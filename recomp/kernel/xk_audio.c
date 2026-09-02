@@ -7,7 +7,7 @@
 
 static xa_voice g_v[XA_MAX_VOICES];
 static int g_available;
-static int g_master_pct = 100;
+static int g_master_pct = 50;                 /* -6 dB headroom: Xbox DirectSound mixes a dozen voices without clipping */
 
 /* ---- Xbox ADPCM (IMA, 64 samples per block, 36 bytes per channel per block) ---------------------- */
 static const int ima_index_tbl[16] = { -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8 };
@@ -129,7 +129,7 @@ int xk_audio_stream_pop_consumed(int i)
     if (v->nq && v->q[v->qhead].consumed) { v->qhead = (v->qhead + 1) % XA_MAX_PKTS; v->nq--; if (v->rd > 0) v->rd--; r = 1; }
     xk_audio_unlock(); return r;
 }
-void xk_audio_stream_flush(int i) { if (i < 0) return; xk_audio_lock(); xa_voice *v = &g_v[i]; v->nq = 0; v->qhead = 0; v->rd = 0; v->pkt_pos = 0; v->blk_frames = 0; xk_audio_unlock(); }
+void xk_audio_stream_flush(int i) { if (i < 0) return; xk_audio_lock(); xa_voice *v = &g_v[i]; v->nq = 0; v->qhead = 0; v->rd = 0; v->pkt_pos = 0; v->ncarry = 0; v->blk_frames = 0; xk_audio_unlock(); }
 
 /* ---- mixing --------------------------------------------------------------------------------- */
 /* Refill v->blk with the next decoded frames from the voice's source; 0 = no more data right now. */
@@ -147,14 +147,19 @@ static int voice_refill(xa_voice *v)
         }
         src = (const uint8_t *)X_G(v->data + v->pos); avail = end - v->pos;
     } else {
-        xa_pkt *p;
-        for (;;) {
-            if (v->rd >= v->nq) return 0;                                   /* starved: nothing queued yet */
-            p = &v->q[(v->qhead + v->rd) % XA_MAX_PKTS];
-            if (v->pkt_pos < p->size) break;
-            p->consumed = 1; v->rd++; v->pkt_pos = 0;                       /* done with this packet: the game thread pops it */
+        /* Streams: packets are arbitrary byte ranges of one continuous encoded stream - ADPCM blocks straddle
+         * packet boundaries, so assemble whole blocks through a carry buffer instead of decoding per packet. */
+        uint32_t need = v->adpcm ? v->block_align : (uint32_t)v->channels * (uint32_t)(v->bits / 8) * 64u;
+        if (need > sizeof v->carry) need = sizeof v->carry;
+        while (v->ncarry < need) {
+            if (v->rd >= v->nq) return 0;                                   /* starved: keep the partial block */
+            xa_pkt *p = &v->q[(v->qhead + v->rd) % XA_MAX_PKTS];
+            if (v->pkt_pos >= p->size) { p->consumed = 1; v->rd++; v->pkt_pos = 0; continue; }
+            uint32_t take = p->size - v->pkt_pos; if (take > need - v->ncarry) take = need - v->ncarry;
+            memcpy(v->carry + v->ncarry, X_G(p->guest + v->pkt_pos), take);
+            v->ncarry += take; v->pkt_pos += take;
         }
-        src = (const uint8_t *)X_G(p->guest + v->pkt_pos); avail = p->size - v->pkt_pos;
+        src = v->carry; avail = v->ncarry;
     }
     uint32_t used;
     if (v->adpcm) {
@@ -168,7 +173,8 @@ static int voice_refill(xa_voice *v)
         if (!n) { used = avail; }
     }
     v->blk_i = 0;
-    if (v->kind == 1) v->pos += used; else v->pkt_pos += used;
+    if (v->kind == 1) v->pos += used;
+    else { if (used >= v->ncarry) v->ncarry = 0; else { memmove(v->carry, v->carry + used, v->ncarry - used); v->ncarry -= used; } }
     return v->blk_frames > 0;
 }
 
@@ -185,16 +191,21 @@ void xk_audio_mix(int16_t *out, int frames)
         uint32_t step = (uint32_t)(((uint64_t)rate << 16) / XA_OUT_RATE);      /* source frames per output frame, 16.16 */
         int vol = (int)(v->volume * 256.0f * g_master_pct / 100.0f);
         for (int f = 0; f < frames; ++f) {
-            /* advance the source position by step; fetch frames as needed */
+            /* advance the source position by step; fetch frames as needed; linear interpolation between the
+             * previous and current source frame (sample-and-hold imaged the 22 kHz sources as a hiss) */
             v->frac += step;
             while (v->frac >= 0x10000u) {
                 if (v->blk_i >= v->blk_frames && !voice_refill(v)) { v->frac = 0; goto next_voice_or_silence; }
+                v->prev[0] = v->last[0]; v->prev[1] = v->last[1];
                 v->last[0] = v->blk[v->blk_i * v->channels];
                 v->last[1] = v->channels == 2 ? v->blk[v->blk_i * v->channels + 1] : v->last[0];
                 v->blk_i++; v->frac -= 0x10000u;
             }
-            acc[f * 2] += (v->last[0] * vol) >> 8;
-            acc[f * 2 + 1] += (v->last[1] * vol) >> 8;
+            int t = (int)(v->frac >> 8);                                   /* 0..255 */
+            int l = v->prev[0] + (((v->last[0] - v->prev[0]) * t) >> 8);
+            int r = v->prev[1] + (((v->last[1] - v->prev[1]) * t) >> 8);
+            acc[f * 2] += (l * vol) >> 8;
+            acc[f * 2 + 1] += (r * vol) >> 8;
             v->frames_out++;
             continue;
         next_voice_or_silence:

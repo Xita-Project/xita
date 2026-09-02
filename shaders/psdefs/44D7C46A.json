@@ -4,9 +4,9 @@
    "file_offset": 0,
    "va": null,
    "stage_count": 2,
-   "mux_msb": true,
-   "same_c0": false,
-   "same_c1": false,
+   "mux_msb": false,
+   "same_c0": true,
+   "same_c1": true,
    "textures": [
     {
      "index": 0,
@@ -53,106 +53,11 @@
        "text": "t0.rgb"
       },
       {
-       "reg": "c1",
-       "reg_code": 2,
-       "channel": "alpha_rep",
-       "mapping": "unsigned_identity",
-       "text": "c1.aaa"
-      },
-      {
-       "reg": "t1",
-       "reg_code": 9,
+       "reg": "v1",
+       "reg_code": 5,
        "channel": "rgb",
        "mapping": "unsigned_identity",
-       "text": "t1.rgb"
-      },
-      {
-       "reg": "c0",
-       "reg_code": 1,
-       "channel": "alpha_rep",
-       "mapping": "unsigned_identity",
-       "text": "c0.aaa"
-      }
-     ],
-     "rgb_out": {
-      "ab": "zero",
-      "cd": "zero",
-      "sum": "r0",
-      "scale": "identity",
-      "mux": false,
-      "ab_dot": false,
-      "cd_dot": false,
-      "ab_blue_to_alpha": false,
-      "cd_blue_to_alpha": false,
-      "raw": 3072
-     },
-     "alpha_in": [
-      {
-       "reg": "zero",
-       "reg_code": 0,
-       "channel": "blue",
-       "mapping": "unsigned_identity",
-       "text": "zero.b"
-      },
-      {
-       "reg": "zero",
-       "reg_code": 0,
-       "channel": "blue",
-       "mapping": "unsigned_identity",
-       "text": "zero.b"
-      },
-      {
-       "reg": "zero",
-       "reg_code": 0,
-       "channel": "blue",
-       "mapping": "unsigned_identity",
-       "text": "zero.b"
-      },
-      {
-       "reg": "zero",
-       "reg_code": 0,
-       "channel": "blue",
-       "mapping": "unsigned_identity",
-       "text": "zero.b"
-      }
-     ],
-     "alpha_out": {
-      "ab": "zero",
-      "cd": "zero",
-      "sum": "zero",
-      "scale": "identity",
-      "mux": false,
-      "ab_dot": false,
-      "cd_dot": false,
-      "ab_blue_to_alpha": false,
-      "cd_blue_to_alpha": false,
-      "raw": 0
-     },
-     "c0_default": "(0.000, 0.000, 0.000, 0.976)",
-     "c1_default": "(0.000, 0.000, 0.000, 0.502)",
-     "c0_map": 0,
-     "c1_map": 0,
-     "text": [
-      "stage 0 rgb  : r0 = sum(t0.rgb * c1.aaa, t1.rgb * c0.aaa)",
-      "stage 0 alpha: (discard)"
-     ]
-    },
-    {
-     "index": 1,
-     "rgb_in": [
-      {
-       "reg": "zero",
-       "reg_code": 0,
-       "channel": "rgb",
-       "mapping": "unsigned_identity",
-       "text": "zero.rgb"
-      },
-      {
-       "reg": "zero",
-       "reg_code": 0,
-       "channel": "rgb",
-       "mapping": "unsigned_identity",
-       "text": "zero.rgb"
+       "text": "v1.rgb"
       },
       {
        "reg": "zero",
@@ -170,7 +75,7 @@
       }
      ],
      "rgb_out": {
-      "ab": "zero",
+      "ab": "r0",
       "cd": "zero",
       "sum": "zero",
       "scale": "identity",
@@ -179,15 +84,22 @@
       "cd_dot": false,
       "ab_blue_to_alpha": false,
       "cd_blue_to_alpha": false,
-      "raw": 0
+      "raw": 192
      },
      "alpha_in": [
       {
-       "reg": "r0",
-       "reg_code": 12,
+       "reg": "t0",
+       "reg_code": 8,
        "channel": "alpha",
        "mapping": "unsigned_identity",
-       "text": "r0.a"
+       "text": "t0.a"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_invert",
+       "text": "zero.b<unsigned_invert>"
       },
       {
        "reg": "v0",
@@ -197,6 +109,94 @@
        "text": "v0.a"
       },
       {
+       "reg": "v1",
+       "reg_code": 5,
+       "channel": "alpha",
+       "mapping": "unsigned_identity",
+       "text": "v1.a"
+      }
+     ],
+     "alpha_out": {
+      "ab": "r0",
+      "cd": "v0",
+      "sum": "zero",
+      "scale": "identity",
+      "mux": false,
+      "ab_dot": false,
+      "cd_dot": false,
+      "ab_blue_to_alpha": false,
+      "cd_blue_to_alpha": false,
+      "raw": 196
+     },
+     "c0_default": "(0.000, 0.000, 0.000, 0.000)",
+     "c1_default": "(0.000, 0.000, 0.000, 0.000)",
+     "c0_map": 0,
+     "c1_map": 0,
+     "text": [
+      "stage 0 rgb  : r0 = t0.rgb * v1.rgb",
+      "stage 0 alpha: r0 = t0.a * zero.b<unsigned_invert>; v0 = v0.a * v1.a"
+     ]
+    },
+    {
+     "index": 1,
+     "rgb_in": [
+      {
+       "reg": "r0",
+       "reg_code": 12,
+       "channel": "rgb",
+       "mapping": "unsigned_identity",
+       "text": "r0.rgb"
+      },
+      {
+       "reg": "v0",
+       "reg_code": 4,
+       "channel": "alpha_rep",
+       "mapping": "unsigned_identity",
+       "text": "v0.aaa"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "rgb",
+       "mapping": "unsigned_identity",
+       "text": "zero.rgb"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "rgb",
+       "mapping": "unsigned_identity",
+       "text": "zero.rgb"
+      }
+     ],
+     "rgb_out": {
+      "ab": "zero",
+      "cd": "zero",
+      "sum": "r0",
+      "scale": "identity",
+      "mux": false,
+      "ab_dot": false,
+      "cd_dot": false,
+      "ab_blue_to_alpha": false,
+      "cd_blue_to_alpha": false,
+      "raw": 3072
+     },
+     "alpha_in": [
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_identity",
+       "text": "zero.b"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_identity",
+       "text": "zero.b"
+      },
+      {
        "reg": "zero",
        "reg_code": 0,
        "channel": "blue",
@@ -214,22 +214,22 @@
      "alpha_out": {
       "ab": "zero",
       "cd": "zero",
-      "sum": "r0",
+      "sum": "zero",
       "scale": "identity",
       "mux": false,
       "ab_dot": false,
       "cd_dot": false,
       "ab_blue_to_alpha": false,
       "cd_blue_to_alpha": false,
-      "raw": 3072
+      "raw": 0
      },
      "c0_default": "(0.000, 0.000, 0.000, 0.000)",
-     "c1_default": "(0.000, 0.000, 0.000, 0.000)",
+     "c1_default": "(1.000, 1.000, 1.000, 0.000)",
      "c0_map": 0,
      "c1_map": 0,
      "text": [
-      "stage 1 rgb  : (discard)",
-      "stage 1 alpha: r0 = sum(r0.a * v0.a, zero.b * zero.b)"
+      "stage 1 rgb  : r0 = sum(r0.rgb * v0.aaa, zero.rgb * zero.rgb)",
+      "stage 1 alpha: (discard)"
      ]
     }
    ],
@@ -299,21 +299,16 @@
     ]
    },
    "registers_read": [
-    "c0",
-    "c1",
     "r0",
     "t0",
-    "t1",
     "v0",
+    "v1",
     "zero"
    ],
    "textures_used": [
-    0,
-    1
-   ],
-   "constants_used": [
     0
    ],
+   "constants_used": [],
    "warnings": []
   }
  ]

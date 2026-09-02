@@ -1008,7 +1008,8 @@ class Emitter:
         proto.append("")
         proto.append("extern int xv_trace_enabled; void xv_trace_call(xctx *c, const char *name, unsigned nargs);")
         proto.append("extern int xv_trace_funcs; void xv_trace_func(uint32_t entry);   /* --trace-funcs: per-frame call histogram */")
-        proto.append("#define XV_FN(a) do { if (xv_trace_funcs) xv_trace_func(a); } while (0)")
+        proto.append("extern volatile uint32_t xv_cur_fn;                       /* sampling profiler: last entered function */")
+        proto.append("#define XV_FN(a) do { xv_cur_fn = (a); if (xv_trace_funcs) xv_trace_func(a); } while (0)")
         proto.append("/* HLE symbols (weak: default trap until implemented) */")
         for name in sorted(self.hle_used):
             proto.append(f"void xv_hle_{name}(xctx *c) __attribute__((weak));")

@@ -732,7 +732,7 @@ const xv_fn_entry_t xv_hle_extra[] = {
  * a no-op stop, which keeps the channel pump moving. */
 void xv_hle_DSoundVoiceIsPlaying(xctx *c) { XD3D_COUNT("DSoundVoiceIsPlaying"); c->r[0] = 0; X_RET(1); }
 void xv_hle_DSoundVoiceStop(xctx *c)      { XD3D_COUNT("DSoundVoiceStop"); c->r[0] = 0; X_RET(1); }
-void xv_hle_DirectSoundCreate(xctx *c) { XD3D_COUNT("DirectSoundCreate"); { static int up; if (!up) { up = 1; extern int xk_audio_start(void); xk_audio_init(); if (xk_audio_start() != 0) D3DLOG("audio thread failed\n"); } } uint32_t ds = ds_obj(256); D3DLOG("DirectSoundCreate -> %08X\n", ds); X_M32(X_ARG(1)) = ds; c->r[0] = 0; X_RET(3); }
+void xv_hle_DirectSoundCreate(xctx *c) { XD3D_COUNT("DirectSoundCreate"); { static int up; if (!up) { up = 1; extern int xk_audio_start(void); extern void xv_prof_start(void) __attribute__((weak)); if (xv_prof_start) xv_prof_start(); xk_audio_init(); if (xk_audio_start() != 0) D3DLOG("audio thread failed\n"); } } uint32_t ds = ds_obj(256); D3DLOG("DirectSoundCreate -> %08X\n", ds); X_M32(X_ARG(1)) = ds; c->r[0] = 0; X_RET(3); }
 void xv_hle_DirectSoundDoWork(xctx *c) { XD3D_COUNT("DirectSoundDoWork"); ds_pump_all(c); X_RET(0); }
 void xv_hle_DirectSoundUseFullHRTF(xctx *c) { XD3D_COUNT("DirectSoundUseFullHRTF"); X_RET(0); }
 void xv_hle_DirectSoundEnterCriticalSection(xctx *c) { XD3D_COUNT("DirectSoundEnterCriticalSection"); X_RET(0); }

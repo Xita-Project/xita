@@ -275,6 +275,8 @@ void xk_os_pad_poll(xk_os_pad *p)
 {
     SceCtrlData d; memset(&d, 0, sizeof d);
     d.lx = d.ly = d.rx = d.ry = 128;                                  /* centred if no pad answers */
+    { static int mode_set; if (!mode_set) { mode_set = 1; sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);   /* real firmware defaults to DIGITAL: sticks read 128 forever */
+        xv_logf("[xk] pad: analog sampling mode set\n"); } }
     sceCtrlPeekBufferPositive(0, &d, 1);
     memset(p, 0, sizeof *p); p->connected = 1;
     uint16_t b = 0;
@@ -367,6 +369,7 @@ int xk_os_audio_open(int rate, int grain)
     g_audio_mutex = sceKernelCreateMutex("xv_audio", 0, 0, NULL);
     g_audio_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, grain, rate, SCE_AUDIO_OUT_MODE_STEREO);
     if (g_audio_port < 0) { xv_logf("[xk] audio port open failed 0x%08X\n", g_audio_port); return -1; }
+    xv_logf("[xk] audio port %d open: %d Hz stereo, grain %d\n", g_audio_port, rate, grain);
     int vol[2] = { SCE_AUDIO_VOLUME_0DB, SCE_AUDIO_VOLUME_0DB };
     sceAudioOutSetVolume(g_audio_port, SCE_AUDIO_VOLUME_FLAG_L_CH | SCE_AUDIO_VOLUME_FLAG_R_CH, vol);
     return 0;
@@ -382,9 +385,11 @@ static void (*g_audio_fn)(void *);
 int xk_os_audio_thread_start(void (*fn)(void *), void *arg)
 {
     (void)arg; g_audio_fn = fn;
-    SceUID t = sceKernelCreateThread("xv_audio", audio_thread_main, 0x10000060, 64 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_2, NULL);
-    if (t < 0) return -1;
-    return sceKernelStartThread(t, sizeof g_audio_fn, &g_audio_fn) < 0 ? -1 : 0;
+    SceUID t = sceKernelCreateThread("xv_audio", audio_thread_main, 64, 64 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_ALL, NULL);
+    if (t < 0) { xv_logf("[xk] audio thread create failed 0x%08X\n", t); return -1; }
+    int r = sceKernelStartThread(t, sizeof g_audio_fn, &g_audio_fn);
+    xv_logf("[xk] audio thread %s (0x%08X)\n", r < 0 ? "START FAILED" : "running", r);
+    return r < 0 ? -1 : 0;
 }
 void xk_os_audio_mutex_lock(void)   { if (g_audio_mutex >= 0) sceKernelLockMutex(g_audio_mutex, 1, NULL); }
 void xk_os_audio_mutex_unlock(void) { if (g_audio_mutex >= 0) sceKernelUnlockMutex(g_audio_mutex, 1); }

@@ -37,11 +37,12 @@ typedef struct {
     uint32_t pos;                     /* byte cursor (block-aligned for ADPCM) */
     /* stream voice */
     xa_pkt   q[XA_MAX_PKTS]; int nq, qhead, rd;    /* rd: mixer read index (offset from qhead), <= nq */
-    uint32_t pkt_pos;                 /* byte cursor inside q[qhead] */
+    uint32_t pkt_pos;                 /* byte cursor inside the packet being read */
+    uint8_t  carry[128]; uint32_t ncarry;   /* partial ADPCM block spanning a packet boundary */
     /* decode state: one decoded block/chunk of frames */
     int16_t  blk[64 * 2]; int blk_frames, blk_i;
     uint32_t frac;                    /* 16.16 resample position inside the current decoded frame */
-    int16_t  last[2];
+    int16_t  last[2], prev[2];        /* current and previous source frame (linear interpolation) */
     uint64_t frames_out;              /* output frames produced since Play (for positions) */
 } xa_voice;
 
