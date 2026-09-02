@@ -24,3 +24,8 @@ recomp/host/*.png
 recomp/host/*.pgm
 __pycache__/
 *.psp2dmp
+# debug dumps / caches
+recomp/host/mem.bin
+recomp/host/*.ppm
+.mapcache/
+assets/ui_scene.bin
