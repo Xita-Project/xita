@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HaloVita</title>
+<meta name="description" content="Halo: Combat Evolved, statically recompiled from the original Xbox executable to run natively on the PlayStation Vita.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="hero">
+  <img class="hero-img" src="img/shot00.jpg" alt="A PlayStation Vita held in front of a monitor, running Halo's main menu: CAMPAIGN, MULTIPLAYER, SETTINGS">
+  <div class="hero-text">
+    <p class="eyebrow">HaloVita · a static recompilation of Halo: Combat Evolved for the PlayStation Vita</p>
+    <h1>The 2001 Xbox executable, running as native ARM code on a handheld from 2011.</h1>
+    <p class="lede">No emulator. The game's x86 machine code is translated to C once, compiled for the Vita's Cortex-A9, and linked against a re-implementation of the Xbox kernel, Direct3D 8 and DirectSound. The menu boots in fifteen seconds; the first campaign level plays.</p>
+    <p class="hero-meta"><span class="mono">2026-09-02</span> · menu, profiles, campaign a10 with audio · 8&nbsp;fps in-level, more to come</p>
+  </div>
+</header>
+
+<main>
+
+<section id="status">
+  <h2>Status</h2>
+  <p class="note">What a build from the current tree does on real hardware. Tested on two PS Vitas (3.65, HENkaku), verified first in Vita3K.</p>
+  <ul class="board">
+    <li><span class="chip ok">works</span><b>Boot to main menu</b><span>~15 s from LiveArea. Ring and planet backdrop, camera pan, full menu navigation.</span></li>
+    <li><span class="chip ok">works</span><b>Profiles &amp; saves</b><span>Create a profile, checkpoint save, pause → save &amp; quit → main menu.</span></li>
+    <li><span class="chip ok">works</span><b>Campaign: The Pillar of Autumn</b><span>Loads in ~20 s. Opening cinematic plays (exterior, bridge, cryo bay). Look tutorial answers to the sticks.</span></li>
+    <li><span class="chip ok">works</span><b>Text</b><span>Menus, dialogs, HUD prompts — Halo's run-time font cache is tracked and re-uploaded as glyphs are drawn.</span></li>
+    <li><span class="chip ok">works</span><b>Audio</b><span>Music, dialogue and effects: Xbox ADPCM decoded and mixed in software to the Vita's 48 kHz output.</span></li>
+    <li><span class="chip part">partial</span><b>Graphics</b><span>Halo's own vertex programs and 133 of its register-combiner pixel shaders run on the GPU. Cube-map reflections, some exterior materials and a few textures are still wrong.</span></li>
+    <li><span class="chip part">partial</span><b>Performance</b><span>~8 fps in-level. The GPU is nearly idle; the recompiled game code is the cost. Code-generation work in progress.</span></li>
+    <li><span class="chip no">not yet</span><b>Multiplayer maps</b><span>Split screen needs two players; System Link needs the Xbox network stack. Blood Gulch solo is not reachable.</span></li>
+    <li><span class="chip no">not yet</span><b>Level select</b><span>Only the first mission is reachable without a save that has progressed.</span></li>
+  </ul>
+</section>
+
+<section id="gallery">
+  <h2>On the hardware and in the emulator</h2>
+  <div class="shots">
+    <figure><video controls muted playsinline preload="metadata" src="img/vita_navigation.mp4"></video><figcaption>PS Vita · navigating the main menu and creating a profile — the first time the recompiled game took input on real hardware.</figcaption></figure>
+    <figure><img src="img/shot06.jpg" alt="Cryo bay rendered in Vita3K: lightmapped walls and floor, ceiling windows, consoles, the Chief in his cryo tube"><figcaption>Vita3K · the a10 cryo bay: lightmapped level geometry through Halo's own shaders.</figcaption></figure>
+    <figure><img src="img/bridge_keyes.jpg" alt="Captain Keyes on the bridge of the Pillar of Autumn, letterboxed"><figcaption>Vita3K · Keyes on the bridge during the opening cinematic.</figcaption></figure>
+    <figure><img src="img/marines.jpg" alt="Marines with light-sticks standing in the cryo bay"><figcaption>Vita3K · marines in the cryo bay; object shadows come from a render-to-texture pass.</figcaption></figure>
+    <figure><img src="img/profile_text.jpg" alt="SELECT PROFILE screen with readable text"><figcaption>Vita3K · the profile screen after the font-cache fix.</figcaption></figure>
+    <figure><img src="img/shot09.jpg" alt="The Pillar of Autumn silhouette against a planet"><figcaption>Vita3K · the opening shot. The ship is a silhouette — one of the open material bugs.</figcaption></figure>
+  </div>
+</section>
+
+<section id="how">
+  <h2>How it works</h2>
+  <ol class="stages">
+    <li><b>Recompile</b><span>The XBE's 8,101 functions (921k x86 instructions) are lifted to C by our own recompiler. Flags are computed lazily and only where read; the guest register file lives in a context struct the compiler can keep in ARM registers.</span></li>
+    <li><b>Kernel &amp; API</b><span>90 Xbox kernel exports — threads, events, APCs, files, virtual memory — re-implemented over the Vita's SCE kernel. XAPI startup runs as lifted code rather than being faked.</span></li>
+    <li><b>Graphics</b><span>Direct3D 8 calls are recorded per frame and replayed through libgxm. Halo's 67 vertex shaders and its NV2A register-combiner setups are translated to Cg and compiled by the console's own shader compiler.</span></li>
+    <li><b>Sound &amp; input</b><span>DirectSound streams feed a software mixer (Xbox ADPCM → 48 kHz stereo). The Vita's controls map onto the Xbox pad; the D-pad doubles for the buttons the Vita lacks.</span></li>
+  </ol>
+</section>
+
+<section id="install">
+  <h2>Install</h2>
+  <p class="note">You need your own copy of Halo: Combat Evolved for Xbox. HaloVita ships no game data — the executable and maps are extracted from your disc image with the included tools.</p>
+  <pre><code>ux0:/xboxvita-recomp.vpk                 # install with VitaShell
+ux0:data/xboxvita/halo_image.bin         # built from your default.xbe
+ux0:data/xboxvita/haloce/maps/ui.map     # and the maps you want (a10.map for the first mission)
+ux0:data/xboxvita/xboxvita.cfg           # optional: XV_FPS=1 for the frame-time overlay</code></pre>
+  <table class="controls">
+    <thead><tr><th>Vita</th><th>Xbox</th><th>Halo (default layout)</th></tr></thead>
+    <tbody>
+      <tr><td>Left / right stick</td><td>sticks</td><td>move / look</td></tr>
+      <tr><td>✕ ○ □ △</td><td>A B X Y</td><td>jump · melee · action &amp; reload · switch weapon</td></tr>
+      <tr><td>L / R</td><td>triggers</td><td>throw grenade / fire</td></tr>
+      <tr><td>Start / Select</td><td>Start / Back</td><td>pause</td></tr>
+      <tr><td>D-pad ↓ ↑</td><td>stick clicks</td><td>crouch / zoom</td></tr>
+      <tr><td>D-pad → ←</td><td>White / Black</td><td>flashlight / switch grenade</td></tr>
+      <tr><td>Select + Start (hold)</td><td>—</td><td>frame-time overlay</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="log">
+  <h2>Milestones</h2>
+  <dl class="timeline">
+    <div><dt class="mono">2026-08</dt><dd>XBE parsed; vertex shaders decoded and compiled on the console; first textured quad through libgxm.</dd></div>
+    <div><dt class="mono">2026-08-31</dt><dd>Recompiler + kernel translator boot the game on a Linux host through XAPI, D3D init and the ui.map load.</dd></div>
+    <div><dt class="mono">2026-09-01</dt><dd>Main menu on Vita3K; then on real hardware after three hardware-only fixes (fiber stacks, file descriptors, TLS layout). Menu navigation and profile creation. Ring backdrop through the game's own 3D pipeline.</dd></div>
+    <div><dt class="mono">2026-09-02</dt><dd>First campaign level: render targets, D3D library globals, per-material combiner programs, BC texture upload. Audio mixer. Text. Analog sticks. Clocks to 444/222 MHz, -O2 code generation. Intro cutscene plays on the Vita at ~8 fps.</dd></div>
+  </dl>
+</section>
+
+</main>
+
+<footer>
+  <p>HaloVita is an independent research project. Halo and the Xbox are trademarks of their respective owners; no game content is distributed. Built with the XboxVita toolchain.</p>
+</footer>
+</body>
+</html>
