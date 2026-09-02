@@ -667,13 +667,12 @@ void xd3d_r_state(const char *what, uint32_t a, uint32_t b, uint32_t v)
     if (!strcmp(what, "SetRenderTarget")) {
         if (!a) return;                                                 /* NULL: keep the current colour target */
         g_offscreen = (v && a != v);
-        if (g_offscreen) xv_d3d_NoteOffscreenTarget(guest_u32(a + 4));  /* surface Data: what a later draw will sample */
-        static unsigned n; if (n++ < 8) UI_LOG("SetRenderTarget %08X (backbuffer %08X) -> %s\n", a, v, g_offscreen ? "offscreen, dropping" : "backbuffer");
+        xv_d3d_SetRenderTarget(a, !g_offscreen);                        /* opens / closes a render-to-texture pass */
+        static unsigned n; if (n++ < 8) UI_LOG("SetRenderTarget %08X (backbuffer %08X) -> %s\n", a, v, g_offscreen ? "offscreen pass" : "backbuffer");
     }
 }
 void xd3d_r_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil)
 {
-    if (g_offscreen) return;
     if (g_mesh_path) { xv_d3d_Clear(flags, color, z, stencil); return; }   /* colour + depth, rendered before the world */
     (void)z; (void)stencil;
     if (flags & 1) xv_ui_gxm_clear(color);
@@ -690,7 +689,7 @@ static uint32_t gl_blend_to_d3d(uint32_t gl)
 void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t data)
 {
     (void)c;
-    if (!g_mesh_path || g_offscreen) return;
+    if (!g_mesh_path) return;
     uint32_t vs = xd3d_state.vs_handle;
     if (!(vs & 1)) return;                                             /* FVF draws: not yet */
     uint32_t fnv = guest_u32((vs & ~1u) + 12);

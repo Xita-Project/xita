@@ -73,18 +73,28 @@ typedef struct {
     float     const_attr[4];
     SceGxmTexture tex[4];
     int16_t   ps_entry;             /* xv_ps_table index, or -1 (heuristic fragment)  */
+    uint8_t   pass;                 /* 0 = back buffer, n = offscreen pass n           */
     float     psc[18][4];           /* combiner constants: per-stage c0[8], c1[8], final c0, c1 */
     uint32_t  clear_color;          /* clear only                                     */
     float     clear_z;
     uint8_t   clear_flags;
 } cmd_t;
 
+/* Render-to-texture: Halo renders object shadows (and a few effects) into textures it created with
+ * CreateTexture, then samples them.  Each SetRenderTarget to such a surface opens a PASS: the draws and
+ * clears recorded until the back buffer returns are tagged with it and replayed first, in their own GXM
+ * scene straight into the texture's guest memory (the arena is GXM-mapped R/W), so the main scene can
+ * sample the result through an alias texture instead of a CPU decode. */
+#define XV_MAX_PASSES 4
+typedef struct { uint32_t data; unsigned w, h, fmt; } rt_pass_t;
 typedef struct {
     cmd_t     cmds[XV_MAX_CMDS];
     unsigned  ncmds;
     float     consts[XV_CONST_POOL];
     unsigned  nconsts;              /* floats used                                    */
     unsigned  dropped;
+    rt_pass_t passes[XV_MAX_PASSES];
+    unsigned  npasses, cur_pass;    /* cur_pass: 0 = back buffer, else index+1        */
 } cmdlist_t;
 
 /* ----------------------------------------------------------------------------------
@@ -333,6 +343,44 @@ static SceGxmTextureAddrMode addr_mode(uint8_t x)
     }
 }
 
+static unsigned g_clear_slot_used;                          /* clear quads consumed by this frame's offscreen passes */
+static cmdlist_t *cur_list(void);
+/* known render-target textures (guest data -> alias texture the GPU wrote) */
+typedef struct { uint32_t data; unsigned w, h, fmt; SceGxmTexture tex; int valid; } rt_alias_t;
+static rt_alias_t g_rt[16]; static unsigned g_rt_n;
+static SceGxmColorFormat rt_color_fmt(unsigned fmt) { return (fmt == 0x05 || fmt == 0x11) ? SCE_GXM_COLOR_FORMAT_U5U6U5_RGB : SCE_GXM_COLOR_FORMAT_U8U8U8U8_ARGB; }
+static SceGxmTextureFormat rt_tex_fmt(unsigned fmt) { return (fmt == 0x05 || fmt == 0x11) ? SCE_GXM_TEXTURE_FORMAT_U5U6U5_RGB : SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB; }
+static rt_alias_t *rt_find(uint32_t data) { for (unsigned i = 0; i < g_rt_n; ++i) if (g_rt[i].data == data) return &g_rt[i]; return NULL; }
+static rt_alias_t *rt_register(uint32_t data, unsigned w, unsigned h, unsigned fmt)
+{
+    rt_alias_t *r = rt_find(data);
+    if (!r) { if (g_rt_n >= 16) return NULL; r = &g_rt[g_rt_n++]; memset(r, 0, sizeof *r); r->data = data; }
+    if (!r->valid || r->w != w || r->h != h || r->fmt != fmt) {
+        r->w = w; r->h = h; r->fmt = fmt;
+        r->valid = sceGxmTextureInitLinear(&r->tex, xv_guest_ptr(0x80000000u | data), rt_tex_fmt(fmt), w, h, 0) == SCE_OK;
+        sceGxmTextureSetMinFilter(&r->tex, SCE_GXM_TEXTURE_FILTER_LINEAR); sceGxmTextureSetMagFilter(&r->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
+        sceGxmTextureSetUAddrMode(&r->tex, SCE_GXM_TEXTURE_ADDR_CLAMP); sceGxmTextureSetVAddrMode(&r->tex, SCE_GXM_TEXTURE_ADDR_CLAMP);
+        static unsigned n; if (n++ < 8) XV_LOG("render target %08X %ux%u fmt %02X -> alias texture %s\n", data, w, h, fmt, r->valid ? "ok" : "FAILED");
+    }
+    return r;
+}
+/* SetRenderTarget: surface header (X_D3DPixelContainer) or 0 for the back buffer */
+void xv_d3d_SetRenderTarget(uint32_t surface_hdr, int is_backbuffer)
+{
+    cmdlist_t *l = cur_list();
+    if (is_backbuffer || !surface_hdr) { l->cur_pass = 0; return; }
+    const uint32_t *hdr = (const uint32_t *)xv_guest_ptr(surface_hdr);
+    uint32_t data = hdr[1], fw = hdr[3], sz = hdr[4];
+    unsigned fmt = (fw >> 8) & 0xFF;
+    unsigned w = sz ? (sz & 0xFFF) + 1 : 1u << ((fw >> 20) & 0xF), h = sz ? ((sz >> 12) & 0xFFF) + 1 : 1u << ((fw >> 24) & 0xF);
+    if (!data || w > 1024 || h > 1024 || l->npasses >= XV_MAX_PASSES) { l->cur_pass = 0xFF; return; }   /* 0xFF: record nothing */
+    rt_pass_t *p = &l->passes[l->npasses++];
+    p->data = data; p->w = w; p->h = h; p->fmt = fmt;
+    l->cur_pass = l->npasses;
+    rt_register(data, w, h, fmt);
+}
+static int recording_dropped(void) { return cur_list()->cur_pass == 0xFF; }
+
 #ifdef XV_RUN_RECOMP
 /* Recomp build: the UI bridge owns the texture cache (CPU de-swizzle/DXT decode to linear RGBA - the GPU's
  * twiddle does not match the NV2A layout), so mesh draws borrow its control words. */
@@ -340,7 +388,9 @@ const SceGxmTexture *xv_ui_gxm_texture(uint32_t hdr);
 static const SceGxmTexture *texture_for(unsigned stage)
 {
     static SceGxmTexture t[4];
-    const SceGxmTexture *src = xv_ui_gxm_texture(S.tex_guest[stage]);
+    const SceGxmTexture *src = NULL;
+    if (g_rt_n) { rt_alias_t *r = rt_find(*(const uint32_t *)xv_guest_ptr(S.tex_guest[stage] + 4)); if (r && r->valid) src = &r->tex; }
+    if (!src) src = xv_ui_gxm_texture(S.tex_guest[stage]);
     if (!src) return NULL;
     t[stage] = *src;
     sceGxmTextureSetMinFilter(&t[stage], S.tex_min[stage] == X_D3DTEXF_POINT ? SCE_GXM_TEXTURE_FILTER_POINT : SCE_GXM_TEXTURE_FILTER_LINEAR);
@@ -407,6 +457,7 @@ static cmd_t *new_cmd(void)
     }
     cmd_t *c = &l->cmds[l->ncmds++];
     memset(c, 0, sizeof(*c));
+    c->pass = (uint8_t)l->cur_pass;
     return c;
 }
 
@@ -486,26 +537,10 @@ static int prim_to_gxm(uint32_t prim, uint32_t *count, const void **indices, uin
 int xd3d_hist_active(void) __attribute__((weak));
 static int trace_frame(void) { return xd3d_hist_active && xd3d_hist_active(); }
 
-static uint32_t g_rt_data[8]; static unsigned g_rt_n;
-void xv_d3d_NoteOffscreenTarget(uint32_t data)
-{
-    if (!data) return;
-    for (unsigned i = 0; i < g_rt_n; ++i) if (g_rt_data[i] == data) return;
-    if (g_rt_n < 8) g_rt_data[g_rt_n++] = data;
-}
-static int samples_offscreen(void)
-{
-    for (unsigned t = 0; t < 4; ++t) {
-        if (!S.tex_guest[t]) continue;
-        uint32_t data = *(const uint32_t *)xv_guest_ptr(S.tex_guest[t] + 4);
-        for (unsigned i = 0; i < g_rt_n; ++i) if (g_rt_data[i] == data) return 1;
-    }
-    return 0;
-}
 
 static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint32_t base_vertex)
 {
-    if (g_rt_n && samples_offscreen()) { static unsigned n; if (n++ < 4) XV_LOG("draw sampling an offscreen render target skipped\n"); return; }
+    if (recording_dropped()) return;
     int slot = handle_to_slot(S.vs_handle);
     if (slot < 0) {
         XV_ONCE(warned_novs, "draw with no valid vertex shader handle (0x%X) skipped\n", S.vs_handle);
@@ -663,13 +698,14 @@ uint32_t xv_d3d_EndFrame(void)
     if (l->dropped) XV_LOG("frame %u: %u command(s) dropped (list full)\n", g_build_frame, l->dropped);
     uint32_t done = g_build_frame++;
     cmdlist_t *next = g_lists[g_build_frame % XV_NUM_LISTS];
-    next->ncmds = 0; next->nconsts = 0; next->dropped = 0; g_quad_used[g_build_frame % XV_NUM_LISTS] = 0;
+    next->ncmds = 0; next->nconsts = 0; next->dropped = 0; next->npasses = 0; next->cur_pass = 0; g_quad_used[g_build_frame % XV_NUM_LISTS] = 0;
     return done;
 }
 
 void xv_d3d_Clear(uint32_t flags, uint32_t color_argb, float z, uint32_t stencil)
 {
     (void)stencil;
+    if (recording_dropped()) return;
     if (trace_frame()) XV_LOG("[hist] cmd %u: Clear flags %X color %08X z %.3f\n", cur_list()->ncmds, flags, color_argb, z);
     cmd_t *c = new_cmd();
     if (!c)
@@ -748,12 +784,12 @@ static xv_fshader_t *fragment_for_ps(vs_slot_t *v, int entry, unsigned blend)
     return &l->fs;
 }
 
-void xv_d3d_render(SceGxmContext *ctx, uint32_t frame)
+static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigned *clear_slot_io, uint32_t frame)
 {
-    cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
-    unsigned clear_slot = 0;
+    unsigned clear_slot = *clear_slot_io;
     for (unsigned i = 0; i < l->ncmds; ++i) {
         cmd_t *c = &l->cmds[i];
+        if (c->pass != pass) continue;
         if (c->kind == 1) {
             int slot = handle_to_slot(g_clear_vs);
             if (slot < 0 || clear_slot >= XV_CLEAR_SLOTS)
@@ -814,6 +850,60 @@ void xv_d3d_render(SceGxmContext *ctx, uint32_t frame)
                 sceGxmSetFragmentTexture(ctx, (unsigned)fs->tex_index[t], &c->tex[t]);
         sceGxmDraw(ctx, (SceGxmPrimitiveType)c->prim, SCE_GXM_INDEX_FORMAT_U16, c->indices, c->index_count);
     }
+    *clear_slot_io = clear_slot;
+}
+
+void xv_d3d_render(SceGxmContext *ctx, uint32_t frame)
+{
+    cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
+    unsigned clear_slot = g_clear_slot_used;
+    render_pass(ctx, l, 0, &clear_slot, frame);
+    g_clear_slot_used = 0;
+}
+
+/* Offscreen passes: their own scenes, BEFORE the caller opens the main scene.  Colour surface = the guest
+ * texture memory (linear, so the alias texture is a plain linear texture); depth = one shared scratch
+ * buffer.  Render targets are cached per (w,h). */
+static struct { unsigned w, h; SceGxmRenderTarget *rt; } g_pass_rts[8]; static unsigned g_pass_rt_n;
+static SceUID g_pass_depth_uid; static void *g_pass_depth; static unsigned g_pass_depth_w;
+static SceGxmRenderTarget *pass_rt(unsigned w, unsigned h)
+{
+    for (unsigned i = 0; i < g_pass_rt_n; ++i) if (g_pass_rts[i].w == w && g_pass_rts[i].h == h) return g_pass_rts[i].rt;
+    if (g_pass_rt_n >= 8) return NULL;
+    SceGxmRenderTargetParams rp; memset(&rp, 0, sizeof rp);
+    rp.width = (uint16_t)w; rp.height = (uint16_t)h; rp.scenesPerFrame = 1; rp.multisampleMode = SCE_GXM_MULTISAMPLE_NONE; rp.driverMemBlock = -1;
+    SceGxmRenderTarget *rt = NULL;
+    if (sceGxmCreateRenderTarget(&rp, &rt) != SCE_OK) { XV_LOG("pass render target %ux%u failed\n", w, h); return NULL; }
+    g_pass_rts[g_pass_rt_n].w = w; g_pass_rts[g_pass_rt_n].h = h; g_pass_rts[g_pass_rt_n].rt = rt; g_pass_rt_n++;
+    return rt;
+}
+void xv_d3d_render_offscreen(SceGxmContext *ctx, uint32_t frame)
+{
+    cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
+    if (!l->npasses) return;
+    if (!g_pass_depth) {                                        /* 1024x1024 max: 4 MB S8D24, uncached */
+        g_pass_depth_w = 1024;
+        g_pass_depth_uid = sceKernelAllocMemBlock("xv_pass_depth", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, 1024 * 1024 * 4, NULL);
+        if (g_pass_depth_uid < 0) return;
+        sceKernelGetMemBlockBase(g_pass_depth_uid, &g_pass_depth);
+        sceGxmMapMemory(g_pass_depth, 1024 * 1024 * 4, SCE_GXM_MEMORY_ATTRIB_READ | SCE_GXM_MEMORY_ATTRIB_WRITE);
+    }
+    unsigned clear_slot = 0;
+    for (unsigned pi = 0; pi < l->npasses; ++pi) {
+        rt_pass_t *p = &l->passes[pi];
+        SceGxmRenderTarget *rt = pass_rt(p->w, p->h);
+        if (!rt) continue;
+        SceGxmColorSurface cs; SceGxmDepthStencilSurface ds;
+        if (sceGxmColorSurfaceInit(&cs, rt_color_fmt(p->fmt), SCE_GXM_COLOR_SURFACE_LINEAR, SCE_GXM_COLOR_SURFACE_SCALE_NONE,
+                                   SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, p->w, p->h, p->w, xv_guest_ptr(0x80000000u | p->data)) != SCE_OK) continue;
+        unsigned dstride = (p->w + 31) & ~31u;
+        if (sceGxmDepthStencilSurfaceInit(&ds, SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24, SCE_GXM_DEPTH_STENCIL_SURFACE_LINEAR, dstride, g_pass_depth, NULL) != SCE_OK) continue;
+        if (sceGxmBeginScene(ctx, 0, rt, NULL, NULL, NULL, &cs, &ds) != SCE_OK) { static unsigned n; if (n++ < 4) XV_LOG("pass BeginScene failed\n"); continue; }
+        sceGxmSetViewport(ctx, p->w * 0.5f, p->w * 0.5f, p->h * 0.5f, -(float)p->h * 0.5f, 0.5f, 0.5f);
+        render_pass(ctx, l, pi + 1, &clear_slot, frame);
+        sceGxmEndScene(ctx, NULL, NULL);
+    }
+    g_clear_slot_used = clear_slot;                             /* the main pass continues in the remaining clear-quad slots */
 }
 
 /* The clear quad's vertex shader is a runtime-owned program registered by main.c. */

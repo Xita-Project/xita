@@ -466,6 +466,13 @@ static void xv_gfx_render_frame(void)
 {
     xv_gfx_t *g = &g_gfx;
 
+#ifdef XV_RUN_RECOMP
+    if (g->hle_ready) {                 /* render-to-texture passes first, each in its own scene */
+        extern uint32_t xv_ui_gxm_mesh_frame(void);
+        uint32_t mf0 = xv_ui_gxm_mesh_frame();
+        if (mf0 != 0xFFFFFFFFu) xv_d3d_render_offscreen(g->ctx, mf0);
+    }
+#endif
     int err = sceGxmBeginScene(g->ctx, 0, g->render_target, NULL, NULL,
                                g->display_sync[g->back_index],
                                &g->display_surface[g->back_index], &g->depth_surface);

@@ -98,3 +98,5 @@ void xv_d3d_set_clear_shader(uint32_t handle);
 
 /* --- pump side (inside sceGxmBeginScene/EndScene) -------------------------------- */
 void xv_d3d_render(SceGxmContext *ctx, uint32_t frame);
+void xv_d3d_render_offscreen(SceGxmContext *ctx, uint32_t frame);   /* render-to-texture passes: call BEFORE the main BeginScene */
+void xv_d3d_SetRenderTarget(uint32_t surface_hdr, int is_backbuffer);
