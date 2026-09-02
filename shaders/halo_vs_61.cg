@@ -1,0 +1,229 @@
+// ---------------------------------------------------------------------------
+//  XboxVita Stage 3 - auto-generated Vita Cg vertex shader
+//  source : halo_vs_61.json
+//  mode   : NV2A microcode translation
+//  target : psp2cgc -profile sce_vp_psp2
+//
+//  Uniform contract:
+//    uniform float4 c[13]  - universal constant array, C_BASE = -96
+//    runtime maps SetVertexShaderConstant(reg, v) -> c[reg - C_BASE]
+//    microcode uses D3D c-96..c-84 (hardware c[0]..)
+//    28 of 30 NV2A slots translated; inputs v0 v1 v2 v3 v4; outputs oPos oD0 oT0 oT1 oT2 oT3
+//    slots [15, 23] = Xbox viewport epilogue, stripped (pass --keep-viewport-epilogue to translate verbatim)
+//  Attribute binding (sceGxmVertexAttribute regIndex from parameter name):
+//    v0  position    float3 FLOAT3      stream 0 +0 (12 B)
+//    v1  blendweight float4 NORMPACKED3 stream 0 +12 (4 B)  // bind as U8 x4 (raw bytes); unpacked in-shader
+//    v2  normal      float4 NORMPACKED3 stream 0 +16 (4 B)  // bind as U8 x4 (raw bytes); unpacked in-shader
+//    v3  color0      float4 NORMPACKED3 stream 0 +20 (4 B)  // bind as U8 x4 (raw bytes); unpacked in-shader
+//    v4  color1      float2 FLOAT2      stream 0 +24 (8 B)
+//  Depth: D3D clip z in [0, w] is passed through unchanged; set the GXM viewport
+//         with zOffset = 0, zScale = 1 (no [-1,1] -> [0,1] remap) to match.
+// ---------------------------------------------------------------------------
+
+struct AppIn
+{
+    float3 position    : POSITION;   // v0 FLOAT3
+    float4 blendweight : BLENDWEIGHT;   // v1 NORMPACKED3
+    float4 normal      : NORMAL;   // v2 NORMPACKED3
+    float4 color0      : COLOR0;   // v3 NORMPACKED3
+    float2 color1      : COLOR1;   // v4 FLOAT2
+};
+
+struct VertOut
+{
+    float4 position    : POSITION;   // oPos
+    float4 color0      : COLOR0;   // oD0
+    float4 texcoord0   : TEXCOORD0;   // oT0
+    float4 texcoord1   : TEXCOORD1;   // oT1
+    float4 texcoord2   : TEXCOORD2;   // oT2
+    float4 texcoord3   : TEXCOORD3;   // oT3
+};
+
+float4 xv_dph(float4 a, float4 b) { return float4(dot(a.xyz, b.xyz) + b.w); }
+
+// D3DVSDT_NORMPACKED3: 11:11:10 signed-normalised packed into one DWORD.
+// Attribute is bound as U8 x4 (raw, not normalised) so b = bytes 0..3 as floats.
+float3 xv_unpack_normpacked3(float4 b)
+{
+    float x = b.x + fmod(b.y, 8.0) * 256.0;                    // bits  0..10
+    float y = floor(b.y / 8.0) + fmod(b.z, 64.0) * 32.0;       // bits 11..21
+    float z = floor(b.z / 64.0) + b.w * 4.0;                   // bits 22..31
+    x = (x >= 1024.0) ? x - 2048.0 : x;
+    y = (y >= 1024.0) ? y - 2048.0 : y;
+    z = (z >=  512.0) ? z - 1024.0 : z;
+    return float3(x / 1023.0, y / 1023.0, z / 511.0);
+}
+
+VertOut main(AppIn IN, uniform float4 c[13])
+{
+    VertOut OUT;
+    // --- attribute loads (expanded to float4 exactly as the NV2A input file presents them)
+    float4 v0 = float4(IN.position, 1.0);
+    float4 v1 = float4(xv_unpack_normpacked3(IN.blendweight), 1.0);   // bind as U8 x4 (raw bytes); unpacked in-shader
+    float4 v2 = float4(xv_unpack_normpacked3(IN.normal), 1.0);   // bind as U8 x4 (raw bytes); unpacked in-shader
+    float4 v3 = float4(xv_unpack_normpacked3(IN.color0), 1.0);   // bind as U8 x4 (raw bytes); unpacked in-shader
+    float4 v4 = float4(IN.color1, 0.0, 1.0);
+
+    // --- register file
+    float4 r8 = float4(0.0, 0.0, 0.0, 0.0), r10 = float4(0.0, 0.0, 0.0, 0.0);
+    float4 oPos = float4(0.0, 0.0, 0.0, 1.0), oD0 = float4(0.0, 0.0, 0.0, 0.0), oT0 = float4(0.0, 0.0, 0.0, 0.0), oT1 = float4(0.0, 0.0, 0.0, 0.0), oT2 = float4(0.0, 0.0, 0.0, 0.0), oT3 = float4(0.0, 0.0, 0.0, 0.0);
+
+    // --- program (one NV2A slot per block; MAC and ILU read before either writes)
+    // [00] dph r10.x & oPos.x, v0, c[0]
+    {
+        float4 m = xv_dph(v0, c[0]);
+        r10.x = m.x;
+        oPos.x = m.x;
+    }
+    // [01] dph r10.y & oPos.y, v0, c[1]
+    {
+        float4 m = xv_dph(v0, c[1]);
+        r10.y = m.y;
+        oPos.y = m.y;
+    }
+    // [02] dph oPos.z, v0, c[2]
+    {
+        float4 m = xv_dph(v0, c[2]);
+        oPos.z = m.z;
+    }
+    // [03] dph r10.w & oPos.w, v0, c[3]
+    {
+        float4 m = xv_dph(v0, c[3]);
+        r10.w = m.w;
+        oPos.w = m.w;
+    }
+    // [04] mul oT0.xy, v4, c[12].xyyy
+    {
+        float4 m = v4 * c[12].xyyy;
+        oT0.xy = m.xy;
+    }
+    // [05] dp3 oT1.x, -c[5], v3
+    {
+        float4 m = float4(dot((-c[5]).xyz, (v3).xyz));
+        oT1.x = m.x;
+    }
+    // [06] dp3 oT1.y, -c[5], v2
+    {
+        float4 m = float4(dot((-c[5]).xyz, (v2).xyz));
+        oT1.y = m.y;
+    }
+    // [07] dp3 oT1.z, -c[5], v1
+    {
+        float4 m = float4(dot((-c[5]).xyz, (v1).xyz));
+        oT1.z = m.z;
+    }
+    // [08] mov oT2.xyz, v1
+    {
+        float4 m = v1;
+        oT2.xyz = m.xyz;
+    }
+    // [09] add r10.xyw, r10.xyww, r10.w
+    {
+        float4 m = r10.xyww + r10.wwww;
+        r10.xyw = m.xyw;
+    }
+    // [10] dph r8.y, v0, c[10]
+    {
+        float4 m = xv_dph(v0, c[10]);
+        r8.y = m.y;
+    }
+    // [11] dph r8.x, v0, c[9] | mov oT3.w, r10
+    {
+        float4 m = xv_dph(v0, c[9]);
+        float4 i = r10;
+        r8.x = m.x;
+        oT3.w = i.w;
+    }
+    // [12] mul oT3.xy, r10, c[12].zwww
+    {
+        float4 m = r10 * c[12].zwww;
+        oT3.xy = m.xy;
+    }
+    // [13] dph r8.z, v0, c[8]
+    {
+        float4 m = xv_dph(v0, c[8]);
+        r8.z = m.z;
+    }
+    // [14] add r8.xy, v4.w, -r8
+    {
+        float4 m = v4.wwww + -r8;
+        r8.xy = m.xy;
+    }
+    // [15] mul oPos.xyz, r12, c[58] | rcc r1.x, r12.w    <- stripped: Xbox viewport epilogue (GXM divides by w)
+    // [16] max r8.xyz, r8, v4.z
+    {
+        float4 m = max(r8, v4.zzzz);
+        r8.xyz = m.xyz;
+    }
+    // [17] mul r8.xy, r8, r8
+    {
+        float4 m = r8 * r8;
+        r8.xy = m.xy;
+    }
+    // [18] min r8.xyz, r8, v4.w
+    {
+        float4 m = min(r8, v4.wwww);
+        r8.xyz = m.xyz;
+    }
+    // [19] add r8.x, r8.x, r8.y
+    {
+        float4 m = r8.xxxx + r8.yyyy;
+        r8.x = m.x;
+    }
+    // [20] mul r8.z, r8.z, c[11].x
+    {
+        float4 m = r8.zzzz * c[11].xxxx;
+        r8.z = m.z;
+    }
+    // [21] min r8.x, r8, v4.w
+    {
+        float4 m = min(r8, v4.wwww);
+        r8.x = m.x;
+    }
+    // [22] add r8.xy, v4.w, -r8
+    {
+        float4 m = v4.wwww + -r8;
+        r8.xy = m.xy;
+    }
+    // [23] mad oPos.xyz, r12, r1.x, c[59]    <- stripped: Xbox viewport epilogue (GXM divides by w)
+    // [24] mul r8.xy, r8, r8
+    {
+        float4 m = r8 * r8;
+        r8.xy = m.xy;
+    }
+    // [25] add r8.y, r8.y, -r8.x
+    {
+        float4 m = r8.yyyy + -r8.xxxx;
+        r8.y = m.y;
+    }
+    // [26] mad r8.w, c[11].y, r8.y, r8.x
+    {
+        float4 m = c[11].yyyy * r8.yyyy + r8.xxxx;
+        r8.w = m.w;
+    }
+    // [27] mul r8.w, r8.w, c[11].z
+    {
+        float4 m = r8.wwww * c[11].zzzz;
+        r8.w = m.w;
+    }
+    // [28] add r8.zw, -r8, v4.w
+    {
+        float4 m = -r8 + v4.wwww;
+        r8.zw = m.zw;
+    }
+    // [29] mul oD0.w, r8.z, r8.w
+    {
+        float4 m = r8.zzzz * r8.wwww;
+        oD0.w = m.w;
+    }
+
+    // --- outputs
+    OUT.position = oPos;
+    OUT.color0 = oD0;
+    OUT.texcoord0 = oT0;
+    OUT.texcoord1 = oT1;
+    OUT.texcoord2 = oT2;
+    OUT.texcoord3 = oT3;
+    return OUT;
+}
+

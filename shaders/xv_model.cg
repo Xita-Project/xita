@@ -1,0 +1,51 @@
+// XboxVita scene-viewer vertex shader for Halo's compressed model vertex
+// (Xbox declaration 0x1E1400, stride 32):
+//   v0 position     FLOAT3       @0
+//   v1 normal       NORMPACKED3  @12   (11:11:10 signed, bound as raw U8 x4)
+//   v2 binormal     NORMPACKED3  @16
+//   v3 tangent      NORMPACKED3  @20
+//   v4 texcoord     NORMSHORT2   @24
+//   v5 node indices PBYTE2       @28
+//   v6 node weight  NORMSHORT1   @30
+// Member names follow shader_recomp_gen.VREG_INPUT so xv_layouts.h can bind them.
+// c[0..3] = rows of transpose(World*View*Projection); c[4] = light direction; c[5].xy = base map u/v scale.
+struct AppIn
+{
+    float3 position    : POSITION;
+    float4 blendweight : BLENDWEIGHT;   // v1 packed normal
+    float4 normal      : NORMAL;        // v2 packed binormal (unused)
+    float4 color0      : COLOR0;        // v3 packed tangent  (unused)
+    float2 color1      : COLOR1;        // v4 texcoord
+    float2 fog         : TEXCOORD4;     // v5 node indices    (unused)
+    float  psize       : TEXCOORD5;     // v6 node weight     (unused)
+};
+
+struct VertOut
+{
+    float4 position  : POSITION;
+    float4 color0    : COLOR0;
+    float4 texcoord0 : TEXCOORD0;
+};
+
+float3 xv_unpack_normpacked3(float4 b)
+{
+    float x = b.x + fmod(b.y, 8.0) * 256.0;
+    float y = floor(b.y / 8.0) + fmod(b.z, 64.0) * 32.0;
+    float z = floor(b.z / 64.0) + b.w * 4.0;
+    x = (x >= 1024.0) ? x - 2048.0 : x;
+    y = (y >= 1024.0) ? y - 2048.0 : y;
+    z = (z >=  512.0) ? z - 1024.0 : z;
+    return float3(x / 1023.0, y / 1023.0, z / 511.0);
+}
+
+VertOut main(AppIn IN, uniform float4 c[6])
+{
+    VertOut OUT;
+    float4 p = float4(IN.position, 1.0);
+    OUT.position = float4(dot(p, c[0]), dot(p, c[1]), dot(p, c[2]), dot(p, c[3]));
+    float3 n = normalize(xv_unpack_normpacked3(IN.blendweight));
+    float  l = lerp(0.35 + 0.65 * max(dot(n, normalize(c[4].xyz)), 0.0), 1.0, c[4].w);   // c[4].w = unlit
+    OUT.color0 = float4(l, l, l, 1.0);
+    OUT.texcoord0 = float4(IN.color1 * c[5].xy, 0.0, 1.0);   // base map u/v scale
+    return OUT;
+}

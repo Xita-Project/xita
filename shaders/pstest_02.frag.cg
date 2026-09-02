@@ -1,0 +1,66 @@
+// ---------------------------------------------------------------------------
+//  XboxVita Stage 3b - auto-generated Vita Cg fragment shader: pstest_02
+//  source def: VA None  file 0x1E0
+//  2 combiner stage(s), MUX_MSB; textures t0:PROJECT2D t1:PROJECT2D t2:PROJECT2D
+//  Uniforms: psc[16] = SetPixelShaderConstant regs; xv_fogcolor.rgb; fog factor = TEXCOORD7
+//    stage 0 rgb  : r0 = dot(t0.rgb<expand_normal>, v1.rgb<expand_normal>)
+//    stage 0 alpha: r0 = sum(v0.a * zero.b<unsigned_invert>, zero.b * zero.b)
+//    stage 1 rgb  : r1 = r0.rgb * t1.rgb; t2 = r0.rgb * c0.rgb; r0 = mux(r0.rgb * t1.rgb, r0.rgb * c0.rgb)  {cd.blue->alpha}
+//    stage 1 alpha: r0 = sum(r0.a * zero.b<unsigned_invert>, t1.a * zero.b<unsigned_invert>)
+//    final      : (default) out = lerp(fog.rgb, r0.rgb, fog.a), r0.a
+// ---------------------------------------------------------------------------
+
+struct VertOut
+{
+    float4 position    : POSITION;
+    float4 color0      : COLOR0;
+    float4 color1      : COLOR1;
+    float4 texcoord0   : TEXCOORD0;
+    float4 texcoord1   : TEXCOORD1;
+    float4 texcoord2   : TEXCOORD2;
+    float  fog         : TEXCOORD7;
+};
+
+float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform sampler2D tex2, uniform float4 psc[16], uniform float4 xv_fogcolor) : COLOR
+{
+    // ---- inputs
+    float4 v0 = IN.color0, v1 = IN.color1;
+    float4 fog = float4(xv_fogcolor.rgb, IN.fog);
+    float4 r0 = float4(0.0, 0.0, 0.0, 0.0), r1 = float4(0.0, 0.0, 0.0, 0.0);
+    float4 t0 = tex2D(tex0, IN.texcoord0.xy);
+    float4 t1 = tex2D(tex1, IN.texcoord1.xy);
+    float4 t2 = tex2D(tex2, IN.texcoord2.xy);
+    float4 t3 = float4(0.0, 0.0, 0.0, 0.0);
+    // ---- combiner stage 0
+    {
+        float3 A = (2.0 * max(t0.rgb, 0.0) - 1.0), B = (2.0 * max(v1.rgb, 0.0) - 1.0), C = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), D = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb);
+        float3 AB = float3(dot(A, B));
+        float3 CD = C * D;
+        float3 SUM = AB + CD;
+        float  a_A = saturate(v0.a), a_B = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).b)), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
+        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        float  a_SUM = a_AB + a_CD;
+        r0.rgb = clamp(AB, -1.0, 1.0);
+        r0.a = clamp(a_SUM, -1.0, 1.0);
+    }
+    // ---- combiner stage 1
+    {
+        float3 A = saturate(r0.rgb), B = saturate(t1.rgb), C = saturate(r0.rgb), D = saturate(psc[2].rgb);
+        float3 AB = A * B;
+        float3 CD = C * D;
+        float3 SUM = (r0.a >= 0.5) ? CD : AB;
+        float  a_A = saturate(r0.a), a_B = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).b)), a_C = saturate(t1.a), a_D = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).b));
+        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        float  a_SUM = a_AB + a_CD;
+        r1.rgb = clamp(AB, -1.0, 1.0);
+        t2.rgb = clamp(CD, -1.0, 1.0);
+        r0.rgb = clamp(SUM, -1.0, 1.0);
+        t2.a = clamp(CD.b, -1.0, 1.0);
+        r0.a = clamp(a_SUM, -1.0, 1.0);
+    }
+    // ---- final combiner
+    // (no final combiner in the def: Xbox D3D default = fixed-function fog blend)
+    float3 out_rgb = lerp(fog.rgb, r0.rgb, fog.a);
+    float  out_a   = r0.a;
+    return saturate(float4(out_rgb, out_a));
+}

@@ -1,0 +1,108 @@
+// ---------------------------------------------------------------------------
+//  XboxVita Stage 3 - auto-generated Vita Cg vertex shader
+//  source : halo_vs_06.json
+//  mode   : NV2A microcode translation
+//  target : psp2cgc -profile sce_vp_psp2
+//
+//  Uniform contract:
+//    uniform float4 c[11]  - universal constant array, C_BASE = -96
+//    runtime maps SetVertexShaderConstant(reg, v) -> c[reg - C_BASE]
+//    microcode uses D3D c-96..c-86 (hardware c[0]..)
+//    7 of 9 NV2A slots translated; inputs v0; outputs oPos oT0 oT1
+//    slots [7, 8] = Xbox viewport epilogue, stripped (pass --keep-viewport-epilogue to translate verbatim)
+//  Attribute binding (sceGxmVertexAttribute regIndex from parameter name):
+//    v0  position    float3 FLOAT3      stream 0 +0 (12 B)
+//    v1  blendweight float4 NORMPACKED3 stream 0 +12 (4 B)  // bind as U8 x4 (raw bytes); unpacked in-shader
+//    v2  normal      float4 NORMPACKED3 stream 0 +16 (4 B)  // bind as U8 x4 (raw bytes); unpacked in-shader
+//    v3  color0      float4 NORMPACKED3 stream 0 +20 (4 B)  // bind as U8 x4 (raw bytes); unpacked in-shader
+//    v4  color1      float2 FLOAT2      stream 0 +24 (8 B)
+//  Depth: D3D clip z in [0, w] is passed through unchanged; set the GXM viewport
+//         with zOffset = 0, zScale = 1 (no [-1,1] -> [0,1] remap) to match.
+// ---------------------------------------------------------------------------
+
+struct AppIn
+{
+    float3 position    : POSITION;   // v0 FLOAT3
+    float4 blendweight : BLENDWEIGHT;   // v1 NORMPACKED3
+    float4 normal      : NORMAL;   // v2 NORMPACKED3
+    float4 color0      : COLOR0;   // v3 NORMPACKED3
+    float2 color1      : COLOR1;   // v4 FLOAT2
+};
+
+struct VertOut
+{
+    float4 position    : POSITION;   // oPos
+    float4 texcoord0   : TEXCOORD0;   // oT0
+    float4 texcoord1   : TEXCOORD1;   // oT1
+};
+
+float4 xv_dph(float4 a, float4 b) { return float4(dot(a.xyz, b.xyz) + b.w); }
+
+// D3DVSDT_NORMPACKED3: 11:11:10 signed-normalised packed into one DWORD.
+// Attribute is bound as U8 x4 (raw, not normalised) so b = bytes 0..3 as floats.
+float3 xv_unpack_normpacked3(float4 b)
+{
+    float x = b.x + fmod(b.y, 8.0) * 256.0;                    // bits  0..10
+    float y = floor(b.y / 8.0) + fmod(b.z, 64.0) * 32.0;       // bits 11..21
+    float z = floor(b.z / 64.0) + b.w * 4.0;                   // bits 22..31
+    x = (x >= 1024.0) ? x - 2048.0 : x;
+    y = (y >= 1024.0) ? y - 2048.0 : y;
+    z = (z >=  512.0) ? z - 1024.0 : z;
+    return float3(x / 1023.0, y / 1023.0, z / 511.0);
+}
+
+VertOut main(AppIn IN, uniform float4 c[11])
+{
+    VertOut OUT;
+    // --- attribute loads (expanded to float4 exactly as the NV2A input file presents them)
+    float4 v0 = float4(IN.position, 1.0);
+
+    // --- register file
+    float4 oPos = float4(0.0, 0.0, 0.0, 1.0), oT0 = float4(0.0, 0.0, 0.0, 0.0), oT1 = float4(0.0, 0.0, 0.0, 0.0);
+
+    // --- program (one NV2A slot per block; MAC and ILU read before either writes)
+    // [00] dph oPos.x, v0, c[0]
+    {
+        float4 m = xv_dph(v0, c[0]);
+        oPos.x = m.x;
+    }
+    // [01] dph oPos.y, v0, c[1]
+    {
+        float4 m = xv_dph(v0, c[1]);
+        oPos.y = m.y;
+    }
+    // [02] dph oPos.z, v0, c[2]
+    {
+        float4 m = xv_dph(v0, c[2]);
+        oPos.z = m.z;
+    }
+    // [03] dph oPos.w, v0, c[3]
+    {
+        float4 m = xv_dph(v0, c[3]);
+        oPos.w = m.w;
+    }
+    // [04] dph oT0.x, v0, c[8]
+    {
+        float4 m = xv_dph(v0, c[8]);
+        oT0.x = m.x;
+    }
+    // [05] dph oT1.y, v0, c[9]
+    {
+        float4 m = xv_dph(v0, c[9]);
+        oT1.y = m.y;
+    }
+    // [06] dph oT1.x, v0, c[10]
+    {
+        float4 m = xv_dph(v0, c[10]);
+        oT1.x = m.x;
+    }
+    // [07] mul oPos.xyz, r12, c[58] | rcc r1.x, r12.w    <- stripped: Xbox viewport epilogue (GXM divides by w)
+    // [08] mad oPos.xyz, r12, r1.x, c[59]    <- stripped: Xbox viewport epilogue (GXM divides by w)
+
+    // --- outputs
+    OUT.position = oPos;
+    OUT.texcoord0 = oT0;
+    OUT.texcoord1 = oT1;
+    return OUT;
+}
+

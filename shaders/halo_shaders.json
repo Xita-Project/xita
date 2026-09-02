@@ -1,0 +1,4703 @@
+[
+ {
+  "index": 0,
+  "func_va": "0x001E1468",
+  "decl_va": "0x001E1388",
+  "cg": "shaders/halo_vs_00.cg",
+  "instructions": 7,
+  "streams": {
+   "0": 16
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "D3DCOLOR"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v9"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0"
+  ]
+ },
+ {
+  "index": 1,
+  "func_va": "0x001E14E0",
+  "decl_va": "0x001E1398",
+  "cg": "shaders/halo_vs_01.cg",
+  "instructions": 12,
+  "streams": {
+   "0": 16
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMSHORT2"
+   }
+  ],
+  "constant_fed_inputs": [
+   "v9"
+  ],
+  "inputs": [
+   "v0",
+   "v4",
+   "v9"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0"
+  ]
+ },
+ {
+  "index": 2,
+  "func_va": "0x001E15A8",
+  "decl_va": "0x001E13BC",
+  "cg": "shaders/halo_vs_02.cg",
+  "instructions": 28,
+  "streams": {
+   "0": 24
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 12,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "D3DCOLOR"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v9"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 3,
+  "func_va": "0x001E1770",
+  "decl_va": "0x001E13EC",
+  "cg": "shaders/halo_vs_03.cg",
+  "instructions": 22,
+  "streams": {
+   "0": 20
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 8,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "D3DCOLOR"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v9"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1",
+   "oT2"
+  ]
+ },
+ {
+  "index": 4,
+  "func_va": "0x001E18D8",
+  "decl_va": "0x001E13EC",
+  "cg": "shaders/halo_vs_04.cg",
+  "instructions": 8,
+  "streams": {
+   "0": 20
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 8,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "D3DCOLOR"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v9"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0"
+  ]
+ },
+ {
+  "index": 5,
+  "func_va": "0x001E1960",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_05.cg",
+  "instructions": 23,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oFog",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 6,
+  "func_va": "0x001E1AD8",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_06.cg",
+  "instructions": 9,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 7,
+  "func_va": "0x001E1B70",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_07.cg",
+  "instructions": 24,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [
+   "v7"
+  ],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v7"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 8,
+  "func_va": "0x001E1CF8",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_08.cg",
+  "instructions": 8,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0"
+  ],
+  "outputs": [
+   "oPos",
+   "oFog",
+   "oT0"
+  ]
+ },
+ {
+  "index": 9,
+  "func_va": "0x001E1D80",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_09.cg",
+  "instructions": 45,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oFog",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 10,
+  "func_va": "0x001E2058",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_10.cg",
+  "instructions": 66,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 11,
+  "func_va": "0x001E2480",
+  "decl_va": "0x001E13A8",
+  "cg": "shaders/halo_vs_11.cg",
+  "instructions": 31,
+  "streams": {
+   "0": 8
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 3,
+    "type": "PBYTE3"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 3,
+    "size": 3,
+    "type": "PBYTE3"
+   },
+   {
+    "vreg": 8,
+    "semantic": "BACKCOLOR1",
+    "stream": 0,
+    "offset": 6,
+    "size": 2,
+    "type": "S32Kx1"
+   }
+  ],
+  "constant_fed_inputs": [
+   "v2",
+   "v3"
+  ],
+  "inputs": [
+   "v0",
+   "v2",
+   "v3",
+   "v8",
+   "v9"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0"
+  ]
+ },
+ {
+  "index": 12,
+  "func_va": "0x001E2678",
+  "decl_va": "0x001E13BC",
+  "cg": "shaders/halo_vs_12.cg",
+  "instructions": 29,
+  "streams": {
+   "0": 24
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 12,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "D3DCOLOR"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v9"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 13,
+  "func_va": "0x001E2850",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_13.cg",
+  "instructions": 21,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0"
+  ]
+ },
+ {
+  "index": 14,
+  "func_va": "0x001E29A8",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_14.cg",
+  "instructions": 44,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oFog",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 15,
+  "func_va": "0x001E2C70",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_15.cg",
+  "instructions": 54,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 16,
+  "func_va": "0x001E2FD8",
+  "decl_va": "0x001E1424",
+  "cg": "shaders/halo_vs_16.cg",
+  "instructions": 25,
+  "streams": {
+   "0": 32,
+   "1": 8
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 7,
+    "semantic": "BACKCOLOR0",
+    "stream": 1,
+    "offset": 0,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 8,
+    "semantic": "BACKCOLOR1",
+    "stream": 1,
+    "offset": 4,
+    "size": 4,
+    "type": "NORMSHORT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4",
+   "v7",
+   "v8"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 17,
+  "func_va": "0x001E3170",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_17.cg",
+  "instructions": 79,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 18,
+  "func_va": "0x001E3668",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_18.cg",
+  "instructions": 39,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oFog",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 19,
+  "func_va": "0x001E38E0",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_19.cg",
+  "instructions": 41,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 20,
+  "func_va": "0x001E3B78",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_20.cg",
+  "instructions": 12,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oFog",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 21,
+  "func_va": "0x001E3C40",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_21.cg",
+  "instructions": 19,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 22,
+  "func_va": "0x001E3D78",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_22.cg",
+  "instructions": 24,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0"
+  ]
+ },
+ {
+  "index": 23,
+  "func_va": "0x001E3F00",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_23.cg",
+  "instructions": 21,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oFog",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 24,
+  "func_va": "0x001E4058",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_24.cg",
+  "instructions": 37,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 25,
+  "func_va": "0x001E42B0",
+  "decl_va": "0x001E1424",
+  "cg": "shaders/halo_vs_25.cg",
+  "instructions": 55,
+  "streams": {
+   "0": 32,
+   "1": 8
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 7,
+    "semantic": "BACKCOLOR0",
+    "stream": 1,
+    "offset": 0,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 8,
+    "semantic": "BACKCOLOR1",
+    "stream": 1,
+    "offset": 4,
+    "size": 4,
+    "type": "NORMSHORT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v8"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1",
+   "oT2"
+  ]
+ },
+ {
+  "index": 26,
+  "func_va": "0x001E4628",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_26.cg",
+  "instructions": 20,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 27,
+  "func_va": "0x001E4770",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_27.cg",
+  "instructions": 24,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 28,
+  "func_va": "0x001E48F8",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_28.cg",
+  "instructions": 34,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 29,
+  "func_va": "0x001E4B20",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_29.cg",
+  "instructions": 11,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 30,
+  "func_va": "0x001E4BD8",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_30.cg",
+  "instructions": 37,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0"
+  ]
+ },
+ {
+  "index": 31,
+  "func_va": "0x001E4E30",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_31.cg",
+  "instructions": 86,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 32,
+  "func_va": "0x001E5398",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_32.cg",
+  "instructions": 38,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0"
+  ]
+ },
+ {
+  "index": 33,
+  "func_va": "0x001E5600",
+  "decl_va": "0x001E13A8",
+  "cg": "shaders/halo_vs_33.cg",
+  "instructions": 30,
+  "streams": {
+   "0": 8
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 3,
+    "type": "PBYTE3"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 3,
+    "size": 3,
+    "type": "PBYTE3"
+   },
+   {
+    "vreg": 8,
+    "semantic": "BACKCOLOR1",
+    "stream": 0,
+    "offset": 6,
+    "size": 2,
+    "type": "S32Kx1"
+   }
+  ],
+  "constant_fed_inputs": [
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "inputs": [
+   "v0",
+   "v2",
+   "v3",
+   "v4",
+   "v8",
+   "v9"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0"
+  ]
+ },
+ {
+  "index": 34,
+  "func_va": "0x001E57E8",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_34.cg",
+  "instructions": 45,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 35,
+  "func_va": "0x001E5AC0",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_35.cg",
+  "instructions": 42,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 36,
+  "func_va": "0x001E5D68",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_36.cg",
+  "instructions": 59,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 37,
+  "func_va": "0x001E6120",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_37.cg",
+  "instructions": 14,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 38,
+  "func_va": "0x001E6208",
+  "decl_va": "0x001E13EC",
+  "cg": "shaders/halo_vs_38.cg",
+  "instructions": 11,
+  "streams": {
+   "0": 20
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 8,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "D3DCOLOR"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 39,
+  "func_va": "0x001E62C0",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_39.cg",
+  "instructions": 21,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0"
+  ]
+ },
+ {
+  "index": 40,
+  "func_va": "0x001E6418",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_40.cg",
+  "instructions": 13,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 41,
+  "func_va": "0x001E64F0",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_41.cg",
+  "instructions": 21,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oFog",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 42,
+  "func_va": "0x001E6648",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_42.cg",
+  "instructions": 16,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 43,
+  "func_va": "0x001E6750",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_43.cg",
+  "instructions": 31,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 44,
+  "func_va": "0x001E6948",
+  "decl_va": "0x001E1424",
+  "cg": "shaders/halo_vs_44.cg",
+  "instructions": 22,
+  "streams": {
+   "0": 32,
+   "1": 8
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 7,
+    "semantic": "BACKCOLOR0",
+    "stream": 1,
+    "offset": 0,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 8,
+    "semantic": "BACKCOLOR1",
+    "stream": 1,
+    "offset": 4,
+    "size": 4,
+    "type": "NORMSHORT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4",
+   "v7"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 45,
+  "func_va": "0x001E6AB0",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_45.cg",
+  "instructions": 59,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 46,
+  "func_va": "0x001E6E68",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_46.cg",
+  "instructions": 24,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0"
+  ]
+ },
+ {
+  "index": 47,
+  "func_va": "0x001E6FF0",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_47.cg",
+  "instructions": 55,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 48,
+  "func_va": "0x001E7368",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_48.cg",
+  "instructions": 37,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 49,
+  "func_va": "0x001E75C0",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_49.cg",
+  "instructions": 18,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 50,
+  "func_va": "0x001E76E8",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_50.cg",
+  "instructions": 72,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 51,
+  "func_va": "0x001E7B70",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_51.cg",
+  "instructions": 18,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 52,
+  "func_va": "0x001E7C98",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_52.cg",
+  "instructions": 16,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [
+   "v7"
+  ],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v7"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1"
+  ]
+ },
+ {
+  "index": 53,
+  "func_va": "0x001E7DA0",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_53.cg",
+  "instructions": 16,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v2",
+   "v3"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1"
+  ]
+ },
+ {
+  "index": 54,
+  "func_va": "0x001E7EA8",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_54.cg",
+  "instructions": 35,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [
+   "v7"
+  ],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v7"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oFog",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 55,
+  "func_va": "0x001E80E0",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_55.cg",
+  "instructions": 21,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [
+   "v7"
+  ],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4",
+   "v7"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1"
+  ]
+ },
+ {
+  "index": 56,
+  "func_va": "0x001E8238",
+  "decl_va": "0x001E13BC",
+  "cg": "shaders/halo_vs_56.cg",
+  "instructions": 9,
+  "streams": {
+   "0": 24
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 12,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "D3DCOLOR"
+   }
+  ],
+  "constant_fed_inputs": [
+   "v10"
+  ],
+  "inputs": [
+   "v0",
+   "v4",
+   "v9",
+   "v10"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0"
+  ]
+ },
+ {
+  "index": 57,
+  "func_va": "0x001E82D0",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_57.cg",
+  "instructions": 63,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 58,
+  "func_va": "0x001E86C8",
+  "decl_va": "0x001E1424",
+  "cg": "shaders/halo_vs_58.cg",
+  "instructions": 7,
+  "streams": {
+   "0": 32,
+   "1": 8
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 7,
+    "semantic": "BACKCOLOR0",
+    "stream": 1,
+    "offset": 0,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 8,
+    "semantic": "BACKCOLOR1",
+    "stream": 1,
+    "offset": 4,
+    "size": 4,
+    "type": "NORMSHORT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v8"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0"
+  ]
+ },
+ {
+  "index": 59,
+  "func_va": "0x001E8740",
+  "decl_va": "0x001E1424",
+  "cg": "shaders/halo_vs_59.cg",
+  "instructions": 19,
+  "streams": {
+   "0": 32,
+   "1": 8
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 7,
+    "semantic": "BACKCOLOR0",
+    "stream": 1,
+    "offset": 0,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 8,
+    "semantic": "BACKCOLOR1",
+    "stream": 1,
+    "offset": 4,
+    "size": 4,
+    "type": "NORMSHORT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4",
+   "v7",
+   "v8"
+  ],
+  "outputs": [
+   "oPos",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 60,
+  "func_va": "0x001E8878",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_60.cg",
+  "instructions": 55,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 61,
+  "func_va": "0x001E8BF0",
+  "decl_va": "0x001E144C",
+  "cg": "shaders/halo_vs_61.cg",
+  "instructions": 30,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 8,
+    "type": "FLOAT2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 62,
+  "func_va": "0x001E8DD8",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_62.cg",
+  "instructions": 60,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 63,
+  "func_va": "0x001E91A0",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_63.cg",
+  "instructions": 57,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ },
+ {
+  "index": 64,
+  "func_va": "0x001E9538",
+  "decl_va": "0x001E1400",
+  "cg": "shaders/halo_vs_64.cg",
+  "instructions": 41,
+  "streams": {
+   "0": 32
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 1,
+    "semantic": "BLENDWEIGHT",
+    "stream": 0,
+    "offset": 12,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 2,
+    "semantic": "NORMAL",
+    "stream": 0,
+    "offset": 16,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 3,
+    "semantic": "COLOR0 (diffuse)",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "NORMPACKED3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 24,
+    "size": 4,
+    "type": "NORMSHORT2"
+   },
+   {
+    "vreg": 5,
+    "semantic": "FOG",
+    "stream": 0,
+    "offset": 28,
+    "size": 2,
+    "type": "PBYTE2"
+   },
+   {
+    "vreg": 6,
+    "semantic": "PSIZE",
+    "stream": 0,
+    "offset": 30,
+    "size": 2,
+    "type": "NORMSHORT1"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v1",
+   "v4",
+   "v5",
+   "v6"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oT0",
+   "oT1",
+   "oT2"
+  ]
+ },
+ {
+  "index": 65,
+  "func_va": "0x001E97D0",
+  "decl_va": "0x001E13BC",
+  "cg": "shaders/halo_vs_65.cg",
+  "instructions": 26,
+  "streams": {
+   "0": 24
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 12,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "D3DCOLOR"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v9"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0"
+  ]
+ },
+ {
+  "index": 66,
+  "func_va": "0x001E9978",
+  "decl_va": "0x001E13D0",
+  "cg": "shaders/halo_vs_66.cg",
+  "instructions": 35,
+  "streams": {
+   "0": 24,
+   "1": 2
+  },
+  "attributes": [
+   {
+    "vreg": 0,
+    "semantic": "POSITION",
+    "stream": 0,
+    "offset": 0,
+    "size": 12,
+    "type": "FLOAT3"
+   },
+   {
+    "vreg": 4,
+    "semantic": "COLOR1 (specular)",
+    "stream": 0,
+    "offset": 12,
+    "size": 8,
+    "type": "FLOAT2"
+   },
+   {
+    "vreg": 9,
+    "semantic": "TEXCOORD0",
+    "stream": 0,
+    "offset": 20,
+    "size": 4,
+    "type": "D3DCOLOR"
+   },
+   {
+    "vreg": 11,
+    "semantic": "TEXCOORD2",
+    "stream": 1,
+    "offset": 0,
+    "size": 2,
+    "type": "PBYTE2"
+   }
+  ],
+  "constant_fed_inputs": [],
+  "inputs": [
+   "v0",
+   "v4",
+   "v9",
+   "v11"
+  ],
+  "outputs": [
+   "oPos",
+   "oD0",
+   "oD1",
+   "oT0",
+   "oT1",
+   "oT2",
+   "oT3"
+  ]
+ }
+]

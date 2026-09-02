@@ -1,0 +1,93 @@
+[
+ {
+  "name": "pstest_00",
+  "samplers": {
+   "tex0": "sampler2D"
+  },
+  "constants_used": [],
+  "textures_used": [
+   0
+  ],
+  "varyings": [
+   "color0",
+   "color1",
+   "fog",
+   "texcoord0"
+  ],
+  "warnings": [],
+  "cg": "shaders/pstest_00.frag.cg"
+ },
+ {
+  "name": "pstest_01",
+  "samplers": {
+   "tex0": "sampler2D",
+   "tex1": "sampler2D"
+  },
+  "constants_used": [
+   0
+  ],
+  "textures_used": [
+   0,
+   1
+  ],
+  "varyings": [
+   "color0",
+   "color1",
+   "fog",
+   "texcoord0",
+   "texcoord1"
+  ],
+  "warnings": [],
+  "cg": "shaders/pstest_01.frag.cg"
+ },
+ {
+  "name": "pstest_02",
+  "samplers": {
+   "tex0": "sampler2D",
+   "tex1": "sampler2D",
+   "tex2": "sampler2D"
+  },
+  "constants_used": [
+   2
+  ],
+  "textures_used": [
+   0,
+   1
+  ],
+  "varyings": [
+   "color0",
+   "color1",
+   "fog",
+   "texcoord0",
+   "texcoord1",
+   "texcoord2"
+  ],
+  "warnings": [],
+  "cg": "shaders/pstest_02.frag.cg"
+ },
+ {
+  "name": "pstest_03",
+  "samplers": {
+   "tex2": "samplerCUBE",
+   "tex3": "sampler2D"
+  },
+  "constants_used": [
+   5
+  ],
+  "textures_used": [
+   2,
+   3
+  ],
+  "varyings": [
+   "color0",
+   "color1",
+   "fog",
+   "texcoord0",
+   "texcoord1",
+   "texcoord2",
+   "texcoord3"
+  ],
+  "warnings": [],
+  "cg": "shaders/pstest_03.frag.cg"
+ }
+]

@@ -1,0 +1,14 @@
+// XboxVita runtime fragment shader: Halo environment approximation, base (t0, oT0) x lightmap (t2, oT2) x 2.
+struct VertOut
+{
+    float4 position  : POSITION;
+    float4 texcoord0 : TEXCOORD0;
+    float4 texcoord2 : TEXCOORD2;
+};
+
+float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex2) : COLOR
+{
+    float4 b = tex2D(tex0, IN.texcoord0.xy);
+    float4 l = tex2D(tex2, IN.texcoord2.xy);
+    return float4(b.rgb * l.rgb * 2.0, b.a);
+}

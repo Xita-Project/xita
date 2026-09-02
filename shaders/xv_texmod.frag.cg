@@ -1,0 +1,13 @@
+// XboxVita runtime fragment shader: D3D "modulate" default (texture stage 0 * diffuse).
+// Used until a real register-combiner program is available for a draw.
+struct VertOut
+{
+    float4 position  : POSITION;
+    float4 color0    : COLOR0;
+    float4 texcoord0 : TEXCOORD0;
+};
+
+float4 main(VertOut IN, uniform sampler2D tex0) : COLOR
+{
+    return tex2D(tex0, IN.texcoord0.xy) * IN.color0;
+}

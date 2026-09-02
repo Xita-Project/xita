@@ -1,0 +1,22 @@
+// XboxVita runtime vertex shader for D3DDevice_Clear: GXM has no clear call, so the
+// HLE draws a full-screen quad.  Clip-space position in, vertex colour out (paired
+// with xv_color.frag).  Layout: float3 position @0, D3DCOLOR @12, stride 16.
+struct AppIn
+{
+    float3 position : POSITION;
+    float4 color0   : COLOR0;
+};
+
+struct VertOut
+{
+    float4 position : POSITION;
+    float4 color0   : COLOR0;
+};
+
+VertOut main(AppIn IN)
+{
+    VertOut OUT;
+    OUT.position = float4(IN.position, 1.0);
+    OUT.color0   = IN.color0.zyxw;     // D3DCOLOR bytes B,G,R,A -> RGBA
+    return OUT;
+}

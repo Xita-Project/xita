@@ -1,0 +1,17 @@
+// XboxVita runtime fragment shader: Halo 2D UI quad path, image texture on stage 1.
+// Pairs with the recompiled UI vertex programs for Xbox declaration 0x1E13EC (halo_vs_03/04/38):
+// oD0 = vertex diffuse (v9), oT1 = the texcoord set the combiner program reads its image from
+// (Halo's 7-stage widget combiner reads the bitmap from t2 and scrolling smoke from t0/t1; the
+// 1-stage text combiner reads the glyph atlas from t0).  The bridge picks the tN variant from the
+// D3DPIXELSHADERDEF bound at draw time.  Output = texture * vertex diffuse (NV2A "modulate").
+struct VertOut
+{
+    float4 position  : POSITION;
+    float4 color0    : COLOR0;
+    float4 texcoord1 : TEXCOORD1;
+};
+
+float4 main(VertOut IN, uniform sampler2D tex0) : COLOR
+{
+    return tex2D(tex0, IN.texcoord1.xy) * IN.color0;
+}

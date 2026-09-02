@@ -1,0 +1,947 @@
+================================================================================
+ XboxVita — Low-Overhead Static-Recomp Wrapper Architecture
+ Target: PS Vita (ARMv7 Cortex-A9 MPCore, SGX543MP4+, 512 MB LPDDR2 + 128 MB CDRAM)
+ Goal:   run a statically recompiled original-Xbox title (64 MB guest RAM,
+         DX8 fixed-function graphics) in <= 300 MB of main RAM — design lands ~90 MB.
+================================================================================
+
+
+--------------------------------------------------------------------------------
+ 0. WHERE THE 400 MB GOES, AND THE DESIGN STANCE
+--------------------------------------------------------------------------------
+
+A generic wrapper pays for the same bytes three or four times:
+
+  Generic layer                          Typical cost   Why it's unnecessary here
+  -------------------------------------  ------------   ---------------------------------------------
+  Guest RAM                              64 MB          Required (the only copy we keep)
+  Shadow VB/IB/texture copies (D3D->GL)  64-120 MB      Vita GPU reads LPDDR2 directly; guest RAM IS
+                                                        GPU memory
+  Texture cache (decoded RGBA8 + hash)   50-100 MB      NV2A swizzle == PowerVR twiddle; formats map 1:1
+  Runtime shader compiler (libshacccg)   20-40 MB       Xbox VS/PS programs are static data in the XBE
+    + shader cache                                      -> compile offline
+  JIT / LLVM / block cache               40-100 MB      Static recomp: code is .text, zero runtime metadata
+  Per-guest-thread OS threads + stacks   10-20 MB       Fibers on one core
+
+Stance:
+  * The 64 MB guest block is the single source of truth for everything the GPU consumes.
+  * No runtime compilers. No dynamic translation metadata.
+  * One Vita thread for guest execution, one for the render/audio/IO pump.
+  * Direct libgxm, not vitaGL (vitaGL's copying vertex path and its runtime Cg
+    compiler ARE the overhead being removed; §4.5 shows the vitaGL-mapped fallback).
+
+Resulting main-RAM budget (CDRAM is a separate 128 MB pool, not counted):
+
+  Region                                  Size        Vita memblock type
+  --------------------------------------  ----------  ----------------------------------------
+  XBOX_RAM (guest phys 0..64MB)           64.0 MB     USER_RW (cached) + sceGxmMapMemory(RW)
+  Recompiled Thumb-2 .text                8-16 MB     part of the .suprx / velf image
+  .rodata: jump tables, GXP blobs         0.5-1 MB    (~25 precompiled shaders @ 4-12 KB)
+  GXM VDM ring                            1.0 MB      USER_RW_UNCACHE
+  GXM vertex ring                         1.0 MB      USER_RW_UNCACHE
+  GXM fragment ring                       0.5 MB      USER_RW_UNCACHE
+  GXM fragment USSE ring                  16 KB       USER_RW_UNCACHE
+  XV_SCRATCH (UP draws, quad idx,
+    DXT block-reorder output)             2.0 MB      USER_RW_UNCACHE ring
+  Texture descriptor table                64 KB       4096 x SceGxmTexture (16 B each)
+  Micro-kernel heap                       256 KB      fibers, handles, wait lists, file table
+  Fiber native stacks                     16 x 32 KB  512 KB
+  Audio mixer                             256 KB
+  IO buffer                               128 KB
+  newlib heap / libc / misc               ~2 MB
+  --------------------------------------  ----------
+                                  Total   ~82-92 MB
+  CDRAM (128 MB, separate): 2x color 960x544x4 = 4 MB, depth/stencil 2 MB
+
+=> ~90 MB, not 300. The 109 MB "extended memory" mode is not even needed.
+
+
+--------------------------------------------------------------------------------
+ 1. UNIFIED-MEMORY POINTER ALIASING (zero-copy VB / IB / texture)
+--------------------------------------------------------------------------------
+
+1.1 Guest address model
+
+Xbox has 64 MB physical, seen through three windows that resolve to the same page:
+
+  Guest virtual             Meaning                                 Host translation
+  ------------------------  --------------------------------------  ----------------------------
+  0x00000000-0x03FFFFFF     user identity-mapped (XBE @ 0x10000)    base + addr
+  0x80000000-0x83FFFFFF     kernel/contiguous alias (MmAlloc*)      base + (addr & 0x03FFFFFF)
+  0xF0000000-0xF3FFFFFF     write-combined alias (D3D Lock ptrs)    base + (addr & 0x03FFFFFF)
+  0xFD000000-0xFDFFFFFF     NV2A MMIO                               never reached: D3D runtime is HLE'd
+
+Because the micro-kernel IS the allocator (§3), every address it hands out
+(NtAllocateVirtualMemory, MmAllocateContiguousMemory, RtlAllocateHeap) is guaranteed
+< 64 MB. The recompiler can therefore use a single 26-bit mask and no page table:
+
+    @ r9 = XBOX_RAM host base (pinned register for the whole process)
+    @ guest load: eax = [ebx + 0x10]
+        add   r0, r5, #0x10           @ r5 = ebx
+        ubfx  r0, r0, #0, #26         @ collapse the 0x8/0xF aliases
+        ldr   r4, [r9, r0]            @ 2 extra instructions vs native
+
+The recompiler elides the ubfx when it can prove the base is low (esp-relative, or a
+pointer that came out of the allocator through constant propagation) — most stack/heap
+traffic in practice.
+
+1.2 The aliasing rule
+
+Every Xbox D3D resource is struct { DWORD Common; DWORD Data; DWORD Lock; } where
+Data is ALREADY the physical address the NV2A DMAs from. GPU alias is a one-liner:
+
+    #define GUEST_MASK 0x03FFFFFFu
+    static uint8_t *g_xram;          /* host base of the 64MB block, GXM-mapped R/W */
+
+    static inline void *gpu_ptr(uint32_t guest_data)   /* Vita GPU address == Vita CPU address */
+    {
+        return g_xram + (guest_data & GUEST_MASK);
+    }
+
+Boot-time mapping:
+
+    SceUID blk = sceKernelAllocMemBlock("xram", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, 64u << 20, NULL);
+    sceKernelGetMemBlockBase(blk, (void **)&g_xram);
+    sceGxmMapMemory(g_xram, 64u << 20, SCE_GXM_MEMORY_ATTRIB_READ | SCE_GXM_MEMORY_ATTRIB_WRITE);
+    /* WRITE attrib so render-to-texture surfaces the game allocates in XRAM work zero-copy too */
+
+1.3 Cache coherency (the one real cost of zero-copy)
+
+The A9 has write-back L1 + PL310 L2; SGX reads DRAM. Xbox games write vertex data
+through the WC alias with the contract "you won't read this back" — exactly the
+contract of an uncached region. Two ways to honour it:
+
+A (recommended): cached block + targeted clean at draw time.
+User mode can't execute cache maintenance, so ship a tiny kernel companion module:
+
+    /* xv_kmod.c — taiHEN kernel plugin, exports one function */
+    int xv_dcache_clean(const void *p, SceSize len) {
+        ksceKernelCpuDcacheAndL2WritebackRange(p, len);   /* L1 + PL310 */
+        return 0;
+    }
+
+At DrawIndexedVertices you know exactly which byte ranges the GPU will read (stream
+base + start*stride .. count*stride, the index array, textures bound since last
+clean), so the clean is bounded and cheap (~3 ns/line; 100 KB VB ~ 10 us). Skip it
+with a per-resource generation counter:
+
+    struct xv_res {              /* host-side side table, 16 B, keyed by guest Data */
+        uint32_t guest_data;
+        uint32_t gen_written;    /* bumped by Lock/Unlock HLE and by Data-field write hooks */
+        uint32_t gen_cleaned;
+        uint32_t size;
+    };
+    static inline void res_ensure_clean(struct xv_res *r, uint32_t off, uint32_t len) {
+        if (r->gen_cleaned != r->gen_written || r->size == 0 /*unknown*/) {
+            xv_dcache_clean(gpu_ptr(r->guest_data) + off, len);
+            r->gen_cleaned = r->gen_written;
+        }
+    }
+
+Games that cache pVB->Data and write without Lock (Xbox allows it) are caught by the
+"size unknown -> always clean" path, or — for precision — by the recompiler emitting a
+1-instruction dirty-page strb on stores whose base it couldn't prove is stack/heap
+(a 2 KB bitmap covers 64 MB at 4 KB granularity).
+
+B (fallback, no kernel module): split the 64 MB into a cached general pool and an
+uncached "WC pool" that only the HLE'd D3D_AllocContiguousMemory(PAGE_WRITECOMBINE)
+path allocates from. Semantically identical to the Xbox; costs one compare in the
+address translation. Use only if a kernel plugin can't be loaded.
+
+1.4 Textures: the layout coincidence that makes this work
+
+NV2A "swizzled" textures are Morton (Z-order) with the non-square extension "square
+blocks of min(w,h) laid along the major axis". PowerVR's twiddled format is the same
+Morton order with the same non-square rule. Result: an Xbox swizzled texture is a
+valid SCE_GXM_TEXTURE_SWIZZLED texture IN PLACE, and channel order is absorbed by
+GXM's per-format swizzle enum, not a conversion pass.
+
+    /* Xbox D3DPixelContainer.Format bit layout */
+    #define XF_FORMAT(f)   (((f) >> 8)  & 0xFF)
+    #define XF_MIPS(f)     (((f) >> 16) & 0x0F)
+    #define XF_USIZE(f)    (((f) >> 20) & 0x0F)     /* log2 width  (swizzled) */
+    #define XF_VSIZE(f)    (((f) >> 24) & 0x0F)     /* log2 height (swizzled) */
+    /* .Size (linear only): width-1 [11:0], height-1 [23:12], pitch/64-1 [31:24] */
+
+    static const struct { uint32_t gxm; uint8_t bpp; uint8_t kind; } xfmt[256] = {
+      [0x06 /*A8R8G8B8 sw*/]  = { SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, 32, SWZ },
+      [0x07 /*X8R8G8B8 sw*/]  = { SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_1RGB, 32, SWZ },
+      [0x05 /*R5G6B5 sw*/]    = { SCE_GXM_TEXTURE_FORMAT_U5U6U5_RGB,    16, SWZ },
+      [0x02 /*A1R5G5B5 sw*/]  = { SCE_GXM_TEXTURE_FORMAT_U1U5U5U5_ARGB, 16, SWZ },
+      [0x04 /*A4R4G4B4 sw*/]  = { SCE_GXM_TEXTURE_FORMAT_U4U4U4U4_ARGB, 16, SWZ },
+      [0x0B /*P8 sw*/]        = { SCE_GXM_TEXTURE_FORMAT_P8_ABGR,        8, SWZ_PAL },
+      [0x00 /*L8 sw*/]        = { SCE_GXM_TEXTURE_FORMAT_U8_RRR1,        8, SWZ },
+      [0x1A /*A8L8 sw*/]      = { SCE_GXM_TEXTURE_FORMAT_U8U8_GGGR,     16, SWZ },
+      [0x12 /*LIN_A8R8G8B8*/] = { SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, 32, LIN },
+      [0x11 /*LIN_R5G6B5*/]   = { SCE_GXM_TEXTURE_FORMAT_U5U6U5_RGB,    16, LIN },
+      [0x0C /*DXT1*/]         = { SCE_GXM_TEXTURE_FORMAT_UBC1_ABGR,      4, DXT },
+      [0x0E /*DXT3*/]         = { SCE_GXM_TEXTURE_FORMAT_UBC2_ABGR,      8, DXT },
+      [0x0F /*DXT5*/]         = { SCE_GXM_TEXTURE_FORMAT_UBC3_ABGR,      8, DXT },
+      /* ... */
+    };
+
+    /* Called from HLE'd D3DDevice_SetTexture(stage, pTex). No allocation, no copy. */
+    SceGxmTexture *xv_texture_descriptor(uint32_t guest_res)
+    {
+        struct xres_pixcont *x = (void *)(g_xram + (guest_res & GUEST_MASK)); /* Common,Data,Lock,Format,Size */
+        SceGxmTexture *t = texdesc_lookup(x->Data, x->Format);   /* 4096-entry open-addressing table */
+        if (t) return t;
+        t = texdesc_alloc(x->Data, x->Format);
+        const void *pix = gpu_ptr(x->Data);
+        uint32_t f = XF_FORMAT(x->Format);
+        switch (xfmt[f].kind) {
+        case SWZ:
+            sceGxmTextureInitSwizzled(t, pix, xfmt[f].gxm, 1u << XF_USIZE(x->Format),
+                                      1u << XF_VSIZE(x->Format), XF_MIPS(x->Format));
+            break;
+        case SWZ_PAL:
+            sceGxmTextureInitSwizzled(t, pix, xfmt[f].gxm, 1u << XF_USIZE(x->Format),
+                                      1u << XF_VSIZE(x->Format), XF_MIPS(x->Format));
+            sceGxmTextureSetPalette(t, gpu_ptr(cur_palette_data[stage]));  /* Xbox palettes: 256xARGB in RAM */
+            break;
+        case LIN: {
+            uint32_t w = (x->Size & 0xFFF) + 1, h = ((x->Size >> 12) & 0xFFF) + 1,
+                     pitch = (((x->Size >> 24) & 0xFF) + 1) * 64;
+            sceGxmTextureInitLinearStrided(t, pix, xfmt[f].gxm, w, h, pitch);
+            break; }
+        case DXT:
+            /* Xbox stores DXT blocks in raster order; UBC on SGX wants blocks Morton-ordered.
+               Blocks are 8/16 B so the reorder is a trivial index permutation — do it once,
+               into XV_SCRATCH if < 256KB, else into a tiny CDRAM slab. This is the ONLY
+               texture kind that isn't in-place; typically <10% of a game's textures. */
+            pix = dxt_block_reorder_once(x, pix);
+            sceGxmTextureInitSwizzled(t, pix, xfmt[f].gxm, 1u << XF_USIZE(x->Format),
+                                      1u << XF_VSIZE(x->Format), XF_MIPS(x->Format));
+            break;
+        }
+        return t;
+    }
+
+The "texture cache" collapses into a 64 KB table of 16-byte GXM control words. Xbox
+mip chains are packed contiguously after level 0, as are GXM swizzled chains — verify
+on hardware per format. Sampler state (filter/wrap/LOD from SetTextureState_* HLE)
+is patched into the control word with sceGxmTextureSetUAddrMode etc.
+
+Render-to-texture: Xbox RT textures must be linear;
+sceGxmColorSurfaceInit(..., SCE_GXM_COLOR_SURFACE_LINEAR, ..., gpu_ptr(Data)) on the
+same guest bytes. Only the swap-chain back buffers live in CDRAM.
+
+1.5 Draw path, end to end
+
+    D3DDevice_DrawIndexedVertices(prim, count, pIndices)     <- recompiled game calls HLE stub
+       |
+       +- vs = cur_vs_key -> GXP already linked (§4)         no compile, no lookup miss possible
+       +- for each stream s bound by SetStreamSource:
+       |      p = gpu_ptr(vb[s].Data) + start*stride
+       |      res_ensure_clean(&vb[s], ...)                  (usually a no-op after frame 1)
+       |      sceGxmSetVertexStream(ctx, s, p)               <- the pointer IS the guest buffer
+       +- idx = guest CPU ptr -> g_xram + (pIndices & MASK)  Xbox indices are u16 == GXM u16
+       |      xv_dcache_clean(idx, count*2)
+       +- for stage 0..3: sceGxmSetFragmentTexture(ctx, st, xv_texture_descriptor(tex[st]))
+       +- upload FF uniform block (WVP, lights, TSS ops) only if dirty bit set
+       +- sceGxmDraw(ctx, map_prim(prim), SCE_GXM_INDEX_FORMAT_U16, idx, count)
+            QUADS/QUADSTRIP/POLYGON -> static index remap table in XV_SCRATCH (built once, <=192 KB)
+
+Zero bytes of vertex or texel data are copied on this path.
+
+
+--------------------------------------------------------------------------------
+ 2. INSTRUCTION PRUNING & STRIPPING (offline pipeline)
+--------------------------------------------------------------------------------
+
+     game.xbe
+       |
+       v
+     +-------------------+   entry ^ 0xA8FC57AB, kernel thunk ^ 0x5B6D40B6 (retail keys)
+     | 1. xbe-parse      |--> sections, TLS dir, kernel import ordinals, LibraryVersions[]
+     +-------------------+       (D3D8 5849, XAPILIB, DSOUND, XNET, XONLINE, XGRAPHC, XACTENG, XMV ...)
+       |
+       v
+     +-------------------+   FLIRT/FunctionID sigs generated from the EXACT XDK .lib versions
+     | 2. lib-identify   |--> symbol map: {addr -> "D3DDevice_SetTexture", lib="D3D8", ver=5849}
+     +-------------------+   (Cxbx-Reloaded's OOVPA DB is a drop-in seed for this)
+       |
+       v
+     +-------------------+   manifest.json: per symbol / per lib -> HLE | STUB | NATIVE | RECOMP | DROP
+     | 3. policy         |
+     +-------------------+
+       |
+       v
+     +-------------------+   lift x86 -> IR; roots = entry, TLS callbacks, PsCreateSystemThreadEx
+     | 4. CFG + roots    |       start routines (const-prop on arg), code ptrs found in .data/.rdata
+     +-------------------+       (vtables, callback tables) unless they point into a DROP'd lib
+       |
+       v
+     +-------------------+   HLE/STUB/NATIVE calls become external edges -> everything behind them
+     | 5. reach + DCE    |   is unreachable -> deleted. D3D8 runtime (largest lib) disappears entirely.
+     +-------------------+
+       |
+       v
+     +-------------------+   Thumb-2, -Os cold / -O2 hot (profile from an xemu trace run),
+     | 6. ARM codegen    |   LTO, --gc-sections, no unwind tables, no symbols
+     +-------------------+
+       |
+       v
+     +-------------------+   .text + .rodata(GXPs, tables) + LZ4(XBE .data/.rdata initial image)
+     | 7. pack .vpk      |   XBE image is decompressed INTO guest RAM at boot and never kept twice
+     +-------------------+
+
+2.1 The policy manifest (excerpt)
+
+    {
+      "D3D8":     { "default": "HLE" },                          // whole runtime -> §1/§4 stubs
+      "XGRAPHC":  { "default": "NATIVE",                         // XGSwizzleRect, XGWriteVertexShader...
+                    "XGSwizzleRect": "NATIVE:xg_swizzle" },      // C reimpl; layout must match §1.4
+      "XAPILIB": {
+          "default": "RECOMP",
+          "memcpy|memset|memcmp|strlen|strcmp|strncpy|sprintf|_snprintf|qsort|_ftol|_CIsin|_CIcos|_CIsqrt":
+                                                 "NATIVE:libc",
+          "malloc|free|realloc|calloc|_msize": "HLE:xk_heap",    // bypass recompiled RtlHeap
+          "XFindFirstSoundtrack|XFindNextSoundtrack|XOpenSoundtrackSong|XGetSoundtrackSongInfo":
+                                                 "STUB:ret=0,lasterr=ERROR_NO_MORE_ITEMS", // soundtrack off
+          "XInitDevices|XGetDevices|XInputOpen|XInputGetState|XInputSetState|XGetDeviceChanges": "HLE:xv_pad",
+          "XMountUtilityDrive|XMountAlternateTitle": "STUB:ret=1",
+          "XLaunchNewImage": "HLE:xv_relaunch",
+          "XSetProcessQuantumLength|XGetLaunchInfo": "HLE:xk"
+      },
+      "XNET":     { "default": "STUB:ret=WSAEINVAL",
+                    "XNetStartup|XNetCleanup|WSAStartup|WSACleanup": "STUB:ret=0",
+                    "XNetGetEthernetLinkStatus": "STUB:ret=0" },  // 0 = unplugged -> games hide MP menus
+      "XONLINE":  { "default": "STUB:ret=E_FAIL", "XOnlineStartup": "STUB:ret=E_FAIL" },
+      "DSOUND":   { "default": "HLE:xv_audio" },                 // 20+ KLOC of DSP glue -> 1.5 KLOC mixer
+      "XACTENG":  { "default": "HLE:xv_xact" },
+      "XMV":      { "default": "STUB:ret=E_FAIL" },              // or offline-transcode FMVs, later
+      "kernel": {
+          "DbgPrint|DbgPrompt|RtlAssert|DbgBreakPoint|DbgLoadImageSymbols": "STUB:ret=0",
+          "HalReturnToFirmware": "HLE:xv_exit",
+          "HalReadWritePCISpace|HalRegisterShutdownNotification|MmMapIoSpace": "STUB:ret=0",
+          "default": "HLE:xk"                                    // §3
+      }
+    }
+
+2.2 What the pruning removes (typical launch title, ~3 MB x86 .text)
+
+  Component                              x86 bytes     Fate          ARM bytes after
+  -------------------------------------  ------------  ------------  ---------------------------
+  D3D8 runtime + pushbuffer builder      450-600 KB    HLE           0 (wrapper stubs ~40 KB shared)
+  DSOUND / XACT                          250-400 KB    HLE           0
+  XNET + XONLINE + WSA                   150-300 KB    STUB          ~1 KB of stubs
+  CRT (msvcrt)                           120 KB        NATIVE libc   0
+  RtlHeap / RtlCriticalSection / Rtl*    60 KB         HLE           0
+  XMV                                    80 KB         STUB          0
+  Game code proper                       1.2-1.8 MB    RECOMP        4-7 MB Thumb-2 (~3.5x expansion)
+
+Executable lands at 5-10 MB instead of the 12-20 MB of naive "recompile everything",
+and none of the pruned libraries need their runtime state emulated (no NV2A pushbuffer
+interpreter, no MCPX DSP, no NIC).
+
+2.3 Two recompiler-side rules that shrink code and kill overhead
+
+  1. fs: segment reads are structural, not memory. Xbox code does
+     mov eax, fs:[0x28] (KPRCB.CurrentThread), [eax+0x28] (TlsData), fs:[0x00] (SEH chain).
+     The recompiler lowers fs:[imm] to ldr rX, [rKPCR, #imm] where rKPCR is a pinned
+     register pointing at the current fiber's guest KPCR (§3.2). No segment emulation.
+
+  2. Calls to identified symbols are direct bl to the HLE/NATIVE function with an
+     x86-cdecl->AAPCS shim generated per prototype, not through a dispatch table. The
+     shim reads args off the guest stack (ldr r0,[rESP,#4] ...) and pops per __stdcall
+     count — the manifest carries the arg count from the XDK headers.
+
+
+--------------------------------------------------------------------------------
+ 3. MICRO-KERNEL EMULATION
+--------------------------------------------------------------------------------
+
+3.1 Threading model
+
+    Vita core 0 - "guest" thread (prio 64, 1 MB native stack)
+       +- fiber scheduler running ALL Xbox threads (cooperative + safe-point preemption)
+    Vita core 1 - "pump" thread: sceGxm submit/finish, audio callback (sceAudioOut), large IO
+    Vita core 2 - (free; optional: async DXT reorder / IO prefetch)
+
+No Xbox thread ever becomes a Vita thread. Xbox games ship 2-10 threads with priorities
+tuned against a single Pentium III core; a fiber scheduler on one A9 core reproduces
+that behaviour more faithfully than real SMP and needs zero locks in the translator.
+
+Preemption at safe points — the recompiler emits at loop back-edges and prologues:
+
+        subs  r10, r10, #1        @ r10 = quantum counter (pinned)
+        blmi  xk_preempt          @ fires every ~20k back-edges ~ 1-2 ms
+
+~1-2% overhead, deterministic; xk_preempt is the only place a fiber can lose the CPU
+involuntarily, so the wrapper's own C code never needs to be guest-reentrant.
+
+3.2 Core data structures (all under 256 KB total)
+
+    /* Guest-visible, allocated INSIDE XRAM per thread (0x300 B) — game code reads it via fs: */
+    struct xk_kpcr {                     /* offsets are the Xbox ones */
+        uint32_t ExceptionList;          /* 0x00  fs:[0]  SEH chain (used by recompiled __try) */
+        uint32_t StackBase, StackLimit;  /* 0x04 0x08 */
+        uint32_t SubSystemTib, FiberData, ArbitraryUserPointer;
+        uint32_t Self;                   /* 0x18 -> guest addr of this struct */
+        uint32_t SelfPcr, Prcb, Irql;    /* 0x1C 0x20 0x24 */
+        uint32_t CurrentThread;          /* 0x28 = PrcbData.CurrentThread -> guest KTHREAD */
+        uint32_t NextThread, IdleThread; /* 0x2C 0x30 */
+        uint8_t  _pad[0x40];
+        struct xk_kthread {              /* at +0x70, layout-compatible where games peek: */
+            uint8_t  Header[0x10];       /* DISPATCHER_HEADER (thread is waitable) */
+            uint8_t  _p[0x18];
+            uint32_t TlsData;            /* +0x28  <- XAPI TLS, must be here */
+            uint8_t  _rest[0x60];
+        } kt;
+    };
+
+    /* Host-side fiber (~160 B + native stack) */
+    struct xk_fiber {
+        uint32_t regs[10]; uint64_t vfp[8];   /* saved r4-r11, sp, lr + d8-d15 */
+        uint32_t xreg[8], eflags;             /* guest register file */
+        uint32_t kpcr_guest;                  /* guest addr of struct xk_kpcr */
+        uint8_t  state;                       /* READY / RUNNING / WAIT / DELAY / DEAD */
+        uint8_t  prio;                        /* 0..31, Xbox base is 8 (THREAD_PRIORITY_NORMAL) */
+        uint8_t  in_wait_all;
+        uint8_t  wait_count;
+        uint64_t wake_at_us;                  /* KeDelayExecutionThread / timeouts */
+        uint32_t wait_status;                 /* STATUS_SUCCESS / STATUS_TIMEOUT / index for WaitAny */
+        struct xk_fiber *next_ready;          /* run queue (per prio) */
+        struct xk_fiber *next_timer;          /* sorted delta list */
+        void    *native_stack;                /* 32 KB, wrapper C frames only; guest stack is in XRAM */
+        uint32_t handle;                      /* NT handle if created via NtCreate* / PsCreateSystemThreadEx */
+    };
+
+    struct xk_sched {
+        struct xk_fiber *ready[32];           /* heads */
+        uint32_t         ready_mask;          /* clz() picks highest prio in 1 instruction */
+        struct xk_fiber *timers;              /* delta list */
+        struct xk_fiber *cur;
+        struct xk_fiber  pool[XK_MAX_FIBERS]; /* 16 */
+        uint32_t         tick_ms;             /* mirrored into guest KeTickCount export (data ordinal) */
+    };
+
+3.3 Context switch (the whole thing)
+
+    /* xk_switch.S — save callee-saved + VFP of `from`, restore `to`.  ~40 cycles. */
+    xk_switch:                  @ r0 = from, r1 = to
+        stmia  r0!, {r4-r11, sp, lr}
+        vstmia r0!, {d8-d15}
+        ldmia  r1!, {r4-r11, sp, lr}
+        vldmia r1!, {d8-d15}
+        bx     lr
+
+Guest x86 registers are held in ARM callee-saved registers by the recompiler's ABI
+(pick a mapping where the hot ones are callee-saved so the switch above already saves
+them), plus pinned r8=rESP(guest), r9=XRAM base, r10=quantum, rKPCR reloaded from the
+fiber on resume. Nothing is copied per switch; the guest stack pointer is just another
+saved register because guest stacks live in XRAM (the game allocated them via
+PsCreateSystemThreadEx(stacksize) -> our allocator).
+
+3.4 Scheduler core
+
+    static void xk_schedule(void)      /* called only from safe points, waits, and yields */
+    {
+        struct xk_fiber *prev = S.cur;
+        xk_expire_timers(now_us());    /* DELAY/timeout fibers -> READY, sets wait_status */
+        if (!S.ready_mask) {
+            /* Everyone is blocked: really idle the core instead of spinning */
+            uint64_t next = S.timers ? S.timers->wake_at_us : now_us() + 1000;
+            sceKernelDelayThread((next - now_us()) < 16000 ? next - now_us() : 16000);
+            xk_expire_timers(now_us());
+            if (!S.ready_mask) return;  /* spurious; caller re-checks */
+        }
+        int p = 31 - __builtin_clz(S.ready_mask);
+        struct xk_fiber *next = rq_pop(p);
+        if (next == prev) { prev->state = RUNNING; return; }
+        next->state = RUNNING; S.cur = next;
+        r_kpcr_set(next->kpcr_guest);   /* pinned reg */
+        quantum_reset();
+        xk_switch(prev, next);
+        /* resumes here when `prev` is scheduled again */
+    }
+
+    void xk_preempt(void) {             /* from the back-edge check */
+        S.cur->state = READY; rq_push_tail(S.cur->prio, S.cur); xk_schedule();
+    }
+
+3.5 Wait objects — operate on the GAME'S structs
+
+KEVENT, KSEMAPHORE, KMUTANT, KTIMER are 16-40 byte structs the game often allocates in
+its own memory and passes by pointer (KeWaitForSingleObject(&myEvent,...)), while Nt*
+variants use handles. The Xbox DISPATCHER_HEADER has a WaitListHead LIST_ENTRY — since
+Vita pointers are 32-bit, host fiber pointers fit in it directly, so no side tables:
+
+    struct xdisp_hdr { uint8_t Type, Absolute, Size, Inserted; int32_t SignalState;
+                       uint32_t WaitFlink, WaitBlink; };
+    /* Type: 0 notification event, 1 sync event, 2 mutant, 5 semaphore, 6 thread,
+             8 notification timer, 9 sync timer */
+
+    static struct xdisp_hdr *obj(uint32_t guest) { return (void *)(g_xram + (guest & GUEST_MASK)); }
+
+    NTSTATUS xk_KeWaitForSingleObject(uint32_t pObj, int reason, int mode, int alertable, uint32_t pTimeout)
+    {
+        struct xdisp_hdr *o = obj(pObj);
+        if (xk_try_acquire(o))                   /* SignalState>0 -> consume per Type, return */
+            return STATUS_SUCCESS;
+        struct xk_fiber *f = S.cur;
+        f->state = WAIT; f->wait_count = 1; f->wait_status = STATUS_SUCCESS;
+        waitlist_push(o, f);                      /* uses o->WaitFlink/Blink as a host list */
+        if (pTimeout) timer_arm(f, guest_timeout_to_us(pTimeout)); /* negative = relative, 100ns units */
+        xk_schedule();
+        /* woken by xk_signal() or the timer */
+        return f->wait_status;                    /* STATUS_SUCCESS | STATUS_TIMEOUT */
+    }
+
+    void xk_KeSetEvent(uint32_t pEvent, int incr, int wait)
+    {
+        struct xdisp_hdr *o = obj(pEvent);
+        o->SignalState = 1;
+        if (o->Type == 0) { while (waitlist_wake_one(o)) ; }   /* notification: wake all, stay set */
+        else if (waitlist_wake_one(o)) o->SignalState = 0;     /* synchronization: auto-reset */
+    }
+
+    /* NtCreateEvent / NtCreateSemaphore / NtCreateMutant: allocate a header in the XK arena
+       inside XRAM, return a handle from a 256-entry table {kind, guest_ptr}.
+       ObReferenceObjectByHandle = table lookup.
+       RtlEnterCriticalSection: XBE code usually inlines the fast path; the slow path calls
+       KeWaitForSingleObject on the CS's embedded event -> already handled. Provide HLE'd
+       Rtl*CriticalSection over the same code for games that call it out-of-line. */
+
+Time sources: KeQuerySystemTime, KeQueryPerformanceCounter (report 733 MHz, derive from
+sceKernelGetProcessTimeWide()*733), KeTickCount (a DATA export — the recompiler
+redirects reads of that import to S.tick_ms, refreshed at every scheduler entry),
+KeDelayExecutionThread -> DELAY state + timer.
+
+Thread creation:
+
+    NTSTATUS xk_PsCreateSystemThreadEx(uint32_t *pHandle, uint32_t extra, uint32_t stackSize,
+                                       uint32_t tlsSize, uint32_t *pTid, uint32_t startCtx1,
+                                       uint32_t startCtx2, int createSuspended, int debugStack,
+                                       uint32_t startRoutine)
+    {
+        struct xk_fiber *f = fiber_alloc();
+        uint32_t stk  = xk_alloc(stackSize ? stackSize : 16384, 16, XK_TAG_STACK);  /* in XRAM */
+        uint32_t kpcr = xk_alloc(sizeof(struct xk_kpcr), 16, XK_TAG_KPCR);
+        kpcr_init(kpcr, stk, stackSize, tlsSize);   /* Self, StackBase/Limit, CurrentThread, TlsData */
+        f->kpcr_guest = kpcr;
+        f->xreg[ESP]  = stk + stackSize - 16;
+        f->prio       = 8;
+        /* First resume lands in a trampoline that calls the recompiled startRoutine(ctx1, ctx2)
+           (XAPI's thread wrapper; it handles TLS and calls the user function) and, on return,
+           PsTerminateSystemThread. */
+        fiber_prepare_native_stack(f, xk_thread_trampoline, startRoutine, startCtx1, startCtx2);
+        f->handle = handle_alloc(HK_THREAD, kpcr + 0x70);
+        *pHandle = f->handle; if (pTid) *pTid = f->handle;
+        if (!createSuspended) rq_push_tail(f->prio, f);
+        return STATUS_SUCCESS;
+    }
+
+3.6 Memory manager — one allocator behind every Xbox API
+
+    Guest physical 64 MB
+    +----------+-------------------------------+----------------------+----------+
+    | 0x00000  | 0x10000: XBE image sections   | general pool         | XK arena |
+    | 64 KB    | (.text is NOT here — only     | (TLSF / first-fit    | 256 KB   |
+    | reserved | .data/.rdata/.bss images)     |  over a 16384-entry  | KPCRs,   |
+    | (null    |                               |  page map, 2 bits/pg | dispatch |
+    |  page)   |                               |  = 4 KB)             | headers  |
+    +----------+-------------------------------+----------------------+----------+
+
+Where the x86 .text WAS in the guest image, leave the pages allocated-but-unused
+(games take function addresses / checksum ranges; a code pointer must remain a valid,
+unique guest address — the recompiler's address->ARM-function table lives in host
+.rodata, indexed by (guest_eip - 0x10000) >> 1, for indirect calls).
+
+  Xbox API                                             Implementation
+  ---------------------------------------------------  -------------------------------------------
+  NtAllocateVirtualMemory(..., MEM_RESERVE|MEM_COMMIT)  page-map allocate, zero-fill; RESERVE w/o
+                                                        COMMIT = allocate too
+  NtFreeVirtualMemory                                   page-map free
+  MmAllocateContiguousMemory(Ex)                        same allocator with alignment/limit;
+                                                        returns 0x80000000 | phys
+  MmFreeContiguousMemory, MmQueryAllocationSize         free / size lookup (16-bit side array)
+  MmGetPhysicalAddress                                  addr & GUEST_MASK
+  MmPersistContiguousMemory, MmSetAddressProtect,       no-ops (success / top 64 KB for GPU
+    MmLockUnlockBufferPages, MmClaimGpuInstanceMemory   instance)
+  RtlAllocateHeap/RtlFreeHeap/RtlReAllocateHeap/        TLSF on top of page allocator — one
+    RtlSizeHeap (+ CRT malloc)                          implementation, ~600 lines
+  NtQueryVirtualMemory                                  synthesize MEMORY_BASIC_INFORMATION
+  MmDbgAllocateMemory, MmDbgFreeMemory                  alias to the above
+
+3.7 File I/O — synchronous, few handles, one buffer
+
+    \Device\CdRom0\                              -> ux0:data/xv/<titleid>/game/   (extracted ISO)
+    \Device\Harddisk0\Partition1\TDATA\<tid>\    -> ux0:data/xv/<titleid>/tdata/
+    \Device\Harddisk0\Partition1\UDATA\<tid>\    -> ux0:data/xv/<titleid>/udata/
+    \Device\Harddisk0\Partition1\ (E:), \??\D:   -> as above via IoCreateSymbolicLink table
+    \Device\Harddisk0\Partition5\ (Z: cache)     -> ux0:data/xv/<titleid>/cache/
+
+ux0 is exFAT and case-insensitive like FATX, so no case-folding layer.
+NtCreateFile/NtOpenFile -> sceIoOpen; NtReadFile/NtWriteFile -> sceIoPread/Pwrite at
+ByteOffset, filling IO_STATUS_BLOCK in guest memory and signalling the optional event
+as if async IO completed instantly. NtQueryInformationFile (Standard/Network/Position/
+Basic), NtSetInformationFile (Position/EndOfFile), NtQueryDirectoryFile (sceIoDread +
+wildcard), NtQueryVolumeInformationFile (8 GB partitions / 700 MB disc),
+NtFlushBuffersFile, NtClose. Reads > 256 KB may be handed to the pump thread with the
+fiber in WAIT; small reads complete inline. 24 handles x 16 B + one 128 KB buffer.
+
+
+--------------------------------------------------------------------------------
+ 4. VERTEX PIPELINE TRANSLATION (DX8 FF -> GXM)
+--------------------------------------------------------------------------------
+
+4.1 Key insight: nothing needs compiling at run time
+
+  Xbox source                                        Where it lives        Offline action
+  -------------------------------------------------  --------------------  --------------------------------
+  Programmable VS (CreateVertexShader(decl, code))   DWORD arrays .rdata   xvu bytecode -> Cg -> psp2cgc ->
+                                                                           GXP; keyed by SHA-1(decl, code)
+  Pixel shader (D3DPIXELSHADERDEF, reg combiners)    struct in .rdata      combiner -> Cg fragment -> GXP
+  Fixed-function (FVF + SetTransform/RenderState/    run-time state        uber-shader pair, state as
+    TextureState)                                                          uniforms; perms only where
+                                                                           attribute layout changes
+
+Only the first two vary per game; the FF uber-shaders are the same ~25 GXP blobs for
+every title. A profile run on xemu records every VS/PS/FVF actually hit so the offline
+pass can bake specialised FF variants for the top-N TSS combos if fragment-bound.
+Runtime fallback for anything unpredicted is the uber-shader, never a compiler.
+
+4.2 Attribute layout: decl -> GXM, table-driven
+
+    /* Xbox register convention: v0 pos, v1 weights, v2 normal, v3 diffuse, v4 specular, v5 fog,
+       v6 psize, v7 backdiffuse, v8 backspecular, v9..v12 texcoord0..3 */
+    static const struct { SceGxmAttributeFormat fmt; uint8_t comps; uint8_t bytes; uint8_t fixup; } vsdt[] = {
+      [X_D3DVSDT_FLOAT1]     = { SCE_GXM_ATTRIBUTE_FORMAT_F32,  1,  4, 0 },
+      [X_D3DVSDT_FLOAT2]     = { SCE_GXM_ATTRIBUTE_FORMAT_F32,  2,  8, 0 },
+      [X_D3DVSDT_FLOAT3]     = { SCE_GXM_ATTRIBUTE_FORMAT_F32,  3, 12, 0 },
+      [X_D3DVSDT_FLOAT4]     = { SCE_GXM_ATTRIBUTE_FORMAT_F32,  4, 16, 0 },
+      [X_D3DVSDT_D3DCOLOR]   = { SCE_GXM_ATTRIBUTE_FORMAT_U8N,  4,  4, FIX_BGRA },   /* swizzle in shader */
+      [X_D3DVSDT_SHORT2]     = { SCE_GXM_ATTRIBUTE_FORMAT_S16,  2,  4, 0 },
+      [X_D3DVSDT_SHORT4]     = { SCE_GXM_ATTRIBUTE_FORMAT_S16,  4,  8, 0 },
+      [X_D3DVSDT_NORMSHORT1] = { SCE_GXM_ATTRIBUTE_FORMAT_S16N, 1,  2, 0 },
+      [X_D3DVSDT_NORMSHORT2] = { SCE_GXM_ATTRIBUTE_FORMAT_S16N, 2,  4, 0 },
+      [X_D3DVSDT_NORMSHORT3] = { SCE_GXM_ATTRIBUTE_FORMAT_S16N, 3,  6, 0 },
+      [X_D3DVSDT_NORMSHORT4] = { SCE_GXM_ATTRIBUTE_FORMAT_S16N, 4,  8, 0 },
+      [X_D3DVSDT_PBYTE1..4]  = { SCE_GXM_ATTRIBUTE_FORMAT_U8N,  n,  n, 0 },
+      [X_D3DVSDT_FLOAT2H]    = { SCE_GXM_ATTRIBUTE_FORMAT_F32,  3, 12, FIX_W1 },
+      [X_D3DVSDT_NORMPACKED3]= { SCE_GXM_ATTRIBUTE_FORMAT_U8,   4,  4, FIX_UNPACK_11_11_10 }, /* decode in VS */
+    };
+
+    /* Build once per (decl, GXP) pair at CreateVertexShader / first FVF use — ~1 us */
+    void xv_build_layout(const uint32_t *decl, const SceGxmProgram *vp, struct xv_layout *L)
+    {
+        int stream = -1; uint32_t off = 0;
+        for (; *decl != X_D3DVSD_END; ++decl) {
+            switch (*decl >> 29) {
+            case 0b001: /* STREAM */ stream = *decl & 0xF; off = 0; break;
+            case 0b010: { /* REG */
+                uint32_t reg = *decl & 0x1F, type = (*decl >> 16) & 0xFF;
+                if (type == X_D3DVSDT_NONE) break;
+                if ((*decl >> 28) & 1) { off += (*decl >> 16) & 0xFF; break; }   /* SKIP */
+                const SceGxmProgramParameter *p = sceGxmProgramFindParameterByName(vp, xreg_name[reg]);
+                if (p) L->attr[L->nattr++] = (SceGxmVertexAttribute){
+                    .streamIndex = stream, .offset = off, .format = vsdt[type].fmt,
+                    .componentCount = vsdt[type].comps,
+                    .regIndex = sceGxmProgramParameterGetResourceIndex(p) };
+                L->fixup_mask |= vsdt[type].fixup << (reg * 2);
+                off += vsdt[type].bytes;
+                break; }
+            }
+            L->stream[stream].stride = off;
+            L->stream[stream].indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
+        }
+        /* Attributes the GXP consumes but the decl doesn't provide (e.g. no COLOR0):
+           bind them to a 16-byte constant stream indexed by INSTANCE -> same value for every vertex. */
+        for each unbound input i of vp:
+            L->attr[L->nattr++] = { .streamIndex = XV_CONST_STREAM, .offset = default_off[i],
+                                    .format = F32, .componentCount = 4, .regIndex = i };
+        L->stream[XV_CONST_STREAM] = { .stride = 0, .indexSource = SCE_GXM_INDEX_SOURCE_INSTANCE_16BIT };
+
+        sceGxmShaderPatcherCreateVertexProgram(patcher, vp_id, L->attr, L->nattr,
+                                               L->stream, L->nstreams, &L->vprog);
+    }
+
+FVF-style SetVertexShader(D3DFVF_*) is turned into an equivalent decl by a ~30-line
+function, so there is one path. Stride from the decl is cross-checked against the
+stride passed to SetStreamSource (the SetStreamSource value wins).
+
+4.3 The FF vertex uber-shader (Cg for psp2cgc, compiled offline)
+
+Permutation axes that MUST be separate programs (change inputs/outputs):
+{XYZ, XYZRHW} x {0..4 texcoord outputs} x {fog out?} = 20 GXPs, ~6 KB each.
+Everything else is uniform:
+
+    struct Light { float4 pos_type;   /* xyz, w: 0 off 1 point 2 spot 3 dir */
+                   float4 dir_range;  float4 diff, spec, amb;  float4 atten_falloff; float4 cos_theta_phi; };
+
+    uniform float4x4 u_wvp;          /* World*View*Proj, composed on CPU at SetTransform (Xbox does the same) */
+    uniform float4x4 u_wv;           /* eye-space lighting/fog */
+    uniform float3x3 u_wv_it;        /* normal matrix */
+    uniform float4x4 u_texm[4];      /* texture matrices; identity when D3DTTFF_DISABLE */
+    uniform float4   u_viewport;     /* RHW path: (2/w, -2/h, x_off, y_off) */
+    uniform float4   u_mat_diff, u_mat_spec, u_mat_amb, u_mat_emis;  uniform float u_mat_power;
+    uniform float4   u_global_amb;
+    uniform float4   u_ff_flags;     /* x: lighting, y: specular, z: normalize normals, w: local viewer */
+    uniform float4   u_colorvertex;  /* per-channel source select: 0 material, 1 color0, 2 color1 (D3DMCS_*) */
+    uniform float4   u_texgen;       /* per stage: 0 pass, 1 cam-space normal, 2 position, 3 reflection, 4 sphere */
+    uniform float4   u_fog;          /* mode, start, end, density */
+    uniform Light    u_light[4];     /* Xbox caps at 8; >4 active lights is <1% of titles */
+    uniform int      u_nlights;
+
+    void main(float4 in_pos   : POSITION,
+              float3 in_nrm   : NORMAL,
+              float4 in_col0  : COLOR0,     /* D3DCOLOR arrives as BGRA u8n -> .bgra below */
+              float4 in_col1  : COLOR1,
+              float4 in_t0 : TEXCOORD0, float4 in_t1 : TEXCOORD1,   /* #if NTEX>... */
+              out float4 o_pos : POSITION,
+              out float4 o_c0  : COLOR0, out float4 o_c1 : COLOR1,
+              out float4 o_t0  : TEXCOORD0, out float4 o_t1 : TEXCOORD1,
+              out float  o_fog : FOG)
+    {
+    #ifdef XV_RHW
+        /* Pre-transformed: x,y screen px, z depth, w = rhw. Undo the divide so the rasterizer redoes it. */
+        float w   = 1.0 / in_pos.w;
+        float2 nd = in_pos.xy * u_viewport.xy + u_viewport.zw;
+        o_pos     = float4(nd * w, in_pos.z * w, w);
+        float3 P  = float3(0,0,0), N = float3(0,0,1);
+    #else
+        o_pos     = mul(u_wvp, float4(in_pos.xyz, 1.0));
+        float3 P  = mul(u_wv,  float4(in_pos.xyz, 1.0)).xyz;
+        float3 N  = mul(u_wv_it, in_nrm);
+        if (u_ff_flags.z > 0.5) N = normalize(N);
+    #endif
+        float4 c0 = in_col0.bgra, c1 = in_col1.bgra;
+
+        if (u_ff_flags.x > 0.5) {                                   /* D3DRS_LIGHTING */
+            float4 md = select3(u_colorvertex.x, u_mat_diff, c0, c1);   /* D3DRS_DIFFUSEMATERIALSOURCE */
+            float4 ma = select3(u_colorvertex.y, u_mat_amb,  c0, c1);
+            float4 ms = select3(u_colorvertex.z, u_mat_spec, c0, c1);
+            float4 me = select3(u_colorvertex.w, u_mat_emis, c0, c1);
+            float3 diff = 0, spec = 0, amb = 0;
+            for (int i = 0; i < u_nlights; ++i) {                   /* uniform loop bound: USSE handles it */
+                float3 L; float att = 1, spot = 1;
+                if (u_light[i].pos_type.w == 3) L = -u_light[i].dir_range.xyz;
+                else { L = u_light[i].pos_type.xyz - P; float d = length(L); L /= d;
+                       att = 1.0 / dot(u_light[i].atten_falloff.xyz, float3(1, d, d*d)); }
+                float ndl = max(dot(N, L), 0);
+                diff += u_light[i].diff.rgb * ndl * att * spot;
+                amb  += u_light[i].amb.rgb  * att * spot;
+                if (u_ff_flags.y > 0.5 && ndl > 0) {
+                    float3 H = normalize(L + (u_ff_flags.w > 0.5 ? normalize(-P) : float3(0,0,-1)));
+                    spec += u_light[i].spec.rgb * pow(max(dot(N, H), 0), u_mat_power) * att * spot;
+                }
+            }
+            o_c0 = float4(saturate(me.rgb + ma.rgb * (u_global_amb.rgb + amb) + md.rgb * diff), md.a);
+            o_c1 = float4(saturate(ms.rgb * spec), 0);
+        } else { o_c0 = c0; o_c1 = c1; }
+
+        /* texgen + texture matrix per stage (unrolled by NTEX) */
+        o_t0 = mul(u_texm[0], texgen(u_texgen.x, in_t0, P, N));
+        o_t1 = mul(u_texm[1], texgen(u_texgen.y, in_t1, P, N));
+
+        /* vertex fog: D3DRS_FOGVERTEXMODE; pixel fog approximated here too */
+        o_fog = fog_factor(u_fog, -P.z);
+    }
+
+CPU side: SetTransform marks a dirty bit; the uniform block (~1 KB) is recomputed and
+written to the GXM vertex ring once per draw ONLY if dirty
+(sceGxmReserveVertexDefaultUniformBuffer + sceGxmSetUniformDataF). No extra allocations.
+
+4.4 Fragment side: TSS -> combiner uber-shader
+
+Xbox TSS is NV2A register combiners under the hood, so one fragment uber-shader serves
+both FF games and the runtime fallback for dynamic D3DPIXELSHADERDEFs:
+
+    uniform float4 u_stage_op[4];    /* colorop, alphaop, resultarg, texture-bound */
+    uniform float4 u_stage_arg[4];   /* colorarg1, colorarg2, alphaarg1, alphaarg2 (D3DTA_* + modifiers) */
+    uniform float4 u_tfactor;
+    uniform float4 u_alpha_test;     /* enable, func, ref, - */
+    uniform float4 u_fog_color;
+    uniform sampler2D s[4];
+
+    float4 main(float4 c0 : COLOR0, float4 c1 : COLOR1, float4 t0 : TEXCOORD0, ..., float fog : FOG) : COLOR
+    {
+        float4 cur = c0, temp = 0;
+        float4 tex[4] = { tex2D(s[0], t0.xy), tex2D(s[1], t1.xy), tex2D(s[2], t2.xy), tex2D(s[3], t3.xy) };
+        /* Sampling unconditionally costs ~nothing when the texture is a 1x1 dummy; dependent-read
+           elimination is done offline for the specialised variants. */
+        for (int i = 0; i < 4; ++i) {
+            int cop = (int)u_stage_op[i].x;
+            if (cop == D3DTOP_DISABLE) break;
+            float4 a1 = arg(u_stage_arg[i].x, cur, tex[i], c0, c1, u_tfactor, temp);
+            float4 a2 = arg(u_stage_arg[i].y, cur, tex[i], c0, c1, u_tfactor, temp);
+            float3 rgb = combine(cop, a1, a2, tex[i].a, cur.a).rgb;
+            float  a   = combine((int)u_stage_op[i].y, a1, a2, tex[i].a, cur.a).a;
+            if (u_stage_op[i].z == D3DTA_TEMP) temp = float4(rgb, a); else cur = float4(rgb, a);
+        }
+        if (u_alpha_test.x > 0.5 && !alpha_cmp((int)u_alpha_test.y, cur.a, u_alpha_test.z)) discard;
+        cur.rgb = lerp(u_fog_color.rgb, cur.rgb, fog);
+        return cur;
+    }
+
+Blend/depth/stencil/cull are GXM render-state calls issued from the corresponding
+SetRenderState_* HLE stubs (Xbox has one function per state, so each stub is
+if (v != cache[k]) { cache[k]=v; dirty|=bit; } and the sceGxmSet* calls flush at draw).
+
+4.5 If forced through vitaGL
+
+Use only its mapped entry points, otherwise the copying layer comes back:
+
+    vglSetupRuntimeShaderCompiler(0,0,0,0)  /* keep libshacccg out of memory; feed precompiled GXPs
+                                               via vglGetGxmContext() + shader patcher */
+    vglVertexAttribPointerMapped(idx, gpu_ptr(vb->Data) + offset);  /* no copy — pointer is gxm-mapped */
+    vglIndexPointerMapped(gpu_ptr(indices));
+    vglDrawObjects(mode, count, GL_TRUE);
+
+Textures still go through glTexImage2D copies in vitaGL, so keep §1.4 on raw GXM via
+vglGetGxmContext(). At that point vitaGL only provides a render-state cache — ~300
+lines you'd rather own.
+
+
+--------------------------------------------------------------------------------
+ 5. PUTTING IT TOGETHER — RUNTIME BLOCK DIAGRAM
+--------------------------------------------------------------------------------
+
+          +----------------------------------------------------------------------------+
+          | Vita core 0: "guest" thread                                                |
+          |  +---------------+  bl  +-------------------+  +-----------------------+   |
+          |  | recompiled    |----->| D3D HLE stubs     |  | micro-kernel (xk)     |   |
+          |  | Thumb-2 game  |      | SetTexture/Draw/  |  | fibers, waits, alloc, |   |
+          |  | code          |<-----| SetRenderState_*  |  | NtFile, handles       |   |
+          |  +------+--------+ ret  +--------+----------+  +----------+------------+   |
+          |   r9=XRAM r8=ESP rKPCR           | gxm calls               | sceIo*         |
+          +---------+-------------------------+-------------------------+---------------+
+                    |                         |                         |
+        +-----------v-------------------------v----------+              |
+        | XBOX_RAM 64 MB  (USER_RW, gxm-mapped R/W)      |              |
+        |  guest .data/.bss | VBs | IBs | textures | RTs | stacks | KPCRs |            |
+        +-----------^------------------------------------+              |
+                    | direct DMA (after range dcache clean)              |
+        +-----------+----------------+    +----------------------------v-----------------+
+        | SGX543MP4+                 |    | Vita core 1: "pump" thread                    |
+        |  FF uber VS/PS GXPs        |<---| sceGxmBeginScene/EndScene/PadHeartbeat,       |
+        |  color/depth in CDRAM      |    | sceAudioOut mixer (DSOUND HLE), big IO        |
+        +----------------------------+    +-----------------------------------------------+
+
+Frame flow: game fiber calls D3DDevice_Swap -> HLE stub enqueues "end scene" to the
+pump (lock-free SPSC ring), blocks the fiber on a vblank event, scheduler runs other
+fibers or idles the core; pump ends the scene, sceGxmDisplayQueueAddEntry, signals the
+event. Two frames in flight max, matching Xbox D3DPRESENT_INTERVAL_ONE behaviour.
+
+
+--------------------------------------------------------------------------------
+ 6. KNOWN HARD EDGES (budget for them, don't discover them)
+--------------------------------------------------------------------------------
+
+  1. Pushbuffer-direct games (D3DDevice_RunPushBuffer, hand-built NV2A methods, some
+     middleware): need a ~2 KLOC NV2A method interpreter mapping onto the same HLE
+     state machine. Not a memory problem, but a real compatibility item.
+  2. Non-square swizzle / mip packing parity between NV2A and SGX: the rule matches on
+     paper; validate each format with a test texture and keep a XV_TEX_FORCE_COPY
+     per-format escape hatch (the copy goes to CDRAM, still not main RAM).
+  3. Cache clean without the kernel module: option B (§1.3) costs one compare per
+     translated memory access; measure before choosing.
+  4. CPU readback of GPU-written XRAM (lock render target, read pixels): needs a
+     dcache INVALIDATE after sceGxmFinish — same kernel export, opposite direction.
+  5. Self-modifying / runtime-generated code in the game (rare on Xbox; some
+     copy-protection stubs): static recomp can't; detect offline and bail loudly.
+  6. x87 precision: Xbox games run the FPU at 53-bit; ARM VFP double matches. Games
+     relying on 80-bit intermediates are the usual static-recomp casualty.
+
+
+--------------------------------------------------------------------------------
+ RECAP
+--------------------------------------------------------------------------------
+
+The wrapper fits in ~90 MB of main RAM because it:
+  (1) makes the 64 MB guest block itself the GPU-visible memory and exploits the
+      NV2A-swizzle == PowerVR-twiddle identity so textures, vertex and index buffers
+      are consumed in place through 16-byte descriptors instead of a cache;
+  (2) prunes the XBE offline with a per-library HLE/STUB/NATIVE manifest that deletes
+      the D3D8/DSOUND/XNET runtimes from the reachability graph before ARM codegen;
+  (3) runs all Xbox threads as fibers on one core with safe-point preemption,
+      operating directly on the game's own dispatcher structs in guest RAM, over one
+      allocator;
+  (4) replaces runtime shader compilation entirely with ~20 offline-compiled
+      fixed-function uber-shader GXPs plus per-title precompiled programmable shaders
+      lifted from .rdata.
+
+Possible next steps: turn §3 into a compilable xk.c / xk_switch.S skeleton with a
+host-side test harness; build the offline xbe-parse + lib-identify tool (§2 steps 1-2).
+
+--------------------------------------------------------------------------------
+ ADDENDUM 2026-09-01 - findings from the Halo pipeline run
+--------------------------------------------------------------------------------
+  * Vertex shaders: 67 XVS blobs in default.xbe (.rdata), table @ VA 0x1F91E0 of
+    {decl, function, handle, size}; declaration pairing recovered statically from
+    the initializer's stores (xbe_shader_pairs.py).  All 67 translate to Cg and
+    compile with SceShaccCg on the console (tools/shadercomp, direct API - the
+    vitaShaRK/SceShaccCgExt patches break this compiler build).
+  * SceShaccCg (SDK 3.0.0 r13225) is strict: no implicit float3->float4 widening;
+    ASCII-only sources are safest; unreferenced locals warn.
+  * Pixel shaders: Halo stores NO static D3DPIXELSHADERDEF structs.  Its rasterizer
+    builds register-combiner setups at run time from shader-tag data (cf. the
+    "transparent shader evaluates ..." validation strings).  Consequence for
+    section 4.4: the fragment side cannot be fully offline for this title.  Plan:
+      (a) pixelshader_recomp_gen.py is the reference translator (validated on
+          synthetic defs); port its logic to C in the runtime;
+      (b) at run time, hash each PSDEF the game builds -> look up a .gxp cache on
+          ux0 (seeded by a profile run) -> on miss, compile with the console's own
+          libshacccg.suprx via the direct SceShaccCg API and add to the cache;
+      (c) the combiner uber-shader (4.4) remains the zero-compile fallback.
+    Memory impact of (b): libshacccg.suprx ~3.4 MB resident + transient compile
+    heap; well inside the budget in section 0.
+  * Fog varying: vertex writes the fog factor to TEXCOORD7, fragment reads it there.
+
+  * HARDWARE CONSTRAINT (found 2026-09-01, crash dump on the console): the Vita kernel
+    validates the user SP against the calling thread's registered stack on syscalls
+    (sceClibPrintf from a fiber on a malloc'd stack -> thread killed).  Vita3K does not
+    emulate this check.  Therefore fiber native stacks (section 3.3) are carved out of
+    the guest thread's own 2 MB stack (bottom-up slices, sceKernelGetThreadInfo), never
+    allocated separately.  Same rule will apply to the recompiled code's native frames.
+  * EXIT PROTOCOL (found 2026-09-01, GPU crash + hard reset on the console): never tear
+    GXM objects down while the display still scans out a frame.  At exit: sceGxmFinish,
+    sceGxmDisplayQueueFinish, sceDisplaySetFrameBuf(NULL), wait vblank, then let
+    sceKernelExitProcess reclaim memblocks/objects.  Explicit teardown only behind
+    XV_FULL_TEARDOWN.  Vita3K reproduces this one as a host SIGSEGV in DestroyContext.
+  * Vita3K settings for fidelity: high-accuracy on, surface sync on (disable-surface-sync
+    false), resolution-multiplier 1, Vulkan backend.  It still does NOT model: syscall
+    SP validation, GPU faults on unmapped memory, cache coherency, USSE limits.
+  * SCENE-VIEWER TRACK (2026-09-01): halo_map.py + halo_scene_export.py + xv_scene.c
+    replay Halo's menu scene (ui.map: sky_ui + scenery\halo\halo models) through the D3D
+    HLE with no game code.  Facts learned about Xbox Halo cache files:
+      - body is a zlib stream after the 2 KB header; tag data at 0x803A6000 (masks into
+        XRAM offset 0x3A6000), tag index header {array, scenario id, checksum, count,
+        model parts, model vertex addr, index blocks, index addr, 'tags'};
+      - 'mode' part = 104 B: +0x44 idx type(1=strip) +0x48 count +0x4C raw u16 indices
+        +0x50 D3DIndexBuffer{-1,Data,0xEEEEEEEE} +0x54 vtype(5) +0x58 vcount
+        +0x64 -> D3DVertexBuffer{0xAAAAAAAA,Data,..}; compressed vertex = decl 0x1E1400;
+      - model header +0x30/+0x34 = base map u/v scale (ring: 48.667 x 1.0);
+      - bitmap data entry 48 B: sig,w,h,depth,type,fmt,flags,regpt,mips,pad,pixel off,size;
+        271/384 bitmaps are DXT (fmt 14/15/16) -> blocks twiddled offline for the SGX;
+      - scenario: scenery @+0x210 (72 B: type,name,perm,pos@8,rot@20), palette @+0x21C,
+        BSPs @+0x5A4; ui.map's BSP is a 2 KB stub, the backdrop is models + sky.
+    Result: ring + galaxy + star field render in Vita3K (assets/screenshots/).
+
+ADDENDUM (2026-09-01) - STAGE 4 FINDINGS: PHYSICAL vs VIRTUAL MEMORY
+--------------------------------------------------------------------
+The zero-copy design assumed 0x0xxxxxxx / 0x8xxxxxxx / 0xFxxxxxxx aliases could be collapsed
+into one 64 MB block. Booting the recompiled Halo disproved that: main() calls
+MmAllocateContiguousMemoryEx(0x345000, low 0x61000, high 0x3A5FFF) and
+MmAllocateContiguousMemoryEx(0x1600000, low 0x3A6000, high 0x19A5FFF) - i.e. it demands PHYSICAL
+pages at exactly those numbers (the .map files carry absolute 0x803A6000-based pointers), while
+the XBE image occupies the same numbers as VIRTUAL addresses (0x10000-0x3B5000). On hardware
+those are different pages. XboxVita therefore uses a page-table memory model:
+  arena = [0, 64 MB) physical RAM | XBE image copy | trash page
+  X_G(a) = g_xram + g_xpt[a >> 12] + (a & 0xFFF)   (4 KB pages, 4 MB table)
+  0x80000000/0xF0000000 aliases -> physical 1:1; virtual [0,64MB) identity by default, except the
+  image pages and pages NtAllocateVirtualMemory backs with other physical pages.
+GPU aliasing still holds for everything the game allocates through Mm* (physical arena is the GXM
+mapped block); the image copy is mapped separately if the GPU ever reads from .data.
+Cost: one extra load per guest memory access.
+
+Other Stage 4 facts: XBE entry = XAPI mainCRTStartup, which CreateThread()s mainXapiStartup ->
+XapiInitProcess -> _rtinit/_cinit -> main(0,0,0) -> XapiBootToDash. Lifting the XAPI start-up
+chain (instead of HLE) and implementing only the kernel surface (Nt/Ke/Mm/Rtl/Io/Ps/Ex/Hal, 90
+exports referenced) reproduces the real boot: partition1 open, \??\D: -> \Device\CdRom0,
+TDATA/UDATA title dirs + T:/U: links, heap init. Xbox TLS: StackBase[0] = TLS block,
+KTHREAD+0x28 = TlsData. Kernel data exports (KeTickCount, XboxHardwareInfo, LaunchDataPage,
+XboxKrnlVersion, HalDiskCachePartitionCount) are guest variables patched into the thunk table;
+function thunks become 0xFE00nnnn magic targets dispatched by ordinal.

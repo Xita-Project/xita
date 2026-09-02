@@ -1,0 +1,32 @@
+set pagination off
+set confirm off
+handle SIGALRM nostop noprint
+define gm
+  set $a = (unsigned)$arg0
+  set $p = *(unsigned char**)&g_xram + (*(unsigned**)&g_xpt)[$a>>12] + ($a & 0xfff)
+  printf "%08X: %08X %08X %08X %08X  f: %f %f %f %f\n", $a, *(unsigned*)$p, *(unsigned*)($p+4), *(unsigned*)($p+8), *(unsigned*)($p+12), *(float*)$p, *(float*)($p+4), *(float*)($p+8), *(float*)($p+12)
+end
+define st
+  set $c = (unsigned char*)$rdi
+  set $fsp = *(unsigned*)($c+144)
+  printf "fsp=%u st0=%f st1=%f eax=%08X\n", $fsp, ((double*)($c+80))[$fsp&7], ((double*)($c+80))[($fsp+1)&7], *(unsigned*)$c
+break xv_hle_D3DDevice_SetTexture if ((unsigned (*)(void))xd3d_frame)() > 398
+run halo_image.bin ../haloce host/saveA > /dev/null 2>&1
+set $n = 0
+while $n < 6
+  set $c = (unsigned char*)$rdi
+  set $esp = *(unsigned*)($c+32)
+  printf "-- SetTexture esp=%08X\n", $esp
+  gm ($esp+4)
+  set $t = *(unsigned*)(*(unsigned char**)&g_xram + (*(unsigned**)&g_xpt)[($esp+8)>>12] + (($esp+8) & 0xfff))
+  printf "tex=%08X\n", $t
+  gm $t
+  gm ($t+0x10)
+  gm 0x80492CE8
+  gm 0x80491D74
+  bt 8
+  continue
+  set $n = $n + 1
+end
+kill
+quit

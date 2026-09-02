@@ -1,0 +1,358 @@
+// ---------------------------------------------------------------------------
+//  XboxVita Stage 3 - auto-generated Vita Cg vertex shader
+//  source : halo_vs_25.json
+//  mode   : NV2A microcode translation
+//  target : psp2cgc -profile sce_vp_psp2
+//
+//  Uniform contract:
+//    uniform float4 c[28]  - universal constant array, C_BASE = -96
+//    runtime maps SetVertexShaderConstant(reg, v) -> c[reg - C_BASE]
+//    microcode uses D3D c-96..c-69 (hardware c[0]..)
+//    53 of 55 NV2A slots translated; inputs v0 v1 v4 v8; outputs oPos oD0 oT0 oT1 oT2
+//    slots [40, 48] = Xbox viewport epilogue, stripped (pass --keep-viewport-epilogue to translate verbatim)
+//  Attribute binding (sceGxmVertexAttribute regIndex from parameter name):
+//    v0  position    float3 FLOAT3      stream 0 +0 (12 B)
+//    v1  blendweight float4 NORMPACKED3 stream 0 +12 (4 B)  // bind as U8 x4 (raw bytes); unpacked in-shader
+//    v2  normal      float4 NORMPACKED3 stream 0 +16 (4 B)  // bind as U8 x4 (raw bytes); unpacked in-shader
+//    v3  color0      float4 NORMPACKED3 stream 0 +20 (4 B)  // bind as U8 x4 (raw bytes); unpacked in-shader
+//    v4  color1      float2 FLOAT2      stream 0 +24 (8 B)
+//    v7  backcolor0  float4 NORMPACKED3 stream 1 +0 (4 B)  // bind as U8 x4 (raw bytes); unpacked in-shader
+//    v8  backcolor1  float2 NORMSHORT2  stream 1 +4 (4 B)  // S16N
+//  Depth: D3D clip z in [0, w] is passed through unchanged; set the GXM viewport
+//         with zOffset = 0, zScale = 1 (no [-1,1] -> [0,1] remap) to match.
+// ---------------------------------------------------------------------------
+
+struct AppIn
+{
+    float3 position    : POSITION;   // v0 FLOAT3
+    float4 blendweight : BLENDWEIGHT;   // v1 NORMPACKED3
+    float4 normal      : NORMAL;   // v2 NORMPACKED3
+    float4 color0      : COLOR0;   // v3 NORMPACKED3
+    float2 color1      : COLOR1;   // v4 FLOAT2
+    float4 backcolor0  : TEXCOORD6;   // v7 NORMPACKED3
+    float2 backcolor1  : TEXCOORD7;   // v8 NORMSHORT2
+};
+
+struct VertOut
+{
+    float4 position    : POSITION;   // oPos
+    float4 color0      : COLOR0;   // oD0
+    float4 texcoord0   : TEXCOORD0;   // oT0
+    float4 texcoord1   : TEXCOORD1;   // oT1
+    float4 texcoord2   : TEXCOORD2;   // oT2
+};
+
+float4 xv_dph(float4 a, float4 b) { return float4(dot(a.xyz, b.xyz) + b.w); }
+
+float4 xv_rsq(float4 s) { return float4(rsqrt(abs(s.x))); }
+
+// D3DVSDT_NORMPACKED3: 11:11:10 signed-normalised packed into one DWORD.
+// Attribute is bound as U8 x4 (raw, not normalised) so b = bytes 0..3 as floats.
+float3 xv_unpack_normpacked3(float4 b)
+{
+    float x = b.x + fmod(b.y, 8.0) * 256.0;                    // bits  0..10
+    float y = floor(b.y / 8.0) + fmod(b.z, 64.0) * 32.0;       // bits 11..21
+    float z = floor(b.z / 64.0) + b.w * 4.0;                   // bits 22..31
+    x = (x >= 1024.0) ? x - 2048.0 : x;
+    y = (y >= 1024.0) ? y - 2048.0 : y;
+    z = (z >=  512.0) ? z - 1024.0 : z;
+    return float3(x / 1023.0, y / 1023.0, z / 511.0);
+}
+
+VertOut main(AppIn IN, uniform float4 c[28])
+{
+    VertOut OUT;
+    // --- attribute loads (expanded to float4 exactly as the NV2A input file presents them)
+    float4 v0 = float4(IN.position, 1.0);
+    float4 v1 = float4(xv_unpack_normpacked3(IN.blendweight), 1.0);   // bind as U8 x4 (raw bytes); unpacked in-shader
+    float4 v4 = float4(IN.color1, 0.0, 1.0);
+    float4 v8 = float4(IN.backcolor1, 0.0, 1.0);   // S16N
+
+    // --- register file
+    float4 r0 = float4(0.0, 0.0, 0.0, 0.0), r1 = float4(0.0, 0.0, 0.0, 0.0), r2 = float4(0.0, 0.0, 0.0, 0.0), r3 = float4(0.0, 0.0, 0.0, 0.0), r4 = float4(0.0, 0.0, 0.0, 0.0), r5 = float4(0.0, 0.0, 0.0, 0.0), r6 = float4(0.0, 0.0, 0.0, 0.0), r7 = float4(0.0, 0.0, 0.0, 0.0), r8 = float4(0.0, 0.0, 0.0, 0.0), r9 = float4(0.0, 0.0, 0.0, 0.0), r10 = float4(0.0, 0.0, 0.0, 0.0), r11 = float4(0.0, 0.0, 0.0, 0.0);
+    float4 oPos = float4(0.0, 0.0, 0.0, 1.0), oD0 = float4(0.0, 0.0, 0.0, 0.0), oT0 = float4(0.0, 0.0, 0.0, 0.0), oT1 = float4(0.0, 0.0, 0.0, 0.0), oT2 = float4(0.0, 0.0, 0.0, 0.0);
+
+    // --- program (one NV2A slot per block; MAC and ILU read before either writes)
+    // [00] add r2.xyz, c[17], -v0
+    {
+        float4 m = c[17] + -v0;
+        r2.xyz = m.xyz;
+    }
+    // [01] add r9.xyz, c[20], -v0
+    {
+        float4 m = c[20] + -v0;
+        r9.xyz = m.xyz;
+    }
+    // [02] dp3 r3.w, r2, r2 | mov oT2.xy, v8
+    {
+        float4 m = float4(dot((r2).xyz, (r2).xyz));
+        float4 i = v8;
+        r3.w = m.w;
+        oT2.xy = i.xy;
+    }
+    // [03] dp3 r5.z, v1, -c[23]
+    {
+        float4 m = float4(dot((v1).xyz, (-c[23]).xyz));
+        r5.z = m.z;
+    }
+    // [04] dp3 r10.w, r9, r9 | rsq r1.w, r3.w
+    {
+        float4 m = float4(dot((r9).xyz, (r9).xyz));
+        float4 i = xv_rsq(r3.wwww);
+        r10.w = m.w;
+        r1.w = i.w;
+    }
+    // [05] mad r5.x, r3.w, -c[17].w, v4.w
+    {
+        float4 m = r3.wwww * -c[17].wwww + v4.wwww;
+        r5.x = m.x;
+    }
+    // [06] mul r4.xyz, r2, r1.w
+    {
+        float4 m = r2 * r1.wwww;
+        r4.xyz = m.xyz;
+    }
+    // [07] dp3 r6.x, r4, v1 | rsq r1.w, r10.w
+    {
+        float4 m = float4(dot((r4).xyz, (v1).xyz));
+        float4 i = xv_rsq(r10.wwww);
+        r6.x = m.x;
+        r1.w = i.w;
+    }
+    // [08] dp3 r7.w, r4, c[18]
+    {
+        float4 m = float4(dot((r4).xyz, (c[18]).xyz));
+        r7.w = m.w;
+    }
+    // [09] mul r11.xyz, r9, r1.w
+    {
+        float4 m = r9 * r1.wwww;
+        r11.xyz = m.xyz;
+    }
+    // [10] mul r8.w, r7.w, c[18].w
+    {
+        float4 m = r7.wwww * c[18].wwww;
+        r8.w = m.w;
+    }
+    // [11] add r6.z, r8.w, c[19].w
+    {
+        float4 m = r8.wwww + c[19].wwww;
+        r6.z = m.z;
+    }
+    // [12] mad r5.y, r10.w, -c[20].w, v4.w
+    {
+        float4 m = r10.wwww * -c[20].wwww + v4.wwww;
+        r5.y = m.y;
+    }
+    // [13] dp3 r6.y, r11, v1
+    {
+        float4 m = float4(dot((r11).xyz, (v1).xyz));
+        r6.y = m.y;
+    }
+    // [14] dp3 r0.w, r11, c[18]
+    {
+        float4 m = float4(dot((r11).xyz, (c[18]).xyz));
+        r0.w = m.w;
+    }
+    // [15] dp3 r5.w, v1, -c[25]
+    {
+        float4 m = float4(dot((v1).xyz, (-c[25]).xyz));
+        r5.w = m.w;
+    }
+    // [16] mul r2.w, r0.w, c[21].w
+    {
+        float4 m = r0.wwww * c[21].wwww;
+        r2.w = m.w;
+    }
+    // [17] add r6.w, r2.w, c[22].w
+    {
+        float4 m = r2.wwww + c[22].wwww;
+        r6.w = m.w;
+    }
+    // [18] max r3, r5, v4.z
+    {
+        float4 m = max(r5, v4.zzzz);
+        r3 = m;
+    }
+    // [19] max r4, r6, v4.z
+    {
+        float4 m = max(r6, v4.zzzz);
+        r4 = m;
+    }
+    // [20] min r5, r3, v4.w
+    {
+        float4 m = min(r3, v4.wwww);
+        r5 = m;
+    }
+    // [21] min r6, r4, v4.w
+    {
+        float4 m = min(r4, v4.wwww);
+        r6 = m;
+    }
+    // [22] mov r7.xyz, c[27]
+    {
+        float4 m = c[27];
+        r7.xyz = m.xyz;
+    }
+    // [23] mul r8.xy, r5, r6
+    {
+        float4 m = r5 * r6;
+        r8.xy = m.xy;
+    }
+    // [24] mul r9.x, r8.x, r6.z
+    {
+        float4 m = r8.xxxx * r6.zzzz;
+        r9.x = m.x;
+    }
+    // [25] mul r10.y, r8.y, r6.w
+    {
+        float4 m = r8.yyyy * r6.wwww;
+        r10.y = m.y;
+    }
+    // [26] mad r11.xyz, r9.x, c[19], r7
+    {
+        float4 m = r9.xxxx * c[19] + r7;
+        r11.xyz = m.xyz;
+    }
+    // [27] mad r0.xyz, r10.y, c[22], r11
+    {
+        float4 m = r10.yyyy * c[22] + r11;
+        r0.xyz = m.xyz;
+    }
+    // [28] mad r2.xyz, r5.z, c[24], r0
+    {
+        float4 m = r5.zzzz * c[24] + r0;
+        r2.xyz = m.xyz;
+    }
+    // [29] mad oD0.xyz, r5.w, c[26], r2
+    {
+        float4 m = r5.wwww * c[26] + r2;
+        oD0.xyz = m.xyz;
+    }
+    // [30] dph oPos.x, v0, c[0]
+    {
+        float4 m = xv_dph(v0, c[0]);
+        oPos.x = m.x;
+    }
+    // [31] dph oPos.y, v0, c[1]
+    {
+        float4 m = xv_dph(v0, c[1]);
+        oPos.y = m.y;
+    }
+    // [32] dph oPos.z, v0, c[2]
+    {
+        float4 m = xv_dph(v0, c[2]);
+        oPos.z = m.z;
+    }
+    // [33] dph oPos.w, v0, c[3]
+    {
+        float4 m = xv_dph(v0, c[3]);
+        oPos.w = m.w;
+    }
+    // [34] mul oT0.xy, v4, c[12].xyyy
+    {
+        float4 m = v4 * c[12].xyyy;
+        oT0.xy = m.xy;
+    }
+    // [35] mul oT1.xy, v4, c[12].zwww
+    {
+        float4 m = v4 * c[12].zwww;
+        oT1.xy = m.xy;
+    }
+    // [36] dph r3.x, v0, c[9]
+    {
+        float4 m = xv_dph(v0, c[9]);
+        r3.x = m.x;
+    }
+    // [37] dph r3.y, v0, c[10]
+    {
+        float4 m = xv_dph(v0, c[10]);
+        r3.y = m.y;
+    }
+    // [38] dph r4.z, v0, c[8]
+    {
+        float4 m = xv_dph(v0, c[8]);
+        r4.z = m.z;
+    }
+    // [39] add r4.xy, v4.w, -r3
+    {
+        float4 m = v4.wwww + -r3;
+        r4.xy = m.xy;
+    }
+    // [40] mul oPos.xyz, r12, c[58] | rcc r1.x, r12.w    <- stripped: Xbox viewport epilogue (GXM divides by w)
+    // [41] max r5.xyz, r4, v4.z
+    {
+        float4 m = max(r4, v4.zzzz);
+        r5.xyz = m.xyz;
+    }
+    // [42] mul r5.xy, r5, r5
+    {
+        float4 m = r5 * r5;
+        r5.xy = m.xy;
+    }
+    // [43] min r6.xyz, r5, v4.w
+    {
+        float4 m = min(r5, v4.wwww);
+        r6.xyz = m.xyz;
+    }
+    // [44] add r7.x, r6.x, r6.y
+    {
+        float4 m = r6.xxxx + r6.yyyy;
+        r7.x = m.x;
+    }
+    // [45] mul r0.z, r6.z, c[11].x
+    {
+        float4 m = r6.zzzz * c[11].xxxx;
+        r0.z = m.z;
+    }
+    // [46] min r6.x, r7, v4.w
+    {
+        float4 m = min(r7, v4.wwww);
+        r6.x = m.x;
+    }
+    // [47] add r8.xy, v4.w, -r6
+    {
+        float4 m = v4.wwww + -r6;
+        r8.xy = m.xy;
+    }
+    // [48] mad oPos.xyz, r12, r1.x, c[59]    <- stripped: Xbox viewport epilogue (GXM divides by w)
+    // [49] mul r9.xy, r8, r8
+    {
+        float4 m = r8 * r8;
+        r9.xy = m.xy;
+    }
+    // [50] add r10.y, r9.y, -r9.x
+    {
+        float4 m = r9.yyyy + -r9.xxxx;
+        r10.y = m.y;
+    }
+    // [51] mad r11.w, c[11].y, r10.y, r9.x
+    {
+        float4 m = c[11].yyyy * r10.yyyy + r9.xxxx;
+        r11.w = m.w;
+    }
+    // [52] mul r0.w, r11.w, c[11].z
+    {
+        float4 m = r11.wwww * c[11].zzzz;
+        r0.w = m.w;
+    }
+    // [53] add r2.zw, -r0, v4.w
+    {
+        float4 m = -r0 + v4.wwww;
+        r2.zw = m.zw;
+    }
+    // [54] mul oD0.w, r2.z, r2.w
+    {
+        float4 m = r2.zzzz * r2.wwww;
+        oD0.w = m.w;
+    }
+
+    // --- outputs
+    OUT.position = oPos;
+    OUT.color0 = oD0;
+    OUT.texcoord0 = oT0;
+    OUT.texcoord1 = oT1;
+    OUT.texcoord2 = oT2;
+    return OUT;
+}
+

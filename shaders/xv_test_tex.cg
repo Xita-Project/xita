@@ -1,0 +1,26 @@
+// XboxVita runtime test vertex shader: textured + coloured quad through the D3D HLE.
+// Layout (Xbox-style declaration): float3 position @0, float2 texcoord0 @12,
+// D3DCOLOR color0 @20, stride 24.  c[0..3] = rows of transpose(WVP).
+struct AppIn
+{
+    float3 position  : POSITION;
+    float2 texcoord0 : TEXCOORD0;
+    float4 color0    : COLOR0;
+};
+
+struct VertOut
+{
+    float4 position  : POSITION;
+    float4 color0    : COLOR0;
+    float4 texcoord0 : TEXCOORD0;
+};
+
+VertOut main(AppIn IN, uniform float4 c[4])
+{
+    VertOut OUT;
+    float4 p = float4(IN.position, 1.0);
+    OUT.position  = float4(dot(p, c[0]), dot(p, c[1]), dot(p, c[2]), dot(p, c[3]));
+    OUT.color0    = IN.color0.zyxw;
+    OUT.texcoord0 = float4(IN.texcoord0, 0.0, 1.0);
+    return OUT;
+}

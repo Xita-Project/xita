@@ -1,0 +1,556 @@
+{
+  "path": "haloce/default.xbe",
+  "file_size": 2535424,
+  "magic_ok": true,
+  "key_used": "retail",
+  "base_address": 65536,
+  "size_of_headers": 3272,
+  "size_of_image": 3819424,
+  "size_of_image_header": 376,
+  "time_date": 1002928583,
+  "time_date_iso": "2001-10-12 23:16:23 UTC",
+  "entry_point_masked": 2835155810,
+  "entry_point": 89289,
+  "entry_point_in_image": true,
+  "entry_point_key_guess": "retail",
+  "kernel_thunk_masked": 1534076566,
+  "kernel_thunk": 1926688,
+  "tls_address": 1927808,
+  "init_flags": 5,
+  "init_flag_names": [
+    "MOUNT_UTILITY_DRIVE",
+    "LIMIT_64MB"
+  ],
+  "pe_base_address": 68096,
+  "pe_size_of_image": 3899648,
+  "debug_pathname": "c:\\halo\\objects\\final\\final.exe",
+  "number_of_sections": 24,
+  "section_headers_address": 66376,
+  "number_of_library_versions": 8,
+  "library_versions_address": 67936,
+  "kernel_library_version_address": 68032,
+  "xapi_library_version_address": 67936,
+  "certificate": {
+    "address": 65912,
+    "size": 464,
+    "time_date": 1068843330,
+    "title_id": 1297285124,
+    "title_id_hex": "4D530004",
+    "title_name": "Halo",
+    "allowed_media": 2,
+    "game_region": 1,
+    "game_region_names": [
+      "NA"
+    ],
+    "game_ratings": 2,
+    "disk_number": 0,
+    "version": 9
+  },
+  "sections": [
+    {
+      "index": 0,
+      "name": ".text",
+      "flags": 22,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO"
+      ],
+      "virtual_address": 69632,
+      "virtual_size": 1506880,
+      "raw_address": 4096,
+      "raw_size": 1506880,
+      "name_address": 67758,
+      "digest": "ef4b7fd1b2a5b166c6d02270f49200cc985e7e6a",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 1,
+      "name": "D3D",
+      "flags": 7,
+      "flag_names": [
+        "WRITABLE",
+        "PRELOAD",
+        "EXECUTABLE"
+      ],
+      "virtual_address": 1576512,
+      "virtual_size": 71540,
+      "raw_address": 1511424,
+      "raw_size": 58124,
+      "name_address": 67764,
+      "digest": "bd3b8339099a844f9ac939f65e739216b37457ca",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 2,
+      "name": "D3DX",
+      "flags": 7,
+      "flag_names": [
+        "WRITABLE",
+        "PRELOAD",
+        "EXECUTABLE"
+      ],
+      "virtual_address": 1648064,
+      "virtual_size": 1724,
+      "raw_address": 1572864,
+      "raw_size": 1724,
+      "name_address": 67768,
+      "digest": "ecc8eb1f2529b53857d516c4bea9e3ba6a3b2c28",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 3,
+      "name": "DSOUND",
+      "flags": 7,
+      "flag_names": [
+        "WRITABLE",
+        "PRELOAD",
+        "EXECUTABLE"
+      ],
+      "virtual_address": 1649792,
+      "virtual_size": 116568,
+      "raw_address": 1576960,
+      "raw_size": 116260,
+      "name_address": 67773,
+      "digest": "bd1b12b1f39419b9527f05c3432dbea295fa09e0",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 4,
+      "name": "XNET",
+      "flags": 38,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1766368,
+      "virtual_size": 30880,
+      "raw_address": 1695744,
+      "raw_size": 30880,
+      "name_address": 67780,
+      "digest": "d390a15ea8b00a7637784cb7d35aa95a1d8668e9",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 5,
+      "name": "BINK",
+      "flags": 54,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1797248,
+      "virtual_size": 70896,
+      "raw_address": 1728512,
+      "raw_size": 70896,
+      "name_address": 67785,
+      "digest": "d78d1e8a87752eed620be51d5c36598f84b071f0",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 6,
+      "name": "BINK32",
+      "flags": 54,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1868160,
+      "virtual_size": 4709,
+      "raw_address": 1802240,
+      "raw_size": 4708,
+      "name_address": 67790,
+      "digest": "1940956dedf6fa15b7eb52ade749775f55523aae",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 7,
+      "name": "BINK32A",
+      "flags": 54,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1872896,
+      "virtual_size": 5497,
+      "raw_address": 1810432,
+      "raw_size": 5496,
+      "name_address": 67797,
+      "digest": "78644dd601affa34f245a44866ce998cd0d43e4d",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 8,
+      "name": "BINK16",
+      "flags": 54,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1878400,
+      "virtual_size": 4892,
+      "raw_address": 1818624,
+      "raw_size": 4892,
+      "name_address": 67805,
+      "digest": "d6ba0b0470c0c81f897cce18ae7ed73fe760043d",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 9,
+      "name": "BINK4444",
+      "flags": 54,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1883296,
+      "virtual_size": 5536,
+      "raw_address": 1826816,
+      "raw_size": 5536,
+      "name_address": 67812,
+      "digest": "a47f88b8bf9b4a1e1be888d392566eb4718b49c2",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 10,
+      "name": "BINK5551",
+      "flags": 54,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1888832,
+      "virtual_size": 4404,
+      "raw_address": 1835008,
+      "raw_size": 4404,
+      "name_address": 67821,
+      "digest": "fcb58e0546eb62a9ab840f58cafa0b2c2b6770a6",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 11,
+      "name": "BINK16MX",
+      "flags": 54,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1893248,
+      "virtual_size": 304,
+      "raw_address": 1843200,
+      "raw_size": 304,
+      "name_address": 67830,
+      "digest": "7aeac382a684a3f6677c8b0487f30f0a06d8b397",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 12,
+      "name": "BINK16X2",
+      "flags": 54,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1893568,
+      "virtual_size": 1368,
+      "raw_address": 1847296,
+      "raw_size": 1368,
+      "name_address": 67839,
+      "digest": "cb7c68fb0ac1dc88b33afc80e5b9c67e448192c5",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 13,
+      "name": "BINK16M",
+      "flags": 54,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1894944,
+      "virtual_size": 504,
+      "raw_address": 1851392,
+      "raw_size": 504,
+      "name_address": 67848,
+      "digest": "fa0611e1616a30a05c4ebcd9d9328b234a26c30a",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 14,
+      "name": "BINK32MX",
+      "flags": 54,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 1895456,
+      "virtual_size": 444,
+      "raw_address": 1855488,
+      "raw_size": 444,
+      "name_address": 67856,
+      "digest": "c863e17786921c350dc3b77b1ee893d8e41b9395",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 15,
+      "name": "BINK32X2",
+      "flags": 22,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE",
+        "HEAD_PAGE_RO"
+      ],
+      "virtual_address": 1895904,
+      "virtual_size": 1420,
+      "raw_address": 1859584,
+      "raw_size": 1420,
+      "name_address": 67865,
+      "digest": "4e202dec62badcfbfececcefc7292fd2226fb43a",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 16,
+      "name": "BINK32M",
+      "flags": 6,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE"
+      ],
+      "virtual_address": 1897344,
+      "virtual_size": 332,
+      "raw_address": 1863680,
+      "raw_size": 332,
+      "name_address": 67874,
+      "digest": "c3295f524321e28c914f2b469208cbbcb366dc8a",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 17,
+      "name": "XPP",
+      "flags": 7,
+      "flag_names": [
+        "WRITABLE",
+        "PRELOAD",
+        "EXECUTABLE"
+      ],
+      "virtual_address": 1897696,
+      "virtual_size": 28968,
+      "raw_address": 1867776,
+      "raw_size": 28968,
+      "name_address": 67882,
+      "digest": "73c849a52766f9c2d2d11dd7238ec60be78279d9",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 18,
+      "name": ".rdata",
+      "flags": 6,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE"
+      ],
+      "virtual_address": 1926688,
+      "virtual_size": 109616,
+      "raw_address": 1900544,
+      "raw_size": 109608,
+      "name_address": 67886,
+      "digest": "fd59aedec2bfd1e14ebdab73f6833f62070e1e22",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 19,
+      "name": ".data",
+      "flags": 7,
+      "flag_names": [
+        "WRITABLE",
+        "PRELOAD",
+        "EXECUTABLE"
+      ],
+      "virtual_address": 2036320,
+      "virtual_size": 1789224,
+      "raw_address": 2011136,
+      "raw_size": 451612,
+      "name_address": 67893,
+      "digest": "92afbd977bc19ca88b7241260998f086208d4681",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 20,
+      "name": "DOLBY",
+      "flags": 6,
+      "flag_names": [
+        "PRELOAD",
+        "EXECUTABLE"
+      ],
+      "virtual_address": 3825568,
+      "virtual_size": 28056,
+      "raw_address": 2465792,
+      "raw_size": 28036,
+      "name_address": 67899,
+      "digest": "894ac381f58a8b0bdd38ae650c0047941bae2364",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 21,
+      "name": "BINKDATA",
+      "flags": 7,
+      "flag_names": [
+        "WRITABLE",
+        "PRELOAD",
+        "EXECUTABLE"
+      ],
+      "virtual_address": 3853632,
+      "virtual_size": 16976,
+      "raw_address": 2494464,
+      "raw_size": 16976,
+      "name_address": 67905,
+      "digest": "9cf67fc702b29d6835f57b36a0f0cdc40e360236",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 22,
+      "name": "$$XTIMAGE",
+      "flags": 40,
+      "flag_names": [
+        "INSERTED_FILE",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 3870624,
+      "virtual_size": 10240,
+      "raw_address": 2514944,
+      "raw_size": 10240,
+      "name_address": 67914,
+      "digest": "81ab053881f47bff02da0cb1683bb1d996f5bf90",
+      "raw_in_bounds": true
+    },
+    {
+      "index": 23,
+      "name": "$$XSIMAGE",
+      "flags": 56,
+      "flag_names": [
+        "INSERTED_FILE",
+        "HEAD_PAGE_RO",
+        "TAIL_PAGE_RO"
+      ],
+      "virtual_address": 3880864,
+      "virtual_size": 4096,
+      "raw_address": 2527232,
+      "raw_size": 4096,
+      "name_address": 67924,
+      "digest": "a56d2cb8ab845aed0d5f734aa53b5d91f2e004ca",
+      "raw_in_bounds": true
+    }
+  ],
+  "library_versions": [
+    {
+      "index": 0,
+      "name": "XAPILIB",
+      "major": 1,
+      "minor": 0,
+      "build": 3911,
+      "qfe": 1,
+      "approved": "approved",
+      "debug_build": false,
+      "version_string": "1.0.3911.1"
+    },
+    {
+      "index": 1,
+      "name": "D3D8",
+      "major": 1,
+      "minor": 0,
+      "build": 3925,
+      "qfe": 1,
+      "approved": "approved",
+      "debug_build": false,
+      "version_string": "1.0.3925.1"
+    },
+    {
+      "index": 2,
+      "name": "D3DX8",
+      "major": 1,
+      "minor": 0,
+      "build": 3911,
+      "qfe": 1,
+      "approved": "approved",
+      "debug_build": false,
+      "version_string": "1.0.3911.1"
+    },
+    {
+      "index": 3,
+      "name": "DSOUND",
+      "major": 1,
+      "minor": 0,
+      "build": 3936,
+      "qfe": 1,
+      "approved": "approved",
+      "debug_build": false,
+      "version_string": "1.0.3936.1"
+    },
+    {
+      "index": 4,
+      "name": "DSOUNDH",
+      "major": 1,
+      "minor": 0,
+      "build": 3937,
+      "qfe": 1,
+      "approved": "approved",
+      "debug_build": false,
+      "version_string": "1.0.3937.1"
+    },
+    {
+      "index": 5,
+      "name": "XNETS",
+      "major": 1,
+      "minor": 0,
+      "build": 3911,
+      "qfe": 1,
+      "approved": "possibly-approved",
+      "debug_build": false,
+      "version_string": "1.0.3911.1"
+    },
+    {
+      "index": 6,
+      "name": "XBOXKRNL",
+      "major": 1,
+      "minor": 0,
+      "build": 3911,
+      "qfe": 1,
+      "approved": "approved",
+      "debug_build": false,
+      "version_string": "1.0.3911.1"
+    },
+    {
+      "index": 7,
+      "name": "LIBC",
+      "major": 1,
+      "minor": 0,
+      "build": 3911,
+      "qfe": 1,
+      "approved": "approved",
+      "debug_build": false,
+      "version_string": "1.0.3911.1"
+    }
+  ],
+  "warnings": []
+}

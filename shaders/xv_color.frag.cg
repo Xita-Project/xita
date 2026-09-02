@@ -1,0 +1,12 @@
+// XboxVita runtime fragment shader: untextured diffuse passthrough (D3D default with
+// no texture bound: output = oD0).
+struct VertOut
+{
+    float4 position : POSITION;
+    float4 color0   : COLOR0;
+};
+
+float4 main(VertOut IN) : COLOR
+{
+    return IN.color0;
+}

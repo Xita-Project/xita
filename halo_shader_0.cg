@@ -1,0 +1,57 @@
+// ---------------------------------------------------------------------------
+//  XboxVita Stage 3 — auto-generated Vita Cg vertex shader
+//  source : halo_shader_0.json
+//  mode   : fixed-function
+//  target : psp2cgc -profile sce_vp_psp2
+//
+//  Uniform contract:
+//    uniform float4 c[9]  — universal constant array, C_BASE = 0
+//    runtime maps SetVertexShaderConstant(reg, v) -> c[reg - C_BASE]
+//    c[0..3] = rows of transpose(World*View*Projection)
+//    c[5..8] = -light dir (object space), light colour, ambient, material diffuse
+//  Attribute binding (sceGxmVertexAttribute regIndex from parameter name):
+//    v0  position    float3 FLOAT3      stream 0 +0 (12 B)
+//    v9  texcoord0   float4 D3DCOLOR    stream 0 +12 (4 B)  // U8N x4 in memory order B,G,R,A -> swizzled to RGBA
+//  Depth: D3D clip z in [0, w] is passed through unchanged; set the GXM viewport
+//         with zOffset = 0, zScale = 1 (no [-1,1] -> [0,1] remap) to match.
+// ---------------------------------------------------------------------------
+
+struct AppIn
+{
+    float3 position    : POSITION;   // v0 FLOAT3
+    float4 texcoord0   : TEXCOORD0;   // v9 D3DCOLOR
+};
+
+struct VertOut
+{
+    float4 position    : POSITION;   // oPos
+    float4 color0      : COLOR0;   // oD0
+    float4 texcoord0   : TEXCOORD0;   // oT0
+};
+
+VertOut main(AppIn IN, uniform float4 c[9])
+{
+    VertOut OUT;
+    // --- attribute loads (expanded to float4 exactly as the NV2A input file presents them)
+    float4 v0 = float4(IN.position, 1.0);
+    float4 v9 = IN.texcoord0.zyxw;   // U8N x4 in memory order B,G,R,A -> swizzled to RGBA
+
+    // --- transform: c[0..3] hold the rows of transpose(World*View*Projection),
+    //     i.e. the classic vs.1.1 `dp4 oPos.x, v0, c0` prologue.
+    float4 oPos;
+    oPos.x = dot(v0, c[0]);
+    oPos.y = dot(v0, c[1]);
+    oPos.z = dot(v0, c[2]);
+    oPos.w = dot(v0, c[3]);
+
+    // --- single directional light (c[5] = -light dir, object space; c[6] = light colour;
+    //     c[7] = ambient; c[8] = material diffuse)
+    float4 oD0  = float4(saturate(c[7].rgb) * c[8].rgb, c[8].a);
+
+    // --- outputs
+    OUT.position = oPos;
+    OUT.color0 = oD0;
+    OUT.texcoord0 = v9;
+    return OUT;
+}
+

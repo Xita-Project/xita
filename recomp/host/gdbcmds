@@ -1,0 +1,16 @@
+set pagination off
+set confirm off
+handle SIGALRM nostop noprint
+define gm
+  printf "%08X\n", *(unsigned*)(g_xram + g_xpt[((unsigned)$arg0)>>12] + (((unsigned)$arg0)&0xfff))
+end
+break f_0005E7E0 if xd3d_frame() > 200
+run halo_image.bin ../haloce host/saveA > /dev/null 2>&1
+bt 16
+printf "esp=%08X edx=%08X\n", c->r[4], c->r[2]
+printf "arg0 "
+gm c->r[4]+4
+printf "arg1 (color) "
+gm c->r[4]+8
+kill
+quit

@@ -1,0 +1,26 @@
+# game data - never commit (copyrighted, and huge)
+haloce/
+haloce.xiso.iso
+recomp/halo_image.bin
+libshacccg.suprx
+extract-xiso/
+# recompiler output (regenerate with xbe_recomp.py)
+recomp/code_*.c
+recomp/xv_fn_table.c
+recomp/xv_stubs_default.c
+recomp/xv_recomp_protos.h
+recomp/recomp_report.json
+# builds
+build/
+recomp/host/obj/
+recomp/host/harness
+*.vpk
+*.o
+*.elf
+# run-time junk
+*.log
+recomp/host/save*/
+recomp/host/*.png
+recomp/host/*.pgm
+__pycache__/
+*.psp2dmp

@@ -1,0 +1,25 @@
+set pagination off
+set confirm off
+handle SIGALRM nostop noprint
+define gm
+  set $a = (unsigned)$arg0
+  set $p = *(unsigned char**)&g_xram + (*(unsigned**)&g_xpt)[$a>>12] + ($a & 0xfff)
+  printf "%08X: %08X %08X %08X %08X  f: %f %f %f %f\n", $a, *(unsigned*)$p, *(unsigned*)($p+4), *(unsigned*)($p+8), *(unsigned*)($p+12), *(float*)$p, *(float*)($p+4), *(float*)($p+8), *(float*)($p+12)
+end
+define st
+  set $c = (unsigned char*)$rdi
+  set $fsp = *(unsigned*)($c+144)
+  printf "fsp=%u st0=%f st1=%f eax=%08X\n", $fsp, ((double*)($c+80))[$fsp&7], ((double*)($c+80))[($fsp+1)&7], *(unsigned*)$c
+end
+break f_000D2F30 if ((unsigned (*)(void))xd3d_frame)() > 200
+run halo_image.bin ../haloce host/saveA > /dev/null 2>&1
+set $n = 0
+while $n < 3
+  st
+  gm (*(unsigned*)$rdi+0x10c)
+  gm (*(unsigned*)$rdi+0x11c)
+  continue
+  set $n = $n + 1
+end
+kill
+quit
