@@ -10,6 +10,9 @@
 #include <stdlib.h>
 
 #include <psp2/gxm.h>
+#include <psp2/io/fcntl.h>
+#include <psp2/io/stat.h>
+#include <psp2/kernel/clib.h>
 #include <psp2/kernel/sysmem.h>
 #include <psp2/kernel/clib.h>
 
@@ -283,13 +286,53 @@ static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage)
     if (!w || !h || w > 4096 || h > 4096) UI_TEX_FAIL();
     if (g.texcount >= UI_TEX_CACHE) { g.tex_purge = 1; return NULL; }
 
+    /* Cube maps (Format bit 2): six faces back to back, each a full swizzled/DXT mip chain padded to 128
+     * bytes.  Decode level 0 of every face to RGBA, twiddle into GXM's cube layout, one mip. */
+    if ((fmtword & 4u) && !sizeword && w == h && ui_is_pow2(w) && w >= 8 && w <= 256) {
+        int isdxt_c = (fmt == 0x0C || fmt == 0x0E || fmt == 0x0F); unsigned bs_c = (fmt == 0x0C) ? 8 : 16, bpp_c = ui_fmt_bpp(fmt);
+        uint32_t face_bytes = 0; { unsigned lw = w, lh = h; for (unsigned l = 0; l < mips; ++l) { face_bytes += isdxt_c ? ((lw + 3) / 4) * ((lh + 3) / 4) * bs_c : lw * lh * bpp_c; lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1; } }
+        face_bytes = (face_bytes + 127) & ~127u;
+        uint32_t need = ALIGN_UP(6u * w * h * 4u, 64);
+        if (g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
+        uint32_t *dst = (uint32_t *)(g.dec_base + g.dec_off);
+        static uint32_t tmp[256 * 256];
+        const uint8_t *base = X_G(0x80000000u | data);
+        for (unsigned f = 0; f < 6; ++f) {
+            if (ui_decode(base + f * face_bytes, fmt, w, h, w * bpp_c, 0, tmp) != 0) { UI_LOG("cube face decode failed fmt %02X\n", fmt); UI_TEX_FAIL(); }
+            uint32_t *face = dst + f * w * h;
+            for (unsigned i = 0; i < w * h; ++i) { unsigned x, y; gxm_unswz(w, h, i, &x, &y); face[i] = tmp[y * w + x]; }
+        }
+        { static int dump = -1; if (dump < 0) dump = getenv("XV_TEXDUMP") != NULL;
+          if (dump) { char path[128]; sceIoMkdir("ux0:data/xboxvita/texdump", 0777);
+            sceClibSnprintf(path, sizeof path, "ux0:data/xboxvita/texdump/cube_%08X_%02X_%ux%u.ppm", data, fmt, w, h);
+            SceUID fd = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+            if (fd >= 0) { char hdr[32]; int n = sceClibSnprintf(hdr, sizeof hdr, "P6\n%u %u\n255\n", w * 6, h); sceIoWrite(fd, hdr, n);
+              static uint8_t row[256 * 6 * 3];
+              for (unsigned y = 0; y < h; ++y) { for (unsigned f = 0; f < 6; ++f) { ui_decode(base + f * face_bytes, fmt, w, h, w * bpp_c, 0, tmp);
+                  for (unsigned x = 0; x < w; ++x) { uint32_t p = tmp[y * w + x]; row[(f * w + x) * 3] = p & 0xFF; row[(f * w + x) * 3 + 1] = (p >> 8) & 0xFF; row[(f * w + x) * 3 + 2] = (p >> 16) & 0xFF; } }
+                sceIoWrite(fd, row, w * 6 * 3); }
+              sceIoClose(fd); } } }
+        xv_gpu_flush(dst, need);
+        ui_tex_entry *e = &g.texcache[g.texcount];
+        int err = sceGxmTextureInitCube(&e->tex, dst, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, 1);
+        if (err != SCE_OK) { UI_LOG("textureInitCube(%ux%u fmt %02X) failed 0x%08X\n", w, h, fmt, err); UI_TEX_FAIL(); }
+        g.dec_off += need;
+        e->data = data; e->fmtword = fmtword; e->valid = 1; g.texcount++;
+        e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache);
+        e->bytes = 0; e->sum = 0; e->checked = g.rec_frame;
+        { static unsigned n; if (n++ < 8) UI_LOG("cube map fmt %02X %ux%u x6 (face stride %u) -> cube texture\n", fmt, w, h, face_bytes); }
+        sceGxmTextureSetMinFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
+        sceGxmTextureSetMagFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
+        return &e->tex;
+    }
     int isdxt = (fmt == 0x0C || fmt == 0x0E || fmt == 0x0F);
     unsigned bs = (fmt == 0x0C) ? 8 : 16, bpp = ui_fmt_bpp(fmt);
     const uint8_t *src = X_G(0x80000000u | data);
     /* Skip down the mip chain (levels are stored back to back) until the level fits UI_TEX_MAXDIM:
      * a 1024x1024 DXT1 level texture becomes 32 KB instead of 4 MB of decoded RGBA. */
+    static unsigned maxdim; if (!maxdim) { const char *e = getenv("XV_TEX_MAXDIM"); maxdim = e ? (unsigned)atoi(e) : UI_TEX_MAXDIM; if (maxdim < 16) maxdim = UI_TEX_MAXDIM; }
     if (!sizeword) {
-        while ((w > UI_TEX_MAXDIM || h > UI_TEX_MAXDIM) && mips > 1 && w > 4 && h > 4) {
+        while ((w > maxdim || h > maxdim) && mips > 1 && w > 4 && h > 4) {
             src += isdxt ? ((w + 3) / 4) * ((h + 3) / 4) * bs : w * h * bpp;
             w >>= 1; h >>= 1; mips--;
         }
@@ -312,11 +355,27 @@ static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage)
         if (err != SCE_OK) { UI_LOG("textureInitSwizzled(%02X %ux%u) failed 0x%08X\n", fmt, w, h, err); UI_TEX_FAIL(); }
         g.dec_off += need; as_bc = 1;
     } else {
-        uint32_t need = ALIGN_UP(w * h * 4u, 64);
+        /* decoded RGBA + a box-filtered mip chain (levels packed after level 0, as GXM lays out linear
+         * mips): without mips the 1024x512 hull plating aliased into streaks at grazing angles, and mips
+         * cut texture bandwidth on the real GPU */
+        unsigned levels = 1; { unsigned lw = w, lh = h; while (lw > 1 && lh > 1 && levels < 12) { lw >>= 1; lh >>= 1; levels++; } }
+        uint32_t need = 0; { unsigned lw = w, lh = h; for (unsigned l = 0; l < levels; ++l) { need += lw * lh * 4u; lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1; } }
+        need = ALIGN_UP(need, 64);
         if (g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
         uint32_t *dst = (uint32_t *)(g.dec_base + g.dec_off);
         if (ui_decode(src, fmt, w, h, pitch ? pitch : w * bpp, linear, dst) != 0) {
             UI_LOG("unhandled tex fmt %02X (%ux%u)\n", fmt, w, h); UI_TEX_FAIL();
+        }
+        {   /* XV_TEXDUMP=<min width>: write decoded textures as PPM to ux0:data/xboxvita/texdump/ */
+            static int dump_min = -1; if (dump_min < 0) { const char *e = getenv("XV_TEXDUMP"); dump_min = e ? atoi(e) : 0; if (e && dump_min <= 0) dump_min = 1; }
+            if (dump_min > 0 && (int)w >= dump_min) {
+                char path[128]; sceIoMkdir("ux0:data/xboxvita/texdump", 0777);
+                sceClibSnprintf(path, sizeof path, "ux0:data/xboxvita/texdump/%08X_%02X_%ux%u_m%u.ppm", data, fmt, w, h, mips);
+                SceUID fd = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+                if (fd >= 0) { char hdr[32]; int n = sceClibSnprintf(hdr, sizeof hdr, "P6\n%u %u\n255\n", w, h); sceIoWrite(fd, hdr, n);
+                    static uint8_t row[4096 * 3]; for (unsigned y = 0; y < h; ++y) { for (unsigned x = 0; x < w && x < 4096; ++x) { uint32_t p = dst[y * w + x]; row[x * 3] = p & 0xFF; row[x * 3 + 1] = (p >> 8) & 0xFF; row[x * 3 + 2] = (p >> 16) & 0xFF; } sceIoWrite(fd, row, (w < 4096 ? w : 4096) * 3); }
+                    sceIoClose(fd); }
+            }
         }
         if (coverage) {                                   /* L8 for the UI path: coverage -> alpha, RGB white */
             for (unsigned i = 0, N = w * h; i < N; ++i) dst[i] = ((dst[i] & 0xFFu) << 24) | 0x00FFFFFFu;
@@ -328,9 +387,23 @@ static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage)
             for (unsigned i = 0; i < N; ++i) { if (dst[i] & 0x00FFFFFFu) rgbnz++; if (dst[i] >> 24) anz++; }
             if (anz > 16 && rgbnz * 20u < anz) for (unsigned i = 0; i < N; ++i) dst[i] |= 0x00FFFFFFu;
         }
-        xv_gpu_flush(dst, w * h * 4u);
-        err = sceGxmTextureInitLinear(&e->tex, dst, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, 0);
-        if (err != SCE_OK) { UI_LOG("textureInitLinear(%ux%u) failed 0x%08X\n", w, h, err); UI_TEX_FAIL(); }
+        {   /* mip chain: 2x2 box filter per channel */
+            const uint32_t *prev = dst; unsigned pw = w, ph = h; uint32_t *lvl = dst + w * h;
+            for (unsigned l = 1; l < levels; ++l) {
+                unsigned nw = pw >> 1, nh = ph >> 1;
+                for (unsigned y = 0; y < nh; ++y) for (unsigned x = 0; x < nw; ++x) {
+                    uint32_t a = prev[(2 * y) * pw + 2 * x], b = prev[(2 * y) * pw + 2 * x + 1], c2 = prev[(2 * y + 1) * pw + 2 * x], d2 = prev[(2 * y + 1) * pw + 2 * x + 1];
+                    uint32_t o = 0;
+                    for (unsigned sh = 0; sh < 32; sh += 8) o |= ((((a >> sh) & 0xFF) + ((b >> sh) & 0xFF) + ((c2 >> sh) & 0xFF) + ((d2 >> sh) & 0xFF) + 2) >> 2) << sh;
+                    lvl[y * nw + x] = o;
+                }
+                prev = lvl; lvl += nw * nh; pw = nw; ph = nh;
+            }
+        }
+        xv_gpu_flush(dst, need);
+        err = sceGxmTextureInitLinear(&e->tex, dst, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, levels);
+        if (err != SCE_OK) { UI_LOG("textureInitLinear(%ux%u, %u mips) failed 0x%08X\n", w, h, levels, err); UI_TEX_FAIL(); }
+        sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
         g.dec_off += need;
     }
     e->data = data; e->fmtword = fmtword; e->valid = 1; g.texcount++;
@@ -342,7 +415,7 @@ static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage)
         e->sum = ui_tex_hash(src, e->bytes);
     }
     { static unsigned n; if (n++ < 24) UI_LOG("tex fmt %02X %ux%u -> %s (%u KB used)\n", fmt, w, h, as_bc ? "BC" : "RGBA", g.dec_off >> 10); }
-    sceGxmTextureSetMinFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
+    sceGxmTextureSetMinFilter(&e->tex, as_bc ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_MIPMAP_LINEAR);
     sceGxmTextureSetMagFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
     sceGxmTextureSetUAddrMode(&e->tex, SCE_GXM_TEXTURE_ADDR_REPEAT);
     sceGxmTextureSetVAddrMode(&e->tex, SCE_GXM_TEXTURE_ADDR_REPEAT);

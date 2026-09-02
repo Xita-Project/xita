@@ -119,6 +119,15 @@ static struct { uint32_t vblank_cb, swap_cb; unsigned frame, draws, draws_total,
 static int g_hist_frame = -2;
 static float g_vp_rows[4][4]; static unsigned g_vp_frame = 0xFFFFFFFFu;   /* view-projection of the frame's first world draw */
 static struct { uint32_t m; unsigned n; uint32_t last; } g_hm[128]; static unsigned g_nhm;   /* NV2A methods poked in the hist frame */
+/* XV_D3D_HIST=<frame> traces an absolute frame; XV_D3D_HIST_LEVEL=<n> traces the n-th frame after a
+ * non-UI map started streaming (level loads take a variable number of frames, this does not drift) */
+static int hist_level_rel = -1, hist_level_base = -1;
+static void hist_level_track(void)
+{
+    if (hist_level_rel == -1) { const char *e = getenv("XV_D3D_HIST_LEVEL"); hist_level_rel = e ? atoi(e) : -2; }
+    if (hist_level_rel < 0 || hist_level_base >= 0) return;
+    if (!xk_file_in_ui_map) { hist_level_base = (int)g_dev.frame; g_hist_frame = hist_level_base + hist_level_rel; D3DLOG("hist: level started at frame %d, tracing frame %d\n", hist_level_base, g_hist_frame); }
+}
 int xd3d_hist_active(void)
 {
     if (g_hist_frame == -2) { const char *e = getenv("XV_D3D_HIST"); g_hist_frame = e ? atoi(e) : -1; }
@@ -227,6 +236,7 @@ void xv_hle_D3DDevice_GetTransform(xctx *c) { XD3D_COUNT("D3DDevice_GetTransform
 void xv_hle_D3DDevice_Present(xctx *c)
 { XD3D_COUNT("D3DDevice_Present");
     g_dev.frame++;
+    hist_level_track();
     xd3d_r_present(g_dev.frame, g_dev.draws);
     if (g_dev.frame % 60 == 0) { uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */

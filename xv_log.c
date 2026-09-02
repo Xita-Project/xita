@@ -28,6 +28,11 @@ void xv_logf(const char *fmt, ...)
     if (g_fd == -2) {
         sceIoMkdir("ux0:data", 0777);
         sceIoMkdir("ux0:data/xboxvita", 0777);
+        /* keep the last three runs: .log -> .1.log -> .2.log -> .3.log (a hardware session is evidence) */
+        sceIoRemove("ux0:data/xboxvita/xboxvita.3.log");
+        sceIoRename("ux0:data/xboxvita/xboxvita.2.log", "ux0:data/xboxvita/xboxvita.3.log");
+        sceIoRename("ux0:data/xboxvita/xboxvita.1.log", "ux0:data/xboxvita/xboxvita.2.log");
+        sceIoRename("ux0:data/xboxvita/xboxvita.log",   "ux0:data/xboxvita/xboxvita.1.log");
         g_fd = sceIoOpen("ux0:data/xboxvita/xboxvita.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
     }
     if (g_fd >= 0) sceIoWrite(g_fd, buf, (SceSize)n);

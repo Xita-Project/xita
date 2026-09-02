@@ -536,6 +536,7 @@ static int prim_to_gxm(uint32_t prim, uint32_t *count, const void **indices, uin
 
 int xd3d_hist_active(void) __attribute__((weak));
 static int trace_frame(void) { return xd3d_hist_active && xd3d_hist_active(); }
+static const SceGxmTexture *cube_fallback(void);
 
 
 static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint32_t base_vertex)
@@ -633,6 +634,12 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             c->tex[t] = *tex;
             c->ntex = (uint8_t)(t + 1);
             texok |= 1u << t;
+        }
+    }
+    if (c->ps_entry >= 0 && xv_ps_table[c->ps_entry].cube_mask) {
+        for (unsigned t = 0; t < 4; ++t) if (xv_ps_table[c->ps_entry].cube_mask & (1u << t)) {
+            int have_cube = (texok & (1u << t)) && sceGxmTextureGetType(&c->tex[t]) == SCE_GXM_TEXTURE_CUBE;
+            if (!have_cube) { const SceGxmTexture *fb = cube_fallback(); if (fb) { c->tex[t] = *fb; if (c->ntex < t + 1) c->ntex = (uint8_t)(t + 1); } }
         }
     }
     if (trace_frame()) {
@@ -773,6 +780,25 @@ static SceGxmFragmentProgram *fragment_for(vs_slot_t *v, unsigned kind, unsigned
     }
     (void)p_tex0;
     return v->fs[kind][blend].fprog;
+}
+
+/* A cube sampler must see a cube texture control word: when the game has a 2D texture (or nothing) on a
+ * stage the combiner reads as a cube map, bind this neutral grey 8x8x6 cube instead of risking the GPU. */
+static SceGxmTexture g_cube_fallback; static int g_cube_fallback_ok = -1;
+static const SceGxmTexture *cube_fallback(void)
+{
+    if (g_cube_fallback_ok < 0) {
+        SceUID uid = sceKernelAllocMemBlock("xv_cube_fb", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, 4096, NULL);
+        void *mem = NULL; g_cube_fallback_ok = 0;
+        if (uid >= 0) {
+            sceKernelGetMemBlockBase(uid, &mem);
+            if (sceGxmMapMemory(mem, 4096, SCE_GXM_MEMORY_ATTRIB_READ) == SCE_OK) {
+                uint32_t *p = mem; for (int i = 0; i < 6 * 8 * 8; ++i) p[i] = 0xFF808080u;
+                g_cube_fallback_ok = sceGxmTextureInitCube(&g_cube_fallback, mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, 8, 8, 1) == SCE_OK;
+            }
+        }
+    }
+    return g_cube_fallback_ok ? &g_cube_fallback : NULL;
 }
 
 /* combiner program from the table; NULL when it cannot be linked (caller falls back to fragment_for) */

@@ -14,7 +14,6 @@
 //    final rgb  : zero.rgb * zero.rgb + (1 - zero.rgb) * zero.rgb + r0.rgb<unsigned_invert>
 //    final alpha: r1.b
 //    final ef_prod = zero.rgb * zero.rgb
-//  ! t3 CUBEMAP approximated as a normalisation cube (normalize(oT3) * 0.5 + 0.5)
 // ---------------------------------------------------------------------------
 
 struct VertOut
@@ -25,7 +24,7 @@ struct VertOut
     float4 texcoord1   : TEXCOORD1;
 };
 
-float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform sampler2D tex2, uniform float4 psc[18], uniform float4 xv_fogcolor) : COLOR
+float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform sampler2D tex2, uniform samplerCUBE tex3, uniform float4 psc[18], uniform float4 xv_fogcolor) : COLOR
 {
     // ---- inputs (varyings the vertex program does not write read as NV2A defaults)
     float4 v0 = IN.color0, v1 = float4(0.0, 0.0, 0.0, 0.0);
@@ -34,7 +33,7 @@ float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform 
     float4 t0 = tex2D(tex0, IN.texcoord0.xy);
     float4 t1 = tex2D(tex1, IN.texcoord1.xy);
     float4 t2 = tex2D(tex2, float4(0.0, 0.0, 0.0, 1.0).xy);
-    float4 t3 = float4(normalize(float4(0.0, 0.0, 0.0, 1.0).xyz) * 0.5 + 0.5, 1.0);
+    float4 t3 = texCUBE(tex3, float4(0.0, 0.0, 0.0, 1.0).xyz);
     // ---- combiner stage 0
     {
         float3 A = saturate(v0.aaa), B = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).rgb)), C = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), D = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb);

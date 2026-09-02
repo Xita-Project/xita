@@ -82,6 +82,7 @@ class GenError(Exception):
 
 
 SAME_C = [False, False]              # set per def by generate()
+CUBE_EXPR = None                     # None = real texCUBE; --cube normal|const|black substitute an expression
 VARYINGS_AVAILABLE: Optional[Set[str]] = None   # --varyings: what the paired vertex program outputs
 
 
@@ -175,10 +176,12 @@ def emit_textures(d: dict, L: List[str], samplers: Dict[int, str], warnings: Lis
             samplers[i] = "sampler2D"
             L.append(f"    float4 t{i} = tex2Dproj(tex{i}, float3({tc}.xy, {tc}.w));")
         elif mode == "CUBEMAP":
-            # The runtime has no cube textures yet.  Halo's cube maps are mostly normalisation maps
-            # (bump-light vectors), which this expression IS; reflection cubes come out as a flat normal.
-            warnings.append(f"t{i} CUBEMAP approximated as a normalisation cube (normalize(oT{i}) * 0.5 + 0.5)")
-            L.append(f"    float4 t{i} = float4(normalize({tc}.xyz) * 0.5 + 0.5, 1.0);")
+            if CUBE_EXPR is None:
+                samplers[i] = "samplerCUBE"
+                L.append(f"    float4 t{i} = texCUBE(tex{i}, {tc}.xyz);")
+            else:
+                warnings.append(f"t{i} CUBEMAP replaced by a stand-in expression")
+                L.append(f"    float4 t{i} = {CUBE_EXPR.format(tc=tc)};")
         elif mode == "PASSTHRU":
             L.append(f"    float4 t{i} = saturate({tc});")
         elif mode == "CLIPPLANE":
@@ -327,8 +330,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--varyings", help="comma list of varyings the vertex program outputs (color0,color1,texcoord0..3,fog); "
                                        "others are not declared (GXM refuses fragment inputs the vertex program lacks)")
     ap.add_argument("--name", help="output name for a single def (instead of <prefix>_NN)")
+    ap.add_argument("--cube", default="real", help="CUBEMAP handling: real (texCUBE) | normal (normalisation-cube stand-in) | const | black")
     args = ap.parse_args(argv)
-    global VARYINGS_AVAILABLE
+    global VARYINGS_AVAILABLE, CUBE_EXPR
+    if args.cube == "const": CUBE_EXPR = "float4(0.5, 0.5, 0.5, 1.0)"
+    elif args.cube == "black": CUBE_EXPR = "float4(0.0, 0.0, 0.0, 1.0)"
+    elif args.cube == "normal": CUBE_EXPR = "float4(normalize({tc}.xyz) * 0.5 + 0.5, 1.0)"
     if args.varyings is not None:
         VARYINGS_AVAILABLE = set(v for v in args.varyings.split(",") if v)
 
