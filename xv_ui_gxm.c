@@ -71,7 +71,7 @@ typedef struct {
 } ui_frame;
 
 /* built texture control words, cached by (guest data pointer, format word) */
-typedef struct { uint32_t data, fmtword; SceGxmTexture tex; int valid; uint32_t sum, bytes; unsigned checked; int16_t next; } ui_tex_entry;   /* sum: content hash of dynamic textures; next: hash chain */
+typedef struct { uint32_t data, fmtword, palsum; SceGxmTexture tex; int valid; uint32_t sum, bytes; unsigned checked; int16_t next; } ui_tex_entry;   /* palsum: hash of the P8 palette used (0 = none) */   /* sum: content hash of dynamic textures; next: hash chain */
 
 /* one UI vertex program + the fragment programs linked against it (one per texcoord set it writes) */
 typedef struct {
@@ -159,6 +159,8 @@ static void ui_dxt(const uint8_t *s, int fmt, uint32_t out[16]){
         for(int i=0;i<16;i++){ unsigned code=(ab>>(i*3))&7,a; if(code==0)a=a0; else if(code==1)a=a1; else if(a0>a1)a=((8-code)*a0+(code-1)*a1)/7; else if(code==6)a=0; else if(code==7)a=255; else a=((6-code)*a0+(code-1)*a1)/5; out[i]=(out[i]&0x00FFFFFFu)|(a<<24);} }
 }
 /* decode guest texture -> dst (w*h RGBA8, bytes R,G,B,A). Returns 0 on success. */
+static const uint32_t *g_cur_pal;       /* palette (guest memory, D3DCOLOR) for the P8 texture being decoded */
+static uint32_t g_cur_palsum;
 static int ui_decode(const uint8_t *src, unsigned fmt, unsigned w, unsigned h, unsigned pitch, int linear, uint32_t *dst)
 {
     if (fmt==0x0C || fmt==0x0E || fmt==0x0F) {                         /* DXT: linear 4x4 block order */
@@ -181,6 +183,9 @@ static int ui_decode(const uint8_t *src, unsigned fmt, unsigned w, unsigned h, u
     } else if (fmt==0x10 || fmt==0x11 || fmt==0x1C || fmt==0x1D) {    /* linear 16-bit */
         for (unsigned y=0;y<h;y++) for (unsigned x=0;x<w;x++){ uint16_t v=src[y*pitch+x*2]|(src[y*pitch+x*2+1]<<8);
             dst[y*w+x]= fmt==0x11?ui_c565(v): fmt==0x1D?ui_c4444(v): ui_c1555(v); }
+    } else if (fmt==0x0B && g_cur_pal) {                              /* P8 swizzled through the bound palette (D3DCOLOR ARGB) */
+        for (unsigned i=0;i<w*h;i++){ unsigned x,y; ui_unswz(w,h,i,&x,&y); uint32_t p=g_cur_pal[src[i]];
+            if(x<w&&y<h) dst[y*w+x]=(p&0xFF000000u)|((p&0xFF)<<16)|(p&0xFF00)|((p>>16)&0xFF); }
     } else if (fmt==0x0B || fmt==0x00 || fmt==0x19 || fmt==0x01) {   /* 8-bit swizzled: L8/P8, A8, AL8 */
         for (unsigned i=0;i<w*h;i++){ unsigned x,y; ui_unswz(w,h,i,&x,&y); uint8_t l=src[i];
             if(x<w&&y<h) dst[y*w+x]= fmt==0x19 ? ((uint32_t)l<<24)|0x00FFFFFF : fmt==0x01 ? ((uint32_t)l<<24)|(l<<16)|(l<<8)|l : 0xFF000000u|(l<<16)|(l<<8)|l; }
@@ -246,7 +251,9 @@ static int ui_is_pow2(unsigned v) { return v && !(v & (v - 1)); }
 /* coverage != 0: the UI quad path wants luminance-only formats (L8) as RGB=white, A=L - its fixed fragment
  * programs modulate by alpha and cannot read .b the way Halo's combiners do for the font cache.  The mesh
  * path (real combiner programs) gets the faithful NV2A sample (L,L,L,1).  Cached separately. */
-static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage)
+static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint32_t pal_guest);
+static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage) { return ui_texture_for_pal(hdr, coverage, 0); }
+static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint32_t pal_guest)
 {
     if (!hdr) return NULL;
     uint32_t data = guest_u32(hdr + 4);              /* X_D3DPixelContainer.Data (guest phys) */
@@ -255,7 +262,11 @@ static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage)
     if (!data) return NULL;
 
     unsigned fmt0 = (fmtword >> 8) & 0xFF;
-    int lum_only = (fmt0 == 0x00 || fmt0 == 0x13 || fmt0 == 0x0B);        /* L8 swz, LIN_L8, P8-as-L8 */
+    /* P8 with a palette bound: decode through it (bump maps hold normals in the palette); its identity is
+     * part of the cache key.  Without a palette P8 falls back to luminance. */
+    g_cur_pal = NULL; g_cur_palsum = 0;
+    if (fmt0 == 0x0B && pal_guest) { g_cur_pal = (const uint32_t *)X_G(pal_guest); g_cur_palsum = ui_tex_hash((const uint8_t *)g_cur_pal, 1024) | 1u; }
+    int lum_only = (fmt0 == 0x00 || fmt0 == 0x13 || (fmt0 == 0x0B && !g_cur_pal));        /* L8 swz, LIN_L8, P8-as-L8 */
     if (!lum_only) coverage = 0;
     if (coverage) fmtword |= 0x80000000u;                                 /* separate cache identity */
     /* Textures the game creates at run time (headers live in the kernel heap, e.g. the 128x128 font cache
@@ -264,7 +275,7 @@ static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage)
     int dynamic = hdr >= 0x03D00000u;
     unsigned bucket = ((data ^ (fmtword * 2654435761u)) >> 7) & 1023u;
     for (int16_t i = g.texhash[bucket]; i >= 0; i = g.texcache[i].next)
-        if (g.texcache[i].valid && g.texcache[i].data == data && g.texcache[i].fmtword == fmtword) {
+        if (g.texcache[i].valid && g.texcache[i].data == data && g.texcache[i].fmtword == fmtword && g.texcache[i].palsum == g_cur_palsum) {
             ui_tex_entry *e = &g.texcache[i];
             if (dynamic && e->bytes && e->checked != g.rec_frame) {
                 e->checked = g.rec_frame;
@@ -317,7 +328,7 @@ static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage)
         int err = sceGxmTextureInitCube(&e->tex, dst, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, 1);
         if (err != SCE_OK) { UI_LOG("textureInitCube(%ux%u fmt %02X) failed 0x%08X\n", w, h, fmt, err); UI_TEX_FAIL(); }
         g.dec_off += need;
-        e->data = data; e->fmtword = fmtword; e->valid = 1; g.texcount++;
+        e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1; g.texcount++;
         e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache);
         e->bytes = 0; e->sum = 0; e->checked = g.rec_frame;
         { static unsigned n; if (n++ < 8) UI_LOG("cube map fmt %02X %ux%u x6 (face stride %u) -> cube texture\n", fmt, w, h, face_bytes); }
@@ -406,7 +417,7 @@ static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage)
         sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
         g.dec_off += need;
     }
-    e->data = data; e->fmtword = fmtword; e->valid = 1; g.texcount++;
+    e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1; g.texcount++;
     e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache);
     e->bytes = 0; e->sum = 0; e->checked = g.rec_frame;
     if (dynamic) {                                                    /* size of the source level we consumed */
@@ -437,6 +448,7 @@ static void ui_tex_purge_if_needed(unsigned frame)
 }
 
 const SceGxmTexture *xv_ui_gxm_texture(uint32_t hdr) { return g.ready ? ui_texture_for(hdr, 0) : NULL; }
+const SceGxmTexture *xv_ui_gxm_texture_pal(uint32_t hdr, uint32_t pal_guest) { return g.ready ? ui_texture_for_pal(hdr, 0, pal_guest) : NULL; }
 
 /* ---- init ------------------------------------------------------------------------------------- */
 /* How many texcoord sets each known UI microcode writes (fragment programs are linked per set):
@@ -649,6 +661,29 @@ static unsigned ovl_number(clr_vtx *v, unsigned n, unsigned val, float x_end, fl
     for (int i = digits - 1; i >= 0; --i) { n = ovl_digit(v, n, (int)(val % 10), x + i * adv, y, s, col); val /= 10; }
     return n;
 }
+/* Loading screen drawn with the clear program: black ground, a thin progress bar, percentage digits. */
+void xv_ui_gxm_loading(SceGxmContext *ctx, float progress)
+{
+    if (!g.ready) return;
+    static unsigned parity; parity ^= 1;
+    clr_vtx *v = &g.clrbuf[parity * (4 + OVL_MAX_QUADS * 4) + 4]; unsigned n = 0;
+    if (progress < 0) progress = 0; if (progress > 1) progress = 1;
+    n = ovl_rect(v, n, 0, 0, 960, 544, 0xFF000000u);                                   /* ground */
+    n = ovl_rect(v, n, 280, 300, 400, 6, 0xFF243040u);                                 /* track */
+    n = ovl_rect(v, n, 280, 300, 400 * progress, 6, 0xFF5CC8FFu);                      /* fill */
+    n = ovl_number(v, n, (unsigned)(progress * 100 + 0.5f), 690 + 44, 282, 10, 0xFF8A98A8u, 1);   /* % */
+    n = ovl_rect(v, n, 736, 296, 3, 3, 0xFF8A98A8u); n = ovl_rect(v, n, 736, 289, 3, 3, 0xFF8A98A8u);   /* two dots: "%" */
+    xv_gpu_flush(v, n * sizeof(clr_vtx));
+    sceGxmSetViewport(ctx, 480.0f, 480.0f, 272.0f, -272.0f, 0.5f, 0.5f);
+    sceGxmSetFrontDepthFunc(ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(ctx, SCE_GXM_DEPTH_WRITE_DISABLED);
+    sceGxmSetCullMode(ctx, SCE_GXM_CULL_NONE);
+    xv_shader_bind(ctx, &g.clear_vs, &g.clear_fs);
+    const void *streams[1] = { v };
+    xv_vshader_set_streams(ctx, &g.clear_vs, streams);
+    sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, (n / 4) * 6);
+}
+
 static void xv_ui_gxm_overlay(SceGxmContext *ctx, int32_t idx)
 {
     if (g_xv_overlay_on < 0) { const char *e = getenv("XV_FPS"); g_xv_overlay_on = e ? atoi(e) != 0 : 0; }
@@ -775,6 +810,7 @@ void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t d
     for (unsigned i = 0; i < 4; ++i) {
         xv_d3d_SetStreamSource(i, xd3d_state.stream_vb[i], xd3d_state.stream_stride[i]);
         xv_d3d_SetTexture(i, xd3d_state.texture[i]);
+        xv_d3d_SetTexturePalette(i, xd3d_state.palette[i]);
     }
     /* the kernel model keeps the NV2A/GL tokens the game wrote; xv_d3d speaks D3D enums */
     xv_d3d_SetRenderState_ZEnable(xd3d_state.z_enable);

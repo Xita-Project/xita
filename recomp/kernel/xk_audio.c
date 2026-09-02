@@ -7,6 +7,9 @@
 
 static xa_voice g_v[XA_MAX_VOICES];
 static int g_available;
+static volatile uint64_t g_last_mix_us;
+extern uint64_t xk_os_monotonic_us(void);
+uint64_t xk_audio_last_mix_us(void) { return g_last_mix_us; }
 static int g_master_pct = 50;                 /* -6 dB headroom: Xbox DirectSound mixes a dozen voices without clipping */
 
 /* ---- Xbox ADPCM (IMA, 64 samples per block, 36 bytes per channel per block) ---------------------- */
@@ -213,6 +216,7 @@ void xk_audio_mix(int16_t *out, int frames)
         }
     }
     xk_audio_unlock();
+    g_last_mix_us = xk_os_monotonic_us();
     for (int k = 0; k < frames * 2; ++k) { int32_t s = acc[k]; out[k] = (int16_t)(s > 32767 ? 32767 : s < -32768 ? -32768 : s); }
 }
 

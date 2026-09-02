@@ -188,12 +188,11 @@ void xk_os_audio_write(const int16_t *stereo, int frames)
     if (g_wav) { fwrite(stereo, 4, (size_t)frames, g_wav); g_wav_bytes += (uint32_t)frames * 4; if ((g_wav_bytes & 0x3FFFF) < (uint32_t)frames * 4) wav_header(g_wav, g_wav_bytes, g_audio_rate); fseek(g_wav, 0, SEEK_END); }
     xk_os_sleep_us((uint64_t)frames * 1000000ull / (uint64_t)g_audio_rate);
 }
-static void *audio_thread_main(void *arg) { void (**fn)(void *) = arg; (*fn)(NULL); return NULL; }
-static void (*g_audio_fn)(void *);
+static void *audio_thread_main(void *arg) { void (*fn)(void *) = (void (*)(void *))arg; fn(NULL); return NULL; }
 int xk_os_audio_thread_start(void (*fn)(void *), void *arg)
 {
-    (void)arg; g_audio_fn = fn; pthread_t t;
-    return pthread_create(&t, NULL, audio_thread_main, &g_audio_fn) == 0 ? 0 : -1;
+    (void)arg; pthread_t t;
+    return pthread_create(&t, NULL, audio_thread_main, (void *)fn) == 0 ? 0 : -1;
 }
 void xk_os_audio_mutex_lock(void)   { pthread_mutex_lock(&g_audio_mutex); }
 void xk_os_audio_mutex_unlock(void) { pthread_mutex_unlock(&g_audio_mutex); }

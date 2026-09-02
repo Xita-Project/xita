@@ -29,8 +29,24 @@ static uint32_t data_export_var(unsigned ordinal)
     }
 }
 
+/* XV_LEVEL=<code>: level select without a save.  The campaign's first entry is the scenario name string
+ * "levels\a10\a10" in three level tables inside the image; overwriting it with e.g. "levels\b30\b30"
+ * (same length: all campaign codes are three characters) makes "The Pillar of Autumn" start that level
+ * through the game's own cache lookup, so the cache validation that defeated a file-level redirect passes. */
+static void xk_level_select(void)
+{
+    const char *lvl = getenv("XV_LEVEL");
+    if (!lvl || strlen(lvl) != 3 || !strcmp(lvl, "a10")) return;
+    static const uint32_t sites[] = { 0x002078A8u, 0x002091ECu, 0x0020F938u };   /* Halo 3925 level tables */
+    char to[16]; snprintf(to, sizeof to, "levels\\%s\\%s", lvl, lvl);
+    int n = 0;
+    for (unsigned i = 0; i < 3; ++i) if (memcmp(X_G(sites[i]), "levels\\a10\\a10", 14) == 0) { memcpy(X_G(sites[i]), to, 14); n++; }
+    XK_LOG("level select: %s patched into %d table(s) - campaign mission 1 now loads it\n", to, n);
+}
+
 void xk_thunks_init(void)
 {
+    xk_level_select();
     xk_var_KeTickCount = xk_kalloc(4);
     xk_var_XboxHardwareInfo = xk_kalloc(16);        /* { Flags, GpuRevision, McpRevision, reserved } */
     X_M32(xk_var_XboxHardwareInfo) = 0x00000002u;   /* XBOX_HW_FLAG_INTERNAL_USB_HUB? keep retail bits: 0 */

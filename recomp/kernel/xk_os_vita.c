@@ -339,6 +339,7 @@ void xk_os_pad_poll(xk_os_pad *p)
         int in_control = !xk_file_in_ui_map && gg && !X_M8(gg + 2);
         { static unsigned n; if ((n++ % 600) == 0) xv_logf("[xk] pad raw lx %u ly %u rx %u ry %u buttons %08X | ui_map %d paused %d -> extras %d\n", d.lx, d.ly, d.rx, d.ry, d.buttons, xk_file_in_ui_map, gg ? X_M8(gg + 2) : -1, in_control); }
         if (in_control) {
+            b &= ~0xFu;                                              /* in-game the D-pad bits are NOT passed: the game does move the player with them */
             if (d.buttons & SCE_CTRL_DOWN) b |= 0x40;                /* LTHUMB */
             if (d.buttons & SCE_CTRL_UP) b |= 0x80;                  /* RTHUMB */
             p->analog[4] = (d.buttons & SCE_CTRL_LEFT) ? 255 : 0;   /* BLACK */
@@ -380,14 +381,16 @@ void xk_os_audio_write(const int16_t *stereo, int frames)
     if (g_audio_port >= 0) sceAudioOutOutput(g_audio_port, stereo);      /* blocks until the previous grain drained */
     else sceKernelDelayThread(23000);
 }
-static int audio_thread_main(SceSize args, void *argp) { (void)args; void (**fn)(void *) = argp; (*fn)(NULL); return 0; }
-static void (*g_audio_fn)(void *);
+/* sceKernelStartThread copies the argument block, so each thread gets its own entry pointer - a shared
+ * static here made the profiler and the mixer race for the same slot (two mixers = buzzing audio). */
+static int audio_thread_main(SceSize args, void *argp) { (void)args; void (*fn)(void *) = *(void (**)(void *))argp; fn(NULL); return 0; }
 int xk_os_audio_thread_start(void (*fn)(void *), void *arg)
 {
-    (void)arg; g_audio_fn = fn;
-    SceUID t = sceKernelCreateThread("xv_audio", audio_thread_main, 64, 64 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_ALL, NULL);
-    if (t < 0) { xv_logf("[xk] audio thread create failed 0x%08X\n", t); return -1; }
-    int r = sceKernelStartThread(t, sizeof g_audio_fn, &g_audio_fn);
+    (void)arg; static unsigned nth; char name[16]; snprintf(name, sizeof name, "xv_worker%u", nth++);
+    SceUID t = sceKernelCreateThread(name, audio_thread_main, 64, 64 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_ALL, NULL);
+    if (t < 0) { xv_logf("[xk] thread %s create failed 0x%08X\n", name, t); return -1; }
+    void (*fnv)(void *) = fn;
+    int r = sceKernelStartThread(t, sizeof fnv, &fnv);
     xv_logf("[xk] audio thread %s (0x%08X)\n", r < 0 ? "START FAILED" : "running", r);
     return r < 0 ? -1 : 0;
 }

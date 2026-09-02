@@ -304,10 +304,15 @@ RECOMP_SRCS  := $(wildcard $(RECOMP_DIR)/code_*.c) $(RECOMP_DIR)/xv_fn_table.c $
 RECOMP_OBJS  := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(RECOMP_SRCS))
 RECOMP_CFLAGS := -O2 -fno-strict-aliasing -mthumb -mcpu=cortex-a9 -mfpu=neon -w -std=gnu11 -I$(RECOMP_DIR) -I$(RECOMP_DIR)/kernel
 
-# every recomp object depends on the runtime headers (X_M* macros live there) - no -MMD for these
-$(RECOMP_BUILD)/%.o: $(RECOMP_DIR)/%.c $(wildcard $(RECOMP_DIR)/*.h $(RECOMP_DIR)/kernel/*.h)
+# lifted code (code_*.c) only includes xv_recomp_protos.h -> xv_x86rt.h; the kernel/HLE objects use -MMD
+# so a kernel header edit does not recompile the ~35 MB of generated code.
+$(RECOMP_BUILD)/code_%.o: $(RECOMP_DIR)/code_%.c $(RECOMP_DIR)/xv_recomp_protos.h $(RECOMP_DIR)/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(CC) $(RECOMP_CFLAGS) -c $< -o $@
+$(RECOMP_BUILD)/%.o: $(RECOMP_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(RECOMP_CFLAGS) -MMD -MP -c $< -o $@
+-include $(RECOMP_OBJS:.o=.d)
 
 $(RECOMP_BUILD)/librecomp.a: $(RECOMP_OBJS)
 	$(PREFIX)-gcc-ar rcs $@ $^

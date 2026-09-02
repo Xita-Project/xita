@@ -19,7 +19,7 @@
 
 #define XV_MAX_VS        96          /* vertex shader handles                          */
 #define XV_MAX_CMDS      2048        /* draws + clears per frame                       */
-#define XV_CONST_POOL    (48 * 1024) /* floats per list: c[] snapshots                 */
+#define XV_CONST_POOL    (256 * 1024) /* floats per list: c[] snapshots (1 MB; full-window programs = 768 floats each) */
 #define XV_TEX_CACHE     512         /* texture control words                          */
 #define XV_CLEAR_SLOTS   16          /* clear quads per frame                          */
 #define XV_SEQ_INDICES   65536       /* sequential u16 indices for DrawVertices        */
@@ -92,6 +92,8 @@ typedef struct {
     unsigned  ncmds;
     float     consts[XV_CONST_POOL];
     unsigned  nconsts;              /* floats used                                    */
+    unsigned  last_gen, last_off, last_n; int last_base;   /* previous snapshot: reused while c[] is unchanged */
+    unsigned  const_dropped;
     unsigned  dropped;
     rt_pass_t passes[XV_MAX_PASSES];
     unsigned  npasses, cur_pass;    /* cur_pass: 0 = back buffer, else index+1        */
@@ -103,7 +105,9 @@ typedef struct {
 typedef struct {
     uint32_t stream_guest[XV_MAX_STREAMS];   /* X_D3DResource guest addresses           */
     unsigned stream_stride[XV_MAX_STREAMS];
+    unsigned vsc_gen;                                         /* bumps whenever SetAllConstants changes c[] */
     uint32_t tex_guest[4];
+    uint32_t pal_guest[4];                                    /* SetPalette per stage (P8 textures) */
     uint8_t  tex_min[4], tex_mag[4], tex_addr_u[4], tex_addr_v[4];
     uint32_t vs_handle;
     float    vsc[192][4];                    /* c[-96..95] as D3D exposes them          */
@@ -288,6 +292,11 @@ void xv_d3d_SetTexture(unsigned stage, uint32_t tex_guest)
     if (stage < 4)
         S.tex_guest[stage] = tex_guest;
 }
+void xv_d3d_SetTexturePalette(unsigned stage, uint32_t pal_guest)
+{
+    if (stage < 4)
+        S.pal_guest[stage] = pal_guest;
+}
 
 void xv_d3d_SetTextureStageState(unsigned stage, unsigned type, uint32_t value)
 {
@@ -385,12 +394,13 @@ static int recording_dropped(void) { return cur_list()->cur_pass == 0xFF; }
 /* Recomp build: the UI bridge owns the texture cache (CPU de-swizzle/DXT decode to linear RGBA - the GPU's
  * twiddle does not match the NV2A layout), so mesh draws borrow its control words. */
 const SceGxmTexture *xv_ui_gxm_texture(uint32_t hdr);
+const SceGxmTexture *xv_ui_gxm_texture_pal(uint32_t hdr, uint32_t pal_guest);
 static const SceGxmTexture *texture_for(unsigned stage)
 {
     static SceGxmTexture t[4];
     const SceGxmTexture *src = NULL;
     if (g_rt_n) { rt_alias_t *r = rt_find(*(const uint32_t *)xv_guest_ptr(S.tex_guest[stage] + 4)); if (r && r->valid) src = &r->tex; }
-    if (!src) src = xv_ui_gxm_texture(S.tex_guest[stage]);
+    if (!src) src = xv_ui_gxm_texture_pal(S.tex_guest[stage], S.pal_guest[stage]);
     if (!src) return NULL;
     t[stage] = *src;
     sceGxmTextureSetMinFilter(&t[stage], S.tex_min[stage] == X_D3DTEXF_POINT ? SCE_GXM_TEXTURE_FILTER_POINT : SCE_GXM_TEXTURE_FILTER_LINEAR);
@@ -611,16 +621,24 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     if (indices)
         xv_gpu_flush(indices, count * 2);
 
-    /* constants: snapshot the window this program reads */
+    /* constants: snapshot the window this program reads.  Consecutive draws with unchanged c[] share one
+     * snapshot (Halo draws hundreds of BSP pieces per frame with full-window programs: 768 floats each) */
     cmdlist_t *l = cur_list();
-    if (v->vs.p_c && l->nconsts + d->c_count * 4 <= XV_CONST_POOL) {
-        c->const_off = l->nconsts / 4;
-        c->const_n = d->c_count;
-        for (unsigned i = 0; i < d->c_count; ++i) {
-            int r = d->c_base + (int)i + 96;
-            const float *src = (r >= 0 && r < 192) ? S.vsc[r] : (const float[4]){ 0, 0, 0, 0 };
-            memcpy(&l->consts[l->nconsts], src, 16);
-            l->nconsts += 4;
+    if (v->vs.p_c) {
+        if (l->nconsts && l->last_gen == S.vsc_gen && l->last_base == d->c_base && l->last_n == d->c_count) {
+            c->const_off = l->last_off; c->const_n = d->c_count;
+        } else if (l->nconsts + d->c_count * 4 <= XV_CONST_POOL) {
+            c->const_off = l->nconsts / 4;
+            c->const_n = d->c_count;
+            for (unsigned i = 0; i < d->c_count; ++i) {
+                int r = d->c_base + (int)i + 96;
+                const float *src = (r >= 0 && r < 192) ? S.vsc[r] : (const float[4]){ 0, 0, 0, 0 };
+                memcpy(&l->consts[l->nconsts], src, 16);
+                l->nconsts += 4;
+            }
+            l->last_gen = S.vsc_gen; l->last_off = c->const_off; l->last_n = d->c_count; l->last_base = d->c_base;
+        } else {
+            l->const_dropped++;               /* drawn with whatever the uniform buffer holds - visible garbage */
         }
     }
 
@@ -653,6 +671,13 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         }
         XV_LOG("[hist]   textures:%s\n", tb);
     }
+    if (trace_frame() && getenv("XV_HIST_CONSTS")) {      /* XV_HIST_CONSTS="12,13,14,24,26": D3D vertex constant registers to print per draw */
+        char cb[512]; int n = 0; const char *e = getenv("XV_HIST_CONSTS");
+        while (*e && n < 440) { int reg = atoi(e); const float *m = S.vsc[96 + (reg < -96 ? -96 : reg > 95 ? 95 : reg)];
+            n += snprintf(cb + n, sizeof cb - n, " c[%d]=%.3f,%.3f,%.3f,%.3f", reg, m[0], m[1], m[2], m[3]);
+            while (*e && *e != ',') e++; if (*e == ',') e++; }
+        XV_LOG("[hist]   consts:%s\n", cb);
+    }
     if (trace_frame() && strstr(d->gxp, getenv("XV_DUMP_VS") ? getenv("XV_DUMP_VS") : "\001") && c->streams[0]) {
         /* first three vertices through the c[0..3] rows the microcode uses for oPos (dph) */
         for (unsigned k = 0; k < 3; ++k) {
@@ -667,8 +692,8 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
           XV_LOG("[hist]   indices @%p (guest ib %08X base %u):%s\n", indices, S.indices_dbg, base_vertex, b); }
     }
     if (trace_frame())
-        XV_LOG("[hist] cmd %u: draw %s ps %08X prim %u n %u base %u tex %08X/%08X/%08X/%08X ntex %u blend %u/%u z %u/%u cull %u c[%d..%d] c0 %.2f %.2f %.2f %.2f\n",
-               l->ncmds - 1, d->gxp, S.ps_hash, prim, count, base_vertex, S.tex_guest[0], S.tex_guest[1], S.tex_guest[2], S.tex_guest[3], c->ntex, S.src_blend, S.dst_blend,
+        XV_LOG("[hist] cmd %u: draw %s ps %08X prim %u n %u base %u tex %08X/%08X/%08X/%08X ntex %u blend %u/%u%s z %u/%u cull %u c[%d..%d] c0 %.2f %.2f %.2f %.2f\n",
+               l->ncmds - 1, d->gxp, S.ps_hash, prim, count, base_vertex, S.tex_guest[0], S.tex_guest[1], S.tex_guest[2], S.tex_guest[3], c->ntex, S.src_blend, S.dst_blend, S.blend_enable ? "" : "(off)",
                S.z_enable, S.z_write, S.cull, d->c_base, d->c_base + (int)d->c_count, S.vsc[96 + d->c_base][0], S.vsc[96 + d->c_base][1], S.vsc[96 + d->c_base][2], S.vsc[96 + d->c_base][3]);
 }
 
@@ -704,15 +729,16 @@ uint32_t xv_d3d_handle_for_hash(uint32_t fnv)
         }
     return 0;
 }
-void xv_d3d_SetAllConstants(const float (*vsc)[4]) { memcpy(S.vsc, vsc, sizeof(S.vsc)); }
+void xv_d3d_SetAllConstants(const float (*vsc)[4]) { if (memcmp(S.vsc, vsc, sizeof(S.vsc)) != 0) { memcpy(S.vsc, vsc, sizeof(S.vsc)); S.vsc_gen++; } }
 void xv_d3d_SetPixelShader(uint32_t hash, const float (*psc)[4]) { S.ps_hash = hash; if (psc) memcpy(S.psc, psc, sizeof(S.psc)); }
 uint32_t xv_d3d_EndFrame(void)
 {
     cmdlist_t *l = cur_list();
     if (l->dropped) XV_LOG("frame %u: %u command(s) dropped (list full)\n", g_build_frame, l->dropped);
+    if (l->const_dropped) XV_LOG("frame %u: %u draw(s) without constants (pool full: %u floats)\n", g_build_frame, l->const_dropped, l->nconsts);
     uint32_t done = g_build_frame++;
     cmdlist_t *next = g_lists[g_build_frame % XV_NUM_LISTS];
-    next->ncmds = 0; next->nconsts = 0; next->dropped = 0; next->npasses = 0; next->cur_pass = 0; g_quad_used[g_build_frame % XV_NUM_LISTS] = 0;
+    next->ncmds = 0; next->nconsts = 0; next->dropped = 0; next->const_dropped = 0; next->npasses = 0; next->cur_pass = 0; g_quad_used[g_build_frame % XV_NUM_LISTS] = 0;
     return done;
 }
 

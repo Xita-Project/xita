@@ -71,7 +71,7 @@ typedef struct xk_obj {
     int        refs;
     uint32_t   guest;        /* guest-visible object body (KEVENT/KTHREAD...) or 0 */
     union {
-        struct { xk_file *f; int is_dir; char *path; int delete_on_close; uint64_t pos; int append; xk_dir *dir; char *pattern; int map_type; char alias_name[32]; } file;   /* alias_name: map name to present in the header (XV_MAP_REDIRECT); map_type: cache header +0x60 (0 sp, 1 mp, 2 ui) once the header was read, else -1 */
+        struct { xk_file *f; int is_dir; char *path; int delete_on_close; uint64_t pos; int append; xk_dir *dir; char *pattern; int map_type; } file;   /* map_type: cache header +0x60 (0 sp, 1 mp, 2 ui) once the header was read, else -1 */
         struct { int signaled; int manual; } event;
         struct { struct xk_thread *owner; int count; int abandoned; } mutant;
         struct { int count; int limit; } sem;

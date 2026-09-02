@@ -48,6 +48,7 @@ typedef struct {
 
 int   xk_audio_init(void);                        /* opens the OS sink + mixer thread; 0 on success, <0 = no audio (mixer still runs silently) */
 int   xk_audio_available(void);
+uint64_t xk_audio_last_mix_us(void);              /* when the mixer last produced a grain (0 = never) */
 void  xk_audio_lock(void);
 void  xk_audio_unlock(void);
 

@@ -217,7 +217,7 @@ void xv_hle_D3DDevice_SetVerticalBlankCallback(xctx *c)
 void xv_hle_D3DDevice_PersistDisplay(xctx *c) { XD3D_COUNT("D3DDevice_PersistDisplay"); c->r[0] = 0; X_RET(0); }
 void xv_hle_D3DDevice_SetFlickerFilter(xctx *c) { XD3D_COUNT("D3DDevice_SetFlickerFilter"); X_RET(1); }
 void xv_hle_D3DDevice_SetSoftDisplayFilter(xctx *c) { XD3D_COUNT("D3DDevice_SetSoftDisplayFilter"); X_RET(1); }
-void xv_hle_D3DDevice_SetShaderConstantMode(xctx *c) { XD3D_COUNT("D3DDevice_SetShaderConstantMode"); X_RET(1); }
+void xv_hle_D3DDevice_SetShaderConstantMode(xctx *c) { XD3D_COUNT("D3DDevice_SetShaderConstantMode"); D3DLOG("SetShaderConstantMode(%08X)\n", X_ARG(0)); xd3d_state.const_mode = X_ARG(0); X_RET(1); }
 void xv_hle_D3DDevice_GetBackBuffer(xctx *c) { XD3D_COUNT("D3DDevice_GetBackBuffer"); RES_COMMON(g_dev.backbuffer)++; X_M32(X_ARG(2)) = g_dev.backbuffer; c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_GetDepthStencilSurface(xctx *c) { XD3D_COUNT("D3DDevice_GetDepthStencilSurface"); RES_COMMON(g_dev.depth)++; X_M32(X_ARG(0)) = g_dev.depth; c->r[0] = 0; X_RET(1); }
 void xv_hle_D3DDevice_SetRenderTarget(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderTarget"); XD3D_RET("SetRenderTarget"); if (xd3d_hist_active()) D3DLOG("[hist] SetRenderTarget(%08X, %08X) backbuffer %08X depth %08X\n", X_ARG(0), X_ARG(1), g_dev.backbuffer, g_dev.depth); xd3d_r_state("SetRenderTarget", X_ARG(0), X_ARG(1), g_dev.backbuffer); X_RET(2); }
@@ -338,7 +338,13 @@ void xv_hle_D3DDevice_SetTexture(xctx *c) { XD3D_COUNT("D3DDevice_SetTexture"); 
             t ? X_M32(t) : 0, t ? X_M32(t + 4) : 0, t ? X_M32(t + 8) : 0, t ? X_M32(t + 12) : 0, t ? X_M32(t + 16) : 0,
             X_M32(0x80492CC8 + 0x24), X_M32(0x80492CC8 + 0x28), X_M32(0x80492CC8 + 0x2C), X_M32(0x80491D54 + 0x24), X_M32(0x80491D54 + 0x28), X_M32(0x80491D54 + 0x2C)); } }
     c->r[0] = 0; X_RET(2); }
-void xv_hle_D3DDevice_SetPalette(xctx *c) { XD3D_COUNT("D3DDevice_SetPalette"); c->r[0] = 0; X_RET(2); }
+/* D3DDevice_SetPalette(Stage, D3DPalette*): Halo's bump maps are P8 - the palette turns indices into normals */
+void xv_hle_D3DDevice_SetPalette(xctx *c) { XD3D_COUNT("D3DDevice_SetPalette");
+    uint32_t st = X_ARG(0), pal = X_ARG(1);
+    uint32_t data = pal ? RES_DATA(pal) : 0;
+    if (st < 4) xd3d_state.palette[st] = data ? (0x80000000u | data) : 0;
+    { static unsigned n; if (n++ < 6) D3DLOG("SetPalette(stage %u, %08X -> entries @%08X, %u)\n", st, pal, data, pal ? 256u >> ((RES_COMMON(pal) >> 30) & 3) : 0); }
+    c->r[0] = 0; X_RET(2); }
 /* D3DRS_* -> NV2A method table in the D3D library (.rdata 0x1F08C8, 0x52 entries): states 0..0x33 are the
  * pixel shader def fields (D3DRS_PSALPHAINPUTS0 .. D3DRS_PSINPUTTEXTURE), the rest the simple states. */
 #define D3D_RS_METHOD_TABLE 0x001F08C8u
@@ -415,6 +421,7 @@ void xv_hle_D3DDevice_GetVertexShaderSize(xctx *c) { XD3D_COUNT("D3DDevice_GetVe
 void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
 { XD3D_COUNT("D3DDevice_SetVertexShaderConstant");
     int32_t reg = (int32_t)X_ARG(0) + 96; uint32_t src = X_ARG(1), n = X_ARG(2);
+    if (xd3d_hist_active()) { const float *f = (const float *)X_G(src); D3DLOG("[hist] SetVertexShaderConstant(reg %d, n %u) from %08X: %.3f %.3f %.3f %.3f\n", (int32_t)X_ARG(0), n, X_M32(c->r[4]), f[0], f[1], f[2], f[3]); }
     for (uint32_t i = 0; i < n && reg + (int32_t)i < 192; ++i)
         if (reg + (int32_t)i >= 0) memcpy(xd3d_state.vsc[reg + i], X_G(src + i * 16), 16);
     if ((uint32_t)reg < xd3d_state.vsc_dirty_lo) xd3d_state.vsc_dirty_lo = (uint32_t)reg;
@@ -647,7 +654,8 @@ static void ds_stream_pump(xctx *c, ds_stream *s)
     uint64_t now = xk_os_monotonic_us();
     /* complete a packet once the mixer has consumed it; fall back to its real-time due date (+300 ms slack)
      * so a stalled or absent audio device can never wedge Halo's packet pump */
-    while (s->nq && ((xk_audio_available() && s->voice >= 0 && xk_audio_stream_pop_consumed(s->voice)) || s->q[0].due_us + 300000 <= now)) {
+    int mixer_alive = xk_audio_available() && s->voice >= 0 && now - xk_audio_last_mix_us() < 1000000;   /* produced a grain in the last second */
+    while (s->nq && (mixer_alive ? xk_audio_stream_pop_consumed(s->voice) : s->q[0].due_us + 300000 <= now)) {
         ds_pkt p = s->q[0]; memmove(&s->q[0], &s->q[1], (size_t)(s->nq - 1) * sizeof p); s->nq--;
         if (p.completed_ptr) X_M32(p.completed_ptr) = p.size;
         if (p.status_ptr) X_M32(p.status_ptr) = 0;                        /* XMEDIAPACKET_STATUS_SUCCESS */
@@ -709,6 +717,7 @@ static void xv_hle_CDirectSoundStream_Process(xctx *c)
         s->tail_us = p->due_us;
         if (p->status_ptr) X_M32(p->status_ptr) = 1;                       /* XMEDIAPACKET_STATUS_PENDING */
         if (s->voice >= 0) xk_audio_stream_push(s->voice, X_M32(pkt), size);   /* pvBuffer */
+        { static unsigned n; if (n++ < 3) D3DLOG("stream packet %u bytes = %u ms at %u B/s (max %u queued)\n", size, (unsigned)((uint64_t)size * 1000u / (s->bytes_per_sec ? s->bytes_per_sec : 1)), s->bytes_per_sec, s->max_pkts); }
         c->r[0] = 0;
     } else if (pkt && s) {
         c->r[0] = 0x80004005u;                                             /* E_FAIL: no packet slot (caller polls GetStatus) */

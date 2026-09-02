@@ -34,46 +34,11 @@ static const char *link_lookup(const char *name)
 }
 
 /* "\??\D:\maps\ui.map", "D:\maps\ui.map" (with DosDevices root), "\Device\Cdrom0\maps\ui.map" -> host path */
-/* XV_MAP_REDIRECT="a10=b30,ui=..." : hand the game another map file when it opens maps\<from>.map.  Starting
- * "The Pillar of Autumn" with a10=b30 boots The Silent Cartographer - a level select without touching the
- * profile save (Xbox 3925 blam.sav is undocumented and checksummed). */
+/* The D: drive is the game's own data (haloce/) and is treated as read-only media: the game never needs to
+ * write there, and a bug once let a cache rebuild overwrite a map file in place.  Writes are refused. */
+static int host_path_is_media(const char *host) { return host && strstr(host, "/haloce/") != NULL; }
 char *xk_path_translate_raw(const char *xbox_path, uint32_t root_handle);
-static char g_redirect_alias[32]; static int g_redirect_pending;   /* name the game expects in the redirected map's header */
-static char *map_redirect(char *host)
-{
-    static const char *cfg; static int init;
-    if (!init) { init = 1; cfg = getenv("XV_MAP_REDIRECT"); if (cfg) XK_LOG("map redirect rules: %s\n", cfg); }
-    if (!cfg || !host) return host;
-    const char *slash = strrchr(host, '/'); const char *base = slash ? slash + 1 : host; size_t bl = strlen(base);
-    if (bl <= 4 || strcmp(base + bl - 4, ".map") != 0) return host;
-    /* which map is this?  The game streams from z:\cacheNNN.map copies, so use the cache header's name
-     * (offset 0x20, 32 bytes) rather than the file name */
-    char name[33] = { 0 };
-    if (strncmp(base, "cache", 5) == 0) {
-        int miss; xk_file *f = xk_os_open(host, 0, 0, 0, &miss);
-        if (!f) return host;
-        char hdr[0x60]; int64_t got = xk_os_read(f, 0, hdr, sizeof hdr); xk_os_close(f);
-        if (got < 0x60 || memcmp(hdr, "daeh", 4) != 0) return host;          /* 'head' tag is stored as the bytes d a e h */
-        memcpy(name, hdr + 0x20, 32);
-    } else { size_t n = bl - 4 < 32 ? bl - 4 : 32; memcpy(name, base, n); }
-    const char *e = cfg;
-    while (*e) {
-        const char *eq = strchr(e, '='); if (!eq) break;
-        const char *end = strchr(eq, ','); if (!end) end = eq + strlen(eq);
-        if ((size_t)(eq - e) == strlen(name) && strncmp(name, e, (size_t)(eq - e)) == 0) {
-            char to[64]; size_t tl = (size_t)(end - eq - 1); if (tl > 40) tl = 40; memcpy(to, eq + 1, tl); to[tl] = 0;
-            char xpath[96]; snprintf(xpath, sizeof xpath, "D:\\maps\\%s.map", to);
-            char *r = xk_path_translate_raw(xpath, OB_DOS_DEVICES_DIRECTORY);
-            if (r) { static unsigned n; if (n++ < 6) XK_LOG("map redirect: %s (%s) -> %s\n", host, name, r); free(host);
-                     memcpy(g_redirect_alias, name, 32); g_redirect_pending = 1; return r; }
-            return host;
-        }
-        e = *end ? end + 1 : end;
-    }
-    return host;
-}
-char *xk_path_translate_raw(const char *xbox_path, uint32_t root_handle);
-char *xk_path_translate(const char *xbox_path, uint32_t root_handle) { return map_redirect(xk_path_translate_raw(xbox_path, root_handle)); }
+char *xk_path_translate(const char *xbox_path, uint32_t root_handle) { return xk_path_translate_raw(xbox_path, root_handle); }
 char *xk_path_translate_raw(const char *xbox_path, uint32_t root_handle)
 {
     char full[1024];
@@ -164,12 +129,13 @@ static uint32_t open_common(xctx *c, uint32_t phandle, uint32_t access, uint32_t
     if (exists && !is_dir && want_dir) { free(host); return STATUS_NOT_A_DIRECTORY; }
     xk_obj *o = xk_obj_new(is_dir ? XO_DIRECTORY : XO_FILE);
     o->u.file.path = host; o->u.file.is_dir = is_dir; o->u.file.map_type = -1;
-    if (g_redirect_pending) { memcpy(o->u.file.alias_name, g_redirect_alias, 32); g_redirect_pending = 0; } else o->u.file.alias_name[0] = 0;
     o->u.file.delete_on_close = (options & 0x1000) != 0;
     o->u.file.append = (access & 0x4) && !(access & 0x2);
     if (!is_dir) {
         int missing = 0;
-        o->u.file.f = xk_os_open(host, write, !exists || disposition == 0 || disposition == 2 || disposition == 3 || disposition == 5, info == 3, &missing);
+        int media = host_path_is_media(host);
+        if (media && (write || info == 3)) { XK_LOG("NtCreateFile: refusing write access to game media %s\n", host); write = 0; }
+        o->u.file.f = xk_os_open(host, write, !media && (!exists || disposition == 0 || disposition == 2 || disposition == 3 || disposition == 5), !media && info == 3, &missing);
         if (!o->u.file.f && write) o->u.file.f = xk_os_open(host, 0, 0, 0, &missing);   /* read-only media */
         if (!o->u.file.f) { status = missing ? STATUS_OBJECT_NAME_NOT_FOUND : STATUS_ACCESS_DENIED; xk_obj_deref(o); if (iosb) IOSB_STATUS(iosb) = status; return status; }
     }
@@ -208,11 +174,15 @@ void xk_NtReadFile(xctx *c)
         XK_LOG("READ CLOBBERED THE STACK: esp %08X (page->arena %08X), buf %08X len %u (buf arena %08X..); apc %08X->%08X\n",
                c->r[4], g_xpt[c->r[4] >> 12], buf, len, g_xpt[buf >> 12], apc_before, X_ARG(2));
     uint32_t st = got < 0 ? STATUS_UNSUCCESSFUL : got == 0 && len ? STATUS_END_OF_FILE : STATUS_SUCCESS;
+    { static const char *watch = NULL; static int winit; if (!winit) { winit = 1; watch = getenv("XV_LOG_READS"); }
+      if (watch && strstr(o->u.file.path, watch)) XK_LOG("NtReadFile(%s @%llu, %u B) = %lld st %08X\n", o->u.file.path, (unsigned long long)pos, len, (long long)got, st); }
     { static unsigned n; if (n++ < 40) XK_LOG("NtReadFile(%s @%llu, %u B -> %08X) = %lld (ev %08X apc %08X ctx %08X)\n", o->u.file.path, (unsigned long long)pos, len, buf, (long long)got, X_ARG(1), X_ARG(2), X_ARG(3)); }
-    if (got > 0 && o->u.file.alias_name[0] && pos < 0x40 && pos + (uint64_t)got > 0x20) {
-        /* redirected map: the game compares the header's scenario name with what it asked for */
-        uint64_t a = pos > 0x20 ? pos : 0x20, b = pos + (uint64_t)got < 0x40 ? pos + (uint64_t)got : 0x40;
-        memcpy((uint8_t *)X_G(buf) + (a - pos), o->u.file.alias_name + (a - 0x20), (size_t)(b - a));
+    {   /* loading screen while a map streams in (the game presents nothing during a level load) */
+        const char *pth = o->u.file.path; size_t hl = strlen(pth);
+        if (got > 0 && len >= 4096 && hl > 4 && !strcmp(pth + hl - 4, ".map")) {
+            extern void xv_gfx_loading_frame(float) __attribute__((weak));
+            if (xv_gfx_loading_frame) { int64_t sz = xk_os_size(o->u.file.f); xv_gfx_loading_frame(sz > 0 ? (float)((double)(pos + (uint64_t)got) / (double)sz) : 0.0f); }
+        }
     }
     if (got > 0) o->u.file.pos = pos + (uint64_t)got;
     {   /* Which kind of cache map is being STREAMED: Halo copies maps to z:\cacheNNN.map, so only the

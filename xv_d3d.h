@@ -73,6 +73,7 @@ void xv_d3d_SetVertexShaderConstant(int reg, const float *data, unsigned count);
 void xv_d3d_SetVertexData4f(unsigned vreg, float x, float y, float z, float w);   /* persistent attribute */
 void xv_d3d_SetStreamSource(unsigned stream, uint32_t vb_guest, unsigned stride); /* vb_guest -> X_D3DResource */
 void xv_d3d_SetTexture(unsigned stage, uint32_t tex_guest);                      /* 0 unbinds */
+void xv_d3d_SetTexturePalette(unsigned stage, uint32_t pal_guest);   /* guest address of 256 D3DCOLOR entries, 0 = none */
 void xv_d3d_SetTextureStageState(unsigned stage, unsigned type, uint32_t value);
 void xv_d3d_SetRenderState_ZEnable(uint32_t v);
 void xv_d3d_SetRenderState_ZWriteEnable(uint32_t v);
