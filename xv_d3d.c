@@ -570,6 +570,13 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     c->ps_entry = -1;
     for (unsigned i = 0; i < XV_PS_TABLE_COUNT; ++i)
         if (xv_ps_table[i].vs_fnv == d->func_hash && xv_ps_table[i].ps_hash == S.ps_hash) { c->ps_entry = (int16_t)i; break; }
+    if (c->ps_entry < 0 && c->fs_kind == FS_TEXMOD) {
+        /* no combiner program for this pair yet: texture x colour is black when the vertex program
+         * writes no colour0 (most environment shaders) - use the plain texture instead */
+        for (unsigned i = 0; i < XV_VS_OUTPUTS_COUNT; ++i)
+            if (xv_vs_outputs[i].vs_fnv == d->func_hash) { if (!(xv_vs_outputs[i].outputs & 1)) c->fs_kind = FS_TEX0; break; }
+        static unsigned n; if (n++ < 6) XV_LOG("[pspair] no program for vs %08X ps %08X: fallback %s\n", d->func_hash, S.ps_hash, c->fs_kind == FS_TEX0 ? "tex0" : "texmod");
+    }
     {   /* debug: XV_FS_FORCE=texmod|tex0|lm|color bypasses the combiner programs for every textured draw */
         static int force = -2;
         if (force == -2) { const char *e = getenv("XV_FS_FORCE"); force = !e ? -1 : !strcmp(e, "tex0") ? FS_TEX0 : !strcmp(e, "lm") ? FS_LM : !strcmp(e, "color") ? FS_COLOR : FS_TEXMOD; }

@@ -103,3 +103,74 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0xFF7E5030u, 0xFCB65DB3u, "app0:shaders/ps_FCB65DB3_3F.frag.gxp" },   /* halo_vs_57 */
 };
 #define XV_PS_TABLE_COUNT (sizeof xv_ps_table / sizeof xv_ps_table[0])
+typedef struct { uint32_t vs_fnv; uint8_t outputs; } xv_vs_out_t;
+static const xv_vs_out_t xv_vs_outputs[] = {
+    { 0x04E5022Au, 0x03 },   /* halo_vs_52: color0,color1 */
+    { 0x0619B0D9u, 0x07 },   /* halo_vs_65: color0,color1,texcoord0 */
+    { 0x109DB448u, 0x0D },   /* halo_vs_27: color0,texcoord0,texcoord1 */
+    { 0x1405EB74u, 0x05 },   /* halo_vs_11: color0,texcoord0 */
+    { 0x166818F8u, 0x04 },   /* halo_vs_13: texcoord0 */
+    { 0x1B43D06Cu, 0x3C },   /* halo_vs_51: texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x1DAF0284u, 0x1D },   /* halo_vs_03: color0,texcoord0,texcoord1,texcoord2 */
+    { 0x20DF9066u, 0x3F },   /* halo_vs_34: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x21E706ACu, 0x3C },   /* halo_vs_42: texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x2725AD9Au, 0x05 },   /* halo_vs_30: color0,texcoord0 */
+    { 0x3019A691u, 0x05 },   /* halo_vs_22: color0,texcoord0 */
+    { 0x3068A44Bu, 0x0C },   /* halo_vs_06: texcoord0,texcoord1 */
+    { 0x339F58D9u, 0x3F },   /* halo_vs_35: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x393556F8u, 0x3F },   /* halo_vs_10: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x39DC538Du, 0x3C },   /* halo_vs_26: texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x3DEBD366u, 0x3C },   /* halo_vs_59: texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x405809D3u, 0x07 },   /* halo_vs_56: color0,color1,texcoord0 */
+    { 0x42F44E53u, 0x0F },   /* halo_vs_15: color0,color1,texcoord0,texcoord1 */
+    { 0x442D7BEAu, 0x3F },   /* halo_vs_07: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x4469E1F8u, 0x05 },   /* halo_vs_04: color0,texcoord0 */
+    { 0x4A1C21F2u, 0x3F },   /* halo_vs_17: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x50944328u, 0x7C },   /* halo_vs_23: fog,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x53C00F6Cu, 0x04 },   /* halo_vs_58: texcoord0 */
+    { 0x55A41AA7u, 0x1D },   /* halo_vs_64: color0,texcoord0,texcoord1,texcoord2 */
+    { 0x5F294309u, 0x05 },   /* halo_vs_32: color0,texcoord0 */
+    { 0x6150B892u, 0x3D },   /* halo_vs_16: color0,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x667FA8CAu, 0x3D },   /* halo_vs_36: color0,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x71412768u, 0x04 },   /* halo_vs_39: texcoord0 */
+    { 0x7DBE1693u, 0x7F },   /* halo_vs_54: color0,color1,fog,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x7F28B12Fu, 0x3C },   /* halo_vs_21: texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x8144CA76u, 0x4C },   /* halo_vs_05: fog,texcoord0,texcoord1 */
+    { 0x842ABBFAu, 0x3F },   /* halo_vs_45: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x8A1EAB4Du, 0x1D },   /* halo_vs_25: color0,texcoord0,texcoord1,texcoord2 */
+    { 0x8E8F42CEu, 0x44 },   /* halo_vs_08: fog,texcoord0 */
+    { 0x909ED3C4u, 0x3F },   /* halo_vs_60: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x978892BAu, 0x01 },   /* halo_vs_00: color0 */
+    { 0x980F42ADu, 0x0D },   /* halo_vs_50: color0,texcoord0,texcoord1 */
+    { 0x9D682413u, 0x3F },   /* halo_vs_37: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x9E2E9021u, 0x7F },   /* halo_vs_09: color0,color1,fog,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0x9E6F8B13u, 0x3F },   /* halo_vs_24: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xA862CB93u, 0x3F },   /* halo_vs_66: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xAC1984DBu, 0x3F },   /* halo_vs_47: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xB1C59E95u, 0x3C },   /* halo_vs_44: texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xBB2F446Bu, 0x3C },   /* halo_vs_38: texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xBC1EFF25u, 0x3C },   /* halo_vs_40: texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xC1FB6D8Cu, 0x3F },   /* halo_vs_62: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xC6657A43u, 0x0F },   /* halo_vs_02: color0,color1,texcoord0,texcoord1 */
+    { 0xC79F61EEu, 0x7C },   /* halo_vs_14: fog,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xC8A57863u, 0x3F },   /* halo_vs_48: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xCA01577Bu, 0x05 },   /* halo_vs_33: color0,texcoord0 */
+    { 0xCE3F8FC6u, 0x3D },   /* halo_vs_61: color0,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xD0D754FAu, 0x0F },   /* halo_vs_55: color0,color1,texcoord0,texcoord1 */
+    { 0xD51EA0F3u, 0x3D },   /* halo_vs_63: color0,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xD9FFD145u, 0x7C },   /* halo_vs_41: fog,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xDB4E520Au, 0x0F },   /* halo_vs_12: color0,color1,texcoord0,texcoord1 */
+    { 0xDE505E28u, 0x05 },   /* halo_vs_46: color0,texcoord0 */
+    { 0xDE6968BDu, 0x3F },   /* halo_vs_19: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xE09FEF67u, 0x4C },   /* halo_vs_20: fog,texcoord0,texcoord1 */
+    { 0xE5CA6845u, 0x3F },   /* halo_vs_31: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xE6B0E103u, 0x3C },   /* halo_vs_49: texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xE877C70Fu, 0x4C },   /* halo_vs_18: fog,texcoord0,texcoord1 */
+    { 0xEEB6D0A9u, 0x3D },   /* halo_vs_28: color0,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xF0F51170u, 0x0D },   /* halo_vs_29: color0,texcoord0,texcoord1 */
+    { 0xF8A4AE90u, 0x07 },   /* halo_vs_01: color0,color1,texcoord0 */
+    { 0xFA91064Du, 0x3D },   /* halo_vs_43: color0,texcoord0,texcoord1,texcoord2,texcoord3 */
+    { 0xFB67EE5Cu, 0x03 },   /* halo_vs_53: color0,color1 */
+    { 0xFF7E5030u, 0x3F },   /* halo_vs_57: color0,color1,texcoord0,texcoord1,texcoord2,texcoord3 */
+};
+#define XV_VS_OUTPUTS_COUNT (sizeof xv_vs_outputs / sizeof xv_vs_outputs[0])

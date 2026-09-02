@@ -40,8 +40,9 @@ from typing import Dict, List, Optional, Set, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from xbox_kernel_exports import KERNEL_EXPORTS, KERNEL_DATA_EXPORTS, KERNEL_ARGC  # noqa: E402
 
+import re as _re
 try:
-    from iced_x86 import Decoder, Instruction, Mnemonic, OpKind, Register, Code, FlowControl, MemorySize
+    from iced_x86 import Decoder, Instruction, Mnemonic, OpKind, Register, Code, FlowControl, MemorySize, RflagsBits
 except ImportError:
     sys.exit("iced-x86 is required: pip install iced-x86")
 
@@ -54,6 +55,14 @@ GUEST_MASK = 0x03FFFFFF
 # --------------------------------------------------------------------------------------
 #  Image access
 # --------------------------------------------------------------------------------------
+
+# dead-flag elimination: the X_FLAGS(...) store emitted by arithmetic lowering (one level of nested parens)
+FLAGS_RE = _re.compile(r"X_FLAGS(?:_C)?\((?:[^()]|\([^()]*\))*\);\s?")
+# instructions whose lowering relies on the flag record for its own result (rotates/shifts feed CF/OF
+# through helpers, adc/sbb read CF, cmpxchg family, string ops with rep) - never strip those
+FLAG_KEEP = { Mnemonic.ADC, Mnemonic.SBB, Mnemonic.RCL, Mnemonic.RCR, Mnemonic.CMPXCHG, Mnemonic.CMPXCHG8B,
+              Mnemonic.CMPSB, Mnemonic.CMPSW, Mnemonic.CMPSD, Mnemonic.SCASB, Mnemonic.SCASW, Mnemonic.SCASD,
+              Mnemonic.SAHF, Mnemonic.LAHF, Mnemonic.POPF, Mnemonic.POPFD, Mnemonic.PUSHF, Mnemonic.PUSHFD }
 
 class Image:
     def __init__(self, xbe_path: str, manifest_path: str):
@@ -363,6 +372,7 @@ class Emitter:
         self.vars: Dict[str, int] = {}
         self.trace = False
         self.trace_funcs = False
+        self.cur_fn = 0
         self.unimpl = Counter()
         self.stats = Counter()
         self.hle_used: Set[str] = set()
@@ -611,6 +621,8 @@ class Emitter:
                 if self.trace and (tgt in self.hle or tgt in self.kthunks):
                     out.append(f'    if (xv_trace_enabled) xv_trace_call(c, "{self.trace_name(tgt)}", {self.trace_argc(tgt)});')
                 out.append(f"    {self.call_expr(tgt)};")
+                if self.trace_funcs:
+                    out.append(f"    XV_FN_BACK(0x{self.cur_fn:08X}u);")      # sampling profiler: time after the call is ours again
                 return
             # indirect: through kernel thunk slot?  call [slot]
             if ins.op0_kind == OpKind.MEMORY and ins.memory_base == Register.NONE and ins.memory_index == Register.NONE:
@@ -920,8 +932,31 @@ class Emitter:
         U()
 
     # ---- functions / files ------------------------------------------------------------
+    def dead_flag_writes(self, insns) -> set:
+        """Backward liveness over one basic block: which instructions write flags that nothing reads
+        before they are overwritten.  Conservative at the block end (successors may read: all live),
+        except after call/ret, where x86 code never depends on flags."""
+        RF_ALL = RflagsBits.OF | RflagsBits.SF | RflagsBits.ZF | RflagsBits.AF | RflagsBits.CF | RflagsBits.PF
+        dead = set()
+        if not insns:
+            return dead
+        last = insns[-1]
+        live = 0 if last.flow_control in (FlowControl.CALL, FlowControl.INDIRECT_CALL, FlowControl.RETURN) else RF_ALL
+        for ins in reversed(insns):
+            rd = ins.rflags_read
+            wr = ins.rflags_modified            # written | cleared | set | undefined
+            if wr and not (wr & live) and not rd and ins.mnemonic not in FLAG_KEEP:
+                dead.add(ins)
+            live = (live & ~wr) | rd
+        return dead
+
     def emit_function(self, fn: Function) -> str:
-        out = [f"void f_{fn.entry:08X}(xctx *c)", "{"]
+        # `restrict`: the context is host memory that no guest pointer can reach, so GCC may keep guest
+        # registers in ARM registers across guest memory stores (otherwise every store reloads them).
+        # xram_/xpt_: locals shadow the globals for the same reason (X_G is redefined per file to use them).
+        out = [f"void f_{fn.entry:08X}(xctx *restrict c)", "{",
+               "    uint8_t *const xram_ = g_xram; const uint32_t *const xpt_ = g_xpt; (void)xram_; (void)xpt_;"]
+        self.cur_fn = fn.entry
         if self.trace_funcs:
             out.append(f"    XV_FN(0x{fn.entry:08X}u);")
         # Blocks are emitted in address order.  When the function owns blocks below its entry (a jump
@@ -933,8 +968,17 @@ class Emitter:
         for start in sorted(fn.blocks):
             blk = fn.blocks[start]
             out.append(f"L_{start:08X}:")
+            dead = self.dead_flag_writes(blk.insns)
             for ins in blk.insns:
-                self.lower(fn, ins, out)
+                if ins in dead:
+                    # flags this instruction writes are all overwritten before anything reads them:
+                    # lower normally, then strip the X_FLAGS(...) store (7 stores per arithmetic op)
+                    tmp: List[str] = []
+                    self.lower(fn, ins, tmp)
+                    out.extend(FLAGS_RE.sub("", line) for line in tmp)
+                    self.stats["flags_elided"] = self.stats.get("flags_elided", 0) + 1
+                else:
+                    self.lower(fn, ins, out)
                 self.stats["insns"] += 1
             # fallthrough into a block that is not the next in address order
             if blk.insns:
@@ -965,7 +1009,9 @@ class Emitter:
             proto.append(f"void f_{f.entry:08X}(xctx *c);")
         for i in range(0, len(fns), per):
             chunk = fns[i:i + per]
-            body = ['#include "xv_recomp_protos.h"', ""]
+            body = ['#include "xv_recomp_protos.h"',
+                    "#undef X_G",
+                    "#define X_G(a) ((void *)(xram_ + xpt_[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))", ""]
             for f in chunk:
                 body.append(self.emit_function(f))
                 body.append("")
@@ -1010,6 +1056,7 @@ class Emitter:
         proto.append("extern int xv_trace_funcs; void xv_trace_func(uint32_t entry);   /* --trace-funcs: per-frame call histogram */")
         proto.append("extern volatile uint32_t xv_cur_fn;                       /* sampling profiler: last entered function */")
         proto.append("#define XV_FN(a) do { xv_cur_fn = (a); if (xv_trace_funcs) xv_trace_func(a); } while (0)")
+        proto.append("#define XV_FN_BACK(a) (xv_cur_fn = (a))")
         proto.append("/* HLE symbols (weak: default trap until implemented) */")
         for name in sorted(self.hle_used):
             proto.append(f"void xv_hle_{name}(xctx *c) __attribute__((weak));")

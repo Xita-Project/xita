@@ -113,7 +113,9 @@ static uint32_t open_common(xctx *c, uint32_t phandle, uint32_t access, uint32_t
     uint32_t status = STATUS_SUCCESS, info = 1;             /* FILE_OPENED */
     /* FILE_SUPERSEDE 0, OPEN 1, CREATE 2, OPEN_IF 3, OVERWRITE 4, OVERWRITE_IF 5 */
     if (!exists) {
-        if (disposition == 1 || disposition == 4) { XK_LOG("%s \"%s\" -> %s: not found\n", is_create ? "NtCreateFile" : "NtOpenFile", name, host); free(host); if (iosb) IOSB_STATUS(iosb) = STATUS_OBJECT_NAME_NOT_FOUND; return STATUS_OBJECT_NAME_NOT_FOUND; }
+        /* FILE_OVERWRITE (4) on a missing file creates it: Halo writes z:\lastmpvr.txt that way and
+         * shows "Unable to load saved game file" when the open fails - FATX is lenient here */
+        if (disposition == 1) { XK_LOG("%s \"%s\" -> %s: not found (disp %u)\n", is_create ? "NtCreateFile" : "NtOpenFile", name, host, disposition); free(host); if (iosb) IOSB_STATUS(iosb) = STATUS_OBJECT_NAME_NOT_FOUND; return STATUS_OBJECT_NAME_NOT_FOUND; }
         if (want_dir) { if (xk_os_mkdir(host) != 0) { free(host); return STATUS_OBJECT_PATH_NOT_FOUND; } is_dir = 1; }
         info = 2;                                            /* FILE_CREATED */
     } else if (disposition == 2) { free(host); if (iosb) IOSB_STATUS(iosb) = STATUS_OBJECT_NAME_COLLISION; return STATUS_OBJECT_NAME_COLLISION; }

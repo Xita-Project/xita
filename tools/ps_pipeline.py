@@ -82,6 +82,14 @@ def main():
         for fnv, ps, out, name in table:
             f.write(f'    {{ 0x{fnv:08X}u, 0x{ps:08X}u, "app0:shaders/{out}.frag.gxp" }},   /* {name} */\n')
         f.write("};\n#define XV_PS_TABLE_COUNT (sizeof xv_ps_table / sizeof xv_ps_table[0])\n")
+        # what each recompiled vertex program writes (bit 0 color0, 1 color1, 2..5 texcoord0..3, 6 fog):
+        # the runtime's fallback fragment choice for pairs not in the table depends on color0
+        f.write("typedef struct { uint32_t vs_fnv; uint8_t outputs; } xv_vs_out_t;\n")
+        f.write("static const xv_vs_out_t xv_vs_outputs[] = {\n")
+        for fnv, (name, vary) in sorted(vso.items()):
+            mask = sum(b for v, b in VAR_BITS if v in vary)
+            f.write(f"    {{ 0x{fnv:08X}u, 0x{mask:02X} }},   /* {name}: {','.join(sorted(vary))} */\n")
+        f.write("};\n#define XV_VS_OUTPUTS_COUNT (sizeof xv_vs_outputs / sizeof xv_vs_outputs[0])\n")
     print(f"{len(table)} pair(s), {len(generated)} fragment shader(s) -> shaders/xv_ps_table.h")
 
 
