@@ -71,7 +71,7 @@ typedef struct {
 } ui_frame;
 
 /* built texture control words, cached by (guest data pointer, format word) */
-typedef struct { uint32_t data, fmtword, palsum; SceGxmTexture tex; int valid; uint32_t sum, bytes; unsigned checked; int16_t next; } ui_tex_entry;   /* palsum: hash of the P8 palette used (0 = none) */   /* sum: content hash of dynamic textures; next: hash chain */
+typedef struct { uint32_t data, fmtword, palsum; SceGxmTexture tex; int valid; uint32_t sum, bytes; unsigned checked; uint16_t stable; int16_t next; } ui_tex_entry;   /* stable: consecutive unchanged re-checks (map textures stop being re-hashed once settled) */   /* palsum: hash of the P8 palette used (0 = none) */   /* sum: content hash of dynamic textures; next: hash chain */
 
 /* one UI vertex program + the fragment programs linked against it (one per texcoord set it writes) */
 typedef struct {
@@ -273,14 +273,23 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
      * that glyphs are rasterised into on demand) change under us: hash their contents once per frame and
      * re-decode on change.  Map textures (headers in the game heap) are immutable. */
     int dynamic = hdr >= 0x03D00000u;
+    /* Map textures are NOT immutable for us: Halo streams bitmap pixels into the game heap asynchronously,
+     * and the game binds a bitmap before its read has landed (the first bind of the a10 hull plating and the
+     * Blood Gulch base walls saw stale/unstreamed bytes: "striped" textures for the rest of the level).  Real
+     * hardware re-reads memory every frame, so re-hash the source: every frame for dynamic textures, and on a
+     * 1-in-16 rotating cadence for map textures until 24 consecutive checks come back unchanged. */
     unsigned bucket = ((data ^ (fmtword * 2654435761u)) >> 7) & 1023u;
+    ui_tex_entry *re = NULL;                       /* set when a cached texture's source changed: re-decode in place */
     for (int16_t i = g.texhash[bucket]; i >= 0; i = g.texcache[i].next)
         if (g.texcache[i].valid && g.texcache[i].data == data && g.texcache[i].fmtword == fmtword && g.texcache[i].palsum == g_cur_palsum) {
             ui_tex_entry *e = &g.texcache[i];
-            if (dynamic && e->bytes && e->checked != g.rec_frame) {
+            int due = e->bytes && e->checked != g.rec_frame &&
+                      (dynamic || (e->stable < 24 && ((g.rec_frame + (unsigned)i) & 15u) == 0));
+            if (due) {
                 e->checked = g.rec_frame;
                 uint32_t sum = ui_tex_hash(X_G(0x80000000u | data), e->bytes);
-                if (sum != e->sum) { e->valid = 0; break; }   /* stale: re-decode below (old pool space is reclaimed by the next purge) */
+                if (sum != e->sum) { re = e; static unsigned n; if (n++ < 12) UI_LOG("tex %08X fmt %02X changed (check %u): re-decoding in place\n", data, (fmtword >> 8) & 0xFF, e->stable); break; }   /* stale: re-decode below */
+                if (!dynamic) e->stable++;
             }
             return &e->tex;
         }
@@ -349,7 +358,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         }
     }
 
-    ui_tex_entry *e = &g.texcache[g.texcount];
+    ui_tex_entry *e = re ? re : &g.texcache[g.texcount];
     int err, as_bc = 0;
     /* square only: GXM's twiddle for non-square textures is not the min-square/long-axis layout we
      * assumed (ring/planet textures streaked) - those take the decode path at the capped mip instead */
@@ -364,8 +373,8 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         unsigned levels = 0; uint32_t need = 0;
         { unsigned lw = w; while (lw >= 4 && levels < (bcmips ? mips : 1)) { need += (lw / 4) * (lw / 4) * bs; lw >>= 1; levels++; } }
         need = ALIGN_UP(need, 64);
-        if (g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
-        uint8_t *dst = g.dec_base + g.dec_off, *o = dst; const uint8_t *lsrc = src;
+        if (!re && g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
+        uint8_t *dst = re ? (uint8_t *)sceGxmTextureGetData(&e->tex) : g.dec_base + g.dec_off, *o = dst; const uint8_t *lsrc = src;
         for (unsigned l = 0, lw = w; l < levels; ++l, lw >>= 1) {
             unsigned bw = lw / 4, nb = bw * bw;
             for (unsigned i = 0; i < nb; ++i) { unsigned x, y; gxm_unswz(bw, bw, i, &x, &y); memcpy(o + i * bs, lsrc + (y * bw + x) * bs, bs); }
@@ -375,7 +384,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         err = sceGxmTextureInitSwizzled(&e->tex, dst, gf, w, h, levels);
         if (err != SCE_OK) { UI_LOG("textureInitSwizzled(%02X %ux%u, %u mips) failed 0x%08X\n", fmt, w, h, levels, err); UI_TEX_FAIL(); }
         if (levels > 1) sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
-        g.dec_off += need; as_bc = levels > 1 ? 2 : 1;
+        if (!re) g.dec_off += need; as_bc = levels > 1 ? 2 : 1;
     } else {
         /* decoded RGBA + a box-filtered mip chain (levels packed after level 0, as GXM lays out linear
          * mips): without mips the 1024x512 hull plating aliased into streaks at grazing angles, and mips
@@ -383,8 +392,8 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         unsigned levels = 1; { unsigned lw = w, lh = h; while (lw > 1 && lh > 1 && levels < 12) { lw >>= 1; lh >>= 1; levels++; } }
         uint32_t need = 0; { unsigned lw = w, lh = h; for (unsigned l = 0; l < levels; ++l) { need += lw * lh * 4u; lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1; } }
         need = ALIGN_UP(need, 64);
-        if (g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
-        uint32_t *dst = (uint32_t *)(g.dec_base + g.dec_off);
+        if (!re && g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
+        uint32_t *dst = re ? (uint32_t *)sceGxmTextureGetData(&e->tex) : (uint32_t *)(g.dec_base + g.dec_off);
         if (ui_decode(src, fmt, w, h, pitch ? pitch : w * bpp, linear, dst) != 0) {
             UI_LOG("unhandled tex fmt %02X (%ux%u)\n", fmt, w, h); UI_TEX_FAIL();
         }
@@ -431,12 +440,12 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         err = sceGxmTextureInitLinear(&e->tex, dst, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, levels);
         if (err != SCE_OK) { UI_LOG("textureInitLinear(%ux%u, %u mips) failed 0x%08X\n", w, h, levels, err); UI_TEX_FAIL(); }
         sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
-        g.dec_off += need;
+        if (!re) g.dec_off += need;
     }
-    e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1; g.texcount++;
-    e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache);
-    e->bytes = 0; e->sum = 0; e->checked = g.rec_frame;
-    if (dynamic) {                                                    /* size of the source level we consumed */
+    e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1;
+    if (!re) { g.texcount++; e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache); }
+    e->bytes = 0; e->sum = 0; e->checked = g.rec_frame; e->stable = 0;
+    {                                                                 /* size of the source level we consumed */
         e->bytes = isdxt ? ((w + 3) / 4) * ((h + 3) / 4) * bs : (pitch ? pitch : w * bpp) * h;
         if (e->bytes > 512 * 1024) e->bytes = 512 * 1024;
         e->sum = ui_tex_hash(src, e->bytes);
