@@ -239,7 +239,7 @@ void xv_hle_XCalculateSignatureBegin(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(1);
 /* XNet / Winsock: no network */
 #define NETLOG(fn, nargs) do { XK_LOG("[net] " fn "(%08X,%08X,%08X,%08X) from %08X\n", X_ARG(0), X_ARG(1), X_ARG(2), X_ARG(3), X_M32(c->r[4])); } while (0)
 void xv_hle_XNetStartup(xctx *c) { NETLOG("XNetStartup", 1); c->r[0] = 0; X_RET(1); }
-void xv_hle_XNetGetEthernetLinkStatus(xctx *c) { c->r[0] = 0x0B; NETLOG("XNetGetEthernetLinkStatus", 0); X_RET(0); }
+void xv_hle_XNetGetEthernetLinkStatus(xctx *c) { c->r[0] = 0x0B; X_RET(0); }   /* ACTIVE|100MBPS|FULL_DUPLEX; called every frame by the session tick (0x9D7B0) - keep it silent */
 void xv_hle_WSAStartup(xctx *c) { NETLOG("WSAStartup", 2); c->r[0] = 0; X_RET(2); }
 void xv_hle_socket(xctx *c) { NETLOG("socket", 3); c->r[0] = 0xFFFFFFFFu; X_RET(3); }
 void xv_hle_bind(xctx *c) { NETLOG("bind", 3); c->r[0] = 0xFFFFFFFFu; X_RET(3); }
