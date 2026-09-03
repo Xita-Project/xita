@@ -207,8 +207,24 @@ void xk_signal_check(void)
         if (t->state == 1 && try_satisfy(t)) t->state = 0;
 }
 
+/* A kicked thread (see xk_thread_kick) runs on the very next switch: used to deliver Halo's vblank
+ * callback on the vblank thread the moment the game's frame-pacing loop sleeps waiting for it, instead
+ * of running the callback inline on the sleeping thread (that deadlocked the map-list loader) or
+ * waiting for the 16.7 ms timer tick. */
+static xk_thread *g_boost;
+void xk_thread_kick(xk_thread *t)
+{
+    if (!t || t->state == 3) return;
+    if (t->state == 1 && t->wait_n == 0 && t->wait_until) t->wait_until = now100();   /* its sleep expires now */
+    g_boost = t;
+}
 static xk_thread *pick_next(xk_thread *after)
 {
+    if (g_boost) {
+        xk_thread *b = g_boost; g_boost = NULL;
+        if (b->state == 1 && b->wait_n == 0 && b->wait_until && now100() >= b->wait_until) { b->wait_result = -1; b->state = 0; }
+        if (b->state == 0) return b;
+    }
     /* round robin over ready threads, starting after `after` */
     xk_thread *start = after ? after->next : g_threads;
     for (int pass = 0; pass < 2; ++pass) {

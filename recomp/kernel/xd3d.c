@@ -207,9 +207,11 @@ void xv_hle_D3DDevice_BlockUntilVerticalBlank(xctx *c) { XD3D_COUNT("D3DDevice_B
  * them.  A kernel guest thread invokes the registered callback every 16.7 ms. */
 /* Vblank on demand: Halo paces frames by spinning (Sleep(0)/yield) in its vblank-count wait loop
  * (3925: 0xBB060..0xBB0F3) until the callback has advanced the counter.  At 10 fps that spin is pure loss
- * (up to 16.7 ms per frame), so when the game thread yields from inside that loop we run the callback
- * right away instead of letting it wait for the timer tick. */
+ * (up to 16.7 ms per frame), so when the game thread yields from inside that loop we wake the vblank
+ * thread early and let it run next (the callback must stay on that thread: running it inline on the
+ * game thread deadlocked the map-list loader at the gametype screen). */
 static uint32_t g_vb_data; static unsigned g_vb_counter; static unsigned g_vb_kicks;
+static xk_thread *g_vb_thread;                 /* the 60 Hz vblank guest thread (kicked on demand) */
 static void vblank_fire(xctx *c)
 {
     if (!g_dev.vblank_cb) return;
@@ -232,8 +234,9 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip)
             D3DLOG("vblank kick miss: eip %08X stack:%s\n", eip, b); }
         return 0;
     }
-    vblank_fire(c); g_vb_kicks++;
-    { static unsigned n; if (n++ < 5) D3DLOG("vblank kick from %08X (%u so far)\n", eip, g_vb_kicks); }
+    if (!g_vb_thread) return 0;
+    xk_thread_kick(g_vb_thread); g_vb_kicks++;            /* the vblank thread fires the callback on its own thread, next switch */
+    { static unsigned n; if (n++ < 5) D3DLOG("vblank kick from %08X (%u so far) -> vblank thread\n", eip, g_vb_kicks); }
     return 1;
 }
 static void vblank_thread(xctx *c, void *arg)
@@ -254,7 +257,7 @@ void xv_hle_D3DDevice_SetVerticalBlankCallback(xctx *c)
 { XD3D_COUNT("D3DDevice_SetVerticalBlankCallback");
     static int started;
     g_dev.vblank_cb = X_ARG(0);
-    if (!started && g_dev.vblank_cb) { started = 1; xk_thread_create_host(vblank_thread, 0); D3DLOG("vblank thread started (cb %08X)\n", g_dev.vblank_cb); }
+    if (!started && g_dev.vblank_cb) { started = 1; g_vb_thread = xk_thread_create_host(vblank_thread, 0); D3DLOG("vblank thread started (cb %08X)\n", g_dev.vblank_cb); }
     X_RET(1);
 }
 void xv_hle_D3DDevice_PersistDisplay(xctx *c) { XD3D_COUNT("D3DDevice_PersistDisplay"); c->r[0] = 0; X_RET(0); }

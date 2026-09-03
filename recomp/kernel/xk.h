@@ -138,6 +138,7 @@ xk_thread *xk_thread_create(uint32_t stack_size, uint32_t tls_size, uint32_t sta
                             uint32_t system_routine, int suspended);
 xk_thread *xk_thread_create_host(void (*entry)(xctx *c, void *arg), void *arg);   /* kernel-internal guest thread with a C body */
 void       xk_sleep_us(uint64_t us);      /* block the current guest thread (scheduler-friendly) */
+void       xk_thread_kick(xk_thread *t);   /* end t's xk_sleep_us early and run it on the next switch (vblank on demand) */
 void       xk_thread_exit(uint32_t status);
 void       xk_yield(void);                /* let other guest threads run */
 void       xk_run_until_idle(void);       /* host harness: drive the scheduler */
