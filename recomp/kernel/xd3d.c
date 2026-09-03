@@ -145,7 +145,7 @@ void xd3d_r_present(unsigned frame, unsigned draws) { if (frame < 10 || frame % 
 void xd3d_hist_tex_check(void)
 {   /* XV_D3D_HIST_TEX=<texture header>: trace the frame after the first draw that binds this texture */
     static uint32_t want = 1; if (want == 1) { const char *e = getenv("XV_D3D_HIST_TEX"); want = e ? (uint32_t)strtoul(e, NULL, 16) : 0; }
-    if (want && g_hist_frame < 0) for (unsigned t = 0; t < 4; ++t) if (xd3d_state.texture[t] == want) { g_hist_frame = (int)g_dev.frame + 1; D3DLOG("hist: texture %08X bound at frame %u -> tracing frame %d\n", want, g_dev.frame, g_hist_frame); want = 0; break; }
+    if (want && g_hist_frame < 0) for (unsigned t = 0; t < 4; ++t) if (xd3d_state.texture[t] == want || (xd3d_state.texture[t] && (X_M32(xd3d_state.texture[t] + 4) | 0x80000000u) == (want | 0x80000000u))) { g_hist_frame = (int)g_dev.frame + 1; D3DLOG("hist: texture %08X bound at frame %u -> tracing frame %d\n", want, g_dev.frame, g_hist_frame); want = 0; break; }
 }
 void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t data) __attribute__((weak));
 void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t data)

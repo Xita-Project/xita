@@ -18,6 +18,7 @@
 
 #include <psp2/gxm.h>
 #include <psp2/io/fcntl.h>
+#include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/clib.h>
 #include <psp2/kernel/sysmem.h>
 
@@ -74,9 +75,17 @@ int xv_boot_recomp(const char *game_dir, const char *save_dir)
     BOOT_LOG("arena %u MB @ %p, GXM-mapped R/W\n", arena >> 20, g_xram);
 
     /* Load the flattened image into its own arena pages (past physical RAM). */
-    int got = sceIoRead(fd, g_xram + xk_mem_image_arena_offset(), size);
+    /* sceIoRead can return short on the memory card (seen once right after a USB session: 3.2 of 3.8 MB):
+     * keep reading until the whole image is in, and only give up on an error or a zero-length read */
+    uint8_t *dst = g_xram + xk_mem_image_arena_offset(); unsigned got = 0; int tries = 0;
+    while (got < size) {
+        int r = sceIoRead(fd, dst + got, size - got);
+        if (r < 0) { BOOT_LOG("image read error 0x%08X at %u / %u\n", r, got, size); break; }
+        if (r == 0) { if (++tries > 8) break; sceKernelDelayThread(20000); continue; }
+        got += (unsigned)r; if (got < size) BOOT_LOG("short image read (%u / %u), continuing\n", got, size);
+    }
     sceIoClose(fd);
-    if (got != (int)size) { BOOT_LOG("short image read (%d / %u)\n", got, size); return -1; }
+    if (got != size) { BOOT_LOG("image incomplete (%u / %u)\n", got, size); return -1; }
 
     /* Kernel up: drive letters, TLS template, thunk table.  game_dir holds maps/, save_dir is writable. */
     xk_init(base, size, xv_game_tls_dir, game_dir, save_dir);
