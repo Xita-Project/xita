@@ -391,6 +391,11 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
                 char path[128]; sceIoMkdir("ux0:data/xboxvita/texdump", 0777);
                 sceClibSnprintf(path, sizeof path, "ux0:data/xboxvita/texdump/%08X_%02X_%ux%u_m%u.ppm", data, fmt, w, h, mips);
                 SceUID fd = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+                if (getenv("XV_TEXDUMP_RAW")) {          /* the source bytes too (offline layout experiments) */
+                    char rp[128]; sceClibSnprintf(rp, sizeof rp, "ux0:data/xboxvita/texdump/%08X_%02X_%ux%u_m%u_f%08X_s%08X.raw", data, fmt, w, h, mips, fmtword, sizeword);
+                    SceUID rf = sceIoOpen(rp, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+                    if (rf >= 0) { sceIoWrite(rf, src, isdxt ? ((w + 3) / 4) * ((h + 3) / 4) * bs : (pitch ? pitch : w * bpp) * h); sceIoClose(rf); }
+                }
                 if (fd >= 0) { char hdr[32]; int n = sceClibSnprintf(hdr, sizeof hdr, "P6\n%u %u\n255\n", w, h); sceIoWrite(fd, hdr, n);
                     static uint8_t row[4096 * 3]; for (unsigned y = 0; y < h; ++y) { for (unsigned x = 0; x < w && x < 4096; ++x) { uint32_t p = dst[y * w + x]; row[x * 3] = p & 0xFF; row[x * 3 + 1] = (p >> 8) & 0xFF; row[x * 3 + 2] = (p >> 16) & 0xFF; } sceIoWrite(fd, row, (w < 4096 ? w : 4096) * 3); }
                     sceIoClose(fd); }

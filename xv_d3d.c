@@ -832,6 +832,24 @@ static SceGxmFragmentProgram *fragment_for(vs_slot_t *v, unsigned kind, unsigned
 /* A cube sampler must see a cube texture control word: when the game has a 2D texture (or nothing) on a
  * stage the combiner reads as a cube map, bind this neutral grey 8x8x6 cube instead of risking the GPU. */
 static SceGxmTexture g_cube_fallback; static int g_cube_fallback_ok = -1;
+/* 8x8 mid-grey 2D texture for stages a program samples but the game left unset or bound with the wrong
+ * kind (a cube map on a sampler2D): binding a zeroed or mismatched SceGxmTexture faults the real GPU */
+static SceGxmTexture g_tex2d_fallback; static int g_tex2d_fallback_ok = -1;
+static const SceGxmTexture *tex2d_fallback(void)
+{
+    if (g_tex2d_fallback_ok < 0) {
+        SceUID uid = sceKernelAllocMemBlock("xv_tex_fb", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, 4096, NULL);
+        void *mem = NULL; g_tex2d_fallback_ok = 0;
+        if (uid >= 0) {
+            sceKernelGetMemBlockBase(uid, &mem);
+            if (sceGxmMapMemory(mem, 4096, SCE_GXM_MEMORY_ATTRIB_READ) == SCE_OK) {
+                uint32_t *p = mem; for (int i = 0; i < 8 * 8; ++i) p[i] = 0xFF808080u;
+                g_tex2d_fallback_ok = sceGxmTextureInitLinear(&g_tex2d_fallback, mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, 8, 8, 1) == SCE_OK;
+            }
+        }
+    }
+    return g_tex2d_fallback_ok ? &g_tex2d_fallback : NULL;
+}
 static const SceGxmTexture *cube_fallback(void)
 {
     if (g_cube_fallback_ok < 0) {
@@ -925,9 +943,20 @@ static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigne
                 if (fs->p_fogcolor) sceGxmSetUniformDataF(fub, fs->p_fogcolor, 0, 4, fog);
             }
         }
-        for (unsigned t = 0; t < c->ntex; ++t)
-            if (fs->tex_index[t] >= 0)
-                sceGxmSetFragmentTexture(ctx, (unsigned)fs->tex_index[t], &c->tex[t]);
+        for (unsigned t = 0; t < 4; ++t) {
+            if (fs->tex_index[t] < 0) continue;                       /* program does not sample this stage */
+            const SceGxmTexture *tx = t < c->ntex ? &c->tex[t] : NULL;
+            int want_cube = c->ps_entry >= 0 && (xv_ps_table[c->ps_entry].cube_mask & (1u << t));
+            int have = tx && sceGxmTextureGetData(tx) != NULL;
+            int is_cube = have && sceGxmTextureGetType(tx) == SCE_GXM_TEXTURE_CUBE;
+            if (!have || (want_cube != is_cube)) {                    /* unset stage, or a cube on a sampler2D / 2D on a samplerCUBE */
+                const SceGxmTexture *fb = want_cube ? cube_fallback() : tex2d_fallback();
+                static unsigned n; if (n++ < 12) XV_LOG("draw: stage %u %s -> fallback %s\n", t, !have ? "unset" : "kind mismatch", want_cube ? "cube" : "2d");
+                if (!fb) continue;
+                tx = fb;
+            }
+            sceGxmSetFragmentTexture(ctx, (unsigned)fs->tex_index[t], tx);
+        }
         sceGxmDraw(ctx, (SceGxmPrimitiveType)c->prim, SCE_GXM_INDEX_FORMAT_U16, c->indices, c->index_count);
     }
     *clear_slot_io = clear_slot;
