@@ -421,7 +421,8 @@ void xk_KeDelayExecutionThread(xctx *c)
     xk_thread *t = xk_cur;
     { static unsigned n; if (n++ < 30) XK_LOG("[wait] t%d KeDelayExecutionThread %lld\n", t->id, (long long)to); }
     if (alertable && t->napc) { xk_apc_deliver(c); c->r[0] = STATUS_USER_APC; X_RET(3); }
-    if (to == 0 && xd3d_vblank_kick && xd3d_vblank_kick(c, X_M32(c->r[4]))) { c->r[0] = STATUS_SUCCESS; X_RET(3); }
+    /* Halo's vblank wait is a Sleep(1) loop (0xBB060 -> Sleep 0x12EBB -> SleepEx -> here with -10000) */
+    if ((to == 0 || (to < 0 && to >= -30000)) && xd3d_vblank_kick && xd3d_vblank_kick(c, X_M32(c->r[4]))) { c->r[0] = STATUS_SUCCESS; X_RET(3); }
     t->wait_n = 0; t->alertable = alertable;
     t->wait_until = to < 0 ? now100() + (uint64_t)(-to) : (to == 0 ? now100() : (uint64_t)to - (xk_time_100ns() - now100()));
     { uint64_t t0 = xk_os_monotonic_us(); uint32_t eip = X_M32(c->r[4]);

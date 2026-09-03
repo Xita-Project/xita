@@ -225,8 +225,13 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip)
     /* the yield/Sleep(0) comes through an XAPI wrapper: look for the wait loop's return address in the
      * top of the guest stack (eip = the wrapper's return address, then up to 24 words above it) */
     int hit = eip >= 0x000BB060u && eip < 0x000BB100u;
-    for (unsigned i = 0; !hit && i < 24; ++i) { uint32_t w = X_M32(c->r[4] + 4u * i); if (w >= 0x000BB060u && w < 0x000BB100u) hit = 1; }
-    if (!hit) return 0;
+    for (unsigned i = 0; !hit && i < 40; ++i) { uint32_t w = X_M32(c->r[4] + 4u * i); if (w >= 0x000BB060u && w < 0x000BB100u) hit = 1; }
+    if (!hit) {
+        static unsigned dumped; if (dumped < 3 && eip >= 0x00012E00u && eip < 0x00012F00u) { dumped++; char b[400]; int n = 0;
+            for (unsigned i = 0; i < 40 && n < 380; ++i) n += snprintf(b + n, sizeof b - n, " %X", X_M32(c->r[4] + 4u * i));
+            D3DLOG("vblank kick miss: eip %08X stack:%s\n", eip, b); }
+        return 0;
+    }
     vblank_fire(c); g_vb_kicks++;
     { static unsigned n; if (n++ < 5) D3DLOG("vblank kick from %08X (%u so far)\n", eip, g_vb_kicks); }
     return 1;

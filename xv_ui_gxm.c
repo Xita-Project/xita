@@ -358,8 +358,11 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
          * twiddled (PowerVR order, see gxm_unswz), so reorder 8/16-byte blocks - no decompression. */
         /* whole mip chain down to 4x4 (Xbox stores the levels back to back; GXM swizzled BC levels are
          * concatenated too): without mips the hull fly-by at grazing angles aliased into streaks */
+        /* XV_BC_MIPS=0 (default until verified on hardware): upload level 0 only - the chained-level layout
+         * may be what faulted the GPU at the main menu on 2026-09-02 21:50 */
+        static int bcmips = -1; if (bcmips < 0) { const char *e = getenv("XV_BC_MIPS"); bcmips = e ? atoi(e) : 0; }
         unsigned levels = 0; uint32_t need = 0;
-        { unsigned lw = w; while (lw >= 4 && levels < mips) { need += (lw / 4) * (lw / 4) * bs; lw >>= 1; levels++; } }
+        { unsigned lw = w; while (lw >= 4 && levels < (bcmips ? mips : 1)) { need += (lw / 4) * (lw / 4) * bs; lw >>= 1; levels++; } }
         need = ALIGN_UP(need, 64);
         if (g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
         uint8_t *dst = g.dec_base + g.dec_off, *o = dst; const uint8_t *lsrc = src;
