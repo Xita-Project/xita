@@ -34,7 +34,7 @@ float4 main(VertOut IN, uniform sampler2D tex0, uniform samplerCUBE tex1, unifor
 {
     // ---- inputs (varyings the vertex program does not write read as NV2A defaults)
     float4 v0 = float4(0.0, 0.0, 0.0, 0.0), v1 = float4(0.0, 0.0, 0.0, 0.0);
-    float4 fog = float4(xv_fogcolor.rgb, IN.fog);
+    float4 fog = float4(xv_fogcolor.rgb, saturate(IN.fog));
     float4 r0 = float4(0.0, 0.0, 0.0, 0.0), r1 = float4(0.0, 0.0, 0.0, 0.0);
     float4 t0 = tex2D(tex0, IN.texcoord0.xy);
     float4 t1 = texCUBE(tex1, IN.texcoord1.xyz);

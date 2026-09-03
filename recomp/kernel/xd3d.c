@@ -438,7 +438,16 @@ void xv_hle_D3DDevice_SetTextureState_BorderColor(xctx *c) { XD3D_COUNT("D3DDevi
 void xv_hle_D3DDevice_SetTextureState_ColorKeyColor(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_ColorKeyColor"); X_RET(2); }
 void xv_hle_D3DDevice_SetTextureState_BumpEnv(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_BumpEnv"); X_RET(3); }
 void xv_hle_D3DDevice_SetTextureState_Deferred(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_Deferred"); if ((c->r[1] & 3) == c->r[1] && c->r[2] < 32) X_M32(D3D_G_TEXTURESTATE + ((c->r[1] << 5) + c->r[2]) * 4) = X_ARG(0); X_RET(1); }
-void xv_hle_D3DDevice_SetRenderState_Deferred(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderState_Deferred"); X_RET(0); }
+/* Deferred render states (fog enable/table mode/start/end/density, lighting, ...) are applied by D3D at
+   draw time; we don't consume them yet.  Log distinct (state, value) pairs so the fog setup can be read. */
+void xv_hle_D3DDevice_SetRenderState_Deferred(xctx *c) {
+    XD3D_COUNT("D3DDevice_SetRenderState_Deferred");
+    static uint32_t seen[64][2]; static unsigned nseen;
+    uint32_t st = c->r[1], v = c->r[2]; unsigned i;               /* __fastcall: ecx = state, edx = value */
+    for (i = 0; i < nseen; ++i) if (seen[i][0] == st && seen[i][1] == v) break;
+    if (i == nseen && nseen < 64) { seen[nseen][0] = st; seen[nseen][1] = v; nseen++; float f; memcpy(&f, &v, 4); D3DLOG("deferred rs[%u] = %08X (%g)\n", st, v, (double)f); }
+    X_RET(0);
+}
 #define RS1(name) void xv_hle_D3DDevice_SetRenderState_##name(xctx *c) { X_RET(1); }
 RS1(BackFillMode)
 void xv_hle_D3DDevice_SetRenderState_CullMode(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderState_CullMode"); xd3d_state.cull = X_ARG(0); X_RET(1); } RS1(DoNotCullUncompressed) RS1(Dxt1NoiseEnable) RS1(EdgeAntiAlias) RS1(FillMode)

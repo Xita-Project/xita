@@ -71,7 +71,7 @@ VertOut main(AppIn IN, uniform float4 c[192])
     }
     // [02] mov r3, c[a0.x+60] | mov oD0.xyz, v9
     {
-        float4 m = c[a0 + 60];
+        float4 m = c[(a0 + 60) < 0 ? 0 : ((a0 + 60) > 191 ? 191 : (a0 + 60))];
         float4 i = v9;
         r3 = m;
         oD0.xyz = i.xyz;
@@ -89,7 +89,7 @@ VertOut main(AppIn IN, uniform float4 c[192])
     }
     // [05] mov r5, c[a0.x+21]
     {
-        float4 m = c[a0 + 21];
+        float4 m = c[(a0 + 21) < 0 ? 0 : ((a0 + 21) > 191 ? 191 : (a0 + 21))];
         r5 = m;
     }
     // [06] mul r6.y, r1.y, c[15].y
@@ -103,7 +103,7 @@ VertOut main(AppIn IN, uniform float4 c[192])
     }
     // [08] mov r7, c[a0.x+17]
     {
-        float4 m = c[a0 + 17];
+        float4 m = c[(a0 + 17) < 0 ? 0 : ((a0 + 17) > 191 ? 191 : (a0 + 17))];
         r7 = m;
     }
     // [09] mov r8.xyz, v0

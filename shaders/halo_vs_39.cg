@@ -80,17 +80,17 @@ VertOut main(AppIn IN, uniform float4 c[185])
     }
     // [02] mul r4, v6.x, c[a0.x+60]
     {
-        float4 m = v6.xxxx * c[a0 + 53];
+        float4 m = v6.xxxx * c[(a0 + 53) < 0 ? 0 : ((a0 + 53) > 191 ? 191 : (a0 + 53))];
         r4 = m;
     }
     // [03] mul r5, v6.x, c[a0.x+61]
     {
-        float4 m = v6.xxxx * c[a0 + 54];
+        float4 m = v6.xxxx * c[(a0 + 54) < 0 ? 0 : ((a0 + 54) > 191 ? 191 : (a0 + 54))];
         r5 = m;
     }
     // [04] mul r6, v6.x, c[a0.x+62]
     {
-        float4 m = v6.xxxx * c[a0 + 55];
+        float4 m = v6.xxxx * c[(a0 + 55) < 0 ? 0 : ((a0 + 55) > 191 ? 191 : (a0 + 55))];
         r6 = m;
     }
     // [05] arl a0.x, r0.y
@@ -109,17 +109,17 @@ VertOut main(AppIn IN, uniform float4 c[185])
     }
     // [08] mad r4, r9.x, c[a0.x+60], r4
     {
-        float4 m = r9.xxxx * c[a0 + 53] + r4;
+        float4 m = r9.xxxx * c[(a0 + 53) < 0 ? 0 : ((a0 + 53) > 191 ? 191 : (a0 + 53))] + r4;
         r4 = m;
     }
     // [09] mad r5, r9.x, c[a0.x+61], r5
     {
-        float4 m = r9.xxxx * c[a0 + 54] + r5;
+        float4 m = r9.xxxx * c[(a0 + 54) < 0 ? 0 : ((a0 + 54) > 191 ? 191 : (a0 + 54))] + r5;
         r5 = m;
     }
     // [10] mad r6, r9.x, c[a0.x+62], r6
     {
-        float4 m = r9.xxxx * c[a0 + 55] + r6;
+        float4 m = r9.xxxx * c[(a0 + 55) < 0 ? 0 : ((a0 + 55) > 191 ? 191 : (a0 + 55))] + r6;
         r6 = m;
     }
     // [11] dph r0.x, v0, r4

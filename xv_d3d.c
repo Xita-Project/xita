@@ -427,7 +427,7 @@ static const SceGxmTexture *texture_for(unsigned stage)
         }
         if (rc == 2)
             XV_ONCE(warned_dxt, "DXT texture bound without block reorder (visual garbage expected until implemented)\n");
-        const void *pix = xv_guest_ptr(x->Data);
+        const void *pix = xv_guest_ptr(0x80000000u | x->Data);     /* physical address (see the stream path) */
         int err;
         if (linear) {
             uint32_t w = (x->Size & 0xFFF) + 1, h = ((x->Size >> 12) & 0xFFF) + 1;
@@ -624,12 +624,66 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         }
         const X_D3DResource *vb = (const X_D3DResource *)xv_guest_ptr(S.stream_guest[s]);
         unsigned stride = S.stream_stride[s] ? S.stream_stride[s] : d->stride[s];
-        const uint8_t *p = (const uint8_t *)xv_guest_ptr(vb->Data) + base_vertex * stride;
+        /* Data is a PHYSICAL address: translate through the 0x80000000 alias.  As a bare low VA it hit
+         * Halo's heap pages (heap VAs start at 0x00465000), so map-resident model vertices (vehicle parts,
+         * dropped weapons: physical 0x005A5A00...) came back as zeros / live heap bytes. */
+        const uint8_t *p = (const uint8_t *)xv_guest_ptr(0x80000000u | vb->Data) + base_vertex * stride;
         c->streams[s] = p;
         xv_gpu_flush(p, nverts * stride);
     }
     if (indices)
         xv_gpu_flush(indices, count * 2);
+
+    {   /* XV_SKIN_DUMP=1: for the first bone-indexed draws, log the node-index bytes (+28/+29), the weight
+         * (+30) and the scale constant c[7] the program multiplies them by (vehicle wheels/weapons mangled) */
+        static int dump = -1; if (dump < 0) { const char *e = getenv("XV_SKIN_DUMP"); dump = e ? atoi(e) : 0; }
+        static unsigned shown;
+        if (dump && c->streams[0] && shown < 160) {
+            int skinned = 0;
+            for (unsigned a = 0; a < d->nattrs; ++a) if (d->attrs[a].offset == 28 && d->attrs[a].format == SCE_GXM_ATTRIBUTE_FORMAT_U8N) skinned = 1;
+            const uint8_t *vb0 = (const uint8_t *)c->streams[0];
+            unsigned st = S.stream_stride[0] ? S.stream_stride[0] : d->stride[0], mx = 0, mx0 = 0; char buf[200]; int k = 0;
+            if (skinned) for (unsigned i = 0; i < nverts; ++i) if (vb0[i * st + 28] > mx0) mx0 = vb0[i * st + 28];
+            /* once per distinct (program, vertex count, node-set) signature so parts that appear later (the
+             * Warthog when the player walks up to it) still get logged */
+            uint32_t sig = 0;
+            if (skinned) { sig = (uint32_t)(uintptr_t)d ^ (nverts * 2654435761u); for (unsigned i = 0; i < nverts; i += 7) sig = sig * 31u + vb0[i * st + 28]; }
+            static uint32_t sigs[160]; int newsig = 0;
+            if (skinned) { unsigned j; for (j = 0; j < shown; ++j) if (sigs[j] == sig) break; if (j == shown) { sigs[shown] = sig; newsig = 1; } }
+            static unsigned big; int bigpart = skinned && nverts == 1372 && big < 40;
+            if (bigpart) {                                          /* the Warthog: which vertices carry odd node bytes, and where the buffer lives */
+                big++; unsigned odd = 0; char ob[160]; int ok = 0;
+                for (unsigned i = 0; i < nverts; ++i) { uint8_t b = vb0[i * st + 28]; if (b % 3 || b > 120) { if (odd < 6) ok += snprintf(ob + ok, sizeof ob - ok, " v%u=%u/%u", i, b, vb0[i * st + 29]); odd++; } }
+                if (big == 1) { FILE *f = fopen("ux0:data/xboxvita/vb_1372.bin", "wb"); if (f) { fwrite(vb0, 1, nverts * st, f); fclose(f); } }
+                if (big == 1) {                                         /* vertex-object table (index header +0x14) as fixed up by the loader */
+                    uint32_t idx = 0x803A6000u, tbl = *(const uint32_t *)xv_guest_ptr(idx + 0x14), cnt = *(const uint32_t *)xv_guest_ptr(idx + 0x10);
+                    XV_LOG("[skin] vobj table %08X x%u; this vb %08X = entry %d\n", tbl, cnt, S.stream_guest[0], (int)(S.stream_guest[0] - tbl) / 12);
+                    for (unsigned i = 0; i < cnt && i < 359; i += (i < 8 || (i >= 246 && i <= 254)) ? 1 : 40) {
+                        const uint32_t *e = (const uint32_t *)xv_guest_ptr(tbl + i * 12);
+                        XV_LOG("[skin] vobj[%u] common %08X data %08X lock %08X\n", i, e[0], e[1], e[2]);
+                    }
+                }
+                XV_LOG("[skin] BIG guest vb %08X (+%u) odd=%u:%s\n", S.stream_guest[0], (unsigned)((const uint8_t *)c->streams[0] - (const uint8_t *)xv_guest_ptr(S.stream_guest[0])), odd, ob);
+            }
+            if (skinned && newsig) {
+                shown++;
+                for (unsigned i = 0; i < nverts && i < 6; ++i) { const uint8_t *vv = vb0 + i * st; int16_t w; memcpy(&w, vv + 30, 2); k += snprintf(buf + k, sizeof buf - k, " [%u,%u w%d]", vv[28], vv[29], w); }
+                for (unsigned i = 0; i < nverts; ++i) { const uint8_t *vv = vb0 + i * st; if (vv[28] > mx) mx = vv[28]; if (vv[29] > mx) mx = vv[29]; }
+                XV_LOG("[skin] %s n=%u stride=%u maxnode=%u c7=(%g %g %g %g) c60=(%g %g %g %g) c63.x=%g nodes:%s\n", d->gxp, nverts, st, mx,
+                       S.vsc[7][0], S.vsc[7][1], S.vsc[7][2], S.vsc[7][3], S.vsc[60][0], S.vsc[60][1], S.vsc[60][2], S.vsc[60][3], S.vsc[63][0], buf);
+                /* distinct node0 bytes in this draw and the 3 matrix rows each selects (c[60+b..62+b]) */
+                uint8_t seen[8]; unsigned ns = 0;
+                for (unsigned i = 0; i < nverts && ns < 8; ++i) { uint8_t b = vb0[i * st + 28]; unsigned j; for (j = 0; j < ns; ++j) if (seen[j] == b) break; if (j == ns) seen[ns++] = b; }
+                for (unsigned j = 0; j < ns; ++j) {
+                    unsigned b = seen[j]; if (60 + b + 2 >= 192) continue;
+                    XV_LOG("[skin]   node byte %u -> rows [%.3f %.3f %.3f %.2f] [%.3f %.3f %.3f %.2f] [%.3f %.3f %.3f %.2f]\n", b,
+                           S.vsc[60 + b][0], S.vsc[60 + b][1], S.vsc[60 + b][2], S.vsc[60 + b][3],
+                           S.vsc[61 + b][0], S.vsc[61 + b][1], S.vsc[61 + b][2], S.vsc[61 + b][3],
+                           S.vsc[62 + b][0], S.vsc[62 + b][1], S.vsc[62 + b][2], S.vsc[62 + b][3]);
+                }
+            }
+        }
+    }
 
     /* constants: snapshot the window this program reads.  Consecutive draws with unchanged c[] share one
      * snapshot (Halo draws hundreds of BSP pieces per frame with full-window programs: 768 floats each) */

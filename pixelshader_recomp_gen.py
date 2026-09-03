@@ -223,7 +223,9 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
     body.append("    // ---- inputs (varyings the vertex program does not write read as NV2A defaults)")
     body.append(f"    float4 v0 = {'IN.color0' if have('color0') else 'float4(0.0, 0.0, 0.0, 0.0)'}, "
                 f"v1 = {'IN.color1' if have('color1') else 'float4(0.0, 0.0, 0.0, 0.0)'};")
-    body.append(f"    float4 fog = float4(xv_fogcolor.rgb, {'IN.fog' if have('fog') else '1.0'});")
+    # the NV2A fog unit clamps the factor to [0,1]; unclamped oFog.x > 1 extrapolated the final lerp past
+    # the lit colour (washed-out sand) and < 0 past the fog colour
+    body.append(f"    float4 fog = float4(xv_fogcolor.rgb, {'saturate(IN.fog)' if have('fog') else '1.0'});")
     body.append("    float4 r0 = float4(0.0, 0.0, 0.0, 0.0), r1 = float4(0.0, 0.0, 0.0, 0.0);")
     # texture stages (declare all four locals so later references never dangle)
     declared = set()

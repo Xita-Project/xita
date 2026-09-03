@@ -549,7 +549,12 @@ def _src_expr(operand: dict, p: Plan) -> str:
         base = "oPos" if operand["index"] == 12 else f"r{operand['index']}"
     elif kind == "c":
         d3d = int(operand["index"]) - p.const_bias - p.c_base
-        base = f"c[a0 + {d3d}]" if operand.get("relative") else f"c[{d3d}]"
+        # Relative reads are clamped into the 192-entry array: Halo's skinned vertices carry a second
+        # node index of 253 ("no node", weight 0), and c[253+60] read past the uniform buffer - garbage
+        # that is harmless at weight 0 unless it is NaN/Inf, which flung vertices (mangled Warthog).
+        # (int ternary: psp2cgc finds clamp/min/max ambiguous on ints)
+        base = (f"c[(a0 + {d3d}) < 0 ? 0 : ((a0 + {d3d}) > 191 ? 191 : (a0 + {d3d}))]"
+                if operand.get("relative") else f"c[{d3d}]")
     else:
         base = "float4(0.0, 0.0, 0.0, 0.0)"
     swz = operand.get("swizzle", "xyzw")
@@ -654,6 +659,8 @@ def emit_main_function(p: Plan, func: dict, args) -> List[str]:
         for op in ops:
             tmp = "m" if op["unit"] == "MAC" else "i"
             if op["opcode"] == "arl":
+                # NV2A ARL floors.  Halo's node index = byte/255 * 255.9375 = k + 0.0037k: always a hair
+                # ABOVE the integer, so plain floor is exact.
                 L.append(f"        a0 = (int)floor(({_src_expr(op['inputs'][0], p)}).x);")
                 continue
             for out in op["outputs"]:
