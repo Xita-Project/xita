@@ -956,8 +956,9 @@ class Emitter:
         dead = set()
         if not insns:
             return dead
+        RF_ALL2 = RF_ALL
         last = insns[-1]
-        live = 0 if last.flow_control in (FlowControl.CALL, FlowControl.INDIRECT_CALL, FlowControl.RETURN) else RF_ALL
+        live = 0 if last.flow_control in (FlowControl.CALL, FlowControl.INDIRECT_CALL, FlowControl.RETURN) else RF_ALL2
         for ins in reversed(insns):
             rd = ins.rflags_read
             wr = ins.rflags_modified            # written | cleared | set | undefined
@@ -966,7 +967,44 @@ class Emitter:
             live = (live & ~wr) | rd
         return dead
 
-    def fusable_pairs(self, insns) -> dict:
+    def block_flag_use(self, insns) -> int:
+        """Flags a block reads before writing them (plus whatever it leaves unwritten: conservative)."""
+        RF_ALL = RflagsBits.OF | RflagsBits.SF | RflagsBits.ZF | RflagsBits.AF | RflagsBits.CF | RflagsBits.PF
+        used = 0; written = 0
+        for ins in insns:
+            used |= ins.rflags_read & ~written
+            if ins.flow_control in (FlowControl.CALL, FlowControl.INDIRECT_CALL, FlowControl.RETURN):
+                return used                       # x86 code never keeps flags across calls/returns
+            written |= ins.rflags_modified
+            if written == RF_ALL:
+                return used
+        return used | (RF_ALL & ~written)
+
+    def exit_live(self, fn, insns) -> int:
+        """Flags live at the end of a block: the union of what its successors read first."""
+        RF_ALL = RflagsBits.OF | RflagsBits.SF | RflagsBits.ZF | RflagsBits.AF | RflagsBits.CF | RflagsBits.PF
+        if not insns:
+            return RF_ALL
+        last = insns[-1]
+        fc = last.flow_control
+        if fc in (FlowControl.CALL, FlowControl.INDIRECT_CALL, FlowControl.RETURN):
+            return 0
+        succ = []
+        if fc in (FlowControl.CONDITIONAL_BRANCH, FlowControl.UNCONDITIONAL_BRANCH):
+            succ.append(last.near_branch_target)
+        if fc in (FlowControl.CONDITIONAL_BRANCH, FlowControl.NEXT):
+            succ.append(last.next_ip)
+        if fc == FlowControl.INDIRECT_BRANCH or not succ:
+            return RF_ALL
+        live = 0
+        for t in succ:
+            b = fn.blocks.get(t) if fn is not None else None
+            if b is None:
+                return RF_ALL
+            live |= self.block_flag_use(b.insns)
+        return live
+
+    def fusable_pairs(self, insns, fn=None) -> dict:
         """index -> (kind, bits, cc) for flag-producing instructions whose flags are read only by the jcc
         that immediately follows (and are dead after it)."""
         RF_ALL = RflagsBits.OF | RflagsBits.SF | RflagsBits.ZF | RflagsBits.AF | RflagsBits.CF | RflagsBits.PF
@@ -975,6 +1013,8 @@ class Emitter:
             return res
         last = insns[-1]
         live_after = [0] * len(insns)
+        # NOTE: successor-aware liveness (exit_live) mis-fused something (the CRT x87 exception path ran
+        # on the host); until that is understood, fuse only when the block itself proves the flags dead.
         live = 0 if last.flow_control in (FlowControl.CALL, FlowControl.INDIRECT_CALL, FlowControl.RETURN) else RF_ALL
         for i in range(len(insns) - 1, -1, -1):
             live_after[i] = live
@@ -1006,6 +1046,7 @@ class Emitter:
         out = [f"void f_{fn.entry:08X}(xctx *restrict c)", "{",
                "    uint8_t *const xram_ = g_xram; const uint32_t *const xpt_ = g_xpt; (void)xram_; (void)xpt_;"]
         self.cur_fn = fn.entry
+        self._cur_fn_obj = fn
         if self.trace_funcs:
             out.append(f"    XV_FN(0x{fn.entry:08X}u);")
         # Blocks are emitted in address order.  When the function owns blocks below its entry (a jump
@@ -1020,7 +1061,7 @@ class Emitter:
             blk = fn.blocks[start]
             out.append(f"L_{start:08X}:")
             dead = self.dead_flag_writes(blk.insns)
-            fuse = self.fusable_pairs(blk.insns)
+            fuse = self.fusable_pairs(blk.insns, fn)
             skip_next = False
             for idx, ins in enumerate(blk.insns):
                 if skip_next:

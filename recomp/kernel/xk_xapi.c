@@ -36,11 +36,14 @@ static uint32_t data_export_var(unsigned ordinal)
 static void xk_level_select(void)
 {
     const char *lvl = getenv("XV_LEVEL");
-    if (!lvl || strlen(lvl) != 3 || !strcmp(lvl, "a10")) return;
-    static const uint32_t sites[] = { 0x002078A8u, 0x002091ECu, 0x0020F938u };   /* Halo 3925 level tables */
-    char to[16]; snprintf(to, sizeof to, "levels\\%s\\%s", lvl, lvl);
+    if (!lvl || !*lvl || !strcmp(lvl, "a10")) return;
+    static const uint32_t sites[] = { 0x002078A8u, 0x002091ECu, 0x0020F938u };   /* Halo 3925 level tables (16-byte entries) */
+    /* 3-letter code -> levels\xxx\xxx; anything else is written as given (<= 15 chars), e.g. XV_LEVEL=x\bloodgulch:
+     * the game takes the map file name from the last path component */
+    char to[16];
+    if (strlen(lvl) == 3) snprintf(to, sizeof to, "levels\\%s\\%s", lvl, lvl); else { if (strlen(lvl) > 15) { XK_LOG("level select: '%s' too long (max 15)\n", lvl); return; } snprintf(to, sizeof to, "%s", lvl); }
     int n = 0;
-    for (unsigned i = 0; i < 3; ++i) if (memcmp(X_G(sites[i]), "levels\\a10\\a10", 14) == 0) { memcpy(X_G(sites[i]), to, 14); n++; }
+    for (unsigned i = 0; i < 3; ++i) if (memcmp(X_G(sites[i]), "levels\\a10\\a10", 14) == 0) { memset(X_G(sites[i]), 0, 16); memcpy(X_G(sites[i]), to, strlen(to)); n++; }
     XK_LOG("level select: %s patched into %d table(s) - campaign mission 1 now loads it\n", to, n);
 }
 

@@ -205,6 +205,32 @@ void xv_hle_D3DDevice_IsBusy(xctx *c) { XD3D_COUNT("D3DDevice_IsBusy"); c->r[0] 
 void xv_hle_D3DDevice_BlockUntilVerticalBlank(xctx *c) { XD3D_COUNT("D3DDevice_BlockUntilVerticalBlank"); xk_yield(); X_RET(0); }
 /* Real hardware raises vblank interrupts at 60 Hz regardless of Present; Halo's frame limiter counts
  * them.  A kernel guest thread invokes the registered callback every 16.7 ms. */
+/* Vblank on demand: Halo paces frames by spinning (Sleep(0)/yield) in its vblank-count wait loop
+ * (3925: 0xBB060..0xBB0F3) until the callback has advanced the counter.  At 10 fps that spin is pure loss
+ * (up to 16.7 ms per frame), so when the game thread yields from inside that loop we run the callback
+ * right away instead of letting it wait for the timer tick. */
+static uint32_t g_vb_data; static unsigned g_vb_counter; static unsigned g_vb_kicks;
+static void vblank_fire(xctx *c)
+{
+    if (!g_dev.vblank_cb) return;
+    if (!g_vb_data) g_vb_data = xk_kalloc(16);
+    g_vb_counter++;
+    X_M32(g_vb_data) = g_vb_counter; X_M32(g_vb_data + 4) = g_dev.frame; X_M32(g_vb_data + 8) = 0; X_M32(g_vb_data + 12) = 0;
+    call_guest(c, g_dev.vblank_cb, g_vb_data);
+}
+int xd3d_vblank_kick(xctx *c, uint32_t eip)
+{
+    static int on = -1; if (on < 0) { const char *e = getenv("XV_VBLANK_KICK"); on = e ? atoi(e) : 1; }
+    if (!on) return 0;
+    /* the yield/Sleep(0) comes through an XAPI wrapper: look for the wait loop's return address in the
+     * top of the guest stack (eip = the wrapper's return address, then up to 24 words above it) */
+    int hit = eip >= 0x000BB060u && eip < 0x000BB100u;
+    for (unsigned i = 0; !hit && i < 24; ++i) { uint32_t w = X_M32(c->r[4] + 4u * i); if (w >= 0x000BB060u && w < 0x000BB100u) hit = 1; }
+    if (!hit) return 0;
+    vblank_fire(c); g_vb_kicks++;
+    { static unsigned n; if (n++ < 5) D3DLOG("vblank kick from %08X (%u so far)\n", eip, g_vb_kicks); }
+    return 1;
+}
 static void vblank_thread(xctx *c, void *arg)
 {
     (void)arg; unsigned counter = 0;
@@ -215,11 +241,8 @@ static void vblank_thread(xctx *c, void *arg)
     D3DLOG("vblank thread: %u Hz\n", hz);
     for (;;) {
         xk_sleep_us(1000000u / hz);
-        if (g_dev.vblank_cb) {
-            counter++;
-            X_M32(data) = counter; X_M32(data + 4) = g_dev.frame; X_M32(data + 8) = 0; X_M32(data + 12) = 0;
-            call_guest(c, g_dev.vblank_cb, data);
-        }
+        (void)counter; (void)data;
+        vblank_fire(c);
     }
 }
 void xv_hle_D3DDevice_SetVerticalBlankCallback(xctx *c)

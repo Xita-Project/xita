@@ -857,7 +857,7 @@
     "clamp_sum": false,
     "complement_v1": false,
     "complement_r0": false,
-    "c0_default": "(0.184, 0.259, 0.239, 1.000)",
+    "c0_default": "(1.000, 1.000, 1.000, 1.000)",
     "c1_default": "(0.000, 0.000, 0.000, 0.000)",
     "c0_map": 0,
     "c1_map": 0,

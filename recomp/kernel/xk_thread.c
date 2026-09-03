@@ -390,7 +390,10 @@ void xk_NtSuspendThread(xctx *c)
 }
 void xk_KeSuspendThread(xctx *c) { XK_LOG("KeSuspendThread(%08X)\n", X_ARG(0)); xk_obj *o = xk_obj_from_guest(X_ARG(0)); if (o) { o->u.thread->suspend_count++; if (o->u.thread->state == 0) o->u.thread->state = 2; } c->r[0] = 0; X_RET(1); }
 void xk_KeResumeThread(xctx *c) { XK_LOG("KeResumeThread(%08X)\n", X_ARG(0)); xk_obj *o = xk_obj_from_guest(X_ARG(0)); if (o && o->u.thread->suspend_count > 0 && --o->u.thread->suspend_count == 0) o->u.thread->state = 0; c->r[0] = 0; X_RET(1); }
-void xk_NtYieldExecution(xctx *c) { { static unsigned n; if (n++ < 30) XK_LOG("[wait] t%d NtYieldExecution\n", xk_cur ? xk_cur->id : -1); } xk_yield(); c->r[0] = STATUS_SUCCESS; X_RET(0); }
+int xd3d_vblank_kick(xctx *c, uint32_t eip) __attribute__((weak));
+void xk_NtYieldExecution(xctx *c) { { static unsigned n; if (n++ < 30) XK_LOG("[wait] t%d NtYieldExecution\n", xk_cur ? xk_cur->id : -1); }
+    if (xd3d_vblank_kick && xd3d_vblank_kick(c, X_M32(c->r[4]))) { c->r[0] = STATUS_SUCCESS; X_RET(0); }
+    xk_yield(); c->r[0] = STATUS_SUCCESS; X_RET(0); }
 void xk_KeSetBasePriorityThread(xctx *c) { int old = (int8_t)X_M8(X_ARG(0) + KTHREAD_BASEPRIORITY); X_M8(X_ARG(0) + KTHREAD_BASEPRIORITY) = (uint8_t)(8 + (int32_t)X_ARG(1)); c->r[0] = (uint32_t)(old - 8); X_RET(2); }
 void xk_KeSetPriorityThread(xctx *c) { int old = X_M8(X_ARG(0) + KTHREAD_PRIORITY); X_M8(X_ARG(0) + KTHREAD_PRIORITY) = (uint8_t)X_ARG(1); c->r[0] = (uint32_t)old; X_RET(2); }
 void xk_KeQueryBasePriorityThread(xctx *c) { c->r[0] = (uint32_t)((int8_t)X_M8(X_ARG(0) + KTHREAD_BASEPRIORITY) - 8); X_RET(1); }
@@ -418,6 +421,7 @@ void xk_KeDelayExecutionThread(xctx *c)
     xk_thread *t = xk_cur;
     { static unsigned n; if (n++ < 30) XK_LOG("[wait] t%d KeDelayExecutionThread %lld\n", t->id, (long long)to); }
     if (alertable && t->napc) { xk_apc_deliver(c); c->r[0] = STATUS_USER_APC; X_RET(3); }
+    if (to == 0 && xd3d_vblank_kick && xd3d_vblank_kick(c, X_M32(c->r[4]))) { c->r[0] = STATUS_SUCCESS; X_RET(3); }
     t->wait_n = 0; t->alertable = alertable;
     t->wait_until = to < 0 ? now100() + (uint64_t)(-to) : (to == 0 ? now100() : (uint64_t)to - (xk_time_100ns() - now100()));
     { uint64_t t0 = xk_os_monotonic_us(); uint32_t eip = X_M32(c->r[4]);
