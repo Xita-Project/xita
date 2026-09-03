@@ -232,6 +232,8 @@ static int xbox_fmt_to_gxm(unsigned fmt, SceGxmTextureFormat *out, int *linear, 
     }
 }
 
+extern uint64_t xk_os_monotonic_us(void);
+static uint64_t g_dec_us; static unsigned g_dec_n;   /* per-frame texture decode/upload cost (reset by the frame-time log) */
 static uint32_t ui_tex_hash(const void *p, uint32_t bytes)
 {   /* FNV-1a over dwords, striding through big textures (a font cache is 32 KB: hashed fully) */
     const uint32_t *w = (const uint32_t *)p; uint32_t n = bytes / 4, step = n > 8192 ? n / 8192 : 1, h = 2166136261u;
@@ -394,6 +396,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         need = ALIGN_UP(need, 64);
         if (!re && g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
         uint32_t *dst = re ? (uint32_t *)sceGxmTextureGetData(&e->tex) : (uint32_t *)(g.dec_base + g.dec_off);
+        uint64_t dec_t0 = xk_os_monotonic_us();
         if (ui_decode(src, fmt, w, h, pitch ? pitch : w * bpp, linear, dst) != 0) {
             UI_LOG("unhandled tex fmt %02X (%ux%u)\n", fmt, w, h); UI_TEX_FAIL();
         }
@@ -441,6 +444,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         if (err != SCE_OK) { UI_LOG("textureInitLinear(%ux%u, %u mips) failed 0x%08X\n", w, h, levels, err); UI_TEX_FAIL(); }
         sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
         if (!re) g.dec_off += need;
+        g_dec_us += xk_os_monotonic_us() - dec_t0; g_dec_n++;
     }
     e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1;
     if (!re) { g.texcount++; e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache); }
@@ -920,8 +924,8 @@ void xd3d_r_present(unsigned frame, unsigned draws)
     if (++g_t_frames == 60) {
         g_xv_ovl_game_ms = g_t_game_acc / 60000.0f; g_xv_ovl_render_ms = g_t_render_acc / 60000.0f;
         g_xv_ovl_fps = 60.0e6f / (float)(g_t_game_acc + g_t_render_acc + 1);
-        UI_LOG("frame time: game %.1f ms + render %.1f ms = %.1f fps | %u textures %u KB\n",
-               g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), g.texcount, g.dec_off >> 10);
+        UI_LOG("frame time: game %.1f ms + render %.1f ms = %.1f fps | %u textures %u KB | decode %u tex %.1f ms\n",
+               g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0); g_dec_n = 0; g_dec_us = 0;
         g_t_frames = 0; g_t_game_acc = g_t_render_acc = 0;
     }
 }
