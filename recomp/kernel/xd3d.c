@@ -395,6 +395,7 @@ void xv_hle_D3DDevice_SetPalette(xctx *c) { XD3D_COUNT("D3DDevice_SetPalette");
 /* D3DRS_* -> NV2A method table in the D3D library (.rdata 0x1F08C8, 0x52 entries): states 0..0x33 are the
  * pixel shader def fields (D3DRS_PSALPHAINPUTS0 .. D3DRS_PSINPUTTEXTURE), the rest the simple states. */
 #define D3D_RS_METHOD_TABLE 0x001F08C8u
+uint32_t xd3d_fog_color(void) { return xd3d_state.fog_color; }   /* for the GXM bridge (xv_d3d.c) */
 static void rs_method(uint32_t method, uint32_t v);
 void xv_hle_D3DDevice_SetRenderStateNotInline(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderStateNotInline");
     uint32_t st = X_ARG(0), v = X_ARG(1);
@@ -412,6 +413,7 @@ static void rs_method(uint32_t method, uint32_t v)
     case 0x300: xd3d_state.alpha_test = v; break;      /* NV097_SET_ALPHA_TEST_ENABLE */
     case 0x304: xd3d_state.alpha_blend = v; break;     /* NV097_SET_BLEND_ENABLE */
     case 0x358: xd3d_state.color_mask = v; break;      /* NV097_SET_COLOR_MASK (Halo: alpha-only lightmap passes) */
+    case 0x2A8: { xd3d_state.fog_color = v; static unsigned n; if (n++ < 6) D3DLOG("fog color %08X\n", v); } break;   /* NV097_SET_FOG_COLOR: was never tracked - fog blended toward black */
     case 0x33C: xd3d_state.alpha_func = v; break;      /* NV097_SET_ALPHA_FUNC (0x200 never .. 0x207 always) */
     case 0x340: xd3d_state.alpha_ref = v; break;
     case 0x344: xd3d_state.src_blend = v; break;       /* NV097_SET_BLEND_FUNC_SFACTOR (GL enums) */
@@ -439,7 +441,10 @@ void xv_hle_D3DDevice_SetTextureState_Deferred(xctx *c) { XD3D_COUNT("D3DDevice_
 void xv_hle_D3DDevice_SetRenderState_Deferred(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderState_Deferred"); X_RET(0); }
 #define RS1(name) void xv_hle_D3DDevice_SetRenderState_##name(xctx *c) { X_RET(1); }
 RS1(BackFillMode)
-void xv_hle_D3DDevice_SetRenderState_CullMode(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderState_CullMode"); xd3d_state.cull = X_ARG(0); X_RET(1); } RS1(DoNotCullUncompressed) RS1(Dxt1NoiseEnable) RS1(EdgeAntiAlias) RS1(FillMode) RS1(FogColor)
+void xv_hle_D3DDevice_SetRenderState_CullMode(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderState_CullMode"); xd3d_state.cull = X_ARG(0); X_RET(1); } RS1(DoNotCullUncompressed) RS1(Dxt1NoiseEnable) RS1(EdgeAntiAlias) RS1(FillMode)
+/* Halo sets the fog colour through this dedicated inline helper, never via the generic
+   render-state table (no 0x2A8 in it) - so a no-op stub here left the fog black. */
+void xv_hle_D3DDevice_SetRenderState_FogColor(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderState_FogColor"); uint32_t v = X_ARG(0); if (v != xd3d_state.fog_color) { xd3d_state.fog_color = v; static unsigned n; if (n++ < 8) D3DLOG("fog color %08X\n", v); } X_RET(1); }
 RS1(FrontFace) RS1(LineWidth) RS1(LogicOp) RS1(MultiSampleAntiAlias) RS1(MultiSampleMask) RS1(MultiSampleType) RS1(NormalizeNormals)
 RS1(OcclusionCullEnable) RS1(PSTextureModes) RS1(RopZCmpAlwaysRead) RS1(RopZRead) RS1(ShadowFunc) RS1(StencilCullEnable)
 RS1(StencilEnable) RS1(StencilFail) RS1(TextureFactor) RS1(TwoSidedLighting) RS1(VertexBlend) RS1(YuvEnable) RS1(ZBias)

@@ -223,7 +223,7 @@
       "cd_blue_to_alpha": false,
       "raw": 144
      },
-     "c0_default": "(0.000, 0.839, 0.024, 0.000)",
+     "c0_default": "(0.000, 0.000, 0.000, 0.000)",
      "c1_default": "(0.000, 0.000, 0.000, 0.000)",
      "c0_map": 0,
      "c1_map": 0,
@@ -857,7 +857,7 @@
     "clamp_sum": false,
     "complement_v1": false,
     "complement_r0": false,
-    "c0_default": "(0.345, 0.357, 0.251, 1.000)",
+    "c0_default": "(1.000, 1.000, 1.000, 1.000)",
     "c1_default": "(0.000, 0.000, 0.000, 0.000)",
     "c0_map": 0,
     "c1_map": 0,

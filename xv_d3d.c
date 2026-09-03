@@ -71,6 +71,7 @@ typedef struct {
     const void *indices;
     uint32_t  const_off, const_n;   /* float4 units into the pool                     */
     float     const_attr[4];
+    uint32_t  fog_color;            /* D3DCOLOR at record time (Halo toggles it within a frame) */
     SceGxmTexture tex[4];
     int16_t   ps_entry;             /* xv_ps_table index, or -1 (heuristic fragment)  */
     uint8_t   pass;                 /* 0 = back buffer, n = offscreen pass n           */
@@ -606,6 +607,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     c->depth_func_idx = S.z_enable ? (uint8_t)((S.z_func >= 1 && S.z_func <= 8) ? S.z_func - 1 : 3) : 7;
     c->depth_write = S.z_enable && S.z_write;
     c->cull = (uint8_t)S.cull;
+    { extern uint32_t xd3d_fog_color(void); c->fog_color = xd3d_fog_color(); }
     memcpy(c->const_attr, S.const_attr, 16);
 
     /* streams: game pointers, offset by the base vertex, flushed for the GPU */
@@ -938,7 +940,8 @@ static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigne
         if (fs->p_psc || fs->p_fogcolor) {
             void *fub;
             if (sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub) == 0) {
-                static const float fog[4] = { 0, 0, 0, 0 };
+                uint32_t fc = c->fog_color;                                            /* D3DCOLOR ARGB, captured at record time */
+                float fog[4] = { ((fc >> 16) & 0xFF) / 255.0f, ((fc >> 8) & 0xFF) / 255.0f, (fc & 0xFF) / 255.0f, ((fc >> 24) & 0xFF) / 255.0f };
                 if (fs->p_psc) sceGxmSetUniformDataF(fub, fs->p_psc, 0, 18 * 4, &c->psc[0][0]);
                 if (fs->p_fogcolor) sceGxmSetUniformDataF(fub, fs->p_fogcolor, 0, 4, fog);
             }

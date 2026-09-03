@@ -12,6 +12,7 @@ typedef struct {
     uint32_t index_base;
     /* textures */
     uint32_t texture[4];               /* X_D3DPixelContainer headers (guest) */
+    uint32_t fog_color;                /* NV097_SET_FOG_COLOR (D3DRS_FOGCOLOR): fragment fog colour */
     uint32_t const_mode;               /* D3DDevice_SetShaderConstantMode (0x200 96, 0x201 192, 0x202 192+fixed offsets) */
     uint32_t palette[4];               /* SetPalette: guest address of the 256 D3DCOLOR entries (P8 textures), 0 = none */
     /* vertex shader constants (Xbox c[-96..96): stored at [index+96]) */
