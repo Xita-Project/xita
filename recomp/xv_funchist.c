@@ -80,6 +80,7 @@ static void prof_dump(void)
         if (ln > 170 || i + 1 == n || i == 39) { xv_logf("[prof]%s\n", line); ln = 0; }
     }
     memset(ps, 0, sizeof ps); ps_used = ps_total = 0;
+    { extern void xk_wait_stats_dump(void) __attribute__((weak)); if (xk_wait_stats_dump) xk_wait_stats_dump(); }
 }
 static void prof_thread(void *arg)
 {

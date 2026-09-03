@@ -230,8 +230,13 @@ void xk_yield(void)
     { static uint64_t last; static unsigned n; n++; uint64_t t = xk_os_monotonic_us();
       if (t - last > 3000000) { if (last && n > 2000) { XK_LOG("yield storm: %u yields in 3 s\n", n); xk_dump_threads(); } last = t; n = 0; } }
     X_M32(xk_var_KeTickCount) = xk_tick_count();
+    /* the sampling profiler reads a global "current guest function": keep it per thread across switches,
+     * otherwise time after a resume is charged to whatever the other thread last entered */
+    extern volatile uint32_t xv_cur_fn __attribute__((weak));
+    uint32_t saved_fn = &xv_cur_fn ? xv_cur_fn : 0;
     xk_os_fiber_switch(xk_os_fiber_main());           /* back to the scheduler loop */
     xk_cur = me;
+    if (&xv_cur_fn) xv_cur_fn = saved_fn;
 }
 
 void xk_dump_threads(void)
@@ -250,6 +255,7 @@ void xk_dump_threads(void)
     }
 }
 
+static uint64_t g_idle_us; static unsigned g_idle_n;
 void xk_run_until_idle(void)
 {
     xk_thread *last = NULL; int idle_spins = 0;
@@ -264,7 +270,7 @@ void xk_run_until_idle(void)
             if (!any) { if (++idle_spins > 3) { XK_LOG("deadlock: %d threads blocked forever\n", alive); xk_dump_threads(); return; } xk_os_sleep_us(1000); continue; }
             uint64_t n = now100();
             if (earliest > n + 1000000) { static unsigned dumps; if (dumps++ < 6) { XK_LOG("scheduler idle for %llu ms:\n", (unsigned long long)(earliest - n) / 10000); xk_dump_threads(); } }
-            if (earliest > n) xk_os_sleep_us((earliest - n) / 10 + 1);
+            if (earliest > n) { uint64_t us = (earliest - n) / 10 + 1; g_idle_us += us; g_idle_n++; xk_os_sleep_us(us); }
             continue;
         }
         idle_spins = 0;
@@ -294,6 +300,26 @@ int xk_apc_deliver(xctx *c)
     return n;
 }
 
+/* ---- blocked-time accounting (dumped with the sampling profiler): who waits, on what, for how long ---- */
+static struct { int tid; int kind; uint32_t key; uint32_t eip; unsigned n; uint64_t us; } g_ws[64]; static unsigned g_nws;
+static void ws_add(int tid, int kind, uint32_t key, uint32_t eip, uint64_t us)
+{
+    for (unsigned i = 0; i < g_nws; ++i) if (g_ws[i].tid == tid && g_ws[i].kind == kind && g_ws[i].key == key) { g_ws[i].n++; g_ws[i].us += us; return; }
+    if (g_nws < 64) { g_ws[g_nws].tid = tid; g_ws[g_nws].kind = kind; g_ws[g_nws].key = key; g_ws[g_nws].eip = eip; g_ws[g_nws].n = 1; g_ws[g_nws].us = us; g_nws++; }
+}
+void xk_wait_stats_dump(void)
+{
+    static const char *kn[] = { "?", "event", "mutant", "sem", "thread", "timer", "delay", "obj" };
+    for (unsigned i = 0; i < g_nws; ++i) for (unsigned j = i + 1; j < g_nws; ++j) if (g_ws[j].us > g_ws[i].us) { typeof(g_ws[0]) tmp = g_ws[i]; g_ws[i] = g_ws[j]; g_ws[j] = tmp; }
+    char line[240]; int ln = 0;
+    ln += snprintf(line + ln, sizeof line - ln, "[wait] idle %llu ms (%u sleeps);", (unsigned long long)(g_idle_us / 1000), g_idle_n);
+    for (unsigned i = 0; i < g_nws && i < 8; ++i) {
+        ln += snprintf(line + ln, sizeof line - ln, " t%d %s@%X<-%X %ums/%u", g_ws[i].tid, kn[g_ws[i].kind], g_ws[i].key, g_ws[i].eip, (unsigned)(g_ws[i].us / 1000), g_ws[i].n);
+        if (ln > 180) { XK_LOG("%s\n", line); ln = 0; }
+    }
+    if (ln) XK_LOG("%s\n", line);
+    g_nws = 0; g_idle_us = 0; g_idle_n = 0;
+}
 /* NTSTATUS-style wait: returns STATUS_WAIT_n / STATUS_TIMEOUT.  timeout: NULL = infinite, negative = relative 100ns, positive = absolute. */
 uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_t *timeout)
 {
@@ -308,7 +334,10 @@ uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_
     if (timeout) t->wait_until = *timeout < 0 ? now100() + (uint64_t)(-*timeout) : (uint64_t)*timeout - (xk_time_100ns() - now100());
     if (dbg) { wlog++; XK_LOG("[wait] t%d blocks on %s@%08X type %d timeout %lld (owner t%d)\n", t->id, objs[0]->type == XO_MUTANT ? "mutant" : "obj", objs[0]->guest, objs[0]->type, timeout ? (long long)*timeout : 0LL, objs[0]->type == XO_MUTANT && objs[0]->u.mutant.owner ? objs[0]->u.mutant.owner->id : -1); }
     t->state = 1;
-    xk_yield();
+    { uint64_t t0 = xk_os_monotonic_us(); uint32_t eip = X_M32(t->ctx.r[4]);
+      xk_yield();
+      { xk_obj *o = objs[0]; int k = o->type == XO_EVENT ? 1 : o->type == XO_MUTANT ? 2 : o->type == XO_SEMAPHORE ? 3 : o->type == XO_THREAD ? 4 : o->type == XO_TIMER ? 5 : 7;
+        ws_add(t->id, k, o->guest ? o->guest : (uint32_t)(uintptr_t)o, eip, xk_os_monotonic_us() - t0); } }
     t->state = 0; t->wait_n = 0;
     if (dbg) XK_LOG("[wait] t%d woke result %d\n", t->id, t->wait_result);
     if (alertable && t->napc) { t->alertable = 0; xk_apc_deliver(&t->ctx); return STATUS_USER_APC; }
@@ -391,7 +420,9 @@ void xk_KeDelayExecutionThread(xctx *c)
     if (alertable && t->napc) { xk_apc_deliver(c); c->r[0] = STATUS_USER_APC; X_RET(3); }
     t->wait_n = 0; t->alertable = alertable;
     t->wait_until = to < 0 ? now100() + (uint64_t)(-to) : (to == 0 ? now100() : (uint64_t)to - (xk_time_100ns() - now100()));
-    t->state = 1; xk_yield(); t->state = 0; t->alertable = 0;
+    { uint64_t t0 = xk_os_monotonic_us(); uint32_t eip = X_M32(c->r[4]);
+      t->state = 1; xk_yield(); t->state = 0; t->alertable = 0;
+      ws_add(t->id, 6, (uint32_t)(to < 0 ? -to / 10000 : 0), eip, xk_os_monotonic_us() - t0); }
     if (alertable && t->napc) { xk_apc_deliver(c); c->r[0] = STATUS_USER_APC; X_RET(3); }
     c->r[0] = STATUS_SUCCESS; X_RET(3);
 }

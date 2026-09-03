@@ -198,8 +198,12 @@ static void vblank_thread(xctx *c, void *arg)
 {
     (void)arg; unsigned counter = 0;
     uint32_t data = xk_kalloc(16);
+    /* XV_VBLANK_HZ: Halo paces frames on this counter (wait for vblank event, then until count >= target);
+     * at 10 fps those waits are pure loss (up to 2 real vblanks after a 100 ms frame), so the rate is a knob */
+    unsigned hz = 60; { const char *e = getenv("XV_VBLANK_HZ"); if (e && atoi(e) >= 30 && atoi(e) <= 1000) hz = (unsigned)atoi(e); }
+    D3DLOG("vblank thread: %u Hz\n", hz);
     for (;;) {
-        xk_sleep_us(16667);
+        xk_sleep_us(1000000u / hz);
         if (g_dev.vblank_cb) {
             counter++;
             X_M32(data) = counter; X_M32(data + 4) = g_dev.frame; X_M32(data + 8) = 0; X_M32(data + 12) = 0;

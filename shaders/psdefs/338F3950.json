@@ -1,0 +1,318 @@
+{
+ "pixel_shaders": [
+  {
+   "file_offset": 0,
+   "va": null,
+   "stage_count": 2,
+   "mux_msb": false,
+   "same_c0": true,
+   "same_c1": true,
+   "textures": [
+    {
+     "index": 0,
+     "mode": "PROJECT2D",
+     "mode_code": 1,
+     "compare_mode": 0,
+     "dot_mapping": 0,
+     "input_stage": null
+    },
+    {
+     "index": 1,
+     "mode": "PROJECT2D",
+     "mode_code": 1,
+     "compare_mode": 0,
+     "dot_mapping": 1,
+     "input_stage": null
+    },
+    {
+     "index": 2,
+     "mode": "CUBEMAP",
+     "mode_code": 3,
+     "compare_mode": 0,
+     "dot_mapping": 1,
+     "input_stage": 0
+    },
+    {
+     "index": 3,
+     "mode": "CUBEMAP",
+     "mode_code": 3,
+     "compare_mode": 0,
+     "dot_mapping": 1,
+     "input_stage": 0
+    }
+   ],
+   "stages": [
+    {
+     "index": 0,
+     "rgb_in": [
+      {
+       "reg": "t3",
+       "reg_code": 11,
+       "channel": "rgb",
+       "mapping": "unsigned_identity",
+       "text": "t3.rgb"
+      },
+      {
+       "reg": "t3",
+       "reg_code": 11,
+       "channel": "rgb",
+       "mapping": "unsigned_identity",
+       "text": "t3.rgb"
+      },
+      {
+       "reg": "c0",
+       "reg_code": 1,
+       "channel": "rgb",
+       "mapping": "unsigned_identity",
+       "text": "c0.rgb"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "rgb",
+       "mapping": "unsigned_invert",
+       "text": "zero.rgb<unsigned_invert>"
+      }
+     ],
+     "rgb_out": {
+      "ab": "r0",
+      "cd": "r1",
+      "sum": "zero",
+      "scale": "identity",
+      "mux": false,
+      "ab_dot": false,
+      "cd_dot": false,
+      "ab_blue_to_alpha": false,
+      "cd_blue_to_alpha": false,
+      "raw": 205
+     },
+     "alpha_in": [
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_identity",
+       "text": "zero.b"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_identity",
+       "text": "zero.b"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_identity",
+       "text": "zero.b"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_identity",
+       "text": "zero.b"
+      }
+     ],
+     "alpha_out": {
+      "ab": "zero",
+      "cd": "zero",
+      "sum": "zero",
+      "scale": "identity",
+      "mux": false,
+      "ab_dot": false,
+      "cd_dot": false,
+      "ab_blue_to_alpha": false,
+      "cd_blue_to_alpha": false,
+      "raw": 0
+     },
+     "c0_default": "(0.604, 0.722, 0.706, 0.000)",
+     "c1_default": "(0.000, 0.000, 0.000, 0.000)",
+     "c0_map": 0,
+     "c1_map": 0,
+     "text": [
+      "stage 0 rgb  : r0 = t3.rgb * t3.rgb; r1 = c0.rgb * zero.rgb<unsigned_invert>",
+      "stage 0 alpha: (discard)"
+     ]
+    },
+    {
+     "index": 1,
+     "rgb_in": [
+      {
+       "reg": "r0",
+       "reg_code": 12,
+       "channel": "rgb",
+       "mapping": "unsigned_identity",
+       "text": "r0.rgb"
+      },
+      {
+       "reg": "r0",
+       "reg_code": 12,
+       "channel": "rgb",
+       "mapping": "unsigned_identity",
+       "text": "r0.rgb"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "rgb",
+       "mapping": "unsigned_identity",
+       "text": "zero.rgb"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "rgb",
+       "mapping": "unsigned_identity",
+       "text": "zero.rgb"
+      }
+     ],
+     "rgb_out": {
+      "ab": "r0",
+      "cd": "zero",
+      "sum": "zero",
+      "scale": "identity",
+      "mux": false,
+      "ab_dot": false,
+      "cd_dot": false,
+      "ab_blue_to_alpha": false,
+      "cd_blue_to_alpha": false,
+      "raw": 192
+     },
+     "alpha_in": [
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_identity",
+       "text": "zero.b"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_identity",
+       "text": "zero.b"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_identity",
+       "text": "zero.b"
+      },
+      {
+       "reg": "zero",
+       "reg_code": 0,
+       "channel": "blue",
+       "mapping": "unsigned_identity",
+       "text": "zero.b"
+      }
+     ],
+     "alpha_out": {
+      "ab": "zero",
+      "cd": "zero",
+      "sum": "zero",
+      "scale": "identity",
+      "mux": false,
+      "ab_dot": false,
+      "cd_dot": false,
+      "ab_blue_to_alpha": false,
+      "cd_blue_to_alpha": false,
+      "raw": 0
+     },
+     "c0_default": "(0.000, 0.000, 0.000, 0.502)",
+     "c1_default": "(0.000, 0.000, 0.000, 0.000)",
+     "c0_map": 0,
+     "c1_map": 0,
+     "text": [
+      "stage 1 rgb  : r0 = r0.rgb * r0.rgb",
+      "stage 1 alpha: (discard)"
+     ]
+    }
+   ],
+   "final": {
+    "present": true,
+    "a": {
+     "reg": "r1",
+     "reg_code": 13,
+     "channel": "rgb",
+     "mapping": "unsigned_invert",
+     "text": "r1.rgb<unsigned_invert>"
+    },
+    "b": {
+     "reg": "ef_prod",
+     "reg_code": 15,
+     "channel": "rgb",
+     "mapping": "unsigned_identity",
+     "text": "ef_prod.rgb"
+    },
+    "c": {
+     "reg": "t3",
+     "reg_code": 11,
+     "channel": "rgb",
+     "mapping": "unsigned_identity",
+     "text": "t3.rgb"
+    },
+    "d": {
+     "reg": "zero",
+     "reg_code": 0,
+     "channel": "rgb",
+     "mapping": "unsigned_identity",
+     "text": "zero.rgb"
+    },
+    "e": {
+     "reg": "r0",
+     "reg_code": 12,
+     "channel": "rgb",
+     "mapping": "unsigned_identity",
+     "text": "r0.rgb"
+    },
+    "f": {
+     "reg": "r0",
+     "reg_code": 12,
+     "channel": "rgb",
+     "mapping": "unsigned_identity",
+     "text": "r0.rgb"
+    },
+    "g": {
+     "reg": "zero",
+     "reg_code": 0,
+     "channel": "blue",
+     "mapping": "unsigned_identity",
+     "text": "zero.b"
+    },
+    "clamp_sum": false,
+    "complement_v1": false,
+    "complement_r0": false,
+    "c0_default": "(0.000, 0.000, 0.000, 0.000)",
+    "c1_default": "(0.000, 0.000, 0.000, 0.000)",
+    "c0_map": 0,
+    "c1_map": 0,
+    "flags": 0,
+    "text": [
+     "final rgb  : r1.rgb<unsigned_invert> * ef_prod.rgb + (1 - r1.rgb<unsigned_invert>) * t3.rgb + zero.rgb",
+     "final alpha: zero.b",
+     "final ef_prod = r0.rgb * r0.rgb"
+    ]
+   },
+   "registers_read": [
+    "c0",
+    "ef_prod",
+    "r0",
+    "r1",
+    "t3",
+    "zero"
+   ],
+   "textures_used": [
+    3
+   ],
+   "constants_used": [
+    0
+   ],
+   "warnings": []
+  }
+ ]
+}

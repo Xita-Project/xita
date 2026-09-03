@@ -100,7 +100,13 @@ void xv_call(xctx *c, uint32_t target)
       if (on && (++n & 0xFFFFF) == 0) XV_RT_LOG("call sample #%lluM: target %08X\n", (unsigned long long)(n >> 20), target); }
     if ((target & 0xFFFF0000u) == 0xFE000000u && xk_dispatch_magic && xk_dispatch_magic(c, target))
         return;
-    xv_fn_t fn = xv_lookup(target);
+    /* direct-mapped cache in front of the binary search: Halo makes ~10^5 indirect calls per frame
+     * (vtables, sort comparators, event handlers) and the same few hundred targets dominate */
+    static struct { uint32_t eip; xv_fn_t fn; } cache[4096];
+    unsigned slot = (target >> 2) & 4095;
+    xv_fn_t fn = cache[slot].eip == target ? cache[slot].fn : NULL;
+    if (!fn) fn = xv_lookup(target);
+    if (fn) { cache[slot].eip = target; cache[slot].fn = fn; }
     if (!fn) {
         for (unsigned i = 0; i < xv_hle_table_count; ++i)
             if (xv_hle_table[i].eip == target && xv_hle_table[i].fn) { fn = xv_hle_table[i].fn; break; }
