@@ -197,6 +197,7 @@ void xv_hle_XInputGetState(xctx *c)
     static uint32_t packet; xk_os_pad p; xk_os_pad_poll(&p);
     uint32_t st = X_ARG(1);
     if (X_ARG(0) == 0x00777702u) {                   /* virtual player 2: idle except what the pad layer injects (script p2* tokens / chord) */
+        { static unsigned n; if (p.p2_buttons || p.p2_analog[0] || (n++ % 240) == 0) XK_LOG("[pad] P2 poll #%u buttons %04X A %u from %08X\n", n, p.p2_buttons, p.p2_analog[0], X_M32(c->r[4])); }
         X_M32(st) = ++packet; X_M16(st + 4) = p.p2_buttons; memcpy(X_G(st + 6), p.p2_analog, 8);
         X_M16(st + 14) = 0; X_M16(st + 16) = 0; X_M16(st + 18) = 0; X_M16(st + 20) = 0;
         c->r[0] = 0; X_RET(2);
