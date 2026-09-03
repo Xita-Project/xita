@@ -298,7 +298,7 @@ RECOMP_DIR   := recomp
 RECOMP_BUILD := $(BUILD)/recomp
 RECOMP_SRCS  := $(wildcard $(RECOMP_DIR)/code_*.c) $(RECOMP_DIR)/xv_fn_table.c $(RECOMP_DIR)/xv_stubs_default.c \
                 $(RECOMP_DIR)/xv_x86rt.c $(RECOMP_DIR)/kernel/xk_mem.c $(RECOMP_DIR)/kernel/xk_rtl.c \
-                $(RECOMP_DIR)/kernel/xk_file.c $(RECOMP_DIR)/kernel/xk_thread.c $(RECOMP_DIR)/kernel/xk_xapi.c \
+                $(RECOMP_DIR)/kernel/xk_file.c $(RECOMP_DIR)/kernel/xk_thread.c $(RECOMP_DIR)/kernel/xk_xapi.c $(RECOMP_DIR)/kernel/xk_net.c \
                 $(RECOMP_DIR)/kernel/xd3d.c $(RECOMP_DIR)/kernel/xk_audio.c $(RECOMP_DIR)/kernel/xk_os_vita.c \
                 $(RECOMP_DIR)/xv_trace_stub.c $(RECOMP_DIR)/xv_funchist.c
 RECOMP_OBJS  := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(RECOMP_SRCS))

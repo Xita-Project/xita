@@ -181,19 +181,26 @@ void xv_hle_XGetDeviceChanges(xctx *c)
 {
     uint32_t type = X_ARG(0); int is_gamepad = type && X_M32(type + 4) == 0xFFFFFFFFu || 1;
     uint32_t ins = 0;
-    if (!g_pad_reported) { ins = 1; g_pad_reported = 1; }                                /* one gamepad in port 1 */
+    static int pad2 = -1; if (pad2 < 0) { const char *e = getenv("XV_PAD2"); pad2 = e ? atoi(e) : 0; }
+    if (!g_pad_reported) { ins = pad2 ? 3 : 1; g_pad_reported = 1; XK_LOG("[pad] XGetDeviceChanges: insertions %u\n", ins); }                    /* gamepad in port 1 (+ a virtual one in port 2: XV_PAD2=1) */
     (void)is_gamepad;
     X_M32(X_ARG(1)) = ins; X_M32(X_ARG(2)) = 0;
     c->r[0] = ins != 0; X_RET(3);
 }
 /* HANDLE XInputOpen(PXPP_DEVICE_TYPE, DWORD dwPort, DWORD dwSlot, PXINPUT_POLLING_PARAMETERS) */
-void xv_hle_XInputOpen(xctx *c) { c->r[0] = X_ARG(1) == 0 ? 0x00777701u : 0; X_RET(4); }
+void xv_hle_XInputOpen(xctx *c) { static int pad2 = -1; if (pad2 < 0) { const char *e = getenv("XV_PAD2"); pad2 = e ? atoi(e) : 0; }
+    c->r[0] = X_ARG(1) == 0 ? 0x00777701u : (X_ARG(1) == 1 && pad2) ? 0x00777702u : 0; XK_LOG("[pad] XInputOpen port %u -> %08X\n", X_ARG(1), c->r[0]); X_RET(4); }
 void xv_hle_XInputClose(xctx *c) { X_RET(1); }
 /* DWORD XInputGetState(HANDLE, PXINPUT_STATE { DWORD dwPacketNumber; XINPUT_GAMEPAD { WORD wButtons; BYTE bAnalogButtons[8]; SHORT sThumbLX, sThumbLY, sThumbRX, sThumbRY; } }) */
 void xv_hle_XInputGetState(xctx *c)
 {
     static uint32_t packet; xk_os_pad p; xk_os_pad_poll(&p);
     uint32_t st = X_ARG(1);
+    if (X_ARG(0) == 0x00777702u) {                   /* virtual player 2: idle except what the pad layer injects (script p2* tokens / chord) */
+        X_M32(st) = ++packet; X_M16(st + 4) = p.p2_buttons; memcpy(X_G(st + 6), p.p2_analog, 8);
+        X_M16(st + 14) = 0; X_M16(st + 16) = 0; X_M16(st + 18) = 0; X_M16(st + 20) = 0;
+        c->r[0] = 0; X_RET(2);
+    }
     X_M32(st) = ++packet; X_M16(st + 4) = p.buttons; memcpy(X_G(st + 6), p.analog, 8);
     X_M16(st + 14) = (uint16_t)p.lx; X_M16(st + 16) = (uint16_t)p.ly; X_M16(st + 18) = (uint16_t)p.rx; X_M16(st + 20) = (uint16_t)p.ry;
     c->r[0] = X_ARG(0) == 0x00777701u ? 0 : 1167;   /* ERROR_DEVICE_NOT_CONNECTED */
@@ -206,16 +213,17 @@ void xv_hle_OutputDebugStringA(xctx *c) { const char *s = xk_gstr(X_ARG(0)); XK_
 void xv_hle_XCalculateSignatureBegin(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(1); }       /* INVALID_HANDLE_VALUE */
 
 /* XNet / Winsock: no network */
-void xv_hle_XNetStartup(xctx *c) { c->r[0] = 0; X_RET(1); }
-void xv_hle_XNetGetEthernetLinkStatus(xctx *c) { c->r[0] = 0; X_RET(0); }
-void xv_hle_WSAStartup(xctx *c) { c->r[0] = 0; X_RET(2); }
-void xv_hle_socket(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(3); }
-void xv_hle_bind(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(3); }
-void xv_hle_connect(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(3); }
-void xv_hle_listen(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(2); }
-void xv_hle_send(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(4); }
-void xv_hle_recv(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(4); }
-void xv_hle_ioctlsocket(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(3); }
+#define NETLOG(fn, nargs) do { XK_LOG("[net] " fn "(%08X,%08X,%08X,%08X) from %08X\n", X_ARG(0), X_ARG(1), X_ARG(2), X_ARG(3), X_M32(c->r[4])); } while (0)
+void xv_hle_XNetStartup(xctx *c) { NETLOG("XNetStartup", 1); c->r[0] = 0; X_RET(1); }
+void xv_hle_XNetGetEthernetLinkStatus(xctx *c) { c->r[0] = 0x0B; X_RET(0); }   /* ACTIVE | 100MBPS | FULL_DUPLEX: the split-screen session (0x9D7B0) refuses to start without a link (pending error 6) */
+void xv_hle_WSAStartup(xctx *c) { NETLOG("WSAStartup", 2); c->r[0] = 0; X_RET(2); }
+void xv_hle_socket(xctx *c) { NETLOG("socket", 3); c->r[0] = 0xFFFFFFFFu; X_RET(3); }
+void xv_hle_bind(xctx *c) { NETLOG("bind", 3); c->r[0] = 0xFFFFFFFFu; X_RET(3); }
+void xv_hle_connect(xctx *c) { NETLOG("connect", 3); c->r[0] = 0xFFFFFFFFu; X_RET(3); }
+void xv_hle_listen(xctx *c) { NETLOG("listen", 2); c->r[0] = 0xFFFFFFFFu; X_RET(2); }
+void xv_hle_send(xctx *c) { NETLOG("send", 4); c->r[0] = 0xFFFFFFFFu; X_RET(4); }
+void xv_hle_recv(xctx *c) { NETLOG("recv", 4); c->r[0] = 0xFFFFFFFFu; X_RET(4); }
+void xv_hle_ioctlsocket(xctx *c) { NETLOG("ioctlsocket", 3); c->r[0] = 0xFFFFFFFFu; X_RET(3); }
 
 /* ---- CRT transcendental HLE ---------------------------------------------------------------------
  * MSVC's _CIfmod (wrapper 0x180ADA -> dispatcher 0x180BC0): st0 = divisor, st1 = dividend;

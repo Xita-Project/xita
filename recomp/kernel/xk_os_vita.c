@@ -289,7 +289,7 @@ void xk_os_pad_poll(xk_os_pad *p)
         if (!init) {
             init = 1; SceUID fd = sceIoOpen("ux0:data/xboxvita/pad.txt", SCE_O_RDONLY, 0);
             if (fd >= 0) { char txt[1024]; int n = sceIoRead(fd, txt, sizeof txt - 1); sceIoClose(fd); if (n < 0) n = 0; txt[n] = 0;
-                const char *e = txt; while (*e && nev < 64) { unsigned at, hold = 4; char bn[8]; int k; if (sscanf(e, "%u:%7[a-z]%n", &at, bn, &k) < 2) break; e += k;
+                const char *e = txt; while (*e && nev < 64) { unsigned at, hold = 4; char bn[8]; int k; if (sscanf(e, "%u:%7[a-z0-9]%n", &at, bn, &k) < 2) break; e += k;
                     if (*e == '*') { int k2; if (sscanf(e, "*%u%n", &hold, &k2) >= 1) e += k2; }
                     ev[nev].at = at; ev[nev].hold = hold; snprintf(ev[nev].btn, 8, "%s", bn); nev++; while (*e == ',' || *e == '\n' || *e == ' ') e++; }
                 xv_logf("[xk] pad script: %d events\n", nev); }
@@ -309,6 +309,14 @@ void xk_os_pad_poll(xk_os_pad *p)
             else if (!strcmp(bn, "lleft")) d.lx = 0; else if (!strcmp(bn, "lright")) d.lx = 255;
             else if (!strcmp(bn, "rup")) d.ry = 0; else if (!strcmp(bn, "rdown")) d.ry = 255;
             else if (!strcmp(bn, "rleft")) d.rx = 0; else if (!strcmp(bn, "rright")) d.rx = 255;
+            else if (bn[0] == 'p' && bn[1] == '2') {                                         /* virtual player 2 (XV_PAD2=1) */
+                const char *q = bn + 2;
+                if (!strcmp(q, "up")) p->p2_buttons |= 1; else if (!strcmp(q, "down")) p->p2_buttons |= 2;
+                else if (!strcmp(q, "left")) p->p2_buttons |= 4; else if (!strcmp(q, "right")) p->p2_buttons |= 8;
+                else if (!strcmp(q, "start")) p->p2_buttons |= 0x10; else if (!strcmp(q, "back")) p->p2_buttons |= 0x20;
+                else if (!strcmp(q, "a")) p->p2_analog[0] = 255; else if (!strcmp(q, "b")) p->p2_analog[1] = 255;
+                else if (!strcmp(q, "x")) p->p2_analog[2] = 255; else if (!strcmp(q, "y")) p->p2_analog[3] = 255;
+            }
         }
     }
     /* Auto-advance past the attract screen to the main menu: pulse Start, then A, on a slow cycle
@@ -320,6 +328,16 @@ void xk_os_pad_poll(xk_os_pad *p)
           if (++both == 45) g_xv_overlay_on = g_xv_overlay_on > 0 ? 0 : 1;
           d.buttons &= ~(SCE_CTRL_START | SCE_CTRL_SELECT);
       } else both = 0; }
+    /* Hardware chord for the virtual second pad (XV_PAD2=1 in xboxvita.cfg): with L+R held, START / X / O /
+     * D-pad go to player 2 instead of player 1 - enough to join a split-screen lobby and pick a profile. */
+    if ((d.buttons & (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) == (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) {
+        if (d.buttons & SCE_CTRL_UP) p->p2_buttons |= 1;      if (d.buttons & SCE_CTRL_DOWN) p->p2_buttons |= 2;
+        if (d.buttons & SCE_CTRL_LEFT) p->p2_buttons |= 4;    if (d.buttons & SCE_CTRL_RIGHT) p->p2_buttons |= 8;
+        if (d.buttons & SCE_CTRL_START) p->p2_buttons |= 0x10; if (d.buttons & SCE_CTRL_SELECT) p->p2_buttons |= 0x20;
+        if (d.buttons & SCE_CTRL_CROSS) p->p2_analog[0] = 255; if (d.buttons & SCE_CTRL_CIRCLE) p->p2_analog[1] = 255;
+        d.buttons &= ~(SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER | SCE_CTRL_UP | SCE_CTRL_DOWN | SCE_CTRL_LEFT | SCE_CTRL_RIGHT |
+                       SCE_CTRL_START | SCE_CTRL_SELECT | SCE_CTRL_CROSS | SCE_CTRL_CIRCLE);
+    }
     if (d.buttons & SCE_CTRL_UP) b |= 1;
     if (d.buttons & SCE_CTRL_DOWN) b |= 2;
     if (d.buttons & SCE_CTRL_LEFT) b |= 4;

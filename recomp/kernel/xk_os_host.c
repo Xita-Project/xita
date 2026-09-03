@@ -137,7 +137,7 @@ void xk_os_pad_poll(xk_os_pad *p)
     if (!init) {
         init = 1; press_a = getenv("XV_PRESS_A") != NULL;
         const char *e = getenv("XV_PAD");
-        while (e && *e && nev < 64) { unsigned at, hold = 4; char b[8]; int n; if (sscanf(e, "%u:%7[a-z]%n", &at, b, &n) < 2) break; e += n;
+        while (e && *e && nev < 64) { unsigned at, hold = 4; char b[8]; int n; if (sscanf(e, "%u:%7[a-z0-9]%n", &at, b, &n) < 2) break; e += n;
             if (*e == '*') { int n2; if (sscanf(e, "*%u%n", &hold, &n2) >= 1) e += n2; }
             ev[nev].at = at; ev[nev].hold = hold; snprintf(ev[nev].btn, 8, "%s", b); nev++; while (*e == ',' || *e == ' ') e++; }
     }
@@ -156,6 +156,14 @@ void xk_os_pad_poll(xk_os_pad *p)
         else if (!strcmp(b, "lleft")) p->lx = -32767; else if (!strcmp(b, "lright")) p->lx = 32767;
         else if (!strcmp(b, "rup")) p->ry = 32767; else if (!strcmp(b, "rdown")) p->ry = -32767;
         else if (!strcmp(b, "rleft")) p->rx = -32767; else if (!strcmp(b, "rright")) p->rx = 32767;
+        else if (b[0] == 'p' && b[1] == '2') {                                             /* virtual player 2 (XV_PAD2=1) */
+            const char *q = b + 2;
+            if (!strcmp(q, "up")) p->p2_buttons |= 1; else if (!strcmp(q, "down")) p->p2_buttons |= 2;
+            else if (!strcmp(q, "left")) p->p2_buttons |= 4; else if (!strcmp(q, "right")) p->p2_buttons |= 8;
+            else if (!strcmp(q, "start")) p->p2_buttons |= 0x10; else if (!strcmp(q, "back")) p->p2_buttons |= 0x20;
+            else if (!strcmp(q, "a")) p->p2_analog[0] = 255; else if (!strcmp(q, "b")) p->p2_analog[1] = 255;
+            else if (!strcmp(q, "x")) p->p2_analog[2] = 255; else if (!strcmp(q, "y")) p->p2_analog[3] = 255;
+        }
     }
 }
 
