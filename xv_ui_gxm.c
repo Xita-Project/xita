@@ -661,28 +661,6 @@ static unsigned ovl_number(clr_vtx *v, unsigned n, unsigned val, float x_end, fl
     for (int i = digits - 1; i >= 0; --i) { n = ovl_digit(v, n, (int)(val % 10), x + i * adv, y, s, col); val /= 10; }
     return n;
 }
-/* Loading screen drawn with the clear program: black ground, a thin progress bar, percentage digits. */
-void xv_ui_gxm_loading(SceGxmContext *ctx, float progress)
-{
-    if (!g.ready) return;
-    static unsigned parity; parity ^= 1;
-    clr_vtx *v = &g.clrbuf[parity * (4 + OVL_MAX_QUADS * 4) + 4]; unsigned n = 0;
-    if (progress < 0) progress = 0; if (progress > 1) progress = 1;
-    n = ovl_rect(v, n, 0, 0, 960, 544, 0xFF000000u);                                   /* ground */
-    n = ovl_rect(v, n, 280, 300, 400, 6, 0xFF243040u);                                 /* track */
-    n = ovl_rect(v, n, 280, 300, 400 * progress, 6, 0xFF5CC8FFu);                      /* fill */
-    n = ovl_number(v, n, (unsigned)(progress * 100 + 0.5f), 690 + 44, 282, 10, 0xFF8A98A8u, 1);   /* % */
-    n = ovl_rect(v, n, 736, 296, 3, 3, 0xFF8A98A8u); n = ovl_rect(v, n, 736, 289, 3, 3, 0xFF8A98A8u);   /* two dots: "%" */
-    xv_gpu_flush(v, n * sizeof(clr_vtx));
-    sceGxmSetViewport(ctx, 480.0f, 480.0f, 272.0f, -272.0f, 0.5f, 0.5f);
-    sceGxmSetFrontDepthFunc(ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
-    sceGxmSetFrontDepthWriteEnable(ctx, SCE_GXM_DEPTH_WRITE_DISABLED);
-    sceGxmSetCullMode(ctx, SCE_GXM_CULL_NONE);
-    xv_shader_bind(ctx, &g.clear_vs, &g.clear_fs);
-    const void *streams[1] = { v };
-    xv_vshader_set_streams(ctx, &g.clear_vs, streams);
-    sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, (n / 4) * 6);
-}
 
 static void xv_ui_gxm_overlay(SceGxmContext *ctx, int32_t idx)
 {

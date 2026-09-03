@@ -512,28 +512,6 @@ static void xv_gfx_render_frame(void)
     g->frame_counter++;
 }
 
-/* Loading screen: the recompiled game presents nothing while it streams a map (15-30 s on the card), so
- * the file layer calls this from the game thread every ~150 ms during large .map reads.  Same thread that
- * renders frames in the RECOMP build, so it can own the context. */
-static uint64_t g_loading_last_us;
-void xv_gfx_loading_frame(float progress)
-{
-    xv_gfx_t *g = &g_gfx;
-    if (!g->ctx) return;
-    extern uint64_t xk_os_monotonic_us(void);
-    uint64_t now = xk_os_monotonic_us();
-    if (now - g_loading_last_us < 150000) return;
-    g_loading_last_us = now;
-    if (sceGxmBeginScene(g->ctx, 0, g->render_target, NULL, NULL, g->display_sync[g->back_index],
-                         &g->display_surface[g->back_index], &g->depth_surface) != SCE_OK) return;
-    { extern void xv_ui_gxm_loading(SceGxmContext *ctx, float progress); xv_ui_gxm_loading(g->ctx, progress); }
-    sceGxmEndScene(g->ctx, NULL, NULL);
-    sceGxmPadHeartbeat(&g->display_surface[g->back_index], g->display_sync[g->back_index]);
-    xv_display_data_t dd; dd.address = g->display_mem[g->back_index].base;
-    sceGxmDisplayQueueAddEntry(g->display_sync[g->front_index], g->display_sync[g->back_index], &dd);
-    g->front_index = g->back_index;
-    g->back_index  = (g->back_index + 1) % XV_DISPLAY_BUFFER_COUNT;
-}
 
 /* Drain the GPU and the display queue.  Must run before ANY GPU-visible memory
  * (including the guest block) is unmapped: the last frame's draws may still be

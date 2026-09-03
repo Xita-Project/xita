@@ -177,13 +177,6 @@ void xk_NtReadFile(xctx *c)
     { static const char *watch = NULL; static int winit; if (!winit) { winit = 1; watch = getenv("XV_LOG_READS"); }
       if (watch && strstr(o->u.file.path, watch)) XK_LOG("NtReadFile(%s @%llu, %u B) = %lld st %08X\n", o->u.file.path, (unsigned long long)pos, len, (long long)got, st); }
     { static unsigned n; if (n++ < 40) XK_LOG("NtReadFile(%s @%llu, %u B -> %08X) = %lld (ev %08X apc %08X ctx %08X)\n", o->u.file.path, (unsigned long long)pos, len, buf, (long long)got, X_ARG(1), X_ARG(2), X_ARG(3)); }
-    {   /* loading screen while a map streams in (the game presents nothing during a level load) */
-        const char *pth = o->u.file.path; size_t hl = strlen(pth);
-        if (got > 0 && len >= 4096 && hl > 4 && !strcmp(pth + hl - 4, ".map")) {
-            extern void xv_gfx_loading_frame(float) __attribute__((weak));
-            if (xv_gfx_loading_frame) { int64_t sz = xk_os_size(o->u.file.f); xv_gfx_loading_frame(sz > 0 ? (float)((double)(pos + (uint64_t)got) / (double)sz) : 0.0f); }
-        }
-    }
     if (got > 0) o->u.file.pos = pos + (uint64_t)got;
     {   /* Which kind of cache map is being STREAMED: Halo copies maps to z:\cacheNNN.map, so only the
          * header tells (+0x60: 0 campaign, 1 multiplayer, 2 ui).  Level-select screens peek at headers only;
