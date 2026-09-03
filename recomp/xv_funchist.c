@@ -26,6 +26,37 @@ void xv_trace_func(uint32_t entry)
     }
 }
 
+/* XV_WATCH_FN=2D6A0,2D570,...: log entry (return address + 4 stack args) and return value (eax) of guest functions */
+int xv_watch_n = -1; static uint32_t xv_watch[16]; static uint32_t xv_watch_lastptr[16];
+static void watch_init(void)
+{
+    xv_watch_n = 0; const char *e = getenv("XV_WATCH_FN");
+    while (e && *e && xv_watch_n < 16) { xv_watch[xv_watch_n++] = (uint32_t)strtoul(e, NULL, 16); while (*e && *e != ',') e++; if (*e == ',') e++; }
+}
+static int watched(uint32_t fn) { for (int i = 0; i < xv_watch_n; ++i) if (xv_watch[i] == fn) return 1; return 0; }
+void xv_watch_enter(uint32_t fn, xctx *c)
+{
+    if (xv_watch_n < 0) { watch_init(); if (!xv_watch_n) return; }
+    if (!watched(fn)) return;
+    uint32_t sp = c->r[4];
+    xv_logf("[watch] enter %05X from %05X esp %08X args %08X %08X %08X %08X eax %08X ecx %08X edx %08X\n", fn, X_M32(sp), sp, X_M32(sp + 4), X_M32(sp + 8), X_M32(sp + 12), X_M32(sp + 16), c->r[0], c->r[1], c->r[2]);
+    for (unsigned a = 1; a <= 4; ++a) {              /* pointer-looking args: first 24 bytes */
+        uint32_t v = X_M32(sp + 4 * a); if (v < 0x10000u || v >= 0x80000000u) continue;
+        char b[80]; int n = 0; for (unsigned i = 0; i < 24; ++i) n += snprintf(b + n, sizeof b - n, "%02X", X_M8(v + i));
+        char b2[80]; int n2 = 0; for (unsigned i = 0; i < 24; ++i) n2 += snprintf(b2 + n2, sizeof b2 - n2, "%02X", X_M8(v + 504 + i));   /* record tail +504..+527 */
+        xv_logf("[watch]   arg%u @%08X: %s  +504: %s\n", a, v, b, b2);
+        for (int i = 0; i < xv_watch_n; ++i) if (xv_watch[i] == fn) xv_watch_lastptr[i] = v;   /* remember the last pointer arg */
+    }
+}
+void xv_watch_leave(uint32_t fn, uint32_t back, xctx *c)
+{
+    if (xv_watch_n <= 0 || !watched(fn)) return;
+    xv_logf("[watch] leave %05X -> eax %08X (al %u) back in %05X\n", fn, c->r[0], c->r[0] & 0xFF, back);
+    for (int i = 0; i < xv_watch_n; ++i) if (xv_watch[i] == fn && xv_watch_lastptr[i]) {   /* the out-buffer argument after the call */
+        uint32_t v = xv_watch_lastptr[i]; char b[140]; int n = 0; for (unsigned k = 0; k < 48; ++k) n += snprintf(b + n, sizeof b - n, "%02X", X_M8(v + k));
+        xv_logf("[watch]   out @%08X: %s\n", v, b); }
+}
+
 void xv_trace_func_reset(void) { memset(fh, 0, sizeof fh); fh_used = 0; }
 
 static int cmp_desc(const void *a, const void *b)

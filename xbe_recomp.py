@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from xbox_kernel_exports import KERNEL_EXPORTS, KERNEL_DATA_EXPORTS, KERNEL_ARGC  # noqa: E402
 
 import re as _re
+import os as _os
 try:
     from iced_x86 import Decoder, Instruction, Mnemonic, OpKind, Register, Code, FlowControl, MemorySize, RflagsBits
 except ImportError:
@@ -1013,9 +1014,12 @@ class Emitter:
             return res
         last = insns[-1]
         live_after = [0] * len(insns)
-        # NOTE: successor-aware liveness (exit_live) mis-fused something (the CRT x87 exception path ran
-        # on the host); until that is understood, fuse only when the block itself proves the flags dead.
-        live = 0 if last.flow_control in (FlowControl.CALL, FlowControl.INDIRECT_CALL, FlowControl.RETURN) else RF_ALL
+        # Successor-aware liveness (exit_live) mis-fused something (the CRT x87 exception path ran on the
+        # host).  XBE_FUSE_EXT="lo-hi" enables it only for functions whose entry is in [lo, hi) (bisecting).
+        ext = _os.environ.get("XBE_FUSE_EXT"); use_ext = False
+        if ext and fn is not None:
+            lo, hi = (int(x, 16) for x in ext.split("-")); use_ext = lo <= fn.entry < hi
+        live = self.exit_live(fn, insns) if use_ext else (0 if last.flow_control in (FlowControl.CALL, FlowControl.INDIRECT_CALL, FlowControl.RETURN) else RF_ALL)
         for i in range(len(insns) - 1, -1, -1):
             live_after[i] = live
             ins = insns[i]
@@ -1164,8 +1168,8 @@ class Emitter:
         proto.append("extern int xv_trace_enabled; void xv_trace_call(xctx *c, const char *name, unsigned nargs);")
         proto.append("extern int xv_trace_funcs; void xv_trace_func(uint32_t entry);   /* --trace-funcs: per-frame call histogram */")
         proto.append("extern volatile uint32_t xv_cur_fn;                       /* sampling profiler: last entered function */")
-        proto.append("#define XV_FN(a) do { xv_cur_fn = (a); if (xv_trace_funcs) xv_trace_func(a); } while (0)")
-        proto.append("#define XV_FN_BACK(a) (xv_cur_fn = (a))")
+        proto.append("extern int xv_watch_n; void xv_watch_enter(uint32_t fn, xctx *c); void xv_watch_leave(uint32_t fn, uint32_t back, xctx *c);\n#define XV_FN(a) do { xv_cur_fn = (a); if (xv_trace_funcs) xv_trace_func(a); if (xv_watch_n) xv_watch_enter((a), c); } while (0)")
+        proto.append("#define XV_FN_BACK(a) do { if (xv_watch_n) xv_watch_leave(xv_cur_fn, (a), c); xv_cur_fn = (a); } while (0)")
         proto.append("/* HLE symbols (weak: default trap until implemented) */")
         for name in sorted(self.hle_used):
             proto.append(f"void xv_hle_{name}(xctx *c) __attribute__((weak));")

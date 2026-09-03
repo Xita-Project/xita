@@ -181,6 +181,17 @@ void xk_NtReadFile(xctx *c)
         static int slow = -1; if (slow < 0) { const char *e = getenv("XV_SLOW_READ"); slow = e ? atoi(e) : 0; }
         if (slow > 0 && got >= 4096) { const char *pth = o->u.file.path; size_t hl = strlen(pth); if (hl > 4 && !strcmp(pth + hl - 4, ".map")) xk_os_sleep_us((uint64_t)slow * ((uint64_t)got / 65536 + 1)); }
     }
+    {   /* Saved-file index records (z:\saved\hdmu.map, 518 bytes: path[256] name[256] u16 type u16 index
+         * u8 is_default u8 valid): the game's gametype-select handler (3925: 0xCD9C0) only starts a game
+         * when the variant's handle carries bit 31 = record byte 517 ("valid").  The default variants in
+         * our saves carry 0 there (index rows created by an early runtime), so present them as valid on
+         * read - the playlist files themselves are intact and load fine. */
+        const char *pth = o->u.file.path; size_t hl = strlen(pth);
+        if (got == 518 && len == 518 && hl >= 8 && !strcmp(pth + hl - 8, "hdmu.map")) {
+            uint8_t *r = (uint8_t *)X_G(buf);
+            if (r[512] == 1 && r[513] == 0 && r[517] == 0) { r[517] = 1; static unsigned n; if (n++ < 3) XK_LOG("hdmu.map record @%llu: variant marked valid\n", (unsigned long long)pos); }
+        }
+    }
     if (got > 0) o->u.file.pos = pos + (uint64_t)got;
     {   /* Which kind of cache map is being STREAMED: Halo copies maps to z:\cacheNNN.map, so only the
          * header tells (+0x60: 0 campaign, 1 multiplayer, 2 ui).  Level-select screens peek at headers only;

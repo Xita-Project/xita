@@ -22,12 +22,14 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0x0619B0D9u, 0x90EDF7C5u, "app0:shaders/ps_90EDF7C5_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0x9A0A365Au, "app0:shaders/ps_9A0A365A_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0x9A70BFECu, "app0:shaders/ps_9A70BFEC_07.frag.gxp", 0x0C },   /* halo_vs_65 */
+    { 0x0619B0D9u, 0xA4F07500u, "app0:shaders/ps_A4F07500_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0xAE08014Au, "app0:shaders/ps_AE08014A_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0xB839C279u, "app0:shaders/ps_B839C279_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0xBC258F31u, "app0:shaders/ps_BC258F31_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0xC7D520FAu, "app0:shaders/ps_C7D520FA_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0xC91B0501u, "app0:shaders/ps_C91B0501_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0xCCFFAD85u, "app0:shaders/ps_CCFFAD85_07.frag.gxp", 0x0C },   /* halo_vs_65 */
+    { 0x0619B0D9u, 0xD6426568u, "app0:shaders/ps_D6426568_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0xDA361329u, "app0:shaders/ps_DA361329_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0xDC2685ADu, "app0:shaders/ps_DC2685AD_07.frag.gxp", 0x0C },   /* halo_vs_65 */
     { 0x0619B0D9u, 0xDD6A34CAu, "app0:shaders/ps_DD6A34CA_07.frag.gxp", 0x0C },   /* halo_vs_65 */
@@ -69,6 +71,7 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0x2725AD9Au, 0x715EC519u, "app0:shaders/ps_715EC519_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0x733022A0u, "app0:shaders/ps_733022A0_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0x73D0C443u, "app0:shaders/ps_73D0C443_05.frag.gxp", 0x0C },   /* halo_vs_30 */
+    { 0x2725AD9Au, 0x78E2FF7Fu, "app0:shaders/ps_78E2FF7F_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0x7F2BA4BEu, "app0:shaders/ps_7F2BA4BE_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0x855AA7ABu, "app0:shaders/ps_855AA7AB_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0x87C61943u, "app0:shaders/ps_87C61943_05.frag.gxp", 0x00 },   /* halo_vs_30 */
@@ -88,12 +91,14 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0x2725AD9Au, 0xCEADE2B0u, "app0:shaders/ps_CEADE2B0_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0xD2FFAB43u, "app0:shaders/ps_D2FFAB43_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0xE0C42B97u, "app0:shaders/ps_E0C42B97_05.frag.gxp", 0x00 },   /* halo_vs_30 */
+    { 0x2725AD9Au, 0xE2ABE2DEu, "app0:shaders/ps_E2ABE2DE_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0xEA8094B7u, "app0:shaders/ps_EA8094B7_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0xEBF0DD93u, "app0:shaders/ps_EBF0DD93_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0xF4FF65D6u, "app0:shaders/ps_F4FF65D6_05.frag.gxp", 0x0C },   /* halo_vs_30 */
     { 0x2725AD9Au, 0xFD13865Fu, "app0:shaders/ps_FD13865F_05.frag.gxp", 0x00 },   /* halo_vs_30 */
     { 0x3068A44Bu, 0x619ABE38u, "app0:shaders/ps_619ABE38_0C.frag.gxp", 0x0C },   /* halo_vs_06 */
     { 0x3068A44Bu, 0xB5DD2FEEu, "app0:shaders/ps_B5DD2FEE_0C.frag.gxp", 0x0C },   /* halo_vs_06 */
+    { 0x393556F8u, 0x0A8A37A5u, "app0:shaders/ps_0A8A37A5_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
     { 0x393556F8u, 0x154066FDu, "app0:shaders/ps_154066FD_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
     { 0x393556F8u, 0x1667DAC2u, "app0:shaders/ps_1667DAC2_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
     { 0x393556F8u, 0x1955B8E9u, "app0:shaders/ps_1955B8E9_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
@@ -103,7 +108,10 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0x393556F8u, 0x713BC366u, "app0:shaders/ps_713BC366_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
     { 0x393556F8u, 0x8A57DA30u, "app0:shaders/ps_8A57DA30_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
     { 0x393556F8u, 0x9416BE1Cu, "app0:shaders/ps_9416BE1C_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
+    { 0x393556F8u, 0xB5691565u, "app0:shaders/ps_B5691565_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
+    { 0x393556F8u, 0xC1B115A1u, "app0:shaders/ps_C1B115A1_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
     { 0x393556F8u, 0xD8AABA3Au, "app0:shaders/ps_D8AABA3A_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
+    { 0x393556F8u, 0xF7761878u, "app0:shaders/ps_F7761878_3F.frag.gxp", 0x08 },   /* halo_vs_10 */
     { 0x39DC538Du, 0x28BD921Au, "app0:shaders/ps_28BD921A_3C.frag.gxp", 0x0C },   /* halo_vs_26 */
     { 0x4A1C21F2u, 0x154066FDu, "app0:shaders/ps_154066FD_3F.frag.gxp", 0x08 },   /* halo_vs_17 */
     { 0x4A1C21F2u, 0x1955B8E9u, "app0:shaders/ps_1955B8E9_3F.frag.gxp", 0x08 },   /* halo_vs_17 */
@@ -112,12 +120,15 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0x50944328u, 0x338F3950u, "app0:shaders/ps_338F3950_7C.frag.gxp", 0x0C },   /* halo_vs_23 */
     { 0x53C00F6Cu, 0x91A49E77u, "app0:shaders/ps_91A49E77_04.frag.gxp", 0x0C },   /* halo_vs_58 */
     { 0x5F294309u, 0x564066B2u, "app0:shaders/ps_564066B2_05.frag.gxp", 0x0C },   /* halo_vs_32 */
+    { 0x5F294309u, 0xEFB5B694u, "app0:shaders/ps_EFB5B694_05.frag.gxp", 0x08 },   /* halo_vs_32 */
     { 0x6150B892u, 0x1D50F9CAu, "app0:shaders/ps_1D50F9CA_3D.frag.gxp", 0x0C },   /* halo_vs_16 */
     { 0x6150B892u, 0x32F4D803u, "app0:shaders/ps_32F4D803_3D.frag.gxp", 0x08 },   /* halo_vs_16 */
+    { 0x6150B892u, 0x3F56DE66u, "app0:shaders/ps_3F56DE66_3D.frag.gxp", 0x08 },   /* halo_vs_16 */
     { 0x6150B892u, 0x45185E3Au, "app0:shaders/ps_45185E3A_3D.frag.gxp", 0x08 },   /* halo_vs_16 */
     { 0x6150B892u, 0x52D0CF2Bu, "app0:shaders/ps_52D0CF2B_3D.frag.gxp", 0x0C },   /* halo_vs_16 */
     { 0x6150B892u, 0x59FF9FF7u, "app0:shaders/ps_59FF9FF7_3D.frag.gxp", 0x08 },   /* halo_vs_16 */
     { 0x6150B892u, 0x953BD9C7u, "app0:shaders/ps_953BD9C7_3D.frag.gxp", 0x08 },   /* halo_vs_16 */
+    { 0x6150B892u, 0xA49158DBu, "app0:shaders/ps_A49158DB_3D.frag.gxp", 0x08 },   /* halo_vs_16 */
     { 0x6150B892u, 0xA77F8C24u, "app0:shaders/ps_A77F8C24_3D.frag.gxp", 0x08 },   /* halo_vs_16 */
     { 0x6150B892u, 0xAE2D2C33u, "app0:shaders/ps_AE2D2C33_3D.frag.gxp", 0x08 },   /* halo_vs_16 */
     { 0x6150B892u, 0xB7A1B68Cu, "app0:shaders/ps_B7A1B68C_3D.frag.gxp", 0x00 },   /* halo_vs_16 */
@@ -140,6 +151,7 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0x909ED3C4u, 0x2A32C814u, "app0:shaders/ps_2A32C814_3F.frag.gxp", 0x0C },   /* halo_vs_60 */
     { 0x909ED3C4u, 0x92513348u, "app0:shaders/ps_92513348_3F.frag.gxp", 0x0C },   /* halo_vs_60 */
     { 0x980F42ADu, 0x60959BDDu, "app0:shaders/ps_60959BDD_0D.frag.gxp", 0x0C },   /* halo_vs_50 */
+    { 0x9E2E9021u, 0x0A8A37A5u, "app0:shaders/ps_0A8A37A5_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
     { 0x9E2E9021u, 0x154066FDu, "app0:shaders/ps_154066FD_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
     { 0x9E2E9021u, 0x1667DAC2u, "app0:shaders/ps_1667DAC2_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
     { 0x9E2E9021u, 0x1955B8E9u, "app0:shaders/ps_1955B8E9_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
@@ -149,9 +161,11 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0x9E2E9021u, 0x713BC366u, "app0:shaders/ps_713BC366_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
     { 0x9E2E9021u, 0x8A57DA30u, "app0:shaders/ps_8A57DA30_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
     { 0x9E2E9021u, 0x9416BE1Cu, "app0:shaders/ps_9416BE1C_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
+    { 0x9E2E9021u, 0xA504588Cu, "app0:shaders/ps_A504588C_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
     { 0x9E2E9021u, 0xB5691565u, "app0:shaders/ps_B5691565_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
     { 0x9E2E9021u, 0xC1B115A1u, "app0:shaders/ps_C1B115A1_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
     { 0x9E2E9021u, 0xD8AABA3Au, "app0:shaders/ps_D8AABA3A_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
+    { 0x9E2E9021u, 0xF7761878u, "app0:shaders/ps_F7761878_7F.frag.gxp", 0x08 },   /* halo_vs_09 */
     { 0x9E6F8B13u, 0x054E94D2u, "app0:shaders/ps_054E94D2_3F.frag.gxp", 0x0C },   /* halo_vs_24 */
     { 0x9E6F8B13u, 0x06B4C4FAu, "app0:shaders/ps_06B4C4FA_3F.frag.gxp", 0x0C },   /* halo_vs_24 */
     { 0x9E6F8B13u, 0x1110538Eu, "app0:shaders/ps_1110538E_3F.frag.gxp", 0x0C },   /* halo_vs_24 */
@@ -169,8 +183,10 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0x9E6F8B13u, 0xDCA13BC5u, "app0:shaders/ps_DCA13BC5_3F.frag.gxp", 0x0C },   /* halo_vs_24 */
     { 0x9E6F8B13u, 0xDFECF91Au, "app0:shaders/ps_DFECF91A_3F.frag.gxp", 0x0C },   /* halo_vs_24 */
     { 0x9E6F8B13u, 0xE1ABD409u, "app0:shaders/ps_E1ABD409_3F.frag.gxp", 0x0C },   /* halo_vs_24 */
+    { 0xA862CB93u, 0x0499B4A9u, "app0:shaders/ps_0499B4A9_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xA862CB93u, 0x0B24D6CDu, "app0:shaders/ps_0B24D6CD_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xA862CB93u, 0x1EC43488u, "app0:shaders/ps_1EC43488_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
+    { 0xA862CB93u, 0x35EBA511u, "app0:shaders/ps_35EBA511_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xA862CB93u, 0x3FDB7203u, "app0:shaders/ps_3FDB7203_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xA862CB93u, 0x40D87C17u, "app0:shaders/ps_40D87C17_3F.frag.gxp", 0x08 },   /* halo_vs_66 */
     { 0xA862CB93u, 0x5C7C4F88u, "app0:shaders/ps_5C7C4F88_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
@@ -180,6 +196,7 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0xA862CB93u, 0x7A8CD380u, "app0:shaders/ps_7A8CD380_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xA862CB93u, 0x7BC230FCu, "app0:shaders/ps_7BC230FC_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xA862CB93u, 0x7C7D4604u, "app0:shaders/ps_7C7D4604_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
+    { 0xA862CB93u, 0x9193AB1Cu, "app0:shaders/ps_9193AB1C_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xA862CB93u, 0x961540F3u, "app0:shaders/ps_961540F3_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xA862CB93u, 0xA306730Bu, "app0:shaders/ps_A306730B_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xA862CB93u, 0xC098E1F1u, "app0:shaders/ps_C098E1F1_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
@@ -189,6 +206,7 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0xA862CB93u, 0xF9B37603u, "app0:shaders/ps_F9B37603_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xA862CB93u, 0xFA19FF95u, "app0:shaders/ps_FA19FF95_3F.frag.gxp", 0x0C },   /* halo_vs_66 */
     { 0xAC1984DBu, 0x0019A1BAu, "app0:shaders/ps_0019A1BA_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
+    { 0xAC1984DBu, 0x01C43784u, "app0:shaders/ps_01C43784_3F.frag.gxp", 0x08 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x06768F2Du, "app0:shaders/ps_06768F2D_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x06B4C4FAu, "app0:shaders/ps_06B4C4FA_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x07669EB7u, "app0:shaders/ps_07669EB7_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
@@ -220,6 +238,7 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0xAC1984DBu, 0x430C971Au, "app0:shaders/ps_430C971A_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x43E2F97Fu, "app0:shaders/ps_43E2F97F_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x44C31569u, "app0:shaders/ps_44C31569_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
+    { 0xAC1984DBu, 0x467B4AFDu, "app0:shaders/ps_467B4AFD_3F.frag.gxp", 0x08 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x46982EA7u, "app0:shaders/ps_46982EA7_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x47A3F2F7u, "app0:shaders/ps_47A3F2F7_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x495D80F9u, "app0:shaders/ps_495D80F9_3F.frag.gxp", 0x08 },   /* halo_vs_47 */
@@ -232,11 +251,13 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0xAC1984DBu, 0x56E453D8u, "app0:shaders/ps_56E453D8_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x5805FF7Eu, "app0:shaders/ps_5805FF7E_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x5D1E5594u, "app0:shaders/ps_5D1E5594_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
+    { 0xAC1984DBu, 0x5EF2753Bu, "app0:shaders/ps_5EF2753B_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x5F445CFAu, "app0:shaders/ps_5F445CFA_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x615E34EDu, "app0:shaders/ps_615E34ED_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x621B401Bu, "app0:shaders/ps_621B401B_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x63E6A800u, "app0:shaders/ps_63E6A800_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x64A1CFE2u, "app0:shaders/ps_64A1CFE2_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
+    { 0xAC1984DBu, 0x66332BB5u, "app0:shaders/ps_66332BB5_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x6776AFE7u, "app0:shaders/ps_6776AFE7_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x68F0395Du, "app0:shaders/ps_68F0395D_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x6A56B4FCu, "app0:shaders/ps_6A56B4FC_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
@@ -254,6 +275,7 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0xAC1984DBu, 0x79BDA186u, "app0:shaders/ps_79BDA186_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x7A55F9EEu, "app0:shaders/ps_7A55F9EE_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x7B8E2FB5u, "app0:shaders/ps_7B8E2FB5_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
+    { 0xAC1984DBu, 0x7D82000Fu, "app0:shaders/ps_7D82000F_3F.frag.gxp", 0x08 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x7E5DAFEAu, "app0:shaders/ps_7E5DAFEA_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x7F689151u, "app0:shaders/ps_7F689151_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x806BC61Au, "app0:shaders/ps_806BC61A_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
@@ -274,6 +296,7 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0xAC1984DBu, 0x98F11F8Eu, "app0:shaders/ps_98F11F8E_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x9A623757u, "app0:shaders/ps_9A623757_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0x9B18392Eu, "app0:shaders/ps_9B18392E_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
+    { 0xAC1984DBu, 0xA007B96Du, "app0:shaders/ps_A007B96D_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xA2D7A890u, "app0:shaders/ps_A2D7A890_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xA60E0BB7u, "app0:shaders/ps_A60E0BB7_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xA6BCDD26u, "app0:shaders/ps_A6BCDD26_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
@@ -291,6 +314,7 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0xAC1984DBu, 0xB5A71C79u, "app0:shaders/ps_B5A71C79_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xB6B9272Du, "app0:shaders/ps_B6B9272D_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xB7B7C872u, "app0:shaders/ps_B7B7C872_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
+    { 0xAC1984DBu, 0xB7DCDA47u, "app0:shaders/ps_B7DCDA47_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xB81D3ACCu, "app0:shaders/ps_B81D3ACC_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xBB7BD967u, "app0:shaders/ps_BB7BD967_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xBE33B62Eu, "app0:shaders/ps_BE33B62E_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
@@ -319,11 +343,13 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0xAC1984DBu, 0xE1ABD409u, "app0:shaders/ps_E1ABD409_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xE56A6F14u, "app0:shaders/ps_E56A6F14_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xE7EEE3F5u, "app0:shaders/ps_E7EEE3F5_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
+    { 0xAC1984DBu, 0xE9D5689Au, "app0:shaders/ps_E9D5689A_3F.frag.gxp", 0x08 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xEF6DDEB2u, "app0:shaders/ps_EF6DDEB2_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xF03DB7B6u, "app0:shaders/ps_F03DB7B6_3F.frag.gxp", 0x08 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xF20715F7u, "app0:shaders/ps_F20715F7_3F.frag.gxp", 0x00 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xF3FC4EB6u, "app0:shaders/ps_F3FC4EB6_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xF425B4C0u, "app0:shaders/ps_F425B4C0_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
+    { 0xAC1984DBu, 0xF62BFCF7u, "app0:shaders/ps_F62BFCF7_3F.frag.gxp", 0x08 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xF65632E2u, "app0:shaders/ps_F65632E2_3F.frag.gxp", 0x08 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xF8B030BAu, "app0:shaders/ps_F8B030BA_3F.frag.gxp", 0x08 },   /* halo_vs_47 */
     { 0xAC1984DBu, 0xFCE27650u, "app0:shaders/ps_FCE27650_3F.frag.gxp", 0x0C },   /* halo_vs_47 */
@@ -347,6 +373,7 @@ static const xv_ps_entry_t xv_ps_table[] = {
     { 0xE09FEF67u, 0x3BCB4C32u, "app0:shaders/ps_3BCB4C32_4C.frag.gxp", 0x0C },   /* halo_vs_20 */
     { 0xE09FEF67u, 0x760AD34Cu, "app0:shaders/ps_760AD34C_4C.frag.gxp", 0x0C },   /* halo_vs_20 */
     { 0xE5CA6845u, 0x0E3D603Au, "app0:shaders/ps_0E3D603A_3F.frag.gxp", 0x08 },   /* halo_vs_31 */
+    { 0xE5CA6845u, 0x6EA3EFE7u, "app0:shaders/ps_6EA3EFE7_3F.frag.gxp", 0x08 },   /* halo_vs_31 */
     { 0xE6B0E103u, 0x95EFB444u, "app0:shaders/ps_95EFB444_3C.frag.gxp", 0x0C },   /* halo_vs_49 */
     { 0xE6B0E103u, 0xC0B2D63Du, "app0:shaders/ps_C0B2D63D_3C.frag.gxp", 0x08 },   /* halo_vs_49 */
     { 0xE6B0E103u, 0xF4C689AEu, "app0:shaders/ps_F4C689AE_3C.frag.gxp", 0x08 },   /* halo_vs_49 */
