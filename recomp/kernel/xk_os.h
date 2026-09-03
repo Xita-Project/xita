@@ -40,5 +40,5 @@ xk_fiber *xk_os_fiber_main(void);            /* the scheduler's own context */
 void      xk_os_fiber_destroy(xk_fiber *f);  /* never the current one */
 
 /* input (XInput HLE) */
-typedef struct { uint16_t buttons; uint8_t analog[8]; int16_t lx, ly, rx, ry; int connected; uint16_t p2_buttons; uint8_t p2_analog[8]; } xk_os_pad;   /* p2_*: virtual second gamepad (XV_PAD2) */
+typedef struct { uint16_t buttons; uint8_t analog[8]; int16_t lx, ly, rx, ry; int connected; uint16_t p2_buttons; uint8_t p2_analog[8]; int force_start; } xk_os_pad;   /* force_start: L+R+Triangle chord / "force" script token (XV_FORCE_START) */   /* p2_*: virtual second gamepad (XV_PAD2) */
 void      xk_os_pad_poll(xk_os_pad *p);

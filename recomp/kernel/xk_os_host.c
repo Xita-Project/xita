@@ -156,6 +156,7 @@ void xk_os_pad_poll(xk_os_pad *p)
         else if (!strcmp(b, "lleft")) p->lx = -32767; else if (!strcmp(b, "lright")) p->lx = 32767;
         else if (!strcmp(b, "rup")) p->ry = 32767; else if (!strcmp(b, "rdown")) p->ry = -32767;
         else if (!strcmp(b, "rleft")) p->rx = -32767; else if (!strcmp(b, "rright")) p->rx = 32767;
+        else if (!strcmp(b, "force")) p->force_start = 1;                                      /* force MP start (XV_FORCE_START) */
         else if (b[0] == 'p' && b[1] == '2') {                                             /* virtual player 2 (XV_PAD2=1) */
             const char *q = b + 2;
             if (!strcmp(q, "up")) p->p2_buttons |= 1; else if (!strcmp(q, "down")) p->p2_buttons |= 2;

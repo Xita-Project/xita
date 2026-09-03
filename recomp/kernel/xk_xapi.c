@@ -192,10 +192,33 @@ void xv_hle_XInputOpen(xctx *c) { static int pad2 = -1; if (pad2 < 0) { const ch
     c->r[0] = X_ARG(1) == 0 ? 0x00777701u : (X_ARG(1) == 1 && pad2) ? 0x00777702u : 0; XK_LOG("[pad] XInputOpen port %u -> %08X\n", X_ARG(1), c->r[0]); X_RET(4); }
 void xv_hle_XInputClose(xctx *c) { X_RET(1); }
 /* DWORD XInputGetState(HANDLE, PXINPUT_STATE { DWORD dwPacketNumber; XINPUT_GAMEPAD { WORD wButtons; BYTE bAnalogButtons[8]; SHORT sThumbLX, sThumbLY, sThumbRX, sThumbRY; } }) */
+/* Force the multiplayer match to start (XV_FORCE_START=1): the lobby is gated on a 2nd player, but the
+ * client session object [2E362C] is fully configured at the ENLISTED PLAYERS screen (map + variant
+ * chosen).  0xA1240(session) is the real game-start executor - it broadcasts the map load and runs the
+ * engine start (0xD1540/0xFA620) - normally reached only via the countdown/host handshake.  We call it
+ * directly with the session pointer when the player holds L+R+Triangle (pad.force_start), bypassing the "waiting for another
+ * player" gate so a single player can drop into the map.  Fires once per lobby entry. */
+void f_000A1240(xctx *c);
+static void xv_force_mp_start(xctx *c)
+{
+    uint32_t sess = X_M32(0x2E362Cu);
+    if (!sess) { XK_LOG("[force-start] no client session at [2E362C]\n"); return; }
+    uint16_t state = X_M16(sess + 0xCA6u);
+    XK_LOG("[force-start] session %08X state %u -> calling A1240\n", sess, state);
+    uint32_t saved = c->r[4];
+    X_PUSH32(sess);              /* stdcall arg */
+    X_PUSH32(0u);               /* dummy return address (A1240 does ret 4) */
+    f_000A1240(c);
+    c->r[4] = saved;            /* belt-and-suspenders: restore esp */
+    XK_LOG("[force-start] A1240 returned, state now %u\n", X_M16(sess + 0xCA6u));
+}
 void xv_hle_XInputGetState(xctx *c)
 {
     static uint32_t packet; xk_os_pad p; xk_os_pad_poll(&p);
     uint32_t st = X_ARG(1);
+    { static int fs = -1; if (fs < 0) { const char *e = getenv("XV_FORCE_START"); fs = e ? atoi(e) : 0; }
+      if (fs && X_ARG(0) == 0x00777701u && p.force_start) {                               /* L+R+Triangle chord or "force" script token */
+          static int fired; if (!fired) { fired = 1; xv_force_mp_start(c); } } }
     if (X_ARG(0) == 0x00777702u) {                   /* virtual player 2: idle except what the pad layer injects (script p2* tokens / chord) */
         { static unsigned n; if (p.p2_buttons || p.p2_analog[0] || (n++ % 240) == 0) XK_LOG("[pad] P2 poll #%u buttons %04X A %u from %08X\n", n, p.p2_buttons, p.p2_analog[0], X_M32(c->r[4])); }
         X_M32(st) = ++packet; X_M16(st + 4) = p.p2_buttons; memcpy(X_G(st + 6), p.p2_analog, 8);
@@ -216,7 +239,7 @@ void xv_hle_XCalculateSignatureBegin(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(1);
 /* XNet / Winsock: no network */
 #define NETLOG(fn, nargs) do { XK_LOG("[net] " fn "(%08X,%08X,%08X,%08X) from %08X\n", X_ARG(0), X_ARG(1), X_ARG(2), X_ARG(3), X_M32(c->r[4])); } while (0)
 void xv_hle_XNetStartup(xctx *c) { NETLOG("XNetStartup", 1); c->r[0] = 0; X_RET(1); }
-void xv_hle_XNetGetEthernetLinkStatus(xctx *c) { c->r[0] = 0x0B; X_RET(0); }   /* ACTIVE | 100MBPS | FULL_DUPLEX: the split-screen session (0x9D7B0) refuses to start without a link (pending error 6) */
+void xv_hle_XNetGetEthernetLinkStatus(xctx *c) { c->r[0] = 0x0B; NETLOG("XNetGetEthernetLinkStatus", 0); X_RET(0); }
 void xv_hle_WSAStartup(xctx *c) { NETLOG("WSAStartup", 2); c->r[0] = 0; X_RET(2); }
 void xv_hle_socket(xctx *c) { NETLOG("socket", 3); c->r[0] = 0xFFFFFFFFu; X_RET(3); }
 void xv_hle_bind(xctx *c) { NETLOG("bind", 3); c->r[0] = 0xFFFFFFFFu; X_RET(3); }

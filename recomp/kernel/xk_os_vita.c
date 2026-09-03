@@ -273,6 +273,12 @@ void xk_os_fiber_destroy(xk_fiber *f)
  * Analog buttons[8]: A, B, X, Y, BLACK, WHITE, LTRIGGER, RTRIGGER (0..255). */
 void xk_os_pad_poll(xk_os_pad *p)
 {
+    /* DIAGNOSTIC (XV_ERR_LOG=1): log Halo's pending UI-error codes when they change.  2E4028 = network
+     * error slot (code 6 -> "A networking error has occurred"); 2E4030 = saved-game error slot. */
+    { static int on = -1; if (on < 0) { const char *e = getenv("XV_ERR_LOG"); on = e ? atoi(e) : 0; }
+      if (on) { extern uint32_t xv_guest_r16(uint32_t); static uint32_t last = 0xEEEEEEEEu;
+        uint32_t a = xv_guest_r16(0x2E4028u), b = xv_guest_r16(0x2E4030u), cur = a | (b << 16);
+        if (cur != last) { xv_logf("[err] pending net(2E4028)=%04X saved(2E4030)=%04X\n", a, b); last = cur; } } }
     SceCtrlData d; memset(&d, 0, sizeof d);
     d.lx = d.ly = d.rx = d.ry = 128;                                  /* centred if no pad answers */
     { static int mode_set; if (!mode_set) { mode_set = 1; sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);   /* real firmware defaults to DIGITAL: sticks read 128 forever */
@@ -309,6 +315,7 @@ void xk_os_pad_poll(xk_os_pad *p)
             else if (!strcmp(bn, "lleft")) d.lx = 0; else if (!strcmp(bn, "lright")) d.lx = 255;
             else if (!strcmp(bn, "rup")) d.ry = 0; else if (!strcmp(bn, "rdown")) d.ry = 255;
             else if (!strcmp(bn, "rleft")) d.rx = 0; else if (!strcmp(bn, "rright")) d.rx = 255;
+            else if (!strcmp(bn, "force")) p->force_start = 1;                                  /* force MP start (XV_FORCE_START) */
             else if (bn[0] == 'p' && bn[1] == '2') {                                         /* virtual player 2 (XV_PAD2=1) */
                 const char *q = bn + 2;
                 if (!strcmp(q, "up")) p->p2_buttons |= 1; else if (!strcmp(q, "down")) p->p2_buttons |= 2;
@@ -331,6 +338,7 @@ void xk_os_pad_poll(xk_os_pad *p)
     /* Hardware chord for the virtual second pad (XV_PAD2=1 in xboxvita.cfg): with L+R held, START / X / O /
      * D-pad go to player 2 instead of player 1 - enough to join a split-screen lobby and pick a profile. */
     if ((d.buttons & (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) == (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) {
+        if (d.buttons & SCE_CTRL_TRIANGLE) { p->force_start = 1; d.buttons &= ~SCE_CTRL_TRIANGLE; }   /* L+R+Triangle: force the MP match start (XV_FORCE_START) */
         if (d.buttons & SCE_CTRL_UP) p->p2_buttons |= 1;      if (d.buttons & SCE_CTRL_DOWN) p->p2_buttons |= 2;
         if (d.buttons & SCE_CTRL_LEFT) p->p2_buttons |= 4;    if (d.buttons & SCE_CTRL_RIGHT) p->p2_buttons |= 8;
         if (d.buttons & SCE_CTRL_START) p->p2_buttons |= 0x10; if (d.buttons & SCE_CTRL_SELECT) p->p2_buttons |= 0x20;

@@ -315,3 +315,6 @@ void xv_hle_xn_XNetGetTitleXnAddr(xctx *c)                  /* (XNADDR *36) -> X
     static const uint8_t mac[6] = { 0x00, 0x50, 0xF2, 0x12, 0x34, 0x56 }; memcpy(X_G(a + 10), mac, 6);
     NLOG("XNetGetTitleXnAddr\n"); c->r[0] = 0x2 | 0x4; X_RET(1);        /* ETHERNET | STATIC */
 }
+
+/* diagnostic accessor for the pad layer (which lacks the X_ macros) */
+uint32_t xv_guest_r16(uint32_t va) { return X_M16(va); }
