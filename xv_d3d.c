@@ -949,7 +949,16 @@ static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigne
             int want_cube = c->ps_entry >= 0 && (xv_ps_table[c->ps_entry].cube_mask & (1u << t));
             int have = tx && sceGxmTextureGetData(tx) != NULL;
             int is_cube = have && sceGxmTextureGetType(tx) == SCE_GXM_TEXTURE_CUBE;
-            if (!have || (want_cube != is_cube)) {                    /* unset stage, or a cube on a sampler2D / 2D on a samplerCUBE */
+            static SceGxmTexture face0[4];
+            if (have && is_cube && !want_cube) {
+                /* the game bound a cube map where the combiner samples 2D (NV2A PROJECT2D on a cube reads it
+                 * as a 2D texture): present face +X as a 2D texture of the same size/format */
+                if (sceGxmTextureInitSwizzled(&face0[t], sceGxmTextureGetData(tx), sceGxmTextureGetFormat(tx), sceGxmTextureGetWidth(tx), sceGxmTextureGetHeight(tx), 1) == SCE_OK) {
+                    sceGxmTextureSetMinFilter(&face0[t], SCE_GXM_TEXTURE_FILTER_LINEAR); sceGxmTextureSetMagFilter(&face0[t], SCE_GXM_TEXTURE_FILTER_LINEAR);
+                    tx = &face0[t]; have = 1; is_cube = 0;
+                }
+            }
+            if (!have || (want_cube != is_cube)) {                    /* unset stage, or a 2D texture on a samplerCUBE */
                 const SceGxmTexture *fb = want_cube ? cube_fallback() : tex2d_fallback();
                 static unsigned n; if (n++ < 12) XV_LOG("draw: stage %u %s -> fallback %s\n", t, !have ? "unset" : "kind mismatch", want_cube ? "cube" : "2d");
                 if (!fb) continue;
