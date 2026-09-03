@@ -569,6 +569,11 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     }
     vs_slot_t *v = &g_vs[slot];
     const xv_vs_desc_t *d = v->vs.desc;
+    {   /* XV_SKIP_VS=halo_vs_40[,halo_vs_26]: drop every draw made with these vertex programs (pass isolation) */
+        static const char *skip = NULL; static int sinit; if (!sinit) { sinit = 1; skip = getenv("XV_SKIP_VS"); }
+        if (skip && d->gxp) { const char *b = strrchr(d->gxp, '/'); b = b ? b + 1 : d->gxp; size_t bl = strlen(b) - 4; const char *e = skip;
+            while (*e) { const char *end = strchr(e, ','); size_t l = end ? (size_t)(end - e) : strlen(e); if (l == bl && !strncmp(e, b, l)) { cur_list()->ncmds--; return; } e = end ? end + 1 : e + l; } }
+    }
     {   /* which (vertex program, combiner program) pairs the game actually draws with: offline input */
         static struct { uint32_t vs, ps; } pairs[256]; static unsigned np; unsigned k;
         for (k = 0; k < np; ++k) if (pairs[k].vs == d->func_hash && pairs[k].ps == S.ps_hash) break;
@@ -680,6 +685,19 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             n += snprintf(cb + n, sizeof cb - n, " c[%d]=%.3f,%.3f,%.3f,%.3f", reg, m[0], m[1], m[2], m[3]);
             while (*e && *e != ',') e++; if (*e == ',') e++; }
         XV_LOG("[hist]   consts:%s\n", cb);
+    }
+    if (trace_frame() && getenv("XV_DUMP_VS") && strstr(d->gxp, getenv("XV_DUMP_VS")) && d->nstreams > 1 && c->streams[1]) {
+        /* raw stream-1 bytes of the first vertices (lightmap uv / normal packing checks) */
+        unsigned st = S.stream_stride[1] ? S.stream_stride[1] : d->stride[1]; char b[200]; int n = 0;
+        for (unsigned k = 0; k < 4 && n < 180; ++k) { const uint8_t *p = (const uint8_t *)c->streams[1] + k * st; n += snprintf(b + n, sizeof b - n, " |"); for (unsigned j = 0; j < st && j < 16; ++j) n += snprintf(b + n, sizeof b - n, " %02X", p[j]); }
+        XV_LOG("[hist]   stream1 stride %u (decl %u) guest %08X:%s\n", st, d->stride[1], S.stream_guest[1], b);
+    }
+    if (trace_frame() && getenv("XV_DUMP_VS") && strstr(d->gxp, getenv("XV_DUMP_VS")) && c->streams[0]) {
+        unsigned st = S.stream_stride[0] ? S.stream_stride[0] : d->stride[0]; char b[300]; int n = 0;
+        for (unsigned k = 0; k < 3 && n < 280; ++k) { const uint8_t *p = (const uint8_t *)c->streams[0] + k * st; const float *f = (const float *)p;
+            n += snprintf(b + n, sizeof b - n, " | pos %.2f %.2f %.2f uv@24 %.3f %.3f raw", f[0], f[1], f[2], f[6], f[7]);
+            for (unsigned j = 12; j < st && j < 32; ++j) n += snprintf(b + n, sizeof b - n, " %02X", p[j]); }
+        XV_LOG("[hist]   stream0 stride %u (decl %u):%s\n", st, d->stride[0], b);
     }
     if (trace_frame() && strstr(d->gxp, getenv("XV_DUMP_VS") ? getenv("XV_DUMP_VS") : "\001") && c->streams[0]) {
         /* first three vertices through the c[0..3] rows the microcode uses for oPos (dph) */

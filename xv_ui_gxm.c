@@ -356,15 +356,23 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
     if (isdxt && w == h && ui_is_pow2(w) && w >= 4) {
         /* Upload DXT as-is: NV2A stores 4x4 blocks row-major, GXM's swizzled layout wants the blocks
          * twiddled (PowerVR order, see gxm_unswz), so reorder 8/16-byte blocks - no decompression. */
-        unsigned bw = w / 4, bh = h / 4, nb = bw * bh;
-        uint32_t need = ALIGN_UP(nb * bs, 64);
+        /* whole mip chain down to 4x4 (Xbox stores the levels back to back; GXM swizzled BC levels are
+         * concatenated too): without mips the hull fly-by at grazing angles aliased into streaks */
+        unsigned levels = 0; uint32_t need = 0;
+        { unsigned lw = w; while (lw >= 4 && levels < mips) { need += (lw / 4) * (lw / 4) * bs; lw >>= 1; levels++; } }
+        need = ALIGN_UP(need, 64);
         if (g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
-        uint8_t *dst = g.dec_base + g.dec_off;
-        for (unsigned i = 0; i < nb; ++i) { unsigned x, y; gxm_unswz(bw, bh, i, &x, &y); memcpy(dst + i * bs, src + (y * bw + x) * bs, bs); }
-        xv_gpu_flush(dst, nb * bs);
-        err = sceGxmTextureInitSwizzled(&e->tex, dst, gf, w, h, 0);
-        if (err != SCE_OK) { UI_LOG("textureInitSwizzled(%02X %ux%u) failed 0x%08X\n", fmt, w, h, err); UI_TEX_FAIL(); }
-        g.dec_off += need; as_bc = 1;
+        uint8_t *dst = g.dec_base + g.dec_off, *o = dst; const uint8_t *lsrc = src;
+        for (unsigned l = 0, lw = w; l < levels; ++l, lw >>= 1) {
+            unsigned bw = lw / 4, nb = bw * bw;
+            for (unsigned i = 0; i < nb; ++i) { unsigned x, y; gxm_unswz(bw, bw, i, &x, &y); memcpy(o + i * bs, lsrc + (y * bw + x) * bs, bs); }
+            o += nb * bs; lsrc += nb * bs;
+        }
+        xv_gpu_flush(dst, need);
+        err = sceGxmTextureInitSwizzled(&e->tex, dst, gf, w, h, levels);
+        if (err != SCE_OK) { UI_LOG("textureInitSwizzled(%02X %ux%u, %u mips) failed 0x%08X\n", fmt, w, h, levels, err); UI_TEX_FAIL(); }
+        if (levels > 1) sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
+        g.dec_off += need; as_bc = levels > 1 ? 2 : 1;
     } else {
         /* decoded RGBA + a box-filtered mip chain (levels packed after level 0, as GXM lays out linear
          * mips): without mips the 1024x512 hull plating aliased into streaks at grazing angles, and mips
@@ -426,7 +434,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         e->sum = ui_tex_hash(src, e->bytes);
     }
     { static unsigned n; if (n++ < 24) UI_LOG("tex fmt %02X %ux%u -> %s (%u KB used)\n", fmt, w, h, as_bc ? "BC" : "RGBA", g.dec_off >> 10); }
-    sceGxmTextureSetMinFilter(&e->tex, as_bc ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_MIPMAP_LINEAR);
+    sceGxmTextureSetMinFilter(&e->tex, as_bc == 1 ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_MIPMAP_LINEAR);
     sceGxmTextureSetMagFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
     sceGxmTextureSetUAddrMode(&e->tex, SCE_GXM_TEXTURE_ADDR_REPEAT);
     sceGxmTextureSetVAddrMode(&e->tex, SCE_GXM_TEXTURE_ADDR_REPEAT);
@@ -774,6 +782,7 @@ static uint32_t gl_blend_to_d3d(uint32_t gl)
 }
 void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t data)
 {
+    { extern void xd3d_hist_tex_check(void); xd3d_hist_tex_check(); }
     (void)c;
     if (!g_mesh_path) return;
     uint32_t vs = xd3d_state.vs_handle;
@@ -877,8 +886,10 @@ uint32_t xv_ui_gxm_mesh_frame(void) { return g_mesh_frame; }
  * previous frame + display flip).  The first hardware number that says where the time goes. */
 static uint64_t g_t_last_present, g_t_game_acc, g_t_render_acc; static unsigned g_t_frames;
 static inline uint64_t t_us(void) { extern uint64_t xk_os_monotonic_us(void); return xk_os_monotonic_us(); }
+void xd3d_hist_small_check(unsigned frame, unsigned draws);
 void xd3d_r_present(unsigned frame, unsigned draws)
 {
+    xd3d_hist_small_check(frame, draws);
     (void)draws;
     extern void xv_present(void);
     uint64_t t0 = t_us();
