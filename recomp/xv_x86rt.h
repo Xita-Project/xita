@@ -69,6 +69,15 @@ static inline uint32_t x_pop32(xctx *c) { uint32_t v = X_M32(c->r[4]); c->r[4] +
         c->f_res = (uint32_t)(res); c->f_bits = (bits); c->f_cf_override = 0; c->f_of_override = 0; } while (0)
 #define X_FLAGS_C(kind, op1, op2, res, bits, cfin) do { X_FLAGS(kind, op1, op2, res, bits); c->f_cf = (cfin); } while (0)
 
+/* inline flag evaluation for fused cmp/test/arith + jcc (constant bits fold at compile time) */
+#define XFI_MASK(bits)          ((bits) == 32 ? 0xFFFFFFFFu : ((1u << (bits)) - 1u))
+#define XFI_MSB(v, bits)        ((((uint32_t)(v)) >> ((bits) - 1)) & 1u)
+#define XFI_Z(r, bits)          ((((uint32_t)(r)) & XFI_MASK(bits)) == 0)
+#define XFI_S(r, bits)          XFI_MSB(r, bits)
+#define XFI_C_SUB(a, b, bits)   ((((uint32_t)(a)) & XFI_MASK(bits)) < (((uint32_t)(b)) & XFI_MASK(bits)))
+#define XFI_C_ADD(a, r, bits)   ((((uint32_t)(r)) & XFI_MASK(bits)) < (((uint32_t)(a)) & XFI_MASK(bits)))
+#define XFI_O_SUB(a, b, r, bits) XFI_MSB(((a) ^ (b)) & ((a) ^ (r)), bits)
+#define XFI_O_ADD(a, b, r, bits) XFI_MSB(((a) ^ (r)) & ((b) ^ (r)), bits)
 static inline uint32_t xf_mask(const xctx *c) { return c->f_bits == 32 ? 0xFFFFFFFFu : ((1u << c->f_bits) - 1u); }
 static inline uint32_t xf_msb(const xctx *c, uint32_t v) { return (v >> (c->f_bits - 1)) & 1u; }
 

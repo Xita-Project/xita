@@ -58,6 +58,20 @@ GUEST_MASK = 0x03FFFFFF
 
 # dead-flag elimination: the X_FLAGS(...) store emitted by arithmetic lowering (one level of nested parens)
 FLAGS_RE = _re.compile(r"X_FLAGS(?:_C)?\((?:[^()]|\([^()]*\))*\);\s?")
+# cmp/test/arith + jcc fusion: the flag producer's operands are captured into function-scope locals and
+# the branch evaluates the condition inline (no 6-word lazy-flag store, no XF_* reload).
+FLAGS_CAP_RE = _re.compile(r"X_FLAGS\((XK_\w+), ((?:[^(),]|\([^()]*\))*), ((?:[^(),]|\([^()]*\))*), ((?:[^(),]|\([^()]*\))*), (\d+)\);\s?")
+FUSE_MNEMONICS = {"cmp", "test", "add", "sub", "and", "or", "xor", "inc", "dec", "neg"}
+def fused_cond(kind: str, bits: int, cc: str):
+    """C expression for condition cc given the captured operands fk_a/fk_b/fk_r of a flag op of `kind`."""
+    Z = f"XFI_Z(fk_r,{bits})"; S = f"XFI_S(fk_r,{bits})"
+    if kind == "XK_LOGIC": C, O = "0", "0"
+    elif kind == "XK_SUB": C, O = f"XFI_C_SUB(fk_a,fk_b,{bits})", f"XFI_O_SUB(fk_a,fk_b,fk_r,{bits})"
+    elif kind == "XK_ADD": C, O = f"XFI_C_ADD(fk_a,fk_r,{bits})", f"XFI_O_ADD(fk_a,fk_b,fk_r,{bits})"
+    else: return None
+    T = {"o": O, "no": f"!{O}", "b": C, "ae": f"!{C}", "e": Z, "ne": f"!{Z}", "be": f"({C}||{Z})", "a": f"(!{C}&&!{Z})",
+         "s": S, "ns": f"!{S}", "l": f"({S}!={O})", "ge": f"({S}=={O})", "le": f"({Z}||({S}!={O}))", "g": f"(!{Z}&&({S}=={O}))"}
+    return T.get(cc)
 # instructions whose lowering relies on the flag record for its own result (rotates/shifts feed CF/OF
 # through helpers, adc/sbb read CF, cmpxchg family, string ops with rep) - never strip those
 FLAG_KEEP = { Mnemonic.ADC, Mnemonic.SBB, Mnemonic.RCL, Mnemonic.RCR, Mnemonic.CMPXCHG, Mnemonic.CMPXCHG8B,
@@ -665,6 +679,8 @@ class Emitter:
             tgt = ins.near_branch_target
             if mn in ("jecxz", "jcxz"):
                 cond = "c->r[1] == 0" if mn == "jecxz" else "X_R16(1) == 0"
+            elif getattr(self, "fused_cond", None):
+                cond = self.fused_cond; self.fused_cond = None
             elif cc in COND:
                 cond = COND[cc]
             else:
@@ -950,6 +966,39 @@ class Emitter:
             live = (live & ~wr) | rd
         return dead
 
+    def fusable_pairs(self, insns) -> dict:
+        """index -> (kind, bits, cc) for flag-producing instructions whose flags are read only by the jcc
+        that immediately follows (and are dead after it)."""
+        RF_ALL = RflagsBits.OF | RflagsBits.SF | RflagsBits.ZF | RflagsBits.AF | RflagsBits.CF | RflagsBits.PF
+        res = {}
+        if len(insns) < 2:
+            return res
+        last = insns[-1]
+        live_after = [0] * len(insns)
+        live = 0 if last.flow_control in (FlowControl.CALL, FlowControl.INDIRECT_CALL, FlowControl.RETURN) else RF_ALL
+        for i in range(len(insns) - 1, -1, -1):
+            live_after[i] = live
+            ins = insns[i]
+            live = (live & ~ins.rflags_modified) | ins.rflags_read
+        for i in range(len(insns) - 1):
+            a, j = insns[i], insns[i + 1]
+            mn = MN[a.mnemonic]; jm = MN[j.mnemonic]
+            if mn not in FUSE_MNEMONICS or not jm.startswith("j") or jm in ("jmp", "jecxz", "jcxz"):
+                continue
+            if a.rflags_read:                     # inc/dec keep CF: they read it - still fine, CF is not in the fused set
+                pass
+            if (a.rflags_modified & live_after[i + 1]) or not (j.rflags_read and (j.rflags_read & ~a.rflags_modified) == 0):
+                continue
+            cc = JCC_ALIAS.get(jm, jm)[1:]
+            if cc in ("p", "np"):
+                continue
+            kind = "XK_LOGIC" if mn in ("test", "and", "or", "xor") else "XK_ADD" if mn in ("add", "inc") else "XK_SUB"
+            if mn in ("inc", "dec") and cc in ("b", "ae", "be", "a"):
+                continue                          # CF is preserved by inc/dec: not derivable from the captured operands
+            bits = self.op_size(a, 0) * 8
+            res[i] = (kind, bits, cc)
+        return res
+
     def emit_function(self, fn: Function) -> str:
         # `restrict`: the context is host memory that no guest pointer can reach, so GCC may keep guest
         # registers in ARM registers across guest memory stores (otherwise every store reloads them).
@@ -965,11 +1014,30 @@ class Emitter:
         # (Halo 3925: 790 of 8097 functions, e.g. game_time_initialize at 0xFA620 ran 0xF8140 instead.)
         if fn.blocks and min(fn.blocks) != fn.entry:
             out.append(f"    goto L_{fn.entry:08X};")
+        out.append("    uint32_t fk_a = 0, fk_b = 0, fk_r = 0; (void)fk_a; (void)fk_b; (void)fk_r;")
+        self.fused_cond = None
         for start in sorted(fn.blocks):
             blk = fn.blocks[start]
             out.append(f"L_{start:08X}:")
             dead = self.dead_flag_writes(blk.insns)
-            for ins in blk.insns:
+            fuse = self.fusable_pairs(blk.insns)
+            skip_next = False
+            for idx, ins in enumerate(blk.insns):
+                if skip_next:
+                    skip_next = False; continue
+                if idx in fuse:
+                    kind, bits, cc = fuse[idx]
+                    tmp: List[str] = []
+                    self.lower(fn, ins, tmp)
+                    cap = [FLAGS_CAP_RE.sub(lambda m: f"fk_a = (uint32_t)({m.group(2)}); fk_b = (uint32_t)({m.group(3)}); fk_r = (uint32_t)({m.group(4)}); ", line) for line in tmp]
+                    out.extend(cap)
+                    self.fused_cond = fused_cond(kind, bits, cc)
+                    self.lower(fn, blk.insns[idx + 1], out)
+                    self.fused_cond = None
+                    self.stats["flags_fused"] = self.stats.get("flags_fused", 0) + 1
+                    self.stats["insns"] += 2
+                    skip_next = True
+                    continue
                 if ins in dead:
                     # flags this instruction writes are all overwritten before anything reads them:
                     # lower normally, then strip the X_FLAGS(...) store (7 stores per arithmetic op)
