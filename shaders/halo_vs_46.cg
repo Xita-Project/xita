@@ -177,7 +177,7 @@ VertOut main(AppIn IN, uniform float4 c[13])
     }
 
     // --- outputs
-    OUT.position = oPos;
+    OUT.position = float4(oPos.xy, oPos.z * 0.9999, oPos.w);   /* keep z < w: Halo puts the sky exactly on the far plane and GXM clips z == w away */
     OUT.color0 = oD0;
     OUT.texcoord0 = oT0;
     return OUT;

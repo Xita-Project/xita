@@ -553,8 +553,10 @@ static int trace_frame(void) { return xd3d_hist_active && xd3d_hist_active(); }
 static const SceGxmTexture *cube_fallback(void);
 
 
+unsigned xv_d3d_last_draws, xv_d3d_draw_acc, xv_d3d_bsp_acc;   /* draw counters for the frame-time log */
 static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint32_t base_vertex)
 {
+    xv_d3d_draw_acc++;
     if (recording_dropped()) return;
     int slot = handle_to_slot(S.vs_handle);
     if (slot < 0) {
@@ -608,6 +610,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     c->depth_write = S.z_enable && S.z_write;
     c->cull = (uint8_t)S.cull;
     { extern uint32_t xd3d_fog_color(void); c->fog_color = xd3d_fog_color(); }
+    if (strstr(d->gxp, "halo_vs_16")) xv_d3d_bsp_acc++;
     memcpy(c->const_attr, S.const_attr, 16);
 
     /* streams: game pointers, offset by the base vertex, flushed for the GPU */
@@ -634,6 +637,21 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     if (indices)
         xv_gpu_flush(indices, count * 2);
 
+    {   /* XV_FOG_DUMP=1: first 3 draws per vertex program: the fog-plane constants c[12], c[13] */
+        static int fdump = -1; if (fdump < 0) { const char *e = getenv("XV_FOG_DUMP"); fdump = e ? atoi(e) : 0; }
+        static const void *fseen[96]; static unsigned fcnt[96], fn;
+        if (fdump) {
+            unsigned j; for (j = 0; j < fn; ++j) if (fseen[j] == d) break;
+            if (j == fn && fn < 96) { fseen[fn] = d; fcnt[fn] = 0; fn++; }
+            if (j < 96 && fcnt[j]++ < 3 && strstr(d->gxp, "halo_vs_06"))
+                XV_LOG("[fog] psc0=(%.3f %.3f %.3f %.3f) psc1=(%.3f %.3f %.3f %.3f) psc8=(%.3f %.3f %.3f %.3f) psc9=(%.3f %.3f %.3f %.3f) fogcol %08X blend %u/%u\n",
+                       S.psc[0][0], S.psc[0][1], S.psc[0][2], S.psc[0][3], S.psc[1][0], S.psc[1][1], S.psc[1][2], S.psc[1][3], S.psc[8][0], S.psc[8][1], S.psc[8][2], S.psc[8][3], S.psc[9][0], S.psc[9][1], S.psc[9][2], S.psc[9][3], c->fog_color, S.src_blend, S.dst_blend);
+            if (j < 96 && fcnt[j] <= 3)
+                XV_LOG("[fog] %s ps %08X c8=(%g %g %g %g) c9=(%g %g %g %g) c10=(%g %g %g %g) rows c0=(%g %g %g %g) c1=(%g %g %g %g) c2=(%g %g %g %g) c3=(%g %g %g %g)\n", d->gxp, S.ps_hash,
+                       S.vsc[8][0], S.vsc[8][1], S.vsc[8][2], S.vsc[8][3], S.vsc[9][0], S.vsc[9][1], S.vsc[9][2], S.vsc[9][3], S.vsc[10][0], S.vsc[10][1], S.vsc[10][2], S.vsc[10][3],
+                       S.vsc[0][0], S.vsc[0][1], S.vsc[0][2], S.vsc[0][3], S.vsc[1][0], S.vsc[1][1], S.vsc[1][2], S.vsc[1][3], S.vsc[2][0], S.vsc[2][1], S.vsc[2][2], S.vsc[2][3], S.vsc[3][0], S.vsc[3][1], S.vsc[3][2], S.vsc[3][3]);
+        }
+    }
     {   /* XV_SKIN_DUMP=1: for the first bone-indexed draws, log the node-index bytes (+28/+29), the weight
          * (+30) and the scale constant c[7] the program multiplies them by (vehicle wheels/weapons mangled) */
         static int dump = -1; if (dump < 0) { const char *e = getenv("XV_SKIN_DUMP"); dump = e ? atoi(e) : 0; }
@@ -734,6 +752,26 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             n += snprintf(tb + n, sizeof tb - n, " %02X:%ux%u%s", (fw >> 8) & 0xFF, w, h, (texok >> t) & 1 ? "" : "!");
         }
         XV_LOG("[hist]   textures:%s\n", tb);
+        if (!S.z_enable && c->streams[0]) {                          /* depth-off draws (sky): where do the first vertices land in clip space? */
+            unsigned st = S.stream_stride[0] ? S.stream_stride[0] : d->stride[0]; char zb[400]; int k = 0;
+            for (unsigned i = 0; i < 6 && k < 360; ++i) {
+                const float *p = (const float *)((const uint8_t *)c->streams[0] + i * st); float v[4] = { p[0], p[1], p[2], 1.0f }, w[4];
+                for (int r = 0; r < 3; ++r) w[r] = S.vsc[60 + r][0] * v[0] + S.vsc[60 + r][1] * v[1] + S.vsc[60 + r][2] * v[2] + S.vsc[60 + r][3];   /* node 0 */
+                w[3] = 1.0f; float o[4];
+                for (int r = 0; r < 4; ++r) o[r] = S.vsc[r][0] * w[0] + S.vsc[r][1] * w[1] + S.vsc[r][2] * w[2] + S.vsc[r][3] * w[3];
+                k += snprintf(zb + k, sizeof zb - k, " [%.2f %.2f %.2f %.2f]", o[0] / o[3], o[1] / o[3], o[2] / o[3], o[3]);
+            }
+            XV_LOG("[hist]   zoff clip (x/w y/w z/w w):%s\n", zb);
+        }
+        for (unsigned t = 0; t < 4; ++t) {                            /* tiny textures (fog ramps): raw bytes */
+            uint32_t cw = S.tex_guest[t]; if (!cw) continue;
+            const uint32_t *hdr = (const uint32_t *)xv_guest_ptr(cw); uint32_t fmtw = hdr[3], data = hdr[1];
+            unsigned fmt = (fmtw >> 8) & 0xFF, lw = (fmtw >> 20) & 0xF, lh = (fmtw >> 24) & 0xF, w = 1u << lw, h = 1u << lh;
+            if (w * h > 256) continue;
+            const uint8_t *px = (const uint8_t *)xv_guest_ptr(0x80000000u | data); unsigned bpp = (fmt == 0x1A || fmt == 0x20 || fmt == 0x05) ? 2 : (fmt == 0x06 || fmt == 0x07) ? 4 : 1;
+            char rb[600]; int k = 0; for (unsigned i = 0; i < w * h * bpp && i < 128 && k < 560; ++i) k += snprintf(rb + k, sizeof rb - k, "%02X", px[i]);
+            XV_LOG("[hist]   tex%u fmt %02X %ux%u raw:%s\n", t, fmt, w, h, rb);
+        }
     }
     if (trace_frame() && getenv("XV_HIST_CONSTS")) {      /* XV_HIST_CONSTS="12,13,14,24,26": D3D vertex constant registers to print per draw */
         char cb[512]; int n = 0; const char *e = getenv("XV_HIST_CONSTS");
@@ -813,6 +851,7 @@ uint32_t xv_d3d_EndFrame(void)
     cmdlist_t *l = cur_list();
     if (l->dropped) XV_LOG("frame %u: %u command(s) dropped (list full)\n", g_build_frame, l->dropped);
     if (l->const_dropped) XV_LOG("frame %u: %u draw(s) without constants (pool full: %u floats)\n", g_build_frame, l->const_dropped, l->nconsts);
+    xv_d3d_last_draws = l->ncmds;
     uint32_t done = g_build_frame++;
     cmdlist_t *next = g_lists[g_build_frame % XV_NUM_LISTS];
     next->ncmds = 0; next->nconsts = 0; next->dropped = 0; next->const_dropped = 0; next->npasses = 0; next->cur_pass = 0; g_quad_used[g_build_frame % XV_NUM_LISTS] = 0;

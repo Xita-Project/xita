@@ -125,6 +125,9 @@ static struct { uint32_t m; unsigned n; uint32_t last; } g_hm[128]; static unsig
 static int hist_level_rel = -1, hist_level_base = -1;
 static void hist_level_track(void)
 {
+    {   /* touch ux0:data/xboxvita/hist.now (or the host data dir equivalent) to trace the next frame on demand */
+        static unsigned tick; if ((++tick & 15) == 0) { FILE *f = fopen("ux0:data/xboxvita/hist.now", "rb"); if (f) { fclose(f); remove("ux0:data/xboxvita/hist.now"); g_hist_frame = (int)g_dev.frame + 1; D3DLOG("hist: on-demand trace of frame %d\n", g_hist_frame); } }
+    }
     if (hist_level_rel == -1) { const char *e = getenv("XV_D3D_HIST_LEVEL"); hist_level_rel = e ? atoi(e) : -2; }
     if (hist_level_rel < 0 || hist_level_base >= 0) return;
     if (!xk_file_in_ui_map) { hist_level_base = (int)g_dev.frame; g_hist_frame = hist_level_base + hist_level_rel; D3DLOG("hist: level started at frame %d, tracing frame %d\n", hist_level_base, g_hist_frame); }
@@ -328,6 +331,11 @@ void xv_hle_D3DDevice_GetVisibilityTestResult(xctx *c) { XD3D_COUNT("D3DDevice_G
 void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawIndexedVertices");
     if (g_vp_frame != g_dev.frame && xd3d_state.z_enable) { g_vp_frame = g_dev.frame; memcpy(g_vp_rows, xd3d_state.vsc, sizeof g_vp_rows); }
+    if (xd3d_hist_active()) {                                         /* caller chain of every draw in the traced frame */
+        char sb[400]; int k = 0; uint32_t esp = c->r[4];
+        for (unsigned j = 0; j < 96 && k < 380; ++j) { uint32_t w = X_M32(esp + 4 * j); if (w >= 0x11000 && w < 0x3A0000) k += snprintf(sb + k, sizeof sb - k, " %X", w); }
+        D3DLOG("[hist] drawcall prim %u n %u stack:%s\n", X_ARG(0), X_ARG(1), sb);
+    }
     g_dev.draws++; g_dev.draws_total++; xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_Begin(xctx *c)
 { XD3D_COUNT("D3DDevice_Begin");

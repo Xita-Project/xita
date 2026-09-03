@@ -80,7 +80,7 @@ VertOut main(AppIn IN, uniform float4 c[5])
     // [07] mad oPos.xyz, r12, r1.x, c[59]    <- stripped: Xbox viewport epilogue (GXM divides by w)
 
     // --- outputs
-    OUT.position = oPos;
+    OUT.position = float4(oPos.xy, oPos.z * 0.9999, oPos.w);   /* keep z < w: Halo puts the sky exactly on the far plane and GXM clips z == w away */
     OUT.color0 = oD0;
     OUT.texcoord0 = oT0;
     return OUT;

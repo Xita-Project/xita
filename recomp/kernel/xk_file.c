@@ -175,7 +175,8 @@ void xk_NtReadFile(xctx *c)
                c->r[4], g_xpt[c->r[4] >> 12], buf, len, g_xpt[buf >> 12], apc_before, X_ARG(2));
     uint32_t st = got < 0 ? STATUS_UNSUCCESSFUL : got == 0 && len ? STATUS_END_OF_FILE : STATUS_SUCCESS;
     { static const char *watch = NULL; static int winit; if (!winit) { winit = 1; watch = getenv("XV_LOG_READS"); }
-      if (watch && strstr(o->u.file.path, watch)) XK_LOG("NtReadFile(%s @%llu, %u B) = %lld st %08X\n", o->u.file.path, (unsigned long long)pos, len, (long long)got, st); }
+      if (watch && strstr(o->u.file.path, watch)) { XK_LOG("NtReadFile(%s @%llu, %u B) = %lld st %08X buf %08X\n", o->u.file.path, (unsigned long long)pos, len, (long long)got, st, buf);
+          static unsigned ns; if (len > 4096 && ns++ < 12) { char sb[400]; int k = 0; uint32_t esp = c->r[4]; for (unsigned j = 0; j < 128 && k < 380; ++j) { uint32_t w = X_M32(esp + 4 * j); if (w >= 0x11000 && w < 0x3A0000) k += snprintf(sb + k, sizeof sb - k, " %X", w); } XK_LOG("  read stack:%s\n", sb); } } }
     { static unsigned n; if (n++ < 40) XK_LOG("NtReadFile(%s @%llu, %u B -> %08X) = %lld (ev %08X apc %08X ctx %08X)\n", o->u.file.path, (unsigned long long)pos, len, buf, (long long)got, X_ARG(1), X_ARG(2), X_ARG(3)); }
     {   /* XV_SLOW_READ=<us per 64 KB>: throttle .map reads to mimic the memory card (loading-screen work in Vita3K) */
         static int slow = -1; if (slow < 0) { const char *e = getenv("XV_SLOW_READ"); slow = e ? atoi(e) : 0; }
