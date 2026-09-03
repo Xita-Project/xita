@@ -80,6 +80,7 @@ void xv_d3d_SetRenderState_ZWriteEnable(uint32_t v);
 void xv_d3d_SetRenderState_ZFunc(uint32_t v);
 void xv_d3d_SetRenderState_CullMode(uint32_t v);
 void xv_d3d_SetRenderState_AlphaBlendEnable(uint32_t v);
+void xv_d3d_SetRenderState_ColorWriteEnable(uint32_t rgba_bits);   /* D3DRS_COLORWRITEENABLE: R 1, G 2, B 4, A 8 */
 void xv_d3d_SetRenderState_SrcBlend(uint32_t v);
 void xv_d3d_SetRenderState_DestBlend(uint32_t v);
 void xv_d3d_Clear(uint32_t flags, uint32_t color_argb, float z, uint32_t stencil);

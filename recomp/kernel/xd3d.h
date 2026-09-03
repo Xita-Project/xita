@@ -28,6 +28,7 @@ typedef struct {
     uint32_t cull;                     /* 1 none, 2 cw, 3 ccw */
     uint32_t z_enable, z_write, z_func;
     uint32_t alpha_blend, src_blend, dst_blend, blend_op;
+    uint32_t color_mask;               /* NV097_SET_COLOR_MASK: 0x01000000 A, 0x00010000 R, 0x00000100 G, 0x00000001 B */
     uint32_t alpha_test, alpha_func, alpha_ref;
     uint32_t fill_mode;
     /* viewport */

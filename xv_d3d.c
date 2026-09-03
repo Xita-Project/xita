@@ -32,12 +32,12 @@
  *  fragment kind, blend) and cached.
  * -------------------------------------------------------------------------------- */
 enum { FS_COLOR = 0, FS_TEXMOD = 1, FS_TEX0 = 2, FS_LM = 3, FS_KINDS = 4 };
-enum { BLEND_OPAQUE = 0, BLEND_ALPHA = 1, BLEND_ADD = 2, BLEND_MODES = 12, BLEND_NOCOLOR = BLEND_MODES - 1 };
+enum { BLEND_OPAQUE = 0, BLEND_ALPHA = 1, BLEND_ADD = 2, BLEND_MODES = 24, BLEND_NOCOLOR = BLEND_MODES - 1 };
 /* blend variants are fragment-program link variants; slots beyond the two fixed ones are handed out
  * to whatever (src,dst) factor pairs the game actually uses (Halo: DESTCOLOR/ZERO, DESTCOLOR/SRCCOLOR,
  * ONE/INVSRCALPHA, SRCALPHA/ONE ...) */
-static struct { uint8_t src, dst; } g_blend_combo[BLEND_MODES] = {
-    { X_D3DBLEND_ONE, X_D3DBLEND_ZERO }, { X_D3DBLEND_SRCALPHA, X_D3DBLEND_INVSRCALPHA }, { X_D3DBLEND_ONE, X_D3DBLEND_ONE } };
+static struct { uint8_t src, dst, mask; } g_blend_combo[BLEND_MODES] = {   /* mask: D3DRS_COLORWRITEENABLE bits (R1 G2 B4 A8) */
+    { X_D3DBLEND_ONE, X_D3DBLEND_ZERO, 0xF }, { X_D3DBLEND_SRCALPHA, X_D3DBLEND_INVSRCALPHA, 0xF }, { X_D3DBLEND_ONE, X_D3DBLEND_ONE, 0xF } };
 static unsigned g_blend_combos = 3;
 static const char *const FS_GXP[FS_KINDS] = { "app0:shaders/xv_color.frag.gxp", "app0:shaders/xv_texmod.frag.gxp", "app0:shaders/xv_tex0.frag.gxp", "app0:shaders/xv_lm.frag.gxp" };
 
@@ -112,7 +112,7 @@ typedef struct {
     uint32_t vs_handle;
     float    vsc[192][4];                    /* c[-96..95] as D3D exposes them          */
     float    const_attr[4];
-    uint32_t z_enable, z_write, z_func, cull, blend_enable, src_blend, dst_blend;
+    uint32_t z_enable, z_write, z_func, cull, blend_enable, src_blend, dst_blend, color_mask;
     uint32_t indices_dbg;                    /* last index pointer handed to a draw (guest), for traces */
     uint32_t ps_hash;                        /* combiner program id (recomp/kernel/xd3d.c psdef_hash) */
     float    psc[18][4];                     /* c0[stage 0..7], c1[stage 0..7], final c0, c1 */
@@ -169,7 +169,7 @@ int xv_d3d_init(const xv_vs_desc_t *const *table, unsigned count)
     g_clear_quads = g_scratch + XV_SEQ_INDICES * 2;
     g_quad_indices = (uint16_t *)(g_clear_quads + XV_NUM_LISTS * XV_CLEAR_SLOTS * 4 * 16);
 
-    memset(&S, 0, sizeof(S));
+    memset(&S, 0, sizeof(S)); S.color_mask = 0xF;
     S.z_enable = 1; S.z_write = 1; S.z_func = X_D3DCMP_LESSEQUAL; S.cull = X_D3DCULL_CCW;
     S.src_blend = X_D3DBLEND_ONE; S.dst_blend = X_D3DBLEND_ZERO;
     S.const_attr[3] = 1.0f;
@@ -316,6 +316,7 @@ void xv_d3d_SetRenderState_ZWriteEnable(uint32_t v)     { S.z_write = v; }
 void xv_d3d_SetRenderState_ZFunc(uint32_t v)            { S.z_func = v; }
 void xv_d3d_SetRenderState_CullMode(uint32_t v)         { S.cull = v; }
 void xv_d3d_SetRenderState_AlphaBlendEnable(uint32_t v) { S.blend_enable = v; }
+void xv_d3d_SetRenderState_ColorWriteEnable(uint32_t v) { S.color_mask = v; }
 void xv_d3d_SetRenderState_SrcBlend(uint32_t v)         { S.src_blend = v; }
 void xv_d3d_SetRenderState_DestBlend(uint32_t v)        { S.dst_blend = v; }
 
@@ -473,14 +474,16 @@ static cmd_t *new_cmd(void)
 
 static int blend_mode(void)
 {
-    if (!S.blend_enable)
+    unsigned mask = S.color_mask & 0xF;
+    unsigned src = S.blend_enable ? S.src_blend : X_D3DBLEND_ONE, dst = S.blend_enable ? S.dst_blend : X_D3DBLEND_ZERO;
+    if (!S.blend_enable && mask == 0xF)
         return BLEND_OPAQUE;
     for (unsigned i = 1; i < g_blend_combos; ++i)
-        if (g_blend_combo[i].src == S.src_blend && g_blend_combo[i].dst == S.dst_blend)
+        if (g_blend_combo[i].src == src && g_blend_combo[i].dst == dst && g_blend_combo[i].mask == mask)
             return (int)i;
     if (g_blend_combos < BLEND_NOCOLOR) {
-        g_blend_combo[g_blend_combos].src = (uint8_t)S.src_blend; g_blend_combo[g_blend_combos].dst = (uint8_t)S.dst_blend;
-        XV_LOG("blend variant %u: %u/%u\n", g_blend_combos, S.src_blend, S.dst_blend);
+        g_blend_combo[g_blend_combos].src = (uint8_t)src; g_blend_combo[g_blend_combos].dst = (uint8_t)dst; g_blend_combo[g_blend_combos].mask = (uint8_t)mask;
+        XV_LOG("blend variant %u: %u/%u mask %X\n", g_blend_combos, src, dst, mask);
         return (int)g_blend_combos++;
     }
     XV_ONCE(warned_blend, "blend %u/%u: variant table full; using src-alpha\n", S.src_blend, S.dst_blend);
@@ -783,7 +786,7 @@ static const SceGxmBlendInfo *blend_info_for(unsigned blend, SceGxmBlendInfo *bi
         bi->alphaSrc = SCE_GXM_BLEND_FACTOR_ONE; bi->alphaDst = SCE_GXM_BLEND_FACTOR_ZERO;
         return bi;
     }
-    bi->colorMask = SCE_GXM_COLOR_MASK_ALL;
+    { unsigned m = g_blend_combo[blend].mask; bi->colorMask = (m & 1 ? SCE_GXM_COLOR_MASK_R : 0) | (m & 2 ? SCE_GXM_COLOR_MASK_G : 0) | (m & 4 ? SCE_GXM_COLOR_MASK_B : 0) | (m & 8 ? SCE_GXM_COLOR_MASK_A : 0); }
     bi->colorFunc = SCE_GXM_BLEND_FUNC_ADD;
     bi->alphaFunc = SCE_GXM_BLEND_FUNC_ADD;
     SceGxmBlendFactor sf = d3d_blend_factor(g_blend_combo[blend].src), df = d3d_blend_factor(g_blend_combo[blend].dst);

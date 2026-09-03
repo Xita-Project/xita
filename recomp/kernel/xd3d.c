@@ -135,7 +135,13 @@ int xd3d_hist_active(void)
 }
 
 void xd3d_r_present(unsigned frame, unsigned draws) __attribute__((weak));
-void xd3d_r_present(unsigned frame, unsigned draws) { if (frame < 10 || frame % 60 == 0) D3DLOG("Present #%u (%u draws, %u clears)\n", frame, draws, g_dev.clears); }
+void xd3d_r_present(unsigned frame, unsigned draws)
+{
+    if (frame < 10 || frame % 60 == 0) D3DLOG("Present #%u (%u draws, %u clears)\n", frame, draws, g_dev.clears);
+    /* XV_D3D_HIST_SMALL=<n>: trace the frame after the first in-level Present with <= n draws (loading screen) */
+    static int small = -1; if (small == -1) { const char *e = getenv("XV_D3D_HIST_SMALL"); small = e ? atoi(e) : -2; }
+    if (small >= 0 && !xk_file_in_ui_map && g_hist_frame < 0 && (int)draws <= small) { g_hist_frame = (int)frame + 2; D3DLOG("hist: small frame %u (%u draws) -> tracing frame %d\n", frame, draws, g_hist_frame); small = -3; }
+}
 void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t data) __attribute__((weak));
 void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t data)
 {
@@ -159,7 +165,7 @@ static void call_guest(xctx *c, uint32_t fn, uint32_t arg)   /* stdcall callback
 
 /* HRESULT Direct3D_CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface) */
 void xv_hle_Direct3D_CreateDevice(xctx *c)
-{ XD3D_COUNT("Direct3D_CreateDevice");
+{ XD3D_COUNT("Direct3D_CreateDevice"); xd3d_state.color_mask = 0x01010101u;
     uint32_t pp = X_ARG(4);
     if (!g_xd3d_device) {
         g_xd3d_device = xk_kalloc(DEVICE_SIZE);
@@ -368,6 +374,7 @@ static void rs_method(uint32_t method, uint32_t v)
     switch (m) {
     case 0x300: xd3d_state.alpha_test = v; break;      /* NV097_SET_ALPHA_TEST_ENABLE */
     case 0x304: xd3d_state.alpha_blend = v; break;     /* NV097_SET_BLEND_ENABLE */
+    case 0x358: xd3d_state.color_mask = v; break;      /* NV097_SET_COLOR_MASK (Halo: alpha-only lightmap passes) */
     case 0x33C: xd3d_state.alpha_func = v; break;      /* NV097_SET_ALPHA_FUNC (0x200 never .. 0x207 always) */
     case 0x340: xd3d_state.alpha_ref = v; break;
     case 0x344: xd3d_state.src_blend = v; break;       /* NV097_SET_BLEND_FUNC_SFACTOR (GL enums) */

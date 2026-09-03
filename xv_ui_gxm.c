@@ -796,6 +796,7 @@ void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t d
     xv_d3d_SetRenderState_ZFunc(xd3d_state.z_func >= 0x200 && xd3d_state.z_func <= 0x207 ? xd3d_state.z_func - 0x200 + 1 : 4);
     xv_d3d_SetRenderState_CullMode(xd3d_state.cull == 0x900 ? 2 : xd3d_state.cull == 0x901 ? 3 : 1);   /* GL_CW / GL_CCW / none */
     xv_d3d_SetRenderState_AlphaBlendEnable(xd3d_state.alpha_blend);
+    { uint32_t m = xd3d_state.color_mask; xv_d3d_SetRenderState_ColorWriteEnable(((m >> 16) & 1) | ((m >> 7) & 2) | ((m & 1) << 2) | ((m >> 21) & 8)); }   /* -> D3D bits R1 G2 B4 A8 */
     xv_d3d_SetRenderState_SrcBlend(gl_blend_to_d3d(xd3d_state.src_blend));
     xv_d3d_SetRenderState_DestBlend(gl_blend_to_d3d(xd3d_state.dst_blend));
     if (indexed) {

@@ -177,6 +177,10 @@ void xk_NtReadFile(xctx *c)
     { static const char *watch = NULL; static int winit; if (!winit) { winit = 1; watch = getenv("XV_LOG_READS"); }
       if (watch && strstr(o->u.file.path, watch)) XK_LOG("NtReadFile(%s @%llu, %u B) = %lld st %08X\n", o->u.file.path, (unsigned long long)pos, len, (long long)got, st); }
     { static unsigned n; if (n++ < 40) XK_LOG("NtReadFile(%s @%llu, %u B -> %08X) = %lld (ev %08X apc %08X ctx %08X)\n", o->u.file.path, (unsigned long long)pos, len, buf, (long long)got, X_ARG(1), X_ARG(2), X_ARG(3)); }
+    {   /* XV_SLOW_READ=<us per 64 KB>: throttle .map reads to mimic the memory card (loading-screen work in Vita3K) */
+        static int slow = -1; if (slow < 0) { const char *e = getenv("XV_SLOW_READ"); slow = e ? atoi(e) : 0; }
+        if (slow > 0 && got >= 4096) { const char *pth = o->u.file.path; size_t hl = strlen(pth); if (hl > 4 && !strcmp(pth + hl - 4, ".map")) xk_os_sleep_us((uint64_t)slow * ((uint64_t)got / 65536 + 1)); }
+    }
     if (got > 0) o->u.file.pos = pos + (uint64_t)got;
     {   /* Which kind of cache map is being STREAMED: Halo copies maps to z:\cacheNNN.map, so only the
          * header tells (+0x60: 0 campaign, 1 multiplayer, 2 ui).  Level-select screens peek at headers only;
