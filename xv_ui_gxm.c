@@ -314,15 +314,37 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         int isdxt_c = (fmt == 0x0C || fmt == 0x0E || fmt == 0x0F); unsigned bs_c = (fmt == 0x0C) ? 8 : 16, bpp_c = ui_fmt_bpp(fmt);
         uint32_t face_bytes = 0; { unsigned lw = w, lh = h; for (unsigned l = 0; l < mips; ++l) { face_bytes += isdxt_c ? ((lw + 3) / 4) * ((lh + 3) / 4) * bs_c : lw * lh * bpp_c; lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1; } }
         face_bytes = (face_bytes + 127) & ~127u;
-        uint32_t need = ALIGN_UP(6u * w * h * 4u, 64);
+        /* GXM cube layout (Vita3K texture cache, matches the hardware): unless the control word says "no mip
+         * chain" (mip_count 0xF), every face is laid out as if it carried the WHOLE chain down to 1x1 and the
+         * faces are aligned to 2 KB (32-bit faces >= 16x16).  We used to pack six level-0 faces back to back,
+         * so faces 1..5 were fetched from the wrong offsets: the normalisation cube gave bogus light vectors
+         * (black contour bands on bump-lit cliffs) and reflections showed the wrong sky.  Upload the full,
+         * box-filtered chain per face - that also gives filtered reflections at a distance. */
+        unsigned levels = 1; { unsigned lw = w; while (lw > 1) { lw >>= 1; levels++; } }
+        uint32_t face_stride = 0; { unsigned lw = w; for (unsigned l = 0; l < levels; ++l) { face_stride += lw * lw * 4u; lw >>= 1; } }
+        if (w >= 16) face_stride = ALIGN_UP(face_stride, 2048);
+        uint32_t need = ALIGN_UP(6u * face_stride, 64);
         if (g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
         uint32_t *dst = (uint32_t *)(g.dec_base + g.dec_off);
-        static uint32_t tmp[256 * 256];
+        static uint32_t tmp[256 * 256], tmp2[128 * 128];
         const uint8_t *base = X_G(0x80000000u | data);
+        memset(dst, 0, need);
         for (unsigned f = 0; f < 6; ++f) {
             if (ui_decode(base + f * face_bytes, fmt, w, h, w * bpp_c, 0, tmp) != 0) { UI_LOG("cube face decode failed fmt %02X\n", fmt); UI_TEX_FAIL(); }
-            uint32_t *face = dst + f * w * h;
-            for (unsigned i = 0; i < w * h; ++i) { unsigned x, y; gxm_unswz(w, h, i, &x, &y); face[i] = tmp[y * w + x]; }
+            uint32_t *lvl = (uint32_t *)((uint8_t *)dst + f * face_stride); uint32_t *cur = tmp, *nxt = tmp2;
+            for (unsigned l = 0, lw = w; l < levels; ++l, lw >>= 1) {
+                for (unsigned i = 0; i < lw * lw; ++i) { unsigned x, y; gxm_unswz(lw, lw, i, &x, &y); lvl[i] = cur[y * lw + x]; }
+                lvl += lw * lw;
+                if (lw > 1) {                                             /* next level: 2x2 box filter per channel */
+                    unsigned nw = lw >> 1;
+                    for (unsigned y = 0; y < nw; ++y) for (unsigned x = 0; x < nw; ++x) {
+                        uint32_t a = cur[(2 * y) * lw + 2 * x], b = cur[(2 * y) * lw + 2 * x + 1], c2 = cur[(2 * y + 1) * lw + 2 * x], d2 = cur[(2 * y + 1) * lw + 2 * x + 1], o = 0;
+                        for (unsigned sh = 0; sh < 32; sh += 8) o |= ((((a >> sh) & 0xFF) + ((b >> sh) & 0xFF) + ((c2 >> sh) & 0xFF) + ((d2 >> sh) & 0xFF) + 2) >> 2) << sh;
+                        nxt[y * nw + x] = o;
+                    }
+                    uint32_t *t = cur; cur = nxt; nxt = t;
+                }
+            }
         }
         { static int dump = -1; if (dump < 0) dump = getenv("XV_TEXDUMP") != NULL;
           if (dump) { char path[128]; sceIoMkdir("ux0:data/xboxvita/texdump", 0777);
@@ -336,8 +358,9 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
               sceIoClose(fd); } } }
         xv_gpu_flush(dst, need);
         ui_tex_entry *e = &g.texcache[g.texcount];
-        int err = sceGxmTextureInitCube(&e->tex, dst, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, 1);
-        if (err != SCE_OK) { UI_LOG("textureInitCube(%ux%u fmt %02X) failed 0x%08X\n", w, h, fmt, err); UI_TEX_FAIL(); }
+        int err = sceGxmTextureInitCube(&e->tex, dst, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, levels);
+        if (err != SCE_OK) { UI_LOG("textureInitCube(%ux%u fmt %02X, %u mips) failed 0x%08X\n", w, h, fmt, levels, err); UI_TEX_FAIL(); }
+        sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
         g.dec_off += need;
         e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1; g.texcount++;
         e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache);
