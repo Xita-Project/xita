@@ -1,16 +1,26 @@
 # xita.dev — static site
 
-Plain HTML/CSS, no build step: `index.html` + `style.css` + `img/`. `CNAME` holds the custom domain.
+Plain HTML/CSS, no build step: `index.html` + `style.css` + `img/`. The `CNAME` file is only read by
+GitHub Pages and is harmless elsewhere.
 
-Hosting: GitHub Pages serving this directory (or a copy of it in a public `xita-site` repository while
-the main repository is private; Pages needs a paid plan to publish from a private repo).
+## Hosting (Cloudflare Pages or Netlify, connected to the private repository)
 
-DNS at the registrar for `xita.dev`:
-- A records on the apex: 185.199.108.153, 185.199.109.153, 185.199.110.153, 185.199.111.153
-- AAAA (optional): 2606:50c0:8000::153, 2606:50c0:8001::153, 2606:50c0:8002::153, 2606:50c0:8003::153
-- CNAME `www` -> `birchwoodgod.github.io`
-Then in the repository's Pages settings set the custom domain to `xita.dev` and enable "Enforce HTTPS".
-`.dev` is on the HSTS preload list, so the site only works over HTTPS; Pages issues the certificate
-once the DNS records resolve (allow up to an hour).
+Both hosts can read a private GitHub repository through their GitHub app; grant access to `xita` only.
+
+Cloudflare Pages:
+1. Workers & Pages -> Create -> Pages -> Connect to Git -> `BirchWoodGod/xita`, branch `main`.
+2. Build settings: framework `None`, build command empty, build output directory `site`.
+3. Custom domains -> add `xita.dev` (and `www.xita.dev`). If the domain's DNS is on Cloudflare the
+   records are created for you; otherwise add a CNAME for the apex (with CNAME flattening) and for
+   `www` pointing at `<project>.pages.dev`.
+
+Netlify:
+1. Add new site -> Import from Git -> `BirchWoodGod/xita`, branch `main`.
+2. Build settings: build command empty, publish directory `site`.
+3. Domain management -> add `xita.dev`. Either move DNS to Netlify DNS, or at the registrar set the
+   apex A record to `75.2.60.5` and CNAME `www` to `<site>.netlify.app`.
+
+`.dev` is on the browser HSTS preload list, so the site only works over HTTPS; both hosts issue the
+certificate automatically once DNS resolves (allow up to an hour).
 
 Rules: never commit or host game data (XBE, maps, halo_image.bin). Screenshots and clips only.
