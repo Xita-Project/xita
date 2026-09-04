@@ -194,6 +194,7 @@ void xk_NtReadFile(xctx *c)
         }
     }
     if (got > 0) o->u.file.pos = pos + (uint64_t)got;
+    if (got > 0) { extern void xv_ui_gxm_invalidate_range(uint32_t, uint32_t) __attribute__((weak)); if (xv_ui_gxm_invalidate_range) xv_ui_gxm_invalidate_range(buf, (uint32_t)got); }   /* streamed bitmap slots reuse memory: re-check overlapping cached textures */
     if (got > 0x100000 && buf == 0x803A6000u) { extern void xv_ui_gxm_request_texture_purge(void) __attribute__((weak)); if (xv_ui_gxm_request_texture_purge) xv_ui_gxm_request_texture_purge(); XK_LOG("map tag data loaded: texture cache purge requested\n"); }
     {   /* Which kind of cache map is being STREAMED: Halo copies maps to z:\cacheNNN.map, so only the
          * header tells (+0x60: 0 campaign, 1 multiplayer, 2 ui).  Level-select screens peek at headers only;

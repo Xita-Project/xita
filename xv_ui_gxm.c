@@ -71,7 +71,7 @@ typedef struct {
 } ui_frame;
 
 /* built texture control words, cached by (guest data pointer, format word) */
-typedef struct { uint32_t data, fmtword, palsum; SceGxmTexture tex; int valid; uint32_t sum, bytes; unsigned checked; uint16_t stable; int16_t next; } ui_tex_entry;   /* stable: consecutive unchanged re-checks (map textures stop being re-hashed once settled) */   /* palsum: hash of the P8 palette used (0 = none) */   /* sum: content hash of dynamic textures; next: hash chain */
+typedef struct { uint32_t data, fmtword, palsum; SceGxmTexture tex; int valid; uint32_t sum, bytes; unsigned checked; uint16_t stable; uint8_t dirty; int16_t next; } ui_tex_entry;   /* stable: consecutive unchanged re-checks (map textures stop being re-hashed once settled) */   /* palsum: hash of the P8 palette used (0 = none) */   /* sum: content hash of dynamic textures; next: hash chain */
 
 /* one UI vertex program + the fragment programs linked against it (one per texcoord set it writes) */
 typedef struct {
@@ -286,11 +286,12 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         if (g.texcache[i].valid && g.texcache[i].data == data && g.texcache[i].fmtword == fmtword && g.texcache[i].palsum == g_cur_palsum) {
             ui_tex_entry *e = &g.texcache[i];
             int due = e->bytes && e->checked != g.rec_frame &&
-                      (dynamic || (e->stable < 24 && ((g.rec_frame + (unsigned)i) & 15u) == 0));
+                      (dynamic || e->dirty || (e->stable < 24 && ((g.rec_frame + (unsigned)i) & 15u) == 0));
             if (due) {
                 e->checked = g.rec_frame;
                 uint32_t sum = ui_tex_hash(X_G(0x80000000u | data), e->bytes);
-                if (sum != e->sum) { re = e; static unsigned n; if (n++ < 12) UI_LOG("tex %08X fmt %02X changed (check %u): re-decoding in place\n", data, (fmtword >> 8) & 0xFF, e->stable); break; }   /* stale: re-decode below */
+                if (sum != e->sum) { re = e; static unsigned n; if (n++ < 12) UI_LOG("tex %08X fmt %02X changed (check %u%s): re-decoding in place\n", data, (fmtword >> 8) & 0xFF, e->stable, e->dirty ? ", file read" : ""); e->dirty = 0; break; }   /* stale: re-decode below */
+                e->dirty = 0;
                 if (!dynamic) e->stable++;
             }
             return &e->tex;
@@ -325,6 +326,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         if (w >= 16) face_stride = ALIGN_UP(face_stride, 2048);
         uint32_t need = ALIGN_UP(6u * face_stride, 64);
         if (g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
+        if (re) re->valid = 0;                                    /* source changed: drop the stale entry, build a fresh one (its pool space is reclaimed at the next purge) */
         uint32_t *dst = (uint32_t *)(g.dec_base + g.dec_off);
         static uint32_t tmp[256 * 256], tmp2[128 * 128];
         const uint8_t *base = X_G(0x80000000u | data);
@@ -364,7 +366,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         g.dec_off += need;
         e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1; g.texcount++;
         e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache);
-        e->bytes = 0; e->sum = 0; e->checked = g.rec_frame;
+        e->bytes = 6u * face_bytes; if (e->bytes > 512 * 1024) e->bytes = 512 * 1024; e->sum = ui_tex_hash(base, e->bytes); e->checked = g.rec_frame; e->stable = 0; e->dirty = 0;
         { static unsigned n; if (n++ < 8) UI_LOG("cube map fmt %02X %ux%u x6 (face stride %u) -> cube texture\n", fmt, w, h, face_bytes); }
         sceGxmTextureSetMinFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
         sceGxmTextureSetMagFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
@@ -493,6 +495,21 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
  * already passed their re-validation quota (Blood Gulch grass on a10's cryo-bay walls).  The kernel calls
  * this when a map's tag region is read; the wipe happens after the current frame. */
 void xv_ui_gxm_request_texture_purge(void) { g.tex_purge = 1; }
+/* A file read landed in guest memory: any cached texture whose source bytes overlap it must be re-hashed at
+ * its next bind.  Halo streams bitmap pixels into a fixed heap region and reuses the slots, so after a long
+ * cinematic the "stable" entries (no longer re-checked) served the previous occupant: Cortana's green
+ * hologram scan-lines on every cryo-bay wall after the a10 intro. */
+void xv_ui_gxm_invalidate_range(uint32_t va, uint32_t len)
+{
+    uint32_t lo = va & 0x7FFFFFFFu, hi = lo + len; unsigned n = 0;
+    for (int i = 0; i < g.texcount; ++i) {
+        ui_tex_entry *e = &g.texcache[i];
+        if (!e->valid || !e->bytes) continue;
+        uint32_t a = e->data & 0x7FFFFFFFu, b = a + e->bytes;
+        if (a < hi && lo < b) { e->dirty = 1; n++; }
+    }
+    if (n) { static unsigned m; if (m++ < 8) UI_LOG("file read %08X+%u overlaps %u cached texture(s): re-check on next bind\n", va, len, n); }
+}
 static void ui_tex_purge_if_needed(unsigned frame)
 {
     if (!g.tex_purge) return;

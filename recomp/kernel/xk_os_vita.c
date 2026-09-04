@@ -291,11 +291,11 @@ void xk_os_pad_poll(xk_os_pad *p)
      * l/r, or a stick: lup/ldown/lleft/lright/rup/rdown/rleft/rright (full deflection).  Absent on a real
      * card, so hardware always sees the physical pad. */
     {
-        static int init; static struct { unsigned at, hold; char btn[8]; } ev[64]; static int nev; static unsigned polls;
+        static int init; static struct { unsigned at, hold; char btn[8]; } ev[512]; static int nev; static unsigned polls;
         if (!init) {
             init = 1; SceUID fd = sceIoOpen("ux0:data/xboxvita/pad.txt", SCE_O_RDONLY, 0);
-            if (fd >= 0) { char txt[1024]; int n = sceIoRead(fd, txt, sizeof txt - 1); sceIoClose(fd); if (n < 0) n = 0; txt[n] = 0;
-                const char *e = txt; while (*e && nev < 64) { unsigned at, hold = 4; char bn[8]; int k; if (sscanf(e, "%u:%7[a-z0-9]%n", &at, bn, &k) < 2) break; e += k;
+            if (fd >= 0) { static char txt[16384]; int n = sceIoRead(fd, txt, sizeof txt - 1); sceIoClose(fd); if (n < 0) n = 0; txt[n] = 0;
+                const char *e = txt; while (*e && nev < 512) { unsigned at, hold = 4; char bn[8]; int k; if (sscanf(e, "%u:%7[a-z0-9]%n", &at, bn, &k) < 2) break; e += k;
                     if (*e == '*') { int k2; if (sscanf(e, "*%u%n", &hold, &k2) >= 1) e += k2; }
                     ev[nev].at = at; ev[nev].hold = hold; snprintf(ev[nev].btn, 8, "%s", bn); nev++; while (*e == ',' || *e == '\n' || *e == ' ') e++; }
                 xv_logf("[xk] pad script: %d events\n", nev); }
