@@ -29,3 +29,4 @@ recomp/host/mem.bin
 recomp/host/*.ppm
 .mapcache/
 assets/ui_scene.bin
+/dashboard/out/
