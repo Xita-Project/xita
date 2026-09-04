@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HaloVita</title>
+<title>Xita</title>
 <meta name="description" content="Halo: Combat Evolved, statically recompiled from the original Xbox executable to run natively on the PlayStation Vita.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
@@ -14,7 +14,7 @@
 <header class="hero">
   <img class="hero-img" src="img/shot00.jpg" alt="A PlayStation Vita held in front of a monitor, running Halo's main menu: CAMPAIGN, MULTIPLAYER, SETTINGS">
   <div class="hero-text">
-    <p class="eyebrow">HaloVita · a static recompilation of Halo: Combat Evolved for the PlayStation Vita</p>
+    <p class="eyebrow">Xita · a static recompilation of Halo: Combat Evolved for the PlayStation Vita</p>
     <h1>The 2001 Xbox executable, running as native ARM code on a handheld from 2011.</h1>
     <p class="lede">No emulator. The game's x86 machine code is translated to C once, compiled for the Vita's Cortex-A9, and linked against a re-implementation of the Xbox kernel, Direct3D 8 and DirectSound. The menu boots in fifteen seconds; the first campaign level plays.</p>
     <p class="hero-meta"><span class="mono">2026-09-02</span> · menu, profiles, campaign a10 with audio · 8&nbsp;fps in-level, more to come</p>
@@ -63,8 +63,8 @@
 
 <section id="install">
   <h2>Install</h2>
-  <p class="note">You need your own copy of Halo: Combat Evolved for Xbox. HaloVita ships no game data — the executable and maps are extracted from your disc image with the included tools.</p>
-  <pre><code>ux0:/xita-recomp.vpk                 # install with VitaShell
+  <p class="note">You need your own copy of Halo: Combat Evolved for Xbox. Xita ships no game data — the executable and maps are extracted from your disc image with the included tools.</p>
+  <pre><code>ux0:/xita.vpk                        # install with VitaShell
 ux0:data/xita/halo_image.bin         # built from your default.xbe
 ux0:data/xita/haloce/maps/ui.map     # and the maps you want (a10.map for the first mission)
 ux0:data/xita/xita.cfg           # optional: XV_FPS=1 for the frame-time overlay</code></pre>
@@ -95,7 +95,7 @@ ux0:data/xita/xita.cfg           # optional: XV_FPS=1 for the frame-time overlay
 </main>
 
 <footer>
-  <p>HaloVita is an independent research project. Halo and the Xbox are trademarks of their respective owners; no game content is distributed. Built with the Xita toolchain.</p>
+  <p>Xita is an independent research project. Halo and the Xbox are trademarks of their respective owners; no game content is distributed. Built with xita-recomp.</p>
 </footer>
 </body>
 </html>
