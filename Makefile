@@ -84,7 +84,7 @@ VPK_SHADER_ARGS := $(foreach s,$(SHADER_PRESENT),-a $(s)=$(s))
 # scene packs exported by halo_scene_export.py (assets/*.bin -> app0:assets/).
 SCE_SYS_DIR     := sce_sys
 SCE_SYS_FILES   := $(wildcard $(SCE_SYS_DIR)/*.png) $(wildcard $(SCE_SYS_DIR)/livearea/contents/*)
-SCENE_FILES     := $(wildcard assets/*.bin)
+SCENE_FILES     := $(if $(filter 1,$(RECOMP)),,$(wildcard assets/*.bin))   # mock-only; the real-game (RECOMP) build never loads it
 VPK_ASSET_ARGS  := $(foreach f,$(SCE_SYS_FILES) $(SCENE_FILES),-a $(f)=$(f))
 
 # --- 5. packaging outputs ----------------------------------------------------
