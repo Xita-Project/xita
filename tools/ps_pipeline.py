@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ps_pipeline.py - collect Halo's run-time register-combiner programs from an xboxvita.log and turn
+ps_pipeline.py - collect Halo's run-time register-combiner programs from an xita.log and turn
 the (vertex program, combiner program) pairs the game drew with into Vita fragment shaders.
 
   log lines used:   [psdef] <hash> <240 hex bytes>        one per unique X_D3DPIXELSHADERDEF
@@ -9,7 +9,7 @@ the (vertex program, combiner program) pairs the game drew with into Vita fragme
   output:           shaders/ps_<hash>_<vsmask>.frag.cg     (compile with tools/shadercomp -> .gxp)
                     shaders/xv_ps_table.h                   runtime lookup table
 
-Usage: tools/ps_pipeline.py <xboxvita.log> [more logs...]
+Usage: tools/ps_pipeline.py <xita.log> [more logs...]
 """
 import glob, json, os, re, subprocess, sys
 

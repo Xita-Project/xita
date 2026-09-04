@@ -1,4 +1,4 @@
-// XboxVita runtime vertex shader for D3DDevice_Clear: GXM has no clear call, so the
+// Xita runtime vertex shader for D3DDevice_Clear: GXM has no clear call, so the
 // HLE draws a full-screen quad.  Clip-space position in, vertex colour out (paired
 // with xv_color.frag).  Layout: float3 position @0, D3DCOLOR @12, stride 16.
 struct AppIn

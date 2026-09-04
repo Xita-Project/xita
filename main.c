@@ -1,8 +1,8 @@
 /*
- * main.c — XboxVita runtime skeleton for the PlayStation Vita (vitasdk, bare libgxm)
+ * main.c — Xita runtime skeleton for the PlayStation Vita (vitasdk, bare libgxm)
  *
  * Implements the four foundation layers of the architecture blueprint
- * (xboxvita-architecture.txt):
+ * (xita-architecture.txt):
  *
  *   §1.2  Guest RAM   : one 64 MB SCE_KERNEL_MEMBLOCK_TYPE_USER_RW block = Xbox
  *                       physical memory 0x00000000..0x03FFFFFF.  guest -> host is
@@ -21,13 +21,13 @@
  *                       is ~40 cycles of hand-written Thumb-2 (§3.3).
  *
  * Build (vitasdk):
- *   arm-vita-eabi-gcc -Wl,-q -O2 -mthumb -o xboxvita.elf main.c \
+ *   arm-vita-eabi-gcc -Wl,-q -O2 -mthumb -o xita.elf main.c \
  *       -lSceGxm_stub -lSceDisplay_stub -lSceKernelThreadMgr_stub \
  *       -lSceSysmem_stub -lSceProcessmgr_stub -lSceLibKernel_stub
- *   vita-elf-create xboxvita.elf xboxvita.velf
- *   vita-make-fself -s xboxvita.velf eboot.bin
- *   vita-mksfoex -s TITLE_ID=XVIT00001 "XboxVita" param.sfo
- *   vita-pack-vpk -s param.sfo -b eboot.bin xboxvita.vpk
+ *   vita-elf-create xita.elf xita.velf
+ *   vita-make-fself -s xita.velf eboot.bin
+ *   vita-mksfoex -s TITLE_ID=XITA00001 "Xita" param.sfo
+ *   vita-pack-vpk -s param.sfo -b eboot.bin xita.vpk
  *
  * Everything the recompiled game and the D3D HLE layer need to plug into is exposed
  * at the bottom of this file (xv_gpu_ptr, xv_gpu_ensure_visible, xk_* fiber API,
@@ -1055,17 +1055,17 @@ static int xv_recomp_thread(SceSize args, void *argp)
 {
     (void)args; (void)argp;
     static const char *const game_dirs[] = {
-        "ux0:data/xboxvita/haloce", "uma0:data/xboxvita/haloce", "app0:haloce",
+        "ux0:data/xita/haloce", "uma0:data/xita/haloce", "app0:haloce",
     };
     const char *game_dir = game_dirs[0];
     for (int i = 0; i < 3; ++i) {
         SceUID d = sceIoDopen(game_dirs[i]);
         if (d >= 0) { sceIoDclose(d); game_dir = game_dirs[i]; break; }
     }
-    sceIoMkdir("ux0:data/xboxvita", 0777);
-    sceIoMkdir("ux0:data/xboxvita/save", 0777);
+    sceIoMkdir("ux0:data/xita", 0777);
+    sceIoMkdir("ux0:data/xita/save", 0777);
     XV_LOG("recomp: game dir %s\n", game_dir);
-    xv_boot_recomp(game_dir, "ux0:data/xboxvita/save");
+    xv_boot_recomp(game_dir, "ux0:data/xita/save");
     return 0;
 }
 #endif
@@ -1073,17 +1073,17 @@ static int xv_recomp_thread(SceSize args, void *argp)
 int main(int argc, char *argv[])
 {
     (void)argc; (void)argv;
-    XV_LOG("XboxVita runtime starting\n");
+    XV_LOG("Xita runtime starting\n");
     /* Homebrew boots at 333/111 MHz; ask for the full clocks (CPU 444, bus 222, GPU 222, GPU xbar 166). */
     scePowerSetArmClockFrequency(444); scePowerSetBusClockFrequency(222);
     scePowerSetGpuClockFrequency(222); scePowerSetGpuXbarClockFrequency(166);
     XV_LOG("clocks: cpu %d bus %d gpu %d xbar %d MHz\n", scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(), scePowerGetGpuXbarClockFrequency());
     xv_log_memory_budget("boot");
-    /* Settings + debug knobs: ux0:data/xboxvita/xboxvita.cfg (and env.txt, kept for emulator scripts) hold
+    /* Settings + debug knobs: ux0:data/xita/xita.cfg (and env.txt, kept for emulator scripts) hold
      * KEY=VALUE lines that become environment variables, so every getenv switch works on the card without a
      * rebuild.  Keys: XV_FPS=1 overlay, XV_VOLUME=0..100, XV_DPAD_EXTRAS=0/1, XV_D3D_HIST=<frame>,
      * XV_FS_FORCE=tex0|lm|texmod, XV_LOG_TEX/XV_LOG_RS/XV_LOG_DS=1, XV_FUNC_HIST=<frame>. */
-    { static const char *const cfgs[2] = { "ux0:data/xboxvita/xboxvita.cfg", "ux0:data/xboxvita/env.txt" };
+    { static const char *const cfgs[2] = { "ux0:data/xita/xita.cfg", "ux0:data/xita/env.txt" };
       for (int ci = 0; ci < 2; ++ci) {
         SceUID fd = sceIoOpen(cfgs[ci], SCE_O_RDONLY, 0);
         if (fd < 0) continue;
@@ -1152,7 +1152,7 @@ shutdown:
     xv_xram_shutdown();
     xv_gfx_shutdown();
 #endif
-    XV_LOG("XboxVita runtime exiting\n");
+    XV_LOG("Xita runtime exiting\n");
     sceKernelExitProcess(0);
     return 0;
 }

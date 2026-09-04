@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
-#  XboxVita — vitasdk Makefile
+#  Xita — vitasdk Makefile
 #
-#  make            build xboxvita.vpk (ELF -> VELF -> eboot.bin -> VPK)
+#  make RECOMP=1   build xita.vpk (the runtime; plain make builds the xita-skel mock) (ELF -> VELF -> eboot.bin -> VPK)
 #  make shaders    (re)compile shaders/*.cg -> shaders/*.gxp   [needs psp2cgc]
 #  make clean      remove build products
 #
@@ -11,9 +11,9 @@
 # ---------------------------------------------------------------------------
 
 # --- 1. project identity -----------------------------------------------------
-PROJECT   := xboxvita
-TITLE_ID  := XVIT00001
-TITLE     := XboxVita
+PROJECT   := xita-skel
+TITLE_ID  := XITA00001
+TITLE     := Xita
 
 # --- toolchain ---------------------------------------------------------------
 ifeq ($(VITASDK),)
@@ -59,7 +59,7 @@ OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
 RECOMP_LINK_LIB := $(BUILD)/recomp/librecomp.a
 LIBS      += -lSceCtrl_stub -lSceRtc_stub -lSceIofilemgr_stub -lSceAudio_stub -lScePower_stub
-PROJECT   := xboxvita-recomp
+PROJECT   := xita
 SFO_EXTRA := -d ATTRIBUTE2=12      # extended memory mode: +109 MB for the arena/heap/texture pool
 VPK       := $(PROJECT).vpk
 endif
@@ -131,7 +131,7 @@ $(VELF): $(ELF)
 $(EBOOT): $(VELF)
 	vita-make-fself -s $< $@
 
-$(SFO): | $(BUILD)
+$(SFO): Makefile | $(BUILD)
 	vita-mksfoex -s TITLE_ID=$(TITLE_ID) $(SFO_EXTRA) "$(TITLE)" $@
 
 # VPK: eboot + param.sfo + shaders/*.gxp (+ sce_sys assets when present) ------
@@ -161,7 +161,7 @@ else
 $(SHADER_DIR)/%.gxp:
 	@echo "psp2cgc not available: $(@:.gxp=.cg) must be compiled on the Vita."
 	@echo "  1. make shadercomp                 (builds tools/shadercomp/xv_shadercomp.vpk, install it once)"
-	@echo "  2. make shaders-device VITA_IP=…    (uploads $(SHADER_DIR)/*.cg to ux0:data/xboxvita/shaders/)"
+	@echo "  2. make shaders-device VITA_IP=…    (uploads $(SHADER_DIR)/*.cg to ux0:data/xita/shaders/)"
 	@echo "  3. run 'XV Shader Compiler' on the Vita (green screen = all compiled)"
 	@echo "  4. make shaders-pull VITA_IP=…      (downloads the .gxp files back into $(SHADER_DIR)/)"
 	@false
@@ -169,7 +169,7 @@ endif
 
 VITA_IP        ?=
 VITA_FTP_PORT  ?= 1337
-DEVICE_SHADERS := ux0:/data/xboxvita/shaders
+DEVICE_SHADERS := ux0:/data/xita/shaders
 SHADERCOMP_DIR := tools/shadercomp
 
 .PHONY: shadercomp shaders-device shaders-pull
@@ -206,18 +206,18 @@ endef
 shaders-usb: $(SHADER_CG)
 	$(need_vita_mount)
 	@test -n "$(SHADER_CG)" || { echo "no .cg files in $(SHADER_DIR)/ — run shader_recomp_gen.py first"; exit 1; }
-	@mkdir -p "$(VITA_MOUNT)/data/xboxvita/shaders"
+	@mkdir -p "$(VITA_MOUNT)/data/xita/shaders"
 	@if [ -f $(SHACCCG) ] && [ ! -f "$(VITA_MOUNT)/data/$(SHACCCG)" ]; then cp -v $(SHACCCG) "$(VITA_MOUNT)/data/"; fi
-	@cp -v $(SHADER_CG) "$(VITA_MOUNT)/data/xboxvita/shaders/"
+	@cp -v $(SHADER_CG) "$(VITA_MOUNT)/data/xita/shaders/"
 	@if [ -f $(SHADERCOMP_DIR)/xv_shadercomp.vpk ]; then cp -v $(SHADERCOMP_DIR)/xv_shadercomp.vpk "$(VITA_MOUNT)/"; fi
 	@sync
 	@echo "staged on $(VITA_MOUNT): $(words $(SHADER_CG)) shader(s), $(SHACCCG), xv_shadercomp.vpk"
 	@echo "next: make vita-eject, install ux0:/xv_shadercomp.vpk with VitaShell, run it, reconnect USB, make shaders-pull-usb"
 
-# --- game deploy: VPK + the data the recompiled engine streams from ux0:data/xboxvita/ ------
+# --- game deploy: VPK + the data the recompiled engine streams from ux0:data/xita/ ------
 # Menu needs only ui.map (14 MB) + halo_image.bin (3.7 MB); add campaign/MP maps with
 # DEPLOY_MAPS="ui.map a10.map bloodgulch.map".  Save data (cache files, profiles) is created
-# by the game under ux0:data/xboxvita/save/ on first boot; the log lands in xboxvita.log there.
+# by the game under ux0:data/xita/save/ on first boot; the log lands in xita.log there.
 DEPLOY_MAPS   ?= ui.map
 DEPLOY_IMAGE  := recomp/halo_image.bin
 DEPLOY_MAPDIR := haloce/maps
@@ -226,31 +226,31 @@ DEPLOY_MAPDIR := haloce/maps
 
 deploy-usb: $(VPK)
 	$(need_vita_mount)
-	@mkdir -p "$(VITA_MOUNT)/data/xboxvita/haloce/maps"
+	@mkdir -p "$(VITA_MOUNT)/data/xita/haloce/maps"
 	@cp -v $(VPK) "$(VITA_MOUNT)/"
-	@cp -v $(DEPLOY_IMAGE) "$(VITA_MOUNT)/data/xboxvita/"
-	@for m in $(DEPLOY_MAPS); do cp -v $(DEPLOY_MAPDIR)/$$m "$(VITA_MOUNT)/data/xboxvita/haloce/maps/"; done
+	@cp -v $(DEPLOY_IMAGE) "$(VITA_MOUNT)/data/xita/"
+	@for m in $(DEPLOY_MAPS); do cp -v $(DEPLOY_MAPDIR)/$$m "$(VITA_MOUNT)/data/xita/haloce/maps/"; done
 	@sync
 	@echo "staged on $(VITA_MOUNT): $(VPK), halo_image.bin, maps: $(DEPLOY_MAPS)"
-	@echo "next: make vita-eject; on the Vita install ux0:/$(VPK) with VitaShell (X on it), then launch XboxVita from LiveArea"
+	@echo "next: make vita-eject; on the Vita install ux0:/$(VPK) with VitaShell (X on it), then launch Xita from LiveArea"
 
 deploy-ftp: $(VPK)
 	$(need_vita_ip)
 	@curl -sS -T $(VPK) "ftp://$(VITA_IP):$(VITA_FTP_PORT)/ux0:/" || exit 1
-	@curl -sS --ftp-create-dirs -T $(DEPLOY_IMAGE) "ftp://$(VITA_IP):$(VITA_FTP_PORT)/ux0:/data/xboxvita/" || exit 1
-	@for m in $(DEPLOY_MAPS); do echo "upload $$m"; curl -sS --ftp-create-dirs -T $(DEPLOY_MAPDIR)/$$m "ftp://$(VITA_IP):$(VITA_FTP_PORT)/ux0:/data/xboxvita/haloce/maps/" || exit 1; done
-	@echo "uploaded $(VPK) + data; on the Vita install ux0:/$(VPK) with VitaShell, then launch XboxVita"
+	@curl -sS --ftp-create-dirs -T $(DEPLOY_IMAGE) "ftp://$(VITA_IP):$(VITA_FTP_PORT)/ux0:/data/xita/" || exit 1
+	@for m in $(DEPLOY_MAPS); do echo "upload $$m"; curl -sS --ftp-create-dirs -T $(DEPLOY_MAPDIR)/$$m "ftp://$(VITA_IP):$(VITA_FTP_PORT)/ux0:/data/xita/haloce/maps/" || exit 1; done
+	@echo "uploaded $(VPK) + data; on the Vita install ux0:/$(VPK) with VitaShell, then launch Xita"
 
-# pull the on-device log after a run (USB): ux0:data/xboxvita/xboxvita.log -> ./vita_run.log
+# pull the on-device log after a run (USB): ux0:data/xita/xita.log -> ./vita_run.log
 deploy-log-usb:
 	$(need_vita_mount)
-	@cp -v "$(VITA_MOUNT)/data/xboxvita/xboxvita.log" vita_run.log && tail -40 vita_run.log
+	@cp -v "$(VITA_MOUNT)/data/xita/xita.log" vita_run.log && tail -40 vita_run.log
 
 shaders-pull-usb:
 	$(need_vita_mount)
 	@mkdir -p $(SHADER_DIR)
-	@cp -v "$(VITA_MOUNT)"/data/xboxvita/shaders/*.gxp $(SHADER_DIR)/ 2>/dev/null || { echo "no .gxp on the Vita yet — run 'XV Shader Compiler' first"; cat "$(VITA_MOUNT)/data/xboxvita/shaders/compile.log" 2>/dev/null; exit 1; }
-	@cp "$(VITA_MOUNT)/data/xboxvita/shaders/compile.log" $(SHADER_DIR)/ 2>/dev/null || true
+	@cp -v "$(VITA_MOUNT)"/data/xita/shaders/*.gxp $(SHADER_DIR)/ 2>/dev/null || { echo "no .gxp on the Vita yet — run 'XV Shader Compiler' first"; cat "$(VITA_MOUNT)/data/xita/shaders/compile.log" 2>/dev/null; exit 1; }
+	@cp "$(VITA_MOUNT)/data/xita/shaders/compile.log" $(SHADER_DIR)/ 2>/dev/null || true
 	@echo "--- compile.log ---"; cat $(SHADER_DIR)/compile.log 2>/dev/null || true
 	@echo "pulled: $$(ls $(SHADER_DIR)/*.gxp | tr '\n' ' ') — run 'make' to pack them"
 

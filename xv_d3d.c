@@ -678,7 +678,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             if (bigpart) {                                          /* the Warthog: which vertices carry odd node bytes, and where the buffer lives */
                 big++; unsigned odd = 0; char ob[160]; int ok = 0;
                 for (unsigned i = 0; i < nverts; ++i) { uint8_t b = vb0[i * st + 28]; if (b % 3 || b > 120) { if (odd < 6) ok += snprintf(ob + ok, sizeof ob - ok, " v%u=%u/%u", i, b, vb0[i * st + 29]); odd++; } }
-                if (big == 1) { FILE *f = fopen("ux0:data/xboxvita/vb_1372.bin", "wb"); if (f) { fwrite(vb0, 1, nverts * st, f); fclose(f); } }
+                if (big == 1) { FILE *f = fopen("ux0:data/xita/vb_1372.bin", "wb"); if (f) { fwrite(vb0, 1, nverts * st, f); fclose(f); } }
                 if (big == 1) {                                         /* vertex-object table (index header +0x14) as fixed up by the loader */
                     uint32_t idx = 0x803A6000u, tbl = *(const uint32_t *)xv_guest_ptr(idx + 0x14), cnt = *(const uint32_t *)xv_guest_ptr(idx + 0x10);
                     XV_LOG("[skin] vobj table %08X x%u; this vb %08X = entry %d\n", tbl, cnt, S.stream_guest[0], (int)(S.stream_guest[0] - tbl) / 12);

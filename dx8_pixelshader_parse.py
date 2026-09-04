@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dx8_pixelshader_parse.py - Stage 2c of the XboxVita pipeline: decode Xbox pixel
+dx8_pixelshader_parse.py - Stage 2c of the Xita pipeline: decode Xbox pixel
 shaders (NV2A register-combiner definitions).
 
 An Xbox pixel shader is not a token stream but a 240-byte D3DPIXELSHADERDEF
@@ -426,7 +426,7 @@ def print_psdef(d: PixelShaderDef, out=sys.stdout) -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="dx8_pixelshader_parse.py",
-                                 description="Decode Xbox D3DPIXELSHADERDEF register-combiner shaders (XboxVita Stage 2c).")
+                                 description="Decode Xbox D3DPIXELSHADERDEF register-combiner shaders (Xita Stage 2c).")
     ap.add_argument("file")
     ap.add_argument("--def", dest="psdef", metavar="LOC", help="location of one def (0x.. or va:0x..)")
     ap.add_argument("--scan", action="store_true", help="find all plausible defs in FILE")

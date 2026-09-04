@@ -4,7 +4,7 @@ haloce.xiso.iso
 recomp/halo_image.bin
 libshacccg.suprx
 extract-xiso/
-# recompiler output (regenerate with xbe_recomp.py)
+# recompiler output (regenerate with xita_recomp.py)
 recomp/code_*.c
 recomp/xv_fn_table.c
 recomp/xv_stubs_default.c

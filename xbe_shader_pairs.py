@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-xbe_shader_pairs.py - Stage 2b of the XboxVita pipeline: pair vertex declarations
+xbe_shader_pairs.py - Stage 2b of the Xita pipeline: pair vertex declarations
 with vertex-shader function blobs.
 
 CreateVertexShader(pDeclaration, pFunction, ...) is called at run time, so the
@@ -188,7 +188,7 @@ def validate_pair(data: bytes, decl_off: int, func_off: int) -> Tuple[List[str],
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="xbe_shader_pairs.py",
-                                 description="Pair vertex declarations with shader blobs (XboxVita Stage 2b).")
+                                 description="Pair vertex declarations with shader blobs (Xita Stage 2b).")
     ap.add_argument("xbe")
     ap.add_argument("--manifest", required=True, help="Stage 1 xbe_parse.py --json output")
     ap.add_argument("-o", "--output", default=None, help="pairs JSON (default: <xbe>.pairs.json)")

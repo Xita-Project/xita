@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-//  XboxVita Stage 3 - auto-generated Vita Cg vertex shader
+//  Xita Stage 3 - auto-generated Vita Cg vertex shader
 //  source : halo_vs_58.json
 //  mode   : NV2A microcode translation
 //  target : psp2cgc -profile sce_vp_psp2

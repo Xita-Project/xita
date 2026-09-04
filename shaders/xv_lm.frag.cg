@@ -1,4 +1,4 @@
-// XboxVita runtime fragment shader: Halo environment approximation, base (t0, oT0) x lightmap (t2, oT2) x 2.
+// Xita runtime fragment shader: Halo environment approximation, base (t0, oT0) x lightmap (t2, oT2) x 2.
 struct VertOut
 {
     float4 position  : POSITION;

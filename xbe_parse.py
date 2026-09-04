@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-xbe_parse.py — Stage 1 of the XboxVita offline static-recompilation pipeline.
+xbe_parse.py — Stage 1 of the Xita offline static-recompilation pipeline.
 
 Parses an original Xbox executable (.xbe) image header using only the Python
 standard library and reports:
@@ -591,7 +591,7 @@ def to_json(info: XbeInfo) -> str:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         prog="xbe_parse.py",
-        description="Parse an original Xbox .xbe header (XboxVita pipeline, Stage 1).",
+        description="Parse an original Xbox .xbe header (Xita pipeline, Stage 1).",
     )
     ap.add_argument("xbe", help="path to the .xbe file")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON instead of a report")

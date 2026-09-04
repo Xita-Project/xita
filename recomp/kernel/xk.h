@@ -1,5 +1,5 @@
 /*
- * xk.h - XboxVita kernel translator (blueprint section 3): the Xbox kernel surface the
+ * xk.h - Xita kernel translator (blueprint section 3): the Xbox kernel surface the
  * recompiled game calls, implemented over a tiny OS abstraction (xk_os.h) so the same
  * code runs on the Vita (fibers on core 0) and in the host harness (ucontext).
  *

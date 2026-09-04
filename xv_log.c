@@ -1,5 +1,5 @@
 /* xv_log.c - one log sink for the Vita build: sceClibPrintf (visible in Vita3K / PrincessLog) plus
- * an append-only file at ux0:data/xboxvita/xboxvita.log so a run on real hardware leaves evidence. */
+ * an append-only file at ux0:data/xita/xita.log so a run on real hardware leaves evidence. */
 #ifdef __vita__
 #include <stdarg.h>
 #include <stdio.h>
@@ -27,13 +27,20 @@ void xv_logf(const char *fmt, ...)
     if (g_mtx >= 0) sceKernelLockMutex(g_mtx, 1, NULL);
     if (g_fd == -2) {
         sceIoMkdir("ux0:data", 0777);
-        sceIoMkdir("ux0:data/xboxvita", 0777);
+        {   /* one-time migration from the pre-rebrand layout: ux0:data/xboxvita -> ux0:data/xita.  Game files,
+             * saves and settings move with the directory; xboxvita.cfg becomes xita.cfg.  Nothing is deleted. */
+            SceIoStat st_;
+            if (sceIoGetstat("ux0:data/xita", &st_) < 0 && sceIoGetstat("ux0:data/xboxvita", &st_) >= 0 &&
+                sceIoRename("ux0:data/xboxvita", "ux0:data/xita") >= 0)
+                sceIoRename("ux0:data/xita/xboxvita.cfg", "ux0:data/xita/xita.cfg");
+        }
+        sceIoMkdir("ux0:data/xita", 0777);
         /* keep the last three runs: .log -> .1.log -> .2.log -> .3.log (a hardware session is evidence) */
-        sceIoRemove("ux0:data/xboxvita/xboxvita.3.log");
-        sceIoRename("ux0:data/xboxvita/xboxvita.2.log", "ux0:data/xboxvita/xboxvita.3.log");
-        sceIoRename("ux0:data/xboxvita/xboxvita.1.log", "ux0:data/xboxvita/xboxvita.2.log");
-        sceIoRename("ux0:data/xboxvita/xboxvita.log",   "ux0:data/xboxvita/xboxvita.1.log");
-        g_fd = sceIoOpen("ux0:data/xboxvita/xboxvita.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+        sceIoRemove("ux0:data/xita/xita.3.log");
+        sceIoRename("ux0:data/xita/xita.2.log", "ux0:data/xita/xita.3.log");
+        sceIoRename("ux0:data/xita/xita.1.log", "ux0:data/xita/xita.2.log");
+        sceIoRename("ux0:data/xita/xita.log",   "ux0:data/xita/xita.1.log");
+        g_fd = sceIoOpen("ux0:data/xita/xita.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
     }
     if (g_fd >= 0) sceIoWrite(g_fd, buf, (SceSize)n);
     if (g_mtx >= 0) sceKernelUnlockMutex(g_mtx, 1);

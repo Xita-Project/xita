@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-halo_scene_export.py - export the models of a Halo (Xbox) map as an XboxVita
+halo_scene_export.py - export the models of a Halo (Xbox) map as an Xita
 "scene pack" the runtime can replay through the D3D HLE without any game code.
 
 The pack reproduces what the real game would have in guest memory:

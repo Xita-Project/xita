@@ -1,5 +1,5 @@
 /*
- * xv_scene.h - XboxVita scene viewer: replays a scene pack exported from a Halo map
+ * xv_scene.h - Xita scene viewer: replays a scene pack exported from a Halo map
  * (halo_scene_export.py) through the D3D HLE, standing in for the recompiled game
  * until Stage 4 exists.  Everything it draws lives in guest RAM exactly as the game
  * would have it: the map's tag data at 0x803A6000 (pre-baked D3D vertex/index buffer

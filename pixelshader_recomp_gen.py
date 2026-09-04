@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-pixelshader_recomp_gen.py - Stage 3b of the XboxVita pipeline: NV2A register
+pixelshader_recomp_gen.py - Stage 3b of the Xita pipeline: NV2A register
 combiners -> Vita Cg fragment shader.
 
 Input: the JSON written by `dx8_pixelshader_parse.py --json` (one or more decoded
@@ -319,7 +319,7 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
         used_var = {v for v in used_var if v in avail}
     L = [
         "// ---------------------------------------------------------------------------",
-        f"//  XboxVita Stage 3b - auto-generated Vita Cg fragment shader: {name}",
+        f"//  Xita Stage 3b - auto-generated Vita Cg fragment shader: {name}",
         f"//  source def: VA {d['va'] and ('0x%08X' % d['va'])}  file 0x{d['file_offset']:X}",
         f"//  {d['stage_count']} combiner stage(s){', MUX_MSB' if d['mux_msb'] else ''}; "
         f"textures {' '.join('t%d:%s' % (t['index'], t['mode']) for t in d['textures'] if t['mode'] != 'NONE') or '-'}",
@@ -365,7 +365,7 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="pixelshader_recomp_gen.py",
-                                 description="NV2A register combiners -> Vita Cg fragment shaders (XboxVita Stage 3b).")
+                                 description="NV2A register combiners -> Vita Cg fragment shaders (Xita Stage 3b).")
     ap.add_argument("json", help="dx8_pixelshader_parse.py --json output")
     ap.add_argument("-o", "--outdir", default="shaders")
     ap.add_argument("--prefix", default="ps", help="output name prefix (default ps -> ps_00.frag.cg ...)")

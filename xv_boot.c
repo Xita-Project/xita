@@ -52,8 +52,8 @@ int xv_boot_recomp(const char *game_dir, const char *save_dir)
 {
     const char *img_paths[] = {
         "app0:halo_image.bin",
-        "ux0:data/xboxvita/halo_image.bin",
-        "uma0:data/xboxvita/halo_image.bin",
+        "ux0:data/xita/halo_image.bin",
+        "uma0:data/xita/halo_image.bin",
     };
     SceUID fd = open_first(img_paths, 3);
     if (fd < 0) { BOOT_LOG("halo_image.bin not found (app0 / ux0 / uma0)\n"); return -1; }

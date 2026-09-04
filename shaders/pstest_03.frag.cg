@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-//  XboxVita Stage 3b - auto-generated Vita Cg fragment shader: pstest_03
+//  Xita Stage 3b - auto-generated Vita Cg fragment shader: pstest_03
 //  source def: VA None  file 0x2D0
 //  1 combiner stage(s); textures t0:CLIPPLANE t1:PASSTHRU t2:CUBEMAP t3:PROJECT2D
 //  Uniforms: psc[16] = SetPixelShaderConstant regs; xv_fogcolor.rgb; fog factor = TEXCOORD7

@@ -1,4 +1,4 @@
-// XboxVita runtime fragment shader: untextured diffuse passthrough (D3D default with
+// Xita runtime fragment shader: untextured diffuse passthrough (D3D default with
 // no texture bound: output = oD0).
 struct VertOut
 {

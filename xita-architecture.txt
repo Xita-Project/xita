@@ -1,5 +1,5 @@
 ================================================================================
- XboxVita — Low-Overhead Static-Recomp Wrapper Architecture
+ Xita — Low-Overhead Static-Recomp Wrapper Architecture
  Target: PS Vita (ARMv7 Cortex-A9 MPCore, SGX543MP4+, 512 MB LPDDR2 + 128 MB CDRAM)
  Goal:   run a statically recompiled original-Xbox title (64 MB guest RAM,
          DX8 fixed-function graphics) in <= 300 MB of main RAM — design lands ~90 MB.
@@ -928,7 +928,7 @@ MmAllocateContiguousMemoryEx(0x345000, low 0x61000, high 0x3A5FFF) and
 MmAllocateContiguousMemoryEx(0x1600000, low 0x3A6000, high 0x19A5FFF) - i.e. it demands PHYSICAL
 pages at exactly those numbers (the .map files carry absolute 0x803A6000-based pointers), while
 the XBE image occupies the same numbers as VIRTUAL addresses (0x10000-0x3B5000). On hardware
-those are different pages. XboxVita therefore uses a page-table memory model:
+those are different pages. Xita therefore uses a page-table memory model:
   arena = [0, 64 MB) physical RAM | XBE image copy | trash page
   X_G(a) = g_xram + g_xpt[a >> 12] + (a & 0xFFF)   (4 KB pages, 4 MB table)
   0x80000000/0xF0000000 aliases -> physical 1:1; virtual [0,64MB) identity by default, except the

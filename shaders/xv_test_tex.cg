@@ -1,4 +1,4 @@
-// XboxVita runtime test vertex shader: textured + coloured quad through the D3D HLE.
+// Xita runtime test vertex shader: textured + coloured quad through the D3D HLE.
 // Layout (Xbox-style declaration): float3 position @0, float2 texcoord0 @12,
 // D3DCOLOR color0 @20, stride 24.  c[0..3] = rows of transpose(WVP).
 struct AppIn

@@ -1,5 +1,5 @@
 /*
- * xv_shader.h - XboxVita runtime: GXM shader patcher + recompiled-shader binding
+ * xv_shader.h - Xita runtime: GXM shader patcher + recompiled-shader binding
  *
  * A recompiled Xbox vertex shader arrives as a .gxp in app0:shaders/ together with
  * a layout descriptor (xv_vs_desc_t, generated into shaders/xv_layouts.h by

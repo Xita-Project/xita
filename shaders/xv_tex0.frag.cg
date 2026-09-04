@@ -1,4 +1,4 @@
-// XboxVita runtime fragment shader: texture stage 0 only (debug / fallback when the vertex
+// Xita runtime fragment shader: texture stage 0 only (debug / fallback when the vertex
 // program writes no diffuse colour).
 struct VertOut
 {

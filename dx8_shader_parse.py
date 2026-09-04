@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dx8_shader_parse.py — Stage 2 of the XboxVita offline static-recompilation pipeline.
+dx8_shader_parse.py — Stage 2 of the Xita offline static-recompilation pipeline.
 
 Decodes the two DWORD arrays an original-Xbox title hands to
 IDirect3DDevice8::CreateVertexShader(pDeclaration, pFunction, ...):
@@ -929,7 +929,7 @@ def _op_comment(op: Op, bias: int) -> str:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         prog="dx8_shader_parse.py",
-        description="Decode Xbox DX8 vertex declarations and NV2A vertex-shader microcode (XboxVita Stage 2).",
+        description="Decode Xbox DX8 vertex declarations and NV2A vertex-shader microcode (Xita Stage 2).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Locations are file offsets (0x1234) or virtual addresses (va:0x31400, needs --manifest\n"
                "or an .xbe FILE with xbe_parse.py alongside).")

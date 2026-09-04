@@ -1,4 +1,4 @@
-// XboxVita runtime helper fragment shader: pass the interpolated colour through.
+// Xita runtime helper fragment shader: pass the interpolated colour through.
 // Used for the first-draw smoke test (vertex colour arrives in TEXCOORD0 from the
 // fixed-function test vertex shader) and as the clear-quad shader.
 struct VertOut

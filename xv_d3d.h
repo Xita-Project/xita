@@ -1,5 +1,5 @@
 /*
- * xv_d3d.h - XboxVita runtime: Direct3D 8 (Xbox flavour) HLE state machine
+ * xv_d3d.h - Xita runtime: Direct3D 8 (Xbox flavour) HLE state machine
  *
  * The recompiled game calls these entry points on the guest fiber.  They never
  * touch GXM directly: they RECORD into a per-frame command list (streams, index

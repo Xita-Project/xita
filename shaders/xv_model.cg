@@ -1,4 +1,4 @@
-// XboxVita scene-viewer vertex shader for Halo's compressed model vertex
+// Xita scene-viewer vertex shader for Halo's compressed model vertex
 // (Xbox declaration 0x1E1400, stride 32):
 //   v0 position     FLOAT3       @0
 //   v1 normal       NORMPACKED3  @12   (11:11:10 signed, bound as raw U8 x4)

@@ -353,8 +353,8 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
             }
         }
         { static int dump = -1; if (dump < 0) dump = getenv("XV_TEXDUMP") != NULL;
-          if (dump) { char path[128]; sceIoMkdir("ux0:data/xboxvita/texdump", 0777);
-            sceClibSnprintf(path, sizeof path, "ux0:data/xboxvita/texdump/cube_%08X_%02X_%ux%u.ppm", data, fmt, w, h);
+          if (dump) { char path[128]; sceIoMkdir("ux0:data/xita/texdump", 0777);
+            sceClibSnprintf(path, sizeof path, "ux0:data/xita/texdump/cube_%08X_%02X_%ux%u.ppm", data, fmt, w, h);
             SceUID fd = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
             if (fd >= 0) { char hdr[32]; int n = sceClibSnprintf(hdr, sizeof hdr, "P6\n%u %u\n255\n", w * 6, h); sceIoWrite(fd, hdr, n);
               static uint8_t row[256 * 6 * 3];
@@ -439,14 +439,14 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         if (ui_decode(src, fmt, w, h, pitch ? pitch : w * bpp, linear, dst) != 0) {
             UI_LOG("unhandled tex fmt %02X (%ux%u)\n", fmt, w, h); UI_TEX_FAIL();
         }
-        {   /* XV_TEXDUMP=<min width>: write decoded textures as PPM to ux0:data/xboxvita/texdump/ */
+        {   /* XV_TEXDUMP=<min width>: write decoded textures as PPM to ux0:data/xita/texdump/ */
             static int dump_min = -1; if (dump_min < 0) { const char *e = getenv("XV_TEXDUMP"); dump_min = e ? atoi(e) : 0; if (e && dump_min <= 0) dump_min = 1; }
             if (dump_min > 0 && (int)w >= dump_min) {
-                char path[128]; sceIoMkdir("ux0:data/xboxvita/texdump", 0777);
-                sceClibSnprintf(path, sizeof path, "ux0:data/xboxvita/texdump/%08X_%02X_%ux%u_m%u.ppm", data, fmt, w, h, mips);
+                char path[128]; sceIoMkdir("ux0:data/xita/texdump", 0777);
+                sceClibSnprintf(path, sizeof path, "ux0:data/xita/texdump/%08X_%02X_%ux%u_m%u.ppm", data, fmt, w, h, mips);
                 SceUID fd = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
                 if (getenv("XV_TEXDUMP_RAW")) {          /* the source bytes too (offline layout experiments) */
-                    char rp[128]; sceClibSnprintf(rp, sizeof rp, "ux0:data/xboxvita/texdump/%08X_%02X_%ux%u_m%u_f%08X_s%08X.raw", data, fmt, w, h, mips, fmtword, sizeword);
+                    char rp[128]; sceClibSnprintf(rp, sizeof rp, "ux0:data/xita/texdump/%08X_%02X_%ux%u_m%u_f%08X_s%08X.raw", data, fmt, w, h, mips, fmtword, sizeword);
                     SceUID rf = sceIoOpen(rp, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
                     if (rf >= 0) { sceIoWrite(rf, src, isdxt ? ((w + 3) / 4) * ((h + 3) / 4) * bs : (pitch ? pitch : w * bpp) * h); sceIoClose(rf); }
                 }
@@ -720,7 +720,7 @@ void xv_ui_gxm_frame_flip(void)
 /* ---- replay (render pump, inside sceGxmBeginScene/EndScene) ------------------------------------- */
 
 /* ---- debug overlay: fps + frame-time split as 7-segment digits (no font needed) -------------------
- * Toggle: hold SELECT+START ~1 s (xk_os_vita pad poll) or XV_FPS=1 in xboxvita.cfg. */
+ * Toggle: hold SELECT+START ~1 s (xk_os_vita pad poll) or XV_FPS=1 in xita.cfg. */
 int g_xv_overlay_on = -1;                                   /* -1 = read config once */
 float g_xv_ovl_game_ms, g_xv_ovl_render_ms, g_xv_ovl_fps;
 static const uint8_t SEG7[10] = { 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F };   /* abcdefg */

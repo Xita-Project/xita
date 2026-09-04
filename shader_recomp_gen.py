@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-shader_recomp_gen.py - Stage 3 of the XboxVita offline static-recompilation pipeline.
+shader_recomp_gen.py - Stage 3 of the Xita offline static-recompilation pipeline.
 
 Consumes the JSON emitted by `dx8_shader_parse.py --json` and writes a compilable
 PlayStation Vita Cg vertex shader (.cg) for psp2cgc / GXP.
@@ -402,7 +402,7 @@ def plan_function(decl: Optional[dict], func: dict, args, src: str) -> Plan:
 def emit_header(p: Plan, args, extra: List[str]) -> List[str]:
     L = [
         "// ---------------------------------------------------------------------------",
-        "//  XboxVita Stage 3 - auto-generated Vita Cg vertex shader",
+        "//  Xita Stage 3 - auto-generated Vita Cg vertex shader",
         f"//  source : {p.source_desc}",
         f"//  mode   : {'fixed-function' if p.mode == 'ff' else 'NV2A microcode translation'}",
         "//  target : psp2cgc -profile sce_vp_psp2",
@@ -741,7 +741,7 @@ def binding_manifest(p: Plan, out_path: str) -> dict:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         prog="shader_recomp_gen.py",
-        description="Generate a Vita Cg vertex shader from dx8_shader_parse.py --json output (XboxVita Stage 3).")
+        description="Generate a Vita Cg vertex shader from dx8_shader_parse.py --json output (Xita Stage 3).")
     ap.add_argument("json", help="Stage 2 JSON (dx8_shader_parse.py ... --json > file)")
     ap.add_argument("-o", "--output", help="output .cg path (default: <json basename>.cg)")
     ap.add_argument("--mode", choices=["auto", "ff", "function"], default="auto",

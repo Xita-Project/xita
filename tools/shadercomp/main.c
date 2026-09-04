@@ -1,12 +1,12 @@
 /*
- * xv_shadercomp — on-device Cg -> GXP compiler for the XboxVita pipeline
+ * xv_shadercomp — on-device Cg -> GXP compiler for the Xita pipeline
  *
  * psp2cgc (Sony's offline Cg compiler) is proprietary and not part of vitasdk.
  * The very same compiler, however, ships on every PS Vita as the runtime module
  * libshacccg.suprx (SceShaccCg).  This homebrew drives it DIRECTLY through the
  * SceShaccCg API (psp2/shacccg.h) — no vitaShaRK, no SceShaccCgExt code patches.
  *
- *     <card>:data/xboxvita/shaders/<name>.cg  --->  <name>.gxp (same directory)
+ *     <card>:data/xita/shaders/<name>.cg  --->  <name>.gxp (same directory)
  *                                                    compile.log
  *
  * Shader kind is taken from the file name: "*.frag.cg" / "*_frag.cg" / "*_fp.cg"
@@ -41,9 +41,9 @@ int _newlib_heap_size_user = 192 * 1024 * 1024;
  * uma0: when an SD2VITA/PSVSD has taken over ux0:.  Every directory that exists
  * is processed; outputs land next to the sources. */
 static const char *const SHADER_DIRS[] = {
-    "ux0:data/xboxvita/shaders",
-    "uma0:data/xboxvita/shaders",
-    "ur0:data/xboxvita/shaders",
+    "ux0:data/xita/shaders",
+    "uma0:data/xita/shaders",
+    "ur0:data/xita/shaders",
 };
 
 /* ur0:data/ is where ShaRKBR33D / ShaRKF00D save the module; the others are
@@ -52,8 +52,8 @@ static const char *const SHACCCG_PATHS[] = {
     "ur0:data/libshacccg.suprx",
     "ux0:data/libshacccg.suprx",
     "uma0:data/libshacccg.suprx",
-    "ux0:data/xboxvita/libshacccg.suprx",
-    "uma0:data/xboxvita/libshacccg.suprx",
+    "ux0:data/xita/libshacccg.suprx",
+    "uma0:data/xita/libshacccg.suprx",
 };
 
 #define COUNT(a)       (sizeof(a) / sizeof((a)[0]))
@@ -350,7 +350,7 @@ int main(int argc, char *argv[])
     show_colour(COLOUR_WORKING);
 
     /* Shader directories that exist; the log goes into the first one (creating
-     * ux0:data/xboxvita/shaders if none exist, so there is always a log). */
+     * ux0:data/xita/shaders if none exist, so there is always a log). */
     int present[COUNT(SHADER_DIRS)] = { 0 };
     int n_present = 0;
     for (unsigned i = 0; i < COUNT(SHADER_DIRS); ++i) {
@@ -363,7 +363,14 @@ int main(int argc, char *argv[])
     }
     if (!n_present) {
         sceIoMkdir("ux0:data", 0777);
-        sceIoMkdir("ux0:data/xboxvita", 0777);
+        {   /* one-time migration from the pre-rebrand layout: ux0:data/xboxvita -> ux0:data/xita.  Game files,
+             * saves and settings move with the directory; xboxvita.cfg becomes xita.cfg.  Nothing is deleted. */
+            SceIoStat st_;
+            if (sceIoGetstat("ux0:data/xita", &st_) < 0 && sceIoGetstat("ux0:data/xboxvita", &st_) >= 0 &&
+                sceIoRename("ux0:data/xboxvita", "ux0:data/xita") >= 0)
+                sceIoRename("ux0:data/xita/xboxvita.cfg", "ux0:data/xita/xita.cfg");
+        }
+        sceIoMkdir("ux0:data/xita", 0777);
         sceIoMkdir(SHADER_DIRS[0], 0777);
         present[0] = 1;
     }

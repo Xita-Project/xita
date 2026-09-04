@@ -19,7 +19,7 @@
 #include "xk_os.h"
 #include "xk.h"                 /* X_M32/X_M8, xk_file_in_ui_map (pad context) */
 
-void xv_logf(const char *fmt, ...);        /* app-side sink (xv_log.c): console + ux0:data/xboxvita/xboxvita.log */
+void xv_logf(const char *fmt, ...);        /* app-side sink (xv_log.c): console + ux0:data/xita/xita.log */
 void xk_os_log(const char *fmt, ...)
 {
     char buf[512];
@@ -286,14 +286,14 @@ void xk_os_pad_poll(xk_os_pad *p)
     sceCtrlPeekBufferPositive(0, &d, 1);
     memset(p, 0, sizeof *p); p->connected = 1;
     uint16_t b = 0;
-    /* Scripted input for emulator runs: ux0:data/xboxvita/pad.txt holds "frame:input[*hold]" items (frame =
+    /* Scripted input for emulator runs: ux0:data/xita/pad.txt holds "frame:input[*hold]" items (frame =
      * game frame / Present count; hold in frames, default 4).  input = up/down/left/right/start/back/a/b/x/y/
      * l/r, or a stick: lup/ldown/lleft/lright/rup/rdown/rleft/rright (full deflection).  Absent on a real
      * card, so hardware always sees the physical pad. */
     {
         static int init; static struct { unsigned at, hold; char btn[8]; } ev[512]; static int nev; static unsigned polls;
         if (!init) {
-            init = 1; SceUID fd = sceIoOpen("ux0:data/xboxvita/pad.txt", SCE_O_RDONLY, 0);
+            init = 1; SceUID fd = sceIoOpen("ux0:data/xita/pad.txt", SCE_O_RDONLY, 0);
             if (fd >= 0) { static char txt[16384]; int n = sceIoRead(fd, txt, sizeof txt - 1); sceIoClose(fd); if (n < 0) n = 0; txt[n] = 0;
                 const char *e = txt; while (*e && nev < 512) { unsigned at, hold = 4; char bn[8]; int k; if (sscanf(e, "%u:%7[a-z0-9]%n", &at, bn, &k) < 2) break; e += k;
                     if (*e == '*') { int k2; if (sscanf(e, "*%u%n", &hold, &k2) >= 1) e += k2; }
@@ -325,8 +325,8 @@ void xk_os_pad_poll(xk_os_pad *p)
                 else if (!strcmp(q, "x")) p->p2_analog[2] = 255; else if (!strcmp(q, "y")) p->p2_analog[3] = 255;
             }
         }
-        /* Pad recorder / raw replay.  XV_PAD_REC=1 (env.txt or xboxvita.cfg) appends one "frame lx ly rx ry buttons"
-         * line to ux0:data/xboxvita/pad_rec.txt every time the pad state changes (frame = Present count, the same
+        /* Pad recorder / raw replay.  XV_PAD_REC=1 (env.txt or xita.cfg) appends one "frame lx ly rx ry buttons"
+         * line to ux0:data/xita/pad_rec.txt every time the pad state changes (frame = Present count, the same
          * index pad.txt uses).  Copy that file to pad_play.txt and the state is fed back in at the same frames, each
          * line holding until the next one - so a play session recorded on the emulator (or on the Vita, from the
          * card) can be re-run unattended.  Timing is per rendered frame, so a replay only lines up on a build that
@@ -334,7 +334,7 @@ void xk_os_pad_poll(xk_os_pad *p)
         {
             static int rec = -1; static SceUID rfd = -1; static SceCtrlData last; static char rbuf[4096]; static int rlen; static unsigned rflush;
             static char *play; static int plen, ppos, pinit; static unsigned pnext; static SceCtrlData pstate; static int pactive;
-            if (!pinit) { pinit = 1; SceUID fd = sceIoOpen("ux0:data/xboxvita/pad_play.txt", SCE_O_RDONLY, 0);
+            if (!pinit) { pinit = 1; SceUID fd = sceIoOpen("ux0:data/xita/pad_play.txt", SCE_O_RDONLY, 0);
                 if (fd >= 0) { SceOff sz = sceIoLseek(fd, 0, SCE_SEEK_END); sceIoLseek(fd, 0, SCE_SEEK_SET);
                     play = malloc((size_t)sz + 1); plen = play ? sceIoRead(fd, play, (SceSize)sz) : 0; if (plen < 0) plen = 0; if (play) play[plen] = 0; sceIoClose(fd);
                     pnext = play && sscanf(play, "%u", &pnext) == 1 ? pnext : 0xFFFFFFFFu;
@@ -352,7 +352,7 @@ void xk_os_pad_poll(xk_os_pad *p)
                     if (pstate.rx < 64 || pstate.rx > 192 || pstate.ry < 64 || pstate.ry > 192) { d.rx = pstate.rx; d.ry = pstate.ry; } }
             }
             if (rec < 0) { const char *e = getenv("XV_PAD_REC"); rec = e ? atoi(e) : 0;
-                if (rec) { rfd = sceIoOpen("ux0:data/xboxvita/pad_rec.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); xv_logf("[xk] pad record: fd %d\n", (int)rfd); memset(&last, 0xFF, sizeof last); } }
+                if (rec) { rfd = sceIoOpen("ux0:data/xita/pad_rec.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); xv_logf("[xk] pad record: fd %d\n", (int)rfd); memset(&last, 0xFF, sizeof last); } }
             if (rfd >= 0) {
                 if (d.lx != last.lx || d.ly != last.ly || d.rx != last.rx || d.ry != last.ry || d.buttons != last.buttons) {
                     last = d; rlen += snprintf(rbuf + rlen, sizeof rbuf - rlen, "%u %u %u %u %u %x\n", polls, d.lx, d.ly, d.rx, d.ry, d.buttons); }
@@ -369,7 +369,7 @@ void xk_os_pad_poll(xk_os_pad *p)
           if (++both == 45) g_xv_overlay_on = g_xv_overlay_on > 0 ? 0 : 1;
           d.buttons &= ~(SCE_CTRL_START | SCE_CTRL_SELECT);
       } else both = 0; }
-    /* Hardware chord for the virtual second pad (XV_PAD2=1 in xboxvita.cfg): with L+R held, START / X / O /
+    /* Hardware chord for the virtual second pad (XV_PAD2=1 in xita.cfg): with L+R held, START / X / O /
      * D-pad go to player 2 instead of player 1 - enough to join a split-screen lobby and pick a profile. */
     if ((d.buttons & (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) == (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) {
         if (d.buttons & SCE_CTRL_TRIANGLE) { p->force_start = 1; d.buttons &= ~SCE_CTRL_TRIANGLE; }   /* L+R+Triangle: force the MP match start (XV_FORCE_START) */

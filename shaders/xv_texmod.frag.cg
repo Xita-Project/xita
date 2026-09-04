@@ -1,4 +1,4 @@
-// XboxVita runtime fragment shader: D3D "modulate" default (texture stage 0 * diffuse).
+// Xita runtime fragment shader: D3D "modulate" default (texture stage 0 * diffuse).
 // Used until a real register-combiner program is available for a draw.
 struct VertOut
 {

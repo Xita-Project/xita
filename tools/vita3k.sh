@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tools/vita3k.sh - drive the Vita3K emulator from the command line for the
-# XboxVita pipeline (no console needed).
+# Xita pipeline (no console needed).
 #
 #   vita3k.sh install  <file.vpk> <TITLEID>      unzip a homebrew VPK into ux0:app/<TITLEID>
 #   vita3k.sh run      <TITLEID> [seconds]       launch, auto-dismiss dialogs, run, kill
@@ -90,7 +90,7 @@ cmd_run() {
 }
 
 cmd_shaders() {
-    local dir="${1:-shaders}" out="$VITA3K_PREF/ux0/data/xboxvita/shaders"
+    local dir="${1:-shaders}" out="$VITA3K_PREF/ux0/data/xita/shaders"
     [ -d "$VITA3K_PREF/ux0/app/XVSC00001" ] || die "xv_shadercomp not installed: $0 install tools/shadercomp/xv_shadercomp.vpk XVSC00001"
     [ -f "$VITA3K_PREF/ur0/data/libshacccg.suprx" ] || die "put libshacccg.suprx at $VITA3K_PREF/ur0/data/"
     mkdir -p "$out"

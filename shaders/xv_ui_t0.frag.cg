@@ -1,4 +1,4 @@
-// XboxVita runtime fragment shader: Halo 2D UI quad path, image texture on stage 0.
+// Xita runtime fragment shader: Halo 2D UI quad path, image texture on stage 0.
 // Pairs with the recompiled UI vertex programs for Xbox declaration 0x1E13EC (halo_vs_03/04/38):
 // oD0 = vertex diffuse (v9), oT0 = the texcoord set the combiner program reads its image from
 // (Halo's 7-stage widget combiner reads the bitmap from t2 and scrolling smoke from t0/t1; the
