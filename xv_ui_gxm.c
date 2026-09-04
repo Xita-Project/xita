@@ -29,6 +29,7 @@ extern void xv_gpu_flush(const void *ptr, uint32_t len);   /* dcache clean befor
 #define UI_MAX_QUADS     4096u
 #define UI_MAX_VERTS     (UI_MAX_QUADS * 4u)
 #define UI_MAX_BATCHES   1024u
+extern volatile uint64_t xv_pump_us_acc;              /* main.c: render time spent on the pump thread */
 #define UI_FRAMES        2u                /* record double-buffer (frame parity) */
 #define UI_TEX_CACHE     768u
 #define UI_TEX_MAXDIM    256u              /* decode no mip level larger than this (level textures are 512-1024) */
@@ -536,6 +537,7 @@ static void ui_tex_purge_if_needed(unsigned frame)
     if (!g.tex_purge) return;
     g.tex_purge = 0;
     if (frame - g.tex_purge_frame < 8 && g.tex_purges) return;
+    { extern void xv_present_drain(void) __attribute__((weak)); if (xv_present_drain) xv_present_drain(); }   /* the pump may still be sampling this pool */
     sceGxmDisplayQueueFinish();
     UI_LOG("texture purge #%u at frame %u (%u textures, %u KB, %u bad)\n", ++g.tex_purges, frame, g.texcount, g.dec_off >> 10, g.nbad);
     g.texcount = 0; g.dec_off = 0; g.nbad = 0; g.tex_purge_frame = frame;
@@ -1002,8 +1004,8 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
     if (++g_t_frames == 60) {
         g_xv_ovl_game_ms = g_t_game_acc / 60000.0f; g_xv_ovl_render_ms = g_t_render_acc / 60000.0f;
         g_xv_ovl_fps = 60.0e6f / (float)(g_t_game_acc + g_t_render_acc + 1);
-        { extern unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc, xv_n_kicks, xv_n_fires; extern uint64_t xv_t_vbcb_us, xv_t_draw_us, xv_t_present_us; UI_LOG("frame time: game %.1f ms + render %.1f ms = %.1f fps | %u textures %u KB | decode %u tex %.1f ms | draws/frame %u bsp %u | frames %u | kicks %u fires %u vbcb %.1f ms draw-hle %.1f ms present %.1f ms (per frame)\n",
-               g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1), g_t_frames, xv_n_kicks / (g_t_frames ? g_t_frames : 1), xv_n_fires / (g_t_frames ? g_t_frames : 1), xv_t_vbcb_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_draw_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_present_us / 1000.0 / (g_t_frames ? g_t_frames : 1)); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; xv_n_kicks = xv_n_fires = 0; xv_t_vbcb_us = xv_t_draw_us = xv_t_present_us = 0; } g_dec_n = 0; g_dec_us = 0;
-        g_t_frames = 0; g_t_game_acc = g_t_render_acc = 0;
+        { extern unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc, xv_n_kicks, xv_n_fires; extern uint64_t xv_t_vbcb_us, xv_t_draw_us, xv_t_present_us; UI_LOG("frame time: game %.1f ms + wait %.1f ms = %.1f fps | pump %.1f ms | %u textures %u KB | decode %u tex %.1f ms | draws/frame %u bsp %u | frames %u | kicks %u fires %u vbcb %.1f ms draw-hle %.1f ms present %.1f ms (per frame)\n",
+               g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), xv_pump_us_acc / 60000.0, g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1), g_t_frames, xv_n_kicks / (g_t_frames ? g_t_frames : 1), xv_n_fires / (g_t_frames ? g_t_frames : 1), xv_t_vbcb_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_draw_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_present_us / 1000.0 / (g_t_frames ? g_t_frames : 1)); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; xv_n_kicks = xv_n_fires = 0; xv_t_vbcb_us = xv_t_draw_us = xv_t_present_us = 0; } g_dec_n = 0; g_dec_us = 0;
+        g_t_frames = 0; g_t_game_acc = g_t_render_acc = 0; xv_pump_us_acc = 0;
     }
 }

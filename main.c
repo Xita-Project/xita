@@ -477,14 +477,14 @@ static int xv_gfx_init(void)
  * point straight into XRAM (xv_gpu_ptr) after xv_gpu_ensure_visible() on the ranges
  * the guest touched (§1.5).  For now the scene is empty — begin/end/flip only.
  */
-static void xv_gfx_render_frame(void)
+static void xv_gfx_render_frame(uint32_t mesh_frame)
 {
     xv_gfx_t *g = &g_gfx;
+    (void)mesh_frame;
 
 #ifdef XV_RUN_RECOMP
     if (g->hle_ready) {                 /* render-to-texture passes first, each in its own scene */
-        extern uint32_t xv_ui_gxm_mesh_frame(void);
-        uint32_t mf0 = xv_ui_gxm_mesh_frame();
+        uint32_t mf0 = mesh_frame;
         if (mf0 != 0xFFFFFFFFu) xv_d3d_render_offscreen(g->ctx, mf0);
     }
 #endif
@@ -503,8 +503,7 @@ static void xv_gfx_render_frame(void)
         xv_d3d_render(g->ctx, g->frame_counter);
 #else
     if (g->hle_ready) {
-        extern uint32_t xv_ui_gxm_mesh_frame(void);
-        uint32_t mf = xv_ui_gxm_mesh_frame();
+        uint32_t mf = mesh_frame;
         /* Halo's VS emits D3D clip space; same viewport the UI replay uses */
         sceGxmSetViewport(g->ctx, 480.0f, 480.0f, 272.0f, -272.0f, 0.5f, 0.5f);
         if (mf != 0xFFFFFFFFu) xv_d3d_render(g->ctx, mf);
@@ -885,21 +884,33 @@ void xk_run(void)
 static volatile uint32_t g_frame_requested = 0;    /* written by guest fiber            */
 static volatile uint32_t g_frame_completed = 0;    /* written by pump thread            */
 static volatile int      g_running         = 1;
+static uint32_t          g_mesh_ring[4];                /* D3D list (mesh frame) per ticket   */
+volatile uint64_t        xv_pump_us_acc     = 0;          /* render time on the pump, for the frame-time log */
 
 /* D3DDevice_Swap() HLE lands here: ask the pump for a flip and block only this fiber.
  * Other fibers keep running; if all are blocked the core idles (§3.4). */
 void xv_present(void)
 {
 #ifdef XV_RUN_RECOMP
-    /* First-pixels path: the recompiled engine drives frames on this one thread, so render the
-     * frame it just recorded synchronously (BeginScene -> xv_ui_gxm_replay -> EndScene -> flip). */
-    xv_gfx_render_frame();
-    return;
+    /* The recompiled engine records frame N on core 0; the pump on core 1 renders it while the engine
+     * records N+1.  One frame in flight: publish the ticket, then wait only until frame N-1 is drawn
+     * (its command list and UI buffer are the ones frame N+1 will record into).  On hardware present
+     * cost the game thread 28-32 ms per heavy frame when it rendered synchronously (2026-09-04). */
+    uint32_t ticket = g_frame_requested + 1;
+    extern uint32_t xv_ui_gxm_mesh_frame(void);
+    g_mesh_ring[ticket & 3u] = xv_ui_gxm_mesh_frame();
+    __atomic_store_n(&g_frame_requested, ticket, __ATOMIC_RELEASE);
+    while ((int32_t)(__atomic_load_n(&g_frame_completed, __ATOMIC_ACQUIRE) - (ticket - 1u)) < 0) sceKernelDelayThread(100);
 #else
     uint32_t ticket = __atomic_add_fetch(&g_frame_requested, 1, __ATOMIC_RELEASE);
     /* allow XV_DISPLAY_MAX_PENDING frames in flight: wait for ticket - pending */
     xk_wait_word(&g_frame_completed, ticket - (XV_DISPLAY_MAX_PENDING - 1));
 #endif
+}
+/* Block until every published frame has been rendered (texture-pool purges, shutdown). */
+void xv_present_drain(void)
+{
+    while ((int32_t)(__atomic_load_n(&g_frame_completed, __ATOMIC_ACQUIRE) - __atomic_load_n(&g_frame_requested, __ATOMIC_ACQUIRE)) < 0) sceKernelDelayThread(100);
 }
 
 /* Core 1: render/present pump. */
@@ -911,7 +922,10 @@ static int xv_pump_thread(SceSize args, void *argp)
         uint32_t req  = __atomic_load_n(&g_frame_requested, __ATOMIC_ACQUIRE);
         uint32_t done = g_frame_completed;
         if ((int32_t)(req - done) > 0) {
-            xv_gfx_render_frame();
+            extern uint64_t xk_os_monotonic_us(void) __attribute__((weak));
+            uint64_t t0 = xk_os_monotonic_us ? xk_os_monotonic_us() : 0;
+            xv_gfx_render_frame(g_mesh_ring[(done + 1u) & 3u]);
+            if (xk_os_monotonic_us) xv_pump_us_acc += xk_os_monotonic_us() - t0;
             __atomic_store_n(&g_frame_completed, done + 1, __ATOMIC_RELEASE);
         } else {
             sceKernelDelayThread(200);      /* ~0.2 ms poll; replace with event flag later */
@@ -1101,12 +1115,18 @@ int main(int argc, char *argv[])
     /* Run the recompiled Halo engine on its own big-stack thread (core 0).  It owns guest memory
      * and drives the kernel scheduler; xv_present() renders each frame it records synchronously. */
     {
+        SceUID pump = sceKernelCreateThread("xv_pump", xv_pump_thread, XV_THREAD_PRIORITY,
+                                            XV_PUMP_THREAD_STACK, 0, SCE_KERNEL_CPU_MASK_USER_1, NULL);
+        if (pump < 0) { XV_LOG("pump thread create failed: 0x%08X\n", pump); goto shutdown; }
+        sceKernelStartThread(pump, 0, NULL);
         SceUID eng = sceKernelCreateThread("xv_recomp", xv_recomp_thread, XV_THREAD_PRIORITY,
                                            2 * 1024 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL);
         if (eng < 0) { XV_LOG("recomp thread create failed: 0x%08X\n", eng); goto shutdown; }
         sceKernelStartThread(eng, 0, NULL);
         sceKernelWaitThreadEnd(eng, NULL, NULL);
         sceKernelDeleteThread(eng);
+        xv_present_drain(); g_running = 0;
+        sceKernelWaitThreadEnd(pump, NULL, NULL); sceKernelDeleteThread(pump);
         XV_LOG("recompiled engine finished after %u frames\n", g_gfx.frame_counter);
     }
 #else
