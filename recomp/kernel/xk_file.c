@@ -346,6 +346,10 @@ void xk_NtQueryDirectoryFile(xctx *c)
         st = STATUS_SUCCESS; break;
     }
     if (iosb) { IOSB_STATUS(iosb) = st; IOSB_INFO(iosb) = written; }
+    /* XV_SAVE_LOG: trace enumeration of the save tree so a failed campaign-resume shows what the game found */
+    { static int on = -1; if (on < 0) { const char *e = getenv("XV_SAVE_LOG"); on = e ? atoi(e) : 0; }
+      if (on && o->u.file.path && (strstr(o->u.file.path, "save") || strstr(o->u.file.path, "saved")))
+          XK_LOG("[save] QueryDir %s pat=%s -> %s '%s'\n", o->u.file.path, o->u.file.pattern ? o->u.file.pattern : "*", st == STATUS_SUCCESS ? "entry" : (st == STATUS_NO_MORE_FILES ? "no-more" : "err"), st == STATUS_SUCCESS ? name : ""); }
     c->r[0] = st; X_RET(10);
 }
 void xk_NtFsControlFile(xctx *c) { XK_LOG("NtFsControlFile(code %08X) ignored\n", X_ARG(5)); if (X_ARG(4)) { IOSB_STATUS(X_ARG(4)) = STATUS_SUCCESS; IOSB_INFO(X_ARG(4)) = 0; } c->r[0] = STATUS_SUCCESS; X_RET(10); }
