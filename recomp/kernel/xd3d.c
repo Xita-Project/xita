@@ -171,6 +171,20 @@ void xd3d_r_state(const char *what, uint32_t a, uint32_t b, uint32_t v) __attrib
 void xd3d_r_state(const char *what, uint32_t a, uint32_t b, uint32_t v) { static unsigned n; if (n++ < 40) D3DLOG("%s(%u, %u, %08X)\n", what, a, b, v); }
 
 unsigned xd3d_frame(void) { return g_dev.frame; }
+/* Pad record/replay index: count from the frame gameplay begins (player 0 unit first valid), not from boot.
+ * Booting and loading a level take a run-dependent number of Present frames, so a boot-relative index makes a
+ * frame-indexed replay drift; a gameplay-relative index lines up in every run.  0 while still in menus/loading. */
+static unsigned g_pad_origin;
+unsigned xd3d_pad_frame(void)
+{
+    if (!g_pad_origin) {
+        uint32_t pl = X_M32(0x276794u);
+        uint32_t unit = pl ? X_M32(pl + 0x10) : 0xFFFFFFFFu;
+        if (pl && unit != 0xFFFFFFFFu) g_pad_origin = g_dev.frame ? g_dev.frame : 1;
+        else return 0;
+    }
+    return g_dev.frame >= g_pad_origin ? g_dev.frame - g_pad_origin + 1 : 0;
+}
 
 static void call_guest(xctx *c, uint32_t fn, uint32_t arg)   /* stdcall callback with one argument */
 {

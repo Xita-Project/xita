@@ -51,3 +51,4 @@ typedef struct { float a[16][4]; } xd3d_im_vtx;                       /* one imm
 void xd3d_r_im_end(uint32_t prim, const xd3d_im_vtx *v, unsigned n); /* Begin/SetVertexData/End draw */
 
 unsigned xd3d_frame(void);
+unsigned xd3d_pad_frame(void);   /* pad record/replay index, anchored at gameplay start */

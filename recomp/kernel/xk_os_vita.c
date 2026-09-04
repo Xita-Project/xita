@@ -410,7 +410,7 @@ void xk_os_pad_poll(xk_os_pad *p)
         }
         /* index by game frame (Present count), not by poll: the game polls the pad more than once per frame */
         extern unsigned xd3d_frame(void) __attribute__((weak));
-        polls = xd3d_frame ? xd3d_frame() : polls + 1;
+        { extern unsigned xd3d_pad_frame(void); unsigned gf = xd3d_pad_frame(); polls = gf ? gf : (xd3d_frame ? xd3d_frame() : polls + 1); }
         for (int i = 0; i < nev; ++i) if (polls >= ev[i].at && polls < ev[i].at + ev[i].hold) {
             const char *bn = ev[i].btn;
             extras |= pad_extra_token(bn);
