@@ -128,10 +128,25 @@ static inline void *xv_gpu_ptr(uint32_t guest_addr)
  */
 extern int xv_kmod_dcache_clean(const void *ptr, SceSize len) __attribute__((weak));
 
+/* Per-draw dcache cleans were 3 kernel calls per draw (streams + indices): 300-450 syscalls a frame.
+ * Collect ranges instead and clean the merged set once, right before the GXM submit (xv_gpu_flush_pending). */
+#define XV_FLUSH_MAX 512
+static struct { uintptr_t lo, hi; } g_flush[XV_FLUSH_MAX]; static unsigned g_nflush; static unsigned g_flush_overflow;
 static inline void xv_gpu_ensure_visible(const void *ptr, SceSize len)
 {
-    if (xv_kmod_dcache_clean)
-        xv_kmod_dcache_clean(ptr, len);
+    if (!xv_kmod_dcache_clean || !len) return;
+    uintptr_t lo = (uintptr_t)ptr & ~(uintptr_t)63u, hi = ((uintptr_t)ptr + len + 63u) & ~(uintptr_t)63u;
+    for (unsigned i = 0; i < g_nflush; ++i) {                          /* merge with an overlapping/adjacent range */
+        if (lo <= g_flush[i].hi + 4096u && hi + 4096u >= g_flush[i].lo) { if (lo < g_flush[i].lo) g_flush[i].lo = lo; if (hi > g_flush[i].hi) g_flush[i].hi = hi; return; }
+    }
+    if (g_nflush < XV_FLUSH_MAX) { g_flush[g_nflush].lo = lo; g_flush[g_nflush].hi = hi; g_nflush++; }
+    else { g_flush_overflow++; xv_kmod_dcache_clean(ptr, len); }         /* table full: clean immediately */
+}
+void xv_gpu_flush_pending(void)
+{
+    if (!xv_kmod_dcache_clean) { g_nflush = 0; return; }
+    for (unsigned i = 0; i < g_nflush; ++i) xv_kmod_dcache_clean((const void *)g_flush[i].lo, (SceSize)(g_flush[i].hi - g_flush[i].lo));
+    g_nflush = 0;
 }
 
 /* Host services used by the D3D HLE (xv_d3d.h). */
