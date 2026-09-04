@@ -9,6 +9,14 @@ one before it being stable.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+**Priority (2026-09-04).** The goal is local multiplayer between Vitas, so the critical
+path is Phase 1 → Phase 3. Phase 2 (the dashboard) is not a prerequisite for ad-hoc play
+and can run in parallel or after it; Phase 4 (plugins and modding) is deferred until the
+first three are done. Within Phase 1, the items that gate Phase 3 are frame pacing,
+stable multiplayer maps and the 25 fps target; the campaign-completion and rendering
+polish items can follow. Phase 3 also reuses the existing in-process server and client
+path, so its first milestone (two Vitas in a lobby) can start as soon as pacing is in.
+
 ## Current state (2026-09-04)
 
 - [x] Boots to the main menu on real hardware; profiles and saves work.
