@@ -117,8 +117,11 @@ settings and control remapping, styled after the original Xbox dashboard.
 ### 2.1 Technical objectives
 
 - **Launcher.** A 3D green-matrix, original-Xbox-style front end rendered with GXM: the
-  glowing green tubes and animated grid, a menu of installed content (campaign, maps,
-  saves), and hand-off into the recompiled engine without a process restart.
+  glowing green tubes and animated grid, and a menu of the installed **games** (Halo:
+  Combat Evolved first, Halo 2 next, each with its own recompiled engine and data under
+  `ux0:data/xita/<game>/`), their content (campaign, maps, saves), and hand-off into the
+  selected engine without a process restart. The dashboard is Xita's multi-game home
+  screen, not a Halo-only menu.
 - **Settings overlays.** In-game and launcher overlays for the runtime's tunables:
   frame pacing mode, look sensitivity and curves, aim assist, texture options, the debug
   knobs that stay useful (frame-time overlay, profiler). These replace hand-editing

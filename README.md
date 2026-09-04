@@ -1,11 +1,13 @@
 # Xita
 
-Halo: Combat Evolved, the original Xbox release, running natively on the PlayStation Vita.
+Original Xbox games running natively on the PlayStation Vita, one static recompilation at
+a time. The first title is Halo: Combat Evolved; Halo 2 is next.
 
-Xita is not an emulator. The game's x86 executable is **statically recompiled** to C by
+Xita is not an emulator. A game's x86 executable is **statically recompiled** to C by
 `xita-recomp` and linked against a runtime (`xita`) that re-implements the Xbox kernel,
 Direct3D 8 and DirectSound surface the game expects on top of the Vita's own libraries
-(GXM, sceCtrl, sceAudio, sceIo). The result is a normal homebrew VPK.
+(GXM, sceCtrl, sceAudio, sceIo). The result is a normal homebrew VPK. A dashboard that
+lists and launches the installed games is on the roadmap.
 
 **You need your own copy of the game.** Xita ships no game data. The executable and the
 maps are extracted from your own Xbox disc image and stay on your memory card.
@@ -21,8 +23,9 @@ maps are extracted from your own Xbox disc image and stay on your memory card.
 | Audio | Streams and effects through a software mixer |
 | Multiplayer | Single Vita only; ad-hoc between Vitas is the next goal |
 
-See [ROADMAP.md](ROADMAP.md) for the plan and [COMPATIBILITY.md](COMPATIBILITY.md) for
-per-level status. The frame rate is CPU-bound and the current target is 25 fps on foot.
+See [ROADMAP.md](ROADMAP.md) for the plan, [COMPATIBILITY.md](COMPATIBILITY.md) for the
+per-game list, and [docs/halo-ce.md](docs/halo-ce.md) for Halo's per-level status. The
+frame rate is CPU-bound and the current target is 25 fps on foot.
 
 ## What you need
 

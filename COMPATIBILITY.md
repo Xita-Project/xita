@@ -1,67 +1,56 @@
-# Compatibility
+# Game compatibility
 
-Per-level status on real hardware and on Vita3K, build `xita-2026-09-04`. Report your own
-results in the pinned "Compatibility reports" issue with the build date, the map, and
-whether you ran on a Vita, a PS TV or the emulator.
+Xita statically recompiles original Xbox executables to run natively on the PlayStation
+Vita. Each game is a separate port: the recompiler is generic, but every title needs its
+own symbol map, its own set of kernel and library calls served by the runtime, and its own
+shader translations. This page lists the games Xita targets and how far each one plays.
 
-Ratings: **Playable** (start to finish, normal play), **Ingame** (loads and renders, known
-problems listed), **Loads** (reaches the level, not played through), **Untested**,
-**Broken** (does not reach gameplay).
+Ratings: **Playable** (start to finish, normal play), **Ingame** (loads and renders,
+known problems listed), **Menus** (boots to its front end only), **Boots** (executable
+starts, no usable output), **Untested**, **Broken** (does not start).
 
-## Menus and system
+| Game | XDK build | Vita | Vita3K | Status | Details |
+| --- | --- | --- | --- | --- | --- |
+| Halo: Combat Evolved | 3925 | Ingame | Ingame | Menus, profiles and saves work; Blood Gulch playable at 11 to 20 fps; campaign through the cryo tutorial with a camera bug after the tube exit; three more maps load. Ad-hoc multiplayer between Vitas is the next milestone. | [docs/halo-ce.md](docs/halo-ce.md) |
 
-| Item | Vita | Vita3K | Notes |
-| --- | --- | --- | --- |
-| Main menu, profiles, settings | Playable | Playable | Intro movies are skipped (Bink is stubbed) |
-| Saved games, checkpoints | Playable | Playable | Files under `ux0:data/xita/save/` |
-| Multiplayer lobby, one Vita | Ingame | Ingame | Needs `XV_FORCE_START=1` to start with a single player |
+| Halo 2 | 5849 | Planned | Planned | Next title after Halo: Combat Evolved is playable. Expect a larger effort: a later XDK (new D3D internals and symbol map), the Xbox's full 64 MB in use, and heavier per-pixel shading. | |
 
-## Campaign
+No other title has been attempted yet. Candidates after Halo 2 will be chosen by how much
+of their engine goes through the calls Xita already serves.
 
-| Level | Map | Vita | Vita3K | Notes |
-| --- | --- | --- | --- | --- |
-| The Pillar of Autumn | a10 | Ingame | Ingame | Intro cinematic and cryo tutorial play. After the cryo-tube exit the camera stays at the cutscene shot on hardware (open bug). Green tint after the intro fixed 2026-09-04. |
-| Halo | a30 | Untested | Untested | |
-| The Truth and Reconciliation | a50 | Untested | Untested | |
-| The Silent Cartographer | b30 | Loads | Loads | Loaded once during testing; not played |
-| Assault on the Control Room | b40 | Untested | Untested | |
-| 343 Guilty Spark | c10 | Untested | Untested | |
-| The Library | c20 | Untested | Untested | |
-| Two Betrayals | c40 | Untested | Untested | |
-| Keyes | d20 | Untested | Untested | |
-| The Maw | d40 | Untested | Untested | |
+## What a new game needs
 
-## Multiplayer maps (solo, one Vita)
+Xita is not an emulator: a game only runs once its executable has been recompiled and
+every Xbox call it makes has an implementation on the Vita. In practice a title needs:
 
-| Map | Vita | Vita3K | Notes |
-| --- | --- | --- | --- |
-| Blood Gulch | Playable | Playable | 11 to 20 fps on foot, about 8 driving. Warthog, all weapons, sky, fog. Ghost and Scorpion presence unverified. |
-| Beaver Creek (Battle Creek) | Ingame | Ingame | Renders fully since the visibility fix; not played through |
-| Boarding Action | Loads | Loads | Loaded once; not played |
-| Hang 'Em High | Loads | Loads | Loaded once; not played |
-| Chill Out | Untested | Untested | |
-| Damnation | Untested | Untested | |
-| Derelict (carousel) | Untested | Untested | |
-| Longest | Untested | Untested | |
-| Prisoner | Untested | Untested | |
-| Rat Race | Untested | Untested | |
-| Sidewinder | Untested | Untested | |
-| Wizard | Untested | Untested | |
-| Chiron TL-34 (putput) | Untested | Untested | |
-
-## Known issues (all maps)
-
-- Frame rate is CPU-bound: 11 to 20 fps on foot in Blood Gulch on hardware. Target is 25.
-- No alpha test yet, so cut-out textures (foliage, decals) show their full quad.
-- Render-to-texture passes are skipped; surfaces that display them show stale content.
-- Intro and attract movies are skipped.
-- Only a single Vita can play; ad-hoc multiplayer between Vitas is the next milestone.
+- **XDK proximity.** The runtime implements the kernel, Direct3D 8 and DirectSound
+  entry points as the 3925-era XDK exposes them, and finds them in the executable through
+  a symbol database (`halo_symbols.json` for Halo). Titles built on nearby XDKs reuse
+  most of that; later XDKs changed D3D internals and need new HLE work.
+- **Symbols.** A symbol map for the game's statically linked XDK libraries, so the
+  recompiler can replace library code with the runtime's implementations instead of
+  lifting it. The XbSymbolDatabase format is the one the tooling reads.
+- **Graphics within GXM's reach.** Vertex programs are translated from NV2A microcode
+  and register-combiner setups from the D3D pixel-shader definitions the game submits.
+  Games that write the push buffer directly, or use NV2A features with no GXM equivalent
+  (some texture modes, two-sided stencil tricks), need per-title work.
+- **Memory.** The Vita gives the runtime about 109 MB in extended mode; the guest gets a
+  64 MB physical space plus the recompiled code and decoded textures. A game that needs
+  most of the Xbox's 64 MB and large texture pools will be tight.
+- **CPU.** One 444 MHz core runs the recompiled game logic; 30 fps titles that were
+  CPU-bound on the Xbox's 733 MHz Pentium III will not reach full speed without the
+  recompiler improvements on the roadmap.
+- **Your own copy.** As with Halo, the executable and assets come from the user's disc
+  image and are never distributed.
 
 ## How to report
 
-Open a comment on the pinned issue with:
+Open a comment on the pinned "Compatibility reports" issue with:
 
-1. Build (the date in the VPK name) and whether it's a Vita, PS TV or Vita3K.
-2. Map and how far you got.
-3. What went wrong, with a screenshot if it's visual, and `ux0:data/xita/xita.log`
-   attached (it contains no game data, only the runtime's own log).
+1. Game and its XDK build if you know it (the tooling prints it when parsing the XBE).
+2. Build of Xita (the date in the VPK name) and whether it's a Vita, a PS TV or Vita3K.
+3. How far it gets, what went wrong, a screenshot if it's visual, and
+   `ux0:data/xita/xita.log` attached (the log contains only the runtime's own output).
+
+Do not attach executables, disc images or game assets; reports containing game data will
+be removed.
