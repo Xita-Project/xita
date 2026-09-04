@@ -39,6 +39,7 @@ void xv_preempt(xctx *c)
      * back-edges was ~10 ms per fire on the Vita (28% of the frame spinning).  XV_PREEMPT_SLICE tunes it. */
     static int slice = -1; if (slice < 0) { const char *e = getenv("XV_PREEMPT_SLICE"); slice = (e && atoi(e) > 100) ? atoi(e) : 20000; }
     c->preempt = slice;
+    { extern void xd3d_lockstep_preempt(xctx *) __attribute__((weak)); if (xd3d_lockstep_preempt) xd3d_lockstep_preempt(c); }
     if (++n <= 5 || (n & 0x3FF) == 0) {
         XV_RT_LOG("preempt #%llu esp=%08X\n", (unsigned long long)n, c->r[4]);
 #ifndef __vita__

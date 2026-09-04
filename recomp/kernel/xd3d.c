@@ -220,6 +220,20 @@ void xv_hle_D3DDevice_BlockUntilVerticalBlank(xctx *c) { XD3D_COUNT("D3DDevice_B
  * thread early and let it run next (the callback must stay on that thread: running it inline on the
  * game thread deadlocked the map-list loader at the gametype screen). */
 static uint32_t g_vb_data; static unsigned g_vb_counter; static unsigned g_vb_kicks;
+static int xd3d_lockstep = -1;                 /* XV_LOCKSTEP=1: frame-locked clock + 30 fps cap (recording/replay) */
+static volatile unsigned g_vb_demand; static void lockstep_init(void);        /* lockstep: the game is in its vblank wait loop and needs one more */
+/* Lockstep: called at every cooperative preempt of a guest thread.  If the thread is spinning in Halo's
+ * vblank wait loop (0xBB060: [esp] ebx, [esp+4] edi, [esp+8] esi, 8 bytes of locals, then the return
+ * address of a `call 0xBB060`), ask the vblank thread for one more vblank.  The game therefore decides
+ * how many vblanks each frame takes - deterministic across runs - and never waits on the host clock. */
+void xd3d_lockstep_preempt(xctx *c)
+{
+    lockstep_init();
+    if (xd3d_lockstep <= 0 || g_vb_demand) return;
+    uint32_t ret = X_M32(c->r[4] + 20u);
+    if (ret > 0x11000u && ret < 0x3A0000u && X_M8(ret - 5u) == 0xE8u && (uint32_t)(ret + (int32_t)X_M32(ret - 4u)) == 0x000BB060u) g_vb_demand = 1;
+}
+static void lockstep_init(void) { if (xd3d_lockstep < 0) { const char *e = getenv("XV_LOCKSTEP"); xd3d_lockstep = e ? atoi(e) : 0; } }
 static xk_thread *g_vb_thread;                 /* the 60 Hz vblank guest thread (kicked on demand) */
 uint64_t xv_t_vbcb_us, xv_t_draw_us; unsigned xv_n_kicks, xv_n_fires;   /* per-frame timing (frame-time log) */
 extern uint64_t xk_os_monotonic_us(void);
@@ -246,6 +260,8 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip)
         return 0;
     }
     if (!g_vb_thread) return 0;
+    lockstep_init();
+    if (xd3d_lockstep > 0) { if (!g_vb_demand) g_vb_demand = 1; }   /* lockstep: one extra vblank on demand, see vblank_thread */
     xk_thread_kick(g_vb_thread); g_vb_kicks++; xv_n_kicks++;            /* the vblank thread fires the callback on its own thread, next switch */
     { static unsigned n; if (n++ < 5) D3DLOG("vblank kick from %08X (%u so far) -> vblank thread\n", eip, g_vb_kicks); }
     return 1;
@@ -263,6 +279,28 @@ static void vblank_thread(xctx *c, void *arg)
     unsigned hz = 60; { const char *e = getenv("XV_VBLANK_HZ"); if (e && atoi(e) >= 30 && atoi(e) <= 1000) hz = (unsigned)atoi(e); }
     D3DLOG("vblank thread: %u Hz real-time%s\n", hz, hz != 60 ? " (WARNING: not 60 - game speed scales with it)" : "");
     uint64_t t0 = xk_os_monotonic_us(), fired = 0;
+    lockstep_init();
+    if (xd3d_lockstep > 0) {
+        /* XV_LOCKSTEP=1 (recording/replay mode): exactly two vblanks per Present, so the simulation advances
+         * one 30 Hz tick per rendered frame and a frame-indexed pad replay reproduces a run bit for bit;
+         * Present caps the frame at 30 fps so the speed stays right.  Real time only takes over when no
+         * Present happens for 200 ms (loading) so the game's timers keep moving. */
+        D3DLOG("vblank thread: lockstep (2 per Present, 30 fps cap)\n");
+        /* Two vblanks per Present, plus one whenever the game sits in its wait loop (0xBB060 yields ->
+         * xd3d_vblank_kick sets g_vb_demand): the game decides how many vblanks a frame takes, never the
+         * host clock, so the count per frame depends only on game state.  200 ms without a Present (a
+         * load) advances real time so timers keep moving. */
+        unsigned seen = g_dev.frame; uint64_t t_last = t0, extra = 0;
+        for (;;) {
+            uint64_t now = xk_os_monotonic_us();
+            if (g_vb_demand) { g_vb_demand = 0; extra++; }
+            uint64_t due = (uint64_t)g_dev.frame * 2u + 2u + extra;
+            if (g_dev.frame != seen) { seen = g_dev.frame; t_last = now; }
+            else if (now - t_last > 200000u) { extra++; due++; t_last = now; }
+            if (fired >= due) { xk_yield(); continue; }               /* runs again at the game's next preempt */
+            while (fired < due) { vblank_fire(c); fired++; }
+        }
+    }
     for (;;) {
         uint64_t due = (xk_os_monotonic_us() - t0) * hz / 1000000u;
         if (fired >= due) { xk_sleep_us(1000000u / hz); continue; }
@@ -302,6 +340,12 @@ void xv_hle_D3DDevice_GetTransform(xctx *c) { XD3D_COUNT("D3DDevice_GetTransform
 /* Present / Swap: fire callbacks, count the frame */
 void xv_hle_D3DDevice_Present(xctx *c)
 { XD3D_COUNT("D3DDevice_Present");
+    lockstep_init();
+    if (xd3d_lockstep > 0) {                /* 30 fps cap: one simulation tick per frame at the right speed */
+        static uint64_t next; uint64_t now = xk_os_monotonic_us();
+        if (next && now < next) { while ((now = xk_os_monotonic_us()) < next) xk_yield(); }   /* yield, not sleep: sleeps are coarse on the emulator */
+        next = (next && now < next + 100000u) ? next + 33333u : now + 33333u;
+    }
     g_dev.frame++;
     hist_level_track();
     xd3d_r_present(g_dev.frame, g_dev.draws);
