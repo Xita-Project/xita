@@ -923,11 +923,11 @@ static SceGxmFragmentProgram *fragment_for(vs_slot_t *v, unsigned kind, unsigned
 {
     if (!v->fs_loaded[kind][blend]) {
         SceGxmBlendInfo bi; const SceGxmBlendInfo *pbi = blend_info_for(blend, &bi);
+        v->fs_loaded[kind][blend] = 1;                 /* cache the attempt either way: a failure must not be retried */
         if (xv_fshader_load(&v->fs[kind][blend], FS_GXP[kind], &v->vs, pbi) != 0) {
             static unsigned n; if (n++ < 12) XV_LOG("fragment %s does not link against %s (kind %u blend %u) - draws skipped\n", FS_GXP[kind], v->vs.desc ? v->vs.desc->gxp : "?", kind, blend);
-            return NULL;
+            /* fs.fprog is NULL (xv_fshader_load memsets it); leave it cached NULL so the draw is skipped, not retried */
         }
-        v->fs_loaded[kind][blend] = 1;
     }
     (void)p_tex0;
     return v->fs[kind][blend].fprog;

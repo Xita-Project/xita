@@ -17,9 +17,9 @@
 #define XV_LOG(...)  xv_logf("[xv/shader] " __VA_ARGS__)
 
 /* Patcher memory: modest fixed pools; 67 vertex + a few fragment programs fit. */
-#define PATCHER_BUFFER_SIZE        (128 * 1024)
-#define PATCHER_VERTEX_USSE_SIZE   (128 * 1024)
-#define PATCHER_FRAGMENT_USSE_SIZE (64 * 1024)
+#define PATCHER_BUFFER_SIZE        (512 * 1024)
+#define PATCHER_VERTEX_USSE_SIZE   (256 * 1024)
+#define PATCHER_FRAGMENT_USSE_SIZE (256 * 1024)
 #define CONST_STREAM_SIZE          (4 * 1024)     /* one float4 lives here (256 KB CDRAM is overkill) */
 
 typedef struct { SceUID uid; void *base; SceSize size; unsigned int usse_offset; } blk_t;
