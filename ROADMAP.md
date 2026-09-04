@@ -27,8 +27,15 @@ path, so its first milestone (two Vitas in a lobby) can start as soon as pacing 
       8-texel linear texture padding).
 - [x] Pad recorder and replay for reproducible runs; frame-time and per-phase timers;
       on-demand draw-call histograms.
-- [~] Camera stays at the cutscene shot after the cryo-tube exit on hardware (walks and
-      looks fine in a fresh emulator game; needs a recorded hardware run).
+- [x] Game clock honest: Halo derives frame time from the vblank count, and the runtime now
+      delivers exactly 60 vblanks per real second (the earlier 1000 Hz counter made the game
+      run fast in heavy scenes and 2x at 60 fps on the emulator).
+- [~] Camera stays at the cutscene shot when the Keyes cutscene is skipped (reproduced from a
+      recorded emulator run; fix in progress).
+- [~] Touch zones for Black, White and the stick clicks, plus deadzone and look-sensitivity
+      settings, merged; not yet verified on hardware.
+- [~] Dashboard first milestone (software-rendered home screen, standalone VPK) and the
+      ad-hoc networking test app exist as separate apps; neither has run on hardware yet.
 - [~] Offscreen render-target passes are dropped rather than rendered.
 
 ## Phase 1 — Gameplay Core & Campaign Completion
