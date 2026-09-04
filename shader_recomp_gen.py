@@ -473,11 +473,11 @@ def emit_output_assign(p: Plan, regs: Dict[str, str]) -> List[str]:
         elif o.cg_type == "float":
             src = f"{src}.x"
         if o.name == "position":
-        # Halo places the sky dome exactly on the far plane (clip z == w).  NV2A keeps those triangles;
-        # GXM clips z > w and rounding pushes whole sky triangles out (pale polygon holes in the sky).
-        L.append(f"    OUT.position = float4({src}.xy, {src}.z * 0.9999, {src}.w);   /* keep z < w: Halo puts the sky exactly on the far plane and GXM clips z == w away */")
-    else:
-        L.append(f"    OUT.{o.name} = {src};")
+            # Halo places the sky dome exactly on the far plane (clip z == w).  NV2A keeps those triangles;
+            # GXM clips z > w and rounding pushes whole sky triangles out (pale polygon holes in the sky).
+            L.append(f"    OUT.position = float4({src}.xy, {src}.z * 0.9999, {src}.w);   /* keep z < w: Halo puts the sky exactly on the far plane and GXM clips z == w away */")
+        else:
+            L.append(f"    OUT.{o.name} = {src};")
     L += ["    return OUT;"]
     return L
 

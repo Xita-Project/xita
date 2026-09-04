@@ -107,6 +107,31 @@ ok:
 /* back [va, va+size) with private physical pages (top-down, so the game's fixed physical ranges stay free) */
 static int virt_commit(uint32_t va, uint32_t size)
 {
+    /* Back the whole commit with ONE ascending run of arena pages when possible.  The per-page path below
+     * hands out pages top-down, so consecutive virtual pages (heap, thread stacks) landed in DESCENDING
+     * arena pages: any block crossing 4 KB was scrambled by host-contiguous copies (rep movs fast path,
+     * HLE bulk readers) - e.g. the portal clipper's in-place polygon copy came back empty and whole map
+     * clusters were culled.  With ascending runs, virtual order == arena order inside a commit. */
+    {
+        uint32_t need = 0;
+        for (uint32_t p = va; p < va + size; p += XK_PAGE) if (!g_virt_committed[p / XK_PAGE]) need++;
+        if (need) {
+            uint32_t bytes = need * XK_PAGE, a = 0;
+            for (uint32_t cand = (KERNEL_VA - bytes) & ~(XK_PAGE - 1); ; cand -= XK_PAGE) {
+                if (phys_range_free(cand, bytes)) { a = cand; break; }
+                if (cand < XK_PAGE) break;
+            }
+            if (a) {
+                uint32_t q = a;
+                for (uint32_t p = va; p < va + size; p += XK_PAGE) {
+                    if (g_virt_committed[p / XK_PAGE]) continue;
+                    g_phys_used[q / XK_PAGE] = 1; g_virt_committed[p / XK_PAGE] = 1;
+                    memset(g_xram + q, 0, XK_PAGE); map_page(p, q); q += XK_PAGE;
+                }
+                return 0;
+            }
+        }
+    }
     for (uint32_t p = va; p < va + size; p += XK_PAGE) {
         if (g_virt_committed[p / XK_PAGE]) continue;
         uint32_t pa = 0;

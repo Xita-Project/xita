@@ -554,6 +554,7 @@ static const SceGxmTexture *cube_fallback(void);
 
 
 unsigned xv_d3d_last_draws, xv_d3d_draw_acc, xv_d3d_bsp_acc;   /* draw counters for the frame-time log */
+unsigned xv_dbg_count[16];                                        /* instrumented guest functions (portal walker) */
 static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint32_t base_vertex)
 {
     xv_d3d_draw_acc++;
@@ -751,7 +752,8 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             unsigned w = sz ? (sz & 0xFFF) + 1 : 1u << ((fw >> 20) & 0xF), h = sz ? ((sz >> 12) & 0xFFF) + 1 : 1u << ((fw >> 24) & 0xF);
             n += snprintf(tb + n, sizeof tb - n, " %02X:%ux%u%s", (fw >> 8) & 0xFF, w, h, (texok >> t) & 1 ? "" : "!");
         }
-        XV_LOG("[hist]   textures:%s\n", tb);
+        { extern char xd3d_last_stack[400]; XV_LOG("[hist]   stack:%s\n", xd3d_last_stack); }
+        XV_LOG("[hist]   textures:%s psc0 %.2f %.2f %.2f %.2f psc1 %.2f %.2f %.2f %.2f\n", tb, c->psc[0][0], c->psc[0][1], c->psc[0][2], c->psc[0][3], c->psc[1][0], c->psc[1][1], c->psc[1][2], c->psc[1][3]);
         if (!S.z_enable && c->streams[0]) {                          /* depth-off draws (sky): where do the first vertices land in clip space? */
             unsigned st = S.stream_stride[0] ? S.stream_stride[0] : d->stride[0]; char zb[400]; int k = 0;
             for (unsigned i = 0; i < 6 && k < 360; ++i) {
@@ -767,9 +769,9 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             uint32_t cw = S.tex_guest[t]; if (!cw) continue;
             const uint32_t *hdr = (const uint32_t *)xv_guest_ptr(cw); uint32_t fmtw = hdr[3], data = hdr[1];
             unsigned fmt = (fmtw >> 8) & 0xFF, lw = (fmtw >> 20) & 0xF, lh = (fmtw >> 24) & 0xF, w = 1u << lw, h = 1u << lh;
-            if (w * h > 256) continue;
+            if (w * h > 256 && !(fmt == 0x0E || fmt == 0x0F || fmt == 0x0C || fmt == 0x19)) continue;   /* tiny textures, plus BC/A8 (sky) first bytes */
             const uint8_t *px = (const uint8_t *)xv_guest_ptr(0x80000000u | data); unsigned bpp = (fmt == 0x1A || fmt == 0x20 || fmt == 0x05) ? 2 : (fmt == 0x06 || fmt == 0x07) ? 4 : 1;
-            char rb[600]; int k = 0; for (unsigned i = 0; i < w * h * bpp && i < 128 && k < 560; ++i) k += snprintf(rb + k, sizeof rb - k, "%02X", px[i]);
+            char rb[600]; int k = 0; for (unsigned i = 0; i < ((w * h > 256) ? 64u : w * h * bpp) && i < 128 && k < 560; ++i) k += snprintf(rb + k, sizeof rb - k, "%02X", px[i]);
             XV_LOG("[hist]   tex%u fmt %02X %ux%u raw:%s\n", t, fmt, w, h, rb);
         }
     }

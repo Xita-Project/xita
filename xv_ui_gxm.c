@@ -831,7 +831,12 @@ void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t d
     xv_d3d_SetRenderState_DestBlend(gl_blend_to_d3d(xd3d_state.dst_blend));
     if (indexed) {
         uint32_t ib = xd3d_state.indices;                              /* X_D3DIndexBuffer header; Data = guest address of the WORDs */
-        uint32_t idata = data ? data : (ib ? (0x80000000u | guest_u32(ib + 4)) : 0);   /* IB Data is physical: use the alias */
+        uint32_t idata = data ? data : (ib ? guest_u32(ib + 4) : 0);   /* TEST: bare IB Data again */
+        { extern int xd3d_hist_active(void); if (xd3d_hist_active()) {
+            static unsigned once; UI_LOG("[hist] ib obj %08X data %08X pidx %08X count %u\n", ib, ib ? guest_u32(ib + 4) : 0, data, count);
+            if (!once++) { uint32_t tbl = guest_u32(0x803A6000u + 0x1C), cnt = guest_u32(0x803A6000u + 0x18);
+                for (unsigned i = 0; i < 6 && i < cnt; ++i) UI_LOG("[hist] tri obj[%u] %08X %08X %08X\n", i, guest_u32(tbl + i * 12), guest_u32(tbl + i * 12 + 4), guest_u32(tbl + i * 12 + 8)); }
+        } }
         if (!idata) return;
         xv_d3d_DrawIndexedVerticesBase(prim, count, idata, xd3d_state.index_base);
     } else {
@@ -924,8 +929,8 @@ void xd3d_r_present(unsigned frame, unsigned draws)
     if (++g_t_frames == 60) {
         g_xv_ovl_game_ms = g_t_game_acc / 60000.0f; g_xv_ovl_render_ms = g_t_render_acc / 60000.0f;
         g_xv_ovl_fps = 60.0e6f / (float)(g_t_game_acc + g_t_render_acc + 1);
-        { extern unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc; UI_LOG("frame time: game %.1f ms + render %.1f ms = %.1f fps | %u textures %u KB | decode %u tex %.1f ms | draws/frame %u bsp %u\n",
-               g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1)); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; } g_dec_n = 0; g_dec_us = 0;
+        { extern unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc, xv_dbg_count[16]; UI_LOG("frame time: game %.1f ms + render %.1f ms = %.1f fps | %u textures %u KB | decode %u tex %.1f ms | draws/frame %u bsp %u | frames %u vis A30=%u 940=%u 520=%u 6D0=%u 126A0=%u 53630=%u leaf-1=%u clus-1=%u | vis2 32E0=%u 24B0=%u 3280=%u 28D0=%u B7F10=%u 39C0=%u C5E0=%u BFD0=%u\n",
+               g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1), g_t_frames, xv_dbg_count[0], xv_dbg_count[1], xv_dbg_count[2], xv_dbg_count[3], xv_dbg_count[4], xv_dbg_count[5], xv_dbg_count[6], xv_dbg_count[7], xv_dbg_count[8], xv_dbg_count[9], xv_dbg_count[10], xv_dbg_count[11], xv_dbg_count[12], xv_dbg_count[13], xv_dbg_count[14], xv_dbg_count[15]); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; memset(xv_dbg_count, 0, sizeof xv_dbg_count); } g_dec_n = 0; g_dec_us = 0;
         g_t_frames = 0; g_t_game_acc = g_t_render_acc = 0;
     }
 }
