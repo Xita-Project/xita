@@ -30,3 +30,6 @@ recomp/host/*.ppm
 .mapcache/
 assets/ui_scene.bin
 /tools/adhoctest/[bx]*
+/dashboard/out/
+/dashboard/build/
+/dashboard/*.vpk
