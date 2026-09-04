@@ -310,6 +310,9 @@ void xv_hle_D3DDevice_Present(xctx *c)
             if (unit != 0xFFFFFFFFu && oh) { uint32_t ent = X_M32(oh + 0x34); obj = X_M32(ent + (unit & 0xFFFF) * 12 + 8); if (obj) for (int i = 0; i < 3; ++i) { uint32_t w = X_M32(obj + 0x5C + 4 * i); memcpy(&up[i], &w, 4); } }
             D3DLOG("  director: vt %08X w104 %08X mode16 %04X ctl %u | player0 unit %08X obj %08X pos %.2f %.2f %.2f | dir+B2 %02X +B6 %08X\n", X_M32(0x271100), X_M32(0x271104), X_M16(0x27114C),
                    ccp ? X_M8(ccp) : 255, unit, obj, up[0], up[1], up[2], X_M8(0x2711B8), X_M32(0x2711BC));
+            if (obj) { float fw[3]; for (int i = 0; i < 3; ++i) { uint32_t w = X_M32(obj + 0x74 + 4 * i); memcpy(&fw[i], &w, 4); }
+                D3DLOG("  unit: tag %08X flags %08X parent %08X fwd %.2f %.2f %.2f seat %04X anim253 %02X +254 %02X +0B0 %08X +0B4 %08X\n", X_M32(obj), X_M32(obj + 0x10), X_M32(obj + 0xCC),
+                       fw[0], fw[1], fw[2], X_M16(obj + 0x2A0), X_M8(obj + 0x253), X_M8(obj + 0x254), X_M32(obj + 0xB0), X_M32(obj + 0xB4)); }
             /* director_update (0x120160): dt @0x2710F0, transition time dir+4 @0x2710FC, observer command @0x271150 (flags, pos, +60 transition, +64 mode),
              * observer state @0x2714DC (+4 cmd ptr, +54.. current camera, +70/+71 flags) */
             float f[12]; for (int i = 0; i < 12; ++i) { uint32_t w = 0; switch (i) { case 0: w = X_M32(0x2710F0); break; case 1: w = X_M32(0x2710FC); break;

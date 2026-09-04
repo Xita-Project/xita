@@ -155,6 +155,38 @@ def emit_stage(s: dict, mux_msb: bool, L: List[str], written: Set[str]) -> None:
     L.append("    }")
 
 
+def is_normalisation_cube(d: dict, i: int) -> bool:
+    """True when texture t{i} is read only as an expand_normal/expand_negate operand of a dot product
+    (the NV2A normalisation-cube-map idiom); anything read as a colour, in the alpha combiner, in the
+    final combiner or by a dependent stage keeps the real cube lookup."""
+    reg = f"t{i}"
+    seen = False
+    for s in d["stages"]:
+        ro = s["rgb_out"]
+        for k, inp in enumerate(s["rgb_in"]):
+            if inp["reg"] != reg:
+                continue
+            seen = True
+            dot = ro["ab_dot"] if k < 2 else ro["cd_dot"]
+            if not dot or inp["mapping"] not in ("expand_normal", "expand_negate"):
+                return False
+        for inp in s["alpha_in"]:
+            if inp["reg"] == reg:
+                return False
+    fin = d["final"]
+    if fin.get("present"):
+        for key in ("a", "b", "c", "d", "e", "f", "g"):
+            v = fin.get(key)
+            if isinstance(v, dict) and v.get("reg") == reg:
+                return False
+    for t in d["textures"]:
+        if t["mode"] in ("DPNDNT_AR", "DPNDNT_GB", "BUMPENVMAP", "BUMPENVMAP_LUM"):
+            src = t["input_stage"] if t["input_stage"] is not None else max(0, t["index"] - 1)
+            if src == i:
+                return False
+    return seen
+
+
 def emit_textures(d: dict, L: List[str], samplers: Dict[int, str], warnings: List[str]) -> None:
     used = set(d["textures_used"])
     for t in d["textures"]:
@@ -176,7 +208,13 @@ def emit_textures(d: dict, L: List[str], samplers: Dict[int, str], warnings: Lis
             samplers[i] = "sampler2D"
             L.append(f"    float4 t{i} = tex2Dproj(tex{i}, float3({tc}.xy, {tc}.w));")
         elif mode == "CUBEMAP":
-            if CUBE_EXPR is None:
+            if CUBE_EXPR is None and is_normalisation_cube(d, i):
+                # Halo binds a normalisation cube map here and only ever dots its expanded value against a bump
+                # map: normalise the interpolated vector directly.  Our uploaded cube faces do not sit in GXM's
+                # face/orientation convention (bump-lit cliffs came out with black contour bands, 2026-09-04),
+                # and an analytic normalise is cheaper than a cube fetch anyway.
+                L.append(f"    float4 t{i} = float4(normalize({tc}.xyz) * 0.5 + 0.5, 1.0);   // normalisation cube map -> analytic")
+            elif CUBE_EXPR is None:
                 samplers[i] = "samplerCUBE"
                 L.append(f"    float4 t{i} = texCUBE(tex{i}, {tc}.xyz);")
             else:
