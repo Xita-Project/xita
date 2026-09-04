@@ -648,7 +648,7 @@ class Emitter:
                     out.append(f"    X_PUSH32(0x{nxt:X}u);")
                     if self.trace:
                         out.append(f'    if (xv_trace_enabled) xv_trace_call(c, "{name}", {KERNEL_ARGC.get(name, 0)});')
-                    out.append(f"    xk_{name}(c);")
+                    out.append(f"    XV_HLE_CALL(0x{slot:X}u, xk_{name});")
                     return
             out.append(f"    {{ uint32_t t_ = {self.operand(ins,0,4)}; X_PUSH32(0x{nxt:X}u); xv_call(c, t_); }}")
             return
@@ -748,11 +748,11 @@ class Emitter:
         if tgt in self.hle:
             name = self.hle[tgt]["name"]
             self.hle_used.add(name)
-            return f"xv_hle_{name}(c)"
+            return f"XV_HLE_CALL(0x{tgt:X}u, xv_hle_{name})"
         if tgt in self.kthunks:
             name = KERNEL_EXPORTS.get(self.kthunks[tgt], f"ordinal_{self.kthunks[tgt]}")
             self.kernel_used.add(name)
-            return f"xk_{name}(c)"
+            return f"XV_HLE_CALL(0x{tgt:X}u, xk_{name})"
         if tgt in self.disc.functions:
             return f"f_{tgt:08X}(c)"
         return f"xv_call(c, 0x{tgt:X}u)"
@@ -1168,6 +1168,9 @@ class Emitter:
         proto.append("extern int xv_trace_enabled; void xv_trace_call(xctx *c, const char *name, unsigned nargs);")
         proto.append("extern int xv_trace_funcs; void xv_trace_func(uint32_t entry);   /* --trace-funcs: per-frame call histogram */")
         proto.append("extern volatile uint32_t xv_cur_fn;                       /* sampling profiler: last entered function */")
+        proto.append("/* HLE/kernel calls mark the profiler's current function as 0x80000000 | guest address of the HLE, so runtime time")
+        proto.append(" * (draw translation, file I/O, waits) is its own bucket instead of landing on the last guest function entered. */")
+        proto.append("#define XV_HLE_CALL(addr, fn) do { uint32_t xvfn_ = xv_cur_fn; xv_cur_fn = 0x80000000u | (uint32_t)(addr); fn(c); xv_cur_fn = xvfn_; } while (0)")
         proto.append("extern int xv_watch_n; void xv_watch_enter(uint32_t fn, xctx *c); void xv_watch_leave(uint32_t fn, uint32_t back, xctx *c);\n#define XV_FN(a) do { xv_cur_fn = (a); if (xv_trace_funcs) xv_trace_func(a); if (xv_watch_n) xv_watch_enter((a), c); } while (0)")
         proto.append("#define XV_FN_BACK(a) do { if (xv_watch_n) xv_watch_leave(xv_cur_fn, (a), c); xv_cur_fn = (a); } while (0)")
         proto.append("/* HLE symbols (weak: default trap until implemented) */")

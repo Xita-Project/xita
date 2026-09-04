@@ -107,7 +107,7 @@ static void prof_dump(void)
     char line[220]; int ln = 0;
     xv_logf("[prof] %u samples, %u functions; top by time:\n", ps_total, n);
     for (unsigned i = 0; i < n && i < 40; ++i) {
-        ln += snprintf(line + ln, sizeof line - ln, " %X:%.1f%%", rows[i][0], 100.0 * rows[i][1] / (ps_total ? ps_total : 1));
+        ln += snprintf(line + ln, sizeof line - ln, rows[i][0] & 0x80000000u ? " H%X:%.1f%%" : " %X:%.1f%%", rows[i][0] & 0x7FFFFFFFu, 100.0 * rows[i][1] / (ps_total ? ps_total : 1));   /* Hxxxx = time inside the HLE called from guest address xxxx */
         if (ln > 170 || i + 1 == n || i == 39) { xv_logf("[prof]%s\n", line); ln = 0; }
     }
     memset(ps, 0, sizeof ps); ps_used = ps_total = 0;
