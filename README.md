@@ -126,6 +126,15 @@ tools/vita3k.sh shaders shaders/                # compiles shaders/*.cg inside t
 | `tools/` | recompile, emulator and on-device shader-compiler helpers |
 | `site/` | the project page |
 
+## How this was built
+
+Most of the code, tooling and documentation in this repository was written with Claude
+(Fable 5.1, Anthropic) working in Claude Code, with the project's author directing the
+work, testing every build on real hardware and on Vita3K, and deciding what to fix and in
+what order. The reverse-engineering findings in the notes and commit messages were
+established the same way: by measurement against the running game, not by memory. Treat
+the code as you would any other contributor's: read it, test it, report what breaks.
+
 ## Legal
 
 Xita is an independent research project. Halo and Xbox are trademarks of their respective
