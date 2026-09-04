@@ -304,7 +304,19 @@ void xv_hle_D3DDevice_Present(xctx *c)
                             + m[2][i] * m[2][3] / (m[2][0]*m[2][0]+m[2][1]*m[2][1]+m[2][2]*m[2][2] + 1e-9f)); } } if (gg) { uint32_t pv = X_M32(gg + 4); memcpy(&pct, &pv, 4); }
         float cx, cy, cz; uint32_t v; v = X_M32(0x2331E4); memcpy(&cx, &v, 4); v = X_M32(0x2331E8); memcpy(&cy, &v, 4); v = X_M32(0x2331EC); memcpy(&cz, &v, 4);
         D3DLOG("  frame stats: %u Begin/End, %u SetVertexData | game_globals %08X: loaded %u active %u b2 %u b3 %u pct %.2f | director on %u cam %.2f %.2f %.2f | gg+C %08X +10 %08X +14 %08X | cam %.2f %.2f %.2f fwd %.2f %.2f %.2f | act %08X\n", g_im.begins_in_frame, g_im.setdata_in_frame,
-               gg, gg ? X_M8(gg) : 0, gg ? X_M8(gg + 1) : 0, gg ? X_M8(gg + 2) : 0, gg ? X_M8(gg + 3) : 0, pct, X_M8(0x2331D9), cx, cy, cz, gg ? X_M32(gg + 0xC) : 0, gg ? X_M32(gg + 0x10) : 0, gg ? X_M32(gg + 0x14) : 0, campos[0], campos[1], campos[2], camfwd[0], camfwd[1], camfwd[2], X_M32(0x276794) ? X_M32(X_M32(0x276794)) : 0); }
+               gg, gg ? X_M8(gg) : 0, gg ? X_M8(gg + 1) : 0, gg ? X_M8(gg + 2) : 0, gg ? X_M8(gg + 3) : 0, pct, X_M8(0x2331D9), cx, cy, cz, gg ? X_M32(gg + 0xC) : 0, gg ? X_M32(gg + 0x10) : 0, gg ? X_M32(gg + 0x14) : 0, campos[0], campos[1], campos[2], camfwd[0], camfwd[1], camfwd[2], X_M32(0x276794) ? X_M32(X_M32(0x276794)) : 0);
+        {   /* director @0x271100: mode vtable (120A90 scripted / 11E750 first person / 11DF50 seat), camera_control flag, player 0 unit + its position */
+            uint32_t ccp = X_M32(0x2FA31C), pl = X_M32(0x276794), unit = pl ? X_M32(pl + 0x10) : 0xFFFFFFFFu, oh = X_M32(0x2FC6AC), obj = 0; float up[3] = { 0, 0, 0 };
+            if (unit != 0xFFFFFFFFu && oh) { uint32_t ent = X_M32(oh + 0x34); obj = X_M32(ent + (unit & 0xFFFF) * 12 + 8); if (obj) for (int i = 0; i < 3; ++i) { uint32_t w = X_M32(obj + 0x5C + 4 * i); memcpy(&up[i], &w, 4); } }
+            D3DLOG("  director: vt %08X w104 %08X mode16 %04X ctl %u | player0 unit %08X obj %08X pos %.2f %.2f %.2f | dir+B2 %02X +B6 %08X\n", X_M32(0x271100), X_M32(0x271104), X_M16(0x27114C),
+                   ccp ? X_M8(ccp) : 255, unit, obj, up[0], up[1], up[2], X_M8(0x2711B8), X_M32(0x2711BC));
+            /* director_update (0x120160): dt @0x2710F0, transition time dir+4 @0x2710FC, observer command @0x271150 (flags, pos, +60 transition, +64 mode),
+             * observer state @0x2714DC (+4 cmd ptr, +54.. current camera, +70/+71 flags) */
+            float f[12]; for (int i = 0; i < 12; ++i) { uint32_t w = 0; switch (i) { case 0: w = X_M32(0x2710F0); break; case 1: w = X_M32(0x2710FC); break;
+                case 2: case 3: case 4: w = X_M32(0x271154 + 4 * (i - 2)); break; case 5: w = X_M32(0x271150 + 0x60); break;
+                case 6: case 7: case 8: w = X_M32(0x2714DC + 0x54 + 4 * (i - 6)); break; case 9: case 10: case 11: w = X_M32(0x2714DC + 0x60 + 4 * (i - 9)); break; } memcpy(&f[i], &w, 4); }
+            D3DLOG("  director2: dt %.4f trans %.3f | cmd flags %08X pos %.2f %.2f %.2f +60 %.3f +64 %08X | obs cmdp %08X +54 %.2f %.2f %.2f +60 %.2f %.2f %.2f +70 %02X %02X\n",
+                   f[0], f[1], X_M32(0x271150), f[2], f[3], f[4], f[5], X_M32(0x271150 + 0x64), X_M32(0x2714DC + 4), f[6], f[7], f[8], f[9], f[10], f[11], X_M8(0x2714DC + 0x70), X_M8(0x2714DC + 0x71)); } }
     {   /* --trace-funcs: count only during the requested frame, dump at its Present */
         extern int xv_trace_funcs; extern int xv_trace_func_frame(void); extern void xv_trace_func_reset(void); extern void xv_trace_func_dump(const char *);
         int ff = xv_trace_func_frame();

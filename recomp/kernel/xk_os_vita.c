@@ -325,6 +325,40 @@ void xk_os_pad_poll(xk_os_pad *p)
                 else if (!strcmp(q, "x")) p->p2_analog[2] = 255; else if (!strcmp(q, "y")) p->p2_analog[3] = 255;
             }
         }
+        /* Pad recorder / raw replay.  XV_PAD_REC=1 (env.txt or xboxvita.cfg) appends one "frame lx ly rx ry buttons"
+         * line to ux0:data/xboxvita/pad_rec.txt every time the pad state changes (frame = Present count, the same
+         * index pad.txt uses).  Copy that file to pad_play.txt and the state is fed back in at the same frames, each
+         * line holding until the next one - so a play session recorded on the emulator (or on the Vita, from the
+         * card) can be re-run unattended.  Timing is per rendered frame, so a replay only lines up on a build that
+         * renders at about the same rate as the recording. */
+        {
+            static int rec = -1; static SceUID rfd = -1; static SceCtrlData last; static char rbuf[4096]; static int rlen; static unsigned rflush;
+            static char *play; static int plen, ppos, pinit; static unsigned pnext; static SceCtrlData pstate; static int pactive;
+            if (!pinit) { pinit = 1; SceUID fd = sceIoOpen("ux0:data/xboxvita/pad_play.txt", SCE_O_RDONLY, 0);
+                if (fd >= 0) { SceOff sz = sceIoLseek(fd, 0, SCE_SEEK_END); sceIoLseek(fd, 0, SCE_SEEK_SET);
+                    play = malloc((size_t)sz + 1); plen = play ? sceIoRead(fd, play, (SceSize)sz) : 0; if (plen < 0) plen = 0; if (play) play[plen] = 0; sceIoClose(fd);
+                    pnext = play && sscanf(play, "%u", &pnext) == 1 ? pnext : 0xFFFFFFFFu;
+                    xv_logf("[xk] pad replay: %d bytes, first frame %u\n", plen, pnext); } }
+            if (play) {
+                while (polls >= pnext && ppos < plen) {                      /* consume every line due by now */
+                    unsigned f, lx, ly, rx, ry, bt; int k;
+                    if (sscanf(play + ppos, "%u %u %u %u %u %x%n", &f, &lx, &ly, &rx, &ry, &bt, &k) < 6) { ppos = plen; pnext = 0xFFFFFFFFu; break; }
+                    ppos += k; while (ppos < plen && (play[ppos] == '\n' || play[ppos] == '\r' || play[ppos] == ' ')) ppos++;
+                    pstate.lx = lx; pstate.ly = ly; pstate.rx = rx; pstate.ry = ry; pstate.buttons = bt; pactive = 1;
+                    pnext = (ppos < plen && sscanf(play + ppos, "%u", &f) == 1) ? f : 0xFFFFFFFFu;
+                }
+                if (pactive) { d.buttons |= pstate.buttons;                  /* the physical pad still adds on top */
+                    if (pstate.lx < 64 || pstate.lx > 192 || pstate.ly < 64 || pstate.ly > 192) { d.lx = pstate.lx; d.ly = pstate.ly; }
+                    if (pstate.rx < 64 || pstate.rx > 192 || pstate.ry < 64 || pstate.ry > 192) { d.rx = pstate.rx; d.ry = pstate.ry; } }
+            }
+            if (rec < 0) { const char *e = getenv("XV_PAD_REC"); rec = e ? atoi(e) : 0;
+                if (rec) { rfd = sceIoOpen("ux0:data/xboxvita/pad_rec.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); xv_logf("[xk] pad record: fd %d\n", (int)rfd); memset(&last, 0xFF, sizeof last); } }
+            if (rfd >= 0) {
+                if (d.lx != last.lx || d.ly != last.ly || d.rx != last.rx || d.ry != last.ry || d.buttons != last.buttons) {
+                    last = d; rlen += snprintf(rbuf + rlen, sizeof rbuf - rlen, "%u %u %u %u %u %x\n", polls, d.lx, d.ly, d.rx, d.ry, d.buttons); }
+                if (rlen > (int)sizeof rbuf - 64 || (rlen && polls - rflush > 120)) { sceIoWrite(rfd, rbuf, rlen); rlen = 0; rflush = polls; }
+            }
+        }
     }
     /* Auto-advance past the attract screen to the main menu: pulse Start, then A, on a slow cycle
      * (Vita3K keyboard mapping is unreliable to script; real pad input still works and overrides). */
@@ -363,7 +397,8 @@ void xk_os_pad_poll(xk_os_pad *p)
     {
         uint32_t gg = X_M32(0x2F8CA0u);
         int in_control = !xk_file_in_ui_map && gg && !X_M8(gg + 2);
-        { static unsigned n; if ((n++ % 600) == 0) xv_logf("[xk] pad raw lx %u ly %u rx %u ry %u buttons %08X | ui_map %d paused %d -> extras %d\n", d.lx, d.ly, d.rx, d.ry, d.buttons, xk_file_in_ui_map, gg ? X_M8(gg + 2) : -1, in_control); }
+        { static unsigned n, m; int defl = (d.lx < 64 || d.lx > 192 || d.ly < 64 || d.ly > 192 || d.rx < 64 || d.rx > 192 || d.ry < 64 || d.ry > 192);
+          if ((n++ % 600) == 0 || (defl && (m++ % 30) == 0)) xv_logf("[xk] pad raw lx %u ly %u rx %u ry %u buttons %08X | ui_map %d paused %d -> extras %d\n", d.lx, d.ly, d.rx, d.ry, d.buttons, xk_file_in_ui_map, gg ? X_M8(gg + 2) : -1, in_control); }
         if (in_control) {
             b &= ~0xFu;                                              /* in-game the D-pad bits are NOT passed: the game does move the player with them */
             if (d.buttons & SCE_CTRL_DOWN) b |= 0x40;                /* LTHUMB */

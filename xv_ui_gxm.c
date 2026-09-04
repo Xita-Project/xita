@@ -926,6 +926,7 @@ void xd3d_r_present(unsigned frame, unsigned draws)
 }
 static void xd3d_r_present_inner(unsigned frame, unsigned draws)
 {
+    { extern void xv_gpu_flush_pending(void); xv_gpu_flush_pending(); }   /* merged dcache cleans for this frame's vertex/index/texture data */
     xd3d_hist_small_check(frame, draws);
     (void)draws;
     extern void xv_present(void);
