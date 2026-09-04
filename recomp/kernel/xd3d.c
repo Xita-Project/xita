@@ -181,9 +181,12 @@ unsigned xd3d_pad_frame(void)
         uint32_t pl = X_M32(0x276794u);
         uint32_t unit = pl ? X_M32(pl + 0x10) : 0xFFFFFFFFu;
         if (pl && unit != 0xFFFFFFFFu) g_pad_origin = g_dev.frame ? g_dev.frame : 1;
-        else return 0;
+        else return g_dev.frame;   /* pre-gameplay: boot frame (< 1000000) */
     }
-    return g_dev.frame >= g_pad_origin ? g_dev.frame - g_pad_origin + 1 : 0;
+    /* Menus index by boot frame (small, deterministic); gameplay by a rebased counter starting at
+     * 1000000 so the two ranges never collide.  The variable part - how many boot frames the level load
+     * takes - lands entirely in the gap, so record and replay line up on both sides. */
+    return 1000000u + (g_dev.frame - g_pad_origin);
 }
 
 static void call_guest(xctx *c, uint32_t fn, uint32_t arg)   /* stdcall callback with one argument */
@@ -321,6 +324,30 @@ static void vblank_thread(xctx *c, void *arg)
         while (fired < due) { vblank_fire(c); fired++; }
     }
 }
+/* Cutscene-skip camera recovery.  Skipping a cinematic fast-forwards its script but the closing
+ * camera_control(off) never runs, so the director mode pointer (0x271100) stays on the scripted camera
+ * (0x120A90) and the view is left at the cutscene shot instead of returning to first person - the
+ * Keyes/Chief bug.  camera_control is guest f_0011FFD0 (stdcall, one arg: on=scripted, off=restore
+ * first person/seat).  When the player is in control and the scripted camera has sat with its transition
+ * finished for a while (not an active multi-shot cinematic, which keeps resetting the transition), call
+ * the game's own camera_control(off) once to hand the camera back.  XV_CAM_FIX=0 disables it. */
+static void xd3d_cam_recover(xctx *c)
+{
+    static int on = -1; if (on < 0) { const char *e = getenv("XV_CAM_FIX"); on = e ? atoi(e) : 1; }
+    if (!on) return;
+    static unsigned stuck; static int armed = 1;
+    uint32_t vt  = X_M32(0x271100u);
+    uint32_t pl  = X_M32(0x276794u);
+    uint32_t unit = pl ? X_M32(pl + 0x10) : 0xFFFFFFFFu;
+    if (vt != 0x120A90u || pl == 0 || unit == 0xFFFFFFFFu) { stuck = 0; armed = 1; return; }
+    float trans; { uint32_t w = X_M32(0x271150u + 0x60u); memcpy(&trans, &w, 4); }   /* observer transition countdown */
+    if (trans > 0.05f) { stuck = 0; return; }                                        /* a cinematic shot is still moving */
+    if (++stuck < 60u) return;                                                        /* ~2 s settled on the scripted cam */
+    if (!armed) return;
+    armed = 0; stuck = 0;
+    D3DLOG("cam recover: scripted camera stuck with player in control -> camera_control(off)\n");
+    call_guest(c, 0x0011FFD0u, 0u);
+}
 void xv_hle_D3DDevice_SetVerticalBlankCallback(xctx *c)
 { XD3D_COUNT("D3DDevice_SetVerticalBlankCallback");
     static int started;
@@ -354,6 +381,7 @@ void xv_hle_D3DDevice_GetTransform(xctx *c) { XD3D_COUNT("D3DDevice_GetTransform
 /* Present / Swap: fire callbacks, count the frame */
 void xv_hle_D3DDevice_Present(xctx *c)
 { XD3D_COUNT("D3DDevice_Present");
+    xd3d_cam_recover(c);
     lockstep_init();
     if (xd3d_lockstep > 0) {                /* 30 fps cap: one simulation tick per frame at the right speed */
         static uint64_t next; uint64_t now = xk_os_monotonic_us();
