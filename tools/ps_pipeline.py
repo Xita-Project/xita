@@ -6,17 +6,25 @@ the (vertex program, combiner program) pairs the game drew with into Vita fragme
   log lines used:   [psdef] <hash> <240 hex bytes>        one per unique X_D3DPIXELSHADERDEF
                     [pspair] <vs fnv> <ps hash> ...        one per unique draw pairing
   persistent state: shaders/psdefs/<hash>.bin, shaders/psdefs/pairs.txt   (accumulated over runs)
-  output:           shaders/ps_<hash>_<vsmask>.frag.cg     (compile with tools/shadercomp -> .gxp)
+  Run without logs to regenerate from the accumulated .bin files and pairs.txt.
+  Legacy and canonical logged hashes are accepted; captures/pairs retain their identities.
+  shaders/halo_pairs.json describes vertex declarations, not logged PS pairings.
+  output:           shaders/ps_<canonical_hash>_<vsmask>.frag.cg     (compile with tools/shadercomp -> .gxp)
                     shaders/xv_ps_table.h                   runtime lookup table
 
-Usage: tools/ps_pipeline.py <xita.log> [more logs...]
+Usage: tools/ps_pipeline.py [xita.log ...]
 """
-import glob, json, os, re, subprocess, sys
+import os, re, sys
+from dataclasses import asdict
+from pathlib import Path
+from psdef_hash import canonicalize, canonical_hash, original_hash
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SH = os.path.join(ROOT, "shaders")
 DEFS = os.path.join(SH, "psdefs")
-PY = sys.executable
+sys.path.insert(0, ROOT)
+from dx8_pixelshader_parse import decode_psdef
+import pixelshader_recomp_gen as gen
 VAR_BITS = [("color0", 1), ("color1", 2), ("texcoord0", 4), ("texcoord1", 8), ("texcoord2", 16), ("texcoord3", 32), ("fog", 64)]
 OUT_MAP = {"oD0": "color0", "oD1": "color1", "oT0": "texcoord0", "oT1": "texcoord1", "oT2": "texcoord2", "oT3": "texcoord3", "oFog": "fog"}
 
@@ -50,33 +58,64 @@ def main():
                 pairs.add((m.group(1), m.group(2)))
     open(pairs_path, "w").write("\n".join(" ".join(p) for p in sorted(pairs)) + "\n")
 
+    # Resolve both legacy and new logged identities without overwriting the captures.
+    definitions, aliases = {}, {}
+    renames = []
+    for path in sorted(Path(DEFS).glob("*.bin")):
+        raw = path.read_bytes()
+        canonical = canonicalize(raw)
+        ps = f"{canonical_hash(raw):08X}"
+        if int(path.stem, 16) not in (original_hash(raw), int(ps, 16)):
+            raise ValueError(f"{path}: neither legacy nor canonical hash matches")
+        if ps in definitions and definitions[ps] != canonical:
+            raise ValueError(f"canonical FNV collision: {ps}")
+        definitions[ps] = canonical
+        aliases[path.stem] = ps
+        renames.append((path.stem, ps))
+    with open(os.path.join(ROOT, "tools/psdef_rename.txt"), "w") as f:
+        f.write("# old hash -> canonical hash; preserve the varying-mask/.frag suffix\n")
+        for old, new in renames:
+            f.write(f"{old} {new}\n")
+
     vso = vs_outputs()
     table = []
     generated = set()
-    for vs, ps in sorted(pairs):
-        fnv = int(vs, 16)
-        if fnv not in vso:
-            print(f"skip pair {vs}/{ps}: no Stage 3 vertex program for fnv {vs}"); continue
-        binp = os.path.join(DEFS, ps + ".bin")
-        if not os.path.exists(binp):
-            print(f"skip pair {vs}/{ps}: def {ps} never dumped"); continue
-        name, vary = vso[fnv]
+    paired = set()
+
+    def generate(ps, vary):
         mask = sum(b for v, b in VAR_BITS if v in vary)
         out = f"ps_{ps}_{mask:02X}"
         if out not in generated:
+            gen.VARYINGS_AVAILABLE = vary
+            cube = os.environ.get("XV_CUBE", "real")
+            gen.CUBE_EXPR = {"real": None, "normal": "float4(normalize({tc}.xyz) * 0.5 + 0.5, 1.0)",
+                             "const": "float4(0.5, 0.5, 0.5, 1.0)", "black": "float4(0.0, 0.0, 0.0, 1.0)"}[cube]
+            cg = gen.generate(asdict(decode_psdef(definitions[ps], 0)), out, False)[0]
+            Path(SH, out + ".frag.cg").write_text(cg)
             generated.add(out)
-            js = subprocess.run([PY, os.path.join(ROOT, "dx8_pixelshader_parse.py"), binp, "--def", "0x0", "--json"],
-                                capture_output=True, text=True)
-            if js.returncode != 0:
-                print(f"parse failed for {ps}: {js.stderr.strip()[-300:]}"); continue
-            jpath = os.path.join(DEFS, ps + ".json"); open(jpath, "w").write(js.stdout)
-            r = subprocess.run([PY, os.path.join(ROOT, "pixelshader_recomp_gen.py"), jpath, "-o", SH, "--name", out,
-                                "--varyings", ",".join(sorted(vary))] + (["--cube", os.environ["XV_CUBE"]] if os.environ.get("XV_CUBE") else []), capture_output=True, text=True)
-            print(r.stdout.strip().splitlines()[-1] if r.stdout.strip() else "", r.stderr.strip()[-300:])
-            if r.returncode != 0: continue
-        cg = open(os.path.join(SH, out + ".frag.cg")).read()
+        cg = Path(SH, out + ".frag.cg").read_text()
         cube_mask = sum(1 << int(m) for m in re.findall(r"samplerCUBE tex(\d)", cg))
+        return out, cube_mask
+
+    canonical_pairs = set()
+    for vs, old in sorted(pairs):
+        ps = aliases.get(old, old)
+        if ps not in definitions:
+            print(f"skip pair {vs}/{old}: def never dumped")
+            continue
+        canonical_pairs.add((vs, ps))
+    for vs, ps in sorted(canonical_pairs):
+        fnv = int(vs, 16)
+        if fnv not in vso:
+            print(f"skip pair {vs}/{ps}: no Stage 3 vertex program for fnv {vs}")
+            continue
+        name, vary = vso[fnv]
+        out, cube_mask = generate(ps, vary)
+        paired.add(ps)
         table.append((fnv, int(ps, 16), out, name, cube_mask))
+    # Keep a source for every captured structure, even without a known vertex pairing.
+    for ps in sorted(definitions.keys() - paired):
+        generate(ps, {v for v, _ in VAR_BITS})
     with open(os.path.join(SH, "xv_ps_table.h"), "w") as f:
         f.write("/* generated by tools/ps_pipeline.py: (vertex program fnv, combiner hash) -> fragment program */\n")
         f.write("typedef struct { uint32_t vs_fnv, ps_hash; const char *gxp; uint8_t cube_mask; } xv_ps_entry_t;   /* cube_mask: stages sampled with samplerCUBE */\n")

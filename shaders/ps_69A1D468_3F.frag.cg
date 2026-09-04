@@ -1,0 +1,79 @@
+// ---------------------------------------------------------------------------
+//  Xita Stage 3b - auto-generated Vita Cg fragment shader: ps_69A1D468_3F
+//  source def: VA None  file 0x0
+//  3 combiner stage(s), MUX_MSB; textures t0:PROJECT2D t1:PROJECT2D t2:CUBEMAP t3:CUBEMAP
+//  Uniforms: psc[16] = SetPixelShaderConstant regs; xv_fogcolor.rgb; fog factor = TEXCOORD7
+//    stage 0 rgb  : r0 = sum(t2.rgb * t0.aaa, t0.rgb * t1.rgb)
+//    stage 0 alpha: r0 = zero.b * zero.b
+//    stage 1 rgb  : r0 = c0.rgb * r0.rgb
+//    stage 1 alpha: (discard)
+//    stage 2 rgb  : r0 = sum(r0.rgb * v0.aaa, zero.rgb * zero.rgb)
+//    stage 2 alpha: (discard)
+//    final rgb  : zero.rgb * zero.rgb + (1 - zero.rgb) * zero.rgb + r0.rgb
+//    final alpha: r0.a
+//    final ef_prod = zero.rgb * zero.rgb
+// ---------------------------------------------------------------------------
+
+struct VertOut
+{
+    float4 position    : POSITION;
+    float4 color0      : COLOR0;
+    float4 color1      : COLOR1;
+    float4 texcoord0   : TEXCOORD0;
+    float4 texcoord1   : TEXCOORD1;
+    float4 texcoord2   : TEXCOORD2;
+    float4 texcoord3   : TEXCOORD3;
+};
+
+float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform samplerCUBE tex2, uniform samplerCUBE tex3, uniform float4 psc[18], uniform float4 xv_fogcolor) : COLOR
+{
+    // ---- inputs (varyings the vertex program does not write read as NV2A defaults)
+    float4 v0 = IN.color0, v1 = IN.color1;
+    float4 fog = float4(xv_fogcolor.rgb, 1.0);
+    float4 r0 = float4(0.0, 0.0, 0.0, 0.0), r1 = float4(0.0, 0.0, 0.0, 0.0);
+    float4 t0 = tex2D(tex0, IN.texcoord0.xy);
+    float4 t1 = tex2D(tex1, IN.texcoord1.xy);
+    float4 t2 = texCUBE(tex2, IN.texcoord2.xyz);
+    float4 t3 = texCUBE(tex3, IN.texcoord3.xyz);
+    // ---- combiner stage 0
+    {
+        float3 A = saturate(t2.rgb), B = saturate(t0.aaa), C = saturate(t0.rgb), D = saturate(t1.rgb);
+        float3 AB = A * B;
+        float3 CD = C * D;
+        float3 SUM = AB + CD;
+        float  a_A = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
+        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        float  a_SUM = a_AB + a_CD;
+        r0.rgb = clamp(SUM, -1.0, 1.0);
+        r0.a = clamp(a_AB, -1.0, 1.0);
+    }
+    // ---- combiner stage 1
+    {
+        float3 A = saturate(psc[1].rgb), B = saturate(r0.rgb), C = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), D = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb);
+        float3 AB = A * B;
+        float3 CD = C * D;
+        float3 SUM = AB + CD;
+        float  a_A = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
+        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        float  a_SUM = a_AB + a_CD;
+        r0.rgb = clamp(AB, -1.0, 1.0);
+    }
+    // ---- combiner stage 2
+    {
+        float3 A = saturate(r0.rgb), B = saturate(v0.aaa), C = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), D = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb);
+        float3 AB = A * B;
+        float3 CD = C * D;
+        float3 SUM = AB + CD;
+        float  a_A = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
+        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        float  a_SUM = a_AB + a_CD;
+        r0.rgb = clamp(SUM, -1.0, 1.0);
+    }
+    // ---- final combiner
+    float4 v1r0_sum = float4(v1.rgb + r0.rgb, 0.0);
+    float4 ef_prod = float4(saturate(float4(0.0, 0.0, 0.0, 0.0).rgb) * saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), 0.0);
+    float3 FA = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), FB = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), FC = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), FD = saturate(r0.rgb);
+    float3 out_rgb = FA * FB + (1.0 - FA) * FC + FD;
+    float  out_a   = saturate(r0.a);
+    return saturate(float4(out_rgb, out_a));
+}

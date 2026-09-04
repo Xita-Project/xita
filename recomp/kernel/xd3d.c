@@ -539,6 +539,22 @@ void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
  * re-submits it before each material.  Hash the program fields (everything except the constant colours)
  * so the renderer can pick the fragment program compiled offline for that combiner setup, and route the
  * def's constants (PSConstant0/1[stage] -> D3D c[PSC0/1Mapping nibble]) to psc[]. */
+/* Canonical copy only: never erase shadow state needed by later push writes or constants.
+ * Layout: dx8_pixelshader_parse.py; keep in sync with tools/psdef_hash.py. */
+static void psdef_canonicalize(uint32_t out[60], const uint32_t in[60])
+{
+    memcpy(out, in, 0xF0);
+    unsigned n = out[0xD4 / 4] & 0xFF;
+    if (n > 8) n = 8;
+    for (unsigned i = n; i < 8; ++i) {
+        out[0x00 / 4 + i] = out[0x68 / 4 + i] = 0;
+        out[0x88 / 4 + i] = out[0xB4 / 4 + i] = 0;
+        out[0xE4 / 4] &= ~(0xFu << (4 * i));
+        out[0xE8 / 4] &= ~(0xFu << (4 * i));
+    }
+    memset((uint8_t *)out + 0x28, 0, 0x40);
+    memset((uint8_t *)out + 0xAC, 0, 8);
+}
 static uint32_t psdef_hash(const uint8_t *d)
 {
     uint32_t h = 2166136261u;
@@ -580,7 +596,9 @@ void xd3d_ps_sync(void)
     if (!xd3d_state.ps_dirty) return;
     xd3d_state.ps_dirty = 0;
     const uint8_t *d = (const uint8_t *)xd3d_state.ps_shadow;
-    xd3d_state.ps_hash = psdef_hash(d);
+    uint32_t canonical[60];
+    psdef_canonicalize(canonical, xd3d_state.ps_shadow);
+    xd3d_state.ps_hash = psdef_hash((const uint8_t *)canonical);
     /* NV2A constants are per stage (UNIQUE_C0/C1, which Halo always sets); PSC0/1Mapping only matters for
      * SetPixelShaderConstant, which Halo never calls.  Layout matches pixelshader_recomp_gen.py's psc[18]. */
     #define PSC_SET(idx, col) do { uint32_t col_ = (col); float *o_ = xd3d_state.psc[(idx)]; \
