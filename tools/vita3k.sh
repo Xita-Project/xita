@@ -54,7 +54,7 @@ cmd_install() {
 launch() {
     need
     kill_emu
-    (cd "$(dirname "$VITA3K_BIN")" && "$VITA3K_BIN" $VITA3K_ARGS -f -w -l 1 -r "$1" > "$LOG" 2>&1 &)
+    (cd "$(dirname "$VITA3K_BIN")" && "$VITA3K_BIN" ${VITA3K_ARGS:-} -f -w -l 1 -r "$1" > "$LOG" 2>&1 &)
     sleep 14
     dismiss_dialogs
 }
@@ -75,7 +75,7 @@ cmd_run() {
     local tid="$1" secs="${2:-60}" fdir="${3:-/tmp/vita3k_frames}"
     mkdir -p "$fdir"; rm -f "$fdir"/frame_*.png
     need; kill_emu
-    (cd "$(dirname "$VITA3K_BIN")" && "$VITA3K_BIN" $VITA3K_ARGS -f -w -l 1 -r "$tid" > "$LOG" 2>&1 &)
+    (cd "$(dirname "$VITA3K_BIN")" && "$VITA3K_BIN" ${VITA3K_ARGS:-} -f -w -l 1 -r "$tid" > "$LOG" 2>&1 &)
     local t=0 n=0 win=""
     while [ "$t" -lt "$secs" ] && pgrep -x Vita3K >/dev/null; do
         sleep 1.5; t=$((t + 2))
