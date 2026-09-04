@@ -48,11 +48,13 @@ tools/recomp.sh haloce/default.xbe
 
 # 3. build the runtime VPK
 export VITASDK=$HOME/vitasdk PATH=$HOME/vitasdk/bin:$PATH
-make RECOMP=1                               # -> xita.vpk
+printf 'LIBS += -lSceTouch_stub\n' | make -f Makefile -f - RECOMP=1  # -> xita.vpk
 
 # 4. build the game image the runtime loads (the XBE's sections, laid out for the guest)
 python3 xbe_image.py haloce/default.xbe game_manifest.json halo_image.bin
 ```
+
+The build command adds the Vita SDK touch import library to the Makefile’s libraries.
 
 The vertex programs and register-combiner programs under `shaders/` are compiled on the
 console: install `tools/shadercomp/xv_shadercomp.vpk`, put the `.cg` files in
@@ -86,7 +88,12 @@ launch renames the directory and `xboxvita.cfg` in place.
 | Start / Select | Start / Back | pause |
 | D-pad down / up | stick clicks | crouch / zoom |
 | D-pad right / left | White / Black | flashlight / switch grenade |
+| Rear touch left / right half | Black / White | switch grenade / flashlight |
+| Front touch bottom-left / bottom-right (300×200 each) | L3 / R3 | crouch / zoom |
 | Select + Start (hold) | | frame-time overlay |
+
+Touch coordinates use the 1920×1088 panel space. D-pad substitutions apply only during
+gameplay; touch inputs are ORed in independently.
 
 ## Settings and debug knobs
 
@@ -98,8 +105,19 @@ launch renames the directory and `xboxvita.cfg` in place.
 | `XV_BC_MIPS=1` | upload mip chains for compressed textures (verified on the emulator, being verified on hardware) |
 | `XV_VBLANK_HZ=1000` | rate of the vblank counter the game waits on; higher means less idle time per frame |
 | `XV_PROF=1` | sample the running guest function and log the top entries |
+| `XV_TOUCH=0/1` | enable touch zones (default 1); unsupported panels behave as untouched |
+| `XV_TOUCH_SWAP=1` | swap rear Black/White halves (default 0) |
+| `XV_DEADZONE=0..99` | radial deadzone percent on both sticks, rescaled outside the deadzone (default 0) |
+| `XV_LOOK_SENS=0..400` | right-stick sensitivity percent (default 100), clamped to Xbox range |
+| `XV_LOOK_CURVE=0/1/2` | right-stick response: linear / legacy (also linear) / squared (default 0) |
+| `XV_INVERT_Y=0/1` | invert right-stick Y (default 0) |
 | `XV_PAD_REC=1` | record pad input to `pad_rec.txt`; copy it to `pad_play.txt` to replay it |
 | `XV_FORCE_START=1` | let a one-player multiplayer lobby start (temporary until ad-hoc play exists) |
+
+Stick settings are read once at the first pad poll; restart after editing. With defaults,
+the original integer stick mapping is preserved exactly. The startup pad log prints
+effective settings and a default-axis self-check. Deadzone precedes look curve,
+sensitivity and Y inversion. Numeric settings are clamped to the ranges above.
 
 Logs go to `ux0:data/xita/xita.log` (the previous three runs are kept). Touching
 `ux0:data/xita/hist.now` dumps the next frame's draw calls.
@@ -113,6 +131,12 @@ tools/vita3k.sh shaders shaders/                # compiles shaders/*.cg inside t
 ```
 
 `ux0:data/xita/pad.txt` scripts input by frame (`500:a,900:lup*100,...`) for unattended runs.
+It also accepts `black`, `white`, `l3`, and `r3` (for example `500:black*30`).
+Recordings use `frame lx ly rx ry buttons` with optional trailing `black white l3 r3`
+names; releases are recorded too. Existing six-column recordings and scripts still
+work. Replay adds to live input and uses the current stick settings, so keep those
+settings the same when reproducing a recording. `XV_TOUCH=0` disables panel reads,
+not scripted or replayed touch buttons.
 
 ## Layout
 

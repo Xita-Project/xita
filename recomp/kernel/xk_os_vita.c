@@ -6,8 +6,10 @@
 #include <malloc.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
 
 #include <psp2/ctrl.h>
+#include <psp2/touch.h>
 #include <psp2/io/dirent.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
@@ -271,6 +273,110 @@ void xk_os_fiber_destroy(xk_fiber *f)
 /* ---- input: sceCtrl -> Xbox gamepad ---------------------------------------------------------- */
 /* Xbox wButtons: DPAD_UP 1, DOWN 2, LEFT 4, RIGHT 8, START 0x10, BACK 0x20, LTHUMB 0x40, RTHUMB 0x80.
  * Analog buttons[8]: A, B, X, Y, BLACK, WHITE, LTRIGGER, RTRIGGER (0..255). */
+enum { PAD_BLACK = 1, PAD_WHITE = 2, PAD_L3 = 4, PAD_R3 = 8 };
+static struct { int touch, swap, deadzone, sens, curve, invert; } g_pad_cfg;
+
+static unsigned pad_extra_token(const char *token)
+{
+    if (!strcmp(token, "black")) return PAD_BLACK;
+    if (!strcmp(token, "white")) return PAD_WHITE;
+    if (!strcmp(token, "l3")) return PAD_L3;
+    if (!strcmp(token, "r3")) return PAD_R3;
+    return 0;
+}
+
+static int pad_setting(const char *key, int def, int lo, int hi)
+{
+    const char *e = getenv(key);
+    int v = e ? atoi(e) : def;
+    return v < lo ? lo : v > hi ? hi : v;
+}
+
+static int16_t pad_axis(int v)
+{
+    return (int16_t)(v > 32767 ? 32767 : v < -32767 ? -32767 : v);
+}
+
+static void pad_stick(unsigned raw_x, unsigned raw_y, int deadzone, int sens,
+                      int curve, int invert, int16_t *out_x, int16_t *out_y)
+{
+    int x = pad_axis(((int)raw_x - 128) * 256);
+    int y = pad_axis(-(((int)raw_y - 128) * 256));
+    /* Preserve the old integer mapping exactly, including its asymmetric endpoints.
+     * Curve 1 is also linear: the previous Vita mapping had no acceleration curve. */
+    if (deadzone || curve == 2 || sens != 100) {
+        float fx = x, fy = y;
+        float radius = sqrtf(fx * fx + fy * fy);
+        float dz = 32767.0f * deadzone / 100.0f;
+        if (radius <= dz) { x = y = 0; }
+        else {
+            float magnitude = fminf(radius / 32767.0f, 1.0f);
+            float scale = 1.0f;
+            if (deadzone) {
+                magnitude = (magnitude - deadzone / 100.0f) / (1.0f - deadzone / 100.0f);
+                scale = magnitude * 32767.0f / radius;
+            }
+            if (curve == 2) scale *= magnitude;
+            scale *= sens / 100.0f;
+            x = pad_axis((int)(fx * scale)); y = pad_axis((int)(fy * scale));
+        }
+    }
+    *out_x = x; *out_y = invert ? -y : y;
+}
+
+static void pad_init(void)
+{
+    static int init;
+    if (init) return;
+    init = 1;
+    g_pad_cfg.touch = pad_setting("XV_TOUCH", 1, 0, 1);
+    g_pad_cfg.swap = pad_setting("XV_TOUCH_SWAP", 0, 0, 1);
+    g_pad_cfg.deadzone = pad_setting("XV_DEADZONE", 0, 0, 99);
+    g_pad_cfg.sens = pad_setting("XV_LOOK_SENS", 100, 0, 400);
+    g_pad_cfg.curve = pad_setting("XV_LOOK_CURVE", 0, 0, 2);
+    g_pad_cfg.invert = pad_setting("XV_INVERT_Y", 0, 0, 1);
+    /* Exhaustive default-path regression check, once at the first poll after cfg load. */
+    int ok = 1;
+    for (int v = 0; v < 256; ++v) {
+        int16_t x, y;
+        pad_stick(v, v, 0, 100, 0, 0, &x, &y);
+        int old_x = (v - 128) * 256, old_y = -(v - 128) * 256;
+        if (old_x < -32767) old_x = -32767;
+        if (old_y > 32767) old_y = 32767;
+        if (x != old_x || y != old_y) ok = 0;
+    }
+    xv_logf("[xk] pad: XV_TOUCH=%d XV_TOUCH_SWAP=%d XV_DEADZONE=%d XV_LOOK_SENS=%d XV_LOOK_CURVE=%d XV_INVERT_Y=%d default-axis-check=%s\n",
+            g_pad_cfg.touch, g_pad_cfg.swap, g_pad_cfg.deadzone, g_pad_cfg.sens,
+            g_pad_cfg.curve, g_pad_cfg.invert, ok ? "PASS" : "FAIL");
+}
+
+static unsigned pad_touch(void)
+{
+    static int init, ready[2];
+    unsigned extras = 0;
+    if (!g_pad_cfg.touch) return 0;
+    if (!init) {
+        init = 1;
+        ready[SCE_TOUCH_PORT_FRONT] = sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START) >= 0;
+        ready[SCE_TOUCH_PORT_BACK] = sceTouchSetSamplingState(SCE_TOUCH_PORT_BACK, SCE_TOUCH_SAMPLING_STATE_START) >= 0;
+    }
+    for (unsigned port = SCE_TOUCH_PORT_FRONT; port <= SCE_TOUCH_PORT_BACK; ++port) {
+        SceTouchData t = {0};
+        if (!ready[port] || sceTouchPeek(port, &t, 1) <= 0) continue;
+        for (unsigned i = 0; i < t.reportNum && i < SCE_TOUCH_MAX_REPORT; ++i) {
+            int x = t.report[i].x, y = t.report[i].y;
+            if (x < 0 || x >= 1920 || y < 0 || y >= 1088) continue;
+            if (port == SCE_TOUCH_PORT_BACK)
+                extras |= ((x < 960) ^ g_pad_cfg.swap) ? PAD_BLACK : PAD_WHITE;
+            else if (y >= 888) {
+                if (x < 300) extras |= PAD_L3;
+                if (x >= 1620) extras |= PAD_R3;
+            }
+        }
+    }
+    return extras;
+}
+
 void xk_os_pad_poll(xk_os_pad *p)
 {
     /* DIAGNOSTIC (XV_ERR_LOG=1): log Halo's pending UI-error codes when they change.  2E4028 = network
@@ -279,6 +385,8 @@ void xk_os_pad_poll(xk_os_pad *p)
       if (on) { extern uint32_t xv_guest_r16(uint32_t); static uint32_t last = 0xEEEEEEEEu;
         uint32_t a = xv_guest_r16(0x2E4028u), b = xv_guest_r16(0x2E4030u), cur = a | (b << 16);
         if (cur != last) { xv_logf("[err] pending net(2E4028)=%04X saved(2E4030)=%04X\n", a, b); last = cur; } } }
+    pad_init();
+    unsigned extras = pad_touch();
     SceCtrlData d; memset(&d, 0, sizeof d);
     d.lx = d.ly = d.rx = d.ry = 128;                                  /* centred if no pad answers */
     { static int mode_set; if (!mode_set) { mode_set = 1; sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);   /* real firmware defaults to DIGITAL: sticks read 128 forever */
@@ -288,7 +396,7 @@ void xk_os_pad_poll(xk_os_pad *p)
     uint16_t b = 0;
     /* Scripted input for emulator runs: ux0:data/xita/pad.txt holds "frame:input[*hold]" items (frame =
      * game frame / Present count; hold in frames, default 4).  input = up/down/left/right/start/back/a/b/x/y/
-     * l/r, or a stick: lup/ldown/lleft/lright/rup/rdown/rleft/rright (full deflection).  Absent on a real
+     * l/r/black/white/l3/r3, or a stick: lup/ldown/lleft/lright/rup/rdown/rleft/rright (full deflection).  Absent on a real
      * card, so hardware always sees the physical pad. */
     {
         static int init; static struct { unsigned at, hold; char btn[8]; } ev[512]; static int nev; static unsigned polls;
@@ -305,6 +413,7 @@ void xk_os_pad_poll(xk_os_pad *p)
         polls = xd3d_frame ? xd3d_frame() : polls + 1;
         for (int i = 0; i < nev; ++i) if (polls >= ev[i].at && polls < ev[i].at + ev[i].hold) {
             const char *bn = ev[i].btn;
+            extras |= pad_extra_token(bn);
             if (!strcmp(bn, "up")) d.buttons |= SCE_CTRL_UP; else if (!strcmp(bn, "down")) d.buttons |= SCE_CTRL_DOWN;
             else if (!strcmp(bn, "left")) d.buttons |= SCE_CTRL_LEFT; else if (!strcmp(bn, "right")) d.buttons |= SCE_CTRL_RIGHT;
             else if (!strcmp(bn, "start")) d.buttons |= SCE_CTRL_START; else if (!strcmp(bn, "back")) d.buttons |= SCE_CTRL_SELECT;
@@ -325,15 +434,15 @@ void xk_os_pad_poll(xk_os_pad *p)
                 else if (!strcmp(q, "x")) p->p2_analog[2] = 255; else if (!strcmp(q, "y")) p->p2_analog[3] = 255;
             }
         }
-        /* Pad recorder / raw replay.  XV_PAD_REC=1 (env.txt or xita.cfg) appends one "frame lx ly rx ry buttons"
+        /* Pad recorder / raw replay.  XV_PAD_REC=1 (env.txt or xita.cfg) appends one "frame lx ly rx ry buttons [black white l3 r3]"
          * line to ux0:data/xita/pad_rec.txt every time the pad state changes (frame = Present count, the same
          * index pad.txt uses).  Copy that file to pad_play.txt and the state is fed back in at the same frames, each
          * line holding until the next one - so a play session recorded on the emulator (or on the Vita, from the
          * card) can be re-run unattended.  Timing is per rendered frame, so a replay only lines up on a build that
          * renders at about the same rate as the recording. */
         {
-            static int rec = -1; static SceUID rfd = -1; static SceCtrlData last; static char rbuf[4096]; static int rlen; static unsigned rflush;
-            static char *play; static int plen, ppos, pinit; static unsigned pnext; static SceCtrlData pstate; static int pactive;
+            static int rec = -1; static SceUID rfd = -1; static SceCtrlData last; static char rbuf[4096]; static int rlen; static unsigned rflush, last_extras;
+            static char *play; static int plen, ppos, pinit; static unsigned pnext; static SceCtrlData pstate; static int pactive; static unsigned pextras;
             if (!pinit) { pinit = 1; SceUID fd = sceIoOpen("ux0:data/xita/pad_play.txt", SCE_O_RDONLY, 0);
                 if (fd >= 0) { SceOff sz = sceIoLseek(fd, 0, SCE_SEEK_END); sceIoLseek(fd, 0, SCE_SEEK_SET);
                     play = malloc((size_t)sz + 1); plen = play ? sceIoRead(fd, play, (SceSize)sz) : 0; if (plen < 0) plen = 0; if (play) play[plen] = 0; sceIoClose(fd);
@@ -343,20 +452,36 @@ void xk_os_pad_poll(xk_os_pad *p)
                 while (polls >= pnext && ppos < plen) {                      /* consume every line due by now */
                     unsigned f, lx, ly, rx, ry, bt; int k;
                     if (sscanf(play + ppos, "%u %u %u %u %u %x%n", &f, &lx, &ly, &rx, &ry, &bt, &k) < 6) { ppos = plen; pnext = 0xFFFFFFFFu; break; }
-                    ppos += k; while (ppos < plen && (play[ppos] == '\n' || play[ppos] == '\r' || play[ppos] == ' ')) ppos++;
+                    ppos += k; pextras = 0;
+                    /* Optional names only on this line; six-column recordings still mean no extras. */
+                    while (ppos < plen && play[ppos] != '\n' && play[ppos] != '\r') {
+                        if (play[ppos] == ' ' || play[ppos] == '\t') { ppos++; continue; }
+                        char token[8]; unsigned n = 0;
+                        while (ppos < plen && play[ppos] != ' ' && play[ppos] != '\t' &&
+                               play[ppos] != '\n' && play[ppos] != '\r') {
+                            if (n < sizeof token - 1) token[n++] = play[ppos];
+                            ppos++;
+                        }
+                        token[n] = 0; pextras |= pad_extra_token(token);
+                    }
+                    while (ppos < plen && (play[ppos] == '\n' || play[ppos] == '\r' || play[ppos] == ' ')) ppos++;
                     pstate.lx = lx; pstate.ly = ly; pstate.rx = rx; pstate.ry = ry; pstate.buttons = bt; pactive = 1;
                     pnext = (ppos < plen && sscanf(play + ppos, "%u", &f) == 1) ? f : 0xFFFFFFFFu;
                 }
-                if (pactive) { d.buttons |= pstate.buttons;                  /* the physical pad still adds on top */
+                if (pactive) { extras |= pextras; d.buttons |= pstate.buttons;                  /* the physical pad still adds on top */
                     if (pstate.lx < 64 || pstate.lx > 192 || pstate.ly < 64 || pstate.ly > 192) { d.lx = pstate.lx; d.ly = pstate.ly; }
                     if (pstate.rx < 64 || pstate.rx > 192 || pstate.ry < 64 || pstate.ry > 192) { d.rx = pstate.rx; d.ry = pstate.ry; } }
             }
             if (rec < 0) { const char *e = getenv("XV_PAD_REC"); rec = e ? atoi(e) : 0;
                 if (rec) { rfd = sceIoOpen("ux0:data/xita/pad_rec.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); xv_logf("[xk] pad record: fd %d\n", (int)rfd); memset(&last, 0xFF, sizeof last); } }
             if (rfd >= 0) {
-                if (d.lx != last.lx || d.ly != last.ly || d.rx != last.rx || d.ry != last.ry || d.buttons != last.buttons) {
-                    last = d; rlen += snprintf(rbuf + rlen, sizeof rbuf - rlen, "%u %u %u %u %u %x\n", polls, d.lx, d.ly, d.rx, d.ry, d.buttons); }
-                if (rlen > (int)sizeof rbuf - 64 || (rlen && polls - rflush > 120)) { sceIoWrite(rfd, rbuf, rlen); rlen = 0; rflush = polls; }
+                if (d.lx != last.lx || d.ly != last.ly || d.rx != last.rx || d.ry != last.ry || d.buttons != last.buttons || extras != last_extras) {
+                    last = d; last_extras = extras;
+                    rlen += snprintf(rbuf + rlen, sizeof rbuf - rlen, "%u %u %u %u %u %x%s%s%s%s\n",
+                                     polls, d.lx, d.ly, d.rx, d.ry, d.buttons,
+                                     extras & PAD_BLACK ? " black" : "", extras & PAD_WHITE ? " white" : "",
+                                     extras & PAD_L3 ? " l3" : "", extras & PAD_R3 ? " r3" : ""); }
+                if (rlen > (int)sizeof rbuf - 96 || (rlen && polls - rflush > 120)) { sceIoWrite(rfd, rbuf, rlen); rlen = 0; rflush = polls; }
             }
         }
     }
@@ -407,6 +532,10 @@ void xk_os_pad_poll(xk_os_pad *p)
             p->analog[5] = (d.buttons & SCE_CTRL_RIGHT) ? 255 : 0;  /* WHITE */
         }
     }
+    if (extras & PAD_L3) b |= 0x40;
+    if (extras & PAD_R3) b |= 0x80;
+    if (extras & PAD_BLACK) p->analog[4] = 255;
+    if (extras & PAD_WHITE) p->analog[5] = 255;
     p->buttons = b;
     p->analog[0] = (d.buttons & SCE_CTRL_CROSS) ? 255 : 0;      /* A */
     p->analog[1] = (d.buttons & SCE_CTRL_CIRCLE) ? 255 : 0;     /* B */
@@ -414,11 +543,9 @@ void xk_os_pad_poll(xk_os_pad *p)
     p->analog[3] = (d.buttons & SCE_CTRL_TRIANGLE) ? 255 : 0;   /* Y */
     p->analog[6] = (d.buttons & SCE_CTRL_LTRIGGER) ? 255 : 0;   /* left trigger */
     p->analog[7] = (d.buttons & SCE_CTRL_RTRIGGER) ? 255 : 0;   /* right trigger */
-    /* 0..255 -> -32767..32767 (clamped: raw 0 * 256 = +32768 wrapped to -32768, so full-up read as full-down) */
-    #define XK_AXIS(v)  ((int16_t)((v) > 32767 ? 32767 : (v) < -32767 ? -32767 : (v)))
-    p->lx = XK_AXIS(((int)d.lx - 128) * 256); p->ly = XK_AXIS(-(((int)d.ly - 128) * 256));
-    p->rx = XK_AXIS(((int)d.rx - 128) * 256); p->ry = XK_AXIS(-(((int)d.ry - 128) * 256));
-    #undef XK_AXIS
+    pad_stick(d.lx, d.ly, g_pad_cfg.deadzone, 100, 0, 0, &p->lx, &p->ly);
+    pad_stick(d.rx, d.ry, g_pad_cfg.deadzone, g_pad_cfg.sens,
+              g_pad_cfg.curve, g_pad_cfg.invert, &p->rx, &p->ry);
 }
 
 /* ---- audio sink: sceAudioOut main port, one grain per write (blocking = pacing) ------------------ */
