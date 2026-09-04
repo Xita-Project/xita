@@ -31,7 +31,8 @@ float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform 
     float4 t0 = tex2D(tex0, IN.texcoord0.xy);
     float4 t1 = tex2D(tex1, IN.texcoord1.xy);
     float4 t2 = tex2D(tex2, IN.texcoord2.xy);
-    float4 t3 = float4(normalize(IN.texcoord3.xyz) * 0.5 + 0.5, 1.0);   // normalisation cube map -> analytic
+    float4 t3; { float3 nv_ = IN.texcoord3.xyz; float l_ = dot(nv_, nv_); t3 = float4(((l_ > 1e-12) && (l_ < 1e30)) ? nv_ * rsqrt(l_) * 0.5 + 0.5 : float3(0.5, 0.5, 1.0), 1.0); }   // normalisation cube map -> analytic
+    float4 t3 = float4(0.0, 0.0, 0.0, 0.0);
     // ---- combiner stage 0
     {
         float3 A = (2.0 * max(t0.rgb, 0.0) - 1.0), B = (2.0 * max(t3.rgb, 0.0) - 1.0), C = saturate(t2.rgb), D = saturate(psc[0].rgb);

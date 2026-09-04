@@ -134,6 +134,7 @@ static void ui_unswz(unsigned w, unsigned h, unsigned idx, unsigned *ox, unsigne
     for(t=w;t>1;t>>=1)lw++; for(t=h;t>1;t>>=1)lh++;
     unsigned c=lw<lh?lw:lh, m=(1u<<c)-1;
     if(lw>=lh){*ox=(bx&m)|((idx>>(2*c))<<c);*oy=by&m;} else {*oy=(by&m)|((idx>>(2*c))<<c);*ox=bx&m;}
+    { static int tr = -1; if (tr < 0) tr = getenv("XV_SWZ_T") != NULL; if (tr && w == h) { unsigned t2 = *ox; *ox = *oy; *oy = t2; } }   /* diagnostic: transposed Morton */
 }
 /* GXM (PowerVR) twiddle: same min-square/long-axis scheme, but Y occupies the even (low) bits and X the
  * odd ones - the transpose of NV2A's order.  Used when handing block-compressed data to the GPU as-is. */
@@ -184,8 +185,9 @@ static int ui_decode(const uint8_t *src, unsigned fmt, unsigned w, unsigned h, u
         for (unsigned y=0;y<h;y++) for (unsigned x=0;x<w;x++){ uint16_t v=src[y*pitch+x*2]|(src[y*pitch+x*2+1]<<8);
             dst[y*w+x]= fmt==0x11?ui_c565(v): fmt==0x1D?ui_c4444(v): ui_c1555(v); }
     } else if (fmt==0x0B && g_cur_pal) {                              /* P8 swizzled through the bound palette (D3DCOLOR ARGB) */
+        static int flat = -1; if (flat < 0) flat = getenv("XV_P8_FLAT") != NULL;   /* diagnostic: every P8 texture becomes a flat tangent-space normal */
         for (unsigned i=0;i<w*h;i++){ unsigned x,y; ui_unswz(w,h,i,&x,&y); uint32_t p=g_cur_pal[src[i]];
-            if(x<w&&y<h) dst[y*w+x]=(p&0xFF000000u)|((p&0xFF)<<16)|(p&0xFF00)|((p>>16)&0xFF); }
+            if(x<w&&y<h) dst[y*w+x]=flat ? 0xFFFF8080u : (p&0xFF000000u)|((p&0xFF)<<16)|(p&0xFF00)|((p>>16)&0xFF); }
     } else if (fmt==0x0B || fmt==0x00 || fmt==0x19 || fmt==0x01) {   /* 8-bit swizzled: L8/P8, A8, AL8 */
         for (unsigned i=0;i<w*h;i++){ unsigned x,y; ui_unswz(w,h,i,&x,&y); uint8_t l=src[i];
             if(x<w&&y<h) dst[y*w+x]= fmt==0x19 ? ((uint32_t)l<<24)|0x00FFFFFF : fmt==0x01 ? ((uint32_t)l<<24)|(l<<16)|(l<<8)|l : 0xFF000000u|(l<<16)|(l<<8)|l; }
@@ -285,8 +287,10 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
     for (int16_t i = g.texhash[bucket]; i >= 0; i = g.texcache[i].next)
         if (g.texcache[i].valid && g.texcache[i].data == data && g.texcache[i].fmtword == fmtword && g.texcache[i].palsum == g_cur_palsum) {
             ui_tex_entry *e = &g.texcache[i];
+            /* tiny textures (Halo's 4x4 stage dummies, 1D ramps) are rewritten by the CPU, never by a file read,
+             * so the read-based invalidation cannot catch them: re-hash them every frame (64 bytes, free) */
             int due = e->bytes && e->checked != g.rec_frame &&
-                      (dynamic || e->dirty || (e->stable < 24 && ((g.rec_frame + (unsigned)i) & 15u) == 0));
+                      (dynamic || e->dirty || e->bytes <= 1024 || (e->stable < 24 && ((g.rec_frame + (unsigned)i) & 15u) == 0));
             if (due) {
                 e->checked = g.rec_frame;
                 uint32_t sum = ui_tex_hash(X_G(0x80000000u | data), e->bytes);
@@ -416,8 +420,18 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         /* decoded RGBA + a box-filtered mip chain (levels packed after level 0, as GXM lays out linear
          * mips): without mips the 1024x512 hull plating aliased into streaks at grazing angles, and mips
          * cut texture bandwidth on the real GPU */
-        unsigned levels = 1; { unsigned lw = w, lh = h; while (lw > 1 && lh > 1 && levels < 12) { lw >>= 1; lh >>= 1; levels++; } }
-        uint32_t need = 0; { unsigned lw = w, lh = h; for (unsigned l = 0; l < levels; ++l) { need += lw * lh * 4u; lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1; } }
+        /* Only build a chain when the Xbox texture has one: lightmap atlases (and other single-level bitmaps)
+         * pack tiny per-face patches with black gutters, and a box-filtered mip blends the patches into the
+         * gutters - whole floor faces went black at a distance in the a10 cryo bay, and Blood Gulch terrain
+         * showed dark blocky patches. */
+        unsigned levels = 1; if (mips > 1) { unsigned lw = w, lh = h; while (lw > 1 && lh > 1 && levels < 12) { lw >>= 1; lh >>= 1; levels++; } }
+        /* GXM linear textures: every level's rows are laid out with the width padded to 8 texels (Vita3K's
+         * texture cache: align_width = 8 for SCE_GXM_TEXTURE_LINEAR).  Packing 4x4 stage dummies (and the
+         * 4/2/1-wide tails of every chain) unpadded made the GPU read rows 2..4 and the small mips from the
+         * next cache entry: Halo's "neutral" 4x4 detail dummies sampled as garbage - black tiles on the a10
+         * cryo-bay floor, since the base pass multiplies by them. */
+#define LIN_PAD(x) (((x) + 7u) & ~7u)
+        uint32_t need = 0; { unsigned lw = w, lh = h; for (unsigned l = 0; l < levels; ++l) { need += LIN_PAD(lw) * lh * 4u; lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1; } }
         need = ALIGN_UP(need, 64);
         if (!re && g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
         uint32_t *dst = re ? (uint32_t *)sceGxmTextureGetData(&e->tex) : (uint32_t *)(g.dec_base + g.dec_off);
@@ -451,17 +465,20 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
             for (unsigned i = 0; i < N; ++i) { if (dst[i] & 0x00FFFFFFu) rgbnz++; if (dst[i] >> 24) anz++; }
             if (anz > 16 && rgbnz * 20u < anz) for (unsigned i = 0; i < N; ++i) dst[i] |= 0x00FFFFFFu;
         }
-        {   /* mip chain: 2x2 box filter per channel */
-            const uint32_t *prev = dst; unsigned pw = w, ph = h; uint32_t *lvl = dst + w * h;
+        if (w < 8) {                                      /* level 0 was decoded with stride w: spread the rows to the 8-texel stride, last row first */
+            for (unsigned y = h; y-- > 1;) memmove(dst + y * 8u, dst + y * w, w * 4u);
+        }
+        {   /* mip chain: 2x2 box filter per channel, every level at its padded row stride */
+            const uint32_t *prev = dst; unsigned pw = w, ph = h; uint32_t *lvl = dst + LIN_PAD(w) * h;
             for (unsigned l = 1; l < levels; ++l) {
-                unsigned nw = pw >> 1, nh = ph >> 1;
+                unsigned nw = pw >> 1, nh = ph >> 1, ps = LIN_PAD(pw), ns = LIN_PAD(nw);
                 for (unsigned y = 0; y < nh; ++y) for (unsigned x = 0; x < nw; ++x) {
-                    uint32_t a = prev[(2 * y) * pw + 2 * x], b = prev[(2 * y) * pw + 2 * x + 1], c2 = prev[(2 * y + 1) * pw + 2 * x], d2 = prev[(2 * y + 1) * pw + 2 * x + 1];
+                    uint32_t a = prev[(2 * y) * ps + 2 * x], b = prev[(2 * y) * ps + 2 * x + 1], c2 = prev[(2 * y + 1) * ps + 2 * x], d2 = prev[(2 * y + 1) * ps + 2 * x + 1];
                     uint32_t o = 0;
                     for (unsigned sh = 0; sh < 32; sh += 8) o |= ((((a >> sh) & 0xFF) + ((b >> sh) & 0xFF) + ((c2 >> sh) & 0xFF) + ((d2 >> sh) & 0xFF) + 2) >> 2) << sh;
-                    lvl[y * nw + x] = o;
+                    lvl[y * ns + x] = o;
                 }
-                prev = lvl; lvl += nw * nh; pw = nw; ph = nh;
+                prev = lvl; lvl += ns * nh; pw = nw; ph = nh;
             }
         }
         xv_gpu_flush(dst, need);
@@ -482,6 +499,10 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
     { static unsigned n; if (n++ < 24) UI_LOG("tex fmt %02X %ux%u -> %s (%u KB used)\n", fmt, w, h, as_bc ? "BC" : "RGBA", g.dec_off >> 10); }
     sceGxmTextureSetMinFilter(&e->tex, as_bc == 1 ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_MIPMAP_LINEAR);
     sceGxmTextureSetMagFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
+    {   /* diagnostic: XV_TEX_POINT=<xbox fmt hex> point-samples every texture of that format (lightmap atlas checks) */
+        static int pf = -2; if (pf == -2) { const char *e2 = getenv("XV_TEX_POINT"); pf = e2 ? (int)strtoul(e2, NULL, 16) : -1; }
+        if ((int)fmt == pf) { sceGxmTextureSetMinFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_POINT); sceGxmTextureSetMagFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_POINT); }
+    }
     sceGxmTextureSetUAddrMode(&e->tex, SCE_GXM_TEXTURE_ADDR_REPEAT);
     sceGxmTextureSetVAddrMode(&e->tex, SCE_GXM_TEXTURE_ADDR_REPEAT);
     return &e->tex;

@@ -578,6 +578,11 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         if (skip && d->gxp) { const char *b = strrchr(d->gxp, '/'); b = b ? b + 1 : d->gxp; size_t bl = strlen(b) - 4; const char *e = skip;
             while (*e) { const char *end = strchr(e, ','); size_t l = end ? (size_t)(end - e) : strlen(e); if (l == bl && !strncmp(e, b, l)) { cur_list()->ncmds--; return; } e = end ? end + 1 : e + l; } }
     }
+    {   /* diagnostic: XV_SKIP_PS=<hash>[,<hash>..] drops every draw that uses one of those combiner programs */
+        static const char *sp = NULL; static int si; if (!si) { si = 1; sp = getenv("XV_SKIP_PS"); }
+        if (sp) { char hb[9]; snprintf(hb, sizeof hb, "%08X", S.ps_hash); const char *e = sp;
+            while (*e) { const char *end = strchr(e, ','); size_t l = end ? (size_t)(end - e) : strlen(e); if (l == 8 && !strncmp(e, hb, 8)) { cur_list()->ncmds--; return; } e = end ? end + 1 : e + l; } }
+    }
     {   /* which (vertex program, combiner program) pairs the game actually draws with: offline input */
         static struct { uint32_t vs, ps; } pairs[256]; static unsigned np; unsigned k;
         for (k = 0; k < np; ++k) if (pairs[k].vs == d->func_hash && pairs[k].ps == S.ps_hash) break;
@@ -751,6 +756,8 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             uint32_t fw = hdr[3], sz = hdr[4];
             unsigned w = sz ? (sz & 0xFFF) + 1 : 1u << ((fw >> 20) & 0xF), h = sz ? ((sz >> 12) & 0xFFF) + 1 : 1u << ((fw >> 24) & 0xF);
             n += snprintf(tb + n, sizeof tb - n, " %02X:%ux%u%s", (fw >> 8) & 0xFF, w, h, (texok >> t) & 1 ? "" : "!");
+            if ((texok >> t) & 1) n += snprintf(tb + n, sizeof tb - n, "[g%ux%u d%08X t%u]", (unsigned)sceGxmTextureGetWidth(&c->tex[t]), (unsigned)sceGxmTextureGetHeight(&c->tex[t]),
+                                                 (unsigned)(uintptr_t)sceGxmTextureGetData(&c->tex[t]) & 0xFFFFFFFFu, (unsigned)sceGxmTextureGetType(&c->tex[t]) >> 29);   /* what GXM actually samples */
         }
         { extern char xd3d_last_stack[400]; XV_LOG("[hist]   stack:%s\n", xd3d_last_stack); }
         XV_LOG("[hist]   textures:%s psc0 %.2f %.2f %.2f %.2f psc1 %.2f %.2f %.2f %.2f\n", tb, c->psc[0][0], c->psc[0][1], c->psc[0][2], c->psc[0][3], c->psc[1][0], c->psc[1][1], c->psc[1][2], c->psc[1][3]);
@@ -950,13 +957,17 @@ static const SceGxmTexture *tex2d_fallback(void)
 static const SceGxmTexture *cube_fallback(void)
 {
     if (g_cube_fallback_ok < 0) {
-        SceUID uid = sceKernelAllocMemBlock("xv_cube_fb", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, 4096, NULL);
+        /* GXM cube layout: every face is laid out with room for its whole mip chain and faces are 2 KB aligned
+         * (32-bit, >= 16x16).  The old 8x8 cube packed six 256-byte faces into 4 KB (and overran it): faces 1..5
+         * read garbage, and a combiner that samples this stand-in with a 2-D coordinate hits exactly those
+         * faces - the a10 cryo-bay floor's base pass multiplied its texture by that junk (black tiles). */
+        SceUID uid = sceKernelAllocMemBlock("xv_cube_fb", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, 16384, NULL);
         void *mem = NULL; g_cube_fallback_ok = 0;
         if (uid >= 0) {
             sceKernelGetMemBlockBase(uid, &mem);
-            if (sceGxmMapMemory(mem, 4096, SCE_GXM_MEMORY_ATTRIB_READ) == SCE_OK) {
-                uint32_t *p = mem; for (int i = 0; i < 6 * 8 * 8; ++i) p[i] = 0xFF808080u;
-                g_cube_fallback_ok = sceGxmTextureInitCube(&g_cube_fallback, mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, 8, 8, 1) == SCE_OK;
+            if (sceGxmMapMemory(mem, 16384, SCE_GXM_MEMORY_ATTRIB_READ) == SCE_OK) {
+                uint32_t *p = mem; for (int i = 0; i < 16384 / 4; ++i) p[i] = 0xFF808080u;   /* every byte of every face (and mip slot) is mid grey */
+                g_cube_fallback_ok = sceGxmTextureInitCube(&g_cube_fallback, mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, 16, 16, 1) == SCE_OK;
             }
         }
     }

@@ -277,7 +277,12 @@ void xv_hle_D3DDevice_SetSoftDisplayFilter(xctx *c) { XD3D_COUNT("D3DDevice_SetS
 void xv_hle_D3DDevice_SetShaderConstantMode(xctx *c) { XD3D_COUNT("D3DDevice_SetShaderConstantMode"); D3DLOG("SetShaderConstantMode(%08X)\n", X_ARG(0)); xd3d_state.const_mode = X_ARG(0); X_RET(1); }
 void xv_hle_D3DDevice_GetBackBuffer(xctx *c) { XD3D_COUNT("D3DDevice_GetBackBuffer"); RES_COMMON(g_dev.backbuffer)++; X_M32(X_ARG(2)) = g_dev.backbuffer; c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_GetDepthStencilSurface(xctx *c) { XD3D_COUNT("D3DDevice_GetDepthStencilSurface"); RES_COMMON(g_dev.depth)++; X_M32(X_ARG(0)) = g_dev.depth; c->r[0] = 0; X_RET(1); }
-void xv_hle_D3DDevice_SetRenderTarget(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderTarget"); XD3D_RET("SetRenderTarget"); if (xd3d_hist_active()) D3DLOG("[hist] SetRenderTarget(%08X, %08X) backbuffer %08X depth %08X\n", X_ARG(0), X_ARG(1), g_dev.backbuffer, g_dev.depth); xd3d_r_state("SetRenderTarget", X_ARG(0), X_ARG(1), g_dev.backbuffer); X_RET(2); }
+/* Halo renders a few passes into offscreen surfaces (render-to-texture: SetRenderTarget(surface, NULL), Clear
+ * colour, draw, back to the backbuffer).  Without real render targets every one of those clears wiped the
+ * backbuffer mid-frame - the a10 cryo bay's lighting passes were cleared before the base-texture pass
+ * modulated against them (black floor tiles).  Until offscreen targets exist, drop their clears and draws. */
+int xd3d_offscreen_rt = 0;
+void xv_hle_D3DDevice_SetRenderTarget(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderTarget"); { uint32_t rt = X_ARG(0); int off = rt && rt != g_dev.backbuffer; if (off != xd3d_offscreen_rt) { static unsigned n; if (n++ < 6) D3DLOG("render target %08X: %s\n", rt, off ? "offscreen (draws dropped)" : "backbuffer"); } xd3d_offscreen_rt = off; } XD3D_RET("SetRenderTarget"); if (xd3d_hist_active()) D3DLOG("[hist] SetRenderTarget(%08X, %08X) backbuffer %08X depth %08X\n", X_ARG(0), X_ARG(1), g_dev.backbuffer, g_dev.depth); xd3d_r_state("SetRenderTarget", X_ARG(0), X_ARG(1), g_dev.backbuffer); X_RET(2); }
 /* D3DVIEWPORT8 { X, Y, Width, Height, MinZ, MaxZ } */
 void xv_hle_D3DDevice_SetViewport(xctx *c)
 { XD3D_COUNT("D3DDevice_SetViewport");
@@ -344,13 +349,13 @@ void xv_hle_D3DDevice_Swap(xctx *c) { XD3D_COUNT("D3DDevice_Swap"); g_dev.frame+
 void xd3d_r_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil) __attribute__((weak));
 void xd3d_r_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil) { (void)flags; (void)color; (void)z; (void)stencil; }
 /* D3DDevice_Clear(Count, pRects, Flags, Color, Z, Stencil) */
-void xv_hle_D3DDevice_Clear(xctx *c) { XD3D_COUNT("D3DDevice_Clear"); g_dev.clears++; float z; uint32_t zi = X_M32(c->r[4] + 4 + 16); memcpy(&z, &zi, 4); xd3d_r_clear(X_ARG(2), X_ARG(3), z, X_ARG(5)); c->r[0] = 0; X_RET(6); }
+void xv_hle_D3DDevice_Clear(xctx *c) { XD3D_COUNT("D3DDevice_Clear"); g_dev.clears++; float z; uint32_t zi = X_M32(c->r[4] + 4 + 16); memcpy(&z, &zi, 4); if (!xd3d_offscreen_rt) xd3d_r_clear(X_ARG(2), X_ARG(3), z, X_ARG(5)); c->r[0] = 0; X_RET(6); }
 void xv_hle_D3DDevice_BeginVisibilityTest(xctx *c) { XD3D_COUNT("D3DDevice_BeginVisibilityTest"); c->r[0] = 0; X_RET(0); }
 void xv_hle_D3DDevice_EndVisibilityTest(xctx *c) { XD3D_COUNT("D3DDevice_EndVisibilityTest"); c->r[0] = 0; X_RET(1); }
 void xv_hle_D3DDevice_GetVisibilityTestResult(xctx *c) { XD3D_COUNT("D3DDevice_GetVisibilityTestResult"); if (X_ARG(1)) X_M32(X_ARG(1)) = 1; if (X_ARG(2)) X_M64(X_ARG(2)) = 0; c->r[0] = 0; X_RET(3); }
 
 /* ---- draws & state ---------------------------------------------------------------------------- */
-void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
+void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_offscreen_rt) xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
 char xd3d_last_stack[400];
 void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawIndexedVertices");
     if (g_vp_frame != g_dev.frame && xd3d_state.z_enable) { g_vp_frame = g_dev.frame; memcpy(g_vp_rows, xd3d_state.vsc, sizeof g_vp_rows); }
@@ -360,7 +365,7 @@ void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawI
         D3DLOG("[hist] drawcall prim %u n %u stack:%s\n", X_ARG(0), X_ARG(1), sb);
         strncpy(xd3d_last_stack, sb, sizeof xd3d_last_stack - 1);
     }
-    g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
+    g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_offscreen_rt) xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_Begin(xctx *c)
 { XD3D_COUNT("D3DDevice_Begin");
     { static int done; if (!done && xd3d_frame() > 1 && X_ARG(0) == 7 && getenv("XV_STACKDUMP")) {

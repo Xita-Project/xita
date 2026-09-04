@@ -213,7 +213,11 @@ def emit_textures(d: dict, L: List[str], samplers: Dict[int, str], warnings: Lis
                 # map: normalise the interpolated vector directly.  Our uploaded cube faces do not sit in GXM's
                 # face/orientation convention (bump-lit cliffs came out with black contour bands, 2026-09-04),
                 # and an analytic normalise is cheaper than a cube fetch anyway.
-                L.append(f"    float4 t{i} = float4(normalize({tc}.xyz) * 0.5 + 0.5, 1.0);   // normalisation cube map -> analytic")
+                # A zero-length vector (Halo: faces with no incident light; the VS then feeds rsq(0)*0 = NaN) must not
+                # normalise to NaN - 0 * NaN is NaN in the combiner and the face renders black.  The NV2A cube lookup
+                # returned a finite texel for it; return "straight up" instead.  NaN fails both comparisons.
+                L.append(f"    float4 t{i}; {{ float3 nv_ = {tc}.xyz; float l_ = dot(nv_, nv_);"
+                         f" t{i} = float4(((l_ > 1e-12) && (l_ < 1e30)) ? nv_ * rsqrt(l_) * 0.5 + 0.5 : float3(0.5, 0.5, 1.0), 1.0); }}   // normalisation cube map -> analytic")
             elif CUBE_EXPR is None:
                 samplers[i] = "samplerCUBE"
                 L.append(f"    float4 t{i} = texCUBE(tex{i}, {tc}.xyz);")
