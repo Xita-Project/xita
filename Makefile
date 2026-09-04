@@ -46,7 +46,7 @@ LIBS      := -lSceGxm_stub \
              -lSceSysmem_stub \
              -lSceProcessmgr_stub
 # … plus SceLibKernel (sceClibPrintf for XV_LOG) and libm (scene camera math).
-LIBS      += -lSceLibKernel_stub -lm
+LIBS      += -lSceLibKernel_stub -lSceTouch_stub -lm
 
 # --- Stage 4: run the recompiled Halo engine instead of the mock game (make RECOMP=1) ---
 # Swaps the runtime D3D HLE (xv_d3d.c/xv_scene.c) for the recompiled engine + kernel translator

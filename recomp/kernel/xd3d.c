@@ -252,16 +252,21 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip)
 }
 static void vblank_thread(xctx *c, void *arg)
 {
-    (void)arg; unsigned counter = 0;
-    uint32_t data = xk_kalloc(16);
-    /* XV_VBLANK_HZ: Halo paces frames on this counter (wait for vblank event, then until count >= target);
-     * at 10 fps those waits are pure loss (up to 2 real vblanks after a 100 ms frame), so the rate is a knob */
+    (void)arg;
+    /* The vblank count IS Halo's clock: the callback (3925: 0xBB4E0) adds one per call to a 64-bit counter at
+     * 0x1F8C80, the frame-end function (0xBB060) turns "vblanks since the last frame" into the frame's seconds
+     * (0x2E3680 = n * 1/60, clamped) and waits until the count reaches the target set at the previous
+     * frame end.  So every fire must correspond to one real 1/60 s: firing faster (the old XV_VBLANK_HZ=1000
+     * setting) or fabricating a vblank when the game waits (the old kick) makes the game run fast - 2x at
+     * 60 fps on the emulator, "20 fps feel" at 10 fps on hardware.  Fire on a real-time schedule and catch up
+     * after a stall (a long frame or a load), never ahead of it.  XV_VBLANK_HZ stays as a diagnostic only. */
     unsigned hz = 60; { const char *e = getenv("XV_VBLANK_HZ"); if (e && atoi(e) >= 30 && atoi(e) <= 1000) hz = (unsigned)atoi(e); }
-    D3DLOG("vblank thread: %u Hz\n", hz);
+    D3DLOG("vblank thread: %u Hz real-time%s\n", hz, hz != 60 ? " (WARNING: not 60 - game speed scales with it)" : "");
+    uint64_t t0 = xk_os_monotonic_us(), fired = 0;
     for (;;) {
-        xk_sleep_us(1000000u / hz);
-        (void)counter; (void)data;
-        vblank_fire(c);
+        uint64_t due = (xk_os_monotonic_us() - t0) * hz / 1000000u;
+        if (fired >= due) { xk_sleep_us(1000000u / hz); continue; }
+        while (fired < due) { vblank_fire(c); fired++; }
     }
 }
 void xv_hle_D3DDevice_SetVerticalBlankCallback(xctx *c)

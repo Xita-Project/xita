@@ -103,7 +103,7 @@ gameplay; touch inputs are ORed in independently.
 | --- | --- |
 | `XV_FPS=1` | frame-time overlay |
 | `XV_BC_MIPS=1` | upload mip chains for compressed textures (verified on the emulator, being verified on hardware) |
-| `XV_VBLANK_HZ=1000` | rate of the vblank counter the game waits on; higher means less idle time per frame |
+| `XV_VBLANK_HZ=60` | diagnostic only: rate of the vblank counter. Halo derives game time from it, so anything but 60 changes the game's speed |
 | `XV_PROF=1` | sample the running guest function and log the top entries |
 | `XV_TOUCH=0/1` | enable touch zones (default 1); unsupported panels behave as untouched |
 | `XV_TOUCH_SWAP=1` | swap rear Black/White halves (default 0) |
