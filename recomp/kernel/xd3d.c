@@ -221,13 +221,15 @@ void xv_hle_D3DDevice_BlockUntilVerticalBlank(xctx *c) { XD3D_COUNT("D3DDevice_B
  * game thread deadlocked the map-list loader at the gametype screen). */
 static uint32_t g_vb_data; static unsigned g_vb_counter; static unsigned g_vb_kicks;
 static xk_thread *g_vb_thread;                 /* the 60 Hz vblank guest thread (kicked on demand) */
+uint64_t xv_t_vbcb_us, xv_t_draw_us; unsigned xv_n_kicks, xv_n_fires;   /* per-frame timing (frame-time log) */
+extern uint64_t xk_os_monotonic_us(void);
 static void vblank_fire(xctx *c)
 {
     if (!g_dev.vblank_cb) return;
     if (!g_vb_data) g_vb_data = xk_kalloc(16);
     g_vb_counter++;
     X_M32(g_vb_data) = g_vb_counter; X_M32(g_vb_data + 4) = g_dev.frame; X_M32(g_vb_data + 8) = 0; X_M32(g_vb_data + 12) = 0;
-    call_guest(c, g_dev.vblank_cb, g_vb_data);
+    { uint64_t t0 = xk_os_monotonic_us(); call_guest(c, g_dev.vblank_cb, g_vb_data); xv_t_vbcb_us += xk_os_monotonic_us() - t0; xv_n_fires++; }
 }
 int xd3d_vblank_kick(xctx *c, uint32_t eip)
 {
@@ -244,7 +246,7 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip)
         return 0;
     }
     if (!g_vb_thread) return 0;
-    xk_thread_kick(g_vb_thread); g_vb_kicks++;            /* the vblank thread fires the callback on its own thread, next switch */
+    xk_thread_kick(g_vb_thread); g_vb_kicks++; xv_n_kicks++;            /* the vblank thread fires the callback on its own thread, next switch */
     { static unsigned n; if (n++ < 5) D3DLOG("vblank kick from %08X (%u so far) -> vblank thread\n", eip, g_vb_kicks); }
     return 1;
 }
@@ -333,7 +335,7 @@ void xv_hle_D3DDevice_EndVisibilityTest(xctx *c) { XD3D_COUNT("D3DDevice_EndVisi
 void xv_hle_D3DDevice_GetVisibilityTestResult(xctx *c) { XD3D_COUNT("D3DDevice_GetVisibilityTestResult"); if (X_ARG(1)) X_M32(X_ARG(1)) = 1; if (X_ARG(2)) X_M64(X_ARG(2)) = 0; c->r[0] = 0; X_RET(3); }
 
 /* ---- draws & state ---------------------------------------------------------------------------- */
-void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); c->r[0] = 0; X_RET(3); }
+void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
 char xd3d_last_stack[400];
 void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawIndexedVertices");
     if (g_vp_frame != g_dev.frame && xd3d_state.z_enable) { g_vp_frame = g_dev.frame; memcpy(g_vp_rows, xd3d_state.vsc, sizeof g_vp_rows); }
@@ -343,7 +345,7 @@ void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawI
         D3DLOG("[hist] drawcall prim %u n %u stack:%s\n", X_ARG(0), X_ARG(1), sb);
         strncpy(xd3d_last_stack, sb, sizeof xd3d_last_stack - 1);
     }
-    g_dev.draws++; g_dev.draws_total++; xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); c->r[0] = 0; X_RET(3); }
+    g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_Begin(xctx *c)
 { XD3D_COUNT("D3DDevice_Begin");
     { static int done; if (!done && xd3d_frame() > 1 && X_ARG(0) == 7 && getenv("XV_STACKDUMP")) {

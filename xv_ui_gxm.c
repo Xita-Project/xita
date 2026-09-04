@@ -465,6 +465,11 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
 /* The pool is a bump allocator: when a frame could not fit its textures, wait for the GPU and start over
  * (the working set is rebuilt over the next frame).  Rate-limited so a set that never fits does not
  * re-decode every frame. */
+/* A new map's tag data lands at the same guest addresses as the old one, so the GXM texture cache
+ * (keyed by guest address + format word) would keep serving the previous level's pixels for entries that
+ * already passed their re-validation quota (Blood Gulch grass on a10's cryo-bay walls).  The kernel calls
+ * this when a map's tag region is read; the wipe happens after the current frame. */
+void xv_ui_gxm_request_texture_purge(void) { g.tex_purge = 1; }
 static void ui_tex_purge_if_needed(unsigned frame)
 {
     if (!g.tex_purge) return;
@@ -913,7 +918,13 @@ uint32_t xv_ui_gxm_mesh_frame(void) { return g_mesh_frame; }
 static uint64_t g_t_last_present, g_t_game_acc, g_t_render_acc; static unsigned g_t_frames;
 static inline uint64_t t_us(void) { extern uint64_t xk_os_monotonic_us(void); return xk_os_monotonic_us(); }
 void xd3d_hist_small_check(unsigned frame, unsigned draws);
+uint64_t xv_t_present_us;
+static void xd3d_r_present_inner(unsigned frame, unsigned draws);
 void xd3d_r_present(unsigned frame, unsigned draws)
+{
+    extern uint64_t xk_os_monotonic_us(void); uint64_t t0 = xk_os_monotonic_us(); xd3d_r_present_inner(frame, draws); xv_t_present_us += xk_os_monotonic_us() - t0;
+}
+static void xd3d_r_present_inner(unsigned frame, unsigned draws)
 {
     xd3d_hist_small_check(frame, draws);
     (void)draws;
@@ -929,8 +940,8 @@ void xd3d_r_present(unsigned frame, unsigned draws)
     if (++g_t_frames == 60) {
         g_xv_ovl_game_ms = g_t_game_acc / 60000.0f; g_xv_ovl_render_ms = g_t_render_acc / 60000.0f;
         g_xv_ovl_fps = 60.0e6f / (float)(g_t_game_acc + g_t_render_acc + 1);
-        { extern unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc, xv_dbg_count[16]; UI_LOG("frame time: game %.1f ms + render %.1f ms = %.1f fps | %u textures %u KB | decode %u tex %.1f ms | draws/frame %u bsp %u | frames %u vis A30=%u 940=%u 520=%u 6D0=%u 126A0=%u 53630=%u leaf-1=%u clus-1=%u | vis2 32E0=%u 24B0=%u 3280=%u 28D0=%u B7F10=%u 39C0=%u C5E0=%u BFD0=%u\n",
-               g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1), g_t_frames, xv_dbg_count[0], xv_dbg_count[1], xv_dbg_count[2], xv_dbg_count[3], xv_dbg_count[4], xv_dbg_count[5], xv_dbg_count[6], xv_dbg_count[7], xv_dbg_count[8], xv_dbg_count[9], xv_dbg_count[10], xv_dbg_count[11], xv_dbg_count[12], xv_dbg_count[13], xv_dbg_count[14], xv_dbg_count[15]); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; memset(xv_dbg_count, 0, sizeof xv_dbg_count); } g_dec_n = 0; g_dec_us = 0;
+        { extern unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc, xv_n_kicks, xv_n_fires; extern uint64_t xv_t_vbcb_us, xv_t_draw_us, xv_t_present_us; UI_LOG("frame time: game %.1f ms + render %.1f ms = %.1f fps | %u textures %u KB | decode %u tex %.1f ms | draws/frame %u bsp %u | frames %u | kicks %u fires %u vbcb %.1f ms draw-hle %.1f ms present %.1f ms (per frame)\n",
+               g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1), g_t_frames, xv_n_kicks / (g_t_frames ? g_t_frames : 1), xv_n_fires / (g_t_frames ? g_t_frames : 1), xv_t_vbcb_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_draw_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_present_us / 1000.0 / (g_t_frames ? g_t_frames : 1)); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; xv_n_kicks = xv_n_fires = 0; xv_t_vbcb_us = xv_t_draw_us = xv_t_present_us = 0; } g_dec_n = 0; g_dec_us = 0;
         g_t_frames = 0; g_t_game_acc = g_t_render_acc = 0;
     }
 }
