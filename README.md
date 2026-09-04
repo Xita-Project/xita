@@ -11,6 +11,8 @@ lists and launches the installed games is on the roadmap.
 
 **You need your own copy of the game.** Xita ships no game data. The executable and the
 maps are extracted from your own Xbox disc image and stay on your memory card.
+No prebuilt VPKs are published either: the runtime binary contains the recompiled game
+code, so every user builds it from their own executable (see Build below).
 
 ## Status
 
