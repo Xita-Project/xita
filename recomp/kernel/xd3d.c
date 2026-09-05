@@ -832,7 +832,7 @@ void xv_hle_D3DTexture_GetSurfaceLevel(xctx *c)
     X_M32(X_ARG(2)) = s; c->r[0] = 0; X_RET(3);
 }
 
-/* ---- DirectSound (silent) ------------------------------------------------------------------------ */
+/* ---- DirectSound ------------------------------------------------------------------------ */
 static uint32_t ds_obj(unsigned size) { uint32_t o = xk_kalloc(size); X_M32(o) = 1; { static unsigned n; if (n++ < 200 && getenv("XV_LOG_DS")) D3DLOG("ds_obj %08X (%u B)\n", o, size); } return o; }
 /* Sound STREAMS are XMediaObjects: Halo drives them through the COM vtable ({QI, AddRef, Release, GetInfo,
  * GetStatus, Process, Discontinuity, Flush}), not the IDirectSoundStream_* C wrappers.  Point our objects
@@ -845,10 +845,43 @@ static uint32_t ds_obj(unsigned size) { uint32_t o = xk_kalloc(size); X_M32(o) =
  * movie runs at the speed its audio track dictates.  Completion is checked whenever the game touches the
  * sound system (DoWork once per frame, GetStatus/Process from the feeder). */
 #include "xk_audio.h"
+#include "dsound_state.h"
+static int ds_log_enabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0) { const char *e = getenv("XV_DSOUND_LOG"); enabled = e && !strcmp(e, "1"); }
+    return enabled;
+}
+static void ds_state_format(ds_state *s, uint32_t wfx)
+{
+    s->tag = 1; s->channels = 2; s->rate = 48000; s->bits = 16; s->align = 4;
+    if (!wfx) return;
+    s->tag = X_M16(wfx);
+    uint32_t ch = X_M16(wfx + 2), rate = X_M32(wfx + 4);
+    if (ch == 1 || ch == 2) s->channels = ch;
+    if (rate >= 4000 && rate <= 96000) s->rate = rate;
+    s->bits = X_M16(wfx + 14) == 8 ? 8 : 16;
+    s->align = s->tag == 0x69 ? (X_M16(wfx + 12) ? X_M16(wfx + 12) : 36 * s->channels) : s->channels * (s->bits / 8);
+}
+static void ds_state_log(const char *event, uint32_t obj, ds_state *s, int queued)
+{
+    if (ds_log_enabled()) D3DLOG("dsound %s obj=%08X bytes=%u format=%X ch=%u bits=%u rate=%u loop=%d duration_us=%llu start_us=%llu end_us=%llu queued=%d\n",
+        event, obj, s->size, s->tag, s->channels, s->bits, ds_state_rate(s), s->looping,
+        (unsigned long long)s->duration_us, (unsigned long long)s->start_us, (unsigned long long)s->end_us, queued);
+}
+static int ds_state_report(uint32_t obj, ds_state *s, int playing, int queued)
+{
+    static unsigned transitions;
+    if (playing != s->last_report) {
+        if (ds_log_enabled() && transitions++ < 256) ds_state_log(playing ? "IsPlaying 0->1" : "IsPlaying 1->0", obj, s, queued);
+        s->last_report = playing;
+    }
+    return playing;
+}
 #define DS_MAX_STREAMS 128
 #define DS_MAX_PKTS    8
-typedef struct { uint32_t status_ptr, completed_ptr, size, event, context; uint64_t due_us; } ds_pkt;
-typedef struct { uint32_t obj; uint32_t bytes_per_sec; uint32_t callback, cb_context, max_pkts; uint64_t tail_us; ds_pkt q[DS_MAX_PKTS]; int nq; int voice; } ds_stream;
+typedef struct { uint32_t status_ptr, completed_ptr, size, event, context; uint64_t due_us, report_due_us; } ds_pkt;
+typedef struct { uint32_t obj; uint32_t bytes_per_sec; uint32_t callback, cb_context, max_pkts; uint64_t tail_us; ds_pkt q[DS_MAX_PKTS]; int nq; int voice; ds_state state; } ds_stream;
 static ds_stream g_ds_streams[DS_MAX_STREAMS];
 static ds_stream *ds_stream_find(uint32_t obj) { for (int i = 0; i < DS_MAX_STREAMS; ++i) if (g_ds_streams[i].obj == obj) return &g_ds_streams[i]; return NULL; }
 /* Completion: status/size out-params, the completion event, and - what Halo's mixer actually relies on -
@@ -894,6 +927,7 @@ static uint32_t ds_stream_obj(uint32_t desc)
         /* DSSTREAMDESC { dwFlags, dwMaxAttachedPackets, lpwfxFormat, lpMixBins, lpfnCallback, lpvContext } */
         uint32_t wfx = desc ? X_M32(desc + 8) : 0;
         s->voice = xk_audio_voice_new(2, wfx);
+        ds_state_format(&s->state, wfx); s->state.stopped = 1; ds_state_log("create stream", o, &s->state, 0);
         if (wfx) { uint32_t bps = X_M32(wfx + 8); if (bps >= 8000 && bps <= 2000000) s->bytes_per_sec = bps; }
         /* XDK 3925 DSSTREAMDESC has no lpMixBins: callback at +12, context at +16 (verified from Halo's calls) */
         if (desc) { uint32_t mp = X_M32(desc + 4); if (mp >= 1 && mp <= DS_MAX_PKTS) s->max_pkts = mp; s->callback = X_M32(desc + 12); s->cb_context = X_M32(desc + 16); }
@@ -921,6 +955,13 @@ static void xv_hle_CDirectSoundStream_Process(xctx *c)
         p->size = size; p->completed_ptr = X_M32(pkt + 8); p->status_ptr = X_M32(pkt + 12); p->event = 0; p->context = X_M32(pkt + 16);
         p->due_us = start + (uint64_t)size * 1000000ull / (s->bytes_per_sec ? s->bytes_per_sec : 192000);
         s->tail_us = p->due_us;
+        ds_state *st = &s->state;
+        uint64_t report_start = !st->stopped && st->end_us > now ? st->end_us : now;
+        st->size = size; st->duration_us = ds_state_duration(st, size);
+        st->start_us = now; st->end_us = report_start + st->duration_us;
+        p->report_due_us = st->end_us;
+        st->stopped = st->paused = 0;
+        ds_state_log("play packet", s->obj, st, s->nq);
         if (p->status_ptr) X_M32(p->status_ptr) = 1;                       /* XMEDIAPACKET_STATUS_PENDING */
         if (s->voice >= 0) xk_audio_stream_push(s->voice, X_M32(pkt), size);   /* pvBuffer */
         { static unsigned n; if (n++ < 3) D3DLOG("stream packet %u bytes = %u ms at %u B/s (max %u queued)\n", size, (unsigned)((uint64_t)size * 1000u / (s->bytes_per_sec ? s->bytes_per_sec : 1)), s->bytes_per_sec, s->max_pkts); }
@@ -938,7 +979,7 @@ static void xv_hle_CDirectSoundStream_Flush(xctx *c)
 {
     { ds_stream *fs = ds_stream_find(X_ARG(0)); if (fs && fs->voice >= 0) xk_audio_stream_flush(fs->voice); } XD3D_COUNT("CDirectSoundStream_Flush");
     ds_stream *s = ds_stream_find(X_ARG(0));
-    if (s) { int n = s->nq; ds_pkt q[DS_MAX_PKTS]; memcpy(q, s->q, sizeof q); s->nq = 0; s->tail_us = 0;
+    if (s) { ds_state_stop(&s->state, xk_os_monotonic_us()); ds_state_log("stop flush", s->obj, &s->state, 0); int n = s->nq; ds_pkt q[DS_MAX_PKTS]; memcpy(q, s->q, sizeof q); s->nq = 0; s->tail_us = 0;
         for (int i = 0; i < n; ++i) { if (q[i].status_ptr) X_M32(q[i].status_ptr) = 2;                          /* FLUSHED */
             if (s->callback) { X_PUSH32(2); X_PUSH32(q[i].context); X_PUSH32(s->cb_context); X_PUSH32(0xDEAD0011u); xv_call(c, s->callback); } } }
     c->r[0] = 0; X_RET(1);
@@ -952,11 +993,6 @@ const xv_fn_entry_t xv_hle_extra[] = {
     { 0x001937F5u, xv_hle_CDirectSoundStream_Discontinuity },    /* vtbl+0x14 */
     { 0x00193822u, xv_hle_CDirectSoundStream_Flush },            /* vtbl+0x18 */
     { 0, 0 } };
-/* Two tiny DSOUND helpers Halo calls on its voice wrappers ([wrapper+0x24] = the DSound object).  Lifted
- * they would poke real CDirectSoundBuffer internals; HLE'd (--hle-addr) they report "not playing" and
- * a no-op stop, which keeps the channel pump moving. */
-void xv_hle_DSoundVoiceIsPlaying(xctx *c) { XD3D_COUNT("DSoundVoiceIsPlaying"); c->r[0] = 0; X_RET(1); }
-void xv_hle_DSoundVoiceStop(xctx *c)      { XD3D_COUNT("DSoundVoiceStop"); c->r[0] = 0; X_RET(1); }
 void xv_hle_DirectSoundCreate(xctx *c) { XD3D_COUNT("DirectSoundCreate"); { static int up; if (!up) { up = 1; extern int xk_audio_start(void); extern void xv_prof_start(void) __attribute__((weak)); if (xv_prof_start) xv_prof_start(); xk_audio_init(); if (xk_audio_start() != 0) D3DLOG("audio thread failed\n"); } } uint32_t ds = ds_obj(256); D3DLOG("DirectSoundCreate -> %08X\n", ds); X_M32(X_ARG(1)) = ds; c->r[0] = 0; X_RET(3); }
 void xv_hle_DirectSoundDoWork(xctx *c) { XD3D_COUNT("DirectSoundDoWork"); ds_pump_all(c); X_RET(0); }
 void xv_hle_DirectSoundUseFullHRTF(xctx *c) { XD3D_COUNT("DirectSoundUseFullHRTF"); X_RET(0); }
@@ -966,7 +1002,7 @@ void xv_hle_DirectSoundEnterCriticalSection(xctx *c) { XD3D_COUNT("DirectSoundEn
  * SetBufferData or allocated from DSBUFFERDESC.dwBufferBytes), Lock returning pointers into it, and a play
  * cursor that advances in real time at the format's byte rate while playing.  Silent otherwise. */
 #define DS_MAX_BUFFERS 256
-typedef struct { uint32_t obj, data, size, bytes_per_sec, base_pos; uint64_t start_us; int playing, looping; int voice; } ds_buffer;
+typedef struct { uint32_t obj, data, size, bytes_per_sec, base_pos; uint64_t start_us; int playing, looping; int voice; ds_state state; } ds_buffer;
 static ds_buffer g_ds_buffers[DS_MAX_BUFFERS];
 static ds_buffer *ds_buffer_find(uint32_t obj) { for (int i = 0; i < DS_MAX_BUFFERS; ++i) if (g_ds_buffers[i].obj == obj) return &g_ds_buffers[i]; return NULL; }
 static uint32_t ds_buffer_obj(uint32_t desc)
@@ -974,6 +1010,7 @@ static uint32_t ds_buffer_obj(uint32_t desc)
     uint32_t o = ds_obj(256); ds_buffer *b = ds_buffer_find(0);
     if (!b) return o;
     memset(b, 0, sizeof *b); b->obj = o; b->bytes_per_sec = 192000; b->voice = -1;
+    ds_state_format(&b->state, desc ? X_M32(desc + 12) : 0); b->state.stopped = 1;
     if (desc) {
         uint32_t bytes = X_M32(desc + 8), wfx = X_M32(desc + 12);                /* DSBUFFERDESC { dwSize, dwFlags, dwBufferBytes, lpwfxFormat, lpMixBins, dwInputMixBin } */
         if (wfx) { uint32_t bps = X_M32(wfx + 8); if (bps >= 8000 && bps <= 2000000) b->bytes_per_sec = bps; }
@@ -981,6 +1018,7 @@ static uint32_t ds_buffer_obj(uint32_t desc)
         b->voice = xk_audio_voice_new(1, wfx);
         if (b->data) xk_audio_voice_set_data(b->voice, b->data, b->size);
     } else b->voice = xk_audio_voice_new(1, 0);
+    b->state.size = b->size; b->state.duration_us = ds_state_duration(&b->state, b->size); ds_state_log("create buffer", o, &b->state, 0);
     return o;
 }
 static uint32_t ds_buffer_pos(ds_buffer *b)
@@ -996,6 +1034,43 @@ static uint32_t ds_buffer_pos(ds_buffer *b)
     if (adv >= b->size) { b->playing = 0; b->base_pos = 0; return 0; }   /* one-shot finished */
     return (uint32_t)adv;
 }
+/* 3925 helper returns a normalized BOOL in EAX (ret 4), not HRESULT/status.
+ * HLE objects replace the whole interface; only native wrappers need +0x24. */
+static ds_state *ds_voice_state(uint32_t obj, uint32_t *resolved, int *queued)
+{
+    if (!obj) return NULL;
+    ds_buffer *b = ds_buffer_find(obj); ds_stream *s = ds_stream_find(obj);
+    if (!b && !s) { obj = X_M32(obj + 0x24); if (!obj) return NULL; b = ds_buffer_find(obj); s = ds_stream_find(obj); }
+    *resolved = obj; *queued = 0;
+    /* Callback-pending packets may already have drained. Never require DoWork
+     * from a caller spinning in IsPlaying; do not dispatch callbacks here. */
+    if (s) { uint64_t now = xk_os_monotonic_us();
+        for (int i = 0; i < s->nq; ++i) if (now < s->q[i].report_due_us) ++*queued;
+    }
+    return b ? &b->state : s ? &s->state : NULL;
+}
+void xv_hle_DSoundVoiceIsPlaying(xctx *c)
+{
+    XD3D_COUNT("DSoundVoiceIsPlaying");
+    uint32_t obj = X_ARG(0); int queued = 0;
+    ds_state *s = ds_voice_state(obj, &obj, &queued);
+    c->r[0] = s ? ds_state_report(obj, s, ds_state_playing(s, xk_os_monotonic_us()) ||
+        (!s->stopped && !s->paused && queued > 0), queued) : 0;
+    X_RET(1);
+}
+void xv_hle_DSoundVoiceStop(xctx *c)
+{
+    XD3D_COUNT("DSoundVoiceStop");
+    uint32_t obj = X_ARG(0); int queued = 0;
+    ds_state *s = ds_voice_state(obj, &obj, &queued);
+    if (s) {
+        ds_state_stop(s, xk_os_monotonic_us());
+        ds_stream *stream = ds_stream_find(obj);
+        if (stream) for (int i = 0; i < stream->nq; ++i) stream->q[i].report_due_us = 0;
+        ds_state_log("stop helper", obj, s, queued);
+    }
+    c->r[0] = 0; X_RET(1);
+}
 void xv_hle_DirectSoundCreateBuffer(xctx *c) { XD3D_COUNT("DirectSoundCreateBuffer"); X_M32(X_ARG(1)) = ds_buffer_obj(X_ARG(0)); c->r[0] = 0; X_RET(2); }
 void xv_hle_IDirectSound_CreateSoundBuffer(xctx *c) { XD3D_COUNT("IDirectSound_CreateSoundBuffer"); X_M32(X_ARG(2)) = ds_buffer_obj(X_ARG(1)); c->r[0] = 0; X_RET(4); }
 void xv_hle_IDirectSound_CreateSoundStream(xctx *c) { XD3D_COUNT("IDirectSound_CreateSoundStream"); X_M32(X_ARG(2)) = ds_stream_obj(X_ARG(1)); c->r[0] = 0; X_RET(4); }
@@ -1010,7 +1085,16 @@ void xv_hle_DSound_CRefCount_Release(xctx *c) { XD3D_COUNT("DSound_CRefCount_Rel
 DS_OK(IDirectSound_CommitDeferredSettings, 1) DS_OK(IDirectSound_SetDistanceFactor, 3) DS_OK(IDirectSound_SetI3DL2Listener, 3)
 DS_OK(IDirectSound_SetMixBinHeadroom, 3) DS_OK(IDirectSound_SetOrientation, 8) DS_OK(IDirectSound_SetPosition, 5)
 DS_OK(IDirectSound_SetRolloffFactor, 3) DS_OK(IDirectSound_SetVelocity, 5)
-void xv_hle_IDirectSoundBuffer_GetStatus(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_GetStatus"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) ds_buffer_pos(b); if (X_ARG(1)) X_M32(X_ARG(1)) = b ? ((b->playing ? 0x1 : 0) | (b->looping ? 0x4 : 0)) : 0; c->r[0] = 0; X_RET(2); }
+void xv_hle_IDirectSoundBuffer_GetStatus(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_GetStatus");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b) ds_buffer_pos(b);
+    int playing = b ? ds_state_report(b->obj, &b->state, ds_state_playing(&b->state, xk_os_monotonic_us()), 0) : 0;
+    if (X_ARG(1)) X_M32(X_ARG(1)) = playing ? (1u | (b->state.looping ? 4u : 0)) : 0;
+    c->r[0] = 0;
+    X_RET(2);
+}
 /* Lock(pThis, dwOffset, dwBytes, ppvAudioPtr1, pdwAudioBytes1, ppvAudioPtr2, pdwAudioBytes2, dwFlags) */
 void xv_hle_IDirectSoundBuffer_Lock(xctx *c)
 {
@@ -1028,23 +1112,124 @@ void xv_hle_IDirectSoundBuffer_Lock(xctx *c)
     c->r[0] = (b && b->data) ? 0 : 0x88780032u;                              /* DSERR_INVALIDPARAM */
     X_RET(8);
 }
-void xv_hle_IDirectSoundBuffer_Play(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_Play"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) { b->base_pos = ds_buffer_pos(b); b->start_us = xk_os_monotonic_us(); b->playing = 1; b->looping = (X_ARG(3) & 1) != 0; xk_audio_voice_play(b->voice, b->looping); } c->r[0] = 0; X_RET(4); }
-void xv_hle_IDirectSoundBuffer_Release(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_Release"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) { xk_audio_voice_free(b->voice); b->obj = 0; } c->r[0] = 0; X_RET(1); }
-void xv_hle_IDirectSoundBuffer_SetBufferData(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetBufferData"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b && X_ARG(1)) { b->data = X_ARG(1); b->size = X_ARG(2); xk_audio_voice_set_data(b->voice, b->data, b->size); } c->r[0] = 0; X_RET(3); }
-void xv_hle_IDirectSoundBuffer_SetCurrentPosition(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetCurrentPosition"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) { b->base_pos = X_ARG(1); b->start_us = xk_os_monotonic_us(); xk_audio_voice_set_pos(b->voice, X_ARG(1)); } c->r[0] = 0; X_RET(2); }
-void xv_hle_IDirectSoundBuffer_SetFrequency(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetFrequency"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) xk_audio_voice_set_frequency(b->voice, X_ARG(1)); c->r[0] = 0; X_RET(2); }
+void xv_hle_IDirectSoundBuffer_Play(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_Play");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b) {
+        b->base_pos = ds_buffer_pos(b);
+        b->start_us = xk_os_monotonic_us();
+        b->playing = 1;
+        b->looping = (X_ARG(3) & 1) != 0;
+        xk_audio_voice_play(b->voice, b->looping);
+        ds_state_stop(&b->state, b->start_us);
+        ds_state_play(&b->state, b->start_us, b->looping);
+        ds_state_log("play buffer", b->obj, &b->state, 0);
+    }
+    c->r[0] = 0;
+    X_RET(4);
+}
+void xv_hle_IDirectSoundBuffer_Release(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_Release"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) { ds_state_stop(&b->state, xk_os_monotonic_us()); ds_state_log("stop release", b->obj, &b->state, 0); xk_audio_voice_free(b->voice); b->obj = 0; } c->r[0] = 0; X_RET(1); }
+void xv_hle_IDirectSoundBuffer_SetBufferData(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_SetBufferData");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b && X_ARG(1)) {
+        if (!ds_state_playing(&b->state, xk_os_monotonic_us())) b->state.stopped = 1;
+        b->data = X_ARG(1);
+        b->size = X_ARG(2);
+        b->state.size = b->size;
+        b->state.offset_us = 0;
+        b->state.duration_us = ds_state_duration(&b->state, b->size);
+        b->state.start_us = xk_os_monotonic_us();
+        b->state.end_us = b->state.start_us + b->state.duration_us;
+        xk_audio_voice_set_data(b->voice, b->data, b->size);
+    }
+    c->r[0] = 0;
+    X_RET(3);
+}
+void xv_hle_IDirectSoundBuffer_SetCurrentPosition(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_SetCurrentPosition");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b) {
+        if (!ds_state_playing(&b->state, xk_os_monotonic_us())) b->state.stopped = 1;
+        b->base_pos = X_ARG(1);
+        b->start_us = xk_os_monotonic_us();
+        xk_audio_voice_set_pos(b->voice, X_ARG(1));
+        uint32_t pos = X_ARG(1);
+        if (b->state.align) pos -= pos % b->state.align;
+        b->state.offset_us = ds_state_duration(&b->state, pos < b->size ? pos : b->size);
+        b->state.start_us = b->start_us;
+        b->state.end_us = b->start_us + ds_state_duration(&b->state, b->size) - b->state.offset_us;
+    }
+    c->r[0] = 0;
+    X_RET(2);
+}
+void xv_hle_IDirectSoundBuffer_SetFrequency(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_SetFrequency");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b) {
+        uint64_t old = ds_state_duration(&b->state, b->size);
+        b->state.frequency = X_ARG(1) >= 100 && X_ARG(1) <= 192000 ? X_ARG(1) : 0;
+        ds_state_retime(&b->state, xk_os_monotonic_us(), old);
+        xk_audio_voice_set_frequency(b->voice, X_ARG(1));
+    }
+    c->r[0] = 0;
+    X_RET(2);
+}
 void xv_hle_IDirectSoundBuffer_SetVolume(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetVolume"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) xk_audio_voice_set_volume_db100(b->voice, (int32_t)X_ARG(1)); c->r[0] = 0; X_RET(2); }
 void xv_hle_IDirectSoundBuffer_SetLoopRegion(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetLoopRegion"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) xk_audio_voice_set_loop(b->voice, X_ARG(1), X_ARG(2)); c->r[0] = 0; X_RET(3); }
-void xv_hle_IDirectSoundBuffer_SetFormat(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetFormat"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b && X_ARG(1)) { xk_audio_voice_set_format(b->voice, X_ARG(1)); uint32_t bps = X_M32(X_ARG(1) + 8); if (bps >= 8000 && bps <= 2000000) b->bytes_per_sec = bps; } c->r[0] = 0; X_RET(2); }
+void xv_hle_IDirectSoundBuffer_SetFormat(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_SetFormat");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b && X_ARG(1)) {
+        uint64_t old = ds_state_duration(&b->state, b->size);
+        ds_state_format(&b->state, X_ARG(1));
+        ds_state_retime(&b->state, xk_os_monotonic_us(), old);
+        xk_audio_voice_set_format(b->voice, X_ARG(1));
+        uint32_t bps = X_M32(X_ARG(1) + 8);
+        if (bps >= 8000 && bps <= 2000000) b->bytes_per_sec = bps;
+    }
+    c->r[0] = 0;
+    X_RET(2);
+}
 DS_OK(IDirectSoundBuffer_SetHeadroom, 2) DS_OK(IDirectSoundBuffer_SetMixBins, 2)
 DS_OK(IDirectSoundBuffer_SetPitch, 2) DS_OK(IDirectSoundBuffer_Unlock, 5)
-void xv_hle_IDirectSoundBuffer_Stop(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_Stop"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) { b->base_pos = ds_buffer_pos(b); b->playing = 0; xk_audio_voice_stop(b->voice); } c->r[0] = 0; X_RET(1); }
+void xv_hle_IDirectSoundBuffer_Stop(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_Stop");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b) {
+        b->base_pos = ds_buffer_pos(b);
+        b->playing = 0;
+        xk_audio_voice_stop(b->voice);
+        ds_state_stop(&b->state, xk_os_monotonic_us());
+        ds_state_log("stop buffer", b->obj, &b->state, 0);
+    }
+    c->r[0] = 0;
+    X_RET(1);
+}
 DS_OK(IDirectSoundStream_SetConeAngles, 4) DS_OK(IDirectSoundStream_SetConeOrientation, 5) DS_OK(IDirectSoundStream_SetConeOutsideVolume, 3)
 DS_OK(IDirectSoundStream_SetI3DL2Source, 3) DS_OK(IDirectSoundStream_SetMaxDistance, 3) DS_OK(IDirectSoundStream_SetMinDistance, 3)
 DS_OK(IDirectSoundStream_SetMixBinVolumes_12, 3) DS_OK(IDirectSoundStream_SetMode, 3) DS_OK(IDirectSoundStream_SetPosition, 5)
 DS_OK(IDirectSoundStream_SetVelocity, 5) DS_OK(CDirectSoundBufferSettings_SetBufferData, 2) DS_OK(CDirectSoundStream_AddRef, 1)
-DS_OK(CDirectSoundStream_Release, 1) DS_OK(CDirectSoundStream_SetMixBins, 2)
-void xv_hle_CDirectSoundStream_SetFrequency(xctx *c) { XD3D_COUNT("CDirectSoundStream_SetFrequency"); ds_stream *s = ds_stream_find(X_ARG(0)); if (s) xk_audio_voice_set_frequency(s->voice, X_ARG(1)); c->r[0] = 0; X_RET(2); }
+void xv_hle_CDirectSoundStream_Release(xctx *c)
+{
+    ds_stream *s = ds_stream_find(X_ARG(0));
+    if (s) { ds_state_stop(&s->state, xk_os_monotonic_us()); ds_state_log("stop release", s->obj, &s->state, s->nq); }
+    c->r[0] = 0; X_RET(1);
+}
+DS_OK(CDirectSoundStream_SetMixBins, 2)
+void xv_hle_CDirectSoundStream_SetFrequency(xctx *c) { XD3D_COUNT("CDirectSoundStream_SetFrequency"); ds_stream *s = ds_stream_find(X_ARG(0)); if (s) { uint64_t now = xk_os_monotonic_us(); uint32_t old = ds_state_rate(&s->state);
+        s->state.frequency = X_ARG(1) >= 100 && X_ARG(1) <= 192000 ? X_ARG(1) : 0;
+        if (s->state.end_us > now) s->state.end_us = now + (s->state.end_us - now) * old / ds_state_rate(&s->state);
+        for (int i = 0; i < s->nq; ++i) if (s->q[i].report_due_us > now)
+            s->q[i].report_due_us = now + (s->q[i].report_due_us - now) * old / ds_state_rate(&s->state);
+        s->state.duration_us = ds_state_duration(&s->state, s->state.size);
+        xk_audio_voice_set_frequency(s->voice, X_ARG(1)); } c->r[0] = 0; X_RET(2); }
 void xv_hle_CDirectSoundStream_SetVolume(xctx *c) { XD3D_COUNT("CDirectSoundStream_SetVolume"); ds_stream *s = ds_stream_find(X_ARG(0)); if (s) xk_audio_voice_set_volume_db100(s->voice, (int32_t)X_ARG(1)); c->r[0] = 0; X_RET(2); }
 DS_OK(CMcpxAPU_Commit3dSettings, 1) DS_OK(CMcpxStream_Flush, 0) DS_OK(CMcpxVoiceClient_Commit3dSettings_4, 1)
 static void ds_report_pos(ds_buffer *b, uint32_t pplay, uint32_t pwrite)
