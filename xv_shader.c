@@ -283,6 +283,10 @@ void xv_shader_bind(SceGxmContext *ctx, const xv_vshader_t *vs, const xv_fshader
 {
     sceGxmSetVertexProgram(ctx, vs->vprog);
     sceGxmSetFragmentProgram(ctx, fs->fprog);
+    /* Shared shaders (xv_texmod/tex0/lm) carry the alpha-test uniform for the mesh path; the UI path binds
+     * them here and must disable it, or the discard reads an uninitialised uniform and drops UI pixels. */
+    if (fs->p_atest) { void *fub; if (sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub) == 0) {
+        static const float off[4] = { 0.0f, 0.0f, 0.0f, 0.0f }; sceGxmSetUniformDataF(fub, fs->p_atest, 0, 4, off); } }
 }
 
 int xv_vshader_begin_constants(SceGxmContext *ctx, const xv_vshader_t *vs, void **ub)

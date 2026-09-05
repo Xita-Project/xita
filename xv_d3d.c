@@ -1029,8 +1029,8 @@ static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigne
            * huge stretched polygons - Halo relies on D3D near-plane clipping that GXM does not do the same way
            * (the "geometry bugs out when looking/walking" artifact). Value = max 1/w; tune with XV_WCLAMP_VAL. */
           static int wc = -1; static float wcv = 16.0f;
-          if (wc < 0) { const char *e = getenv("XV_WCLAMP"); wc = e ? atoi(e) : 0; const char *ev = getenv("XV_WCLAMP_VAL"); if (ev) wcv = (float)atof(ev);
-              if (wc) { sceGxmSetWClampEnable(ctx, SCE_GXM_WCLAMP_MODE_ENABLED); sceGxmSetWClampValue(ctx, wcv); } }
+          if (wc < 0) { const char *e = getenv("XV_WCLAMP"); wc = e ? atoi(e) : 0; const char *ev = getenv("XV_WCLAMP_VAL"); if (ev) wcv = (float)atof(ev); }
+          if (wc) { sceGxmSetWClampEnable(ctx, SCE_GXM_WCLAMP_MODE_ENABLED); sceGxmSetWClampValue(ctx, wcv); }   /* per draw: GXM state is per-scene */
         }
         vs_slot_t *v = &g_vs[c->vs];
         xv_fshader_t *fs = c->ps_entry >= 0 ? fragment_for_ps(v, c->ps_entry, c->blend) : NULL;

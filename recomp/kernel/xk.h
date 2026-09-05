@@ -143,7 +143,7 @@ void       xk_thread_exit(uint32_t status);
 void       xk_yield(void);
 void       xk_mem_bind_arena(void);   /* set g_img_base after the arena is allocated */
 uint32_t   xk_mem_image_lo(void);
-uint32_t   xk_mem_image_hi(void);                /* let other guest threads run */
+uint32_t   xk_mem_image_hi(void);
 void       xk_run_until_idle(void);       /* host harness: drive the scheduler */
 void       xk_dump_threads(void);
 void       xk_apc_queue(xk_thread *t, uint32_t routine, uint32_t a1, uint32_t a2, uint32_t a3);
