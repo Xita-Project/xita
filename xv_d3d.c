@@ -1060,7 +1060,8 @@ static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigne
                 if (fs->p_psc) sceGxmSetUniformDataF(fub, fs->p_psc, 0, 18 * 4, &c->psc[0][0]);
                 if (fs->p_fogcolor) sceGxmSetUniformDataF(fub, fs->p_fogcolor, 0, 4, fog);
                 if (fs->p_atest) { uint32_t at = c->atest;                            /* alpha test: (ref, func, enable) */
-                    float av[4] = { (at & 0xFF) / 255.0f, (float)((at >> 8) & 7), (at >> 16) & 1 ? 1.0f : 0.0f, 0.0f };
+                    static int noat = -1; if (noat < 0) { const char *e = getenv("XV_NO_ATEST"); noat = e ? atoi(e) : 0; }
+                    float av[4] = { (at & 0xFF) / 255.0f, (float)((at >> 8) & 7), (noat || !((at >> 16) & 1)) ? 0.0f : 1.0f, 0.0f };
                     sceGxmSetUniformDataF(fub, fs->p_atest, 0, 4, av); }
             }
         }
