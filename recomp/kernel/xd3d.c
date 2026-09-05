@@ -362,12 +362,21 @@ void xv_hle_D3DDevice_SetSoftDisplayFilter(xctx *c) { XD3D_COUNT("D3DDevice_SetS
 void xv_hle_D3DDevice_SetShaderConstantMode(xctx *c) { XD3D_COUNT("D3DDevice_SetShaderConstantMode"); D3DLOG("SetShaderConstantMode(%08X)\n", X_ARG(0)); xd3d_state.const_mode = X_ARG(0); X_RET(1); }
 void xv_hle_D3DDevice_GetBackBuffer(xctx *c) { XD3D_COUNT("D3DDevice_GetBackBuffer"); RES_COMMON(g_dev.backbuffer)++; X_M32(X_ARG(2)) = g_dev.backbuffer; c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_GetDepthStencilSurface(xctx *c) { XD3D_COUNT("D3DDevice_GetDepthStencilSurface"); RES_COMMON(g_dev.depth)++; X_M32(X_ARG(0)) = g_dev.depth; c->r[0] = 0; X_RET(1); }
-/* Halo renders a few passes into offscreen surfaces (render-to-texture: SetRenderTarget(surface, NULL), Clear
- * colour, draw, back to the backbuffer).  Without real render targets every one of those clears wiped the
- * backbuffer mid-frame - the a10 cryo bay's lighting passes were cleared before the base-texture pass
- * modulated against them (black floor tiles).  Until offscreen targets exist, drop their clears and draws. */
+/* NULL retains the current color target. XV_DROP_RT=1 restores the diagnostic drop path. */
 int xd3d_offscreen_rt = 0;
-void xv_hle_D3DDevice_SetRenderTarget(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderTarget"); { uint32_t rt = X_ARG(0); int off = rt && rt != g_dev.backbuffer; if (off != xd3d_offscreen_rt) { static unsigned n; if (n++ < 6) D3DLOG("render target %08X: %s\n", rt, off ? "offscreen (draws dropped)" : "backbuffer"); } xd3d_offscreen_rt = off; } XD3D_RET("SetRenderTarget"); if (xd3d_hist_active()) D3DLOG("[hist] SetRenderTarget(%08X, %08X) backbuffer %08X depth %08X\n", X_ARG(0), X_ARG(1), g_dev.backbuffer, g_dev.depth); xd3d_r_state("SetRenderTarget", X_ARG(0), X_ARG(1), g_dev.backbuffer); X_RET(2); }
+static int xd3d_drop_rt(void)
+{
+    static int drop = -1;
+    if (drop < 0) { const char *e = getenv("XV_DROP_RT"); drop = e && atoi(e) == 1; }
+    return xd3d_offscreen_rt && drop;
+}
+void xv_hle_D3DDevice_SetRenderTarget(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_SetRenderTarget");
+    if (X_ARG(0)) xd3d_offscreen_rt = X_ARG(0) != g_dev.backbuffer;
+    xd3d_r_state("SetRenderTarget", X_ARG(0), X_ARG(1), g_dev.backbuffer);
+    c->r[0] = 0; X_RET(2);
+}
 /* D3DVIEWPORT8 { X, Y, Width, Height, MinZ, MaxZ } */
 void xv_hle_D3DDevice_SetViewport(xctx *c)
 { XD3D_COUNT("D3DDevice_SetViewport");
@@ -441,13 +450,13 @@ void xv_hle_D3DDevice_Swap(xctx *c) { XD3D_COUNT("D3DDevice_Swap"); g_dev.frame+
 void xd3d_r_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil) __attribute__((weak));
 void xd3d_r_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil) { (void)flags; (void)color; (void)z; (void)stencil; }
 /* D3DDevice_Clear(Count, pRects, Flags, Color, Z, Stencil) */
-void xv_hle_D3DDevice_Clear(xctx *c) { XD3D_COUNT("D3DDevice_Clear"); g_dev.clears++; float z; uint32_t zi = X_M32(c->r[4] + 4 + 16); memcpy(&z, &zi, 4); if (!xd3d_offscreen_rt) xd3d_r_clear(X_ARG(2), X_ARG(3), z, X_ARG(5)); c->r[0] = 0; X_RET(6); }
+void xv_hle_D3DDevice_Clear(xctx *c) { XD3D_COUNT("D3DDevice_Clear"); g_dev.clears++; float z; uint32_t zi = X_M32(c->r[4] + 4 + 16); memcpy(&z, &zi, 4); if (!xd3d_drop_rt()) xd3d_r_clear(X_ARG(2), X_ARG(3), z, X_ARG(5)); c->r[0] = 0; X_RET(6); }
 void xv_hle_D3DDevice_BeginVisibilityTest(xctx *c) { XD3D_COUNT("D3DDevice_BeginVisibilityTest"); c->r[0] = 0; X_RET(0); }
 void xv_hle_D3DDevice_EndVisibilityTest(xctx *c) { XD3D_COUNT("D3DDevice_EndVisibilityTest"); c->r[0] = 0; X_RET(1); }
 void xv_hle_D3DDevice_GetVisibilityTestResult(xctx *c) { XD3D_COUNT("D3DDevice_GetVisibilityTestResult"); if (X_ARG(1)) X_M32(X_ARG(1)) = 1; if (X_ARG(2)) X_M64(X_ARG(2)) = 0; c->r[0] = 0; X_RET(3); }
 
 /* ---- draws & state ---------------------------------------------------------------------------- */
-void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_offscreen_rt) xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
+void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_drop_rt()) xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
 char xd3d_last_stack[400];
 void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawIndexedVertices");
     if (g_vp_frame != g_dev.frame && xd3d_state.z_enable) { g_vp_frame = g_dev.frame; memcpy(g_vp_rows, xd3d_state.vsc, sizeof g_vp_rows); }
@@ -457,7 +466,7 @@ void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawI
         D3DLOG("[hist] drawcall prim %u n %u stack:%s\n", X_ARG(0), X_ARG(1), sb);
         strncpy(xd3d_last_stack, sb, sizeof xd3d_last_stack - 1);
     }
-    g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_offscreen_rt) xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
+    g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_drop_rt()) xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_Begin(xctx *c)
 { XD3D_COUNT("D3DDevice_Begin");
     { static int done; if (!done && xd3d_frame() > 1 && X_ARG(0) == 7 && getenv("XV_STACKDUMP")) {
@@ -725,6 +734,16 @@ void xv_hle_D3DDevice_CreateTexture(xctx *c)
     static unsigned n; if (n++ < 16) D3DLOG("CreateTexture(%ux%u, levels %u, fmt %02X) -> %08X data %08X (%u KB)\n", X_ARG(0), X_ARG(1), X_ARG(2), X_ARG(4), t, RES_DATA(t), bytes >> 10);
     X_M32(X_ARG(6)) = t; c->r[0] = RES_DATA(t) ? 0 : 0x8007000Eu; X_RET(7);
 }
+/* HRESULT CreateImageSurface(Width, Height, Format, ppSurface). This Halo symbol
+ * manifest has no named entry; guest-created headers still use the same layout. */
+void xv_hle_D3DDevice_CreateImageSurface(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_CreateImageSurface");
+    uint32_t s = make_pixel_container(X_ARG(0), X_ARG(1), 1, 1, X_ARG(2), 0, 0, NULL);
+    RES_COMMON(s) = (RES_COMMON(s) & ~0x00070000u) | X_D3DCOMMON_TYPE_SURFACE;
+    SURF_PARENT(s) = 0;
+    X_M32(X_ARG(3)) = s; c->r[0] = RES_DATA(s) ? 0 : 0x8007000Eu; X_RET(4);
+}
 /* HRESULT D3DDevice_CreateVolumeTexture(Width, Height, Depth, Levels, Usage, Format, Pool, ppVolumeTexture) */
 void xv_hle_D3DDevice_CreateVolumeTexture(xctx *c) { XD3D_COUNT("D3DDevice_CreateVolumeTexture"); uint32_t t = make_pixel_container(X_ARG(0), X_ARG(1), X_ARG(2), X_ARG(3), X_ARG(5), 0, 1, NULL); X_M32(X_ARG(7)) = t; c->r[0] = RES_DATA(t) ? 0 : 0x8007000Eu; X_RET(8); }
 /* HRESULT D3DDevice_CreateCubeTexture(EdgeLength, Levels, Usage, Format, Pool, ppCubeTexture) */
@@ -761,12 +780,25 @@ void xv_hle_D3DResource_Register(xctx *c)
     static unsigned n; if (n++ < 6) D3DLOG("Register(%08X: common %08X data %08X + base %08X -> %08X)\n", r, RES_COMMON(r), data, base, RES_DATA(r));
     c->r[0] = 0; X_RET(2);
 }
-void xv_hle_D3DResource_Release(xctx *c)
-{ XD3D_COUNT("D3DResource_Release");
-    uint32_t r = X_ARG(0); uint32_t rc = RES_COMMON(r) & X_D3DCOMMON_REFCOUNT_MASK;
-    if (rc > 1) RES_COMMON(r)--; else if ((RES_COMMON(r) & X_D3DCOMMON_D3DCREATED) && RES_DATA(r)) { xk_phys_free(RES_DATA(r)); RES_DATA(r) = 0; RES_COMMON(r) &= ~X_D3DCOMMON_REFCOUNT_MASK; }
-    c->r[0] = rc ? rc - 1 : 0; X_RET(1);
+static uint32_t release_resource(uint32_t r)
+{
+    uint32_t common = RES_COMMON(r), rc = common & X_D3DCOMMON_REFCOUNT_MASK;
+    if (rc > 1) RES_COMMON(r)--;
+    else if (rc) {
+        RES_COMMON(r) &= ~X_D3DCOMMON_REFCOUNT_MASK;
+        if ((common & 0x00070000u) == X_D3DCOMMON_TYPE_SURFACE && SURF_PARENT(r)) {
+            uint32_t parent = SURF_PARENT(r); SURF_PARENT(r) = 0;
+            release_resource(parent);
+        } else if ((common & X_D3DCOMMON_D3DCREATED) && RES_DATA(r)) {
+            xd3d_r_state("ReleaseRenderTarget", RES_DATA(r), 0, 0);
+            xk_phys_free(RES_DATA(r));
+        }
+        RES_DATA(r) = 0;
+    }
+    return rc ? rc - 1 : 0;
 }
+void xv_hle_D3DResource_Release(xctx *c)
+{ XD3D_COUNT("D3DResource_Release"); c->r[0] = release_resource(X_ARG(0)); X_RET(1); }
 void xv_hle_D3DResource_AddRef(xctx *c) { XD3D_COUNT("D3DResource_AddRef"); RES_COMMON(X_ARG(0))++; c->r[0] = RES_COMMON(X_ARG(0)) & X_D3DCOMMON_REFCOUNT_MASK; X_RET(1); }
 void xv_hle_D3DResource_IsBusy(xctx *c) { XD3D_COUNT("D3DResource_IsBusy"); c->r[0] = 0; X_RET(1); }
 void xv_hle_D3DResource_BlockUntilNotBusy(xctx *c) { XD3D_COUNT("D3DResource_BlockUntilNotBusy"); X_RET(1); }
@@ -781,7 +813,7 @@ static void level_geom(uint32_t hdr, unsigned level, unsigned *w, unsigned *h, u
     int cube = (f & 4) != 0; uint32_t off = 0;
     for (unsigned l = 0; l < level; ++l) { off += level_bytes(*fmt, W, H, D) * (cube ? 6 : 1); W = W > 1 ? W >> 1 : 1; H = H > 1 ? H >> 1 : 1; D = D > 1 ? D >> 1 : 1; }
     *w = W; *h = H; *d = D; *offset = off;
-    *pitch = fmt_is_dxt(*fmt) ? ((W + 3) / 4) * (*fmt == 0x0C ? 8 : 16) : (s ? (((s >> 24) & 0xFF) + 1) * 64 : W * fmt_bits(*fmt) / 8);
+    *pitch = fmt_is_dxt(*fmt) ? ((W + 3) / 4) * (*fmt == 0x0C ? 8 : 16) : (s ? (level ? ((W * fmt_bits(*fmt) / 8 + 63) & ~63u) : (((s >> 24) & 0xFF) + 1) * 64) : W * fmt_bits(*fmt) / 8);
 }
 /* D3DTexture_LockRect(pThis, Level, pLockedRect { INT Pitch; void *pBits; }, pRect, Flags) */
 void xv_hle_D3DTexture_LockRect(xctx *c)
@@ -827,7 +859,7 @@ void xv_hle_D3DTexture_GetSurfaceLevel(xctx *c)
     uint32_t t = X_ARG(0); unsigned w, h, d, fmt, pitch; uint32_t off; level_geom(t, X_ARG(1), &w, &h, &d, &fmt, &off, &pitch);
     uint32_t s = new_header(X_D3DCOMMON_TYPE_SURFACE, 64);
     RES_DATA(s) = RES_DATA(t) + off; RES_COMMON(s) &= ~X_D3DCOMMON_D3DCREATED;
-    PC_FORMAT(s) = (PC_FORMAT(t) & ~0xFFF00000u) | (log2u(w) << 20) | (log2u(h) << 24); PC_SIZE(s) = PC_SIZE(t); SURF_PARENT(s) = t;
+    PC_FORMAT(s) = (PC_FORMAT(t) & ~0xFFF00000u) | (log2u(w) << 20) | (log2u(h) << 24); PC_SIZE(s) = PC_SIZE(t) ? ((w - 1) | ((h - 1) << 12) | ((pitch / 64 - 1) << 24)) : 0; SURF_PARENT(s) = t;
     RES_COMMON(t)++;
     X_M32(X_ARG(2)) = s; c->r[0] = 0; X_RET(3);
 }

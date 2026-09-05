@@ -36,7 +36,7 @@ path, so its first milestone (two Vitas in a lobby) can start as soon as pacing 
       settings, merged; not yet verified on hardware.
 - [~] Dashboard first milestone (software-rendered home screen, standalone VPK) and the
       ad-hoc networking test app exist as separate apps; neither has run on hardware yet.
-- [~] Offscreen render-target passes are dropped rather than rendered.
+- [~] Pooled offscreen render targets and ordered scene replay implemented; hardware validation pending (see [design](docs/render-targets.md)).
 
 ## Phase 1 — Gameplay Core & Campaign Completion
 

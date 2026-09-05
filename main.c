@@ -495,17 +495,20 @@ static void xv_gfx_render_frame(uint32_t mesh_frame)
     (void)mesh_frame;
 
 #ifdef XV_RUN_RECOMP
-    if (g->hle_ready) {                 /* render-to-texture passes first, each in its own scene */
-        uint32_t mf0 = mesh_frame;
-        if (mf0 != 0xFFFFFFFFu) xv_d3d_render_offscreen(g->ctx, mf0);
-    }
+    int rtt = g->hle_ready && mesh_frame != 0xffffffffu && xv_d3d_has_render_targets(mesh_frame);
+    if (rtt) {
+        if (xv_d3d_render_targets(g->ctx, mesh_frame, g->render_target,
+                g->display_sync[g->back_index], &g->display_surface[g->back_index], &g->depth_surface) < 0) return;
+    } else
 #endif
-    int err = sceGxmBeginScene(g->ctx, 0, g->render_target, NULL, NULL,
-                               g->display_sync[g->back_index],
-                               &g->display_surface[g->back_index], &g->depth_surface);
-    if (err != SCE_OK) {
-        XV_LOG("sceGxmBeginScene failed: 0x%08X\n", err);
-        return;
+    {
+        int err = sceGxmBeginScene(g->ctx, 0, g->render_target, NULL, NULL,
+                                   g->display_sync[g->back_index],
+                                   &g->display_surface[g->back_index], &g->depth_surface);
+        if (err != SCE_OK) {
+            XV_LOG("sceGxmBeginScene failed: 0x%08X\n", err);
+            return;
+        }
     }
 
     /* Replay the D3D HLE command list the game fiber recorded for this frame:
@@ -518,8 +521,11 @@ static void xv_gfx_render_frame(uint32_t mesh_frame)
         uint32_t mf = mesh_frame;
         /* Halo's VS emits D3D clip space; same viewport the UI replay uses */
         sceGxmSetViewport(g->ctx, 480.0f, 480.0f, 272.0f, -272.0f, 0.5f, 0.5f);
-        if (mf != 0xFFFFFFFFu) xv_d3d_render(g->ctx, mf);
+        if (mf != 0xFFFFFFFFu && !rtt) xv_d3d_render(g->ctx, mf);
     }
+#endif
+#ifdef XV_RUN_RECOMP
+    if (!rtt)
 #endif
     { extern void xv_ui_gxm_replay(SceGxmContext *ctx); xv_ui_gxm_replay(g->ctx); }
 
@@ -923,6 +929,13 @@ void xv_present(void)
 void xv_present_drain(void)
 {
     while ((int32_t)(__atomic_load_n(&g_frame_completed, __ATOMIC_ACQUIRE) - __atomic_load_n(&g_frame_requested, __ATOMIC_ACQUIRE)) < 0) sceKernelDelayThread(100);
+}
+
+/* Only called on the recording thread, while published work is drained. */
+void xv_render_target_drain(void)
+{
+    xv_present_drain();
+    sceGxmFinish(g_gfx.ctx);
 }
 
 /* Core 1: render/present pump. */

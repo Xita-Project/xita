@@ -17,6 +17,7 @@
 #include <psp2/kernel/clib.h>
 
 #include "xv_shader.h"
+#include "xv_d3d.h"
 extern void xv_gpu_flush(const void *ptr, uint32_t len);   /* dcache clean before GPU read (main.c) */
 #include "xv_ui_gxm.h"
 #include "shaders/xv_layouts.h"           /* xv_vs_halo_vs_03, xv_vs_clear, xv_halo_vs[] */
@@ -261,6 +262,9 @@ static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage) { return 
 static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint32_t pal_guest)
 {
     if (!hdr) return NULL;
+    extern const SceGxmTexture *xv_d3d_render_target_texture(uint32_t hdr);
+    const SceGxmTexture *rt = xv_d3d_render_target_texture(hdr);
+    if (rt) return rt;
     uint32_t data = guest_u32(hdr + 4);              /* X_D3DPixelContainer.Data (guest phys) */
     uint32_t fmtword = guest_u32(hdr + 12);
     uint32_t sizeword = guest_u32(hdr + 16);
@@ -679,6 +683,7 @@ void xv_ui_gxm_quads(const xd3d_im_vtx *v, unsigned n, uint32_t tex_hdr, const f
         fr->overflow = 1; return;
     }
 
+    if (!xv_d3d_record_ui(g.rec, fr->bcount)) return;
     ui_batch *b = &fr->batches[fr->bcount++];
     b->first_vertex = fr->vcount;
     b->nquads = quads;
@@ -780,6 +785,41 @@ static void xv_ui_gxm_overlay(SceGxmContext *ctx, int32_t idx)
     sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, (n / 4) * 6);
 }
 
+unsigned xv_ui_gxm_record_frame(void) { return g.rec; }
+void xv_ui_gxm_replay_overlay(SceGxmContext *ctx, unsigned frame)
+{
+    if (!g.ready || frame >= UI_FRAMES) return;
+    sceGxmSetViewport(ctx, 480.0f, 480.0f, 272.0f, -272.0f, 0.5f, 0.5f);
+    sceGxmSetCullMode(ctx, SCE_GXM_CULL_NONE);
+    xv_ui_gxm_overlay(ctx, frame);
+}
+/* Ordered RTT replay retains the scene's viewport and pins the UI ring index. */
+void xv_ui_gxm_replay_batch(SceGxmContext *ctx, unsigned frame, unsigned batch, const void *target)
+{
+    if (!g.ready || frame >= UI_FRAMES || batch >= g.frame[frame].bcount) return;
+    ui_frame *fr = &g.frame[frame];
+    ui_batch *b = &fr->batches[batch];
+    if (target && b->has_tex && sceGxmTextureGetData(&b->tex) == target) {
+        static int warned;
+        if (!warned++) UI_LOG("RT feedback UI batch skipped\n");
+        return;
+    }
+    ui_prog *p = &g.prog[b->prog];
+    sceGxmSetFrontDepthFunc(ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(ctx, SCE_GXM_DEPTH_WRITE_DISABLED);
+    sceGxmSetCullMode(ctx, SCE_GXM_CULL_NONE);
+    xv_shader_bind(ctx, &p->vs, &p->fs[b->stage]);
+    const void *streams[1] = { &fr->verts[b->first_vertex] };
+    xv_vshader_set_streams(ctx, &p->vs, streams);
+    void *ub = NULL;
+    if (xv_vshader_begin_constants(ctx, &p->vs, &ub) == 0) {
+        int cnt = p->desc->c_count > XV_MAX_ATTRS ? XV_MAX_ATTRS : p->desc->c_count;
+        xv_vshader_set_constants(ub, &p->vs, p->desc->c_base, cnt, b->cwin);
+    }
+    if (b->has_tex) sceGxmSetFragmentTexture(ctx, 0, &b->tex);
+    sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, b->nquads * 6);
+}
+
 void xv_ui_gxm_replay(SceGxmContext *ctx)
 {
     if (!g.ready) return;
@@ -840,13 +880,12 @@ void xv_ui_gxm_replay(SceGxmContext *ctx)
  * ============================================================================================== */
 #include "xv_d3d.h"
 static int g_mesh_path = 1;                              /* world geometry through xv_d3d (set 0 to fall back to UI-only clears) */
-/* Render-to-texture passes (Halo: dynamic object shadows, some fog/reflection effects) are dropped
- * for now: while an offscreen surface is the target nothing is recorded, and draws that sample one
- * of those surfaces are skipped by xv_d3d.  Without this, the offscreen clears wiped the frame. */
+/* Color target state for the legacy immediate UI path. */
 static int g_offscreen;
 void xd3d_r_state(const char *what, uint32_t a, uint32_t b, uint32_t v)
 {
     (void)b;
+    if (!strcmp(what, "ReleaseRenderTarget")) { xv_d3d_ReleaseRenderTarget(a); return; }
     if (!strcmp(what, "SetRenderTarget")) {
         if (!a) return;                                                 /* NULL: keep the current colour target */
         g_offscreen = (v && a != v);
@@ -962,7 +1001,7 @@ static unsigned ps_image_stage(uint32_t psdef)
 
 void xd3d_r_im_end(uint32_t prim, const xd3d_im_vtx *v, unsigned n)
 {
-    if (prim != 7 || n < 4 || g_offscreen) return;       /* QUADLIST only (the UI path) */
+    if (prim != 7 || n < 4) return;       /* QUADLIST only (the UI path) */
     uint32_t vs = xd3d_state.vs_handle;
     uint32_t decl = (vs & 1) ? guest_u32(vs & ~1u) : 0;
     if (decl != UI_DECL_VA) return;                      /* other decls handled elsewhere */

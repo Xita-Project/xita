@@ -98,7 +98,16 @@ uint32_t xv_d3d_EndFrame(void);                           /* close the recorded 
 /* Handle (from xv_d3d_RegisterVertexShader) of the clear-quad program xv_clear.gxp. */
 void xv_d3d_set_clear_shader(uint32_t handle);
 
-/* --- pump side (inside sceGxmBeginScene/EndScene) -------------------------------- */
-void xv_d3d_render(SceGxmContext *ctx, uint32_t frame);
-void xv_d3d_render_offscreen(SceGxmContext *ctx, uint32_t frame);   /* render-to-texture passes: call BEFORE the main BeginScene */
+/* --- render targets: record on guest thread, replay on pump -------------------- */
+int xv_d3d_record_ui(unsigned frame, unsigned batch);
+const SceGxmTexture *xv_d3d_render_target_texture(uint32_t hdr);
+void xv_d3d_ReleaseRenderTarget(uint32_t data);
 void xv_d3d_SetRenderTarget(uint32_t surface_hdr, int is_backbuffer);
+
+/* Legacy replay runs inside the caller's scene. RTT replay starts outside a
+ * scene and leaves the final backbuffer scene open for the caller to end/flip. */
+void xv_d3d_render(SceGxmContext *ctx, uint32_t frame);
+int xv_d3d_has_render_targets(uint32_t frame);
+int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
+    SceGxmRenderTarget *back, SceGxmSyncObject *sync,
+    const SceGxmColorSurface *color, const SceGxmDepthStencilSurface *depth);

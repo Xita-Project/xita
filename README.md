@@ -102,6 +102,7 @@ gameplay; touch inputs are ORed in independently.
 | Key | Effect |
 | --- | --- |
 | `XV_FPS=1` | frame-time overlay |
+| `XV_DROP_RT=1` | discard offscreen render-target passes for diagnosis (default 0 renders them; see [design and verification](docs/render-targets.md)) |
 | `XV_BC_MIPS=1` | upload mip chains for compressed textures (verified on the emulator, being verified on hardware) |
 | `XV_VBLANK_HZ=60` | diagnostic only: rate of the vblank counter. Halo derives game time from it, so anything but 60 changes the game's speed |
 | `XV_PROF=1` | sample the running guest function and log the top entries |
