@@ -58,6 +58,7 @@ SRCS      := main.c xv_shader.c xv_d3d.c xv_ui_gxm.c xv_boot.c xv_log.c
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
 RECOMP_LINK_LIB := $(BUILD)/recomp/librecomp.a
+LIBS      += -lSceNet_stub -lSceNetCtl_stub -lScePspnetAdhoc_stub -lSceSysmodule_stub -lSceCommonDialog_stub
 LIBS      += -lSceCtrl_stub -lSceRtc_stub -lSceIofilemgr_stub -lSceAudio_stub -lScePower_stub
 PROJECT   := xita
 SFO_EXTRA := -d ATTRIBUTE2=12      # extended memory mode: +109 MB for the arena/heap/texture pool

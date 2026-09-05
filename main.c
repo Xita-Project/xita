@@ -35,6 +35,9 @@
  * compiled by psp2cgc), the D3D HLE state machine, and the kernel API translator.
  */
 
+#ifdef XV_RUN_RECOMP
+#include <psp2/common_dialog.h>
+#endif
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -489,6 +492,11 @@ static int xv_gfx_init(void)
  * point straight into XRAM (xv_gpu_ptr) after xv_gpu_ensure_visible() on the ranges
  * the guest touched (§1.5).  For now the scene is empty — begin/end/flip only.
  */
+#ifdef XV_RUN_RECOMP
+static int g_net_dialog;
+extern int xv_net_startup(void (*draw)(void));
+extern void xv_net_shutdown(void);
+#endif
 static void xv_gfx_render_frame(uint32_t mesh_frame)
 {
     xv_gfx_t *g = &g_gfx;
@@ -525,6 +533,18 @@ static void xv_gfx_render_frame(uint32_t mesh_frame)
 
     sceGxmEndScene(g->ctx, NULL, NULL);
 
+#ifdef XV_RUN_RECOMP
+    if (g_net_dialog) {
+        SceCommonDialogUpdateParam up = {0};
+        up.renderTarget.colorSurfaceData = g->display_mem[g->back_index].base;
+        up.renderTarget.surfaceType = SCE_GXM_COLOR_SURFACE_LINEAR;
+        up.renderTarget.colorFormat = XV_COLOR_FORMAT;
+        up.renderTarget.width = XV_DISPLAY_WIDTH; up.renderTarget.height = XV_DISPLAY_HEIGHT;
+        up.renderTarget.strideInPixels = XV_DISPLAY_STRIDE;
+        up.displaySyncObject = g->display_sync[g->back_index];
+        sceCommonDialogUpdate(&up);
+    }
+#endif
     /* Present: heartbeat keeps the GPU/display in step, then queue the flip. */
     sceGxmPadHeartbeat(&g->display_surface[g->back_index], g->display_sync[g->back_index]);
 
@@ -537,6 +557,14 @@ static void xv_gfx_render_frame(uint32_t mesh_frame)
     g->back_index  = (g->back_index + 1) % XV_DISPLAY_BUFFER_COUNT;
     g->frame_counter++;
 }
+
+#ifdef XV_RUN_RECOMP
+static void xv_net_dialog_draw(void)
+{
+    xv_gfx_render_frame(0xFFFFFFFFu);
+    sceDisplayWaitVblankStart();
+}
+#endif
 
 
 /* Drain the GPU and the display queue.  Must run before ANY GPU-visible memory
@@ -1124,6 +1152,10 @@ int main(int argc, char *argv[])
     xv_log_memory_budget("after gfx");
 
 #ifdef XV_RUN_RECOMP
+    g_net_dialog = 1;
+    int net_result = xv_net_startup(xv_net_dialog_draw);
+    g_net_dialog = 0;
+    if (net_result < 0) goto shutdown;
     /* Run the recompiled Halo engine on its own big-stack thread (core 0).  It owns guest memory
      * and drives the kernel scheduler; xv_present() renders each frame it records synchronously. */
     {
@@ -1170,6 +1202,9 @@ int main(int argc, char *argv[])
 #endif
 
 shutdown:
+#ifdef XV_RUN_RECOMP
+    xv_net_shutdown();
+#endif
     /* Exit protocol (verified on hardware + Vita3K): drain the GPU and the display
      * queue, detach the framebuffer, and let sceKernelExitProcess() reclaim every
      * memblock and GXM object.  Tearing objects down by hand while the display still

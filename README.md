@@ -112,6 +112,7 @@ gameplay; touch inputs are ORed in independently.
 | `XV_LOOK_CURVE=0/1/2` | right-stick response: linear / legacy (also linear) / squared (default 0) |
 | `XV_INVERT_Y=0/1` | invert right-stick Y (default 0) |
 | `XV_PAD_REC=1` | record pad input to `pad_rec.txt`; copy it to `pad_play.txt` to replay it |
+| `XV_NET_ADHOC=1` | opt-in System Link over Vita ad-hoc; default 0 keeps loopback. Hardware unverified; see [docs/adhoc.md](docs/adhoc.md) |
 | `XV_FORCE_START=1` | let a one-player multiplayer lobby start (temporary until ad-hoc play exists) |
 
 Stick settings are read once at the first pad poll; restart after editing. With defaults,
