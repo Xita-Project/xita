@@ -137,6 +137,7 @@ static void hist_level_track(void)
     if (hist_level_rel < 0 || hist_level_base >= 0) return;
     if (!xk_file_in_ui_map) { hist_level_base = (int)g_dev.frame; g_hist_frame = hist_level_base + hist_level_rel; D3DLOG("hist: level started at frame %d, tracing frame %d\n", hist_level_base, g_hist_frame); }
 }
+void xd3d_hist_arm(void) { g_hist_frame = (int)g_dev.frame + 1; D3DLOG("hist: armed by screenshot -> tracing frame %d\n", g_hist_frame); }
 int xd3d_hist_active(void)
 {
     if (g_hist_frame == -2) { const char *e = getenv("XV_D3D_HIST"); g_hist_frame = e ? atoi(e) : -1; }
