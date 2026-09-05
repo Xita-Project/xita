@@ -125,7 +125,13 @@ void xv_shader_shutdown(void)
 
 static SceGxmProgram *load_gxp(const char *path)
 {
-    SceUID fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+    /* A shader compiled on the console (tools/shadercomp -> ux0:data/xita/shaders/<name>.gxp) overrides the
+     * copy packed in the VPK, so regenerated .cg sources take effect without repacking/reinstalling. */
+    SceUID fd = -1;
+    { const char *base = strrchr(path, '/'); base = base ? base + 1 : path; char alt[160];
+      snprintf(alt, sizeof alt, "ux0:data/xita/shaders/%s", base); fd = sceIoOpen(alt, SCE_O_RDONLY, 0);
+      if (fd >= 0) { static unsigned n; if (n++ < 4) XV_LOG("%s: using device-compiled %s\n", path, alt); } }
+    if (fd < 0) fd = sceIoOpen(path, SCE_O_RDONLY, 0);
     if (fd < 0) {
         XV_LOG("cannot open %s (0x%08X)\n", path, fd);
         return NULL;
@@ -249,6 +255,7 @@ int xv_fshader_load(xv_fshader_t *fs, const char *gxp_path, const xv_vshader_t *
     }
     fs->p_psc      = sceGxmProgramFindParameterByName(fs->prog, "psc");
     fs->p_fogcolor = sceGxmProgramFindParameterByName(fs->prog, "xv_fogcolor");
+    fs->p_atest    = sceGxmProgramFindParameterByName(fs->prog, "xv_atest");
     static const char *const texnames[4] = { "tex0", "tex1", "tex2", "tex3" };
     for (int i = 0; i < 4; ++i) {
         const SceGxmProgramParameter *p = sceGxmProgramFindParameterByName(fs->prog, texnames[i]);

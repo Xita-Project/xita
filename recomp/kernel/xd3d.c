@@ -525,6 +525,13 @@ void xv_hle_D3DDevice_SetPalette(xctx *c) { XD3D_COUNT("D3DDevice_SetPalette");
  * pixel shader def fields (D3DRS_PSALPHAINPUTS0 .. D3DRS_PSINPUTTEXTURE), the rest the simple states. */
 #define D3D_RS_METHOD_TABLE 0x001F08C8u
 uint32_t xd3d_fog_color(void) { return xd3d_state.fog_color; }   /* for the GXM bridge (xv_d3d.c) */
+/* Alpha test state for the GXM bridge, packed: ref[7:0] | (func-0x200)[10:8] | enable[16].  NV097 alpha
+ * funcs 0x200..0x207 = NEVER LESS EQUAL LEQUAL GREATER NOTEQUAL GEQUAL ALWAYS. */
+uint32_t xd3d_alpha_test(void)
+{
+    uint32_t f = xd3d_state.alpha_func >= 0x200u && xd3d_state.alpha_func <= 0x207u ? xd3d_state.alpha_func - 0x200u : 7u;
+    return (xd3d_state.alpha_ref & 0xFFu) | (f << 8) | ((xd3d_state.alpha_test ? 1u : 0u) << 16);
+}
 static void rs_method(uint32_t method, uint32_t v);
 void xv_hle_D3DDevice_SetRenderStateNotInline(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderStateNotInline");
     uint32_t st = X_ARG(0), v = X_ARG(1);

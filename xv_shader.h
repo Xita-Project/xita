@@ -59,6 +59,7 @@ typedef struct {
     SceGxmFragmentProgram        *fprog;
     const SceGxmProgramParameter *p_psc;          /* uniform float4 psc[16]       */
     const SceGxmProgramParameter *p_fogcolor;     /* uniform float4 xv_fogcolor   */
+    const SceGxmProgramParameter *p_atest;        /* uniform float4 xv_atest (alpha test ref,func,enable) */
     int                           tex_index[4];   /* resource index of tex0..3 or -1 */
 } xv_fshader_t;
 

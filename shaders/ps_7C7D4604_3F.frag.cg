@@ -2,7 +2,7 @@
 //  Xita Stage 3b - auto-generated Vita Cg fragment shader: ps_7C7D4604_3F
 //  source def: VA None  file 0x0
 //  2 combiner stage(s); textures t0:PROJECT2D t1:PROJECT2D t2:CUBEMAP t3:CUBEMAP
-//  Uniforms: psc[16] = SetPixelShaderConstant regs; xv_fogcolor.rgb; fog factor = TEXCOORD7
+//  Uniforms: psc[16] = SetPixelShaderConstant regs; xv_fogcolor.rgb; fog factor = TEXCOORD7; xv_atest = alpha test (ref,func,enable)
 //    stage 0 rgb  : r0 = t0.rgb * v1.rgb
 //    stage 0 alpha: r0 = t0.a * zero.b<unsigned_invert>; v0 = v0.a * v1.a
 //    stage 1 rgb  : (discard)
@@ -23,7 +23,7 @@ struct VertOut
     float4 texcoord3   : TEXCOORD3;
 };
 
-float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform samplerCUBE tex2, uniform samplerCUBE tex3, uniform float4 psc[18], uniform float4 xv_fogcolor) : COLOR
+float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform samplerCUBE tex2, uniform samplerCUBE tex3, uniform float4 psc[18], uniform float4 xv_fogcolor, uniform float4 xv_atest) : COLOR
 {
     // ---- inputs (varyings the vertex program does not write read as NV2A defaults)
     float4 v0 = IN.color0, v1 = IN.color1;
@@ -63,5 +63,14 @@ float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform 
     float3 FA = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), FB = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), FC = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), FD = saturate(r0.rgb);
     float3 out_rgb = FA * FB + (1.0 - FA) * FC + FD;
     float  out_a   = saturate(r0.a);
+    // ---- alpha test (NV097_SET_ALPHA_TEST_ENABLE/FUNC/REF): xv_atest = (ref, func 0..7, enable, 0)
+    //      0 NEVER 1 LESS 2 EQUAL 3 LEQUAL 4 GREATER 5 NOTEQUAL 6 GEQUAL 7 ALWAYS  (NV097 0x200+n)
+    if (xv_atest.z > 0.5) {
+        float a_ = saturate(out_a); float r_ = xv_atest.x; float f_ = xv_atest.y;
+        bool pass_ = (f_ > 6.5) || (f_ > 3.5 && f_ < 4.5 && a_ > r_) || (f_ > 5.5 && f_ < 6.5 && a_ >= r_)
+                  || (f_ > 0.5 && f_ < 1.5 && a_ < r_) || (f_ > 2.5 && f_ < 3.5 && a_ <= r_)
+                  || (f_ > 1.5 && f_ < 2.5 && abs(a_ - r_) < 0.002) || (f_ > 4.5 && f_ < 5.5 && abs(a_ - r_) >= 0.002);
+        if (!pass_) discard;
+    }
     return saturate(float4(out_rgb, out_a));
 }

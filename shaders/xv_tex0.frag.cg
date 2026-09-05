@@ -6,7 +6,17 @@ struct VertOut
     float4 texcoord0 : TEXCOORD0;
 };
 
-float4 main(VertOut IN, uniform sampler2D tex0) : COLOR
+float4 main(VertOut IN, uniform sampler2D tex0, uniform float4 xv_atest) : COLOR
 {
-    return tex2D(tex0, IN.texcoord0.xy);
+    float4 c_ = tex2D(tex0, IN.texcoord0.xy);
+    // ---- alpha test (NV097_SET_ALPHA_TEST_ENABLE/FUNC/REF): xv_atest = (ref, func 0..7, enable, 0)
+    //      0 NEVER 1 LESS 2 EQUAL 3 LEQUAL 4 GREATER 5 NOTEQUAL 6 GEQUAL 7 ALWAYS  (NV097 0x200+n)
+    if (xv_atest.z > 0.5) {
+        float a_ = saturate(c_.a); float r_ = xv_atest.x; float f_ = xv_atest.y;
+        bool pass_ = (f_ > 6.5) || (f_ > 3.5 && f_ < 4.5 && a_ > r_) || (f_ > 5.5 && f_ < 6.5 && a_ >= r_)
+                  || (f_ > 0.5 && f_ < 1.5 && a_ < r_) || (f_ > 2.5 && f_ < 3.5 && a_ <= r_)
+                  || (f_ > 1.5 && f_ < 2.5 && abs(a_ - r_) < 0.002) || (f_ > 4.5 && f_ < 5.5 && abs(a_ - r_) >= 0.002);
+        if (!pass_) discard;
+    }
+    return c_;
 }

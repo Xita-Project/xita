@@ -275,7 +275,7 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
     emit_textures(d, tex_lines, samplers, warnings)
     for ln in tex_lines:
         for i in range(4):
-            if f"float4 t{i} =" in ln:
+            if f"float4 t{i} =" in ln or f"float4 t{i};" in ln:   # `float4 tN;` = the analytic-normalize cube path
                 declared.add(i)
     for i in range(4):
         if i not in declared:
@@ -310,6 +310,7 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
         body.append("    // (no final combiner in the def: Xbox D3D default = fixed-function fog blend)")
         body.append("    float3 out_rgb = lerp(fog.rgb, r0.rgb, fog.a);")
         body.append("    float  out_a   = r0.a;")
+    body.append('    // ---- alpha test (NV097_SET_ALPHA_TEST_ENABLE/FUNC/REF): xv_atest = (ref, func 0..7, enable, 0)\n    //      0 NEVER 1 LESS 2 EQUAL 3 LEQUAL 4 GREATER 5 NOTEQUAL 6 GEQUAL 7 ALWAYS  (NV097 0x200+n)\n    if (xv_atest.z > 0.5) {\n        float a_ = saturate(out_a); float r_ = xv_atest.x; float f_ = xv_atest.y;\n        bool pass_ = (f_ > 6.5) || (f_ > 3.5 && f_ < 4.5 && a_ > r_) || (f_ > 5.5 && f_ < 6.5 && a_ >= r_)\n                  || (f_ > 0.5 && f_ < 1.5 && a_ < r_) || (f_ > 2.5 && f_ < 3.5 && a_ <= r_)\n                  || (f_ > 1.5 && f_ < 2.5 && abs(a_ - r_) < 0.002) || (f_ > 4.5 && f_ < 5.5 && abs(a_ - r_) >= 0.002);\n        if (!pass_) discard;\n    }')
     body.append("    return saturate(float4(out_rgb, out_a));")
 
     # header + signature
@@ -323,7 +324,7 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
         f"//  source def: VA {d['va'] and ('0x%08X' % d['va'])}  file 0x{d['file_offset']:X}",
         f"//  {d['stage_count']} combiner stage(s){', MUX_MSB' if d['mux_msb'] else ''}; "
         f"textures {' '.join('t%d:%s' % (t['index'], t['mode']) for t in d['textures'] if t['mode'] != 'NONE') or '-'}",
-        "//  Uniforms: psc[16] = SetPixelShaderConstant regs; xv_fogcolor.rgb; fog factor = TEXCOORD7",
+        "//  Uniforms: psc[16] = SetPixelShaderConstant regs; xv_fogcolor.rgb; fog factor = TEXCOORD7; xv_atest = alpha test (ref,func,enable)",
     ]
     for s in d["stages"]:
         for line in s["text"]:
@@ -347,6 +348,7 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
         params.append(f"uniform {samplers[i]} tex{i}")
     params.append("uniform float4 psc[18]")
     params.append("uniform float4 xv_fogcolor")
+    params.append("uniform float4 xv_atest")
     if any(t["mode"] in ("BUMPENVMAP", "BUMPENVMAP_LUM") for t in d["textures"]):
         params.append("uniform float4 xv_bumpmat[4]")
         params.append("uniform float4 xv_bumplum[4]")

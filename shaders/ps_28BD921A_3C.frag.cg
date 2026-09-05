@@ -2,7 +2,7 @@
 //  Xita Stage 3b - auto-generated Vita Cg fragment shader: ps_28BD921A_3C
 //  source def: VA None  file 0x0
 //  5 combiner stage(s); textures t0:PROJECT2D t1:PROJECT2D t2:CUBEMAP t3:CUBEMAP
-//  Uniforms: psc[16] = SetPixelShaderConstant regs; xv_fogcolor.rgb; fog factor = TEXCOORD7
+//  Uniforms: psc[16] = SetPixelShaderConstant regs; xv_fogcolor.rgb; fog factor = TEXCOORD7; xv_atest = alpha test (ref,func,enable)
 //    stage 0 rgb  : r0 = dot(t2.rgb<expand_normal>, c0.rgb<expand_normal>); r1 = t3.rgb * t3.rgb
 //    stage 0 alpha: (discard)
 //    stage 1 rgb  : r0 = r0.rgb * r0.rgb; r1 = r1.rgb * r1.rgb
@@ -27,7 +27,7 @@ struct VertOut
     float4 texcoord3   : TEXCOORD3;
 };
 
-float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform samplerCUBE tex3, uniform float4 psc[18], uniform float4 xv_fogcolor) : COLOR
+float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform samplerCUBE tex3, uniform float4 psc[18], uniform float4 xv_fogcolor, uniform float4 xv_atest) : COLOR
 {
     // ---- inputs (varyings the vertex program does not write read as NV2A defaults)
     float4 v0 = float4(0.0, 0.0, 0.0, 0.0), v1 = float4(0.0, 0.0, 0.0, 0.0);
@@ -37,7 +37,6 @@ float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform 
     float4 t1 = tex2D(tex1, IN.texcoord1.xy);
     float4 t2; { float3 nv_ = IN.texcoord2.xyz; float l_ = dot(nv_, nv_); t2 = float4(((l_ > 1e-12) && (l_ < 1e30)) ? nv_ * rsqrt(l_) * 0.5 + 0.5 : float3(0.5, 0.5, 1.0), 1.0); }   // normalisation cube map -> analytic
     float4 t3 = texCUBE(tex3, IN.texcoord3.xyz);
-    float4 t2 = float4(0.0, 0.0, 0.0, 0.0);
     // ---- combiner stage 0
     {
         float3 A = (2.0 * max(t2.rgb, 0.0) - 1.0), B = (2.0 * max(psc[0].rgb, 0.0) - 1.0), C = saturate(t3.rgb), D = saturate(t3.rgb);
@@ -102,5 +101,14 @@ float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform 
     float3 FA = saturate(r0.rgb), FB = saturate(ef_prod.rgb), FC = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), FD = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb);
     float3 out_rgb = FA * FB + (1.0 - FA) * FC + FD;
     float  out_a   = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
+    // ---- alpha test (NV097_SET_ALPHA_TEST_ENABLE/FUNC/REF): xv_atest = (ref, func 0..7, enable, 0)
+    //      0 NEVER 1 LESS 2 EQUAL 3 LEQUAL 4 GREATER 5 NOTEQUAL 6 GEQUAL 7 ALWAYS  (NV097 0x200+n)
+    if (xv_atest.z > 0.5) {
+        float a_ = saturate(out_a); float r_ = xv_atest.x; float f_ = xv_atest.y;
+        bool pass_ = (f_ > 6.5) || (f_ > 3.5 && f_ < 4.5 && a_ > r_) || (f_ > 5.5 && f_ < 6.5 && a_ >= r_)
+                  || (f_ > 0.5 && f_ < 1.5 && a_ < r_) || (f_ > 2.5 && f_ < 3.5 && a_ <= r_)
+                  || (f_ > 1.5 && f_ < 2.5 && abs(a_ - r_) < 0.002) || (f_ > 4.5 && f_ < 5.5 && abs(a_ - r_) >= 0.002);
+        if (!pass_) discard;
+    }
     return saturate(float4(out_rgb, out_a));
 }

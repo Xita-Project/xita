@@ -72,6 +72,7 @@ typedef struct {
     uint32_t  const_off, const_n;   /* float4 units into the pool                     */
     float     const_attr[4];
     uint32_t  fog_color;            /* D3DCOLOR at record time (Halo toggles it within a frame) */
+    uint32_t  atest;                /* alpha test at record time: ref | func<<8 | enable<<16 (xd3d_alpha_test) */
     SceGxmTexture tex[4];
     int16_t   ps_entry;             /* xv_ps_table index, or -1 (heuristic fragment)  */
     uint8_t   pass;                 /* 0 = back buffer, n = offscreen pass n           */
@@ -616,6 +617,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     c->depth_write = S.z_enable && S.z_write;
     c->cull = (uint8_t)S.cull;
     { extern uint32_t xd3d_fog_color(void); c->fog_color = xd3d_fog_color(); }
+    { extern uint32_t xd3d_alpha_test(void); c->atest = xd3d_alpha_test(); }
     if (strstr(d->gxp, "halo_vs_16")) xv_d3d_bsp_acc++;
     memcpy(c->const_attr, S.const_attr, 16);
 
@@ -1043,13 +1045,16 @@ static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigne
         }
         xv_shader_set_const_attr(c->const_attr);
         xv_vshader_set_streams(ctx, &v->vs, c->streams);
-        if (fs->p_psc || fs->p_fogcolor) {
+        if (fs->p_psc || fs->p_fogcolor || fs->p_atest) {
             void *fub;
             if (sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub) == 0) {
                 uint32_t fc = c->fog_color;                                            /* D3DCOLOR ARGB, captured at record time */
                 float fog[4] = { ((fc >> 16) & 0xFF) / 255.0f, ((fc >> 8) & 0xFF) / 255.0f, (fc & 0xFF) / 255.0f, ((fc >> 24) & 0xFF) / 255.0f };
                 if (fs->p_psc) sceGxmSetUniformDataF(fub, fs->p_psc, 0, 18 * 4, &c->psc[0][0]);
                 if (fs->p_fogcolor) sceGxmSetUniformDataF(fub, fs->p_fogcolor, 0, 4, fog);
+                if (fs->p_atest) { uint32_t at = c->atest;                            /* alpha test: (ref, func, enable) */
+                    float av[4] = { (at & 0xFF) / 255.0f, (float)((at >> 8) & 7), (at >> 16) & 1 ? 1.0f : 0.0f, 0.0f };
+                    sceGxmSetUniformDataF(fub, fs->p_atest, 0, 4, av); }
             }
         }
         for (unsigned t = 0; t < 4; ++t) {
