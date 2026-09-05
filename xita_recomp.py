@@ -381,6 +381,11 @@ X87_SIZES = {"float32": "f32", "float64": "f64", "float80": "f80", "int16": "i16
 class Emitter:
     def __init__(self, img: Image, disc: Discovery, hle: Dict[int, dict], kthunks: Dict[int, int], outdir: str, nfiles: int):
         self.img, self.disc, self.hle, self.kthunks = img, disc, hle, kthunks
+        # Image occupies a fixed, never-remapped arena region: constant addresses inside it get a
+        # flat X_IMG* access (no page-table load).  Bounds page-aligned to match xk_mem_setup().
+        _isz = img.m['size_of_image']
+        self.image_lo = img.base & ~0xFFF
+        self.image_hi = (img.base + _isz + 0xFFF) & ~0xFFF
         self.outdir = outdir
         self.nfiles = nfiles
         self.game_main: Optional[int] = None
@@ -434,6 +439,13 @@ class Emitter:
         return f"({expr})"
 
     def mem(self, ins: Instruction, size: int) -> str:
+        # Pure-constant address (no base/index/segment) inside the fixed image map -> flat access.
+        if (size in (1, 2, 4) and ins.memory_base == Register.NONE and ins.memory_index == Register.NONE
+                and REGNAME.get(ins.segment_prefix, "") not in ("fs", "gs")):
+            d = ins.memory_displacement & 0xFFFFFFFF
+            if self.image_lo <= d < self.image_hi:
+                self.stats["img_flat"] = self.stats.get("img_flat", 0) + 1
+                return f"X_IMG{size*8}(0x{d:X}u)"
         return f"X_M{size*8}({self.addr(ins)})"
 
     def op_size(self, ins: Instruction, i: int) -> int:
@@ -1048,7 +1060,8 @@ class Emitter:
         # registers in ARM registers across guest memory stores (otherwise every store reloads them).
         # xram_/xpt_: locals shadow the globals for the same reason (X_G is redefined per file to use them).
         out = [f"void f_{fn.entry:08X}(xctx *restrict c)", "{",
-               "    uint8_t *const xram_ = g_xram; const uint32_t *const xpt_ = g_xpt; (void)xram_; (void)xpt_;"]
+               "    uint8_t *const xram_ = g_xram; const uint32_t *const xpt_ = g_xpt; (void)xram_; (void)xpt_;",
+               "    uint8_t *const imgb_ = g_img_base; (void)imgb_;"]
         self.cur_fn = fn.entry
         self._cur_fn_obj = fn
         if self.trace_funcs:
@@ -1124,7 +1137,11 @@ class Emitter:
             chunk = fns[i:i + per]
             body = ['#include "xv_recomp_protos.h"',
                     "#undef X_G",
-                    "#define X_G(a) ((void *)(xram_ + xpt_[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))", ""]
+                    "#define X_G(a) ((void *)(xram_ + xpt_[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))",
+                    "#undef X_IMG8\n#undef X_IMG16\n#undef X_IMG32",
+                    "#define X_IMG8(a)  (*(uint8_t *)(imgb_ + (uint32_t)(a)))",
+                    "#define X_IMG16(a) (*(xu16_u  *)(imgb_ + (uint32_t)(a)))",
+                    "#define X_IMG32(a) (*(xu32_u  *)(imgb_ + (uint32_t)(a)))", ""]
             for f in chunk:
                 body.append(self.emit_function(f))
                 body.append("")

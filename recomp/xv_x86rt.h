@@ -29,6 +29,14 @@ typedef float    __attribute__((aligned(1), may_alias)) xf32_u;
 #define X_M32(a)    (*(xu32_u   *)X_G(a))
 #define X_M64(a)    (*(xu64_u   *)X_G(a))
 #define X_MF32(a)   (*(xf32_u   *)X_G(a))
+/* Fast path for constant addresses in the XBE image: the image is copied once into the arena at a fixed
+ * offset (arena base XRAM_SIZE, virtual base g_image_lo) and is never remapped, so its host pointer is a
+ * compile-time-constant-plus-base with no page-table load.  g_img_base = g_xram + XRAM_SIZE - g_image_lo,
+ * set in xk_mem_setup; the recompiler emits X_IMG* only for constant displacements inside [image_lo,hi). */
+extern uint8_t *g_img_base;
+#define X_IMG8(a)   (*(uint8_t  *)(g_img_base + (uint32_t)(a)))
+#define X_IMG16(a)  (*(xu16_u   *)(g_img_base + (uint32_t)(a)))
+#define X_IMG32(a)  (*(xu32_u   *)(g_img_base + (uint32_t)(a)))
 
 enum { XK_LOGIC = 0, XK_ADD, XK_ADC, XK_SUB, XK_SBB, XK_EXPLICIT };
 

@@ -23,6 +23,7 @@ uint32_t *g_xpt;                                      /* 1M entries: virtual pag
 static uint8_t  g_phys_used[NPAGES];                  /* physical page bitmap (byte per page) */
 static uint8_t  g_virt_committed[NPAGES];             /* virtual pages below 64 MB that own a private physical page */
 static uint32_t g_image_lo, g_image_hi, g_trash_off;
+uint8_t *g_img_base;   /* g_xram + XRAM_SIZE - g_image_lo: flat base for constant image-address access (xv_x86rt.h X_IMG*) */
 
 typedef struct { uint32_t va, size; uint32_t flags; } vrange_t;       /* virtual reservations */
 static vrange_t g_vr[MAX_RANGES]; static int g_nvr;
@@ -50,6 +51,7 @@ void xk_mem_setup(uint32_t image_base, uint32_t image_size)
         map_page(0xF0000000u + va, va);                           /* GPU/write-combined alias */
     }
     for (uint32_t va = g_image_lo; va < g_image_hi; va += XK_PAGE) map_page(va, XRAM_SIZE + (va - g_image_lo));
+    g_img_base = 0;   /* set once g_xram exists (xk_mem_bind_arena); until then X_IMG must not be used */
     memset(g_phys_used, 0, sizeof g_phys_used);
     for (uint32_t pa = KERNEL_VA; pa < XRAM_SIZE; pa += XK_PAGE) g_phys_used[pa / XK_PAGE] = 1;   /* kernel area: identity, reserved */
     g_nvr = 0; g_npr = 0;
@@ -58,6 +60,13 @@ void xk_mem_setup(uint32_t image_base, uint32_t image_size)
     g_vr[g_nvr++] = (vrange_t){ KERNEL_VA, XRAM_SIZE - KERNEL_VA, 0xFFFFFFFFu };
 }
 uint32_t xk_mem_image_arena_offset(void) { return XRAM_SIZE; }
+extern uint8_t *g_xram;
+/* Call after g_xram is allocated: fixes the flat base for constant image-address access (X_IMG*).
+ * g_img_base + a == X_G(a) for every a in [g_image_lo, g_image_hi) (the image is mapped at arena
+ * offset XRAM_SIZE and never remapped). */
+void xk_mem_bind_arena(void) { g_img_base = g_xram + XRAM_SIZE - g_image_lo; }
+uint32_t xk_mem_image_lo(void) { return g_image_lo; }
+uint32_t xk_mem_image_hi(void) { return g_image_hi; }
 uint32_t xk_mem_arena_size(void) { return g_trash_off + XK_PAGE; }
 
 /* ---- physical --------------------------------------------------------------------------------- */

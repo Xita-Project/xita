@@ -69,6 +69,10 @@ int xv_boot_recomp(const char *game_dir, const char *save_dir)
     g_xram_uid = sceKernelAllocMemBlock("xv_arena", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, arena, NULL);
     if (g_xram_uid < 0) { BOOT_LOG("arena alloc (%u MB) failed: 0x%08X\n", arena >> 20, g_xram_uid); sceIoClose(fd); return -1; }
     sceKernelGetMemBlockBase(g_xram_uid, (void **)&g_xram);
+    xk_mem_bind_arena();                                  /* g_img_base for flat image-address access (X_IMG*) */
+    { uint32_t lo = xk_mem_image_lo(), hi = xk_mem_image_hi();
+      if (lo != (base & ~0xFFFu) || hi != ((base + size + 0xFFFu) & ~0xFFFu))
+          BOOT_LOG("WARNING image bounds %08X..%08X mismatch base %08X size %X - X_IMG may be wrong\n", lo, hi, base, size); }
     int err = sceGxmMapMemory(g_xram, arena, SCE_GXM_MEMORY_ATTRIB_READ | SCE_GXM_MEMORY_ATTRIB_WRITE);
     if (err != SCE_OK) { BOOT_LOG("sceGxmMapMemory(arena) failed: 0x%08X\n", err); sceIoClose(fd); return -1; }
     memset(g_xram, 0, arena);

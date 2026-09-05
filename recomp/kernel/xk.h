@@ -140,7 +140,10 @@ xk_thread *xk_thread_create_host(void (*entry)(xctx *c, void *arg), void *arg); 
 void       xk_sleep_us(uint64_t us);      /* block the current guest thread (scheduler-friendly) */
 void       xk_thread_kick(xk_thread *t);   /* end t's xk_sleep_us early and run it on the next switch (vblank on demand) */
 void       xk_thread_exit(uint32_t status);
-void       xk_yield(void);                /* let other guest threads run */
+void       xk_yield(void);
+void       xk_mem_bind_arena(void);   /* set g_img_base after the arena is allocated */
+uint32_t   xk_mem_image_lo(void);
+uint32_t   xk_mem_image_hi(void);                /* let other guest threads run */
 void       xk_run_until_idle(void);       /* host harness: drive the scheduler */
 void       xk_dump_threads(void);
 void       xk_apc_queue(xk_thread *t, uint32_t routine, uint32_t a1, uint32_t a2, uint32_t a3);
