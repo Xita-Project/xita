@@ -385,11 +385,17 @@ static void shot_watch(void)
 {
     static int on = -1; if (on < 0) { const char *e = getenv("XV_SHOT_DUMP"); on = e ? atoi(e) : 0; }
     if (!on) return;
-    static unsigned tick; if ((++tick % 60u) != 0) return;
+    static unsigned tick; if ((++tick % 180u) != 0) return;   /* ~every 15s at 12fps: a filesystem scan, keep it rare */
     SceUID d = sceIoDopen("ux0:picture/SCREENSHOT");
     if (d < 0) return;
     int count = 0; SceIoDirent e;
-    while (sceIoDread(d, (memset(&e, 0, sizeof e), &e)) > 0) count++;
+    while (sceIoDread(d, (memset(&e, 0, sizeof e), &e)) > 0) {
+        if (!SCE_S_ISDIR(e.d_stat.st_mode)) { count++; continue; }   /* a stray file */
+        char sub[128]; snprintf(sub, sizeof sub, "ux0:picture/SCREENSHOT/%s", e.d_name);
+        SceUID d2 = sceIoDopen(sub); if (d2 < 0) continue;           /* a screenshot may reuse an existing folder */
+        SceIoDirent e2; while (sceIoDread(d2, (memset(&e2, 0, sizeof e2), &e2)) > 0) if (!SCE_S_ISDIR(e2.d_stat.st_mode)) count++;
+        sceIoDclose(d2);
+    }
     sceIoDclose(d);
     static int last = -1;
     if (last >= 0 && count > last) { extern void xd3d_hist_arm(void) __attribute__((weak)); if (xd3d_hist_arm) xd3d_hist_arm(); }
