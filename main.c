@@ -305,6 +305,18 @@ static void xv_display_callback(const void *callback_data)
     fb.width       = XV_DISPLAY_WIDTH;
     fb.height      = XV_DISPLAY_HEIGHT;
     sceDisplaySetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME);
+    /* XV_FB_DUMP=1: write each presented frame as ux0:data/xita/fb/NNN.ppm (A8B8G8R8 -> RGB) so the exact
+     * on-screen image can be inspected off-device (e.g. what shows at a level-load transition). Ring of 240. */
+    { static int on = -1; if (on < 0) { const char *e = getenv("XV_FB_DUMP"); on = e ? atoi(e) : 0; if (on) sceIoMkdir("ux0:data/xita/fb", 0777); }
+      if (on && dd->address) { static unsigned fn; char path[64]; char hdr[32]; char row[XV_DISPLAY_WIDTH * 3];
+          sceClibSnprintf(path, sizeof path, "ux0:data/xita/fb/%03u.ppm", fn % 240u); fn++;
+          SceUID f = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+          if (f >= 0) { int hl = sceClibSnprintf(hdr, sizeof hdr, "P6\n%u %u\n255\n", (unsigned)XV_DISPLAY_WIDTH, (unsigned)XV_DISPLAY_HEIGHT); sceIoWrite(f, hdr, hl);
+              const uint8_t *px = (const uint8_t *)dd->address;
+              for (unsigned y = 0; y < XV_DISPLAY_HEIGHT; ++y) { const uint8_t *pr = px + (size_t)y * XV_DISPLAY_STRIDE * 4;
+                  for (unsigned x = 0; x < XV_DISPLAY_WIDTH; ++x) { row[x*3+0] = pr[x*4+0]; row[x*3+1] = pr[x*4+1]; row[x*3+2] = pr[x*4+2]; }
+                  sceIoWrite(f, row, XV_DISPLAY_WIDTH * 3); }
+              sceIoClose(f); } } }
     sceDisplayWaitVblankStart();
 }
 
