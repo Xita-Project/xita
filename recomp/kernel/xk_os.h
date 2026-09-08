@@ -32,6 +32,11 @@ uint64_t  xk_os_time_100ns(void);            /* wall clock since 1601-01-01 */
 uint64_t  xk_os_monotonic_us(void);
 void      xk_os_sleep_us(uint64_t us);
 
+/* Sticky notification interrupts scheduler idle waits, not guest timers. */
+int       xk_os_scheduler_prepare(void);
+void      xk_os_scheduler_notify(void); /* may be called by the render thread */
+void      xk_os_scheduler_wait(uint64_t us);
+
 /* fibers: cooperative, one host stack each; guest code runs on guest stacks via esp */
 xk_fiber *xk_os_fiber_create(void (*entry)(void *), void *arg, size_t host_stack);
 void      xk_os_fiber_switch(xk_fiber *to);  /* from current */

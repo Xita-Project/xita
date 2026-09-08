@@ -93,6 +93,30 @@ uint64_t xk_os_monotonic_us(void)
 }
 void xk_os_sleep_us(uint64_t us) { struct timespec ts = { (time_t)(us / 1000000ull), (long)((us % 1000000ull) * 1000) }; nanosleep(&ts, NULL); }
 
+#include <pthread.h>
+static pthread_mutex_t g_scheduler_mutex=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_scheduler_cond=PTHREAD_COND_INITIALIZER;
+static int g_scheduler_notified;
+int xk_os_scheduler_prepare(void) { return 1; }
+void xk_os_scheduler_notify(void)
+{
+    pthread_mutex_lock(&g_scheduler_mutex);
+    g_scheduler_notified=1;
+    pthread_cond_signal(&g_scheduler_cond);
+    pthread_mutex_unlock(&g_scheduler_mutex);
+}
+void xk_os_scheduler_wait(uint64_t us)
+{
+    struct timespec until;clock_gettime(CLOCK_REALTIME,&until);
+    until.tv_sec+=us/1000000;until.tv_nsec+=(us%1000000)*1000;
+    if (until.tv_nsec>=1000000000) {until.tv_sec++;until.tv_nsec-=1000000000;}
+    pthread_mutex_lock(&g_scheduler_mutex);
+    while (!g_scheduler_notified)
+        if (pthread_cond_timedwait(&g_scheduler_cond,&g_scheduler_mutex,&until)) break;
+    g_scheduler_notified=0;
+    pthread_mutex_unlock(&g_scheduler_mutex);
+}
+
 /* ---- fibers ---------------------------------------------------------------------------- */
 struct xk_fiber { ucontext_t uc; void *stack; void (*entry)(void *); void *arg; };
 static xk_fiber g_main_fiber;

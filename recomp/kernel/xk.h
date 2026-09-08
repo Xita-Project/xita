@@ -127,6 +127,7 @@ typedef struct xk_thread {
     uint32_t   exit_status;
     /* wait */
     xk_obj    *wait_objs[16]; int wait_n; int wait_all; uint64_t wait_until; int wait_result;
+    const uint32_t *wait_word; uint32_t wait_value; /* externally published completion */
     int        alertable;
     /* user APCs (I/O completion routines, NtQueueApcThread): routine(arg1, arg2, arg3) */
     struct { uint32_t routine, a1, a2, a3; } apc[16]; int napc;
@@ -138,6 +139,7 @@ xk_thread *xk_thread_create(uint32_t stack_size, uint32_t tls_size, uint32_t sta
                             uint32_t system_routine, int suspended);
 xk_thread *xk_thread_create_host(void (*entry)(xctx *c, void *arg), void *arg);   /* kernel-internal guest thread with a C body */
 void       xk_sleep_us(uint64_t us);      /* block the current guest thread (scheduler-friendly) */
+int        xk_wait_u32(const uint32_t *word, uint32_t value, uint64_t timeout_us);
 void       xk_thread_kick(xk_thread *t);   /* end t's xk_sleep_us early and run it on the next switch (vblank on demand) */
 void       xk_thread_exit(uint32_t status);
 void       xk_yield(void);
@@ -180,6 +182,7 @@ void     xk_path_mount(const char *device, const char *host_dir);          /* \D
 
 /* ---- misc --------------------------------------------------------------------------------- */
 void     xk_init(uint32_t image_base, uint32_t image_size, uint32_t tls_dir, const char *game_dir, const char *save_dir);
+int      xk_variant_recover_unsigned(uint32_t data);
 void     xk_thunks_init(void);            /* rewrite kernel thunk slots: data exports -> guest vars, funcs -> magic */
 extern int xk_file_in_ui_map;              /* xk_file.c: the map being streamed is a UI map (main menu) */
 extern uint32_t xk_var_KeTickCount, xk_var_XboxHardwareInfo, xk_var_LaunchDataPage, xk_var_XboxKrnlVersion, xk_var_HalDiskCachePartitionCount;

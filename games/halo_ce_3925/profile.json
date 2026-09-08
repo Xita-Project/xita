@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "id": "halo_ce_3925",
+  "name": "Halo: Combat Evolved (Xbox 3925)",
+  "binary": {
+    "sha256": "4094e994243ddeae3f1b478bde6a7ee81498218ccd7c9d7bc2327db547d95aae",
+    "title_id": "0x4D530004",
+    "base_address": "0x00010000",
+    "entry_point": "0x00015CC9",
+    "size_of_image": "0x003A47A0"
+  },
+  "symbols_sha256": "649e98f53a1017ffe2dd5fd4e65f7313a8c5f4150f62c196d0aef8b4dfe5cd70",
+  "adapter": "halo_ce_3925",
+  "roots": [],
+  "lift": [],
+  "variables": {},
+  "function_overrides": {
+    "0x0002D120": {
+      "name": "HaloSignSavedRecord",
+      "stack_args": 3
+    },
+    "0x00053FA0": {
+      "name": "HaloBuildVisibleIndices",
+      "stack_args": 1
+    },
+    "0x001B83C0": {
+      "name": "BinkOpen",
+      "stack_args": 2
+    },
+    "0x0019C5E7": {
+      "name": "DSoundVoiceIsPlaying",
+      "stack_args": 1
+    },
+    "0x0019C5FF": {
+      "name": "DSoundVoiceStop",
+      "stack_args": 1
+    },
+    "0x001AF688": {
+      "name": "ws_WSAGetLastError",
+      "stack_args": 0
+    },
+    "0x001B0D29": {
+      "name": "ws_accept",
+      "stack_args": 3
+    },
+    "0x001B0D13": {
+      "name": "ws_bind",
+      "stack_args": 3
+    },
+    "0x001B1572": {
+      "name": "ws_closesocket",
+      "stack_args": 1
+    },
+    "0x001B0D1E": {
+      "name": "ws_connect",
+      "stack_args": 3
+    },
+    "0x001B03F1": {
+      "name": "ws_getpeername",
+      "stack_args": 3
+    },
+    "0x001B03FC": {
+      "name": "ws_getsockname",
+      "stack_args": 3
+    },
+    "0x001B03E2": {
+      "name": "ws_getsockopt",
+      "stack_args": 5
+    },
+    "0x001B01B9": {
+      "name": "ws_ioctlsocket",
+      "stack_args": 3
+    },
+    "0x001B0572": {
+      "name": "ws_listen",
+      "stack_args": 2
+    },
+    "0x001B149E": {
+      "name": "ws_recv",
+      "stack_args": 4
+    },
+    "0x001B158C": {
+      "name": "ws_recvfrom",
+      "stack_args": 6
+    },
+    "0x001B0D34": {
+      "name": "ws_select",
+      "stack_args": 5
+    },
+    "0x001B14EA": {
+      "name": "ws_send",
+      "stack_args": 4
+    },
+    "0x001B157D": {
+      "name": "ws_sendto",
+      "stack_args": 6
+    },
+    "0x001B0D04": {
+      "name": "ws_setsockopt",
+      "stack_args": 5
+    },
+    "0x001B102C": {
+      "name": "ws_socket",
+      "stack_args": 3
+    },
+    "0x001AF3E0": {
+      "name": "xn_XNetCreateKey",
+      "stack_args": 2
+    },
+    "0x001AF488": {
+      "name": "xn_XNetGetTitleXnAddr",
+      "stack_args": 1
+    },
+    "0x001AF44E": {
+      "name": "xn_XNetRandom",
+      "stack_args": 2
+    },
+    "0x001AF420": {
+      "name": "xn_XNetRegisterKey",
+      "stack_args": 2
+    },
+    "0x001AF437": {
+      "name": "xn_XNetUnregisterKey",
+      "stack_args": 1
+    },
+    "0x001AF471": {
+      "name": "xn_XNetXnAddrToInAddr",
+      "stack_args": 3
+    }
+  }
+}

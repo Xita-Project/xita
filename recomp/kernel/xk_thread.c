@@ -102,6 +102,18 @@ void xk_sleep_us(uint64_t us)
     xk_yield(); t->state = 0; t->wait_until = 0;
 }
 
+int xk_wait_u32(const uint32_t *word, uint32_t value, uint64_t timeout_us)
+{
+    if (__atomic_load_n(word,__ATOMIC_ACQUIRE)==value) return 1;
+    if (!xk_os_scheduler_prepare() && timeout_us>1000) timeout_us=1000;
+    xk_thread *t=xk_cur;
+    t->wait_n=0; t->wait_word=word; t->wait_value=value;
+    t->wait_until=xk_uptime_100ns()+timeout_us*10; t->state=1;
+    xk_yield();
+    t->state=0; t->wait_word=NULL; t->wait_until=0;
+    return __atomic_load_n(word,__ATOMIC_ACQUIRE)==value;
+}
+
 xk_thread *xk_thread_create(uint32_t stack_size, uint32_t tls_size, uint32_t start_routine, uint32_t start_context, uint32_t system_routine, int suspended)
 {
     xk_thread *t = calloc(1, sizeof *t);
@@ -192,6 +204,13 @@ void xk_obj_consume(xk_obj *o, xk_thread *t)
 
 static int try_satisfy(xk_thread *t)
 {
+    if (t->wait_word) {
+        if (__atomic_load_n(t->wait_word,__ATOMIC_ACQUIRE)!=t->wait_value) return 0;
+        t->wait_result=0; return 1;
+    }
+    /* A sleep has no dispatcher objects. A previous WaitAll flag must not
+     * make that empty list immediately signaled and bypass its deadline. */
+    if (!t->wait_n) return 0;
     if (t->wait_all) {
         for (int i = 0; i < t->wait_n; ++i) if (!xk_obj_signaled(t->wait_objs[i])) return 0;
         for (int i = 0; i < t->wait_n; ++i) xk_obj_consume(t->wait_objs[i], t);
@@ -212,17 +231,25 @@ void xk_signal_check(void)
  * of running the callback inline on the sleeping thread (that deadlocked the map-list loader) or
  * waiting for the 16.7 ms timer tick. */
 static xk_thread *g_boost;
+/* A runnable guest can do the scheduler's selection before handing back the
+ * baton. Preserve that choice: probing a semaphore/event may consume it. */
+static xk_thread *g_yield_next;
+static unsigned g_yield_calls, g_yield_same, g_yield_handoffs;
+static unsigned g_wait_dump_requested;
+void xk_wait_stats_request(void)
+{ __atomic_store_n(&g_wait_dump_requested,1,__ATOMIC_RELEASE); }
+void xk_wait_stats_dump(void);
 void xk_thread_kick(xk_thread *t)
 {
     if (!t || t->state == 3) return;
-    if (t->state == 1 && t->wait_n == 0 && t->wait_until) t->wait_until = now100();   /* its sleep expires now */
+    if (t->state == 1 && t->wait_n == 0 && !t->wait_word && t->wait_until) t->wait_until = now100();   /* its sleep expires now */
     g_boost = t;
 }
 static xk_thread *pick_next(xk_thread *after)
 {
     if (g_boost) {
         xk_thread *b = g_boost; g_boost = NULL;
-        if (b->state == 1 && b->wait_n == 0 && b->wait_until && now100() >= b->wait_until) { b->wait_result = -1; b->state = 0; }
+        if (b->state == 1 && b->wait_n == 0 && !b->wait_word && b->wait_until && now100() >= b->wait_until) { b->wait_result = -1; b->state = 0; }
         if (b->state == 0) return b;
     }
     /* round robin over ready threads, starting after `after` */
@@ -241,11 +268,23 @@ void xd3d_ds_check(const char *where, uint32_t eip) __attribute__((weak));
 void xk_yield(void)
 {
     xk_thread *me = xk_cur;
+    if (__atomic_load_n(&g_wait_dump_requested,__ATOMIC_RELAXED) &&
+        __atomic_exchange_n(&g_wait_dump_requested,0,__ATOMIC_ACQ_REL))
+        xk_wait_stats_dump(); /* Guest-owned counters are never read/reset by the profiler thread. */
     me->ctx.eip_hint = X_M32(me->ctx.r[4]);          /* return address of the kernel call we are inside */
     if (xd3d_ds_check) xd3d_ds_check("yield", me->ctx.eip_hint);
     { static uint64_t last; static unsigned n; n++; uint64_t t = xk_os_monotonic_us();
       if (t - last > 3000000) { if (last && n > 2000) { XK_LOG("yield storm: %u yields in 3 s\n", n); xk_dump_threads(); } last = t; n = 0; } }
     X_M32(xk_var_KeTickCount) = xk_tick_count();
+    g_yield_calls++;
+    static int fast = -1;
+    if (fast < 0) { const char *e=getenv("XV_FAST_YIELD"); fast=!e||atoi(e)!=0; }
+    if (fast && me->state == 0) {
+        xk_thread *next = pick_next(me);
+        if (next == me) { g_yield_same++; return; }
+        g_yield_next = next;
+    }
+    g_yield_handoffs++;
     /* the sampling profiler reads a global "current guest function": keep it per thread across switches,
      * otherwise time after a resume is charged to whatever the other thread last entered */
     extern volatile uint32_t xv_cur_fn __attribute__((weak));
@@ -277,16 +316,23 @@ void xk_run_until_idle(void)
     xk_thread *last = NULL; int idle_spins = 0;
     for (;;) {
         X_M32(xk_var_KeTickCount) = xk_tick_count();
-        xk_thread *t = pick_next(last);
+        xk_thread *t = g_yield_next;
+        g_yield_next = NULL;
+        if (!t) t = pick_next(last);
         if (!t) {
             /* everyone blocked: sleep until the earliest timeout, or quit if nothing can ever wake */
             uint64_t earliest = 0; int any = 0, alive = 0;
             for (xk_thread *x = g_threads; x; x = x->next) { if (x->state != 3) alive++; if (x->state == 1 && x->wait_until && (!earliest || x->wait_until < earliest)) { earliest = x->wait_until; any = 1; } }
             if (!alive) { XK_LOG("all threads exited\n"); return; }
-            if (!any) { if (++idle_spins > 3) { XK_LOG("deadlock: %d threads blocked forever\n", alive); xk_dump_threads(); return; } xk_os_sleep_us(1000); continue; }
+            if (!any) { if (++idle_spins > 3) { XK_LOG("deadlock: %d threads blocked forever\n", alive); xk_dump_threads(); return; } xk_os_scheduler_wait(1000); continue; }
             uint64_t n = now100();
             if (earliest > n + 1000000) { static unsigned dumps; if (dumps++ < 6) { XK_LOG("scheduler idle for %llu ms:\n", (unsigned long long)(earliest - n) / 10000); xk_dump_threads(); } }
-            if (earliest > n) { uint64_t us = (earliest - n) / 10 + 1; g_idle_us += us; g_idle_n++; xk_os_sleep_us(us); }
+            if (earliest > n) {
+                uint64_t us = (earliest - n) / 10 + 1;
+                uint64_t started = xk_os_monotonic_us();
+                xk_os_scheduler_wait(us);
+                g_idle_us += xk_os_monotonic_us() - started; g_idle_n++;
+            }
             continue;
         }
         idle_spins = 0;
@@ -334,6 +380,9 @@ void xk_wait_stats_dump(void)
         if (ln > 180) { XK_LOG("%s\n", line); ln = 0; }
     }
     if (ln) XK_LOG("%s\n", line);
+    XK_LOG("[guest-yield] calls %u same-thread %u scheduler-handoffs %u\n",
+        g_yield_calls,g_yield_same,g_yield_handoffs);
+    g_yield_calls=g_yield_same=g_yield_handoffs=0;
     g_nws = 0; g_idle_us = 0; g_idle_n = 0;
 }
 /* NTSTATUS-style wait: returns STATUS_WAIT_n / STATUS_TIMEOUT.  timeout: NULL = infinite, negative = relative 100ns, positive = absolute. */

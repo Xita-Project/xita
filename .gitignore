@@ -33,3 +33,34 @@ assets/ui_scene.bin
 /dashboard/out/
 /dashboard/build/
 /dashboard/*.vpk
+# Local game-derived inputs and diagnostic exports. Existing tracked files still
+# require removal/history review before publication; ignore rules are not cleanup.
+*.xbe
+*.iso
+*.xiso
+*.map
+*.suprx
+*.skprx
+*.velf
+halo_image.bin
+game_manifest.json
+halo_symbols.json
+halo_shader_0.cg
+shaders/halo*
+shaders/ps_*
+shaders/psdefs/
+shaders/*.gxp
+shaders/xv_layouts.h
+shaders/xv_ps_table.h
+shaders/xv_ps_gxp.h
+shaders/xv_hud_gxp.h
+shaders/xv_vs_gxp.h
+dashboard/license_text.h
+.venv/
+release-audit.json
+.env
+.env.*
+core
+core.*
+**/build/
+**/out/

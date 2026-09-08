@@ -39,6 +39,7 @@ Usage:
 """
 
 from __future__ import annotations
+import re as _re
 
 import argparse
 import json
@@ -83,6 +84,8 @@ class GenError(Exception):
 
 SAME_C = [False, False]              # set per def by generate()
 CUBE_EXPR = None                     # None = real texCUBE; --cube normal|const|black substitute an expression
+CUBE_2D_MASK = 0                     # bound 2D textures using the NV2A cube addressing mode
+CUBE_MODES = {"CUBEMAP", "DOT_RFLCT_DIFF", "DOT_RFLCT_SPEC", "DOT_STR_CUBE"}
 VARYINGS_AVAILABLE: Optional[Set[str]] = None   # --varyings: what the paired vertex program outputs
 
 
@@ -180,7 +183,7 @@ def is_normalisation_cube(d: dict, i: int) -> bool:
             if isinstance(v, dict) and v.get("reg") == reg:
                 return False
     for t in d["textures"]:
-        if t["mode"] in ("DPNDNT_AR", "DPNDNT_GB", "BUMPENVMAP", "BUMPENVMAP_LUM"):
+        if t["mode"] in ("DPNDNT_AR", "DPNDNT_GB", "BUMPENVMAP", "BUMPENVMAP_LUM") or t["mode"].startswith("DOT"):
             src = t["input_stage"] if t["input_stage"] is not None else max(0, t["index"] - 1)
             if src == i:
                 return False
@@ -189,6 +192,23 @@ def is_normalisation_cube(d: dict, i: int) -> bool:
 
 def emit_textures(d: dict, L: List[str], samplers: Dict[int, str], warnings: List[str]) -> None:
     used = set(d["textures_used"])
+    def coord(i):
+        return f"IN.texcoord{i}" if VARYINGS_AVAILABLE is None or f"texcoord{i}" in VARYINGS_AVAILABLE else "float4(0.0, 0.0, 0.0, 1.0)"
+    def mapped(t):
+        src = t["input_stage"] if t["input_stage"] is not None else 0
+        c = f"t{src}.rgb"
+        mapping = t['dot_mapping']
+        if mapping == 0: return c
+        if mapping == 1: return f"(({c} * 255.0 - 128.0) / 127.0)"
+        if mapping == 2: return f"(({c} * 255.0 + 0.5 - step(128.0 / 255.0, {c}) * 256.0) / 127.5)"
+        if mapping == 3: return f"(({c} * 255.0 - step(128.0 / 255.0, {c}) * 256.0) / 127.0)"
+        raise ValueError(f"unsupported dot mapping {mapping}")
+    def cube_sample(i, direction):
+        if CUBE_2D_MASK & (1 << i):
+            samplers[i] = 'sampler2D'
+            return f"tex2D(tex{i}, xv_cube_uv({direction}))"
+        samplers[i] = 'samplerCUBE'
+        return f"texCUBE(tex{i}, {direction})"
     for t in d["textures"]:
         i = t["index"]
         mode = t["mode"]
@@ -208,7 +228,12 @@ def emit_textures(d: dict, L: List[str], samplers: Dict[int, str], warnings: Lis
             samplers[i] = "sampler2D"
             L.append(f"    float4 t{i} = tex2Dproj(tex{i}, float3({tc}.xy, {tc}.w));")
         elif mode == "CUBEMAP":
-            if CUBE_EXPR is None and is_normalisation_cube(d, i):
+            if CUBE_2D_MASK & (1 << i):
+                # A cube lookup on a 2D binding uses face-direction ratios. It
+                # does not replace the texture or remap ratios into [0,1].
+                samplers[i] = "sampler2D"
+                L.append(f"    float4 t{i} = tex2D(tex{i}, xv_cube_uv({tc}.xyz));")
+            elif CUBE_EXPR is None and is_normalisation_cube(d, i):
                 # Halo binds a normalisation cube map here and only ever dots its expanded value against a bump
                 # map: normalise the interpolated vector directly.  Our uploaded cube faces do not sit in GXM's
                 # face/orientation convention (bump-lit cliffs came out with black contour bands, 2026-09-04),
@@ -226,6 +251,27 @@ def emit_textures(d: dict, L: List[str], samplers: Dict[int, str], warnings: Lis
                 L.append(f"    float4 t{i} = {CUBE_EXPR.format(tc=tc)};")
         elif mode == "PASSTHRU":
             L.append(f"    float4 t{i} = saturate({tc});")
+        elif mode in ("DOTPRODUCT", "DOT_ST", "DOT_RFLCT_DIFF", "DOT_RFLCT_SPEC", "DOT_STR_CUBE"):
+            # NV2A texture shader dots are a dependent coordinate pipeline,
+            # separate from the register combiners (see xemu glsl/psh.c).
+            L.append(f"    float dot{i} = dot({tc}.xyz, {mapped(t)});")
+            if mode == 'DOTPRODUCT':
+                L.append(f"    float4 t{i} = float4(0.0, 0.0, 0.0, 0.0);")
+            elif mode == 'DOT_ST':
+                samplers[i] = 'sampler2D'
+                L.append(f"    float4 t{i} = tex2D(tex{i}, float2(dot{i-1}, dot{i}) * xv_texscale[{i}].xy);")
+            else:
+                if mode == 'DOT_RFLCT_DIFF':
+                    L.append(f"    float3 n{i} = float3(dot{i-1}, dot{i}, dot({coord(i+1)}.xyz, {mapped(d['textures'][i+1])}));")
+                else:
+                    L.append(f"    float3 n{i} = float3(dot{i-2}, dot{i-1}, dot{i});")
+                if mode == 'DOT_RFLCT_SPEC':
+                    L.append(f"    float3 eye{i} = float3({coord(i-2)}.w, {coord(i-1)}.w, {tc}.w);")
+                    L.append(f"    float3 refl{i} = 2.0 * n{i} * dot(n{i}, eye{i}) / max(dot(n{i}, n{i}), 1e-20) - eye{i};")
+                    direction = f'refl{i}'
+                else:
+                    direction = f'n{i}'
+                L.append(f"    float4 t{i} = {cube_sample(i, direction)};")
         elif mode == "CLIPPLANE":
             cm = t["compare_mode"]
             conds = []
@@ -281,6 +327,9 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
         if i not in declared:
             tex_lines.append(f"    float4 t{i} = float4(0.0, 0.0, 0.0, 0.0);")
     body += tex_lines
+    # NV2A seeds the temporary alpha from texture 0 before the first combiner.
+    # Decal fades and mux programs may read it without an earlier alpha write.
+    body.append("    r0.a = " + ("1.0" if d['textures'][0]['mode'] == 'NONE' else 't0.a') + ";")
 
     for s in d["stages"]:
         emit_stage(s, d["mux_msb"], body, written)
@@ -312,6 +361,15 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
         body.append("    float  out_a   = r0.a;")
     body.append('    // ---- alpha test (NV097_SET_ALPHA_TEST_ENABLE/FUNC/REF): xv_atest = (ref, func 0..7, enable, 0)\n    //      0 NEVER 1 LESS 2 EQUAL 3 LEQUAL 4 GREATER 5 NOTEQUAL 6 GEQUAL 7 ALWAYS  (NV097 0x200+n)\n    if (xv_atest.z > 0.5) {\n        float a_ = saturate(out_a); float r_ = xv_atest.x; float f_ = xv_atest.y;\n        bool pass_ = (f_ > 6.5) || (f_ > 3.5 && f_ < 4.5 && a_ > r_) || (f_ > 5.5 && f_ < 6.5 && a_ >= r_)\n                  || (f_ > 0.5 && f_ < 1.5 && a_ < r_) || (f_ > 2.5 && f_ < 3.5 && a_ <= r_)\n                  || (f_ > 1.5 && f_ < 2.5 && abs(a_ - r_) < 0.002) || (f_ > 4.5 && f_ < 5.5 && abs(a_ - r_) >= 0.002);\n        if (!pass_) discard;\n    }')
     body.append("    return saturate(float4(out_rgb, out_a));")
+    # Experimental combiner lowering. Keep full precision by default: changing
+    # out_a and its inputs can alter alpha-test decisions even when the comparison
+    # itself remains float. Hardware gains and visual equivalence are unverified.
+    if os.environ.get("XV_PS_PRECISION", "float") == "half":
+        # Only the combiner body: the alpha-test block (and everything after its marker) stays float so
+        # tools/specialize_ps_alpha.py still recognises it by exact text, and so does the final return.
+        cut = next((i for i, ln in enumerate(body) if "---- alpha test" in ln), len(body))
+        body = [_re.sub(r"\bfloat(4|3|2)?\b", lambda m: "half" + (m.group(1) or ""), ln)
+                if (i < cut and not ln.lstrip().startswith("//")) else ln for i, ln in enumerate(body)]
 
     # header + signature
     used_var = {"color0", "color1", "fog"} | {f"texcoord{i}" for i in range(4)
@@ -343,12 +401,22 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
             L.append(f"    {ty:<6} {nm:<11} : {sem};")
     L.append("};")
     L.append("")
+    if CUBE_2D_MASK:
+        L += ["// NV2A cube-mode addressing on a 2D resource (see xemu pgraph/glsl/psh.c).",
+              "float2 xv_cube_uv(float3 d)", "{",
+              "    float3 a = abs(d);",
+              "    if (a.x > a.y && a.x > a.z) return float2(d.x > 0.0 ? -d.z : d.z, d.y) / a.x;",
+              "    if (a.y > a.x && a.y > a.z) return float2(d.x, d.y > 0.0 ? -d.z : d.z) / a.y;",
+              "    return float2(d.z > 0.0 ? d.x : -d.x, d.y) / max(a.z, 1e-20);",
+              "}", ""]
     params = ["VertOut IN"]
     for i in sorted(samplers):
         params.append(f"uniform {samplers[i]} tex{i}")
     params.append("uniform float4 psc[18]")
     params.append("uniform float4 xv_fogcolor")
     params.append("uniform float4 xv_atest")
+    if any(t['mode'] == 'DOT_ST' for t in d['textures']):
+        params.append("uniform float4 xv_texscale[4]")
     if any(t["mode"] in ("BUMPENVMAP", "BUMPENVMAP_LUM") for t in d["textures"]):
         params.append("uniform float4 xv_bumpmat[4]")
         params.append("uniform float4 xv_bumplum[4]")
@@ -377,8 +445,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                                        "others are not declared (GXM refuses fragment inputs the vertex program lacks)")
     ap.add_argument("--name", help="output name for a single def (instead of <prefix>_NN)")
     ap.add_argument("--cube", default="real", help="CUBEMAP handling: real (texCUBE) | normal (normalisation-cube stand-in) | const | black")
+    ap.add_argument("--cube-2d-mask", type=lambda x: int(x, 0), default=0, help="stages with a 2D resource and cube addressing")
     args = ap.parse_args(argv)
-    global VARYINGS_AVAILABLE, CUBE_EXPR
+    global VARYINGS_AVAILABLE, CUBE_EXPR, CUBE_2D_MASK
+    CUBE_2D_MASK = args.cube_2d_mask
     if args.cube == "const": CUBE_EXPR = "float4(0.5, 0.5, 0.5, 1.0)"
     elif args.cube == "black": CUBE_EXPR = "float4(0.0, 0.0, 0.0, 1.0)"
     elif args.cube == "normal": CUBE_EXPR = "float4(normalize({tc}.xyz) * 0.5 + 0.5, 1.0)"

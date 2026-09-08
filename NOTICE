@@ -1,0 +1,24 @@
+Xita
+Copyright (C) 2026 Xita contributors
+
+Xita's original code and documentation are licensed under the GNU General
+Public License, version 3 only (SPDX: GPL-3.0-only). See LICENSE for the full
+terms. Xita comes WITHOUT ANY WARRANTY, including the implied warranties of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+You may redistribute and modify the covered software under those terms.
+When distributing covered binaries, provide the corresponding source and
+preserve applicable notices as required by the GPL.
+
+This license does not grant rights to third-party game executables, translated
+game code or shaders, game artwork, maps, recordings, or proprietary SDK and
+firmware components. Third-party components retain their own licenses.
+See THIRD_PARTY.md and docs/release-audit.md for the release inventory and
+outstanding provenance checks. Possessing a game copy does not by itself
+authorize distribution of that game's code or assets.
+
+Xita is an independent project, unaffiliated with Microsoft, Xbox, Bungie,
+Halo Studios, or Sony Interactive Entertainment. Product and game names
+identify compatibility; their trademarks remain with their respective owners.
+
+Project: https://github.com/BirchWoodGod/xita

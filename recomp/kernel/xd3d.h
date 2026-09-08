@@ -2,10 +2,12 @@
  * The host null renderer logs it; the Vita build overrides the hooks and feeds GXM (xv_d3d bridge). */
 #pragma once
 #include "../xv_x86rt.h"
+#include "../../xv_stencil.h"
 
 typedef struct {
     /* geometry */
     uint32_t vs_handle;                /* odd = shader object | 1 (guest struct: decl, func, size, fnv) ; even = FVF */
+    uint32_t vs_program;               /* resident program selected independently of the input declaration */
     uint32_t stream_vb[4];             /* X_D3DVertexBuffer headers (guest) */
     uint32_t stream_stride[4];
     uint32_t indices;                  /* X_D3DIndexBuffer header (guest) or 0 */
@@ -21,6 +23,7 @@ typedef struct {
     /* pixel shader */
     uint32_t ps_def;                   /* X_D3DPIXELSHADERDEF pointer (runtime-built combiners) */
     uint32_t ps_hash;                  /* FNV of the def minus its constant colours: identifies the combiner program */
+    uint32_t ps_key;                   /* canonical program identity, excluding inactive stages */
     uint32_t ps_shadow[0x3C];          /* effective X_D3DPIXELSHADERDEF: SetPixelShaderProgram + the NV2A combiner
                                           registers Halo pokes afterwards through SetRenderState_Simple */
     int      ps_dirty;
@@ -34,6 +37,7 @@ typedef struct {
     uint32_t fill_mode;
     /* viewport */
     uint32_t vp_x, vp_y, vp_w, vp_h; float vp_minz, vp_maxz;
+    xv_stencil stencil;
     /* frame counters */
     unsigned frame, draws_in_frame;
 } xd3d_state_t;
@@ -49,6 +53,11 @@ void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t d
 void xd3d_r_state(const char *what, uint32_t a, uint32_t b, uint32_t v);
 typedef struct { float a[16][4]; } xd3d_im_vtx;                       /* one immediate-mode vertex: all 16 attribute registers */
 void xd3d_r_im_end(uint32_t prim, const xd3d_im_vtx *v, unsigned n); /* Begin/SetVertexData/End draw */
+int xd3d_im_passthrough(void); /* current Begin/End uses SetVertexData4f(-1) */
+const float (*xd3d_current_attributes(void))[4]; /* persistent NV2A vertex register values */
+int xd3d_hist_active(void);
+uint32_t xd3d_texture_state(unsigned stage, unsigned state); /* XDK 3925 indices */
+uint32_t xd3d_backbuffer_data(void);
 
 unsigned xd3d_frame(void);
 unsigned xd3d_pad_frame(void);   /* pad record/replay index, anchored at gameplay start */

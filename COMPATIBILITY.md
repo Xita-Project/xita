@@ -1,56 +1,66 @@
 # Game compatibility
 
-Xita statically recompiles original Xbox executables to run natively on the PlayStation
-Vita. Each game is a separate port: the recompiler is generic, but every title needs its
-own symbol map, its own set of kernel and library calls served by the runtime, and its own
-shader translations. This page lists the games Xita targets and how far each one plays.
+[README](README.md) · [Roadmap](ROADMAP.md) · [Halo level details](docs/halo-ce.md)
 
-Ratings: **Playable** (start to finish, normal play), **Ingame** (loads and renders,
-known problems listed), **Menus** (boots to its front end only), **Boots** (executable
-starts, no usable output), **Untested**, **Broken** (does not start).
+Updated **September 8, 2026**. Halo: Combat Evolved is the only title tested.
+Each game needs a separate port; Xita does not run arbitrary Xbox executables.
 
-| Game | XDK build | Vita | Vita3K | Status | Details |
-| --- | --- | --- | --- | --- | --- |
-| Halo: Combat Evolved | 3925 | Ingame | Ingame | Menus, profiles and saves work; Blood Gulch playable at 11 to 20 fps; campaign through the cryo tutorial with a camera bug after the tube exit; three more maps load. Ad-hoc multiplayer between Vitas is the next milestone. | [docs/halo-ce.md](docs/halo-ce.md) |
+## Titles
 
-| Halo 2 | 5849 | Planned | Planned | Next title after Halo: Combat Evolved is playable. Expect a larger effort: a later XDK (new D3D internals and symbol map), the Xbox's full 64 MB in use, and heavier per-pixel shading. | |
+| Game | Tested executable | Real Vita | Vita3K |
+| --- | --- | --- | --- |
+| Halo: Combat Evolved (Xbox) | Tested 3925-era executable; alternate versions unvalidated | **Ingame** — performance and GPU stability remain open | **Ingame** — useful for rendering and behavior checks |
+| Halo 2 | None | **Untested / future target** | **Untested** |
+| Other original Xbox titles | None | **Untested** | **Untested** |
 
-No other title has been attempted yet. Candidates after Halo 2 will be chosen by how much
-of their engine goes through the calls Xita already serves.
+**Ingame** means gameplay is reachable with known problems. **Playable** is
+reserved for representative play at acceptable speed and stability, including
+completion where applicable. No title currently meets that release gate.
 
-## What a new game needs
+## Halo: tested features
 
-Xita is not an emulator: a game only runs once its executable has been recompiled and
-every Xbox call it makes has an implementation on the Vita. In practice a title needs:
+| Feature | Evidence and limits |
+| --- | --- |
+| Main menu, profiles and dashboard | Work on hardware. Solo Split Screen starts through Enlisted Players without the shortcut. |
+| Blood Gulch | Latest sampled hardware session: **11.00 FPS at 640×360**, 256 texture cap. User confirms driving, shooting and looking around. Sixty-frame averages span **8.1–13.0 FPS** after the initial loading window. |
+| Battle Creek | Tested on hardware and emulator; see the earlier [480p report](docs/hardware-20260905-battlecreek-480p.md). No matched test of the latest candidate yet. |
+| Vehicles and variants | User confirms Warthog, Ghost and Scorpion operation. Driving performance and long-run stability need further testing. |
+| Rendering | User confirms major improvements to sky, decals, baked lighting and active camouflage. Whole-game rendering correctness is not established. |
+| Campaign | The Pillar of Autumn has been played through the Keyes section in prior builds. AI, cinematic camera recovery and later missions need further hardware validation. |
+| Checkpoints and resume | In-game Revert to Last Save is user-confirmed. A later menu-resume correction passes emulator restart testing; hardware menu-resume remains unverified. |
+| GPU stability | Prior driving and rocket self-death crashes remain under investigation. No new dump in the latest follow-up; exact rocket/death reproduction is unconfirmed. |
+| Audio | In-game sounds work for the user; crackly main-menu music is reported. Page-read and output-buffer fixes pass host tests and were installed September 8; audible improvement on Vita is unverified. |
+| Video | Bink intro/attract movies skipped. In-engine cinematics are separate. |
+| Networking | Solo matches work. Ad-hoc/System Link between physical Vitas remains experimental and unverified. |
 
-- **XDK proximity.** The runtime implements the kernel, Direct3D 8 and DirectSound
-  entry points as the 3925-era XDK exposes them, and finds them in the executable through
-  a symbol database (`halo_symbols.json` for Halo). Titles built on nearby XDKs reuse
-  most of that; later XDKs changed D3D internals and need new HLE work.
-- **Symbols.** A symbol map for the game's statically linked XDK libraries, so the
-  recompiler can replace library code with the runtime's implementations instead of
-  lifting it. The XbSymbolDatabase format is the one the tooling reads.
-- **Graphics within GXM's reach.** Vertex programs are translated from NV2A microcode
-  and register-combiner setups from the D3D pixel-shader definitions the game submits.
-  Games that write the push buffer directly, or use NV2A features with no GXM equivalent
-  (some texture modes, two-sided stencil tricks), need per-title work.
-- **Memory.** The Vita gives the runtime about 109 MB in extended mode; the guest gets a
-  64 MB physical space plus the recompiled code and decoded textures. A game that needs
-  most of the Xbox's 64 MB and large texture pools will be tight.
-- **CPU.** One 444 MHz core runs the recompiled game logic; 30 fps titles that were
-  CPU-bound on the Xbox's 733 MHz Pentium III will not reach full speed without the
-  recompiler improvements on the roadmap.
-- **Your own copy.** As with Halo, the executable and assets come from the user's disc
-  image and are never distributed.
+The first performance milestone is **sustained 20 FPS**, then 25 FPS. Neither
+has been verified. Historical peaks around 20–22 FPS are scene-dependent, not
+representative averages. Keep resolution, settings and workload fixed when
+comparing changes. Emulator performance does not establish hardware speed.
 
-## How to report
+The [latest measured hardware report](docs/hardware-20260907-frame-constants.md)
+covers the previous constant-buffer build. The [September 8 USB update](docs/hardware-20260908-weapon-menu.md)
+installs dashboard triple-buffer control, the deferred visibility-read comparison,
+and [weapon stencil, lobby and audio corrections](docs/weapon-menu-20260908.md).
+Installation is verified; hardware gameplay, music quality and performance checks
+for this update are pending. Emulator results do not establish hardware correctness.
 
-Open a comment on the pinned "Compatibility reports" issue with:
+## Supporting another game
 
-1. Game and its XDK build if you know it (the tooling prints it when parsing the XBE).
-2. Build of Xita (the date in the VPK name) and whether it's a Vita, a PS TV or Vita3K.
-3. How far it gets, what went wrong, a screenshot if it's visual, and
-   `ux0:data/xita/xita.log` attached (the log contains only the runtime's own output).
+Each title needs an executable/version profile, symbol identification,
+compatible kernel/graphics/audio calls, shader translation and memory testing.
+Halo-specific hooks must not be applied to other games. The future dashboard
+game selector will choose installed, separately recompiled ports.
 
-Do not attach executables, disc images or game assets; reports containing game data will
-be removed.
+## Reporting a test
+
+Include:
+
+1. Xita build identifier and game/executable version.
+2. Vita, PS TV or Vita3K; map, resolution and graphics settings.
+3. Actions taken, time played, FPS and steps to reproduce any issue.
+4. A short, reviewed diagnostic excerpt when useful.
+
+Logs can contain shader definitions, memory details and local paths. Do not
+attach game code, maps, firmware, SDK components, private saves or raw crash
+dumps to a public report.

@@ -42,6 +42,22 @@ void xv_preempt(xctx *c)
     { extern void xd3d_lockstep_preempt(xctx *) __attribute__((weak)); if (xd3d_lockstep_preempt) xd3d_lockstep_preempt(c); }
     if (++n <= 5 || (n & 0x3FF) == 0) {
         XV_RT_LOG("preempt #%llu esp=%08X\n", (unsigned long long)n, c->r[4]);
+        if (getenv("XV_SPIN_BT")) {
+            extern volatile uint32_t xv_cur_fn;
+#if defined(__vita__)
+            /* Resolve an untraced build's busy loop with its ELF: add this
+             * relative offset to xv_preempt's symbol address. ASLR cancels. */
+            uintptr_t caller = (uintptr_t)__builtin_return_address(0);
+            XV_RT_LOG("spin ARM caller %08X relative-to-xv_preempt %d\n",
+                      (unsigned)caller, (int32_t)(caller - (uintptr_t)xv_preempt));
+#endif
+            XV_RT_LOG("spin fn %08X regs %08X %08X %08X %08X %08X %08X %08X %08X\n",
+                      xv_cur_fn, c->r[0], c->r[1], c->r[2], c->r[3],
+                      c->r[4], c->r[5], c->r[6], c->r[7]);
+            if (xv_cur_fn == 0x51E90u)
+                XV_RT_LOG("spin polygon %08X count %08X vertices %08X\n",
+                          c->r[3], X_M32(c->r[3] + 0x34), X_M32(c->r[3] + 0x38));
+        }
 #ifndef __vita__
         if ((n & 0x3FF) == 0 && getenv("XV_SPIN_BT")) {   /* host: who is spinning (guest stack + host backtrace + HLE histogram) */
             char sb[200]; int k = 0;
@@ -98,13 +114,21 @@ extern const unsigned xv_hle_table_count;
 extern const xv_fn_entry_t xv_hle_extra[] __attribute__((weak));   /* xd3d.c: vtable-only HLE methods */
 
 int xk_dispatch_magic(xctx *c, uint32_t target) __attribute__((weak));
+extern const unsigned xv_guest_trace_enabled __attribute__((weak));
+extern volatile uint32_t xv_cur_fn __attribute__((weak));
 
 void xv_call(xctx *c, uint32_t target)
 {
     { static uint64_t n; static int on = -1; if (on < 0) on = getenv("XV_CALL_SAMPLE") != NULL;
       if (on && (++n & 0xFFFFF) == 0) XV_RT_LOG("call sample #%lluM: target %08X\n", (unsigned long long)(n >> 20), target); }
-    if ((target & 0xFFFF0000u) == 0xFE000000u && xk_dispatch_magic && xk_dispatch_magic(c, target))
-        return;
+    int traced = &xv_guest_trace_enabled && xv_guest_trace_enabled && &xv_cur_fn;
+    uint32_t caller = traced ? xv_cur_fn : 0;
+    if ((target & 0xFFFF0000u) == 0xFE000000u && xk_dispatch_magic) {
+        if (traced) xv_cur_fn = target;
+        int handled = xk_dispatch_magic(c, target);
+        if (traced) xv_cur_fn = caller;
+        if (handled) return;
+    }
     /* direct-mapped cache in front of the binary search: Halo makes ~10^5 indirect calls per frame
      * (vtables, sort comparators, event handlers) and the same few hundred targets dominate */
     static struct { uint32_t eip; xv_fn_t fn; } cache[4096];
@@ -112,6 +136,7 @@ void xv_call(xctx *c, uint32_t target)
     xv_fn_t fn = cache[slot].eip == target ? cache[slot].fn : NULL;
     if (!fn) fn = xv_lookup(target);
     if (fn) { cache[slot].eip = target; cache[slot].fn = fn; }
+    int is_hle = !fn;
     if (!fn) {
         for (unsigned i = 0; i < xv_hle_table_count; ++i)
             if (xv_hle_table[i].eip == target && xv_hle_table[i].fn) { fn = xv_hle_table[i].fn; break; }
@@ -127,15 +152,42 @@ void xv_call(xctx *c, uint32_t target)
         xv_trap(c, target);
         return;
     }
+    if (traced && is_hle) xv_cur_fn = 0x80000000u | target;
     fn(c);
+    /* Generated indirect calls and callback dispatch return here. Their callee
+     * may have changed the sampler marker; subsequent caller work belongs to
+     * the caller, just as XV_FN_BACK handles direct generated calls. */
+    if (traced) xv_cur_fn = caller;
 }
 
 /* ---- 80-bit extended precision <-> double ---------------------------------------- */
+/* Rare cross-page copies stay out of the recompiled game's hot instruction stream. */
+void x_guest_read_pages(void *dst, uint32_t a, size_t size)
+{
+    uint8_t *p = dst;
+    while (size) {
+        size_t n = 4096u - (a & 0xFFFu);
+        if (n > size) n = size;
+        memcpy(p, X_G(a), n);
+        p += n; a += (uint32_t)n; size -= n;
+    }
+}
+void x_guest_write_pages(uint32_t a, const void *src, size_t size)
+{
+    const uint8_t *p = src;
+    while (size) {
+        size_t n = 4096u - (a & 0xFFFu);
+        if (n > size) n = size;
+        memcpy(X_G(a), p, n);
+        p += n; a += (uint32_t)n; size -= n;
+    }
+}
+
 double x87_load_f80(xctx *c, uint32_t a)
 {
     (void)c;
     uint64_t mant; uint16_t se;
-    memcpy(&mant, X_G(a), 8); memcpy(&se, X_G(a + 8), 2);
+    x_guest_read(&mant, a, 8); x_guest_read(&se, a + 8, 2);
     int sign = se >> 15; int exp = se & 0x7FFF;
     if (exp == 0 && mant == 0) return sign ? -0.0 : 0.0;
     if (exp == 0x7FFF) return (mant << 1) ? NAN : (sign ? -INFINITY : INFINITY);
@@ -157,7 +209,7 @@ void x87_store_f80(xctx *c, uint32_t a, double v)
         se = (uint16_t)(e - 1 + 16383);
     }
     se |= (uint16_t)(sign << 15);
-    memcpy(X_G(a), &mant, 8); memcpy(X_G(a + 8), &se, 2);
+    x_guest_write(a, &mant, 8); x_guest_write(a + 8, &se, 2);
 }
 
 /* ---- string instructions ------------------------------------------------------------ */
@@ -166,12 +218,16 @@ void x87_store_f80(xctx *c, uint32_t a, double v)
 static inline uint32_t ld(xctx *c, uint32_t a, unsigned sz)
 {
     (void)c;
-    return sz == 1 ? X_M8(a) : sz == 2 ? X_M16(a) : X_M32(a);
+    if (sz == 1) return X_M8(a);
+    if (sz == 2) { uint16_t v; x_guest_read(&v, a, 2); return v; }
+    uint32_t v; x_guest_read(&v, a, 4); return v;
 }
 static inline void st(xctx *c, uint32_t a, unsigned sz, uint32_t v)
 {
     (void)c;
-    if (sz == 1) X_M8(a) = (uint8_t)v; else if (sz == 2) X_M16(a) = (uint16_t)v; else X_M32(a) = v;
+    if (sz == 1) X_M8(a) = (uint8_t)v;
+    else if (sz == 2) { uint16_t w = (uint16_t)v; x_guest_write(a, &w, 2); }
+    else x_guest_write(a, &v, 4);
 }
 
 static void watch_range(xctx *c, const char *op, uint32_t dst, uint32_t len)
@@ -187,11 +243,19 @@ void x_str_movs(xctx *c, unsigned sz, int mode)
 {
     if (mode != X_STR_ONCE) watch_range(c, "movs", c->df ? c->r[7] - c->r[1] * sz : c->r[7], c->r[1] * sz);
     if (mode == X_STR_ONCE) { st(c, c->r[7], sz, ld(c, c->r[6], sz)); c->r[6] += STEP(sz); c->r[7] += STEP(sz); return; }
-    if (!c->df && c->r[1]) {                         /* fast path: forward copy */
-        size_t n = (size_t)c->r[1] * sz;
-        memmove(X_G(c->r[7]), X_G(c->r[6]), n);
-        c->r[6] += (uint32_t)n; c->r[7] += (uint32_t)n; c->r[1] = 0;
-        return;
+    while (!c->df && c->r[1]) { /* Copy whole elements within both translated pages. */
+        unsigned n = 4096u - (c->r[6] & 0xFFFu);
+        unsigned dst_n = 4096u - (c->r[7] & 0xFFFu);
+        if (dst_n < n) n = dst_n;
+        unsigned count = n / sz;
+        if (count > c->r[1]) count = c->r[1];
+        n = count * sz;
+        uint8_t *src = X_G(c->r[6]), *dst = X_G(c->r[7]);
+        /* Forward overlapping REP MOVS propagates earlier writes; memmove would snapshot them. */
+        if (!count || ((uintptr_t)dst > (uintptr_t)src && (uintptr_t)dst - (uintptr_t)src < n)) {
+            st(c, c->r[7], sz, ld(c, c->r[6], sz)); count = 1; n = sz;
+        } else memmove(dst, src, n);
+        c->r[6] += n; c->r[7] += n; c->r[1] -= count;
     }
     while (c->r[1]) { st(c, c->r[7], sz, ld(c, c->r[6], sz)); c->r[6] += STEP(sz); c->r[7] += STEP(sz); c->r[1]--; }
 }
@@ -201,7 +265,11 @@ void x_str_stos(xctx *c, unsigned sz, int mode)
     uint32_t v = c->r[0];
     if (mode != X_STR_ONCE) watch_range(c, "stos", c->df ? c->r[7] - c->r[1] * sz : c->r[7], c->r[1] * sz);
     if (mode == X_STR_ONCE) { st(c, c->r[7], sz, v); c->r[7] += STEP(sz); return; }
-    if (!c->df && sz == 1 && c->r[1]) { memset(X_G(c->r[7]), (int)(v & 0xFF), c->r[1]); c->r[7] += c->r[1]; c->r[1] = 0; return; }
+    while (!c->df && sz == 1 && c->r[1]) {
+        unsigned n = 4096u - (c->r[7] & 0xFFFu);
+        if (n > c->r[1]) n = c->r[1];
+        memset(X_G(c->r[7]), (int)(v & 0xFF), n); c->r[7] += n; c->r[1] -= n;
+    }
     while (c->r[1]) { st(c, c->r[7], sz, v); c->r[7] += STEP(sz); c->r[1]--; }
 }
 

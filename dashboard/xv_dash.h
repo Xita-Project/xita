@@ -43,6 +43,9 @@ typedef struct {
     /* present: display completed frame, pace at 60 Hz, supply next buffer.
      * Return zero on success, negative on error. No buffer is freed by module. */
     int (*present)(void *userdata, xv_dash_framebuffer *framebuffer);
+    /* Embedded runtime: Launch Game plus supported pre-launch settings.
+     * Selection returns an empty map and opens the game's normal menu. */
+    int simple_launcher;
 } xv_dash_config;
 
 /* 0 = selected, 1 = caller cancelled, -1 = invalid config / allocation / I/O

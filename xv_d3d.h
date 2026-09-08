@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <psp2/gxm.h>
 #include "xv_shader.h"
+#include "xv_stencil.h"
 
 /* --- Xbox D3D structures / enums as the game sees them --------------------------- */
 
@@ -58,7 +59,7 @@ enum { X_D3DFMT_L8 = 0x00, X_D3DFMT_A1R5G5B5 = 0x02, X_D3DFMT_A4R4G4B4 = 0x04, X
 
 /* --- host services the HLE relies on (provided by main.c) ------------------------- */
 void *xv_guest_ptr(uint32_t guest_addr);                 /* guest -> host/GPU pointer  */
-void  xv_gpu_flush(const void *ptr, uint32_t len);       /* dcache clean before GPU read */
+void  xv_gpu_flush(const void *ptr, uint32_t len);       /* register uncached GPU writes for publication */
 void  xv_present(void);                                  /* D3DDevice_Swap fence         */
 
 /* --- lifecycle ----------------------------------------------------------------- */
@@ -71,10 +72,12 @@ uint32_t xv_d3d_RegisterVertexShader(const xv_vs_desc_t *desc);                /
 void xv_d3d_SetVertexShader(uint32_t handle);
 void xv_d3d_SetVertexShaderConstant(int reg, const float *data, unsigned count);  /* reg: D3D numbering, -96..95 */
 void xv_d3d_SetVertexData4f(unsigned vreg, float x, float y, float z, float w);   /* persistent attribute */
+void xv_d3d_SetAllAttributes(const float (*attributes)[4]);
 void xv_d3d_SetStreamSource(unsigned stream, uint32_t vb_guest, unsigned stride); /* vb_guest -> X_D3DResource */
 void xv_d3d_SetTexture(unsigned stage, uint32_t tex_guest);                      /* 0 unbinds */
 void xv_d3d_SetTexturePalette(unsigned stage, uint32_t pal_guest);   /* guest address of 256 D3DCOLOR entries, 0 = none */
 void xv_d3d_SetTextureStageState(unsigned stage, unsigned type, uint32_t value);
+void xv_d3d_SetStencil(const xv_stencil *state);
 void xv_d3d_SetRenderState_ZEnable(uint32_t v);
 void xv_d3d_SetRenderState_ZWriteEnable(uint32_t v);
 void xv_d3d_SetRenderState_ZFunc(uint32_t v);
@@ -83,22 +86,49 @@ void xv_d3d_SetRenderState_AlphaBlendEnable(uint32_t v);
 void xv_d3d_SetRenderState_ColorWriteEnable(uint32_t rgba_bits);   /* D3DRS_COLORWRITEENABLE: R 1, G 2, B 4, A 8 */
 void xv_d3d_SetRenderState_SrcBlend(uint32_t v);
 void xv_d3d_SetRenderState_DestBlend(uint32_t v);
+void xv_d3d_SetRenderState_BlendOp(uint32_t nv2a_op);
 void xv_d3d_Clear(uint32_t flags, uint32_t color_argb, float z, uint32_t stencil);
 void xv_d3d_NoteOffscreenTarget(uint32_t data);
-void xv_d3d_SetPixelShader(uint32_t hash, const float (*psc)[4]);   /* combiner program id + its 16 constants */           /* guest Data of a render-target surface: draws sampling it are skipped */
+void xv_d3d_SetPixelShader(uint32_t hash, uint32_t key, const float (*psc)[4]); /* raw/canonical ids + 18 constants; key 0 selects a semantic HUD id */
 void xv_d3d_DrawVertices(uint32_t prim, uint32_t start_vertex, uint32_t vertex_count);
+/* Copy complete immediate attribute registers into a bounded GPU frame ring. */
+void xv_d3d_DrawImmediate(uint32_t prim, const void *vertices, uint32_t count);
+/* Packed immediate vertices using the active shader's single-stream stride. */
+void xv_d3d_DrawImmediateStrided(uint32_t prim, const void *vertices, uint32_t count, uint32_t stride);
 void xv_d3d_DrawIndexedVertices(uint32_t prim, uint32_t vertex_count, uint32_t indices_guest);
 void xv_d3d_Swap(void);
 /* recomp-build entry points (state pushed per draw by the kernel's D3D object model) */
 void     xv_d3d_DrawIndexedVerticesBase(uint32_t prim, uint32_t index_count, uint32_t indices_guest, uint32_t base_vertex);
 uint32_t xv_d3d_handle_for_hash(uint32_t fnv);            /* registers the program on first use; 0 = unknown */
 void     xv_d3d_SetAllConstants(const float (*vsc)[4]);   /* c[-96..95] */
+/* Exact CPU scan comparison; -1 restores the configured opt-in default. */
+void     xv_d3d_draw_scan_override(int enabled);
 uint32_t xv_d3d_EndFrame(void);                           /* close the recorded list; returns its frame number */
 
 /* Handle (from xv_d3d_RegisterVertexShader) of the clear-quad program xv_clear.gxp. */
 void xv_d3d_set_clear_shader(uint32_t handle);
 
-/* --- pump side (inside sceGxmBeginScene/EndScene) -------------------------------- */
-void xv_d3d_render(SceGxmContext *ctx, uint32_t frame);
-void xv_d3d_render_offscreen(SceGxmContext *ctx, uint32_t frame);   /* render-to-texture passes: call BEFORE the main BeginScene */
+/* --- render targets: record on guest thread, replay on pump -------------------- */
+int xv_d3d_record_ui(unsigned frame, unsigned batch);
+const SceGxmTexture *xv_d3d_render_target_texture(uint32_t hdr);
+void xv_d3d_ReleaseRenderTarget(uint32_t data);
 void xv_d3d_SetRenderTarget(uint32_t surface_hdr, int is_backbuffer);
+int xv_d3d_uses_previous_frame(uint32_t frame);
+void xv_d3d_SetPreviousFrameTexture(const SceGxmTexture *texture);
+/* Only sampled from an offscreen pass, after the backbuffer scene has finished. */
+void xv_d3d_SetSceneBackbufferTexture(const SceGxmTexture *texture);
+void xv_d3d_check_geometry(uint32_t frame); /* trace-only lifetime diagnostics, after GPU completion */
+void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, unsigned h); /* before the first scene */
+void xv_d3d_visibility_complete(uint32_t frame); /* after GPU completion, before releasing the frame */
+
+/* Legacy replay runs inside the caller's scene. RTT replay starts outside a
+ * scene and leaves the final backbuffer scene open for the caller to end/flip. */
+void xv_d3d_render(SceGxmContext *ctx, uint32_t frame);
+int xv_d3d_has_render_targets(uint32_t frame);
+int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
+    SceGxmRenderTarget *back, SceGxmSyncObject *sync,
+    const SceGxmColorSurface *color, const SceGxmDepthStencilSurface *depth,
+    unsigned back_width, unsigned back_height);
+
+unsigned xv_d3d_record_slot(void);
+void xv_d3d_BeginFrame(void);

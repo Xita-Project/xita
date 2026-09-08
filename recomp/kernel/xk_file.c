@@ -5,6 +5,7 @@
 #include <string.h>
 #include <ctype.h>
 #include "xk.h"
+#include "xk_quality.h"
 
 /* ---- namespace: devices -> host dirs, links -> devices ------------------------------------ */
 typedef struct { char name[64]; char target[256]; } link_t;
@@ -121,6 +122,19 @@ static uint32_t open_common(xctx *c, uint32_t phandle, uint32_t access, uint32_t
         /* FILE_OVERWRITE (4) on a missing file creates it: Halo writes z:\lastmpvr.txt that way and
          * shows "Unable to load saved game file" when the open fails - FATX is lenient here */
         if (disposition == 1) { XK_LOG("%s \"%s\" -> %s: not found (disp %u)\n", is_create ? "NtCreateFile" : "NtOpenFile", name, host, disposition); free(host); if (iosb) IOSB_STATUS(iosb) = STATUS_OBJECT_NAME_NOT_FOUND; return STATUS_OBJECT_NAME_NOT_FOUND; }
+        /* Creating a file never creates its parent directories. Vita3K's host
+         * open may do that implicitly: XAPI's OPEN_ALWAYS SaveMeta probe then
+         * leaves an empty save directory and subsequent profile creation fails. */
+        char parent[1024]; snprintf(parent, sizeof parent, "%s", host);
+        char *slash = strrchr(parent, '/');
+        if (slash && slash != parent) {
+            int parent_dir = 0; *slash = 0;
+            if (stat_ci(parent, &parent_dir, NULL, NULL) != 0 || !parent_dir) {
+                free(host);
+                if (iosb) { IOSB_STATUS(iosb) = STATUS_OBJECT_PATH_NOT_FOUND; IOSB_INFO(iosb) = 0; }
+                return STATUS_OBJECT_PATH_NOT_FOUND;
+            }
+        }
         if (want_dir) { if (xk_os_mkdir(host) != 0) { free(host); return STATUS_OBJECT_PATH_NOT_FOUND; } is_dir = 1; }
         info = 2;                                            /* FILE_CREATED */
     } else if (disposition == 2) { free(host); if (iosb) IOSB_STATUS(iosb) = STATUS_OBJECT_NAME_COLLISION; return STATUS_OBJECT_NAME_COLLISION; }
@@ -161,6 +175,30 @@ void xk_NtClose(xctx *c)
     c->r[0] = STATUS_SUCCESS; X_RET(1);
 }
 
+/* A guest buffer can span separately committed/reused pages. Keep adjacent host
+ * pages in one I/O request (map streaming is normally contiguous), but translate
+ * again at every discontinuity instead of reading/writing unrelated arena data. */
+static int64_t file_guest_io(xk_file *f, uint64_t pos, uint32_t buf, uint32_t len, int writing)
+{
+    uint32_t done = 0;
+    do {
+        uint32_t a = buf + done, left = len - done;
+        uint32_t n = 4096u - (a & 0xFFFu);
+        if (n > left) n = left;
+        while (n < left && (uint64_t)a + n <= UINT32_MAX &&
+               g_xpt[(a + n) >> 12] == g_xpt[a >> 12] + (a & 0xFFFu) + n) {
+            uint32_t more = left - n;
+            n += more < 4096u ? more : 4096u;
+        }
+        int64_t got = writing ? xk_os_write(f, pos + done, X_G(a), n)
+                              : xk_os_read(f, pos + done, X_G(a), n);
+        if (got < 0) return done ? (int64_t)done : got;
+        done += (uint32_t)got;
+        if ((uint64_t)got < n) break; /* EOF or short I/O: leave the remainder untouched */
+    } while (done < len);
+    return done;
+}
+
 /* NTSTATUS NtReadFile(HANDLE, HANDLE Event, PIO_APC_ROUTINE, PVOID ApcContext, PIO_STATUS_BLOCK, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset) */
 void xk_NtReadFile(xctx *c)
 {
@@ -169,11 +207,21 @@ void xk_NtReadFile(xctx *c)
     uint64_t pos = poff ? LI64(poff) : o->u.file.pos;
     if (poff && (LI64(poff) == 0xFFFFFFFFFFFFFFFEull)) pos = o->u.file.pos;   /* FILE_USE_FILE_POINTER_POSITION */
     uint32_t apc_before = X_ARG(2), ctx_before = X_ARG(3);
-    int64_t got = xk_os_read(o->u.file.f, pos, X_G(buf), len);
+    int64_t got = file_guest_io(o->u.file.f, pos, buf, len, 0);
+    if (got > 0 && (uint64_t)got == len && buf == 0x803A6000u && o->u.file.path) {
+        size_t length = strlen(o->u.file.path);
+        if (length > 4 && !strcmp(o->u.file.path+length-4,".map"))
+            xk_quality_map_read(buf,(uint32_t)got);
+    }
     if (X_ARG(2) != apc_before || X_ARG(3) != ctx_before)
         XK_LOG("READ CLOBBERED THE STACK: esp %08X (page->arena %08X), buf %08X len %u (buf arena %08X..); apc %08X->%08X\n",
                c->r[4], g_xpt[c->r[4] >> 12], buf, len, g_xpt[buf >> 12], apc_before, X_ARG(2));
     uint32_t st = got < 0 ? STATUS_UNSUCCESSFUL : got == 0 && len ? STATUS_END_OF_FILE : STATUS_SUCCESS;
+    if (pos == 0 && got == 512 && len == 512) {
+        const char *pth = o->u.file.path; size_t hl = strlen(pth);
+        if (hl >= 9 && !strcmp(pth + hl - 9, "/blam.lst") && xk_variant_recover_unsigned(buf))
+            XK_LOG("[variant] recovered legacy unsigned settings: %s\n", pth);
+    }
     { static const char *watch = NULL; static int winit; if (!winit) { winit = 1; watch = getenv("XV_LOG_READS"); }
       if (watch && strstr(o->u.file.path, watch)) { XK_LOG("NtReadFile(%s @%llu, %u B) = %lld st %08X buf %08X\n", o->u.file.path, (unsigned long long)pos, len, (long long)got, st, buf);
           static unsigned ns; if (len > 4096 && ns++ < 12) { char sb[400]; int k = 0; uint32_t esp = c->r[4]; for (unsigned j = 0; j < 128 && k < 380; ++j) { uint32_t w = X_M32(esp + 4 * j); if (w >= 0x11000 && w < 0x3A0000) k += snprintf(sb + k, sizeof sb - k, " %X", w); } XK_LOG("  read stack:%s\n", sb); } } }
@@ -196,7 +244,7 @@ void xk_NtReadFile(xctx *c)
     if (got > 0) o->u.file.pos = pos + (uint64_t)got;
     { static int sl = -1; if (sl < 0) { const char *e = getenv("XV_SAVE_LOG"); sl = e ? atoi(e) : 0; }
       if (sl && o->u.file.path) { const char *b = o->u.file.path; size_t hl = strlen(b);
-          if ((hl >= 12 && !strcmp(b + hl - 12, "savegame.bin")) || (hl >= 8 && !strcmp(b + hl - 8, "blam.sav")))
+          if ((hl >= 12 && !strcmp(b + hl - 12, "savegame.bin")) || (hl >= 8 && !strcmp(b + hl - 8, "blam.sav")) || (hl >= 12 && !strcmp(b + hl - 12, "SaveMeta.xbx")))
               XK_LOG("[save] READ %s @%llu len %u -> %lld\n", b, (unsigned long long)pos, len, (long long)got); } }
     if (got > 0) { extern void xv_ui_gxm_invalidate_range(uint32_t, uint32_t) __attribute__((weak)); if (xv_ui_gxm_invalidate_range) xv_ui_gxm_invalidate_range(buf, (uint32_t)got); }   /* streamed bitmap slots reuse memory: re-check overlapping cached textures */
     if (got > 0x100000) {                                  /* any multi-MB read: map tag data (0x803A6000) or a BSP switch - both reuse texture memory wholesale */ extern void xv_ui_gxm_request_texture_purge(void) __attribute__((weak)); if (xv_ui_gxm_request_texture_purge) xv_ui_gxm_request_texture_purge(); XK_LOG("map tag data loaded: texture cache purge requested\n"); }
@@ -221,11 +269,24 @@ void xk_NtWriteFile(xctx *c)
     if (!o || o->type != XO_FILE) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(8); }
     uint64_t pos = poff && LI64(poff) != 0xFFFFFFFFFFFFFFFEull ? LI64(poff) : o->u.file.pos;
     if (o->u.file.append) { int64_t s = xk_os_size(o->u.file.f); pos = s > 0 ? (uint64_t)s : 0; }
-    int64_t got = xk_os_write(o->u.file.f, pos, X_G(buf), len);
+    int64_t got = file_guest_io(o->u.file.f, pos, buf, len, 1);
+    { static const char *watch; static int init; static unsigned traces;
+      if (!init) { init = 1; watch = getenv("XV_LOG_WRITES"); }
+      if (watch && o->u.file.path && strstr(o->u.file.path, watch) && traces++ < 48) {
+          XK_LOG("[write-trace] %s @%llu len %u buf %08X -> %lld first %08X\n",
+              o->u.file.path, (unsigned long long)pos, len, buf, (long long)got,
+              len >= 4 ? X_M32(buf) : 0);
+          char sb[400] = {0}; int k = 0;
+          for (unsigned j = 0; j < 128 && k < 380; j++) {
+              uint32_t w = X_M32(c->r[4] + 4u * j);
+              if (w >= 0x11000 && w < 0x3A0000) k += snprintf(sb + k, sizeof sb - k, " %X", w);
+          }
+          XK_LOG("[write-trace] stack:%s\n", sb);
+      } }
     { static unsigned n; if (n++ < 12) XK_LOG("NtWriteFile(%s @%llu, %u B) = %lld\n", o->u.file.path, (unsigned long long)pos, len, (long long)got); }
     { static int sl = -1; if (sl < 0) { const char *e = getenv("XV_SAVE_LOG"); sl = e ? atoi(e) : 0; }
       if (sl && o->u.file.path) { const char *b = o->u.file.path; size_t hl = strlen(b);
-          if ((hl >= 12 && !strcmp(b + hl - 12, "savegame.bin")) || (hl >= 8 && !strcmp(b + hl - 8, "blam.sav")))
+          if ((hl >= 12 && !strcmp(b + hl - 12, "savegame.bin")) || (hl >= 8 && !strcmp(b + hl - 8, "blam.sav")) || (hl >= 12 && !strcmp(b + hl - 12, "SaveMeta.xbx")))
               XK_LOG("[save] WRITE %s @%llu len %u -> %lld\n", b, (unsigned long long)pos, len, (long long)got); } }
     uint32_t st = got < 0 ? STATUS_ACCESS_DENIED : STATUS_SUCCESS;
     if (got > 0) o->u.file.pos = pos + (uint64_t)got;
@@ -280,7 +341,15 @@ void xk_NtSetInformationFile(xctx *c)
     switch (cls) {
     case FileDispositionInformation: o->u.file.delete_on_close = X_M8(info) != 0; break;
     case FilePositionInformation: o->u.file.pos = LI64(info); break;
-    case FileEndOfFileInformation: case FileAllocationInformation: if (o->u.file.f && xk_os_truncate(o->u.file.f, LI64(info)) != 0) st = STATUS_ACCESS_DENIED; break;
+    case FileEndOfFileInformation: case FileAllocationInformation: {
+        /* The aligned(1) uint64_t lvalue type in LI64 leaks into Vita GCC's
+         * argument layout: it passes r1/r2, but the adapter expects r2/r3.
+         * Assemble two words to obtain an ordinary uint64_t at this ABI boundary.
+         * A cast or a plain uint64_t temporary still gets miscompiled. */
+        uint64_t size = (uint64_t)X_M32(info) | ((uint64_t)X_M32(info + 4) << 32);
+        if (o->u.file.f && xk_os_truncate(o->u.file.f, size) != 0) st = STATUS_ACCESS_DENIED;
+        break;
+    }
     case FileBasicInformation: break;
     case FileRenameInformation: {   /* { BOOLEAN Replace; HANDLE RootDir; ANSI_STRING FileName } (Xbox) */
         char nm[512]; xk_ansi_to_c(info + 8, nm, sizeof nm); char *host = xk_path_translate(nm, X_M32(info + 4) ? X_M32(info + 4) : OB_DOS_DEVICES_DIRECTORY);
