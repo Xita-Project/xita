@@ -106,12 +106,18 @@ Installation is verified; gameplay and performance results for this build are pe
 
 Graphics includes textures, filtering, mip smoothing, resolution, materials,
 glow, particles, decals, a frame limit, compressed textures and experimental
-**triple buffering**. Triple buffering defaults off and applies on launch.
+**triple buffering**. Triple buffering defaults off.
 It may increase input delay and is not a guaranteed FPS boost.
 
 Use **Up/Down** to navigate, **Cross** to select, **Left/Right** to change a
 setting, and **Circle** to go back. Changes save automatically. **About / License**
 includes the full GPL for offline reading. See the [dashboard guide](dashboard/README.md).
+
+During play, press **Select + Circle** to open the graphics overlay. Resolution,
+filtering, mip smoothing, frame limit and triple buffering apply during play.
+Other options are labeled **Relaunch Xita to apply**. Changes save automatically;
+**Circle** closes the panel. The game continues behind it, so pause Halo with
+**Start** first when needed. See [in-game settings](docs/in-game-settings.md).
 
 | Vita control | Halo action |
 | --- | --- |

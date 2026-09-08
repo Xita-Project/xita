@@ -387,6 +387,7 @@ static void render_launcher(dash *s)
         text(s,378,326,"Your settings are ready.",2,0,WHITE);
         text(s,378,366,"Launch opens Halo's main menu.",1,1,DIM);
         text(s,378,390,"Choose a campaign or multiplayer game there.",1,0,DIM);
+        text(s,378,414,"In-game graphics: SELECT + CIRCLE.",1,0,GREEN);
         if (s->image && s->ui) text(s,378,439,"CROSS  LAUNCH GAME",2,1,GREEN);
         else text(s,378,439,"Game files are missing. Check your installation.",1,0,GREEN);
     } else if (s->page == LICENSE_PAGE) {
@@ -470,8 +471,65 @@ static int edit_setting(dash *s, int direction)
     if (settings(s,1,k)) {
         s->values[k] = old;
         strcpy(s->status,"Could not save settings. Check storage and try again.");
-    } else strcpy(s->status,"Settings saved");
+    } else { strcpy(s->status,"Settings saved"); return k + 1; }
     return 0;
+}
+
+struct xv_dash_graphics { dash state; };
+int xv_dash_graphics_live(const char *key)
+{
+    return key && (!strcmp(key,"XV_RENDER_HEIGHT") || !strcmp(key,"XV_TEX_FILTER") ||
+        !strcmp(key,"XV_MIP_SMOOTH") || !strcmp(key,"XV_FRAME_CAP") || !strcmp(key,"XV_TRIPLE_BUFFER"));
+}
+xv_dash_graphics *xv_dash_graphics_create(const char *root)
+{
+    xv_dash_graphics *panel = calloc(1,sizeof(*panel));
+    if (!panel) return NULL;
+    dash *s = &panel->state;
+    s->root = root ? root : "ux0:data/xita";
+    s->simple = s->page = s->depth = 1;
+    memcpy(s->values,defaults,sizeof defaults);
+    for (int i=0;i<SETTINGS_COUNT;i++) {
+        const char *value=getenv(keys[i]); if(value)s->values[i]=atoi(value);
+    }
+    if (settings(s,0,-1)) strcpy(s->status,"Could not read settings. Check storage.");
+    return panel;
+}
+void xv_dash_graphics_destroy(xv_dash_graphics *panel) { free(panel); }
+void xv_dash_graphics_status(xv_dash_graphics *panel, const char *message)
+{ if(panel)snprintf(panel->state.status,sizeof panel->state.status,"%s",message); }
+const char *xv_dash_graphics_input(xv_dash_graphics *panel, uint32_t edge, int *value)
+{
+    if (!panel || !value) return NULL;
+    dash *s=&panel->state;
+    if (edge & (XV_DASH_UP|XV_DASH_DOWN)) {
+        s->row=(s->row+((edge&XV_DASH_UP)?launch_counts[1]-1:1))%launch_counts[1];
+        s->status[0]=0;
+    } else if (edge & (XV_DASH_LEFT|XV_DASH_RIGHT|XV_DASH_CROSS)) {
+        int changed=edit_setting(s,(edge&XV_DASH_LEFT)?-1:1);
+        if(changed) {
+            int k=changed-1; *value=s->values[k];
+            strcpy(s->status,xv_dash_graphics_live(keys[k]) ? "Saved. Applying at the next frame." : "Saved for next launch. Relaunch Xita to apply.");
+            return keys[k];
+        }
+    }
+    return NULL;
+}
+void xv_dash_graphics_snapshot(const xv_dash_graphics *panel, xv_dash_graphics_view *view)
+{
+    memset(view,0,sizeof(*view));
+    if(!panel)return;
+    const dash *s=&panel->state;
+    view->active=1;view->selected=s->row;view->count=launch_counts[1];
+    view->first=s->row/5*5;
+    for(int i=0;i<5 && view->first+i<view->count;i++) {
+        int k=launch_keys[1][view->first+i];
+        snprintf(view->names[i],sizeof view->names[i],"%s",setting_names[k]);
+        setting_value(s,k,view->values[i],sizeof view->values[i]);
+    }
+    int k=launch_keys[1][s->row];view->live=xv_dash_graphics_live(keys[k]);
+    snprintf(view->help,sizeof view->help,"%s",setting_help[k]);
+    snprintf(view->status,sizeof view->status,"%s",s->status);
 }
 static int launcher_input(dash *s, uint32_t edge, xv_dash_result *out)
 {

@@ -279,6 +279,16 @@ int main(void)
     xv_ui_gxm_apply_texture_options(&sampler);
     assert(test_min == SCE_GXM_TEXTURE_FILTER_LINEAR && sampler_writes == 2);
     assert(test_mip == SCE_GXM_TEXTURE_MIP_FILTER_ENABLED); /* stride bits untouched */
+    /* Live edits replace only the selected override; GAME/AUTO again leave
+     * the next draw's original descriptor unchanged. No environment mutation. */
+    xv_ui_gxm_set_texture_options(1,-1);
+    xv_ui_gxm_apply_texture_options(&sampler);
+    assert(test_mag==SCE_GXM_TEXTURE_FILTER_POINT && g_mip_smooth==0);
+    xv_ui_gxm_set_texture_options(0,1);sampler_writes=0;
+    xv_ui_gxm_apply_texture_options(&sampler);assert(!sampler_writes);
+    xv_ui_gxm_set_texture_options(2,-1);
+    xv_ui_gxm_apply_texture_options(&sampler);
+    assert(test_mag==SCE_GXM_TEXTURE_FILTER_LINEAR && g_mip_smooth==1);
     unsetenv("XV_TEX_FILTER"); unsetenv("XV_MIP_SMOOTH"); g_texture_filter = -1;
     puts("PASS: sampler defaults preserved, point/linear overrides retain mip selection, mip off respects strided textures");
     unsetenv("XV_TEXDUMP"); unsetenv("XV_P8_FLAT");

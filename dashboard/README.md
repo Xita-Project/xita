@@ -10,9 +10,14 @@ mip smoothing (Auto/Off), render resolution (960x544, 848x480, 704x400 or 640x36
 material detail, lens-flare glow, cosmetic particles, impact-decal lifetime and budget,
 20/25/30 FPS limits, 444/500 MHz CPU requests, extended compressed textures, master volume, look sensitivity,
 deadzone, inverted look, response curve, touch shortcuts, FPS overlay and CPU meter.
+
+The integrated game also has an [in-game graphics panel](../docs/in-game-settings.md),
+opened with **Select + Circle**. It shares the dashboard's settings and marks
+options that require relaunching Xita.
+
 The September 8 local candidate adds **Triple buffering** in Graphics and an
 **About / License** page. Triple buffering defaults off, saves `XV_TRIPLE_BUFFER`,
-and applies before the game workers start. On permits frame preparation ahead
+and can also change through the in-game panel. On permits frame preparation ahead
 of the GPU using the existing three slots; a slot still cannot be reused before
 GPU completion. It is experimental, may add input delay, and has no verified
 hardware FPS benefit yet.

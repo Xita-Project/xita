@@ -8,6 +8,11 @@ uint32_t *g_xpt;
 int xk_file_in_ui_map, g_xv_overlay_on;
 static SceCtrlData controller;
 static unsigned sampled[2], peeked[2], front_contact;
+static unsigned settings_buttons;
+static int settings_capture;
+SceUInt64 sceKernelGetProcessTimeWide(void) {return 1000000;}
+int xv_settings_input(uint32_t buttons,uint64_t now)
+{assert(now==1000000);settings_buttons=buttons;return settings_capture;}
 void xv_logf(const char *fmt, ...) { (void)fmt; }
 static int optimization=-1;
 void xv_benchmark_optimizations(int enabled) { optimization=enabled; }
@@ -49,8 +54,12 @@ int main(int argc, char **argv)
     X_M32(0x2E4000)=0;X_M8(0x5002)=1;xk_os_pad_poll(&p);assert(p.buttons==2);
     X_M8(0x5002)=0;xk_file_in_ui_map=1;xk_os_pad_poll(&p);assert(p.buttons==2);
     xk_file_in_ui_map=0;xk_os_pad_poll(&p);assert(p.buttons==0x40);
+    settings_capture=1;controller.buttons=SCE_CTRL_SELECT|SCE_CTRL_CIRCLE;
+    xk_os_pad_poll(&p);assert(settings_buttons==XV_SETTINGS_TOGGLE && !p.buttons && p.connected);
+    controller.buttons=SCE_CTRL_RIGHT;xk_os_pad_poll(&p);assert(settings_buttons==XV_DASH_RIGHT && !p.buttons);
+    settings_capture=0;controller.buttons=SCE_CTRL_DOWN;
     controller.buttons=0;front_contact=1;xk_os_pad_poll(&p);assert(p.buttons==0x40);
-    assert(peeked[1]==(rear?6u:0u)); /* rear-disabled never samples or polls panel */
+    assert(peeked[1]==(rear?8u:0u)); /* rear-disabled never samples or polls panel */
     front_contact=0;X_M8(0x5000)=X_M8(0x5001)=1;
     controller.buttons=SCE_CTRL_LTRIGGER|SCE_CTRL_RTRIGGER|SCE_CTRL_SELECT;
     xk_os_pad_poll(&p);assert(xv_benchmark_active()&&!p.buttons&&p.connected);

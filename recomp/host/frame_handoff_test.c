@@ -12,6 +12,8 @@ void xv_vertex_upload_report(unsigned n) {}
 static unsigned submitted, consumed, sealed, begun, queued_ui, published_ui;
 static struct { unsigned slot, verts, batches; } packets[128];
 static int dirty_ui;
+void xv_settings_snapshot(xv_dash_graphics_view *view)
+{ memset(view,0,sizeof(*view));view->active=1;view->selected=(int)submitted; }
 volatile uint64_t xv_pump_us_acc;
 unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc, xv_n_kicks, xv_n_fires;
 uint64_t xv_t_vbcb_us, xv_t_draw_us;
@@ -28,6 +30,7 @@ static void consume(void)
     unsigned slot=packets[consumed].slot;
     assert(g.frame[slot].vcount==packets[consumed].verts);
     assert(g.frame[slot].bcount==packets[consumed].batches);
+    assert(g.frame[slot].settings.active && g.frame[slot].settings.selected==(int)consumed);
     consumed++;
 }
 void xv_present_drain(void) { while(consumed!=submitted)consume(); }

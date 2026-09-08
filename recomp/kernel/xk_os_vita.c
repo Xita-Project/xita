@@ -22,6 +22,7 @@
 #include "xk_read_retry.h"
 #include "../../runtime/xv_cpu.h"
 #include "../../runtime/xv_benchmark.h"
+#include "../../runtime/xv_settings.h"
 #include "xk.h"                 /* X_M32/X_M8, xk_file_in_ui_map (pad context) */
 
 void xv_logf(const char *fmt, ...);        /* app-side sink (xv_log.c): console + ux0:data/xita/xita.log */
@@ -597,6 +598,23 @@ void xk_os_pad_poll(xk_os_pad *p)
                 if (rlen > (int)sizeof rbuf - 96 || (rlen && polls - rflush > 120)) { sceIoWrite(rfd, rbuf, rlen); rlen = 0; rflush = polls; }
             }
         }
+    }
+    /* SELECT+CIRCLE opens Xita's graphics panel. Its controls never reach Halo;
+     * no guest pause state is patched. Halo can be paused with START first. */
+    { extern int xv_settings_input(uint32_t,uint64_t) __attribute__((weak));
+      if(xv_settings_input) {
+          uint32_t input=0;
+          const unsigned masks[]={SCE_CTRL_UP,SCE_CTRL_DOWN,SCE_CTRL_LEFT,SCE_CTRL_RIGHT,SCE_CTRL_CROSS,SCE_CTRL_CIRCLE};
+          for(unsigned i=0;i<6;i++)if(d.buttons&masks[i])input|=1u<<i;
+          if(d.ly<80)input|=XV_DASH_UP;
+          if(d.ly>176)input|=XV_DASH_DOWN;
+          if(d.lx<80)input|=XV_DASH_LEFT;
+          if(d.lx>176)input|=XV_DASH_RIGHT;
+          if((d.buttons&(SCE_CTRL_SELECT|SCE_CTRL_CIRCLE))==(SCE_CTRL_SELECT|SCE_CTRL_CIRCLE))input=XV_SETTINGS_TOGGLE;
+          if(xv_settings_input(input,sceKernelGetProcessTimeWide())) {
+              memset(p,0,sizeof(*p));p->connected=1;return;
+          }
+      }
     }
     /* Auto-advance past the attract screen to the main menu: pulse Start, then A, on a slow cycle
      * (Vita3K keyboard mapping is unreliable to script; real pad input still works and overrides). */

@@ -84,6 +84,9 @@ Vita drive/
 4. Choose settings in **Graphics**, then select **Launch Game**.
 5. Use Halo's campaign menu, or **Split Screen** for a solo multiplayer map.
 
+During gameplay, **Select + Circle** opens the [graphics overlay](in-game-settings.md).
+It labels which changes apply during play and which need a relaunch.
+
 Use **Up/Down** to navigate Xita, **Cross** to select, **Left/Right** to change a
 setting, and **Circle** to go back. Settings save automatically.
 **About / License** contains the GPL for offline reading.

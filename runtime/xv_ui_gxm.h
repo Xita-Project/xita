@@ -42,6 +42,8 @@ void xv_ui_gxm_clear(uint32_t argb);                       /* xd3d_r_clear: full
  * X_D3DPixelContainer, `tint` = combiner colour (NULL -> white). */
 void xv_ui_gxm_quads(const xd3d_im_vtx *v, unsigned n, uint32_t tex_hdr, const float tint[4], unsigned prog, unsigned stage);
 void xv_ui_gxm_frame_flip(void);                           /* xd3d_r_present: publish + swap buffers */
+/* Native-resolution settings, inside the final scene and covered by its fence. */
+void xv_ui_gxm_replay_settings(SceGxmContext *ctx, unsigned frame);
 
 /* --- replay (render pump, inside sceGxmBeginScene/EndScene) -------------------------------------- */
 void xv_ui_gxm_replay(SceGxmContext *ctx, unsigned width, unsigned height);

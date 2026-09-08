@@ -6,6 +6,7 @@
  * only work on the game fiber is a tight pack loop that streams vertices straight into GPU memory.
  */
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -25,6 +26,8 @@
 #include "xv_d3d.h"
 #include "xv_stencil_gxm.h"
 #include "xv_ui_gxm.h"
+#include "xv_settings.h"
+#include "dashboard/font.h"
 #include "shaders/xv_layouts.h"           /* xv_vs_halo_vs_03, xv_vs_clear, xv_halo_vs[] */
 
 #include "xv_log.h"
@@ -77,6 +80,7 @@ typedef struct {
     uint32_t  clear_argb;
     int       has_clear;
     int       overflow;
+    xv_dash_graphics_view settings;
 } ui_frame;
 
 /* built texture control words, cached by (guest data pointer, format word) */
@@ -98,12 +102,13 @@ static struct {
     uint32_t         nprog;
 
     xv_vshader_t     clear_vs;
-    xv_fshader_t     clear_fs;
+    xv_fshader_t     clear_fs, settings_fs;
 
     /* GPU-mapped memory */
     SceUID           vbuf_uid;  ui_vtx  *vbuf;         /* UI_FRAMES * UI_MAX_VERTS */
     SceUID           ibuf_uid;  uint16_t *ibuf;        /* UI_MAX_QUADS * 6, built once */
     SceUID           clr_uid;   clr_vtx *clrbuf;       /* UI_FRAMES * (4 fullscreen verts + OVL_MAX_QUADS*4 overlay) */
+    SceUID           settings_uid; clr_vtx *settingsbuf;
     SceUID           dec_uid;   uint8_t *dec_base;     /* Immutable decoded RGBA / native BC texture uploads */
     uint32_t         dec_off, dec_cap;
 
@@ -633,6 +638,18 @@ int xv_ui_gxm_texture_opaque(const SceGxmTexture *texture)
 }
 
 static int g_texture_filter = -1, g_mip_smooth = -1;
+void xv_ui_gxm_set_texture_options(int filter, int mip)
+{
+    /* Initialize the unchanged half from startup config, on the recording
+     * thread. Texture controls are copied for each draw before publication. */
+    if(g_texture_filter<0) {
+        const char *f=getenv("XV_TEX_FILTER"), *m=getenv("XV_MIP_SMOOTH");
+        g_texture_filter=f?atoi(f):0;g_mip_smooth=m?!!atoi(m):1;
+        if(g_texture_filter<0 || g_texture_filter>2)g_texture_filter=0;
+    }
+    if(filter>=0 && filter<=2)g_texture_filter=filter;
+    if(mip>=0)g_mip_smooth=!!mip;
+}
 void xv_ui_gxm_apply_texture_options(SceGxmTexture *texture)
 {
     if (g_texture_filter < 0) {
@@ -703,13 +720,21 @@ int xv_ui_gxm_init(void)
         xv_fshader_load(&g.clear_fs, "app0:shaders/xv_color.frag.gxp", &g.clear_vs, NULL) != 0) {
         UI_LOG("clear program load failed\n"); return -1;
     }
+    const SceGxmBlendInfo panel_blend={
+        .colorMask=SCE_GXM_COLOR_MASK_ALL,
+        .colorFunc=SCE_GXM_BLEND_FUNC_ADD,.alphaFunc=SCE_GXM_BLEND_FUNC_ADD,
+        .colorSrc=SCE_GXM_BLEND_FACTOR_SRC_ALPHA,.colorDst=SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaSrc=SCE_GXM_BLEND_FACTOR_ONE,.alphaDst=SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+    };
+    if(xv_fshader_load(&g.settings_fs,"app0:shaders/xv_color.frag.gxp",&g.clear_vs,&panel_blend)!=0)return -1;
 
     g.vbuf = ui_gpu_alloc(UI_FRAMES * UI_MAX_VERTS * sizeof(ui_vtx), &g.vbuf_uid);
     g.ibuf = ui_gpu_alloc(UI_MAX_QUADS * 6 * sizeof(uint16_t), &g.ibuf_uid);
     g.clrbuf = ui_gpu_alloc(UI_FRAMES * (4 + OVL_MAX_QUADS * 4) * sizeof(clr_vtx), &g.clr_uid);
+    g.settingsbuf = ui_gpu_alloc(UI_FRAMES * UI_MAX_QUADS * 4 * sizeof(clr_vtx), &g.settings_uid);
     g.dec_cap = 32 * 1024 * 1024;                                  /* texture pool (BC as-is, others decoded RGBA) */
     g.dec_base = ui_gpu_alloc(g.dec_cap, &g.dec_uid);
-    if (!g.vbuf || !g.ibuf || !g.clrbuf || !g.dec_base) return -1;
+    if (!g.vbuf || !g.ibuf || !g.clrbuf || !g.dec_base || !g.settingsbuf) return -1;
 
     /* static quad index buffer: quad q -> (0,1,2, 0,2,3)+q*4, relative to the batch's stream base */
     for (uint32_t q = 0; q < UI_MAX_QUADS; ++q) {
@@ -734,11 +759,13 @@ void xv_ui_gxm_shutdown(void)
     if (g.vbuf) { sceGxmUnmapMemory(g.vbuf); sceKernelFreeMemBlock(g.vbuf_uid); }
     if (g.ibuf) { sceGxmUnmapMemory(g.ibuf); sceKernelFreeMemBlock(g.ibuf_uid); }
     if (g.clrbuf) { sceGxmUnmapMemory(g.clrbuf); sceKernelFreeMemBlock(g.clr_uid); }
+    if (g.settingsbuf) { sceGxmUnmapMemory(g.settingsbuf); sceKernelFreeMemBlock(g.settings_uid); }
     if (g.dec_base) { sceGxmUnmapMemory(g.dec_base); sceKernelFreeMemBlock(g.dec_uid); }
     for (uint32_t i = 0; i < g.nprog; ++i) {
         for (int st = 0; st < (int)UI_MAX_STAGES; ++st) if (g.prog[i].fs_ok[st]) xv_fshader_unload(&g.prog[i].fs[st]);
         xv_vshader_unload(&g.prog[i].vs);
     }
+    xv_fshader_unload(&g.settings_fs);
     xv_fshader_unload(&g.clear_fs); xv_vshader_unload(&g.clear_vs);
     g.ready = 0;
 }
@@ -823,6 +850,8 @@ void xv_ui_gxm_frame_flip(void)
     ui_frame *fr = &g.frame[g.rec];
     if (fr->overflow)
         UI_LOG("frame overflow (%u verts, %u batches) - some UI dropped\n", fr->vcount, fr->bcount);
+    { extern void xv_settings_snapshot(xv_dash_graphics_view *) __attribute__((weak));
+      if(xv_settings_snapshot)xv_settings_snapshot(&fr->settings); }
     /* flush the vertex/clear data we just wrote so the GPU sees it */
     xv_gpu_flush_ui(fr->verts, fr->vcount * sizeof(ui_vtx));
     __atomic_store_n(&g.pub, (int32_t)g.rec, __ATOMIC_RELEASE);    /* hand this frame to the pump */
@@ -843,14 +872,61 @@ void xv_ui_gxm_frame_begin(void)
 int g_xv_overlay_on = -1;                                   /* -1 = read config once */
 float g_xv_ovl_game_ms, g_xv_ovl_render_ms, g_xv_ovl_fps;
 static const uint8_t SEG7[10] = { 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F };   /* abcdefg */
-static unsigned ovl_rect(clr_vtx *v, unsigned n, float x, float y, float w, float h, uint32_t col)
+static unsigned panel_rect(clr_vtx *v, unsigned n, unsigned limit, float x, float y, float w, float h, uint32_t col)
 {
-    if (n + 4 > OVL_MAX_QUADS * 4) return n;
+    if (n + 4 > limit * 4) return n;
     /* pixel space (960x544) -> clip; y down */
     float x0 = x / 480.0f - 1.0f, x1 = (x + w) / 480.0f - 1.0f, y0 = 1.0f - y / 272.0f, y1 = 1.0f - (y + h) / 272.0f;
     v[n++] = (clr_vtx){ x0, y0, 0.5f, col }; v[n++] = (clr_vtx){ x1, y0, 0.5f, col };
     v[n++] = (clr_vtx){ x1, y1, 0.5f, col }; v[n++] = (clr_vtx){ x0, y1, 0.5f, col };
     return n;
+}
+static unsigned ovl_rect(clr_vtx *v, unsigned n, float x, float y, float w, float h, uint32_t col)
+{ return panel_rect(v,n,OVL_MAX_QUADS,x,y,w,h,col); }
+static unsigned panel_text(clr_vtx *v,unsigned n,const char *text,float x,float y,float scale,uint32_t color)
+{
+    for(;*text;text++,x+=6*scale) {
+        unsigned ch=(unsigned char)*text;if(ch<32 || ch>127)ch='?';
+        for(unsigned row=0;row<8;row++)for(unsigned col=0;col<5;) {
+            if(!(font[ch-32][row]&(1u<<(6-col)))) {col++;continue;}
+            unsigned start=col++;
+            while(col<5 && (font[ch-32][row]&(1u<<(6-col))))col++;
+            n=panel_rect(v,n,UI_MAX_QUADS,x+start*scale,y+row*scale,(col-start)*scale,scale,color);
+        }
+    }
+    return n;
+}
+void xv_ui_gxm_replay_settings(SceGxmContext *ctx,unsigned frame)
+{
+    if(!g.ready || frame>=UI_FRAMES || !g.frame[frame].settings.active)return;
+    const xv_dash_graphics_view *s=&g.frame[frame].settings;
+    clr_vtx *v=&g.settingsbuf[frame*UI_MAX_QUADS*4];unsigned n=0;
+    const uint32_t green=0xff8cee60u,white=0xffd0ffc0u,dim=0xff90b590u;
+    n=panel_rect(v,n,UI_MAX_QUADS,116,62,728,426,0xef081409u);
+    n=panel_text(v,n,"XITA / IN-GAME GRAPHICS",140,84,2,green);
+    char range[32];
+    int end=s->first+5;if(end>s->count)end=s->count;
+    snprintf(range,sizeof range,"%d-%d / %d",s->first+1,end,s->count);
+    n=panel_text(v,n,range,810-strlen(range)*6,88,1,dim);
+    n=panel_text(v,n,"Game continues unless paused in Halo.",140,115,1,dim);
+    for(int i=0;i<5 && s->first+i<s->count;i++) {
+        float y=153+i*44;int selected=s->first+i==s->selected;
+        if(selected)n=panel_rect(v,n,UI_MAX_QUADS,132,y-8,696,34,0xff244028u);
+        n=panel_text(v,n,s->names[i],145,y,2,selected?white:dim);
+        n=panel_text(v,n,s->values[i],810-strlen(s->values[i])*12,y,2,green);
+    }
+    n=panel_text(v,n,s->live?"APPLIES DURING PLAY":"RELAUNCH XITA TO APPLY",145,380,1,green);
+    n=panel_text(v,n,s->help,145,402,1,dim);
+    n=panel_text(v,n,s->status,145,423,1,white);
+    n=panel_text(v,n,"UP / DOWN  SELECT    LEFT / RIGHT  CHANGE    CIRCLE  CLOSE",145,461,1,green);
+    xv_gpu_flush_pump(v,n*sizeof(*v));
+    sceGxmSetViewport(ctx,480,480,272,-272,0.5f,0.5f);
+    sceGxmSetCullMode(ctx,SCE_GXM_CULL_NONE);xv_stencil_bind(ctx,NULL);
+    sceGxmSetFrontDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);
+    xv_shader_bind(ctx,&g.clear_vs,&g.settings_fs);
+    const void *streams[]={v};xv_vshader_set_streams(ctx,&g.clear_vs,streams);
+    XV_RENDER_CALL(XV_RENDER_DRAW,sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,g.ibuf,n/4*6));
 }
 static unsigned ovl_digit(clr_vtx *v, unsigned n, int d, float x, float y, float s, uint32_t col)
 {
@@ -1367,6 +1443,8 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
     if (g_t_last_present) g_t_game_acc += t0 - g_t_last_present;
     { extern void xv_benchmark_present(void) __attribute__((weak));
       if(xv_benchmark_present)xv_benchmark_present(); }
+    { extern void xv_settings_frame(void) __attribute__((weak));
+      if(xv_settings_frame)xv_settings_frame(); }
     if (g_mesh_path) g_mesh_frame = xv_d3d_EndFrame();
     xv_ui_gxm_frame_flip();      /* seal; do not reset the next slot yet */
     xv_gpu_flush_pending();     /* includes the current frame's late UI writes */

@@ -12,7 +12,7 @@ LIBS := -lSceAppMgr_stub -lSceCtrl_stub -lSceTouch_stub -lSceDisplay_stub \
         -lSceSysmem_stub -lSceIofilemgr_stub -lSceKernelThreadMgr_stub \
         -lSceProcessmgr_stub -lSceLibKernel_stub -lm
 
-.PHONY: all clean host-test
+.PHONY: all clean host-test graphics-test
 all: $(PROJECT).vpk
 build out:
 	mkdir -p $@
@@ -32,5 +32,9 @@ build/host_test: xv_dash.c xv_dash.h font.h license_text.h host_test.c | build
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -o $@ xv_dash.c host_test.c -lm
 host-test: build/host_test | out
 	./build/host_test
+build/graphics_test: graphics_test.c xv_dash.c xv_dash.h font.h license_text.h ../runtime/xv_settings.c ../runtime/xv_settings.h | build
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -I.. -fsanitize=address,undefined -o $@ xv_dash.c ../runtime/xv_settings.c graphics_test.c -lm
+graphics-test: build/graphics_test
+	./build/graphics_test
 clean:
 	rm -rf build out $(PROJECT).vpk

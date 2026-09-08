@@ -62,6 +62,7 @@
 #include "xv_vertex_upload.h"
 #include "xv_scene.h"
 #include "xv_quality_settings.h"
+#include "xv_ui_gxm.h"
 #include "xv_layouts.h"        /* generated: recompiled-shader layouts (gen_layouts.py) */
 
 /* ======================================================================================
@@ -555,7 +556,7 @@ fail:
 static void xv_gfx_configure_resolution(void)
 { xv_gfx_configure_resolution_height(xv_quality_int("XV_RENDER_HEIGHT",544,360,544)); }
 
-static int xv_gfx_upscale(xv_gfx_t *g, const SceGxmNotification *fence)
+static int xv_gfx_upscale(xv_gfx_t *g, unsigned ui_frame, const SceGxmNotification *fence)
 {
     int err = XV_RENDER_CALL(XV_RENDER_SCENE_BEGIN, sceGxmBeginScene(g->ctx, 0, g->render_target, NULL, NULL,
                         g->display_sync[g->back_index], &g->display_surface[g->back_index], NULL));
@@ -578,6 +579,7 @@ static int xv_gfx_upscale(xv_gfx_t *g, const SceGxmNotification *fence)
     sceGxmSetFragmentTexture(g->ctx, g->scale_fs.tex_index[0], &g->scaled_texture[g->back_index]);
     XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(g->ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16,
                (const uint8_t *)g->scale_quad.base + 4 * 24, 6));
+    xv_ui_gxm_replay_settings(g->ctx, ui_frame);
     return XV_RENDER_END(9, sceGxmEndScene(g->ctx, NULL, fence));
 }
 
@@ -662,8 +664,9 @@ static int xv_gfx_render_frame(uint32_t mesh_frame, unsigned ui_frame, const Sce
     { extern void xv_ui_gxm_replay_frame(SceGxmContext *, unsigned, unsigned, unsigned);
       xv_ui_gxm_replay_frame(g->ctx, g->render_width, g->render_height, ui_frame); }
 
+    if (!scaled) xv_ui_gxm_replay_settings(g->ctx, ui_frame);
     if (XV_RENDER_END(0, sceGxmEndScene(g->ctx, NULL, scaled ? NULL : fence)) != SCE_OK) return -1;
-    if (scaled && xv_gfx_upscale(g, fence) != SCE_OK) { XV_LOG("upscale failed\n"); return -1; }
+    if (scaled && xv_gfx_upscale(g, ui_frame, fence) != SCE_OK) { XV_LOG("upscale failed\n"); return -1; }
 
 #ifdef XV_RUN_RECOMP
     if (g_net_dialog) {
@@ -1069,6 +1072,7 @@ static volatile uint32_t g_frame_completed = 0;    /* written by pump thread    
 #include "xv_benchmark.h"
 static xv_frame_events g_frame_events = { -1 };
 static uint32_t g_resolution_request,g_resolution_result;
+static uint32_t g_settings_frame_period;
 static volatile int      g_running         = 1;
 static struct {
     uint32_t mesh, ui;
@@ -1095,6 +1099,10 @@ static void xv_pipeline_configure(void)
     XV_LOG("triple buffering: %s; GPU completion retains ownership of each slot\n",
            g_pipeline_configured ? "on (experimental)" : "off (single-flight)");
 }
+/* Recording thread, after draining old frames. */
+void xv_settings_pipeline(int enabled) { g_pipeline_configured=!!enabled; }
+void xv_settings_frame_cap(unsigned cap)
+{ __atomic_store_n(&g_settings_frame_period,cap?1000000u/cap:0,__ATOMIC_RELEASE); }
 void xv_pipeline_override(int enabled)
 { __atomic_store_n(&g_pipeline_override, enabled < 0 ? -1 : !!enabled, __ATOMIC_RELEASE); }
 void xv_present_drain(void);
@@ -1188,6 +1196,16 @@ void xv_benchmark_present(void)
         xv_frame_events_wait(&g_frame_events,XV_FRAME_COMPLETED,100);
     xv_benchmark_applied(sceKernelGetProcessTimeWide(),actual);
 }
+unsigned xv_settings_resolution(unsigned height)
+{
+    __atomic_store_n(&g_resolution_result,0,__ATOMIC_RELAXED);
+    __atomic_store_n(&g_resolution_request,height,__ATOMIC_RELEASE);
+    xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
+    unsigned actual;
+    while(!(actual=__atomic_load_n(&g_resolution_result,__ATOMIC_ACQUIRE)))
+        xv_frame_events_wait(&g_frame_events,XV_FRAME_COMPLETED,100);
+    return actual;
+}
 /* The idle pump owns configuration; there can be no outstanding frame here. */
 static int xv_pump_resolution(void)
 {
@@ -1251,8 +1269,11 @@ static int xv_pump_thread(SceSize args, void *argp)
     xv_cpu_poll(sceKernelGetProcessTimeWide());
     int cap=xv_quality_int("XV_FRAME_CAP",0,0,60);
     uint32_t period=cap>0 ? 1000000u/(unsigned)cap : 0;
+    __atomic_store_n(&g_settings_frame_period,period,__ATOMIC_RELEASE);
     uint64_t next_frame=0;
     while (g_running) {
+        uint32_t updated=__atomic_load_n(&g_settings_frame_period,__ATOMIC_ACQUIRE);
+        if(updated!=period) {period=updated;next_frame=0;}
         while (xv_pump_retire()) {}
         uint32_t requested=__atomic_load_n(&g_frame_requested,__ATOMIC_ACQUIRE);
         uint32_t done=__atomic_load_n(&g_frame_completed,__ATOMIC_ACQUIRE);

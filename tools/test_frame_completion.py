@@ -30,7 +30,7 @@ int sceKernelWaitEventFlag(SceUID id,unsigned bits,unsigned mode,unsigned *out,S
 const unsigned xv_guest_trace_enabled=1;
 void xv_logf(const char *fmt,...) {}
 static volatile uint32_t g_frame_requested,g_frame_completed;
-static uint32_t g_frame_submitted;
+static uint32_t g_frame_submitted, g_settings_frame_period;
 static volatile int g_running=1;
 static uint64_t xv_pump_us_acc;
 static struct { SceGxmContext *ctx; int hle_ready; unsigned front_index,back_index; } g_gfx={NULL,1,2,0};
