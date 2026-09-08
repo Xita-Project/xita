@@ -15,9 +15,9 @@ class ReleaseAudit(unittest.TestCase):
         for name in ['recomp/code_123.c', 'shaders/halo_vs_00.cg',
                      'shaders/psdefs/example.bin', 'shaders/xv_vs_gxp.h', 'game_manifest.json',
                      'haloce/default.xbe', 'private.iso', 'libshacccg.suprx',
-                     'save/checkpoint.sav', 'app/eboot.bin', 'site/img/test.png']:
+                     'save/checkpoint.sav', 'local/halo_ce_3925/halo_symbols.json', 'local/tools/extract-xiso', 'app/eboot.bin', 'site/img/test.png']:
             self.assertTrue(audit.path_risks(name), name)
-        for name in ['main.c', 'tools/release_audit.py', 'dashboard/font.h', 'LICENSE']:
+        for name in ['runtime/main.c', 'tools/release_audit.py', 'dashboard/font.h', 'LICENSE']:
             self.assertEqual(audit.path_risks(name), [], name)
 
     def test_content_does_not_print_values(self):
@@ -30,7 +30,7 @@ class ReleaseAudit(unittest.TestCase):
     def test_export_preserves_originals(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp); source = base/'src'; source.mkdir()
-            files = {'main.c':'int example;\n', 'LICENSE':'example notice\n',
+            files = {'runtime/main.c':'int example;\n', 'LICENSE':'example notice\n',
                      'game.xbe':'private marker', 'shaders/halo_vs_00.cg':'private translation',
                      'shaders/xv_vs_gxp.h':'private embedded translation',
                      'recomp/kernel/xk_clip.c':'generated private game math',
@@ -50,7 +50,7 @@ class ReleaseAudit(unittest.TestCase):
                 self.assertFalse((out/'alias.c').exists())
                 self.assertFalse((out/'shaders/xv_vs_gxp.h').exists())
                 self.assertFalse((out/'.git').exists())
-                self.assertEqual((out/'main.c').read_bytes(),(source/'main.c').read_bytes())
+                self.assertEqual((out/'runtime/main.c').read_bytes(),(source/'runtime/main.c').read_bytes())
                 for name,data in files.items(): self.assertEqual((source/name).read_text(),data)
                 with self.assertRaises(ValueError): audit.export_review(out)
                 with self.assertRaises(ValueError): audit.export_review(source/'nested')

@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../../xv_draw_profile.h"
+#include "../../runtime/xv_draw_profile.h"
 
 static unsigned clock_calls, reports;
 static uint64_t now;

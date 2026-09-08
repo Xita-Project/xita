@@ -434,7 +434,7 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    ap = argparse.ArgumentParser(prog="pixelshader_recomp_gen.py",
+    ap = argparse.ArgumentParser(prog="recompiler/pixelshader_recomp_gen.py",
                                  description="NV2A register combiners -> Vita Cg fragment shaders (Xita Stage 3b).")
     ap.add_argument("json", help="dx8_pixelshader_parse.py --json output")
     ap.add_argument("-o", "--outdir", default="shaders")

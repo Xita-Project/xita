@@ -1,6 +1,7 @@
 CC ?= cc
 .DEFAULT_GOAL := test
 CFLAGS ?= -O2 -g -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing
+CFLAGS += -I../.. -I../../runtime
 VITASDK ?= $(HOME)/vitasdk
 PYTHON ?= python3
 
@@ -16,7 +17,7 @@ build/audio_test: audio_test.c ../kernel/xk_audio.c ../kernel/xk_audio.h ../xv_x
 test-stencil: build/stencil_test
 	./build/stencil_test
 
-build/stencil_test: stencil_test.c ../../xv_stencil.h ../../xv_stencil_gxm.h
+build/stencil_test: stencil_test.c ../../runtime/xv_stencil.h ../../runtime/xv_stencil_gxm.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=c11 -idirafter $(VITASDK)/arm-vita-eabi/include stencil_test.c -o $@
 
@@ -50,9 +51,9 @@ test-input: build/vita_input_test
 	./build/vita_input_test
 	./build/vita_input_test rear
 
-build/vita_input_test: vita_input_test.c ../kernel/xk_os_vita.c ../kernel/xk.h ../../xv_benchmark.c
+build/vita_input_test: vita_input_test.c ../kernel/xk_os_vita.c ../kernel/xk.h ../../runtime/xv_benchmark.c
 	mkdir -p build
-	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include vita_input_test.c ../../xv_benchmark.c -Wl,--gc-sections -lm -o $@
+	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include vita_input_test.c ../../runtime/xv_benchmark.c -Wl,--gc-sections -lm -o $@
 
 .PHONY: test
 test: build/runtime_test build/immediate_test build/file_io_test build/file_open_test build/crypto_test build/profiler_test build/profiler_traced_test build/dispatch_profile_test
@@ -81,17 +82,17 @@ test-render-profile: build/render_profile_test build/render_profile_traced_test 
 	./build/render_profile_traced_test 0
 	./build/render_profile_no_clock_test 1
 
-build/render_profile_test: render_profile_test.c ../../xv_render_profile.c ../../xv_render_profile.h
+build/render_profile_test: render_profile_test.c ../../runtime/xv_render_profile.c ../../runtime/xv_render_profile.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -std=gnu11 render_profile_test.c ../../xv_render_profile.c -o $@
+	$(CC) $(CFLAGS) -std=gnu11 render_profile_test.c ../../runtime/xv_render_profile.c -o $@
 
-build/render_profile_traced_test: render_profile_test.c ../../xv_render_profile.c ../../xv_render_profile.h
+build/render_profile_traced_test: render_profile_test.c ../../runtime/xv_render_profile.c ../../runtime/xv_render_profile.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -std=gnu11 -DXV_TEST_GUEST_TRACE=1 render_profile_test.c ../../xv_render_profile.c -o $@
+	$(CC) $(CFLAGS) -std=gnu11 -DXV_TEST_GUEST_TRACE=1 render_profile_test.c ../../runtime/xv_render_profile.c -o $@
 
-build/render_profile_no_clock_test: render_profile_test.c ../../xv_render_profile.c ../../xv_render_profile.h
+build/render_profile_no_clock_test: render_profile_test.c ../../runtime/xv_render_profile.c ../../runtime/xv_render_profile.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -std=gnu11 -DXV_TEST_NO_CLOCK=1 render_profile_test.c ../../xv_render_profile.c -o $@
+	$(CC) $(CFLAGS) -std=gnu11 -DXV_TEST_NO_CLOCK=1 render_profile_test.c ../../runtime/xv_render_profile.c -o $@
 
 build/dispatch_profile_test: Makefile dispatch_profile_test.c ../xv_x86rt.c ../xv_x86rt.h
 	mkdir -p build
@@ -138,7 +139,7 @@ build/read_retry_test: read_retry_test.c ../kernel/xk_read_retry.h
 test-cpu: build/cpu_usage_test
 	./build/cpu_usage_test
 
-build/cpu_usage_test: Makefile cpu_usage_test.c ../../xv_cpu.c ../../xv_cpu.h ../../xv_log.h
+build/cpu_usage_test: Makefile cpu_usage_test.c ../../runtime/xv_cpu.c ../../runtime/xv_cpu.h ../../runtime/xv_log.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include cpu_usage_test.c -o $@
 
@@ -149,11 +150,11 @@ test-textures: build/texture_cache_test build/texture_worker_test
 	XV_EXTENDED_BC=1 ./build/texture_cache_test
 	./build/texture_worker_test
 
-build/texture_worker_test: texture_worker_test.c ../../xv_texture_worker.c ../../xv_texture_worker.h ../../xv_texture_decode.h ../../xv_bc_layout.h
+build/texture_worker_test: texture_worker_test.c ../../runtime/xv_texture_worker.c ../../runtime/xv_texture_worker.h ../../runtime/xv_texture_decode.h ../../runtime/xv_bc_layout.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include texture_worker_test.c -pthread -o $@
 
-build/texture_cache_test: Makefile texture_cache_test.c ../../xv_ui_gxm.c ../../xv_ui_gxm.h ../../xv_texture_worker.h ../../xv_texture_decode.h ../../xv_bc_layout.h ../../shaders/xv_layouts.h
+build/texture_cache_test: Makefile texture_cache_test.c ../../runtime/xv_ui_gxm.c ../../runtime/xv_ui_gxm.h ../../runtime/xv_texture_worker.h ../../runtime/xv_texture_decode.h ../../runtime/xv_bc_layout.h ../../shaders/xv_layouts.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include texture_cache_test.c -Wl,--gc-sections -lm -o $@
 
@@ -176,31 +177,31 @@ test-frames: build/frame_handoff_test build/frame_pacer_test build/vertex_upload
 	$(PYTHON) ../../tools/test_frame_acquisition.py
 	$(PYTHON) ../../tools/test_frame_completion.py
 
-build/vertex_upload_test: vertex_upload_test.c ../../xv_vertex_upload.c ../../xv_vertex_upload.h ../../xv_frame_slots.h ../../xv_gpu_upload.h ../../xv_bytes_equal.h ../../xv_snapshot_copy.h
+build/vertex_upload_test: vertex_upload_test.c ../../runtime/xv_vertex_upload.c ../../runtime/xv_vertex_upload.h ../../runtime/xv_frame_slots.h ../../runtime/xv_gpu_upload.h ../../runtime/xv_bytes_equal.h ../../runtime/xv_snapshot_copy.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include vertex_upload_test.c -o $@
 
-build/bytes_equal_test: bytes_equal_test.c ../../xv_bytes_equal.h
+build/bytes_equal_test: bytes_equal_test.c ../../runtime/xv_bytes_equal.h
 	mkdir -p build
 	$(CC) $(CFLAGS) bytes_equal_test.c -o $@
 
-build/frame_pacer_test: frame_pacer_test.c ../../xv_frame_pacer.h
+build/frame_pacer_test: frame_pacer_test.c ../../runtime/xv_frame_pacer.h
 	mkdir -p build
 	$(CC) $(CFLAGS) frame_pacer_test.c -o $@
 
-build/frame_handoff_test: Makefile frame_handoff_test.c ../../xv_ui_gxm.c ../../xv_ui_gxm.h
+build/frame_handoff_test: Makefile frame_handoff_test.c ../../runtime/xv_ui_gxm.c ../../runtime/xv_ui_gxm.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include frame_handoff_test.c -Wl,--gc-sections -lm -o $@
 
-build/ps_cache_test: Makefile ps_cache_test.c ../../xv_d3d.c ../../xv_d3d.h ../../xv_index_copy.h ../../xv_bytes_equal.h ../../shaders/xv_ps_table.h
+build/ps_cache_test: Makefile ps_cache_test.c ../../runtime/xv_d3d.c ../../runtime/xv_d3d.h ../../runtime/xv_index_copy.h ../../runtime/xv_bytes_equal.h ../../shaders/xv_ps_table.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include ps_cache_test.c -Wl,--gc-sections -lm -o $@
 
-build/hud_program_test: hud_program_test.c ../../xv_hud.h ../../xv_ps_key.h
+build/hud_program_test: hud_program_test.c ../../runtime/xv_hud.h ../../runtime/xv_ps_key.h
 	mkdir -p build
 	$(CC) $(CFLAGS) hud_program_test.c -o $@
 
-build/shader_loader_test: Makefile shader_loader_test.c ../../xv_shader.c ../../xv_shader.h ../../xv_log.h ../../shaders/xv_ps_gxp.h ../../shaders/xv_vs_gxp.h
+build/shader_loader_test: Makefile shader_loader_test.c ../../runtime/xv_shader.c ../../runtime/xv_shader.h ../../runtime/xv_log.h ../../shaders/xv_ps_gxp.h ../../shaders/xv_vs_gxp.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include shader_loader_test.c -Wl,--gc-sections -o $@
 
@@ -209,7 +210,7 @@ test-geometry: build/geometry_worker_test
 	./build/geometry_worker_test
 	$(PYTHON) geometry_test.py
 
-build/geometry_worker_test: geometry_worker_test.c ../../xv_geometry_sort.h ../../xv_geometry_worker.c ../../xv_geometry_worker.h
+build/geometry_worker_test: geometry_worker_test.c ../../runtime/xv_geometry_sort.h ../../runtime/xv_geometry_worker.c ../../runtime/xv_geometry_worker.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -I../.. -idirafter $(VITASDK)/arm-vita-eabi/include geometry_worker_test.c -pthread -o $@
 
@@ -224,21 +225,21 @@ test-draw-prep: build/index_copy_test build/draw_profile_test build/draw_profile
 	XV_DRAW_SCAN_NEON=1 ./build/ps_cache_test
 	XV_INDEX_SCAN_CACHED=0 ./build/ps_cache_test
 
-build/index_copy_test: index_copy_test.c ../../xv_index_copy.h
+build/index_copy_test: index_copy_test.c ../../runtime/xv_index_copy.h
 	mkdir -p build
 	$(CC) $(CFLAGS) $< -o $@
 
-build/draw_state_test: draw_state_test.c ../../xv_draw_state.h ../../xv_d3d.c ../../xv_bytes_equal.h ../../xv_index_copy.h
+build/draw_state_test: draw_state_test.c ../../runtime/xv_draw_state.h ../../runtime/xv_d3d.c ../../runtime/xv_bytes_equal.h ../../runtime/xv_index_copy.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include draw_state_test.c -Wl,--gc-sections -lm -o $@
 
-build/draw_profile_test: draw_profile_test.c ../../xv_draw_profile.c ../../xv_draw_profile.h
+build/draw_profile_test: draw_profile_test.c ../../runtime/xv_draw_profile.c ../../runtime/xv_draw_profile.h
 	mkdir -p build
-	$(CC) $(CFLAGS) draw_profile_test.c ../../xv_draw_profile.c -o $@
+	$(CC) $(CFLAGS) draw_profile_test.c ../../runtime/xv_draw_profile.c -o $@
 
-build/draw_profile_no_clock_test: draw_profile_test.c ../../xv_draw_profile.c ../../xv_draw_profile.h
+build/draw_profile_no_clock_test: draw_profile_test.c ../../runtime/xv_draw_profile.c ../../runtime/xv_draw_profile.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -DXV_TEST_NO_CLOCK draw_profile_test.c ../../xv_draw_profile.c -o $@
+	$(CC) $(CFLAGS) -DXV_TEST_NO_CLOCK draw_profile_test.c ../../runtime/xv_draw_profile.c -o $@
 
 .PHONY: test-visibility
 test-visibility: build/visibility_test
@@ -257,7 +258,7 @@ test-completion: build/resolution_benchmark_test build/scheduler_notify_test bui
 	./build/scheduler_notify_test
 	./build/scheduler_vita_notify_test
 
-build/resolution_benchmark_test: resolution_benchmark_test.c ../../xv_benchmark.c ../../xv_benchmark.h
+build/resolution_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
 	$(CC) $(CFLAGS) -std=gnu11 resolution_benchmark_test.c -lm -o $@
 
 build/scheduler_notify_test: scheduler_notify_test.c ../kernel/xk_os_host.c ../kernel/xk_os.h
@@ -276,7 +277,7 @@ test-cpu-prep: build/ps_identity_test build/frame_events_test build/sleep_wait_t
 	./build/draw_optimization_test
 	./build/draw_optimization_test disabled
 
-build/draw_optimization_test: draw_optimization_test.c ../../xv_d3d.c ../../xv_shader.h
+build/draw_optimization_test: draw_optimization_test.c ../../runtime/xv_d3d.c ../../runtime/xv_shader.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include draw_optimization_test.c -Wl,--gc-sections -lm -o $@
 
@@ -287,7 +288,7 @@ test-texture-preparation: build/texture_preparation_test
 	./build/texture_preparation_test override
 	$(PYTHON) ../../tools/test_draw_textures.py
 
-build/texture_preparation_test: Makefile texture_preparation_test.c ../../xv_d3d.c ../../xv_shader.h ../../shaders/xv_ps_table.h
+build/texture_preparation_test: Makefile texture_preparation_test.c ../../runtime/xv_d3d.c ../../runtime/xv_shader.h ../../shaders/xv_ps_table.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include texture_preparation_test.c -Wl,--gc-sections -lm -o $@
 
@@ -299,15 +300,15 @@ build/sleep_wait_test: sleep_wait_test.c ../kernel/xk_thread.c ../kernel/xk.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections sleep_wait_test.c -Wl,--gc-sections -o $@
 
-build/ps_identity_test: ps_identity_test.c ../../xv_ps_identity.h ../../xv_ps_key.h ../kernel/xd3d.c ../kernel/xd3d.h ../kernel/xk_mem.c ../xv_x86rt.c
+build/ps_identity_test: ps_identity_test.c ../../runtime/xv_ps_identity.h ../../runtime/xv_ps_key.h ../kernel/xd3d.c ../kernel/xd3d.h ../kernel/xk_mem.c ../xv_x86rt.c
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections ps_identity_test.c ../xv_x86rt.c ../kernel/xk_mem.c -Wl,--gc-sections -lm -o $@
 
-build/frame_events_test: frame_events_test.c ../../xv_frame_events.h
+build/frame_events_test: frame_events_test.c ../../runtime/xv_frame_events.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include frame_events_test.c -pthread -o $@
 
-build/visibility_test: Makefile visibility_test.c ../../xv_d3d.c ../../xv_visibility.h ../kernel/xd3d.c ../xv_x86rt.c ../kernel/xk_mem.c
+build/visibility_test: Makefile visibility_test.c ../../runtime/xv_d3d.c ../../runtime/xv_visibility.h ../kernel/xd3d.c ../xv_x86rt.c ../kernel/xk_mem.c
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include visibility_test.c ../xv_x86rt.c ../kernel/xk_mem.c ../kernel/xd3d.c -Wl,--gc-sections -lm -pthread -o $@
 
@@ -328,15 +329,15 @@ test-opaque-material: build/texture_alpha_test build/opaque_material_test build/
 	./build/opaque_material_test no-alpha-specialization
 	XV_BC_MIPS=1 ./build/texture_cache_test
 
-build/texture_alpha_test: texture_alpha_test.c ../../xv_texture_alpha.h ../../xv_texture_decode.h
+build/texture_alpha_test: texture_alpha_test.c ../../runtime/xv_texture_alpha.h ../../runtime/xv_texture_decode.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 texture_alpha_test.c -lm -o $@
 
-build/opaque_material_test: opaque_material_test.c texture_preparation_test.c ../../xv_d3d.c ../../xv_texture_alpha.h ../../shaders/xv_ps_table.h
+build/opaque_material_test: opaque_material_test.c texture_preparation_test.c ../../runtime/xv_d3d.c ../../runtime/xv_texture_alpha.h ../../shaders/xv_ps_table.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include opaque_material_test.c -Wl,--gc-sections -lm -o $@
 
-build/texture_cache_test build/texture_preparation_test build/draw_optimization_test: ../../xv_texture_alpha.h
+build/texture_cache_test build/texture_preparation_test build/draw_optimization_test: ../../runtime/xv_texture_alpha.h
 
 .PHONY: test-cutout
 test-cutout: build/cutout_policy_test build/ps_cache_test
@@ -348,17 +349,17 @@ test-cutout: build/cutout_policy_test build/ps_cache_test
 	./build/cutout_policy_test no-alpha
 	./build/ps_cache_test
 
-build/cutout_policy_test: cutout_policy_test.c ps_cache_test.c ../../xv_d3d.c ../../xv_shader.h ../../shaders/xv_ps_table.h
+build/cutout_policy_test: cutout_policy_test.c ps_cache_test.c ../../runtime/xv_d3d.c ../../runtime/xv_shader.h ../../shaders/xv_ps_table.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include cutout_policy_test.c -Wl,--gc-sections -lm -o $@
 
-build/ps_cache_test build/texture_preparation_test build/opaque_material_test: ../../xv_shader.h
+build/ps_cache_test build/texture_preparation_test build/opaque_material_test: ../../runtime/xv_shader.h
 
 .PHONY: test-rgba-layout
 test-rgba-layout: build/rgba_layout_test
 	./build/rgba_layout_test
 
-build/rgba_layout_test: Makefile rgba_layout_test.c texture_cache_test.c ../../xv_ui_gxm.c ../../xv_rgba_layout.h
+build/rgba_layout_test: Makefile rgba_layout_test.c texture_cache_test.c ../../runtime/xv_ui_gxm.c ../../runtime/xv_rgba_layout.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include rgba_layout_test.c -Wl,--gc-sections -lm -o $@
 
@@ -366,7 +367,7 @@ build/rgba_layout_test: Makefile rgba_layout_test.c texture_cache_test.c ../../x
 test-alpha-range: build/alpha_range_test
 	./build/alpha_range_test
 
-build/alpha_range_test: Makefile alpha_range_test.c ../../xv_alpha_range.h ../../xv_texture_decode.h
+build/alpha_range_test: Makefile alpha_range_test.c ../../runtime/xv_alpha_range.h ../../runtime/xv_texture_decode.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 alpha_range_test.c -lm -o $@
 

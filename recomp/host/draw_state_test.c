@@ -1,6 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
-#include "../../xv_d3d.c"
+#include "../../runtime/xv_d3d.c"
 
 static unsigned calls[5];
 void xv_logf(const char *fmt,...) {(void)fmt;}

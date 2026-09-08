@@ -12,7 +12,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import xita_recomp as r
+from recompiler import xita_recomp as r
 from games.halo_ce_3925.hooks import HaloHooks
 
 ENTRY, SIZE = 0xB71C0, 874
@@ -46,7 +46,7 @@ def register_body(body):
 
 
 def generate():
-    img = r.Image(str(ROOT/'haloce/default.xbe'), str(ROOT/'game_manifest.json'))
+    img = r.Image(str(ROOT/'haloce/default.xbe'), str(ROOT/'local/halo_ce_3925/game_manifest.json'))
     code = img.bytes_at(ENTRY, SIZE)
     assert hashlib.sha256(code).hexdigest() == DIGEST
     instructions = {i.ip: i for i in r.Decoder(32, code, ip=ENTRY)}

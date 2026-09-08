@@ -8,10 +8,10 @@ import sys
 
 root=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(root))
-import xita_recomp as r
+from recompiler import xita_recomp as r
 from games.halo_ce_3925.hooks import HaloHooks
 
-img=r.Image(str(root/'haloce/default.xbe'),str(root/'game_manifest.json'))
+img=r.Image(str(root/'haloce/default.xbe'),str(root/'local/halo_ce_3925/game_manifest.json'))
 disc=r.Discovery(img,{},img.kernel_imports(),lambda *args:None)
 for address in (0x88b80,0x114c50):disc.add_root(address)
 for address in (0x88b80,0x114c50):

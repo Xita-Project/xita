@@ -7,7 +7,7 @@ head=r'''#define xv_call test_call
 #define xv_preempt test_preempt
 #include "xv_recomp_protos.h"
 #include "kernel/xk.h"
-#include "xv_geometry_sort.h"
+#include "runtime/xv_geometry_sort.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>

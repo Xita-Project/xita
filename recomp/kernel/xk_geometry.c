@@ -4,7 +4,7 @@
  */
 #include <stdlib.h>
 #include "xk.h"
-#include "../../xv_geometry_sort.h"
+#include "../../runtime/xv_geometry_sort.h"
 
 void xv_geometry_sort_parallel(int32_t *, unsigned) __attribute__((weak));
 static int32_t *scratch;

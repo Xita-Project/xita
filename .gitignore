@@ -60,8 +60,8 @@ dashboard/license_text.h
 release-audit.json
 .env
 .env.*
-core
-core.*
+/core
+/core.*
 **/build/
 **/out/
 
@@ -69,3 +69,6 @@ core.*
 .xita-recomp-*/
 .xita-vpk-*/
 recomp/kernel/xk_clip.c
+
+# Private game metadata, captures and locally supplied helper binaries.
+/local/

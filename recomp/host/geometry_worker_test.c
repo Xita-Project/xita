@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
-#include "../../xv_geometry_worker.c"
+#include "../../runtime/xv_geometry_worker.c"
 static sem_t sems[16];
 static unsigned next_sem, live_sems, step, fail_step, next_thread;
 static struct { pthread_t thread; SceKernelThreadEntry entry; void *arg; int running; } ts[2];

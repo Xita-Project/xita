@@ -152,7 +152,7 @@ def bsp_header(m: HaloMap, bsp: dict):
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="halo_map.py")
+    ap = argparse.ArgumentParser(prog="recompiler/halo_map.py")
     ap.add_argument("map")
     ap.add_argument("--tags", action="store_true", help="list every tag")
     ap.add_argument("--bsp", action="store_true", help="dump structure BSP headers")

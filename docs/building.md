@@ -50,7 +50,8 @@ extraction directory is selected with `-d`:
 extract-xiso -x /path/to/your/halo.iso -d haloce
 ```
 
-The current port also needs the corresponding `halo_symbols.json` and the
+The current port also needs the corresponding
+`local/halo_ce_3925/halo_symbols.json` and the
 translated shader inputs used by the development build. Their clean-source
 generation/provenance is an outstanding release gate. Do not substitute inputs
 from another game or executable version.
@@ -60,16 +61,22 @@ from another game or executable version.
 From the repository root, with the virtual environment active:
 
 ```sh
-python xbe_parse.py haloce/default.xbe --json > game_manifest.json
+mkdir -p local/halo_ce_3925
+python recompiler/xbe_parse.py haloce/default.xbe --json > local/halo_ce_3925/game_manifest.json
 tools/recomp.sh haloce/default.xbe
 python tools/gen_native_clip.py
-python xbe_image.py haloce/default.xbe game_manifest.json recomp/halo_image.bin
+python recompiler/xbe_image.py haloce/default.xbe local/halo_ce_3925/game_manifest.json recomp/halo_image.bin
 make -j2 RECOMP=1
 ```
 
 The result is `xita.vpk`. The Makefile already links the touch library; no extra
 override is needed. Generated C, game images, shader translations and the
 Halo-linked VPK are local build products, not public release inputs.
+
+Keep game metadata and local helper binaries under the ignored `local/` folder.
+The supported executable stays at `haloce/default.xbe`. Rebuilding shader lookup
+tables for a game build requires that executable and its manifest; the build
+must retain the shader identities used to recognize the game's programs.
 
 Changed shaders must be compiled before packaging the VPK. `make shaders`
 uses an available authorized `psp2cgc`; `make shadercomp` builds the on-device

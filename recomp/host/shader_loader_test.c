@@ -1,7 +1,7 @@
 /* Exercise the actual shader loader with fake Vita I/O; no GPU is needed. */
 #include <assert.h>
 #include <stdarg.h>
-#include "../../xv_shader.c"
+#include "../../runtime/xv_shader.c"
 static int packaged = 1, device = 1, selected, invalid_program;
 static unsigned parameter_mask, parameter_queries;
 void xv_logf(const char *fmt, ...) { (void)fmt; }

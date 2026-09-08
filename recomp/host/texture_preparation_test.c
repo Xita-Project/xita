@@ -2,7 +2,7 @@
  * is controlled here; shader_loader_test separately checks its real API. */
 #define XV_RUN_RECOMP 1
 #include <assert.h>
-#include "../../xv_d3d.c"
+#include "../../runtime/xv_d3d.c"
 static uint32_t headers[4][8];
 static SceGxmTexture textures[4];
 static unsigned missing, resolves[4], metadata_reads, override_shaders;

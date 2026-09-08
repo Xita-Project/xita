@@ -6,6 +6,28 @@ Install the app from a VPK, then add your own Halo data. You need a
 homebrew-enabled PS Vita, VitaShell and a USB cable. Windows, macOS and Linux
 can all copy the files; VitaSDK and a source build are unnecessary for installation.
 
+## First installation: create the game image
+
+The VPK does not contain `halo_image.bin`. You generate it from **`default.xbe`**
+from your own supported original Xbox Halo CE copy; do not rename the XBE.
+If Halo already launches on your Vita, keep your existing image and skip this step.
+
+Download [xbe_parse.py](../recompiler/xbe_parse.py) and [xbe_image.py](../recompiler/xbe_image.py)
+using **Download raw file**, install Python 3, and place the scripts beside your
+extracted `haloce/` folder. In that folder, run these commands in **Windows Command Prompt**:
+
+```bat
+py -3 xbe_parse.py haloce\default.xbe --json > game_manifest.json
+py -3 xbe_image.py haloce\default.xbe game_manifest.json halo_image.bin
+```
+
+On **Linux/macOS**, use `python3` in place of `py -3` and
+`haloce/default.xbe` in place of `haloce\default.xbe`.
+The resulting `halo_image.bin` appears beside the scripts. Copy it to
+`ux0:data/xita/halo_image.bin`, along with the `haloce/` folder as shown below.
+The [full game-data guide](game-data.md) includes the supported executable
+fingerprint and folder layout.
+
 ## 1. Download a VPK
 
 Open [Releases](https://github.com/BirchWoodGod/xita/releases), expand **Assets**,

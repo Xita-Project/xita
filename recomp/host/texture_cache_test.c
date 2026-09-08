@@ -4,7 +4,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #ifndef XV_TEXTURE_TEST_SOURCE
-#define XV_TEXTURE_TEST_SOURCE "../../xv_ui_gxm.c"
+#define XV_TEXTURE_TEST_SOURCE "../../runtime/xv_ui_gxm.c"
 #endif
 #include XV_TEXTURE_TEST_SOURCE
 

@@ -5,7 +5,7 @@ import os, shlex, struct, subprocess, sys, tempfile
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-from halo_map import HaloMap, TAG_BASE
+from recompiler.halo_map import HaloMap, TAG_BASE
 
 with tempfile.TemporaryDirectory(prefix='xita-quality-test-') as directory:
     d=Path(directory); exe=d/'quality'

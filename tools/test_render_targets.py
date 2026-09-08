@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 
 root = pathlib.Path(__file__).resolve().parents[1]
-src = (root / 'xv_d3d.c').read_text()
+src = (root / 'runtime/xv_d3d.c').read_text()
 start = src.index('static cmdlist_t *cur_list(void);')
 end = src.index('#ifdef XV_RUN_RECOMP', start)
 implementation = src[start:end]
@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='xita-rt-test-') as tmp:
     exe = tmp / 'test'
     subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Wno-unused-parameter',
                     '-Werror', '-I', str(tmp), str(root / 'tools/tests/render_targets_host.c'),
-                    str(root / 'xv_render_profile.c'),
+                    str(root / 'runtime/xv_render_profile.c'),
                     '-o', str(exe)], check=True)
     for queue in ('0', '1'):
         for scenes in ('1', '4', '8'):

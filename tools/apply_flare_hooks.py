@@ -13,7 +13,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from halo_flare_hooks import IMAGE_SHA256, ENTRY_HOOK, BARRIERS, barrier_line
+from recompiler.halo_flare_hooks import IMAGE_SHA256, ENTRY_HOOK, BARRIERS, barrier_line
 
 
 def add_hooks(source):

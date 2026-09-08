@@ -29,6 +29,13 @@ Usage:
 
 from __future__ import annotations
 
+# Support running this script directly from any working directory.
+if __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
 import argparse
 import hashlib
 import json
@@ -39,7 +46,7 @@ from collections import Counter, defaultdict, deque
 from typing import Dict, List, Optional, Set, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from xbox_kernel_exports import KERNEL_EXPORTS, KERNEL_DATA_EXPORTS, KERNEL_ARGC  # noqa: E402
+from recompiler.xbox_kernel_exports import KERNEL_EXPORTS, KERNEL_DATA_EXPORTS, KERNEL_ARGC  # noqa: E402
 
 import re as _re
 import os as _os
@@ -88,7 +95,7 @@ class Image:
             with open(manifest_path) as source:
                 self.m = json.load(source)
         else:
-            from xbe_parse import XbeParser, to_json
+            from recompiler.xbe_parse import XbeParser, to_json
             self.m = json.loads(to_json(XbeParser(self.data, xbe_path).parse()))
         self.base = self.m["base_address"]
         self.secs = [(s["virtual_address"], s["raw_address"], s["raw_size"], s["virtual_size"], s["name"], s["flag_names"])
@@ -399,7 +406,7 @@ class Emitter:
         self.vars: Dict[str, int] = {}
         self.trace = False
         self.trace_funcs = False
-        from xita_recomp_core.hooks import NoGameHooks
+        from recompiler.core.hooks import NoGameHooks
         self.hooks = hooks if hooks is not None else NoGameHooks()
         self.cur_fn = 0
         self.unimpl = Counter()
@@ -1233,7 +1240,7 @@ class Emitter:
 
 # --------------------------------------------------------------------------------------
 
-from xita_recomp_core.system import DEFAULT_LIFT, HLE_LIBS, HLE_KEEP
+from recompiler.core.system import DEFAULT_LIFT, HLE_LIBS, HLE_KEEP
 
 
 def find_main(img: Image, hle: Dict[int, dict]) -> Optional[int]:
@@ -1258,7 +1265,7 @@ def find_main(img: Image, hle: Dict[int, dict]) -> Optional[int]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="xita_recomp.py")
+    ap = argparse.ArgumentParser(prog="recompiler/xita_recomp.py")
     ap.add_argument("xbe", nargs="?")
     ap.add_argument("--profile", help="game profile ID or JSON path (no game hooks when omitted)")
     ap.add_argument("--list-profiles", action="store_true", help="list reviewed profiles without game inputs")
@@ -1276,9 +1283,9 @@ def main() -> int:
     args = ap.parse_args()
 
     from pathlib import Path
-    from xbe_parse import XbeError
-    from xita_recomp_core.profile import load_profile, list_profiles
-    from xita_recomp_core.output import check_output_identity, emit_output
+    from recompiler.xbe_parse import XbeError
+    from recompiler.core.profile import load_profile, list_profiles
+    from recompiler.core.output import check_output_identity, emit_output
     from games import load_hooks
     if args.list_profiles:
         for entry in list_profiles():

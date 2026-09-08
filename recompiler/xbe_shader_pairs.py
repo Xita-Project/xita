@@ -28,6 +28,13 @@ Usage:
 
 from __future__ import annotations
 
+# Support running this script directly from any working directory.
+if __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
 import argparse
 import json
 import os
@@ -37,7 +44,7 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import dx8_shader_parse as s2  # noqa: E402
+from recompiler import dx8_shader_parse as s2  # noqa: E402
 
 RECORD_SIZE = 16
 
@@ -187,7 +194,7 @@ def validate_pair(data: bytes, decl_off: int, func_off: int) -> Tuple[List[str],
 # ---------------------------------------------------------------------------
 
 def main(argv: Optional[List[str]] = None) -> int:
-    ap = argparse.ArgumentParser(prog="xbe_shader_pairs.py",
+    ap = argparse.ArgumentParser(prog="recompiler/xbe_shader_pairs.py",
                                  description="Pair vertex declarations with shader blobs (Xita Stage 2b).")
     ap.add_argument("xbe")
     ap.add_argument("--manifest", required=True, help="Stage 1 xbe_parse.py --json output")

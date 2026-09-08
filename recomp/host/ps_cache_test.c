@@ -1,6 +1,6 @@
 /* Actual link cache with mocked shader creation; no GPU required. */
 #include <assert.h>
-#include "../../xv_d3d.c"
+#include "../../runtime/xv_d3d.c"
 /* These tests isolate shader/state policy; owned vertex storage is exercised
  * separately against the production allocator and delayed completion. */
 const void *xv_vertex_upload(unsigned slot, const void *p, unsigned n) { return p; }

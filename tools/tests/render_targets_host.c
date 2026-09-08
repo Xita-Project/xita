@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "constants.h"
-#include "../../xv_render_profile.h"
+#include "../../runtime/xv_render_profile.h"
 void xv_logf(const char *fmt, ...) { (void)fmt; }
 #define XV_CLEAR_SLOTS 64
 #define XV_RT_SLOTS 8
@@ -118,7 +118,7 @@ void xv_ui_gxm_replay_batch(SceGxmContext *c, unsigned frame, unsigned batch, co
 void xv_ui_gxm_replay_overlay(SceGxmContext *c, unsigned f) { assert(open_scene); }
 static void visibility_draw_state(SceGxmContext *ctx, cmdlist_t *l, const cmd_t *c)
 { (void)ctx; (void)l; assert(!c); }
-#include "../../xv_render_target.h"
+#include "../../runtime/xv_render_target.h"
 #include "render_targets_under_test.inc"
 static void capacity_tests(void)
 {

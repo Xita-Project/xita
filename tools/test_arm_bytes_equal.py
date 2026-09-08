@@ -13,7 +13,7 @@ parser.add_argument('--baseline-elf',required=True,type=Path)
 parser.add_argument('--output-dir',required=True,type=Path)
 args=parser.parse_args();out=args.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
 wrapper=out/'wrapper.c';binary=out/'bytes-equal-arm.elf'
-wrapper.write_text('#include "xv_bytes_equal.h"\nint test_equal(const void *a,const void *b,unsigned n) { return xv_bytes_equal(a,b,n); }\n')
+wrapper.write_text('#include "runtime/xv_bytes_equal.h"\nint test_equal(const void *a,const void *b,unsigned n) { return xv_bytes_equal(a,b,n); }\n')
 subprocess.run(['arm-vita-eabi-gcc','-O2','-mthumb','-mcpu=cortex-a9','-mfpu=neon','-ffreestanding','-fno-builtin','-nostdlib','-I',str(root),str(wrapper),'-Wl,-Ttext=0x10000,-e,test_equal','-o',str(binary)],check=True)
 uc=Uc(UC_ARCH_ARM,UC_MODE_ARM);uc.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_A9)
 uc.reg_write(UC_ARM_REG_C1_C0_2,15<<20);uc.reg_write(UC_ARM_REG_FPEXC,1<<30)
@@ -82,5 +82,5 @@ for n in [16,64,256,4096]:
   instructions=0;assert invoke(name,A,B,n);assert instructions>0;row[name+'_instructions']=instructions
  rows.append(row)
 uc.hook_del(hook)
-report={'cases':cases,'native_calls':native_calls,'bounds_faults':faults,'seconds':time.monotonic()-started,'instruction_counts_not_cycles':rows,'functions':functions,'header_sha256':hashlib.sha256((root/'xv_bytes_equal.h').read_bytes()).hexdigest(),'baseline_elf_sha256':hashlib.sha256(args.baseline_elf.read_bytes()).hexdigest()}
+report={'cases':cases,'native_calls':native_calls,'bounds_faults':faults,'seconds':time.monotonic()-started,'instruction_counts_not_cycles':rows,'functions':functions,'header_sha256':hashlib.sha256((root/'runtime/xv_bytes_equal.h').read_bytes()).hexdigest(),'baseline_elf_sha256':hashlib.sha256(args.baseline_elf.read_bytes()).hexdigest()}
 (out/'results.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))

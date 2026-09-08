@@ -30,7 +30,7 @@ The runtime needs a memory image made from your executable. **Renaming
 and two scripts; it does not compile the game or require VitaSDK.
 
 1. Install Python 3 if needed.
-2. Download [xbe_parse.py](../xbe_parse.py) and [xbe_image.py](../xbe_image.py)
+2. Download [xbe_parse.py](../recompiler/xbe_parse.py) and [xbe_image.py](../recompiler/xbe_image.py)
    using each file page's **Download raw file** button, or use them from a source checkout.
 3. Put the two scripts beside your extracted `haloce/` folder:
 

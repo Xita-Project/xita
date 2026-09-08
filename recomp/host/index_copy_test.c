@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../../xv_index_copy.h"
+#include "../../runtime/xv_index_copy.h"
 
 int main(void)
 {

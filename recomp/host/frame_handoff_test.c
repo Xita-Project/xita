@@ -8,7 +8,7 @@ void xv_texture_worker_report(void) {}
 void xv_geometry_worker_report(void) {}
 void xv_draw_profile_report(unsigned n) {}
 void xv_vertex_upload_report(unsigned n) {}
-#include "../../xv_ui_gxm.c"
+#include "../../runtime/xv_ui_gxm.c"
 static unsigned submitted, consumed, sealed, begun, queued_ui, published_ui;
 static struct { unsigned slot, verts, batches; } packets[128];
 static int dirty_ui;

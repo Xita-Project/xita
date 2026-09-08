@@ -4,7 +4,7 @@ import pathlib
 import subprocess
 import tempfile
 root = pathlib.Path(__file__).resolve().parents[1]
-source = (root / 'xv_d3d.c').read_text()
+source = (root / 'runtime/xv_d3d.c').read_text()
 start = source.index('static int bind_draw_textures(')
 end = source.index('static void render_range(', start)
 with tempfile.TemporaryDirectory(prefix='xita-draw-textures-') as directory:

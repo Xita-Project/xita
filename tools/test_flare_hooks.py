@@ -13,9 +13,9 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import xita_recomp as r
+from recompiler import xita_recomp as r
 from games.halo_ce_3925.hooks import HaloHooks
-from halo_flare_hooks import ENTRY, ENTRY_HOOK, BARRIERS, barrier_line, matches_image
+from recompiler.halo_flare_hooks import ENTRY, ENTRY_HOOK, BARRIERS, barrier_line, matches_image
 from apply_flare_hooks import add_hooks
 from iced_x86 import InstructionInfoFactory, Register, OpAccess, FlowControl, RflagsBits
 
@@ -126,6 +126,6 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source', type=Path, default=ROOT/'recomp')
     args = p.parse_args()
-    img = r.Image(str(ROOT/'haloce/default.xbe'), str(ROOT/'game_manifest.json'))
+    img = r.Image(str(ROOT/'haloce/default.xbe'), str(ROOT/'local/halo_ce_3925/game_manifest.json'))
     hooks(img)
     liveness(img, args.source)

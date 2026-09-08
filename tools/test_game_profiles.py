@@ -12,8 +12,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from xita_recomp_core.profile import load_profile
-from xbe_parse import SECTION_HEADER_FMT, XOR_KEYS
+from recompiler.core.profile import load_profile
+from recompiler.xbe_parse import SECTION_HEADER_FMT, XOR_KEYS
 
 
 def fixture():
@@ -54,7 +54,7 @@ class Profiles(unittest.TestCase):
         return load_profile(self.path)
 
     def run_cli(self, *args):
-        return subprocess.run([sys.executable, str(ROOT / "xita_recomp.py"), str(self.xbe),
+        return subprocess.run([sys.executable, str(ROOT / "recompiler/xita_recomp.py"), str(self.xbe),
                                *map(str, args)], cwd=self.root, capture_output=True, text=True)
 
     def test_complete_lift_and_profile_isolation(self):
@@ -103,7 +103,7 @@ class Profiles(unittest.TestCase):
         self.assertEqual((out / "code_000.c").read_bytes(), before)
 
     def test_failed_postprocessing_preserves_output(self):
-        from xita_recomp_core.output import emit_output
+        from recompiler.core.output import emit_output
         out = self.root / "output"
         out.mkdir()
         (out / "code_000.c").write_text("previous complete build")
@@ -143,7 +143,7 @@ class Profiles(unittest.TestCase):
         self.assertEqual(marker.read_text(), "preserve existing work")
 
     def test_manifest_identity_and_addresses(self):
-        import xita_recomp as r
+        from recompiler import xita_recomp as r
         profile = self.load()
         image = r.Image(str(self.xbe))
         profile.validate_image(image)
@@ -195,7 +195,7 @@ class Profiles(unittest.TestCase):
         result = self.run_cli("--files", 0)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("positive", result.stderr)
-        result = subprocess.run([sys.executable, str(ROOT / "xita_recomp.py"), "--list-profiles"],
+        result = subprocess.run([sys.executable, str(ROOT / "recompiler/xita_recomp.py"), "--list-profiles"],
                                 cwd=self.root, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("halo_ce_3925", result.stdout)

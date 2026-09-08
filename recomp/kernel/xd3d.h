@@ -2,7 +2,7 @@
  * The host null renderer logs it; the Vita build overrides the hooks and feeds GXM (xv_d3d bridge). */
 #pragma once
 #include "../xv_x86rt.h"
-#include "../../xv_stencil.h"
+#include "../../runtime/xv_stencil.h"
 
 typedef struct {
     /* geometry */

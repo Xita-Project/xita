@@ -1,4 +1,4 @@
-#include "../../xv_bytes_equal.h"
+#include "../../runtime/xv_bytes_equal.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>

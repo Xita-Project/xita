@@ -9,8 +9,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from dx8_pixelshader_parse import decode_psdef
-import pixelshader_recomp_gen as gen
+from recompiler.dx8_pixelshader_parse import decode_psdef
+from recompiler import pixelshader_recomp_gen as gen
 from tools.psdef_hash import canonicalize, canonical_hash, original_hash
 from tools.ps_pipeline import vs_outputs
 
@@ -33,7 +33,7 @@ def main():
         cases.append(bytes(changed))
     with tempfile.TemporaryDirectory() as tmp:
         source = Path(tmp, 'key.c')
-        source.write_text('#include <stdio.h>\n#include "xv_ps_key.h"\n'
+        source.write_text('#include <stdio.h>\n#include "runtime/xv_ps_key.h"\n'
                           'int main(void) { unsigned char d[240]; while(fread(d,1,240,stdin)==240) '
                           'printf("%08X\\n",xv_ps_program_key(d)); return 0; }\n')
         exe = Path(tmp, 'key')

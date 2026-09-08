@@ -6,8 +6,8 @@ Native helpers retain the ordinary translated body as their fallback.
 import hashlib
 import re
 
-from halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
-from xita_recomp_core.hooks import NoGameHooks
+from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
+from recompiler.core.hooks import NoGameHooks
 
 
 class HaloHooks(NoGameHooks):

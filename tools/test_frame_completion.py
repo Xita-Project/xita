@@ -4,7 +4,7 @@ The fake display releases scanout independently of GPU scratch retirement.
 """
 import pathlib,os,subprocess,tempfile
 root=pathlib.Path(__file__).resolve().parents[1]
-source=(root/'main.c').read_text()
+source=(root/'runtime/main.c').read_text()
 a=source.index('static unsigned g_retired_count')
 b=source.index('/* ======================================================================================\n *  Mock guest workload',a)
 pump=source[a:b]
@@ -17,10 +17,10 @@ prefix=r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <psp2/gxm.h>
-#include "xv_frame_slots.h"
-#include "xv_quality_settings.h"
-#include "xv_render_profile.h"
-#include "xv_frame_events.h"
+#include "runtime/xv_frame_slots.h"
+#include "runtime/xv_quality_settings.h"
+#include "runtime/xv_render_profile.h"
+#include "runtime/xv_frame_events.h"
 #define XV_DISPLAY_BUFFER_COUNT 3u
 #define XV_DISPLAY_MAX_PENDING 2u
 #define XV_LOG(...) ((void)0)
@@ -121,6 +121,6 @@ with tempfile.TemporaryDirectory(prefix='xita-frame-completion-') as tmp:
     p=pathlib.Path(tmp);(p/'test.c').write_text(prefix+packets+fixture+pump+suffix)
     sdk=pathlib.Path(os.environ.get('VITASDK',str(pathlib.Path.home()/'vitasdk')))
     subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP','-Wall','-Wextra','-Werror','-Wno-unused-parameter',
-      '-I',str(root),'-idirafter',str(sdk/'arm-vita-eabi/include'),str(p/'test.c'),str(root/'xv_render_profile.c'),'-o',str(p/'test')],check=True)
+      '-I',str(root),'-I',str(root/'runtime'),'-idirafter',str(sdk/'arm-vita-eabi/include'),str(p/'test.c'),str(root/'runtime/xv_render_profile.c'),'-o',str(p/'test')],check=True)
     for args in [[],['1'],['0','wrap'],['1','wrap'],['0','wrap','error']]:
         subprocess.run([str(p/'test'),*args],check=True)

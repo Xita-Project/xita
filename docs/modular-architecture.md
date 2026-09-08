@@ -25,10 +25,10 @@ flowchart TD
 
 | Module | Responsibility |
 | --- | --- |
-| `xita_recomp.py` | XBE discovery and x86-to-C lowering. Its default emitter has no game hooks. VitaSDK produces ARM instructions from the resulting C. |
-| `xita_recomp_core/system.py` | Shared XDK library/symbol policy for lifting versus HLE. |
-| `xita_recomp_core/profile.py` | Strict JSON loading, schema checks, XBE/title/manifest validation, HLE signatures, roots and variable mappings. |
-| `xita_recomp_core/hooks.py` | No-op interface for instruction, function-entry, body and postprocessing callbacks. |
+| `recompiler/xita_recomp.py` | XBE discovery and x86-to-C lowering. Its default emitter has no game hooks. VitaSDK produces ARM instructions from the resulting C. |
+| `recompiler/core/system.py` | Shared XDK library/symbol policy for lifting versus HLE. |
+| `recompiler/core/profile.py` | Strict JSON loading, schema checks, XBE/title/manifest validation, HLE signatures, roots and variable mappings. |
+| `recompiler/core/hooks.py` | No-op interface for instruction, function-entry, body and postprocessing callbacks. |
 | `games/halo_ce_3925/` | Halo profile, reviewed emission hooks and the native-adapter source list. |
 | `libxita_guest.a` | Generated functions, dispatch table and compatibility stubs. |
 | `libxita_sys.a` | Shared execution support and kernel/Direct3D/DirectSound/XNet implementation objects. |
@@ -49,11 +49,11 @@ when their source lists change so obsolete members cannot survive.
 ## Use a profile
 
 ```sh
-python xita_recomp.py --list-profiles
-python xita_recomp.py haloce/default.xbe --profile halo_ce_3925 \
-  --symbols halo_symbols.json --check-profile
-python xita_recomp.py haloce/default.xbe --profile halo_ce_3925 \
-  --symbols halo_symbols.json -o recomp/
+python -m recompiler --list-profiles
+python -m recompiler haloce/default.xbe --profile halo_ce_3925 \
+  --symbols local/halo_ce_3925/halo_symbols.json --check-profile
+python -m recompiler haloce/default.xbe --profile halo_ce_3925 \
+  --symbols local/halo_ce_3925/halo_symbols.json -o recomp/
 make RECOMP=1 GAME_PROFILE=halo_ce_3925
 ```
 

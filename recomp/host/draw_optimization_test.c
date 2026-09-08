@@ -1,6 +1,6 @@
 #define XV_RUN_RECOMP 1
 #include <assert.h>
-#include "../../xv_d3d.c"
+#include "../../runtime/xv_d3d.c"
 static unsigned resolves, setters, options, links;
 static int available=1, fail_link;
 static SceGxmTexture source;

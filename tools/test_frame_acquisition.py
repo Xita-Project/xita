@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Production present/acquire logic: only a still-owned next slot blocks."""
 import pathlib,subprocess,tempfile,os
-root=pathlib.Path(__file__).resolve().parents[1];s=(root/'main.c').read_text()
+root=pathlib.Path(__file__).resolve().parents[1];s=(root/'runtime/main.c').read_text()
 a=s.index('static volatile uint32_t g_frame_requested');b=s.index('void xv_present_drain(void);',a)+len('void xv_present_drain(void);');globals_=s[a:b]
 a=s.index('void xv_present(void)');b=s.index('/* Called after draining',a);code=s[a:b]
 a=s.index('void xv_benchmark_optimizations(int enabled)');b=s.index('void xv_benchmark_present(void)',a);code+=s[a:b]
@@ -11,7 +11,7 @@ prefix=r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <psp2/gxm.h>
-#include "xv_frame_slots.h"
+#include "runtime/xv_frame_slots.h"
 #define XV_LOG(...) ((void)0)
 void xv_cpu_guest_poll(void) {}
 static unsigned frame,ui,contents[3],waits;
@@ -92,7 +92,7 @@ with tempfile.TemporaryDirectory(prefix='xita-frame-acquire-') as tmp:
     p=pathlib.Path(tmp);(p/'test.c').write_text(f'#define CANDIDATE_COUNT {count}\n'+prefix+globals_+fixture+code+suffix)
     sdk=pathlib.Path(os.environ.get('VITASDK',str(pathlib.Path.home()/'vitasdk')))
     subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-unused-variable',
-        '-I',str(root),'-idirafter',str(sdk/'arm-vita-eabi/include'),str(p/'test.c'),'-o',str(p/'test')],check=True)
+        '-I',str(root),'-I',str(root/'runtime'),'-idirafter',str(sdk/'arm-vita-eabi/include'),str(p/'test.c'),'-o',str(p/'test')],check=True)
     for value in [None,'0','1','invalid','-1']:
         env=os.environ.copy();env.pop('XV_TRIPLE_BUFFER',None)
         if value is not None:env['XV_TRIPLE_BUFFER']=value

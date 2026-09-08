@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <time.h>
-#include "../../xv_frame_events.h"
+#include "../../runtime/xv_frame_events.h"
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
 static unsigned bits, delays, waits, signals;

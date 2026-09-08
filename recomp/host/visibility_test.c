@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <sched.h>
-#include "../../xv_d3d.c"
+#include "../../runtime/xv_d3d.c"
 #include "../kernel/xk.h"
 uint8_t *g_xram;
 xk_thread *xk_cur;

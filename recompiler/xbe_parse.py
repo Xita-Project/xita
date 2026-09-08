@@ -590,7 +590,7 @@ def to_json(info: XbeInfo) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="xbe_parse.py",
+        prog="recompiler/xbe_parse.py",
         description="Parse an original Xbox .xbe header (Xita pipeline, Stage 1).",
     )
     ap.add_argument("xbe", help="path to the .xbe file")

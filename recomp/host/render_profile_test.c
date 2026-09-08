@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../../xv_render_profile.h"
+#include "../../runtime/xv_render_profile.h"
 
 #ifndef XV_TEST_GUEST_TRACE
 #define XV_TEST_GUEST_TRACE 0

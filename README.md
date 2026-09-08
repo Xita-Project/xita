@@ -35,6 +35,36 @@ testing status explained. Releases remain private during development.
 supported original Xbox copy of Halo CE. The VPK does not include the game image
 or maps. [Prepare your game data](docs/game-data.md) once, then use VPKs for app updates.
 
+### Create halo_image.bin from your .xbe
+
+`halo_image.bin` is generated from your own Xbox Halo CE **`default.xbe`**.
+It is not a separate download, and renaming the `.xbe` will not work.
+If Halo already runs on your Vita, keep the image you have and skip this step.
+
+Install Python 3, then download [xbe_parse.py](recompiler/xbe_parse.py) and
+[xbe_image.py](recompiler/xbe_image.py) with **Download raw file** on each file page.
+Place both scripts beside your extracted `haloce/` folder, which contains
+`default.xbe` and `maps/`. Open a terminal in the folder containing the scripts.
+
+**Windows — Command Prompt:**
+
+```bat
+py -3 xbe_parse.py haloce\default.xbe --json > game_manifest.json
+py -3 xbe_image.py haloce\default.xbe game_manifest.json halo_image.bin
+```
+
+**Linux / macOS:**
+
+```sh
+python3 xbe_parse.py haloce/default.xbe --json > game_manifest.json
+python3 xbe_image.py haloce/default.xbe game_manifest.json halo_image.bin
+```
+
+This creates **`halo_image.bin` beside the scripts**. Copy it to
+**`ux0:data/xita/halo_image.bin`**, and copy your `haloce/` folder to
+**`ux0:data/xita/haloce/`**. Your executable must match the
+[supported Xbox revision](docs/game-data.md#supported-game-copy).
+
 ## Screenshots
 
 Actual development captures; select an image to view it at full size.
@@ -119,6 +149,11 @@ To work on the code, see [Building from source](docs/building.md),
 [modular architecture](docs/modular-architecture.md). Source builds currently
 require additional development inputs described in the build guide.
 Public-release preparation is tracked in the [release audit](docs/release-audit.md).
+
+The source is organized into [runtime/](runtime/README.md) for the Vita renderer
+and application, [recompiler/](recompiler/README.md) for the offline pipeline,
+and [games/](games/) for title profiles. See the [project layout](docs/project-layout.md)
+for the remaining folders and local build inputs.
 
 Xita's original code and documentation are **GPL-3.0-only**. See [LICENSE](LICENSE),
 [NOTICE](NOTICE) and [third-party notices](THIRD_PARTY.md). This does not grant

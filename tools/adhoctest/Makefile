@@ -23,8 +23,8 @@ VPK := $(PROJECT).vpk
 all: $(VPK)
 $(BUILD):
 	mkdir -p $@
-$(ELF): main.c screen.c screen.h Makefile | $(BUILD)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ main.c screen.c $(LIBS)
+$(ELF): runtime/main.c screen.c screen.h Makefile | $(BUILD)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ runtime/main.c screen.c $(LIBS)
 $(VELF): $(ELF)
 	vita-elf-create $< $@
 $(EBOOT): $(VELF)

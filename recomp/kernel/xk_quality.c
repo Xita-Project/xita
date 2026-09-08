@@ -4,7 +4,7 @@
  */
 #include "xk.h"
 #include "xk_quality.h"
-#include "../../xv_quality_settings.h"
+#include "../../runtime/xv_quality_settings.h"
 #include <math.h>
 
 #define TAG_BASE 0x803A6000u

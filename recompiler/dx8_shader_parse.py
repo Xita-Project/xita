@@ -39,6 +39,13 @@ Only the Python standard library is used.
 
 from __future__ import annotations
 
+# Support running this script directly from any working directory.
+if __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
 import argparse
 import json
 import os
@@ -262,7 +269,7 @@ class AddressSpace:
         if magic == b"XBEH":
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             try:
-                import xbe_parse  # type: ignore
+                from recompiler import xbe_parse  # type: ignore
                 with open(path, "rb") as f:
                     info = xbe_parse.XbeParser(f.read(), path).parse()
                 return cls(json.loads(xbe_parse.to_json(info)))
@@ -928,7 +935,7 @@ def _op_comment(op: Op, bias: int) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="dx8_shader_parse.py",
+        prog="recompiler/dx8_shader_parse.py",
         description="Decode Xbox DX8 vertex declarations and NV2A vertex-shader microcode (Xita Stage 2).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Locations are file offsets (0x1234) or virtual addresses (va:0x31400, needs --manifest\n"

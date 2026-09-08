@@ -20,7 +20,7 @@ code = r'''#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include "xv_stencil.h"
+#include "runtime/xv_stencil.h"
 struct { xv_stencil stencil; uint32_t alpha_test, alpha_blend, color_mask, fog_color, alpha_func,
  alpha_ref, src_blend, dst_blend, blend_op, z_func, z_write, ps_shadow[60], ps_dirty; } xd3d_state;
 struct { unsigned m,n,last; } g_hm[128];

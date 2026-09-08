@@ -3,7 +3,7 @@
  * Generated guards complete results before brightness reset/read or query reuse. */
 #include "xk.h"
 #include "xk_flare.h"
-#include "../../xv_visibility.h"
+#include "../../runtime/xv_visibility.h"
 #include <stdlib.h>
 
 extern uint32_t xd3d_r_visibility_result(uint32_t id, uint32_t *pixels);

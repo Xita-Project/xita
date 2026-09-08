@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 SLUG = re.compile(r"[a-z][a-z0-9_]*\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -69,7 +69,7 @@ class GameProfile:
 
     def validate_image(self, image):
         """Reject another revision or a stale/edited parser manifest before writing."""
-        from xbe_parse import XbeParser, to_json
+        from recompiler.xbe_parse import XbeParser, to_json
         if hashlib.sha256(image.data).hexdigest() != self.binary["sha256"]:
             raise ValueError(f"{self.id}: XBE SHA-256 mismatch; this profile is revision-specific")
         actual = json.loads(to_json(XbeParser(image.data, "<profile input>").parse()))

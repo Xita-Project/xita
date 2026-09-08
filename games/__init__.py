@@ -1,5 +1,5 @@
 """Reviewed game adapters. Adding a profile alone does not register Python code."""
-from xita_recomp_core.hooks import NoGameHooks
+from recompiler.core.hooks import NoGameHooks
 
 
 def load_hooks(adapter, image):

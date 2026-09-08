@@ -8,7 +8,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include "../../xv_texture_worker.c"
+#include "../../runtime/xv_texture_worker.c"
 
 static sem_t semaphores[8];
 static unsigned next_sema, live_semas, fail_step, step, cleaned, starts;

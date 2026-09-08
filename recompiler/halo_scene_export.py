@@ -26,13 +26,20 @@ Usage: halo_scene_export.py haloce/maps/ui.map -o assets/ui_scene.bin [--models 
 
 from __future__ import annotations
 
+# Support running this script directly from any working directory.
+if __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
 import argparse
 import os
 import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from halo_map import HaloMap, TAG_BASE  # noqa: E402
+from recompiler.halo_map import HaloMap, TAG_BASE  # noqa: E402
 
 GUEST_MASK = 0x03FFFFFF
 TEX_STRUCT_BASE = 0x00F00000          # X_D3DPixelContainer table
@@ -304,7 +311,7 @@ class SceneExporter:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="halo_scene_export.py")
+    ap = argparse.ArgumentParser(prog="recompiler/halo_scene_export.py")
     ap.add_argument("map")
     ap.add_argument("-o", "--output", default="assets/ui_scene.bin")
     ap.add_argument("--models", nargs="*", default=["sky\\sky_ui\\sky_ui", "scenery\\halo\\halo"])

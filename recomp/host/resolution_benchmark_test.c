@@ -1,6 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
-#include "../../xv_benchmark.c"
+#include "../../runtime/xv_benchmark.c"
 void xv_logf(const char *fmt,...) { (void)fmt; }
 static int optimization=-1;
 static unsigned switches;

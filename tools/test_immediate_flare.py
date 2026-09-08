@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 root = pathlib.Path(__file__).resolve().parents[1]
 sdk = pathlib.Path(os.environ.get("VITASDK", str(pathlib.Path.home() / "vitasdk")))
-s = (root / "xv_ui_gxm.c").read_text()
+s = (root / "runtime/xv_ui_gxm.c").read_text()
 parts = []
 for begin, end in [("static inline uint32_t pack_argb(", "void xv_ui_gxm_clear("),
                    ("static unsigned g_flare_seen", "void xd3d_r_im_end(")]:

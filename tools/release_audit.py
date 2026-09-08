@@ -38,6 +38,8 @@ def path_risks(name):
         reasons.append('translated-or-captured-game-shader')
     if name in {'game_manifest.json', 'halo_symbols.json'} or low.startswith('haloce/'):
         reasons.append('game-input-provenance-review')
+    if low.startswith('local/'):
+        reasons.append('private-runtime-or-local-data')
     if low.startswith(('assets/', 'site/', 'sce_sys/')) or p.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp', '.mp4', '.wav', '.ogg', '.mp3'}:
         reasons.append('artwork-or-media-provenance-review')
     if p.suffix.lower() in {'.log', '.sav'} or any(x.lower() in {'save', 'saves', '.env', '.claude', '.codex'} for x in p.parts):

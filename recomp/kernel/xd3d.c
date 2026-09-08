@@ -17,7 +17,7 @@
 #include "xk_flare.h"
 extern void xv_flare_barrier(unsigned) __attribute__((weak));
 extern void xv_flare_report(unsigned) __attribute__((weak));
-#include "../../xv_visibility.h"
+#include "../../runtime/xv_visibility.h"
 
 #define D3DLOG(...) xk_os_log("[d3d] " __VA_ARGS__)
 
@@ -851,8 +851,8 @@ static uint32_t psdef_hash(const uint8_t *d)
     }
     return h;
 }
-#include "../../xv_ps_key.h"
-#include "../../xv_ps_identity.h"
+#include "../../runtime/xv_ps_key.h"
+#include "../../runtime/xv_ps_identity.h"
 static xv_ps_identity_cache ps_identity_cache;
 void xd3d_prepare_report(unsigned frames)
 {

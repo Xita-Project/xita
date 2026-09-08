@@ -20,8 +20,8 @@
 
 #include "xk_os.h"
 #include "xk_read_retry.h"
-#include "../../xv_cpu.h"
-#include "../../xv_benchmark.h"
+#include "../../runtime/xv_cpu.h"
+#include "../../runtime/xv_benchmark.h"
 #include "xk.h"                 /* X_M32/X_M8, xk_file_in_ui_map (pad context) */
 
 void xv_logf(const char *fmt, ...);        /* app-side sink (xv_log.c): console + ux0:data/xita/xita.log */

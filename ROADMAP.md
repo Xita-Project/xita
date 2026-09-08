@@ -1,7 +1,7 @@
 # Xita Roadmap
 
 Xita runs Halo: Combat Evolved's original Xbox executable on the PlayStation Vita. The
-offline recompiler (`xita-recomp`, `xita_recomp.py`) lifts the x86 code to C; the runtime
+offline recompiler (`python -m recompiler`) lifts the x86 code to C; the runtime
 (`xita`, `xita.vpk`) supplies the Xbox kernel, Direct3D and DirectSound surface on top of
 the Vita's GXM, sceCtrl, sceAudio and sceIo. This document is the planning reference for
 the remaining work. Gameplay performance and stability gate later work; the dashboard
@@ -758,7 +758,7 @@ Kept here because these are engine work, not frontend work:
       directions. Audit follow-up: scalar `X_M16/32/64/F32` lvalues and HLE uses of
       contiguous `X_G` pointers still need page-aware handling. Gameplay verification
       remains open.
-- [~] **P1 — Shader fallback sampler mismatch.** [xv_d3d.c](xv_d3d.c) now uses
+- [~] **P1 — Shader fallback sampler mismatch.** [xv_d3d.c](runtime/xv_d3d.c) now uses
       the cube mask only when the combiner shader was selected; heuristic fallbacks
       bind 2D textures.
       Verify forced link failure and cache exhaustion on Vita hardware.
@@ -769,7 +769,7 @@ Kept here because these are engine work, not frontend work:
       sizes, fragmentation, full-pool exhaustion and recovery; hardware soak pending.
 - [~] **P1 — Stale shader overrides during upgrades.** The connected Vita's installed
       shaders matched the repository, but 67 device-compiled overrides differed and
-      predated fixes including bone-index bounds and depth handling. [xv_shader.c](xv_shader.c)
+      predated fixes including bone-index bounds and depth handling. [xv_shader.c](runtime/xv_shader.c)
       now prefers packaged shaders; `XV_SHADER_OVERRIDE=1` explicitly enables development
       overrides. Host tests verify both precedence modes and missing-file fallbacks.
 - [ ] **P1 — a10 near-plane stretching on hardware.** The user reports nearby surfaces

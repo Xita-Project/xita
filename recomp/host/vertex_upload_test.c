@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #define XV_VERTEX_UPLOAD_BYTES 256u
-#include "../../xv_vertex_upload.c"
+#include "../../runtime/xv_vertex_upload.c"
 static struct { void *p; int mapped; } blocks[16];
 static unsigned next_id=1, live, fail_at, calls, flushes;
 void xv_logf(const char *fmt, ...) {}

@@ -1,6 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
-#include "../../xv_stencil_gxm.h"
+#include "../../runtime/xv_stencil_gxm.h"
 
 static SceGxmStencilFunc func;
 static SceGxmStencilOp pass;

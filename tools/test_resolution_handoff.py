@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 
 root = pathlib.Path(__file__).resolve().parents[1]
-source = (root / 'main.c').read_text()
+source = (root / 'runtime/main.c').read_text()
 start = source.index('static int xv_pump_resolution(void)')
 end = source.index('\n/* Only called on the recording thread', start)
 prefix = r'''

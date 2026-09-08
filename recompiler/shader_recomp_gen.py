@@ -740,7 +740,7 @@ def binding_manifest(p: Plan, out_path: str) -> dict:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="shader_recomp_gen.py",
+        prog="recompiler/shader_recomp_gen.py",
         description="Generate a Vita Cg vertex shader from dx8_shader_parse.py --json output (Xita Stage 3).")
     ap.add_argument("json", help="Stage 2 JSON (dx8_shader_parse.py ... --json > file)")
     ap.add_argument("-o", "--output", help="output .cg path (default: <json basename>.cg)")

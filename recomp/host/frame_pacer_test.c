@@ -1,6 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
-#include "../../xv_frame_pacer.h"
+#include "../../runtime/xv_frame_pacer.h"
 int main(void)
 {
     uint64_t next = 0;

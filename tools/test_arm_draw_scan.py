@@ -26,14 +26,14 @@ parser.add_argument('--output-dir', required=True, type=Path)
 args = parser.parse_args()
 out = args.output_dir.resolve()
 out.mkdir(parents=True, exist_ok=True)
-source = (root / 'xv_d3d.c').read_text()
+source = (root / 'runtime/xv_d3d.c').read_text()
 start = source.index('void xv_d3d_SetAllConstants(')
 end = source.index('\nvoid ', start + 1)
 setter = source[start:end]
 wrapper = out / 'draw-scan.c'
-wrapper.write_text('''#include "xv_index_copy.h"
-#include "xv_snapshot_copy.h"
-#include "xv_bytes_equal.h"
+wrapper.write_text('''#include "runtime/xv_index_copy.h"
+#include "runtime/xv_snapshot_copy.h"
+#include "runtime/xv_bytes_equal.h"
 static struct { float vsc[192][4]; unsigned vsc_gen; } S;
 static unsigned scan_constant_checks, scan_constant_reused;
 static uint64_t scan_constant_bytes;
@@ -248,6 +248,6 @@ report = {'index_cases': index_cases, 'constant_cases': constant_cases,
     'constant_instruction_counts_not_cycles': constant_rows,
     'elf_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
     'source_sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
-        for name in ['xv_d3d.c', 'xv_index_copy.h', 'xv_bytes_equal.h', 'xv_snapshot_copy.h']}}
+        for name in ['runtime/xv_d3d.c', 'runtime/xv_index_copy.h', 'runtime/xv_bytes_equal.h', 'runtime/xv_snapshot_copy.h']}}
 (out / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
 print(json.dumps(report, indent=2))

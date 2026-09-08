@@ -2,8 +2,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include "../../xv_alpha_range.h"
-#include "../../xv_texture_decode.h"
+#include "../../runtime/xv_alpha_range.h"
+#include "../../runtime/xv_texture_decode.h"
 
 int main(void)
 {

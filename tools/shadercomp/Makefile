@@ -1,4 +1,4 @@
-# xv_shadercomp — on-device Cg -> GXP compiler (see main.c)
+# xv_shadercomp — on-device Cg -> GXP compiler (see runtime/main.c)
 #   make            -> xv_shadercomp.vpk   (install with VitaShell, run once)
 
 PROJECT   := xv_shadercomp
@@ -35,7 +35,7 @@ all: $(VPK)
 $(BUILD):
 	@mkdir -p $(BUILD)
 
-$(ELF): main.c | $(BUILD)
+$(ELF): runtime/main.c | $(BUILD)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
 
 $(VELF): $(ELF)

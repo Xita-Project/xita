@@ -2,8 +2,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include "../../xv_texture_alpha.h"
-#include "../../xv_texture_decode.h"
+#include "../../runtime/xv_texture_alpha.h"
+#include "../../runtime/xv_texture_decode.h"
 
 static void compare(const uint8_t b[16], unsigned fmt)
 {

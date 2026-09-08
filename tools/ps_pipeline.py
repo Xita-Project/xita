@@ -21,8 +21,8 @@ SH = os.path.join(ROOT, "shaders")
 DEFS = os.path.join(SH, "psdefs")
 PY = sys.executable
 sys.path.insert(0, ROOT)
-from dx8_pixelshader_parse import decode_psdef
-import pixelshader_recomp_gen as gen
+from recompiler.dx8_pixelshader_parse import decode_psdef
+from recompiler import pixelshader_recomp_gen as gen
 from tools.psdef_hash import original_hash, canonicalize, canonical_hash
 from tools.specialize_ps_alpha import specialize
 VAR_BITS = [("color0", 1), ("color1", 2), ("texcoord0", 4), ("texcoord1", 8), ("texcoord2", 16), ("texcoord3", 32), ("fog", 64)]

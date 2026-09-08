@@ -1,7 +1,7 @@
 /* Execute the actual monitor with controlled kernel counters and wall time. */
 #include <assert.h>
 #include <stdarg.h>
-#include "../../xv_cpu.c"
+#include "../../runtime/xv_cpu.c"
 
 static SceKernelSystemInfo fixture;
 static int fixture_rc, queries, logs;

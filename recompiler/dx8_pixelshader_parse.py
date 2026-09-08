@@ -38,6 +38,13 @@ Usage:
 
 from __future__ import annotations
 
+# Support running this script directly from any working directory.
+if __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
 import argparse
 import json
 import os
@@ -47,7 +54,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import dx8_shader_parse as s2  # noqa: E402  (AddressSpace / ShaderError)
+from recompiler import dx8_shader_parse as s2  # noqa: E402  (AddressSpace / ShaderError)
 
 PSDEF_SIZE = 0xF0
 PSDEF_FMT = "<8I I I 8I 8I 8I 8I I I I 8I I I I I I I I"
@@ -425,7 +432,7 @@ def print_psdef(d: PixelShaderDef, out=sys.stdout) -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    ap = argparse.ArgumentParser(prog="dx8_pixelshader_parse.py",
+    ap = argparse.ArgumentParser(prog="recompiler/dx8_pixelshader_parse.py",
                                  description="Decode Xbox D3DPIXELSHADERDEF register-combiner shaders (Xita Stage 2c).")
     ap.add_argument("file")
     ap.add_argument("--def", dest="psdef", metavar="LOC", help="location of one def (0x.. or va:0x..)")
