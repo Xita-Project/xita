@@ -23,6 +23,12 @@ uint32_t *g_xpt;                                      /* 1M entries: virtual pag
 static uint8_t  g_phys_used[NPAGES];                  /* physical page bitmap (byte per page) */
 static uint8_t  g_virt_committed[NPAGES];             /* virtual pages below 64 MB that own a private physical page */
 static uint32_t g_image_lo, g_image_hi, g_trash_off;
+/* 64-byte kernel-pool units: zero = free, length at the head, UINT16_MAX inside.
+ * 96 KB of host metadata covers the entire 3 MB pool, with no fixed free-list limit. */
+#define KPOOL_UNIT 64u
+#define KPOOL_UNITS ((XRAM_SIZE - KERNEL_VA) / KPOOL_UNIT)
+static uint16_t g_kunits[KPOOL_UNITS];
+static uint32_t g_khint;
 uint8_t *g_img_base;   /* g_xram + XRAM_SIZE - g_image_lo: flat base for constant image-address access (xv_x86rt.h X_IMG*) */
 
 typedef struct { uint32_t va, size; uint32_t flags; } vrange_t;       /* virtual reservations */
@@ -55,6 +61,7 @@ void xk_mem_setup(uint32_t image_base, uint32_t image_size)
     memset(g_phys_used, 0, sizeof g_phys_used);
     for (uint32_t pa = KERNEL_VA; pa < XRAM_SIZE; pa += XK_PAGE) g_phys_used[pa / XK_PAGE] = 1;   /* kernel area: identity, reserved */
     g_nvr = 0; g_npr = 0;
+    memset(g_kunits, 0, sizeof g_kunits); g_khint = 0;
     /* the image's virtual range is reserved (never handed out) */
     g_vr[g_nvr++] = (vrange_t){ g_image_lo, g_image_hi - g_image_lo, 0xFFFFFFFFu };
     g_vr[g_nvr++] = (vrange_t){ KERNEL_VA, XRAM_SIZE - KERNEL_VA, 0xFFFFFFFFu };
@@ -179,17 +186,37 @@ int xk_mem_free(uint32_t va)
 uint32_t xk_mem_size(uint32_t va) { int i = vr_find(va); return i >= 0 ? g_vr[i].size : 0; }
 uint32_t xk_mem_available(void) { return phys_free_pages() * XK_PAGE; }
 
-/* kernel objects: bump/free-list inside the identity-mapped kernel area */
-typedef struct { uint32_t addr, size; } kblk_t;
-static kblk_t g_kfree[512]; static int g_nkfree; static uint32_t g_kbump = KERNEL_VA;
+/* Kernel objects remain identity-mapped; adjacent freed units can serve larger requests. */
 uint32_t xk_kalloc(uint32_t size)
 {
-    size = (size + 63) & ~63u;
-    for (int i = 0; i < g_nkfree; ++i) if (g_kfree[i].size >= size) { uint32_t a = g_kfree[i].addr; g_kfree[i].addr += size; g_kfree[i].size -= size; if (!g_kfree[i].size) g_kfree[i] = g_kfree[--g_nkfree]; memset(X_G(a), 0, size); return a; }
-    if (g_kbump + size > XRAM_SIZE) { XK_LOG("kalloc: out of kernel memory\n"); return 0; }
-    uint32_t a = g_kbump; g_kbump += size; memset(X_G(a), 0, size); return a;
+    if (!size) size = 1;
+    if (size > XRAM_SIZE - KERNEL_VA) return 0;
+    uint32_t need = (size + KPOOL_UNIT - 1) / KPOOL_UNIT;
+    uint32_t run = 0;
+    for (uint32_t i = g_khint; i < KPOOL_UNITS; ) {
+        if (g_kunits[i]) { run = 0; i += g_kunits[i] == UINT16_MAX ? 1 : g_kunits[i]; continue; }
+        ++i;
+        if (++run < need) continue;
+        uint32_t start = i - need;
+        g_kunits[start] = (uint16_t)need;
+        for (uint32_t j = start + 1; j < i; ++j) g_kunits[j] = UINT16_MAX;
+        /* Preserve earlier holes that were too small for this request. */
+        if (start == g_khint) g_khint = i;
+        uint32_t a = KERNEL_VA + start * KPOOL_UNIT;
+        memset(X_G(a), 0, need * KPOOL_UNIT);
+        return a;
+    }
+    XK_LOG("kalloc: out of kernel memory\n"); return 0;
 }
-void xk_kfree(uint32_t addr) { (void)addr; }
+void xk_kfree(uint32_t addr)
+{
+    if (addr < KERNEL_VA || addr >= XRAM_SIZE || (addr & (KPOOL_UNIT - 1))) return;
+    uint32_t start = (addr - KERNEL_VA) / KPOOL_UNIT;
+    uint16_t n = g_kunits[start];
+    if (!n || n == UINT16_MAX) return; /* null, duplicate or interior free */
+    memset(&g_kunits[start], 0, n * sizeof g_kunits[0]);
+    if (start < g_khint) g_khint = start;
+}
 
 /* ---- exports ------------------------------------------------------------------------------------ */
 /* PVOID MmAllocateContiguousMemoryEx(NumberOfBytes, LowestAcceptable, HighestAcceptable, Alignment, Protect) */

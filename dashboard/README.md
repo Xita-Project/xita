@@ -1,5 +1,76 @@
 # Xita Dashboard
 
+## Integrated startup dashboard
+
+`make RECOMP=1` from the repository root now embeds a simple launcher in Xita
+(`XITA00001`). Its prominent **Launch Game** button opens Halo's normal menu.
+Graphics, Performance, Audio, Controls and Display pages edit the supported runtime settings:
+texture detail (64/128/256/512 existing-mip cap), filtering (Game/Point/Linear),
+mip smoothing (Auto/Off), render resolution (960x544, 848x480, 704x400 or 640x360),
+material detail, lens-flare glow, cosmetic particles, impact-decal lifetime and budget,
+20/25/30 FPS limits, 444/500 MHz CPU requests, extended compressed textures, master volume, look sensitivity,
+deadzone, inverted look, response curve, touch shortcuts, FPS overlay and CPU meter.
+The September 8 local candidate adds **Triple buffering** in Graphics and an
+**About / License** page. Triple buffering defaults off, saves `XV_TRIPLE_BUFFER`,
+and applies before the game workers start. On permits frame preparation ahead
+of the GPU using the existing three slots; a slot still cannot be reused before
+GPU completion. It is experimental, may add input delay, and has no verified
+hardware FPS benefit yet.
+
+About / License gives a short GPL-3.0-only summary. Cross opens the full notice
+and GPL, Up/Down scrolls, Left/Right changes pages, and Circle goes back.
+`tools/embed_license.py` generates the embedded text from the actual root
+`LICENSE` and `NOTICE`; both files and third-party notices accompany the VPK.
+The new quality controls default to Original, decal limits and frame caps to Off,
+and extended compression to Off. 500 MHz requires a supporting overclock plugin;
+the runtime falls back to a 444 MHz request when 500 is rejected or not reported.
+See [settings and implementation details](../docs/quality-options-20260906.md).
+
+Cross enters/selects, Up/Down navigates, Left/Right changes a setting, and Circle
+returns to the sidebar. Controller navigation is supported in this embedded mode.
+Graphics contains twelve visual controls, including effects, frame limit,
+triple buffering and
+extended compression. Five rows are visible at once; Up/Down scrolls the list,
+with a position indicator and scrollbar. CPU clock remains under Performance;
+the FPS overlay and CPU meter remain under Display. Existing setting values are
+preserved when moving between sections.
+The consolidated menu passed host navigation/persistence checks and an isolated
+Vita3K launch check, then was installed over USB September 6 at 14:29–14:30 CDT.
+Direct read and a fresh read-only mount verified the executable and all 657
+other checked files unchanged. That earlier update changed menu organization only;
+the September 8 additions are a separate local candidate.
+
+Each edit saves only its own key. Unknown keys, other diagnostic settings, duplicate
+keys, whitespace and comments survive. A failed save rolls the edited value back.
+The runtime reloads settings before starting the game threads; `xita.cfg` takes
+precedence over the `env.txt` fallback. No game save is touched by the dashboard.
+`XV_DASHBOARD=0` is available for automated runs that need direct boot.
+
+This mode draws into a temporary cached CPU canvas (about 2 MiB), then copies the
+completed frame into the existing inactive CDRAM display buffer before any GPU scene
+or guest/render worker is started. Each CPU-rendered frame waits for the display
+switch before reusing the former front buffer. The final front/back indices carry
+into GXM rendering. Dashboard state is freed on return; there is no dashboard
+worker or dashboard rendering during gameplay. The cached canvas is freed before
+game startup. Drawing directly into uncached display memory caused the reported
+3 fps hardware dashboard; the September 5 hardware log measures 19.7–19.9 fps
+with cached drawing. See the [hardware report](../docs/hardware-20260905-bloodgulch-480p.md).
+
+The API enables this mode with `xv_dash_config.simple_launcher = 1`. Its result
+has `game_id = "haloce"`, an empty map and no save selection. It checks the game
+image and UI map under the configured data root before allowing launch. The
+content-browser API and standalone producer below remain separate legacy modes;
+the integrated dashboard does not promise map/save hand-off or checkpoint repair.
+
+Host tests cover one-button launch, reopening persisted values, selective edits,
+write failure, blocked launch and framebuffer padding. Emulator checks cover
+navigation, saved settings reaching game startup, and the transition to Halo.
+Dashboard scanout and input work on hardware. The cached drawing change and
+expanded graphics settings pass host and emulator checks; the latest hardware
+run confirms the faster dashboard and 480p/Low settings reaching gameplay.
+
+## Standalone prototype
+
 A native, software-rendered first dashboard milestone: an animated green home
 screen, installed Halo: Combat Evolved maps and saves, a disabled Halo 2 entry,
 settings, the default control mapping, and project credits. No game assets or
@@ -123,7 +194,7 @@ The runtime must already be installed. The current runtime does **not** read
 `launch.cfg`: this milestone supplies the producer and launch request, but
 honoring a selected map/save/mode requires a later runtime integration. The
 standalone launcher cannot make the current runtime consume that selection.
-No runtime source is changed here.
+The integrated startup mode above launches the normal game menu directly.
 
 Real hardware still needs to verify scanout timing/tearing, software rendering
 cost at 60 Hz, stick repeat and touch calibration on both panels, memory-card

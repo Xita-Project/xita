@@ -60,7 +60,10 @@ typedef struct {
     const SceGxmProgramParameter *p_psc;          /* uniform float4 psc[16]       */
     const SceGxmProgramParameter *p_fogcolor;     /* uniform float4 xv_fogcolor   */
     const SceGxmProgramParameter *p_atest;        /* uniform float4 xv_atest (alpha test ref,func,enable) */
+    const SceGxmProgramParameter *p_texscale;     /* dependent reads of linear textures use pixel coordinates */
     int                           tex_index[4];   /* resource index of tex0..3 or -1 */
+    uint8_t                       uses_discard, replaces_depth;
+    uint8_t                       alpha_test_mode; /* link cache: 0 generic, 1 disabled, 2 GREATER */
 } xv_fshader_t;
 
 /* Lifecycle (sceGxmInitialize must already have run). */
@@ -77,6 +80,11 @@ int  xv_fshader_load(xv_fshader_t *fs, const char *gxp_path, const xv_vshader_t 
                      const SceGxmBlendInfo *blend);
 void xv_fshader_unload(xv_fshader_t *fs);
 
+/* Samplers of the exact embedded program, without I/O, allocation or linking.
+ * Unknown programs and development overrides conservatively return all four.
+ * Call on the guest recording thread; configuration is fixed before launch. */
+unsigned xv_fshader_embedded_texture_mask(const char *path);
+
 /* Per-draw helpers. */
 void xv_shader_bind(SceGxmContext *ctx, const xv_vshader_t *vs, const xv_fshader_t *fs);
 /* Uniform writes for one draw: reserve the vertex default uniform buffer ONCE
@@ -84,8 +92,7 @@ void xv_shader_bind(SceGxmContext *ctx, const xv_vshader_t *vs, const xv_fshader
  * any number of SetVertexShaderConstant(d3d_reg, count float4s) ranges into it. */
 int  xv_vshader_begin_constants(SceGxmContext *ctx, const xv_vshader_t *vs, void **ub);
 int  xv_vshader_set_constants(void *ub, const xv_vshader_t *vs, int d3d_reg, int count, const float *v);
-/* Value seen by every constant-fed attribute (SetVertexData4f). */
-void xv_shader_set_const_attr(const float v[4]);
 /* Binds vertex streams: `streams[i]` = GPU-visible pointer for declaration stream i;
- * the constant stream (if any) is bound automatically. */
+ * immutable defaults are bound for the constant stream. Mesh replay replaces
+ * that binding with its frame-owned snapshot of all 16 persistent registers. */
 void xv_vshader_set_streams(SceGxmContext *ctx, const xv_vshader_t *vs, const void *const *streams);

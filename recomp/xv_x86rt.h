@@ -17,6 +17,21 @@ extern "C" {
 extern uint8_t  *g_xram;
 extern uint32_t *g_xpt;
 #define X_G(a)      ((void *)(g_xram + g_xpt[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))
+/* Host copies must translate every guest page, including separately committed pages. */
+void x_guest_read_pages(void *dst, uint32_t a, size_t size);
+void x_guest_write_pages(uint32_t a, const void *src, size_t size);
+/* Keep fixed-size, single-page accesses visible to the compiler. Including the
+ * split-copy loop here made GCC emit calls to generic memcpy even for x87 floats. */
+static inline __attribute__((always_inline)) void x_guest_read(void *dst, uint32_t a, size_t size)
+{
+    if (size <= 4096u - (a & 0xFFFu)) { memcpy(dst, X_G(a), size); return; }
+    x_guest_read_pages(dst, a, size);
+}
+static inline __attribute__((always_inline)) void x_guest_write(uint32_t a, const void *src, size_t size)
+{
+    if (size <= 4096u - (a & 0xFFFu)) { memcpy(X_G(a), src, size); return; }
+    x_guest_write_pages(a, src, size);
+}
 /* x86 code reads and writes at any alignment.  On the Vita's Cortex-A9 plain ldr/str tolerate that, but
  * ldrd/strd and the VFP vldr/vstr do not (data abort: a10 load crashed on `fld dword [esi+6]` at an
  * address ending in ...5E).  Under-aligned types make GCC emit only alignment-safe sequences. */
@@ -211,22 +226,22 @@ void x_str_scas(xctx *c, unsigned sz, int mode);
 static inline void x87_push(xctx *c, double v) { c->fsp = (c->fsp - 1u) & 7u; c->st[c->fsp] = v; }
 static inline void x87_pop(xctx *c) { c->fsp = (c->fsp + 1u) & 7u; }
 static inline void x87_init(xctx *c) { c->fsp = 0; c->fcw = 0x037F; c->fsw = 0; }
-static inline double x87_load_f32(xctx *c, uint32_t a) { (void)c; return (double)X_MF32(a); }
-static inline double x87_load_f64(xctx *c, uint32_t a) { double d; (void)c; memcpy(&d, X_G(a), 8); return d; }
+static inline double x87_load_f32(xctx *c, uint32_t a) { (void)c; float v; x_guest_read(&v, a, 4); return (double)v; }
+static inline double x87_load_f64(xctx *c, uint32_t a) { double d; (void)c; x_guest_read(&d, a, 8); return d; }
 double x87_load_f80(xctx *c, uint32_t a);
-static inline double x87_load_i16(xctx *c, uint32_t a) { (void)c; return (double)(int16_t)X_M16(a); }
-static inline double x87_load_i32(xctx *c, uint32_t a) { (void)c; return (double)(int32_t)X_M32(a); }
-static inline double x87_load_i64(xctx *c, uint32_t a) { int64_t v; (void)c; memcpy(&v, X_G(a), 8); return (double)v; }
-static inline void x87_store_f32(xctx *c, uint32_t a, double v) { (void)c; X_MF32(a) = (float)v; }
-static inline void x87_store_f64(xctx *c, uint32_t a, double v) { (void)c; memcpy(X_G(a), &v, 8); }
+static inline double x87_load_i16(xctx *c, uint32_t a) { (void)c; int16_t v; x_guest_read(&v, a, 2); return (double)v; }
+static inline double x87_load_i32(xctx *c, uint32_t a) { (void)c; int32_t v; x_guest_read(&v, a, 4); return (double)v; }
+static inline double x87_load_i64(xctx *c, uint32_t a) { int64_t v; (void)c; x_guest_read(&v, a, 8); return (double)v; }
+static inline void x87_store_f32(xctx *c, uint32_t a, double v) { (void)c; float r = (float)v; x_guest_write(a, &r, 4); }
+static inline void x87_store_f64(xctx *c, uint32_t a, double v) { (void)c; x_guest_write(a, &v, 8); }
 void x87_store_f80(xctx *c, uint32_t a, double v);
 static inline double x87_round(xctx *c, double v) {
     switch ((c->fcw >> 10) & 3u) { case 0: return nearbyint(v); case 1: return floor(v); case 2: return ceil(v); default: return trunc(v); }
 }
 static inline double x87_trunc(xctx *c, double v) { (void)c; return trunc(v); }
-static inline void x87_store_i16(xctx *c, uint32_t a, double v) { (void)c; X_M16(a) = (v >= -32768.0 && v <= 32767.0) ? (uint16_t)(int16_t)v : 0x8000u; }
-static inline void x87_store_i32(xctx *c, uint32_t a, double v) { (void)c; X_M32(a) = (v >= -2147483648.0 && v <= 2147483647.0) ? (uint32_t)(int32_t)v : 0x80000000u; }
-static inline void x87_store_i64(xctx *c, uint32_t a, double v) { int64_t r = (v >= -9.2233720368547758e18 && v < 9.2233720368547758e18) ? (int64_t)v : (int64_t)0x8000000000000000ull; (void)c; memcpy(X_G(a), &r, 8); }
+static inline void x87_store_i16(xctx *c, uint32_t a, double v) { (void)c; uint16_t r = (v >= -32768.0 && v <= 32767.0) ? (uint16_t)(int16_t)v : 0x8000u; x_guest_write(a, &r, 2); }
+static inline void x87_store_i32(xctx *c, uint32_t a, double v) { (void)c; uint32_t r = (v >= -2147483648.0 && v <= 2147483647.0) ? (uint32_t)(int32_t)v : 0x80000000u; x_guest_write(a, &r, 4); }
+static inline void x87_store_i64(xctx *c, uint32_t a, double v) { int64_t r = (v >= -9.2233720368547758e18 && v < 9.2233720368547758e18) ? (int64_t)v : (int64_t)0x8000000000000000ull; (void)c; x_guest_write(a, &r, 8); }
 static inline void x87_compare(xctx *c, double a, double b, int eflags) {
     uint16_t cc;
     if (isnan(a) || isnan(b)) cc = 0x4500;                          /* C3|C2|C0 */
@@ -247,8 +262,8 @@ static inline void x87_fxam(xctx *c) {
 }
 
 /* ---- SSE helpers ----------------------------------------------------------------------- */
-static inline void x_load128(xctx *c, float *d, uint32_t a) { (void)c; memcpy(d, X_G(a), 16); }
-static inline void x_store128(xctx *c, uint32_t a, const float *s) { (void)c; memcpy(X_G(a), s, 16); }
+static inline void x_load128(xctx *c, float *d, uint32_t a) { (void)c; x_guest_read(d, a, 16); }
+static inline void x_store128(xctx *c, uint32_t a, const float *s) { (void)c; x_guest_write(a, s, 16); }
 static inline void x_comiss(xctx *c, float a, float b) {
     uint32_t f = (isnan(a) || isnan(b)) ? 0x45u : (a < b) ? 0x01u : (a == b) ? 0x40u : 0u;
     xf_set_eflags(c, (xf_eflags(c) & ~0x8D5u) | f);

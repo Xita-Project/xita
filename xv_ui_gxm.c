@@ -17,11 +17,19 @@
 #include <psp2/kernel/clib.h>
 
 #include "xv_shader.h"
-extern void xv_gpu_flush(const void *ptr, uint32_t len);   /* dcache clean before GPU read (main.c) */
+#include "xv_frame_slots.h"
+#include "xv_gpu_upload.h"
+#include "xv_vertex_upload.h"
+#include "xv_render_profile.h"
+#include "xv_cpu.h"
+#include "xv_d3d.h"
+#include "xv_stencil_gxm.h"
 #include "xv_ui_gxm.h"
 #include "shaders/xv_layouts.h"           /* xv_vs_halo_vs_03, xv_vs_clear, xv_halo_vs[] */
 
 #include "xv_log.h"
+#include "xv_draw_profile.h"
+#include "xv_flare_clip.h"
 #define UI_LOG(...)  xv_logf("[xv/ui] " __VA_ARGS__)
 
 #define ALIGN_UP(x, a)   (((x) + ((a) - 1)) & ~((uint32_t)(a) - 1))
@@ -30,7 +38,7 @@ extern void xv_gpu_flush(const void *ptr, uint32_t len);   /* dcache clean befor
 #define UI_MAX_VERTS     (UI_MAX_QUADS * 4u)
 #define UI_MAX_BATCHES   1024u
 extern volatile uint64_t xv_pump_us_acc;              /* main.c: render time spent on the pump thread */
-#define UI_FRAMES        2u                /* record double-buffer (frame parity) */
+#define UI_FRAMES        XV_FRAME_SLOTS    /* independently retired recording slots */
 #define UI_TEX_CACHE     768u
 #define UI_TEX_MAXDIM    256u              /* decode no mip level larger than this (level textures are 512-1024) */
 #define UI_TEX_BAD       1024u
@@ -51,7 +59,7 @@ typedef struct { float x, y, z; uint32_t color; } clr_vtx;
 typedef struct { float x, y; float u, v; uint32_t color; } ui_vtx;
 
 typedef struct {
-    uint32_t      first_vertex;            /* into the current frame's vertex half */
+    uint32_t      first_vertex;            /* into the current frame's vertex slot */
     uint32_t      nquads;
     uint8_t       prog;                    /* UI vertex program index (by microcode FNV) */
     uint8_t       stage;                   /* texture stage the combiner reads its image from */
@@ -72,7 +80,7 @@ typedef struct {
 } ui_frame;
 
 /* built texture control words, cached by (guest data pointer, format word) */
-typedef struct { uint32_t data, fmtword, palsum; SceGxmTexture tex; int valid; uint32_t sum, bytes; unsigned checked; uint16_t stable; uint8_t dirty; int16_t next; } ui_tex_entry;   /* stable: consecutive unchanged re-checks (map textures stop being re-hashed once settled) */   /* palsum: hash of the P8 palette used (0 = none) */   /* sum: content hash of dynamic textures; next: hash chain */
+typedef struct { uint32_t data, fmtword, palsum; SceGxmTexture tex; int valid; uint32_t sum, bytes, source_data; unsigned checked; uint16_t stable; uint8_t dirty, opaque, pinned, rgba_layout; int16_t next; } ui_tex_entry;   /* source_data: selected mip's physical address; data remains the resource/cache identity */   /* stable: consecutive unchanged re-checks; palsum: P8 palette hash; sum: source content hash; next: hash chain */
 
 /* one UI vertex program + the fragment programs linked against it (one per texcoord set it writes) */
 typedef struct {
@@ -96,7 +104,7 @@ static struct {
     SceUID           vbuf_uid;  ui_vtx  *vbuf;         /* UI_FRAMES * UI_MAX_VERTS */
     SceUID           ibuf_uid;  uint16_t *ibuf;        /* UI_MAX_QUADS * 6, built once */
     SceUID           clr_uid;   clr_vtx *clrbuf;       /* UI_FRAMES * (4 fullscreen verts + OVL_MAX_QUADS*4 overlay) */
-    SceUID           dec_uid;   uint8_t *dec_base;     /* CPU-decoded linear RGBA8 texture pool */
+    SceUID           dec_uid;   uint8_t *dec_base;     /* Immutable decoded RGBA / native BC texture uploads */
     uint32_t         dec_off, dec_cap;
 
     ui_frame         frame[UI_FRAMES];
@@ -117,7 +125,7 @@ static void *ui_gpu_alloc(uint32_t size, SceUID *uid)
 {
     void *base = NULL;
     size = ALIGN_UP(size, 4 * 1024);
-    *uid = sceKernelAllocMemBlock("xv_ui", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, size, NULL);
+    *uid = sceKernelAllocMemBlock("xv_ui", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, size, NULL);
     if (*uid < 0) { UI_LOG("alloc %u KB failed: 0x%08X\n", size >> 10, *uid); return NULL; }
     sceKernelGetMemBlockBase(*uid, &base);
     int err = sceGxmMapMemory(base, size, SCE_GXM_MEMORY_ATTRIB_READ);
@@ -129,14 +137,11 @@ static void *ui_gpu_alloc(uint32_t size, SceUID *uid)
 /* ---- CPU texture decode to linear RGBA8 (bytes R,G,B,A == GXM U8U8U8U8_ABGR) --------------------
  * The GPU's hardware twiddle does not match the NV2A layout for Xbox's swizzled/DXT UI atlas, so we
  * de-swizzle + decompress once on the CPU (textures are cached).  Same logic proved correct on host. */
-static uint32_t ui_morton1(uint32_t x){ x&=0x55555555; x=(x|(x>>1))&0x33333333; x=(x|(x>>2))&0x0F0F0F0F; x=(x|(x>>4))&0x00FF00FF; x=(x|(x>>8))&0x0000FFFF; return x; }
-static void ui_unswz(unsigned w, unsigned h, unsigned idx, unsigned *ox, unsigned *oy){
-    unsigned bx=ui_morton1(idx), by=ui_morton1(idx>>1), lw=0, lh=0, t;
-    for(t=w;t>1;t>>=1)lw++; for(t=h;t>1;t>>=1)lh++;
-    unsigned c=lw<lh?lw:lh, m=(1u<<c)-1;
-    if(lw>=lh){*ox=(bx&m)|((idx>>(2*c))<<c);*oy=by&m;} else {*oy=(by&m)|((idx>>(2*c))<<c);*ox=bx&m;}
-    { static int tr = -1; if (tr < 0) tr = getenv("XV_SWZ_T") != NULL; if (tr && w == h) { unsigned t2 = *ox; *ox = *oy; *oy = t2; } }   /* diagnostic: transposed Morton */
-}
+#include "xv_texture_worker.h"
+#include "xv_texture_alpha.h"
+#include "xv_rgba_layout.h"
+#include "xv_geometry_worker.h"
+#include "xv_quality_settings.h"
 /* GXM (PowerVR) twiddle: same min-square/long-axis scheme, but Y occupies the even (low) bits and X the
  * odd ones - the transpose of NV2A's order.  Used when handing block-compressed data to the GPU as-is. */
 static void gxm_unswz(unsigned w, unsigned h, unsigned idx, unsigned *ox, unsigned *oy){
@@ -145,63 +150,46 @@ static void gxm_unswz(unsigned w, unsigned h, unsigned idx, unsigned *ox, unsign
     unsigned c=lw<lh?lw:lh, m=(1u<<c)-1;
     if(lw>=lh){*ox=(bx&m)|((idx>>(2*c))<<c);*oy=by&m;} else {*oy=(by&m)|((idx>>(2*c))<<c);*ox=bx&m;}
 }
-static uint32_t ui_c565(uint16_t v){ unsigned r=(v>>11)&31,g=(v>>5)&63,b=v&31; return 0xFF000000u|((b*255/31)<<16)|((g*255/63)<<8)|(r*255/31); }
-static uint32_t ui_c4444(uint16_t v){ unsigned a=(v>>12)&15,r=(v>>8)&15,g=(v>>4)&15,b=v&15; return ((a*17u)<<24)|((b*17u)<<16)|((g*17u)<<8)|(r*17u); }
-static uint32_t ui_c1555(uint16_t v){ unsigned a=v>>15?255:0,r=(v>>10)&31,g=(v>>5)&31,b=v&31; return (a<<24)|((b*255/31)<<16)|((g*255/31)<<8)|(r*255/31); }
-static void ui_dxt(const uint8_t *s, int fmt, uint32_t out[16]){
-    const uint8_t *cb = fmt==0x0C ? s : s+8;
-    uint16_t c0=cb[0]|(cb[1]<<8), c1=cb[2]|(cb[3]<<8);
-    uint32_t p[4]={ui_c565(c0),ui_c565(c1),0,0};
-    if(c0>c1||fmt!=0x0C){ for(int i=0;i<3;i++){unsigned a=(p[0]>>(i*8))&0xFF,b=(p[1]>>(i*8))&0xFF; p[2]|=(((2*a+b)/3)<<(i*8)); p[3]|=(((a+2*b)/3)<<(i*8));} p[2]|=0xFF000000u; p[3]|=0xFF000000u; }
-    else { for(int i=0;i<3;i++){unsigned a=(p[0]>>(i*8))&0xFF,b=(p[1]>>(i*8))&0xFF; p[2]|=(((a+b)/2)<<(i*8));} p[2]|=0xFF000000u; }
-    uint32_t bits=cb[4]|(cb[5]<<8)|(cb[6]<<16)|((uint32_t)cb[7]<<24);
-    for(int i=0;i<16;i++) out[i]=p[(bits>>(i*2))&3];
-    if(fmt==0x0E) for(int i=0;i<16;i++){ unsigned a4=(s[i/2]>>((i&1)*4))&0xF; out[i]=(out[i]&0x00FFFFFFu)|((a4*17u)<<24); }
-    else if(fmt==0x0F){ unsigned a0=s[0],a1=s[1]; uint64_t ab=0; for(int i=0;i<6;i++) ab|=(uint64_t)s[2+i]<<(i*8);
-        for(int i=0;i<16;i++){ unsigned code=(ab>>(i*3))&7,a; if(code==0)a=a0; else if(code==1)a=a1; else if(a0>a1)a=((8-code)*a0+(code-1)*a1)/7; else if(code==6)a=0; else if(code==7)a=255; else a=((6-code)*a0+(code-1)*a1)/5; out[i]=(out[i]&0x00FFFFFFu)|(a<<24);} }
-}
-/* decode guest texture -> dst (w*h RGBA8, bytes R,G,B,A). Returns 0 on success. */
 static const uint32_t *g_cur_pal;       /* palette (guest memory, D3DCOLOR) for the P8 texture being decoded */
 static uint32_t g_cur_palsum;
+
 static int ui_decode(const uint8_t *src, unsigned fmt, unsigned w, unsigned h, unsigned pitch, int linear, uint32_t *dst)
 {
-    if (fmt==0x0C || fmt==0x0E || fmt==0x0F) {                         /* DXT: linear 4x4 block order */
-        unsigned bw=(w+3)/4, bh=(h+3)/4, bs=(fmt==0x0C?8:16);
-        for (unsigned by=0; by<bh; ++by) for (unsigned bx=0; bx<bw; ++bx) {
-            uint32_t blk[16]; ui_dxt(src + (by*bw+bx)*bs, fmt, blk);
-            for (unsigned i=0;i<16;i++){ unsigned x=bx*4+(i&3), y=by*4+(i>>2); if(x<w&&y<h) dst[y*w+x]=blk[i]; }
-        }
-    } else if (fmt==0x12 || fmt==0x1E || fmt==0x3F || fmt==0x40 || fmt==0x41) {   /* linear 32-bit */
-        for (unsigned y=0;y<h;y++) for (unsigned x=0;x<w;x++){ const uint8_t *p=src+y*pitch+x*4; uint32_t r,g,b,a;
-            if(fmt==0x3F){a=p[3];b=p[2];g=p[1];r=p[0];} else if(fmt==0x41){r=p[3];g=p[2];b=p[1];a=p[0];}
-            else if(fmt==0x40){b=p[3];g=p[2];r=p[1];a=p[0];} else {b=p[0];g=p[1];r=p[2];a=fmt==0x1E?255:p[3];}
-            dst[y*w+x]=(a<<24)|(b<<16)|(g<<8)|r; }
-    } else if (fmt==0x06 || fmt==0x07) {                              /* swizzled A8R8G8B8 */
-        for (unsigned i=0;i<w*h;i++){ unsigned x,y; ui_unswz(w,h,i,&x,&y); const uint8_t *p=src+i*4;
-            if(x<w&&y<h) dst[y*w+x]=((fmt==0x07?255u:p[3])<<24)|(p[0]<<16)|(p[1]<<8)|p[2]; }
-    } else if (fmt==0x02 || fmt==0x03 || fmt==0x04 || fmt==0x05) {    /* swizzled 16-bit */
-        for (unsigned i=0;i<w*h;i++){ unsigned x,y; ui_unswz(w,h,i,&x,&y); uint16_t v=src[i*2]|(src[i*2+1]<<8);
-            if(x<w&&y<h) dst[y*w+x]= fmt==0x05?ui_c565(v): fmt==0x04?ui_c4444(v): ui_c1555(v); }
-    } else if (fmt==0x10 || fmt==0x11 || fmt==0x1C || fmt==0x1D) {    /* linear 16-bit */
-        for (unsigned y=0;y<h;y++) for (unsigned x=0;x<w;x++){ uint16_t v=src[y*pitch+x*2]|(src[y*pitch+x*2+1]<<8);
-            dst[y*w+x]= fmt==0x11?ui_c565(v): fmt==0x1D?ui_c4444(v): ui_c1555(v); }
-    } else if (fmt==0x0B && g_cur_pal) {                              /* P8 swizzled through the bound palette (D3DCOLOR ARGB) */
-        static int flat = -1; if (flat < 0) flat = getenv("XV_P8_FLAT") != NULL;   /* diagnostic: every P8 texture becomes a flat tangent-space normal */
-        for (unsigned i=0;i<w*h;i++){ unsigned x,y; ui_unswz(w,h,i,&x,&y); uint32_t p=g_cur_pal[src[i]];
-            if(x<w&&y<h) dst[y*w+x]=flat ? 0xFFFF8080u : (p&0xFF000000u)|((p&0xFF)<<16)|(p&0xFF00)|((p>>16)&0xFF); }
-    } else if (fmt==0x0B || fmt==0x00 || fmt==0x19 || fmt==0x01) {   /* 8-bit swizzled: L8/P8, A8, AL8 */
-        for (unsigned i=0;i<w*h;i++){ unsigned x,y; ui_unswz(w,h,i,&x,&y); uint8_t l=src[i];
-            if(x<w&&y<h) dst[y*w+x]= fmt==0x19 ? ((uint32_t)l<<24)|0x00FFFFFF : fmt==0x01 ? ((uint32_t)l<<24)|(l<<16)|(l<<8)|l : 0xFF000000u|(l<<16)|(l<<8)|l; }
-    } else if (fmt==0x13 || fmt==0x1F || fmt==0x1B) {                  /* 8-bit linear: L8, A8, AL8 */
-        for (unsigned y=0;y<h;y++) for (unsigned x=0;x<w;x++){ uint8_t l=src[y*pitch+x];
-            dst[y*w+x]= fmt==0x1F ? ((uint32_t)l<<24)|0x00FFFFFF : fmt==0x1B ? ((uint32_t)l<<24)|(l<<16)|(l<<8)|l : 0xFF000000u|(l<<16)|(l<<8)|l; }
-    } else if (fmt==0x1A) {                                             /* A8L8 swizzled */
-        for (unsigned i=0;i<w*h;i++){ unsigned x,y; ui_unswz(w,h,i,&x,&y); uint8_t l=src[i*2], a=src[i*2+1];
-            if(x<w&&y<h) dst[y*w+x]=((uint32_t)a<<24)|(l<<16)|(l<<8)|l; }
-    } else if (fmt==0x20) {                                             /* LIN_A8L8 */
-        for (unsigned y=0;y<h;y++) for (unsigned x=0;x<w;x++){ uint8_t l=src[y*pitch+x*2], a=src[y*pitch+x*2+1]; dst[y*w+x]=((uint32_t)a<<24)|(l<<16)|(l<<8)|l; }
-    } else { (void)linear; return -1; }
-    return 0;
+    /* Resolve diagnostics on the caller; the worker reads only its job inputs. */
+    static int configured, transpose, flat;
+    if (!configured) {
+        transpose = getenv("XV_SWZ_T") != NULL;
+        flat = getenv("XV_P8_FLAT") != NULL;
+        configured = 1;
+    }
+    xv_texture_job job = { src, dst, g_cur_pal, fmt, w, h, pitch, linear, transpose, flat, 0 };
+    return xv_texture_decode(&job);
+}
+/* Comparison override is changed only after the render queue drains. Cache
+ * variants keep both layouts immutable until the normal texture-pool purge. */
+static int g_rgba_swizzled_override=-1;
+static int ui_rgba_swizzled(void)
+{
+    static int configured=-1;
+    if (configured<0) configured=xv_quality_int("XV_RGBA_SWIZZLED",0,0,1);
+    return g_rgba_swizzled_override<0 ? configured : g_rgba_swizzled_override;
+}
+void xv_ui_gxm_rgba_layout_override(int enabled)
+{
+    g_rgba_swizzled_override=enabled<0 ? -1 : !!enabled;
+    UI_LOG("[rgba-layout] decoded power-of-two textures %s; immutable cache variants\n",
+           ui_rgba_swizzled() ? "swizzled" : "linear");
+}
+static int ui_extended_bc(void)
+{
+    static int option=-1;
+    if (option<0) option=xv_quality_int("XV_EXTENDED_BC",0,0,1);
+    return option;
+}
+static int ui_reorder_bc(const uint8_t *src,uint8_t *dst,unsigned fmt,unsigned w,unsigned h)
+{
+    xv_texture_job job={src,(uint32_t *)dst,NULL,fmt,w,h,0,0,0,0,1};
+    return xv_texture_decode(&job);
 }
 
 /* ---- texture control words: CPU-decode Xbox atlas -> linear RGBA8, cached ----------------------- */
@@ -243,6 +231,32 @@ static uint32_t ui_tex_hash(const void *p, uint32_t bytes)
     for (uint32_t i = 0; i < n; i += step) h = (h ^ w[i]) * 16777619u;
     return h;
 }
+/* P8 bindings repeatedly hash the same 256 palette words. Compare every byte
+ * before reusing the FNV result, so CPU writes within a frame, address reuse
+ * and physical aliases remain visible. The comparison has no dependent
+ * multiply chain. Four slots tolerate the usual alternating palette bindings. */
+static struct { uint32_t words[256], sum; int valid; } g_palette_hash[4];
+static unsigned g_palette_reused, g_palette_hashed;
+static int g_palette_override=-1;
+void xv_palette_cache_override(int enabled) { g_palette_override=enabled; }
+static uint32_t ui_palette_hash(const uint32_t *palette)
+{
+    static int enabled = -1;
+    if (enabled < 0) { const char *e=getenv("XV_PALETTE_HASH_CACHE"); enabled=!e || atoi(e)!=0; }
+    int use_cache=g_palette_override<0?enabled:g_palette_override;
+    unsigned slot=((uintptr_t)palette >> 10) & 3u;
+    if (use_cache && g_palette_hash[slot].valid &&
+        !memcmp(g_palette_hash[slot].words,palette,sizeof g_palette_hash[slot].words)) {
+        g_palette_reused++;
+        return g_palette_hash[slot].sum;
+    }
+    g_palette_hashed++;
+    if (!use_cache) return ui_tex_hash(palette,1024) | 1u;
+    memcpy(g_palette_hash[slot].words,palette,sizeof g_palette_hash[slot].words);
+    g_palette_hash[slot].sum=ui_tex_hash(g_palette_hash[slot].words,1024) | 1u;
+    g_palette_hash[slot].valid=1;
+    return g_palette_hash[slot].sum;
+}
 static unsigned ui_fmt_bpp(unsigned fmt)
 {
     switch (fmt) {
@@ -261,6 +275,9 @@ static const SceGxmTexture *ui_texture_for(uint32_t hdr, int coverage) { return 
 static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint32_t pal_guest)
 {
     if (!hdr) return NULL;
+    extern const SceGxmTexture *xv_d3d_render_target_texture(uint32_t hdr);
+    const SceGxmTexture *rt = xv_d3d_render_target_texture(hdr);
+    if (rt) return rt;
     uint32_t data = guest_u32(hdr + 4);              /* X_D3DPixelContainer.Data (guest phys) */
     uint32_t fmtword = guest_u32(hdr + 12);
     uint32_t sizeword = guest_u32(hdr + 16);
@@ -270,9 +287,11 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
     /* P8 with a palette bound: decode through it (bump maps hold normals in the palette); its identity is
      * part of the cache key.  Without a palette P8 falls back to luminance. */
     g_cur_pal = NULL; g_cur_palsum = 0;
-    if (fmt0 == 0x0B && pal_guest) { g_cur_pal = (const uint32_t *)X_G(pal_guest); g_cur_palsum = ui_tex_hash((const uint8_t *)g_cur_pal, 1024) | 1u; }
+    if (fmt0 == 0x0B && pal_guest) { g_cur_pal = (const uint32_t *)X_G(pal_guest); g_cur_palsum = ui_palette_hash(g_cur_pal); }
     int lum_only = (fmt0 == 0x00 || fmt0 == 0x13 || (fmt0 == 0x0B && !g_cur_pal));        /* L8 swz, LIN_L8, P8-as-L8 */
-    if (!lum_only) coverage = 0;
+    /* Alpha-only font fallback is a UI policy, never a mutation of samples
+     * consumed by real material combiners (smoke, dark surfaces, meter ramps). */
+    int alpha_coverage = coverage && !lum_only;
     if (coverage) fmtword |= 0x80000000u;                                 /* separate cache identity */
     /* Textures the game creates at run time (headers live in the kernel heap, e.g. the 128x128 font cache
      * that glyphs are rasterised into on demand) change under us: hash their contents once per frame and
@@ -288,14 +307,15 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
     for (int16_t i = g.texhash[bucket]; i >= 0; i = g.texcache[i].next)
         if (g.texcache[i].valid && g.texcache[i].data == data && g.texcache[i].fmtword == fmtword && g.texcache[i].palsum == g_cur_palsum) {
             ui_tex_entry *e = &g.texcache[i];
+            if (e->rgba_layout && e->rgba_layout != (ui_rgba_swizzled() ? 2 : 1)) continue;
             /* tiny textures (Halo's 4x4 stage dummies, 1D ramps) are rewritten by the CPU, never by a file read,
              * so the read-based invalidation cannot catch them: re-hash them every frame (64 bytes, free) */
             int due = e->bytes && e->checked != g.rec_frame &&
                       (dynamic || e->dirty || e->bytes <= 1024 || (e->stable < 24 && ((g.rec_frame + (unsigned)i) & 15u) == 0));
             if (due) {
                 e->checked = g.rec_frame;
-                uint32_t sum = ui_tex_hash(X_G(0x80000000u | data), e->bytes);
-                if (sum != e->sum) { re = e; static unsigned n; if (n++ < 12) UI_LOG("tex %08X fmt %02X changed (check %u%s): re-decoding in place\n", data, (fmtword >> 8) & 0xFF, e->stable, e->dirty ? ", file read" : ""); e->dirty = 0; break; }   /* stale: re-decode below */
+                uint32_t sum = ui_tex_hash(X_G(0x80000000u | e->source_data), e->bytes);
+                if (sum != e->sum) { re = e; static unsigned n; if (n++ < 12) UI_LOG("tex %08X fmt %02X changed (check %u%s): refreshing upload\n", data, (fmtword >> 8) & 0xFF, e->stable, e->dirty ? ", file read" : ""); e->dirty = 0; break; }   /* stale: re-decode below */
                 e->dirty = 0;
                 if (!dynamic) e->stable++;
             }
@@ -315,7 +335,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
     if (g.texcount >= UI_TEX_CACHE) { g.tex_purge = 1; return NULL; }
 
     /* Cube maps (Format bit 2): six faces back to back, each a full swizzled/DXT mip chain padded to 128
-     * bytes.  Decode level 0 of every face to RGBA, twiddle into GXM's cube layout, one mip. */
+     * bytes. Preserve complete BC chains when enabled; otherwise build RGBA mips. */
     if ((fmtword & 4u) && !sizeword && w == h && ui_is_pow2(w) && w >= 8 && w <= 256) {
         int isdxt_c = (fmt == 0x0C || fmt == 0x0E || fmt == 0x0F); unsigned bs_c = (fmt == 0x0C) ? 8 : 16, bpp_c = ui_fmt_bpp(fmt);
         uint32_t face_bytes = 0; { unsigned lw = w, lh = h; for (unsigned l = 0; l < mips; ++l) { face_bytes += isdxt_c ? ((lw + 3) / 4) * ((lh + 3) / 4) * bs_c : lw * lh * bpp_c; lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1; } }
@@ -327,8 +347,9 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
          * (black contour bands on bump-lit cliffs) and reflections showed the wrong sky.  Upload the full,
          * box-filtered chain per face - that also gives filtered reflections at a distance. */
         unsigned levels = 1; { unsigned lw = w; while (lw > 1) { lw >>= 1; levels++; } }
-        uint32_t face_stride = 0; { unsigned lw = w; for (unsigned l = 0; l < levels; ++l) { face_stride += lw * lw * 4u; lw >>= 1; } }
-        if (w >= 16) face_stride = ALIGN_UP(face_stride, 2048);
+        int keep_bc=ui_extended_bc() && isdxt_c && mips>=levels;
+        uint32_t face_stride = 0; { unsigned lw = w; for (unsigned l = 0; l < levels; ++l) { face_stride += keep_bc ? xv_bc_level_bytes(lw,lw,bs_c) : lw * lw * 4u; lw >>= 1; } }
+        if (w >= (keep_bc ? 32u : 16u)) face_stride = ALIGN_UP(face_stride, 2048);
         uint32_t need = ALIGN_UP(6u * face_stride, 64);
         if (g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
         if (re) re->valid = 0;                                    /* source changed: drop the stale entry, build a fresh one (its pool space is reclaimed at the next purge) */
@@ -337,6 +358,16 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         const uint8_t *base = X_G(0x80000000u | data);
         memset(dst, 0, need);
         for (unsigned f = 0; f < 6; ++f) {
+            if (keep_bc) {
+                const uint8_t *in=base+f*face_bytes;
+                uint8_t *out=(uint8_t *)dst+f*face_stride;
+                for (unsigned l=0,lw=w;l<levels;++l,lw>>=1) {
+                    unsigned bytes=xv_bc_level_bytes(lw,lw,bs_c);
+                    if (ui_reorder_bc(in,out,fmt,lw,lw)) UI_TEX_FAIL();
+                    in+=bytes;out+=bytes;
+                }
+                continue;
+            }
             if (ui_decode(base + f * face_bytes, fmt, w, h, w * bpp_c, 0, tmp) != 0) { UI_LOG("cube face decode failed fmt %02X\n", fmt); UI_TEX_FAIL(); }
             uint32_t *lvl = (uint32_t *)((uint8_t *)dst + f * face_stride); uint32_t *cur = tmp, *nxt = tmp2;
             for (unsigned l = 0, lw = w; l < levels; ++l, lw >>= 1) {
@@ -365,14 +396,17 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
               sceIoClose(fd); } } }
         xv_gpu_flush(dst, need);
         ui_tex_entry *e = &g.texcache[g.texcount];
-        int err = sceGxmTextureInitCube(&e->tex, dst, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, levels);
+        int err = sceGxmTextureInitCube(&e->tex, dst, keep_bc ? gf : SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, levels);
         if (err != SCE_OK) { UI_LOG("textureInitCube(%ux%u fmt %02X, %u mips) failed 0x%08X\n", w, h, fmt, levels, err); UI_TEX_FAIL(); }
         sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
         g.dec_off += need;
         e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1; g.texcount++;
+        e->opaque = e->pinned = 0; /* Cube reinterpretation is not covered by the initial proof. */
         e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache);
+        e->source_data = data;
         e->bytes = 6u * face_bytes; if (e->bytes > 512 * 1024) e->bytes = 512 * 1024; e->sum = ui_tex_hash(base, e->bytes); e->checked = g.rec_frame; e->stable = 0; e->dirty = 0;
         { static unsigned n; if (n++ < 8) UI_LOG("cube map fmt %02X %ux%u x6 (face stride %u) -> cube texture\n", fmt, w, h, face_bytes); }
+        if (keep_bc) UI_LOG("[texture-bc] cube %ux%u: %u mips, %u bytes, face stride %u\n",w,h,levels,need,face_stride);
         sceGxmTextureSetMinFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
         sceGxmTextureSetMagFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
         return &e->tex;
@@ -391,10 +425,15 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
     }
 
     ui_tex_entry *e = re ? re : &g.texcache[g.texcount];
-    int err, as_bc = 0;
-    /* square only: GXM's twiddle for non-square textures is not the min-square/long-axis layout we
-     * assumed (ring/planet textures streaked) - those take the decode path at the capped mip instead */
-    if (isdxt && w == h && ui_is_pow2(w) && w >= 4) {
+    /* A command may already rely on this upload being opaque. Never overwrite
+     * its pixels after granting that proof, even within the recording frame.
+     * The normal pool purge drains published draws before reclaiming storage. */
+    int allocate = 1; /* All recorded uploads are immutable until pool retirement. */
+    int opaque = 0; unsigned rgba_layout = 0;
+    int err, as_bc = 0; unsigned source_consumed=0;
+    /* Rectangular BC and full cube chains are opt-in pending hardware comparison.
+     * Both reorder blocks using the same tested Y-even/X-odd GXM layout. */
+    if (isdxt && (w == h || ui_extended_bc()) && ui_is_pow2(w) && ui_is_pow2(h) && w >= 4 && h >= 4) {
         /* Upload DXT as-is: NV2A stores 4x4 blocks row-major, GXM's swizzled layout wants the blocks
          * twiddled (PowerVR order, see gxm_unswz), so reorder 8/16-byte blocks - no decompression. */
         /* whole mip chain down to 4x4 (Xbox stores the levels back to back; GXM swizzled BC levels are
@@ -403,20 +442,30 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
          * may be what faulted the GPU at the main menu on 2026-09-02 21:50 */
         static int bcmips = -1; if (bcmips < 0) { const char *e = getenv("XV_BC_MIPS"); bcmips = e ? atoi(e) : 0; }
         unsigned levels = 0; uint32_t need = 0;
-        { unsigned lw = w; while (lw >= 4 && levels < (bcmips ? mips : 1)) { need += (lw / 4) * (lw / 4) * bs; lw >>= 1; levels++; } }
+        int rectangular=w!=h;
+        { unsigned lw=w,lh=h,requested=rectangular ? mips : bcmips ? mips : 1;
+          while (levels<requested && (rectangular || (lw>=4 && lh>=4))) {
+              need+=xv_bc_level_bytes(lw,lh,bs); ++levels;
+              if (lw==1 || lh==1) break;
+              lw>>=1;lh>>=1;
+          } }
+        source_consumed=need;
         need = ALIGN_UP(need, 64);
-        if (!re && g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
-        uint8_t *dst = re ? (uint8_t *)sceGxmTextureGetData(&e->tex) : g.dec_base + g.dec_off, *o = dst; const uint8_t *lsrc = src;
-        for (unsigned l = 0, lw = w; l < levels; ++l, lw >>= 1) {
-            unsigned bw = lw / 4, nb = bw * bw;
-            for (unsigned i = 0; i < nb; ++i) { unsigned x, y; gxm_unswz(bw, bw, i, &x, &y); memcpy(o + i * bs, lsrc + (y * bw + x) * bs, bs); }
-            o += nb * bs; lsrc += nb * bs;
+        if (allocate && g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
+        uint8_t *dst = !allocate ? (uint8_t *)sceGxmTextureGetData(&e->tex) : g.dec_base + g.dec_off, *o = dst; const uint8_t *lsrc = src;
+        for (unsigned l = 0, lw = w, lh = h; l < levels; ++l, lw >>= 1, lh >>= 1) {
+            unsigned bytes=xv_bc_level_bytes(lw,lh,bs);
+            if (ui_reorder_bc(lsrc,o,fmt,lw,lh)) UI_TEX_FAIL();
+            o+=bytes;lsrc+=bytes;
         }
+        opaque = xv_alpha_bc_opaque(dst, source_consumed, fmt);
         xv_gpu_flush(dst, need);
         err = sceGxmTextureInitSwizzled(&e->tex, dst, gf, w, h, levels);
         if (err != SCE_OK) { UI_LOG("textureInitSwizzled(%02X %ux%u, %u mips) failed 0x%08X\n", fmt, w, h, levels, err); UI_TEX_FAIL(); }
         if (levels > 1) sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
-        if (!re) g.dec_off += need; as_bc = levels > 1 ? 2 : 1;
+        if (allocate) g.dec_off += need;
+        as_bc = levels > 1 ? 2 : 1;
+        if (rectangular) { static unsigned n; if (n++<16) UI_LOG("[texture-bc] rectangle %ux%u: %u mips, %u bytes\n",w,h,levels,need); }
     } else {
         /* decoded RGBA + a box-filtered mip chain (levels packed after level 0, as GXM lays out linear
          * mips): without mips the 1024x512 hull plating aliased into streaks at grazing angles, and mips
@@ -434,11 +483,23 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
 #define LIN_PAD(x) (((x) + 7u) & ~7u)
         uint32_t need = 0; { unsigned lw = w, lh = h; for (unsigned l = 0; l < levels; ++l) { need += LIN_PAD(lw) * lh * 4u; lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1; } }
         need = ALIGN_UP(need, 64);
-        if (!re && g.dec_off + need > g.dec_cap) { g.tex_purge = 1; return NULL; }
-        uint32_t *dst = re ? (uint32_t *)sceGxmTextureGetData(&e->tex) : (uint32_t *)(g.dec_base + g.dec_off);
+        uint32_t swizzled_bytes=xv_rgba_swizzled_bytes(w,h,levels);
+        rgba_layout=swizzled_bytes ? (ui_rgba_swizzled() ? 2 : 1) : 0;
+        /* A private cached buffer lives through worker completion. No shared
+         * scratch, and no allocation on an unchanged texture's cache-hit path. */
+        uint32_t *scratch=rgba_layout==2 ? malloc(need) : NULL;
+        int swizzled=scratch!=NULL;
+        if (rgba_layout==2 && !swizzled) {
+            static unsigned failures;
+            if (failures++<4) UI_LOG("[rgba-layout] scratch allocation failed; retaining linear layout for this version\n");
+        }
+        if (swizzled) need=ALIGN_UP(swizzled_bytes,64);
+        if (g.dec_off + need > g.dec_cap) { free(scratch); g.tex_purge = 1; return NULL; }
+        uint32_t *gpu=(uint32_t *)(g.dec_base+g.dec_off);
+        uint32_t *dst=swizzled ? scratch : gpu;
         uint64_t dec_t0 = xk_os_monotonic_us();
         if (ui_decode(src, fmt, w, h, pitch ? pitch : w * bpp, linear, dst) != 0) {
-            UI_LOG("unhandled tex fmt %02X (%ux%u)\n", fmt, w, h); UI_TEX_FAIL();
+            UI_LOG("unhandled tex fmt %02X (%ux%u)\n", fmt, w, h); free(scratch); UI_TEX_FAIL();
         }
         {   /* XV_TEXDUMP=<min width>: write decoded textures as PPM to ux0:data/xita/texdump/ */
             static int dump_min = -1; if (dump_min < 0) { const char *e = getenv("XV_TEXDUMP"); dump_min = e ? atoi(e) : 0; if (e && dump_min <= 0) dump_min = 1; }
@@ -456,9 +517,9 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
                     sceIoClose(fd); }
             }
         }
-        if (coverage) {                                   /* L8 for the UI path: coverage -> alpha, RGB white */
+        if (coverage && lum_only) {                       /* L8 for the UI path: coverage -> alpha, RGB white */
             for (unsigned i = 0, N = w * h; i < N; ++i) dst[i] = ((dst[i] & 0xFFu) << 24) | 0x00FFFFFFu;
-        } else if (!lum_only) {
+        } else if (alpha_coverage) {
             /* Font/text atlases with glyph coverage in ALPHA and black RGB: texmod (tex.rgb*color) would show
              * nothing, so set RGB=white and let tex.a drive the blend.  Never for luminance formats (their
              * synthesized alpha is 255 everywhere, which used to turn the small-font cache into a white square). */
@@ -482,18 +543,27 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
                 prev = lvl; lvl += ns * nh; pw = nw; ph = nh;
             }
         }
-        xv_gpu_flush(dst, need);
-        err = sceGxmTextureInitLinear(&e->tex, dst, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, levels);
-        if (err != SCE_OK) { UI_LOG("textureInitLinear(%ux%u, %u mips) failed 0x%08X\n", w, h, levels, err); UI_TEX_FAIL(); }
+        opaque = xv_alpha_rgba_opaque(dst, w, h, levels);
+        if (swizzled) xv_rgba_swizzle(dst,gpu,w,h,levels);
+        free(scratch);
+        xv_gpu_flush(gpu, need);
+        err = swizzled ? sceGxmTextureInitSwizzled(&e->tex, gpu, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, levels)
+                      : sceGxmTextureInitLinear(&e->tex, gpu, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, levels);
+        if (err != SCE_OK) { UI_LOG("textureInitRGBA(%ux%u, %u mips, swizzled %d) failed 0x%08X\n", w, h, levels, swizzled, err); UI_TEX_FAIL(); }
         sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
-        if (!re) g.dec_off += need;
+        if (allocate) g.dec_off += need;
         g_dec_us += xk_os_monotonic_us() - dec_t0; g_dec_n++;
     }
     e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1;
+    e->opaque = opaque; e->pinned = 0; e->rgba_layout = rgba_layout;
     if (!re) { g.texcount++; e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache); }
     e->bytes = 0; e->sum = 0; e->checked = g.rec_frame; e->stable = 0;
     {                                                                 /* size of the source level we consumed */
-        e->bytes = isdxt ? ((w + 3) / 4) * ((h + 3) / 4) * bs : (pitch ? pitch : w * bpp) * h;
+        /* Keep validation and file-read invalidation on the same mip that was
+         * decoded. Comparing its hash with level 0 falsely marked unchanged
+         * large textures dirty on every re-check. */
+        e->source_data = data + (uint32_t)(src - (const uint8_t *)X_G(0x80000000u | data));
+        e->bytes = source_consumed ? source_consumed : isdxt ? ((w + 3) / 4) * ((h + 3) / 4) * bs : (pitch ? pitch : w * bpp) * h;
         if (e->bytes > 512 * 1024) e->bytes = 512 * 1024;
         e->sum = ui_tex_hash(src, e->bytes);
     }
@@ -527,7 +597,7 @@ void xv_ui_gxm_invalidate_range(uint32_t va, uint32_t len)
     for (int i = 0; i < g.texcount; ++i) {
         ui_tex_entry *e = &g.texcache[i];
         if (!e->valid || !e->bytes) continue;
-        uint32_t a = e->data & 0x7FFFFFFFu, b = a + e->bytes;
+        uint32_t a = e->source_data & 0x7FFFFFFFu, b = a + e->bytes;
         if (a < hi && lo < b) { e->dirty = 1; n++; }
     }
     if (n) { static unsigned m; if (m++ < 8) UI_LOG("file read %08X+%u overlaps %u cached texture(s): re-check on next bind\n", va, len, n); }
@@ -546,6 +616,45 @@ static void ui_tex_purge_if_needed(unsigned frame)
 
 const SceGxmTexture *xv_ui_gxm_texture(uint32_t hdr) { return g.ready ? ui_texture_for(hdr, 0) : NULL; }
 const SceGxmTexture *xv_ui_gxm_texture_pal(uint32_t hdr, uint32_t pal_guest) { return g.ready ? ui_texture_for_pal(hdr, 0, pal_guest) : NULL; }
+
+/* Called only on the recording thread, immediately after live resolution.
+ * Accept the cache owner's descriptor itself, never a copied/forged control
+ * word or a render-target alias. The draw stores a value, not this mutable entry. */
+int xv_ui_gxm_texture_opaque(const SceGxmTexture *texture)
+{
+    uintptr_t base = (uintptr_t)&g.texcache[0].tex, ptr = (uintptr_t)texture;
+    if (!texture || ptr < base || (ptr - base) % sizeof(ui_tex_entry)) return 0;
+    uintptr_t i = (ptr - base) / sizeof(ui_tex_entry);
+    if (i >= g.texcount) return 0;
+    ui_tex_entry *e = &g.texcache[i];
+    if (!e->valid || !e->opaque) return 0;
+    e->pinned = 1;
+    return 1;
+}
+
+static int g_texture_filter = -1, g_mip_smooth = -1;
+void xv_ui_gxm_apply_texture_options(SceGxmTexture *texture)
+{
+    if (g_texture_filter < 0) {
+        const char *f = getenv("XV_TEX_FILTER"), *m = getenv("XV_MIP_SMOOTH");
+        g_texture_filter = f ? atoi(f) : 0;
+        if (g_texture_filter < 0 || g_texture_filter > 2) g_texture_filter = 0;
+        g_mip_smooth = m ? atoi(m) != 0 : 1;
+        UI_LOG("texture options: filter %d (0 game, 1 point, 2 linear), mip smoothing %s\n",
+               g_texture_filter, g_mip_smooth ? "auto" : "off");
+    }
+    if (g_texture_filter) {
+        SceGxmTextureFilter min = sceGxmTextureGetMinFilter(texture);
+        int mip = min == SCE_GXM_TEXTURE_FILTER_MIPMAP_LINEAR || min == SCE_GXM_TEXTURE_FILTER_MIPMAP_POINT;
+        sceGxmTextureSetMinFilter(texture, g_texture_filter == 1 ?
+            (mip ? SCE_GXM_TEXTURE_FILTER_MIPMAP_POINT : SCE_GXM_TEXTURE_FILTER_POINT) :
+            (mip ? SCE_GXM_TEXTURE_FILTER_MIPMAP_LINEAR : SCE_GXM_TEXTURE_FILTER_LINEAR));
+        sceGxmTextureSetMagFilter(texture, g_texture_filter == 1 ? SCE_GXM_TEXTURE_FILTER_POINT : SCE_GXM_TEXTURE_FILTER_LINEAR);
+    }
+    /* LINEAR_STRIDED uses these bits for stride, and does not support mips. */
+    if (!g_mip_smooth && sceGxmTextureGetType(texture) != SCE_GXM_TEXTURE_LINEAR_STRIDED)
+        sceGxmTextureSetMipFilter(texture, SCE_GXM_TEXTURE_MIP_FILTER_DISABLED);
+}
 
 /* ---- init ------------------------------------------------------------------------------------- */
 /* How many texcoord sets each known UI microcode writes (fragment programs are linked per set):
@@ -619,6 +728,8 @@ int xv_ui_gxm_init(void)
 
 void xv_ui_gxm_shutdown(void)
 {
+    xv_texture_worker_shutdown();
+    xv_geometry_worker_shutdown();
     if (!g.ready) return;
     if (g.vbuf) { sceGxmUnmapMemory(g.vbuf); sceKernelFreeMemBlock(g.vbuf_uid); }
     if (g.ibuf) { sceGxmUnmapMemory(g.ibuf); sceKernelFreeMemBlock(g.ibuf_uid); }
@@ -679,13 +790,14 @@ void xv_ui_gxm_quads(const xd3d_im_vtx *v, unsigned n, uint32_t tex_hdr, const f
         fr->overflow = 1; return;
     }
 
+    if (!xv_d3d_record_ui(g.rec, fr->bcount)) return;
     ui_batch *b = &fr->batches[fr->bcount++];
     b->first_vertex = fr->vcount;
     b->nquads = quads;
     b->prog = (uint8_t)prog; b->stage = (uint8_t)stage;
     const SceGxmTexture *t = ui_texture_for(tex_hdr, 1);
     b->has_tex = t != NULL;
-    if (t) b->tex = *t;
+    if (t) { b->tex = *t; xv_ui_gxm_apply_texture_options(&b->tex); }
     if (tint) { b->tint[0] = tint[0]; b->tint[1] = tint[1]; b->tint[2] = tint[2]; b->tint[3] = tint[3]; }
     else       b->tint[0] = b->tint[1] = b->tint[2] = b->tint[3] = 1.0f;
 
@@ -712,9 +824,14 @@ void xv_ui_gxm_frame_flip(void)
     if (fr->overflow)
         UI_LOG("frame overflow (%u verts, %u batches) - some UI dropped\n", fr->vcount, fr->bcount);
     /* flush the vertex/clear data we just wrote so the GPU sees it */
-    xv_gpu_flush(fr->verts, fr->vcount * sizeof(ui_vtx));
+    xv_gpu_flush_ui(fr->verts, fr->vcount * sizeof(ui_vtx));
     __atomic_store_n(&g.pub, (int32_t)g.rec, __ATOMIC_RELEASE);    /* hand this frame to the pump */
     g.rec = (g.rec + 1u) % UI_FRAMES;                             /* start recording the next */
+}
+
+void xv_ui_gxm_frame_begin(void)
+{
+    /* xv_present acquired this retired slot after publishing the last frame. */
     ui_frame *nx = &g.frame[g.rec];
     nx->vcount = 0; nx->bcount = 0; nx->has_clear = 0; nx->overflow = 0;
 }
@@ -759,37 +876,120 @@ static unsigned ovl_number(clr_vtx *v, unsigned n, unsigned val, float x_end, fl
     return n;
 }
 
+/* C0/C1/C2, a bar and an explicit percentage. Dashes distinguish unavailable
+ * kernel counters from an idle core. This stays inside the existing quad budget. */
+static unsigned ovl_cpu_row(clr_vtx *v, unsigned n, unsigned core, unsigned usage, float y)
+{
+    const uint32_t white = 0xFFE0E0E0u;
+    uint32_t col = usage > 90 && usage <= 100 ? 0xFFFF8040u : 0xFF70D8FFu;
+    float x = 778, s = 7, t = 1.4f;
+    /* C */
+    n = ovl_rect(v, n, x, y, s, t, white);
+    n = ovl_rect(v, n, x, y, t, 12.6f, white);
+    n = ovl_rect(v, n, x, y + 11.2f, s, t, white);
+    n = ovl_digit(v, n, (int)core, x + 10, y, s, white);
+    n = ovl_rect(v, n, 809, y + 3, 74, 7, 0xFF303030u);
+    if (usage <= 100) {
+        if (usage) n = ovl_rect(v, n, 809, y + 3, 74.0f * usage / 100.0f, 7, col);
+        n = ovl_number(v, n, usage, 938, y, s, col, 1);
+        /* %: two dots and a descending diagonal. */
+        n = ovl_rect(v, n, 940, y + 1, 2, 2, white);
+        n = ovl_rect(v, n, 947, y + 10, 2, 2, white);
+        for (unsigned i = 0; i < 5; ++i) n = ovl_rect(v, n, 946 - i * 1.25f, y + 2 + i * 2, 1.5f, 2, white);
+    } else {
+        n = ovl_rect(v, n, 917, y + 6, 7, t, white);
+        n = ovl_rect(v, n, 928, y + 6, 7, t, white);
+    }
+    return n;
+}
+
 static void xv_ui_gxm_overlay(SceGxmContext *ctx, int32_t idx)
 {
+    extern uint32_t xv_benchmark_status(void) __attribute__((weak));
+    uint32_t test=xv_benchmark_status?xv_benchmark_status():0;
     if (g_xv_overlay_on < 0) { const char *e = getenv("XV_FPS"); g_xv_overlay_on = e ? atoi(e) != 0 : 0; }
-    if (!g_xv_overlay_on) return;
+    if (!g_xv_overlay_on && !test) return;
     clr_vtx *v = &g.clrbuf[idx * (4 + OVL_MAX_QUADS * 4) + 4]; unsigned n = 0;
     const uint32_t bg = 0xA0000000u, fps_col = 0xFF40FF40u, game_col = 0xFFFFD040u, rend_col = 0xFF40C0FFu;
     /* panel top-right: fps | game ms | render ms  (colours: green / amber / blue) */
-    n = ovl_rect(v, n, 960 - 190, 6, 184, 30, bg);
+    n = ovl_rect(v, n, 960 - 190, 6, 184, 96, bg);
     n = ovl_number(v, n, (unsigned)(g_xv_ovl_fps + 0.5f), 960 - 136, 11, 10, fps_col, 1);
     n = ovl_number(v, n, (unsigned)(g_xv_ovl_game_ms + 0.5f), 960 - 74, 11, 10, game_col, 1);
     n = ovl_number(v, n, (unsigned)(g_xv_ovl_render_ms + 0.5f), 960 - 12, 11, 10, rend_col, 1);
+    uint32_t cpu = xv_cpu_usage();
+    for (unsigned i = 0; i < 3; ++i) n = ovl_cpu_row(v, n, i, (cpu >> (8 * i)) & 255u, 42 + 19 * i);
+    if(test) {
+        n=ovl_rect(v,n,770,105,184,35,bg);
+        /* Tiny 3x5 TEST label, followed by resolution and phase progress. */
+        static const unsigned glyphs[]={072222u,074747u,074717u,072222u};
+        static const unsigned material_glyphs[]={074557u,075744u,055557u,0};
+        const unsigned *label=(test&(1u<<19))?material_glyphs:glyphs;
+        for(unsigned c=0;c<4;c++)for(unsigned y=0;y<5;y++)for(unsigned x=0;x<3;x++)
+            if(label[c]&(1u<<((4-y)*3+2-x)))n=ovl_rect(v,n,779+c*9+x*2,111+y*2,2,2,0xFFFFFFFFu);
+        n=ovl_number(v,n,test&1023u,882,108,8,game_col,3);
+        n=ovl_number(v,n,(test>>17)&3u,941,108,8,fps_col,1);
+        n=ovl_rect(v,n,779,130,164,4,0xFF303030u);
+        n=ovl_rect(v,n,779,130,164*((test>>10)&127u)/100.0f,4,fps_col);
+    }
     if (!n) return;
-    xv_gpu_flush(v, n * sizeof(clr_vtx));
+    xv_gpu_flush_pump(v, n * sizeof(clr_vtx));
     sceGxmSetFrontDepthFunc(ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
     sceGxmSetFrontDepthWriteEnable(ctx, SCE_GXM_DEPTH_WRITE_DISABLED);
     xv_shader_bind(ctx, &g.clear_vs, &g.clear_fs);
     const void *streams[1] = { v };
     xv_vshader_set_streams(ctx, &g.clear_vs, streams);
-    sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, (n / 4) * 6);
+    XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, (n / 4) * 6));
 }
 
-void xv_ui_gxm_replay(SceGxmContext *ctx)
+unsigned xv_ui_gxm_record_frame(void) { return g.rec; }
+void xv_ui_gxm_replay_overlay(SceGxmContext *ctx, unsigned frame)
 {
-    if (!g.ready) return;
-    int32_t idx = __atomic_load_n(&g.pub, __ATOMIC_ACQUIRE);
-    if (idx < 0) return;
+    if (!g.ready || frame >= UI_FRAMES) return;
+    sceGxmSetCullMode(ctx, SCE_GXM_CULL_NONE);
+    xv_stencil_bind(ctx, NULL);
+    xv_ui_gxm_overlay(ctx, frame);
+}
+/* Ordered RTT replay retains the scene's viewport and pins the UI ring index. */
+void xv_ui_gxm_replay_batch(SceGxmContext *ctx, unsigned frame, unsigned batch, const void *target)
+{
+    if (!g.ready || frame >= UI_FRAMES || batch >= g.frame[frame].bcount) return;
+    ui_frame *fr = &g.frame[frame];
+    ui_batch *b = &fr->batches[batch];
+    if (target && b->has_tex && sceGxmTextureGetData(&b->tex) == target) {
+        static int warned;
+        if (!warned++) UI_LOG("RT feedback UI batch skipped\n");
+        return;
+    }
+    xv_stencil_bind(ctx, NULL);
+    ui_prog *p = &g.prog[b->prog];
+    sceGxmSetFrontDepthFunc(ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(ctx, SCE_GXM_DEPTH_WRITE_DISABLED);
+    sceGxmSetCullMode(ctx, SCE_GXM_CULL_NONE);
+    xv_shader_bind(ctx, &p->vs, &p->fs[b->stage]);
+    const void *streams[1] = { &fr->verts[b->first_vertex] };
+    xv_vshader_set_streams(ctx, &p->vs, streams);
+    void *ub = NULL;
+    if (xv_vshader_begin_constants(ctx, &p->vs, &ub) == 0) {
+        int cnt = p->desc->c_count > XV_MAX_ATTRS ? XV_MAX_ATTRS : p->desc->c_count;
+        xv_vshader_set_constants(ub, &p->vs, p->desc->c_base, cnt, b->cwin);
+    }
+    if (b->has_tex) sceGxmSetFragmentTexture(ctx, 0, &b->tex);
+    XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, b->nquads * 6));
+}
+
+unsigned xv_ui_gxm_published_frame(void)
+{ return (unsigned)__atomic_load_n(&g.pub, __ATOMIC_ACQUIRE); }
+void xv_ui_gxm_replay(SceGxmContext *ctx, unsigned width, unsigned height)
+{ xv_ui_gxm_replay_frame(ctx, width, height, xv_ui_gxm_published_frame()); }
+void xv_ui_gxm_replay_frame(SceGxmContext *ctx, unsigned width, unsigned height, unsigned idx)
+{
+    if (!g.ready || idx >= UI_FRAMES) return;
     ui_frame *fr = &g.frame[idx];
 
     /* Halo's own VS emits D3D clip space (+y up); GXM's default viewport (yScale = -height/2) already
      * puts +y at the top of the 960x544 target, so keep it explicit here (xv_d3d may have changed it). */
-    sceGxmSetViewport(ctx, 480.0f, 480.0f, 272.0f, -272.0f, 0.5f, 0.5f);
+    sceGxmSetViewport(ctx, width * 0.5f, width * 0.5f, height * 0.5f, -(float)height * 0.5f, 0.5f, 0.5f);
+    xv_stencil_bind(ctx, NULL);
     /* 2D: depth off, cull off */
     sceGxmSetFrontDepthFunc(ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
     sceGxmSetFrontDepthWriteEnable(ctx, SCE_GXM_DEPTH_WRITE_DISABLED);
@@ -801,11 +1001,11 @@ void xv_ui_gxm_replay(SceGxmContext *ctx)
         uint32_t col = fr->clear_argb;
         const float corners[4][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
         for (int i = 0; i < 4; ++i) { cv[i].x = corners[i][0]; cv[i].y = corners[i][1]; cv[i].z = 0.5f; cv[i].color = col; }
-        xv_gpu_flush(cv, 4 * sizeof(clr_vtx));
+        xv_gpu_flush_pump(cv, 4 * sizeof(clr_vtx));
         xv_shader_bind(ctx, &g.clear_vs, &g.clear_fs);
         const void *streams[1] = { cv };
         xv_vshader_set_streams(ctx, &g.clear_vs, streams);
-        sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, 6);
+        XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, 6));
     }
 
     /* UI batches */
@@ -829,7 +1029,7 @@ void xv_ui_gxm_replay(SceGxmContext *ctx)
             if (tdata != last_tex_ptr) { sceGxmSetFragmentTexture(ctx, 0, &b->tex); last_tex_ptr = tdata; }
         }
 
-        sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, b->nquads * 6);
+        XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, g.ibuf, b->nquads * 6));
     }
     xv_ui_gxm_overlay(ctx, idx);
 }
@@ -839,14 +1039,15 @@ void xv_ui_gxm_replay(SceGxmContext *ctx)
  *  the Vita this file provides the strong definitions, so the same game code drives GXM.
  * ============================================================================================== */
 #include "xv_d3d.h"
+#include "xv_passthrough.h"
+#include "xv_hud.h"
 static int g_mesh_path = 1;                              /* world geometry through xv_d3d (set 0 to fall back to UI-only clears) */
-/* Render-to-texture passes (Halo: dynamic object shadows, some fog/reflection effects) are dropped
- * for now: while an offscreen surface is the target nothing is recorded, and draws that sample one
- * of those surfaces are skipped by xv_d3d.  Without this, the offscreen clears wiped the frame. */
+/* Color target state for the legacy immediate UI path. */
 static int g_offscreen;
 void xd3d_r_state(const char *what, uint32_t a, uint32_t b, uint32_t v)
 {
     (void)b;
+    if (!strcmp(what, "ReleaseRenderTarget")) { xv_d3d_ReleaseRenderTarget(a); return; }
     if (!strcmp(what, "SetRenderTarget")) {
         if (!a) return;                                                 /* NULL: keep the current colour target */
         g_offscreen = (v && a != v);
@@ -869,34 +1070,53 @@ static uint32_t gl_blend_to_d3d(uint32_t gl)
     switch (gl) { case 0: return 1; case 1: return 2; case 0x300: return 3; case 0x301: return 4; case 0x302: return 5; case 0x303: return 6;
                   case 0x304: return 7; case 0x305: return 8; case 0x306: return 9; case 0x307: return 10; case 0x308: return 11; default: return 2; }
 }
-void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t data)
+static void sync_draw_state(void)
 {
-    { extern void xd3d_hist_tex_check(void); xd3d_hist_tex_check(); }
-    (void)c;
-    if (!g_mesh_path) return;
-    uint32_t vs = xd3d_state.vs_handle;
-    if (!(vs & 1)) return;                                             /* FVF draws: not yet */
-    uint32_t fnv = guest_u32((vs & ~1u) + 12);
-    uint32_t h = xv_d3d_handle_for_hash(fnv);
-    if (!h) { static unsigned n; if (n++ < 8) UI_LOG("draw: no program for VS fnv %08X\n", fnv); return; }
-    xv_d3d_SetVertexShader(h);
-    xv_d3d_SetAllConstants(xd3d_state.vsc);
+    uint64_t profile = xv_draw_profile_begin();
     xd3d_ps_sync();
-    xv_d3d_SetPixelShader(xd3d_state.ps_hash, xd3d_state.psc);
+    xv_d3d_SetAllAttributes(xd3d_current_attributes());
+    xv_d3d_SetPixelShader(xd3d_state.ps_hash, xd3d_state.ps_key, xd3d_state.psc);
     for (unsigned i = 0; i < 4; ++i) {
         xv_d3d_SetStreamSource(i, xd3d_state.stream_vb[i], xd3d_state.stream_stride[i]);
         xv_d3d_SetTexture(i, xd3d_state.texture[i]);
         xv_d3d_SetTexturePalette(i, xd3d_state.palette[i]);
+        /* XDK 3925 orders ADDRESSU/V at 10/11 and MAG/MINFILTER at 13/14.
+         * The deferred setter already updates this guest table. Leaving GXM's
+         * mesh defaults here forced point sampling even for filtered lightmaps. */
+        xv_d3d_SetTextureStageState(i, X_D3DTSS_ADDRESSU, xd3d_texture_state(i, 10));
+        xv_d3d_SetTextureStageState(i, X_D3DTSS_ADDRESSV, xd3d_texture_state(i, 11));
+        xv_d3d_SetTextureStageState(i, X_D3DTSS_MAGFILTER, xd3d_texture_state(i, 13));
+        xv_d3d_SetTextureStageState(i, X_D3DTSS_MINFILTER, xd3d_texture_state(i, 14));
     }
     /* the kernel model keeps the NV2A/GL tokens the game wrote; xv_d3d speaks D3D enums */
+    xv_d3d_SetStencil(&xd3d_state.stencil);
     xv_d3d_SetRenderState_ZEnable(xd3d_state.z_enable);
     xv_d3d_SetRenderState_ZWriteEnable(xd3d_state.z_write);
     xv_d3d_SetRenderState_ZFunc(xd3d_state.z_func >= 0x200 && xd3d_state.z_func <= 0x207 ? xd3d_state.z_func - 0x200 + 1 : 4);
     xv_d3d_SetRenderState_CullMode(xd3d_state.cull == 0x900 ? 2 : xd3d_state.cull == 0x901 ? 3 : 1);   /* GL_CW / GL_CCW / none */
     xv_d3d_SetRenderState_AlphaBlendEnable(xd3d_state.alpha_blend);
+    xv_d3d_SetRenderState_BlendOp(xd3d_state.blend_op);
     { uint32_t m = xd3d_state.color_mask; xv_d3d_SetRenderState_ColorWriteEnable(((m >> 16) & 1) | ((m >> 7) & 2) | ((m & 1) << 2) | ((m >> 21) & 8)); }   /* -> D3D bits R1 G2 B4 A8 */
     xv_d3d_SetRenderState_SrcBlend(gl_blend_to_d3d(xd3d_state.src_blend));
     xv_d3d_SetRenderState_DestBlend(gl_blend_to_d3d(xd3d_state.dst_blend));
+    xv_draw_profile_step(XV_DRAW_STATE, &profile);
+}
+
+void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t data)
+{
+    { extern void xd3d_hist_tex_check(void); xd3d_hist_tex_check(); }
+    (void)c;
+    if (!g_mesh_path) return;
+    uint32_t vs = xd3d_state.vs_program;
+    if (!(vs & 1)) return;                                             /* FVF draws: not yet */
+    uint32_t fnv = guest_u32((vs & ~1u) + 12);
+    uint64_t profile = xv_draw_profile_begin();
+    uint32_t h = xv_d3d_handle_for_hash(fnv);
+    if (!h) { static unsigned n; if (n++ < 8) UI_LOG("draw: no program for VS fnv %08X\n", fnv); return; }
+    xv_d3d_SetVertexShader(h);
+    xv_d3d_SetAllConstants(xd3d_state.vsc);
+    xv_draw_profile_step(XV_DRAW_SETUP, &profile);
+    sync_draw_state();
     if (indexed) {
         uint32_t ib = xd3d_state.indices;                              /* X_D3DIndexBuffer header; Data = guest address of the WORDs */
         uint32_t idata = data ? data : (ib ? guest_u32(ib + 4) : 0);   /* TEST: bare IB Data again */
@@ -960,13 +1180,164 @@ static unsigned ps_image_stage(uint32_t psdef)
     return best;
 }
 
+/* Immediate lens-flare vertices use the particle declaration, plus v10 set
+ * directly by Halo. Keep that attribute per vertex: the streamed declaration
+ * normally supplies it from one persistent value for the whole draw. */
+static unsigned g_flare_seen, g_flare_culled;
+static void draw_immediate_flare(const xd3d_im_vtx *v, unsigned n)
+{
+    typedef struct {
+        float x, y, z, u, v;
+        uint32_t color;
+        float secondary[4];
+    } flare_vertex;
+    _Static_assert(sizeof(flare_vertex) == 40, "immediate flare vertex layout");
+    static uint32_t handle;
+    static xv_vs_desc_t desc;
+    static xv_attr_desc_t attrs[4];
+    if (!g_mesh_path) return;
+    static int cull=-1;
+    if (cull<0) {
+        const char *e=getenv("XV_FLARE_CULL"), *wc=getenv("XV_WCLAMP");
+        cull=(!e || atoi(e)) && (!wc || !atoi(wc));
+    }
+    g_flare_seen+=n/4;
+    if (cull && n==4 && xv_flare_quad_outside(v,sizeof *v,&xd3d_state.vsc[28])) {
+        g_flare_culled++; return;
+    }
+    if (!handle) {
+        /* Keep normal hash lookup bound to the streamed layout. */
+        if (!xv_d3d_handle_for_hash(xv_vs_halo_vs_56.func_hash)) return;
+        desc = xv_vs_halo_vs_56;
+        memcpy(attrs, desc.attrs, sizeof attrs);
+        attrs[3].stream = 0;
+        attrs[3].offset = 24;
+        desc.attrs = attrs;
+        desc.stride[0] = sizeof(flare_vertex);
+        handle = xv_d3d_RegisterVertexShader(&desc);
+        if (!handle) return;
+    }
+    xv_d3d_SetVertexShader(handle);
+    xv_d3d_SetAllConstants(xd3d_state.vsc);
+    sync_draw_state();
+    for (unsigned first = 0; first + 4 <= n;) {
+        flare_vertex packed[64];
+        unsigned count=0;
+        while (first+4<=n && count+4<=64) {
+            if (cull && n!=4 && xv_flare_quad_outside(v+first,sizeof *v,&xd3d_state.vsc[28])) {
+                g_flare_culled++; first+=4; continue;
+            }
+            for (unsigned i=0;i<4;i++) {
+                const xd3d_im_vtx *src=&v[first+i];
+                packed[count+i]=(flare_vertex){src->a[0][0],src->a[0][1],src->a[0][2],
+                    src->a[4][0],src->a[4][1],pack_argb(src->a[9]),{0}};
+                memcpy(packed[count+i].secondary,src->a[10],sizeof packed[count+i].secondary);
+            }
+            first+=4; count+=4;
+        }
+        if (count) xv_d3d_DrawImmediateStrided(X_D3DPT_QUADLIST,packed,count,sizeof(flare_vertex));
+    }
+}
+
 void xd3d_r_im_end(uint32_t prim, const xd3d_im_vtx *v, unsigned n)
 {
-    if (prim != 7 || n < 4 || g_offscreen) return;       /* QUADLIST only (the UI path) */
+    if (xd3d_im_passthrough()) {
+        if (!g_mesh_path || prim != 7 || n < 4) return;
+        static uint32_t handle;
+        if (!handle) handle = xv_d3d_RegisterVertexShader(&xv_vs_passthrough);
+        if (!handle) return;
+        xv_d3d_SetVertexShader(handle);
+        sync_draw_state();
+        float scale[4][4];
+        for (unsigned t = 0; t < 4; ++t) {
+            scale[t][0] = scale[t][1] = scale[t][2] = scale[t][3] = 1.0f;
+            uint32_t hdr = xd3d_state.texture[t];
+            uint32_t size = hdr ? guest_u32(hdr + 16) : 0;
+            if (size) {
+                scale[t][0] = 1.0f / ((size & 0xFFF) + 1);
+                scale[t][1] = 1.0f / (((size >> 12) & 0xFFF) + 1);
+            }
+        }
+        xv_d3d_SetVertexShaderConstant(0, &scale[0][0], 4);
+        if (xd3d_hist_active()) {
+            UI_LOG("[hist] passthrough rgba %.3f %.3f %.3f %.3f uv %.3f %.3f / %.3f %.3f\n",
+                   v[0].a[3][0], v[0].a[3][1], v[0].a[3][2], v[0].a[3][3],
+                   v[0].a[9][0], v[0].a[9][1], v[0].a[10][0], v[0].a[10][1]);
+        }
+        xv_d3d_DrawImmediate(X_D3DPT_QUADLIST, v, n);
+        return;
+    }
+    if (prim != 7 || n < 4) return;       /* QUADLIST only (the UI path) */
     uint32_t vs = xd3d_state.vs_handle;
     uint32_t decl = (vs & 1) ? guest_u32(vs & ~1u) : 0;
-    if (decl != UI_DECL_VA) return;                      /* other decls handled elsewhere */
-    uint32_t fnv = (vs & 1) ? guest_u32((vs & ~1u) + 12) : 0;
+    uint32_t program = xd3d_state.vs_program;
+    uint32_t fnv = (program & 1) ? guest_u32((program & ~1u) + 12) : 0;
+    if (decl == 0x001E13BCu && fnv == 0x405809D3u) {
+        draw_immediate_flare(v, n);
+        return;
+    }
+    if (decl != UI_DECL_VA) return;
+    xd3d_ps_sync();
+    /* Halo's HUD uses premultiplied/additive blending and a combiner threshold
+     * for meter fills. The one-texture UI fallback loses those constants and
+     * multiplies the reticle's zero alpha into otherwise visible RGB. */
+    uint32_t hud_program = xv_hud_program_for_vs(fnv, xd3d_state.ps_shadow);
+    if (!hud_program) hud_program = xv_composite_program_for_vs(fnv, xd3d_state.ps_shadow);
+    /* Scene copies use this same declaration. Keep their combiner/blend state
+     * and record them in the mesh list so backbuffer aliases resolve on replay. */
+    int scene_copy = 0;
+    for (unsigned t = 0; t < 4; t++) {
+        uint32_t hdr = xd3d_state.texture[t];
+        if (hdr && guest_u32(hdr + 4) && guest_u32(hdr + 4) == xd3d_backbuffer_data()) scene_copy = 1;
+    }
+    if (hud_program || scene_copy) {
+        uint32_t h = xv_d3d_handle_for_hash(fnv);
+        if (!h) return;
+        xv_d3d_SetVertexShader(h);
+        xv_d3d_SetAllConstants(xd3d_state.vsc);
+        sync_draw_state();
+        if (hud_program) xv_d3d_SetPixelShader(hud_program, 0, xd3d_state.psc);
+        if (fnv == 0xBB2F446Bu) {
+            float rows[8][4]; uint32_t sizes[4];
+            for (unsigned t=0;t<4;t++) {
+                uint32_t hdr=xd3d_state.texture[t];
+                sizes[t]=hdr ? guest_u32(hdr+16) : 0;
+            }
+            xv_composite_texture_rows(rows,&xd3d_state.vsc[15],sizes);
+            xv_d3d_SetVertexShaderConstant(-81,&rows[0][0],8);
+        } else if (scene_copy) {
+            /* Linear Xbox copy coordinates are pixels. The original VS applies
+             * its own texture transform, then GXM needs normalized coordinates. */
+            float scale[4]; memcpy(scale, xd3d_state.vsc[32], sizeof scale);
+            uint32_t hdr = xd3d_state.texture[0];
+            uint32_t size = hdr ? guest_u32(hdr + 16) : 0;
+            if (size) { scale[0] /= (size & 0xFFF) + 1; scale[1] /= ((size >> 12) & 0xFFF) + 1; }
+            xv_d3d_SetVertexShaderConstant(-64, scale, 1);
+        }
+        if (xd3d_hist_active()) {
+            extern uint32_t xd3d_alpha_test(void);
+            UI_LOG("[hist] hud ps %08X blendop %08X alpha %08X pos %.1f %.1f / %.1f %.1f\n",
+                   xd3d_state.ps_hash, xd3d_state.blend_op, xd3d_alpha_test(),
+                   v[0].a[0][0], v[0].a[0][1], v[2].a[0][0], v[2].a[0][1]);
+            UI_LOG("[hist] hud sides %.1f %.1f / %.1f %.1f cull %X\n",
+                   v[1].a[0][0], v[1].a[0][1], v[3].a[0][0], v[3].a[0][1], xd3d_state.cull);
+            if (hud_program == 0x5D70F0B3u)
+                for (unsigned i = 0; i < 4; i++)
+                    UI_LOG("[hist] meter c%u %08X %08X\n", i,
+                           xd3d_state.ps_shadow[0x28 / 4 + i], xd3d_state.ps_shadow[0x48 / 4 + i]);
+        }
+        for (unsigned first = 0; first + 4 <= n;) {
+            ui_vtx packed[64];
+            unsigned count = (n - first) & ~3u; if (count > 64) count = 64;
+            for (unsigned i = 0; i < count; i++) {
+                const xd3d_im_vtx *src = &v[first + i];
+                packed[i] = (ui_vtx){src->a[0][0], src->a[0][1], src->a[4][0], src->a[4][1], pack_argb(src->a[9])};
+            }
+            xv_d3d_DrawImmediateStrided(X_D3DPT_QUADLIST, packed, count, sizeof(ui_vtx));
+            first += count;
+        }
+        return;
+    }
     unsigned prog = 0;
     for (uint32_t i = 0; i < g.nprog; ++i) if (g.prog[i].desc->func_hash == fnv) { prog = i; break; }
     unsigned stage = ps_image_stage(xd3d_state.ps_def);
@@ -989,23 +1360,37 @@ void xd3d_r_present(unsigned frame, unsigned draws)
 }
 static void xd3d_r_present_inner(unsigned frame, unsigned draws)
 {
-    { extern void xv_gpu_flush_pending(void); xv_gpu_flush_pending(); }   /* merged dcache cleans for this frame's vertex/index/texture data */
     xd3d_hist_small_check(frame, draws);
     (void)draws;
     extern void xv_present(void);
     uint64_t t0 = t_us();
     if (g_t_last_present) g_t_game_acc += t0 - g_t_last_present;
+    { extern void xv_benchmark_present(void) __attribute__((weak));
+      if(xv_benchmark_present)xv_benchmark_present(); }
     if (g_mesh_path) g_mesh_frame = xv_d3d_EndFrame();
-    xv_ui_gxm_frame_flip();      /* publish the recorded frame */
-    xv_present();                /* fence: block this fiber until the pump has drawn it */
+    xv_ui_gxm_frame_flip();      /* seal; do not reset the next slot yet */
+    xv_gpu_flush_pending();     /* includes the current frame's late UI writes */
+    xv_present();               /* publish, then acquire only the next slots */
+    if (g_mesh_path) xv_d3d_BeginFrame();
+    xv_ui_gxm_frame_begin();
     ui_tex_purge_if_needed(frame);
     uint64_t t1 = t_us();
     g_t_render_acc += t1 - t0; g_t_last_present = t1;
     if (++g_t_frames == 60) {
+        { extern void xv_native_math_report(unsigned); extern void xd3d_prepare_report(unsigned);
+          xv_native_math_report(g_t_frames); xd3d_prepare_report(g_t_frames); }
+        xv_draw_profile_report(g_t_frames);
+        xv_vertex_upload_report(g_t_frames);
+        UI_LOG("[palette-cache] %u frames: %u reused / %u hashed (all 1024 bytes checked)\n",
+            g_t_frames,g_palette_reused,g_palette_hashed);
+        g_palette_reused=g_palette_hashed=0;
+        if (g_flare_seen) UI_LOG("[flare-work] %u quads kept / %u outside screen in %u frames\n",
+            g_flare_seen-g_flare_culled,g_flare_culled,g_t_frames);
+        g_flare_seen=g_flare_culled=0;
         g_xv_ovl_game_ms = g_t_game_acc / 60000.0f; g_xv_ovl_render_ms = g_t_render_acc / 60000.0f;
         g_xv_ovl_fps = 60.0e6f / (float)(g_t_game_acc + g_t_render_acc + 1);
         { extern unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc, xv_n_kicks, xv_n_fires; extern uint64_t xv_t_vbcb_us, xv_t_draw_us, xv_t_present_us; UI_LOG("frame time: game %.1f ms + wait %.1f ms = %.1f fps | pump %.1f ms | %u textures %u KB | decode %u tex %.1f ms | draws/frame %u bsp %u | frames %u | kicks %u fires %u vbcb %.1f ms draw-hle %.1f ms present %.1f ms (per frame)\n",
-               g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), xv_pump_us_acc / 60000.0, g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1), g_t_frames, xv_n_kicks / (g_t_frames ? g_t_frames : 1), xv_n_fires / (g_t_frames ? g_t_frames : 1), xv_t_vbcb_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_draw_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_present_us / 1000.0 / (g_t_frames ? g_t_frames : 1)); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; xv_n_kicks = xv_n_fires = 0; xv_t_vbcb_us = xv_t_draw_us = xv_t_present_us = 0; } g_dec_n = 0; g_dec_us = 0;
+               g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), xv_pump_us_acc / 60000.0, g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1), g_t_frames, xv_n_kicks / (g_t_frames ? g_t_frames : 1), xv_n_fires / (g_t_frames ? g_t_frames : 1), xv_t_vbcb_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_draw_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_present_us / 1000.0 / (g_t_frames ? g_t_frames : 1)); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; xv_n_kicks = xv_n_fires = 0; xv_t_vbcb_us = xv_t_draw_us = xv_t_present_us = 0; } g_dec_n = 0; g_dec_us = 0; xv_texture_worker_report(); xv_geometry_worker_report();
         g_t_frames = 0; g_t_game_acc = g_t_render_acc = 0; xv_pump_us_acc = 0;
     }
 }

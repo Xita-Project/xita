@@ -19,6 +19,9 @@
 #include <psp2/rtc.h>
 
 #include "xk_os.h"
+#include "xk_read_retry.h"
+#include "../../xv_cpu.h"
+#include "../../xv_benchmark.h"
 #include "xk.h"                 /* X_M32/X_M8, xk_file_in_ui_map (pad context) */
 
 void xv_logf(const char *fmt, ...);        /* app-side sink (xv_log.c): console + ux0:data/xita/xita.log */
@@ -42,7 +45,12 @@ void xk_os_log(const char *fmt, ...)
  * playlist's blam.lst failed to open and Halo then wrote through a -1 pointer.  So a guest handle owns
  * only path+flags; the sceIo descriptor is acquired on demand and the least recently used one is
  * evicted once XK_FD_CACHE are live.  All I/O is positional (pread/pwrite), so reopening is invisible. */
-struct xk_file { SceUID fd; int flags; int lsize_slot; char path[128]; struct xk_file *lru_prev, *lru_next; };
+struct xk_file {
+    SceUID fd; int flags; int lsize_slot; char path[128]; struct xk_file *lru_prev, *lru_next;
+    int profile;
+    uint64_t read_bytes, write_bytes, read_us, write_us;
+    uint32_t reads, writes, reported_mb;
+};
 struct xk_dir  { SceUID d; char path[512]; };
 
 #define XK_FD_CACHE 16
@@ -119,15 +127,43 @@ xk_file *xk_os_open(const char *path, int write, int create, int truncate, int *
     f->flags = flags & ~(SCE_O_CREAT | SCE_O_TRUNC);        /* a later reopen must not recreate/clobber */
     g_fds_live++; lru_push_front(f);
     snprintf(f->path, sizeof f->path, "%s", path);
+    { static int profile = -1;
+      if (profile < 0) { const char *e = getenv("XV_LOAD_PROFILE"); profile = e ? atoi(e) != 0 : 1; }
+      size_t len = strlen(path);
+      f->profile = profile && len > 4 && !strcmp(path + len - 4, ".map"); }
     f->lsize_slot = lsize_find(path, 0);
     if (truncate && f->lsize_slot >= 0) g_lsize[f->lsize_slot].size = -1;
     return f;
 }
-void xk_os_close(xk_file *f) { if (f) { fd_release(f); free(f); } }
+static void map_io_report(xk_file *f, int closing)
+{
+    uint32_t mb = (uint32_t)((f->read_bytes + f->write_bytes) >> 20);
+    if (!mb || (!closing && mb < f->reported_mb + 32)) return;
+    xk_os_log("[load-io] %s%s: read %llu KB / %u calls / %llu ms; write %llu KB / %u calls / %llu ms\n",
+              f->path, closing ? " (close)" : "", (unsigned long long)(f->read_bytes >> 10), f->reads,
+              (unsigned long long)(f->read_us / 1000), (unsigned long long)(f->write_bytes >> 10),
+              f->writes, (unsigned long long)(f->write_us / 1000));
+    f->reported_mb = mb;
+}
+void xk_os_close(xk_file *f) { if (f) { if (f->profile) map_io_report(f, 1); fd_release(f); free(f); } }
+static int64_t file_read_once(void *handle, uint64_t pos, void *buf, uint32_t n)
+{
+    return sceIoPread(*(SceUID *)handle, buf, n, (SceOff)pos);
+}
 int64_t xk_os_read(xk_file *f, uint64_t pos, void *buf, uint32_t n)
 {
+    uint64_t started = f->profile ? sceKernelGetProcessTimeWide() : 0;
     SceUID fd = fd_acquire(f); if (fd < 0) return -1;
-    int64_t r = sceIoPread(fd, buf, n, (SceOff)pos);
+    unsigned retries;
+    int64_t r = xk_read_retry(&fd, pos, buf, n, file_read_once, &retries);
+    if (retries && r == n)
+        xk_os_log("[read-retry] %s @%llu: completed %u bytes with %u staged reads\n",
+                  f->path, (unsigned long long)pos, n, retries);
+    if (f->profile) {
+        f->read_us += sceKernelGetProcessTimeWide() - started; f->reads++;
+        if (r > 0) f->read_bytes += (uint64_t)r;
+        map_io_report(f, 0);
+    }
     int64_t ls = logical_size(f);
     if (ls < 0) return r;
     if (r < 0) r = 0;
@@ -140,8 +176,14 @@ int64_t xk_os_read(xk_file *f, uint64_t pos, void *buf, uint32_t n)
 }
 int64_t xk_os_write(xk_file *f, uint64_t pos, const void *buf, uint32_t n)
 {
+    uint64_t started = f->profile ? sceKernelGetProcessTimeWide() : 0;
     SceUID fd = fd_acquire(f); if (fd < 0) return -1;
     int64_t r = sceIoPwrite(fd, buf, n, (SceOff)pos);
+    if (f->profile) {
+        f->write_us += sceKernelGetProcessTimeWide() - started; f->writes++;
+        if (r > 0) f->write_bytes += (uint64_t)r;
+        map_io_report(f, 0);
+    }
     if (r > 0 && f->lsize_slot >= 0 && g_lsize[f->lsize_slot].size >= 0 && (int64_t)(pos + (uint64_t)r) > g_lsize[f->lsize_slot].size)
         g_lsize[f->lsize_slot].size = (int64_t)(pos + (uint64_t)r);
     return r;
@@ -154,8 +196,25 @@ int64_t xk_os_size(xk_file *f)
 }
 int xk_os_truncate(xk_file *f, uint64_t size)
 {
-    /* Logical only (see g_lsize).  Shrinking below the physical size cannot be done on 3.60 sceIo
-     * without rewriting the file, so the logical size just hides the tail. */
+    if (size > INT64_MAX) return -1;
+    /* Checkpoint files must retain their reserved length after a restart. Halo
+     * reinitializes any checkpoint file whose length is not 0x380000, even though its payload is only 0x345000.
+     * Extending with a final zero byte preserves the existing prefix and lets
+     * sceIo zero-fill the gap. Shrinking retains the existing logical behavior. */
+    size_t path_len = strlen(f->path);
+    int checkpoint = path_len >= 13 && !strcmp(f->path + path_len - 13, "/savegame.bin");
+    if (checkpoint) {
+        SceUID fd = fd_acquire(f); if (fd < 0) return -1;
+        int64_t physical = phys_size(fd); if (physical < 0) return -1;
+        if (size >= (uint64_t)physical) {
+            uint8_t zero = 0;
+            if (size > (uint64_t)physical && sceIoPwrite(fd, &zero, 1, (SceOff)(size - 1)) != 1)
+                return -1;
+            /* An earlier logical shrink may already have a shared size entry. */
+            if (f->lsize_slot >= 0) g_lsize[f->lsize_slot].size = (int64_t)size;
+            return 0;
+        }
+    }
     if (f->lsize_slot < 0) {
         f->lsize_slot = lsize_find(f->path, 1);
         if (f->lsize_slot < 0) { xk_os_log("truncate: logical-size table full for %s\n", f->path); return -1; }
@@ -208,6 +267,32 @@ uint64_t xk_os_time_100ns(void)
 uint64_t xk_os_monotonic_us(void) { return sceKernelGetProcessTimeWide(); }
 void xk_os_sleep_us(uint64_t us) { sceKernelDelayThread(us > 0xFFFFFFFFull ? 0xFFFFFFFFu : (SceUInt)us); }
 
+static int g_scheduler_event=-2;
+int xk_os_scheduler_prepare(void)
+{
+    /* Called only by serialized guest execution. Publish after creation. */
+    int previous=__atomic_load_n(&g_scheduler_event,__ATOMIC_ACQUIRE);
+    if (previous!=-2) return previous>=0;
+    int id=sceKernelCreateEventFlag("xk_completion",0,0,NULL);
+    __atomic_store_n(&g_scheduler_event,id,__ATOMIC_RELEASE);
+    xk_os_log("scheduler completion notifications: %s\n",id>=0?"on":"timed fallback");
+    return id>=0;
+}
+void xk_os_scheduler_notify(void)
+{
+    int id=__atomic_load_n(&g_scheduler_event,__ATOMIC_ACQUIRE);
+    if (id>=0) sceKernelSetEventFlag(id,1);
+}
+void xk_os_scheduler_wait(uint64_t us)
+{
+    int id=__atomic_load_n(&g_scheduler_event,__ATOMIC_ACQUIRE);
+    if (id<0) { xk_os_sleep_us(us); return; }
+    SceUInt timeout=us>UINT32_MAX?UINT32_MAX:(SceUInt)us;
+    unsigned bits;
+    int rc=sceKernelWaitEventFlag(id,1,SCE_EVENT_WAITOR|SCE_EVENT_WAITCLEAR_PAT,&bits,&timeout);
+    if (rc<0 && timeout) xk_os_sleep_us(timeout>1000?1000:timeout);
+}
+
 /* ---- fibers -------------------------------------------------------------------------------- */
 /* Guest threads used to run on hand-rolled fibers (memalign'd stacks + a Thumb-2 sp swap).  Real
  * hardware killed the process on the first sceIoWrite issued from such a stack (core dump: thread
@@ -231,6 +316,7 @@ static int fiber_thread(SceSize args, void *argp)
     (void)args;
     xk_fiber *f = *(xk_fiber **)argp;
     fiber_park(f);                                          /* wait for the scheduler's first switch */
+    xv_cpu_log_thread("guest-fiber");
     f->entry(f->arg);
     xk_os_log("fiber entry returned - switching to scheduler\n");
     xk_os_fiber_switch(&g_main_fiber);
@@ -274,7 +360,7 @@ void xk_os_fiber_destroy(xk_fiber *f)
 /* Xbox wButtons: DPAD_UP 1, DOWN 2, LEFT 4, RIGHT 8, START 0x10, BACK 0x20, LTHUMB 0x40, RTHUMB 0x80.
  * Analog buttons[8]: A, B, X, Y, BLACK, WHITE, LTRIGGER, RTRIGGER (0..255). */
 enum { PAD_BLACK = 1, PAD_WHITE = 2, PAD_L3 = 4, PAD_R3 = 8 };
-static struct { int touch, swap, deadzone, sens, curve, invert; } g_pad_cfg;
+static struct { int touch, rear_touch, swap, deadzone, sens, curve, invert; } g_pad_cfg;
 
 static unsigned pad_extra_token(const char *token)
 {
@@ -330,6 +416,7 @@ static void pad_init(void)
     if (init) return;
     init = 1;
     g_pad_cfg.touch = pad_setting("XV_TOUCH", 1, 0, 1);
+    g_pad_cfg.rear_touch = pad_setting("XV_REAR_TOUCH", 0, 0, 1);
     g_pad_cfg.swap = pad_setting("XV_TOUCH_SWAP", 0, 0, 1);
     g_pad_cfg.deadzone = pad_setting("XV_DEADZONE", 0, 0, 99);
     g_pad_cfg.sens = pad_setting("XV_LOOK_SENS", 100, 0, 400);
@@ -345,8 +432,8 @@ static void pad_init(void)
         if (old_y > 32767) old_y = 32767;
         if (x != old_x || y != old_y) ok = 0;
     }
-    xv_logf("[xk] pad: XV_TOUCH=%d XV_TOUCH_SWAP=%d XV_DEADZONE=%d XV_LOOK_SENS=%d XV_LOOK_CURVE=%d XV_INVERT_Y=%d default-axis-check=%s\n",
-            g_pad_cfg.touch, g_pad_cfg.swap, g_pad_cfg.deadzone, g_pad_cfg.sens,
+    xv_logf("[xk] pad: XV_TOUCH=%d XV_REAR_TOUCH=%d XV_TOUCH_SWAP=%d XV_DEADZONE=%d XV_LOOK_SENS=%d XV_LOOK_CURVE=%d XV_INVERT_Y=%d default-axis-check=%s\n",
+            g_pad_cfg.touch, g_pad_cfg.rear_touch, g_pad_cfg.swap, g_pad_cfg.deadzone, g_pad_cfg.sens,
             g_pad_cfg.curve, g_pad_cfg.invert, ok ? "PASS" : "FAIL");
 }
 
@@ -358,7 +445,8 @@ static unsigned pad_touch(void)
     if (!init) {
         init = 1;
         ready[SCE_TOUCH_PORT_FRONT] = sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START) >= 0;
-        ready[SCE_TOUCH_PORT_BACK] = sceTouchSetSamplingState(SCE_TOUCH_PORT_BACK, SCE_TOUCH_SAMPLING_STATE_START) >= 0;
+        if (g_pad_cfg.rear_touch)
+            ready[SCE_TOUCH_PORT_BACK] = sceTouchSetSamplingState(SCE_TOUCH_PORT_BACK, SCE_TOUCH_SAMPLING_STATE_START) >= 0;
     }
     for (unsigned port = SCE_TOUCH_PORT_FRONT; port <= SCE_TOUCH_PORT_BACK; ++port) {
         SceTouchData t = {0};
@@ -519,6 +607,23 @@ void xk_os_pad_poll(xk_os_pad *p)
           if (++both == 45) g_xv_overlay_on = g_xv_overlay_on > 0 ? 0 : 1;
           d.buttons &= ~(SCE_CTRL_START | SCE_CTRL_SELECT);
       } else both = 0; }
+    /* L+R+Select compares resolution; L+R+Square compares the current optimization candidate.
+     * Either chord cancels an active test. Menu input remains
+     * available when no test is running; a test's ordinary input is neutral. */
+    { static int held;
+      unsigned chord=SCE_CTRL_LTRIGGER|SCE_CTRL_RTRIGGER|SCE_CTRL_SELECT;
+      unsigned cpu_chord=SCE_CTRL_LTRIGGER|SCE_CTRL_RTRIGGER|SCE_CTRL_SQUARE;
+      uint32_t gg=X_M32(0x2F8CA0u);
+      int control=!xk_file_in_ui_map && gg && X_M8(gg) && X_M8(gg+1) && !X_M8(gg+2) && !X_M32(0x2E4000u);
+      int cpu_pressed=(d.buttons&cpu_chord)==cpu_chord;
+      int pressed=(d.buttons&chord)==chord || cpu_pressed;
+      if(pressed&&!held&&(control||xv_benchmark_active())) {
+          if(cpu_pressed)xv_benchmark_compare_toggle();else xv_benchmark_toggle();
+      }
+      held=pressed;
+      if(xv_benchmark_active()) {memset(p,0,sizeof *p);p->connected=1;return;}
+      if(pressed&&control)d.buttons&=~(chord|cpu_chord);
+    }
     /* Hardware chord for the virtual second pad (XV_PAD2=1 in xita.cfg): with L+R held, START / X / O /
      * D-pad go to player 2 instead of player 1 - enough to join a split-screen lobby and pick a profile. */
     if ((d.buttons & (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) == (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) {
@@ -543,12 +648,15 @@ void xk_os_pad_poll(xk_os_pad *p)
      *   right -> White             (flashlight)    left  -> Black            (switch grenade) */
     /* ...but only while the player is in control: Halo's in-game UI reads the extra bits as a cancel (a
      * D-pad press closed the pause menu), so with a UI screen up - main menu (ui.map) or the pause menu
-     * (game_globals.paused_by_ui) - the D-pad stays a plain D-pad. */
+     * (game_globals.paused_by_ui) - the D-pad stays a plain D-pad. Multiplayer
+     * does not pause simulation, so also check player 0's current UI root,
+     * managed by Halo 3925's D0B20/D1540 screen lifecycle. */
     {
         uint32_t gg = X_M32(0x2F8CA0u);
-        int in_control = !xk_file_in_ui_map && gg && !X_M8(gg + 2);
+        uint32_t menu = X_M32(0x2E4000u);
+        int in_control = !xk_file_in_ui_map && !menu && gg && !X_M8(gg + 2);
         { static unsigned n, m; int defl = (d.lx < 64 || d.lx > 192 || d.ly < 64 || d.ly > 192 || d.rx < 64 || d.rx > 192 || d.ry < 64 || d.ry > 192);
-          if ((n++ % 600) == 0 || (defl && (m++ % 30) == 0)) xv_logf("[xk] pad raw lx %u ly %u rx %u ry %u buttons %08X | ui_map %d paused %d -> extras %d\n", d.lx, d.ly, d.rx, d.ry, d.buttons, xk_file_in_ui_map, gg ? X_M8(gg + 2) : -1, in_control); }
+          if ((n++ % 600) == 0 || (defl && (m++ % 30) == 0)) xv_logf("[xk] pad raw lx %u ly %u rx %u ry %u buttons %08X | ui_map %d paused %d menu %08X -> extras %d\n", d.lx, d.ly, d.rx, d.ry, d.buttons, xk_file_in_ui_map, gg ? X_M8(gg + 2) : -1, menu, in_control); }
         if (in_control) {
             b &= ~0xFu;                                              /* in-game the D-pad bits are NOT passed: the game does move the player with them */
             if (d.buttons & SCE_CTRL_DOWN) b |= 0x40;                /* LTHUMB */
@@ -596,7 +704,14 @@ void xk_os_audio_write(const int16_t *stereo, int frames)
 }
 /* sceKernelStartThread copies the argument block, so each thread gets its own entry pointer - a shared
  * static here made the profiler and the mixer race for the same slot (two mixers = buzzing audio). */
-static int audio_thread_main(SceSize args, void *argp) { (void)args; void (*fn)(void *) = *(void (**)(void *))argp; fn(NULL); return 0; }
+static int audio_thread_main(SceSize args, void *argp)
+{
+    (void)args;
+    void (*fn)(void *) = *(void (**)(void *))argp;
+    xv_cpu_log_thread("audio-or-profiler-worker");
+    fn(NULL);
+    return 0;
+}
 int xk_os_audio_thread_start(void (*fn)(void *), void *arg)
 {
     (void)arg; static unsigned nth; char name[16]; snprintf(name, sizeof name, "xv_worker%u", nth++);

@@ -139,6 +139,7 @@ void xk_audio_stream_flush(int i) { if (i < 0) return; xk_audio_lock(); xa_voice
 static int voice_refill(xa_voice *v)
 {
     const uint8_t *src; uint32_t avail;
+    uint8_t page_block[64 * 2 * 2];
     if (v->kind == 1) {
         if (!v->data || !v->size) return 0;
         uint32_t end = v->size;
@@ -148,7 +149,17 @@ static int voice_refill(xa_voice *v)
             v->pos = (v->loop_len && v->loop_start < v->size) ? v->loop_start : 0;
             if (v->pos >= end) return 0;
         }
-        src = (const uint8_t *)X_G(v->data + v->pos); avail = end - v->pos;
+        uint32_t address = v->data + v->pos;
+        src = (const uint8_t *)X_G(address); avail = end - v->pos;
+        /* A guest allocation may span separately backed pages. Decode directly
+         * within a page; gather only the chunk that crosses a page boundary. */
+        uint32_t bytes = v->adpcm ? 36u * (uint32_t)v->channels
+            : 64u * (uint32_t)v->channels * (uint32_t)(v->bits / 8);
+        if (bytes > avail) bytes = avail;
+        if (bytes > 4096u - (address & 0xfffu)) {
+            x_guest_read(page_block, address, bytes);
+            src = page_block;
+        }
     } else {
         /* Streams: packets are arbitrary byte ranges of one continuous encoded stream - ADPCM blocks straddle
          * packet boundaries, so assemble whole blocks through a carry buffer instead of decoding per packet. */
@@ -159,7 +170,7 @@ static int voice_refill(xa_voice *v)
             xa_pkt *p = &v->q[(v->qhead + v->rd) % XA_MAX_PKTS];
             if (v->pkt_pos >= p->size) { p->consumed = 1; v->rd++; v->pkt_pos = 0; continue; }
             uint32_t take = p->size - v->pkt_pos; if (take > need - v->ncarry) take = need - v->ncarry;
-            memcpy(v->carry + v->ncarry, X_G(p->guest + v->pkt_pos), take);
+            x_guest_read(v->carry + v->ncarry, p->guest + v->pkt_pos, take);
             v->ncarry += take; v->pkt_pos += take;
         }
         src = v->carry; avail = v->ncarry;
@@ -171,7 +182,7 @@ static int voice_refill(xa_voice *v)
     } else {
         uint32_t fb = (uint32_t)v->channels * (uint32_t)(v->bits / 8), n = avail / fb; if (n > 64) n = 64;
         if (v->bits == 16) { for (uint32_t k = 0; k < n * (uint32_t)v->channels; ++k) v->blk[k] = (int16_t)(src[2 * k] | (src[2 * k + 1] << 8)); }
-        else { for (uint32_t k = 0; k < n * (uint32_t)v->channels; ++k) v->blk[k] = (int16_t)((src[k] - 128) << 8); }
+        else { for (uint32_t k = 0; k < n * (uint32_t)v->channels; ++k) v->blk[k] = (int16_t)((src[k] - 128) * 256); }
         v->blk_frames = (int)n; used = n * fb;
         if (!n) { used = avail; }
     }
@@ -224,7 +235,14 @@ void xk_audio_mix(int16_t *out, int frames)
 static void mixer_thread(void *arg)
 {
     (void)arg;
-    static int16_t buf[XA_GRAIN * 2];
-    for (;;) { xk_audio_mix(buf, XA_GRAIN); xk_os_audio_write(buf, XA_GRAIN); }
+    /* The sink can retain the submitted grain until the next write. Keep it
+     * immutable while preparing the next one; each DMA buffer is 64-byte aligned. */
+    _Alignas(64) static int16_t buf[2][XA_GRAIN * 2];
+    unsigned slot = 0;
+    for (;;) {
+        xk_audio_mix(buf[slot], XA_GRAIN);
+        xk_os_audio_write(buf[slot], XA_GRAIN);
+        slot ^= 1;
+    }
 }
 int xk_audio_start(void) { return xk_os_audio_thread_start(mixer_thread, NULL); }

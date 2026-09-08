@@ -12,6 +12,18 @@
 #include <psp2/gxm.h>
 
 #include "xv_d3d.h"
+#include "xv_draw_profile.h"
+#include "xv_draw_state.h"
+#include "xv_stencil_gxm.h"
+#include "xv_render_profile.h"
+#include "xv_render_target.h"
+#include "xv_index_copy.h"
+#include "xv_bytes_equal.h"
+#include "xv_visibility.h"
+#include "xv_frame_slots.h"
+#include "xv_vertex_upload.h"
+#include "xv_gpu_upload.h"
+#include "xv_texture_alpha.h"
 
 #include "xv_log.h"
 #define XV_LOG(...)     xv_logf("[xv/d3d] " __VA_ARGS__)
@@ -21,10 +33,15 @@
 #define XV_MAX_CMDS      2048        /* draws + clears per frame                       */
 #define XV_CONST_POOL    (256 * 1024) /* floats per list: c[] snapshots (1 MB; full-window programs = 768 floats each) */
 #define XV_TEX_CACHE     512         /* texture control words                          */
-#define XV_CLEAR_SLOTS   16          /* clear quads per frame                          */
+#define XV_LEGACY_CLEAR_SLOTS 16     /* preserve the no-RTT replay limit */
+#define XV_CLEAR_SLOTS   64          /* clear quads per frame                          */
 #define XV_SEQ_INDICES   65536       /* sequential u16 indices for DrawVertices        */
 #define XV_QUAD_INDICES  49152       /* per list: u16 indices rewritten from QUADLIST/POLYGON draws */
-#define XV_NUM_LISTS     2
+#define XV_FRAME_INDICES (384 * 1024) /* per list: the a10 intro requests over 277K indices */
+#define XV_NUM_LISTS     XV_FRAME_SLOTS
+#define XV_IM_VERTICES  1024 /* shared immediate/attribute storage: a10 flares exceed 64 KiB */
+#define XV_IM_STRIDE    (16 * 4 * sizeof(float))
+#define XV_IM_BYTES     (XV_IM_VERTICES * XV_IM_STRIDE)
 
 /* ----------------------------------------------------------------------------------
  *  Fragment programs.  GXM bakes the vertex program's output layout and the blend
@@ -36,24 +53,57 @@ enum { BLEND_OPAQUE = 0, BLEND_ALPHA = 1, BLEND_ADD = 2, BLEND_MODES = 24, BLEND
 /* blend variants are fragment-program link variants; slots beyond the two fixed ones are handed out
  * to whatever (src,dst) factor pairs the game actually uses (Halo: DESTCOLOR/ZERO, DESTCOLOR/SRCCOLOR,
  * ONE/INVSRCALPHA, SRCALPHA/ONE ...) */
-static struct { uint8_t src, dst, mask; } g_blend_combo[BLEND_MODES] = {   /* mask: D3DRS_COLORWRITEENABLE bits (R1 G2 B4 A8) */
-    { X_D3DBLEND_ONE, X_D3DBLEND_ZERO, 0xF }, { X_D3DBLEND_SRCALPHA, X_D3DBLEND_INVSRCALPHA, 0xF }, { X_D3DBLEND_ONE, X_D3DBLEND_ONE, 0xF } };
+static struct { uint8_t src, dst, mask, op; } g_blend_combo[BLEND_MODES] = {   /* mask: D3DRS_COLORWRITEENABLE bits (R1 G2 B4 A8); op 0 = add */
+    { X_D3DBLEND_ONE, X_D3DBLEND_ZERO, 0xF, 0 }, { X_D3DBLEND_SRCALPHA, X_D3DBLEND_INVSRCALPHA, 0xF, 0 }, { X_D3DBLEND_ONE, X_D3DBLEND_ONE, 0xF, 0 } };
 static unsigned g_blend_combos = 3;
 static const char *const FS_GXP[FS_KINDS] = { "app0:shaders/xv_color.frag.gxp", "app0:shaders/xv_texmod.frag.gxp", "app0:shaders/xv_tex0.frag.gxp", "app0:shaders/xv_lm.frag.gxp" };
 
 /* Recompiled register-combiner programs (Stage 3b, tools/ps_pipeline.py): fragment programs keyed by
  * the combiner hash the game submitted.  Linked lazily per (vertex program, combiner, blend). */
 #include "xv_ps_table.h"
-#define XV_PS_PER_VS 12
-typedef struct { int16_t entry; uint8_t blend, failed; xv_fshader_t fs; } ps_link_t;
+#define XV_PS_LINKS (XV_MAX_VS * 12) /* share the former per-VS capacity */
+#define XV_PS_BUCKETS 2048
+typedef struct { uint16_t vs, next; int16_t entry; uint8_t blend, failed, alpha_mode; xv_fshader_t fs; } ps_link_t;
+static ps_link_t g_ps_links[XV_PS_LINKS];
+static uint16_t g_ps_buckets[XV_PS_BUCKETS]; /* slot + 1; zero ends a chain */
+static unsigned g_ps_count;
+/* Guest-owned preparation metadata; it never reads the pump's link cache. */
+static uint8_t g_ps_texture_masks[XV_PS_TABLE_COUNT]; /* bit 4 marks initialized */
+static unsigned texture_stages_prepared, texture_stages_skipped;
+static unsigned opaque_candidates, opaque_proven;
+static int opaque_material_override = -1;
+void xv_opaque_material_override(int enabled)
+{ opaque_material_override = enabled < 0 ? -1 : !!enabled; }
+static int cutout_override = -1;
+void xv_cutout_override(int enabled) { cutout_override = enabled < 0 ? -1 : !!enabled; }
+static int cutout_enabled(void)
+{
+    static int enabled = -1, compatible;
+    if (enabled < 0) {
+        const char *e = getenv("XV_CUTOUT_TEST"); enabled = !e || atoi(e) != 0;
+        e = getenv("XV_SHADER_OVERRIDE"); compatible = !e || atoi(e) == 0;
+        e = getenv("XV_NO_ATEST"); compatible &= !e || atoi(e) == 0;
+        e = getenv("XV_ALPHA_SPECIALIZE"); compatible &= !e || atoi(e) != 0;
+    }
+    return compatible && (cutout_override < 0 ? enabled : cutout_override);
+}
+static int unused_textures_override = -1;
+void xv_unused_textures_override(int enabled)
+{ unused_textures_override = enabled < 0 ? -1 : !!enabled; }
+
+static void ps_links_shutdown(void)
+{
+    for (unsigned i = 0; i < g_ps_count; i++) xv_fshader_unload(&g_ps_links[i].fs);
+    memset(g_ps_links, 0, sizeof g_ps_links);
+    memset(g_ps_buckets, 0, sizeof g_ps_buckets);
+    g_ps_count = 0;
+}
 
 typedef struct {
     xv_vshader_t  vs;
     int           loaded;
     xv_fshader_t  fs[FS_KINDS][BLEND_MODES];
     int           fs_loaded[FS_KINDS][BLEND_MODES];
-    ps_link_t     ps[XV_PS_PER_VS];
-    unsigned      nps;
 } vs_slot_t;
 
 /* ----------------------------------------------------------------------------------
@@ -66,29 +116,31 @@ typedef struct {
     uint8_t   depth_func_idx, depth_write, cull;
     uint8_t   ntex;
     uint16_t  vs;                   /* slot index                                     */
+    uint16_t  visibility;           /* frame query index + 1, zero disables testing */
     uint32_t  index_count;
     const void *streams[XV_MAX_STREAMS];
     const void *indices;
+    uint32_t geometry_bytes[XV_MAX_STREAMS + 1], geometry_hash[XV_MAX_STREAMS + 1]; /* trace frames only */
     uint32_t  const_off, const_n;   /* float4 units into the pool                     */
-    float     const_attr[4];
+    const void *constant_stream;    /* immutable, frame-owned persistent attributes */
     uint32_t  fog_color;            /* D3DCOLOR at record time (Halo toggles it within a frame) */
     uint32_t  atest;                /* alpha test at record time: ref | func<<8 | enable<<16 (xd3d_alpha_test) */
     SceGxmTexture tex[4];
+    float     texscale[4][4];
     int16_t   ps_entry;             /* xv_ps_table index, or -1 (heuristic fragment)  */
     uint8_t   pass;                 /* 0 = back buffer, n = offscreen pass n           */
+    uint8_t   previous_frame;       /* stages sampling the last completed backbuffer */
+    uint8_t   opaque_alpha;         /* pinned tex0 upload proves the captured test always passes */
     float     psc[18][4];           /* combiner constants: per-stage c0[8], c1[8], final c0, c1 */
     uint32_t  clear_color;          /* clear only                                     */
     float     clear_z;
-    uint8_t   clear_flags;
+    uint8_t   clear_flags, clear_stencil;
+    xv_stencil stencil;
 } cmd_t;
 
-/* Render-to-texture: Halo renders object shadows (and a few effects) into textures it created with
- * CreateTexture, then samples them.  Each SetRenderTarget to such a surface opens a PASS: the draws and
- * clears recorded until the back buffer returns are tagged with it and replayed first, in their own GXM
- * scene straight into the texture's guest memory (the arena is GXM-mapped R/W), so the main scene can
- * sample the result through an alias texture instead of a CPU decode. */
-#define XV_MAX_PASSES 4
-typedef struct { uint32_t data; unsigned w, h, fmt; } rt_pass_t;
+/* Commands retain their target identity; replay visits contiguous ranges in order. */
+#define XV_RT_SLOTS 8
+#define XV_RT_BUDGET (16u * 1024 * 1024)
 typedef struct {
     cmd_t     cmds[XV_MAX_CMDS];
     unsigned  ncmds;
@@ -96,9 +148,15 @@ typedef struct {
     unsigned  nconsts;              /* floats used                                    */
     unsigned  last_gen, last_off, last_n; int last_base;   /* previous snapshot: reused while c[] is unchanged */
     unsigned  const_dropped;
-    unsigned  dropped;
-    rt_pass_t passes[XV_MAX_PASSES];
-    unsigned  npasses, cur_pass;    /* cur_pass: 0 = back buffer, else index+1        */
+    unsigned  dropped, drop_commands, drop_indices, drop_attributes, drop_immediate;
+    struct { unsigned before, frame, batch, target; } ui[1024];
+    unsigned nui, ui_frame;
+    unsigned  cur_pass;    /* 0 = backbuffer, slot+1 = RTT, 0xff = discard */
+    struct { uint16_t result_slot; uint32_t serial, guest_area, render_area; } visibility[XV_VISIBILITY_PER_FRAME];
+    unsigned nvisibility, active_visibility;
+    int visibility_gpu_ready;
+    unsigned visibility_back_area;
+    unsigned visibility_draw_slot; /* pump-owned cached GXM state */
 } cmdlist_t;
 
 /* ----------------------------------------------------------------------------------
@@ -113,10 +171,13 @@ typedef struct {
     uint8_t  tex_min[4], tex_mag[4], tex_addr_u[4], tex_addr_v[4];
     uint32_t vs_handle;
     float    vsc[192][4];                    /* c[-96..95] as D3D exposes them          */
-    float    const_attr[4];
+    float    const_attr[16][4];
     uint32_t z_enable, z_write, z_func, cull, blend_enable, src_blend, dst_blend, color_mask;
+    xv_stencil stencil;
     uint32_t indices_dbg;                    /* last index pointer handed to a draw (guest), for traces */
     uint32_t ps_hash;                        /* combiner program id (recomp/kernel/xd3d.c psdef_hash) */
+    uint32_t ps_key;
+    uint8_t blend_op;
     float    psc[18][4];                     /* c0[stage 0..7], c1[stage 0..7], final c0, c1 */
 } d3d_state_t;
 
@@ -126,6 +187,7 @@ static vs_slot_t           g_vs[XV_MAX_VS];
 static unsigned            g_nvs;
 static d3d_state_t         S;
 static cmdlist_t          *g_lists[XV_NUM_LISTS];
+static unsigned            g_record_pass;
 static uint32_t            g_build_frame;              /* frame being recorded         */
 static uint32_t            g_clear_vs;                  /* handle of xv_clear           */
 
@@ -136,14 +198,158 @@ static uint16_t *g_seq_indices;
 static uint8_t  *g_clear_quads;                          /* XV_NUM_LISTS x SLOTS x 4 verts x 16 B */
 static uint16_t *g_quad_indices;                         /* XV_NUM_LISTS x XV_QUAD_INDICES */
 static uint32_t  g_quad_used[XV_NUM_LISTS];
+static uint16_t *g_frame_indices;
+static uint32_t  g_index_used[XV_NUM_LISTS];
+static uint8_t  *g_im_vertices;
+static uint32_t  g_im_used[XV_NUM_LISTS];
+static uint64_t  g_im_requested[XV_NUM_LISTS];
+static uint64_t g_index_requested[XV_NUM_LISTS];
 
 typedef struct { uint32_t data, format; SceGxmTexture tex; uint8_t valid; } tex_entry_t;
 static tex_entry_t g_texcache[XV_TEX_CACHE];
+
+static xv_visibility_result g_visibility_results[XV_VISIBILITY_IDS];
+/* SGX543MP4 writes one counter array per GPU core. Each frame owns its buffer
+ * until the pump retires its GPU notification, just like indices/vertices. */
+#define XV_VISIBILITY_GPU_CORES 4u
+#define XV_VISIBILITY_STRIDE (XV_VISIBILITY_PER_FRAME * sizeof(uint32_t))
+#define XV_VISIBILITY_WORDS (XV_VISIBILITY_PER_FRAME * XV_VISIBILITY_GPU_CORES)
+static uint32_t *g_visibility_memory;
+static SceUID g_visibility_uid = -1;
 
 static const SceGxmDepthFunc DEPTH_FUNCS[] = {
     SCE_GXM_DEPTH_FUNC_NEVER, SCE_GXM_DEPTH_FUNC_LESS, SCE_GXM_DEPTH_FUNC_EQUAL, SCE_GXM_DEPTH_FUNC_LESS_EQUAL,
     SCE_GXM_DEPTH_FUNC_GREATER, SCE_GXM_DEPTH_FUNC_NOT_EQUAL, SCE_GXM_DEPTH_FUNC_GREATER_EQUAL, SCE_GXM_DEPTH_FUNC_ALWAYS,
 };
+
+/* Frame-owned vertex constants. The rocket/death and driving GPU dumps both
+ * fault at the end of the driver's vertex ring. Keep immutable mesh constants
+ * out of that ring; frame acquisition already protects these three slots. */
+#define XV_FRAME_CONSTANT_BYTES (XV_CONST_POOL * sizeof(float))
+#define XV_FRAME_CONSTANT_ALLOC ((XV_FRAME_CONSTANT_BYTES + 4096u) & ~4095u)
+static struct {
+    SceUID uid;
+    uint8_t *memory;
+    uint32_t frame;
+    unsigned ready;
+} g_frame_constants[XV_NUM_LISTS];
+static int8_t g_frame_constant_layout[XV_MAX_VS]; /* 0 unknown, 1 raw float4, -1 packed */
+static unsigned g_constant_upload_frames, g_constant_upload_high;
+static uint64_t g_constant_upload_bytes;
+static unsigned g_constant_direct_draws, g_constant_ring_draws, g_constant_bad_draws;
+
+static void frame_constants_shutdown(void)
+{
+    for (unsigned i = 0; i < XV_NUM_LISTS; ++i) {
+        if (!g_frame_constants[i].memory) continue;
+        sceGxmUnmapMemory(g_frame_constants[i].memory);
+        sceKernelFreeMemBlock(g_frame_constants[i].uid);
+        memset(&g_frame_constants[i], 0, sizeof(g_frame_constants[i]));
+    }
+    memset(g_frame_constant_layout, 0, sizeof g_frame_constant_layout);
+}
+
+static const uint8_t *frame_constants_prepare(const cmdlist_t *l, uint32_t frame)
+{
+    unsigned slot = frame % XV_NUM_LISTS;
+    if (!l->nconsts || l->nconsts > XV_CONST_POOL) return NULL;
+    if (g_frame_constants[slot].ready && g_frame_constants[slot].frame == frame)
+        return g_frame_constants[slot].memory;
+    if (!g_frame_constants[slot].memory) {
+        void *mem = NULL;
+        SceUID uid = sceKernelAllocMemBlock("xv_frame_const", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,
+            XV_FRAME_CONSTANT_ALLOC, NULL);
+        if (uid < 0) return NULL;
+        if (sceKernelGetMemBlockBase(uid, &mem) < 0 || !mem ||
+            sceGxmMapMemory(mem, XV_FRAME_CONSTANT_ALLOC, SCE_GXM_MEMORY_ATTRIB_READ) < 0) {
+            sceKernelFreeMemBlock(uid); return NULL;
+        }
+        /* A mapped, zeroed tail also keeps speculative boundary reads inside
+         * owned storage. It is not included in any shader's declared window. */
+        memset(mem, 0, XV_FRAME_CONSTANT_ALLOC);
+        xv_gpu_flush_pump(mem, XV_FRAME_CONSTANT_ALLOC);
+        g_frame_constants[slot].memory = mem;
+        g_frame_constants[slot].uid = uid;
+        XV_LOG("frame constants slot %u: %u KiB + mapped tail @ %p\n", slot,
+            (unsigned)(XV_FRAME_CONSTANT_BYTES / 1024), mem);
+    }
+    unsigned bytes = l->nconsts * sizeof(float);
+    memcpy(g_frame_constants[slot].memory, l->consts, bytes);
+    xv_gpu_flush_pump(g_frame_constants[slot].memory, bytes);
+    g_frame_constants[slot].frame = frame;
+    g_frame_constants[slot].ready = 1;
+    g_constant_upload_bytes += bytes;
+    if (bytes > g_constant_upload_high) g_constant_upload_high = bytes;
+    if (++g_constant_upload_frames == 60) {
+        XV_LOG("[frame-constants] 60 uploads: %llu KiB max %u KiB; draws direct %u ring %u rejected %u\n",
+            (unsigned long long)(g_constant_upload_bytes / 1024), g_constant_upload_high / 1024,
+            g_constant_direct_draws, g_constant_ring_draws, g_constant_bad_draws);
+        g_constant_upload_frames = g_constant_upload_high = 0;
+        g_constant_upload_bytes = 0;
+        g_constant_direct_draws = g_constant_ring_draws = g_constant_bad_draws = 0;
+    }
+    return g_frame_constants[slot].memory;
+}
+
+/* Every shipped Halo vertex program exposes c[] as a complete float4 array at
+ * offset zero in its default buffer. Verify reflection, including the buffer
+ * size, once per loaded program; a packed/override layout retains SDK packing. */
+static int frame_constants_raw_layout(unsigned slot, const xv_vshader_t *vs)
+{
+    if (!g_frame_constant_layout[slot]) {
+        const SceGxmProgramParameter *p = vs->p_c;
+        int raw = p && vs->desc->c_count &&
+            sceGxmProgramParameterGetCategory(p) == SCE_GXM_PARAMETER_CATEGORY_UNIFORM &&
+            sceGxmProgramParameterGetType(p) == SCE_GXM_PARAMETER_TYPE_F32 &&
+            sceGxmProgramParameterGetComponentCount(p) == 4 &&
+            sceGxmProgramParameterGetArraySize(p) == vs->desc->c_count &&
+            sceGxmProgramParameterGetResourceIndex(p) == 0 &&
+            sceGxmProgramParameterGetContainerIndex(p) == 14 &&
+            sceGxmProgramGetDefaultUniformBufferSize(vs->prog) == vs->desc->c_count * 16u;
+        g_frame_constant_layout[slot] = raw ? 1 : -1;
+        if (!raw) XV_LOG("frame constants: packed layout retains SDK upload for %s\n", vs->desc->gxp);
+    }
+    return g_frame_constant_layout[slot] > 0;
+}
+
+static int bind_vertex_constants(SceGxmContext *ctx, const cmdlist_t *l,
+    const cmd_t *c, const xv_vshader_t *vs, uint32_t frame)
+{
+    if (!vs->p_c) return 1;
+    int err = -1;
+    /* Pool exhaustion used to submit a draw with the previous draw's constants.
+     * Reject it, and all malformed ranges, before touching any GPU buffer. */
+    if (c->vs >= XV_MAX_VS || !c->const_n || c->const_n != vs->desc->c_count ||
+        l->nconsts > XV_CONST_POOL || c->const_off > l->nconsts / 4 ||
+        c->const_n > l->nconsts / 4 - c->const_off) goto bad;
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *e = getenv("XV_FRAME_CONSTANTS"); enabled = !e || atoi(e) != 0;
+        XV_LOG("frame-owned vertex constants: %d\n", enabled);
+    }
+    if (enabled && frame_constants_raw_layout(c->vs, vs)) {
+        const uint8_t *base = frame_constants_prepare(l, frame);
+        if (!base) goto bad;
+        err = sceGxmSetVertexDefaultUniformBuffer(ctx, base + c->const_off * 16u);
+        if (err < 0) goto bad;
+        ++g_constant_direct_draws;
+        return 1;
+    }
+    void *ub = NULL;
+    err = sceGxmReserveVertexDefaultUniformBuffer(ctx, &ub);
+    if (err < 0 || !ub) goto bad;
+    err = sceGxmSetUniformDataF(ub, vs->p_c, 0, c->const_n * 4, &l->consts[c->const_off * 4]);
+    if (err < 0) goto bad;
+    ++g_constant_ring_draws;
+    return 1;
+bad:
+    ++g_constant_bad_draws;
+    static unsigned warnings;
+    if (warnings++ < 12) XV_LOG("vertex constants rejected: frame %u vs %u offset %u count %u pool %u err %08X\n",
+        frame, c->vs, c->const_off, c->const_n, l->nconsts, err);
+    return 0;
+}
+/* End frame-owned vertex constants. */
 
 /* ----------------------------------------------------------------------------------
  *  Init / shutdown
@@ -157,7 +363,7 @@ int xv_d3d_init(const xv_vs_desc_t *const *table, unsigned count)
         if (!g_lists[i])
             return -1;
     }
-    uint32_t size = (XV_SEQ_INDICES * 2 + XV_NUM_LISTS * XV_CLEAR_SLOTS * 4 * 16 + XV_NUM_LISTS * XV_QUAD_INDICES * 2 + 0xFFF) & ~0xFFFu;
+    uint32_t size = (XV_SEQ_INDICES * 2 + XV_NUM_LISTS * XV_CLEAR_SLOTS * 4 * 16 + XV_NUM_LISTS * XV_QUAD_INDICES * 2 + XV_NUM_LISTS * XV_IM_VERTICES * XV_IM_STRIDE + XV_NUM_LISTS * XV_FRAME_INDICES * 2 + 0xFFF) & ~0xFFFu;
     g_scratch_uid = sceKernelAllocMemBlock("xv_d3d_scratch", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, size, NULL);
     if (g_scratch_uid < 0)
         return g_scratch_uid;
@@ -170,11 +376,13 @@ int xv_d3d_init(const xv_vs_desc_t *const *table, unsigned count)
         g_seq_indices[i] = (uint16_t)i;
     g_clear_quads = g_scratch + XV_SEQ_INDICES * 2;
     g_quad_indices = (uint16_t *)(g_clear_quads + XV_NUM_LISTS * XV_CLEAR_SLOTS * 4 * 16);
+    g_im_vertices = (uint8_t *)(g_quad_indices + XV_NUM_LISTS * XV_QUAD_INDICES);
+    g_frame_indices = (uint16_t *)(g_im_vertices + XV_NUM_LISTS * XV_IM_BYTES);
 
     memset(&S, 0, sizeof(S)); S.color_mask = 0xF;
     S.z_enable = 1; S.z_write = 1; S.z_func = X_D3DCMP_LESSEQUAL; S.cull = X_D3DCULL_CCW;
     S.src_blend = X_D3DBLEND_ONE; S.dst_blend = X_D3DBLEND_ZERO;
-    S.const_attr[3] = 1.0f;
+    for (unsigned i = 0; i < 16; i++) S.const_attr[i][3] = 1.0f;
     for (int i = 0; i < 4; ++i) {
         S.tex_min[i] = S.tex_mag[i] = X_D3DTEXF_POINT;
         S.tex_addr_u[i] = S.tex_addr_v[i] = X_D3DTADDRESS_WRAP;
@@ -183,8 +391,18 @@ int xv_d3d_init(const xv_vs_desc_t *const *table, unsigned count)
     return 0;
 }
 
+static void rt_shutdown(void);
 void xv_d3d_shutdown(void)
 {
+    frame_constants_shutdown();
+    xv_vertex_upload_shutdown();
+    if (g_visibility_memory) {
+        sceGxmUnmapMemory(g_visibility_memory);
+        sceKernelFreeMemBlock(g_visibility_uid);
+        g_visibility_memory = NULL;
+    }
+    rt_shutdown();
+    ps_links_shutdown();
     for (unsigned i = 0; i < g_nvs; ++i) {
         for (int k = 0; k < FS_KINDS; ++k)
             for (int b = 0; b < BLEND_MODES; ++b)
@@ -265,6 +483,7 @@ void xv_d3d_SetVertexShader(uint32_t handle)
 
 void xv_d3d_SetVertexShaderConstant(int reg, const float *data, unsigned count)
 {
+    S.vsc_gen++; /* invalidate the command list's cached constant snapshot */
     for (unsigned i = 0; i < count; ++i) {
         int r = reg + (int)i + 96;
         if (r >= 0 && r < 192)
@@ -274,9 +493,10 @@ void xv_d3d_SetVertexShaderConstant(int reg, const float *data, unsigned count)
 
 void xv_d3d_SetVertexData4f(unsigned vreg, float x, float y, float z, float w)
 {
-    (void)vreg;                        /* one shared value for now (see XV_CONST_STREAM) */
-    S.const_attr[0] = x; S.const_attr[1] = y; S.const_attr[2] = z; S.const_attr[3] = w;
+    if (vreg >= 16) return;
+    S.const_attr[vreg][0] = x; S.const_attr[vreg][1] = y; S.const_attr[vreg][2] = z; S.const_attr[vreg][3] = w;
 }
+void xv_d3d_SetAllAttributes(const float (*attributes)[4]) { memcpy(S.const_attr, attributes, sizeof S.const_attr); }
 
 /* ----------------------------------------------------------------------------------
  *  Streams, textures, render state
@@ -313,6 +533,7 @@ void xv_d3d_SetTextureStageState(unsigned stage, unsigned type, uint32_t value)
     }
 }
 
+void xv_d3d_SetStencil(const xv_stencil *state) { S.stencil = *state; }
 void xv_d3d_SetRenderState_ZEnable(uint32_t v)          { S.z_enable = v; }
 void xv_d3d_SetRenderState_ZWriteEnable(uint32_t v)     { S.z_write = v; }
 void xv_d3d_SetRenderState_ZFunc(uint32_t v)            { S.z_func = v; }
@@ -321,6 +542,16 @@ void xv_d3d_SetRenderState_AlphaBlendEnable(uint32_t v) { S.blend_enable = v; }
 void xv_d3d_SetRenderState_ColorWriteEnable(uint32_t v) { S.color_mask = v; }
 void xv_d3d_SetRenderState_SrcBlend(uint32_t v)         { S.src_blend = v; }
 void xv_d3d_SetRenderState_DestBlend(uint32_t v)        { S.dst_blend = v; }
+void xv_d3d_SetRenderState_BlendOp(uint32_t v)
+{
+    switch (v) {
+    case 0x800a: S.blend_op = 1; break; /* subtract */
+    case 0x800b: S.blend_op = 2; break; /* reverse subtract */
+    case 0x8007: S.blend_op = 3; break; /* min */
+    case 0x8008: S.blend_op = 4; break; /* max */
+    default: S.blend_op = 0; break;    /* add, including reset/unset */
+    }
+}
 
 /* --- texture control words over guest pixels (blueprint 1.4) ----------------------- */
 static int xbox_format_to_gxm(uint32_t fmt, SceGxmTextureFormat *out, int *linear, int *bpp)
@@ -355,61 +586,244 @@ static SceGxmTextureAddrMode addr_mode(uint8_t x)
     }
 }
 
-static unsigned g_clear_slot_used;                          /* clear quads consumed by this frame's offscreen passes */
 static cmdlist_t *cur_list(void);
-/* known render-target textures (guest data -> alias texture the GPU wrote) */
-typedef struct { uint32_t data; unsigned w, h, fmt; SceGxmTexture tex; int valid; } rt_alias_t;
-static rt_alias_t g_rt[16]; static unsigned g_rt_n;
-static SceGxmColorFormat rt_color_fmt(unsigned fmt) { return (fmt == 0x05 || fmt == 0x11) ? SCE_GXM_COLOR_FORMAT_U5U6U5_RGB : SCE_GXM_COLOR_FORMAT_U8U8U8U8_ARGB; }
-static SceGxmTextureFormat rt_tex_fmt(unsigned fmt) { return (fmt == 0x05 || fmt == 0x11) ? SCE_GXM_TEXTURE_FORMAT_U5U6U5_RGB : SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB; }
-static rt_alias_t *rt_find(uint32_t data) { for (unsigned i = 0; i < g_rt_n; ++i) if (g_rt[i].data == data) return &g_rt[i]; return NULL; }
+/* Storage belongs to a guest pixel allocation, not its surface header. Released
+ * entries retain their GXM objects for reuse, after both recorded lists retire. */
+typedef struct {
+    uint32_t data, owner, last_frame;
+    unsigned w, h, fmt, bytes, driver_bytes;
+    SceUID uid;
+    void *mem;
+    SceGxmRenderTarget *rt;
+    SceGxmColorSurface color;
+    SceGxmDepthStencilSurface depth;
+    SceGxmTexture tex;
+} rt_alias_t;
+static rt_alias_t g_rt[XV_RT_SLOTS];
+static unsigned g_rt_bytes;
+extern void xv_render_target_drain(void); /* wait for pump AND GPU, outside a scene */
+
+static int rt_formats(unsigned fmt, SceGxmColorFormat *cf, SceGxmTextureFormat *tf, unsigned *bpp)
+{
+    *bpp = 4;
+    switch (fmt) {
+    case 0x06: case 0x12:
+        *cf = SCE_GXM_COLOR_FORMAT_U8U8U8U8_ARGB; *tf = SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB; return 1;
+    case 0x07: case 0x1e:
+        *cf = SCE_GXM_COLOR_FORMAT_U8U8U8U8_ARGB; *tf = SCE_GXM_TEXTURE_FORMAT_X8U8U8U8_1RGB; return 1;
+    case 0x05: case 0x11:
+        *cf = SCE_GXM_COLOR_FORMAT_U5U6U5_RGB; *tf = SCE_GXM_TEXTURE_FORMAT_U5U6U5_RGB; *bpp = 2; return 1;
+    case 0x02: case 0x10:
+        *cf = SCE_GXM_COLOR_FORMAT_U1U5U5U5_ARGB; *tf = SCE_GXM_TEXTURE_FORMAT_U1U5U5U5_ARGB; *bpp = 2; return 1;
+    case 0x04: case 0x1d:
+        *cf = SCE_GXM_COLOR_FORMAT_U4U4U4U4_ARGB; *tf = SCE_GXM_TEXTURE_FORMAT_U4U4U4U4_ARGB; *bpp = 2; return 1;
+    case 0x00: case 0x13:
+        *cf = SCE_GXM_COLOR_FORMAT_U8_R; *tf = SCE_GXM_TEXTURE_FORMAT_U8_1RRR; *bpp = 1; return 1;
+    case 0x19: case 0x1f:
+        *cf = SCE_GXM_COLOR_FORMAT_U8_A; *tf = SCE_GXM_TEXTURE_FORMAT_U8_R000; *bpp = 1; return 1;
+    default: return 0;
+    }
+}
+static void rt_destroy(rt_alias_t *r)
+{
+    if (r->rt) sceGxmDestroyRenderTarget(r->rt);
+    if (r->mem) { sceGxmUnmapMemory(r->mem); sceKernelFreeMemBlock(r->uid); }
+    g_rt_bytes -= r->bytes + r->driver_bytes;
+    memset(r, 0, sizeof *r);
+}
+static void rt_shutdown(void)
+{
+    for (unsigned i = 0; i < XV_RT_SLOTS; ++i) rt_destroy(&g_rt[i]);
+}
+void xv_d3d_ReleaseRenderTarget(uint32_t data)
+{
+    data &= 0x03ffffffu;
+    for (unsigned i = 0; i < XV_RT_SLOTS; ++i)
+        if (g_rt[i].owner == data) g_rt[i].data = g_rt[i].owner = 0;
+}
+static rt_alias_t *rt_find(uint32_t data)
+{
+    data &= 0x03ffffffu;
+    if (data) for (unsigned i = 0; i < XV_RT_SLOTS; ++i)
+        if (g_rt[i].data == data) return &g_rt[i];
+    return NULL;
+}
+const SceGxmTexture *xv_d3d_render_target_texture(uint32_t hdr)
+{
+    if (!hdr) return NULL;
+    const uint32_t *h = xv_guest_ptr(hdr);
+    rt_alias_t *r = rt_find(h[1]);
+    if (!r || r->fmt != ((h[3] >> 8) & 255)) return NULL;
+    r->last_frame = g_build_frame;
+    return &r->tex;
+}
 static rt_alias_t *rt_register(uint32_t data, unsigned w, unsigned h, unsigned fmt)
 {
     rt_alias_t *r = rt_find(data);
-    if (!r) { if (g_rt_n >= 16) return NULL; r = &g_rt[g_rt_n++]; memset(r, 0, sizeof *r); r->data = data; }
-    if (!r->valid || r->w != w || r->h != h || r->fmt != fmt) {
-        r->w = w; r->h = h; r->fmt = fmt;
-        r->valid = sceGxmTextureInitLinear(&r->tex, xv_guest_ptr(0x80000000u | data), rt_tex_fmt(fmt), w, h, 0) == SCE_OK;
-        sceGxmTextureSetMinFilter(&r->tex, SCE_GXM_TEXTURE_FILTER_LINEAR); sceGxmTextureSetMagFilter(&r->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
-        sceGxmTextureSetUAddrMode(&r->tex, SCE_GXM_TEXTURE_ADDR_CLAMP); sceGxmTextureSetVAddrMode(&r->tex, SCE_GXM_TEXTURE_ADDR_CLAMP);
-        static unsigned n; if (n++ < 8) XV_LOG("render target %08X %ux%u fmt %02X -> alias texture %s\n", data, w, h, fmt, r->valid ? "ok" : "FAILED");
+    if (r) {
+        if (r->w != w || r->h != h || r->fmt != fmt) goto fail;
+        r->last_frame = g_build_frame;
+        return r;
     }
+    SceGxmColorFormat cf; SceGxmTextureFormat tf; unsigned bpp;
+    if (!w || !h || w > 1024 || h > 1024 || !rt_formats(fmt, &cf, &tf, &bpp)) goto fail;
+    /* Prefer an idle entry with identical geometry/format; never alias two live
+     * surfaces just because their dimensions match. */
+    for (unsigned i = 0; i < XV_RT_SLOTS; ++i) {
+        rt_alias_t *q = &g_rt[i];
+        if (q->data || (q->mem && (uint32_t)(g_build_frame - q->last_frame) < XV_NUM_LISTS)) continue;
+        if (!r) r = q;
+        if (q->mem && q->w == w && q->h == h && q->fmt == fmt) { r = q; break; }
+    }
+    if (!r) goto fail;
+    xv_render_target_drain();
+    if (r->mem && (r->w != w || r->h != h || r->fmt != fmt)) rt_destroy(r);
+    if (!r->mem) {
+        unsigned stride = (w + 7) & ~7u, ds = (w + 31) & ~31u;
+        unsigned color_bytes = (stride * h * bpp + 4095) & ~4095u;
+        unsigned bytes = color_bytes + ((ds * ((h + 31) & ~31u) * 4 + 4095) & ~4095u);
+        SceGxmRenderTargetParams rp; memset(&rp, 0, sizeof rp);
+        rp.width = w; rp.height = h;
+        rp.multisampleMode = SCE_GXM_MULTISAMPLE_NONE; rp.driverMemBlock = -1;
+        unsigned driver_bytes = 0;
+        if (bytes > XV_RT_BUDGET || g_rt_bytes > XV_RT_BUDGET - bytes) goto fail;
+        SceUID uid = sceKernelAllocMemBlock("xv_rt", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, bytes, NULL);
+        void *mem = NULL;
+        if (uid < 0) goto fail;
+        if (sceKernelGetMemBlockBase(uid, &mem) < 0 || sceGxmMapMemory(mem, bytes, SCE_GXM_MEMORY_ATTRIB_READ | SCE_GXM_MEMORY_ATTRIB_WRITE) < 0) {
+            sceKernelFreeMemBlock(uid); goto fail;
+        }
+        r->uid = uid; r->mem = mem; r->bytes = bytes;
+        g_rt_bytes += bytes;
+        if (xv_render_target_create(&rp, XV_RT_BUDGET - g_rt_bytes, &r->rt, &driver_bytes, "offscreen") < 0) {
+            rt_destroy(r); goto fail;
+        }
+        r->driver_bytes = driver_bytes; g_rt_bytes += driver_bytes;
+        if (sceGxmColorSurfaceInit(&r->color, cf, SCE_GXM_COLOR_SURFACE_LINEAR, SCE_GXM_COLOR_SURFACE_SCALE_NONE,
+                SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, w, h, stride, mem) < 0 ||
+            sceGxmTextureInitLinear(&r->tex, mem, tf, w, h, 1) < 0 ||
+            sceGxmDepthStencilSurfaceInit(&r->depth, SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24,
+                SCE_GXM_DEPTH_STENCIL_SURFACE_LINEAR, ds, (uint8_t *)mem + color_bytes, NULL) < 0) {
+            rt_destroy(r); goto fail;
+        }
+        sceGxmDepthStencilSurfaceSetForceLoadMode(&r->depth, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_ENABLED);
+        sceGxmDepthStencilSurfaceSetForceStoreMode(&r->depth, SCE_GXM_DEPTH_STENCIL_FORCE_STORE_ENABLED);
+        sceGxmTextureSetMinFilter(&r->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
+        sceGxmTextureSetMagFilter(&r->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
+        sceGxmTextureSetUAddrMode(&r->tex, SCE_GXM_TEXTURE_ADDR_CLAMP);
+        sceGxmTextureSetVAddrMode(&r->tex, SCE_GXM_TEXTURE_ADDR_CLAMP);
+        r->w = w; r->h = h; r->fmt = fmt;
+        XV_LOG("RT slot %u: %ux%u fmt %02X, pool %u KB\n", (unsigned)(r - g_rt), w, h, fmt, g_rt_bytes >> 10);
+    }
+    memset(r->mem, 0, r->bytes);
+    r->data = data & 0x03ffffffu; r->last_frame = g_build_frame;
     return r;
+fail:
+    { static unsigned n; if (n++ < 16) XV_LOG("RT %08X %ux%u fmt %02X unavailable; pass skipped\n", data, w, h, fmt); }
+    return NULL;
 }
-/* SetRenderTarget: surface header (X_D3DPixelContainer) or 0 for the back buffer */
 void xv_d3d_SetRenderTarget(uint32_t surface_hdr, int is_backbuffer)
 {
     cmdlist_t *l = cur_list();
-    if (is_backbuffer || !surface_hdr) { l->cur_pass = 0; return; }
-    const uint32_t *hdr = (const uint32_t *)xv_guest_ptr(surface_hdr);
-    uint32_t data = hdr[1], fw = hdr[3], sz = hdr[4];
-    unsigned fmt = (fw >> 8) & 0xFF;
-    unsigned w = sz ? (sz & 0xFFF) + 1 : 1u << ((fw >> 20) & 0xF), h = sz ? ((sz >> 12) & 0xFFF) + 1 : 1u << ((fw >> 24) & 0xF);
-    if (!data || w > 1024 || h > 1024 || l->npasses >= XV_MAX_PASSES) { l->cur_pass = 0xFF; return; }   /* 0xFF: record nothing */
-    rt_pass_t *p = &l->passes[l->npasses++];
-    p->data = data; p->w = w; p->h = h; p->fmt = fmt;
-    l->cur_pass = l->npasses;
-    rt_register(data, w, h, fmt);
+    if (!surface_hdr) return; /* Xbox NULL retains the current color target. */
+    if (is_backbuffer) { l->cur_pass = 0; return; }
+    static int drop = -1;
+    if (drop < 0) { const char *e = getenv("XV_DROP_RT"); drop = e && atoi(e) == 1; }
+    l->cur_pass = 0xff;
+    if (drop) return;
+    const uint32_t *hdr = xv_guest_ptr(surface_hdr);
+    uint32_t fw = hdr[3], sz = hdr[4];
+    unsigned w = sz ? (sz & 0xfff) + 1 : 1u << ((fw >> 20) & 15);
+    unsigned h = sz ? ((sz >> 12) & 0xfff) + 1 : 1u << ((fw >> 24) & 15);
+    if (!hdr[1]) return;
+    rt_alias_t *r = rt_register(hdr[1], w, h, (fw >> 8) & 255);
+    if (r) {
+        uint32_t parent = (hdr[0] & 0x00070000u) == 0x00050000u ? hdr[5] : 0;
+        r->owner = (parent ? ((const uint32_t *)xv_guest_ptr(parent))[1] : hdr[1]) & 0x03ffffffu;
+        l->cur_pass = (unsigned)(r - g_rt) + 1;
+    }
 }
-static int recording_dropped(void) { return cur_list()->cur_pass == 0xFF; }
+static int recording_dropped(void) { return cur_list()->cur_pass == 0xff; }
 
+int xv_d3d_record_ui(unsigned frame, unsigned batch)
+{
+    cmdlist_t *l = cur_list();
+    if (recording_dropped() || l->nui >= 1024) return 0;
+    unsigned i = l->nui++;
+    l->ui[i].before = l->ncmds; l->ui[i].frame = frame;
+    l->ui[i].batch = batch; l->ui[i].target = l->cur_pass;
+    if (l->cur_pass) g_rt[l->cur_pass - 1].last_frame = g_build_frame;
+    return 1;
+}
+
+static int draw_scan_override = -1;
+static unsigned scan_index_calls, scan_constant_checks, scan_constant_reused;
+static uint64_t scan_indices, scan_constant_bytes;
+void xv_d3d_draw_scan_override(int enabled)
+{ draw_scan_override = enabled < 0 ? -1 : !!enabled; }
+static int draw_scan_neon(void)
+{
+    static int configured = -1;
+    if (configured < 0) {
+        const char *e = getenv("XV_DRAW_SCAN_NEON");
+        configured = e && atoi(e) != 0; /* opt-in until measured on Vita */
+    }
+    return draw_scan_override < 0 ? configured : draw_scan_override;
+}
 #ifdef XV_RUN_RECOMP
-/* Recomp build: the UI bridge owns the texture cache (CPU de-swizzle/DXT decode to linear RGBA - the GPU's
- * twiddle does not match the NV2A layout), so mesh draws borrow its control words. */
+/* The recording thread borrows validated texture descriptors before applying
+ * its captured sampler state. Texture lifetime belongs to the UI bridge. */
 const SceGxmTexture *xv_ui_gxm_texture(uint32_t hdr);
 const SceGxmTexture *xv_ui_gxm_texture_pal(uint32_t hdr, uint32_t pal_guest);
+void xv_ui_gxm_apply_texture_options(SceGxmTexture *texture);
+int xv_ui_gxm_texture_opaque(const SceGxmTexture *texture);
+static const SceGxmTexture *texture_source[4];
+static unsigned sampler_hits, sampler_misses;
+void xv_d3d_prep_cache_report(unsigned frames)
+{
+    XV_LOG("[draw-scan] %u frames: enabled %d; %u index copies / %llu indices; %u constant checks / %u unchanged / %llu KiB checked; exact bytes, draw order preserved\n",
+        frames, draw_scan_neon(), scan_index_calls, (unsigned long long)scan_indices,
+        scan_constant_checks, scan_constant_reused, (unsigned long long)(scan_constant_bytes >> 10));
+    scan_index_calls = scan_constant_checks = scan_constant_reused = 0;
+    scan_indices = scan_constant_bytes = 0;
+    XV_LOG("[sampler-cache] %u frames: %u reused / %u prepared (texture validity still checked)\n", frames, sampler_hits, sampler_misses);
+    sampler_hits = sampler_misses = 0;
+    XV_LOG("[texture-prep] %u frames: %u stages prepared / %u unused skipped\n", frames, texture_stages_prepared, texture_stages_skipped);
+    texture_stages_prepared = texture_stages_skipped = 0;
+    XV_LOG("[opaque-material] %u frames: %u eligible / %u proven opaque (captured upload; alpha test retained otherwise)\n", frames, opaque_candidates, opaque_proven);
+    opaque_candidates = opaque_proven = 0;
+}
 static const SceGxmTexture *texture_for(unsigned stage)
 {
     static SceGxmTexture t[4];
+    static uint32_t keys[4][8];
+    static uint8_t valid[4];
+    static int enabled = -1;
+    if (enabled < 0) { const char *e = getenv("XV_SAMPLER_CACHE"); enabled = !e || atoi(e) != 0; }
     const SceGxmTexture *src = NULL;
-    if (g_rt_n) { rt_alias_t *r = rt_find(*(const uint32_t *)xv_guest_ptr(S.tex_guest[stage] + 4)); if (r && r->valid) src = &r->tex; }
+    src = xv_d3d_render_target_texture(S.tex_guest[stage]);
     if (!src) src = xv_ui_gxm_texture_pal(S.tex_guest[stage], S.pal_guest[stage]);
+    texture_source[stage] = src;
     if (!src) return NULL;
+    /* Always resolve the live texture first: streaming, palettes, render-target
+     * reuse and dirty pixels retain the cache owner's existing validation.
+     * User filter options are immutable for this process (set before launch). */
+    uint32_t key[8];
+    _Static_assert(sizeof *src == 16, "GXM texture control word size");
+    memcpy(key, src, sizeof *src);
+    key[4] = S.tex_min[stage]; key[5] = S.tex_mag[stage];
+    key[6] = S.tex_addr_u[stage]; key[7] = S.tex_addr_v[stage];
+    if (enabled && valid[stage] && !memcmp(keys[stage], key, sizeof key)) {
+        sampler_hits++; return &t[stage];
+    }
+    sampler_misses++;
     t[stage] = *src;
     sceGxmTextureSetMinFilter(&t[stage], S.tex_min[stage] == X_D3DTEXF_POINT ? SCE_GXM_TEXTURE_FILTER_POINT : SCE_GXM_TEXTURE_FILTER_LINEAR);
     sceGxmTextureSetMagFilter(&t[stage], S.tex_mag[stage] == X_D3DTEXF_POINT ? SCE_GXM_TEXTURE_FILTER_POINT : SCE_GXM_TEXTURE_FILTER_LINEAR);
+    xv_ui_gxm_apply_texture_options(&t[stage]);
     sceGxmTextureSetUAddrMode(&t[stage], addr_mode(S.tex_addr_u[stage]));
     sceGxmTextureSetVAddrMode(&t[stage], addr_mode(S.tex_addr_v[stage]));
+    memcpy(keys[stage], key, sizeof key); valid[stage] = 1;
     return &t[stage];
 }
 #else
@@ -461,16 +875,65 @@ static const SceGxmTexture *texture_for(unsigned stage)
  * -------------------------------------------------------------------------------- */
 static cmdlist_t *cur_list(void) { return g_lists[g_build_frame % XV_NUM_LISTS]; }
 
+void xd3d_r_visibility_begin(uint32_t w, uint32_t h)
+{
+    cmdlist_t *l=cur_list();
+    l->active_visibility=0;
+    if (l->nvisibility == XV_VISIBILITY_PER_FRAME) return;
+    unsigned slot=l->nvisibility++;
+    memset(&l->visibility[slot],0,sizeof l->visibility[slot]);
+    l->visibility[slot].guest_area=(w && h && w<=4096 && h<=4096) ? w*h : 640u*480u;
+    l->active_visibility=slot+1;
+}
+uint32_t xd3d_r_visibility_end(uint32_t id)
+{
+    cmdlist_t *l=cur_list();
+    unsigned slot=l->active_visibility;
+    l->active_visibility=0;
+    if (!slot) return XV_VISIBILITY_OUT_OF_MEMORY;
+    return xv_visibility_issue(g_visibility_results,id,
+        &l->visibility[slot-1].result_slot,&l->visibility[slot-1].serial);
+}
+uint32_t xd3d_r_visibility_result(uint32_t id, uint32_t *pixels)
+{
+    return xv_visibility_read(g_visibility_results,id,pixels);
+}
+uint32_t xd3d_r_visibility_result_stale(uint32_t id, uint32_t *pixels, uint32_t *behind)
+{
+    return xv_visibility_read_stale(g_visibility_results,id,pixels,behind);
+}
+
+extern int xk_wait_u32(const uint32_t *,uint32_t,uint64_t) __attribute__((weak));
+extern void xk_os_scheduler_notify(void) __attribute__((weak));
+extern uint64_t xk_os_monotonic_us(void) __attribute__((weak));
+int xd3d_r_visibility_wait(uint32_t id,uint32_t timeout_us,uint32_t *ready_age_us,uint32_t *render_us)
+{
+    xv_visibility_result *r=xv_visibility_find(g_visibility_results,id);
+    if (!r || !xk_wait_u32) return 0;
+    uint32_t serial=__atomic_load_n(&r->issued,__ATOMIC_ACQUIRE);
+    /* A query still being recorded must return INCOMPLETE so Halo can reach
+     * Present. Park only after the pump has started its submitted generation. */
+    if (!serial || __atomic_load_n(&r->submitted,__ATOMIC_ACQUIRE)!=serial) return 0;
+    xk_wait_u32(&r->completed,serial,timeout_us);
+    if (xk_os_monotonic_us && __atomic_load_n(&r->completed,__ATOMIC_ACQUIRE)==serial) {
+        *ready_age_us=(uint32_t)xk_os_monotonic_us()-r->completed_us;
+        *render_us=r->completed_us-r->submitted_us;
+    }
+    return 1;
+}
+
 static cmd_t *new_cmd(void)
 {
     cmdlist_t *l = cur_list();
     if (l->ncmds >= XV_MAX_CMDS) {
-        l->dropped++;
+        l->dropped++; l->drop_commands++;
         return NULL;
     }
     cmd_t *c = &l->cmds[l->ncmds++];
     memset(c, 0, sizeof(*c));
     c->pass = (uint8_t)l->cur_pass;
+    c->visibility = (uint16_t)l->active_visibility;
+    if (c->pass && c->pass <= XV_RT_SLOTS) g_rt[c->pass - 1].last_frame = g_build_frame;
     return c;
 }
 
@@ -478,14 +941,16 @@ static int blend_mode(void)
 {
     unsigned mask = S.color_mask & 0xF;
     unsigned src = S.blend_enable ? S.src_blend : X_D3DBLEND_ONE, dst = S.blend_enable ? S.dst_blend : X_D3DBLEND_ZERO;
+    unsigned op = S.blend_enable ? S.blend_op : 0;
     if (!S.blend_enable && mask == 0xF)
         return BLEND_OPAQUE;
     for (unsigned i = 1; i < g_blend_combos; ++i)
-        if (g_blend_combo[i].src == src && g_blend_combo[i].dst == dst && g_blend_combo[i].mask == mask)
+        if (g_blend_combo[i].src == src && g_blend_combo[i].dst == dst && g_blend_combo[i].mask == mask && g_blend_combo[i].op == op)
             return (int)i;
     if (g_blend_combos < BLEND_NOCOLOR) {
         g_blend_combo[g_blend_combos].src = (uint8_t)src; g_blend_combo[g_blend_combos].dst = (uint8_t)dst; g_blend_combo[g_blend_combos].mask = (uint8_t)mask;
-        XV_LOG("blend variant %u: %u/%u mask %X\n", g_blend_combos, src, dst, mask);
+        g_blend_combo[g_blend_combos].op = (uint8_t)op;
+        XV_LOG("blend variant %u: %u/%u mask %X op %u\n", g_blend_combos, src, dst, mask, op);
         return (int)g_blend_combos++;
     }
     XV_ONCE(warned_blend, "blend %u/%u: variant table full; using src-alpha\n", S.src_blend, S.dst_blend);
@@ -551,13 +1016,272 @@ static int prim_to_gxm(uint32_t prim, uint32_t *count, const void **indices, uin
 
 int xd3d_hist_active(void) __attribute__((weak));
 static int trace_frame(void) { return xd3d_hist_active && xd3d_hist_active(); }
+
+/* The generated table is ordered by (vertex, canonical program, 2D cube mask).
+ * Inactive combiner state cannot force a material onto a heuristic fragment. */
+static int ps_entry_for(uint32_t vs, uint32_t key, unsigned c2d)
+{
+    unsigned lo = 0, hi = XV_PS_TABLE_COUNT;
+    while (lo < hi) {
+        unsigned mid = lo + (hi - lo) / 2;
+        const xv_ps_entry_t *e = &xv_ps_table[mid];
+        int less = e->vs_fnv < vs || (e->vs_fnv == vs &&
+            (e->ps_key < key || (e->ps_key == key && e->c2d_mask < c2d)));
+        if (less) lo = mid + 1; else hi = mid;
+    }
+    if (lo < XV_PS_TABLE_COUNT && xv_ps_table[lo].vs_fnv == vs &&
+        xv_ps_table[lo].ps_key == key && xv_ps_table[lo].c2d_mask == c2d) return (int)lo;
+    return -1;
+}
+
+static uint32_t ps_key_from_capture(uint32_t hash)
+{
+    unsigned lo = 0, hi = XV_PS_CAPTURE_COUNT;
+    while (lo < hi) {
+        unsigned mid = lo + (hi - lo) / 2;
+        if (xv_ps_capture_keys[mid].hash < hash) lo = mid + 1; else hi = mid;
+    }
+    return lo < XV_PS_CAPTURE_COUNT && xv_ps_capture_keys[lo].hash == hash ? xv_ps_capture_keys[lo].key : 0;
+}
 static const SceGxmTexture *cube_fallback(void);
 
 
 unsigned xv_d3d_last_draws, xv_d3d_draw_acc, xv_d3d_bsp_acc;   /* draw counters for the frame-time log */
 unsigned xv_dbg_count[16];                                        /* instrumented guest functions (portal walker) */
-static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint32_t base_vertex)
+static void *retain_immediate_bytes(const void *source, uint64_t bytes)
 {
+    unsigned list = g_build_frame % XV_NUM_LISTS;
+    uint64_t aligned=(bytes+15u)&~UINT64_C(15);
+    g_im_requested[list]+=aligned;
+    if (aligned > XV_IM_BYTES-g_im_used[list]) return NULL;
+    uint8_t *dst = g_im_vertices + list * XV_IM_BYTES + g_im_used[list];
+    memcpy(dst,source,(size_t)bytes);
+    g_im_used[list]+=(uint32_t)aligned;
+    return dst;
+}
+static int snapshot_attributes(cmd_t *c)
+{
+    void *dst=retain_immediate_bytes(S.const_attr,sizeof S.const_attr);
+    if (!dst) return 0;
+    c->constant_stream = dst;
+    return 1;
+}
+
+static unsigned index_bounds(const uint16_t *indices, unsigned count)
+{
+    unsigned maximum = 0;
+    for (unsigned i = 0; i < count; i++)
+        if (indices[i] > maximum) maximum = indices[i];
+    return count ? maximum + 1 : 0;
+}
+
+static int retain_indices(const void **indices, unsigned count, unsigned *nverts)
+{
+    if (!*indices || !count) return 0;
+    unsigned list = g_build_frame % XV_NUM_LISTS;
+    uintptr_t p = (uintptr_t)*indices;
+    uintptr_t quad = (uintptr_t)(g_quad_indices + list * XV_QUAD_INDICES);
+    /* These two buffers already have sufficient lifetimes. */
+    if (*indices == g_seq_indices) {
+        if (count > XV_SEQ_INDICES) return 0;
+        *nverts = count;
+        return 1;
+    }
+    if (p >= quad && p < quad + XV_QUAD_INDICES * 2) {
+        if (count > (quad + XV_QUAD_INDICES * 2 - p) / 2) return 0;
+        *nverts = index_bounds(*indices, count);
+        return 1;
+    }
+    g_index_requested[list] += ((uint64_t)count + 7u) & ~7ull;
+    if (g_index_used[list] > XV_FRAME_INDICES || count > XV_FRAME_INDICES - g_index_used[list]) return 0;
+    uint16_t *dst = g_frame_indices + list * XV_FRAME_INDICES + g_index_used[list];
+    static int cached_scan = -1;
+    if (cached_scan < 0) {
+        const char *e = getenv("XV_INDEX_SCAN_CACHED");
+        cached_scan = !e || atoi(e) != 0;
+        XV_LOG("index bounds: %s\n", cached_scan ? "cached snapshot" : "GPU copy scan (baseline)");
+    }
+    scan_index_calls++; scan_indices += count;
+    if (cached_scan) *nverts = draw_scan_neon() ?
+        xv_index_copy_bounds_neon(dst, *indices, count) : xv_index_copy_bounds(dst, *indices, count);
+    else {
+        memcpy(dst, *indices, count * sizeof *dst);
+        *nverts = index_bounds(dst, count);
+    }
+    g_index_used[list] += (count + 7u) & ~7u; /* keep every draw 16-byte aligned */
+    *indices = dst;
+    return 1;
+}
+
+static uint32_t geometry_hash(const void *data, unsigned bytes)
+{
+    const uint8_t *p = data;
+    uint32_t h = 2166136261u;
+    for (unsigned i = 0; i < bytes; i++) h = (h ^ p[i]) * 16777619u;
+    return h;
+}
+static unsigned changed_geometry(const cmd_t *c)
+{
+    unsigned changed = 0;
+    for (unsigned s = 0; s <= XV_MAX_STREAMS; s++) {
+        const void *p = s == XV_MAX_STREAMS ? c->indices : c->streams[s];
+        if (c->geometry_bytes[s] && geometry_hash(p, c->geometry_bytes[s]) != c->geometry_hash[s]) changed |= 1u << s;
+    }
+    return changed;
+}
+/* Diagnose writes between recording and GPU completion, without retaining or
+ * changing guest data. Only the explicitly requested histogram frames are hashed. */
+void xv_d3d_check_geometry(uint32_t frame)
+{
+    if (frame == UINT32_MAX) return;
+    cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
+    unsigned checked = 0, changed = 0;
+    for (unsigned i = 0; i < l->ncmds; i++) {
+        cmd_t *c = &l->cmds[i];
+        if (!c->geometry_bytes[XV_MAX_STREAMS]) continue;
+        checked++;
+        unsigned mask = changed_geometry(c);
+        if (mask) {
+            if (changed++ < 16) XV_LOG("[geometry] frame %u cmd %u %s changed mask %X (indices bit %u)\n",
+                frame, i, g_vs[c->vs].vs.desc->gxp, mask, XV_MAX_STREAMS);
+        }
+    }
+    if (checked) XV_LOG("[geometry] frame %u checked %u draws, %u changed before GPU completion\n", frame, checked, changed);
+}
+
+/* Include all cube/2D and alpha variants, plus the heuristic fallback. The
+ * cube-mode stages still determine variant identity even if a compiler removed
+ * their sampler. Texture-coordinate scales below remain captured for all stages:
+ * dependent reads can use another stage's coordinates without sampling it. */
+static unsigned draw_texture_mask(const cmd_t *c)
+{
+    static int enabled = -1;
+    static uint8_t fallback[FS_KINDS];
+    if (enabled < 0) { const char *e = getenv("XV_UNUSED_TEXTURES"); enabled = !e || atoi(e) != 0; }
+    if (!(unused_textures_override < 0 ? enabled : unused_textures_override) || c->fs_kind >= FS_KINDS) return 15;
+    if (!fallback[c->fs_kind])
+        fallback[c->fs_kind] = 16 | xv_fshader_embedded_texture_mask(FS_GXP[c->fs_kind]);
+    unsigned mask = fallback[c->fs_kind] & 15;
+    if (c->ps_entry < 0) return mask;
+    if ((unsigned)c->ps_entry >= XV_PS_TABLE_COUNT) return 15;
+    if (!g_ps_texture_masks[c->ps_entry]) {
+        const xv_ps_entry_t *entry = &xv_ps_table[c->ps_entry];
+        unsigned first = (unsigned)c->ps_entry, last = first;
+        while (first && xv_ps_table[first-1].vs_fnv == entry->vs_fnv &&
+               xv_ps_table[first-1].ps_key == entry->ps_key) first--;
+        unsigned family_mask = 0;
+        for (last = first; last < XV_PS_TABLE_COUNT &&
+             xv_ps_table[last].vs_fnv == entry->vs_fnv && xv_ps_table[last].ps_key == entry->ps_key; last++) {
+            const xv_ps_entry_t *e = &xv_ps_table[last];
+            family_mask |= e->cube_modes | xv_fshader_embedded_texture_mask(e->gxp);
+            size_t len = strlen(e->gxp);
+            char variant[160];
+            if (len < 9 || len + 4 > sizeof variant || strcmp(e->gxp + len - 9, ".frag.gxp")) family_mask |= 15;
+            else {
+                snprintf(variant, sizeof variant, "%.*s_na.frag.gxp", (int)(len - 9), e->gxp);
+                family_mask |= xv_fshader_embedded_texture_mask(variant);
+                if (e->ps_key == 0x154066FDu) {
+                    snprintf(variant, sizeof variant, "%.*s_gt.frag.gxp", (int)(len - 9), e->gxp);
+                    family_mask |= xv_fshader_embedded_texture_mask(variant);
+                }
+            }
+        }
+        for (unsigned i = first; i < last; i++) g_ps_texture_masks[i] = 16 | family_mask;
+    }
+    return mask | (g_ps_texture_masks[c->ps_entry] & 15);
+}
+
+/* The audited family returns unchanged tex0 alpha in every cube/alpha variant.
+ * User shader replacements invalidate that dependency proof. Keep all uncertain
+ * addressing modes and non-2D resources on the original alpha-test path. */
+static int opaque_material_enabled(void)
+{
+    static int enabled = -1, compatible;
+    if (enabled < 0) {
+        const char *e = getenv("XV_OPAQUE_MATERIAL"); enabled = !e || atoi(e) != 0;
+        e = getenv("XV_SHADER_OVERRIDE"); compatible = !e || atoi(e) == 0;
+        e = getenv("XV_ALPHA_SPECIALIZE"); compatible &= !e || atoi(e) != 0;
+    }
+    return compatible && (opaque_material_override < 0 ? enabled : opaque_material_override);
+}
+static int opaque_material_candidate(const cmd_t *c)
+{
+    if (c->ps_entry < 0 || (unsigned)c->ps_entry >= XV_PS_TABLE_COUNT ||
+        xv_ps_table[c->ps_entry].ps_key != 0x154066FDu ||
+        !(c->atest & (1u << 16)) || ((c->atest >> 8) & 7u) == 7 ||
+        !xv_alpha_accepts_opaque(c->atest)) return 0;
+    for (unsigned i = 0; i < 2; i++) {
+        unsigned mode = i ? S.tex_addr_v[0] : S.tex_addr_u[0];
+        if (mode != X_D3DTADDRESS_WRAP && mode != X_D3DTADDRESS_MIRROR &&
+            mode != X_D3DTADDRESS_CLAMP && mode != X_D3DTADDRESS_CLAMPTOEDGE) return 0;
+    }
+    return 1;
+}
+
+static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
+{
+    /* textures */
+    unsigned texok = 0, mask = draw_texture_mask(c);
+    int candidate = opaque_material_candidate(c);
+    opaque_candidates += candidate;
+    c->opaque_alpha = 0;
+    for (unsigned t = 0; t < 4; ++t) {
+        if (!S.tex_guest[t])
+            continue;
+        if (!(mask & (1u << t))) { texture_stages_skipped++; continue; }
+        texture_stages_prepared++;
+#ifdef XV_RUN_RECOMP
+        if (immediate) {
+            extern uint32_t xd3d_backbuffer_data(void);
+            uint32_t data = ((const X_D3DResource *)xv_guest_ptr(S.tex_guest[t]))->Data;
+            if (data && data == xd3d_backbuffer_data()) {
+                c->previous_frame |= (uint8_t)(1u << t);
+                c->ntex = (uint8_t)(t + 1);
+                continue;
+            }
+        }
+#endif
+        const SceGxmTexture *tex = texture_for(t);
+        if (tex) {
+            c->tex[t] = *tex;
+            c->ntex = (uint8_t)(t + 1);
+            texok |= 1u << t;
+#ifdef XV_RUN_RECOMP
+            if (!t && candidate && opaque_material_enabled() &&
+                sceGxmTextureGetType(tex) != SCE_GXM_TEXTURE_CUBE &&
+                xv_ui_gxm_texture_opaque(texture_source[0])) {
+                c->opaque_alpha = 1; opaque_proven++;
+            }
+#endif
+        }
+    }
+    for (unsigned t = 0; t < 4; t++) {
+        c->texscale[t][0] = c->texscale[t][1] = 1.0f;
+        if (S.tex_guest[t]) {
+            const uint32_t *header = (const uint32_t *)xv_guest_ptr(S.tex_guest[t]);
+            if (header[4]) {
+                c->texscale[t][0] = 1.0f / ((header[4] & 0xFFF) + 1);
+                c->texscale[t][1] = 1.0f / (((header[4] >> 12) & 0xFFF) + 1);
+            }
+        }
+    }
+    if (c->ps_entry >= 0) {
+        const xv_ps_entry_t *e = &xv_ps_table[c->ps_entry];
+        unsigned c2d = 0;
+        for (unsigned t = 0; t < 4; ++t)
+            if ((e->cube_modes & texok & (1u << t)) &&
+                sceGxmTextureGetType(&c->tex[t]) != SCE_GXM_TEXTURE_CUBE) c2d |= 1u << t;
+        if (c2d) {
+            int variant = ps_entry_for(d->func_hash, e->ps_key, c2d);
+            if (variant >= 0) c->ps_entry = (int16_t)variant;
+        }
+    }
+    return texok;
+}
+
+static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint32_t base_vertex, const void *immediate)
+{
+    uint64_t profile = xv_draw_profile_begin();
     xv_d3d_draw_acc++;
     if (recording_dropped()) return;
     int slot = handle_to_slot(S.vs_handle);
@@ -572,7 +1296,27 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         cur_list()->ncmds--;
         return;
     }
+    /* Halo rebuilds visible-world indices as the camera turns, including while
+     * the preceding frame is in flight. Holding the guest pointer mixes that
+     * new triangle list with the preceding draw's vertices and camera. */
+    unsigned nverts;
+    if (!retain_indices(&indices, count, &nverts)) {
+        cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_indices++;
+        return;
+    }
+    /* Observation only, restricted to an explicitly requested histogram frame. */
+    if (trace_frame()) {
+        unsigned lo=65535,hi=0;
+        const uint8_t *ix=indices;
+        for(unsigned i=0;i<count;i++) {
+            uint16_t value;memcpy(&value,ix+2u*i,2);
+            if(value<lo)lo=value;if(value>hi)hi=value;
+        }
+        XV_LOG("[index-range] frame %u cmd %u prim %u count %u min %u max %u retained %u base %u immediate %u\n",
+            g_build_frame,cur_list()->ncmds-1,prim,count,lo,hi,nverts,base_vertex,immediate!=NULL);
+    }
     vs_slot_t *v = &g_vs[slot];
+    xv_draw_profile_step(XV_DRAW_INDICES, &profile);
     const xv_vs_desc_t *d = v->vs.desc;
     {   /* XV_SKIP_VS=halo_vs_40[,halo_vs_26]: drop every draw made with these vertex programs (pass isolation) */
         static const char *skip = NULL; static int sinit; if (!sinit) { sinit = 1; skip = getenv("XV_SKIP_VS"); }
@@ -596,10 +1340,14 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     c->indices = indices;
     c->index_count = count;
     c->fs_kind = S.tex_guest[0] ? FS_TEXMOD : FS_COLOR;
-    c->ps_entry = -1;
-    for (unsigned i = 0; i < XV_PS_TABLE_COUNT; ++i)
-        if (xv_ps_table[i].vs_fnv == d->func_hash && xv_ps_table[i].ps_hash == S.ps_hash) { c->ps_entry = (int16_t)i; break; }
-    if (c->ps_entry < 0 && c->fs_kind == FS_TEXMOD) {
+    /* The immediate UI bridge recognizes these exact active combiner programs.
+     * Use their equivalent built-in shaders with the captured blend state; the
+     * font fallback whitened black radar texels and tinted the copy pass green. */
+    int simple_ui = (d->func_hash == 0x1DAF0284u || d->func_hash == 0x4469E1F8u) &&
+                    (S.ps_hash == 0x1A42D493u || S.ps_hash == 0x6C94962Bu);
+    if (simple_ui) c->fs_kind = S.ps_hash == 0x1A42D493u ? FS_TEX0 : FS_TEXMOD;
+    c->ps_entry = (int16_t)ps_entry_for(d->func_hash, S.ps_key, 0);
+    if (!simple_ui && c->ps_entry < 0 && c->fs_kind == FS_TEXMOD) {
         /* no combiner program for this pair yet: texture x colour is black when the vertex program
          * writes no colour0 (most environment shaders) - use the plain texture instead */
         for (unsigned i = 0; i < XV_VS_OUTPUTS_COUNT; ++i)
@@ -615,20 +1363,23 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     c->blend = (uint8_t)blend_mode();
     c->depth_func_idx = S.z_enable ? (uint8_t)((S.z_func >= 1 && S.z_func <= 8) ? S.z_func - 1 : 3) : 7;
     c->depth_write = S.z_enable && S.z_write;
+    c->stencil = S.stencil;
     c->cull = (uint8_t)S.cull;
     { extern uint32_t xd3d_fog_color(void); c->fog_color = xd3d_fog_color(); }
     { extern uint32_t xd3d_alpha_test(void); c->atest = xd3d_alpha_test(); }
     if (strstr(d->gxp, "halo_vs_16")) xv_d3d_bsp_acc++;
-    memcpy(c->const_attr, S.const_attr, 16);
-
-    /* streams: game pointers, offset by the base vertex, flushed for the GPU */
-    uint32_t nverts = count;                                  /* vertices the GPU will fetch */
-    if (indices && indices != g_seq_indices) {
-        uint32_t mx = 0; const uint16_t *ix = (const uint16_t *)indices;
-        for (uint32_t i = 0; i < count; ++i) if (ix[i] > mx) mx = ix[i];
-        nverts = mx + 1;
+    for (unsigned a = 0; a < d->nattrs; a++) if (d->attrs[a].stream == XV_CONST_STREAM) {
+        if (!snapshot_attributes(c)) {
+            cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_attributes++;
+            return;
+        }
+        break;
     }
+
+    xv_draw_profile_step(XV_DRAW_PROGRAM, &profile);
+    /* Snapshot raw streams after applying the existing base-vertex offset. */
     for (unsigned s = 0; s < d->nstreams; ++s) {
+        if (immediate && s == 0) { c->streams[s] = immediate; continue; }
         if (!S.stream_guest[s]) {
             XV_ONCE(warned_stream, "stream %u not set for %s\n", s, d->gxp);
             continue;
@@ -639,11 +1390,62 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
          * Halo's heap pages (heap VAs start at 0x00465000), so map-resident model vertices (vehicle parts,
          * dropped weapons: physical 0x005A5A00...) came back as zeros / live heap bytes. */
         const uint8_t *p = (const uint8_t *)xv_guest_ptr(0x80000000u | vb->Data) + base_vertex * stride;
-        c->streams[s] = p;
-        xv_gpu_flush(p, nverts * stride);
+        if (!stride || nverts > UINT32_MAX / stride ||
+            !(c->streams[s] = xv_vertex_upload(g_build_frame % XV_NUM_LISTS, p, nverts * stride))) {
+            cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_attributes++;
+            return;
+        }
+        if (trace_frame()) XV_LOG("[hist] stream %u vb %08X common %08X data %08X vertices %u stride %u\n",
+            s, S.stream_guest[s], vb->Common, vb->Data, nverts, stride);
+        /* Only the owned upload is published; the cached source stays on CPU. */
     }
     if (indices)
         xv_gpu_flush(indices, count * 2);
+    xv_draw_profile_step(XV_DRAW_STREAMS, &profile);
+    if (trace_frame()) {
+        /* Opt-in capture for offline skin/mesh diagnosis. Defaults to the first
+         * requested histogram frame; allow up to four for lighting A/B captures. */
+        const char *dump_vs = getenv("XV_MESH_DUMP");
+        static uint32_t dump_frame = UINT32_MAX;
+        static unsigned dump_frames;
+        if (dump_vs && strstr(d->gxp, dump_vs) && c->streams[0]) {
+            const char *frames = getenv("XV_MESH_DUMP_FRAMES");
+            int limit = frames ? atoi(frames) : 1;
+            if (limit < 1) limit = 1;
+            if (limit > 4) limit = 4;
+            if (dump_frame != g_build_frame && dump_frames < (unsigned)limit) {
+                dump_frame = g_build_frame; dump_frames++;
+            }
+            unsigned stride = S.stream_stride[0] ? S.stream_stride[0] : d->stride[0];
+            if (immediate) stride = d->stride[0]; /* packed UI/flare layout, not the prior VB */
+            if (dump_frame == g_build_frame && stride && nverts <= (4u * 1024 * 1024) / stride) {
+                char path[128];
+                snprintf(path, sizeof path, "ux0:data/xita/mesh_%u_%u.bin", g_build_frame, cur_list()->ncmds - 1);
+                FILE *f = fopen(path, "wb");
+                if (f) {
+                    uint32_t header[] = { 0x4853454D, d->func_hash, S.ps_hash, nverts, stride, count, prim, c->atest };
+                    fwrite(header, sizeof header, 1, f);
+                    fwrite(S.vsc, sizeof S.vsc, 1, f);
+                    fwrite(S.psc, sizeof S.psc, 1, f);
+                    fwrite(c->streams[0], stride, nverts, f);
+                    fwrite(indices, 2, count, f);
+                    fclose(f);
+                }
+            }
+        }
+        for (unsigned s = 0; s < d->nstreams; s++) {
+            unsigned stride = S.stream_stride[s] ? S.stream_stride[s] : d->stride[s];
+            if (immediate && s == 0) stride = d->stride[s];
+            if (c->streams[s] && stride && nverts <= (4u * 1024 * 1024) / stride) {
+                c->geometry_bytes[s] = nverts * stride;
+                c->geometry_hash[s] = geometry_hash(c->streams[s], c->geometry_bytes[s]);
+            }
+        }
+        if (indices && count <= 65536) {
+            c->geometry_bytes[XV_MAX_STREAMS] = count * 2;
+            c->geometry_hash[XV_MAX_STREAMS] = geometry_hash(indices, count * 2);
+        }
+    }
 
     {   /* XV_FOG_DUMP=1: first 3 draws per vertex program: the fog-plane constants c[12], c[13] */
         static int fdump = -1; if (fdump < 0) { const char *e = getenv("XV_FOG_DUMP"); fdump = e ? atoi(e) : 0; }
@@ -711,6 +1513,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         }
     }
 
+    xv_draw_profile_step(XV_DRAW_DIAGNOSTICS, &profile);
     /* constants: snapshot the window this program reads.  Consecutive draws with unchanged c[] share one
      * snapshot (Halo draws hundreds of BSP pieces per frame with full-window programs: 768 floats each) */
     cmdlist_t *l = cur_list();
@@ -728,29 +1531,18 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             }
             l->last_gen = S.vsc_gen; l->last_off = c->const_off; l->last_n = d->c_count; l->last_base = d->c_base;
         } else {
-            l->const_dropped++;               /* drawn with whatever the uniform buffer holds - visible garbage */
+            l->const_dropped++;               /* rejected during replay; never reuse stale constants */
         }
     }
 
-    /* textures */
-    unsigned texok = 0;
-    for (unsigned t = 0; t < 4; ++t) {
-        if (!S.tex_guest[t])
-            continue;
-        const SceGxmTexture *tex = texture_for(t);
-        if (tex) {
-            c->tex[t] = *tex;
-            c->ntex = (uint8_t)(t + 1);
-            texok |= 1u << t;
-        }
-    }
-    if (c->ps_entry >= 0 && xv_ps_table[c->ps_entry].cube_mask) {
-        for (unsigned t = 0; t < 4; ++t) if (xv_ps_table[c->ps_entry].cube_mask & (1u << t)) {
-            int have_cube = (texok & (1u << t)) && sceGxmTextureGetType(&c->tex[t]) == SCE_GXM_TEXTURE_CUBE;
-            if (!have_cube) { const SceGxmTexture *fb = cube_fallback(); if (fb) { c->tex[t] = *fb; if (c->ntex < t + 1) c->ntex = (uint8_t)(t + 1); } }
-        }
-    }
+    xv_draw_profile_step(XV_DRAW_CONSTANTS, &profile);
+    unsigned texok = record_textures(c, d, immediate != NULL);
+    xv_draw_profile_step(XV_DRAW_TEXTURES, &profile);
     if (trace_frame()) {
+        XV_LOG("[stencil] cmd %u vs %s enable %u func %u ref %u mask %02X/%02X ops %u/%u/%u\n",
+            cur_list()->ncmds-1, d->gxp, c->stencil.enabled, c->stencil.func,
+            c->stencil.ref, c->stencil.read_mask, c->stencil.write_mask,
+            c->stencil.fail, c->stencil.depth_fail, c->stencil.pass);
         char tb[160]; int n = 0;
         for (unsigned t = 0; t < 4; ++t) {
             if (!S.tex_guest[t]) { n += snprintf(tb + n, sizeof tb - n, " -"); continue; }
@@ -770,9 +1562,13 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
                 for (int r = 0; r < 3; ++r) w[r] = S.vsc[60 + r][0] * v[0] + S.vsc[60 + r][1] * v[1] + S.vsc[60 + r][2] * v[2] + S.vsc[60 + r][3];   /* node 0 */
                 w[3] = 1.0f; float o[4];
                 for (int r = 0; r < 4; ++r) o[r] = S.vsc[r][0] * w[0] + S.vsc[r][1] * w[1] + S.vsc[r][2] * w[2] + S.vsc[r][3] * w[3];
-                k += snprintf(zb + k, sizeof zb - k, " [%.2f %.2f %.2f %.2f]", o[0] / o[3], o[1] / o[3], o[2] / o[3], o[3]);
+                k += snprintf(zb + k, sizeof zb - k, " [%.2f %.2f %.7f %.2f]", o[0] / o[3], o[1] / o[3], o[2] / o[3], o[3]);
             }
             XV_LOG("[hist]   zoff clip (x/w y/w z/w w):%s\n", zb);
+            XV_LOG("[hist]   zoff state mask %X blend %u atest %08X rows z %.7g %.7g %.7g %.7g w %.7g %.7g %.7g %.7g\n",
+                   S.color_mask, c->blend, c->atest,
+                   S.vsc[2][0], S.vsc[2][1], S.vsc[2][2], S.vsc[2][3],
+                   S.vsc[3][0], S.vsc[3][1], S.vsc[3][2], S.vsc[3][3]);
         }
         for (unsigned t = 0; t < 4; ++t) {                            /* tiny textures (fog ramps): raw bytes */
             uint32_t cw = S.tex_guest[t]; if (!cw) continue;
@@ -821,23 +1617,43 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         XV_LOG("[hist] cmd %u: draw %s ps %08X prim %u n %u base %u tex %08X/%08X/%08X/%08X ntex %u blend %u/%u%s z %u/%u cull %u c[%d..%d] c0 %.2f %.2f %.2f %.2f\n",
                l->ncmds - 1, d->gxp, S.ps_hash, prim, count, base_vertex, S.tex_guest[0], S.tex_guest[1], S.tex_guest[2], S.tex_guest[3], c->ntex, S.src_blend, S.dst_blend, S.blend_enable ? "" : "(off)",
                S.z_enable, S.z_write, S.cull, d->c_base, d->c_base + (int)d->c_count, S.vsc[96 + d->c_base][0], S.vsc[96 + d->c_base][1], S.vsc[96 + d->c_base][2], S.vsc[96 + d->c_base][3]);
+    xv_draw_profile_step(XV_DRAW_DIAGNOSTICS, &profile);
 }
 
 void xv_d3d_DrawVertices(uint32_t prim, uint32_t start_vertex, uint32_t vertex_count)
 {
     if (vertex_count > XV_SEQ_INDICES)
         vertex_count = XV_SEQ_INDICES;
-    record_draw(prim, vertex_count, g_seq_indices, start_vertex);
+    record_draw(prim, vertex_count, g_seq_indices, start_vertex, NULL);
 }
 
 void xv_d3d_DrawIndexedVertices(uint32_t prim, uint32_t vertex_count, uint32_t indices_guest)
 {
-    record_draw(prim, vertex_count, xv_guest_ptr(indices_guest), 0);
+    record_draw(prim, vertex_count, xv_guest_ptr(indices_guest), 0, NULL);
 }
 void xv_d3d_DrawIndexedVerticesBase(uint32_t prim, uint32_t index_count, uint32_t indices_guest, uint32_t base_vertex)
 {
     S.indices_dbg = indices_guest;
-    record_draw(prim, index_count, xv_guest_ptr(indices_guest), base_vertex);
+    record_draw(prim, index_count, xv_guest_ptr(indices_guest), base_vertex, NULL);
+}
+
+void xv_d3d_DrawImmediate(uint32_t prim, const void *vertices, uint32_t count)
+{
+    xv_d3d_DrawImmediateStrided(prim, vertices, count, XV_IM_STRIDE);
+}
+void xv_d3d_DrawImmediateStrided(uint32_t prim, const void *vertices, uint32_t count, uint32_t stride)
+{
+    int slot = handle_to_slot(S.vs_handle);
+    if (!vertices || !count || !stride || stride > XV_IM_STRIDE || recording_dropped() || slot < 0) return;
+    const xv_vs_desc_t *desc = g_vs[slot].vs.desc;
+    if (!desc || desc->nstreams != 1 || desc->stride[0] != stride) return;
+    void *dst=retain_immediate_bytes(vertices,(uint64_t)count*stride);
+    if (!dst) {
+        cur_list()->dropped++; cur_list()->drop_immediate++;
+        return;
+    }
+    /* Uncached GPU-mapped scratch, retained until this frame's fence completes. */
+    record_draw(prim, count, g_seq_indices, 0, dst);
 }
 
 /* Recomp-build helpers: the kernel's D3D object model (recomp/kernel/xd3d.c) owns the state and hands
@@ -855,50 +1671,202 @@ uint32_t xv_d3d_handle_for_hash(uint32_t fnv)
         }
     return 0;
 }
-void xv_d3d_SetAllConstants(const float (*vsc)[4]) { if (memcmp(S.vsc, vsc, sizeof(S.vsc)) != 0) { memcpy(S.vsc, vsc, sizeof(S.vsc)); S.vsc_gen++; } }
-void xv_d3d_SetPixelShader(uint32_t hash, const float (*psc)[4]) { S.ps_hash = hash; if (psc) memcpy(S.psc, psc, sizeof(S.psc)); }
+void xv_d3d_SetAllConstants(const float (*vsc)[4])
+{
+    scan_constant_checks++; scan_constant_bytes += sizeof S.vsc;
+    int equal = draw_scan_neon() ? xv_bytes_equal(S.vsc, vsc, sizeof S.vsc) :
+                                  !memcmp(S.vsc, vsc, sizeof S.vsc);
+    if (equal) { scan_constant_reused++; return; }
+    memcpy(S.vsc, vsc, sizeof S.vsc);
+    S.vsc_gen++;
+}
+void xv_d3d_SetPixelShader(uint32_t hash, uint32_t key, const float (*psc)[4]) { S.ps_hash = hash; S.ps_key = key ? key : ps_key_from_capture(hash); if (psc) memcpy(S.psc, psc, sizeof(S.psc)); }
+/* Keep real resource shortages distinct and avoid per-frame log I/O during a
+ * shortage. Opt-in memory samples also expose headroom when nothing drops. */
+static void report_draw_drops(cmdlist_t *l)
+{
+    static int detail = -1, previous_drop;
+    if (detail < 0) { const char *e = getenv("XV_LOG_DRAW_DROPS"); detail = e && atoi(e); }
+    if ((l->dropped && !previous_drop) ||
+        (g_build_frame % 60u == 0 && (l->dropped || detail))) {
+        unsigned list = g_build_frame % XV_NUM_LISTS;
+        XV_LOG("[draw-memory] frame %u drops %u (commands %u indices %u attributes %u immediate %u); commands %u/%u indices %u/%u requested %llu immediate %u/%u requested %llu\n",
+            g_build_frame, l->dropped, l->drop_commands, l->drop_indices,
+            l->drop_attributes, l->drop_immediate, l->ncmds, XV_MAX_CMDS,
+            g_index_used[list], XV_FRAME_INDICES, (unsigned long long)g_index_requested[list],
+            g_im_used[list], (unsigned)XV_IM_BYTES, (unsigned long long)g_im_requested[list]);
+    }
+    previous_drop = l->dropped != 0;
+}
+
 uint32_t xv_d3d_EndFrame(void)
 {
     cmdlist_t *l = cur_list();
-    if (l->dropped) XV_LOG("frame %u: %u command(s) dropped (list full)\n", g_build_frame, l->dropped);
+    report_draw_drops(l);
     if (l->const_dropped) XV_LOG("frame %u: %u draw(s) without constants (pool full: %u floats)\n", g_build_frame, l->const_dropped, l->nconsts);
     xv_d3d_last_draws = l->ncmds;
+    extern unsigned xv_ui_gxm_record_frame(void);
+    l->ui_frame = xv_ui_gxm_record_frame();
+    g_record_pass = l->cur_pass;
     uint32_t done = g_build_frame++;
-    cmdlist_t *next = g_lists[g_build_frame % XV_NUM_LISTS];
-    next->ncmds = 0; next->nconsts = 0; next->dropped = 0; next->const_dropped = 0; next->npasses = 0; next->cur_pass = 0; g_quad_used[g_build_frame % XV_NUM_LISTS] = 0;
     return done;
+}
+unsigned xv_d3d_record_slot(void) { return g_build_frame % XV_NUM_LISTS; }
+void xv_d3d_BeginFrame(void)
+{
+    xv_vertex_upload_reset(g_build_frame % XV_NUM_LISTS);
+    g_frame_constants[g_build_frame % XV_NUM_LISTS].ready = 0;
+    g_lists[g_build_frame % XV_NUM_LISTS]->cur_pass = g_record_pass;
+    cmdlist_t *next = g_lists[g_build_frame % XV_NUM_LISTS];
+    next->nui = 0; next->ncmds = 0; next->nconsts = 0; next->dropped = 0; next->const_dropped = 0; g_quad_used[g_build_frame % XV_NUM_LISTS] = 0;
+    g_im_used[g_build_frame % XV_NUM_LISTS] = 0;
+    g_im_requested[g_build_frame % XV_NUM_LISTS] = 0;
+    g_index_used[g_build_frame % XV_NUM_LISTS] = 0;
+    g_index_requested[g_build_frame % XV_NUM_LISTS] = 0;
+    next->drop_commands = next->drop_indices = next->drop_attributes = next->drop_immediate = 0;
+    next->nvisibility = next->active_visibility = 0;
+    next->visibility_gpu_ready = 0;
+
 }
 
 void xv_d3d_Clear(uint32_t flags, uint32_t color_argb, float z, uint32_t stencil)
 {
-    (void)stencil;
     if (recording_dropped()) return;
     if (trace_frame()) XV_LOG("[hist] cmd %u: Clear flags %X color %08X z %.3f\n", cur_list()->ncmds, flags, color_argb, z);
+    cmdlist_t *l=cur_list();
+    unsigned clear_flags=(flags&X_D3DCLEAR_TARGET ? 1u : 0u)|(flags&X_D3DCLEAR_ZBUFFER ? 2u : 0u)|
+        (flags&X_D3DCLEAR_STENCIL ? 4u : 0u);
+    /* Consecutive clears of the same attachments can be one draw. A recorded
+     * UI batch or visibility query makes the earlier clear observable. */
+    if (l->ncmds && !l->active_visibility &&
+        (!l->nui || l->ui[l->nui-1].before<l->ncmds)) {
+        cmd_t *previous=&l->cmds[l->ncmds-1];
+        if (previous->kind==1 && previous->pass==l->cur_pass && !previous->visibility) {
+            if (clear_flags&1) previous->clear_color=color_argb;
+            if (clear_flags&2) previous->clear_z=z;
+            if (clear_flags&4) previous->clear_stencil=(uint8_t)stencil;
+            previous->clear_flags|=clear_flags;
+            return;
+        }
+    }
     cmd_t *c = new_cmd();
     if (!c)
         return;
     c->kind = 1;
-    c->clear_flags = (uint8_t)((flags & X_D3DCLEAR_TARGET ? 1 : 0) | (flags & X_D3DCLEAR_ZBUFFER ? 2 : 0));
+    c->clear_flags = (uint8_t)clear_flags;
     c->clear_color = color_argb;
     c->clear_z = z;
+    c->clear_stencil = (uint8_t)stencil;
 }
 
 void xv_d3d_Swap(void)
 {
     cmdlist_t *l = cur_list();
-    if (l->dropped)
-        XV_LOG("frame %u: %u command(s) dropped (list full)\n", g_build_frame, l->dropped);
+    report_draw_drops(l);
     g_build_frame++;
     /* reset the list the NEXT frame will use (the pump is done with it: at most one
        frame is in flight beyond the one just submitted) */
     cmdlist_t *next = g_lists[g_build_frame % XV_NUM_LISTS];
-    next->ncmds = 0; next->nconsts = 0; next->dropped = 0;
+    next->nui = 0; next->ncmds = 0; next->nconsts = 0; next->dropped = 0;
+    g_im_used[g_build_frame % XV_NUM_LISTS] = 0;
+    g_im_requested[g_build_frame % XV_NUM_LISTS] = 0;
+    g_index_used[g_build_frame % XV_NUM_LISTS] = 0;
+    g_index_requested[g_build_frame % XV_NUM_LISTS] = 0;
+    next->drop_commands = next->drop_indices = next->drop_attributes = next->drop_immediate = 0;
+    next->nvisibility = next->active_visibility = 0;
+    next->visibility_gpu_ready = 0;
     xv_present();
 }
 
 /* ----------------------------------------------------------------------------------
  *  Replay (pump thread)
  * -------------------------------------------------------------------------------- */
+static void visibility_draw_state(SceGxmContext *ctx, cmdlist_t *l, const cmd_t *c)
+{
+    unsigned slot=c && c->kind==0 && l->visibility_gpu_ready ? c->visibility : 0;
+    if (slot == l->visibility_draw_slot) return;
+    if (slot) {
+        l->visibility[slot-1].render_area=c->pass && c->pass<=XV_RT_SLOTS ?
+            g_rt[c->pass-1].w*g_rt[c->pass-1].h : l->visibility_back_area;
+        sceGxmSetFrontVisibilityTestIndex(ctx,slot-1);
+        sceGxmSetBackVisibilityTestIndex(ctx,slot-1);
+        sceGxmSetFrontVisibilityTestEnable(ctx,SCE_GXM_VISIBILITY_TEST_ENABLED);
+        sceGxmSetBackVisibilityTestEnable(ctx,SCE_GXM_VISIBILITY_TEST_ENABLED);
+    } else {
+        sceGxmSetFrontVisibilityTestEnable(ctx,SCE_GXM_VISIBILITY_TEST_DISABLED);
+        sceGxmSetBackVisibilityTestEnable(ctx,SCE_GXM_VISIBILITY_TEST_DISABLED);
+    }
+    l->visibility_draw_slot=slot;
+}
+void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, unsigned h)
+{
+    cmdlist_t *l=g_lists[frame % XV_NUM_LISTS];
+    l->visibility_gpu_ready=0;
+    l->visibility_back_area=w*h;
+    l->visibility_draw_slot=UINT32_MAX;
+    visibility_draw_state(ctx,l,NULL);
+    if (!l->nvisibility) return;
+    uint32_t submitted_us=xk_os_monotonic_us?(uint32_t)xk_os_monotonic_us():0;
+    for (unsigned i=0;i<l->nvisibility;i++)
+        if (l->visibility[i].serial)
+            xv_visibility_submit(g_visibility_results,l->visibility[i].result_slot,l->visibility[i].serial,submitted_us);
+    static int attempted;
+    if (!attempted) {
+        attempted=1;
+        unsigned bytes=XV_NUM_LISTS * XV_VISIBILITY_WORDS * sizeof(uint32_t);
+        g_visibility_uid=sceKernelAllocMemBlock("xv_visibility",SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,bytes,NULL);
+        if (g_visibility_uid >= 0) {
+            void *p=NULL;
+            if (sceKernelGetMemBlockBase(g_visibility_uid,&p) >= 0 &&
+                sceGxmMapMemory(p,bytes,SCE_GXM_MEMORY_ATTRIB_READ|SCE_GXM_MEMORY_ATTRIB_WRITE) >= 0)
+                g_visibility_memory=p;
+            else { sceKernelFreeMemBlock(g_visibility_uid); g_visibility_uid=-1; }
+        }
+        if (!g_visibility_memory) XV_LOG("visibility buffer allocation failed; reporting zero coverage\n");
+    }
+    if (!g_visibility_memory) return;
+    uint32_t *p=g_visibility_memory+(frame % XV_NUM_LISTS)*XV_VISIBILITY_WORDS;
+    memset(p,0,XV_VISIBILITY_WORDS*sizeof *p);
+    int err=sceGxmSetVisibilityBuffer(ctx,p,XV_VISIBILITY_STRIDE);
+    l->visibility_gpu_ready=err >= 0;
+    sceGxmSetFrontVisibilityTestOp(ctx,SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
+    sceGxmSetBackVisibilityTestOp(ctx,SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
+    if (err < 0) XV_ONCE(warn_visibility,"visibility buffer rejected %08X; reporting zero coverage\n",err);
+}
+void xv_d3d_visibility_complete(uint32_t frame)
+{
+    cmdlist_t *l=g_lists[frame % XV_NUM_LISTS];
+    const uint32_t *p=g_visibility_memory ?
+        g_visibility_memory+(frame % XV_NUM_LISTS)*XV_VISIBILITY_WORDS : NULL;
+    uint32_t completed_us=xk_os_monotonic_us?(uint32_t)xk_os_monotonic_us():0;
+    for (unsigned i=0;i<l->nvisibility;i++) {
+        if (!l->visibility[i].serial) continue;
+        uint64_t total=0;
+        if (l->visibility_gpu_ready && p)
+            for (unsigned core=0;core<XV_VISIBILITY_GPU_CORES;core++)
+                total+=p[core*XV_VISIBILITY_PER_FRAME+i];
+        uint32_t pixels=xv_visibility_scale(total,l->visibility[i].guest_area,l->visibility[i].render_area);
+        xv_visibility_publish_timed(g_visibility_results,l->visibility[i].result_slot,l->visibility[i].serial,pixels,completed_us);
+        static unsigned shown; static int log_all=-1;
+        if (log_all<0) log_all=getenv("XV_LOG_VISIBILITY")!=NULL;
+        if (shown++<12 || (log_all && frame % 60u==0))
+            XV_LOG("[visibility] frame %u id %u pixels %u raw %llu area %u/%u GPU %d\n",frame,
+                g_visibility_results[l->visibility[i].result_slot].id,pixels,(unsigned long long)total,l->visibility[i].guest_area,l->visibility[i].render_area,l->visibility_gpu_ready);
+    }
+    if (l->nvisibility && xk_os_scheduler_notify) xk_os_scheduler_notify();
+}
+
+static SceGxmBlendFactor alpha_blend_factor(SceGxmBlendFactor f)
+{
+    switch (f) {
+    case SCE_GXM_BLEND_FACTOR_SRC_COLOR: return SCE_GXM_BLEND_FACTOR_SRC_ALPHA;
+    case SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_COLOR: return SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    case SCE_GXM_BLEND_FACTOR_DST_COLOR: return SCE_GXM_BLEND_FACTOR_DST_ALPHA;
+    case SCE_GXM_BLEND_FACTOR_ONE_MINUS_DST_COLOR: return SCE_GXM_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+    default: return f;
+    }
+}
+
 static const SceGxmBlendInfo *blend_info_for(unsigned blend, SceGxmBlendInfo *bi)
 {
     if (blend == BLEND_OPAQUE) return NULL;
@@ -911,13 +1879,14 @@ static const SceGxmBlendInfo *blend_info_for(unsigned blend, SceGxmBlendInfo *bi
         return bi;
     }
     { unsigned m = g_blend_combo[blend].mask; bi->colorMask = (m & 1 ? SCE_GXM_COLOR_MASK_R : 0) | (m & 2 ? SCE_GXM_COLOR_MASK_G : 0) | (m & 4 ? SCE_GXM_COLOR_MASK_B : 0) | (m & 8 ? SCE_GXM_COLOR_MASK_A : 0); }
-    bi->colorFunc = SCE_GXM_BLEND_FUNC_ADD;
-    bi->alphaFunc = SCE_GXM_BLEND_FUNC_ADD;
+    static const SceGxmBlendFunc ops[] = { SCE_GXM_BLEND_FUNC_ADD, SCE_GXM_BLEND_FUNC_SUBTRACT,
+        SCE_GXM_BLEND_FUNC_REVERSE_SUBTRACT, SCE_GXM_BLEND_FUNC_MIN, SCE_GXM_BLEND_FUNC_MAX };
+    bi->colorFunc = ops[g_blend_combo[blend].op];
+    bi->alphaFunc = bi->colorFunc;
     SceGxmBlendFactor sf = d3d_blend_factor(g_blend_combo[blend].src), df = d3d_blend_factor(g_blend_combo[blend].dst);
     bi->colorSrc = sf; bi->colorDst = df;
-    /* colour-only factors have no alpha meaning: keep the framebuffer alpha as-is for those */
-    bi->alphaSrc = (sf == SCE_GXM_BLEND_FACTOR_DST_COLOR || sf == SCE_GXM_BLEND_FACTOR_ONE_MINUS_DST_COLOR) ? SCE_GXM_BLEND_FACTOR_DST_ALPHA : sf;
-    bi->alphaDst = (df == SCE_GXM_BLEND_FACTOR_SRC_COLOR || df == SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_COLOR) ? SCE_GXM_BLEND_FACTOR_SRC_ALPHA : df;
+    bi->alphaSrc = alpha_blend_factor(sf);
+    bi->alphaDst = alpha_blend_factor(df);
     return bi;
 }
 
@@ -926,7 +1895,12 @@ static SceGxmFragmentProgram *fragment_for(vs_slot_t *v, unsigned kind, unsigned
     if (!v->fs_loaded[kind][blend]) {
         SceGxmBlendInfo bi; const SceGxmBlendInfo *pbi = blend_info_for(blend, &bi);
         v->fs_loaded[kind][blend] = 1;                 /* cache the attempt either way: a failure must not be retried */
-        if (xv_fshader_load(&v->fs[kind][blend], FS_GXP[kind], &v->vs, pbi) != 0) {
+        /* This already-embedded no-alpha combiner returns constant (1,1,1,0).
+         * Color is masked off; no varying/sampler/uniform input is required.
+         * A passthrough COLOR0 shader cannot link to every Xbox vertex shader. */
+        const char *path = kind == FS_COLOR && blend == BLEND_NOCOLOR ?
+            "builtin:xita-depth" : FS_GXP[kind];
+        if (xv_fshader_load(&v->fs[kind][blend], path, &v->vs, pbi) != 0) {
             static unsigned n; if (n++ < 12) XV_LOG("fragment %s does not link against %s (kind %u blend %u) - draws skipped\n", FS_GXP[kind], v->vs.desc ? v->vs.desc->gxp : "?", kind, blend);
             /* fs.fprog is NULL (xv_fshader_load memsets it); leave it cached NULL so the draw is skipped, not retried */
         }
@@ -950,6 +1924,7 @@ static const SceGxmTexture *tex2d_fallback(void)
             sceKernelGetMemBlockBase(uid, &mem);
             if (sceGxmMapMemory(mem, 4096, SCE_GXM_MEMORY_ATTRIB_READ) == SCE_OK) {
                 uint32_t *p = mem; for (int i = 0; i < 8 * 8; ++i) p[i] = 0xFF808080u;
+                xv_gpu_flush_pump(mem, 8 * 8 * sizeof(uint32_t));
                 g_tex2d_fallback_ok = sceGxmTextureInitLinear(&g_tex2d_fallback, mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, 8, 8, 1) == SCE_OK;
             }
         }
@@ -969,6 +1944,7 @@ static const SceGxmTexture *cube_fallback(void)
             sceKernelGetMemBlockBase(uid, &mem);
             if (sceGxmMapMemory(mem, 16384, SCE_GXM_MEMORY_ATTRIB_READ) == SCE_OK) {
                 uint32_t *p = mem; for (int i = 0; i < 16384 / 4; ++i) p[i] = 0xFF808080u;   /* every byte of every face (and mip slot) is mid grey */
+                xv_gpu_flush_pump(mem, 16384);
                 g_cube_fallback_ok = sceGxmTextureInitCube(&g_cube_fallback, mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, 16, 16, 1) == SCE_OK;
             }
         }
@@ -977,30 +1953,139 @@ static const SceGxmTexture *cube_fallback(void)
 }
 
 /* combiner program from the table; NULL when it cannot be linked (caller falls back to fragment_for) */
-static xv_fshader_t *fragment_for_ps(vs_slot_t *v, int entry, unsigned blend)
+static xv_fshader_t *fragment_for_ps_mode(vs_slot_t *v, int entry, unsigned blend, int alpha_mode)
 {
-    for (unsigned i = 0; i < v->nps; ++i)
-        if (v->ps[i].entry == entry && v->ps[i].blend == blend) return v->ps[i].failed ? NULL : &v->ps[i].fs;
-    if (v->nps >= XV_PS_PER_VS) return NULL;
-    ps_link_t *l = &v->ps[v->nps++];
-    l->entry = (int16_t)entry; l->blend = (uint8_t)blend; l->failed = 0;
-    SceGxmBlendInfo bi; const SceGxmBlendInfo *pbi = blend_info_for(blend, &bi);
-    if (xv_fshader_load(&l->fs, xv_ps_table[entry].gxp, &v->vs, pbi) != 0) {
-        static unsigned n; if (n++ < 12) XV_LOG("combiner %s does not link against %s (blend %u) - using heuristic fragment\n", xv_ps_table[entry].gxp, v->vs.desc ? v->vs.desc->gxp : "?", blend);
-        l->failed = 1; return NULL;
+    if (entry < 0 || (unsigned)entry >= XV_PS_TABLE_COUNT || blend >= BLEND_MODES) return NULL;
+    if (alpha_mode < 0 || alpha_mode > 2) return NULL;
+    if (alpha_mode == 2 && xv_ps_table[entry].ps_key != 0x154066FDu)
+        return fragment_for_ps_mode(v, entry, blend, 0);
+    unsigned vs = (unsigned)(v - g_vs);
+    unsigned bucket = (vs * 131u + (unsigned)entry * 33u + blend + alpha_mode * 521u) & (XV_PS_BUCKETS - 1);
+    for (unsigned p = g_ps_buckets[bucket]; p; p = g_ps_links[p - 1].next) {
+        ps_link_t *l = &g_ps_links[p - 1];
+        if (l->vs == vs && l->entry == entry && l->blend == blend && l->alpha_mode == alpha_mode)
+            return l->failed ? (alpha_mode ? fragment_for_ps_mode(v, entry, blend, 0) : NULL) : &l->fs;
     }
+    if (g_ps_count == XV_PS_LINKS) {
+        XV_ONCE(warn_ps_full, "combiner link cache full (%u): using fallback\n", g_ps_count);
+        return alpha_mode ? fragment_for_ps_mode(v, entry, blend, 0) : NULL;
+    }
+    ps_link_t *l = &g_ps_links[g_ps_count++];
+    l->vs = (uint16_t)vs; l->next = g_ps_buckets[bucket];
+    g_ps_buckets[bucket] = (uint16_t)g_ps_count;
+    l->entry = (int16_t)entry; l->blend = (uint8_t)blend; l->failed = 0; l->alpha_mode = alpha_mode;
+    SceGxmBlendInfo bi; const SceGxmBlendInfo *pbi = blend_info_for(blend, &bi);
+    const char *path = xv_ps_table[entry].gxp; char variant[160];
+    if (alpha_mode) {
+        size_t len = strlen(path);
+        if (len < 9 || len + 4 > sizeof variant || strcmp(path + len - 9, ".frag.gxp")) {
+            l->failed = 1;
+            return fragment_for_ps_mode(v, entry, blend, 0);
+        }
+        snprintf(variant, sizeof variant, "%.*s_%s.frag.gxp", (int)(len - 9), path, alpha_mode == 2 ? "gt" : "na");
+        path = variant;
+    }
+    if (xv_fshader_load(&l->fs, path, &v->vs, pbi) != 0) {
+        static unsigned n; if (n++ < 12) XV_LOG("combiner %s does not link against %s (blend %u) - using heuristic fragment\n", xv_ps_table[entry].gxp, v->vs.desc ? v->vs.desc->gxp : "?", blend);
+        l->failed = 1; return alpha_mode ? fragment_for_ps_mode(v, entry, blend, 0) : NULL;
+    }
+    l->fs.alpha_test_mode = alpha_mode;
     return &l->fs;
 }
+static xv_fshader_t *fragment_for_ps(vs_slot_t *v, int entry, unsigned blend)
+{ return fragment_for_ps_mode(v, entry, blend, 0); }
+/* Captured function and enable are prerequisites: the dedicated program keeps
+ * only the GREATER comparison. Opaque coverage still takes the earlier path. */
+static int material_alpha_mode(const cmd_t *c, int no_alpha)
+{
+    if (no_alpha) return 1;
+    if (cutout_enabled() && c->ps_entry >= 0 && (unsigned)c->ps_entry < XV_PS_TABLE_COUNT &&
+        xv_ps_table[c->ps_entry].ps_key == 0x154066FDu &&
+        (c->atest & (1u << 16)) && ((c->atest >> 8) & 7u) == 4) return 2;
+    return 0;
+}
+static int draw_needs_alpha_test(uint32_t atest)
+{
+    /* ALWAYS is equivalent to disabled, including NaN alpha: preserve the
+     * original return's saturate arithmetic in either variant. */
+    return (atest & (1u << 16)) && ((atest >> 8) & 7u) != 7u;
+}
 
-static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigned *clear_slot_io, uint32_t frame)
+static xv_fshader_t *depth_only_fragment(vs_slot_t *v, const cmd_t *c, xv_fshader_t *original)
+{
+    static int enabled = -1;
+    if (enabled < 0) { const char *e=getenv("XV_DEPTH_ONLY_SHADER"); enabled=!e || atoi(e)!=0; }
+    /* Use the successfully linked program's actual effects. Alpha testing,
+     * texture-mode clipping and shader depth writes must preserve coverage.
+     * The constant fragment has no discard, inputs or depth output; its color
+     * is masked off. Failed links retain the original shader. */
+    if (!enabled || !original || !original->fprog || c->blend >= BLEND_MODES ||
+        g_blend_combo[c->blend].mask || original->uses_discard || original->replaces_depth)
+        return original;
+    if (!fragment_for(v, FS_COLOR, BLEND_NOCOLOR, NULL)) return original;
+    return &v->fs[FS_COLOR][BLEND_NOCOLOR];
+}
+
+static SceGxmTexture g_previous_frame_texture, g_scene_backbuffer_texture;
+void xv_d3d_SetPreviousFrameTexture(const SceGxmTexture *texture) { g_previous_frame_texture = *texture; }
+void xv_d3d_SetSceneBackbufferTexture(const SceGxmTexture *texture) { g_scene_backbuffer_texture = *texture; }
+int xv_d3d_uses_previous_frame(uint32_t frame)
+{
+    cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
+    for (unsigned i = 0; i < l->ncmds; ++i) if (l->cmds[i].previous_frame && !l->cmds[i].pass) return 1;
+    return 0;
+}
+/* Check feedback after resolving the actual linked shader's active samplers,
+ * previous-frame substitution, and cube/2D fallback. Unused bound stages do
+ * not sample anything and cannot create feedback. */
+static int bind_draw_textures(SceGxmContext *ctx, const cmd_t *c,
+    const xv_fshader_t *fs, unsigned cube_mask)
+{
+    const void *target=c->pass && c->pass<=XV_RT_SLOTS ? g_rt[c->pass-1].mem : NULL;
+    for (unsigned t = 0; t < 4; ++t) {
+        if (fs->tex_index[t] < 0) continue;                       /* program does not sample this stage */
+        const SceGxmTexture *tx = t < c->ntex ? &c->tex[t] : NULL;
+        if (c->previous_frame & (1u << t))
+            tx = c->pass ? &g_scene_backbuffer_texture : &g_previous_frame_texture;
+        int want_cube = (cube_mask & (1u << t)) != 0;
+        int have = tx && sceGxmTextureGetData(tx) != NULL;
+        int is_cube = have && sceGxmTextureGetType(tx) == SCE_GXM_TEXTURE_CUBE;
+        static SceGxmTexture face0[4];
+        if (have && is_cube && !want_cube) {
+            /* the game bound a cube map where the combiner samples 2D (NV2A PROJECT2D on a cube reads it
+             * as a 2D texture): present face +X as a 2D texture of the same size/format */
+            if (sceGxmTextureInitSwizzled(&face0[t], sceGxmTextureGetData(tx), sceGxmTextureGetFormat(tx), sceGxmTextureGetWidth(tx), sceGxmTextureGetHeight(tx), 1) == SCE_OK) {
+                sceGxmTextureSetMinFilter(&face0[t], SCE_GXM_TEXTURE_FILTER_LINEAR); sceGxmTextureSetMagFilter(&face0[t], SCE_GXM_TEXTURE_FILTER_LINEAR);
+                tx = &face0[t]; have = 1; is_cube = 0;
+            }
+        }
+        if (!have || (want_cube != is_cube)) {                    /* unset stage, or a 2D texture on a samplerCUBE */
+            const SceGxmTexture *fb = want_cube ? cube_fallback() : tex2d_fallback();
+            static unsigned n; if (n++ < 12) XV_LOG("draw: stage %u %s -> fallback %s\n", t, !have ? "unset" : "kind mismatch", want_cube ? "cube" : "2d");
+            if (!fb) return 0;
+            tx = fb;
+        }
+        if (target && sceGxmTextureGetData(tx)==target) {
+            XV_ONCE(warn_feedback, "RT feedback draw skipped (active sampler reads its color target)\n");
+            return 0;
+        }
+        sceGxmSetFragmentTexture(ctx, (unsigned)fs->tex_index[t], tx);
+    }
+    return 1;
+}
+static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsigned end, unsigned *clear_slot_io, uint32_t frame, unsigned clear_limit)
 {
     unsigned clear_slot = *clear_slot_io;
-    for (unsigned i = 0; i < l->ncmds; ++i) {
+    xv_draw_state state = {0};
+    xv_stencil_cache stencil_state = {0};
+    for (unsigned i = first; i < end; ++i) {
         cmd_t *c = &l->cmds[i];
-        if (c->pass != pass) continue;
+        visibility_draw_state(ctx,l,c);
         if (c->kind == 1) {
+            state.valid = 0;
+            stencil_state.valid = 0;
             int slot = handle_to_slot(g_clear_vs);
-            if (slot < 0 || clear_slot >= XV_CLEAR_SLOTS)
+            if (slot < 0 || clear_slot >= clear_limit)
                 continue;
             vs_slot_t *v = &g_vs[slot];
             SceGxmFragmentProgram *fp = fragment_for(v, FS_COLOR, (c->clear_flags & 1) ? BLEND_OPAQUE : BLEND_NOCOLOR, NULL);
@@ -1015,13 +2100,15 @@ static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigne
             q[0] = (typeof(q[0])){ -1, -1, z, b, g, r, a }; q[1] = (typeof(q[0])){ 1, -1, z, b, g, r, a };
             q[2] = (typeof(q[0])){ 1, 1, z, b, g, r, a };   q[3] = (typeof(q[0])){ -1, 1, z, b, g, r, a };
             clear_slot++;
+            xv_stencil_clear(ctx, c->clear_flags & 4, c->clear_stencil);
             sceGxmSetFrontDepthFunc(ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
             sceGxmSetFrontDepthWriteEnable(ctx, (c->clear_flags & 2) ? SCE_GXM_DEPTH_WRITE_ENABLED : SCE_GXM_DEPTH_WRITE_DISABLED);
             sceGxmSetCullMode(ctx, SCE_GXM_CULL_NONE);
             sceGxmSetVertexProgram(ctx, v->vs.vprog);
             sceGxmSetFragmentProgram(ctx, fp);
             sceGxmSetVertexStream(ctx, 0, q);
-            sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLE_FAN, SCE_GXM_INDEX_FORMAT_U16, g_seq_indices, 4);
+            xv_gpu_flush_pump(q, 4 * sizeof *q);
+            XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLE_FAN, SCE_GXM_INDEX_FORMAT_U16, g_seq_indices, 4));
             continue;
         }
 
@@ -1033,62 +2120,58 @@ static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigne
           if (wc) { sceGxmSetWClampEnable(ctx, SCE_GXM_WCLAMP_MODE_ENABLED); sceGxmSetWClampValue(ctx, wcv); }   /* per draw: GXM state is per-scene */
         }
         vs_slot_t *v = &g_vs[c->vs];
-        xv_fshader_t *fs = c->ps_entry >= 0 ? fragment_for_ps(v, c->ps_entry, c->blend) : NULL;
+        static int specialize_alpha = -1;
+        if (specialize_alpha < 0) {
+            const char *e = getenv("XV_ALPHA_SPECIALIZE");
+            specialize_alpha = e ? atoi(e) != 0 : 1;
+            XV_LOG("alpha-disabled shader specialization: %d\n", specialize_alpha);
+        }
+        int no_alpha = specialize_alpha && (!draw_needs_alpha_test(c->atest) || c->opaque_alpha);
+        int alpha_mode = material_alpha_mode(c, no_alpha);
+        xv_fshader_t *fs = c->ps_entry >= 0 ?
+            XV_RENDER_CALL(XV_RENDER_SHADER_LOOKUP, fragment_for_ps_mode(v, c->ps_entry, c->blend, alpha_mode)) : NULL;
+        /* Heuristic fragments use only 2D samplers, even if the requested combiner used cubes. */
+        unsigned cube_mask = fs ? xv_ps_table[c->ps_entry].cube_mask : 0;
         SceGxmFragmentProgram *fp = fs ? fs->fprog : fragment_for(v, c->fs_kind, c->blend, NULL);
         if (!fp)
             continue;
         if (!fs) fs = &v->fs[c->fs_kind][c->blend];
-        sceGxmSetFrontDepthFunc(ctx, DEPTH_FUNCS[c->depth_func_idx]);
-        sceGxmSetFrontDepthWriteEnable(ctx, c->depth_write ? SCE_GXM_DEPTH_WRITE_ENABLED : SCE_GXM_DEPTH_WRITE_DISABLED);
-        sceGxmSetCullMode(ctx, c->cull == X_D3DCULL_NONE ? SCE_GXM_CULL_NONE
-                               : c->cull == X_D3DCULL_CW ? SCE_GXM_CULL_CW : SCE_GXM_CULL_CCW);
-        sceGxmSetVertexProgram(ctx, v->vs.vprog);
-        sceGxmSetFragmentProgram(ctx, fp);
-
-        if (c->const_n && v->vs.p_c) {
-            void *ub;
-            if (sceGxmReserveVertexDefaultUniformBuffer(ctx, &ub) == 0)
-                sceGxmSetUniformDataF(ub, v->vs.p_c, 0, c->const_n * 4, &l->consts[c->const_off * 4]);
+        xv_fshader_t *depth_fs = depth_only_fragment(v, c, fs);
+        if (depth_fs != fs) {
+            fs = depth_fs; fp = fs->fprog; cube_mask = 0;
+            xv_render_profile_depth_only(c->index_count);
         }
-        xv_shader_set_const_attr(c->const_attr);
+        if (!bind_draw_textures(ctx,c,fs,cube_mask)) continue;
+        xv_render_profile_work(c->ps_entry >= 0 && (unsigned)c->ps_entry < XV_PS_TABLE_COUNT ? xv_ps_table[c->ps_entry].ps_key : 0,
+            c->index_count, no_alpha && !fs->p_atest);
+        xv_stencil_bind_cached(&stencil_state, ctx, &c->stencil);
+        xv_draw_state_bind(&state, ctx, DEPTH_FUNCS[c->depth_func_idx],
+            c->depth_write ? SCE_GXM_DEPTH_WRITE_ENABLED : SCE_GXM_DEPTH_WRITE_DISABLED,
+            c->cull == X_D3DCULL_NONE ? SCE_GXM_CULL_NONE
+                : c->cull == X_D3DCULL_CW ? SCE_GXM_CULL_CW : SCE_GXM_CULL_CCW,
+            v->vs.vprog, fp);
+
+        if (!XV_RENDER_CALL(XV_RENDER_VERTEX_UNIFORM, bind_vertex_constants(ctx, l, c, &v->vs, frame)))
+            continue;
         xv_vshader_set_streams(ctx, &v->vs, c->streams);
-        if (fs->p_psc || fs->p_fogcolor || fs->p_atest) {
+        if (v->vs.const_stream != 0xFF && c->constant_stream)
+            sceGxmSetVertexStream(ctx, v->vs.const_stream, c->constant_stream);
+        if (fs->p_psc || fs->p_fogcolor || fs->p_atest || fs->p_texscale) {
             void *fub;
-            if (sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub) == 0) {
+            if (XV_RENDER_CALL(XV_RENDER_FRAGMENT_UNIFORM, sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub)) == 0) {
                 uint32_t fc = c->fog_color;                                            /* D3DCOLOR ARGB, captured at record time */
                 float fog[4] = { ((fc >> 16) & 0xFF) / 255.0f, ((fc >> 8) & 0xFF) / 255.0f, (fc & 0xFF) / 255.0f, ((fc >> 24) & 0xFF) / 255.0f };
                 if (fs->p_psc) sceGxmSetUniformDataF(fub, fs->p_psc, 0, 18 * 4, &c->psc[0][0]);
                 if (fs->p_fogcolor) sceGxmSetUniformDataF(fub, fs->p_fogcolor, 0, 4, fog);
+                if (fs->p_texscale) sceGxmSetUniformDataF(fub, fs->p_texscale, 0, 16, &c->texscale[0][0]);
                 if (fs->p_atest) { uint32_t at = c->atest;                            /* alpha test: (ref, func, enable) */
                     static int noat = -1; if (noat < 0) { const char *e = getenv("XV_NO_ATEST"); noat = e ? atoi(e) : 0; }
                     float av[4] = { (at & 0xFF) / 255.0f, (float)((at >> 8) & 7), (noat || !((at >> 16) & 1)) ? 0.0f : 1.0f, 0.0f };
                     sceGxmSetUniformDataF(fub, fs->p_atest, 0, 4, av); }
             }
         }
-        for (unsigned t = 0; t < 4; ++t) {
-            if (fs->tex_index[t] < 0) continue;                       /* program does not sample this stage */
-            const SceGxmTexture *tx = t < c->ntex ? &c->tex[t] : NULL;
-            int want_cube = c->ps_entry >= 0 && (xv_ps_table[c->ps_entry].cube_mask & (1u << t));
-            int have = tx && sceGxmTextureGetData(tx) != NULL;
-            int is_cube = have && sceGxmTextureGetType(tx) == SCE_GXM_TEXTURE_CUBE;
-            static SceGxmTexture face0[4];
-            if (have && is_cube && !want_cube) {
-                /* the game bound a cube map where the combiner samples 2D (NV2A PROJECT2D on a cube reads it
-                 * as a 2D texture): present face +X as a 2D texture of the same size/format */
-                if (sceGxmTextureInitSwizzled(&face0[t], sceGxmTextureGetData(tx), sceGxmTextureGetFormat(tx), sceGxmTextureGetWidth(tx), sceGxmTextureGetHeight(tx), 1) == SCE_OK) {
-                    sceGxmTextureSetMinFilter(&face0[t], SCE_GXM_TEXTURE_FILTER_LINEAR); sceGxmTextureSetMagFilter(&face0[t], SCE_GXM_TEXTURE_FILTER_LINEAR);
-                    tx = &face0[t]; have = 1; is_cube = 0;
-                }
-            }
-            if (!have || (want_cube != is_cube)) {                    /* unset stage, or a 2D texture on a samplerCUBE */
-                const SceGxmTexture *fb = want_cube ? cube_fallback() : tex2d_fallback();
-                static unsigned n; if (n++ < 12) XV_LOG("draw: stage %u %s -> fallback %s\n", t, !have ? "unset" : "kind mismatch", want_cube ? "cube" : "2d");
-                if (!fb) continue;
-                tx = fb;
-            }
-            sceGxmSetFragmentTexture(ctx, (unsigned)fs->tex_index[t], tx);
-        }
-        sceGxmDraw(ctx, (SceGxmPrimitiveType)c->prim, SCE_GXM_INDEX_FORMAT_U16, c->indices, c->index_count);
+        if (fs->alpha_test_mode == 2) xv_render_profile_cutout(c->index_count);
+        XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, (SceGxmPrimitiveType)c->prim, SCE_GXM_INDEX_FORMAT_U16, c->indices, c->index_count));
     }
     *clear_slot_io = clear_slot;
 }
@@ -1096,54 +2179,106 @@ static void render_pass(SceGxmContext *ctx, cmdlist_t *l, unsigned pass, unsigne
 void xv_d3d_render(SceGxmContext *ctx, uint32_t frame)
 {
     cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
-    unsigned clear_slot = g_clear_slot_used;
-    render_pass(ctx, l, 0, &clear_slot, frame);
-    g_clear_slot_used = 0;
+    unsigned clear_slot = 0;
+    render_range(ctx, l, 0, l->ncmds, &clear_slot, frame, XV_LEGACY_CLEAR_SLOTS);
+    visibility_draw_state(ctx,l,NULL);
 }
-
-/* Offscreen passes: their own scenes, BEFORE the caller opens the main scene.  Colour surface = the guest
- * texture memory (linear, so the alias texture is a plain linear texture); depth = one shared scratch
- * buffer.  Render targets are cached per (w,h). */
-static struct { unsigned w, h; SceGxmRenderTarget *rt; } g_pass_rts[8]; static unsigned g_pass_rt_n;
-static SceUID g_pass_depth_uid; static void *g_pass_depth; static unsigned g_pass_depth_w;
-static SceGxmRenderTarget *pass_rt(unsigned w, unsigned h)
-{
-    for (unsigned i = 0; i < g_pass_rt_n; ++i) if (g_pass_rts[i].w == w && g_pass_rts[i].h == h) return g_pass_rts[i].rt;
-    if (g_pass_rt_n >= 8) return NULL;
-    SceGxmRenderTargetParams rp; memset(&rp, 0, sizeof rp);
-    rp.width = (uint16_t)w; rp.height = (uint16_t)h; rp.scenesPerFrame = 1; rp.multisampleMode = SCE_GXM_MULTISAMPLE_NONE; rp.driverMemBlock = -1;
-    SceGxmRenderTarget *rt = NULL;
-    if (sceGxmCreateRenderTarget(&rp, &rt) != SCE_OK) { XV_LOG("pass render target %ux%u failed\n", w, h); return NULL; }
-    g_pass_rts[g_pass_rt_n].w = w; g_pass_rts[g_pass_rt_n].h = h; g_pass_rts[g_pass_rt_n].rt = rt; g_pass_rt_n++;
-    return rt;
-}
-void xv_d3d_render_offscreen(SceGxmContext *ctx, uint32_t frame)
+int xv_d3d_has_render_targets(uint32_t frame)
 {
     cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
-    if (!l->npasses) return;
-    if (!g_pass_depth) {                                        /* 1024x1024 max: 4 MB S8D24, uncached */
-        g_pass_depth_w = 1024;
-        g_pass_depth_uid = sceKernelAllocMemBlock("xv_pass_depth", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, 1024 * 1024 * 4, NULL);
-        if (g_pass_depth_uid < 0) return;
-        sceKernelGetMemBlockBase(g_pass_depth_uid, &g_pass_depth);
-        sceGxmMapMemory(g_pass_depth, 1024 * 1024 * 4, SCE_GXM_MEMORY_ATTRIB_READ | SCE_GXM_MEMORY_ATTRIB_WRITE);
+    for (unsigned i = 0; i < l->ncmds; ++i) if (l->cmds[i].pass) return 1;
+    for (unsigned i = 0; i < l->nui; ++i) if (l->ui[i].target) return 1;
+    return 0;
+}
+/* Caller supplies the current display buffer. Leaves a backbuffer scene open for
+ * UI and the existing EndScene/heartbeat/flip. Only called for frames using RTT. */
+int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
+    SceGxmRenderTarget *back, SceGxmSyncObject *sync,
+    const SceGxmColorSurface *color, const SceGxmDepthStencilSurface *depth,
+    unsigned back_width, unsigned back_height)
+{
+    cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
+    SceGxmDepthStencilSurface bd = *depth;
+    sceGxmDepthStencilSurfaceSetForceStoreMode(&bd, SCE_GXM_DEPTH_STENCIL_FORCE_STORE_ENABLED);
+    unsigned clear_slot = 0, current = 0xff;
+    int open = 0;
+    static int queue_passes = -1;
+    if (queue_passes < 0) {
+        const char *e = getenv("XV_RT_QUEUE");
+        queue_passes = e ? atoi(e) != 0 : 1;
+        XV_LOG("RT pass queue: %s (XV_RT_QUEUE=%d)\n",
+            queue_passes ? "enabled" : "disabled", queue_passes);
     }
-    unsigned clear_slot = 0;
-    for (unsigned pi = 0; pi < l->npasses; ++pi) {
-        rt_pass_t *p = &l->passes[pi];
-        SceGxmRenderTarget *rt = pass_rt(p->w, p->h);
-        if (!rt) continue;
-        SceGxmColorSurface cs; SceGxmDepthStencilSurface ds;
-        if (sceGxmColorSurfaceInit(&cs, rt_color_fmt(p->fmt), SCE_GXM_COLOR_SURFACE_LINEAR, SCE_GXM_COLOR_SURFACE_SCALE_NONE,
-                                   SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, p->w, p->h, p->w, xv_guest_ptr(0x80000000u | p->data)) != SCE_OK) continue;
-        unsigned dstride = (p->w + 31) & ~31u;
-        if (sceGxmDepthStencilSurfaceInit(&ds, SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24, SCE_GXM_DEPTH_STENCIL_SURFACE_LINEAR, dstride, g_pass_depth, NULL) != SCE_OK) continue;
-        if (sceGxmBeginScene(ctx, 0, rt, NULL, NULL, NULL, &cs, &ds) != SCE_OK) { static unsigned n; if (n++ < 4) XV_LOG("pass BeginScene failed\n"); continue; }
-        sceGxmSetViewport(ctx, p->w * 0.5f, p->w * 0.5f, p->h * 0.5f, -(float)p->h * 0.5f, 0.5f, 0.5f);
-        render_pass(ctx, l, pi + 1, &clear_slot, frame);
-        sceGxmEndScene(ctx, NULL, NULL);
+    /* Fragment passes remain ordered on this context across frames. Resource
+     * replacement drains owners; ordinary target reuse needs no CPU Finish. */
+    unsigned i = 0, u = 0;
+    for (;;) {
+        int ui = u < l->nui && l->ui[u].before <= i;
+        int done = i >= l->ncmds && !ui;
+        unsigned target = ui ? l->ui[u].target : done ? 0 : l->cmds[i].pass;
+        if (target > XV_RT_SLOTS || (target && !g_rt[target - 1].rt)) {
+            XV_LOG("RT invalid target %u at frame %u command %u UI %u\n", target, frame, i, u);
+            if (open) {
+                XV_RENDER_END(current, sceGxmEndScene(ctx, NULL, NULL));
+                xv_render_profile_stage(XV_RENDER_TARGET_FINISH);
+                sceGxmFinish(ctx);
+                xv_render_profile_stage(XV_RENDER_SUBMIT);
+            }
+            return -1;
+        }
+        if (target != current) {
+            if (open) {
+                int err = XV_RENDER_END(current, sceGxmEndScene(ctx, NULL, NULL));
+                /* Successive scenes on this context preserve fragment order:
+                 * later passes may sample earlier color/depth stores without
+                 * blocking the CPU here. Clear slots, UI batches and geometry
+                 * stay owned until this frame's final fragment notification.
+                 * Keep a synchronous diagnostic fallback and drain on errors. */
+                if (!queue_passes || err < 0) {
+                    xv_render_profile_stage(XV_RENDER_TARGET_FINISH);
+                    sceGxmFinish(ctx);
+                    xv_render_profile_stage(XV_RENDER_SUBMIT);
+                }
+                if (err < 0) { XV_LOG("RT EndScene failed %08X\n", err); return -1; }
+                open = 0;
+            }
+            rt_alias_t *r = target ? &g_rt[target - 1] : NULL;
+            int err = XV_RENDER_CALL(XV_RENDER_SCENE_BEGIN, sceGxmBeginScene(ctx, 0, r ? r->rt : back, NULL, NULL,
+                r ? NULL : sync, r ? &r->color : color, r ? &r->depth : &bd));
+            if (err < 0) {
+                xv_render_profile_stage(XV_RENDER_TARGET_FINISH);
+                sceGxmFinish(ctx);
+                xv_render_profile_stage(XV_RENDER_SUBMIT);
+                XV_LOG("RT BeginScene target %u failed %08X\n", target, err);
+                return -1;
+            }
+            if (!target) {
+                sceGxmDepthStencilSurfaceSetForceLoadMode(&bd, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_ENABLED);
+            }
+            unsigned w = r ? r->w : back_width, h = r ? r->h : back_height;
+            sceGxmSetViewport(ctx, w * 0.5f, w * 0.5f, h * 0.5f, -(float)h * 0.5f, 0.5f, 0.5f);
+            current = target; open = 1;
+        }
+        if (done) break;
+        if (ui) {
+            visibility_draw_state(ctx,l,NULL);
+            extern void xv_ui_gxm_replay_batch(SceGxmContext *, unsigned, unsigned, const void *);
+            xv_ui_gxm_replay_batch(ctx, l->ui[u].frame, l->ui[u].batch, target ? g_rt[target - 1].mem : NULL);
+            ++u;
+        } else {
+            /* Replay consecutive mesh commands together so the local state
+             * cache survives adjacent draws. Preserve every UI/target boundary. */
+            unsigned end=i+1;
+            while (end<l->ncmds && l->cmds[end].pass==target &&
+                   (u>=l->nui || end<l->ui[u].before)) ++end;
+            render_range(ctx, l, i, end, &clear_slot, frame, XV_CLEAR_SLOTS);
+            i=end;
+        }
     }
-    g_clear_slot_used = clear_slot;                             /* the main pass continues in the remaining clear-quad slots */
+    extern void xv_ui_gxm_replay_overlay(SceGxmContext *, unsigned);
+    visibility_draw_state(ctx,l,NULL);
+    xv_ui_gxm_replay_overlay(ctx, l->ui_frame);
+    return 0;
 }
 
 /* The clear quad's vertex shader is a runtime-owned program registered by main.c. */

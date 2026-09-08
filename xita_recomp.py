@@ -80,9 +80,14 @@ FLAG_KEEP = { Mnemonic.ADC, Mnemonic.SBB, Mnemonic.RCL, Mnemonic.RCR, Mnemonic.C
               Mnemonic.SAHF, Mnemonic.LAHF, Mnemonic.POPF, Mnemonic.POPFD, Mnemonic.PUSHF, Mnemonic.PUSHFD }
 
 class Image:
-    def __init__(self, xbe_path: str, manifest_path: str):
+    def __init__(self, xbe_path: str, manifest_path: Optional[str] = None):
         self.data = open(xbe_path, "rb").read()
-        self.m = json.load(open(manifest_path))
+        if manifest_path:
+            with open(manifest_path) as source:
+                self.m = json.load(source)
+        else:
+            from xbe_parse import XbeParser, to_json
+            self.m = json.loads(to_json(XbeParser(self.data, xbe_path).parse()))
         self.base = self.m["base_address"]
         self.secs = [(s["virtual_address"], s["raw_address"], s["raw_size"], s["virtual_size"], s["name"], s["flag_names"])
                      for s in self.m["sections"]]
@@ -379,7 +384,7 @@ X87_SIZES = {"float32": "f32", "float64": "f64", "float80": "f80", "int16": "i16
 
 
 class Emitter:
-    def __init__(self, img: Image, disc: Discovery, hle: Dict[int, dict], kthunks: Dict[int, int], outdir: str, nfiles: int):
+    def __init__(self, img: Image, disc: Discovery, hle: Dict[int, dict], kthunks: Dict[int, int], outdir: str, nfiles: int, hooks=None):
         self.img, self.disc, self.hle, self.kthunks = img, disc, hle, kthunks
         # Image occupies a fixed, never-remapped arena region: constant addresses inside it get a
         # flat X_IMG* access (no page-table load).  Bounds page-aligned to match xk_mem_setup().
@@ -392,6 +397,8 @@ class Emitter:
         self.vars: Dict[str, int] = {}
         self.trace = False
         self.trace_funcs = False
+        from xita_recomp_core.hooks import NoGameHooks
+        self.hooks = hooks if hooks is not None else NoGameHooks()
         self.cur_fn = 0
         self.unimpl = Counter()
         self.stats = Counter()
@@ -486,6 +493,7 @@ class Emitter:
 
     # ---- instruction lowering ------------------------------------------------------
     def lower(self, fn: Function, ins: Instruction, out: List[str]):
+        out.extend(self.hooks.before_instruction(ins.ip))
         mn = MN[ins.mnemonic]
         rep = ins.has_rep_prefix or ins.has_repe_prefix or ins.has_repne_prefix
         ip = ins.ip
@@ -1066,6 +1074,7 @@ class Emitter:
         self._cur_fn_obj = fn
         if self.trace_funcs:
             out.append(f"    XV_FN(0x{fn.entry:08X}u);")
+        out.extend(self.hooks.function_entry(fn.entry))
         # Blocks are emitted in address order.  When the function owns blocks below its entry (a jump
         # back into shared code, a tail merged with an earlier function) the first emitted block is
         # NOT the entry - without this goto the function would start executing someone else's code.
@@ -1124,7 +1133,8 @@ class Emitter:
                         out.append(f"    goto L_{blk.end:08X};")
         out.append("    return;")
         out.append("}")
-        return "\n".join(out)
+        body = "\n".join(out)
+        return self.hooks.transform_body(fn.entry, body)
 
     def write_all(self):
         os.makedirs(self.outdir, exist_ok=True)
@@ -1153,6 +1163,7 @@ class Emitter:
             tbl.append(f"    {{ 0x{f.entry:08X}u, f_{f.entry:08X} }},")
         tbl.append("};")
         tbl.append(f"const unsigned xv_fn_table_count = {len(fns)};")
+        tbl.append(f"const unsigned xv_guest_trace_enabled = {int(self.trace_funcs)};")
         tbl.append(f"const uint32_t xv_entry_point = 0x{self.img.entry:08X}u;")
         tbl.append(f"const uint32_t xv_game_main = 0x{self.game_main or 0:08X}u;")
         tbl.append(f"const uint32_t xv_game_tls_dir = 0x{self.img.tls:08X}u;")
@@ -1220,24 +1231,7 @@ class Emitter:
 
 # --------------------------------------------------------------------------------------
 
-# XAPI helpers that are pure guest-side bookkeeping (TLS/KTHREAD fields, object-attribute
-# formatting): more faithful to recompile them than to reimplement them.
-DEFAULT_LIFT = {"SetLastError", "GetLastError", "XapiSetLastNTError", "XapiFormatObjectAttributes",
-                "XapiMapLetterToDirectory", "XapiSelectCachePartition", "XGetSectionSize", "GetTimeZoneInformation",
-                "RaiseException", "UnhandledExceptionFilter", "XAutoPowerDownResetTimer", "XRegisterThreadNotifyRoutine",
-                # the real XAPI start-up chain and thread/sync wrappers: they only need the kernel underneath
-                "mainCRTStartup", "mainXapiStartup", "XapiInitProcess", "XapiBootToDash", "CreateThread", "CreateEventA",
-                "CreateMutexA", "SetEvent", "ResetEvent", "SwitchToThread", "SetThreadPriority", "GetExitCodeThread",
-                "XapiThreadStartup", "MU_Init", "XapiInitDefaultHeap", "XapiHeapAlloc"}
-
-
-# Libraries that are replaced wholesale by the Vita runtime, and the XAPI entry points that talk to
-# hardware (USB input, launch data, debug output) and therefore stay HLE even though XAPILIB is lifted.
-HLE_LIBS = {"D3D8", "D3DX", "DSOUND", "XNETS", "XONLINE", "XGRAPHC", "XACTENG"}
-HLE_KEEP = {"XGetLaunchInfo", "XInitDevices", "XGetDeviceChanges", "XInputOpen", "XInputClose", "XInputGetState",
-            "XInputSetState", "XInputPoll", "XLaunchNewImageA", "OutputDebugStringA", "XCalculateSignatureBegin",
-            "XCalculateSignatureUpdate", "XCalculateSignatureEnd", "MU_Init", "XMountMUA", "XUnmountMU", "XMountUtilityDrive",
-            "XSetProcessQuantumLength", "XGetDevices"}
+from xita_recomp_core.system import DEFAULT_LIFT, HLE_LIBS, HLE_KEEP
 
 
 def find_main(img: Image, hle: Dict[int, dict]) -> Optional[int]:
@@ -1263,8 +1257,11 @@ def find_main(img: Image, hle: Dict[int, dict]) -> Optional[int]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="xita_recomp.py")
-    ap.add_argument("xbe")
-    ap.add_argument("--manifest", required=True)
+    ap.add_argument("xbe", nargs="?")
+    ap.add_argument("--profile", help="game profile ID or JSON path (no game hooks when omitted)")
+    ap.add_argument("--list-profiles", action="store_true", help="list reviewed profiles without game inputs")
+    ap.add_argument("--check-profile", action="store_true", help="validate inputs without emitting code")
+    ap.add_argument("--manifest", help="optional xbe_parse JSON; otherwise parse the XBE directly")
     ap.add_argument("--symbols", help="XbSymbolDatabase JSON (halo_symbols.json)")
     ap.add_argument("-o", "--outdir", default="recomp")
     ap.add_argument("--files", type=int, default=32, help="number of .c files to split into")
@@ -1276,16 +1273,44 @@ def main() -> int:
     ap.add_argument("--hle-addr", nargs="*", default=[], help="extra HLE overrides by address: HEXADDR:Name:StackArgc")
     args = ap.parse_args()
 
-    img = Image(args.xbe, args.manifest)
+    from pathlib import Path
+    from xita_recomp_core.profile import load_profile, list_profiles
+    from games import load_hooks
+    if args.list_profiles:
+        for entry in list_profiles():
+            print(f"{entry.id}: {entry.name}")
+        return 0
+    if not args.xbe:
+        ap.error("an XBE is required unless --list-profiles is used")
+    if args.files < 1:
+        ap.error("--files must be positive")
+    if args.check_profile and not args.profile:
+        ap.error("--check-profile requires --profile")
+    try:
+        profile = load_profile(args.profile) if args.profile else None
+        img = Image(args.xbe, args.manifest)
+        symbol_data = Path(args.symbols).read_bytes() if args.symbols else None
+        symbols = json.loads(symbol_data) if symbol_data is not None else []
+        if profile:
+            profile.validate_image(img)
+            profile.validate_symbols(symbol_data)
+        hooks = load_hooks(profile.adapter if profile else None, img)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        ap.error(str(error))
+    if args.check_profile:
+        print(f"Validated {profile.id}: executable, manifest, symbols and profile addresses")
+        return 0
     hle: Dict[int, dict] = {}
-    lift = set(args.lift) | DEFAULT_LIFT
+    lift = set(args.lift) | DEFAULT_LIFT | set(profile.lift if profile else ())
     if args.symbols:
-        for s in json.load(open(args.symbols)):
+        for s in symbols:
             if s["kind"] != "FUN" or s["name"] in lift:
                 continue
             if s["lib"] not in HLE_LIBS and s["name"] not in HLE_KEEP:
                 continue                                    # XAPILIB etc.: recompile the original code
             hle[s["address"]] = s
+    if profile:
+        hle.update(profile.overrides)
     for spec in args.hle_addr:
         addr, name, argc = spec.split(":")
         hle[int(addr, 16)] = {"lib": "CUSTOM", "kind": "FUN", "convention": "stdcall", "name": name,
@@ -1297,10 +1322,11 @@ def main() -> int:
     disc = Discovery(img, hle, kthunks, log)
     disc.add_root(img.entry)
     game_main = None
-    for r in args.roots:
-        disc.add_root(int(r, 16))
-        game_main = game_main or int(r, 16)
-    if not args.roots:
+    roots = [int(r, 16) for r in args.roots] or list(profile.roots if profile else ())
+    for address in roots:
+        disc.add_root(address)
+        game_main = game_main or address
+    if not roots:
         game_main = find_main(img, hle)
         if game_main:
             print(f"game main() = 0x{game_main:08X} (first non-symbol call from mainXapiStartup)")
@@ -1315,13 +1341,16 @@ def main() -> int:
     print(f"discovered {len(disc.functions)} functions, {nblocks} blocks, {ninsn:,} instructions "
           f"({sum(len(t) for f in disc.functions.values() for t in f.switch_tables.values())} switch targets); {dict(disc.stats)}")
 
-    em = Emitter(img, disc, hle, kthunks, args.outdir, args.files)
+    em = Emitter(img, disc, hle, kthunks, args.outdir, args.files, hooks=hooks)
     em.game_main = game_main
     em.trace = args.trace_calls
     em.trace_funcs = args.trace_funcs
     if args.symbols:
-        em.vars = {s["name"]: s["address"] for s in json.load(open(args.symbols)) if s["kind"] == "VAR"}
+        em.vars = {s["name"]: s["address"] for s in symbols if s["kind"] == "VAR"}
+    if profile:
+        em.vars.update(profile.variables)
     n = em.write_all()
+    hooks.postprocess(args.outdir)
     total = em.stats["insns"]
     un = sum(em.unimpl.values())
     print(f"emitted {n} functions / {total:,} instructions to {args.outdir}/ ; unimplemented {un} ({100.0*un/max(total,1):.2f}%)")
@@ -1331,7 +1360,9 @@ def main() -> int:
     print("  kernel:", " ".join(kernel_names))
     json.dump({"functions": [f.entry for f in sorted(disc.functions.values(), key=lambda f: f.entry)],
                "hle_used": sorted(em.hle_used), "kernel_used": kernel_names,
-               "unimplemented": dict(em.unimpl)}, open(os.path.join(args.outdir, "recomp_report.json"), "w"), indent=1)
+               "unimplemented": dict(em.unimpl),
+               "profile": profile.id if profile else None,
+               "input_sha256": __import__("hashlib").sha256(img.data).hexdigest()}, open(os.path.join(args.outdir, "recomp_report.json"), "w"), indent=1)
     return 0
 
 

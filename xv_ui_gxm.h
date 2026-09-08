@@ -14,7 +14,8 @@
  *
  * Threading: the game fiber RECORDS batches (xv_ui_gxm_*), the render pump REPLAYS them inside its
  * GXM scene (xv_ui_gxm_replay).  GXM scenes are single-threaded, so recording and replay never touch
- * the context concurrently; the record ring is double-buffered by frame parity.
+ * the context concurrently. Three recording slots are retired by GPU fragment
+ * notifications; replay receives an explicit slot captured at publication.
  */
 #pragma once
 
@@ -27,6 +28,13 @@
 int  xv_ui_gxm_init(void);
 void xv_ui_gxm_shutdown(void);
 int  xv_ui_gxm_ready(void);
+/* Apply explicit pre-launch sampler overrides to a copied descriptor. Defaults
+ * preserve the game's filters and only existing mip chains can be sampled. */
+void xv_ui_gxm_apply_texture_options(SceGxmTexture *texture);
+/* Benchmark phase boundary only, after draining: -1 restores configuration. */
+void xv_ui_gxm_rgba_layout_override(int enabled);
+/* Recording-thread proof: pins an opaque decoded upload against in-place writes. */
+int xv_ui_gxm_texture_opaque(const SceGxmTexture *texture);
 
 /* --- recording (game fiber) --------------------------------------------------------------------- */
 void xv_ui_gxm_clear(uint32_t argb);                       /* xd3d_r_clear: full-screen tint */
@@ -36,4 +44,8 @@ void xv_ui_gxm_quads(const xd3d_im_vtx *v, unsigned n, uint32_t tex_hdr, const f
 void xv_ui_gxm_frame_flip(void);                           /* xd3d_r_present: publish + swap buffers */
 
 /* --- replay (render pump, inside sceGxmBeginScene/EndScene) -------------------------------------- */
-void xv_ui_gxm_replay(SceGxmContext *ctx);
+void xv_ui_gxm_replay(SceGxmContext *ctx, unsigned width, unsigned height);
+
+void xv_ui_gxm_frame_begin(void);
+unsigned xv_ui_gxm_published_frame(void);
+void xv_ui_gxm_replay_frame(SceGxmContext *, unsigned, unsigned, unsigned);

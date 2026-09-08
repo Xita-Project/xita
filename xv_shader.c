@@ -12,6 +12,10 @@
 #include <psp2/gxm.h>
 
 #include "xv_shader.h"
+#include "xv_render_profile.h"
+#include "shaders/xv_hud_gxp.h"
+#include "shaders/xv_ps_gxp.h"
+#include "shaders/xv_vs_gxp.h"
 
 #include "xv_log.h"
 #define XV_LOG(...)  xv_logf("[xv/shader] " __VA_ARGS__)
@@ -20,13 +24,13 @@
 #define PATCHER_BUFFER_SIZE        (512 * 1024)
 #define PATCHER_VERTEX_USSE_SIZE   (256 * 1024)
 #define PATCHER_FRAGMENT_USSE_SIZE (256 * 1024)
-#define CONST_STREAM_SIZE          (4 * 1024)     /* one float4 lives here (256 KB CDRAM is overkill) */
+#define CONST_STREAM_SIZE          (4 * 1024)     /* default register file; draws supply frame-owned values */
 
 typedef struct { SceUID uid; void *base; SceSize size; unsigned int usse_offset; } blk_t;
 
 static SceGxmShaderPatcher *g_patcher;
 static blk_t g_buffer, g_vusse, g_fusse, g_const;
-static float *g_const_attr;                       /* GPU-visible float4 for constant-fed attributes */
+static float *g_const_attr;                       /* immutable GPU defaults for all 16 registers */
 
 /* ------------------------------------------------------------------------- */
 
@@ -83,8 +87,8 @@ int xv_shader_init(void)
         return err;
     }
     g_const_attr = (float *)g_const.base;
-    g_const_attr[0] = g_const_attr[1] = g_const_attr[2] = 0.0f;
-    g_const_attr[3] = 1.0f;
+    memset(g_const_attr, 0, 16 * 16);
+    for (unsigned i = 0; i < 16; i++) g_const_attr[i * 4 + 3] = 1.0f;
 
     SceGxmShaderPatcherParams pp;
     memset(&pp, 0, sizeof(pp));
@@ -123,15 +127,79 @@ void xv_shader_shutdown(void)
 
 /* ------------------------------------------------------------------------- */
 
+unsigned xv_fshader_embedded_texture_mask(const char *path)
+{
+    static int override = -1;
+    if (override < 0) { const char *e = getenv("XV_SHADER_OVERRIDE"); override = e && atoi(e) != 0; }
+    if (override || !path) return 15;
+    unsigned lo = 0, hi = sizeof xv_ps_embedded / sizeof xv_ps_embedded[0];
+    while (lo < hi) {
+        unsigned mid = lo + (hi - lo) / 2;
+        int cmp = strcmp(path, xv_ps_embedded[mid].path);
+        if (cmp < 0) hi = mid;
+        else if (cmp > 0) lo = mid + 1;
+        else {
+            const SceGxmProgram *prog = (const SceGxmProgram *)xv_ps_embedded[mid].data;
+            if (sceGxmProgramCheck(prog) != SCE_OK) return 15;
+            static const char *const names[4] = { "tex0", "tex1", "tex2", "tex3" };
+            unsigned mask = 0;
+            for (unsigned t = 0; t < 4; t++)
+                if (sceGxmProgramFindParameterByName(prog, names[t])) mask |= 1u << t;
+            return mask;
+        }
+    }
+    return 15;
+}
+
 static SceGxmProgram *load_gxp(const char *path)
 {
-    /* A shader compiled on the console (tools/shadercomp -> ux0:data/xita/shaders/<name>.gxp) overrides the
-     * copy packed in the VPK, so regenerated .cg sources take effect without repacking/reinstalling. */
-    SceUID fd = -1;
+    /* Optimization correctness relies on this exact constant program, even
+     * when development overrides are enabled for ordinary game shaders. */
+    int builtin_only = !strcmp(path, "builtin:xita-depth");
+    if (builtin_only) path = "app0:shaders/ps_28CF808C_07_na.frag.gxp";
+    /* Packaged shaders match this runtime's layouts. Old device-compiled files can outlive an
+     * upgrade, so overriding the package is an explicit development option. */
+    static int override = -1;
+    if (override < 0) {
+        const char *e = getenv("XV_SHADER_OVERRIDE"); override = e ? atoi(e) != 0 : 0;
+        XV_LOG("shader source preference: %s\n", override ? "device override" : "packaged");
+    }
+    /* These new HUD programs travel inside the executable as well as the VPK.
+     * An in-place USB executable update therefore has every required shader. */
+    const void *builtin = NULL; unsigned builtin_size = 0;
+    for (unsigned i = 0; i < sizeof xv_hud_gxp / sizeof xv_hud_gxp[0]; i++)
+        if (!strcmp(path, xv_hud_gxp[i].path)) { builtin = xv_hud_gxp[i].data; builtin_size = xv_hud_gxp[i].size; break; }
+    /* Vertex programs must travel with their matching fragments and layouts.
+     * This also updates fog varyings during an executable-only USB install. */
+    for (unsigned i = 0; i < sizeof xv_vs_embedded / sizeof xv_vs_embedded[0]; i++)
+        if (!strcmp(path, xv_vs_embedded[i].path)) {
+            builtin = xv_vs_embedded[i].data; builtin_size = xv_vs_embedded[i].size; break;
+        }
+    /* Every table-referenced fragment travels with this executable. Keep the
+     * existing device-override option for shader development. */
+    unsigned lo = 0, hi = sizeof xv_ps_embedded / sizeof xv_ps_embedded[0];
+    while (lo < hi) {
+        unsigned mid = lo + (hi - lo) / 2;
+        int cmp = strcmp(path, xv_ps_embedded[mid].path);
+        if (cmp < 0) hi = mid;
+        else if (cmp > 0) lo = mid + 1;
+        else { builtin = xv_ps_embedded[mid].data; builtin_size = xv_ps_embedded[mid].size; break; }
+    }
+    if (builtin_only && !builtin) return NULL;
+    int use_override = override && !builtin_only;
+    SceUID fd = (use_override || builtin) ? -1 : sceIoOpen(path, SCE_O_RDONLY, 0);
+    if (fd < 0 && (!builtin || use_override))
     { const char *base = strrchr(path, '/'); base = base ? base + 1 : path; char alt[160];
       snprintf(alt, sizeof alt, "ux0:data/xita/shaders/%s", base); fd = sceIoOpen(alt, SCE_O_RDONLY, 0);
       if (fd >= 0) { static unsigned n; if (n++ < 4) XV_LOG("%s: using device-compiled %s\n", path, alt); } }
-    if (fd < 0) fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+    if (fd < 0 && builtin) {
+        SceGxmProgram *prog = malloc(builtin_size);
+        if (!prog) return NULL;
+        memcpy(prog, builtin, builtin_size);
+        if (sceGxmProgramCheck(prog) != SCE_OK) { free(prog); return NULL; }
+        return prog;
+    }
+    if (fd < 0 && use_override) fd = sceIoOpen(path, SCE_O_RDONLY, 0);
     if (fd < 0) {
         XV_LOG("cannot open %s (0x%08X)\n", path, fd);
         return NULL;
@@ -191,7 +259,7 @@ int xv_vshader_load(xv_vshader_t *vs, const xv_vs_desc_t *desc)
             continue;                       /* unused by the program: compiler dropped it */
         }
         attrs[nattr].streamIndex    = (a->stream == XV_CONST_STREAM) ? desc->nstreams : a->stream;
-        attrs[nattr].offset         = a->offset;
+        attrs[nattr].offset         = a->stream == XV_CONST_STREAM ? a->vreg * 16 : a->offset;
         attrs[nattr].format         = a->format;
         attrs[nattr].componentCount = a->components;
         attrs[nattr].regIndex       = (uint16_t)sceGxmProgramParameterGetResourceIndex(p);
@@ -205,7 +273,7 @@ int xv_vshader_load(xv_vshader_t *vs, const xv_vs_desc_t *desc)
         streams[s].indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
     }
     if (need_const) {
-        streams[nstreams].stride      = 16;
+        streams[nstreams].stride      = 16 * 16;
         streams[nstreams].indexSource = SCE_GXM_INDEX_SOURCE_INSTANCE_16BIT;   /* instance 0 -> same float4 for all */
         vs->const_stream = (uint8_t)nstreams;
         nstreams++;
@@ -245,17 +313,28 @@ int xv_fshader_load(xv_fshader_t *fs, const char *gxp_path, const xv_vshader_t *
     int err = sceGxmShaderPatcherRegisterProgram(g_patcher, fs->prog, &fs->id);
     if (err < 0) {
         XV_LOG("%s: register failed 0x%08X\n", gxp_path, err);
+        free((void *)fs->prog); fs->prog = NULL;
         return err;
     }
     err = sceGxmShaderPatcherCreateFragmentProgram(g_patcher, fs->id, SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,
                                                    SCE_GXM_MULTISAMPLE_NONE, blend, vs->prog, &fs->fprog);
     if (err < 0) {
         XV_LOG("%s: create fragment program failed 0x%08X\n", gxp_path, err);
+        sceGxmShaderPatcherUnregisterProgram(g_patcher, fs->id);
+        free((void *)fs->prog); fs->prog = NULL;
         return err;
     }
     fs->p_psc      = sceGxmProgramFindParameterByName(fs->prog, "psc");
+    fs->uses_discard = sceGxmProgramIsDiscardUsed(fs->prog) != 0;
+    fs->replaces_depth = sceGxmProgramIsDepthReplaceUsed(fs->prog) != 0;
     fs->p_fogcolor = sceGxmProgramFindParameterByName(fs->prog, "xv_fogcolor");
     fs->p_atest    = sceGxmProgramFindParameterByName(fs->prog, "xv_atest");
+    if (strstr(gxp_path, "_na.frag.gxp"))
+        XV_LOG("%s: alpha-disabled, discard-used %u\n", gxp_path, (unsigned)sceGxmProgramIsDiscardUsed(fs->prog));
+    fs->p_texscale = sceGxmProgramFindParameterByName(fs->prog, "xv_texscale");
+    if (fs->p_psc && strstr(gxp_path, "_1D.frag.gxp"))
+        XV_LOG("%s: constants %u x %u\n", gxp_path,
+               sceGxmProgramParameterGetArraySize(fs->p_psc), sceGxmProgramParameterGetComponentCount(fs->p_psc));
     static const char *const texnames[4] = { "tex0", "tex1", "tex2", "tex3" };
     for (int i = 0; i < 4; ++i) {
         const SceGxmProgramParameter *p = sceGxmProgramFindParameterByName(fs->prog, texnames[i]);
@@ -285,7 +364,7 @@ void xv_shader_bind(SceGxmContext *ctx, const xv_vshader_t *vs, const xv_fshader
     sceGxmSetFragmentProgram(ctx, fs->fprog);
     /* Shared shaders (xv_texmod/tex0/lm) carry the alpha-test uniform for the mesh path; the UI path binds
      * them here and must disable it, or the discard reads an uninitialised uniform and drops UI pixels. */
-    if (fs->p_atest) { void *fub; if (sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub) == 0) {
+    if (fs->p_atest) { void *fub; if (XV_RENDER_CALL(XV_RENDER_FRAGMENT_UNIFORM, sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub)) == 0) {
         static const float off[4] = { 0.0f, 0.0f, 0.0f, 0.0f }; sceGxmSetUniformDataF(fub, fs->p_atest, 0, 4, off); } }
 }
 
@@ -294,7 +373,7 @@ int xv_vshader_begin_constants(SceGxmContext *ctx, const xv_vshader_t *vs, void 
     *ub = NULL;
     if (!vs->p_c)
         return 0;                                  /* program has no c[]: nothing to reserve */
-    return sceGxmReserveVertexDefaultUniformBuffer(ctx, ub);
+    return XV_RENDER_CALL(XV_RENDER_VERTEX_UNIFORM, sceGxmReserveVertexDefaultUniformBuffer(ctx, ub));
 }
 
 int xv_vshader_set_constants(void *ub, const xv_vshader_t *vs, int d3d_reg, int count, const float *v)
@@ -305,12 +384,6 @@ int xv_vshader_set_constants(void *ub, const xv_vshader_t *vs, int d3d_reg, int 
     if (first < 0 || first + count > vs->desc->c_count)
         return -1;                                 /* outside this shader's window: ignore */
     return sceGxmSetUniformDataF(ub, vs->p_c, (unsigned)first * 4, (unsigned)count * 4, v);
-}
-
-void xv_shader_set_const_attr(const float v[4])
-{
-    if (g_const_attr)
-        memcpy(g_const_attr, v, 16);
 }
 
 void xv_vshader_set_streams(SceGxmContext *ctx, const xv_vshader_t *vs, const void *const *streams)

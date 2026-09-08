@@ -26,7 +26,7 @@ STRIP     := $(PREFIX)-strip
 SIZE      := $(PREFIX)-size
 
 # --- 3. sources + flags ------------------------------------------------------
-SRCS      := main.c xv_shader.c xv_d3d.c xv_scene.c xv_ui_gxm.c xv_log.c
+SRCS      := main.c xv_shader.c xv_d3d.c xv_scene.c xv_ui_gxm.c xv_log.c xv_benchmark.c xv_cpu.c xv_texture_worker.c xv_geometry_worker.c xv_gpu_upload.c xv_vertex_upload.c xv_draw_profile.c xv_render_profile.c
 BUILD     := build
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
@@ -36,7 +36,9 @@ LAYOUTS_H := shaders/xv_layouts.h
 LAYOUTS_SRC := shaders/halo_shaders.json
 
 CFLAGS    := -O2 -mthumb -Wall -Wextra -Wno-unused-parameter -MMD -MP -I. -Ishaders
-LDFLAGS   := -Wl,-q
+# Reserve room for vita-elf-create's module/import metadata before the next
+# load segment. Traced builds can otherwise end too close to its boundary.
+LDFLAGS   := -Wl,-q,--defsym=__sce_headroom=0x1000
 
 # --- 4. linker stubs ---------------------------------------------------------
 # The five hardware modules main.c talks to directly …
@@ -54,10 +56,13 @@ LIBS      += -lSceLibKernel_stub -lSceTouch_stub -lm
 RECOMP    ?= 0
 ifeq ($(RECOMP),1)
 CFLAGS    += -DXV_RUN_RECOMP -Irecomp -Irecomp/kernel
-SRCS      := main.c xv_shader.c xv_d3d.c xv_ui_gxm.c xv_boot.c xv_log.c
+SRCS      := main.c xv_shader.c xv_d3d.c xv_ui_gxm.c xv_boot.c xv_log.c xv_benchmark.c xv_cpu.c xv_texture_worker.c xv_geometry_worker.c xv_gpu_upload.c xv_vertex_upload.c xv_draw_profile.c xv_render_profile.c dashboard/xv_dash.c
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
-RECOMP_LINK_LIB := $(BUILD)/recomp/librecomp.a
+# An HLE-only object has no kernel-init reference to pull it out of the archive.
+# Link it before the archive's weak compatibility stubs.
+RECOMP_LINK_LIB := $(BUILD)/recomp/kernel/xk_geometry.o $(BUILD)/recomp/librecomp.a
+LIBS      += -lSceNet_stub -lSceNetCtl_stub -lScePspnetAdhoc_stub -lSceSysmodule_stub -lSceCommonDialog_stub
 LIBS      += -lSceCtrl_stub -lSceRtc_stub -lSceIofilemgr_stub -lSceAudio_stub -lScePower_stub
 PROJECT   := xita
 SFO_EXTRA := -d ATTRIBUTE2=12      # extended memory mode: +109 MB for the arena/heap/texture pool
@@ -85,7 +90,8 @@ VPK_SHADER_ARGS := $(foreach s,$(SHADER_PRESENT),-a $(s)=$(s))
 SCE_SYS_DIR     := sce_sys
 SCE_SYS_FILES   := $(wildcard $(SCE_SYS_DIR)/*.png) $(wildcard $(SCE_SYS_DIR)/livearea/contents/*)
 SCENE_FILES     := $(if $(filter 1,$(RECOMP)),,$(wildcard assets/*.bin))   # mock-only; the real-game (RECOMP) build never loads it
-VPK_ASSET_ARGS  := $(foreach f,$(SCE_SYS_FILES) $(SCENE_FILES),-a $(f)=$(f))
+LICENSE_FILES  := LICENSE NOTICE THIRD_PARTY.md $(wildcard LICENSES/*.txt)
+VPK_ASSET_ARGS  := $(foreach f,$(SCE_SYS_FILES) $(SCENE_FILES) $(LICENSE_FILES),-a $(f)=$(f))
 
 # --- 5. packaging outputs ----------------------------------------------------
 ELF       := $(BUILD)/$(PROJECT).elf
@@ -102,6 +108,10 @@ VPK       := $(PROJECT).vpk
 
 all: $(VPK)
 
+dashboard/license_text.h: LICENSE NOTICE tools/embed_license.py
+	python3 tools/embed_license.py
+$(BUILD)/dashboard/xv_dash.o: dashboard/license_text.h
+
 # generated layout tables (recompiled-shader attribute layouts) --------------------
 # The XBE + Stage 1 manifest let the generator hash each Xbox function blob so the
 # D3D HLE can recognise programs the game passes to CreateVertexShader().
@@ -112,16 +122,32 @@ $(LAYOUTS_H): $(LAYOUTS_SRC) gen_layouts.py shader_recomp_gen.py
 
 $(BUILD)/main.o: $(LAYOUTS_H)
 
+HUD_GXP := $(foreach h,A972FE61 5D70F0B3 EB818129,shaders/ps_$(h)_1D.frag.gxp)
+shaders/xv_hud_gxp.h: tools/embed_hud_shaders.py $(HUD_GXP)
+	python3 tools/embed_hud_shaders.py $@
+$(BUILD)/xv_shader.o: shaders/xv_hud_gxp.h
+shaders/xv_vs_gxp.h: tools/embed_vertex_shaders.py tools/test_vertex_varyings.py shaders/xv_layouts.h $(wildcard shaders/halo_vs_*.gxp shaders/halo_vs_*.cg)
+	python3 tools/test_vertex_varyings.py
+	python3 tools/embed_vertex_shaders.py $@
+$(BUILD)/xv_shader.o: shaders/xv_vs_gxp.h
+shaders/xv_ps_gxp.h: tools/embed_ps_shaders.py shaders/xv_ps_table.h $(wildcard shaders/ps_*.gxp) shaders/xv_color.frag.gxp shaders/xv_texmod.frag.gxp shaders/xv_tex0.frag.gxp shaders/xv_lm.frag.gxp
+	python3 tools/embed_ps_shaders.py $@
+$(BUILD)/xv_shader.o: shaders/xv_ps_gxp.h
+
 # compile ----------------------------------------------------------------------
 $(BUILD)/%.o: %.c | $(BUILD)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD):
 	@mkdir -p $(BUILD)
 
 # link -------------------------------------------------------------------------
-$(ELF): $(OBJS) $(RECOMP_LINK_LIB)
+$(ELF): $(OBJS) $(RECOMP_LINK_LIB) Makefile
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(RECOMP_LINK_LIB) $(LIBS)
+ifeq ($(RECOMP),1)
+	@$(PREFIX)-nm $@ | awk '$$2 == "T" { strong[$$3] = 1 } END { if (!strong["xv_hle_HaloBuildVisibleIndices"] || !strong["xv_hle_HaloSignSavedRecord"]) { print "required Halo HLE resolved to a compatibility stub"; exit 1 } }'
+endif
 	@$(SIZE) $@
 
 # ELF -> VELF (resolves NIDs / import stubs) -> signed fself --------------------
@@ -135,7 +161,7 @@ $(SFO): Makefile | $(BUILD)
 	vita-mksfoex -s TITLE_ID=$(TITLE_ID) $(SFO_EXTRA) "$(TITLE)" $@
 
 # VPK: eboot + param.sfo + shaders/*.gxp (+ sce_sys assets when present) ------
-$(VPK): $(EBOOT) $(SFO) $(SHADER_PRESENT) $(SCE_SYS_FILES) $(SCENE_FILES)
+$(VPK): $(EBOOT) $(SFO) $(SHADER_PRESENT) $(SCE_SYS_FILES) $(SCENE_FILES) $(LICENSE_FILES)
 ifneq ($(SHADER_MISSING),)
 	@echo "warning: shader(s) not found, VPK built without them: $(SHADER_MISSING)"
 	@echo "         (run 'make shaders' with psp2cgc on PATH, or drop prebuilt .gxp files in $(SHADER_DIR)/)"
@@ -298,11 +324,15 @@ RECOMP_DIR   := recomp
 RECOMP_BUILD := $(BUILD)/recomp
 RECOMP_SRCS  := $(wildcard $(RECOMP_DIR)/code_*.c) $(RECOMP_DIR)/xv_fn_table.c $(RECOMP_DIR)/xv_stubs_default.c \
                 $(RECOMP_DIR)/xv_x86rt.c $(RECOMP_DIR)/kernel/xk_mem.c $(RECOMP_DIR)/kernel/xk_rtl.c \
-                $(RECOMP_DIR)/kernel/xk_file.c $(RECOMP_DIR)/kernel/xk_thread.c $(RECOMP_DIR)/kernel/xk_xapi.c $(RECOMP_DIR)/kernel/xk_net.c \
-                $(RECOMP_DIR)/kernel/xd3d.c $(RECOMP_DIR)/kernel/xk_audio.c $(RECOMP_DIR)/kernel/xk_os_vita.c \
+                $(RECOMP_DIR)/kernel/xk_file.c $(RECOMP_DIR)/kernel/xk_quality.c $(RECOMP_DIR)/kernel/xk_math.c $(RECOMP_DIR)/kernel/xk_clip.c $(RECOMP_DIR)/kernel/xk_flare.c $(RECOMP_DIR)/kernel/xk_thread.c $(RECOMP_DIR)/kernel/xk_xapi.c $(RECOMP_DIR)/kernel/xk_net.c \
+                $(RECOMP_DIR)/kernel/xd3d.c $(RECOMP_DIR)/kernel/xk_audio.c $(RECOMP_DIR)/kernel/xk_crypto.c $(RECOMP_DIR)/kernel/xk_os_vita.c \
                 $(RECOMP_DIR)/xv_trace_stub.c $(RECOMP_DIR)/xv_funchist.c
 RECOMP_OBJS  := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(RECOMP_SRCS))
 RECOMP_CFLAGS := -O2 -fno-strict-aliasing -mthumb -mcpu=cortex-a9 -mfpu=neon -w -std=gnu11 -I$(RECOMP_DIR) -I$(RECOMP_DIR)/kernel
+
+# Native replacements must retain the lifted multiply/add rounding points.
+$(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -ffp-contract=off
+$(RECOMP_BUILD)/kernel/xk_clip.o: RECOMP_CFLAGS += -ffp-contract=off
 
 # lifted code (code_*.c) only includes xv_recomp_protos.h -> xv_x86rt.h; the kernel/HLE objects use -MMD
 # so a kernel header edit does not recompile the ~35 MB of generated code.

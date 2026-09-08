@@ -19,6 +19,7 @@
 #include <psp2/gxm.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/clib.h>
 #include <psp2/kernel/sysmem.h>
 
@@ -50,6 +51,7 @@ static SceUID open_first(const char *const *paths, int n)
 /* Runs on its own Vita thread (core 0).  Returns when the game exits / deadlocks. */
 int xv_boot_recomp(const char *game_dir, const char *save_dir)
 {
+    uint64_t boot_started = sceKernelGetProcessTimeWide();
     const char *img_paths[] = {
         "app0:halo_image.bin",
         "ux0:data/xita/halo_image.bin",
@@ -78,6 +80,7 @@ int xv_boot_recomp(const char *game_dir, const char *save_dir)
     if (err != SCE_OK) { BOOT_LOG("sceGxmMapMemory(arena) failed: 0x%08X\n", err); sceIoClose(fd); return -1; }
     memset(g_xram, 0, arena);
     BOOT_LOG("arena %u MB @ %p, GXM-mapped R/W\n", arena >> 20, g_xram);
+    uint64_t arena_ready = sceKernelGetProcessTimeWide();
 
     /* Load the flattened image into its own arena pages (past physical RAM). */
     /* sceIoRead can return short on the memory card (seen once right after a USB session: 3.2 of 3.8 MB):
@@ -91,6 +94,7 @@ int xv_boot_recomp(const char *game_dir, const char *save_dir)
     }
     sceIoClose(fd);
     if (got != size) { BOOT_LOG("image incomplete (%u / %u)\n", got, size); return -1; }
+    uint64_t image_ready = sceKernelGetProcessTimeWide();
 
     /* Kernel up: drive letters, TLS template, thunk table.  game_dir holds maps/, save_dir is writable. */
     xk_init(base, size, xv_game_tls_dir, game_dir, save_dir);
@@ -98,6 +102,10 @@ int xv_boot_recomp(const char *game_dir, const char *save_dir)
     /* The initial thread runs mainCRTStartup(); the kernel scheduler takes it from there. */
     if (!xk_thread_create(0x10000, 0, xv_entry_point, 0, 0, 0)) { BOOT_LOG("entry thread create failed\n"); return -1; }
 
+    BOOT_LOG("startup timings: arena %u ms, image read %u ms (%u KB), kernel %u ms\n",
+             (unsigned)((arena_ready - boot_started) / 1000),
+             (unsigned)((image_ready - arena_ready) / 1000), size >> 10,
+             (unsigned)((sceKernelGetProcessTimeWide() - image_ready) / 1000));
     BOOT_LOG("running recompiled engine (entry %08X)\n", xv_entry_point);
     xk_run_until_idle();
     BOOT_LOG("engine returned\n");

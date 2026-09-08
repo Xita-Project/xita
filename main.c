@@ -15,10 +15,11 @@
  *                       fragment / fragment-USSE ring buffers, context, render target,
  *                       two CDRAM display buffers + sync objects, one depth buffer,
  *                       display queue callback.  No vitaGL, no runtime shader compiler.
- *   §3.4  Scheduler   : xk_sched — every emulated Xbox thread is a fiber inside ONE
- *                       Vita thread pinned to core 0 ("guest"); a second Vita thread
- *                       pinned to core 1 is the render/present pump.  Context switch
- *                       is ~40 cycles of hand-written Thumb-2 (§3.3).
+ *   §3.4  Scheduler   : the mock uses xk_sched on core 0. Recompiled guest fibers
+ *                       use separate kernel threads and semaphore baton handoffs,
+ *                       so only one executes guest code at a time. The bootstrap
+ *                       requests core 0; actual fiber affinity is logged with
+ *                       XV_THREADS=1. The render/present pump requests core 1.
  *
  * Build (vitasdk):
  *   arm-vita-eabi-gcc -Wl,-q -O2 -mthumb -o xita.elf main.c \
@@ -35,10 +36,15 @@
  * compiled by psp2cgc), the D3D HLE state machine, and the kernel API translator.
  */
 
+#ifdef XV_RUN_RECOMP
+#include <psp2/common_dialog.h>
+#endif
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <ctype.h>
 
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/sysmem.h>
@@ -53,7 +59,9 @@
 
 #include "xv_shader.h"
 #include "xv_d3d.h"
+#include "xv_vertex_upload.h"
 #include "xv_scene.h"
+#include "xv_quality_settings.h"
 #include "xv_layouts.h"        /* generated: recompiled-shader layouts (gen_layouts.py) */
 
 /* ======================================================================================
@@ -61,6 +69,14 @@
  * ==================================================================================== */
 
 #include "xv_log.h"
+#include "xv_cpu.h"
+#include "xv_frame_pacer.h"
+#include "xv_render_profile.h"
+#include "xv_render_target.h"
+#ifdef XV_RUN_RECOMP
+#include <psp2/ctrl.h>
+#include "dashboard/xv_dash.h"
+#endif
 #define XV_LOG(...)                 xv_logf("[xv] " __VA_ARGS__)
 
 #define XV_XRAM_SIZE                (64u * 1024u * 1024u)     /* Xbox physical RAM     */
@@ -69,7 +85,7 @@
 #define XV_DISPLAY_WIDTH            960
 #define XV_DISPLAY_HEIGHT           544
 #define XV_DISPLAY_STRIDE           1024                      /* pixels                */
-#define XV_DISPLAY_BUFFER_COUNT     2
+#define XV_DISPLAY_BUFFER_COUNT     3
 #define XV_DISPLAY_PIXEL_FORMAT     SCE_DISPLAY_PIXELFORMAT_A8B8G8R8
 #define XV_COLOR_FORMAT             SCE_GXM_COLOR_FORMAT_A8B8G8R8
 #define XV_DISPLAY_MAX_PENDING      2                         /* frames in flight      */
@@ -118,40 +134,13 @@ static inline void *xv_gpu_ptr(uint32_t guest_addr)
 }
 #endif
 
-/*
- * Cache coherency (§1.3, option A).  USER_RW memory is write-back cached on the A9;
- * the SGX reads DRAM.  Before the GPU consumes a range the CPU wrote, the L1+L2 lines
- * must be cleaned.  User mode cannot issue cache maintenance, so a tiny taiHEN kernel
- * module exports xv_kmod_dcache_clean() (-> ksceKernelCpuDcacheAndL2WritebackRange).
- * It is declared weak: when the module is not present the call resolves to NULL and
- * we fall back to a no-op, which is only safe while nothing is drawn from XRAM.
- */
-extern int xv_kmod_dcache_clean(const void *ptr, SceSize len) __attribute__((weak));
-
-/* Per-draw dcache cleans were 3 kernel calls per draw (streams + indices): 300-450 syscalls a frame.
- * Collect ranges instead and clean the merged set once, right before the GXM submit (xv_gpu_flush_pending). */
-#define XV_FLUSH_MAX 512
-static struct { uintptr_t lo, hi; } g_flush[XV_FLUSH_MAX]; static unsigned g_nflush; static unsigned g_flush_overflow;
-static inline void xv_gpu_ensure_visible(const void *ptr, SceSize len)
-{
-    if (!xv_kmod_dcache_clean || !len) return;
-    uintptr_t lo = (uintptr_t)ptr & ~(uintptr_t)63u, hi = ((uintptr_t)ptr + len + 63u) & ~(uintptr_t)63u;
-    for (unsigned i = 0; i < g_nflush; ++i) {                          /* merge with an overlapping/adjacent range */
-        if (lo <= g_flush[i].hi + 4096u && hi + 4096u >= g_flush[i].lo) { if (lo < g_flush[i].lo) g_flush[i].lo = lo; if (hi > g_flush[i].hi) g_flush[i].hi = hi; return; }
-    }
-    if (g_nflush < XV_FLUSH_MAX) { g_flush[g_nflush].lo = lo; g_flush[g_nflush].hi = hi; g_nflush++; }
-    else { g_flush_overflow++; xv_kmod_dcache_clean(ptr, len); }         /* table full: clean immediately */
-}
-void xv_gpu_flush_pending(void)
-{
-    if (!xv_kmod_dcache_clean) { g_nflush = 0; return; }
-    for (unsigned i = 0; i < g_nflush; ++i) xv_kmod_dcache_clean((const void *)g_flush[i].lo, (SceSize)(g_flush[i].hi - g_flush[i].lo));
-    g_nflush = 0;
-}
+/* Uncached GPU uploads are published by their owning thread. */
+#include "xv_gpu_upload.h"
+#include "xv_frame_slots.h"
 
 /* Host services used by the D3D HLE (xv_d3d.h). */
 void *xv_guest_ptr(uint32_t guest_addr)              { return xv_gpu_ptr(guest_addr); }
-void  xv_gpu_flush(const void *ptr, uint32_t len)    { xv_gpu_ensure_visible(ptr, len); }
+
 
 #ifndef XV_RUN_RECOMP
 static int xv_xram_init(void)
@@ -254,7 +243,11 @@ static void *xv_fragment_usse_alloc(uint32_t size, xv_memblock_t *out, uint32_t 
 /* Data handed to the display-queue callback per flip. */
 typedef struct {
     void *address;
+    unsigned old_slot, tracked;
 } xv_display_data_t;
+static uint32_t g_display_free[XV_DISPLAY_BUFFER_COUNT];
+static uint32_t g_display_queued, g_display_released;
+static volatile unsigned *g_notifications;
 
 typedef struct {
     SceGxmContext          *ctx;
@@ -271,6 +264,13 @@ typedef struct {
     SceGxmSyncObject       *display_sync[XV_DISPLAY_BUFFER_COUNT];
     xv_memblock_t           depth_mem;
     SceGxmDepthStencilSurface depth_surface;
+    unsigned                render_width, render_height;
+    SceGxmRenderTarget      *scaled_target;
+    xv_memblock_t           scaled_mem[XV_DISPLAY_BUFFER_COUNT], scale_quad;
+    SceGxmColorSurface      scaled_surface[XV_DISPLAY_BUFFER_COUNT];
+    SceGxmTexture           scaled_texture[XV_DISPLAY_BUFFER_COUNT];
+    xv_vshader_t            scale_vs;
+    xv_fshader_t            scale_fs;
 
     uint32_t                back_index;
     uint32_t                front_index;
@@ -318,6 +318,11 @@ static void xv_display_callback(const void *callback_data)
                   sceIoWrite(f, row, XV_DISPLAY_WIDTH * 3); }
               sceIoClose(f); } } }
     sceDisplayWaitVblankStart();
+    if (dd->tracked) {
+        __atomic_store_n(&g_display_free[dd->old_slot], 1, __ATOMIC_RELEASE);
+        __atomic_add_fetch(&g_display_released, 1, __ATOMIC_RELEASE);
+    }
+
 }
 
 static int xv_gfx_init(void)
@@ -338,6 +343,9 @@ static int xv_gfx_init(void)
         XV_LOG("sceGxmInitialize failed: 0x%08X\n", err);
         return -1;
     }
+
+    g_notifications = sceGxmGetNotificationRegion();
+    if (!g_notifications) { XV_LOG("GXM notification region unavailable\n"); return -1; }
 
     /* --- 2. ring buffers (blueprint §0 budget: 1 MB + 1 MB + 512 KB + 16 KB) ------- */
     if (!xv_gpu_alloc(SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, SCE_GXM_DEFAULT_VDM_RING_BUFFER_SIZE,
@@ -379,11 +387,10 @@ static int xv_gfx_init(void)
     rt.flags                = 0;
     rt.width                = XV_DISPLAY_WIDTH;
     rt.height               = XV_DISPLAY_HEIGHT;
-    rt.scenesPerFrame       = 1;
     rt.multisampleMode      = SCE_GXM_MULTISAMPLE_NONE;
     rt.multisampleLocations = 0;
     rt.driverMemBlock       = -1;          /* let GXM allocate its own tiling memory */
-    err = sceGxmCreateRenderTarget(&rt, &g->render_target);
+    err = xv_render_target_create(&rt, UINT32_MAX, &g->render_target, NULL, "display");
     if (err != SCE_OK) {
         XV_LOG("sceGxmCreateRenderTarget failed: 0x%08X\n", err);
         return -1;
@@ -436,6 +443,7 @@ static int xv_gfx_init(void)
 
     g->back_index  = 0;
     g->front_index = XV_DISPLAY_BUFFER_COUNT - 1;
+    g->render_width = XV_DISPLAY_WIDTH; g->render_height = XV_DISPLAY_HEIGHT;
     XV_LOG("GXM: context up, %ux%u, %u display buffers, rings %u/%u/%u KB\n",
            XV_DISPLAY_WIDTH, XV_DISPLAY_HEIGHT, XV_DISPLAY_BUFFER_COUNT,
            g->vdm_ring.size >> 10, g->vertex_ring.size >> 10, g->fragment_ring.size >> 10);
@@ -483,33 +491,159 @@ static int xv_gfx_init(void)
     return 0;
 }
 
-/*
- * One frame on the pump thread.  This is where the D3D HLE layer's recorded draw
- * list will be replayed: vertex streams / index pointers / texture control words all
- * point straight into XRAM (xv_gpu_ptr) after xv_gpu_ensure_visible() on the ranges
- * the guest touched (§1.5).  For now the scene is empty — begin/end/flip only.
- */
-static void xv_gfx_render_frame(uint32_t mesh_frame)
+/* Resolution resources belong to the pump and are replaced only after draining
+ * published work. Draws consume immutable per-slot vertex/index snapshots. */
+static void xv_gfx_free_scale(xv_gfx_t *g)
+{
+    if (g->scale_fs.prog) xv_fshader_unload(&g->scale_fs);
+    if (g->scale_vs.prog) xv_vshader_unload(&g->scale_vs);
+    xv_gpu_free(&g->scale_quad);
+    for (unsigned i = 0; i < XV_DISPLAY_BUFFER_COUNT; i++) xv_gpu_free(&g->scaled_mem[i]);
+    if (g->scaled_target) { sceGxmDestroyRenderTarget(g->scaled_target); g->scaled_target = NULL; }
+    g->render_width = XV_DISPLAY_WIDTH; g->render_height = XV_DISPLAY_HEIGHT;
+}
+
+/* Called after the dashboard reloads settings, before either game worker starts.
+ * Each reduced surface follows its corresponding display buffer through the
+ * existing frame queue; no per-frame allocation or CPU image scaling. */
+static void xv_gfx_configure_resolution_height(unsigned h)
+{
+    xv_gfx_t *g = &g_gfx;
+    if (h != 360 && h != 400 && h != 480) {
+        XV_LOG("render resolution: 960x544 (native)\n"); return;
+    }
+    const unsigned w = xv_render_width(h);
+    SceGxmRenderTargetParams rp = {0};
+    rp.width = w; rp.height = h;
+    rp.multisampleMode = SCE_GXM_MULTISAMPLE_NONE; rp.driverMemBlock = -1;
+    if (xv_render_target_create(&rp, UINT32_MAX, &g->scaled_target, NULL, "scaled") != SCE_OK) goto fail;
+    for (unsigned i = 0; i < XV_DISPLAY_BUFFER_COUNT; i++) {
+        void *p = xv_gpu_alloc(SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, w * h * 4,
+                    SCE_GXM_MEMORY_ATTRIB_READ | SCE_GXM_MEMORY_ATTRIB_WRITE, "xv_scaled", &g->scaled_mem[i]);
+        if (!p) goto fail;
+        memset(p, 0, w * h * 4);
+        if (sceGxmColorSurfaceInit(&g->scaled_surface[i], XV_COLOR_FORMAT,
+                SCE_GXM_COLOR_SURFACE_LINEAR, SCE_GXM_COLOR_SURFACE_SCALE_NONE,
+                SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, w, h, w, p) != SCE_OK) goto fail;
+        if (sceGxmTextureInitLinearStrided(&g->scaled_texture[i], p,
+                SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h, w * 4) != SCE_OK) goto fail;
+        sceGxmTextureSetMinFilter(&g->scaled_texture[i], SCE_GXM_TEXTURE_FILTER_LINEAR);
+        sceGxmTextureSetMagFilter(&g->scaled_texture[i], SCE_GXM_TEXTURE_FILTER_LINEAR);
+        sceGxmTextureSetUAddrMode(&g->scaled_texture[i], SCE_GXM_TEXTURE_ADDR_CLAMP);
+        sceGxmTextureSetVAddrMode(&g->scaled_texture[i], SCE_GXM_TEXTURE_ADDR_CLAMP);
+    }
+    if (xv_vshader_load(&g->scale_vs, &xv_vs_test_tex) != 0 ||
+        xv_fshader_load(&g->scale_fs, "app0:shaders/xv_tex0.frag.gxp", &g->scale_vs, NULL) != 0) goto fail;
+    struct scale_vertex { float x, y, z, u, v; uint32_t color; };
+    struct scale_data { struct scale_vertex v[4]; uint16_t indices[6]; };
+    const struct scale_data quad = {
+        {{-1, 1, 0, 0, 0, 0xFFFFFFFFu}, {1, 1, 0, 1, 0, 0xFFFFFFFFu},
+         {1, -1, 0, 1, 1, 0xFFFFFFFFu}, {-1, -1, 0, 0, 1, 0xFFFFFFFFu}},
+        {0, 1, 2, 0, 2, 3}};
+    void *q = xv_gpu_alloc(SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, sizeof quad,
+                           SCE_GXM_MEMORY_ATTRIB_READ, "xv_scale_quad", &g->scale_quad);
+    if (!q) goto fail;
+    memcpy(q, &quad, sizeof quad);
+    g->render_width = w; g->render_height = h;
+    XV_LOG("render resolution: %ux%u, linear upscale to 960x544\n", w, h);
+    return;
+fail:
+    xv_gfx_free_scale(g);
+    XV_LOG("%up setup failed; using native 960x544\n", h);
+}
+
+static void xv_gfx_configure_resolution(void)
+{ xv_gfx_configure_resolution_height(xv_quality_int("XV_RENDER_HEIGHT",544,360,544)); }
+
+static int xv_gfx_upscale(xv_gfx_t *g, const SceGxmNotification *fence)
+{
+    int err = XV_RENDER_CALL(XV_RENDER_SCENE_BEGIN, sceGxmBeginScene(g->ctx, 0, g->render_target, NULL, NULL,
+                        g->display_sync[g->back_index], &g->display_surface[g->back_index], NULL));
+    if (err != SCE_OK) return err;
+    sceGxmSetViewport(g->ctx, 480, 480, 272, -272, 0.5f, 0.5f);
+    sceGxmSetFrontDepthFunc(g->ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(g->ctx, SCE_GXM_DEPTH_WRITE_DISABLED);
+    sceGxmSetCullMode(g->ctx, SCE_GXM_CULL_NONE);
+    xv_shader_bind(g->ctx, &g->scale_vs, &g->scale_fs);
+    const void *streams[] = {g->scale_quad.base};
+    xv_vshader_set_streams(g->ctx, &g->scale_vs, streams);
+    const float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    void *ub;
+    if (xv_vshader_begin_constants(g->ctx, &g->scale_vs, &ub) == 0)
+        xv_vshader_set_constants(ub, &g->scale_vs, 0, 4, identity);
+    if (g->scale_fs.p_atest && XV_RENDER_CALL(XV_RENDER_FRAGMENT_UNIFORM, sceGxmReserveFragmentDefaultUniformBuffer(g->ctx, &ub)) == SCE_OK) {
+        const float disabled[4] = {0,7,0,0};
+        sceGxmSetUniformDataF(ub, g->scale_fs.p_atest, 0, 4, disabled);
+    }
+    sceGxmSetFragmentTexture(g->ctx, g->scale_fs.tex_index[0], &g->scaled_texture[g->back_index]);
+    XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(g->ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16,
+               (const uint8_t *)g->scale_quad.base + 4 * 24, 6));
+    return XV_RENDER_END(9, sceGxmEndScene(g->ctx, NULL, fence));
+}
+
+#ifdef XV_RUN_RECOMP
+static int g_net_dialog;
+extern int xv_net_startup(void (*draw)(void));
+extern void xv_net_shutdown(void);
+#endif
+static int xv_gfx_render_frame(uint32_t mesh_frame, unsigned ui_frame, const SceGxmNotification *fence)
 {
     xv_gfx_t *g = &g_gfx;
     (void)mesh_frame;
+    int scaled = g->scaled_target != NULL;
 
 #ifdef XV_RUN_RECOMP
-    if (g->hle_ready) {                 /* render-to-texture passes first, each in its own scene */
+    if (g->hle_ready) {                 /* prepare the previous completed frame before opening any scene */
         uint32_t mf0 = mesh_frame;
-        if (mf0 != 0xFFFFFFFFu) xv_d3d_render_offscreen(g->ctx, mf0);
+        if (mf0 != 0xFFFFFFFFu) xv_d3d_visibility_prepare(g->ctx,mf0,g->render_width,g->render_height);
+        if (mf0 != 0xFFFFFFFFu && xv_d3d_uses_previous_frame(mf0)) {
+            /* Previous-frame fragments precede this frame on the same context.
+             * Keep the surface alive through display-slot ownership; do not
+             * block the CPU before sampling it in the later fragment pass. */
+            SceGxmTexture previous = {0};
+            if (sceGxmTextureInitLinearStrided(&previous, g->display_mem[g->front_index].base,
+                    SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, XV_DISPLAY_WIDTH, XV_DISPLAY_HEIGHT,
+                    XV_DISPLAY_STRIDE * 4) == SCE_OK) {
+                sceGxmTextureSetMinFilter(&previous, SCE_GXM_TEXTURE_FILTER_LINEAR);
+                sceGxmTextureSetMagFilter(&previous, SCE_GXM_TEXTURE_FILTER_LINEAR);
+                sceGxmTextureSetUAddrMode(&previous, SCE_GXM_TEXTURE_ADDR_CLAMP);
+                sceGxmTextureSetVAddrMode(&previous, SCE_GXM_TEXTURE_ADDR_CLAMP);
+            }
+            /* Clear a failed descriptor too: an older front buffer may now be
+             * the active render target after the display buffers rotate. */
+            xv_d3d_SetPreviousFrameTexture(&previous);
+        }
     }
+    int rtt = g->hle_ready && mesh_frame != 0xffffffffu && xv_d3d_has_render_targets(mesh_frame);
+    if (rtt) {
+        SceGxmTexture scene = {0};
+        if (scaled) scene = g->scaled_texture[g->back_index];
+        else if (sceGxmTextureInitLinearStrided(&scene, g->display_mem[g->back_index].base,
+                SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, XV_DISPLAY_WIDTH, XV_DISPLAY_HEIGHT,
+                XV_DISPLAY_STRIDE * 4) == SCE_OK) {
+            sceGxmTextureSetMinFilter(&scene, SCE_GXM_TEXTURE_FILTER_LINEAR);
+            sceGxmTextureSetMagFilter(&scene, SCE_GXM_TEXTURE_FILTER_LINEAR);
+            sceGxmTextureSetUAddrMode(&scene, SCE_GXM_TEXTURE_ADDR_CLAMP);
+            sceGxmTextureSetVAddrMode(&scene, SCE_GXM_TEXTURE_ADDR_CLAMP);
+        }
+        xv_d3d_SetSceneBackbufferTexture(&scene);
+        if (xv_d3d_render_targets(g->ctx, mesh_frame, scaled ? g->scaled_target : g->render_target,
+                scaled ? NULL : g->display_sync[g->back_index],
+                scaled ? &g->scaled_surface[g->back_index] : &g->display_surface[g->back_index],
+                &g->depth_surface, g->render_width, g->render_height) < 0) return -1;
+    } else
 #endif
-    int err = sceGxmBeginScene(g->ctx, 0, g->render_target, NULL, NULL,
-                               g->display_sync[g->back_index],
-                               &g->display_surface[g->back_index], &g->depth_surface);
-    if (err != SCE_OK) {
-        XV_LOG("sceGxmBeginScene failed: 0x%08X\n", err);
-        return;
+    {
+        int err = XV_RENDER_CALL(XV_RENDER_SCENE_BEGIN, sceGxmBeginScene(g->ctx, 0, scaled ? g->scaled_target : g->render_target, NULL, NULL,
+                                   scaled ? NULL : g->display_sync[g->back_index],
+                                   scaled ? &g->scaled_surface[g->back_index] : &g->display_surface[g->back_index], &g->depth_surface));
+        if (err != SCE_OK) {
+            XV_LOG("sceGxmBeginScene failed: 0x%08X\n", err);
+            return -1;
+        }
     }
 
-    /* Replay the D3D HLE command list the game fiber recorded for this frame:
-     * clears, draws with their streams/indices/textures pointing into guest RAM. */
+    /* Replay this frame's recorded commands and owned GPU-visible uploads. */
 #ifndef XV_RUN_RECOMP
     if (g->hle_ready)
         xv_d3d_render(g->ctx, g->frame_counter);
@@ -517,26 +651,61 @@ static void xv_gfx_render_frame(uint32_t mesh_frame)
     if (g->hle_ready) {
         uint32_t mf = mesh_frame;
         /* Halo's VS emits D3D clip space; same viewport the UI replay uses */
-        sceGxmSetViewport(g->ctx, 480.0f, 480.0f, 272.0f, -272.0f, 0.5f, 0.5f);
-        if (mf != 0xFFFFFFFFu) xv_d3d_render(g->ctx, mf);
+        sceGxmSetViewport(g->ctx, g->render_width * 0.5f, g->render_width * 0.5f,
+                          g->render_height * 0.5f, -(float)g->render_height * 0.5f, 0.5f, 0.5f);
+        if (mf != 0xFFFFFFFFu && !rtt) xv_d3d_render(g->ctx, mf);
     }
 #endif
-    { extern void xv_ui_gxm_replay(SceGxmContext *ctx); xv_ui_gxm_replay(g->ctx); }
+#ifdef XV_RUN_RECOMP
+    if (!rtt)
+#endif
+    { extern void xv_ui_gxm_replay_frame(SceGxmContext *, unsigned, unsigned, unsigned);
+      xv_ui_gxm_replay_frame(g->ctx, g->render_width, g->render_height, ui_frame); }
 
-    sceGxmEndScene(g->ctx, NULL, NULL);
+    if (XV_RENDER_END(0, sceGxmEndScene(g->ctx, NULL, scaled ? NULL : fence)) != SCE_OK) return -1;
+    if (scaled && xv_gfx_upscale(g, fence) != SCE_OK) { XV_LOG("upscale failed\n"); return -1; }
 
+#ifdef XV_RUN_RECOMP
+    if (g_net_dialog) {
+        SceCommonDialogUpdateParam up = {0};
+        up.renderTarget.colorSurfaceData = g->display_mem[g->back_index].base;
+        up.renderTarget.surfaceType = SCE_GXM_COLOR_SURFACE_LINEAR;
+        up.renderTarget.colorFormat = XV_COLOR_FORMAT;
+        up.renderTarget.width = XV_DISPLAY_WIDTH; up.renderTarget.height = XV_DISPLAY_HEIGHT;
+        up.renderTarget.strideInPixels = XV_DISPLAY_STRIDE;
+        up.displaySyncObject = g->display_sync[g->back_index];
+        sceCommonDialogUpdate(&up);
+    }
+#endif
     /* Present: heartbeat keeps the GPU/display in step, then queue the flip. */
     sceGxmPadHeartbeat(&g->display_surface[g->back_index], g->display_sync[g->back_index]);
 
-    xv_display_data_t dd;
-    dd.address = g->display_mem[g->back_index].base;
-    sceGxmDisplayQueueAddEntry(g->display_sync[g->front_index],
+    xv_display_data_t dd = {g->display_mem[g->back_index].base, g->front_index, fence != NULL};
+    if (dd.tracked) __atomic_store_n(&g_display_free[g->back_index], 0, __ATOMIC_RELEASE);
+    xv_render_profile_stage(XV_RENDER_DISPLAY_QUEUE);
+    int queued = sceGxmDisplayQueueAddEntry(g->display_sync[g->front_index],
                                g->display_sync[g->back_index], &dd);
+    if (queued < 0) {
+        if (dd.tracked) __atomic_store_n(&g_display_free[g->back_index], 1, __ATOMIC_RELEASE);
+        XV_LOG("display queue failed %08X\n", queued);
+        return queued;
+    }
+    if (dd.tracked) g_display_queued++;
+    xv_render_profile_stage(XV_RENDER_SUBMIT);
 
     g->front_index = g->back_index;
     g->back_index  = (g->back_index + 1) % XV_DISPLAY_BUFFER_COUNT;
     g->frame_counter++;
+    return 0;
 }
+
+#ifdef XV_RUN_RECOMP
+static void xv_net_dialog_draw(void)
+{
+    xv_gfx_render_frame(0xFFFFFFFFu, UINT32_MAX, NULL);
+    sceDisplayWaitVblankStart();
+}
+#endif
 
 
 /* Drain the GPU and the display queue.  Must run before ANY GPU-visible memory
@@ -556,6 +725,7 @@ static void __attribute__((unused)) xv_gfx_shutdown(void)
     xv_gfx_t *g = &g_gfx;
     XV_LOG("shutdown: finish\n");
     xv_gfx_finish();
+    xv_gfx_free_scale(g);
     XV_LOG("shutdown: d3d\n");
     xv_d3d_shutdown();
     XV_LOG("shutdown: shader patcher\n");
@@ -895,52 +1065,231 @@ void xk_run(void)
 
 static volatile uint32_t g_frame_requested = 0;    /* written by guest fiber            */
 static volatile uint32_t g_frame_completed = 0;    /* written by pump thread            */
+#include "xv_frame_events.h"
+#include "xv_benchmark.h"
+static xv_frame_events g_frame_events = { -1 };
+static uint32_t g_resolution_request,g_resolution_result;
 static volatile int      g_running         = 1;
-static uint32_t          g_mesh_ring[4];                /* D3D list (mesh frame) per ticket   */
+static struct {
+    uint32_t mesh, ui;
+    SceGxmNotification fence;
+    uint64_t started_us;
+    int failed;
+} g_packets[XV_FRAME_TICKETS];
+static xv_slot_owner g_mesh_owners[XV_FRAME_SLOTS], g_ui_owners[XV_FRAME_SLOTS];
+static uint32_t g_frame_submitted; /* pump-owned, distinct from GPU completion */
+static int g_pipeline_override = -1;
+static int g_pipeline_configured; /* Written before starting either game worker. */
+static unsigned g_slot_waits;
+static uint64_t g_slot_wait_us;
+static int xv_pipeline_enabled(void)
+{
+    int override = __atomic_load_n(&g_pipeline_override, __ATOMIC_ACQUIRE);
+    return override < 0 ? g_pipeline_configured : override;
+}
+static void xv_pipeline_configure(void)
+{
+    const char *value = getenv("XV_TRIPLE_BUFFER");
+    /* Same boolean parsing as the dashboard; missing means conservative mode. */
+    g_pipeline_configured = value && atoi(value) != 0;
+    XV_LOG("triple buffering: %s; GPU completion retains ownership of each slot\n",
+           g_pipeline_configured ? "on (experimental)" : "off (single-flight)");
+}
+void xv_pipeline_override(int enabled)
+{ __atomic_store_n(&g_pipeline_override, enabled < 0 ? -1 : !!enabled, __ATOMIC_RELEASE); }
+void xv_present_drain(void);
 volatile uint64_t        xv_pump_us_acc     = 0;          /* render time on the pump, for the frame-time log */
 
-/* D3DDevice_Swap() HLE lands here: ask the pump for a flip and block only this fiber.
- * Other fibers keep running; if all are blocked the core idles (§3.4). */
+/* D3DDevice_Swap() publishes a frame, then acquires the next recording slot.
+ * Only an occupied slot parks this fiber; other guest fibers remain runnable. */
+/* Called only by the serialized recording thread. Slot owners refer to GPU
+ * completion, never just CPU submission or a display callback. */
 void xv_present(void)
 {
 #ifdef XV_RUN_RECOMP
-    /* The recompiled engine records frame N on core 0; the pump on core 1 renders it while the engine
-     * records N+1.  One frame in flight: publish the ticket, then wait only until frame N-1 is drawn
-     * (its command list and UI buffer are the ones frame N+1 will record into).  On hardware present
-     * cost the game thread 28-32 ms per heavy frame when it rendered synchronously (2026-09-04). */
-    uint32_t ticket = g_frame_requested + 1;
+    xv_cpu_guest_poll();
     extern uint32_t xv_ui_gxm_mesh_frame(void);
-    g_mesh_ring[ticket & 3u] = xv_ui_gxm_mesh_frame();
+    extern unsigned xv_ui_gxm_published_frame(void), xv_ui_gxm_record_frame(void);
+    /* Single-flight is the recovery default. The pre-launch setting or a test
+     * override permits overlap; GPU slot ownership applies to either mode. */
+    if (!xv_pipeline_enabled()) xv_present_drain();
+    uint32_t ticket = g_frame_requested + 1u;
+    unsigned q = ticket & (XV_FRAME_TICKETS - 1u);
+    uint32_t mesh = xv_ui_gxm_mesh_frame();
+    unsigned ui = xv_ui_gxm_published_frame();
+    g_packets[q].mesh = mesh; g_packets[q].ui = ui;
+    if (mesh != UINT32_MAX) g_mesh_owners[mesh % XV_FRAME_SLOTS] = (xv_slot_owner){ticket,1};
+    if (ui < XV_FRAME_SLOTS) g_ui_owners[ui] = (xv_slot_owner){ticket,1};
     __atomic_store_n(&g_frame_requested, ticket, __ATOMIC_RELEASE);
-    while ((int32_t)(__atomic_load_n(&g_frame_completed, __ATOMIC_ACQUIRE) - (ticket - 1u)) < 0) sceKernelDelayThread(100);
+    xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
+    unsigned next_mesh = xv_d3d_record_slot(), next_ui = xv_ui_gxm_record_frame();
+    uint64_t start = 0;
+    for (;;) {
+        uint32_t done = __atomic_load_n(&g_frame_completed, __ATOMIC_ACQUIRE);
+        if (!xv_slot_busy(&g_mesh_owners[next_mesh],done) &&
+            !xv_slot_busy(&g_ui_owners[next_ui],done)) break;
+        if (!start) { start = sceKernelGetProcessTimeWide(); g_slot_waits++; }
+        /* Park just this guest fiber; other runnable guest threads may work. */
+        extern void xk_sleep_us(uint64_t);
+        xk_sleep_us(100);
+    }
+    if (start) g_slot_wait_us += sceKernelGetProcessTimeWide() - start;
+    if (ticket % 60u == 0) {
+        XV_LOG("[frame-acquire] 60 presents: %u busy-slot waits %llu us; async %d\n",
+            g_slot_waits,(unsigned long long)g_slot_wait_us,xv_pipeline_enabled());
+        g_slot_waits=0; g_slot_wait_us=0;
+    }
 #else
     uint32_t ticket = __atomic_add_fetch(&g_frame_requested, 1, __ATOMIC_RELEASE);
-    /* allow XV_DISPLAY_MAX_PENDING frames in flight: wait for ticket - pending */
-    xk_wait_word(&g_frame_completed, ticket - (XV_DISPLAY_MAX_PENDING - 1));
+    xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
+    xk_wait_word(&g_frame_completed, ticket);
+    xv_d3d_BeginFrame();
 #endif
 }
 /* Block until every published frame has been rendered (texture-pool purges, shutdown). */
 void xv_present_drain(void)
 {
-    while ((int32_t)(__atomic_load_n(&g_frame_completed, __ATOMIC_ACQUIRE) - __atomic_load_n(&g_frame_requested, __ATOMIC_ACQUIRE)) < 0) sceKernelDelayThread(100);
+    while ((int32_t)(__atomic_load_n(&g_frame_completed, __ATOMIC_ACQUIRE) - __atomic_load_n(&g_frame_requested, __ATOMIC_ACQUIRE)) < 0)
+        xv_frame_events_wait(&g_frame_events,XV_FRAME_COMPLETED,100);
 }
 
-/* Core 1: render/present pump. */
+/* Called after draining, before recording rings rotate. Only the pump changes
+ * GXM resources, and it acknowledges before the next frame is published. */
+void xv_benchmark_optimizations(int enabled)
+{
+    extern void xv_flare_barrier(unsigned) __attribute__((weak));
+    extern void xv_flare_defer_override(int) __attribute__((weak));
+    xv_present_drain();
+    if (xv_benchmark_compare_vertex_copy()) {
+        xv_vertex_copy_override(enabled);
+        return;
+    }
+    if (xv_benchmark_compare_draw_scan()) {
+        xv_d3d_draw_scan_override(enabled);
+        return;
+    }
+    /* Retire retained results before switching the exact-result schedule. */
+    if (xv_flare_barrier) xv_flare_barrier(0); /* XV_FLARE_NEXT */
+    if (xv_flare_defer_override) xv_flare_defer_override(enabled);
+}
+void xv_benchmark_present(void)
+{
+    if(!xv_benchmark_active())return;
+    extern int xd3d_benchmark_view(float view[6]);
+    float view[6]={0};int valid=xd3d_benchmark_view(view);
+    unsigned height=xv_benchmark_step(sceKernelGetProcessTimeWide(),g_gfx.render_height,valid,view);
+    if(!height)return;
+    xv_present_drain(); /* Resolution resources require an empty queue. */
+    __atomic_store_n(&g_resolution_result,0,__ATOMIC_RELAXED);
+    __atomic_store_n(&g_resolution_request,height,__ATOMIC_RELEASE);
+    xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
+    unsigned actual;
+    while(!(actual=__atomic_load_n(&g_resolution_result,__ATOMIC_ACQUIRE)))
+        xv_frame_events_wait(&g_frame_events,XV_FRAME_COMPLETED,100);
+    xv_benchmark_applied(sceKernelGetProcessTimeWide(),actual);
+}
+/* The idle pump owns configuration; there can be no outstanding frame here. */
+static int xv_pump_resolution(void)
+{
+    unsigned height=__atomic_load_n(&g_resolution_request,__ATOMIC_ACQUIRE);
+    if(!height)return 0;
+    if(g_gfx.render_height!=height) {
+        sceGxmFinish(g_gfx.ctx);
+        xv_gfx_free_scale(&g_gfx);
+        xv_gfx_configure_resolution_height(height);
+    }
+    __atomic_store_n(&g_resolution_request,0,__ATOMIC_RELAXED);
+    __atomic_store_n(&g_resolution_result,g_gfx.render_height,__ATOMIC_RELEASE);
+    xv_frame_events_signal(&g_frame_events,XV_FRAME_COMPLETED);
+    return 1;
+}
+
+/* Only called on the recording thread, while published work is drained. */
+void xv_render_target_drain(void)
+{
+    xv_present_drain();
+    sceGxmFinish(g_gfx.ctx);
+}
+
+/* Poll and retire the oldest completed packet. The GPU's fragment notification
+ * protects every scene in this packet, including a final upscale. Display
+ * release is tracked separately and cannot retire geometry or queries. */
+static unsigned g_retired_count, g_max_pending;
+static uint64_t g_completion_us;
+static int xv_pump_retire(void)
+{
+    uint32_t done = __atomic_load_n(&g_frame_completed, __ATOMIC_RELAXED);
+    if (done == g_frame_submitted) return 0;
+    uint32_t ticket = done + 1u;
+    unsigned q = ticket & (XV_FRAME_TICKETS - 1u);
+    if (!g_packets[q].failed &&
+        __atomic_load_n(g_packets[q].fence.address, __ATOMIC_ACQUIRE) != g_packets[q].fence.value) return 0;
+    uint64_t elapsed = sceKernelGetProcessTimeWide() - g_packets[q].started_us;
+    if (g_gfx.hle_ready && g_packets[q].mesh != UINT32_MAX) {
+        xv_d3d_visibility_complete(g_packets[q].mesh);
+        xv_d3d_check_geometry(g_packets[q].mesh);
+    }
+    g_completion_us += elapsed;
+    __atomic_store_n(&g_frame_completed,ticket,__ATOMIC_RELEASE);
+    xv_frame_events_signal(&g_frame_events,XV_FRAME_COMPLETED);
+    if (++g_retired_count == 60) {
+        XV_LOG("[frame-retire] 60 frames: completion latency %.3f ms/frame; max pending %u; GPU notification retirement (overlaps guest/submission)\n",
+            g_completion_us / 60000.0, g_max_pending);
+        g_retired_count=0; g_completion_us=0; g_max_pending=0;
+    }
+    return 1;
+}
+/* Core 1 owns all GXM submission. It can submit another packet while the prior
+ * notification is pending; it polls fences while display slots/pacing are busy. */
 static int xv_pump_thread(SceSize args, void *argp)
 {
     (void)args; (void)argp;
-    XV_LOG("pump: up on core 1\n");
+    XV_LOG("pump: triple slots, fragment notification retirement; configured queue mode; requested core 1\n");
+    xv_cpu_log_thread("render-pump");
+    for (unsigned i=0;i<XV_DISPLAY_BUFFER_COUNT;i++)
+        __atomic_store_n(&g_display_free[i],i!=g_gfx.front_index,__ATOMIC_RELEASE);
+    xv_cpu_poll(sceKernelGetProcessTimeWide());
+    int cap=xv_quality_int("XV_FRAME_CAP",0,0,60);
+    uint32_t period=cap>0 ? 1000000u/(unsigned)cap : 0;
+    uint64_t next_frame=0;
     while (g_running) {
-        uint32_t req  = __atomic_load_n(&g_frame_requested, __ATOMIC_ACQUIRE);
-        uint32_t done = g_frame_completed;
-        if ((int32_t)(req - done) > 0) {
-            extern uint64_t xk_os_monotonic_us(void) __attribute__((weak));
-            uint64_t t0 = xk_os_monotonic_us ? xk_os_monotonic_us() : 0;
-            xv_gfx_render_frame(g_mesh_ring[(done + 1u) & 3u]);
-            if (xk_os_monotonic_us) xv_pump_us_acc += xk_os_monotonic_us() - t0;
-            __atomic_store_n(&g_frame_completed, done + 1, __ATOMIC_RELEASE);
+        while (xv_pump_retire()) {}
+        uint32_t requested=__atomic_load_n(&g_frame_requested,__ATOMIC_ACQUIRE);
+        uint32_t done=__atomic_load_n(&g_frame_completed,__ATOMIC_ACQUIRE);
+        if (g_frame_submitted != requested) {
+            uint64_t now=sceKernelGetProcessTimeWide();
+            int display_busy=!__atomic_load_n(&g_display_free[g_gfx.back_index],__ATOMIC_ACQUIRE) ||
+                g_display_queued-__atomic_load_n(&g_display_released,__ATOMIC_ACQUIRE)>=XV_DISPLAY_MAX_PENDING;
+            if (display_busy || now<next_frame) { sceKernelDelayThread(100); continue; }
+            uint32_t ticket=g_frame_submitted+1u;
+            unsigned q=ticket&(XV_FRAME_TICKETS-1u);
+#ifndef XV_RUN_RECOMP
+            g_packets[q].mesh=ticket-1u; g_packets[q].ui=UINT32_MAX;
+#endif
+            g_packets[q].fence=(SceGxmNotification){g_notifications+q,ticket};
+            g_packets[q].started_us=now;
+            xv_cpu_poll(now);
+            xv_render_profile_begin(g_packets[q].mesh);
+            xv_gpu_write_barrier();
+            int err=xv_gfx_render_frame(g_packets[q].mesh,g_packets[q].ui,&g_packets[q].fence);
+            g_packets[q].failed=err<0;
+            if (err<0) {
+                /* A failed EndScene may never signal. Exceptional cleanup only:
+                 * finish any accepted work before releasing its storage. */
+                XV_LOG("[frame-fence] submission failed %08X; draining failed packet\n",err);
+                sceGxmFinish(g_gfx.ctx);
+            }
+            g_frame_submitted=ticket;
+            unsigned pending=ticket-done;
+            if (pending>g_max_pending) g_max_pending=pending;
+            next_frame=now+period;
+            xv_pump_us_acc+=sceKernelGetProcessTimeWide()-now;
+            xv_render_profile_end(); /* submission duration, not GPU latency */
+        } else if (done!=g_frame_submitted) {
+            sceKernelDelayThread(100); /* bounded polling, no full-GPU wait */
         } else {
-            sceKernelDelayThread(200);      /* ~0.2 ms poll; replace with event flag later */
+            if(xv_pump_resolution())continue;
+            xv_frame_events_wait(&g_frame_events,XV_FRAME_REQUESTED,200);
         }
     }
     return 0;
@@ -1080,6 +1429,7 @@ int  xv_boot_recomp(const char *game_dir, const char *save_dir);
 static int xv_recomp_thread(SceSize args, void *argp)
 {
     (void)args; (void)argp;
+    xv_cpu_log_thread("guest-bootstrap");
     static const char *const game_dirs[] = {
         "ux0:data/xita/haloce", "uma0:data/xita/haloce", "app0:haloce",
     };
@@ -1096,6 +1446,134 @@ static int xv_recomp_thread(SceSize args, void *argp)
 }
 #endif
 
+static void xv_load_settings(void)
+{
+    /* The user-facing dashboard file wins over emulator fallback settings. */
+    const char *files[] = {"ux0:data/xita/env.txt", "ux0:data/xita/xita.cfg"};
+    for (unsigned i = 0; i < 2; ++i) {
+        FILE *f = fopen(files[i], "r");
+        if (!f) continue;
+        char line[2048];
+        while (fgets(line, sizeof line, f)) {
+            if (!strchr(line, '\n') && !feof(f)) {
+                int c; while ((c = fgetc(f)) != EOF && c != '\n') {}
+                continue; /* Do not execute a truncated setting. */
+            }
+            char *key = line; while (isspace((unsigned char)*key)) key++;
+            if (*key == '#' || *key == ';' || !*key) continue;
+            char *eq = strchr(key, '='); if (!eq) continue;
+            char *end = eq; while (end > key && isspace((unsigned char)end[-1])) end--;
+            *end = 0;
+            char *value = eq + 1; while (isspace((unsigned char)*value)) value++;
+            end = value;
+            while (*end && *end != '#' && *end != ';' && *end != '\r' && *end != '\n') end++;
+            while (end > value && isspace((unsigned char)end[-1])) end--;
+            *end = 0;
+            if (*key) { setenv(key, value, 1); XV_LOG("cfg %s=%s\n", key, value); }
+        }
+        fclose(f);
+    }
+}
+
+#ifdef XV_RUN_RECOMP
+typedef struct {
+    xv_gfx_t *gfx;
+    uint64_t frame_started, sample_started, draw_us, copy_us, wait_us;
+    unsigned frames;
+} xv_dashboard_platform;
+
+static int xv_dashboard_poll(void *userdata, xv_dash_input *input)
+{
+    xv_dashboard_platform *p = userdata;
+    p->frame_started = sceKernelGetProcessTimeWide();
+    if (!p->sample_started) p->sample_started = p->frame_started;
+    SceCtrlData pad = {0};
+    int rc = sceCtrlPeekBufferPositive(0, &pad, 1);
+    if (rc < 0) return rc;
+    if (!rc) return 0;
+    const unsigned masks[] = {SCE_CTRL_UP, SCE_CTRL_DOWN, SCE_CTRL_LEFT, SCE_CTRL_RIGHT, SCE_CTRL_CROSS, SCE_CTRL_CIRCLE};
+    for (unsigned i = 0; i < 6; ++i) if (pad.buttons & masks[i]) input->buttons |= 1u << i;
+    input->lx = (int)pad.lx - 128; input->ly = (int)pad.ly - 128;
+    return 0;
+}
+static int xv_dashboard_present(void *userdata, xv_dash_framebuffer *fb)
+{
+    xv_dashboard_platform *p = userdata;
+    xv_gfx_t *g = p->gfx;
+    uint64_t drawn = sceKernelGetProcessTimeWide();
+    /* Alpha blending reads its destination repeatedly: keep it in cached RAM.
+     * Stream the completed image into the inactive CDRAM buffer only once.
+     * Both ends of this copy are CPU addresses; the GPU never reads the canvas. */
+    void *display_pixels = g->display_mem[g->back_index].base;
+    memcpy(display_pixels, fb->pixels, (size_t)fb->pitch * fb->height * sizeof(uint32_t));
+    uint64_t copied = sceKernelGetProcessTimeWide();
+    SceDisplayFrameBuf display = {0};
+    display.size = sizeof display; display.base = display_pixels;
+    display.pitch = fb->pitch; display.width = fb->width; display.height = fb->height;
+    display.pixelformat = XV_DISPLAY_PIXEL_FORMAT;
+    int rc = sceDisplaySetFrameBuf(&display, SCE_DISPLAY_SETBUF_NEXTFRAME);
+    if (rc < 0) return rc;
+    rc = sceDisplayWaitVblankStart(); if (rc < 0) return rc;
+    g->front_index = g->back_index;
+    g->back_index = (g->back_index + 1u) % XV_DISPLAY_BUFFER_COUNT;
+    /* Keep fb->pixels pointing at the cached canvas when display buffers swap. */
+    uint64_t shown = sceKernelGetProcessTimeWide();
+    p->draw_us += drawn - p->frame_started;
+    p->copy_us += copied - drawn;
+    p->wait_us += shown - copied;
+    if (++p->frames == 120) {
+        uint64_t elapsed = shown - p->sample_started;
+        unsigned fps10 = elapsed ? (unsigned)(p->frames * 10000000ull / elapsed) : 0;
+        XV_LOG("dashboard: %u.%u fps; draw %u us, copy %u us, wait %u us/frame\n",
+               fps10 / 10, fps10 % 10, (unsigned)(p->draw_us / p->frames),
+               (unsigned)(p->copy_us / p->frames), (unsigned)(p->wait_us / p->frames));
+        p->frames = 0; p->draw_us = p->copy_us = p->wait_us = 0;
+        p->sample_started = shown;
+    }
+    return 0;
+}
+static int xv_dashboard_start(void)
+{
+    const char *skip = getenv("XV_DASHBOARD");
+    if (skip && !atoi(skip)) return 0; /* automation bypass */
+    sceIoMkdir("ux0:data", 0777); sceIoMkdir("ux0:data/xita", 0777);
+    if (sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE) < 0) return -1;
+    const unsigned bytes = ALIGN_UP(XV_DISPLAY_STRIDE * XV_DISPLAY_HEIGHT * sizeof(uint32_t), 4096);
+    SceUID canvas_uid = sceKernelAllocMemBlock("xv_dash_canvas", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, bytes, NULL);
+    if (canvas_uid < 0) { XV_LOG("dashboard: canvas allocation failed: 0x%08X\n", canvas_uid); return -1; }
+    void *canvas = NULL;
+    if (sceKernelGetMemBlockBase(canvas_uid, &canvas) < 0) { sceKernelFreeMemBlock(canvas_uid); return -1; }
+    xv_dashboard_platform platform = {.gfx = &g_gfx};
+    xv_dash_config cfg = {
+        .framebuffer = {canvas, XV_DISPLAY_WIDTH, XV_DISPLAY_HEIGHT, XV_DISPLAY_STRIDE},
+        .userdata = &platform, .poll = xv_dashboard_poll, .present = xv_dashboard_present, .simple_launcher = 1
+    };
+    xv_dash_result choice;
+    XV_LOG("dashboard: ready; cached canvas %u KB; waiting for Launch Game\n", bytes / 1024);
+    int rc = xv_dash_run(&cfg, &choice);
+    sceKernelFreeMemBlock(canvas_uid); /* No dashboard memory survives into Halo. */
+    if (rc != 0) return -1;
+    xv_load_settings(); /* All game consumers initialize after this hand-off. */
+    XV_LOG("dashboard: Launch Game; settings applied\n");
+    return 0;
+}
+#endif
+
+static void xv_configure_cpu_clock(void)
+{
+    int requested = xv_quality_int("XV_CPU_MHZ", 444, 444, 500);
+    if (requested != 500) requested = 444;
+    int rc = scePowerSetArmClockFrequency(requested);
+    int actual = scePowerGetArmClockFrequency();
+    if (requested == 500 && (rc < 0 || actual < 500)) {
+        scePowerSetArmClockFrequency(444);
+        XV_LOG("CPU clock: 500 MHz unavailable (rc %08X, reported %d); requesting 444 MHz\n", rc, actual);
+    }
+    XV_LOG("game clocks: requested CPU %d, effective cpu %d bus %d gpu %d xbar %d MHz\n",
+        requested, scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(),
+        scePowerGetGpuClockFrequency(), scePowerGetGpuXbarClockFrequency());
+}
+
 int main(int argc, char *argv[])
 {
     (void)argc; (void)argv;
@@ -1105,40 +1583,53 @@ int main(int argc, char *argv[])
     scePowerSetGpuClockFrequency(222); scePowerSetGpuXbarClockFrequency(166);
     XV_LOG("clocks: cpu %d bus %d gpu %d xbar %d MHz\n", scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(), scePowerGetGpuXbarClockFrequency());
     xv_log_memory_budget("boot");
-    /* Settings + debug knobs: ux0:data/xita/xita.cfg (and env.txt, kept for emulator scripts) hold
-     * KEY=VALUE lines that become environment variables, so every getenv switch works on the card without a
-     * rebuild.  Keys: XV_FPS=1 overlay, XV_VOLUME=0..100, XV_DPAD_EXTRAS=0/1, XV_D3D_HIST=<frame>,
-     * XV_FS_FORCE=tex0|lm|texmod, XV_LOG_TEX/XV_LOG_RS/XV_LOG_DS=1, XV_FUNC_HIST=<frame>. */
-    { static const char *const cfgs[2] = { "ux0:data/xita/xita.cfg", "ux0:data/xita/env.txt" };
-      for (int ci = 0; ci < 2; ++ci) {
-        SceUID fd = sceIoOpen(cfgs[ci], SCE_O_RDONLY, 0);
-        if (fd < 0) continue;
-        static char txt[2048]; int n = sceIoRead(fd, txt, sizeof txt - 1); sceIoClose(fd); if (n < 0) n = 0; txt[n] = 0;
-        for (char *ln = txt; ln && *ln; ) { char *nl = strchr(ln, '\n'); if (nl) *nl++ = 0; char *cr = strchr(ln, '\r'); if (cr) *cr = 0; char *eq = strchr(ln, '=');
-            if (eq && ln[0] != '#' && ln[0] != ';') { *eq = 0; setenv(ln, eq + 1, 1); XV_LOG("cfg %s=%s\n", ln, eq + 1); } ln = nl; } } }
+    xv_load_settings();
 
+    uint64_t gfx_started = sceKernelGetProcessTimeWide();
     if (xv_gfx_init() != 0) {           /* GXM first: sceGxmMapMemory needs it live */
         XV_LOG("graphics init failed\n");
         goto shutdown;
     }
     xv_log_memory_budget("after gfx");
+    XV_LOG("graphics startup: %u ms\n", (unsigned)((sceKernelGetProcessTimeWide() - gfx_started) / 1000));
 
 #ifdef XV_RUN_RECOMP
-    /* Run the recompiled Halo engine on its own big-stack thread (core 0).  It owns guest memory
-     * and drives the kernel scheduler; xv_present() renders each frame it records synchronously. */
+    if (xv_dashboard_start() < 0) {
+        XV_LOG("dashboard failed; game was not started\n");
+        goto shutdown;
+    }
+    xv_configure_cpu_clock();
+    g_net_dialog = 1;
+    int net_result = xv_net_startup(xv_net_dialog_draw);
+    g_net_dialog = 0;
+    if (net_result < 0) goto shutdown;
+    xv_gfx_configure_resolution();
+    xv_pipeline_configure(); /* Dashboard edits loaded; workers have not started. */
+    { extern void xv_cutout_override(int); xv_cutout_override(0); }
+    xv_frame_events_init(&g_frame_events,xv_quality_int("XV_FRAME_EVENTS",1,0,1));
+    XV_LOG("frame handoff: %s\n",g_frame_events.id>=0 ? "event notifications" : "poll fallback");
+    /* Bootstrap the guest scheduler on core 0. Guest fibers have their own kernel
+     * threads with default affinity; the render pump submits frames asynchronously. */
     {
         SceUID pump = sceKernelCreateThread("xv_pump", xv_pump_thread, XV_THREAD_PRIORITY,
                                             XV_PUMP_THREAD_STACK, 0, SCE_KERNEL_CPU_MASK_USER_1, NULL);
-        if (pump < 0) { XV_LOG("pump thread create failed: 0x%08X\n", pump); goto shutdown; }
+        if (pump < 0) { XV_LOG("pump thread create failed: 0x%08X\n", pump); xv_frame_events_close(&g_frame_events); goto shutdown; }
         sceKernelStartThread(pump, 0, NULL);
         SceUID eng = sceKernelCreateThread("xv_recomp", xv_recomp_thread, XV_THREAD_PRIORITY,
                                            2 * 1024 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL);
-        if (eng < 0) { XV_LOG("recomp thread create failed: 0x%08X\n", eng); goto shutdown; }
+        if (eng < 0) {
+            XV_LOG("recomp thread create failed: 0x%08X\n", eng); g_running=0;
+            xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
+            sceKernelWaitThreadEnd(pump,NULL,NULL); sceKernelDeleteThread(pump);
+            xv_frame_events_close(&g_frame_events); goto shutdown;
+        }
         sceKernelStartThread(eng, 0, NULL);
         sceKernelWaitThreadEnd(eng, NULL, NULL);
         sceKernelDeleteThread(eng);
         xv_present_drain(); g_running = 0;
+        xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
         sceKernelWaitThreadEnd(pump, NULL, NULL); sceKernelDeleteThread(pump);
+        xv_frame_events_close(&g_frame_events);
         XV_LOG("recompiled engine finished after %u frames\n", g_gfx.frame_counter);
     }
 #else
@@ -1170,6 +1661,9 @@ int main(int argc, char *argv[])
 #endif
 
 shutdown:
+#ifdef XV_RUN_RECOMP
+    xv_net_shutdown();
+#endif
     /* Exit protocol (verified on hardware + Vita3K): drain the GPU and the display
      * queue, detach the framebuffer, and let sceKernelExitProcess() reclaim every
      * memblock and GXM object.  Tearing objects down by hand while the display still
