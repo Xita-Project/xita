@@ -1,0 +1,34 @@
+// Xbox immediate pretransformed vertices. Halo supplies clip-space position,
+// diffuse/specular colours and four independent texture coordinates.
+struct AppIn {
+    float4 position : POSITION;
+    float4 color0 : COLOR0;
+    float4 color1 : COLOR1;
+    float4 texcoord0 : TEXCOORD0;
+    float4 texcoord1 : TEXCOORD1;
+    float4 texcoord2 : TEXCOORD2;
+    float4 texcoord3 : TEXCOORD3;
+};
+struct VertOut {
+    float4 position : POSITION;
+    float4 color0 : COLOR0;
+    float4 color1 : COLOR1;
+    float4 texcoord0 : TEXCOORD0;
+    float4 texcoord1 : TEXCOORD1;
+    float4 texcoord2 : TEXCOORD2;
+    float4 texcoord3 : TEXCOORD3;
+    float fog : TEXCOORD7;
+};
+VertOut main(AppIn IN, uniform float4 c[4]) {
+    VertOut OUT;
+    OUT.position = IN.position;
+    OUT.color0 = IN.color0;
+    OUT.color1 = IN.color1;
+    // Xbox linear textures use texel coordinates; GXM samples normalized UVs.
+    OUT.texcoord0 = IN.texcoord0 * c[0];
+    OUT.texcoord1 = IN.texcoord1 * c[1];
+    OUT.texcoord2 = IN.texcoord2 * c[2];
+    OUT.texcoord3 = IN.texcoord3 * c[3];
+    OUT.fog = 1.0;
+    return OUT;
+}

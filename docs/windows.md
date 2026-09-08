@@ -2,6 +2,9 @@
 
 [README](../README.md) · [Build and install](building.md)
 
+An [experimental native PowerShell guide](windows-powershell.md) is also available.
+It uses Windows VitaSDK plus MSYS2 utilities and awaits Windows validation.
+
 Use **WSL2 with Ubuntu** for Xita's Bash/Make workflow. Native Windows building
 has not been validated, and this guide has not yet been tested end to end on
 a Windows machine. The release input gaps in the [build guide](building.md)

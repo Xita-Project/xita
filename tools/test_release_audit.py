@@ -32,7 +32,10 @@ class ReleaseAudit(unittest.TestCase):
             base = Path(tmp); source = base/'src'; source.mkdir()
             files = {'main.c':'int example;\n', 'LICENSE':'example notice\n',
                      'game.xbe':'private marker', 'shaders/halo_vs_00.cg':'private translation',
-                     'shaders/xv_vs_gxp.h':'private embedded translation'}
+                     'shaders/xv_vs_gxp.h':'private embedded translation',
+                     'recomp/kernel/xk_clip.c':'generated private game math',
+                     'games/example/profile.json':'{"schema_version":1}',
+                     'games/example/runtime.mk':'XITA_GAME_SRCS := example.c\n'}
             for name, data in files.items():
                 p=source/name; p.parent.mkdir(parents=True,exist_ok=True); p.write_text(data)
             (source/'alias.c').symlink_to(source/'game.xbe')
@@ -40,8 +43,10 @@ class ReleaseAudit(unittest.TestCase):
             audit.ROOT = source; audit.git = lambda *args: '\0'.join([*files,'alias.c']).encode()
             try:
                 out=base/'review'; result=audit.export_review(out)
-                self.assertEqual(result['included'],2)
+                self.assertEqual(result['included'],4)
                 self.assertFalse((out/'game.xbe').exists())
+                self.assertFalse((out/'recomp/kernel/xk_clip.c').exists())
+                self.assertTrue((out/'games/example/profile.json').exists())
                 self.assertFalse((out/'alias.c').exists())
                 self.assertFalse((out/'shaders/xv_vs_gxp.h').exists())
                 self.assertFalse((out/'.git').exists())
@@ -49,7 +54,7 @@ class ReleaseAudit(unittest.TestCase):
                 for name,data in files.items(): self.assertEqual((source/name).read_text(),data)
                 with self.assertRaises(ValueError): audit.export_review(out)
                 with self.assertRaises(ValueError): audit.export_review(source/'nested')
-                self.assertEqual(len(json.loads((out/'SOURCE_REVIEW.json').read_text())['excluded']),4)
+                self.assertEqual(len(json.loads((out/'SOURCE_REVIEW.json').read_text())['excluded']),5)
             finally: audit.ROOT, audit.git = old_root, old_git
 
 

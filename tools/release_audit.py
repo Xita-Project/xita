@@ -30,7 +30,7 @@ def path_risks(name):
     p = PurePosixPath(name)
     low = name.lower()
     reasons = []
-    if GENERATED.search(name): reasons.append('generated-game-code')
+    if GENERATED.search(name) or name == 'recomp/kernel/xk_clip.c': reasons.append('generated-game-code')
     if p.suffix.lower() in {'.xbe', '.xiso', '.iso', '.map', '.psp2dmp', '.suprx', '.skprx', '.vpk', '.elf', '.velf', '.o', '.a', '.exe', '.dll'} or p.name.lower() == 'eboot.bin':
         reasons.append('game-build-dump-or-sdk-binary')
     if p.suffix.lower() in {'.bin', '.gxp'}: reasons.append('binary-provenance-review')
@@ -104,7 +104,7 @@ def export_review(destination):
     destination.mkdir(parents=True)
     for name in sorted(set(names)):
         p = ROOT / name
-        approved_type = p.suffix in {'.c', '.h', '.py', '.sh', '.md', '.cg'} or p.name in {'Makefile', 'LICENSE', 'NOTICE', '.gitignore', '.gitattributes'} or name.startswith('LICENSES/')
+        approved_type = p.suffix in {'.c', '.h', '.py', '.sh', '.md', '.cg', '.ps1', '.mk', '.inc'} or (name.startswith('games/') and p.name == 'profile.json') or p.name in {'Makefile', 'LICENSE', 'NOTICE', '.gitignore', '.gitattributes'} or name.startswith('LICENSES/')
         reasons = flagged.get(name, []) or ([] if approved_type else ['unreviewed-file-type'])
         if reasons:
             excluded.append({'path': name, 'reasons': reasons}); continue

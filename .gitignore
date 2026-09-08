@@ -64,3 +64,8 @@ core
 core.*
 **/build/
 **/out/
+
+# Per-game output and generated native helpers remain local.
+.xita-recomp-*/
+.xita-vpk-*/
+recomp/kernel/xk_clip.c

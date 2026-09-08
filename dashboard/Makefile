@@ -1,3 +1,4 @@
+PYTHON ?= python3
 PROJECT := xita_dash
 TITLE_ID := XITADASH1
 TITLE := Xita Dashboard
@@ -16,7 +17,7 @@ all: $(PROJECT).vpk
 build out:
 	mkdir -p $@
 license_text.h: ../LICENSE ../NOTICE ../tools/embed_license.py
-	python3 ../tools/embed_license.py
+	$(PYTHON) ../tools/embed_license.py
 build/$(PROJECT).elf: xv_dash.c xv_dash.h font.h license_text.h main_standalone.c | build
 	$(CC) $(CFLAGS) -Wl,-q -o $@ xv_dash.c main_standalone.c $(LIBS)
 build/$(PROJECT).velf: build/$(PROJECT).elf

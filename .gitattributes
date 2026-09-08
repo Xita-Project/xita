@@ -14,3 +14,7 @@ NOTICE text eol=lf
 *.bin binary
 *.gxp binary
 *.mp4 binary
+*.json text eol=lf
+*.mk text eol=lf
+*.ps1 text eol=lf
+*.inc text eol=lf

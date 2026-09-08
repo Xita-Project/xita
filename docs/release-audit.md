@@ -95,3 +95,13 @@ repository visibility or rewrites history.
    Never flip this development repository public assuming `.gitignore` removed history.
 5. Re-run the audit and dependency/secret review, review PR requirements and
    compatibility claims, and obtain explicit publication authorization.
+
+## Private development release assets
+
+Private GitHub releases may hold recovery VPKs for the project owner. A
+Halo-linked VPK contains translated game code and captured/translated shaders,
+even when maps and the flattened game image are excluded. Before changing
+repository visibility, audit release assets as well as tracked files and Git
+history; move or remove private packages first. Neither ignore rules nor the
+GPL grant makes those packages public-release inputs. The generated native
+clipper is also excluded from source exports and must be regenerated locally.

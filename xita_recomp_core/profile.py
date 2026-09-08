@@ -1,4 +1,5 @@
 """Strict, versioned JSON game profiles. No additional Python dependency."""
+from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json

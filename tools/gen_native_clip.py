@@ -13,6 +13,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import xita_recomp as r
+from games.halo_ce_3925.hooks import HaloHooks
 
 ENTRY, SIZE = 0xB71C0, 874
 DIGEST = '34bf76203325f8157fcc9595b80b4be8851d829baabc556d45941533aa6c22e3'
@@ -86,7 +87,7 @@ def generate():
         disc.add_root(address)
         disc.lift_function(disc.functions[address])
         disc.split_blocks(disc.functions[address])
-    emit = r.Emitter(img, disc, {}, img.kernel_imports(), 'unused', 1)
+    emit = r.Emitter(img, disc, {}, img.kernel_imports(), 'unused', 1, hooks=HaloHooks(img))
     hooked = emit.emit_function(disc.functions[ENTRY])
     assert hooked.count('if (xv_math_polygon_clip(c)) return;') == 1
     read = img.bytes_at

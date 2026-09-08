@@ -30,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import struct
@@ -81,7 +82,8 @@ FLAG_KEEP = { Mnemonic.ADC, Mnemonic.SBB, Mnemonic.RCL, Mnemonic.RCR, Mnemonic.C
 
 class Image:
     def __init__(self, xbe_path: str, manifest_path: Optional[str] = None):
-        self.data = open(xbe_path, "rb").read()
+        with open(xbe_path, "rb") as source:
+            self.data = source.read()
         if manifest_path:
             with open(manifest_path) as source:
                 self.m = json.load(source)
@@ -1274,7 +1276,9 @@ def main() -> int:
     args = ap.parse_args()
 
     from pathlib import Path
+    from xbe_parse import XbeError
     from xita_recomp_core.profile import load_profile, list_profiles
+    from xita_recomp_core.output import check_output_identity, emit_output
     from games import load_hooks
     if args.list_profiles:
         for entry in list_profiles():
@@ -1295,11 +1299,16 @@ def main() -> int:
             profile.validate_image(img)
             profile.validate_symbols(symbol_data)
         hooks = load_hooks(profile.adapter if profile else None, img)
-    except (OSError, ValueError, KeyError, TypeError) as error:
+    except (OSError, ValueError, KeyError, TypeError, XbeError) as error:
         ap.error(str(error))
     if args.check_profile:
         print(f"Validated {profile.id}: executable, manifest, symbols and profile addresses")
         return 0
+    try:
+        check_output_identity(args.outdir, profile.id if profile else None,
+                              hashlib.sha256(img.data).hexdigest())
+    except (OSError, ValueError) as error:
+        ap.error(str(error))
     hle: Dict[int, dict] = {}
     lift = set(args.lift) | DEFAULT_LIFT | set(profile.lift if profile else ())
     if args.symbols:
@@ -1349,8 +1358,10 @@ def main() -> int:
         em.vars = {s["name"]: s["address"] for s in symbols if s["kind"] == "VAR"}
     if profile:
         em.vars.update(profile.variables)
-    n = em.write_all()
-    hooks.postprocess(args.outdir)
+    try:
+        n = emit_output(em, hooks)
+    except (OSError, ValueError) as error:
+        ap.error(str(error))
     total = em.stats["insns"]
     un = sum(em.unimpl.values())
     print(f"emitted {n} functions / {total:,} instructions to {args.outdir}/ ; unimplemented {un} ({100.0*un/max(total,1):.2f}%)")
@@ -1362,7 +1373,7 @@ def main() -> int:
                "hle_used": sorted(em.hle_used), "kernel_used": kernel_names,
                "unimplemented": dict(em.unimpl),
                "profile": profile.id if profile else None,
-               "input_sha256": __import__("hashlib").sha256(img.data).hexdigest()}, open(os.path.join(args.outdir, "recomp_report.json"), "w"), indent=1)
+               "input_sha256": hashlib.sha256(img.data).hexdigest()}, open(os.path.join(args.outdir, "recomp_report.json"), "w"), indent=1)
     return 0
 
 

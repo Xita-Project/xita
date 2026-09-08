@@ -369,3 +369,7 @@ test-alpha-range: build/alpha_range_test
 build/alpha_range_test: Makefile alpha_range_test.c ../../xv_alpha_range.h ../../xv_texture_decode.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 alpha_range_test.c -lm -o $@
+
+.PHONY: test-profiles
+test-profiles:
+	$(PYTHON) ../../tools/test_game_profiles.py

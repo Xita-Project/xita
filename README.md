@@ -2,7 +2,7 @@
 
 **A static recompiler and runtime for bringing original Xbox games to the PlayStation Vita.**
 
-[Roadmap](ROADMAP.md) · [Compatibility](COMPATIBILITY.md) · [Build guide](docs/building.md) · [Windows guide](docs/windows.md) · [GPL license](LICENSE)
+[Roadmap](ROADMAP.md) · [Compatibility](COMPATIBILITY.md) · [Build guide](docs/building.md) · [Windows guide](docs/windows.md) · [PowerShell experiment](docs/windows-powershell.md) · [GPL license](LICENSE)
 
 Xita translates an Xbox game's x86 executable into C, builds it as ARM code,
 and supplies Xbox kernel, graphics and audio interfaces through Vita homebrew
@@ -32,11 +32,20 @@ limits. Emulator FPS does not predict Vita performance.
 The [September 8 USB update](docs/hardware-20260908-weapon-menu.md) installs
 weapon, lobby and audio corrections plus the deferred visibility comparison.
 Installation is verified; gameplay and performance results for this build are pending.
+The [September 8 follow-up](docs/progress-20260908-modular-site.md) covers the
+modular libraries, private source backups, website and development VPK packages.
+
+The [modular architecture](docs/modular-architecture.md) now separates validated
+game profiles, the shared lifter, and system/game/generated-code libraries.
+Halo remains the only tested port. The project website is maintained separately
+in the private [xita-website repository](https://github.com/BirchWoodGod/xita-website)
+for **xita.dev**; it is not deployed yet.
 
 ## Getting started
 
 You need a homebrew-enabled Vita, VitaShell, your own supported Xbox game copy,
-and a computer with VitaSDK and Python. Windows users can build through WSL2.
+and a computer with VitaSDK and Python. Windows users can use WSL2 or try the
+unverified native PowerShell route linked above.
 
 1. Follow the [build guide](docs/building.md), or start with [Windows setup](docs/windows.md).
 2. Install your locally built VPK and copy the required game files to the Vita.

@@ -47,6 +47,9 @@ for this update are pending. Emulator results do not establish hardware correctn
 
 ## Supporting another game
 
+The [modular profile/library foundation](docs/modular-architecture.md) is implemented
+and locally validated for Halo 3925. It does not add another supported game.
+
 Each title needs an executable/version profile, symbol identification,
 compatible kernel/graphics/audio calls, shader translation and memory testing.
 Halo-specific hooks must not be applied to other games. The future dashboard

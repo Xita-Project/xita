@@ -1,6 +1,6 @@
 # Building and installing Xita
 
-[README](../README.md) · [Windows setup](windows.md) · [Release audit](release-audit.md)
+[README](../README.md) · [Windows setup](windows.md) · [PowerShell experiment](windows-powershell.md) · [Release audit](release-audit.md)
 
 These steps describe the **development checkout**. The source review export
 omits game-derived shaders, metadata and unverified symbol inputs. Its dashboard
@@ -59,6 +59,7 @@ From the repository root, with the virtual environment active:
 ```sh
 python xbe_parse.py haloce/default.xbe --json > game_manifest.json
 tools/recomp.sh haloce/default.xbe
+python tools/gen_native_clip.py
 python xbe_image.py haloce/default.xbe game_manifest.json recomp/halo_image.bin
 make -j2 RECOMP=1
 ```

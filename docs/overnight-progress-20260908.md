@@ -1,4 +1,8 @@
-# September 8 progress
+# September 8 morning progress
+
+Later work and the newly authorized private GitHub pushes are recorded in the
+[modular/site follow-up](progress-20260908-modular-site.md). The installation
+and pending hardware comparison below remain unchanged.
 
 ## Installed and safe to disconnect
 
