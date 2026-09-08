@@ -1,6 +1,9 @@
-# Building and installing Xita
+# Building Xita from source
 
-[README](../README.md) · [Windows setup](windows.md) · [PowerShell experiment](windows-powershell.md) · [Release audit](release-audit.md)
+[README](../README.md) · [Install a VPK](installing.md) · [Windows / WSL setup](windows.md) · [Release audit](release-audit.md)
+
+To install the app, use [VPK releases and USB installation](installing.md).
+The instructions below are for developers rebuilding Xita.
 
 These steps describe the **development checkout**. The source review export
 omits game-derived shaders, metadata and unverified symbol inputs. Its dashboard
@@ -76,22 +79,10 @@ The Makefile documents the developer shader upload/download targets.
 
 ## Install over USB
 
-1. Open VitaShell in USB mode and connect the Vita.
-2. Copy your locally built VPK to the card and copy the game data below.
-3. Safely eject, leave USB mode, and install the VPK with VitaShell.
-4. Open Xita, choose settings, and select **Launch Game**.
-
-```text
-ux0:data/xita/halo_image.bin          from recomp/halo_image.bin
-ux0:data/xita/haloce/maps/ui.map      required for Halo's menu
-ux0:data/xita/haloce/maps/a10.map     first campaign level
-ux0:data/xita/haloce/maps/bloodgulch.map
-ux0:data/xita/xita.cfg               dashboard settings
-```
-
-Keep other required game files and desired maps in the matching `haloce/`
-layout. Packaged shaders load from the application; device overrides are a
-developer feature. Back up `ux0:data/xita/save/` before replacing an installation.
+Follow the [USB installation guide](installing.md#2-copy-over-usb), using your
+locally built `xita.vpk` and `recomp/halo_image.bin`. Keep the game folder layout
+described there. Packaged shaders load from the application; device overrides
+are a developer feature.
 
 ## Build just the dashboard
 

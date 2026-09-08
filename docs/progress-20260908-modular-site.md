@@ -21,9 +21,10 @@ rewrite or repository visibility change is part of this update.
 - Full traced Halo regeneration preserves all 35 generated C/header files
   byte-for-byte. The separate Vita build succeeds, with all 8,595 inspected
   guest/HLE/kernel/native-helper symbol bindings and sizes unchanged.
-- [PowerShell experiment](windows-powershell.md): native Windows VitaSDK bootstrap,
-  MSYS2 Make/Bash support, UTF-8 metadata and explicit Python selection. Windows
-  execution remains unverified; Linux-hosted native build checks passed.
+- [VPK installation](installing.md) is now the primary setup path. The experimental
+  native Windows build guide was removed after review; WSL source-building notes
+  remain available for developers. One-time game data preparation is documented
+  separately from building the app.
 - Python VPK packaging avoids an argument for every shader. Required-input,
   exclusion and ZIP tests pass. The development packages are also compared with
   the official VitaSDK packer's file payloads.

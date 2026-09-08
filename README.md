@@ -1,13 +1,52 @@
-# Xita
+<p align="center">
+  <img src="docs/images/xita-logo.png" alt="Xita logo" width="128" height="128">
+</p>
+
+<h1 align="center">Xita</h1>
 
 **A static recompiler and runtime for bringing original Xbox games to the PlayStation Vita.**
 
-[Roadmap](ROADMAP.md) · [Compatibility](COMPATIBILITY.md) · [Build guide](docs/building.md) · [Windows guide](docs/windows.md) · [PowerShell experiment](docs/windows-powershell.md) · [GPL license](LICENSE)
+[Download VPK](https://github.com/BirchWoodGod/xita/releases) · [Install](docs/installing.md) · [Compatibility](COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
 
 Xita translates an Xbox game's x86 executable into C, builds it as ARM code,
 and supplies Xbox kernel, graphics and audio interfaces through Vita homebrew
 libraries. Each title needs its own port and testing. **Halo: Combat Evolved
 is the only game tested so far.**
+
+## Getting started
+
+1. **Download a VPK** from [Releases](https://github.com/BirchWoodGod/xita/releases).
+   Expand **Assets** and choose a `.vpk` file. The **Source code** ZIP is for developers.
+2. **Copy it over USB.** Open VitaShell's USB mode and copy the VPK to your Vita's
+   storage. Windows users can use File Explorer; installing a VPK needs no compiler or WSL.
+3. **Install and add your game data.** Safely eject the drive, leave USB mode, and
+   open the VPK in VitaShell. On first setup, copy your own supported Halo image
+   and maps using the [installation guide](docs/installing.md).
+4. **Launch Xita.** Choose your graphics settings and select **Launch Game**.
+   Start a campaign or a solo match through Halo's **Split Screen** menu.
+
+**Already have Xita working?** Keep your existing game files, settings and saves;
+follow [Updating Xita](docs/installing.md#updating-xita). The current
+[September 8 release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908)
+contains a recovery VPK and a newer experimental rendering VPK, with each build's
+testing status explained. Releases remain private during development.
+
+**First installation?** You need a homebrew-enabled Vita, VitaShell and your own
+supported original Xbox copy of Halo CE. The VPK does not include the game image
+or maps. [Prepare your game data](docs/game-data.md) once, then use VPKs for app updates.
+
+## Screenshots
+
+Actual development captures; select an image to view it at full size.
+
+| Xita dashboard · Vita3K · September 8 | Halo CE: Blood Gulch · Vita3K · September 8 |
+| --- | --- |
+| [![Xita dashboard with Launch Game and graphics settings](docs/images/dashboard-vita3k.png)](docs/images/dashboard-vita3k.png) | [![Halo CE gameplay at a Blood Gulch base](docs/images/blood-gulch-vita3k.png)](docs/images/blood-gulch-vita3k.png) |
+| **Halo CE: campaign · physical Vita · September 5** | **Halo CE: cryo bay · Vita3K · September 8** |
+| [![Halo CE campaign gameplay captured on a physical Vita](docs/images/campaign-vita.png)](docs/images/campaign-vita.png) | [![Halo CE cryo bay captured in Vita3K](docs/images/cryo-vita3k.png)](docs/images/cryo-vita3k.png) |
+
+The emulator's **20 FPS** overlay is a test cap, not a Vita measurement.
+These captures show different development builds. [Image details](docs/images/README.md).
 
 ## Current status
 
@@ -18,7 +57,7 @@ target is **sustained 20 FPS on real hardware**; it has not been met.
 | Area | Current position |
 | --- | --- |
 | Dashboard | Launch Game and settings; triple buffering and About / License installed September 8, hardware testing pending |
-| Blood Gulch | Latest sampled hardware session: about **11 FPS at 640×360**, including driving, shooting and looking around |
+| Blood Gulch | September 7 hardware sample: about **11 FPS at 640×360**, including driving, shooting and looking around |
 | Campaign | The Pillar of Autumn reaches gameplay; camera recovery, AI, resume and completion need further hardware testing |
 | Rendering | Major improvements to loading, lighting, sky, decals, foliage and active camouflage; remaining regressions are tracked |
 | Stability | Earlier driving and rocket/death tests crashed the GPU; one follow-up with the constant-buffer candidate produced no new dump |
@@ -32,30 +71,6 @@ limits. Emulator FPS does not predict Vita performance.
 The [September 8 USB update](docs/hardware-20260908-weapon-menu.md) installs
 weapon, lobby and audio corrections plus the deferred visibility comparison.
 Installation is verified; gameplay and performance results for this build are pending.
-The [September 8 follow-up](docs/progress-20260908-modular-site.md) covers the
-modular libraries, private source backups, website and development VPK packages.
-
-The [modular architecture](docs/modular-architecture.md) now separates validated
-game profiles, the shared lifter, and system/game/generated-code libraries.
-Halo remains the only tested port. The project website is maintained separately
-in the private [xita-website repository](https://github.com/BirchWoodGod/xita-website)
-for **xita.dev**; it is not deployed yet.
-
-## Getting started
-
-You need a homebrew-enabled Vita, VitaShell, your own supported Xbox game copy,
-and a computer with VitaSDK and Python. Windows users can use WSL2 or try the
-unverified native PowerShell route linked above.
-
-1. Follow the [build guide](docs/building.md), or start with [Windows setup](docs/windows.md).
-2. Install your locally built VPK and copy the required game files to the Vita.
-3. Open Xita, adjust settings, then select **Launch Game**.
-
-**Release preparation is in progress.** The development checkout contains
-game-derived shader inputs that are excluded from the source review export.
-A clean-source Halo build still needs the regeneration and provenance work in
-[the release audit](docs/release-audit.md). A locally built Halo VPK contains
-translated game code; do not assume it is redistributable.
 
 ## Dashboard and controls
 
@@ -98,6 +113,12 @@ or unfiltered crash dumps. See [Compatibility](COMPATIBILITY.md#reporting-a-test
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 PRs need a focused change, relevant validation and clear source/license provenance.
+
+To work on the code, see [Building from source](docs/building.md),
+[Windows / WSL developer setup](docs/windows.md) and the
+[modular architecture](docs/modular-architecture.md). Source builds currently
+require additional development inputs described in the build guide.
+Public-release preparation is tracked in the [release audit](docs/release-audit.md).
 
 Xita's original code and documentation are **GPL-3.0-only**. See [LICENSE](LICENSE),
 [NOTICE](NOTICE) and [third-party notices](THIRD_PARTY.md). This does not grant

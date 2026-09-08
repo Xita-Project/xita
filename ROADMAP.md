@@ -23,8 +23,9 @@ the audit's unresolved content and clean-build gates must be addressed before pu
 September 8 modular foundation: [validated game profiles and separate libraries](docs/modular-architecture.md)
 now preserve Halo emission while extracting its hooks from the lifter.
 Remaining title-specific HLE and dashboard discovery are still future work.
-The separate private website repository targets **xita.dev**. Windows documentation
-also includes an [experimental native PowerShell path](docs/windows-powershell.md).
+The separate private website repository targets **xita.dev**. The README now
+leads with [VPK installation](docs/installing.md), one-time game data setup and
+labeled dashboard/gameplay screenshots. Source-building guides are for developers.
 
 The [modular/site follow-up](docs/progress-20260908-modular-site.md) records the
 private source/website pushes and recovery/candidate VPK packaging.

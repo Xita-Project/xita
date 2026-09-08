@@ -1,9 +1,10 @@
-# Windows build guide
+# Windows / WSL developer build guide
 
-[README](../README.md) · [Build and install](building.md)
+[README](../README.md) · [Install a VPK](installing.md) · [Build from source](building.md)
 
-An [experimental native PowerShell guide](windows-powershell.md) is also available.
-It uses Windows VitaSDK plus MSYS2 utilities and awaits Windows validation.
+For normal installation, download a [VPK release](https://github.com/BirchWoodGod/xita/releases)
+and copy it with Windows File Explorer using the [USB guide](installing.md).
+WSL is only needed if you want to build the app from source.
 
 Use **WSL2 with Ubuntu** for Xita's Bash/Make workflow. Native Windows building
 has not been validated, and this guide has not yet been tested end to end on
