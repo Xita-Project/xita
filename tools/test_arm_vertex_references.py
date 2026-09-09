@@ -121,6 +121,11 @@ for count in counts:
 capture(list(range(65536)),A+3,B+1)
 for count in [1,7,8,255,256,257,4096]:
     capture([rng.randrange(65536) for _ in range(count)],A+CAP-count*2,B+CAP-count*2)
+for count in [1,255,256,257,1024]:
+    for value in [0,7,8,255,256,1023,1024,65535]:
+        capture([value]*count,A+CAP-count*2,B+CAP-count*2)
+    capture([0 if i&1 else 65535 for i in range(count)],A+3,B+1)
+capture(list(reversed(range(65536))),A+1,B+3)
 capture_cases=calls-capture_start
 for vertices in [511,512,513,1024,1025,65535,65536]:
     for stride in [1,3,8,12]:

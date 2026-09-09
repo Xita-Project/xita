@@ -96,6 +96,10 @@ reduced them to 2.69 MiB. Index plus stream preparation fell from about 5.94 to
 4.34 ms per frame in this emulator sample, including mask construction cost.
 Hardware still needs measurement.
 
+A separate [mask-construction follow-up](vertex-reference-mask-20260908.md)
+reduces the helper's executed ARM instruction count in captured draws. It is
+staged independently and has not replaced the installed comparison build.
+
 Private checks covered Blood Gulch walking, camera turns, rifle/grenade effects,
 the flashlight, Warthog entry/driving/exit and campaign camera movement. Six
 explicitly sampled frames checked 1,240 draws in total with no snapshot changes

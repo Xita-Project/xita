@@ -15,14 +15,48 @@ static inline unsigned xv_index_copy_reference_bounds(void *destination, const v
     uint16_t chunk[256];
     const uint8_t *src = source;
     uint8_t *dst = destination;
+    unsigned remaining = count, maximum = 0, groups = 0;
     xv_vertex_refs_clear(refs);
-    while (count) {
-        unsigned n = count < 256 ? count : 256;
+    while (remaining) {
+        unsigned n = remaining < 256 ? remaining : 256;
         memcpy(chunk, src, n * sizeof *chunk);
-        for (unsigned i = 0; i < n; i++) xv_vertex_refs_add(refs, chunk[i]);
+#if defined(__ARM_NEON)
+        /* For longer lists, count the completed mask once. Short lists retain
+         * incremental counting: even one index can address the last mask word. */
+        if (count >= 256) {
+            for (unsigned i = 0; i < n; i++) {
+                unsigned index = chunk[i], group = index >> 3;
+                refs->bits[group >> 5] |= 1u << (group & 31);
+                if (index > maximum) maximum = index;
+            }
+        } else
+#endif
+        {
+            for (unsigned i = 0; i < n; i++) {
+                unsigned index = chunk[i], group = index >> 3, word = group >> 5;
+                uint32_t bit = 1u << (group & 31);
+                if (!(refs->bits[word] & bit)) { refs->bits[word] |= bit; groups++; }
+                if (index > maximum) maximum = index;
+            }
+        }
         memcpy(dst, chunk, n * sizeof *chunk);
-        src += n * sizeof *chunk; dst += n * sizeof *chunk; count -= n;
+        src += n * sizeof *chunk; dst += n * sizeof *chunk; remaining -= n;
     }
+    refs->vertices = count ? maximum + 1 : 0;
+#if defined(__ARM_NEON)
+    if (count >= 256) {
+        uint32x4_t sum = vdupq_n_u32(0);
+        unsigned words = (maximum >> 8) + 1;
+        /* The 256-word mask was fully cleared above. Rounding this scan to
+         * four words stays inside it, including the maximum uint16_t index. */
+        for (unsigned i = 0; i < words; i += 4)
+            sum = vaddq_u32(sum, vpaddlq_u16(vpaddlq_u8(vcntq_u8(
+                vld1q_u8((const uint8_t *)(refs->bits + i))))));
+        uint32x2_t pair = vadd_u32(vget_low_u32(sum), vget_high_u32(sum));
+        groups = vget_lane_u32(vpadd_u32(pair, pair), 0);
+    }
+#endif
+    refs->groups = groups;
     return refs->vertices;
 }
 

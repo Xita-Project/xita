@@ -48,6 +48,24 @@ static void copy_checks(void)
     assert(!xv_vertex_refs_sparse(&refs, 65536 * 3 - 1, 3));
     assert(!xv_vertex_refs_sparse(&refs, UINT32_MAX, UINT32_MAX));
     assert(!xv_vertex_refs_sparse(&refs, 0, 0));
+
+    /* Both sides of the counting-path cutoff, with repeated values near each
+     * mask boundary. Poisoned prior masks must not inflate the group count. */
+    static const unsigned counts[] = {1, 255, 256, 257, 1024};
+    static const uint16_t boundaries[] = {0, 7, 8, 255, 256, 1023, 1024, 65535};
+    uint16_t repeated[1024], copied[1024];
+    for (unsigned c = 0; c < sizeof counts / sizeof *counts; c++)
+        for (unsigned b = 0; b < sizeof boundaries / sizeof *boundaries; b++) {
+            unsigned n = counts[c];
+            for (unsigned i = 0; i < n; i++) repeated[i] = boundaries[b];
+            memset(&refs, 0xa5, sizeof refs);
+            assert(xv_index_copy_reference_bounds(copied, repeated, n, &refs) ==
+                   (unsigned)boundaries[b] + 1);
+            assert(!memcmp(copied, repeated, n * 2) && refs.groups == 1);
+            for (unsigned g = 0; g < 8192; g++)
+                assert(!!(refs.bits[g >> 5] & (1u << (g & 31))) ==
+                       (g == (unsigned)(boundaries[b] >> 3)));
+        }
 }
 
 static void mutation_checks(void)
