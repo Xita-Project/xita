@@ -1,6 +1,6 @@
 # Installing Xita
 
-[README](../README.md) · [Download VPK](https://github.com/BirchWoodGod/xita/releases) · [Game data](game-data.md) · [Compatibility](../COMPATIBILITY.md)
+[README](../README.md) · [Download VPK](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-vertex-references) · [Game data](game-data.md) · [Compatibility](../COMPATIBILITY.md)
 
 Install the app from a VPK, then add your own Halo data. You need a
 homebrew-enabled PS Vita, VitaShell and a USB cable. Windows, macOS and Linux
@@ -30,27 +30,20 @@ fingerprint and folder layout.
 
 ## 1. Download a VPK
 
-Open [Releases](https://github.com/BirchWoodGod/xita/releases), expand **Assets**,
-and download a file ending in `.vpk`. Sign in with a GitHub account that has
-repository access while releases are private.
-
-The [September 8 development release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908)
-has these choices:
-
-| File | Use |
-| --- | --- |
-| `xita-native-bounds-20260908.vpk` | CPU visibility experiment plus the graphics panel. Optimization is off by default; [benchmark setup and validation](native-bounds-20260908.md). Hardware results pending. |
-| `xita-ingame-settings-20260908.vpk` | Graphics-panel candidate, including the in-game graphics panel. Native/host checks and Vita3K feature testing passed; hardware panel testing is pending. |
-| `xita-local-rendering-modular-20260908.vpk` | Earlier rendering/library build, before the panel. Its executable was verified on the test Vita and used for the September 8 Blood Gulch run. |
-| `xita-installed-20260908.vpk` | Recovery package matching the September 8, 07:00 CDT executable. |
-
-All four packages passed ZIP integrity checks. The panel and native-bounds
-packages also match the VitaSDK packer's payloads. These newly assembled VPKs have not yet
-been installed through VitaShell. These are development builds.
-`NATIVE-BOUNDS-BUILD-INFO.json` and `NATIVE-BOUNDS-SHA256SUMS.txt` describe the CPU
-experiment. `INGAME-SETTINGS-BUILD-INFO.json` and `INGAME-SETTINGS-SHA256SUMS.txt`
-describe the panel package; `BUILD-INFO.json` and `SHA256SUMS.txt` describe the older two.
+Open the [current Xita game release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-vertex-references),
+expand **Assets**, and download **`xita-vertex-references-20260908.vpk`**.
+Each release contains one VPK, `SHA256SUMS.txt` and `BUILD-INFO.json`. Sign in
+with an account that has repository access while releases are private.
 GitHub's automatic **Source code** downloads are not installable apps.
+
+This development package includes the in-game graphics panel and an optional
+vertex-validation comparison. Its executable was installed and verified over
+USB on the primary Vita; the hardware comparison remains pending. The experiment
+is off by default. [Build and test details](vertex-references-20260908.md).
+
+For an older build, use the [release guide](releases.md). Older releases are
+marked **Superseded**. The separate **Xita AdHoc Test** VPK tests networking on two
+consoles and does not install or update Halo.
 
 ## 2. Copy over USB
 
@@ -63,12 +56,14 @@ GitHub's automatic **Source code** downloads are not installable apps.
    If Halo already works in Xita, keep the existing data.
 
 When the drive represents `ux0:`, its `data/xita/` folder corresponds to
-`ux0:data/xita/` in VitaShell. Do not create a folder literally named `ux0:`.
+`ux0:data/xita/` in VitaShell. Do not create a folder literally named `ux0:`. Open `data/xita/` on the drive
+and paste your `haloce` folder there once. The result must contain
+`data/xita/haloce/maps/ui.map`; `data/xita/haloce/haloce/maps/` is one folder too deep.
 
 ```text
 Vita drive/
 ├── VPK/
-│   └── xita-ingame-settings-20260908.vpk
+│   └── xita-vertex-references-20260908.vpk
 └── data/
     └── xita/
         ├── halo_image.bin

@@ -9,8 +9,8 @@ path; wireless connectivity still needs testing on two consoles. See the
 
 ## Download
 
-The private [September 8 development release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908)
-includes `xita_adhoctest-20260908b.vpk`. Install it with VitaShell on both consoles; it has
+The separate [AdHoc Test 01.01 release](https://github.com/BirchWoodGod/xita/releases/tag/adhoc-20260908b)
+contains only `xita_adhoctest-20260908b.vpk`. Install it with VitaShell on both consoles; it has
 its own bubble and does not replace Xita. No Halo data is required for this test.
 This replaces the earlier `xita_adhoctest.vpk`, which failed to start on hardware.
 

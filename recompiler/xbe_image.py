@@ -4,7 +4,11 @@ base_address .. base_address+size_of_image, zero-filled gaps) for the recompiled
 runtime / host harness.  Usage: xbe_image.py GAME.xbe manifest.json out.bin"""
 import json, sys
 xbe, manifest, out = sys.argv[1:4]
-m = json.load(open(manifest)); data = open(xbe, "rb").read()
+# Let the JSON decoder detect UTF-8/UTF-16 (including Windows BOMs) instead
+# of decoding with the host's default text encoding first.
+with open(manifest, "rb") as f:
+    m = json.load(f)
+data = open(xbe, "rb").read()
 base = m["base_address"]; size = m["size_of_image"]
 img = bytearray(size)
 # The XBE header itself is mapped at the base address on a real Xbox and XAPI reads it at run time

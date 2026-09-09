@@ -6,7 +6,7 @@
 
 **A static recompiler and runtime for bringing original Xbox games to the PlayStation Vita.**
 
-[Download VPK](https://github.com/BirchWoodGod/xita/releases) · [Install](docs/installing.md) · [Compatibility](COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
+[Download VPK](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-vertex-references) · [Install](docs/installing.md) · [Compatibility](COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
 
 Xita translates an Xbox game's x86 executable into C, builds it as ARM code,
 and supplies Xbox kernel, graphics and audio interfaces through Vita homebrew
@@ -15,8 +15,8 @@ is the only game tested so far.**
 
 ## Getting started
 
-1. **Download a VPK** from [Releases](https://github.com/BirchWoodGod/xita/releases).
-   Expand **Assets** and choose a `.vpk` file. The **Source code** ZIP is for developers.
+1. **Download the VPK** from the [current Xita release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-vertex-references).
+   Expand **Assets** and choose its single `.vpk` file. The **Source code** ZIP is for developers.
 2. **Copy it over USB.** Open VitaShell's USB mode and copy the VPK to your Vita's
    storage. Windows users can use File Explorer; installing a VPK needs no compiler or WSL.
 3. **Install and add your game data.** Safely eject the drive, leave USB mode, and
@@ -27,9 +27,11 @@ is the only game tested so far.**
 
 **Already have Xita working?** Keep your existing game files, settings and saves;
 follow [Updating Xita](docs/installing.md#updating-xita). The current
-[September 8 release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908)
-contains a recovery VPK and a newer experimental rendering VPK, with each build's
-testing status explained. Releases remain private during development.
+[game release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-vertex-references)
+contains one VPK, a checksum and build information. Older builds have their own
+releases marked **Superseded**; the [ad hoc tester](https://github.com/BirchWoodGod/xita/releases/tag/adhoc-20260908b)
+is a separate download. [Release guide](docs/releases.md). Releases remain private
+during development.
 
 **First installation?** You need a homebrew-enabled Vita, VitaShell and your own
 supported original Xbox copy of Halo CE. The VPK does not include the game image
@@ -62,7 +64,8 @@ python3 xbe_image.py haloce/default.xbe game_manifest.json halo_image.bin
 
 This creates **`halo_image.bin` beside the scripts**. Copy it to
 **`ux0:data/xita/halo_image.bin`**, and copy your `haloce/` folder to
-**`ux0:data/xita/haloce/`**. Your executable must match the
+**`ux0:data/xita/haloce/`**. There should be only one `haloce` folder: the menu map
+must be at `ux0:data/xita/haloce/maps/ui.map`. Your executable must match the
 [supported Xbox revision](docs/game-data.md#supported-game-copy).
 
 ## Screenshots

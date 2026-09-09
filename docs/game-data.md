@@ -74,10 +74,37 @@ Use VitaShell USB mode to copy:
 | Computer file/folder | Vita destination |
 | --- | --- |
 | `halo_image.bin` | `ux0:data/xita/halo_image.bin` |
-| `haloce/` game folder | `ux0:data/xita/haloce/` |
+| `haloce/` game folder | Open `ux0:data/xita/` and paste the folder there once |
+
+The final layout must be:
+
+```text
+ux0:data/xita/
+├── halo_image.bin
+└── haloce/
+    ├── default.xbe
+    └── maps/
+        ├── ui.map
+        ├── a10.map
+        ├── bloodgulch.map
+        └── ...
+```
+
+There is **one `haloce` folder**. If you already created `xita/haloce/`, copy the
+contents of the computer's `haloce/` into it. A path such as
+`xita/haloce/haloce/maps/ui.map` is one level too deep.
 
 `ui.map` supplies the Halo menu, `a10.map` is the first campaign level, and
 `bloodgulch.map` is Blood Gulch. Copy the remaining campaign maps to continue
 beyond the opening mission. The VPK does not supply these files.
 
 Return to [Install and launch](installing.md#3-install-and-launch).
+
+## Manifest encoding error on Windows
+
+If `xbe_image.py` reports `UnicodeDecodeError` with byte `0xff`, download the
+updated [xbe_image.py](../recompiler/xbe_image.py) and repeat the image command.
+It accepts UTF-8 and UTF-16 manifests, including the UTF-16 output produced by
+Windows PowerShell redirection. Existing manifests work without resaving them.
+With an older script, saving `game_manifest.json` as UTF-8 in Notepad is a
+workaround. This affects preparation on the computer; no app update is required.
