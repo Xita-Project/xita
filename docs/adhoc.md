@@ -157,6 +157,12 @@ because LeakSanitizer cannot operate there. These tests do not simulate firmware
    `tools/adhoctest` on both separately and save both `adhoc.log` files to isolate
    firmware/group connectivity from Halo traffic.
 
+The standalone [Xita AdHoc Test](../tools/adhoctest/README.md) is also packaged as
+`xita_adhoctest.vpk` in the private September 8 release. Its Makefile was corrected
+after the root-directory cleanup, and the current build passes with warnings
+treated as errors. The transport host tests were rerun successfully. These are
+build/mock checks; the first two-Vita wireless run is still pending.
+
 Two physical Vitas are now available for testing (September 8). Their availability
 does not establish a successful link. Connection-dialog rendering, firmware port
 acceptance, PDP discovery, PTP establishment, Halo lobby/join/start compatibility,

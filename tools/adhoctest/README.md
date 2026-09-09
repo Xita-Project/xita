@@ -5,6 +5,12 @@ Builds `xita_adhoctest.vpk`, title **Xita AdHoc Test**, title ID **XITAADH01**.
 Hardware behavior has not been tested; a successful build is not evidence of a
 working wireless connection.
 
+## Download
+
+The private [September 8 development release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908)
+includes `xita_adhoctest.vpk`. Install it with VitaShell on both consoles; it has
+its own bubble and does not replace Xita. No Halo data is required for this test.
+
 ## Build
 
 From the repository root:
@@ -118,12 +124,12 @@ These choices were checked against the installed Vita SDK headers and archives:
 
 ## Runtime XNet/Winsock mapping
 
-The Phase 3 runtime will need guest socket/port-to-PDP/PTP tables, XNet address and
-session-to-MAC translation, broadcast/lobby discovery, error and nonblocking
-semantics, bounded runtime-owned buffers, power servicing and disconnect/rejoin
-handling. This tool does not implement XNet key exchange or a game lobby.
-Native matching's IP-address API needs separate validation before using it as the
-runtime discovery layer.
+The [opt-in Xita transport](../../docs/adhoc.md) now implements guest socket/port
+mapping to PDP/PTP, XNet address-to-MAC translation, broadcast routing, bounded
+buffers and cooperative waits. Its host tests pass; two-Vita lobby discovery and
+gameplay remain unverified. This standalone tool tests firmware connectivity and
+does not implement XNet key exchange or a Halo lobby. Native matching's IP-address
+API is diagnostic only and is not used by Xita's runtime discovery layer.
 
 Header functions used by this test, with their prospective roles:
 
