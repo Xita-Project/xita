@@ -37,7 +37,15 @@ September 8 native visibility experiment: the [bounding-box helper](docs/native-
 passes full-context host/sanitizer and linked Cortex-A9 comparisons. Its longer
 synthetic paths use about 39% fewer counted ARM instructions; quick rejections
 retain a small overhead. It remains off by default with a separate off/on/off
-hardware benchmark. No hardware FPS improvement has been measured.
+hardware benchmark. The [collected hardware run](docs/hardware-20260908-native-bounds.md)
+measured 9.49 / 9.35 / 9.55 FPS off/on/off: no useful gain, so keep it disabled.
+
+September 8 indexed vertex validation: the [new experiment](docs/vertex-references-20260908.md)
+checks only groups containing referenced vertex records while keeping owned GPU
+snapshots. Native, host, ARM and private Blood Gulch/campaign checks pass. The
+campaign sample reduced preparation work in the emulator, while a light Blood
+Gulch view showed mask overhead. It remains off by default pending a controlled
+Vita comparison; sustained 20 FPS is still unverified.
 
 September 8 optimization research: the [Skate3-Mobile review](docs/skate3-optimization-review-20260908.md)
 separates transferable engine ideas from Android-specific choices. The opt-in
@@ -45,7 +53,7 @@ separates transferable engine ideas from Android-specific choices. The opt-in
 and private gameplay checks; hardware measurement is pending. A separate fused
 [vertex-copy experiment](docs/vertex-copy-20260908.md) retains both owned snapshots
 while avoiding a second read. Both pass local checks and await hardware measurement.
-The installed visibility comparison remains the next hardware test. A separate
+The indexed vertex comparison is the next hardware performance test. A separate
 [rendering candidate](docs/shader-varyings-20260908.md) corrects fog interfaces
 and routes additional full-screen effects through their complete shader programs.
 

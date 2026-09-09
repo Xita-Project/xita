@@ -89,6 +89,20 @@ combined elapsed time therefore increased slightly in this emulator sample.
 That tradeoff is a reason to measure hardware and heavier campaign views before
 enabling the candidate by default.
 
+The campaign cryo-room comparison also completed with a comparable camera and
+120 measured frames per phase: 19.962 / 19.962 / 19.934 FPS under the same cap.
+Full-span comparison requests were about 5.82 MiB per frame; selective validation
+reduced them to 2.69 MiB. Index plus stream preparation fell from about 5.94 to
+4.34 ms per frame in this emulator sample, including mask construction cost.
+Hardware still needs measurement.
+
+Private checks covered Blood Gulch walking, camera turns, rifle/grenade effects,
+the flashlight, Warthog entry/driving/exit and campaign camera movement. Six
+explicitly sampled frames checked 1,240 draws in total with no snapshot changes
+before GPU completion. These samples do not establish hardware stability or
+resolve the earlier hardware rocket/death crash. Death/respawn was not confirmed
+in this run.
+
 ## Hardware comparison
 
 Keep the current graphics settings and use the candidate executable. Set:

@@ -49,7 +49,7 @@ subprocess.run(['arm-vita-eabi-gcc','-O2','-mthumb','-mcpu=cortex-a9','-mfpu=neo
 uc=Uc(UC_ARCH_ARM,UC_MODE_ARM)
 uc.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_A9)
 uc.reg_write(UC_ARM_REG_C1_C0_2,15<<20);uc.reg_write(UC_ARM_REG_FPEXC,1<<30)
-elf_ranges=[]
+elf_ranges=[];elf_write_ranges=[]
 with binary.open('rb') as f:
     elf=ELFFile(f);symbols=elf.get_section_by_name('.symtab')
     functions={n:symbols.get_symbol_by_name(n)[0]['st_value'] for n in
@@ -61,13 +61,15 @@ with binary.open('rb') as f:
         for page in range(lo&~4095,(lo+size+4095)&~4095,4096):
             if page not in pages:uc.mem_map(page,4096);pages.add(page)
         uc.mem_write(lo,segment.data());elf_ranges.append((lo,lo+size))
+        if segment['p_flags'] & 2:elf_write_ranges.append((lo,lo+size))
 A,B,R,STACK,END,CAP=0x200000,0x400000,0x600000,0x700000,0x900000,0x100000
 for address,size in [(A,CAP),(B,CAP),(R,4096),(STACK,65536),(END,4096)]:uc.mem_map(address,size)
 allowed_read=[];allowed_write=[];faults=[];calls=0
 
 def access(emu,kind,address,size,value,user):
     allowed=allowed_read if kind==UC_MEM_READ else allowed_write
-    if any(lo<=address and address+size<=hi for lo,hi in allowed+elf_ranges+[(STACK,STACK+65536)]):return
+    image_ranges=elf_ranges if kind==UC_MEM_READ else elf_write_ranges
+    if any(lo<=address and address+size<=hi for lo,hi in allowed+image_ranges+[(STACK,STACK+65536)]):return
     faults.append((kind,hex(address),size));emu.emu_stop()
 
 uc.hook_add(UC_HOOK_MEM_READ|UC_HOOK_MEM_WRITE,access)
@@ -145,5 +147,6 @@ for vertices in [511,512,513,1024,1025,65535,65536]:
             assert invoke('test_equal',left,right,R,stride)==expected,(vertices,stride,changed)
 result=dict(index_capture_cases=capture_cases,total_calls=calls,strict_access_bounds=True,
             unicorn_version=unicorn.__version__,thumb_memory_hook_self_check=True,
+            elf_writes_restricted_to_writable_segments=True,
             modeled_firmware=['sceClibMemcpy','sceClibMemset'],performance_measured=False)
 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');print('PASS:',json.dumps(result))
