@@ -65,11 +65,50 @@ Validation for this follow-up:
   runtime/header/build inputs were checked against this source tree. All 1,584
   non-executable VPK payloads match the installed candidate's native package.
 
-The new executable has not been run in Vita3K or on hardware. Existing private
-emulator results describe the earlier installed implementation. The new native
-VPK SHA-256 is
+The native VPK SHA-256 is
 `60347f25cab23cac8010a5040693153f01bace0e1e86bb58bc821c0cf81ce132`.
 It is a local validation artifact, not a newly published recovery release.
+
+## Private emulator follow-up
+
+The exact candidate package was installed into an independent private Vita3K
+copy, with all 1,585 payloads verified. The current saved hardware graphics
+settings were retained at 360p with the 20 FPS cap. Indexed validation was enabled
+outside the automatic full/indexed/full comparisons; the dashboard was bypassed
+and explicit single-frame geometry diagnostics were enabled. Physical Vita files
+were not changed.
+
+Both comparisons completed all three phases with 60 settling and 120 measured
+frames per phase, a comparable camera, and restoration of the configured mode.
+
+| Scene | Full before: index + stream ms | Indexed ms | Full after: index + stream ms | FPS before / on / after |
+| --- | ---: | ---: | ---: | --- |
+| Campaign cryo room | 5.842 | 3.846 | 5.901 | 19.949 / 19.963 / 19.935 |
+| Blood Gulch spawn facing the base | 0.801 | 0.770 | 0.794 | 19.945 / 19.963 / 19.967 |
+
+These are emulator caller-time samples under a frame cap, not a Vita performance
+result. The campaign camera and enabled reference counters match the earlier
+candidate's cryo-room sample: 2,580 checks/hits and 70,200 comparison runs per
+60-frame report. Enabled index preparation averaged 1.084 ms here, versus about
+1.542 ms in the earlier run. That is a comparison between separate emulator
+sessions, not an isolated hardware comparison of the two mask implementations.
+The Blood Gulch spawn camera differs from the earlier sample; only its own
+off/on/off phases are directly comparable.
+
+Checks covered normal solo split-screen start, campaign horizontal/vertical
+camera movement and flashlight input, Blood Gulch rifle fire, passenger/driver
+entry and exit, forward/reverse driving, camera steering, cliff collisions, and
+two grenade deaths and respawns. The second death transition was captured,
+including the player body, rejoin countdown and restored first-person play.
+Driving consisted of short input segments near the base, including wall
+collisions; it was not a sustained representative performance run. Campaign
+combat and progression were not tested in this follow-up.
+
+Sixteen explicitly sampled frames checked 3,154 draws with no retained-geometry
+changes before GPU completion; the uploader reported no failures. The match
+returned to the main menu and the private emulator processes were stopped.
+The physical rocket/death crash remains unverified, and no hardware FPS gain is
+established by these checks.
 
 ## Next decision
 
