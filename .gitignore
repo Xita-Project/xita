@@ -69,6 +69,7 @@ release-audit.json
 .xita-recomp-*/
 .xita-vpk-*/
 recomp/kernel/xk_clip.c
+recomp/kernel/xk_bounds.c
 
 # Private game metadata, captures and locally supplied helper binaries.
 /local/

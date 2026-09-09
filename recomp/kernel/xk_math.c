@@ -31,6 +31,8 @@ static int math_overlap(const void *a, unsigned an, const void *b, unsigned bn)
 }
 void xv_native_math_report(unsigned frames)
 {
+    extern unsigned xv_math_bounds_calls(void) __attribute__((weak));
+    if (xv_math_bounds_calls) XK_LOG("[native-bounds] %u frames: %u calls\n", frames, xv_math_bounds_calls());
     extern unsigned xv_math_clip_calls(void) __attribute__((weak));
     extern unsigned xv_math_clip_register_calls(void) __attribute__((weak));
     if (xv_math_clip_calls) XK_LOG("[native-clip] %u frames: %u calls\n", frames, xv_math_clip_calls());

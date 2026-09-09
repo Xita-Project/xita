@@ -65,6 +65,7 @@ mkdir -p local/halo_ce_3925
 python recompiler/xbe_parse.py haloce/default.xbe --json > local/halo_ce_3925/game_manifest.json
 tools/recomp.sh haloce/default.xbe
 python tools/gen_native_clip.py
+python tools/gen_native_bounds.py
 python recompiler/xbe_image.py haloce/default.xbe local/halo_ce_3925/game_manifest.json recomp/halo_image.bin
 make -j2 RECOMP=1
 ```

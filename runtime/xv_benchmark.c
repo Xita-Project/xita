@@ -20,13 +20,21 @@ void xv_benchmark_compare_toggle(void) { if(b.active)b.cancel=1;else b.request=2
 int xv_benchmark_active(void) { return b.active||b.request; }
 uint32_t xv_benchmark_status(void) { return __atomic_load_n(&status,__ATOMIC_ACQUIRE); }
 static unsigned phase_height(void) { return b.compare?b.original:heights[b.phase]; }
+int xv_benchmark_compare_native_bounds(void)
+{
+    static int selected = -1;
+    if (selected < 0) {
+        const char *e = getenv("XV_BENCHMARK_NATIVE_BOUNDS"); selected = e && atoi(e) != 0;
+    }
+    return selected;
+}
 int xv_benchmark_compare_vertex_copy(void)
 {
     static int selected = -1;
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_VERTEX_COPY"); selected = e && atoi(e) != 0;
     }
-    return selected;
+    return selected && !xv_benchmark_compare_native_bounds();
 }
 int xv_benchmark_compare_draw_scan(void)
 {
@@ -34,10 +42,11 @@ int xv_benchmark_compare_draw_scan(void)
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_DRAW_SCAN"); selected = e && atoi(e) != 0;
     }
-    return selected && !xv_benchmark_compare_vertex_copy();
+    return selected && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_vertex_copy() ? "vertex-copy-compare" :
+    (xv_benchmark_compare_native_bounds() ? "native-bounds-compare" :
+     xv_benchmark_compare_vertex_copy() ? "vertex-copy-compare" :
      xv_benchmark_compare_draw_scan() ? "draw-scan-compare" : "flare-compare") : "resolution-test"; }
 static void publish(void)
 {
@@ -60,7 +69,9 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
             xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_vertex_copy())
+            if (xv_benchmark_compare_native_bounds())
+                xv_logf("[native-bounds-compare] start off/on/off at %up; original/native/original bounding-box visibility; resolution, draw preparation, effects, visibility waits, queue policy and frame cap unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_vertex_copy())
                 xv_logf("[vertex-copy-compare] start off/on/off at %up; two-copy/fused/two-copy owned vertex snapshots; scan, visibility, vertex comparison, residency, queue mode, shaders and settings unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_draw_scan())
                 xv_logf("[draw-scan-compare] start off/on/off at %up; scalar/NEON/scalar exact index copy and constant equality; visibility, vertex comparison, upload residency, queue mode, shaders and settings unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);

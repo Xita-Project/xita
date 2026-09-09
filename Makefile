@@ -345,6 +345,9 @@ RECOMP_CFLAGS := -O2 -fno-strict-aliasing -mthumb -mcpu=cortex-a9 -mfpu=neon -w 
 # Native replacements must retain the lifted multiply/add rounding points.
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_clip.o: RECOMP_CFLAGS += -ffp-contract=off
+$(RECOMP_BUILD)/kernel/xk_bounds.o: RECOMP_CFLAGS += -ffp-contract=off
+recomp/kernel/xk_bounds.c: tools/gen_native_bounds.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
+	$(PYTHON) tools/gen_native_bounds.py
 
 # lifted code (code_*.c) only includes xv_recomp_protos.h -> xv_x86rt.h; the kernel/HLE objects use -MMD
 # so a kernel header edit does not recompile the ~35 MB of generated code.

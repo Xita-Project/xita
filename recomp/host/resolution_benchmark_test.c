@@ -11,7 +11,11 @@ int main(void)
     int scan = select && atoi(select) != 0;
     select = getenv("XV_BENCHMARK_VERTEX_COPY");
     int copy = select && atoi(select) != 0;
+    select = getenv("XV_BENCHMARK_NATIVE_BOUNDS");
+    int bounds = select && atoi(select) != 0;
+    if (bounds) copy = scan = 0;
     if (copy) scan = 0;
+    assert(xv_benchmark_compare_native_bounds() == bounds);
     assert(xv_benchmark_compare_vertex_copy() == copy);
     assert(xv_benchmark_compare_draw_scan() == scan);
     float view[6]={1,2,3,0,1,0};uint64_t now=1;unsigned height=480;
@@ -41,7 +45,7 @@ int main(void)
     puts("PASS: timed 544/360/544 phases, warmup excluded, view rejection, cancel/menu/allocation fallback and restoration");
     assert(!switches); /* Resolution testing must not touch CPU switches. */
     xv_benchmark_compare_toggle();assert(xv_benchmark_step(now,480,1,view)==480);
-    assert(!strcmp(tag(), copy ? "vertex-copy-compare" : scan ? "draw-scan-compare" : "flare-compare"));
+    assert(!strcmp(tag(), bounds ? "native-bounds-compare" : copy ? "vertex-copy-compare" : scan ? "draw-scan-compare" : "flare-compare"));
     assert(optimization==0 && (xv_benchmark_status()&(1u<<19)));
     xv_benchmark_applied(now,480);
     for(unsigned phase=0;phase<3;phase++)for(unsigned frame=1;frame<=180;frame++) {

@@ -39,15 +39,17 @@ has these choices:
 
 | File | Use |
 | --- | --- |
-| `xita-ingame-settings-20260908.vpk` | Latest candidate, including the in-game graphics panel. Native/host checks and Vita3K feature testing passed; hardware panel testing is pending. |
+| `xita-native-bounds-20260908.vpk` | CPU visibility experiment plus the graphics panel. Optimization is off by default; [benchmark setup and validation](native-bounds-20260908.md). Hardware results pending. |
+| `xita-ingame-settings-20260908.vpk` | Graphics-panel candidate, including the in-game graphics panel. Native/host checks and Vita3K feature testing passed; hardware panel testing is pending. |
 | `xita-local-rendering-modular-20260908.vpk` | Earlier rendering/library build, before the panel. Its executable was verified on the test Vita and used for the September 8 Blood Gulch run. |
 | `xita-installed-20260908.vpk` | Recovery package matching the September 8, 07:00 CDT executable. |
 
-All three packages passed ZIP integrity checks, and the latest package also
-matches the VitaSDK packer's payloads. These newly assembled VPKs have not yet
+All four packages passed ZIP integrity checks. The panel and native-bounds
+packages also match the VitaSDK packer's payloads. These newly assembled VPKs have not yet
 been installed through VitaShell. These are development builds.
-`INGAME-SETTINGS-BUILD-INFO.json` and `INGAME-SETTINGS-SHA256SUMS.txt` describe
-the latest package; `BUILD-INFO.json` and `SHA256SUMS.txt` describe the older two.
+`NATIVE-BOUNDS-BUILD-INFO.json` and `NATIVE-BOUNDS-SHA256SUMS.txt` describe the CPU
+experiment. `INGAME-SETTINGS-BUILD-INFO.json` and `INGAME-SETTINGS-SHA256SUMS.txt`
+describe the panel package; `BUILD-INFO.json` and `SHA256SUMS.txt` describe the older two.
 GitHub's automatic **Source code** downloads are not installable apps.
 
 ## 2. Copy over USB

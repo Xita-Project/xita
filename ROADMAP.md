@@ -33,6 +33,12 @@ private source/website pushes and recovery/candidate VPK packaging.
 The [September 8 progress summary](docs/overnight-progress-20260908.md) lists what
 is installed, what is local and the next hardware test.
 
+September 8 native visibility experiment: the [bounding-box helper](docs/native-bounds-20260908.md)
+passes full-context host/sanitizer and linked Cortex-A9 comparisons. Its longer
+synthetic paths use about 39% fewer counted ARM instructions; quick rejections
+retain a small overhead. It remains off by default with a separate off/on/off
+hardware benchmark. No hardware FPS improvement has been measured.
+
 September 8 optimization research: the [Skate3-Mobile review](docs/skate3-optimization-review-20260908.md)
 separates transferable engine ideas from Android-specific choices. The opt-in
 [exact draw-scan candidate](docs/draw-scan-20260908.md) passes native, ARM, host
