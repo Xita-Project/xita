@@ -13,6 +13,10 @@ September 9 CPU candidate: [inline guest parity checks](docs/parity-flags-202609
 remove repeated ARM population-count calls. Host, actual ARM and native build
 checks pass; the candidate is staged privately and hardware FPS remains unmeasured.
 The installed indexed-vertex comparison is still the next hardware test.
+The separate [tracing audit](docs/tracing-overhead-20260909.md) prepares the
+existing untraced build mode for comparison and makes its status explicit in
+startup logs. Its smaller executable and ARM instruction savings are unmeasured
+on hardware.
 
 September 8, 07:00 CDT [verified USB update](docs/hardware-20260908-weapon-menu.md): Graphics gains **Triple buffering** (experimental,
 default off), the dashboard gains an offline **GPL-3.0-only About / License** page,

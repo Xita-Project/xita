@@ -129,10 +129,16 @@ static void prof_thread(void *arg)
 }
 void xv_prof_start(void)
 {
+    /* Untraced entries do not resolve the lazy watch sentinel. Resolve it
+     * here too, so native helpers avoid no-op watch dispatch in normal play. */
+    if (xv_watch_n < 0) watch_init();
     extern const unsigned xv_guest_trace_enabled __attribute__((weak));
     int traced = &xv_guest_trace_enabled && xv_guest_trace_enabled;
     const char *e = getenv("XV_PROF");
-    if (e ? !atoi(e) : !traced) return; /* --trace-funcs builds collect by default; normal builds opt in */
+    if (e ? !atoi(e) : !traced) { /* --trace-funcs builds collect by default; normal builds opt in */
+        xv_logf("[prof] sampling profiler off; guest function tracing %s\n", traced ? "enabled" : "absent");
+        return;
+    }
     extern int xk_os_audio_thread_start(void (*fn)(void *), void *arg);      /* same helper: a plain thread */
     xv_logf("[prof] sampling profiler on (1 kHz); guest function tracing %s\n", traced ? "enabled" : "absent");
     xk_os_audio_thread_start(prof_thread, NULL);

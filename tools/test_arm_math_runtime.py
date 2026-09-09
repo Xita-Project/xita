@@ -26,6 +26,10 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--baseline', type=Path, required=True)
 parser.add_argument('--candidate', type=Path, required=True)
 parser.add_argument('--output-dir', type=Path, required=True)
+parser.add_argument('--functions', nargs='+',
+                    choices=['f_000B77C0', 'xv_math_polygon_clip', 'f_000B71C0',
+                             'f_000B5B40', 'f_000B5F60'],
+                    default=['f_000B77C0', 'xv_math_polygon_clip'])
 args = parser.parse_args()
 out = args.output_dir.resolve()
 out.mkdir(parents=True, exist_ok=True)
@@ -77,8 +81,14 @@ class Machine:
         uc.mem_write(PT, page_table)
         for name, value in [('g_xram', RAM), ('g_xpt', PT), ('g_img_base', RAM)]:
             uc.mem_write(self.symbols[name], struct.pack('<I', value))
+        # Normal startup has resolved an absent XV_WATCH_FN. Without this,
+        # an untraced direct-entry test leaves watch_n at its lazy -1 sentinel
+        # and measures repeated no-op watch calls that normal startup avoids.
+        uc.mem_write(self.symbols['xv_watch_n'], struct.pack('<I', 0))
+        self.guest_trace_enabled = struct.unpack('<I', uc.mem_read(
+            self.symbols['xv_guest_trace_enabled'], 4))[0]
         self.imports = {self.symbols[n] & ~1: n for n in
-                        ('getenv', 'sceClibMemcpy', 'sceClibMemmove', 'sceClibMemset', 'xv_preempt')}
+                        ('getenv', 'xk_os_log', 'sceClibMemcpy', 'sceClibMemmove', 'sceClibMemset', 'xv_preempt')}
         self.count = self.copy_calls = self.copy_bytes = 0
         uc.hook_add(UC_HOOK_CODE, self.step)
 
@@ -90,6 +100,8 @@ class Machine:
         assert name != 'xv_preempt', 'fixture exhausted scheduling budget'
         if name == 'getenv':
             uc.reg_write(UC_ARM_REG_R0, 0)
+        elif name == 'xk_os_log':
+            pass  # Native math announces its setting once, during unmeasured warmup.
         else:
             dst, src, count = (uc.reg_read(r) for r in (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2))
             assert count <= SIZE
@@ -100,6 +112,10 @@ class Machine:
         uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
 
     def call(self, name, memory, context):
+        def math_counts():
+            return sum((struct.unpack('<II', self.uc.mem_read(self.symbols[n], 8))
+                        for n in ('math_fast', 'math_fallback')), ())
+        before = math_counts()
         self.uc.mem_write(RAM, memory)
         self.uc.mem_write(CTX, context)
         self.uc.reg_write(UC_ARM_REG_R0, CTX)
@@ -109,7 +125,8 @@ class Machine:
         self.uc.emu_start(self.symbols[name] | 1, END, count=1000000)
         assert self.uc.reg_read(UC_ARM_REG_PC) == END, name + ' did not return'
         return (bytes(self.uc.mem_read(CTX, layout['size'])), bytes(self.uc.mem_read(RAM, SIZE)),
-                self.count, (self.copy_calls, self.copy_bytes))
+                self.count, (self.copy_calls, self.copy_bytes),
+                tuple((a - b) & 0xffffffff for a, b in zip(math_counts(), before)))
 
 
 def fixture(name, k):
@@ -134,6 +151,8 @@ def fixture(name, k):
 
     count = [0, 1, 2, 3, 4, 8, 16, 64][k % 8]
     sp, source, output, parameter = 0x62000, 0x18ffc + k % 4, 0x21000 + k % 4, 0x31ffc + k % 4
+    if name in ('f_000B5B40', 'f_000B5F60') and k % 11:
+        sp = 0x62100  # include native fast paths as well as stack-page fallback
     if k % 5 == 0:
         output = source
     elif k % 5 == 1:
@@ -164,7 +183,7 @@ def fixture(name, k):
         fl(sp + 12, [0, .01, 1, -1][k % 4])
         fl(parameter, (k // 8 % 4) * 1.5)
         fl(parameter + 4, (k // 16 % 3) * .75)
-    else:
+    elif name in ('xv_math_polygon_clip', 'f_000B71C0'):
         reg(2, output)
         word(sp + 4, count)
         word(sp + 8, source)
@@ -176,12 +195,35 @@ def fixture(name, k):
         fl(parameter, 1 if k % 3 else 0)
         fl(parameter + 4, 1 if k % 3 == 0 else 0)
         fl(parameter + 8, (k // 8 % 7 - 3) * .5)
+    elif name == 'f_000B5F60':
+        source = 0x18000 + k % 4
+        output = 0x22000 if k % 7 else source
+        angle = k * .125
+        for i, value in enumerate([math.sin(angle), .125, -.25, math.cos(angle)]):
+            fl(source + i * 4, value)
+        fl(0x1f0b04, 2)
+        reg(1, source)
+        reg(2, output)
+    elif name == 'f_000B5B40':
+        left, right = 0x18000 + k % 4, 0x1a000 + k % 4
+        output = [0x22000, left, right, left + 4, left + 0x20000][k % 5]
+        for address, angle in [(left, k * .125), (right, k * -.25)]:
+            values = [1, math.cos(angle), math.sin(angle), 0,
+                      -math.sin(angle), math.cos(angle), 0, 0, 0, 1,
+                      k * .25, -k * .125, 3]
+            for i, value in enumerate(values):
+                fl(address + i * 4, value)
+        word(sp + 4, left)
+        word(sp + 8, right)
+        word(sp + 12, output)
+    else:
+        raise AssertionError(name)
     return bytes(memory), bytes(context)
 
 
 baseline, candidate = Machine(args.baseline), Machine(args.candidate)
 report = {}
-for name in ('f_000B77C0', 'xv_math_polygon_clip'):
+for name in args.functions:
     rows = []
     # Warm up lazy environment lookups equally before measuring.
     memory, context = fixture(name, 0)
@@ -193,14 +235,21 @@ for name in ('f_000B77C0', 'xv_math_polygon_clip'):
         assert old[0] == new[0], (name, k, 'context')
         assert old[1] == new[1], (name, k, 'guest memory')
         assert old[3] == new[3], (name, k, 'firmware copies')
-        rows.append({'case': k, 'baseline': old[2], 'candidate': new[2]})
+        assert old[4] == new[4], (name, k, 'native math fast/fallback paths')
+        rows.append({'case': k, 'baseline': old[2], 'candidate': new[2],
+                     'native_math_counts': old[4]})
     before, after = (sum(r[n] for r in rows) for n in ('baseline', 'candidate'))
     report[name] = {'cases': len(rows), 'baseline_instructions': before,
                     'candidate_instructions': after, 'change_percent': (after / before - 1) * 100,
                     'faster_cases': sum(r['candidate'] < r['baseline'] for r in rows),
-                    'slower_cases': sum(r['candidate'] > r['baseline'] for r in rows)}
+                    'slower_cases': sum(r['candidate'] > r['baseline'] for r in rows),
+                    'native_math_counts': dict(zip(['matrix_fast', 'quaternion_fast',
+                        'matrix_fallback', 'quaternion_fallback'],
+                        [sum(r['native_math_counts'][i] for r in rows) for i in range(4)]))}
     (out / (name + '.json')).write_text(json.dumps(rows, indent=2) + '\n')
 report = {'unicorn': unicorn.__version__, 'results': report, 'units': 'instructions, not cycles or FPS',
+          'guest_trace_enabled': {'baseline': baseline.guest_trace_enabled,
+                                  'candidate': candidate.guest_trace_enabled},
           'inputs': {n: {'path': str(p.resolve()), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
                      for n, p in [('baseline', args.baseline), ('candidate', args.candidate)]}}
 (out / 'result.json').write_text(json.dumps(report, indent=2) + '\n')
