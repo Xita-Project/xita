@@ -158,10 +158,11 @@ because LeakSanitizer cannot operate there. These tests do not simulate firmware
    firmware/group connectivity from Halo traffic.
 
 The standalone [Xita AdHoc Test](../tools/adhoctest/README.md) is also packaged as
-`xita_adhoctest.vpk` in the private September 8 release. Its Makefile was corrected
-after the root-directory cleanup, and the current build passes with warnings
-treated as errors. The transport host tests were rerun successfully. These are
-build/mock checks; the first two-Vita wireless run is still pending.
+`xita_adhoctest-20260908b.vpk` in the private September 8 release. The first hardware
+attempt failed at GXM initialization before networking started. The replacement
+updates the graphics setup and dialog/display buffer ownership; see the
+[startup investigation](adhoc-startup-20260908.md). A successful two-Vita wireless
+run is still pending.
 
 Two physical Vitas are now available for testing (September 8). Their availability
 does not establish a successful link. Connection-dialog rendering, firmware port

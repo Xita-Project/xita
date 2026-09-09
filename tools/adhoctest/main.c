@@ -79,7 +79,10 @@ static int pump(int dialog)
             (unsigned)__atomic_load_n(&match_ip, __ATOMIC_RELAXED));
         last_events=events;
     }
-    if (t >= next_draw) { screen_draw(dialog); next_draw=t+100000; }
+    if (t >= next_draw) {
+        if (screen_draw(dialog)<0) quitting=1;
+        next_draw=t+100000;
+    }
     sceKernelDelayThread(10000);
     return !quitting;
 }
@@ -244,7 +247,12 @@ int main(void)
 {
     int net_module=0, adhoc_module=0, matching_module=0;
     int net=0, ctl=0, adhoc=0, actl=0, match=0, matching=-1, started=0, joined=0;
-    if (screen_init()<0) goto cleanup;
+    if (screen_init()<0) {
+        screen_status(0,"Graphics setup failed. Network test did not start.");
+        screen_status(1,"See adhoc.log for the failing call. Cross exits.");
+        goto failed;
+    }
+    if (screen_draw(0)<0) goto cleanup;
     log_line("New Xita AdHoc Test run. Cross exits. No router required.");
     session=now();
     if (CALL(sceSysmoduleLoadModule(SCE_SYSMODULE_NET))<0) goto failed;

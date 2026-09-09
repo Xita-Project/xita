@@ -31,7 +31,7 @@ $(EBOOT): $(VELF)
 	vita-make-fself -s $< $@
 $(SFO): Makefile sce_sys/README.md | $(BUILD)
 	mkdir -p $(dir $@)
-	vita-mksfoex -s TITLE_ID=$(TITLE_ID) "$(TITLE)" $@
+	vita-mksfoex -s TITLE_ID=$(TITLE_ID) -s APP_VER=01.01 "$(TITLE)" $@
 $(VPK): $(EBOOT) $(SFO)
 	vita-pack-vpk -s $(SFO) -b $(EBOOT) $@
 clean:
