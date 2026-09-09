@@ -5,8 +5,12 @@ bounding-box visibility test at `0x5C300`. It retains the original outside,
 partial and fully-inside classifications, including the optional reverse test
 of frustum points against the box. It does not change which models should draw.
 
-The optimization is **off by default**. There is no hardware FPS result yet.
-The latest measured gameplay baseline remains [12.73 FPS at 360p](hardware-20260908-evening.md).
+The optimization is **off by default**. The later
+[hardware comparison](hardware-20260908-native-bounds.md) measured
+**9.492 / 9.351 / 9.547 FPS** for original/native/original in a matching stationary
+view. It showed no benefit; retain the original routine as the default. The
+earlier [12.73 FPS gameplay session](hardware-20260908-evening.md) used different
+activity/settings and is not the baseline for this comparison.
 
 ## Why this function
 
