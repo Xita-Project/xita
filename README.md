@@ -18,7 +18,7 @@ is the only game tested so far.**
 1. **Download the VPK** from the [current Xita release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-vertex-references).
    Expand **Assets** and choose its single `.vpk` file. The **Source code** ZIP is for developers.
 2. **Copy it over USB.** Open VitaShell's USB mode and copy the VPK to your Vita's
-   storage. Windows users can use File Explorer; installing a VPK needs no compiler or WSL.
+   storage. Windows users can use File Explorer.
 3. **Install and add your game data.** Safely eject the drive, leave USB mode, and
    open the VPK in VitaShell. On first setup, copy your own supported Halo image
    and maps using the [installation guide](docs/installing.md).
