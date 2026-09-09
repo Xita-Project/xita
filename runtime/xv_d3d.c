@@ -204,6 +204,9 @@ static uint8_t  *g_im_vertices;
 static uint32_t  g_im_used[XV_NUM_LISTS];
 static uint64_t  g_im_requested[XV_NUM_LISTS];
 static uint64_t g_index_requested[XV_NUM_LISTS];
+/* Serialized recorder scratch. Reset for every draw; no GPU/pump pointer to it. */
+static xv_vertex_refs g_draw_vertex_refs;
+static int g_draw_vertex_refs_valid;
 
 typedef struct { uint32_t data, format; SceGxmTexture tex; uint8_t valid; } tex_entry_t;
 static tex_entry_t g_texcache[XV_TEX_CACHE];
@@ -1077,6 +1080,7 @@ static unsigned index_bounds(const uint16_t *indices, unsigned count)
 
 static int retain_indices(const void **indices, unsigned count, unsigned *nverts)
 {
+    g_draw_vertex_refs_valid = 0;
     if (!*indices || !count) return 0;
     unsigned list = g_build_frame % XV_NUM_LISTS;
     uintptr_t p = (uintptr_t)*indices;
@@ -1102,7 +1106,10 @@ static int retain_indices(const void **indices, unsigned count, unsigned *nverts
         XV_LOG("index bounds: %s\n", cached_scan ? "cached snapshot" : "GPU copy scan (baseline)");
     }
     scan_index_calls++; scan_indices += count;
-    if (cached_scan) *nverts = draw_scan_neon() ?
+    if (xv_vertex_references_enabled()) {
+        *nverts = xv_index_copy_reference_bounds(dst, *indices, count, &g_draw_vertex_refs);
+        g_draw_vertex_refs_valid = 1;
+    } else if (cached_scan) *nverts = draw_scan_neon() ?
         xv_index_copy_bounds_neon(dst, *indices, count) : xv_index_copy_bounds(dst, *indices, count);
     else {
         memcpy(dst, *indices, count * sizeof *dst);
@@ -1279,6 +1286,28 @@ static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
     return texok;
 }
 
+static int vertex_reference_layout(const xv_vs_desc_t *d, unsigned stream, unsigned stride)
+{
+    if (!stride || stream >= d->nstreams || stride != d->stride[stream]) return 0;
+    for (unsigned i = 0; i < d->nattrs; i++) {
+        const xv_attr_desc_t *a = &d->attrs[i];
+        if (a->stream != stream) continue;
+        unsigned size;
+        switch (a->format) {
+        case SCE_GXM_ATTRIBUTE_FORMAT_U8: case SCE_GXM_ATTRIBUTE_FORMAT_S8:
+        case SCE_GXM_ATTRIBUTE_FORMAT_U8N: case SCE_GXM_ATTRIBUTE_FORMAT_S8N: size = 1; break;
+        case SCE_GXM_ATTRIBUTE_FORMAT_U16: case SCE_GXM_ATTRIBUTE_FORMAT_S16:
+        case SCE_GXM_ATTRIBUTE_FORMAT_U16N: case SCE_GXM_ATTRIBUTE_FORMAT_S16N:
+        case SCE_GXM_ATTRIBUTE_FORMAT_F16: size = 2; break;
+        case SCE_GXM_ATTRIBUTE_FORMAT_F32: size = 4; break;
+        default: return 0;
+        }
+        if (!a->components || a->components > 4 ||
+            a->offset + size * a->components > stride) return 0;
+    }
+    return 1;
+}
+
 static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint32_t base_vertex, const void *immediate)
 {
     uint64_t profile = xv_draw_profile_begin();
@@ -1390,8 +1419,12 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
          * Halo's heap pages (heap VAs start at 0x00465000), so map-resident model vertices (vehicle parts,
          * dropped weapons: physical 0x005A5A00...) came back as zeros / live heap bytes. */
         const uint8_t *p = (const uint8_t *)xv_guest_ptr(0x80000000u | vb->Data) + base_vertex * stride;
+        const xv_vertex_refs *refs = g_draw_vertex_refs_valid &&
+            vertex_reference_layout(d, s, stride) ? &g_draw_vertex_refs : NULL;
         if (!stride || nverts > UINT32_MAX / stride ||
-            !(c->streams[s] = xv_vertex_upload(g_build_frame % XV_NUM_LISTS, p, nverts * stride))) {
+            !(c->streams[s] = refs ? xv_vertex_upload_referenced(g_build_frame % XV_NUM_LISTS,
+                p, nverts * stride, stride, refs) :
+                xv_vertex_upload(g_build_frame % XV_NUM_LISTS, p, nverts * stride))) {
             cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_attributes++;
             return;
         }

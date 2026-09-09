@@ -2,9 +2,29 @@
 #define XV_INDEX_COPY_H
 #include <stdint.h>
 #include <string.h>
+#include "xv_vertex_refs.h"
 #if defined(__ARM_NEON)
 #include <arm_neon.h>
 #endif
+
+/* Build reference coverage from the exact retained values, never a later read
+ * of guest indices or the uncached destination. Only the opt-in path uses it. */
+static inline unsigned xv_index_copy_reference_bounds(void *destination, const void *source,
+                                                        unsigned count, xv_vertex_refs *refs)
+{
+    uint16_t chunk[256];
+    const uint8_t *src = source;
+    uint8_t *dst = destination;
+    xv_vertex_refs_clear(refs);
+    while (count) {
+        unsigned n = count < 256 ? count : 256;
+        memcpy(chunk, src, n * sizeof *chunk);
+        for (unsigned i = 0; i < n; i++) xv_vertex_refs_add(refs, chunk[i]);
+        memcpy(dst, chunk, n * sizeof *chunk);
+        src += n * sizeof *chunk; dst += n * sizeof *chunk; count -= n;
+    }
+    return refs->vertices;
+}
 
 /* GPU scratch is uncached on Vita. Derive the vertex range from a small cached
  * snapshot, then publish those exact indices with bulk writes. Never read back

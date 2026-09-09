@@ -1,7 +1,9 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+#ifndef XV_VERTEX_UPLOAD_BYTES
 #define XV_VERTEX_UPLOAD_BYTES 256u
+#endif
 #include "../../runtime/xv_vertex_upload.c"
 static struct { void *p; int mapped; } blocks[16];
 static unsigned next_id=1, live, fail_at, calls, flushes;
@@ -22,7 +24,7 @@ int sceKernelFreeMemBlock(SceUID id) { assert(!blocks[id].mapped && blocks[id].p
 int sceGxmMapMemory(void *p,SceSize n,SceGxmMemoryAttribFlags a)
 {
     if(++calls==fail_at)return -1;
-    assert(n==256 && a==SCE_GXM_MEMORY_ATTRIB_READ);
+    assert(n==XV_VERTEX_UPLOAD_BYTES && a==SCE_GXM_MEMORY_ATTRIB_READ);
     for(unsigned i=1;i<next_id;i++)if(blocks[i].p==p){blocks[i].mapped=1;return 0;}
     assert(0);return -1;
 }
@@ -118,4 +120,5 @@ int main(void)
     assert(xv_slot_busy(&owner,UINT32_MAX-1));assert(!xv_slot_busy(&owner,0));
     owner=(xv_slot_owner){0,1};assert(xv_slot_busy(&owner,UINT32_MAX));assert(!xv_slot_busy(&owner,0));
     puts("PASS: immutable snapshots, retired-byte reuse and override, padding/length changes, 2000 mixed slot generations, bounds, allocation/map failures and ticket wrap");
+    return 0;
 }

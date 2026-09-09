@@ -6,6 +6,7 @@ void xv_benchmark_toggle(void);
 /* Compare this build's optimization candidate at the current resolution. */
 void xv_benchmark_compare_toggle(void);
 /* Developer selection; default comparison remains deferred visibility. */
+int xv_benchmark_compare_vertex_references(void);
 int xv_benchmark_compare_native_bounds(void);
 int xv_benchmark_compare_draw_scan(void);
 int xv_benchmark_compare_vertex_copy(void);

@@ -177,7 +177,11 @@ test-frames: build/frame_handoff_test build/frame_pacer_test build/vertex_upload
 	$(PYTHON) ../../tools/test_frame_acquisition.py
 	$(PYTHON) ../../tools/test_frame_completion.py
 
-build/vertex_upload_test: vertex_upload_test.c ../../runtime/xv_vertex_upload.c ../../runtime/xv_vertex_upload.h ../../runtime/xv_frame_slots.h ../../runtime/xv_gpu_upload.h ../../runtime/xv_bytes_equal.h ../../runtime/xv_snapshot_copy.h
+.PHONY: test-vertex-references
+test-vertex-references:
+	$(PYTHON) ../../tools/test_vertex_references.py
+
+build/vertex_upload_test: ../../runtime/xv_vertex_refs.h vertex_upload_test.c ../../runtime/xv_vertex_upload.c ../../runtime/xv_vertex_upload.h ../../runtime/xv_frame_slots.h ../../runtime/xv_gpu_upload.h ../../runtime/xv_bytes_equal.h ../../runtime/xv_snapshot_copy.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include vertex_upload_test.c -o $@
 
@@ -193,7 +197,7 @@ build/frame_handoff_test: Makefile frame_handoff_test.c ../../runtime/xv_ui_gxm.
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include frame_handoff_test.c -Wl,--gc-sections -lm -o $@
 
-build/ps_cache_test: Makefile ps_cache_test.c ../../runtime/xv_d3d.c ../../runtime/xv_d3d.h ../../runtime/xv_index_copy.h ../../runtime/xv_bytes_equal.h ../../shaders/xv_ps_table.h
+build/ps_cache_test: Makefile ps_cache_test.c ../../runtime/xv_d3d.c ../../runtime/xv_d3d.h ../../runtime/xv_index_copy.h ../../runtime/xv_vertex_refs.h ../../runtime/xv_bytes_equal.h ../../shaders/xv_ps_table.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include ps_cache_test.c -Wl,--gc-sections -lm -o $@
 
@@ -225,11 +229,11 @@ test-draw-prep: build/index_copy_test build/draw_profile_test build/draw_profile
 	XV_DRAW_SCAN_NEON=1 ./build/ps_cache_test
 	XV_INDEX_SCAN_CACHED=0 ./build/ps_cache_test
 
-build/index_copy_test: index_copy_test.c ../../runtime/xv_index_copy.h
+build/index_copy_test: index_copy_test.c ../../runtime/xv_index_copy.h ../../runtime/xv_vertex_refs.h
 	mkdir -p build
 	$(CC) $(CFLAGS) $< -o $@
 
-build/draw_state_test: draw_state_test.c ../../runtime/xv_draw_state.h ../../runtime/xv_d3d.c ../../runtime/xv_bytes_equal.h ../../runtime/xv_index_copy.h
+build/draw_state_test: draw_state_test.c ../../runtime/xv_draw_state.h ../../runtime/xv_d3d.c ../../runtime/xv_bytes_equal.h ../../runtime/xv_index_copy.h ../../runtime/xv_vertex_refs.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include draw_state_test.c -Wl,--gc-sections -lm -o $@
 

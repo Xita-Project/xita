@@ -37,6 +37,21 @@ static int compare_override = -1;
 static int copy_override = -1;
 static unsigned fused_copies;
 static uint64_t fused_bytes;
+static int references_override = -1;
+static unsigned reference_checks, reference_hits, reference_runs;
+static uint64_t reference_requested, reference_compared;
+
+void xv_vertex_references_override(int enabled)
+{ references_override = enabled < 0 ? -1 : !!enabled; }
+int xv_vertex_references_enabled(void)
+{
+    static int configured = -1;
+    if (configured < 0) {
+        const char *e = getenv("XV_VERTEX_REFERENCES");
+        configured = e && atoi(e) != 0;
+    }
+    return references_override < 0 ? configured : references_override;
+}
 
 void xv_vertex_copy_override(int enabled)
 { copy_override = enabled < 0 ? -1 : !!enabled; }
@@ -98,15 +113,27 @@ static int allocate(unsigned slot)
     pools[slot].gpu = g; pools[slot].cpu = c;
     return 1;
 }
-const void *xv_vertex_upload(unsigned slot, const void *source, unsigned bytes)
+static const void *upload(unsigned slot, const void *source, unsigned bytes,
+                           unsigned stride, const xv_vertex_refs *refs)
 {
     if (slot >= XV_FRAME_SLOTS || !source || !bytes || bytes > XV_VERTEX_UPLOAD_BYTES) goto fail;
     unsigned hash = ((uintptr_t)source >> 4) & (UPLOAD_BUCKETS - 1);
     for (unsigned n = pools[slot].bucket[hash]; n; n = pools[slot].entries[n-1].next) {
         upload_entry *e = &pools[slot].entries[n-1];
         if (e->source != source || e->bytes < bytes) continue;
-        compared_bytes += bytes;
-        if (vertex_equal(source, pools[slot].cpu + e->offset, bytes)) {
+        int match;
+        if (xv_vertex_refs_sparse(refs, bytes, stride)) {
+            uint64_t checked = 0;
+            reference_checks++; reference_requested += bytes;
+            match = xv_vertex_refs_equal(refs, stride, source, pools[slot].cpu + e->offset,
+                                         vertex_equal, &checked, &reference_runs);
+            reference_compared += checked; compared_bytes += checked;
+            reference_hits += !!match;
+        } else {
+            compared_bytes += bytes;
+            match = vertex_equal(source, pools[slot].cpu + e->offset, bytes);
+        }
+        if (match) {
             reused++; return pools[slot].gpu + e->offset;
         }
     }
@@ -153,6 +180,11 @@ const void *xv_vertex_upload(unsigned slot, const void *source, unsigned bytes)
 fail:
     failures++; return NULL;
 }
+const void *xv_vertex_upload(unsigned slot, const void *source, unsigned bytes)
+{ return upload(slot, source, bytes, 0, NULL); }
+const void *xv_vertex_upload_referenced(unsigned slot, const void *source, unsigned bytes,
+                                       unsigned stride, const xv_vertex_refs *refs)
+{ return upload(slot, source, bytes, stride, refs); }
 void xv_vertex_upload_reset(unsigned slot)
 {
     if (slot >= XV_FRAME_SLOTS) return;
@@ -174,6 +206,11 @@ void xv_vertex_upload_shutdown(void)
 }
 void xv_vertex_upload_report(unsigned frames)
 {
+    xv_logf("[vertex-references] %u frames: enabled %d; %u checks / %u hits / %u runs; requested %llu KiB compared %llu KiB; indexed records checked, owned uploads retained\n",
+        frames, xv_vertex_references_enabled(), reference_checks, reference_hits, reference_runs,
+        (unsigned long long)(reference_requested >> 10), (unsigned long long)(reference_compared >> 10));
+    reference_checks = reference_hits = reference_runs = 0;
+    reference_requested = reference_compared = 0;
     xv_logf("[vertex-copy] %u frames: enabled %d; %u fused copies / %llu KiB; both owned snapshots retained\n",
         frames, copy_enabled(), fused_copies, (unsigned long long)(fused_bytes >> 10));
     fused_copies = 0; fused_bytes = 0;

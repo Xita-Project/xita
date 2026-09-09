@@ -4,6 +4,7 @@
 /* These tests isolate shader/state policy; owned vertex storage is exercised
  * separately against the production allocator and delayed completion. */
 const void *xv_vertex_upload(unsigned slot, const void *p, unsigned n) { return p; }
+int xv_vertex_references_enabled(void) { return 0; }
 void xv_vertex_upload_reset(unsigned slot) {}
 void xv_vertex_upload_shutdown(void) {}
 void xv_gpu_flush_pump(const void *p, uint32_t n) {}
