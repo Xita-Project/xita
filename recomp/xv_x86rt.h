@@ -114,7 +114,11 @@ static inline uint32_t XF_S(const xctx *c) {
 }
 static inline uint32_t XF_P(const xctx *c) {
     if (c->f_kind == XK_EXPLICIT) return (c->f_res >> 2) & 1u;
-    return (__builtin_popcount(c->f_res & 0xFFu) & 1u) == 0;
+    /* PF is even parity of the low byte only. Fold its two nibbles and
+     * select the four-bit result from an immediate. The Vita compiler can
+     * otherwise call __popcountsi2 for this eight-bit result. */
+    uint32_t folded = c->f_res ^ (c->f_res >> 4);
+    return (0x9669u >> (folded & 15u)) & 1u;
 }
 static inline uint32_t XF_C(const xctx *c) {
     if (c->f_kind == XK_EXPLICIT) return c->f_res & 1u;

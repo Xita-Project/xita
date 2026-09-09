@@ -56,7 +56,7 @@ build/vita_input_test: vita_input_test.c ../kernel/xk_os_vita.c ../kernel/xk.h .
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include vita_input_test.c ../../runtime/xv_benchmark.c -Wl,--gc-sections -lm -o $@
 
 .PHONY: test
-test: build/runtime_test build/immediate_test build/file_io_test build/file_open_test build/crypto_test build/profiler_test build/profiler_traced_test build/dispatch_profile_test
+test: test-parity build/runtime_test build/immediate_test build/file_io_test build/file_open_test build/crypto_test build/profiler_test build/profiler_traced_test build/dispatch_profile_test
 	./build/runtime_test
 	./build/immediate_test
 	./build/file_io_test
@@ -117,6 +117,14 @@ build/immediate_test: Makefile immediate_test.c ../xv_x86rt.c ../kernel/xk_mem.c
 build/runtime_test: Makefile runtime_test.c ../xv_x86rt.c ../xv_x86rt.h ../kernel/xk_mem.c ../kernel/xk.h ../kernel/xk_os.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections runtime_test.c ../xv_x86rt.c ../kernel/xk_mem.c -Wl,--gc-sections -lm -o $@
+
+.PHONY: test-parity
+test-parity: build/parity_test
+	./build/parity_test
+
+build/parity_test: Makefile parity_test.c ../xv_x86rt.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 parity_test.c -lm -o $@
 
 .PHONY: test-read-retry
 test-read-retry: build/read_retry_test

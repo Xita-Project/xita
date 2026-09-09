@@ -9,6 +9,11 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 9 CPU candidate: [inline guest parity checks](docs/parity-flags-20260909.md)
+remove repeated ARM population-count calls. Host, actual ARM and native build
+checks pass; the candidate is staged privately and hardware FPS remains unmeasured.
+The installed indexed-vertex comparison is still the next hardware test.
+
 September 8, 07:00 CDT [verified USB update](docs/hardware-20260908-weapon-menu.md): Graphics gains **Triple buffering** (experimental,
 default off), the dashboard gains an offline **GPL-3.0-only About / License** page,
 and deferred exact visibility reads are rebased onto the constant-buffer fix.
