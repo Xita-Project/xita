@@ -10,8 +10,9 @@ XV_NET_LOG=1
 ```
 
 Restart after changing settings. `XV_NET_ADHOC` unset, `0`, or any value other
-than numeric `1` selects loopback. `env.txt` is loaded after `xita.cfg`; remove
-conflicting overrides there. Logs go to `ux0:data/xita/xita.log`.
+than numeric `1` selects loopback. `env.txt` is loaded first, then `xita.cfg`;
+the dashboard file takes precedence. Check both files for older overrides.
+Logs go to `ux0:data/xita/xita.log`.
 
 ## Startup and SDK surface
 
@@ -130,11 +131,10 @@ listener acceptance, local TCP source identity, XNADDR round trips and close.
 In a ptrace-based sandbox, use `ASAN_OPTIONS=detect_leaks=0 tools/tests/net_hle.sh`
 because LeakSanitizer cannot operate there. These tests do not simulate firmware.
 
-1. Build from your own Halo Xbox executable using `tools/recomp.sh`, then
-   `export VITASDK=$HOME/vitasdk PATH=$HOME/vitasdk/bin:$PATH` and
-   `make RECOMP=1 -j8`. Install the resulting `xita.vpk` on both Vitas. Both need
-   the same supported Halo build, game image, maps and shaders described in the
-   project README. Do not distribute the binary or generated game code/data.
+1. Install the same Xita development VPK on both Vitas using the
+   [installation guide](installing.md). Both need their supported Halo image
+   and the same map; start with Blood Gulch. Source builders can instead use
+   the [build guide](building.md) and install that build on both devices.
 2. First remove `XV_NET_ADHOC` on one Vita and verify the usual single-Vita
    multiplayer lobby and force-start workflow still works. This is the hardware
    regression baseline. Exit the app.
@@ -157,7 +157,8 @@ because LeakSanitizer cannot operate there. These tests do not simulate firmware
    `tools/adhoctest` on both separately and save both `adhoc.log` files to isolate
    firmware/group connectivity from Halo traffic.
 
-No second Vita is available here. Connection-dialog rendering, firmware port
+Two physical Vitas are now available for testing (September 8). Their availability
+does not establish a successful link. Connection-dialog rendering, firmware port
 acceptance, PDP discovery, PTP establishment, Halo lobby/join/start compatibility,
 MTU/packet sizes, Wi-Fi power behavior, loss/latency and disconnect recovery all
 remain untested on hardware. Oversized datagrams report errors; fragmentation

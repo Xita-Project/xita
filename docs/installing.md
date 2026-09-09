@@ -35,18 +35,20 @@ and download a file ending in `.vpk`. Sign in with a GitHub account that has
 repository access while releases are private.
 
 The [September 8 development release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908)
-has two choices:
+has these choices:
 
 | File | Use |
 | --- | --- |
-| `xita-installed-20260908.vpk` | Recovery package matching the executable already installed on the test Vita. |
-| `xita-local-rendering-modular-20260908.vpk` | Newer experimental rendering/library build for testing; physical Vita validation is pending. |
+| `xita-ingame-settings-20260908.vpk` | Latest candidate, including the in-game graphics panel. Native/host checks and Vita3K feature testing passed; hardware panel testing is pending. |
+| `xita-local-rendering-modular-20260908.vpk` | Earlier rendering/library build, before the panel. Its executable was verified on the test Vita and used for the September 8 Blood Gulch run. |
+| `xita-installed-20260908.vpk` | Recovery package matching the September 8, 07:00 CDT executable. |
 
-The recovery executable was verified after USB installation. Both VPK archives
-were checked locally, but these newly packaged VPKs have not yet been installed
-through VitaShell. Neither is a stable release. `BUILD-INFO.json` identifies each
-build; `SHA256SUMS.txt` contains download checksums. GitHub's automatic **Source code**
-downloads are not installable apps.
+All three packages passed ZIP integrity checks, and the latest package also
+matches the VitaSDK packer's payloads. These newly assembled VPKs have not yet
+been installed through VitaShell. These are development builds.
+`INGAME-SETTINGS-BUILD-INFO.json` and `INGAME-SETTINGS-SHA256SUMS.txt` describe
+the latest package; `BUILD-INFO.json` and `SHA256SUMS.txt` describe the older two.
+GitHub's automatic **Source code** downloads are not installable apps.
 
 ## 2. Copy over USB
 
@@ -64,7 +66,7 @@ When the drive represents `ux0:`, its `data/xita/` folder corresponds to
 ```text
 Vita drive/
 ├── VPK/
-│   └── xita-installed-20260908.vpk
+│   └── xita-ingame-settings-20260908.vpk
 └── data/
     └── xita/
         ├── halo_image.bin
@@ -101,6 +103,19 @@ Use the build filename when reporting results. Returning to the recovery build
 uses the same VPK installation process. Existing private development shader
 overrides are outside the VPK; if a release appears to show old rendering,
 include that detail when reporting it.
+
+## Upgrading an older XboxVita installation
+
+The older **XboxVita** bubble uses app ID `XVIT00001` and may store Halo under
+`ux0:data/xboxvita/`. The current **Xita** bubble uses `XITA00001` and reads
+`ux0:data/xita/`.
+
+Install the current VPK in VitaShell, then copy your existing `halo_image.bin`,
+`haloce/` and `save/` from the old data folder into `ux0:data/xita/`. If the new
+folder already contains settings or saves, back up both versions before choosing
+which to keep. Keep the older installation until Xita launches successfully.
+Do not replace the old app's executable directly: install the current VPK to
+register the new bubble and app ID.
 
 ## Troubleshooting
 
