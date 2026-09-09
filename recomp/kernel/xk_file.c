@@ -199,6 +199,19 @@ static int64_t file_guest_io(xk_file *f, uint64_t pos, uint32_t buf, uint32_t le
     return done;
 }
 
+static int builtin_profile_path(const char *path, int guest)
+{
+    const char *names[2] = {"00.sav", "01.sav"};
+    const char *prefix = guest ? "z:\\saved\\player_profiles\\default_profile\\"
+                               : "/cache/saved/player_profiles/default_profile/";
+    size_t n = strlen(path), prefix_n = strlen(prefix), suffix_n = prefix_n + 6;
+    if (n < suffix_n || (guest && n != suffix_n) ||
+        memcmp(path + n - suffix_n, prefix, prefix_n)) return -1;
+    for (int i = 0; i < 2; ++i)
+        if (!strcmp(path + n - 6, names[i])) return i;
+    return -1;
+}
+
 /* NTSTATUS NtReadFile(HANDLE, HANDLE Event, PIO_APC_ROUTINE, PVOID ApcContext, PIO_STATUS_BLOCK, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset) */
 void xk_NtReadFile(xctx *c)
 {
@@ -221,6 +234,9 @@ void xk_NtReadFile(xctx *c)
         const char *pth = o->u.file.path; size_t hl = strlen(pth);
         if (hl >= 9 && !strcmp(pth + hl - 9, "/blam.lst") && xk_variant_recover_unsigned(buf))
             XK_LOG("[variant] recovered legacy unsigned settings: %s\n", pth);
+        int preset = builtin_profile_path(pth, 0);
+        if (preset >= 0 && xk_builtin_profile_recover(buf, (unsigned)preset))
+            XK_LOG("[profile] recovered built-in preset signature: %s\n", pth);
     }
     { static const char *watch = NULL; static int winit; if (!winit) { winit = 1; watch = getenv("XV_LOG_READS"); }
       if (watch && strstr(o->u.file.path, watch)) { XK_LOG("NtReadFile(%s @%llu, %u B) = %lld st %08X buf %08X\n", o->u.file.path, (unsigned long long)pos, len, (long long)got, st, buf);
@@ -237,8 +253,18 @@ void xk_NtReadFile(xctx *c)
          * read - the playlist files themselves are intact and load fine. */
         const char *pth = o->u.file.path; size_t hl = strlen(pth);
         if (got == 518 && len == 518 && hl >= 8 && !strcmp(pth + hl - 8, "hdmu.map")) {
-            uint8_t *r = (uint8_t *)X_G(buf);
-            if (r[512] == 1 && r[513] == 0 && r[517] == 0) { r[517] = 1; static unsigned n; if (n++ < 3) XK_LOG("hdmu.map record @%llu: variant marked valid\n", (unsigned long long)pos); }
+            uint8_t flags[6]; x_guest_read(flags, buf + 512, sizeof flags);
+            int variant = flags[0] == 1 && flags[1] == 0;
+            int profile = 0;
+            if (flags[0] == 0 && flags[1] == 0 && flags[4] == 1) {
+                char path[257]; x_guest_read(path, buf, 256); path[256] = 0;
+                profile = builtin_profile_path(path, 1) >= 0;
+            }
+            if ((variant || profile) && flags[5] == 0) {
+                uint8_t valid = 1; x_guest_write(buf + 517, &valid, 1);
+                static unsigned n; if (n++ < 6) XK_LOG("hdmu.map record @%llu: %s marked valid\n",
+                    (unsigned long long)pos, profile ? "built-in profile" : "variant");
+            }
         }
     }
     if (got > 0) o->u.file.pos = pos + (uint64_t)got;

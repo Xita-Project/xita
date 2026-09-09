@@ -9,6 +9,13 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 9 tester follow-up: the [built-in multiplayer profile fix and LiveArea
+update](docs/builtin-profiles-20260909.md) pass host and emulator checks; physical
+Vita confirmation remains pending. The Windows image tool now accepts UTF-16
+manifests, and installation instructions show exactly one `haloce` folder.
+[Releases](docs/releases.md) now contain one VPK each, with separate networking
+diagnostics. These changes do not establish a hardware FPS improvement.
+
 September 8, 07:00 CDT [verified USB update](docs/hardware-20260908-weapon-menu.md): Graphics gains **Triple buffering** (experimental,
 default off), the dashboard gains an offline **GPL-3.0-only About / License** page,
 and deferred exact visibility reads are rebased onto the constant-buffer fix.

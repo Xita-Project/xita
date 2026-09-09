@@ -183,6 +183,7 @@ void     xk_path_mount(const char *device, const char *host_dir);          /* \D
 /* ---- misc --------------------------------------------------------------------------------- */
 void     xk_init(uint32_t image_base, uint32_t image_size, uint32_t tls_dir, const char *game_dir, const char *save_dir);
 int      xk_variant_recover_unsigned(uint32_t data);
+int      xk_builtin_profile_recover(uint32_t data, unsigned preset);
 void     xk_thunks_init(void);            /* rewrite kernel thunk slots: data exports -> guest vars, funcs -> magic */
 extern int xk_file_in_ui_map;              /* xk_file.c: the map being streamed is a UI map (main menu) */
 extern uint32_t xk_var_KeTickCount, xk_var_XboxHardwareInfo, xk_var_LaunchDataPage, xk_var_XboxKrnlVersion, xk_var_HalDiskCachePartitionCount;

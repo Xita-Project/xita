@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="500" viewBox="0 0 840 500">
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#081310"/>
+      <stop offset="1" stop-color="#183627"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop stop-color="#375333" stop-opacity=".6"/>
+      <stop offset="1" stop-color="#183627" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="840" height="500" fill="url(#background)"/>
+  <ellipse cx="695" cy="285" rx="430" ry="340" fill="url(#glow)"/>
+  <g fill="none" stroke="#c4eb83" stroke-opacity=".12">
+    <path d="M556 -100 956 300M596 -100 996 300M636 -100 1036 300"/>
+    <path d="m505 600 400-400m-360 400 400-400m-360 400 400-400"/>
+    <path d="M48 134h744M48 397h744"/>
+  </g>
+  <path d="m54 57 37 37m0-37L54 94" stroke="#d6f867" stroke-width="12"/>
+  <text x="116" y="96" fill="#f1f5e9" font-family="DejaVu Sans" font-size="53" font-weight="bold" letter-spacing="4">XITA</text>
+  <rect x="48" y="433" width="5" height="17" fill="#d6f867"/>
+  <text x="69" y="446" fill="#d1ddcc" font-family="DejaVu Sans" font-size="14" letter-spacing="2">ORIGINAL XBOX / PLAYSTATION VITA</text>
+</svg>

@@ -16,11 +16,11 @@ import subprocess
 root = Path(__file__).resolve().parents[2]
 functions = {}
 for p in sorted((root / 'recomp').glob('code_*.c')):
-    for name in ('0002F800', '001015A0'):
+    for name in ('0002F800', '001015A0', '00030630'):
         m = re.search(r'^void f_' + name + r'\(.*?^\}', p.read_text(), re.M | re.S)
         if m:
             functions[name] = m[0]
-if len(functions) != 2:
+if len(functions) != 3:
     raise SystemExit('Generate Halo 3925 with tools/recomp.sh first.')
 record = bytearray(512)
 record[:14] = 'TestAll'.encode('utf-16-le')
@@ -28,6 +28,13 @@ for offset, value in ((24, 2), (32, 3), (52, 300), (60, 0x3f800000), (64, 15)):
     struct.pack_into('<I', record, offset, value)
 key = hmac.new(bytes.fromhex('5c0733ae0401f7e8ba7993fdcd2f1fe0'), bytes(range(16)), hashlib.sha1).digest()[:16]
 expected = hmac.new(key, record[:104], hashlib.sha1).digest()
+profile_digests = []
+for preset in range(2):
+    prefs = bytearray(48)
+    prefs[24:28] = bytes([255, 255, 1, preset])
+    prefs[42:44] = bytes([3, preset])
+    profile_digests.append(hmac.new(key, prefs, hashlib.sha1).digest())
+
 head = r'''
 #define xv_call test_call
 #include "xv_recomp_protos.h"
@@ -41,7 +48,7 @@ head = r'''
 #define XV_FN_BACK(a) ((void)0)
 uint8_t *g_xram, *g_img_base; uint32_t *g_xpt;
 volatile uint32_t xv_cur_fn;
-static unsigned repair, old_sign, fallback, xapi_mode, xapi_calls;
+static unsigned repair, old_sign, fallback, xapi_mode, xapi_calls, profile_mode;
 static unsigned char disk[512] = {RECORD};
 void xk_os_log(const char *fmt, ...) { (void)fmt; }
 uint32_t xk_kalloc(uint32_t n) { static uint32_t a=0x7000; uint32_t p=a; a+=n; return p; }
@@ -69,9 +76,11 @@ void f_0002EE30(xctx *c) { c->r[0]=1; X_RET(1); }
 void f_0002EDF0(xctx *c) { X_RET(1); }
 void f_00050930(xctx *c) {
     assert(c->r[6]==512); x_guest_write(c->r[1],disk,512);
-    if (repair) xk_variant_recover_unsigned(c->r[1]);
+    if (repair) { if (profile_mode) xk_builtin_profile_recover(c->r[1], disk[27]);
+        else xk_variant_recover_unsigned(c->r[1]); }
     c->r[0]=1; X_RET(0);
 }
+void f_00030150(xctx *c) { memset(X_G(c->r[2]), 0, 48); X_RET(0); }
 void f_0002EED0(xctx *c) { fallback++; c->r[0]=0x8000; X_RET(0); }
 void f_0001B712(xctx *c) {
     uint32_t dst=X_ARG(0),src=X_ARG(1),n=X_ARG(2);
@@ -133,10 +142,54 @@ int main(void) {
         assert(c.r[4]==0x6010 && c.r[6]==666 && xapi_calls==(xapi_mode?3:1));
         for(unsigned i=0;i<20;i++)assert(X_M8(0xd000+i)==(xapi_mode?0x42:0x5a));
     }
+
+    /* Actual profile loader: the old signer loses the built-in Inverted
+     * preferences on a dirty stack; repaired/generated signatures retain all
+     * 48 bytes. Named player profiles continue to use the XAPI path above. */
+    profile_mode=1; xapi_mode=0;
+    const uint8_t profile_digests[2][20]={PROFILE_DIGESTS};
+    for (unsigned preset=0;preset<2;preset++) {
+        memset(disk,0,sizeof disk);disk[24]=disk[25]=255;disk[26]=1;
+        disk[27]=disk[43]=preset;disk[42]=3;
+        memset(disk+48,0x3c,20); /* old Begin stub left arbitrary stack bytes */
+        for (unsigned mode=0;mode<3;mode++) {
+            old_sign=mode==0;repair=mode==1;
+            if (mode==2) {
+                x_guest_write(0x9000,disk,512);
+                c.r[4]=0x6000;X_M32(0x6004)=0x9000;X_M32(0x6008)=48;X_M32(0x600c)=0x9030;
+                xv_hle_HaloSignSavedRecord(&c);x_guest_read(disk,0x9000,512);
+                assert(!memcmp(disk+48,profile_digests[preset],20));
+            }
+            c=(xctx){0};c.preempt=1000000;c.r[4]=0x6000;
+            c.r[3]=333;c.r[5]=555;c.r[6]=666;c.r[7]=777;
+            memset(X_G(0x5000),0xa5,4096);
+            X_M32(0x6004)=0x8000001a+preset;X_M32(0x6008)=0x9000;
+            unsigned before=fallback;f_00030630(&c);
+            assert((c.r[0]&255)==1 && c.r[4]==0x600c);
+            assert(c.r[3]==333 && c.r[5]==555 && c.r[6]==666 && c.r[7]==777);
+            assert(fallback==before+(mode==0));
+            if (mode) assert(!memcmp(X_G(0x9000),disk,48));
+            if (mode<2) for(unsigned i=48;i<68;i++)assert(disk[i]==0x3c);
+        }
+        /* Reject named records, invalid preset/sensitivity and unexpected
+         * fields without changing a byte, even under the built-in path. */
+        for(unsigned bad=0;bad<5;bad++) {
+            uint8_t bytes[512];memcpy(bytes,disk,512);
+            if(bad==0)bytes[0]='N';
+            if(bad==1)bytes[27]=2;
+            if(bad==2)bytes[42]=0;
+            if(bad==3)bytes[42]=11;
+            if(bad==4)bytes[32]=1;
+            x_guest_write(0x9ff0,bytes,512);
+            assert(!xk_builtin_profile_recover(0x9ff0,preset));
+            uint8_t after[512];x_guest_read(after,0x9ff0,512);assert(!memcmp(after,bytes,512));
+        }
+    }
     free(g_xram);free(g_xpt);
-    puts("PASS: original variant loader reproduces renamed-Slayer fallback; recovery preserves All vehicles; HMAC, corrupt signatures, legacy playlists, split pages and profile ABI");
+    puts("PASS: original variant loader reproduces renamed-Slayer fallback; recovery preserves All vehicles; HMAC, corrupt signatures, legacy playlists, split pages, profile ABI and built-in Default/Inverted loader");
 }
-'''.replace('EXPECTED', ','.join(map(str, expected)))
+'''.replace('EXPECTED', ','.join(map(str, expected))).replace('PROFILE_DIGESTS',
+    ','.join('{' + ','.join(map(str, digest)) + '}' for digest in profile_digests))
 build = root / 'recomp/host/build'
 build.mkdir(exist_ok=True)
 p = build / 'original_variant.c'

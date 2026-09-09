@@ -17,10 +17,13 @@ struct xk_file { unsigned char data[32768]; uint32_t size, calls, short_limit, f
 static xk_obj file, event;
 static unsigned apcs, signals;
 static unsigned variant_reads;
+static unsigned builtin_reads, builtin_preset;
 /* Tag mutation has its own real-map integration test in tools/test_quality.py. */
 void xk_quality_map_read(uint32_t address,uint32_t bytes)
 { assert(address==0x803A6000u && bytes); }
 int xk_variant_recover_unsigned(uint32_t data) { assert(data == 0x1103); variant_reads++; return 0; }
+int xk_builtin_profile_recover(uint32_t data, unsigned preset)
+{ assert(data == 0x1103 && preset < 2); builtin_reads++; builtin_preset = preset; return 0; }
 xk_obj *xk_handle_get(uint32_t h) { return h == 1 ? &file : h == 2 ? &event : NULL; }
 xk_obj *xk_handle_get_type(uint32_t h, xk_objtype t) { xk_obj *o = xk_handle_get(h); return o && o->type == t ? o : NULL; }
 void xk_signal_check(void) { signals++; }
@@ -120,6 +123,35 @@ int main(void)
     disk.short_limit = 0;
     file.u.file.path = "/save/profile/blam.sav";
     assert(run(0, 0x1103, 512, 0) == STATUS_SUCCESS && variant_reads == 1);
+    assert(!builtin_reads);
+    file.u.file.path = "/save/cache/saved/player_profiles/default_profile/00.sav";
+    assert(run(0, 0x1103, 512, 0) == STATUS_SUCCESS && builtin_reads == 1 && builtin_preset == 0);
+    assert(run(0, 0x1103, 512, 512) == STATUS_SUCCESS && builtin_reads == 1);
+    assert(run(0, 0x1103, 48, 0) == STATUS_SUCCESS && builtin_reads == 1);
+    disk.short_limit = 48;
+    assert(run(0, 0x1103, 512, 0) == STATUS_SUCCESS && builtin_reads == 1);
+    disk.short_limit = 0;
+    file.u.file.path = "/save/cache/saved/player_profiles/default_profile/01.sav";
+    assert(run(0, 0x1103, 512, 0) == STATUS_SUCCESS && builtin_reads == 2 && builtin_preset == 1);
+    file.u.file.path = "/save/cache/saved/player_profiles/default_profile/02.sav";
+    assert(run(0, 0x1103, 512, 0) == STATUS_SUCCESS && builtin_reads == 2);
+    /* Only the two built-in index entries become selectable. Split the valid
+     * flag onto a noncontiguous guest page; never rewrite the cache on disk. */
+    file.u.file.path = "/save/cache/saved/hdmu.map";
+    for (unsigned test = 0; test < 8; ++test) {
+        memset(disk.data, 0, 518);
+        strcpy((char *)disk.data, test == 1 ? "z:\\saved\\player_profiles\\default_profile\\01.sav" :
+            test == 2 ? "z:\\saved\\player_profiles\\default_profile\\02.sav" :
+            test == 3 ? "u:\\user\\blam.sav" : "z:\\saved\\player_profiles\\default_profile\\00.sav");
+        disk.data[516] = test == 4 ? 0 : 1;
+        disk.data[512] = test == 5 ? 2 : 0;
+        disk.data[517] = test == 6 ? 1 : 0;
+        if (test == 7) memset(disk.data, 'x', 256);
+        assert(run(0, 0x2dfb, 518, 0) == STATUS_SUCCESS);
+        for (unsigned i = 0; i < 518; ++i)
+            assert(X_M8(0x2dfb + i) == ((i == 517 && test < 2) ? 1 : disk.data[i]));
+        assert(disk.data[517] == (test == 6));
+    }
     /* Include a large value, unaligned info, and noncontiguous guest pages. */
     check_reservation(0x1103, 0x380000, 20, 0);
     check_reservation(0x1103, UINT64_C(0x123456789abcdef0), 19, 0);

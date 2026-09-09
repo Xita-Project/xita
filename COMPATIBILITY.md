@@ -2,7 +2,7 @@
 
 [README](README.md) · [Roadmap](ROADMAP.md) · [Halo level details](docs/halo-ce.md)
 
-Updated **September 8, 2026**. Halo: Combat Evolved is the only title tested.
+Updated **September 9, 2026**. Halo: Combat Evolved is the only title tested.
 Each game needs a separate port; Xita does not run arbitrary Xbox executables.
 
 ## Titles
@@ -21,7 +21,7 @@ completion where applicable. No title currently meets that release gate.
 
 | Feature | Evidence and limits |
 | --- | --- |
-| Main menu, profiles and dashboard | Work on hardware. Solo Split Screen starts through Enlisted Players without the shortcut. |
+| Main menu, profiles and dashboard | Existing profiles and solo Split Screen work on hardware. Fresh-install Default/Inverted failures are reproduced and corrected in host/emulator checks; [physical confirmation pending](docs/builtin-profiles-20260909.md). |
 | Blood Gulch | Latest sampled hardware session: **11.00 FPS at 640×360**, 256 texture cap. User confirms driving, shooting and looking around. Sixty-frame averages span **8.1–13.0 FPS** after the initial loading window. |
 | Battle Creek | Tested on hardware and emulator; see the earlier [480p report](docs/hardware-20260905-battlecreek-480p.md). No matched test of the latest candidate yet. |
 | Vehicles and variants | User confirms Warthog, Ghost and Scorpion operation. Driving performance and long-run stability need further testing. |

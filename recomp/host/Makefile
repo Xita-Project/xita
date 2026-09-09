@@ -102,9 +102,9 @@ build/crypto_test: Makefile crypto_test.c ../kernel/xk_crypto.c ../xv_x86rt.c ..
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections crypto_test.c ../kernel/xk_crypto.c ../xv_x86rt.c -Wl,--gc-sections -lm -o $@
 
-build/file_io_test: Makefile file_io_test.c ../kernel/xk_file.c ../xv_x86rt.h ../kernel/xk.h
+build/file_io_test: Makefile file_io_test.c ../kernel/xk_file.c ../xv_x86rt.c ../xv_x86rt.h ../kernel/xk.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections file_io_test.c ../kernel/xk_file.c -Wl,--gc-sections -o $@
+	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections file_io_test.c ../kernel/xk_file.c ../xv_x86rt.c -Wl,--gc-sections -lm -o $@
 
 build/file_open_test: Makefile file_open_test.c ../kernel/xk_file.c ../xv_x86rt.h ../kernel/xk.h
 	mkdir -p build

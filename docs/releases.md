@@ -8,7 +8,7 @@ have their own release and bubble.
 
 | Download | Purpose |
 | --- | --- |
-| [Xita — vertex comparison](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-vertex-references) | Current game package; hardware comparison pending. |
+| [Xita — LiveArea and profiles](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260909-livearea-profiles) | Current game package; profile fix and updated LiveArea. Physical testing pending. |
 | [Xita AdHoc Test 01.01](https://github.com/BirchWoodGod/xita/releases/tag/adhoc-20260908b) | Standalone diagnostic for two Vitas; wireless testing pending. |
 
 Each release has three uploaded files: the VPK, `SHA256SUMS.txt` and
@@ -23,6 +23,7 @@ Their VPK bytes are preserved for recovery and test comparisons.
 
 | Build | Release |
 | --- | --- |
+| Indexed vertex comparison | [September 8](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-vertex-references) |
 | Native visibility experiment | [September 8](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-native-bounds) |
 | First in-game graphics panel | [September 8](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-settings) |
 | Rendering and modular libraries | [September 8](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908) |

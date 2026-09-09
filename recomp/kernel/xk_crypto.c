@@ -84,27 +84,57 @@ static uint32_t signature_key, hd_key;
  * bounded repair separate from the still-experimental profile/checkpoint signing
  * path. The old Begin stub returned INVALID_HANDLE and left the digest as stack
  * garbage; 0x2F800 then silently loaded default Slayer under the custom name. */
-static int variant_signature(uint32_t data, uint8_t digest[20])
+static int saved_record_signature(uint32_t data, unsigned length, uint8_t digest[20])
 {
-    if (!signature_key) return 0;
+    if (!signature_key || (length != 48 && length != 104)) return 0;
     uint8_t key[16], pad[64], record[104]; sha_ctx s;
     x_guest_read(key, signature_key, sizeof key);
-    x_guest_read(record, data, sizeof record);
+    x_guest_read(record, data, length);
     for (unsigned i = 0; i < 64; ++i) pad[i] = (i < 16 ? key[i] : 0) ^ 0x36;
-    sha_init(&s); sha_update(&s, pad, 64); sha_update(&s, record, sizeof record); sha_final(&s, digest);
+    sha_init(&s); sha_update(&s, pad, 64); sha_update(&s, record, length); sha_final(&s, digest);
     for (unsigned i = 0; i < 64; ++i) pad[i] = (i < 16 ? key[i] : 0) ^ 0x5c;
     sha_init(&s); sha_update(&s, pad, 64); sha_update(&s, digest, 20); sha_final(&s, digest);
     return 1;
 }
 
+/* The generated Default/Inverted cache records have no user name, the -1
+ * profile identifier, kind 1 and matching preset/inversion bytes. Recognize
+ * only these built-in preferences; named profiles and checkpoints retain
+ * their existing signing path. */
+static int builtin_profile(uint32_t data)
+{
+    uint8_t record[48]; x_guest_read(record, data, sizeof record);
+    for (unsigned i = 0; i < sizeof record; ++i)
+        if (i != 24 && i != 25 && i != 26 && i != 27 && i != 42 && i != 43 && record[i])
+            return -1;
+    if (record[24] != 255 || record[25] != 255 || record[26] != 1 ||
+        record[27] > 1 || record[42] < 1 || record[42] > 10 || record[43] != record[27])
+        return -1;
+    return record[27];
+}
+
+int xk_builtin_profile_recover(uint32_t data, unsigned preset)
+{
+    uint8_t digest[20], old[20];
+    if (preset > 1 || builtin_profile(data) != (int)preset ||
+        !saved_record_signature(data, 48, digest)) return 0;
+    x_guest_read(old, data + 48, sizeof old);
+    if (!memcmp(old, digest, sizeof old)) return 0;
+    /* Only called for the two generated cache files. Repair the guest copy,
+     * including old stack-residue signatures; never rewrite the disk file. */
+    x_guest_write(data + 48, digest, sizeof digest);
+    return 1;
+}
+
 /* stdcall void HaloSignSavedRecord(data, uint16 length, digest), 0x2D120.
- * Non-variant records retain the original XAPI call sequence, including its
+ * Other records retain the original XAPI call sequence, including its
  * unchanged output when Begin fails in unsigned-profile compatibility mode. */
 void xv_hle_HaloSignSavedRecord(xctx *c)
 {
     uint32_t data = X_ARG(0), len = (uint16_t)X_ARG(1), out = X_ARG(2);
     uint8_t digest[20];
-    if (len == 104 && variant_signature(data, digest)) {
+    if ((len == 104 || (len == 48 && builtin_profile(data) >= 0)) &&
+        saved_record_signature(data, len, digest)) {
         x_guest_write(out, digest, sizeof digest);
         c->r[0] = 0; X_RET(3);
     }
@@ -145,7 +175,7 @@ int xk_variant_recover_unsigned(uint32_t data)
         if (!record[i] && !record[i+1]) terminated = 1;
     if (!terminated || kind < 1 || kind > 5 || teams > 1 || weapons > 10 ||
         vehicles > 4 || !(health > 0 && health <= 16)) return 0;
-    if (!variant_signature(data, digest)) return 0;
+    if (!saved_record_signature(data, 104, digest)) return 0;
     x_guest_write(data + 104, digest, sizeof digest);
     return 1; /* guest copy only; disk file and gameplay settings are unchanged */
 }
