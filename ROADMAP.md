@@ -9,6 +9,13 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 9 external tester reports: [performance review and reproduction plan](docs/tester-feedback-20260909.md).
+Camera movement jumps near stick center, a flashlight rendering problem and one
+stretched shadow remain open; the exact build/settings are unknown. Prioritize
+measuring expensive passes and preparation, then investigate existing model LODs
+and additional independent CPU jobs. The blue overlay number is Present-path
+milliseconds, not GPU frequency or utilization.
+
 September 9 tester follow-up: the [built-in multiplayer profile fix and LiveArea
 update](docs/builtin-profiles-20260909.md) pass host and emulator checks; physical
 Vita confirmation remains pending. The Windows image tool now accepts UTF-16

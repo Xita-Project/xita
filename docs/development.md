@@ -2,6 +2,27 @@
 
 [README](../README.md) · [Roadmap](../ROADMAP.md) · [Release audit](release-audit.md)
 
+## Sending tester logs
+
+Normal campaign play is useful; a benchmark is not required to report a bug.
+After playing, close Xita and open VitaShell USB mode. Copy these files from
+`ux0:data/xita/` (shown as `data/xita/` on the computer's Vita drive):
+
+| File | Contents |
+| --- | --- |
+| `xita.log` | Current run: startup, rendering diagnostics and benchmark results. |
+| `xita.1.log`, `xita.2.log`, `xita.3.log` | Previous runs, if present. Include these if Xita has been relaunched since the issue. |
+| `xita.cfg` | Saved settings used to interpret the run. |
+| `adhoc.log` | Separate ad hoc tester output; include for networking tests. |
+
+Zip the copied files and send them privately to the maintainer. Include the
+installed VPK filename, map/mission, what happened and approximate time into the
+session, plus a screenshot if available. Copy logs before relaunching Xita:
+each launch rotates the previous run, retaining three older logs. The game
+image, maps and saves are not needed for this initial report.
+
+## Diagnostic settings
+
 Settings live in `ux0:data/xita/xita.cfg`, one `KEY=VALUE` per line. In Vita3K,
 `env.txt` supplies fallback values; the configuration file takes precedence.
 The dashboard updates only the edited setting and preserves unrelated keys and
@@ -19,12 +40,31 @@ comments. Restart to apply launch-time changes.
 | `XV_SHADER_OVERRIDE=1` | Prefer device shader files over packaged ones; development only. |
 | `XV_PROF=1` | Enable sampling; regenerate with `--trace-funcs` for guest attribution. Instrumentation changes the workload. |
 
-In the current local candidate, **L + R + Square** runs eager/deferred/eager
-visibility comparison. It preserves configured buffering, shader quality,
-resolution and the frame cap, then restores the configured visibility mode.
+**L + R + Square** uses the enabled benchmark selector. With no more specific
+selector enabled, it runs eager/deferred/eager visibility comparison. The
+primary Vita's last verified configuration enables
+`XV_BENCHMARK_VERTEX_REFERENCES=1`, selecting full/indexed/full vertex validation
+instead. Check the `[...-compare] start` line and the build notes before
+interpreting results. See [indexed validation](vertex-references-20260908.md).
+The comparison preserves configured buffering, shader quality, resolution and
+the frame cap, then restores the configured experiment setting.
 Use a loaded first-person view, hold still, and keep settings unchanged.
 **L + R + Select** compares 544p/360p/544p instead. Either shortcut cancels an
 active comparison; completion/cancellation restores its original settings.
+
+## Overlay units
+
+| Display | Meaning |
+| --- | --- |
+| Green / left | FPS derived from 60-frame timing windows. |
+| Amber / middle | Milliseconds outside the Present path: guest work, HLE, draw preparation and associated waits. |
+| Blue / right | Milliseconds in the Present path: frame finalization, publication, slot acquisition and conditional maintenance. **Not GPU MHz, utilization or total GPU execution time.** |
+| C0 / C1 / C2 | System-wide CPU busy percentages over roughly one second; dashes mean unavailable. |
+
+The GPU runs asynchronously. A low blue number does not establish that it is
+idle. Effective clock frequencies are recorded separately in the startup log.
+See the [tester feedback review](tester-feedback-20260909.md) for current
+synchronization and worker behavior.
 
 Sixty-frame FPS windows do not measure instantaneous peaks or 1% lows.
 Visibility wait and notification-latency timers overlap other work; do not

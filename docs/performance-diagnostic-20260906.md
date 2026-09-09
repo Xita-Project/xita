@@ -1,5 +1,10 @@
 # September 6 performance diagnostic build
 
+**Historical baseline:** the Finish timings below precede
+[asynchronous slot retirement](slot-pipeline-20260907.md). Ordinary frames in
+the current renderer no longer call `sceGxmFinish`. See the
+[September 9 review](tester-feedback-20260909.md) for current measurement limits.
+
 The latest ordinary Vita build records Blood Gulch at a median 8.1 FPS, with
 9.45 ms in the indexed draw adapter against a 118.35 ms game-side interval.
 Its 79.05 ms render-pump timer combines submission and waiting. This diagnostic

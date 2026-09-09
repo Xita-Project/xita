@@ -26,6 +26,7 @@ completion where applicable. No title currently meets that release gate.
 | Battle Creek | Tested on hardware and emulator; see the earlier [480p report](docs/hardware-20260905-battlecreek-480p.md). No matched test of the latest candidate yet. |
 | Vehicles and variants | User confirms Warthog, Ghost and Scorpion operation. Driving performance and long-run stability need further testing. |
 | Rendering | User confirms major improvements to sky, decals, baked lighting and active camouflage. Whole-game rendering correctness is not established. |
+| External tester follow-up | September 9: flashlight bug, one stretched shadow, and a jump when leaving stick center. Exact build/settings unknown; [reproduction and performance review](docs/tester-feedback-20260909.md). |
 | Campaign | The Pillar of Autumn has been played through the Keyes section in prior builds. AI, cinematic camera recovery and later missions need further hardware validation. |
 | Checkpoints and resume | In-game Revert to Last Save is user-confirmed. A later menu-resume correction passes emulator restart testing; hardware menu-resume remains unverified. |
 | GPU stability | Prior driving and rocket self-death crashes remain under investigation. No new dump in the latest follow-up; exact rocket/death reproduction is unconfirmed. |
