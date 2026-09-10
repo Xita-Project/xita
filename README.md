@@ -82,6 +82,10 @@ must be at `ux0:data/xita/haloce/maps/ui.map`. Your executable must match the
 
 ## Screenshots
 
+[Explore per-game progress](https://xita.dev/games/) to inspect generated
+functions and remaining instruction gaps. Developers can also generate the
+[same interactive report locally](docs/game-progress.md).
+
 Actual development captures; select an image to view it at full size.
 
 | Xita dashboard · Vita3K · September 8 | Halo CE: Blood Gulch · Vita3K · September 8 |

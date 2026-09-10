@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Game progress · Xita</title>
+  <meta name="description" content="Explore Xita's per-game recompilation reports, native helpers and remaining instruction gaps.">
+  <link rel="stylesheet" href="progress.css">
+  <script src="reports.js" defer></script><script src="progress.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to progress</a>
+  <header class="wrap masthead"><a class="brand" href="https://xita.dev">XITA<span>Xbox → PlayStation Vita</span></a>
+    <nav aria-label="Main navigation"><a href="https://xita.dev/#progress">Project</a><a href="https://xita.dev/history/">History</a><a href="index.html" aria-current="page">Game progress</a></nav></header>
+  <main id="main" class="wrap">
+    <section class="intro"><p class="eyebrow">Inside the recompiler</p><h1>Game progress.</h1>
+      <p>Explore each game profile, function by function. Every block comes from a generated source report.</p></section>
+    <noscript><p class="notice">The interactive map needs JavaScript. <a href="reports.json">Download the metadata report</a> to inspect the recorded results.</p></noscript>
+    <section class="workspace" aria-label="Game report">
+      <div class="toolbar"><label class="game-field">Game profile<select id="profile"></select></label><p id="revision" class="meta"></p><a class="download" href="reports.json" download>Download report ↓</a></div>
+      <div id="stats" class="stats" aria-live="polite"></div>
+      <div class="controls"><label>Search functions<input id="search" type="search" placeholder="Name, address or native helper" autocomplete="off"></label>
+        <label>Show<select id="filter"><option value="all">All recorded entries</option><option value="translated">Translated functions</option><option value="native">Native helpers present</option><option value="unsupported">Instruction gaps</option><option value="boundary">HLE / kernel boundaries</option></select></label>
+        <label>Block size<select id="weight"><option value="instructions">Instruction markers</option><option value="count">One block per entry</option></select></label>
+        <button id="reset" type="button">Reset view</button></div>
+      <div class="legend"><span class="translated">Translated</span><span class="native">Native helper present</span><span class="unsupported">Unsupported handler present</span><span class="boundary">HLE / kernel boundary</span></div>
+      <p id="visible" class="meta" aria-live="polite"></p>
+      <div class="map-layout"><div class="map-shell"><canvas id="map" aria-label="Function treemap. Use the searchable entry list below for keyboard access."></canvas><p id="empty" hidden>No entries match. Try another filter or search.</p></div>
+        <aside id="detail" aria-live="polite"><p class="eyebrow">Inspect an entry</p><h2>Select a block</h2><p>Click the map or choose an entry below to see the evidence behind its color.</p></aside></div>
+      <details class="entry-list"><summary>Browse entries as a list</summary><div id="rows"></div><div class="pagination"><button id="previous" type="button">Previous</button><span id="page-number"></span><button id="next" type="button">Next</button></div></details>
+    </section>
+    <section class="reading"><div><p class="eyebrow">Reading the map</p><h2>Coverage needs context.</h2></div>
+      <div><p><strong>Translated</strong> means the generated function has no recorded unsupported-instruction handler. <strong>Native helper present</strong> means an entry hook can use a native replacement; the original fallback may still run.</p>
+        <p><strong>Instruction gaps</strong> mark functions containing an unsupported handler. Some may be unreachable or discovered from data; this is a review queue, not a count of confirmed gameplay bugs. <strong>Boundaries</strong> are referenced HLE and kernel APIs, whose implementation coverage is not established by this report.</p>
+        <p>Area represents distinct emitted instruction markers within each function, with a minimum of one unit per entry. Shared code can appear in multiple functions. These counts do not measure whole-binary coverage, exact decompilation matching, hardware performance, or successful completion of the game.</p>
+        <p>Exact-match and per-function behavioral validation remain <strong>unrecorded</strong> until supporting evidence is attached. Each report belongs to one executable revision. Profiles appear in the selector when their reports are added; a profile alone does not establish gameplay support.</p></div>
+    </section>
+  </main><footer class="wrap"><a href="https://xita.dev">Back to xita.dev ↗</a><p>Xita · Independent development · Metadata only; no game code or assets.</p></footer>
+</body></html>

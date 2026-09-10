@@ -9,6 +9,15 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 9 [per-game progress maps](docs/game-progress.md): a shared local and
+website viewer now reports generated functions, native entry helpers, unsupported
+handlers and referenced APIs per profile. Exact matching and behavioral
+validation remain unrecorded; translation counts are not whole-game completion.
+
+September 9 [USB model/material update](docs/hardware-20260909-model-prep.md):
+source `22331f4` installed and read back successfully; configuration preserved
+and USB safely unmounted. Physical gains and the LiveArea wallpaper remain open.
+
 September 9 [model/material preparation candidate](docs/model-preparation-20260909.md):
 **Model detail** selects existing character/scenery LODs earlier, with Original
 as the default. Unchanged shader colors now reuse their expanded values. Host,

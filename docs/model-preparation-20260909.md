@@ -6,8 +6,9 @@ colors. This is new Xita code checked against the supported Xbox 3925 executable
 and owned maps. No Wii source or assets were imported; the archive's provenance
 and license remain unconfirmed.
 
-This candidate is built locally. The published `xita-gameplay-20260909.vpk`
-does not contain these changes. No physical Vita FPS gain has been measured.
+This candidate is built and [installed over USB](hardware-20260909-model-prep.md).
+The published `xita-gameplay-20260909.vpk` does not contain these changes.
+No physical Vita FPS gain has been measured.
 
 ## Model detail
 
