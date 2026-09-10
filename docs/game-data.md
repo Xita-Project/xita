@@ -35,7 +35,7 @@ and two scripts; it does not compile the game or require VitaSDK.
 3. Put the two scripts beside your extracted `haloce/` folder:
 
 ```text
-setup/
+setup/                 ← open your terminal here
 ├── xbe_parse.py
 ├── xbe_image.py
 └── haloce/
@@ -46,8 +46,11 @@ setup/
         └── ...
 ```
 
-On **Windows**, open **Command Prompt** in `setup/`. Check the fingerprint
-against the value above, then run:
+On **Windows**, open **Command Prompt or PowerShell in `setup/`**, the folder
+containing both scripts and the `haloce` folder. Run `dir` to check that layout.
+The prompt should end in `\setup>`, and `dir haloce\default.xbe` should find
+your executable. `setup` is an example folder name; your parent folder can have
+a different name. Check the fingerprint against the value above, then run:
 
 ```bat
 certutil -hashfile haloce\default.xbe SHA256
@@ -64,7 +67,8 @@ python3 xbe_image.py haloce/default.xbe game_manifest.json halo_image.bin
 ```
 
 If the fingerprint differs, stop: this VPK does not support that executable.
-Successful preparation prints `wrote halo_image.bin`. The current supported
+Continue only after both commands succeed. Successful preparation prints
+`wrote halo_image.bin`. The current supported
 image is **3,819,432 bytes**, including its eight-byte header.
 
 ## Copy the data
@@ -99,6 +103,30 @@ contents of the computer's `haloce/` into it. A path such as
 beyond the opening mission. The VPK does not supply these files.
 
 Return to [Install and launch](installing.md#3-install-and-launch).
+
+## File not found while creating the image
+
+`haloce\default.xbe` means “open the `haloce` folder inside the current folder.”
+If your prompt already ends in `\haloce>`, that path would look for
+`haloce\haloce\default.xbe`, causing `No such file or directory`.
+
+If `dir` shows **`xbe_parse.py`, `xbe_image.py` and `default.xbe` together** in
+your current folder, use these commands in Command Prompt or PowerShell:
+
+```powershell
+certutil -hashfile .\default.xbe SHA256
+py -3 xbe_parse.py .\default.xbe --json > game_manifest.json
+py -3 xbe_image.py .\default.xbe game_manifest.json halo_image.bin
+```
+
+If the scripts are in the parent folder as shown in the setup diagram, run
+`cd ..` to return there and use the original `haloce\default.xbe` commands.
+Do not create another `haloce` folder to fix this error.
+
+After correcting the path, rerun **both** Python commands. A failed first
+command can leave an empty `game_manifest.json`; its presence alone does not
+mean the manifest was created successfully. Copy the resulting image separately
+to `ux0:data/xita/halo_image.bin`, even if you generated it inside `haloce`.
 
 ## Manifest encoding error on Windows
 

@@ -45,10 +45,19 @@ If Halo already runs on your Vita, keep the image you have and skip this step.
 
 Install Python 3, then download [xbe_parse.py](recompiler/xbe_parse.py) and
 [xbe_image.py](recompiler/xbe_image.py) with **Download raw file** on each file page.
-Place both scripts beside your extracted `haloce/` folder, which contains
-`default.xbe` and `maps/`. Open a terminal in the folder containing the scripts.
+Arrange the files as shown, then open a terminal in **`setup/`**:
 
-**Windows — Command Prompt:**
+```text
+setup/                 ← run the commands here
+├── xbe_parse.py
+├── xbe_image.py
+└── haloce/
+    ├── default.xbe
+    └── maps/
+```
+
+**Windows — Command Prompt or PowerShell:** run `dir` first to confirm that
+both scripts and the `haloce` folder are listed.
 
 ```bat
 py -3 xbe_parse.py haloce\default.xbe --json > game_manifest.json
@@ -62,7 +71,10 @@ python3 xbe_parse.py haloce/default.xbe --json > game_manifest.json
 python3 xbe_image.py haloce/default.xbe game_manifest.json halo_image.bin
 ```
 
-This creates **`halo_image.bin` beside the scripts**. Copy it to
+If your prompt already ends in `\haloce>` and the scripts are inside that
+folder too, use [these commands instead](docs/game-data.md#file-not-found-while-creating-the-image).
+
+After both commands succeed, **`halo_image.bin` appears beside the scripts**. Copy it to
 **`ux0:data/xita/halo_image.bin`**, and copy your `haloce/` folder to
 **`ux0:data/xita/haloce/`**. There should be only one `haloce` folder: the menu map
 must be at `ux0:data/xita/haloce/maps/ui.map`. Your executable must match the

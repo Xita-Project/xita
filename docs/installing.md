@@ -13,13 +13,30 @@ from your own supported original Xbox Halo CE copy; do not rename the XBE.
 If Halo already launches on your Vita, keep your existing image and skip this step.
 
 Download [xbe_parse.py](../recompiler/xbe_parse.py) and [xbe_image.py](../recompiler/xbe_image.py)
-using **Download raw file**, install Python 3, and place the scripts beside your
-extracted `haloce/` folder. In that folder, run these commands in **Windows Command Prompt**:
+using **Download raw file**, install Python 3, and arrange them like this:
+
+```text
+setup/                 ← open your terminal here
+├── xbe_parse.py
+├── xbe_image.py
+└── haloce/
+    ├── default.xbe
+    └── maps/
+```
+
+Open **Command Prompt or PowerShell in `setup/`**, the folder containing the
+scripts. Run `dir` first: you should see both scripts and the `haloce` folder.
+The commands below use `haloce\default.xbe` relative to that location:
 
 ```bat
 py -3 xbe_parse.py haloce\default.xbe --json > game_manifest.json
 py -3 xbe_image.py haloce\default.xbe game_manifest.json halo_image.bin
 ```
+
+If your prompt already ends in `\haloce>` and the scripts and `default.xbe`
+are all there, use `default.xbe` in both commands instead of
+`haloce\default.xbe`. See [the exact commands for that layout](game-data.md#file-not-found-while-creating-the-image).
+Continue only after both commands succeed and the second prints `wrote halo_image.bin`.
 
 On **Linux/macOS**, use `python3` in place of `py -3` and
 `haloce/default.xbe` in place of `haloce\default.xbe`.
