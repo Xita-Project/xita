@@ -9,6 +9,13 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 9 [tester issue 3](docs/tester-issue-3-20260909.md): the 512-entry shader
+capture list overflowed into repeated per-draw logging. The bounded-capture fix
+passes regression/native checks and is built locally; it is not installed or
+released. Tester photos show a30 sky/HUD problems on an unidentified build.
+The [Wii Blam archive review](docs/wii-reference-20260909.md) identifies authored
+model LOD, visibility/material reuse and offline preparation as follow-ups.
+
 September 9 [gameplay performance candidate](docs/gameplay-build-20260909.md):
 development function markers removed and default sampling disabled. Host and
 640 linked-ARM comparison cases pass; physical FPS remains unmeasured. Latest

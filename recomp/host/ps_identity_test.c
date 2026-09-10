@@ -2,7 +2,23 @@
 #include "../kernel/xd3d.c"
 uint8_t *g_xram;
 xk_thread *xk_cur;
-void xk_os_log(const char *fmt, ...) { (void)fmt; }
+static unsigned definition_logs, capture_limit_logs;
+void xk_os_log(const char *fmt, ...)
+{
+    if (strstr(fmt, "[psdef]")) {
+        va_list ap; va_start(ap, fmt);
+        unsigned hash = va_arg(ap, unsigned);
+        const char *hex = va_arg(ap, const char *);
+        assert(hash == xd3d_state.ps_hash && strlen(hex) == 480);
+        const uint8_t *bytes = (const uint8_t *)xd3d_state.ps_shadow;
+        for (unsigned i = 0; i < 240; ++i) {
+            char expected[3]; snprintf(expected, sizeof expected, "%02X", bytes[i]);
+            assert(hex[2*i] == expected[0] && hex[2*i+1] == expected[1]);
+        }
+        va_end(ap); ++definition_logs;
+    }
+    if (strstr(fmt, "shader definition capture limit")) ++capture_limit_logs;
+}
 static uint32_t rng=13;
 static uint32_t next(void){rng^=rng<<13;rng^=rng>>17;rng^=rng<<5;return rng;}
 static void check(void)
@@ -60,6 +76,9 @@ int main(int argc,char **argv)
     xv_ps_identity_lookup(&cache,definitions[1],&hash,&key);
     xv_ps_identity_lookup(&cache,definitions[0],&hash,&key);
     assert(hash==psdef_hash((uint8_t *)definitions[0])&&key==xv_ps_program_key(definitions[0]));
+    /* More than 512 distinct programs must not restart logging on every draw.
+       All identity/color assertions above still apply after capture saturates. */
+    assert(definition_logs == 512 && capture_limit_logs == 1);
     free(g_xram);free(g_xpt);
     puts("PASS: production shader identity/color sync, 18000 updates, reuse/collisions, repeated state, mutable upload, reset and split pages");
 }
