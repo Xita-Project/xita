@@ -9,6 +9,13 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 9 [parallel vertex upload candidate](docs/vertex-upload-worker-20260909.md):
+core 0 copies immutable vertex snapshots while the guest records and core 1
+submits. A bounded queue and separate CPU/GPU completion protect slot reuse.
+Dashboard Performance gains an experimental switch; off/on/off comparison is
+available. Hardware gains are unverified and the feature defaults off. Workload
+sharing takes priority; independent shadow/reflection controls remain follow-ups.
+
 September 9 [per-game progress maps](docs/game-progress.md): a shared local and
 website viewer now reports generated functions, native entry helpers, unsupported
 handlers and referenced APIs per profile. Exact matching and behavioral

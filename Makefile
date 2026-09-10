@@ -27,7 +27,7 @@ STRIP     := $(PREFIX)-strip
 SIZE      := $(PREFIX)-size
 
 # --- 3. sources + flags ------------------------------------------------------
-SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_scene.c runtime/xv_ui_gxm.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_draw_profile.c runtime/xv_render_profile.c
+SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_scene.c runtime/xv_ui_gxm.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_upload_worker.c runtime/xv_draw_profile.c runtime/xv_render_profile.c
 BUILD     := build
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
@@ -62,7 +62,7 @@ endif
 include games/$(GAME_PROFILE)/runtime.mk
 ifeq ($(RECOMP),1)
 CFLAGS    += -DXV_RUN_RECOMP -Irecomp -Irecomp/kernel
-SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_ui_gxm.c runtime/xv_boot.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_draw_profile.c runtime/xv_render_profile.c runtime/xv_settings.c dashboard/xv_dash.c
+SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_ui_gxm.c runtime/xv_boot.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_upload_worker.c runtime/xv_draw_profile.c runtime/xv_render_profile.c runtime/xv_settings.c dashboard/xv_dash.c
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
 # Select the reviewed native adapter independently of generated game objects.

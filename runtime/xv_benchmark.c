@@ -20,13 +20,21 @@ void xv_benchmark_compare_toggle(void) { if(b.active)b.cancel=1;else b.request=2
 int xv_benchmark_active(void) { return b.active||b.request; }
 uint32_t xv_benchmark_status(void) { return __atomic_load_n(&status,__ATOMIC_ACQUIRE); }
 static unsigned phase_height(void) { return b.compare?b.original:heights[b.phase]; }
+int xv_benchmark_compare_vertex_worker(void)
+{
+    static int selected=-1;
+    if (selected<0) {
+        const char *e=getenv("XV_BENCHMARK_VERTEX_WORKER"); selected=e && atoi(e)!=0;
+    }
+    return selected;
+}
 int xv_benchmark_compare_vertex_references(void)
 {
     static int selected = -1;
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_VERTEX_REFERENCES"); selected = e && atoi(e) != 0;
     }
-    return selected;
+    return selected && !xv_benchmark_compare_vertex_worker();
 }
 int xv_benchmark_compare_native_bounds(void)
 {
@@ -34,7 +42,7 @@ int xv_benchmark_compare_native_bounds(void)
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_NATIVE_BOUNDS"); selected = e && atoi(e) != 0;
     }
-    return selected && !xv_benchmark_compare_vertex_references();
+    return selected && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_references();
 }
 int xv_benchmark_compare_vertex_copy(void)
 {
@@ -42,7 +50,7 @@ int xv_benchmark_compare_vertex_copy(void)
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_VERTEX_COPY"); selected = e && atoi(e) != 0;
     }
-    return selected && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
+    return selected && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 int xv_benchmark_compare_draw_scan(void)
 {
@@ -50,10 +58,11 @@ int xv_benchmark_compare_draw_scan(void)
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_DRAW_SCAN"); selected = e && atoi(e) != 0;
     }
-    return selected && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
+    return selected && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_vertex_references() ? "vertex-references-compare" :
+    (xv_benchmark_compare_vertex_worker() ? "vertex-worker-compare" :
+     xv_benchmark_compare_vertex_references() ? "vertex-references-compare" :
      xv_benchmark_compare_native_bounds() ? "native-bounds-compare" :
      xv_benchmark_compare_vertex_copy() ? "vertex-copy-compare" :
      xv_benchmark_compare_draw_scan() ? "draw-scan-compare" : "flare-compare") : "resolution-test"; }
@@ -78,7 +87,9 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
             xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_vertex_references())
+            if (xv_benchmark_compare_vertex_worker())
+                xv_logf("[vertex-worker-compare] start off/on/off at %up; caller/core-0/caller GPU copies from immutable vertex snapshots; resolution, shaders, queue policy and frame cap unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_vertex_references())
                 xv_logf("[vertex-references-compare] start off/on/off at %up; full/indexed/full vertex validation; exact retained indices and referenced records, owned uploads and all other settings unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_native_bounds())
                 xv_logf("[native-bounds-compare] start off/on/off at %up; original/native/original bounding-box visibility; resolution, draw preparation, effects, visibility waits, queue policy and frame cap unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);

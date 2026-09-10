@@ -5,6 +5,14 @@ CFLAGS += -I../.. -I../../runtime
 VITASDK ?= $(HOME)/vitasdk
 PYTHON ?= python3
 
+.PHONY: test-upload-worker
+test-upload-worker: build/upload_worker_test
+	./build/upload_worker_test
+
+build/upload_worker_test: Makefile upload_worker_test.c vertex_upload_test.c ../../runtime/xv_vertex_upload.c ../../runtime/xv_vertex_upload.h ../../runtime/xv_upload_worker.c ../../runtime/xv_upload_worker.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include upload_worker_test.c -pthread -o $@
+
 .PHONY: test-audio
 test-audio: build/audio_test
 	./build/audio_test
@@ -256,6 +264,7 @@ test-visibility: build/visibility_test
 .PHONY: test-cpu-prep
 test-completion: build/resolution_benchmark_test build/scheduler_notify_test build/scheduler_vita_notify_test
 	./build/resolution_benchmark_test
+	XV_BENCHMARK_VERTEX_WORKER=1 XV_BENCHMARK_VERTEX_REFERENCES=1 ./build/resolution_benchmark_test
 	XV_BENCHMARK_DRAW_SCAN=1 ./build/resolution_benchmark_test
 	XV_BENCHMARK_VERTEX_COPY=1 ./build/resolution_benchmark_test
 	XV_BENCHMARK_DRAW_SCAN=1 XV_BENCHMARK_VERTEX_COPY=1 ./build/resolution_benchmark_test

@@ -147,7 +147,8 @@ int main(void)
         {1,4,"XV_MATERIAL_QUALITY=1\n"}, {1,5,"XV_GLOW_QUALITY=1\n"},
         {1,6,"XV_PARTICLE_QUALITY=1\n"}, {1,7,"XV_DECAL_SECONDS=60\n"},
         {1,8,"XV_DECAL_LIMIT=128\n"}, {1,9,"XV_FRAME_CAP=30\n"}, {5,0,"XV_CPU_MHZ=500\n"},
-        {1,10,"XV_EXTENDED_BC=1\n"}, {1,11,"XV_TRIPLE_BUFFER=1\n"}, {1,12,"XV_MODEL_DETAIL=1\n"}
+        {1,10,"XV_EXTENDED_BC=1\n"}, {1,11,"XV_TRIPLE_BUFFER=1\n"}, {1,12,"XV_MODEL_DETAIL=1\n"},
+        {5,1,"XV_VERTEX_WORKER=1\n"}
     };
     for (unsigned q=0;q<sizeof quality/sizeof quality[0];++q) {
         uint32_t script[40]; unsigned count=0;

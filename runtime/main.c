@@ -592,6 +592,10 @@ static int xv_gfx_render_frame(uint32_t mesh_frame, unsigned ui_frame, const Sce
 {
     xv_gfx_t *g = &g_gfx;
     (void)mesh_frame;
+    /* Wait only for CPU copies belonging to this packet, before opening any
+     * scene. Core 0 can upload while the guest records and core 1 submits. */
+    if (g->hle_ready && mesh_frame != UINT32_MAX)
+        xv_vertex_upload_wait(mesh_frame % XV_FRAME_SLOTS);
     int scaled = g->scaled_target != NULL;
 
 #ifdef XV_RUN_RECOMP
@@ -1168,6 +1172,10 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
+    if (xv_benchmark_compare_vertex_worker()) {
+        xv_vertex_worker_override(enabled);
+        return;
+    }
     if (xv_benchmark_compare_vertex_references()) {
         xv_vertex_references_override(enabled);
         return;

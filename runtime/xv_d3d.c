@@ -1460,7 +1460,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
                     fwrite(header, sizeof header, 1, f);
                     fwrite(S.vsc, sizeof S.vsc, 1, f);
                     fwrite(S.psc, sizeof S.psc, 1, f);
-                    fwrite(c->streams[0], stride, nverts, f);
+                    fwrite(xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[0]), stride, nverts, f);
                     fwrite(indices, 2, count, f);
                     fclose(f);
                 }
@@ -1471,7 +1471,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             if (immediate && s == 0) stride = d->stride[s];
             if (c->streams[s] && stride && nverts <= (4u * 1024 * 1024) / stride) {
                 c->geometry_bytes[s] = nverts * stride;
-                c->geometry_hash[s] = geometry_hash(c->streams[s], c->geometry_bytes[s]);
+                c->geometry_hash[s] = geometry_hash(xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[s]), c->geometry_bytes[s]);
             }
         }
         if (indices && count <= 65536) {
@@ -1502,7 +1502,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         if (dump && c->streams[0] && shown < 160) {
             int skinned = 0;
             for (unsigned a = 0; a < d->nattrs; ++a) if (d->attrs[a].offset == 28 && d->attrs[a].format == SCE_GXM_ATTRIBUTE_FORMAT_U8N) skinned = 1;
-            const uint8_t *vb0 = (const uint8_t *)c->streams[0];
+            const uint8_t *vb0 = (const uint8_t *)xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[0]);
             unsigned st = S.stream_stride[0] ? S.stream_stride[0] : d->stride[0], mx = 0, mx0 = 0; char buf[200]; int k = 0;
             if (skinned) for (unsigned i = 0; i < nverts; ++i) if (vb0[i * st + 28] > mx0) mx0 = vb0[i * st + 28];
             /* once per distinct (program, vertex count, node-set) signature so parts that appear later (the
@@ -1524,7 +1524,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
                         XV_LOG("[skin] vobj[%u] common %08X data %08X lock %08X\n", i, e[0], e[1], e[2]);
                     }
                 }
-                XV_LOG("[skin] BIG guest vb %08X (+%u) odd=%u:%s\n", S.stream_guest[0], (unsigned)((const uint8_t *)c->streams[0] - (const uint8_t *)xv_guest_ptr(S.stream_guest[0])), odd, ob);
+                XV_LOG("[skin] BIG guest vb %08X (+%u) odd=%u:%s\n", S.stream_guest[0], (unsigned)((const uint8_t *)xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[0]) - (const uint8_t *)xv_guest_ptr(S.stream_guest[0])), odd, ob);
             }
             if (skinned && newsig) {
                 shown++;
@@ -1591,7 +1591,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         if (!S.z_enable && c->streams[0]) {                          /* depth-off draws (sky): where do the first vertices land in clip space? */
             unsigned st = S.stream_stride[0] ? S.stream_stride[0] : d->stride[0]; char zb[400]; int k = 0;
             for (unsigned i = 0; i < 6 && k < 360; ++i) {
-                const float *p = (const float *)((const uint8_t *)c->streams[0] + i * st); float v[4] = { p[0], p[1], p[2], 1.0f }, w[4];
+                const float *p = (const float *)((const uint8_t *)xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[0]) + i * st); float v[4] = { p[0], p[1], p[2], 1.0f }, w[4];
                 for (int r = 0; r < 3; ++r) w[r] = S.vsc[60 + r][0] * v[0] + S.vsc[60 + r][1] * v[1] + S.vsc[60 + r][2] * v[2] + S.vsc[60 + r][3];   /* node 0 */
                 w[3] = 1.0f; float o[4];
                 for (int r = 0; r < 4; ++r) o[r] = S.vsc[r][0] * w[0] + S.vsc[r][1] * w[1] + S.vsc[r][2] * w[2] + S.vsc[r][3] * w[3];
@@ -1623,12 +1623,12 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     if (trace_frame() && getenv("XV_DUMP_VS") && strstr(d->gxp, getenv("XV_DUMP_VS")) && d->nstreams > 1 && c->streams[1]) {
         /* raw stream-1 bytes of the first vertices (lightmap uv / normal packing checks) */
         unsigned st = S.stream_stride[1] ? S.stream_stride[1] : d->stride[1]; char b[200]; int n = 0;
-        for (unsigned k = 0; k < 4 && n < 180; ++k) { const uint8_t *p = (const uint8_t *)c->streams[1] + k * st; n += snprintf(b + n, sizeof b - n, " |"); for (unsigned j = 0; j < st && j < 16; ++j) n += snprintf(b + n, sizeof b - n, " %02X", p[j]); }
+        for (unsigned k = 0; k < 4 && n < 180; ++k) { const uint8_t *p = (const uint8_t *)xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[1]) + k * st; n += snprintf(b + n, sizeof b - n, " |"); for (unsigned j = 0; j < st && j < 16; ++j) n += snprintf(b + n, sizeof b - n, " %02X", p[j]); }
         XV_LOG("[hist]   stream1 stride %u (decl %u) guest %08X:%s\n", st, d->stride[1], S.stream_guest[1], b);
     }
     if (trace_frame() && getenv("XV_DUMP_VS") && strstr(d->gxp, getenv("XV_DUMP_VS")) && c->streams[0]) {
         unsigned st = S.stream_stride[0] ? S.stream_stride[0] : d->stride[0]; char b[300]; int n = 0;
-        for (unsigned k = 0; k < 3 && n < 280; ++k) { const uint8_t *p = (const uint8_t *)c->streams[0] + k * st; const float *f = (const float *)p;
+        for (unsigned k = 0; k < 3 && n < 280; ++k) { const uint8_t *p = (const uint8_t *)xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[0]) + k * st; const float *f = (const float *)p;
             n += snprintf(b + n, sizeof b - n, " | pos %.2f %.2f %.2f uv@24 %.3f %.3f raw", f[0], f[1], f[2], f[6], f[7]);
             for (unsigned j = 12; j < st && j < 32; ++j) n += snprintf(b + n, sizeof b - n, " %02X", p[j]); }
         XV_LOG("[hist]   stream0 stride %u (decl %u):%s\n", st, d->stride[0], b);
@@ -1637,7 +1637,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         /* first three vertices through the c[0..3] rows the microcode uses for oPos (dph) */
         for (unsigned k = 0; k < 3; ++k) {
             const uint16_t *ix = (const uint16_t *)indices; unsigned vi = ix ? ix[k] : k;
-            const float *p = (const float *)((const uint8_t *)c->streams[0] + vi * (S.stream_stride[0] ? S.stream_stride[0] : d->stride[0]));
+            const float *p = (const float *)((const uint8_t *)xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[0]) + vi * (S.stream_stride[0] ? S.stream_stride[0] : d->stride[0]));
             float o[4]; for (unsigned r = 0; r < 4; ++r) { const float *m = S.vsc[96 + d->c_base + r]; o[r] = p[0] * m[0] + p[1] * m[1] + p[2] * m[2] + m[3]; }
             XV_LOG("[hist]   v%u idx %u pos %.2f %.2f %.2f -> clip %.2f %.2f %.2f w %.2f (ndc %.2f %.2f z %.3f)\n", k, vi, p[0], p[1], p[2], o[0], o[1], o[2], o[3], o[0] / o[3], o[1] / o[3], o[2] / o[3]);
         }
@@ -1741,6 +1741,7 @@ uint32_t xv_d3d_EndFrame(void)
     extern unsigned xv_ui_gxm_record_frame(void);
     l->ui_frame = xv_ui_gxm_record_frame();
     g_record_pass = l->cur_pass;
+    xv_vertex_upload_seal(g_build_frame % XV_NUM_LISTS);
     uint32_t done = g_build_frame++;
     return done;
 }
@@ -1796,6 +1797,7 @@ void xv_d3d_Swap(void)
 {
     cmdlist_t *l = cur_list();
     report_draw_drops(l);
+    xv_vertex_upload_seal(g_build_frame % XV_NUM_LISTS);
     g_build_frame++;
     /* reset the list the NEXT frame will use (the pump is done with it: at most one
        frame is in flight beyond the one just submitted) */

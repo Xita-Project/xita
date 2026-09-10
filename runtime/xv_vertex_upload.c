@@ -4,6 +4,8 @@
 #include "xv_log.h"
 #include "xv_bytes_equal.h"
 #include "xv_snapshot_copy.h"
+#include "xv_quality_settings.h"
+#include "xv_upload_worker.h"
 #include <psp2/gxm.h>
 #include <psp2/kernel/sysmem.h>
 #include <stdlib.h>
@@ -18,6 +20,14 @@
 #endif
 #define UPLOAD_ENTRIES 2048u
 #define UPLOAD_BUCKETS 256u
+#ifndef XV_VERTEX_WORKER_BATCH
+#define XV_VERTEX_WORKER_BATCH (64u * 1024u)
+#endif
+/* Optional in host tests; the Vita runtime links the concrete worker object. */
+int xv_upload_worker_submit(void *,const void *,unsigned,uint32_t *) __attribute__((weak));
+void xv_upload_worker_wait(uint32_t) __attribute__((weak));
+void xv_upload_worker_report(unsigned) __attribute__((weak));
+void xv_upload_worker_shutdown(void) __attribute__((weak));
 typedef struct {
     const void *source;
     unsigned bytes, offset, next;
@@ -26,6 +36,9 @@ static struct {
     SceUID gpu_uid, cpu_uid;
     uint8_t *gpu, *cpu;
     unsigned used, count, valid_bytes, bucket[UPLOAD_BUCKETS];
+    unsigned dispatched;
+    uint32_t ticket;
+    int started, asynchronous, has_ticket;
     upload_entry entries[UPLOAD_ENTRIES];
 } pools[XV_FRAME_SLOTS];
 static unsigned copies, reused, failures, high_water;
@@ -40,6 +53,47 @@ static uint64_t fused_bytes;
 static int references_override = -1;
 static unsigned reference_checks, reference_hits, reference_runs;
 static uint64_t reference_requested, reference_compared;
+static int worker_override = -1;
+void xv_vertex_worker_override(int enabled)
+{ worker_override = enabled < 0 ? -1 : !!enabled; }
+int xv_vertex_worker_enabled(void)
+{
+    static int configured = -1;
+    if (configured < 0) configured = xv_quality_int("XV_VERTEX_WORKER",0,0,1);
+    return worker_override < 0 ? configured : worker_override;
+}
+
+static void dispatch(unsigned slot, int final)
+{
+    unsigned first=pools[slot].dispatched, bytes=pools[slot].used-first;
+    if (!pools[slot].asynchronous || !bytes || (!final && bytes<XV_VERTEX_WORKER_BATCH)) return;
+    uint8_t *dst=pools[slot].gpu+first;
+    const uint8_t *src=pools[slot].cpu+first;
+    uint32_t ticket;
+    if (bytes>=4096 && xv_upload_worker_submit(dst,src,bytes,&ticket)) {
+        pools[slot].ticket=ticket; pools[slot].has_ticket=1;
+    } else {
+        memcpy(dst,src,bytes);
+        xv_gpu_flush(dst,bytes);
+    }
+    pools[slot].dispatched=pools[slot].used;
+}
+
+void xv_vertex_upload_seal(unsigned slot)
+{ if (slot<XV_FRAME_SLOTS) dispatch(slot,1); }
+void xv_vertex_upload_wait(unsigned slot)
+{
+    if (slot<XV_FRAME_SLOTS && pools[slot].has_ticket)
+        xv_upload_worker_wait(pools[slot].ticket);
+}
+const void *xv_vertex_upload_readback(unsigned slot, const void *ptr)
+{
+    if (slot<XV_FRAME_SLOTS && pools[slot].gpu) {
+        uintptr_t offset=(uintptr_t)ptr-(uintptr_t)pools[slot].gpu;
+        if (offset<pools[slot].used) return pools[slot].cpu+offset;
+    }
+    return ptr; /* immediate vertices are already complete */
+}
 
 void xv_vertex_references_override(int enabled)
 { references_override = enabled < 0 ? -1 : !!enabled; }
@@ -117,6 +171,11 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
                            unsigned stride, const xv_vertex_refs *refs)
 {
     if (slot >= XV_FRAME_SLOTS || !source || !bytes || bytes > XV_VERTEX_UPLOAD_BYTES) goto fail;
+    if (!pools[slot].started) {
+        pools[slot].asynchronous=xv_vertex_worker_enabled() && xv_upload_worker_submit &&
+            xv_upload_worker_wait && xv_upload_worker_shutdown;
+        pools[slot].started=1; /* latch for this slot generation, including benchmark transitions */
+    }
     unsigned hash = ((uintptr_t)source >> 4) & (UPLOAD_BUCKETS - 1);
     for (unsigned n = pools[slot].bucket[hash]; n; n = pools[slot].entries[n-1].next) {
         upload_entry *e = &pools[slot].entries[n-1];
@@ -155,7 +214,11 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
     if (resident) {
         resident_hits++; resident_bytes += bytes;
     } else {
-        if (copy_enabled()) {
+        if (pools[slot].asynchronous) {
+            /* Guest memory can change immediately after this call. The worker
+             * only reads this append-only cached mirror, never the guest. */
+            memcpy(pools[slot].cpu + off, source, bytes);
+        } else if (copy_enabled()) {
             xv_snapshot_copy(pools[slot].cpu + off, pools[slot].gpu + off, source, bytes);
             fused_copies++; fused_bytes += bytes;
         } else {
@@ -169,12 +232,13 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
         /* Initialize newly exposed padding in both copies. Later frames may
          * consume it as vertex bytes after changing stream sizes or order. */
         memset(pools[slot].cpu + off + bytes, 0, aligned - bytes);
-        memset(pools[slot].gpu + off + bytes, 0, aligned - bytes);
+        if (!pools[slot].asynchronous) memset(pools[slot].gpu + off + bytes, 0, aligned - bytes);
         pools[slot].valid_bytes = off + aligned;
     }
     pools[slot].entries[n] = (upload_entry){source, bytes, off, pools[slot].bucket[hash]};
     pools[slot].bucket[hash] = n + 1;
     pools[slot].used += aligned;
+    dispatch(slot,0);
     if (pools[slot].used > high_water) high_water = pools[slot].used;
     return pools[slot].gpu + off;
 fail:
@@ -188,6 +252,12 @@ const void *xv_vertex_upload_referenced(unsigned slot, const void *source, unsig
 void xv_vertex_upload_reset(unsigned slot)
 {
     if (slot >= XV_FRAME_SLOTS) return;
+    /* GPU retirement remains the caller's responsibility. Also join any
+     * queued CPU copies before this mirror is reused, even for a dropped frame. */
+    xv_vertex_upload_seal(slot);
+    xv_vertex_upload_wait(slot);
+    pools[slot].dispatched=0; pools[slot].has_ticket=0;
+    pools[slot].started=pools[slot].asynchronous=0;
     /* Keep initialized matching bytes, but discard all current-frame source
      * identities. Reuse is always proved again by a full byte comparison. */
     pools[slot].used = pools[slot].count = 0;
@@ -195,6 +265,8 @@ void xv_vertex_upload_reset(unsigned slot)
 }
 void xv_vertex_upload_shutdown(void)
 {
+    for (unsigned s=0;s<XV_FRAME_SLOTS;s++) xv_vertex_upload_seal(s);
+    if (xv_upload_worker_shutdown) xv_upload_worker_shutdown();
     for (unsigned s = 0; s < XV_FRAME_SLOTS; ++s) {
         if (pools[s].gpu) {
             sceGxmUnmapMemory(pools[s].gpu);
@@ -206,6 +278,7 @@ void xv_vertex_upload_shutdown(void)
 }
 void xv_vertex_upload_report(unsigned frames)
 {
+    if (xv_upload_worker_report) xv_upload_worker_report(frames);
     xv_logf("[vertex-references] %u frames: enabled %d; %u checks / %u hits / %u runs; requested %llu KiB compared %llu KiB; indexed records checked, owned uploads retained\n",
         frames, xv_vertex_references_enabled(), reference_checks, reference_hits, reference_runs,
         (unsigned long long)(reference_requested >> 10), (unsigned long long)(reference_compared >> 10));

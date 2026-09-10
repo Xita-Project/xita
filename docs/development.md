@@ -36,6 +36,7 @@ comments. Restart to apply launch-time changes.
 | `XV_RENDER_HEIGHT=360/400/480/544` | Game render resolution, upscaled to the Vita display. |
 | `XV_FPS=1`, `XV_CPU=1` | Frame overlay and sampled per-core busy counters. Counters include system work; they are not GPU utilization. |
 | `XV_THREADS=1` | Thread and affinity diagnostics. |
+| `XV_VERTEX_WORKER=0/1` | Experimental core-0 copies from immutable vertex snapshots. Default off; dashboard Performance switch, relaunch required. |
 | `XV_DASHBOARD=0` | Bypass the dashboard for automation. |
 | `XV_SHADER_OVERRIDE=1` | Prefer device shader files over packaged ones; development only. |
 | `XV_PROF=1` | Enable sampling; regenerate with `--trace-funcs` for guest attribution. Instrumentation changes the workload. |
@@ -53,6 +54,12 @@ Use a loaded first-person view, hold still, and keep settings unchanged.
 active comparison; completion/cancellation restores its original settings.
 
 ## Overlay units
+
+The experimental [parallel vertex upload comparison](vertex-upload-worker-20260909.md)
+uses `XV_BENCHMARK_VERTEX_WORKER=1` and **L + R + Select + Square**. It takes
+precedence over older comparison selectors and preserves all other settings.
+The dashboard Performance switch requires relaunching Xita. It defaults off
+until measured on hardware.
 
 | Display | Meaning |
 | --- | --- |
