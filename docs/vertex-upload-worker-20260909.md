@@ -2,8 +2,9 @@
 
 This candidate moves the second vertex snapshot copy from the recording thread
 to a persistent worker requesting CPU core 0. It is experimental and off by
-default. It is built locally; the installed September 9 USB build does not yet
-include it. No physical Vita speedup or stable 20 FPS result is established.
+default. The [September 10 USB update](hardware-20260910-vertex-worker.md)
+installs it with the worker enabled for testing. No physical Vita speedup or
+stable 20 FPS result is established.
 
 ## Why this work
 
@@ -57,7 +58,7 @@ Dashboard **Performance → Parallel vertex uploads** controls `XV_VERTEX_WORKER
 Xita after changing this option. The in-game panel remains the graphics panel.
 
 For a controlled developer comparison, set `XV_BENCHMARK_VERTEX_WORKER=1` in
-`ux0:data/xita/xita.cfg`, relaunch, then use **L + R + Select + Square** in a loaded
+`ux0:data/xita/xita.cfg`, relaunch, then use **L + R + Square** in a loaded
 first-person view. This selector takes precedence over older comparison selectors
 such as `XV_BENCHMARK_VERTEX_REFERENCES`. It runs caller/worker/caller phases at the
 configured resolution, queue mode, shader quality, clock request and frame cap.

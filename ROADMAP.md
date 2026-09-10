@@ -9,6 +9,11 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 10 [USB vertex worker update](docs/hardware-20260910-vertex-worker.md):
+source `21fe9ca` installed and verified after USB remount. Core-0 vertex uploads
+are enabled on the test Vita with an off/on/off comparison selected; other
+settings are preserved. Hardware performance and stability testing are pending.
+
 September 9 [parallel vertex upload candidate](docs/vertex-upload-worker-20260909.md):
 core 0 copies immutable vertex snapshots while the guest records and core 1
 submits. A bounded queue and separate CPU/GPU completion protect slot reuse.
