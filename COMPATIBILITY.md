@@ -22,7 +22,7 @@ completion where applicable. No title currently meets that release gate.
 | Feature | Evidence and limits |
 | --- | --- |
 | Main menu, profiles and dashboard | Existing profiles and solo Split Screen work on hardware. Fresh-install Default/Inverted failures are reproduced and corrected in host/emulator checks; [physical confirmation pending](docs/builtin-profiles-20260909.md). |
-| Blood Gulch | Latest sampled hardware session: **11.00 FPS at 640×360**, 256 texture cap. User confirms driving, shooting and looking around. Sixty-frame averages span **8.1–13.0 FPS** after the initial loading window. |
+| Blood Gulch | September 7 sampled hardware session: **11.00 FPS at 640×360**, 256 texture cap. User confirms driving, shooting and looking around. Sixty-frame averages span **8.1–13.0 FPS** after the initial loading window. |
 | Battle Creek | Tested on hardware and emulator; see the earlier [480p report](docs/hardware-20260905-battlecreek-480p.md). No matched test of the latest candidate yet. |
 | Vehicles and variants | User confirms Warthog, Ghost and Scorpion operation. Driving performance and long-run stability need further testing. |
 | Rendering | User confirms major improvements to sky, decals, baked lighting and active camouflage. Whole-game rendering correctness is not established. |
@@ -38,6 +38,12 @@ The first performance milestone is **sustained 20 FPS**, then 25 FPS. Neither
 has been verified. Historical peaks around 20–22 FPS are scene-dependent, not
 representative averages. Keep resolution, settings and workload fixed when
 comparing changes. Emulator performance does not establish hardware speed.
+
+The [September 9 gameplay candidate](docs/gameplay-build-20260909.md) removes
+development tracing. Its host and 640 linked-ARM checks pass; hardware speed
+and GPU stability remain unverified. The installed revision-2 LiveArea still
+shows a blank/plain background; revision 3 awaits a VitaShell installation and
+physical display check.
 
 The [latest measured hardware report](docs/hardware-20260907-frame-constants.md)
 covers the previous constant-buffer build. The [September 8 USB update](docs/hardware-20260908-weapon-menu.md)

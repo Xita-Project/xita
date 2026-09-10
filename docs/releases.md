@@ -1,6 +1,6 @@
 # Releases and downloads
 
-[Install Xita](installing.md) · [All releases](https://github.com/BirchWoodGod/xita/releases)
+[Install Xita](installing.md) · [All releases](https://github.com/Xita-Project/xita/releases)
 
 **One build per release, with one installable VPK.** Download links in the README
 and installation guide lead to the current game package. Networking diagnostics
@@ -8,8 +8,8 @@ have their own release and bubble.
 
 | Download | Purpose |
 | --- | --- |
-| [Xita — LiveArea and profiles](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260909-livearea-profiles) | Current game package; profile fix and updated LiveArea. Physical testing pending. |
-| [Xita AdHoc Test 01.01](https://github.com/BirchWoodGod/xita/releases/tag/adhoc-20260908b) | Standalone diagnostic for two Vitas; wireless testing pending. |
+| [Xita — Gameplay build](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay) | Current game package; development tracing removed, LiveArea compatibility update. Hardware results pending. |
+| [Xita AdHoc Test 01.01](https://github.com/Xita-Project/xita/releases/tag/adhoc-20260908b) | Standalone diagnostic for two Vitas; wireless testing pending. |
 
 Each release has three uploaded files: the VPK, `SHA256SUMS.txt` and
 `BUILD-INFO.json`. GitHub also adds source archives automatically; these cannot
@@ -23,12 +23,13 @@ Their VPK bytes are preserved for recovery and test comparisons.
 
 | Build | Release |
 | --- | --- |
-| Indexed vertex comparison | [September 8](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-vertex-references) |
-| Native visibility experiment | [September 8](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-native-bounds) |
-| First in-game graphics panel | [September 8](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-settings) |
-| Rendering and modular libraries | [September 8](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908) |
-| Earlier installed recovery build | [September 8, 07:00 CDT](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908-recovery) |
-| Original ad hoc tester — failed hardware startup | [Superseded diagnostic](https://github.com/BirchWoodGod/xita/releases/tag/adhoc-20260908) |
+| Instrumented profile/LiveArea build | [September 9](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-livearea-profiles) |
+| Indexed vertex comparison | [September 8](https://github.com/Xita-Project/xita/releases/tag/dev-20260908-vertex-references) |
+| Native visibility experiment | [September 8](https://github.com/Xita-Project/xita/releases/tag/dev-20260908-native-bounds) |
+| First in-game graphics panel | [September 8](https://github.com/Xita-Project/xita/releases/tag/dev-20260908-settings) |
+| Rendering and modular libraries | [September 8](https://github.com/Xita-Project/xita/releases/tag/dev-20260908) |
+| Earlier installed recovery build | [September 8, 07:00 CDT](https://github.com/Xita-Project/xita/releases/tag/dev-20260908-recovery) |
+| Original ad hoc tester — failed hardware startup | [Superseded diagnostic](https://github.com/Xita-Project/xita/releases/tag/adhoc-20260908) |
 
 The September 8 packages were originally grouped under one tag. Their individual
 releases now separate them without rebuilding the VPKs. The original

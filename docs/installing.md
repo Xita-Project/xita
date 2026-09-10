@@ -1,6 +1,6 @@
 # Installing Xita
 
-[README](../README.md) · [Download VPK](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260909-livearea-profiles) · [Game data](game-data.md) · [Compatibility](../COMPATIBILITY.md)
+[README](../README.md) · [Download VPK](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay) · [Game data](game-data.md) · [Compatibility](../COMPATIBILITY.md)
 
 Install the app from a VPK, then add your own Halo data. You need a
 homebrew-enabled PS Vita, VitaShell and a USB cable. Windows, macOS and Linux
@@ -30,16 +30,17 @@ fingerprint and folder layout.
 
 ## 1. Download a VPK
 
-Open the [current Xita game release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260909-livearea-profiles),
-expand **Assets**, and download **`xita-livearea-profiles-20260909.vpk`**.
+Open the [current Xita game release](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay),
+expand **Assets**, and download **`xita-gameplay-20260909.vpk`**.
 Each release contains one VPK, `SHA256SUMS.txt` and `BUILD-INFO.json`. Sign in
 with an account that has repository access while releases are private.
 GitHub's automatic **Source code** downloads are not installable apps.
 
-This development package updates the Vita LiveArea artwork and fixes the
-built-in **Default** and **Inverted** multiplayer profile error. Host and emulator
-checks pass; physical Vita confirmation is pending.
-[Build and test details](builtin-profiles-20260909.md).
+This development package removes function tracing from normal gameplay and
+keeps the built-in **Default** and **Inverted** profile fix. It also revises the
+LiveArea artwork format after a blank-background report. Host and linked-ARM
+checks pass; hardware FPS and LiveArea confirmation are pending.
+[Build and test details](gameplay-build-20260909.md).
 
 It also includes the in-game graphics panel and the previous optional
 [vertex-validation comparison](vertex-references-20260908.md), which remains off
@@ -67,7 +68,7 @@ and paste your `haloce` folder there once. The result must contain
 ```text
 Vita drive/
 ├── VPK/
-│   └── xita-livearea-profiles-20260909.vpk
+│   └── xita-gameplay-20260909.vpk
 └── data/
     └── xita/
         ├── halo_image.bin

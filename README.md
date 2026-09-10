@@ -6,7 +6,7 @@
 
 **A static recompiler and runtime for bringing original Xbox games to the PlayStation Vita.**
 
-[Download VPK](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260909-livearea-profiles) · [Install](docs/installing.md) · [Compatibility](COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
+[Download VPK](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay) · [Install](docs/installing.md) · [Compatibility](COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
 
 Xita translates an Xbox game's x86 executable into C, builds it as ARM code,
 and supplies Xbox kernel, graphics and audio interfaces through Vita homebrew
@@ -15,7 +15,7 @@ is the only game tested so far.**
 
 ## Getting started
 
-1. **Download the VPK** from the [current Xita release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260909-livearea-profiles).
+1. **Download the VPK** from the [current Xita release](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay).
    Expand **Assets** and choose its single `.vpk` file. The **Source code** ZIP is for developers.
 2. **Copy it over USB.** Open VitaShell's USB mode and copy the VPK to your Vita's
    storage. Windows users can use File Explorer.
@@ -27,9 +27,9 @@ is the only game tested so far.**
 
 **Already have Xita working?** Keep your existing game files, settings and saves;
 follow [Updating Xita](docs/installing.md#updating-xita). The current
-[game release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260909-livearea-profiles)
+[game release](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay)
 contains one VPK, a checksum and build information. Older builds have their own
-releases marked **Superseded**; the [ad hoc tester](https://github.com/BirchWoodGod/xita/releases/tag/adhoc-20260908b)
+releases marked **Superseded**; the [ad hoc tester](https://github.com/Xita-Project/xita/releases/tag/adhoc-20260908b)
 is a separate download. [Release guide](docs/releases.md). Releases remain private
 during development.
 
@@ -101,9 +101,10 @@ See [Compatibility](COMPATIBILITY.md) and the
 [latest hardware report](docs/hardware-20260907-frame-constants.md) for test
 limits. Emulator FPS does not predict Vita performance.
 
-The [September 9 update](docs/builtin-profiles-20260909.md) refreshes the Vita
-LiveArea and fixes fresh-install Default/Inverted profile selection in emulator
-testing. Physical Vita confirmation is pending.
+The [September 9 gameplay build](docs/gameplay-build-20260909.md) removes
+development function tracing and keeps the profile/rendering fixes. It also
+revises the LiveArea assets after a blank-background report. Hardware FPS and
+LiveArea confirmation are pending.
 
 The [September 8 USB update](docs/hardware-20260908-weapon-menu.md) installs
 weapon, lobby and audio corrections plus the deferred visibility comparison.

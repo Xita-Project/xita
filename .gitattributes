@@ -18,3 +18,5 @@ NOTICE text eol=lf
 *.mk text eol=lf
 *.ps1 text eol=lf
 *.inc text eol=lf
+# LiveArea XML follows the VitaSDK sample's on-device line-ending convention.
+sce_sys/livearea/contents/template.xml text eol=crlf

@@ -9,6 +9,12 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 9 [gameplay performance candidate](docs/gameplay-build-20260909.md):
+development function markers removed and default sampling disabled. Host and
+640 linked-ARM comparison cases pass; physical FPS remains unmeasured. Latest
+USB logs show zero ordinary Finish calls across 79 timing windows and active
+parallel geometry sorting. LiveArea revision 3 awaits a physical display check.
+
 September 9 external tester reports: [performance review and reproduction plan](docs/tester-feedback-20260909.md).
 Camera movement jumps near stick center, a flashlight rendering problem and one
 stretched shadow remain open; the exact build/settings are unknown. Prioritize
