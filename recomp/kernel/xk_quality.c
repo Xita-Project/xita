@@ -33,6 +33,89 @@ static void put_float(uint32_t p, float f)
     uint32_t u; memcpy(&u,&f,4); X_M32(p) = u;
 }
 static void null_bitmap(uint32_t p) { X_M32(p+12) = UINT32_MAX; }
+
+static int name_prefix(const quality_tags *t, uint32_t entry, const char *prefix)
+{
+    uint32_t p = X_M32(entry+16);
+    for (unsigned i=0; prefix[i]; ++i)
+        if (!span(t,p,i+1) || X_M8(p+i)!=(unsigned char)prefix[i]) return 0;
+    return 1;
+}
+
+static int model_has_lods(const quality_tags *t, uint32_t p)
+{
+    unsigned nr=X_M32(p+0xc4), ng=X_M32(p+0xd0);
+    uint32_t regions=X_M32(p+0xc8), geometry=X_M32(p+0xd4);
+    if (!nr || nr>32 || !ng || ng>256 || !span(t,regions,nr*76u) ||
+        !span(t,geometry,ng*48u)) return 0;
+    int alternate=0;
+    for (unsigned r=0; r<nr; ++r) {
+        uint32_t region=regions+r*76u, permutations=X_M32(region+68);
+        unsigned count=X_M32(region+64);
+        if (!count || count>32 || !span(t,permutations,count*88u)) return 0;
+        for (unsigned j=0; j<count; ++j) {
+            uint32_t perm=permutations+j*88u;
+            unsigned first=X_M16(perm+64);
+            for (unsigned lod=0; lod<5; ++lod) {
+                unsigned index=X_M16(perm+64+lod*2);
+                /* Retain original selection for incomplete LOD tables. */
+                if (index>=ng) return 0;
+                if (index!=first) alternate=1;
+            }
+        }
+    }
+    return alternate;
+}
+
+static void model_lod_quality(const quality_tags *t, int level)
+{
+    if (level==2) return;
+    enum { ELIGIBLE=1, PROTECTED=2 };
+    uint8_t *uses=calloc(t->count,1);
+    if (!uses) return;
+    unsigned changed=0, protected=0, unchanged=0;
+    /* Resolve all object owners first. A cinematic scenery tag can share a
+     * weapon or vehicle model; that model must retain its original cutoffs. */
+    for (unsigned i=0; i<t->count; ++i) {
+        uint32_t entry=t->array+i*32u, group=X_M32(entry), p;
+        if (group!=TAG_GROUP('o','b','j','e') &&
+            X_M32(entry+4)!=TAG_GROUP('o','b','j','e') &&
+            X_M32(entry+8)!=TAG_GROUP('o','b','j','e')) continue;
+        if (!(p=tag_data(t,X_M32(entry+12),group,380))) goto done;
+        uint32_t model=X_M32(p+0x34);
+        if (!tag_data(t,model,TAG_GROUP('m','o','d','e'),232)) continue;
+        int eligible=(group==TAG_GROUP('s','c','e','n') ||
+                      group==TAG_GROUP('b','i','p','d')) &&
+                     !name_prefix(t,entry,"cinematics\\");
+        uses[model&0xffffu] |= eligible ? ELIGIBLE : PROTECTED;
+    }
+    for (unsigned i=0; i<t->count; ++i) {
+        if (!(uses[i]&ELIGIBLE)) continue;
+        if (uses[i]&PROTECTED) { ++protected; continue; }
+        uint32_t entry=t->array+i*32u;
+        if (!name_prefix(t,entry,"scenery\\") &&
+            !name_prefix(t,entry,"characters\\")) { ++protected; continue; }
+        uint32_t p=tag_data(t,X_M32(entry+12),TAG_GROUP('m','o','d','e'),232);
+        float cutoff[5]; int valid=p!=0;
+        if (!p) continue;
+        for (unsigned j=0; j<5; ++j) {
+            cutoff[j]=get_float(p+8+j*4);
+            if (!isfinite(cutoff[j]) || cutoff[j]<0 || cutoff[j]>1000000 ||
+                (j && cutoff[j]<cutoff[j-1])) valid=0;
+        }
+        if (!valid || cutoff[4]==0 || !model_has_lods(t,p)) { ++unchanged; continue; }
+        /* Xbox 3925's selector at 0xA2800 reads increasing cutoffs from +8.
+         * Raise only the four mesh-transition thresholds: the original
+         * minimum visibility cutoff, geometry, bounds and collision stay intact. */
+        float scale=level==1 ? 1.25f : (5.0f/3.0f);
+        for (unsigned j=1; j<5; ++j) put_float(p+8+j*4,cutoff[j]*scale);
+        ++changed;
+    }
+    XK_LOG("[model-lod] detail %d: %u models adjusted, %u protected, %u without usable transitions; minimum visibility retained\n",
+        level,changed,protected,unchanged);
+done:
+    free(uses);
+}
 static int cosmetic_particle(const quality_tags *t, uint32_t entry, uint32_t p)
 {
     /* Preserve any particle with collision, death or material effects, and all
@@ -55,12 +138,13 @@ static int cosmetic_particle(const quality_tags *t, uint32_t entry, uint32_t p)
 
 void xk_quality_map_read(uint32_t address, uint32_t bytes)
 {
-    static int configured, material, glow, particles, decal_seconds;
+    static int configured, material, glow, particles, decal_seconds, model_detail;
     if (!configured) {
         material = xv_quality_int("XV_MATERIAL_QUALITY",2,0,2);
         glow = xv_quality_int("XV_GLOW_QUALITY",2,0,2);
         particles = xv_quality_int("XV_PARTICLE_QUALITY",2,0,2);
         decal_seconds = xv_quality_int("XV_DECAL_SECONDS",0,0,300);
+        model_detail = xv_quality_int("XV_MODEL_DETAIL",2,0,2);
         configured = 1;
     }
     if (address != TAG_BASE || bytes < 0x28 || bytes > 32u*1024*1024) return;
@@ -71,6 +155,7 @@ void xk_quality_map_read(uint32_t address, uint32_t bytes)
      * cache must not accidentally turn a pointer into a material field. */
     for (unsigned i = 0; i < t.count; ++i)
         if ((X_M32(t.array+i*32+12)&0xffffu) != i) return;
+    model_lod_quality(&t,model_detail);
     unsigned materials=0,flares=0,shortened=0,decals=0;
     for (unsigned i = 0; i < t.count; ++i) {
         uint32_t entry=t.array+i*32u, group=X_M32(entry), id=X_M32(entry+12), p;

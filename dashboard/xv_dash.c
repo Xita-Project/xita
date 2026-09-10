@@ -33,14 +33,14 @@ static const map_info multiplayer[] = {
 };
 enum { FPS, BC_MIPS, PROF, VBLANK, TEX_DETAIL, VOLUME, SENSITIVITY, DEADZONE,
        INVERT_Y, LOOK_CURVE, TOUCH, CPU, TEX_FILTER, MIP_SMOOTH, RESOLUTION,
-       MATERIAL, GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, CPU_CLOCK, EXTENDED_BC, TRIPLE_BUFFER, SETTINGS_COUNT };
+       MATERIAL, GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, CPU_CLOCK, EXTENDED_BC, TRIPLE_BUFFER, MODEL_DETAIL, SETTINGS_COUNT };
 static const char *const keys[] = {"XV_FPS", "XV_BC_MIPS", "XV_PROF", "XV_VBLANK_HZ",
     "XV_TEX_MAXDIM", "XV_VOLUME", "XV_LOOK_SENS", "XV_DEADZONE", "XV_INVERT_Y",
     "XV_LOOK_CURVE", "XV_TOUCH", "XV_CPU", "XV_TEX_FILTER", "XV_MIP_SMOOTH", "XV_RENDER_HEIGHT",
     "XV_MATERIAL_QUALITY", "XV_GLOW_QUALITY", "XV_PARTICLE_QUALITY", "XV_DECAL_SECONDS",
-    "XV_DECAL_LIMIT", "XV_FRAME_CAP", "XV_CPU_MHZ", "XV_EXTENDED_BC", "XV_TRIPLE_BUFFER"};
+    "XV_DECAL_LIMIT", "XV_FRAME_CAP", "XV_CPU_MHZ", "XV_EXTENDED_BC", "XV_TRIPLE_BUFFER", "XV_MODEL_DETAIL"};
 static const int defaults[] = {0, 0, 0, 60, 256, 50, 100, 0, 0, 0, 1, 1, 0, 1, 544,
-    2, 2, 2, 0, 0, 0, 444, 0, 0};
+    2, 2, 2, 0, 0, 0, 444, 0, 0, 2};
 static const int rates[] = {60, 120, 250, 500, 1000};
 static const int texture_caps[] = {64, 128, 256, 512};
 static const int resolutions[] = {360, 400, 480, 544};
@@ -294,18 +294,18 @@ static int content_count(const dash *s)
 
 enum { LAUNCH_VISIBLE_ROWS = 5, LICENSE_PAGE = 6, LICENSE_VISIBLE_LINES = 18 };
 static const char *const launch_pages[] = {"LAUNCH GAME", "GRAPHICS", "AUDIO", "CONTROLS", "DISPLAY", "PERFORMANCE", "ABOUT / LICENSE"};
-static const int launch_keys[][12] = {
+static const int launch_keys[][13] = {
     {-1}, {TEX_DETAIL, TEX_FILTER, MIP_SMOOTH, RESOLUTION, MATERIAL,
-           GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, EXTENDED_BC, TRIPLE_BUFFER}, {VOLUME, -1},
+           GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, EXTENDED_BC, TRIPLE_BUFFER, MODEL_DETAIL}, {VOLUME, -1},
     {SENSITIVITY, DEADZONE, INVERT_Y, LOOK_CURVE, TOUCH}, {FPS, CPU, -1},
     {CPU_CLOCK, -1}, {-1}
 };
-static const int launch_counts[] = {0, 12, 1, 5, 2, 1, 0};
+static const int launch_counts[] = {0, 13, 1, 5, 2, 1, 0};
 static const char *const setting_names[] = {
     "Performance overlay", "", "", "", "Texture detail", "Master volume",
     "Look sensitivity", "Stick deadzone", "Invert look", "Look response", "Touch controls", "CPU meter",
     "Texture filtering", "Mip smoothing", "Render resolution", "Material quality",
-    "Glow / lens flares", "Particle detail", "Decal lifetime", "Decal limit", "Frame limit", "CPU clock", "More compressed textures", "Triple buffering"
+    "Glow / lens flares", "Particle detail", "Decal lifetime", "Decal limit", "Frame limit", "CPU clock", "More compressed textures", "Triple buffering", "Model detail"
 };
 static const char *const setting_help[] = {
     "Show FPS and frame timing during play.", "", "", "",
@@ -328,7 +328,8 @@ static const char *const setting_help[] = {
     "Caps presentation FPS when fast enough. Game time stays unchanged.",
     "500 MHz needs an overclock plugin; unavailable clocks use 444 MHz.",
     "Keep more textures compressed. Compare appearance before keeping it on.",
-    "Experimental: prepare frames ahead. May add input delay. Default off."
+    "Experimental: prepare frames ahead. May add input delay. Default off.",
+    "Simpler distant characters/scenery where available. Relaunch to apply."
 };
 static void render_license(dash *s)
 {
@@ -357,6 +358,8 @@ static void setting_value(const dash *s, int k, char *value, size_t size)
         if (v == 360 || v == 400 || v == 480) snprintf(value,size,"%dP",v);
         else snprintf(value,size,"NATIVE");
     }
+    else if (k == MODEL_DETAIL)
+        snprintf(value,size,"%s",v == 0 ? "LOW" : v == 1 ? "BALANCED" : "ORIGINAL");
     else if (k == MATERIAL || k == GLOW || k == PARTICLES)
         snprintf(value,size,"%s",v == 0 ? (k == GLOW ? "OFF" : "LOW") : v == 1 ? (k == GLOW ? "LOW" : "MEDIUM") : "ORIGINAL");
     else if (k == DECAL_TIME || k == DECAL_LIMIT) {
@@ -455,7 +458,7 @@ static int edit_setting(dash *s, int direction)
         else v = texture_caps[(selected + (direction < 0 ? COUNT(texture_caps)-1 : 1)) % COUNT(texture_caps)];
     }
     else if (k == TEX_FILTER) v = (old >= 0 && old <= 2) ? (old + (direction < 0 ? 2 : 1)) % 3 : 0;
-    else if (k == MATERIAL || k == GLOW || k == PARTICLES)
+    else if (k == MATERIAL || k == GLOW || k == PARTICLES || k == MODEL_DETAIL)
         v = old >= 0 && old <= 2 ? (old + (direction < 0 ? 2 : 1)) % 3 : 2;
     else if (k == CPU_CLOCK) v = old == 500 ? 444 : 500;
     else if (k == LOOK_CURVE) v = old == 2 ? 0 : 2;

@@ -2,7 +2,8 @@
 
 Press **Select + Circle** together to open Xita's graphics panel over Halo.
 Use **Up/Down** or the left stick to select an option, **Left/Right** to change
-it, and **Circle** to close. All twelve dashboard graphics options are available.
+it, and **Circle** to close. All thirteen dashboard graphics options are available
+in the source candidate; the September 9 gameplay release has twelve.
 
 The panel consumes controller input while open. It does not pause the game;
 press **Start** to pause Halo before opening it if needed. Closing the panel
@@ -16,12 +17,20 @@ returns control after the menu buttons are released.
 | Frame limit | Particle detail |
 | Triple buffering | Decal lifetime and limit |
 | | More compressed textures |
+| | Model detail (source candidate) |
 
 The selected option explains when it takes effect. Values save to `xita.cfg`,
 preserving unrelated settings and comments. A failed save leaves the previous
 value in place. If a resolution allocation fails, rendering falls back to native
 resolution and the panel reports it. Triple buffering remains experimental and
 defaults off; it may increase input delay.
+
+**Model detail** defaults to **Original**. **Balanced** and **Low** select Halo's
+existing simpler character/scenery meshes sooner where the Xbox maps provide
+them. Weapons and shared vehicle models retain their original settings. Many
+rocks and trees have no alternate meshes, so this option does not reduce their
+detail. Close and relaunch Xita after changing it. Hardware performance gains
+remain unmeasured; see the [implementation and limits](model-preparation-20260909.md).
 
 The panel is disabled while a benchmark is active. It draws at the Vita's native
 960×544 resolution even when the game uses a smaller render target.

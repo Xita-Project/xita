@@ -20,6 +20,10 @@ matching offsets, ABI or behavior.
 | Offline texture preparation | `tools/wii_texture_pack/wii_texture_pack.py` emits native GX formats and mip records. | Evaluate Vita-native preprocessing for loading and first-use stalls. Wii GX bytes are not a GXM texture layout, and existing Xita caches mean steady-state FPS benefit must be measured. |
 | Fog/sky diagnosis | `src/host_render_fog.c:735` builds atmospheric and planar fog from cluster, sky, camera and map data, with explicit finite/range checks. | Use it to identify which original-game values to inspect for the tester's black/gray a30 sky. It is not evidence that the same bug or fix applies to Xita. |
 
+The first [model LOD and material preparation implementation](model-preparation-20260909.md)
+now has a local native candidate and host/emulator checks. Physical gains are
+pending; it is not in the published September 9 gameplay VPK.
+
 Prioritize the confirmed [shader-capture flood](tester-issue-3-20260909.md), then
 model LOD/state reuse based on a fixed hardware scene. The archive supports the
 idea of doing less repeated engine work; it does not provide a measured Vita FPS

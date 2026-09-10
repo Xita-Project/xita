@@ -147,7 +147,7 @@ int main(void)
         {1,4,"XV_MATERIAL_QUALITY=1\n"}, {1,5,"XV_GLOW_QUALITY=1\n"},
         {1,6,"XV_PARTICLE_QUALITY=1\n"}, {1,7,"XV_DECAL_SECONDS=60\n"},
         {1,8,"XV_DECAL_LIMIT=128\n"}, {1,9,"XV_FRAME_CAP=30\n"}, {5,0,"XV_CPU_MHZ=500\n"},
-        {1,10,"XV_EXTENDED_BC=1\n"}, {1,11,"XV_TRIPLE_BUFFER=1\n"}
+        {1,10,"XV_EXTENDED_BC=1\n"}, {1,11,"XV_TRIPLE_BUFFER=1\n"}, {1,12,"XV_MODEL_DETAIL=1\n"}
     };
     for (unsigned q=0;q<sizeof quality/sizeof quality[0];++q) {
         uint32_t script[40]; unsigned count=0;
@@ -165,7 +165,7 @@ int main(void)
         XV_DASH_RIGHT,XV_DASH_DOWN,XV_DASH_CIRCLE,XV_DASH_UP,XV_DASH_CROSS};
     assert(run(&cfg,&h,graphics_wrap,8,&result) == 0);
     f = fopen(path,"r"); assert(f); n = fread(data,1,sizeof(data)-1,f); data[n] = 0; fclose(f);
-    assert(strstr(data,"XV_TRIPLE_BUFFER=0\n") && strstr(data,"XV_EXTENDED_BC=1\n") && strstr(data,"XV_TEX_MAXDIM=256\n"));
+    assert(strstr(data,"XV_MODEL_DETAIL=2\n") && strstr(data,"XV_TRIPLE_BUFFER=1\n") && strstr(data,"XV_EXTENDED_BC=1\n") && strstr(data,"XV_TEX_MAXDIM=256\n"));
     /* About/license is readable without game files and never edits settings. */
     char before_license[2048]; strcpy(before_license,data);
     const uint32_t license[] = {XV_DASH_UP,XV_DASH_CROSS,XV_DASH_DOWN,0,

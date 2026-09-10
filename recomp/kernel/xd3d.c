@@ -854,6 +854,8 @@ static uint32_t psdef_hash(const uint8_t *d)
 #include "../../runtime/xv_ps_key.h"
 #include "../../runtime/xv_ps_identity.h"
 static xv_ps_identity_cache ps_identity_cache;
+static uint32_t ps_packed_colors[18];
+static unsigned ps_colors_reused, ps_colors_computed;
 void xd3d_prepare_report(unsigned frames)
 {
     D3DLOG("[draw-state-cache] %u frames lookups %u adjacent %u reused %u computed %u\n",
@@ -861,6 +863,9 @@ void xd3d_prepare_report(unsigned frames)
         ps_identity_cache.table_hits,ps_identity_cache.misses);
     ps_identity_cache.lookups=ps_identity_cache.adjacent_hits=0;
     ps_identity_cache.table_hits=ps_identity_cache.misses=0;
+    D3DLOG("[material-prep] %u frames colors reused %u expanded %u\n",
+        frames,ps_colors_reused,ps_colors_computed);
+    ps_colors_reused=ps_colors_computed=0;
 }
 static void psdef_load(uint32_t def)
 {
@@ -906,10 +911,15 @@ void xd3d_ps_sync(void)
     }
     if (cache_enabled) xv_ps_identity_lookup(&ps_identity_cache,d,&xd3d_state.ps_hash,&xd3d_state.ps_key);
     else { xd3d_state.ps_hash=psdef_hash(d); xd3d_state.ps_key=xv_ps_program_key(d); }
-    ps_synced=1;
     /* NV2A constants are per stage (UNIQUE_C0/C1, which Halo always sets); PSC0/1Mapping only matters for
      * SetPixelShaderConstant, which Halo never calls.  Layout matches pixelshader_recomp_gen.py's psc[18]. */
-    #define PSC_SET(idx, col) do { uint32_t col_ = (col); float *o_ = xd3d_state.psc[(idx)]; \
+    /* Program changes frequently leave stage colors alone. Compare their exact
+     * packed values, never shader hashes or guest pointers. ps_synced gates the
+     * first expansion (including an all-zero program) and state-reset paths. */
+    #define PSC_SET(idx, col) do { uint32_t col_ = (col); \
+        if (cache_enabled && ps_synced && ps_packed_colors[(idx)] == col_) { ++ps_colors_reused; break; } \
+        ps_packed_colors[(idx)] = col_; ++ps_colors_computed; \
+        float *o_ = xd3d_state.psc[(idx)]; \
         o_[0] = ((col_ >> 16) & 0xFF) / 255.0f; o_[1] = ((col_ >> 8) & 0xFF) / 255.0f; o_[2] = (col_ & 0xFF) / 255.0f; o_[3] = (col_ >> 24) / 255.0f; } while (0)
     for (unsigned i = 0; i < 8; ++i) {
         PSC_SET(i, xd3d_state.ps_shadow[0x28 / 4 + i]);
@@ -918,6 +928,7 @@ void xd3d_ps_sync(void)
     PSC_SET(16, xd3d_state.ps_shadow[0xAC / 4]);
     PSC_SET(17, xd3d_state.ps_shadow[0xB0 / 4]);
     #undef PSC_SET
+    ps_synced=1;
     static uint32_t seen[512]; static unsigned nseen;
     /* This is a bounded diagnostic capture, not a shader cache. Once full,
      * stop before scanning/formatting: uncached hashes otherwise log on every

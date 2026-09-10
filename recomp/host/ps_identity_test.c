@@ -41,6 +41,15 @@ int main(int argc,char **argv)
     /* The first all-zero program still needs its identity and colors resolved. */
     c.r[4]=stack;X_M32(stack+4)=def;
     xv_hle_D3DDevice_SetPixelShaderProgram(&c);assert(xd3d_state.ps_dirty);check();
+    assert(ps_colors_computed==18 && !ps_colors_reused);
+    /* Program-only changes reuse colors; one animated color expands one slot. */
+    xd3d_state.ps_shadow[0]^=1;xd3d_state.ps_dirty=1;check();
+    assert(ps_colors_computed==(argc==1?18u:36u) && ps_colors_reused==(argc==1?18u:0u));
+    xd3d_state.ps_shadow[0xB0/4]=0xfedcba98;xd3d_state.ps_dirty=1;check();
+    assert(ps_colors_computed==(argc==1?19u:54u) && ps_colors_reused==(argc==1?35u:0u));
+    /* A state reset must rebuild even if every packed color matches the cache. */
+    memset(xd3d_state.psc,0xff,sizeof xd3d_state.psc);ps_synced=0;
+    xd3d_state.ps_dirty=1;check();assert(ps_colors_computed==(argc==1?37u:72u));
     memset(&xd3d_state,0,sizeof xd3d_state);ps_synced=0;
     c.r[4]=stack;c.r[1]=0x260;c.r[2]=0;
     xv_hle_D3DDevice_SetRenderState_Simple(&c);assert(xd3d_state.ps_dirty);check();
@@ -79,6 +88,8 @@ int main(int argc,char **argv)
     /* More than 512 distinct programs must not restart logging on every draw.
        All identity/color assertions above still apply after capture saturates. */
     assert(definition_logs == 512 && capture_limit_logs == 1);
+    assert(ps_colors_reused==(argc==1?210035u:0u) && ps_colors_computed>100000);
+    printf("material preparation: %u colors reused, %u expanded\n",ps_colors_reused,ps_colors_computed);
     free(g_xram);free(g_xpt);
     puts("PASS: production shader identity/color sync, 18000 updates, reuse/collisions, repeated state, mutable upload, reset and split pages");
 }

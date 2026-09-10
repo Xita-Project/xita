@@ -9,6 +9,13 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 9 [model/material preparation candidate](docs/model-preparation-20260909.md):
+**Model detail** selects existing character/scenery LODs earlier, with Original
+as the default. Unchanged shader colors now reuse their expanded values. Host,
+owned-map, original-selector and native checks pass; hardware gains are pending.
+These source changes are not in the published September 9 gameplay VPK.
+The reported slow VPK installation also motivates a future shader bundle.
+
 September 9 [tester issue 3](docs/tester-issue-3-20260909.md): the 512-entry shader
 capture list overflowed into repeated per-draw logging. The bounded-capture fix
 passes regression/native checks and is built locally; it is not installed or

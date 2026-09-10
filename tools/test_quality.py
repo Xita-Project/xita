@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix='xita-quality-test-') as directory:
         m=HaloMap(str(ROOT/path),str(ROOT/'.mapcache'))
         original=m.data[m.tag_offset:m.tag_offset+m.tag_size]
         source=d/'input';target=d/'output';source.write_bytes(original)
-        original_env=dict(os.environ,XV_MATERIAL_QUALITY='2',XV_GLOW_QUALITY='2',XV_PARTICLE_QUALITY='2',XV_DECAL_SECONDS='0')
+        original_env=dict(os.environ,XV_MATERIAL_QUALITY='2',XV_GLOW_QUALITY='2',XV_PARTICLE_QUALITY='2',XV_DECAL_SECONDS='0',XV_MODEL_DETAIL='2')
         subprocess.run([str(exe),str(source),str(target)],env=original_env,check=True)
         assert target.read_bytes()==original,(path,'defaults changed tags')
         for quality in (0,1):
