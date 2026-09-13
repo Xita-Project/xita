@@ -26,6 +26,7 @@ const h2_host_channel *h2_host_channel_current(void)
 { return channel_ready ? &channel : NULL; }
 static int software_flip(void *opaque, uint32_t value, uint32_t source);
 static int channel_idle(void);
+static int complete_timed_mode_vblank(xctx *c, uint32_t source);
 extern void xv_logf(const char *, ...);
 extern volatile uint32_t xv_cur_fn;
 extern uint32_t xk_mem_arena_size(void);
@@ -61,6 +62,34 @@ static void call_guest(xctx *c, void (*function)(xctx *), uint32_t ip)
     X_PUSH32(ip);
     function(c);
     if (c->r[4] != stack) reject(c, ip, c->r[4], stack);
+}
+static int game_vblank_inputs_valid(void)
+{
+    return guest_span_valid(0x485AB0, 16) && guest_span_valid(0x55E6B8, 4) &&
+           guest_span_valid(0x4E6400, 32) && X_M16(0x4E6400) < 15 &&
+           X_M32(MINIPORT + 0x190) == 0x12B2A0;
+}
+static void signal_game_vblank(xctx *c, uint32_t count, uint32_t swaps, uint32_t flags,
+                                uint32_t source)
+{
+    /* Callers validate the complete stack and fixed original callback data
+     * before waiting or mutating anything. KeSetEvent precedes the callback. */
+    uint64_t before = X_M32(0x485AB0) | (uint64_t)X_M32(0x485AB4) << 32;
+    xctx interrupt = *c; interrupt.r[4] -= 16;
+    X_M32(interrupt.r[4]) = 0x3FEE5E;
+    X_M32(interrupt.r[4] + 4) = MINIPORT + 0x194;
+    X_M32(interrupt.r[4] + 8) = 1; X_M32(interrupt.r[4] + 12) = 0;
+    xk_KeSetEvent(&interrupt);
+    if (interrupt.r[4] != c->r[4]) reject(c, source, interrupt.r[4], c->r[4]);
+    interrupt = *c; interrupt.preempt = 100000; interrupt.r[4] -= 12;
+    uint32_t record = interrupt.r[4];
+    X_M32(record) = count; X_M32(record + 4) = swaps; X_M32(record + 8) = flags;
+    interrupt.r[4] -= 4; X_M32(interrupt.r[4]) = record;
+    call_guest(&interrupt, f_0012B2A0, 0x3FEE87);
+    uint64_t after = X_M32(0x485AB0) | (uint64_t)X_M32(0x485AB4) << 32;
+    if (after != before + 1) reject(c, source, 0x485AB0, (uint32_t)after);
+    xv_logf("[h2/vblank] original callback=0012B2A0 record=%u,%u,%u game_count=%llu->%llu\n",
+            count, swaps, flags, (unsigned long long)before, (unsigned long long)after);
 }
 static void *map_physical_raw(uint32_t address, uint32_t bytes)
 {
@@ -218,6 +247,12 @@ void __wrap_xk_KeWaitForSingleObject(xctx *c)
     check_stack(c, 0, 5);
     if (X_ARG(0) != MINIPORT + 0x194) { __real_xk_KeWaitForSingleObject(c); return; }
     uint32_t ip = X_M32(c->r[4]), event = MINIPORT + 0x194;
+    if (mode_vblanks == 1) {
+        if (ip != 0x3F9BF7 || X_ARG(1) != 6 || X_ARG(2) != 1 || X_ARG(3) || X_ARG(4) ||
+            !complete_timed_mode_vblank(c, ip)) reject(c, ip, event, 0);
+        __real_xk_KeWaitForSingleObject(c);
+        return;
+    }
     /* Audited first mode-transition wait, before scanout is enabled. Service
      * one real host vblank; general IRQs, callbacks and asynchronous flips are
      * still unsupported. Other kernel waits use the original implementation. */
@@ -285,7 +320,8 @@ void __wrap_xk_AvSetDisplayMode(xctx *c)
 {
     check_stack(c, 0, 6);
     uint32_t ip = X_M32(c->r[4]), address = X_ARG(5);
-    if (!initialization_flip_done || mode_vblanks != 1 || display_mode_set || !channel_idle() ||
+    if (!initialization_flip_done || (mode_vblanks != 1 && mode_vblanks != 2) ||
+        display_mode_set || !channel_idle() ||
         X_ARG(0) != BAR || X_ARG(1) || X_ARG(2) != 0x88070701 || X_ARG(3) != 0x12 || X_ARG(4) != 2560 ||
         (address & 15) || gamma_cursor != 768 || !av_config.has_flicker || av_config.flicker_filter != 5 ||
         !av_config.has_luma || av_config.luma_filter ||
@@ -453,9 +489,7 @@ static int complete_initialization_vblank(xctx *c, uint32_t source)
     if (!initialization_flip_queued || initialization_flip_done || software_active ||
         display_mode_set || mode_vblanks || c->r[4] < 512 ||
         !guest_span_valid(c->r[4] - 512, 512) || !guest_span_valid(MINIPORT, 0x7E4) ||
-        !guest_span_valid(0x408650, 4) || !guest_span_valid(0x485AB0, 16) ||
-        !guest_span_valid(0x55E6B8, 4) || !guest_span_valid(0x4E6400, 32) ||
-        X_M16(0x4E6400) >= 15 || X_M32(MINIPORT) != BAR ||
+        !guest_span_valid(0x408650, 4) || !game_vblank_inputs_valid() || X_M32(MINIPORT) != BAR ||
         X_M32(MINIPORT + 4) != 2560 || X_M32(MINIPORT + 8) != 0x88070701 ||
         X_M32(MINIPORT + 0x1B4) != 0x00480104 || X_M32(MINIPORT + 0x1B8) != 1 ||
         X_M32(MINIPORT + 0x174) != 1 || X_M32(MINIPORT + 0x178) != 1 ||
@@ -483,7 +517,6 @@ static int complete_initialization_vblank(xctx *c, uint32_t source)
         return 0; /* guest queue, CPU state and pending parser word untouched */
     }
     uint32_t saved_fn = xv_cur_fn;
-    uint64_t game_vblank_before = X_M32(0x485AB0) | (uint64_t)X_M32(0x485AB4) << 32;
     xctx interrupt = *c;
     interrupt.preempt = 100000;
     software_active = 1; gamma_cursor = 0;
@@ -501,24 +534,48 @@ static int complete_initialization_vblank(xctx *c, uint32_t source)
      * Signal the actual event before the original cdecl callback, as 3FED90
      * does. Its 12-byte record is {vblank count, retired swap count, flags}. */
     X_M32(MINIPORT + 0x1D0) = 0;
-    interrupt = *c; interrupt.r[4] -= 16;
-    X_M32(interrupt.r[4]) = 0x3FEE5E;
-    X_M32(interrupt.r[4] + 4) = MINIPORT + 0x194;
-    X_M32(interrupt.r[4] + 8) = 1; X_M32(interrupt.r[4] + 12) = 0;
-    xk_KeSetEvent(&interrupt);
-    if (interrupt.r[4] != c->r[4]) reject(c, source, interrupt.r[4], c->r[4]);
-    interrupt = *c; interrupt.preempt = 100000; interrupt.r[4] -= 12;
-    uint32_t record = interrupt.r[4];
-    X_M32(record) = 1; X_M32(record + 4) = 1; X_M32(record + 8) = 1;
-    interrupt.r[4] -= 4; X_M32(interrupt.r[4]) = record;
-    call_guest(&interrupt, f_0012B2A0, 0x3FEE87);
-    uint64_t game_vblank_after = X_M32(0x485AB0) | (uint64_t)X_M32(0x485AB4) << 32;
-    if (game_vblank_after != game_vblank_before + 1)
-        reject(c, source, 0x485AB0, (uint32_t)game_vblank_after);
+    signal_game_vblank(c, 1, 1, 1, source);
     active_context = c; xv_cur_fn = saved_fn; software_active = 0;
     initialization_flip_queued = 0; initialization_flip_done = 1; mode_vblanks = 1;
-    xv_logf("[h2/vblank] real Vita vcount=%u->%u retired initialization address=%08X; original callback=0012B2A0 record=1,1,1 game_count=%llu->%llu, scanout disabled\n",
-            before, after, address, (unsigned long long)game_vblank_before, (unsigned long long)game_vblank_after);
+    xv_logf("[h2/vblank] real Vita vcount=%u->%u retired initialization address=%08X; scanout disabled\n",
+            before, after, address);
+    h2_platform_fpscr_write(saved_fpscr);
+    return 1;
+}
+static int complete_timed_mode_vblank(xctx *c, uint32_t source)
+{
+    /* Native63's caller reset the event after the interval-one flip retired.
+     * This is exactly the next empty-queue vblank, before applying 480p mode. */
+    if (!initialization_flip_done || initialization_flip_queued || software_active ||
+        display_mode_set || mode_vblanks != 1 || !channel_idle() || c->r[4] < 512 ||
+        !guest_span_valid(c->r[4] - 512, 512) || !guest_span_valid(MINIPORT, 0x7E4) ||
+        !game_vblank_inputs_valid() || X_M32(MINIPORT) != BAR ||
+        X_M32(MINIPORT + 8) != 0x88070701 || X_M32(MINIPORT + 0x1B4) != 0x00480104 ||
+        X_M32(MINIPORT + 0x174) || X_M32(MINIPORT + 0x180) || X_M32(MINIPORT + 0x18C) ||
+        X_M32(MINIPORT + 0x194) != 0x00040000 || X_M32(MINIPORT + 0x198) ||
+        X_M32(MINIPORT + 0x1B8) != 1 || X_M32(MINIPORT + 0x1BC) != 1 ||
+        X_M32(MINIPORT + 0x1C0) != 1 || X_M32(MINIPORT + 0x1C4) != 2 ||
+        X_M32(MINIPORT + 0x1C8) != 1 || X_M32(MINIPORT + 0x1CC) != 1 ||
+        X_M32(MINIPORT + 0x1D0) || X_M32(MINIPORT + 0x1D4) || !X_M32(MINIPORT + 0x1D8) ||
+        X_M32(MINIPORT + 0x7DC) || X_M32(MINIPORT + 0x7E0) || gamma_cursor != 768 ||
+        channel.commands.flip_read != 1 || channel.commands.flip_write || channel.commands.flip_modulo != 2)
+        return 0;
+    uint32_t saved_fpscr = h2_platform_fpscr_read(), before, after;
+    int status = h2_platform_wait_vblank(&before, &after);
+    if (status < 0 || before == after) { h2_platform_fpscr_write(saved_fpscr); return 0; }
+    uint32_t timestamp = (uint32_t)x_rdtsc(), saved_fn = xv_cur_fn;
+    X_M32(MINIPORT + 0x1D4) = timestamp - X_M32(MINIPORT + 0x1D8);
+    X_M32(MINIPORT + 0x1D8) = timestamp; X_M32(MINIPORT + 0x1C0) = 2;
+    xctx interrupt = *c; interrupt.preempt = 100000; interrupt.r[6] = MINIPORT;
+    software_active = 1;
+    call_guest(&interrupt, f_003FECC0, source);
+    if (interrupt.r[0]) reject(c, source, MINIPORT, interrupt.r[0]);
+    /* Original 3FEDE3: no retirement and counter==deadline advances the next
+     * requested count and delivers flags=2 to the original game callback. */
+    X_M32(MINIPORT + 0x1C4) = 3;
+    signal_game_vblank(c, 2, 1, 2, source);
+    active_context = c; xv_cur_fn = saved_fn; software_active = 0; mode_vblanks = 2;
+    xv_logf("[h2/vblank] real Vita vcount=%u->%u delivered second mode-transition vblank; queue empty, scanout disabled\n", before, after);
     h2_platform_fpscr_write(saved_fpscr);
     return 1;
 }

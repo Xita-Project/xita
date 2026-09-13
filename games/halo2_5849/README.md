@@ -4,7 +4,7 @@ This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
 `5849` identifies the linked XDK library build, not an asserted game build number.
 
-The [latest native checkpoint and exact private replay command](../../docs/halo2-initialization-vblank.md)
+The [latest native checkpoint and exact private replay command](../../docs/halo2-original-error-screen.md)
 describe the current normal and diagnostic startup stops. There is no main menu.
 
 A separate [native startup target](../../docs/halo2-native-boot-20260912.md)
@@ -65,7 +65,8 @@ The separate `--host-channel --audio-unavailable` diagnostic selects the
 It returns an explicit error at public sound creation, creates no audio object,
 and now executes original deferred timer callbacks with the corrected kernel
 ABI, runs a limited native FP mask/clear bridge, executes original state interfaces, then stops at an unsupported
-second initialization vblank wait after retiring the first timed flip. Earlier
+flicker-filter change after presenting the original disc-error screen.
+The cause of that game error is still under investigation. Earlier
 texture-state progress followed an incorrectly balanced timer return; the
 current checkpoint documents this limitation. It supplies
 no audio, additional rendering or menu; the ordinary profile is unchanged.

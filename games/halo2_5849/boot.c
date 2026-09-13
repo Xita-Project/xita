@@ -152,6 +152,22 @@ int h2_platform_blank(int blank)
 }
 static void graphics_snapshot(void)
 {
+    /* Stop-only capture: keep the latest successfully presented buffer without
+     * adding file I/O to recurring presentation. It can remain stored while
+     * the display is blanked; this records the last presented frame, not an
+     * assertion about current scanout enable state. */
+    if (presented_frames && active_display.base) {
+        FILE *frame = fopen("ux0:data/xita-halo2/last-presented-at-stop.bin", "wb");
+        if (frame) {
+            uint32_t header[4] = {active_display.width, active_display.height,
+                                  active_display.pitch * 4, presented_frames};
+            int complete = fwrite(header, 1, sizeof header, frame) == sizeof header &&
+                           fwrite(active_display.base, 1, H2_DISPLAY_BYTES, frame) == H2_DISPLAY_BYTES;
+            int closed = fclose(frame);
+            xv_logf("[h2/display] private last-presented snapshot frame=%u complete=%d\n",
+                    presented_frames, complete && !closed);
+        }
+    }
     const h2_host_channel *channel = h2_host_channel_current ? h2_host_channel_current() : NULL;
     if (channel) {
         FILE *state = fopen("ux0:data/xita-halo2/channel-at-stop.json", "wb");

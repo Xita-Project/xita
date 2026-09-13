@@ -103,7 +103,15 @@ void f_003FF240(xctx *c)
 }
 void f_003FECC0(xctx *c)
 {
-    assert(timed_test && c->r[6] == 0x406C08 && X_M32(0x406C08 + 0x1C0) == 1);
+    assert(timed_test && c->r[6] == 0x406C08);
+    if (X_M32(0x406C08 + 0x1C0) == 2) {
+        assert(!X_M32(0x406C08 + 0x174) && !X_M32(0x406C08 + 0x180));
+        ++retire_calls;
+        uint32_t stack = c->r[4]; memset(c, 0xB7, sizeof *c);
+        c->r[4] = stack; c->r[0] = 0; native_fpscr = 0xCAFEBABE; X_RET(0);
+        return;
+    }
+    assert(X_M32(0x406C08 + 0x1C0) == 1);
     assert(X_M32(0x406C08 + 0x174) == 1 && X_M32(0x406C08 + 0x178) == 1);
     ++retire_calls;
     h2_bus_write8(c, 0x3FF5CE, 0xFD6813C8, 0);
@@ -118,7 +126,8 @@ void f_003FECC0(xctx *c)
 void f_0012B2A0(xctx *c)
 {
     uint32_t record = X_ARG(0);
-    assert(event_calls == 1 && X_M32(record) == 1 && X_M32(record + 4) == 1 && X_M32(record + 8) == 1);
+    assert((event_calls == 1 || event_calls == 2) && X_M32(record) == event_calls &&
+           X_M32(record + 4) == 1 && X_M32(record + 8) == event_calls);
     assert(X_M32(0x406C08 + 0x1BC) == 1 && X_M32(0x408650) == 0x300000);
     ++callback_calls; ++X_M32(0x485AB0);
     uint32_t stack = c->r[4]; memset(c, 0xE3, sizeof *c);
@@ -344,7 +353,30 @@ int main(int argc, char **argv)
         assert(X_M32(0x406C08 + 0x1C0) == 1 && X_M32(0x406C08 + 0x1BC) == 1);
         assert(X_M32(0x406C08 + 0x174) == 0 && X_M32(0x406C08 + 0x7DC) == 0);
         assert(X_M32(0x485AB0) == 1 && h2_bus_read32(&c, 0, 0xFD800044) == put);
-        puts("Host-channel timed initialization: real-vblank failure isolation, original queue/callback ABI and parser retry pass.");
+        c.r[4] = 0x600000; X_M32(c.r[4]) = 0x3F9BF7;
+        X_M32(c.r[4] + 4) = 0x406D9C; X_M32(c.r[4] + 8) = 6;
+        X_M32(c.r[4] + 12) = 1; X_M32(c.r[4] + 16) = X_M32(c.r[4] + 20) = 0;
+        X_M32(0x406DA0) = 0; interrupted = c;
+        vblank_result = -1;
+        if (!setjmp(fault)) { __wrap_xk_KeWaitForSingleObject(&c); assert(0); }
+        assert(vblank_calls == 4 && callback_calls == 1 && !wait_calls && native_fpscr == 0x60000011);
+        assert(!memcmp(&c, &interrupted, sizeof c) && X_M32(0x406C08 + 0x1C0) == 1);
+        vblank_result = 0; vblank_delta = 0;
+        if (!setjmp(fault)) { __wrap_xk_KeWaitForSingleObject(&c); assert(0); }
+        assert(vblank_calls == 5 && event_calls == 1 && !wait_calls);
+        vblank_delta = 1; __wrap_xk_KeWaitForSingleObject(&c);
+        interrupted.r[0] = 0; interrupted.r[4] += 24;
+        assert(vblank_calls == 6 && callback_calls == 2 && event_calls == 2 && retire_calls == 2 && wait_calls == 1);
+        assert(!memcmp(&c, &interrupted, sizeof c) && native_fpscr == 0x60000011);
+        assert(X_M32(0x485AB0) == 2 && X_M32(0x406C08 + 0x1C0) == 2);
+        assert(X_M32(0x406C08 + 0x1C4) == 3 && X_M32(0x406DA0) == 1 && !present_calls);
+        c.r[4] = 0x600000; X_M32(c.r[4]) = 0x3F9C0F;
+        X_M32(c.r[4] + 4) = 0xFD000000; X_M32(c.r[4] + 8) = 0;
+        X_M32(c.r[4] + 12) = 0x88070701; X_M32(c.r[4] + 16) = 0x12;
+        X_M32(c.r[4] + 20) = 2560; X_M32(c.r[4] + 24) = 0x300000;
+        __wrap_xk_AvSetDisplayMode(&c);
+        assert(present_calls == 1 && c.r[0] == 0 && c.r[4] == 0x60001C);
+        puts("Host-channel timed initialization: two real vblank contracts, callback ABI, parser retry and mode presentation pass.");
         free(g_xpt); free(g_xram); return 0;
     }
     assert(X_M32(0x408650) == 0x300000 && X_M32(0x406C08 + 0x1BC) == 1);
