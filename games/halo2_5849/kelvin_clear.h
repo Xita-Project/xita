@@ -16,7 +16,8 @@ typedef struct h2_kelvin_clear {
     uint8_t channel, has_object, has_color_dma, has_zeta_dma;
 } h2_kelvin_clear;
 /* map_physical must validate the whole requested RAM span before returning a
- * stable writable pointer, or return NULL without mutation. */
+ * stable writable pointer, or return NULL without mutation. The consumer checks
+ * both physical and returned host spans for overlap; injectivity is not assumed. */
 int h2_kelvin_clear_init(h2_kelvin_clear *state, h2_instance_read read_instance,
                          h2_physical_map map_physical, void *opaque,
                          uint32_t physical_bytes, uint8_t channel);

@@ -11,7 +11,7 @@ resolves its color/depth DMA handles, records surface/clear state and executes
 synchronous CPU clears into physical RAM. It supports origin-zero, linear ARGB8
 and Z24S8 surfaces, inclusive clear rectangles wholly inside the surface, per-color
 component masks, and independent depth/stencil masks. Each attachment's full span
-is validated before either is written. Overlapping attachments, bad DMA direction
+is validated before either is written. Overlapping physical or returned host attachment spans, bad DMA direction
 or limits, invalid rectangles and unavailable physical mappings reject without
 changing framebuffer bytes or consumer state.
 
@@ -34,7 +34,7 @@ The synthetic integration test sends real packet encodings through the parser,
 RAMHT/DMA resolver and consumer, then compares every RAM word, including row
 padding and surrounding guards. It verifies partial color/depth/stencil clears,
 last-row bounds, read-only/wrong handles, duplicate objects, unsupported layouts,
-second-attachment mapping failure, alias rejection and exact parser stop position.
+second-attachment mapping failure, physical/host alias rejection and exact parser stop position.
 All eight Halo 2 host executables, clear-consumer ASan/UBSan and ARM cross-compile
 pass. No CE runtime or profile changes are included.
 

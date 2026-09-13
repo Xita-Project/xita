@@ -37,7 +37,7 @@ static int map_target(const h2_kelvin_clear *state, uint32_t instance, uint32_t 
                                             state->physical_bytes, &target->physical)) return 0;
     target->bytes = bytes; target->pitch = pitch;
     target->data = state->map_physical(state->opaque, target->physical, target->bytes);
-    return target->data != NULL;
+    return target->data != NULL && target->bytes <= UINTPTR_MAX - (uintptr_t)target->data;
 }
 
 static int clear_surface(h2_kelvin_clear *state, uint32_t flags)
@@ -71,6 +71,8 @@ static int clear_surface(h2_kelvin_clear *state, uint32_t flags)
     /* Aliased attachments need separately established ordering semantics. */
     if (count == 2 && (uint64_t)targets[0].physical < (uint64_t)targets[1].physical + targets[1].bytes &&
         (uint64_t)targets[1].physical < (uint64_t)targets[0].physical + targets[0].bytes) return 0;
+    if (count == 2 && (uintptr_t)targets[0].data < (uintptr_t)targets[1].data + targets[1].bytes &&
+        (uintptr_t)targets[1].data < (uintptr_t)targets[0].data + targets[0].bytes) return 0;
     for (unsigned i = 0; i < count; ++i) {
         target *t = &targets[i];
         for (uint32_t y = ymin; y <= ymax; ++y) {

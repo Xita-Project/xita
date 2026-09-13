@@ -7,6 +7,7 @@
 typedef struct fixture {
     uint32_t instance[0x5000 / 4], push[64], fail_map;
     unsigned push_count;
+    uint32_t alias_map;
     uint8_t ram[4096];
     h2_kelvin_clear consumer;
 } fixture;
@@ -20,6 +21,7 @@ static void *map_physical(void *opaque, uint32_t address, uint32_t bytes)
 {
     fixture *f = opaque;
     if (address == f->fail_map || address > sizeof f->ram || bytes > sizeof f->ram - address) return NULL;
+    if (address == 0x300 && f->alias_map) return f->ram + f->alias_map;
     return f->ram + address;
 }
 static int push_read(void *opaque, uint32_t address, uint32_t *word)
@@ -92,6 +94,9 @@ int main(void)
     assert(pixel(&f, 0x31C) == 0x11223344 && pixel(&f, 0x11C) == 0x12DD56BB);
     /* Validate both targets before writing either, even when the second mapping fails. */
     f.fail_map = 0x300; rejected(&f, 0x1D94, 0xF3); f.fail_map = 0;
+    f.alias_map = 0x110; rejected(&f, 0x1D94, 0xF3); /* distinct physical, overlapping host spans */
+    f.alias_map = 0x100; rejected(&f, 0x1D94, 0xF3); /* exact host alias */
+    f.alias_map = 0;
     inst(&f, 0x11134, 62); rejected(&f, 0x1D94, 0xF3); inst(&f, 0x11134, 63);
     dma(&f, 4, 0x11130, 0x100, 63); rejected(&f, 0x1D94, 0xF3); dma(&f, 4, 0x11130, 0x300, 63);
     rejected(&f, 0x1D94, 4); rejected(&f, 0x1D98, 0xF0000000); rejected(&f, 0x1810, 1);
