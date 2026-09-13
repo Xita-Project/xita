@@ -15,6 +15,7 @@
 #include "kernel/xk.h"
 #include "cache_volume.h"
 #include "gpu_bus.h"
+#include "instance_memory.h"
 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
 uint8_t *g_xram;
@@ -159,6 +160,9 @@ int main(void)
             base, size, arena_size, xv_entry_point, xv_game_tls_dir);
     if (h2_cache_mounts() != 0) {
         xv_logf("[h2/blocked] private cache volume provisioning failed\n"); return 7;
+    }
+    if (h2_instance_memory_init() != 0) {
+        xv_logf("[h2/blocked] GPU instance range reservation failed\n"); return 8;
     }
     xk_init(base, size, xv_game_tls_dir, "ux0:data/xita-halo2/game", "ux0:data/xita-halo2/save");
     xk_file_set_ce_adapter_enabled(0);

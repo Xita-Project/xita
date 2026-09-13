@@ -102,6 +102,13 @@ enum h2_nv2a_result h2_nv2a_read32(const h2_nv2a *device, uint32_t offset, uint3
     case 0x001808: result = 0x030000A1u; break; /* VGA class, NV2A revision A1 */
     case 0x00180C: result = device->pci_latency; break;
     case 0x001830: result = device->pci_rom; break;
+    case 0x001218: result = 0; break; /* PBUS FBIO_RAM: DDR (bit 8 clear) */
+    case 0x100200: /* virtual four 32-bit partitions, one rank */
+        if (device->memory_bytes != 0x4000000u) return H2_NV2A_UNSUPPORTED_OPERATION;
+        result = 3; break;
+    case 0x100204: /* 9 column bits, 11 row bits, four banks: 64 MiB total */
+        if (device->memory_bytes != 0x4000000u) return H2_NV2A_UNSUPPORTED_OPERATION;
+        result = 0x01039000u; break;
     case 0x10020C: result = device->memory_bytes; break; /* PFB CSTATUS */
     case 0x600140: result = device->crtc_interrupt_enable; break;
     case 0x009100: result = device->timer_pending; break;
@@ -178,7 +185,8 @@ enum h2_nv2a_result h2_nv2a_write32(h2_nv2a *device, uint32_t offset, uint32_t v
         if (value) return H2_NV2A_UNSUPPORTED_OPERATION; /* no timer/alarm source yet */
         device->timer_interrupt_enable = 0;
         return H2_NV2A_OK;
-    case 0x001800: case 0x001808: case 0x10020C:
+    case 0x001800: case 0x001808: case 0x001218:
+    case 0x100200: case 0x100204: case 0x10020C:
         return H2_NV2A_UNSUPPORTED_OPERATION; /* read-only identity/memory size */
     default: return H2_NV2A_UNKNOWN_REGISTER;
     }

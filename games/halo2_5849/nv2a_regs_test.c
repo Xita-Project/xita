@@ -17,6 +17,13 @@ int main(void)
     assert(read_value(&device, 0x1800) == 0x02A010DE);
     assert(read_value(&device, 0x1808) == 0x030000A1);
     assert(read_value(&device, 0x10020C) == 0x4000000);
+    assert(read_value(&device, 0x1218) == 0); /* DDR */
+    uint32_t cfg0 = read_value(&device, 0x100200), cfg1 = read_value(&device, 0x100204);
+    unsigned partitions = (cfg0 & 3) + 1, columns = (cfg1 >> 12) & 15;
+    unsigned rows = ((cfg1 >> 16) & 15) + 8, banks = 2u << ((cfg1 >> 24) & 1);
+    assert(partitions * 4u * banks * (1u << (columns + rows)) == read_value(&device, 0x10020C));
+    assert(h2_nv2a_write32(&device, 0x100204, 0) == H2_NV2A_UNSUPPORTED_OPERATION);
+    assert(read_value(&device, 0x100204) == cfg1);
     assert(read_value(&device, 0x1804) == 2);
     assert(h2_nv2a_write32(&device, 0x1804, read_value(&device, 0x1804) | 4) == H2_NV2A_OK);
     assert(read_value(&device, 0x1804) == 6);
