@@ -4,6 +4,9 @@ void h2_host_miniport_init(xctx *c);
 void h2_host_miniport_shutdown(xctx *c);
 void h2_host_channel_configure(xctx *c);
 void h2_host_memory_barrier(xctx *c);
+/* Stopped-thread diagnostics only; no guest memory access or submission. */
+struct h2_host_channel;
+const struct h2_host_channel *h2_host_channel_current(void);
 void h2_host_tile_remove(xctx *c);
 void h2_host_tile_configure(xctx *c);
 /* Desired encoder settings. The implemented digital 480p scanout requires

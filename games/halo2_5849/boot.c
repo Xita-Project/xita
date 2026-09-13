@@ -20,6 +20,8 @@
 #include "instance_memory.h"
 #include "scanout.h"
 #include "input.h"
+#include "command_snapshot.h"
+extern const h2_host_channel *h2_host_channel_current(void) __attribute__((weak));
 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
 uint8_t *g_xram;
@@ -147,6 +149,15 @@ int h2_platform_blank(int blank)
 }
 static void graphics_snapshot(void)
 {
+    const h2_host_channel *channel = h2_host_channel_current ? h2_host_channel_current() : NULL;
+    if (channel) {
+        FILE *state = fopen("ux0:data/xita-halo2/channel-at-stop.json", "wb");
+        if (state) {
+            int complete = h2_command_snapshot(state, channel);
+            int closed = fclose(state);
+            xv_logf("[h2/graphics] private decoded channel snapshot complete=%d\n", complete && !closed);
+        }
+    }
     /* Diagnostic state from the pinned image's static device. This file may
      * contain owned game data and belongs only in the private emulator lab. */
     static uint8_t device[0x24A0];
