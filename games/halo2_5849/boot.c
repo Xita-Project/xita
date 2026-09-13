@@ -54,6 +54,7 @@ void xv_logf(const char *fmt, ...)
     if (log_fd >= 0) sceIoWrite(log_fd, buffer, length);
 }
 void xv_log_flush(void) { if (log_fd >= 0) sceIoSyncByFd(log_fd, 0); }
+uint64_t h2_graphics_time_us(void) { return sceKernelGetSystemTimeWide(); }
 void h2_graphics_stop(xctx *context, uint32_t instruction, uint32_t address,
                       uint32_t value, int write, int reason)
 {

@@ -69,6 +69,8 @@ class Halo2Bus(unittest.TestCase):
 uint8_t *g_xram, *g_img_base;
 uint32_t *g_xpt;
 static jmp_buf escape;
+static uint64_t now_us;
+uint64_t h2_graphics_time_us(void) { return now_us; }
 static uint32_t stopped_ip, stopped_address;
 static int stopped_write, stopped_reason;
 void xv_logf(const char *format, ...) { (void)format; }
@@ -107,6 +109,9 @@ int main(void)
     c.r[1] = 0x1FFF; f_000110A0(&c); assert(c.r[0] == 0x2345);
     c.r[1] = 0x2001; f_00011090(&c); assert(c.r[1] == 0xF1);
     assert(xf_eflags(&c) == flags);
+    now_us = 1000000;
+    c.r[1] = 0xFD009410; f_00011040(&c); assert(c.r[0] == 1);
+    c.r[1] = 0xFD009400; f_00011040(&c); assert(c.r[0] == 0xBD0C4980);
     /* Unsupported reads/writes report the actual instruction and do not run on. */
     c.r[1] = 0xFD600140; c.r[2] = 1;
     if (!setjmp(escape)) { f_00011050(&c); abort(); }
