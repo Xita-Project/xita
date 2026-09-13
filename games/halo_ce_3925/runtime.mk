@@ -8,3 +8,6 @@ XITA_GAME_SRCS := recomp/kernel/xk_quality.c recomp/kernel/xk_math.c \
 ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
 XITA_GAME_SRCS += recomp/kernel/xk_palette.c
 endif
+ifeq ($(XV_QUAT_CACHE),1)
+XITA_GAME_SRCS += recomp/kernel/xk_quat_cache.c
+endif

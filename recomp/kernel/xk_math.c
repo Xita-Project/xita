@@ -2,6 +2,9 @@
  * unusual layouts use the unchanged lifted function without side effects. */
 #include "xk.h"
 #include <stdlib.h>
+#ifdef XV_QUAT_CACHE
+#include "xk_quat_cache.h"
+#endif
 
 static unsigned math_fast[2], math_fallback[2];
 enum { ML_DISJOINT, ML_LEFT, ML_RIGHT, ML_BOTH, ML_DISABLED, ML_ALIGNMENT,
@@ -31,6 +34,9 @@ static int math_overlap(const void *a, unsigned an, const void *b, unsigned bn)
 }
 void xv_native_math_report(unsigned frames)
 {
+#ifdef XV_QUAT_CACHE
+    xv_quat_cache_report(frames);
+#endif
 #ifdef XV_NATIVE_MODEL_PALETTE
     extern void xv_model_palette_report(unsigned);
     xv_model_palette_report(frames);
@@ -122,6 +128,12 @@ int xv_math_quaternion_matrix(xctx *restrict c)
         math_overlap(scratch_out,24,constants,0xA0u)) {
         math_fallback[1]++; return 0;
     }
+#ifdef XV_QUAT_CACHE
+    xv_quat_cache_request cache_request;
+    if (xv_quat_cache_restore(c,ip,output,scratch_out,constants,&cache_request)) {
+        c->r[4]=sp+4; math_fast[1]++; return 1;
+    }
+#endif
     float input[4], scratch[6];
     memcpy(input,ip,sizeof input);
     double s0=c->st[(fp+0)&7u];
@@ -232,6 +244,9 @@ L_000B5FA9:
     c->st[(fp+5)&7u]=s5;
     c->st[(fp+6)&7u]=s6;
     c->st[(fp+7)&7u]=s7;
+#ifdef XV_QUAT_CACHE
+    xv_quat_cache_store(c,output,scratch_out,&cache_request);
+#endif
     c->r[4]=sp+4;
     math_fast[1]++;
     return 1;

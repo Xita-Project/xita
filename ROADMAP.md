@@ -9,6 +9,12 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 13 [quaternion reuse experiment](docs/quaternion-reuse-experiment-20260913.md):
+an optional exact-value cache passes original/native equivalence and 1,920
+Cortex-A9 execution cases. Emulator caller counts show useful reuse alongside
+costly misses; hardware benefit is unresolved, so it remains off by default.
+Larger scene/object workloads and stable 20 FPS remain the priority.
+
 September 13 [model matrix batch experiment](docs/model-palette-batch-20260913.md):
 an opt-in native loop avoids repeated guest-call and intermediate register-state
 work. Original-code comparisons, sanitizer tests, 288 Cortex-A9 execution cases,
