@@ -207,6 +207,7 @@ void xv_boot_missing_kernel(xctx *c, const char *name)
             name, xv_cur_fn, X_M32(c->r[4]), c->r[0], c->r[4]);
     xv_log_flush();
     sceKernelExitProcess(21);
+    for (;;) sceKernelDelayThread(1000);
 }
 void __wrap_xv_unimpl(xctx *c, uint32_t address, const char *name)
 {
@@ -214,6 +215,7 @@ void __wrap_xv_unimpl(xctx *c, uint32_t address, const char *name)
             name, address, xv_cur_fn, c->r[0], c->r[1], c->r[4]);
     xv_log_flush();
     sceKernelExitProcess(22);
+    for (;;) sceKernelDelayThread(1000);
 }
 void xv_runtime_trap(xctx *c, uint32_t address)
 {
@@ -222,6 +224,7 @@ void xv_runtime_trap(xctx *c, uint32_t address)
     graphics_snapshot();
     xv_log_flush();
     sceKernelExitProcess(23);
+    for (;;) sceKernelDelayThread(1000);
 }
 
 int main(void)

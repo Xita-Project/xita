@@ -62,6 +62,14 @@ def main():
             roots.add(target)
     if args.host_channel:
         roots.update(host_channel_callback_roots(image))
+        # Native attempt 35: application creator 0x120A90 pushes 0x120C30
+        # at 0x120B0E and calls XAPI thread creation at 0x120B3D. The native
+        # worker dispatch reaches that exact entry. Whole-image gate above.
+        roots.add(0x120C30)
+        # Attempt 36 dispatches the allocator's slot zero at 0x453308.
+        # The two-slot vtable contains allocate/free; the following bytes are
+        # string data. Keep the whole-image revision guard and exact bounds.
+        roots.update(image.u32(slot) for slot in (0x453308, 0x45330C))
     output = args.out.resolve()
     generated = output / "generated"
     profile = str(Path(__file__).with_name("graphics-profile.json")) if args.graphics else "halo2_5849"
