@@ -16,13 +16,17 @@ LIBS := -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceSysmem_stub -lSceProc
 .DEFAULT_GOAL := all
 .PHONY: all test-host
 all: $(BUILD)/halo2-boot.vpk
-test-host: $(BUILD)/push_stream_test $(BUILD)/nv2a_memory_test $(BUILD)/instance_memory_test $(BUILD)/cache_volume_test $(BUILD)/nv2a_regs_test $(BUILD)/nv2a_timer_test
+test-host: $(BUILD)/gpu_objects_test $(BUILD)/push_stream_test $(BUILD)/nv2a_memory_test $(BUILD)/instance_memory_test $(BUILD)/cache_volume_test $(BUILD)/nv2a_regs_test $(BUILD)/nv2a_timer_test
+	$(BUILD)/gpu_objects_test
 	$(BUILD)/push_stream_test
 	$(BUILD)/nv2a_memory_test
 	$(BUILD)/instance_memory_test
 	$(BUILD)/cache_volume_test
 	$(BUILD)/nv2a_regs_test
 	$(BUILD)/nv2a_timer_test
+$(BUILD)/gpu_objects_test: gpu_objects_test.c gpu_objects.c gpu_objects.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror gpu_objects_test.c gpu_objects.c -o $@
 $(BUILD)/push_stream_test: push_stream_test.c push_stream.c push_stream.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror push_stream_test.c push_stream.c -o $@
