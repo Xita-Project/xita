@@ -36,6 +36,8 @@ class Halo2Bus(unittest.TestCase):
                 0x11050: "8911c3",  # [ECX] <- EDX
                 0x11060: "a1041800fdc3",  # absolute PCI command read
                 0x11070: "8b09c3",  # address register aliases destination
+                0x11090: "0fb609c3",  # MOVZX ECX, byte [ECX], address/destination alias
+                0x110A0: "0fb701c3",  # MOVZX EAX, word [ECX]
                 0x11080: "894908c3",  # store address register as data
             }
             for address, code in programs.items():
@@ -97,6 +99,14 @@ int main(void)
     assert(g_xram[0x2000] == 0x23 && g_xram[0x2001] == 0xF1);
     c.r[1] = 0x1100; f_00011080(&c);
     c.r[1] += 8; f_00011040(&c); assert(c.r[0] == 0x1100);
+    /* Zero extension extracts little-endian byte lanes without changing flags. */
+    uint32_t flags = xf_eflags(&c);
+    c.r[1] = 0xFD680509; f_00011090(&c); assert(c.r[1] == 0xC2);
+    assert(xf_eflags(&c) == flags);
+    c.r[1] = 0xFD680508; f_000110A0(&c); assert(c.r[0] == 0xC20D);
+    c.r[1] = 0x1FFF; f_000110A0(&c); assert(c.r[0] == 0x2345);
+    c.r[1] = 0x2001; f_00011090(&c); assert(c.r[1] == 0xF1);
+    assert(xf_eflags(&c) == flags);
     /* Unsupported reads/writes report the actual instruction and do not run on. */
     c.r[1] = 0xFD600140; c.r[2] = 1;
     if (!setjmp(escape)) { f_00011050(&c); abort(); }

@@ -11,6 +11,14 @@ def lower_bus_mov(emitter, instruction, output):
     touch MMIO. This is deliberately not a general instruction/device emulator.
     """
     ins = instruction
+    if (ins.mnemonic == Mnemonic.MOVZX and emitter.op_size(ins, 0) == 4 and
+            ins.op0_kind == OpKind.REGISTER and ins.op1_kind == OpKind.MEMORY):
+        width = emitter.op_size(ins, 1)
+        if width not in (1, 2):
+            return False
+        output.append(f"    {{ extern uint32_t h2_bus_read{width * 8}(xctx *, uint32_t, uint32_t); "
+                      f"{emitter.operand(ins, 0, 4)} = h2_bus_read{width * 8}(c, 0x{ins.ip:X}u, {emitter.addr(ins)}); }}")
+        return True
     if ins.mnemonic != Mnemonic.MOV or emitter.op_size(ins, 0) != 4:
         return False
     if ins.op0_kind == OpKind.MEMORY:

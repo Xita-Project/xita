@@ -11,28 +11,35 @@ void h2_gpu_bus_reset(uint32_t physical_memory_bytes)
     accesses = 0;
 }
 
-static int is_mmio(uint32_t address)
+static int is_mmio(uint32_t address, unsigned width)
 {
     /* Include scalar accesses that would straddle the BAR's lower boundary. */
-    return address >= 0xFCFFFFFDu && address < 0xFE000000u;
+    return address >= 0xFD000000u - (width - 1) && address < 0xFE000000u;
 }
 
-uint32_t h2_bus_read32(xctx *context, uint32_t instruction, uint32_t address)
+static uint32_t bus_read(xctx *context, uint32_t instruction, uint32_t address, unsigned width)
 {
-    uint32_t value;
-    if (!is_mmio(address)) {
-        x_guest_read(&value, address, sizeof value);
+    uint32_t value = 0;
+    if (!is_mmio(address, width)) {
+        x_guest_read(&value, address, width);
         return value;
     }
-    enum h2_nv2a_result result = h2_nv2a_read32(&device, address - 0xFD000000u, &value);
+    enum h2_nv2a_result result = h2_nv2a_read(&device, address - 0xFD000000u, width, &value);
     if (result != H2_NV2A_OK) h2_graphics_stop(context, instruction, address, 0, 0, result);
-    if (++accesses <= 128) xv_logf("[h2/mmio] read eip=%08X address=%08X value=%08X\n", instruction, address, value);
+    if (++accesses <= 128) xv_logf("[h2/mmio] read%u eip=%08X address=%08X value=%08X\n", width * 8, instruction, address, value);
     return value;
 }
 
+uint32_t h2_bus_read8(xctx *context, uint32_t instruction, uint32_t address)
+{ return bus_read(context, instruction, address, 1); }
+uint32_t h2_bus_read16(xctx *context, uint32_t instruction, uint32_t address)
+{ return bus_read(context, instruction, address, 2); }
+uint32_t h2_bus_read32(xctx *context, uint32_t instruction, uint32_t address)
+{ return bus_read(context, instruction, address, 4); }
+
 void h2_bus_write32(xctx *context, uint32_t instruction, uint32_t address, uint32_t value)
 {
-    if (!is_mmio(address)) {
+    if (!is_mmio(address, 4)) {
         x_guest_write(address, &value, sizeof value);
         return;
     }
