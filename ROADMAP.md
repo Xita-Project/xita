@@ -9,17 +9,25 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 12 [deeper workload audit](docs/guest-workload-audit-20260912.md):
+independent model matrix products are a candidate for batching; object callbacks
+and hierarchical transforms still require ordered ownership. The private deeper
+diagnostic passes emulator collection checks. Before more hardware writes, resolve
+the [storage readback anomaly](docs/storage-audit-20260912.md); saves are backed up
+and a read-only allocation inspector is prepared.
+
 September 12 [guest-phase hardware result](docs/hardware-20260912-guest-phases.md):
 post-loading Blood Gulch windows attribute about 43 ms/frame to selected scene
 work and 25 ms/frame to the object-update region, including their unselected
-callees. A finer 48-scope diagnostic and batched report writes are in validation;
-safe worker batches and a measured FPS gain remain follow-ups.
+callees. A finer 48-scope diagnostic and batched report writes pass host/native/
+emulator validation; executable readback matches after installation. Storage
+integrity, safe worker batches and a measured FPS gain remain follow-ups.
 
 September 12 [selected guest-phase diagnostic](docs/guest-phase-timing-20260912.md):
-32 opt-in scopes distinguish selected self time from nested work and explicit
-guest handoff time. Source `30deb24` is installed and verified over USB with
-timing enabled. Collect normal play to attribute larger update and scene-preparation
-batches; more gameplay parallelism and FPS gains remain open.
+The initial 32 opt-in scopes distinguish selected self time from nested work and
+explicit guest handoff time. Source `30deb24` supplied the capture above and has
+been superseded by the 48-scope follow-up. More gameplay parallelism and FPS gains
+remain open.
 
 September 12 [vertex worker hardware result](docs/hardware-20260912-vertex-worker-results.md):
 Blood Gulch at 360p measures 11.294 / 11.627 / 11.395 FPS off/on/off, favoring
