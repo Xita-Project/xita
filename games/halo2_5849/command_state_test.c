@@ -125,7 +125,21 @@ int main(void)
     reject(0, 0x358, 2); reject(0, 0x370, 0x1234); reject(0, 0x380, 0x200);
     reject(0, 0x3C0, 0x1234); reject(0, 0x2C0, 0xF0000000);
     assert(emit(0, 0x100, 0) && emit(0, 0x110, 0));
-    reject(0, 0x100, 9); reject(0, 0x100, 0x28); reject(0, 0x110, 1);
+    reject(0, 0x100, 9); reject(0, 0x110, 1);
+    assert(emit(0, 0x100, 0x28) && s.dxt1_noise == 1 && s.software_valid == 1);
+    assert(emit(0, 0x100, 8) && !s.dxt1_noise && s.software_updates == 2);
+    reject(0, 0x100, 0x48); reject(0, 0x100, 0x29);
+    for (unsigned selector = 1; selector < 32; ++selector)
+        if (selector != 8 && selector != 9) reject(0, 0x100, selector);
+    assert(emit(0, 0x1D8C, 0x400094) && emit(0, 0x1D90, 0));
+    h2_kelvin_clear parameters = c;
+    assert(emit(0, 0x100, 9) && s.software_valid == 3 && s.software_updates == 3);
+    assert(!memcmp(&parameters, &c, sizeof c)); /* original leaves parameters intact */
+    assert(emit(0, 0x1D8C, 0x400B80) && emit(0, 0x100, 9));
+    assert(s.software_valid == 7 && !s.zcull_debug5 && !s.rop_control && s.software_updates == 4);
+    assert(emit(0, 0x1D90, 1)); reject(0, 0x100, 9);
+    assert(emit(0, 0x1D90, 0) && emit(0, 0x1D8C, 0x400B84)); reject(0, 0x100, 9);
+    assert(emit(0, 0x1D8C, 0xFFFFFFFF)); reject(0, 0x100, 9);
     /* The draw-state representation must not bypass clear-sensitive settings. */
     dma(10, 3, 0x800, 7);
     assert(emit(0, 0x200, 2u << 16) && emit(0, 0x204, 1u << 16));

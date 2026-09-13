@@ -143,6 +143,26 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
 }
 static int has_setup(const h2_command_state *s, uint16_t method)
 { return !!(s->setup_valid[(method / 4) / 32] & (1u << ((method / 4) % 32))); }
+static int software_method(h2_command_state *s, const h2_kelvin_clear *c, uint32_t value)
+{
+    /* Original 3FF240 takes selector in bits 0..4 and argument above bit 4.
+     * Selector 8 writes the argument to RDI E0:50 and DF:08 (DXT1 noise).
+     * Selector 9 writes the color-clear parameter to BAR + depth-clear parameter.
+     * Translate only the audited constructor's settings into typed host state;
+     * never expose its arbitrary register-write protocol or discard callbacks. */
+    if (!value) return 1;
+    if (value == 8 || value == 0x28) {
+        s->dxt1_noise = value >> 5; s->software_valid |= 1;
+    } else if (value == 9 && !c->clear_color) {
+        if (c->clear_zstencil == 0x400094) {
+            s->zcull_debug5 = 0; s->software_valid |= 2;
+        } else if (c->clear_zstencil == 0x400B80) {
+            s->rop_control = 0; s->software_valid |= 4;
+        } else return 0;
+    } else return 0;
+    ++s->software_updates;
+    return 1;
+}
 static int clear_setup_supported(const h2_command_state *s, const h2_kelvin_clear *c, uint32_t flags)
 {
     if (!flags) return 1;
@@ -207,7 +227,7 @@ static int kelvin(h2_command_state *s, h2_kelvin_clear *c, unsigned sub,
         return 1;
     }
     switch (method) {
-    case 0x100: return value == 0; /* nonzero values invoke software methods */
+    case 0x100: return software_method(s, c, value);
     case 0x110:
         if (value) return 0;
         __atomic_thread_fence(__ATOMIC_SEQ_CST); return 1; /* accepted work is synchronous */

@@ -19,6 +19,10 @@ typedef struct h2_command_state {
     uint32_t setup[0x2000 / 4], setup_valid[0x2000 / 4 / 32];
     uint32_t semaphore_offset, flip_read, flip_write, flip_modulo;
     uint32_t provoking_vertex, edge_flag, compress_depth, shader_inputs, shadow_slope;
+    /* XDK 5849 software-method inputs, not physical RDI/register emulation.
+     * Future texture/draw execution must honor these settings or reject. */
+    uint32_t dxt1_noise, zcull_debug5, rop_control, software_valid;
+    uint64_t software_updates;
     uint64_t semaphore_releases;
     uint32_t last_semaphore_address, last_semaphore_value;
 } h2_command_state;

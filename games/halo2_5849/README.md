@@ -47,6 +47,8 @@ and stops at an unsupported PVIDEO access. This is not rendered output.
 directory, adds the [explicit host miniport/channel boundary](../../docs/halo2-host-channel-20260913.md).
 It has allocated color and logical depth resources and
 [completed the constructor's initial command submission and semaphore write](../../docs/halo2-constructor-submission-20260913.md).
+It now also [executes the first depth/stencil clear](../../docs/halo2-first-depth-clear-20260913.md)
+and stops at the subsequent software flip request.
 Draws, blits, native presentation and the title/menu remain unsupported. Unknown
 commands stop explicitly. Diagnostic packages embed owned game image/code and
 must not be distributed or uploaded as releases.
