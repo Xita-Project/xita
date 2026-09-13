@@ -119,6 +119,26 @@ int main(void)
     assert(emit(0, 0xAF8, 0x80000000) && s.constants[0x3A][2] == 0x80000000);
     assert(emit(0, 0xA7C, 0xDEADBEEF) && s.setup[0xA7C / 4] == 0xDEADBEEF);
     assert(emit(0, 0x1BFC, 0x80000000) && s.setup[0x1BFC / 4] == 0x80000000);
+    /* Palette writes only retain a descriptor, even for an unmapped offset.
+     * All four units have independent state, preserved verbatim; no instance,
+     * guest memory, clear state, or unrelated command state may change. */
+    for (unsigned unit = 0; unit < 4; ++unit) {
+        unsigned method = 0x1B20 + unit * 64;
+        for (unsigned length = 0; length < 4; ++length) for (unsigned context = 0; context < 2; ++context) {
+            uint32_t value = 0xFFFFFFC0u | (length << 2) | context;
+            h2_command_state expected = s; h2_kelvin_clear clear = c; fixture memory = f;
+            expected.setup[method / 4] = value;
+            expected.setup_valid[method / 128] |= 1u << ((method / 4) % 32);
+            assert(emit(0, method, value));
+            assert(!memcmp(&s, &expected, sizeof s) && !memcmp(&c, &clear, sizeof c));
+            assert(!memcmp(&f, &memory, sizeof f));
+        }
+        reject(0, method, 2); reject(0, method, 0x10); reject(0, method, 0x20);
+        reject(0, method + 1, 0); reject(1, method, 0); /* alignment/class isolation */
+    }
+    reject(0, 0x1C20, 0); /* no fifth texture unit */
+    reject(0, 0x17FC, 3); reject(0, 0x1800, 0); reject(0, 0x1810, 0);
+    reject(0, 0x1818, 0); reject(0, 0x1940, 0); /* no vertex/draw execution */
     reject(0, 0x1B00, 1); reject(0, 0x1B04, 1); /* resources need another implementation */
     assert(emit(0, 0x300, 1) && emit(0, 0x328, 6));
     reject(0, 0x300, 2); reject(0, 0x328, 7); reject(0, 0x33C, 0x208);

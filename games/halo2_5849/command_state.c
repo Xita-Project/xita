@@ -80,6 +80,12 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
         case 0x28: case 0x2C: case 0x30: case 0x34: /* bump matrix */
         case 0x38: case 0x3C: /* bump scale/offset */
             break;
+        case 0x20: /* palette descriptor: DMA bit 0, length bits 2..3, offset 6..31 */
+            if (value & 0x32u) return 0;
+            /* State assignment only: no palette read, allocation or decoding.
+             * A future draw must resolve the selected DMA and validate the
+             * entire palette span before touching guest data. */
+            break;
         default: return 0; /* texture resources/format/filter need separate validation */
         }
     } else switch (method) {
