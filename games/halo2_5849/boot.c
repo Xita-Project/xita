@@ -58,6 +58,12 @@ void xv_watch_leave(uint32_t address, uint32_t back, xctx *c) { (void)address; (
 void xv_trace_func(uint32_t address)
 {
     static unsigned count;
+    if (address == 0x3F5240u && xk_cur) {
+        xctx *c = &xk_cur->ctx;
+        uint32_t pp = X_M32(c->r[4] + 4);
+        xv_logf("[h2/graphics] CreateDevice LTCG flags=%08X output=%08X parameters=%08X width=%u height=%u format=%08X\n",
+                c->r[0], c->r[1], pp, X_M32(pp), X_M32(pp + 4), X_M32(pp + 8));
+    }
     /* XAPI's direct application call targets 0x12190 in the pinned image.
      * Keep that observation even if constructor tracing uses the initial cap. */
     if (++count <= 2000 || (count % 100000) == 0 || address == 0x12190u) {

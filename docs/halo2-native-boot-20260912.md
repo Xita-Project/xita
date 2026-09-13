@@ -65,6 +65,8 @@ has no NV2A device model, so those MMIO accesses also lack hardware semantics.
 This is a graphics translation boundary, not a reason to ignore the port
 write. The next task is to identify and validate the XDK 5849 D3D API boundary
 and connect appropriate shared graphics HLE without CE device-layout assumptions.
+The [graphics boundary report](halo2-graphics-boundary-20260912.md) records the
+subsequently verified CreateDevice entry and attempt 07's native arguments.
 
 Attempt 06 used `GUEST_OPT=-O0`, with runtime code at `-O1`. Its private VPK is
 19,867,336 bytes; no VPK, executable image, assets, generated code or trace
@@ -93,6 +95,8 @@ the standalone Makefile together when using another directory. This does not
 use the repository's normal CE build/output or generated CE source.
 
 The VPK contains only this target's native executable, SFO and generated image.
+It embeds code/image data from the owned game and must not be uploaded as a
+distributable release.
 It reads assets from `ux0:data/xita-halo2/game` and writes its own state under
 `ux0:data/xita-halo2/save`. Its trace is `ux0:data/xita-halo2/boot.log`.
 The lab uses a private reflink copy of the extracted game tree; original assets
