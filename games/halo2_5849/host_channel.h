@@ -1,12 +1,14 @@
 /* One synchronous virtual DMA channel. Completion means accepted methods have
- * executed against guest RAM; it never implies display, vblank or GPU fences. */
+ * executed against guest RAM, including implemented semaphore writes. It never
+ * implies display, vblank or unimplemented asynchronous GPU work. */
 #pragma once
 #include "push_stream.h"
-#include "kelvin_clear.h"
+#include "command_state.h"
 
 typedef struct h2_host_channel {
     h2_push_stream stream;
     h2_kelvin_clear clear;
+    h2_command_state commands;
     h2_dma_object dma;
     h2_push_read read_physical;
     void *opaque;

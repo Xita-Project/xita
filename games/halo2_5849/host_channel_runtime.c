@@ -262,6 +262,9 @@ int h2_host_channel_bus(xctx *c, uint32_t ip, uint32_t address, unsigned width,
                 *value, h2_host_channel_get(&channel), result, fault.address, fault.word,
                 fault.subchannel, fault.method, (unsigned long long)channel.clear.completed_clears,
                 (unsigned long long)channel.clear.written_pixels);
+        xv_logf("[h2/channel] semaphore releases=%llu last=%08X value=%08X\n",
+                (unsigned long long)channel.commands.semaphore_releases,
+                channel.commands.last_semaphore_address, channel.commands.last_semaphore_value);
         if (result != H2_PUSH_COMPLETE && result != H2_PUSH_NEED_DATA)
             reject(c, ip, address, *value);
     } else if (address == BAR + 0x800040 || address == BAR + 0x3240) *value = channel.put;

@@ -68,6 +68,23 @@ int main(void)
     setup(&f, &c); f.ram[0x100 / 4] = 0x101;
     assert(h2_host_channel_submit(&c, 0x104, 20, &fault) == H2_PUSH_BUDGET_EXHAUSTED);
     assert(h2_host_channel_get(&c) == 0x100);
+    /* A split release packet writes only when its value arrives. A later
+     * unsupported method cannot replay the completed semaphore. */
+    setup(&f, &c);
+    f.instance[14 * 2] = 14; f.instance[14 * 2 + 1] = 0x80001300;
+    f.instance[0x3000 / 4] = 0x8000B003;
+    f.instance[0x3004 / 4] = 3;
+    f.instance[0x3008 / 4] = f.instance[0x300C / 4] = 3;
+    uint32_t program[] = {0x40000, 13, 0x401A4, 14, 0x41D6C, 0, 0x41D70, 0x12345678, 0x41800, 1};
+    memcpy((uint8_t *)f.ram + 0x100, program, sizeof program);
+    assert(h2_host_channel_submit(&c, 0x11C, 100, &fault) == H2_PUSH_NEED_DATA);
+    assert(!c.commands.semaphore_releases && !f.ram[0x800 / 4]);
+    assert(h2_host_channel_submit(&c, 0x120, 100, &fault) == H2_PUSH_COMPLETE);
+    assert(c.commands.semaphore_releases == 1 && f.ram[0x800 / 4] == 0x12345678);
+    assert(h2_host_channel_submit(&c, 0x128, 100, &fault) == H2_PUSH_METHOD_REJECTED);
+    assert(c.stream.get == 0x124 && c.commands.semaphore_releases == 1);
+    assert(h2_host_channel_submit(&c, 0x128, 100, &fault) == H2_PUSH_METHOD_REJECTED);
+    assert(c.commands.semaphore_releases == 1);
     puts("Host channel: checked bootstrap, DMA bounds, partial packets and honest rejection/progress pass.");
     return 0;
 }

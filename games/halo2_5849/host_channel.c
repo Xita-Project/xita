@@ -12,7 +12,7 @@ static int execute_method(void *opaque, uint8_t subchannel, uint16_t method,
                            uint32_t value, uint32_t source)
 {
     h2_host_channel *c = opaque;
-    return h2_kelvin_clear_method(&c->clear, subchannel, method, value, source);
+    return h2_command_method(&c->commands, &c->clear, subchannel, method, value, source);
 }
 int h2_host_channel_init(h2_host_channel *c, const h2_dma_object *dma,
                          uint32_t ring, uint32_t bytes, h2_push_read read_physical,
