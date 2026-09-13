@@ -123,6 +123,14 @@ def main():
         # Native43: arena allocator call 0x14B4C2 uses the two-slot table
         # at 0x453498 (allocate/free); the following word begins string data.
         roots.update(image.u32(slot) for slot in (0x453498, 0x45349C))
+        # Native44: D486D..D4885 selects three records at 4674A0, stride38h.
+        # The loop calls only each record's first field and skips nulls.
+        for slot in (0x4674A0, 0x4674D8, 0x467510):
+            target = image.u32(slot)
+            if target:
+                if not image.is_code(target):
+                    raise ValueError(f"Halo 2 resource initializer {slot:#x} is not code")
+                roots.add(target)
     output = args.out.resolve()
     generated = output / "generated"
     profile = str(Path(__file__).with_name("graphics-profile.json")) if args.graphics else "halo2_5849"

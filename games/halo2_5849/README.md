@@ -4,6 +4,9 @@ This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
 `5849` identifies the linked XDK library build, not an asserted game build number.
 
+The [latest native checkpoint and exact private replay command](../../docs/halo2-checkpoint-20260913.md)
+describe the current normal and diagnostic startup stops. There is no main menu.
+
 A separate [native startup target](../../docs/halo2-native-boot-20260912.md)
 executes the owned XBE's entry in Vita3K with an isolated title and filesystem.
 It has reached the actual application entry and D3D initialization. The Halo 2 title/menu,
