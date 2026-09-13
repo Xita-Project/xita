@@ -4,6 +4,11 @@
 #ifdef XV_NATIVE_MODEL_PALETTE
 #include "xk.h"
 #include <stdlib.h>
+#if defined(XV_PALETTE_JOB_PROFILE) && XV_PALETTE_JOB_PROFILE
+#include <stdio.h>
+/* Accepted serial batches only. Owner-thread counters; never a worker queue. */
+static unsigned palette_sizes[65];
+#endif
 
 static unsigned palette_batches, palette_matrices, palette_declined[4];
 static int palette_enabled(void)
@@ -117,6 +122,9 @@ int xv_math_model_palette(xctx *c)
     X_FLAGS(XK_SUB, count, count, 0, 32);
     c->f_cf=0; c->f_of=0;
     palette_batches++; palette_matrices += count;
+#if defined(XV_PALETTE_JOB_PROFILE) && XV_PALETTE_JOB_PROFILE
+    palette_sizes[count]++;
+#endif
     return 1;
 }
 
@@ -125,6 +133,23 @@ void xv_model_palette_report(unsigned frames)
     XK_LOG("[model-palette] %u frames batches %u matrices %u declined disabled %u bounds %u budget %u layout %u\n",
         frames,palette_batches,palette_matrices,palette_declined[0],palette_declined[1],
         palette_declined[2],palette_declined[3]);
+#if defined(XV_PALETTE_JOB_PROFILE) && XV_PALETTE_JOB_PROFILE
+    /* One bounded log call per reporting interval, not one write per bin/job.
+     * Worst case: 64 pairs of two-digit size + ':' + ten-digit count + space. */
+    char line[1024];
+    _Static_assert(64 * 14 + 80 < sizeof line, "palette size report capacity");
+    size_t used = (size_t)snprintf(line, sizeof line,
+                                 "[model-palette-sizes] %u frames sizes", frames);
+    for (unsigned size = 1; size <= 64; ++size) {
+        if (!palette_sizes[size]) continue;
+        int written = snprintf(line + used, sizeof line - used,
+                               " %u:%u", size, palette_sizes[size]);
+        if (written < 0 || (size_t)written >= sizeof line - used) break;
+        used += (size_t)written;
+    }
+    XK_LOG("%s\n", line);
+    memset(palette_sizes, 0, sizeof palette_sizes);
+#endif
     palette_batches=palette_matrices=0;
     memset(palette_declined,0,sizeof palette_declined);
 }

@@ -9,6 +9,12 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 13 [port research and worker sizing](docs/ports-and-worker-sizing-20260913.md):
+an immediate result dependency rules out moving the object-size calculation to
+a worker by itself. An optional, locally validated model-batch size histogram
+will help select useful job sizes. No additional worker or hardware gain is
+claimed; ordinary helper machine code is unchanged when profiling is absent.
+
 September 13 [bulk guest memory clears](docs/string-fill-20260913.md) replace
 per-element work for repeated-byte word/dword fills. Host and Cortex-A9
 equivalence checks pass; emulator counters confirm hundreds of eligible calls

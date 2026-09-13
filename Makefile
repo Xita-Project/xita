@@ -354,6 +354,9 @@ endif
 # Native replacements must retain the lifted multiply/add rounding points.
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -ffp-contract=off
+ifeq ($(XV_PALETTE_JOB_PROFILE),1)
+$(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -DXV_PALETTE_JOB_PROFILE=1
+endif
 $(RECOMP_BUILD)/kernel/xk_object_basis.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_clip.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_bounds.o: RECOMP_CFLAGS += -ffp-contract=off

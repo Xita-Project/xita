@@ -9,7 +9,26 @@
 enum { ARENA = 1 << 20, MODEL = 0x12000, POSE = 0x21000, NODES = 0x31000, SP = 0x51000 };
 uint8_t *g_xram, *g_img_base;
 uint32_t *g_xpt;
+#if defined(XV_PALETTE_JOB_PROFILE) && XV_PALETTE_JOB_PROFILE
+#include <stdarg.h>
+static char sizes_report[1024];
+static unsigned sizes_reports;
+void xk_os_log(const char *fmt, ...)
+{
+    char line[2048]; va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(line, sizeof line, fmt, args);
+    va_end(args);
+    assert(n >= 0 && (unsigned)n < sizeof line);
+    if (!strncmp(line, "[model-palette-sizes]", 21)) {
+        assert((unsigned)n < sizeof sizes_report);
+        memcpy(sizes_report, line, n + 1); sizes_reports++;
+    }
+}
+void xv_model_palette_report(unsigned);
+#else
 void xk_os_log(const char *fmt, ...) { (void)fmt; }
+#endif
 void original_palette(xctx *), current_palette(xctx *), candidate_palette(xctx *);
 int xv_math_model_palette(xctx *);
 static unsigned yields;
@@ -91,6 +110,40 @@ static xctx fixture(unsigned k, unsigned count)
     }
     return c;
 }
+
+#if defined(XV_PALETTE_JOB_PROFILE) && XV_PALETTE_JOB_PROFILE
+static void check_size_reporting(int enabled)
+{
+    xv_model_palette_report(60); /* Drain earlier arithmetic/guard fixtures. */
+    unsigned before = sizes_reports;
+    for (unsigned size = 1; size <= 64; ++size) {
+        for (unsigned repeat = 0; repeat < size % 3 + 1; ++repeat) {
+            xctx c = fixture(0, size);
+            assert(xv_math_model_palette(&c) == enabled);
+        }
+        xctx rejected = fixture(0, size);
+        rejected.r[7] = 0;
+        assert(!xv_math_model_palette(&rejected));
+    }
+    xv_model_palette_report(120);
+    assert(sizes_reports == before + 1);
+    const char *p = sizes_report;
+    static const char prefix[] = "[model-palette-sizes] 120 frames sizes";
+    assert(!strncmp(p, prefix, sizeof prefix - 1));
+    p += sizeof prefix - 1;
+    if (enabled) {
+        for (unsigned size = 1; size <= 64; ++size) {
+            unsigned reported_size, batches; int consumed = 0;
+            assert(sscanf(p, " %u:%u%n", &reported_size, &batches, &consumed) == 2);
+            assert(reported_size == size && batches == size % 3 + 1);
+            p += consumed;
+        }
+    }
+    assert(!strcmp(p, "\n"));
+    xv_model_palette_report(60);
+    assert(!strcmp(sizes_report, "[model-palette-sizes] 60 frames sizes\n"));
+}
+#endif
 
 int main(int argc, char **argv)
 {
@@ -192,6 +245,10 @@ int main(int argc, char **argv)
         printf("Host microbenchmark %u nodes: current %.1f ns, batch %.1f ns (not Vita frame time)\n",
                count, duration[0] * 50000, duration[1] * 50000);
     }
+#if defined(XV_PALETTE_JOB_PROFILE) && XV_PALETTE_JOB_PROFILE
+    check_size_reporting(enabled);
+    printf("PASS %s: accepted size histogram, rejection exclusion and interval reset\n", argv[1]);
+#endif
     free(before); free(expected); free(g_xram); free(g_xpt);
     return 0;
 }
