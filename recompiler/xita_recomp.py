@@ -726,7 +726,13 @@ class Emitter:
         if mn in ("loop", "loope", "loopne"):
             tgt = ins.near_branch_target
             extra = {"loop": "", "loope": " && XF_Z(c)", "loopne": " && !XF_Z(c)"}[mn]
-            out.append(f"    if (--c->r[1] != 0{extra}) {{ X_PREEMPT(); goto L_{tgt:08X}; }}"); return
+            if tgt in fn.blocks:
+                out.append(f"    if (--c->r[1] != 0{extra}) {{ X_PREEMPT(); goto L_{tgt:08X}; }}")
+            else:
+                # Match JMP/Jcc: an external target has no local label and
+                # must use tail dispatch without pushing a return address.
+                out.append(f"    if (--c->r[1] != 0{extra}) {{ {self.call_expr(tgt)}; return; }}")
+            return
 
         # ---- x87 --------------------------------------------------------------------
         if mn.startswith("f") and mn not in ("fs",):

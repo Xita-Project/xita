@@ -6,6 +6,9 @@ support. No Halo CE hooks, symbol files or generated code were reused. This
 pass used source commit `164c824`, Python with `iced-x86==1.21.0`, and
 host GCC 16.2.1 (20260810).
 
+The final section records the subsequent full extraction and LOOP emission
+fix. The initial discovery results below remain the baseline for comparison.
+
 ## Input identity
 
 | Field | Observed value |
@@ -31,7 +34,7 @@ the full disc image, maps, movies and other executables were not extracted.
 These hashes identify the supplied files; archive-wide CRC and authenticity
 checks were not performed.
 
-## Validation
+## Initial validation
 
 - The XBE parser reported no warnings. The revision-specific profile check
   passed and did not create its requested output directory. Separate checks
@@ -125,3 +128,36 @@ See the [profile README](../games/halo2_5849/README.md) for reproduction command
 Executable bytes, manifests, instruction samples, generated C, memory images
 and diagnostic exports remain private local artifacts and are not part of
 this change.
+
+## Full extraction and LOOP emission follow-up
+
+The complete game tree was subsequently extracted to `~/games/halo2`: 81 files,
+four directories and 4,720,758,479 bytes, including 30 map files, movies, media
+and the disc's updater executables. The destination did not previously exist.
+`7z x` extracted both archive members with successful CRC checks. An independent
+XDVDFS directory traversal checked paths, duplicate names and extent bounds
+before disc extraction. Every extracted file's size and SHA-256 then matched
+the corresponding ISO extent. The final `default.xbe` passed profile validation.
+Publication used atomic `renameat2(RENAME_NOREPLACE)`; only the task's temporary
+ISO and staging directory were removed. Per-file hashes remain in the private
+extraction validation manifest.
+
+The LOOP lowering fix applies the existing JMP/Jcc tail-dispatch policy to
+targets outside `fn.blocks`, instead of emitting a goto to an absent label.
+Internal LOOP branches retain their previous emission and preemption behavior.
+Discovery rules, function candidates, unsupported counts and Halo CE hooks
+are unchanged. This removes a C-generation failure; it does not make the
+spurious XPP pointer a valid function or establish safe game execution.
+
+`python tools/test_loop_branches.py` compiles and executes synthetic `LOOP`,
+`LOOPE` and `LOOPNE` programs with external, forward and backward targets.
+Its nine variants cover 54 cases, including both ZF states, ECX wraparound,
+fallthrough, unchanged flags and a single return-address cleanup. Before the
+fix, all three external-target variants failed C compilation with missing
+labels; the internal variants passed. All variants pass with the fix, as do
+the existing ten profile tests.
+
+Regenerated default Halo 2 discovery output passes host C syntax checking for
+all 34 translation units with zero diagnostics. The complete
+`recomp_report.json` matches the pre-fix report exactly. This checks generation
+consistency and C syntax only; the game was not linked, executed or deployed.
