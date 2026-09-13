@@ -9,6 +9,11 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 13 [bulk guest memory clears](docs/string-fill-20260913.md) replace
+per-element work for repeated-byte word/dword fills. Host and Cortex-A9
+equivalence checks pass; emulator counters confirm hundreds of eligible calls
+per Blood Gulch frame. Hardware frame-time benefit remains unmeasured.
+
 September 13 [constant synchronization](docs/constant-tracking-20260913.md) and
 [contiguous capture](docs/constant-window-copy-20260913.md) reduce repeated CPU
 copy/comparison work. Host checks, native builds and emulator gameplay pass;

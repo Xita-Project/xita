@@ -265,10 +265,19 @@ void x_str_stos(xctx *c, unsigned sz, int mode)
     uint32_t v = c->r[0];
     if (mode != X_STR_ONCE) watch_range(c, "stos", c->df ? c->r[7] - c->r[1] * sz : c->r[7], c->r[1] * sz);
     if (mode == X_STR_ONCE) { st(c, c->r[7], sz, v); c->r[7] += STEP(sz); return; }
-    while (!c->df && sz == 1 && c->r[1]) {
-        unsigned n = 4096u - (c->r[7] & 0xFFFu);
-        if (n > c->r[1]) n = c->r[1];
-        memset(X_G(c->r[7]), (int)(v & 0xFF), n); c->r[7] += n; c->r[1] -= n;
+    uint32_t byte = v & 0xFFu;
+    int repeated_byte = sz == 1 || (sz == 2 && (v & 0xFFFFu) == byte * 0x101u) ||
+                        (sz == 4 && v == byte * 0x01010101u);
+    while (!c->df && repeated_byte && c->r[1]) {
+        /* Zero/byte-pattern word and dword fills need one translation per
+         * page, not per element. Keep an element crossing a page boundary on
+         * the existing split-write path; adjacent guest pages may not be
+         * adjacent in the host arena. Backward/nonuniform fills stay scalar. */
+        unsigned count = (4096u - (c->r[7] & 0xFFFu)) / sz;
+        if (count > c->r[1]) count = c->r[1];
+        if (!count) { st(c, c->r[7], sz, v); count = 1; }
+        else memset(X_G(c->r[7]), (int)byte, count * sz);
+        c->r[7] += count * sz; c->r[1] -= count;
     }
     while (c->r[1]) { st(c, c->r[7], sz, v); c->r[7] += STEP(sz); c->r[1]--; }
 }
