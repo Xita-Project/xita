@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Synthetic x86 execution through the explicit Halo 2 graphics bus lowering."""
+from pathlib import Path
+import struct
+import subprocess
+import sys
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from games import load_hooks
+from games.halo2_5849.hooks import lower_bus_mov
+from recompiler.core.hooks import NoGameHooks
+from recompiler import xita_recomp as recomp
+from tools.test_game_profiles import fixture
+
+
+class SyntheticBusHooks(NoGameHooks):
+    def lower_instruction(self, emitter, instruction, output):
+        return lower_bus_mov(emitter, instruction, output)
+
+
+class Halo2Bus(unittest.TestCase):
+    def test_generated_bus_and_cpu_effects(self):
+        with tempfile.TemporaryDirectory(prefix="xita-h2-bus-") as directory:
+            root = Path(directory)
+            data = bytearray(fixture()[0])
+            data.extend(bytes(0x1200 - len(data)))
+            struct.pack_into("<I", data, 0x408, 0x200)
+            struct.pack_into("<I", data, 0x410, 0x200)
+            programs = {
+                # Original synthetic driver: enable bus master and inspect identity/RAM.
+                0x11000: "89c38b830418000083c8048983041800008b8b001800008b930c0210009c5dc3",
+                0x11040: "8b01c3",  # EAX <- [ECX]
+                0x11050: "8911c3",  # [ECX] <- EDX
+                0x11060: "a1041800fdc3",  # absolute PCI command read
+                0x11070: "8b09c3",  # address register aliases destination
+                0x11080: "894908c3",  # store address register as data
+            }
+            for address, code in programs.items():
+                blob = bytes.fromhex(code)
+                offset = address - 0x10000
+                data[offset:offset + len(blob)] = blob
+            xbe = root / "synthetic.xbe"
+            xbe.write_bytes(data)
+            image = recomp.Image(str(xbe))
+            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+                load_hooks("halo2_5849_graphics", image)
+            discovery = recomp.Discovery(image, {}, {}, lambda *_: None)
+            for address in programs:
+                discovery.add_root(address)
+            discovery.run()
+            plain = recomp.Emitter(image, discovery, {}, {}, str(root), 1)
+            self.assertNotIn("h2_bus", plain.emit_function(discovery.functions[0x11000]))
+            emitter = recomp.Emitter(image, discovery, {}, {}, str(root), 1, SyntheticBusHooks())
+            emitter.write_all()
+            self.assertEqual(dict(emitter.unimpl), {})
+            harness = root / "harness.c"
+            harness.write_text(r'''
+#include <assert.h>
+#include <setjmp.h>
+#include <stdlib.h>
+#include "code_000.c"
+#include "gpu_bus.h"
+#include "nv2a_regs.h"
+uint8_t *g_xram, *g_img_base;
+uint32_t *g_xpt;
+static jmp_buf escape;
+static uint32_t stopped_ip, stopped_address;
+static int stopped_write, stopped_reason;
+void xv_logf(const char *format, ...) { (void)format; }
+void xv_check_guest_address(uint32_t address)
+{ assert(address < 0xFD000000u || address >= 0xFE000000u); }
+void h2_graphics_stop(xctx *c, uint32_t ip, uint32_t address, uint32_t value, int write, int reason)
+{
+    (void)c; (void)value;
+    stopped_ip = ip; stopped_address = address; stopped_write = write; stopped_reason = reason;
+    longjmp(escape, 1);
+}
+int main(void)
+{
+    g_xram = calloc(1, 0x5000); g_xpt = calloc(1u << 20, 4); assert(g_xram && g_xpt);
+    g_xpt[1] = 0; g_xpt[2] = 0x2000;
+    h2_gpu_bus_reset(0x4000000);
+    xctx c = {0}; c.r[0] = 0xFD000000; c.r[4] = 0x1800;
+    f_00011000(&c);
+    assert(c.r[0] == 6 && c.r[1] == 0x02A010DE && c.r[2] == 0x4000000);
+    assert(c.r[3] == 0xFD000000 && c.r[4] == 0x1804);
+    assert((c.r[5] & 0x8D5) == 4); /* OR result 6: parity, no CF/ZF/SF/OF */
+    f_00011060(&c); assert(c.r[0] == 6);
+    c.r[1] = 0xFD001800; f_00011070(&c); assert(c.r[1] == 0x02A010DE);
+    /* Ordinary accesses preserve bits, including nonadjacent guest pages. */
+    c.r[1] = 0x1FFE; c.r[2] = 0xF1234567;
+    f_00011050(&c); f_00011040(&c); assert(c.r[0] == c.r[2]);
+    assert(g_xram[0xFFE] == 0x67 && g_xram[0xFFF] == 0x45);
+    assert(g_xram[0x2000] == 0x23 && g_xram[0x2001] == 0xF1);
+    c.r[1] = 0x1100; f_00011080(&c);
+    c.r[1] += 8; f_00011040(&c); assert(c.r[0] == 0x1100);
+    /* Unsupported reads/writes report the actual instruction and do not run on. */
+    c.r[1] = 0xFD600140; c.r[2] = 1;
+    if (!setjmp(escape)) { f_00011050(&c); abort(); }
+    assert(stopped_ip == 0x11050 && stopped_address == 0xFD600140);
+    assert(stopped_write && stopped_reason == H2_NV2A_UNSUPPORTED_OPERATION);
+    f_00011040(&c); assert(c.r[0] == 0); /* rejected enable left register unchanged */
+    c.r[1] = 0xFD000100;
+    if (!setjmp(escape)) { f_00011040(&c); abort(); }
+    assert(stopped_ip == 0x11040 && stopped_address == c.r[1] && !stopped_write);
+    assert(stopped_reason == H2_NV2A_UNKNOWN_REGISTER);
+    c.r[1] = 0xFCFFFFFE;
+    if (!setjmp(escape)) { f_00011040(&c); abort(); }
+    assert(stopped_reason == H2_NV2A_INVALID_ACCESS);
+    free(g_xpt); free(g_xram);
+    return 0;
+}
+''')
+            executable = root / "bus"
+            command = ["cc", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Wno-unused-label",
+                       "-Wno-clobbered", "-fno-strict-aliasing", "-DXV_CHECK_GUEST_ADDRESS=1",
+                       "-ffunction-sections", "-fdata-sections", "-I", str(ROOT / "recomp"),
+                       "-I", str(ROOT / "games/halo2_5849"), str(harness),
+                       str(ROOT / "recomp/xv_x86rt.c"), str(ROOT / "games/halo2_5849/gpu_bus.c"),
+                       str(ROOT / "games/halo2_5849/nv2a_regs.c"), "-Wl,--gc-sections", "-lm", "-o", str(executable)]
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(executable)], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

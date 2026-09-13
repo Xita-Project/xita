@@ -508,6 +508,8 @@ class Emitter:
         ip = ins.ip
         nxt = ins.next_ip
         out.append(f"    /* {ip:08X}  {str(ins)} */")
+        if self.hooks.lower_instruction(self, ins, out):
+            return
 
         def U():
             self.unimpl[mn] += 1

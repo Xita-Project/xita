@@ -37,3 +37,8 @@ For the diagnostic startup target, use `prepare_boot.py` in this directory.
 It verifies the executable identity and includes the bounded initializer tables
 observed in this revision's XAPI startup. See the linked native startup report
 for build, isolation, validation and current limits.
+
+`prepare_boot.py --graphics` selects a separate experimental profile for
+[explicit graphics bus accesses](../../docs/halo2-graphics-bus-20260913.md).
+The original guest constructor has passed PCI setup and now stops at an
+unmodeled master-control register. This is not rendered output or a working menu.

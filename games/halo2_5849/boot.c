@@ -14,6 +14,7 @@
 #include "xv_x86rt.h"
 #include "kernel/xk.h"
 #include "cache_volume.h"
+#include "gpu_bus.h"
 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
 uint8_t *g_xram;
@@ -53,6 +54,16 @@ void xv_logf(const char *fmt, ...)
     if (log_fd >= 0) sceIoWrite(log_fd, buffer, length);
 }
 void xv_log_flush(void) { if (log_fd >= 0) sceIoSyncByFd(log_fd, 0); }
+void h2_graphics_stop(xctx *context, uint32_t instruction, uint32_t address,
+                      uint32_t value, int write, int reason)
+{
+    (void)context;
+    xv_logf("[h2/blocked] NV2A %s eip=%08X address=%08X value=%08X reason=%d\n",
+            write ? "write" : "read", instruction, address, value, reason);
+    xv_log_flush();
+    sceKernelExitProcess(25);
+    for (;;) sceKernelDelayThread(1000);
+}
 void xv_check_guest_address(uint32_t address)
 {
     /* The 16 MiB NV2A BAR has no device model in this target. Do not let its
@@ -150,6 +161,7 @@ int main(void)
     }
     xk_init(base, size, xv_game_tls_dir, "ux0:data/xita-halo2/game", "ux0:data/xita-halo2/save");
     xk_file_set_ce_adapter_enabled(0);
+    h2_gpu_bus_reset(64u * 1024u * 1024u);
     if (prepare_disk_header() != 0) {
         xv_logf("[h2/blocked] private disk header storage unavailable\n"); return 6;
     }
