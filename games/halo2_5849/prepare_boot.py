@@ -67,7 +67,10 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--graphics", action="store_true", help="enable the strict diagnostic NV2A bus adapter")
     mode.add_argument("--host-channel", action="store_true", help="enable the experimental synchronous command consumer (requires HOST_CHANNEL=1)")
+    parser.add_argument("--audio-unavailable", action="store_true", help="diagnostic only: DirectSoundCreate returns DSERR_NODRIVER (requires --host-channel)")
     args = parser.parse_args()
+    if args.audio_unavailable and not args.host_channel:
+        parser.error("--audio-unavailable requires --host-channel")
     image = Image(str(args.xbe))
     load_profile("halo2_5849").validate_image(image)
     # The observed XAPI initializer at 0x2D1D15 calls the first table, and its
@@ -102,6 +105,8 @@ def main():
     profile = str(Path(__file__).with_name("graphics-profile.json")) if args.graphics else "halo2_5849"
     if args.host_channel:
         profile = str(Path(__file__).with_name("host-channel-profile.json"))
+    if args.audio_unavailable:
+        profile = str(Path(__file__).with_name("audio-unavailable-profile.json"))
     subprocess.run([sys.executable, "-m", "recompiler", str(args.xbe.resolve()),
                     "--profile", profile, "--no-data-roots", "--trace-calls", "--trace-funcs",
                     "--files", "128", "-o", str(generated),

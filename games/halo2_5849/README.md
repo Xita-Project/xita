@@ -56,3 +56,9 @@ there is still no menu.
 Draws, blits, recurring flips and the title/menu remain unsupported. Unknown
 commands stop explicitly. Diagnostic packages embed owned game image/code and
 must not be distributed or uploaded as releases.
+
+The separate `--host-channel --audio-unavailable` diagnostic selects the
+[original game's audio-driver failure path](../../docs/halo2-audio-error-path-20260913.md).
+It returns an explicit error at public sound creation, creates no audio object,
+and currently reaches an undiscovered game-initialization callback. It supplies
+no audio, additional rendering or menu; the ordinary profile is unchanged.

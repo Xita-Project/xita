@@ -107,3 +107,16 @@ class Halo2HostChannelHooks(Halo2GraphicsHooks):
             return []
         name = boundary[2]
         return [f"    {{ extern void {name}(xctx *); {name}(c); return; }}"]
+
+
+class Halo2AudioUnavailableHooks(Halo2HostChannelHooks):
+    """Explicit diagnostic error-path probe; supplies no audio device."""
+    def __init__(self, image):
+        super().__init__(image)
+        if hashlib.sha256(image.bytes_at(0x37D797, 71)).hexdigest() != "937701608e296f3edcb1b3b77221d14015ee71e5b094256ba8fe1f50b76d7a0c":
+            raise ValueError("Halo 2 DirectSoundCreate fingerprint mismatch")
+
+    def function_entry(self, address):
+        if address == 0x37D797:
+            return ["    { extern void h2_audio_unavailable(xctx *); h2_audio_unavailable(c); return; }"]
+        return super().function_entry(address)
