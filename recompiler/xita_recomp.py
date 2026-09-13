@@ -765,7 +765,7 @@ class Emitter:
             out.append(f"    {self.operand(ins,0,8)} = x_mmx_{mn}({self.operand(ins,0,8)}, (uint64_t){cnt});"); return
 
         # ---- SSE scalar subset --------------------------------------------------------
-        if mn in ("movss", "movaps", "movups", "movlps", "movhps", "addss", "subss", "mulss", "divss", "sqrtss", "minss", "maxss",
+        if mn in ("movss", "movaps", "movups", "movlps", "movhps", "movhlps", "movlhps", "addss", "subss", "mulss", "divss", "sqrtss", "minss", "maxss",
                   "cvtsi2ss", "cvttss2si", "cvtss2si", "comiss", "ucomiss", "xorps", "andps", "orps", "addps", "subps", "mulps",
                   "shufps", "unpcklps", "movd", "rsqrtss", "rcpss"):
             self.lower_sse(ins, mn, out, U); return
@@ -923,6 +923,12 @@ class Emitter:
                 out.append(f"    x_load128(c, {xmm(0)}, {self.addr(ins)});")
             else:
                 out.append(f"    x_store128(c, {self.addr(ins)}, {xmm(1)});")
+            return
+        if mn in ("movhlps", "movlhps"):
+            dst, src = (0, 2) if mn == "movhlps" else (2, 0)
+            # Legacy SSE half-register moves preserve all bits, including NaN
+            # payloads. The two eight-byte ranges are disjoint even for src=dst.
+            out.append(f"    memcpy(&{xmm(0)}[{dst}], &{xmm(1)}[{src}], 8);")
             return
         if mn in ("movlps", "movhps"):
             lo = 0 if mn == "movlps" else 2

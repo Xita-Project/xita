@@ -161,3 +161,30 @@ Regenerated default Halo 2 discovery output passes host C syntax checking for
 all 34 translation units with zero diagnostics. The complete
 `recomp_report.json` matches the pre-fix report exactly. This checks generation
 consistency and C syntax only; the game was not linked, executed or deployed.
+
+## MOVHLPS / MOVLHPS follow-up
+
+The lifter now implements these two legacy SSE register moves with eight-byte
+copies. `MOVHLPS` copies the source's upper half into the destination's lower
+half; `MOVLHPS` copies the source's lower half into the destination's upper
+half. The other destination half is preserved. The operation definitions and
+absence of floating-point exceptions were checked against
+[Intel SDM Volume 2B, revision 089](https://cdrdv2-public.intel.com/868141/253667-089-sdm-vol-2b.pdf),
+pages 4-73 and 4-79. Byte copies preserve NaN payloads and signed zeros, including
+same-register moves whose source and destination halves are disjoint.
+
+`python tools/test_sse_half_moves.py` covers all 128 instruction/register-pair
+combinations, including all same-register pairs. Nineteen bit-pattern rotations
+exercise zeros, infinities, signaling/quiet NaNs, subnormals and normal values.
+The harness compares the complete resulting context against an integer-bit
+reference at `-O2` and `-O3 -ffast-math -fstrict-aliasing`: 4,864 comparisons pass.
+The LOOP execution suite and all ten profile tests also pass.
+
+Repeating the private `--no-data-roots` experiment with the same temporary
+`XON_RD` / `.data1` data classification reduces unsupported emitted instances
+from 411 to 312: 97 `movhlps` instances and two `movlhps` instances are removed.
+All other report fields and mnemonic counts match the baseline, including
+9,694 candidate functions and 936,789 emitted instruction instances. These
+counts remain contaminated by unverified boundaries and duplicated candidates;
+the reduction is not a gameplay or compatibility result. No other SIMD family,
+profile rule, runtime path or hardware behavior was changed or validated.
