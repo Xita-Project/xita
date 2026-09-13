@@ -15,6 +15,7 @@ typedef struct h2_nv2a {
     uint32_t timer_divider, timer_multiplier, timer_ratio_fraction;
     uint32_t timer_alarm, timer_pending;
     uint32_t pci_command, pci_latency, pci_rom;
+    uint8_t crtc_index, crtc_unlocked, crtc_tv_latency;
     uint32_t crtc_interrupt_enable, timer_interrupt_enable;
 } h2_nv2a;
 
@@ -32,3 +33,5 @@ uint32_t h2_nv2a_pll_hz(uint32_t coefficient);
 void h2_nv2a_reset(h2_nv2a *device, uint32_t memory_bytes);
 enum h2_nv2a_result h2_nv2a_read32(const h2_nv2a *device, uint32_t offset, uint32_t *value);
 enum h2_nv2a_result h2_nv2a_write32(h2_nv2a *device, uint32_t offset, uint32_t value);
+enum h2_nv2a_result h2_nv2a_write(h2_nv2a *device, uint32_t offset,
+                                unsigned width, uint32_t value);

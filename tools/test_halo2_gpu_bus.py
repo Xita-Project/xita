@@ -38,6 +38,13 @@ class Halo2Bus(unittest.TestCase):
                 0x11070: "8b09c3",  # address register aliases destination
                 0x11090: "0fb609c3",  # MOVZX ECX, byte [ECX], address/destination alias
                 0x110A0: "0fb701c3",  # MOVZX EAX, word [ECX]
+                0x110B0: "8a21c3",  # MOV AH,[ECX]
+                0x110C0: "8a09c3",  # MOV CL,[ECX], partial address alias
+                0x110D0: "668b01c3",  # MOV AX,[ECX]
+                0x110E0: "8821c3",  # MOV [ECX],AH
+                0x110F0: "668911c3",  # MOV [ECX],DX
+                0x11100: "c6011fc3",  # byte immediate
+                0x11110: "8c19c3",  # MOV [ECX],DS must retain existing segment path
                 0x11080: "894908c3",  # store address register as data
             }
             for address, code in programs.items():
@@ -57,6 +64,7 @@ class Halo2Bus(unittest.TestCase):
             self.assertNotIn("h2_bus", plain.emit_function(discovery.functions[0x11000]))
             emitter = recomp.Emitter(image, discovery, {}, {}, str(root), 1, SyntheticBusHooks())
             emitter.write_all()
+            self.assertNotIn("h2_bus", emitter.emit_function(discovery.functions[0x11110]))
             self.assertEqual(dict(emitter.unimpl), {})
             harness = root / "harness.c"
             harness.write_text(r'''
@@ -110,6 +118,26 @@ int main(void)
     c.r[1] = 0xFD680508; f_000110A0(&c); assert(c.r[0] == 0xC20D);
     c.r[1] = 0x1FFF; f_000110A0(&c); assert(c.r[0] == 0x2345);
     c.r[1] = 0x2001; f_00011090(&c); assert(c.r[1] == 0xF1);
+    assert(xf_eflags(&c) == flags);
+    /* Partial loads preserve the untouched lanes and use the old address. */
+    c.r[0] = 0x12345678; c.r[1] = 0xFD680509;
+    f_000110B0(&c); assert(c.r[0] == 0x1234C278);
+    f_000110C0(&c); assert(c.r[1] == 0xFD6805C2);
+    c.r[1] = 0xFD680508; f_000110D0(&c); assert(c.r[0] == 0x1234C20D);
+    c.r[1] = 0x1FFF; c.r[2] = 0xDEAD8765; f_000110F0(&c);
+    assert(g_xram[0xFFF] == 0x65 && g_xram[0x2000] == 0x87);
+    assert(g_xram[0xFFE] == 0x67 && g_xram[0x2001] == 0xF1);
+    f_000110D0(&c); assert(c.r[0] == 0x12348765);
+    c.r[1] = 0x2001; f_000110E0(&c); assert(g_xram[0x2001] == 0x87);
+    assert(xf_eflags(&c) == flags);
+    /* The native constructor's indexed unlock / latency transaction. */
+    c.r[1] = 0xFD6013D4; f_00011100(&c);
+    c.r[1] = 0xFD6013D5; f_000110B0(&c); assert((c.r[0] & 0xFF00) == 0);
+    c.r[0] = 0x5700; f_000110E0(&c);
+    f_000110B0(&c); assert(c.r[0] == 0x300);
+    c.r[1] = 0xFD6013D4; c.r[0] = 0x5200; f_000110E0(&c);
+    c.r[1] = 0xFD6013D5; f_000110B0(&c); assert(c.r[0] == 0);
+    c.r[0] = 0x400; f_000110E0(&c); f_000110B0(&c); assert(c.r[0] == 0x400);
     assert(xf_eflags(&c) == flags);
     now_us = 1000000;
     c.r[1] = 0xFD009410; f_00011040(&c); assert(c.r[0] == 1);

@@ -110,6 +110,38 @@ int main(void)
     assert(h2_nv2a_read(&device, 0x680508, 0, &value) == H2_NV2A_INVALID_ACCESS);
     assert(h2_nv2a_read(&device, 0x680508, 8, &value) == H2_NV2A_INVALID_ACCESS);
     assert(value == 0xAAAAAAAA);
+    /* Indexed CRTC lock and latency state; no display timing is implied. */
+    assert(h2_nv2a_write(&device, 0x6013D4, 1, 0x1F) == H2_NV2A_OK);
+    assert(h2_nv2a_read(&device, 0x6013D5, 1, &value) == H2_NV2A_OK && value == 0);
+    assert(h2_nv2a_write(&device, 0x6013D5, 1, 0x57) == H2_NV2A_OK);
+    assert(h2_nv2a_read(&device, 0x6013D5, 1, &value) == H2_NV2A_OK && value == 3);
+    assert(h2_nv2a_write(&device, 0x6013D4, 1, 0x52) == H2_NV2A_OK);
+    assert(h2_nv2a_read(&device, 0x6013D5, 1, &value) == H2_NV2A_OK && value == 0);
+    assert(h2_nv2a_write(&device, 0x6013D5, 1, 4) == H2_NV2A_OK);
+    assert(h2_nv2a_read(&device, 0x6013D5, 1, &value) == H2_NV2A_OK && value == 4);
+    assert(h2_nv2a_write(&device, 0x6013D4, 1, 0x1F) == H2_NV2A_OK);
+    assert(h2_nv2a_write(&device, 0x6013D5, 1, 0x99) == H2_NV2A_OK);
+    assert(h2_nv2a_read(&device, 0x6013D5, 1, &value) == H2_NV2A_OK && value == 0);
+    before = device;
+    assert(h2_nv2a_write(&device, 0x6013D5, 1, 0x55) != H2_NV2A_OK);
+    assert(h2_nv2a_write(&device, 0x6013D4, 2, 0x571F) != H2_NV2A_OK);
+    assert(h2_nv2a_write(&device, 0x6013D4, 4, 0x571F) != H2_NV2A_OK);
+    assert(h2_nv2a_write(&device, 0x6013D4, 1, 256) != H2_NV2A_OK);
+    assert(memcmp(&before, &device, sizeof before) == 0);
+    assert(h2_nv2a_write(&device, 0x6013D4, 1, 0x52) == H2_NV2A_OK);
+    before = device; value = 0xAAAAAAAA;
+    assert(h2_nv2a_write(&device, 0x6013D5, 1, 5) != H2_NV2A_OK);
+    assert(h2_nv2a_read(&device, 0x6013D5, 1, &value) != H2_NV2A_OK);
+    assert(value == 0xAAAAAAAA && memcmp(&before, &device, sizeof before) == 0);
+    assert(h2_nv2a_write(&device, 0x6013D4, 1, 0x77) == H2_NV2A_OK);
+    before = device;
+    assert(h2_nv2a_read(&device, 0x6013D5, 1, &value) != H2_NV2A_OK);
+    assert(h2_nv2a_write(&device, 0x6013D5, 1, 0) != H2_NV2A_OK);
+    assert(memcmp(&before, &device, sizeof before) == 0);
+    assert(h2_nv2a_write32(&device, 0x200, 0) == H2_NV2A_OK);
+    assert(device.crtc_index == 0 && device.crtc_unlocked == 0 && device.crtc_tv_latency == 0);
+    assert(h2_nv2a_read(&device, 0x6013D4, 1, &value) == H2_NV2A_UNSUPPORTED_OPERATION);
+    assert(h2_nv2a_write(&device, 0x6013D4, 1, 0x1F) == H2_NV2A_UNSUPPORTED_OPERATION);
     puts("NV2A bootstrap: identity, PCI state, interrupt-disable state and rejected-access isolation passed");
     return 0;
 }

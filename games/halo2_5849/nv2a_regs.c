@@ -85,7 +85,7 @@ static int unit_enabled(const h2_nv2a *device, uint32_t offset)
     uint32_t gate = offset >= 0x002000 && offset < 0x004000 ? H2_ENGINE_FIFO :
                     offset >= 0x009000 && offset < 0x00A000 ? H2_ENGINE_TIMER :
                     offset >= 0x100000 && offset < 0x101000 ? H2_ENGINE_FB :
-                    offset >= 0x600000 && offset < 0x601000 ? H2_ENGINE_CRTC : 0;
+                    offset >= 0x600000 && offset < 0x602000 ? H2_ENGINE_CRTC : 0;
     return !gate || (device->master_enable & gate);
 }
 
@@ -95,6 +95,15 @@ enum h2_nv2a_result h2_nv2a_read(const h2_nv2a *device, uint32_t offset,
     if (!value || (width != 1 && width != 2 && width != 4) ||
         (offset & (width - 1)) || offset >= 0x1000000u)
         return H2_NV2A_INVALID_ACCESS;
+    if (offset == 0x6013D4 || offset == 0x6013D5) {
+        if (width != 1 || !(device->pci_command & 2) || !unit_enabled(device, offset))
+            return H2_NV2A_UNSUPPORTED_OPERATION;
+        if (offset == 0x6013D4) *value = device->crtc_index;
+        else if (device->crtc_index == 0x1F) *value = device->crtc_unlocked ? 3 : 0;
+        else if (device->crtc_index == 0x52 && device->crtc_unlocked) *value = device->crtc_tv_latency;
+        else return H2_NV2A_UNSUPPORTED_OPERATION;
+        return H2_NV2A_OK;
+    }
     uint32_t whole;
     enum h2_nv2a_result result = h2_nv2a_read32(device, offset & ~3u, &whole);
     if (result == H2_NV2A_OK)
@@ -154,7 +163,10 @@ enum h2_nv2a_result h2_nv2a_write32(h2_nv2a *device, uint32_t offset, uint32_t v
          * their unknown registers become accessible by enabling a bit. */
         if (!(value & H2_ENGINE_TIMER)) reset_timer(device);
         if (!(value & H2_ENGINE_FIFO)) device->fifo_ramht = device->fifo_ramfc = 0;
-        if (!(value & H2_ENGINE_CRTC)) device->crtc_interrupt_enable = 0;
+        if (!(value & H2_ENGINE_CRTC)) {
+            device->crtc_interrupt_enable = 0;
+            device->crtc_index = device->crtc_unlocked = device->crtc_tv_latency = 0;
+        }
         device->master_enable = value;
         return H2_NV2A_OK;
     case 0x002210: {
@@ -233,4 +245,32 @@ enum h2_nv2a_result h2_nv2a_write32(h2_nv2a *device, uint32_t offset, uint32_t v
         return H2_NV2A_UNSUPPORTED_OPERATION; /* read-only identity/memory size */
     default: return H2_NV2A_UNKNOWN_REGISTER;
     }
+}
+
+/* Only byte index/data accesses are supported. Packed VGA writes, display
+ * timing and unknown selected registers remain explicit unsupported operations.
+ * Initial lock/latency state is virtual boot configuration, not a retail dump. */
+enum h2_nv2a_result h2_nv2a_write(h2_nv2a *device, uint32_t offset,
+                                unsigned width, uint32_t value)
+{
+    if ((width != 1 && width != 2 && width != 4) ||
+        (offset & (width - 1)) || offset >= 0x1000000u)
+        return H2_NV2A_INVALID_ACCESS;
+    if (width == 4) return h2_nv2a_write32(device, offset, value);
+    if (!(device->pci_command & 2) || !unit_enabled(device, offset))
+        return H2_NV2A_UNSUPPORTED_OPERATION;
+    if (width != 1 || value > 255) return H2_NV2A_UNSUPPORTED_OPERATION;
+    if (offset == 0x6013D4) {
+        device->crtc_index = value;
+        return H2_NV2A_OK;
+    }
+    if (offset == 0x6013D5) {
+        if (device->crtc_index == 0x1F && (value == 0x57 || value == 0x99))
+            device->crtc_unlocked = value == 0x57;
+        else if (device->crtc_index == 0x52 && device->crtc_unlocked)
+            device->crtc_tv_latency = value;
+        else return H2_NV2A_UNSUPPORTED_OPERATION;
+        return H2_NV2A_OK;
+    }
+    return H2_NV2A_UNKNOWN_REGISTER;
 }

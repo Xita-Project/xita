@@ -59,7 +59,7 @@ static uint32_t bus_read(xctx *context, uint32_t instruction, uint32_t address, 
         result = h2_nv2a_read(&device, address - 0xFD000000u, width, &value);
     }
     if (result != H2_NV2A_OK) h2_graphics_stop(context, instruction, address, 0, 0, result);
-    if (++accesses <= 128) xv_logf("[h2/mmio] read%u eip=%08X address=%08X value=%08X\n", width * 8, instruction, address, value);
+    if (!(address >= 0xFD700000u && address < 0xFD800000u) && ++accesses <= 128) xv_logf("[h2/mmio] read%u eip=%08X address=%08X value=%08X\n", width * 8, instruction, address, value);
     return value;
 }
 
@@ -70,19 +70,20 @@ uint32_t h2_bus_read16(xctx *context, uint32_t instruction, uint32_t address)
 uint32_t h2_bus_read32(xctx *context, uint32_t instruction, uint32_t address)
 { return bus_read(context, instruction, address, 4); }
 
-void h2_bus_write32(xctx *context, uint32_t instruction, uint32_t address, uint32_t value)
+static void bus_write(xctx *context, uint32_t instruction, uint32_t address, uint32_t value, unsigned width)
 {
-    if (!is_mmio(address, 4)) {
-        x_guest_write(address, &value, sizeof value);
+    value &= 0xFFFFFFFFu >> (8 * (4 - width));
+    if (!is_mmio(address, width)) {
+        x_guest_write(address, &value, width);
         return;
     }
     advance_time(context, instruction, address, value, 1);
     enum h2_nv2a_result result;
     if (address >= 0xFD700000u && address < 0xFD800000u) {
         uint32_t mapped;
-        result = h2_nv2a_pramin_address(&device, address - 0xFD700000u, 4, &mapped);
+        result = h2_nv2a_pramin_address(&device, address - 0xFD700000u, width, &mapped);
         if (result == H2_NV2A_OK) {
-            x_guest_write(mapped, &value, 4);
+            x_guest_write(mapped, &value, width);
             ++pramin_writes;
             uint32_t index = (address - 0xFD710000u) / 4;
             if (!(pramin_touched[index / 8] & (1u << (index & 7)))) {
@@ -91,8 +92,15 @@ void h2_bus_write32(xctx *context, uint32_t instruction, uint32_t address, uint3
             }
         }
     } else {
-        result = h2_nv2a_write32(&device, address - 0xFD000000u, value);
+        result = h2_nv2a_write(&device, address - 0xFD000000u, width, value);
     }
     if (result != H2_NV2A_OK) h2_graphics_stop(context, instruction, address, value, 1, result);
-    if (++accesses <= 128) xv_logf("[h2/mmio] write eip=%08X address=%08X value=%08X\n", instruction, address, value);
+    if (!(address >= 0xFD700000u && address < 0xFD800000u) && ++accesses <= 128) xv_logf("[h2/mmio] write%u eip=%08X address=%08X value=%08X\n", width * 8, instruction, address, value);
 }
+
+void h2_bus_write8(xctx *c, uint32_t ip, uint32_t address, uint32_t value)
+{ bus_write(c, ip, address, value, 1); }
+void h2_bus_write16(xctx *c, uint32_t ip, uint32_t address, uint32_t value)
+{ bus_write(c, ip, address, value, 2); }
+void h2_bus_write32(xctx *c, uint32_t ip, uint32_t address, uint32_t value)
+{ bus_write(c, ip, address, value, 4); }
