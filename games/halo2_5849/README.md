@@ -1,9 +1,14 @@
-# Halo 2 executable identity and initial discovery
+# Halo 2 executable identity and native startup
 
 This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
-It does not enable a Halo 2 runtime build, rendering, audio or gameplay.
 `5849` identifies the linked XDK library build, not an asserted game build number.
+
+A separate [native startup target](../../docs/halo2-native-boot-20260912.md)
+executes the owned XBE's entry in Vita3K with an isolated title and filesystem.
+It has reached the actual application entry and D3D initialization. The Halo 2 title/menu,
+rendering, audio and gameplay are not working. This target has no CE renderer
+or CE game-address hooks.
 
 The [initial inspection report](../../docs/halo2-initial-profile-20260912.md)
 records the executable identity, validation results and known discovery gaps.
@@ -27,3 +32,8 @@ module commands above for this profile. `--no-data-roots` disables scanning
 non-code sections for roots; the discovery engine still follows direct calls
 and considers code-address immediates. Its output contains false boundaries
 and unsupported instructions and is not ready to execute.
+
+For the diagnostic startup target, use `prepare_boot.py` in this directory.
+It verifies the executable identity and includes the bounded initializer tables
+observed in this revision's XAPI startup. See the linked native startup report
+for build, isolation, validation and current limits.
