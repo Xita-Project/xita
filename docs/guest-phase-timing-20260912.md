@@ -102,8 +102,24 @@ first-person sequence, accepts camera input and opens the pause menu. Live
 reports preserve the open main-loop scope across windows and distinguish
 nested self time from parked time. The captured last five campaign windows
 contain 300 frames, with zero dropped or invalid records and no parser errors.
+The saved enabled session contains 105 complete, usable windows (6,300 frames);
+the analyzer correctly excludes one incomplete final window from emulator
+shutdown. Restarting this same executable with the setting off reaches the
+menu and emits only the startup `off` record, with no phase windows. Both
+isolated emulator sessions were stopped by the operator; the enabled session
+returned to the menu through Save and Quit first.
 Private build, test and capture artifacts are under
 `/home/birchwoodgod/xita-backups/2026-09-12-212616-guest-phase-timing`.
+
+## Test Vita update
+
+Source `30deb24` was installed over USB on September 12. The preceding
+executable, configuration and logs were copied and hash-verified first.
+The installed EBOOT matches the candidate hash above, including a second
+readback after USB unmount/remount. `XV_PHASE_TIMING=1` was appended to
+`xita.cfg`; all previous configuration bytes were preserved. Its resulting
+SHA-256 is `618503cc2eebb67641ed4565ff106bfd2113428ddab9353354cf7349d07b741c`.
+USB was safely unmounted after verification. No VPK reinstall was required.
 
 Hardware attribution and any subsequent optimization remain pending. Do not
 treat emulator timings or instrumentation tests as evidence of Vita FPS gains.

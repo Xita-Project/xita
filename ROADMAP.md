@@ -11,8 +11,9 @@ Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` no
 
 September 12 [selected guest-phase diagnostic](docs/guest-phase-timing-20260912.md):
 32 opt-in scopes distinguish selected self time from nested work and explicit
-guest handoff time. This prepares hardware attribution of larger update and
-scene-preparation batches; more gameplay parallelism and FPS gains remain open.
+guest handoff time. Source `30deb24` is installed and verified over USB with
+timing enabled. Collect normal play to attribute larger update and scene-preparation
+batches; more gameplay parallelism and FPS gains remain open.
 
 September 12 [vertex worker hardware result](docs/hardware-20260912-vertex-worker-results.md):
 Blood Gulch at 360p measures 11.294 / 11.627 / 11.395 FPS off/on/off, favoring
