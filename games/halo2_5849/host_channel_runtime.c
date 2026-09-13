@@ -294,9 +294,9 @@ void __wrap_xk_AvSendTVEncoderOption(xctx *c)
         /* Virtual NTSC-M, 60 Hz, normal aspect, HDTV 480p capabilities. */
         X_M32(output) = 0x00480104u;
         xv_logf("[h2/av] virtual AV capabilities=00480104 output=%08X; no display mode applied\n", output);
-    } else if (option == 11 && param == 5 && !output) {
+    } else if (option == 11 && !output && (param == 5 || (display_mode_set && param <= 5))) {
         av_config.flicker_filter = param; av_config.has_flicker = 1;
-        xv_logf("[h2/av] deferred flicker-filter request=%u; presentation unsupported\n", param);
+        xv_logf("[h2/av] retained flicker-filter request=%u; inactive for selected progressive scanout\n", param);
     } else if (option == 14 && !param && !output) {
         av_config.luma_filter = param; av_config.has_luma = 1;
         xv_logf("[h2/av] deferred luma-filter request=%u; presentation unsupported\n", param);

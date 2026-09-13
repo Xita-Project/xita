@@ -376,6 +376,19 @@ int main(int argc, char **argv)
         X_M32(c.r[4] + 20) = 2560; X_M32(c.r[4] + 24) = 0x300000;
         __wrap_xk_AvSetDisplayMode(&c);
         assert(present_calls == 1 && c.r[0] == 0 && c.r[4] == 0x60001C);
+        for (unsigned level = 0; level <= 5; ++level) {
+            c.r[4] = 0x600000; X_M32(c.r[4] + 8) = 11;
+            X_M32(c.r[4] + 12) = level; X_M32(c.r[4] + 16) = 0;
+            interrupted = c;
+            __wrap_xk_AvSendTVEncoderOption(&c);
+            interrupted.r[4] += 20;
+            assert(!memcmp(&c, &interrupted, sizeof c));
+            assert(h2_host_av_configuration().has_flicker && h2_host_av_configuration().flicker_filter == level);
+            assert(present_calls == 1 && blank_calls == 0); /* no interlaced filter applied */
+        }
+        c.r[4] = 0x600000; X_M32(c.r[4] + 12) = 6;
+        if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
+        assert(h2_host_av_configuration().flicker_filter == 5 && c.r[4] == 0x600000);
         puts("Host-channel timed initialization: two real vblank contracts, callback ABI, parser retry and mode presentation pass.");
         free(g_xpt); free(g_xram); return 0;
     }

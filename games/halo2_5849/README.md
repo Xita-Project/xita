@@ -4,13 +4,13 @@ This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
 `5849` identifies the linked XDK library build, not an asserted game build number.
 
-The [latest native checkpoint and exact private replay command](../../docs/halo2-original-error-screen.md)
+The [latest native checkpoint and exact private replay command](../../docs/halo2-progressive-flicker-state.md)
 describe the current normal and diagnostic startup stops. There is no main menu.
 
 A separate [native startup target](../../docs/halo2-native-boot-20260912.md)
 executes the owned XBE's entry in Vita3K with an isolated title and filesystem.
 It has reached the actual application entry and D3D initialization. The Halo 2 title/menu,
-rendering, audio and gameplay are not working. This target has no CE renderer
+3D rendering, audio and gameplay are not working. This target has no CE renderer
 or CE game-address hooks.
 
 The [initial inspection report](../../docs/halo2-initial-profile-20260912.md)
@@ -65,8 +65,8 @@ The separate `--host-channel --audio-unavailable` diagnostic selects the
 It returns an explicit error at public sound creation, creates no audio object,
 and now executes original deferred timer callbacks with the corrected kernel
 ABI, runs a limited native FP mask/clear bridge, executes original state interfaces, then stops at an unsupported
-flicker-filter change after presenting the original disc-error screen.
+luma-filter enable after presenting the original disc-error screen.
 The cause of that game error is still under investigation. Earlier
 texture-state progress followed an incorrectly balanced timer return; the
 current checkpoint documents this limitation. It supplies
-no audio, additional rendering or menu; the ordinary profile is unchanged.
+no audio, 3D rendering or menu; the ordinary profile is unchanged.

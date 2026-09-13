@@ -271,6 +271,15 @@ void xv_watch_leave(uint32_t address, uint32_t back, xctx *c) { (void)address; (
 void xv_trace_func(uint32_t address)
 {
     static unsigned count;
+    static unsigned error_path_count;
+    if (xk_cur && error_path_count < 64 &&
+        (address == 0x13F10 || address == 0x163820 || address == 0x163890 ||
+         address == 0x223240 || address == 0x12B450 || address == 0x18E810)) {
+        const xctx *c = &xk_cur->ctx;
+        ++error_path_count;
+        xv_logf("[h2/error-path] fn=%08X return=%08X eax=%08X ecx=%08X edx=%08X esi=%08X\n",
+                address, X_M32(c->r[4]), c->r[0], c->r[1], c->r[2], c->r[6]);
+    }
     /* Read-only evidence for the pinned 1088E0 descriptor walk. The exact
      * record array is image-backed; reject pointers outside it before reads. */
     static int descriptor_chain_logged;
