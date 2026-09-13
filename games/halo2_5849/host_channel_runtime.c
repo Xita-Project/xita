@@ -18,7 +18,7 @@ static h2_host_channel channel;
 static h2_host_tiles tiles;
 static xctx *active_context;
 static int miniport_ready, channel_ready;
-static int software_active, initialization_flip_done;
+static int software_active, initialization_flip_done, initialization_flip_queued;
 static uint8_t scanout_gamma[768]; /* interleaved R/G/B DAC entries */
 static unsigned gamma_cursor;
 const h2_host_channel *h2_host_channel_current(void)
@@ -340,7 +340,7 @@ void h2_host_miniport_shutdown(xctx *c)
     xv_logf("[h2/channel] shutdown idle PUT=GET=%08X; host state retired, guest allocations retained\n", channel.put);
     memset(&channel, 0, sizeof channel);
     memset(&tiles, 0, sizeof tiles);
-    miniport_ready = channel_ready = initialization_flip_done = 0;
+    miniport_ready = channel_ready = initialization_flip_done = initialization_flip_queued = 0;
     mode_vblanks = gamma_cursor = 0;
     display_mode_set = 0;
     memset(scanout_gamma, 0, sizeof scanout_gamma);
@@ -379,10 +379,13 @@ static int software_flip(void *opaque, uint32_t value, uint32_t source)
 {
     (void)opaque;
     uint32_t address = (value >> 5) & ~15u;
-    /* First audited flip: immediate, interval zero, scanout disabled, an empty
-     * software queue, no timing or client callback, identity gamma pending.
+    int queued = (value & 0x1FF) == 0x21; /* interval one, non-immediate */
+    /* First audited flips: scanout disabled, an empty software queue, no
+     * timing or swap callback, identity gamma pending. The interval-one form
+     * only queues work; no vblank or completion is fabricated.
      * Validate every possible guest input/write span before invoking its body. */
-    if (software_active || initialization_flip_done || (value & 0x1FF) != 0x101 ||
+    if (software_active || initialization_flip_done || initialization_flip_queued ||
+        (!queued && (value & 0x1FF) != 0x101) ||
         !active_context || active_context->r[4] < 256 ||
         !guest_span_valid(active_context->r[4] - 256, 256) ||
         !guest_span_valid(MINIPORT, 0x7E4) || !guest_span_valid(0x408650, 4) ||
@@ -407,6 +410,7 @@ static int software_flip(void *opaque, uint32_t value, uint32_t source)
      * RAM updates remain visible; all interrupted CPU/FP/control state survives. */
     xctx *interrupted = active_context;
     uint32_t interrupted_fn = xv_cur_fn;
+    uint32_t old_framebuffer = X_M32(0x408650);
     xctx interrupt = *interrupted;
     interrupt.r[0] = value; interrupt.r[1] = MINIPORT;
     interrupt.preempt = 100000; /* bounded interrupt body cannot yield mid-command */
@@ -415,6 +419,18 @@ static int software_flip(void *opaque, uint32_t value, uint32_t source)
     active_context = interrupted;
     xv_cur_fn = interrupted_fn;
     software_active = 0;
+    if (queued) {
+        if (gamma_cursor || channel.commands.flip_read ||
+            X_M32(0x408650) != old_framebuffer || X_M32(MINIPORT + 0x174) != 1 ||
+            X_M32(MINIPORT + 0x178) != 1 || X_M32(MINIPORT + 0x17C) != address ||
+            X_M32(MINIPORT + 0x1BC) || X_M32(MINIPORT + 0x1C0) ||
+            X_M32(MINIPORT + 0x1C4) != 2 || X_M32(MINIPORT + 0x1C8) != 1 ||
+            X_M32(MINIPORT + 0x1CC) != 1 || X_M32(MINIPORT + 0x7DC) != 1)
+            reject(active_context, source, address, value);
+        initialization_flip_queued = 1;
+        xv_logf("[h2/flip] original interval-one handler queued address=%08X due_vblank=1; no completion or presentation\n", address);
+        return 1;
+    }
     if (gamma_cursor != 768 || channel.commands.flip_read != 1 ||
         X_M32(0x408650) != address || X_M32(MINIPORT + 0x1BC) != 1 ||
         X_M32(MINIPORT + 0x1CC) != 1 || X_M32(MINIPORT + 0x7DC))

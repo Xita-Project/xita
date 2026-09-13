@@ -11,6 +11,7 @@ volatile uint32_t xv_cur_fn;
 static jmp_buf fault;
 static uint32_t last_ip, last_address, calls;
 static unsigned software_calls;
+static int timed_test;
 static unsigned vblank_calls, event_calls, wait_calls;
 static int vblank_result;
 static uint32_t vblank_delta = 1;
@@ -72,9 +73,17 @@ void f_00401D96(xctx *c)
 }
 void f_003FF240(xctx *c)
 {
-    assert(c->r[0] == ((0x300000u | 8) << 5 | 1) && c->r[1] == 0x406C08);
+    assert(c->r[0] == ((0x300000u | (timed_test ? 1 : 8)) << 5 | 1) && c->r[1] == 0x406C08);
     ++software_calls;
     xv_cur_fn = 0x3FF240;
+    if (timed_test) {
+        X_M32(0x406C08 + 0x174) = X_M32(0x406C08 + 0x178) = 1;
+        X_M32(0x406C08 + 0x17C) = 0x300000;
+        X_M32(0x406C08 + 0x1C4) = 2;
+        X_M32(0x406C08 + 0x1C8) = X_M32(0x406C08 + 0x1CC) = 1;
+        uint32_t stack = c->r[4]; memset(c, 0xA5, sizeof *c); c->r[4] = stack; X_RET(0);
+        return;
+    }
     assert(h2_bus_read32(c, 0x3FE5E5, 0xFD003240) != 0);
     h2_bus_write8(c, 0x3FF5CE, 0xFD6813C8, 0);
     for (unsigned i = 0; i < 768; ++i) h2_bus_write8(c, 0x3FF5F1, 0xFD6813C9, i / 3);
@@ -91,8 +100,10 @@ static void instance_word(xctx *c, uint32_t offset, uint32_t word)
 { h2_bus_write32(c, 0, 0xFD700000 + offset, word); }
 static void packet(uint32_t *put, uint16_t method, uint32_t value)
 { X_M32(0x80000000u + *put) = 0x40000u | method; X_M32(0x80000004u + *put) = value; *put += 8; }
-int main(void)
+int main(int argc, char **argv)
 {
+    assert(argc == 1 || (argc == 2 && !strcmp(argv[1], "--timed")));
+    timed_test = argc == 2;
     g_xram = calloc(1, 0x4000000); g_img_base = g_xram;
     g_xpt = calloc(1 << 20, 4); assert(g_xram && g_xpt);
     for (unsigned page = 0; page < 0x4000; ++page) {
@@ -254,7 +265,7 @@ int main(void)
     packet(&put, 0x200, 640u << 16); packet(&put, 0x204, 480u << 16);
     packet(&put, 0x20C, 0x0A000A00); packet(&put, 0x120, 0);
     packet(&put, 0x124, 1); packet(&put, 0x128, 2);
-    packet(&put, 0x100, (0x300008u << 5) | 1);
+    packet(&put, 0x100, ((0x300000u | (timed_test ? 1 : 8)) << 5) | 1);
     X_M32(0x406C08 + 0x1B8) = 1; X_M32(0x406C08 + 0x7DC) = 1;
     xctx interrupted = c;
     xv_cur_fn = 0x1234;
@@ -268,6 +279,19 @@ int main(void)
     X_M32(0x406C08 + 0x18C) = 0;
     h2_bus_write32(&c, 0x1234, 0xFD800040, put);
     assert(software_calls == 1 && !memcmp(&c, &interrupted, sizeof c) && xv_cur_fn == 0x1234);
+    if (timed_test) {
+        assert(X_M32(0x408650) == 0 && X_M32(0x406C08 + 0x1BC) == 0);
+        assert(X_M32(0x406C08 + 0x174) == 1 && X_M32(0x406C08 + 0x178) == 1);
+        assert(X_M32(0x406C08 + 0x17C) == 0x300000 && X_M32(0x406C08 + 0x1CC) == 1);
+        packet(&put, 0x12C, 0); packet(&put, 0x130, 0);
+        if (!setjmp(fault)) { h2_bus_write32(&c, 0x1234, 0xFD800040, put); assert(0); }
+        assert(h2_bus_read32(&c, 0, 0xFD800044) == put - 4);
+        assert(!vblank_calls && !event_calls && !present_calls);
+        assert(X_M32(0x406C08 + 0x1C0) == 0 && X_M32(0x406C08 + 0x7DC) == 1);
+        assert(!memcmp(&c, &interrupted, sizeof c));
+        puts("Host-channel timed initialization: original queue contract and strict uncompleted flip stall pass.");
+        free(g_xpt); free(g_xram); return 0;
+    }
     assert(X_M32(0x408650) == 0x300000 && X_M32(0x406C08 + 0x1BC) == 1);
     packet(&put, 0x12C, 0); packet(&put, 0x130, 0);
     h2_bus_write32(&c, 0x1234, 0xFD800040, put);
