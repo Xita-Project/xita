@@ -29,3 +29,22 @@ Private evidence: `native-43-artifacts`, `native-43-view`,
 `native43-vtable-audit.txt`, `native-milestone-43.json`, and
 `game-init-regressions.log`. Owned generated code, captures and game-embedded
 packages remain private and must not be distributed as releases.
+
+## Native 44 allocator follow-up
+
+The two verified allocator slots `453498/45349C` are now included as roots.
+The original allocation executes, then `D4830` enters a three-record callback
+walk and stops at `115D10`, dispatched at `D487D`, return `D487F`. The walk
+starts at `4674A0`, advances by `38h`, runs three times and skips null callbacks.
+Its other record fields are not inferred as code. No rendering or audio
+behavior changed; the unavailable-audio diagnostic is still selected.
+All 15 host executables pass. Native 44 was captured, archived and stopped.
+
+| Native 44 audio-error diagnostic artifact | SHA-256 |
+| --- | --- |
+| ELF | `186c3a501a7964fec696e7ac73e6798473680864488d646951896082c3cdc6ad` |
+| EBOOT | `bde2b1a3808dd0ba775dea0998a313221ea47e14a47d3df008094bf4398e43ee` |
+| Boot trace | `b9df82f42e5a1a91689c974c470f6904d0f142a7097976350ac3946cd6e360b8` |
+
+Evidence remains in the corresponding `native-44-artifacts`, `native-44-view`
+and `native-milestone-44.json` private paths.

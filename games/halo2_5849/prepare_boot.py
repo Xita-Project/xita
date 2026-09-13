@@ -120,6 +120,9 @@ def main():
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
         roots.add(image.u32(image.u32(0x477058) + 0x10))
+        # Native43: arena allocator call 0x14B4C2 uses the two-slot table
+        # at 0x453498 (allocate/free); the following word begins string data.
+        roots.update(image.u32(slot) for slot in (0x453498, 0x45349C))
     output = args.out.resolve()
     generated = output / "generated"
     profile = str(Path(__file__).with_name("graphics-profile.json")) if args.graphics else "halo2_5849"
