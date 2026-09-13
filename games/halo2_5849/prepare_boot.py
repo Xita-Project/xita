@@ -20,6 +20,7 @@ GAME_INIT_WALK = (0x137C84, 19, "44c1c20adf4bb014714a0825d601e592e668699e31671c7
 GAME_DESCRIPTOR_WALK = (0x1088E0, 124, "c1bf2193fbf5a7f7a8d0de9fffaaf9ee5cbe12ced08b39059af29896540348ec")
 GAME_MODE_WALK = (0x18EF00, 152, "c499facfbe49993ebd3e15bb55a4f65adafb4bfd53eb99474ba7bb96ad3f8102")
 GAME_INTERFACE_REGISTRATION = (0x3769F0, 45, "46e548c6c8f362dc1ba57b6f7581a1b2c0bffb4b2cb9c2e812dcc7b9544b1611")
+GAME_ONLINE_INTERFACE_DISPATCH = (0x59949, 41, "c68f2b75408f155325c537d83f024b3ff580f096399c7606ca83a739654555a1")
 GAME_DISPATCH_CONSTRUCTORS = (
     (0x23546B, 27, "cbd17bebf8667c708be45cbe65a4fc6dfc672448edf8c83151e4173d16e69e71"),
     (0x234E43, 33, "84924bde2768f01fd262d3d0cd0916038e22c201d8200008e05c9cdff85bd95f"),
@@ -98,6 +99,17 @@ def game_allocator_vtable_roots(image):
 def game_state_vtable_roots(image):
     """Native58: one constructor assigns eleven adjacent four-method state tables."""
     return _constructor_vtable_roots(image, GAME_STATE_CONSTRUCTORS, 0x450990, 0x450A40)
+
+
+def game_online_interface_roots(image):
+    """Native59: the same original update calls two statically bound interfaces."""
+    address, length, digest = GAME_ONLINE_INTERFACE_DISPATCH
+    if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+        raise ValueError("Halo 2 online interface dispatch fingerprint mismatch")
+    for instance, table in ((0x47708C, 0x450B68), (0x47712C, 0x450B44)):
+        if image.u32(instance) != table:
+            raise ValueError(f"Halo 2 online interface binding {instance:#x} mismatch")
+    return _code_vtable_roots(image, 0x450B44, 0x450B88)
 
 
 def game_descriptor_initialization_chain(image):
@@ -258,6 +270,7 @@ def main():
         roots.update(game_allocator_vtable_roots(image))
         roots.update(game_registered_interface_roots(image))
         roots.update(game_state_vtable_roots(image))
+        roots.update(game_online_interface_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
         # Native49: 1A474C passes the global arena object 47D924 to 18E1F0.
         # Its stored vtable is 4508FC: allocate/free, followed by string data.

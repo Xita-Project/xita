@@ -30,6 +30,27 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_two_static_online_interfaces(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16
+                         for n, slot in enumerate(range(0x450B44, 0x450B88, 4))}
+        expected = set(image.targets.values())
+        image.targets.update({0x47708C: 0x450B68, 0x47712C: 0x450B44})
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_ONLINE_INTERFACE_DISPATCH", spec):
+            self.assertEqual(prepare_boot.game_online_interface_roots(image), expected)
+            self.assertEqual(len(expected), 17)
+            image.targets[0x47712C] = 0x450B48
+            with self.assertRaisesRegex(ValueError, "binding .* mismatch"):
+                prepare_boot.game_online_interface_roots(image)
+            image.targets[0x47712C] = 0x450B44
+            image.targets[0x450B84] = None
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_online_interface_roots(image)
+        with patch.object(prepare_boot, "GAME_ONLINE_INTERFACE_DISPATCH", (0x200, len(image.code), "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_online_interface_roots(image)
+
     def test_eleven_state_interfaces_bounded_by_constructor(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {slot: 0x1000 + n * 16
