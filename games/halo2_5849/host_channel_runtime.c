@@ -294,6 +294,7 @@ void __wrap_xk_AvSetDisplayMode(xctx *c)
     int result = h2_platform_present(pixels, H2_SCANOUT_BYTES, scanout_gamma, &vcount);
     if (result < 0) reject(c, ip, address, (uint32_t)result);
     display_mode_set = 1;
+    screen_blanked = 0;
     xv_logf("[h2/display] presented linear ARGB8 address=%08X 640x480 pitch=2560 vcount=%u; progressive gamma scanout, interlaced flicker filter inactive, luma filter disabled\n",
             address, vcount);
     c->r[0] = 0; X_RET(6);
@@ -301,6 +302,42 @@ void __wrap_xk_AvSetDisplayMode(xctx *c)
 
 static int channel_idle(void)
 { return channel_ready && !channel.bootstrap && !channel.stream.remaining && channel.put == channel.stream.get; }
+void h2_host_miniport_shutdown(xctx *c)
+{
+    const uint32_t ip = 0x3FE4CBu, mini = c->r[0];
+    check_stack(c, ip, 0);
+    /* Paired with our virtual miniport initialization. The original caller
+     * already flushed and blanked the display and released its resources.
+     * No physical IRQ/shutdown callback was registered by this backend. */
+    if (mini != MINIPORT || !guest_span_valid(mini, 0x81C) ||
+        X_M32(0x407488) != DEVICE || X_M32(mini) != BAR || !miniport_ready ||
+        !channel_idle() || software_active || !display_mode_set || !screen_blanked ||
+        X_M32(mini + 0x818) || X_M32(mini + 0x174) || X_M32(mini + 0x180) ||
+        X_M32(mini + 0x18C) || X_M32(mini + 0x190) ||
+        X_M32(mini + 0x100) || X_M32(mini + 0x104) != 1 || X_M32(mini + 0x108) != 1 ||
+        X_M32(mini + 0x128) != 0x711000 || X_M32(mini + 0x134) != 2 ||
+        h2_instance_bytes() != 0x5000 ||
+        !map_physical_raw(PHYSICAL_BYTES - 0x10000u - h2_instance_bytes(), h2_instance_bytes()))
+        reject(c, ip, mini, channel_ready);
+    /* Retire the synchronous channel, preserving its final guest-visible
+     * RAMFC cursors. There is no pending DMA fetch or serialized GPU context.
+     * Guest RAM and allocation ownership remain with the original destructor. */
+    instance_write(c, 0x11000, channel.put);
+    instance_write(c, 0x11004, channel.put);
+    instance_write(c, 0x11008, 0);
+    instance_write(c, 0x11010, 0);
+    instance_write(c, 0x11044, h2_bus_read32(c, ip, BAR + 0x711040));
+    instance_write(c, 0x11050, 0);
+    xv_logf("[h2/channel] shutdown idle PUT=GET=%08X; host state retired, guest allocations retained\n", channel.put);
+    memset(&channel, 0, sizeof channel);
+    memset(&tiles, 0, sizeof tiles);
+    miniport_ready = channel_ready = initialization_flip_done = 0;
+    mode_vblanks = gamma_cursor = 0;
+    display_mode_set = 0;
+    memset(scanout_gamma, 0, sizeof scanout_gamma);
+    active_context = NULL;
+    X_RET(0);
+}
 void h2_host_tile_remove(xctx *c)
 {
     check_stack(c, 0x3FE86Au, 2);

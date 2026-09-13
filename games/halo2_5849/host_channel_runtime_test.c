@@ -328,6 +328,34 @@ int main(void)
     if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
     if (!setjmp(fault)) { h2_bus_write32(&c, 0, 0xFD40071C, 2); assert(0); }
     assert(software_calls == 1); /* no arbitrary external increment or DAC access */
+    c.r[0] = 0x406C08; c.r[4] = 0x600000;
+    uint32_t old_ramfc = h2_bus_read32(&c, 0, 0xFD711000);
+    if (!setjmp(fault)) { h2_host_miniport_shutdown(&c); assert(0); } /* display still active */
+    assert(h2_bus_read32(&c, 0, 0xFD711000) == old_ramfc);
+    X_M32(c.r[4] + 12) = 1; __wrap_xk_AvSendTVEncoderOption(&c);
+    c.r[0] = 0x406C08; c.r[4] = 0x600000;
+    X_M32(0x406C08 + 0x190) = 0x12345678;
+    if (!setjmp(fault)) { h2_host_miniport_shutdown(&c); assert(0); }
+    X_M32(0x406C08 + 0x190) = 0;
+    g_xpt[0x407] = 0x4000000;
+    if (!setjmp(fault)) { h2_host_miniport_shutdown(&c); assert(0); }
+    g_xpt[0x407] = 0x407000;
+    g_xpt[0x83FEF] = 0x4000000;
+    if (!setjmp(fault)) { h2_host_miniport_shutdown(&c); assert(0); }
+    g_xpt[0x83FEF] = 0x3FEF000;
+    uint32_t final_put = h2_bus_read32(&c, 0, 0xFD800044);
+    interrupted = c; interrupted.r[4] += 4;
+    h2_host_miniport_shutdown(&c);
+    assert(!memcmp(&c, &interrupted, sizeof c)); /* complete CPU/FP/control state */
+    assert(h2_bus_read32(&c, 0, 0xFD711000) == final_put);
+    assert(h2_bus_read32(&c, 0, 0xFD711004) == final_put);
+    assert(h2_bus_read32(&c, 0, 0xFD711010) == 0);
+    if (!setjmp(fault)) { h2_bus_read32(&c, 0, 0xFD800044); assert(0); }
+    c.r[0] = 0x406C08; c.r[4] = 0x600000;
+    if (!setjmp(fault)) { h2_host_miniport_shutdown(&c); assert(0); } /* double shutdown */
+    memset(X_G(0x406C08), 0, 0x81C); /* original caller clears its device */
+    h2_host_miniport_init(&c);
+    assert(calls == 8 && c.r[0] == 1 && c.r[4] == 0x600004);
     puts("Host-channel runtime: LTCG contracts, mapped resources, canonical color/depth/stencil pixels and strict rejection pass.");
     free(g_xpt); free(g_xram); return 0;
 }
