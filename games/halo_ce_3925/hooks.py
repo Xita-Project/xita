@@ -11,6 +11,31 @@ from recompiler.core.hooks import NoGameHooks
 
 
 class HaloHooks(NoGameHooks):
+    def phase_targets(self):
+        if not self.enabled:
+            raise ValueError("Halo phase timing requires the audited executable")
+        # Edges verified against the 3925 main loop, tick dispatcher and scene
+        # dispatcher. Address labels deliberately retain unresolved semantics;
+        # a tick child must not be advertised as all AI/physics without evidence.
+        return {
+            0xBD420: "main_loop", 0xFA920: "tick_driver", 0x109760: "tick_dispatch",
+            0x120160: "director_update", 0xBCB30: "scene_dispatch",
+            0xBC260: "view_setup", 0x5DBC0: "scene_frame",
+            0x5D990: "scene_5D990", 0x5D340: "scene_5D340",
+            0x800E0: "render_begin", 0x531B0: "scene_531B0",
+            0x581A0: "scene_581A0", 0x520B0: "scene_520B0",
+            0x5D410: "scene_5D410", 0x108A10: "tick_108A10",
+            0x108810: "tick_108810", 0xF73F0: "tick_F73F0",
+            0x1138B0: "tick_1138B0", 0xF7C40: "tick_F7C40",
+            0xD8BC0: "tick_D8BC0", 0x107CB0: "tick_107CB0",
+            0xE7140: "tick_E7140", 0x119460: "tick_119460",
+            0x900E0: "tick_900E0", 0xF5BF0: "tick_F5BF0",
+            0xE2A00: "tick_E2A00", 0xBB5D0: "frame_BB5D0",
+            0x9EAE0: "frame_9EAE0", 0xBC400: "frame_BC400",
+            0xBC8E0: "frame_BC8E0", 0xBB060: "frame_BB060",
+            0x7EDF0: "frame_present",
+        }
+
     def __init__(self, image):
         self.image = image
         self.enabled = matches_image(image)

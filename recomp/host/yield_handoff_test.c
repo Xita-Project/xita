@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <setjmp.h>
 #include "../kernel/xk_thread.c"
 uint8_t *g_xram,*g_img_base;
 uint32_t *g_xpt;
@@ -6,6 +7,15 @@ static uint64_t clock_us;
 static unsigned switches, destroyed;
 static xk_thread *expected;
 static int run_selected;
+static unsigned phase_suspends, phase_resumes, phase_forgets, root_switches;
+static int phase_parked, exit_mode;
+static jmp_buf exit_jump;
+void xv_phase_suspend(void *context)
+{ assert(context==&xk_cur->ctx && !phase_parked);phase_parked=1;phase_suspends++; }
+void xv_phase_resume(void *context)
+{ assert(context==&xk_cur->ctx && phase_parked);phase_parked=0;phase_resumes++; }
+void xv_phase_forget(void *context)
+{ assert(context==&xk_cur->ctx);phase_forgets++; }
 static xk_fiber *const root_fiber=(xk_fiber *)(uintptr_t)1;
 uint64_t xk_os_monotonic_us(void) { return clock_us; }
 void xk_os_log(const char *fmt, ...) { (void)fmt; }
@@ -13,7 +23,8 @@ xk_fiber *xk_os_fiber_main(void) { return root_fiber; }
 void xk_os_fiber_switch(xk_fiber *f)
 {
     switches++;
-    if (!run_selected) { assert(f==root_fiber); return; }
+    if (exit_mode) { assert(f==root_fiber && phase_forgets==1 && !phase_parked);longjmp(exit_jump,1); }
+    if (!run_selected) { assert(f==root_fiber && phase_parked);root_switches++;return; }
     assert(expected && f==expected->fiber && xk_cur==expected);
     expected->state=3;
 }
@@ -57,6 +68,10 @@ int main(int argc,char **argv)
     /* Profiler only requests; the guest owns the eventual counter reset. */
     g_yield_calls=123;xk_wait_stats_request();assert(g_yield_calls==123);
     xk_yield();assert(!g_wait_dump_requested && g_yield_calls==1);
+    assert(phase_suspends==root_switches && phase_resumes==root_switches && !phase_parked);
+    exit_mode=1;
+    if(!setjmp(exit_jump))xk_thread_exit(0);
+    assert(phase_forgets==1);
     free(g_xpt);free(g_xram);
     puts("PASS: same-thread yield bypass, due sleeps, boosts, single event consumption, preserved root selection, real waits and guest-owned statistics");
 }

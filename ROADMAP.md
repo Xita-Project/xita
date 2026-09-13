@@ -9,6 +9,11 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 12 [selected guest-phase diagnostic](docs/guest-phase-timing-20260912.md):
+32 opt-in scopes distinguish selected self time from nested work and explicit
+guest handoff time. This prepares hardware attribution of larger update and
+scene-preparation batches; more gameplay parallelism and FPS gains remain open.
+
 September 12 [vertex worker hardware result](docs/hardware-20260912-vertex-worker-results.md):
 Blood Gulch at 360p measures 11.294 / 11.627 / 11.395 FPS off/on/off, favoring
 the worker by 2.49% in one comparison. Core-0 execution is confirmed; the copy

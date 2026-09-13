@@ -6,6 +6,9 @@ manifest cannot provide executable Python, C snippets, or shell commands.
 
 
 class NoGameHooks:
+    def phase_targets(self):
+        raise ValueError("This game adapter has no reviewed phase timing targets")
+
     def before_instruction(self, address):
         return []
 

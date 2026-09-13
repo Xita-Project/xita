@@ -129,6 +129,8 @@ static void prof_thread(void *arg)
 }
 void xv_prof_start(void)
 {
+    extern void xv_phase_init(void) __attribute__((weak));
+    if (xv_phase_init) xv_phase_init();
     /* Untraced entries do not resolve the lazy watch sentinel. Resolve it
      * here too, so native helpers avoid no-op watch dispatch in normal play. */
     if (xv_watch_n < 0) watch_init();

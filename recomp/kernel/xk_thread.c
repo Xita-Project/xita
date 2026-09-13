@@ -4,6 +4,10 @@
 #include <string.h>
 #include "xk.h"
 
+void xv_phase_suspend(void *context) __attribute__((weak));
+void xv_phase_resume(void *context) __attribute__((weak));
+void xv_phase_forget(void *context) __attribute__((weak));
+
 /* ---- objects & handles ------------------------------------------------------------------- */
 static xk_obj *g_handles[XK_MAX_HANDLES];
 static uint32_t g_next_handle = 4;
@@ -169,6 +173,7 @@ xk_thread *xk_thread_create(uint32_t stack_size, uint32_t tls_size, uint32_t sta
 void xk_thread_exit(uint32_t status)
 {
     xk_thread *t = xk_cur;
+    if (xv_phase_forget) xv_phase_forget(&t->ctx);
     XK_LOG("thread %d exited (%08X)\n", t->id, status);
     t->state = 3; t->exit_status = status; X_M32(t->kthread + KTHREAD_EXITSTATUS) = status; X_M8(t->kthread + KTHREAD_SIGNALSTATE) = 1;   /* GetExitCodeThread: SignalState ? ExitStatus : STILL_ACTIVE */
     xk_signal_check();
@@ -289,8 +294,10 @@ void xk_yield(void)
      * otherwise time after a resume is charged to whatever the other thread last entered */
     extern volatile uint32_t xv_cur_fn __attribute__((weak));
     uint32_t saved_fn = &xv_cur_fn ? xv_cur_fn : 0;
+    if (xv_phase_suspend) xv_phase_suspend(&me->ctx);
     xk_os_fiber_switch(xk_os_fiber_main());           /* back to the scheduler loop */
     xk_cur = me;
+    if (xv_phase_resume) xv_phase_resume(&me->ctx);
     if (&xv_cur_fn) xv_cur_fn = saved_fn;
 }
 

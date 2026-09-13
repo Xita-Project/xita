@@ -334,7 +334,7 @@ XITA_GUEST_SRCS := $(wildcard $(RECOMP_DIR)/code_*.c) $(RECOMP_DIR)/xv_fn_table.
 XITA_SYS_SRCS := $(RECOMP_DIR)/xv_x86rt.c $(RECOMP_DIR)/kernel/xk_mem.c $(RECOMP_DIR)/kernel/xk_rtl.c \
                  $(RECOMP_DIR)/kernel/xk_file.c $(RECOMP_DIR)/kernel/xk_thread.c $(RECOMP_DIR)/kernel/xk_xapi.c $(RECOMP_DIR)/kernel/xk_net.c \
                  $(RECOMP_DIR)/kernel/xd3d.c $(RECOMP_DIR)/kernel/xk_audio.c $(RECOMP_DIR)/kernel/xk_crypto.c $(RECOMP_DIR)/kernel/xk_os_vita.c \
-                 $(RECOMP_DIR)/xv_trace_stub.c $(RECOMP_DIR)/xv_funchist.c
+                 $(RECOMP_DIR)/xv_trace_stub.c $(RECOMP_DIR)/xv_funchist.c $(RECOMP_DIR)/xv_phase.c
 RECOMP_SRCS := $(XITA_GUEST_SRCS) $(XITA_SYS_SRCS) $(XITA_GAME_SRCS)
 RECOMP_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(RECOMP_SRCS))
 XITA_GUEST_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GUEST_SRCS))
@@ -349,9 +349,10 @@ $(RECOMP_BUILD)/kernel/xk_bounds.o: RECOMP_CFLAGS += -ffp-contract=off
 recomp/kernel/xk_bounds.c: tools/gen_native_bounds.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_bounds.py
 
-# lifted code (code_*.c) only includes xv_recomp_protos.h -> xv_x86rt.h; the kernel/HLE objects use -MMD
+# Lifted code includes xv_recomp_protos.h -> xv_x86rt.h and, for diagnostic
+# generation, xv_phase.h. The kernel/HLE objects use -MMD
 # so a kernel header edit does not recompile the ~35 MB of generated code.
-$(RECOMP_BUILD)/code_%.o: $(RECOMP_DIR)/code_%.c $(RECOMP_DIR)/xv_recomp_protos.h $(RECOMP_DIR)/xv_x86rt.h
+$(RECOMP_BUILD)/code_%.o: $(RECOMP_DIR)/code_%.c $(RECOMP_DIR)/xv_recomp_protos.h $(RECOMP_DIR)/xv_x86rt.h $(RECOMP_DIR)/xv_phase.h
 	@mkdir -p $(dir $@)
 	$(CC) $(RECOMP_CFLAGS) -c $< -o $@
 $(RECOMP_BUILD)/%.o: $(RECOMP_DIR)/%.c
