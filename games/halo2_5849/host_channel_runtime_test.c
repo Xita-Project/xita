@@ -66,6 +66,25 @@ int main(void)
     assert(X_M32(0x610000) == 0x00480104 && c.r[4] == 0x600000);
     if (!setjmp(fault)) { __wrap_xk_AvSetDisplayMode(&c); assert(0); }
     assert(c.r[4] == 0x600000);
+    assert(!h2_host_av_configuration().has_flicker && !h2_host_av_configuration().has_luma);
+    X_M32(c.r[4] + 4) = 0xFD000000; X_M32(c.r[4] + 8) = 11;
+    X_M32(c.r[4] + 12) = 5; X_M32(c.r[4] + 16) = 0;
+    __wrap_xk_AvSendTVEncoderOption(&c);
+    assert(h2_host_av_configuration().has_flicker && h2_host_av_configuration().flicker_filter == 5);
+    assert(c.r[0] == 0xABCDEF01 && c.r[4] == 0x600014);
+    c.r[4] = 0x600000; X_M32(c.r[4] + 12) = 4;
+    if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
+    assert(h2_host_av_configuration().flicker_filter == 5 && c.r[4] == 0x600000);
+    X_M32(c.r[4] + 8) = 14; X_M32(c.r[4] + 12) = 0; X_M32(c.r[4] + 16) = 0x610000;
+    if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
+    assert(!h2_host_av_configuration().has_luma && X_M32(0x610000) == 0x00480104);
+    X_M32(c.r[4] + 16) = 0; __wrap_xk_AvSendTVEncoderOption(&c);
+    assert(h2_host_av_configuration().has_luma && h2_host_av_configuration().luma_filter == 0);
+    assert(c.r[4] == 0x600014 && c.r[0] == 0xABCDEF01);
+    c.r[4] = 0x600000; X_M32(c.r[4] + 4) = 0xDEADBEEF;
+    if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
+    if (!setjmp(fault)) { __wrap_xk_AvSetDisplayMode(&c); assert(0); }
+    assert(c.r[4] == 0x600000); /* deferred settings still cannot apply a display */
     X_M32(0x404FE0 + 0x24) = 0x80010000; X_M32(0x404FE0 + 0x28) = 0x80011000;
     X_M32(0x406C08 + 0x10C) = 0x111D; X_M32(0x61000C) = 0x1112;
     X_M32(0x406C08 + 0x160) = 0x149C;

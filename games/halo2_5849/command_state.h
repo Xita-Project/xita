@@ -12,6 +12,11 @@ typedef struct h2_command_state {
     uint32_t dma[11], dma_valid;
     uint32_t m2mf_notifier, surfaces_dma[2], blit_context[7], blit_operation, pattern_color;
     uint32_t constants[192][4], constant_load;
+    uint32_t program[136][4], program_load, program_start, execution_mode, context_write;
+    uint32_t vertex4ub[16]; /* packed attribute inputs; no vertices are emitted */
+    /* Original inputs for an explicit whitelist of non-executing setup methods.
+     * This is not a complete PGRAPH register file or an implemented draw state. */
+    uint32_t setup[0x2000 / 4], setup_valid[0x2000 / 4 / 32];
     uint32_t semaphore_offset, flip_read, flip_write, flip_modulo;
     uint32_t provoking_vertex, edge_flag, compress_depth, shader_inputs, shadow_slope;
     uint64_t semaphore_releases;

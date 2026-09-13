@@ -197,17 +197,25 @@ void h2_host_memory_barrier(xctx *c)
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
     X_RET(0);
 }
+static h2_host_av_config av_config;
+h2_host_av_config h2_host_av_configuration(void) { return av_config; }
 void __wrap_xk_AvSendTVEncoderOption(xctx *c)
 {
     check_stack(c, 0, 4);
     uint32_t base = X_ARG(0), option = X_ARG(1), param = X_ARG(2), output = X_ARG(3);
-    /* Explicit virtual target: NTSC-M, 60 Hz, normal aspect, HDTV 480p. This
-     * reports capabilities only; applying a display mode remains unsupported. */
-    if (!miniport_ready || (base && base != BAR) || option != 6 || param ||
-        !output || (output & 3) || !guest_span_valid(output, 4))
-        reject(c, X_M32(c->r[4]), output, option);
-    X_M32(output) = 0x00480104u;
-    xv_logf("[h2/av] virtual AV capabilities=00480104 output=%08X; no display mode applied\n", output);
+    if (!miniport_ready || (base && base != BAR))
+        reject(c, X_M32(c->r[4]), base, option);
+    if (option == 6 && !param && output && !(output & 3) && guest_span_valid(output, 4)) {
+        /* Virtual NTSC-M, 60 Hz, normal aspect, HDTV 480p capabilities. */
+        X_M32(output) = 0x00480104u;
+        xv_logf("[h2/av] virtual AV capabilities=00480104 output=%08X; no display mode applied\n", output);
+    } else if (option == 11 && param == 5 && !output) {
+        av_config.flicker_filter = param; av_config.has_flicker = 1;
+        xv_logf("[h2/av] deferred flicker-filter request=%u; presentation unsupported\n", param);
+    } else if (option == 14 && !param && !output) {
+        av_config.luma_filter = param; av_config.has_luma = 1;
+        xv_logf("[h2/av] deferred luma-filter request=%u; presentation unsupported\n", param);
+    } else reject(c, X_M32(c->r[4]), output, option);
     X_RET(4);
 }
 void __wrap_xk_AvSetDisplayMode(xctx *c)

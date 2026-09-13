@@ -105,6 +105,45 @@ int main(void)
     f.failed_instance = 0x130A8; reject(0, 0x1D70, 9); f.failed_instance = 0;
     dma(10, 3, 0xFFF, 7); reject(0, 0x1D70, 9); /* physical end/alignment */
     reject(0, 0x1800, 3); reject(0, 0x1810, 0); /* draws stay fatal */
+    assert(emit(0, 0x1E9C, 134));
+    for (unsigned i = 0; i < 8; ++i) assert(emit(0, 0xB00 + i * 4, 0xAABB0000 + i));
+    assert(s.program[134][3] == 0xAABB0003 && s.program[135][3] == 0xAABB0007 && s.program_load == 136);
+    reject(0, 0xB20, 1); reject(0, 0x1E9C, 136); reject(0, 0x1EA0, 136);
+    assert(emit(0, 0x1EA0, 135) && s.program_start == 135);
+    assert(emit(0, 0x1E94, 6) && emit(0, 0x1E98, 0));
+    reject(0, 0x1E94, 7); reject(0, 0x1E94, 8); reject(0, 0x1E98, 2);
+    reject(0, 0x1E90, 0); /* executing a program remains unsupported */
+    assert(emit(0, 0x194C, 0x11223344) && s.vertex4ub[3] == 0x11223344);
+    reject(0, 0x1940, 1); /* position attribute would emit a vertex */
+    assert(emit(0, 0xA20, 0x7FC12345) && s.constants[0x3B][0] == 0x7FC12345);
+    assert(emit(0, 0xAF8, 0x80000000) && s.constants[0x3A][2] == 0x80000000);
+    assert(emit(0, 0xA7C, 0xDEADBEEF) && s.setup[0xA7C / 4] == 0xDEADBEEF);
+    assert(emit(0, 0x1BFC, 0x80000000) && s.setup[0x1BFC / 4] == 0x80000000);
+    reject(0, 0x1B00, 1); reject(0, 0x1B04, 1); /* resources need another implementation */
+    assert(emit(0, 0x300, 1) && emit(0, 0x328, 6));
+    reject(0, 0x300, 2); reject(0, 0x328, 7); reject(0, 0x33C, 0x208);
+    reject(0, 0x358, 2); reject(0, 0x370, 0x1234); reject(0, 0x380, 0x200);
+    reject(0, 0x3C0, 0x1234); reject(0, 0x2C0, 0xF0000000);
+    assert(emit(0, 0x100, 0) && emit(0, 0x110, 0));
+    reject(0, 0x100, 9); reject(0, 0x100, 0x28); reject(0, 0x110, 1);
+    /* The draw-state representation must not bypass clear-sensitive settings. */
+    dma(10, 3, 0x800, 7);
+    assert(emit(0, 0x200, 2u << 16) && emit(0, 0x204, 1u << 16));
+    assert(emit(0, 0x208, 0x128) && emit(0, 0x20C, 0x00080008));
+    assert(emit(0, 0x1D98, 1u << 16) && emit(0, 0x1D9C, 0));
+    assert(emit(0, 0x2B4, 0) && emit(0, 0x2C0, 2u << 16) && emit(0, 0x2E0, 1u << 16));
+    assert(emit(0, 0x290, 0x100001) && emit(0, 0x1D7C, 0xFFFF0000));
+    assert(emit(0, 0x1D8C, 0x11223344) && emit(0, 0x1D94, 3));
+    assert(f.ram[0x800 / 4] == 0x11223344 && f.ram[0x804 / 4] == 0x11223344);
+    assert(c.completed_clears == 1 && c.written_pixels == 2);
+    assert(emit(0, 0x290, 0x101001)); reject(0, 0x1D94, 3);
+    assert(emit(0, 0x290, 0x100001) && emit(0, 0x1D7C, 1)); reject(0, 0x1D94, 3);
+    assert(emit(0, 0x1D7C, 0) && emit(0, 0x2B4, 1)); reject(0, 0x1D94, 3);
+    assert(emit(0, 0x2B4, 0) && emit(0, 0x2C0, 1u << 16)); reject(0, 0x1D94, 3);
+    assert(emit(0, 0x2C0, 2u << 16) && emit(0, 0x310, 1)); reject(0, 0x1D94, 0xF0);
+    assert(emit(0, 0x310, 0) && emit(0, 0x1D90, 0xAABBCCDD) && emit(0, 0x1D94, 0xF0));
+    assert(f.ram[0x800 / 4] == 0xAABBCCDD && f.ram[0x804 / 4] == 0xAABBCCDD);
+    assert(c.completed_clears == 2 && c.written_pixels == 4);
     puts("Command state: class bindings, context aliases, exact state, semaphore writes/bounds and rejection isolation pass.");
     return 0;
 }

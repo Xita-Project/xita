@@ -26,11 +26,16 @@ static int bind_object(h2_command_state *s, h2_kelvin_clear *c, unsigned sub,
     if (!graph_object(c, value, &o)) return 0;
     unsigned index;
     switch (o.context[0] & 0xFFF) {
-    case 0x97: index = 0; break;
-    case 0x39: index = 1; break;
-    case 0x9F: index = 2; break;
-    case 0x62: index = 3; break;
-    case 0x44: index = 4; break;
+    case 0x97: index = 0;
+        break;
+    case 0x39: index = 1;
+        break;
+    case 0x9F: index = 2;
+        break;
+    case 0x62: index = 3;
+        break;
+    case 0x44: index = 4;
+        break;
     default: return 0;
     }
     /* One persistent object per supported class. No guessed context switching. */
@@ -56,6 +61,105 @@ static int release_semaphore(h2_command_state *s, h2_kelvin_clear *c, uint32_t v
     __atomic_store_n((uint32_t *)pointer, native, __ATOMIC_RELEASE);
     ++s->semaphore_releases;
     s->last_semaphore_address = physical; s->last_semaphore_value = value;
+    return 1;
+}
+static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
+{
+    /* State assignments from the observed constructor. Unknown ranges and all
+     * execution methods remain excluded, even if their opcode is adjacent. */
+    if ((method >= 0xA60 && method <= 0xA9C) || /* combiner factors */
+        (method >= 0xAE0 && method <= 0xAEC)) { /* texture color keys */
+        /* Full packed color values. */
+    } else if (method >= 0x3C0 && method <= 0x3FC) { /* four texgen S/T/R/Q slots */
+        if (value != 0 && value != 0x2400 && value != 0x2401 && value != 0x2402 &&
+            value != 0x8511 && value != 0x8512) return 0;
+    } else if (method >= 0x1B00 && method <= 0x1BFC) {
+        switch ((method - 0x1B00) & 63) {
+        case 0x0C: /* texture control: enable/lod state only */
+        case 0x24: /* border color */
+        case 0x28: case 0x2C: case 0x30: case 0x34: /* bump matrix */
+        case 0x38: case 0x3C: /* bump scale/offset */
+            break;
+        default: return 0; /* texture resources/format/filter need separate validation */
+        }
+    } else switch (method) {
+    case 0x300: case 0x304: case 0x308: case 0x30C: case 0x310:
+    case 0x320: case 0x324: case 0x32C: case 0x330: case 0x334: case 0x338:
+    case 0x35C: case 0x3A4: case 0x147C: case 0x17BC: case 0x17C4:
+        if (value > 1) return 0;
+        break; /* enable bits */
+    case 0x328: if (value > 6) return 0;
+        break; /* skin mode */
+    case 0x33C: case 0x354: case 0x364: /* alpha/depth/stencil compare functions */
+        if (value < 0x200 || value > 0x207) return 0;
+        break;
+    case 0x340: case 0x368: if (value > 255) return 0;
+        break; /* alpha/stencil reference */
+    case 0x344: case 0x348: /* blend factors */
+        if (value > 1 && !(value >= 0x300 && value <= 0x308) &&
+            !(value >= 0x8001 && value <= 0x8004)) return 0;
+        break;
+    case 0x350: /* blend equation */
+        if (value != 0x8006 && value != 0x8007 && value != 0x8008 && value != 0x800A &&
+            value != 0x800B && value != 0xF005 && value != 0xF006) return 0;
+        break;
+    case 0x358: if (value & ~0x01010101u) return 0;
+        break; /* color write mask */
+    case 0x370: case 0x374: case 0x378: /* stencil operations */
+        if (value && value != 0x1E00 && value != 0x1E01 && value != 0x1E02 &&
+            value != 0x1E03 && value != 0x150A && value != 0x8507 && value != 0x8508) return 0;
+        break;
+    case 0x37C: if (value != 0x1D00 && value != 0x1D01) return 0;
+        break; /* shading */
+    case 0x380: if (value > 0x1FF) return 0;
+        break; /* fixed-point line width */
+    case 0x38C: case 0x390: if (value < 0x1B00 || value > 0x1B02) return 0;
+        break;
+    case 0x39C: if (value != 0x404 && value != 0x405 && value != 0x408) return 0;
+        break;
+    case 0x3A0: if (value != 0x900 && value != 0x901) return 0;
+        break;
+    case 0x2B4: if (value > 1) return 0;
+        break; /* window inclusion/exclusion */
+    case 0x2C0: case 0x2E0: if (value & 0xF000F000u) return 0;
+        break; /* first window */
+    case 0x9F8: if (value > 4) return 0;
+        break; /* raster swath width */
+    case 0x1D84: if (value & ~3u) return 0;
+        break; /* hierarchical depth/stencil optimization */
+    case 0x1E6C: if (value > 7) return 0;
+        break; /* shadow compare */
+    case 0x290: /* control: clear format checked at execution */
+    case 0x2A8: case 0x34C: /* packed colors */
+    case 0x360: case 0x36C: /* stencil mask inputs (low 8 bits used by future draws) */
+    case 0x384: case 0x388: case 0x394: case 0x398: /* floating-point depth/offset inputs */
+    case 0x1D78: case 0x1D7C: /* depth clamp / AA metadata; clear has its own guard */
+        break;
+    default: return 0;
+    }
+    s->setup[method / 4] = value;
+    s->setup_valid[(method / 4) / 32] |= 1u << ((method / 4) % 32);
+    return 1;
+}
+static int has_setup(const h2_command_state *s, uint16_t method)
+{ return !!(s->setup_valid[(method / 4) / 32] & (1u << ((method / 4) % 32))); }
+static int clear_setup_supported(const h2_command_state *s, const h2_kelvin_clear *c, uint32_t flags)
+{
+    if (!flags) return 1;
+    if ((s->setup[0x1D7C / 4] & 1) || ((flags & 3) && (s->setup[0x290 / 4] & 0x1000)) ||
+        ((flags & 0xF0) && s->setup[0x310 / 4])) return 0;
+    if (s->setup[0x2B4 / 4]) return 0;
+    if (has_setup(s, 0x2C0) || has_setup(s, 0x2E0)) {
+        if (!has_setup(s, 0x2C0) || !has_setup(s, 0x2E0)) return 0;
+        uint32_t x = s->setup[0x2C0 / 4], y = s->setup[0x2E0 / 4];
+        /* Require the whole clear strictly inside the first inclusive window.
+         * This also covers an exclusive upper-bound interpretation. Narrower
+         * clipping and other window slots are not implemented. */
+        if ((x & 0xFFF) > (c->clear_horizontal & 0xFFF) ||
+            (y & 0xFFF) > (c->clear_vertical & 0xFFF) ||
+            ((x >> 16) & 0xFFF) <= ((c->clear_horizontal >> 16) & 0xFFF) ||
+            ((y >> 16) & 0xFFF) <= ((c->clear_vertical >> 16) & 0xFFF)) return 0;
+    }
     return 1;
 }
 static int kelvin(h2_command_state *s, h2_kelvin_clear *c, unsigned sub,
@@ -89,7 +193,35 @@ static int kelvin(h2_command_state *s, h2_kelvin_clear *c, unsigned sub,
         if (component == 3) ++s->constant_load;
         return 1;
     }
+    if (method >= 0xA20 && method <= 0xA2C) {
+        s->constants[0x3B][(method - 0xA20) / 4] = value; return 1;
+    }
+    if (method >= 0xAF0 && method <= 0xAFC) {
+        s->constants[0x3A][(method - 0xAF0) / 4] = value; return 1;
+    }
+    if (method >= 0xB00 && method <= 0xB7C) {
+        if (s->program_load >= 136) return 0;
+        unsigned component = ((method - 0xB00) / 4) % 4;
+        s->program[s->program_load][component] = value;
+        if (component == 3) ++s->program_load;
+        return 1;
+    }
     switch (method) {
+    case 0x100: return value == 0; /* nonzero values invoke software methods */
+    case 0x110:
+        if (value) return 0;
+        __atomic_thread_fence(__ATOMIC_SEQ_CST); return 1; /* accepted work is synchronous */
+    case 0x194C: case 0x1950: case 0x195C: case 0x1960:
+        s->vertex4ub[(method - 0x1940) / 4] = value; return 1;
+    case 0x1E94:
+        if ((value & ~7u) || (value & 3) == 3) return 0;
+        s->execution_mode = value; return 1;
+    case 0x1E98: if (value > 1) return 0; s->context_write = value; return 1;
+    case 0x1E9C: if (value >= 136) return 0; s->program_load = value; return 1;
+    case 0x1EA0: if (value >= 136) return 0; s->program_start = value; return 1;
+    case 0x1D94:
+        if (!clear_setup_supported(s, c, value)) return 0;
+        return h2_kelvin_clear_method(c, sub, method, value, source);
     case 0x120: if (value > 7) return 0; s->flip_read = value; return 1;
     case 0x124: if (value > 7) return 0; s->flip_write = value; return 1;
     case 0x128: if (value > 7) return 0; s->flip_modulo = value; return 1;
@@ -102,7 +234,9 @@ static int kelvin(h2_command_state *s, h2_kelvin_clear *c, unsigned sub,
     case 0x1E68: s->shadow_slope = value; return 1;
     case 0x1E78: if (value & ~0x0FFFF000u) return 0; s->shader_inputs = value; return 1;
     case 0x1EA4: if (value >= 192) return 0; s->constant_load = value; return 1;
-    default: return h2_kelvin_clear_method(c, sub, method, value, source);
+    default:
+        if (setup_method(s, method, value)) return 1;
+        return h2_kelvin_clear_method(c, sub, method, value, source);
     }
 }
 int h2_command_method(h2_command_state *s, h2_kelvin_clear *c, uint8_t sub,
