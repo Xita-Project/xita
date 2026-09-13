@@ -16,7 +16,21 @@ extern "C" {
  * its own pages because Halo places physical allocations at the same numbers (see kernel/xk_mem.c). */
 extern uint8_t  *g_xram;
 extern uint32_t *g_xpt;
+#ifdef XV_CHECK_GUEST_ADDRESS
+/* Optional diagnostic target policy, invoked before translating a guest
+ * pointer. This is not a memory-range validator: callers retain their normal
+ * width/page handling, and image-constant accesses use the pinned image path.
+ * Ordinary builds retain the original macro with no callback overhead. */
+void xv_check_guest_address(uint32_t address);
+static inline void *x_guest_checked_pointer(uint32_t address)
+{
+    xv_check_guest_address(address);
+    return g_xram + g_xpt[address >> 12] + (address & 0xFFFu);
+}
+#define X_G(a)      x_guest_checked_pointer((uint32_t)(a))
+#else
 #define X_G(a)      ((void *)(g_xram + g_xpt[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))
+#endif
 /* Host copies must translate every guest page, including separately committed pages. */
 void x_guest_read_pages(void *dst, uint32_t a, size_t size);
 void x_guest_write_pages(uint32_t a, const void *src, size_t size);

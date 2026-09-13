@@ -1167,8 +1167,10 @@ class Emitter:
         for i in range(0, len(fns), per):
             chunk = fns[i:i + per]
             body = ['#include "xv_recomp_protos.h"',
+                    "#ifndef XV_CHECK_GUEST_ADDRESS",
                     "#undef X_G",
                     "#define X_G(a) ((void *)(xram_ + xpt_[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))",
+                    "#endif",
                     "#undef X_IMG8\n#undef X_IMG16\n#undef X_IMG32",
                     "#define X_IMG8(a)  (*(uint8_t *)(imgb_ + (uint32_t)(a)))",
                     "#define X_IMG16(a) (*(xu16_u  *)(imgb_ + (uint32_t)(a)))",

@@ -53,6 +53,18 @@ void xv_logf(const char *fmt, ...)
     if (log_fd >= 0) sceIoWrite(log_fd, buffer, length);
 }
 void xv_log_flush(void) { if (log_fd >= 0) sceIoSyncByFd(log_fd, 0); }
+void xv_check_guest_address(uint32_t address)
+{
+    /* The 16 MiB NV2A BAR has no device model in this target. Do not let its
+     * registers alias the runtime's shared unmapped-memory trash page. */
+    if (address >= 0xFD000000u && address < 0xFE000000u) {
+        xv_logf("[h2/blocked] NV2A MMIO address=%08X fn=%08X\n", address, xv_cur_fn);
+        xv_log_flush();
+        sceKernelExitProcess(24);
+        /* Vita3K can return briefly while process teardown is pending. */
+        for (;;) sceKernelDelayThread(1000);
+    }
+}
 void xv_watch_enter(uint32_t address, xctx *c) { (void)address; (void)c; }
 void xv_watch_leave(uint32_t address, uint32_t back, xctx *c) { (void)address; (void)back; (void)c; }
 void xv_trace_func(uint32_t address)

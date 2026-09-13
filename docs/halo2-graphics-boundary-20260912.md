@@ -77,13 +77,22 @@ That disagreement alone rules out automatically binding every scanned signature.
 The scanner also suggests a swap-callback offset of `0x1DB4`; this requires
 checking its consumers before using it as a device-layout contract.
 
-The first unsupported instruction remains `OUT DX,AL` at `0x3FE131`, port
+The first unsupported instruction in attempts 06/07 was `OUT DX,AL` at `0x3FE131`, port
 `0x80C0`, low-byte value 1. Primary
 [xemu Xbox ACPI code](https://github.com/xemu-project/xemu/blob/75650bd8cd91945f7b79774e2cee0b200ca373ff/hw/xbox/acpi_xbox.c)
 places GPIO at offset `0xC0` within the power-management I/O region and models
 the TV encoder field pin. The surrounding guest code also accesses NV2A MMIO.
 Implementing that isolated port write would not supply the missing graphics
 device, command processing or interrupt semantics.
+
+Attempt 08 enables a target-local pointer policy for the unmodeled 16 MiB NV2A
+BAR, consistent with the primary
+[xemu device definition](https://github.com/xemu-project/xemu/blob/75650bd8cd91945f7b79774e2cee0b200ca373ff/hw/xbox/nv2a/nv2a.c).
+It stops before the earlier MMIO read of `0xFD001804` in `0x3FE165`; the owned
+instruction is at `0x3FE16B`. Application entry and the CreateDevice arguments
+are still observed. The target now rejects that pointer instead of reading
+the shared runtime's generic unmapped-memory trash page. It does not implement
+the register or claim to validate all guest memory accesses.
 
 ## Reproduction evidence and next gate
 
@@ -96,6 +105,14 @@ The private emulator log's SHA-256 is
 `f5bce51b4877624b44f526af1867c2fdb5e61d415f3d8354d3a06a4d6e22d78d`.
 The trace confirms application entry, CreateDevice arguments, and the strict
 instruction stop. It contains no successful device-creation return.
+
+The current checked attempt 08 EBOOT is 79,918,294 bytes with SHA-256
+`b2296cf0102771626195ce2559804232dfdee5a78d4b764ac8a83b1f47d6b120`.
+Its private emulator log's SHA-256 is
+`6c8026eb9603d1d2a289a18d469f9972ef01567664e31c797a9327d2e1147b87`.
+The guest exits at the MMIO diagnostic, and its isolated Vita3K GUI process
+was then stopped. Shared host regression tests, cache-volume tests and 13
+Python tests (including checked/default generated-memory execution) pass.
 
 The next gate is a device/command translation contract that preserves the
 verified LTCG ABI, initializes the guest fields its inline code consumes, and

@@ -68,6 +68,13 @@ and connect appropriate shared graphics HLE without CE device-layout assumptions
 The [graphics boundary report](halo2-graphics-boundary-20260912.md) records the
 subsequently verified CreateDevice entry and attempt 07's native arguments.
 
+Attempt 08 adds a diagnostic pointer check for the unmodeled NV2A region. It
+still reaches application entry and the same CreateDevice call, then stops
+**before reading `0xFD001804` in function `0x3FE165`**. The owned instruction is
+at `0x3FE16B`. This is the earliest checked graphics stop; attempts 06/07 had
+allowed those MMIO addresses to use the generic unmapped-memory trash page
+before stopping at `OUT`. That earlier path did not emulate GPU registers.
+
 Attempt 06 used `GUEST_OPT=-O0`, with runtime code at `-O1`. Its private VPK is
 19,867,336 bytes; no VPK, executable image, assets, generated code or trace
 containing game-derived data is tracked in the repository.
@@ -81,7 +88,7 @@ python games/halo2_5849/prepare_boot.py /path/to/owned/default.xbe
 make -C games/halo2_5849 -j8
 make -C games/halo2_5849 test-host
 make -C recomp/host test
-python -m unittest tools.test_game_profiles tools.test_loop_branches tools.test_sse_half_moves
+python -m unittest tools.test_game_profiles tools.test_loop_branches tools.test_sse_half_moves tools.test_guest_address_check
 ```
 
 For faster diagnostic compilation, `GUEST_OPT=-O0` compiles the generated guest
@@ -120,6 +127,12 @@ requests. The shared host tests cover both legacy CE recovery and the explicit
 disabled mode, an absent optional map adapter, and diagnostic trap handling
 through both direct traps and unresolved indirect calls.
 
+The address-check integration test recompiles synthetic x86 scalar loads/stores,
+an absolute MMIO load and a SIMD load, then executes the generated C with and
+without the optional policy. It verifies rejection before memory access and
+checks both pages of split runtime copies. The default build needs no policy
+symbol. The four Python modules above pass 13 tests in total.
+
 ## Explicit limits
 
 The cache volumes are configured 750 MiB virtual devices with 512-byte sectors.
@@ -139,6 +152,14 @@ runtime's cooperative trap loop. Existing shared kernel implementations remain
 partial, and ten imported kernel data exports still lack real guest objects;
 the initial report lists these gaps. Reaching XAPI initialization does not
 validate those APIs or the data exports.
+
+The diagnostic Makefile enables `XV_CHECK_GUEST_ADDRESS` and supplies an address
+policy rejecting the unmodeled NV2A BAR, `[0xFD000000, 0xFE000000)`. Ordinary
+builds retain their original address macros; regenerated checked builds honor
+the hook instead of redefining it away. This checks pointer translation, not
+every byte range or every unmapped address. Image-constant accesses keep their
+pinned image path. The check supplies no MMIO semantics and is not intended for
+performance measurement.
 
 CE tag transforms, saved-profile/variant repairs and CE map-type tracking are
 explicitly disabled for this target. Their existing default behavior is
