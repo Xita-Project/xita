@@ -9,6 +9,7 @@ uint32_t *g_xpt;
 static jmp_buf fault;
 static uint32_t last_ip, last_address, calls;
 uint32_t h2_instance_bytes(void) { return 0x5000; }
+uint32_t xk_mem_arena_size(void) { return 0x4001000; }
 uint64_t h2_graphics_time_us(void) { return 0; }
 void xv_logf(const char *format, ...) { (void)format; }
 void h2_graphics_stop(xctx *c, uint32_t ip, uint32_t address, uint32_t value, int write, int reason)
@@ -62,6 +63,18 @@ int main(void)
     instance_word(&c, 0x11128, 3); instance_word(&c, 0x1112C, 3);
     c.r[0] = 8; c.r[2] = 0x406C08;
     X_M32(c.r[4] + 4) = 128; X_M32(c.r[4] + 8) = 128; X_M32(c.r[4] + 12) = 0x610000;
+    g_xpt[0x610] = 0x4000000; /* descriptor on the trash page must stop */
+    if (!setjmp(fault)) { h2_host_channel_configure(&c); assert(0); }
+    assert(last_address == 0x610000 && c.r[4] == 0x600000);
+    g_xpt[0x610] = 0x610000;
+    g_xpt[0x80010] = 0x4000000;
+    if (!setjmp(fault)) { h2_host_channel_configure(&c); assert(0); }
+    assert(X_M32(0x406C08 + 0x138) == 0);
+    g_xpt[0x80010] = 0x10000;
+    g_xpt[0x83FEF] = 0x4000000;
+    if (!setjmp(fault)) { h2_host_channel_configure(&c); assert(0); }
+    assert(X_M32(0x406C08 + 0x138) == 0);
+    g_xpt[0x83FEF] = 0x3FEF000;
     h2_host_channel_configure(&c);
     assert(c.r[4] == 0x600010 && c.r[3] == 0xABC00003 && c.r[5] == 0xABC00005 && c.r[6] == 0xABC00006 && c.r[7] == 0xABC00007);
     assert(X_M32(0x406C08 + 0x138) == 0x111D && X_M32(0x406C08 + 0x104) == 1 && X_M32(0x406C08 + 0x108) == 1);
@@ -76,6 +89,31 @@ int main(void)
     assert(last_ip == 0x1234 && last_address == 0xFD800044);
     if (!setjmp(fault)) { h2_bus_read32(&c, 0x1234, 0xFD008088); assert(0); }
     assert(last_address == 0xFD008088);
+    c.r[4] = 0x600000; c.r[0] = 0;
+    X_M32(c.r[4] + 4) = 0x406C08; X_M32(c.r[4] + 8) = 0x20000;
+    X_M32(c.r[4] + 12) = 0x4000; X_M32(c.r[4] + 16) = 64;
+    X_M32(c.r[4] + 20) = 0x80000000; X_M32(c.r[4] + 24) = X_M32(c.r[4] + 28) = 0;
+    if (!setjmp(fault)) { h2_host_tile_configure(&c); assert(0); }
+    assert(last_ip == 0x3FE67F && c.r[4] == 0x600000);
+    X_M32(c.r[4] + 20) = 0;
+    g_xpt[0x80023] = 0x4000000; /* last region page invalid, not just the first */
+    if (!setjmp(fault)) { h2_host_tile_configure(&c); assert(0); }
+    assert(c.r[4] == 0x600000);
+    g_xpt[0x80023] = 0x23000;
+    h2_host_tile_configure(&c);
+    assert(c.r[0] == 1 && c.r[4] == 0x600020 && c.r[3] == 0xABC00003 && c.r[6] == 0xABC00006 && c.r[7] == 0xABC00007);
+    c.r[4] = 0x600000; c.r[3] = 0;
+    X_M32(c.r[4] + 4) = 0x406C08; X_M32(c.r[4] + 8) = 1;
+    h2_host_tile_remove(&c);
+    assert(c.r[0] == 1 && c.r[3] == 0 && c.r[4] == 0x60000C);
+    c.r[4] = 0x600000; c.r[0] = 0;
+    X_M32(c.r[4] + 8) = 0x20000;
+    h2_host_tile_configure(&c); /* the following real clear is inside this tile */
+    uint32_t good_stack = c.r[4];
+    c.r[4] = 0x6FFFF0; g_xpt[0x700] = 0x4000000;
+    if (!setjmp(fault)) { h2_host_tile_configure(&c); assert(0); }
+    assert(last_address == 0x6FFFF0);
+    c.r[4] = good_stack; g_xpt[0x700] = 0x700000;
     instance_word(&c, 0x10068, 13); instance_word(&c, 0x1006C, 0x800114A0);
     instance_word(&c, 0x14A00, 0x97);
     instance_word(&c, 0x10018, 3); instance_word(&c, 0x1001C, 0x80001113);

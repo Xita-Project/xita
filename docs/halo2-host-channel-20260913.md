@@ -55,7 +55,8 @@ bootstrap jump, GET is `03C2B000`, result COMPLETE, clears 0 and pixels 0. Origi
 framebuffer setup then calls `MmAllocateContiguousMemoryEx` for `00258000` bytes,
 alignment `4000`, yielding `839D0000`. The next stop is checked MMIO `FD003214`
 in function `3FE927`; static inspection identifies the byte TEST at `3FE92A`,
-reached through resource/tile helper `3FE86A`. No unknown register value was
+in synchronization shared by tile assignment/removal. The later native tile
+trace identifies assignment `3FE67F` as the live path. No unknown register value was
 supplied. Both emulator runs returned to Idle and were stopped explicitly.
 
 Attempt 18's device snapshot matches attempt 16 in all 31 compared identity,
@@ -104,7 +105,7 @@ regressions pass. These are synthetic inputs; no owned executable bytes are
 tracked in tests. The native runtime build emits no warnings.
 
 The next bounded task is the tile/resource configuration contract around
-`3FE86A`, then the first real default-state command submission. It requires a
+`3FE67F` / `3FE86A`, then the first real default-state command submission. It requires a
 supported memory-layout model and explicit command semantics, followed by native
 evidence. A general NV2A emulator, shader/draw support and presentation remain
 outside this checkpoint.
