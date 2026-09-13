@@ -4,7 +4,7 @@ This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
 `5849` identifies the linked XDK library build, not an asserted game build number.
 
-The [latest native checkpoint and exact private replay command](../../docs/halo2-kernel-timers.md)
+The [latest native checkpoint and exact private replay command](../../docs/halo2-native-fp-environment.md)
 describe the current normal and diagnostic startup stops. There is no main menu.
 
 A separate [native startup target](../../docs/halo2-native-boot-20260912.md)
@@ -64,7 +64,8 @@ The separate `--host-channel --audio-unavailable` diagnostic selects the
 [original game's audio-driver failure path](../../docs/halo2-audio-error-path-20260913.md).
 It returns an explicit error at public sound creation, creates no audio object,
 and now executes original deferred timer callbacks with the corrected kernel
-ABI, then stops at an unsupported SSE control-register instruction. Earlier
+ABI, runs a limited native FP mask/clear bridge, then stops at an undiscovered
+state-interface method. Earlier
 texture-state progress followed an incorrectly balanced timer return; the
 current checkpoint documents this limitation. It supplies
 no audio, additional rendering or menu; the ordinary profile is unchanged.

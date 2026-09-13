@@ -23,6 +23,7 @@
 #include "command_snapshot.h"
 #include "kernel_stack.h"
 #include "kernel_timer.h"
+#include "fp_environment.h"
 extern const h2_host_channel *h2_host_channel_current(void) __attribute__((weak));
 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
@@ -232,6 +233,23 @@ void h2_timer_fault(xctx *c, const char *reason, uint32_t first, uint32_t second
     sceKernelExitProcess(27);
     for (;;) sceKernelDelayThread(1000);
 }
+uint32_t h2_platform_fpscr_read(void)
+{
+    uint32_t value;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(value) : : "memory");
+    return value;
+}
+void h2_platform_fpscr_write(uint32_t value)
+{ __asm__ volatile("vmsr fpscr, %0" : : "r"(value) : "memory", "vfpcc"); }
+void h2_fp_environment_fault(xctx *c, uint32_t ip, uint32_t address, uint32_t value)
+{
+    graphics_snapshot();
+    xv_logf("[h2/blocked] FP environment ip=%08X address=%08X value=%08X esp=%08X\n",
+            ip, address, value, c->r[4]);
+    xv_log_flush();
+    sceKernelExitProcess(28);
+    for (;;) sceKernelDelayThread(1000);
+}
 void xv_watch_enter(uint32_t address, xctx *c) { (void)address; (void)c; }
 void xv_watch_leave(uint32_t address, uint32_t back, xctx *c) { (void)address; (void)back; (void)c; }
 void xv_trace_func(uint32_t address)
@@ -297,6 +315,10 @@ void xv_boot_missing_kernel(xctx *c, const char *name)
 }
 void __wrap_xv_unimpl(xctx *c, uint32_t address, const char *name)
 {
+    graphics_snapshot();
+    uint32_t fpscr;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr));
+    xv_logf("[h2/fp] native FPSCR=%08X guest FCW=%04X FSW=%04X\n", fpscr, c->fcw, c->fsw);
     xv_logf("[h2/blocked] instruction=%s address=%08X fn=%08X eax=%08X ecx=%08X esp=%08X\n",
             name, address, xv_cur_fn, c->r[0], c->r[1], c->r[4]);
     xv_log_flush();

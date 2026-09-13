@@ -45,6 +45,21 @@ def lower_sparse_jump(emitter, instruction, output):
     return True
 
 
+def lower_fp_environment(emitter, instruction, output):
+    if instruction.mnemonic not in (Mnemonic.STMXCSR, Mnemonic.LDMXCSR):
+        return False
+    registers = {Register.NONE, Register.EAX, Register.ECX, Register.EDX, Register.EBX,
+                 Register.ESP, Register.EBP, Register.ESI, Register.EDI}
+    if (instruction.op0_kind != OpKind.MEMORY or instruction.op_count != 1 or
+            instruction.memory_base not in registers or instruction.memory_index not in registers or
+            instruction.memory_displ_size == 2 or instruction.segment_prefix == Register.GS):
+        raise ValueError("Halo 2 MXCSR instruction shape mismatch")
+    name = "h2_stmxcsr" if instruction.mnemonic == Mnemonic.STMXCSR else "h2_ldmxcsr"
+    output.append(f"    {{ extern void {name}(xctx *, uint32_t, uint32_t); "
+                  f"{name}(c, 0x{instruction.ip:08X}u, {emitter.addr(instruction)}); }}")
+    return True
+
+
 def lower_bus_mov(emitter, instruction, output):
     """Preserve scalar MOV semantics while making reads/writes explicit to HLE.
 
@@ -139,7 +154,9 @@ class Halo2HostChannelHooks(Halo2GraphicsHooks):
         reviewed_sparse_jump_roots(image)
 
     def lower_instruction(self, emitter, instruction, output):
-        return lower_sparse_jump(emitter, instruction, output) or super().lower_instruction(emitter, instruction, output)
+        return (lower_sparse_jump(emitter, instruction, output) or
+                lower_fp_environment(emitter, instruction, output) or
+                super().lower_instruction(emitter, instruction, output))
 
     def function_entry(self, address):
         boundary = HOST_BOUNDARIES.get(address)
