@@ -637,6 +637,20 @@ class Emitter:
             out.append(f"    if ({COND[cc]}) {self.operand(ins,0,sz)} = {self.operand(ins,1,sz)};"); return
         if mn in ("bt", "bts", "btr", "btc"):
             sz = self.op_size(ins, 0); a = self.operand(ins, 0, sz); b = self.operand(ins, 1, sz if ins.op1_kind != OpKind.IMMEDIATE8 else 1)
+            if ins.op0_kind == OpKind.MEMORY:
+                # Register offsets address a signed bit string, not only the
+                # first word. Immediate offsets are modulo the operand width;
+                # larger constants have their high bits encoded in disp by asm.
+                bits = sz * 8
+                out.append(f"    {{ int32_t index_ = (int{bits}_t)({b}); uint32_t bit_ = (uint32_t)index_ & {bits-1}u;")
+                offset = f" + (uint32_t)(((int64_t)index_ - bit_) / 8)" if ins.op1_kind == OpKind.REGISTER else ""
+                out.append(f"      uint32_t address_ = {self.addr(ins)}{offset}; uint{bits}_t value_; x_guest_read(&value_, address_, {sz});")
+                out.append("      c->f_cf_override = 1; c->f_cf = (value_ >> bit_) & 1u;")
+                if mn != "bt":
+                    operation = {"bts": "|", "btr": "& ~", "btc": "^"}[mn]
+                    out.append(f"      value_ = (uint{bits}_t)(value_ {operation} (1u << bit_)); x_guest_write(address_, &value_, {sz});")
+                out.append("    }")
+                return
             out.append(f"    {{ uint32_t bit_ = ({b}) & {sz*8-1}; c->f_cf_override = 1; c->f_cf = ({a} >> bit_) & 1; "
                        + ({"bt": "", "bts": f"{a} |= (1u << bit_);", "btr": f"{a} &= ~(1u << bit_);", "btc": f"{a} ^= (1u << bit_);"}[mn]) + " }"); return
         if mn in ("bsf", "bsr"):
