@@ -53,13 +53,21 @@ void f_003FE165(xctx *c)
 void f_003FE190(xctx *c)
 { assert(c->r[0] == 0x406C08); ++calls; c->r[0] = 1; X_RET(0); }
 void f_00401C33(xctx *c)
-{ assert(c->r[6] == 0x406C08); ++calls; X_RET(0); }
+{
+    assert(c->r[6] == 0x406C08); ++calls;
+    X_M32(c->r[6] + 0x154) = h2_bus_read32(c, 0, 0xFD000200);
+    X_M32(c->r[6] + 0x158) = h2_bus_read32(c, 0, 0xFD000140);
+    h2_bus_write32(c, 0, 0xFD000200, UINT32_MAX);
+    X_RET(0);
+}
 void f_00401D96(xctx *c)
 {
     assert(c->r[6] == 0x406C08); ++calls;
     X_M32(c->r[6] + 0x130) = 0x710000;
     X_M32(c->r[6] + 0x128) = 0x711000;
     X_M32(c->r[6] + 0x140) = 0x110A;
+    X_M32(c->r[6] + 0x14C) = 3;
+    X_M32(c->r[6] + 0x150) = 0x01039000;
     X_RET(0);
 }
 void f_003FF240(xctx *c)
@@ -344,18 +352,25 @@ int main(void)
     if (!setjmp(fault)) { h2_host_miniport_shutdown(&c); assert(0); }
     g_xpt[0x83FEF] = 0x3FEF000;
     uint32_t final_put = h2_bus_read32(&c, 0, 0xFD800044);
+    X_M32(0x406C08 + 0x154) ^= 1;
+    if (!setjmp(fault)) { h2_host_miniport_shutdown(&c); assert(0); }
+    assert(h2_bus_read32(&c, 0, 0xFD000200) == UINT32_MAX);
+    X_M32(0x406C08 + 0x154) ^= 1;
     interrupted = c; interrupted.r[4] += 4;
     h2_host_miniport_shutdown(&c);
     assert(!memcmp(&c, &interrupted, sizeof c)); /* complete CPU/FP/control state */
     assert(h2_bus_read32(&c, 0, 0xFD711000) == final_put);
     assert(h2_bus_read32(&c, 0, 0xFD711004) == final_put);
     assert(h2_bus_read32(&c, 0, 0xFD711010) == 0);
+    assert(h2_bus_read32(&c, 0, 0xFD000200) == 0x01110000);
+    assert(h2_bus_read32(&c, 0, 0xFD000140) == 0);
     if (!setjmp(fault)) { h2_bus_read32(&c, 0, 0xFD800044); assert(0); }
     c.r[0] = 0x406C08; c.r[4] = 0x600000;
     if (!setjmp(fault)) { h2_host_miniport_shutdown(&c); assert(0); } /* double shutdown */
     memset(X_G(0x406C08), 0, 0x81C); /* original caller clears its device */
     h2_host_miniport_init(&c);
     assert(calls == 8 && c.r[0] == 1 && c.r[4] == 0x600004);
+    assert(X_M32(0x406C08 + 0x154) == 0x01110000);
     puts("Host-channel runtime: LTCG contracts, mapped resources, canonical color/depth/stencil pixels and strict rejection pass.");
     free(g_xpt); free(g_xram); return 0;
 }

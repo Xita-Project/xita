@@ -316,6 +316,8 @@ void h2_host_miniport_shutdown(xctx *c)
         X_M32(mini + 0x18C) || X_M32(mini + 0x190) ||
         X_M32(mini + 0x100) || X_M32(mini + 0x104) != 1 || X_M32(mini + 0x108) != 1 ||
         X_M32(mini + 0x128) != 0x711000 || X_M32(mini + 0x134) != 2 ||
+        X_M32(mini + 0x14C) != 3 || X_M32(mini + 0x150) != 0x01039000 ||
+        X_M32(mini + 0x154) != 0x01110000 || X_M32(mini + 0x158) != 0 ||
         h2_instance_bytes() != 0x5000 ||
         !map_physical_raw(PHYSICAL_BYTES - 0x10000u - h2_instance_bytes(), h2_instance_bytes()))
         reject(c, ip, mini, channel_ready);
@@ -328,6 +330,11 @@ void h2_host_miniport_shutdown(xctx *c)
     instance_write(c, 0x11010, 0);
     instance_write(c, 0x11044, h2_bus_read32(c, ip, BAR + 0x711040));
     instance_write(c, 0x11050, 0);
+    /* Restore the modeled entry gates saved by the original clock/memory
+     * helpers. Fixed PFB geometry already matches the validated saved values.
+     * Retire RAMFC first: disabling FIFO resets its descriptor registers. */
+    h2_bus_write32(c, 0x3FE64Fu, BAR + 0x200, X_M32(mini + 0x154));
+    h2_bus_write32(c, 0x3FE65Bu, BAR + 0x140, X_M32(mini + 0x158));
     xv_logf("[h2/channel] shutdown idle PUT=GET=%08X; host state retired, guest allocations retained\n", channel.put);
     memset(&channel, 0, sizeof channel);
     memset(&tiles, 0, sizeof tiles);

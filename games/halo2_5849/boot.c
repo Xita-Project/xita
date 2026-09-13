@@ -157,10 +157,11 @@ void xv_check_guest_address(uint32_t address)
 {
     /* Accesses that bypass the explicit bus adapter must not alias the
      * runtime's shared unmapped-memory trash page. */
-    if (address >= 0xFD000000u && address < 0xFE000000u) {
+    int ohci = address >= 0xFED00000u && address < 0xFED01000u;
+    if (ohci || (address >= 0xFD000000u && address < 0xFE000000u)) {
         h2_gpu_bus_report();
         graphics_snapshot();
-        xv_logf("[h2/blocked] NV2A MMIO address=%08X fn=%08X\n", address, xv_cur_fn);
+        xv_logf("[h2/blocked] %s MMIO address=%08X fn=%08X\n", ohci ? "OHCI" : "NV2A", address, xv_cur_fn);
         xv_log_flush();
         sceKernelExitProcess(24);
         /* Vita3K can return briefly while process teardown is pending. */

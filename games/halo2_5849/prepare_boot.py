@@ -14,6 +14,28 @@ from recompiler.xita_recomp import Image, KERNEL_DATA_EXPORTS, KERNEL_EXPORTS
 
 
 HOST_CALLBACK_WALK = (0x3FBA54, 135, "e0cc1649c0b744615b3de0f5b2446411bb408d0b3ce4d1d3da59980219abc70c")
+XPP_CALLBACK_WALK = (0x408C72, 36, "9234a2afaedda5206ca55c2bf3f0269b70b1b0345091581c639ee86230cd3756")
+
+
+def host_device_callback_roots(image):
+    """Native37 XPP dispatch: six descriptor slots, initialization at +4."""
+    address, length, digest = XPP_CALLBACK_WALK
+    if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+        raise ValueError("Halo 2 XPP callback walk fingerprint mismatch")
+    roots = set()
+    for slot in range(0x4086D4, 0x4086EC, 4):
+        descriptor = image.u32(slot)
+        if descriptor == 0:
+            continue
+        section = image.section_of(descriptor) if descriptor else None
+        if not descriptor or descriptor & 3 or not section or section[4] != "XPP":
+            raise ValueError(f"Halo 2 XPP descriptor {slot:#x} is invalid")
+        target = image.u32(descriptor + 4)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != "XPP":
+            raise ValueError(f"Halo 2 XPP callback {descriptor:#x} is invalid")
+        roots.add(target)
+    return roots
 
 
 def host_channel_callback_roots(image):
@@ -70,6 +92,7 @@ def main():
         # The two-slot vtable contains allocate/free; the following bytes are
         # string data. Keep the whole-image revision guard and exact bounds.
         roots.update(image.u32(slot) for slot in (0x453308, 0x45330C))
+        roots.update(host_device_callback_roots(image))
     output = args.out.resolve()
     generated = output / "generated"
     profile = str(Path(__file__).with_name("graphics-profile.json")) if args.graphics else "halo2_5849"

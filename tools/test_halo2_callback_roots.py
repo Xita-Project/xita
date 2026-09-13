@@ -29,6 +29,31 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_xpp_two_level_walk(self):
+        image = SyntheticImage()
+        image.section_name = "XPP"
+        image.targets = {slot: 0x2000 + n * 24
+                         for n, slot in enumerate(range(0x4086D4, 0x4086EC, 4))}
+        image.targets.update({0x2004 + n * 24: 0x5000 + (n % 3) * 16 for n in range(6)})
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "XPP_CALLBACK_WALK", spec):
+            self.assertEqual(prepare_boot.host_device_callback_roots(image), {0x5000, 0x5010, 0x5020})
+            image.targets[0x4086E8] = 0  # original walk skips null descriptors
+            self.assertEqual(len(prepare_boot.host_device_callback_roots(image)), 3)
+            image.targets[0x4086D4] = 0x2001
+            with self.assertRaisesRegex(ValueError, "descriptor"):
+                prepare_boot.host_device_callback_roots(image)
+            image.targets[0x4086D4] = 0x2000
+            image.targets[0x2004] = None
+            with self.assertRaisesRegex(ValueError, "callback"):
+                prepare_boot.host_device_callback_roots(image)
+            image.targets[0x2004] = 0x5000; image.bad_code = 0x5000
+            with self.assertRaisesRegex(ValueError, "callback"):
+                prepare_boot.host_device_callback_roots(image)
+        with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+            with patch.object(prepare_boot, "XPP_CALLBACK_WALK", (0x200, len(image.code), "0" * 64)):
+                prepare_boot.host_device_callback_roots(image)
+
     def test_exact_walk_and_invalid_targets(self):
         image = SyntheticImage()
         spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
