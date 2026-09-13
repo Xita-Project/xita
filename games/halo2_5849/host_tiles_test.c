@@ -30,6 +30,18 @@ int main(void)
     assert(h2_host_tiles_span(&t, 0x1FFFC, 8));
     assert(h2_host_tile_disable(&t, 0));
     assert(!h2_host_tiles_span(&t, UINT32_MAX, 2) && !h2_host_tiles_span(&t, 0, 0));
-    puts("Host tile regions: uncompressed linear bounds, replacement, disable and compression/overlap rejection pass.");
+    assert(h2_host_tile_assign(&t, 2, 0x30000, 0x8000, 2560, 0x84000001, 0, 0, 0x4000000));
+    assert(t.entries[2].flags == 0x84000001);
+    assert(h2_host_tiles_attachment(&t, 0x30000, 2560, 2560, 1, 0x128));
+    assert(!h2_host_tiles_attachment(&t, 0x30000, 2560, 2560, 0, 0x128));
+    assert(!h2_host_tiles_attachment(&t, 0x30000, 2560, 2560, 1, 0x118));
+    assert(!h2_host_tiles_attachment(&t, 0x30000, 2560, 4096, 1, 0x128));
+    before = t;
+    assert(!h2_host_tile_assign(&t, 2, 0x30000, 0x8000, 2560, 0x84000000, 0, 0, 0x4000000));
+    assert(!h2_host_tile_assign(&t, 2, 0x30000, 0x8000, 2560, 0x84000003, 0, 0, 0x4000000));
+    assert(!h2_host_tile_assign(&t, 2, 0x30000, 0x8000, 2560, 0x84000001, 4, 0, 0x4000000));
+    assert(!h2_host_tile_assign(&t, 2, 0x30000, 0x8000, 2560, 0x84000001, 0, 4, 0x4000000));
+    assert(!memcmp(&before, &t, sizeof t));
+    puts("Host tile regions: bounds, canonical depth metadata, format/pitch guards and unknown-layout rejection pass.");
     return 0;
 }

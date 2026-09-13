@@ -73,6 +73,12 @@ static int read_physical(void *opaque, uint32_t address, uint32_t *word)
     memcpy(word, pointer, 4);
     return 1;
 }
+static int check_attachment(void *opaque, uint32_t address, uint32_t bytes,
+                              uint32_t pitch, int zeta, uint32_t format)
+{
+    (void)opaque;
+    return h2_host_tiles_attachment(&tiles, address, bytes, pitch, zeta, format);
+}
 static int read_instance(void *opaque, uint32_t offset, uint32_t *word)
 {
     (void)opaque;
@@ -177,6 +183,7 @@ void h2_host_channel_configure(xctx *c)
     X_M32(mini + 0x104) |= 1;
     X_M32(mini + 0x108) |= 1;
     channel_ready = 1;
+    channel.clear.check_attachment = check_attachment;
     xv_logf("[h2/channel] configured channel=0 DMA=%08X context=%08X ring=%08X+%X schedule=%08X\n",
             dma_instance, context, channel.stream.base, channel.stream.bytes, schedule);
     X_RET(3);
@@ -190,6 +197,25 @@ void h2_host_memory_barrier(xctx *c)
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
     X_RET(0);
 }
+void __wrap_xk_AvSendTVEncoderOption(xctx *c)
+{
+    check_stack(c, 0, 4);
+    uint32_t base = X_ARG(0), option = X_ARG(1), param = X_ARG(2), output = X_ARG(3);
+    /* Explicit virtual target: NTSC-M, 60 Hz, normal aspect, HDTV 480p. This
+     * reports capabilities only; applying a display mode remains unsupported. */
+    if (!miniport_ready || (base && base != BAR) || option != 6 || param ||
+        !output || (output & 3) || !guest_span_valid(output, 4))
+        reject(c, X_M32(c->r[4]), output, option);
+    X_M32(output) = 0x00480104u;
+    xv_logf("[h2/av] virtual AV capabilities=00480104 output=%08X; no display mode applied\n", output);
+    X_RET(4);
+}
+void __wrap_xk_AvSetDisplayMode(xctx *c)
+{
+    check_stack(c, 0, 6);
+    xv_logf("[h2/av] display-mode application is unsupported\n");
+    reject(c, X_M32(c->r[4]), X_ARG(0), X_ARG(2));
+}
 
 static int channel_idle(void)
 { return channel_ready && !channel.bootstrap && !channel.stream.remaining && channel.put == channel.stream.get; }
@@ -199,7 +225,7 @@ void h2_host_tile_remove(xctx *c)
     uint32_t index = c->r[3], mini = X_ARG(0), clear_zoffset = X_ARG(1);
     if (mini != MINIPORT || !channel_idle() || !h2_host_tile_disable(&tiles, index))
         reject(c, 0x3FE86Au, mini, index);
-    /* No compression offset exists in the supported uncompressed backend. */
+    /* The canonical representation has no physical compression offset. */
     xv_logf("[h2/tiles] disabled index=%u clear_zoffset=%08X\n", index, clear_zoffset);
     c->r[0] = 1;
     X_RET(2);
@@ -215,6 +241,8 @@ void h2_host_tile_configure(xctx *c)
         !map_physical_raw(address, bytes) ||
         !h2_host_tile_assign(&tiles, index, address, bytes, pitch, flags, zstart, zoffset, PHYSICAL_BYTES))
         reject(c, 0x3FE67Fu, address, flags);
+    if (flags == 0x84000001u)
+        xv_logf("[h2/tiles] depth uses canonical logical Z24S8 bytes; hardware compression/tags are not emulated\n");
     c->r[0] = 1;
     X_RET(7);
 }

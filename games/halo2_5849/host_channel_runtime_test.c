@@ -56,6 +56,16 @@ int main(void)
     c.r[4] = 0x600000; c.r[0] = 0x406C08;
     if (!setjmp(fault)) { h2_host_miniport_init(&c); assert(0); }
     assert(calls == 4);
+    c.r[0] = 0xABCDEF01;
+    X_M32(c.r[4] + 4) = 0; X_M32(c.r[4] + 8) = 6;
+    X_M32(c.r[4] + 12) = 0; X_M32(c.r[4] + 16) = 0x610000;
+    __wrap_xk_AvSendTVEncoderOption(&c);
+    assert(X_M32(0x610000) == 0x00480104 && c.r[0] == 0xABCDEF01 && c.r[4] == 0x600014);
+    c.r[4] = 0x600000; X_M32(c.r[4] + 8) = 7;
+    if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
+    assert(X_M32(0x610000) == 0x00480104 && c.r[4] == 0x600000);
+    if (!setjmp(fault)) { __wrap_xk_AvSetDisplayMode(&c); assert(0); }
+    assert(c.r[4] == 0x600000);
     X_M32(0x404FE0 + 0x24) = 0x80010000; X_M32(0x404FE0 + 0x28) = 0x80011000;
     X_M32(0x406C08 + 0x10C) = 0x111D; X_M32(0x61000C) = 0x1112;
     X_M32(0x406C08 + 0x160) = 0x149C;
@@ -114,24 +124,50 @@ int main(void)
     if (!setjmp(fault)) { h2_host_tile_configure(&c); assert(0); }
     assert(last_address == 0x6FFFF0);
     c.r[4] = good_stack; g_xpt[0x700] = 0x700000;
+    c.r[4] = 0x600000; c.r[0] = 1;
+    X_M32(c.r[4] + 8) = 0x24000; X_M32(c.r[4] + 20) = 0x84000001;
+    h2_host_tile_configure(&c);
+    assert(c.r[0] == 1 && c.r[4] == 0x600020 && c.r[5] == 0xABC00005);
     instance_word(&c, 0x10068, 13); instance_word(&c, 0x1006C, 0x800114A0);
     instance_word(&c, 0x14A00, 0x97);
     instance_word(&c, 0x10018, 3); instance_word(&c, 0x1001C, 0x80001113);
-    instance_word(&c, 0x11130, 0xB003); instance_word(&c, 0x11134, 15);
+    instance_word(&c, 0x11130, 0xB003); instance_word(&c, 0x11134, 71);
     instance_word(&c, 0x11138, 0x20003); instance_word(&c, 0x1113C, 0x20003);
+    instance_word(&c, 0x10020, 4); instance_word(&c, 0x10024, 0x80001114);
+    instance_word(&c, 0x11140, 0xB003); instance_word(&c, 0x11144, 71);
+    instance_word(&c, 0x11148, 0x24003); instance_word(&c, 0x1114C, 0x24003);
     static uint32_t put; put = 0x10000;
-    packet(&put, 0, 13); packet(&put, 0x194, 3);
+    packet(&put, 0, 13); packet(&put, 0x194, 3); packet(&put, 0x198, 4);
     packet(&put, 0x200, 2 << 16); packet(&put, 0x204, 2 << 16);
-    packet(&put, 0x208, 0x128); packet(&put, 0x20C, 8); packet(&put, 0x210, 0);
+    packet(&put, 0x208, 0x128); packet(&put, 0x20C, 64 | (64 << 16)); packet(&put, 0x210, 0);
     packet(&put, 0x1D98, 1 << 16); packet(&put, 0x1D9C, 1 << 16);
-    packet(&put, 0x1D90, 0x12345678); packet(&put, 0x1D94, 0xF0);
+    packet(&put, 0x1D90, 0x12345678); packet(&put, 0x1D8C, 0xA1B2C3D4); packet(&put, 0x1D94, 0xF3);
     h2_bus_write32(&c, 0x1234, 0xFD800040, put);
-    for (unsigned i = 0; i < 16; i += 4) assert(X_M32(0x80020000 + i) == 0x12345678);
+    for (unsigned i = 0; i < 4; ++i) {
+        unsigned offset = (i / 2) * 64 + (i % 2) * 4;
+        assert(X_M32(0x80020000 + offset) == 0x12345678);
+        assert(X_M32(0x80024000 + offset) == 0xA1B2C3D4);
+    }
+    assert(X_M32(0x80024008) == 0 && X_M32(0x8002403C) == 0);
+    packet(&put, 0x1D8C, 0x11223344); packet(&put, 0x1D94, 1);
+    h2_bus_write32(&c, 0x1234, 0xFD800040, put);
+    assert(X_M32(0x80024000) == 0x112233D4);
+    packet(&put, 0x1D8C, 0x55667788); packet(&put, 0x1D94, 2);
+    h2_bus_write32(&c, 0x1234, 0xFD800040, put);
+    assert(X_M32(0x80024000) == 0x11223388);
+    packet(&put, 0x194, 4); /* a canonical depth region cannot be a color target */
+    packet(&put, 0x1D94, 0xF0);
+    if (!setjmp(fault)) { h2_bus_write32(&c, 0x1234, 0xFD800040, put); assert(0); }
+    assert(h2_bus_read32(&c, 0, 0xFD800044) == put - 4 && X_M32(0x80024000) == 0x11223388);
+    X_M32(0x80000000u + put - 4) = 0; /* replace the rejected request with a clear no-op */
+    h2_bus_write32(&c, 0x1234, 0xFD800040, put);
+    packet(&put, 0x194, 3);
     packet(&put, 0x1D90, 0x87654321); packet(&put, 0x1D94, 0xF0);
     g_xpt[0x80020] = 0x30000;
     if (!setjmp(fault)) { h2_bus_write32(&c, 0x1234, 0xFD800040, put); assert(0); }
     assert(h2_bus_read32(&c, 0, 0xFD800044) == put - 4);
-    for (unsigned i = 0; i < 16; i += 4) assert(*(uint32_t *)(g_xram + 0x20000 + i) == 0x12345678);
-    puts("Host-channel runtime: LTCG contracts, instance state, bootstrap, pixels and strict MMIO/map rejection pass.");
+    for (unsigned i = 0; i < 4; ++i)
+        assert(*(uint32_t *)(g_xram + 0x20000 + (i / 2) * 64 + (i % 2) * 4) == 0x12345678);
+    puts("Host-channel runtime: LTCG contracts, mapped resources, canonical color/depth/stencil pixels and strict rejection pass.");
     free(g_xpt); free(g_xram); return 0;
 }

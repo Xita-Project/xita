@@ -4,9 +4,12 @@
 #include "gpu_objects.h"
 
 typedef void *(*h2_physical_map)(void *opaque, uint32_t address, uint32_t bytes);
+typedef int (*h2_attachment_check)(void *opaque, uint32_t address, uint32_t bytes,
+                                   uint32_t pitch, int zeta, uint32_t format);
 typedef struct h2_kelvin_clear {
     h2_instance_read read_instance;
     h2_physical_map map_physical;
+    h2_attachment_check check_attachment; /* optional, side-effect-free metadata check */
     void *opaque;
     uint32_t physical_bytes, object_instance, bound_subchannels;
     uint32_t dma_color, dma_zeta;

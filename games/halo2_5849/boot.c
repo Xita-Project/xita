@@ -68,6 +68,18 @@ static void graphics_snapshot(void)
     int closed = fclose(snapshot);
     xv_logf("[h2/graphics] private device snapshot base=00404FE0 bytes=%u complete=%d\n",
             (unsigned)written, written == sizeof device && closed == 0);
+    uint32_t ring = X_M32(0x404FE0u + 0x24), end = X_M32(0x404FE0u + 0x28);
+    if (ring < 0x80000000u || end <= ring || end > 0x84000000u || end - ring > 0x100000u) return;
+    uint32_t header[4] = {ring - 0x80000000u, end - ring, X_M32(0x404FE0u) & 0x0FFFFFFFu, 0};
+    snapshot = fopen("ux0:data/xita-halo2/push-at-stop.bin", "wb");
+    if (!snapshot) return;
+    /* Raw physical host RAM, bounded independently of guest page mappings.
+     * Header: physical base, allocation bytes, guest cursor, reserved zero. */
+    int complete = fwrite(header, 1, sizeof header, snapshot) == sizeof header &&
+                   fwrite(g_xram + header[0], 1, header[1], snapshot) == header[1];
+    closed = fclose(snapshot);
+    xv_logf("[h2/graphics] private push snapshot base=%08X bytes=%u cursor=%08X complete=%d\n",
+            header[0], header[1], header[2], complete && closed == 0);
 }
 void h2_graphics_stop(xctx *context, uint32_t instruction, uint32_t address,
                       uint32_t value, int write, int reason)

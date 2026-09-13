@@ -16,6 +16,9 @@ OBJECTS += $(addprefix $(BUILD)/,host_channel_runtime.o host_channel.o host_tile
 endif
 comma := ,
 WRAPS := xk_MmClaimGpuInstanceMemory xv_unimpl xk_NtOpenFile xk_NtReadFile xk_NtWriteFile xk_NtDeviceIoControlFile xk_NtFsControlFile xk_NtQueryVolumeInformationFile
+ifeq ($(HOST_CHANNEL),1)
+WRAPS += xk_AvSendTVEncoderOption xk_AvSetDisplayMode
+endif
 LIBS := -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceSysmem_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lSceRtc_stub -lSceCtrl_stub -lSceTouch_stub -lSceAudio_stub -lm
 .DEFAULT_GOAL := all
 .PHONY: all test-host

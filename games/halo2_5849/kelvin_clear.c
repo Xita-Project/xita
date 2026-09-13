@@ -27,7 +27,7 @@ typedef struct target {
 } target;
 
 static int map_target(const h2_kelvin_clear *state, uint32_t instance, uint32_t offset,
-                       uint32_t pitch, uint32_t width, uint32_t height, target *target)
+                       uint32_t pitch, uint32_t width, uint32_t height, int zeta, target *target)
 {
     h2_dma_object dma;
     if (!pitch || (pitch & 3) || (offset & 3) || (uint64_t)width * 4 > pitch ||
@@ -36,6 +36,8 @@ static int map_target(const h2_kelvin_clear *state, uint32_t instance, uint32_t 
     if (bytes > UINT32_MAX || !h2_dma_resolve(&dma, offset, (uint32_t)bytes, 1,
                                             state->physical_bytes, &target->physical)) return 0;
     target->bytes = bytes; target->pitch = pitch;
+    if (state->check_attachment && !state->check_attachment(state->opaque, target->physical,
+                                    target->bytes, pitch, zeta, state->format)) return 0;
     target->data = state->map_physical(state->opaque, target->physical, target->bytes);
     return target->data != NULL && target->bytes <= UINTPTR_MAX - (uintptr_t)target->data;
 }
@@ -57,14 +59,14 @@ static int clear_surface(h2_kelvin_clear *state, uint32_t flags)
     target targets[2] = {{0}}; unsigned count = 0;
     if (flags & 0xF0) {
         if (!state->has_color_dma || !map_target(state, state->dma_color, state->color_offset,
-                                                state->pitch & 0xFFFF, width, height, &targets[count])) return 0;
+                                                state->pitch & 0xFFFF, width, height, 0, &targets[count])) return 0;
         targets[count].mask = ((flags & 0x10) ? 0x00FF0000 : 0) | ((flags & 0x20) ? 0x0000FF00 : 0) |
                               ((flags & 0x40) ? 0x000000FF : 0) | ((flags & 0x80) ? 0xFF000000u : 0);
         targets[count++].value = state->clear_color;
     }
     if (flags & 3) {
         if (!state->has_zeta_dma || !map_target(state, state->dma_zeta, state->zeta_offset,
-                                               state->pitch >> 16, width, height, &targets[count])) return 0;
+                                               state->pitch >> 16, width, height, 1, &targets[count])) return 0;
         targets[count].mask = ((flags & 1) ? 0xFFFFFF00u : 0) | ((flags & 2) ? 0xFF : 0);
         targets[count++].value = state->clear_zstencil;
     }

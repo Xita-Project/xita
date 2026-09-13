@@ -9,7 +9,7 @@ int h2_host_tile_assign(h2_host_tiles *tiles, unsigned index, uint32_t address,
     if (!tiles || index >= 8 || !bytes || ((address | bytes) & 0x3FFF) ||
         address >= physical_bytes || bytes > physical_bytes - address ||
         !pitch || (pitch & 63) || pitch > 0x10000 || pitch > bytes ||
-        (flags & ~1u) || zstart || zoffset) return 0;
+        ((flags & ~1u) && flags != 0x84000001u) || zstart || zoffset) return 0;
     for (unsigned i = 0; i < 8; ++i) {
         const h2_host_tile *other = &tiles->entries[i];
         if (i != index && other->enabled && overlaps(address, bytes, other->address, other->bytes)) return 0;
@@ -31,6 +31,18 @@ int h2_host_tiles_span(const h2_host_tiles *tiles, uint32_t address, uint32_t by
         const h2_host_tile *tile = &tiles->entries[i];
         if (tile->enabled && overlaps(address, bytes, tile->address, tile->bytes) &&
             (address < tile->address || (uint64_t)address + bytes > (uint64_t)tile->address + tile->bytes)) return 0;
+    }
+    return 1;
+}
+int h2_host_tiles_attachment(const h2_host_tiles *tiles, uint32_t address,
+                              uint32_t bytes, uint32_t pitch, int zeta, uint32_t format)
+{
+    if (!h2_host_tiles_span(tiles, address, bytes)) return 0;
+    for (unsigned i = 0; i < 8; ++i) {
+        const h2_host_tile *tile = &tiles->entries[i];
+        if (!tile->enabled || !overlaps(address, bytes, tile->address, tile->bytes)) continue;
+        if (pitch != tile->pitch || (tile->flags == 0x84000001u &&
+                                    (!zeta || ((format >> 4) & 15) != 2))) return 0;
     }
     return 1;
 }
