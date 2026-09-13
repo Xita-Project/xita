@@ -9,6 +9,17 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 13 [constant synchronization](docs/constant-tracking-20260913.md) and
+[contiguous capture](docs/constant-window-copy-20260913.md) reduce repeated CPU
+copy/comparison work. Host checks, native builds and emulator gameplay pass;
+the [native object-basis experiment](docs/object-basis-experiment-20260913.md)
+also passes equivalence checks. These changes still need hardware measurements.
+
+September 13 [Halo 2 shader reuse audit](docs/halo2-shader-reuse-20260913.md):
+two inspected programs compile through the existing Vita shader toolchain.
+Actual vertex bindings and viewport conversion remain unverified; this does
+not establish a rendered menu or game compatibility.
+
 September 13 [quaternion reuse experiment](docs/quaternion-reuse-experiment-20260913.md):
 an optional exact-value cache passes original/native equivalence and 1,920
 Cortex-A9 execution cases. Emulator caller counts show useful reuse alongside
