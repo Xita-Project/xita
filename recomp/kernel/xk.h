@@ -180,6 +180,7 @@ uint32_t xk_tick_count(void);             /* ms since boot */
 
 /* ---- files / paths ----------------------------------------------------------------------- */
 void     xk_file_set_ce_adapter_enabled(int enabled); /* Legacy CE read recovery is enabled by default. */
+void     xk_file_set_balanced_lifetime(int enabled); /* Default off; set before opening title files. */
 char    *xk_path_translate(const char *xbox_path, uint32_t root_handle);   /* -> malloc'd host path or NULL */
 void     xk_path_add_link(const char *name, const char *target);           /* \??\D: -> \Device\Cdrom0 */
 void     xk_path_mount(const char *device, const char *host_dir);          /* \Device\Cdrom0 -> ./haloce */

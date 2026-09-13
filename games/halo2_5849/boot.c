@@ -287,14 +287,16 @@ void xv_trace_func(uint32_t address)
         (address == 0x13F10 || address == 0x163820 || address == 0x163890 ||
          address == 0x223240 || address == 0x12B450 || address == 0x18E810 ||
          address == 0x68250 || address == 0x2C8A0 || address == 0x13C20 ||
-         address == 0x13CD0 || address == 0x214940)) {
+         address == 0x13CD0 || address == 0x214940 || address == 0x213484 ||
+         address == 0x2133A1 || address == 0x121B00 || address == 0x18EAA0)) {
         const xctx *c = &xk_cur->ctx;
         ++error_path_count;
         xv_logf("[h2/error-path] fn=%08X return=%08X eax=%08X ecx=%08X edx=%08X esi=%08X\n",
                 address, X_M32(c->r[4]), c->r[0], c->r[1], c->r[2], c->r[6]);
         if (address == 0x68250 || address == 0x223240) {
             const uint32_t globals[] = {0x4CF770, 0x4CF77C, 0x4E6948,
-                                       0x4E6470, 0x4E64A0, 0x4E9BB8};
+                                       0x4E6470, 0x4E64A0, 0x4E9BB8,
+                                       0x51EA00, 0x51EA04, 0x47004C};
             for (unsigned i = 0; i < sizeof globals / sizeof *globals; ++i)
                 trace_mapped_word(globals[i]);
             /* These pointer slots themselves are owned image-backed data. */
@@ -424,6 +426,7 @@ int main(void)
     }
     xk_init(base, size, xv_game_tls_dir, "ux0:data/xita-halo2/game", "ux0:data/xita-halo2/save");
     xk_file_set_ce_adapter_enabled(0);
+    xk_file_set_balanced_lifetime(1);
     h2_gpu_bus_reset(64u * 1024u * 1024u);
     if (prepare_disk_header() != 0) {
         xv_logf("[h2/blocked] private disk header storage unavailable\n"); return 6;

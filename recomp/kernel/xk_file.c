@@ -10,6 +10,8 @@
 void xk_quality_map_read(uint32_t address, uint32_t bytes) __attribute__((weak));
 static int ce_adapter_enabled = 1;
 void xk_file_set_ce_adapter_enabled(int enabled) { ce_adapter_enabled = enabled != 0; }
+static int balanced_lifetime;
+void xk_file_set_balanced_lifetime(int enabled) { balanced_lifetime = enabled != 0; }
 
 /* ---- namespace: devices -> host dirs, links -> devices ------------------------------------ */
 typedef struct { char name[64]; char target[256]; } link_t;
@@ -158,9 +160,18 @@ static uint32_t open_common(xctx *c, uint32_t phandle, uint32_t access, uint32_t
         if (!o->u.file.f) { status = missing ? STATUS_OBJECT_NAME_NOT_FOUND : STATUS_ACCESS_DENIED; xk_obj_deref(o); if (iosb) IOSB_STATUS(iosb) = status; return status; }
     }
     uint32_t h = xk_handle_create(o);
+    if (!h && balanced_lifetime) {
+        xk_obj_deref(o);
+        if (iosb) { IOSB_STATUS(iosb) = STATUS_TOO_MANY_OPENED_FILES; IOSB_INFO(iosb) = 0; }
+        return STATUS_TOO_MANY_OPENED_FILES;
+    }
     X_M32(phandle) = h;
     if (iosb) { IOSB_STATUS(iosb) = status; IOSB_INFO(iosb) = info; }
     XK_LOG("%s \"%s\" -> %s (h=%X)%s\n", is_create ? "NtCreateFile" : "NtOpenFile", name, host, h, is_dir ? " [dir]" : "");
+    /* The handle owns its own reference. Release the creator reference so
+     * final NtClose can close descriptors and honor delete-on-close. Opt-in
+     * until existing title adapters have been audited for leaked ownership. */
+    if (balanced_lifetime) xk_obj_deref(o);
     return status;
 }
 
