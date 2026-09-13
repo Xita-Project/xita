@@ -27,6 +27,7 @@ extern const uint32_t xv_game_tls_dir;
 static SceUID log_fd = -1;
 static const char disk_header_path[] = "ux0:data/xita-halo2/save/disk-header.bin";
 static unsigned presented_frames;
+static SceDisplayFrameBuf active_display;
 
 static int prepare_disk_header(void)
 {
@@ -94,8 +95,9 @@ int h2_platform_present(const uint8_t *pixels, size_t bytes,
     status = sceDisplayWaitVblankStart();
     if (status < 0) return status;
     *vcount = (uint32_t)sceDisplayGetVcount();
+    active_display = frame;
     ++presented_frames;
-    FILE *snapshot = fopen("ux0:data/xita-halo2/scanout-last.bin", "wb");
+    FILE *snapshot = presented_frames == 1 ? fopen("ux0:data/xita-halo2/scanout-last.bin", "wb") : NULL;
     if (snapshot) {
         uint32_t header[4] = {H2_DISPLAY_WIDTH, H2_DISPLAY_HEIGHT, H2_DISPLAY_WIDTH * 4, presented_frames};
         int complete = fwrite(header, 1, sizeof header, snapshot) == sizeof header &&
@@ -105,6 +107,13 @@ int h2_platform_present(const uint8_t *pixels, size_t bytes,
     }
     back ^= 1;
     return 0;
+}
+int h2_platform_blank(int blank)
+{
+    if (!active_display.base) return -1;
+    int result = sceDisplaySetFrameBuf(blank ? NULL : &active_display, SCE_DISPLAY_SETBUF_NEXTFRAME);
+    if (result < 0) return result;
+    return sceDisplayWaitVblankStart();
 }
 static void graphics_snapshot(void)
 {
@@ -168,6 +177,11 @@ void xv_trace_func(uint32_t address)
         uint32_t pp = X_M32(c->r[4] + 4);
         xv_logf("[h2/graphics] CreateDevice LTCG flags=%08X output=%08X parameters=%08X width=%u height=%u format=%08X\n",
                 c->r[0], c->r[1], pp, X_M32(pp), X_M32(pp + 4), X_M32(pp + 8));
+    }
+    if (address == 0x3FC530u && xk_cur) {
+        xctx *c = &xk_cur->ctx;
+        xv_logf("[h2/graphics] device release caller=%08X device=%08X esi=%08X\n",
+                X_M32(c->r[4]), c->r[0], c->r[6]);
     }
     /* XAPI's direct application call targets 0x12190 in the pinned image.
      * Keep that observation even if constructor tracing uses the initial cap. */

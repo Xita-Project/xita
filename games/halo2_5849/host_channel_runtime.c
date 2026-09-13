@@ -209,7 +209,7 @@ void h2_host_memory_barrier(xctx *c)
 }
 static h2_host_av_config av_config;
 static unsigned mode_vblanks;
-static int display_mode_set;
+static int display_mode_set, screen_blanked;
 void __wrap_xk_KeWaitForSingleObject(xctx *c)
 {
     check_stack(c, 0, 5);
@@ -262,6 +262,19 @@ void __wrap_xk_AvSendTVEncoderOption(xctx *c)
     } else if (option == 14 && !param && !output) {
         av_config.luma_filter = param; av_config.has_luma = 1;
         xv_logf("[h2/av] deferred luma-filter request=%u; presentation unsupported\n", param);
+    } else if (option == 15 && display_mode_set && base == BAR && !param &&
+               output && !(output & 3) && guest_span_valid(output, 4)) {
+        /* The only implemented scanout is progressive: a single field, index
+         * zero. This is not an analog encoder/interlaced-field approximation. */
+        X_M32(output) = 0;
+        xv_logf("[h2/av] progressive field index=0 output=%08X\n", output);
+    } else if (option == 9 && display_mode_set && base == BAR && param <= 1 && !output) {
+        if (screen_blanked != (int)param) {
+            int result = h2_platform_blank(param);
+            if (result < 0) reject(c, X_M32(c->r[4]), base, (uint32_t)result);
+            screen_blanked = param;
+        }
+        xv_logf("[h2/av] real progressive display blank=%u\n", param);
     } else reject(c, X_M32(c->r[4]), output, option);
     X_RET(4);
 }

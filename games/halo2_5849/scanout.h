@@ -15,3 +15,4 @@ int h2_scanout_convert(uint8_t *output, size_t output_bytes,
                          const uint8_t *rgb_gamma, size_t gamma_bytes);
 int h2_platform_present(const uint8_t *pixels, size_t bytes,
                           const uint8_t *rgb_gamma, uint32_t *vcount);
+int h2_platform_blank(int blank);

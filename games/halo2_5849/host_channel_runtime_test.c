@@ -16,6 +16,10 @@ static int vblank_result;
 static uint32_t vblank_delta = 1;
 static unsigned present_calls;
 static int present_result;
+static int blank_result, blank_value;
+static unsigned blank_calls;
+int h2_platform_blank(int blank)
+{ ++blank_calls; blank_value = blank; return blank_result; }
 int h2_platform_present(const uint8_t *pixels, size_t bytes, const uint8_t *rgb_gamma, uint32_t *vcount)
 {
     assert(pixels == g_xram + 0x300000 && bytes == H2_SCANOUT_BYTES);
@@ -299,6 +303,29 @@ int main(void)
     present_result = 0; __wrap_xk_AvSetDisplayMode(&c);
     interrupted.r[0] = 0; interrupted.r[4] += 28;
     assert(present_calls == 2 && !memcmp(&c, &interrupted, sizeof c));
+    c.r[4] = 0x600000; c.r[0] = 0xABCDEFAA;
+    X_M32(c.r[4] + 8) = 15; X_M32(c.r[4] + 12) = 0; X_M32(c.r[4] + 16) = 0x610000;
+    X_M32(0x610000) = 0xAABBCCDD;
+    __wrap_xk_AvSendTVEncoderOption(&c);
+    assert(X_M32(0x610000) == 0 && c.r[0] == 0xABCDEFAA && c.r[4] == 0x600014);
+    c.r[4] = 0x600000; X_M32(c.r[4] + 16) = 0x610001;
+    if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
+    assert(X_M32(0x610000) == 0 && c.r[4] == 0x600000);
+    X_M32(c.r[4] + 8) = 9; X_M32(c.r[4] + 16) = 0;
+    __wrap_xk_AvSendTVEncoderOption(&c);
+    assert(present_calls == 2 && c.r[0] == 0xABCDEFAA && c.r[4] == 0x600014);
+    c.r[4] = 0x600000; X_M32(c.r[4] + 12) = 1;
+    blank_result = -1;
+    if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
+    assert(blank_calls == 1 && blank_value == 1 && c.r[4] == 0x600000);
+    blank_result = 0; __wrap_xk_AvSendTVEncoderOption(&c);
+    assert(blank_calls == 2 && c.r[4] == 0x600014);
+    c.r[4] = 0x600000; __wrap_xk_AvSendTVEncoderOption(&c); /* repeated blank is idempotent */
+    assert(blank_calls == 2);
+    c.r[4] = 0x600000; X_M32(c.r[4] + 12) = 0; __wrap_xk_AvSendTVEncoderOption(&c);
+    assert(blank_calls == 3 && blank_value == 0);
+    c.r[4] = 0x600000; X_M32(c.r[4] + 12) = 2;
+    if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
     if (!setjmp(fault)) { h2_bus_write32(&c, 0, 0xFD40071C, 2); assert(0); }
     assert(software_calls == 1); /* no arbitrary external increment or DAC access */
     puts("Host-channel runtime: LTCG contracts, mapped resources, canonical color/depth/stencil pixels and strict rejection pass.");
