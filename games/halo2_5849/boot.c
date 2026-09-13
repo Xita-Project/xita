@@ -204,6 +204,27 @@ void xv_watch_leave(uint32_t address, uint32_t back, xctx *c) { (void)address; (
 void xv_trace_func(uint32_t address)
 {
     static unsigned count;
+    /* Read-only evidence for the pinned 1088E0 descriptor walk. The exact
+     * record array is image-backed; reject pointers outside it before reads. */
+    static int descriptor_chain_logged;
+    if (!descriptor_chain_logged && (address == 0x175F40u || address == 0x106460u) &&
+        xk_cur && X_M32(xk_cur->ctx.r[4]) == 0x10894Du) {
+        descriptor_chain_logged = 1;
+        uint32_t node = X_M32(0x4E0330u);
+        unsigned seen = 0;
+        for (unsigned n = 0; node && n < 17; ++n) {
+            if (node < 0x4678E8u || node > 0x468568u || (node - 0x4678E8u) % 0xC8u) {
+                xv_logf("[h2/startup] descriptor chain unexpected node=%08X\n", node);
+                break;
+            }
+            unsigned bit = 1u << ((node - 0x4678E8u) / 0xC8u);
+            if (seen & bit) { xv_logf("[h2/startup] descriptor chain cycle node=%08X\n", node); break; }
+            seen |= bit;
+            xv_logf("[h2/startup] descriptor index=%u node=%08X initializer=%08X next=%08X\n",
+                    n, node, X_M32(node + 0x10u), X_M32(node + 0xC4u));
+            node = X_M32(node + 0xC4u);
+        }
+    }
     if (address == 0x3F5240u && xk_cur) {
         xctx *c = &xk_cur->ctx;
         uint32_t pp = X_M32(c->r[4] + 4);

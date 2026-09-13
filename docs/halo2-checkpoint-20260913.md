@@ -1,5 +1,8 @@
 # Halo 2 checkpoint: native attempt 45
 
+A later [native46 descriptor milestone](halo2-descriptor-startup.md) passes
+this checkpoint’s descriptor stop; no menu is displayed.
+
 **No Halo 2 menu or game geometry is displayed.** The real native Vita target
 runs the owned executable's entry, creates and retires the initial graphics
 device, constructs its second device, loads font assets, opens the real Vita

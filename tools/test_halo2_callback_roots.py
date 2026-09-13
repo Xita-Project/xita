@@ -1,5 +1,6 @@
 """Synthetic bounds and revision guards for the observed D3D callback walk."""
 import hashlib
+import struct
 import unittest
 from unittest.mock import patch
 from games.halo2_5849 import prepare_boot
@@ -101,6 +102,100 @@ class CallbackRoots(unittest.TestCase):
         with patch.object(prepare_boot, "HOST_CALLBACK_WALK", (0x200, len(image.code), "0" * 64)):
             with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
                 prepare_boot.host_channel_callback_roots(image)
+
+
+class DescriptorImage:
+    def __init__(self):
+        self.code = b"synthetic descriptor caller"
+        self.data = bytearray(0x10000)
+        self.parents = [0x461000 + n * 0xC8 for n in range(13)]
+        for index, parent in enumerate(self.parents):
+            self.write(0x468630 + 4 * index, parent)
+
+    def write(self, address, value):
+        struct.pack_into("<I", self.data, address - 0x460000, value)
+
+    def bytes_at(self, address, length):
+        if address == 0x200:
+            assert length == len(self.code)
+            return self.code
+        return bytes(self.data[address - 0x460000:address - 0x460000 + length])
+
+    def u32(self, address):
+        return struct.unpack_from("<I", self.data, address - 0x460000)[0]
+
+    def section_of(self, address):
+        if 0x460000 <= address < 0x470000:
+            return (0x460000, 0, 0x10000, 0x10000, ".data", ())
+        if 0x1000 <= address < 0x2000:
+            return (0x1000, 0, 0x1000, 0x1000, ".text", ("EXECUTABLE",))
+        return None
+
+    def is_code(self, address):
+        return 0x1000 <= address < 0x2000
+
+
+class DescriptorRoots(unittest.TestCase):
+    def setUp(self):
+        self.image = DescriptorImage()
+        code = self.image.code
+        self.guard = patch.object(prepare_boot, "GAME_DESCRIPTOR_WALK",
+                                  (0x200, len(code), hashlib.sha256(code).hexdigest()))
+        self.guard.start()
+        self.addCleanup(self.guard.stop)
+
+    def chain(self):
+        return prepare_boot.game_descriptor_initialization_chain(self.image)
+
+    def test_shared_self_children_and_repeated_callbacks_keep_original_order(self):
+        a, b = self.image.parents[:2]
+        shared = 0x464000
+        for parent in (a, b):
+            self.image.write(parent + 0x84, shared)
+            self.image.write(parent + 0x88, parent)
+            self.image.write(parent + 0x90, 0xDEAD)  # ignored after first null
+            self.image.write(parent + 0x10, 0x1000)
+        self.image.write(shared + 0x10, 0x1500)
+        # Child descriptors are not themselves traversed as parents.
+        self.image.write(shared + 0x84, 0xDEAD)
+        expected = [(a, 0x1000), (shared, 0x1500), (b, 0x1000)]
+        expected += [(parent, 0) for parent in self.image.parents[2:]]
+        before = bytes(self.image.data)
+        self.assertEqual(self.chain(), expected)
+        self.assertEqual(bytes(self.image.data), before)
+
+    def test_full_sixteen_child_bound(self):
+        parent = self.image.parents[0]
+        children = [0x464000 + n * 0xC8 for n in range(16)]
+        for index, child in enumerate(children):
+            self.image.write(parent + 0x84 + 4 * index, child)
+        self.assertEqual([node for node, _ in self.chain()],
+                         [parent] + children + self.image.parents[1:])
+
+    def test_bad_descriptor_spans_and_callback(self):
+        for invalid in (0, 0x461001, 0x46FFFC, 0x500000):
+            self.image.write(0x468630, invalid)
+            with self.assertRaisesRegex(ValueError, "data span"):
+                self.chain()
+        parent = self.image.parents[0]
+        self.image.write(0x468630, parent)
+        self.image.write(parent + 0x84, parent + 4)
+        with self.assertRaisesRegex(ValueError, "overlap"):
+            self.chain()
+        self.image.write(parent + 0x84, 0)
+        self.image.write(parent + 0x10, 0x464000)
+        with self.assertRaisesRegex(ValueError, "invalid initializer"):
+            self.chain()
+
+    def test_reject_initial_links_and_changed_caller(self):
+        parent = self.image.parents[0]
+        self.image.write(parent + 0xC4, parent)
+        with self.assertRaisesRegex(ValueError, "initial link"):
+            self.chain()
+        self.image.write(parent + 0xC4, 0)
+        self.image.code = bytes([self.image.code[0] ^ 1]) + self.image.code[1:]
+        with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+            self.chain()
 
 
 if __name__ == "__main__":

@@ -16,6 +16,74 @@ from recompiler.xita_recomp import Image, KERNEL_DATA_EXPORTS, KERNEL_EXPORTS
 HOST_CALLBACK_WALK = (0x3FBA54, 135, "e0cc1649c0b744615b3de0f5b2446411bb408d0b3ce4d1d3da59980219abc70c")
 XPP_CALLBACK_WALK = (0x408C72, 36, "9234a2afaedda5206ca55c2bf3f0269b70b1b0345091581c639ee86230cd3756")
 GAME_INIT_WALK = (0x137C84, 19, "44c1c20adf4bb014714a0825d601e592e668699e31671c7676a674951946da02")
+GAME_DESCRIPTOR_WALK = (0x1088E0, 124, "c1bf2193fbf5a7f7a8d0de9fffaaf9ee5cbe12ced08b39059af29896540348ec")
+
+
+def game_descriptor_initialization_chain(image):
+    """Native45: reproduce the bounded original descriptor linking algorithm.
+
+    Children are not recursively traversed. A shared/self child is appended
+    only while its current next pointer is zero; later parent writes can
+    replace that pointer. Do not substitute ordinary graph deduplication.
+    This extraction supports the pinned image's initially unlinked records.
+    It never changes the image or the original guest list construction.
+    """
+    address, length, digest = GAME_DESCRIPTOR_WALK
+    if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+        raise ValueError("Halo 2 descriptor walk fingerprint mismatch")
+    nodes = {}
+
+    def validate_node(node):
+        if node in nodes:
+            return
+        section = image.section_of(node) if node else None
+        if (not node or node & 3 or not section or section[4] != ".data" or
+                node + 0xC8 > section[0] + section[2] or
+                len(image.bytes_at(node, 0xC8)) != 0xC8):
+            raise ValueError(f"Halo 2 descriptor {node!r} has invalid data span")
+        if any(node < other + 0xC8 and other < node + 0xC8 for other in nodes):
+            raise ValueError("Halo 2 descriptor records overlap")
+        if image.u32(node + 0xC4) != 0:
+            raise ValueError("Halo 2 descriptor has unsupported initial link")
+        target = image.u32(node + 0x10)
+        section = image.section_of(target) if target else None
+        if target is None or (target and (not image.is_code(target) or not section or section[4] != ".text")):
+            raise ValueError(f"Halo 2 descriptor {node:#x} has invalid initializer")
+        nodes[node] = target
+
+    parents = []
+    children = {}
+    for slot in range(0x468630, 0x468664, 4):
+        parent = image.u32(slot)
+        validate_node(parent)
+        parents.append(parent)
+        children[parent] = []
+        for index in range(16):
+            child = image.u32(parent + 0x84 + 4 * index)
+            if child == 0:
+                break
+            validate_node(child)
+            children[parent].append(child)
+    links = {node: 0 for node in nodes}
+    links[0] = 0  # synthetic head slot, corresponding to guest [4E0330]
+    tail = 0
+    for parent in parents:
+        links[tail] = parent
+        tail = parent
+        for child in children[parent]:
+            if links[child] == 0:
+                links[tail] = child
+                tail = child
+    links[tail] = 0
+    chain, seen = [], set()
+    node = links[0]
+    while node:
+        if node in seen or node not in nodes:
+            raise ValueError("Halo 2 descriptor chain is cyclic or invalid")
+        seen.add(node)
+        chain.append((node, nodes[node]))
+        node = links[node]
+    return chain
 
 
 def game_initialization_roots(image):
@@ -102,6 +170,8 @@ def main():
                 raise ValueError(f"Initializer slot {slot:#x} has invalid target {target!r}")
             roots.add(target)
     if args.host_channel:
+        descriptor_chain = game_descriptor_initialization_chain(image)
+        roots.update(target for _, target in descriptor_chain if target)
         roots.update(host_channel_callback_roots(image))
         # Native attempt 35: application creator 0x120A90 pushes 0x120C30
         # at 0x120B0E and calls XAPI thread creation at 0x120B3D. The native
@@ -145,6 +215,8 @@ def main():
     # xv_game_main is the startup entry in this entry-only diagnostic target;
     # boot.c only uses xv_entry_point. No game-main boundary is asserted here.
     (output / "startup-roots.json").write_text(json.dumps(sorted(roots), indent=2) + "\n")
+    if args.host_channel:
+        (output / "descriptor-initializers.json").write_text(json.dumps(descriptor_chain, indent=2) + "\n")
     # Generated compatibility stubs return success. This diagnostic target
     # deliberately does not link them: absent kernel implementations halt.
     lines = ['#include "xv_x86rt.h"', 'void xv_boot_missing_kernel(xctx *c, const char *name);']
