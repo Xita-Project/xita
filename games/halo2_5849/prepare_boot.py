@@ -117,6 +117,9 @@ def main():
         # indirect dispatch from 0x37B17B. The following words are data.
         roots.update(image.u32(slot) for slot in range(0x4170E4, 0x4170F4, 4))
         roots.update(game_initialization_roots(image))
+        # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
+        # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
+        roots.add(image.u32(image.u32(0x477058) + 0x10))
     output = args.out.resolve()
     generated = output / "generated"
     profile = str(Path(__file__).with_name("graphics-profile.json")) if args.graphics else "halo2_5849"
