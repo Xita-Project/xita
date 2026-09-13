@@ -169,6 +169,9 @@ uint32_t xk_mem_size(uint32_t addr);
 uint32_t xk_mem_available(void);
 uint32_t xk_kalloc(uint32_t size);        /* kernel-side small objects living in guest RAM (KTHREAD, KPCR, ...) */
 void     xk_kfree(uint32_t addr);
+/* Optional fixed kernel-arena reservations, 64-byte aligned; 0 success. */
+int      xk_kreserve_fixed(uint32_t addr, uint32_t size);
+int      xk_krelease_fixed(uint32_t addr, uint32_t size);
 
 /* ---- time ----------------------------------------------------------------------------- */
 uint64_t xk_time_100ns(void);             /* system time (since 1601) */

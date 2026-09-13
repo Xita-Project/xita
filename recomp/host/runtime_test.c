@@ -111,12 +111,40 @@ static void kernel_pool(void)
     free(blocks);
 }
 
+static void fixed_kernel_pool(void)
+{
+    const uint32_t base = 0x03FE0000, size = 0x10000;
+    assert(xk_kreserve_fixed(base, size) == 0);
+    X_M32(base) = 0xCAFE1234;
+    xk_kfree(base); /* fixed ownership cannot be released by ordinary free */
+    assert(xk_kreserve_fixed(base, size) == -1);
+    assert(xk_kreserve_fixed(base + 1, size) == -1);
+    assert(xk_kreserve_fixed(base, 1) == -1);
+    assert(xk_kreserve_fixed(0x3D00000, UINT32_MAX) == -1);
+    assert(xk_kreserve_fixed(0x4000000, size) == -1);
+    assert(xk_krelease_fixed(base - 64, size + 64) == -1); /* atomic ownership check */
+    assert(xk_kalloc(3u << 20) == 0);
+    uint32_t lower = xk_kalloc(0x2E0000), upper = xk_kalloc(0x10000);
+    assert(lower == 0x3D00000 && upper == 0x3FF0000 && xk_kalloc(1) == 0);
+    assert(X_M32(base) == 0xCAFE1234);
+    assert(xk_kreserve_fixed(lower, 64) == -1); /* cannot steal live allocations */
+    xk_kfree(lower); xk_kfree(upper);
+    assert(xk_krelease_fixed(base, 0xB000) == 0); /* GPU claim shrinks lower end */
+    assert(xk_krelease_fixed(base, size) == -1); /* mixed ownership: no partial release */
+    lower = xk_kalloc(0x2EB000); assert(lower == 0x3D00000);
+    upper = xk_kalloc(0x10000); assert(upper == 0x3FF0000);
+    assert(xk_kalloc(1) == 0);
+    xk_kfree(lower); xk_kfree(upper);
+    assert(xk_krelease_fixed(base + 0xB000, 0x5000) == 0);
+    lower = xk_kalloc(3u << 20); assert(lower == 0x3D00000); xk_kfree(lower);
+}
+
 int main(void)
 {
     xk_mem_setup(0x10000, 0x400000);
     g_xram = calloc(1, xk_mem_arena_size()); assert(g_xram);
     xk_mem_bind_arena();
-    page_copies(); kernel_pool();
+    page_copies(); kernel_pool(); fixed_kernel_pool();
     free(g_xram); free(g_xpt);
     puts("PASS: SSE/x87/string page crossings and overlap; kernel pool reuse, merging, fragmentation and exhaustion");
     return 0;

@@ -26,6 +26,7 @@ static uint32_t g_image_lo, g_image_hi, g_trash_off;
 /* 64-byte kernel-pool units: zero = free, length at the head, UINT16_MAX inside.
  * 96 KB of host metadata covers the entire 3 MB pool, with no fixed free-list limit. */
 #define KPOOL_UNIT 64u
+#define KPOOL_FIXED (UINT16_MAX - 1)
 #define KPOOL_UNITS ((XRAM_SIZE - KERNEL_VA) / KPOOL_UNIT)
 static uint16_t g_kunits[KPOOL_UNITS];
 static uint32_t g_khint;
@@ -194,7 +195,7 @@ uint32_t xk_kalloc(uint32_t size)
     uint32_t need = (size + KPOOL_UNIT - 1) / KPOOL_UNIT;
     uint32_t run = 0;
     for (uint32_t i = g_khint; i < KPOOL_UNITS; ) {
-        if (g_kunits[i]) { run = 0; i += g_kunits[i] == UINT16_MAX ? 1 : g_kunits[i]; continue; }
+        if (g_kunits[i]) { run = 0; i += g_kunits[i] >= KPOOL_FIXED ? 1 : g_kunits[i]; continue; }
         ++i;
         if (++run < need) continue;
         uint32_t start = i - need;
@@ -213,9 +214,37 @@ void xk_kfree(uint32_t addr)
     if (addr < KERNEL_VA || addr >= XRAM_SIZE || (addr & (KPOOL_UNIT - 1))) return;
     uint32_t start = (addr - KERNEL_VA) / KPOOL_UNIT;
     uint16_t n = g_kunits[start];
-    if (!n || n == UINT16_MAX) return; /* null, duplicate or interior free */
+    if (!n || n >= KPOOL_FIXED) return; /* null, duplicate or interior free */
     memset(&g_kunits[start], 0, n * sizeof g_kunits[0]);
     if (start < g_khint) g_khint = start;
+}
+
+/* Optional fixed physical ranges inside the kernel arena. Unused by default.
+ * Reservation markers cannot be freed as allocations; release checks ownership
+ * of the entire range before mutation. Existing guest bytes are preserved. */
+static int kfixed_bounds(uint32_t address, uint32_t bytes)
+{
+    return address >= KERNEL_VA && address < XRAM_SIZE && bytes &&
+           bytes <= XRAM_SIZE - address && !(address & (KPOOL_UNIT - 1)) &&
+           !(bytes & (KPOOL_UNIT - 1));
+}
+int xk_kreserve_fixed(uint32_t address, uint32_t bytes)
+{
+    if (!kfixed_bounds(address, bytes)) return -1;
+    uint32_t first = (address - KERNEL_VA) / KPOOL_UNIT, units = bytes / KPOOL_UNIT;
+    for (uint32_t i = first; i < first + units; ++i) if (g_kunits[i]) return -1;
+    for (uint32_t i = first; i < first + units; ++i) g_kunits[i] = KPOOL_FIXED;
+    return 0;
+}
+int xk_krelease_fixed(uint32_t address, uint32_t bytes)
+{
+    if (!kfixed_bounds(address, bytes)) return -1;
+    uint32_t first = (address - KERNEL_VA) / KPOOL_UNIT, units = bytes / KPOOL_UNIT;
+    for (uint32_t i = first; i < first + units; ++i)
+        if (g_kunits[i] != KPOOL_FIXED) return -1;
+    memset(&g_kunits[first], 0, units * sizeof g_kunits[0]);
+    if (first < g_khint) g_khint = first;
+    return 0;
 }
 
 /* ---- exports ------------------------------------------------------------------------------------ */
