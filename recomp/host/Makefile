@@ -64,15 +64,21 @@ build/vita_input_test: vita_input_test.c ../kernel/xk_os_vita.c ../kernel/xk.h .
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include vita_input_test.c ../../runtime/xv_benchmark.c -Wl,--gc-sections -lm -o $@
 
 .PHONY: test
-test: build/runtime_test build/immediate_test build/file_io_test build/file_open_test build/crypto_test build/profiler_test build/profiler_traced_test build/dispatch_profile_test
+test: build/runtime_test build/immediate_test build/file_io_test build/file_io_no_adapter_test build/file_open_test build/crypto_test build/profiler_test build/profiler_traced_test build/dispatch_profile_test build/trap_handler_test
 	./build/runtime_test
 	./build/immediate_test
 	./build/file_io_test
+	./build/file_io_no_adapter_test
 	./build/file_open_test
 	./build/crypto_test
 	./build/profiler_test
 	./build/profiler_traced_test
 	./build/dispatch_profile_test
+	./build/trap_handler_test
+
+build/trap_handler_test: trap_handler_test.c ../xv_x86rt.c ../xv_x86rt.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections trap_handler_test.c ../xv_x86rt.c -Wl,--gc-sections -lm -o $@
 
 build/profiler_test: Makefile profiler_test.c ../xv_funchist.c ../xv_x86rt.h
 	mkdir -p build
@@ -113,6 +119,10 @@ build/crypto_test: Makefile crypto_test.c ../kernel/xk_crypto.c ../xv_x86rt.c ..
 build/file_io_test: Makefile file_io_test.c ../kernel/xk_file.c ../xv_x86rt.c ../xv_x86rt.h ../kernel/xk.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections file_io_test.c ../kernel/xk_file.c ../xv_x86rt.c -Wl,--gc-sections -lm -o $@
+
+build/file_io_no_adapter_test: Makefile file_io_test.c ../kernel/xk_file.c ../xv_x86rt.c ../xv_x86rt.h ../kernel/xk.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -DXV_TEST_NO_GAME_ADAPTER -std=gnu11 -ffunction-sections -fdata-sections file_io_test.c ../kernel/xk_file.c ../xv_x86rt.c -Wl,--gc-sections -lm -o $@
 
 build/file_open_test: Makefile file_open_test.c ../kernel/xk_file.c ../xv_x86rt.h ../kernel/xk.h
 	mkdir -p build

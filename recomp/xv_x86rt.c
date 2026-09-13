@@ -75,6 +75,9 @@ void xv_preempt(xctx *c)
 
 void xv_trap(xctx *c, uint32_t eip)
 {
+    /* Optional diagnostic target exit. A returning handler still traps below. */
+    extern void xv_runtime_trap(xctx *, uint32_t) __attribute__((weak));
+    if (xv_runtime_trap) xv_runtime_trap(c, eip);
     XV_RT_LOG("TRAP at %08X: eax=%08X ecx=%08X edx=%08X ebx=%08X esp=%08X ebp=%08X esi=%08X edi=%08X\n",
               eip, c->r[0], c->r[1], c->r[2], c->r[3], c->r[4], c->r[5], c->r[6], c->r[7]);
     { char sb[512]; int n = 0;                                 /* guest stack words that look like code addresses */

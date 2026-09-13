@@ -6,6 +6,10 @@
 #include <ctype.h>
 #include "xk.h"
 #include "xk_quality.h"
+/* The map transformation belongs to an optional game adapter. */
+void xk_quality_map_read(uint32_t address, uint32_t bytes) __attribute__((weak));
+static int ce_adapter_enabled = 1;
+void xk_file_set_ce_adapter_enabled(int enabled) { ce_adapter_enabled = enabled != 0; }
 
 /* ---- namespace: devices -> host dirs, links -> devices ------------------------------------ */
 typedef struct { char name[64]; char target[256]; } link_t;
@@ -221,16 +225,16 @@ void xk_NtReadFile(xctx *c)
     if (poff && (LI64(poff) == 0xFFFFFFFFFFFFFFFEull)) pos = o->u.file.pos;   /* FILE_USE_FILE_POINTER_POSITION */
     uint32_t apc_before = X_ARG(2), ctx_before = X_ARG(3);
     int64_t got = file_guest_io(o->u.file.f, pos, buf, len, 0);
-    if (got > 0 && (uint64_t)got == len && buf == 0x803A6000u && o->u.file.path) {
+    if (ce_adapter_enabled && got > 0 && (uint64_t)got == len && buf == 0x803A6000u && o->u.file.path) {
         size_t length = strlen(o->u.file.path);
-        if (length > 4 && !strcmp(o->u.file.path+length-4,".map"))
+        if (xk_quality_map_read && length > 4 && !strcmp(o->u.file.path+length-4,".map"))
             xk_quality_map_read(buf,(uint32_t)got);
     }
     if (X_ARG(2) != apc_before || X_ARG(3) != ctx_before)
         XK_LOG("READ CLOBBERED THE STACK: esp %08X (page->arena %08X), buf %08X len %u (buf arena %08X..); apc %08X->%08X\n",
                c->r[4], g_xpt[c->r[4] >> 12], buf, len, g_xpt[buf >> 12], apc_before, X_ARG(2));
     uint32_t st = got < 0 ? STATUS_UNSUCCESSFUL : got == 0 && len ? STATUS_END_OF_FILE : STATUS_SUCCESS;
-    if (pos == 0 && got == 512 && len == 512) {
+    if (ce_adapter_enabled && pos == 0 && got == 512 && len == 512) {
         const char *pth = o->u.file.path; size_t hl = strlen(pth);
         if (hl >= 9 && !strcmp(pth + hl - 9, "/blam.lst") && xk_variant_recover_unsigned(buf))
             XK_LOG("[variant] recovered legacy unsigned settings: %s\n", pth);
@@ -252,7 +256,7 @@ void xk_NtReadFile(xctx *c)
          * our saves carry 0 there (index rows created by an early runtime), so present them as valid on
          * read - the playlist files themselves are intact and load fine. */
         const char *pth = o->u.file.path; size_t hl = strlen(pth);
-        if (got == 518 && len == 518 && hl >= 8 && !strcmp(pth + hl - 8, "hdmu.map")) {
+        if (ce_adapter_enabled && got == 518 && len == 518 && hl >= 8 && !strcmp(pth + hl - 8, "hdmu.map")) {
             uint8_t flags[6]; x_guest_read(flags, buf + 512, sizeof flags);
             int variant = flags[0] == 1 && flags[1] == 0;
             int profile = 0;
@@ -279,7 +283,7 @@ void xk_NtReadFile(xctx *c)
          * a read past the 2 KB header means the map is loading/loaded.  The pad layer keeps the D-pad plain
          * while a UI map is current. */
         const char *pth = o->u.file.path; size_t hl = strlen(pth);
-        if (got > 0 && hl > 4 && !strcmp(pth + hl - 4, ".map")) {
+        if (ce_adapter_enabled && got > 0 && hl > 4 && !strcmp(pth + hl - 4, ".map")) {
             if (pos == 0 && got >= 0x64 && X_M32(buf) == 0x68656164u) o->u.file.map_type = (int)X_M32(buf + 0x60);   /* 'head' tag: bytes d a e h */
             if (pos >= 2048 && o->u.file.map_type >= 0) xk_file_in_ui_map = (o->u.file.map_type == 2);
         }
