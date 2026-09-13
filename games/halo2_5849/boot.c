@@ -17,6 +17,7 @@
 #include "cache_volume.h"
 #include "gpu_bus.h"
 #include "instance_memory.h"
+#include "scanout.h"
 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
 uint8_t *g_xram;
@@ -25,6 +26,7 @@ int xv_trace_enabled = 1, xv_trace_funcs = 1, xv_watch_n;
 extern const uint32_t xv_game_tls_dir;
 static SceUID log_fd = -1;
 static const char disk_header_path[] = "ux0:data/xita-halo2/save/disk-header.bin";
+static unsigned presented_frames;
 
 static int prepare_disk_header(void)
 {
@@ -64,6 +66,46 @@ int h2_platform_wait_vblank(uint32_t *before, uint32_t *after)
     *after = (uint32_t)sceDisplayGetVcount();
     return result;
 }
+int h2_platform_present(const uint8_t *pixels, size_t bytes,
+                          const uint8_t *rgb_gamma, uint32_t *vcount)
+{
+    static SceUID blocks[2] = {-1, -1};
+    static uint8_t *buffers[2];
+    static unsigned back;
+    if (!buffers[0]) {
+        for (unsigned i = 0; i < 2; ++i) {
+            blocks[i] = sceKernelAllocMemBlock("h2_scanout", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 0x200000, NULL);
+            if (blocks[i] < 0 || sceKernelGetMemBlockBase(blocks[i], (void **)&buffers[i]) < 0) {
+                for (unsigned j = 0; j <= i; ++j) {
+                    if (blocks[j] >= 0) sceKernelFreeMemBlock(blocks[j]);
+                    blocks[j] = -1; buffers[j] = NULL;
+                }
+                return -1;
+            }
+        }
+    }
+    if (!h2_scanout_convert(buffers[back], 0x200000, pixels, bytes, rgb_gamma, 768)) return -1;
+    SceDisplayFrameBuf frame = {0};
+    frame.size = sizeof frame; frame.base = buffers[back];
+    frame.pitch = frame.width = H2_DISPLAY_WIDTH; frame.height = H2_DISPLAY_HEIGHT;
+    frame.pixelformat = SCE_DISPLAY_PIXELFORMAT_A8B8G8R8;
+    int status = sceDisplaySetFrameBuf(&frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
+    if (status < 0) return status;
+    status = sceDisplayWaitVblankStart();
+    if (status < 0) return status;
+    *vcount = (uint32_t)sceDisplayGetVcount();
+    ++presented_frames;
+    FILE *snapshot = fopen("ux0:data/xita-halo2/scanout-last.bin", "wb");
+    if (snapshot) {
+        uint32_t header[4] = {H2_DISPLAY_WIDTH, H2_DISPLAY_HEIGHT, H2_DISPLAY_WIDTH * 4, presented_frames};
+        int complete = fwrite(header, 1, sizeof header, snapshot) == sizeof header &&
+                       fwrite(buffers[back], 1, H2_DISPLAY_BYTES, snapshot) == H2_DISPLAY_BYTES;
+        int closed = fclose(snapshot);
+        xv_logf("[h2/display] private scanout snapshot frame=%u complete=%d\n", presented_frames, complete && !closed);
+    }
+    back ^= 1;
+    return 0;
+}
 static void graphics_snapshot(void)
 {
     /* Diagnostic state from the pinned image's static device. This file may
@@ -98,6 +140,7 @@ void h2_graphics_stop(xctx *context, uint32_t instruction, uint32_t address,
     xv_logf("[h2/blocked] NV2A %s eip=%08X address=%08X value=%08X reason=%d\n",
             write ? "write" : "read", instruction, address, value, reason);
     xv_log_flush();
+    if (presented_frames) sceKernelDelayThread(3000000); /* retain the actual stopped image for capture */
     sceKernelExitProcess(25);
     for (;;) sceKernelDelayThread(1000);
 }

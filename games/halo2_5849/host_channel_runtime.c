@@ -7,6 +7,7 @@
 #include "gpu_bus.h"
 #include "nv2a_regs.h"
 #include "instance_memory.h"
+#include "scanout.h"
 #include <string.h>
 
 #define DEVICE 0x404FE0u
@@ -208,6 +209,7 @@ void h2_host_memory_barrier(xctx *c)
 }
 static h2_host_av_config av_config;
 static unsigned mode_vblanks;
+static int display_mode_set;
 void __wrap_xk_KeWaitForSingleObject(xctx *c)
 {
     check_stack(c, 0, 5);
@@ -266,8 +268,22 @@ void __wrap_xk_AvSendTVEncoderOption(xctx *c)
 void __wrap_xk_AvSetDisplayMode(xctx *c)
 {
     check_stack(c, 0, 6);
-    xv_logf("[h2/av] display-mode application is unsupported\n");
-    reject(c, X_M32(c->r[4]), X_ARG(0), X_ARG(2));
+    uint32_t ip = X_M32(c->r[4]), address = X_ARG(5);
+    if (!initialization_flip_done || mode_vblanks != 1 || display_mode_set || !channel_idle() ||
+        X_ARG(0) != BAR || X_ARG(1) || X_ARG(2) != 0x88070701 || X_ARG(3) != 0x12 || X_ARG(4) != 2560 ||
+        (address & 15) || gamma_cursor != 768 || !av_config.has_flicker || av_config.flicker_filter != 5 ||
+        !av_config.has_luma || av_config.luma_filter ||
+        !check_attachment(NULL, address, H2_SCANOUT_BYTES, 2560, 0, 0x128))
+        reject(c, ip, address, X_ARG(2));
+    const uint8_t *pixels = map_physical_raw(address, H2_SCANOUT_BYTES);
+    if (!pixels) reject(c, ip, address, H2_SCANOUT_BYTES);
+    uint32_t vcount;
+    int result = h2_platform_present(pixels, H2_SCANOUT_BYTES, scanout_gamma, &vcount);
+    if (result < 0) reject(c, ip, address, (uint32_t)result);
+    display_mode_set = 1;
+    xv_logf("[h2/display] presented linear ARGB8 address=%08X 640x480 pitch=2560 vcount=%u; progressive gamma scanout, interlaced flicker filter inactive, luma filter disabled\n",
+            address, vcount);
+    c->r[0] = 0; X_RET(6);
 }
 
 static int channel_idle(void)

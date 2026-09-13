@@ -1,5 +1,6 @@
 #include "host_channel_runtime.h"
 #include "gpu_bus.h"
+#include "scanout.h"
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
@@ -13,6 +14,14 @@ static unsigned software_calls;
 static unsigned vblank_calls, event_calls, wait_calls;
 static int vblank_result;
 static uint32_t vblank_delta = 1;
+static unsigned present_calls;
+static int present_result;
+int h2_platform_present(const uint8_t *pixels, size_t bytes, const uint8_t *rgb_gamma, uint32_t *vcount)
+{
+    assert(pixels == g_xram + 0x300000 && bytes == H2_SCANOUT_BYTES);
+    for (unsigned i = 0; i < 768; ++i) assert(rgb_gamma[i] == i / 3);
+    ++present_calls; *vcount = 102; return present_result;
+}
 int h2_platform_wait_vblank(uint32_t *before, uint32_t *after)
 { ++vblank_calls; *before = 100; *after = 100 + vblank_delta; return vblank_result; }
 void xk_KeSetEvent(xctx *c)
@@ -272,6 +281,24 @@ int main(void)
     c.r[4] = 0x600000; X_M32(c.r[4] + 4) = 0x7000;
     __wrap_xk_KeWaitForSingleObject(&c);
     assert(wait_calls == 2 && vblank_calls == 3); /* unrelated wait passes through */
+    c.r[4] = 0x600000; X_M32(c.r[4]) = 0x3F9C0F;
+    X_M32(c.r[4] + 4) = 0xFD000000; X_M32(c.r[4] + 8) = 0;
+    X_M32(c.r[4] + 12) = 0x88070701; X_M32(c.r[4] + 16) = 0x12;
+    X_M32(c.r[4] + 20) = 2560; X_M32(c.r[4] + 24) = 0x300000;
+    interrupted = c;
+    g_xpt[0x8042B] = 0x4000000;
+    if (!setjmp(fault)) { __wrap_xk_AvSetDisplayMode(&c); assert(0); }
+    assert(!present_calls && !memcmp(&c, &interrupted, sizeof c));
+    g_xpt[0x8042B] = 0x42B000;
+    X_M32(c.r[4] + 16) = 6;
+    if (!setjmp(fault)) { __wrap_xk_AvSetDisplayMode(&c); assert(0); }
+    assert(!present_calls); X_M32(c.r[4] + 16) = 0x12;
+    present_result = -1;
+    if (!setjmp(fault)) { __wrap_xk_AvSetDisplayMode(&c); assert(0); }
+    assert(present_calls == 1 && !memcmp(&c, &interrupted, sizeof c));
+    present_result = 0; __wrap_xk_AvSetDisplayMode(&c);
+    interrupted.r[0] = 0; interrupted.r[4] += 28;
+    assert(present_calls == 2 && !memcmp(&c, &interrupted, sizeof c));
     if (!setjmp(fault)) { h2_bus_write32(&c, 0, 0xFD40071C, 2); assert(0); }
     assert(software_calls == 1); /* no arbitrary external increment or DAC access */
     puts("Host-channel runtime: LTCG contracts, mapped resources, canonical color/depth/stencil pixels and strict rejection pass.");

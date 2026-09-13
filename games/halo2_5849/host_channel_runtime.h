@@ -5,8 +5,9 @@ void h2_host_channel_configure(xctx *c);
 void h2_host_memory_barrier(xctx *c);
 void h2_host_tile_remove(xctx *c);
 void h2_host_tile_configure(xctx *c);
-/* Desired encoder settings only. A future presenter must implement them or
- * reject presentation; recording a request never applies a display mode. */
+/* Desired encoder settings. The implemented digital 480p scanout requires
+ * luma disabled; interlaced flicker filtering is inactive in this mode.
+ * Recording these requests alone never applies a display mode. */
 typedef struct h2_host_av_config {
     uint32_t flicker_filter, luma_filter;
     uint8_t has_flicker, has_luma;
