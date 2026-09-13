@@ -80,6 +80,48 @@ No source writes are added, and neither
 an error nor a difference between FAT copies by itself identifies the cause of
 the earlier executable-content damage.
 
+## September 13 captured allocation result
+
+The rerun supplied 1,123,744 bytes of metadata in 56 reads, with no capture
+omissions. All captured hashes and overlapping byte ranges agree. The main boot
+and examined directory-entry checksums validate. The active FAT is 0, clusters
+are 32,768 bytes, and the volume flags are 2 (dirty).
+
+The stop is specifically in `app/XITA00001/eboot.bin`. Its noncontiguous stream
+declares 31,120,122 bytes, requiring 950 clusters. The captured active FAT follows
+928 clusters, reaches cluster **1,409,407**, and then points to zero. That cluster
+is also the first cluster of the retained `eboot.before-20260912.bin`, whose
+stream declares a contiguous allocation of 950 clusters. The active allocation
+bitmap marks this shared cluster free. The first four clusters of the retained
+file are marked free; the captured new-file prefix includes the first of them.
+
+This is an observed allocation inconsistency, rather than just a difference
+between stale FAT copies. A second small decoder, independent of the audit
+implementation, confirms the stream flags, lengths, shared cluster, zero link
+and free bitmap bit directly from the captured bytes. The inactive FAT happens
+to point from 1,409,407 to 1,409,408; it is not used as a recovery chain and does
+not establish that the inactive state is correct.
+
+No device was mounted or written during the offline analysis. The capture is a
+sequence of reads, not an atomic whole-volume snapshot. It does not identify
+whether the underlying cause is media, adapter, Vita USB handling, a filesystem
+implementation, or some combination. The earlier executable hash match after
+remount is insufficient to certify the currently captured allocation.
+
+Preserved private evidence under the existing backup directory:
+
+`usb-install/raw-audit-20260913/`
+
+- `captured-report.json`, SHA-256
+  `8eee909e8af038f7e65db8332b751b945e6ebd48916b26d350441115e52c9aba`.
+- `offline-analysis.json`, partial cluster lists, and `independent-decode.json`.
+
+Keep gameplay, installation and cleanup writes paused. A full card backup and
+read-only inspection through a direct card reader are the next recovery steps;
+do not switch FATs, clear dirty flags, or delete the retained file as a shortcut.
+The computer currently has about 20 GiB free, insufficient for an uncompressed
+image of the 255,865,126,912-byte volume. A separate backup destination is needed.
+
 The next storage step is read-only allocation inspection or a stable image with
 appropriate read access, followed by a recovery plan based on those results.
 Do not use repeated app installs or deletion of the retained file as a repair.
