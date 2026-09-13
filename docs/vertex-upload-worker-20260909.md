@@ -3,8 +3,9 @@
 This candidate moves the second vertex snapshot copy from the recording thread
 to a persistent worker requesting CPU core 0. It is experimental and off by
 default. The [September 10 USB update](hardware-20260910-vertex-worker.md)
-installs it with the worker enabled for testing. No physical Vita speedup or
-stable 20 FPS result is established.
+installs it with the worker enabled for testing. The [September 12 hardware
+comparison](hardware-20260912-vertex-worker-results.md) favors the worker by
+2.49% in one Blood Gulch view; repeatability and stable 20 FPS remain unproven.
 
 ## Why this work
 
@@ -109,6 +110,6 @@ The VPK SHA-256 is
 Only `eboot.bin` differs from the previous model/material candidate; the other
 1,584 package entries are unchanged. No shader assets or game data need replacing.
 
-Physical testing is the next gate before enabling this by default. Shadows and
+Broader physical testing is the next gate before enabling this by default. Shadows and
 reflections remain requested graphics follow-ups, deferred while workload sharing
 is prioritized.

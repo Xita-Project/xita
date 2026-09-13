@@ -9,6 +9,12 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 12 [vertex worker hardware result](docs/hardware-20260912-vertex-worker-results.md):
+Blood Gulch at 360p measures 11.294 / 11.627 / 11.395 FPS off/on/off, favoring
+the worker by 2.49% in one comparison. Core-0 execution is confirmed; the copy
+is too small to balance CPU load. Next, time and isolate larger guest update
+and scene-preparation batches. Repeatability and stable 20 FPS remain open.
+
 September 10 [USB vertex worker update](docs/hardware-20260910-vertex-worker.md):
 source `21fe9ca` installed and verified after USB remount. Core-0 vertex uploads
 are enabled on the test Vita with an off/on/off comparison selected; other
