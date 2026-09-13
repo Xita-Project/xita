@@ -282,6 +282,16 @@ static void trace_mapped_word(uint32_t address)
 void xv_trace_func(uint32_t address)
 {
     static unsigned count;
+    static unsigned movie_probe_count;
+    if (xk_cur && movie_probe_count < 16 &&
+        (address == 0x372030 || address == 0x3E97E0 || address == 0x3E9750 || address == 0x3E9C70)) {
+        const xctx *c = &xk_cur->ctx;
+        ++movie_probe_count;
+        xv_logf("[h2/movie] fn=%08X return=%08X eax=%08X ebx=%08X flags=%08X\n",
+                address, X_M32(c->r[4]), c->r[0], c->r[3], xf_eflags((xctx *)c));
+        trace_mapped_word(0x466D6C); trace_mapped_word(0x5637DC);
+        trace_mapped_word(0x484B00); trace_mapped_word(0x484B10); trace_mapped_word(0x484B28);
+    }
     static unsigned error_path_count;
     if (xk_cur && error_path_count < 64 &&
         (address == 0x13F10 || address == 0x163820 || address == 0x163890 ||
@@ -383,6 +393,10 @@ void xv_runtime_trap(xctx *c, uint32_t address)
 {
     xv_logf("[h2/blocked] guest trap address=%08X fn=%08X eax=%08X ecx=%08X esp=%08X return=%08X\n",
             address, xv_cur_fn, c->r[0], c->r[1], c->r[4], X_M32(c->r[4]));
+    if (xv_cur_fn >= 0x3E0000 && xv_cur_fn < 0x3F0000) {
+        trace_mapped_word(0x466D6C); trace_mapped_word(0x5637DC);
+        trace_mapped_word(0x484B00); trace_mapped_word(0x484B10); trace_mapped_word(0x484B28);
+    }
     graphics_snapshot();
     xv_log_flush();
     sceKernelExitProcess(23);

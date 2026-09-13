@@ -4,7 +4,7 @@ This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
 `5849` identifies the linked XDK library build, not an asserted game build number.
 
-The [latest native checkpoint and exact private replay command](../../docs/halo2-file-lifetime.md)
+The [latest native checkpoint and exact private replay command](../../docs/halo2-eflags-id.md)
 describe the current normal and diagnostic startup stops. There is no main menu.
 
 A separate [native startup target](../../docs/halo2-native-boot-20260912.md)

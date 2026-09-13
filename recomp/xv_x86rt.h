@@ -88,6 +88,9 @@ typedef struct xctx {
     int32_t  preempt;              /* back-edge budget; xv_preempt() refills and yields (spin-loop starvation fix) */
     uint32_t eip_hint;
     void    *fiber;                /* owning xk fiber */
+#if defined(XV_EFLAGS_ID) && XV_EFLAGS_ID
+    uint32_t id_flag;              /* EFLAGS.ID, independent of lazy arithmetic flags */
+#endif
 } xctx;
 
 #define X_R16(i)    (*(uint16_t *)&c->r[i])
@@ -153,10 +156,17 @@ static inline uint32_t XF_O(const xctx *c) {
     }
 }
 static inline uint32_t xf_eflags(xctx *c) {
-    return 0x202u | XF_C(c) | (XF_P(c) << 2) | (XF_Z(c) << 6) | (XF_S(c) << 7) | (XF_O(c) << 11) | (c->df << 10);
+    uint32_t value = 0x202u | XF_C(c) | (XF_P(c) << 2) | (XF_Z(c) << 6) | (XF_S(c) << 7) | (XF_O(c) << 11) | (c->df << 10);
+#if defined(XV_EFLAGS_ID) && XV_EFLAGS_ID
+    value |= c->id_flag & 0x200000u;
+#endif
+    return value;
 }
 static inline void xf_set_eflags(xctx *c, uint32_t v) {
     c->f_kind = XK_EXPLICIT; c->f_res = v; c->f_bits = 32; c->f_cf_override = 0; c->f_of_override = 0; c->df = (v >> 10) & 1u;
+#if defined(XV_EFLAGS_ID) && XV_EFLAGS_ID
+    c->id_flag = v & 0x200000u;
+#endif
 }
 
 /* ---- shifts / rotates ------------------------------------------------------------- */
