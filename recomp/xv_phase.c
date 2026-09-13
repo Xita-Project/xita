@@ -4,9 +4,12 @@
 #include "xv_phase.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 uint64_t xk_os_monotonic_us(void);
 void xk_os_log(const char *fmt, ...);
+void xk_os_log_batch(const char *text, unsigned length) __attribute__((weak));
 extern const xv_phase_target xv_phase_targets[] __attribute__((weak));
 extern const unsigned xv_phase_target_count __attribute__((weak));
 
@@ -24,6 +27,34 @@ static phase_owner owners[XV_PHASE_MAX_OWNERS];
 static phase_stat stats[XV_PHASE_MAX_TARGETS];
 static unsigned target_count, frames, dropped, invalid;
 static uint64_t window_start;
+/* Bounded static storage: the serialized guest owns reports. Even 48 maximum
+ * length labels and UINT64_MAX counters fit without growing guest stacks. */
+static char report_buffer[(XV_PHASE_MAX_TARGETS + 2) * 320];
+
+static int append_report(unsigned *used, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(report_buffer + *used, sizeof report_buffer - *used, fmt, ap);
+    va_end(ap);
+    if (n < 0 || (unsigned)n >= sizeof report_buffer - *used) return 0;
+    *used += (unsigned)n;
+    return 1;
+}
+
+static void write_report(unsigned used)
+{
+    if (xk_os_log_batch) xk_os_log_batch(report_buffer, used);
+    else {
+        /* Hosts without the batch sink retain complete, individually bounded
+         * rows; passing a whole report through a 512-byte logger truncates it. */
+        const char *row = report_buffer, *end;
+        while ((end = strchr(row, '\n')) != NULL) {
+            xk_os_log("%.*s", (int)(end - row + 1), row);
+            row = end + 1;
+        }
+    }
+}
 
 static phase_owner *find_owner(void *context, int create)
 {
@@ -131,17 +162,20 @@ void xv_phase_frame(unsigned end_frame)
     uint64_t now = xk_os_monotonic_us();
     for (unsigned i = 0; i < XV_PHASE_MAX_OWNERS; i++)
         if (owners[i].context) account(&owners[i], now);
-    xk_os_log("[guest-phase] %u frames end-frame %u window-us %llu dropped %u invalid %u; us below are window totals; self excludes selected children\n",
+    unsigned used = 0;
+    int complete = append_report(&used, "[guest-phase] %u frames end-frame %u window-us %llu dropped %u invalid %u; us below are window totals; self excludes selected children\n",
         frames, end_frame, (unsigned long long)(now >= window_start ? now - window_start : 0), dropped, invalid);
     for (unsigned i = 0; i < target_count; i++) {
         phase_stat *s = &stats[i];
         if (!s->calls && !s->active && !s->parked) continue;
-        xk_os_log("[guest-phase] %08X %s calls %llu active-us %llu self-us %llu parked-us %llu parked-self-us %llu\n",
+        complete &= append_report(&used, "[guest-phase] %08X %s calls %llu active-us %llu self-us %llu parked-us %llu parked-self-us %llu\n",
             xv_phase_targets[i].address, xv_phase_targets[i].name,
             (unsigned long long)s->calls, (unsigned long long)s->active,
             (unsigned long long)s->self, (unsigned long long)s->parked,
             (unsigned long long)s->parked_self);
     }
+    if (complete) write_report(used);
+    else xk_os_log("[guest-phase] report formatting failed; window discarded\n");
     memset(stats, 0, sizeof stats); frames = dropped = invalid = 0;
     /* Exclude this report's own writes from open scopes. The separately logged
      * report cost lets readers see the diagnostic perturbation of frame time. */

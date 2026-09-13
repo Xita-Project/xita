@@ -1,5 +1,9 @@
 # Selected guest-phase timing — September 12, 2026
 
+This records the initial 32-scope diagnostic. The subsequent
+[hardware result and finer 48-scope follow-up](hardware-20260912-guest-phases.md)
+refine the selected boundaries and batch report I/O.
+
 This diagnostic candidate times 32 reviewed Halo CE entry points around the
 main loop, tick dispatch, camera update, view setup and scene preparation. It
 is the next investigation after the [vertex worker hardware result](hardware-20260912-vertex-worker-results.md):

@@ -9,6 +9,12 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 12 [guest-phase hardware result](docs/hardware-20260912-guest-phases.md):
+post-loading Blood Gulch windows attribute about 43 ms/frame to selected scene
+work and 25 ms/frame to the object-update region, including their unselected
+callees. A finer 48-scope diagnostic and batched report writes are in validation;
+safe worker batches and a measured FPS gain remain follow-ups.
+
 September 12 [selected guest-phase diagnostic](docs/guest-phase-timing-20260912.md):
 32 opt-in scopes distinguish selected self time from nested work and explicit
 guest handoff time. Source `30deb24` is installed and verified over USB with

@@ -14,26 +14,59 @@ class HaloHooks(NoGameHooks):
     def phase_targets(self):
         if not self.enabled:
             raise ValueError("Halo phase timing requires the audited executable")
-        # Edges verified against the 3925 main loop, tick dispatcher and scene
-        # dispatcher. Address labels deliberately retain unresolved semantics;
-        # a tick child must not be advertised as all AI/physics without evidence.
+        # September 12 physical timings selected the object-update region and
+        # scene dispatcher for a deeper pass. Preserve the parent scopes, then
+        # measure their immediate children; selected self still includes all
+        # unselected descendants. These are address labels, not AI/physics claims.
         return {
-            0xBD420: "main_loop", 0xFA920: "tick_driver", 0x109760: "tick_dispatch",
-            0x120160: "director_update", 0xBCB30: "scene_dispatch",
-            0xBC260: "view_setup", 0x5DBC0: "scene_frame",
-            0x5D990: "scene_5D990", 0x5D340: "scene_5D340",
-            0x800E0: "render_begin", 0x531B0: "scene_531B0",
-            0x581A0: "scene_581A0", 0x520B0: "scene_520B0",
-            0x5D410: "scene_5D410", 0x108A10: "tick_108A10",
-            0x108810: "tick_108810", 0xF73F0: "tick_F73F0",
-            0x1138B0: "tick_1138B0", 0xF7C40: "tick_F7C40",
-            0xD8BC0: "tick_D8BC0", 0x107CB0: "tick_107CB0",
-            0xE7140: "tick_E7140", 0x119460: "tick_119460",
-            0x900E0: "tick_900E0", 0xF5BF0: "tick_F5BF0",
-            0xE2A00: "tick_E2A00", 0xBB5D0: "frame_BB5D0",
-            0x9EAE0: "frame_9EAE0", 0xBC400: "frame_BC400",
-            0xBC8E0: "frame_BC8E0", 0xBB060: "frame_BB060",
+            0xBD420: "main_loop",
+            0xFA920: "tick_driver",
+            0x109760: "tick_dispatch",
+            0xBCB30: "scene_dispatch",
+            0x5D410: "scene_5D410",
+            0x900E0: "tick_900E0",
             0x7EDF0: "frame_present",
+            0x8B2C0: "object_8B2C0",
+            0x8B2F0: "object_8B2F0",
+            0x8DC60: "object_8DC60",
+            0x8E830: "object_8E830",
+            0x8ECA0: "object_8ECA0",
+            0x8FB70: "object_8FB70",
+            0x2C920: "render_2C920",
+            0x2CE30: "render_2CE30",
+            0x539C0: "render_539C0",
+            0x54010: "render_54010",
+            0x542F0: "render_542F0",
+            0x54740: "render_54740",
+            0x54C10: "render_54C10",
+            0x590F0: "render_590F0",
+            0x59D80: "render_59D80",
+            0x5B710: "render_5B710",
+            0x5B760: "render_5B760",
+            0x5E270: "render_5E270",
+            0x60560: "render_60560",
+            0x606B0: "render_606B0",
+            0x6BF30: "render_6BF30",
+            0x73A80: "render_73A80",
+            0x73FD0: "render_73FD0",
+            0x74D10: "render_74D10",
+            0x75780: "render_75780",
+            0x758E0: "render_758E0",
+            0x769D0: "render_769D0",
+            0x7BFE0: "render_7BFE0",
+            0x7C200: "render_7C200",
+            0x7F210: "render_7F210",
+            0x92890: "render_92890",
+            0x93C00: "render_93C00",
+            0x93DD0: "render_93DD0",
+            0xD35A0: "render_D35A0",
+            0xD6B00: "render_D6B00",
+            0xD80C0: "render_D80C0",
+            0x10C300: "render_10C300",
+            0x10C7E0: "render_10C7E0",
+            0x110C80: "render_110C80",
+            0x17F350: "render_17F350",
+            0x17FCC0: "render_17FCC0",
         }
 
     def __init__(self, image):

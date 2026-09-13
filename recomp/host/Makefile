@@ -5,6 +5,14 @@ CFLAGS += -I../.. -I../../runtime
 VITASDK ?= $(HOME)/vitasdk
 PYTHON ?= python3
 
+.PHONY: test-log-batch
+test-log-batch: build/log_batch_test
+	./build/log_batch_test
+
+build/log_batch_test: log_batch_test.c ../../runtime/xv_log.c ../../runtime/xv_log.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include log_batch_test.c -o $@
+
 .PHONY: test-upload-worker
 test-upload-worker: build/upload_worker_test
 	./build/upload_worker_test

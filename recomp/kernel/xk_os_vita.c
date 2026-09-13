@@ -26,6 +26,11 @@
 #include "xk.h"                 /* X_M32/X_M8, xk_file_in_ui_map (pad context) */
 
 void xv_logf(const char *fmt, ...);        /* app-side sink (xv_log.c): console + ux0:data/xita/xita.log */
+void xv_log_write(const char *text, unsigned length);
+void xk_os_log_batch(const char *text, unsigned length)
+{
+    xv_log_write(text, length);
+}
 void xk_os_log(const char *fmt, ...)
 {
     char buf[512];

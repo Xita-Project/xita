@@ -21,7 +21,24 @@ void xv_logf(const char *fmt, ...)
     va_end(ap);
     if (n <= 0) return;
     if (n > (int)sizeof buf - 1) n = (int)sizeof buf - 1;
-    sceClibPrintf("%s", buf);
+    xv_log_write(buf, (unsigned)n);
+}
+
+void xv_log_write(const char *buf, unsigned n)
+{
+    if (!buf || !n) return;
+    /* Keep individual console messages within the existing formatting limit.
+     * The file receives the complete batch under one mutex acquisition. */
+    for (unsigned at = 0; at < n;) {
+        unsigned chunk = n - at;
+        if (chunk > 511) chunk = 511;
+        /* Emulator consoles prefix each call. Preserve complete lines where
+         * possible so their prefixes cannot split a phase record in half. */
+        for (unsigned i = chunk; i; --i)
+            if (buf[at + i - 1] == '\n') { chunk = i; break; }
+        sceClibPrintf("%.*s", (int)chunk, buf + at);
+        at += chunk;
+    }
 
     if (g_mtx < 0) g_mtx = sceKernelCreateMutex("xv_log", 0, 0, NULL);
     if (g_mtx >= 0) sceKernelLockMutex(g_mtx, 1, NULL);
@@ -42,7 +59,14 @@ void xv_logf(const char *fmt, ...)
         sceIoRename("ux0:data/xita/xita.log",   "ux0:data/xita/xita.1.log");
         g_fd = sceIoOpen("ux0:data/xita/xita.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
     }
-    if (g_fd >= 0) sceIoWrite(g_fd, buf, (SceSize)n);
+    if (g_fd >= 0) {
+        unsigned written = 0;
+        while (written < n) {
+            SceSSize r = sceIoWrite(g_fd, buf + written, (SceSize)(n - written));
+            if (r <= 0 || (unsigned)r > n - written) break;
+            written += (unsigned)r;
+        }
+    }
     if (g_mtx >= 0) sceKernelUnlockMutex(g_mtx, 1);
 }
 
