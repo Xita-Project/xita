@@ -30,6 +30,21 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_eleven_state_interfaces_bounded_by_constructor(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16
+                         for n, slot in enumerate(range(0x450990, 0x450A40, 4))}
+        spec = ((0x200, len(image.code), hashlib.sha256(image.code).hexdigest()),)
+        with patch.object(prepare_boot, "GAME_STATE_CONSTRUCTORS", spec):
+            self.assertEqual(prepare_boot.game_state_vtable_roots(image), set(image.targets.values()))
+            self.assertEqual(len(image.targets), 44)
+            image.targets[0x450A3C] = None
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_state_vtable_roots(image)
+        with patch.object(prepare_boot, "GAME_STATE_CONSTRUCTORS", ((0x200, len(image.code), "0" * 64),)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_state_vtable_roots(image)
+
     def test_four_registered_interfaces_exact_bounds_and_bindings(self):
         image = SyntheticImage(); image.section_name = ".text"; image.targets = {}
         bindings = ((0x417370, 0x462E00, 0x417378), (0x4173E4, 0x462E10, 0x4173E8),

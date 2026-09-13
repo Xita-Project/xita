@@ -28,6 +28,10 @@ GAME_ALLOCATOR_CONSTRUCTORS = (
     (0x81EC2, 6, "12ddc689a0e651bd82e523e0305410591c34c0ecd1da8fda19d119363ba1520f"),
     (0x32A871, 6, "090c672f0e3b32b564eec33dbae02580b53d91bf1c9d4e1eb0b378b0d2faa881"),
 )
+GAME_STATE_CONSTRUCTORS = (
+    (0x376A20, 10, "ea990a0b2671f169030c7ed2bac29c98c5c5e42fd4bafcb4d5fcf86da5ff161c"),
+    (0x58E70, 105, "9195f198f6de23c02ee21bf68539b3898e5bad37deff50056be9c0b6b35b1e29"),
+)
 
 
 def game_mode_callback_roots(image):
@@ -89,6 +93,11 @@ def game_dispatch_vtable_roots(image):
 def game_allocator_vtable_roots(image):
     """Native48: allocator at 454970, followed by the table assigned at 32A871."""
     return _constructor_vtable_roots(image, GAME_ALLOCATOR_CONSTRUCTORS, 0x454970, 0x454980)
+
+
+def game_state_vtable_roots(image):
+    """Native58: one constructor assigns eleven adjacent four-method state tables."""
+    return _constructor_vtable_roots(image, GAME_STATE_CONSTRUCTORS, 0x450990, 0x450A40)
 
 
 def game_descriptor_initialization_chain(image):
@@ -248,6 +257,7 @@ def main():
         roots.update(game_mode_callback_roots(image))
         roots.update(game_allocator_vtable_roots(image))
         roots.update(game_registered_interface_roots(image))
+        roots.update(game_state_vtable_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
         # Native49: 1A474C passes the global arena object 47D924 to 18E1F0.
         # Its stored vtable is 4508FC: allocate/free, followed by string data.
