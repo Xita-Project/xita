@@ -13,6 +13,7 @@
 
 #include "xv_d3d.h"
 #include "xv_draw_profile.h"
+#include "xv_constant_window.h"
 #include "xv_draw_state.h"
 #include "xv_stencil_gxm.h"
 #include "xv_render_profile.h"
@@ -1556,12 +1557,8 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         } else if (l->nconsts + d->c_count * 4 <= XV_CONST_POOL) {
             c->const_off = l->nconsts / 4;
             c->const_n = d->c_count;
-            for (unsigned i = 0; i < d->c_count; ++i) {
-                int r = d->c_base + (int)i + 96;
-                const float *src = (r >= 0 && r < 192) ? S.vsc[r] : (const float[4]){ 0, 0, 0, 0 };
-                memcpy(&l->consts[l->nconsts], src, 16);
-                l->nconsts += 4;
-            }
+            xv_constant_window_copy(&l->consts[l->nconsts], S.vsc, d->c_base, d->c_count);
+            l->nconsts += d->c_count * 4u;
             l->last_gen = S.vsc_gen; l->last_off = c->const_off; l->last_n = d->c_count; l->last_base = d->c_base;
         } else {
             l->const_dropped++;               /* rejected during replay; never reuse stale constants */
