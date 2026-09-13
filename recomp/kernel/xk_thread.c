@@ -196,7 +196,11 @@ void xk_obj_consume(xk_obj *o, xk_thread *t)
     case XO_EVENT: if (!o->u.event.manual) o->u.event.signaled = 0; break;
     case XO_MUTANT: o->u.mutant.owner = t; o->u.mutant.count++; break;
     case XO_SEMAPHORE: o->u.sem.count--; break;
-    case XO_TIMER: if (o->u.timer.period == 0) o->u.timer.signaled = 0; else o->u.timer.signaled = 0; break;
+    case XO_TIMER: {
+        extern int xk_game_timer_consume(xk_obj *) __attribute__((weak));
+        if (!xk_game_timer_consume || !xk_game_timer_consume(o)) o->u.timer.signaled = 0;
+        break;
+    }
     default: break;
     }
     sync_guest(o);
@@ -268,6 +272,8 @@ void xd3d_ds_check(const char *where, uint32_t eip) __attribute__((weak));
 void xk_yield(void)
 {
     xk_thread *me = xk_cur;
+    extern void xk_game_yield_check(xk_thread *) __attribute__((weak));
+    if (xk_game_yield_check) xk_game_yield_check(me);
     if (__atomic_load_n(&g_wait_dump_requested,__ATOMIC_RELAXED) &&
         __atomic_exchange_n(&g_wait_dump_requested,0,__ATOMIC_ACQ_REL))
         xk_wait_stats_dump(); /* Guest-owned counters are never read/reset by the profiler thread. */
