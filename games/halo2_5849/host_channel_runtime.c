@@ -8,6 +8,7 @@
 #include "nv2a_regs.h"
 #include "instance_memory.h"
 #include "scanout.h"
+#include "fp_environment.h"
 #include <string.h>
 
 #define DEVICE 0x404FE0u
@@ -30,7 +31,7 @@ extern volatile uint32_t xv_cur_fn;
 extern uint32_t xk_mem_arena_size(void);
 extern void f_003FE165(xctx *), f_003FE190(xctx *);
 extern void f_00401C33(xctx *), f_00401D96(xctx *);
-extern void f_003FF240(xctx *);
+extern void f_003FF240(xctx *), f_003FECC0(xctx *), f_0012B2A0(xctx *);
 extern void __real_xk_KeWaitForSingleObject(xctx *), xk_KeSetEvent(xctx *);
 
 static void reject(xctx *c, uint32_t ip, uint32_t address, uint32_t value)
@@ -410,6 +411,7 @@ static int software_flip(void *opaque, uint32_t value, uint32_t source)
      * RAM updates remain visible; all interrupted CPU/FP/control state survives. */
     xctx *interrupted = active_context;
     uint32_t interrupted_fn = xv_cur_fn;
+    uint32_t interrupted_fpscr = h2_platform_fpscr_read();
     uint32_t old_framebuffer = X_M32(0x408650);
     xctx interrupt = *interrupted;
     interrupt.r[0] = value; interrupt.r[1] = MINIPORT;
@@ -429,6 +431,7 @@ static int software_flip(void *opaque, uint32_t value, uint32_t source)
             reject(active_context, source, address, value);
         initialization_flip_queued = 1;
         xv_logf("[h2/flip] original interval-one handler queued address=%08X due_vblank=1; no completion or presentation\n", address);
+        h2_platform_fpscr_write(interrupted_fpscr);
         return 1;
     }
     if (gamma_cursor != 768 || channel.commands.flip_read != 1 ||
@@ -438,6 +441,85 @@ static int software_flip(void *opaque, uint32_t value, uint32_t source)
     initialization_flip_done = 1;
     xv_logf("[h2/flip] original initialization handler completed address=%08X gamma_bytes=%u read=%u; scanout disabled, no presentation\n",
             address, gamma_cursor, channel.commands.flip_read);
+    h2_platform_fpscr_write(interrupted_fpscr);
+    return 1;
+}
+
+static int complete_initialization_vblank(xctx *c, uint32_t source)
+{
+    /* Native62: one queued interval-one initialization flip, progressive
+     * scanout disabled, before the first vblank of this virtual miniport.
+     * Do not generalize this to active display, arbitrary callbacks or IRQs. */
+    if (!initialization_flip_queued || initialization_flip_done || software_active ||
+        display_mode_set || mode_vblanks || c->r[4] < 512 ||
+        !guest_span_valid(c->r[4] - 512, 512) || !guest_span_valid(MINIPORT, 0x7E4) ||
+        !guest_span_valid(0x408650, 4) || !guest_span_valid(0x485AB0, 16) ||
+        !guest_span_valid(0x55E6B8, 4) || !guest_span_valid(0x4E6400, 32) ||
+        X_M16(0x4E6400) >= 15 || X_M32(MINIPORT) != BAR ||
+        X_M32(MINIPORT + 4) != 2560 || X_M32(MINIPORT + 8) != 0x88070701 ||
+        X_M32(MINIPORT + 0x1B4) != 0x00480104 || X_M32(MINIPORT + 0x1B8) != 1 ||
+        X_M32(MINIPORT + 0x174) != 1 || X_M32(MINIPORT + 0x178) != 1 ||
+        X_M32(MINIPORT + 0x180) || X_M32(MINIPORT + 0x184) || X_M32(MINIPORT + 0x188) ||
+        X_M32(MINIPORT + 0x18C) || X_M32(MINIPORT + 0x190) != 0x12B2A0 ||
+        X_M32(MINIPORT + 0x194) != 0x00040000 || X_M32(MINIPORT + 0x198) > 1 ||
+        X_M32(MINIPORT + 0x1BC) || X_M32(MINIPORT + 0x1C0) ||
+        X_M32(MINIPORT + 0x1C4) != 2 || X_M32(MINIPORT + 0x1C8) != 1 ||
+        X_M32(MINIPORT + 0x1CC) != 1 || X_M32(MINIPORT + 0x1D0) ||
+        X_M32(MINIPORT + 0x1D4) || X_M32(MINIPORT + 0x1D8) ||
+        X_M32(MINIPORT + 0x7DC) != 1 || X_M32(MINIPORT + 0x7E0) ||
+        channel.commands.flip_read || channel.commands.flip_write || channel.commands.flip_modulo != 2)
+        return 0;
+    uint32_t address = X_M32(MINIPORT + 0x17C);
+    if ((address & 15) || !map_physical_raw(address, H2_SCANOUT_BYTES) ||
+        !check_attachment(NULL, address, H2_SCANOUT_BYTES, 2560, 0, 0x128)) return 0;
+    for (unsigned component = 0; component < 3; ++component)
+        for (unsigned i = 0; i < 256; ++i)
+            if (X_M8(MINIPORT + 0x1DC + component * 256 + i) != i) return 0;
+
+    uint32_t saved_fpscr = h2_platform_fpscr_read(), before, after;
+    int status = h2_platform_wait_vblank(&before, &after);
+    if (status < 0 || before == after) {
+        h2_platform_fpscr_write(saved_fpscr);
+        return 0; /* guest queue, CPU state and pending parser word untouched */
+    }
+    uint32_t saved_fn = xv_cur_fn;
+    uint64_t game_vblank_before = X_M32(0x485AB0) | (uint64_t)X_M32(0x485AB4) << 32;
+    xctx interrupt = *c;
+    interrupt.preempt = 100000;
+    software_active = 1; gamma_cursor = 0;
+    /* Original 3FED90's first progressive-vblank count/time update. The queue
+     * consumer below performs the original retirement and gamma writes. */
+    X_M32(MINIPORT + 0x1D8) = (uint32_t)x_rdtsc();
+    X_M32(MINIPORT + 0x1C0) = 1;
+    interrupt.r[6] = MINIPORT;
+    call_guest(&interrupt, f_003FECC0, source);
+    if (interrupt.r[0] != 1 || gamma_cursor != 768 || channel.commands.flip_read != 1 ||
+        X_M32(MINIPORT + 0x174) || X_M32(MINIPORT + 0x1BC) != 1 ||
+        X_M32(MINIPORT + 0x7DC) || X_M32(0x408650) != address)
+        reject(c, source, address, interrupt.r[0]);
+    /* Progressive field zero; no analog field/interrupt register is invented.
+     * Signal the actual event before the original cdecl callback, as 3FED90
+     * does. Its 12-byte record is {vblank count, retired swap count, flags}. */
+    X_M32(MINIPORT + 0x1D0) = 0;
+    interrupt = *c; interrupt.r[4] -= 16;
+    X_M32(interrupt.r[4]) = 0x3FEE5E;
+    X_M32(interrupt.r[4] + 4) = MINIPORT + 0x194;
+    X_M32(interrupt.r[4] + 8) = 1; X_M32(interrupt.r[4] + 12) = 0;
+    xk_KeSetEvent(&interrupt);
+    if (interrupt.r[4] != c->r[4]) reject(c, source, interrupt.r[4], c->r[4]);
+    interrupt = *c; interrupt.preempt = 100000; interrupt.r[4] -= 12;
+    uint32_t record = interrupt.r[4];
+    X_M32(record) = 1; X_M32(record + 4) = 1; X_M32(record + 8) = 1;
+    interrupt.r[4] -= 4; X_M32(interrupt.r[4]) = record;
+    call_guest(&interrupt, f_0012B2A0, 0x3FEE87);
+    uint64_t game_vblank_after = X_M32(0x485AB0) | (uint64_t)X_M32(0x485AB4) << 32;
+    if (game_vblank_after != game_vblank_before + 1)
+        reject(c, source, 0x485AB0, (uint32_t)game_vblank_after);
+    active_context = c; xv_cur_fn = saved_fn; software_active = 0;
+    initialization_flip_queued = 0; initialization_flip_done = 1; mode_vblanks = 1;
+    xv_logf("[h2/vblank] real Vita vcount=%u->%u retired initialization address=%08X; original callback=0012B2A0 record=1,1,1 game_count=%llu->%llu, scanout disabled\n",
+            before, after, address, (unsigned long long)game_vblank_before, (unsigned long long)game_vblank_after);
+    h2_platform_fpscr_write(saved_fpscr);
     return 1;
 }
 int h2_host_channel_bus(xctx *c, uint32_t ip, uint32_t address, unsigned width,
@@ -464,6 +546,10 @@ int h2_host_channel_bus(xctx *c, uint32_t ip, uint32_t address, unsigned width,
     if (write) {
         h2_push_fault fault;
         enum h2_push_result result = h2_host_channel_submit(&channel, *value, 1000000, &fault);
+        if (result == H2_PUSH_METHOD_REJECTED && fault.method == 0x130 && !fault.word &&
+            fault.subchannel < 8 && channel.commands.bound[fault.subchannel] == 1 &&
+            complete_initialization_vblank(c, fault.address))
+            result = h2_host_channel_submit(&channel, *value, 1000000, &fault);
         xv_logf("[h2/channel] PUT=%08X GET=%08X result=%d source=%08X word=%08X sub=%u method=%04X clears=%llu pixels=%llu\n",
                 *value, h2_host_channel_get(&channel), result, fault.address, fault.word,
                 fault.subchannel, fault.method, (unsigned long long)channel.clear.completed_clears,
