@@ -65,9 +65,25 @@ enum h2_nv2a_result h2_nv2a_advance_us(h2_nv2a *device, uint64_t elapsed_us)
     return H2_NV2A_OK;
 }
 
+enum h2_nv2a_result h2_nv2a_pramin_address(const h2_nv2a *device, uint32_t offset,
+                                         unsigned width, uint32_t *guest_address)
+{
+    if (!guest_address || (width != 1 && width != 2 && width != 4) ||
+        (offset & (width - 1)) || offset >= 0x100000)
+        return H2_NV2A_INVALID_ACCESS;
+    if (!(device->pci_command & 2) || !(device->master_enable & H2_ENGINE_FB) ||
+        device->memory_bytes != 0x4000000 || device->instance_bytes > 0x10000 ||
+        offset < 0x10000 || width > device->instance_bytes ||
+        offset - 0x10000 > device->instance_bytes - width)
+        return H2_NV2A_UNSUPPORTED_OPERATION;
+    *guest_address = 0x80000000u | (device->memory_bytes - 64 - (offset & ~63u)) | (offset & 63u);
+    return H2_NV2A_OK;
+}
+
 static int unit_enabled(const h2_nv2a *device, uint32_t offset)
 {
-    uint32_t gate = offset >= 0x009000 && offset < 0x00A000 ? H2_ENGINE_TIMER :
+    uint32_t gate = offset >= 0x002000 && offset < 0x004000 ? H2_ENGINE_FIFO :
+                    offset >= 0x009000 && offset < 0x00A000 ? H2_ENGINE_TIMER :
                     offset >= 0x100000 && offset < 0x101000 ? H2_ENGINE_FB :
                     offset >= 0x600000 && offset < 0x601000 ? H2_ENGINE_CRTC : 0;
     return !gate || (device->master_enable & gate);
@@ -92,6 +108,9 @@ enum h2_nv2a_result h2_nv2a_read32(const h2_nv2a *device, uint32_t offset, uint3
     if (!(device->pci_command & 2) || !unit_enabled(device, offset)) return H2_NV2A_UNSUPPORTED_OPERATION;
     uint32_t result;
     switch (offset) {
+    case 0x002210: result = device->fifo_ramht; break;
+    case 0x002214: result = device->fifo_ramfc; break;
+    case 0x100214: result = 0; break; /* PRAMIN CPU-write protection disabled */
     case 0x000200: result = device->master_enable; break;
     case 0x000140: result = device->master_interrupt_enable; break;
     case 0x680500: result = device->core_pll; break;
@@ -134,8 +153,32 @@ enum h2_nv2a_result h2_nv2a_write32(h2_nv2a *device, uint32_t offset, uint32_t v
          * reset and disappear. Bits for other units are retained, but none of
          * their unknown registers become accessible by enabling a bit. */
         if (!(value & H2_ENGINE_TIMER)) reset_timer(device);
+        if (!(value & H2_ENGINE_FIFO)) device->fifo_ramht = device->fifo_ramfc = 0;
         if (!(value & H2_ENGINE_CRTC)) device->crtc_interrupt_enable = 0;
         device->master_enable = value;
+        return H2_NV2A_OK;
+    case 0x002210: {
+        if (value & ~0x030301F0u) return H2_NV2A_UNSUPPORTED_OPERATION;
+        uint32_t base = (value & 0x1F0) << 8, size = 0x1000u << ((value >> 16) & 3), address;
+        if (h2_nv2a_pramin_address(device, base, 4, &address) != H2_NV2A_OK ||
+            h2_nv2a_pramin_address(device, base + size - 4, 4, &address) != H2_NV2A_OK)
+            return H2_NV2A_UNSUPPORTED_OPERATION;
+        device->fifo_ramht = value;
+        return H2_NV2A_OK;
+    }
+    case 0x002214: {
+        if (value & ~0x00FF01FCu) return H2_NV2A_UNSUPPORTED_OPERATION;
+        uint32_t base1 = (value & 0x1FC) << 8, base2 = (value & 0xFE0000) >> 7, address;
+        if (h2_nv2a_pramin_address(device, base1, 4, &address) != H2_NV2A_OK ||
+            h2_nv2a_pramin_address(device, base2, 4, &address) != H2_NV2A_OK)
+            return H2_NV2A_UNSUPPORTED_OPERATION;
+        /* Store both context-table addresses/size bit. Context switching and
+         * channel extents are not executed by this bootstrap register model. */
+        device->fifo_ramfc = value;
+        return H2_NV2A_OK;
+    }
+    case 0x100214:
+        if (value) return H2_NV2A_UNSUPPORTED_OPERATION; /* CPU aliases remain writable */
         return H2_NV2A_OK;
     case 0x000140:
         if (value) return H2_NV2A_UNSUPPORTED_OPERATION; /* no IRQ delivery yet */

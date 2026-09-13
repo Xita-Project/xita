@@ -60,6 +60,7 @@ void h2_graphics_stop(xctx *context, uint32_t instruction, uint32_t address,
                       uint32_t value, int write, int reason)
 {
     (void)context;
+    h2_gpu_bus_report();
     xv_logf("[h2/blocked] NV2A %s eip=%08X address=%08X value=%08X reason=%d\n",
             write ? "write" : "read", instruction, address, value, reason);
     xv_log_flush();
@@ -68,9 +69,10 @@ void h2_graphics_stop(xctx *context, uint32_t instruction, uint32_t address,
 }
 void xv_check_guest_address(uint32_t address)
 {
-    /* The 16 MiB NV2A BAR has no device model in this target. Do not let its
-     * registers alias the runtime's shared unmapped-memory trash page. */
+    /* Accesses that bypass the explicit bus adapter must not alias the
+     * runtime's shared unmapped-memory trash page. */
     if (address >= 0xFD000000u && address < 0xFE000000u) {
+        h2_gpu_bus_report();
         xv_logf("[h2/blocked] NV2A MMIO address=%08X fn=%08X\n", address, xv_cur_fn);
         xv_log_flush();
         sceKernelExitProcess(24);

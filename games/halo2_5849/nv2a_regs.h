@@ -7,7 +7,8 @@ enum h2_nv2a_result {
     H2_NV2A_UNSUPPORTED_OPERATION
 };
 typedef struct h2_nv2a {
-    uint32_t memory_bytes;
+    uint32_t memory_bytes, instance_bytes;
+    uint32_t fifo_ramht, fifo_ramfc;
     uint32_t master_enable, master_interrupt_enable;
     uint32_t core_pll, memory_pll, video_pll;
     uint64_t timer_ticks, timer_source_fraction;
@@ -17,11 +18,14 @@ typedef struct h2_nv2a {
     uint32_t crtc_interrupt_enable, timer_interrupt_enable;
 } h2_nv2a;
 
-enum { H2_ENGINE_TIMER = 1u << 16, H2_ENGINE_FB = 1u << 20,
+enum { H2_ENGINE_FIFO = 1u << 8, H2_ENGINE_TIMER = 1u << 16, H2_ENGINE_FB = 1u << 20,
        H2_ENGINE_CRTC = 1u << 24 };
 /* Side-effect-free register subreads, little endian; no cross-register reads. */
 enum h2_nv2a_result h2_nv2a_read(const h2_nv2a *device, uint32_t offset,
                                unsigned width, uint32_t *value);
+/* PRAMIN offsets use reversed 64-byte groups inside the claimed retail window. */
+enum h2_nv2a_result h2_nv2a_pramin_address(const h2_nv2a *device, uint32_t offset,
+                                         unsigned width, uint32_t *guest_address);
 /* Advance only from an injected elapsed clock; tests never depend on wall time. */
 enum h2_nv2a_result h2_nv2a_advance_us(h2_nv2a *device, uint64_t elapsed_us);
 uint32_t h2_nv2a_pll_hz(uint32_t coefficient);
