@@ -30,6 +30,36 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_allocator_vtable_bounds_and_revision(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16
+                         for n, slot in enumerate(range(0x454970, 0x454980, 4))}
+        spec = ((0x200, len(image.code), hashlib.sha256(image.code).hexdigest()),)
+        with patch.object(prepare_boot, "GAME_ALLOCATOR_CONSTRUCTORS", spec):
+            self.assertEqual(prepare_boot.game_allocator_vtable_roots(image), set(image.targets.values()))
+            image.targets[0x45497C] = None
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_allocator_vtable_roots(image)
+        with patch.object(prepare_boot, "GAME_ALLOCATOR_CONSTRUCTORS", ((0x200, len(image.code), "0" * 64),)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_allocator_vtable_roots(image)
+
+    def test_paired_mode_callbacks_and_null_skip(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16
+                         for n, slot in enumerate(range(0x453C00, 0x453C40, 4))}
+        image.targets[0x453C08] = 0
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_MODE_WALK", spec):
+            self.assertEqual(prepare_boot.game_mode_callback_roots(image), set(image.targets.values()) - {0})
+            for invalid in (None, 0xDEAD):
+                image.targets[0x453C3C] = invalid; image.bad_code = invalid
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_mode_callback_roots(image)
+        with patch.object(prepare_boot, "GAME_MODE_WALK", (0x200, len(image.code), "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_mode_callback_roots(image)
+
     def test_constructor_bounded_dispatch_vtable(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {slot: 0x1000 + n * 16

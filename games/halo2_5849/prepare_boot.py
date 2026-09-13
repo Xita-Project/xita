@@ -17,25 +17,56 @@ HOST_CALLBACK_WALK = (0x3FBA54, 135, "e0cc1649c0b744615b3de0f5b2446411bb408d0b3c
 XPP_CALLBACK_WALK = (0x408C72, 36, "9234a2afaedda5206ca55c2bf3f0269b70b1b0345091581c639ee86230cd3756")
 GAME_INIT_WALK = (0x137C84, 19, "44c1c20adf4bb014714a0825d601e592e668699e31671c7676a674951946da02")
 GAME_DESCRIPTOR_WALK = (0x1088E0, 124, "c1bf2193fbf5a7f7a8d0de9fffaaf9ee5cbe12ced08b39059af29896540348ec")
+GAME_MODE_WALK = (0x18EF00, 152, "c499facfbe49993ebd3e15bb55a4f65adafb4bfd53eb99474ba7bb96ad3f8102")
 GAME_DISPATCH_CONSTRUCTORS = (
     (0x23546B, 27, "cbd17bebf8667c708be45cbe65a4fc6dfc672448edf8c83151e4173d16e69e71"),
     (0x234E43, 33, "84924bde2768f01fd262d3d0cd0916038e22c201d8200008e05c9cdff85bd95f"),
 )
+GAME_ALLOCATOR_CONSTRUCTORS = (
+    (0x81EC2, 6, "12ddc689a0e651bd82e523e0305410591c34c0ecd1da8fda19d119363ba1520f"),
+    (0x32A871, 6, "090c672f0e3b32b564eec33dbae02580b53d91bf1c9d4e1eb0b378b0d2faa881"),
+)
 
 
-def game_dispatch_vtable_roots(image):
-    """Native46 object vtable, bounded by two original constructor assignments."""
-    for address, length, digest in GAME_DISPATCH_CONSTRUCTORS:
+def game_mode_callback_roots(image):
+    """Native47: eight paired callbacks, two stride-eight walks of 40h bytes."""
+    address, length, digest = GAME_MODE_WALK
+    if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+        raise ValueError("Halo 2 mode callback walk fingerprint mismatch")
+    roots = set()
+    for slot in range(0x453C00, 0x453C40, 4):
+        target = image.u32(slot)
+        if target == 0:
+            continue
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError(f"Halo 2 mode callback slot {slot:#x} has invalid target")
+        roots.add(target)
+    return roots
+
+
+def _constructor_vtable_roots(image, constructors, start, end):
+    for address, length, digest in constructors:
         if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
             raise ValueError("Halo 2 dispatch constructor fingerprint mismatch")
     roots = set()
-    for slot in range(0x4599A8, 0x4599DC, 4):
+    for slot in range(start, end, 4):
         target = image.u32(slot)
         section = image.section_of(target) if target else None
         if not target or not image.is_code(target) or not section or section[4] != ".text":
             raise ValueError(f"Halo 2 dispatch vtable slot {slot:#x} has invalid target")
         roots.add(target)
     return roots
+
+
+def game_dispatch_vtable_roots(image):
+    """Native46 object vtable, bounded by two original constructor assignments."""
+    return _constructor_vtable_roots(image, GAME_DISPATCH_CONSTRUCTORS, 0x4599A8, 0x4599DC)
+
+
+def game_allocator_vtable_roots(image):
+    """Native48: allocator at 454970, followed by the table assigned at 32A871."""
+    return _constructor_vtable_roots(image, GAME_ALLOCATOR_CONSTRUCTORS, 0x454970, 0x454980)
 
 
 def game_descriptor_initialization_chain(image):
@@ -192,6 +223,17 @@ def main():
         descriptor_chain = game_descriptor_initialization_chain(image)
         roots.update(target for _, target in descriptor_chain if target)
         roots.update(game_dispatch_vtable_roots(image))
+        roots.update(game_mode_callback_roots(image))
+        roots.update(game_allocator_vtable_roots(image))
+        # Native49: 1A474C passes the global arena object 47D924 to 18E1F0.
+        # Its stored vtable is 4508FC: allocate/free, followed by string data.
+        if image.u32(0x47D924) != 0x4508FC:
+            raise ValueError("Halo 2 global arena vtable binding mismatch")
+        for slot in (0x4508FC, 0x450900):
+            target = image.u32(slot)
+            if not target or not image.is_code(target):
+                raise ValueError(f"Halo 2 global arena slot {slot:#x} is not code")
+            roots.add(target)
         roots.update(host_channel_callback_roots(image))
         # Native attempt 35: application creator 0x120A90 pushes 0x120C30
         # at 0x120B0E and calls XAPI thread creation at 0x120B3D. The native

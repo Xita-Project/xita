@@ -22,6 +22,11 @@ only when its completion log is true and its JSON parses.
 Host validation covers exact bit patterns at the first/last constant and program
 slots, setup bitmap limits, object/binding fields, 64-bit counters, unchanged
 channel state and stream-write failure under ASan/UBSan. All 15 existing Halo 2
-host tests pass. VitaSDK compiles the serializer and boot integration. Native
-integration will be verified in the next startup build; this change does not
-claim a menu or any new rendered output.
+host tests pass. VitaSDK compiles the serializer and boot integration. Native48 integrates the snapshot and logs completion=1. Its 9,600-byte JSON
+parses with SHA-256
+`f461fd24cc4d5a7292da55faa2f857f8df7d93b89f86f2f97921eabe54f70327`.
+GET and PUT both equal `03B54280`, with no pending method. The second channel's
+program bank, surface format and pitch are still zero; no second-device draw
+setup has been submitted. The capture remains private at
+`native-48-artifacts/channel-at-stop.json`. This validates serialization of
+actual tracked state, not a menu or any new rendered output.
