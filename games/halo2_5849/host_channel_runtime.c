@@ -21,6 +21,8 @@ static int miniport_ready, channel_ready;
 static int software_active, initialization_flip_done;
 static uint8_t scanout_gamma[768]; /* interleaved R/G/B DAC entries */
 static unsigned gamma_cursor;
+const h2_host_channel *h2_host_channel_current(void)
+{ return channel_ready ? &channel : NULL; }
 static int software_flip(void *opaque, uint32_t value, uint32_t source);
 static int channel_idle(void);
 extern void xv_logf(const char *, ...);
