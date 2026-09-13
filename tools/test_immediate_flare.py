@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory(prefix="xita-flare-test-") as d:
     (d / "flare_under_test.inc").write_text("\n".join(parts))
     exe = d / "test"
     subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-O1", "-g",
-                    "-fsanitize=address,undefined", "-I", str(root), "-I", str(d),
+                    "-fsanitize=address,undefined", "-I", str(root), "-I", str(root / "runtime"), "-I", str(d),
                     "-idirafter", str(sdk / "arm-vita-eabi/include"),
                     str(root / "tools/tests/immediate_flare.c"), "-o", str(exe)], check=True)
     env = os.environ.copy()

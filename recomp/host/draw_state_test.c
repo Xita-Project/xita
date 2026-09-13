@@ -10,6 +10,56 @@ void sceGxmSetCullMode(SceGxmContext *c,SceGxmCullMode v){(void)c;(void)v;calls[
 void sceGxmSetVertexProgram(SceGxmContext *c,const SceGxmVertexProgram *v){(void)c;(void)v;calls[3]++;}
 void sceGxmSetFragmentProgram(SceGxmContext *c,const SceGxmFragmentProgram *v){(void)c;(void)v;calls[4]++;}
 
+static void test_tracked_constants(void)
+{
+    /* A tracked producer may change several disjoint ranges before a draw.
+     * Compare the full result and generation with the original full-bank path,
+     * including generic/UI overrides, owner switches and empty dirty ranges. */
+    for (unsigned mode = 0; mode < 2; mode++) {
+        xv_d3d_draw_scan_override(mode);
+        float banks[2][192][4] = {{{0}}};
+        uint32_t lo[2] = {0, 0}, hi[2] = {0, 0};
+        for (unsigned iteration = 0; iteration < 4096; iteration++) {
+            unsigned owner = (iteration / 13) & 1u;
+            if (iteration % 3) {
+                unsigned first = (iteration * 17) % 192;
+                unsigned last = first + 1 + (iteration * 7) % (192 - first);
+                for (unsigned row = first; row < last; row++) {
+                    uint32_t bits[4] = {iteration, row, 0x80000000u, 0x7fc00001u + iteration};
+                    memcpy(banks[owner][row], bits, sizeof bits);
+                }
+                if (first < lo[owner]) lo[owner] = first;
+                if (last > hi[owner]) hi[owner] = last;
+                unsigned other = (first + 97) % 192;
+                uint32_t extra[4] = {iteration ^ 0xabcd, 0x80000000u, 0, 0x7fc54321u};
+                memcpy(banks[owner][other], extra, sizeof extra);
+                if (other < lo[owner]) lo[owner] = other;
+                if (other + 1 > hi[owner]) hi[owner] = other + 1;
+            }
+            if (iteration % 11 == 0) {
+                float override[4] = {1, 2, 3, 4};
+                xv_d3d_SetVertexShaderConstant(-96 + iteration % 192, override, 1);
+            }
+            if (iteration % 29 == 0) xv_d3d_SetAllConstants(banks[owner ^ 1]);
+            if (iteration % 31 == 0) S.vsc_gen = UINT32_MAX;
+            unsigned expected_gen = S.vsc_gen + !!memcmp(S.vsc, banks[owner], sizeof banks[owner]);
+            xv_d3d_SetTrackedConstants(banks[owner], &lo[owner], &hi[owner]);
+            assert(S.vsc_gen == expected_gen && !memcmp(S.vsc, banks[owner], sizeof banks[owner]));
+            assert(lo[owner] == 192 && hi[owner] == 0);
+            uint64_t checked = scan_constant_bytes;
+            xv_d3d_SetTrackedConstants(banks[owner], &lo[owner], &hi[owner]);
+            assert(S.vsc_gen == expected_gen && scan_constant_bytes == checked);
+        }
+        /* Malformed ranges force a full sync; they never index outside c[]. */
+        uint32_t bad[][2] = {{193, 193}, {UINT32_MAX, 0}, {0, UINT32_MAX}, {20, 10}};
+        for (unsigned i = 0; i < sizeof bad / sizeof *bad; i++) {
+            banks[1][190][0] += 1;
+            xv_d3d_SetTrackedConstants(banks[1], &bad[i][0], &bad[i][1]);
+            assert(!memcmp(S.vsc, banks[1], sizeof banks[1]));
+        }
+    }
+}
+
 int main(void)
 {
     xv_draw_state s={0};
@@ -67,7 +117,9 @@ int main(void)
         xv_d3d_SetAllConstants(constants);
         assert(S.vsc_gen == 0 && !memcmp(S.vsc, constants, sizeof constants));
     }
+    test_tracked_constants();
     xv_d3d_draw_scan_override(-1);
     puts("PASS: repeated state binds removed; clear values and UI/target/query/draw boundaries preserved");
     puts("PASS: exact constants and generations at every byte, partial UI writes and wrap, both scan modes");
+    puts("PASS: 8192 tracked update sequences, owner/UI changes, empty ranges, malformed ranges and generation wrap");
 }

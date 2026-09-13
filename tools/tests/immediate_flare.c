@@ -8,7 +8,7 @@
 #include "shaders/xv_layouts.h"
 #define X_D3DPT_QUADLIST 8
 typedef struct { float a[16][4]; } xd3d_im_vtx;
-static struct { float vsc[192][4]; } xd3d_state;
+static struct { float vsc[192][4]; uint32_t vsc_dirty_lo, vsc_dirty_hi; } xd3d_state;
 static int g_mesh_path = 1;
 static unsigned normal, registered, calls, total, synced;
 static uint8_t recorded[72 * 40];
@@ -27,8 +27,8 @@ static uint32_t xv_d3d_RegisterVertexShader(const xv_vs_desc_t *d)
     registered++; return 3;
 }
 static void xv_d3d_SetVertexShader(uint32_t h) { assert(h == 3); }
-static void xv_d3d_SetAllConstants(const float c[192][4])
-{ assert(c == xd3d_state.vsc); }
+static void xv_d3d_SetTrackedConstants(const float c[192][4], uint32_t *lo, uint32_t *hi)
+{ assert(c == xd3d_state.vsc && lo == &xd3d_state.vsc_dirty_lo && hi == &xd3d_state.vsc_dirty_hi); }
 static void sync_draw_state(void) { synced++; }
 static void xv_d3d_DrawImmediateStrided(uint32_t prim, const void *v, uint32_t n, uint32_t stride)
 {

@@ -101,6 +101,9 @@ void xv_d3d_Swap(void);
 void     xv_d3d_DrawIndexedVerticesBase(uint32_t prim, uint32_t index_count, uint32_t indices_guest, uint32_t base_vertex);
 uint32_t xv_d3d_handle_for_hash(uint32_t fnv);            /* registers the program on first use; 0 = unknown */
 void     xv_d3d_SetAllConstants(const float (*vsc)[4]);   /* c[-96..95] */
+/* Persistent producer with all writes recorded in [dirty_lo, dirty_hi).
+ * Consumes that range; UI/generic writes automatically force a full resync. */
+void     xv_d3d_SetTrackedConstants(const float (*vsc)[4], uint32_t *dirty_lo, uint32_t *dirty_hi);
 /* Exact CPU scan comparison; -1 restores the configured opt-in default. */
 void     xv_d3d_draw_scan_override(int enabled);
 uint32_t xv_d3d_EndFrame(void);                           /* close the recorded list; returns its frame number */

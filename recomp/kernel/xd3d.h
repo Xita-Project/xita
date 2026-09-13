@@ -19,7 +19,7 @@ typedef struct {
     uint32_t palette[4];               /* SetPalette: guest address of the 256 D3DCOLOR entries (P8 textures), 0 = none */
     /* vertex shader constants (Xbox c[-96..96): stored at [index+96]) */
     float    vsc[192][4];
-    uint32_t vsc_dirty_lo, vsc_dirty_hi;
+    uint32_t vsc_dirty_lo, vsc_dirty_hi; /* changed rows [lo, hi); consumed as 192,0 */
     /* pixel shader */
     uint32_t ps_def;                   /* X_D3DPIXELSHADERDEF pointer (runtime-built combiners) */
     uint32_t ps_hash;                  /* FNV of the def minus its constant colours: identifies the combiner program */

@@ -172,6 +172,7 @@ typedef struct {
     uint8_t  tex_min[4], tex_mag[4], tex_addr_u[4], tex_addr_v[4];
     uint32_t vs_handle;
     float    vsc[192][4];                    /* c[-96..95] as D3D exposes them          */
+    const float (*vsc_source)[4];            /* synchronized owner; partial/UI writes invalidate */
     float    const_attr[16][4];
     uint32_t z_enable, z_write, z_func, cull, blend_enable, src_blend, dst_blend, color_mask;
     xv_stencil stencil;
@@ -487,6 +488,7 @@ void xv_d3d_SetVertexShader(uint32_t handle)
 
 void xv_d3d_SetVertexShaderConstant(int reg, const float *data, unsigned count)
 {
+    S.vsc_source = NULL;
     S.vsc_gen++; /* invalidate the command list's cached constant snapshot */
     for (unsigned i = 0; i < count; ++i) {
         int r = reg + (int)i + 96;
@@ -1703,12 +1705,33 @@ uint32_t xv_d3d_handle_for_hash(uint32_t fnv)
 }
 void xv_d3d_SetAllConstants(const float (*vsc)[4])
 {
+    S.vsc_source = NULL;
     scan_constant_checks++; scan_constant_bytes += sizeof S.vsc;
     int equal = draw_scan_neon() ? xv_bytes_equal(S.vsc, vsc, sizeof S.vsc) :
                                   !memcmp(S.vsc, vsc, sizeof S.vsc);
     if (equal) { scan_constant_reused++; return; }
     memcpy(S.vsc, vsc, sizeof S.vsc);
     S.vsc_gen++;
+}
+void xv_d3d_SetTrackedConstants(const float (*vsc)[4], uint32_t *dirty_lo, uint32_t *dirty_hi)
+{
+    unsigned lo = *dirty_lo, hi = *dirty_hi;
+    /* Only the producer knows whether unchanged rows are still identical.
+     * A different producer or an intervening UI/generic write requires a full
+     * synchronization, even when the producer has no new dirty registers. */
+    if (S.vsc_source != vsc || lo > 192 || hi > 192 ||
+        (lo > hi && !(lo == 192 && hi == 0))) {
+        xv_d3d_SetAllConstants(vsc);
+    } else {
+        size_t bytes = hi > lo ? (size_t)(hi - lo) * 16u : 0;
+        scan_constant_checks++; scan_constant_bytes += bytes;
+        int equal = !bytes || (draw_scan_neon() ? xv_bytes_equal(S.vsc[lo], vsc[lo], bytes) :
+                                                 !memcmp(S.vsc[lo], vsc[lo], bytes));
+        if (equal) scan_constant_reused++;
+        else { memcpy(S.vsc[lo], vsc[lo], bytes); S.vsc_gen++; }
+    }
+    S.vsc_source = vsc;
+    *dirty_lo = 192; *dirty_hi = 0;
 }
 void xv_d3d_SetPixelShader(uint32_t hash, uint32_t key, const float (*psc)[4]) { S.ps_hash = hash; S.ps_key = key ? key : ps_key_from_capture(hash); if (psc) memcpy(S.psc, psc, sizeof(S.psc)); }
 /* Keep real resource shortages distinct and avoid per-frame log I/O during a

@@ -1190,7 +1190,7 @@ void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t d
     uint32_t h = xv_d3d_handle_for_hash(fnv);
     if (!h) { static unsigned n; if (n++ < 8) UI_LOG("draw: no program for VS fnv %08X\n", fnv); return; }
     xv_d3d_SetVertexShader(h);
-    xv_d3d_SetAllConstants(xd3d_state.vsc);
+    xv_d3d_SetTrackedConstants(xd3d_state.vsc, &xd3d_state.vsc_dirty_lo, &xd3d_state.vsc_dirty_hi);
     xv_draw_profile_step(XV_DRAW_SETUP, &profile);
     sync_draw_state();
     if (indexed) {
@@ -1294,7 +1294,7 @@ static void draw_immediate_flare(const xd3d_im_vtx *v, unsigned n)
         if (!handle) return;
     }
     xv_d3d_SetVertexShader(handle);
-    xv_d3d_SetAllConstants(xd3d_state.vsc);
+    xv_d3d_SetTrackedConstants(xd3d_state.vsc, &xd3d_state.vsc_dirty_lo, &xd3d_state.vsc_dirty_hi);
     sync_draw_state();
     for (unsigned first = 0; first + 4 <= n;) {
         flare_vertex packed[64];
@@ -1370,7 +1370,7 @@ void xd3d_r_im_end(uint32_t prim, const xd3d_im_vtx *v, unsigned n)
         uint32_t h = xv_d3d_handle_for_hash(fnv);
         if (!h) return;
         xv_d3d_SetVertexShader(h);
-        xv_d3d_SetAllConstants(xd3d_state.vsc);
+        xv_d3d_SetTrackedConstants(xd3d_state.vsc, &xd3d_state.vsc_dirty_lo, &xd3d_state.vsc_dirty_hi);
         sync_draw_state();
         if (hud_program) xv_d3d_SetPixelShader(hud_program, 0, xd3d_state.psc);
         if (fnv == 0xBB2F446Bu) {
