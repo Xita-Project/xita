@@ -297,9 +297,13 @@ void __wrap_xk_AvSendTVEncoderOption(xctx *c)
     } else if (option == 11 && !output && (param == 5 || (display_mode_set && param <= 5))) {
         av_config.flicker_filter = param; av_config.has_flicker = 1;
         xv_logf("[h2/av] retained flicker-filter request=%u; inactive for selected progressive scanout\n", param);
-    } else if (option == 14 && !param && !output) {
+    } else if (option == 14 && !output && (!param || (display_mode_set && param == 1))) {
+        /* Retain the Boolean analog soft-filter preference. The implemented
+         * output is digital progressive RGB, before analog TV encoding. See
+         * Conexant 100381B sections 1.3.45 and E.9 for the HDTV/VGA DAC path;
+         * no SD luma filtering or analog reconstruction is simulated here. */
         av_config.luma_filter = param; av_config.has_luma = 1;
-        xv_logf("[h2/av] deferred luma-filter request=%u; presentation unsupported\n", param);
+        xv_logf("[h2/av] retained analog luma-filter request=%u; digital progressive output\n", param);
     } else if (option == 15 && display_mode_set && base == BAR && !param &&
                output && !(output & 3) && guest_span_valid(output, 4)) {
         /* The only implemented scanout is progressive: a single field, index

@@ -268,17 +268,44 @@ void h2_fp_environment_fault(xctx *c, uint32_t ip, uint32_t address, uint32_t va
 }
 void xv_watch_enter(uint32_t address, xctx *c) { (void)address; (void)c; }
 void xv_watch_leave(uint32_t address, uint32_t back, xctx *c) { (void)address; (void)back; (void)c; }
+static void trace_mapped_word(uint32_t address)
+{
+    /* Diagnostic reads must never resolve through the shared trash page. */
+    uint32_t arena = xk_mem_arena_size();
+    if (arena < 4096 || address > UINT32_MAX - 3) return;
+    for (uint32_t page = address >> 12; page <= (address + 3) >> 12; ++page) {
+        uint32_t offset = g_xpt[page];
+        if ((offset & 4095) || (uint64_t)offset + 4096 > arena - 4096) return;
+    }
+    xv_logf("[h2/error-state] address=%08X word=%08X\n", address, X_M32(address));
+}
 void xv_trace_func(uint32_t address)
 {
     static unsigned count;
     static unsigned error_path_count;
     if (xk_cur && error_path_count < 64 &&
         (address == 0x13F10 || address == 0x163820 || address == 0x163890 ||
-         address == 0x223240 || address == 0x12B450 || address == 0x18E810)) {
+         address == 0x223240 || address == 0x12B450 || address == 0x18E810 ||
+         address == 0x68250 || address == 0x2C8A0 || address == 0x13C20 ||
+         address == 0x13CD0 || address == 0x214940)) {
         const xctx *c = &xk_cur->ctx;
         ++error_path_count;
         xv_logf("[h2/error-path] fn=%08X return=%08X eax=%08X ecx=%08X edx=%08X esi=%08X\n",
                 address, X_M32(c->r[4]), c->r[0], c->r[1], c->r[2], c->r[6]);
+        if (address == 0x68250 || address == 0x223240) {
+            const uint32_t globals[] = {0x4CF770, 0x4CF77C, 0x4E6948,
+                                       0x4E6470, 0x4E64A0, 0x4E9BB8};
+            for (unsigned i = 0; i < sizeof globals / sizeof *globals; ++i)
+                trace_mapped_word(globals[i]);
+            /* These pointer slots themselves are owned image-backed data. */
+            uint32_t state = X_M32(0x4E6948), mode = X_M32(0x4CF77C);
+            if (state && state <= UINT32_MAX - 0x1123) {
+                trace_mapped_word(state); trace_mapped_word(state + 0x1120);
+            }
+            if (mode && mode <= UINT32_MAX - 0x1B) {
+                trace_mapped_word(mode + 8); trace_mapped_word(mode + 0x18);
+            }
+        }
     }
     /* Read-only evidence for the pinned 1088E0 descriptor walk. The exact
      * record array is image-backed; reject pointers outside it before reads. */

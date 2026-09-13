@@ -186,6 +186,10 @@ int main(int argc, char **argv)
     X_M32(c.r[4] + 16) = 0; __wrap_xk_AvSendTVEncoderOption(&c);
     assert(h2_host_av_configuration().has_luma && h2_host_av_configuration().luma_filter == 0);
     assert(c.r[4] == 0x600014 && c.r[0] == 0xABCDEF01);
+    c.r[4] = 0x600000; X_M32(c.r[4] + 12) = 1;
+    if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
+    assert(h2_host_av_configuration().luma_filter == 0 && c.r[4] == 0x600000);
+    X_M32(c.r[4] + 12) = 0;
     c.r[4] = 0x600000; X_M32(c.r[4] + 4) = 0xDEADBEEF;
     if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
     if (!setjmp(fault)) { __wrap_xk_AvSetDisplayMode(&c); assert(0); }
@@ -389,6 +393,24 @@ int main(int argc, char **argv)
         c.r[4] = 0x600000; X_M32(c.r[4] + 12) = 6;
         if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
         assert(h2_host_av_configuration().flicker_filter == 5 && c.r[4] == 0x600000);
+        X_M32(c.r[4] + 8) = 14;
+        const unsigned luma_levels[] = {1, 1, 0, 1};
+        for (unsigned i = 0; i < sizeof luma_levels / sizeof *luma_levels; ++i) {
+            c.r[4] = 0x600000; X_M32(c.r[4] + 12) = luma_levels[i];
+            interrupted = c;
+            __wrap_xk_AvSendTVEncoderOption(&c);
+            interrupted.r[4] += 20;
+            assert(!memcmp(&c, &interrupted, sizeof c));
+            assert(h2_host_av_configuration().has_luma && h2_host_av_configuration().luma_filter == luma_levels[i]);
+            assert(present_calls == 1 && blank_calls == 0);
+        }
+        c.r[4] = 0x600000; X_M32(c.r[4] + 12) = 2; interrupted = c;
+        if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
+        assert(h2_host_av_configuration().luma_filter == 1 && !memcmp(&c, &interrupted, sizeof c));
+        X_M32(c.r[4] + 12) = 0; X_M32(c.r[4] + 16) = 0x610000;
+        if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
+        assert(h2_host_av_configuration().luma_filter == 1 && X_M32(0x610000) == 0x00480104);
+        assert(present_calls == 1 && blank_calls == 0 && !memcmp(&c, &interrupted, sizeof c));
         puts("Host-channel timed initialization: two real vblank contracts, callback ABI, parser retry and mode presentation pass.");
         free(g_xpt); free(g_xram); return 0;
     }
