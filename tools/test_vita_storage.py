@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Synthetic on-disk exFAT allocation tests; never accesses a device."""
 import contextlib
+import base64
 import hashlib
 import io
+import json
 from pathlib import Path
 import struct
 import tempfile
@@ -169,6 +171,62 @@ class StorageTests(unittest.TestCase):
                     status = main([str(source), *PATHS])
                 self.assertEqual(status, int(overlap))
                 self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
+
+    def test_zero_root_link_saves_context_and_raw_evidence(self):
+        data = fixture()
+        struct.pack_into('<I', data, 25 * 512 + 2 * 4, 0)
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / 'test.img'
+            source.write_bytes(data)
+            output, errors = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                status = main([str(source), *PATHS, '--capture-metadata'])
+            report = json.loads(output.getvalue())
+            self.assertEqual(status, 2)
+            self.assertEqual(report['context']['stage'], 'root_directory')
+            self.assertEqual(report['context']['last_fat_link']['cluster'], 2)
+            self.assertEqual(report['context']['last_fat_link']['value'], 0)
+            self.assertEqual([v['value'] for v in report['fat_probes'][0]['fat_values']],
+                             [0xffffffff, 0])
+            self.assertNotIn('files', report)  # no inactive-FAT fallback result
+            self.assertIn('cluster out of range: 0x0', errors.getvalue())
+            self.assertEqual(report['unvalidated_first_cluster_preview']['offset'], 26 * 512)
+            reads = report['metadata_capture']['reads']
+            self.assertGreater(len(reads), 3)
+            for read in reads:
+                actual = base64.b64decode(read['base64'])
+                self.assertEqual(actual, data[read['offset']:read['offset'] + read['size']])
+                self.assertEqual(hashlib.sha256(actual).hexdigest(), read['sha256'])
+            self.assertEqual(source.read_bytes(), data)
+
+    def test_boot_and_open_errors_also_emit_json(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / 'test.img'
+            for stage in ('open_source', 'boot'):
+                if stage == 'boot':
+                    source.write_bytes(b'bad')
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+                    status = main([str(source), *PATHS, '--capture-metadata'])
+                report = json.loads(output.getvalue())
+                self.assertEqual(status, 2)
+                self.assertEqual(report['context']['stage'], stage)
+
+    def test_selected_path_error_reports_allocation_without_raw_capture(self):
+        data = fixture()
+        struct.pack_into('<I', data, 25 * 512 + 7 * 4, 0)
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / 'test.img'
+            source.write_bytes(data)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+                status = main([str(source), *PATHS])
+            report = json.loads(output.getvalue())
+            self.assertEqual(status, 2)
+            self.assertEqual(report['context']['path'], PATHS[0])
+            self.assertEqual(report['context']['allocation']['first'], 7)
+            self.assertNotIn('metadata_capture', report)
+            self.assertEqual(source.read_bytes(), data)
 
 
 if __name__ == '__main__':

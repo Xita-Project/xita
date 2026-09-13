@@ -7,7 +7,9 @@ directory names; the exFAT up-case table is deliberately not approximated.
 Format reference: https://learn.microsoft.com/en-us/windows/win32/fileio/exfat-specification
 """
 import argparse
+import base64
 import functools
+import hashlib
 import itertools
 import json
 import struct
@@ -17,6 +19,7 @@ from pathlib import PurePosixPath
 MAX_READ = 64 * 1024 * 1024
 MAX_CHAIN = 131072
 MAX_DIRECTORY = 16 * 1024 * 1024
+MAX_CAPTURE = 8 * 1024 * 1024
 
 
 class AuditError(ValueError):
@@ -44,10 +47,12 @@ def checksum(data, bits, skip=()):
 
 
 class Volume:
-    def __init__(self, stream, offset=0):
+    def __init__(self, stream, offset=0, capture=None):
         if offset < 0:
             raise AuditError('negative volume offset')
         self.stream, self.offset, self.read_bytes = stream, offset, 0
+        self.capture = capture
+        self.context = dict(stage='boot')
         self.length = None
         boot = self.read(0, 512)
         if boot[3:11] != b'EXFAT   ' or boot[510:512] != b'\x55\xaa':
@@ -90,6 +95,17 @@ class Volume:
         data = self.stream.read(size)
         if len(data) != size:
             raise AuditError('truncated source')
+        if self.capture is not None:
+            key = (offset, size)
+            if key not in self.capture['_seen']:
+                self.capture['_seen'].add(key)
+                if self.capture['bytes'] + size <= MAX_CAPTURE:
+                    self.capture['bytes'] += size
+                    self.capture['reads'].append(dict(offset=offset, size=size,
+                        sha256=hashlib.sha256(data).hexdigest(),
+                        base64=base64.b64encode(data).decode('ascii')))
+                else:
+                    self.capture['omitted_reads'] += 1
         return data
 
     def cluster_offset(self, cluster):
@@ -105,9 +121,14 @@ class Volume:
     def next_cluster(self, cluster):
         self.cluster_offset(cluster)
         sector, offset = divmod(cluster * 4, self.sector)
-        return u32(self.fat_sector(self.active, sector), offset)
+        value = u32(self.fat_sector(self.active, sector), offset)
+        self.context['last_fat_link'] = dict(cluster=cluster, value=value,
+            volume_byte_offset=(self.fat_offset + self.active * self.fat_length) * self.sector + cluster * 4)
+        return value
 
     def chain(self, first, length=None, contiguous=False):
+        self.context['allocation'] = dict(first=first, length=length, contiguous=contiguous)
+        self.context.pop('last_fat_link', None)
         needed = None if length is None else (length + self.cluster - 1) // self.cluster
         if needed == 0:
             if first or contiguous:
@@ -210,11 +231,13 @@ class Volume:
     def audit(self, paths):
         if len({str(PurePosixPath(p)) for p in paths}) != len(paths):
             raise AuditError('duplicate selected path')
+        self.context = dict(stage='root_directory')
         root_chain = self.chain(self.root)
         root_files, bitmaps = self.directory(root_chain)
         if set(bitmaps) != set(range(self.fats)):
             raise AuditError('missing allocation bitmap entry')
         active_bitmap = bitmaps[self.active]
+        self.context = dict(stage='active_allocation_bitmap', bitmap=active_bitmap)
         bitmap_chain = self.chain(**active_bitmap)
         required = (self.count + 7) // 8
         if active_bitmap['length'] < required:
@@ -227,6 +250,7 @@ class Volume:
                 raise AuditError('use a nonempty volume-relative path without dot components')
             files = root_files
             for i, part in enumerate(components):
+                self.context = dict(stage='selected_path', path='/'.join(components[:i + 1]))
                 if part not in files:
                     raise AuditError(f'path not found (exact case required): {path}')
                 info = files[part]
@@ -252,6 +276,46 @@ class Volume:
                     media_failure_flag=bool(self.flags & 4), bitmap_entries=bitmaps,
                     files=allocations, findings=findings, bytes_read=self.read_bytes)
 
+    def failure_report(self, error):
+        """Report the stop without following an alternate FAT as a fallback.
+
+        A small raw preview can help inspect a broken root chain offline. Its
+        bytes are evidence only, not a validated or complete directory listing.
+        """
+        report = dict(read_only=True, status='stopped', error=str(error),
+                      context=dict(self.context), sector_bytes=self.sector,
+                      cluster_bytes=self.cluster, fat_count=self.fats,
+                      active_fat=self.active, root_cluster=self.root,
+                      volume_flags=self.flags,
+                      inactive_state='Inactive FAT values may be stale; they are not used as a fallback.')
+        allocation = self.context.get('allocation', {})
+        first = allocation.get('first')
+        link = self.context.get('last_fat_link', {})
+        probes = []
+        for cluster in sorted({c for c in (first, link.get('cluster'))
+                               if c is not None and 2 <= c < self.count + 2}):
+            probe = dict(cluster=cluster, fat_values=[])
+            for fat in range(self.fats):
+                try:
+                    sector, offset = divmod(cluster * 4, self.sector)
+                    value = u32(self.fat_sector(fat, sector), offset)
+                    probe['fat_values'].append(dict(fat=fat, active=fat == self.active, value=value))
+                except (AuditError, OSError) as exc:
+                    probe['fat_values'].append(dict(fat=fat, error=str(exc)))
+            probes.append(probe)
+        report['fat_probes'] = probes
+        if self.capture is not None and first is not None and 2 <= first < self.count + 2:
+            try:
+                size = min(self.cluster, 65536)
+                offset = self.cluster_offset(first)
+                self.read(offset, size)
+                report['unvalidated_first_cluster_preview'] = dict(offset=offset, size=size,
+                    note='Raw preview only; no alternate chain was followed.')
+            except (AuditError, OSError) as exc:
+                report['preview_error'] = str(exc)
+        report['bytes_read'] = self.read_bytes
+        return report
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -259,15 +323,31 @@ def main(argv=None):
     parser.add_argument('paths', nargs='+', help='Exact volume-relative paths to inspect')
     parser.add_argument('--offset', type=lambda s: int(s, 0), default=0,
                         help='Byte offset of volume within image; default 0')
+    parser.add_argument('--capture-metadata', action='store_true',
+                        help='Include up to 8 MiB of raw metadata reads in JSON for offline diagnosis; keep private')
     args = parser.parse_args(argv)
+    capture = dict(bytes=0, reads=[], omitted_reads=0, _seen=set()) if args.capture_metadata else None
+    volume, status = None, 0
     try:
         with open(args.source, 'rb') as source:
-            report = Volume(source, args.offset).audit(args.paths)
+            try:
+                volume = Volume(source, args.offset, capture)
+                report = volume.audit(args.paths)
+                status = 1 if report['findings'] else 0
+            except (OSError, AuditError) as exc:
+                report = volume.failure_report(exc) if volume is not None else dict(
+                    read_only=True, status='stopped', error=str(exc), context=dict(stage='boot'))
+                status = 2
     except (OSError, AuditError) as exc:
-        print(f'audit stopped: {exc}', file=sys.stderr)
-        return 2
+        report = dict(read_only=True, status='stopped', error=str(exc), context=dict(stage='open_source'))
+        status = 2
+    if capture is not None:
+        del capture['_seen']
+        report['metadata_capture'] = dict(volume_offset=args.offset, **capture)
     print(json.dumps(report, indent=2))
-    return 1 if report['findings'] else 0
+    if status == 2:
+        print(f"audit stopped ({report['context']['stage']}): {report['error']}; details saved in JSON output", file=sys.stderr)
+    return status
 
 
 if __name__ == '__main__':

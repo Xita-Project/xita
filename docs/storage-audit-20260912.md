@@ -55,11 +55,30 @@ every file, verify file contents, check backup boot recovery, or implement TexFA
 transactions. Live changes would make its output unreliable. It has not yet
 inspected this card's raw metadata because administrator read access is absent.
 
-Run its host checks with `python3 tools/test_vita_storage.py`. Thirteen synthetic
+Run its host checks with `python3 tools/test_vita_storage.py`. Sixteen synthetic
 cases cover active second-FAT selection with a deliberately stale first bitmap,
 one-FAT volumes, overlapping allocations, active free bits, contiguous files,
 cycles/excess/short chains, invalid clusters, checksums, paths, offsets,
-truncation and unchanged source-image hashes after CLI execution.
+truncation and unchanged source-image hashes after CLI execution. Error-output
+tests also cover a zero root-chain link, a broken selected-file chain, and
+source-open/boot failures.
+
+September 13 follow-up: the first hardware run stopped with
+`cluster out of range: 0x0`. The original CLI printed this only to stderr,
+leaving the redirected report empty; the location of that zero is therefore
+not yet known. The updated CLI emits a JSON report even when inspection stops,
+including the traversal stage, allocation, last FAT link, and corresponding
+values in each FAT. It does not follow the inactive FAT as a recovery fallback.
+
+For a diagnostic rerun, append `--capture-metadata` to the command. This embeds
+up to 8 MiB of the raw metadata reads with offsets and hashes in the computer's
+JSON report. On an allocation failure it can also preserve a bounded raw preview
+of the first cluster, explicitly marked unvalidated. This allows offline
+inspection without treating the preview as a complete directory. The report may
+contain directory names and a small preview of file contents; keep it private.
+No source writes are added, and neither
+an error nor a difference between FAT copies by itself identifies the cause of
+the earlier executable-content damage.
 
 The next storage step is read-only allocation inspection or a stable image with
 appropriate read access, followed by a recovery plan based on those results.
