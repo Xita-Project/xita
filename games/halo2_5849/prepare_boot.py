@@ -15,6 +15,22 @@ from recompiler.xita_recomp import Image, KERNEL_DATA_EXPORTS, KERNEL_EXPORTS
 
 HOST_CALLBACK_WALK = (0x3FBA54, 135, "e0cc1649c0b744615b3de0f5b2446411bb408d0b3ce4d1d3da59980219abc70c")
 XPP_CALLBACK_WALK = (0x408C72, 36, "9234a2afaedda5206ca55c2bf3f0269b70b1b0345091581c639ee86230cd3756")
+GAME_INIT_WALK = (0x137C84, 19, "44c1c20adf4bb014714a0825d601e592e668699e31671c7676a674951946da02")
+
+
+def game_initialization_roots(image):
+    """Native41: 68 record callbacks, ESI=0..0x990 in steps of 0x24."""
+    address, length, digest = GAME_INIT_WALK
+    if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+        raise ValueError("Halo 2 game initialization walk fingerprint mismatch")
+    roots = set()
+    for slot in range(0x440DD8, 0x440DD8 + 0x990, 0x24):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError(f"Halo 2 game initialization slot {slot:#x} has invalid target {target!r}")
+        roots.add(target)
+    return roots
 
 
 def host_device_callback_roots(image):
@@ -100,6 +116,7 @@ def main():
         # destructor, AddRef, Release, delete helper. Slot one is the observed
         # indirect dispatch from 0x37B17B. The following words are data.
         roots.update(image.u32(slot) for slot in range(0x4170E4, 0x4170F4, 4))
+        roots.update(game_initialization_roots(image))
     output = args.out.resolve()
     generated = output / "generated"
     profile = str(Path(__file__).with_name("graphics-profile.json")) if args.graphics else "halo2_5849"

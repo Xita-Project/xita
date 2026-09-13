@@ -29,6 +29,27 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_game_record_stride_and_bounds(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x440DD8 + n * 0x24: 0x5000 + (n % 49) * 16 for n in range(68)}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_INIT_WALK", spec):
+            self.assertEqual(len(prepare_boot.game_initialization_roots(image)), 49)
+            last = 0x440DD8 + 67 * 0x24
+            for bad in (None, 0):
+                image.targets[last] = bad
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_initialization_roots(image)
+            image.targets[last] = image.bad_code = 0xDEAD
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_initialization_roots(image)
+            image.bad_code = None; image.section_name = "DATA"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_initialization_roots(image)
+        with patch.object(prepare_boot, "GAME_INIT_WALK", (0x200, len(image.code), "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_initialization_roots(image)
+
     def test_xpp_two_level_walk(self):
         image = SyntheticImage()
         image.section_name = "XPP"
