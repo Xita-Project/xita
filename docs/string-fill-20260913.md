@@ -31,7 +31,8 @@ This is not a universal speedup. A nonuniform 150-dword fill increases from
 A private Vita3K census confirms gameplay coverage. Over Blood Gulch frames
 7,304–7,908, all 291,627 repeated word/dword calls qualify for the new path:
 about 483 calls and 33,453 bytes per frame. This does not count single stores
-as eligible, and it is not a hardware timing measurement. The instrumented
+as eligible; eligible calls can include zero repetition counts, so this is
+not a count of actual `memset` invocations or a hardware timing measurement. The instrumented
 build renders Blood Gulch, camera movement/firing, the campaign cryo room and
 menu transitions. Diagnostic counters are absent from the final build.
 
