@@ -158,6 +158,20 @@ int main(void)
     assert(emit(0, 0x310, 0) && emit(0, 0x1D90, 0xAABBCCDD) && emit(0, 0x1D94, 0xF0));
     assert(f.ram[0x800 / 4] == 0xAABBCCDD && f.ram[0x804 / 4] == 0xAABBCCDD);
     assert(c.completed_clears == 2 && c.written_pixels == 4);
+    /* Flip write wraps modulo the configured queue size; a stall may pass only
+     * when a read completion has already made the counters differ. */
+    for (unsigned modulo = 2; modulo <= 7; ++modulo) {
+        assert(emit(0, 0x128, modulo));
+        for (unsigned write = 0; write < modulo; ++write) {
+            assert(emit(0, 0x120, write) && emit(0, 0x124, write));
+            reject(0, 0x130, 0); reject(0, 0x12C, 1);
+            assert(emit(0, 0x12C, 0) && s.flip_write == (write + 1) % modulo);
+            assert(emit(0, 0x130, 0)); reject(0, 0x130, 1);
+        }
+    }
+    assert(emit(0, 0x128, 0)); reject(0, 0x12C, 0); reject(0, 0x130, 0);
+    assert(emit(0, 0x128, 1)); reject(0, 0x12C, 0); reject(0, 0x130, 0);
+    assert(emit(0, 0x128, 2) && emit(0, 0x120, 2)); reject(0, 0x12C, 0); reject(0, 0x130, 0);
     puts("Command state: class bindings, context aliases, exact state, semaphore writes/bounds and rejection isolation pass.");
     return 0;
 }

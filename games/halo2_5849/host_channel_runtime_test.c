@@ -6,8 +6,27 @@
 #include <stdlib.h>
 uint8_t *g_xram, *g_img_base;
 uint32_t *g_xpt;
+volatile uint32_t xv_cur_fn;
 static jmp_buf fault;
 static uint32_t last_ip, last_address, calls;
+static unsigned software_calls;
+static unsigned vblank_calls, event_calls, wait_calls;
+static int vblank_result;
+static uint32_t vblank_delta = 1;
+int h2_platform_wait_vblank(uint32_t *before, uint32_t *after)
+{ ++vblank_calls; *before = 100; *after = 100 + vblank_delta; return vblank_result; }
+void xk_KeSetEvent(xctx *c)
+{
+    assert(X_ARG(0) == 0x406D9C && X_ARG(1) == 1 && !X_ARG(2));
+    ++event_calls; X_M32(X_ARG(0) + 4) = 1;
+    uint32_t stack = c->r[4]; memset(c, 0x5A, sizeof *c); c->r[4] = stack; X_RET(3);
+}
+void __real_xk_KeWaitForSingleObject(xctx *c)
+{
+    ++wait_calls;
+    if (X_ARG(0) == 0x406D9C) assert(X_M32(X_ARG(0) + 4) == 1);
+    c->r[0] = 0; X_RET(5);
+}
 uint32_t h2_instance_bytes(void) { return 0x5000; }
 uint32_t xk_mem_arena_size(void) { return 0x4001000; }
 uint64_t h2_graphics_time_us(void) { return 0; }
@@ -29,6 +48,23 @@ void f_00401D96(xctx *c)
     X_M32(c->r[6] + 0x128) = 0x711000;
     X_M32(c->r[6] + 0x140) = 0x110A;
     X_RET(0);
+}
+void f_003FF240(xctx *c)
+{
+    assert(c->r[0] == ((0x300000u | 8) << 5 | 1) && c->r[1] == 0x406C08);
+    ++software_calls;
+    xv_cur_fn = 0x3FF240;
+    assert(h2_bus_read32(c, 0x3FE5E5, 0xFD003240) != 0);
+    h2_bus_write8(c, 0x3FF5CE, 0xFD6813C8, 0);
+    for (unsigned i = 0; i < 768; ++i) h2_bus_write8(c, 0x3FF5F1, 0xFD6813C9, i / 3);
+    assert(h2_bus_read32(c, 0x3FED43, 0xFD40071C) == 0);
+    h2_bus_write32(c, 0x3FED4C, 0xFD40071C, 2);
+    X_M32(0x408650) = X_M32(0x406C08 + 0x17C) = 0x300000;
+    X_M32(0x406C08 + 0x1BC) = X_M32(0x406C08 + 0x1CC) = 1;
+    X_M32(0x406C08 + 0x7DC) = 0;
+    uint32_t stack = c->r[4];
+    memset(c, 0xA5, sizeof *c); /* no interrupt CPU/FP/control state may leak */
+    c->r[4] = stack; X_RET(0);
 }
 static void instance_word(xctx *c, uint32_t offset, uint32_t word)
 { h2_bus_write32(c, 0, 0xFD700000 + offset, word); }
@@ -187,6 +223,57 @@ int main(void)
     assert(h2_bus_read32(&c, 0, 0xFD800044) == put - 4);
     for (unsigned i = 0; i < 4; ++i)
         assert(*(uint32_t *)(g_xram + 0x20000 + (i / 2) * 64 + (i % 2) * 4) == 0x12345678);
+    g_xpt[0x80020] = 0x20000;
+    h2_bus_write32(&c, 0x1234, 0xFD800040, put);
+    c.r[4] = 0x600000; c.r[0] = 0;
+    X_M32(c.r[4] + 4) = 0x406C08; X_M32(c.r[4] + 8) = 0x300000;
+    X_M32(c.r[4] + 12) = 0x12C000; X_M32(c.r[4] + 16) = 2560;
+    X_M32(c.r[4] + 20) = X_M32(c.r[4] + 24) = X_M32(c.r[4] + 28) = 0;
+    h2_host_tile_configure(&c);
+    packet(&put, 0x200, 640u << 16); packet(&put, 0x204, 480u << 16);
+    packet(&put, 0x20C, 0x0A000A00); packet(&put, 0x120, 0);
+    packet(&put, 0x124, 1); packet(&put, 0x128, 2);
+    packet(&put, 0x100, (0x300008u << 5) | 1);
+    X_M32(0x406C08 + 0x1B8) = 1; X_M32(0x406C08 + 0x7DC) = 1;
+    xctx interrupted = c;
+    xv_cur_fn = 0x1234;
+    g_xpt[0x80000 + (0x42B000 >> 12)] = 0x4000000; /* last framebuffer page */
+    if (!setjmp(fault)) { h2_bus_write32(&c, 0x1234, 0xFD800040, put); assert(0); }
+    assert(!software_calls && !memcmp(&c, &interrupted, sizeof c) && X_M32(0x406C08 + 0x7DC) == 1);
+    g_xpt[0x8042B] = 0x42B000;
+    X_M32(0x406C08 + 0x18C) = 0x1000; /* client callback remains unsupported */
+    if (!setjmp(fault)) { h2_bus_write32(&c, 0x1234, 0xFD800040, put); assert(0); }
+    assert(!software_calls && !memcmp(&c, &interrupted, sizeof c));
+    X_M32(0x406C08 + 0x18C) = 0;
+    h2_bus_write32(&c, 0x1234, 0xFD800040, put);
+    assert(software_calls == 1 && !memcmp(&c, &interrupted, sizeof c) && xv_cur_fn == 0x1234);
+    assert(X_M32(0x408650) == 0x300000 && X_M32(0x406C08 + 0x1BC) == 1);
+    packet(&put, 0x12C, 0); packet(&put, 0x130, 0);
+    h2_bus_write32(&c, 0x1234, 0xFD800040, put);
+    assert(h2_bus_read32(&c, 0, 0xFD800044) == put);
+    c.r[4] = 0x600000; X_M32(c.r[4]) = 0x3F9BF7;
+    X_M32(c.r[4] + 4) = 0x406D9C; X_M32(c.r[4] + 8) = 6;
+    X_M32(c.r[4] + 12) = 1; X_M32(c.r[4] + 16) = X_M32(c.r[4] + 20) = 0;
+    X_M32(0x406DA0) = 0; X_M32(0x406C10) = 0x88070701;
+    interrupted = c; vblank_result = -1;
+    if (!setjmp(fault)) { __wrap_xk_KeWaitForSingleObject(&c); assert(0); }
+    assert(vblank_calls == 1 && !event_calls && !wait_calls && !memcmp(&c, &interrupted, sizeof c));
+    assert(!X_M32(0x406DA0) && !X_M32(0x406DC8));
+    vblank_result = 0; vblank_delta = 0;
+    if (!setjmp(fault)) { __wrap_xk_KeWaitForSingleObject(&c); assert(0); }
+    assert(vblank_calls == 2 && !event_calls && !wait_calls);
+    vblank_delta = 1; X_M32(0x406C08 + 0x190) = 0x1000;
+    if (!setjmp(fault)) { __wrap_xk_KeWaitForSingleObject(&c); assert(0); }
+    assert(vblank_calls == 2 && !event_calls); X_M32(0x406C08 + 0x190) = 0;
+    __wrap_xk_KeWaitForSingleObject(&c);
+    interrupted.r[0] = 0; interrupted.r[4] += 24;
+    assert(vblank_calls == 3 && event_calls == 1 && wait_calls == 1 && !memcmp(&c, &interrupted, sizeof c));
+    assert(X_M32(0x406DC8) == 1 && X_M32(0x406DA0) == 1);
+    c.r[4] = 0x600000; X_M32(c.r[4] + 4) = 0x7000;
+    __wrap_xk_KeWaitForSingleObject(&c);
+    assert(wait_calls == 2 && vblank_calls == 3); /* unrelated wait passes through */
+    if (!setjmp(fault)) { h2_bus_write32(&c, 0, 0xFD40071C, 2); assert(0); }
+    assert(software_calls == 1); /* no arbitrary external increment or DAC access */
     puts("Host-channel runtime: LTCG contracts, mapped resources, canonical color/depth/stencil pixels and strict rejection pass.");
     free(g_xpt); free(g_xram); return 0;
 }

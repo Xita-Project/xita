@@ -17,10 +17,18 @@ static h2_host_channel channel;
 static h2_host_tiles tiles;
 static xctx *active_context;
 static int miniport_ready, channel_ready;
+static int software_active, initialization_flip_done;
+static uint8_t scanout_gamma[768]; /* interleaved R/G/B DAC entries */
+static unsigned gamma_cursor;
+static int software_flip(void *opaque, uint32_t value, uint32_t source);
+static int channel_idle(void);
 extern void xv_logf(const char *, ...);
+extern volatile uint32_t xv_cur_fn;
 extern uint32_t xk_mem_arena_size(void);
 extern void f_003FE165(xctx *), f_003FE190(xctx *);
 extern void f_00401C33(xctx *), f_00401D96(xctx *);
+extern void f_003FF240(xctx *);
+extern void __real_xk_KeWaitForSingleObject(xctx *), xk_KeSetEvent(xctx *);
 
 static void reject(xctx *c, uint32_t ip, uint32_t address, uint32_t value)
 {
@@ -184,6 +192,7 @@ void h2_host_channel_configure(xctx *c)
     X_M32(mini + 0x108) |= 1;
     channel_ready = 1;
     channel.clear.check_attachment = check_attachment;
+    channel.software_flip = software_flip;
     xv_logf("[h2/channel] configured channel=0 DMA=%08X context=%08X ring=%08X+%X schedule=%08X\n",
             dma_instance, context, channel.stream.base, channel.stream.bytes, schedule);
     X_RET(3);
@@ -198,6 +207,42 @@ void h2_host_memory_barrier(xctx *c)
     X_RET(0);
 }
 static h2_host_av_config av_config;
+static unsigned mode_vblanks;
+void __wrap_xk_KeWaitForSingleObject(xctx *c)
+{
+    check_stack(c, 0, 5);
+    if (X_ARG(0) != MINIPORT + 0x194) { __real_xk_KeWaitForSingleObject(c); return; }
+    uint32_t ip = X_M32(c->r[4]), event = MINIPORT + 0x194;
+    /* Audited first mode-transition wait, before scanout is enabled. Service
+     * one real host vblank; general IRQs, callbacks and asynchronous flips are
+     * still unsupported. Other kernel waits use the original implementation. */
+    if (!initialization_flip_done || mode_vblanks || !channel_idle() ||
+        ip != 0x3F9BF7 || X_ARG(1) != 6 || X_ARG(2) != 1 || X_ARG(3) || X_ARG(4) ||
+        c->r[4] < 16 || !guest_span_valid(c->r[4] - 16, 16) ||
+        !guest_span_valid(MINIPORT, 0x1DC) || X_M32(event) != 0x00040000 ||
+        X_M32(event + 4) || X_M32(MINIPORT + 0x1B8) != 1 || X_M32(MINIPORT + 0x190) ||
+        X_M32(MINIPORT + 0x1BC) != 1 || X_M32(MINIPORT + 0x1CC) != 1 ||
+        X_M32(MINIPORT + 0x174) || X_M32(MINIPORT + 0x180) ||
+        X_M32(MINIPORT + 0x1C0) || X_M32(MINIPORT + 0x1C4) ||
+        X_M32(MINIPORT + 0x1D4) || X_M32(MINIPORT + 0x1D8) ||
+        X_M32(MINIPORT + 8) != 0x88070701) reject(c, ip, event, 0);
+    uint32_t before, after;
+    int status = h2_platform_wait_vblank(&before, &after);
+    if (status < 0 || before == after) reject(c, ip, event, (uint32_t)status);
+    /* The driver's empty-queue progressive vblank path increments its count,
+     * records the same RDTSC timebase and signals this notification event. */
+    X_M32(MINIPORT + 0x1C0) = 1;
+    X_M32(MINIPORT + 0x1D8) = (uint32_t)x_rdtsc();
+    X_M32(MINIPORT + 0x1D0) = 0;
+    xctx signal = *c; signal.r[4] -= 16;
+    X_M32(signal.r[4]) = 0x3FEE5E;
+    X_M32(signal.r[4] + 4) = event; X_M32(signal.r[4] + 8) = 1; X_M32(signal.r[4] + 12) = 0;
+    xk_KeSetEvent(&signal);
+    if (signal.r[4] != c->r[4]) reject(c, ip, signal.r[4], c->r[4]);
+    ++mode_vblanks;
+    xv_logf("[h2/vblank] real Vita vcount=%u->%u delivered event=%08X; scanout disabled\n", before, after, event);
+    __real_xk_KeWaitForSingleObject(c);
+}
 h2_host_av_config h2_host_av_configuration(void) { return av_config; }
 void __wrap_xk_AvSendTVEncoderOption(xctx *c)
 {
@@ -255,9 +300,71 @@ void h2_host_tile_configure(xctx *c)
     X_RET(7);
 }
 
+static int software_flip(void *opaque, uint32_t value, uint32_t source)
+{
+    (void)opaque;
+    uint32_t address = (value >> 5) & ~15u;
+    /* First audited flip: immediate, interval zero, scanout disabled, an empty
+     * software queue, no timing or client callback, identity gamma pending.
+     * Validate every possible guest input/write span before invoking its body. */
+    if (software_active || initialization_flip_done || (value & 0x1FF) != 0x101 ||
+        !active_context || active_context->r[4] < 256 ||
+        !guest_span_valid(active_context->r[4] - 256, 256) ||
+        !guest_span_valid(MINIPORT, 0x7E4) || !guest_span_valid(0x408650, 4) ||
+        channel.clear.format != 0x128 || channel.clear.clip_horizontal != (640u << 16) ||
+        channel.clear.clip_vertical != (480u << 16) ||
+        (channel.clear.pitch & 0xFFFF) != 2560 ||
+        !map_physical_raw(address, 640 * 480 * 4) ||
+        !check_attachment(NULL, address, 640 * 480 * 4, 2560, 0, 0x128) ||
+        X_M32(MINIPORT) != BAR || X_M32(MINIPORT + 0x1B8) != 1 ||
+        X_M32(MINIPORT + 0x18C) || X_M32(MINIPORT + 0x1D4) ||
+        X_M32(MINIPORT + 0x7DC) != 1 || X_M32(MINIPORT + 0x7E0) ||
+        channel.commands.flip_read != 0 || channel.commands.flip_write != 1 ||
+        channel.commands.flip_modulo != 2) return 0;
+    for (unsigned offset = 0x174; offset <= 0x188; offset += 4)
+        if (X_M32(MINIPORT + offset)) return 0;
+    for (unsigned offset = 0x1BC; offset <= 0x1D8; offset += 4)
+        if (X_M32(MINIPORT + offset)) return 0;
+    for (unsigned component = 0; component < 3; ++component)
+        for (unsigned i = 0; i < 256; ++i)
+            if (X_M8(MINIPORT + 0x1DC + component * 256 + i) != i) return 0;
+    /* The software interrupt uses a private CPU context. Original queue/global
+     * RAM updates remain visible; all interrupted CPU/FP/control state survives. */
+    xctx *interrupted = active_context;
+    uint32_t interrupted_fn = xv_cur_fn;
+    xctx interrupt = *interrupted;
+    interrupt.r[0] = value; interrupt.r[1] = MINIPORT;
+    interrupt.preempt = 100000; /* bounded interrupt body cannot yield mid-command */
+    software_active = 1; gamma_cursor = 0;
+    call_guest(&interrupt, f_003FF240, source);
+    active_context = interrupted;
+    xv_cur_fn = interrupted_fn;
+    software_active = 0;
+    if (gamma_cursor != 768 || channel.commands.flip_read != 1 ||
+        X_M32(0x408650) != address || X_M32(MINIPORT + 0x1BC) != 1 ||
+        X_M32(MINIPORT + 0x1CC) != 1 || X_M32(MINIPORT + 0x7DC))
+        reject(active_context, source, address, value);
+    initialization_flip_done = 1;
+    xv_logf("[h2/flip] original initialization handler completed address=%08X gamma_bytes=%u read=%u; scanout disabled, no presentation\n",
+            address, gamma_cursor, channel.commands.flip_read);
+    return 1;
+}
 int h2_host_channel_bus(xctx *c, uint32_t ip, uint32_t address, unsigned width,
                          uint32_t *value, int write)
 {
+    if (address == BAR + 0x40071C || address == BAR + 0x6813C8 || address == BAR + 0x6813C9) {
+        if (!software_active) reject(c, ip, address, *value);
+        if (address == BAR + 0x40071C) {
+            if (width != 4 || (write && (*value != 2 || channel.commands.flip_read != 0)))
+                reject(c, ip, address, *value);
+            if (write) channel.commands.flip_read = 1; else *value = 0;
+        } else {
+            if (!write || width != 1 || (address == BAR + 0x6813C8 && (*value || gamma_cursor)) ||
+                (address == BAR + 0x6813C9 && gamma_cursor >= 768)) reject(c, ip, address, *value);
+            if (address == BAR + 0x6813C9) scanout_gamma[gamma_cursor++] = *value;
+        }
+        return 1;
+    }
     if (address != BAR + 0x800040 && address != BAR + 0x800044 &&
         address != BAR + 0x3240 && address != BAR + 0x3244 && address != BAR + 0x400700) return 0;
     if (!channel_ready || width != 4 || (write && address != BAR + 0x800040))

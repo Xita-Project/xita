@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <psp2/display.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/clib.h>
@@ -56,6 +57,13 @@ void xv_logf(const char *fmt, ...)
 }
 void xv_log_flush(void) { if (log_fd >= 0) sceIoSyncByFd(log_fd, 0); }
 uint64_t h2_graphics_time_us(void) { return sceKernelGetSystemTimeWide(); }
+int h2_platform_wait_vblank(uint32_t *before, uint32_t *after)
+{
+    *before = (uint32_t)sceDisplayGetVcount();
+    int result = sceDisplayWaitVblankStart();
+    *after = (uint32_t)sceDisplayGetVcount();
+    return result;
+}
 static void graphics_snapshot(void)
 {
     /* Diagnostic state from the pinned image's static device. This file may
@@ -207,6 +215,7 @@ int main(void)
     xv_logf("[h2/boot] entering guest scheduler\n");
     xk_run_until_idle();
     xv_logf("[h2/boot] scheduler returned\n");
+    graphics_snapshot();
     xv_log_flush();
     return 0;
 }

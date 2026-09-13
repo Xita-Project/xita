@@ -245,6 +245,15 @@ static int kelvin(h2_command_state *s, h2_kelvin_clear *c, unsigned sub,
     case 0x120: if (value > 7) return 0; s->flip_read = value; return 1;
     case 0x124: if (value > 7) return 0; s->flip_write = value; return 1;
     case 0x128: if (value > 7) return 0; s->flip_modulo = value; return 1;
+    case 0x12C:
+        if (value || s->flip_modulo < 2 || s->flip_write >= s->flip_modulo ||
+            s->flip_read >= s->flip_modulo) return 0;
+        s->flip_write = (s->flip_write + 1) % s->flip_modulo; return 1;
+    case 0x130:
+        /* A stalled asynchronous flip has no completion source yet. Stop it;
+         * only already completed synchronous work may pass this condition. */
+        return !value && s->flip_modulo >= 2 && s->flip_write < s->flip_modulo &&
+               s->flip_read < s->flip_modulo && s->flip_read != s->flip_write;
     case 0x9FC: if (value > 1) return 0; s->provoking_vertex = value; return 1;
     case 0x16BC: if (value > 1) return 0; s->edge_flag = value; return 1;
     case 0x1D6C: if (value & 3) return 0; s->semaphore_offset = value; return 1;

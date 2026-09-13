@@ -11,6 +11,8 @@ typedef struct h2_host_channel {
     h2_command_state commands;
     h2_dma_object dma;
     h2_push_read read_physical;
+    /* Optional XDK software flip boundary. Rejection must preserve guest/state. */
+    int (*software_flip)(void *opaque, uint32_t value, uint32_t source);
     void *opaque;
     uint32_t put;
     uint8_t bootstrap;
