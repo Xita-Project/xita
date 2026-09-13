@@ -14,7 +14,10 @@ def load_hooks(adapter, image):
     if adapter == "halo2_5849_graphics":
         from .halo2_5849.hooks import Halo2GraphicsHooks
         return Halo2GraphicsHooks(image)
+    if adapter == "halo2_5849_host_channel":
+        from .halo2_5849.hooks import Halo2HostChannelHooks
+        return Halo2HostChannelHooks(image)
     raise ValueError(f"Unknown game adapter: {adapter}")
 
 
-ADAPTERS = frozenset({"halo_ce_3925", "halo2_5849_graphics"})
+ADAPTERS = frozenset({"halo_ce_3925", "halo2_5849_graphics", "halo2_5849_host_channel"})

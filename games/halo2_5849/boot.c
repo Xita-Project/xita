@@ -56,11 +56,25 @@ void xv_logf(const char *fmt, ...)
 }
 void xv_log_flush(void) { if (log_fd >= 0) sceIoSyncByFd(log_fd, 0); }
 uint64_t h2_graphics_time_us(void) { return sceKernelGetSystemTimeWide(); }
+static void graphics_snapshot(void)
+{
+    /* Diagnostic state from the pinned image's static device. This file may
+     * contain owned game data and belongs only in the private emulator lab. */
+    static uint8_t device[0x24A0];
+    x_guest_read(device, 0x404FE0u, sizeof device);
+    FILE *snapshot = fopen("ux0:data/xita-halo2/device-at-stop.bin", "wb");
+    if (!snapshot) return;
+    size_t written = fwrite(device, 1, sizeof device, snapshot);
+    int closed = fclose(snapshot);
+    xv_logf("[h2/graphics] private device snapshot base=00404FE0 bytes=%u complete=%d\n",
+            (unsigned)written, written == sizeof device && closed == 0);
+}
 void h2_graphics_stop(xctx *context, uint32_t instruction, uint32_t address,
                       uint32_t value, int write, int reason)
 {
     (void)context;
     h2_gpu_bus_report();
+    graphics_snapshot();
     xv_logf("[h2/blocked] NV2A %s eip=%08X address=%08X value=%08X reason=%d\n",
             write ? "write" : "read", instruction, address, value, reason);
     xv_log_flush();
@@ -73,6 +87,7 @@ void xv_check_guest_address(uint32_t address)
      * runtime's shared unmapped-memory trash page. */
     if (address >= 0xFD000000u && address < 0xFE000000u) {
         h2_gpu_bus_report();
+        graphics_snapshot();
         xv_logf("[h2/blocked] NV2A MMIO address=%08X fn=%08X\n", address, xv_cur_fn);
         xv_log_flush();
         sceKernelExitProcess(24);

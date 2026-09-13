@@ -1,5 +1,6 @@
 """Pinned Halo 2 diagnostic bus translation; no CE or constructor replacements."""
 from iced_x86 import Mnemonic, OpKind, Register
+import hashlib
 from recompiler.core.hooks import NoGameHooks
 from recompiler.core.profile import load_profile
 
@@ -53,3 +54,25 @@ class Halo2GraphicsHooks(NoGameHooks):
         section = self.image.section_of(instruction.ip)
         return bool(section and section[4] == "D3D" and
                     lower_bus_mov(emitter, instruction, output))
+
+
+HOST_BOUNDARIES = {
+    0x3FE005: (352, "3c7fccae26a9a87e47c60a69737aa6cde7340fee827b8e4b0338e96236947b4e", "h2_host_miniport_init"),
+    0x4026CE: (410, "8d205a7f9f747353088695cf6df386bff659143e376c211663e9d74713fb56a0", "h2_host_channel_configure"),
+    0x3FADE0: (45, "97d24aa2909c3ed0a59eb665c9759882cc01544230ea133ac77d1c1c532afc81", "h2_host_memory_barrier"),
+}
+
+
+class Halo2HostChannelHooks(Halo2GraphicsHooks):
+    def __init__(self, image):
+        super().__init__(image)
+        for address, (length, digest, _) in HOST_BOUNDARIES.items():
+            if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+                raise ValueError(f"Halo 2 host channel boundary mismatch at {address:#x}")
+
+    def function_entry(self, address):
+        boundary = HOST_BOUNDARIES.get(address)
+        if boundary is None:
+            return []
+        name = boundary[2]
+        return [f"    {{ extern void {name}(xctx *); {name}(c); return; }}"]

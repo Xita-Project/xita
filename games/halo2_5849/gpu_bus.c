@@ -9,6 +9,9 @@ static uint64_t last_time_us;
 static uint32_t pramin_reads, pramin_writes, pramin_unique;
 static uint8_t pramin_touched[0x10000 / 4 / 8];
 extern void xv_logf(const char *format, ...);
+/* Linked only by the separate experimental host-channel target. */
+extern int h2_host_channel_bus(xctx *, uint32_t, uint32_t, unsigned, uint32_t *, int)
+    __attribute__((weak));
 
 void h2_gpu_bus_reset(uint32_t physical_memory_bytes)
 {
@@ -49,6 +52,8 @@ static uint32_t bus_read(xctx *context, uint32_t instruction, uint32_t address, 
         x_guest_read(&value, address, width);
         return value;
     }
+    if (h2_host_channel_bus && h2_host_channel_bus(context, instruction, address, width, &value, 0))
+        return value;
     advance_time(context, instruction, address, 0, 0);
     enum h2_nv2a_result result;
     if (address >= 0xFD700000u && address < 0xFD800000u) {
@@ -77,6 +82,8 @@ static void bus_write(xctx *context, uint32_t instruction, uint32_t address, uin
         x_guest_write(address, &value, width);
         return;
     }
+    if (h2_host_channel_bus && h2_host_channel_bus(context, instruction, address, width, &value, 1))
+        return;
     advance_time(context, instruction, address, value, 1);
     enum h2_nv2a_result result;
     if (address >= 0xFD700000u && address < 0xFD800000u) {

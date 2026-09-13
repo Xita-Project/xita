@@ -16,7 +16,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("xbe", type=Path)
     parser.add_argument("--out", type=Path, default=ROOT / "local/halo2_5849/boot")
-    parser.add_argument("--graphics", action="store_true", help="enable the strict diagnostic NV2A bus adapter")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--graphics", action="store_true", help="enable the strict diagnostic NV2A bus adapter")
+    mode.add_argument("--host-channel", action="store_true", help="enable the experimental synchronous command consumer (requires HOST_CHANNEL=1)")
     args = parser.parse_args()
     image = Image(str(args.xbe))
     load_profile("halo2_5849").validate_image(image)
@@ -35,6 +37,8 @@ def main():
     output = args.out.resolve()
     generated = output / "generated"
     profile = str(Path(__file__).with_name("graphics-profile.json")) if args.graphics else "halo2_5849"
+    if args.host_channel:
+        profile = str(Path(__file__).with_name("host-channel-profile.json"))
     subprocess.run([sys.executable, "-m", "recompiler", str(args.xbe.resolve()),
                     "--profile", profile, "--no-data-roots", "--trace-calls", "--trace-funcs",
                     "--files", "128", "-o", str(generated),
