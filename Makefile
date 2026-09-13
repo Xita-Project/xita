@@ -344,6 +344,9 @@ RECOMP_CFLAGS := -O2 -fno-strict-aliasing -mthumb -mcpu=cortex-a9 -mfpu=neon -w 
 ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_MODEL_PALETTE
 endif
+ifeq ($(XV_NATIVE_OBJECT_BASIS),1)
+RECOMP_CFLAGS += -DXV_NATIVE_OBJECT_BASIS
+endif
 ifeq ($(XV_QUAT_CACHE),1)
 RECOMP_CFLAGS += -DXV_QUAT_CACHE
 endif
@@ -351,6 +354,7 @@ endif
 # Native replacements must retain the lifted multiply/add rounding points.
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -ffp-contract=off
+$(RECOMP_BUILD)/kernel/xk_object_basis.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_clip.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_bounds.o: RECOMP_CFLAGS += -ffp-contract=off
 recomp/kernel/xk_bounds.c: tools/gen_native_bounds.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)

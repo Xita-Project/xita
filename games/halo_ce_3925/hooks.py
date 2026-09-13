@@ -73,6 +73,8 @@ class HaloHooks(NoGameHooks):
         self.image = image
         self.enabled = matches_image(image)
         self.flare_enabled = self.enabled
+        self.object_basis_enabled = self.enabled and hashlib.sha256(
+            image.bytes_at(0x8E166, 301) or b"").hexdigest() == "2dd205a3eef42000a6f5adf73582961a651e1ab9630a6669285a972085f61941"
         self.palette_enabled = self.enabled and all(
             hashlib.sha256(image.bytes_at(address, size) or b"").hexdigest() == digest
             for address, size, digest in (
@@ -80,6 +82,10 @@ class HaloHooks(NoGameHooks):
                 (0xB5B40, 339, "21273987e0276cda51a2d70b2b576abc42195b8efeff9ab4e8f552a15b323726")))
 
     def before_instruction(self, address):
+        if self.object_basis_enabled and address == 0x8E166:
+            return ["#ifdef XV_NATIVE_OBJECT_BASIS",
+                    "    { extern int xv_math_object_basis(xctx *); if (xv_math_object_basis(c)) goto L_0008E293; }",
+                    "#endif"]
         if self.palette_enabled and address == 0xA2781:
             return ["#ifdef XV_NATIVE_MODEL_PALETTE",
                     "    { extern int xv_math_model_palette(xctx *); if (xv_math_model_palette(c)) goto L_000A27F2; }",

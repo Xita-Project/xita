@@ -34,6 +34,10 @@ static int math_overlap(const void *a, unsigned an, const void *b, unsigned bn)
 }
 void xv_native_math_report(unsigned frames)
 {
+#ifdef XV_NATIVE_OBJECT_BASIS
+    extern void xv_object_basis_report(unsigned);
+    xv_object_basis_report(frames);
+#endif
 #ifdef XV_QUAT_CACHE
     xv_quat_cache_report(frames);
 #endif
