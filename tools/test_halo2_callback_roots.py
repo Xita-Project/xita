@@ -30,6 +30,29 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_four_registered_interfaces_exact_bounds_and_bindings(self):
+        image = SyntheticImage(); image.section_name = ".text"; image.targets = {}
+        bindings = ((0x417370, 0x462E00, 0x417378), (0x4173E4, 0x462E10, 0x4173E8),
+                    (0x41745C, 0x462E28, 0x417460), (0x4174D0, 0x462F30, 0x4174D8))
+        expected = set()
+        for number, (slot, instance, table) in enumerate(bindings):
+            image.targets[slot] = instance; image.targets[instance] = table
+            for index in range(27):
+                target = 0x1000 + (number * 27 + index) * 16
+                image.targets[table + 4 * index] = target; expected.add(target)
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_INTERFACE_REGISTRATION", spec):
+            self.assertEqual(prepare_boot.game_registered_interface_roots(image), expected)
+            image.targets[0x462F30] += 4
+            with self.assertRaisesRegex(ValueError, "binding"):
+                prepare_boot.game_registered_interface_roots(image)
+            image.targets[0x462F30] -= 4; image.targets[0x417540] = None
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_registered_interface_roots(image)
+        with patch.object(prepare_boot, "GAME_INTERFACE_REGISTRATION", (0x200, len(image.code), "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_registered_interface_roots(image)
+
     def test_allocator_vtable_bounds_and_revision(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {slot: 0x1000 + n * 16

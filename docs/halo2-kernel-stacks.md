@@ -35,7 +35,10 @@ bytes are preserved.
 
 The checked boot runtime also rejects access to unmapped pages in this stack
 window, including lower guards and retired stacks. This is a diagnostic fault;
-it does not implement resumable guest stack-overflow exceptions.
+it does not implement resumable guest stack-overflow exceptions. Shared
+virtual-memory/allocation-size queries do not yet enumerate these high aliases
+as VAD allocations. Address-validity and physical-address queries use the real
+page map; broader alias-query support has not been exercised or asserted.
 
 ## Validation and native 51
 

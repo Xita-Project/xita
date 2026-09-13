@@ -4,7 +4,7 @@ This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
 `5849` identifies the linked XDK library build, not an asserted game build number.
 
-The [latest native checkpoint and exact private replay command](../../docs/halo2-checkpoint-20260913.md)
+The [latest native checkpoint and exact private replay command](../../docs/halo2-sparse-state-jump.md)
 describe the current normal and diagnostic startup stops. There is no main menu.
 
 A separate [native startup target](../../docs/halo2-native-boot-20260912.md)
@@ -63,5 +63,6 @@ must not be distributed or uploaded as releases.
 The separate `--host-channel --audio-unavailable` diagnostic selects the
 [original game's audio-driver failure path](../../docs/halo2-audio-error-path-20260913.md).
 It returns an explicit error at public sound creation, creates no audio object,
-and currently reaches an undiscovered game-initialization callback. It supplies
+and now reaches a second-device texture-state submission after executing the
+original startup callbacks and sparse state transition. It supplies
 no audio, additional rendering or menu; the ordinary profile is unchanged.

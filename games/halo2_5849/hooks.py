@@ -8,6 +8,42 @@ from recompiler.core.profile import load_profile
 _GPRS = {getattr(Register, name) for name in (
     "EAX ECX EDX EBX ESP EBP ESI EDI AX CX DX BX SP BP SI DI AL CL DL BL AH CH DH BH".split())}
 
+SPARSE_JUMP_IP = 0x18EBDD
+SPARSE_JUMP_TABLE = 0x18EC08
+SPARSE_JUMP_GUARDS = (
+    (0x18EB80, 100, "85bfb44438536da9c07ee5e19acdea5a49c29502b71c96b3214736fd4b29902a"),
+    (0x18EC08, 24, "93324ac5bd2d4025f18ded90bf69be6bdce3f496bd293bc14b2948db69676743"),
+)
+
+
+def reviewed_sparse_jump_roots(image):
+    """Native52: a six-entry table with null holes, not a contiguous prefix."""
+    for address, length, digest in SPARSE_JUMP_GUARDS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 sparse jump fingerprint mismatch")
+    roots = set()
+    for index in range(6):
+        target = image.u32(SPARSE_JUMP_TABLE + index * 4)
+        if target == 0:
+            continue
+        if not image.is_code(target):
+            raise ValueError("Halo 2 sparse jump target is not executable")
+        roots.add(target)
+    return roots
+
+
+def lower_sparse_jump(emitter, instruction, output):
+    if instruction.ip != SPARSE_JUMP_IP:
+        return False
+    if (instruction.mnemonic != Mnemonic.JMP or instruction.op0_kind != OpKind.MEMORY or
+            instruction.memory_base != Register.NONE or instruction.memory_index != Register.EAX or
+            instruction.memory_index_scale != 4 or instruction.memory_displacement != SPARSE_JUMP_TABLE):
+        raise ValueError("Halo 2 sparse jump instruction shape mismatch")
+    # Use the existing generic indirect-tail-jump form. It reads the actual
+    # table word, does not push a return address, and faults null/unknown targets.
+    output.append(f"    xv_call(c, {emitter.operand(instruction, 0, 4)}); return;")
+    return True
+
 
 def lower_bus_mov(emitter, instruction, output):
     """Preserve scalar MOV semantics while making reads/writes explicit to HLE.
@@ -100,6 +136,10 @@ class Halo2HostChannelHooks(Halo2GraphicsHooks):
         for address, (length, digest, _) in HOST_BOUNDARIES.items():
             if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
                 raise ValueError(f"Halo 2 host channel boundary mismatch at {address:#x}")
+        reviewed_sparse_jump_roots(image)
+
+    def lower_instruction(self, emitter, instruction, output):
+        return lower_sparse_jump(emitter, instruction, output) or super().lower_instruction(emitter, instruction, output)
 
     def function_entry(self, address):
         boundary = HOST_BOUNDARIES.get(address)

@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from recompiler.core.profile import load_profile
 from recompiler.xita_recomp import Image, KERNEL_DATA_EXPORTS, KERNEL_EXPORTS
+from games.halo2_5849.hooks import reviewed_sparse_jump_roots
 
 
 HOST_CALLBACK_WALK = (0x3FBA54, 135, "e0cc1649c0b744615b3de0f5b2446411bb408d0b3ce4d1d3da59980219abc70c")
@@ -18,6 +19,7 @@ XPP_CALLBACK_WALK = (0x408C72, 36, "9234a2afaedda5206ca55c2bf3f0269b70b1b0345091
 GAME_INIT_WALK = (0x137C84, 19, "44c1c20adf4bb014714a0825d601e592e668699e31671c7676a674951946da02")
 GAME_DESCRIPTOR_WALK = (0x1088E0, 124, "c1bf2193fbf5a7f7a8d0de9fffaaf9ee5cbe12ced08b39059af29896540348ec")
 GAME_MODE_WALK = (0x18EF00, 152, "c499facfbe49993ebd3e15bb55a4f65adafb4bfd53eb99474ba7bb96ad3f8102")
+GAME_INTERFACE_REGISTRATION = (0x3769F0, 45, "46e548c6c8f362dc1ba57b6f7581a1b2c0bffb4b2cb9c2e812dcc7b9544b1611")
 GAME_DISPATCH_CONSTRUCTORS = (
     (0x23546B, 27, "cbd17bebf8667c708be45cbe65a4fc6dfc672448edf8c83151e4173d16e69e71"),
     (0x234E43, 33, "84924bde2768f01fd262d3d0cd0916038e22c201d8200008e05c9cdff85bd95f"),
@@ -49,6 +51,10 @@ def _constructor_vtable_roots(image, constructors, start, end):
     for address, length, digest in constructors:
         if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
             raise ValueError("Halo 2 dispatch constructor fingerprint mismatch")
+    return _code_vtable_roots(image, start, end)
+
+
+def _code_vtable_roots(image, start, end):
     roots = set()
     for slot in range(start, end, 4):
         target = image.u32(slot)
@@ -56,6 +62,22 @@ def _constructor_vtable_roots(image, constructors, start, end):
         if not target or not image.is_code(target) or not section or section[4] != ".text":
             raise ValueError(f"Halo 2 dispatch vtable slot {slot:#x} has invalid target")
         roots.add(target)
+    return roots
+
+
+def game_registered_interface_roots(image):
+    """Native51: four static interface objects registered by the same initializer."""
+    address, length, digest = GAME_INTERFACE_REGISTRATION
+    if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+        raise ValueError("Halo 2 interface registration fingerprint mismatch")
+    roots = set()
+    for slot, instance, table in ((0x417370, 0x462E00, 0x417378),
+                                  (0x4173E4, 0x462E10, 0x4173E8),
+                                  (0x41745C, 0x462E28, 0x417460),
+                                  (0x4174D0, 0x462F30, 0x4174D8)):
+        if image.u32(slot) != instance or image.u32(instance) != table:
+            raise ValueError(f"Halo 2 interface binding {slot:#x} mismatch")
+        roots.update(_code_vtable_roots(image, table, table + 27 * 4))
     return roots
 
 
@@ -225,6 +247,8 @@ def main():
         roots.update(game_dispatch_vtable_roots(image))
         roots.update(game_mode_callback_roots(image))
         roots.update(game_allocator_vtable_roots(image))
+        roots.update(game_registered_interface_roots(image))
+        roots.update(reviewed_sparse_jump_roots(image))
         # Native49: 1A474C passes the global arena object 47D924 to 18E1F0.
         # Its stored vtable is 4508FC: allocate/free, followed by string data.
         if image.u32(0x47D924) != 0x4508FC:
