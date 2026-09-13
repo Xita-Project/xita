@@ -69,6 +69,15 @@ core-utilization readings.
 
 ## Next gate and evidence
 
+September 13 follow-up ruled out another small target in the sampled scene.
+A private indirect-dispatch census over 600 stationary Blood Gulch frames records
+683,603 calls: 681,758 hit the existing guest cache (99.73%), and only 641 require
+the HLE table search (1.07 per frame). Repeated HLE searches are avoidable, but
+their frequency does not justify prioritizing a new cache over the larger scene
+and object routines. These emulator counts are not hardware timings. Evidence
+is in the phase-followup directory's `audit/dispatch/result-live.json`; the
+instrumentation is private and the dispatch implementation is unchanged.
+
 First resolve storage integrity sufficiently to collect the installed 48-scope
 diagnostic. Rank actual Vita child costs, then prototype the largest independent
 batch with a serial fallback and equivalence tests. Measure dispatch, worker,
