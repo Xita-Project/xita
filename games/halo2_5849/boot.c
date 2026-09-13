@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <psp2/ctrl.h>
 #include <psp2/display.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
@@ -18,6 +19,7 @@
 #include "gpu_bus.h"
 #include "instance_memory.h"
 #include "scanout.h"
+#include "input.h"
 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
 uint8_t *g_xram;
@@ -60,6 +62,34 @@ void xv_logf(const char *fmt, ...)
 }
 void xv_log_flush(void) { if (log_fd >= 0) sceIoSyncByFd(log_fd, 0); }
 uint64_t h2_graphics_time_us(void) { return sceKernelGetSystemTimeWide(); }
+static int16_t pad_axis(uint8_t value, int invert)
+{
+    int32_t axis = value < 128 ? ((int32_t)value - 128) * 256 :
+                              ((int32_t)value - 128) * 32767 / 127;
+    if (invert) axis = -axis;
+    if (axis > 32767) axis = 32767;
+    return (int16_t)axis;
+}
+int h2_platform_pad(h2_pad_sample *sample, int initialize)
+{
+    if (initialize) {
+        int result = sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);
+        if (result < 0) return result;
+    }
+    SceCtrlData pad = {0};
+    int result = sceCtrlPeekBufferPositive(0, &pad, 1);
+    if (result < 1) return result < 0 ? result : -1;
+    memset(sample, 0, sizeof *sample);
+    const uint32_t digital[] = {SCE_CTRL_UP, SCE_CTRL_DOWN, SCE_CTRL_LEFT,
+                               SCE_CTRL_RIGHT, SCE_CTRL_START, SCE_CTRL_SELECT};
+    const uint32_t analog[] = {SCE_CTRL_CROSS, SCE_CTRL_CIRCLE, SCE_CTRL_SQUARE,
+                              SCE_CTRL_TRIANGLE, 0, 0, SCE_CTRL_LTRIGGER, SCE_CTRL_RTRIGGER};
+    for (unsigned i = 0; i < 6; ++i) if (pad.buttons & digital[i]) sample->buttons |= 1u << i;
+    for (unsigned i = 0; i < 8; ++i) if (pad.buttons & analog[i]) sample->analog[i] = 255;
+    sample->axes[0] = pad_axis(pad.lx, 0); sample->axes[1] = pad_axis(pad.ly, 1);
+    sample->axes[2] = pad_axis(pad.rx, 0); sample->axes[3] = pad_axis(pad.ry, 1);
+    return 0;
+}
 int h2_platform_wait_vblank(uint32_t *before, uint32_t *after)
 {
     *before = (uint32_t)sceDisplayGetVcount();

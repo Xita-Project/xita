@@ -79,6 +79,12 @@ class Halo2GraphicsHooks(NoGameHooks):
 
 
 HOST_BOUNDARIES = {
+    0x4098C0: (5, "9561ed51279ef9f1745a95cdc2983dffdffddc77f72490c0a5633693bfdcbd1f", "h2_input_init"),
+    0x409932: (86, "bfb4e066121c5f7f7a06d73dbbb718944f287af76bfecea43cd50054d5dbc226", "h2_input_open"),
+    0x409988: (12, "57f31931e7501e76294d43919c37ad52bb9ed9a16078c6a9058b32fa53f09203", "h2_input_close"),
+    0x409994: (472, "66d193ca4aaf3159e9e9e2e789c2505f451bace610b47f186ac702b977658f67", "h2_input_capabilities"),
+    0x409B6C: (115, "1d0e98d392433bce9ad7ca82f285a16ce3355d3ac8f2179299eb55827cd293a2", "h2_input_state"),
+    0x409BDF: (51, "2bbc1fbb891fbf9c9acb1941fa38d5a9cf75545f6917f0653429da4d3d89dab2", "h2_input_feedback"),
     0x3FE4CB: (436, "2d6efe5e6fab632c7e291a17ec657f774d20f7952bcbf759278e62df7995c214", "h2_host_miniport_shutdown"),
     0x3FE005: (352, "3c7fccae26a9a87e47c60a69737aa6cde7340fee827b8e4b0338e96236947b4e", "h2_host_miniport_init"),
     0x4026CE: (410, "8d205a7f9f747353088695cf6df386bff659143e376c211663e9d74713fb56a0", "h2_host_channel_configure"),
