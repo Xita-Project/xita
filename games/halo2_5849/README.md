@@ -49,6 +49,10 @@ It has allocated color and logical depth resources and
 [completed the constructor's initial command submission and semaphore write](../../docs/halo2-constructor-submission-20260913.md).
 It now also [executes the first depth/stencil clear](../../docs/halo2-first-depth-clear-20260913.md)
 and [presents the initial, entirely black framebuffer](../../docs/halo2-first-scanout-20260913.md).
+The original game has since retired its first device, constructed its second,
+loaded its font assets and [opened the real Vita controller](../../docs/halo2-vita-input-20260913.md).
+Startup now [stops at Xbox audio hardware](../../docs/halo2-audio-boundary-20260913.md);
+there is still no menu.
 Draws, blits, recurring flips and the title/menu remain unsupported. Unknown
 commands stop explicitly. Diagnostic packages embed owned game image/code and
 must not be distributed or uploaded as releases.

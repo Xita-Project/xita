@@ -93,6 +93,10 @@ def main():
         # string data. Keep the whole-image revision guard and exact bounds.
         roots.update(image.u32(slot) for slot in (0x453308, 0x45330C))
         roots.update(host_device_callback_roots(image))
+        # Attempt 39 reaches the sound object's four-slot vtable at 0x4170E4:
+        # destructor, AddRef, Release, delete helper. Slot one is the observed
+        # indirect dispatch from 0x37B17B. The following words are data.
+        roots.update(image.u32(slot) for slot in range(0x4170E4, 0x4170F4, 4))
     output = args.out.resolve()
     generated = output / "generated"
     profile = str(Path(__file__).with_name("graphics-profile.json")) if args.graphics else "halo2_5849"
