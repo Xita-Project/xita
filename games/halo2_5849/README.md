@@ -40,5 +40,13 @@ for build, isolation, validation and current limits.
 
 `prepare_boot.py --graphics` selects a separate experimental profile for
 [explicit graphics bus accesses](../../docs/halo2-graphics-bus-20260913.md).
-The original guest constructor has passed PCI setup and now stops at an
-unmodeled master-control register. This is not rendered output or a working menu.
+The original guest constructor has passed PCI, clock, memory and instance setup
+and stops at an unsupported PVIDEO access. This is not rendered output.
+
+`prepare_boot.py --host-channel`, built with `HOST_CHANNEL=1` in its own output
+directory, adds the [explicit host miniport/channel boundary](../../docs/halo2-host-channel-20260913.md).
+It has allocated color and logical depth resources and
+[completed the constructor's initial command submission and semaphore write](../../docs/halo2-constructor-submission-20260913.md).
+Draws, blits, native presentation and the title/menu remain unsupported. Unknown
+commands stop explicitly. Diagnostic packages embed owned game image/code and
+must not be distributed or uploaded as releases.

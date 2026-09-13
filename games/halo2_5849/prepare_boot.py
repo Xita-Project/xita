@@ -2,6 +2,7 @@
 """Prepare private, revision-checked Halo 2 startup artifacts from an owned XBE."""
 from pathlib import Path
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -10,6 +11,31 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from recompiler.core.profile import load_profile
 from recompiler.xita_recomp import Image, KERNEL_DATA_EXPORTS, KERNEL_EXPORTS
+
+
+HOST_CALLBACK_WALK = (0x3FBA54, 135, "e0cc1649c0b744615b3de0f5b2446411bb408d0b3ce4d1d3da59980219abc70c")
+
+
+def host_channel_callback_roots(image):
+    """Exact default-state callback walk observed at 3FBACA in native attempt 25.
+
+    EBX traverses E4..294 and ESI=EBX-170. The indirect call runs only for
+    ESI>=B0 and EBX!=268, with EBP=403A48. This excludes slot403B40.
+    The enclosing caller already has the whole-image revision gate in main().
+    """
+    address, length, digest = HOST_CALLBACK_WALK
+    if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+        raise ValueError("Halo 2 default-state callback walk fingerprint mismatch")
+    roots = set()
+    for slot in range(0x403AF8, 0x403B70, 4):
+        if slot == 0x403B40:
+            continue
+        target = image.u32(slot)
+        section = image.section_of(target) if target is not None else None
+        if not target or not image.is_code(target) or not section or section[4] != "D3D":
+            raise ValueError(f"Halo 2 default-state callback {slot:#x} has invalid target {target!r}")
+        roots.add(target)
+    return roots
 
 
 def main():
@@ -34,6 +60,8 @@ def main():
             if target is None or not image.is_code(target):
                 raise ValueError(f"Initializer slot {slot:#x} has invalid target {target!r}")
             roots.add(target)
+    if args.host_channel:
+        roots.update(host_channel_callback_roots(image))
     output = args.out.resolve()
     generated = output / "generated"
     profile = str(Path(__file__).with_name("graphics-profile.json")) if args.graphics else "halo2_5849"

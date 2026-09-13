@@ -154,6 +154,7 @@ void xv_runtime_trap(xctx *c, uint32_t address)
 {
     xv_logf("[h2/blocked] guest trap address=%08X fn=%08X eax=%08X ecx=%08X esp=%08X return=%08X\n",
             address, xv_cur_fn, c->r[0], c->r[1], c->r[4], X_M32(c->r[4]));
+    graphics_snapshot();
     xv_log_flush();
     sceKernelExitProcess(23);
 }

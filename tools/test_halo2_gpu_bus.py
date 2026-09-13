@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from games import load_hooks
-from games.halo2_5849.hooks import lower_bus_mov
+from games.halo2_5849.hooks import lower_bus_mov, lower_bus_compare
 from recompiler.core.hooks import NoGameHooks
 from recompiler import xita_recomp as recomp
 from tools.test_game_profiles import fixture
@@ -18,7 +18,7 @@ from tools.test_game_profiles import fixture
 
 class SyntheticBusHooks(NoGameHooks):
     def lower_instruction(self, emitter, instruction, output):
-        return lower_bus_mov(emitter, instruction, output)
+        return lower_bus_mov(emitter, instruction, output) or lower_bus_compare(emitter, instruction, output)
 
 
 class Halo2Bus(unittest.TestCase):
@@ -45,6 +45,15 @@ class Halo2Bus(unittest.TestCase):
                 0x110F0: "668911c3",  # MOV [ECX],DX
                 0x11100: "c6011fc3",  # byte immediate
                 0x11110: "8c19c3",  # MOV [ECX],DS must retain existing segment path
+                0x11120: "3b019c5dc3",  # CMP EAX,[ECX]
+                0x11130: "39019c5dc3",  # CMP [ECX],EAX
+                0x11140: "663b019c5dc3",  # CMP AX,[ECX]
+                0x11150: "6639019c5dc3",  # CMP [ECX],AX
+                0x11160: "3a219c5dc3",  # CMP AH,[ECX]
+                0x11170: "38219c5dc3",  # CMP [ECX],AH
+                0x11180: "8339ff9c5dc3",  # CMP dword [ECX], sign-extended -1
+                0x11190: "668339ff9c5dc3",  # CMP word [ECX], sign-extended -1
+                0x111A0: "8039ff9c5dc3",  # CMP byte [ECX], FF
                 0x11080: "894908c3",  # store address register as data
             }
             for address, code in programs.items():
@@ -73,6 +82,7 @@ class Halo2Bus(unittest.TestCase):
 #include <assert.h>
 #include <setjmp.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include "code_000.c"
 #include "gpu_bus.h"
 #include "nv2a_regs.h"
@@ -92,6 +102,18 @@ void h2_graphics_stop(xctx *c, uint32_t ip, uint32_t address, uint32_t value, in
     (void)c; (void)value;
     stopped_ip = ip; stopped_address = address; stopped_write = write; stopped_reason = reason;
     longjmp(escape, 1);
+}
+static uint32_t comparison_flags(uint32_t a, uint32_t b, unsigned bits)
+{
+    uint32_t mask = bits == 32 ? UINT32_MAX : (1u << bits) - 1;
+    a &= mask; b &= mask;
+    uint32_t result = (a - b) & mask, sign = 1u << (bits - 1);
+    unsigned parity = 0;
+    for (unsigned i = 0; i < 8; ++i) parity ^= (result >> i) & 1;
+    /* Shared xf_eflags currently omits AF; preserve that existing contract. */
+    return (a < b) | ((!parity) << 2) |
+           ((!result) << 6) | (!!(result & sign) << 7) |
+           (!!((a ^ b) & (a ^ result) & sign) << 11);
 }
 int main(void)
 {
@@ -153,6 +175,37 @@ int main(void)
     c.r[1] = 0xFD715000;
     if (!setjmp(escape)) { f_00011040(&c); abort(); }
     assert(stopped_reason == H2_NV2A_UNSUPPORTED_OPERATION);
+    /* CMP reads leave all data registers and RAM intact; flags cover signed
+     * overflow, borrow, zero, sign and parity at each width. The inherited AF
+     * omission in xf_eflags is outside this bus-read change. */
+    void (*compare[3][3])(xctx *) = {
+        {f_00011160, f_00011170, f_000111A0},
+        {f_00011140, f_00011150, f_00011190},
+        {f_00011120, f_00011130, f_00011180}
+    };
+    uint32_t samples[] = {0, 1, 15, 16, 127, 128, 255, 256, 32767, 32768, 65535, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF};
+    for (unsigned w = 0; w < 3; ++w) for (unsigned order = 0; order < 3; ++order)
+    for (unsigned i = 0; i < sizeof samples / sizeof *samples; ++i)
+    for (unsigned j = 0; j < sizeof samples / sizeof *samples; ++j) {
+        unsigned bits = 8u << w;
+        uint32_t a = samples[i], b = samples[j];
+        c.r[1] = 0x1FFF; c.r[2] = b; f_00011050(&c);
+        c.r[0] = w ? a : ((a & 255) << 8) | 0xABC00003;
+        uint32_t eax = c.r[0], esp = c.r[4];
+        compare[w][order](&c);
+        uint32_t left = order ? b : a, right = order == 2 ? UINT32_MAX : order ? a : b;
+        if ((c.r[5] & 0x8D5) != comparison_flags(left, right, bits)) fprintf(stderr, "CMP bits=%u order=%u a=%08X b=%08X flags=%X expect=%X\n", bits, order, a, b, c.r[5], comparison_flags(left, right, bits));
+        assert((c.r[5] & 0x8D5) == comparison_flags(left, right, bits));
+        assert(c.r[0] == eax && c.r[1] == 0x1FFF && c.r[2] == b && c.r[4] == esp + 4);
+        f_00011040(&c); assert(c.r[0] == b);
+        c.r[4] = 0x1800;
+    }
+    c.r[0] = 6; c.r[1] = 0xFD001804;
+    f_00011120(&c); assert((c.r[5] & 0x8D5) == 0x44 && c.r[0] == 6);
+    c.r[1] = 0xFD000100; uint32_t before_flags = xf_eflags(&c);
+    if (!setjmp(escape)) { f_00011120(&c); abort(); }
+    assert(stopped_ip == 0x11120 && stopped_address == c.r[1] && !stopped_write);
+    assert(xf_eflags(&c) == before_flags);
     /* Unsupported reads/writes report the actual instruction and do not run on. */
     c.r[1] = 0xFD600140; c.r[2] = 1;
     if (!setjmp(escape)) { f_00011050(&c); abort(); }

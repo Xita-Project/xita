@@ -44,6 +44,27 @@ def lower_bus_mov(emitter, instruction, output):
     return False
 
 
+def lower_bus_compare(emitter, instruction, output):
+    """Read a scalar CMP memory operand through the same checked bus as MOV."""
+    ins = instruction
+    if ins.mnemonic != Mnemonic.CMP:
+        return False
+    memory = [i for i in range(2) if ins.op_kind(i) == OpKind.MEMORY]
+    width = emitter.op_size(ins, 0)
+    if len(memory) != 1 or width not in (1, 2, 4):
+        return False
+    other = 1 - memory[0]
+    if ins.op_kind(other) == OpKind.REGISTER and ins.op_register(other) not in _GPRS:
+        return False
+    operands = [emitter.operand(ins, i, width) for i in range(2)]
+    operands[memory[0]] = f"h2_bus_read{width * 8}(c, 0x{ins.ip:X}u, {emitter.addr(ins)})"
+    ctype = f"uint{width * 8}_t"
+    output.append(f"    {{ extern uint32_t h2_bus_read{width * 8}(xctx *, uint32_t, uint32_t); "
+                  f"{ctype} a_ = {operands[0]}, b_ = {operands[1]}; "
+                  f"X_FLAGS(XK_SUB, a_, b_, ({ctype})(a_-b_), {width * 8}); }}")
+    return True
+
+
 class Halo2GraphicsHooks(NoGameHooks):
     def __init__(self, image):
         # A profile with a different executable cannot opt into these rules.
@@ -53,7 +74,8 @@ class Halo2GraphicsHooks(NoGameHooks):
     def lower_instruction(self, emitter, instruction, output):
         section = self.image.section_of(instruction.ip)
         return bool(section and section[4] == "D3D" and
-                    lower_bus_mov(emitter, instruction, output))
+                    (lower_bus_mov(emitter, instruction, output) or
+                     lower_bus_compare(emitter, instruction, output)))
 
 
 HOST_BOUNDARIES = {
