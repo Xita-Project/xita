@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Compare Vita-compiled model batches in a Cortex-A9 instruction emulator.
+
+Requires private original.c from test_model_palette.py --output-dir, VitaSDK,
+Unicorn and pyelftools. Memory-copy imports are modeled and counted separately;
+instruction counts are neither CPU cycles nor hardware frame times.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import struct
+import subprocess
+
+from elftools.elf.elffile import ELFFile
+from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_CODE
+from unicorn.arm_const import (UC_ARM_REG_C1_C0_2, UC_ARM_REG_FPEXC, UC_ARM_REG_FPSCR,
+    UC_CPU_ARM_CORTEX_A9, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
+    UC_ARM_REG_SP, UC_ARM_REG_LR, UC_ARM_REG_PC)
+
+ROOT = Path(__file__).resolve().parents[1]
+RAM, PT, STACK, CTX, END, ENV = (0x20000000, 0x21000000, 0x22000000,
+                                0x23000000, 0x24000000, 0x25000000)
+SIZE = 1 << 20
+FIELDS = ('size', 'r', 'st', 'fsp', 'fsw', 'fcw', 'preempt', 'f_kind', 'f_bits', 'xmm')
+
+
+def build(directory, reference, cc):
+    harness = directory / 'arm-fixture.c'
+    harness.write_text('''#include "xv_x86rt.h"
+#include <stddef.h>
+uint8_t *g_xram, *g_img_base;
+uint32_t *g_xpt;
+const unsigned layout[] = {sizeof(xctx),offsetof(xctx,r),offsetof(xctx,st),offsetof(xctx,fsp),offsetof(xctx,fsw),offsetof(xctx,fcw),offsetof(xctx,preempt),offsetof(xctx,f_kind),offsetof(xctx,f_bits),offsetof(xctx,xmm)};
+void test_boot(void) {}
+void xk_os_log(const char *format, ...) { (void)format; }
+char *getenv(const char *name) { (void)name; return (char *)0; }
+int atoi(const char *value) { (void)value; return 0; }
+void __wrap_xv_preempt(xctx *c) { c->preempt = 100; }
+void *memcpy(void *dest, const void *source, size_t size) { (void)source;(void)size;return dest; }
+void *memset(void *dest, int value, size_t size) { (void)value;(void)size;return dest; }
+void *memmove(void *dest, const void *source, size_t size) { (void)source;(void)size;return dest; }
+''')
+    elf = directory / 'arm-test.elf'
+    command = [cc, '-O2', '-fno-strict-aliasing', '-ffp-contract=off', '-mthumb',
+               '-mcpu=cortex-a9', '-mfpu=neon', '-std=gnu11', '-I' + str(ROOT / 'recomp'),
+               '-DXV_NATIVE_MODEL_PALETTE', '-ffunction-sections', '-fdata-sections',
+               str(reference), str(harness), str(ROOT / 'recomp/kernel/xk_palette.c'),
+               str(ROOT / 'recomp/kernel/xk_math.c'), str(ROOT / 'recomp/xv_x86rt.c'),
+               '-nostdlib', '-Wl,-Ttext=0x10000,-e,test_boot,--gc-sections,--wrap=xv_preempt,'
+               '--undefined=original_palette,--undefined=current_palette,--undefined=candidate_palette,'
+               '--undefined=layout', '-lgcc', '-o', str(elf)]
+    subprocess.run(command, check=True)
+    return elf, command
+
+
+class Machine:
+    def __init__(self, path):
+        self.uc = uc = Uc(UC_ARCH_ARM, UC_MODE_ARM)
+        uc.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_A9)
+        uc.reg_write(UC_ARM_REG_C1_C0_2, 15 << 20)
+        uc.reg_write(UC_ARM_REG_FPEXC, 1 << 30)
+        with path.open('rb') as file:
+            elf = ELFFile(file)
+            self.symbols = {s.name: s['st_value'] for s in elf.get_section_by_name('.symtab').iter_symbols() if s.name}
+            segments = [s for s in elf.iter_segments() if s['p_type'] == 'PT_LOAD']
+            pages = sorted({page for segment in segments for page in range(
+                segment['p_vaddr'] & ~4095, (segment['p_vaddr'] + segment['p_memsz'] + 4095) & ~4095, 4096)})
+            for page in pages:
+                uc.mem_map(page, 4096)
+            for segment in segments:
+                uc.mem_write(segment['p_vaddr'], segment.data())
+        for base, size in ((RAM, SIZE), (PT, 4 << 20), (STACK, 65536),
+                           (CTX, 4096), (END, 4096), (ENV, 4096)):
+            uc.mem_map(base, size)
+        uc.mem_write(ENV, b'1\0')
+        for name, value in (('g_xram', RAM), ('g_xpt', PT), ('g_img_base', RAM)):
+            if name in self.symbols:
+                uc.mem_write(self.symbols[name], struct.pack('<I', value))
+        data = uc.mem_read(self.symbols['layout'], len(FIELDS) * 4)
+        self.layout = dict(zip(FIELDS, struct.unpack('<' + 'I' * len(FIELDS), data)))
+        self.imports = {self.symbols[n] & ~1: n for n in
+                        ('getenv', 'atoi', 'xk_os_log', 'memcpy', 'memmove', 'memset', '__wrap_xv_preempt')
+                        if n in self.symbols}
+        uc.hook_add(UC_HOOK_CODE, self.step)
+
+    def step(self, uc, address, size, user):
+        self.instructions += 1
+        name = self.imports.get(address)
+        if not name:
+            return
+        if name == 'getenv':
+            uc.reg_write(UC_ARM_REG_R0, ENV)
+        elif name == 'atoi':
+            uc.reg_write(UC_ARM_REG_R0, 1)
+        elif name == 'xk_os_log':
+            pass
+        elif name == '__wrap_xv_preempt':
+            self.yields += 1
+            return  # Execute the fixture's actual budget-reset instructions.
+        else:
+            dst, src, count = (uc.reg_read(reg) for reg in (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2))
+            assert count <= SIZE
+            data = bytes([src & 255]) * count if name == 'memset' else bytes(uc.mem_read(src, count))
+            uc.mem_write(dst, data)
+            self.copies += 1
+            self.copy_bytes += count
+            uc.reg_write(UC_ARM_REG_R0, dst)
+        uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
+
+    def run(self, function, fixture):
+        memory, context, pages, rounding = fixture
+        uc = self.uc
+        uc.mem_write(RAM, memory)
+        uc.mem_write(CTX, context)
+        uc.mem_write(PT, struct.pack('<' + 'I' * len(pages), *pages))
+        uc.mem_write(STACK, bytes(65536))
+        uc.reg_write(UC_ARM_REG_R0, CTX)
+        uc.reg_write(UC_ARM_REG_SP, STACK + 65024)
+        uc.reg_write(UC_ARM_REG_LR, END | 1)
+        uc.reg_write(UC_ARM_REG_FPSCR, rounding << 22)
+        self.instructions = self.copies = self.copy_bytes = self.yields = 0
+        counters = ('palette_batches', 'math_fast', 'math_fallback')
+        before = {name: struct.unpack('<I', uc.mem_read(self.symbols[name], 4))[0]
+                  for name in counters}
+        uc.emu_start(self.symbols[function] | 1, END, count=2000000)
+        assert uc.reg_read(UC_ARM_REG_PC) == END, function + ' did not return'
+        delta = {name: (struct.unpack('<I', uc.mem_read(self.symbols[name], 4))[0] - before[name]) & 0xffffffff
+                 for name in counters}
+        return dict(context=bytes(uc.mem_read(CTX, self.layout['size'])),
+                    memory=bytes(uc.mem_read(RAM, SIZE)), instructions=self.instructions,
+                    copies=self.copies, copy_bytes=self.copy_bytes, yields=self.yields,
+                    batches=delta['palette_batches'], native_matrices=delta['math_fast'],
+                    translated_matrices=delta['math_fallback'])
+
+
+def fixture(layout, count, variant, rounding):
+    memory = bytearray(b'\xa5' * SIZE)
+    context = bytearray(layout['size'])
+    pages = [(i ^ 0x40) * 4096 for i in range(SIZE // 4096)]
+    model, pose, nodes, sp = 0x12000, 0x21080, 0x31080, 0x51800
+    if variant == 1:
+        nodes = pose - 0x68
+    elif variant == 2:
+        pose = 0x21ffc
+        pages[0x22] = pages[0x25]
+    elif variant == 3:
+        pages[sp >> 12] = pages[pose >> 12]
+    elif variant == 5:
+        model = 0x12ffc - 0xb8
+    elif variant == 6:
+        pose += 1
+    elif variant == 7:
+        sp = 0x51010  # Existing per-matrix stack guard falls back across this page.
+
+    def write(address, data):
+        for index, value in enumerate(data):
+            memory[pages[(address + index) >> 12] + ((address + index) & 4095)] = value
+
+    def word(address, value):
+        write(address, struct.pack('<I', value))
+
+    def field(name, value, fmt='I'):
+        struct.pack_into('<' + fmt, context, layout[name], value)
+
+    def reg(index, value):
+        struct.pack_into('<I', context, layout['r'] + index * 4, value)
+
+    for i in range(8):
+        reg(i, 0x12345000 + i)
+        struct.pack_into('<d', context, layout['st'] + i * 8, i + .375)
+        for j in range(4):
+            struct.pack_into('<f', context, layout['xmm'] + (i * 4 + j) * 4, i * 4 + j + .25)
+    reg(4, sp); reg(5, model); reg(7, pose)
+    field('fsp', count % 8); field('fsw', 0xabcd, 'H'); field('fcw', 0x37f, 'H')
+    field('preempt', max(count - 1, 0) if variant == 4 else count)
+    field('f_kind', 3); field('f_bits', 32)
+    word(model + 0xb8, count); word(model + 0xbc, nodes)
+    for n in range(count):
+        for j in range(13):
+            write(pose + n * 52 + j * 4, struct.pack('<f', ((n * 13 + j) % 17 - 8) * .037))
+            write(nodes + 0x68 + n * 156 + j * 4, struct.pack('<f', ((n * 7 + j) % 13 - 6) * .021))
+    return bytes(memory), bytes(context), pages, rounding
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--reference', type=Path, required=True)
+    parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--cc', default=os.environ.get('ARM_CC', 'arm-vita-eabi-gcc'))
+    args = parser.parse_args()
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    elf, command = build(args.output_dir, args.reference, args.cc)
+    machine = Machine(elf)
+    for function in ('original_palette', 'current_palette', 'candidate_palette'):
+        machine.run(function, fixture(machine.layout, 1, 0, 0))
+    rows = []
+    for rounding in range(4):
+        for count in (0, 1, 2, 4, 8, 16, 32, 64, 65):
+            for variant in range(8):
+                sample = fixture(machine.layout, count, variant, rounding)
+                results = {name: machine.run(name + '_palette', sample)
+                           for name in ('original', 'current', 'candidate')}
+                reference = results['original']
+                for name in ('current', 'candidate'):
+                    for field in ('context', 'memory', 'yields'):
+                        if results[name][field] != reference[field]:
+                            diagnostic = args.output_dir / f'mismatch-{rounding}-{count}-{variant}-{name}-{field}'
+                            if field != 'yields':
+                                diagnostic.with_suffix('.expected').write_bytes(reference[field])
+                                diagnostic.with_suffix('.actual').write_bytes(results[name][field])
+                            raise AssertionError(str(diagnostic))
+                assert results['candidate']['batches'] in (0, 1)
+                if variant == 0 and 1 <= count <= 64:
+                    assert results['current']['native_matrices'] > 0, 'Baseline must exercise existing native math'
+                row = dict(rounding=rounding, count=count, variant=variant)
+                row.update({name: {k: v for k, v in result.items() if k not in ('context', 'memory')}
+                            for name, result in results.items()})
+                rows.append(row)
+        print(f'PASS ARM rounding mode {rounding}: {len(rows)} fixture comparisons', flush=True)
+    report = dict(fixtures=len(rows), full_context_and_arena_match=True,
+                  limitation='Instruction counts exclude modeled memory-copy bodies; not cycles or Vita FPS',
+                  elf_sha256=hashlib.sha256(elf.read_bytes()).hexdigest(), command=command, rows=rows)
+    (args.output_dir / 'result.json').write_text(json.dumps(report, indent=2) + '\n')
+    for row in rows:
+        if row['rounding'] == row['variant'] == 0:
+            print('ARM nodes', row['count'], 'current', row['current']['instructions'],
+                  'batch', row['candidate']['instructions'], 'batch accepted', row['candidate']['batches'],
+                  'baseline native', row['current']['native_matrices'],
+                  'baseline translated', row['current']['translated_matrices'])
+
+
+if __name__ == '__main__':
+    main()

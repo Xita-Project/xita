@@ -3,3 +3,8 @@
 XITA_GAME_SRCS := recomp/kernel/xk_quality.c recomp/kernel/xk_math.c \
                   recomp/kernel/xk_clip.c recomp/kernel/xk_bounds.c recomp/kernel/xk_flare.c \
                   recomp/kernel/xk_geometry.c
+
+# Explicit experiment; ordinary Halo builds retain their existing objects.
+ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
+XITA_GAME_SRCS += recomp/kernel/xk_palette.c
+endif

@@ -341,9 +341,13 @@ XITA_GUEST_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GUEST
 XITA_SYS_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_SYS_SRCS))
 XITA_GAME_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GAME_SRCS))
 RECOMP_CFLAGS := -O2 -fno-strict-aliasing -mthumb -mcpu=cortex-a9 -mfpu=neon -w -std=gnu11 -I. -Iruntime -I$(RECOMP_DIR) -I$(RECOMP_DIR)/kernel
+ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
+RECOMP_CFLAGS += -DXV_NATIVE_MODEL_PALETTE
+endif
 
 # Native replacements must retain the lifted multiply/add rounding points.
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -ffp-contract=off
+$(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_clip.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_bounds.o: RECOMP_CFLAGS += -ffp-contract=off
 recomp/kernel/xk_bounds.c: tools/gen_native_bounds.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)

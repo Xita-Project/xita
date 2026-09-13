@@ -73,8 +73,17 @@ class HaloHooks(NoGameHooks):
         self.image = image
         self.enabled = matches_image(image)
         self.flare_enabled = self.enabled
+        self.palette_enabled = self.enabled and all(
+            hashlib.sha256(image.bytes_at(address, size) or b"").hexdigest() == digest
+            for address, size, digest in (
+                (0xA2781, 0x45, "a1460c149ae33b843578a5652fdd0dc09e5e9fe39ffb96fb5c19204041dd9fd3"),
+                (0xB5B40, 339, "21273987e0276cda51a2d70b2b576abc42195b8efeff9ab4e8f552a15b323726")))
 
     def before_instruction(self, address):
+        if self.palette_enabled and address == 0xA2781:
+            return ["#ifdef XV_NATIVE_MODEL_PALETTE",
+                    "    { extern int xv_math_model_palette(xctx *); if (xv_math_model_palette(c)) goto L_000A27F2; }",
+                    "#endif"]
         if self.flare_enabled and address in BARRIERS:
             return [barrier_line(address)]
         return []

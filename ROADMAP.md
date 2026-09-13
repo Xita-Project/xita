@@ -9,6 +9,12 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 13 [model matrix batch experiment](docs/model-palette-batch-20260913.md):
+an opt-in native loop avoids repeated guest-call and intermediate register-state
+work. Original-code comparisons, sanitizer tests, 288 Cortex-A9 execution cases,
+the native build and emulator Blood Gulch/cryo-room checks pass. Ordinary builds
+are unchanged; hardware gains and a larger safe parallel workload remain open.
+
 September 12 [deeper workload audit](docs/guest-workload-audit-20260912.md):
 independent model matrix products are a candidate for batching; object callbacks
 and hierarchical transforms still require ordered ownership. The private deeper
