@@ -119,9 +119,50 @@ Preserved private evidence under the existing backup directory:
 Keep gameplay, installation and cleanup writes paused. A full card backup and
 read-only inspection through a direct card reader are the next recovery steps;
 do not switch FATs, clear dirty flags, or delete the retained file as a shortcut.
-The computer currently has about 20 GiB free, insufficient for an uncompressed
-image of the 255,865,126,912-byte volume. A separate backup destination is needed.
+The computer initially had about 20 GiB free. The user subsequently freed about
+660 GiB, sufficient for an uncompressed image of the 255,865,126,912-byte volume.
 
 The next storage step is read-only allocation inspection or a stable image with
 appropriate read access, followed by a recovery plan based on those results.
 Do not use repeated app installs or deletion of the retained file as a repair.
+
+## Full-copy attempt and USB transport error
+
+The user ran a read-only `dd` image copy with exclusive destination creation and
+final synchronization. It stopped after **557,842,432 bytes (532 MiB)** with an
+input/output error. This is a partial image, not a complete backup. At 07:47:14
+the kernel logged a high-speed USB reset, SCSI read errors, and the device going
+offline/changed. Another reset appears at 07:48:32. This identifies a USB-path
+interruption during the failure; it does not prove bad microSD sectors or
+establish the cause of the earlier allocation damage.
+
+The original partial image is preserved, SHA-256
+`9f5da4eeb3ca99003ba37ee1674a283c1291af9c22cb63daaaa6c622d099d446`.
+All 54 earlier captured metadata ranges within it match byte-for-byte; two
+captured ranges lie beyond the partial image's extent. The kernel log, hashes
+and partial-copy status are saved under:
+
+`/home/birchwoodgod/xita-backups/vita-recovery-20260913`
+
+GNU ddrescue 1.30 is staged privately from the configured Manjaro repository's
+`ddrescue-1.30-2-x86_64` package. The repository SHA-256 and packager signature
+validate against the installed distribution keyrings. No system package was
+installed. A separate reflink copy, `vita-rescue.img`, and `vita-rescue.map`
+preserve the successful prefix and mark the remainder untried. The original
+partial image is not the recovery output.
+
+The [GNU ddrescue manual](https://www.gnu.org/software/ddrescue/manual/ddrescue_manual.html)
+describes persistent progress maps and `--try-again` for revisiting regions left
+untrimmed after a device stops responding. A synthetic read-failure test verifies
+that our conservative first-pass configuration stops, preserves the known
+prefix, and resumes to an exact complete copy. Without `--try-again`, skipping
+trim/sweep/scrape can leave prior failures unresolved even when a later run exits
+zero; completion must therefore also check the map and expected image length.
+
+The private `resume-backup.py` verifies the input size, saved boot identity and
+unmounted state; it writes only the pre-created regular image/map on the computer.
+It limits read errors and time without progress, performs no scraping/retry
+passes, preserves the original partial image, and checks map completion. It has
+not yet resumed physical recovery. Prefer a direct card reader to isolate the
+Vita USB path, or a different known-good cable/port if no reader is available.
+Recheck device identity before running; do not attempt filesystem repairs yet.
