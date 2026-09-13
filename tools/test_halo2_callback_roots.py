@@ -30,6 +30,20 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_constructor_bounded_dispatch_vtable(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16
+                         for n, slot in enumerate(range(0x4599A8, 0x4599DC, 4))}
+        spec = ((0x200, len(image.code), hashlib.sha256(image.code).hexdigest()),)
+        with patch.object(prepare_boot, "GAME_DISPATCH_CONSTRUCTORS", spec):
+            self.assertEqual(prepare_boot.game_dispatch_vtable_roots(image), set(image.targets.values()))
+            image.targets[0x4599D8] = None
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_dispatch_vtable_roots(image)
+        with patch.object(prepare_boot, "GAME_DISPATCH_CONSTRUCTORS", ((0x200, len(image.code), "0" * 64),)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_dispatch_vtable_roots(image)
+
     def test_game_record_stride_and_bounds(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {0x440DD8 + n * 0x24: 0x5000 + (n % 49) * 16 for n in range(68)}
