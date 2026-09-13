@@ -4,7 +4,7 @@ This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
 `5849` identifies the linked XDK library build, not an asserted game build number.
 
-The [latest native checkpoint and exact private replay command](../../docs/halo2-online-interfaces.md)
+The [latest native checkpoint and exact private replay command](../../docs/halo2-constant-vertex-attribute.md)
 describe the current normal and diagnostic startup stops. There is no main menu.
 
 A separate [native startup target](../../docs/halo2-native-boot-20260912.md)
@@ -65,7 +65,7 @@ The separate `--host-channel --audio-unavailable` diagnostic selects the
 It returns an explicit error at public sound creation, creates no audio object,
 and now executes original deferred timer callbacks with the corrected kernel
 ABI, runs a limited native FP mask/clear bridge, executes original state interfaces, then stops at an unsupported
-vertex-attribute graphics command. Earlier
+XDK software graphics command. Earlier
 texture-state progress followed an incorrectly balanced timer return; the
 current checkpoint documents this limitation. It supplies
 no audio, additional rendering or menu; the ordinary profile is unchanged.

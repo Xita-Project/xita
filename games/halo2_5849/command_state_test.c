@@ -115,6 +115,25 @@ int main(void)
     reject(0, 0x1E90, 0); /* executing a program remains unsupported */
     assert(emit(0, 0x194C, 0x11223344) && s.vertex4ub[3] == 0x11223344);
     reject(0, 0x1940, 1); /* position attribute would emit a vertex */
+    /* Constant attribute 15 writes retain every float bit independently,
+     * including NaNs, infinities, signed zero and repeated components. */
+    const uint32_t attribute_bits[] = {0, 0x3F000000, 0x3F800000, 0x42280000,
+                                      0x80000000, 0x7F800000, 0x7FC12345, 0x7F812345};
+    for (unsigned value = 0; value < sizeof attribute_bits / sizeof *attribute_bits; ++value) {
+        for (unsigned component = 0; component < 4; ++component) {
+            unsigned method = 0x1AF0 + component * 4;
+            h2_command_state expected = s; h2_kelvin_clear clear = c; fixture memory = f;
+            expected.setup[method / 4] = attribute_bits[value];
+            expected.setup_valid[method / 128] |= 1u << ((method / 4) % 32);
+            assert(emit(0, method, attribute_bits[value]));
+            assert(!memcmp(&s, &expected, sizeof s) && !memcmp(&c, &clear, sizeof c));
+            assert(!memcmp(&f, &memory, sizeof f));
+            reject(1, method, 0); reject(0, method + 1, 0);
+        }
+    }
+    for (unsigned method = 0x1A00; method < 0x1AF0; method += 4) reject(0, method, 0);
+    reject(0, 0x197C, 0); /* packed alias of attribute 15 is not implemented */
+    reject(0, 0x17FC, 0); reject(0, 0x17FC, 5); /* no begin/end or emission */
     assert(emit(0, 0xA20, 0x7FC12345) && s.constants[0x3B][0] == 0x7FC12345);
     assert(emit(0, 0xAF8, 0x80000000) && s.constants[0x3A][2] == 0x80000000);
     assert(emit(0, 0xA7C, 0xDEADBEEF) && s.setup[0xA7C / 4] == 0xDEADBEEF);

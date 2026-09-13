@@ -70,6 +70,13 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
     if ((method >= 0xA60 && method <= 0xA9C) || /* combiner factors */
         (method >= 0xAE0 && method <= 0xAEC)) { /* texture color keys */
         /* Full packed color values. */
+    } else if (method >= 0x1AF0 && method <= 0x1AFC) {
+        /* SET_VERTEX_DATA4F attribute 15, one exact component per method.
+         * Attribute 0's final component emits a vertex and stays unsupported.
+         * BEGIN_END and every vertex-emission path reject, so there can be no
+         * pending vertices whose old attributes need materializing here.
+         * Preserve the raw float bits and per-component validity for a future
+         * backend; this neither executes a shader nor emits geometry. */
     } else if (method >= 0x3C0 && method <= 0x3FC) { /* four texgen S/T/R/Q slots */
         if (value != 0 && value != 0x2400 && value != 0x2401 && value != 0x2402 &&
             value != 0x8511 && value != 0x8512) return 0;
