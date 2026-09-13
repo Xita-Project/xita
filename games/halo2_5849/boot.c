@@ -21,6 +21,7 @@
 #include "scanout.h"
 #include "input.h"
 #include "command_snapshot.h"
+#include "kernel_stack.h"
 extern const h2_host_channel *h2_host_channel_current(void) __attribute__((weak));
 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
@@ -196,6 +197,8 @@ void h2_graphics_stop(xctx *context, uint32_t instruction, uint32_t address,
 }
 void xv_check_guest_address(uint32_t address)
 {
+    if (h2_kernel_stack_unmapped(address))
+        h2_kernel_stack_fault(xk_cur ? &xk_cur->ctx : NULL, "unmapped stack window", address, 0);
     /* Accesses that bypass the explicit bus adapter must not alias the
      * runtime's shared unmapped-memory trash page. */
     int ohci = address >= 0xFED00000u && address < 0xFED01000u;
@@ -209,6 +212,15 @@ void xv_check_guest_address(uint32_t address)
         /* Vita3K can return briefly while process teardown is pending. */
         for (;;) sceKernelDelayThread(1000);
     }
+}
+void h2_kernel_stack_fault(xctx *c, const char *reason, uint32_t first, uint32_t second)
+{
+    graphics_snapshot();
+    xv_logf("[h2/blocked] kernel stack reason=%s first=%08X second=%08X fn=%08X esp=%08X\n",
+            reason, first, second, xv_cur_fn, c ? c->r[4] : 0);
+    xv_log_flush();
+    sceKernelExitProcess(26);
+    for (;;) sceKernelDelayThread(1000);
 }
 void xv_watch_enter(uint32_t address, xctx *c) { (void)address; (void)c; }
 void xv_watch_leave(uint32_t address, uint32_t back, xctx *c) { (void)address; (void)back; (void)c; }
