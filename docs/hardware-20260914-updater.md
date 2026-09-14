@@ -44,9 +44,17 @@ writing. No mount changes occur in the game or rendering loop.
 The new helper, contract, fallback boot record and candidate in slot B were
 copied directly through the user's authorized USB connection. All five files
 were hashed again after a read-only remount, and the volume was safely unmounted.
-The original slot A and user settings retained their hashes. Slot B is pending
-until its first successful dashboard startup; this transfer alone does not
-prove either physical startup or a successful Wi-Fi installation.
+The original slot A and user settings retained their hashes during that USB
+transfer. The user then launched Xita, and the paired service confirmed the
+expected runtime in slot B. A subsequent real Wi-Fi upload of the same candidate
+applied through the new helper, restarted automatically, and confirmed slot A
+with the expected hash and empty staging state. The identical candidate was
+intentional: slot switching must be verified even when hashes are equal.
+The revised launcher-log endpoint also works on hardware. Halo subsequently
+reached its normal main menu through remote dashboard input.
+
+This establishes physical dashboard update/startup, not a successful update
+from active gameplay, long-running rollback recovery, or an FPS improvement.
 
 | Component | SHA-256 |
 | --- | --- |
@@ -72,3 +80,12 @@ FPS gain. The preceding physical object-basis trials averaged approximately
 11.75 FPS with or without that helper, so no useful improvement was established.
 The next planned comparison is the optional native model-palette batch, followed
 by further scene/object profiling if the whole-frame benefit is small.
+
+A first explicit model-palette trial completed all three phases in Vita3K, but
+the host downloaded its log before the final file bytes were visible and
+correctly refused to report success. Vita3K's `sceIoSyncByFd` is unimplemented.
+The host now polls only the appended log tail after measurement until the
+restoration record is readable, then downloads the full evidence. A repeated
+native trial passes with the requested model-palette tag and all camera checks;
+its approximately 20 FPS values reflect the emulator cap, not hardware speed.
+This host-only fix changes no executable or measured phase behavior.

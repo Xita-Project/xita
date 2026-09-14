@@ -33,6 +33,8 @@ def benchmark_cases(tmp):
             return {"frame": 100}
         def log(self, path):
             assert not self.active; Path(path).write_text(self.records)
+        def wait_benchmark_log(self, offset):
+            assert not self.active
         def hold(self, buttons, duration):
             self.active = True
             if self.mode != "missing-result":
@@ -61,6 +63,18 @@ def benchmark_cases(tmp):
 
 
 def main():
+    # Completion status may precede visible file bytes. Incremental polling
+    # must accept a split restoration line without re-reading the whole log.
+    tail_client=object.__new__(Client)
+    chunks=[b'',b'[model-palette-compare] resto',b'red 360p (requested 360p)\n']
+    cursor=[100]
+    def delayed_log(path):
+        assert path==f'/log?offset={cursor[0]}'
+        data=chunks.pop(0);cursor[0]+=len(data)
+        return {'x-log-size':str(cursor[0])},data
+    tail_client.request=delayed_log
+    with patch('vita_remote.time.sleep',lambda _:None):tail_client.wait_benchmark_log(100)
+    assert not chunks
     # An identical runtime hash must not hide a failed inactive-slot install.
     class Boot:
         def __init__(self,slot,state,sha='a'*64): self.value=dict(requested=0,boot_slot=slot,state=state,boot_sha256=sha)
