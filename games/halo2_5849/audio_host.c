@@ -493,6 +493,8 @@ static void scalar(xctx *c, uint32_t ip)
     live(c, ip, X_ARG(0), 0);
     if (ip == 0x37D52A && (!mapped(0x386B0C, 4) || X_M32(0x386B0C)))
         fail(c, ip, "unsupported sound shutdown state", 0x386B0C);
+    if (!apply && (device.dirty & 5))
+        fail(c, ip, "pending spatial listener commit is unsupported", device.dirty);
     if (ip == 0x37D506) { device.pending_distance = bits; device.dirty |= 8; }
     else if (ip == 0x37D5CD) { device.pending_rolloff = bits; device.dirty |= 16; }
     else { device.pending_doppler = bits; device.dirty |= 32; }
@@ -507,6 +509,28 @@ static void scalar(xctx *c, uint32_t ip)
             ip, bits, apply, device.distance, device.rolloff, device.doppler,
             device.pending_distance, device.pending_rolloff, device.pending_doppler, device.dirty);
     result(c, 0, 3);
+}
+static void listener_vector(xctx *c, uint32_t ip)
+{
+    unsigned count = ip == 0x37D598 ? 3 : 6;
+    stack(c, ip, count + 2);
+    if (X_ARG(count + 1) != 1)
+        fail(c, ip, "immediate spatial listener commit is unsupported", X_ARG(count + 1));
+    uint32_t value[6] = {0};
+    for (unsigned i = 0; i < count; ++i) {
+        value[i] = X_ARG(i + 1);
+        uint32_t magnitude = value[i] & 0x7FFFFFFF;
+        /* Only normal finite values and signed zero: subnormal/nonfinite
+         * x87 exception behavior is outside this pending-state boundary. */
+        if (magnitude >= 0x7F800000 || (magnitude && magnitude < 0x00800000))
+            fail(c, ip, "listener vector representation", value[i]);
+    }
+    live(c, ip, X_ARG(0), 0); buffer_operational(c, ip);
+    uint32_t *pending = count == 3 ? device.pending_position : device.pending_orientation;
+    memcpy(pending, value, count * 4); device.dirty |= count == 3 ? 1 : 4;
+    xv_logf("[h2/audio] deferred listener entry=%08X caller=%08X values=%08X,%08X,%08X,%08X,%08X,%08X dirty=%X; spatial commit unsupported\n",
+            ip, X_M32(c->r[4]), value[0], value[1], value[2], value[3], value[4], value[5], device.dirty);
+    result(c, 0, count + 2);
 }
 static void mix_bin(xctx *c, uint32_t ip)
 {
@@ -635,6 +659,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
 {
     uint32_t fpscr = h2_platform_fpscr_read();
     switch (ip) {
+    case 0x37D598: case 0x37D54E: listener_vector(c, ip); break;
     case 0x37D797: create(c); break;
     case 0x37A14F: case 0x37C70F: case 0x379F45: case 0x37A795: reference(c, ip); break;
     case 0x37D4BE: buffer_create(c); break;

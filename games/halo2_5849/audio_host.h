@@ -5,6 +5,8 @@ typedef struct {
     uint32_t base, references, ever_created, children;
     uint32_t distance, rolloff, doppler;
     uint32_t pending_distance, pending_rolloff, pending_doppler, dirty;
+    /* Valid only when dirty bit 1/4 is set. Spatial commit is unsupported. */
+    uint32_t pending_position[3], pending_orientation[6];
     uint8_t headroom[32];
 } h2_audio_device_snapshot;
 

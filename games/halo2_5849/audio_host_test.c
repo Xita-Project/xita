@@ -79,6 +79,53 @@ static void reject(xctx *c, uint32_t ip)
 }
 static uint32_t read32(uint32_t address)
 { uint32_t value; x_guest_read(&value, address, 4); return value; }
+static xctx vector_context(unsigned count, const uint32_t *values)
+{
+    xctx c = context(0x5008, 0, 0);
+    for (unsigned i = 0; i < count; ++i) X_M32(c.r[4] + 8 + i * 4) = values[i];
+    X_M32(c.r[4] + 8 + count * 4) = 1;
+    return c;
+}
+static void listener_vector_tests(void)
+{
+    h2_audio_device_snapshot saved = device;
+    const uint32_t values[] = {0, 0x80000000, 0x00800000, 0x3F800000, 0xBF800000, 0x7F7FFFFF, 0xFF7FFFFF};
+    for (unsigned count = 3; count <= 6; count += 3) {
+        uint32_t ip = count == 3 ? 0x37D598 : 0x37D54E, bit = count == 3 ? 1 : 4;
+        for (unsigned shift = 0; shift < 7; ++shift) {
+            uint32_t vector[6]; for (unsigned i = 0; i < count; ++i) vector[i] = values[(i + shift) % 7];
+            device = saved;
+            xctx c = vector_context(count, vector);
+            uint8_t memory[0x9000]; memcpy(memory, g_xram, sizeof memory);
+            call(&c, ip, 0, count + 2);
+            h2_audio_device_snapshot expected = saved; expected.dirty |= bit;
+            memcpy(count == 3 ? expected.pending_position : expected.pending_orientation, vector, count * 4);
+            assert(!memcmp(&device, &expected, sizeof device) && !memcmp(memory, g_xram, sizeof memory));
+            for (unsigned scalar_index = 0; scalar_index < 3; ++scalar_index) {
+                const uint32_t entries[] = {0x37D506, 0x37D5CD, 0x37D52A};
+                c = context(0x5008, 0x3F800000, 0); reject(&c, entries[scalar_index]);
+            }
+            c = vector_context(count, vector); X_M32(c.r[4] + 8 + count * 4) = 0; reject(&c, ip);
+            c = vector_context(count, vector); X_M32(c.r[4] + 8 + count * 4) = 3; reject(&c, ip);
+            for (unsigned i = 0; i < count; ++i) {
+                const uint32_t invalid[] = {1, 0x807FFFFF, 0x7F800000, 0xFF800000, 0x7FC12345};
+                for (unsigned j = 0; j < sizeof invalid / sizeof *invalid; ++j) {
+                    c = vector_context(count, vector); X_M32(c.r[4] + 8 + i * 4) = invalid[j]; reject(&c, ip);
+                }
+            }
+            c = vector_context(count, vector); X_M32(0x386B0C) = 1; reject(&c, ip); X_M32(0x386B0C) = 0;
+            healthy = 0; reject(&c, ip); healthy = 1;
+            X_M32(c.r[4] + 4) = 0x5000; reject(&c, ip);
+            c = vector_context(count, vector); g_xpt[2] = 0x8000; reject(&c, ip); g_xpt[2] = 0x1000;
+        }
+    }
+    device = saved;
+    uint32_t vector[6] = {0, 0, 0x3F800000, 0, 0x3F800000, 0};
+    xctx c = vector_context(3, vector); call(&c, 0x37D598, 0, 5);
+    c = vector_context(6, vector); call(&c, 0x37D54E, 0, 8);
+    assert(device.dirty == (saved.dirty | 5));
+    device = saved;
+}
 static void original_entry(xctx *c, uint32_t ip, int allowed)
 {
     xctx before = *c; h2_audio_device_snapshot state = device;
@@ -204,6 +251,7 @@ int main(void)
     assert(read32(0x2FFE) == 0x5008 && healthy && allocated && device.references == 1);
     assert(X_M32(0x5000) == 0x417120 && X_M32(0x5004) == 1);
     assert(device.doppler == 0x3F800000 && device.pending_doppler == 0x3F800000);
+    listener_vector_tests();
     for (unsigned i = 0; i < 32; ++i) assert(device.headroom[i] == (i != 31));
     /* A second caller shares the actual device, without a second output worker. */
     unsigned op = opens; c = context(0, 0x4100, 0); call(&c, 0x37D797, 0, 3);
