@@ -24,6 +24,12 @@ static xctx global_stream_description(void)
     x_guest_write(0x8ffd,routes,8);x_guest_write(0xaffe,pair,8);
     xctx c=context(0x3ffd,0x6ffe,0,0);X_M32(c.r[4])=0x335ed8;return c;
 }
+static xctx muted_stream_description(void)
+{
+    xctx c=global_stream_description();uint32_t count=5;
+    uint32_t pairs[10]={27,(uint32_t)-10000,28,(uint32_t)-10000,29,(uint32_t)-10000,30,(uint32_t)-10000,2,(uint32_t)-10000};
+    x_guest_write(0x8ffd,&count,4);x_guest_write(0xaffe,pairs,sizeof pairs);return c;
+}
 static void reject_stream(xctx *c,uint32_t ip)
 {
     h2_audio_stream before[XA_MAX_VOICES];memcpy(before,streams,sizeof before);
@@ -132,6 +138,20 @@ int main(void)
         c=context(h,0,0,0);call(&c,0x37AB87,0,1);
     }
     c=global_stream_description();uint32_t bad_bin=31;x_guest_write(0xaffe,&bad_bin,4);reject_stream(&c,0x37D835);
+    for(unsigned i=0;i<10;++i){
+        c=muted_stream_description();uint32_t value=read32(0xaffe + i*4)^1;
+        x_guest_write(0xaffe + i*4,&value,4);reject_stream(&c,0x37D835);
+    }
+    c=muted_stream_description();call(&c,0x37D835,0,2);uint32_t muted=read32(0x6ffe);
+    h2_audio_stream *ms=stream_live(&c,0x37D835,muted);xa_voice *mv=g_v+ms->voice;
+    assert(ms->route_count==5 && ms->route_bin==UINT32_MAX && !mv->volume && !mv->playing && !mv->nq);
+    for(unsigned i=0;i<5;++i)assert(ms->route_bins[i]==(i<4?27+i:2) && ms->route_gains[i]==-10000);
+    c=context(muted,0,0,0);call(&c,0x37B818,0,2);assert(!ms->headroom && !mv->volume);
+    /* Direct fixture feed verifies genuine gain zero, not silent output data. */
+    x_guest_write(0xc000,samples,sizeof samples);assert(!xk_audio_stream_push(ms->voice,0xc000,sizeof samples));
+    xk_audio_mix(decoded,48);for(unsigned i=0;i<96;++i)assert(!decoded[i]);
+    xk_audio_voice_stop(ms->voice);xk_audio_stream_flush(ms->voice);
+    c=context(muted,0,0,0);call(&c,0x37AB87,0,1);assert(device.references==1 && !device.children);
     c=stream_description(dev,0);
     int ids[XA_MAX_VOICES];for(unsigned i=0;i<XA_MAX_VOICES;i++){ids[i]=xk_audio_voice_new(2,0x4FF9);assert(ids[i]>=0);}
     before=read32(0x6FFE);unsigned old_frees=frees;

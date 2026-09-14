@@ -33,6 +33,8 @@ static h2_audio_buffer buffers[XA_MAX_VOICES];
 typedef struct {
     uint32_t base, references, callback, context, packet_limit, headroom;
     uint32_t flags, route_bin;
+    uint32_t route_count, route_bins[5];
+    int32_t route_gains[5];
     struct { uint32_t mirror, source, context; uint64_t ticket; } packets[2];
     uint32_t submitted, completed;
     int voice;
@@ -485,15 +487,23 @@ static void stream_create(xctx *c, uint32_t ip)
     if (fields[0] != (global ? 0x40000000u : 0x20000000u) || fields[1] != 2 ||
         fields[3] != (global ? 0x335D82u : 0x220730u) || (!global && fields[5]))
         fail(c, ip, "unsupported stream description", fields[0]);
-    uint32_t routes[2]={0}, pair[2]={0};
+    uint32_t routes[2]={0}, pair[10]={0};
     if (global) {
         if (!mapped(fields[4],28) || (uint64_t)fields[4]+24!=out || !mapped(fields[5],8))
             fail(c,ip,"global stream context/route mapping",fields[4]);
         x_guest_read(routes,fields[5],8);
-        if (routes[0]!=1 || !mapped(routes[1],8)) fail(c,ip,"global stream route list",fields[5]);
-        x_guest_read(pair,routes[1],8);
-        if (pair[0]<27 || pair[0]>30 || pair[1]) fail(c,ip,"unsupported global stream route",pair[0]);
-        if (aliases(out,4,fields[5],8) || aliases(out,4,routes[1],8))
+        if ((routes[0]!=1 && routes[0]!=5) || !mapped(routes[1],routes[0]*8)) fail(c,ip,"global stream route list",fields[5]);
+        x_guest_read(pair,routes[1],routes[0]*8);
+        if (routes[0]==1) {
+            if (pair[0]<27 || pair[0]>30 || pair[1]) fail(c,ip,"unsupported global stream route",pair[0]);
+        } else {
+            /* Original 333890: four DSP descriptor bins and center, all muted.
+             * Only empty ownership is supported; Process remains a strict stop. */
+            for(unsigned i=0;i<5;++i)
+                if(pair[i*2]!=(i<4?27+i:2) || pair[i*2+1]!=(uint32_t)-10000)
+                    fail(c,ip,"unsupported muted global stream route",pair[i*2]);
+        }
+        if (aliases(out,4,fields[5],8) || aliases(out,4,routes[1],routes[0]*8))
             fail(c,ip,"global stream route output alias",out);
     }
     uint8_t format[20] = {0};
@@ -524,7 +534,7 @@ static void stream_create(xctx *c, uint32_t ip)
     if ((base & 4095) || !mapped(base, 4096) || overlaps_device(base, 4096) ||
         page_overlap(base, 4096, c->r[4], stack_bytes) || page_overlap(base, 4096, out, 4) ||
         page_overlap(base, 4096, desc, 24) || page_overlap(base, 4096, fields[2], format_bytes) ||
-        (global && (page_overlap(base,4096,fields[4],28) || page_overlap(base,4096,fields[5],8) || page_overlap(base,4096,routes[1],8))))
+        (global && (page_overlap(base,4096,fields[4],28) || page_overlap(base,4096,fields[5],8) || page_overlap(base,4096,routes[1],routes[0]*8))))
         fail(c, ip, "stream allocation mapping/alias", base);
     x_guest_write(base + 64, format, 20);
     int voice = xk_audio_voice_new(2, base + 64);
@@ -532,15 +542,18 @@ static void stream_create(xctx *c, uint32_t ip)
         if (xk_mem_free(base) < 0) fail(c, ip, "stream allocation rollback", base);
         result(c, 0x8007000E, args); return;
     }
-    xk_audio_lock(); xk_audio_voice_set_volume_db100(voice, -600); xk_audio_unlock();
+    xk_audio_lock(); xk_audio_voice_set_volume_db100(voice, routes[0]==5 ? -10600 : -600); xk_audio_unlock();
     streams[index] = (h2_audio_stream){.base=base,.references=1,.callback=fields[3],.context=fields[4],
-        .packet_limit=fields[1],.headroom=600,.flags=fields[0],.route_bin=global ? pair[0] : UINT32_MAX,.voice=voice};
+        .packet_limit=fields[1],.headroom=600,.flags=fields[0],.route_bin=global && routes[0]==1 ? pair[0] : UINT32_MAX,.voice=voice};
+    streams[index].route_count=routes[0];
+    for(unsigned i=0;i<routes[0];++i){streams[index].route_bins[i]=pair[i*2];streams[index].route_gains[i]=(int32_t)pair[i*2+1];}
     X_M32(base) = 0x417170; X_M32(base + 4) = 0x417160; X_M32(base + 8) = 1;
     ++device.children; X_M32(device.base + 4) = ++device.references;
     x_guest_write(out, &base, 4);
     xv_logf("[h2/audio-stream] create caller=%08X object=%08X voice=%u format=%u channels=%u packet_limit=2 callback=%08X context=%u parent_refs=%u; empty real mixer voice, packet/DSP routing unsupported\n",
             X_M32(c->r[4]), base, voice, kind, format[2], fields[3], fields[4], device.references);
     if (global) xv_logf("[h2/audio-stream] global mono16/8000Hz accurate-notify retained; only checked zero packets and completed-sink notifications supported\n");
+    if (routes[0]==5) xv_logf("[h2/audio-stream] five exact muted routes retained, real inactive voice gain zero; Process unsupported\n");
     result(c, 0, args);
 }
 #if H2_AUDIO_DSP
@@ -584,7 +597,7 @@ static void stream_process(xctx *c)
 {
     const uint32_t ip=0x37AD25;stack(c,ip,3);
     h2_audio_stream *s=stream_live(c,ip,X_ARG(0));uint32_t address=X_ARG(1),packet[6],caller=X_M32(c->r[4]);
-    if (!effects || s->flags!=0x40000000 || (s->route_bin<27 || s->route_bin>30) || s->callback!=0x335D82 || s->headroom ||
+    if (!effects || s->flags!=0x40000000 || s->route_count!=1 || (s->route_bin<27 || s->route_bin>30) || s->callback!=0x335D82 || s->headroom ||
         (caller!=0x33610E && caller!=0x335D7B) || X_ARG(2) || !mapped(address,sizeof packet))
         fail(c,ip,"unsupported stream Process state/caller",caller);
     x_guest_read(packet,address,sizeof packet);
@@ -652,9 +665,9 @@ static void stream_headroom(xctx *c)
     if (X_ARG(1)) fail(c, ip, "unsupported stream headroom", X_ARG(1));
     /* Original 37A629 replaces the stored attenuation and adjusts total gain.
      * The observed zero request removes the default 600 hundredths of dB. */
-    xk_audio_lock(); xk_audio_voice_set_volume_db100(s->voice, 0); xk_audio_unlock();
+    xk_audio_lock(); xk_audio_voice_set_volume_db100(s->voice, s->route_count==5 ? -10000 : 0); xk_audio_unlock();
     s->headroom = 0;
-    xv_logf("[h2/audio-stream] headroom object=%08X caller=%08X real mixer attenuation=0dB\n", s->base, X_M32(c->r[4]));
+    xv_logf("[h2/audio-stream] headroom object=%08X caller=%08X headroom=0 retained_route_mute=%u\n", s->base, X_M32(c->r[4]),s->route_count==5);
     result(c, 0, 2);
 }
 static void buffer_data(xctx *c)
@@ -1436,7 +1449,7 @@ void h2_audio_trace_buffer(xctx *c, uint32_t ip)
         for(unsigned n=0;n<2 && mapped(frame,8);++n)frame=X_M32(frame);
         if(frame>=0x2c && mapped(frame-0x2c,32)) {
             uint32_t pairs[8];x_guest_read(pairs,frame-0x2c,32);
-            xv_logf("[h2/audio-global] original333330 frame=%08X four_routes=%u/%d,%u/%d,%u/%d,%u/%d\n",
+            xv_logf("[h2/audio-global] ancestor_frame=%08X raw_words_at_minus2C=%u/%d,%u/%d,%u/%d,%u/%d (layout depends on original caller)\n",
                     frame,pairs[0],(int32_t)pairs[1],pairs[2],(int32_t)pairs[3],pairs[4],(int32_t)pairs[5],pairs[6],(int32_t)pairs[7]);
         }
     }
