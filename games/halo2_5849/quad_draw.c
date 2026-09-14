@@ -21,11 +21,21 @@ static int pipeline(const h2_quad_draw *q, const h2_command_state *s,
         memcmp(s->program, r->program, sizeof r->program) ||
         memcmp(s->constants + 10, r->constants, sizeof r->constants) ||
         memcmp(s->setup_valid, r->setup_valid, sizeof r->setup_valid)) return 0;
-    /* Texture storage may change each decoded frame. Every other stored input
-     * remains exactly the independently reviewed native73 pipeline. The
-     * contract is deliberately narrower than general NV2A state support. */
-    for (unsigned i = 0; i < 2048; ++i)
-        if (i != 0x1B00 / 4 && s->setup[i] != r->setup[i]) return 0;
+    /* Only unit 0 is sampled, as linear X8R8G8B8. Palette descriptors do not
+     * participate in this non-indexed format or in disabled units 1..3. Keep
+     * them stored unchanged, including addresses with no backing allocation;
+     * never map or read them. Indexed textures remain unsupported. */
+    if ((s->setup[0x1B04 / 4] & ~3u) != 0x00011E28u) return 0;
+    for (unsigned unit = 1; unit < 4; ++unit)
+        if (s->setup[(0x1B0C + unit * 64) / 4] & 0x40000000u) return 0;
+    /* Texture storage may change each decoded frame. All remaining state
+     * matches the independently reviewed native73 pipeline exactly. */
+    for (unsigned i = 0; i < 2048; ++i) {
+        unsigned method = i * 4;
+        if (method >= 0x1B20 && method <= 0x1BE0 && (method & 63) == 32) {
+            if (s->setup[i] & 0x32u) return 0; /* reserved palette bits */
+        } else if (method != 0x1B00 && s->setup[i] != r->setup[i]) return 0;
+    }
     return 1;
 }
 

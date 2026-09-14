@@ -104,7 +104,8 @@ int main(void)
     init();
     /* Every retained word is checked, including valid bits and program/constant
      * bank ends. These failures precede all mapping and renderer callbacks. */
-    for (unsigned i = 0; i < 2048; ++i) if (i != 0x1B00 / 4) {
+    for (unsigned i = 0; i < 2048; ++i) if (i != 0x1B00 / 4 &&
+        !(i * 4 >= 0x1B20 && i * 4 <= 0x1BE0 && ((i * 4) & 63) == 32)) {
         s.setup[i] ^= 1; reject(0, 0x17FC, 7); s.setup[i] ^= 1;
     }
     for (unsigned i = 0; i < 64; ++i) {
@@ -117,6 +118,35 @@ int main(void)
         s.constants[i][k] ^= 1; reject(0, 0x17FC, 7); s.constants[i][k] ^= 1;
     }
     assert(!maps && !reads && !calls && !memcmp(ram, prior_ram, sizeof ram));
+    /* Palette state remains exact but is not a resource for non-indexed unit0
+     * or disabled units. Even unmapped offsets must cause no extra DMA reads
+     * or mappings; all descriptor selector/length combinations are harmless. */
+    assert(h2_quad_method(&q, &s, &c, 0, 0x17FC, 7));
+    unsigned baseline_maps = maps, baseline_reads = reads;
+    for (unsigned selector = 0; selector < 2; ++selector)
+    for (unsigned length = 0; length < 4; ++length) {
+        init();
+        for (unsigned unit = 0; unit < 4; ++unit)
+            s.setup[(0x1B20 + unit * 64) / 4] = 0xFFFFF000u + unit * 64 + length * 4 + selector;
+        h2_command_state prior = s;
+        assert(h2_quad_method(&q, &s, &c, 0, 0x17FC, 7));
+        assert(maps == baseline_maps && reads == baseline_reads && !calls);
+        assert(!memcmp(&s, &prior, sizeof s) && !memcmp(ram, prior_ram, sizeof ram));
+    }
+    for (unsigned unit = 0; unit < 4; ++unit)
+    for (unsigned bit = 0; bit < 6; ++bit) if ((1u << bit) & 0x32u) {
+        init(); s.setup[(0x1B20 + unit * 64) / 4] = 1u << bit;
+        reject(0, 0x17FC, 7); assert(!maps && !reads && !calls);
+    }
+    /* A changed reference cannot grant indexed or additional sampled units. */
+    for (unsigned unit = 0; unit < 4; ++unit) {
+        init();
+        if (!unit) s.setup[0x1B04 / 4] = 0x00010B29;
+        else s.setup[(0x1B0C + unit * 64) / 4] = 0x40000000;
+        memcpy(reference.setup, s.setup, sizeof reference.setup);
+        reject(0, 0x17FC, 7); assert(!maps && !reads && !calls);
+    }
+    init();
     reject(0, 0x17FC, 0); reject(0, 0x17FC, 5); reject(8, 0x17FC, 7);
     for (unsigned failure = 0; failure < 8; ++failure) {
         init();
@@ -131,7 +161,10 @@ int main(void)
         reject(0, 0x17FC, 7);
         assert(!calls && !memcmp(ram, prior_ram, sizeof ram));
     }
-    init(); assert(h2_quad_method(&q, &s, &c, 0, 0x17FC, 7));
+    init();
+    for (unsigned unit = 0; unit < 4; ++unit)
+        s.setup[(0x1B20 + unit * 64) / 4] = 0xFFFFF000u + unit * 64;
+    assert(h2_quad_method(&q, &s, &c, 0, 0x17FC, 7));
     reject(0, 0x17FC, 7); reject(0, 0x17FC, 0); reject(0, 0x1B00, 4096);
     reject(0, 0x1964, 0xFFFFFFFE); reject(0, 0x1898, 0);
     s.bound[1] = 1; reject(1, 0x1964, UINT32_MAX);
