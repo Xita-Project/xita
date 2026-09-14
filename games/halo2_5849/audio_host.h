@@ -81,5 +81,7 @@ int h2_audio_backend_fx_play(unsigned bin);
 int h2_audio_backend_fx_forget(unsigned bin);
 int h2_audio_backend_effect_read(h2_dsp_engine *engine, unsigned index,
                                  unsigned offset, void *out, unsigned bytes);
+int h2_audio_backend_effect_write_pair(h2_dsp_engine *engine, unsigned index,
+                                       unsigned offset, uint32_t first, uint32_t second);
 #endif
 _Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32_t value);

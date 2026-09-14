@@ -7,7 +7,9 @@
 #undef main
 #undef xv_call
 struct h2_dsp_engine { uint32_t marker; };
-static unsigned dsp_opens, dsp_closes, dsp_reads;
+static unsigned dsp_opens, dsp_closes, dsp_reads, dsp_writes;
+static int dsp_write_failure;
+static uint32_t dsp_written[4][2];
 static int dsp_failure;
 static unsigned test_fx_bound, test_fx_routes, test_fx_playing;
 static unsigned test_fx_mask(unsigned key)
@@ -96,6 +98,12 @@ int h2_audio_backend_effect_read(h2_dsp_engine *s, unsigned index, unsigned offs
     if (index >= 15 || offset > 128 || bytes > 128 - offset) return 0;
     return h2_dsp_read_effect(s, index, offset, out, bytes);
 }
+int h2_audio_backend_effect_write_pair(h2_dsp_engine *s, unsigned index, unsigned offset, uint32_t first, uint32_t second)
+{
+    assert(s==effects && index>=4 && index<=7 && offset==32);
+    if(dsp_write_failure || ((first|second)&0xff000000u))return 0;
+    ++dsp_writes;dsp_written[index-4][0]=first;dsp_written[index-4][1]=second;return 1;
+}
 h2_dsp_engine*h2_dsp_asset_open(const char*path,h2_dsp_status*status)
 {
     assert(!strcmp(path,"app0:halo2-dsp.bin")&&healthy);
@@ -130,9 +138,15 @@ static xctx query_context(uint32_t dev,uint32_t index,uint32_t offset,uint32_t b
 }
 static void dsp_reject(xctx*c,uint32_t ip)
 {
-    unsigned op=dsp_opens,cl=dsp_closes,rd=dsp_reads;h2_dsp_engine*owner=effects;
+    unsigned op=dsp_opens,cl=dsp_closes,rd=dsp_reads,wr=dsp_writes;h2_dsp_engine*owner=effects;
     uint32_t guest=effects_guest,bytes=effects_guest_bytes;
-    reject(c,ip);assert(op==dsp_opens&&cl==dsp_closes&&rd==dsp_reads&&owner==effects&&guest==effects_guest&&bytes==effects_guest_bytes);
+    reject(c,ip);assert(op==dsp_opens&&cl==dsp_closes&&rd==dsp_reads&&wr==dsp_writes&&owner==effects&&guest==effects_guest&&bytes==effects_guest_bytes);
+}
+static xctx write_context(uint32_t dev,unsigned index)
+{
+    static const uint32_t callers[]={0x191294,0x1912ac,0x1912c3,0x1912db};
+    xctx c=context(dev,index,32,0x6ffe);X_M32(c.r[4])=callers[index-4];
+    X_M32(c.r[4]+20)=8;X_M32(c.r[4]+24)=0;return c;
 }
 #ifndef H2_AUDIO_DSP_TEST_MAIN
 #define H2_AUDIO_DSP_TEST_MAIN main
@@ -180,6 +194,28 @@ int H2_AUDIO_DSP_TEST_MAIN(void)
     c=query_context(dev,4,0,8);X_M32(c.r[4]+16)=effects_guest+4096;dsp_reject(&c,0x37B5E6);
     g_xpt[0x300]=g_xpt[effects_guest>>12];c=query_context(dev,4,0,8);X_M32(c.r[4]+16)=0x300010;dsp_reject(&c,0x37B5E6);
     c=query_context(dev,4,0,8);X_M32(c.r[4]+16)=c.r[4]+8;dsp_reject(&c,0x37B5E6);
+    /* Public six-argument ABI, both parameter values, split guest pages and
+     * exact original caller pairing. Synthetic provider is not a DSP oracle. */
+    for(unsigned index=4;index<=7;index++)for(unsigned change=0;change<2;change++){
+        uint32_t words[2]={change?0xabcdef:0,change?0x123456:30};x_guest_write(0x6ffe,words,8);
+        c=write_context(dev,index);call(&c,0x37B60D,0,6);
+        assert(!memcmp(dsp_written[index-4],words,8));
+    }
+    for(unsigned slot=0;slot<6;slot++){
+        if(slot==3)continue; /* source bytes may be unaligned */
+        c=write_context(dev,4);X_M32(c.r[4]+4+slot*4)^=1;dsp_reject(&c,0x37B60D);
+    }
+    c=write_context(dev,4);X_M32(c.r[4])^=1;dsp_reject(&c,0x37B60D);
+    c=write_context(dev,4);X_M32(c.r[4]+16)=effects_guest+4096;dsp_reject(&c,0x37B60D);
+    c=write_context(dev,4);X_M32(c.r[4]+16)=0x300010;dsp_reject(&c,0x37B60D);
+    c=write_context(dev,4);X_M32(c.r[4]+16)=c.r[4]+8;dsp_reject(&c,0x37B60D);
+    c=write_context(dev,4);X_M32(c.r[4]+16)=0xfffffffcu;dsp_reject(&c,0x37B60D);
+    for(unsigned i=0;i<2;i++){
+        uint32_t words[2]={1,2};words[i]|=0xff000000u;x_guest_write(0x6ffe,words,8);
+        c=write_context(dev,4);dsp_reject(&c,0x37B60D);
+    }
+    uint32_t words[2]={0,30};x_guest_write(0x6ffe,words,8);dsp_write_failure=1;
+    c=write_context(dev,4);dsp_reject(&c,0x37B60D);dsp_write_failure=0;
     c=context(0,0,0,1);dsp_reject(&c,0x37B6DF); /* no unprocessed effect playback */
     c=context(dev-8,0,0,0);call(&c,0x37C70F,0,1);assert(!effects&&!effects_guest&&!effects_guest_bytes&&dsp_closes==2&&!healthy);
     for(unsigned i=0;i<256;i++)assert(!pool[i]);free(g_xram);free(g_xpt);

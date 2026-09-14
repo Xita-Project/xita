@@ -143,6 +143,48 @@ static void signal_tests(void)
     for(unsigned i=0;i<32;i++)assert(output[i]==0x55555555);
     h2_dsp_destroy(s);
 }
+static void effect_write_tests(void)
+{
+    h2_dsp_engine*s=fixture();s->image_size=0x1000;s->effect_count=1;s->state_offset=0x818;
+    s->effects[0]=(h2_dsp_effect){.state_offset=0x818,.state_bytes=128};
+    memset(s->scratch,0xa5,s->scratch_size);
+    for(unsigned i=0;i<DSP_XRAM_SIZE;i++)s->core.xram[i]=0x13579b;
+    uint64_t frames=s->status.frames,instructions=s->status.instructions;
+    const uint32_t pairs[][2]={{0,30},{0xabcdef,0x123456},{0xffffff,0},{1,0x800000}};
+    for(unsigned p=0;p<sizeof pairs/sizeof *pairs;p++){
+        assert(h2_dsp_write_effect_pair(s,0,32,pairs[p][0],pairs[p][1]));
+        for(unsigned i=0;i<s->scratch_size;i++)if(i<0x838 || i>=0x840)assert(s->scratch[i]==0xa5);
+        for(unsigned i=0;i<DSP_XRAM_SIZE;i++)if(i!=0x88 && i!=0x89)assert(s->core.xram[i]==0x13579b);
+        assert(le32(s->scratch+0x838)==pairs[p][0] && le32(s->scratch+0x83c)==pairs[p][1]);
+        assert(s->status.frames==frames && s->status.instructions==instructions);
+        /* Interpreter MOVEs consume each newly written word; a subsequent
+         * checked halt completes the frame. These are synthetic opcodes. */
+        s->core.registers[DSP_REG_R0]=0x88;s->core.registers[DSP_REG_Y1]=1;s->core.pc=0;
+        s->core.pram[0]=(1u<<17)|(1u<<7)|(1u<<4)|DSP_REG_X0;
+        s->core.pram[1]=(1u<<17)|(1u<<7)|(1u<<6)|(1u<<4)|DSP_REG_Y0;
+        s->core.pram[2]=(8u<<16)|(1u<<15)|(1u<<14)|(DSP_REG_Y1<<8)|4;
+        int completed=frame(s);
+        if(!completed)fprintf(stderr,"pair frame fault=%s pc=%x address=%x value=%x\n",s->status.fault,s->core.pc,s->status.fault_address,s->status.fault_value);
+        assert(completed);assert(s->core.registers[DSP_REG_X0]==pairs[p][0] && s->core.registers[DSP_REG_Y0]==pairs[p][1]);
+        frames=s->status.frames;instructions=s->status.instructions;
+    }
+    h2_dsp_engine *before=malloc(sizeof *before);uint8_t*scratch=malloc(s->scratch_size);assert(before&&scratch);
+    *before=*s;memcpy(scratch,s->scratch,s->scratch_size);
+    const uint32_t bad[][4]={{1,32,0,30},{0,33,0,30},{0,124,0,30},{0,UINT32_MAX,0,30},
+        {0,32,0x1000000,0},{0,32,0,0xff000000}};
+    for(unsigned i=0;i<sizeof bad/sizeof *bad;i++){
+        assert(!h2_dsp_write_effect_pair(s,bad[i][0],bad[i][1],bad[i][2],bad[i][3]));
+        assert(!memcmp(s,before,sizeof *s)&&!memcmp(s->scratch,scratch,s->scratch_size));
+    }
+    assert(!h2_dsp_write_effect_pair(NULL,0,32,0,30));
+    active=s;assert(!h2_dsp_write_effect_pair(s,0,32,0,30));active=NULL;
+    s->status.fault="test";assert(!h2_dsp_write_effect_pair(s,0,32,0,30));s->status.fault=NULL;
+    assert(!memcmp(s,before,sizeof *s)&&!memcmp(s->scratch,scratch,s->scratch_size));
+    s->effects[0].state_offset=0x817;assert(!h2_dsp_write_effect_pair(s,0,32,0,30));
+    s->effects[0].state_offset=0x2e10;assert(!h2_dsp_write_effect_pair(s,0,32,0,30));
+    s->effects[0].state_offset=0x818;s->image_size=0x83f;assert(!h2_dsp_write_effect_pair(s,0,32,0,30));
+    assert(!memcmp(s->scratch,scratch,s->scratch_size));free(before);free(scratch);h2_dsp_destroy(s);
+}
 int main(void)
 {
     uint32_t value=0x12345678;
@@ -151,5 +193,5 @@ int main(void)
         uint32_t expected=low&(1u<<(bits-1))?low|~mask:low;
         assert(dsp_signextend((int)bits,value)==expected);
     }
-    dma_tests();fault_tests();image_tests();signal_tests();puts("DSP engine: synthetic transfers, checked signal frames/FX export, faults, no false ack, effect reads and 31,744 sign-extension cases pass");return 0;
+    dma_tests();fault_tests();image_tests();signal_tests();effect_write_tests();puts("DSP engine: synthetic transfers, checked signal frames/FX export, faults, no false ack, effect reads/writes/real consumption and 31,744 sign-extension cases pass");return 0;
 }

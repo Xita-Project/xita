@@ -28,6 +28,12 @@ void h2_dsp_snapshot(const h2_dsp_engine *engine, h2_dsp_status *status);
 int h2_dsp_effect_map(const h2_dsp_engine *engine, uint32_t index, h2_dsp_effect *out);
 int h2_dsp_read_effect(const h2_dsp_engine *engine, uint32_t index,
                        uint32_t offset, void *out, uint32_t bytes);
+/* Immediate aligned pair: update both saved image and live X state. Reject
+ * high bits, incomplete ranges, mix-buffer destinations and active/faulted
+ * engines before any mutation. Values are copied scalars, never host aliases.
+ * Caller serializes with frame execution; no deferred command is implied. */
+int h2_dsp_write_effect_pair(h2_dsp_engine *engine, uint32_t index,
+                            uint32_t offset, uint32_t first, uint32_t second);
 /* Tests/audit can execute another real frame with all input mix bins zero.
  * Any interpreter, DMA, memory or instruction-budget fault poisons the engine;
  * no API may report usable state afterward. */

@@ -260,6 +260,22 @@ int h2_dsp_read_effect(const h2_dsp_engine*s,uint32_t index,uint32_t offset,void
         dest[i]=(uint8_t)(value>>((a&3)*8));}
     return 1;
 }
+int h2_dsp_write_effect_pair(h2_dsp_engine*s,uint32_t index,uint32_t offset,uint32_t first,uint32_t second)
+{
+    if(!s||s->status.fault||active||index>=s->effect_count||(offset&3)||
+       ((first|second)&0xff000000u))return 0;
+    const h2_dsp_effect*e=&s->effects[index];
+    if(offset>e->state_bytes||8>e->state_bytes-offset||e->state_offset<s->state_offset)return 0;
+    uint64_t shadow=(uint64_t)e->state_offset+offset;
+    uint64_t address=0x200ull+e->state_offset-s->state_offset+offset;
+    if(!s->scratch||(shadow&3)||(address&3)||shadow+8>s->image_size||
+       shadow+8>s->scratch_size||address+8>0xc00u*4)return 0;
+    /* Original 383D79 shadow copy followed by 37E5C6 immediate GP writes.
+     * All checks precede both writes; no monitor, histories or counters reset. */
+    put32(s->scratch+shadow,first);put32(s->scratch+shadow+4,second);
+    s->core.xram[address/4]=first;s->core.xram[address/4+1]=second;
+    return 1;
+}
 int h2_dsp_zero_frame(h2_dsp_engine*s)
 {
     if(!s||s->status.fault||active)return 0;

@@ -6,6 +6,12 @@
 h2_dsp_engine *h2_test_fx_engine(void);
 void h2_test_fx_fault(h2_dsp_engine *);
 static atomic_uint second_play_done;
+static atomic_uint effect_writer_done;
+static void *write_effect_pairs(void *arg)
+{
+    for(unsigned i=1;i<=2000;i++)assert(h2_audio_backend_effect_write_pair(arg,0,64,i,i^0xffffffu));
+    atomic_store(&effect_writer_done,1);return NULL;
+}
 static void *start_second(void *unused)
 {
     (void)unused; assert(h2_audio_backend_fx_play(23) == 0);
@@ -46,6 +52,19 @@ int main(void)
         assert(!h2_audio_backend_effect_read(s, 0, 1, state, sizeof state));
         for (unsigned j = 0; j < 32; ++j) assert(state[j] == 0x765432);
     }
+    /* Real worker runs concurrently. Each serialized query sees a complete
+     * pair, while rejected owners/words cannot alter the live DSP state. */
+    assert(h2_audio_backend_effect_write_pair(s,0,64,0,0xffffff));
+    assert(!h2_audio_backend_effect_write_pair((h2_dsp_engine *)(uintptr_t)1,0,64,1,2));
+    assert(!h2_audio_backend_effect_write_pair(s,0,64,1,0x1000000));
+    pthread_t writer;assert(!pthread_create(&writer,NULL,write_effect_pairs,s));
+    do {
+        uint32_t pair[2];assert(h2_audio_backend_effect_read(s,0,64,pair,8));
+        assert(pair[0]<=2000 && (pair[0]^pair[1])==0xffffff);
+    } while(!atomic_load(&effect_writer_done));
+    assert(!pthread_join(writer,NULL));
+    uint32_t last_pair[2];assert(h2_audio_backend_effect_read(s,0,64,last_pair,8));
+    assert(last_pair[0]==2000 && last_pair[1]==(2000^0xffffffu));
     /* Hold a real pending sink grain, then let the worker prepare the next
      * first-source grain. Starting source23 cannot relabel either old grain
      * or claim either was its own successful submission. */

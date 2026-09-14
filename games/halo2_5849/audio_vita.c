@@ -410,6 +410,15 @@ int h2_audio_backend_effect_read(h2_dsp_engine *engine, unsigned index,
              h2_dsp_read_effect(engine, index, offset, out, bytes);
     sceKernelUnlockMutex(progress_mutex, 1); return ok;
 }
+int h2_audio_backend_effect_write_pair(h2_dsp_engine *engine, unsigned index,
+                                       unsigned offset, uint32_t first, uint32_t second)
+{
+    if (h2_audio_backend_health() < 0 || progress_mutex < 0) return 0;
+    sceKernelLockMutex(progress_mutex, 1, NULL);
+    int ok = h2_audio_backend_health() == 0 && (!fx.engine || fx.engine == engine) &&
+             h2_dsp_write_effect_pair(engine, index, offset, first, second);
+    sceKernelUnlockMutex(progress_mutex, 1); return ok;
+}
 #endif
 
 static int mix_worker(SceSize bytes, void *arg)

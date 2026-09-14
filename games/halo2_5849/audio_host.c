@@ -1263,6 +1263,25 @@ static void effects_query(xctx *c)
             X_M32(c->r[4]), index, offset, bytes);
     result(c, 0, 5);
 }
+static void effects_write(xctx *c)
+{
+    const uint32_t ip = 0x37B60D;
+    static const uint32_t callers[4] = {0x191294, 0x1912AC, 0x1912C3, 0x1912DB};
+    stack(c, ip, 6); live(c, ip, X_ARG(0), 0); buffer_operational(c, ip);
+    uint32_t index = X_ARG(1), offset = X_ARG(2), source = X_ARG(3);
+    if (!effects || !mapped(effects_guest, effects_guest_bytes)) fail(c, ip, "no initialized DSP image", index);
+    if (index < 4 || index > 7 || X_M32(c->r[4]) != callers[index - 4] ||
+        offset != 32 || X_ARG(4) != 8 || X_ARG(5))
+        fail(c, ip, "unreviewed immediate effect write", index);
+    if (!mapped(source, 8) || overlaps_device(source, 8) || aliases(source, 8, c->r[4], 28))
+        fail(c, ip, "effect write source/alias", source);
+    uint32_t words[2]; x_guest_read(words, source, sizeof words);
+    if (!h2_audio_backend_effect_write_pair(effects, index, offset, words[0], words[1]))
+        fail(c, ip, "immediate effect shadow/GP write rejected", index);
+    xv_logf("[h2/dsp] SetEffectData caller=%08X index=%u offset=%u bytes=8 flags=0 words=%08X,%08X immediate shadow+GP write\n",
+            X_M32(c->r[4]), index, offset, words[0], words[1]);
+    result(c, 0, 6);
+}
 #endif
 #if H2_AUDIO_EFFECTS_UNAVAILABLE
 /* Explicit failure experiment, not an effects implementation. No output,
@@ -1316,6 +1335,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37AD25: stream_process(c); break;
     case 0x37B86D: effects_download(c); break;
     case 0x37B5E6: effects_query(c); break;
+    case 0x37B60D: effects_write(c); break;
 #elif H2_AUDIO_EFFECTS_UNAVAILABLE
     case 0x37B86D: effects_unavailable(c); break;
 #endif
