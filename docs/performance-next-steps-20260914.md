@@ -55,11 +55,16 @@ No code from that project's Source Engine tree was imported for this research.
 1. Validate indexed vertex checks during ordinary campaign and multiplayer
    play, including firing, driving and death/respawn. Run additional matched
    scene comparisons before changing the default. The benchmark restores the
-   configured setting, which is currently disabled on the test device.
-2. Break down the remaining vertex-preparation cost by span size, cache hit or
+   configured setting. On September 14 it was enabled through the new
+   dashboard control for the current hardware validation session.
+2. [Physical work sizing](vertex-work-profile-20260914.md#physical-diagnostic-result)
+   now measures about 11.4 ms/frame in indexed comparisons and 7.0 ms/frame in
+   initial snapshots in the cryo room. Continue to break down vertex-preparation cost by span size, cache hit or
    miss, index-mask construction and snapshot copy. Keep this instrumentation
    bounded and separate from the ordinary performance build.
-3. Prototype parallel preparation only for inputs whose lifetime is defined.
+3. The first [shared snapshot experiment](snapshot-worker-20260914.md) is built
+   and installed for hardware comparison. Continue parallel preparation only
+   for inputs whose lifetime is defined.
    `xv_index_copy.h` constructs coverage from the retained index chunks;
    `xv_vertex_upload.c` compares live guest bytes before creating or reusing a
    retained snapshot. Moving a live guest pointer to an asynchronous queue is

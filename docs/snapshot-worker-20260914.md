@@ -31,7 +31,9 @@ and signal failures, busy queues, delayed completion, 64 destination alignments,
 odd sizes, surrounding canaries, immediate source changes after return, and 81
 retained slot generations. Existing delayed-copy and 300-generation checks also
 pass. ASan/UBSan and ThreadSanitizer runs pass. The benchmark admission and
-restoration tests and real HTTP remote suite pass.
+restoration tests and real HTTP remote suite pass. The production frame
+acquisition fixture also verifies all 17 experiment branches select only their
+intended override across configuration modes and ticket wrap.
 
 The first ordinary candidate runtime is
 `7f33dee4f5df113b7d62a00b195acc859dd36ebf84a2a17f85c1ca7c9f514946`.
@@ -39,7 +41,8 @@ It uses the existing 1,588-entry updater contract and changes only the game
 executable and boot manifest. Vita3K renders the campaign and completes the off/on/off comparison with
 matching camera checks, nonzero core-0 snapshot work, no recorded vertex upload
 failures and restoration to the configured disabled mode. Emulator FPS is not a
-physical performance result. Physical off/on/off timing remains pending.
+physical performance result. The physical updater has confirmed this exact
+candidate in slot A; physical off/on/off timing remains pending.
 
 The emulator again crashed inside its in-process app restart, after Xita drained
 the GPU/display and handed off to the helper. Restarting the isolated emulator
