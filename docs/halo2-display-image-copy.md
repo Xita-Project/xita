@@ -44,8 +44,8 @@ original game data, not a visible movie or menu.
 
 The original caller 3F8AD0 belongs to display persistence. Its known enclosing
 call paths prepare launch data and call 2D07F2. This suggests a title/dashboard
-exit path rather than normal menu loading, but the actual parent caller and
-reason need runtime capture. Do not treat a new unsupported boundary here as
+exit path rather than normal menu loading, and native81 confirms the actual Start caller is 21347F -> 2238F4(0,0,0).
+See [caller/cache diagnostics](halo2-exit-cache-diagnostics.md). Do not treat a new unsupported boundary here as
 proof the menu is closer. Before expanding persistence, trace the actual caller
 and original mainmenu-header validation/failure path. Shared AvGet/SetSavedDataAddress
 and MmPersistContiguousMemory are legacy stubs; this milestone stops before

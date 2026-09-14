@@ -300,6 +300,57 @@ static void trace_mapped_word(uint32_t address)
 void xv_trace_func(uint32_t address)
 {
     static unsigned count;
+    /* Read-only native80 follow-up: distinguish real map loading from the
+     * display-persistence path used before launching another title/dashboard.
+     * No caller result, header bytes or guest control state is changed. */
+    static unsigned launch_probe_count, header_probe_count, map_probe_count;
+    static uint32_t previous_map_state = UINT32_MAX;
+    if (xk_cur && launch_probe_count < 16 &&
+        (address == 0x22376B || address == 0x2237D4 || address == 0x22387B ||
+         address == 0x2238F4 || address == 0x3F8AD0)) {
+        const xctx *c = &xk_cur->ctx;
+        uint32_t fpscr = h2_platform_fpscr_read();
+        ++launch_probe_count;
+        xv_logf("[h2/launch-probe] fn=%08X esp=%08X eax=%08X esi=%08X ebp=%08X\n",
+                address, c->r[4], c->r[0], c->r[6], c->r[5]);
+        for (unsigned i = 0; i < 5 && c->r[4] <= UINT32_MAX - i * 4; ++i)
+            trace_mapped_word(c->r[4] + i * 4);
+        trace_mapped_word(0x55E780); trace_mapped_word(0x4E6948);
+        h2_platform_fpscr_write(fpscr);
+    }
+    if (xk_cur && address == 0x2141F0 && map_probe_count < 80) {
+        uint32_t state = X_M32(0x55BD04);
+        if (state != previous_map_state) {
+            uint32_t fpscr = h2_platform_fpscr_read();
+            ++map_probe_count; previous_map_state = state;
+            xv_logf("[h2/map-probe] state=%u fn=%08X\n", state, address);
+            const uint32_t fields[] = {0x55BCF0, 0x55BD00, 0x55BD04, 0x55BD08, 0x55BD0C,
+                                       0x55BD10, 0x55BD14, 0x55B4F0, 0x55B4F4, 0x55B4F8};
+            for (unsigned i = 0; i < sizeof fields / sizeof *fields; ++i) trace_mapped_word(fields[i]);
+            h2_platform_fpscr_write(fpscr);
+        }
+    }
+    if (xk_cur && address == 0x122870 && header_probe_count < 8) {
+        const xctx *c = &xk_cur->ctx;
+        uint32_t fpscr = h2_platform_fpscr_read();
+        ++header_probe_count;
+        xv_logf("[h2/header-probe] original validator ESI=%08X esp=%08X\n", c->r[6], c->r[4]);
+        trace_mapped_word(c->r[4]); trace_mapped_word(0x55BCF0);
+        /* This image-backed buffer is fixed and fully mapped by the checked
+         * boot image loader. Read through the guest mapping for each word. */
+        if (c->r[6] == 0x55B4F0) {
+            uint32_t header[512];
+            for (unsigned i = 0; i < 512; ++i) header[i] = X_M32(0x55B4F0 + i * 4);
+            char path[96]; snprintf(path, sizeof path, "ux0:data/xita-halo2/map-header-%u.bin", header_probe_count);
+            FILE *out = fopen(path, "wb");
+            if (out) {
+                int complete = fwrite(header, 1, sizeof header, out) == sizeof header;
+                int closed = fclose(out);
+                xv_logf("[h2/header-probe] private original header capture=%u complete=%d\n", header_probe_count, complete && !closed);
+            }
+        }
+        h2_platform_fpscr_write(fpscr);
+    }
     static unsigned movie_probe_count;
     if (xk_cur && movie_probe_count < 16 &&
         (address == 0x372030 || address == 0x3E97E0 || address == 0x3E9750 || address == 0x3E9C70)) {
