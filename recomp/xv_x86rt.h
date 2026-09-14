@@ -274,10 +274,23 @@ static inline void x87_store_i32(xctx *c, uint32_t a, double v) { (void)c; uint3
 static inline void x87_store_i64(xctx *c, uint32_t a, double v) { int64_t r = (v >= -9.2233720368547758e18 && v < 9.2233720368547758e18) ? (int64_t)v : (int64_t)0x8000000000000000ull; (void)c; x_guest_write(a, &r, 8); }
 static inline void x87_compare(xctx *c, double a, double b, int eflags) {
     uint16_t cc;
+#if defined(__thumb2__) && defined(__ARM_FP) && (__ARM_FP & 8)
+    /* One quiet VFP comparison provides unordered/less/equal together. The
+     * portable expression otherwise emits up to three comparisons on A9.
+     * Keep the guest condition codes and native FP exceptions unchanged. */
+    uint32_t result;
+    __asm__ volatile("vcmp.f64 %P1, %P2\n\tvmrs APSR_nzcv, fpscr\n\t"
+                     "mov %0, #0\n\tit mi\n\tmovmi %0, #256\n\t"
+                     "it eq\n\tmoveq %0, #16384\n\t"
+                     "it vs\n\tmovvs %0, #17664"
+                     : "=r"(result) : "w"(a), "w"(b) : "cc");
+    cc = (uint16_t)result;
+#else
     if (isnan(a) || isnan(b)) cc = 0x4500;                          /* C3|C2|C0 */
     else if (a < b)           cc = 0x0100;                          /* C0 */
     else if (a == b)          cc = 0x4000;                          /* C3 */
     else                      cc = 0;
+#endif
     c->fsw = (uint16_t)((c->fsw & ~0x4700u) | cc | ((c->fsp & 7u) << 11));
     if (eflags) {                                                    /* fcomi: ZF=C3 PF=C2 CF=C0 */
         uint32_t f = ((cc & 0x4000) ? 0x40u : 0) | ((cc & 0x0400) ? 0x04u : 0) | ((cc & 0x0100) ? 0x01u : 0);
