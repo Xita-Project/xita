@@ -12,6 +12,10 @@ static int execute_method(void *opaque, uint8_t subchannel, uint16_t method,
                            uint32_t value, uint32_t source)
 {
     h2_host_channel *c = opaque;
+    if (c->geometry_method) {
+        int result = c->geometry_method(c->opaque, subchannel, method, value, source);
+        if (result != -1) return result == 1;
+    }
     if (subchannel < 8 && c->commands.bound[subchannel] == 1 && method == 0x100 &&
         (value & 31) == 1 && c->software_flip)
         return c->software_flip(c->opaque, value, source);

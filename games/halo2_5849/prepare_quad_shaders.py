@@ -17,6 +17,7 @@ from recompiler import shader_recomp_gen as gen
 
 XBE_SHA = "03215919bb7163259257d361f4c7bf802a7ab12aa85e2689436369b5c427935d"
 PROGRAM_SHA = "2e4131cffc816b0306d02238b90d3e4fb0c31ae4ce982ffa2c9980f9368260da"
+CONTRACT_SNAPSHOT_SHA = "a008f536b05e8e3aebcea56d148da630b0cd302f8d74797417b76d673a4bf659"
 
 # This specialization requires the exact two-stage combiner documented in
 # halo2-quad-gxm-probe.md. It is not a general pixel shader translation.
@@ -66,7 +67,7 @@ def vertex_source(function):
     return source + "\n", plan
 
 
-def prepare(xbe, snapshot, out):
+def prepare(xbe, snapshot, out, contract=False):
     if hashlib.sha256(xbe.read_bytes()).hexdigest() != XBE_SHA:
         raise ValueError("owned XBE revision mismatch")
     image = Image(str(xbe))
@@ -87,10 +88,16 @@ def prepare(xbe, snapshot, out):
         if list(words) != captured or len(constants) != 192 or any(len(row) != 4 for row in constants):
             raise ValueError("snapshot program/constant shape mismatch")
         artifacts["constants.bin"] = struct.pack("<712I", *(word for row in constants[10:188] for word in row))
+    if contract:
+        if not snapshot or hashlib.sha256(snapshot.read_bytes()).hexdigest() != CONTRACT_SNAPSHOT_SHA:
+            raise ValueError("quad contract requires the pinned native73 pipeline capture")
+        artifacts["quad.contract.bin"] = (struct.pack("<II", 0x43513248, 1) +
+            struct.pack("<2048I", *state["setup"]) +
+            struct.pack("<64I", *state["setup_valid"]) + artifacts["constants.bin"] + program[4:])
     out.mkdir(parents=True, exist_ok=True)
     for name, contents in artifacts.items():
         (out / name).write_bytes(contents)
-    manifest = {"scope": "private observed movie-quad shader probe; no integrated guest renderer",
+    manifest = {"scope": "private pinned movie-quad renderer contract" if contract else "private observed movie-quad shader probe",
                 "xbe_sha256": XBE_SHA, "vertex_program_sha256": PROGRAM_SHA,
                 "snapshot_sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest() if snapshot else None,
                 "constant_hardware_base": 10, "constant_count": plan.c_count,
@@ -105,5 +112,6 @@ if __name__ == "__main__":
     parser.add_argument("xbe", type=Path)
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--contract", action="store_true", help="emit only the pinned native73 draw contract")
     args = parser.parse_args()
-    print(json.dumps(prepare(args.xbe, args.snapshot, args.out), indent=2))
+    print(json.dumps(prepare(args.xbe, args.snapshot, args.out, args.contract), indent=2))

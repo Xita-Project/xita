@@ -56,7 +56,7 @@ The original game has since retired its first device, constructed its second,
 loaded its font assets and [opened the real Vita controller](../../docs/halo2-vita-input-20260913.md).
 Startup now [stops at Xbox audio hardware](../../docs/halo2-audio-boundary-20260913.md);
 there is still no menu.
-Draws, blits, recurring flips and the title/menu remain unsupported. Unknown
+General draws, blits, recurring flips and the title/menu remain unsupported. Unknown
 commands stop explicitly. Diagnostic packages embed owned game image/code and
 must not be distributed or uploaded as releases.
 
@@ -71,9 +71,12 @@ allows the original code to rebuild its cache and open the intro movie. The
 pixel converters; no movie frame or menu has been displayed. Earlier
 texture-state progress followed an incorrectly balanced timer return; the
 current checkpoint documents this limitation. It supplies
-no audio, 3D rendering or menu; the ordinary profile is unchanged.
+no audio, general 3D rendering or menu; the ordinary profile is unchanged.
 
 The separate [GXM quad probe](../../docs/halo2-quad-gxm-probe.md) validates the
 observed original vertex program against synthetic pixel fixtures. Its shader
-preparation and `quad-probe` build target do not yet connect guest geometry to
-GXM; the actual game still stops at its first `BEGIN QUADS` command.
+preparation and `quad-probe` build target remain separate from the game app.
+The opt-in `QUAD_RENDER=1` target now
+[executes the first two original movie quads through GXM](../../docs/halo2-original-movie-quads.md).
+The first movie framebuffer is presented and is entirely black. The next strict
+stop is the recurring active-scanout flip; no visible movie or menu is claimed.

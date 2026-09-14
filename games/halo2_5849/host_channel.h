@@ -13,6 +13,10 @@ typedef struct h2_host_channel {
     h2_push_read read_physical;
     /* Optional XDK software flip boundary. Rejection must preserve guest/state. */
     int (*software_flip)(void *opaque, uint32_t value, uint32_t source);
+    /* Optional geometry consumer: -1 means not handled, 0 rejects, 1 executes.
+     * Rejection/not-handled must preserve guest and command state. */
+    int (*geometry_method)(void *opaque, uint8_t subchannel, uint16_t method,
+                            uint32_t value, uint32_t source);
     void *opaque;
     uint32_t put;
     uint8_t bootstrap;

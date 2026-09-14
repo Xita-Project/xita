@@ -30,6 +30,14 @@ static void setup(fixture *f, h2_host_channel *c)
     h2_dma_object dma = {0, sizeof f->ram - 1, 2, 0};
     assert(h2_host_channel_init(c, &dma, 0x100, 0x100, read_ram, read_instance, map_ram, f, sizeof f->ram));
 }
+static int geometry_result, geometry_calls;
+static int geometry(void *opaque, uint8_t sub, uint16_t method, uint32_t value, uint32_t source)
+{
+    assert(opaque); ++geometry_calls;
+    if (method != 0x17FC) return -1;
+    assert(!sub && value == 7 && source == 0x10C);
+    return geometry_result;
+}
 int main(void)
 {
     fixture f; h2_host_channel c, before; h2_push_fault fault;
@@ -85,6 +93,18 @@ int main(void)
     assert(c.stream.get == 0x124 && c.commands.semaphore_releases == 1);
     assert(h2_host_channel_submit(&c, 0x128, 100, &fault) == H2_PUSH_METHOD_REJECTED);
     assert(c.commands.semaphore_releases == 1);
-    puts("Host channel: checked bootstrap, DMA bounds, partial packets and honest rejection/progress pass.");
+    setup(&f, &c); c.geometry_method = geometry;
+    const uint32_t draw[] = {0x40000, 13, 0x417FC, 7, 0x41800, 0};
+    memcpy((uint8_t *)f.ram + 0x100, draw, sizeof draw);
+    geometry_result = 0;
+    assert(h2_host_channel_submit(&c, 0x118, 100, &fault) == H2_PUSH_METHOD_REJECTED);
+    assert(c.stream.get == 0x10C && c.clear.has_object && geometry_calls == 2);
+    geometry_result = -2; /* invalid callback results also fail closed */
+    assert(h2_host_channel_submit(&c, 0x118, 100, &fault) == H2_PUSH_METHOD_REJECTED);
+    assert(c.stream.get == 0x10C);
+    geometry_result = 1;
+    assert(h2_host_channel_submit(&c, 0x118, 100, &fault) == H2_PUSH_METHOD_REJECTED);
+    assert(c.stream.get == 0x114 && fault.method == 0x1800);
+    puts("Host channel: checked bootstrap, DMA bounds, partial packets, optional geometry and rejection/progress pass.");
     return 0;
 }

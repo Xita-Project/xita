@@ -1,11 +1,13 @@
 # Halo 2: original shader, synthetic GXM pixel validation
 
-The standalone `XH2T00001` utility now executes the observed Halo 2 vertex
+The standalone `XH2T00001` utility executes the observed Halo 2 vertex
 program through GXM and checks its output against synthetic textures. This is
-not yet connected to Xbox command execution. Actual Halo 2 remains at native73:
+not itself connected to Xbox command execution. At this checkpoint, native73:
 the original intro movie reaches `BEGIN QUADS` (`17FC=7`, GET `03B4438C`), and
 the checked consumer stops before emitting geometry. There is no visible movie
-or main menu yet.
+or main menu was visible. The subsequent
+[integrated movie-quad milestone](halo2-original-movie-quads.md) connects the
+validated shader path to the original commands.
 
 ## Supported shader experiment
 

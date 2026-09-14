@@ -9,6 +9,9 @@
 #include "instance_memory.h"
 #include "scanout.h"
 #include "fp_environment.h"
+#if H2_QUAD_RENDER
+#include "quad_gxm.h"
+#endif
 #include <string.h>
 
 #define DEVICE 0x404FE0u
@@ -30,6 +33,24 @@ static int complete_timed_mode_vblank(xctx *c, uint32_t source);
 extern void xv_logf(const char *, ...);
 extern volatile uint32_t xv_cur_fn;
 extern uint32_t xk_mem_arena_size(void);
+#if H2_QUAD_RENDER
+static h2_quad_draw movie_quad;
+static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
+                            uint32_t value, uint32_t source)
+{
+    (void)opaque;
+    if (!movie_quad.active && method != 0x17FC) return -1;
+    uint32_t fpscr = h2_platform_fpscr_read();
+    uint64_t before = movie_quad.completed;
+    int result = h2_quad_method(&movie_quad, &channel.commands, &channel.clear, sub, method, value);
+    if (movie_quad.completed != before && (movie_quad.completed <= 4 || !(movie_quad.completed % 60)))
+        xv_logf("[h2/quad] completed=%u original_vertices=4 source=%08X color=%08X texture=%08X RGB committed; not yet presented\n",
+                (unsigned)movie_quad.completed, source, channel.clear.color_offset,
+                channel.commands.setup[0x1B00 / 4]);
+    h2_platform_fpscr_write(fpscr);
+    return result;
+}
+#endif
 extern void f_003FE165(xctx *), f_003FE190(xctx *);
 extern void f_00401C33(xctx *), f_00401D96(xctx *);
 extern void f_003FF240(xctx *), f_003FECC0(xctx *), f_0012B2A0(xctx *);
@@ -226,6 +247,14 @@ void h2_host_channel_configure(xctx *c)
     channel_ready = 1;
     channel.clear.check_attachment = check_attachment;
     channel.software_flip = software_flip;
+#if H2_QUAD_RENDER
+    memset(&movie_quad, 0, sizeof movie_quad);
+    uint32_t contract_fpscr = h2_platform_fpscr_read();
+    movie_quad.contract = h2_quad_gxm_contract();
+    h2_platform_fpscr_write(contract_fpscr);
+    movie_quad.render = h2_quad_gxm_render;
+    channel.geometry_method = geometry_method;
+#endif
     xv_logf("[h2/channel] configured channel=0 DMA=%08X context=%08X ring=%08X+%X schedule=%08X\n",
             dma_instance, context, channel.stream.base, channel.stream.bytes, schedule);
     X_RET(3);
