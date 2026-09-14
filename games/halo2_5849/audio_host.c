@@ -1378,6 +1378,24 @@ void h2_audio_host_snapshot(h2_audio_device_snapshot *out) { *out = device; }
 void h2_audio_trace_buffer(xctx *c, uint32_t ip)
 {
     /* Terminal read-only probes; never repair guest inputs or resume them. */
+#if H2_AUDIO_DSP
+    if (ip==0x37B60D && !(c->r[4]&3) && mapped(c->r[4],28)) {
+        uint32_t index=X_ARG(1),offset=X_ARG(2),source=X_ARG(3),bytes=X_ARG(4),words[2];
+        xv_logf("[h2/effect-write-probe] caller=%08X index=%u offset=%u source=%08X bytes=%u flags=%08X\n",
+                X_M32(c->r[4]),index,offset,source,bytes,X_ARG(5));
+        if(bytes==8 && mapped(source,8)) {
+            x_guest_read(words,source,8);
+            xv_logf("[h2/effect-write-probe] input=%08X,%08X\n",words[0],words[1]);
+            if(effects && h2_audio_backend_effect_read(effects,index,offset,words,8))
+                xv_logf("[h2/effect-write-probe] current_GP=%08X,%08X\n",words[0],words[1]);
+        }
+        if(effects_guest && index<15 && mapped(effects_guest+8+index*32,16)) {
+            uint32_t map[4];x_guest_read(map,effects_guest+8+index*32,16);
+            xv_logf("[h2/effect-write-probe] state_view=%08X state_bytes=%u code_view=%08X code_bytes=%u\n",
+                    map[2],map[3],map[0],map[1]);
+        }
+    }
+#endif
     if (ip==0x37AD25 && !(c->r[4]&3) && mapped(c->r[4],16)) {
         uint32_t input=X_ARG(1),packet[6];
         for (unsigned i=0;i<XA_MAX_VOICES;++i) if (streams[i].base==X_ARG(0) && streams[i].references)
