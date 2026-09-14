@@ -118,6 +118,10 @@ test-host: $(BUILD)/audio_fx_test
 $(BUILD)/audio_fx_vita_test: audio_fx_vita_test.c audio_fx_fixture.c audio_fx_test.c audio_fx.c audio_fx.h audio_fx_limits.h audio_hrtf_model.h audio_filter_model.h audio_vita_test.c audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h audio_fx_limits.h dsp_engine_test.c dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c $(DSP_HEADERS)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -fno-strict-aliasing -I$(ROOT) -I$(ROOT)/recomp $(DSP_INCLUDES) audio_fx_vita_test.c audio_fx_fixture.c audio_progress.c -pthread -lm -o $@
+$(BUILD)/audio_gp_pcm_vita_test: audio_gp_pcm_vita_test.c audio_fx_vita_test.c audio_fx_fixture.c audio_fx.c audio_fx.h audio_fx_limits.h audio_filter_model.h audio_hrtf_model.h audio_vita_test.c audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/xv_x86rt.c dsp_engine_test.c dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c $(DSP_HEADERS)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O2 -fno-strict-aliasing -frounding-math -ffp-contract=off -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp $(DSP_INCLUDES) audio_gp_pcm_vita_test.c audio_fx_fixture.c audio_progress.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -pthread -lm -o $@
+test-host: $(BUILD)/audio_gp_pcm_vita_test
 $(BUILD)/audio_fx_host_test: audio_fx_host_test.c audio_dsp_test.c audio_buffer_test.c audio_host.c audio_host.h audio_fx_limits.h dsp_asset.h dsp_engine.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_fx_host_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
@@ -177,6 +181,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/audio_fx_test
 	$(BUILD)/audio_hrtf_model_test
 	$(BUILD)/audio_fx_vita_test
+	$(BUILD)/audio_gp_pcm_vita_test
 	$(BUILD)/audio_fx_host_test
 	$(BUILD)/kernel_timer_test
 	$(BUILD)/linear_texture_test

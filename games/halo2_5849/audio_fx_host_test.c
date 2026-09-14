@@ -256,7 +256,7 @@ int main(int argc, char **argv)
                 X_M32(c.r[4])=0x221592;call(&c,0x37CC4A,0,3);assert(pcm->bytes==1000 && pcm->mirror);
                 c=fx_context(pcm_handle,0,0x22159D);call(&c,0x37B6A7,0,2);
                 /* Exercise the real shared PCM decoder independently of the
-                 * still-rejected loaded-DSP Play: both audible test input
+                 * separately tested loaded-DSP Play: both audible test input
                  * and fully muted input advance effective1000Hz source time. */
                 int16_t output[2048];xk_audio_voice_play(pcm->voice,1);xk_audio_mix(output,1024);
                 unsigned nonzero=0;for(unsigned i=0;i<2048;++i)nonzero+=output[i]!=0;assert(nonzero && g_v[pcm->voice].frames_out==1024);
@@ -266,7 +266,12 @@ int main(int argc, char **argv)
                 xk_audio_voice_play(pcm->voice,1);xk_audio_mix(output,1024);
                 for(unsigned i=0;i<2048;++i)assert(!output[i]);assert(g_v[pcm->voice].frames_out==1024 && g_v[pcm->voice].pos);
                 xk_audio_voice_stop(pcm->voice);
-                c=context(pcm_handle,0,0,1);X_M32(c.r[4])=0x2215B9;reject(&c,0x37B6DF);
+                c=context(pcm_handle,0,0,0);X_M32(c.r[4])=0x2215B9;reject(&c,0x37B6DF);
+                c=context(pcm_handle,0,0,1);X_M32(c.r[4])=0x2215B9;test_gp_pcm_play_failure=1;reject(&c,0x37B6DF);
+                test_gp_pcm_play_failure=0;call(&c,0x37B6DF,0,4);assert(pcm->started && g_v[pcm->voice].playing);
+                c=context(pcm_handle,0,0,0);reject(&c,0x379F45);
+                c=fx_context(pcm_handle,0,0x2215AC);reject(&c,0x37B66F);
+                xk_audio_voice_stop(pcm->voice);pcm->started=0; /* inactive teardown only */
                 c=context(pcm_handle,0,0,0);call(&c,0x379F45,0,1);assert(device.references==16 && device.children==15);
 
                 for (unsigned i = 8; i-- > 0;) {

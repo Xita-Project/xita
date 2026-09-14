@@ -27,7 +27,7 @@ typedef struct {
     int32_t route_gains[6];
     uint32_t fx_bin;
     uint32_t filter[6];
-    uint32_t gp_pcm; /* observed mono8/1000Hz buffer, route14; no active route yet */
+    uint32_t gp_pcm; /* observed mono8/1000Hz buffer, fully muted route14 */
 } h2_audio_buffer;
 static h2_audio_buffer buffers[XA_MAX_VOICES];
 typedef struct {
@@ -444,7 +444,7 @@ static void global_buffer_create(xctx *c)
     uint32_t handle=base+0x1C; x_guest_write(out,&handle,4);
     /* The original global wrapper takes/releases a temporary device ref.
      * On return only the real child's reference survives, including failure. */
-    xv_logf("[h2/audio-global] create caller=0022153E interface=%08X real voice=%d PCM8 mono effective1000Hz route14 headroom600 parent_refs=%u inactive; loaded-DSP playback unsupported\n",handle,voice,device.references);
+    xv_logf("[h2/audio-global] create caller=0022153E interface=%08X real voice=%d PCM8 mono effective1000Hz route14 headroom600 parent_refs=%u inactive; only fully muted GP14 playback is supported\n",handle,voice,device.references);
     result(c,0,2);
 #else
     fail(c,ip,"global routed PCM requires real DSP",ip);
@@ -880,6 +880,17 @@ static void buffer_play(xctx *c)
         xv_logf("[h2/fxin2] Play caller=%08X interface=%08X source_key=%X input_bin=%u original FX loop semantics, actual source-tagged GP grain accepted by stereo sink\n",
                 X_M32(c->r[4]), b->base + 0x1C, b->fx_bin, b->fx_bin & 0xFFFF);
         result(c, 0, 4); return;
+    }
+    if (b->gp_pcm) {
+        if (!effects || X_M32(c->r[4])!=0x2215B9 || b->started || b->stopped || b->volume!=-10000 || b->headroom ||
+            b->frequency!=1000 || b->bytes!=1000 || b->route_count!=1 || b->route_bins[0]!=14 || b->route_gains[0] ||
+            !b->mirror || !mapped(b->mirror,b->mirror_bytes) || !mapped(b->source,b->bytes) ||
+            X_ARG(1) || X_ARG(2) || X_ARG(3)!=1)
+            fail(c,ip,"unsupported muted GP PCM Play state/flags",b->base);
+        if (h2_audio_backend_gp_pcm_play(b->voice)<0) fail(c,ip,"muted PCM real GP/sink Play rejected",b->base);
+        b->started=1;
+        xv_logf("[h2/audio-global] Play caller=002215B9 interface=%08X voice=%d loop1000 bytes effective1000Hz; actual decoder advances, verified muted GP14 contribution, source-tagged sink grain accepted\n",b->base+0x1C,b->voice);
+        result(c,0,4); return;
     }
     if (effects) fail(c, ip, "loaded DSP PCM voice routing is unsupported", X_M32(c->r[4]));
 #endif

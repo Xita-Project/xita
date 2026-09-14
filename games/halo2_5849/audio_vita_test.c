@@ -54,6 +54,19 @@ static int launched, joined;
 static int (*native_entry)(SceSize, void *);
 static int failing(unsigned bit) { return (atomic_load(&faults) & (1u << bit)) != 0; }
 void xv_logf(const char *format, ...) { (void)format; }
+#ifdef H2_AUDIO_TEST_REAL_MIXER
+#define xk_os_audio_open h2_audio_sink_open
+#define xk_os_audio_mutex_lock h2_audio_sink_lock
+#define xk_os_audio_mutex_unlock h2_audio_sink_unlock
+#define XK_AUDIO_OUTPUT_FILTER h2_audio_bins_filter
+#include "recomp/kernel/xk_audio.c"
+#undef xk_os_audio_open
+#undef xk_os_audio_mutex_lock
+#undef xk_os_audio_mutex_unlock
+#undef XK_AUDIO_OUTPUT_FILTER
+void xk_os_log(const char *format, ...) { (void)format; }
+uint64_t xk_os_monotonic_us(void) { return sceKernelGetProcessTimeWide(); }
+#else
 int xk_audio_init(void) { fake_voice = -1; fake_decoded = 0; fake_playing = 0; return h2_audio_sink_open(XA_OUT_RATE, XA_GRAIN); }
 void xk_audio_lock(void) { h2_audio_sink_lock(); }
 void xk_audio_unlock(void) { h2_audio_sink_unlock(); }
@@ -80,6 +93,7 @@ void xk_audio_voice_set_pos(int voice, uint32_t position)
 { assert(voice == fake_voice && !position); xk_audio_lock(); fake_decoded = position; xk_audio_unlock(); }
 uint32_t xk_audio_voice_pos(int voice) { assert(voice == fake_voice); return fake_decoded; }
 uint32_t xk_audio_free_voices(void) { return 42; }
+#endif
 static int sceKernelCreateMutex(const char *name, int a, int b, void *p)
 {
     unsigned index = !strcmp(name, "h2_audio_progress"), bit = index ? 16 : 1;
@@ -123,7 +137,11 @@ static int sceAudioOutOutput(int id, const void *data)
     }
     else
 #endif
+#ifdef H2_AUDIO_TEST_REAL_MIXER
+        for (unsigned i=0;i<XA_GRAIN*2;++i) assert(!samples[i]);
+#else
         assert(samples[0] == 1234 && samples[XA_GRAIN * 2 - 1] == -4321);
+#endif
     if (failing(F_WRITE)) return -23;
     assert(!atomic_load(&queued)); atomic_store(&queued, XA_GRAIN);
     atomic_fetch_add(&outputs, 1); usleep(1000); return 0;

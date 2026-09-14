@@ -20,6 +20,8 @@ typedef struct {
     uint32_t fx_deadline_misses, fx_empty_after_compute;
     uint32_t fx_bound_mask, fx_playing_mask;
     uint64_t fx_source_submitted[H2_FX_SOURCES], fx_source_consumed[H2_FX_SOURCES];
+    uint32_t gp_pcm_playing_mask;
+    uint64_t gp_pcm_submitted[2], gp_pcm_consumed[2];
 } h2_audio_backend_status;
 
 /* Bounded device + external PCM buffer creation/binding/controls and paired
@@ -67,6 +69,8 @@ int h2_audio_backend_fx_route(unsigned bin, unsigned routes);
 int h2_audio_backend_fx_route_mask(unsigned bin, unsigned output_mask);
 int h2_audio_backend_fx_mute(unsigned key);
 int h2_audio_backend_fx_filter(unsigned key);
+/* Only the validated looping, fully muted mono8/1000Hz voices into GP14. */
+int h2_audio_backend_gp_pcm_play(int voice);
 int h2_audio_backend_fx_play(unsigned bin);
 int h2_audio_backend_fx_forget(unsigned bin);
 int h2_audio_backend_effect_read(h2_dsp_engine *engine, unsigned index,

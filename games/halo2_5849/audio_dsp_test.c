@@ -51,6 +51,13 @@ int h2_audio_backend_fx_filter(unsigned key)
     if (test_fx_filter_failure) return -1;
     test_fx_filtered |= 1u << (key - 23); return 0;
 }
+static int test_gp_pcm_play_failure;
+int h2_audio_backend_gp_pcm_play(int voice)
+{
+    assert(test_fx_playing==0x7fff);
+    if (test_gp_pcm_play_failure) return -1;
+    xk_audio_voice_play(voice,1); return 0;
+}
 int h2_audio_backend_fx_play(unsigned bin)
 { unsigned mask = test_fx_mask(bin); assert((test_fx_bound & mask) && !(test_fx_playing & mask) && (bin != 13 || test_fx_routes == 6)); test_fx_playing |= mask; return 0; }
 int h2_audio_backend_fx_forget(unsigned bin)

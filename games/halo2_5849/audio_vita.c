@@ -6,6 +6,10 @@
 #if H2_AUDIO_DSP
 #include "audio_fx.h"
 static h2_audio_fx fx;
+static int gp_pcm_voice[2] = {-1,-1};
+static unsigned gp_pcm_active, gp_pcm_queued;
+static uint64_t gp_pcm_submitted[2], gp_pcm_consumed[2];
+static _Alignas(64) int16_t gp_pcm_output[1024 * 2];
 static uint64_t fx_submitted, fx_consumed, fx_compute_us, fx_max_compute_us;
 static uint32_t fx_queued, fx_deadline_misses, fx_empty_after_compute;
 static uint64_t fx_source_submitted[H2_FX_SOURCES], fx_source_consumed[H2_FX_SOURCES];
@@ -60,6 +64,10 @@ static int observe_rest(void)
         for (unsigned v = 0; v < H2_FX_SOURCES; ++v)
             if (fx_queued & (1u << v)) fx_source_consumed[v] += previous - (uint32_t)remaining;
         if (!remaining) fx_queued = 0;
+    }
+    if (gp_pcm_queued) {
+        for (unsigned i=0;i<2;++i) if (gp_pcm_queued & (1u<<i)) gp_pcm_consumed[i] += previous - (uint32_t)remaining;
+        if (!remaining) gp_pcm_queued=0;
     }
 #else
     (void)previous;
@@ -235,6 +243,52 @@ int h2_audio_backend_fx_play(unsigned bin)
         sceKernelDelayThread(1000);
     }
 }
+int h2_audio_backend_gp_pcm_play(int voice)
+{
+    if (voice<0 || voice>=XA_MAX_VOICES || h2_audio_backend_health()<0) return -1;
+    sceKernelLockMutex(progress_mutex,1,NULL);
+    unsigned index=gp_pcm_voice[0]<0 ? 0 : 1;
+    int ok=h2_audio_backend_health()==0 && fx.playing==0x7fff && fx.bound==0x7fff &&
+        progress.voice<0 && gp_pcm_voice[index]<0 && gp_pcm_voice[0]!=voice &&
+        (!index || gp_pcm_active==1);
+    xk_audio_lock();
+    if (xk_audio_voice_playing(voice)) ok=0;
+    for (unsigned v=0;v<XA_MAX_VOICES;++v) if (xk_audio_voice_playing(v) &&
+        (int)v!=gp_pcm_voice[0] && (int)v!=gp_pcm_voice[1]) ok=0;
+    xk_audio_unlock();
+    uint64_t before=gp_pcm_submitted[index];
+    if (ok) {
+        gp_pcm_voice[index]=voice; gp_pcm_active |= 1u<<index;
+        xk_audio_voice_play(voice,1);
+    }
+    sceKernelUnlockMutex(progress_mutex,1);
+    if (!ok) return -1;
+    uint64_t start=sceKernelGetProcessTimeWide();
+    for (;;) {
+        sceKernelLockMutex(progress_mutex,1,NULL);
+        int accepted=gp_pcm_submitted[index]>before, healthy=h2_audio_backend_health()==0;
+        sceKernelUnlockMutex(progress_mutex,1);
+        if (!healthy) return -1;
+        if (accepted) return 0;
+        if (sceKernelGetProcessTimeWide()-start>2000000) {
+            __atomic_store_n(&error,(uint32_t)-1006,__ATOMIC_RELEASE); return -1;
+        }
+        sceKernelDelayThread(1000);
+    }
+}
+/* Called only under the ownership lock. These voices are already validated
+ * mono8/1000Hz with volume-10000 and route14. Decode/resample them normally,
+ * then prove their contribution is zero. Never discard unexpected samples.
+ * The GP's existing zero bin14 is therefore their exact supported input. */
+static int mix_muted_gp_pcm(void)
+{
+    if (!gp_pcm_active) return 1;
+    xk_audio_mix(gp_pcm_output,XA_GRAIN);
+    for (unsigned i=0;i<XA_GRAIN*2;++i) if (gp_pcm_output[i]) return 0;
+    int ok=1; xk_audio_lock();
+    for (unsigned i=0;i<2;++i) if ((gp_pcm_active & (1u<<i)) && !xk_audio_voice_playing(gp_pcm_voice[i])) ok=0;
+    xk_audio_unlock(); return ok;
+}
 int h2_audio_backend_effect_read(h2_dsp_engine *engine, unsigned index,
                                  unsigned offset, void *out, unsigned bytes)
 {
@@ -251,7 +305,7 @@ static int mix_worker(SceSize bytes, void *arg)
     (void)bytes; (void)arg;
     unsigned slot = 0, first = 1;
 #if H2_AUDIO_DSP
-    unsigned fx_prepared = 0;
+    unsigned fx_prepared = 0, pcm_prepared = 0;
 #endif
     while (__atomic_load_n(&running, __ATOMIC_ACQUIRE)) {
         sceKernelLockMutex(progress_mutex, 1, NULL);
@@ -263,6 +317,10 @@ static int mix_worker(SceSize bytes, void *arg)
          * plays. Never discard computed DSP time to catch up with wall time. */
         if (fx.playing && !fx_prepared) {
             uint64_t begin = sceKernelGetProcessTimeWide();
+            if (!mix_muted_gp_pcm()) {
+                __atomic_store_n(&error,(uint32_t)-1007,__ATOMIC_RELEASE);
+                sceKernelUnlockMutex(progress_mutex,1); break;
+            }
             if (!h2_audio_fx_render(&fx, output[slot], XA_GRAIN)) {
                 __atomic_store_n(&error, (uint32_t)-1004, __ATOMIC_RELEASE);
                 sceKernelUnlockMutex(progress_mutex, 1); break;
@@ -271,7 +329,7 @@ static int mix_worker(SceSize bytes, void *arg)
             fx_compute_us += duration;
             if (duration > fx_max_compute_us) fx_max_compute_us = duration;
             if (duration * XA_OUT_RATE > (uint64_t)XA_GRAIN * 1000000) ++fx_deadline_misses;
-            fx_prepared = fx.playing;
+            fx_prepared = fx.playing; pcm_prepared = gp_pcm_active;
             /* This is an observed empty queue after computation, not a
              * hardware underrun interrupt or a measured duration of silence. */
             int had_fx = fx_queued;
@@ -307,7 +365,9 @@ static int mix_worker(SceSize bytes, void *arg)
             fx_submitted += XA_GRAIN; fx_queued = fx_prepared;
             for (unsigned v = 0; v < H2_FX_SOURCES; ++v)
                 if (fx_prepared & (1u << v)) fx_source_submitted[v] += XA_GRAIN;
-            fx_prepared = 0;
+            gp_pcm_queued=pcm_prepared;
+            for (unsigned i=0;i<2;++i) if (pcm_prepared & (1u<<i)) gp_pcm_submitted[i]+=XA_GRAIN;
+            fx_prepared = pcm_prepared = 0;
         }
 #endif
         submitted_at = sceKernelGetProcessTimeWide();
@@ -369,6 +429,10 @@ int h2_audio_backend_close(void)
     /* An unverified drain retains the port and storage. A later close can
      * retry observation, but must never free resources still owned by a sink. */
     if (progress_mutex >= 0 && progress.pending && (observe_rest() < 0 || progress.pending)) return -1;
+#if H2_AUDIO_DSP
+    if (mutex>=0) for (unsigned i=0;i<2;++i) if (gp_pcm_active & (1u<<i)) xk_audio_voice_stop(gp_pcm_voice[i]);
+    gp_pcm_active=0;
+#endif
     int result = 0;
     if (worker >= 0) { if (sceKernelDeleteThread(worker) < 0) result = -1; else worker = -1; }
     if (ready >= 0) { if (sceKernelDeleteSema(ready) < 0) result = -1; else ready = -1; }
@@ -383,6 +447,8 @@ int h2_audio_backend_open(void)
     if (port >= 0 || worker >= 0 || mutex >= 0 || ready >= 0 || progress_mutex >= 0) return -2;
     grains = nonzero_grains = peak = error = 0;
 #if H2_AUDIO_DSP
+    gp_pcm_voice[0]=gp_pcm_voice[1]=-1; gp_pcm_active=gp_pcm_queued=0;
+    memset(gp_pcm_submitted,0,sizeof gp_pcm_submitted); memset(gp_pcm_consumed,0,sizeof gp_pcm_consumed);
     fx = (h2_audio_fx){0}; fx_submitted = fx_consumed = fx_compute_us = fx_max_compute_us = 0;
     fx_queued = fx_deadline_misses = fx_empty_after_compute = 0;
     memset(fx_source_submitted, 0, sizeof fx_source_submitted);
@@ -447,6 +513,9 @@ void h2_audio_backend_snapshot(h2_audio_backend_status *out)
     out->fx_bound_mask = fx.bound; out->fx_playing_mask = fx.playing;
     memcpy(out->fx_source_submitted, fx_source_submitted, sizeof fx_source_submitted);
     memcpy(out->fx_source_consumed, fx_source_consumed, sizeof fx_source_consumed);
+    out->gp_pcm_playing_mask=gp_pcm_active;
+    memcpy(out->gp_pcm_submitted,gp_pcm_submitted,sizeof gp_pcm_submitted);
+    memcpy(out->gp_pcm_consumed,gp_pcm_consumed,sizeof gp_pcm_consumed);
     if (progress_mutex >= 0) sceKernelUnlockMutex(progress_mutex, 1);
 #endif
 }

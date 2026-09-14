@@ -16,3 +16,6 @@ h2_dsp_engine *h2_test_fx_engine(void)
     return s;
 }
 void h2_test_fx_fault(h2_dsp_engine *s) { s->core.pc = 0x1000; }
+
+void h2_test_fx_input(h2_dsp_engine *s, unsigned bin, uint32_t out[32])
+{ assert(bin<32); memcpy(out,s->core.mixbuffer+bin*32,32*sizeof *out); }

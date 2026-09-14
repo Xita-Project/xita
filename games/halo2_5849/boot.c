@@ -570,6 +570,9 @@ _Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32
         xv_logf("[h2/fxin2] bin%u submitted=%llu consumed=%llu\n", bin,
                 (unsigned long long)backend.fx_source_submitted[7 + bin - 15],
                 (unsigned long long)backend.fx_source_consumed[7 + bin - 15]);
+    xv_logf("[h2/audio-global] muted PCM mask=%X submitted=%llu,%llu consumed=%llu,%llu\n",
+            backend.gp_pcm_playing_mask,(unsigned long long)backend.gp_pcm_submitted[0],(unsigned long long)backend.gp_pcm_submitted[1],
+            (unsigned long long)backend.gp_pcm_consumed[0],(unsigned long long)backend.gp_pcm_consumed[1]);
     xv_logf("[h2/audio] original HRTF configuration table and critical section at stop\n");
     for (unsigned i = 0; i < 11; ++i) trace_mapped_word(0x3871C8 + 4 * i);
     for (unsigned i = 0; i < 7; ++i) trace_mapped_word(0x386B18 + 4 * i);
