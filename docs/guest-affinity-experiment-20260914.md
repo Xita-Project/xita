@@ -58,3 +58,35 @@ The test executable SHA-256 is
 `8cdcd52a15e63412795e0c67d0392b81e2b5e624203cc4a8d9ffb187ffaeef39`.
 Its updater contract and immutable helper/assets match the previously verified
 package. Only the game executable and boot manifest change.
+
+## Physical campaign result
+
+The same runtime booted in physical slot B through the paired updater and
+entered the Pillar of Autumn cryo room. Three original/core-2/original trials
+completed at 640 × 360, with 60 settling and 120 measured frames per arm. The
+30 FPS cap, 444 MHz effective CPU clock, graphics settings and existing workers
+stayed unchanged. Indexed vertex validation and query overlap were disabled.
+All camera checks passed; live animation and simulation continued.
+
+| Trial | Original before | Core 2 | Original after |
+| --- | ---: | ---: | ---: |
+| 1 | 6.198 FPS | 6.184 FPS | 6.147 FPS |
+| 2 | 6.193 FPS | 6.212 FPS | 6.163 FPS |
+| 3 | 6.162 FPS | 6.128 FPS | 6.145 FPS |
+
+Pooled elapsed times give **6.168 → 6.175 FPS**, or **162.128 → 161.956
+ms/frame**. Individual frame-time savings were +0.310, +0.875 and −0.670 ms.
+The 0.172 ms pooled difference is small and inconsistent; it does not establish
+a useful speedup. Keep ordinary scheduling unchanged.
+
+Logs confirm the physical thread's original mask `0x00000000`, applied core-2
+mask `0x00040000` and exact restoration after every trial, without affinity
+failures. All 79 pinned CPU samples report core 2 and its migration counter
+stays constant during each pinned arm. The experiment therefore exercised
+actual physical affinity changes rather than an emulator stub. It does not
+show that CPU migration is the campaign's main bottleneck.
+
+Private evidence is `physical-campaign`, `physical-campaign-analysis.json` and
+`physical-campaign-pinned-cores.json` in the directory above. The final remote
+status reports no active benchmark. The presenting thread's original affinity
+and configured experiment settings are restored.

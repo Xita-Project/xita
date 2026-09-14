@@ -2,7 +2,8 @@
 
 The native visibility experiment did not improve the collected hardware result.
 The next candidate targets repeated vertex comparisons during draw preparation.
-It is **off by default**, and no Vita FPS gain has been measured for it yet.
+It is **off by default**. The September 14 hardware follow-up measured a
+repeatable gain in the Pillar of Autumn cryo room; see the results below.
 
 ## What changes
 
@@ -94,7 +95,7 @@ The campaign cryo-room comparison also completed with a comparable camera and
 Full-span comparison requests were about 5.82 MiB per frame; selective validation
 reduced them to 2.69 MiB. Index plus stream preparation fell from about 5.94 to
 4.34 ms per frame in this emulator sample, including mask construction cost.
-Hardware still needs measurement.
+These September 8 measurements cover the emulator. Physical results follow.
 
 Private checks covered Blood Gulch walking, camera turns, rifle/grenade effects,
 the flashlight, Warthog entry/driving/exit and campaign camera movement. Six
@@ -125,3 +126,44 @@ Judge the complete frame time as well as those individual stages. A separate
 run with `XV_VERTEX_REFERENCES=1` is needed for driving, firing, death/respawn and
 campaign correctness. Keep it disabled if hardware shows no useful improvement
 or any rendering/lifetime regression. Sustained 20 FPS remains the project goal.
+
+## September 14 hardware follow-up
+
+Three physical cryo-room comparisons at 640 × 360 completed with passing camera
+checks. Each arm used 60 settling frames and 120 measured frames. The frame cap
+was 30; texture maximum was 128, low model detail and triple buffering were
+enabled, and the existing vertex copy worker stayed enabled throughout. The
+requested 500 MHz CPU clock resolved to 444 MHz; GPU/bus/crossbar were
+222/222/166 MHz. Query-overlap, native bounds and model-palette experiments were
+disabled. Live animation and simulation continued.
+
+| Trial | Full before | Indexed | Full after |
+| --- | ---: | ---: | ---: |
+| 1 | 6.220 FPS | 6.782 FPS | 6.185 FPS |
+| 2 | 6.093 FPS | 6.674 FPS | 6.134 FPS |
+| 3 | 6.206 FPS | 6.772 FPS | 6.151 FPS |
+
+Pooling elapsed microseconds across the 720 full-validation and 360 indexed
+frames gives **6.165 → 6.742 FPS**, or **162.216 → 148.317 ms/frame**. The
+candidate saved **13.899 ms/frame**, a 9.37% FPS increase. Individual trials
+saved 13.777, 13.737 and 14.183 ms/frame.
+
+Nearby draw-preparation windows agree with the direction of the full-frame
+measurement: stream preparation fell from about 34.92 to 19.12 ms/frame, while
+index preparation rose from 3.69 to 6.08 ms/frame. Those counter windows do not
+align exactly with the measured arms, so their difference is supporting
+evidence rather than an independent exact accounting of the gain.
+
+The test runtime SHA-256 was
+`5e5e120eeea33e0f11a51ac9f63b05f69df526c99424a7883c5c9f8039f06619`.
+Private logs and exact-time analysis are under
+`2026-09-13-worker-sizing/validation/hardware-updater-20260914T122650Z/flare-query-overlap/`:
+`physical-campaign-references`, `physical-campaign-references-analysis.json` and
+`physical-campaign-reference-costs.json`.
+
+This confirms a benefit in one demanding campaign view. It does not establish
+the campaign average, stable 20/30 FPS, or correctness throughout driving and
+death/respawn. Comparisons restored `XV_VERTEX_REFERENCES=0`; the physical device
+does not silently keep the experiment enabled afterward. The next validation
+is ordinary gameplay with indexed validation enabled, followed by the same
+comparison in additional campaign and multiplayer views.

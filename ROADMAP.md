@@ -9,15 +9,18 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
-[~] September 14 [texture binding cache](docs/texture-state-cache-20260914.md):
-about half the mesh bindings repeat in the tested emulator gameplay view.
-An optional cache and isolated comparison pass host and emulator checks; physical frame-time
-benefit remains unmeasured, so the cache defaults off.
+[~] September 14 [campaign results and next steps](docs/performance-next-steps-20260914.md):
+indexed vertex validation saved 13.9 ms/frame across three cryo-room comparisons,
+from 6.165 to 6.742 FPS. It remains opt-in pending broader gameplay checks.
+Next: validate additional views, measure remaining vertex work and prototype
+larger independent worker jobs with explicit input lifetimes.
 
-[~] September 14 [native point transforms](docs/native-point-transform-20260914.md):
-the guarded helper passes compiled ARM comparisons and an emulator gameplay
-comparison. Most calls in the tested view use the native path; hardware speed
-remains unmeasured.
+[~] September 14 [rendering candidates](docs/hardware-20260914-candidates.md):
+physical comparisons of texture binding reuse, native point transforms and
+early visibility completion show small or inconsistent gains across views.
+Fewer API calls alone did not establish a useful texture-cache FPS benefit.
+The separate [exact query-overlap experiment](docs/flare-query-overlap-20260914.md)
+helped two Blood Gulch views but not the tested campaign room; it defaults off.
 
 [~] September 14 [native transform math](docs/native-math-unroll-20260914.md):
 unrolled scalar VFP calculations preserve 48,896 compiled ARM test outcomes
@@ -27,8 +30,8 @@ benefit remains unmeasured. Stable 20 FPS is the first milestone toward 30 FPS.
 [~] September 14 [hardware rendering comparisons](docs/hardware-20260914-rendering.md):
 the model-palette helper did not improve the tested Blood Gulch view. Existing
 deferred flare queries saved about 13.3 ms/frame in matched trials, but were
-already enabled. A separate world-scene completion experiment passes emulator
-checks and awaits hardware measurement.
+already enabled. The later candidate and campaign reports above distinguish
+those existing gains from new experiments.
 
 [~] [Remote hardware testing](docs/remote-testing.md): opt-in LAN controller
 input, completed-frame screenshots, log downloads and repeated off/on/off
@@ -37,11 +40,11 @@ launched Halo, entered Blood Gulch and collected three complete comparisons.
 One-time pairing and foreground launch are required. The
 [integrated updater](docs/integrated-updater.md) adds a stable launcher, verified
 inactive executable slots and rollback. [September 14 testing](docs/hardware-20260914-updater.md)
-confirms physical Wi-Fi installs, including a gameplay handoff, but a later
-restart has not returned to the control service. Shutdown diagnostics and
-display-awake leases are implemented and emulator-tested; physical recovery
-remains unverified. Remote experiment selection is available. Next: restore
-hardware access and bundle build/settings/logs/screenshots into test reports.
+confirms repeated physical Wi-Fi installs, including gameplay handoffs, exact
+runtime hashes, slot changes and cleared staging state. Access recovered after
+the earlier unconfirmed restart; the current runtime is confirmed on hardware.
+Remote experiment selection, shutdown diagnostics and display-awake leases are
+available. Long-running recovery reliability remains a separate validation task.
 
 September 13 [object-transform hardware follow-up](docs/hardware-20260913-object-basis.md):
 the enabled native helper records over two million accepted calls with no guard

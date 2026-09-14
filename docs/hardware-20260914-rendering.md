@@ -2,6 +2,8 @@
 
 The [later two-view hardware tests](hardware-20260914-candidates.md) measure
 early visibility completion, native point transforms and texture binding reuse.
+The [campaign results and next steps](performance-next-steps-20260914.md) cover
+the later indexed-vertex gain, workload sharing and lessons from the HL2 port.
 
 Three matched trials in stationary solo Blood Gulch confirm that the existing
 deferred flare queries help this scene. The new model-palette helper did not

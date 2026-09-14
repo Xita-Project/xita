@@ -1,5 +1,22 @@
 # September 14: updater permissions and remote comparisons
 
+## Latest physical status
+
+The earlier loss of the control service described below is historical. Access
+recovered, and subsequent paired Wi-Fi updates confirmed changed slots, exact
+runtime hashes and cleared staging state. The latest physical runtime is
+`8cdcd52a15e63412795e0c67d0392b81e2b5e624203cc4a8d9ffb187ffaeef39`,
+confirmed in slot B, followed by ordinary campaign loading and controlled
+benchmarks. It retains the helper and contract listed below. These runtime
+updates needed no further VPK installation.
+
+The latest receipt is privately retained at `guest-affinity/physical-update.log`
+under the evidence directory below. The [campaign performance report](performance-next-steps-20260914.md)
+records what this remote test loop measured. Successful update receipts do not
+establish indefinite recovery reliability or an FPS improvement by themselves.
+
+## Initial failure and correction
+
 The original updater VPK was installed and its runtime identified as
 `e1c6e95867db1843cc0d95e437f557a4b7944dd8dca91bb7f449da8b886dd987`.
 Wi-Fi transfers verified their incoming bytes, but the helper returned to slot
