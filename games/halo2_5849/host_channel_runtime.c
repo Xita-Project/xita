@@ -23,6 +23,9 @@ static h2_host_tiles tiles;
 static xctx *active_context;
 static int miniport_ready, channel_ready;
 static int software_active, initialization_flip_done, initialization_flip_queued;
+static int active_flip_queued, active_flip_retiring;
+static uint32_t active_flip_address, active_flip_due, active_flip_serial;
+static unsigned active_crtc_writes, active_read_increments;
 static uint8_t scanout_gamma[768]; /* interleaved R/G/B DAC entries */
 static unsigned gamma_cursor;
 const h2_host_channel *h2_host_channel_current(void)
@@ -30,6 +33,8 @@ const h2_host_channel *h2_host_channel_current(void)
 static int software_flip(void *opaque, uint32_t value, uint32_t source);
 static int channel_idle(void);
 static int complete_timed_mode_vblank(xctx *c, uint32_t source);
+static int queue_active_flip(uint32_t value, uint32_t source);
+static int complete_active_flip(xctx *c, uint32_t source);
 extern void xv_logf(const char *, ...);
 extern volatile uint32_t xv_cur_fn;
 extern uint32_t xk_mem_arena_size(void);
@@ -383,7 +388,7 @@ void h2_host_miniport_shutdown(xctx *c)
      * No physical IRQ/shutdown callback was registered by this backend. */
     if (mini != MINIPORT || !guest_span_valid(mini, 0x81C) ||
         X_M32(0x407488) != DEVICE || X_M32(mini) != BAR || !miniport_ready ||
-        !channel_idle() || software_active || !display_mode_set || !screen_blanked ||
+        !channel_idle() || software_active || active_flip_queued || !display_mode_set || !screen_blanked ||
         X_M32(mini + 0x818) || X_M32(mini + 0x174) || X_M32(mini + 0x180) ||
         X_M32(mini + 0x18C) || X_M32(mini + 0x190) ||
         X_M32(mini + 0x100) || X_M32(mini + 0x104) != 1 || X_M32(mini + 0x108) != 1 ||
@@ -412,6 +417,7 @@ void h2_host_miniport_shutdown(xctx *c)
     memset(&tiles, 0, sizeof tiles);
     miniport_ready = channel_ready = initialization_flip_done = initialization_flip_queued = 0;
     mode_vblanks = gamma_cursor = 0;
+    active_flip_queued = active_flip_retiring = 0;
     display_mode_set = 0;
     memset(scanout_gamma, 0, sizeof scanout_gamma);
     active_context = NULL;
@@ -448,6 +454,7 @@ void h2_host_tile_configure(xctx *c)
 static int software_flip(void *opaque, uint32_t value, uint32_t source)
 {
     (void)opaque;
+    if (display_mode_set) return queue_active_flip(value, source);
     uint32_t address = (value >> 5) & ~15u;
     int queued = (value & 0x1FF) == 0x21; /* interval one, non-immediate */
     /* First audited flips: scanout disabled, an empty software queue, no
@@ -511,6 +518,107 @@ static int software_flip(void *opaque, uint32_t value, uint32_t source)
     xv_logf("[h2/flip] original initialization handler completed address=%08X gamma_bytes=%u read=%u; scanout disabled, no presentation\n",
             address, gamma_cursor, channel.commands.flip_read);
     h2_platform_fpscr_write(interrupted_fpscr);
+    return 1;
+}
+
+static int active_display_inputs(xctx *c, uint32_t address)
+{
+    return initialization_flip_done && !initialization_flip_queued && !software_active &&
+        display_mode_set && !screen_blanked && mode_vblanks == 2 && c && c->r[4] >= 512 &&
+        guest_span_valid(c->r[4] - 512, 512) && guest_span_valid(MINIPORT, 0x7E4) &&
+        guest_span_valid(0x408650, 4) && game_vblank_inputs_valid() &&
+        X_M32(MINIPORT) == BAR && X_M32(MINIPORT + 4) == 2560 &&
+        X_M32(MINIPORT + 8) == 0x88070701 && X_M32(MINIPORT + 0x1B4) == 0x00480104 &&
+        !X_M32(MINIPORT + 0x1B8) && !X_M32(MINIPORT + 0x18C) &&
+        X_M32(MINIPORT + 0x190) == 0x12B2A0 && !X_M32(MINIPORT + 0x1D0) &&
+        X_M32(MINIPORT + 0x194) == 0x00040000 && X_M32(MINIPORT + 0x198) <= 1 &&
+        !X_M32(MINIPORT + 0x7DC) && !X_M32(MINIPORT + 0x7E0) && gamma_cursor == 768 &&
+        channel.commands.flip_modulo == 2 && channel.clear.format == 0x128 &&
+        channel.clear.clip_horizontal == (640u << 16) && channel.clear.clip_vertical == (480u << 16) &&
+        (channel.clear.pitch & 0xFFFF) == 2560 && !(address & 15) &&
+        map_physical_raw(address, H2_SCANOUT_BYTES) &&
+        check_attachment(NULL, address, H2_SCANOUT_BYTES, 2560, 0, 0x128);
+}
+
+static int queue_active_flip(uint32_t value, uint32_t source)
+{
+    uint32_t address = (value >> 5) & ~15u;
+    if (active_flip_queued || (value & 0x1FF) != 0x21 ||
+        !active_display_inputs(active_context, address)) return 0;
+    uint32_t count = X_M32(MINIPORT + 0x1C0), serial = X_M32(MINIPORT + 0x1CC);
+    if (count < 2 || count > 0x7FFFFFFD || serial > 0x7FFFFFFD ||
+        X_M32(MINIPORT + 0x1BC) != serial || X_M32(MINIPORT + 0x1C8) > count ||
+        X_M32(MINIPORT + 0x174) || X_M32(MINIPORT + 0x180) ||
+        channel.commands.flip_read != (serial & 1) ||
+        channel.commands.flip_write != ((serial + 1) & 1)) return 0;
+    uint32_t old_framebuffer = X_M32(0x408650), saved_fn = xv_cur_fn;
+    uint32_t saved_fpscr = h2_platform_fpscr_read();
+    xctx *interrupted = active_context, interrupt = *interrupted;
+    interrupt.r[0] = value; interrupt.r[1] = MINIPORT; interrupt.preempt = 100000;
+    software_active = 1;
+    call_guest(&interrupt, f_003FF240, source);
+    active_context = interrupted; xv_cur_fn = saved_fn; software_active = 0;
+    uint32_t slot = (serial & 1) * 12;
+    if (X_M32(MINIPORT + 0x174 + slot) != 1 ||
+        X_M32(MINIPORT + 0x178 + slot) != count + 1 ||
+        X_M32(MINIPORT + 0x17C + slot) != address ||
+        X_M32(MINIPORT + 0x174 + (slot ^ 12)) ||
+        X_M32(MINIPORT + 0x1C0) != count || X_M32(MINIPORT + 0x1C4) != count + 2 ||
+        X_M32(MINIPORT + 0x1C8) != count + 1 || X_M32(MINIPORT + 0x1CC) != serial + 1 ||
+        X_M32(MINIPORT + 0x1BC) != serial || X_M32(0x408650) != old_framebuffer ||
+        channel.commands.flip_read != (serial & 1)) reject(interrupted, source, address, value);
+    active_flip_address = address; active_flip_due = count + 1; active_flip_serial = serial;
+    active_flip_queued = 1;
+    if (serial < 4 || !((serial + 1) % 60))
+        xv_logf("[h2/flip] original active-display interval-one queued address=%08X due=%u serial=%u; pending\n",
+                address, active_flip_due, serial + 1);
+    h2_platform_fpscr_write(saved_fpscr);
+    return 1;
+}
+
+static int complete_active_flip(xctx *c, uint32_t source)
+{
+    if (!active_flip_queued || !active_display_inputs(c, active_flip_address)) return 0;
+    uint32_t slot = (active_flip_serial & 1) * 12;
+    if (X_M32(MINIPORT + 0x174 + slot) != 1 ||
+        X_M32(MINIPORT + 0x178 + slot) != active_flip_due ||
+        X_M32(MINIPORT + 0x17C + slot) != active_flip_address ||
+        X_M32(MINIPORT + 0x174 + (slot ^ 12)) ||
+        X_M32(MINIPORT + 0x1C0) != active_flip_due - 1 ||
+        X_M32(MINIPORT + 0x1C4) != active_flip_due + 1 ||
+        X_M32(MINIPORT + 0x1C8) != active_flip_due ||
+        X_M32(MINIPORT + 0x1BC) != active_flip_serial ||
+        X_M32(MINIPORT + 0x1CC) != active_flip_serial + 1 ||
+        channel.commands.flip_read != (active_flip_serial & 1) ||
+        channel.commands.flip_write != channel.commands.flip_read) return 0;
+    uint32_t saved_fpscr = h2_platform_fpscr_read(), before, after;
+    int status = h2_platform_wait_vblank(&before, &after);
+    if (status < 0 || before == after) { h2_platform_fpscr_write(saved_fpscr); return 0; }
+    uint32_t timestamp = (uint32_t)x_rdtsc(), saved_fn = xv_cur_fn;
+    X_M32(MINIPORT + 0x1D4) = timestamp - X_M32(MINIPORT + 0x1D8);
+    X_M32(MINIPORT + 0x1D8) = timestamp; X_M32(MINIPORT + 0x1C0) = active_flip_due;
+    xctx interrupt = *c; interrupt.r[6] = MINIPORT; interrupt.preempt = 100000;
+    software_active = active_flip_retiring = 1;
+    active_crtc_writes = active_read_increments = 0;
+    call_guest(&interrupt, f_003FECC0, source);
+    if (interrupt.r[0] != 1 || active_crtc_writes != 1 || active_read_increments != 1 ||
+        X_M32(MINIPORT + 0x174) || X_M32(MINIPORT + 0x180) ||
+        X_M32(MINIPORT + 0x1BC) != active_flip_serial + 1 ||
+        X_M32(0x408650) != active_flip_address ||
+        channel.commands.flip_read != ((active_flip_serial + 1) & 1))
+        reject(c, source, active_flip_address, interrupt.r[0]);
+    signal_game_vblank(c, active_flip_due, active_flip_serial + 1, 1, source);
+    active_context = c; xv_cur_fn = saved_fn; software_active = active_flip_retiring = 0;
+    uint32_t presented;
+    const uint8_t *pixels = map_physical_raw(active_flip_address, H2_SCANOUT_BYTES);
+    if (!pixels) reject(c, source, active_flip_address, H2_SCANOUT_BYTES);
+    status = h2_platform_present(pixels, H2_SCANOUT_BYTES, scanout_gamma, &presented);
+    if (status < 0) reject(c, source, active_flip_address, (uint32_t)status);
+    active_flip_queued = 0;
+    if (active_flip_serial < 4 || !((active_flip_serial + 1) % 60))
+        xv_logf("[h2/display] original recurring flip address=%08X guest_vblank=%u swaps=%u real_wait=%u->%u present_vcount=%u\n",
+                active_flip_address, active_flip_due, active_flip_serial + 1, before, after, presented);
+    h2_platform_fpscr_write(saved_fpscr);
     return 1;
 }
 
@@ -615,12 +723,28 @@ static int complete_timed_mode_vblank(xctx *c, uint32_t source)
 int h2_host_channel_bus(xctx *c, uint32_t ip, uint32_t address, unsigned width,
                          uint32_t *value, int write)
 {
+    if (address == BAR + 0x600800) {
+        if (!software_active || !active_flip_retiring || !write || width != 4 ||
+            ip != 0x3FF5BC || active_crtc_writes || *value != active_flip_address)
+            reject(c, ip, address, *value);
+        ++active_crtc_writes; /* typed scanout selection, presented after retirement */
+        return 1;
+    }
     if (address == BAR + 0x40071C || address == BAR + 0x6813C8 || address == BAR + 0x6813C9) {
         if (!software_active) reject(c, ip, address, *value);
         if (address == BAR + 0x40071C) {
-            if (width != 4 || (write && (*value != 2 || channel.commands.flip_read != 0)))
+            if (active_flip_retiring) {
+                if (width != 4 || channel.commands.flip_modulo != 2 ||
+                    channel.commands.flip_read != (active_flip_serial & 1) ||
+                    (write && (*value != 2 || ip != 0x3FED4C || active_read_increments || active_crtc_writes != 1)) ||
+                    (!write && ip != 0x3FED43)) reject(c, ip, address, *value);
+                if (write) { channel.commands.flip_read = (channel.commands.flip_read + 1) % 2; ++active_read_increments; }
+                else *value = 0;
+            } else {
+                if (width != 4 || (write && (*value != 2 || channel.commands.flip_read != 0)))
                 reject(c, ip, address, *value);
-            if (write) channel.commands.flip_read = 1; else *value = 0;
+                if (write) channel.commands.flip_read = 1; else *value = 0;
+            }
         } else {
             if (!write || width != 1 || (address == BAR + 0x6813C8 && (*value || gamma_cursor)) ||
                 (address == BAR + 0x6813C9 && gamma_cursor >= 768)) reject(c, ip, address, *value);
@@ -638,7 +762,8 @@ int h2_host_channel_bus(xctx *c, uint32_t ip, uint32_t address, unsigned width,
         enum h2_push_result result = h2_host_channel_submit(&channel, *value, 1000000, &fault);
         if (result == H2_PUSH_METHOD_REJECTED && fault.method == 0x130 && !fault.word &&
             fault.subchannel < 8 && channel.commands.bound[fault.subchannel] == 1 &&
-            complete_initialization_vblank(c, fault.address))
+            (active_flip_queued ? complete_active_flip(c, fault.address) :
+                                  complete_initialization_vblank(c, fault.address)))
             result = h2_host_channel_submit(&channel, *value, 1000000, &fault);
         xv_logf("[h2/channel] PUT=%08X GET=%08X result=%d source=%08X word=%08X sub=%u method=%04X clears=%llu pixels=%llu\n",
                 *value, h2_host_channel_get(&channel), result, fault.address, fault.word,

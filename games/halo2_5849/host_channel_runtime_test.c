@@ -11,7 +11,7 @@ volatile uint32_t xv_cur_fn;
 static jmp_buf fault;
 static uint32_t last_ip, last_address, calls;
 static unsigned software_calls;
-static int timed_test;
+static int timed_test, active_test;
 static uint32_t native_fpscr;
 static unsigned retire_calls, callback_calls;
 uint32_t h2_platform_fpscr_read(void) { return native_fpscr; }
@@ -81,6 +81,18 @@ void f_003FF240(xctx *c)
     ++software_calls;
     native_fpscr = 0x12345678;
     xv_cur_fn = 0x3FF240;
+    if (active_test && software_calls > 1) {
+        uint32_t serial = X_M32(0x406C08 + 0x1CC), count = X_M32(0x406C08 + 0x1C0);
+        uint32_t slot = (serial & 1) * 12;
+        X_M32(0x406C08 + 0x174 + slot) = 1;
+        X_M32(0x406C08 + 0x178 + slot) = count + 1;
+        X_M32(0x406C08 + 0x17C + slot) = 0x300000;
+        X_M32(0x406C08 + 0x1C4) = count + 2;
+        X_M32(0x406C08 + 0x1C8) = count + 1;
+        X_M32(0x406C08 + 0x1CC) = serial + 1;
+        uint32_t stack = c->r[4]; memset(c, 0xA5, sizeof *c); c->r[4] = stack; X_RET(0);
+        return;
+    }
     if (timed_test) {
         X_M32(0x406C08 + 0x174) = X_M32(0x406C08 + 0x178) = 1;
         X_M32(0x406C08 + 0x17C) = 0x300000;
@@ -104,6 +116,20 @@ void f_003FF240(xctx *c)
 void f_003FECC0(xctx *c)
 {
     assert(timed_test && c->r[6] == 0x406C08);
+    if (active_test && X_M32(0x406C08 + 0x1C0) > 2) {
+        uint32_t serial = X_M32(0x406C08 + 0x1BC), slot = (serial & 1) * 12;
+        assert(X_M32(0x406C08 + 0x174 + slot) == 1);
+        assert(X_M32(0x406C08 + 0x178 + slot) == X_M32(0x406C08 + 0x1C0));
+        ++retire_calls;
+        h2_bus_write32(c, 0x3FF5BC, 0xFD600800, 0x300000);
+        assert(h2_bus_read32(c, 0x3FED43, 0xFD40071C) == 0);
+        h2_bus_write32(c, 0x3FED4C, 0xFD40071C, 2);
+        X_M32(0x408650) = 0x300000; X_M32(0x406C08 + 0x174 + slot) = 0;
+        X_M32(0x406C08 + 0x1BC) = serial + 1;
+        uint32_t stack = c->r[4]; memset(c, 0xB7, sizeof *c);
+        c->r[4] = stack; c->r[0] = 1; native_fpscr = 0xCAFEBABE; X_RET(0);
+        return;
+    }
     if (X_M32(0x406C08 + 0x1C0) == 2) {
         assert(!X_M32(0x406C08 + 0x174) && !X_M32(0x406C08 + 0x180));
         ++retire_calls;
@@ -126,9 +152,17 @@ void f_003FECC0(xctx *c)
 void f_0012B2A0(xctx *c)
 {
     uint32_t record = X_ARG(0);
-    assert((event_calls == 1 || event_calls == 2) && X_M32(record) == event_calls &&
-           X_M32(record + 4) == 1 && X_M32(record + 8) == event_calls);
-    assert(X_M32(0x406C08 + 0x1BC) == 1 && X_M32(0x408650) == 0x300000);
+    if (active_test && event_calls > 2) {
+        assert(X_M32(record) == event_calls + 1 && X_M32(record + 4) == event_calls - 1 &&
+               X_M32(record + 8) == 1);
+        assert(X_M32(0x406C08 + 0x1BC) == event_calls - 1);
+        assert(present_calls == event_calls - 2); /* retirement and event precede presentation */
+    } else {
+        assert((event_calls == 1 || event_calls == 2) && X_M32(record) == event_calls &&
+               X_M32(record + 4) == 1 && X_M32(record + 8) == event_calls);
+        assert(X_M32(0x406C08 + 0x1BC) == 1);
+    }
+    assert(X_M32(0x408650) == 0x300000);
     ++callback_calls; ++X_M32(0x485AB0);
     uint32_t stack = c->r[4]; memset(c, 0xE3, sizeof *c);
     c->r[4] = stack; native_fpscr = 0x1234ABCD; X_RET(0);
@@ -139,8 +173,9 @@ static void packet(uint32_t *put, uint16_t method, uint32_t value)
 { X_M32(0x80000000u + *put) = 0x40000u | method; X_M32(0x80000004u + *put) = value; *put += 8; }
 int main(int argc, char **argv)
 {
-    assert(argc == 1 || (argc == 2 && !strcmp(argv[1], "--timed")));
+    assert(argc == 1 || (argc == 2 && (!strcmp(argv[1], "--timed") || !strcmp(argv[1], "--active"))));
     timed_test = argc == 2;
+    active_test = argc == 2 && !strcmp(argv[1], "--active");
     g_xram = calloc(1, 0x4000000); g_img_base = g_xram;
     g_xpt = calloc(1 << 20, 4); assert(g_xram && g_xpt);
     for (unsigned page = 0; page < 0x4000; ++page) {
@@ -411,6 +446,48 @@ int main(int argc, char **argv)
         if (!setjmp(fault)) { __wrap_xk_AvSendTVEncoderOption(&c); assert(0); }
         assert(h2_host_av_configuration().luma_filter == 1 && X_M32(0x610000) == 0x00480104);
         assert(present_calls == 1 && blank_calls == 0 && !memcmp(&c, &interrupted, sizeof c));
+        if (active_test) {
+            X_M32(0x406C08 + 0x1B8) = 0;
+            X_M32(0x406C08 + 0x1C0) = 3;
+            for (volatile unsigned flip = 0; flip < 2; ++flip) {
+                packet(&put, 0x100, (0x300001u << 5) | 1);
+                unsigned queued = software_calls, retired = retire_calls;
+                uint32_t mini_copy[0x7E4 / 4]; memcpy(mini_copy, g_xram + 0x406C08, sizeof mini_copy);
+                /* Validate complete mappings and callback object before invoking original queue code. */
+                uint32_t last_page = g_xpt[0x8042B]; g_xpt[0x8042B] = 0x4000000;
+                if (!setjmp(fault)) { h2_bus_write32(&c, 0x1234, 0xFD800040, put); assert(0); }
+                g_xpt[0x8042B] = last_page;
+                assert(software_calls == queued && !memcmp(mini_copy, g_xram + 0x406C08, sizeof mini_copy));
+                X_M32(0x406C08 + 0x194) = 0;
+                if (!setjmp(fault)) { h2_bus_write32(&c, 0x1234, 0xFD800040, put); assert(0); }
+                X_M32(0x406C08 + 0x194) = 0x40000;
+                assert(software_calls == queued && !memcmp(&c, &interrupted, sizeof c));
+                h2_bus_write32(&c, 0x1234, 0xFD800040, put);
+                assert(software_calls == queued + 1 && retire_calls == retired);
+                assert(X_M32(0x406C08 + 0x1BC) == flip + 1 && present_calls == flip + 1);
+                assert(native_fpscr == 0x60000011 && !memcmp(&c, &interrupted, sizeof c));
+                packet(&put, 0x12C, 0); packet(&put, 0x130, 0);
+                memcpy(mini_copy, g_xram + 0x406C08, sizeof mini_copy);
+                vblank_result = -1;
+                if (!setjmp(fault)) { h2_bus_write32(&c, 0x1234, 0xFD800040, put); assert(0); }
+                assert(retire_calls == retired && h2_bus_read32(&c, 0, 0xFD800044) == put - 4);
+                assert(!memcmp(mini_copy, g_xram + 0x406C08, sizeof mini_copy));
+                assert(native_fpscr == 0x60000011 && !memcmp(&c, &interrupted, sizeof c));
+                vblank_result = 0; vblank_delta = 0;
+                if (!setjmp(fault)) { h2_bus_write32(&c, 0x1234, 0xFD800040, put); assert(0); }
+                assert(retire_calls == retired && !memcmp(mini_copy, g_xram + 0x406C08, sizeof mini_copy));
+                assert(native_fpscr == 0x60000011 && !memcmp(&c, &interrupted, sizeof c));
+                vblank_delta = 1;
+                h2_bus_write32(&c, 0x1234, 0xFD800040, put);
+                assert(h2_bus_read32(&c, 0, 0xFD800044) == put && retire_calls == retired + 1);
+                assert(X_M32(0x406C08 + 0x1BC) == flip + 2 && present_calls == flip + 2);
+                assert(event_calls == flip + 3 && callback_calls == flip + 3);
+                assert(native_fpscr == 0x60000011 && !memcmp(&c, &interrupted, sizeof c) && xv_cur_fn == 0x1234);
+                if (!setjmp(fault)) { h2_bus_write32(&c, 0x3FF5BC, 0xFD600800, 0x300000); assert(0); }
+                if (!setjmp(fault)) { h2_bus_write32(&c, 0x3FED4C, 0xFD40071C, 2); assert(0); }
+            }
+            puts("Host-channel recurring flips: both parities, failed/unchanged vblank, strict bus guards, callback ordering and complete CPU/FP state pass.");
+        }
         puts("Host-channel timed initialization: two real vblank contracts, callback ABI, parser retry and mode presentation pass.");
         free(g_xpt); free(g_xram); return 0;
     }

@@ -78,5 +78,7 @@ observed original vertex program against synthetic pixel fixtures. Its shader
 preparation and `quad-probe` build target remain separate from the game app.
 The opt-in `QUAD_RENDER=1` target now
 [executes the first two original movie quads through GXM](../../docs/halo2-original-movie-quads.md).
-The first movie framebuffer is presented and is entirely black. The next strict
-stop is the recurring active-scanout flip; no visible movie or menu is claimed.
+The [recurring flip milestone](../../docs/halo2-recurring-flips.md) now executes
+381 original swaps and opens/reads the main-menu map header. Actual captures
+remain black. The next strict stop is an inline queue-status read in original
+12D0A0 after a Start-key press; no visible movie or menu is claimed.

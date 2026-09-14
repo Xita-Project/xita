@@ -73,6 +73,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/host_tiles_test
 	$(BUILD)/host_channel_runtime_test
 	$(BUILD)/host_channel_runtime_test --timed
+	$(BUILD)/host_channel_runtime_test --active
 	$(BUILD)/host_channel_test
 	$(BUILD)/kelvin_clear_test
 	$(BUILD)/gpu_objects_test
