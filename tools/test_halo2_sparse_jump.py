@@ -35,6 +35,27 @@ def synthetic_image(path):
 
 
 class SparseJump(unittest.TestCase):
+    def test_widget_kind_revision_roots_and_shape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = synthetic_image(Path(directory) / "synthetic.xbe")
+            changed = bytearray(image.data)
+            struct.pack_into("<4I", changed, 0x1098, 0x11010, 0, 0x11030, 0xFFFFFFFF)
+            image.data = bytes(changed)
+            guards = tuple((a, n, hashlib.sha256(image.bytes_at(a, n)).hexdigest())
+                           for a, n in ((0x11000, 7), (0x11080, 36)))
+            with patch.object(hooks, "WIDGET_KIND_JUMP_TABLE", 0x11080), patch.object(hooks, "WIDGET_KIND_JUMP_GUARDS", guards):
+                self.assertEqual(hooks.reviewed_widget_kind_roots(image), {0x11010, 0x11020, 0x11030})
+                with patch.object(image, "is_code", return_value=False):
+                    with self.assertRaisesRegex(ValueError, "not executable"):
+                        hooks.reviewed_widget_kind_roots(image)
+                changed[0x10A0] ^= 1; image.data = bytes(changed)
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    hooks.reviewed_widget_kind_roots(image)
+            with patch.object(hooks, "WIDGET_KIND_JUMP_IP", 0x11000), patch.object(hooks, "WIDGET_KIND_JUMP_TABLE", 0x11080):
+                wrong = recomp.Decoder(32, bytes.fromhex("ff248d80100100"), ip=0x11000).decode()
+                with self.assertRaisesRegex(ValueError, "shape mismatch"):
+                    hooks.lower_sparse_jump(None, wrong, [])
+
     def test_revision_targets_and_instruction_shape(self):
         with tempfile.TemporaryDirectory() as directory:
             image = synthetic_image(Path(directory) / "synthetic.xbe")
@@ -56,6 +77,12 @@ class SparseJump(unittest.TestCase):
                 self.assertFalse(hooks.lower_sparse_jump(None, wrong, []))
 
     def test_tail_dispatch_and_unchanged_default(self):
+        self.check_tail_dispatch("SPARSE_JUMP")
+
+    def test_widget_kind_tail_dispatch_and_unchanged_default(self):
+        self.check_tail_dispatch("WIDGET_KIND_JUMP")
+
+    def check_tail_dispatch(self, prefix):
         compiler = shutil.which("cc"); self.assertIsNotNone(compiler)
         for enabled in (False, True):
             with self.subTest(hook=enabled), tempfile.TemporaryDirectory(prefix="xita-sparse-") as directory:
@@ -64,7 +91,7 @@ class SparseJump(unittest.TestCase):
                 for address in (0x11000, 0x11010, 0x11020, 0x11030): discovery.add_root(address)
                 discovery.run()
                 self.assertEqual(discovery.functions[0x11000].switch_tables[0x11000], [(0, 0x11010), (-1, 0x11030)])
-                with patch.object(hooks, "SPARSE_JUMP_IP", 0x11000), patch.object(hooks, "SPARSE_JUMP_TABLE", 0x11080):
+                with patch.object(hooks, prefix + "_IP", 0x11000), patch.object(hooks, prefix + "_TABLE", 0x11080):
                     emitter = recomp.Emitter(image, discovery, {}, {}, str(root), 1,
                                              hooks=SparseHooks() if enabled else NoGameHooks())
                     emitter.write_all()
