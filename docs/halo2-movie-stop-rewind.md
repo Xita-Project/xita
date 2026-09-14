@@ -130,3 +130,7 @@ Next, audit the `3E39FD` Release caller and finish the original movie cleanup,
 then trace the resulting map startup. The separate
 [effects-unavailable initializer limitation](halo2-effects-image-audit.md)
 remains unresolved; no state or object is fabricated to bypass it.
+
+The [native106 visible-intro checkpoint](halo2-visible-intro.md) now completes
+the audited final device Release, displays original movie content, and reaches
+the remaining game sound-initialization dependency after normal Start.

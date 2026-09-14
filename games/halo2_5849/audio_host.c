@@ -570,7 +570,7 @@ void h2_audio_guest_entry(xctx *c, uint32_t ip)
          * then invokes the existing common-header Release adapter. */
         stack(c, ip, 1); live(c, ip, X_ARG(0), 0);
         uint32_t caller = X_M32(c->r[4]);
-        if ((caller != 0x21EB91 && caller != 0x3E3D19) || !mapped(0x417128, 4) || X_M32(0x417128) != 0x37C70F)
+        if ((caller != 0x21EB91 && caller != 0x3E3D19 && caller != 0x3E39FD) || !mapped(0x417128, 4) || X_M32(0x417128) != 0x37C70F)
             fail(c, ip, "original sound release caller/vtable", X_M32(c->r[4]));
         if (c->r[4] < 16) fail(c, ip, "original sound release stack", c->r[4]);
         output(c, ip, c->r[4] - 16, 24);

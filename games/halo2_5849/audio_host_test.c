@@ -128,7 +128,9 @@ static void original_configuration_tests(void)
     g_xpt[0x417] = 0x7000; X_M32(0x417128) = 0x37C70F;
     c = context(0x5008, 0, 0); X_M32(c.r[4]) = 0x21EB91;
     original_entry(&c, 0x379F2A, 1);
-    X_M32(c.r[4]) = 0x3E3D19; original_entry(&c, 0x379F2A, 1); X_M32(c.r[4]) = 0x21EB91;
+    X_M32(c.r[4]) = 0x3E3D19; original_entry(&c, 0x379F2A, 1);
+    X_M32(c.r[4]) = 0x3E39FD; original_entry(&c, 0x379F2A, 1);
+    X_M32(c.r[4]) = 0x3E39FC; original_entry(&c, 0x379F2A, 0); X_M32(c.r[4]) = 0x21EB91;
     X_M32(c.r[4]) ^= 4; original_entry(&c, 0x379F2A, 0); X_M32(c.r[4]) = 0x21EB91;
     X_M32(0x417128) = 0; original_entry(&c, 0x379F2A, 0); X_M32(0x417128) = 0x37C70F;
     g_xpt[0x417] = 0x8000; original_entry(&c, 0x379F2A, 0); g_xpt[0x417] = 0x7000;

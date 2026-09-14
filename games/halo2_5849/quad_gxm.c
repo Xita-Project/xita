@@ -114,6 +114,38 @@ static int initialize(void)
     return 1;
 }
 
+/* Read-only measurements of already validated, completed staging buffers.
+ * Save at most one nonblack input/output pair privately; no recurring image
+ * writes, no guest mutation and no alteration of the rendering contract. */
+static void trace_pixels(const h2_quad_request *request)
+{
+    static uint32_t count, captured;
+    ++count;
+    if (count > 4 && count % 60) return;
+    uint32_t input_nonblack = 0, output_nonblack = 0, input_bits = 0, output_bits = 0;
+    for (unsigned i = 0; i < 640 * 480; ++i) {
+        uint32_t in = texture[i] & 0xFFFFFF, out = target[i] & 0xFFFFFF;
+        input_nonblack += in != 0; output_nonblack += out != 0;
+        input_bits |= in; output_bits |= out;
+    }
+    xv_logf("[h2/quad-pixels] draw=%u texture=%08X input_nonblack=%u output_nonblack=%u input_bits=%06X output_bits=%06X\n",
+            count, request->texture.physical, input_nonblack, output_nonblack, input_bits, output_bits);
+    if (!captured && input_nonblack) {
+        captured = 1;
+        const char *paths[] = {"ux0:data/xita-halo2/movie-input-first.bin", "ux0:data/xita-halo2/movie-output-first.bin"};
+        const uint32_t *images[] = {texture, target};
+        for (unsigned i = 0; i < 2; ++i) {
+            FILE *file = fopen(paths[i], "wb");
+            if (!file) continue;
+            uint32_t header[] = {640, 480, 2560, count};
+            int complete = fwrite(header, 1, sizeof header, file) == sizeof header &&
+                           fwrite(images[i], 1, 640 * 480 * 4, file) == 640 * 480 * 4;
+            int closed = fclose(file);
+            xv_logf("[h2/quad-pixels] private first nonblack image=%u draw=%u complete=%d\n", i, count, complete && !closed);
+        }
+    }
+}
+
 const uint32_t *h2_quad_gxm_render(void *opaque, const h2_quad_request *request)
 {
     (void)opaque;
@@ -139,5 +171,6 @@ const uint32_t *h2_quad_gxm_render(void *opaque, const h2_quad_request *request)
     CHECK(sceGxmSetVertexStream(ctx,0,vertices));CHECK(sceGxmSetFragmentTexture(ctx,sampler_index,&tex));
     CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,indices,6));SceGxmNotification done={sceGxmGetNotificationRegion(),++notification}; REQUIRE(done.address);
     CHECK(sceGxmEndScene(ctx,NULL,&done));CHECK(sceGxmNotificationWait(&done));sceGxmFinish(ctx);
+    trace_pixels(request);
     return target;
 }

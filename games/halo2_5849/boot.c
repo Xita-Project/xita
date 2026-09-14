@@ -328,6 +328,20 @@ void xv_trace_func(uint32_t address)
         trace_mapped_word(0x547F28); trace_mapped_word(0x51EA00);
         h2_platform_fpscr_write(fpscr);
     }
+    /* Sample raw original Bink header words before frame processing. The
+     * count and mappings are diagnostic only; no timing/input is changed. */
+    static uint32_t movie_header_count;
+    if (address == 0x1568D0 && (++movie_header_count <= 4 || !(movie_header_count % 60))) {
+        uint32_t fpscr = h2_platform_fpscr_read();
+        uint32_t arena = xk_mem_arena_size(), offset = g_xpt[0x4E9];
+        if (arena >= 8192 && !(offset & 4095) && (uint64_t)offset + 4096 <= arena - 4096) {
+            uint32_t object = X_M32(0x4E9194);
+            xv_logf("[h2/movie-header] invocation=%u object=%08X\n", movie_header_count, object);
+            if (object && object <= UINT32_MAX - 0x24)
+                for (unsigned i = 0; i < 10; ++i) trace_mapped_word(object + i * 4);
+        }
+        h2_platform_fpscr_write(fpscr);
+    }
     /* Native86: observe the original audio failure unwind and subsequent
      * map setup. This never supplies an object or changes the failing call. */
     static unsigned sound_probe_count;
