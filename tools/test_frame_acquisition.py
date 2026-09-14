@@ -24,11 +24,13 @@ void xv_vertex_upload_override(int enabled) { upload_override=enabled; }
 static int compare_override=-99;
 void xv_vertex_compare_override(int enabled) { compare_override=enabled; }
 static int candidate, scan_override=-99, copy_override=-99, bounds_override=-99, references_override=-99;
-static int worker_override=-99, point_override=-99, texture_override=-99;
+static int worker_override=-99, point_override=-99, texture_override=-99, snapshot_override=-99;
 static int neon_override=-99, object_scan_override=-99, hle_override=-99, overlap_override=-99, affinity_override=-99;
 int xv_benchmark_compare_matrix_neon(void) { return candidate==11; }
 int xv_benchmark_compare_object_scan(void) { return candidate==12; }
 int xv_benchmark_compare_hle_dispatch(void) { return candidate==13; }
+int xv_benchmark_compare_snapshot_worker(void) { return candidate==16; }
+void xv_snapshot_worker_override(int enabled) { snapshot_override=enabled; }
 int xv_benchmark_compare_guest_affinity(void) { return candidate==15; }
 int xv_benchmark_compare_flare_query_overlap(void) { return candidate==14; }
 
@@ -110,7 +112,7 @@ int main(int argc,char **argv)
     assert(!xv_early_visibility_enabled());
     for(candidate=0;candidate<CANDIDATE_COUNT;candidate++)for(int mode=-1;mode<=1;mode++) {
         g_early_visibility_override=-1;
-        point_override=texture_override=-99;
+        point_override=texture_override=snapshot_override=-99;
         neon_override=object_scan_override=hle_override=overlap_override=affinity_override=-99;
         flare_override=scan_override=copy_override=bounds_override=references_override=worker_override=basis_override=palette_override=-99;flare_barriers=0;
         xv_benchmark_optimizations(mode);
@@ -120,6 +122,7 @@ int main(int argc,char **argv)
         assert(bounds_override==(candidate==3?mode:-99));
         assert(references_override==(candidate==4?mode:-99));
         assert(worker_override==(candidate==5?mode:-99));
+        assert(snapshot_override==(candidate==16?mode:-99));
         assert(basis_override==(candidate==6?mode:-99));
         assert(palette_override==(candidate==7?mode:-99));
         assert(point_override==(candidate==9?mode:-99));
@@ -139,7 +142,7 @@ int main(int argc,char **argv)
 }
 '''
 with tempfile.TemporaryDirectory(prefix='xita-frame-acquire-') as tmp:
-    count=16
+    count=17
     p=pathlib.Path(tmp);(p/'test.c').write_text(f'#define CANDIDATE_COUNT {count}\n'+prefix+globals_+fixture+code+suffix)
     sdk=pathlib.Path(os.environ.get('VITASDK',str(pathlib.Path.home()/'vitasdk')))
     subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP','-DXV_NATIVE_OBJECT_BASIS','-DXV_NATIVE_MODEL_PALETTE','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-unused-variable',
