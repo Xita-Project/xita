@@ -2,8 +2,8 @@
 
 This experiment evaluates a bounded SIMD version of the existing native matrix
 multiply. It is compiled out of ordinary builds and disabled at runtime when
-included. Instruction counts show only a small saving after admission checks;
-there is no hardware FPS result yet.
+included. Instruction counts show only a small saving after admission checks.
+The physical comparisons below do not show a consistent gain; keep it disabled.
 
 Build with `XV_NATIVE_MATRIX_NEON=1` to include it. In that build,
 `XV_NATIVE_MATRIX_NEON=1` in the runtime configuration enables it, or the remote
@@ -61,4 +61,25 @@ pyelftools. Owned game data and linked game artifacts remain outside Git.
 
 Private reports are under
 `2026-09-13-worker-sizing/validation/hardware-updater-20260914T122650Z/matrix-neon`.
-Emulator off/on/off and a physical comparison remain the next gates.
+## Physical comparison
+
+The isolated emulator completes three off/on/off trials and restores the
+disabled setting. Its 20 FPS cap limits this to a functionality check.
+Accepted and numeric-fallback counters confirm that the enabled phase uses
+the helper.
+
+The physical Vita then completes three trials in each of two stationary Blood
+Gulch views, with 60 settling and 120 measured frames per phase. Each view has
+720 off frames and 360 on frames. Graphics remain at the existing 360p settings,
+phase timing is off and the configured disabled setting is restored.
+
+| View | Off FPS | On FPS | Saved frame time |
+| --- | ---: | ---: | ---: |
+| First base view | 9.483 | 9.493 | 0.110 ms |
+| Turned view | 16.773 | 16.572 | -0.724 ms |
+
+These aggregate FPS values come from measured elapsed times. The first view
+has one positive and two negative trials; the second has one positive and two
+negative trials. They do not justify enabling the experiment. The two views
+are different workloads and are not a before/after build comparison.
+Exact trials and runtime identity are in the private `physical-analysis.json`.

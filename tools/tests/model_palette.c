@@ -175,7 +175,7 @@ int main(int argc, char **argv)
         int used = xv_math_model_palette(&candidate);
         if (used) { accepted++; assert(enabled); }
         else {
-            rejected++; assert(!enabled);
+            rejected++; /* Numeric guards can decline while enabled. */
             assert(!memcmp(&initial, &candidate, sizeof initial));
             assert(!memcmp(before, g_xram, ARENA));
             candidate_palette(&candidate);
@@ -190,7 +190,7 @@ int main(int argc, char **argv)
         int want=strcmp(argv[1],"math-disabled") && (mode<0?enabled:mode);
         for (unsigned k=0;k<32;k++) {
             unsigned count=k*2+1;
-            xctx initial=fixture(k,count),reference=initial,candidate=initial;
+            xctx initial=fixture(k*3,count),reference=initial,candidate=initial;
             memcpy(before,g_xram,ARENA);
             yields=0;original_palette(&reference);assert(!yields);
             memcpy(expected,g_xram,ARENA);memcpy(g_xram,before,ARENA);
@@ -251,6 +251,7 @@ int main(int argc, char **argv)
         same_context(reference, candidate, 5000 + budget);
         same_memory(expected, initial.r[4] + 0xe4, 8, 5000 + budget);
     }
+    assert(enabled ? (accepted && rejected) : !accepted);
     printf("PASS %s: %u batches accepted / %u fallback, 4096 original comparisons, "
            "19 unchanged declines, 7 guest handoffs; full context and arena\n", argv[1], accepted, rejected);
     if (enabled) for (unsigned count = 1; count <= 64; count *= 2) {

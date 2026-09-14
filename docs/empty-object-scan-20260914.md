@@ -58,7 +58,25 @@ not measured gameplay coverage; the counts are not CPU cycles or an FPS gain.
 
 Benchmark admission, cancellation/restoration, absent-helper rejection and real
 loopback HTTP tests pass. The game-profile isolation suite also passes.
-Full emulator gameplay and physical off/on/off measurements are still pending.
+The full emulator completes three off/on/off trials and restores the disabled
+setting. Counters confirm that the enabled phase exercises passes 1 and 2;
+only about 32–36 empty entries per pass per frame are skipped in this view.
+Its 20 FPS cap prevents an uncapped throughput comparison.
+
+The physical Vita completes three trials in each of two stationary Blood Gulch
+views at the unchanged 360p settings, with phase timing off. Each view contains
+720 off frames and 360 on frames, following 60 settling frames per phase.
+
+| View | Off FPS | On FPS | Saved frame time |
+| --- | ---: | ---: | ---: |
+| First base view | 17.695 | 17.544 | -0.488 ms |
+| Turned view | 12.647 | 12.581 | -0.415 ms |
+
+FPS is computed from the pooled measured elapsed times. Both views have one
+positive and two negative trials. Keep the option disabled: the measured scan
+coverage does not repay its checks consistently. The views are separate
+workloads, not a before/after build comparison. Exact trials and runtime
+identity are in the private `physical-analysis.json`.
 
 Reference generation requires the matching owned `--xbe`, `--manifest` and
 a private `--output-dir`. The ARM runner takes that directory's `original.c`

@@ -4,13 +4,18 @@
 #ifdef XV_NATIVE_MODEL_PALETTE
 #include "xk.h"
 #include <stdlib.h>
+#if defined(__arm__)
+#include <arm_neon.h>
+#elif defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
 #if defined(XV_PALETTE_JOB_PROFILE) && XV_PALETTE_JOB_PROFILE
 #include <stdio.h>
 /* Accepted serial batches only. Owner-thread counters; never a worker queue. */
 static unsigned palette_sizes[65];
 #endif
 
-static unsigned palette_batches, palette_matrices, palette_declined[4];
+static unsigned palette_batches, palette_matrices, palette_declined[5];
 /* Guest-owner benchmark override; -1 restores the configured default. */
 static int palette_override = -1;
 void xv_model_palette_override(int value)
@@ -88,6 +93,50 @@ static void product(xctx *c, const float *ap, const float *bp, float *op)
     }
 }
 
+/* The batch can omit intermediate register-only arithmetic. Bound each input
+ * to signed zero or magnitude [2^-30, 2^30] before writing anything: useful
+ * products stay finite and normal. Unusual cases retain the existing per-call
+ * matrix path, including its established NaN operand priority. Integer NEON
+ * comparisons classify four input words at a time without changing FPSCR. */
+static int palette_numeric(const float *left, const uint8_t *right, unsigned count)
+{
+#if defined(__arm__)
+    unsigned fpscr;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr) :: "memory");
+    if (fpscr & 0x00009f00u) return 0;
+#elif defined(__x86_64__)
+    if ((_mm_getcsr() & 0x1f80u) != 0x1f80u) return 0;
+#else
+    return 0;
+#endif
+    for (unsigned n=0;n<count;n++) {
+        const uint32_t *a=(const uint32_t *)(left+n*13u);
+        const uint32_t *b=(const uint32_t *)(right+n*156u);
+#if defined(__arm__)
+        uint32x4_t bad=vdupq_n_u32(0),zero=vdupq_n_u32(0);
+        const uint32x4_t mask=vdupq_n_u32(0x7fffffffu);
+        const uint32x4_t low=vdupq_n_u32(0x30800000u);
+        const uint32x4_t range=vdupq_n_u32(0x4e800000u-0x30800000u);
+        for (unsigned j=0;j<12;j+=4) {
+            uint32x4_t av=vandq_u32(vld1q_u32(a+j),mask),bv=vandq_u32(vld1q_u32(b+j),mask);
+            bad=vorrq_u32(bad,vbicq_u32(vcgtq_u32(vsubq_u32(av,low),range),vceqq_u32(av,zero)));
+            bad=vorrq_u32(bad,vbicq_u32(vcgtq_u32(vsubq_u32(bv,low),range),vceqq_u32(bv,zero)));
+        }
+        uint32x2_t half=vorr_u32(vget_low_u32(bad),vget_high_u32(bad));
+        if (vget_lane_u32(half,0)|vget_lane_u32(half,1)) return 0;
+        unsigned j=12;
+#else
+        for (unsigned j=0;j<13;j++)
+#endif
+        {
+            uint32_t av=a[j]&0x7fffffffu, bv=b[j]&0x7fffffffu;
+            if ((av && av-0x30800000u > 0x4e800000u-0x30800000u) ||
+                (bv && bv-0x30800000u > 0x4e800000u-0x30800000u)) return 0;
+        }
+    }
+    return 1;
+}
+
 int xv_math_model_palette(xctx *c)
 {
     if (!palette_enabled()) return decline(0);
@@ -116,6 +165,7 @@ int xv_math_model_palette(xctx *c)
      * but neither output nor guest call scratch can alias any input. */
     /* No handoff or other consumer observes intermediate register state.
      * Keep all matrix outputs, then reproduce the final call's context once. */
+    if (!palette_numeric(left,right,count)) return decline(4);
     uint32_t last = count - 1u;
     for (unsigned i = 0; i < last; i++)
         product(NULL, left + i * 13u, (const float *)(right + i * 156u), output + i * 13u);
@@ -137,9 +187,9 @@ int xv_math_model_palette(xctx *c)
 
 void xv_model_palette_report(unsigned frames)
 {
-    XK_LOG("[model-palette] %u frames batches %u matrices %u declined disabled %u bounds %u budget %u layout %u\n",
+    XK_LOG("[model-palette] %u frames batches %u matrices %u declined disabled %u bounds %u budget %u layout %u numeric/fp %u\n",
         frames,palette_batches,palette_matrices,palette_declined[0],palette_declined[1],
-        palette_declined[2],palette_declined[3]);
+        palette_declined[2],palette_declined[3],palette_declined[4]);
 #if defined(XV_PALETTE_JOB_PROFILE) && XV_PALETTE_JOB_PROFILE
     /* One bounded log call per reporting interval, not one write per bin/job.
      * Worst case: 64 pairs of two-digit size + ':' + ten-digit count + space. */
