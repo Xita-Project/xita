@@ -80,8 +80,17 @@ class HaloHooks(NoGameHooks):
             for address, size, digest in (
                 (0xA2781, 0x45, "a1460c149ae33b843578a5652fdd0dc09e5e9fe39ffb96fb5c19204041dd9fd3"),
                 (0xB5B40, 339, "21273987e0276cda51a2d70b2b576abc42195b8efeff9ab4e8f552a15b323726")))
+        self.object_scan_enabled = self.enabled and hashlib.sha256(
+            image.bytes_at(0x900E0, 0x239) or b"").hexdigest() == "5bcdb3c78aa2f0b4ba4da986cfe59cb0d28c1004cbcc804abdafabd8200f520a"
 
     def before_instruction(self, address):
+        if self.object_scan_enabled and address in (0x90190, 0x90240, 0x902B6):
+            index = (0x90190, 0x90240, 0x902B6).index(address)
+            return ["#ifdef XV_NATIVE_OBJECT_SCAN",
+                    "    { extern int xv_object_scan_active; "
+                    "extern unsigned xv_object_scan_empty(xctx *, unsigned); "
+                    f"if (xv_object_scan_active) xv_object_scan_empty(c, {index}u); }}",
+                    "#endif"]
         if self.object_basis_enabled and address == 0x8E166:
             return ["#ifdef XV_NATIVE_OBJECT_BASIS",
                     "    { extern int xv_math_object_basis(xctx *); if (xv_math_object_basis(c)) goto L_0008E293; }",

@@ -1457,6 +1457,9 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
     if (++g_t_frames == 60) {
         { extern void xv_native_math_report(unsigned); extern void xd3d_prepare_report(unsigned);
           xv_native_math_report(g_t_frames); xd3d_prepare_report(g_t_frames); }
+#ifdef XV_NATIVE_OBJECT_SCAN
+        { extern void xv_object_scan_report(unsigned); xv_object_scan_report(g_t_frames); }
+#endif
         xv_draw_profile_report(g_t_frames);
         xv_vertex_upload_report(g_t_frames);
         UI_LOG("[palette-cache] %u frames: %u reused / %u hashed (all 1024 bytes checked)\n",
