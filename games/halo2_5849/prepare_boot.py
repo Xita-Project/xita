@@ -21,6 +21,10 @@ GAME_DESCRIPTOR_WALK = (0x1088E0, 124, "c1bf2193fbf5a7f7a8d0de9fffaaf9ee5cbe12ce
 GAME_MODE_WALK = (0x18EF00, 152, "c499facfbe49993ebd3e15bb55a4f65adafb4bfd53eb99474ba7bb96ad3f8102")
 GAME_INTERFACE_REGISTRATION = (0x3769F0, 45, "46e548c6c8f362dc1ba57b6f7581a1b2c0bffb4b2cb9c2e812dcc7b9544b1611")
 GAME_ONLINE_INTERFACE_DISPATCH = (0x59949, 41, "c68f2b75408f155325c537d83f024b3ff580f096399c7606ca83a739654555a1")
+BINK_PIXEL_DISPATCH = (
+    (0x3EDB70, 80, "67b6419123998c1cce93a7f29fb8630684b4f2813e8ab27d5cc6c1cc884535e0"),
+    (0x3E97E0, 1013, "57ec72883b4d8abe0ef2170d0e79202c3a5b70a7da216051a2d25e1d3fa72db0"),
+)
 GAME_DISPATCH_CONSTRUCTORS = (
     (0x23546B, 27, "cbd17bebf8667c708be45cbe65a4fc6dfc672448edf8c83151e4173d16e69e71"),
     (0x234E43, 33, "84924bde2768f01fd262d3d0cd0916038e22c201d8200008e05c9cdff85bd95f"),
@@ -110,6 +114,31 @@ def game_online_interface_roots(image):
         if image.u32(instance) != table:
             raise ValueError(f"Halo 2 online interface binding {instance:#x} mismatch")
     return _code_vtable_roots(image, 0x450B44, 0x450B88)
+
+
+def bink_pixel_callback_roots(image):
+    """Native68: the original wrapper passes this mixed converter descriptor.
+
+    3E97E0 copies selected function fields into the converter dispatch globals.
+    Six scalar/function pairs and sixteen later function words are distinct
+    from the intervening mutable selection counters; those are never roots.
+    """
+    for address, length, digest in BINK_PIXEL_DISPATCH:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 Bink pixel dispatch fingerprint mismatch")
+    base = 0x57A080
+    for offset, value in ((0, 4), (4, 2), (12, 2), (20, 3), (28, 2), (36, 2), (44, 3)):
+        if image.u32(base + offset) != value:
+            raise ValueError("Halo 2 Bink pixel descriptor shape mismatch")
+    roots = set()
+    for offset in (*range(8, 0x34, 8), *range(0x74, 0xB4, 4)):
+        target = image.u32(base + offset)
+        section = image.section_of(target) if target else None
+        if (not target or not image.is_code(target) or not section or
+                section[4] not in {"BINK32", "BINK32M", "BINK32X2", "BINK32MX"}):
+            raise ValueError(f"Halo 2 Bink pixel callback {base + offset:#x} has invalid target")
+        roots.add(target)
+    return roots
 
 
 def game_descriptor_initialization_chain(image):
@@ -271,6 +300,7 @@ def main():
         roots.update(game_registered_interface_roots(image))
         roots.update(game_state_vtable_roots(image))
         roots.update(game_online_interface_roots(image))
+        roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
         # Native49: 1A474C passes the global arena object 47D924 to 18E1F0.
         # Its stored vtable is 4508FC: allocate/free, followed by string data.

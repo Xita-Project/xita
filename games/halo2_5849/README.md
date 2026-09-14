@@ -4,7 +4,7 @@ This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
 `5849` identifies the linked XDK library build, not an asserted game build number.
 
-The [latest native checkpoint and exact private replay command](../../docs/halo2-eflags-id.md)
+The [latest native checkpoint and exact private replay command](../../docs/halo2-movie-callbacks.md)
 describe the current normal and diagnostic startup stops. There is no main menu.
 
 A separate [native startup target](../../docs/halo2-native-boot-20260912.md)
@@ -64,9 +64,11 @@ The separate `--host-channel --audio-unavailable` diagnostic selects the
 [original game's audio-driver failure path](../../docs/halo2-audio-error-path-20260913.md).
 It returns an explicit error at public sound creation, creates no audio object,
 and now executes original deferred timer callbacks with the corrected kernel
-ABI, runs a limited native FP mask/clear bridge, executes original state interfaces, then stops at an unsupported
-luma-filter enable after presenting the original disc-error screen.
-The cause of that game error is still under investigation. Earlier
+ABI, runs a limited native FP mask/clear bridge and executes original state
+interfaces. Fixing the [font-cache object lifetime](../../docs/halo2-file-lifetime.md)
+allows the original code to rebuild its cache and open the intro movie. The
+[movie CPU feature probe](../../docs/halo2-eflags-id.md) now selects its original
+pixel converters; no movie frame or menu has been displayed. Earlier
 texture-state progress followed an incorrectly balanced timer return; the
 current checkpoint documents this limitation. It supplies
 no audio, 3D rendering or menu; the ordinary profile is unchanged.

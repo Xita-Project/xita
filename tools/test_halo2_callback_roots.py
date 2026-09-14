@@ -30,6 +30,35 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_mixed_bink_pixel_descriptor(self):
+        image = SyntheticImage(); image.section_name = "BINK32"
+        offsets = (*range(8, 0x34, 8), *range(0x74, 0xB4, 4))
+        image.targets = {0x57A080 + off: 0x1000 + n * 16 for n, off in enumerate(offsets)}
+        expected = set(image.targets.values()); self.assertEqual(len(expected), 22)
+        for off, value in ((0, 4), (4, 2), (12, 2), (20, 3), (28, 2), (36, 2), (44, 3)):
+            image.targets[0x57A080 + off] = value
+        # Neither mutable counters nor following descriptor data are inspected.
+        image.targets[0x57A0B4] = image.targets[0x57A0F0] = image.targets[0x57A134] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "BINK_PIXEL_DISPATCH", (spec, spec)):
+            self.assertEqual(prepare_boot.bink_pixel_callback_roots(image), expected)
+            image.targets[0x57A130] = 0
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.bink_pixel_callback_roots(image)
+            image.targets[0x57A130] = 0x1000 + 21 * 16
+            image.section_name = "BINKDATA"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.bink_pixel_callback_roots(image)
+            image.section_name = "BINK32"; image.bad_code = image.targets[0x57A088]
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.bink_pixel_callback_roots(image)
+            image.bad_code = None; image.targets[0x57A084] = 4
+            with self.assertRaisesRegex(ValueError, "shape"):
+                prepare_boot.bink_pixel_callback_roots(image)
+        with patch.object(prepare_boot, "BINK_PIXEL_DISPATCH", ((0x200, len(image.code), "0" * 64),)):
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.bink_pixel_callback_roots(image)
+
     def test_two_static_online_interfaces(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {slot: 0x1000 + n * 16
