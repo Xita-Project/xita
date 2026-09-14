@@ -3,7 +3,7 @@
 Native118 completes the original FXIN2 creation/Play loop, including both
 nonspatial and fixed spatial voices for bins 23, 24 and 25. Together with bin
 13, all seven sources feed the actual GP interpreter and emulated Vita sink.
-The next strict stop is a per-bin volume call. **The presented frame remains
+The next strict stop is a route-list replacement with per-bin gains. **The presented frame remains
 black, game audio remains zero, and no main menu or gameplay is demonstrated.**
 The visible original intro checkpoint remains [native106](halo2-visible-intro.md).
 
@@ -80,7 +80,9 @@ The next strict stop is `37C5E4`, return `2AEC87`, ESP `005E5E50`, on nonspatial
 bin-23 interface `0128601C`. List `005E5EB0` points to four entries at `005E5E70`:
 `{6:0, 8:-6400, 7:-6400, 9:-6400}`. Their relationship to the object's existing
 routes must be established from the original setter before accepting them.
-No return value is fabricated to advance this boundary.
+No return value is fabricated to advance this boundary. The later
+[native119 route audit](halo2-fxin2-route.md) confirms this is `SetMixBins`
+replacement semantics, not an update limited to previously assigned bins.
 
 ## Private evidence and replay
 

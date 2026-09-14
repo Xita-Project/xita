@@ -68,6 +68,7 @@ void h2_audio_backend_snapshot(h2_audio_backend_status *out);
 int h2_audio_backend_fx_bind(h2_dsp_engine *engine, unsigned bin);
 int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *engine, unsigned bin, const int8_t taps[31]);
 int h2_audio_backend_fx_route(unsigned bin, unsigned routes);
+int h2_audio_backend_fx_route_mask(unsigned bin, unsigned output_mask);
 int h2_audio_backend_fx_play(unsigned bin);
 int h2_audio_backend_fx_forget(unsigned bin);
 int h2_audio_backend_effect_read(h2_dsp_engine *engine, unsigned index,

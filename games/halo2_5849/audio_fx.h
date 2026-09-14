@@ -14,7 +14,7 @@
 #define H2_FX_SPATIAL24 0x10018u
 #define H2_FX_SPATIAL25 0x10019u
 #endif
-typedef struct { unsigned routes; uint64_t frames; } h2_audio_fx_source;
+typedef struct { unsigned routes, output_mask; uint64_t frames; } h2_audio_fx_source;
 typedef struct {
     h2_dsp_engine *engine;
     unsigned bound, playing;
@@ -27,6 +27,8 @@ unsigned h2_audio_fx_mask(unsigned bin);
 int h2_audio_fx_bind(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin);
 int h2_audio_fx_bind_spatial(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin, const int8_t taps[31]);
 int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes);
+/* Exact active nonspatial bin23 replacement: bins6/8/7/9, only bin6 unity. */
+int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned bin, unsigned output_mask);
 int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin);
 int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin);
 /* Execute complete 32-sample frames, reading every active source before

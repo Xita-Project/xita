@@ -86,6 +86,18 @@ int main(void)
         assert(status.fx_source_submitted[2 + (bin - 23) * 2] >= XA_GRAIN);
     }
 
+    /* Preserve a previously computed old-route grain, then change the real
+     * next-frame mix under the worker lock. Neither old grain is discarded. */
+    atomic_store(&faults, 1u << F_HOLD);
+    for (;;) { h2_audio_backend_snapshot(&status); if (status.fx_computed_frames > status.fx_submitted_frames) break; usleep(1000); }
+    uint64_t old_computed = status.fx_computed_frames;
+    assert(h2_audio_backend_fx_route_mask(24, 64) < 0);
+    assert(h2_audio_backend_fx_route_mask(23, 64) == 0);
+    h2_audio_backend_snapshot(&status); assert(status.last_peak_left == 7812 && status.fx_computed_frames == old_computed);
+    atomic_store(&faults, 0);
+    for (;;) { h2_audio_backend_snapshot(&status); if (status.fx_submitted_frames > old_computed) break; usleep(1000); }
+    assert(status.last_peak_left == 5859 && status.last_peak_right == 5859 && !status.error);
+
     assert(h2_audio_backend_fx_forget(23) < 0);
     assert(h2_audio_backend_fx_forget(13) < 0 && h2_audio_backend_fx_route(13, 2) < 0 && h2_audio_backend_fx_play(13) < 0);
     assert(h2_audio_backend_close() == 0 && !resources && !atomic_load(&queued));

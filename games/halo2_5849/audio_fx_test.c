@@ -138,8 +138,29 @@ int H2_AUDIO_FX_TEST_MAIN(void)
     assert(saturated > 32 && fx.sources[2].frames == 3 && fx.sources[4].frames == 2 && fx.sources[6].frames == 2);
     before = fx; assert(!h2_audio_fx_bind(&fx, s, 26) && !h2_audio_fx_bind_spatial(&fx, s, 26, taps));
     assert(!h2_audio_fx_forget(&fx, H2_FX_SPATIAL25) && !memcmp(&before, &fx, sizeof fx));
+    /* Original route replacement removes bin23 from FL/FR and contributes
+     * it to bin6 only. Other source histories/ownership remain intact. */
+    before = fx;
+    assert(!h2_audio_fx_route_mask(&fx, 24, 64) && !h2_audio_fx_route_mask(&fx, 23, 128));
+    assert(!memcmp(&before, &fx, sizeof fx));
+    assert(h2_audio_fx_route_mask(&fx, 23, 64));
+    for (unsigned i = 0; i < 3; ++i) assert(h2_hrtf_init(&fx.spatial[i], taps)); /* isolated input fixture */
+    for (unsigned bin = 13; bin <= 25; ++bin) if (bin == 13 || bin >= 23)
+        for (unsigned i = 0; i < 32; ++i) put32(s->scratch + 0xb000 + (bin - 11) * 128 + i * 4, bin == 23 ? 4194304 : 0);
+    assert(h2_audio_fx_render(&fx, out, 32));
+    float curve = 0;
+    for (unsigned i = 0; i < 32; ++i) {
+        curve += 0.01f * (1.0f - curve);
+        assert(!out[i * 2] && !out[i * 2 + 1]);
+        int32_t filtered = (int32_t)lrintf(curve * 4194304.0f);
+        int32_t combined = (int32_t)lrintf((curve * 0.5f + 0.5f) * 8388608.0f);
+        assert(s->core.mixbuffer[6 * 32 + i] == (uint32_t)combined);
+        assert(s->core.mixbuffer[7 * 32 + i] == (uint32_t)filtered);
+        assert(!s->core.mixbuffer[8 * 32 + i] && !s->core.mixbuffer[9 * 32 + i]);
+    }
+    assert(h2_audio_fx_route_mask(&fx, 23, 64)); /* repeated list is idempotent */
     /* A subsequent frame fault is terminal, with no completed frame counted. */
-    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 36 && s->status.fault);
+    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 37 && s->status.fault);
     assert(!h2_audio_fx_render(&fx, out, 32)); h2_dsp_destroy(s);
     puts("Halo 2 FX source: checked ownership, six independent unity routes, real DSP frames and signed GP output pass");
     return 0;

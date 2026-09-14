@@ -21,7 +21,7 @@ int h2_audio_fx_bind(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin)
         (bin != 13 && (fx->bound != mask - 1 || fx->playing != mask - 1)) ||
         !h2_dsp_read_fx_frame(engine, bin, source)) return 0;
     fx->engine = engine; fx->bound |= mask;
-    fx->sources[source_index(mask)] = (h2_audio_fx_source){.routes = 2};
+    fx->sources[source_index(mask)] = (h2_audio_fx_source){.routes = 2, .output_mask = 3};
     return 1;
 }
 int h2_audio_fx_bind_spatial(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin, const int8_t taps[31])
@@ -30,7 +30,7 @@ int h2_audio_fx_bind_spatial(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bi
     int32_t samples[32]; h2_hrtf_model state;
     if (!fx || bin < 23 || bin > 25 || fx->engine != engine || fx->bound != mask - 1 || fx->playing != mask - 1 ||
         !h2_dsp_read_fx_frame(engine, bin, samples) || !h2_hrtf_init(&state, taps)) return 0;
-    fx->spatial[bin - 23] = state; fx->sources[source_index(mask)] = (h2_audio_fx_source){.routes = 5};
+    fx->spatial[bin - 23] = state; fx->sources[source_index(mask)] = (h2_audio_fx_source){.routes = 5, .output_mask = 0x4C0};
     fx->bound |= mask; return 1;
 }
 int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes)
@@ -38,7 +38,13 @@ int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes)
     unsigned mask = h2_audio_fx_mask(bin);
     if (!fx || !mask || !(fx->bound & mask) || (fx->playing & mask) ||
         bin != 13 || (routes != 2 && routes != 6)) return 0;
-    fx->sources[0].routes = routes; return 1;
+    fx->sources[0].routes = routes; fx->sources[0].output_mask = (1u << routes) - 1; return 1;
+}
+int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned bin, unsigned output_mask)
+{
+    if (!fx || bin != 23 || output_mask != (1u << 6) || fx->bound != 127 || fx->playing != 127 ||
+        (fx->sources[1].routes != 2 && fx->sources[1].routes != 4)) return 0;
+    fx->sources[1].routes = 4; fx->sources[1].output_mask = output_mask; return 1;
 }
 int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin)
 {
@@ -72,7 +78,7 @@ static int mix_full_loop(h2_audio_fx *fx, int32_t bins[32][32])
                 mixed[6][i] += filtered[i]; mixed[7][i] += filtered[i]; mixed[10][i] += filtered[i];
             }
         } else {
-            for (unsigned bin = 0; bin < fx->sources[v].routes; ++bin)
+            for (unsigned bin = 0; bin < 11; ++bin) if (fx->sources[v].output_mask & (1u << bin))
                 for (unsigned i = 0; i < 32; ++i) mixed[bin][i] += sources[v][i] / 8388608.0f;
         }
     }

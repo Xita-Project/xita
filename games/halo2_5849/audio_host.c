@@ -24,6 +24,7 @@ typedef struct {
     uint32_t submix, spatial[41];
     uint8_t route_bins[6];
     uint32_t route_count;
+    int32_t route_gains[6];
     uint32_t fx_bin;
 } h2_audio_buffer;
 static h2_audio_buffer buffers[XA_MAX_VOICES];
@@ -513,7 +514,9 @@ static void buffer_control(xctx *c, uint32_t ip)
     stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
     uint32_t value = X_ARG(1);
     if (b->submix == 2) {
-        if (ip != 0x37B66F || value || b->started || b->fx_bin != 13 || X_M32(c->r[4]) != 0x220C37)
+        int initial = !b->started && b->fx_bin == 13 && X_M32(c->r[4]) == 0x220C37;
+        int retained = b->started && b->fx_bin == 23 && b->route_count == 4 && X_M32(c->r[4]) == 0x2AEC95;
+        if (ip != 0x37B66F || value || (!initial && !retained))
             fail(c, ip, "unsupported FXIN2 gain/state/caller", value);
         b->volume = 0;
         xv_logf("[h2/fxin2] original unity volume retained caller=%08X interface=%08X\n", X_M32(c->r[4]), b->base + 0x1C);
@@ -619,6 +622,18 @@ static void buffer_routing(xctx *c, uint32_t ip)
     }
 #if H2_AUDIO_DSP
     if (b->submix == 2) {
+        if (ip == 0x37C5E4 && X_M32(c->r[4]) == 0x2AEC87) {
+            if (!b->started || b->stopped || b->fx_bin != 23 || b->volume || b->headroom ||
+                list[0] != 4 || !mapped(list[1], 32)) fail(c, ip, "unsupported active FX23 route state/list", list[0]);
+            x_guest_read(pairs, list[1], 32);
+            const uint32_t expected[8] = {6,0,8,(uint32_t)-6400,7,(uint32_t)-6400,9,(uint32_t)-6400};
+            if (memcmp(pairs, expected, sizeof expected)) fail(c, ip, "unsupported active FX23 route/gain", list[1]);
+            if (h2_audio_backend_fx_route_mask(23, 1u << 6) < 0) fail(c, ip, "FX23 active mixer route rejected", b->base);
+            b->route_count = 4;
+            for (unsigned i = 0; i < 4; ++i) { b->route_bins[i] = pairs[i * 2]; b->route_gains[i] = (int32_t)pairs[i * 2 + 1]; }
+            xv_logf("[h2/fxin2] SetMixBins caller=002AEC87 interface=%08X input23 routes6,8,7,9; bin6 unity, others original attenuationFFF/mute; future computed grains updated\n", b->base + 0x1C);
+            result(c, 0, 2); return;
+        }
         if (ip != 0x37C5E4 || b->started || b->fx_bin != 13 || X_M32(c->r[4]) != 0x220CAA ||
             list[0] != 6 || !mapped(list[1], 48)) fail(c, ip, "unsupported FXIN2 route caller/list", list[0]);
         x_guest_read(pairs, list[1], 48);

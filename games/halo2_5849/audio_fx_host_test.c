@@ -110,6 +110,21 @@ int main(int argc, char **argv)
                 c = context(spatial_handle, 0, 0, 0); reject(&c, 0x379F45);
                 }
                 assert(extras == 5 && test_fx_playing == 127 && device.references == 8);
+                uint32_t active_list[2] = {4,0x5ffb}, active_pairs[8] = {6,0,8,(uint32_t)-6400,7,(uint32_t)-6400,9,(uint32_t)-6400};
+                x_guest_write(0x4ffc, active_list, 8);
+                for (unsigned field = 0; field < 8; ++field) {
+                    active_pairs[field] ^= 1; x_guest_write(active_list[1], active_pairs, sizeof active_pairs);
+                    c = fx_context(second_handle, 0x4ffc, 0x2AEC87); reject(&c, 0x37C5E4); active_pairs[field] ^= 1;
+                    assert(!test_fx23_output_mask && second->route_count == 2);
+                }
+                x_guest_write(active_list[1], active_pairs, sizeof active_pairs);
+                c = fx_context(second_handle, 0x4ffc, 0x2AEC88); reject(&c, 0x37C5E4);
+                c = fx_context(second_handle, 0x4ffc, 0x2AEC87); call(&c, 0x37C5E4, 0, 2);
+                assert(test_fx23_output_mask == 64 && second->route_count == 4 && second->route_gains[1] == -6400);
+                c = fx_context(second_handle, 0, 0x2AEC94); reject(&c, 0x37B66F);
+                c = fx_context(second_handle, 1, 0x2AEC95); reject(&c, 0x37B66F);
+                c = fx_context(second_handle, 0, 0x2AEC95); call(&c, 0x37B66F, 0, 2);
+
                 while (extras) {
                     uint32_t handle = extra_handles[--extras]; h2_audio_buffer *retiring = find_buffer(handle - 0x1c);
                     retiring->started = 0; test_fx_playing &= ~test_fx_mask(retiring->fx_bin); /* test teardown only */

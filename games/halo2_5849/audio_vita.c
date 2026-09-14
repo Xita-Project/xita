@@ -183,6 +183,13 @@ int h2_audio_backend_fx_route(unsigned bin, unsigned routes)
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_route(&fx, bin, routes);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
+int h2_audio_backend_fx_route_mask(unsigned bin, unsigned output_mask)
+{
+    if (h2_audio_backend_health() < 0) return -1;
+    sceKernelLockMutex(progress_mutex, 1, NULL);
+    int ok = h2_audio_backend_health() == 0 && h2_audio_fx_route_mask(&fx, bin, output_mask);
+    sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
+}
 int h2_audio_backend_fx_forget(unsigned bin)
 {
     if (h2_audio_backend_health() < 0) return -1;
