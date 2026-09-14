@@ -96,6 +96,15 @@ int h2_platform_pad(h2_pad_sample *sample, int initialize)
     for (unsigned i = 0; i < 8; ++i) if (pad.buttons & analog[i]) sample->analog[i] = 255;
     sample->axes[0] = pad_axis(pad.lx, 0); sample->axes[1] = pad_axis(pad.ly, 1);
     sample->axes[2] = pad_axis(pad.rx, 0); sample->axes[3] = pad_axis(pad.ry, 1);
+    /* Read-only input evidence for the original movie skip path. */
+    static unsigned input_probe_count;
+    static uint16_t input_probe_previous;
+    if (input_probe_count < 16 && (initialize || input_probe_previous != sample->buttons)) {
+        uint32_t fpscr = h2_platform_fpscr_read();
+        ++input_probe_count; input_probe_previous = sample->buttons;
+        xv_logf("[h2/input-probe] initialize=%d digital=%04X\n", initialize, sample->buttons);
+        h2_platform_fpscr_write(fpscr);
+    }
     return 0;
 }
 int h2_platform_wait_vblank(uint32_t *before, uint32_t *after)
@@ -300,6 +309,25 @@ static void trace_mapped_word(uint32_t address)
 void xv_trace_func(uint32_t address)
 {
     static unsigned count;
+    /* The original movie checks skip input only after initial frame setup.
+     * Observe that ordering and its flags without calling input early or
+     * changing a return value, a flag, or an audio/video operation. */
+    static unsigned movie_skip_probe_count;
+    if (xk_cur && movie_skip_probe_count < 32 &&
+        (address == 0x156090 || address == 0x1568D0 || address == 0x155F80 ||
+         address == 0x156AB0 || address == 0x1565A0 || address == 0x3E35C0)) {
+        const xctx *c = &xk_cur->ctx;
+        uint32_t fpscr = h2_platform_fpscr_read();
+        ++movie_skip_probe_count;
+        xv_logf("[h2/movie-skip-probe] fn=%08X esp=%08X esi=%08X ebx=%08X\n",
+                address, c->r[4], c->r[6], c->r[3]);
+        for (unsigned i = 0; i < 3 && c->r[4] <= UINT32_MAX - i * 4; ++i)
+            trace_mapped_word(c->r[4] + i * 4);
+        trace_mapped_word(0x4E9188); trace_mapped_word(0x4E918C);
+        trace_mapped_word(0x4E9190); trace_mapped_word(0x4E9194);
+        trace_mapped_word(0x547F28); trace_mapped_word(0x51EA00);
+        h2_platform_fpscr_write(fpscr);
+    }
     /* Native86: observe the original audio failure unwind and subsequent
      * map setup. This never supplies an object or changes the failing call. */
     static unsigned sound_probe_count;

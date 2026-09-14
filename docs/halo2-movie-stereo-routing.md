@@ -124,3 +124,4 @@ The next investigation is the original input/skip path and its ordering against
 this first Play request. If playback is required before input can be processed,
 the cursor must derive from real mixer/sink progress. The mixer's decode-ahead
 byte position must not be substituted for an actual playback position.
+The [native103 skip audit](halo2-movie-skip-ordering.md) confirms that ordering.
