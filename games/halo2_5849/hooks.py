@@ -211,6 +211,7 @@ class Halo2AudioUnavailableHooks(Halo2HostChannelHooks):
 
 
 AUDIO_HOST_BOUNDARIES = {
+    0x37AD25: (119, "7a182f2613dd476b6f5c86e101220a58cc389291b4acf5f4fce67aa9775d3bc4"),
     0x37D835: (87, "51775a4ae6d24d39db3ab4f2b8b66a190acba4bfffeed8f358aa4738dde0fd2e"),
     0x37D7DE: (87, "fba5b0697871b05f1c503ba189363fbceb37cc38b63e1a4dd0b427a660cb35be"),
     0x37B68B: (28, "5c0809339e8b04993352a3357f95cfda7dc11ead13d354d701ad997f272f52cd"),
@@ -266,12 +267,20 @@ AUDIO_ORIGINAL_BOUNDARIES = {
 }
 
 
+# Original callback bodies execute unchanged; validate their exact revision.
+AUDIO_CALLBACK_BOUNDARIES = {
+    0x335D82: (23, "db7607cb0403e7efdfad4a9b00c8d7efe11fc3455c3e28f42a1f88062a2fa730"),
+    0x335D38: (74, "0c58e0d92dfe7751dc98c874bba3122866519fc5ae8dfa8413118e92c731609c"),
+    0x33586D: (56, "d0fb8c3a3c75ca6c1ea906433a99919888b0b43d6bf441b174cf774d3ca14f2e"),
+}
+
+
 class Halo2AudioHostHooks(Halo2HostChannelHooks):
     """Opt-in, bounded real-output device adapter; unknown methods stop."""
     def __init__(self, image):
         super().__init__(image)
         self.image = image
-        for address, (length, digest) in (AUDIO_HOST_BOUNDARIES | AUDIO_ORIGINAL_BOUNDARIES).items():
+        for address, (length, digest) in (AUDIO_HOST_BOUNDARIES | AUDIO_ORIGINAL_BOUNDARIES | AUDIO_CALLBACK_BOUNDARIES).items():
             if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
                 raise ValueError(f"Halo 2 audio host boundary mismatch at {address:#x}")
         if (image.u32(0x417124) != 0x37A14F or image.u32(0x417128) != 0x37C70F or

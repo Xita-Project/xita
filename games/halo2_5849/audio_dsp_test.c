@@ -1,9 +1,11 @@
 /* Actual adapter/mixer with synthetic DSP provider for ABI/lifetime tests.
  * The real interpreter and owned-program execution are separately tested. */
 #define H2_AUDIO_DSP 1
+#define xv_call test_stream_invoke
 #define main original_pcm_test_main
 #include "audio_buffer_test.c"
 #undef main
+#undef xv_call
 struct h2_dsp_engine { uint32_t marker; };
 static unsigned dsp_opens, dsp_closes, dsp_reads;
 static int dsp_failure;
@@ -57,6 +59,33 @@ int h2_audio_backend_gp_pcm_play(int voice)
     assert(test_fx_playing==0x7fff);
     if (test_gp_pcm_play_failure) return -1;
     xk_audio_voice_play(voice,1); return 0;
+}
+static xk_thread test_stream_worker;
+static int test_stream_thread_failure;
+xk_thread *xk_thread_create_host(void (*entry)(xctx *,void *),void *arg)
+{ assert(entry==stream_worker_entry && !arg);return test_stream_thread_failure ? NULL : &test_stream_worker; }
+void xk_thread_kick(xk_thread *thread) { assert(thread==&test_stream_worker); }
+void xk_sleep_us(uint64_t us) { (void)us;assert(0); }
+static unsigned test_stream_callbacks;
+static uint32_t test_stream_callback_context;
+void test_stream_invoke(xctx *c,uint32_t routine)
+{
+    assert(routine==0x335d82 && X_M32(c->r[4])==0xdead0003 && X_M32(c->r[4]+4)==test_stream_callback_context &&
+        X_M32(c->r[4]+8)==test_stream_callbacks && !X_M32(c->r[4]+12) && X_M8(c->fs_base+0x24)==2);
+    ++test_stream_callbacks;c->r[0]^=0xabcdef;c->r[1]^=0x123456;c->r[4]+=16;native_fp^=0x777777;
+}
+static int test_stream_submit_failure=1;
+static unsigned test_stream_serial,test_stream_ready,test_stream_completed;
+int h2_audio_backend_stream_submit(int voice,uint32_t mirror,uint64_t *ticket)
+{
+    if(test_stream_submit_failure)return -1;
+    assert(xk_audio_stream_push(voice,mirror,320)==0);*ticket=++test_stream_serial;return 0;
+}
+int h2_audio_backend_stream_complete(int voice,uint64_t *ticket)
+{
+    assert(voice>=0);
+    if(test_stream_completed==test_stream_ready)return 0;
+    *ticket=++test_stream_completed;return 1;
 }
 int h2_audio_backend_fx_play(unsigned bin)
 { unsigned mask = test_fx_mask(bin); assert((test_fx_bound & mask) && !(test_fx_playing & mask) && (bin != 13 || test_fx_routes == 6)); test_fx_playing |= mask; return 0; }

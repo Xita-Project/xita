@@ -126,6 +126,12 @@ int main(void)
     c=context(global_handle,0,0,0);call(&c,0x37AB40,2,1);assert(device.references==2);
     c=context(global_handle,0,0,0);call(&c,0x37AB87,1,1);
     c=context(global_handle,0,0,0);call(&c,0x37AB87,0,1);assert(device.references==1 && !device.children);
+    for(unsigned bin=28;bin<=30;++bin){
+        c=global_stream_description();x_guest_write(0xaffe,&bin,4);call(&c,0x37D835,0,2);
+        uint32_t h=read32(0x6ffe);h2_audio_stream *s=stream_live(&c,0x37D835,h);assert(s->route_bin==bin);
+        c=context(h,0,0,0);call(&c,0x37AB87,0,1);
+    }
+    c=global_stream_description();uint32_t bad_bin=31;x_guest_write(0xaffe,&bad_bin,4);reject_stream(&c,0x37D835);
     c=stream_description(dev,0);
     int ids[XA_MAX_VOICES];for(unsigned i=0;i<XA_MAX_VOICES;i++){ids[i]=xk_audio_voice_new(2,0x4FF9);assert(ids[i]>=0);}
     before=read32(0x6FFE);unsigned old_frees=frees;

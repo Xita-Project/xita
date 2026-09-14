@@ -70,6 +70,35 @@ int main(void)
     for(unsigned i=0;i<2;++i)assert(g_v[i].frames_out>=gp_pcm_submitted[i] && g_v[i].frames_out<=gp_pcm_submitted[i]+1024);
     for(unsigned i=0;i<2;++i)assert(g_v[i].frames_out>=1024 && g_v[i].pos && g_v[i].volume==0.0f);
     xk_audio_unlock();sceKernelUnlockMutex(progress_mutex,1);
+    const uint8_t stream_wfx[18]={1,0,1,0,0x40,0x1f,0,0,0x80,0x3e,0,0,2,0,16,0,0,0};
+    x_guest_write(0x1100,stream_wfx,18);int stream_ids[4];
+    for(unsigned v=0;v<4;++v){
+        stream_ids[v]=xk_audio_voice_new(2,0x1100);assert(stream_ids[v]==(int)v+2);
+        xk_audio_lock();xk_audio_voice_set_volume_db100(stream_ids[v],0);xk_audio_unlock();
+    }
+    uint64_t tickets[4][2],completed=0xabcdef;
+    atomic_store(&faults,1u<<F_HOLD);atomic_store(&hold_on_stream_submit,1);
+    for(unsigned v=0;v<4;++v){
+        for(unsigned i=0;i<2;++i)assert(h2_audio_backend_stream_submit(stream_ids[v],0x9000+(v*2+i)*320,&tickets[v][i])==0);
+        assert(tickets[v][1]==tickets[v][0]+1);
+        assert(h2_audio_backend_stream_submit(stream_ids[v],0xb000,&completed)<0 && completed==0xabcdef);
+    }
+    int fifth=xk_audio_voice_new(2,0x1100);xk_audio_lock();xk_audio_voice_set_volume_db100(fifth,0);xk_audio_unlock();
+    assert(h2_audio_backend_stream_submit(fifth,0xb000,&completed)<0 && completed==0xabcdef);xk_audio_voice_free(fifth);
+    atomic_store(&faults,0);
+    while(atomic_load(&hold_on_stream_submit) || !(atomic_load(&faults)&(1u<<F_HOLD)))usleep(1000);
+    for(unsigned v=0;v<4;++v)assert(h2_audio_backend_stream_complete(stream_ids[v],&completed)==0 && completed==0xabcdef);
+    h2_audio_backend_snapshot(&status);assert(status.gp_stream_decoded && !status.gp_stream_completed && status.gp_stream_packets==8);
+    atomic_store(&faults,0);
+    for(unsigned i=0;i<2;++i)for(unsigned v=0;v<4;++v){
+        int result;do{result=h2_audio_backend_stream_complete(stream_ids[v],&completed);assert(result>=0);if(!result)usleep(1000);}while(!result);
+        assert(completed==tickets[v][i]);
+    }
+    h2_audio_backend_snapshot(&status);assert(status.gp_stream_completed==8 && !status.gp_stream_packets);
+    sceKernelLockMutex(progress_mutex,1,NULL);h2_test_fx_input(s,27,routed);
+    for(unsigned i=0;i<32;++i)assert(!routed[i]);
+    xk_audio_lock();for(unsigned v=0;v<4;++v)assert(g_v[stream_ids[v]].frames_out>=1926 && !g_v[stream_ids[v]].nq);xk_audio_unlock();
+    sceKernelUnlockMutex(progress_mutex,1);
     /* Deliberately violate the host adapter's mute contract. Nonzero PCM
      * must stop before it can be discarded or submitted as another route. */
     xk_audio_lock();xk_audio_voice_set_volume_db100(0,0);xk_audio_unlock();

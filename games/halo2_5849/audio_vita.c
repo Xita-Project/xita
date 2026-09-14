@@ -5,7 +5,17 @@
 #include "audio_progress.h"
 #if H2_AUDIO_DSP
 #include "audio_fx.h"
+#include "audio_stream_cursor.h"
 static h2_audio_fx fx;
+typedef struct {
+    int voice;
+    unsigned count;
+    struct { uint64_t ticket, end_source, fence; } packets[2];
+    uint64_t end, removed;
+} gp_stream_state;
+static gp_stream_state gp_streams[4];
+static unsigned gp_stream_decoded,gp_stream_completed;
+static uint64_t gp_stream_serial;
 static int gp_pcm_voice[2] = {-1,-1};
 static unsigned gp_pcm_active, gp_pcm_queued;
 static uint64_t gp_pcm_submitted[2], gp_pcm_consumed[2];
@@ -276,10 +286,64 @@ int h2_audio_backend_gp_pcm_play(int voice)
         sceKernelDelayThread(1000);
     }
 }
+/* Four original streams, each with two 320-byte zero PCM packets. The host validates their
+ * descriptor and immutable mirror. No guest callback runs on this worker. */
+int h2_audio_backend_stream_submit(int voice,uint32_t mirror,uint64_t *ticket)
+{
+    if (voice<0 || voice>=XA_MAX_VOICES || !mirror || !ticket || h2_audio_backend_health()<0) return -1;
+    sceKernelLockMutex(progress_mutex,1,NULL);
+    gp_stream_state *s=NULL;
+    for(unsigned i=0;i<4;++i) if(gp_streams[i].voice==voice)s=&gp_streams[i];
+    if(!s) for(unsigned i=0;i<4;++i) if(gp_streams[i].voice<0){s=&gp_streams[i];break;}
+    h2_stream_cursor cursor;
+    int ok=s && h2_audio_backend_health()==0 && fx.playing==0x7fff && gp_pcm_active==3 &&
+        s->count<2 && gp_stream_serial<UINT64_MAX && s->end<=UINT64_MAX-160 &&
+        h2_audio_stream_cursor_read(voice,&cursor);
+    if (ok && xk_audio_stream_push(voice,mirror,320)<0) ok=0;
+    if (ok) {
+        s->voice=voice;s->end+=160;
+        s->packets[s->count].ticket=++gp_stream_serial;
+        s->packets[s->count].end_source=s->end;
+        s->packets[s->count++].fence=0;*ticket=gp_stream_serial;
+    }
+    sceKernelUnlockMutex(progress_mutex,1);return ok ? 0 : -1;
+}
+int h2_audio_backend_stream_complete(int voice,uint64_t *ticket)
+{
+    if (!ticket || h2_audio_backend_health()<0) return -1;
+    sceKernelLockMutex(progress_mutex,1,NULL);
+    gp_stream_state *s=NULL;
+    for(unsigned i=0;i<4;++i)if(gp_streams[i].voice==voice)s=&gp_streams[i];
+    int result=s?0:-1;
+    if (s && s->count && s->packets[0].fence && fx_consumed>=s->packets[0].fence) {
+        *ticket=s->packets[0].ticket;s->packets[0]=s->packets[1];memset(&s->packets[1],0,sizeof s->packets[1]);
+        --s->count;++gp_stream_completed;result=1;
+    }
+    sceKernelUnlockMutex(progress_mutex,1);return result;
+}
+static int stream_decoded(uint64_t fence)
+{
+    for(unsigned v=0;v<4;++v){
+        gp_stream_state *s=&gp_streams[v];if(s->voice<0 || !s->count)continue;
+        h2_stream_cursor cursor;if(!h2_audio_stream_cursor_read(s->voice,&cursor) ||
+            s->removed>s->end || cursor.source_frames>s->end-s->removed)return 0;
+        uint64_t source=s->removed+cursor.source_frames;
+        for(unsigned i=0;i<s->count;++i) if(!s->packets[i].fence){
+            uint64_t end=s->packets[i].end_source;
+            /* Retire both interpolation lanes, or the final drained source,
+             * then wait for the whole containing sink grain to be consumed. */
+            if(!(source>=end && (source-end>=2 || cursor.drained)))break;
+            if(!xk_audio_stream_pop_consumed(s->voice))return 0;
+            s->removed+=160;s->packets[i].fence=fence;++gp_stream_decoded;
+        }
+    }
+    return 1;
+}
 /* Called only under the ownership lock. These voices are already validated
- * mono8/1000Hz with volume-10000 and route14. Decode/resample them normally,
- * then prove their contribution is zero. Never discard unexpected samples.
- * The GP's existing zero bin14 is therefore their exact supported input. */
+ * mono8/1000Hz with volume-10000/route14, plus zero PCM stream sources into
+ * bins27..30. Decode/resample normally, then prove every contribution is zero.
+ * Never discard unexpected samples. The GP's zero inputs are exact for this
+ * bounded state; nonzero stream samples are rejected by the guest adapter. */
 static int mix_muted_gp_pcm(void)
 {
     if (!gp_pcm_active) return 1;
@@ -321,7 +385,7 @@ static int mix_worker(SceSize bytes, void *arg)
                 __atomic_store_n(&error,(uint32_t)-1007,__ATOMIC_RELEASE);
                 sceKernelUnlockMutex(progress_mutex,1); break;
             }
-            if (!h2_audio_fx_render(&fx, output[slot], XA_GRAIN)) {
+            if (!stream_decoded(fx.frames*32+XA_GRAIN) || !h2_audio_fx_render(&fx, output[slot], XA_GRAIN)) {
                 __atomic_store_n(&error, (uint32_t)-1004, __ATOMIC_RELEASE);
                 sceKernelUnlockMutex(progress_mutex, 1); break;
             }
@@ -431,6 +495,7 @@ int h2_audio_backend_close(void)
     if (progress_mutex >= 0 && progress.pending && (observe_rest() < 0 || progress.pending)) return -1;
 #if H2_AUDIO_DSP
     if (mutex>=0) for (unsigned i=0;i<2;++i) if (gp_pcm_active & (1u<<i)) xk_audio_voice_stop(gp_pcm_voice[i]);
+    if (mutex>=0) for(unsigned i=0;i<4;++i) if(gp_streams[i].voice>=0)xk_audio_voice_stop(gp_streams[i].voice);
     gp_pcm_active=0;
 #endif
     int result = 0;
@@ -447,6 +512,8 @@ int h2_audio_backend_open(void)
     if (port >= 0 || worker >= 0 || mutex >= 0 || ready >= 0 || progress_mutex >= 0) return -2;
     grains = nonzero_grains = peak = error = 0;
 #if H2_AUDIO_DSP
+    memset(gp_streams,0,sizeof gp_streams);for(unsigned i=0;i<4;++i)gp_streams[i].voice=-1;
+    gp_stream_decoded=gp_stream_completed=0;gp_stream_serial=0;
     gp_pcm_voice[0]=gp_pcm_voice[1]=-1; gp_pcm_active=gp_pcm_queued=0;
     memset(gp_pcm_submitted,0,sizeof gp_pcm_submitted); memset(gp_pcm_consumed,0,sizeof gp_pcm_consumed);
     fx = (h2_audio_fx){0}; fx_submitted = fx_consumed = fx_compute_us = fx_max_compute_us = 0;
@@ -513,6 +580,8 @@ void h2_audio_backend_snapshot(h2_audio_backend_status *out)
     out->fx_bound_mask = fx.bound; out->fx_playing_mask = fx.playing;
     memcpy(out->fx_source_submitted, fx_source_submitted, sizeof fx_source_submitted);
     memcpy(out->fx_source_consumed, fx_source_consumed, sizeof fx_source_consumed);
+    out->gp_stream_packets=0;for(unsigned i=0;i<4;++i)out->gp_stream_packets+=gp_streams[i].count;
+    out->gp_stream_decoded=gp_stream_decoded;out->gp_stream_completed=gp_stream_completed;
     out->gp_pcm_playing_mask=gp_pcm_active;
     memcpy(out->gp_pcm_submitted,gp_pcm_submitted,sizeof gp_pcm_submitted);
     memcpy(out->gp_pcm_consumed,gp_pcm_consumed,sizeof gp_pcm_consumed);

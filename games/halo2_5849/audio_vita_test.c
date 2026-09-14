@@ -51,6 +51,9 @@ static pthread_t native_thread;
 static pthread_mutex_t native_mutex[2];
 static sem_t native_ready;
 static int launched, joined;
+#if H2_AUDIO_DSP
+static atomic_int hold_on_stream_submit;
+#endif
 static int (*native_entry)(SceSize, void *);
 static int failing(unsigned bit) { return (atomic_load(&faults) & (1u << bit)) != 0; }
 void xv_logf(const char *format, ...) { (void)format; }
@@ -59,7 +62,7 @@ void xv_logf(const char *format, ...) { (void)format; }
 #define xk_os_audio_mutex_lock h2_audio_sink_lock
 #define xk_os_audio_mutex_unlock h2_audio_sink_unlock
 #define XK_AUDIO_OUTPUT_FILTER h2_audio_bins_filter
-#include "recomp/kernel/xk_audio.c"
+#include "audio_mixer_bridge.c"
 #undef xk_os_audio_open
 #undef xk_os_audio_mutex_lock
 #undef xk_os_audio_mutex_unlock
@@ -67,6 +70,11 @@ void xv_logf(const char *format, ...) { (void)format; }
 void xk_os_log(const char *format, ...) { (void)format; }
 uint64_t xk_os_monotonic_us(void) { return sceKernelGetProcessTimeWide(); }
 #else
+#if H2_AUDIO_DSP
+int h2_audio_stream_cursor_read(int voice,h2_stream_cursor *out) { (void)voice;(void)out;return 0; }
+int xk_audio_stream_push(int voice,uint32_t guest,uint32_t size) { (void)voice;(void)guest;(void)size;return -1; }
+int xk_audio_stream_pop_consumed(int voice) { (void)voice;return 0; }
+#endif
 int xk_audio_init(void) { fake_voice = -1; fake_decoded = 0; fake_playing = 0; return h2_audio_sink_open(XA_OUT_RATE, XA_GRAIN); }
 void xk_audio_lock(void) { h2_audio_sink_lock(); }
 void xk_audio_unlock(void) { h2_audio_sink_unlock(); }
@@ -144,6 +152,9 @@ static int sceAudioOutOutput(int id, const void *data)
 #endif
     if (failing(F_WRITE)) return -23;
     assert(!atomic_load(&queued)); atomic_store(&queued, XA_GRAIN);
+#if H2_AUDIO_DSP
+    if (gp_stream_decoded && atomic_exchange(&hold_on_stream_submit,0)) atomic_fetch_or(&faults,1u<<F_HOLD);
+#endif
     atomic_fetch_add(&outputs, 1); usleep(1000); return 0;
 }
 static int sceAudioOutGetRestSample(int id)
