@@ -11,6 +11,14 @@ static xctx fx_description(uint32_t dev)
     uint32_t fields[6] = {24, 0x100000, 0, 0, 0, 13}; x_guest_write(0x3ffd, fields, sizeof fields);
     xctx c = context(dev, 0x3ffd, 0x6ffe, 0); X_M32(c.r[4]) = 0x220C26; return c;
 }
+static xctx global_pcm_description(void)
+{
+    uint32_t fields[6]={24,0,0,0x4ff9,0x5ffc,0},list[2]={1,0x7ff9},pair[2]={14,0};
+    uint8_t format[18]={1,0,1,0,0xe8,3,0,0,0xe8,3,0,0,1,0,8,0,0,0};
+    x_guest_write(0x3ffd,fields,24);x_guest_write(0x4ff9,format,18);
+    x_guest_write(0x5ffc,list,8);x_guest_write(0x7ff9,pair,8);
+    xctx c=context(0x3ffd,0x8ffb,0,0);X_M32(c.r[4])=0x22153E;return c;
+}
 static xctx fx_context(uint32_t handle, uint32_t arg, uint32_t caller)
 { xctx c = context(handle, arg, 0, 0); X_M32(c.r[4]) = caller; return c; }
 int main(int argc, char **argv)
@@ -226,6 +234,41 @@ int main(int argc, char **argv)
                     c = fx_context(handle,0,0x21EA29); reject(&c,0x379F45);
                 }
                 assert(device.references == 16 && device.children == 15);
+                for (unsigned field=0;field<6;++field) {
+                    c=global_pcm_description();uint32_t value=read32(0x3ffd+field*4)^1;x_guest_write(0x3ffd+field*4,&value,4);
+                    reject(&c,0x37D7DE);
+                }
+                for (unsigned byte=0;byte<18;++byte) {
+                    c=global_pcm_description();uint8_t value; x_guest_read(&value,0x4ff9+byte,1);value^=1;x_guest_write(0x4ff9+byte,&value,1);
+                    reject(&c,0x37D7DE);
+                }
+                c=global_pcm_description();X_M32(c.r[4])++;reject(&c,0x37D7DE);
+                c=global_pcm_description();X_M32(c.r[4]+8)=0x4ff9;reject(&c,0x37D7DE);
+                c=global_pcm_description();allocation_failure=1;uint32_t untouched=read32(0x8ffb);
+                call(&c,0x37D7DE,0x8007000e,2);allocation_failure=0;assert(read32(0x8ffb)==untouched && device.references==16);
+                c=global_pcm_description();call(&c,0x37D7DE,0,2);uint32_t pcm_handle=read32(0x8ffb);
+                h2_audio_buffer *pcm=find_buffer(pcm_handle-0x1c);assert(pcm && pcm->gp_pcm && pcm->headroom==600 && pcm->frequency==1000);
+                assert(g_v[pcm->voice].channels==1 && g_v[pcm->voice].bits==8 && g_v[pcm->voice].freq_override==1000);
+                assert(device.references==17 && device.children==16 && pcm->route_bins[0]==14);
+                c=global_pcm_description();reject(&c,0x37D7DE); /* preceding buffer must have played */
+                uint8_t bytes[1000];for(unsigned i=0;i<1000;++i)bytes[i]=(uint8_t)i;x_guest_write(0xb000,bytes,1000);
+                c=context(pcm_handle,0xb000,1000,0);X_M32(c.r[4])=0x221593;reject(&c,0x37CC4A);
+                X_M32(c.r[4])=0x221592;call(&c,0x37CC4A,0,3);assert(pcm->bytes==1000 && pcm->mirror);
+                c=fx_context(pcm_handle,0,0x22159D);call(&c,0x37B6A7,0,2);
+                /* Exercise the real shared PCM decoder independently of the
+                 * still-rejected loaded-DSP Play: both audible test input
+                 * and fully muted input advance effective1000Hz source time. */
+                int16_t output[2048];xk_audio_voice_play(pcm->voice,1);xk_audio_mix(output,1024);
+                unsigned nonzero=0;for(unsigned i=0;i<2048;++i)nonzero+=output[i]!=0;assert(nonzero && g_v[pcm->voice].frames_out==1024);
+                xk_audio_voice_stop(pcm->voice);
+                c=fx_context(pcm_handle,(uint32_t)-9999,0x2215AC);reject(&c,0x37B66F);
+                c=fx_context(pcm_handle,(uint32_t)-10000,0x2215AC);call(&c,0x37B66F,0,2);
+                xk_audio_voice_play(pcm->voice,1);xk_audio_mix(output,1024);
+                for(unsigned i=0;i<2048;++i)assert(!output[i]);assert(g_v[pcm->voice].frames_out==1024 && g_v[pcm->voice].pos);
+                xk_audio_voice_stop(pcm->voice);
+                c=context(pcm_handle,0,0,1);X_M32(c.r[4])=0x2215B9;reject(&c,0x37B6DF);
+                c=context(pcm_handle,0,0,0);call(&c,0x379F45,0,1);assert(device.references==16 && device.children==15);
+
                 for (unsigned i = 8; i-- > 0;) {
                     uint32_t handle = extra_sources[i]; h2_audio_buffer *target = find_buffer(handle - 0x1c);
                     target->started = 0; test_fx_playing &= ~test_fx_mask(target->fx_bin); /* test teardown only */

@@ -27,6 +27,7 @@ typedef struct {
     int32_t route_gains[6];
     uint32_t fx_bin;
     uint32_t filter[6];
+    uint32_t gp_pcm; /* observed mono8/1000Hz buffer, route14; no active route yet */
 } h2_audio_buffer;
 static h2_audio_buffer buffers[XA_MAX_VOICES];
 typedef struct {
@@ -176,6 +177,9 @@ static h2_audio_buffer *buffer_live(xctx *c, uint32_t ip, uint32_t object, int i
         !device.children || device.references < device.children)
         fail(c, ip, "buffer identity", object);
     live(c, ip, device.base, 1);
+    if (b->gp_pcm && ip != 0x37A14F && ip != 0x379F45 && ip != 0x37A795 &&
+        ip != 0x37CC4A && ip != 0x37B6A7 && ip != 0x37B66F && ip != 0x37B6DF)
+        fail(c, ip, "unsupported routed low-rate PCM method", b->base);
     if (b->submix == 1 && ip != 0x37D4BE && ip != 0x37A14F && ip != 0x379F45 &&
         ip != 0x37A795 && ip != 0x37C5E4 && ip != 0x37C620 && ip != 0x37C644 &&
         ip != 0x37C6C1 && ip != 0x37C69D && ip != 0x37C600)
@@ -385,6 +389,67 @@ static void buffer_create(xctx *c)
             X_M32(c->r[4]), handle, voice, device.references);
     result(c, 0, 4);
 }
+static void global_buffer_create(xctx *c)
+{
+    const uint32_t ip = 0x37D7DE;
+    stack(c,ip,2); live(c,ip,device.base,1); buffer_operational(c,ip);
+#if H2_AUDIO_DSP
+    uint32_t desc=X_ARG(0),out=X_ARG(1),fields[6],list[2],pair[2];
+    uint8_t format[18];
+    const uint8_t expected[18]={1,0,1,0,0xE8,3,0,0,0xE8,3,0,0,1,0,8,0,0,0};
+    output(c,ip,out,4);
+    if (!effects || X_M32(c->r[4]) != 0x22153E || !mapped(desc,24))
+        fail(c,ip,"global PCM caller/descriptor",desc);
+    x_guest_read(fields,desc,24);
+    if (fields[0]!=24 || fields[1] || fields[2] || fields[5] || !mapped(fields[3],18) || !mapped(fields[4],8))
+        fail(c,ip,"unsupported global PCM descriptor",desc);
+    x_guest_read(format,fields[3],18); x_guest_read(list,fields[4],8);
+    if (memcmp(format,expected,18) || list[0]!=1 || !mapped(list[1],8))
+        fail(c,ip,"unsupported global PCM format/route list",fields[3]);
+    x_guest_read(pair,list[1],8);
+    if (pair[0]!=14 || pair[1]) fail(c,ip,"unsupported global PCM route/gain",list[1]);
+    const uint32_t addresses[5]={c->r[4],desc,fields[3],fields[4],list[1]};
+    const unsigned lengths[5]={12,24,18,8,8};
+    for (unsigned i=0;i<5;++i) if (aliases(out,4,addresses[i],lengths[i])) fail(c,ip,"global PCM output alias",out);
+    unsigned fx_sources=0,pcm_sources=0,index;
+    for (unsigned i=0;i<XA_MAX_VOICES;++i) if (buffers[i].base) {
+        if (buffers[i].submix==2 && buffers[i].started && !buffers[i].stopped) ++fx_sources;
+        if (buffers[i].gp_pcm) {
+            ++pcm_sources;
+            if (!buffers[i].started || buffers[i].stopped) fail(c,ip,"global PCM predecessor is inactive",buffers[i].base);
+        }
+    }
+    if (fx_sources!=H2_FX_SOURCES || pcm_sources>=2 || device.references>UINT32_MAX-2)
+        fail(c,ip,"global PCM owner sequence",pcm_sources);
+    for (index=0;index<XA_MAX_VOICES && buffers[index].base;++index) {}
+    if (index==XA_MAX_VOICES) { result(c,0x8007000E,2); return; }
+    uint32_t base=xk_mem_alloc(4096,4096,0,0,0);
+    if (!base) { result(c,0x8007000E,2); return; }
+    if ((base&4095) || !mapped(base,4096) || overlaps_device(base,4096) || page_overlap(base,4096,out,4))
+        fail(c,ip,"global PCM allocation mapping",base);
+    for (unsigned i=0;i<5;++i) if (page_overlap(base,4096,addresses[i],lengths[i])) fail(c,ip,"global PCM allocation alias",base);
+    x_guest_write(base+64,format,18);
+    int voice=xk_audio_voice_new(1,base+64);
+    if (voice<0) {
+        if (xk_mem_free(base)<0) fail(c,ip,"global PCM allocation rollback",base);
+        result(c,0x8007000E,2); return;
+    }
+    /* Shared parsing limits nominal rates to >=4kHz. Its existing frequency
+     * override supports1000Hz and drives the actual decoder/resampler. */
+    xk_audio_lock(); xk_audio_voice_set_frequency(voice,1000); xk_audio_voice_set_volume_db100(voice,-600); xk_audio_unlock();
+    buffers[index]=(h2_audio_buffer){.base=base,.references=1,.voice=voice,.frequency=1000,
+        .headroom=600,.route_count=1,.route_bins={14},.gp_pcm=1};
+    X_M32(base)=0x417150; X_M32(base+4)=1;
+    ++device.children; X_M32(device.base+4)=++device.references;
+    uint32_t handle=base+0x1C; x_guest_write(out,&handle,4);
+    /* The original global wrapper takes/releases a temporary device ref.
+     * On return only the real child's reference survives, including failure. */
+    xv_logf("[h2/audio-global] create caller=0022153E interface=%08X real voice=%d PCM8 mono effective1000Hz route14 headroom600 parent_refs=%u inactive; loaded-DSP playback unsupported\n",handle,voice,device.references);
+    result(c,0,2);
+#else
+    fail(c,ip,"global routed PCM requires real DSP",ip);
+#endif
+}
 static h2_audio_stream *stream_live(xctx *c, uint32_t ip, uint32_t object)
 {
     buffer_operational(c, ip); live(c, ip, device.base, 1);
@@ -490,6 +555,8 @@ static void buffer_data(xctx *c)
     const uint32_t ip = 0x37CC4A;
     stack(c, ip, 3); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
     uint32_t source = X_ARG(1), bytes = X_ARG(2);
+    if (b->gp_pcm && (X_M32(c->r[4])!=0x221592 || bytes!=1000 || b->started))
+        fail(c,ip,"unsupported global PCM data binding",source);
     /* First bind only in this milestone. Playback and live rebinding remain
      * strict stops until their routing/commit/cursor contracts are supplied. */
     if (b->mirror || !bytes || bytes > 0x100000 || (bytes & 3) || (source & 3) ||
@@ -514,6 +581,10 @@ static void buffer_control(xctx *c, uint32_t ip)
 {
     stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
     uint32_t value = X_ARG(1);
+    if (b->gp_pcm && (b->started ||
+        !((ip==0x37B6A7 && !value && X_M32(c->r[4])==0x22159D) ||
+          (ip==0x37B66F && value==(uint32_t)-10000 && !b->headroom && X_M32(c->r[4])==0x2215AC))))
+        fail(c,ip,"unsupported global PCM control/state",value);
     if (b->submix == 2) {
 #if H2_AUDIO_DSP
         uint32_t caller = X_M32(c->r[4]);
@@ -549,7 +620,7 @@ static void buffer_control(xctx *c, uint32_t ip)
         int32_t volume = b->volume; uint32_t headroom = b->headroom;
         if (ip == 0x37B66F) {
             volume = (int32_t)value;
-            if (volume > 0 || volume < -9000) fail(c, ip, "unsupported buffer volume", value);
+            if (volume > 0 || (volume < -9000 && !(b->gp_pcm && volume == -10000))) fail(c, ip, "unsupported buffer volume", value);
         } else {
             if (value != 0 && value != 600) fail(c, ip, "unsupported buffer headroom", value);
             headroom = value;
@@ -1084,6 +1155,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37D797: create(c); break;
     case 0x37A14F: case 0x37C70F: case 0x379F45: case 0x37A795: reference(c, ip); break;
     case 0x37D4BE: buffer_create(c); break;
+    case 0x37D7DE: global_buffer_create(c); break;
     case 0x37CC4A: buffer_data(c); break;
     case 0x37B7B3: buffer_lock(c); break;
     case 0x379F40: buffer_unlock(c); break;
@@ -1201,19 +1273,30 @@ void h2_audio_trace_buffer(xctx *c, uint32_t ip)
             xv_logf("[h2/audio-buffer] route[%u] bin=%u volume=%d\n", i, pairs[i*2], (int32_t)pairs[i*2+1]);
         return;
     }
-    if ((ip != 0x37D4BE && ip != 0x37D4E2) || !mapped(c->r[4], 20) || (c->r[4] & 3)) return;
-    uint32_t desc = X_ARG(1), fields[6];
+    int global_create = ip == 0x37D7DE;
+    if ((!global_create && ip != 0x37D4BE && ip != 0x37D4E2) ||
+        !mapped(c->r[4], global_create ? 12 : 20) || (c->r[4] & 3)) return;
+    uint32_t desc = X_ARG(global_create ? 0 : 1), fields[6];
+    uint32_t out = X_ARG(global_create ? 1 : 2), outer = global_create ? 0 : X_ARG(3);
     if (!mapped(desc, sizeof fields)) return;
     x_guest_read(fields, desc, sizeof fields);
     uint32_t wfx;
     if (ip == 0x37D4E2) {
         xv_logf("[h2/audio-stream] descriptor=%08X flags=%08X packets=%u format=%08X callback=%08X context=%08X mixbins=%08X output=%08X outer=%08X\n",
-                desc, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], X_ARG(2), X_ARG(3));
+                desc, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], out, outer);
         wfx = fields[2];
     } else {
         xv_logf("[h2/audio-buffer] descriptor=%08X size=%08X flags=%08X bytes=%08X format=%08X mixbins=%08X inputbin=%08X output=%08X outer=%08X\n",
-                desc, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], X_ARG(2), X_ARG(3));
+                desc, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], out, outer);
         wfx = fields[3];
+    }
+    if (global_create && mapped(fields[4],8)) {
+        uint32_t list[2]; x_guest_read(list,fields[4],8);
+        xv_logf("[h2/audio-global] caller=%08X route_list=%08X count=%u pairs=%08X\n",X_M32(c->r[4]),fields[4],list[0],list[1]);
+        if (list[0] && list[0] <= 8 && mapped(list[1],list[0] * 8)) {
+            uint32_t pairs[16]; x_guest_read(pairs,list[1],list[0] * 8);
+            for (unsigned i=0;i<list[0];++i) xv_logf("[h2/audio-global] route[%u] bin=%u volume=%d\n",i,pairs[i*2],(int32_t)pairs[i*2+1]);
+        }
     }
     uint8_t format[18];
     if (!mapped(wfx, sizeof format)) return;
