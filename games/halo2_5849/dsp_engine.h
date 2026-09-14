@@ -33,6 +33,15 @@ int h2_dsp_read_effect(const h2_dsp_engine *engine, uint32_t index,
  * no API may report usable state afterward. */
 int h2_dsp_zero_frame(h2_dsp_engine *engine);
 
+/* Execute a real 32-sample frame from 32 planar mix bins. Every input must
+ * be a signed 24-bit integer in a 32-bit container; reject invalid input
+ * before changing any DSP state. This API supplies no scheduling or voices. */
+int h2_dsp_mix_frame(h2_dsp_engine *engine, const int32_t bins[32][32]);
+/* Original monitor DMA exports twenty FX buses (Xbox bins 11..30) to scratch
+ * B000. Read one completed frame as signed 24-bit samples. The caller must
+ * serialize this with execution; failure leaves output untouched. */
+int h2_dsp_read_fx_frame(const h2_dsp_engine *engine, unsigned bin, int32_t out[32]);
+
 /* Read an initialized space into a guest-visible snapshot: 0=X, 1=Y, 2=P,
  * 3=scratch. No DSP work is scheduled by this read. */
 int h2_dsp_copy_space(const h2_dsp_engine *engine, unsigned space, uint32_t offset,

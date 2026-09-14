@@ -266,6 +266,24 @@ int h2_dsp_zero_frame(h2_dsp_engine*s)
     memset(s->core.mixbuffer,0,sizeof(s->core.mixbuffer));
     return frame(s);
 }
+int h2_dsp_mix_frame(h2_dsp_engine*s,const int32_t bins[32][32])
+{
+    if(!s||s->status.fault||active||!bins)return 0;
+    for(unsigned b=0;b<32;b++)for(unsigned i=0;i<32;i++)
+        if(bins[b][i]<-8388608||bins[b][i]>8388607)return 0;
+    for(unsigned b=0;b<32;b++)for(unsigned i=0;i<32;i++)
+        s->core.mixbuffer[b*32+i]=(uint32_t)bins[b][i]&0xffffffu;
+    return frame(s);
+}
+int h2_dsp_read_fx_frame(const h2_dsp_engine*s,unsigned bin,int32_t out[32])
+{
+    if(!s||s->status.fault||active||!s->status.frames||!out||bin<11||bin>30||s->scratch_size<0xba00)return 0;
+    for(unsigned i=0;i<32;i++){
+        int32_t value=(int32_t)(le32(s->scratch+0xb000+(bin-11)*128+i*4)&0xffffffu);
+        out[i]=value&0x800000?value-0x1000000:value;
+    }
+    return 1;
+}
 
 int h2_dsp_copy_space(const h2_dsp_engine*s,unsigned space,uint32_t offset,void*out,uint32_t bytes)
 {

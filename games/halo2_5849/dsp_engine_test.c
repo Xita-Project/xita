@@ -109,6 +109,40 @@ static void image_tests(void)
     active=s;uint32_t original_mix=s->core.mixbuffer[0];assert(!h2_dsp_zero_frame(s));assert(s->core.mixbuffer[0]==original_mix);active=NULL;
     h2_dsp_destroy(s);
 }
+static void signal_tests(void)
+{
+    h2_dsp_engine*s=fixture();int32_t input[32][32],output[32];
+    for(unsigned b=0;b<32;b++)for(unsigned i=0;i<32;i++)
+        input[b][i]=i==0?-8388608:i==31?8388607:(int32_t)(b*32+i)-512;
+    memset(output,0x55,sizeof output);assert(!h2_dsp_read_fx_frame(s,13,output));
+    uint32_t before[DSP_MIXBUFFER_SIZE];memcpy(before,s->core.mixbuffer,sizeof before);
+    for(unsigned b=0;b<32;b++)for(unsigned edge=0;edge<2;edge++){
+        unsigned i=edge?31:0;int32_t old=input[b][i];input[b][i]=edge?8388608:-8388609;
+        assert(!h2_dsp_mix_frame(s,input));assert(!memcmp(before,s->core.mixbuffer,sizeof before));
+        assert(!s->status.frames&&!s->status.instructions&&!s->status.fault);input[b][i]=old;
+    }
+    assert(!h2_dsp_mix_frame(s,NULL));active=s;assert(!h2_dsp_mix_frame(s,input));active=NULL;
+    /* Construct MOVEP X0,X:FFFFC4 from the documented interpreter bitfields,
+     * exercising the actual checked frame-halt peripheral. */
+    s->core.registers[DSP_REG_X0]=1;
+    s->core.pram[0]=(8u<<16)|(1u<<15)|(1u<<14)|(DSP_REG_X0<<8)|4;
+    assert(h2_dsp_mix_frame(s,input));assert(s->status.frames==1&&s->status.instructions==1);
+    for(unsigned b=0;b<32;b++)for(unsigned i=0;i<32;i++)assert(s->core.mixbuffer[b*32+i]==((uint32_t)input[b][i]&0xffffffu));
+    /* Same range/control as original monitor export: 20 bins, 32 words each.
+     * The synthetic payload includes negative extrema and each lane/bin. */
+    descriptor(s,0x49e2,640,0x1560,0xb000,0,0xb001);assert(transfer(s));
+    for(unsigned bin=11;bin<=30;bin++){
+        assert(h2_dsp_read_fx_frame(s,bin,output));assert(!memcmp(input[bin],output,sizeof output));
+    }
+    const unsigned bad[]={0,10,31,32,UINT32_MAX};memset(output,0x55,sizeof output);
+    for(unsigned i=0;i<sizeof bad/sizeof *bad;i++)assert(!h2_dsp_read_fx_frame(s,bad[i],output));
+    assert(!h2_dsp_read_fx_frame(s,13,NULL));active=s;assert(!h2_dsp_read_fx_frame(s,13,output));active=NULL;
+    s->scratch_size=0xb9ff;assert(!h2_dsp_read_fx_frame(s,13,output));s->scratch_size=0x10000;
+    s->core.pc=0x1000;assert(!h2_dsp_mix_frame(s,input));assert(s->status.fault);
+    assert(!h2_dsp_read_fx_frame(s,13,output));assert(!h2_dsp_mix_frame(s,input));
+    for(unsigned i=0;i<32;i++)assert(output[i]==0x55555555);
+    h2_dsp_destroy(s);
+}
 int main(void)
 {
     uint32_t value=0x12345678;
@@ -117,5 +151,5 @@ int main(void)
         uint32_t expected=low&(1u<<(bits-1))?low|~mask:low;
         assert(dsp_signextend((int)bits,value)==expected);
     }
-    dma_tests();fault_tests();image_tests();puts("DSP engine: synthetic transfers, bounds, faults, no false ack, effect reads and 31,744 sign-extension cases pass");return 0;
+    dma_tests();fault_tests();image_tests();signal_tests();puts("DSP engine: synthetic transfers, checked signal frames/FX export, faults, no false ack, effect reads and 31,744 sign-extension cases pass");return 0;
 }
