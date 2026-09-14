@@ -109,6 +109,16 @@ int main(void)
 
 
 
+    atomic_store(&faults, 1u << F_HOLD);
+    for (;;) { h2_audio_backend_snapshot(&status); if (status.fx_computed_frames > status.fx_submitted_frames) break; usleep(1000); }
+    uint64_t filter_computed = status.fx_computed_frames;
+    assert(h2_audio_backend_fx_filter(24) < 0 && h2_audio_backend_fx_filter(25) < 0);
+    assert(h2_audio_backend_fx_filter(23) == 0 && h2_audio_backend_fx_filter(24) == 0);
+    h2_audio_backend_snapshot(&status); assert(status.fx_computed_frames == filter_computed && status.last_peak_left == 1953);
+    atomic_store(&faults, 0);
+    for (;;) { h2_audio_backend_snapshot(&status); if (status.fx_submitted_frames > filter_computed) break; usleep(1000); }
+    assert(status.last_peak_left == 1953 && !status.error && status.fx_playing_mask == 127);
+    assert(h2_audio_backend_fx_filter(23) == 0 && h2_audio_backend_fx_filter(24) == 0);
     assert(h2_audio_backend_fx_forget(23) < 0);
     assert(h2_audio_backend_fx_forget(13) < 0 && h2_audio_backend_fx_route(13, 2) < 0 && h2_audio_backend_fx_play(13) < 0);
     assert(h2_audio_backend_close() == 0 && !resources && !atomic_load(&queued));

@@ -197,8 +197,29 @@ int H2_AUDIO_FX_TEST_MAIN(void)
     }
     for (unsigned v = 0; v < 7; ++v) assert(fx.sources[v].frames == before.sources[v].frames + 1);
     for (unsigned v = 0; v < 3; ++v) assert(fx.spatial[v].position == (before.spatial[v].position + 32) % 31);
+    before = fx;
+    assert(!h2_audio_fx_filter(NULL,23) && !h2_audio_fx_filter(&fx,24));
+    assert(!h2_audio_fx_filter(&fx,25) && !memcmp(&before,&fx,sizeof fx));
+    assert(h2_audio_fx_filter(&fx,23) && h2_audio_fx_filter(&fx,24));
+    before = fx; assert(h2_audio_fx_render(&fx,out,32));
+    assert(fx.filtered == 3 && fx.lowpass[0].low != fx.lowpass[1].low);
+    for (unsigned i = 0; i < 32; ++i) {
+        /* f=q=1 steady input is attenuated by sqrt(.51), not bypassed.
+         * The actual GP observes independent filtered bins6/7; FL/FR and
+         * the spatial companion continue on their existing routes. */
+        int32_t a = (int32_t)s->core.mixbuffer[6 * 32 + i];
+        int32_t b = (int32_t)s->core.mixbuffer[7 * 32 + i];
+        assert(a >= 1497665 && a <= 1497667 && b >= 2246498 && b <= 2246501);
+        assert(out[i * 2] == 4096 && out[i * 2 + 1] == 4096);
+    }
+    before = fx; assert(h2_audio_fx_filter(&fx,23) && h2_audio_fx_filter(&fx,24));
+    assert(!memcmp(&before,&fx,sizeof fx));
+    /* Mutating an invalid route cannot enable a filter or reset histories. */
+    fx.sources[5].output_mask = 3; before = fx;
+    assert(!h2_audio_fx_filter(&fx,23) && !memcmp(&before,&fx,sizeof fx));
+    fx.sources[5].output_mask = 0;
     /* A subsequent frame fault is terminal, with no completed frame counted. */
-    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 39 && s->status.fault);
+    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 40 && s->status.fault);
     assert(!h2_audio_fx_render(&fx, out, 32)); h2_dsp_destroy(s);
     puts("Halo 2 FX source: checked ownership, six independent unity routes, real DSP frames and signed GP output pass");
     return 0;

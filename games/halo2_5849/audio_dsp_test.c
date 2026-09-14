@@ -38,6 +38,14 @@ int h2_audio_backend_fx_mute(unsigned key)
     else { assert(key == 25 && test_fx25_routed); test_fx25_muted = 1; }
     return 0;
 }
+static unsigned test_fx_filtered;
+static int test_fx_filter_failure;
+int h2_audio_backend_fx_filter(unsigned key)
+{
+    assert(test_fx_bound == 127 && test_fx_playing == 127 && test_fx25_muted && (key == 23 || key == 24));
+    if (test_fx_filter_failure) return -1;
+    test_fx_filtered |= 1u << (key - 23); return 0;
+}
 int h2_audio_backend_fx_play(unsigned bin)
 { unsigned mask = test_fx_mask(bin); assert((test_fx_bound & mask) && !(test_fx_playing & mask) && (bin != 13 || test_fx_routes == 6)); test_fx_playing |= mask; return 0; }
 int h2_audio_backend_fx_forget(unsigned bin)

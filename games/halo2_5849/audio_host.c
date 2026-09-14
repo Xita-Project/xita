@@ -26,6 +26,7 @@ typedef struct {
     uint32_t route_count;
     int32_t route_gains[6];
     uint32_t fx_bin;
+    uint32_t filter[6];
 } h2_audio_buffer;
 static h2_audio_buffer buffers[XA_MAX_VOICES];
 typedef struct {
@@ -181,7 +182,7 @@ static h2_audio_buffer *buffer_live(xctx *c, uint32_t ip, uint32_t object, int i
         fail(c, ip, "submix activation/data/spatial processing is unsupported", b->base);
     if (b->submix == 2 && ip != 0x37A14F && ip != 0x379F45 && ip != 0x37A795 &&
         ip != 0x37B66F && ip != 0x37C5E4 && ip != 0x37B6DF &&
-        ip != 0x37C620 && ip != 0x37C644 && ip != 0x37C6E5)
+        ip != 0x37C620 && ip != 0x37C644 && ip != 0x37C6E5 && ip != 0x37B68B)
         fail(c, ip, "unsupported FXIN2 control/data/spatial method", b->base);
     return b;
 }
@@ -696,6 +697,31 @@ static void buffer_routing(xctx *c, uint32_t ip)
     result(c, 0x80004001, 2);
 #endif
 }
+static void fx_filter(xctx *c)
+{
+    const uint32_t ip = 0x37B68B;
+    stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    uint32_t address = X_ARG(1), words[6], caller = X_M32(c->r[4]);
+#if H2_AUDIO_FILTER_MODEL
+    unsigned key = caller == 0x2AEFBC ? 23 : caller == 0x2AEFCD ? 24 : 0;
+    if (!key || b->submix != 2 || b->fx_bin != key || !b->started || b->stopped ||
+        b->volume || b->headroom || b->route_count != 4 ||
+        b->route_bins[key == 23 ? 0 : 2] != (key == 23 ? 6u : 7u) ||
+        b->route_gains[key == 23 ? 0 : 2] || !mapped(address, sizeof words))
+        fail(c, ip, "unsupported FX low-pass object/caller/input", address);
+    x_guest_read(words, address, sizeof words);
+    const uint32_t supported[6] = {1,0,0,0x8000,0,0};
+    if (memcmp(words, supported, sizeof words)) fail(c, ip, "unsupported FX filter coefficients", address);
+    if (h2_audio_backend_fx_filter(key) < 0) fail(c, ip, "FX real filter binding rejected", key);
+    memcpy(b->filter, words, sizeof words);
+    xv_logf("[h2/fxin2] filter caller=%08X interface=%08X key=%u mode=1 cutoff=0 resonance=8000; active fixed low-pass model, history retained\n",
+            caller, b->base + 0x1C, key);
+    result(c, 0, 2);
+#else
+    (void)b; (void)words; (void)caller;
+    fail(c, ip, "FX low-pass model disabled", address);
+#endif
+}
 static void fx_deferred_parameters(xctx *c)
 {
     const uint32_t ip = 0x37C6E5;
@@ -1053,6 +1079,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37B637: mix_bin(c, ip); break;
     case 0x37C5E4: case 0x37B6C3: buffer_routing(c, ip); break;
     case 0x37C6E5: fx_deferred_parameters(c); break;
+    case 0x37B68B: fx_filter(c); break;
     case 0x37B6DF: buffer_play(c); break;
     case 0x37B703: buffer_stop(c); break;
     case 0x37B75B: buffer_status(c); break;

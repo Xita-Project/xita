@@ -1,6 +1,9 @@
 /* Guest ABI and resource lifetime; provider/sink are scripted here. Actual
  * DSP output and concurrent ownership are covered by the companion tests. */
 #define H2_AUDIO_SPATIAL_MODEL 1
+#ifndef H2_AUDIO_FILTER_MODEL
+#define H2_AUDIO_FILTER_MODEL 1
+#endif
 #define H2_AUDIO_DSP_TEST_MAIN dsp_adapter_tests
 #include "audio_dsp_test.c"
 static xctx fx_description(uint32_t dev)
@@ -172,6 +175,32 @@ int main(int argc, char **argv)
 
 
 
+                for (unsigned filter_index = 0; filter_index < 2; ++filter_index) {
+                    uint32_t handle = filter_index ? extra_handles[1] : second_handle;
+                    uint32_t caller = filter_index ? 0x2AEFCD : 0x2AEFBC;
+                    h2_audio_buffer *target = find_buffer(handle - 0x1c), before = *target;
+                    uint32_t desc[6] = {1,0,0,0x8000,0,0};
+                    for (unsigned field = 0; field < 6; ++field) {
+                        desc[field] ^= 1; x_guest_write(0x5ffb,desc,sizeof desc);
+                        c = fx_context(handle,0x5ffb,caller); reject(&c,0x37B68B); desc[field] ^= 1;
+                        assert(!memcmp(target,&before,sizeof before));
+                    }
+                    x_guest_write(0x5ffb,desc,sizeof desc);
+                    c = fx_context(handle,0x5ffb,caller+1); reject(&c,0x37B68B);
+                    c = fx_context(handle,0,caller); reject(&c,0x37B68B);
+#if H2_AUDIO_FILTER_MODEL
+                    c = fx_context(handle,0x5ffb,caller); test_fx_filter_failure = 1; reject(&c,0x37B68B);
+                    test_fx_filter_failure = 0; assert(!memcmp(target,&before,sizeof before));
+                    c = fx_context(handle,0x5ffb,caller); call(&c,0x37B68B,0,2);
+                    memcpy(before.filter,desc,sizeof desc); assert(!memcmp(target,&before,sizeof before));
+                    uint32_t readback[6]; x_guest_read(readback,0x5ffb,sizeof readback); assert(!memcmp(readback,desc,sizeof desc));
+                    assert(test_fx_filtered == (1u << (filter_index + 1)) - 1);
+                    c = fx_context(handle,0x5ffb,caller); call(&c,0x37B68B,0,2);
+#else
+                    c = fx_context(handle,0x5ffb,caller); reject(&c,0x37B68B);
+                    assert(!test_fx_filtered && !memcmp(target,&before,sizeof before));
+#endif
+                }
                 while (extras) {
                     uint32_t handle = extra_handles[--extras]; h2_audio_buffer *retiring = find_buffer(handle - 0x1c);
                     retiring->started = 0; test_fx_playing &= ~test_fx_mask(retiring->fx_bin); /* test teardown only */

@@ -64,6 +64,17 @@ int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key)
     if (fx->sources[index].routes != (key == 25 ? 2u : 5u)) return 0;
     fx->sources[index].output_mask = 0; return 1;
 }
+int h2_audio_fx_filter(h2_audio_fx *fx, unsigned key)
+{
+    if (!fx || fx->bound != 127 || fx->playing != 127 ||
+        fx->sources[1].output_mask != 64 || fx->sources[2].output_mask ||
+        fx->sources[3].output_mask != 128 || fx->sources[4].output_mask ||
+        fx->sources[5].output_mask || fx->sources[6].output_mask != 1024 ||
+        (key != 23 && key != 24) || (key == 24 && !(fx->filtered & 1))) return 0;
+    /* Original setter replaces coefficients without clearing voice history.
+     * A zero-initialized new voice owns its independent integrator state. */
+    fx->filtered |= 1u << (key - 23); return 1;
+}
 int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin)
 {
     unsigned mask = h2_audio_fx_mask(bin), index = source_index(mask);
@@ -97,8 +108,14 @@ static int mix_full_loop(h2_audio_fx *fx, int32_t bins[32][32])
             for (unsigned bin = 0; bin < 11; ++bin) if (fx->sources[v].output_mask & (1u << bin))
                 for (unsigned i = 0; i < 32; ++i) mixed[bin][i] += filtered[i];
         } else {
+            float samples[32];
+            for (unsigned i = 0; i < 32; ++i) {
+                samples[i] = sources[v][i] / 8388608.0f;
+                if ((v == 1 || v == 3) && (fx->filtered & (1u << ((v - 1) / 2))))
+                    samples[i] = h2_audio_filter_sample(&fx->lowpass[(v - 1) / 2], samples[i]);
+            }
             for (unsigned bin = 0; bin < 11; ++bin) if (fx->sources[v].output_mask & (1u << bin))
-                for (unsigned i = 0; i < 32; ++i) mixed[bin][i] += sources[v][i] / 8388608.0f;
+                for (unsigned i = 0; i < 32; ++i) mixed[bin][i] += samples[i];
         }
     }
     for (unsigned bin = 0; bin < 11; ++bin)

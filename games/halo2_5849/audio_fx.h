@@ -1,6 +1,7 @@
 #pragma once
 #include "dsp_engine.h"
 #include "audio_hrtf_model.h"
+#include "audio_filter_model.h"
 
 /* Bounded original FXIN2 loop: bin13 -> routes0..5; bins23..25 initially ->0,1.
  * Each bin23..25 also has a fixed spatial voice initially into bins6/7/10.
@@ -23,6 +24,8 @@ typedef struct {
     uint64_t frames;
     h2_audio_fx_source sources[H2_FX_SOURCES];
     h2_hrtf_model spatial[3];
+    unsigned filtered;
+    h2_audio_filter lowpass[2]; /* independent nonspatial23/24 histories */
 } h2_audio_fx;
 /* Stable bit0=bin13; then nonspatial/spatial pairs23,24,25. Zero is unsupported. */
 unsigned h2_audio_fx_mask(unsigned bin);
@@ -32,6 +35,7 @@ int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes);
 /* Exact original active FX23/24 and spatial25 route replacements only. */
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned bin, unsigned output_mask);
 int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key);
+int h2_audio_fx_filter(h2_audio_fx *fx, unsigned key);
 int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin);
 int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin);
 /* Execute complete 32-sample frames, reading every active source before
