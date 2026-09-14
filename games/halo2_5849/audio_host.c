@@ -19,6 +19,10 @@ typedef struct {
     uint32_t locked, lock_offset, lock_first, lock_second, commits;
     uint32_t started, stopped, rewound, cursor_queries;
     uint64_t committed_bytes;
+    /* MIXIN owns a mono 32-sample, signed-24-in-32 bus, never a PCM voice.
+     * Only inactive ownership and deferred parameters are supported. */
+    uint32_t submix, spatial[41];
+    uint8_t route_bins[5];
 } h2_audio_buffer;
 static h2_audio_buffer buffers[XA_MAX_VOICES];
 typedef struct {
@@ -168,6 +172,10 @@ static h2_audio_buffer *buffer_live(xctx *c, uint32_t ip, uint32_t object, int i
         !device.children || device.references < device.children)
         fail(c, ip, "buffer identity", object);
     live(c, ip, device.base, 1);
+    if (b->submix && ip != 0x37D4BE && ip != 0x37A14F && ip != 0x379F45 &&
+        ip != 0x37A795 && ip != 0x37C5E4 && ip != 0x37C620 && ip != 0x37C644 &&
+        ip != 0x37C6C1 && ip != 0x37C69D && ip != 0x37C600)
+        fail(c, ip, "submix activation/data/spatial processing is unsupported", b->base);
     return b;
 }
 static int aliases(uint32_t a, unsigned an, uint32_t b, unsigned bn);
@@ -192,8 +200,8 @@ static void reference(xctx *c, uint32_t ip)
              * mirror when its allocation is released. Caller owns source. */
             if (b->started && h2_audio_backend_forget(b->voice) < 0)
                 fail(c, ip, "release PCM progress ownership", b->voice);
-            xk_audio_voice_free(b->voice);
-            if (b->mirror && xk_mem_free(b->mirror) < 0) fail(c, ip, "free PCM mirror", b->mirror);
+            if (!b->submix) xk_audio_voice_free(b->voice);
+            if (!b->submix && b->mirror && xk_mem_free(b->mirror) < 0) fail(c, ip, "free PCM mirror", b->mirror);
             if (xk_mem_free(b->base) < 0) fail(c, ip, "free buffer", b->base);
             *b = (h2_audio_buffer){0};
             --device.children; drop_device(c, ip);
@@ -210,6 +218,46 @@ static void reference(xctx *c, uint32_t ip)
     }
     result(c, device.references, 1);
 }
+static void submix_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t fields[6])
+{
+    const uint32_t ip = 0x37D4BE;
+    if (X_M32(c->r[4]) != 0x220AC8 || fields[0] != 24 || fields[1] != 0x2010 ||
+        fields[2] || fields[3] || fields[4] || fields[5])
+        fail(c, ip, "unsupported submix description/caller", fields[1]);
+    if (aliases(out, 4, c->r[4], 20) || aliases(out, 4, desc, 24))
+        fail(c, ip, "submix output alias", out);
+    if (device.references == UINT32_MAX) fail(c, ip, "submix parent overflow", device.references);
+    unsigned index;
+    for (index = 0; index < XA_MAX_VOICES && buffers[index].base; ++index) {}
+    if (index == XA_MAX_VOICES) { result(c, 0x8007000E, 4); return; }
+    /* One allocation owns both the opaque header and a separate mapped bus
+     * page. No permissive WAVE parser or PCM voice sees the MIXIN format. */
+    uint32_t base = xk_mem_alloc(8192, 4096, 0, 0, 0);
+    if (!base) { result(c, 0x8007000E, 4); return; }
+    if ((base & 4095) || !mapped(base, 8192) || overlaps_device(base, 8192) ||
+        page_overlap(base, 8192, c->r[4], 20) || page_overlap(base, 8192, out, 4) ||
+        page_overlap(base, 8192, desc, 24)) fail(c, ip, "submix allocation mapping/alias", base);
+    h2_audio_buffer candidate = {.base = base, .references = 1, .voice = -1,
+        .submix = 1, .mirror = base + 4096, .mirror_bytes = 4096, .bytes = 128,
+        .frequency = 48000, .route_bins = {6, 8, 7, 9, 10}};
+    /* Named XDK defaults: dirty parameters, 360-degree cones, +Z cone vector,
+     * min/max 1/1e9, unit distance/rolloff/Doppler, I3DL2 occlusion LF ratio. */
+    candidate.spatial[0] = 0x07FF0000;
+    candidate.spatial[0x20 / 4] = candidate.spatial[0x24 / 4] = 360;
+    candidate.spatial[0x30 / 4] = candidate.spatial[0x38 / 4] = 0x3F800000;
+    candidate.spatial[0x3C / 4] = 0x4E6E6B28;
+    candidate.spatial[0x44 / 4] = candidate.spatial[0x48 / 4] = candidate.spatial[0x4C / 4] = 0x3F800000;
+    candidate.spatial[0x7C / 4] = 0x007F0000;
+    candidate.spatial[0xA0 / 4] = 0x3E800000;
+    uint32_t silence[32] = {0}; x_guest_write(candidate.mirror, silence, sizeof silence);
+    buffers[index] = candidate;
+    X_M32(base) = 0x417150; X_M32(base + 4) = 1;
+    ++device.children; X_M32(device.base + 4) = ++device.references;
+    uint32_t handle = base + 0x1C; x_guest_write(out, &handle, 4);
+    xv_logf("[h2/submix] create caller=%08X interface=%08X bus=%08X signed24 mono48000 samples=32 input_bin=31 routes=6,8,7,9,10 headroom=0 parent_refs=%u; inactive, DSP/HRTF activation unsupported\n",
+            X_M32(c->r[4]), handle, candidate.mirror, device.references);
+    result(c, 0, 4);
+}
 static void buffer_create(xctx *c)
 {
     const uint32_t ip = 0x37D4BE;
@@ -218,6 +266,7 @@ static void buffer_create(xctx *c)
     output(c, ip, out, 4);
     if (X_ARG(3) || !mapped(desc, sizeof fields)) fail(c, ip, "buffer descriptor", desc);
     x_guest_read(fields, desc, sizeof fields);
+    if (fields[1] == 0x2010) { submix_create(c, desc, out, fields); return; }
     if (fields[0] != 24 || fields[1] != 0xA0 || fields[2] || fields[4] || fields[5])
         fail(c, ip, "unsupported buffer description", fields[1]);
     /* Exact observed PCM format; do not feed permissive mixer defaults an
@@ -467,6 +516,16 @@ static void buffer_routing(xctx *c, uint32_t ip)
     if (!b->mirror || !mapped(list_address, 8))
         fail(c, ip, "unsupported PCM route input", list_address);
     x_guest_read(list, list_address, 8);
+    if (b->submix) {
+        if (ip != 0x37C5E4 || X_M32(c->r[4]) != 0x220B29 || list[0] != 5 || !mapped(list[1], 40))
+            fail(c, ip, "unsupported submix routing caller/list", list[0]);
+        x_guest_read(pairs, list[1], 40);
+        for (unsigned i = 0; i < 5; ++i)
+            if (pairs[2 * i] != b->route_bins[i] || pairs[2 * i + 1])
+                fail(c, ip, "unsupported submix route/gain", pairs[2 * i]);
+        xv_logf("[h2/submix] original default five-bin unity route retained interface=%08X; inactive\n", b->base + 0x1C);
+        result(c, 0, 2); return;
+    }
     if (list[0] != 2
 #if H2_AUDIO_MULTIBIN_UNAVAILABLE
         && !(ip == 0x37C5E4 && list[0] == 6 && X_M32(c->r[4]) == 0x3E321F)
@@ -494,6 +553,25 @@ static void buffer_routing(xctx *c, uint32_t ip)
             X_M32(c->r[4]), b->base + 0x1C);
     result(c, 0x80004001, 2);
 #endif
+}
+static void submix_deferred(xctx *c, uint32_t ip)
+{
+    stack(c, ip, 3); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    uint32_t value = X_ARG(1), offset, dirty, caller;
+    switch (ip) {
+    case 0x37C620: offset = 0x3C; dirty = 0x00200000; caller = 0x220B3E; break;
+    case 0x37C644: offset = 0x38; dirty = 0x00200000; caller = 0x220B4D; break;
+    case 0x37C6C1: offset = 0x48; dirty = 0x01000000; caller = 0x220B58; break;
+    case 0x37C69D: offset = 0x4C; dirty = 0x02000000; caller = 0x220B63; break;
+    default: offset = 0x34; dirty = 0x00100000; caller = 0x220B6E; break;
+    }
+    if (!b->submix || X_ARG(2) != 1 || X_M32(c->r[4]) != caller ||
+        value != (offset == 0x38 || offset == 0x3C ? 0x7F7FFFFF : 0))
+        fail(c, ip, "unsupported submix deferred parameter/caller", value);
+    b->spatial[offset / 4] = value; b->spatial[0] |= dirty;
+    xv_logf("[h2/submix] deferred entry=%08X caller=%08X interface=%08X offset=%X bits=%08X dirty=%08X; spatial commit unsupported\n",
+            ip, caller, b->base + 0x1C, offset, value, b->spatial[0]);
+    result(c, 0, 3);
 }
 static void buffer_play(xctx *c)
 {
@@ -602,6 +680,9 @@ static void scalar(xctx *c, uint32_t ip)
         fail(c, ip, "unsupported sound shutdown state", 0x386B0C);
     if (!apply && (device.dirty & 5))
         fail(c, ip, "pending spatial listener commit is unsupported", device.dirty);
+    if (!apply)
+        for (unsigned i = 0; i < XA_MAX_VOICES; ++i)
+            if (buffers[i].submix) fail(c, ip, "submix spatial listener commit is unsupported", buffers[i].base);
     if (ip == 0x37D506) { device.pending_distance = bits; device.dirty |= 8; }
     else if (ip == 0x37D5CD) { device.pending_rolloff = bits; device.dirty |= 16; }
     else { device.pending_doppler = bits; device.dirty |= 32; }
@@ -766,6 +847,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
 {
     uint32_t fpscr = h2_platform_fpscr_read();
     switch (ip) {
+    case 0x37C620: case 0x37C644: case 0x37C6C1: case 0x37C69D: case 0x37C600: submix_deferred(c, ip); break;
     case 0x37D4E2: stream_create(c); break;
     case 0x37AB40: case 0x37AB87: stream_reference(c, ip); break;
     case 0x37B818: stream_headroom(c); break;
