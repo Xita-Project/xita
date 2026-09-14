@@ -34,7 +34,7 @@ parser.add_argument('--random-floats', action='store_true')
 parser.add_argument('--fpscr', type=lambda s: int(s, 0), nargs='+', default=[0])
 parser.add_argument('--functions', nargs='+',
                     choices=['f_000B77C0', 'xv_math_polygon_clip', 'f_000B71C0',
-                             'f_000B5B40', 'f_000B5F60'],
+                             'f_000B5B40', 'f_000B5F60', 'f_000B5EA0'],
                     default=['f_000B77C0', 'xv_math_polygon_clip'])
 args = parser.parse_args()
 if not 1 <= args.cases <= 10000:
@@ -43,8 +43,8 @@ if any(value & ~0x03c00000 for value in args.fpscr):
     parser.error('--fpscr permits rounding, flush-to-zero and default-NaN controls only')
 if args.float_edges and args.random_floats:
     parser.error('choose --float-edges or --random-floats')
-if (args.float_edges or args.random_floats) and any(name not in ('f_000B5B40', 'f_000B5F60') for name in args.functions):
-    parser.error('float stress fixtures are available for matrix/quaternion functions only')
+if (args.float_edges or args.random_floats) and any(name not in ('f_000B5B40', 'f_000B5F60', 'f_000B5EA0') for name in args.functions):
+    parser.error('float stress fixtures are available for matrix/quaternion/point functions only')
 out = args.output_dir.resolve()
 out.mkdir(parents=True, exist_ok=True)
 fields = ['r', 'st', 'fsp', 'fsw', 'fcw', 'preempt', 'f_kind', 'f_bits']
@@ -126,6 +126,10 @@ class Machine:
         uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
 
     def call(self, name, memory, context, fpscr=0):
+        def point_counts():
+            if 'point_fast' not in self.symbols: return (0,0,0,0,0)
+            return struct.unpack('<I', self.uc.mem_read(self.symbols['point_fast'],4)) + struct.unpack('<IIII', self.uc.mem_read(self.symbols['point_fallback'],16))
+        point_before=point_counts()
         def math_counts():
             return sum((struct.unpack('<II', self.uc.mem_read(self.symbols[n], 8))
                         for n in ('math_fast', 'math_fallback')), ())
@@ -142,7 +146,8 @@ class Machine:
         return (bytes(self.uc.mem_read(CTX, layout['size'])), bytes(self.uc.mem_read(RAM, SIZE)),
                 self.count, (self.copy_calls, self.copy_bytes),
                 tuple((a - b) & 0xffffffff for a, b in zip(math_counts(), before)),
-                self.uc.reg_read(UC_ARM_REG_FPSCR))
+                self.uc.reg_read(UC_ARM_REG_FPSCR),
+                tuple((a-b)&0xffffffff for a,b in zip(point_counts(),point_before)))
 
 
 def fixture(name, k):
@@ -227,6 +232,38 @@ def fixture(name, k):
         fl(0x1f0b04, 2)
         reg(1, source)
         reg(2, output)
+    elif name == 'f_000B5EA0':
+        source, matrix, output = 0x18000, 0x1a000, 0x22000
+        variant=k%18
+        if variant==1: output=source
+        elif variant==2: output=source+4
+        elif variant==3: output=source-4
+        elif variant==4: output=source+0x20000
+        elif variant==5: output=matrix+48
+        elif variant==6: source=matrix+16
+        elif variant==7: matrix+=1
+        elif variant==8: source+=1
+        elif variant==9: output+=1
+        elif variant==10: matrix+=4092
+        elif variant==11: source+=4092
+        elif variant==12: output+=4092
+        elif variant==13: output=source+0x20004
+        elif variant==14: output=sp
+        elif variant==15: field('fsp',8+(k&7))
+        elif variant==16: output=matrix
+        elif variant==17: output=source+8
+        for address, length, shift in ((matrix,13,0),(source,3,5)):
+            for i in range(length):
+                if args.random_floats: word(address+4*i,rng.getrandbits(32))
+                elif args.float_edges:
+                    # Alternate finite extremes (accepted layouts) with full
+                    # exceptional values (numeric fallback) across TOP cycles.
+                    pool=edges if (k//306)&1 else [v for v in edges if v&0x7f800000 != 0x7f800000]
+                    word(address+4*i,pool[(k//18+3*i+shift)%len(pool)])
+                else: fl(address+4*i,math.sin((k//18+i+shift)*.25)*3)
+        if (k//18)&1: word(matrix,0x3f800000)
+        field('fsp',((k//18)&7) if variant!=15 else 8+(k&7))
+        reg(0,output);reg(1,matrix);reg(2,source)
     elif name == 'f_000B5B40':
         left, right = 0x18000 + k % 4, 0x1a000 + k % 4
         output = [0x22000, left, right, left + 4, left + 0x20000][k % 5]
@@ -274,7 +311,7 @@ for name in args.functions:
             assert old[5] == new[5], (name, k, hex(fpscr), 'native FP status', hex(old[5]), hex(new[5]))
             rows.append({'case': k, 'fpscr': fpscr, 'baseline': old[2], 'candidate': new[2],
                          'firmware_copies': {'baseline': old[3], 'candidate': new[3]},
-                         'native_math_counts': old[4]})
+                         'native_math_counts': old[4], 'point_math_counts': new[6]})
     before, after = (sum(r[n] for r in rows) for n in ('baseline', 'candidate'))
     report[name] = {'cases': len(rows), 'baseline_instructions': before,
                     'candidate_instructions': after, 'change_percent': (after / before - 1) * 100,

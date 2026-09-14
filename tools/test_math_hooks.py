@@ -8,11 +8,11 @@ from recompiler import xita_recomp as r
 from games.halo_ce_3925.hooks import HaloHooks
 img=r.Image(str(root/'haloce/default.xbe'),str(root/'local/halo_ce_3925/game_manifest.json'))
 disc=r.Discovery(img,{},img.kernel_imports(),lambda *args:None)
-for address in (0xB5B40,0xB5F60):
+for address in (0xB5B40,0xB5F60,0xB5EA0):
     disc.add_root(address)
     disc.lift_function(disc.functions[address]);disc.split_blocks(disc.functions[address])
 emitter=r.Emitter(img,disc,{},img.kernel_imports(),'unused',1,hooks=HaloHooks(img))
-for address,helper,size in ((0xB5B40,'xv_math_matrix_multiply',339),(0xB5F60,'xv_math_quaternion_matrix',291)):
+for address,helper,size in ((0xB5B40,'xv_math_matrix_multiply',339),(0xB5F60,'xv_math_quaternion_matrix',291),(0xB5EA0,'xv_math_point_transform',105)):
     emitted=emitter.emit_function(disc.functions[address])
     assert emitted.count(f'if ({helper}(c)) return;')==1
     original=img.bytes_at

@@ -5,6 +5,7 @@
 
 void xv_logf(const char *fmt,...);
 void xv_benchmark_optimizations(int enabled) __attribute__((weak));
+void xv_point_math_override(int enabled) __attribute__((weak));
 enum { SETTLE=60, MEASURE=120, PHASES=3 };
 static const unsigned heights[PHASES]={544,360,544};
 static struct {
@@ -20,13 +21,14 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_EARLY_VISIBILITY||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_POINT_MATH||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
 #ifndef XV_NATIVE_OBJECT_BASIS
     if(kind==XV_BENCH_OBJECT_BASIS)return -1;
 #endif
 #ifndef XV_NATIVE_MODEL_PALETTE
     if(kind==XV_BENCH_MODEL_PALETTE)return -1;
 #endif
+    if(kind==XV_BENCH_POINT_MATH&&!xv_point_math_override)return -1;
     unsigned expected=0;
     return __atomic_compare_exchange_n(&request_state,&expected,kind,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)?0:-1;
 }
@@ -56,6 +58,7 @@ void xv_benchmark_compare_toggle(void) {toggle(1);}
 int xv_benchmark_active(void) { return b.active||b.request||xv_benchmark_remote_busy(); }
 uint32_t xv_benchmark_status(void) { return __atomic_load_n(&status,__ATOMIC_ACQUIRE); }
 static unsigned phase_height(void) { return b.compare?b.original:heights[b.phase]; }
+int xv_benchmark_compare_point_math(void) { return remote_kind==XV_BENCH_POINT_MATH; }
 int xv_benchmark_compare_early_visibility(void) { return remote_kind==XV_BENCH_EARLY_VISIBILITY; }
 int xv_benchmark_compare_object_basis(void)
 {
@@ -77,11 +80,12 @@ int xv_benchmark_compare_model_palette(void)
 }
 static int native_math_selected(void)
 {
-    return xv_benchmark_compare_object_basis() || xv_benchmark_compare_model_palette();
+    return xv_benchmark_compare_object_basis() || xv_benchmark_compare_model_palette() || xv_benchmark_compare_point_math();
 }
 static int candidate_available(void)
 {
     if (!native_math_selected()) return 1;
+    if (xv_benchmark_compare_point_math() && !xv_point_math_override) return 0;
     const char *math=getenv("XV_NATIVE_MATH");
     if (math && !atoi(math)) return 0;
 #ifndef XV_NATIVE_OBJECT_BASIS
@@ -138,7 +142,8 @@ int xv_benchmark_compare_draw_scan(void)
     return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_early_visibility() ? "early-visibility-compare" :
+    (xv_benchmark_compare_point_math() ? "point-math-compare" :
+     xv_benchmark_compare_early_visibility() ? "early-visibility-compare" :
      xv_benchmark_compare_object_basis() ? "object-basis-compare" :
      xv_benchmark_compare_model_palette() ? "model-palette-compare" :
      xv_benchmark_compare_vertex_worker() ? "vertex-worker-compare" :

@@ -108,12 +108,16 @@ python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.j
 
 Available names are `object-basis`, `model-palette`, `vertex-worker`,
 `vertex-references`, `native-bounds`, `vertex-copy`, `draw-scan`, `flare`,
-`resolution`, and `early-visibility`. Resolution runs 544/360/544; the others run off/on/off. Each restores
+`resolution`, `early-visibility`, and `point-math`. Resolution runs 544/360/544;
+the others run off/on/off. Each restores
 the prior override and resolution. The network thread only publishes a request;
 the guest input owner checks first-person control and starts it at the existing
 frame boundary. Menus, overlapping tests, incomplete uploads and pending updates
 reject new requests. A native helper must be compiled into that build to select
 it. The runner also verifies that the result belongs to the requested test.
+
+`point-math` compares the original and [native point-transform routine](native-point-transform-20260914.md)
+at the current resolution, with other math and workers unchanged.
 
 `early-visibility` is an experiment, disabled outside its comparison. It
 publishes exact visibility results at the world scene's fragment fence when

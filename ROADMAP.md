@@ -9,6 +9,11 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+[~] September 14 [native point transforms](docs/native-point-transform-20260914.md):
+the guarded helper passes compiled ARM comparisons and an emulator gameplay
+comparison. Most calls in the tested view use the native path; hardware speed
+remains unmeasured.
+
 [~] September 14 [native transform math](docs/native-math-unroll-20260914.md):
 unrolled scalar VFP calculations preserve 48,896 compiled ARM test outcomes
 while reducing accepted matrix/quaternion instruction counts. Hardware FPS

@@ -2,11 +2,16 @@
  * unusual layouts use the unchanged lifted function without side effects. */
 #include "xk.h"
 #include <stdlib.h>
+#if defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
 #ifdef XV_QUAT_CACHE
 #include "xk_quat_cache.h"
 #endif
 
 static unsigned math_fast[2], math_fallback[2];
+static unsigned point_fast, point_fallback[4];
+static int point_override = -1;
 enum { ML_DISJOINT, ML_LEFT, ML_RIGHT, ML_BOTH, ML_DISABLED, ML_ALIGNMENT,
        ML_PAGE, ML_SCRATCH, ML_PARTIAL, ML_COUNT };
 static unsigned matrix_layout[ML_COUNT];
@@ -34,6 +39,9 @@ static int math_overlap(const void *a, unsigned an, const void *b, unsigned bn)
 }
 void xv_native_math_report(unsigned frames)
 {
+    XK_LOG("[native-point] %u frames fast %u; fallback disabled %u fp %u layout %u numeric %u\n",
+           frames,point_fast,point_fallback[0],point_fallback[1],point_fallback[2],point_fallback[3]);
+    point_fast=0; memset(point_fallback,0,sizeof point_fallback);
 #ifdef XV_NATIVE_OBJECT_BASIS
     extern void xv_object_basis_report(unsigned);
     xv_object_basis_report(frames);
@@ -59,6 +67,69 @@ void xv_native_math_report(unsigned frames)
         frames,matrix_layout[0],matrix_layout[1],matrix_layout[2],matrix_layout[3],
         matrix_layout[4],matrix_layout[5],matrix_layout[6],matrix_layout[7],matrix_layout[8]);
     memset(matrix_layout,0,sizeof matrix_layout);
+}
+
+void xv_point_math_override(int value)
+{
+    point_override=value<0?-1:!!value;
+}
+static int point_decline(unsigned reason)
+{
+    point_fallback[reason]++; return 0;
+}
+static int point_fp_supported(void)
+{
+#if defined(__arm__)
+    uint32_t value;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(value) :: "memory");
+    return !(value&0x00009f00u);
+#elif defined(__x86_64__)
+    return (_mm_getcsr()&0x1f80u)==0x1f80u;
+#else
+    return 0;
+#endif
+}
+/* Pure point transform: retain double intermediates and float store rounding.
+ * All three source coordinates are consumed before any output store. Matrix
+ * overlap is declined because the original interleaves matrix reads/stores. */
+int xv_math_point_transform(xctx *c)
+{
+    static int enabled=-1;
+    if(enabled<0) {
+        const char *value=getenv("XV_NATIVE_POINT_MATH");
+        enabled=!value||atoi(value)!=0;
+    }
+    if(!math_enabled()||!(point_override<0?enabled:point_override))return point_decline(0);
+    if(!point_fp_supported())return point_decline(1);
+    const uint32_t *m=math_span(c->r[1],52), *v=math_span(c->r[2],12);
+    float *out=math_span(c->r[0],12);
+    if(!m||!v||!out||c->fsp>7||math_overlap(m,52,out,12))return point_decline(2);
+    /* Finite inputs avoid changing arithmetic NaN payload/operand priority.
+     * Classify integer representations without raising FP exceptions. */
+    for(unsigned i=0;i<13;i++)if((m[i]&0x7f800000u)==0x7f800000u)return point_decline(3);
+    for(unsigned i=0;i<3;i++)if((v[i]&0x7f800000u)==0x7f800000u)return point_decline(3);
+    const float *mf=(const float *)m,*vf=(const float *)v;
+    double x=vf[0], y=vf[1], z=vf[2];
+    uint32_t scale=m[0];
+    if(scale!=0x3f800000u) {
+        double s=mf[0]; x=x*s; y=y*s; z=z*s;
+    }
+    double first=(z*(double)mf[7]+y*(double)mf[4])+x*(double)mf[1];
+    first=first+(double)mf[10];
+    double y_last=x*(double)mf[2];
+    double second=(z*(double)mf[8]+y*(double)mf[5])+y_last;
+    second=second+(double)mf[11];
+    double z_middle=y*(double)mf[6], z_last=x*(double)mf[3];
+    double third=(z*(double)mf[9]+z_middle)+z_last;
+    third=third+(double)mf[12];
+    out[0]=(float)first;out[1]=(float)second;out[2]=(float)third;
+    unsigned top=c->fsp;
+    c->st[(top-1)&7]=third;c->st[(top-2)&7]=z_last;
+    c->st[(top-3)&7]=z_middle;c->st[(top-4)&7]=second;
+    c->st[(top-5)&7]=y_last;
+    c->r[2]=scale;
+    X_FLAGS(XK_SUB,scale,0x3f800000u,scale-0x3f800000u,32);
+    c->r[4]+=4;point_fast++;return 1;
 }
 
 /* Keep the prior native VFP operand order while unrolling fixed-size loops.

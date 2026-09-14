@@ -4,7 +4,8 @@
 enum {
     XV_BENCH_OBJECT_BASIS=1, XV_BENCH_MODEL_PALETTE, XV_BENCH_VERTEX_WORKER,
     XV_BENCH_VERTEX_REFERENCES, XV_BENCH_NATIVE_BOUNDS, XV_BENCH_VERTEX_COPY,
-    XV_BENCH_DRAW_SCAN, XV_BENCH_FLARE, XV_BENCH_RESOLUTION, XV_BENCH_EARLY_VISIBILITY
+    XV_BENCH_DRAW_SCAN, XV_BENCH_FLARE, XV_BENCH_RESOLUTION, XV_BENCH_EARLY_VISIBILITY,
+    XV_BENCH_POINT_MATH
 };
 /* Network admission only publishes a request. The ordinary guest input owner
  * validates first-person control and consumes it before the present boundary. */
@@ -19,6 +20,7 @@ void xv_benchmark_compare_toggle(void);
 /* Developer selection; default comparison remains deferred visibility. */
 int xv_benchmark_compare_object_basis(void);
 int xv_benchmark_compare_early_visibility(void);
+int xv_benchmark_compare_point_math(void);
 int xv_benchmark_compare_model_palette(void);
 int xv_benchmark_compare_vertex_worker(void);
 int xv_benchmark_compare_vertex_references(void);
