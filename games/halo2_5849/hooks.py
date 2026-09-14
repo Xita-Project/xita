@@ -208,3 +208,34 @@ class Halo2AudioUnavailableHooks(Halo2HostChannelHooks):
         if address == 0x37D797:
             return ["    { extern void h2_audio_unavailable(xctx *); h2_audio_unavailable(c); return; }"]
         return super().function_entry(address)
+
+
+AUDIO_HOST_BOUNDARIES = {
+    0x37D797: (71, "937701608e296f3edcb1b3b77221d14015ee71e5b094256ba8fe1f50b76d7a0c"),
+    0x37B5AE: (28, "a1220eefc06488fc180381e054af0cc9236b398f28a89b131070c3295b0cb14e"),
+    0x37D506: (36, "34794564c8e0c6e58dd39ddfd60f7f14fef847e45956a12f290d01aed8fbf134"),
+    0x37D5CD: (36, "45d4369e05e88c3204372c8367ead01af52e9eb7bc690972f082c4169eb68c6b"),
+    0x37B5CA: (28, "26b77b362863d3f2dbe17b5d83ddcd88b467e09b9e132e48a340aa1c30014a44"),
+    0x37A14F: (71, "b22c0d65d399f848fc77cbc2eff4a9fb22fef16b59503eb903309af5536c35d9"),
+    0x37C70F: (201, "f37d2bbd41311fc416c2b8903348f7277202a97ec15b333b4549be1359a89484"),
+}
+
+
+class Halo2AudioHostHooks(Halo2HostChannelHooks):
+    """Opt-in, bounded real-output device adapter; unknown methods stop."""
+    def __init__(self, image):
+        super().__init__(image)
+        self.image = image
+        for address, (length, digest) in AUDIO_HOST_BOUNDARIES.items():
+            if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+                raise ValueError(f"Halo 2 audio host boundary mismatch at {address:#x}")
+        if image.u32(0x417124) != 0x37A14F or image.u32(0x417128) != 0x37C70F:
+            raise ValueError("Halo 2 sound reference vtable mismatch")
+
+    def function_entry(self, address):
+        if address in AUDIO_HOST_BOUNDARIES:
+            return [f"    {{ extern void h2_audio_host_call(xctx *, uint32_t); h2_audio_host_call(c, 0x{address:X}u); return; }}"]
+        section = self.image.section_of(address)
+        if section and section[4] == "DSOUND":
+            return [f"    {{ extern void h2_audio_guest_entry(xctx *, uint32_t); h2_audio_guest_entry(c, 0x{address:X}u); }}"]
+        return super().function_entry(address)

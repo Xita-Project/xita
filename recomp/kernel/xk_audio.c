@@ -83,6 +83,14 @@ int xk_audio_init(void)
 int  xk_audio_available(void) { return g_available; }
 void xk_audio_lock(void)   { xk_os_audio_mutex_lock(); }
 void xk_audio_unlock(void) { xk_os_audio_mutex_unlock(); }
+uint32_t xk_audio_free_voices(void)
+{
+    uint32_t free_count = 0;
+    xk_audio_lock();
+    for (unsigned i = 0; i < XA_MAX_VOICES; ++i) free_count += !g_v[i].used;
+    xk_audio_unlock();
+    return free_count;
+}
 
 int xk_audio_voice_new(int kind, uint32_t wfx_guest)
 {

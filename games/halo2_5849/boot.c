@@ -492,6 +492,28 @@ void xv_runtime_trap(xctx *c, uint32_t address)
     for (;;) sceKernelDelayThread(1000);
 }
 
+#if H2_AUDIO_HOST
+#include "audio_host.h"
+_Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32_t value)
+{
+    h2_audio_device_snapshot device;
+    h2_audio_backend_status backend;
+    h2_audio_host_snapshot(&device); h2_audio_backend_snapshot(&backend);
+    xv_logf("[h2/blocked] sound entry=%08X reason=%s value=%08X fn=%08X esp=%08X\n",
+            entry, reason, value, xv_cur_fn, c->r[4]);
+    for (unsigned i = 0; i < 8 && c->r[4] <= UINT32_MAX - i * 4; ++i)
+        trace_mapped_word(c->r[4] + i * 4);
+    xv_logf("[h2/audio] stop device=%08X refs=%u distance=%08X rolloff=%08X pending=%08X,%08X dirty=%X grains=%u nonzero=%u peak=%u error=%08X port=%d worker=%d\n",
+            device.base, device.references, device.distance, device.rolloff,
+            device.pending_distance, device.pending_rolloff, device.dirty,
+            backend.grains, backend.nonzero_grains, backend.peak, backend.error, backend.port, backend.thread);
+    int closed = h2_audio_backend_close();
+    xv_logf("[h2/audio] terminal worker/port close result=%d\n", closed);
+    graphics_snapshot(); xv_log_flush(); sceKernelExitProcess(32);
+    for (;;) sceKernelDelayThread(1000);
+}
+#endif
+
 int main(void)
 {
     sceIoMkdir("ux0:data", 0777);

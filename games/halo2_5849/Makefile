@@ -6,6 +6,7 @@ HOST_CC ?= cc
 GUEST_OPT ?= -O1
 HOST_CHANNEL ?= 0
 QUAD_RENDER ?= 0
+AUDIO_HOST ?= 0
 GENERATED ?= $(ROOT)/local/halo2_5849/boot/generated
 BUILD ?= $(ROOT)/local/halo2_5849/boot/build
 IMAGE ?= $(ROOT)/local/halo2_5849/boot/halo2_image.bin
@@ -17,6 +18,14 @@ OBJECTS := $(addprefix $(BUILD)/,$(SYS:.c=.o)) $(BUILD)/boot.o $(BUILD)/kernel_s
 ifeq ($(HOST_CHANNEL),1)
 OBJECTS += $(addprefix $(BUILD)/,host_channel_runtime.o command_state.o host_channel.o host_tiles.o push_stream.o gpu_objects.o kelvin_clear.o scanout.o input.o audio_unavailable.o)
 OBJECTS += $(BUILD)/kernel_timer.o $(BUILD)/fp_environment.o $(BUILD)/linear_texture.o
+endif
+ifeq ($(AUDIO_HOST),1)
+ifneq ($(HOST_CHANNEL),1)
+$(error AUDIO_HOST=1 requires HOST_CHANNEL=1)
+endif
+OBJECTS += $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/recomp/kernel/xk_audio.o
+$(BUILD)/boot.o: CFLAGS += -DH2_AUDIO_HOST=1
+$(BUILD)/recomp/kernel/xk_audio.o: CFLAGS += -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock
 endif
 comma := ,
 WRAPS := xk_MmCreateKernelStack xk_MmDeleteKernelStack xk_MmClaimGpuInstanceMemory xv_unimpl xk_NtOpenFile xk_NtReadFile xk_NtWriteFile xk_NtDeviceIoControlFile xk_NtFsControlFile xk_NtQueryVolumeInformationFile
@@ -37,6 +46,20 @@ QUAD_FILES := $(QUAD_SHADERS)/quad.vert.gxp $(QUAD_SHADERS)/quad.frag.gxp $(QUAD
 QUAD_PACK := -a $(QUAD_SHADERS)/quad.vert.gxp=quad.vert.gxp -a $(QUAD_SHADERS)/quad.frag.gxp=quad.frag.gxp -a $(QUAD_SHADERS)/quad.contract.bin=quad.contract.bin
 endif
 .DEFAULT_GOAL := all
+.PHONY: audio-probe
+audio-probe: $(BUILD)/audio-probe.vpk
+$(BUILD)/audio-probe.elf: audio_probe.c audio_vita.c audio_host.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock -Wl,-q,--gc-sections $(filter %.c,$^) -o $@ -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceAudio_stub -lSceSysmem_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lm
+$(BUILD)/audio-probe.velf: $(BUILD)/audio-probe.elf
+	$(VITASDK)/bin/vita-elf-create $< $@
+$(BUILD)/audio-probe-eboot.bin: $(BUILD)/audio-probe.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/audio-probe-param.sfo: Makefile
+	@mkdir -p $(dir $@)
+	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2A00001 "H2 Synthetic Audio Probe" $@
+$(BUILD)/audio-probe.vpk: $(BUILD)/audio-probe-eboot.bin $(BUILD)/audio-probe-param.sfo
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/audio-probe-param.sfo -b $(BUILD)/audio-probe-eboot.bin $@
 .PHONY: quad-probe
 # Separate synthetic utility. These shaders/constants are generated from an
 # owned image and must remain private; this target does not change the game app.
@@ -57,6 +80,7 @@ $(BUILD)/quad-probe.vpk: $(BUILD)/quad-probe-eboot.bin $(BUILD)/quad-probe-param
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
 test-host: $(BUILD)/quad_draw_test
 test-host: $(BUILD)/blit_copy_test
+test-host: $(BUILD)/audio_host_test $(BUILD)/audio_vita_test $(BUILD)/audio_mixer_test
 all: $(BUILD)/halo2-boot.vpk
 test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/input_test $(BUILD)/scanout_test $(BUILD)/command_state_test $(BUILD)/host_tiles_test $(BUILD)/host_channel_runtime_test $(BUILD)/host_channel_test $(BUILD)/kelvin_clear_test $(BUILD)/gpu_objects_test $(BUILD)/push_stream_test $(BUILD)/nv2a_memory_test $(BUILD)/instance_memory_test $(BUILD)/cache_volume_test $(BUILD)/nv2a_regs_test $(BUILD)/nv2a_timer_test
 	$(BUILD)/kernel_timer_test
@@ -69,6 +93,9 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/fp_environment_test
 	$(BUILD)/kernel_stack_test
 	$(BUILD)/audio_unavailable_test
+	$(BUILD)/audio_host_test
+	$(BUILD)/audio_vita_test
+	$(BUILD)/audio_mixer_test
 	$(BUILD)/input_test
 	$(BUILD)/scanout_test
 	$(BUILD)/command_state_test
@@ -106,6 +133,15 @@ $(BUILD)/kernel_stack_test: kernel_stack_test.c kernel_stack.c kernel_stack.h $(
 $(BUILD)/audio_unavailable_test: audio_unavailable_test.c audio_unavailable.c $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT)/recomp audio_unavailable_test.c audio_unavailable.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
+$(BUILD)/audio_host_test: audio_host_test.c audio_host.c audio_host.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_host_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
+$(BUILD)/audio_vita_test: audio_vita_test.c audio_vita.c audio_host.h $(ROOT)/recomp/kernel/xk_audio.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -I$(ROOT) -I$(ROOT)/recomp audio_vita_test.c -pthread -o $@
+$(BUILD)/audio_mixer_test: audio_mixer_test.c $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp $(filter %.c,$^) -Wl,--gc-sections -lm -o $@
 $(BUILD)/input_test: input_test.c input.c input.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT)/recomp input_test.c input.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
@@ -179,7 +215,7 @@ $(BUILD)/nv2a_regs.o: nv2a_regs.c
 $(BUILD)/linear_texture.o $(BUILD)/fp_environment.o $(BUILD)/kernel_timer.o $(BUILD)/kernel_stack.o $(BUILD)/command_snapshot.o $(BUILD)/host_channel_runtime.o $(BUILD)/command_state.o $(BUILD)/host_channel.o $(BUILD)/host_tiles.o $(BUILD)/push_stream.o $(BUILD)/gpu_objects.o $(BUILD)/kelvin_clear.o $(BUILD)/scanout.o $(BUILD)/input.o $(BUILD)/audio_unavailable.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o: $(BUILD)/%.o: %.c
+$(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/%.o: $(GENERATED)/%.c $(GENERATED)/xv_recomp_protos.h

@@ -95,6 +95,8 @@ class Halo2Bus(unittest.TestCase):
                 load_hooks("halo2_5849_host_channel", image)
             with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
                 load_hooks("halo2_5849_audio_unavailable", image)
+            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+                load_hooks("halo2_5849_audio_host", image)
             discovery = recomp.Discovery(image, {}, {}, lambda *_: None)
             for address in programs:
                 discovery.add_root(address)

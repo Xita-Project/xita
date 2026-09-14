@@ -20,7 +20,10 @@ def load_hooks(adapter, image):
     if adapter == "halo2_5849_audio_unavailable":
         from .halo2_5849.hooks import Halo2AudioUnavailableHooks
         return Halo2AudioUnavailableHooks(image)
+    if adapter == "halo2_5849_audio_host":
+        from .halo2_5849.hooks import Halo2AudioHostHooks
+        return Halo2AudioHostHooks(image)
     raise ValueError(f"Unknown game adapter: {adapter}")
 
 
-ADAPTERS = frozenset({"halo_ce_3925", "halo2_5849_graphics", "halo2_5849_host_channel", "halo2_5849_audio_unavailable"})
+ADAPTERS = frozenset({"halo_ce_3925", "halo2_5849_graphics", "halo2_5849_host_channel", "halo2_5849_audio_unavailable", "halo2_5849_audio_host"})
