@@ -24,7 +24,10 @@
 #include "kernel_stack.h"
 #include "kernel_timer.h"
 #include "fp_environment.h"
+#include "linear_texture.h"
 extern const h2_host_channel *h2_host_channel_current(void) __attribute__((weak));
+extern int h2_linear_texture_read(const h2_command_state *, const h2_kelvin_clear *,
+                                  unsigned, h2_linear_texture *) __attribute__((weak));
 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
 uint8_t *g_xram;
@@ -175,6 +178,21 @@ static void graphics_snapshot(void)
             int complete = h2_command_snapshot(state, channel);
             int closed = fclose(state);
             xv_logf("[h2/graphics] private decoded channel snapshot complete=%d\n", complete && !closed);
+        }
+        h2_linear_texture texture;
+        if (h2_linear_texture_read &&
+            h2_linear_texture_read(&channel->commands, &channel->clear, 0, &texture)) {
+            FILE *pixels = fopen("ux0:data/xita-halo2/texture0-at-stop.bin", "wb");
+            if (pixels) {
+                uint32_t header[8] = {1, texture.physical, texture.width, texture.height,
+                                      texture.pitch, texture.bytes, texture.method_format, 0};
+                int complete = fwrite(header, 1, sizeof header, pixels) == sizeof header &&
+                               fwrite(texture.pixels, 1, texture.bytes, pixels) == texture.bytes;
+                int closed = fclose(pixels);
+                xv_logf("[h2/graphics] private read-only texture0 snapshot address=%08X size=%ux%u pitch=%u bytes=%u complete=%d\n",
+                        texture.physical, texture.width, texture.height, texture.pitch, texture.bytes,
+                        complete && !closed);
+            }
         }
     }
     /* Diagnostic state from the pinned image's static device. This file may
