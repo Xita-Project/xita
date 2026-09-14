@@ -9,7 +9,8 @@
 #define UPLOAD_JOBS 64u
 typedef struct { void *dst; const void *src; unsigned bytes; int cached; } upload_job;
 static upload_job queue[UPLOAD_JOBS];
-static SceUID thread = -1, wake = -1;
+static SceUID thread = -1, wake = -1, snapshot_done = -1;
+static int snapshot_unavailable;
 static int unavailable, stopping;
 static uint32_t submitted, completed; /* producer-owned / atomic worker-owned */
 static unsigned queued, fallback;
@@ -35,6 +36,9 @@ static int upload_thread(SceSize args, void *argp)
         __atomic_fetch_add(job.cached ? &snapshot_bytes : &work_bytes, job.bytes, __ATOMIC_RELAXED);
         __atomic_fetch_add(job.cached ? &snapshot_jobs : &work_jobs, 1u, __ATOMIC_RELAXED);
         __atomic_store_n(&completed, ++head, __ATOMIC_RELEASE);
+        /* Notification is only a wake hint. The ticket remains the ownership
+         * proof, including a stale notification or a failed firmware signal. */
+        if (job.cached) sceKernelSetEventFlag(snapshot_done,1);
     }
 }
 static int start_worker(void)
@@ -76,13 +80,32 @@ int xv_upload_worker_snapshot(void *dst, const void *src, unsigned bytes)
      * recording producer owns submitted, so idle cannot become busy here. */
     if (!dst || !src || bytes < 128u*1024u ||
         submitted != __atomic_load_n(&completed,__ATOMIC_ACQUIRE)) return 0;
+    if (snapshot_unavailable) return 0;
+    if (snapshot_done < 0) {
+        snapshot_done=sceKernelCreateEventFlag("xv_snapshot_done",0,0,NULL);
+        if (snapshot_done < 0) { snapshot_unavailable=1; return 0; }
+    }
     /* An absolute cache-line boundary prevents the two writers sharing a line
      * even when the allocator returns only 16-byte-aligned storage. */
     unsigned half=(unsigned)((((uintptr_t)dst+bytes/2u)&~(uintptr_t)63u)-(uintptr_t)dst);
     uint32_t ticket;
     if (!submit(dst,src,half,&ticket,1)) return 0;
     memcpy((uint8_t *)dst+half,(const uint8_t *)src+half,bytes-half);
-    xv_upload_worker_wait(ticket); /* acquire before returning the guest loan */
+    if ((int32_t)(__atomic_load_n(&completed,__ATOMIC_ACQUIRE)-ticket)<0) {
+        uint64_t begin=sceKernelGetProcessTimeWide();
+        do {
+            unsigned bits; SceUInt timeout=1000;
+            /* This event has one waiter: the recording owner of a synchronous
+             * source loan. GPU consumers keep their independent ticket wait.
+             * A timeout/error always rechecks completion; no lost signal can
+             * return borrowed storage early or strand a completed loan. */
+            if (sceKernelWaitEventFlag(snapshot_done,1,
+                SCE_EVENT_WAITOR|SCE_EVENT_WAITCLEAR_PAT,
+                &bits,&timeout)<0) sceKernelDelayThread(100);
+        } while ((int32_t)(__atomic_load_n(&completed,__ATOMIC_ACQUIRE)-ticket)<0);
+        __atomic_fetch_add(&waits,1u,__ATOMIC_RELAXED);
+        __atomic_fetch_add(&wait_us,(uint32_t)(sceKernelGetProcessTimeWide()-begin),__ATOMIC_RELAXED);
+    }
     return 1;
 }
 void xv_upload_worker_wait(uint32_t ticket)
@@ -105,7 +128,7 @@ void xv_upload_worker_report(unsigned frames)
     uint32_t sbytes=__atomic_exchange_n(&snapshot_bytes,0,__ATOMIC_RELAXED);
     uint32_t sus=__atomic_exchange_n(&snapshot_us,0,__ATOMIC_RELAXED);
     if (sjobs)
-        xv_logf("[snapshot-worker] %u frames: C0 %u halves %u KiB %.3f ms; synchronous source loans joined (overlapping window totals)\n",
+        xv_logf("[snapshot-worker] %u frames: C0 %u halves %u KiB %.3f ms; event-woken source loans joined (overlapping window totals)\n",
             frames,sjobs,sbytes>>10,sus/1000.0);
     if (queued || fallback || jobs || nwait)
         xv_logf("[vertex-worker] %u frames: %u queued / %u caller fallbacks; C0 %u batches %u KiB %.3f ms; completion waits %u %.3f ms (overlapping window totals)\n",
@@ -122,6 +145,8 @@ void xv_upload_worker_shutdown(void)
         sceKernelDeleteThread(thread); sceKernelDeleteSema(wake);
     }
     thread=wake=-1; unavailable=stopping=0; submitted=completed=0;
+    if (snapshot_done>=0) sceKernelDeleteEventFlag(snapshot_done);
+    snapshot_done=-1; snapshot_unavailable=0;
     queued=fallback=work_us=work_bytes=work_jobs=waits=wait_us=0;
     snapshot_us=snapshot_bytes=snapshot_jobs=0;
 }

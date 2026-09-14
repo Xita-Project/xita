@@ -7,6 +7,7 @@
 #include <semaphore.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 #include "../../runtime/xv_upload_worker.c"
 
 static sem_t wake_sem;
@@ -14,6 +15,35 @@ static pthread_t native_thread;
 static SceKernelThreadEntry entry;
 static int running, sem_live, pause_worker, fail_signal, worker_parked;
 static unsigned init_step, init_failure, barriers;
+static pthread_mutex_t done_lock=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t done_cond=PTHREAD_COND_INITIALIZER;
+static int done_live,done_bits,fail_done_create,fail_done_signal,fail_done_wait;
+SceUID sceKernelCreateEventFlag(const char *s,int attr,int bits,SceKernelEventFlagOptParam *o)
+{
+    assert(!strcmp(s,"xv_snapshot_done") && !attr && !bits && !o && !done_live);
+    if(fail_done_create) {fail_done_create=0;return -1;}
+    done_live=1;done_bits=0;return 3;
+}
+int sceKernelDeleteEventFlag(SceUID id)
+{ assert(id==3 && done_live && !running);done_live=0;done_bits=0;return 0; }
+int sceKernelSetEventFlag(SceUID id,unsigned bits)
+{
+    assert(id==3 && done_live && bits==1);
+    if(__atomic_exchange_n(&fail_done_signal,0,__ATOMIC_RELAXED))return -1;
+    pthread_mutex_lock(&done_lock);done_bits|=bits;
+    pthread_cond_signal(&done_cond);pthread_mutex_unlock(&done_lock);return 0;
+}
+int sceKernelWaitEventFlag(SceUID id,unsigned bits,unsigned mode,unsigned *out,SceUInt *timeout)
+{
+    assert(id==3 && done_live && bits==1 && mode==(SCE_EVENT_WAITOR|SCE_EVENT_WAITCLEAR_PAT) && timeout && *timeout==1000);
+    if(__atomic_exchange_n(&fail_done_wait,0,__ATOMIC_RELAXED))return -1;
+    struct timespec until;clock_gettime(CLOCK_REALTIME,&until);until.tv_nsec+=*timeout*1000;
+    if(until.tv_nsec>=1000000000){until.tv_sec++;until.tv_nsec-=1000000000;}
+    int rc=0;pthread_mutex_lock(&done_lock);
+    while(!done_bits && !rc)rc=pthread_cond_timedwait(&done_cond,&done_lock,&until);
+    if(done_bits){*out=done_bits;done_bits=0;rc=0;}
+    pthread_mutex_unlock(&done_lock);return rc?-1:0;
+}
 void xv_cpu_log_thread(const char *s) { assert(!strcmp(s,"vertex-upload")); }
 void xv_gpu_write_barrier(void)
 { __atomic_thread_fence(__ATOMIC_SEQ_CST); __atomic_fetch_add(&barriers,1u,__ATOMIC_RELAXED); }
@@ -57,7 +87,7 @@ SceUInt64 sceKernelGetProcessTimeWide(void)
 { struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000; }
 static void reset_worker(void)
 {
-    xv_vertex_upload_shutdown(); assert(!running && !sem_live && !live);
+    xv_vertex_upload_shutdown(); assert(!running && !sem_live && !live && !done_live);
     next_id=1; init_step=init_failure=0; fail_signal=0;
 }
 static void queue_guards(void)
@@ -163,6 +193,10 @@ static void snapshot_loans(void)
     unsigned char *a=malloc(n+128), *b=malloc(n+128);assert(a && b);
     memset(a,0x42,n+128);memset(b,0x91,n+128);
     assert(!xv_upload_worker_snapshot(b,a,131071) && thread<0 && b[0]==0x91);
+    fail_done_create=1;assert(!xv_upload_worker_snapshot(b,a,n));
+    assert(!xv_upload_worker_snapshot(b,a,n) && thread<0);
+    for(unsigned j=0;j<n;j++)assert(b[j]==0x91);
+    reset_worker();
     for(unsigned fail=1;fail<=3;fail++) {
         init_failure=fail;assert(!xv_upload_worker_snapshot(b,a,n));
         for(unsigned j=0;j<n;j++)assert(b[j]==0x91);
@@ -180,11 +214,23 @@ static void snapshot_loans(void)
     __atomic_store_n(&pause_worker,0,__ATOMIC_RELEASE);
     xv_upload_worker_wait(ticket);reset_worker();
     /* The caller cannot return its source loan while the consumer is delayed. */
+    for(unsigned fault=0;fault<4;fault++) {
+    memset(a,0x42,n+128);
+    if(fault==3) {
+        assert(xv_upload_worker_snapshot(b,a,n));
+        assert(!sceKernelSetEventFlag(snapshot_done,1)); /* deliberately stale */
+    }
+    __atomic_store_n(&fail_done_signal,fault==1,__ATOMIC_RELAXED);
+    __atomic_store_n(&fail_done_wait,fault==2,__ATOMIC_RELAXED);
     __atomic_store_n(&pause_worker,1,__ATOMIC_RELEASE);
     loan.dst=b+17;loan.src=a+3;loan.bytes=n;loan.done=0;
     pthread_t caller;assert(!pthread_create(&caller,NULL,borrow_source,NULL));
     for(unsigned i=0;i<10000 && !__atomic_load_n(&worker_parked,__ATOMIC_ACQUIRE);i++)usleep(100);
     assert(__atomic_load_n(&worker_parked,__ATOMIC_ACQUIRE));
+    if(fault==2) {
+        for(unsigned i=0;i<10000 && __atomic_load_n(&fail_done_wait,__ATOMIC_RELAXED);i++)usleep(100);
+        assert(!__atomic_load_n(&fail_done_wait,__ATOMIC_RELAXED));
+    }
     assert(!__atomic_load_n(&loan.done,__ATOMIC_ACQUIRE));
     __atomic_store_n(&pause_worker,0,__ATOMIC_RELEASE);
     assert(!pthread_join(caller,NULL) && loan.accepted);
@@ -192,6 +238,9 @@ static void snapshot_loans(void)
     memset(a,0x37,n+128);
     for(unsigned j=0;j<n;j++)assert(b[17+j]==0x42);
     reset_worker();
+    }
+    __atomic_store_n(&fail_done_signal,0,__ATOMIC_RELAXED);
+    __atomic_store_n(&fail_done_wait,0,__ATOMIC_RELAXED);
     /* Every destination alignment, odd sizes and untouched surrounding bytes. */
     for(unsigned off=0;off<64;off++) {
         memset(b,0x91,n+128);
@@ -213,7 +262,7 @@ static void snapshot_loans(void)
         assert(!memcmp(pools[slot].cpu,pools[slot].gpu,pools[slot].valid_bytes));
     }
     assert(snapshot_jobs>0);xv_snapshot_worker_override(-1);reset_worker();free(a);free(b);
-    puts("PASS: synchronous snapshot loans, busy/start/signal fallback, delayed join, 64 alignments, bounds and 81 retained slot generations");
+    puts("PASS: synchronous snapshot loans, event creation/signal/wait faults, busy/start/signal fallback, delayed join, 64 alignments, bounds and 81 retained slot generations");
 }
 int main(void)
 {
