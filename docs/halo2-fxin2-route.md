@@ -1,5 +1,8 @@
 # Halo 2: active FX23 route replacement
 
+The subsequent [native120 checkpoint](halo2-fxin2-mute.md) implements the
+original spatial FX23 mute while retaining its active processing state.
+
 Native119 passes the original `SetMixBins` call from `2AEC87` and following
 zero-volume call from `2AEC95`. The nonspatial FX23 voice now feeds GP bin 6
 instead of FL/FR. The next strict stop is a volume request on its spatial

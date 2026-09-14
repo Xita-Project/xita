@@ -97,6 +97,11 @@ int main(void)
     atomic_store(&faults, 0);
     for (;;) { h2_audio_backend_snapshot(&status); if (status.fx_submitted_frames > old_computed) break; usleep(1000); }
     assert(status.last_peak_left == 5859 && status.last_peak_right == 5859 && !status.error);
+    assert(h2_audio_backend_fx_mute_spatial23() == 0);
+    h2_audio_backend_snapshot(&status); uint64_t muted_submitted = status.fx_source_submitted[2];
+    for (;;) { h2_audio_backend_snapshot(&status); if (status.fx_source_submitted[2] > muted_submitted) break; usleep(1000); }
+    assert(status.fx_playing_mask == 127 && !status.error && status.last_peak_left == 5859);
+
 
     assert(h2_audio_backend_fx_forget(23) < 0);
     assert(h2_audio_backend_fx_forget(13) < 0 && h2_audio_backend_fx_route(13, 2) < 0 && h2_audio_backend_fx_play(13) < 0);

@@ -23,6 +23,9 @@ int h2_audio_backend_fx_route(unsigned bin, unsigned routes)
 static unsigned test_fx23_output_mask;
 int h2_audio_backend_fx_route_mask(unsigned bin, unsigned output_mask)
 { assert(bin == 23 && output_mask == 64 && test_fx_bound == 127 && test_fx_playing == 127); test_fx23_output_mask = output_mask; return 0; }
+static unsigned test_fx23_muted;
+int h2_audio_backend_fx_mute_spatial23(void)
+{ assert(test_fx_bound == 127 && test_fx_playing == 127 && test_fx23_output_mask == 64); test_fx23_muted = 1; return 0; }
 int h2_audio_backend_fx_play(unsigned bin)
 { unsigned mask = test_fx_mask(bin); assert((test_fx_bound & mask) && !(test_fx_playing & mask) && (bin != 13 || test_fx_routes == 6)); test_fx_playing |= mask; return 0; }
 int h2_audio_backend_fx_forget(unsigned bin)

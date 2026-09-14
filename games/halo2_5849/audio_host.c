@@ -514,6 +514,17 @@ static void buffer_control(xctx *c, uint32_t ip)
     stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
     uint32_t value = X_ARG(1);
     if (b->submix == 2) {
+#if H2_AUDIO_DSP
+        if (ip == 0x37B66F && X_M32(c->r[4]) == 0x2AECA6) {
+            if (value != (uint32_t)-6400 || b->fx_bin != H2_FX_SPATIAL23 || !b->started || b->stopped ||
+                b->route_count != 5 || b->headroom || (b->volume && b->volume != -6400))
+                fail(c, ip, "unsupported spatial FX23 mute state/value", value);
+            if (h2_audio_backend_fx_mute_spatial23() < 0) fail(c, ip, "spatial FX23 mixer mute rejected", b->base);
+            b->volume = -6400;
+            xv_logf("[h2/fxin2] caller=002AECA6 interface=%08X original volume=-6400 attenuationFFF on all routes; source/filter/GP time remains active\n", b->base + 0x1C);
+            result(c, 0, 2); return;
+        }
+#endif
         int initial = !b->started && b->fx_bin == 13 && X_M32(c->r[4]) == 0x220C37;
         int retained = b->started && b->fx_bin == 23 && b->route_count == 4 && X_M32(c->r[4]) == 0x2AEC95;
         if (ip != 0x37B66F || value || (!initial && !retained))

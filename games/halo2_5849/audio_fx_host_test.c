@@ -124,6 +124,15 @@ int main(int argc, char **argv)
                 c = fx_context(second_handle, 0, 0x2AEC94); reject(&c, 0x37B66F);
                 c = fx_context(second_handle, 1, 0x2AEC95); reject(&c, 0x37B66F);
                 c = fx_context(second_handle, 0, 0x2AEC95); call(&c, 0x37B66F, 0, 2);
+                uint32_t muted_handle = extra_handles[0]; h2_audio_buffer *muted = find_buffer(muted_handle - 0x1c);
+                uint32_t spatial_before[41]; memcpy(spatial_before, muted->spatial, sizeof spatial_before);
+                c = fx_context(muted_handle, (uint32_t)-6399, 0x2AECA6); reject(&c, 0x37B66F);
+                c = fx_context(muted_handle, (uint32_t)-6400, 0x2AECA7); reject(&c, 0x37B66F);
+                assert(!test_fx23_muted && !muted->volume);
+                c = fx_context(muted_handle, (uint32_t)-6400, 0x2AECA6); call(&c, 0x37B66F, 0, 2);
+                assert(test_fx23_muted && muted->volume == -6400 && muted->started && test_fx_playing == 127);
+                assert(!memcmp(spatial_before, muted->spatial, sizeof spatial_before));
+
 
                 while (extras) {
                     uint32_t handle = extra_handles[--extras]; h2_audio_buffer *retiring = find_buffer(handle - 0x1c);

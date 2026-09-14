@@ -29,6 +29,7 @@ int h2_audio_fx_bind_spatial(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bi
 int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes);
 /* Exact active nonspatial bin23 replacement: bins6/8/7/9, only bin6 unity. */
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned bin, unsigned output_mask);
+int h2_audio_fx_mute_spatial23(h2_audio_fx *fx);
 int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin);
 int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin);
 /* Execute complete 32-sample frames, reading every active source before
