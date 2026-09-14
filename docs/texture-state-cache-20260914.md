@@ -1,9 +1,13 @@
 # September 14: scoped texture binding cache
 
+The [later hardware comparisons](hardware-20260914-candidates.md) show a small
+mixed gain at the base and a small regression in the valley. The cache remains
+disabled by default; fewer texture API calls did not establish a frame-time gain.
+
 A new, optional mesh submission cache removes repeated
 `sceGxmSetFragmentTexture` calls when the complete resolved descriptor already
-matches the active sampler unit. It defaults **off** while physical Vita
-frame-time benefit remains unmeasured.
+matches the active sampler unit. It defaults **off** because the physical
+comparisons have not established a frame-time benefit.
 
 A count-only Vita3K probe preserved every API call. One stationary Blood Gulch
 view requested 331 bindings per frame, of which 166 were identical to the

@@ -1,5 +1,9 @@
 # September 14: native point transforms
 
+The [later hardware comparisons](hardware-20260914-candidates.md) show mixed
+trial results in two Blood Gulch views. The instruction reduction below is
+validated; a broad FPS improvement is not established.
+
 Halo CE's point-transform routine now has a guarded native implementation.
 Accepted synthetic Cortex-A9 cases fall from about 505 to 265 instructions
 (about 47.5%). This is an instruction-count result, not measured CPU cycles
@@ -55,12 +59,12 @@ Runtime: `52a17e35e1fbf173bb963514d22e38a3655dbe6a5c34e061b1af45a52200beda`.
 VPK: `fc381c93d1ffc2f5849032b9724275cbad97c7ac297364d096baa94b305fcaa7`.
 ELF: `9f013de1f860d7428553f7f40febf94b7b9f732beaf09a4150edb39e67a05f79`.
 
-## Next hardware test
+## Hardware comparison
 
-The physical Vita's paired service remains unavailable after the earlier
-[unconfirmed restart](hardware-20260914-updater.md). This build is not verified
-installed there. When access returns, compare matched scenes with the same
-settings, phase logging disabled and enough frame-cap headroom:
+Access returned during the lunch check. The updater installed the combined
+`8b89a41e...` runtime, including this helper, and two hardware views completed
+the isolated comparison. Results are linked above. The command compares
+matched scenes with phase logging disabled and enough frame-cap headroom:
 
 ```sh
 python3 tools/vita_remote.py --config /private/path/remote-client.json benchmark /private/path/point-math-001 --kind point-math --runs 3

@@ -1,5 +1,8 @@
 # September 14 hardware rendering comparisons
 
+The [later two-view hardware tests](hardware-20260914-candidates.md) measure
+early visibility completion, native point transforms and texture binding reuse.
+
 Three matched trials in stationary solo Blood Gulch confirm that the existing
 deferred flare queries help this scene. The new model-palette helper did not
 improve it. Stable 20 FPS and the newer 30 FPS target remain unachieved.
