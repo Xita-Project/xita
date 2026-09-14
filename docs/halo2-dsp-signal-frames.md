@@ -12,7 +12,7 @@ The original loader establishes the corresponding GP scratch address:
    eight initial GP scratch pages mapped.
 2. EP construction `385614` calls `385513`, which registers three additional
    pages through `37E42A` / `383D27`.
-3. Only afterward, `384333` calls `37E43E` to append the FX allocation at page
+3. Only afterward, `384337` calls `37E43E` to append the FX allocation at page
    eleven, GP scratch `B000`.
 
 This is an audit of the owned original loader, not an Xbox hardware trace.
