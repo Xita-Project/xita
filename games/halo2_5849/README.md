@@ -72,3 +72,8 @@ pixel converters; no movie frame or menu has been displayed. Earlier
 texture-state progress followed an incorrectly balanced timer return; the
 current checkpoint documents this limitation. It supplies
 no audio, 3D rendering or menu; the ordinary profile is unchanged.
+
+The separate [GXM quad probe](../../docs/halo2-quad-gxm-probe.md) validates the
+observed original vertex program against synthetic pixel fixtures. Its shader
+preparation and `quad-probe` build target do not yet connect guest geometry to
+GXM; the actual game still stops at its first `BEGIN QUADS` command.
