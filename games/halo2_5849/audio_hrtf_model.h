@@ -53,7 +53,7 @@ static inline int h2_hrtf_init(h2_hrtf_model *state, const int8_t taps[31])
     if (sum != 1.0f) for (unsigned i = 0; i < 31; ++i) next.target[i] /= sum;
     *state = next; h2_hrtf_leave(fp); return 1;
 }
-static inline void h2_hrtf_frame(h2_hrtf_model *state, const int32_t in[32], int32_t out[32])
+static inline void h2_hrtf_frame_float(h2_hrtf_model *state, const int32_t in[32], float out[32])
 {
     h2_hrtf_fp fp = h2_hrtf_enter();
     for (unsigned n = 0; n < 32; ++n) {
@@ -65,9 +65,22 @@ static inline void h2_hrtf_frame(h2_hrtf_model *state, const int32_t in[32], int
             unsigned index = state->position >= k ? state->position - k : state->position + 31 - k;
             acc += state->current[k] * state->history[index];
         }
-        double scaled = (double)acc * 8388608.0;
-        out[n] = scaled >= 8388607.0 ? 8388607 : scaled <= -8388608.0 ? -8388608 : (int32_t)lrint(scaled);
+        out[n] = acc;
         if (++state->position == 31) state->position = 0;
     }
+    h2_hrtf_leave(fp);
+}
+
+/* Caller holds the model's nearest environment when combining voices. */
+static inline int32_t h2_hrtf_quantize(float sample)
+{
+    double scaled = (double)sample * 8388608.0;
+    return scaled >= 8388607.0 ? 8388607 : scaled <= -8388608.0 ? -8388608 : (int32_t)lrint(scaled);
+}
+static inline void h2_hrtf_frame(h2_hrtf_model *state, const int32_t in[32], int32_t out[32])
+{
+    float filtered[32]; h2_hrtf_frame_float(state, in, filtered);
+    h2_hrtf_fp fp = h2_hrtf_enter();
+    for (unsigned i = 0; i < 32; ++i) out[i] = h2_hrtf_quantize(filtered[i]);
     h2_hrtf_leave(fp);
 }

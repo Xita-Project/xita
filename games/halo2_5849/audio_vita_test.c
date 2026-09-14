@@ -118,7 +118,7 @@ static int sceAudioOutOutput(int id, const void *data)
 #if H2_AUDIO_DSP
     if (fx.playing) {
         /* A retained old grain may precede the new source's first grain. */
-        assert(samples[0] == 1953 || samples[0] == 3906);
+        assert(samples[0] == 1953 || samples[0] == 3906 || samples[0] == 5859 || samples[0] == 7812);
         for (unsigned i = 0; i < XA_GRAIN * 2; ++i) assert(samples[i] == samples[0]);
     }
     else

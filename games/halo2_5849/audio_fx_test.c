@@ -78,9 +78,9 @@ int H2_AUDIO_FX_TEST_MAIN(void)
      * Its filtered routes must not replace or multiply the two 2D routes. */
     int8_t taps[31] = {127};
     assert(!h2_audio_fx_bind(&fx, s, H2_FX_SPATIAL23));
-    assert(h2_audio_fx_bind_spatial(&fx, s, taps) && fx.bound == 7 && fx.playing == 3);
+    assert(h2_audio_fx_bind_spatial(&fx, s, 23, taps) && fx.bound == 7 && fx.playing == 3);
     assert(h2_audio_fx_forget(&fx, H2_FX_SPATIAL23) && !memcmp(&before, &fx, sizeof fx));
-    assert(h2_audio_fx_bind_spatial(&fx, s, taps));
+    assert(h2_audio_fx_bind_spatial(&fx, s, 23, taps));
     assert(!h2_audio_fx_route(&fx, H2_FX_SPATIAL23, 5));
     assert(h2_audio_fx_play(&fx, H2_FX_SPATIAL23) && fx.playing == 7);
     for (unsigned i = 0; i < 32; ++i) {
@@ -99,8 +99,47 @@ int H2_AUDIO_FX_TEST_MAIN(void)
         }
     }
     assert(!h2_audio_fx_forget(&fx, H2_FX_SPATIAL23));
+    /* Continue the exact creation order for the remaining original pairs.
+     * Each new filter starts independently; one inactive owner can be removed
+     * without changing any existing history or source progress. */
+    before = fx; assert(!h2_audio_fx_bind(&fx, s, 25) && !memcmp(&before, &fx, sizeof fx));
+    float curves[3] = {gain,0,0};
+    for (unsigned bin = 24; bin <= 25; ++bin) {
+        assert(h2_audio_fx_bind(&fx, s, bin) && h2_audio_fx_play(&fx, bin));
+        before = fx;
+        assert(h2_audio_fx_bind_spatial(&fx, s, bin, taps));
+        assert(h2_audio_fx_forget(&fx, 0x10000u | bin) && !memcmp(&before, &fx, sizeof fx));
+        assert(h2_audio_fx_bind_spatial(&fx, s, bin, taps));
+        assert(h2_audio_fx_play(&fx, 0x10000u | bin));
+    }
+    assert(fx.bound == 127 && fx.playing == 127);
+    unsigned saturated = 0;
+    for (unsigned frame = 0; frame < 2; ++frame) {
+        int32_t sample = frame ? -8388608 : 8388607;
+        for (unsigned bin = 13; bin <= 25; ++bin) if (bin == 13 || bin >= 23)
+            for (unsigned i = 0; i < 32; ++i) put32(s->scratch + 0xb000 + (bin - 11) * 128 + i * 4, (uint32_t)sample);
+        assert(h2_audio_fx_render(&fx, out, 32));
+        for (unsigned i = 0; i < 32; ++i) {
+            float total = 0;
+            for (unsigned voice = 3; voice-- > 0;) {
+                curves[voice] += 0.01f * (1.0f - curves[voice]);
+                total += curves[voice] * (sample / 8388608.0f);
+            }
+            double scaled = (double)total * 8388608.0;
+            int32_t expected = scaled >= 8388607.0 ? 8388607 : scaled <= -8388608.0 ? -8388608 : lrint(scaled);
+            saturated += scaled >= 8388607.0 || scaled <= -8388608.0;
+            assert(out[i * 2] == (frame ? -32768 : 32767) && out[i * 2 + 1] == out[i * 2]);
+            for (unsigned bin = 6; bin <= 10; ++bin) {
+                uint32_t wanted = bin == 6 || bin == 7 || bin == 10 ? (uint32_t)expected & 0xffffff : 0;
+                assert(s->core.mixbuffer[bin * 32 + i] == wanted);
+            }
+        }
+    }
+    assert(saturated > 32 && fx.sources[2].frames == 3 && fx.sources[4].frames == 2 && fx.sources[6].frames == 2);
+    before = fx; assert(!h2_audio_fx_bind(&fx, s, 26) && !h2_audio_fx_bind_spatial(&fx, s, 26, taps));
+    assert(!h2_audio_fx_forget(&fx, H2_FX_SPATIAL25) && !memcmp(&before, &fx, sizeof fx));
     /* A subsequent frame fault is terminal, with no completed frame counted. */
-    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 34 && s->status.fault);
+    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 36 && s->status.fault);
     assert(!h2_audio_fx_render(&fx, out, 32)); h2_dsp_destroy(s);
     puts("Halo 2 FX source: checked ownership, six independent unity routes, real DSP frames and signed GP output pass");
     return 0;

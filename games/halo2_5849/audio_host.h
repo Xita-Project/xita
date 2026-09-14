@@ -2,6 +2,8 @@
 #include "recomp/xv_x86rt.h"
 #ifndef H2_FX_SPATIAL23
 #define H2_FX_SPATIAL23 0x10017u
+#define H2_FX_SPATIAL24 0x10018u
+#define H2_FX_SPATIAL25 0x10019u
 #endif
 
 typedef struct {
@@ -21,7 +23,7 @@ typedef struct {
     uint64_t fx_compute_us, fx_max_compute_us;
     uint32_t fx_deadline_misses, fx_empty_after_compute;
     uint32_t fx_bound_mask, fx_playing_mask;
-    uint64_t fx_source_submitted[3], fx_source_consumed[3];
+    uint64_t fx_source_submitted[7], fx_source_consumed[7];
 } h2_audio_backend_status;
 
 /* Bounded device + external PCM buffer creation/binding/controls and paired
@@ -60,11 +62,11 @@ int h2_audio_backend_forget(int voice);
 void h2_audio_backend_snapshot(h2_audio_backend_status *out);
 #if H2_AUDIO_DSP
 #include "dsp_engine.h"
-/* Verified FXIN2/bin13 and bin23 sources; no coexistence with playing PCM/stream
+/* Verified FXIN2/bin13 and paired bin23..25 sources; no playing PCM/stream
  * voices. Play waits for an actual complete GP grain accepted by the sink.
  * Engine lifetime remains with the device, which joins the worker first. */
 int h2_audio_backend_fx_bind(h2_dsp_engine *engine, unsigned bin);
-int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *engine, const int8_t taps[31]);
+int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *engine, unsigned bin, const int8_t taps[31]);
 int h2_audio_backend_fx_route(unsigned bin, unsigned routes);
 int h2_audio_backend_fx_play(unsigned bin);
 int h2_audio_backend_fx_forget(unsigned bin);

@@ -73,14 +73,25 @@ int main(int argc, char **argv)
                 FILE *filter = fopen(argv[1], "rb"); assert(filter); int8_t taps[32];
                 assert(fread(taps, 1, sizeof taps, filter) == sizeof taps && fgetc(filter) == EOF); fclose(filter);
                 x_guest_write(0x386958, taps, 32); x_guest_write(0x386978, taps, 32);
+                uint32_t extra_handles[5]; unsigned extras = 0;
+                for (unsigned bin = 23; bin <= 25; ++bin) {
+                    if (bin != 23) {
+                        c = fx_description(dev); x_guest_write(0x3ffd + 20, &bin, 4); X_M32(c.r[4]) = 0x21E830;
+                        call(&c, 0x37D4BE, 0, 4); uint32_t handle = read32(0x6ffe); extra_handles[extras++] = handle;
+                        c = fx_context(handle, 0, 0x21E842); call(&c, 0x37B6DF, 0, 4);
+                    }
+                    c = fx_description(dev); spatial_desc[5] = bin; x_guest_write(0x3ffd, spatial_desc, sizeof spatial_desc);
+                    X_M32(c.r[4]) = 0x21E88A;
+                    unsigned before_mask = (1u << (2 + (bin - 23) * 2)) - 1, after_mask = before_mask * 2 + 1;
                 xctx invalid = c; X_M32(c.r[4] + 12) = 0x386958; reject(&invalid, 0x37D4BE);
                 X_M32(c.r[4] + 12) = 0x3871F0; invalid = c; reject(&invalid, 0x37D4BE);
                 g_xpt[0x388] = g_xpt[0x386]; X_M32(c.r[4] + 12) = 0x388958; invalid = c; reject(&invalid, 0x37D4BE);
                 X_M32(c.r[4] + 12) = 0x6ffe;
                 call(&c, 0x37D4BE, 0, 4); uint32_t spatial_handle = read32(0x6ffe);
                 h2_audio_buffer *spatial = find_buffer(spatial_handle - 0x1c);
-                assert(spatial && spatial->fx_bin == H2_FX_SPATIAL23 && spatial->route_count == 5);
-                assert(test_fx_bound == 7 && test_fx_playing == 3 && device.references == 4);
+                extra_handles[extras++] = spatial_handle;
+                assert(spatial && spatial->fx_bin == (0x10000u | bin) && spatial->route_count == 5);
+                assert(test_fx_bound == after_mask && test_fx_playing == before_mask && device.references == 4 + (bin - 23) * 2);
                 for (unsigned setter = 0; setter < 2; ++setter) {
                     uint32_t ip = setter ? 0x37C644 : 0x37C620, caller = setter ? 0x21E8AC : 0x21E89D;
                     c = context(spatial_handle, 0x7f7fffff, 0, 0); X_M32(c.r[4]) = caller; reject(&c, ip);
@@ -88,17 +99,22 @@ int main(int argc, char **argv)
                     c = context(spatial_handle, 0x7f7fffff, 1, 0); X_M32(c.r[4]) = caller+1; reject(&c, ip);
                     c = context(spatial_handle, 0x7f7fffff, 1, 0); X_M32(c.r[4]) = caller; call(&c, ip, 0, 3);
                 }
-                c = fx_context(spatial_handle, 0, 0x21E8BA); reject(&c, 0x37B6DF);
-                device.dirty = 0x25; device.pending_distance = 0x4043126f;
+                device.pending_position[0] = 1; c = fx_context(spatial_handle, 0, 0x21E8BA); reject(&c, 0x37B6DF);
+                device.pending_position[0] = 0; device.dirty = 0x25; device.pending_distance = 0x4043126f;
                 device.pending_rolloff = device.pending_doppler = 0;
                 device.pending_orientation[0] = device.pending_orientation[4] = 0x3f800000;
                 c = fx_context(spatial_handle, 0, 0x21E8BA); call(&c, 0x37B6DF, 0, 4);
-                assert(test_fx_playing == 7 && spatial->started && !spatial->spatial[0]);
+                assert(test_fx_playing == after_mask && spatial->started && !spatial->spatial[0]);
                 assert(spatial->spatial[1] == 0xf8000000 && spatial->spatial[0x70/4] == 0x43340000);
                 c = fx_context(spatial_handle, 0, 0x21E8BA); reject(&c, 0x37B6DF);
                 c = context(spatial_handle, 0, 0, 0); reject(&c, 0x379F45);
-                spatial->started = 0; test_fx_playing &= ~4u; /* test teardown only */
-                c = context(spatial_handle, 0, 0, 0); call(&c, 0x379F45, 0, 1);
+                }
+                assert(extras == 5 && test_fx_playing == 127 && device.references == 8);
+                while (extras) {
+                    uint32_t handle = extra_handles[--extras]; h2_audio_buffer *retiring = find_buffer(handle - 0x1c);
+                    retiring->started = 0; test_fx_playing &= ~test_fx_mask(retiring->fx_bin); /* test teardown only */
+                    c = context(handle, 0, 0, 0); call(&c, 0x379F45, 0, 1);
+                }
                 assert(test_fx_bound == 3 && device.references == 3);
             }
             c = context(second_handle, 0, 0, 0); reject(&c, 0x379F45);

@@ -68,21 +68,30 @@ int main(void)
      * Synthetic fixture's real GP exposes input bins separately in core tests;
      * its monitor here still reports the two unchanged nonspatial sources. */
     int8_t taps[31] = {127};
-    assert(h2_audio_backend_fx_bind_spatial(s, taps) < 0); /* bins6..10 default headroom */
+    assert(h2_audio_backend_fx_bind_spatial(s, 23, taps) < 0); /* bins6..10 default headroom */
     for (unsigned i = 6; i <= 10; ++i) assert(h2_audio_backend_set_headroom(i, 0) == 0);
-    assert(h2_audio_backend_fx_bind_spatial(s, taps) == 0);
+    assert(h2_audio_backend_fx_bind_spatial(s, 23, taps) == 0);
     assert(h2_audio_backend_set_headroom(10, 1) < 0);
     assert(h2_audio_backend_fx_play(H2_FX_SPATIAL23) == 0);
     h2_audio_backend_snapshot(&status);
     assert(status.fx_bound_mask == 7 && status.fx_playing_mask == 7 && status.fx_source_submitted[2] >= XA_GRAIN);
     assert(status.last_peak_left == 3906 && status.last_peak_right == 3906);
     assert(h2_audio_backend_fx_forget(H2_FX_SPATIAL23) < 0);
+    for (unsigned bin = 24; bin <= 25; ++bin) {
+        assert(h2_audio_backend_fx_bind(s, bin) == 0 && h2_audio_backend_fx_play(bin) == 0);
+        assert(h2_audio_backend_fx_bind_spatial(s, bin, taps) == 0 && h2_audio_backend_fx_play(0x10000u | bin) == 0);
+        h2_audio_backend_snapshot(&status); unsigned mask = (1u << (3 + (bin - 23) * 2)) - 1;
+        assert(status.fx_bound_mask == mask && status.fx_playing_mask == mask);
+        assert(status.last_peak_left == (bin == 24 ? 5859u : 7812u) && status.last_peak_right == status.last_peak_left);
+        assert(status.fx_source_submitted[2 + (bin - 23) * 2] >= XA_GRAIN);
+    }
+
     assert(h2_audio_backend_fx_forget(23) < 0);
     assert(h2_audio_backend_fx_forget(13) < 0 && h2_audio_backend_fx_route(13, 2) < 0 && h2_audio_backend_fx_play(13) < 0);
     assert(h2_audio_backend_close() == 0 && !resources && !atomic_load(&queued));
     atomic_store(&faults, 0);
     h2_audio_backend_snapshot(&status); assert(status.fx_consumed_frames == status.fx_submitted_frames);
-    for (unsigned i = 0; i < 3; ++i) assert(status.fx_source_consumed[i] == status.fx_source_submitted[i]);
+    for (unsigned i = 0; i < 7; ++i) assert(status.fx_source_consumed[i] == status.fx_source_submitted[i]);
     h2_dsp_destroy(s);
 /* GCC's TSan runtime fails its own longjmp-buffer check on this injected DSP
  * fault. The TSan concurrency run skips only this fixture; normal and

@@ -1,5 +1,8 @@
 # Halo 2: fixed spatial FXIN2 processing
 
+The later [seven-source loop checkpoint](halo2-fxin2-loop.md) completes the
+original bin23..25 pairs. This document preserves native117 evidence.
+
 Native117 executes the original spatial bin-23 buffer creation, deferred
 minimum/maximum distance setters and Play, then reaches the next nonspatial
 bin-24 descriptor. Three actual sources feed the GP and emulated Vita sink.

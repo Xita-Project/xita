@@ -282,7 +282,7 @@ static void fx_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t field
 #if H2_AUDIO_SPATIAL_MODEL
     spatial = fields[1] == 0x100010;
     if (spatial) {
-        if (caller != 0x21E88A || bin != 23 || !mapped(0x386958, 64) ||
+        if (caller != 0x21E88A || bin < 23 || bin > 25 || !mapped(0x386958, 64) ||
             !mapped(0x3871F0, 4) || X_M32(0x3871F0) != 2)
             fail(c, ip, "unsupported spatial FXIN2 caller/HRTF mode", caller);
         int8_t right[32]; x_guest_read(taps, 0x386958, 32); x_guest_read(right, 0x386978, 32);
@@ -294,20 +294,20 @@ static void fx_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t field
 #endif
     if (spatial && (aliases(out, 4, 0x386958, 64) || aliases(out, 4, 0x3871F0, 4)))
         fail(c, ip, "spatial FXIN2 output/filter-control alias", out);
-    uint32_t source_key = spatial ? H2_FX_SPATIAL23 : bin;
-    if (!((caller == 0x220C26 && bin == 13) || (caller == 0x21E830 && bin == 23) || spatial) ||
+    uint32_t source_key = spatial ? 0x10000u | bin : bin;
+    if (!((caller == 0x220C26 && bin == 13) || (caller == 0x21E830 && bin >= 23 && bin <= 25) || spatial) ||
         fields[0] != 24 || fields[1] != (spatial ? 0x100010u : 0x100000u) || fields[2] || fields[3] || fields[4] || !effects)
         fail(c, ip, "unsupported FXIN2 description/caller", fields[1]);
     if (aliases(out, 4, c->r[4], 20) || aliases(out, 4, desc, 24))
         fail(c, ip, "FXIN2 output alias", out);
     if (device.references == UINT32_MAX) fail(c, ip, "FXIN2 parent overflow", device.references);
-    int first_playing = 0, second_playing = 0;
+    uint32_t predecessor = spatial ? bin : bin == 23 ? 13 : (0x10000u | (bin - 1));
+    int predecessor_playing = 0;
     for (unsigned i = 0; i < XA_MAX_VOICES; ++i) if (buffers[i].base && buffers[i].submix == 2) {
         if (buffers[i].fx_bin == source_key) fail(c, ip, "duplicate FXIN2 source", bin);
-        if (buffers[i].fx_bin == 13 && buffers[i].started && !buffers[i].stopped) first_playing = 1;
-        if (buffers[i].fx_bin == 23 && buffers[i].started && !buffers[i].stopped) second_playing = 1;
+        if (buffers[i].fx_bin == predecessor && buffers[i].started && !buffers[i].stopped) predecessor_playing = 1;
     }
-    if ((bin == 23 && !first_playing) || (spatial && !second_playing)) fail(c, ip, "second FXIN2 requires active first source", bin);
+    if (bin != 13 && !predecessor_playing) fail(c, ip, "FXIN2 loop predecessor must be active", source_key);
     unsigned index;
     for (index = 0; index < XA_MAX_VOICES && buffers[index].base; ++index) {}
     if (index == XA_MAX_VOICES) { result(c, 0x8007000E, 4); return; }
@@ -318,7 +318,7 @@ static void fx_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t field
         page_overlap(base, 4096, desc, 24)) fail(c, ip, "FXIN2 allocation mapping/alias", base);
     if (spatial && (page_overlap(base, 4096, 0x386958, 64) || page_overlap(base, 4096, 0x3871F0, 4)))
         fail(c, ip, "spatial FXIN2 allocation/filter-control alias", base);
-    if ((spatial ? h2_audio_backend_fx_bind_spatial(effects, taps) : h2_audio_backend_fx_bind(effects, bin)) < 0) {
+    if ((spatial ? h2_audio_backend_fx_bind_spatial(effects, bin, taps) : h2_audio_backend_fx_bind(effects, bin)) < 0) {
         if (xk_mem_free(base) < 0) fail(c, ip, "FXIN2 allocation rollback", base);
         fail(c, ip, "FXIN2 engine/idle voices/headroom contract", bin);
     }
@@ -670,7 +670,7 @@ static void submix_deferred(xctx *c, uint32_t ip)
     default: offset = 0x34; dirty = 0x00100000; caller = 0x220B6E; break;
     }
     if (b->submix == 2) {
-        if (b->fx_bin != H2_FX_SPATIAL23 || b->started || (ip != 0x37C620 && ip != 0x37C644))
+        if ((b->fx_bin < H2_FX_SPATIAL23 || b->fx_bin > H2_FX_SPATIAL25) || b->started || (ip != 0x37C620 && ip != 0x37C644))
             fail(c, ip, "unsupported FXIN2 deferred parameter", ip);
         caller = ip == 0x37C620 ? 0x21E89D : 0x21E8AC;
     }
@@ -689,7 +689,7 @@ static void buffer_play(xctx *c)
 #if H2_AUDIO_DSP
     if (b->submix == 2) {
         uint32_t routes = b->fx_bin == 13 ? 6 : 2, caller = b->fx_bin == 13 ? 0x220CB5 : 0x21E842;
-        if (b->fx_bin == H2_FX_SPATIAL23) {
+        if ((b->fx_bin >= H2_FX_SPATIAL23 && b->fx_bin <= H2_FX_SPATIAL25)) {
             uint32_t expected[41]; spatial_defaults(expected);
             expected[0x38/4] = expected[0x3C/4] = 0x7F7FFFFF;
             const uint32_t orientation[6] = {0x3F800000,0,0,0,0x3F800000,0}, zero[3] = {0};
@@ -704,7 +704,7 @@ static void buffer_play(xctx *c)
             X_M32(c->r[4]) != caller) fail(c, ip, "unsupported FXIN2 Play state/flags/caller", X_ARG(3));
         if (h2_audio_backend_fx_play(b->fx_bin) < 0) fail(c, ip, "FXIN2 real DSP/sink Play rejected", b->base);
         b->started = 1;
-        if (b->fx_bin == H2_FX_SPATIAL23) {
+        if ((b->fx_bin >= H2_FX_SPATIAL23 && b->fx_bin <= H2_FX_SPATIAL25)) {
             /* Original 382032 / CA0A / AE57 updates at the verified Play. */
             b->spatial[0] = b->spatial[0x7C/4] = 0; b->spatial[1] = 0xF8000000;
             b->spatial[0x70/4] = 0x43340000;
