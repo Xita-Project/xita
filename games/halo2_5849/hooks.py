@@ -14,6 +14,13 @@ SPARSE_JUMP_GUARDS = (
     (0x18EB80, 100, "85bfb44438536da9c07ee5e19acdea5a49c29502b71c96b3214736fd4b29902a"),
     (0x18EC08, 24, "93324ac5bd2d4025f18ded90bf69be6bdce3f496bd293bc14b2948db69676743"),
 )
+INLINE_QUEUE_STATUS_GUARD = (
+    0x12D0CF, 26, "76248680a6285ea26e18db9d8eddf97bdf349746e8281507c8876dfd43090850")
+INLINE_QUEUE_STATUS = {
+    0x12D0D5: (Mnemonic.MOV, Register.ECX, 0x3240),
+    0x12D0DB: (Mnemonic.CMP, Register.ECX, 0x3244),
+    0x12D0E3: (Mnemonic.MOV, Register.EAX, 0x400700),
+}
 
 
 def reviewed_sparse_jump_roots(image):
@@ -116,6 +123,26 @@ def lower_bus_compare(emitter, instruction, output):
     return True
 
 
+def lower_inline_queue_status(emitter, instruction, output):
+    """Native78: three inline reads after the original channel flush.
+
+    These use the same live PUT/GET/busy values as the D3D section. All other
+    instructions in the game function keep their original checked lowering.
+    """
+    expected = INLINE_QUEUE_STATUS.get(instruction.ip)
+    if expected is None:
+        return False
+    mnemonic, register, displacement = expected
+    if (instruction.mnemonic != mnemonic or instruction.op_count != 2 or
+            instruction.op0_kind != OpKind.REGISTER or instruction.op0_register != register or
+            instruction.op1_kind != OpKind.MEMORY or instruction.memory_base != Register.EAX or
+            instruction.memory_index != Register.NONE or
+            instruction.memory_displacement != displacement or instruction.segment_prefix != Register.NONE or
+            emitter.op_size(instruction, 0) != 4 or emitter.op_size(instruction, 1) != 4):
+        raise ValueError("Halo 2 inline queue-status instruction shape mismatch")
+    return lower_bus_mov(emitter, instruction, output) or lower_bus_compare(emitter, instruction, output)
+
+
 class Halo2GraphicsHooks(NoGameHooks):
     def __init__(self, image):
         # A profile with a different executable cannot opt into these rules.
@@ -152,10 +179,14 @@ class Halo2HostChannelHooks(Halo2GraphicsHooks):
             if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
                 raise ValueError(f"Halo 2 host channel boundary mismatch at {address:#x}")
         reviewed_sparse_jump_roots(image)
+        address, length, digest = INLINE_QUEUE_STATUS_GUARD
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 inline queue-status fingerprint mismatch")
 
     def lower_instruction(self, emitter, instruction, output):
         return (lower_sparse_jump(emitter, instruction, output) or
                 lower_fp_environment(emitter, instruction, output) or
+                lower_inline_queue_status(emitter, instruction, output) or
                 super().lower_instruction(emitter, instruction, output))
 
     def function_entry(self, address):

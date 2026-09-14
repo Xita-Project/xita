@@ -10,7 +10,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from games import load_hooks
-from games.halo2_5849.hooks import lower_bus_mov, lower_bus_compare
+from games.halo2_5849.hooks import lower_bus_mov, lower_bus_compare, lower_inline_queue_status
+from iced_x86 import Code, Instruction, MemoryOperand, Register
 from recompiler.core.hooks import NoGameHooks
 from recompiler import xita_recomp as recomp
 from tools.test_game_profiles import fixture
@@ -22,6 +23,31 @@ class SyntheticBusHooks(NoGameHooks):
 
 
 class Halo2Bus(unittest.TestCase):
+    def test_inline_status_is_limited_to_audited_reads(self):
+        # Construct instructions through the assembler API; no owned bytes.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); path = root / "synthetic.xbe"
+            path.write_bytes(fixture()[0]); image = recomp.Image(str(path))
+            discovery = recomp.Discovery(image, {}, {}, lambda *_: None)
+            emitter = recomp.Emitter(image, discovery, {}, {}, str(root), 1)
+            for ip, code, register, offset in (
+                    (0x12D0D5, Code.MOV_R32_RM32, Register.ECX, 0x3240),
+                    (0x12D0DB, Code.CMP_R32_RM32, Register.ECX, 0x3244),
+                    (0x12D0E3, Code.MOV_R32_RM32, Register.EAX, 0x400700)):
+                instruction = Instruction.create_reg_mem(code, register,
+                    MemoryOperand(Register.EAX, displ=offset, displ_size=4))
+                instruction.ip = ip; output = []
+                self.assertTrue(lower_inline_queue_status(emitter, instruction, output))
+                self.assertIn("h2_bus_read32", "\n".join(output))
+                self.assertNotIn("h2_bus_write", "\n".join(output))
+                if code == Code.CMP_R32_RM32:
+                    self.assertIn("X_FLAGS(XK_SUB", "\n".join(output))
+                instruction.memory_base = Register.EDX
+                with self.assertRaisesRegex(ValueError, "shape mismatch"):
+                    lower_inline_queue_status(emitter, instruction, [])
+                instruction.ip = 0x11000
+                self.assertFalse(lower_inline_queue_status(emitter, instruction, []))
+
     def test_generated_bus_and_cpu_effects(self):
         with tempfile.TemporaryDirectory(prefix="xita-h2-bus-") as directory:
             root = Path(directory)

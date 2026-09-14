@@ -364,6 +364,9 @@ int main(int argc, char **argv)
         packet(&put, 0x12C, 0); packet(&put, 0x130, 0);
         if (!setjmp(fault)) { h2_bus_write32(&c, 0x1234, 0xFD800040, put); assert(0); }
         assert(h2_bus_read32(&c, 0, 0xFD800044) == put - 4);
+        assert(h2_bus_read32(&c, 0x12D0D5, 0xFD003240) == put);
+        assert(h2_bus_read32(&c, 0x12D0DB, 0xFD003244) == put - 4);
+        assert(h2_bus_read32(&c, 0x12D0E3, 0xFD400700) == 1);
         assert(!vblank_calls && !event_calls && !present_calls);
         assert(X_M32(0x406C08 + 0x1C0) == 0 && X_M32(0x406C08 + 0x7DC) == 1);
         assert(!memcmp(&c, &interrupted, sizeof c));
@@ -392,6 +395,9 @@ int main(int argc, char **argv)
         assert(X_M32(0x406C08 + 0x1C0) == 1 && X_M32(0x406C08 + 0x1BC) == 1);
         assert(X_M32(0x406C08 + 0x174) == 0 && X_M32(0x406C08 + 0x7DC) == 0);
         assert(X_M32(0x485AB0) == 1 && h2_bus_read32(&c, 0, 0xFD800044) == put);
+        assert(h2_bus_read32(&c, 0x12D0D5, 0xFD003240) == put);
+        assert(h2_bus_read32(&c, 0x12D0DB, 0xFD003244) == put);
+        assert(h2_bus_read32(&c, 0x12D0E3, 0xFD400700) == 0);
         c.r[4] = 0x600000; X_M32(c.r[4]) = 0x3F9BF7;
         X_M32(c.r[4] + 4) = 0x406D9C; X_M32(c.r[4] + 8) = 6;
         X_M32(c.r[4] + 12) = 1; X_M32(c.r[4] + 16) = X_M32(c.r[4] + 20) = 0;
