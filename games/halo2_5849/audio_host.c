@@ -21,6 +21,11 @@ typedef struct {
     uint64_t committed_bytes;
 } h2_audio_buffer;
 static h2_audio_buffer buffers[XA_MAX_VOICES];
+typedef struct {
+    uint32_t base, references, callback, context, packet_limit, headroom;
+    int voice;
+} h2_audio_stream;
+static h2_audio_stream streams[XA_MAX_VOICES];
 extern uint32_t h2_platform_fpscr_read(void);
 extern void h2_platform_fpscr_write(uint32_t);
 extern void xv_logf(const char *, ...);
@@ -63,6 +68,8 @@ static int overlaps_device(uint32_t address, uint32_t bytes)
     for (unsigned i = 0; i < XA_MAX_VOICES; ++i)
         if (page_overlap(address, bytes, buffers[i].base, 4096) ||
             page_overlap(address, bytes, buffers[i].mirror, buffers[i].mirror_bytes)) return 1;
+    for (unsigned i = 0; i < XA_MAX_VOICES; ++i)
+        if (page_overlap(address, bytes, streams[i].base, 4096)) return 1;
     return 0;
 }
 static void output(xctx *c, uint32_t ip, uint32_t address, uint32_t bytes)
@@ -242,6 +249,106 @@ static void buffer_create(xctx *c)
     xv_logf("[h2/audio-buffer] create caller=%08X interface=%08X voice=%u PCM16 stereo44100 parent_refs=%u\n",
             X_M32(c->r[4]), handle, voice, device.references);
     result(c, 0, 4);
+}
+static h2_audio_stream *stream_live(xctx *c, uint32_t ip, uint32_t object)
+{
+    buffer_operational(c, ip); live(c, ip, device.base, 1);
+    for (unsigned i = 0; i < XA_MAX_VOICES; ++i) {
+        h2_audio_stream *s = streams + i;
+        if (!s->base || s->base != object) continue;
+        if (!s->references || !mapped(s->base, 4096) || X_M32(s->base) != 0x417170 ||
+            X_M32(s->base + 4) != 0x417160 || X_M32(s->base + 8) != s->references ||
+            !device.children || device.references < device.children)
+            fail(c, ip, "stream identity", object);
+        return s;
+    }
+    fail(c, ip, "unknown stream", object); return NULL;
+}
+static void stream_create(xctx *c)
+{
+    const uint32_t ip = 0x37D4E2;
+    stack(c, ip, 4); live(c, ip, X_ARG(0), 0); buffer_operational(c, ip);
+    uint32_t desc = X_ARG(1), out = X_ARG(2), fields[6];
+    output(c, ip, out, 4);
+    if (X_M32(c->r[4]) != 0x2AE692 || X_ARG(3) || !mapped(desc, sizeof fields))
+        fail(c, ip, "stream caller/descriptor", desc);
+    x_guest_read(fields, desc, sizeof fields);
+    if (fields[0] != 0x20000000 || fields[1] != 2 || fields[3] != 0x220730 || fields[5])
+        fail(c, ip, "unsupported stream description", fields[0]);
+    uint8_t format[20] = {0};
+    if (!mapped(fields[2], 18)) fail(c, ip, "stream format mapping", fields[2]);
+    x_guest_read(format, fields[2], 18);
+    uint32_t format_bytes = format[0] == 0x69 ? 20 : 18;
+    if (!mapped(fields[2], format_bytes)) fail(c, ip, "stream format extension", fields[2]);
+    x_guest_read(format, fields[2], format_bytes);
+    /* Original 21E410 builds these three exact formats. Reject everything
+     * else before the shared mixer's permissive format parser can see it. */
+    const uint8_t formats[3][20] = {
+        {0x69,0,1,0,0x44,0xAC,0,0,0xE4,0x60,0,0,36,0,4,0,2,0,64,0},
+        {0x69,0,2,0,0x44,0xAC,0,0,0xC8,0xC1,0,0,72,0,4,0,2,0,64,0},
+        {1,0,2,0,0x44,0xAC,0,0,0x10,0xB1,2,0,4,0,16,0,0,0,0,0}
+    };
+    unsigned kind;
+    for (kind = 0; kind < 3 && memcmp(format, formats[kind], 20); ++kind) {}
+    if (kind == 3) fail(c, ip, "unsupported stream format", fields[2]);
+    if (aliases(out, 4, c->r[4], 20) || aliases(out, 4, desc, 24) || aliases(out, 4, fields[2], format_bytes))
+        fail(c, ip, "stream output alias", out);
+    if (device.references == UINT32_MAX) fail(c, ip, "stream parent reference overflow", device.references);
+    unsigned index;
+    for (index = 0; index < XA_MAX_VOICES && streams[index].base; ++index) {}
+    if (index == XA_MAX_VOICES) { result(c, 0x8007000E, 4); return; }
+    uint32_t base = xk_mem_alloc(4096, 4096, 0, 0, 0);
+    if (!base) { result(c, 0x8007000E, 4); return; }
+    if ((base & 4095) || !mapped(base, 4096) || overlaps_device(base, 4096) ||
+        page_overlap(base, 4096, c->r[4], 20) || page_overlap(base, 4096, out, 4) ||
+        page_overlap(base, 4096, desc, 24) || page_overlap(base, 4096, fields[2], format_bytes))
+        fail(c, ip, "stream allocation mapping/alias", base);
+    x_guest_write(base + 64, format, 20);
+    int voice = xk_audio_voice_new(2, base + 64);
+    if (voice < 0) {
+        if (xk_mem_free(base) < 0) fail(c, ip, "stream allocation rollback", base);
+        result(c, 0x8007000E, 4); return;
+    }
+    xk_audio_lock(); xk_audio_voice_set_volume_db100(voice, -600); xk_audio_unlock();
+    streams[index] = (h2_audio_stream){base, 1, fields[3], fields[4], fields[1], 600, voice};
+    X_M32(base) = 0x417170; X_M32(base + 4) = 0x417160; X_M32(base + 8) = 1;
+    ++device.children; X_M32(device.base + 4) = ++device.references;
+    x_guest_write(out, &base, 4);
+    xv_logf("[h2/audio-stream] create caller=%08X object=%08X voice=%u format=%u channels=%u packet_limit=2 callback=%08X context=%u parent_refs=%u; empty real mixer voice, packet/DSP routing unsupported\n",
+            X_M32(c->r[4]), base, voice, kind, format[2], fields[3], fields[4], device.references);
+    result(c, 0, 4);
+}
+static void stream_reference(xctx *c, uint32_t ip)
+{
+    stack(c, ip, 1); h2_audio_stream *s = stream_live(c, ip, X_ARG(0));
+    uint32_t count = s->references;
+    if (ip == 0x37AB40) {
+        if (count == UINT32_MAX) fail(c, ip, "stream reference overflow", count);
+        X_M32(s->base + 8) = s->references = ++count;
+    } else if (count > 1) {
+        X_M32(s->base + 8) = s->references = --count;
+    } else {
+        /* No Process call is accepted yet; all supported streams are empty.
+         * Free takes the mixer lock before releasing their guest storage. */
+        xk_audio_lock(); int playing = xk_audio_voice_playing(s->voice); xk_audio_unlock();
+        if (playing) fail(c, ip, "stream release requires completed packet ownership", s->base);
+        xk_audio_voice_free(s->voice);
+        if (xk_mem_free(s->base) < 0) fail(c, ip, "free stream", s->base);
+        *s = (h2_audio_stream){0}; --device.children; drop_device(c, ip); count = 0;
+    }
+    result(c, count, 1);
+}
+static void stream_headroom(xctx *c)
+{
+    const uint32_t ip = 0x37B818;
+    stack(c, ip, 2); h2_audio_stream *s = stream_live(c, ip, X_ARG(0));
+    if (X_ARG(1)) fail(c, ip, "unsupported stream headroom", X_ARG(1));
+    /* Original 37A629 replaces the stored attenuation and adjusts total gain.
+     * The observed zero request removes the default 600 hundredths of dB. */
+    xk_audio_lock(); xk_audio_voice_set_volume_db100(s->voice, 0); xk_audio_unlock();
+    s->headroom = 0;
+    xv_logf("[h2/audio-stream] headroom object=%08X caller=%08X real mixer attenuation=0dB\n", s->base, X_M32(c->r[4]));
+    result(c, 0, 2);
 }
 static void buffer_data(xctx *c)
 {
@@ -659,6 +766,9 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
 {
     uint32_t fpscr = h2_platform_fpscr_read();
     switch (ip) {
+    case 0x37D4E2: stream_create(c); break;
+    case 0x37AB40: case 0x37AB87: stream_reference(c, ip); break;
+    case 0x37B818: stream_headroom(c); break;
     case 0x37D598: case 0x37D54E: listener_vector(c, ip); break;
     case 0x37D797: create(c); break;
     case 0x37A14F: case 0x37C70F: case 0x379F45: case 0x37A795: reference(c, ip); break;

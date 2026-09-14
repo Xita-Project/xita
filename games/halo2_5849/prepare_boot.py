@@ -15,6 +15,24 @@ from games.halo2_5849.hooks import reviewed_sparse_jump_roots
 
 
 HOST_CALLBACK_WALK = (0x3FBA54, 135, "e0cc1649c0b744615b3de0f5b2446411bb408d0b3ce4d1d3da59980219abc70c")
+STREAM_VTABLE = (0x417170, 28, "72cb68310880069f79f94d33bfd78c04aae9b0b48e2d4b623612bd88cd1a53c9")
+
+
+def audio_stream_roots(image):
+    """Seven original stream interface slots; unknown APIs retain strict guards."""
+    address, length, digest = STREAM_VTABLE
+    if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+        raise ValueError("Halo 2 stream vtable fingerprint mismatch")
+    roots = set()
+    for slot in range(address, address + length, 4):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != "DSOUND":
+            raise ValueError("Halo 2 stream vtable target is not DSOUND code")
+        roots.add(target)
+    return roots
+
+
 XPP_CALLBACK_WALK = (0x408C72, 36, "9234a2afaedda5206ca55c2bf3f0269b70b1b0345091581c639ee86230cd3756")
 GAME_INIT_WALK = (0x137C84, 19, "44c1c20adf4bb014714a0825d601e592e668699e31671c7676a674951946da02")
 GAME_MAP_WALKS = (
@@ -442,6 +460,7 @@ def main():
         profile = str(Path(__file__).with_name("audio-host-profile.json"))
         # Header AddRef/Release are reached through the exact original vtable.
         roots.update((0x37A14F, 0x37C70F))
+        roots.update(audio_stream_roots(image))
     subprocess.run([sys.executable, "-m", "recompiler", str(args.xbe.resolve()),
                     "--profile", profile, "--no-data-roots", "--trace-calls", "--trace-funcs",
                     "--files", "128", "-o", str(generated),

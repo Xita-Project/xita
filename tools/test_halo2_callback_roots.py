@@ -30,6 +30,26 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_stream_interface_bounds_and_revision(self):
+        image = SyntheticImage(); image.section_name = "DSOUND"
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x200, 0x21C, 4))}
+        image.code = bytes(28)
+        guard = (0x200, 28, hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "STREAM_VTABLE", guard):
+            self.assertEqual(prepare_boot.audio_stream_roots(image), set(image.targets.values()))
+            image.section_name = ".text"
+            with self.assertRaisesRegex(ValueError, "DSOUND code"):
+                prepare_boot.audio_stream_roots(image)
+            image.section_name = "DSOUND"; image.bad_code = 0x1030
+            with self.assertRaisesRegex(ValueError, "DSOUND code"):
+                prepare_boot.audio_stream_roots(image)
+            image.bad_code = None; image.targets[0x204] = 0
+            with self.assertRaisesRegex(ValueError, "DSOUND code"):
+                prepare_boot.audio_stream_roots(image)
+            image.code = bytes([1]) * 28
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.audio_stream_roots(image)
+
     def test_resource_lifecycle_three_record_walks(self):
         image = SyntheticImage(); image.section_name = ".text"
         bases = (0x4674A4, 0x4674A8, 0x4674B8)

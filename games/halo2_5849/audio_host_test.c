@@ -45,6 +45,7 @@ int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write)
 /* Device-only failure fixtures must not allocate or mutate a buffer voice. */
 int xk_audio_voice_new(int kind, uint32_t format) { (void)kind; (void)format; assert(0); return -1; }
 void xk_audio_voice_free(int v) { (void)v; assert(0); }
+int xk_audio_voice_playing(int v) { (void)v; assert(0); return 0; }
 void xk_audio_voice_set_data(int v, uint32_t data, uint32_t bytes) { (void)v; (void)data; (void)bytes; assert(0); }
 void xk_audio_voice_set_volume_db100(int v, int32_t db) { (void)v; (void)db; assert(0); }
 void xk_audio_voice_set_frequency(int v, uint32_t hz) { (void)v; (void)hz; assert(0); }

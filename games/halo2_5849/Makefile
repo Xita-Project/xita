@@ -147,6 +147,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/audio_buffer_test
 	$(BUILD)/audio_host_test
 	$(BUILD)/audio_dsp_test
+	$(BUILD)/audio_stream_test
 	$(BUILD)/audio_effects_failure_test
 	$(BUILD)/audio_vita_test
 	$(BUILD)/audio_progress_test
@@ -193,6 +194,10 @@ $(BUILD)/audio_dsp_test: audio_dsp_test.c audio_buffer_test.c audio_host.c audio
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_dsp_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
 test-host: $(BUILD)/audio_dsp_test
+$(BUILD)/audio_stream_test: audio_stream_test.c audio_buffer_test.c audio_host.c audio_host.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_stream_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
+test-host: $(BUILD)/audio_stream_test
 $(BUILD)/audio_multibin_failure_test: audio_buffer_test.c audio_host.c audio_host.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -DH2_AUDIO_MULTIBIN_UNAVAILABLE=1 -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_buffer_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
