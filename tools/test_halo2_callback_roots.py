@@ -30,6 +30,38 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_resource_lifecycle_three_record_walks(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        bases = (0x4674A4, 0x4674A8, 0x4674B8)
+        image.targets = {base + n * 0x38: 0x1000 + (n * 3 + phase) * 16
+                         for phase, base in enumerate(bases) for n in range(3)}
+        expected = set(image.targets.values())
+        for base in bases:
+            image.targets[base + 3 * 0x38] = None
+        for n in range(3):
+            image.targets[0x467498 + n * 0x38] = None  # metadata, never code
+            image.targets[0x4674AC + n * 0x38] = None  # unreviewed field
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_RESOURCE_WALKS", (spec,) * 3):
+            self.assertEqual(prepare_boot.game_resource_callback_roots(image), expected)
+            for base in bases:
+                last = base + 2 * 0x38; saved = image.targets[last]
+                image.targets[last] = 0
+                self.assertEqual(prepare_boot.game_resource_callback_roots(image), expected - {saved})
+                for bad in (None, 0xDEAD):
+                    image.targets[last] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_resource_callback_roots(image)
+                image.targets[last] = saved; image.bad_code = None
+            image.section_name = "DATA"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_resource_callback_roots(image)
+        for which in range(3):
+            specs = [spec] * 3; specs[which] = (0x200, len(image.code), "0" * 64)
+            with patch.object(prepare_boot, "GAME_RESOURCE_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_resource_callback_roots(image)
+
     def test_map_lifecycle_fields_bounds_nulls_and_revision(self):
         image = SyntheticImage(); image.section_name = ".text"
         bases = (0x440DE0, 0x440DE4, 0x440DE8, 0x440DEC)

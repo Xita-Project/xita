@@ -23,6 +23,11 @@ GAME_MAP_WALKS = (
     (0x137D7B, 28, "a96f07c6fb9bebebfe3c9c11c3991c16c39ea99e73e03f0e281734cf1549cf06"),
     (0x137DA1, 24, "602be11a670b15871af4b680707d5daef495dfe3c96e1397204b8e5f580dd7d2"),
 )
+GAME_RESOURCE_WALKS = (
+    (0xD48A1, 29, "0791d3646b316f6c184aabc27feed7cb52baae825f512b69619b288d7e6e06c2"),
+    (0xD48D2, 28, "0590129ef3b973f39b577ebb22e78a02e28b830fd15d1810386c95aab9c7738d"),
+    (0xD4DB7, 25, "1bfc7777b7aa974c521ed9f9a02992ddd431597af8c68e9dc9d1070988637ef8"),
+)
 GAME_DESCRIPTOR_WALK = (0x1088E0, 124, "c1bf2193fbf5a7f7a8d0de9fffaaf9ee5cbe12ced08b39059af29896540348ec")
 GAME_MODE_WALK = (0x18EF00, 152, "c499facfbe49993ebd3e15bb55a4f65adafb4bfd53eb99474ba7bb96ad3f8102")
 GAME_INTERFACE_REGISTRATION = (0x3769F0, 45, "46e548c6c8f362dc1ba57b6f7581a1b2c0bffb4b2cb9c2e812dcc7b9544b1611")
@@ -253,6 +258,29 @@ def game_map_callback_roots(image):
     return roots
 
 
+def game_resource_callback_roots(image):
+    """Native84: three original three-record walks, each at stride0x38.
+
+    Only the called fields at 4674A4, 4674A8 and 4674B8 are followed. The
+    metadata, other lifecycle fields and following records are not scanned.
+    """
+    for address, length, digest in GAME_RESOURCE_WALKS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 resource callback walk fingerprint mismatch")
+    roots = set()
+    for base in (0x4674A4, 0x4674A8, 0x4674B8):
+        for index in range(3):
+            slot = base + index * 0x38
+            target = image.u32(slot)
+            if target == 0:
+                continue
+            section = image.section_of(target) if target else None
+            if not target or not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError(f"Halo 2 resource callback slot {slot:#x} has invalid target")
+            roots.add(target)
+    return roots
+
+
 def host_device_callback_roots(image):
     """Native37 XPP dispatch: six descriptor slots, initialization at +4."""
     address, length, digest = XPP_CALLBACK_WALK
@@ -357,6 +385,7 @@ def main():
         roots.update(image.u32(slot) for slot in range(0x4170E4, 0x4170F4, 4))
         roots.update(game_initialization_roots(image))
         roots.update(game_map_callback_roots(image))
+        roots.update(game_resource_callback_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
         roots.add(image.u32(image.u32(0x477058) + 0x10))
