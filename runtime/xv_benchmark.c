@@ -10,6 +10,8 @@ void xv_matrix_neon_override(int enabled) __attribute__((weak));
 void xv_object_scan_override(int enabled) __attribute__((weak));
 void xv_hle_dispatch_override(int enabled) __attribute__((weak));
 void xv_flare_query_overlap_override(int enabled) __attribute__((weak));
+void xv_guest_affinity_override(int) __attribute__((weak));
+int xv_guest_affinity_valid(void) __attribute__((weak));
 enum { SETTLE=60, MEASURE=120, PHASES=3 };
 static const unsigned heights[PHASES]={544,360,544};
 static struct {
@@ -25,7 +27,7 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_FLARE_QUERY_OVERLAP||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_GUEST_AFFINITY||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
 #ifndef XV_NATIVE_OBJECT_BASIS
     if(kind==XV_BENCH_OBJECT_BASIS)return -1;
 #endif
@@ -37,6 +39,7 @@ int xv_benchmark_remote_request(unsigned kind)
     if(kind==XV_BENCH_OBJECT_SCAN&&!xv_object_scan_override)return -1;
     if(kind==XV_BENCH_FLARE_QUERY_OVERLAP&&!xv_flare_query_overlap_override)return -1;
     if(kind==XV_BENCH_HLE_DISPATCH&&!xv_hle_dispatch_override)return -1;
+    if(kind==XV_BENCH_GUEST_AFFINITY&&(!xv_guest_affinity_override||!xv_guest_affinity_valid))return -1;
     unsigned expected=0;
     return __atomic_compare_exchange_n(&request_state,&expected,kind,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)?0:-1;
 }
@@ -71,6 +74,7 @@ int xv_benchmark_compare_point_math(void) { return remote_kind==XV_BENCH_POINT_M
 int xv_benchmark_compare_matrix_neon(void) { return remote_kind==XV_BENCH_MATRIX_NEON; }
 int xv_benchmark_compare_object_scan(void) { return remote_kind==XV_BENCH_OBJECT_SCAN; }
 int xv_benchmark_compare_flare_query_overlap(void) { return remote_kind==XV_BENCH_FLARE_QUERY_OVERLAP; }
+int xv_benchmark_compare_guest_affinity(void) { return remote_kind==XV_BENCH_GUEST_AFFINITY; }
 int xv_benchmark_compare_hle_dispatch(void) { return remote_kind==XV_BENCH_HLE_DISPATCH; }
 int xv_benchmark_compare_early_visibility(void) { return remote_kind==XV_BENCH_EARLY_VISIBILITY; }
 int xv_benchmark_compare_object_basis(void)
@@ -97,6 +101,7 @@ static int native_math_selected(void)
 }
 static int candidate_available(void)
 {
+    if (xv_benchmark_compare_guest_affinity()) return xv_guest_affinity_override && xv_guest_affinity_valid;
     if (xv_benchmark_compare_object_scan()) return xv_object_scan_override != 0;
     if (xv_benchmark_compare_flare_query_overlap()) {
         const char *defer=getenv("XV_FLARE_DEFER"), *stale=getenv("XV_VIS_STALE");
@@ -163,7 +168,8 @@ int xv_benchmark_compare_draw_scan(void)
     return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_flare_query_overlap() ? "flare-query-overlap-compare" :
+    (xv_benchmark_compare_guest_affinity() ? "guest-affinity-compare" :
+     xv_benchmark_compare_flare_query_overlap() ? "flare-query-overlap-compare" :
      xv_benchmark_compare_hle_dispatch() ? "hle-dispatch-compare" :
      xv_benchmark_compare_object_scan() ? "object-scan-compare" :
      xv_benchmark_compare_texture_state() ? "texture-state-compare" :
@@ -203,7 +209,9 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
             xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_flare_query_overlap())
+            if (xv_benchmark_compare_guest_affinity())
+                xv_logf("[guest-affinity-compare] start original/core-2/original at %up; presenting guest thread only; exact original mask restored; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_flare_query_overlap())
                 xv_logf("[flare-query-overlap-compare] start off/on/off at %up; retain exact query generations across new query recording; brightness, identity and Present still drain; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_hle_dispatch())
                 xv_logf("[hle-dispatch-compare] start off/on/off at %up; reuse immutable HLE lookup results; guest-first priority, callbacks and tracing retained; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
@@ -230,6 +238,7 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         publish();return phase_height();
     }
     if(!b.active||b.configuring)return 0;
+    if(xv_benchmark_compare_guest_affinity() && !xv_guest_affinity_valid())return restore("affinity API failure");
     if(b.cancel||!valid)return restore(b.cancel?"cancelled":"view unavailable");
     b.frames++;
     if(b.frames==SETTLE) {

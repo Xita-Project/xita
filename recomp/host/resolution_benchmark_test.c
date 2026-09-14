@@ -4,6 +4,11 @@
 void xv_logf(const char *fmt,...) { (void)fmt; }
 static int optimization=-1;
 static unsigned switches;
+static int affinity_ok=1;
+#ifndef TEST_NO_GUEST_AFFINITY
+void xv_guest_affinity_override(int enabled) { (void)enabled; }
+int xv_guest_affinity_valid(void) { return affinity_ok; }
+#endif
 #ifndef TEST_NO_FLARE_QUERY_OVERLAP
 void xv_flare_query_overlap_override(int enabled) { (void)enabled; }
 #endif
@@ -115,7 +120,7 @@ int main(void)
     xv_benchmark_remote_poll(0);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==-1);
     xv_benchmark_remote_poll(1);
-    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_FLARE_QUERY_OVERLAP+1)==-1);
+    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_GUEST_AFFINITY+1)==-1);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==0 && !b.request && !b.active);
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_remote_poll(0);assert(!xv_benchmark_remote_busy());
@@ -126,9 +131,12 @@ int main(void)
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_toggle();assert(xv_benchmark_step(now,544,1,view)==360);
     xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
-    unsigned kinds[]={XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
+    unsigned kinds[]={XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
     for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++) {
         int compiled=1;
+#ifdef TEST_NO_GUEST_AFFINITY
+        if(kinds[i]==XV_BENCH_GUEST_AFFINITY)compiled=0;
+#endif
 #ifdef TEST_NO_FLARE_QUERY_OVERLAP
         if(kinds[i]==XV_BENCH_FLARE_QUERY_OVERLAP)compiled=0;
 #endif
@@ -155,6 +163,7 @@ int main(void)
         xv_benchmark_remote_poll(1);
         assert(xv_benchmark_compare_point_math()==(kinds[i]==XV_BENCH_POINT_MATH));
         assert(xv_benchmark_compare_matrix_neon()==(kinds[i]==XV_BENCH_MATRIX_NEON));
+        assert(xv_benchmark_compare_guest_affinity()==(kinds[i]==XV_BENCH_GUEST_AFFINITY));
         assert(xv_benchmark_compare_flare_query_overlap()==(kinds[i]==XV_BENCH_FLARE_QUERY_OVERLAP));
         assert(xv_benchmark_compare_hle_dispatch()==(kinds[i]==XV_BENCH_HLE_DISPATCH));
         assert(xv_benchmark_compare_object_scan()==(kinds[i]==XV_BENCH_OBJECT_SCAN));
@@ -178,6 +187,13 @@ int main(void)
         assert(switches==previous_switches && !xv_benchmark_remote_busy() && !b.active);
         unsetenv(keys[i]);
     }
+#endif
+#ifndef TEST_NO_GUEST_AFFINITY
+    xv_benchmark_remote_poll(1);
+    assert(!xv_benchmark_remote_request(XV_BENCH_GUEST_AFFINITY));xv_benchmark_remote_poll(1);
+    assert(xv_benchmark_step(now,360,1,view)==360);xv_benchmark_applied(now,360);
+    affinity_ok=0;assert(xv_benchmark_step(now,360,1,view)==360);
+    assert(optimization==-1);xv_benchmark_applied(now,360);assert(!xv_benchmark_active());affinity_ok=1;
 #endif
     puts("PASS: remote admission, guest-owner consumption, menu rejection, explicit candidate priority, incompatible modes, unavailable builds and cancellation restore");
 }

@@ -38,6 +38,7 @@ def benchmark_cases(tmp):
             assert not self.active
         def hold(self, buttons, duration):
             self.active = True
+            if self.mode == "affinity-failure": self.records += "[guest-affinity] failure restoring mask\n"
             if self.mode != "missing-result":
                 self.records += "[" + self.kind + "-compare] result off-before 10.000 on 12.000 off-after 10.000 fps comparable-view " + ("0" if self.mode == "camera" else "1") + "\n"
         def pad(self):
@@ -60,8 +61,17 @@ def benchmark_cases(tmp):
         if mode != "success":
             assert result["error"]
     with patch("vita_remote.time.sleep",lambda _:None):
-        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap'):
+        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap','guest-affinity'):
             benchmark(Fake('success', kind),tmp/('selected-'+kind),1,30,kind)
+        failed=Fake('affinity-failure','guest-affinity')
+        try: benchmark(failed,tmp/'failed-affinity',1,30,'guest-affinity')
+        except RuntimeError as error: assert 'Affinity' in str(error)
+        else: raise AssertionError('Failed affinity change accepted as valid measurement')
+        assert failed.released
+        historical=Fake('success','guest-affinity')
+        historical.records='[guest-affinity] failure from an earlier test\n'
+        benchmark(historical,tmp/'historical-affinity-failure',1,30,'guest-affinity')
+
 
 
 def main():
@@ -185,7 +195,7 @@ def main():
             assert request('/benchmark?kind=unknown','POST')[0]==400
             assert request('/benchmark?kind=model-palette&kind=flare','POST')[0]==400
             assert request('/benchmark?kind=model-palette','POST',token='f'*32)[0]==403
-            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap'):
+            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap','guest-affinity'):
                 assert request('/benchmark?kind='+kind,'POST')[0]==204
                 assert request('/benchmark?kind='+kind,'POST')[0]==409
                 assert request('/screen')[0]==request('/update')[0]==409

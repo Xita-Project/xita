@@ -14,7 +14,7 @@ import zipfile
 
 BUTTONS = dict(select=1, start=8, up=16, right=32, down=64, left=128,
                l=256, r=512, triangle=4096, circle=8192, cross=16384, square=32768)
-BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap")
+BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity")
 RESULT = re.compile(r"\[([a-z-]+-compare|resolution-test)\] result (?:off-before|544-before) ([\d.]+) (?:on|360) ([\d.]+) (?:off-after|544-after) ([\d.]+) fps comparable-view ([01])")
 RESTORED = re.compile(rb"\[(?:[a-z-]+-compare|resolution-test)\] restored [^\n]*\n")
 
@@ -218,9 +218,13 @@ def benchmark(client, out, runs, timeout, kind=None):
                 raise RuntimeError("Benchmark deadline exceeded; no completed result claimed")
             client.wait_benchmark_log(log_offset)
             logfile = out / f"trial-{i+1}.log"
+            trial_offset=log_offset
             client.log(logfile)
             log_offset=logfile.stat().st_size
-            matches = RESULT.findall(logfile.read_text(errors="replace"))
+            text = logfile.read_text(errors="replace")
+            if kind=="guest-affinity" and "[guest-affinity] failure" in logfile.read_bytes()[trial_offset:].decode(errors="replace"):
+                raise RuntimeError("Affinity change or restoration failed; no valid comparison claimed")
+            matches = RESULT.findall(text)
             if len(matches) != prior + 1:
                 raise RuntimeError("Expected one fresh benchmark result; cancelled/incomplete run or restarted application")
             tag, before, on, after, comparable = matches[-1]

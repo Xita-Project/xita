@@ -128,3 +128,37 @@ void xv_cpu_poll(uint64_t now_us)
     g_cpu_previous = info; g_cpu_previous_time = now_us; g_cpu_have_previous = 1;
     __atomic_store_n(&g_cpu_usage, usage, __ATOMIC_RELEASE);
 }
+
+#ifdef XV_GUEST_AFFINITY
+/* Benchmark owner only. Keep the original mask, including SDK default zero.
+ * Only the thread that presents guest frames changes; workers and cooperative
+ * fiber handoffs retain their existing ownership and ordering. */
+static SceUID affinity_thread=-1;
+static int affinity_original, affinity_failed;
+int xv_guest_affinity_valid(void) { return !affinity_failed; }
+void xv_guest_affinity_override(int value)
+{
+    if(value<0) {
+        if(affinity_thread<0)return;
+        int rc=sceKernelChangeThreadCpuAffinityMask(affinity_thread,affinity_original);
+        if(rc<0 || sceKernelGetThreadCpuAffinityMask(affinity_thread)!=affinity_original) { affinity_failed=1; xv_logf("[guest-affinity] failure restoring thread=%08X rc=%08X\n",(unsigned)affinity_thread,(unsigned)rc); return; }
+        xv_logf("[guest-affinity] restored thread=%08X mask=%08X\n",(unsigned)affinity_thread,(unsigned)affinity_original);
+        affinity_thread=-1;return;
+    }
+    SceUID current=sceKernelGetThreadId();
+    if(affinity_thread<0) {
+        affinity_failed=0;
+        if(value!=0) { affinity_failed=1;return; }
+        int mask=sceKernelGetThreadCpuAffinityMask(current);
+        if(mask<0) { affinity_failed=1; xv_logf("[guest-affinity] failure reading original mask rc=%08X\n",(unsigned)mask); return; }
+        affinity_thread=current;affinity_original=mask;
+    }
+    if(current!=affinity_thread) { affinity_failed=1; xv_logf("[guest-affinity] failure: presenting thread changed\n");return; }
+    int mask=value ? SCE_KERNEL_CPU_MASK_USER_2 : affinity_original;
+    int rc=sceKernelChangeThreadCpuAffinityMask(current,mask);
+    if(rc<0 || sceKernelGetThreadCpuAffinityMask(current)!=mask) {
+        affinity_failed=1;xv_logf("[guest-affinity] failure setting thread=%08X mask=%08X rc=%08X\n",(unsigned)current,(unsigned)mask,(unsigned)rc);return;
+    }
+    xv_logf("[guest-affinity] thread=%08X mask=%08X original=%08X\n",(unsigned)current,(unsigned)mask,(unsigned)affinity_original);
+}
+#endif

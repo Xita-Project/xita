@@ -463,3 +463,16 @@ test-hle-dispatch: build/hle_dispatch_cache_test build/hle_dispatch_untraced_tes
 build/no_flare_query_overlap_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_FLARE_QUERY_OVERLAP resolution_benchmark_test.c -lm -o $@
+
+.PHONY: test-guest-affinity
+test-guest-affinity: build/guest_affinity_test build/no_guest_affinity_benchmark_test
+	./build/guest_affinity_test
+	./build/no_guest_affinity_benchmark_test
+
+build/guest_affinity_test: ../../tools/tests/guest_affinity.c ../../runtime/xv_cpu.c
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include ../../tools/tests/guest_affinity.c -Wl,--gc-sections -o $@
+
+build/no_guest_affinity_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_GUEST_AFFINITY resolution_benchmark_test.c -lm -o $@

@@ -90,3 +90,24 @@ CPU preparation and rendering costs in broad views.
 
 Private logs, screenshots, elapsed-time analysis and package receipts are under
 `2026-09-13-worker-sizing/validation/hardware-updater-20260914T122650Z/flare-query-overlap`.
+
+## Campaign follow-up
+
+The CPU-log correction package
+`5e5e120eeea33e0f11a51ac9f63b05f69df526c99424a7883c5c9f8039f06619`
+booted through the updater on both emulator and physical Vita. Ordinary campaign
+menus entered the Pillar of Autumn cryo room. Three emulator comparisons completed
+and restored the option; they are integration checks, not hardware speed claims.
+
+Three physical cryo-room comparisons measured 6.133 FPS off versus 6.113 FPS on,
+a mean **0.543 ms/frame regression** (individual changes: -0.692, -0.898 and
+-0.039 ms saved). Flare waits were already nearly zero. The option remains off by
+default. This result reinforces that the Blood Gulch gains cannot be generalized
+to campaign performance.
+
+The room records roughly 430 draws/frame and 35 ms/frame in vertex-stream
+preparation, with core 2 frequently near full utilization. The final GPU
+completion latency is about 63 ms but overlaps other work; it is not an extra
+63 ms to add to CPU time. Frame-slot acquisition reported no busy-slot waits.
+The next checks are indexed vertex validation and presenting-thread affinity,
+followed by identifying an immutable boundary for heavier preparation work.
