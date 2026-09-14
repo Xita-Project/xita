@@ -11,6 +11,7 @@ static unsigned test_fx_bound, test_fx_routes, test_fx_playing;
 static unsigned test_fx_mask(unsigned key)
 {
     if (key == 13) return 1;
+    if (key >= 15 && key <= 22) return 1u << (7 + key - 15);
     unsigned bin = key & 0xffff; assert(bin >= 23 && bin <= 25);
     return 1u << (1 + (bin - 23) * 2 + !!(key & 0x10000));
 }
@@ -24,6 +25,10 @@ static unsigned test_fx23_output_mask, test_fx24_output_mask, test_fx25_routed;
 static unsigned test_fx23_muted, test_fx24_muted, test_fx25_muted;
 int h2_audio_backend_fx_route_mask(unsigned key, unsigned output_mask)
 {
+    if (key >= 15 && key <= 22) {
+        unsigned mask = test_fx_mask(key); assert(test_fx_bound == mask * 2 - 1 && test_fx_playing == mask - 1);
+        assert(output_mask == (1u << (6 + (key - 15) % 4))); return 0;
+    }
     assert(test_fx_bound == 127 && test_fx_playing == 127);
     if (key == 23) { assert(output_mask == 64); test_fx23_output_mask = output_mask; }
     else if (key == 24) { assert(output_mask == 128 && test_fx23_muted); test_fx24_output_mask = output_mask; }

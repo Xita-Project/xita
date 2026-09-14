@@ -4,6 +4,7 @@
 unsigned h2_audio_fx_mask(unsigned key)
 {
     if (key == 13) return 1;
+    if (key >= 15 && key <= 22) return 1u << (7 + key - 15);
     for (unsigned bin = 23; bin <= 25; ++bin) {
         unsigned bit = 1u << (1 + (bin - 23) * 2);
         if (key == bin) return bit;
@@ -12,13 +13,14 @@ unsigned h2_audio_fx_mask(unsigned key)
     return 0;
 }
 static unsigned source_index(unsigned mask) { return mask ? (unsigned)__builtin_ctz(mask) : 0; }
-static unsigned source_bin(unsigned index) { return index == 0 ? 13 : 23 + (index - 1) / 2; }
+static unsigned source_bin(unsigned index) { return index == 0 ? 13 : index < 7 ? 23 + (index - 1) / 2 : 15 + index - 7; }
 static int spatial_key(unsigned key) { return key >= H2_FX_SPATIAL23 && key <= H2_FX_SPATIAL25; }
 int h2_audio_fx_bind(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin)
 {
     unsigned mask = h2_audio_fx_mask(bin); int32_t source[32];
     if (!fx || !mask || spatial_key(bin) || (fx->bound & mask) || (fx->engine && fx->engine != engine) ||
         (bin != 13 && (fx->bound != mask - 1 || fx->playing != mask - 1)) ||
+        (bin >= 15 && bin <= 22 && fx->filtered != 3) ||
         !h2_dsp_read_fx_frame(engine, bin, source)) return 0;
     fx->engine = engine; fx->bound |= mask;
     fx->sources[source_index(mask)] = (h2_audio_fx_source){.routes = 2, .output_mask = 3};
@@ -42,6 +44,12 @@ int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes)
 }
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned key, unsigned output_mask)
 {
+    if (key >= 15 && key <= 22) {
+        unsigned mask = h2_audio_fx_mask(key), index = source_index(mask);
+        if (!fx || fx->filtered != 3 || fx->bound != mask * 2 - 1 || fx->playing != mask - 1 ||
+            output_mask != (1u << (6 + (key - 15) % 4))) return 0;
+        fx->sources[index].routes = 1; fx->sources[index].output_mask = output_mask; return 1;
+    }
     if (!fx || fx->bound != 127 || fx->playing != 127) return 0;
     unsigned index, count;
     if (key == 23 && output_mask == 64) { index = 1; count = 4; }
@@ -79,7 +87,7 @@ int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin)
 {
     unsigned mask = h2_audio_fx_mask(bin), index = source_index(mask);
     if (!fx || !mask || !(fx->bound & mask) || (fx->playing & mask) ||
-        fx->sources[index].routes != (bin == 13 ? 6u : spatial_key(bin) ? 5u : 2u)) return 0;
+        fx->sources[index].routes != (bin == 13 ? 6u : bin >= 15 && bin <= 22 ? 1u : spatial_key(bin) ? 5u : 2u)) return 0;
     fx->playing |= mask; return 1;
 }
 int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin)
@@ -101,7 +109,7 @@ static int mix_full_loop(h2_audio_fx *fx, int32_t bins[32][32])
      * creation order as one deterministic reference worker, retaining float
      * contributions until the final GP conversion (not per-voice clipping). */
     for (unsigned v = H2_FX_SOURCES; v-- > 0;) if (fx->playing & (1u << v)) {
-        if (v && !(v & 1)) {
+        if (v && v < 7 && !(v & 1)) {
             float filtered[32]; h2_hrtf_frame_float(&fx->spatial[(v - 2) / 2], sources[v], filtered);
             /* Muting changes gains only: the active voice still reads and
              * advances its filter history before contributing zero. */

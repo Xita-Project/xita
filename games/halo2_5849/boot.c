@@ -566,6 +566,10 @@ _Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32
                 (unsigned long long)backend.fx_source_submitted[index], (unsigned long long)backend.fx_source_consumed[index],
                 (unsigned long long)backend.fx_source_submitted[index+1], (unsigned long long)backend.fx_source_consumed[index+1]);
     }
+    for (unsigned bin = 15; bin <= 22; ++bin) if (backend.fx_bound_mask & (1u << (7 + bin - 15)))
+        xv_logf("[h2/fxin2] bin%u submitted=%llu consumed=%llu\n", bin,
+                (unsigned long long)backend.fx_source_submitted[7 + bin - 15],
+                (unsigned long long)backend.fx_source_consumed[7 + bin - 15]);
     xv_logf("[h2/audio] original HRTF configuration table and critical section at stop\n");
     for (unsigned i = 0; i < 11; ++i) trace_mapped_word(0x3871C8 + 4 * i);
     for (unsigned i = 0; i < 7; ++i) trace_mapped_word(0x386B18 + 4 * i);

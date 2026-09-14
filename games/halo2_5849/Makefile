@@ -111,21 +111,21 @@ $(BUILD)/dsp_engine_test: dsp_engine_test.c dsp_engine.c dsp_engine.h dsp/interp
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -fno-strict-aliasing $(DSP_INCLUDES) $< -lm -o $@
 test-host: $(BUILD)/dsp_engine_test
-$(BUILD)/audio_fx_test: audio_fx_test.c audio_fx.c audio_fx.h audio_hrtf_model.h audio_filter_model.h dsp_engine_test.c dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c dsp/interp/dsp_cpu.h dsp/interp/dsp_cpu_regs.h dsp/interp/dsp_emu.c.inc dsp/interp/dsp_dis.c.inc $(DSP_HEADERS)
+$(BUILD)/audio_fx_test: audio_fx_test.c audio_fx.c audio_fx.h audio_fx_limits.h audio_hrtf_model.h audio_filter_model.h dsp_engine_test.c dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c dsp/interp/dsp_cpu.h dsp/interp/dsp_cpu_regs.h dsp/interp/dsp_emu.c.inc dsp/interp/dsp_dis.c.inc $(DSP_HEADERS)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -fno-strict-aliasing $(DSP_INCLUDES) $< -lm -o $@
 test-host: $(BUILD)/audio_fx_test
-$(BUILD)/audio_fx_vita_test: audio_fx_vita_test.c audio_fx_fixture.c audio_fx_test.c audio_fx.c audio_fx.h audio_hrtf_model.h audio_filter_model.h audio_vita_test.c audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h dsp_engine_test.c dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c $(DSP_HEADERS)
+$(BUILD)/audio_fx_vita_test: audio_fx_vita_test.c audio_fx_fixture.c audio_fx_test.c audio_fx.c audio_fx.h audio_fx_limits.h audio_hrtf_model.h audio_filter_model.h audio_vita_test.c audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h audio_fx_limits.h dsp_engine_test.c dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c $(DSP_HEADERS)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -fno-strict-aliasing -I$(ROOT) -I$(ROOT)/recomp $(DSP_INCLUDES) audio_fx_vita_test.c audio_fx_fixture.c audio_progress.c -pthread -lm -o $@
-$(BUILD)/audio_fx_host_test: audio_fx_host_test.c audio_dsp_test.c audio_buffer_test.c audio_host.c audio_host.h dsp_asset.h dsp_engine.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/audio_fx_host_test: audio_fx_host_test.c audio_dsp_test.c audio_buffer_test.c audio_host.c audio_host.h audio_fx_limits.h dsp_asset.h dsp_engine.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_fx_host_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
 test-host: $(BUILD)/audio_fx_vita_test $(BUILD)/audio_fx_host_test
 .PHONY: audio-probe
 .PHONY: fx-probe
 fx-probe: $(BUILD)/fxin2-probe.vpk
-$(BUILD)/fxin2-probe.elf: audio_fx_probe.c audio_fx.c audio_fx.h audio_hrtf_model.h audio_filter_model.h audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h dsp_asset.c dsp_asset.h dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c $(DSP_HEADERS) $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/fxin2-probe.elf: audio_fx_probe.c audio_fx.c audio_fx.h audio_fx_limits.h audio_hrtf_model.h audio_filter_model.h audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h audio_fx_limits.h dsp_asset.c dsp_asset.h dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c $(DSP_HEADERS) $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 -O2 -mthumb -mcpu=cortex-a9 -mfpu=neon -fno-strict-aliasing -ffunction-sections -fdata-sections -DH2_AUDIO_DSP=1 -DH2_FX_PROBE_SECOND=$(FX_PROBE_SECOND) -I$(ROOT) -I$(ROOT)/recomp $(DSP_INCLUDES) -DXK_AUDIO_OUTPUT_FILTER=h2_audio_bins_filter -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock -Wl,-q,--gc-sections $(filter %.c,$^) -o $@ -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceAudio_stub -lSceSysmem_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lm
 $(BUILD)/fxin2-probe.velf: $(BUILD)/fxin2-probe.elf
@@ -138,7 +138,7 @@ $(BUILD)/fxin2-probe-param.sfo: Makefile
 $(BUILD)/fxin2-probe.vpk: $(BUILD)/fxin2-probe-eboot.bin $(BUILD)/fxin2-probe-param.sfo $(DSP_ASSET)
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/fxin2-probe-param.sfo -b $(BUILD)/fxin2-probe-eboot.bin -a $(DSP_ASSET)=halo2-dsp.bin $@
 audio-probe: $(BUILD)/audio-probe.vpk
-$(BUILD)/audio-probe.elf: audio_probe.c audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/audio-probe.elf: audio_probe.c audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h audio_fx_limits.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp -DXK_AUDIO_OUTPUT_FILTER=h2_audio_bins_filter -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock -Wl,-q,--gc-sections $(filter %.c,$^) -o $@ -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceAudio_stub -lSceSysmem_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lm
 $(BUILD)/audio-probe.velf: $(BUILD)/audio-probe.elf
@@ -236,31 +236,31 @@ $(BUILD)/kernel_stack_test: kernel_stack_test.c kernel_stack.c kernel_stack.h $(
 $(BUILD)/audio_unavailable_test: audio_unavailable_test.c audio_unavailable.c $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT)/recomp audio_unavailable_test.c audio_unavailable.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
-$(BUILD)/audio_dsp_test: audio_dsp_test.c audio_buffer_test.c audio_host.c audio_host.h dsp_asset.h dsp_engine.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/audio_dsp_test: audio_dsp_test.c audio_buffer_test.c audio_host.c audio_host.h audio_fx_limits.h dsp_asset.h dsp_engine.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_dsp_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
 test-host: $(BUILD)/audio_dsp_test
-$(BUILD)/audio_stream_test: audio_stream_test.c audio_buffer_test.c audio_host.c audio_host.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/audio_stream_test: audio_stream_test.c audio_buffer_test.c audio_host.c audio_host.h audio_fx_limits.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_stream_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
 test-host: $(BUILD)/audio_stream_test
-$(BUILD)/audio_submix_test: audio_submix_test.c audio_buffer_test.c audio_host.c audio_host.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/audio_submix_test: audio_submix_test.c audio_buffer_test.c audio_host.c audio_host.h audio_fx_limits.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_submix_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
 test-host: $(BUILD)/audio_submix_test
-$(BUILD)/audio_multibin_failure_test: audio_buffer_test.c audio_host.c audio_host.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/audio_multibin_failure_test: audio_buffer_test.c audio_host.c audio_host.h audio_fx_limits.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -DH2_AUDIO_MULTIBIN_UNAVAILABLE=1 -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_buffer_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
-$(BUILD)/audio_buffer_test: audio_buffer_test.c audio_host.c audio_host.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/audio_buffer_test: audio_buffer_test.c audio_host.c audio_host.h audio_fx_limits.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_buffer_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
-$(BUILD)/audio_host_test: audio_host_test.c audio_host.c audio_host.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/audio_host_test: audio_host_test.c audio_host.c audio_host.h audio_fx_limits.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_host_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
-$(BUILD)/audio_effects_failure_test: audio_host_test.c audio_host.c audio_host.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/audio_effects_failure_test: audio_host_test.c audio_host.c audio_host.h audio_fx_limits.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -DH2_AUDIO_EFFECTS_UNAVAILABLE=1 -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_host_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
-$(BUILD)/audio_vita_test: audio_vita_test.c audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h $(ROOT)/recomp/kernel/xk_audio.h
+$(BUILD)/audio_vita_test: audio_vita_test.c audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h audio_fx_limits.h $(ROOT)/recomp/kernel/xk_audio.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -I$(ROOT) -I$(ROOT)/recomp audio_vita_test.c audio_progress.c -pthread -o $@
 $(BUILD)/audio_progress_test: audio_progress_test.c audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.h

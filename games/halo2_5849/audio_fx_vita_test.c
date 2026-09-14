@@ -119,12 +119,22 @@ int main(void)
     for (;;) { h2_audio_backend_snapshot(&status); if (status.fx_submitted_frames > filter_computed) break; usleep(1000); }
     assert(status.last_peak_left == 1953 && !status.error && status.fx_playing_mask == 127);
     assert(h2_audio_backend_fx_filter(23) == 0 && h2_audio_backend_fx_filter(24) == 0);
+    for (unsigned bin = 15; bin <= 22; ++bin) {
+        assert(h2_audio_backend_fx_bind(s,bin) == 0);
+        assert(h2_audio_backend_fx_play(bin) < 0); /* default route cannot be used */
+        assert(h2_audio_backend_fx_route_mask(bin,1u << (6 + (bin - 15) % 4)) == 0);
+        assert(h2_audio_backend_fx_play(bin) == 0);
+        h2_audio_backend_snapshot(&status);
+        assert(status.fx_source_submitted[7 + bin - 15] >= XA_GRAIN && !status.error);
+        assert(status.last_peak_left == 1953 && status.last_peak_right == 1953);
+    }
+    assert(status.fx_playing_mask == 0x7fff && status.fx_bound_mask == 0x7fff);
     assert(h2_audio_backend_fx_forget(23) < 0);
     assert(h2_audio_backend_fx_forget(13) < 0 && h2_audio_backend_fx_route(13, 2) < 0 && h2_audio_backend_fx_play(13) < 0);
     assert(h2_audio_backend_close() == 0 && !resources && !atomic_load(&queued));
     atomic_store(&faults, 0);
     h2_audio_backend_snapshot(&status); assert(status.fx_consumed_frames == status.fx_submitted_frames);
-    for (unsigned i = 0; i < 7; ++i) assert(status.fx_source_consumed[i] == status.fx_source_submitted[i]);
+    for (unsigned i = 0; i < H2_FX_SOURCES; ++i) assert(status.fx_source_consumed[i] == status.fx_source_submitted[i]);
     h2_dsp_destroy(s);
 /* GCC's TSan runtime fails its own longjmp-buffer check on this injected DSP
  * fault. The TSan concurrency run skips only this fixture; normal and

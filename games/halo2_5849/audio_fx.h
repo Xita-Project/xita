@@ -7,16 +7,12 @@
  * Each bin23..25 also has a fixed spatial voice initially into bins6/7/10.
  * The verified later sequence routes23->6,24->7,spatial25->10 and mutes
  * spatial23,spatial24,nonspatial25, without retiring their active processing.
+ * After that, bins15..22 each route to one of6/7/8/9, repeated twice.
  * Their mono signed-24 sources all read the prior completed GP frame. All
  * other voices must be inactive. The caller owns and serializes the engine,
  * this state, and every read of that engine. */
-#define H2_FX_SOURCES 7
 /* Internal source keys, distinct from nonspatial voices using the same bins. */
-#ifndef H2_FX_SPATIAL23
-#define H2_FX_SPATIAL23 0x10017u
-#define H2_FX_SPATIAL24 0x10018u
-#define H2_FX_SPATIAL25 0x10019u
-#endif
+#include "audio_fx_limits.h"
 typedef struct { unsigned routes, output_mask; uint64_t frames; } h2_audio_fx_source;
 typedef struct {
     h2_dsp_engine *engine;
@@ -27,12 +23,13 @@ typedef struct {
     unsigned filtered;
     h2_audio_filter lowpass[2]; /* independent nonspatial23/24 histories */
 } h2_audio_fx;
-/* Stable bit0=bin13; then nonspatial/spatial pairs23,24,25. Zero is unsupported. */
+/* Stable source bits are defined in audio_fx_limits.h. Zero is unsupported. */
 unsigned h2_audio_fx_mask(unsigned bin);
 int h2_audio_fx_bind(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin);
 int h2_audio_fx_bind_spatial(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin, const int8_t taps[31]);
 int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes);
-/* Exact original active FX23/24 and spatial25 route replacements only. */
+/* Exact original active FX23/24/spatial25 replacements and inactive single
+ * routes for15..22 only; the creation/Play sequence remains enforced. */
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned bin, unsigned output_mask);
 int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key);
 int h2_audio_fx_filter(h2_audio_fx *fx, unsigned key);

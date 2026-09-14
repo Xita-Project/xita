@@ -297,13 +297,13 @@ static void fx_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t field
     if (spatial && (aliases(out, 4, 0x386958, 64) || aliases(out, 4, 0x3871F0, 4)))
         fail(c, ip, "spatial FXIN2 output/filter-control alias", out);
     uint32_t source_key = spatial ? 0x10000u | bin : bin;
-    if (!((caller == 0x220C26 && bin == 13) || (caller == 0x21E830 && bin >= 23 && bin <= 25) || spatial) ||
+    if (!((caller == 0x220C26 && bin == 13) || (caller == 0x21E830 && bin >= 23 && bin <= 25) || (caller == 0x21E9E0 && bin >= 15 && bin <= 22) || spatial) ||
         fields[0] != 24 || fields[1] != (spatial ? 0x100010u : 0x100000u) || fields[2] || fields[3] || fields[4] || !effects)
         fail(c, ip, "unsupported FXIN2 description/caller", fields[1]);
     if (aliases(out, 4, c->r[4], 20) || aliases(out, 4, desc, 24))
         fail(c, ip, "FXIN2 output alias", out);
     if (device.references == UINT32_MAX) fail(c, ip, "FXIN2 parent overflow", device.references);
-    uint32_t predecessor = spatial ? bin : bin == 23 ? 13 : (0x10000u | (bin - 1));
+    uint32_t predecessor = spatial ? bin : bin >= 15 && bin <= 22 ? (bin == 15 ? H2_FX_SPATIAL25 : bin - 1) : bin == 23 ? 13 : (0x10000u | (bin - 1));
     int predecessor_playing = 0;
     for (unsigned i = 0; i < XA_MAX_VOICES; ++i) if (buffers[i].base && buffers[i].submix == 2) {
         if (buffers[i].fx_bin == source_key) fail(c, ip, "duplicate FXIN2 source", bin);
@@ -528,7 +528,9 @@ static void buffer_control(xctx *c, uint32_t ip)
             result(c, 0, 2); return;
         }
 #endif
-        int initial = !b->started && b->fx_bin == 13 && X_M32(c->r[4]) == 0x220C37;
+        int initial = !b->started && !b->stopped && !b->volume && !b->headroom &&
+            ((b->fx_bin == 13 && X_M32(c->r[4]) == 0x220C37) ||
+             (b->fx_bin >= 15 && b->fx_bin <= 22 && b->route_count == 2 && X_M32(c->r[4]) == 0x21E9EE));
         int retained = b->started && !b->stopped && !b->volume && !b->headroom &&
             ((b->fx_bin == 23 && b->route_count == 4 && X_M32(c->r[4]) == 0x2AEC95) ||
              (b->fx_bin == 24 && b->route_count == 4 && X_M32(c->r[4]) == 0x2AEDE7) ||
@@ -658,6 +660,17 @@ static void buffer_routing(xctx *c, uint32_t ip)
             xv_logf("[h2/fxin2] SetMixBins caller=%08X interface=%08X source_key=%X count=%u unity_mask=%03X others original attenuationFFF/mute; future computed grains updated\n", caller, b->base + 0x1C, key, count, output_mask);
             result(c, 0, 2); return;
         }
+        if (caller == 0x21EA1B && b->fx_bin >= 15 && b->fx_bin <= 22) {
+            unsigned route = 6 + (b->fx_bin - 15) % 4;
+            if (ip != 0x37C5E4 || b->started || b->stopped || b->volume || b->headroom ||
+                list[0] != 1 || !mapped(list[1],8)) fail(c,ip,"unsupported FX15..22 route state/list",list[0]);
+            x_guest_read(pairs,list[1],8);
+            if (pairs[0] != route || pairs[1]) fail(c,ip,"unsupported FX15..22 route/gain",list[1]);
+            if (h2_audio_backend_fx_route_mask(b->fx_bin,1u << route) < 0) fail(c,ip,"FX15..22 real route binding rejected",b->fx_bin);
+            b->route_count = 1; b->route_bins[0] = route; b->route_gains[0] = 0;
+            xv_logf("[h2/fxin2] caller=0021EA1B interface=%08X input_bin=%u single unity GP route=%u; inactive\n",b->base+0x1C,b->fx_bin,route);
+            result(c,0,2); return;
+        }
         if (ip != 0x37C5E4 || b->started || b->fx_bin != 13 || X_M32(c->r[4]) != 0x220CAA ||
             list[0] != 6 || !mapped(list[1], 48)) fail(c, ip, "unsupported FXIN2 route caller/list", list[0]);
         x_guest_read(pairs, list[1], 48);
@@ -771,6 +784,7 @@ static void buffer_play(xctx *c)
 #if H2_AUDIO_DSP
     if (b->submix == 2) {
         uint32_t routes = b->fx_bin == 13 ? 6 : 2, caller = b->fx_bin == 13 ? 0x220CB5 : 0x21E842;
+        if (b->fx_bin >= 15 && b->fx_bin <= 22) { routes = 1; caller = 0x21EA29; }
         if ((b->fx_bin >= H2_FX_SPATIAL23 && b->fx_bin <= H2_FX_SPATIAL25)) {
             uint32_t expected[41]; spatial_defaults(expected);
             expected[0x38/4] = expected[0x3C/4] = 0x7F7FFFFF;

@@ -201,6 +201,37 @@ int main(int argc, char **argv)
                     assert(!test_fx_filtered && !memcmp(target,&before,sizeof before));
 #endif
                 }
+#if H2_AUDIO_FILTER_MODEL
+                uint32_t extra_sources[8];
+                for (unsigned bin = 15; bin <= 22; ++bin) {
+                    c = fx_description(dev); x_guest_write(0x3ffd + 20,&bin,4); X_M32(c.r[4]) = 0x21E9E1; reject(&c,0x37D4BE);
+                    X_M32(c.r[4]) = 0x21E9E0; call(&c,0x37D4BE,0,4);
+                    uint32_t handle = read32(0x6ffe); extra_sources[bin - 15] = handle;
+                    h2_audio_buffer *target = find_buffer(handle - 0x1c);
+                    assert(target->route_count == 2 && !target->started);
+                    c = fx_context(handle,1,0x21E9EE); reject(&c,0x37B66F);
+                    c = fx_context(handle,0,0x21E9EF); reject(&c,0x37B66F);
+                    c = fx_context(handle,0,0x21E9EE); call(&c,0x37B66F,0,2);
+                    uint32_t list[2] = {1,0x5ffb}, pair[2] = {6 + (bin - 15) % 4,1};
+                    x_guest_write(0x4ffc,list,8); x_guest_write(0x5ffb,pair,8);
+                    c = fx_context(handle,0x4ffc,0x21EA1B); reject(&c,0x37C5E4);
+                    pair[1] = 0; pair[0] ^= 1; x_guest_write(0x5ffb,pair,8); reject(&c,0x37C5E4);
+                    pair[0] ^= 1; x_guest_write(0x5ffb,pair,8);
+                    c = fx_context(handle,0x4ffc,0x21EA1C); reject(&c,0x37C5E4);
+                    c = fx_context(handle,0x4ffc,0x21EA1B); call(&c,0x37C5E4,0,2);
+                    assert(target->route_count == 1 && target->route_bins[0] == pair[0]);
+                    c = fx_context(handle,0,0x21EA2A); reject(&c,0x37B6DF);
+                    c = fx_context(handle,0,0x21EA29); call(&c,0x37B6DF,0,4);
+                    assert(target->started && test_fx_playing == (1u << (8 + bin - 15)) - 1);
+                    c = fx_context(handle,0,0x21EA29); reject(&c,0x379F45);
+                }
+                assert(device.references == 16 && device.children == 15);
+                for (unsigned i = 8; i-- > 0;) {
+                    uint32_t handle = extra_sources[i]; h2_audio_buffer *target = find_buffer(handle - 0x1c);
+                    target->started = 0; test_fx_playing &= ~test_fx_mask(target->fx_bin); /* test teardown only */
+                    c = context(handle,0,0,0); call(&c,0x379F45,0,1);
+                }
+#endif
                 while (extras) {
                     uint32_t handle = extra_handles[--extras]; h2_audio_buffer *retiring = find_buffer(handle - 0x1c);
                     retiring->started = 0; test_fx_playing &= ~test_fx_mask(retiring->fx_bin); /* test teardown only */
