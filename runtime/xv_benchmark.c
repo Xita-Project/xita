@@ -20,13 +20,46 @@ void xv_benchmark_compare_toggle(void) { if(b.active)b.cancel=1;else b.request=2
 int xv_benchmark_active(void) { return b.active||b.request; }
 uint32_t xv_benchmark_status(void) { return __atomic_load_n(&status,__ATOMIC_ACQUIRE); }
 static unsigned phase_height(void) { return b.compare?b.original:heights[b.phase]; }
+int xv_benchmark_compare_object_basis(void)
+{
+    static int selected=-1;
+    if (selected<0) {
+        const char *e=getenv("XV_BENCHMARK_OBJECT_BASIS"); selected=e && atoi(e)!=0;
+    }
+    return selected;
+}
+int xv_benchmark_compare_model_palette(void)
+{
+    static int selected=-1;
+    if (selected<0) {
+        const char *e=getenv("XV_BENCHMARK_MODEL_PALETTE"); selected=e && atoi(e)!=0;
+    }
+    return selected && !xv_benchmark_compare_object_basis();
+}
+static int native_math_selected(void)
+{
+    return xv_benchmark_compare_object_basis() || xv_benchmark_compare_model_palette();
+}
+static int candidate_available(void)
+{
+    if (!native_math_selected()) return 1;
+    const char *math=getenv("XV_NATIVE_MATH");
+    if (math && !atoi(math)) return 0;
+#ifndef XV_NATIVE_OBJECT_BASIS
+    if (xv_benchmark_compare_object_basis()) return 0;
+#endif
+#ifndef XV_NATIVE_MODEL_PALETTE
+    if (xv_benchmark_compare_model_palette()) return 0;
+#endif
+    return 1;
+}
 int xv_benchmark_compare_vertex_worker(void)
 {
     static int selected=-1;
     if (selected<0) {
         const char *e=getenv("XV_BENCHMARK_VERTEX_WORKER"); selected=e && atoi(e)!=0;
     }
-    return selected;
+    return selected && !native_math_selected();
 }
 int xv_benchmark_compare_vertex_references(void)
 {
@@ -34,7 +67,7 @@ int xv_benchmark_compare_vertex_references(void)
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_VERTEX_REFERENCES"); selected = e && atoi(e) != 0;
     }
-    return selected && !xv_benchmark_compare_vertex_worker();
+    return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker();
 }
 int xv_benchmark_compare_native_bounds(void)
 {
@@ -42,7 +75,7 @@ int xv_benchmark_compare_native_bounds(void)
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_NATIVE_BOUNDS"); selected = e && atoi(e) != 0;
     }
-    return selected && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_references();
+    return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_references();
 }
 int xv_benchmark_compare_vertex_copy(void)
 {
@@ -50,7 +83,7 @@ int xv_benchmark_compare_vertex_copy(void)
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_VERTEX_COPY"); selected = e && atoi(e) != 0;
     }
-    return selected && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
+    return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 int xv_benchmark_compare_draw_scan(void)
 {
@@ -58,10 +91,12 @@ int xv_benchmark_compare_draw_scan(void)
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_DRAW_SCAN"); selected = e && atoi(e) != 0;
     }
-    return selected && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
+    return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_vertex_worker() ? "vertex-worker-compare" :
+    (xv_benchmark_compare_object_basis() ? "object-basis-compare" :
+     xv_benchmark_compare_model_palette() ? "model-palette-compare" :
+     xv_benchmark_compare_vertex_worker() ? "vertex-worker-compare" :
      xv_benchmark_compare_vertex_references() ? "vertex-references-compare" :
      xv_benchmark_compare_native_bounds() ? "native-bounds-compare" :
      xv_benchmark_compare_vertex_copy() ? "vertex-copy-compare" :
@@ -84,10 +119,16 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         memset(&b,0,sizeof b);
         b.compare=compare;
         if(!valid || (compare&&!xv_benchmark_optimizations)) {xv_logf("[%s] start requires a loaded first-person view and available test hooks\n",tag());return 0;}
+        if(compare && !candidate_available()) {
+            xv_logf("[%s] selected native math experiment is not compiled in or XV_NATIVE_MATH is disabled; no settings changed\n",tag());
+            return 0;
+        }
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
             xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_vertex_worker())
+            if (native_math_selected())
+                xv_logf("[%s] start off/on/off at %up; only selected native helper changes; other math, workers, resolution, shaders, queue policy and frame cap unchanged; %u settle + %u measured frames each\n",tag(),height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_vertex_worker())
                 xv_logf("[vertex-worker-compare] start off/on/off at %up; caller/core-0/caller GPU copies from immutable vertex snapshots; resolution, shaders, queue policy and frame cap unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_vertex_references())
                 xv_logf("[vertex-references-compare] start off/on/off at %up; full/indexed/full vertex validation; exact retained indices and referenced records, owned uploads and all other settings unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);

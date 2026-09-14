@@ -9,6 +9,12 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 13 [object-transform hardware follow-up](docs/hardware-20260913-object-basis.md):
+the enabled native helper records over two million accepted calls with no guard
+rejections. Different views prevent attributing a frame-rate gain. A dedicated
+[native-math off/on/off comparison](docs/native-math-benchmark-20260913.md) now
+isolates either helper in one session; broader CPU sharing remains unfinished.
+
 September 13 [hardware gameplay results](docs/hardware-20260913-gameplay.md):
 the new executable is verified installed. One Blood Gulch worker comparison
 measures 15.898 / 16.222 / 15.718 FPS off/on/off; moving views remain slower.

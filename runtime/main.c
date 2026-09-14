@@ -1172,6 +1172,20 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
+    if (xv_benchmark_compare_object_basis()) {
+#ifdef XV_NATIVE_OBJECT_BASIS
+        extern void xv_object_basis_override(int);
+        xv_object_basis_override(enabled);
+#endif
+        return;
+    }
+    if (xv_benchmark_compare_model_palette()) {
+#ifdef XV_NATIVE_MODEL_PALETTE
+        extern void xv_model_palette_override(int);
+        xv_model_palette_override(enabled);
+#endif
+        return;
+    }
     if (xv_benchmark_compare_vertex_worker()) {
         xv_vertex_worker_override(enabled);
         return;

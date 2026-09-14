@@ -11,15 +11,22 @@ static unsigned palette_sizes[65];
 #endif
 
 static unsigned palette_batches, palette_matrices, palette_declined[4];
+/* Guest-owner benchmark override; -1 restores the configured default. */
+static int palette_override = -1;
+void xv_model_palette_override(int value)
+{
+    palette_override = value < 0 ? -1 : value != 0;
+}
 static int palette_enabled(void)
 {
-    static int enabled = -1;
+    static int enabled = -1, math_allowed;
     if (enabled < 0) {
         const char *batch = getenv("XV_NATIVE_MODEL_PALETTE");
         const char *math = getenv("XV_NATIVE_MATH");
-        enabled = batch && atoi(batch) != 0 && (!math || atoi(math) != 0);
+        enabled = batch && atoi(batch) != 0;
+        math_allowed = !math || atoi(math) != 0;
     }
-    return enabled;
+    return math_allowed && (palette_override < 0 ? enabled : palette_override);
 }
 static int decline(unsigned reason) { palette_declined[reason]++; return 0; }
 

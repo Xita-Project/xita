@@ -17,6 +17,13 @@ int main(void)
     int references = select && atoi(select) != 0;
     select = getenv("XV_BENCHMARK_VERTEX_WORKER");
     int worker = select && atoi(select) != 0;
+    select = getenv("XV_BENCHMARK_OBJECT_BASIS");
+    int basis = select && atoi(select) != 0;
+    select = getenv("XV_BENCHMARK_MODEL_PALETTE");
+    int palette = !basis && select && atoi(select) != 0;
+    if (basis || palette) worker = references = bounds = copy = scan = 0;
+    assert(xv_benchmark_compare_object_basis()==basis);
+    assert(xv_benchmark_compare_model_palette()==palette);
     if (worker) references = bounds = copy = scan = 0;
     assert(xv_benchmark_compare_vertex_worker()==worker);
     if (references) bounds = copy = scan = 0;
@@ -52,8 +59,24 @@ int main(void)
     xv_benchmark_applied(now,480);assert(!b.active&&!xv_benchmark_status());
     puts("PASS: timed 544/360/544 phases, warmup excluded, view rejection, cancel/menu/allocation fallback and restoration");
     assert(!switches); /* Resolution testing must not touch CPU switches. */
+    int available=1;
+#ifndef XV_NATIVE_OBJECT_BASIS
+    if (basis) available=0;
+#endif
+#ifndef XV_NATIVE_MODEL_PALETTE
+    if (palette) available=0;
+#endif
+    select=getenv("XV_NATIVE_MATH");
+    if ((basis || palette) && select && !atoi(select)) available=0;
+    if (!available) {
+        xv_benchmark_compare_toggle();
+        assert(!xv_benchmark_step(now,480,1,view));
+        assert(!b.active && !b.request && !switches && optimization==-1);
+        puts("PASS: unavailable native experiment rejects without changing settings or selecting another test");
+        return 0;
+    }
     xv_benchmark_compare_toggle();assert(xv_benchmark_step(now,480,1,view)==480);
-    assert(!strcmp(tag(), worker ? "vertex-worker-compare" : references ? "vertex-references-compare" : bounds ? "native-bounds-compare" : copy ? "vertex-copy-compare" : scan ? "draw-scan-compare" : "flare-compare"));
+    assert(!strcmp(tag(), basis ? "object-basis-compare" : palette ? "model-palette-compare" : worker ? "vertex-worker-compare" : references ? "vertex-references-compare" : bounds ? "native-bounds-compare" : copy ? "vertex-copy-compare" : scan ? "draw-scan-compare" : "flare-compare"));
     assert(optimization==0 && (xv_benchmark_status()&(1u<<19)));
     xv_benchmark_applied(now,480);
     for(unsigned phase=0;phase<3;phase++)for(unsigned frame=1;frame<=180;frame++) {

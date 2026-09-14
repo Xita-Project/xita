@@ -12,6 +12,7 @@ uint32_t *g_xpt;
 void xk_os_log(const char *format, ...) { (void)format; }
 void original_basis(xctx *), candidate_basis(xctx *);
 int xv_math_object_basis(xctx *);
+void xv_object_basis_override(int);
 static uint32_t rng=9876543;
 static uint32_t next(void) { rng^=rng<<13; rng^=rng>>17; rng^=rng<<5; return rng; }
 
@@ -91,6 +92,25 @@ int main(int argc,char **argv)
         compare(a,b,expected,k);
     }
     assert(!fesetround(FE_TONEAREST));
+    /* Benchmark transitions preserve results and restore both configured
+     * defaults; forcing on still obeys the master native-math disable. */
+    for (int mode=-1;mode<=1;mode++) {
+        xv_object_basis_override(mode);
+        int want=strcmp(argv[1],"math-disabled") && (mode<0?enabled:mode);
+        for (unsigned k=0;k<32;k++) {
+            xctx initial=fixture(k),a=initial,b=initial;
+            memcpy(before,g_xram,ARENA);
+            original_basis(&a);memcpy(expected,g_xram,ARENA);memcpy(g_xram,before,ARENA);
+            int used=xv_math_object_basis(&b);assert(used==want);
+            if (!used) {
+                assert(!memcmp(&b,&initial,sizeof b) && !memcmp(before,g_xram,ARENA));
+                original_basis(&b);
+            }
+            compare(a,b,expected,k);
+        }
+    }
+    xv_object_basis_override(-1);
+    { xctx c=fixture(0);assert(xv_math_object_basis(&c)==enabled); }
     for (unsigned k=0;k<8;k++) {
         xctx c=fixture(1);
         switch(k) {

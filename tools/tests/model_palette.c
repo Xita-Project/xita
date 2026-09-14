@@ -31,6 +31,7 @@ void xk_os_log(const char *fmt, ...) { (void)fmt; }
 #endif
 void original_palette(xctx *), current_palette(xctx *), candidate_palette(xctx *);
 int xv_math_model_palette(xctx *);
+void xv_model_palette_override(int);
 static unsigned yields;
 void __wrap_xv_preempt(xctx *c) { yields++; c->preempt = 100; }
 static uint32_t rng = 92351;
@@ -184,6 +185,27 @@ int main(int argc, char **argv)
         same_memory(expected, initial.r[4] + 0xe4, count, k);
     }
     assert(!fesetround(FE_TONEAREST));
+    for (int mode=-1;mode<=1;mode++) {
+        xv_model_palette_override(mode);
+        int want=strcmp(argv[1],"math-disabled") && (mode<0?enabled:mode);
+        for (unsigned k=0;k<32;k++) {
+            unsigned count=k*2+1;
+            xctx initial=fixture(k,count),reference=initial,candidate=initial;
+            memcpy(before,g_xram,ARENA);
+            yields=0;original_palette(&reference);assert(!yields);
+            memcpy(expected,g_xram,ARENA);memcpy(g_xram,before,ARENA);
+            int used=xv_math_model_palette(&candidate);assert(used==want);
+            if (!used) {
+                assert(!memcmp(&initial,&candidate,sizeof initial) && !memcmp(before,g_xram,ARENA));
+                original_palette(&candidate);
+            }
+            assert(!yields);
+            same_context(reference,candidate,6000+k);
+            same_memory(expected,initial.r[4]+0xe4,count,6000+k);
+        }
+    }
+    xv_model_palette_override(-1);
+    { xctx c=fixture(0,8);assert(xv_math_model_palette(&c)==enabled); }
     /* Every decline must precede any write, including for physical aliases,
      * split mappings and ranges that would wrap the 32-bit guest address. */
     for (unsigned variant = 0; variant < 19; variant++) {

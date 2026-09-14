@@ -9,15 +9,22 @@
 #endif
 
 static unsigned basis_used, basis_mirrored, basis_declined[3];
+/* Guest-owner benchmark override; -1 restores the configured default. */
+static int basis_override = -1;
+void xv_object_basis_override(int value)
+{
+    basis_override = value < 0 ? -1 : value != 0;
+}
 static int enabled(void)
 {
-    static int value = -1;
+    static int value = -1, math_allowed;
     if (value < 0) {
         const char *basis = getenv("XV_NATIVE_OBJECT_BASIS");
         const char *math = getenv("XV_NATIVE_MATH");
-        value = basis && atoi(basis) != 0 && (!math || atoi(math) != 0);
+        value = basis && atoi(basis) != 0;
+        math_allowed = !math || atoi(math) != 0;
     }
-    return value;
+    return math_allowed && (basis_override < 0 ? value : basis_override);
 }
 static int fp_supported(void)
 {
