@@ -155,6 +155,20 @@ int main(int argc, char **argv)
                 }
                 assert(test_fx24_output_mask == 128 && test_fx25_routed && test_fx24_muted && test_fx25_muted);
                 assert(test_fx_playing == 127 && device.references == 8);
+                h2_audio_buffer *deferred = find_buffer(extra_handles[4] - 0x1c);
+                uint32_t raw[9] = {0x7fc12345,0x80000000,1,0xffffffff,0x3f800000,0x7f800000,7,0xff800000,0x3e800000};
+                uint32_t expected[41]; memcpy(expected,deferred->spatial,sizeof expected);
+                x_guest_write(0x5ffb,raw,sizeof raw);
+                for (unsigned mode = 0; mode < 3; ++mode) {
+                    c = context(extra_handles[4], mode == 2 ? 0 : 0x5ffb, mode == 0 ? 0 : 1, 0);
+                    X_M32(c.r[4]) = mode == 1 ? 0x2AEF6B : 0x2AEF6A; reject(&c,0x37C6E5);
+                    assert(!memcmp(expected,deferred->spatial,sizeof expected));
+                }
+                memcpy(expected + 0x80 / 4,raw,sizeof raw); expected[0x7C / 4] |= 0x007F0000;
+                c = context(extra_handles[4],0x5ffb,1,0); X_M32(c.r[4]) = 0x2AEF6A; call(&c,0x37C6E5,0,3);
+                assert(!memcmp(expected,deferred->spatial,sizeof expected) && test_fx_playing == 127);
+                uint32_t readback[9]; x_guest_read(readback,0x5ffb,sizeof readback); assert(!memcmp(raw,readback,sizeof raw));
+
 
 
 

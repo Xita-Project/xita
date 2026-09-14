@@ -181,7 +181,7 @@ static h2_audio_buffer *buffer_live(xctx *c, uint32_t ip, uint32_t object, int i
         fail(c, ip, "submix activation/data/spatial processing is unsupported", b->base);
     if (b->submix == 2 && ip != 0x37A14F && ip != 0x379F45 && ip != 0x37A795 &&
         ip != 0x37B66F && ip != 0x37C5E4 && ip != 0x37B6DF &&
-        ip != 0x37C620 && ip != 0x37C644)
+        ip != 0x37C620 && ip != 0x37C644 && ip != 0x37C6E5)
         fail(c, ip, "unsupported FXIN2 control/data/spatial method", b->base);
     return b;
 }
@@ -696,6 +696,24 @@ static void buffer_routing(xctx *c, uint32_t ip)
     result(c, 0x80004001, 2);
 #endif
 }
+static void fx_deferred_parameters(xctx *c)
+{
+    const uint32_t ip = 0x37C6E5;
+    stack(c, ip, 3); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    uint32_t address = X_ARG(1), words[9];
+    if (X_M32(c->r[4]) != 0x2AEF6A || X_ARG(2) != 1 || !mapped(address, sizeof words) ||
+        b->submix != 2 || b->fx_bin != H2_FX_SPATIAL25 || !b->started || b->stopped || b->volume || b->headroom ||
+        b->route_count != 5 || b->route_bins[4] != 10 || b->route_gains[0] != -6400 || b->route_gains[4])
+        fail(c, ip, "unsupported FX25 deferred parameter state/input", address);
+    x_guest_read(words, address, sizeof words);
+    /* Original 37C0E9 copies nine raw words then ORs byte[7E] with7F.
+     * Flag1 returns without touching the active voice, filter or DSP. */
+    memcpy(&b->spatial[0x80 / 4], words, sizeof words);
+    b->spatial[0x7C / 4] |= 0x007F0000;
+    xv_logf("[h2/fxin2] deferred parameters caller=002AEF6A interface=%08X input=%08X words=9 dirty=%08X; original storage only, active commit unsupported\n",
+            b->base + 0x1C, address, b->spatial[0x7C / 4]);
+    result(c, 0, 3);
+}
 static void submix_deferred(xctx *c, uint32_t ip)
 {
     stack(c, ip, 3); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
@@ -1034,6 +1052,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37D506: case 0x37D5CD: case 0x37D52A: scalar(c, ip); break;
     case 0x37B637: mix_bin(c, ip); break;
     case 0x37C5E4: case 0x37B6C3: buffer_routing(c, ip); break;
+    case 0x37C6E5: fx_deferred_parameters(c); break;
     case 0x37B6DF: buffer_play(c); break;
     case 0x37B703: buffer_stop(c); break;
     case 0x37B75B: buffer_status(c); break;
@@ -1104,6 +1123,15 @@ void h2_audio_host_snapshot(h2_audio_device_snapshot *out) { *out = device; }
 void h2_audio_trace_buffer(xctx *c, uint32_t ip)
 {
     /* Terminal read-only probes; never repair guest inputs or resume them. */
+    if (ip == 0x37B68B && !(c->r[4] & 3) && mapped(c->r[4], 12)) {
+        uint32_t address = X_M32(c->r[4] + 8), fields[6];
+        if (mapped(address, sizeof fields)) {
+            x_guest_read(fields, address, sizeof fields);
+            xv_logf("[h2/audio-filter] entry=%08X caller=%08X interface=%08X descriptor=%08X words=%08X,%08X,%08X,%08X,%08X,%08X\n",
+                    ip, X_M32(c->r[4]), X_M32(c->r[4] + 4), address, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5]);
+        }
+    }
+
     for (unsigned i = 0; i < XA_MAX_VOICES; ++i) {
         const h2_audio_buffer *b = &buffers[i];
         if (b->base)

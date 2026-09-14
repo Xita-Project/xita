@@ -1,5 +1,8 @@
 # Halo 2: complete original FX pair configuration
 
+The following [native123/124 checkpoint](halo2-fxin2-deferred.md) implements
+the original deferred parameter storage and captures the next filter request.
+
 Native122 completes the remaining route/volume calls in original `2AEB20`.
 It then stops at a new deferred spatial-parameter setter. **The game still
 presents its first black frame, with zero nonzero game audio grains. No main
