@@ -4,7 +4,7 @@ This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
 `5849` identifies the linked XDK library build, not an asserted game build number.
 
-The [latest native checkpoint and exact private replay command](../../docs/halo2-linear-texture-view.md)
+The [latest native checkpoint and exact private replay command](../../docs/halo2-menu-audio-dependency.md)
 describe the current normal and diagnostic startup stops. There is no main menu.
 
 A separate [native startup target](../../docs/halo2-native-boot-20260912.md)
@@ -85,6 +85,8 @@ private cache4 formatted by the original code, the
 [inactive-palette milestone](../../docs/halo2-inactive-palettes.md) copies the full
 main-menu map and begins loading its content into guest RAM after Start.
 [Per-map lifecycle discovery](../../docs/halo2-map-lifecycle-roots.md) addresses
-the next bounded original callback family. Actual captures remain black; no
-visible movie or main menu is established. Populated FATX raw/namespace coherence
+the next bounded original callback family. Native87 now executes the map and
+descriptor callbacks and proves a [null sound-object dependency](../../docs/halo2-menu-audio-dependency.md)
+after the unavailable-driver error. Actual captures remain black; no visible
+movie or main menu is established. Populated FATX raw/namespace coherence
 and general geometry/texture support remain incomplete.

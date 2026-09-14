@@ -1,7 +1,9 @@
 # Explicit audio-driver-unavailable diagnostic
 
-Native attempt 41 confirms that the original game continues startup after a
-failed DirectSoundCreate. This does not implement audio. The ordinary
+Native attempt 41 confirms that the original game continues early startup after a
+failed DirectSoundCreate. [Native87](halo2-menu-audio-dependency.md) now proves that
+later map setup unconditionally dereferences an uninitialized sound object. This
+diagnostic cannot currently reach the main menu and does not implement audio. The ordinary
 host-channel profile still executes original DirectSound and stops at MCPX
 hardware in native 40. Only the new explicit `--audio-unavailable` option
 selects a separate profile that returns `DSERR_NODRIVER` at the pinned public

@@ -300,6 +300,26 @@ static void trace_mapped_word(uint32_t address)
 void xv_trace_func(uint32_t address)
 {
     static unsigned count;
+    /* Native86: observe the original audio failure unwind and subsequent
+     * map setup. This never supplies an object or changes the failing call. */
+    static unsigned sound_probe_count;
+    if (xk_cur && sound_probe_count < 16 &&
+        (address == 0x21EAE0 || address == 0x21F6D0 || address == 0x21E3B0)) {
+        const xctx *c = &xk_cur->ctx;
+        uint32_t fpscr = h2_platform_fpscr_read();
+        ++sound_probe_count;
+        uint32_t state = X_M32(0x51EBE4);
+        xv_logf("[h2/sound-probe] fn=%08X state=%08X eax=%08X ecx=%08X edx=%08X esi=%08X esp=%08X\n",
+                address, state, c->r[0], c->r[1], c->r[2], c->r[6], c->r[4]);
+        for (unsigned i = 0; i < 10 && c->r[4] <= UINT32_MAX - i * 4; ++i)
+            trace_mapped_word(c->r[4] + i * 4);
+        if (state && state <= UINT32_MAX - 0x2AB4) {
+            trace_mapped_word(state);
+            trace_mapped_word(state + 0x2AB0);
+            trace_mapped_word(state + 0x2AB4);
+        }
+        h2_platform_fpscr_write(fpscr);
+    }
     /* Read-only native80 follow-up: distinguish real map loading from the
      * display-persistence path used before launching another title/dashboard.
      * No caller result, header bytes or guest control state is changed. */
