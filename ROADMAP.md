@@ -9,6 +9,20 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+**Active objective (September 14):** restructure costly Halo CE engine and rendering
+work into efficient native routines and independent worker jobs until sustained
+30 FPS is verified on the physical Vita in representative campaign, combat and
+vehicle gameplay. Keep rendering and gameplay correct, document fixed comparison
+settings and retain private checkpoints. Stable 20 FPS is an intermediate
+milestone; neither target is complete. The separate Halo 2 agent is pursuing the
+original main menu in Vita3K. See the [implementation order](docs/performance-next-steps-20260914.md).
+
+[~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
+indexed checks are selectable in Graphics for ordinary gameplay validation.
+An optional diagnostic splits comparison/copy cost by span size; it adds no
+profiling calls to ordinary builds. Host checks and campaign rendering in
+Vita3K pass; physical collection and larger worker jobs remain in progress.
+
 [~] September 14 [campaign results and next steps](docs/performance-next-steps-20260914.md):
 indexed vertex validation saved 13.9 ms/frame across three cryo-room comparisons,
 from 6.165 to 6.742 FPS. It remains opt-in pending broader gameplay checks.

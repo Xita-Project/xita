@@ -6,6 +6,7 @@
 #include "xv_snapshot_copy.h"
 #include "xv_quality_settings.h"
 #include "xv_upload_worker.h"
+#include "xv_vertex_profile.h"
 #include <psp2/gxm.h>
 #include <psp2/kernel/sysmem.h>
 #include <stdlib.h>
@@ -67,6 +68,7 @@ static void dispatch(unsigned slot, int final)
 {
     unsigned first=pools[slot].dispatched, bytes=pools[slot].used-first;
     if (!pools[slot].asynchronous || !bytes || (!final && bytes<XV_VERTEX_WORKER_BATCH)) return;
+    uint64_t profile = xv_vertex_work_begin();
     uint8_t *dst=pools[slot].gpu+first;
     const uint8_t *src=pools[slot].cpu+first;
     uint32_t ticket;
@@ -77,6 +79,7 @@ static void dispatch(unsigned slot, int final)
         xv_gpu_flush(dst,bytes);
     }
     pools[slot].dispatched=pools[slot].used;
+    xv_vertex_work_end(XV_VERTEX_DISPATCH,bytes,profile);
 }
 
 void xv_vertex_upload_seal(unsigned slot)
@@ -133,7 +136,10 @@ static int compare_enabled(void)
 static int vertex_equal(const void *a, const void *b, unsigned bytes)
 {
     /* Small or frequently changed spans retain libc's short comparison path. */
-    return bytes >= 64 && compare_enabled() ? xv_bytes_equal(a,b,bytes) : !memcmp(a,b,bytes);
+    uint64_t profile = xv_vertex_work_begin();
+    int equal = bytes >= 64 && compare_enabled() ? xv_bytes_equal(a,b,bytes) : !memcmp(a,b,bytes);
+    xv_vertex_work_end(equal ? XV_VERTEX_EQUAL : XV_VERTEX_DIFFERENT,bytes,profile);
+    return equal;
 }
 
 void xv_vertex_upload_override(int enabled)
@@ -214,6 +220,7 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
     if (resident) {
         resident_hits++; resident_bytes += bytes;
     } else {
+        uint64_t profile = xv_vertex_work_begin();
         if (pools[slot].asynchronous) {
             /* Guest memory can change immediately after this call. The worker
              * only reads this append-only cached mirror, never the guest. */
@@ -227,6 +234,7 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
         }
         copies++; copied_bytes += bytes;
         xv_gpu_flush(pools[slot].gpu + off, bytes);
+        xv_vertex_work_end(XV_VERTEX_SNAPSHOT,bytes,profile);
     }
     if (off + aligned > pools[slot].valid_bytes) {
         /* Initialize newly exposed padding in both copies. Later frames may
@@ -278,6 +286,7 @@ void xv_vertex_upload_shutdown(void)
 }
 void xv_vertex_upload_report(unsigned frames)
 {
+    xv_vertex_work_report(frames);
     if (xv_upload_worker_report) xv_upload_worker_report(frames);
     xv_logf("[vertex-references] %u frames: enabled %d; %u checks / %u hits / %u runs; requested %llu KiB compared %llu KiB; indexed records checked, owned uploads retained\n",
         frames, xv_vertex_references_enabled(), reference_checks, reference_hits, reference_runs,

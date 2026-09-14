@@ -2,8 +2,8 @@
 
 Press **Select + Circle** together to open Xita's graphics panel over Halo.
 Use **Up/Down** or the left stick to select an option, **Left/Right** to change
-it, and **Circle** to close. All thirteen dashboard graphics options are available
-in the source candidate; the September 9 gameplay release has twelve.
+it, and **Circle** to close. All fourteen dashboard graphics options are available
+in the source candidate; older releases may have fewer options.
 
 The panel consumes controller input while open. It does not pause the game;
 press **Start** to pause Halo before opening it if needed. Closing the panel
@@ -18,12 +18,20 @@ returns control after the menu buttons are released.
 | Triple buffering | Decal lifetime and limit |
 | | More compressed textures |
 | | Model detail (source candidate) |
+| | Indexed vertex checks (source candidate) |
 
 The selected option explains when it takes effect. Values save to `xita.cfg`,
 preserving unrelated settings and comments. A failed save leaves the previous
 value in place. If a resolution allocation fails, rendering falls back to native
 resolution and the panel reports it. Triple buffering remains experimental and
 defaults off; it may increase input delay.
+
+**Indexed vertex checks** is an experimental optimization that reduces repeated
+CPU comparisons for geometry. It keeps the referenced vertex data and rendering
+unchanged. It defaults to **Off** and requires relaunching Xita after editing.
+Three physical cryo-room comparisons improved from about 6.16 to 6.74 FPS;
+broader gameplay and additional views still need validation. See the
+[measurements and limits](vertex-references-20260908.md#september-14-hardware-follow-up).
 
 **Model detail** defaults to **Original**. **Balanced** and **Low** select Halo's
 existing simpler character/scenery meshes sooner where the Xbox maps provide

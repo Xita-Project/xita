@@ -17,7 +17,7 @@ build/log_batch_test: log_batch_test.c ../../runtime/xv_log.c ../../runtime/xv_l
 test-upload-worker: build/upload_worker_test
 	./build/upload_worker_test
 
-build/upload_worker_test: Makefile upload_worker_test.c vertex_upload_test.c ../../runtime/xv_vertex_upload.c ../../runtime/xv_vertex_upload.h ../../runtime/xv_upload_worker.c ../../runtime/xv_upload_worker.h
+build/upload_worker_test: Makefile upload_worker_test.c vertex_upload_test.c ../../runtime/xv_vertex_upload.c ../../runtime/xv_vertex_upload.h ../../runtime/xv_vertex_profile.h ../../runtime/xv_upload_worker.c ../../runtime/xv_upload_worker.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include upload_worker_test.c -pthread -o $@
 
@@ -212,7 +212,7 @@ test-frames: build/frame_handoff_test build/frame_pacer_test build/vertex_upload
 test-vertex-references:
 	$(PYTHON) ../../tools/test_vertex_references.py
 
-build/vertex_upload_test: ../../runtime/xv_vertex_refs.h vertex_upload_test.c ../../runtime/xv_vertex_upload.c ../../runtime/xv_vertex_upload.h ../../runtime/xv_frame_slots.h ../../runtime/xv_gpu_upload.h ../../runtime/xv_bytes_equal.h ../../runtime/xv_snapshot_copy.h
+build/vertex_upload_test: ../../runtime/xv_vertex_refs.h vertex_upload_test.c ../../runtime/xv_vertex_upload.c ../../runtime/xv_vertex_upload.h ../../runtime/xv_vertex_profile.h ../../runtime/xv_frame_slots.h ../../runtime/xv_gpu_upload.h ../../runtime/xv_bytes_equal.h ../../runtime/xv_snapshot_copy.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include vertex_upload_test.c -o $@
 
