@@ -40,17 +40,29 @@ int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes)
         bin != 13 || (routes != 2 && routes != 6)) return 0;
     fx->sources[0].routes = routes; fx->sources[0].output_mask = (1u << routes) - 1; return 1;
 }
-int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned bin, unsigned output_mask)
+int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned key, unsigned output_mask)
 {
-    if (!fx || bin != 23 || output_mask != (1u << 6) || fx->bound != 127 || fx->playing != 127 ||
-        (fx->sources[1].routes != 2 && fx->sources[1].routes != 4)) return 0;
-    fx->sources[1].routes = 4; fx->sources[1].output_mask = output_mask; return 1;
+    if (!fx || fx->bound != 127 || fx->playing != 127) return 0;
+    unsigned index, count;
+    if (key == 23 && output_mask == 64) { index = 1; count = 4; }
+    else if (key == 24 && output_mask == 128 && fx->sources[1].output_mask == 64 && !fx->sources[2].output_mask) {
+        index = 3; count = 4;
+    } else if (key == H2_FX_SPATIAL25 && output_mask == 1024 && fx->sources[3].output_mask == 128 && !fx->sources[4].output_mask) {
+        index = 6; count = 5;
+    } else return 0;
+    if (fx->sources[index].routes != count && fx->sources[index].routes != 2) return 0;
+    fx->sources[index].routes = count; fx->sources[index].output_mask = output_mask; return 1;
 }
-int h2_audio_fx_mute_spatial23(h2_audio_fx *fx)
+int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key)
 {
-    if (!fx || fx->bound != 127 || fx->playing != 127 || fx->sources[1].output_mask != 64 ||
-        fx->sources[2].routes != 5) return 0;
-    fx->sources[2].output_mask = 0; return 1;
+    if (!fx || fx->bound != 127 || fx->playing != 127) return 0;
+    unsigned index;
+    if (key == H2_FX_SPATIAL23 && fx->sources[1].output_mask == 64) index = 2;
+    else if (key == H2_FX_SPATIAL24 && fx->sources[3].output_mask == 128 && !fx->sources[2].output_mask) index = 4;
+    else if (key == 25 && fx->sources[6].output_mask == 1024 && !fx->sources[4].output_mask) index = 5;
+    else return 0;
+    if (fx->sources[index].routes != (key == 25 ? 2u : 5u)) return 0;
+    fx->sources[index].output_mask = 0; return 1;
 }
 int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin)
 {

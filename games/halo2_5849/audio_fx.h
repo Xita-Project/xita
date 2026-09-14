@@ -2,8 +2,10 @@
 #include "dsp_engine.h"
 #include "audio_hrtf_model.h"
 
-/* Bounded original FXIN2 loop: bin13 -> routes0..5; bins23..25 -> routes0,1.
- * Each bin23..25 also has a fixed spatial voice into bins6/7/10.
+/* Bounded original FXIN2 loop: bin13 -> routes0..5; bins23..25 initially ->0,1.
+ * Each bin23..25 also has a fixed spatial voice initially into bins6/7/10.
+ * The verified later sequence routes23->6,24->7,spatial25->10 and mutes
+ * spatial23,spatial24,nonspatial25, without retiring their active processing.
  * Their mono signed-24 sources all read the prior completed GP frame. All
  * other voices must be inactive. The caller owns and serializes the engine,
  * this state, and every read of that engine. */
@@ -27,9 +29,9 @@ unsigned h2_audio_fx_mask(unsigned bin);
 int h2_audio_fx_bind(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin);
 int h2_audio_fx_bind_spatial(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin, const int8_t taps[31]);
 int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes);
-/* Exact active nonspatial bin23 replacement: bins6/8/7/9, only bin6 unity. */
+/* Exact original active FX23/24 and spatial25 route replacements only. */
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned bin, unsigned output_mask);
-int h2_audio_fx_mute_spatial23(h2_audio_fx *fx);
+int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key);
 int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin);
 int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin);
 /* Execute complete 32-sample frames, reading every active source before

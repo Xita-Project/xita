@@ -1,5 +1,8 @@
 # Halo 2: active spatial FX23 mute
 
+The following [native122 checkpoint](halo2-fxin2-configuration.md) completes
+the remaining original FX24/25 routing and mute sequence.
+
 Native120 executes the original spatial FX23 `SetVolume(-6400)` call from
 `2AECA6`, then reaches bin24 route setup. **The game still presents only its
 first black frame with zero nonzero audio grains; there is no main menu or

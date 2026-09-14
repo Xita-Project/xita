@@ -515,18 +515,23 @@ static void buffer_control(xctx *c, uint32_t ip)
     uint32_t value = X_ARG(1);
     if (b->submix == 2) {
 #if H2_AUDIO_DSP
-        if (ip == 0x37B66F && X_M32(c->r[4]) == 0x2AECA6) {
-            if (value != (uint32_t)-6400 || b->fx_bin != H2_FX_SPATIAL23 || !b->started || b->stopped ||
-                b->route_count != 5 || b->headroom || (b->volume && b->volume != -6400))
-                fail(c, ip, "unsupported spatial FX23 mute state/value", value);
-            if (h2_audio_backend_fx_mute_spatial23() < 0) fail(c, ip, "spatial FX23 mixer mute rejected", b->base);
+        uint32_t caller = X_M32(c->r[4]);
+        uint32_t muted_key = caller == 0x2AECA6 ? H2_FX_SPATIAL23 : caller == 0x2AEDF8 ? H2_FX_SPATIAL24 : caller == 0x2AEF43 ? 25 : 0;
+        if (ip == 0x37B66F && muted_key) {
+            if (value != (uint32_t)-6400 || b->fx_bin != muted_key || !b->started || b->stopped ||
+                b->route_count != (muted_key == 25 ? 2u : 5u) || b->headroom || (b->volume && b->volume != -6400))
+                fail(c, ip, "unsupported original FX mute state/value", value);
+            if (h2_audio_backend_fx_mute(muted_key) < 0) fail(c, ip, "FX mixer mute rejected", b->base);
             b->volume = -6400;
-            xv_logf("[h2/fxin2] caller=002AECA6 interface=%08X original volume=-6400 attenuationFFF on all routes; source/filter/GP time remains active\n", b->base + 0x1C);
+            xv_logf("[h2/fxin2] caller=%08X interface=%08X source_key=%X original volume=-6400 attenuationFFF on all routes; source/filter/GP time remains active\n", caller, b->base + 0x1C, muted_key);
             result(c, 0, 2); return;
         }
 #endif
         int initial = !b->started && b->fx_bin == 13 && X_M32(c->r[4]) == 0x220C37;
-        int retained = b->started && b->fx_bin == 23 && b->route_count == 4 && X_M32(c->r[4]) == 0x2AEC95;
+        int retained = b->started && !b->stopped && !b->volume && !b->headroom &&
+            ((b->fx_bin == 23 && b->route_count == 4 && X_M32(c->r[4]) == 0x2AEC95) ||
+             (b->fx_bin == 24 && b->route_count == 4 && X_M32(c->r[4]) == 0x2AEDE7) ||
+             (b->fx_bin == H2_FX_SPATIAL25 && b->route_count == 5 && b->route_gains[0] == -6400 && !b->route_gains[4] && X_M32(c->r[4]) == 0x2AEF32));
         if (ip != 0x37B66F || value || (!initial && !retained))
             fail(c, ip, "unsupported FXIN2 gain/state/caller", value);
         b->volume = 0;
@@ -633,16 +638,23 @@ static void buffer_routing(xctx *c, uint32_t ip)
     }
 #if H2_AUDIO_DSP
     if (b->submix == 2) {
-        if (ip == 0x37C5E4 && X_M32(c->r[4]) == 0x2AEC87) {
-            if (!b->started || b->stopped || b->fx_bin != 23 || b->volume || b->headroom ||
-                list[0] != 4 || !mapped(list[1], 32)) fail(c, ip, "unsupported active FX23 route state/list", list[0]);
-            x_guest_read(pairs, list[1], 32);
-            const uint32_t expected[8] = {6,0,8,(uint32_t)-6400,7,(uint32_t)-6400,9,(uint32_t)-6400};
-            if (memcmp(pairs, expected, sizeof expected)) fail(c, ip, "unsupported active FX23 route/gain", list[1]);
-            if (h2_audio_backend_fx_route_mask(23, 1u << 6) < 0) fail(c, ip, "FX23 active mixer route rejected", b->base);
-            b->route_count = 4;
-            for (unsigned i = 0; i < 4; ++i) { b->route_bins[i] = pairs[i * 2]; b->route_gains[i] = (int32_t)pairs[i * 2 + 1]; }
-            xv_logf("[h2/fxin2] SetMixBins caller=002AEC87 interface=%08X input23 routes6,8,7,9; bin6 unity, others original attenuationFFF/mute; future computed grains updated\n", b->base + 0x1C);
+        uint32_t caller = X_M32(c->r[4]);
+        uint32_t key = caller == 0x2AEC87 ? 23 : caller == 0x2AEDD9 ? 24 : caller == 0x2AEF24 ? H2_FX_SPATIAL25 : 0;
+        if (ip == 0x37C5E4 && key) {
+            unsigned count = key == H2_FX_SPATIAL25 ? 5 : 4, output_mask = key == 23 ? 64 : key == 24 ? 128 : 1024;
+            if (!b->started || b->stopped || b->fx_bin != key || b->volume || b->headroom ||
+                list[0] != count || !mapped(list[1], count * 8)) fail(c, ip, "unsupported active FX route state/list", list[0]);
+            x_guest_read(pairs, list[1], count * 8);
+            const uint32_t bins[5] = {6,8,7,9,10};
+            for (unsigned i = 0; i < count; ++i) {
+                uint32_t gain = output_mask & (1u << bins[i]) ? 0 : (uint32_t)-6400;
+                if (pairs[i * 2] != bins[i] || pairs[i * 2 + 1] != gain)
+                    fail(c, ip, "unsupported active FX route/gain", list[1]);
+            }
+            if (h2_audio_backend_fx_route_mask(key, output_mask) < 0) fail(c, ip, "FX active mixer route rejected", b->base);
+            b->route_count = count;
+            for (unsigned i = 0; i < count; ++i) { b->route_bins[i] = pairs[i * 2]; b->route_gains[i] = (int32_t)pairs[i * 2 + 1]; }
+            xv_logf("[h2/fxin2] SetMixBins caller=%08X interface=%08X source_key=%X count=%u unity_mask=%03X others original attenuationFFF/mute; future computed grains updated\n", caller, b->base + 0x1C, key, count, output_mask);
             result(c, 0, 2); return;
         }
         if (ip != 0x37C5E4 || b->started || b->fx_bin != 13 || X_M32(c->r[4]) != 0x220CAA ||

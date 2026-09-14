@@ -20,12 +20,24 @@ int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *s, unsigned bin, const int8_
 { unsigned mask = test_fx_mask(0x10000u | bin); assert(s == effects && test_fx_bound == mask - 1 && test_fx_playing == mask - 1 && taps); test_fx_bound |= mask; return 0; }
 int h2_audio_backend_fx_route(unsigned bin, unsigned routes)
 { assert(bin == 13 && (test_fx_bound & 1) && !(test_fx_playing & 1) && routes == 6); test_fx_routes = routes; return 0; }
-static unsigned test_fx23_output_mask;
-int h2_audio_backend_fx_route_mask(unsigned bin, unsigned output_mask)
-{ assert(bin == 23 && output_mask == 64 && test_fx_bound == 127 && test_fx_playing == 127); test_fx23_output_mask = output_mask; return 0; }
-static unsigned test_fx23_muted;
-int h2_audio_backend_fx_mute_spatial23(void)
-{ assert(test_fx_bound == 127 && test_fx_playing == 127 && test_fx23_output_mask == 64); test_fx23_muted = 1; return 0; }
+static unsigned test_fx23_output_mask, test_fx24_output_mask, test_fx25_routed;
+static unsigned test_fx23_muted, test_fx24_muted, test_fx25_muted;
+int h2_audio_backend_fx_route_mask(unsigned key, unsigned output_mask)
+{
+    assert(test_fx_bound == 127 && test_fx_playing == 127);
+    if (key == 23) { assert(output_mask == 64); test_fx23_output_mask = output_mask; }
+    else if (key == 24) { assert(output_mask == 128 && test_fx23_muted); test_fx24_output_mask = output_mask; }
+    else { assert(key == H2_FX_SPATIAL25 && output_mask == 1024 && test_fx24_muted); test_fx25_routed = 1; }
+    return 0;
+}
+int h2_audio_backend_fx_mute(unsigned key)
+{
+    assert(test_fx_bound == 127 && test_fx_playing == 127);
+    if (key == H2_FX_SPATIAL23) { assert(test_fx23_output_mask == 64); test_fx23_muted = 1; }
+    else if (key == H2_FX_SPATIAL24) { assert(test_fx24_output_mask == 128); test_fx24_muted = 1; }
+    else { assert(key == 25 && test_fx25_routed); test_fx25_muted = 1; }
+    return 0;
+}
 int h2_audio_backend_fx_play(unsigned bin)
 { unsigned mask = test_fx_mask(bin); assert((test_fx_bound & mask) && !(test_fx_playing & mask) && (bin != 13 || test_fx_routes == 6)); test_fx_playing |= mask; return 0; }
 int h2_audio_backend_fx_forget(unsigned bin)

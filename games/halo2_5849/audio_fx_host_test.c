@@ -132,6 +132,30 @@ int main(int argc, char **argv)
                 c = fx_context(muted_handle, (uint32_t)-6400, 0x2AECA6); call(&c, 0x37B66F, 0, 2);
                 assert(test_fx23_muted && muted->volume == -6400 && muted->started && test_fx_playing == 127);
                 assert(!memcmp(spatial_before, muted->spatial, sizeof spatial_before));
+                /* Remaining exact caller sequence: route/zero-volume then
+                 * mute the companion, without changing live ownership. */
+                for (unsigned stage = 0; stage < 2; ++stage) {
+                    uint32_t route_handle = extra_handles[stage ? 4 : 1], mute_handle = extra_handles[stage ? 3 : 2];
+                    uint32_t route_caller = stage ? 0x2AEF24 : 0x2AEDD9, zero_caller = stage ? 0x2AEF32 : 0x2AEDE7;
+                    uint32_t mute_caller = stage ? 0x2AEF43 : 0x2AEDF8;
+                    uint32_t remaining_list[2] = {stage ? 5 : 4,0x5ffb};
+                    uint32_t remaining_pairs[10] = {6,(uint32_t)-6400,8,(uint32_t)-6400,7,(uint32_t)-6400,9,(uint32_t)-6400,10,(uint32_t)-6400};
+                    remaining_pairs[stage ? 9 : 5] = 0;
+                    x_guest_write(0x4ffc,remaining_list,8);
+                    for (unsigned field = 0; field < remaining_list[0] * 2; ++field) {
+                        remaining_pairs[field] ^= 1; x_guest_write(remaining_list[1],remaining_pairs,remaining_list[0] * 8);
+                        c = fx_context(route_handle,0x4ffc,route_caller); reject(&c,0x37C5E4); remaining_pairs[field] ^= 1;
+                    }
+                    x_guest_write(remaining_list[1],remaining_pairs,remaining_list[0] * 8);
+                    c = fx_context(route_handle,0x4ffc,route_caller+1); reject(&c,0x37C5E4);
+                    c = fx_context(route_handle,0x4ffc,route_caller); call(&c,0x37C5E4,0,2);
+                    c = fx_context(route_handle,0,zero_caller); call(&c,0x37B66F,0,2);
+                    c = fx_context(mute_handle,(uint32_t)-6399,mute_caller); reject(&c,0x37B66F);
+                    c = fx_context(mute_handle,(uint32_t)-6400,mute_caller); call(&c,0x37B66F,0,2);
+                }
+                assert(test_fx24_output_mask == 128 && test_fx25_routed && test_fx24_muted && test_fx25_muted);
+                assert(test_fx_playing == 127 && device.references == 8);
+
 
 
                 while (extras) {

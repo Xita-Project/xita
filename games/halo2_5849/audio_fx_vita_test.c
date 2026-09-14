@@ -97,10 +97,16 @@ int main(void)
     atomic_store(&faults, 0);
     for (;;) { h2_audio_backend_snapshot(&status); if (status.fx_submitted_frames > old_computed) break; usleep(1000); }
     assert(status.last_peak_left == 5859 && status.last_peak_right == 5859 && !status.error);
-    assert(h2_audio_backend_fx_mute_spatial23() == 0);
+    assert(h2_audio_backend_fx_mute(H2_FX_SPATIAL23) == 0);
     h2_audio_backend_snapshot(&status); uint64_t muted_submitted = status.fx_source_submitted[2];
     for (;;) { h2_audio_backend_snapshot(&status); if (status.fx_source_submitted[2] > muted_submitted) break; usleep(1000); }
     assert(status.fx_playing_mask == 127 && !status.error && status.last_peak_left == 5859);
+    assert(h2_audio_backend_fx_route_mask(24,128) == 0 && h2_audio_backend_fx_mute(H2_FX_SPATIAL24) == 0);
+    assert(h2_audio_backend_fx_route_mask(H2_FX_SPATIAL25,1024) == 0 && h2_audio_backend_fx_mute(25) == 0);
+    h2_audio_backend_snapshot(&status); uint64_t final_computed = status.fx_computed_frames;
+    for (;;) { h2_audio_backend_snapshot(&status); if (status.fx_submitted_frames > final_computed) break; usleep(1000); }
+    assert(status.last_peak_left == 1953 && status.last_peak_right == 1953 && status.fx_playing_mask == 127 && !status.error);
+
 
 
     assert(h2_audio_backend_fx_forget(23) < 0);
