@@ -35,6 +35,7 @@ static int sceKernelStartThread(int, unsigned, void *);
 static int sceKernelWaitThreadEnd(int, void *, SceUInt *);
 #define H2_AUDIO_PLATFORM_TEST 1
 #include "audio_vita.c"
+#include "audio_bins.c"
 
 enum { F_MUTEX, F_PORT, F_VOLUME, F_SEMA, F_THREAD, F_START, F_READY, F_WRITE, F_JOIN, F_RELEASE };
 static atomic_uint faults;
@@ -48,6 +49,8 @@ static int (*native_entry)(SceSize, void *);
 static int failing(unsigned bit) { return (atomic_load(&faults) & (1u << bit)) != 0; }
 void xv_logf(const char *format, ...) { (void)format; }
 int xk_audio_init(void) { return h2_audio_sink_open(XA_OUT_RATE, XA_GRAIN); }
+void xk_audio_lock(void) { h2_audio_sink_lock(); }
+void xk_audio_unlock(void) { h2_audio_sink_unlock(); }
 void xk_audio_mix(int16_t *out, int count)
 {
     assert(count == XA_GRAIN && !((uintptr_t)out & 63));
@@ -147,10 +150,16 @@ int main(void)
         assert(h2_audio_backend_health() == 0 && h2_audio_backend_free_voices() == 42);
         h2_audio_backend_status state; h2_audio_backend_snapshot(&state);
         assert(state.grains >= 1 && state.nonzero_grains >= 1 && state.peak == 4321 && !state.error);
+        assert(state.last_peak_left == 1234 && state.last_peak_right == 4321);
+        uint8_t bins[32]; h2_audio_bins_snapshot(bins);
+        for (unsigned b = 0; b < 32; ++b) assert(bins[b] == (b != 31));
+        assert(h2_audio_backend_set_headroom(31, 0xFF) == 0);
+        h2_audio_bins_snapshot(bins); assert(bins[31] == 0xFF);
         assert(atomic_load(&outputs) > old_outputs && state.port == 20 && state.thread == 40);
         assert(h2_audio_backend_close() == 0 && !resources && !atomic_load(&active));
         assert(atomic_load(&drains) == old_drains + 1 && h2_audio_backend_health() == -1);
         assert(h2_audio_backend_close() == 0); /* harmless duplicate shutdown */
+        assert(h2_audio_backend_set_headroom(0, 0) == -1);
     }
     /* A join failure must retain everything that a running worker could use. */
     assert(h2_audio_backend_open() == 0);

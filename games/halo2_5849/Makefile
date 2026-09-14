@@ -23,9 +23,9 @@ ifeq ($(AUDIO_HOST),1)
 ifneq ($(HOST_CHANNEL),1)
 $(error AUDIO_HOST=1 requires HOST_CHANNEL=1)
 endif
-OBJECTS += $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/recomp/kernel/xk_audio.o
+OBJECTS += $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/recomp/kernel/xk_audio.o
 $(BUILD)/boot.o: CFLAGS += -DH2_AUDIO_HOST=1
-$(BUILD)/recomp/kernel/xk_audio.o: CFLAGS += -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock
+$(BUILD)/recomp/kernel/xk_audio.o: CFLAGS += -DXK_AUDIO_OUTPUT_FILTER=h2_audio_bins_filter -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock
 endif
 comma := ,
 WRAPS := xk_MmCreateKernelStack xk_MmDeleteKernelStack xk_MmClaimGpuInstanceMemory xv_unimpl xk_NtOpenFile xk_NtReadFile xk_NtWriteFile xk_NtDeviceIoControlFile xk_NtFsControlFile xk_NtQueryVolumeInformationFile
@@ -48,9 +48,9 @@ endif
 .DEFAULT_GOAL := all
 .PHONY: audio-probe
 audio-probe: $(BUILD)/audio-probe.vpk
-$(BUILD)/audio-probe.elf: audio_probe.c audio_vita.c audio_host.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+$(BUILD)/audio-probe.elf: audio_probe.c audio_vita.c audio_bins.c audio_bins.h audio_host.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
-	$(CC) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock -Wl,-q,--gc-sections $(filter %.c,$^) -o $@ -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceAudio_stub -lSceSysmem_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lm
+	$(CC) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp -DXK_AUDIO_OUTPUT_FILTER=h2_audio_bins_filter -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock -Wl,-q,--gc-sections $(filter %.c,$^) -o $@ -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceAudio_stub -lSceSysmem_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lm
 $(BUILD)/audio-probe.velf: $(BUILD)/audio-probe.elf
 	$(VITASDK)/bin/vita-elf-create $< $@
 $(BUILD)/audio-probe-eboot.bin: $(BUILD)/audio-probe.velf
@@ -80,7 +80,7 @@ $(BUILD)/quad-probe.vpk: $(BUILD)/quad-probe-eboot.bin $(BUILD)/quad-probe-param
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
 test-host: $(BUILD)/quad_draw_test
 test-host: $(BUILD)/blit_copy_test
-test-host: $(BUILD)/audio_host_test $(BUILD)/audio_vita_test $(BUILD)/audio_mixer_test
+test-host: $(BUILD)/audio_host_test $(BUILD)/audio_vita_test $(BUILD)/audio_mixer_test $(BUILD)/audio_bins_test
 all: $(BUILD)/halo2-boot.vpk
 test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/input_test $(BUILD)/scanout_test $(BUILD)/command_state_test $(BUILD)/host_tiles_test $(BUILD)/host_channel_runtime_test $(BUILD)/host_channel_test $(BUILD)/kelvin_clear_test $(BUILD)/gpu_objects_test $(BUILD)/push_stream_test $(BUILD)/nv2a_memory_test $(BUILD)/instance_memory_test $(BUILD)/cache_volume_test $(BUILD)/nv2a_regs_test $(BUILD)/nv2a_timer_test
 	$(BUILD)/kernel_timer_test
@@ -96,6 +96,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/audio_host_test
 	$(BUILD)/audio_vita_test
 	$(BUILD)/audio_mixer_test
+	$(BUILD)/audio_bins_test
 	$(BUILD)/input_test
 	$(BUILD)/scanout_test
 	$(BUILD)/command_state_test
@@ -136,12 +137,15 @@ $(BUILD)/audio_unavailable_test: audio_unavailable_test.c audio_unavailable.c $(
 $(BUILD)/audio_host_test: audio_host_test.c audio_host.c audio_host.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_host_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
-$(BUILD)/audio_vita_test: audio_vita_test.c audio_vita.c audio_host.h $(ROOT)/recomp/kernel/xk_audio.h
+$(BUILD)/audio_vita_test: audio_vita_test.c audio_vita.c audio_bins.c audio_bins.h audio_host.h $(ROOT)/recomp/kernel/xk_audio.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -I$(ROOT) -I$(ROOT)/recomp audio_vita_test.c -pthread -o $@
 $(BUILD)/audio_mixer_test: audio_mixer_test.c $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp $(filter %.c,$^) -Wl,--gc-sections -lm -o $@
+$(BUILD)/audio_bins_test: audio_bins_test.c audio_bins.c audio_bins.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -DXK_AUDIO_OUTPUT_FILTER=h2_audio_bins_filter -I$(ROOT) -I$(ROOT)/recomp $(filter %.c,$^) -Wl,--gc-sections -lm -o $@
 $(BUILD)/input_test: input_test.c input.c input.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT)/recomp input_test.c input.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
@@ -215,7 +219,7 @@ $(BUILD)/nv2a_regs.o: nv2a_regs.c
 $(BUILD)/linear_texture.o $(BUILD)/fp_environment.o $(BUILD)/kernel_timer.o $(BUILD)/kernel_stack.o $(BUILD)/command_snapshot.o $(BUILD)/host_channel_runtime.o $(BUILD)/command_state.o $(BUILD)/host_channel.o $(BUILD)/host_tiles.o $(BUILD)/push_stream.o $(BUILD)/gpu_objects.o $(BUILD)/kelvin_clear.o $(BUILD)/scanout.o $(BUILD)/input.o $(BUILD)/audio_unavailable.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o: $(BUILD)/%.o: %.c
+$(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/%.o: $(GENERATED)/%.c $(GENERATED)/xv_recomp_protos.h

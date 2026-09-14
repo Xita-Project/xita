@@ -4,10 +4,12 @@
 typedef struct {
     uint32_t base, references, ever_created;
     uint32_t distance, rolloff, pending_distance, pending_rolloff, dirty;
+    uint8_t headroom[32];
 } h2_audio_device_snapshot;
 
 typedef struct {
     uint32_t grains, nonzero_grains, peak, error;
+    uint32_t last_peak_left, last_peak_right;
     int32_t port, thread;
 } h2_audio_backend_status;
 
@@ -27,5 +29,6 @@ int h2_audio_backend_open(void);
 int h2_audio_backend_close(void);
 int h2_audio_backend_health(void);
 uint32_t h2_audio_backend_free_voices(void);
+int h2_audio_backend_set_headroom(uint32_t bin, uint32_t headroom);
 void h2_audio_backend_snapshot(h2_audio_backend_status *out);
 _Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32_t value);

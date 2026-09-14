@@ -80,6 +80,7 @@ static void create(xctx *c)
             .distance = 0x3F800000, .rolloff = 0x3F800000,
             .pending_distance = 0x3F800000, .pending_rolloff = 0x3F800000
         };
+        memset(device.headroom, 1, 31);
         /* Match only the independently audited common vtable/refcount header.
          * Public wrappers expose base+8. All remaining original DSOUND object
          * methods are guarded; no fake DSP/listener/voice pointers are stored. */
@@ -149,6 +150,19 @@ static void scalar(xctx *c, uint32_t ip)
             device.pending_distance, device.pending_rolloff, device.dirty);
     result(c, 0, 3);
 }
+static void mix_bin(xctx *c, uint32_t ip)
+{
+    stack(c, ip, 3);
+    uint32_t bin = X_ARG(1), amount = X_ARG(2);
+    if (bin >= 32) fail(c, ip, "mix bin index", bin);
+    live(c, ip, X_ARG(0), 0);
+    if (h2_audio_backend_set_headroom(bin, amount) < 0)
+        fail(c, ip, "mix bin output", bin);
+    device.headroom[bin] = (uint8_t)amount;
+    xv_logf("[h2/audio] mix bin=%u stored=%u shift=%u caller=%08X\n",
+            bin, device.headroom[bin], amount & 7, X_M32(c->r[4]));
+    result(c, 0, 3);
+}
 void h2_audio_host_call(xctx *c, uint32_t ip)
 {
     uint32_t fpscr = h2_platform_fpscr_read();
@@ -157,6 +171,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37A14F: case 0x37C70F: reference(c, ip); break;
     case 0x37B5AE: case 0x37B5CA: query(c, ip); break;
     case 0x37D506: case 0x37D5CD: scalar(c, ip); break;
+    case 0x37B637: mix_bin(c, ip); break;
     default: fail(c, ip, "unimplemented adapter", ip);
     }
     h2_platform_fpscr_write(fpscr);

@@ -33,7 +33,7 @@ int main(void)
     FILE *report = fopen("ux0:data/xita-halo2/audio-probe.txt", "w");
     if (!report) return 2;
     int success = 0, voice = -1;
-    h2_audio_backend_status before = {0}, playing = {0}, stopped = {0};
+    h2_audio_backend_status before = {0}, playing = {0}, attenuated = {0}, restored = {0}, stopped = {0};
     g_xram = calloc(1, 0x6000); g_img_base = g_xram; g_xpt = calloc(1u << 20, 4);
     if (!g_xram || !g_xpt) goto finish;
     g_xpt[1] = 0; g_xpt[2] = 0x1000; g_xpt[3] = 0x3000;
@@ -51,17 +51,30 @@ int main(void)
     if (h2_audio_backend_open() < 0) goto finish;
     h2_audio_backend_snapshot(&before);
     if (before.nonzero_grains || before.error || h2_audio_backend_free_voices() != XA_MAX_VOICES) goto finish;
+    for (unsigned bin = 0; bin < 32; ++bin)
+        if (h2_audio_backend_set_headroom(bin, 0) < 0) goto finish;
     voice = xk_audio_voice_new(1, 0x1100);
     if (voice < 0 || h2_audio_backend_free_voices() != XA_MAX_VOICES - 1) goto finish;
     xk_audio_voice_set_data(voice, 0x2FE0, sizeof pcm); xk_audio_voice_play(voice, 1);
     if (wait_for_grains(12, 1) < 0) goto finish;
     h2_audio_backend_snapshot(&playing);
     if (!playing.peak || playing.peak > 7200 || playing.error) goto finish;
+    if (playing.last_peak_left != 3600 || playing.last_peak_right != 3600) goto finish;
+    if (h2_audio_backend_set_headroom(0, 1) < 0 || h2_audio_backend_set_headroom(1, 2) < 0) goto finish;
+    /* Allow the already mixed/submitted grain to retire before inspecting
+     * steady output. There are many complete triangle cycles in each grain. */
+    if (wait_for_grains(playing.grains + 4, 0) < 0) goto finish;
+    h2_audio_backend_snapshot(&attenuated);
+    if (attenuated.error || attenuated.last_peak_left != 1800 || attenuated.last_peak_right != 900) goto finish;
+    if (h2_audio_backend_set_headroom(0, 0) < 0 || h2_audio_backend_set_headroom(1, 0) < 0) goto finish;
+    if (wait_for_grains(attenuated.grains + 4, 0) < 0) goto finish;
+    h2_audio_backend_snapshot(&restored);
+    if (restored.error || restored.last_peak_left != 3600 || restored.last_peak_right != 3600) goto finish;
     xk_audio_voice_stop(voice); xk_audio_voice_free(voice); voice = -1;
-    if (h2_audio_backend_free_voices() != XA_MAX_VOICES || wait_for_grains(playing.grains + 3, 0) < 0) goto finish;
+    if (h2_audio_backend_free_voices() != XA_MAX_VOICES || wait_for_grains(restored.grains + 3, 0) < 0) goto finish;
     h2_audio_backend_snapshot(&stopped);
     /* At most the worker's already mixed grain can remain nonzero at stop. */
-    if (stopped.nonzero_grains > playing.nonzero_grains + 1) goto finish;
+    if (stopped.nonzero_grains > restored.nonzero_grains + 1) goto finish;
     if (h2_audio_backend_close() < 0) goto finish;
     if (h2_audio_backend_open() < 0) goto finish;
     if (h2_audio_backend_close() < 0) goto finish;
@@ -74,9 +87,11 @@ finish:
     if (retired < 0) success = 0;
     fprintf(report, "synthetic_pcm_probe=%s\nrate=48000 channels=2 format=PCM16 frequency=1000\n"
             "before_grains=%u before_nonzero=%u\nplaying_grains=%u playing_nonzero=%u peak=%u error=%08X\n"
+            "headroom_1_2_peaks=%u,%u restored_0_0_peaks=%u,%u\n"
             "stopped_grains=%u stopped_nonzero=%u\nreopen_close=%d\n",
             success ? "PASS" : "FAIL", before.grains, before.nonzero_grains,
             playing.grains, playing.nonzero_grains, playing.peak, playing.error,
+            attenuated.last_peak_left, attenuated.last_peak_right, restored.last_peak_left, restored.last_peak_right,
             stopped.grains, stopped.nonzero_grains, success);
     fclose(report);
     if (!retired) { free(g_xpt); free(g_xram); }

@@ -12,6 +12,9 @@ available. Native87 reached map initialization through the failure path; native9
 enters the earlier sound success path that native87 skipped. Native90 therefore
 does **not** establish that a working sound device has reached map initialization.
 
+The subsequent [mix-bin milestone](halo2-mix-bin-headroom.md) advances this
+original success path to deferred Doppler setup; native90 remains preserved.
+
 ## Checked ABI and ownership
 
 The adapter verifies the complete owned executable SHA-256, each of seven entry

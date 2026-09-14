@@ -4,7 +4,7 @@ This is an **identity and discovery profile**, not a working game port. It
 selects no game adapter, function overrides, extra roots, variables or symbols.
 `5849` identifies the linked XDK library build, not an asserted game build number.
 
-The [latest native checkpoint and exact private replay command](../../docs/halo2-host-audio-device.md)
+The [latest native checkpoint and exact private replay command](../../docs/halo2-mix-bin-headroom.md)
 describe the current normal and diagnostic startup stops. There is no main menu.
 
 A separate [native startup target](../../docs/halo2-native-boot-20260912.md)
@@ -94,5 +94,6 @@ and general geometry/texture support remain incomplete.
 The separate `--host-channel --audio-host` profile, built with `AUDIO_HOST=1`,
 now [creates a real Vita audio device and completes the first sound queries](../../docs/halo2-host-audio-device.md).
 A separate synthetic PCM utility verifies nonzero mixer output and worker
-lifetime. Original game startup stops at the next unsupported per-bin headroom
-method, before any game audio or menu. The no-driver diagnostic remains intact.
+lifetime. The [mix-bin headroom milestone](../../docs/halo2-mix-bin-headroom.md)
+now executes all 32 original bin updates and stops at deferred Doppler setup,
+before any game audio or menu. The no-driver diagnostic remains intact.

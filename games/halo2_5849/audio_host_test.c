@@ -11,6 +11,8 @@ static jmp_buf stopped;
 static unsigned opens, closes, allocations, frees;
 static int open_failure, alloc_failure, close_failure, healthy, allocated;
 static uint32_t native_fp = 0xA5A55A5A, available = 192;
+static unsigned bin_updates;
+static uint32_t last_bin, last_headroom;
 uint32_t h2_platform_fpscr_read(void) { return native_fp; }
 void h2_platform_fpscr_write(uint32_t value) { native_fp = value; }
 void xv_logf(const char *format, ...) { (void)format; native_fp ^= 0x12345678; }
@@ -33,6 +35,8 @@ int h2_audio_backend_close(void)
 { ++closes; assert(healthy); native_fp = 2; if (close_failure) return -1; healthy = 0; return 0; }
 int h2_audio_backend_health(void) { return healthy ? 0 : -1; }
 uint32_t h2_audio_backend_free_voices(void) { assert(healthy); return available; }
+int h2_audio_backend_set_headroom(uint32_t bin, uint32_t amount)
+{ assert(healthy && bin < 32); ++bin_updates; last_bin = bin; last_headroom = amount; return 0; }
 
 static xctx context(uint32_t a, uint32_t b, uint32_t d)
 {
@@ -52,12 +56,13 @@ static void reject(xctx *c, uint32_t ip)
 {
     xctx before = *c; h2_audio_device_snapshot state = device;
     uint8_t memory[0x9000]; memcpy(memory, g_xram, sizeof memory);
-    unsigned op = opens, cl = closes, al = allocations, fr = frees;
+    unsigned op = opens, cl = closes, al = allocations, fr = frees, bu = bin_updates;
     uint32_t before_fp = native_fp;
     if (!setjmp(stopped)) { h2_audio_host_call(c, ip); assert(!"expected sound stop"); }
     assert(!memcmp(c, &before, sizeof before));
     assert(!memcmp(&state, &device, sizeof state) && !memcmp(memory, g_xram, sizeof memory));
     assert(op == opens && cl == closes && al == allocations && fr == frees && native_fp == before_fp);
+    assert(bu == bin_updates);
 }
 static uint32_t read32(uint32_t address)
 { uint32_t value; x_guest_read(&value, address, 4); return value; }
@@ -94,6 +99,7 @@ int main(void)
     call(&c, 0x37D797, 0, 3); only_changed(memory, 0x2FFE, 4, 1);
     assert(read32(0x2FFE) == 0x5008 && healthy && allocated && device.references == 1);
     assert(X_M32(0x5000) == 0x417120 && X_M32(0x5004) == 1);
+    for (unsigned i = 0; i < 32; ++i) assert(device.headroom[i] == (i != 31));
     /* A second caller shares the actual device, without a second output worker. */
     unsigned op = opens; c = context(0, 0x4100, 0); call(&c, 0x37D797, 0, 3);
     assert(op == opens && read32(0x4100) == 0x5008 && device.references == 2);
@@ -130,7 +136,18 @@ int main(void)
     }
     c = context(0x5008, 0x3F800000, 2); reject(&c, 0x37D506);
     c = context(0x5008, 0x4100, 0); healthy = 0; reject(&c, 0x37B5CA); healthy = 1;
-    reject(&c, 0x37B637); /* no success fallback for an unknown adapter entry */
+    for (unsigned bin = 0; bin < 32; ++bin) {
+        uint32_t raw = 0xFEDCBA00u + bin;
+        c = context(0x5008, bin, raw); memcpy(memory, g_xram, sizeof memory);
+        call(&c, 0x37B637, 0, 3);
+        assert(last_bin == bin && last_headroom == raw && device.headroom[bin] == (uint8_t)raw);
+        assert(!memcmp(memory, g_xram, sizeof memory));
+    }
+    c = context(0x5008, 32, 0); reject(&c, 0x37B637);
+    c = context(0x5008, UINT32_MAX, 0); reject(&c, 0x37B637);
+    c = context(0x5000, 0, 0); reject(&c, 0x37B637);
+    c = context(0x5008, 0, 0); healthy = 0; reject(&c, 0x37B637); healthy = 1;
+    reject(&c, 0x37D52A); /* no success fallback for the next original method */
     c = context(0x5008, 0, 0); reject(&c, 0x37A14F); /* common header expects base, not interface */
     c = context(0x5000, 0, 0); call(&c, 0x37A14F, 3, 1);
     X_M32(0x5004) = 9; c = context(0x5000, 0, 0); reject(&c, 0x37A14F); X_M32(0x5004) = 3;
@@ -152,6 +169,7 @@ int main(void)
     c = context(0x5008, 0x4100, 0); reject(&c, 0x37B5CA);
     if (!setjmp(stopped)) { h2_audio_guest_entry(&c, 0x37B637); assert(!"unknown original method must stop after host creation"); }
     c = context(0, 0x4100, 0); call(&c, 0x37D797, 0, 3); assert(device.distance == 0x3F800000);
+    for (unsigned i = 0; i < 32; ++i) assert(device.headroom[i] == (i != 31));
     c = context(0x5000, 0, 0); call(&c, 0x37C70F, 0, 1); assert(frees == 2);
     free(g_xpt); free(g_xram); puts("Halo 2 audio device ABI/lifetime tests passed"); return 0;
 }

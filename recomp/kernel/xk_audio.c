@@ -234,6 +234,12 @@ void xk_audio_mix(int16_t *out, int frames)
             break;                                   /* starved (stream) or finished (buffer): rest of this grain silent */
         }
     }
+    /* Optional title-specific gain stage on unsaturated sums, under the mixer
+     * lock. The default build has no additional call or altered sample path. */
+#ifdef XK_AUDIO_OUTPUT_FILTER
+    extern void XK_AUDIO_OUTPUT_FILTER(int32_t *, int);
+    XK_AUDIO_OUTPUT_FILTER(acc, frames);
+#endif
     xk_audio_unlock();
     g_last_mix_us = xk_os_monotonic_us();
     for (int k = 0; k < frames * 2; ++k) { int32_t s = acc[k]; out[k] = (int16_t)(s > 32767 ? 32767 : s < -32768 ? -32768 : s); }

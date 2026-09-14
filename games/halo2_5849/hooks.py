@@ -211,6 +211,7 @@ class Halo2AudioUnavailableHooks(Halo2HostChannelHooks):
 
 
 AUDIO_HOST_BOUNDARIES = {
+    0x37B637: (32, "9cd8e91683d0bd423aefc6a5ec381a25191ffc3ea7cd0a7f3c3a91933b2e3dcf"),
     0x37D797: (71, "937701608e296f3edcb1b3b77221d14015ee71e5b094256ba8fe1f50b76d7a0c"),
     0x37B5AE: (28, "a1220eefc06488fc180381e054af0cc9236b398f28a89b131070c3295b0cb14e"),
     0x37D506: (36, "34794564c8e0c6e58dd39ddfd60f7f14fef847e45956a12f290d01aed8fbf134"),

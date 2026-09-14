@@ -1,6 +1,7 @@
 /* Halo 2 owns this output worker; the shared mixer algorithms are unchanged.
  * Its OS calls are renamed at compile time, so the CE sink is not selected. */
 #include "audio_host.h"
+#include "audio_bins.h"
 #include "recomp/kernel/xk_audio.h"
 #ifndef H2_AUDIO_PLATFORM_TEST
 #include <psp2/audioout.h>
@@ -11,6 +12,7 @@
 static SceUID port = -1, mutex = -1, worker = -1, ready = -1;
 static int started, running;
 static uint32_t grains, nonzero_grains, peak, error;
+static uint32_t last_peak_left, last_peak_right;
 static _Alignas(64) int16_t output[2][XA_GRAIN * 2];
 extern void xv_logf(const char *, ...);
 
@@ -39,11 +41,15 @@ static int mix_worker(SceSize bytes, void *arg)
         int rc = sceAudioOutOutput(port, output[slot]);
         if (rc >= 0) {
             uint32_t maximum = 0;
+            uint32_t channel_peak[2] = {0};
             for (unsigned i = 0; i < XA_GRAIN * 2; ++i) {
                 int value = output[slot][i];
                 uint32_t absolute = value < 0 ? (uint32_t)-value : (uint32_t)value;
                 if (absolute > maximum) maximum = absolute;
+                if (absolute > channel_peak[i & 1]) channel_peak[i & 1] = absolute;
             }
+            __atomic_store_n(&last_peak_left, channel_peak[0], __ATOMIC_RELAXED);
+            __atomic_store_n(&last_peak_right, channel_peak[1], __ATOMIC_RELAXED);
             __atomic_add_fetch(&grains, 1, __ATOMIC_RELAXED);
             if (maximum) __atomic_add_fetch(&nonzero_grains, 1, __ATOMIC_RELAXED);
             if (maximum > __atomic_load_n(&peak, __ATOMIC_RELAXED))
@@ -78,8 +84,10 @@ int h2_audio_backend_open(void)
 {
     if (port >= 0 || worker >= 0 || mutex >= 0 || ready >= 0) return -2;
     grains = nonzero_grains = peak = error = 0;
+    last_peak_left = last_peak_right = 0;
     memset(output, 0, sizeof output);
     if (xk_audio_init() < 0) return open_failed();
+    h2_audio_bins_reset();
     ready = sceKernelCreateSema("h2_audio_ready", 0, 0, 1, NULL);
     if (ready < 0) return open_failed();
     worker = sceKernelCreateThread("h2_audio_output", mix_worker, 80, 64 * 1024, 0,
@@ -99,12 +107,16 @@ int h2_audio_backend_open(void)
 int h2_audio_backend_health(void)
 { return port >= 0 && started && !__atomic_load_n(&error, __ATOMIC_ACQUIRE) ? 0 : -1; }
 uint32_t h2_audio_backend_free_voices(void) { return xk_audio_free_voices(); }
+int h2_audio_backend_set_headroom(uint32_t bin, uint32_t amount)
+{ return h2_audio_backend_health() < 0 ? -1 : h2_audio_bins_set(bin, amount); }
 void h2_audio_backend_snapshot(h2_audio_backend_status *out)
 {
     *out = (h2_audio_backend_status){
         .grains = __atomic_load_n(&grains, __ATOMIC_RELAXED),
         .nonzero_grains = __atomic_load_n(&nonzero_grains, __ATOMIC_RELAXED),
         .peak = __atomic_load_n(&peak, __ATOMIC_RELAXED),
-        .error = __atomic_load_n(&error, __ATOMIC_ACQUIRE), .port = port, .thread = worker
+        .error = __atomic_load_n(&error, __ATOMIC_ACQUIRE), .port = port, .thread = worker,
+        .last_peak_left = __atomic_load_n(&last_peak_left, __ATOMIC_RELAXED),
+        .last_peak_right = __atomic_load_n(&last_peak_right, __ATOMIC_RELAXED)
     };
 }
