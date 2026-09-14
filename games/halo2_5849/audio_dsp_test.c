@@ -7,6 +7,20 @@
 struct h2_dsp_engine { uint32_t marker; };
 static unsigned dsp_opens, dsp_closes, dsp_reads;
 static int dsp_failure;
+static unsigned test_fx_bound, test_fx_routes, test_fx_playing;
+int h2_audio_backend_fx_bind(h2_dsp_engine *s, unsigned bin)
+{ assert(s == effects && bin == 13 && !test_fx_bound); test_fx_bound = 1; test_fx_routes = 2; return 0; }
+int h2_audio_backend_fx_route(unsigned routes)
+{ assert(test_fx_bound && !test_fx_playing && routes == 6); test_fx_routes = routes; return 0; }
+int h2_audio_backend_fx_play(void)
+{ assert(test_fx_bound && !test_fx_playing && test_fx_routes == 6); test_fx_playing = 1; return 0; }
+int h2_audio_backend_fx_forget(void)
+{ assert(test_fx_bound && !test_fx_playing); test_fx_bound = test_fx_routes = 0; return 0; }
+int h2_audio_backend_effect_read(h2_dsp_engine *s, unsigned index, unsigned offset, void *out, unsigned bytes)
+{
+    if (index >= 15 || offset > 128 || bytes > 128 - offset) return 0;
+    return h2_dsp_read_effect(s, index, offset, out, bytes);
+}
 h2_dsp_engine*h2_dsp_asset_open(const char*path,h2_dsp_status*status)
 {
     assert(!strcmp(path,"app0:halo2-dsp.bin")&&healthy);
@@ -45,7 +59,10 @@ static void dsp_reject(xctx*c,uint32_t ip)
     uint32_t guest=effects_guest,bytes=effects_guest_bytes;
     reject(c,ip);assert(op==dsp_opens&&cl==dsp_closes&&rd==dsp_reads&&owner==effects&&guest==effects_guest&&bytes==effects_guest_bytes);
 }
-int main(void)
+#ifndef H2_AUDIO_DSP_TEST_MAIN
+#define H2_AUDIO_DSP_TEST_MAIN main
+#endif
+int H2_AUDIO_DSP_TEST_MAIN(void)
 {
     g_xram=malloc(0x200000);g_img_base=g_xram;g_xpt=malloc((1u<<20)*4);assert(g_xram&&g_xpt);
     memset(g_xram,0xcc,0x200000);for(unsigned i=0;i<1u<<20;i++)g_xpt[i]=0x1ff000;

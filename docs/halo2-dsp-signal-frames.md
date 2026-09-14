@@ -81,3 +81,8 @@ remains the visible Microsoft intro checkpoint. The next bounded task is
 connecting this verified FX source to the original FXIN2 ownership/routing/Play
 contract and a real sink, with explicit underrun/progress behavior and without
 accepting unsupported spatial processing or stream packets.
+
+The subsequent [native113 FXIN2 sink milestone](halo2-fxin2-sink.md) connects
+this source to original creation/routing/Play and the real output worker. The
+native signal utility demonstrates nonzero sink samples; native113's game
+checkpoint remains silent and black.

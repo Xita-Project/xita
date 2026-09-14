@@ -1,0 +1,65 @@
+/* Guest ABI and resource lifetime; provider/sink are scripted here. Actual
+ * DSP output and concurrent ownership are covered by the companion tests. */
+#define H2_AUDIO_DSP_TEST_MAIN dsp_adapter_tests
+#include "audio_dsp_test.c"
+static xctx fx_description(uint32_t dev)
+{
+    uint32_t fields[6] = {24, 0x100000, 0, 0, 0, 13}; x_guest_write(0x3ffd, fields, sizeof fields);
+    xctx c = context(dev, 0x3ffd, 0x6ffe, 0); X_M32(c.r[4]) = 0x220C26; return c;
+}
+static xctx fx_context(uint32_t handle, uint32_t arg, uint32_t caller)
+{ xctx c = context(handle, arg, 0, 0); X_M32(c.r[4]) = caller; return c; }
+int main(void)
+{
+    g_xram = malloc(0x200000); g_img_base = g_xram; g_xpt = malloc((1u << 20) * 4); assert(g_xram && g_xpt);
+    memset(g_xram, 0xcc, 0x200000); for (unsigned i = 0; i < 1u << 20; ++i) g_xpt[i] = 0x1ff000;
+    for (unsigned i = 1; i < 16; ++i) g_xpt[i] = (i - 1) * 4096;
+    g_xpt[3] = 0x8000; g_xpt[7] = 0x9000; g_xpt[0x386] = 0xf000; X_M32(0x386B0C) = 0;
+    xctx c = context(0, 0x6200, 0, 0); call(&c, 0x37D797, 0, 3); uint32_t dev = read32(0x6200);
+    c = fx_description(dev); reject(&c, 0x37D4BE);
+    c = download_context(); call(&c, 0x37B86D, 0, 4);
+    for (unsigned i = 0; i < 6; ++i) {
+        c = fx_description(dev); uint32_t v = read32(0x3ffd + i * 4) ^ 1;
+        x_guest_write(0x3ffd + i * 4, &v, 4); reject(&c, 0x37D4BE); assert(!test_fx_bound);
+    }
+    c = fx_description(dev); X_M32(c.r[4])++; reject(&c, 0x37D4BE);
+    c = fx_description(dev); X_M32(c.r[4] + 12) = 0x4000; reject(&c, 0x37D4BE);
+    c = fx_description(dev); uint32_t before = read32(0x6ffe); allocation_failure = 1;
+    call(&c, 0x37D4BE, 0x8007000e, 4); allocation_failure = 0;
+    assert(!test_fx_bound && !device.children && read32(0x6ffe) == before);
+    for (unsigned active_case = 0; active_case < 2; ++active_case) {
+        c = fx_description(dev); call(&c, 0x37D4BE, 0, 4);
+        uint32_t handle = read32(0x6ffe); h2_audio_buffer *b = find_buffer(handle - 0x1c);
+        assert(b && b->submix == 2 && b->voice == -1 && !b->mirror && !b->headroom && !b->volume && b->route_count == 2);
+        assert(device.children == 1 && device.references == 2 && xk_audio_free_voices() == XA_MAX_VOICES);
+        c = fx_description(dev); reject(&c, 0x37D4BE);
+        c = fx_context(handle, 1, 0x220C37); reject(&c, 0x37B66F);
+        c = fx_context(handle, 0, 0x220C38); reject(&c, 0x37B66F);
+        c = fx_context(handle, 0, 0x220C37); call(&c, 0x37B66F, 0, 2);
+        uint32_t list[2] = {6, 0x5ffb}, pairs[12] = {0,0,1,0,2,0,3,0,4,0,5,0};
+        x_guest_write(0x4ffc, list, 8);
+        for (unsigned i = 0; i < 12; ++i) {
+            pairs[i] ^= 1; x_guest_write(list[1], pairs, sizeof pairs);
+            c = fx_context(handle, 0x4ffc, 0x220CAA); reject(&c, 0x37C5E4); pairs[i] ^= 1;
+        }
+        x_guest_write(list[1], pairs, sizeof pairs);
+        c = fx_context(handle, 0x4ffc, 0x220CAA); call(&c, 0x37C5E4, 0, 2); assert(b->route_count == 6 && test_fx_routes == 6);
+        const uint32_t unsupported[] = {0x37CC4A,0x37B7B3,0x379F40,0x37C5C8,0x37B6A7,0x37B6C3,0x37B703,0x37B75B,0x37B797,0x37B777,0x37C620};
+        for (unsigned i = 0; i < sizeof unsupported / sizeof *unsupported; ++i) { c = fx_context(handle, 0, 0x220CB5); reject(&c, unsupported[i]); }
+        c = fx_context(handle, 0, 0x220CB5); X_M32(c.r[4] + 16) = 1; reject(&c, 0x37B6DF);
+        if (active_case) {
+            c = fx_context(handle, 0, 0x220CB5); call(&c, 0x37B6DF, 0, 4); assert(b->started && test_fx_playing);
+            c = fx_context(handle, 0, 0x220CB5); reject(&c, 0x37B6DF);
+            c = context(handle, 0, 0, 0); reject(&c, 0x379F45);
+            /* Test teardown only: active Stop remains unsupported in guest. */
+            b->started = 0; test_fx_playing = 0;
+        }
+        c = context(b->base, 0, 0, 0); call(&c, 0x37A14F, 2, 1);
+        c = context(handle, 0, 0, 0); call(&c, 0x379F45, 1, 1);
+        c = context(handle, 0, 0, 0); call(&c, 0x379F45, 0, 1);
+        assert(!test_fx_bound && !device.children && device.references == 1);
+    }
+    c = context(dev - 8, 0, 0, 0); call(&c, 0x37C70F, 0, 1); assert(!effects && !healthy);
+    for (unsigned i = 0; i < 256; ++i) assert(!pool[i]); free(g_xram); free(g_xpt);
+    puts("Halo 2 FXIN2 ABI: checked descriptor/gain/routes/Play, full context, aliases, strict methods and device lifetime pass"); return 0;
+}

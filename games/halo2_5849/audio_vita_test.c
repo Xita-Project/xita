@@ -40,7 +40,7 @@ static int sceKernelWaitThreadEnd(int, void *, SceUInt *);
 #include "audio_vita.c"
 #include "audio_bins.c"
 
-enum { F_MUTEX, F_PROGRESS, F_PORT, F_VOLUME, F_SEMA, F_THREAD, F_START, F_READY, F_WRITE, F_JOIN, F_RELEASE, F_REST, F_REVERSE, F_STALL };
+enum { F_MUTEX, F_PROGRESS, F_PORT, F_VOLUME, F_SEMA, F_THREAD, F_START, F_READY, F_WRITE, F_JOIN, F_RELEASE, F_REST, F_REVERSE, F_STALL, F_FX_SLOW };
 static atomic_uint faults;
 static unsigned resources;
 static atomic_uint outputs, drains, active, queued;
@@ -69,7 +69,13 @@ void xk_audio_voice_play(int voice, int loop)
 { assert(voice == 0 && loop == 1); xk_audio_lock(); fake_voice = voice; fake_playing = 1; xk_audio_unlock(); }
 void xk_audio_voice_stop(int voice)
 { assert(voice == fake_voice); xk_audio_lock(); fake_playing = 0; xk_audio_unlock(); }
-int xk_audio_voice_playing(int voice) { assert(voice == fake_voice); return fake_playing; }
+int xk_audio_voice_playing(int voice) {
+#if H2_AUDIO_DSP
+    return voice == fake_voice && fake_playing;
+#else
+    assert(voice == fake_voice); return fake_playing;
+#endif
+}
 void xk_audio_voice_set_pos(int voice, uint32_t position)
 { assert(voice == fake_voice && !position); xk_audio_lock(); fake_decoded = position; xk_audio_unlock(); }
 uint32_t xk_audio_voice_pos(int voice) { assert(voice == fake_voice); return fake_decoded; }
@@ -109,7 +115,11 @@ static int sceAudioOutOutput(int id, const void *data)
     assert(id == 20 && (resources & 2));
     if (!data) { assert(!atomic_load(&queued)); atomic_fetch_add(&drains, 1); return 0; }
     const int16_t *samples = data;
-    assert(samples[0] == 1234 && samples[XA_GRAIN * 2 - 1] == -4321);
+#if H2_AUDIO_DSP
+    if (fx.playing) for (unsigned i = 0; i < XA_GRAIN * 2; ++i) assert(samples[i] == 1953);
+    else
+#endif
+        assert(samples[0] == 1234 && samples[XA_GRAIN * 2 - 1] == -4321);
     if (failing(F_WRITE)) return -23;
     assert(!atomic_load(&queued)); atomic_store(&queued, XA_GRAIN);
     atomic_fetch_add(&outputs, 1); usleep(1000); return 0;
@@ -120,12 +130,18 @@ static int sceAudioOutGetRestSample(int id)
     if (failing(F_REST)) return -24;
     if (failing(F_REVERSE)) return XA_GRAIN + 1;
     if (failing(F_STALL)) return (int)remaining;
+    if (failing(F_FX_SLOW)) { atomic_store(&queued, 0); return 0; }
     if (remaining) { assert(remaining >= 128); remaining -= 128; atomic_store(&queued, remaining); }
     return (int)remaining;
 }
 static int sceKernelDelayThread(unsigned delay) { assert(delay == 1000); usleep(delay); return 0; }
 static uint64_t sceKernelGetProcessTimeWide(void)
-{ struct timespec t; assert(!clock_gettime(CLOCK_MONOTONIC, &t)); return (uint64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000 + (failing(F_STALL) ? 2000000 : 0); }
+{
+    static atomic_uint slow_time;
+    struct timespec t; assert(!clock_gettime(CLOCK_MONOTONIC, &t));
+    uint32_t extra = failing(F_FX_SLOW) ? atomic_fetch_add(&slow_time, 50000) : atomic_load(&slow_time);
+    return (uint64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000 + (failing(F_STALL) ? 2000000 : 0) + extra;
+}
 static int sceKernelCreateSema(const char *name, int a, int initial, int maximum, void *p)
 {
     (void)name; assert(!a && !initial && maximum == 1 && !p && !(resources & 4));

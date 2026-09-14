@@ -550,6 +550,10 @@ _Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32
             device.base, device.references, device.distance, device.rolloff, device.doppler,
             device.pending_distance, device.pending_rolloff, device.pending_doppler, device.dirty,
             backend.grains, backend.nonzero_grains, backend.peak, backend.error, backend.port, backend.thread);
+    xv_logf("[h2/fxin2] stop computed_frames=%llu submitted_frames=%llu consumed_frames=%llu compute_us=%llu max_grain_us=%llu deadline_misses=%u empty_after_compute=%u (observations, not hardware underrun IRQs)\n",
+            (unsigned long long)backend.fx_computed_frames, (unsigned long long)backend.fx_submitted_frames,
+            (unsigned long long)backend.fx_consumed_frames, (unsigned long long)backend.fx_compute_us,
+            (unsigned long long)backend.fx_max_compute_us, backend.fx_deadline_misses, backend.fx_empty_after_compute);
     xv_logf("[h2/audio] original HRTF configuration table and critical section at stop\n");
     for (unsigned i = 0; i < 11; ++i) trace_mapped_word(0x3871C8 + 4 * i);
     for (unsigned i = 0; i < 7; ++i) trace_mapped_word(0x386B18 + 4 * i);
