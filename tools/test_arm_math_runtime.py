@@ -54,8 +54,8 @@ if sum((args.float_edges, args.random_floats, args.bounded_matrices,
     parser.error('choose one floating-point fixture mode')
 if (args.bounded_matrices or args.matrix_boundaries) and args.functions != ['f_000B5B40']:
     parser.error('matrix-specific fixtures require only f_000B5B40')
-if (args.float_edges or args.random_floats) and any(name not in ('f_000B5B40', 'f_000B5F60', 'f_000B5EA0') for name in args.functions):
-    parser.error('float stress fixtures are available for matrix/quaternion/point functions only')
+if (args.float_edges or args.random_floats) and 'f_000B77C0' in args.functions:
+    parser.error('float stress fixtures are not implemented for f_000B77C0')
 out = args.output_dir.resolve()
 out.mkdir(parents=True, exist_ok=True)
 fields = ['r', 'st', 'fsp', 'fsw', 'fcw', 'preempt', 'f_kind', 'f_bits']
@@ -249,6 +249,20 @@ def fixture(name, k):
         fl(parameter, 1 if k % 3 else 0)
         fl(parameter + 4, 1 if k % 3 == 0 else 0)
         fl(parameter + 8, (k // 8 % 7 - 3) * .5)
+        if args.float_edges or args.random_floats:
+            # Keep control/count fields valid while stressing every numeric
+            # input. Retain the ordinary alias, alignment and page layouts.
+            # Rotate separate vertex, plane, epsilon and combined cases so
+            # an exceptional plane cannot hide all vertex arithmetic.
+            groups = [[source + i * 4 for i in range(count * 2)],
+                      [parameter + i * 4 for i in range(3)], [sp + 28]]
+            for group, addresses in enumerate(groups):
+                if k % 4 != 3 and group != k % 4:
+                    continue
+                for i, address in enumerate(addresses):
+                    bits = (rng.getrandbits(32) if args.random_floats else
+                            edges[(k // 4 + group * 5 + i * 3) % len(edges)])
+                    word(address, bits)
     elif name == 'f_000B5F60':
         source = 0x18000 + k % 4
         output = 0x22000 if k % 7 else source
