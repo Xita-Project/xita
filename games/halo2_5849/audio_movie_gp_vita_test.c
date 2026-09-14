@@ -2,6 +2,10 @@
 #define H2_AUDIO_TEST_MOVIE 1
 #define H2_GP_PCM_TEST_MAIN old_muted_gp_test
 #include "audio_gp_pcm_vita_test.c"
+static atomic_int stop_done;
+static int stopping_voice;
+static void *stop_movie(void *unused)
+{(void)unused;assert(!h2_audio_backend_stop(stopping_voice));atomic_store(&stop_done,1);return NULL;}
 int main(void)
 {
     g_xram=calloc(1,0x40000);g_img_base=g_xram;g_xpt=malloc((1u<<20)*4);assert(g_xram&&g_xpt);
@@ -36,6 +40,22 @@ int main(void)
     for(unsigned i=0;i<32;++i){assert(left[i]==628000);assert(right[i]==244000);assert(center[i]==500000);}
     xk_audio_lock();assert(g_v[movie].frames_out>=progress.completed_frames);xk_audio_unlock();
     sceKernelUnlockMutex(progress_mutex,1);
+    /* Hold one queued plus one computed movie grain. Stop cannot report
+     * completion, forget or rewind until both ownership stages retire. */
+    atomic_store(&faults,1u<<F_HOLD);
+    for(;;){sceKernelLockMutex(progress_mutex,1,NULL);int prepared=movie_prepared==movie;
+        sceKernelUnlockMutex(progress_mutex,1);if(prepared)break;usleep(1000);}
+    stopping_voice=movie;pthread_t stopper;assert(!pthread_create(&stopper,NULL,stop_movie,NULL));
+    for(;;){sceKernelLockMutex(progress_mutex,1,NULL);int draining=movie_draining;
+        sceKernelUnlockMutex(progress_mutex,1);if(draining)break;usleep(1000);}
+    assert(!atomic_load(&stop_done) && h2_audio_backend_rewind(movie)<0 && h2_audio_backend_forget(movie)<0);
+    atomic_store(&faults,0);pthread_join(stopper,NULL);assert(atomic_load(&stop_done));
+    uint32_t state;assert(!h2_audio_backend_status_voice(movie,&state) && !state);
+    assert(!h2_audio_backend_cursor(movie,&play,&write) && play==write);
+    assert(!h2_audio_backend_stop(movie));
+    assert(!h2_audio_backend_rewind(movie));assert(!h2_audio_backend_cursor(movie,&play,&write) && !play && !write);
+    assert(!h2_audio_backend_play(movie,106496,44100));
+    for(;;){h2_audio_backend_snapshot(&status);if(status.movie_consumed_frames>=2048)break;usleep(1000);}
     /* A second unregistered active voice is rejected before rendering it. */
     int extra=xk_audio_voice_new(1,0x1180);xk_audio_voice_set_data(extra,0x10000,sizeof samples);xk_audio_voice_play(extra,1);
     for(;;){h2_audio_backend_snapshot(&status);if(status.error)break;usleep(1000);}assert(status.error==(uint32_t)-1007);

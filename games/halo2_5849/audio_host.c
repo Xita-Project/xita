@@ -1038,9 +1038,6 @@ static void buffer_stop(xctx *c)
 {
     const uint32_t ip = 0x37B703;
     stack(c, ip, 1); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
-#if H2_AUDIO_DSP
-    if(effects)fail(c,ip,"loaded DSP movie Stop requires retained-grain drain",b->base);
-#endif
     if (!b->started || b->locked) fail(c, ip, "unsupported PCM Stop state", b->base);
     if (h2_audio_backend_stop(b->voice) < 0) fail(c, ip, "real PCM stop/drain rejected", b->voice);
     b->stopped = 1;

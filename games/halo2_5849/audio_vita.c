@@ -17,6 +17,8 @@ typedef struct {
 static gp_stream_state gp_streams[4];
 static unsigned gp_stream_decoded,gp_stream_completed;
 static uint64_t gp_stream_serial;
+/* Serialized retained GP grain ownership; separate from submitted progress. */
+static int movie_prepared=-1,movie_draining;
 static int gp_pcm_voice[2] = {-1,-1};
 static unsigned gp_pcm_active, gp_pcm_queued;
 static uint64_t gp_pcm_submitted[2], gp_pcm_consumed[2];
@@ -140,6 +142,28 @@ int h2_audio_backend_stop(int voice)
 {
     if (h2_audio_backend_health() < 0 || voice < 0) return -1;
     sceKernelLockMutex(progress_mutex, 1, NULL);
+#if H2_AUDIO_DSP
+    if(fx.engine){
+        if(progress.voice!=voice || movie_draining){sceKernelUnlockMutex(progress_mutex,1);return -1;}
+        movie_draining=1;xk_audio_voice_stop(voice);
+        sceKernelUnlockMutex(progress_mutex,1);
+        uint64_t began=sceKernelGetProcessTimeWide();
+        /* The worker must submit its already-computed movie grain. Let it
+         * run while waiting; new computations exclude the stopped voice. */
+        for(;;){
+            sceKernelLockMutex(progress_mutex,1,NULL);
+            int rc=observe_rest();
+            if(rc>=0 && sceKernelGetProcessTimeWide()-began>2000000)rc=-1008;
+            if(rc<0)__atomic_store_n(&error,(uint32_t)rc,__ATOMIC_RELEASE);
+            if(rc<0 || h2_audio_backend_health()<0){sceKernelUnlockMutex(progress_mutex,1);return -1;}
+            if(movie_prepared!=voice && (!progress.pending || progress.queued_voice!=voice)){
+                int ok=h2_audio_progress_stop(&progress,voice);if(ok)movie_draining=0;
+                sceKernelUnlockMutex(progress_mutex,1);return ok?0:-1;
+            }
+            sceKernelUnlockMutex(progress_mutex,1);sceKernelDelayThread(1000);
+        }
+    }
+#endif
     int rc = -1;
     if (progress.voice == voice && h2_audio_backend_health() == 0) {
         xk_audio_voice_stop(voice);
@@ -368,10 +392,10 @@ static int mix_muted_gp_pcm(void)
     if (!gp_pcm_active) return 1;
     if(progress.voice>=0){
         int zero[4];for(unsigned i=0;i<4;++i)zero[i]=gp_streams[i].voice;
-        if(!h2_audio_movie_contract(progress.voice,gp_pcm_voice,zero,!progress.stopped))return 0;
+        if(!h2_audio_movie_contract(progress.voice,gp_pcm_voice,zero,!progress.stopped && !movie_draining))return 0;
     }
     xk_audio_mix(gp_pcm_output,XA_GRAIN);
-    if(progress.voice<0 || progress.stopped)
+    if(progress.voice<0 || progress.stopped || movie_draining)
         for (unsigned i=0;i<XA_GRAIN*2;++i) if (gp_pcm_output[i]) return 0;
     int ok=1; xk_audio_lock();
     for (unsigned i=0;i<2;++i) if ((gp_pcm_active & (1u<<i)) && !xk_audio_voice_playing(gp_pcm_voice[i])) ok=0;
@@ -394,7 +418,7 @@ static int mix_worker(SceSize bytes, void *arg)
     unsigned slot = 0, first = 1;
 #if H2_AUDIO_DSP
     unsigned fx_prepared = 0, pcm_prepared = 0;
-    int movie_prepared=-1;uint32_t movie_frontier=0;
+    uint32_t movie_frontier=0;
 #endif
     while (__atomic_load_n(&running, __ATOMIC_ACQUIRE)) {
         sceKernelLockMutex(progress_mutex, 1, NULL);
@@ -410,7 +434,7 @@ static int mix_worker(SceSize bytes, void *arg)
                 __atomic_store_n(&error,(uint32_t)-1007,__ATOMIC_RELEASE);
                 sceKernelUnlockMutex(progress_mutex,1); break;
             }
-            movie_prepared=progress.stopped?-1:progress.voice;
+            movie_prepared=(progress.stopped || movie_draining)?-1:progress.voice;
             if(movie_prepared>=0){xk_audio_lock();movie_frontier=xk_audio_voice_pos(movie_prepared);xk_audio_unlock();}
             if (!stream_decoded(fx.frames*32+XA_GRAIN) ||
                 !(movie_prepared>=0 ? h2_audio_fx_render_pcm(&fx,output[slot],XA_GRAIN,gp_pcm_output) :
@@ -467,7 +491,7 @@ static int mix_worker(SceSize bytes, void *arg)
                 if (fx_prepared & (1u << v)) fx_source_submitted[v] += XA_GRAIN;
             gp_pcm_queued=pcm_prepared;
             for (unsigned i=0;i<2;++i) if (pcm_prepared & (1u<<i)) gp_pcm_submitted[i]+=XA_GRAIN;
-            fx_prepared = pcm_prepared = 0;
+            fx_prepared = pcm_prepared = 0;movie_prepared=-1;
         }
 #endif
         submitted_at = sceKernelGetProcessTimeWide();
@@ -551,6 +575,7 @@ int h2_audio_backend_open(void)
 #if H2_AUDIO_DSP
     memset(gp_streams,0,sizeof gp_streams);for(unsigned i=0;i<4;++i)gp_streams[i].voice=-1;
     gp_stream_decoded=gp_stream_completed=0;gp_stream_serial=0;
+    movie_prepared=-1;movie_draining=0;
     gp_pcm_voice[0]=gp_pcm_voice[1]=-1; gp_pcm_active=gp_pcm_queued=0;
     memset(gp_pcm_submitted,0,sizeof gp_pcm_submitted); memset(gp_pcm_consumed,0,sizeof gp_pcm_consumed);
     fx = (h2_audio_fx){0}; fx_submitted = fx_consumed = fx_compute_us = fx_max_compute_us = 0;
