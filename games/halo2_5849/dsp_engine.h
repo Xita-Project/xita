@@ -32,3 +32,8 @@ int h2_dsp_read_effect(const h2_dsp_engine *engine, uint32_t index,
  * Any interpreter, DMA, memory or instruction-budget fault poisons the engine;
  * no API may report usable state afterward. */
 int h2_dsp_zero_frame(h2_dsp_engine *engine);
+
+/* Read an initialized space into a guest-visible snapshot: 0=X, 1=Y, 2=P,
+ * 3=scratch. No DSP work is scheduled by this read. */
+int h2_dsp_copy_space(const h2_dsp_engine *engine, unsigned space, uint32_t offset,
+                       void *out, uint32_t bytes);

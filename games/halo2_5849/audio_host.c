@@ -4,6 +4,11 @@
 #include "recomp/kernel/xk.h"
 #include "recomp/kernel/xk_audio.h"
 #include <string.h>
+#if H2_AUDIO_DSP
+#include "dsp_asset.h"
+static h2_dsp_engine *effects;
+static uint32_t effects_guest, effects_guest_bytes;
+#endif
 
 static h2_audio_device_snapshot device;
 typedef struct {
@@ -52,6 +57,9 @@ static int overlaps_device(uint32_t address, uint32_t bytes)
     /* Opaque objects and unexposed sample mirrors own full guest pages.
      * Include physical aliases through distinct virtual mappings. */
     if (page_overlap(address, bytes, device.base, 4096)) return 1;
+#if H2_AUDIO_DSP
+    if (page_overlap(address, bytes, effects_guest, effects_guest_bytes)) return 1;
+#endif
     for (unsigned i = 0; i < XA_MAX_VOICES; ++i)
         if (page_overlap(address, bytes, buffers[i].base, 4096) ||
             page_overlap(address, bytes, buffers[i].mirror, buffers[i].mirror_bytes)) return 1;
@@ -121,6 +129,12 @@ static void drop_device(xctx *c, uint32_t ip)
         uint32_t released = device.base;
         if (device.children) fail(c, ip, "live device children", device.children);
         if (h2_audio_backend_close() < 0) fail(c, ip, "close worker", device.base);
+#if H2_AUDIO_DSP
+        if (effects) {
+            if (xk_mem_free(effects_guest) < 0) fail(c, ip, "free DSP views", effects_guest);
+            h2_dsp_destroy(effects); effects = NULL; effects_guest = effects_guest_bytes = 0;
+        }
+#endif
         if (xk_mem_free(device.base) < 0) fail(c, ip, "free device", device.base);
         device = (h2_audio_device_snapshot){.ever_created = 1};
         xv_logf("[h2/audio] final Release caller=%08X device=%08X worker/port closed, guest allocation freed\n",
@@ -376,6 +390,9 @@ static void buffer_routing(xctx *c, uint32_t ip)
 }
 static void buffer_play(xctx *c)
 {
+#if H2_AUDIO_DSP
+    if (effects) { stack(c, 0x37B6DF, 4); fail(c, 0x37B6DF, "loaded DSP voice routing is unsupported", X_M32(c->r[4])); }
+#endif
     const uint32_t ip = 0x37B6DF;
     stack(c, ip, 4); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
     if (!b->mirror || (b->started && !b->rewound) || b->locked || X_ARG(1) || X_ARG(2) || X_ARG(3) != 1 ||
@@ -504,6 +521,96 @@ static void mix_bin(xctx *c, uint32_t ip)
             bin, device.headroom[bin], amount & 7, X_M32(c->r[4]));
     result(c, 0, 3);
 }
+#if H2_AUDIO_DSP
+static void effects_download(xctx *c)
+{
+    const uint32_t ip = 0x37B86D;
+    stack(c, ip, 4);
+    uint32_t name = X_ARG(0), location = X_ARG(1), flags = X_ARG(2), out = X_ARG(3);
+    if (X_M32(c->r[4]) != 0x1913A9 || flags != 1 || !mapped(name, 9) || !mapped(location, 8))
+        fail(c, ip, "effects download input", name);
+    char label[9]; uint32_t locations[2];
+    x_guest_read(label, name, sizeof label); x_guest_read(locations, location, sizeof locations);
+    if (memcmp(label, "DSPImage", 9) || locations[0] != 9 || locations[1] != 10)
+        fail(c, ip, "effects download image/location", location);
+    output(c, ip, out, 4); live(c, ip, device.base + 8, 0); buffer_operational(c, ip);
+    if (aliases(out, 4, c->r[4], 20) || effects || device.children)
+        fail(c, ip, "effects download ownership/alias", out);
+    /* Real initialized interpreter; no descriptor is published before the
+     * owned monitor's completed command acknowledgement and frame halt. */
+    h2_dsp_status state;
+    h2_dsp_engine *candidate = h2_dsp_asset_open("app0:halo2-dsp.bin", &state);
+    if (!candidate) {
+        xv_logf("[h2/dsp] initialization failed reason=%s pc=%04X address=%08X value=%08X\n",
+                state.fault ? state.fault : "allocation", state.pc, state.fault_address, state.fault_value);
+        fail(c, ip, "DSP initialization", state.pc);
+    }
+    uint32_t bytes = 0xB000 + state.scratch_bytes;
+    uint32_t base = xk_mem_alloc(bytes, 4096, 0, 0, 0);
+    if (!base) { h2_dsp_destroy(candidate); result(c, 0x8007000E, 4); return; }
+    if ((base & 4095) || !mapped(base, bytes) || overlaps_device(base, bytes) ||
+        page_overlap(base, bytes, c->r[4], 20) || page_overlap(base, bytes, out, 4))
+        fail(c, ip, "DSP guest view allocation", base);
+    /* The interpreter is paused at a completed frame. These read-only views
+     * contain its actual initialized banks; later DSP execution/voice routing
+     * remains unsupported here. The descriptor owns this guest allocation. */
+    const uint32_t sizes[4] = {0x4000, 0x2000, 0x4000, state.scratch_bytes};
+    uint32_t cursor = base + 4096;
+    uint8_t chunk[4096];
+    for (unsigned space = 0; space < 4; ++space) {
+        for (uint32_t offset = 0; offset < sizes[space]; offset += sizeof chunk) {
+            uint32_t n = sizes[space] - offset;
+            if (n > sizeof chunk) n = sizeof chunk;
+            if (!h2_dsp_copy_space(candidate, space, offset, chunk, n)) fail(c, ip, "DSP bank export", space);
+            x_guest_write(cursor + offset, chunk, n);
+        }
+        cursor += sizes[space];
+    }
+    uint32_t descriptor[2 + 15 * 8] = {15, state.scratch_bytes - 0xC000};
+    if (state.effect_count != 15) fail(c, ip, "DSP effect count", state.effect_count);
+    for (uint32_t i = 0; i < 15; ++i) {
+        h2_dsp_effect map;
+        if (!h2_dsp_effect_map(candidate, i, &map)) fail(c, ip, "DSP effect map", i);
+        uint32_t *d = descriptor + 2 + i * 8;
+        /* Original 37E229 relocates code after the 5CC-byte monitor, state
+         * to X:80, Y to its base, and scratch after its C000-byte prefix. */
+        d[0] = base + 0x7000 + 0x5CC + map.code_offset - 0x818; d[1] = map.code_bytes;
+        d[2] = base + 0x1000 + 0x200 + map.state_offset - 0x3F98; d[3] = map.state_bytes;
+        d[4] = base + 0x5000 + map.y_offset; d[5] = map.y_bytes;
+        d[6] = base + 0xB000 + 0xC000 + map.scratch_offset; d[7] = map.scratch_bytes;
+    }
+    x_guest_write(base, descriptor, sizeof descriptor);
+    effects = candidate; effects_guest = base; effects_guest_bytes = bytes;
+    x_guest_write(out, &base, 4);
+    xv_logf("[h2/dsp] original image initialized caller=%08X descriptor=%08X bytes=%u effects=%u locations=%u,%u instructions=%llu transfers=%llu command=%u state=%016llX; paused after completed zero-input frame\n",
+            X_M32(c->r[4]), base, bytes, state.effect_count, locations[0], locations[1],
+            (unsigned long long)state.instructions, (unsigned long long)state.transfers, state.command,
+            (unsigned long long)state.state_fingerprint);
+    result(c, 0, 4);
+}
+static void effects_query(xctx *c)
+{
+    const uint32_t ip = 0x37B5E6;
+    stack(c, ip, 5); live(c, ip, X_ARG(0), 0); buffer_operational(c, ip);
+    uint32_t index = X_ARG(1), offset = X_ARG(2), out = X_ARG(3), bytes = X_ARG(4);
+    if (!effects || !mapped(effects_guest, effects_guest_bytes)) fail(c, ip, "no initialized DSP image", index);
+    if (index >= 15) { result(c, 0x88780032, 5); return; }
+    output(c, ip, out, bytes);
+    if (aliases(out, bytes, c->r[4], 24)) fail(c, ip, "DSP effect query stack alias", out);
+    h2_dsp_effect map;
+    if (!h2_dsp_effect_map(effects, index, &map) || offset > map.state_bytes || bytes > map.state_bytes - offset)
+        fail(c, ip, "DSP effect query range", offset);
+    uint8_t chunk[4096];
+    for (uint32_t pos = 0; pos < bytes; pos += sizeof chunk) {
+        uint32_t n = bytes - pos; if (n > sizeof chunk) n = sizeof chunk;
+        if (!h2_dsp_read_effect(effects, index, offset + pos, chunk, n)) fail(c, ip, "DSP state query", index);
+        x_guest_write(out + pos, chunk, n);
+    }
+    xv_logf("[h2/dsp] GetEffectData caller=%08X index=%u offset=%u bytes=%u actual initialized state\n",
+            X_M32(c->r[4]), index, offset, bytes);
+    result(c, 0, 5);
+}
+#endif
 #if H2_AUDIO_EFFECTS_UNAVAILABLE
 /* Explicit failure experiment, not an effects implementation. No output,
  * device, section reference or worker resource is changed by this call. */
@@ -544,7 +651,10 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37B75B: buffer_status(c); break;
     case 0x37B797: buffer_rewind(c); break;
     case 0x37B777: buffer_cursor(c); break;
-#if H2_AUDIO_EFFECTS_UNAVAILABLE
+#if H2_AUDIO_DSP
+    case 0x37B86D: effects_download(c); break;
+    case 0x37B5E6: effects_query(c); break;
+#elif H2_AUDIO_EFFECTS_UNAVAILABLE
     case 0x37B86D: effects_unavailable(c); break;
 #endif
     default: fail(c, ip, "unimplemented adapter", ip);

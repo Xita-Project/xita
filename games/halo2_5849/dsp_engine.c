@@ -266,3 +266,19 @@ int h2_dsp_zero_frame(h2_dsp_engine*s)
     memset(s->core.mixbuffer,0,sizeof(s->core.mixbuffer));
     return frame(s);
 }
+
+int h2_dsp_copy_space(const h2_dsp_engine*s,unsigned space,uint32_t offset,void*out,uint32_t bytes)
+{
+    if(!s||s->status.fault||!out||space>3)return 0;
+    uint32_t limit=space==0?DSP_XRAM_SIZE*4:space==1?DSP_YRAM_SIZE*4:space==2?DSP_PRAM_SIZE*4:s->scratch_size;
+    if(offset>limit||bytes>limit-offset)return 0;
+    if(space==3){memcpy(out,s->scratch+offset,bytes);return 1;}
+    uint8_t*dest=out;
+    for(uint32_t i=0;i<bytes;i++){
+        uint32_t a=offset+i,word=a/4,value;
+        if(space==0)value=word>=0xc00?s->core.mixbuffer[word-0xc00]:s->core.xram[word];
+        else value=space==1?s->core.yram[word]:s->core.pram[word];
+        dest[i]=(uint8_t)(value>>((a&3)*8));
+    }
+    return 1;
+}

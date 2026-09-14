@@ -78,6 +78,16 @@ class AudioHooks(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("AUDIO_MULTIBIN_UNAVAILABLE=1 requires AUDIO_HOST=1", result.stderr)
 
+    def test_dsp_requires_real_host_and_excludes_failure_probe(self):
+        root = Path(__file__).resolve().parents[1]
+        for flags, message in ((["AUDIO_HOST=0", "AUDIO_DSP=1"], "AUDIO_DSP=1 requires AUDIO_HOST=1"),
+                               (["HOST_CHANNEL=1", "AUDIO_HOST=1", "AUDIO_DSP=1", "AUDIO_EFFECTS_UNAVAILABLE=1"],
+                                "AUDIO_DSP=1 conflicts with AUDIO_EFFECTS_UNAVAILABLE=1")):
+            result = subprocess.run(["make", "-C", str(root / "games/halo2_5849"), "-n", *flags],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, result.stderr)
+
     def test_cli_is_explicit_and_mutually_exclusive(self):
         command = [sys.executable, str(Path(__file__).resolve().parents[1] / "games/halo2_5849/prepare_boot.py"), "missing.xbe"]
         for flags, message in ((["--audio-host"], "requires --host-channel"),

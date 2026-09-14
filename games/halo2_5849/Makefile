@@ -7,6 +7,7 @@ GUEST_OPT ?= -O1
 HOST_CHANNEL ?= 0
 QUAD_RENDER ?= 0
 AUDIO_HOST ?= 0
+AUDIO_DSP ?= 0
 AUDIO_EFFECTS_UNAVAILABLE ?= 0
 AUDIO_MULTIBIN_UNAVAILABLE ?= 0
 GENERATED ?= $(ROOT)/local/halo2_5849/boot/generated
@@ -28,6 +29,19 @@ endif
 OBJECTS += $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/recomp/kernel/xk_audio.o
 $(BUILD)/boot.o: CFLAGS += -DH2_AUDIO_HOST=1
 $(BUILD)/recomp/kernel/xk_audio.o: CFLAGS += -DXK_AUDIO_OUTPUT_FILTER=h2_audio_bins_filter -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock
+endif
+ifeq ($(AUDIO_DSP),1)
+ifneq ($(AUDIO_HOST),1)
+$(error AUDIO_DSP=1 requires AUDIO_HOST=1)
+endif
+ifeq ($(AUDIO_EFFECTS_UNAVAILABLE),1)
+$(error AUDIO_DSP=1 conflicts with AUDIO_EFFECTS_UNAVAILABLE=1)
+endif
+OBJECTS += $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o $(BUILD)/dsp_core.o
+$(BUILD)/audio_host.o: CFLAGS += -DH2_AUDIO_DSP=1
+$(BUILD)/dsp_engine.o $(BUILD)/dsp_core.o: CFLAGS += -O2 -I$(CURDIR)/dsp/compat -I$(CURDIR)/dsp
+DSP_FILES = $(DSP_ASSET)
+DSP_PACK = -a $(DSP_ASSET)=halo2-dsp.bin
 endif
 ifeq ($(AUDIO_EFFECTS_UNAVAILABLE),1)
 ifneq ($(AUDIO_HOST),1)
@@ -132,6 +146,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/audio_multibin_failure_test
 	$(BUILD)/audio_buffer_test
 	$(BUILD)/audio_host_test
+	$(BUILD)/audio_dsp_test
 	$(BUILD)/audio_effects_failure_test
 	$(BUILD)/audio_vita_test
 	$(BUILD)/audio_progress_test
@@ -174,6 +189,10 @@ $(BUILD)/kernel_stack_test: kernel_stack_test.c kernel_stack.c kernel_stack.h $(
 $(BUILD)/audio_unavailable_test: audio_unavailable_test.c audio_unavailable.c $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT)/recomp audio_unavailable_test.c audio_unavailable.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
+$(BUILD)/audio_dsp_test: audio_dsp_test.c audio_buffer_test.c audio_host.c audio_host.h dsp_asset.h dsp_engine.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_dsp_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
+test-host: $(BUILD)/audio_dsp_test
 $(BUILD)/audio_multibin_failure_test: audio_buffer_test.c audio_host.c audio_host.h audio_progress.c audio_progress.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -DH2_AUDIO_MULTIBIN_UNAVAILABLE=1 -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp audio_buffer_test.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -lm -o $@
@@ -271,7 +290,10 @@ $(BUILD)/nv2a_regs.o: nv2a_regs.c
 $(BUILD)/linear_texture.o $(BUILD)/fp_environment.o $(BUILD)/kernel_timer.o $(BUILD)/kernel_stack.o $(BUILD)/command_snapshot.o $(BUILD)/host_channel_runtime.o $(BUILD)/command_state.o $(BUILD)/host_channel.o $(BUILD)/host_tiles.o $(BUILD)/push_stream.o $(BUILD)/gpu_objects.o $(BUILD)/kelvin_clear.o $(BUILD)/scanout.o $(BUILD)/input.o $(BUILD)/audio_unavailable.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o: $(BUILD)/%.o: %.c
+$(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/dsp_core.o: dsp/interp/dsp_cpu.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/%.o: $(GENERATED)/%.c $(GENERATED)/xv_recomp_protos.h
@@ -286,6 +308,6 @@ $(BUILD)/eboot.bin: $(BUILD)/halo2-boot.velf
 $(BUILD)/param.sfo: Makefile
 	@mkdir -p $(dir $@)
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2B00001 -d ATTRIBUTE2=12 "Xita Halo 2 Boot" $@
-$(BUILD)/halo2-boot.vpk: $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES)
-	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $@
+$(BUILD)/halo2-boot.vpk: $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(DSP_FILES)
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(DSP_PACK) $@
 -include $(OBJECTS:.o=.d)

@@ -112,6 +112,6 @@ Install only in the isolated Vita3K lab and launch `XH2D00001`. It writes
 is `../private/dsp-bringup/`, including `native-probe/`,
 `native-probe-result.txt`, `engine-check.log`, `counter-independence.json`,
 `dsp-engine-san.log`, `owned-engine-san.log` and `all-host.log`.
-The emulator is stopped after the probe. The next game integration is the audited
-effects download/query ABI with owned lifetime and mapped descriptors; unsupported
-playback routes must continue to stop until real DSP mixer/output integration.
+The emulator is stopped after the probe. The opt-in game download/query integration
+is recorded in [the native107 checkpoint](halo2-dsp-game-init.md); unsupported
+playback routes still stop pending DSP mixer/output integration.

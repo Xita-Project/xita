@@ -100,6 +100,13 @@ static void image_tests(void)
     s=fixture();s->effect_count=1;s->state_offset=0x818;s->effects[0]=(h2_dsp_effect){.state_offset=0x818,.state_bytes=8};
     s->core.xram[0x80]=0x123456;s->core.xram[0x81]=0xabcdef;uint8_t out[8];assert(h2_dsp_read_effect(s,0,1,out,5));assert(out[0]==0x34&&out[1]==0x12&&out[2]==0&&out[3]==0xef&&out[4]==0xcd);
     memset(out,0x55,sizeof(out));assert(!h2_dsp_read_effect(s,0,7,out,2));assert(!h2_dsp_read_effect(s,1,0,out,4));assert(!h2_dsp_read_effect(s,0,0xffffffff,out,1));for(unsigned i=0;i<8;i++)assert(out[i]==0x55);
+    s->core.xram[0xbff]=0x112233;s->core.xram[0xc00]=0x445566;s->core.mixbuffer[0]=0xaabbcc;
+    assert(h2_dsp_copy_space(s,0,0x2fff,out,5));
+    assert(out[0]==0&&out[1]==0xcc&&out[2]==0xbb&&out[3]==0xaa&&out[4]==0);
+    s->core.yram[0]=0x778899;assert(h2_dsp_copy_space(s,1,0,out,4));assert(out[0]==0x99&&out[1]==0x88&&out[2]==0x77&&out[3]==0);
+    memset(out,0x55,sizeof(out));assert(!h2_dsp_copy_space(s,1,0x1fff,out,2));assert(!h2_dsp_copy_space(s,4,0,out,1));
+    assert(!h2_dsp_copy_space(s,3,0xffffffff,out,1));for(unsigned i=0;i<8;i++)assert(out[i]==0x55);
+    active=s;uint32_t original_mix=s->core.mixbuffer[0];assert(!h2_dsp_zero_frame(s));assert(s->core.mixbuffer[0]==original_mix);active=NULL;
     h2_dsp_destroy(s);
 }
 int main(void)
