@@ -120,6 +120,18 @@ int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write)
     sceKernelUnlockMutex(progress_mutex, 1);
     return ok ? 0 : -1;
 }
+int h2_audio_backend_repeat_play(int voice,uint32_t bytes,uint32_t rate)
+{
+    if(h2_audio_backend_health()<0 || progress_mutex<0)return -1;
+    sceKernelLockMutex(progress_mutex,1,NULL);
+    int ok=voice>=0 && voice==progress.voice && !progress.stopped && !progress.rewound &&
+           bytes==progress.bytes && rate==44100 && progress.step==((44100u<<16)/XA_OUT_RATE);
+    xk_audio_lock();if(ok && !xk_audio_voice_playing(voice))ok=0;xk_audio_unlock();
+    /* Original active looping Play reasserts the same source/loop range; bit2
+     * alone requests a current-offset reset. This supported flags1 retry
+     * leaves the real decoder, queued grains and consumed position intact. */
+    sceKernelUnlockMutex(progress_mutex,1);return ok?0:-1;
+}
 
 /* The sole queued grain cannot be cancelled by this sink. Stop the real mixer,
  * then observe its retained grain through completion before reporting stopped.

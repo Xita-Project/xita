@@ -55,6 +55,7 @@ int h2_audio_backend_set_headroom(uint32_t bin, uint32_t headroom);
 /* First Play of the sole supported looping PCM voice. Cursor observations
  * follow actual sink consumption and the independent mixer read frontier. */
 int h2_audio_backend_play(int voice, uint32_t bytes, uint32_t rate);
+int h2_audio_backend_repeat_play(int voice,uint32_t bytes,uint32_t rate);
 int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write);
 int h2_audio_backend_stop(int voice);
 int h2_audio_backend_status_voice(int voice, uint32_t *status);

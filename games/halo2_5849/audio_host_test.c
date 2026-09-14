@@ -39,6 +39,8 @@ int h2_audio_backend_set_headroom(uint32_t bin, uint32_t amount)
 { assert(healthy && bin < 32); ++bin_updates; last_bin = bin; last_headroom = amount; return 0; }
 int h2_audio_backend_play(int voice, uint32_t bytes, uint32_t rate)
 { (void)voice; (void)bytes; (void)rate; assert(0); return -1; }
+int h2_audio_backend_repeat_play(int voice,uint32_t bytes,uint32_t rate)
+{(void)voice;(void)bytes;(void)rate;assert(0);return -1;}
 int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write)
 { (void)voice; (void)play; (void)write; assert(0); return -1; }
 

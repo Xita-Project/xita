@@ -68,6 +68,8 @@ int h2_audio_backend_play(int voice, uint32_t bytes, uint32_t rate)
     if (!healthy || !h2_audio_progress_play(&next, voice, bytes, rate)) return -1;
     xk_audio_voice_play(voice, 1); test_progress = next; return 0;
 }
+int h2_audio_backend_repeat_play(int voice,uint32_t bytes,uint32_t rate)
+{return healthy && test_progress.voice==voice && test_progress.bytes==bytes && rate==44100 && !test_progress.stopped && xk_audio_voice_playing(voice)?0:-1;}
 int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write)
 { return healthy && h2_audio_progress_cursor(&test_progress, voice, play, write) ? 0 : -1; }
 int h2_audio_backend_stop(int voice)
@@ -367,6 +369,10 @@ int main(void)
     c = context(handle, 0, 0, 1); call(&c, 0x37B6DF, 0, 4);
     assert(b->started && g_v[b->voice].playing && g_v[b->voice].looping);
     c = context(handle, 0, 0, 1); reject(&c, 0x37B6DF);
+    c=context(handle,0,0,1);X_M32(c.r[4])=0x3E3639;
+    xa_voice repeat_voice=g_v[b->voice];h2_audio_progress repeat_progress=test_progress;h2_audio_buffer repeat_buffer=*b;
+    call(&c,0x37B6DF,0,4);
+    assert(!memcmp(&repeat_voice,&g_v[b->voice],sizeof repeat_voice) && !memcmp(&repeat_progress,&test_progress,sizeof repeat_progress) && !memcmp(&repeat_buffer,b,sizeof *b));
     c = context(handle, 0, 0, 0); reject(&c, 0x379F45); /* active release needs Stop */
     c = context(handle, 0x1FF8, 0x6120, 0); reject(&c, 0x37B777);
     c = context(handle, 0x6120, 0x6120, 0); reject(&c, 0x37B777);

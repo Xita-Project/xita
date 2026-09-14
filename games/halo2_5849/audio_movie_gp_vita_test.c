@@ -23,6 +23,9 @@ int main(void)
     for(;;){h2_audio_backend_snapshot(&status);if(status.fx_computed_frames>status.fx_submitted_frames)break;usleep(1000);}
     assert(!h2_audio_backend_play(movie,106496,44100));uint32_t play,write;
     assert(!h2_audio_backend_cursor(movie,&play,&write)&&!play&&!write);
+    assert(!h2_audio_backend_repeat_play(movie,106496,44100));
+    assert(h2_audio_backend_repeat_play(movie,106492,44100)<0 && h2_audio_backend_repeat_play(movie,106496,48000)<0);
+    assert(!h2_audio_backend_cursor(movie,&play,&write)&&!play&&!write);
     /* An already prepared pre-Play GP grain remains uncredited. */
     atomic_store(&faults,0);
     for(;;){h2_audio_backend_snapshot(&status);if(status.movie_consumed_frames>=2048)break;usleep(1000);}

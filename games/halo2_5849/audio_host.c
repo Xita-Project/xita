@@ -1014,12 +1014,19 @@ static void buffer_play(xctx *c)
         xv_logf("[h2/audio-global] Play caller=002215B9 interface=%08X voice=%d loop1000 bytes effective1000Hz; actual decoder advances, verified muted GP14 contribution, source-tagged sink grain accepted\n",b->base+0x1C,b->voice);
         result(c,0,4); return;
     }
-    if (effects && (X_M32(c->r[4])!=0x3E35DB || b->bytes!=106496 || b->frequency!=44100 || b->volume || b->headroom))
+    if (effects && ((X_M32(c->r[4])!=0x3E35DB && X_M32(c->r[4])!=0x3E3639) || b->bytes!=106496 || b->frequency!=44100 || b->volume || b->headroom))
         fail(c,ip,"unsupported loaded DSP movie Play",X_M32(c->r[4]));
 #endif
-    if (!b->mirror || (b->started && !b->rewound) || b->locked || X_ARG(1) || X_ARG(2) || X_ARG(3) != 1 ||
+    int repeat=b->started && !b->stopped && !b->rewound && X_M32(c->r[4])==0x3E3639;
+    if(X_M32(c->r[4])==0x3E3639 && !repeat)fail(c,ip,"movie retry requires active loop",b->base);
+    if (!b->mirror || (b->started && !b->rewound && !repeat) || b->locked || X_ARG(1) || X_ARG(2) || X_ARG(3) != 1 ||
         !mapped(b->mirror, b->mirror_bytes) || !mapped(b->source, b->bytes) || overlaps_device(b->source, b->bytes))
         fail(c, ip, "unsupported PCM Play state/flags", X_ARG(3));
+    if(repeat){
+        if(h2_audio_backend_repeat_play(b->voice,b->bytes,b->frequency)<0)fail(c,ip,"real PCM repeat Play rejected",b->voice);
+        xv_logf("[h2/audio-buffer] repeated active looping Play caller=003E3639 voice=%d; decoder and sink ownership retained\n",b->voice);
+        result(c,0,4);return;
+    }
     if (h2_audio_backend_play(b->voice, b->bytes, b->frequency) < 0)
         fail(c, ip, "real PCM sink Play rejected", b->voice);
     b->started = 1; b->stopped = b->rewound = 0;
