@@ -93,6 +93,17 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
             value != 0x8511 && value != 0x8512) return 0;
     } else if (method >= 0x1B00 && method <= 0x1BFC) {
         switch ((method - 0x1B00) & 63) {
+        case 0x00: /* offset */
+        case 0x04: /* format, including original DMA selector encoding */
+        case 0x08: /* addressing */
+        case 0x10: /* pitch/control */
+        case 0x14: /* filtering */
+        case 0x1C: /* rectangle */
+            /* Original method inputs only, even for unmapped/invalid resource
+             * descriptions. No DMA mapping, texture read or upload occurs.
+             * Draw execution must decode and validate every selected input
+             * and the complete source span before accessing guest memory. */
+            break;
         case 0x0C: /* texture control: enable/lod state only */
         case 0x24: /* border color */
         case 0x28: case 0x2C: case 0x30: case 0x34: /* bump matrix */
@@ -104,12 +115,13 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
              * A future draw must resolve the selected DMA and validate the
              * entire palette span before touching guest data. */
             break;
-        default: return 0; /* texture resources/format/filter need separate validation */
+        default: return 0; /* the 18h hole is not a texture-state method */
         }
     } else switch (method) {
     case 0x300: case 0x304: case 0x308: case 0x30C: case 0x310:
     case 0x320: case 0x324: case 0x32C: case 0x330: case 0x334: case 0x338:
     case 0x35C: case 0x3A4: case 0x147C: case 0x17BC: case 0x17C4:
+    case 0x2A4: case 0x314: case 0x318: case 0x31C: case 0x3B8:
         if (value > 1) return 0;
         break; /* enable bits */
     case 0x328: if (value > 6) return 0;
@@ -155,6 +167,20 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
         break; /* shadow compare */
     case 0x1E74: if (value & ~0xFFFu) return 0;
         break; /* low shader-control field; other-stage inputs stay separate */
+    case 0x294: if (value & ~0x30001u) return 0;
+        break; /* separate specular, local eye, alpha from material */
+    case 0x29C:
+        if (value != 0x2601 && !(value >= 0x800 && value <= 0x804)) return 0;
+        break; /* fog equation */
+    case 0x2A0: if (value > 3 && value != 6) return 0;
+        break; /* fog source */
+    case 0x3BC: if (value & ~0xFFFFu) return 0;
+        break; /* eight two-bit light modes */
+    case 0x43C: if (value > 0x1FF) return 0;
+        break; /* fixed-point point size */
+    case 0x9C0: case 0x9C4: case 0x9C8: /* original fog parameter bits */
+    case 0x1E70: /* texture shader-stage modes, validated by a future draw */
+        break;
     case 0x290: /* control: clear format checked at execution */
     case 0x2A8: case 0x34C: /* packed colors */
     case 0x360: case 0x36C: /* stencil mask inputs (low 8 bits used by future draws) */

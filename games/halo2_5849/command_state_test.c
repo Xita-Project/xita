@@ -182,7 +182,55 @@ int main(void)
     reject(0, 0x1C20, 0); /* no fifth texture unit */
     reject(0, 0x17FC, 3); reject(0, 0x1800, 0); reject(0, 0x1810, 0);
     reject(0, 0x1818, 0); reject(0, 0x1940, 0); /* no vertex/draw execution */
-    reject(0, 0x1B00, 1); reject(0, 0x1B04, 1); /* resources need another implementation */
+    /* Descriptors are inert until a draw backend validates their full mapping.
+     * Failed mappers and unreadable DMA objects cannot affect state writes. */
+    const unsigned texture_offsets[] = {0, 4, 8, 0x10, 0x14, 0x1C};
+    const uint32_t texture_values[] = {0, 0x01336000, 0x00011E29, 0x0A000000,
+                                      0x028001E0, 0x02062000, 0xFFFFFFFF, 0x80000001};
+    f.fail_map = 1; f.failed_instance = 0x130A0;
+    for (unsigned unit = 0; unit < 4; ++unit) for (unsigned field = 0; field < 6; ++field) {
+        unsigned method = 0x1B00 + unit * 64 + texture_offsets[field];
+        for (unsigned v = 0; v < sizeof texture_values / sizeof *texture_values; ++v) {
+            h2_command_state expected = s; h2_kelvin_clear clear = c; fixture memory = f;
+            expected.setup[method / 4] = texture_values[v];
+            expected.setup_valid[method / 128] |= 1u << ((method / 4) % 32);
+            assert(emit(0, method, texture_values[v]));
+            assert(!memcmp(&s, &expected, sizeof s) && !memcmp(&c, &clear, sizeof c));
+            assert(!memcmp(&f, &memory, sizeof f));
+            reject(1, method, 0); reject(0, method + 1, 0);
+        }
+        reject(0, 0x1B18 + unit * 64, 0);
+    }
+    f.fail_map = 0; f.failed_instance = 0;
+    for (unsigned field = 0; field < 6; ++field) reject(0, 0x1C00 + texture_offsets[field], 0);
+    const unsigned scalar_methods[] = {0x2A4, 0x314, 0x318, 0x3B8, 0x294, 0x29C,
+                                      0x2A0, 0x3BC, 0x43C, 0x9C0, 0x9C4, 0x9C8, 0x1E70};
+    const uint32_t scalar_values[] = {1, 0, 0, 1, 0x20001, 0x2601, 0, 0, 8,
+                                      0x3F800000, 0x3F800000, 0, 1};
+    for (unsigned i = 0; i < sizeof scalar_methods / sizeof *scalar_methods; ++i) {
+        unsigned method = scalar_methods[i]; uint32_t value = scalar_values[i];
+        h2_command_state expected = s; h2_kelvin_clear clear = c; fixture memory = f;
+        expected.setup[method / 4] = value;
+        expected.setup_valid[method / 128] |= 1u << ((method / 4) % 32);
+        assert(emit(0, method, value));
+        assert(!memcmp(&s, &expected, sizeof s) && !memcmp(&c, &clear, sizeof c));
+        assert(!memcmp(&f, &memory, sizeof f));
+        reject(1, method, value); reject(0, method + 1, value);
+    }
+    for (unsigned i = 0; i < 4; ++i) reject(0, scalar_methods[i], 2);
+    assert(emit(0, 0x31C, 0) && emit(0, 0x31C, 1)); reject(0, 0x31C, 2);
+    reject(0, 0x294, 2); reject(0, 0x294, 0x40000);
+    reject(0, 0x29C, 0x7FF); reject(0, 0x29C, 0x805); reject(0, 0x29C, 0x2600);
+    for (unsigned v = 0x800; v <= 0x804; ++v) assert(emit(0, 0x29C, v));
+    for (unsigned v = 0; v <= 6; ++v) {
+        if (v == 4 || v == 5) reject(0, 0x2A0, v);
+        else assert(emit(0, 0x2A0, v));
+    }
+    reject(0, 0x2A0, 7); reject(0, 0x3BC, 0x10000); reject(0, 0x43C, 0x200);
+    assert(emit(0, 0x3BC, 0xFFFF) && emit(0, 0x43C, 0x1FF));
+    reject(0, 0x9CC, 0); reject(0, 0x298, 0); /* no neighboring material/FP state */
+    reject(0, 0x17FC, 7); reject(0, 0x17FC, 0);
+    reject(0, 0x1880, 0); reject(0, 0x1884, 0); reject(0, 0x1964, 0xFFFFFFFF);
     assert(emit(0, 0x300, 1) && emit(0, 0x328, 6));
     reject(0, 0x300, 2); reject(0, 0x328, 7); reject(0, 0x33C, 0x208);
     reject(0, 0x358, 2); reject(0, 0x370, 0x1234); reject(0, 0x380, 0x200);

@@ -9,8 +9,8 @@ struct h2_host_channel;
 const struct h2_host_channel *h2_host_channel_current(void);
 void h2_host_tile_remove(xctx *c);
 void h2_host_tile_configure(xctx *c);
-/* Desired encoder settings. The implemented digital 480p scanout requires
- * luma disabled; interlaced flicker filtering is inactive in this mode.
+/* Desired encoder settings. The implemented digital 480p scanout retains the
+ * analog luma preference; interlaced flicker filtering is inactive in this mode.
  * Recording these requests alone never applies a display mode. */
 typedef struct h2_host_av_config {
     uint32_t flicker_filter, luma_filter;
