@@ -8,6 +8,7 @@ HOST_CHANNEL ?= 0
 QUAD_RENDER ?= 0
 AUDIO_HOST ?= 0
 AUDIO_DSP ?= 0
+FX_PROBE_SECOND ?= 0
 AUDIO_EFFECTS_UNAVAILABLE ?= 0
 AUDIO_MULTIBIN_UNAVAILABLE ?= 0
 GENERATED ?= $(ROOT)/local/halo2_5849/boot/generated
@@ -111,7 +112,7 @@ test-host: $(BUILD)/audio_fx_vita_test $(BUILD)/audio_fx_host_test
 fx-probe: $(BUILD)/fxin2-probe.vpk
 $(BUILD)/fxin2-probe.elf: audio_fx_probe.c audio_fx.c audio_fx.h audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h dsp_asset.c dsp_asset.h dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c $(DSP_HEADERS) $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
 	@mkdir -p $(dir $@)
-	$(CC) -std=gnu11 -O2 -mthumb -mcpu=cortex-a9 -mfpu=neon -fno-strict-aliasing -ffunction-sections -fdata-sections -DH2_AUDIO_DSP=1 -I$(ROOT) -I$(ROOT)/recomp $(DSP_INCLUDES) -DXK_AUDIO_OUTPUT_FILTER=h2_audio_bins_filter -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock -Wl,-q,--gc-sections $(filter %.c,$^) -o $@ -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceAudio_stub -lSceSysmem_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lm
+	$(CC) -std=gnu11 -O2 -mthumb -mcpu=cortex-a9 -mfpu=neon -fno-strict-aliasing -ffunction-sections -fdata-sections -DH2_AUDIO_DSP=1 -DH2_FX_PROBE_SECOND=$(FX_PROBE_SECOND) -I$(ROOT) -I$(ROOT)/recomp $(DSP_INCLUDES) -DXK_AUDIO_OUTPUT_FILTER=h2_audio_bins_filter -Dxk_os_audio_open=h2_audio_sink_open -Dxk_os_audio_mutex_lock=h2_audio_sink_lock -Dxk_os_audio_mutex_unlock=h2_audio_sink_unlock -Wl,-q,--gc-sections $(filter %.c,$^) -o $@ -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceAudio_stub -lSceSysmem_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lm
 $(BUILD)/fxin2-probe.velf: $(BUILD)/fxin2-probe.elf
 	$(VITASDK)/bin/vita-elf-create $< $@
 $(BUILD)/fxin2-probe-eboot.bin: $(BUILD)/fxin2-probe.velf

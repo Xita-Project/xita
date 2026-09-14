@@ -5,7 +5,10 @@
 h2_dsp_engine *h2_test_fx_engine(void)
 {
     h2_dsp_engine *s = fx_fixture();
-    for (unsigned i = 0; i < 32; ++i) put32(s->scratch + 0xb100 + i * 4, 500000);
+    for (unsigned i = 0; i < 32; ++i) {
+        put32(s->scratch + 0xb100 + i * 4, 500000);
+        put32(s->scratch + 0xb600 + i * 4, 500000);
+    }
     s->effect_count = 1; s->state_offset = 0x818;
     s->effects[0] = (h2_dsp_effect){.state_offset = 0x818, .state_bytes = 128};
     for (unsigned i = 0; i < 32; ++i) s->core.xram[0x80 + i] = 0x765432;

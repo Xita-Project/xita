@@ -25,11 +25,19 @@ int main(void)
     engine = h2_dsp_asset_open("app0:halo2-dsp.bin", &dsp);
     if (!engine || !h2_dsp_zero_frame(engine)) goto done;
     int32_t bins[32][32] = {{0}};
-    for (unsigned i = 0; i < 32; ++i) bins[13][i] = 0x100000;
+    for (unsigned i = 0; i < 32; ++i) {
+        bins[13][i] = 0x100000;
+#if H2_FX_PROBE_SECOND
+        bins[23][i] = 0x80000;
+#endif
+    }
     if (!h2_dsp_mix_frame(engine, bins)) goto done;
     for (unsigned i = 0; i < 6; ++i) if (h2_audio_backend_set_headroom(i, 0) < 0) goto done;
-    if (h2_audio_backend_fx_bind(engine, 13) < 0 || h2_audio_backend_fx_route(6) < 0 ||
-        h2_audio_backend_fx_play() < 0) goto done;
+    if (h2_audio_backend_fx_bind(engine, 13) < 0 || h2_audio_backend_fx_route(13, 6) < 0 ||
+        h2_audio_backend_fx_play(13) < 0) goto done;
+#if H2_FX_PROBE_SECOND
+    if (h2_audio_backend_fx_bind(engine, 23) < 0 || h2_audio_backend_fx_play(23) < 0) goto done;
+#endif
     uint64_t begin = sceKernelGetProcessTimeWide();
     while (sceKernelGetProcessTimeWide() - begin < 5000000) {
         h2_audio_backend_snapshot(&sink);
@@ -44,18 +52,26 @@ done:
     if (!retired && engine) h2_dsp_snapshot(engine, &dsp);
     ok = ok && !retired && !sink.error && sink.peak && sink.nonzero_grains &&
          sink.fx_submitted_frames == sink.fx_consumed_frames;
+#if H2_FX_PROBE_SECOND
+    ok = ok && sink.fx_playing_mask == 3 && sink.fx_source_submitted[1] &&
+         sink.fx_source_submitted[1] == sink.fx_source_consumed[1];
+#endif
     fprintf(f, "owned_DSP_synthetic_signal_real_sink=%s\ncomputed_frames=%llu submitted_frames=%llu consumed_frames=%llu\n"
             "compute_us=%llu max_grain_us=%llu deadline_misses=%u empty_after_compute=%u\n"
             "sink_grains=%u nonzero_grains=%u peak=%u error=%08X close=%d\n"
             "dsp_frames=%llu instructions=%llu canonical=%016llX\n"
-            "Source: synthetic bin13 one-frame pulse through original owned GP, prior FX13 source to six unity bins.\n"
+            "sources_bound=%X sources_playing=%X source13_submitted=%llu consumed=%llu source23_submitted=%llu consumed=%llu\n"
+            "Source: synthetic bin13 one-frame pulse through original GP; optional second probe adds bin23 pulse and default FL/FR source.\n"
             "Output: real GP FL/FR monitor to Vita stereo sink; no EP/AC3, title/menu or real-time guarantee.\n",
             ok ? "PASS" : "FAIL", (unsigned long long)sink.fx_computed_frames,
             (unsigned long long)sink.fx_submitted_frames, (unsigned long long)sink.fx_consumed_frames,
             (unsigned long long)sink.fx_compute_us, (unsigned long long)sink.fx_max_compute_us,
             sink.fx_deadline_misses, sink.fx_empty_after_compute, sink.grains, sink.nonzero_grains,
             sink.peak, sink.error, retired, (unsigned long long)dsp.frames,
-            (unsigned long long)dsp.instructions, (unsigned long long)dsp.state_fingerprint);
+            (unsigned long long)dsp.instructions, (unsigned long long)dsp.state_fingerprint,
+            sink.fx_bound_mask, sink.fx_playing_mask,
+            (unsigned long long)sink.fx_source_submitted[0], (unsigned long long)sink.fx_source_consumed[0],
+            (unsigned long long)sink.fx_source_submitted[1], (unsigned long long)sink.fx_source_consumed[1]);
     fclose(f);
     if (!retired) { h2_dsp_destroy(engine); free(g_xram); free(g_xpt); }
     sceKernelExitProcess(ok ? 0 : 1); return ok ? 0 : 1;

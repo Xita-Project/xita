@@ -1,37 +1,59 @@
 #include "audio_fx.h"
 #include <string.h>
 
+unsigned h2_audio_fx_mask(unsigned bin)
+{ return bin == 13 ? 1 : bin == 23 ? 2 : 0; }
+static unsigned source_bin(unsigned index) { return index == 0 ? 13 : 23; }
 int h2_audio_fx_bind(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin)
 {
-    int32_t source[32];
-    if (!fx || fx->engine || bin != 13 || !h2_dsp_read_fx_frame(engine, bin, source)) return 0;
-    *fx = (h2_audio_fx){.engine = engine, .routes = 2};
+    unsigned mask = h2_audio_fx_mask(bin); int32_t source[32];
+    if (!fx || !mask || (fx->bound & mask) || (fx->engine && fx->engine != engine) ||
+        !h2_dsp_read_fx_frame(engine, bin, source)) return 0;
+    fx->engine = engine; fx->bound |= mask;
+    fx->sources[mask == 1 ? 0 : 1] = (h2_audio_fx_source){.routes = 2};
     return 1;
 }
-int h2_audio_fx_route(h2_audio_fx *fx, unsigned routes)
+int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes)
 {
-    if (!fx || !fx->engine || fx->playing || (routes != 2 && routes != 6)) return 0;
-    fx->routes = routes; return 1;
+    unsigned mask = h2_audio_fx_mask(bin);
+    if (!fx || !mask || !(fx->bound & mask) || (fx->playing & mask) ||
+        bin != 13 || (routes != 2 && routes != 6)) return 0;
+    fx->sources[0].routes = routes; return 1;
 }
-int h2_audio_fx_play(h2_audio_fx *fx)
+int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin)
 {
-    if (!fx || !fx->engine || fx->playing || fx->routes != 6) return 0;
-    fx->playing = 1; return 1;
+    unsigned mask = h2_audio_fx_mask(bin), index = mask == 1 ? 0 : 1;
+    if (!fx || !mask || !(fx->bound & mask) || (fx->playing & mask) ||
+        fx->sources[index].routes != (bin == 13 ? 6u : 2u)) return 0;
+    fx->playing |= mask; return 1;
 }
-int h2_audio_fx_forget(h2_audio_fx *fx)
+int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin)
 {
-    if (!fx || !fx->engine || fx->playing) return 0;
-    *fx = (h2_audio_fx){0}; return 1;
+    unsigned mask = h2_audio_fx_mask(bin);
+    if (!fx || !mask || !(fx->bound & mask) || (fx->playing & mask)) return 0;
+    fx->bound &= ~mask; fx->sources[mask == 1 ? 0 : 1] = (h2_audio_fx_source){0};
+    if (!fx->bound) *fx = (h2_audio_fx){0};
+    return 1;
 }
 int h2_audio_fx_render(h2_audio_fx *fx, int16_t *stereo, unsigned frames)
 {
-    if (!fx || !fx->engine || !fx->playing || fx->routes != 6 || !stereo ||
+    if (!fx || !fx->engine || !fx->playing || (fx->playing & ~fx->bound) || !stereo ||
         !frames || frames > 1024 || (frames & 31)) return 0;
     for (unsigned at = 0; at < frames; at += 32) {
         int32_t source[32], bins[32][32] = {{0}};
         uint8_t monitor[256];
-        if (!h2_dsp_read_fx_frame(fx->engine, 13, source)) return 0;
-        for (unsigned bin = 0; bin < fx->routes; ++bin) memcpy(bins[bin], source, sizeof source);
+        for (unsigned v = 0; v < H2_FX_SOURCES; ++v) if (fx->playing & (1u << v)) {
+            if (!h2_dsp_read_fx_frame(fx->engine, source_bin(v), source)) return 0;
+            for (unsigned bin = 0; bin < fx->sources[v].routes; ++bin)
+                for (unsigned i = 0; i < 32; ++i) bins[bin][i] += source[i];
+        }
+        /* Two signed-24 unity sources fit exactly in int32 and also in the
+         * pinned reference's float accumulator. Clamp only after both have
+         * contributed; per-source clipping would lose opposite-sign energy. */
+        for (unsigned bin = 0; bin < 6; ++bin) for (unsigned i = 0; i < 32; ++i) {
+            if (bins[bin][i] > 8388607) bins[bin][i] = 8388607;
+            if (bins[bin][i] < -8388608) bins[bin][i] = -8388608;
+        }
         if (!h2_dsp_mix_frame(fx->engine, bins) ||
             !h2_dsp_copy_space(fx->engine, 0, 0x3000, monitor, sizeof monitor)) return 0;
         for (unsigned i = 0; i < 32; ++i) for (unsigned channel = 0; channel < 2; ++channel) {
@@ -42,6 +64,8 @@ int h2_audio_fx_render(h2_audio_fx *fx, int16_t *stereo, unsigned frames)
             stereo[(at + i) * 2 + channel] = (int16_t)(bits < 0x8000 ? (int)bits : (int)bits - 65536);
         }
         ++fx->frames;
+        for (unsigned v = 0; v < H2_FX_SOURCES; ++v)
+            if (fx->playing & (1u << v)) ++fx->sources[v].frames;
     }
     return 1;
 }

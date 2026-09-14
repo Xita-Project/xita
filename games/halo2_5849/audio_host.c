@@ -24,6 +24,7 @@ typedef struct {
     uint32_t submix, spatial[41];
     uint8_t route_bins[6];
     uint32_t route_count;
+    uint32_t fx_bin;
 } h2_audio_buffer;
 static h2_audio_buffer buffers[XA_MAX_VOICES];
 typedef struct {
@@ -205,7 +206,7 @@ static void reference(xctx *c, uint32_t ip)
             if (!b->submix && b->started && h2_audio_backend_forget(b->voice) < 0)
                 fail(c, ip, "release PCM progress ownership", b->voice);
 #if H2_AUDIO_DSP
-            if (b->submix == 2 && h2_audio_backend_fx_forget() < 0)
+            if (b->submix == 2 && h2_audio_backend_fx_forget(b->fx_bin) < 0)
                 fail(c, ip, "release FXIN2 source ownership", b->base);
 #endif
             if (!b->submix) xk_audio_voice_free(b->voice);
@@ -270,14 +271,19 @@ static void submix_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t f
 static void fx_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t fields[6])
 {
     const uint32_t ip = 0x37D4BE;
-    if (X_M32(c->r[4]) != 0x220C26 || fields[0] != 24 || fields[1] != 0x100000 ||
-        fields[2] || fields[3] || fields[4] || fields[5] != 13 || !effects)
+    uint32_t caller = X_M32(c->r[4]), bin = fields[5];
+    if (!((caller == 0x220C26 && bin == 13) || (caller == 0x21E830 && bin == 23)) ||
+        fields[0] != 24 || fields[1] != 0x100000 || fields[2] || fields[3] || fields[4] || !effects)
         fail(c, ip, "unsupported FXIN2 description/caller", fields[1]);
     if (aliases(out, 4, c->r[4], 20) || aliases(out, 4, desc, 24))
         fail(c, ip, "FXIN2 output alias", out);
     if (device.references == UINT32_MAX) fail(c, ip, "FXIN2 parent overflow", device.references);
-    for (unsigned i = 0; i < XA_MAX_VOICES; ++i)
-        if (buffers[i].base && buffers[i].submix == 2) fail(c, ip, "only one FXIN2 source supported", buffers[i].base);
+    int first_playing = 0;
+    for (unsigned i = 0; i < XA_MAX_VOICES; ++i) if (buffers[i].base && buffers[i].submix == 2) {
+        if (buffers[i].fx_bin == bin) fail(c, ip, "duplicate FXIN2 source", bin);
+        if (buffers[i].fx_bin == 13 && buffers[i].started && !buffers[i].stopped) first_playing = 1;
+    }
+    if (bin == 23 && !first_playing) fail(c, ip, "second FXIN2 requires active first source", bin);
     unsigned index;
     for (index = 0; index < XA_MAX_VOICES && buffers[index].base; ++index) {}
     if (index == XA_MAX_VOICES) { result(c, 0x8007000E, 4); return; }
@@ -286,17 +292,17 @@ static void fx_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t field
     if ((base & 4095) || !mapped(base, 4096) || overlaps_device(base, 4096) ||
         page_overlap(base, 4096, c->r[4], 20) || page_overlap(base, 4096, out, 4) ||
         page_overlap(base, 4096, desc, 24)) fail(c, ip, "FXIN2 allocation mapping/alias", base);
-    if (h2_audio_backend_fx_bind(effects, 13) < 0) {
+    if (h2_audio_backend_fx_bind(effects, bin) < 0) {
         if (xk_mem_free(base) < 0) fail(c, ip, "FXIN2 allocation rollback", base);
-        fail(c, ip, "FXIN2 engine/idle voices/headroom contract", 13);
+        fail(c, ip, "FXIN2 engine/idle voices/headroom contract", bin);
     }
     buffers[index] = (h2_audio_buffer){.base = base, .references = 1, .voice = -1,
-        .submix = 2, .bytes = 128, .frequency = 48000, .route_count = 2, .route_bins = {0, 1}};
+        .submix = 2, .bytes = 128, .frequency = 48000, .route_count = 2, .route_bins = {0, 1}, .fx_bin = bin};
     X_M32(base) = 0x417150; X_M32(base + 4) = 1;
     ++device.children; X_M32(device.base + 4) = ++device.references;
     uint32_t handle = base + 0x1C; x_guest_write(out, &handle, 4);
-    xv_logf("[h2/fxin2] create caller=%08X interface=%08X real GP scratch B100/bin13 signed24 mono48000 samples=32 default routes=0,1 headroom=0 parent_refs=%u inactive\n",
-            X_M32(c->r[4]), handle, device.references);
+    xv_logf("[h2/fxin2] create caller=%08X interface=%08X real GP scratch=%04X bin=%u signed24 mono48000 samples=32 default routes=0,1 headroom=0 parent_refs=%u inactive\n",
+            caller, handle, 0xB000 + (bin - 11) * 128, bin, device.references);
     result(c, 0, 4);
 }
 #endif
@@ -474,7 +480,7 @@ static void buffer_control(xctx *c, uint32_t ip)
     stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
     uint32_t value = X_ARG(1);
     if (b->submix == 2) {
-        if (ip != 0x37B66F || value || b->started || X_M32(c->r[4]) != 0x220C37)
+        if (ip != 0x37B66F || value || b->started || b->fx_bin != 13 || X_M32(c->r[4]) != 0x220C37)
             fail(c, ip, "unsupported FXIN2 gain/state/caller", value);
         b->volume = 0;
         xv_logf("[h2/fxin2] original unity volume retained caller=%08X interface=%08X\n", X_M32(c->r[4]), b->base + 0x1C);
@@ -580,12 +586,12 @@ static void buffer_routing(xctx *c, uint32_t ip)
     }
 #if H2_AUDIO_DSP
     if (b->submix == 2) {
-        if (ip != 0x37C5E4 || b->started || X_M32(c->r[4]) != 0x220CAA ||
+        if (ip != 0x37C5E4 || b->started || b->fx_bin != 13 || X_M32(c->r[4]) != 0x220CAA ||
             list[0] != 6 || !mapped(list[1], 48)) fail(c, ip, "unsupported FXIN2 route caller/list", list[0]);
         x_guest_read(pairs, list[1], 48);
         for (unsigned i = 0; i < 6; ++i)
             if (pairs[2 * i] != i || pairs[2 * i + 1]) fail(c, ip, "unsupported FXIN2 route/gain", pairs[2 * i]);
-        if (h2_audio_backend_fx_route(6) < 0) fail(c, ip, "FXIN2 real route binding", b->base);
+        if (h2_audio_backend_fx_route(b->fx_bin, 6) < 0) fail(c, ip, "FXIN2 real route binding", b->base);
         b->route_count = 6; for (unsigned i = 0; i < 6; ++i) b->route_bins[i] = i;
         xv_logf("[h2/fxin2] caller=%08X interface=%08X six independent unity GP routes 0..5\n", X_M32(c->r[4]), b->base + 0x1C);
         result(c, 0, 2); return;
@@ -644,12 +650,13 @@ static void buffer_play(xctx *c)
     stack(c, ip, 4); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
 #if H2_AUDIO_DSP
     if (b->submix == 2) {
-        if (b->started || b->route_count != 6 || b->volume || b->headroom || X_ARG(1) || X_ARG(2) || X_ARG(3) ||
-            X_M32(c->r[4]) != 0x220CB5) fail(c, ip, "unsupported FXIN2 Play state/flags/caller", X_ARG(3));
-        if (h2_audio_backend_fx_play() < 0) fail(c, ip, "FXIN2 real DSP/sink Play rejected", b->base);
+        uint32_t routes = b->fx_bin == 13 ? 6 : 2, caller = b->fx_bin == 13 ? 0x220CB5 : 0x21E842;
+        if (b->started || b->route_count != routes || b->volume || b->headroom || X_ARG(1) || X_ARG(2) || X_ARG(3) ||
+            X_M32(c->r[4]) != caller) fail(c, ip, "unsupported FXIN2 Play state/flags/caller", X_ARG(3));
+        if (h2_audio_backend_fx_play(b->fx_bin) < 0) fail(c, ip, "FXIN2 real DSP/sink Play rejected", b->base);
         b->started = 1;
-        xv_logf("[h2/fxin2] Play caller=%08X interface=%08X original FX loop semantics, actual GP grain accepted by stereo sink\n",
-                X_M32(c->r[4]), b->base + 0x1C);
+        xv_logf("[h2/fxin2] Play caller=%08X interface=%08X bin=%u original FX loop semantics, actual source-tagged GP grain accepted by stereo sink\n",
+                X_M32(c->r[4]), b->base + 0x1C, b->fx_bin);
         result(c, 0, 4); return;
     }
     if (effects) fail(c, ip, "loaded DSP PCM voice routing is unsupported", X_M32(c->r[4]));

@@ -145,3 +145,7 @@ The existing [DSP game build options](halo2-dsp-game-init.md) apply; utility
 build target is `fx-probe` with private `BUILD` and `DSP_ASSET` paths.
 **Both diagnostic packages embed owned executable game/DSP content and must
 not be uploaded or distributed as releases.**
+
+The later [two-source checkpoint](halo2-fx23-mixing.md) executes the bin-23
+creation/Play and documents Native115's next spatial-buffer stop. The evidence
+above remains the historical first-source Native113 result.

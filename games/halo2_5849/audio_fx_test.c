@@ -22,14 +22,14 @@ int H2_AUDIO_FX_TEST_MAIN(void)
     assert(!h2_audio_fx_bind(NULL, s, 13));
     assert(!h2_audio_fx_bind(&fx, s, 12) && !fx.engine);
     assert(!h2_audio_fx_bind(&fx, NULL, 13) && !fx.engine);
-    assert(h2_audio_fx_bind(&fx, s, 13) && fx.routes == 2 && !fx.playing);
-    before = fx; assert(!h2_audio_fx_play(&fx) && !memcmp(&before, &fx, sizeof fx));
-    assert(!h2_audio_fx_route(&fx, 5) && !memcmp(&before, &fx, sizeof fx));
-    assert(h2_audio_fx_forget(&fx) && !fx.engine);
+    assert(h2_audio_fx_bind(&fx, s, 13) && fx.sources[0].routes == 2 && !fx.playing);
+    before = fx; assert(!h2_audio_fx_play(&fx, 13) && !memcmp(&before, &fx, sizeof fx));
+    assert(!h2_audio_fx_route(&fx, 13, 5) && !memcmp(&before, &fx, sizeof fx));
+    assert(h2_audio_fx_forget(&fx, 13) && !fx.engine);
     assert(h2_audio_fx_bind(&fx, s, 13));
-    assert(h2_audio_fx_route(&fx, 6) && h2_audio_fx_play(&fx));
+    assert(h2_audio_fx_route(&fx, 13, 6) && h2_audio_fx_play(&fx, 13));
     before = fx;
-    assert(!h2_audio_fx_play(&fx) && !h2_audio_fx_forget(&fx) && !h2_audio_fx_route(&fx, 2));
+    assert(!h2_audio_fx_play(&fx, 13) && !h2_audio_fx_forget(&fx, 13) && !h2_audio_fx_route(&fx, 13, 2));
     for (unsigned n = 0; n < 1056; ++n) if (!n || n > 1024 || (n & 31)) {
         assert(!h2_audio_fx_render(&fx, out, n));
         assert(!memcmp(&before, &fx, sizeof fx));
@@ -45,8 +45,37 @@ int H2_AUDIO_FX_TEST_MAIN(void)
     }
     for (unsigned b = 0; b < 32; ++b) for (unsigned i = 0; i < 32; ++i)
         assert(s->core.mixbuffer[b * 32 + i] == (b < 6 ? (uint32_t)samples[i % 11] & 0xffffff : 0));
+    /* Add an independent source while the first is active. Inactive release
+     * and rebind cannot alter the first source's state or DSP frame count. */
+    h2_dsp_engine *other = fx_fixture(); before = fx;
+    assert(!h2_audio_fx_bind(&fx, other, 23) && !memcmp(&before, &fx, sizeof fx));
+    h2_dsp_destroy(other);
+    assert(h2_audio_fx_bind(&fx, s, 23) && fx.bound == 3 && fx.playing == 1);
+    assert(h2_audio_fx_forget(&fx, 23) && !memcmp(&before, &fx, sizeof fx));
+    assert(h2_audio_fx_bind(&fx, s, 23));
+    assert(!h2_audio_fx_route(&fx, 23, 6) && h2_audio_fx_play(&fx, 23));
+    const int32_t pairs[][2] = {{8388607,1},{-8388608,-1},{8388607,8388607},{-8388608,-8388608},
+        {8388607,-8388608},{-1,1},{255,1},{-255,-1},{123456,-654321},{8388500,107},{-8388500,-108}};
+    for (unsigned i = 0; i < 32; ++i) {
+        put32(s->scratch + 0xb100 + i * 4, (uint32_t)pairs[i % 11][0]);
+        put32(s->scratch + 0xb600 + i * 4, (uint32_t)pairs[i % 11][1]);
+    }
+    uint64_t engine_frames = s->status.frames;
+    assert(h2_audio_fx_render(&fx, out, 32));
+    assert(fx.frames == 33 && s->status.frames == engine_frames + 1);
+    assert(fx.sources[0].frames == 33 && fx.sources[1].frames == 1);
+    for (unsigned i = 0; i < 32; ++i) {
+        int64_t sum = (int64_t)pairs[i % 11][0] + pairs[i % 11][1];
+        if (sum > 8388607) sum = 8388607; if (sum < -8388608) sum = -8388608;
+        int expected = sum >= 0 ? sum / 256 : -((-sum + 255) / 256);
+        assert(out[i * 2] == expected && out[i * 2 + 1] == expected);
+        for (unsigned b = 0; b < 32; ++b)
+            assert(s->core.mixbuffer[b * 32 + i] == ((uint32_t)(b < 2 ? sum : b < 6 ? pairs[i % 11][0] : 0) & 0xffffff));
+    }
+    before = fx; assert(!h2_audio_fx_forget(&fx, 23) && !h2_audio_fx_bind(&fx, s, 23));
+    assert(!h2_audio_fx_bind(&fx, s, 24) && !memcmp(&before, &fx, sizeof fx));
     /* A subsequent frame fault is terminal, with no completed frame counted. */
-    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 32 && s->status.fault);
+    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 33 && s->status.fault);
     assert(!h2_audio_fx_render(&fx, out, 32)); h2_dsp_destroy(s);
     puts("Halo 2 FX source: checked ownership, six independent unity routes, real DSP frames and signed GP output pass");
     return 0;

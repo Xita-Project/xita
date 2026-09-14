@@ -40,7 +40,7 @@ static int sceKernelWaitThreadEnd(int, void *, SceUInt *);
 #include "audio_vita.c"
 #include "audio_bins.c"
 
-enum { F_MUTEX, F_PROGRESS, F_PORT, F_VOLUME, F_SEMA, F_THREAD, F_START, F_READY, F_WRITE, F_JOIN, F_RELEASE, F_REST, F_REVERSE, F_STALL, F_FX_SLOW };
+enum { F_MUTEX, F_PROGRESS, F_PORT, F_VOLUME, F_SEMA, F_THREAD, F_START, F_READY, F_WRITE, F_JOIN, F_RELEASE, F_REST, F_REVERSE, F_STALL, F_FX_SLOW, F_HOLD };
 static atomic_uint faults;
 static unsigned resources;
 static atomic_uint outputs, drains, active, queued;
@@ -116,7 +116,11 @@ static int sceAudioOutOutput(int id, const void *data)
     if (!data) { assert(!atomic_load(&queued)); atomic_fetch_add(&drains, 1); return 0; }
     const int16_t *samples = data;
 #if H2_AUDIO_DSP
-    if (fx.playing) for (unsigned i = 0; i < XA_GRAIN * 2; ++i) assert(samples[i] == 1953);
+    if (fx.playing) {
+        /* A retained old grain may precede the new source's first grain. */
+        assert(samples[0] == 1953 || samples[0] == 3906);
+        for (unsigned i = 0; i < XA_GRAIN * 2; ++i) assert(samples[i] == samples[0]);
+    }
     else
 #endif
         assert(samples[0] == 1234 && samples[XA_GRAIN * 2 - 1] == -4321);
@@ -130,6 +134,7 @@ static int sceAudioOutGetRestSample(int id)
     if (failing(F_REST)) return -24;
     if (failing(F_REVERSE)) return XA_GRAIN + 1;
     if (failing(F_STALL)) return (int)remaining;
+    if (failing(F_HOLD)) return (int)remaining;
     if (failing(F_FX_SLOW)) { atomic_store(&queued, 0); return 0; }
     if (remaining) { assert(remaining >= 128); remaining -= 128; atomic_store(&queued, remaining); }
     return (int)remaining;

@@ -17,6 +17,8 @@ typedef struct {
     uint64_t fx_computed_frames, fx_submitted_frames, fx_consumed_frames;
     uint64_t fx_compute_us, fx_max_compute_us;
     uint32_t fx_deadline_misses, fx_empty_after_compute;
+    uint32_t fx_bound_mask, fx_playing_mask;
+    uint64_t fx_source_submitted[2], fx_source_consumed[2];
 } h2_audio_backend_status;
 
 /* Bounded device + external PCM buffer creation/binding/controls and paired
@@ -55,13 +57,13 @@ int h2_audio_backend_forget(int voice);
 void h2_audio_backend_snapshot(h2_audio_backend_status *out);
 #if H2_AUDIO_DSP
 #include "dsp_engine.h"
-/* Single verified FXIN2/bin13 source; no coexistence with playing PCM/stream
+/* Verified FXIN2/bin13 and bin23 sources; no coexistence with playing PCM/stream
  * voices. Play waits for an actual complete GP grain accepted by the sink.
  * Engine lifetime remains with the device, which joins the worker first. */
 int h2_audio_backend_fx_bind(h2_dsp_engine *engine, unsigned bin);
-int h2_audio_backend_fx_route(unsigned routes);
-int h2_audio_backend_fx_play(void);
-int h2_audio_backend_fx_forget(void);
+int h2_audio_backend_fx_route(unsigned bin, unsigned routes);
+int h2_audio_backend_fx_play(unsigned bin);
+int h2_audio_backend_fx_forget(unsigned bin);
 int h2_audio_backend_effect_read(h2_dsp_engine *engine, unsigned index,
                                  unsigned offset, void *out, unsigned bytes);
 #endif

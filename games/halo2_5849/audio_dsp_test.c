@@ -8,14 +8,15 @@ struct h2_dsp_engine { uint32_t marker; };
 static unsigned dsp_opens, dsp_closes, dsp_reads;
 static int dsp_failure;
 static unsigned test_fx_bound, test_fx_routes, test_fx_playing;
+static unsigned test_fx_mask(unsigned bin) { assert(bin == 13 || bin == 23); return bin == 13 ? 1 : 2; }
 int h2_audio_backend_fx_bind(h2_dsp_engine *s, unsigned bin)
-{ assert(s == effects && bin == 13 && !test_fx_bound); test_fx_bound = 1; test_fx_routes = 2; return 0; }
-int h2_audio_backend_fx_route(unsigned routes)
-{ assert(test_fx_bound && !test_fx_playing && routes == 6); test_fx_routes = routes; return 0; }
-int h2_audio_backend_fx_play(void)
-{ assert(test_fx_bound && !test_fx_playing && test_fx_routes == 6); test_fx_playing = 1; return 0; }
-int h2_audio_backend_fx_forget(void)
-{ assert(test_fx_bound && !test_fx_playing); test_fx_bound = test_fx_routes = 0; return 0; }
+{ unsigned mask = test_fx_mask(bin); assert(s == effects && !(test_fx_bound & mask)); test_fx_bound |= mask; if (bin == 13) test_fx_routes = 2; return 0; }
+int h2_audio_backend_fx_route(unsigned bin, unsigned routes)
+{ assert(bin == 13 && (test_fx_bound & 1) && !(test_fx_playing & 1) && routes == 6); test_fx_routes = routes; return 0; }
+int h2_audio_backend_fx_play(unsigned bin)
+{ unsigned mask = test_fx_mask(bin); assert((test_fx_bound & mask) && !(test_fx_playing & mask) && (bin != 13 || test_fx_routes == 6)); test_fx_playing |= mask; return 0; }
+int h2_audio_backend_fx_forget(unsigned bin)
+{ unsigned mask = test_fx_mask(bin); assert((test_fx_bound & mask) && !(test_fx_playing & mask)); test_fx_bound &= ~mask; if (bin == 13) test_fx_routes = 0; return 0; }
 int h2_audio_backend_effect_read(h2_dsp_engine *s, unsigned index, unsigned offset, void *out, unsigned bytes)
 {
     if (index >= 15 || offset > 128 || bytes > 128 - offset) return 0;

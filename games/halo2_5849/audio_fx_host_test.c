@@ -49,6 +49,23 @@ int main(void)
         c = fx_context(handle, 0, 0x220CB5); X_M32(c.r[4] + 16) = 1; reject(&c, 0x37B6DF);
         if (active_case) {
             c = fx_context(handle, 0, 0x220CB5); call(&c, 0x37B6DF, 0, 4); assert(b->started && test_fx_playing);
+            /* Exact next original constructor: independent default FL/FR
+             * source, with first source ownership retained throughout. */
+            c = fx_description(dev); uint32_t second_bin = 23;
+            x_guest_write(0x3ffd + 20, &second_bin, 4); X_M32(c.r[4]) = 0x21E830;
+            call(&c, 0x37D4BE, 0, 4); uint32_t second_handle = read32(0x6ffe);
+            h2_audio_buffer *second = find_buffer(second_handle - 0x1c);
+            assert(second && second != b && second->fx_bin == 23 && second->route_count == 2);
+            assert(device.references == 3 && device.children == 2 && test_fx_bound == 3 && test_fx_playing == 1);
+            c = fx_context(second_handle, 0, 0x220CB5); reject(&c, 0x37B6DF);
+            c = fx_context(second_handle, 0, 0x220C37); reject(&c, 0x37B66F);
+            c = fx_context(second_handle, 0x4ffc, 0x220CAA); reject(&c, 0x37C5E4);
+            c = fx_context(second_handle, 0, 0x21E842); call(&c, 0x37B6DF, 0, 4);
+            assert(second->started && test_fx_playing == 3 && b->started);
+            c = context(second_handle, 0, 0, 0); reject(&c, 0x379F45);
+            second->started = 0; test_fx_playing &= ~2u; /* test teardown only */
+            c = context(second_handle, 0, 0, 0); call(&c, 0x379F45, 0, 1);
+            assert(device.references == 2 && device.children == 1 && test_fx_bound == 1 && test_fx_playing == 1);
             c = fx_context(handle, 0, 0x220CB5); reject(&c, 0x37B6DF);
             c = context(handle, 0, 0, 0); reject(&c, 0x379F45);
             /* Test teardown only: active Stop remains unsupported in guest. */
