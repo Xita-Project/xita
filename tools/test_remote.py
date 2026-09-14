@@ -10,7 +10,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from vita_remote import Client, benchmark, upload_update
+from vita_remote import Client, benchmark, upload_update, wait_for_update
 from package_vpk import update_contract, update_record
 from unittest.mock import patch
 
@@ -39,6 +39,9 @@ def benchmark_cases(tmp):
                 self.records += "[object-basis-compare] result off-before 10.000 on 12.000 off-after 10.000 fps comparable-view " + ("0" if self.mode == "camera" else "1") + "\n"
         def pad(self):
             self.released = True
+        def request(self,path,method):
+            assert path=='/benchmark?kind=object-basis' and method=='POST'
+            self.hold(0,0)
     for mode in ("success", "camera", "missing-result", "disconnect"):
         client = Fake(mode); out = tmp / mode
         with patch("vita_remote.time.sleep", lambda _: None):
@@ -53,9 +56,21 @@ def benchmark_cases(tmp):
         assert len(result["trials"]) == (3 if mode == "success" else 0)
         if mode != "success":
             assert result["error"]
+    with patch("vita_remote.time.sleep",lambda _:None):
+        benchmark(Fake('success'),tmp/'selected',1,30,'object-basis')
 
 
 def main():
+    # An identical runtime hash must not hide a failed inactive-slot install.
+    class Boot:
+        def __init__(self,slot,state,sha='a'*64): self.value=dict(requested=0,boot_slot=slot,state=state,boot_sha256=sha)
+        def request(self,path): return {},json.dumps(self.value).encode()
+    with patch('vita_remote.time.sleep',lambda _:None):
+        assert wait_for_update(Boot(1,0),'a'*64,0)==1
+        for boot in (Boot(0,2),Boot(0,0),Boot(1,2),Boot(1,0,'b'*64)):
+            try: wait_for_update(boot,'a'*64,0)
+            except RuntimeError: pass
+            else: raise AssertionError('Failed installation acknowledged as installed')
     with tempfile.TemporaryDirectory(prefix="xita-remote-test-") as tmp:
         tmp = Path(tmp)
         benchmark_cases(tmp)
@@ -69,6 +84,9 @@ def main():
         (data / "remote.key").write_text(key + "\n")
         log = b"frame evidence\n" * 10000
         (data / "xita.log").write_bytes(log)
+        (data / "update").mkdir()
+        launcher_log=b"update failed: open inactive app slot for writing (errno 13)\n"
+        (data / "update/launcher.log").write_bytes(launcher_log)
         app=tmp/'ux0:app/XITA00001';app.mkdir(parents=True)
         (tmp/'app0:').symlink_to(app,target_is_directory=True)
         old=b'SCE\0'+bytes(4092)
@@ -138,15 +156,28 @@ def main():
                 offset = (y * 960 + x) * 3
                 assert pixels[offset:offset+3] == bytes((x & 255, y & 255, 0x55))
             assert command("b") == "ACK"
-            assert request("/screen")[0] == request("/log?offset=0")[0] == 409
+            assert request("/screen")[0] == request("/log?offset=0")[0] == request('/launcher-log?offset=0')[0] == 409
             assert json.loads(request("/status")[2])["benchmark"] == 1
             assert request("/update")[0] == 409
             assert command("n") == "ACK"
+            assert request('/benchmark?kind=unknown','POST')[0]==400
+            assert request('/benchmark?kind=model-palette&kind=flare','POST')[0]==400
+            assert request('/benchmark?kind=model-palette','POST',token='f'*32)[0]==403
+            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution'):
+                assert request('/benchmark?kind='+kind,'POST')[0]==204
+                assert request('/benchmark?kind='+kind,'POST')[0]==409
+                assert request('/screen')[0]==request('/update')[0]==409
+                assert command('n')=='ACK'
             code, headers, body = request("/log?offset=0")
             assert code == 200 and body == log[:65536] and int(headers["X-Log-Size"]) == len(log)
             assert request("/log?offset=65536")[2] == log[65536:131072]
             assert request("/log?offset=" + str(len(log)))[2] == b""
             assert request("/log?offset=" + str(len(log)+1))[0] == 416
+            assert request('/launcher-log?offset=0',token='f'*32)[0]==403
+            assert request('/launcher-log?offset=0')[2]==launcher_log
+            assert request('/launcher-log?offset=7')[2]==launcher_log[7:]
+            assert request('/launcher-log?offset=0&path=remote.key')[0]==400
+            assert request('/launcher-log?offset=0&offset=1')[0]==400
             assert command("f") == "ACK"
             assert request("/screen")[0] == 504
             assert command("f") == "ACK"
@@ -161,6 +192,8 @@ def main():
             assert client.status()["protocol"] == 1
             assert client.log(tmp / "client.log") == len(log)
             assert (tmp / "client.log").read_bytes() == log
+            assert client.log(tmp/'launcher.log',launcher=True)==len(launcher_log)
+            assert (tmp/'launcher.log').read_bytes()==launcher_log
             assert client.screen(tmp / "client.ppm")["frame"] > 0
             assert (tmp / "client.ppm").read_bytes() == ppm
             subprocess.run(["python3", str(ROOT / "tools/vita_remote.py"), "--config", str(conf),
@@ -171,6 +204,7 @@ def main():
             assert request(manifest,'POST',token='f'*32)[0]==403
             assert request(manifest+'x','POST')[0]==409
             assert request(manifest,'POST')[0]==204
+            assert request('/benchmark?kind=model-palette','POST')[0]==409
             assert request('/update/chunk?offset=1','POST',data=b'1234')[0]==409
             assert request('/update/chunk?offset=0','POST',data=bytes(65537))[0]==403
             assert request('/update/finish','POST')[0]==409

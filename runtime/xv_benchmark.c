@@ -15,13 +15,50 @@ static struct {
     double fps[PHASES];
 } b;
 static uint32_t status;
-void xv_benchmark_toggle(void) { if(b.active)b.cancel=1;else b.request=1; }
-void xv_benchmark_compare_toggle(void) { if(b.active)b.cancel=1;else b.request=2; }
-int xv_benchmark_active(void) { return b.active||b.request; }
+static unsigned request_state, remote_ready, remote_kind;
+#define BENCH_RUNNING UINT32_MAX
+unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
+int xv_benchmark_remote_request(unsigned kind)
+{
+    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_RESOLUTION||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+#ifndef XV_NATIVE_OBJECT_BASIS
+    if(kind==XV_BENCH_OBJECT_BASIS)return -1;
+#endif
+#ifndef XV_NATIVE_MODEL_PALETTE
+    if(kind==XV_BENCH_MODEL_PALETTE)return -1;
+#endif
+    unsigned expected=0;
+    return __atomic_compare_exchange_n(&request_state,&expected,kind,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)?0:-1;
+}
+void xv_benchmark_remote_poll(int control)
+{
+    __atomic_store_n(&remote_ready,!!control,__ATOMIC_RELEASE);
+    unsigned kind=__atomic_load_n(&request_state,__ATOMIC_ACQUIRE);
+    if(!kind||kind==BENCH_RUNNING)return;
+    if(!__atomic_compare_exchange_n(&request_state,&kind,BENCH_RUNNING,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED))return;
+    if(!control) {
+        xv_logf("[remote-benchmark] request rejected: first-person control unavailable\n");
+        __atomic_store_n(&request_state,0,__ATOMIC_RELEASE);return;
+    }
+    remote_kind=kind;b.request=kind==XV_BENCH_RESOLUTION?1:2;
+}
+static void toggle(int compare)
+{
+    if(b.active) {b.cancel=1;return;}
+    if(b.request) {b.request=0;__atomic_store_n(&request_state,0,__ATOMIC_RELEASE);return;}
+    unsigned expected=0;
+    if(__atomic_compare_exchange_n(&request_state,&expected,BENCH_RUNNING,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)) {
+        remote_kind=0;b.request=compare?2:1;
+    }
+}
+void xv_benchmark_toggle(void) {toggle(0);}
+void xv_benchmark_compare_toggle(void) {toggle(1);}
+int xv_benchmark_active(void) { return b.active||b.request||xv_benchmark_remote_busy(); }
 uint32_t xv_benchmark_status(void) { return __atomic_load_n(&status,__ATOMIC_ACQUIRE); }
 static unsigned phase_height(void) { return b.compare?b.original:heights[b.phase]; }
 int xv_benchmark_compare_object_basis(void)
 {
+    if(remote_kind)return remote_kind==XV_BENCH_OBJECT_BASIS;
     static int selected=-1;
     if (selected<0) {
         const char *e=getenv("XV_BENCHMARK_OBJECT_BASIS"); selected=e && atoi(e)!=0;
@@ -30,6 +67,7 @@ int xv_benchmark_compare_object_basis(void)
 }
 int xv_benchmark_compare_model_palette(void)
 {
+    if(remote_kind)return remote_kind==XV_BENCH_MODEL_PALETTE;
     static int selected=-1;
     if (selected<0) {
         const char *e=getenv("XV_BENCHMARK_MODEL_PALETTE"); selected=e && atoi(e)!=0;
@@ -55,6 +93,7 @@ static int candidate_available(void)
 }
 int xv_benchmark_compare_vertex_worker(void)
 {
+    if(remote_kind)return remote_kind==XV_BENCH_VERTEX_WORKER;
     static int selected=-1;
     if (selected<0) {
         const char *e=getenv("XV_BENCHMARK_VERTEX_WORKER"); selected=e && atoi(e)!=0;
@@ -63,6 +102,7 @@ int xv_benchmark_compare_vertex_worker(void)
 }
 int xv_benchmark_compare_vertex_references(void)
 {
+    if(remote_kind)return remote_kind==XV_BENCH_VERTEX_REFERENCES;
     static int selected = -1;
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_VERTEX_REFERENCES"); selected = e && atoi(e) != 0;
@@ -71,6 +111,7 @@ int xv_benchmark_compare_vertex_references(void)
 }
 int xv_benchmark_compare_native_bounds(void)
 {
+    if(remote_kind)return remote_kind==XV_BENCH_NATIVE_BOUNDS;
     static int selected = -1;
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_NATIVE_BOUNDS"); selected = e && atoi(e) != 0;
@@ -79,6 +120,7 @@ int xv_benchmark_compare_native_bounds(void)
 }
 int xv_benchmark_compare_vertex_copy(void)
 {
+    if(remote_kind)return remote_kind==XV_BENCH_VERTEX_COPY;
     static int selected = -1;
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_VERTEX_COPY"); selected = e && atoi(e) != 0;
@@ -87,6 +129,7 @@ int xv_benchmark_compare_vertex_copy(void)
 }
 int xv_benchmark_compare_draw_scan(void)
 {
+    if(remote_kind)return remote_kind==XV_BENCH_DRAW_SCAN;
     static int selected = -1;
     if (selected < 0) {
         const char *e = getenv("XV_BENCHMARK_DRAW_SCAN"); selected = e && atoi(e) != 0;
@@ -118,9 +161,10 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         int compare=b.request==2;
         memset(&b,0,sizeof b);
         b.compare=compare;
-        if(!valid || (compare&&!xv_benchmark_optimizations)) {xv_logf("[%s] start requires a loaded first-person view and available test hooks\n",tag());return 0;}
+        if(!valid || (compare&&!xv_benchmark_optimizations)) {xv_logf("[%s] start requires a loaded first-person view and available test hooks\n",tag());__atomic_store_n(&request_state,0,__ATOMIC_RELEASE);return 0;}
         if(compare && !candidate_available()) {
             xv_logf("[%s] selected native math experiment is not compiled in or XV_NATIVE_MATH is disabled; no settings changed\n",tag());
+            __atomic_store_n(&request_state,0,__ATOMIC_RELEASE);
             return 0;
         }
         b.active=b.configuring=b.view_ok=1;b.original=height;
@@ -176,7 +220,8 @@ void xv_benchmark_applied(uint64_t now,unsigned height)
     if(!b.active||!b.configuring)return;
     if(b.restoring) {
         xv_logf("[%s] restored %up (requested %up)\n",tag(),height,b.original);
-        b.active=b.configuring=b.restoring=0;publish();return;
+        b.active=b.configuring=b.restoring=0;publish();remote_kind=0;
+        __atomic_store_n(&request_state,0,__ATOMIC_RELEASE);return;
     }
     if(height!=phase_height()) {
         xv_logf("[%s] allocation fallback %up; cancel requested\n",tag(),height);

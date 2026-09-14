@@ -170,13 +170,14 @@ $(SFO): Makefile | $(BUILD)
 	vita-mksfoex -s TITLE_ID=$(TITLE_ID) $(SFO_EXTRA) "$(TITLE)" $@
 
 # Stable updater boot helper; generated game code is never linked into it.
-$(BUILD)/update-launcher.elf: runtime/xv_update_launcher.c runtime/xv_update.c runtime/xv_sha256.c runtime/xv_update.h runtime/xv_sha256.h
+$(BUILD)/update-launcher.elf: runtime/xv_update_launcher.c runtime/xv_update.c runtime/xv_sha256.c runtime/xv_update.h runtime/xv_sha256.h Makefile
 	@mkdir -p $(BUILD)
 	$(CC) -O2 -mthumb -Wall -Wextra -Iruntime $(LDFLAGS) -o $@ runtime/xv_update_launcher.c runtime/xv_update.c runtime/xv_sha256.c -lSceAppMgr_stub -lSceIofilemgr_stub -lScePower_stub -lSceProcessmgr_stub -lSceKernelThreadMgr_stub -lSceLibKernel_stub
 $(BUILD)/update-launcher.velf: $(BUILD)/update-launcher.elf
 	vita-elf-create $< $@
 $(BUILD)/update-launcher.self: $(BUILD)/update-launcher.velf
-	vita-make-fself -s $< $@
+	# Only this fixed-path helper needs app-directory write access. The game stays safe.
+	vita-make-fself $< $@
 ifeq ($(RECOMP),1)
 UPDATE_LAUNCHER := $(BUILD)/update-launcher.self
 endif

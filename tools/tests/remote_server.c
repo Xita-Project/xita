@@ -2,6 +2,9 @@
 #include "../../runtime/xv_remote.c"
 static unsigned benchmark;
 uint32_t xv_benchmark_status(void) {return LOAD(&benchmark);}
+unsigned xv_benchmark_remote_busy(void) {return LOAD(&benchmark)!=0;}
+int xv_benchmark_remote_request(unsigned kind)
+{unsigned expected=0;return kind>=1&&kind<=XV_BENCH_RESOLUTION&&__atomic_compare_exchange_n(&benchmark,&expected,kind,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)?0:-1;}
 void xv_logf(const char *fmt,...) {(void)fmt;}
 int main(void)
 {
@@ -21,6 +24,7 @@ int main(void)
     xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(!buttons&&lx==128);
     STORE(&enabled,0);STORE(&pad_seq,0);STORE(&pad_deadline,0);
     xv_update_init();
+    xv_update_confirm(0);
     xv_remote_start();
     if(!LOAD(&enabled)) {puts("DISABLED");return 0;}
     puts("READY");fflush(stdout);

@@ -18,8 +18,28 @@ def main():
     with tempfile.TemporaryDirectory(prefix='xita-update-test-') as temp:
         tmp=Path(temp)
         so=tmp/'update.so'
+        mount_test=os.getenv('MOUNT_TEST')=='1'
+        flags=[]
+        if mount_test:
+            # Exercise the Vita branch with a disappearing app0 alias. Further
+            # helper reads must use the verified fixed backing app directory.
+            (tmp/'psp2/io').mkdir(parents=True)
+            (tmp/'psp2/appmgr.h').write_text('int sceAppMgrUmount(const char *);\n')
+            (tmp/'psp2/io/fcntl.h').write_text('int sceIoSync(const char *,int);\n')
+            stub=tmp/'mount.c'
+            stub.write_text('''#include <string.h>
+#include <unistd.h>
+int mount_fail=1, mount_calls;
+int sceAppMgrUmount(const char *p) {
+    ++mount_calls;
+    if(strcmp(p,"app0:")||mount_fail)return -13;
+    return unlink("app0:");
+}
+int sceIoSync(const char *p,int flags) {return strcmp(p,"ux0:")||flags?-1:0;}
+''')
+            flags=['-D__vita__','-I'+str(tmp),str(stub)]
         subprocess.run(['cc','-std=gnu11','-O2','-Wall','-Wextra','-Werror','-fPIC','-shared',
-            str(ROOT/'runtime/xv_update.c'),str(ROOT/'runtime/xv_sha256.c'),'-o',str(so)],check=True)
+            *flags,str(ROOT/'runtime/xv_update.c'),str(ROOT/'runtime/xv_sha256.c'),'-o',str(so)],check=True)
         lib=C.CDLL(str(so))
         lib.xv_update_begin.argtypes=[C.c_uint,C.c_char_p,C.c_char_p]
         lib.xv_update_chunk.argtypes=[C.c_uint,C.c_void_p,C.c_uint]
@@ -74,12 +94,23 @@ def main():
             assert lib.xv_update_request(0)==0
             assert lib.xv_update_boot()==0 and (app/'game-a.self').read_bytes()==old
             lib.xv_update_init();stage(new)
+            if mount_test:
+                assert lib.xv_update_request(0)==0 and lib.xv_update_boot()==0
+                assert (app/'game-a.self').read_bytes()==old
+                assert not (app/'game-b.self').exists()
+                assert 'release app0 write protection' in (store/'launcher.log').read_text()
+                C.c_int.in_dll(lib,'mount_fail').value=0
+                lib.xv_update_init();stage(new)
             # Destination failure cannot replace the active executable.
             (app/'game-b.self.next').mkdir()
             assert lib.xv_update_request(0)==0 and lib.xv_update_boot()==0
+            assert 'open inactive app slot for writing' in (store/'launcher.log').read_text()
             (app/'game-b.self.next').rmdir()
             lib.xv_update_init();stage(new)
             assert lib.xv_update_request(0)==0 and lib.xv_update_boot()==1
+            if mount_test:
+                assert not (tmp/'app0:').exists()
+                assert C.c_int.in_dll(lib,'mount_calls').value==2
             assert (app/'game-a.self').read_bytes()==old
             assert (app/'game-b.self').read_bytes()==new
             # No dashboard acknowledgement: next launch falls back to A.

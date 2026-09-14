@@ -21,6 +21,7 @@ static uint32_t *screen;
 static char key[33];
 static unsigned captured_frame;
 static int listener=-1;
+static int upload_in_progress;
 static uint64_t awake_until;
 #ifdef __vita__
 static SceUID worker=-1;
@@ -153,7 +154,7 @@ static void serve(int s)
         if(!authorized_request(request,&method,&target,&body_size)) {reply(s,403,"Authentication or framing rejected\n");return;}
         if(initial_body>body_size) {reply(s,400,"Unexpected request body\n");return;}
         if(!strncmp(target,"/update",7)) {
-            if(xv_benchmark_status()) {reply(s,409,"Updates disabled during benchmark\n");return;}
+            if(xv_benchmark_status()||xv_benchmark_remote_busy()) {reply(s,409,"Updates disabled during benchmark\n");return;}
             if(!strcmp(method,"GET")&&!strcmp(target,"/update")) {
                 char body[384];xv_update_json(body,sizeof body);
                 if(!header(s,200,"application/json",strlen(body),NULL))send_all(s,body,strlen(body),remote_now()+2000000);
@@ -162,7 +163,7 @@ static void serve(int s)
                 if(!sha||!abi) {reply(s,400,"Invalid update manifest\n");return;}
                 *sha=0;*abi=0;
                 if(!uint_value(target+19,XV_UPDATE_LIMIT,&size)||xv_update_begin(size,sha+8,abi+10))reply(s,409,"Incompatible package or update unavailable\n");
-                else reply(s,204,"");
+                else {upload_in_progress=1;reply(s,204,"");}
             } else if(!strcmp(method,"POST")&&!strncmp(target,"/update/chunk?offset=",21)) {
                 unsigned offset;if(!body_size||!uint_value(target+21,XV_UPDATE_LIMIT,&offset)) {reply(s,400,"Invalid update chunk\n");return;}
                 char *chunk=malloc(body_size);if(!chunk) {reply(s,503,"No upload buffer\n");return;}
@@ -176,10 +177,17 @@ static void serve(int s)
                 int bad=have!=body_size||xv_update_chunk(offset,chunk,body_size);free(chunk);
                 reply(s,bad?409:204,bad?"Incomplete chunk or wrong offset\n":"");
             } else if(!strcmp(method,"POST")&&!strcmp(target,"/update/finish")) {
-                int bad=xv_update_finish();reply(s,bad?409:204,bad?"Update verification failed\n":"");
+                int bad=xv_update_finish();if(!bad)upload_in_progress=0;reply(s,bad?409:204,bad?"Update verification failed\n":"");
             } else if(!strcmp(method,"POST")&&(!strcmp(target,"/update/apply")||!strcmp(target,"/update/rollback"))) {
                 int bad=xv_update_request(!strcmp(target,"/update/rollback"));reply(s,bad?409:204,bad?"Update not ready\n":"");
             } else reply(s,404,"Unknown update operation\n");
+        } else if(!strcmp(method,"POST")&&!strncmp(target,"/benchmark?kind=",16)) {
+            static const char *const kinds[]={"object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution"};
+            unsigned kind=0;
+            for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++)if(!strcmp(target+16,kinds[i]))kind=i+1;
+            if(!kind)reply(s,400,"Unknown benchmark kind\n");
+            else if(upload_in_progress||xv_update_requested()||xv_benchmark_remote_request(kind))reply(s,409,"Benchmark unavailable: enter first-person gameplay and finish any active operation\n");
+            else reply(s,204,"");
         } else if(!strcmp(method,"GET")&&!strcmp(target,"/status")) {
             uint64_t now=remote_now();
             char body[320];snprintf(body,sizeof body,"{\"protocol\":1,\"build\":\"%s %s\",\"frames\":%u,\"benchmark\":%u,\"awake_seconds\":%llu}\n",
@@ -197,7 +205,7 @@ static void serve(int s)
             unsigned seconds;if(!uint_value(target+15,3600,&seconds)) {reply(s,400,"Lease limit is 3600 seconds\n");return;}
             awake_until=remote_now()+(uint64_t)seconds*1000000;keep_awake();reply(s,204,"");
         } else if(!strcmp(method,"GET")&&!strcmp(target,"/screen")) {
-            if(xv_benchmark_status()) {reply(s,409,"Capture disabled during benchmark\n");return;}
+            if(xv_benchmark_status()||xv_benchmark_remote_busy()) {reply(s,409,"Capture disabled during benchmark\n");return;}
             unsigned expected=0;
             if(!__atomic_compare_exchange_n(&capture,&expected,1,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)) {reply(s,409,"Capture pending\n");return;}
             deadline=remote_now()+3000000;
@@ -222,10 +230,11 @@ static void serve(int s)
                 while(LOAD(&capture)==2)remote_sleep(1000);
                 STORE(&capture,0);reply(s,504,"No completed display frame\n");
             }
-        } else if(!strcmp(method,"GET")&&!strncmp(target,"/log?offset=",12)) {
-            if(xv_benchmark_status()) {reply(s,409,"Bulk log reads disabled during benchmark\n");return;}
-            unsigned offset;if(!uint_value(target+12,0x7fffffffu,&offset)) {reply(s,400,"Invalid log offset\n");return;}
-            FILE *f=fopen(ROOT "xita.log","rb");if(!f) {reply(s,404,"Log unavailable\n");return;}
+        } else if(!strcmp(method,"GET")&&(!strncmp(target,"/log?offset=",12)||!strncmp(target,"/launcher-log?offset=",21))) {
+            if(xv_benchmark_status()||xv_benchmark_remote_busy()) {reply(s,409,"Bulk log reads disabled during benchmark\n");return;}
+            int launcher=!strncmp(target,"/launcher-log?offset=",21);
+            unsigned offset;if(!uint_value(target+(launcher?21:12),0x7fffffffu,&offset)) {reply(s,400,"Invalid log offset\n");return;}
+            FILE *f=fopen(launcher?ROOT "update/launcher.log":ROOT "xita.log","rb");if(!f) {reply(s,404,"Log unavailable\n");return;}
             if(fseek(f,0,SEEK_END)) {fclose(f);reply(s,500,"Log seek failed\n");return;}
             long size=ftell(f);
             if(size<0 || offset>(unsigned long)size || fseek(f,offset,SEEK_SET)) {fclose(f);reply(s,416,"Log offset unavailable\n");return;}
@@ -269,6 +278,7 @@ void xv_remote_stop(void)
     /* A callback that claimed the request owns screen until it publishes. */
     while(LOAD(&capture)==2)remote_sleep(1000);
     xv_update_close();
+    upload_in_progress=0;
     free(screen);screen=NULL;STORE(&capture,0);memset(key,0,sizeof key);
 #ifdef __vita__
     if(ctl_initialized) {sceNetCtlTerm();ctl_initialized=0;}

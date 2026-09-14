@@ -1,6 +1,17 @@
 #pragma once
 #include <stdint.h>
 
+enum {
+    XV_BENCH_OBJECT_BASIS=1, XV_BENCH_MODEL_PALETTE, XV_BENCH_VERTEX_WORKER,
+    XV_BENCH_VERTEX_REFERENCES, XV_BENCH_NATIVE_BOUNDS, XV_BENCH_VERTEX_COPY,
+    XV_BENCH_DRAW_SCAN, XV_BENCH_FLARE, XV_BENCH_RESOLUTION
+};
+/* Network admission only publishes a request. The ordinary guest input owner
+ * validates first-person control and consumes it before the present boundary. */
+int xv_benchmark_remote_request(unsigned kind);
+void xv_benchmark_remote_poll(int control);
+unsigned xv_benchmark_remote_busy(void);
+
 /* Guest-thread state machine. Resolution changes run on the drained pump. */
 void xv_benchmark_toggle(void);
 /* Compare this build's optimization candidate at the current resolution. */

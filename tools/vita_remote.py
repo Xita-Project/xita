@@ -14,7 +14,8 @@ import zipfile
 
 BUTTONS = dict(select=1, start=8, up=16, right=32, down=64, left=128,
                l=256, r=512, triangle=4096, circle=8192, cross=16384, square=32768)
-RESULT = re.compile(r"\[([a-z-]+-compare)\] result off-before ([\d.]+) on ([\d.]+) off-after ([\d.]+) fps comparable-view ([01])")
+BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution")
+RESULT = re.compile(r"\[([a-z-]+-compare|resolution-test)\] result (?:off-before|544-before) ([\d.]+) (?:on|360) ([\d.]+) (?:off-after|544-after) ([\d.]+) fps comparable-view ([01])")
 
 
 class Client:
@@ -74,14 +75,15 @@ class Client:
         return {"path": str(path), "frame": int(headers["x-xita-frame"]),
                 "ppm_sha256": hashlib.sha256(data).hexdigest()}
 
-    def log(self, path):
+    def log(self, path, *, launcher=False):
         # Pin the first response's file length, so continuous logging cannot
         # make a pull run indefinitely. App restart/rotation requires a new pull.
         offset = 0
         limit = None
         with Path(path).open("xb") as out:
             while limit is None or offset < limit:
-                headers, data = self.request(f"/log?offset={offset}")
+                endpoint="launcher-log" if launcher else "log"
+                headers, data = self.request(f"/{endpoint}?offset={offset}")
                 size = int(headers["x-log-size"])
                 if limit is None:
                     limit = size
@@ -92,6 +94,21 @@ class Client:
                     raise RuntimeError("Log ended before the declared size")
                 out.write(data); offset += len(data)
         return offset
+
+
+def wait_for_update(client, sha, previous_slot, timeout=180):
+    deadline=time.monotonic()+timeout
+    while time.monotonic()<deadline:
+        time.sleep(1)
+        try:
+            boot=json.loads(client.request("/update")[1])
+        except (OSError,RuntimeError,http.client.HTTPException):
+            continue
+        if not boot["requested"] and boot.get("boot_slot",-1)>=0:
+            if boot.get("boot_sha256") != sha or boot["boot_slot"] == previous_slot or boot["state"] != 0:
+                raise RuntimeError("Update did not install: launcher returned to the previous slot or left the candidate staged. The working build is preserved.")
+            return boot["boot_slot"]
+    raise RuntimeError("No confirmed boot within the timeout; installation was not verified. Reconnect to inspect update status.")
 
 
 def upload_update(client, package, apply=False, wait=False):
@@ -113,6 +130,8 @@ def upload_update(client, package, apply=False, wait=False):
     current=json.loads(client.request("/update")[1])
     if current["contract"] != abi:
         raise ValueError("Launcher or packaged assets differ; install this VPK once through VitaShell")
+    if apply and current.get("boot_slot",-1) not in (0,1):
+        raise ValueError("Wait for a confirmed dashboard boot before applying an update")
     sha=hashlib.sha256(data).hexdigest()
     client.lease(1800)
     client.request(f"/update/begin?size={len(data)}&sha256={sha}&contract={abi}", "POST")
@@ -129,27 +148,17 @@ def upload_update(client, package, apply=False, wait=False):
         client.request("/update/apply","POST")
         result["restart_requested"]=True
         if wait:
-            deadline=time.monotonic()+180
-            while time.monotonic()<deadline:
-                time.sleep(1)
-                try:
-                    boot=json.loads(client.request("/update")[1])
-                except (OSError,RuntimeError,http.client.HTTPException):
-                    continue
-                if not boot["requested"] and boot.get("boot_slot",-1)>=0:
-                    if boot.get("boot_sha256") != sha:
-                        raise RuntimeError("Launcher returned to a different build; candidate was not confirmed")
-                    result["boot_confirmed"]=True;result["slot"]=boot["boot_slot"]
-                    break
-            else:
-                raise RuntimeError("No confirmed boot within 180 seconds; the staged update and previous build are preserved")
+            result["slot"]=wait_for_update(client,sha,current["boot_slot"])
+            result["boot_confirmed"]=True
     print(json.dumps(result),flush=True)
     return result
 
 
-def benchmark(client, out, runs, timeout):
+def benchmark(client, out, runs, timeout, kind=None):
     if not 1 <= runs <= 10 or not 30 <= timeout <= 600:
         raise ValueError("Use 1–10 trials and a 30–600 second timeout per trial")
+    if kind is not None and kind not in BENCHMARK_KINDS:
+        raise ValueError("Unknown benchmark kind")
     out = Path(out); out.mkdir(parents=True, exist_ok=False)
     receipt = {"trials": [], "complete": False,
                "note": "Same-session off/on/off; live simulation continues. Network status polling remains enabled in every arm."}
@@ -164,7 +173,10 @@ def benchmark(client, out, runs, timeout):
         for i in range(runs):
             if client.status()["benchmark"]:
                 raise RuntimeError("Unexpected active benchmark before trial")
-            client.hold(BUTTONS["l"] | BUTTONS["r"] | BUTTONS["square"], duration=.6)
+            if kind is None:
+                client.hold(BUTTONS["l"] | BUTTONS["r"] | BUTTONS["square"], duration=.6)
+            else:
+                client.request("/benchmark?kind="+kind,"POST")
             deadline = time.monotonic() + timeout
             seen_active = False
             while time.monotonic() < deadline:
@@ -184,10 +196,17 @@ def benchmark(client, out, runs, timeout):
             if len(matches) != prior + 1:
                 raise RuntimeError("Expected one fresh benchmark result; cancelled/incomplete run or restarted application")
             tag, before, on, after, comparable = matches[-1]
+            expected="resolution-test" if kind=="resolution" else kind+"-compare" if kind else None
+            if expected and tag!=expected:
+                raise RuntimeError("Completed a different benchmark than requested")
             if comparable != "1":
                 raise RuntimeError("Camera consistency check failed; trial is not comparable")
             trial = dict(candidate=tag, off_before_fps=float(before), on_fps=float(on), off_after_fps=float(after),
                          log=str(logfile), comparable=True)
+            if kind=="resolution":
+                trial["fps_544_before"]=trial.pop("off_before_fps")
+                trial["fps_360"]=trial.pop("on_fps")
+                trial["fps_544_after"]=trial.pop("off_after_fps")
             receipt["trials"].append(trial); prior = len(matches)
             print(json.dumps(trial), flush=True)
             (out / "result.json").write_text(json.dumps(receipt, indent=2) + "\n")
@@ -221,6 +240,7 @@ def main():
     commands.add_parser("rollback", help="restart into the previous confirmed executable")
     shot = commands.add_parser("screen"); shot.add_argument("output", type=Path)
     log = commands.add_parser("log"); log.add_argument("output", type=Path)
+    launcher_log = commands.add_parser("launcher-log"); launcher_log.add_argument("output", type=Path)
     lease = commands.add_parser("lease"); lease.add_argument("seconds", type=int)
     pad = commands.add_parser("pad")
     pad.add_argument("buttons", nargs="*", choices=list(BUTTONS))
@@ -230,6 +250,7 @@ def main():
     bench = commands.add_parser("benchmark")
     bench.add_argument("output", type=Path); bench.add_argument("--runs", type=int, default=3)
     bench.add_argument("--timeout", type=int, default=180)
+    bench.add_argument("--kind", choices=BENCHMARK_KINDS, help="select a test for this run without changing saved settings")
     args = parser.parse_args()
     if args.command == "pair":
         if not 1024 <= args.port <= 65535:
@@ -257,6 +278,8 @@ def main():
         print(json.dumps(client.screen(args.output)))
     elif args.command == "log":
         print(f"Saved {client.log(args.output)} bytes")
+    elif args.command == "launcher-log":
+        print(f"Saved {client.log(args.output,launcher=True)} bytes")
     elif args.command == "release":
         client.pad()
     elif args.command == "lease":
@@ -265,7 +288,7 @@ def main():
         client.hold(sum(BUTTONS[b] for b in set(args.buttons)), args.duration,
                     **{a: getattr(args, a) for a in ("lx", "ly", "rx", "ry")})
     elif args.command == "benchmark":
-        benchmark(client, args.output, args.runs, args.timeout)
+        benchmark(client, args.output, args.runs, args.timeout,args.kind)
 
 
 if __name__ == "__main__":

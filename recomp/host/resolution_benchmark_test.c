@@ -97,4 +97,38 @@ int main(void)
     assert(xv_benchmark_step(now,544,0,view)==544&&optimization==-1);xv_benchmark_applied(now,544);
     switches=0;xv_benchmark_compare_toggle();assert(!xv_benchmark_step(now,544,0,view)&&!switches&&!b.active);
     puts("PASS: CPU off/on/off uses fixed resolution, excludes warmup and restores overrides on completion, cancellation or lost view");
+    xv_benchmark_remote_poll(0);
+    assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==-1);
+    xv_benchmark_remote_poll(1);
+    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(10)==-1);
+    assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==0 && !b.request && !b.active);
+    assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
+    xv_benchmark_remote_poll(0);assert(!xv_benchmark_remote_busy());
+    xv_benchmark_remote_poll(1);
+    assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==0);
+    xv_benchmark_remote_poll(1);assert(b.request==1);
+    assert(xv_benchmark_step(now,360,1,view)==544);xv_benchmark_applied(now,544);
+    assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
+    xv_benchmark_toggle();assert(xv_benchmark_step(now,544,1,view)==360);
+    xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
+    unsigned kinds[]={XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
+    for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++) {
+        int compiled=1;
+#ifndef XV_NATIVE_OBJECT_BASIS
+        if(kinds[i]==XV_BENCH_OBJECT_BASIS)compiled=0;
+#endif
+#ifndef XV_NATIVE_MODEL_PALETTE
+        if(kinds[i]==XV_BENCH_MODEL_PALETTE)compiled=0;
+#endif
+        assert(xv_benchmark_remote_request(kinds[i])==(compiled?0:-1));
+        if(!compiled)continue;
+        xv_benchmark_remote_poll(1);
+        assert(xv_benchmark_compare_object_basis()==(kinds[i]==XV_BENCH_OBJECT_BASIS));
+        assert(xv_benchmark_compare_model_palette()==(kinds[i]==XV_BENCH_MODEL_PALETTE));
+        assert(xv_benchmark_compare_vertex_worker()==(kinds[i]==XV_BENCH_VERTEX_WORKER));
+        assert(xv_benchmark_step(now,360,1,view)==360 && optimization==0);xv_benchmark_applied(now,360);
+        xv_benchmark_compare_toggle();assert(xv_benchmark_step(now,360,1,view)==360 && optimization==-1);
+        xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
+    }
+    puts("PASS: remote admission, guest-owner consumption, menu rejection, explicit candidate priority, unavailable builds and cancellation restore");
 }

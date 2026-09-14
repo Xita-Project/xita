@@ -619,6 +619,7 @@ void xk_os_pad_poll(xk_os_pad *p)
           if(d.lx>176)input|=XV_DASH_RIGHT;
           if((d.buttons&(SCE_CTRL_SELECT|SCE_CTRL_CIRCLE))==(SCE_CTRL_SELECT|SCE_CTRL_CIRCLE))input=XV_SETTINGS_TOGGLE;
           if(xv_settings_input(input,sceKernelGetProcessTimeWide())) {
+              xv_benchmark_remote_poll(0);
               memset(p,0,sizeof(*p));p->connected=1;return;
           }
       }
@@ -640,6 +641,7 @@ void xk_os_pad_poll(xk_os_pad *p)
       unsigned cpu_chord=SCE_CTRL_LTRIGGER|SCE_CTRL_RTRIGGER|SCE_CTRL_SQUARE;
       uint32_t gg=X_M32(0x2F8CA0u);
       int control=!xk_file_in_ui_map && gg && X_M8(gg) && X_M8(gg+1) && !X_M8(gg+2) && !X_M32(0x2E4000u);
+      xv_benchmark_remote_poll(control);
       int cpu_pressed=(d.buttons&cpu_chord)==cpu_chord;
       int pressed=(d.buttons&chord)==chord || cpu_pressed;
       if(pressed&&!held&&(control||xv_benchmark_active())) {

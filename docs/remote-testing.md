@@ -55,6 +55,7 @@ python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.j
 python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json pad cross
 python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json pad --rx 180 --duration 1
 python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json log /private/path/run.log
+python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json launcher-log /private/path/launcher.log
 ```
 
 Supported buttons are `select`, `start`, directions, `l`, `r`, `triangle`,
@@ -98,6 +99,27 @@ candidate; see [native math comparisons](native-math-benchmark-20260913.md).
 The script checks for one new result per trial and a passing camera check.
 Timeouts, cancelled tests, missing results and moved cameras are failures, not
 successful measurements. Partial evidence is retained if a connection fails.
+
+New builds also accept an explicit test without changing `xita.cfg`:
+
+```sh
+python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json benchmark /private/path/palette-001 --kind model-palette --runs 3
+```
+
+Available names are `object-basis`, `model-palette`, `vertex-worker`,
+`vertex-references`, `native-bounds`, `vertex-copy`, `draw-scan`, `flare`, and
+`resolution`. The last runs 544/360/544; the others run off/on/off. Each restores
+the prior override and resolution. The network thread only publishes a request;
+the guest input owner checks first-person control and starts it at the existing
+frame boundary. Menus, overlapping tests, incomplete uploads and pending updates
+reject new requests. A native helper must be compiled into that build to select
+it. The runner also verifies that the result belongs to the requested test.
+
+`launcher-log` downloads only `ux0:data/xita/update/launcher.log` through the same
+authenticated, bounded log reader. It cannot select arbitrary paths. Both log
+endpoints and screen/update operations are excluded while a test is pending or
+running. This permits diagnosing a failed update after the old build returns,
+provided that old build already contains the launcher-log endpoint.
 
 Keep graphics settings, clocks, phase instrumentation and remote status polling
 the same in every arm. Results still reflect live game simulation; repeat trials

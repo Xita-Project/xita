@@ -21,7 +21,9 @@ The host extracts only the runtime from the VPK, compares the package's asset
 contract with the installed launcher, uploads bounded chunks, and asks the Vita
 to read back and verify the complete SHA-256. With `--apply`, it then requests a
 restart and waits for a dashboard acknowledgement reporting the exact runtime
-hash. An upload receipt alone is not an installed-build confirmation.
+hash, a different boot slot and an empty staging state. This also detects a
+failed installation when the uploaded runtime is identical to the running one.
+An upload receipt alone is not an installed-build confirmation.
 
 Omit `--apply` to stage the verified build for the dashboard's **Install received
 update** action. **Restore previous build**, or the command below, requests the
@@ -48,6 +50,15 @@ The stable launcher is never overwritten by this protocol. It manages
 update. The active slot remains intact while the helper copies, flushes and
 verifies the candidate. Small checksummed records track generation, executable
 size/hash, package contract and pending/attempted/confirmed state.
+
+The helper is packaged with app-directory write permission; the game runtime
+keeps its original safe SELF mode. Before writing an inactive slot, the helper
+releases `app0:` with `sceAppMgrUmount`. The mounted app otherwise protects its
+backing installation directory. It verifies that the fixed backing directory
+still has the expected package contract, then uses that directory for subsequent
+helper reads. The next executable is loaded through `app0:` as usual. Unmount,
+copy, verification and metadata failures are recorded in the launcher log, and
+the confirmed executable remains available.
 
 During gameplay, the recording owner drains its published frames at a present
 boundary and parks without yielding the guest token. The main thread stops the
@@ -115,6 +126,14 @@ are preserved privately under
 Physical Vita upload, gameplay restart and rollback still need validation after
 the one-time bootstrap VPK installation. No FPS improvement is claimed for the
 updater itself.
+
+The first physical update attempts exposed two launcher issues: safe SELF
+permissions and the mounted application's write protection. The unsafe helper
+alone still failed to open the inactive slot with `errno 13`. The old host
+acknowledgement also accepted an unchanged runtime hash too early; those first
+attempts are **failed updates**, not hardware installation passes. See the
+[September 14 follow-up](hardware-20260914-updater.md) for the correction and
+its separate transfer, startup and update validation results.
 
 The [VitaSDK app-manager API](https://github.com/vitasdk/vita-headers/blob/master/include/psp2/appmgr.h)
 documents the SELF handoff and its `app0:` location requirement.

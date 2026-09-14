@@ -25,7 +25,8 @@ int main(void)
         int fallback=xv_update_boot();
         if(fallback>=0&&fallback!=slot) {
             argument[12]=(char)('0'+fallback);
-            sceAppMgrLoadExec(fallback?"app0:game-b.self":"app0:game-a.self",args,NULL);
+            rc=sceAppMgrLoadExec(fallback?"app0:game-b.self":"app0:game-a.self",args,NULL);
+            if(rc>=0)for(;;)sceKernelDelayThread(100000);
         }
     }
     sceKernelExitProcess(1);return 1;

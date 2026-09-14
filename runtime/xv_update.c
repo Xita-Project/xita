@@ -9,7 +9,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <errno.h>
 #ifdef __vita__
+#include <psp2/appmgr.h>
 #include <psp2/io/fcntl.h>
 #endif
 #define DATA "ux0:data/xita/update/"
@@ -23,6 +25,17 @@ static FILE *transfer;
 static record incoming;
 static unsigned state,received,total,requested,boot_slot;
 static char boot_sha[65];
+/* Only the small boot helper releases app0, after verifying the confirmed slot
+ * and staged candidate. Further helper reads use the fixed backing directory.
+ * A newly loaded game process starts with its own app0 mount and this flag zero. */
+static int app_unmounted;
+static void app_path(char out[128],const char *name)
+{snprintf(out,128,"%s%s",app_unmounted?WRITE_APP:APP,name);}
+static void boot_error(const char *operation, int error)
+{
+    FILE *f=fopen(DATA "launcher.log","a");
+    if(f) {fprintf(f,"update failed: %s (errno %d); confirmed slot preserved\n",operation,error);fclose(f);}
+}
 static const char *const labels[]={"No update staged","Receiving update","Update verified - ready to install","Update failed - working build preserved","Restarting to apply update"};
 static int hex64(const char *p)
 {
@@ -56,7 +69,8 @@ static int write_text(const char *path,const char *text)
 }
 static int contract(char out[65])
 {
-    FILE *f=fopen(APP "update-contract.txt","rb");if(!f)return -1;
+    char path[128];app_path(path,"update-contract.txt");
+    FILE *f=fopen(path,"rb");if(!f)return -1;
     char b[67]={0};size_t n=fread(b,1,sizeof b-1,f);int bad=ferror(f);fclose(f);
     if(n==65&&b[64]=='\n')b[64]=0;
     if(bad||!hex64(b))return -1;
@@ -97,14 +111,15 @@ static int verify(const char *path,const record *r)
     return bad||strcmp(sum,r->sha)?-1:0;
 }
 static void slot_path(char out[128],unsigned slot,int writable)
-{snprintf(out,128,"%sgame-%c.self",writable?WRITE_APP:APP,'a'+slot);}
+{snprintf(out,128,"%sgame-%c.self",writable||app_unmounted?WRITE_APP:APP,'a'+slot);}
 static void meta_path(char out[128],unsigned slot)
 {snprintf(out,128,DATA "slot-%u.meta",slot);}
 static int read_slot(unsigned slot,record *r,int check_file)
 {
     char path[128];meta_path(path,slot);
     if(record_read(path,r)) {
-        if(slot||record_read(APP "boot-game.txt",r))return -1;
+        app_path(path,"boot-game.txt");
+        if(slot||record_read(path,r))return -1;
     }
     slot_path(path,slot,0);return check_file?verify(path,r):0;
 }
@@ -155,18 +170,34 @@ void xv_update_json(char *out,size_t size)
 }
 static int copy_candidate(unsigned slot,const record *r)
 {
+#ifdef __vita__
+    if(!app_unmounted) {
+        /* VitaSDK documents that app0 holds write protection on ux0:app/TITLEID.
+         * VitaShell uses the same Umount -> LoadExec("app0:...") lifecycle. */
+        int rc=sceAppMgrUmount("app0:");
+        if(rc<0) {boot_error("release app0 write protection",rc);return -1;}
+        app_unmounted=1;
+    }
+    char installed[65];
+    if(contract(installed)||strcmp(installed,r->contract)) {
+        boot_error("verify backing app contract after unmount",0);return -1;
+    }
+#endif
     char path[128],tmp[140];slot_path(path,slot,1);snprintf(tmp,sizeof tmp,"%s.next",path);
-    FILE *in=fopen(DATA "incoming.self","rb");if(!in)return -1;
-    FILE *out=fopen(tmp,"wb");if(!out) {fclose(in);return -1;}
+    FILE *in=fopen(DATA "incoming.self","rb");if(!in) {boot_error("open incoming executable",errno);return -1;}
+    FILE *out=fopen(tmp,"wb");if(!out) {int error=errno;fclose(in);boot_error("open inactive app slot for writing",error);return -1;}
     unsigned char b[8192];size_t n;unsigned count=0;int bad=0;
     while((n=fread(b,1,sizeof b,in))) {
         if(n>r->size-count||fwrite(b,1,n,out)!=n) {bad=1;break;}count+=(unsigned)n;
     }
     if(ferror(in)||count!=r->size)bad=1;
     fclose(in);if(sync_close(out))bad=1;
-    if(bad||verify(tmp,r)||rename(tmp,path))return -1;
+    if(bad) {boot_error("copy or flush inactive executable",errno);return -1;}
+    if(verify(tmp,r)) {boot_error("verify inactive executable",errno);return -1;}
+    if(rename(tmp,path)) {boot_error("rename inactive executable",errno);return -1;}
 #ifdef __vita__
-    if(sceIoSync("ux0:",0)<0)return -1;
+    int sync=sceIoSync("ux0:",0);
+    if(sync<0) {boot_error("sync renamed executable",sync);return -1;}
 #endif
     return 0;
 }
@@ -179,7 +210,7 @@ int xv_update_boot(void)
         if(valid[i]) {if(slots[i].generation>generation)generation=slots[i].generation;
             if(slots[i].state==CONFIRMED&&(active<0||slots[i].generation>slots[active].generation))active=(int)i;}
     }
-    if(active<0)return -1;
+    if(active<0) {boot_error("find a verified confirmed executable",0);return -1;}
     FILE *f=fopen(DATA "action","rb");char action[16]={0};
     if(f) {fread(action,1,sizeof action-1,f);fclose(f);}
     if(!strcmp(action,"apply\n")&&generation<1000000000&&!record_read(DATA "incoming.meta",&candidate)&&!verify(DATA "incoming.self",&candidate)) {
@@ -188,7 +219,10 @@ int xv_update_boot(void)
         if(!copy_candidate(target,&candidate)) {
             char meta[128];meta_path(meta,target);
             if(!record_write(meta,&candidate)) {slots[target]=candidate;valid[target]=1;remove(DATA "incoming.meta");remove(DATA "incoming.self");}
+            else boot_error("publish inactive slot metadata",errno);
         }
+    } else if(!strcmp(action,"apply\n")) {
+        boot_error("validate staged update or generation",0);
     } else if(!strcmp(action,"rollback\n")) {
         unsigned other=1u-(unsigned)active;
         if(valid[other]&&slots[other].state==CONFIRMED) {
@@ -200,6 +234,7 @@ int xv_update_boot(void)
     for(unsigned i=0;i<2;i++)if(valid[i]&&slots[i].state==PENDING&&slots[i].generation>slots[active].generation) {
         slots[i].state=ATTEMPTED;char meta[128];meta_path(meta,i);
         if(!record_write(meta,&slots[i]))return (int)i;
+        boot_error("record candidate boot attempt",errno);
     }
     return active;
 }
