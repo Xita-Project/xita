@@ -135,8 +135,14 @@ The private candidate is `xita-remote-test-20260913-6eff881.vpk`:
 
 Archive integrity passes; only `eboot.bin` differs from the preceding native-math
 benchmark package. Validation receipts and captures are private under
-`2026-09-13-worker-sizing/validation/remote-test`. The VPK is staged in Downloads;
-it has **not** been copied to or installed on the physical Vita.
+`2026-09-13-worker-sizing/validation/remote-test`. The VPK is also copied to
+`ux0:VPK/xita-remote-test-20260913-6eff881.vpk`, with a private pairing key and
+remote-test settings prepared. Package, key and configuration hashes were checked
+again after a read-only USB remount, then the volume was safely unmounted.
+**VitaShell installation and first hardware connection are still required.**
+The installed executable remains the preceding `168c0f9` benchmark build until
+installation. Existing graphics/benchmark settings and the prior configuration
+backup are preserved; the computer pairing awaits the Vita's Wi-Fi IP address.
 
 Platform references: [VitaSDK network initialization sample](https://github.com/vitasdk/samples/blob/master/net_http/src/main.c),
 [socket API](https://docs.vitasdk.org/group__SceNetUser.html), and the local SDK's
