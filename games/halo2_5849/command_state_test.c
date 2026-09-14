@@ -137,6 +137,30 @@ int main(void)
     assert(emit(0, 0xA20, 0x7FC12345) && s.constants[0x3B][0] == 0x7FC12345);
     assert(emit(0, 0xAF8, 0x80000000) && s.constants[0x3A][2] == 0x80000000);
     assert(emit(0, 0xA7C, 0xDEADBEEF) && s.setup[0xA7C / 4] == 0xDEADBEEF);
+    /* Native69's combiner banks store only their own raw word and validity.
+     * Invalid/unimplemented draw encodings are never executed by this stage. */
+    const unsigned combiner_bases[] = {0x260, 0xAA0, 0xAC0, 0x1E40};
+    const unsigned combiner_words[] = {0x288, 0x28C, 0x1E20, 0x1E24, 0x1E60, 0x17F8, 0x1E74};
+    const uint32_t combiner_values[] = {0, 0x18111912, 0x00000089, 0x00011102, 0xFFFFFFFF, 0x80000000};
+    for (unsigned slot = 0; slot < 39; ++slot) {
+        unsigned method = slot < 32 ? combiner_bases[slot / 8] + (slot % 8) * 4 : combiner_words[slot - 32];
+        for (unsigned v = 0; v < sizeof combiner_values / sizeof *combiner_values; ++v) {
+            uint32_t value = combiner_values[v];
+            if (method == 0x1E74) value &= 0xFFF;
+            h2_command_state expected = s; h2_kelvin_clear clear = c; fixture memory = f;
+            expected.setup[method / 4] = value;
+            expected.setup_valid[method / 128] |= 1u << ((method / 4) % 32);
+            assert(emit(0, method, value));
+            assert(!memcmp(&s, &expected, sizeof s) && !memcmp(&c, &clear, sizeof c));
+            assert(!memcmp(&f, &memory, sizeof f));
+            reject(1, method, value); reject(0, method + 1, value);
+        }
+    }
+    reject(0, 0x25C, 0); reject(0, 0x280, 0); reject(0, 0x284, 0);
+    reject(0, 0x1E1C, 0); reject(0, 0x1E28, 0); reject(0, 0x1E64, 0);
+    reject(0, 0x1E74, 0x1000); reject(0, 0x1E74, 0x80000000);
+    reject(0, 0x17FC, 7); reject(0, 0x17FC, 0); /* no quad or END execution */
+    reject(0, 0x1880, 0); reject(0, 0x1884, 0); /* no immediate position */
     assert(emit(0, 0x1BFC, 0x80000000) && s.setup[0x1BFC / 4] == 0x80000000);
     /* Palette writes only retain a descriptor, even for an unmapped offset.
      * All four units have independent state, preserved verbatim; no instance,

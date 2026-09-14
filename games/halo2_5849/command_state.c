@@ -70,6 +70,17 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
     if ((method >= 0xA60 && method <= 0xA9C) || /* combiner factors */
         (method >= 0xAE0 && method <= 0xAEC)) { /* texture color keys */
         /* Full packed color values. */
+    } else if ((method >= 0x260 && method <= 0x27C) || /* alpha inputs */
+               (method >= 0xAA0 && method <= 0xABC) || /* alpha outputs */
+               (method >= 0xAC0 && method <= 0xADC) || /* color inputs */
+               (method >= 0x1E40 && method <= 0x1E5C) || /* color outputs */
+               method == 0x288 || method == 0x28C || /* final combiner */
+               method == 0x1E20 || method == 0x1E24 || /* final factors */
+               method == 0x1E60 || method == 0x17F8) { /* control/clip mode */
+        /* Native69: exact register assignments, not shader execution. Each
+         * eight-stage bank and the final words retain all input bits. A future
+         * draw backend must validate the selected combiner modes and sources;
+         * BEGIN_END and every emission path still reject without mutation. */
     } else if (method >= 0x1AF0 && method <= 0x1AFC) {
         /* SET_VERTEX_DATA4F attribute 15, one exact component per method.
          * Attribute 0's final component emits a vertex and stays unsupported.
@@ -142,6 +153,8 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
         break; /* hierarchical depth/stencil optimization */
     case 0x1E6C: if (value > 7) return 0;
         break; /* shadow compare */
+    case 0x1E74: if (value & ~0xFFFu) return 0;
+        break; /* low shader-control field; other-stage inputs stay separate */
     case 0x290: /* control: clear format checked at execution */
     case 0x2A8: case 0x34C: /* packed colors */
     case 0x360: case 0x36C: /* stencil mask inputs (low 8 bits used by future draws) */
