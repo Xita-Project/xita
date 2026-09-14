@@ -78,6 +78,10 @@
 #include <psp2/ctrl.h>
 #include "dashboard/xv_dash.h"
 #include "xv_remote.h"
+#include "xv_update.h"
+#include <psp2/appmgr.h>
+static unsigned g_update_quiesced, g_recomp_finished;
+static int g_update_slot=-1;
 #endif
 #define XV_LOG(...)                 xv_logf("[xv] " __VA_ARGS__)
 
@@ -1155,6 +1159,15 @@ void xv_present(void)
             g_slot_waits,(unsigned long long)g_slot_wait_us,xv_pipeline_enabled());
         g_slot_waits=0; g_slot_wait_us=0;
     }
+    if(xv_update_requested()) {
+        /* End of the serialized recording call: all published uploads have
+         * owners. Drain them, then park without yielding the guest token.
+         * The main thread stops the pump before replacing this process. */
+        xv_present_drain();
+        XV_LOG("update: recording paused after frame %u\n",ticket);
+        __atomic_store_n(&g_update_quiesced,1,__ATOMIC_RELEASE);
+        for(;;)sceKernelDelayThread(10000);
+    }
 #else
     uint32_t ticket = __atomic_add_fetch(&g_frame_requested, 1, __ATOMIC_RELEASE);
     xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
@@ -1498,6 +1511,7 @@ static int xv_recomp_thread(SceSize args, void *argp)
     sceIoMkdir("ux0:data/xita/save", 0777);
     XV_LOG("recomp: game dir %s\n", game_dir);
     xv_boot_recomp(game_dir, "ux0:data/xita/save");
+    __atomic_store_n(&g_recomp_finished,1,__ATOMIC_RELEASE);
     return 0;
 }
 #endif
@@ -1541,6 +1555,7 @@ typedef struct {
 static int xv_dashboard_poll(void *userdata, xv_dash_input *input)
 {
     xv_dashboard_platform *p = userdata;
+    if(xv_update_requested())return 1;
     p->frame_started = sceKernelGetProcessTimeWide();
     if (!p->sample_started) p->sample_started = p->frame_started;
     SceCtrlData pad = {0};
@@ -1576,6 +1591,13 @@ static int xv_dashboard_present(void *userdata, xv_dash_framebuffer *fb)
     g->back_index = (g->back_index + 1u) % XV_DISPLAY_BUFFER_COUNT;
     /* Keep fb->pixels pointing at the cached canvas when display buffers swap. */
     uint64_t shown = sceKernelGetProcessTimeWide();
+    if(g_update_slot>=0 && p->frames==2) {
+        const char *remote=getenv("XV_REMOTE_TEST"),*adhoc=getenv("XV_NET_ADHOC");
+        int need_remote=remote&&!strcmp(remote,"1")&&!(adhoc&&atoi(adhoc)==1);
+        int rc=need_remote&&!xv_remote_ready()?-1:xv_update_confirm((unsigned)g_update_slot);
+        XV_LOG("update: dashboard boot confirmation slot %d rc %d\n",g_update_slot,rc);
+        g_update_slot=-1;
+    }
     p->draw_us += drawn - p->frame_started;
     p->copy_us += copied - drawn;
     p->wait_us += shown - copied;
@@ -1590,6 +1612,7 @@ static int xv_dashboard_present(void *userdata, xv_dash_framebuffer *fb)
     }
     return 0;
 }
+static void xv_dashboard_update_status(char *text,unsigned size) {xv_update_status(text,size);}
 static int xv_dashboard_start(void)
 {
     const char *skip = getenv("XV_DASHBOARD");
@@ -1604,12 +1627,14 @@ static int xv_dashboard_start(void)
     xv_dashboard_platform platform = {.gfx = &g_gfx};
     xv_dash_config cfg = {
         .framebuffer = {canvas, XV_DISPLAY_WIDTH, XV_DISPLAY_HEIGHT, XV_DISPLAY_STRIDE},
-        .userdata = &platform, .poll = xv_dashboard_poll, .present = xv_dashboard_present, .simple_launcher = 1
+        .userdata = &platform, .poll = xv_dashboard_poll, .present = xv_dashboard_present, .simple_launcher = 1,
+        .update_status=xv_dashboard_update_status, .update_action=xv_update_request
     };
     xv_dash_result choice;
     XV_LOG("dashboard: ready; cached canvas %u KB; waiting for Launch Game\n", bytes / 1024);
     int rc = xv_dash_run(&cfg, &choice);
     sceKernelFreeMemBlock(canvas_uid); /* No dashboard memory survives into Halo. */
+    if(xv_update_requested())return 1;
     if (rc != 0) return -1;
     xv_load_settings(); /* All game consumers initialize after this hand-off. */
     XV_LOG("dashboard: Launch Game; settings applied\n");
@@ -1652,8 +1677,12 @@ int main(int argc, char *argv[])
     XV_LOG("graphics startup: %u ms\n", (unsigned)((sceKernelGetProcessTimeWide() - gfx_started) / 1000));
 
 #ifdef XV_RUN_RECOMP
+    xv_update_init();
+    for(int i=0;i<argc;i++)if(!strcmp(argv[i],"--xita-slot=0")||!strcmp(argv[i],"--xita-slot=1"))g_update_slot=argv[i][12]-'0';
     xv_remote_start();
-    if (xv_dashboard_start() < 0) {
+    int dashboard_result=xv_dashboard_start();
+    if(dashboard_result>0)goto shutdown;
+    if (dashboard_result < 0) {
         XV_LOG("dashboard failed; game was not started\n");
         goto shutdown;
     }
@@ -1682,9 +1711,15 @@ int main(int argc, char *argv[])
             sceKernelWaitThreadEnd(pump,NULL,NULL); sceKernelDeleteThread(pump);
             xv_frame_events_close(&g_frame_events); goto shutdown;
         }
-        sceKernelStartThread(eng, 0, NULL);
-        sceKernelWaitThreadEnd(eng, NULL, NULL);
-        sceKernelDeleteThread(eng);
+        int engine_started=sceKernelStartThread(eng,0,NULL)>=0;
+        /* Vita3K's WaitThreadEnd ignores its timeout. Observe explicit owner
+         * signals without joining a deliberately parked recording fiber. */
+        if(engine_started) {
+            while(!__atomic_load_n(&g_recomp_finished,__ATOMIC_ACQUIRE) &&
+                  !__atomic_load_n(&g_update_quiesced,__ATOMIC_ACQUIRE))sceKernelDelayThread(100000);
+            if(!__atomic_load_n(&g_update_quiesced,__ATOMIC_ACQUIRE))sceKernelWaitThreadEnd(eng,NULL,NULL);
+        } else XV_LOG("recomp thread start failed\n");
+        if(!__atomic_load_n(&g_update_quiesced,__ATOMIC_ACQUIRE))sceKernelDeleteThread(eng);
         xv_present_drain(); g_running = 0;
         xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
         sceKernelWaitThreadEnd(pump, NULL, NULL); sceKernelDeleteThread(pump);
@@ -1737,6 +1772,13 @@ shutdown:
 #ifdef XV_FULL_TEARDOWN
     xv_xram_shutdown();
     xv_gfx_shutdown();
+#endif
+#ifdef XV_RUN_RECOMP
+    if(xv_update_requested()) {
+        int rc=sceAppMgrLoadExec("app0:eboot.bin",NULL,NULL);
+        if(rc>=0)for(;;)sceKernelDelayThread(100000);
+        XV_LOG("update: launcher handoff failed %08X; exiting without replacing active slot\n",rc);
+    }
 #endif
     XV_LOG("Xita runtime exiting\n");
     sceKernelExitProcess(0);

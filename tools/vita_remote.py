@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import secrets
 import time
+import zipfile
 
 BUTTONS = dict(select=1, start=8, up=16, right=32, down=64, left=128,
                l=256, r=512, triangle=4096, circle=8192, cross=16384, square=32768)
@@ -23,10 +24,10 @@ class Client:
         if not re.fullmatch(r"[0-9a-fA-F]{32}", self.key):
             raise ValueError("Invalid pairing key")
 
-    def request(self, path, method="GET"):
-        conn = http.client.HTTPConnection(self.config["host"], self.config.get("port", 8080), timeout=25)
+    def request(self, path, method="GET", body=None, timeout=25):
+        conn = http.client.HTTPConnection(self.config["host"], self.config.get("port", 8080), timeout=timeout)
         try:
-            conn.request(method, path, headers={"Authorization": "Bearer " + self.key})
+            conn.request(method, path, body=body, headers={"Authorization": "Bearer " + self.key})
             response = conn.getresponse()
             data = response.read()
             if response.getheader("Content-Length") != str(len(data)):
@@ -91,6 +92,59 @@ class Client:
                     raise RuntimeError("Log ended before the declared size")
                 out.write(data); offset += len(data)
         return offset
+
+
+def upload_update(client, package, apply=False, wait=False):
+    from package_vpk import update_contract
+    with zipfile.ZipFile(package) as z:
+        names=z.namelist()
+        if len(set(names)) != len(names) or any(i.file_size > 64*1024*1024 for i in z.infolist()) or sum(i.file_size for i in z.infolist()) > 256*1024*1024:
+            raise ValueError("Invalid or oversized update package")
+        files={name:z.read(name) for name in names}
+    required={"eboot.bin", "game-a.self", "update-contract.txt", "boot-game.txt"}
+    if not required.issubset(files):
+        raise ValueError("This VPK does not include the integrated updater")
+    abi=update_contract(files)
+    if files["update-contract.txt"] != (abi+"\n").encode():
+        raise ValueError("Package asset contract failed")
+    data=files["game-a.self"]
+    if not 4096 <= len(data) <= 64*1024*1024 or data[:4] != b"SCE\0":
+        raise ValueError("Invalid Vita executable")
+    current=json.loads(client.request("/update")[1])
+    if current["contract"] != abi:
+        raise ValueError("Launcher or packaged assets differ; install this VPK once through VitaShell")
+    sha=hashlib.sha256(data).hexdigest()
+    client.lease(1800)
+    client.request(f"/update/begin?size={len(data)}&sha256={sha}&contract={abi}", "POST")
+    for offset in range(0,len(data),65536):
+        client.request(f"/update/chunk?offset={offset}","POST",data[offset:offset+65536])
+        if offset % (1024*1024) == 0:
+            print(f"Uploaded {min(offset+65536,len(data))}/{len(data)} bytes",flush=True)
+    client.request("/update/finish","POST",timeout=120)
+    state=json.loads(client.request("/update")[1])
+    if state["state"] != 2 or state["received"] != len(data):
+        raise RuntimeError("Device did not confirm verified update")
+    result={"bytes":len(data),"sha256":sha,"verified":True,"restart_requested":False}
+    if apply:
+        client.request("/update/apply","POST")
+        result["restart_requested"]=True
+        if wait:
+            deadline=time.monotonic()+180
+            while time.monotonic()<deadline:
+                time.sleep(1)
+                try:
+                    boot=json.loads(client.request("/update")[1])
+                except (OSError,RuntimeError,http.client.HTTPException):
+                    continue
+                if not boot["requested"] and boot.get("boot_slot",-1)>=0:
+                    if boot.get("boot_sha256") != sha:
+                        raise RuntimeError("Launcher returned to a different build; candidate was not confirmed")
+                    result["boot_confirmed"]=True;result["slot"]=boot["boot_slot"]
+                    break
+            else:
+                raise RuntimeError("No confirmed boot within 180 seconds; the staged update and previous build are preserved")
+    print(json.dumps(result),flush=True)
+    return result
 
 
 def benchmark(client, out, runs, timeout):
@@ -160,6 +214,11 @@ def main():
     pair.add_argument("--port", type=int, default=8080)
     commands.add_parser("status")
     commands.add_parser("release")
+    upload = commands.add_parser("update", help="stage a compatible VPK executable and verify on device")
+    upload.add_argument("package", type=Path)
+    upload.add_argument("--apply", action="store_true", help="restart into the verified candidate")
+    commands.add_parser("update-status")
+    commands.add_parser("rollback", help="restart into the previous confirmed executable")
     shot = commands.add_parser("screen"); shot.add_argument("output", type=Path)
     log = commands.add_parser("log"); log.add_argument("output", type=Path)
     lease = commands.add_parser("lease"); lease.add_argument("seconds", type=int)
@@ -186,7 +245,13 @@ def main():
     if not args.config:
         parser.error("--config is required")
     client = Client(args.config)
-    if args.command == "status":
+    if args.command == "update":
+        upload_update(client,args.package,args.apply,wait=args.apply)
+    elif args.command == "update-status":
+        print(client.request("/update")[1].decode())
+    elif args.command == "rollback":
+        client.request("/update/rollback","POST")
+    elif args.command == "status":
         print(json.dumps(client.status(), indent=2))
     elif args.command == "screen":
         print(json.dumps(client.screen(args.output)))

@@ -59,6 +59,9 @@ static int run(xv_dash_config *cfg, harness *h, const uint32_t *script, unsigned
     h->script = script; h->length = len; h->step = h->frames = 0;
     return xv_dash_run(cfg,result);
 }
+static unsigned update_calls,update_rows;
+static int update_action(int rollback) {update_calls++;update_rows|=1u<<rollback;return -1;}
+static void update_status(char *text,unsigned size) {snprintf(text,size,"Synthetic update status");}
 int main(void)
 {
     char root[] = "out/fixture-XXXXXX"; assert(mkdtemp(root));
@@ -71,7 +74,7 @@ int main(void)
     uint32_t *pixels = malloc(976*544*sizeof(*pixels)); assert(pixels);
     for (int i = 0; i < 976*544; i++) pixels[i] = 0x12345678u;
     harness h = {0};
-    xv_dash_config cfg = {{pixels,960,544,976},root,&h,poll_input,present,0};
+    xv_dash_config cfg = {{pixels,960,544,976},root,&h,poll_input,present,0,NULL,NULL};
     xv_dash_result result;
     const uint32_t preview[] = {0,XV_DASH_DOWN,XV_DASH_CROSS};
     h.previews = 1;
@@ -113,6 +116,12 @@ int main(void)
     put(root,"haloce/maps/ui.map","");
     put(root,"xita.cfg","# user settings\nXV_THREADS=1\nXV_PROF=1\nXV_VBLANK_HZ=60\n XV_TEX_MAXDIM = 256 # detail\nXV_TEX_MAXDIM=256\nXV_VOLUME=50\nUNKNOWN=keep\n");
     cfg.simple_launcher = 1;
+    cfg.update_status=update_status;cfg.update_action=update_action;
+    const uint32_t update_menu[]={XV_DASH_UP,0,XV_DASH_CROSS,0,XV_DASH_CROSS,0,XV_DASH_DOWN,0,XV_DASH_CROSS};
+    assert(run(&cfg,&h,update_menu,9,&result)==1 && update_calls==2 && update_rows==3);
+    assert(!result.game_id[0]);
+    cfg.update_status=NULL;cfg.update_action=NULL;
+    assert(run(&cfg,&h,update_menu,9,&result)==1);
     const uint32_t launch[] = {0,XV_DASH_CROSS};
     assert(run(&cfg,&h,launch,2,&result) == 0 && !strcmp(result.game_id,"haloce") && !result.map[0] && !result.is_save);
     const uint32_t texture[] = {XV_DASH_DOWN,XV_DASH_CROSS,XV_DASH_LEFT,0,XV_DASH_CIRCLE,XV_DASH_UP,XV_DASH_CROSS};

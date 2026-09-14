@@ -8,3 +8,5 @@ void xv_remote_stop(void);
 void xv_remote_frame(const void *pixels, unsigned width, unsigned height, unsigned pitch);
 /* Short-lived remote input; physical input takes priority. No network I/O here. */
 void xv_remote_pad(uint32_t *buttons, uint8_t *lx, uint8_t *ly, uint8_t *rx, uint8_t *ry);
+
+int xv_remote_ready(void);

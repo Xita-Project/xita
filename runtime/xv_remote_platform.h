@@ -23,6 +23,8 @@ static int remote_listen(unsigned port)
 {
     int s=sceNetSocket("xita_test",SCE_NET_AF_INET,SCE_NET_SOCK_STREAM,0);
     if(s<0)return -1;
+    int reuse=1;
+    if(sceNetSetsockopt(s,SCE_NET_SOL_SOCKET,SCE_NET_SO_REUSEADDR,&reuse,sizeof reuse)<0) {remote_close(s);return -1;}
     remote_address a={0};a.sin_len=sizeof a;a.sin_family=SCE_NET_AF_INET;a.sin_port=sceNetHtons(port);
     if(remote_nonblock(s)<0 || sceNetBind(s,(SceNetSockaddr *)&a,sizeof a)<0 || sceNetListen(s,2)<0) {remote_close(s);return -1;}
     return s;
@@ -49,6 +51,7 @@ static int remote_nonblock(int s) {return fcntl(s,F_SETFL,O_NONBLOCK);}
 static int remote_listen(unsigned port)
 {
     int s=socket(AF_INET,SOCK_STREAM,0);if(s<0)return -1;
+    int reuse=1;if(setsockopt(s,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof reuse)<0) {remote_close(s);return -1;}
     struct sockaddr_in a={0};a.sin_family=AF_INET;a.sin_port=htons(port);a.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
     if(remote_nonblock(s)<0 || bind(s,(struct sockaddr *)&a,sizeof a)<0 || listen(s,2)<0) {remote_close(s);return -1;}
     return s;

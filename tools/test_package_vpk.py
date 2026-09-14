@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import zipfile
-from package_vpk import package
+from package_vpk import package, update_contract
 
 
 class Packaging(unittest.TestCase):
@@ -33,6 +33,25 @@ class Packaging(unittest.TestCase):
             with self.assertRaises(ValueError):
                 package(root, root / "build/eboot.bin", root / "build/param.sfo", out)
             self.assertEqual(out.read_bytes(), before)
+
+    def test_updater_contract(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            for name,data in {'runtime.self':b'SCE\0'+bytes(4092),'launcher.self':b'SCE\0loader',
+                'param.sfo':b'\0PSFtest','LICENSE':b'license','NOTICE':b'notice','THIRD_PARTY.md':b'notices'}.items():
+                (root/name).write_bytes(data)
+            out=root/'candidate.vpk'
+            package(root,root/'runtime.self',root/'param.sfo',out,launcher=root/'launcher.self')
+            with zipfile.ZipFile(out) as z:files={name:z.read(name) for name in z.namelist()}
+            self.assertEqual(files['eboot.bin'],b'SCE\0loader')
+            self.assertEqual(files['game-a.self'],(root/'runtime.self').read_bytes())
+            abi=update_contract(files)
+            self.assertEqual(files['update-contract.txt'],(abi+'\n').encode())
+            files['game-a.self']=b'SCE\0different runtime'
+            files['boot-game.txt']=b'different initial runtime record'
+            self.assertEqual(update_contract(files),abi)
+            files['eboot.bin']+=b'different launcher'
+            self.assertNotEqual(update_contract(files),abi)
 
 
 if __name__ == "__main__":

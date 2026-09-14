@@ -46,6 +46,8 @@ typedef struct {
     /* Embedded runtime: Launch Game plus supported pre-launch settings.
      * Selection returns an empty map and opens the game's normal menu. */
     int simple_launcher;
+    void (*update_status)(char *text, unsigned size);
+    int (*update_action)(int rollback);
 } xv_dash_config;
 
 /* 0 = selected, 1 = caller cancelled, -1 = invalid config / allocation / I/O

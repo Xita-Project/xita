@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Exercise the production HTTP/input/capture code through real loopback sockets."""
 import http.client
+import hashlib
+import zipfile
 import json
 import os
 from pathlib import Path
@@ -8,7 +10,8 @@ import socket
 import subprocess
 import tempfile
 import time
-from vita_remote import Client, benchmark
+from vita_remote import Client, benchmark, upload_update
+from package_vpk import update_contract, update_record
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,13 +62,27 @@ def main():
         exe = tmp / "server"
         flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if os.getenv("SANITIZE") else []
         subprocess.run(["cc", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", *flags,
-                        str(ROOT / "tools/tests/remote_server.c"), "-pthread", "-o", str(exe)], check=True)
+                        str(ROOT / "tools/tests/remote_server.c"), str(ROOT / "runtime/xv_update.c"), str(ROOT / "runtime/xv_sha256.c"), "-pthread", "-o", str(exe)], check=True)
         data = tmp / "ux0:data/xita"
         data.mkdir(parents=True)
         key = "0123456789abcdef" * 2
         (data / "remote.key").write_text(key + "\n")
         log = b"frame evidence\n" * 10000
         (data / "xita.log").write_bytes(log)
+        app=tmp/'ux0:app/XITA00001';app.mkdir(parents=True)
+        (tmp/'app0:').symlink_to(app,target_is_directory=True)
+        old=b'SCE\0'+bytes(4092)
+        new=b'SCE\0'+bytes(range(256))*700
+        files={'eboot.bin':b'SCE\0stable launcher', 'game-a.self':new, 'sce_sys/param.sfo':b'\0PSFtest'}
+        abi=update_contract(files)
+        files['update-contract.txt']=(abi+'\n').encode()
+        files['boot-game.txt']=update_record(len(new),hashlib.sha256(new).hexdigest(),abi)
+        (app/'update-contract.txt').write_text(abi+'\n')
+        (app/'boot-game.txt').write_bytes(update_record(len(old),hashlib.sha256(old).hexdigest(),abi))
+        (app/'game-a.self').write_bytes(old)
+        candidate=tmp/'candidate.vpk'
+        with zipfile.ZipFile(candidate,'w') as z:
+            for name,value in files.items():z.writestr(name,value)
         env = dict(os.environ, XV_REMOTE_TEST="0", XV_NET_ADHOC="0")
         for enabled, adhoc, token in [("0", "0", key), ("1", "1", key), ("1", "0", "bad")]:
             (data / "remote.key").write_text(token)
@@ -81,9 +98,9 @@ def main():
             proc.stdin.write(c.encode()); proc.stdin.flush()
             return proc.stdout.readline().decode().strip()
 
-        def request(path, method="GET", token=key):
+        def request(path, method="GET", token=key, data=None):
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
-            conn.request(method, path, headers={"Authorization": "Bearer " + token})
+            conn.request(method, path, body=data, headers={"Authorization": "Bearer " + token})
             r = conn.getresponse(); result = r.status, dict(r.getheaders()), r.read(); conn.close()
             return result
 
@@ -123,6 +140,7 @@ def main():
             assert command("b") == "ACK"
             assert request("/screen")[0] == request("/log?offset=0")[0] == 409
             assert json.loads(request("/status")[2])["benchmark"] == 1
+            assert request("/update")[0] == 409
             assert command("n") == "ACK"
             code, headers, body = request("/log?offset=0")
             assert code == 200 and body == log[:65536] and int(headers["X-Log-Size"]) == len(log)
@@ -148,9 +166,38 @@ def main():
             subprocess.run(["python3", str(ROOT / "tools/vita_remote.py"), "--config", str(conf),
                             "pad", "--rx", "160", "--duration", ".05"], check=True)
             assert command("p") == "PAD 0 128 128 128 128"
+            state=json.loads(request('/update')[2]);assert state['contract']==abi and state['state']==0
+            manifest=f'/update/begin?size={len(new)}&sha256={hashlib.sha256(new).hexdigest()}&contract={abi}'
+            assert request(manifest,'POST',token='f'*32)[0]==403
+            assert request(manifest+'x','POST')[0]==409
+            assert request(manifest,'POST')[0]==204
+            assert request('/update/chunk?offset=1','POST',data=b'1234')[0]==409
+            assert request('/update/chunk?offset=0','POST',data=bytes(65537))[0]==403
+            assert request('/update/finish','POST')[0]==409
+            # An abandoned chunk is never appended to the staged file.
+            with socket.create_connection(('127.0.0.1',port),timeout=10) as sock:
+                sock.sendall(b'POST /update/chunk?offset=0 HTTP/1.1\r\n'+auth+b'Content-Length: 64\r\n\r\nshort')
+                sock.shutdown(socket.SHUT_WR)
+                assert sock.recv(4096).split(b' ')[1]==b'409'
+            assert json.loads(request('/update')[2])['received']==0
+            result=upload_update(client,candidate,True)
+            assert result['verified'] and result['restart_requested']
+            assert (app/'game-a.self').read_bytes()==old
+            assert command('t')=='BOOT 1'
+            assert (app/'game-a.self').read_bytes()==old and (app/'game-b.self').read_bytes()==new
+            assert command('c')=='CONFIRM 0'
+            assert command('t')=='BOOT 1'
         finally:
             proc.stdin.write(b"q"); proc.stdin.flush()
             assert proc.wait(timeout=10) == 0
+        # Restart the production server on the same port immediately after
+        # real traffic; updater handoffs must not lose their control endpoint.
+        proc=subprocess.Popen([exe],cwd=tmp,env=dict(env,XV_REMOTE_TEST="1",XV_REMOTE_PORT=str(port)),stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+        try:
+            assert proc.stdout.readline()==b"READY\n"
+            assert request('/status')[0]==200
+        finally:
+            proc.stdin.write(b'q');proc.stdin.flush();assert proc.wait(timeout=10)==0
         print("PASS: real HTTP auth/framing, bounded controls/expiry/physical priority, leases, immutable frame colors, benchmark exclusion, log chunks and capture timeout recovery")
 
 

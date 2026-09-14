@@ -51,6 +51,7 @@ static const char *const texture_labels[] = {"VERY LOW", "LOW", "STANDARD", "HIG
 typedef struct { int x1, y1, x2, y2; } segment;
 typedef struct {
     xv_dash_framebuffer fb;
+    const xv_dash_config *config;
     const char *root;
     int image, ui, camp[10], multi[13], nc, nm;
     char **saves;
@@ -293,15 +294,15 @@ static int content_count(const dash *s)
     return s->mode == 0 ? s->nc : s->mode == 1 ? s->nm : s->ns;
 }
 
-enum { LAUNCH_VISIBLE_ROWS = 5, LICENSE_PAGE = 6, LICENSE_VISIBLE_LINES = 18 };
-static const char *const launch_pages[] = {"LAUNCH GAME", "GRAPHICS", "AUDIO", "CONTROLS", "DISPLAY", "PERFORMANCE", "ABOUT / LICENSE"};
+enum { LAUNCH_VISIBLE_ROWS = 5, LICENSE_PAGE = 6, UPDATE_PAGE = 7, LICENSE_VISIBLE_LINES = 18 };
+static const char *const launch_pages[] = {"LAUNCH GAME", "GRAPHICS", "AUDIO", "CONTROLS", "DISPLAY", "PERFORMANCE", "ABOUT / LICENSE", "UPDATE"};
 static const int launch_keys[][13] = {
     {-1}, {TEX_DETAIL, TEX_FILTER, MIP_SMOOTH, RESOLUTION, MATERIAL,
            GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, EXTENDED_BC, TRIPLE_BUFFER, MODEL_DETAIL}, {VOLUME, -1},
     {SENSITIVITY, DEADZONE, INVERT_Y, LOOK_CURVE, TOUCH}, {FPS, CPU, -1},
-    {CPU_CLOCK, VERTEX_WORKER, -1}, {-1}
+    {CPU_CLOCK, VERTEX_WORKER, -1}, {-1}, {-1}
 };
-static const int launch_counts[] = {0, 13, 1, 5, 2, 2, 0};
+static const int launch_counts[] = {0, 13, 1, 5, 2, 2, 0, 2};
 static const char *const setting_names[] = {
     "Performance overlay", "", "", "", "Texture detail", "Master volume",
     "Look sensitivity", "Stick deadzone", "Invert look", "Look response", "Touch controls", "CPU meter",
@@ -379,9 +380,9 @@ static void setting_value(const dash *s, int k, char *value, size_t size)
 static void render_launcher(dash *s)
 {
     for (int i = 0; i < COUNT(launch_pages); i++) {
-        int y = 180 + i*43, active = s->page == i;
-        pill(s,40,y,286,38,active ? GREEN : DIM,active ? 190 : 60);
-        pill(s,43,y+3,280,32,0xff092510u,active ? 80 : 255);
+        int y = 177 + i*38, active = s->page == i;
+        pill(s,40,y,286,34,active ? GREEN : DIM,active ? 190 : 60);
+        pill(s,43,y+3,280,28,0xff092510u,active ? 80 : 255);
         text(s,64,y+11,launch_pages[i],2,1,active ? WHITE : DIM);
     }
     rect(s,350,177,576,305,0xff040b05u,235);
@@ -395,6 +396,16 @@ static void render_launcher(dash *s)
         text(s,378,414,"In-game graphics: SELECT + CIRCLE.",1,0,GREEN);
         if (s->image && s->ui) text(s,378,439,"CROSS  LAUNCH GAME",2,1,GREEN);
         else text(s,378,439,"Game files are missing. Check your installation.",1,0,GREEN);
+    } else if (s->page == UPDATE_PAGE) {
+        char state[96]="Updater not available in this build";
+        if(s->config && s->config->update_status)s->config->update_status(state,sizeof state);
+        text(s,378,206,"XITA UPDATES",3,1,WHITE);
+        text(s,378,267,state,1,0,GREEN);
+        text(s,378,306,"Send a compatible build from your paired computer.",1,0,DIM);
+        text(s,378,330,"The previous working build stays available.",1,0,DIM);
+        text(s,378,374,"INSTALL RECEIVED UPDATE",2,0,s->depth&&s->row==0?WHITE:GREEN);
+        text(s,378,414,"RESTORE PREVIOUS BUILD",2,0,s->depth&&s->row==1?WHITE:GREEN);
+        text(s,378,458,"Installing or restoring restarts Xita.",1,0,DIM);
     } else if (s->page == LICENSE_PAGE) {
         if (s->depth) render_license(s);
         else {
@@ -414,7 +425,7 @@ static void render_launcher(dash *s)
         if (end > count) end = count;
         text(s,376,194,launch_pages[s->page],1,2,GREEN);
         if (count > LAUNCH_VISIBLE_ROWS) {
-            char range[32];
+            char range[48];
             snprintf(range,sizeof range,"%d-%d OF %d",s->scroll+1,end,count);
             text(s,892-(int)strlen(range)*6,194,range,1,0,DIM);
             rect(s,918,218,2,185,DIM,80);
@@ -539,6 +550,14 @@ void xv_dash_graphics_snapshot(const xv_dash_graphics *panel, xv_dash_graphics_v
 static int launcher_input(dash *s, uint32_t edge, xv_dash_result *out)
 {
     if (edge & XV_DASH_CIRCLE) { s->depth = 0; s->row = 0; s->scroll = 0; s->status[0] = 0; }
+    else if(s->depth && s->page == UPDATE_PAGE) {
+        if(edge & (XV_DASH_UP|XV_DASH_DOWN))s->row=1-s->row;
+        if(edge & XV_DASH_CROSS) {
+            if(!s->config || !s->config->update_action || s->config->update_action(s->row))
+                strcpy(s->status,"Update unavailable. Check the paired computer.");
+            else strcpy(s->status,"Restarting Xita...");
+        }
+    }
     else if (s->depth && s->page == LICENSE_PAGE) {
         int delta = edge & XV_DASH_UP ? -1 : edge & XV_DASH_DOWN ? 1 :
                     edge & XV_DASH_LEFT ? -LICENSE_VISIBLE_LINES :
@@ -708,7 +727,7 @@ int xv_dash_run(const xv_dash_config *cfg, xv_dash_result *out)
     if (!s) return -1;
     int rc = -1;
     s->fb = cfg->framebuffer; s->root = cfg->data_root ? cfg->data_root : "ux0:data/xita";
-    s->simple = cfg->simple_launcher;
+    s->simple = cfg->simple_launcher; s->config = cfg;
     memcpy(s->values,defaults,sizeof defaults);
     if (s->simple) for (int i = 0; i < SETTINGS_COUNT; i++) {
         const char *e = getenv(keys[i]); if (e) s->values[i] = atoi(e);

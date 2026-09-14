@@ -13,8 +13,10 @@ Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` no
 input, completed-frame screenshots, log downloads and repeated off/on/off
 trials. The [first physical Vita session](docs/hardware-20260913-remote.md)
 launched Halo, entered Blood Gulch and collected three complete comparisons.
-One-time pairing and foreground launch are required; integrated updates and
-crash recovery remain open. Next: an updater, remote test selection, performance
+One-time pairing and foreground launch are required. The
+[integrated updater](docs/integrated-updater.md) adds a stable launcher, verified
+inactive executable slots and rollback; physical installation testing and
+crash recovery remain open. Next: remote test selection, performance
 snapshots and reports bundling build/settings/logs/screenshots.
 
 September 13 [object-transform hardware follow-up](docs/hardware-20260913-object-basis.md):

@@ -20,6 +20,7 @@ int main(void)
     STORE(&pad_deadline,(uint32_t)(remote_now()+2000000));STORE(&pad_seq,1);
     xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(!buttons&&lx==128);
     STORE(&enabled,0);STORE(&pad_seq,0);STORE(&pad_deadline,0);
+    xv_update_init();
     xv_remote_start();
     if(!LOAD(&enabled)) {puts("DISABLED");return 0;}
     puts("READY");fflush(stdout);
@@ -32,6 +33,8 @@ int main(void)
         if(got==0)break;
         if(got>0) {
             if(command=='q')break;
+            if(command=='t') {printf("BOOT %d\n",xv_update_boot());fflush(stdout);continue;}
+            if(command=='c') {printf("CONFIRM %d\n",xv_update_confirm(1));fflush(stdout);continue;}
             if(command=='b')STORE(&benchmark,1);
             if(command=='n')STORE(&benchmark,0);
             if(command=='f')frames=!frames;

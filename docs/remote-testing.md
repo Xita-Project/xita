@@ -6,11 +6,13 @@ benchmark without someone operating the Vita. USB can still supply power and
 carry package transfers. Live commands use the same local Wi-Fi network as the
 computer; VitaShell USB transfer mode is a separate workflow.
 
-The service is disabled by default. It does not install packages, replace a
-running executable, access arbitrary files, or recover a console after a system
-or GPU-driver crash. This first version requires a one-time setup and launching
-Xita in the foreground. Campaign navigation and vehicles can be operated through
-the controls, but there is no deterministic campaign/vehicle replay yet.
+The service is disabled by default and requires a one-time setup with Xita
+running in the foreground. The [integrated updater](integrated-updater.md) can
+install compatible runtime builds into an inactive slot and restart Xita.
+Changed packaged assets still require a VPK installation through VitaShell.
+Campaign navigation and vehicles can be operated through the controls, but
+there is no deterministic campaign/vehicle replay or recovery from a system
+or GPU-driver freeze.
 
 ## One-time setup
 
@@ -106,6 +108,12 @@ zero instrumentation overhead. No socket operations run on the guest or render
 threads. Captures and downloads have costs and belong outside timed intervals.
 
 ## Validation and limits
+
+The [integrated updater](integrated-updater.md) adds compatible executable
+uploads, an Update dashboard page, two-slot rollback and post-restart build
+identification. It requires one new VPK installation; the original remote-test
+build below cannot receive executable uploads. Its protocol remains private
+and opt-in, with fixed update paths and no writes to game data or settings.
 
 `python3 tools/test_remote.py` exercises the production server through actual
 host loopback sockets. `SANITIZE=1` adds ASan/UBSan. Cases include disabled/missing

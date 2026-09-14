@@ -4,6 +4,7 @@
 #include "xv_remote.h"
 #include "xv_benchmark.h"
 #include "xv_log.h"
+#include "xv_update.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -114,7 +115,7 @@ static int pad_query(char *query,unsigned values[6])
     /* Only ordinary Vita buttons, never PS/power or reserved bits. */
     return !(values[0]&~0xF3F9u);
 }
-static int authorized_request(char *request,char **method,char **target)
+static int authorized_request(char *request,char **method,char **target,unsigned *body_size)
 {
     char *line=strstr(request,"\r\n");if(!line)return 0;*line=0;
     char *space=strchr(request,' ');if(!space)return 0;*space=0;*method=request;*target=space+1;
@@ -128,11 +129,11 @@ static int authorized_request(char *request,char **method,char **target)
             if(auth++ || strncmp(value,"Bearer ",7) || strlen(value+7)!=32)return 0;
             unsigned diff=0;for(unsigned i=0;i<32;i++)diff|=(unsigned char)value[i+7]^(unsigned char)key[i];
             if(diff)return 0;
-        } else if(!strcasecmp(p,"Content-Length")) {if(length++ || strcmp(value,"0"))return 0;}
+        } else if(!strcasecmp(p,"Content-Length")) {if(length++ || !uint_value(value,XV_UPDATE_CHUNK,body_size))return 0;}
         else if(!strcasecmp(p,"Transfer-Encoding"))return 0;
         p=end+2;
     }
-    return auth==1;
+    return auth==1 && (!*body_size || (!strcmp(*method,"POST") && !strncmp(*target,"/update/chunk?offset=",21)));
 }
 static void serve(int s)
 {
@@ -142,15 +143,44 @@ static void serve(int s)
         if(!n)return;
         if(n<0) {remote_sleep(10000);continue;}
         used+=n;request[used]=0;
-        if(memchr(request,0,used)) {reply(s,400,"Invalid request\n");return;}
         char *end=strstr(request,"\r\n\r\n");
-        if(!end)continue;
-        if(end+4!=request+used) {reply(s,400,"No request body supported\n");return;}
+        if(!end) {if(memchr(request,0,used)) {reply(s,400,"Invalid request\n");return;}continue;}
+        size_t head=(size_t)(end+4-request),initial_body=used-head;
+        if(memchr(request,0,head)) {reply(s,400,"Invalid request\n");return;}
         /* Leave the final header's CRLF but remove the empty terminator. */
         end[2]=0;
-        char *method=NULL,*target=NULL;
-        if(!authorized_request(request,&method,&target)) {reply(s,403,"Authentication or framing rejected\n");return;}
-        if(!strcmp(method,"GET")&&!strcmp(target,"/status")) {
+        char *method=NULL,*target=NULL;unsigned body_size=0;
+        if(!authorized_request(request,&method,&target,&body_size)) {reply(s,403,"Authentication or framing rejected\n");return;}
+        if(initial_body>body_size) {reply(s,400,"Unexpected request body\n");return;}
+        if(!strncmp(target,"/update",7)) {
+            if(xv_benchmark_status()) {reply(s,409,"Updates disabled during benchmark\n");return;}
+            if(!strcmp(method,"GET")&&!strcmp(target,"/update")) {
+                char body[384];xv_update_json(body,sizeof body);
+                if(!header(s,200,"application/json",strlen(body),NULL))send_all(s,body,strlen(body),remote_now()+2000000);
+            } else if(!strcmp(method,"POST")&&!strncmp(target,"/update/begin?size=",19)) {
+                char *sha=strstr(target+19,"&sha256="),*abi=sha?strstr(sha+8,"&contract="):NULL;unsigned size;
+                if(!sha||!abi) {reply(s,400,"Invalid update manifest\n");return;}
+                *sha=0;*abi=0;
+                if(!uint_value(target+19,XV_UPDATE_LIMIT,&size)||xv_update_begin(size,sha+8,abi+10))reply(s,409,"Incompatible package or update unavailable\n");
+                else reply(s,204,"");
+            } else if(!strcmp(method,"POST")&&!strncmp(target,"/update/chunk?offset=",21)) {
+                unsigned offset;if(!body_size||!uint_value(target+21,XV_UPDATE_LIMIT,&offset)) {reply(s,400,"Invalid update chunk\n");return;}
+                char *chunk=malloc(body_size);if(!chunk) {reply(s,503,"No upload buffer\n");return;}
+                memcpy(chunk,request+head,initial_body);size_t have=initial_body;deadline=remote_now()+15000000;
+                while(have<body_size&&LOAD(&running)&&remote_now()<deadline) {
+                    int got=remote_recv(s,chunk+have,body_size-have);
+                    if(!got)break;
+                    if(got<0) {remote_sleep(10000);keep_awake();continue;}
+                    have+=(unsigned)got;
+                }
+                int bad=have!=body_size||xv_update_chunk(offset,chunk,body_size);free(chunk);
+                reply(s,bad?409:204,bad?"Incomplete chunk or wrong offset\n":"");
+            } else if(!strcmp(method,"POST")&&!strcmp(target,"/update/finish")) {
+                int bad=xv_update_finish();reply(s,bad?409:204,bad?"Update verification failed\n":"");
+            } else if(!strcmp(method,"POST")&&(!strcmp(target,"/update/apply")||!strcmp(target,"/update/rollback"))) {
+                int bad=xv_update_request(!strcmp(target,"/update/rollback"));reply(s,bad?409:204,bad?"Update not ready\n":"");
+            } else reply(s,404,"Unknown update operation\n");
+        } else if(!strcmp(method,"GET")&&!strcmp(target,"/status")) {
             uint64_t now=remote_now();
             char body[320];snprintf(body,sizeof body,"{\"protocol\":1,\"build\":\"%s %s\",\"frames\":%u,\"benchmark\":%u,\"awake_seconds\":%llu}\n",
                 __DATE__,__TIME__,LOAD(&frame_count),xv_benchmark_status(),
@@ -226,6 +256,7 @@ REMOTE_THREAD(server)
     }
     return 0;
 }
+int xv_remote_ready(void) {return LOAD(&enabled)!=0;}
 void xv_remote_stop(void)
 {
     STORE(&enabled,0);STORE(&running,0);STORE(&pad_deadline,0);
@@ -237,6 +268,7 @@ void xv_remote_stop(void)
     if(listener>=0) {remote_close(listener);listener=-1;}
     /* A callback that claimed the request owns screen until it publishes. */
     while(LOAD(&capture)==2)remote_sleep(1000);
+    xv_update_close();
     free(screen);screen=NULL;STORE(&capture,0);memset(key,0,sizeof key);
 #ifdef __vita__
     if(ctl_initialized) {sceNetCtlTerm();ctl_initialized=0;}
@@ -276,7 +308,7 @@ void xv_remote_start(void)
     if(sceKernelStartThread(worker,0,NULL)<0) {sceKernelDeleteThread(worker);worker=-1;goto failed;}
     SceNetCtlInfo info={0};
     if(sceNetCtlInetGetInfo(SCE_NETCTL_INFO_GET_IP_ADDRESS,&info)>=0)
-        xv_logf("[remote] test service %s:%u; authenticated controls/captures/logs; no file writes\n",info.ip_address,port);
+        xv_logf("[remote] test service %s:%u; authenticated controls/captures/logs and staged executable updates\n",info.ip_address,port);
     else xv_logf("[remote] test service port %u; waiting for configured Wi-Fi\n",port);
 #else
     if(pthread_create(&worker,NULL,server,NULL))goto failed;
