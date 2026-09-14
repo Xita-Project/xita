@@ -7,6 +7,9 @@ acknowledgement. This increment supplies a checked metadata reader and a
 separately enabled, genuine failure result. It does not supply an effects
 processor, descriptor substitute or working menu.
 
+The next [movie PCM buffer increment](halo2-movie-pcm-buffer.md) records the
+original buffer descriptor and adds bounded real mixer ownership.
+
 ## Owned image and consumers
 
 The XBE SHA-256 remains

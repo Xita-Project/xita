@@ -1,10 +1,18 @@
-/* Checked XDK5849 device boundary. Buffer/stream/effect APIs are not supplied
- * by this milestone. A successful device owns a real mixer/output worker. */
+/* Checked XDK5849 device and external PCM buffer boundaries. Unknown sound
+ * methods stop; every accepted object owns real mixer/output resources. */
 #include "audio_host.h"
 #include "recomp/kernel/xk.h"
+#include "recomp/kernel/xk_audio.h"
 #include <string.h>
 
 static h2_audio_device_snapshot device;
+typedef struct {
+    uint32_t base, references, mirror, mirror_bytes, source, bytes;
+    uint32_t frequency, headroom;
+    int32_t volume;
+    int voice;
+} h2_audio_buffer;
+static h2_audio_buffer buffers[XA_MAX_VOICES];
 extern uint32_t h2_platform_fpscr_read(void);
 extern void h2_platform_fpscr_write(uint32_t);
 extern void xv_logf(const char *, ...);
@@ -26,15 +34,24 @@ static void stack(xctx *c, uint32_t ip, unsigned args)
     if ((c->r[4] & 3) || !mapped(c->r[4], 4 + 4 * args))
         fail(c, ip, "stack", c->r[4]);
 }
+static int page_overlap(uint32_t address, uint32_t bytes, uint32_t owned, uint32_t size)
+{
+    if (!owned || !size) return 0;
+    uint32_t last = (address + bytes - 1) >> 12;
+    uint32_t end = (owned + size - 1) >> 12;
+    for (uint32_t p = address >> 12; p <= last; ++p)
+        for (uint32_t q = owned >> 12; q <= end; ++q)
+            if (g_xpt[p] == g_xpt[q]) return 1;
+    return 0;
+}
 static int overlaps_device(uint32_t address, uint32_t bytes)
 {
-    if (!device.base) return 0;
-    /* Reject aliases through another virtual page as well as direct overlap.
-     * The opaque device owns the complete single-page guest allocation. */
-    uint32_t owned = g_xpt[device.base >> 12];
-    uint32_t last = (address + bytes - 1) >> 12;
-    for (uint32_t p = address >> 12; p <= last; ++p)
-        if (g_xpt[p] == owned) return 1;
+    /* Opaque objects and unexposed sample mirrors own full guest pages.
+     * Include physical aliases through distinct virtual mappings. */
+    if (page_overlap(address, bytes, device.base, 4096)) return 1;
+    for (unsigned i = 0; i < XA_MAX_VOICES; ++i)
+        if (page_overlap(address, bytes, buffers[i].base, 4096) ||
+            page_overlap(address, bytes, buffers[i].mirror, buffers[i].mirror_bytes)) return 1;
     return 0;
 }
 static void output(xctx *c, uint32_t ip, uint32_t address, uint32_t bytes)
@@ -93,24 +110,163 @@ static void create(xctx *c)
             caller, handle, device.references);
     result(c, 0, 3);
 }
-static void reference(xctx *c, uint32_t ip)
+static void drop_device(xctx *c, uint32_t ip)
 {
-    stack(c, ip, 1); live(c, ip, X_ARG(0), 1);
-    if (ip == 0x37A14F) {
-        if (device.references == UINT32_MAX) fail(c, ip, "reference overflow", device.references);
-        ++device.references;
-        X_M32(device.base + 4) = device.references;
-    } else if (device.references > 1) {
+    if (device.references > 1) {
         --device.references; X_M32(device.base + 4) = device.references;
     } else {
         uint32_t released = device.base;
+        if (device.children) fail(c, ip, "live device children", device.children);
         if (h2_audio_backend_close() < 0) fail(c, ip, "close worker", device.base);
         if (xk_mem_free(device.base) < 0) fail(c, ip, "free device", device.base);
         device = (h2_audio_device_snapshot){.ever_created = 1};
         xv_logf("[h2/audio] final Release caller=%08X device=%08X worker/port closed, guest allocation freed\n",
                 X_M32(c->r[4]), released);
     }
+}
+static h2_audio_buffer *find_buffer(uint32_t base)
+{
+    for (unsigned i = 0; i < XA_MAX_VOICES; ++i)
+        if (buffers[i].base && buffers[i].base == base) return &buffers[i];
+    return NULL;
+}
+static void buffer_operational(xctx *c, uint32_t ip)
+{
+    if (!mapped(0x386B0C, 4) || X_M32(0x386B0C))
+        fail(c, ip, "unsupported sound shutdown state", 0x386B0C);
+}
+static h2_audio_buffer *buffer_live(xctx *c, uint32_t ip, uint32_t object, int internal)
+{
+    buffer_operational(c, ip);
+    h2_audio_buffer *b = find_buffer(object - (internal ? 0 : 0x1C));
+    if (!b || !b->references || !mapped(b->base, 4096) ||
+        X_M32(b->base) != 0x417150 || X_M32(b->base + 4) != b->references ||
+        !device.children || device.references < device.children)
+        fail(c, ip, "buffer identity", object);
+    live(c, ip, device.base, 1);
+    return b;
+}
+static void reference(xctx *c, uint32_t ip)
+{
+    stack(c, ip, 1);
+    if (ip != 0x37C70F && (ip != 0x37A14F || find_buffer(X_ARG(0)))) {
+        h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), ip != 0x379F45);
+        uint32_t count = b->references;
+        if (ip == 0x37A14F) {
+            if (count == UINT32_MAX) fail(c, ip, "buffer reference overflow", count);
+            X_M32(b->base + 4) = ++b->references;
+            count = b->references;
+        } else if (--count) {
+            X_M32(b->base + 4) = b->references = count;
+        } else {
+            /* free() takes the mixer lock, so no worker can still read the
+             * mirror when its allocation is released. Caller owns source. */
+            xk_audio_voice_free(b->voice);
+            if (b->mirror && xk_mem_free(b->mirror) < 0) fail(c, ip, "free PCM mirror", b->mirror);
+            if (xk_mem_free(b->base) < 0) fail(c, ip, "free buffer", b->base);
+            *b = (h2_audio_buffer){0};
+            --device.children; drop_device(c, ip);
+        }
+        result(c, count, 1); return;
+    }
+    live(c, ip, X_ARG(0), 1);
+    if (ip == 0x37A14F) {
+        if (device.references == UINT32_MAX) fail(c, ip, "reference overflow", device.references);
+        ++device.references; X_M32(device.base + 4) = device.references;
+    } else {
+        if (device.references <= device.children) fail(c, ip, "release child-owned device", device.references);
+        drop_device(c, ip);
+    }
     result(c, device.references, 1);
+}
+static void buffer_create(xctx *c)
+{
+    const uint32_t ip = 0x37D4BE;
+    stack(c, ip, 4); live(c, ip, X_ARG(0), 0); buffer_operational(c, ip);
+    uint32_t desc = X_ARG(1), out = X_ARG(2), fields[6];
+    output(c, ip, out, 4);
+    if (X_ARG(3) || !mapped(desc, sizeof fields)) fail(c, ip, "buffer descriptor", desc);
+    x_guest_read(fields, desc, sizeof fields);
+    if (fields[0] != 24 || fields[1] != 0xA0 || fields[2] || fields[4] || fields[5])
+        fail(c, ip, "unsupported buffer description", fields[1]);
+    /* Exact observed PCM format; do not feed permissive mixer defaults an
+     * unknown codec, malformed average/block alignment, or extension. */
+    const uint8_t pcm[18] = {1,0,2,0,0x44,0xAC,0,0,0x10,0xB1,2,0,4,0,16,0,0,0};
+    uint8_t format[18];
+    if (!mapped(fields[3], 18)) fail(c, ip, "buffer format mapping", fields[3]);
+    x_guest_read(format, fields[3], 18);
+    if (memcmp(format, pcm, 18)) fail(c, ip, "unsupported PCM format", fields[3]);
+    if (device.references == UINT32_MAX) fail(c, ip, "reference overflow", device.references);
+    unsigned index;
+    for (index = 0; index < XA_MAX_VOICES && buffers[index].base; ++index) {}
+    if (index == XA_MAX_VOICES) { result(c, 0x8007000E, 4); return; }
+    uint32_t base = xk_mem_alloc(4096, 4096, 0, 0, 0);
+    if (!base) { result(c, 0x8007000E, 4); return; }
+    if ((base & 4095) || !mapped(base, 4096)) fail(c, ip, "buffer allocation mapping", base);
+    x_guest_write(base + 64, format, 18);
+    int voice = xk_audio_voice_new(1, base + 64);
+    if (voice < 0) {
+        if (xk_mem_free(base) < 0) fail(c, ip, "buffer rollback", base);
+        result(c, 0x8007000E, 4); return;
+    }
+    buffers[index] = (h2_audio_buffer){.base = base, .references = 1, .voice = voice,
+                                     .frequency = 44100, .headroom = 600};
+    xk_audio_lock(); xk_audio_voice_set_volume_db100(voice, -600); xk_audio_unlock();
+    X_M32(base) = 0x417150; X_M32(base + 4) = 1;
+    ++device.children; X_M32(device.base + 4) = ++device.references;
+    uint32_t handle = base + 0x1C; x_guest_write(out, &handle, 4);
+    xv_logf("[h2/audio-buffer] create caller=%08X interface=%08X voice=%u PCM16 stereo44100 parent_refs=%u\n",
+            X_M32(c->r[4]), handle, voice, device.references);
+    result(c, 0, 4);
+}
+static void buffer_data(xctx *c)
+{
+    const uint32_t ip = 0x37CC4A;
+    stack(c, ip, 3); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    uint32_t source = X_ARG(1), bytes = X_ARG(2);
+    /* First bind only in this milestone. Playback and live rebinding remain
+     * strict stops until their routing/commit/cursor contracts are supplied. */
+    if (b->mirror || !bytes || bytes > 0x100000 || (bytes & 3) || (source & 3) ||
+        !mapped(source, bytes) || overlaps_device(source, bytes))
+        fail(c, ip, "unsupported external PCM binding", source);
+    uint32_t size = (bytes + 4095) & ~4095u;
+    uint32_t mirror = xk_mem_alloc(size, 4096, 0, 0, 0);
+    if (!mirror) { result(c, 0x8007000E, 3); return; }
+    if ((mirror & 4095) || !mapped(mirror, size)) fail(c, ip, "PCM mirror mapping", mirror);
+    uint8_t chunk[4096];
+    for (uint32_t at = 0; at < bytes; at += sizeof chunk) {
+        uint32_t n = bytes - at; if (n > sizeof chunk) n = sizeof chunk;
+        x_guest_read(chunk, source + at, n); x_guest_write(mirror + at, chunk, n);
+    }
+    xk_audio_voice_set_data(b->voice, mirror, bytes);
+    b->source = source; b->bytes = bytes; b->mirror = mirror; b->mirror_bytes = size;
+    xv_logf("[h2/audio-buffer] SetBufferData caller=%08X interface=%08X external=%08X bytes=%u mirror=%08X\n",
+            X_M32(c->r[4]), b->base + 0x1C, source, bytes, mirror);
+    result(c, 0, 3);
+}
+static void buffer_control(xctx *c, uint32_t ip)
+{
+    stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    uint32_t value = X_ARG(1);
+    if (ip == 0x37C5C8) {
+        if (value && value != 44100) fail(c, ip, "unsupported buffer frequency", value);
+        xk_audio_lock(); xk_audio_voice_set_frequency(b->voice, value); xk_audio_unlock();
+        b->frequency = value ? value : 44100;
+    } else {
+        int32_t volume = b->volume; uint32_t headroom = b->headroom;
+        if (ip == 0x37B66F) {
+            volume = (int32_t)value;
+            if (volume > 0 || volume < -9000) fail(c, ip, "unsupported buffer volume", value);
+        } else {
+            if (value != 0 && value != 600) fail(c, ip, "unsupported buffer headroom", value);
+            headroom = value;
+        }
+        xk_audio_lock(); xk_audio_voice_set_volume_db100(b->voice, volume - (int32_t)headroom); xk_audio_unlock();
+        b->volume = volume; b->headroom = headroom;
+    }
+    xv_logf("[h2/audio-buffer] control entry=%08X value=%08X caller=%08X frequency=%u volume=%d headroom=%u\n",
+            ip, value, X_M32(c->r[4]), b->frequency, b->volume, b->headroom);
+    result(c, 0, 2);
 }
 static void query(xctx *c, uint32_t ip)
 {
@@ -196,7 +352,10 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     uint32_t fpscr = h2_platform_fpscr_read();
     switch (ip) {
     case 0x37D797: create(c); break;
-    case 0x37A14F: case 0x37C70F: reference(c, ip); break;
+    case 0x37A14F: case 0x37C70F: case 0x379F45: case 0x37A795: reference(c, ip); break;
+    case 0x37D4BE: buffer_create(c); break;
+    case 0x37CC4A: buffer_data(c); break;
+    case 0x37C5C8: case 0x37B66F: case 0x37B6A7: buffer_control(c, ip); break;
     case 0x37B5AE: case 0x37B5CA: query(c, ip); break;
     case 0x37D506: case 0x37D5CD: case 0x37D52A: scalar(c, ip); break;
     case 0x37B637: mix_bin(c, ip); break;
@@ -259,3 +418,41 @@ void h2_audio_guest_entry(xctx *c, uint32_t ip)
     h2_platform_fpscr_write(fpscr);
 }
 void h2_audio_host_snapshot(h2_audio_device_snapshot *out) { *out = device; }
+void h2_audio_trace_buffer(xctx *c, uint32_t ip)
+{
+    /* Terminal read-only probes; never repair guest inputs or resume them. */
+    for (unsigned i = 0; i < XA_MAX_VOICES; ++i) {
+        const h2_audio_buffer *b = &buffers[i];
+        if (b->base)
+            xv_logf("[h2/audio-buffer] stop interface=%08X refs=%u voice=%d external=%08X bytes=%u mirror=%08X frequency=%u volume=%d headroom=%u\n",
+                    b->base + 0x1C, b->references, b->voice, b->source, b->bytes, b->mirror,
+                    b->frequency, b->volume, b->headroom);
+    }
+    if (ip == 0x37C5E4 && !(c->r[4] & 3) && mapped(c->r[4], 12)) {
+        uint32_t address = X_ARG(1), list[2];
+        if (!mapped(address, 8)) return;
+        x_guest_read(list, address, 8);
+        xv_logf("[h2/audio-buffer] SetMixBins caller=%08X list=%08X count=%u entries=%08X\n",
+                X_M32(c->r[4]), address, list[0], list[1]);
+        if (!list[0] || list[0] > 8 || !mapped(list[1], list[0] * 8)) return;
+        uint32_t pairs[16]; x_guest_read(pairs, list[1], list[0] * 8);
+        for (unsigned i = 0; i < list[0]; ++i)
+            xv_logf("[h2/audio-buffer] route[%u] bin=%u volume=%d\n", i, pairs[i*2], (int32_t)pairs[i*2+1]);
+        return;
+    }
+    if (ip != 0x37D4BE || !mapped(c->r[4], 20) || (c->r[4] & 3)) return;
+    uint32_t desc = X_ARG(1), fields[6];
+    if (!mapped(desc, sizeof fields)) return;
+    x_guest_read(fields, desc, sizeof fields);
+    xv_logf("[h2/audio-buffer] descriptor=%08X size=%08X flags=%08X bytes=%08X format=%08X mixbins=%08X inputbin=%08X output=%08X outer=%08X\n",
+            desc, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], X_ARG(2), X_ARG(3));
+    uint8_t format[18];
+    if (!mapped(fields[3], sizeof format)) return;
+    x_guest_read(format, fields[3], sizeof format);
+    uint16_t tag, channels, align, bits, extra; uint32_t rate, average;
+    memcpy(&tag, format, 2); memcpy(&channels, format + 2, 2);
+    memcpy(&rate, format + 4, 4); memcpy(&average, format + 8, 4);
+    memcpy(&align, format + 12, 2); memcpy(&bits, format + 14, 2); memcpy(&extra, format + 16, 2);
+    xv_logf("[h2/audio-buffer] wave tag=%u channels=%u rate=%u average=%u align=%u bits=%u extra=%u\n",
+            tag, channels, rate, average, align, bits, extra);
+}

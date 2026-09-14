@@ -503,6 +503,7 @@ _Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32
             entry, reason, value, xv_cur_fn, c->r[4]);
     for (unsigned i = 0; i < 8 && c->r[4] <= UINT32_MAX - i * 4; ++i)
         trace_mapped_word(c->r[4] + i * 4);
+    h2_audio_trace_buffer(c, entry);
     xv_logf("[h2/audio] stop device=%08X refs=%u distance=%08X rolloff=%08X doppler=%08X pending=%08X,%08X,%08X dirty=%X grains=%u nonzero=%u peak=%u error=%08X port=%d worker=%d\n",
             device.base, device.references, device.distance, device.rolloff, device.doppler,
             device.pending_distance, device.pending_rolloff, device.pending_doppler, device.dirty,

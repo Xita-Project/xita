@@ -15,7 +15,7 @@ from games.halo2_5849.hooks import (
 class Image:
     def __init__(self):
         self.parts = {address: str(address).encode() for address in AUDIO_HOST_BOUNDARIES | AUDIO_ORIGINAL_BOUNDARIES}
-        self.words = {0x417124: 0x37A14F, 0x417128: 0x37C70F}
+        self.words = {0x417124: 0x37A14F, 0x417128: 0x37C70F, 0x417154: 0x37A14F, 0x417158: 0x37A795}
 
     def bytes_at(self, address, length):
         return self.parts[address][:length]

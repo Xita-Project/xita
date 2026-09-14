@@ -211,6 +211,13 @@ class Halo2AudioUnavailableHooks(Halo2HostChannelHooks):
 
 
 AUDIO_HOST_BOUNDARIES = {
+    0x37D4BE: (36, "1e031345f578d8e9a006024dd3965019ce536af7c4010febb53397685aa543f5"),
+    0x37CC4A: (32, "78a7f3aac8962233ca024758d5b866b7c58da0fa6099fcfe8e1420bbef2f033e"),
+    0x379F45: (22, "d3270be9d4962cdcdb62ef4c3242b41b960c1f0cb7621e035393e8b7607de92c"),
+    0x37A795: (74, "5b0d7aeb517875dbc44378585de0558a3933bffe42d178a357ab4f274f29c94d"),
+    0x37C5C8: (28, "093366e133157c00dfbd587c7c41fa96b6bec546a6428a9b32117a91eb0e107c"),
+    0x37B66F: (28, "c6aebe191b2b4cdc717d348e89ee35298b240fa29289607795f2c2de1f21dd53"),
+    0x37B6A7: (28, "0a794b8ec207fdb882d1baabfe6327f112952d73364ebe86a3d7f7cee761b458"),
     0x37B86D: (514, "152b5769f3630d38073a25543bbce4d35f387ad3af712ad1b96f5427794f2b67"),
     0x37D52A: (36, "ae868f50868faf0f465131b3bbd5e9535658ab3b345614c5c4274ce28e5d8166"),
     0x37B637: (32, "9cd8e91683d0bd423aefc6a5ec381a25191ffc3ea7cd0a7f3c3a91933b2e3dcf"),
@@ -242,7 +249,8 @@ class Halo2AudioHostHooks(Halo2HostChannelHooks):
         for address, (length, digest) in (AUDIO_HOST_BOUNDARIES | AUDIO_ORIGINAL_BOUNDARIES).items():
             if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
                 raise ValueError(f"Halo 2 audio host boundary mismatch at {address:#x}")
-        if image.u32(0x417124) != 0x37A14F or image.u32(0x417128) != 0x37C70F:
+        if (image.u32(0x417124) != 0x37A14F or image.u32(0x417128) != 0x37C70F or
+                image.u32(0x417154) != 0x37A14F or image.u32(0x417158) != 0x37A795):
             raise ValueError("Halo 2 sound reference vtable mismatch")
 
     def function_entry(self, address):

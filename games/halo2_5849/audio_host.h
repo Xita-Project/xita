@@ -2,7 +2,7 @@
 #include "recomp/xv_x86rt.h"
 
 typedef struct {
-    uint32_t base, references, ever_created;
+    uint32_t base, references, ever_created, children;
     uint32_t distance, rolloff, doppler;
     uint32_t pending_distance, pending_rolloff, pending_doppler, dirty;
     uint8_t headroom[32];
@@ -14,6 +14,8 @@ typedef struct {
     int32_t port, thread;
 } h2_audio_backend_status;
 
+/* Bounded device + external PCM buffer creation/binding/controls. Guest
+ * routing, playback and write commits are still unsupported. */
 void h2_audio_host_call(xctx *c, uint32_t entry);
 /* Original DSOUND constructors can run before the first host device. Once a
  * host device exists, unknown original DSOUND methods must never read its
@@ -23,6 +25,7 @@ void h2_audio_host_call(xctx *c, uint32_t entry);
  * this does not implement HRTF processing. */
 void h2_audio_guest_entry(xctx *c, uint32_t entry);
 void h2_audio_host_snapshot(h2_audio_device_snapshot *out);
+void h2_audio_trace_buffer(xctx *c, uint32_t entry);
 
 /* open returns only after the real sink accepts its first mixed grain.
  * Failed open (-1) rolls back all host resources; -2 means resources were

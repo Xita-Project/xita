@@ -1,0 +1,207 @@
+/* Synthetic guest ABI plus the actual shared PCM mixer. No owned game bytes.
+ * Play remains unsupported in the guest adapter; test-only mixer playback
+ * establishes that creation/binding/control changes really affect samples. */
+#include "audio_host.c"
+#include "recomp/kernel/xk_audio.c"
+#include <assert.h>
+#include <setjmp.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+uint8_t *g_xram, *g_img_base;
+uint32_t *g_xpt;
+static jmp_buf stopped;
+static unsigned locked, healthy, opens, closes, allocs, frees;
+static int allocation_failure;
+static uint32_t native_fp = 0xA5A55A5A;
+static uint32_t pool[256];
+uint32_t h2_platform_fpscr_read(void) { return native_fp; }
+void h2_platform_fpscr_write(uint32_t value) { native_fp = value; }
+void xv_logf(const char *format, ...) { (void)format; native_fp ^= 0x12345678; }
+void xk_os_log(const char *format, ...) { (void)format; }
+_Noreturn void h2_audio_stop(xctx *c, uint32_t ip, const char *reason, uint32_t value)
+{ (void)c; (void)ip; (void)reason; (void)value; longjmp(stopped, 1); }
+uint32_t xk_mem_arena_size(void) { return 0x200000; }
+uint32_t xk_mem_alloc(uint32_t bytes, uint32_t align, uint32_t low, uint32_t high, int down)
+{
+    assert(bytes && !(bytes & 4095) && align == 4096 && !low && !high && !down);
+    ++allocs; if (allocation_failure) return 0;
+    unsigned count = bytes >> 12;
+    for (unsigned i = 0; i + count <= 256; ++i) {
+        unsigned j = 0; while (j < count && !pool[i + j]) ++j;
+        if (j < count) continue;
+        pool[i] = count;
+        for (j = 0; j < count; ++j) {
+            if (j) pool[i + j] = UINT32_MAX;
+            g_xpt[0x100 + i + j] = 0x10000 + (i + j) * 4096;
+        }
+        return (0x100 + i) << 12;
+    }
+    return 0;
+}
+int xk_mem_free(uint32_t base)
+{
+    assert(!(base & 4095) && base >= 0x100000 && base < 0x200000);
+    unsigned i = (base - 0x100000) >> 12, count = pool[i];
+    assert(count && count != UINT32_MAX && !locked);
+    /* Every real mixer reference must be gone before freeing guest backing. */
+    for (unsigned v = 0; v < XA_MAX_VOICES; ++v)
+        assert(!g_v[v].used || g_v[v].data != base);
+    for (unsigned j = 0; j < count; ++j) { pool[i + j] = 0; g_xpt[0x100 + i + j] = 0x1FF000; }
+    ++frees; return 0;
+}
+uint32_t xk_mem_size(uint32_t base) { return pool[(base - 0x100000) >> 12] * 4096; }
+int xk_os_audio_open(int rate, int grain) { assert(rate == XA_OUT_RATE && grain == XA_GRAIN); return 0; }
+void xk_os_audio_mutex_lock(void) { assert(!locked && healthy); locked = 1; }
+void xk_os_audio_mutex_unlock(void) { assert(locked); locked = 0; }
+uint64_t xk_os_monotonic_us(void) { return 42; }
+int h2_audio_backend_open(void) { assert(!healthy); healthy = 1; ++opens; return xk_audio_init(); }
+int h2_audio_backend_close(void) { assert(healthy && xk_audio_free_voices() == XA_MAX_VOICES); healthy = 0; ++closes; return 0; }
+int h2_audio_backend_health(void) { return healthy ? 0 : -1; }
+uint32_t h2_audio_backend_free_voices(void) { return xk_audio_free_voices(); }
+int h2_audio_backend_set_headroom(uint32_t bin, uint32_t amount) { (void)bin; (void)amount; assert(0); return -1; }
+static xctx context(uint32_t a, uint32_t b, uint32_t d, uint32_t e)
+{
+    xctx c; memset(&c, 0x5A, sizeof c); c.r[4] = 0x1FF0;
+    X_M32(c.r[4]) = 0x3E3B97;
+    X_M32(c.r[4] + 4) = a; X_M32(c.r[4] + 8) = b;
+    X_M32(c.r[4] + 12) = d; X_M32(c.r[4] + 16) = e;
+    return c;
+}
+static uint32_t read32(uint32_t address) { uint32_t x; x_guest_read(&x, address, 4); return x; }
+static void call(xctx *c, uint32_t ip, uint32_t ret, unsigned args)
+{
+    xctx expected = *c; expected.r[0] = ret; expected.r[4] += 4 + args * 4;
+    uint32_t fp = native_fp; h2_audio_host_call(c, ip);
+    assert(!memcmp(c, &expected, sizeof *c) && fp == native_fp && !locked);
+}
+static void reject(xctx *c, uint32_t ip)
+{
+    xctx before = *c; h2_audio_device_snapshot dev = device;
+    h2_audio_buffer bs[XA_MAX_VOICES]; xa_voice vs[XA_MAX_VOICES];
+    memcpy(bs, buffers, sizeof bs); memcpy(vs, g_v, sizeof vs);
+    uint8_t *ram = malloc(0x200000); assert(ram); memcpy(ram, g_xram, 0x200000);
+    uint32_t fp = native_fp; unsigned a = allocs, f = frees, cl = closes;
+    if (!setjmp(stopped)) { h2_audio_host_call(c, ip); assert(!"expected strict stop"); }
+    assert(!memcmp(c, &before, sizeof before) && !memcmp(&dev, &device, sizeof dev));
+    assert(!memcmp(bs, buffers, sizeof bs) && !memcmp(vs, g_v, sizeof vs));
+    assert(!memcmp(ram, g_xram, 0x200000) && fp == native_fp && a == allocs && f == frees && cl == closes && !locked);
+    free(ram);
+}
+static xctx description(uint32_t dev)
+{
+    uint32_t fields[6] = {24, 0xA0, 0, 0x4FF9, 0, 0};
+    const uint8_t wave[18] = {1,0,2,0,0x44,0xAC,0,0,0x10,0xB1,2,0,4,0,16,0,0,0};
+    x_guest_write(0x3FFD, fields, sizeof fields); x_guest_write(0x4FF9, wave, sizeof wave);
+    return context(dev, 0x3FFD, 0x6FFE, 0);
+}
+int main(void)
+{
+    unsetenv("XV_VOLUME"); g_xram = calloc(1, 0x200000); g_img_base = g_xram;
+    g_xpt = malloc((1u << 20) * 4); assert(g_xram && g_xpt);
+    for (unsigned i = 0; i < 1u << 20; ++i) g_xpt[i] = 0x1FF000;
+    for (unsigned p = 1; p <= 10; ++p) g_xpt[p] = (p - 1) << 12;
+    g_xpt[3] = 0x3000; g_xpt[4] = 0x2000; g_xpt[8] = 0x8000; g_xpt[9] = 0x7000;
+    g_xpt[0x386] = 0xA000;
+    xctx c = context(0, 0x6100, 0, 0); call(&c, 0x37D797, 0, 3);
+    uint32_t dev = read32(0x6100); assert(dev == 0x100008);
+    c = description(dev); X_M32(0x386B0C) = 1; reject(&c, 0x37D4BE); X_M32(0x386B0C) = 0;
+    c = description(dev); allocation_failure = 1; call(&c, 0x37D4BE, 0x8007000E, 4); allocation_failure = 0;
+    assert(!read32(0x6FFE) && device.references == 1 && !device.children);
+    for (unsigned i = 0; i < 18; ++i) {
+        c = description(dev); X_M8(0x4FF9 + i) ^= 1; reject(&c, 0x37D4BE);
+    }
+    for (unsigned i = 0; i < 6; ++i) if (i != 3) {
+        c = description(dev); uint32_t value = 1; x_guest_write(0x3FFD + i * 4, &value, 4); reject(&c, 0x37D4BE);
+    }
+    c = description(dev); X_M32(c.r[4] + 16) = 1; reject(&c, 0x37D4BE);
+    c = description(dev); X_M32(c.r[4] + 12) = dev; reject(&c, 0x37D4BE);
+    c = description(dev); g_xpt[5] = 0x1FF000; reject(&c, 0x37D4BE); g_xpt[5] = 0x4000;
+    /* Actual mixer exhaustion rolls the new object back and retains neither
+     * parent nor output. All 192 voices here are synthetic fixture resources. */
+    c = description(dev); for (unsigned i = 0; i < XA_MAX_VOICES; ++i) assert(xk_audio_voice_new(1, 0) == (int)i);
+    unsigned before = frees; call(&c, 0x37D4BE, 0x8007000E, 4);
+    assert(frees == before + 1 && !read32(0x6FFE) && device.references == 1);
+    for (unsigned i = 0; i < XA_MAX_VOICES; ++i) xk_audio_voice_free(i);
+    c = description(dev); call(&c, 0x37D4BE, 0, 4);
+    uint32_t handle = read32(0x6FFE); h2_audio_buffer *b = find_buffer(handle - 0x1C);
+    assert(b && b->references == 1 && device.references == 2 && device.children == 1);
+    assert(xk_audio_free_voices() == 191 && g_v[b->voice].rate == 44100 && g_v[b->voice].channels == 2 && g_v[b->voice].bits == 16);
+    /* Physical aliases of both the object and mirror are protected. */
+    g_xpt[0xA] = g_xpt[b->base >> 12]; c = context(dev, 0xA100, 0, 0); reject(&c, 0x37B5CA);
+    c = context(handle, 0xA000, 4096, 0); reject(&c, 0x37CC4A); g_xpt[0xA] = 0x9000;
+    c = context(handle, 0x8F00, 1025, 0); reject(&c, 0x37CC4A);
+    c = context(handle, 0xFFFFFFFC, 8, 0); reject(&c, 0x37CC4A);
+    int16_t source[512]; for (unsigned i = 0; i < 256; ++i) { source[i*2] = 8000; source[i*2+1] = -4000; }
+    x_guest_write(0x8F00, source, sizeof source);
+    c = context(handle, 0x8F00, sizeof source, 0); allocation_failure = 1;
+    call(&c, 0x37CC4A, 0x8007000E, 3); allocation_failure = 0; assert(!b->mirror && !g_v[b->voice].data);
+    c = context(handle, 0x8F00, sizeof source, 0); call(&c, 0x37CC4A, 0, 3);
+    uint8_t samples[sizeof source]; x_guest_read(samples, b->mirror, sizeof samples);
+    assert(!memcmp(samples, source, sizeof samples) && g_v[b->voice].data == b->mirror);
+    c = context(handle, 0x8F00, sizeof source, 0); reject(&c, 0x37CC4A);
+    g_xpt[0xA] = g_xpt[b->mirror >> 12]; c = context(dev, 0xA100, 0, 0); reject(&c, 0x37B5CA); g_xpt[0xA] = 0x9000;
+    c = context(handle, 48000, 0, 0); reject(&c, 0x37C5C8);
+    c = context(handle, 44100, 0, 0); call(&c, 0x37C5C8, 0, 2);
+    c = context(handle, 0, 0, 0); call(&c, 0x37B66F, 0, 2);
+    assert(fabsf(g_v[b->voice].volume - powf(10.0f, -600.0f / 2000)) < 1e-6f);
+    c = context(handle, 0, 0, 0); call(&c, 0x37B6A7, 0, 2);
+    assert(g_v[b->voice].volume == 1 && !b->headroom);
+    c = context(handle, 1, 0, 0); reject(&c, 0x37B66F); reject(&c, 0x37B6A7);
+    c = context(handle, (uint32_t)-9001, 0, 0); reject(&c, 0x37B66F);
+    /* No guest success is supplied for routing, Play, Lock or streams. */
+    c = context(handle, 0, 0, 0);
+    reject(&c, 0x37C5E4); reject(&c, 0x37B6DF); reject(&c, 0x37B7B3); reject(&c, 0x37B7E3);
+    int voice = b->voice;
+    xk_audio_voice_play(voice, 1);
+    int16_t mixed[XA_GRAIN * 2]; xk_audio_mix(mixed, XA_GRAIN); xk_audio_mix(mixed, XA_GRAIN);
+    for (unsigned i = 0; i < XA_GRAIN; ++i) assert(mixed[i*2] == 4000 && mixed[i*2+1] == -2000);
+    memset(source, 0, sizeof source); x_guest_write(0x8F00, source, sizeof source);
+    xk_audio_mix(mixed, XA_GRAIN);
+    for (unsigned i = 0; i < XA_GRAIN; ++i) assert(mixed[i*2] == 4000 && mixed[i*2+1] == -2000);
+    /* Volume and headroom alter the real samples, with the existing shared
+     * 50 percent master gain independently retained. */
+    c = context(handle, (uint32_t)-600, 0, 0); call(&c, 0x37B66F, 0, 2);
+    xk_audio_mix(mixed, XA_GRAIN);
+    for (unsigned i = 0; i < XA_GRAIN; ++i) {
+        assert(mixed[i*2] == 2000);
+        assert(mixed[i*2+1] == -1000);
+    }
+    c = context(handle, 600, 0, 0); call(&c, 0x37B6A7, 0, 2);
+    assert(b->volume == -600 && b->headroom == 600);
+    xk_audio_mix(mixed, XA_GRAIN);
+    for (unsigned i = 0; i < XA_GRAIN; ++i) {
+        assert(mixed[i*2] == 1000);
+        assert(mixed[i*2+1] == -500);
+    }
+    c = context(b->base, 0, 0, 0); call(&c, 0x37A14F, 2, 1);
+    c = context(handle, 0, 0, 0); call(&c, 0x379F45, 1, 1);
+    assert(device.references == 2 && g_v[voice].used);
+    c = context(dev - 8, 0, 0, 0); call(&c, 0x37C70F, 1, 1);
+    assert(healthy && !closes && device.children == 1);
+    c = context(dev - 8, 0, 0, 0); reject(&c, 0x37C70F);
+    uint32_t mirror = b->mirror, object = b->base;
+    c = context(handle, 0, 0, 0); call(&c, 0x379F45, 0, 1);
+    assert(!device.base && !healthy && closes == 1 && !g_v[voice].used);
+    assert(!find_buffer(object) && g_xpt[object >> 12] == 0x1FF000 && g_xpt[mirror >> 12] == 0x1FF000);
+    x_guest_read(samples, 0x8F00, sizeof samples); assert(!memcmp(samples, source, sizeof samples));
+    c = context(handle, 0, 0, 0); reject(&c, 0x379F45);
+    /* Internal common Release follows the same lifetime after a new device. */
+    c = context(0, 0x6100, 0, 0); call(&c, 0x37D797, 0, 3); dev = read32(0x6100);
+    c = description(dev); call(&c, 0x37D4BE, 0, 4); handle = read32(0x6FFE);
+    for (unsigned i = 0; i < 256; ++i) { source[i*2] = 8000; source[i*2+1] = -4000; }
+    x_guest_write(0x8F00, source, sizeof source);
+    c = context(handle, 0x8F00, sizeof source, 0); call(&c, 0x37CC4A, 0, 3);
+    b = find_buffer(handle - 0x1C); xk_audio_voice_play(b->voice, 1);
+    xk_audio_mix(mixed, XA_GRAIN); xk_audio_mix(mixed, XA_GRAIN); assert(mixed[100]);
+    c = context(handle - 0x1C, 0, 0, 0); call(&c, 0x37A795, 0, 1);
+    xk_audio_mix(mixed, XA_GRAIN);
+    for (unsigned i = 0; i < XA_GRAIN * 2; ++i) assert(!mixed[i]);
+    assert(device.references == 1 && !device.children && xk_audio_free_voices() == 192);
+    c = context(dev - 8, 0, 0, 0); call(&c, 0x37C70F, 0, 1);
+    assert(opens == 2 && closes == 2);
+    for (unsigned i = 0; i < 256; ++i) assert(!pool[i]);
+    free(g_xpt); free(g_xram);
+    puts("Halo 2 real PCM voice, bounded controls, mirror ownership, rollback, aliases and parent lifetime passed");
+    return 0;
+}

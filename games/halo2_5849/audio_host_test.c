@@ -38,6 +38,15 @@ uint32_t h2_audio_backend_free_voices(void) { assert(healthy); return available;
 int h2_audio_backend_set_headroom(uint32_t bin, uint32_t amount)
 { assert(healthy && bin < 32); ++bin_updates; last_bin = bin; last_headroom = amount; return 0; }
 
+/* Device-only failure fixtures must not allocate or mutate a buffer voice. */
+int xk_audio_voice_new(int kind, uint32_t format) { (void)kind; (void)format; assert(0); return -1; }
+void xk_audio_voice_free(int v) { (void)v; assert(0); }
+void xk_audio_voice_set_data(int v, uint32_t data, uint32_t bytes) { (void)v; (void)data; (void)bytes; assert(0); }
+void xk_audio_voice_set_volume_db100(int v, int32_t db) { (void)v; (void)db; assert(0); }
+void xk_audio_voice_set_frequency(int v, uint32_t hz) { (void)v; (void)hz; assert(0); }
+void xk_audio_lock(void) { assert(0); }
+void xk_audio_unlock(void) { assert(0); }
+
 static xctx context(uint32_t a, uint32_t b, uint32_t d)
 {
     xctx c; memset(&c, 0x5A, sizeof c); c.r[4] = 0x1FF4;
