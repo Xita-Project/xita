@@ -117,6 +117,10 @@ int xk_dispatch_magic(xctx *c, uint32_t target) __attribute__((weak));
 extern const unsigned xv_guest_trace_enabled __attribute__((weak));
 extern volatile uint32_t xv_cur_fn __attribute__((weak));
 
+#ifdef XV_HLE_DISPATCH_CACHE
+#include "xv_hle_dispatch_cache.h"
+#endif
+
 void xv_call(xctx *c, uint32_t target)
 {
     { static uint64_t n; static int on = -1; if (on < 0) on = getenv("XV_CALL_SAMPLE") != NULL;
@@ -129,14 +133,28 @@ void xv_call(xctx *c, uint32_t target)
         if (traced) xv_cur_fn = caller;
         if (handled) return;
     }
-    /* direct-mapped cache in front of the binary search: Halo makes ~10^5 indirect calls per frame
-     * (vtables, sort comparators, event handlers) and the same few hundred targets dominate */
+    /* Cache repeated guest targets before the binary search. Call volume varies
+     * by scene; measure it instead of inferring a per-frame cost from code size. */
     static struct { uint32_t eip; xv_fn_t fn; } cache[4096];
     unsigned slot = (target >> 2) & 4095;
     xv_fn_t fn = cache[slot].eip == target ? cache[slot].fn : NULL;
+#ifdef XV_HLE_DISPATCH_CACHE
+    int is_hle;
+    /* A cached HLE result has already passed the guest-first lookup. These
+     * linked tables are immutable. Keep its classification separate from the
+     * guest cache so tracing, callbacks and lookup priority remain unchanged. */
+    if (!fn && (fn = hle_dispatch_find(target))) {
+        is_hle = 1;
+        goto dispatch_resolved;
+    }
+#endif
     if (!fn) fn = xv_lookup(target);
     if (fn) { cache[slot].eip = target; cache[slot].fn = fn; }
+#ifdef XV_HLE_DISPATCH_CACHE
+    is_hle = !fn;
+#else
     int is_hle = !fn;
+#endif
     if (!fn) {
         for (unsigned i = 0; i < xv_hle_table_count; ++i)
             if (xv_hle_table[i].eip == target && xv_hle_table[i].fn) { fn = xv_hle_table[i].fn; break; }
@@ -152,6 +170,11 @@ void xv_call(xctx *c, uint32_t target)
         xv_trap(c, target);
         return;
     }
+#ifdef XV_HLE_DISPATCH_CACHE
+    if (is_hle) hle_dispatch_store(target, fn);
+dispatch_resolved:
+    if (is_hle) hle_dispatch_hle_calls++; else hle_dispatch_guest_calls++;
+#endif
     if (traced && is_hle) xv_cur_fn = 0x80000000u | target;
     fn(c);
     /* Generated indirect calls and callback dispatch return here. Their callee

@@ -66,3 +66,25 @@ The full VPK builds with the same 1,588 packaged members; only the gameplay
 executable and boot record change. Emulator gameplay and physical off/on/off
 comparisons are the next gates. Private reports are under
 `2026-09-13-worker-sizing/validation/hardware-updater-20260914T122650Z/palette-unroll`.
+
+## September 14 hardware comparison
+
+The updater boot-confirmed runtime
+`6716186c37cfa3f25fd34865dd8695d1ec96f4cf269c1110fab520aab76cea2b`
+on the physical Vita. Three off/on/off trials in each of two stationary Blood
+Gulch views used 60 settling and 120 measured frames per arm. All camera checks
+passed. Graphics settings stayed fixed at 360p, with phase timing disabled and
+the existing 30 FPS cap. Each row pools 720 off and 360 on frames using exact
+elapsed microseconds. Different views are separate workloads.
+
+| View | Off FPS | On FPS | Saved ms/frame |
+| --- | ---: | ---: | ---: |
+| Base entrance | 17.823 | 17.627 | -0.621 |
+| Turned toward valley | 11.524 | 11.544 | 0.152 |
+
+Both views had mixed trial directions. The base trials saved 0.458, -2.336 and
+0.014 ms; the turned trials saved 0.240, -0.363 and 0.577 ms. Smaller isolated
+ARM instruction counts did not establish a consistent whole-frame improvement.
+The native palette therefore remains disabled in the hardware configuration.
+No stable 20 or 30 FPS result is claimed. Private logs, exact pooled analysis
+and screenshots are under `palette-unroll` in the September 14 hardware session.

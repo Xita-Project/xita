@@ -391,6 +391,9 @@ endif
 $(RECOMP_BUILD)/kernel/xk_object_basis.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_clip.o: RECOMP_CFLAGS += -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_bounds.o: RECOMP_CFLAGS += -ffp-contract=off
+ifeq ($(XV_HLE_DISPATCH_CACHE),1)
+$(RECOMP_BUILD)/xv_x86rt.o: RECOMP_CFLAGS += -DXV_HLE_DISPATCH_CACHE
+endif
 recomp/kernel/xk_bounds.c: tools/gen_native_bounds.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_bounds.py
 
