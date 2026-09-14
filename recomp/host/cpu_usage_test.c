@@ -116,8 +116,14 @@ int main(void)
     thread_fixture.currentCpuAffinityMask = 0x20000; current_core = 1;
     xv_cpu_log_thread("render-pump");
     assert(strstr(last_log, "name=xv_pump") && strstr(last_log, "core=1 affinity=00020000"));
+    thread_fixture.currentCpuAffinityMask=SCE_KERNEL_THREAD_CPU_AFFINITY_MASK_DEFAULT;
+    strcpy(thread_fixture.name,"xk_fiber");current_core=2;
+    xv_cpu_log_thread("default-affinity");
+    assert(strstr(last_log,"name=xk_fiber") && strstr(last_log,"core=2 affinity=00000000"));
+    assert(!strstr(last_log,"unavailable"));
     thread_rc = -1; xv_cpu_log_thread("failed"); assert(strstr(last_log, "unavailable"));
     thread_rc = 0; memset(&thread_fixture, 0, sizeof thread_fixture);
+    current_core=1;
     xv_cpu_log_thread("stub"); assert(strstr(last_log, "unavailable"));
     assert(strstr(last_log, "core=1")); /* core ID remains useful when ThreadInfo is empty */
     puts("PASS: per-core idle deltas, variable intervals, 64-bit counters, poll throttle, masks, reset/skew, API failure/recovery, stub rejection and disable");

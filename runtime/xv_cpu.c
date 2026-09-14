@@ -27,8 +27,10 @@ void xv_cpu_log_thread(const char *role)
     SceKernelThreadInfo info;
     memset(&info, 0, sizeof info); info.size = sizeof info;
     int rc = sceKernelGetThreadInfo(id, &info);
-    /* Successful-but-empty emulator responses are not measured thread data. */
-    if (rc < 0 || !info.name[0] || !(info.currentCpuAffinityMask & SCE_KERNEL_CPU_MASK_USER_ALL)) {
+    /* Reject empty emulator responses. A populated thread record with mask
+     * zero must still be logged: zero is the SDK's default-affinity value,
+     * and the sampled CPU ID is independent of that returned mask. */
+    if (rc < 0 || !info.name[0]) {
         xv_logf("[cpu-thread] role=%s id=%08X core=%d info-unavailable rc=%08X affinity=%08X\n",
                 role, (unsigned)id, sceKernelGetCpuId(), (unsigned)rc, (unsigned)info.currentCpuAffinityMask);
         return;
