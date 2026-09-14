@@ -73,3 +73,7 @@ recomp/kernel/xk_bounds.c
 
 # Private game metadata, captures and locally supplied helper binaries.
 /local/
+
+# Private credentials for the opt-in LAN test service.
+remote.key
+remote-client.json

@@ -67,9 +67,13 @@ test-input: build/vita_input_test
 	./build/vita_input_test
 	./build/vita_input_test rear
 
-build/vita_input_test: vita_input_test.c ../kernel/xk_os_vita.c ../kernel/xk.h ../../runtime/xv_benchmark.c
+build/vita_input_test: vita_input_test.c ../kernel/xk_os_vita.c ../kernel/xk.h ../../runtime/xv_benchmark.c ../../runtime/xv_remote.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include vita_input_test.c ../../runtime/xv_benchmark.c -Wl,--gc-sections -lm -o $@
+
+.PHONY: test-remote
+test-remote:
+	python3 ../../tools/test_remote.py
 
 .PHONY: test
 test: build/runtime_test build/immediate_test build/file_io_test build/file_open_test build/crypto_test build/profiler_test build/profiler_traced_test build/dispatch_profile_test

@@ -9,6 +9,11 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+[~] [Remote hardware testing](docs/remote-testing.md): opt-in LAN controller
+input, completed-frame screenshots, log downloads and repeated off/on/off
+trials. One-time pairing and foreground launch are required; initial hardware
+validation, automated installation and crash recovery remain open.
+
 September 13 [object-transform hardware follow-up](docs/hardware-20260913-object-basis.md):
 the enabled native helper records over two million accepted calls with no guard
 rejections. Different views prevent attributing a frame-rate gain. A dedicated

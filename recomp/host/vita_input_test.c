@@ -10,6 +10,9 @@ static SceCtrlData controller;
 static unsigned sampled[2], peeked[2], front_contact;
 static unsigned settings_buttons;
 static int settings_capture;
+static uint32_t remote_buttons;
+void xv_remote_pad(uint32_t *buttons,uint8_t *lx,uint8_t *ly,uint8_t *rx,uint8_t *ry)
+{(void)lx;(void)ly;(void)rx;(void)ry;if(remote_buttons)*buttons=remote_buttons;}
 SceUInt64 sceKernelGetProcessTimeWide(void) {return 1000000;}
 int xv_settings_input(uint32_t buttons,uint64_t now)
 {assert(now==1000000);settings_buttons=buttons;return settings_capture;}
@@ -82,6 +85,14 @@ int main(int argc, char **argv)
     controller.buttons=0;xk_os_pad_poll(&p);
     controller.buttons=SCE_CTRL_LTRIGGER|SCE_CTRL_RTRIGGER|SCE_CTRL_TRIANGLE;
     xk_os_pad_poll(&p);assert(p.force_start&&!xv_benchmark_active());
+    controller.buttons=0;controller.lx=128;xk_os_pad_poll(&p);
+    remote_buttons=SCE_CTRL_LTRIGGER|SCE_CTRL_RTRIGGER|SCE_CTRL_SQUARE;
+    xk_os_pad_poll(&p);assert(xv_benchmark_active()&&!p.buttons&&!p.force_start);
+    assert(xv_benchmark_step(6,480,1,view)==480);xv_benchmark_applied(6,480);
+    remote_buttons=0;xk_os_pad_poll(&p);
+    remote_buttons=SCE_CTRL_LTRIGGER|SCE_CTRL_RTRIGGER|SCE_CTRL_SQUARE;
+    xk_os_pad_poll(&p);assert(xv_benchmark_step(7,480,1,view)==480);
+    xv_benchmark_applied(7,480);assert(!xv_benchmark_active()&&optimization==-1);
     free(g_xpt);free(g_xram);
     puts("PASS: actual Vita input, unpaused multiplayer menus, paused campaign, main menu, gameplay shortcuts and independent rear/front touch");
     return 0;

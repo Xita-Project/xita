@@ -77,6 +77,7 @@
 #ifdef XV_RUN_RECOMP
 #include <psp2/ctrl.h>
 #include "dashboard/xv_dash.h"
+#include "xv_remote.h"
 #endif
 #define XV_LOG(...)                 xv_logf("[xv] " __VA_ARGS__)
 
@@ -306,6 +307,9 @@ static void xv_display_callback(const void *callback_data)
     fb.width       = XV_DISPLAY_WIDTH;
     fb.height      = XV_DISPLAY_HEIGHT;
     sceDisplaySetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME);
+#ifdef XV_RUN_RECOMP
+    xv_remote_frame(dd->address, XV_DISPLAY_WIDTH, XV_DISPLAY_HEIGHT, XV_DISPLAY_STRIDE);
+#endif
     /* XV_FB_DUMP=1: write each presented frame as ux0:data/xita/fb/NNN.ppm (A8B8G8R8 -> RGB) so the exact
      * on-screen image can be inspected off-device (e.g. what shows at a level-load transition). Ring of 240. */
     { static int on = -1; if (on < 0) { const char *e = getenv("XV_FB_DUMP"); on = e ? atoi(e) : 0; if (on) sceIoMkdir("ux0:data/xita/fb", 0777); }
@@ -1542,7 +1546,8 @@ static int xv_dashboard_poll(void *userdata, xv_dash_input *input)
     SceCtrlData pad = {0};
     int rc = sceCtrlPeekBufferPositive(0, &pad, 1);
     if (rc < 0) return rc;
-    if (!rc) return 0;
+    if (!rc) pad.lx = pad.ly = pad.rx = pad.ry = 128;
+    xv_remote_pad(&pad.buttons, &pad.lx, &pad.ly, &pad.rx, &pad.ry);
     const unsigned masks[] = {SCE_CTRL_UP, SCE_CTRL_DOWN, SCE_CTRL_LEFT, SCE_CTRL_RIGHT, SCE_CTRL_CROSS, SCE_CTRL_CIRCLE};
     for (unsigned i = 0; i < 6; ++i) if (pad.buttons & masks[i]) input->buttons |= 1u << i;
     input->lx = (int)pad.lx - 128; input->ly = (int)pad.ly - 128;
@@ -1558,6 +1563,7 @@ static int xv_dashboard_present(void *userdata, xv_dash_framebuffer *fb)
      * Both ends of this copy are CPU addresses; the GPU never reads the canvas. */
     void *display_pixels = g->display_mem[g->back_index].base;
     memcpy(display_pixels, fb->pixels, (size_t)fb->pitch * fb->height * sizeof(uint32_t));
+    xv_remote_frame(fb->pixels, fb->width, fb->height, fb->pitch);
     uint64_t copied = sceKernelGetProcessTimeWide();
     SceDisplayFrameBuf display = {0};
     display.size = sizeof display; display.base = display_pixels;
@@ -1646,6 +1652,7 @@ int main(int argc, char *argv[])
     XV_LOG("graphics startup: %u ms\n", (unsigned)((sceKernelGetProcessTimeWide() - gfx_started) / 1000));
 
 #ifdef XV_RUN_RECOMP
+    xv_remote_start();
     if (xv_dashboard_start() < 0) {
         XV_LOG("dashboard failed; game was not started\n");
         goto shutdown;
@@ -1714,6 +1721,7 @@ int main(int argc, char *argv[])
 
 shutdown:
 #ifdef XV_RUN_RECOMP
+    xv_remote_stop();
     xv_net_shutdown();
 #endif
     /* Exit protocol (verified on hardware + Vita3K): drain the GPU and the display

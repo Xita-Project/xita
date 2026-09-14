@@ -2,6 +2,9 @@
 
 [README](../README.md) · [Roadmap](../ROADMAP.md) · [Release audit](release-audit.md)
 
+For unattended hardware work, see [remote testing](remote-testing.md): optional
+LAN screenshots, controller input, log collection and repeated benchmarks.
+
 ## Sending tester logs
 
 Normal campaign play is useful; a benchmark is not required to report a bug.
@@ -42,11 +45,10 @@ comments. Restart to apply launch-time changes.
 | `XV_PROF=1` | Enable sampling; regenerate with `--trace-funcs` for guest attribution. Instrumentation changes the workload. |
 
 **L + R + Square** uses the enabled benchmark selector. With no more specific
-selector enabled, it runs eager/deferred/eager visibility comparison. The
-primary Vita's last verified configuration enables
-`XV_BENCHMARK_VERTEX_REFERENCES=1`, selecting full/indexed/full vertex validation
-instead. Check the `[...-compare] start` line and the build notes before
-interpreting results. See [indexed validation](vertex-references-20260908.md).
+selector enabled, it runs eager/deferred/eager visibility comparison. Check the
+`[...-compare] start` line and the build notes before interpreting results.
+The [native math selectors](native-math-benchmark-20260913.md) take precedence
+over older [indexed validation](vertex-references-20260908.md) and worker tests.
 The comparison preserves configured buffering, shader quality, resolution and
 the frame cap, then restores the configured experiment setting.
 Use a loaded first-person view, hold still, and keep settings unchanged.
@@ -56,8 +58,8 @@ active comparison; completion/cancellation restores its original settings.
 ## Overlay units
 
 The experimental [parallel vertex upload comparison](vertex-upload-worker-20260909.md)
-uses `XV_BENCHMARK_VERTEX_WORKER=1` and **L + R + Select + Square**. It takes
-precedence over older comparison selectors and preserves all other settings.
+uses `XV_BENCHMARK_VERTEX_WORKER=1` and **L + R + Square**. Native math selectors
+must be off to select this comparison. Other settings are preserved.
 The dashboard Performance switch requires relaunching Xita. It defaults off
 until measured on hardware.
 

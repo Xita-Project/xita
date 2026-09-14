@@ -23,6 +23,7 @@
 #include "../../runtime/xv_cpu.h"
 #include "../../runtime/xv_benchmark.h"
 #include "../../runtime/xv_settings.h"
+#include "../../runtime/xv_remote.h"
 #include "xk.h"                 /* X_M32/X_M8, xk_file_in_ui_map (pad context) */
 
 void xv_logf(const char *fmt, ...);        /* app-side sink (xv_log.c): console + ux0:data/xita/xita.log */
@@ -511,6 +512,7 @@ void xk_os_pad_poll(xk_os_pad *p)
     { static int mode_set; if (!mode_set) { mode_set = 1; sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);   /* real firmware defaults to DIGITAL: sticks read 128 forever */
         xv_logf("[xk] pad: analog sampling mode set\n"); } }
     sceCtrlPeekBufferPositive(0, &d, 1);
+    xv_remote_pad(&d.buttons, &d.lx, &d.ly, &d.rx, &d.ry);
     memset(p, 0, sizeof *p); p->connected = 1;
     uint16_t b = 0;
     /* Scripted input for emulator runs: ux0:data/xita/pad.txt holds "frame:input[*hold]" items (frame =
