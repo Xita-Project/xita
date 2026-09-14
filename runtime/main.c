@@ -1245,6 +1245,11 @@ void xv_benchmark_optimizations(int enabled)
         if(xv_point_math_override)xv_point_math_override(enabled);
         return;
     }
+    if (xv_benchmark_compare_matrix_neon()) {
+        extern void xv_matrix_neon_override(int) __attribute__((weak));
+        if(xv_matrix_neon_override)xv_matrix_neon_override(enabled);
+        return;
+    }
     if (xv_benchmark_compare_early_visibility()) {
         __atomic_store_n(&g_early_visibility_override, enabled < 0 ? -1 : !!enabled, __ATOMIC_RELEASE);
         return;

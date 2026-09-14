@@ -32,8 +32,15 @@ passes with the unchanged portable path.
 These counts include fixture input loads. They are not CPU cycles or measured
 gameplay savings. Register allocation and caller context affect the result:
 some `-O3` unordered and EFLAGS paths execute more instructions than the
-preceding version. Full game validation and a hardware comparison are pending;
-no FPS improvement is claimed.
+preceding version. No FPS improvement is claimed.
+
+The full game builds and passes a further 10,752 linked-ARM matrix, quaternion
+and point comparisons, preserving complete guest context, memory and FPSCR.
+Its updater boot is verified in the isolated CE emulator. The dashboard, main
+menu, ordinary solo Blood Gulch startup, walking, turning and firing work;
+the captured gameplay log contains no reported trap or crash. The emulator is
+capped at 20 FPS, so this is a functionality check. A physical comparison is
+still pending.
 
 With VitaSDK on `PATH` and Unicorn/pyelftools installed:
 

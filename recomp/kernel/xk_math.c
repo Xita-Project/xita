@@ -8,6 +8,9 @@
 #ifdef XV_QUAT_CACHE
 #include "xk_quat_cache.h"
 #endif
+#ifdef XV_NATIVE_MATRIX_NEON
+#include "xk_matrix_neon.h"
+#endif
 
 static unsigned math_fast[2], math_fallback[2];
 static unsigned point_fast, point_fallback[4];
@@ -39,6 +42,9 @@ static int math_overlap(const void *a, unsigned an, const void *b, unsigned bn)
 }
 void xv_native_math_report(unsigned frames)
 {
+#ifdef XV_NATIVE_MATRIX_NEON
+    matrix_neon_report(frames);
+#endif
     XK_LOG("[native-point] %u frames fast %u; fallback disabled %u fp %u layout %u numeric %u\n",
            frames,point_fast,point_fallback[0],point_fallback[1],point_fallback[2],point_fallback[3]);
     point_fast=0; memset(point_fallback,0,sizeof point_fallback);
@@ -169,6 +175,10 @@ int xv_math_matrix_multiply(xctx *restrict c)
         return matrix_decline(ML_PARTIAL);
     matrix_layout[(op==ap?ML_LEFT:0)+(op==bp?ML_RIGHT:0)]++;
     float l[13], r[13], v[8][4];
+#ifdef XV_NATIVE_MATRIX_NEON
+    float left_scale=ap[0],right_scale=bp[0];
+    if (!matrix_neon_try(ap,bp,op,v)) {
+#endif
     memcpy(l, ap, sizeof l); memcpy(r, bp, sizeof r);
     /* SSE lanes are x, zero, y, z. Preserve even the otherwise unused lane,
      * including NaN/zero behavior, and each float rounding point. */
@@ -210,10 +220,17 @@ int xv_math_matrix_multiply(xctx *restrict c)
 #endif
     }
     op[10]=v[3][0]; op[11]=v[3][2]; op[12]=v[3][3];
+#ifdef XV_NATIVE_MATRIX_NEON
+    }
+#endif
     double scale;
 #if defined(__arm__)
     /* Preserve the previous compiled scale product's NaN operand priority. */
+#ifdef XV_NATIVE_MATRIX_NEON
+    double left=(double)left_scale,right=(double)right_scale;
+#else
     double left=(double)l[0],right=(double)r[0];
+#endif
     __asm__("vmul.f64 %P0, %P1, %P2" : "=w"(scale) : "w"(right),"w"(left));
 #else
     scale = (double)l[0] * (double)r[0];

@@ -285,9 +285,10 @@ test-visibility: build/visibility_test
 	./build/visibility_test 100 fixed
 
 .PHONY: test-cpu-prep
-test-completion: build/resolution_benchmark_test build/native_math_benchmark_test build/no_point_math_benchmark_test build/scheduler_notify_test build/scheduler_vita_notify_test
+test-completion: build/resolution_benchmark_test build/native_math_benchmark_test build/no_point_math_benchmark_test build/no_matrix_neon_benchmark_test build/scheduler_notify_test build/scheduler_vita_notify_test
 	./build/resolution_benchmark_test
 	./build/no_point_math_benchmark_test
+	./build/no_matrix_neon_benchmark_test
 	XV_BENCHMARK_VERTEX_WORKER=1 XV_BENCHMARK_VERTEX_REFERENCES=1 ./build/resolution_benchmark_test
 	XV_BENCHMARK_DRAW_SCAN=1 ./build/resolution_benchmark_test
 	XV_BENCHMARK_VERTEX_COPY=1 ./build/resolution_benchmark_test
@@ -312,6 +313,10 @@ build/no_point_math_benchmark_test: resolution_benchmark_test.c ../../runtime/xv
 build/native_math_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -DXV_NATIVE_OBJECT_BASIS -DXV_NATIVE_MODEL_PALETTE resolution_benchmark_test.c -lm -o $@
+
+build/no_matrix_neon_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_MATRIX_NEON resolution_benchmark_test.c -lm -o $@
 
 build/scheduler_notify_test: scheduler_notify_test.c ../kernel/xk_os_host.c ../kernel/xk_os.h
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections scheduler_notify_test.c -Wl,--gc-sections -pthread -lm -o $@

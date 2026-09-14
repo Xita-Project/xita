@@ -31,7 +31,13 @@ parser.add_argument('--output-dir', type=Path, required=True)
 parser.add_argument('--cases', type=int, default=128)
 parser.add_argument('--float-edges', action='store_true')
 parser.add_argument('--random-floats', action='store_true')
+parser.add_argument('--bounded-matrices', action='store_true',
+                    help='bounded finite matrix inputs with expanded alias/page layouts')
+parser.add_argument('--matrix-boundaries', action='store_true',
+                    help='matrix numeric guard boundaries at every input component')
 parser.add_argument('--fpscr', type=lambda s: int(s, 0), nargs='+', default=[0])
+parser.add_argument('--native-matrix', choices=['default', 'off', 'on'],
+                    help='set the candidate compiled NEON matrix override')
 parser.add_argument('--functions', nargs='+',
                     choices=['f_000B77C0', 'xv_math_polygon_clip', 'f_000B71C0',
                              'f_000B5B40', 'f_000B5F60', 'f_000B5EA0'],
@@ -39,10 +45,15 @@ parser.add_argument('--functions', nargs='+',
 args = parser.parse_args()
 if not 1 <= args.cases <= 10000:
     parser.error('--cases must be between 1 and 10000')
-if any(value & ~0x03c00000 for value in args.fpscr):
-    parser.error('--fpscr permits rounding, flush-to-zero and default-NaN controls only')
-if args.float_edges and args.random_floats:
-    parser.error('choose --float-edges or --random-floats')
+if any(value & ~0x03c0009f for value in args.fpscr):
+    parser.error('--fpscr permits rounding, flush-to-zero, default-NaN and cumulative exception flags only')
+if args.native_matrix and 'f_000B5B40' not in args.functions:
+    parser.error('--native-matrix requires f_000B5B40 in --functions')
+if sum((args.float_edges, args.random_floats, args.bounded_matrices,
+        args.matrix_boundaries)) > 1:
+    parser.error('choose one floating-point fixture mode')
+if (args.bounded_matrices or args.matrix_boundaries) and args.functions != ['f_000B5B40']:
+    parser.error('matrix-specific fixtures require only f_000B5B40')
 if (args.float_edges or args.random_floats) and any(name not in ('f_000B5B40', 'f_000B5F60', 'f_000B5EA0') for name in args.functions):
     parser.error('float stress fixtures are available for matrix/quaternion/point functions only')
 out = args.output_dir.resolve()
@@ -126,6 +137,12 @@ class Machine:
         uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
 
     def call(self, name, memory, context, fpscr=0):
+        def matrix_counts():
+            names = ('matrix_neon_accepted', 'matrix_neon_disabled',
+                     'matrix_neon_fp', 'matrix_neon_numeric')
+            return tuple(struct.unpack('<I', self.uc.mem_read(self.symbols[n], 4))[0]
+                         if n in self.symbols else 0 for n in names)
+        matrix_before = matrix_counts()
         def point_counts():
             if 'point_fast' not in self.symbols: return (0,0,0,0,0)
             return struct.unpack('<I', self.uc.mem_read(self.symbols['point_fast'],4)) + struct.unpack('<IIII', self.uc.mem_read(self.symbols['point_fallback'],16))
@@ -147,7 +164,18 @@ class Machine:
                 self.count, (self.copy_calls, self.copy_bytes),
                 tuple((a - b) & 0xffffffff for a, b in zip(math_counts(), before)),
                 self.uc.reg_read(UC_ARM_REG_FPSCR),
-                tuple((a-b)&0xffffffff for a,b in zip(point_counts(),point_before)))
+                tuple((a-b)&0xffffffff for a,b in zip(point_counts(),point_before)),
+                tuple((a-b)&0xffffffff for a,b in zip(matrix_counts(),matrix_before)))
+
+    def matrix_mode(self, mode):
+        symbol = self.symbols.get('xv_matrix_neon_override')
+        if not symbol:
+            raise RuntimeError('Candidate was not built with XV_NATIVE_MATRIX_NEON=1')
+        self.uc.reg_write(UC_ARM_REG_R0, {'default': 0xffffffff, 'off': 0, 'on': 1}[mode])
+        self.uc.reg_write(UC_ARM_REG_SP, STACK + 65024)
+        self.uc.reg_write(UC_ARM_REG_LR, END | 1)
+        self.uc.emu_start(symbol | 1, END, count=1000)
+        assert self.uc.reg_read(UC_ARM_REG_PC) == END, 'matrix override did not return'
 
 
 def fixture(name, k):
@@ -266,17 +294,55 @@ def fixture(name, k):
         reg(0,output);reg(1,matrix);reg(2,source)
     elif name == 'f_000B5B40':
         left, right = 0x18000 + k % 4, 0x1a000 + k % 4
+        if args.matrix_boundaries:
+            left, right = 0x18000, 0x1a000
         output = [0x22000, left, right, left + 4, left + 0x20000][k % 5]
+        if args.bounded_matrices or args.matrix_boundaries:
+            alignment = 0 if args.matrix_boundaries else k % 4
+            variant = (k // 520) % 12 if args.matrix_boundaries else (k // 4) % 12
+            output = 0x22000 + alignment
+            if variant == 1: output = left
+            elif variant == 2: output = right
+            elif variant == 3: right = output = left
+            elif variant == 4: right = left
+            elif variant == 5: right, output = left + 0x20000, left
+            elif variant == 6: output = left + 4
+            elif variant == 7: output = left + 0x20004
+            elif variant == 8:
+                sp = 0x62008
+                reg(4, sp)
+                word(sp, 0x12345678)
+            elif variant == 9: left = 0x18ff0 + alignment
+            elif variant == 10: right = 0x1aff8 + alignment
+            elif variant == 11: output = 0x22ffc + alignment
         for address, angle in [(left, k * .125), (right, k * -.25)]:
             values = [1, math.cos(angle), math.sin(angle), 0,
                       -math.sin(angle), math.cos(angle), 0, 0, 0, 1,
                       k * .25, -k * .125, 3]
             for i, value in enumerate(values):
-                if args.random_floats: word(address + i * 4, rng.getrandbits(32))
+                if args.bounded_matrices:
+                    value = ((rng.randrange(2) << 31) | (rng.randrange(98,156) << 23) |
+                             rng.getrandbits(23))
+                    if rng.randrange(8) == 0: value &= 0x80000000
+                    word(address + i * 4, value)
+                elif args.random_floats: word(address + i * 4, rng.getrandbits(32))
                 elif args.float_edges:
                     edge_index = ((k // 4) // len(edges) + 5 * i + 2) if address == right else (k // 4 + 3 * i)
                     word(address + i * 4, edges[edge_index % len(edges)])
                 else: fl(address + i * 4, value)
+        if args.matrix_boundaries:
+            # Adjacent representable values on both sides of each bound,
+            # exceptional values, and signed zeros. Cycle both operands and
+            # every component; the expanded layouts also exercise aliases.
+            boundaries = [0, 0x80000000, 0x307fffff, 0x30800000,
+                          0x30800001, 0x4e7fffff, 0x4e800000, 0x4e800001,
+                          0xb07fffff, 0xb0800000, 0xb0800001, 0xce7fffff,
+                          0xce800000, 0xce800001, 1, 0x80000001,
+                          0x7f800000, 0xff800000, 0x7fc01234, 0x7f801234]
+            case = k % 520
+            operand = (left, right)[(case // 13) % 2]
+            word(operand + 4 * (case % 13),
+                 boundaries[(case // 26) % len(boundaries)])
         word(sp + 4, left)
         word(sp + 8, right)
         word(sp + 12, output)
@@ -293,6 +359,8 @@ for name in args.functions:
     memory, context = fixture(name, 0)
     baseline.call(name, memory, context)
     candidate.call(name, memory, context)
+    if args.native_matrix:
+        candidate.matrix_mode(args.native_matrix)
     for fpscr in args.fpscr:
         for k in range(args.cases):
             memory, context = fixture(name, k)
@@ -311,7 +379,8 @@ for name in args.functions:
             assert old[5] == new[5], (name, k, hex(fpscr), 'native FP status', hex(old[5]), hex(new[5]))
             rows.append({'case': k, 'fpscr': fpscr, 'baseline': old[2], 'candidate': new[2],
                          'firmware_copies': {'baseline': old[3], 'candidate': new[3]},
-                         'native_math_counts': old[4], 'point_math_counts': new[6]})
+                         'native_math_counts': old[4], 'point_math_counts': new[6],
+                         'matrix_neon_counts': new[7]})
     before, after = (sum(r[n] for r in rows) for n in ('baseline', 'candidate'))
     report[name] = {'cases': len(rows), 'baseline_instructions': before,
                     'candidate_instructions': after, 'change_percent': (after / before - 1) * 100,
@@ -322,7 +391,10 @@ for name in args.functions:
                         [sum(r['native_math_counts'][i] for r in rows) for i in range(4)]))}
     (out / (name + '.json')).write_text(json.dumps(rows, indent=2) + '\n')
 report = {'unicorn': unicorn.__version__, 'results': report, 'units': 'instructions, not cycles or FPS',
+          'native_matrix': args.native_matrix,
           'float_edges': args.float_edges, 'random_floats': args.random_floats, 'fpscr': args.fpscr,
+          'bounded_matrices': args.bounded_matrices,
+          'matrix_boundaries': args.matrix_boundaries,
           'guest_trace_enabled': {'baseline': baseline.guest_trace_enabled,
                                   'candidate': candidate.guest_trace_enabled},
           'inputs': {n: {'path': str(p.resolve()), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}

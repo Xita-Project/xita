@@ -7,6 +7,9 @@ static unsigned switches;
 #ifndef TEST_NO_POINT_MATH
 void xv_point_math_override(int enabled) { (void)enabled; }
 #endif
+#ifndef TEST_NO_MATRIX_NEON
+void xv_matrix_neon_override(int enabled) { (void)enabled; }
+#endif
 void xv_benchmark_optimizations(int enabled) { optimization=enabled;switches++; }
 int main(void)
 {
@@ -103,7 +106,7 @@ int main(void)
     xv_benchmark_remote_poll(0);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==-1);
     xv_benchmark_remote_poll(1);
-    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_TEXTURE_STATE+1)==-1);
+    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_MATRIX_NEON+1)==-1);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==0 && !b.request && !b.active);
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_remote_poll(0);assert(!xv_benchmark_remote_busy());
@@ -114,11 +117,14 @@ int main(void)
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_toggle();assert(xv_benchmark_step(now,544,1,view)==360);
     xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
-    unsigned kinds[]={XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
+    unsigned kinds[]={XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
     for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++) {
         int compiled=1;
 #ifdef TEST_NO_POINT_MATH
         if(kinds[i]==XV_BENCH_POINT_MATH)compiled=0;
+#endif
+#ifdef TEST_NO_MATRIX_NEON
+        if(kinds[i]==XV_BENCH_MATRIX_NEON)compiled=0;
 #endif
 #ifndef XV_NATIVE_OBJECT_BASIS
         if(kinds[i]==XV_BENCH_OBJECT_BASIS)compiled=0;
@@ -130,6 +136,7 @@ int main(void)
         if(!compiled)continue;
         xv_benchmark_remote_poll(1);
         assert(xv_benchmark_compare_point_math()==(kinds[i]==XV_BENCH_POINT_MATH));
+        assert(xv_benchmark_compare_matrix_neon()==(kinds[i]==XV_BENCH_MATRIX_NEON));
         assert(xv_benchmark_compare_texture_state()==(kinds[i]==XV_BENCH_TEXTURE_STATE));
         assert(xv_benchmark_compare_early_visibility()==(kinds[i]==XV_BENCH_EARLY_VISIBILITY));
         assert(xv_benchmark_compare_object_basis()==(kinds[i]==XV_BENCH_OBJECT_BASIS));

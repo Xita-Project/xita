@@ -19,8 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def benchmark_cases(tmp):
     class Fake:
-        def __init__(self, mode):
-            self.mode = mode; self.active = False; self.records = ""; self.released = False
+        def __init__(self, mode, kind="object-basis"):
+            self.mode = mode; self.kind = kind
+            self.active = False; self.records = ""; self.released = False
         def status(self):
             if self.mode == "disconnect":
                 raise OSError("connection lost")
@@ -38,11 +39,11 @@ def benchmark_cases(tmp):
         def hold(self, buttons, duration):
             self.active = True
             if self.mode != "missing-result":
-                self.records += "[object-basis-compare] result off-before 10.000 on 12.000 off-after 10.000 fps comparable-view " + ("0" if self.mode == "camera" else "1") + "\n"
+                self.records += "[" + self.kind + "-compare] result off-before 10.000 on 12.000 off-after 10.000 fps comparable-view " + ("0" if self.mode == "camera" else "1") + "\n"
         def pad(self):
             self.released = True
         def request(self,path,method):
-            assert path=='/benchmark?kind=object-basis' and method=='POST'
+            assert path=='/benchmark?kind='+self.kind and method=='POST'
             self.hold(0,0)
     for mode in ("success", "camera", "missing-result", "disconnect"):
         client = Fake(mode); out = tmp / mode
@@ -59,7 +60,8 @@ def benchmark_cases(tmp):
         if mode != "success":
             assert result["error"]
     with patch("vita_remote.time.sleep",lambda _:None):
-        benchmark(Fake('success'),tmp/'selected',1,30,'object-basis')
+        for kind in ('object-basis', 'matrix-neon'):
+            benchmark(Fake('success', kind),tmp/('selected-'+kind),1,30,kind)
 
 
 def main():
@@ -183,7 +185,7 @@ def main():
             assert request('/benchmark?kind=unknown','POST')[0]==400
             assert request('/benchmark?kind=model-palette&kind=flare','POST')[0]==400
             assert request('/benchmark?kind=model-palette','POST',token='f'*32)[0]==403
-            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state'):
+            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon'):
                 assert request('/benchmark?kind='+kind,'POST')[0]==204
                 assert request('/benchmark?kind='+kind,'POST')[0]==409
                 assert request('/screen')[0]==request('/update')[0]==409
