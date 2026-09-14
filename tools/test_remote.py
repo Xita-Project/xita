@@ -60,7 +60,7 @@ def benchmark_cases(tmp):
         if mode != "success":
             assert result["error"]
     with patch("vita_remote.time.sleep",lambda _:None):
-        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch'):
+        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap'):
             benchmark(Fake('success', kind),tmp/('selected-'+kind),1,30,kind)
 
 
@@ -185,7 +185,7 @@ def main():
             assert request('/benchmark?kind=unknown','POST')[0]==400
             assert request('/benchmark?kind=model-palette&kind=flare','POST')[0]==400
             assert request('/benchmark?kind=model-palette','POST',token='f'*32)[0]==403
-            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch'):
+            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap'):
                 assert request('/benchmark?kind='+kind,'POST')[0]==204
                 assert request('/benchmark?kind='+kind,'POST')[0]==409
                 assert request('/screen')[0]==request('/update')[0]==409

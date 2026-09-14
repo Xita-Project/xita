@@ -25,6 +25,12 @@ static int compare_override=-99;
 void xv_vertex_compare_override(int enabled) { compare_override=enabled; }
 static int candidate, scan_override=-99, copy_override=-99, bounds_override=-99, references_override=-99;
 static int worker_override=-99, point_override=-99, texture_override=-99;
+static int neon_override=-99, object_scan_override=-99, hle_override=-99, overlap_override=-99;
+int xv_benchmark_compare_matrix_neon(void) { return candidate==11; }
+int xv_benchmark_compare_object_scan(void) { return candidate==12; }
+int xv_benchmark_compare_hle_dispatch(void) { return candidate==13; }
+int xv_benchmark_compare_flare_query_overlap(void) { return candidate==14; }
+
 int xv_benchmark_compare_texture_state(void) { return candidate==10; }
 void xv_d3d_texture_state_override(int enabled) { texture_override=enabled; }
 int xv_benchmark_compare_point_math(void) { return candidate==9; }
@@ -69,6 +75,10 @@ int sceKernelSetEventFlag(SceUID id,unsigned bits) { assert(0);return 0; }
 int sceKernelWaitEventFlag(SceUID id,unsigned bits,unsigned mode,unsigned *out,SceUInt *timeout) { assert(0);return 0; }
 '''
 suffix=r'''
+void xv_matrix_neon_override(int enabled) { neon_override=enabled; }
+void xv_object_scan_override(int enabled) { object_scan_override=enabled; }
+void xv_hle_dispatch_override(int enabled) { hle_override=enabled; }
+void xv_flare_query_overlap_override(int enabled) { overlap_override=enabled; }
 void xv_point_math_override(int enabled) { point_override=enabled; }
 void xv_flare_barrier(unsigned reason) { assert(reason==0);flare_barriers++; }
 void xv_flare_defer_override(int enabled) { assert(flare_barriers);flare_override=enabled; }
@@ -99,9 +109,10 @@ int main(int argc,char **argv)
     for(candidate=0;candidate<CANDIDATE_COUNT;candidate++)for(int mode=-1;mode<=1;mode++) {
         g_early_visibility_override=-1;
         point_override=texture_override=-99;
+        neon_override=object_scan_override=hle_override=overlap_override=-99;
         flare_override=scan_override=copy_override=bounds_override=references_override=worker_override=basis_override=palette_override=-99;flare_barriers=0;
         xv_benchmark_optimizations(mode);
-        assert(flare_override==(candidate==0?mode:-99) && flare_barriers==(unsigned)(candidate==0));
+        assert(flare_override==(candidate==0?mode:-99) && flare_barriers==(unsigned)(candidate==0 || candidate==14));
         assert(scan_override==(candidate==1?mode:-99));
         assert(copy_override==(candidate==2?mode:-99));
         assert(bounds_override==(candidate==3?mode:-99));
@@ -111,6 +122,10 @@ int main(int argc,char **argv)
         assert(palette_override==(candidate==7?mode:-99));
         assert(point_override==(candidate==9?mode:-99));
         assert(texture_override==(candidate==10?mode:-99));
+        assert(neon_override==(candidate==11?mode:-99));
+        assert(object_scan_override==(candidate==12?mode:-99));
+        assert(hle_override==(candidate==13?mode:-99));
+        assert(overlap_override==(candidate==14?mode:-99));
         assert(g_early_visibility_override==(candidate==8?mode:-1));
         assert(xv_early_visibility_enabled()==(candidate==8 && mode==1));
         assert(compare_override==-99 && upload_override==-99 && xv_pipeline_enabled()==!single);
@@ -121,7 +136,7 @@ int main(int argc,char **argv)
 }
 '''
 with tempfile.TemporaryDirectory(prefix='xita-frame-acquire-') as tmp:
-    count=11
+    count=15
     p=pathlib.Path(tmp);(p/'test.c').write_text(f'#define CANDIDATE_COUNT {count}\n'+prefix+globals_+fixture+code+suffix)
     sdk=pathlib.Path(os.environ.get('VITASDK',str(pathlib.Path.home()/'vitasdk')))
     subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP','-DXV_NATIVE_OBJECT_BASIS','-DXV_NATIVE_MODEL_PALETTE','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-unused-variable',

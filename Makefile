@@ -374,6 +374,10 @@ endif
 ifeq ($(XV_QUAT_CACHE),1)
 RECOMP_CFLAGS += -DXV_QUAT_CACHE
 endif
+ifeq ($(XV_FLARE_QUERY_OVERLAP),1)
+RECOMP_CFLAGS += -DXV_FLARE_QUERY_OVERLAP
+CFLAGS += -DXV_FLARE_QUERY_OVERLAP
+endif
 
 # Native replacements must retain the lifted multiply/add rounding points.
 # Unroll only bounded native math units. Scalar VFP operations retain their

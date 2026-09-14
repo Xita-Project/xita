@@ -185,6 +185,24 @@ int main(int argc, char **argv)
     assert(xd3d_r_visibility_wait(321,100000,&age,&render_us));
     assert(age==7&&render_us>=250); /* Publication precedes the resumed read. */
     wait_hook=NULL;
+#ifdef XV_FLARE_QUERY_OVERLAP
+    /* Retained serials use the real recorder/publisher and wait wrapper. A
+     * replacement still being recorded must not change the retained read. */
+    uint32_t retained=xd3d_r_visibility_generation(321), retained_pixels;
+    assert(retained==serial);
+    assert(!xd3d_r_visibility_result_generation(321,retained,&retained_pixels));
+    begin();end(321);
+    uint32_t replacement=xd3d_r_visibility_generation(321);
+    assert(replacement!=retained);
+    pixels=0x12345678;
+    assert(xd3d_r_visibility_result(321,&pixels)==XV_VISIBILITY_INCOMPLETE&&pixels==0x12345678);
+    assert(!xd3d_r_visibility_result_generation(321,retained,&pixels)&&pixels==retained_pixels);
+    before_words=word_waits;
+    assert(!xd3d_r_visibility_wait_generation(321,replacement,100000)&&word_waits==before_words);
+    assert(xd3d_r_visibility_wait_generation(321,retained,100000)&&word_waits==before_words+1);
+    assert(!xd3d_r_visibility_wait_generation(UINT32_MAX,retained,100000));
+    assert(!xd3d_r_visibility_wait_generation(321,0,100000));
+#endif
     for (unsigned i=0;i<XV_NUM_LISTS;i++) free(g_lists[i]);
     free(g_visibility_memory); free(g_xram); free(g_xpt);
     puts("PASS: visibility HLE ABI, pending output, four-core counts, generations, capacity, ID permutations, GXM state, and 200000 threaded handoffs");

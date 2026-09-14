@@ -905,6 +905,16 @@ uint32_t xd3d_r_visibility_result(uint32_t id, uint32_t *pixels)
 {
     return xv_visibility_read(g_visibility_results,id,pixels);
 }
+#ifdef XV_FLARE_QUERY_OVERLAP
+uint32_t xd3d_r_visibility_generation(uint32_t id)
+{
+    return xv_visibility_generation(g_visibility_results,id);
+}
+uint32_t xd3d_r_visibility_result_generation(uint32_t id,uint32_t serial,uint32_t *pixels)
+{
+    return xv_visibility_read_generation(g_visibility_results,id,serial,pixels);
+}
+#endif
 uint32_t xd3d_r_visibility_result_stale(uint32_t id, uint32_t *pixels, uint32_t *behind)
 {
     return xv_visibility_read_stale(g_visibility_results,id,pixels,behind);
@@ -928,6 +938,18 @@ int xd3d_r_visibility_wait(uint32_t id,uint32_t timeout_us,uint32_t *ready_age_u
     }
     return 1;
 }
+#ifdef XV_FLARE_QUERY_OVERLAP
+int xd3d_r_visibility_wait_generation(uint32_t id,uint32_t serial,uint32_t timeout_us)
+{
+    xv_visibility_result *r=xv_visibility_find(g_visibility_results,id);
+    if (!r || !serial || !xk_wait_u32 ||
+        __atomic_load_n(&r->submitted,__ATOMIC_ACQUIRE)!=serial) return 0;
+    /* The serial retained before ID reuse is still the submitted generation.
+     * The next Present remains a barrier and cannot submit a replacement. */
+    xk_wait_u32(&r->completed,serial,timeout_us);
+    return 1;
+}
+#endif
 
 static cmd_t *new_cmd(void)
 {

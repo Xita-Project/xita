@@ -19,7 +19,12 @@ extern volatile uint32_t xv_cur_fn __attribute__((weak));
 #define FLARE_SURFACE 0x2BFFD2u
 #define FLARE_SURFACE_END FLARE_LIST
 
-typedef struct { uint32_t destination; int32_t area; } flare_record;
+typedef struct {
+    uint32_t destination; int32_t area;
+#ifdef XV_FLARE_QUERY_OVERLAP
+    uint32_t generation;
+#endif
+} flare_record;
 static flare_record records[FLARE_LIMIT]; /* query ID is the retained list index */
 static unsigned pending;
 static uint32_t draining;
@@ -28,6 +33,23 @@ static int override = -1;
 static unsigned deferred, eager, declined, retained, peak;
 static unsigned barriers[XV_FLARE_BARRIERS], waits;
 static uint64_t gap_us, wait_us;
+
+#ifdef XV_FLARE_QUERY_OVERLAP
+extern uint32_t xd3d_r_visibility_generation(uint32_t id);
+extern uint32_t xd3d_r_visibility_result_generation(uint32_t id,uint32_t serial,uint32_t *pixels);
+extern int xd3d_r_visibility_wait_generation(uint32_t id,uint32_t serial,uint32_t timeout_us);
+static int overlap_override=-1, pending_overlap;
+static unsigned overlap_batches, overlap_queries;
+void xv_flare_query_overlap_override(int value) { overlap_override=value<0?-1:!!value; }
+static int overlap_enabled(void)
+{
+    static int configured=-1;
+    if (configured<0) {
+        const char *e=getenv("XV_FLARE_QUERY_OVERLAP"); configured=e && atoi(e)!=0;
+    }
+    return overlap_override<0 ? configured : overlap_override;
+}
+#endif
 
 void xv_flare_defer_override(int enabled) { override=enabled<0?-1:!!enabled; }
 
@@ -57,10 +79,19 @@ static uint8_t intensity(uint8_t old, int32_t area, uint32_t pixels)
     return old;
 }
 
+static uint32_t read_pixels(unsigned id,uint32_t *pixels)
+{
+#ifdef XV_FLARE_QUERY_OVERLAP
+    if (pending_overlap)
+        return xd3d_r_visibility_result_generation(id,records[id].generation,pixels);
+#endif
+    return xd3d_r_visibility_result(id,pixels);
+}
+
 static uint32_t exact_pixels(unsigned id)
 {
     /* The lifted helper initializes its output to -1 and retains it on error. */
-    uint32_t pixels=UINT32_MAX, result=xd3d_r_visibility_result(id,&pixels);
+    uint32_t pixels=UINT32_MAX, result=read_pixels(id,&pixels);
     if (result!=XV_VISIBILITY_INCOMPLETE) return pixels;
     static int poll=-1, events, backoff;
     if (poll<0) {
@@ -74,12 +105,21 @@ static uint32_t exact_pixels(unsigned id)
     uint64_t started=xk_os_monotonic_us();
     do {
         uint32_t age=UINT32_MAX, elapsed=0;
-        if (!events || !xd3d_r_visibility_wait(id,100000,&age,&elapsed)) {
+        int parked=0;
+        if (events) {
+#ifdef XV_FLARE_QUERY_OVERLAP
+            if (pending_overlap)
+                parked=xd3d_r_visibility_wait_generation(id,records[id].generation,100000);
+            else
+#endif
+                parked=xd3d_r_visibility_wait(id,100000,&age,&elapsed);
+        }
+        if (!parked) {
             unsigned delay=(unsigned)poll;
             if (backoff) { delay<<=retry; if(delay>1000)delay=1000; if(retry<4)retry++; }
             if (delay) xk_sleep_us(delay); else xk_yield();
         }
-        result=xd3d_r_visibility_result(id,&pixels);
+        result=read_pixels(id,&pixels);
     } while (result==XV_VISIBILITY_INCOMPLETE);
     waits++; wait_us+=xk_os_monotonic_us()-started;
     return pixels;
@@ -93,6 +133,11 @@ void xv_flare_barrier(unsigned reason)
     while (__atomic_load_n(&draining,__ATOMIC_ACQUIRE))
         xk_wait_u32(&draining,0,100000);
     if (!pending || reason==XV_FLARE_COLLECTION) return;
+#ifdef XV_FLARE_QUERY_OVERLAP
+    /* Retain the exact old serial across new Begin/End calls. Brightness,
+     * identity, reset, next-list and Present barriers still drain all reads. */
+    if (reason==XV_FLARE_QUERY && pending_overlap) { overlap_queries++; return; }
+#endif
     __atomic_store_n(&draining,1,__ATOMIC_RELEASE);
     if (reason<XV_FLARE_BARRIERS) barriers[reason]++;
     gap_us+=xk_os_monotonic_us()-queued_us;
@@ -104,6 +149,9 @@ void xv_flare_barrier(unsigned reason)
         *out=intensity(*out,records[i].area,pixels);
     }
     pending=0;
+#ifdef XV_FLARE_QUERY_OVERLAP
+    pending_overlap=0;
+#endif
     if (&xv_cur_fn) xv_cur_fn=saved_fn;
     __atomic_store_n(&draining,0,__ATOMIC_RELEASE);
     xk_os_scheduler_notify();
@@ -127,6 +175,9 @@ int xv_flare_defer(xctx *c)
     int32_t count=(int32_t)X_IMG32(FLARE_COUNT);
     if (!supported_caller(c) || count<0 || count>(int32_t)FLARE_LIMIT) { declined++; return 0; }
     if (!count) { eager++; return 0; }
+#ifdef XV_FLARE_QUERY_OVERLAP
+    int overlap=overlap_enabled();
+#endif
     int incomplete=0;
     for (unsigned i=0;i<(unsigned)count;i++) {
         uint32_t row=FLARE_LIST+i*40u;
@@ -142,6 +193,12 @@ int xv_flare_defer(xctx *c)
             if (dest<FLARE_SURFACE || dest>=FLARE_SURFACE_END) { declined++; return 0; }
         }
         records[i]=(flare_record){dest,(int32_t)X_IMG32(row+0x24u)};
+#ifdef XV_FLARE_QUERY_OVERLAP
+        if (overlap && records[i].area>0) {
+            records[i].generation=xd3d_r_visibility_generation(i);
+            if (!records[i].generation) { declined++; return 0; }
+        }
+#endif
         if (records[i].area>0 && !incomplete) {
             uint32_t pixels=UINT32_MAX;
             incomplete=xd3d_r_visibility_result(i,&pixels)==XV_VISIBILITY_INCOMPLETE;
@@ -150,6 +207,10 @@ int xv_flare_defer(xctx *c)
     if (!incomplete) { eager++; return 0; }
     queued_us=xk_os_monotonic_us();
     pending=(unsigned)count;
+#ifdef XV_FLARE_QUERY_OVERLAP
+    pending_overlap=overlap;
+    overlap_batches+=(unsigned)overlap;
+#endif
     retained+=pending; deferred++; if(pending>peak)peak=pending;
     X_IMG32(FLARE_COUNT)=0;
     /* All original volatile outputs are dead at the supported enclosing calls.
@@ -164,5 +225,10 @@ void xv_flare_report(unsigned frames)
         frames,deferred,eager,declined,retained,peak,barriers[0],barriers[1],barriers[2],barriers[3],barriers[4],barriers[5],
         (unsigned long long)gap_us,waits,(unsigned long long)wait_us);
     deferred=eager=declined=retained=peak=waits=0;gap_us=wait_us=0;
+#ifdef XV_FLARE_QUERY_OVERLAP
+    XK_LOG("[flare-query-overlap] %u frames: %u retained-generation batches / %u query barriers postponed; exact results, Present still drains\n",
+           frames,overlap_batches,overlap_queries);
+    overlap_batches=overlap_queries=0;
+#endif
     memset(barriers,0,sizeof barriers);
 }

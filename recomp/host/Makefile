@@ -285,12 +285,13 @@ test-visibility: build/visibility_test
 	./build/visibility_test 100 fixed
 
 .PHONY: test-cpu-prep
-test-completion: build/resolution_benchmark_test build/native_math_benchmark_test build/no_point_math_benchmark_test build/no_matrix_neon_benchmark_test build/no_object_scan_benchmark_test build/no_hle_dispatch_benchmark_test build/scheduler_notify_test build/scheduler_vita_notify_test
+test-completion: build/no_flare_query_overlap_benchmark_test build/resolution_benchmark_test build/native_math_benchmark_test build/no_point_math_benchmark_test build/no_matrix_neon_benchmark_test build/no_object_scan_benchmark_test build/no_hle_dispatch_benchmark_test build/scheduler_notify_test build/scheduler_vita_notify_test
 	./build/resolution_benchmark_test
 	./build/no_point_math_benchmark_test
 	./build/no_matrix_neon_benchmark_test
 	./build/no_object_scan_benchmark_test
 	./build/no_hle_dispatch_benchmark_test
+	./build/no_flare_query_overlap_benchmark_test
 	XV_BENCHMARK_VERTEX_WORKER=1 XV_BENCHMARK_VERTEX_REFERENCES=1 ./build/resolution_benchmark_test
 	XV_BENCHMARK_DRAW_SCAN=1 ./build/resolution_benchmark_test
 	XV_BENCHMARK_VERTEX_COPY=1 ./build/resolution_benchmark_test
@@ -458,3 +459,7 @@ test-hle-dispatch: build/hle_dispatch_cache_test build/hle_dispatch_untraced_tes
 	./build/hle_dispatch_untraced_test on
 	./build/hle_dispatch_untraced_test off
 	./build/hle_dispatch_untraced_test unset
+
+build/no_flare_query_overlap_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_FLARE_QUERY_OVERLAP resolution_benchmark_test.c -lm -o $@

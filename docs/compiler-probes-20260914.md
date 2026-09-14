@@ -39,6 +39,12 @@ captured clipping callers changed by less than 0.2%. Optional NEON and empty-obj
 scan code was also excluded from this private build, so its instruction totals
 are not an isolated measurement of LTO alone. No hardware FPS benefit is claimed.
 
+An isolated Vita3K run booted the final package through the updater, opened the
+normal main menu and profile/level/difficulty screens, and entered the Pillar of
+Autumn cryo sequence. This is a startup smoke test, not complete gameplay
+validation or a physical performance result. The emulator was subsequently
+restored to the ordinary compiler configuration for query-overlap tests.
+
 An earlier package unintentionally applied LTO to the updater helper. Contract
 verification rejected it before deployment. A fresh link with game-only flags
 produced the final compatible package and the same validated game ELF.

@@ -1236,6 +1236,12 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
+    if (xv_benchmark_compare_flare_query_overlap()) {
+        extern void xv_flare_query_overlap_override(int) __attribute__((weak));
+        if(xv_flare_barrier)xv_flare_barrier(0);
+        if(xv_flare_query_overlap_override)xv_flare_query_overlap_override(enabled);
+        return;
+    }
     if (xv_benchmark_compare_hle_dispatch()) {
         extern void xv_hle_dispatch_override(int) __attribute__((weak));
         if(xv_hle_dispatch_override)xv_hle_dispatch_override(enabled);
