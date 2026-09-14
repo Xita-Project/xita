@@ -162,38 +162,56 @@ static void write_commit_tests(uint32_t handle)
     x_guest_write(b->source, pcm, sizeof pcm); c = unlock_context(handle); call(&c, 0x379F40, 0, 5);
     assert(b->committed_bytes == bytes + 1024);
 }
-static xctx routing_context(uint32_t handle)
+static xctx routing_context(uint32_t handle, uint32_t count)
 {
     xctx c = context(handle, 0x3FFC, 0, 0); X_M32(c.r[4]) = 0x3E321F;
-    uint32_t list[2] = {6, 0x4FEC}, pairs[12];
+    uint32_t list[2] = {count, 0x4FFC}, pairs[12];
     for (unsigned i = 0; i < 6; ++i) { pairs[i*2] = i; pairs[i*2+1] = 0; }
-    x_guest_write(0x3FFC, list, 8); x_guest_write(0x4FEC, pairs, sizeof pairs);
+    x_guest_write(0x3FFC, list, 8); x_guest_write(0x4FFC, pairs, sizeof pairs);
     return c;
 }
-static void routing_tests(uint32_t handle)
+static void unchanged_route(xctx *c, uint32_t ip, uint32_t expected)
 {
-    xctx c = routing_context(handle);
-#if H2_AUDIO_MULTIBIN_UNAVAILABLE
     uint8_t *ram = malloc(0x200000); assert(ram); memcpy(ram, g_xram, 0x200000);
     h2_audio_device_snapshot dev = device; h2_audio_buffer bs[XA_MAX_VOICES]; xa_voice vs[XA_MAX_VOICES];
     memcpy(bs, buffers, sizeof bs); memcpy(vs, g_v, sizeof vs);
     unsigned al = allocs, fr = frees, cl = closes;
-    call(&c, 0x37C5E4, 0x80004001, 2);
+    call(c, ip, expected, 2);
     assert(!memcmp(ram, g_xram, 0x200000) && !memcmp(&dev, &device, sizeof dev));
     assert(!memcmp(bs, buffers, sizeof bs) && !memcmp(vs, g_v, sizeof vs));
     assert(al == allocs && fr == frees && cl == closes); free(ram);
-    c = routing_context(handle); X_M32(c.r[4]) ^= 1; reject(&c, 0x37C5E4);
-    c = routing_context(handle); X_M32(0x3FFC) = 5; reject(&c, 0x37C5E4);
-    c = routing_context(handle); X_M32(0x3FFC) = UINT32_MAX; reject(&c, 0x37C5E4);
-    c = routing_context(handle); X_M32(0x4000) = 0xFFFFFFF0; reject(&c, 0x37C5E4);
-    c = routing_context(handle); g_xpt[5] = 0x1FF000; reject(&c, 0x37C5E4); g_xpt[5] = 0x4000;
-    for (unsigned i = 0; i < 12; ++i) {
-        c = routing_context(handle); X_M32(0x4FEC + i * 4) ^= 0x100; reject(&c, 0x37C5E4);
+}
+static void routing_tests(uint32_t handle, uint32_t ip)
+{
+    xctx c = routing_context(handle, 2); unchanged_route(&c, ip, 0);
+    /* This real stereo API is available independently of the diagnostic flag
+     * and does not require the diagnostic-only six-bin caller address. */
+    c = routing_context(handle, 2); X_M32(c.r[4]) ^= 1; unchanged_route(&c, ip, 0);
+    const uint32_t bad_count[] = {0, 1, 3, 5, 7, UINT32_MAX};
+    for (unsigned i = 0; i < sizeof bad_count / sizeof *bad_count; ++i) {
+        c = routing_context(handle, bad_count[i]); reject(&c, ip);
     }
-    c = routing_context(handle); X_M32(0x386B0C) = 1; reject(&c, 0x37C5E4); X_M32(0x386B0C) = 0;
-    c = routing_context(handle); healthy = 0; reject(&c, 0x37C5E4); healthy = 1;
+    c = routing_context(handle, 2); X_M32(0x4000) = 0xFFFFFFF0; reject(&c, ip);
+    c = routing_context(handle, 2); g_xpt[5] = 0x1FF000; reject(&c, ip); g_xpt[5] = 0x4000;
+    for (unsigned i = 0; i < 4; ++i) {
+        c = routing_context(handle, 2); X_M32(0x4FFC + i * 4) ^= 1; reject(&c, ip);
+    }
+    c = routing_context(handle, 2); X_M32(0x5000) = (uint32_t)-600; reject(&c, ip);
+    c = routing_context(handle, 2); X_M32(0x4FFC) = 1; X_M32(0x5004) = 0; reject(&c, ip);
+    c = routing_context(handle, 2); X_M32(0x386B0C) = 1; reject(&c, ip); X_M32(0x386B0C) = 0;
+    c = routing_context(handle, 2); healthy = 0; reject(&c, ip); healthy = 1;
+    c = routing_context(handle, 6);
+#if H2_AUDIO_MULTIBIN_UNAVAILABLE
+    if (ip == 0x37B6C3) { reject(&c, ip); return; }
+    unchanged_route(&c, ip, 0x80004001);
+    c = routing_context(handle, 6); X_M32(c.r[4]) ^= 1; reject(&c, ip);
+    c = routing_context(handle, 6); X_M32(0x4000) = 0xFFFFFFF0; reject(&c, ip);
+    c = routing_context(handle, 6); g_xpt[5] = 0x1FF000; reject(&c, ip); g_xpt[5] = 0x4000;
+    for (unsigned i = 0; i < 12; ++i) {
+        c = routing_context(handle, 6); X_M32(0x4FFC + i * 4) ^= 0x100; reject(&c, ip);
+    }
 #else
-    reject(&c, 0x37C5E4); /* exactly the valid movie list is fatal by default */
+    reject(&c, ip); /* the valid six-bin movie list is fatal by default */
 #endif
 }
 int main(void)
@@ -254,10 +272,12 @@ int main(void)
     /* Unknown routing, Play, streams and an empty Lock remain strict stops. */
     c = context(handle, 0, 0, 0);
     reject(&c, 0x37C5E4); reject(&c, 0x37B6DF); reject(&c, 0x37B7B3); reject(&c, 0x37B7E3);
-    routing_tests(handle);
+    routing_tests(handle, 0x37C5E4); routing_tests(handle, 0x37B6C3);
     int voice = b->voice;
     xk_audio_voice_play(voice, 1);
-    int16_t mixed[XA_GRAIN * 2]; xk_audio_mix(mixed, XA_GRAIN); xk_audio_mix(mixed, XA_GRAIN);
+    int16_t mixed[XA_GRAIN * 2]; xk_audio_mix(mixed, XA_GRAIN);
+    c = routing_context(handle, 2); unchanged_route(&c, 0x37C5E4, 0);
+    xk_audio_mix(mixed, XA_GRAIN);
     for (unsigned i = 0; i < XA_GRAIN; ++i) assert(mixed[i*2] == 4000 && mixed[i*2+1] == -2000);
     memset(source, 0, sizeof source); x_guest_write(0x8F00, source, sizeof source);
     xk_audio_mix(mixed, XA_GRAIN);
@@ -272,6 +292,7 @@ int main(void)
     }
     c = context(handle, 600, 0, 0); call(&c, 0x37B6A7, 0, 2);
     assert(b->volume == -600 && b->headroom == 600);
+    c = routing_context(handle, 2); unchanged_route(&c, 0x37B6C3, 0);
     xk_audio_mix(mixed, XA_GRAIN);
     for (unsigned i = 0; i < XA_GRAIN; ++i) {
         assert(mixed[i*2] == 1000);

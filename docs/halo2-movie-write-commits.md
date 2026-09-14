@@ -80,6 +80,9 @@ must not be uploaded as distributable releases.
 
 ## Native99 result and replay
 
+The following [stereo-route increment](halo2-movie-stereo-routing.md) handles
+the exact next request and records its separate native validation.
+
 The original Bink clear calls Unlock from `3E3309` and commits all 106,496
 bytes. It then creates its worker and calls the control helper again. The next
 strict stop is SetMixBins `37C5E4`, return `3E321F`, ESP `005E5D58`: this time

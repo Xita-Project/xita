@@ -334,28 +334,41 @@ static void buffer_unlock(xctx *c)
                 (unsigned long long)b->committed_bytes, b->commits);
     result(c, 0, 5);
 }
-#if H2_AUDIO_MULTIBIN_UNAVAILABLE
-/* Explicit failure probe for the observed movie's unsupported six-speaker
- * route. The real PCM voice retains its original FL/FR defaults unchanged. */
-static void multibin_unavailable(xctx *c)
+static void buffer_routing(xctx *c, uint32_t ip)
 {
-    const uint32_t ip = 0x37C5E4;
     stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
     uint32_t list_address = X_ARG(1), list[2], pairs[12];
-    if (X_M32(c->r[4]) != 0x3E321F || !b->mirror || !mapped(list_address, 8))
-        fail(c, ip, "multibin diagnostic caller/input", list_address);
+    if (!b->mirror || !mapped(list_address, 8))
+        fail(c, ip, "unsupported PCM route input", list_address);
     x_guest_read(list, list_address, 8);
-    if (list[0] != 6 || !mapped(list[1], sizeof pairs))
-        fail(c, ip, "multibin diagnostic list", list[0]);
-    x_guest_read(pairs, list[1], sizeof pairs);
-    for (unsigned i = 0; i < 6; ++i)
+    if (list[0] != 2
+#if H2_AUDIO_MULTIBIN_UNAVAILABLE
+        && !(ip == 0x37C5E4 && list[0] == 6 && X_M32(c->r[4]) == 0x3E321F)
+#endif
+        ) fail(c, ip, "unsupported PCM route count/caller", list[0]);
+    if (!mapped(list[1], list[0] * 8)) fail(c, ip, "unmapped PCM route pairs", list[1]);
+    x_guest_read(pairs, list[1], list[0] * 8);
+    for (unsigned i = 0; i < list[0]; ++i)
         if (pairs[i * 2] != i || pairs[i * 2 + 1])
-            fail(c, ip, "multibin diagnostic route", pairs[i * 2]);
+            fail(c, ip, "unsupported PCM route/gain", pairs[i * 2]);
+    if (list[0] == 2) {
+        /* The only real route supported by these stereo PCM voices is
+         * channel 0 -> FL/bin 0 and channel 1 -> FR/bin 1, both unity gain.
+         * Re-selecting this already-active route or its unity per-bin gains
+         * needs no mixer mutation. Buffer volume/headroom remain independent. */
+        xv_logf("[h2/audio-buffer] stereo entry=%08X caller=%08X interface=%08X real FL/FR unity route/gains\n",
+                ip, X_M32(c->r[4]), b->base + 0x1C);
+        result(c, 0, 2);
+        return;
+    }
+#if H2_AUDIO_MULTIBIN_UNAVAILABLE
+    /* Explicit failure probe for the observed unsupported six-speaker route;
+     * preserve the actual stereo route, objects and caller memory. */
     xv_logf("[h2/diagnostic] SetMixBins caller=%08X interface=%08X bins0..5 volume0 returns DSERR_UNSUPPORTED=80004001; real default FL/FR voice unchanged\n",
             X_M32(c->r[4]), b->base + 0x1C);
     result(c, 0x80004001, 2);
-}
 #endif
+}
 static void query(xctx *c, uint32_t ip)
 {
     stack(c, ip, 2);
@@ -449,9 +462,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37B5AE: case 0x37B5CA: query(c, ip); break;
     case 0x37D506: case 0x37D5CD: case 0x37D52A: scalar(c, ip); break;
     case 0x37B637: mix_bin(c, ip); break;
-#if H2_AUDIO_MULTIBIN_UNAVAILABLE
-    case 0x37C5E4: multibin_unavailable(c); break;
-#endif
+    case 0x37C5E4: case 0x37B6C3: buffer_routing(c, ip); break;
 #if H2_AUDIO_EFFECTS_UNAVAILABLE
     case 0x37B86D: effects_unavailable(c); break;
 #endif
@@ -530,12 +541,12 @@ void h2_audio_trace_buffer(xctx *c, uint32_t ip)
                 X_M32(c->r[4]), X_ARG(0), X_ARG(1), X_ARG(2), X_ARG(3), X_ARG(4), X_ARG(5), X_ARG(6), X_ARG(7));
         return;
     }
-    if (ip == 0x37C5E4 && !(c->r[4] & 3) && mapped(c->r[4], 12)) {
+    if ((ip == 0x37C5E4 || ip == 0x37B6C3) && !(c->r[4] & 3) && mapped(c->r[4], 12)) {
         uint32_t address = X_ARG(1), list[2];
         if (!mapped(address, 8)) return;
         x_guest_read(list, address, 8);
-        xv_logf("[h2/audio-buffer] SetMixBins caller=%08X list=%08X count=%u entries=%08X\n",
-                X_M32(c->r[4]), address, list[0], list[1]);
+        xv_logf("[h2/audio-buffer] route entry=%08X caller=%08X list=%08X count=%u entries=%08X\n",
+                ip, X_M32(c->r[4]), address, list[0], list[1]);
         if (!list[0] || list[0] > 8 || !mapped(list[1], list[0] * 8)) return;
         uint32_t pairs[16]; x_guest_read(pairs, list[1], list[0] * 8);
         for (unsigned i = 0; i < list[0]; ++i)
