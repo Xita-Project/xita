@@ -30,6 +30,30 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_game_sound_owner_bindings_and_bounded_tables(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x200, 0x224, 4))}
+        expected = set(image.targets.values()); image.targets[0x100] = 0x200
+        image.code = bytes(36)
+        guard = ((0x100, 0x200, 36, hashlib.sha256(image.code).hexdigest()),)
+        with patch.object(prepare_boot, "GAME_SOUND_VTABLES", guard):
+            self.assertEqual(prepare_boot.game_sound_owner_roots(image), expected)
+            image.targets[0x100] = 0x204
+            with self.assertRaisesRegex(ValueError, "binding"):
+                prepare_boot.game_sound_owner_roots(image)
+            image.targets[0x100] = 0x200; image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_sound_owner_roots(image)
+            image.section_name = ".text"; image.bad_code = 0x1020
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_sound_owner_roots(image)
+            image.bad_code = None; image.targets[0x220] = 0
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_sound_owner_roots(image)
+            image.code = bytes([1]) * 36
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.game_sound_owner_roots(image)
+
     def test_stream_interface_bounds_and_revision(self):
         image = SyntheticImage(); image.section_name = "DSOUND"
         image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x200, 0x21C, 4))}

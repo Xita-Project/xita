@@ -16,6 +16,28 @@ from games.halo2_5849.hooks import reviewed_sparse_jump_roots
 
 HOST_CALLBACK_WALK = (0x3FBA54, 135, "e0cc1649c0b744615b3de0f5b2446411bb408d0b3ce4d1d3da59980219abc70c")
 STREAM_VTABLE = (0x417170, 28, "72cb68310880069f79f94d33bfd78c04aae9b0b48e2d4b623612bd88cd1a53c9")
+GAME_SOUND_VTABLES = (
+    (0x47F0D0, 0x45711C, 36, "3390e861a1a9ebe7c9da27fbef73da9982814ad5696894b63d9aed83c665c38b"),
+    (0x47F088, 0x457140, 28, "cfe13e6e922ae34f6ec6ffdfae387fecb3c865fe164f75f1be70c9004d969120"),
+    (0x47F0F0, 0x45715C, 36, "5176d30bf8e4cea56c2a70787eed63a1704718b78f13a40bcd04edd9074be25e"),
+)
+
+
+def game_sound_owner_roots(image):
+    """Original stream-format/selected sound owners observed in initialization."""
+    roots = set()
+    for owner, address, length, digest in GAME_SOUND_VTABLES:
+        if image.u32(owner) != address:
+            raise ValueError("Halo 2 game sound owner binding mismatch")
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 game sound owner vtable fingerprint mismatch")
+        for slot in range(address, address + length, 4):
+            target = image.u32(slot)
+            section = image.section_of(target) if target else None
+            if not target or not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError("Halo 2 game sound owner target is not title code")
+            roots.add(target)
+    return roots
 
 
 def audio_stream_roots(image):
@@ -461,6 +483,7 @@ def main():
         # Header AddRef/Release are reached through the exact original vtable.
         roots.update((0x37A14F, 0x37C70F))
         roots.update(audio_stream_roots(image))
+        roots.update(game_sound_owner_roots(image))
     subprocess.run([sys.executable, "-m", "recompiler", str(args.xbe.resolve()),
                     "--profile", profile, "--no-data-roots", "--trace-calls", "--trace-funcs",
                     "--files", "128", "-o", str(generated),
