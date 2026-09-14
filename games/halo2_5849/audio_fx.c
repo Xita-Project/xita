@@ -42,8 +42,25 @@ int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes)
         bin != 13 || (routes != 2 && routes != 6)) return 0;
     fx->sources[0].routes = routes; fx->sources[0].output_mask = (1u << routes) - 1; return 1;
 }
+/* Native142 repeats the completed configuration during map sound setup.
+ * Only the exact already-running layout is idempotent; never expand the
+ * accepted mutable routing state or clear any source/filter/DSP history. */
+static int completed_configuration(const h2_audio_fx *fx)
+{
+    static const unsigned counts[7]={6,4,5,4,5,2,5};
+    static const unsigned outputs[7]={63,64,0,128,0,0,1024};
+    if(!fx || !fx->engine || fx->bound!=0x7fff || fx->playing!=0x7fff || fx->filtered!=3)return 0;
+    for(unsigned i=0;i<7;++i)
+        if(fx->sources[i].routes!=counts[i] || fx->sources[i].output_mask!=outputs[i])return 0;
+    for(unsigned i=7;i<H2_FX_SOURCES;++i)
+        if(fx->sources[i].routes!=1 || fx->sources[i].output_mask!=(1u<<(6+(i-7)%4)))return 0;
+    return 1;
+}
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned key, unsigned output_mask)
 {
+    if(completed_configuration(fx))
+        return (key==23 && output_mask==64) || (key==24 && output_mask==128) ||
+               (key==H2_FX_SPATIAL25 && output_mask==1024);
     if (key >= 15 && key <= 22) {
         unsigned mask = h2_audio_fx_mask(key), index = source_index(mask);
         if (!fx || fx->filtered != 3 || fx->bound != mask * 2 - 1 || fx->playing != mask - 1 ||
@@ -63,6 +80,7 @@ int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned key, unsigned output_mask)
 }
 int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key)
 {
+    if(completed_configuration(fx))return key==H2_FX_SPATIAL23 || key==H2_FX_SPATIAL24 || key==25;
     if (!fx || fx->bound != 127 || fx->playing != 127) return 0;
     unsigned index;
     if (key == H2_FX_SPATIAL23 && fx->sources[1].output_mask == 64) index = 2;
@@ -74,6 +92,7 @@ int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key)
 }
 int h2_audio_fx_filter(h2_audio_fx *fx, unsigned key)
 {
+    if(completed_configuration(fx))return key==23 || key==24;
     if (!fx || fx->bound != 127 || fx->playing != 127 ||
         fx->sources[1].output_mask != 64 || fx->sources[2].output_mask ||
         fx->sources[3].output_mask != 128 || fx->sources[4].output_mask ||

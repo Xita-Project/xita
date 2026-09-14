@@ -29,7 +29,8 @@ int h2_audio_fx_bind(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin);
 int h2_audio_fx_bind_spatial(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin, const int8_t taps[31]);
 int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes);
 /* Exact original active FX23/24/spatial25 replacements and inactive single
- * routes for15..22 only; the creation/Play sequence remains enforced. */
+ * routes for15..22 only; exact unchanged repeats are accepted after the full
+ * configuration. The creation/Play sequence remains enforced. */
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned bin, unsigned output_mask);
 int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key);
 int h2_audio_fx_filter(h2_audio_fx *fx, unsigned key);

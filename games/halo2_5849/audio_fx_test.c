@@ -232,6 +232,23 @@ int H2_AUDIO_FX_TEST_MAIN(void)
         for (unsigned i = 0; i < 32; ++i) put32(s->scratch + 0xb000 + (bin - 11) * 128 + i * 4,0x200000);
     }
     assert(fx.playing == 0x7fff);
+    /* Original map setup repeats identical routing/mutes/filters after all
+     * 15 sources are active. Preserve exact DSP ownership and histories. */
+    before=fx;
+    assert(h2_audio_fx_route_mask(&fx,23,64) && h2_audio_fx_route_mask(&fx,24,128));
+    assert(h2_audio_fx_route_mask(&fx,H2_FX_SPATIAL25,1024));
+    assert(h2_audio_fx_mute(&fx,H2_FX_SPATIAL23) && h2_audio_fx_mute(&fx,H2_FX_SPATIAL24));
+    assert(h2_audio_fx_mute(&fx,25));
+    assert(h2_audio_fx_filter(&fx,23) && h2_audio_fx_filter(&fx,24));
+    assert(!memcmp(&before,&fx,sizeof fx));
+    assert(!h2_audio_fx_route_mask(&fx,23,128) && !h2_audio_fx_route_mask(&fx,15,64));
+    assert(!h2_audio_fx_mute(&fx,23) && !h2_audio_fx_filter(&fx,25));
+    assert(!memcmp(&before,&fx,sizeof fx));
+    fx.sources[14].output_mask=0;
+    h2_audio_fx invalid=fx;
+    assert(!h2_audio_fx_route_mask(&fx,23,64) && !h2_audio_fx_mute(&fx,H2_FX_SPATIAL23));
+    assert(!h2_audio_fx_filter(&fx,23) && !memcmp(&invalid,&fx,sizeof fx));
+    fx=before;
     for (unsigned i = 0; i < 32; ++i) {
         put32(s->scratch + 0xb000 + (17 - 11) * 128 + i * 4,0x7fffff);
         put32(s->scratch + 0xb000 + (21 - 11) * 128 + i * 4,1);
