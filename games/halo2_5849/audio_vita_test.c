@@ -46,6 +46,7 @@ static unsigned resources;
 static atomic_uint outputs, drains, active, queued;
 static int fake_voice = -1;
 static uint32_t fake_decoded;
+static int fake_playing;
 static pthread_t native_thread;
 static pthread_mutex_t native_mutex[2];
 static sem_t native_ready;
@@ -53,7 +54,7 @@ static int launched, joined;
 static int (*native_entry)(SceSize, void *);
 static int failing(unsigned bit) { return (atomic_load(&faults) & (1u << bit)) != 0; }
 void xv_logf(const char *format, ...) { (void)format; }
-int xk_audio_init(void) { fake_voice = -1; fake_decoded = 0; return h2_audio_sink_open(XA_OUT_RATE, XA_GRAIN); }
+int xk_audio_init(void) { fake_voice = -1; fake_decoded = 0; fake_playing = 0; return h2_audio_sink_open(XA_OUT_RATE, XA_GRAIN); }
 void xk_audio_lock(void) { h2_audio_sink_lock(); }
 void xk_audio_unlock(void) { h2_audio_sink_unlock(); }
 void xk_audio_mix(int16_t *out, int count)
@@ -61,11 +62,16 @@ void xk_audio_mix(int16_t *out, int count)
     assert(count == XA_GRAIN && !((uintptr_t)out & 63));
     h2_audio_sink_lock();
     for (int i = 0; i < count * 2; ++i) out[i] = (i & 1) ? -4321 : 1234;
-    if (fake_voice >= 0) fake_decoded = (fake_decoded + 4096) % 106496;
+    if (fake_playing) fake_decoded = (fake_decoded + 4096) % 106496;
     h2_audio_sink_unlock();
 }
 void xk_audio_voice_play(int voice, int loop)
-{ assert(voice == 0 && loop == 1); xk_audio_lock(); fake_voice = voice; xk_audio_unlock(); }
+{ assert(voice == 0 && loop == 1); xk_audio_lock(); fake_voice = voice; fake_playing = 1; xk_audio_unlock(); }
+void xk_audio_voice_stop(int voice)
+{ assert(voice == fake_voice); xk_audio_lock(); fake_playing = 0; xk_audio_unlock(); }
+int xk_audio_voice_playing(int voice) { assert(voice == fake_voice); return fake_playing; }
+void xk_audio_voice_set_pos(int voice, uint32_t position)
+{ assert(voice == fake_voice && !position); xk_audio_lock(); fake_decoded = position; xk_audio_unlock(); }
 uint32_t xk_audio_voice_pos(int voice) { assert(voice == fake_voice); return fake_decoded; }
 uint32_t xk_audio_free_voices(void) { return 42; }
 static int sceKernelCreateMutex(const char *name, int a, int b, void *p)
@@ -190,6 +196,23 @@ int main(void)
             assert(h2_audio_backend_cursor(0, &play, &write) == 0); usleep(1000);
         }
         assert(play && !(play & 3) && play < 106496 && !(write & 3) && write < 106496);
+        uint32_t voice_status = 99;
+        assert(h2_audio_backend_status_voice(0, &voice_status) == 0 && voice_status == 5);
+        assert(h2_audio_backend_forget(0) < 0 && h2_audio_backend_rewind(0) < 0);
+        assert(h2_audio_backend_stop(1) < 0);
+        assert(h2_audio_backend_stop(0) == 0);
+        assert(h2_audio_backend_status_voice(0, &voice_status) == 0 && !voice_status);
+        assert(h2_audio_backend_cursor(0, &play, &write) == 0 && play == write);
+        uint32_t stopped_position = play; usleep(20000);
+        assert(h2_audio_backend_cursor(0, &play, &write) == 0 && play == stopped_position && write == play);
+        assert(h2_audio_backend_play(0, 106496, 44100) < 0);
+        assert(h2_audio_backend_stop(0) == 0 && h2_audio_backend_rewind(0) == 0);
+        assert(h2_audio_backend_cursor(0, &play, &write) == 0 && !play && !write);
+        assert(h2_audio_backend_play(0, 106496, 44100) == 0);
+        assert(h2_audio_backend_stop(0) == 0 && h2_audio_backend_forget(0) == 0);
+        assert(h2_audio_backend_cursor(0, &play, &write) < 0);
+        assert(h2_audio_backend_play(0, 106496, 44100) == 0);
+        assert(h2_audio_backend_stop(0) == 0 && h2_audio_backend_forget(0) == 0);
         assert(h2_audio_backend_close() == 0 && !resources && !atomic_load(&active) && !atomic_load(&queued));
         assert(atomic_load(&drains) == old_drains + 1 && h2_audio_backend_health() == -1);
         assert(h2_audio_backend_close() == 0); /* harmless duplicate shutdown */
@@ -212,6 +235,7 @@ int main(void)
             sceKernelUnlockMutex(progress_mutex, 1); usleep(1000);
         }
         uint32_t play = 123, write = 456;
+        assert(h2_audio_backend_stop(0) < 0);
         assert(h2_audio_backend_cursor(0, &play, &write) < 0 && play == 123 && write == 456);
         assert(h2_audio_backend_close() < 0 && resources == 31 && !atomic_load(&active));
         atomic_store(&faults, 0);

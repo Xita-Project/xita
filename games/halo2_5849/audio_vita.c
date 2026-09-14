@@ -75,6 +75,60 @@ int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write)
     return ok ? 0 : -1;
 }
 
+/* The sole queued grain cannot be cancelled by this sink. Stop the real mixer,
+ * then observe its retained grain through completion before reporting stopped.
+ * Holding progress_mutex prevents another grain from being submitted meanwhile. */
+int h2_audio_backend_stop(int voice)
+{
+    if (h2_audio_backend_health() < 0 || voice < 0) return -1;
+    sceKernelLockMutex(progress_mutex, 1, NULL);
+    int rc = -1;
+    if (progress.voice == voice && h2_audio_backend_health() == 0) {
+        xk_audio_voice_stop(voice);
+        rc = 0;
+        while (progress.pending) {
+            rc = observe_rest();
+            if (rc < 0) { __atomic_store_n(&error, (uint32_t)rc, __ATOMIC_RELEASE); break; }
+            if (progress.pending) sceKernelDelayThread(1000);
+        }
+        if (rc >= 0 && !h2_audio_progress_stop(&progress, voice)) rc = -1;
+    }
+    sceKernelUnlockMutex(progress_mutex, 1); return rc < 0 ? -1 : 0;
+}
+int h2_audio_backend_status_voice(int voice, uint32_t *status)
+{
+    if (h2_audio_backend_health() < 0 || voice < 0) return -1;
+    sceKernelLockMutex(progress_mutex, 1, NULL);
+    int ok = progress.voice == voice && h2_audio_backend_health() == 0;
+    if (ok) {
+        xk_audio_lock(); int playing = xk_audio_voice_playing(voice); xk_audio_unlock();
+        ok = !!playing == !progress.stopped;
+        if (ok) *status = playing ? 5 : 0; /* playing + looping, or drained stop */
+    }
+    sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
+}
+int h2_audio_backend_rewind(int voice)
+{
+    if (h2_audio_backend_health() < 0) return -1;
+    sceKernelLockMutex(progress_mutex, 1, NULL);
+    h2_audio_progress next = progress;
+    int ok = h2_audio_backend_health() == 0 && h2_audio_progress_rewind(&next, voice);
+    if (ok) { xk_audio_voice_set_pos(voice, 0); progress = next; }
+    sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
+}
+int h2_audio_backend_forget(int voice)
+{
+    if (h2_audio_backend_health() < 0) return -1;
+    sceKernelLockMutex(progress_mutex, 1, NULL);
+    h2_audio_progress next = progress;
+    int ok = h2_audio_backend_health() == 0 && h2_audio_progress_forget(&next, voice);
+    if (ok) {
+        xk_audio_lock(); ok = !xk_audio_voice_playing(voice); xk_audio_unlock();
+        if (ok) progress = next;
+    }
+    sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
+}
+
 static int mix_worker(SceSize bytes, void *arg)
 {
     (void)bytes; (void)arg;
@@ -92,7 +146,7 @@ static int mix_worker(SceSize bytes, void *arg)
         }
         xk_audio_mix(output[slot], XA_GRAIN);
         uint32_t decoded_position = 0;
-        if (progress.voice >= 0) {
+        if (progress.voice >= 0 && !progress.stopped) {
             xk_audio_lock(); decoded_position = xk_audio_voice_pos(progress.voice); xk_audio_unlock();
         }
         rc = sceAudioOutOutput(port, output[slot]);

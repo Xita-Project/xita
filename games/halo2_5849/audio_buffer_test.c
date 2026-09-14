@@ -70,6 +70,25 @@ int h2_audio_backend_play(int voice, uint32_t bytes, uint32_t rate)
 }
 int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write)
 { return healthy && h2_audio_progress_cursor(&test_progress, voice, play, write) ? 0 : -1; }
+int h2_audio_backend_stop(int voice)
+{
+    if (!healthy || test_progress.voice != voice) return -1;
+    xk_audio_voice_stop(voice);
+    if (test_progress.pending) assert(h2_audio_progress_rest(&test_progress, 0));
+    return h2_audio_progress_stop(&test_progress, voice) ? 0 : -1;
+}
+int h2_audio_backend_status_voice(int voice, uint32_t *status)
+{
+    if (!healthy || test_progress.voice != voice) return -1;
+    *status = xk_audio_voice_playing(voice) ? 5 : 0; return 0;
+}
+int h2_audio_backend_rewind(int voice)
+{
+    if (!healthy || !h2_audio_progress_rewind(&test_progress, voice)) return -1;
+    xk_audio_voice_set_pos(voice, 0); return 0;
+}
+int h2_audio_backend_forget(int voice)
+{ return healthy && h2_audio_progress_forget(&test_progress, voice) ? 0 : -1; }
 static xctx context(uint32_t a, uint32_t b, uint32_t d, uint32_t e)
 {
     xctx c; memset(&c, 0x5A, sizeof c); c.r[4] = 0x1FF0;
@@ -372,8 +391,44 @@ int main(void)
     c = context(handle, 0, 0x6120, 0); call(&c, 0x37B777, 0, 3);
     c = context(handle, 0x6FFE, 0, 0); call(&c, 0x37B777, 0, 3);
     c = context(handle, 0, 0, 0); call(&c, 0x37B777, 0, 3);
-    /* Terminal test-fixture teardown, not an implemented guest Stop/Release. */
-    xk_audio_voice_free(b->voice); assert(h2_audio_backend_close() == 0);
+    c = context(handle, 0, 0, 0); reject(&c, 0x37B797); /* running seek rejected */
+    c = context(handle, 0x6120, 0, 0); call(&c, 0x37B75B, 0, 2); assert(read32(0x6120) == 5);
+    c = context(handle, b->mirror, 0, 0); reject(&c, 0x37B75B);
+    c = context(handle, 0x1FF8, 0, 0); reject(&c, 0x37B75B);
+    c = context(handle, 0, 0, 0); reject(&c, 0x37B75B);
+    for (unsigned cycle = 0; cycle < 3; ++cycle) {
+        c = context(handle, 0, 0, 0); call(&c, 0x37B703, 0, 1);
+        assert(b->stopped && !g_v[b->voice].playing && !test_progress.pending);
+        c = context(handle, 0, 0, 0); call(&c, 0x37B703, 0, 1); /* original idempotence */
+        c = context(handle, 0x6120, 0, 0); call(&c, 0x37B75B, 0, 2); assert(!read32(0x6120));
+        c = context(handle, 0x6FFE, 0x6120, 0); call(&c, 0x37B777, 0, 3);
+        assert(read32(0x6FFE) == read32(0x6120));
+        xk_audio_mix(mixed, XA_GRAIN); for (unsigned i = 0; i < XA_GRAIN * 2; ++i) assert(!mixed[i]);
+        assert(h2_audio_progress_submit(&test_progress, XA_GRAIN, 0)); /* real quiet grain */
+        c = context(handle, 0, 0, 1); reject(&c, 0x37B6DF); /* no rewind yet */
+        c = context(handle, 4, 0, 0); reject(&c, 0x37B797); /* arbitrary seek not supported */
+        c = context(handle, 0, 0, 0); call(&c, 0x37B797, 0, 2);
+        assert(b->rewound && !g_v[b->voice].pos && !g_v[b->voice].blk_frames);
+        c = context(handle, 0x6FFE, 0x6120, 0); call(&c, 0x37B777, 0, 3);
+        assert(!read32(0x6FFE) && !read32(0x6120));
+        c = context(handle, 0, 0, 1); call(&c, 0x37B6DF, 0, 4);
+        assert(h2_audio_progress_rest(&test_progress, 0) && !test_progress.completed_frames);
+        xk_audio_mix(mixed, XA_GRAIN); assert(mixed[100] && g_v[b->voice].frames_out == XA_GRAIN);
+        assert(h2_audio_progress_submit(&test_progress, XA_GRAIN, xk_audio_voice_pos(b->voice)));
+        assert(h2_audio_progress_rest(&test_progress, 0));
+    }
+    c = context(handle, 0, 0, 0); call(&c, 0x37B703, 0, 1);
+    c = context(handle, 0, 0, 0); call(&c, 0x379F45, 0, 1);
+    assert(test_progress.voice == -1 && !device.children);
+    /* A subsequent object may use the released sole-voice slot safely. */
+    c = description(dev); call(&c, 0x37D4BE, 0, 4); handle = read32(0x6FFE);
+    c = context(handle, 0x8F00, sizeof source, 0); call(&c, 0x37CC4A, 0, 3);
+    c = context(handle, 0, 0, 1); call(&c, 0x37B6DF, 0, 4);
+    c = context(handle, 0, 0, 0); call(&c, 0x37B703, 0, 1);
+    c = context(handle, 0, 0, 0); call(&c, 0x379F45, 0, 1);
+    c = context(dev - 8, 0, 0, 0); call(&c, 0x37C70F, 0, 1);
+    assert(opens == 3 && closes == 3 && !healthy);
+    for (unsigned i = 0; i < 256; ++i) assert(!pool[i]);
     free(g_xpt); free(g_xram);
     puts("Halo 2 real PCM voice, bounded controls, mirror ownership, rollback, aliases and parent lifetime passed");
     return 0;

@@ -115,3 +115,7 @@ its real mixer/output behavior where proven. Then continue original movie
 completion and the [normal skip path](halo2-movie-skip-ordering.md). The explicit
 [effects-unavailable diagnostic](halo2-effects-image-audit.md) still leaves the
 separate game sound initializer incomplete; it is not proof of a sound-free menu.
+
+The [native105 Stop/rewind milestone](halo2-movie-stop-rewind.md) now supports
+the observed cleanup sequence and records an actual guest Start press. It still
+presents only black pixels and stops at a separately guarded device Release.

@@ -34,6 +34,29 @@ int main(void)
         }
         consumed += XA_GRAIN; assert(p.completed_frames == consumed && !p.pending);
     }
+    /* Stopping cannot discard queued active samples. A completed stop holds
+     * its cursor through quiet output; rewind/restart and forget preserve an
+     * already queued silent grain without crediting it to a new voice. */
+    assert(h2_audio_progress_submit(&p, XA_GRAIN, 4096));
+    before = p; assert(!h2_audio_progress_stop(&p, 0) && !memcmp(&p, &before, sizeof p));
+    assert(!h2_audio_progress_rewind(&p, 0) && !h2_audio_progress_forget(&p, 0));
+    assert(h2_audio_progress_rest(&p, 0));
+    assert(h2_audio_progress_stop(&p, 0));
+    assert(h2_audio_progress_cursor(&p, 0, &play, &write) && play == write);
+    uint32_t stop_position = play;
+    assert(h2_audio_progress_submit(&p, XA_GRAIN, 0));
+    assert(h2_audio_progress_rest(&p, 256));
+    assert(h2_audio_progress_cursor(&p, 0, &play, &write) && play == stop_position && write == play);
+    assert(!h2_audio_progress_play(&p, 0, 106496, 44100));
+    assert(h2_audio_progress_rewind(&p, 0));
+    assert(h2_audio_progress_cursor(&p, 0, &play, &write) && !play && !write);
+    assert(h2_audio_progress_play(&p, 0, 106496, 44100));
+    assert(h2_audio_progress_rest(&p, 0) && !p.completed_frames);
+    assert(h2_audio_progress_stop(&p, 0));
+    assert(h2_audio_progress_submit(&p, XA_GRAIN, 0));
+    assert(h2_audio_progress_forget(&p, 0) && p.pending && p.remaining == XA_GRAIN && p.voice == -1);
+    assert(h2_audio_progress_play(&p, 0, 106496, 44100));
+    assert(h2_audio_progress_rest(&p, 0) && !p.completed_frames);
     /* Counter and invalid-input rejection precede any output/state mutation. */
     assert(h2_audio_progress_submit(&p, XA_GRAIN, p.bytes));
     assert(h2_audio_progress_cursor(&p, 0, &play, &write) && !write);

@@ -301,3 +301,8 @@ int main(void)
     c = context(0x5000, 0, 0); call(&c, 0x37C70F, 0, 1); assert(frees == 2);
     free(g_xpt); free(g_xram); puts("Halo 2 audio device ABI/lifetime tests passed"); return 0;
 }
+
+int h2_audio_backend_stop(int v) { (void)v; assert(0); return -1; }
+int h2_audio_backend_status_voice(int v, uint32_t *s) { (void)v; (void)s; assert(0); return -1; }
+int h2_audio_backend_rewind(int v) { (void)v; assert(0); return -1; }
+int h2_audio_backend_forget(int v) { (void)v; assert(0); return -1; }

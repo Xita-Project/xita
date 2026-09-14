@@ -12,7 +12,7 @@ typedef struct {
     int32_t volume;
     int voice;
     uint32_t locked, lock_offset, lock_first, lock_second, commits;
-    uint32_t started, cursor_queries;
+    uint32_t started, stopped, rewound, cursor_queries;
     uint64_t committed_bytes;
 } h2_audio_buffer;
 static h2_audio_buffer buffers[XA_MAX_VOICES];
@@ -158,8 +158,8 @@ static void reference(xctx *c, uint32_t ip)
         uint32_t count = b->references;
         if (ip != 0x37A14F && count == 1 && b->locked)
             fail(c, ip, "release locked buffer", b->base);
-        if (ip != 0x37A14F && count == 1 && b->started)
-            fail(c, ip, "release active PCM voice requires audited Stop", b->base);
+        if (ip != 0x37A14F && count == 1 && b->started && !b->stopped)
+            fail(c, ip, "release active PCM voice requires completed Stop", b->base);
         if (ip == 0x37A14F) {
             if (count == UINT32_MAX) fail(c, ip, "buffer reference overflow", count);
             X_M32(b->base + 4) = ++b->references;
@@ -169,6 +169,8 @@ static void reference(xctx *c, uint32_t ip)
         } else {
             /* free() takes the mixer lock, so no worker can still read the
              * mirror when its allocation is released. Caller owns source. */
+            if (b->started && h2_audio_backend_forget(b->voice) < 0)
+                fail(c, ip, "release PCM progress ownership", b->voice);
             xk_audio_voice_free(b->voice);
             if (b->mirror && xk_mem_free(b->mirror) < 0) fail(c, ip, "free PCM mirror", b->mirror);
             if (xk_mem_free(b->base) < 0) fail(c, ip, "free buffer", b->base);
@@ -376,15 +378,50 @@ static void buffer_play(xctx *c)
 {
     const uint32_t ip = 0x37B6DF;
     stack(c, ip, 4); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
-    if (!b->mirror || b->started || b->locked || X_ARG(1) || X_ARG(2) || X_ARG(3) != 1 ||
+    if (!b->mirror || (b->started && !b->rewound) || b->locked || X_ARG(1) || X_ARG(2) || X_ARG(3) != 1 ||
         !mapped(b->mirror, b->mirror_bytes) || !mapped(b->source, b->bytes) || overlaps_device(b->source, b->bytes))
         fail(c, ip, "unsupported PCM Play state/flags", X_ARG(3));
     if (h2_audio_backend_play(b->voice, b->bytes, b->frequency) < 0)
         fail(c, ip, "real PCM sink Play rejected", b->voice);
-    b->started = 1;
+    b->started = 1; b->stopped = b->rewound = 0;
     xv_logf("[h2/audio-buffer] real looping Play caller=%08X interface=%08X voice=%d bytes=%u frequency=%u\n",
             X_M32(c->r[4]), b->base + 0x1C, b->voice, b->bytes, b->frequency);
     result(c, 0, 4);
+}
+static void buffer_stop(xctx *c)
+{
+    const uint32_t ip = 0x37B703;
+    stack(c, ip, 1); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    if (!b->started || b->locked) fail(c, ip, "unsupported PCM Stop state", b->base);
+    if (h2_audio_backend_stop(b->voice) < 0) fail(c, ip, "real PCM stop/drain rejected", b->voice);
+    b->stopped = 1;
+    xv_logf("[h2/audio-buffer] real Stop caller=%08X interface=%08X voice=%d drained=1\n",
+            X_M32(c->r[4]), b->base + 0x1C, b->voice);
+    result(c, 0, 1);
+}
+static void buffer_status(xctx *c)
+{
+    const uint32_t ip = 0x37B75B;
+    stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    uint32_t out = X_ARG(1), status;
+    if (!b->started) fail(c, ip, "PCM status before supported Play", b->base);
+    output(c, ip, out, 4);
+    if (aliases(out, 4, c->r[4], 12)) fail(c, ip, "PCM status output/stack alias", out);
+    if (h2_audio_backend_status_voice(b->voice, &status) < 0 || (status != 0 && status != 5))
+        fail(c, ip, "real PCM status rejected", b->voice);
+    x_guest_write(out, &status, 4); result(c, 0, 2);
+}
+static void buffer_rewind(xctx *c)
+{
+    const uint32_t ip = 0x37B797;
+    stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    if (!b->started || !b->stopped || b->locked || X_ARG(1))
+        fail(c, ip, "unsupported PCM seek state/position", X_ARG(1));
+    if (h2_audio_backend_rewind(b->voice) < 0) fail(c, ip, "real PCM rewind rejected", b->voice);
+    b->rewound = 1;
+    xv_logf("[h2/audio-buffer] stopped rewind caller=%08X interface=%08X position=0\n",
+            X_M32(c->r[4]), b->base + 0x1C);
+    result(c, 0, 2);
 }
 static void buffer_cursor(xctx *c)
 {
@@ -503,6 +540,9 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37B637: mix_bin(c, ip); break;
     case 0x37C5E4: case 0x37B6C3: buffer_routing(c, ip); break;
     case 0x37B6DF: buffer_play(c); break;
+    case 0x37B703: buffer_stop(c); break;
+    case 0x37B75B: buffer_status(c); break;
+    case 0x37B797: buffer_rewind(c); break;
     case 0x37B777: buffer_cursor(c); break;
 #if H2_AUDIO_EFFECTS_UNAVAILABLE
     case 0x37B86D: effects_unavailable(c); break;
@@ -573,9 +613,9 @@ void h2_audio_trace_buffer(xctx *c, uint32_t ip)
                     b->base + 0x1C, b->references, b->voice, b->source, b->bytes, b->mirror,
                     b->frequency, b->volume, b->headroom);
         if (b->base)
-            xv_logf("[h2/audio-buffer] stop locked=%u offset=%u first=%u second=%u commits=%u committed_bytes=%llu started=%u cursor_queries=%u\n",
+            xv_logf("[h2/audio-buffer] stop locked=%u offset=%u first=%u second=%u commits=%u committed_bytes=%llu started=%u stopped=%u rewound=%u cursor_queries=%u\n",
                     b->locked, b->lock_offset, b->lock_first, b->lock_second, b->commits,
-                    (unsigned long long)b->committed_bytes, b->started, b->cursor_queries);
+                    (unsigned long long)b->committed_bytes, b->started, b->stopped, b->rewound, b->cursor_queries);
     }
     if (ip == 0x37B7B3 && !(c->r[4] & 3) && mapped(c->r[4], 36)) {
         xv_logf("[h2/audio-buffer] Lock caller=%08X interface=%08X offset=%u bytes=%u pointer1=%08X length1=%08X pointer2=%08X length2=%08X flags=%08X\n",
