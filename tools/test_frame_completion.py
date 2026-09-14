@@ -33,15 +33,18 @@ static volatile uint32_t g_frame_requested,g_frame_completed;
 static uint32_t g_frame_submitted, g_settings_frame_period;
 static volatile int g_running=1;
 static uint64_t xv_pump_us_acc;
-static struct { SceGxmContext *ctx; int hle_ready; unsigned front_index,back_index; } g_gfx={NULL,1,2,0};
+static struct { SceGxmContext *ctx; int hle_ready; unsigned front_index,back_index; void *scaled_target; } g_gfx={NULL,1,2,0,NULL};
 static uint32_t g_display_free[3],g_display_queued,g_display_released;
-static volatile unsigned notification_words[4];
+static volatile unsigned notification_words[8];
 static volatile unsigned *g_notifications=notification_words;
 '''
 fixture=r'''
-static unsigned rendered,finished,queries,peak_live,base,failed_frame;
-static uint64_t now=1,retired_at[3],submitted_at[3];
-static struct { SceGxmNotification fence; uint64_t due,display_due; unsigned old_slot; int done,shown,accepted; } gpu[3];
+static unsigned rendered,finished,queries,checked,peak_live,base,failed_frame;
+static int early,has_queries=1,missing_world;
+static int xv_early_visibility_enabled(void) { return early; }
+int xv_d3d_has_visibility(uint32_t frame) { assert(frame>=10 && frame<=12);return has_queries; }
+static uint64_t now=1,retired_at[3],submitted_at[3],queries_at[3];
+static struct { SceGxmNotification fence,world; uint64_t due,world_due,display_due; unsigned old_slot; int done,world_done,shown,accepted; } gpu[3];
 void xv_cpu_log_thread(const char *role) {}
 void xv_cpu_poll(uint64_t t) {}
 void xv_gpu_write_barrier(void) {}
@@ -50,26 +53,31 @@ uint64_t sceKernelGetProcessTimeWide(void) { return now; }
 uint64_t xk_os_monotonic_us(void) { return now; }
 void xv_d3d_visibility_complete(uint32_t frame)
 {
-    assert(frame==10+queries && gpu[queries].done);
+    assert(frame==10+queries && (gpu[queries].world_done || gpu[queries].done));
     assert(g_frame_completed==base+queries);
-    retired_at[queries]=now;queries++;
+    queries_at[queries]=now;queries++;
 }
-void xv_d3d_check_geometry(uint32_t frame) { assert(frame==9+queries && gpu[queries-1].done); }
-static int xv_gfx_render_frame(uint32_t mesh,unsigned ui,const SceGxmNotification *fence)
+void xv_d3d_check_geometry(uint32_t frame) {
+    assert(frame==10+checked && gpu[checked].done && queries>checked);
+    assert(g_frame_completed==base+checked);retired_at[checked++]=now;
+}
+static int xv_gfx_render_frame(uint32_t mesh,unsigned ui,const SceGxmNotification *fence,const SceGxmNotification *world)
 {
     assert(mesh==10+rendered && ui==rendered);
     assert(g_display_free[g_gfx.back_index] && g_display_queued-g_display_released<2);
     unsigned i=rendered++;
     gpu[i].fence=*fence;submitted_at[i]=now;
+    assert((world!=NULL)==(early && g_gfx.scaled_target && has_queries));
+    if(world) {gpu[i].world=*world;assert(*world->address!=world->value);}
     /* Work completion remains delayed after CPU submission. */
-    gpu[i].due=now+10000;gpu[i].display_due=now+12000;
+    gpu[i].world_due=now+5000;gpu[i].due=now+10000;gpu[i].display_due=now+12000;
     gpu[i].old_slot=g_gfx.front_index;
     if(i+1==failed_frame)return -7;
     gpu[i].accepted=1;
     g_display_free[g_gfx.back_index]=0;
     g_display_queued++;
     g_gfx.front_index=g_gfx.back_index;g_gfx.back_index=(g_gfx.back_index+1)%3;
-    if(rendered-queries>peak_live)peak_live=rendered-queries;
+    if(rendered-checked>peak_live)peak_live=rendered-checked;
     return 0;
 }
 void sceGxmFinish(SceGxmContext *ctx)
@@ -83,13 +91,16 @@ int sceKernelDelayThread(SceUInt delay)
 {
     now+=delay;assert(now<1000000);
     for(unsigned i=0;i<rendered;i++) {
+        if(gpu[i].world.address && !missing_world && !gpu[i].world_done && now>=gpu[i].world_due) {
+            gpu[i].world_done=1;*gpu[i].world.address=gpu[i].world.value;
+        }
         if(!gpu[i].done && now>=gpu[i].due) {gpu[i].done=1;*gpu[i].fence.address=gpu[i].fence.value;}
         if(gpu[i].accepted && !gpu[i].shown && now>=gpu[i].display_due) {
             assert(gpu[i].done);gpu[i].shown=1;
             g_display_free[gpu[i].old_slot]=1;g_display_released++;
         }
     }
-    if(queries==3) {assert(g_frame_completed==base+3u);g_running=0;}
+    if(checked==3) {assert(g_frame_completed==base+3u);g_running=0;}
     return 0;
 }
 '''
@@ -100,21 +111,29 @@ int main(int argc,char **argv)
     if(capped)setenv("XV_FRAME_CAP","20",1);else unsetenv("XV_FRAME_CAP");
     base=argc>2 ? UINT32_MAX-1u : 0;
     failed_frame=argc>3 ? 2 : 0;
+    early=getenv("TEST_EARLY")!=NULL;
+    g_gfx.scaled_target=getenv("TEST_NATIVE")?NULL:(void*)1;
+    has_queries=!getenv("TEST_NO_QUERIES");missing_world=getenv("TEST_MISSING_WORLD")!=NULL;
     g_frame_completed=g_frame_submitted=base;g_frame_requested=base+3u;
     for(unsigned i=0;i<3;i++) {
         uint32_t ticket=base+i+1u;unsigned q=ticket&3u;
         g_packets[q].mesh=10+i;g_packets[q].ui=i;
+        notification_words[4+q]=ticket; /* stale matching query value must be cleared before submission */
         notification_words[q]=ticket-4u; /* previous use, including ticket wrap */
     }
     xv_pump_thread(0,NULL);
-    assert(rendered==3 && queries==3 && finished==(failed_frame?1u:0u));
+    assert(rendered==3 && queries==3 && checked==3 && finished==(failed_frame?1u:0u));
     if(!failed_frame) {
         if(capped) {assert(peak_live==1);assert(retired_at[0]<submitted_at[1]);}
         else {assert(peak_live>=2);assert(submitted_at[1]<retired_at[0]);}
         assert(retired_at[0]<=gpu[0].due+100);
+        if(early && g_gfx.scaled_target && has_queries && !missing_world) {
+            assert(queries_at[0]<=gpu[0].world_due+100);
+            assert(queries_at[0]<retired_at[0]);
+        } else assert(queries_at[0]==retired_at[0]);
         assert(retired_at[0]<gpu[0].display_due); /* retirement need not wait for vblank */
     }
-    puts("PASS: production notification retirement, overlapping submissions, scanout ownership, pacing, ticket wrap and exceptional failure drain");
+    puts("PASS: world query completion never releases frame storage; final retirement, scanout, pacing, ticket wrap, missing query notification and failure drain");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='xita-frame-completion-') as tmp:
@@ -122,5 +141,7 @@ with tempfile.TemporaryDirectory(prefix='xita-frame-completion-') as tmp:
     sdk=pathlib.Path(os.environ.get('VITASDK',str(pathlib.Path.home()/'vitasdk')))
     subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP','-Wall','-Wextra','-Werror','-Wno-unused-parameter',
       '-I',str(root),'-I',str(root/'runtime'),'-idirafter',str(sdk/'arm-vita-eabi/include'),str(p/'test.c'),str(root/'runtime/xv_render_profile.c'),'-o',str(p/'test')],check=True)
-    for args in [[],['1'],['0','wrap'],['1','wrap'],['0','wrap','error']]:
-        subprocess.run([str(p/'test'),*args],check=True)
+    for mode in [[],['TEST_EARLY'],['TEST_EARLY','TEST_NATIVE'],['TEST_EARLY','TEST_NO_QUERIES'],['TEST_EARLY','TEST_MISSING_WORLD']]:
+        env=os.environ.copy();env.update({key:'1' for key in mode})
+        for args in [[],['1'],['0','wrap'],['1','wrap'],['0','wrap','error']]:
+            subprocess.run([str(p/'test'),*args],check=True,env=env)

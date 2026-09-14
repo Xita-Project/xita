@@ -1888,6 +1888,10 @@ void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, u
     sceGxmSetBackVisibilityTestOp(ctx,SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
     if (err < 0) XV_ONCE(warn_visibility,"visibility buffer rejected %08X; reporting zero coverage\n",err);
 }
+int xv_d3d_has_visibility(uint32_t frame)
+{
+    return g_lists[frame % XV_NUM_LISTS]->nvisibility != 0;
+}
 void xv_d3d_visibility_complete(uint32_t frame)
 {
     cmdlist_t *l=g_lists[frame % XV_NUM_LISTS];

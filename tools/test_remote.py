@@ -177,7 +177,7 @@ def main():
             assert request('/benchmark?kind=unknown','POST')[0]==400
             assert request('/benchmark?kind=model-palette&kind=flare','POST')[0]==400
             assert request('/benchmark?kind=model-palette','POST',token='f'*32)[0]==403
-            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution'):
+            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility'):
                 assert request('/benchmark?kind='+kind,'POST')[0]==204
                 assert request('/benchmark?kind='+kind,'POST')[0]==409
                 assert request('/screen')[0]==request('/update')[0]==409

@@ -4,7 +4,7 @@ static unsigned benchmark;
 uint32_t xv_benchmark_status(void) {return LOAD(&benchmark);}
 unsigned xv_benchmark_remote_busy(void) {return LOAD(&benchmark)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
-{unsigned expected=0;return kind>=1&&kind<=XV_BENCH_RESOLUTION&&__atomic_compare_exchange_n(&benchmark,&expected,kind,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)?0:-1;}
+{unsigned expected=0;return kind>=1&&kind<=XV_BENCH_EARLY_VISIBILITY&&__atomic_compare_exchange_n(&benchmark,&expected,kind,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)?0:-1;}
 void xv_logf(const char *fmt,...) {(void)fmt;}
 int main(void)
 {
@@ -17,9 +17,15 @@ int main(void)
     STORE(&pad_deadline,(uint32_t)(remote_now()+2000000));
     uint32_t buttons=0;uint8_t lx=128,ly=128,rx=128,ry=128;
     xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(buttons==8&&lx==192&&ly==128&&rx==128&&ry==100);
+    buttons=0x10000;lx=ly=rx=ry=128;
+    xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(buttons==0x10008&&lx==192&&ry==100);
+    buttons=0x10010;lx=ly=rx=ry=128;
+    xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(buttons==0x10010&&lx==128);
     buttons=16;lx=ly=rx=ry=128;xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(buttons==16&&lx==128);
     buttons=0;lx=0;xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(!buttons&&lx==0);
     lx=128;STORE(&pad_deadline,(uint32_t)(remote_now()-1));xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(!buttons&&lx==128);
+    buttons=0x10000;xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(buttons==0x10000&&lx==128);
+    buttons=0;
     STORE(&pad_deadline,(uint32_t)(remote_now()+2000000));STORE(&pad_seq,1);
     xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(!buttons&&lx==128);
     STORE(&enabled,0);STORE(&pad_seq,0);STORE(&pad_deadline,0);

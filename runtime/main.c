@@ -596,7 +596,19 @@ static int g_net_dialog;
 extern int xv_net_startup(void (*draw)(void));
 extern void xv_net_shutdown(void);
 #endif
-static int xv_gfx_render_frame(uint32_t mesh_frame, unsigned ui_frame, const SceGxmNotification *fence)
+/* Visibility draws end with the world scene. Its fragment fence may publish
+ * query values before the upscale completes, but only the final fence releases
+ * packet storage. Both paths preserve the same scenes and draw order. */
+static int xv_gfx_end_scenes(xv_gfx_t *g, unsigned ui_frame,
+    const SceGxmNotification *fence, const SceGxmNotification *visibility_fence)
+{
+    int scaled = g->scaled_target != NULL;
+    if (XV_RENDER_END(0, sceGxmEndScene(g->ctx, NULL, scaled ? visibility_fence : fence)) != SCE_OK) return -1;
+    if (scaled && xv_gfx_upscale(g, ui_frame, fence) != SCE_OK) { XV_LOG("upscale failed\n"); return -1; }
+    return 0;
+}
+static int xv_gfx_render_frame(uint32_t mesh_frame, unsigned ui_frame,
+    const SceGxmNotification *fence, const SceGxmNotification *visibility_fence)
 {
     xv_gfx_t *g = &g_gfx;
     (void)mesh_frame;
@@ -677,8 +689,7 @@ static int xv_gfx_render_frame(uint32_t mesh_frame, unsigned ui_frame, const Sce
       xv_ui_gxm_replay_frame(g->ctx, g->render_width, g->render_height, ui_frame); }
 
     if (!scaled) xv_ui_gxm_replay_settings(g->ctx, ui_frame);
-    if (XV_RENDER_END(0, sceGxmEndScene(g->ctx, NULL, scaled ? NULL : fence)) != SCE_OK) return -1;
-    if (scaled && xv_gfx_upscale(g, ui_frame, fence) != SCE_OK) { XV_LOG("upscale failed\n"); return -1; }
+    if (xv_gfx_end_scenes(g, ui_frame, fence, visibility_fence) < 0) return -1;
 
 #ifdef XV_RUN_RECOMP
     if (g_net_dialog) {
@@ -717,7 +728,7 @@ static int xv_gfx_render_frame(uint32_t mesh_frame, unsigned ui_frame, const Sce
 #ifdef XV_RUN_RECOMP
 static void xv_net_dialog_draw(void)
 {
-    xv_gfx_render_frame(0xFFFFFFFFu, UINT32_MAX, NULL);
+    xv_gfx_render_frame(0xFFFFFFFFu, UINT32_MAX, NULL, NULL);
     sceDisplayWaitVblankStart();
 }
 #endif
@@ -1088,14 +1099,21 @@ static uint32_t g_settings_frame_period;
 static volatile int      g_running         = 1;
 static struct {
     uint32_t mesh, ui;
-    SceGxmNotification fence;
-    uint64_t started_us;
-    int failed;
+    SceGxmNotification fence, visibility_fence;
+    uint64_t started_us, visibility_us;
+    int failed, visibility_completed;
 } g_packets[XV_FRAME_TICKETS];
 static xv_slot_owner g_mesh_owners[XV_FRAME_SLOTS], g_ui_owners[XV_FRAME_SLOTS];
 static uint32_t g_frame_submitted; /* pump-owned, distinct from GPU completion */
 static int g_pipeline_override = -1;
 static int g_pipeline_configured; /* Written before starting either game worker. */
+static int g_early_visibility_override = -1;
+static int xv_early_visibility_enabled(void)
+{
+    int override = __atomic_load_n(&g_early_visibility_override, __ATOMIC_ACQUIRE);
+    /* Experimental until matched physical comparisons establish its value. */
+    return override < 0 ? 0 : override;
+}
 static unsigned g_slot_waits;
 static uint64_t g_slot_wait_us;
 static int xv_pipeline_enabled(void)
@@ -1189,6 +1207,10 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
+    if (xv_benchmark_compare_early_visibility()) {
+        __atomic_store_n(&g_early_visibility_override, enabled < 0 ? -1 : !!enabled, __ATOMIC_RELEASE);
+        return;
+    }
     if (xv_benchmark_compare_object_basis()) {
 #ifdef XV_NATIVE_OBJECT_BASIS
         extern void xv_object_basis_override(int);
@@ -1282,18 +1304,34 @@ void xv_render_target_drain(void)
  * release is tracked separately and cannot retire geometry or queries. */
 static unsigned g_retired_count, g_max_pending;
 static uint64_t g_completion_us;
+static unsigned g_early_visibility_count;
+static uint64_t g_early_visibility_us, g_visibility_tail_us;
 static int xv_pump_retire(void)
 {
     uint32_t done = __atomic_load_n(&g_frame_completed, __ATOMIC_RELAXED);
     if (done == g_frame_submitted) return 0;
     uint32_t ticket = done + 1u;
     unsigned q = ticket & (XV_FRAME_TICKETS - 1u);
+    if (!g_packets[q].visibility_completed && g_packets[q].visibility_fence.address &&
+        __atomic_load_n(g_packets[q].visibility_fence.address, __ATOMIC_ACQUIRE) == g_packets[q].visibility_fence.value) {
+        g_packets[q].visibility_us = sceKernelGetProcessTimeWide();
+        xv_d3d_visibility_complete(g_packets[q].mesh);
+        g_packets[q].visibility_completed = 1;
+        /* No ownership release here: upscale, settings and final fragments
+         * may still read the frame's geometry, textures and UI snapshots. */
+    }
     if (!g_packets[q].failed &&
         __atomic_load_n(g_packets[q].fence.address, __ATOMIC_ACQUIRE) != g_packets[q].fence.value) return 0;
-    uint64_t elapsed = sceKernelGetProcessTimeWide() - g_packets[q].started_us;
+    uint64_t now = sceKernelGetProcessTimeWide();
+    uint64_t elapsed = now - g_packets[q].started_us;
     if (g_gfx.hle_ready && g_packets[q].mesh != UINT32_MAX) {
-        xv_d3d_visibility_complete(g_packets[q].mesh);
+        if (!g_packets[q].visibility_completed) xv_d3d_visibility_complete(g_packets[q].mesh);
         xv_d3d_check_geometry(g_packets[q].mesh);
+    }
+    if (g_packets[q].visibility_completed) {
+        g_early_visibility_count++;
+        g_early_visibility_us += g_packets[q].visibility_us - g_packets[q].started_us;
+        g_visibility_tail_us += now - g_packets[q].visibility_us;
     }
     g_completion_us += elapsed;
     __atomic_store_n(&g_frame_completed,ticket,__ATOMIC_RELEASE);
@@ -1301,6 +1339,10 @@ static int xv_pump_retire(void)
     if (++g_retired_count == 60) {
         XV_LOG("[frame-retire] 60 frames: completion latency %.3f ms/frame; max pending %u; GPU notification retirement (overlaps guest/submission)\n",
             g_completion_us / 60000.0, g_max_pending);
+        if (g_early_visibility_count) XV_LOG("[frame-query] %u world fragment fences: query latency %.3f ms/frame; remaining final-fence tail %.3f ms/frame; scheduled polling times, overlaps CPU/GPU\n",
+            g_early_visibility_count, g_early_visibility_us / (1000.0 * g_early_visibility_count),
+            g_visibility_tail_us / (1000.0 * g_early_visibility_count));
+        g_early_visibility_count=0; g_early_visibility_us=0; g_visibility_tail_us=0;
         g_retired_count=0; g_completion_us=0; g_max_pending=0;
     }
     return 1;
@@ -1336,11 +1378,21 @@ static int xv_pump_thread(SceSize args, void *argp)
             g_packets[q].mesh=ticket-1u; g_packets[q].ui=UINT32_MAX;
 #endif
             g_packets[q].fence=(SceGxmNotification){g_notifications+q,ticket};
+            g_packets[q].visibility_fence=(SceGxmNotification){NULL,0};
+            g_packets[q].visibility_completed=0;
+            if (xv_early_visibility_enabled() && g_gfx.scaled_target && g_gfx.hle_ready &&
+                g_packets[q].mesh != UINT32_MAX && xv_d3d_has_visibility(g_packets[q].mesh)) {
+                g_packets[q].visibility_fence=(SceGxmNotification){g_notifications+XV_FRAME_TICKETS+q,ticket};
+                /* This ticket slot's prior owner has retired. Initialize its
+                 * separate query word, including the uint32_t ticket wrap. */
+                __atomic_store_n(g_packets[q].visibility_fence.address, ~ticket, __ATOMIC_RELEASE);
+            }
             g_packets[q].started_us=now;
             xv_cpu_poll(now);
             xv_render_profile_begin(g_packets[q].mesh);
             xv_gpu_write_barrier();
-            int err=xv_gfx_render_frame(g_packets[q].mesh,g_packets[q].ui,&g_packets[q].fence);
+            int err=xv_gfx_render_frame(g_packets[q].mesh,g_packets[q].ui,&g_packets[q].fence,
+                g_packets[q].visibility_fence.address ? &g_packets[q].visibility_fence : NULL);
             g_packets[q].failed=err<0;
             if (err<0) {
                 /* A failed EndScene may never signal. Exceptional cleanup only:

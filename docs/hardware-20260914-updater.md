@@ -53,8 +53,26 @@ intentional: slot switching must be verified even when hashes are equal.
 The revised launcher-log endpoint also works on hardware. Halo subsequently
 reached its normal main menu through remote dashboard input.
 
-This establishes physical dashboard update/startup, not a successful update
-from active gameplay, long-running rollback recovery, or an FPS improvement.
+An update from live solo Blood Gulch subsequently confirmed diagnostic runtime
+`ca79ff5918b30611edda75548c47c3d84752910ec55f495a7000c38543bf1529`
+in slot B, with empty staging state. The dashboard and Halo menu rendered.
+This establishes a physical gameplay-to-updater handoff, not long-running
+recovery reliability or an FPS improvement.
+
+The next capture exposed persistent controller status `0x00010000` after
+relaunch. [VitaSDK identifies this as `SCE_CTRL_INTERCEPTED`](https://github.com/vitasdk/vita-headers/blob/5e1e7d38d766e4c1634a77f6e5249caab8c8f9cb/include/psp2common/ctrl.h),
+not a held gameplay button. The remote layer had treated every nonzero bit as
+physical input and rejected injected controls. Its correction preserves this
+status bit, physical button/stick priority and input expiry; host tests pass
+normally and with ASan/UBSan. It does not take control of the system shell.
+
+The corrected diagnostic (`e1ebb007f713bf4c95c4d2e7c63274143e40d0ec19393d1463957b29fa4e8dea`)
+uploaded and verified, but the next restart did **not** return a confirmed boot
+within 180 seconds. The Vita still responded to ping while the paired HTTP
+service refused connections. Its installation and current screen are
+unconfirmed. The prior slot protocol preserves a fallback, but recovery from
+this particular stop has not yet been observed. Neither a GPU crash nor an
+SD-card fault can be diagnosed from that network symptom alone.
 
 | Component | SHA-256 |
 | --- | --- |

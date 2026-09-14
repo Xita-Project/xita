@@ -11,7 +11,7 @@ import tempfile
 root = pathlib.Path(__file__).resolve().parents[1]
 src = (root / 'runtime/xv_d3d.c').read_text()
 start = src.index('static cmdlist_t *cur_list(void);')
-end = src.index('#ifdef XV_RUN_RECOMP', start)
+end = src.index('static int draw_scan_override', start)
 implementation = src[start:end]
 start = src.index('int xv_d3d_has_render_targets(')
 end = src.index('/* The clear quad', start)

@@ -35,14 +35,17 @@ static int thread_started;
 void xv_remote_pad(uint32_t *buttons,uint8_t *lx,uint8_t *ly,uint8_t *rx,uint8_t *ry)
 {
     if(!LOAD(&enabled))return;
-    /* A real button or stick motion always wins. Network input expires even
-     * if the client crashes without sending a release. Reads never spin. */
-    if(*buttons || *lx<112 || *lx>144 || *ly<112 || *ly>144 ||
+    /* 0x10000 is SCE_CTRL_INTERCEPTED in the application API: system focus
+     * metadata, not a held gameplay button. It can remain set after LoadExec.
+     * Keep it intact while injecting only Xita's paired, leased game input.
+     * Every reported physical button or stick motion still takes priority. */
+    const uint32_t intercepted=0x00010000u;
+    if((*buttons & ~intercepted) || *lx<112 || *lx>144 || *ly<112 || *ly>144 ||
        *rx<112 || *rx>144 || *ry<112 || *ry>144)return;
     unsigned seq=LOAD(&pad_seq);if(seq&1)return;
     unsigned axes=LOAD(&pad_axes),buttons_remote=LOAD(&pad_buttons),until=LOAD(&pad_deadline);
     if(seq!=LOAD(&pad_seq) || !until || (int32_t)(until-(uint32_t)remote_now())<=0)return;
-    *buttons=buttons_remote;*lx=axes;*ly=axes>>8;*rx=axes>>16;*ry=axes>>24;
+    *buttons=(*buttons & intercepted)|buttons_remote;*lx=axes;*ly=axes>>8;*rx=axes>>16;*ry=axes>>24;
 }
 
 void xv_remote_frame(const void *pixels,unsigned width,unsigned height,unsigned pitch)
@@ -182,7 +185,7 @@ static void serve(int s)
                 int bad=xv_update_request(!strcmp(target,"/update/rollback"));reply(s,bad?409:204,bad?"Update not ready\n":"");
             } else reply(s,404,"Unknown update operation\n");
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/benchmark?kind=",16)) {
-            static const char *const kinds[]={"object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution"};
+            static const char *const kinds[]={"object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility"};
             unsigned kind=0;
             for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++)if(!strcmp(target+16,kinds[i]))kind=i+1;
             if(!kind)reply(s,400,"Unknown benchmark kind\n");
