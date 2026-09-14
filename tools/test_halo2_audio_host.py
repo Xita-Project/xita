@@ -24,7 +24,7 @@ class Image:
         return self.words[address]
 
     def section_of(self, address):
-        return (0, 0, 0, 0, "DSOUND" if address in AUDIO_ORIGINAL_BOUNDARIES or address == 0x37B86D else ".text", ())
+        return (0, 0, 0, 0, "DSOUND" if address in AUDIO_ORIGINAL_BOUNDARIES or address == 0x37E5D8 else ".text", ())
 
 
 class AudioHooks(unittest.TestCase):
@@ -42,7 +42,7 @@ class AudioHooks(unittest.TestCase):
         hook = self.construct()
         for address in AUDIO_HOST_BOUNDARIES:
             self.assertIn("h2_audio_host_call", "".join(hook.function_entry(address)))
-        for address in [*AUDIO_ORIGINAL_BOUNDARIES, 0x37B86D]:
+        for address in [*AUDIO_ORIGINAL_BOUNDARIES, 0x37E5D8]:
             guard = "".join(hook.function_entry(address))
             self.assertIn("h2_audio_guest_entry", guard)
             self.assertNotIn("return;", guard)

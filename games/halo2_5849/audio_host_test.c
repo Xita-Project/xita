@@ -112,7 +112,48 @@ static void original_configuration_tests(void)
     }
     xctx c = context(0, 0, 0); original_entry(&c, 0x37DEBF, 0); /* selected HRTF body */
     original_entry(&c, 0x37B86D, 0); /* DSP image loader */
+    g_xpt[0x417] = 0x7000; X_M32(0x417128) = 0x37C70F;
+    c = context(0x5008, 0, 0); X_M32(c.r[4]) = 0x21EB91;
+    original_entry(&c, 0x379F2A, 1);
+    X_M32(c.r[4]) = 0x3E3D19; original_entry(&c, 0x379F2A, 1); X_M32(c.r[4]) = 0x21EB91;
+    X_M32(c.r[4]) ^= 4; original_entry(&c, 0x379F2A, 0); X_M32(c.r[4]) = 0x21EB91;
+    X_M32(0x417128) = 0; original_entry(&c, 0x379F2A, 0); X_M32(0x417128) = 0x37C70F;
+    g_xpt[0x417] = 0x8000; original_entry(&c, 0x379F2A, 0); g_xpt[0x417] = 0x7000;
+    X_M32(c.r[4] + 4) = 0x5000; original_entry(&c, 0x379F2A, 0);
 }
+#if H2_AUDIO_EFFECTS_UNAVAILABLE
+static xctx effects_context(void)
+{
+    xctx c = context(0x2FFC, 0x4100, 1);
+    X_M32(c.r[4]) = 0x1913A9; X_M32(c.r[4] + 16) = 0x4200;
+    x_guest_write(0x2FFC, "DSPImage", 9); X_M32(0x4100) = 9; X_M32(0x4104) = 10;
+    return c;
+}
+static void effects_failure_tests(void)
+{
+    xctx c = effects_context(); uint8_t memory[0x9000]; memcpy(memory, g_xram, sizeof memory);
+    h2_audio_device_snapshot state = device;
+    unsigned op = opens, cl = closes, al = allocations, fr = frees, bu = bin_updates;
+    call(&c, 0x37B86D, 0x80004001, 4);
+    assert(!memcmp(memory, g_xram, sizeof memory) && !memcmp(&state, &device, sizeof state));
+    assert(op == opens && cl == closes && al == allocations && fr == frees && bu == bin_updates);
+    c = effects_context(); X_M32(c.r[4] + 8) = 0x3FFE;
+    uint32_t locations[2] = {9, 10}; x_guest_write(0x3FFE, locations, sizeof locations);
+    memcpy(memory, g_xram, sizeof memory); call(&c, 0x37B86D, 0x80004001, 4);
+    assert(!memcmp(memory, g_xram, sizeof memory));
+    c = effects_context(); X_M32(c.r[4]) ^= 4; reject(&c, 0x37B86D);
+    c = effects_context(); X_M32(c.r[4] + 12) = 0; reject(&c, 0x37B86D);
+    c = effects_context(); X_M32(c.r[4] + 12) = 3; reject(&c, 0x37B86D);
+    c = effects_context(); X_M32(c.r[4] + 16) = 0x5008; reject(&c, 0x37B86D);
+    c = effects_context(); X_M32(c.r[4] + 16) = 0xFFFFFFFE; reject(&c, 0x37B86D);
+    c = effects_context(); X_M8(0x3004) = 'X'; reject(&c, 0x37B86D);
+    c = effects_context(); X_M32(0x4100) = 8; reject(&c, 0x37B86D);
+    c = effects_context(); X_M32(0x4104) = 9; reject(&c, 0x37B86D);
+    c = effects_context(); healthy = 0; reject(&c, 0x37B86D); healthy = 1;
+    c = effects_context(); g_xpt[3] = 0x8000; reject(&c, 0x37B86D); g_xpt[3] = 0x3000;
+    c = effects_context(); X_M32(c.r[4] + 8) = 0xFFFFFFFC; reject(&c, 0x37B86D);
+}
+#endif
 static void only_changed(const uint8_t *before, uint32_t out, unsigned bytes, int header)
 {
     uint8_t allowed[0x9000] = {0};
@@ -218,6 +259,9 @@ int main(void)
     c = context(0x5008, 0, 0); healthy = 0; reject(&c, 0x37B637); healthy = 1;
     reject(&c, 0x37B86D); /* no success fallback for the effects image loader */
     original_configuration_tests();
+#if H2_AUDIO_EFFECTS_UNAVAILABLE
+    effects_failure_tests();
+#endif
     c = context(0x5008, 0, 0); reject(&c, 0x37A14F); /* common header expects base, not interface */
     c = context(0x5000, 0, 0); call(&c, 0x37A14F, 3, 1);
     X_M32(0x5004) = 9; c = context(0x5000, 0, 0); reject(&c, 0x37A14F); X_M32(0x5004) = 3;

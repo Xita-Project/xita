@@ -211,6 +211,7 @@ class Halo2AudioUnavailableHooks(Halo2HostChannelHooks):
 
 
 AUDIO_HOST_BOUNDARIES = {
+    0x37B86D: (514, "152b5769f3630d38073a25543bbce4d35f387ad3af712ad1b96f5427794f2b67"),
     0x37D52A: (36, "ae868f50868faf0f465131b3bbd5e9535658ab3b345614c5c4274ce28e5d8166"),
     0x37B637: (32, "9cd8e91683d0bd423aefc6a5ec381a25191ffc3ea7cd0a7f3c3a91933b2e3dcf"),
     0x37D797: (71, "937701608e296f3edcb1b3b77221d14015ee71e5b094256ba8fe1f50b76d7a0c"),
@@ -223,8 +224,10 @@ AUDIO_HOST_BOUNDARIES = {
 }
 
 # These execute original generated code after a read-only runtime guard. They
-# configure algorithm pointers only; none of the selected HRTF bodies is HLE'd.
+# configure algorithm pointers or invoke the audited common Release header;
+# none of the selected HRTF processing bodies is HLE'd.
 AUDIO_ORIGINAL_BOUNDARIES = {
+    0x379F2A: (22, "0a72b625b8e9e1a301ddf3c84ec304eded77fc8886c86f41f03efd6fa1fac2b5"),
     0x379F5B: (31, "7f397c78fa9ddaa3fc01f85707ae08b470294586a72dacef5c6dec704dea2f73"),
     0x379E9E: (30, "c66d5fef481a4aa92bb4e6df72e3f1e2cfb1fc0a9f0bc0ac8ff03aeaf34c597c"),
     0x37E126: (111, "18c533b0df59f16b85abb24c514759e0eb47802cf4dd639bc51389c711aec77c"),

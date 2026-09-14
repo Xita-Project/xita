@@ -103,9 +103,12 @@ static void reference(xctx *c, uint32_t ip)
     } else if (device.references > 1) {
         --device.references; X_M32(device.base + 4) = device.references;
     } else {
+        uint32_t released = device.base;
         if (h2_audio_backend_close() < 0) fail(c, ip, "close worker", device.base);
         if (xk_mem_free(device.base) < 0) fail(c, ip, "free device", device.base);
         device = (h2_audio_device_snapshot){.ever_created = 1};
+        xv_logf("[h2/audio] final Release caller=%08X device=%08X worker/port closed, guest allocation freed\n",
+                X_M32(c->r[4]), released);
     }
     result(c, device.references, 1);
 }
@@ -168,6 +171,26 @@ static void mix_bin(xctx *c, uint32_t ip)
             bin, device.headroom[bin], amount & 7, X_M32(c->r[4]));
     result(c, 0, 3);
 }
+#if H2_AUDIO_EFFECTS_UNAVAILABLE
+/* Explicit failure experiment, not an effects implementation. No output,
+ * device, section reference or worker resource is changed by this call. */
+static void effects_unavailable(xctx *c)
+{
+    const uint32_t ip = 0x37B86D;
+    stack(c, ip, 4);
+    uint32_t name = X_ARG(0), location = X_ARG(1), flags = X_ARG(2), out = X_ARG(3);
+    if (X_M32(c->r[4]) != 0x1913A9 || flags != 1 || !mapped(name, 9) || !mapped(location, 8))
+        fail(c, ip, "effects diagnostic input", name);
+    char label[9]; x_guest_read(label, name, sizeof label);
+    uint32_t locations[2]; x_guest_read(locations, location, sizeof locations);
+    if (memcmp(label, "DSPImage", 9) || locations[0] != 9 || locations[1] != 10)
+        fail(c, ip, "effects diagnostic image/location", location);
+    output(c, ip, out, 4); live(c, ip, device.base + 8, 0);
+    xv_logf("[h2/diagnostic] XAudioDownloadEffectsImage caller=%08X image=%08X location=%08X flags=%u output=%08X returns DSERR_UNSUPPORTED=80004001; output untouched\n",
+            X_M32(c->r[4]), name, location, flags, out);
+    result(c, 0x80004001, 4);
+}
+#endif
 void h2_audio_host_call(xctx *c, uint32_t ip)
 {
     uint32_t fpscr = h2_platform_fpscr_read();
@@ -177,6 +200,9 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37B5AE: case 0x37B5CA: query(c, ip); break;
     case 0x37D506: case 0x37D5CD: case 0x37D52A: scalar(c, ip); break;
     case 0x37B637: mix_bin(c, ip); break;
+#if H2_AUDIO_EFFECTS_UNAVAILABLE
+    case 0x37B86D: effects_unavailable(c); break;
+#endif
     default: fail(c, ip, "unimplemented adapter", ip);
     }
     h2_platform_fpscr_write(fpscr);
@@ -195,6 +221,17 @@ static int aliases(uint32_t a, unsigned an, uint32_t b, unsigned bn)
 void h2_audio_guest_entry(xctx *c, uint32_t ip)
 {
     if (!device.ever_created) return;
+    if (ip == 0x379F2A) {
+        /* Audited public Release wrapper: the original code adjusts base+8
+         * then invokes the existing common-header Release adapter. */
+        stack(c, ip, 1); live(c, ip, X_ARG(0), 0);
+        uint32_t caller = X_M32(c->r[4]);
+        if ((caller != 0x21EB91 && caller != 0x3E3D19) || !mapped(0x417128, 4) || X_M32(0x417128) != 0x37C70F)
+            fail(c, ip, "original sound release caller/vtable", X_M32(c->r[4]));
+        if (c->r[4] < 16) fail(c, ip, "original sound release stack", c->r[4]);
+        output(c, ip, c->r[4] - 16, 24);
+        return;
+    }
     uint32_t caller;
     switch (ip) {
     case 0x379F5B: caller = 0x21E604; break;

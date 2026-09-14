@@ -159,3 +159,7 @@ data for indices 4..7. No useful no-effects success contract has been proved.
 The next task is a read-only audit of those exact requirements and failure
 control flow, followed by a real supported effect route if feasible. Returning
 a fabricated descriptor or swallowing the failure is not part of this work.
+
+The follow-up [effects-image audit](halo2-effects-image-audit.md) records the
+original DSP requirements and the explicit failure-path experiment through
+native95. It does not supply DSP success or a visible main menu.
