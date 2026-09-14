@@ -199,11 +199,41 @@ void xv_preempt(xctx *c);                            /* called when the back-edg
 #define X_PREEMPT() do { if (--c->preempt <= 0) xv_preempt(c); } while (0)
 void xv_unimpl(xctx *c, uint32_t eip, const char *what);
 
-static inline void x_div_32(xctx *c, uint32_t a, uint32_t eip) { if (!a) { xv_trap(c, eip); return; }
-    uint64_t n = ((uint64_t)c->r[2] << 32) | c->r[0]; uint64_t q = n / a; if (q >> 32) { xv_trap(c, eip); return; } c->r[0] = (uint32_t)q; c->r[2] = (uint32_t)(n % a); }
-static inline void x_idiv_32(xctx *c, uint32_t a, uint32_t eip) { if (!a) { xv_trap(c, eip); return; }
-    int64_t n = (int64_t)(((uint64_t)c->r[2] << 32) | c->r[0]); int64_t q = n / (int32_t)a; if (q != (int32_t)q) { xv_trap(c, eip); return; }
-    c->r[0] = (uint32_t)(int32_t)q; c->r[2] = (uint32_t)(int32_t)(n % (int32_t)a); }
+static inline void x_div_32(xctx *c, uint32_t a, uint32_t eip)
+{
+    uint32_t lo = c->r[0], hi = c->r[2];
+    /* hi >= divisor is exactly the unsigned quotient-overflow condition. */
+    if (!a || hi >= a) { xv_trap(c, eip); return; }
+    if (!hi) {
+        /* The usual XOR EDX,EDX case needs only 32-bit software division. */
+        c->r[0] = lo / a;
+        c->r[2] = lo % a;
+        return;
+    }
+    uint64_t n = ((uint64_t)hi << 32) | lo;
+    c->r[0] = (uint32_t)(n / a);
+    c->r[2] = (uint32_t)(n % a);
+}
+static inline void x_idiv_32(xctx *c, uint32_t a, uint32_t eip)
+{
+    uint32_t lo = c->r[0], hi = c->r[2];
+    int32_t divisor = (int32_t)a, low = (int32_t)lo;
+    if (!a) { xv_trap(c, eip); return; }
+    if (hi == (low < 0 ? UINT32_MAX : 0u)) {
+        /* CDQ produces a signed 32-bit dividend. Guard C's overflow case
+         * before dividing, and leave the guest context intact on a trap. */
+        if (low == INT32_MIN && divisor == -1) { xv_trap(c, eip); return; }
+        c->r[0] = (uint32_t)(low / divisor);
+        c->r[2] = (uint32_t)(low % divisor);
+        return;
+    }
+    int64_t n = (int64_t)(((uint64_t)hi << 32) | lo);
+    if (n == INT64_MIN && divisor == -1) { xv_trap(c, eip); return; }
+    int64_t q = n / divisor;
+    if (q < INT32_MIN || q > INT32_MAX) { xv_trap(c, eip); return; }
+    c->r[0] = (uint32_t)(int32_t)q;
+    c->r[2] = (uint32_t)(int32_t)(n % divisor);
+}
 static inline void x_div_16(xctx *c, uint16_t a, uint32_t eip) { if (!a) { xv_trap(c, eip); return; }
     uint32_t n = ((uint32_t)X_R16(2) << 16) | X_R16(0); X_R16(0) = (uint16_t)(n / a); X_R16(2) = (uint16_t)(n % a); }
 static inline void x_idiv_16(xctx *c, uint16_t a, uint32_t eip) { if (!a) { xv_trap(c, eip); return; }

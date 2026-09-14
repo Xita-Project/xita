@@ -76,7 +76,7 @@ test-remote:
 	python3 ../../tools/test_remote.py
 
 .PHONY: test
-test: build/runtime_test build/immediate_test build/file_io_test build/file_open_test build/crypto_test build/profiler_test build/profiler_traced_test build/dispatch_profile_test
+test: build/runtime_test build/immediate_test build/file_io_test build/file_open_test build/crypto_test build/profiler_test build/profiler_traced_test build/dispatch_profile_test build/div32_test
 	./build/runtime_test
 	./build/immediate_test
 	./build/file_io_test
@@ -85,6 +85,15 @@ test: build/runtime_test build/immediate_test build/file_io_test build/file_open
 	./build/profiler_test
 	./build/profiler_traced_test
 	./build/dispatch_profile_test
+	./build/div32_test
+
+.PHONY: test-div32
+test-div32: build/div32_test
+	./build/div32_test
+
+build/div32_test: Makefile div32_test.c ../xv_x86rt.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -I.. div32_test.c -lm -o $@
 
 build/profiler_test: Makefile profiler_test.c ../xv_funchist.c ../xv_x86rt.h
 	mkdir -p build
