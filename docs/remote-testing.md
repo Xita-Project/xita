@@ -124,8 +124,10 @@ Actual requests for a screenshot or log during measurement returned HTTP 409.
 Remote walking, turning and firing also responded after the benchmark.
 
 This was a 20 FPS capped emulator functionality check, not evidence of Vita
-performance or test-service overhead. Hardware connectivity and idle behavior
-still require a first paired Vita run. Until then this is an experimental tool.
+performance or test-service overhead. The subsequent
+[physical Vita run](hardware-20260913-remote.md) confirms connectivity, launch,
+menus, stick controls, captures, log downloads and three automatic comparisons.
+Long-running idle behavior and isolated test-service overhead remain unmeasured.
 The emulator was stopped and its prior executable/settings restored afterward.
 
 The private candidate is `xita-remote-test-20260913-6eff881.vpk`:
@@ -139,10 +141,11 @@ benchmark package. Validation receipts and captures are private under
 `ux0:VPK/xita-remote-test-20260913-6eff881.vpk`, with a private pairing key and
 remote-test settings prepared. Package, key and configuration hashes were checked
 again after a read-only USB remount, then the volume was safely unmounted.
-**VitaShell installation and first hardware connection are still required.**
-The installed executable remains the preceding `168c0f9` benchmark build until
-installation. Existing graphics/benchmark settings and the prior configuration
-backup are preserved; the computer pairing awaits the Vita's Wi-Fi IP address.
+The user subsequently installed the package and supplied the Wi-Fi address;
+the running service's build stamp matches this candidate. Existing graphics and
+benchmark settings and the prior configuration backup are preserved. No fresh
+installed executable hash was read over Wi-Fi. Integrated installation remains
+a separate development task.
 
 Platform references: [VitaSDK network initialization sample](https://github.com/vitasdk/samples/blob/master/net_http/src/main.c),
 [socket API](https://docs.vitasdk.org/group__SceNetUser.html), and the local SDK's
