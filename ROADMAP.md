@@ -9,6 +9,14 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+September 13 [hardware gameplay results](docs/hardware-20260913-gameplay.md):
+the new executable is verified installed. One Blood Gulch worker comparison
+measures 15.898 / 16.222 / 15.718 FPS off/on/off; moving views remain slower.
+Detailed timings prioritize scene/object CPU work, with no busy-slot waits in
+the analyzed gameplay reports. The two new native-math experiments were disabled
+by configuration and still need separate hardware comparisons. Stable 20 FPS
+and broader workload sharing remain open.
+
 September 13 [port research and worker sizing](docs/ports-and-worker-sizing-20260913.md):
 an immediate result dependency rules out moving the object-size calculation to
 a worker by itself. An optional, locally validated model-batch size histogram

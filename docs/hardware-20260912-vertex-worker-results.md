@@ -19,7 +19,8 @@ The result is in `xita.1.log`, lines 5424–5812. All phases report `view-ok 1`
 at position `82.2239 -90.7322 4.9681`, forward
 `0.11940 -0.99283 -0.00894`. Each phase settles for 60 frames and measures 120.
 The run uses 360p, 128-pixel texture limit, Low model detail, a 20 FPS cap,
-500 MHz CPU request and triple buffering off. These are the run's logged
+500 MHz CPU request (the API reports a fallback to 444 MHz) and triple buffering
+off. These are the run's logged
 settings; the latest saved configuration has several different graphics options.
 
 | Phase | FPS | Mean frame time |

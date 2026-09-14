@@ -48,8 +48,9 @@ of 4/10/86%. GPU notification completion latency averages about 49 ms across
 nearby reports; it overlaps guest/submission and includes completion observation
 delay, so it is not additive time or a pure shader-runtime measurement.
 
-Configuration in this run includes 360p, 500 MHz, texture maximum 128, the vertex
-worker and triple buffering, with the previously selected material/effect/LOD
+Configuration in this run includes 360p, a 500 MHz CPU request (the API reports
+a fallback to 444 MHz), texture maximum 128, the vertex worker and triple
+buffering, with the previously selected material/effect/LOD
 settings. No settings were changed during collection. This is not a comparison
 against the earlier fixed-camera worker benchmark or standard graphics preset.
 

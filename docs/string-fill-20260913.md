@@ -46,5 +46,11 @@ return to the menu; the preceding candidate logs the same message types.
 This is a functional smoke check, not a clean emulator-error-log claim.
 The private combined candidate also enables the previously tested object-basis
 and model-palette experiments. Evidence is under `audit/string-fill/` in the
-phase-followup directory. Hardware installation and frame-time comparison
-remain pending storage recovery; no Vita write was attempted.
+phase-followup directory. At that validation stage, no Vita write was attempted.
+
+The September 13 [hardware capture](hardware-20260913-gameplay.md) now confirms
+this executable is installed and runs Blood Gulch. The native object-basis and
+model-palette experiments were compiled in but disabled in the retained runtime
+configuration. The capture compares the existing vertex worker, not this bulk
+clear change against its predecessor; its individual hardware benefit remains
+unmeasured.
