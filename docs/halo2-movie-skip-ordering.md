@@ -84,3 +84,7 @@ The next bounded implementation is real Play plus a cursor derived from mixer
 and sink progress, followed by another original skip trial once that predicate
 is reachable. The current explicit effects-unavailable diagnostic also retains
 the separately documented [game sound-initialization limitation](halo2-effects-image-audit.md).
+
+The [native104 Play milestone](halo2-movie-play-cursors.md) now passes that first
+Play using the real mixer and sink progress, reaching recurring movie updates.
+Its presented frames are still black; the next strict sound boundary is `37B703`.

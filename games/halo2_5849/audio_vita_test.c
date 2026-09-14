@@ -25,6 +25,9 @@ static int sceAudioOutOpenPort(int, int, int, int);
 static int sceAudioOutSetVolume(int, int, const int *);
 static int sceAudioOutReleasePort(int);
 static int sceAudioOutOutput(int, const void *);
+static int sceAudioOutGetRestSample(int);
+static int sceKernelDelayThread(unsigned);
+static uint64_t sceKernelGetProcessTimeWide(void);
 static int sceKernelCreateSema(const char *, int, int, int, void *);
 static int sceKernelDeleteSema(int);
 static int sceKernelSignalSema(int, int);
@@ -37,18 +40,20 @@ static int sceKernelWaitThreadEnd(int, void *, SceUInt *);
 #include "audio_vita.c"
 #include "audio_bins.c"
 
-enum { F_MUTEX, F_PORT, F_VOLUME, F_SEMA, F_THREAD, F_START, F_READY, F_WRITE, F_JOIN, F_RELEASE };
+enum { F_MUTEX, F_PROGRESS, F_PORT, F_VOLUME, F_SEMA, F_THREAD, F_START, F_READY, F_WRITE, F_JOIN, F_RELEASE, F_REST, F_REVERSE, F_STALL };
 static atomic_uint faults;
 static unsigned resources;
-static atomic_uint outputs, drains, active;
+static atomic_uint outputs, drains, active, queued;
+static int fake_voice = -1;
+static uint32_t fake_decoded;
 static pthread_t native_thread;
-static pthread_mutex_t native_mutex;
+static pthread_mutex_t native_mutex[2];
 static sem_t native_ready;
 static int launched, joined;
 static int (*native_entry)(SceSize, void *);
 static int failing(unsigned bit) { return (atomic_load(&faults) & (1u << bit)) != 0; }
 void xv_logf(const char *format, ...) { (void)format; }
-int xk_audio_init(void) { return h2_audio_sink_open(XA_OUT_RATE, XA_GRAIN); }
+int xk_audio_init(void) { fake_voice = -1; fake_decoded = 0; return h2_audio_sink_open(XA_OUT_RATE, XA_GRAIN); }
 void xk_audio_lock(void) { h2_audio_sink_lock(); }
 void xk_audio_unlock(void) { h2_audio_sink_unlock(); }
 void xk_audio_mix(int16_t *out, int count)
@@ -56,21 +61,29 @@ void xk_audio_mix(int16_t *out, int count)
     assert(count == XA_GRAIN && !((uintptr_t)out & 63));
     h2_audio_sink_lock();
     for (int i = 0; i < count * 2; ++i) out[i] = (i & 1) ? -4321 : 1234;
+    if (fake_voice >= 0) fake_decoded = (fake_decoded + 4096) % 106496;
     h2_audio_sink_unlock();
 }
+void xk_audio_voice_play(int voice, int loop)
+{ assert(voice == 0 && loop == 1); xk_audio_lock(); fake_voice = voice; xk_audio_unlock(); }
+uint32_t xk_audio_voice_pos(int voice) { assert(voice == fake_voice); return fake_decoded; }
 uint32_t xk_audio_free_voices(void) { return 42; }
 static int sceKernelCreateMutex(const char *name, int a, int b, void *p)
 {
-    (void)name; assert(!a && !b && !p && !(resources & 1));
-    if (failing(F_MUTEX)) return -10;
-    assert(!pthread_mutex_init(&native_mutex, NULL)); resources |= 1; return 10;
+    unsigned index = !strcmp(name, "h2_audio_progress"), bit = index ? 16 : 1;
+    assert(!a && !b && !p && !(resources & bit));
+    if (failing(index ? F_PROGRESS : F_MUTEX)) return -10;
+    assert(!pthread_mutex_init(&native_mutex[index], NULL)); resources |= bit; return 10 + index;
 }
 static int sceKernelDeleteMutex(int id)
-{ assert(id == 10 && (resources & 1) && !atomic_load(&active)); assert(!pthread_mutex_destroy(&native_mutex)); resources &= ~1u; return 0; }
+{
+    unsigned index = id - 10, bit = index ? 16 : 1; assert(index < 2 && (resources & bit) && !atomic_load(&active));
+    assert(!pthread_mutex_destroy(&native_mutex[index])); resources &= ~bit; return 0;
+}
 static int sceKernelLockMutex(int id, int n, void *p)
-{ assert(id == 10 && n == 1 && !p); return pthread_mutex_lock(&native_mutex); }
+{ assert(id >= 10 && id <= 11 && n == 1 && !p); return pthread_mutex_lock(&native_mutex[id - 10]); }
 static int sceKernelUnlockMutex(int id, int n)
-{ assert(id == 10 && n == 1); return pthread_mutex_unlock(&native_mutex); }
+{ assert(id >= 10 && id <= 11 && n == 1); return pthread_mutex_unlock(&native_mutex[id - 10]); }
 static int sceAudioOutOpenPort(int type, int grain, int rate, int mode)
 {
     assert(type == 0 && grain == XA_GRAIN && rate == XA_OUT_RATE && mode == 1 && !(resources & 2));
@@ -88,12 +101,25 @@ static int sceAudioOutReleasePort(int id)
 static int sceAudioOutOutput(int id, const void *data)
 {
     assert(id == 20 && (resources & 2));
-    if (!data) { atomic_fetch_add(&drains, 1); return 0; }
+    if (!data) { assert(!atomic_load(&queued)); atomic_fetch_add(&drains, 1); return 0; }
     const int16_t *samples = data;
     assert(samples[0] == 1234 && samples[XA_GRAIN * 2 - 1] == -4321);
     if (failing(F_WRITE)) return -23;
+    assert(!atomic_load(&queued)); atomic_store(&queued, XA_GRAIN);
     atomic_fetch_add(&outputs, 1); usleep(1000); return 0;
 }
+static int sceAudioOutGetRestSample(int id)
+{
+    assert(id == 20); unsigned remaining = atomic_load(&queued);
+    if (failing(F_REST)) return -24;
+    if (failing(F_REVERSE)) return XA_GRAIN + 1;
+    if (failing(F_STALL)) return (int)remaining;
+    if (remaining) { assert(remaining >= 128); remaining -= 128; atomic_store(&queued, remaining); }
+    return (int)remaining;
+}
+static int sceKernelDelayThread(unsigned delay) { assert(delay == 1000); usleep(delay); return 0; }
+static uint64_t sceKernelGetProcessTimeWide(void)
+{ struct timespec t; assert(!clock_gettime(CLOCK_MONOTONIC, &t)); return (uint64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000 + (failing(F_STALL) ? 2000000 : 0); }
 static int sceKernelCreateSema(const char *name, int a, int initial, int maximum, void *p)
 {
     (void)name; assert(!a && !initial && maximum == 1 && !p && !(resources & 4));
@@ -145,8 +171,8 @@ int main(void)
     atomic_store(&faults, 0);
     for (unsigned cycle = 0; cycle < 3; ++cycle) {
         unsigned old_outputs = atomic_load(&outputs), old_drains = atomic_load(&drains);
-        assert(h2_audio_backend_open() == 0 && resources == 15);
-        assert(h2_audio_backend_open() == -2 && resources == 15); /* never resets a live device */
+        assert(h2_audio_backend_open() == 0 && resources == 31);
+        assert(h2_audio_backend_open() == -2 && resources == 31); /* never resets a live device */
         assert(h2_audio_backend_health() == 0 && h2_audio_backend_free_voices() == 42);
         h2_audio_backend_status state; h2_audio_backend_snapshot(&state);
         assert(state.grains >= 1 && state.nonzero_grains >= 1 && state.peak == 4321 && !state.error);
@@ -156,7 +182,15 @@ int main(void)
         assert(h2_audio_backend_set_headroom(31, 0xFF) == 0);
         h2_audio_bins_snapshot(bins); assert(bins[31] == 0xFF);
         assert(atomic_load(&outputs) > old_outputs && state.port == 20 && state.thread == 40);
-        assert(h2_audio_backend_close() == 0 && !resources && !atomic_load(&active));
+        uint32_t play = 0, write = 0;
+        assert(h2_audio_backend_play(0, 106496, 44100) == 0);
+        assert(h2_audio_backend_play(0, 106496, 44100) < 0); /* restart not in this contract */
+        assert(h2_audio_backend_cursor(1, &play, &write) < 0);
+        for (unsigned poll = 0; poll < 100 && !play; ++poll) {
+            assert(h2_audio_backend_cursor(0, &play, &write) == 0); usleep(1000);
+        }
+        assert(play && !(play & 3) && play < 106496 && !(write & 3) && write < 106496);
+        assert(h2_audio_backend_close() == 0 && !resources && !atomic_load(&active) && !atomic_load(&queued));
         assert(atomic_load(&drains) == old_drains + 1 && h2_audio_backend_health() == -1);
         assert(h2_audio_backend_close() == 0); /* harmless duplicate shutdown */
         assert(h2_audio_backend_set_headroom(0, 0) == -1);
@@ -164,8 +198,26 @@ int main(void)
     /* A join failure must retain everything that a running worker could use. */
     assert(h2_audio_backend_open() == 0);
     atomic_store(&faults, 1u << F_JOIN);
-    assert(h2_audio_backend_close() == -1 && resources == 15);
+    assert(h2_audio_backend_close() == -1 && resources == 31);
     atomic_store(&faults, 0); assert(h2_audio_backend_close() == 0 && !resources);
+    /* A failed, invalid or stalled observation cannot invent a cursor or
+     * free an unverified outstanding grain. Retain resources until real
+     * successful observations drain it; do not join a terminated worker twice. */
+    for (unsigned f = F_REST; f <= F_STALL; ++f) {
+        assert(h2_audio_backend_open() == 0);
+        assert(h2_audio_backend_play(0, 106496, 44100) == 0);
+        for (;;) {
+            sceKernelLockMutex(progress_mutex, 1, NULL);
+            if (progress.pending) { atomic_store(&faults, 1u << f); sceKernelUnlockMutex(progress_mutex, 1); break; }
+            sceKernelUnlockMutex(progress_mutex, 1); usleep(1000);
+        }
+        uint32_t play = 123, write = 456;
+        assert(h2_audio_backend_cursor(0, &play, &write) < 0 && play == 123 && write == 456);
+        assert(h2_audio_backend_close() < 0 && resources == 31 && !atomic_load(&active));
+        atomic_store(&faults, 0);
+        int rc = -1; for (unsigned tries = 0; tries < 10 && rc; ++tries) rc = h2_audio_backend_close();
+        assert(!rc && !resources && !atomic_load(&queued));
+    }
     /* Failed rollback is a separate terminal result, never NODRIVER success. */
     atomic_store(&faults, (1u << F_THREAD) | (1u << F_RELEASE));
     assert(h2_audio_backend_open() == -2 && resources == 2);

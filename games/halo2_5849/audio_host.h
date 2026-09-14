@@ -15,8 +15,8 @@ typedef struct {
 } h2_audio_backend_status;
 
 /* Bounded device + external PCM buffer creation/binding/controls and paired
- * write commits, exact FL/FR unity routing/gains. Guest playback/cursors and
- * surround routing are unsupported. */
+ * write commits, exact FL/FR unity routing/gains and first looping Play with
+ * sink-backed cursors. Stop/restart, other play modes and surround are unsupported. */
 void h2_audio_host_call(xctx *c, uint32_t entry);
 /* Original DSOUND constructors can run before the first host device. Once a
  * host device exists, unknown original DSOUND methods must never read its
@@ -38,5 +38,9 @@ int h2_audio_backend_close(void);
 int h2_audio_backend_health(void);
 uint32_t h2_audio_backend_free_voices(void);
 int h2_audio_backend_set_headroom(uint32_t bin, uint32_t headroom);
+/* First Play of the sole supported looping PCM voice. Cursor observations
+ * follow actual sink consumption and the independent mixer read frontier. */
+int h2_audio_backend_play(int voice, uint32_t bytes, uint32_t rate);
+int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write);
 void h2_audio_backend_snapshot(h2_audio_backend_status *out);
 _Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32_t value);

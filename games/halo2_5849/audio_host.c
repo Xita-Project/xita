@@ -12,6 +12,7 @@ typedef struct {
     int32_t volume;
     int voice;
     uint32_t locked, lock_offset, lock_first, lock_second, commits;
+    uint32_t started, cursor_queries;
     uint64_t committed_bytes;
 } h2_audio_buffer;
 static h2_audio_buffer buffers[XA_MAX_VOICES];
@@ -157,6 +158,8 @@ static void reference(xctx *c, uint32_t ip)
         uint32_t count = b->references;
         if (ip != 0x37A14F && count == 1 && b->locked)
             fail(c, ip, "release locked buffer", b->base);
+        if (ip != 0x37A14F && count == 1 && b->started)
+            fail(c, ip, "release active PCM voice requires audited Stop", b->base);
         if (ip == 0x37A14F) {
             if (count == UINT32_MAX) fail(c, ip, "buffer reference overflow", count);
             X_M32(b->base + 4) = ++b->references;
@@ -369,6 +372,42 @@ static void buffer_routing(xctx *c, uint32_t ip)
     result(c, 0x80004001, 2);
 #endif
 }
+static void buffer_play(xctx *c)
+{
+    const uint32_t ip = 0x37B6DF;
+    stack(c, ip, 4); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    if (!b->mirror || b->started || b->locked || X_ARG(1) || X_ARG(2) || X_ARG(3) != 1 ||
+        !mapped(b->mirror, b->mirror_bytes) || !mapped(b->source, b->bytes) || overlaps_device(b->source, b->bytes))
+        fail(c, ip, "unsupported PCM Play state/flags", X_ARG(3));
+    if (h2_audio_backend_play(b->voice, b->bytes, b->frequency) < 0)
+        fail(c, ip, "real PCM sink Play rejected", b->voice);
+    b->started = 1;
+    xv_logf("[h2/audio-buffer] real looping Play caller=%08X interface=%08X voice=%d bytes=%u frequency=%u\n",
+            X_M32(c->r[4]), b->base + 0x1C, b->voice, b->bytes, b->frequency);
+    result(c, 0, 4);
+}
+static void buffer_cursor(xctx *c)
+{
+    const uint32_t ip = 0x37B777;
+    stack(c, ip, 3); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    if (!b->started) fail(c, ip, "PCM cursor before supported Play", b->base);
+    uint32_t out[2] = {X_ARG(1), X_ARG(2)}, positions[2];
+    for (unsigned i = 0; i < 2; ++i) if (out[i]) {
+        output(c, ip, out[i], 4);
+        if (aliases(out[i], 4, c->r[4], 16)) fail(c, ip, "PCM cursor output/stack alias", out[i]);
+    }
+    if (out[0] && out[1] && aliases(out[0], 4, out[1], 4))
+        fail(c, ip, "PCM cursor output alias", out[0]);
+    if (h2_audio_backend_cursor(b->voice, &positions[0], &positions[1]) < 0)
+        fail(c, ip, "real PCM sink cursor rejected", b->voice);
+    if ((positions[0] | positions[1]) & 3 || positions[0] >= b->bytes || positions[1] >= b->bytes)
+        fail(c, ip, "invalid real PCM sink cursor", positions[0]);
+    for (unsigned i = 0; i < 2; ++i) if (out[i]) x_guest_write(out[i], &positions[i], 4);
+    if (b->cursor_queries++ < 8)
+        xv_logf("[h2/audio-buffer] sink cursor caller=%08X played=%u decoded_frontier=%u\n",
+                X_M32(c->r[4]), positions[0], positions[1]);
+    result(c, 0, 3);
+}
 static void query(xctx *c, uint32_t ip)
 {
     stack(c, ip, 2);
@@ -463,6 +502,8 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37D506: case 0x37D5CD: case 0x37D52A: scalar(c, ip); break;
     case 0x37B637: mix_bin(c, ip); break;
     case 0x37C5E4: case 0x37B6C3: buffer_routing(c, ip); break;
+    case 0x37B6DF: buffer_play(c); break;
+    case 0x37B777: buffer_cursor(c); break;
 #if H2_AUDIO_EFFECTS_UNAVAILABLE
     case 0x37B86D: effects_unavailable(c); break;
 #endif
@@ -532,9 +573,9 @@ void h2_audio_trace_buffer(xctx *c, uint32_t ip)
                     b->base + 0x1C, b->references, b->voice, b->source, b->bytes, b->mirror,
                     b->frequency, b->volume, b->headroom);
         if (b->base)
-            xv_logf("[h2/audio-buffer] stop locked=%u offset=%u first=%u second=%u commits=%u committed_bytes=%llu\n",
+            xv_logf("[h2/audio-buffer] stop locked=%u offset=%u first=%u second=%u commits=%u committed_bytes=%llu started=%u cursor_queries=%u\n",
                     b->locked, b->lock_offset, b->lock_first, b->lock_second, b->commits,
-                    (unsigned long long)b->committed_bytes);
+                    (unsigned long long)b->committed_bytes, b->started, b->cursor_queries);
     }
     if (ip == 0x37B7B3 && !(c->r[4] & 3) && mapped(c->r[4], 36)) {
         xv_logf("[h2/audio-buffer] Lock caller=%08X interface=%08X offset=%u bytes=%u pointer1=%08X length1=%08X pointer2=%08X length2=%08X flags=%08X\n",

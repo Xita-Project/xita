@@ -1,8 +1,9 @@
 /* Synthetic guest ABI plus the actual shared PCM mixer. No owned game bytes.
- * Play remains unsupported in the guest adapter; test-only mixer playback
- * establishes that creation/binding/control changes really affect samples. */
+ * A scripted sink supplies actual consumption observations for the Play ABI;
+ * the worker/sink protocol has a separate concurrent platform test. */
 #include "audio_host.c"
 #include "recomp/kernel/xk_audio.c"
+#include "audio_progress.c"
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
@@ -15,6 +16,7 @@ static unsigned locked, healthy, opens, closes, allocs, frees, lock_calls, unloc
 static int allocation_failure;
 static uint32_t native_fp = 0xA5A55A5A;
 static uint32_t pool[256];
+static h2_audio_progress test_progress;
 uint32_t h2_platform_fpscr_read(void) { return native_fp; }
 void h2_platform_fpscr_write(uint32_t value) { native_fp = value; }
 void xv_logf(const char *format, ...) { (void)format; native_fp ^= 0x12345678; }
@@ -55,11 +57,19 @@ int xk_os_audio_open(int rate, int grain) { assert(rate == XA_OUT_RATE && grain 
 void xk_os_audio_mutex_lock(void) { assert(!locked && healthy); locked = 1; ++lock_calls; }
 void xk_os_audio_mutex_unlock(void) { assert(locked); locked = 0; ++unlock_calls; }
 uint64_t xk_os_monotonic_us(void) { return 42; }
-int h2_audio_backend_open(void) { assert(!healthy); healthy = 1; ++opens; return xk_audio_init(); }
+int h2_audio_backend_open(void) { assert(!healthy); h2_audio_progress_reset(&test_progress); healthy = 1; ++opens; return xk_audio_init(); }
 int h2_audio_backend_close(void) { assert(healthy && xk_audio_free_voices() == XA_MAX_VOICES); healthy = 0; ++closes; return 0; }
 int h2_audio_backend_health(void) { return healthy ? 0 : -1; }
 uint32_t h2_audio_backend_free_voices(void) { return xk_audio_free_voices(); }
 int h2_audio_backend_set_headroom(uint32_t bin, uint32_t amount) { (void)bin; (void)amount; assert(0); return -1; }
+int h2_audio_backend_play(int voice, uint32_t bytes, uint32_t rate)
+{
+    h2_audio_progress next = test_progress;
+    if (!healthy || !h2_audio_progress_play(&next, voice, bytes, rate)) return -1;
+    xk_audio_voice_play(voice, 1); test_progress = next; return 0;
+}
+int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write)
+{ return healthy && h2_audio_progress_cursor(&test_progress, voice, play, write) ? 0 : -1; }
 static xctx context(uint32_t a, uint32_t b, uint32_t d, uint32_t e)
 {
     xctx c; memset(&c, 0x5A, sizeof c); c.r[4] = 0x1FF0;
@@ -325,6 +335,45 @@ int main(void)
     c = context(dev - 8, 0, 0, 0); call(&c, 0x37C70F, 0, 1);
     assert(opens == 2 && closes == 2);
     for (unsigned i = 0; i < 256; ++i) assert(!pool[i]);
+    /* Original guest first Play drives the real mixer. Distinguish the
+     * consumed source position from its independently captured read frontier. */
+    c = context(0, 0x6100, 0, 0); call(&c, 0x37D797, 0, 3); dev = read32(0x6100);
+    c = description(dev); call(&c, 0x37D4BE, 0, 4); handle = read32(0x6FFE);
+    b = find_buffer(handle - 0x1C);
+    c = context(handle, 0x8F00, sizeof source, 0); call(&c, 0x37CC4A, 0, 3);
+    c = context(handle, 0x6FFE, 0x6120, 0); reject(&c, 0x37B777);
+    for (unsigned argument = 1; argument < 4; ++argument) {
+        c = context(handle, 0, 0, 1); X_M32(c.r[4] + 4 + argument * 4) ^= 2; reject(&c, 0x37B6DF);
+    }
+    c = context(handle, 0, 0, 1); call(&c, 0x37B6DF, 0, 4);
+    assert(b->started && g_v[b->voice].playing && g_v[b->voice].looping);
+    c = context(handle, 0, 0, 1); reject(&c, 0x37B6DF);
+    c = context(handle, 0, 0, 0); reject(&c, 0x379F45); /* active release needs Stop */
+    c = context(handle, 0x1FF8, 0x6120, 0); reject(&c, 0x37B777);
+    c = context(handle, 0x6120, 0x6120, 0); reject(&c, 0x37B777);
+    c = context(handle, b->mirror, 0x6120, 0); reject(&c, 0x37B777);
+    c = context(handle, 0x6FFE, 0x6120, 0); g_xpt[7] = 0x1FF000; reject(&c, 0x37B777); g_xpt[7] = 0x6000;
+    c = context(handle, 0x6FFE, 0x6120, 0); call(&c, 0x37B777, 0, 3);
+    assert(!read32(0x6FFE) && !read32(0x6120));
+    for (unsigned grain = 0; grain < 12; ++grain) {
+        xk_audio_mix(mixed, XA_GRAIN);
+        assert(g_v[b->voice].frames_out == (grain + 1ull) * XA_GRAIN);
+        uint32_t frontier = xk_audio_voice_pos(b->voice);
+        assert(h2_audio_progress_submit(&test_progress, XA_GRAIN, frontier));
+        for (unsigned remaining = XA_GRAIN;; remaining -= 256) {
+            assert(h2_audio_progress_rest(&test_progress, remaining));
+            c = context(handle, 0x6FFE, 0x6120, 0); call(&c, 0x37B777, 0, 3);
+            uint64_t frames = (grain + 1ull) * XA_GRAIN - remaining;
+            uint32_t expected = (uint32_t)(((frames * ((44100ull << 16) / 48000)) >> 16) % (sizeof source / 4)) * 4;
+            assert(read32(0x6FFE) == expected && read32(0x6120) == frontier % sizeof source);
+            if (!remaining) break;
+        }
+    }
+    c = context(handle, 0, 0x6120, 0); call(&c, 0x37B777, 0, 3);
+    c = context(handle, 0x6FFE, 0, 0); call(&c, 0x37B777, 0, 3);
+    c = context(handle, 0, 0, 0); call(&c, 0x37B777, 0, 3);
+    /* Terminal test-fixture teardown, not an implemented guest Stop/Release. */
+    xk_audio_voice_free(b->voice); assert(h2_audio_backend_close() == 0);
     free(g_xpt); free(g_xram);
     puts("Halo 2 real PCM voice, bounded controls, mirror ownership, rollback, aliases and parent lifetime passed");
     return 0;
