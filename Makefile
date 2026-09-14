@@ -372,7 +372,9 @@ RECOMP_CFLAGS += -DXV_QUAT_CACHE
 endif
 
 # Native replacements must retain the lifted multiply/add rounding points.
-$(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -ffp-contract=off
+# Unroll only the bounded native math unit. Scalar VFP operations retain its
+# established operand order; no global fast-math or guest codegen change.
+$(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -ffp-contract=off
 ifeq ($(XV_PALETTE_JOB_PROFILE),1)
 $(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -DXV_PALETTE_JOB_PROFILE=1

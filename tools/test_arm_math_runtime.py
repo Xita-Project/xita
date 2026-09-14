@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compare two actual Vita-linked math implementations after a runtime change.
 
-Uses synthetic finite polygon fixtures, including aliases and split guest pages.
+Uses synthetic fixtures, including aliases and split guest pages. Optional math
+edge cases cover exceptional floats and caller-selected native FP controls.
 Requires Unicorn/pyelftools and VitaSDK. Firmware memory copies are modeled;
 libgcc executes normally. Instruction counts are not CPU cycles or game FPS.
 The full guest context and 2 MiB guest arena must match byte for byte.
@@ -11,6 +12,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import random
 import struct
 import subprocess
 
@@ -18,7 +20,7 @@ import unicorn
 from elftools.elf.elffile import ELFFile
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_CODE
 from unicorn.arm_const import (UC_ARM_REG_C1_C0_2, UC_ARM_REG_FPEXC,
-    UC_CPU_ARM_CORTEX_A9, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
+    UC_CPU_ARM_CORTEX_A9, UC_ARM_REG_FPSCR, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
     UC_ARM_REG_SP, UC_ARM_REG_LR, UC_ARM_REG_PC)
 
 root = Path(__file__).resolve().parents[1]
@@ -26,11 +28,23 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--baseline', type=Path, required=True)
 parser.add_argument('--candidate', type=Path, required=True)
 parser.add_argument('--output-dir', type=Path, required=True)
+parser.add_argument('--cases', type=int, default=128)
+parser.add_argument('--float-edges', action='store_true')
+parser.add_argument('--random-floats', action='store_true')
+parser.add_argument('--fpscr', type=lambda s: int(s, 0), nargs='+', default=[0])
 parser.add_argument('--functions', nargs='+',
                     choices=['f_000B77C0', 'xv_math_polygon_clip', 'f_000B71C0',
                              'f_000B5B40', 'f_000B5F60'],
                     default=['f_000B77C0', 'xv_math_polygon_clip'])
 args = parser.parse_args()
+if not 1 <= args.cases <= 10000:
+    parser.error('--cases must be between 1 and 10000')
+if any(value & ~0x03c00000 for value in args.fpscr):
+    parser.error('--fpscr permits rounding, flush-to-zero and default-NaN controls only')
+if args.float_edges and args.random_floats:
+    parser.error('choose --float-edges or --random-floats')
+if (args.float_edges or args.random_floats) and any(name not in ('f_000B5B40', 'f_000B5F60') for name in args.functions):
+    parser.error('float stress fixtures are available for matrix/quaternion functions only')
 out = args.output_dir.resolve()
 out.mkdir(parents=True, exist_ok=True)
 fields = ['r', 'st', 'fsp', 'fsw', 'fcw', 'preempt', 'f_kind', 'f_bits']
@@ -111,7 +125,7 @@ class Machine:
             self.copy_bytes += count
         uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
 
-    def call(self, name, memory, context):
+    def call(self, name, memory, context, fpscr=0):
         def math_counts():
             return sum((struct.unpack('<II', self.uc.mem_read(self.symbols[n], 8))
                         for n in ('math_fast', 'math_fallback')), ())
@@ -121,17 +135,24 @@ class Machine:
         self.uc.reg_write(UC_ARM_REG_R0, CTX)
         self.uc.reg_write(UC_ARM_REG_SP, STACK + 65024)
         self.uc.reg_write(UC_ARM_REG_LR, END | 1)
+        self.uc.reg_write(UC_ARM_REG_FPSCR, fpscr)
         self.count = self.copy_calls = self.copy_bytes = 0
         self.uc.emu_start(self.symbols[name] | 1, END, count=1000000)
         assert self.uc.reg_read(UC_ARM_REG_PC) == END, name + ' did not return'
         return (bytes(self.uc.mem_read(CTX, layout['size'])), bytes(self.uc.mem_read(RAM, SIZE)),
                 self.count, (self.copy_calls, self.copy_bytes),
-                tuple((a - b) & 0xffffffff for a, b in zip(math_counts(), before)))
+                tuple((a - b) & 0xffffffff for a, b in zip(math_counts(), before)),
+                self.uc.reg_read(UC_ARM_REG_FPSCR))
 
 
 def fixture(name, k):
     memory = bytearray(b'\xa5' * SIZE)
     context = bytearray(layout['size'])
+    rng = random.Random(0x5b5f60 + k)
+    edges = [0, 0x80000000, 1, 0x807fffff, 0x00800000, 0x80800000,
+             0x7f7fffff, 0xff7fffff, 0x7f800000, 0xff800000, 0x7fc01234,
+             0xffc05678, 0x7f801234, 0x3f800000, 0xbf800000, 0x3f000001,
+             0xbf000001]
 
     def write(a, data):
         for i, value in enumerate(data):
@@ -200,7 +221,9 @@ def fixture(name, k):
         output = 0x22000 if k % 7 else source
         angle = k * .125
         for i, value in enumerate([math.sin(angle), .125, -.25, math.cos(angle)]):
-            fl(source + i * 4, value)
+            if args.random_floats: word(source + i * 4, rng.getrandbits(32))
+            elif args.float_edges: word(source + i * 4, edges[(k // 4 + 3 * i) % len(edges)])
+            else: fl(source + i * 4, value)
         fl(0x1f0b04, 2)
         reg(1, source)
         reg(2, output)
@@ -212,7 +235,11 @@ def fixture(name, k):
                       -math.sin(angle), math.cos(angle), 0, 0, 0, 1,
                       k * .25, -k * .125, 3]
             for i, value in enumerate(values):
-                fl(address + i * 4, value)
+                if args.random_floats: word(address + i * 4, rng.getrandbits(32))
+                elif args.float_edges:
+                    edge_index = ((k // 4) // len(edges) + 5 * i + 2) if address == right else (k // 4 + 3 * i)
+                    word(address + i * 4, edges[edge_index % len(edges)])
+                else: fl(address + i * 4, value)
         word(sp + 4, left)
         word(sp + 8, right)
         word(sp + 12, output)
@@ -229,15 +256,25 @@ for name in args.functions:
     memory, context = fixture(name, 0)
     baseline.call(name, memory, context)
     candidate.call(name, memory, context)
-    for k in range(128):
-        memory, context = fixture(name, k)
-        old, new = baseline.call(name, memory, context), candidate.call(name, memory, context)
-        assert old[0] == new[0], (name, k, 'context')
-        assert old[1] == new[1], (name, k, 'guest memory')
-        assert old[3] == new[3], (name, k, 'firmware copies')
-        assert old[4] == new[4], (name, k, 'native math fast/fallback paths')
-        rows.append({'case': k, 'baseline': old[2], 'candidate': new[2],
-                     'native_math_counts': old[4]})
+    for fpscr in args.fpscr:
+        for k in range(args.cases):
+            memory, context = fixture(name, k)
+            old, new = baseline.call(name, memory, context, fpscr), candidate.call(name, memory, context, fpscr)
+            for index, field_name in [(0, 'context'), (1, 'guest-memory')]:
+                if old[index] != new[index]:
+                    prefix = out / f'mismatch-{name}-{k}-{fpscr:08x}-{field_name}'
+                    prefix.with_suffix('.baseline').write_bytes(old[index])
+                    prefix.with_suffix('.candidate').write_bytes(new[index])
+                    offsets = [i for i, (a, b) in enumerate(zip(old[index], new[index])) if a != b]
+                    prefix.with_suffix('.json').write_text(json.dumps({'case': k, 'fpscr': fpscr,
+                        'different_bytes': len(offsets), 'first_offsets': offsets[:32],
+                        'native_math_counts': old[4]}, indent=2) + '\n')
+                    raise AssertionError((name, k, hex(fpscr), field_name, str(prefix)))
+            assert old[4] == new[4], (name, k, hex(fpscr), 'native math fast/fallback paths')
+            assert old[5] == new[5], (name, k, hex(fpscr), 'native FP status', hex(old[5]), hex(new[5]))
+            rows.append({'case': k, 'fpscr': fpscr, 'baseline': old[2], 'candidate': new[2],
+                         'firmware_copies': {'baseline': old[3], 'candidate': new[3]},
+                         'native_math_counts': old[4]})
     before, after = (sum(r[n] for r in rows) for n in ('baseline', 'candidate'))
     report[name] = {'cases': len(rows), 'baseline_instructions': before,
                     'candidate_instructions': after, 'change_percent': (after / before - 1) * 100,
@@ -248,6 +285,7 @@ for name in args.functions:
                         [sum(r['native_math_counts'][i] for r in rows) for i in range(4)]))}
     (out / (name + '.json')).write_text(json.dumps(rows, indent=2) + '\n')
 report = {'unicorn': unicorn.__version__, 'results': report, 'units': 'instructions, not cycles or FPS',
+          'float_edges': args.float_edges, 'random_floats': args.random_floats, 'fpscr': args.fpscr,
           'guest_trace_enabled': {'baseline': baseline.guest_trace_enabled,
                                   'candidate': candidate.guest_trace_enabled},
           'inputs': {n: {'path': str(p.resolve()), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}

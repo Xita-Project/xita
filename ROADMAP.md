@@ -9,15 +9,29 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+[~] September 14 [native transform math](docs/native-math-unroll-20260914.md):
+unrolled scalar VFP calculations preserve 48,896 compiled ARM test outcomes
+while reducing accepted matrix/quaternion instruction counts. Hardware FPS
+benefit remains unmeasured. Stable 20 FPS is the first milestone toward 30 FPS.
+
+[~] September 14 [hardware rendering comparisons](docs/hardware-20260914-rendering.md):
+the model-palette helper did not improve the tested Blood Gulch view. Existing
+deferred flare queries saved about 13.3 ms/frame in matched trials, but were
+already enabled. A separate world-scene completion experiment passes emulator
+checks and awaits hardware measurement.
+
 [~] [Remote hardware testing](docs/remote-testing.md): opt-in LAN controller
 input, completed-frame screenshots, log downloads and repeated off/on/off
 trials. The [first physical Vita session](docs/hardware-20260913-remote.md)
 launched Halo, entered Blood Gulch and collected three complete comparisons.
 One-time pairing and foreground launch are required. The
 [integrated updater](docs/integrated-updater.md) adds a stable launcher, verified
-inactive executable slots and rollback; physical installation testing and
-crash recovery remain open. Next: remote test selection, performance
-snapshots and reports bundling build/settings/logs/screenshots.
+inactive executable slots and rollback. [September 14 testing](docs/hardware-20260914-updater.md)
+confirms physical Wi-Fi installs, including a gameplay handoff, but a later
+restart has not returned to the control service. Shutdown diagnostics and
+display-awake leases are implemented and emulator-tested; physical recovery
+remains unverified. Remote experiment selection is available. Next: restore
+hardware access and bundle build/settings/logs/screenshots into test reports.
 
 September 13 [object-transform hardware follow-up](docs/hardware-20260913-object-basis.md):
 the enabled native helper records over two million accepted calls with no guard
