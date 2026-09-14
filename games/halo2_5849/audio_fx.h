@@ -1,21 +1,29 @@
 #pragma once
 #include "dsp_engine.h"
+#include "audio_hrtf_model.h"
 
 /* Bounded nonspatial FXIN2 sources: bin13 -> routes0..5 and bin23 -> routes0,1.
+ * Optional fixed spatial bin23 uses the explicit HRTF model into bins6/7/10.
  * Their mono signed-24 sources all read the prior completed GP frame. All
  * other voices must be inactive. The caller owns and serializes the engine,
  * this state, and every read of that engine. */
-#define H2_FX_SOURCES 2
+#define H2_FX_SOURCES 3
+/* Internal source key, distinct from the nonspatial voice using input bin23. */
+#ifndef H2_FX_SPATIAL23
+#define H2_FX_SPATIAL23 0x10017u
+#endif
 typedef struct { unsigned routes; uint64_t frames; } h2_audio_fx_source;
 typedef struct {
     h2_dsp_engine *engine;
     unsigned bound, playing;
     uint64_t frames;
     h2_audio_fx_source sources[H2_FX_SOURCES];
+    h2_hrtf_model spatial;
 } h2_audio_fx;
-/* Stable bit0=bin13, bit1=bin23; zero means unsupported. */
+/* Stable bit0=bin13, bit1=bin23, bit2=fixed spatial bin23; zero is unsupported. */
 unsigned h2_audio_fx_mask(unsigned bin);
 int h2_audio_fx_bind(h2_audio_fx *fx, h2_dsp_engine *engine, unsigned bin);
+int h2_audio_fx_bind_spatial(h2_audio_fx *fx, h2_dsp_engine *engine, const int8_t taps[31]);
 int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes);
 int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin);
 int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin);

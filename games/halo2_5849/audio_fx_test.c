@@ -74,8 +74,33 @@ int H2_AUDIO_FX_TEST_MAIN(void)
     }
     before = fx; assert(!h2_audio_fx_forget(&fx, 23) && !h2_audio_fx_bind(&fx, s, 23));
     assert(!h2_audio_fx_bind(&fx, s, 24) && !memcmp(&before, &fx, sizeof fx));
+    /* Fixed spatial voice is a distinct owner of the same prior FX23 frame.
+     * Its filtered routes must not replace or multiply the two 2D routes. */
+    int8_t taps[31] = {127};
+    assert(!h2_audio_fx_bind(&fx, s, H2_FX_SPATIAL23));
+    assert(h2_audio_fx_bind_spatial(&fx, s, taps) && fx.bound == 7 && fx.playing == 3);
+    assert(h2_audio_fx_forget(&fx, H2_FX_SPATIAL23) && !memcmp(&before, &fx, sizeof fx));
+    assert(h2_audio_fx_bind_spatial(&fx, s, taps));
+    assert(!h2_audio_fx_route(&fx, H2_FX_SPATIAL23, 5));
+    assert(h2_audio_fx_play(&fx, H2_FX_SPATIAL23) && fx.playing == 7);
+    for (unsigned i = 0; i < 32; ++i) {
+        put32(s->scratch + 0xb100 + i * 4, 0);
+        put32(s->scratch + 0xb600 + i * 4, 0x400000);
+    }
+    engine_frames = s->status.frames; assert(h2_audio_fx_render(&fx, out, 32));
+    assert(s->status.frames == engine_frames + 1 && fx.sources[2].frames == 1);
+    float gain = 0;
+    for (unsigned i = 0; i < 32; ++i) {
+        gain += 0.01f * (1.0f - gain); uint32_t expected = (uint32_t)lrint((double)(gain * 0.5f) * 8388608.0);
+        assert(out[i * 2] == 16384 && out[i * 2 + 1] == 16384);
+        for (unsigned bin = 0; bin < 32; ++bin) {
+            uint32_t wanted = bin < 2 ? 0x400000 : bin == 6 || bin == 7 || bin == 10 ? expected : 0;
+            assert(s->core.mixbuffer[bin * 32 + i] == wanted);
+        }
+    }
+    assert(!h2_audio_fx_forget(&fx, H2_FX_SPATIAL23));
     /* A subsequent frame fault is terminal, with no completed frame counted. */
-    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 33 && s->status.fault);
+    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 34 && s->status.fault);
     assert(!h2_audio_fx_render(&fx, out, 32)); h2_dsp_destroy(s);
     puts("Halo 2 FX source: checked ownership, six independent unity routes, real DSP frames and signed GP output pass");
     return 0;

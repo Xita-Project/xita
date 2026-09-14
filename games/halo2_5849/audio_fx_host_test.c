@@ -1,5 +1,6 @@
 /* Guest ABI and resource lifetime; provider/sink are scripted here. Actual
  * DSP output and concurrent ownership are covered by the companion tests. */
+#define H2_AUDIO_SPATIAL_MODEL 1
 #define H2_AUDIO_DSP_TEST_MAIN dsp_adapter_tests
 #include "audio_dsp_test.c"
 static xctx fx_description(uint32_t dev)
@@ -9,12 +10,12 @@ static xctx fx_description(uint32_t dev)
 }
 static xctx fx_context(uint32_t handle, uint32_t arg, uint32_t caller)
 { xctx c = context(handle, arg, 0, 0); X_M32(c.r[4]) = caller; return c; }
-int main(void)
+int main(int argc, char **argv)
 {
     g_xram = malloc(0x200000); g_img_base = g_xram; g_xpt = malloc((1u << 20) * 4); assert(g_xram && g_xpt);
     memset(g_xram, 0xcc, 0x200000); for (unsigned i = 0; i < 1u << 20; ++i) g_xpt[i] = 0x1ff000;
     for (unsigned i = 1; i < 16; ++i) g_xpt[i] = (i - 1) * 4096;
-    g_xpt[3] = 0x8000; g_xpt[7] = 0x9000; g_xpt[0x386] = 0xf000; X_M32(0x386B0C) = 0;
+    g_xpt[3] = 0x8000; g_xpt[7] = 0x9000; g_xpt[0x386] = 0xf000; g_xpt[0x387] = 0x1e0000; X_M32(0x386B0C) = 0;
     xctx c = context(0, 0x6200, 0, 0); call(&c, 0x37D797, 0, 3); uint32_t dev = read32(0x6200);
     c = fx_description(dev); reject(&c, 0x37D4BE);
     c = download_context(); call(&c, 0x37B86D, 0, 4);
@@ -62,6 +63,44 @@ int main(void)
             c = fx_context(second_handle, 0x4ffc, 0x220CAA); reject(&c, 0x37C5E4);
             c = fx_context(second_handle, 0, 0x21E842); call(&c, 0x37B6DF, 0, 4);
             assert(second->started && test_fx_playing == 3 && b->started);
+            /* Invalid/unmapped owned-filter contracts fail before allocating.
+             * Optional privately supplied 32-byte owned filter enables the
+             * exact valid creation ABI path without tracking owned bytes. */
+            c = fx_description(dev); uint32_t spatial_desc[6] = {24,0x100010,0,0,0,23};
+            x_guest_write(0x3ffd, spatial_desc, sizeof spatial_desc); X_M32(c.r[4]) = 0x21E88A;
+            X_M32(0x3871F0) = 2; memset(X_G(0x386958), 0, 64); reject(&c, 0x37D4BE);
+            if (argc == 2) {
+                FILE *filter = fopen(argv[1], "rb"); assert(filter); int8_t taps[32];
+                assert(fread(taps, 1, sizeof taps, filter) == sizeof taps && fgetc(filter) == EOF); fclose(filter);
+                x_guest_write(0x386958, taps, 32); x_guest_write(0x386978, taps, 32);
+                xctx invalid = c; X_M32(c.r[4] + 12) = 0x386958; reject(&invalid, 0x37D4BE);
+                X_M32(c.r[4] + 12) = 0x3871F0; invalid = c; reject(&invalid, 0x37D4BE);
+                g_xpt[0x388] = g_xpt[0x386]; X_M32(c.r[4] + 12) = 0x388958; invalid = c; reject(&invalid, 0x37D4BE);
+                X_M32(c.r[4] + 12) = 0x6ffe;
+                call(&c, 0x37D4BE, 0, 4); uint32_t spatial_handle = read32(0x6ffe);
+                h2_audio_buffer *spatial = find_buffer(spatial_handle - 0x1c);
+                assert(spatial && spatial->fx_bin == H2_FX_SPATIAL23 && spatial->route_count == 5);
+                assert(test_fx_bound == 7 && test_fx_playing == 3 && device.references == 4);
+                for (unsigned setter = 0; setter < 2; ++setter) {
+                    uint32_t ip = setter ? 0x37C644 : 0x37C620, caller = setter ? 0x21E8AC : 0x21E89D;
+                    c = context(spatial_handle, 0x7f7fffff, 0, 0); X_M32(c.r[4]) = caller; reject(&c, ip);
+                    c = context(spatial_handle, 0x7f7ffffe, 1, 0); X_M32(c.r[4]) = caller; reject(&c, ip);
+                    c = context(spatial_handle, 0x7f7fffff, 1, 0); X_M32(c.r[4]) = caller+1; reject(&c, ip);
+                    c = context(spatial_handle, 0x7f7fffff, 1, 0); X_M32(c.r[4]) = caller; call(&c, ip, 0, 3);
+                }
+                c = fx_context(spatial_handle, 0, 0x21E8BA); reject(&c, 0x37B6DF);
+                device.dirty = 0x25; device.pending_distance = 0x4043126f;
+                device.pending_rolloff = device.pending_doppler = 0;
+                device.pending_orientation[0] = device.pending_orientation[4] = 0x3f800000;
+                c = fx_context(spatial_handle, 0, 0x21E8BA); call(&c, 0x37B6DF, 0, 4);
+                assert(test_fx_playing == 7 && spatial->started && !spatial->spatial[0]);
+                assert(spatial->spatial[1] == 0xf8000000 && spatial->spatial[0x70/4] == 0x43340000);
+                c = fx_context(spatial_handle, 0, 0x21E8BA); reject(&c, 0x37B6DF);
+                c = context(spatial_handle, 0, 0, 0); reject(&c, 0x379F45);
+                spatial->started = 0; test_fx_playing &= ~4u; /* test teardown only */
+                c = context(spatial_handle, 0, 0, 0); call(&c, 0x379F45, 0, 1);
+                assert(test_fx_bound == 3 && device.references == 3);
+            }
             c = context(second_handle, 0, 0, 0); reject(&c, 0x379F45);
             second->started = 0; test_fx_playing &= ~2u; /* test teardown only */
             c = context(second_handle, 0, 0, 0); call(&c, 0x379F45, 0, 1);

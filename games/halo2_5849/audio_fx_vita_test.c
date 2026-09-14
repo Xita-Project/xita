@@ -64,12 +64,25 @@ int main(void)
     assert(status.fx_bound_mask == 3 && status.fx_playing_mask == 3 && status.fx_source_submitted[1] >= XA_GRAIN);
     assert(status.fx_source_submitted[0] == status.fx_submitted_frames);
     assert(status.last_peak_left == 3906 && status.last_peak_right == 3906);
+    /* Third, spatial owner must also complete only its own tagged grain.
+     * Synthetic fixture's real GP exposes input bins separately in core tests;
+     * its monitor here still reports the two unchanged nonspatial sources. */
+    int8_t taps[31] = {127};
+    assert(h2_audio_backend_fx_bind_spatial(s, taps) < 0); /* bins6..10 default headroom */
+    for (unsigned i = 6; i <= 10; ++i) assert(h2_audio_backend_set_headroom(i, 0) == 0);
+    assert(h2_audio_backend_fx_bind_spatial(s, taps) == 0);
+    assert(h2_audio_backend_set_headroom(10, 1) < 0);
+    assert(h2_audio_backend_fx_play(H2_FX_SPATIAL23) == 0);
+    h2_audio_backend_snapshot(&status);
+    assert(status.fx_bound_mask == 7 && status.fx_playing_mask == 7 && status.fx_source_submitted[2] >= XA_GRAIN);
+    assert(status.last_peak_left == 3906 && status.last_peak_right == 3906);
+    assert(h2_audio_backend_fx_forget(H2_FX_SPATIAL23) < 0);
     assert(h2_audio_backend_fx_forget(23) < 0);
     assert(h2_audio_backend_fx_forget(13) < 0 && h2_audio_backend_fx_route(13, 2) < 0 && h2_audio_backend_fx_play(13) < 0);
     assert(h2_audio_backend_close() == 0 && !resources && !atomic_load(&queued));
     atomic_store(&faults, 0);
     h2_audio_backend_snapshot(&status); assert(status.fx_consumed_frames == status.fx_submitted_frames);
-    for (unsigned i = 0; i < 2; ++i) assert(status.fx_source_consumed[i] == status.fx_source_submitted[i]);
+    for (unsigned i = 0; i < 3; ++i) assert(status.fx_source_consumed[i] == status.fx_source_submitted[i]);
     h2_dsp_destroy(s);
 /* GCC's TSan runtime fails its own longjmp-buffer check on this injected DSP
  * fault. The TSan concurrency run skips only this fixture; normal and

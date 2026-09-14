@@ -166,6 +166,16 @@ int h2_audio_backend_fx_bind(h2_dsp_engine *engine, unsigned bin)
     int ok = h2_audio_backend_health() == 0 && fx_inputs_ready() && h2_audio_fx_bind(&fx, engine, bin);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
+int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *engine, const int8_t taps[31])
+{
+    if (h2_audio_backend_health() < 0) return -1;
+    sceKernelLockMutex(progress_mutex, 1, NULL);
+    uint8_t bins[32]; h2_audio_bins_snapshot(bins); int zero = 1;
+    for (unsigned i = 0; i <= 10; ++i) if (bins[i]) zero = 0;
+    int ok = h2_audio_backend_health() == 0 && zero && fx_inputs_ready() &&
+        h2_audio_fx_bind_spatial(&fx, engine, taps);
+    sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
+}
 int h2_audio_backend_fx_route(unsigned bin, unsigned routes)
 {
     if (h2_audio_backend_health() < 0) return -1;
@@ -184,7 +194,7 @@ int h2_audio_backend_fx_play(unsigned bin)
 {
     if (h2_audio_backend_health() < 0) return -1;
     sceKernelLockMutex(progress_mutex, 1, NULL);
-    unsigned mask = h2_audio_fx_mask(bin), index = mask == 1 ? 0 : 1;
+    unsigned mask = h2_audio_fx_mask(bin), index = mask == 1 ? 0 : mask == 2 ? 1 : 2;
     uint64_t before = fx_source_submitted[index];
     int ok = h2_audio_backend_health() == 0 && fx_inputs_ready() && h2_audio_fx_play(&fx, bin);
     sceKernelUnlockMutex(progress_mutex, 1);
@@ -388,7 +398,7 @@ int h2_audio_backend_set_headroom(uint32_t bin, uint32_t amount)
     if (h2_audio_backend_health() < 0) return -1;
 #if H2_AUDIO_DSP
     sceKernelLockMutex(progress_mutex, 1, NULL);
-    int result = h2_audio_backend_health() < 0 || (fx.engine && bin < 6 && amount)
+    int result = h2_audio_backend_health() < 0 || (fx.engine && bin < ((fx.bound & 4) ? 11u : 6u) && amount)
         ? -1 : h2_audio_bins_set(bin, amount);
     sceKernelUnlockMutex(progress_mutex, 1); return result;
 #else

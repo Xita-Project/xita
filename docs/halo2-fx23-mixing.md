@@ -142,3 +142,6 @@ The utility build uses target `fx-probe`, `FX_PROBE_SECOND=1`, private `BUILD`
 and owned `DSP_ASSET`; the default first-source probe remains available.
 **These diagnostic packages embed owned executable game/DSP content and must
 not be uploaded or distributed as releases.**
+
+The later [fixed spatial checkpoint](halo2-spatial-fxin2.md) documents the
+opt-in model, original Play audit, native validation and next bin-24 stop.

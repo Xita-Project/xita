@@ -8,9 +8,11 @@ struct h2_dsp_engine { uint32_t marker; };
 static unsigned dsp_opens, dsp_closes, dsp_reads;
 static int dsp_failure;
 static unsigned test_fx_bound, test_fx_routes, test_fx_playing;
-static unsigned test_fx_mask(unsigned bin) { assert(bin == 13 || bin == 23); return bin == 13 ? 1 : 2; }
+static unsigned test_fx_mask(unsigned bin) { assert(bin == 13 || bin == 23 || bin == H2_FX_SPATIAL23); return bin == 13 ? 1 : bin == 23 ? 2 : 4; }
 int h2_audio_backend_fx_bind(h2_dsp_engine *s, unsigned bin)
 { unsigned mask = test_fx_mask(bin); assert(s == effects && !(test_fx_bound & mask)); test_fx_bound |= mask; if (bin == 13) test_fx_routes = 2; return 0; }
+int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *s, const int8_t taps[31])
+{ assert(s == effects && test_fx_bound == 3 && test_fx_playing == 3 && taps); test_fx_bound |= 4; return 0; }
 int h2_audio_backend_fx_route(unsigned bin, unsigned routes)
 { assert(bin == 13 && (test_fx_bound & 1) && !(test_fx_playing & 1) && routes == 6); test_fx_routes = routes; return 0; }
 int h2_audio_backend_fx_play(unsigned bin)
