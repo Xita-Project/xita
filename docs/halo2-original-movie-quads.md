@@ -1,6 +1,6 @@
 # Halo 2: first original movie draws through GXM
 
-Native76 executes two original intro-movie quads through GXM. The original game
+Native77 executes two original intro-movie quads through GXM. The original game
 supplies the command vertices, decoded texture, vertex program and constants;
 the [validated shader translation](halo2-quad-gxm-probe.md) supplies the native
 programs. The first movie framebuffer is presented through the existing original
@@ -9,9 +9,15 @@ active-scanout flip stops explicitly. **No visible movie or main menu is claimed
 
 Native74 first established this path; native75 tightened callback/error handling,
 and native76 additionally preserves native FPSCR around loading the private
-pipeline contract. Native75/76 have identical terminal decoded channel and push
-captures. The explicit audio-unavailable diagnostic remains required; it still
-returns a genuine audio-driver error and creates no audio device.
+pipeline contract. A subsequent audit found that dependency files copied from
+an earlier build still named the old output directory. That left `boot.o` and
+`command_snapshot.o` with the prior channel structure layout. Native74–76's
+channel JSON GET/PUT/bootstrap values are invalid and superseded by native77;
+their original draw/flip logs and framebuffer captures remain preserved.
+Retargeting the dependencies and rebuilding both readers restores exact JSON
+agreement with the terminal parser log. Native77 is the reproducible checkpoint.
+The explicit audio-unavailable diagnostic still returns a genuine audio-driver
+error and creates no audio device.
 
 ## Scope and preservation
 
@@ -72,15 +78,15 @@ PUT `03B44C44`; the submitter remains original guest `3FAC58`. It requests the
 next active-display interval-one swap. The existing initialization-only flip
 guard rejects it. No arbitrary port write or false swap completion is added.
 
-Native76 private files are under `native-76-artifacts/` and `native-76-view/`:
+Native77 private files are under `native-77-artifacts/` and `native-77-view/`:
 
 | Artifact | SHA-256 |
 | --- | --- |
-| ELF, 75,180,028 bytes | `6a567ef3f9987b30b74cec731627d6615e8243df552a3520a0f41d70fd35604f` |
-| EBOOT, 91,889,554 bytes | `5f7bea6bae7f9ed71d12cf4b5a8eac13e2d87ae9addcb64323e5ead535f1dc17` |
-| VPK, 25,614,840 bytes | `abb4affc9d25bd9b58d88a1cf3656e3b736029c6a28719659982f863b9554045` |
-| Boot trace | `78fbefef362a335ce0a75ba402776bf6e46e8b0fa3aebfdab8aa4cd106907b55` |
-| Decoded channel | `b3eead14c2761be12aef561fad4876de6392d7b003ad6d60efe4afa53dc5cc83` |
+| ELF, 75,180,028 bytes | `de5d1900d0d76df590c8bc642828554a823e8317f7d4065f81e3ca26fda98c88` |
+| EBOOT, 91,889,554 bytes | `686e3e730e5480045c0543e8e688b2a12150aefd007eb70c4ad853156b2d394b` |
+| VPK, 25,614,838 bytes | `571ae8160a308dd3c5ec3aeb8b87955635c65571e0bd35cf43dba65ca4f116b5` |
+| Boot trace | `a720d5ffe7e86a687a8564e52bfb666c7b9fa49b36a0b7278aee2f2892f93aba` |
+| Decoded channel | `e2af71b83f36e02f84262819f61ca1273dbdb6fe41ddfa01551571c16252eeaf` |
 | Last presented frame | `d5ac913ac8137311738933954f21221544586ff6ba9cc9b044cd2afa7bb42a62` |
 
 The last presented capture has header `{960,544,3840,2}`. Every pixel is
@@ -100,7 +106,8 @@ probe's exact pixel/culling checks are documented separately.
 
 Run `prepare_quad_shaders.py` as documented for the probe, adding `--contract`
 and supplying the pinned native73 JSON. Compile its generated shaders with the
-isolated shader compiler. Use a distinct build directory for this selection:
+isolated shader compiler. Use a fresh, distinct build directory for this selection;
+do not copy object/dependency files from another output directory:
 
 ```sh
 make -C games/halo2_5849 -j4 HOST_CHANNEL=1 QUAD_RENDER=1 GUEST_OPT=-O0 \
@@ -116,7 +123,7 @@ uses synchronous shader compilation. Its launcher must install the three
 Exact archived replay in this workspace:
 
 ```sh
-python3 ../private/run_lab.py replay76 ../private/native-76-artifacts/halo2-boot.vpk
+python3 ../private/run_lab.py replay77 ../private/native-77-artifacts/halo2-boot.vpk
 ```
 
 The next bounded task is the original active-display software flip: audit its
