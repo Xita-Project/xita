@@ -1236,6 +1236,10 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
+    if (xv_benchmark_compare_texture_state()) {
+        xv_d3d_texture_state_override(enabled);
+        return;
+    }
     if (xv_benchmark_compare_point_math()) {
         extern void xv_point_math_override(int) __attribute__((weak));
         if(xv_point_math_override)xv_point_math_override(enabled);

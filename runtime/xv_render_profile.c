@@ -23,6 +23,7 @@ static unsigned work_count, work_overflow;
 static unsigned depth_only_draws, cutout_draws;
 static uint64_t cutout_indices;
 static uint64_t depth_only_indices;
+static unsigned texture_requests, texture_skipped, texture_errors;
 static struct { uint64_t end_us; unsigned count, frame_count, max_per_frame; } targets[10];
 
 uint64_t xv_render_profile_call_begin(void)
@@ -71,6 +72,13 @@ void xv_render_profile_depth_only(unsigned indices)
 {
     if (!active) return;
     depth_only_draws++; depth_only_indices += indices;
+}
+void xv_render_profile_texture(int skipped, int failed)
+{
+    if (!active) return;
+    texture_requests++;
+    texture_skipped += !!skipped;
+    texture_errors += !!failed;
 }
 
 void xv_render_profile_begin(uint32_t mesh_frame)
@@ -151,6 +159,10 @@ void xv_render_profile_end(void)
     xv_logf("[cutout-work] mesh %u..%u: %u draws / %llu indices use dedicated GREATER alpha test\n",
         first_mesh,last_mesh,cutout_draws,(unsigned long long)cutout_indices);
     cutout_draws=0; cutout_indices=0;
+    xv_logf("[texture-bind] mesh %u..%u: %u requests / %u API calls / %u identical skipped / %u errors (%u frames; mesh replay only)\n",
+        first_mesh,last_mesh,texture_requests,texture_requests-texture_skipped,
+        texture_skipped,texture_errors,frames);
+    texture_requests=texture_skipped=texture_errors=0;
     depth_only_draws=0; depth_only_indices=0;
     frames = 0;
     min_draws = max_draws = over_500 = over_800 = 0;

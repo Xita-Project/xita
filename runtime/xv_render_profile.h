@@ -35,6 +35,8 @@ void xv_render_profile_scene_end(unsigned target, uint64_t token);
 void xv_render_profile_work(uint32_t shader, unsigned indices, int no_alpha);
 void xv_render_profile_depth_only(unsigned indices);
 void xv_render_profile_cutout(unsigned indices);
+/* Resolved mesh binding outcome; pump-owned counters, no per-binding timer. */
+void xv_render_profile_texture(int skipped, int failed);
 #define XV_RENDER_CALL(kind, expression) __extension__ ({ \
     uint64_t xv_call_token_ = xv_render_profile_call_begin(); \
     __auto_type xv_call_result_ = (expression); \

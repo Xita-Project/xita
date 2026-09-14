@@ -9,6 +9,11 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+[~] September 14 [texture binding cache](docs/texture-state-cache-20260914.md):
+about half the mesh bindings repeat in the tested emulator gameplay view.
+An optional cache and isolated comparison pass host and emulator checks; physical frame-time
+benefit remains unmeasured, so the cache defaults off.
+
 [~] September 14 [native point transforms](docs/native-point-transform-20260914.md):
 the guarded helper passes compiled ARM comparisons and an emulator gameplay
 comparison. Most calls in the tested view use the native path; hardware speed

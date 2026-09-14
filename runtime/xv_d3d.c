@@ -15,6 +15,7 @@
 #include "xv_draw_profile.h"
 #include "xv_constant_window.h"
 #include "xv_draw_state.h"
+#include "xv_texture_state.h"
 #include "xv_stencil_gxm.h"
 #include "xv_render_profile.h"
 #include "xv_render_target.h"
@@ -2097,7 +2098,7 @@ int xv_d3d_uses_previous_frame(uint32_t frame)
 /* Check feedback after resolving the actual linked shader's active samplers,
  * previous-frame substitution, and cube/2D fallback. Unused bound stages do
  * not sample anything and cannot create feedback. */
-static int bind_draw_textures(SceGxmContext *ctx, const cmd_t *c,
+static int bind_draw_textures(xv_texture_state *state, SceGxmContext *ctx, const cmd_t *c,
     const xv_fshader_t *fs, unsigned cube_mask)
 {
     const void *target=c->pass && c->pass<=XV_RT_SLOTS ? g_rt[c->pass-1].mem : NULL;
@@ -2128,21 +2129,42 @@ static int bind_draw_textures(SceGxmContext *ctx, const cmd_t *c,
             XV_ONCE(warn_feedback, "RT feedback draw skipped (active sampler reads its color target)\n");
             return 0;
         }
-        sceGxmSetFragmentTexture(ctx, (unsigned)fs->tex_index[t], tx);
+        unsigned result = xv_texture_state_bind(state, ctx, (unsigned)fs->tex_index[t], tx);
+        xv_render_profile_texture(result == XV_TEXTURE_UNCHANGED, result == XV_TEXTURE_BIND_ERROR);
     }
     return 1;
+}
+static int texture_state_override = -1;
+void xv_d3d_texture_state_override(int enabled)
+{
+    __atomic_store_n(&texture_state_override, enabled < 0 ? -1 : !!enabled, __ATOMIC_RELEASE);
+}
+static int texture_state_enabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *e = getenv("XV_TEXTURE_STATE_CACHE");
+        enabled = e && atoi(e) != 0; /* Await hardware comparison before changing the default. */
+        XV_LOG("texture binding cache: %d (XV_TEXTURE_STATE_CACHE)\n", enabled);
+    }
+    int override = __atomic_load_n(&texture_state_override, __ATOMIC_ACQUIRE);
+    return override < 0 ? enabled : override;
 }
 static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsigned end, unsigned *clear_slot_io, uint32_t frame, unsigned clear_limit)
 {
     unsigned clear_slot = *clear_slot_io;
     xv_draw_state state = {0};
     xv_stencil_cache stencil_state = {0};
+    xv_texture_state textures;
+    textures.valid = 0;
+    xv_texture_state *texture_state = texture_state_enabled() ? &textures : NULL;
     for (unsigned i = first; i < end; ++i) {
         cmd_t *c = &l->cmds[i];
         visibility_draw_state(ctx,l,c);
         if (c->kind == 1) {
             state.valid = 0;
             stencil_state.valid = 0;
+            textures.valid = 0;
             int slot = handle_to_slot(g_clear_vs);
             if (slot < 0 || clear_slot >= clear_limit)
                 continue;
@@ -2200,7 +2222,7 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             fs = depth_fs; fp = fs->fprog; cube_mask = 0;
             xv_render_profile_depth_only(c->index_count);
         }
-        if (!bind_draw_textures(ctx,c,fs,cube_mask)) continue;
+        if (!bind_draw_textures(texture_state,ctx,c,fs,cube_mask)) continue;
         xv_render_profile_work(c->ps_entry >= 0 && (unsigned)c->ps_entry < XV_PS_TABLE_COUNT ? xv_ps_table[c->ps_entry].ps_key : 0,
             c->index_count, no_alpha && !fs->p_atest);
         xv_stencil_bind_cached(&stencil_state, ctx, &c->stencil);

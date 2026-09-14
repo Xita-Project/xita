@@ -24,7 +24,9 @@ void xv_vertex_upload_override(int enabled) { upload_override=enabled; }
 static int compare_override=-99;
 void xv_vertex_compare_override(int enabled) { compare_override=enabled; }
 static int candidate, scan_override=-99, copy_override=-99, bounds_override=-99, references_override=-99;
-static int worker_override=-99, point_override=-99;
+static int worker_override=-99, point_override=-99, texture_override=-99;
+int xv_benchmark_compare_texture_state(void) { return candidate==10; }
+void xv_d3d_texture_state_override(int enabled) { texture_override=enabled; }
 int xv_benchmark_compare_point_math(void) { return candidate==9; }
 int xv_benchmark_compare_early_visibility(void) { return candidate==8; }
 static int basis_override=-99, palette_override=-99;
@@ -96,7 +98,7 @@ int main(int argc,char **argv)
     assert(!xv_early_visibility_enabled());
     for(candidate=0;candidate<CANDIDATE_COUNT;candidate++)for(int mode=-1;mode<=1;mode++) {
         g_early_visibility_override=-1;
-        point_override=-99;
+        point_override=texture_override=-99;
         flare_override=scan_override=copy_override=bounds_override=references_override=worker_override=basis_override=palette_override=-99;flare_barriers=0;
         xv_benchmark_optimizations(mode);
         assert(flare_override==(candidate==0?mode:-99) && flare_barriers==(unsigned)(candidate==0));
@@ -108,6 +110,7 @@ int main(int argc,char **argv)
         assert(basis_override==(candidate==6?mode:-99));
         assert(palette_override==(candidate==7?mode:-99));
         assert(point_override==(candidate==9?mode:-99));
+        assert(texture_override==(candidate==10?mode:-99));
         assert(g_early_visibility_override==(candidate==8?mode:-1));
         assert(xv_early_visibility_enabled()==(candidate==8 && mode==1));
         assert(compare_override==-99 && upload_override==-99 && xv_pipeline_enabled()==!single);
@@ -118,7 +121,7 @@ int main(int argc,char **argv)
 }
 '''
 with tempfile.TemporaryDirectory(prefix='xita-frame-acquire-') as tmp:
-    count=10
+    count=11
     p=pathlib.Path(tmp);(p/'test.c').write_text(f'#define CANDIDATE_COUNT {count}\n'+prefix+globals_+fixture+code+suffix)
     sdk=pathlib.Path(os.environ.get('VITASDK',str(pathlib.Path.home()/'vitasdk')))
     subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP','-DXV_NATIVE_OBJECT_BASIS','-DXV_NATIVE_MODEL_PALETTE','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-unused-variable',

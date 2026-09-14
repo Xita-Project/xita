@@ -12,7 +12,7 @@ const unsigned xv_guest_trace_enabled = XV_TEST_GUEST_TRACE;
 static uint64_t now;
 static unsigned clock_calls, reports, draw_calls, work_reports;
 static char cutout_report[1024];
-static char draw_report[1024];
+static char draw_report[1024], texture_report[1024];
 static char report[1024], submit_report[1024], work_report[1024];
 static unsigned scene_calls, target_reports;
 static char target_report[10][1024];
@@ -32,6 +32,7 @@ void xv_logf(const char *fmt, ...)
     if (strstr(line,"[render-work]")) { strcpy(work_report,line); work_reports++; }
     if(strstr(line,"[cutout-work]"))strcpy(cutout_report,line);
     if(strstr(line,"[render-draws]"))strcpy(draw_report,line);
+    if(strstr(line,"[texture-bind]"))strcpy(texture_report,line);
     unsigned target, first, last;
     if (sscanf(line, "[render-target] mesh %u..%u target %u:", &first, &last, &target) == 3) {
         assert(target < 10); snprintf(target_report[target], sizeof target_report[target], "%s", line); target_reports++;
@@ -51,6 +52,7 @@ int main(int argc, char **argv)
     on = 0;
 #endif
     /* Networking/shutdown render calls outside a pump frame are ignored. */
+    xv_render_profile_texture(0,0); /* Outside-frame requests are ignored. */
     xv_render_profile_stage(XV_RENDER_PREVIOUS_FINISH);
     xv_render_profile_end();
     xv_render_profile_scene_end(0, 0);
@@ -59,6 +61,7 @@ int main(int argc, char **argv)
     assert(!clock_calls && !reports);
     for (unsigned i = 0; i < 60; ++i) {
         xv_render_profile_begin(1000 + i);
+        xv_render_profile_texture(0,0); xv_render_profile_texture(1,0); xv_render_profile_texture(0,1);
         if(i%2)xv_render_profile_cutout(7); /* first clock origin is zero */
         assert(XV_RENDER_CALL(XV_RENDER_DRAW,simulated_draw())==-17);
         xv_render_profile_work(0x1234,3,i&1);
@@ -84,6 +87,7 @@ int main(int argc, char **argv)
     }
     if (on) {
         assert(draw_calls==60 && work_reports==1);
+        assert(strstr(texture_report,"180 requests / 120 API calls / 60 identical skipped / 60 errors (60 frames"));
         assert(strstr(cutout_report,"30 draws / 210 indices"));
         assert(strstr(work_report,"shader 00001234: draws 60 indices 180 no-alpha 30"));
         assert(strstr(report, "60 frames mesh 1000..1059:"));
@@ -98,6 +102,7 @@ int main(int argc, char **argv)
             xv_render_profile_end();
         }
         assert(reports == 2);
+        assert(strstr(texture_report,"0 requests / 0 API calls / 0 identical skipped / 0 errors (60 frames"));
         assert(strstr(cutout_report,"0 draws / 0 indices"));
         assert(strstr(report, "60 frames mesh 2000..2059: submit 3.000 previous-finish 0.000 target-finish 0.000 frame-finish 0.000 display-queue 0.000 retire 0.000 total 3.000"));
         assert(strstr(report, "finish-calls 0/0/0 queue-calls 0"));
@@ -134,7 +139,7 @@ int main(int argc, char **argv)
             xv_render_profile_end();
         }
         assert(strstr(draw_report,"0 sceGxmDraw calls / 60 frames; avg 0.00 min 0 max 0; frames >500 0 >800 0"));
-    } else assert(!clock_calls && !reports && !work_reports && !draw_report[0] && draw_calls==60);
+    } else assert(!clock_calls && !reports && !work_reports && !draw_report[0] && !texture_report[0] && draw_calls==60);
     puts("PASS: render stages, draw count ranges/thresholds, failed draws, window reset, idle exclusion and disabled/no-clock behavior");
     return 0;
 }

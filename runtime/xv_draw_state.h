@@ -3,7 +3,8 @@
 #include <psp2/gxm.h>
 
 /* Local to one uninterrupted mesh replay range. UI draws, clears and scene
- * transitions invalidate this state; uniforms and textures remain per draw. */
+ * transitions invalidate this state. Uniforms remain per draw; texture state
+ * has a separate optional cache with the same range lifetime. */
 typedef struct {
     int valid;
     SceGxmDepthFunc depth;

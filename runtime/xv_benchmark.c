@@ -21,7 +21,7 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_POINT_MATH||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_TEXTURE_STATE||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
 #ifndef XV_NATIVE_OBJECT_BASIS
     if(kind==XV_BENCH_OBJECT_BASIS)return -1;
 #endif
@@ -58,6 +58,7 @@ void xv_benchmark_compare_toggle(void) {toggle(1);}
 int xv_benchmark_active(void) { return b.active||b.request||xv_benchmark_remote_busy(); }
 uint32_t xv_benchmark_status(void) { return __atomic_load_n(&status,__ATOMIC_ACQUIRE); }
 static unsigned phase_height(void) { return b.compare?b.original:heights[b.phase]; }
+int xv_benchmark_compare_texture_state(void) { return remote_kind==XV_BENCH_TEXTURE_STATE; }
 int xv_benchmark_compare_point_math(void) { return remote_kind==XV_BENCH_POINT_MATH; }
 int xv_benchmark_compare_early_visibility(void) { return remote_kind==XV_BENCH_EARLY_VISIBILITY; }
 int xv_benchmark_compare_object_basis(void)
@@ -142,7 +143,8 @@ int xv_benchmark_compare_draw_scan(void)
     return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_point_math() ? "point-math-compare" :
+    (xv_benchmark_compare_texture_state() ? "texture-state-compare" :
+     xv_benchmark_compare_point_math() ? "point-math-compare" :
      xv_benchmark_compare_early_visibility() ? "early-visibility-compare" :
      xv_benchmark_compare_object_basis() ? "object-basis-compare" :
      xv_benchmark_compare_model_palette() ? "model-palette-compare" :
@@ -177,7 +179,9 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
             xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_early_visibility())
+            if (xv_benchmark_compare_texture_state())
+                xv_logf("[texture-state-compare] start off/on/off at %up; only identical resolved mesh texture bindings are cached within uninterrupted ranges; draw order, shaders, geometry, workers and settings unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_early_visibility())
                 xv_logf("[early-visibility-compare] start off/on/off at %up; final/world/final fragment fence publishes exact query results; frame storage retains final-fence ownership; scenes, draws, workers and settings unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (native_math_selected())
                 xv_logf("[%s] start off/on/off at %up; only selected native helper changes; other math, workers, resolution, shaders, queue policy and frame cap unchanged; %u settle + %u measured frames each\n",tag(),height,SETTLE,MEASURE);
