@@ -29,6 +29,7 @@ int xv_upload_worker_submit(void *,const void *,unsigned,uint32_t *) __attribute
 void xv_upload_worker_wait(uint32_t) __attribute__((weak));
 void xv_upload_worker_report(unsigned) __attribute__((weak));
 void xv_upload_worker_shutdown(void) __attribute__((weak));
+int xv_upload_worker_snapshot(void *,const void *,unsigned) __attribute__((weak));
 typedef struct {
     const void *source;
     unsigned bytes, offset, next;
@@ -55,6 +56,15 @@ static int references_override = -1;
 static unsigned reference_checks, reference_hits, reference_runs;
 static uint64_t reference_requested, reference_compared;
 static int worker_override = -1;
+static int snapshot_worker_override = -1;
+void xv_snapshot_worker_override(int enabled)
+{ snapshot_worker_override = enabled < 0 ? -1 : !!enabled; }
+static int snapshot_worker_enabled(void)
+{
+    static int configured = -1;
+    if (configured < 0) configured = xv_quality_int("XV_SNAPSHOT_WORKER",0,0,1);
+    return snapshot_worker_override < 0 ? configured : snapshot_worker_override;
+}
 void xv_vertex_worker_override(int enabled)
 { worker_override = enabled < 0 ? -1 : !!enabled; }
 int xv_vertex_worker_enabled(void)
@@ -222,9 +232,12 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
     } else {
         uint64_t profile = xv_vertex_work_begin();
         if (pools[slot].asynchronous) {
-            /* Guest memory can change immediately after this call. The worker
-             * only reads this append-only cached mirror, never the guest. */
-            memcpy(pools[slot].cpu + off, source, bytes);
+            /* Guest memory can change immediately after this call. A shared
+             * initial copy joins its source loan here; later asynchronous GPU
+             * copies read only this append-only cached mirror. */
+            if (!snapshot_worker_enabled() || !xv_upload_worker_snapshot ||
+                !xv_upload_worker_snapshot(pools[slot].cpu + off,source,bytes))
+                memcpy(pools[slot].cpu + off, source, bytes);
         } else if (copy_enabled()) {
             xv_snapshot_copy(pools[slot].cpu + off, pools[slot].gpu + off, source, bytes);
             fused_copies++; fused_bytes += bytes;

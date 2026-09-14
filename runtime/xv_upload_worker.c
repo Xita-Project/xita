@@ -7,13 +7,14 @@
 #include <string.h>
 
 #define UPLOAD_JOBS 64u
-typedef struct { void *dst; const void *src; unsigned bytes; } upload_job;
+typedef struct { void *dst; const void *src; unsigned bytes; int cached; } upload_job;
 static upload_job queue[UPLOAD_JOBS];
 static SceUID thread = -1, wake = -1;
 static int unavailable, stopping;
 static uint32_t submitted, completed; /* producer-owned / atomic worker-owned */
 static unsigned queued, fallback;
 static uint32_t work_us, work_bytes, work_jobs, waits, wait_us;
+static uint32_t snapshot_us, snapshot_bytes, snapshot_jobs;
 
 static int upload_thread(SceSize args, void *argp)
 {
@@ -29,10 +30,10 @@ static int upload_thread(SceSize args, void *argp)
         upload_job job = queue[head & (UPLOAD_JOBS - 1u)];
         uint64_t begin = sceKernelGetProcessTimeWide();
         memcpy(job.dst, job.src, job.bytes);
-        xv_gpu_write_barrier(); /* destination is USER_RW_UNCACHE */
-        __atomic_fetch_add(&work_us, (uint32_t)(sceKernelGetProcessTimeWide()-begin), __ATOMIC_RELAXED);
-        __atomic_fetch_add(&work_bytes, job.bytes, __ATOMIC_RELAXED);
-        __atomic_fetch_add(&work_jobs, 1u, __ATOMIC_RELAXED);
+        if (!job.cached) xv_gpu_write_barrier(); /* GPU destination is USER_RW_UNCACHE */
+        __atomic_fetch_add(job.cached ? &snapshot_us : &work_us, (uint32_t)(sceKernelGetProcessTimeWide()-begin), __ATOMIC_RELAXED);
+        __atomic_fetch_add(job.cached ? &snapshot_bytes : &work_bytes, job.bytes, __ATOMIC_RELAXED);
+        __atomic_fetch_add(job.cached ? &snapshot_jobs : &work_jobs, 1u, __ATOMIC_RELAXED);
         __atomic_store_n(&completed, ++head, __ATOMIC_RELEASE);
     }
 }
@@ -54,17 +55,34 @@ fail:
     xv_logf("[cpu-work] vertex upload worker unavailable; copies stay on caller\n");
     return 0;
 }
-int xv_upload_worker_submit(void *dst, const void *src, unsigned bytes, uint32_t *ticket)
+static int submit(void *dst, const void *src, unsigned bytes, uint32_t *ticket, int cached)
 {
     if (!dst || !src || !bytes || !ticket) return 0;
     if (!start_worker() || submitted-__atomic_load_n(&completed, __ATOMIC_ACQUIRE)>=UPLOAD_JOBS) {
         fallback++; return 0; /* caller copies this disjoint range without waiting */
     }
-    queue[submitted & (UPLOAD_JOBS-1u)] = (upload_job){dst,src,bytes};
+    queue[submitted & (UPLOAD_JOBS-1u)] = (upload_job){dst,src,bytes,cached};
     __atomic_thread_fence(__ATOMIC_RELEASE);
     /* Exactly one wake per job. Failed dispatch leaves no published ticket. */
     if (sceKernelSignalSema(wake,1)<0) { fallback++; return 0; }
     *ticket = ++submitted; queued++;
+    return 1;
+}
+int xv_upload_worker_submit(void *dst, const void *src, unsigned bytes, uint32_t *ticket)
+{ return submit(dst,src,bytes,ticket,0); }
+int xv_upload_worker_snapshot(void *dst, const void *src, unsigned bytes)
+{
+    /* Never queue borrowed memory behind asynchronous GPU copies. The same
+     * recording producer owns submitted, so idle cannot become busy here. */
+    if (!dst || !src || bytes < 128u*1024u ||
+        submitted != __atomic_load_n(&completed,__ATOMIC_ACQUIRE)) return 0;
+    /* An absolute cache-line boundary prevents the two writers sharing a line
+     * even when the allocator returns only 16-byte-aligned storage. */
+    unsigned half=(unsigned)((((uintptr_t)dst+bytes/2u)&~(uintptr_t)63u)-(uintptr_t)dst);
+    uint32_t ticket;
+    if (!submit(dst,src,half,&ticket,1)) return 0;
+    memcpy((uint8_t *)dst+half,(const uint8_t *)src+half,bytes-half);
+    xv_upload_worker_wait(ticket); /* acquire before returning the guest loan */
     return 1;
 }
 void xv_upload_worker_wait(uint32_t ticket)
@@ -83,6 +101,12 @@ void xv_upload_worker_report(unsigned frames)
     uint32_t us=__atomic_exchange_n(&work_us,0,__ATOMIC_RELAXED);
     uint32_t nwait=__atomic_exchange_n(&waits,0,__ATOMIC_RELAXED);
     uint32_t wait=__atomic_exchange_n(&wait_us,0,__ATOMIC_RELAXED);
+    uint32_t sjobs=__atomic_exchange_n(&snapshot_jobs,0,__ATOMIC_RELAXED);
+    uint32_t sbytes=__atomic_exchange_n(&snapshot_bytes,0,__ATOMIC_RELAXED);
+    uint32_t sus=__atomic_exchange_n(&snapshot_us,0,__ATOMIC_RELAXED);
+    if (sjobs)
+        xv_logf("[snapshot-worker] %u frames: C0 %u halves %u KiB %.3f ms; synchronous source loans joined (overlapping window totals)\n",
+            frames,sjobs,sbytes>>10,sus/1000.0);
     if (queued || fallback || jobs || nwait)
         xv_logf("[vertex-worker] %u frames: %u queued / %u caller fallbacks; C0 %u batches %u KiB %.3f ms; completion waits %u %.3f ms (overlapping window totals)\n",
             frames,queued,fallback,jobs,bytes>>10,us/1000.0,nwait,wait/1000.0);
@@ -99,4 +123,5 @@ void xv_upload_worker_shutdown(void)
     }
     thread=wake=-1; unavailable=stopping=0; submitted=completed=0;
     queued=fallback=work_us=work_bytes=work_jobs=waits=wait_us=0;
+    snapshot_us=snapshot_bytes=snapshot_jobs=0;
 }

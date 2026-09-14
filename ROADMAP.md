@@ -21,7 +21,11 @@ original main menu in Vita3K. See the [implementation order](docs/performance-ne
 indexed checks are selectable in Graphics for ordinary gameplay validation.
 An optional diagnostic splits comparison/copy cost by span size; it adds no
 profiling calls to ordinary builds. Host checks and campaign rendering in
-Vita3K pass; physical collection and larger worker jobs remain in progress.
+Vita3K pass. Physical profiling measures 11.4 ms/frame comparing indexed
+vertices and 7.0 ms creating snapshots in one fixed campaign view.
+The [large snapshot worker experiment](docs/snapshot-worker-20260914.md) now
+shares bounded initial copies with idle core 0 and joins before guest execution
+resumes. Host memory/race checks pass; hardware timing remains pending.
 
 [~] September 14 [campaign results and next steps](docs/performance-next-steps-20260914.md):
 indexed vertex validation saved 13.9 ms/frame across three cryo-room comparisons,

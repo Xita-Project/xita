@@ -12,7 +12,7 @@
 static sem_t wake_sem;
 static pthread_t native_thread;
 static SceKernelThreadEntry entry;
-static int running, sem_live, pause_worker, fail_signal;
+static int running, sem_live, pause_worker, fail_signal, worker_parked;
 static unsigned init_step, init_failure, barriers;
 void xv_cpu_log_thread(const char *s) { assert(!strcmp(s,"vertex-upload")); }
 void xv_gpu_write_barrier(void)
@@ -30,7 +30,9 @@ int sceKernelSignalSema(SceUID id,int n)
 int sceKernelWaitSema(SceUID id,int n,SceUInt *timeout)
 {
     assert(id==1 && n==1); int r=sem_wait(&wake_sem);
+    __atomic_store_n(&worker_parked,1,__ATOMIC_RELEASE);
     while (__atomic_load_n(&pause_worker,__ATOMIC_ACQUIRE)) usleep(100);
+    __atomic_store_n(&worker_parked,0,__ATOMIC_RELEASE);
     return r;
 }
 SceUID sceKernelCreateThread(const char *s,SceKernelThreadEntry e,int priority,SceSize bytes,SceUInt a,int mask,const SceKernelThreadOptParam *o)
@@ -149,9 +151,73 @@ static void generations(void)
     assert(xv_vertex_upload(0,large,sizeof large));xv_vertex_upload_reset(0);
     assert(xv_vertex_upload(0,large,8193));reset_worker();
 }
+static struct { unsigned char *dst, *src; unsigned bytes; int done, accepted; } loan;
+static void *borrow_source(void *unused)
+{
+    loan.accepted=xv_upload_worker_snapshot(loan.dst,loan.src,loan.bytes);
+    __atomic_store_n(&loan.done,1,__ATOMIC_RELEASE);return NULL;
+}
+static void snapshot_loans(void)
+{
+    const unsigned n=150001;
+    unsigned char *a=malloc(n+128), *b=malloc(n+128);assert(a && b);
+    memset(a,0x42,n+128);memset(b,0x91,n+128);
+    assert(!xv_upload_worker_snapshot(b,a,131071) && thread<0 && b[0]==0x91);
+    for(unsigned fail=1;fail<=3;fail++) {
+        init_failure=fail;assert(!xv_upload_worker_snapshot(b,a,n));
+        for(unsigned j=0;j<n;j++)assert(b[j]==0x91);
+        reset_worker();
+    }
+    fail_signal=1;assert(!xv_upload_worker_snapshot(b,a,n));
+    for(unsigned j=0;j<n;j++)assert(b[j]==0x91);
+    reset_worker();
+    /* A queued ordinary GPU copy makes the loan decline without writing. */
+    __atomic_store_n(&pause_worker,1,__ATOMIC_RELEASE);
+    unsigned char small[64]={0}, dest[64]={0};uint32_t ticket;
+    assert(xv_upload_worker_submit(dest,small,sizeof small,&ticket));
+    assert(!xv_upload_worker_snapshot(b,a,n));
+    for(unsigned j=0;j<n;j++)assert(b[j]==0x91);
+    __atomic_store_n(&pause_worker,0,__ATOMIC_RELEASE);
+    xv_upload_worker_wait(ticket);reset_worker();
+    /* The caller cannot return its source loan while the consumer is delayed. */
+    __atomic_store_n(&pause_worker,1,__ATOMIC_RELEASE);
+    loan.dst=b+17;loan.src=a+3;loan.bytes=n;loan.done=0;
+    pthread_t caller;assert(!pthread_create(&caller,NULL,borrow_source,NULL));
+    for(unsigned i=0;i<10000 && !__atomic_load_n(&worker_parked,__ATOMIC_ACQUIRE);i++)usleep(100);
+    assert(__atomic_load_n(&worker_parked,__ATOMIC_ACQUIRE));
+    assert(!__atomic_load_n(&loan.done,__ATOMIC_ACQUIRE));
+    __atomic_store_n(&pause_worker,0,__ATOMIC_RELEASE);
+    assert(!pthread_join(caller,NULL) && loan.accepted);
+    assert(completed==submitted && !memcmp(b+17,a+3,n));
+    memset(a,0x37,n+128);
+    for(unsigned j=0;j<n;j++)assert(b[17+j]==0x42);
+    reset_worker();
+    /* Every destination alignment, odd sizes and untouched surrounding bytes. */
+    for(unsigned off=0;off<64;off++) {
+        memset(b,0x91,n+128);
+        assert(xv_upload_worker_snapshot(b+off,a+(off*7%64),n));
+        for(unsigned j=0;j<n+128;j++)assert(b[j]==(j>=off && j<off+n?0x37:0x91));
+        assert(completed==submitted);
+    }
+    reset_worker();
+    /* Real uploader: both generations remain exact after immediate guest writes. */
+    xv_snapshot_worker_override(1);xv_vertex_worker_override(1);xv_vertex_upload_override(0);
+    const unsigned char *old[3]={0};unsigned char values[3]={0};
+    for(unsigned frame=0;frame<81;frame++) {
+        unsigned slot=frame%3; xv_vertex_upload_reset(slot);
+        values[slot]=(unsigned char)frame;memset(a,values[slot],n);
+        old[slot]=xv_vertex_upload(slot,a,n);assert(old[slot]);
+        memset(a,0xde,n);xv_vertex_upload_seal(slot);xv_vertex_upload_wait(slot);
+        for(unsigned s=0;s<3;s++)if(old[s])
+            for(unsigned j=0;j<n;j++)assert(old[s][j]==values[s]);
+        assert(!memcmp(pools[slot].cpu,pools[slot].gpu,pools[slot].valid_bytes));
+    }
+    assert(snapshot_jobs>0);xv_snapshot_worker_override(-1);reset_worker();free(a);free(b);
+    puts("PASS: synchronous snapshot loans, busy/start/signal fallback, delayed join, 64 alignments, bounds and 81 retained slot generations");
+}
 int main(void)
 {
-    assert(!xv_vertex_worker_enabled());queue_guards();delayed_slots();generations();
+    assert(!xv_vertex_worker_enabled());queue_guards();delayed_slots();generations();snapshot_loans();
     puts("PASS: real upload worker, 3 startup failures, failed dispatch, full queue, delayed consumer, ticket wrap, source mutation, 300 mixed slot generations, reset and shutdown");
     return 0;
 }

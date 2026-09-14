@@ -23,7 +23,8 @@ failures in the captured windows.
 
 ## Bounded diagnostic
 
-Build with `XV_VERTEX_PROFILE=1` to collect elapsed caller time and requested
+Use a fresh build directory (or remove `build/runtime/xv_vertex_upload.o` when
+switching this flag). Build with `XV_VERTEX_PROFILE=1` to collect elapsed caller time and requested
 bytes for equal comparisons, unequal comparisons, initial snapshot creation and
 upload dispatch. Each category is split into five span-size bins: up to 4 KiB,
 4–16 KiB, 16–64 KiB, 64–256 KiB and above 256 KiB. The `[vertex-work]` records
@@ -54,6 +55,28 @@ rebuild produce the identical runtime hash tested in the emulator.
 Private evidence is under
 `2026-09-13-worker-sizing/validation/engine-restructure-20260914T2300Z`.
 The gameplay handoff includes logs and the Captain Keyes cutscene screenshot.
-Those mixed views are not a controlled optimization result. Physical diagnostic
-collection and a broader ordinary indexed-gameplay validation are still in
-progress at this checkpoint.
+Those mixed views are not a controlled optimization result.
+
+## Physical diagnostic result
+
+The exact diagnostic runtime booted on hardware and completed a fixed cryo-room
+indexed-check off/on/off trial at 640 × 360. Taking the two complete 60-frame
+accounting windows inside each arm (excluding the first straddling window):
+
+| Caller work | Full checks before | Indexed checks | Full checks after |
+| --- | ---: | ---: | ---: |
+| Equal vertex comparisons | 27.089 ms/frame | 11.425 ms/frame | 27.130 ms/frame |
+| Initial snapshot creation | 6.984 ms/frame | 7.028 ms/frame | 6.991 ms/frame |
+| Upload dispatch | 0.207 ms/frame | 0.210 ms/frame | 0.211 ms/frame |
+
+These instrumented timings size work; they are not an ordinary FPS result or a
+new optimization gain. The ordinary runtime `88e8e7aef54a9882d543436ad501e4559dfd4bce79d95211dc9ff25acf8d63bf`
+then booted through the updater on the physical Vita. It also renders the cryo
+room in Vita3K with indexed checks enabled. Broader gameplay validation continues.
+
+One Vita3K in-process restart crashed after the runtime logged completed GPU and
+display drains and handed off to the boot helper. Restarting the isolated
+emulator completed the staged update and verified the expected runtime. The
+physical updater completed that same update normally.
+
+The next experiment is [sharing large initial snapshot copies](snapshot-worker-20260914.md).
