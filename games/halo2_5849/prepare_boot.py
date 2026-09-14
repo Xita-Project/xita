@@ -92,6 +92,10 @@ GAME_STATE_CONSTRUCTORS = (
     (0x376A20, 10, "ea990a0b2671f169030c7ed2bac29c98c5c5e42fd4bafcb4d5fcf86da5ff161c"),
     (0x58E70, 105, "9195f198f6de23c02ee21bf68539b3898e5bad37deff50056be9c0b6b35b1e29"),
 )
+GAME_STARTUP_WIDGET_CONSTRUCTORS = (
+    (0x2B7269, 32, "80197ecb7c788fcdef80d420ace1c23bb3b5b063704d5a2de1b3f0a9a663e90c"),
+    (0x2B7388, 6, "9a1381c2d5cae2abe6b261ed8da05f4b4ffb50cd3f83001353654c83aab7ad4c"),
+)
 
 
 def game_mode_callback_roots(image):
@@ -158,6 +162,15 @@ def game_allocator_vtable_roots(image):
 def game_state_vtable_roots(image):
     """Native58: one constructor assigns eleven adjacent four-method state tables."""
     return _constructor_vtable_roots(image, GAME_STATE_CONSTRUCTORS, 0x450990, 0x450A40)
+
+
+def game_startup_widget_vtable_roots(image):
+    """Native146: constructor 2B7269 assigns the table used at 234E2C.
+
+    The adjacent table is independently assigned at 2B7388. Include only the
+    intervening 28 executable slots, including observed slot48h -> 2B7289.
+    """
+    return _constructor_vtable_roots(image, GAME_STARTUP_WIDGET_CONSTRUCTORS, 0x45BC60, 0x45BCD0)
 
 
 def game_online_interface_roots(image):
@@ -427,6 +440,7 @@ def main():
         roots.update(game_allocator_vtable_roots(image))
         roots.update(game_registered_interface_roots(image))
         roots.update(game_state_vtable_roots(image))
+        roots.update(game_startup_widget_vtable_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
