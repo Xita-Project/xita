@@ -13,6 +13,9 @@ typedef struct {
 void h2_audio_progress_reset(h2_audio_progress *p);
 int h2_audio_progress_play(h2_audio_progress *p, int voice, uint32_t bytes, uint32_t rate);
 int h2_audio_progress_submit(h2_audio_progress *p, uint32_t frames, uint32_t decoded_position);
+/* Retained GP grains carry the voice that actually contributed when computed.
+ * A grain prepared before Play must not advance the newly started movie. */
+int h2_audio_progress_submit_tagged(h2_audio_progress *p,uint32_t frames,uint32_t decoded_position,int voice);
 int h2_audio_progress_rest(h2_audio_progress *p, uint32_t remaining);
 int h2_audio_progress_cursor(const h2_audio_progress *p, int voice, uint32_t *play, uint32_t *write);
 

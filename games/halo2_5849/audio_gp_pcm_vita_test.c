@@ -46,7 +46,10 @@ static h2_dsp_engine *open_complete_fx(void)
     }
     return s;
 }
-int main(void)
+#ifndef H2_GP_PCM_TEST_MAIN
+#define H2_GP_PCM_TEST_MAIN main
+#endif
+int H2_GP_PCM_TEST_MAIN(void)
 {
     g_xram=calloc(1,0x10000);g_img_base=g_xram;g_xpt=malloc((1u<<20)*4);assert(g_xram && g_xpt);
     for(unsigned p=0;p<1u<<20;++p)g_xpt[p]=0xf000;

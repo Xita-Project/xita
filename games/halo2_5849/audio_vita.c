@@ -6,6 +6,7 @@
 #if H2_AUDIO_DSP
 #include "audio_fx.h"
 #include "audio_stream_cursor.h"
+#include "audio_mixer_bridge.h"
 static h2_audio_fx fx;
 typedef struct {
     int voice;
@@ -93,7 +94,13 @@ int h2_audio_backend_play(int voice, uint32_t bytes, uint32_t rate)
     h2_audio_progress next = progress;
     int ok = h2_audio_backend_health() == 0 && h2_audio_progress_play(&next, voice, bytes, rate);
 #if H2_AUDIO_DSP
-    if (fx.engine) ok = 0;
+    if (fx.engine) {
+        int zero[4];for(unsigned i=0;i<4;++i)zero[i]=gp_streams[i].voice;
+        uint8_t bins[32];h2_audio_bins_snapshot(bins);int unity=1;
+        for(unsigned i=0;i<11;++i)if(bins[i])unity=0;
+        ok=ok && bytes==106496 && rate==44100 && fx.playing==0x7fff && fx.filtered==3 && gp_pcm_active==3 &&
+           unity && h2_audio_movie_contract(voice,gp_pcm_voice,zero,0);
+    }
 #endif
     if (ok) { xk_audio_voice_play(voice, 1); progress = next; }
     sceKernelUnlockMutex(progress_mutex, 1);
@@ -347,8 +354,13 @@ static int stream_decoded(uint64_t fence)
 static int mix_muted_gp_pcm(void)
 {
     if (!gp_pcm_active) return 1;
+    if(progress.voice>=0){
+        int zero[4];for(unsigned i=0;i<4;++i)zero[i]=gp_streams[i].voice;
+        if(!h2_audio_movie_contract(progress.voice,gp_pcm_voice,zero,!progress.stopped))return 0;
+    }
     xk_audio_mix(gp_pcm_output,XA_GRAIN);
-    for (unsigned i=0;i<XA_GRAIN*2;++i) if (gp_pcm_output[i]) return 0;
+    if(progress.voice<0 || progress.stopped)
+        for (unsigned i=0;i<XA_GRAIN*2;++i) if (gp_pcm_output[i]) return 0;
     int ok=1; xk_audio_lock();
     for (unsigned i=0;i<2;++i) if ((gp_pcm_active & (1u<<i)) && !xk_audio_voice_playing(gp_pcm_voice[i])) ok=0;
     xk_audio_unlock(); return ok;
@@ -370,6 +382,7 @@ static int mix_worker(SceSize bytes, void *arg)
     unsigned slot = 0, first = 1;
 #if H2_AUDIO_DSP
     unsigned fx_prepared = 0, pcm_prepared = 0;
+    int movie_prepared=-1;uint32_t movie_frontier=0;
 #endif
     while (__atomic_load_n(&running, __ATOMIC_ACQUIRE)) {
         sceKernelLockMutex(progress_mutex, 1, NULL);
@@ -385,7 +398,11 @@ static int mix_worker(SceSize bytes, void *arg)
                 __atomic_store_n(&error,(uint32_t)-1007,__ATOMIC_RELEASE);
                 sceKernelUnlockMutex(progress_mutex,1); break;
             }
-            if (!stream_decoded(fx.frames*32+XA_GRAIN) || !h2_audio_fx_render(&fx, output[slot], XA_GRAIN)) {
+            movie_prepared=progress.stopped?-1:progress.voice;
+            if(movie_prepared>=0){xk_audio_lock();movie_frontier=xk_audio_voice_pos(movie_prepared);xk_audio_unlock();}
+            if (!stream_decoded(fx.frames*32+XA_GRAIN) ||
+                !(movie_prepared>=0 ? h2_audio_fx_render_pcm(&fx,output[slot],XA_GRAIN,gp_pcm_output) :
+                  h2_audio_fx_render(&fx, output[slot], XA_GRAIN))) {
                 __atomic_store_n(&error, (uint32_t)-1004, __ATOMIC_RELEASE);
                 sceKernelUnlockMutex(progress_mutex, 1); break;
             }
@@ -423,7 +440,14 @@ static int mix_worker(SceSize bytes, void *arg)
             xk_audio_lock(); decoded_position = xk_audio_voice_pos(progress.voice); xk_audio_unlock();
         }
         rc = sceAudioOutOutput(port, output[slot]);
-        if (rc >= 0 && !h2_audio_progress_submit(&progress, XA_GRAIN, decoded_position)) rc = -1003;
+        if (rc >= 0 && !
+#if H2_AUDIO_DSP
+            (fx_prepared ? h2_audio_progress_submit_tagged(&progress,XA_GRAIN,movie_frontier,movie_prepared) :
+             h2_audio_progress_submit(&progress,XA_GRAIN,decoded_position))
+#else
+            h2_audio_progress_submit(&progress,XA_GRAIN,decoded_position)
+#endif
+            ) rc=-1003;
 #if H2_AUDIO_DSP
         if (rc >= 0 && fx_prepared) {
             fx_submitted += XA_GRAIN; fx_queued = fx_prepared;
@@ -494,6 +518,7 @@ int h2_audio_backend_close(void)
      * retry observation, but must never free resources still owned by a sink. */
     if (progress_mutex >= 0 && progress.pending && (observe_rest() < 0 || progress.pending)) return -1;
 #if H2_AUDIO_DSP
+    if (mutex>=0 && fx.engine && progress.voice>=0)xk_audio_voice_stop(progress.voice);
     if (mutex>=0) for (unsigned i=0;i<2;++i) if (gp_pcm_active & (1u<<i)) xk_audio_voice_stop(gp_pcm_voice[i]);
     if (mutex>=0) for(unsigned i=0;i<4;++i) if(gp_streams[i].voice>=0)xk_audio_voice_stop(gp_streams[i].voice);
     gp_pcm_active=0;
@@ -583,6 +608,9 @@ void h2_audio_backend_snapshot(h2_audio_backend_status *out)
     out->gp_stream_packets=0;for(unsigned i=0;i<4;++i)out->gp_stream_packets+=gp_streams[i].count;
     out->gp_stream_decoded=gp_stream_decoded;out->gp_stream_completed=gp_stream_completed;
     out->gp_pcm_playing_mask=gp_pcm_active;
+    out->movie_voice=progress.voice;
+    out->movie_submitted_frames=progress.completed_frames+(progress.voice>=0 && progress.pending && progress.queued_voice==progress.voice?progress.queued_frames:0);
+    out->movie_consumed_frames=progress.completed_frames+(progress.voice>=0 && progress.pending && progress.queued_voice==progress.voice?progress.queued_frames-progress.remaining:0);
     memcpy(out->gp_pcm_submitted,gp_pcm_submitted,sizeof gp_pcm_submitted);
     memcpy(out->gp_pcm_consumed,gp_pcm_consumed,sizeof gp_pcm_consumed);
     if (progress_mutex >= 0) sceKernelUnlockMutex(progress_mutex, 1);

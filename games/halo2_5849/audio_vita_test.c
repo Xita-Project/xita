@@ -72,6 +72,8 @@ uint64_t xk_os_monotonic_us(void) { return sceKernelGetProcessTimeWide(); }
 #else
 #if H2_AUDIO_DSP
 int h2_audio_stream_cursor_read(int voice,h2_stream_cursor *out) { (void)voice;(void)out;return 0; }
+int h2_audio_movie_contract(int movie,const int muted[2],const int zero[4],int playing)
+{(void)movie;(void)muted;(void)zero;(void)playing;return 0;}
 int xk_audio_stream_push(int voice,uint32_t guest,uint32_t size) { (void)voice;(void)guest;(void)size;return -1; }
 int xk_audio_stream_pop_consumed(int voice) { (void)voice;return 0; }
 #endif
@@ -139,9 +141,18 @@ static int sceAudioOutOutput(int id, const void *data)
     const int16_t *samples = data;
 #if H2_AUDIO_DSP
     if (fx.playing) {
+#ifdef H2_AUDIO_TEST_MOVIE
+        /* Synthetic base FX is 500000 Q23. The single PCM voice contributes
+         * +500 left / -1000 right after interpolation and inherited50% master. */
+        if(progress.voice>=0){
+            for(unsigned i=0;i<XA_GRAIN;++i){assert(samples[i*2]>=1953 && samples[i*2]<=2453);assert(samples[i*2+1]>=953 && samples[i*2+1]<=1953);}
+        }else
+#endif
+        {
         /* A retained old grain may precede the new source's first grain. */
         assert(samples[0] == 1953 || samples[0] == 3906 || samples[0] == 5859 || samples[0] == 7812);
         for (unsigned i = 0; i < XA_GRAIN * 2; ++i) assert(samples[i] == samples[0]);
+        }
     }
     else
 #endif

@@ -23,6 +23,8 @@ typedef struct {
     uint32_t gp_stream_packets, gp_stream_decoded, gp_stream_completed;
     uint32_t gp_pcm_playing_mask;
     uint64_t gp_pcm_submitted[2], gp_pcm_consumed[2];
+    int32_t movie_voice;
+    uint64_t movie_submitted_frames,movie_consumed_frames;
 } h2_audio_backend_status;
 
 /* Bounded device + external PCM buffer creation/binding/controls and paired

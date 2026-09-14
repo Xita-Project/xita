@@ -245,8 +245,22 @@ int H2_AUDIO_FX_TEST_MAIN(void)
         assert(out[i * 2] == 4096 && out[i * 2 + 1] == 4096);
     }
     for (unsigned v = 0; v < H2_FX_SOURCES; ++v) assert(fx.sources[v].frames == before.sources[v].frames + 1);
+    int16_t pcm[64];const int16_t movie[]={-32768,32767,-4096,4096,-1,1,0,30000};
+    for(unsigned i=0;i<64;++i)pcm[i]=movie[i%8];
+    before=fx;assert(!h2_audio_fx_render_pcm(&fx,out,32,NULL));
+    assert(!h2_audio_fx_render_pcm(&fx,out,32,out+1) && !memcmp(&before,&fx,sizeof fx));
+    assert(h2_audio_fx_render_pcm(&fx,out,32,pcm));
+    for(unsigned i=0;i<32;++i)for(unsigned ch=0;ch<2;++ch){
+        int expected=4096+pcm[i*2+ch];if(expected>32767)expected=32767;if(expected<-32768)expected=-32768;
+        assert(out[i*2+ch]==expected);
+        int64_t gp=(int64_t)0x100000+pcm[i*2+ch]*256;
+        if(gp>8388607)gp=8388607;if(gp<-8388608)gp=-8388608;
+        assert(s->core.mixbuffer[ch*32+i]==((uint32_t)gp&0xffffff));
+    }
+    for(unsigned i=0;i<32;++i)assert(s->core.mixbuffer[2*32+i]==0x100000);
+    for(unsigned v=0;v<H2_FX_SOURCES;++v)assert(fx.sources[v].frames==before.sources[v].frames+1);
     /* A subsequent frame fault is terminal, with no completed frame counted. */
-    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 41 && s->status.fault);
+    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 42 && s->status.fault);
     assert(!h2_audio_fx_render(&fx, out, 32)); h2_dsp_destroy(s);
     puts("Halo 2 FX source: checked ownership, six independent unity routes, real DSP frames and signed GP output pass");
     return 0;

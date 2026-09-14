@@ -18,6 +18,13 @@ int main(void)
     assert(h2_audio_progress_rest(&p, 512));
     assert(h2_audio_progress_cursor(&p, 0, &play, &write) && !play && !write);
     assert(h2_audio_progress_rest(&p, 0) && !p.completed_frames);
+    /* A GP frame computed before Play can be submitted afterward. Its
+     * retained empty tag must still prevent newly credited movie time. */
+    before=p;assert(!h2_audio_progress_submit_tagged(&p,XA_GRAIN,0,1) && !memcmp(&before,&p,sizeof p));
+    assert(h2_audio_progress_submit_tagged(&p,XA_GRAIN,0,-1));
+    assert(h2_audio_progress_rest(&p,512));
+    assert(h2_audio_progress_cursor(&p,0,&play,&write) && !play && !write);
+    assert(h2_audio_progress_rest(&p,0) && !p.completed_frames);
     before = p; assert(!h2_audio_progress_play(&p, 1, 1024, 48000) && !memcmp(&p, &before, sizeof p));
     uint64_t consumed = 0;
     for (unsigned grain = 0; grain < 160; ++grain) {

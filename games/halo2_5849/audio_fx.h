@@ -41,3 +41,7 @@ int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin);
  * Output is the real GP's FL/FR monitor taps (not EP/AC3 or surround downmix).
  * A fault poisons the engine; never submit partially computed output. */
 int h2_audio_fx_render(h2_audio_fx *fx, int16_t *stereo, unsigned frames);
+/* Verified late movie voice: already decoded/resampled PCM16 FL/FR at unity.
+ * Add before the complete FX loop's contributions, then convert once to GP
+ * signed24. Input and output must not overlap. No surround route is inferred. */
+int h2_audio_fx_render_pcm(h2_audio_fx *fx,int16_t *stereo,unsigned frames,const int16_t *pcm);

@@ -1014,7 +1014,8 @@ static void buffer_play(xctx *c)
         xv_logf("[h2/audio-global] Play caller=002215B9 interface=%08X voice=%d loop1000 bytes effective1000Hz; actual decoder advances, verified muted GP14 contribution, source-tagged sink grain accepted\n",b->base+0x1C,b->voice);
         result(c,0,4); return;
     }
-    if (effects) fail(c, ip, "loaded DSP PCM voice routing is unsupported", X_M32(c->r[4]));
+    if (effects && (X_M32(c->r[4])!=0x3E35DB || b->bytes!=106496 || b->frequency!=44100 || b->volume || b->headroom))
+        fail(c,ip,"unsupported loaded DSP movie Play",X_M32(c->r[4]));
 #endif
     if (!b->mirror || (b->started && !b->rewound) || b->locked || X_ARG(1) || X_ARG(2) || X_ARG(3) != 1 ||
         !mapped(b->mirror, b->mirror_bytes) || !mapped(b->source, b->bytes) || overlaps_device(b->source, b->bytes))
@@ -1030,6 +1031,9 @@ static void buffer_stop(xctx *c)
 {
     const uint32_t ip = 0x37B703;
     stack(c, ip, 1); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+#if H2_AUDIO_DSP
+    if(effects)fail(c,ip,"loaded DSP movie Stop requires retained-grain drain",b->base);
+#endif
     if (!b->started || b->locked) fail(c, ip, "unsupported PCM Stop state", b->base);
     if (h2_audio_backend_stop(b->voice) < 0) fail(c, ip, "real PCM stop/drain rejected", b->voice);
     b->stopped = 1;

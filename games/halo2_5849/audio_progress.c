@@ -14,10 +14,12 @@ int h2_audio_progress_play(h2_audio_progress *p, int voice, uint32_t bytes, uint
     return 1;
 }
 int h2_audio_progress_submit(h2_audio_progress *p, uint32_t frames, uint32_t decoded_position)
+{return h2_audio_progress_submit_tagged(p,frames,decoded_position,p->stopped?-1:p->voice);}
+int h2_audio_progress_submit_tagged(h2_audio_progress *p,uint32_t frames,uint32_t decoded_position,int voice)
 {
     if (p->pending || !frames || frames > XA_GRAIN ||
-        (p->voice >= 0 && !p->stopped && ((decoded_position & 3) || decoded_position > p->bytes))) return 0;
-    p->pending = 1; p->remaining = frames; p->queued_voice = p->stopped ? -1 : p->voice;
+        (voice!=-1 && (voice!=p->voice || p->stopped || (decoded_position&3) || decoded_position>p->bytes))) return 0;
+    p->pending = 1; p->remaining = frames; p->queued_voice = voice;
     p->queued_frames = p->queued_voice >= 0 ? frames : 0;
     if (p->queued_voice >= 0) p->write_position = decoded_position % p->bytes;
     return 1;

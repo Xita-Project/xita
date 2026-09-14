@@ -99,12 +99,17 @@ int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin)
     if (!fx->bound) *fx = (h2_audio_fx){0};
     return 1;
 }
-static int mix_full_loop(h2_audio_fx *fx, int32_t bins[32][32])
+static int mix_full_loop(h2_audio_fx *fx, int32_t bins[32][32], const int16_t *pcm)
 {
     int32_t sources[H2_FX_SOURCES][32];
     for (unsigned v = 0; v < H2_FX_SOURCES; ++v)
         if ((fx->playing & (1u << v)) && !h2_dsp_read_fx_frame(fx->engine, source_bin(v), sources[v])) return 0;
     float mixed[11][32] = {{0}}; h2_hrtf_fp fp = h2_hrtf_enter();
+    /* The movie voice is created after the FX voices, so contributes first
+     * in the original reverse creation order. Preserve separate FL/FR values
+     * and clamp only after the prior-frame FX contributions are added. */
+    if(pcm)for(unsigned i=0;i<32;++i)for(unsigned ch=0;ch<2;++ch)
+        mixed[ch][i]=pcm[i*2+ch]/32768.0f;
     /* Each original Play inserts at the MP-list head. Use that reverse
      * creation order as one deterministic reference worker, retaining float
      * contributions until the final GP conversion (not per-voice clipping). */
@@ -130,15 +135,17 @@ static int mix_full_loop(h2_audio_fx *fx, int32_t bins[32][32])
         for (unsigned i = 0; i < 32; ++i) bins[bin][i] = h2_hrtf_quantize(mixed[bin][i]);
     h2_hrtf_leave(fp); return 1;
 }
-int h2_audio_fx_render(h2_audio_fx *fx, int16_t *stereo, unsigned frames)
+static int render(h2_audio_fx *fx, int16_t *stereo, unsigned frames, const int16_t *pcm)
 {
     if (!fx || !fx->engine || !fx->playing || (fx->playing & ~fx->bound) || !stereo ||
-        !frames || frames > 1024 || (frames & 31)) return 0;
+        !frames || frames > 1024 || (frames & 31) ||
+        (pcm && (fx->playing!=0x7fff || fx->filtered!=3 ||
+         ((uintptr_t)pcm<=(uintptr_t)stereo ? (uintptr_t)stereo-(uintptr_t)pcm : (uintptr_t)pcm-(uintptr_t)stereo)<frames*4u))) return 0;
     for (unsigned at = 0; at < frames; at += 32) {
         int32_t source[32], bins[32][32] = {{0}};
         uint8_t monitor[256];
         if (fx->playing & ~7u) {
-            if (!mix_full_loop(fx, bins)) return 0;
+            if (!mix_full_loop(fx, bins, pcm ? pcm+at*2 : NULL)) return 0;
         } else {
         for (unsigned v = 0; v < 2; ++v) if (fx->playing & (1u << v)) {
             if (!h2_dsp_read_fx_frame(fx->engine, source_bin(v), source)) return 0;
@@ -177,3 +184,7 @@ int h2_audio_fx_render(h2_audio_fx *fx, int16_t *stereo, unsigned frames)
     }
     return 1;
 }
+int h2_audio_fx_render(h2_audio_fx *fx,int16_t *stereo,unsigned frames)
+{return render(fx,stereo,frames,NULL);}
+int h2_audio_fx_render_pcm(h2_audio_fx *fx,int16_t *stereo,unsigned frames,const int16_t *pcm)
+{return pcm && render(fx,stereo,frames,pcm);}
