@@ -29,6 +29,10 @@ GAME_RESOURCE_WALKS = (
     (0xD4DB7, 25, "1bfc7777b7aa974c521ed9f9a02992ddd431597af8c68e9dc9d1070988637ef8"),
 )
 GAME_DESCRIPTOR_WALK = (0x1088E0, 124, "c1bf2193fbf5a7f7a8d0de9fffaaf9ee5cbe12ced08b39059af29896540348ec")
+GAME_DESCRIPTOR_MAP_WALKS = (
+    (0xB69D8, 31, "4850979303eb86790589e6a32dd3bcce89e4d8f58d809678e55869c4f3e51d67"),
+    (0xB6AB7, 31, "ea694745b9044ee364ab532d8e5b9ff513a30b50df1127666c9adab5beb432aa"),
+)
 GAME_MODE_WALK = (0x18EF00, 152, "c499facfbe49993ebd3e15bb55a4f65adafb4bfd53eb99474ba7bb96ad3f8102")
 GAME_INTERFACE_REGISTRATION = (0x3769F0, 45, "46e548c6c8f362dc1ba57b6f7581a1b2c0bffb4b2cb9c2e812dcc7b9544b1611")
 GAME_ONLINE_INTERFACE_DISPATCH = (0x59949, 41, "c68f2b75408f155325c537d83f024b3ff580f096399c7606ca83a739654555a1")
@@ -234,6 +238,28 @@ def game_initialization_roots(image):
     return roots
 
 
+def game_descriptor_map_roots(image):
+    """Native85: map setup/cleanup follow the existing chain via node+C4.
+
+    Reuse the original linking algorithm, including shared/self children.
+    Only callback fields18/1C are read; the original loops skip nulls.
+    """
+    for address, length, digest in GAME_DESCRIPTOR_MAP_WALKS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 descriptor map walk fingerprint mismatch")
+    roots = set()
+    for node, _ in game_descriptor_initialization_chain(image):
+        for offset in (0x18, 0x1C):
+            target = image.u32(node + offset)
+            if target == 0:
+                continue
+            section = image.section_of(target) if target else None
+            if not target or not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError(f"Halo 2 descriptor map callback {node + offset:#x} has invalid target")
+            roots.add(target)
+    return roots
+
+
 def game_map_callback_roots(image):
     """Native83: four per-map lifecycle fields in the same 68-record table.
 
@@ -386,6 +412,7 @@ def main():
         roots.update(game_initialization_roots(image))
         roots.update(game_map_callback_roots(image))
         roots.update(game_resource_callback_roots(image))
+        roots.update(game_descriptor_map_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
         roots.add(image.u32(image.u32(0x477058) + 0x10))

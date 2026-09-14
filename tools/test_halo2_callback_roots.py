@@ -344,6 +344,41 @@ class DescriptorRoots(unittest.TestCase):
     def chain(self):
         return prepare_boot.game_descriptor_initialization_chain(self.image)
 
+    def test_map_fields_reuse_linking_and_skip_unvisited_data(self):
+        a, b = self.image.parents[:2]; shared = 0x464000
+        for parent in (a, b):
+            self.image.write(parent + 0x84, shared)
+            self.image.write(parent + 0x88, parent)
+            self.image.write(parent + 0x14, 0xDEAD)
+            self.image.write(parent + 0x20, 0xDEAD)
+        self.image.write(shared + 0x84, 0xDEAD)  # no recursive child walk
+        self.image.write(a + 0x18, 0x1100)
+        self.image.write(b + 0x1C, 0x1100)  # duplicate
+        self.image.write(shared + 0x18, 0x1200)
+        last = self.image.parents[-1]
+        self.image.write(last + 0x1C, 0x1300)
+        spec = (0x200, len(self.image.code), hashlib.sha256(self.image.code).hexdigest())
+        before = bytes(self.image.data)
+        with patch.object(prepare_boot, "GAME_DESCRIPTOR_MAP_WALKS", (spec, spec)):
+            self.assertEqual(prepare_boot.game_descriptor_map_roots(self.image), {0x1100, 0x1200, 0x1300})
+            self.assertEqual(bytes(self.image.data), before)
+            for node, offset in ((a, 0x18), (last, 0x1C)):
+                saved = self.image.u32(node + offset)
+                for invalid in (0xDEAD, 0x464000):
+                    self.image.write(node + offset, invalid)
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_descriptor_map_roots(self.image)
+                self.image.write(node + offset, saved)
+            self.image.write(last + 0xC4, a)
+            with self.assertRaisesRegex(ValueError, "initial link"):
+                prepare_boot.game_descriptor_map_roots(self.image)
+            self.image.write(last + 0xC4, 0)
+        for which in range(2):
+            specs = [spec, spec]; specs[which] = (0x200, len(self.image.code), "0" * 64)
+            with patch.object(prepare_boot, "GAME_DESCRIPTOR_MAP_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_descriptor_map_roots(self.image)
+
     def test_shared_self_children_and_repeated_callbacks_keep_original_order(self):
         a, b = self.image.parents[:2]
         shared = 0x464000
