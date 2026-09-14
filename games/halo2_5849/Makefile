@@ -60,6 +60,27 @@ QUAD_FILES := $(QUAD_SHADERS)/quad.vert.gxp $(QUAD_SHADERS)/quad.frag.gxp $(QUAD
 QUAD_PACK := -a $(QUAD_SHADERS)/quad.vert.gxp=quad.vert.gxp -a $(QUAD_SHADERS)/quad.frag.gxp=quad.frag.gxp -a $(QUAD_SHADERS)/quad.contract.bin=quad.contract.bin
 endif
 .DEFAULT_GOAL := all
+DSP_ASSET ?= $(ROOT)/local/halo2_5849/dsp/halo2-dsp.bin
+DSP_INCLUDES := -I$(CURDIR)/dsp/compat -I$(CURDIR)/dsp
+DSP_HEADERS := $(wildcard dsp/compat/qemu/*.h dsp/compat/*.h dsp/*.h)
+.PHONY: dsp-probe
+dsp-probe: $(BUILD)/dsp-probe.vpk
+$(BUILD)/dsp-probe.elf: dsp_probe.c dsp_asset.c dsp_asset.h dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c dsp/interp/dsp_cpu.h dsp/interp/dsp_cpu_regs.h dsp/interp/dsp_emu.c.inc dsp/interp/dsp_dis.c.inc $(DSP_HEADERS)
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 -O2 -mthumb -mcpu=cortex-a9 -mfpu=neon -fno-strict-aliasing -ffunction-sections -fdata-sections $(DSP_INCLUDES) $(filter %.c,$^) -Wl,-q,--gc-sections -o $@ -lSceLibKernel_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lm
+$(BUILD)/dsp-probe.velf: $(BUILD)/dsp-probe.elf
+	$(VITASDK)/bin/vita-elf-create $< $@
+$(BUILD)/dsp-probe-eboot.bin: $(BUILD)/dsp-probe.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/dsp-probe-param.sfo: Makefile
+	@mkdir -p $(dir $@)
+	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2D00001 "H2 Private DSP Probe" $@
+$(BUILD)/dsp-probe.vpk: $(BUILD)/dsp-probe-eboot.bin $(BUILD)/dsp-probe-param.sfo $(DSP_ASSET)
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/dsp-probe-param.sfo -b $(BUILD)/dsp-probe-eboot.bin -a $(DSP_ASSET)=halo2-dsp.bin $@
+$(BUILD)/dsp_engine_test: dsp_engine_test.c dsp_engine.c dsp_engine.h dsp/interp/dsp_cpu.c dsp/interp/dsp_cpu.h dsp/interp/dsp_cpu_regs.h dsp/interp/dsp_emu.c.inc dsp/interp/dsp_dis.c.inc $(DSP_HEADERS)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O2 -fno-strict-aliasing $(DSP_INCLUDES) $< -lm -o $@
+test-host: $(BUILD)/dsp_engine_test
 .PHONY: audio-probe
 audio-probe: $(BUILD)/audio-probe.vpk
 $(BUILD)/audio-probe.elf: audio_probe.c audio_vita.c audio_bins.c audio_bins.h audio_progress.c audio_progress.h audio_host.h $(ROOT)/recomp/kernel/xk_audio.c $(ROOT)/recomp/kernel/xk_audio.h $(ROOT)/recomp/xv_x86rt.c $(ROOT)/recomp/xv_x86rt.h
@@ -97,6 +118,7 @@ test-host: $(BUILD)/blit_copy_test
 test-host: $(BUILD)/audio_multibin_failure_test $(BUILD)/audio_buffer_test $(BUILD)/audio_host_test $(BUILD)/audio_effects_failure_test $(BUILD)/audio_vita_test $(BUILD)/audio_mixer_test $(BUILD)/audio_bins_test $(BUILD)/audio_progress_test
 all: $(BUILD)/halo2-boot.vpk
 test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/input_test $(BUILD)/scanout_test $(BUILD)/command_state_test $(BUILD)/host_tiles_test $(BUILD)/host_channel_runtime_test $(BUILD)/host_channel_test $(BUILD)/kelvin_clear_test $(BUILD)/gpu_objects_test $(BUILD)/push_stream_test $(BUILD)/nv2a_memory_test $(BUILD)/instance_memory_test $(BUILD)/cache_volume_test $(BUILD)/nv2a_regs_test $(BUILD)/nv2a_timer_test
+	$(BUILD)/dsp_engine_test
 	$(BUILD)/kernel_timer_test
 	$(BUILD)/linear_texture_test
 	$(BUILD)/quad_draw_test
