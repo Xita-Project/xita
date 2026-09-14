@@ -30,6 +30,30 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_widget_property_dispatch_bounds_nulls_and_revision(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x470828, 0x4709E8, 4))}
+        image.targets[0x470830] = 0
+        expected = set(image.targets.values()) - {0}
+        image.targets[0x470824] = None; image.targets[0x4709E8] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_WIDGET_PROPERTY_DISPATCH", spec):
+            self.assertEqual(prepare_boot.game_widget_property_roots(image), expected)
+            for slot in (0x470828, 0x470888, 0x4709E4):
+                saved = image.targets[slot]; image.targets[slot] = None
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_widget_property_roots(image)
+                image.targets[slot] = saved
+            image.bad_code = image.targets[0x4709E4]
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_widget_property_roots(image)
+            image.bad_code = None; image.section_name = "D3D"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_widget_property_roots(image)
+            image.section_name = ".text"; image.code = b"x" * len(image.code)
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.game_widget_property_roots(image)
+
     def test_text_widget_and_embedded_member_prefixes(self):
         image = SyntheticImage(); image.section_name = ".text"
         spans = ((0x458940, 0x458984), (0x4588B0, 0x4588BC), (0x458930, 0x45893C))

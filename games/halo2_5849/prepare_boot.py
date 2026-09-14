@@ -102,6 +102,7 @@ GAME_TEXT_WIDGET_CONSTRUCTORS = (
     (0x22F4FA, 19, "a27a5c5dad3bab9e240ea5d61bb3be35633de873c4e7f8c9de1251d55fd80775"),
     (0x22F532, 19, "2ec44c870c40e778e72b6f3d4a7a2b37fa8ab37ae974256d86e49fe9920be02e"),
 )
+GAME_WIDGET_PROPERTY_DISPATCH = (0x2373BE, 56, "863a8fd2961e9fd5ceab6711205222d5cf403957a5512768286bceb656ca4c61")
 
 
 def game_mode_callback_roots(image):
@@ -191,6 +192,27 @@ def game_text_widget_vtable_roots(image):
         roots.update(_code_vtable_roots(image, start, end))
     if any(image.u32(end) != 0 for end in (0x458984, 0x4588BC, 0x45893C)):
         raise ValueError("Halo 2 text interface boundary mismatch")
+    return roots
+
+
+def game_widget_property_roots(image):
+    """Native148: original caller checks 0 <= index < 70h and skips nulls.
+
+    Each nonnull entry supplies the original property kind/offset/scale. Keep
+    the table's explicit holes and execute the callbacks without replacement.
+    """
+    address, length, digest = GAME_WIDGET_PROPERTY_DISPATCH
+    if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+        raise ValueError("Halo 2 widget property dispatch fingerprint mismatch")
+    roots = set()
+    for slot in range(0x470828, 0x4709E8, 4):
+        target = image.u32(slot)
+        if target == 0:
+            continue
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError(f"Halo 2 widget property slot {slot:#x} has invalid target")
+        roots.add(target)
     return roots
 
 
@@ -463,6 +485,7 @@ def main():
         roots.update(game_state_vtable_roots(image))
         roots.update(game_startup_widget_vtable_roots(image))
         roots.update(game_text_widget_vtable_roots(image))
+        roots.update(game_widget_property_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
