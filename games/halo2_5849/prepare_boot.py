@@ -17,6 +17,12 @@ from games.halo2_5849.hooks import reviewed_sparse_jump_roots
 HOST_CALLBACK_WALK = (0x3FBA54, 135, "e0cc1649c0b744615b3de0f5b2446411bb408d0b3ce4d1d3da59980219abc70c")
 XPP_CALLBACK_WALK = (0x408C72, 36, "9234a2afaedda5206ca55c2bf3f0269b70b1b0345091581c639ee86230cd3756")
 GAME_INIT_WALK = (0x137C84, 19, "44c1c20adf4bb014714a0825d601e592e668699e31671c7676a674951946da02")
+GAME_MAP_WALKS = (
+    (0x137CC5, 34, "c8aab7f2f289627cdbf8915607639cd18538016fe0b7f4e3103dd4bbef21eeff"),
+    (0x137D0D, 24, "9cb66f3dce939462fe6ed66f2a48cf29c9f7984c06084164cdcaef1866c90598"),
+    (0x137D7B, 28, "a96f07c6fb9bebebfe3c9c11c3991c16c39ea99e73e03f0e281734cf1549cf06"),
+    (0x137DA1, 24, "602be11a670b15871af4b680707d5daef495dfe3c96e1397204b8e5f580dd7d2"),
+)
 GAME_DESCRIPTOR_WALK = (0x1088E0, 124, "c1bf2193fbf5a7f7a8d0de9fffaaf9ee5cbe12ced08b39059af29896540348ec")
 GAME_MODE_WALK = (0x18EF00, 152, "c499facfbe49993ebd3e15bb55a4f65adafb4bfd53eb99474ba7bb96ad3f8102")
 GAME_INTERFACE_REGISTRATION = (0x3769F0, 45, "46e548c6c8f362dc1ba57b6f7581a1b2c0bffb4b2cb9c2e812dcc7b9544b1611")
@@ -223,6 +229,30 @@ def game_initialization_roots(image):
     return roots
 
 
+def game_map_callback_roots(image):
+    """Native83: four per-map lifecycle fields in the same 68-record table.
+
+    Two forward walks cover ESI=0..0x990, stride0x24; their paired reverse
+    walks cover the same records. Each original walk skips null callbacks.
+    Other descriptor fields are not interpreted as code, and the original
+    order, calls and state writes remain in generated code.
+    """
+    for address, length, digest in GAME_MAP_WALKS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 map callback walk fingerprint mismatch")
+    roots = set()
+    for base in (0x440DE0, 0x440DE4, 0x440DE8, 0x440DEC):
+        for slot in range(base, base + 0x990, 0x24):
+            target = image.u32(slot)
+            if target == 0:
+                continue
+            section = image.section_of(target) if target else None
+            if not target or not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError(f"Halo 2 map callback slot {slot:#x} has invalid target")
+            roots.add(target)
+    return roots
+
+
 def host_device_callback_roots(image):
     """Native37 XPP dispatch: six descriptor slots, initialization at +4."""
     address, length, digest = XPP_CALLBACK_WALK
@@ -326,6 +356,7 @@ def main():
         # indirect dispatch from 0x37B17B. The following words are data.
         roots.update(image.u32(slot) for slot in range(0x4170E4, 0x4170F4, 4))
         roots.update(game_initialization_roots(image))
+        roots.update(game_map_callback_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
         roots.add(image.u32(image.u32(0x477058) + 0x10))

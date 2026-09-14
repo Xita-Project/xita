@@ -78,7 +78,13 @@ observed original vertex program against synthetic pixel fixtures. Its shader
 preparation and `quad-probe` build target remain separate from the game app.
 The opt-in `QUAD_RENDER=1` target now
 [executes the first two original movie quads through GXM](../../docs/halo2-original-movie-quads.md).
-The [recurring flip milestone](../../docs/halo2-recurring-flips.md) now executes
-381 original swaps and opens/reads the main-menu map header. Actual captures
-remain black. The next strict stop is an inline queue-status read in original
-12D0A0 after a Start-key press; no visible movie or menu is claimed.
+The [recurring flip milestone](../../docs/halo2-recurring-flips.md) executes
+original swaps. [Caller/cache diagnostics](../../docs/halo2-exit-cache-diagnostics.md)
+identify the title-exit path on a reused unsupported cache volume. With an empty
+private cache4 formatted by the original code, the
+[inactive-palette milestone](../../docs/halo2-inactive-palettes.md) copies the full
+main-menu map and begins loading its content into guest RAM after Start.
+[Per-map lifecycle discovery](../../docs/halo2-map-lifecycle-roots.md) addresses
+the next bounded original callback family. Actual captures remain black; no
+visible movie or main menu is established. Populated FATX raw/namespace coherence
+and general geometry/texture support remain incomplete.

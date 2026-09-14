@@ -30,6 +30,39 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_map_lifecycle_fields_bounds_nulls_and_revision(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        bases = (0x440DE0, 0x440DE4, 0x440DE8, 0x440DEC)
+        image.targets = {base + n * 0x24: 0x1000 + ((n + phase) % 47) * 16
+                         for phase, base in enumerate(bases) for n in range(68)}
+        for base in bases:
+            image.targets[base] = 0
+        # Adjacent descriptor fields and the next record are never inspected.
+        for n in range(69):
+            for field in (0x440DD8, 0x440DDC, 0x440DF0):
+                image.targets[field + n * 0x24] = None
+        for base in bases:
+            image.targets[base + 68 * 0x24] = None
+        expected = {t for t in image.targets.values() if t}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_MAP_WALKS", (spec,) * 4):
+            self.assertEqual(prepare_boot.game_map_callback_roots(image), expected)
+            for base in bases:
+                last = base + 67 * 0x24; saved = image.targets[last]
+                for bad in (None, 0xDEAD):
+                    image.targets[last] = bad; image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_map_callback_roots(image)
+                image.targets[last] = saved; image.bad_code = None
+            image.section_name = "DATA"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_map_callback_roots(image)
+        for which in range(4):
+            specs = [spec] * 4; specs[which] = (0x200, len(image.code), "0" * 64)
+            with patch.object(prepare_boot, "GAME_MAP_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_map_callback_roots(image)
+
     def test_mixed_bink_pixel_descriptor(self):
         image = SyntheticImage(); image.section_name = "BINK32"
         offsets = (*range(8, 0x34, 8), *range(0x74, 0xB4, 4))
