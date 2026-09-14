@@ -14,8 +14,8 @@ typedef struct {
     int32_t port, thread;
 } h2_audio_backend_status;
 
-/* Bounded device + external PCM buffer creation/binding/controls. Guest
- * routing, playback and write commits are still unsupported. */
+/* Bounded device + external PCM buffer creation/binding/controls and paired
+ * write commits. Guest playback/cursors and surround routing are unsupported. */
 void h2_audio_host_call(xctx *c, uint32_t entry);
 /* Original DSOUND constructors can run before the first host device. Once a
  * host device exists, unknown original DSOUND methods must never read its

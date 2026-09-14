@@ -7,6 +7,9 @@ routing, streams and effects remain unsupported in this increment. Host sample
 tests establish the real mixer connection; they do not establish movie playback
 or a visible main menu.
 
+The later [paired write-commit increment](halo2-movie-write-commits.md) adds
+checked Lock/Unlock ownership after these captured boundaries.
+
 ## Original descriptor and ownership
 
 Native96 stops at public `37D4BE`, return `3E3B97`. Its six-DWORD descriptor at

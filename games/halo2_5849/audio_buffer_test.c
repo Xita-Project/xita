@@ -11,7 +11,7 @@
 uint8_t *g_xram, *g_img_base;
 uint32_t *g_xpt;
 static jmp_buf stopped;
-static unsigned locked, healthy, opens, closes, allocs, frees;
+static unsigned locked, healthy, opens, closes, allocs, frees, lock_calls, unlock_calls;
 static int allocation_failure;
 static uint32_t native_fp = 0xA5A55A5A;
 static uint32_t pool[256];
@@ -52,8 +52,8 @@ int xk_mem_free(uint32_t base)
 }
 uint32_t xk_mem_size(uint32_t base) { return pool[(base - 0x100000) >> 12] * 4096; }
 int xk_os_audio_open(int rate, int grain) { assert(rate == XA_OUT_RATE && grain == XA_GRAIN); return 0; }
-void xk_os_audio_mutex_lock(void) { assert(!locked && healthy); locked = 1; }
-void xk_os_audio_mutex_unlock(void) { assert(locked); locked = 0; }
+void xk_os_audio_mutex_lock(void) { assert(!locked && healthy); locked = 1; ++lock_calls; }
+void xk_os_audio_mutex_unlock(void) { assert(locked); locked = 0; ++unlock_calls; }
 uint64_t xk_os_monotonic_us(void) { return 42; }
 int h2_audio_backend_open(void) { assert(!healthy); healthy = 1; ++opens; return xk_audio_init(); }
 int h2_audio_backend_close(void) { assert(healthy && xk_audio_free_voices() == XA_MAX_VOICES); healthy = 0; ++closes; return 0; }
@@ -94,6 +94,73 @@ static xctx description(uint32_t dev)
     const uint8_t wave[18] = {1,0,2,0,0x44,0xAC,0,0,0x10,0xB1,2,0,4,0,16,0,0,0};
     x_guest_write(0x3FFD, fields, sizeof fields); x_guest_write(0x4FF9, wave, sizeof wave);
     return context(dev, 0x3FFD, 0x6FFE, 0);
+}
+static xctx lock_context(uint32_t handle, uint32_t offset, uint32_t bytes, uint32_t flags)
+{
+    xctx c = context(handle, offset, bytes, 0x6FFE); X_M32(c.r[4]) = 0x3E3293;
+    X_M32(c.r[4] + 20) = 0x6110; X_M32(c.r[4] + 24) = 0x6120;
+    X_M32(c.r[4] + 28) = 0x6130; X_M32(c.r[4] + 32) = flags;
+    return c;
+}
+static xctx unlock_context(uint32_t handle)
+{
+    xctx c = context(handle, read32(0x6FFE), read32(0x6110), read32(0x6120));
+    X_M32(c.r[4]) = 0x3E3309; X_M32(c.r[4] + 20) = read32(0x6130); return c;
+}
+static void write_commit_tests(uint32_t handle)
+{
+    h2_audio_buffer *b = find_buffer(handle - 0x1C); assert(b && b->bytes == 1024);
+    xctx c = unlock_context(handle); reject(&c, 0x379F40);
+    const uint32_t invalid[][3] = {{0,0,0},{1,4,0},{0,6,0},{1024,4,0},{0,1028,0},{0,4,1},{0,4,2}};
+    for (unsigned i = 0; i < sizeof invalid / sizeof *invalid; ++i) {
+        c = lock_context(handle, invalid[i][0], invalid[i][1], invalid[i][2]); reject(&c, 0x37B7B3);
+    }
+    const uint32_t bad_output[] = {0, b->base + 0x100, b->mirror, b->source, 0x1FF8, 0x6120, 0xFFFFFFFE};
+    for (unsigned i = 0; i < sizeof bad_output / sizeof *bad_output; ++i) {
+        c = lock_context(handle, 0, 1024, 0); X_M32(c.r[4] + 16) = bad_output[i]; reject(&c, 0x37B7B3);
+    }
+    c = lock_context(handle, 0, 1024, 0); g_xpt[7] = 0x1FF000; reject(&c, 0x37B7B3); g_xpt[7] = 0x6000;
+    c = lock_context(handle, 0, 1024, 0); g_xpt[8] = 0x1FF000; reject(&c, 0x37B7B3); g_xpt[8] = 0x8000;
+    c = lock_context(handle, 0, 1024, 0);
+    X_M32(c.r[4] + 16) = 0x6100; X_M32(c.r[4] + 24) = 0xA100; g_xpt[10] = g_xpt[6];
+    reject(&c, 0x37B7B3); g_xpt[10] = 0x9000;
+    uint8_t expected[1024], changed[1024], actual[1024];
+    x_guest_read(expected, b->mirror, sizeof expected);
+    uint32_t commits = 0; uint64_t bytes = 0;
+    /* Exercise both split and unsplit ranges, exactly at and around the ring
+     * end. Changes outside the committed region must remain invisible. */
+    const uint32_t ranges[][2] = {{0,1024},{0,4},{4,16},{1000,64},{1020,1024},{512,512},{516,512}};
+    for (unsigned r = 0; r < sizeof ranges / sizeof *ranges; ++r) {
+        uint32_t off = ranges[r][0], len = ranges[r][1], n1 = len;
+        if (n1 > 1024 - off) n1 = 1024 - off;
+        uint32_t n2 = len - n1;
+        c = lock_context(handle, off, len, 0); call(&c, 0x37B7B3, 0, 8);
+        assert(read32(0x6FFE) == b->source + off && read32(0x6110) == n1);
+        assert(read32(0x6120) == (n2 ? b->source : 0) && read32(0x6130) == n2 && b->locked);
+        c = lock_context(handle, 0, 4, 0); reject(&c, 0x37B7B3);
+        c = context(handle, 0, 0, 0); reject(&c, 0x379F45);
+        for (unsigned i = 0; i < sizeof changed; ++i) changed[i] = (uint8_t)(i * 37 + r * 23);
+        x_guest_write(b->source, changed, sizeof changed);
+        x_guest_read(actual, b->mirror, sizeof actual); assert(!memcmp(actual, expected, sizeof actual));
+        for (unsigned i = 1; i <= 4; ++i) {
+            c = unlock_context(handle); X_M32(c.r[4] + 4 + i * 4) ^= 4; reject(&c, 0x379F40);
+        }
+        c = unlock_context(handle); healthy = 0; reject(&c, 0x379F40); healthy = 1;
+        unsigned locks = lock_calls;
+        c = unlock_context(handle); call(&c, 0x379F40, 0, 5);
+        assert(lock_calls == locks + 1 && lock_calls == unlock_calls && !b->locked);
+        for (uint32_t i = 0; i < len; ++i) { uint32_t at = (off + i) % 1024; expected[at] = changed[at]; }
+        x_guest_read(actual, b->mirror, sizeof actual); assert(!memcmp(actual, expected, sizeof actual));
+        x_guest_read(actual, b->source, sizeof actual); assert(!memcmp(actual, changed, sizeof actual));
+        assert(b->commits == ++commits && b->committed_bytes == (bytes += len));
+        c = unlock_context(handle); reject(&c, 0x379F40);
+    }
+    /* Restore the constant synthetic PCM through the real paired API for the
+     * following mixer sample/control/lifetime assertions. */
+    c = lock_context(handle, 0, 1024, 0); call(&c, 0x37B7B3, 0, 8);
+    int16_t pcm[512]; for (unsigned i = 0; i < 256; ++i) { pcm[i*2] = 8000; pcm[i*2+1] = -4000; }
+    x_guest_write(b->source, pcm, sizeof pcm); c = unlock_context(handle); call(&c, 0x379F40, 0, 5);
+    assert(b->committed_bytes == bytes + 1024);
 }
 static xctx routing_context(uint32_t handle)
 {
@@ -175,6 +242,7 @@ int main(void)
     assert(!memcmp(samples, source, sizeof samples) && g_v[b->voice].data == b->mirror);
     c = context(handle, 0x8F00, sizeof source, 0); reject(&c, 0x37CC4A);
     g_xpt[0xA] = g_xpt[b->mirror >> 12]; c = context(dev, 0xA100, 0, 0); reject(&c, 0x37B5CA); g_xpt[0xA] = 0x9000;
+    write_commit_tests(handle);
     c = context(handle, 48000, 0, 0); reject(&c, 0x37C5C8);
     c = context(handle, 44100, 0, 0); call(&c, 0x37C5C8, 0, 2);
     c = context(handle, 0, 0, 0); call(&c, 0x37B66F, 0, 2);
@@ -183,7 +251,7 @@ int main(void)
     assert(g_v[b->voice].volume == 1 && !b->headroom);
     c = context(handle, 1, 0, 0); reject(&c, 0x37B66F); reject(&c, 0x37B6A7);
     c = context(handle, (uint32_t)-9001, 0, 0); reject(&c, 0x37B66F);
-    /* No guest success is supplied for routing, Play, Lock or streams. */
+    /* Unknown routing, Play, streams and an empty Lock remain strict stops. */
     c = context(handle, 0, 0, 0);
     reject(&c, 0x37C5E4); reject(&c, 0x37B6DF); reject(&c, 0x37B7B3); reject(&c, 0x37B7E3);
     routing_tests(handle);

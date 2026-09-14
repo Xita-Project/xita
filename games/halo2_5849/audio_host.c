@@ -11,6 +11,8 @@ typedef struct {
     uint32_t frequency, headroom;
     int32_t volume;
     int voice;
+    uint32_t locked, lock_offset, lock_first, lock_second, commits;
+    uint64_t committed_bytes;
 } h2_audio_buffer;
 static h2_audio_buffer buffers[XA_MAX_VOICES];
 extern uint32_t h2_platform_fpscr_read(void);
@@ -146,12 +148,15 @@ static h2_audio_buffer *buffer_live(xctx *c, uint32_t ip, uint32_t object, int i
     live(c, ip, device.base, 1);
     return b;
 }
+static int aliases(uint32_t a, unsigned an, uint32_t b, unsigned bn);
 static void reference(xctx *c, uint32_t ip)
 {
     stack(c, ip, 1);
     if (ip != 0x37C70F && (ip != 0x37A14F || find_buffer(X_ARG(0)))) {
         h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), ip != 0x379F45);
         uint32_t count = b->references;
+        if (ip != 0x37A14F && count == 1 && b->locked)
+            fail(c, ip, "release locked buffer", b->base);
         if (ip == 0x37A14F) {
             if (count == UINT32_MAX) fail(c, ip, "buffer reference overflow", count);
             X_M32(b->base + 4) = ++b->references;
@@ -268,6 +273,67 @@ static void buffer_control(xctx *c, uint32_t ip)
             ip, value, X_M32(c->r[4]), b->frequency, b->volume, b->headroom);
     result(c, 0, 2);
 }
+static void buffer_lock(xctx *c)
+{
+    const uint32_t ip = 0x37B7B3;
+    stack(c, ip, 8); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    uint32_t offset = X_ARG(1), bytes = X_ARG(2);
+    if (!b->mirror || b->locked || X_ARG(7) || !bytes || bytes > b->bytes ||
+        offset >= b->bytes || ((offset | bytes) & 3) || !mapped(b->source, b->bytes) ||
+        overlaps_device(b->source, b->bytes) || !mapped(b->mirror, b->mirror_bytes))
+        fail(c, ip, "unsupported PCM lock range/state", offset);
+    uint32_t out[4] = {X_ARG(3), X_ARG(4), X_ARG(5), X_ARG(6)};
+    for (unsigned i = 0; i < 4; ++i) {
+        output(c, ip, out[i], 4);
+        if (aliases(out[i], 4, c->r[4], 36) || page_overlap(out[i], 4, b->source, b->bytes))
+            fail(c, ip, "PCM lock output/source/stack alias", out[i]);
+        for (unsigned j = 0; j < i; ++j)
+            if (aliases(out[i], 4, out[j], 4)) fail(c, ip, "PCM lock output alias", out[i]);
+    }
+    uint32_t first = b->bytes - offset;
+    if (first > bytes) first = bytes;
+    uint32_t second = bytes - first;
+    uint32_t value[4] = {b->source + offset, first, second ? b->source : 0, second};
+    /* Original Lock returns caller-owned addresses, with a split only at the
+     * ring end. Validate every output before writing any of them. */
+    for (unsigned i = 0; i < 4; ++i) x_guest_write(out[i], &value[i], 4);
+    b->locked = 1; b->lock_offset = offset; b->lock_first = first; b->lock_second = second;
+    if (b->commits < 8)
+        xv_logf("[h2/audio-buffer] Lock caller=%08X offset=%u bytes=%u first=%08X+%u second=%08X+%u\n",
+                X_M32(c->r[4]), offset, bytes, value[0], first, value[2], second);
+    result(c, 0, 8);
+}
+static void buffer_unlock(xctx *c)
+{
+    const uint32_t ip = 0x379F40;
+    stack(c, ip, 5); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    uint32_t second = b->lock_second ? b->source : 0;
+    if (!b->locked || X_ARG(1) != b->source + b->lock_offset || X_ARG(2) != b->lock_first ||
+        X_ARG(3) != second || X_ARG(4) != b->lock_second ||
+        !mapped(b->source, b->bytes) || overlaps_device(b->source, b->bytes) ||
+        !mapped(b->mirror, b->mirror_bytes))
+        fail(c, ip, "unmatched PCM write commit", X_ARG(1));
+    /* Xbox Unlock is a no-op. For the audited Bink paired-write contract,
+     * commit its completed regions to the unexposed host mirror atomically
+     * with respect to the real mixer. No worker reads the writable source. */
+    uint8_t chunk[4096];
+    uint32_t offsets[2] = {b->lock_offset, 0}, sizes[2] = {b->lock_first, b->lock_second};
+    xk_audio_lock();
+    for (unsigned region = 0; region < 2; ++region) {
+        for (uint32_t at = 0; at < sizes[region]; at += sizeof chunk) {
+            uint32_t n = sizes[region] - at; if (n > sizeof chunk) n = sizeof chunk;
+            uint32_t offset = offsets[region] + at;
+            x_guest_read(chunk, b->source + offset, n); x_guest_write(b->mirror + offset, chunk, n);
+        }
+    }
+    xk_audio_unlock();
+    b->locked = 0; ++b->commits; b->committed_bytes += b->lock_first + b->lock_second;
+    if (b->commits <= 8)
+        xv_logf("[h2/audio-buffer] Unlock caller=%08X committed=%u+%u total=%llu commits=%u\n",
+                X_M32(c->r[4]), b->lock_first, b->lock_second,
+                (unsigned long long)b->committed_bytes, b->commits);
+    result(c, 0, 5);
+}
 #if H2_AUDIO_MULTIBIN_UNAVAILABLE
 /* Explicit failure probe for the observed movie's unsupported six-speaker
  * route. The real PCM voice retains its original FL/FR defaults unchanged. */
@@ -377,6 +443,8 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37A14F: case 0x37C70F: case 0x379F45: case 0x37A795: reference(c, ip); break;
     case 0x37D4BE: buffer_create(c); break;
     case 0x37CC4A: buffer_data(c); break;
+    case 0x37B7B3: buffer_lock(c); break;
+    case 0x379F40: buffer_unlock(c); break;
     case 0x37C5C8: case 0x37B66F: case 0x37B6A7: buffer_control(c, ip); break;
     case 0x37B5AE: case 0x37B5CA: query(c, ip); break;
     case 0x37D506: case 0x37D5CD: case 0x37D52A: scalar(c, ip); break;
@@ -452,6 +520,10 @@ void h2_audio_trace_buffer(xctx *c, uint32_t ip)
             xv_logf("[h2/audio-buffer] stop interface=%08X refs=%u voice=%d external=%08X bytes=%u mirror=%08X frequency=%u volume=%d headroom=%u\n",
                     b->base + 0x1C, b->references, b->voice, b->source, b->bytes, b->mirror,
                     b->frequency, b->volume, b->headroom);
+        if (b->base)
+            xv_logf("[h2/audio-buffer] stop locked=%u offset=%u first=%u second=%u commits=%u committed_bytes=%llu\n",
+                    b->locked, b->lock_offset, b->lock_first, b->lock_second, b->commits,
+                    (unsigned long long)b->committed_bytes);
     }
     if (ip == 0x37B7B3 && !(c->r[4] & 3) && mapped(c->r[4], 36)) {
         xv_logf("[h2/audio-buffer] Lock caller=%08X interface=%08X offset=%u bytes=%u pointer1=%08X length1=%08X pointer2=%08X length2=%08X flags=%08X\n",
