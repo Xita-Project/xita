@@ -12,10 +12,12 @@ prefix=r'''
 #include <stdlib.h>
 #include <psp2/gxm.h>
 #include "runtime/xv_frame_slots.h"
+#include "runtime/xv_update.h"
 #define XV_LOG(...) ((void)0)
 void xv_cpu_guest_poll(void) {}
 static unsigned g_update_quiesced;
 unsigned xv_update_requested(void) { return 0; }
+void xv_update_progress(unsigned stage) { (void)stage; }
 static unsigned frame,ui,contents[3],waits;
 static int upload_override=-99;
 void xv_vertex_upload_override(int enabled) { upload_override=enabled; }

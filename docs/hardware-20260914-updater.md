@@ -74,6 +74,31 @@ unconfirmed. The prior slot protocol preserves a fallback, but recovery from
 this particular stop has not yet been observed. Neither a GPU crash nor an
 SD-card fault can be diagnosed from that network symptom alone.
 
+## Shutdown observability follow-up
+
+The next runtime keeps the paired service running while GPU and display work
+drains, then stops networking before the launcher handoff. `/update` exposes
+a monotonic `handoff` stage, and the host includes the last observed stage in
+an unconfirmed-restart error. This makes a drain stall distinguishable from a
+later loss of the service when that stage was observed; a refused connection
+alone still cannot identify the cause. No GPU owner is freed to force progress.
+
+Active remote test leases now renew the display timers as well as automatic
+suspend. An update requests display-on before draining and detaching the
+framebuffer. These are preventative measures, not a diagnosis of the physical
+stop above.
+
+Production shutdown ordering, lease expiry, HTTP stage monotonicity and client
+timeout tests pass, including ASan/UBSan. A native dashboard update in isolated
+Vita3K uploaded the 31,176,802-byte runtime, changed slot A to B, relaunched and
+confirmed its exact hash with empty staging state. The runtime is
+`d267fc391d720fc12e08ac0fddd78b2361fd2dbee9fff33b98535994dbdcd3fb`;
+its package is `6b513d689de7cd0b68efc2472daae77c11955c26b0b0aa1adfcfbe12a6b172aa`.
+The helper and asset contract match the confirmed hardware baseline, so this
+runtime requires no replacement launcher. It has not been confirmed on the
+physical Vita, whose paired service remains unavailable after the earlier
+restart.
+
 | Component | SHA-256 |
 | --- | --- |
 | Runtime | `7787ebbcccc938dc56bbdb34ed0b6d35099042ec168e17a1d07f50c34f4401c1` |

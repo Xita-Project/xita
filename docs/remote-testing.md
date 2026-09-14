@@ -72,14 +72,14 @@ before its display slot can be reused. The service never reads a GPU buffer in
 flight and adds no `sceGxmFinish` calls. It refuses screenshots and bulk log
 reads during a measured benchmark. Status reads remain small and available.
 
-To prevent automatic suspend for up to an hour:
+To keep the display active and prevent automatic suspend for up to an hour:
 
 ```sh
 python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json lease 3600
 ```
 
 Renew the lease during a longer session; `lease 0` stops renewing the idle timer.
-Only automatic suspension is suppressed. Display dimming/off remains allowed.
+While the lease is active, the service also renews the display dimming/off timers.
 Leave the Vita charging for unattended tests. Set `XV_REMOTE_TEST=0` and restart
 to disable the service entirely.
 

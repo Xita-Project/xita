@@ -45,6 +45,11 @@ int main(void)
             if(command=='q')break;
             if(command=='t') {printf("BOOT %d\n",xv_update_boot());fflush(stdout);continue;}
             if(command=='c') {printf("CONFIRM %d\n",xv_update_confirm(1));fflush(stdout);continue;}
+            if(command=='h') {
+                xv_update_progress(XV_UPDATE_GPU_DRAIN);
+                xv_update_progress(XV_UPDATE_REQUESTED);
+                xv_update_progress(XV_UPDATE_HANDOFF_COUNT);
+            }
             if(command=='b')STORE(&benchmark,1);
             if(command=='n')STORE(&benchmark,0);
             if(command=='f')frames=!frames;

@@ -23,6 +23,14 @@ static unsigned captured_frame;
 static int listener=-1;
 static int upload_in_progress;
 static uint64_t awake_until;
+static unsigned handoff;
+void xv_update_progress(unsigned stage)
+{
+    if(!xv_update_requested() || stage<=XV_UPDATE_IDLE || stage>=XV_UPDATE_HANDOFF_COUNT)return;
+    unsigned previous=LOAD(&handoff);
+    while(previous<stage && !__atomic_compare_exchange_n(&handoff,&previous,stage,0,
+          __ATOMIC_RELEASE,__ATOMIC_RELAXED)) {}
+}
 #ifdef __vita__
 static SceUID worker=-1;
 static void *net_pool;
@@ -67,7 +75,9 @@ static void keep_awake(void)
 #ifdef __vita__
     static uint64_t next;
     uint64_t now=remote_now();
-    if(now<awake_until && now>=next) {sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DISABLE_AUTO_SUSPEND);next=now+1000000;}
+    /* Unattended gameplay/update leases also keep the display active. An
+     * auto-suspend-only tick permits screen-off controller interception. */
+    if(now<awake_until && now>=next) {sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);next=now+1000000;}
 #endif
 }
 static int send_all(int s,const void *data,size_t length,uint64_t deadline)
@@ -160,6 +170,9 @@ static void serve(int s)
             if(xv_benchmark_status()||xv_benchmark_remote_busy()) {reply(s,409,"Updates disabled during benchmark\n");return;}
             if(!strcmp(method,"GET")&&!strcmp(target,"/update")) {
                 char body[384];xv_update_json(body,sizeof body);
+                size_t n=strlen(body);
+                if(n && body[n-1]=='}')snprintf(body+n-1,sizeof body-n+1,",\"handoff\":%u}",
+                    xv_update_requested()?LOAD(&handoff):XV_UPDATE_IDLE);
                 if(!header(s,200,"application/json",strlen(body),NULL))send_all(s,body,strlen(body),remote_now()+2000000);
             } else if(!strcmp(method,"POST")&&!strncmp(target,"/update/begin?size=",19)) {
                 char *sha=strstr(target+19,"&sha256="),*abi=sha?strstr(sha+8,"&contract="):NULL;unsigned size;
@@ -182,7 +195,9 @@ static void serve(int s)
             } else if(!strcmp(method,"POST")&&!strcmp(target,"/update/finish")) {
                 int bad=xv_update_finish();if(!bad)upload_in_progress=0;reply(s,bad?409:204,bad?"Update verification failed\n":"");
             } else if(!strcmp(method,"POST")&&(!strcmp(target,"/update/apply")||!strcmp(target,"/update/rollback"))) {
-                int bad=xv_update_request(!strcmp(target,"/update/rollback"));reply(s,bad?409:204,bad?"Update not ready\n":"");
+                int bad=xv_update_request(!strcmp(target,"/update/rollback"));
+                if(!bad)xv_update_progress(XV_UPDATE_REQUESTED);
+                reply(s,bad?409:204,bad?"Update not ready\n":"");
             } else reply(s,404,"Unknown update operation\n");
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/benchmark?kind=",16)) {
             static const char *const kinds[]={"object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility"};

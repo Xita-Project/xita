@@ -746,6 +746,34 @@ static void xv_gfx_finish(void)
     }
 }
 
+/* Keep the paired service available through GPU/display drains so a stalled
+ * shutdown can still report its stage and logs. It stops before LoadExec. */
+static void xv_finish_for_exit(void)
+{
+#ifdef XV_RUN_RECOMP
+    if(xv_update_requested()) {
+        int display=scePowerRequestDisplayOn();
+        sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+        XV_LOG("update: wake display rc %08X; GPU drain begins\n",display);
+        xv_update_progress(XV_UPDATE_GPU_DRAIN);
+    }
+#endif
+    xv_gfx_finish();
+#ifdef XV_RUN_RECOMP
+    xv_update_progress(XV_UPDATE_DISPLAY_DRAIN);
+    if(xv_update_requested())XV_LOG("update: GPU drain complete; detaching display\n");
+#endif
+    sceDisplaySetFrameBuf(NULL,SCE_DISPLAY_SETBUF_NEXTFRAME);
+    sceDisplayWaitVblankStart();
+    sceDisplayWaitVblankStart();
+#ifdef XV_RUN_RECOMP
+    xv_update_progress(XV_UPDATE_NETWORK_STOP);
+    if(xv_update_requested())XV_LOG("update: display detached; stopping network service\n");
+    xv_remote_stop();
+    xv_net_shutdown();
+#endif
+}
+
 static void __attribute__((unused)) xv_gfx_shutdown(void)
 {
     xv_gfx_t *g = &g_gfx;
@@ -1183,6 +1211,7 @@ void xv_present(void)
          * The main thread stops the pump before replacing this process. */
         xv_present_drain();
         XV_LOG("update: recording paused after frame %u\n",ticket);
+        xv_update_progress(XV_UPDATE_RECORDING_DRAINED);
         __atomic_store_n(&g_update_quiesced,1,__ATOMIC_RELEASE);
         for(;;)sceKernelDelayThread(10000);
     }
@@ -1776,6 +1805,7 @@ int main(int argc, char *argv[])
         xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
         sceKernelWaitThreadEnd(pump, NULL, NULL); sceKernelDeleteThread(pump);
         xv_frame_events_close(&g_frame_events);
+        xv_update_progress(XV_UPDATE_PUMP_STOPPED);
         XV_LOG("recompiled engine finished after %u frames\n", g_gfx.frame_counter);
     }
 #else
@@ -1807,26 +1837,22 @@ int main(int argc, char *argv[])
 #endif
 
 shutdown:
-#ifdef XV_RUN_RECOMP
-    xv_remote_stop();
-    xv_net_shutdown();
-#endif
     /* Exit protocol (verified on hardware + Vita3K): drain the GPU and the display
      * queue, detach the framebuffer, and let sceKernelExitProcess() reclaim every
      * memblock and GXM object.  Tearing objects down by hand while the display still
      * scans out the last frame produces a GPU fault (the console needs a hard reset),
      * so the explicit teardown below is only compiled in for the in-process reload
      * case where GXM has to survive the guest (not used yet). */
-    xv_gfx_finish();
-    sceDisplaySetFrameBuf(NULL, SCE_DISPLAY_SETBUF_NEXTFRAME);
-    sceDisplayWaitVblankStart();
-    sceDisplayWaitVblankStart();
+    xv_finish_for_exit();
 #ifdef XV_FULL_TEARDOWN
     xv_xram_shutdown();
     xv_gfx_shutdown();
 #endif
 #ifdef XV_RUN_RECOMP
     if(xv_update_requested()) {
+        xv_update_progress(XV_UPDATE_LAUNCHER_HANDOFF);
+        XV_LOG("update: handing off to boot helper\n");
+        xv_log_flush();
         int rc=sceAppMgrLoadExec("app0:eboot.bin",NULL,NULL);
         if(rc>=0)for(;;)sceKernelDelayThread(100000);
         XV_LOG("update: launcher handoff failed %08X; exiting without replacing active slot\n",rc);

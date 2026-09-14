@@ -197,6 +197,7 @@ test-frames: build/frame_handoff_test build/frame_pacer_test build/vertex_upload
 	$(PYTHON) ../../tools/test_frame_acquisition.py
 	$(PYTHON) ../../tools/test_frame_completion.py
 	$(PYTHON) ../../tools/test_scene_fences.py
+	$(PYTHON) ../../tools/test_update_handoff.py
 
 .PHONY: test-vertex-references
 test-vertex-references:

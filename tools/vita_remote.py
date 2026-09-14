@@ -117,17 +117,24 @@ class Client:
 
 def wait_for_update(client, sha, previous_slot, timeout=180):
     deadline=time.monotonic()+timeout
+    last_stage=None
+    stages={1:"request accepted",2:"recording drained",3:"render worker stopped",4:"GPU drain",5:"display drain",6:"network shutdown",7:"launcher handoff"}
     while time.monotonic()<deadline:
         time.sleep(1)
         try:
             boot=json.loads(client.request("/update")[1])
         except (OSError,RuntimeError,http.client.HTTPException):
             continue
+        stage=boot.get("handoff",0)
+        if stage and stage!=last_stage:
+            last_stage=stage
+            print("Update handoff: "+stages.get(stage,f"stage {stage}"),flush=True)
         if not boot["requested"] and boot.get("boot_slot",-1)>=0:
             if boot.get("boot_sha256") != sha or boot["boot_slot"] == previous_slot or boot["state"] != 0:
                 raise RuntimeError("Update did not install: launcher returned to the previous slot or left the candidate staged. The working build is preserved.")
             return boot["boot_slot"]
-    raise RuntimeError("No confirmed boot within the timeout; installation was not verified. Reconnect to inspect update status.")
+    detail=" Last reported stage: "+stages.get(last_stage,f"stage {last_stage}")+"." if last_stage else ""
+    raise RuntimeError("No confirmed boot within the timeout; installation was not verified."+detail+" Reconnect to inspect update status.")
 
 
 def upload_update(client, package, apply=False, wait=False):

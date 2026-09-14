@@ -85,6 +85,12 @@ def main():
             try: wait_for_update(boot,'a'*64,0)
             except RuntimeError: pass
             else: raise AssertionError('Failed installation acknowledged as installed')
+    stalled=Boot(0,4);stalled.value.update(requested=1,handoff=4)
+    with patch('vita_remote.time.sleep',lambda _:None), patch('vita_remote.time.monotonic',side_effect=[0,0,2]):
+        try: wait_for_update(stalled,'a'*64,0,timeout=1)
+        except RuntimeError as error:
+            assert 'not verified' in str(error) and 'Last reported stage: GPU drain' in str(error)
+        else: raise AssertionError('Stalled handoff acknowledged as installed')
     with tempfile.TemporaryDirectory(prefix="xita-remote-test-") as tmp:
         tmp = Path(tmp)
         benchmark_cases(tmp)
@@ -213,7 +219,8 @@ def main():
             subprocess.run(["python3", str(ROOT / "tools/vita_remote.py"), "--config", str(conf),
                             "pad", "--rx", "160", "--duration", ".05"], check=True)
             assert command("p") == "PAD 0 128 128 128 128"
-            state=json.loads(request('/update')[2]);assert state['contract']==abi and state['state']==0
+            assert command('h')=='ACK'  # ignored when no update is requested
+            state=json.loads(request('/update')[2]);assert state['contract']==abi and state['state']==0 and state['handoff']==0
             manifest=f'/update/begin?size={len(new)}&sha256={hashlib.sha256(new).hexdigest()}&contract={abi}'
             assert request(manifest,'POST',token='f'*32)[0]==403
             assert request(manifest+'x','POST')[0]==409
@@ -230,6 +237,9 @@ def main():
             assert json.loads(request('/update')[2])['received']==0
             result=upload_update(client,candidate,True)
             assert result['verified'] and result['restart_requested']
+            assert json.loads(request('/update')[2])['handoff']==1
+            assert command('h')=='ACK'
+            state=json.loads(request('/update')[2]);assert state['handoff']==4 and state['requested']==1
             assert (app/'game-a.self').read_bytes()==old
             assert command('t')=='BOOT 1'
             assert (app/'game-a.self').read_bytes()==old and (app/'game-b.self').read_bytes()==new
