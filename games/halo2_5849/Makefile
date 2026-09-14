@@ -56,11 +56,13 @@ $(BUILD)/quad-probe.vpk: $(BUILD)/quad-probe-eboot.bin $(BUILD)/quad-probe-param
 .PHONY: all test-host
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
 test-host: $(BUILD)/quad_draw_test
+test-host: $(BUILD)/blit_copy_test
 all: $(BUILD)/halo2-boot.vpk
 test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/input_test $(BUILD)/scanout_test $(BUILD)/command_state_test $(BUILD)/host_tiles_test $(BUILD)/host_channel_runtime_test $(BUILD)/host_channel_test $(BUILD)/kelvin_clear_test $(BUILD)/gpu_objects_test $(BUILD)/push_stream_test $(BUILD)/nv2a_memory_test $(BUILD)/instance_memory_test $(BUILD)/cache_volume_test $(BUILD)/nv2a_regs_test $(BUILD)/nv2a_timer_test
 	$(BUILD)/kernel_timer_test
 	$(BUILD)/linear_texture_test
 	$(BUILD)/quad_draw_test
+	$(BUILD)/blit_copy_test
 	$(BUILD)/eflags_id_test
 	$(BUILD)/eflags_id_default_test
 	$(BUILD)/file_lifetime_test
@@ -113,6 +115,9 @@ $(BUILD)/scanout_test: scanout_test.c scanout.c scanout.h
 $(BUILD)/command_state_test: command_state_test.c command_state.c command_state.h kelvin_clear.c kelvin_clear.h gpu_objects.c gpu_objects.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror command_state_test.c command_state.c kelvin_clear.c gpu_objects.c -o $@
+$(BUILD)/blit_copy_test: blit_copy_test.c command_state.c command_state.h kelvin_clear.c kelvin_clear.h gpu_objects.c gpu_objects.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror blit_copy_test.c command_state.c kelvin_clear.c gpu_objects.c -o $@
 $(BUILD)/linear_texture_test: linear_texture_test.c linear_texture.c linear_texture.h command_state.h kelvin_clear.h gpu_objects.c gpu_objects.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror linear_texture_test.c linear_texture.c gpu_objects.c -o $@

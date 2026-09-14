@@ -63,6 +63,52 @@ static int release_semaphore(h2_command_state *s, h2_kelvin_clear *c, uint32_t v
     s->last_semaphore_address = physical; s->last_semaphore_value = value;
     return 1;
 }
+static int simple_graph_context(h2_kelvin_clear *c, uint32_t instance, uint32_t klass)
+{
+    if (!instance || (instance & 15) || instance > 0xFFFF0) return 0;
+    for (unsigned i = 0; i < 4; ++i) {
+        uint32_t word;
+        if (!c->read_instance(c->opaque, instance + i * 4, &word) || word != (i ? 0 : klass)) return 0;
+    }
+    return 1;
+}
+static int copy_display_image(h2_command_state *s, h2_kelvin_clear *c, uint32_t dimensions)
+{
+    /* Native79 display preservation: original zero-origin 640x480 SRCCOPY,
+     * linear A8R8G8B8 with equal contiguous pitches. Other blits still reject. */
+    const uint32_t bytes = 640 * 480 * 4;
+    if (dimensions != 0x01E00280 || s->surfaces_valid != 15 || s->blit_point_valid != 3 ||
+        s->surfaces_format != 0xA || s->surfaces_pitch != 0x0A000A00 ||
+        s->blit_point[0] || s->blit_point[1] || s->blit_operation != 3 ||
+        !s->objects[2].present || !s->objects[3].present ||
+        s->blit_context[6] != s->objects[3].instance ||
+        !simple_graph_context(c, s->objects[2].instance, 0x9F) ||
+        !simple_graph_context(c, s->objects[3].instance, 0x62) ||
+        s->completed_blits == UINT64_MAX || s->copied_bytes > UINT64_MAX - bytes) return 0;
+    for (unsigned i = 0; i < 6; ++i)
+        if (!simple_graph_context(c, s->blit_context[i], 0x30)) return 0;
+    uint32_t physical[2]; void *mapped[2];
+    for (unsigned i = 0; i < 2; ++i) {
+        h2_dma_object dma;
+        if (!h2_dma_load(c->read_instance, c->opaque, s->surfaces_dma[i], &dma) ||
+            !h2_dma_resolve(&dma, s->surfaces_offset[i], bytes, i, c->physical_bytes, &physical[i]) ||
+            (physical[i] & 3) ||
+            (c->check_attachment && !c->check_attachment(c->opaque, physical[i], bytes, 2560, 0, 0x128))) return 0;
+        mapped[i] = c->map_physical(c->opaque, physical[i], bytes);
+        if (!mapped[i] || (uintptr_t)mapped[i] > UINTPTR_MAX - bytes) return 0;
+    }
+    /* Reject both physical overlap and non-injective host aliases before the
+     * first write. Source pixels already include completed synchronous GXM RGB
+     * commits; preserve all four original bytes including alpha. */
+    if (((uint64_t)physical[0] < (uint64_t)physical[1] + bytes &&
+         (uint64_t)physical[1] < (uint64_t)physical[0] + bytes) ||
+        ((uintptr_t)mapped[0] < (uintptr_t)mapped[1] + bytes &&
+         (uintptr_t)mapped[1] < (uintptr_t)mapped[0] + bytes)) return 0;
+    memcpy(mapped[1], mapped[0], bytes);
+    ++s->completed_blits; s->copied_bytes += bytes;
+    s->last_blit_source = physical[0]; s->last_blit_dest = physical[1];
+    return 1;
+}
 static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
 {
     /* State assignments from the observed constructor. Unknown ranges and all
@@ -333,7 +379,7 @@ int h2_command_method(h2_command_state *s, h2_kelvin_clear *c, uint8_t sub,
         s->m2mf_notifier = instance; return 1;
     case 3:
         if (method == 0x2FC) {
-            if (value != 3) return 0; /* SRCCOPY state; blit execution rejects. */
+            if (value != 3) return 0; /* only SRCCOPY */
             s->blit_operation = value; return 1;
         }
         if (method >= 0x184 && method <= 0x19C) {
@@ -342,8 +388,28 @@ int h2_command_method(h2_command_state *s, h2_kelvin_clear *c, uint8_t sub,
                 (o.context[0] & 0xFFF) != (method == 0x19C ? 0x62 : 0x30)) return 0;
             s->blit_context[(method - 0x184) / 4] = o.instance; return 1;
         }
+        if (method == 0x300 || method == 0x304) {
+            if (value) return 0; /* observed zero-origin copy only */
+            unsigned index = (method - 0x300) / 4;
+            s->blit_point[index] = value; s->blit_point_valid |= 1u << index; return 1;
+        }
+        if (method == 0x308) return copy_display_image(s, c, value);
         return 0;
     case 4:
+        if (method >= 0x300 && method <= 0x30C) {
+            unsigned index = (method - 0x300) / 4;
+            if (method == 0x300) {
+                if (value != 0xA) return 0;
+                s->surfaces_format = value;
+            } else if (method == 0x304) {
+                if (value != 0x0A000A00) return 0;
+                s->surfaces_pitch = value;
+            } else {
+                if (value & ~0x07FFFFFCu) return 0;
+                s->surfaces_offset[index - 2] = value;
+            }
+            s->surfaces_valid |= 1u << index; return 1;
+        }
         if ((method != 0x184 && method != 0x188) || !dma_object(c, value, &instance)) return 0;
         s->surfaces_dma[(method - 0x184) / 4] = instance; return 1;
     case 5:

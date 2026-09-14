@@ -1,5 +1,5 @@
-/* Audited constructor state only. Draw, blit, notify, flip and report execution
- * remain unsupported. Stored state is preserved even while those paths reject. */
+/* Audited command state and bounded synchronous clear/semaphore/frame copy.
+ * Other execution requires an explicit consumer or rejects. */
 #pragma once
 #include "kelvin_clear.h"
 typedef struct h2_command_object {
@@ -25,6 +25,10 @@ typedef struct h2_command_state {
     uint64_t software_updates;
     uint64_t semaphore_releases;
     uint32_t last_semaphore_address, last_semaphore_value;
+    uint32_t surfaces_format, surfaces_pitch, surfaces_offset[2], surfaces_valid;
+    uint32_t blit_point[2], blit_point_valid;
+    uint64_t completed_blits, copied_bytes;
+    uint32_t last_blit_source, last_blit_dest;
 } h2_command_state;
 /* Rejection preserves command/clear state and guest bytes. */
 int h2_command_method(h2_command_state *state, h2_kelvin_clear *clear,

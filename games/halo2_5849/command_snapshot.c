@@ -57,6 +57,10 @@ int h2_command_snapshot(FILE *out, const h2_host_channel *channel)
     U32("shader_inputs", s->shader_inputs); U32("shadow_slope", s->shadow_slope);
     U32("m2mf_notifier", s->m2mf_notifier); U32("blit_operation", s->blit_operation);
     U32("pattern_color", s->pattern_color);
+    U32("surfaces_format", s->surfaces_format); U32("surfaces_pitch", s->surfaces_pitch);
+    U32("surfaces_valid", s->surfaces_valid); U32("blit_point_valid", s->blit_point_valid);
+    U64("completed_blits", s->completed_blits); U64("copied_bytes", s->copied_bytes);
+    U32("last_blit_source", s->last_blit_source); U32("last_blit_dest", s->last_blit_dest);
 #undef U32
 #undef U64
     /* Field-by-field serialization deliberately excludes host pointers and C
@@ -74,6 +78,8 @@ int h2_command_snapshot(FILE *out, const h2_host_channel *channel)
     fputc(']', out);
     words(out, "dma", s->dma, 11);
     words(out, "surfaces_dma", s->surfaces_dma, 2);
+    words(out, "surfaces_offset", s->surfaces_offset, 2);
+    words(out, "blit_point", s->blit_point, 2);
     words(out, "blit_context", s->blit_context, 7);
     words(out, "vertex4ub", s->vertex4ub, 16);
     words(out, "setup", s->setup, 0x2000 / 4);
