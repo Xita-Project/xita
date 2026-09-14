@@ -769,19 +769,31 @@ void h2_audio_trace_buffer(xctx *c, uint32_t ip)
             xv_logf("[h2/audio-buffer] route[%u] bin=%u volume=%d\n", i, pairs[i*2], (int32_t)pairs[i*2+1]);
         return;
     }
-    if (ip != 0x37D4BE || !mapped(c->r[4], 20) || (c->r[4] & 3)) return;
+    if ((ip != 0x37D4BE && ip != 0x37D4E2) || !mapped(c->r[4], 20) || (c->r[4] & 3)) return;
     uint32_t desc = X_ARG(1), fields[6];
     if (!mapped(desc, sizeof fields)) return;
     x_guest_read(fields, desc, sizeof fields);
-    xv_logf("[h2/audio-buffer] descriptor=%08X size=%08X flags=%08X bytes=%08X format=%08X mixbins=%08X inputbin=%08X output=%08X outer=%08X\n",
-            desc, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], X_ARG(2), X_ARG(3));
+    uint32_t wfx;
+    if (ip == 0x37D4E2) {
+        xv_logf("[h2/audio-stream] descriptor=%08X flags=%08X packets=%u format=%08X callback=%08X context=%08X mixbins=%08X output=%08X outer=%08X\n",
+                desc, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], X_ARG(2), X_ARG(3));
+        wfx = fields[2];
+    } else {
+        xv_logf("[h2/audio-buffer] descriptor=%08X size=%08X flags=%08X bytes=%08X format=%08X mixbins=%08X inputbin=%08X output=%08X outer=%08X\n",
+                desc, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], X_ARG(2), X_ARG(3));
+        wfx = fields[3];
+    }
     uint8_t format[18];
-    if (!mapped(fields[3], sizeof format)) return;
-    x_guest_read(format, fields[3], sizeof format);
+    if (!mapped(wfx, sizeof format)) return;
+    x_guest_read(format, wfx, sizeof format);
     uint16_t tag, channels, align, bits, extra; uint32_t rate, average;
     memcpy(&tag, format, 2); memcpy(&channels, format + 2, 2);
     memcpy(&rate, format + 4, 4); memcpy(&average, format + 8, 4);
     memcpy(&align, format + 12, 2); memcpy(&bits, format + 14, 2); memcpy(&extra, format + 16, 2);
-    xv_logf("[h2/audio-buffer] wave tag=%u channels=%u rate=%u average=%u align=%u bits=%u extra=%u\n",
-            tag, channels, rate, average, align, bits, extra);
+    xv_logf("[h2/audio-format] entry=%08X wave tag=%u channels=%u rate=%u average=%u align=%u bits=%u extra=%u\n",
+            ip, tag, channels, rate, average, align, bits, extra);
+    if (tag == 0x69 && extra == 2 && mapped(wfx, 20)) {
+        uint16_t samples; x_guest_read(&samples, wfx + 18, 2);
+        xv_logf("[h2/audio-format] Xbox ADPCM samples_per_block=%u\n", samples);
+    }
 }
