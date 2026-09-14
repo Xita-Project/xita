@@ -152,6 +152,14 @@ int main(void)
     xk_audio_mix(decoded,48);for(unsigned i=0;i<96;++i)assert(!decoded[i]);
     xk_audio_voice_stop(ms->voice);xk_audio_stream_flush(ms->voice);
     c=context(muted,0,0,0);call(&c,0x37AB87,0,1);assert(device.references==1 && !device.children);
+    c=muted_stream_description();uint32_t alt=0x335d99;x_guest_write(0x3ffd+12,&alt,4);reject_stream(&c,0x37D835);
+    for(unsigned bin=27;bin<=30;++bin){
+        c=global_stream_description();x_guest_write(0xaffe,&bin,4);x_guest_write(0x3ffd+12,&alt,4);call(&c,0x37D835,0,2);
+        uint32_t h=read32(0x6ffe);h2_audio_stream *s=stream_live(&c,0x37D835,h);
+        assert(s->callback==alt && s->route_count==1 && s->route_bin==bin && !g_v[s->voice].playing && !g_v[s->voice].nq);
+        c=context(h,0,0,0);call(&c,0x37B818,0,2);assert(g_v[s->voice].volume==1.0f);
+        c=context(h,0,0,0);call(&c,0x37AB87,0,1);
+    }
     c=stream_description(dev,0);
     int ids[XA_MAX_VOICES];for(unsigned i=0;i<XA_MAX_VOICES;i++){ids[i]=xk_audio_voice_new(2,0x4FF9);assert(ids[i]>=0);}
     before=read32(0x6FFE);unsigned old_frees=frees;

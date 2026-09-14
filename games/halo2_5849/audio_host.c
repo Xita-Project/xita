@@ -485,7 +485,7 @@ static void stream_create(xctx *c, uint32_t ip)
         fail(c, ip, "stream caller/descriptor", desc);
     x_guest_read(fields, desc, sizeof fields);
     if (fields[0] != (global ? 0x40000000u : 0x20000000u) || fields[1] != 2 ||
-        fields[3] != (global ? 0x335D82u : 0x220730u) || (!global && fields[5]))
+        (global ? (fields[3]!=0x335D82u && fields[3]!=0x335D99u) : fields[3]!=0x220730u) || (!global && fields[5]))
         fail(c, ip, "unsupported stream description", fields[0]);
     uint32_t routes[2]={0}, pair[10]={0};
     if (global) {
@@ -499,6 +499,7 @@ static void stream_create(xctx *c, uint32_t ip)
         } else {
             /* Original 333890: four DSP descriptor bins and center, all muted.
              * Only empty ownership is supported; Process remains a strict stop. */
+            if(fields[3]!=0x335D82)fail(c,ip,"muted stream callback",fields[3]);
             for(unsigned i=0;i<5;++i)
                 if(pair[i*2]!=(i<4?27+i:2) || pair[i*2+1]!=(uint32_t)-10000)
                     fail(c,ip,"unsupported muted global stream route",pair[i*2]);
@@ -554,6 +555,7 @@ static void stream_create(xctx *c, uint32_t ip)
             X_M32(c->r[4]), base, voice, kind, format[2], fields[3], fields[4], device.references);
     if (global) xv_logf("[h2/audio-stream] global mono16/8000Hz accurate-notify retained; only checked zero packets and completed-sink notifications supported\n");
     if (routes[0]==5) xv_logf("[h2/audio-stream] five exact muted routes retained, real inactive voice gain zero; Process unsupported\n");
+    if (fields[3]==0x335D99) xv_logf("[h2/audio-stream] alternate original callback retained for empty ownership; Process unsupported\n");
     result(c, 0, args);
 }
 #if H2_AUDIO_DSP
