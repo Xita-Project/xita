@@ -268,6 +268,28 @@ static void buffer_control(xctx *c, uint32_t ip)
             ip, value, X_M32(c->r[4]), b->frequency, b->volume, b->headroom);
     result(c, 0, 2);
 }
+#if H2_AUDIO_MULTIBIN_UNAVAILABLE
+/* Explicit failure probe for the observed movie's unsupported six-speaker
+ * route. The real PCM voice retains its original FL/FR defaults unchanged. */
+static void multibin_unavailable(xctx *c)
+{
+    const uint32_t ip = 0x37C5E4;
+    stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    uint32_t list_address = X_ARG(1), list[2], pairs[12];
+    if (X_M32(c->r[4]) != 0x3E321F || !b->mirror || !mapped(list_address, 8))
+        fail(c, ip, "multibin diagnostic caller/input", list_address);
+    x_guest_read(list, list_address, 8);
+    if (list[0] != 6 || !mapped(list[1], sizeof pairs))
+        fail(c, ip, "multibin diagnostic list", list[0]);
+    x_guest_read(pairs, list[1], sizeof pairs);
+    for (unsigned i = 0; i < 6; ++i)
+        if (pairs[i * 2] != i || pairs[i * 2 + 1])
+            fail(c, ip, "multibin diagnostic route", pairs[i * 2]);
+    xv_logf("[h2/diagnostic] SetMixBins caller=%08X interface=%08X bins0..5 volume0 returns DSERR_UNSUPPORTED=80004001; real default FL/FR voice unchanged\n",
+            X_M32(c->r[4]), b->base + 0x1C);
+    result(c, 0x80004001, 2);
+}
+#endif
 static void query(xctx *c, uint32_t ip)
 {
     stack(c, ip, 2);
@@ -359,6 +381,9 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37B5AE: case 0x37B5CA: query(c, ip); break;
     case 0x37D506: case 0x37D5CD: case 0x37D52A: scalar(c, ip); break;
     case 0x37B637: mix_bin(c, ip); break;
+#if H2_AUDIO_MULTIBIN_UNAVAILABLE
+    case 0x37C5E4: multibin_unavailable(c); break;
+#endif
 #if H2_AUDIO_EFFECTS_UNAVAILABLE
     case 0x37B86D: effects_unavailable(c); break;
 #endif
@@ -427,6 +452,11 @@ void h2_audio_trace_buffer(xctx *c, uint32_t ip)
             xv_logf("[h2/audio-buffer] stop interface=%08X refs=%u voice=%d external=%08X bytes=%u mirror=%08X frequency=%u volume=%d headroom=%u\n",
                     b->base + 0x1C, b->references, b->voice, b->source, b->bytes, b->mirror,
                     b->frequency, b->volume, b->headroom);
+    }
+    if (ip == 0x37B7B3 && !(c->r[4] & 3) && mapped(c->r[4], 36)) {
+        xv_logf("[h2/audio-buffer] Lock caller=%08X interface=%08X offset=%u bytes=%u pointer1=%08X length1=%08X pointer2=%08X length2=%08X flags=%08X\n",
+                X_M32(c->r[4]), X_ARG(0), X_ARG(1), X_ARG(2), X_ARG(3), X_ARG(4), X_ARG(5), X_ARG(6), X_ARG(7));
+        return;
     }
     if (ip == 0x37C5E4 && !(c->r[4] & 3) && mapped(c->r[4], 12)) {
         uint32_t address = X_ARG(1), list[2];

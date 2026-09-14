@@ -152,3 +152,78 @@ next bounded task is to establish the six-bin routing contract for this stereo
 buffer, then implement verified write commits and playback/cursor behavior.
 The shared mixer exposes a decode-ahead cursor, so it cannot be treated as an
 accurate DirectSound play cursor without additional validation.
+
+## Explicit unavailable-multibin diagnostic
+
+The actual PCM format/default-settings path through `37CDCA`, `37C825`,
+`37DA87`, `37D9EE` and `37BC89` selects the two-entry list at `3858BC`:
+bin 0/volume 0, bin 1/volume 0. This matches the existing real stereo mixer.
+The requested six-bin list is different. Original `37BC89` stores its ordered
+bin bytes at settings+`28`, signed volume indexed by bin at +`30`, and count at
++`24`. No 3D/multipass transformation applies to the observed flags `A0`.
+
+The pinned [xemu VP implementation](https://github.com/xemu-project/xemu/blob/75650bd8cd91945f7b79774e2cee0b200ca373ff/hw/xbox/mcpx/apu/vp/vp.c)
+assigns each hardware routing slot its source channel modulo channel count.
+Six alternating routes therefore cannot simply be treated as two routes by
+silently dropping center, LFE and rear bins. Their final fold-down requires an
+established speaker/DSP output policy. That policy is not implemented here.
+
+With the separately enabled `AUDIO_MULTIBIN_UNAVAILABLE=1`, the exact movie
+call returns the [documented unavailable-operation result](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ee416776(v=vs.85)),
+`DSERR_UNSUPPORTED=80004001`, and leaves the
+real default FL/FR voice unchanged. This is a failure-path diagnostic, not a
+six-bin implementation. It requires the real audio host and checks caller
+`3E321F`, a live bound buffer, mapped list and all six exact `(bin,volume)` pairs.
+Unexpected callers, layouts, counts, values and invalid memory still stop.
+Without this flag, even the observed valid six-bin request remains fatal.
+
+Bink's original `3E321F..3E325D` return path does not test the SetMixBins HRESULT.
+The caller at `3E3BF4` immediately invokes its normal clear-buffer helper.
+Private original-code tests compare success and `80004001` and reach identical
+Lock arguments at `37B7B3`, return `3E3293`: offset 0, size `1A000`, flags 0,
+and the buffer's own pointer/length output fields. This establishes control
+flow under the stated failure, without claiming that Xbox normally rejects
+this valid six-bin list. Evidence is
+`../private/audio-host/movie-routing-original-check.json` and its private
+`check_original_movie_routing.py` driver. Hardware route commit, pitch conversion
+and critical-section helpers are isolated in that test.
+
+Thirty-one host executables and 42 Python tests pass for this increment. The
+failure-enabled buffer executable also passes ASan/UBSan. Its full-state checks
+verify no guest memory, buffer, mixer voice, device reference or allocation
+changes on the accepted negative result. Both default strict and diagnostic
+builds reject malformed callers, counts, route values and mappings. Subsequent
+test-only real mixer playback retains the expected stereo samples.
+
+Native98 executes the explicit failure and reaches the original whole-buffer
+Lock at `37B7B3`, return `3E3293`, stack `005E596C`. Its arguments are
+interface `00B8601C`, offset 0, length 106496, pointer1/length1 outputs
+`8006408C`/`80064088`, pointer2/length2 outputs `80064094`/`80064090`, flags 0.
+The worker again reports one silent grain, no nonzero grains and no output
+error. The black raw frame and channel snapshot retain the hashes above;
+no movie/menu is visible. Terminal snapshots complete before the same
+unclassified post-exit Vita3K fault. The lab uses dummy/muted audio; host sample
+checks do not imply physical audibility.
+
+| Native98 artifact | SHA-256 |
+| --- | --- |
+| ELF | `d93347ab1eeb880c8bb72fb1e89c1024a967fece3b22e161a8915481c4b7c840` |
+| EBOOT | `5ccce42470d09ee42d8fb5922fc2fd285f13bb2df8fe149dd37914e7987b142e` |
+| VPK | `8a2ba336f08a9be79f4ab68acfe47e55d30545eddbb6694cecc2f56c29962bec` |
+| Guest trace | `35f061e9d562027331bd0b6c2b7b12bce5584c67d7b9171e0eed5301f381b914` |
+
+The frozen artifacts/captures are `../private/native-98-artifacts` and
+`../private/native-98-view`. The fresh source/image/build directory is
+`../private/audio-movie-stereo-failure`, with Native97's flags plus
+`AUDIO_MULTIBIN_UNAVAILABLE=1`. Exact replay uses the same private launcher:
+
+```sh
+cd /home/birchwoodgod/xita-backups/2026-09-12-halo2-initial-profile/private
+python3 run_lab.py replay98 native-98-artifacts/halo2-boot.vpk
+# After the terminal trace completes:
+python3 run_lab.py stop
+```
+
+The next boundary is the original Lock/Unlock pair and committed guest sample
+ownership. No implementation of that pair, playback, cursor reporting or
+surround fold-down is included in Native98.

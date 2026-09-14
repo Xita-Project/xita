@@ -95,6 +95,40 @@ static xctx description(uint32_t dev)
     x_guest_write(0x3FFD, fields, sizeof fields); x_guest_write(0x4FF9, wave, sizeof wave);
     return context(dev, 0x3FFD, 0x6FFE, 0);
 }
+static xctx routing_context(uint32_t handle)
+{
+    xctx c = context(handle, 0x3FFC, 0, 0); X_M32(c.r[4]) = 0x3E321F;
+    uint32_t list[2] = {6, 0x4FEC}, pairs[12];
+    for (unsigned i = 0; i < 6; ++i) { pairs[i*2] = i; pairs[i*2+1] = 0; }
+    x_guest_write(0x3FFC, list, 8); x_guest_write(0x4FEC, pairs, sizeof pairs);
+    return c;
+}
+static void routing_tests(uint32_t handle)
+{
+    xctx c = routing_context(handle);
+#if H2_AUDIO_MULTIBIN_UNAVAILABLE
+    uint8_t *ram = malloc(0x200000); assert(ram); memcpy(ram, g_xram, 0x200000);
+    h2_audio_device_snapshot dev = device; h2_audio_buffer bs[XA_MAX_VOICES]; xa_voice vs[XA_MAX_VOICES];
+    memcpy(bs, buffers, sizeof bs); memcpy(vs, g_v, sizeof vs);
+    unsigned al = allocs, fr = frees, cl = closes;
+    call(&c, 0x37C5E4, 0x80004001, 2);
+    assert(!memcmp(ram, g_xram, 0x200000) && !memcmp(&dev, &device, sizeof dev));
+    assert(!memcmp(bs, buffers, sizeof bs) && !memcmp(vs, g_v, sizeof vs));
+    assert(al == allocs && fr == frees && cl == closes); free(ram);
+    c = routing_context(handle); X_M32(c.r[4]) ^= 1; reject(&c, 0x37C5E4);
+    c = routing_context(handle); X_M32(0x3FFC) = 5; reject(&c, 0x37C5E4);
+    c = routing_context(handle); X_M32(0x3FFC) = UINT32_MAX; reject(&c, 0x37C5E4);
+    c = routing_context(handle); X_M32(0x4000) = 0xFFFFFFF0; reject(&c, 0x37C5E4);
+    c = routing_context(handle); g_xpt[5] = 0x1FF000; reject(&c, 0x37C5E4); g_xpt[5] = 0x4000;
+    for (unsigned i = 0; i < 12; ++i) {
+        c = routing_context(handle); X_M32(0x4FEC + i * 4) ^= 0x100; reject(&c, 0x37C5E4);
+    }
+    c = routing_context(handle); X_M32(0x386B0C) = 1; reject(&c, 0x37C5E4); X_M32(0x386B0C) = 0;
+    c = routing_context(handle); healthy = 0; reject(&c, 0x37C5E4); healthy = 1;
+#else
+    reject(&c, 0x37C5E4); /* exactly the valid movie list is fatal by default */
+#endif
+}
 int main(void)
 {
     unsetenv("XV_VOLUME"); g_xram = calloc(1, 0x200000); g_img_base = g_xram;
@@ -152,6 +186,7 @@ int main(void)
     /* No guest success is supplied for routing, Play, Lock or streams. */
     c = context(handle, 0, 0, 0);
     reject(&c, 0x37C5E4); reject(&c, 0x37B6DF); reject(&c, 0x37B7B3); reject(&c, 0x37B7E3);
+    routing_tests(handle);
     int voice = b->voice;
     xk_audio_voice_play(voice, 1);
     int16_t mixed[XA_GRAIN * 2]; xk_audio_mix(mixed, XA_GRAIN); xk_audio_mix(mixed, XA_GRAIN);

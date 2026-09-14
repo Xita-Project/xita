@@ -70,6 +70,14 @@ class AudioHooks(unittest.TestCase):
                 self.construct()
             self.image.words[slot] = original
 
+    def test_multibin_failure_requires_real_audio_host(self):
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(["make", "-C", str(root / "games/halo2_5849"), "-n",
+                                 "AUDIO_HOST=0", "AUDIO_MULTIBIN_UNAVAILABLE=1"],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AUDIO_MULTIBIN_UNAVAILABLE=1 requires AUDIO_HOST=1", result.stderr)
+
     def test_cli_is_explicit_and_mutually_exclusive(self):
         command = [sys.executable, str(Path(__file__).resolve().parents[1] / "games/halo2_5849/prepare_boot.py"), "missing.xbe"]
         for flags, message in ((["--audio-host"], "requires --host-channel"),
