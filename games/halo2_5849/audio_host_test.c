@@ -66,6 +66,53 @@ static void reject(xctx *c, uint32_t ip)
 }
 static uint32_t read32(uint32_t address)
 { uint32_t value; x_guest_read(&value, address, 4); return value; }
+static void original_entry(xctx *c, uint32_t ip, int allowed)
+{
+    xctx before = *c; h2_audio_device_snapshot state = device;
+    uint8_t memory[0x9000]; memcpy(memory, g_xram, sizeof memory);
+    unsigned op = opens, cl = closes, al = allocations, fr = frees, bu = bin_updates;
+    uint32_t fp = native_fp;
+    if (!setjmp(stopped)) { h2_audio_guest_entry(c, ip); assert(allowed); }
+    else assert(!allowed);
+    assert(!memcmp(c, &before, sizeof before) && !memcmp(&state, &device, sizeof state));
+    assert(!memcmp(memory, g_xram, sizeof memory) && fp == native_fp);
+    assert(op == opens && cl == closes && al == allocations && fr == frees && bu == bin_updates);
+}
+static void original_configuration_tests(void)
+{
+    g_xpt[0x387] = 0x6000; g_xpt[7] = 0x7000;
+    const uint32_t entries[] = {0x379F5B, 0x379E9E, 0x37E126};
+    const uint32_t callers[] = {0x21E604, 0x379F61, 0x379F69};
+    for (unsigned i = 0; i < 3; ++i) {
+        xctx c = context(0, 0, 0); c.fs_base = 0x7000;
+        X_M32(c.r[4]) = callers[i];
+        for (unsigned irql = 0; irql < 3; ++irql) {
+            X_M8(0x7024) = irql; original_entry(&c, entries[i], 1);
+        }
+        X_M32(c.r[4]) ^= 4; original_entry(&c, entries[i], 0); X_M32(c.r[4]) = callers[i];
+        c.r[4]++; original_entry(&c, entries[i], 0); c.r[4]--;
+        c.fs_base = 0xFFFFFFF0; original_entry(&c, entries[i], 0);
+        c.fs_base = 0x8000; original_entry(&c, entries[i], 0); c.fs_base = 0x7000;
+        const unsigned pages[] = {0x386, 0x387, 1};
+        for (unsigned j = 0; j < 3; ++j) {
+            uint32_t saved = g_xpt[pages[j]];
+            g_xpt[pages[j]] = 0x8000; original_entry(&c, entries[i], 0);
+            if (pages[j] != 1) { g_xpt[pages[j]] = 0x4000; original_entry(&c, entries[i], 0); }
+            g_xpt[pages[j]] = saved;
+        }
+        healthy = 0; original_entry(&c, entries[i], 0); healthy = 1;
+        c.fs_base = 0x3871C8 - 0x24; original_entry(&c, entries[i], 0);
+        c.fs_base = 0x386B18 - 0x24; original_entry(&c, entries[i], 0);
+        c.fs_base = c.r[4] - 0x24; original_entry(&c, entries[i], 0);
+        /* Distinct guest pages mapping overlapping original table/stack bytes. */
+        c.fs_base = 0x7000; c.r[4] = 0x21E0; X_M32(c.r[4]) = callers[i];
+        g_xpt[0x387] = g_xpt[2]; original_entry(&c, entries[i], 0); g_xpt[0x387] = 0x6000;
+        /* A valid return word is insufficient if original pushes cross a gap. */
+        c.r[4] = 0x1000; X_M32(c.r[4]) = callers[i]; original_entry(&c, entries[i], 0);
+    }
+    xctx c = context(0, 0, 0); original_entry(&c, 0x37DEBF, 0); /* selected HRTF body */
+    original_entry(&c, 0x37B86D, 0); /* DSP image loader */
+}
 static void only_changed(const uint8_t *before, uint32_t out, unsigned bytes, int header)
 {
     uint8_t allowed[0x9000] = {0};
@@ -81,6 +128,7 @@ int main(void)
     assert(g_xram && g_xpt); memset(g_xram, 0xCC, 0x9000);
     for (unsigned i = 0; i < 1u << 20; ++i) g_xpt[i] = 0x8000;
     g_xpt[1] = 0; g_xpt[2] = 0x1000; g_xpt[3] = 0x3000; g_xpt[4] = 0x2000;
+    g_xpt[0x386] = 0x5000; X_M32(0x386B0C) = 0;
     xctx c = context(0, 0x2FFE, 0);
     h2_audio_guest_entry(&c, 0x37DACA); /* original static initializers still run */
     c = context(1, 0x2FFE, 0); reject(&c, 0x37D797);
@@ -99,6 +147,7 @@ int main(void)
     call(&c, 0x37D797, 0, 3); only_changed(memory, 0x2FFE, 4, 1);
     assert(read32(0x2FFE) == 0x5008 && healthy && allocated && device.references == 1);
     assert(X_M32(0x5000) == 0x417120 && X_M32(0x5004) == 1);
+    assert(device.doppler == 0x3F800000 && device.pending_doppler == 0x3F800000);
     for (unsigned i = 0; i < 32; ++i) assert(device.headroom[i] == (i != 31));
     /* A second caller shares the actual device, without a second output worker. */
     unsigned op = opens; c = context(0, 0x4100, 0); call(&c, 0x37D797, 0, 3);
@@ -120,8 +169,23 @@ int main(void)
     assert(device.distance == 0x4043126F && device.pending_distance == 0x3F000000 && device.dirty == 8);
     c = context(0x5008, 0x80000000, 1); call(&c, 0x37D5CD, 0, 3);
     assert(device.rolloff == 0x3F800000 && device.pending_rolloff == 0x80000000 && device.dirty == 24);
+    c = context(0x5008, 0, 1); call(&c, 0x37D52A, 0, 3);
+    assert(device.doppler == 0x3F800000 && !device.pending_doppler && device.dirty == 56);
     c = context(0x5008, 0x41200000, 0); call(&c, 0x37D5CD, 0, 3);
-    assert(device.distance == 0x3F000000 && device.rolloff == 0x41200000 && !device.dirty);
+    assert(device.distance == 0x3F000000 && device.rolloff == 0x41200000 && !device.doppler && !device.dirty);
+    /* Original deferred bits survive until an immediate call of any scalar. */
+    const uint32_t doppler_bits[] = {0, 0x80000000, 1, 0x007FFFFF, 0x00800000, 0x3F800000, 0x41200000};
+    const uint32_t immediate_entries[] = {0x37D506, 0x37D5CD, 0x37D52A};
+    for (unsigned i = 0; i < sizeof doppler_bits / sizeof *doppler_bits; ++i) {
+        for (unsigned j = 0; j < 3; ++j) {
+            uint32_t active = device.doppler;
+            c = context(0x5008, doppler_bits[i], 1); call(&c, 0x37D52A, 0, 3);
+            assert(device.doppler == active && device.pending_doppler == doppler_bits[i] && device.dirty == 32);
+            c = context(0x5008, j == 2 ? doppler_bits[i] : 0x3F800000, 0);
+            call(&c, immediate_entries[j], 0, 3);
+            assert(device.doppler == doppler_bits[i] && !device.dirty);
+        }
+    }
     c = context(0x5008, 0x00800000, 0); call(&c, 0x37D506, 0, 3);
     assert(device.distance == 0x00800000);
     c = context(0x5008, 0x7F7FFFFF, 0); call(&c, 0x37D506, 0, 3);
@@ -133,7 +197,12 @@ int main(void)
     const uint32_t bad_rolloff[] = {0xBF800000, 0x41200001, 0xFFC00001, 0xFF800000};
     for (unsigned i = 0; i < sizeof bad_rolloff / sizeof *bad_rolloff; ++i) {
         c = context(0x5008, bad_rolloff[i], 0); reject(&c, 0x37D5CD);
+        c = context(0x5008, bad_rolloff[i], 1); reject(&c, 0x37D52A);
     }
+    c = context(0x5008, 0x3F800000, 2); reject(&c, 0x37D52A);
+    c = context(0x5008, 0x3F800000, 0);
+    X_M32(0x386B0C) = 1; reject(&c, 0x37D52A); X_M32(0x386B0C) = 0;
+    g_xpt[0x386] = 0x8000; reject(&c, 0x37D52A); g_xpt[0x386] = 0x5000;
     c = context(0x5008, 0x3F800000, 2); reject(&c, 0x37D506);
     c = context(0x5008, 0x4100, 0); healthy = 0; reject(&c, 0x37B5CA); healthy = 1;
     for (unsigned bin = 0; bin < 32; ++bin) {
@@ -147,7 +216,8 @@ int main(void)
     c = context(0x5008, UINT32_MAX, 0); reject(&c, 0x37B637);
     c = context(0x5000, 0, 0); reject(&c, 0x37B637);
     c = context(0x5008, 0, 0); healthy = 0; reject(&c, 0x37B637); healthy = 1;
-    reject(&c, 0x37D52A); /* no success fallback for the next original method */
+    reject(&c, 0x37B86D); /* no success fallback for the effects image loader */
+    original_configuration_tests();
     c = context(0x5008, 0, 0); reject(&c, 0x37A14F); /* common header expects base, not interface */
     c = context(0x5000, 0, 0); call(&c, 0x37A14F, 3, 1);
     X_M32(0x5004) = 9; c = context(0x5000, 0, 0); reject(&c, 0x37A14F); X_M32(0x5004) = 3;
@@ -169,6 +239,7 @@ int main(void)
     c = context(0x5008, 0x4100, 0); reject(&c, 0x37B5CA);
     if (!setjmp(stopped)) { h2_audio_guest_entry(&c, 0x37B637); assert(!"unknown original method must stop after host creation"); }
     c = context(0, 0x4100, 0); call(&c, 0x37D797, 0, 3); assert(device.distance == 0x3F800000);
+    assert(device.doppler == 0x3F800000 && device.pending_doppler == 0x3F800000);
     for (unsigned i = 0; i < 32; ++i) assert(device.headroom[i] == (i != 31));
     c = context(0x5000, 0, 0); call(&c, 0x37C70F, 0, 1); assert(frees == 2);
     free(g_xpt); free(g_xram); puts("Halo 2 audio device ABI/lifetime tests passed"); return 0;

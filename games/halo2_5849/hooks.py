@@ -211,6 +211,7 @@ class Halo2AudioUnavailableHooks(Halo2HostChannelHooks):
 
 
 AUDIO_HOST_BOUNDARIES = {
+    0x37D52A: (36, "ae868f50868faf0f465131b3bbd5e9535658ab3b345614c5c4274ce28e5d8166"),
     0x37B637: (32, "9cd8e91683d0bd423aefc6a5ec381a25191ffc3ea7cd0a7f3c3a91933b2e3dcf"),
     0x37D797: (71, "937701608e296f3edcb1b3b77221d14015ee71e5b094256ba8fe1f50b76d7a0c"),
     0x37B5AE: (28, "a1220eefc06488fc180381e054af0cc9236b398f28a89b131070c3295b0cb14e"),
@@ -221,13 +222,21 @@ AUDIO_HOST_BOUNDARIES = {
     0x37C70F: (201, "f37d2bbd41311fc416c2b8903348f7277202a97ec15b333b4549be1359a89484"),
 }
 
+# These execute original generated code after a read-only runtime guard. They
+# configure algorithm pointers only; none of the selected HRTF bodies is HLE'd.
+AUDIO_ORIGINAL_BOUNDARIES = {
+    0x379F5B: (31, "7f397c78fa9ddaa3fc01f85707ae08b470294586a72dacef5c6dec704dea2f73"),
+    0x379E9E: (30, "c66d5fef481a4aa92bb4e6df72e3f1e2cfb1fc0a9f0bc0ac8ff03aeaf34c597c"),
+    0x37E126: (111, "18c533b0df59f16b85abb24c514759e0eb47802cf4dd639bc51389c711aec77c"),
+}
+
 
 class Halo2AudioHostHooks(Halo2HostChannelHooks):
     """Opt-in, bounded real-output device adapter; unknown methods stop."""
     def __init__(self, image):
         super().__init__(image)
         self.image = image
-        for address, (length, digest) in AUDIO_HOST_BOUNDARIES.items():
+        for address, (length, digest) in (AUDIO_HOST_BOUNDARIES | AUDIO_ORIGINAL_BOUNDARIES).items():
             if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
                 raise ValueError(f"Halo 2 audio host boundary mismatch at {address:#x}")
         if image.u32(0x417124) != 0x37A14F or image.u32(0x417128) != 0x37C70F:

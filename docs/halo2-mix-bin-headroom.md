@@ -137,6 +137,8 @@ No CE emulator, physical Vita or USB device was touched.
 
 The next bounded task is the independently identified `37D52A` Doppler setter
 and its deferred-state contract, followed by auditing the original `379F5B`
-DirectSound work call before allowing it to return. Buffer/stream/effect and
+configuration call before allowing it to return. The subsequent
+[Doppler/HRTF audit](halo2-deferred-doppler.md) identifies this precisely as
+DirectSoundUseLightHRTF4Channel, not DirectSoundDoWork. Buffer/stream/effect and
 unsupported routing methods remain explicit stops. This milestone does not
 supply a fabricated completion or substitute menu screen.

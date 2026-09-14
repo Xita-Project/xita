@@ -77,8 +77,9 @@ static void create(xctx *c)
         if ((base & 4095) || !mapped(base, 4096)) fail(c, ip, "allocation mapping", base);
         device = (h2_audio_device_snapshot){
             .base = base, .references = 1, .ever_created = 1,
-            .distance = 0x3F800000, .rolloff = 0x3F800000,
-            .pending_distance = 0x3F800000, .pending_rolloff = 0x3F800000
+            .distance = 0x3F800000, .rolloff = 0x3F800000, .doppler = 0x3F800000,
+            .pending_distance = 0x3F800000, .pending_rolloff = 0x3F800000,
+            .pending_doppler = 0x3F800000
         };
         memset(device.headroom, 1, 31);
         /* Match only the independently audited common vtable/refcount header.
@@ -137,17 +138,21 @@ static void scalar(xctx *c, uint32_t ip)
     else valid &= (bits == 0x80000000 || !(bits >> 31)) && magnitude <= 0x41200000;
     if (!valid) fail(c, ip, "listener parameters", bits);
     live(c, ip, X_ARG(0), 0);
+    if (ip == 0x37D52A && (!mapped(0x386B0C, 4) || X_M32(0x386B0C)))
+        fail(c, ip, "unsupported sound shutdown state", 0x386B0C);
     if (ip == 0x37D506) { device.pending_distance = bits; device.dirty |= 8; }
-    else { device.pending_rolloff = bits; device.dirty |= 16; }
+    else if (ip == 0x37D5CD) { device.pending_rolloff = bits; device.dirty |= 16; }
+    else { device.pending_doppler = bits; device.dirty |= 32; }
     if (!apply) {
         /* Original immediate application commits all pending listener values.
          * There are no 3D voices in this supported subset. */
         device.distance = device.pending_distance; device.rolloff = device.pending_rolloff;
+        device.doppler = device.pending_doppler;
         device.dirty = 0;
     }
-    xv_logf("[h2/audio] listener entry=%08X bits=%08X apply=%u active=%08X,%08X pending=%08X,%08X dirty=%X\n",
-            ip, bits, apply, device.distance, device.rolloff,
-            device.pending_distance, device.pending_rolloff, device.dirty);
+    xv_logf("[h2/audio] listener entry=%08X bits=%08X apply=%u active=%08X,%08X,%08X pending=%08X,%08X,%08X dirty=%X\n",
+            ip, bits, apply, device.distance, device.rolloff, device.doppler,
+            device.pending_distance, device.pending_rolloff, device.pending_doppler, device.dirty);
     result(c, 0, 3);
 }
 static void mix_bin(xctx *c, uint32_t ip)
@@ -170,14 +175,50 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37D797: create(c); break;
     case 0x37A14F: case 0x37C70F: reference(c, ip); break;
     case 0x37B5AE: case 0x37B5CA: query(c, ip); break;
-    case 0x37D506: case 0x37D5CD: scalar(c, ip); break;
+    case 0x37D506: case 0x37D5CD: case 0x37D52A: scalar(c, ip); break;
     case 0x37B637: mix_bin(c, ip); break;
     default: fail(c, ip, "unimplemented adapter", ip);
     }
     h2_platform_fpscr_write(fpscr);
 }
+/* Small validated ranges only. Include physical aliases across distinct guest
+ * pages when checking the original writer's table/control/stack footprint. */
+static int aliases(uint32_t a, unsigned an, uint32_t b, unsigned bn)
+{
+    for (unsigned i = 0; i < an; ++i) {
+        uint32_t pa = g_xpt[(a + i) >> 12] + ((a + i) & 4095);
+        for (unsigned j = 0; j < bn; ++j)
+            if (pa == g_xpt[(b + j) >> 12] + ((b + j) & 4095)) return 1;
+    }
+    return 0;
+}
 void h2_audio_guest_entry(xctx *c, uint32_t ip)
 {
-    if (device.ever_created) fail(c, ip, "unsupported original DSOUND method", ip);
+    if (!device.ever_created) return;
+    uint32_t caller;
+    switch (ip) {
+    case 0x379F5B: caller = 0x21E604; break;
+    case 0x379E9E: caller = 0x379F61; break;
+    case 0x37E126: caller = 0x379F69; break;
+    default: fail(c, ip, "unsupported original DSOUND method", ip);
+    }
+    uint32_t fpscr = h2_platform_fpscr_read();
+    stack(c, ip, 0);
+    if (X_M32(c->r[4]) != caller) fail(c, ip, "original sound configuration caller", X_M32(c->r[4]));
+    live(c, ip, device.base + 8, 0);
+    if (c->r[4] < 32 || c->fs_base > UINT32_MAX - 0x24 || !mapped(c->fs_base + 0x24, 1))
+        fail(c, ip, "original sound configuration control", c->fs_base);
+    /* Original code pushes at most 16 further bytes. Reserve/check 32 before
+     * permitting it to run; this guard never initializes or writes them. */
+    uint32_t low = c->r[4] - 32, irql = c->fs_base + 0x24;
+    output(c, ip, low, 36); output(c, ip, 0x386B18, 28); output(c, ip, 0x3871C8, 44);
+    if (aliases(0x3871C8, 44, 0x386B18, 28) || aliases(0x3871C8, 44, low, 36) ||
+        aliases(0x386B18, 28, low, 36) || aliases(0x3871C8, 44, irql, 1) ||
+        aliases(0x386B18, 28, irql, 1) || aliases(low, 36, irql, 1))
+        fail(c, ip, "original sound configuration alias", ip);
+    if (ip == 0x379F5B)
+        xv_logf("[h2/audio] executing original LightHRTF4Channel configuration caller=%08X irql=%u\n",
+                caller, X_M8(irql));
+    h2_platform_fpscr_write(fpscr);
 }
 void h2_audio_host_snapshot(h2_audio_device_snapshot *out) { *out = device; }

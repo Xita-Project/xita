@@ -7,14 +7,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from games.halo2_5849.hooks import (
-    AUDIO_HOST_BOUNDARIES, HOST_BOUNDARIES, Halo2AudioHostHooks, Halo2AudioUnavailableHooks,
+    AUDIO_HOST_BOUNDARIES, AUDIO_ORIGINAL_BOUNDARIES, HOST_BOUNDARIES, Halo2AudioHostHooks, Halo2AudioUnavailableHooks,
     Halo2HostChannelHooks,
 )
 
 
 class Image:
     def __init__(self):
-        self.parts = {address: str(address).encode() for address in AUDIO_HOST_BOUNDARIES}
+        self.parts = {address: str(address).encode() for address in AUDIO_HOST_BOUNDARIES | AUDIO_ORIGINAL_BOUNDARIES}
         self.words = {0x417124: 0x37A14F, 0x417128: 0x37C70F}
 
     def bytes_at(self, address, length):
@@ -24,7 +24,7 @@ class Image:
         return self.words[address]
 
     def section_of(self, address):
-        return (0, 0, 0, 0, "DSOUND" if address == 0x379F5B else ".text", ())
+        return (0, 0, 0, 0, "DSOUND" if address in AUDIO_ORIGINAL_BOUNDARIES or address == 0x37B86D else ".text", ())
 
 
 class AudioHooks(unittest.TestCase):
@@ -34,16 +34,18 @@ class AudioHooks(unittest.TestCase):
 
     def construct(self):
         with patch.object(Halo2HostChannelHooks, "__init__", return_value=None), \
-                patch.dict(AUDIO_HOST_BOUNDARIES, self.expected, clear=True):
+                patch.dict(AUDIO_HOST_BOUNDARIES, {a: self.expected[a] for a in AUDIO_HOST_BOUNDARIES}, clear=True), \
+                patch.dict(AUDIO_ORIGINAL_BOUNDARIES, {a: self.expected[a] for a in AUDIO_ORIGINAL_BOUNDARIES}, clear=True):
             return Halo2AudioHostHooks(self.image)
 
     def test_exact_boundaries_and_unknown_method_guard(self):
         hook = self.construct()
         for address in AUDIO_HOST_BOUNDARIES:
             self.assertIn("h2_audio_host_call", "".join(hook.function_entry(address)))
-        guard = "".join(hook.function_entry(0x379F5B))
-        self.assertIn("h2_audio_guest_entry", guard)
-        self.assertNotIn("return;", guard)
+        for address in [*AUDIO_ORIGINAL_BOUNDARIES, 0x37B86D]:
+            guard = "".join(hook.function_entry(address))
+            self.assertIn("h2_audio_guest_entry", guard)
+            self.assertNotIn("return;", guard)
         self.assertEqual(hook.function_entry(0x123456), [])
         normal = object.__new__(Halo2HostChannelHooks)
         for address in HOST_BOUNDARIES:

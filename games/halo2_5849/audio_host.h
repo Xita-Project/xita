@@ -3,7 +3,8 @@
 
 typedef struct {
     uint32_t base, references, ever_created;
-    uint32_t distance, rolloff, pending_distance, pending_rolloff, dirty;
+    uint32_t distance, rolloff, doppler;
+    uint32_t pending_distance, pending_rolloff, pending_doppler, dirty;
     uint8_t headroom[32];
 } h2_audio_device_snapshot;
 
@@ -16,7 +17,9 @@ typedef struct {
 void h2_audio_host_call(xctx *c, uint32_t entry);
 /* Original DSOUND constructors can run before the first host device. Once a
  * host device exists, unknown original DSOUND methods must never read its
- * deliberately incomplete XDK object representation. */
+ * deliberately incomplete XDK object representation. Only the fingerprinted
+ * LightHRTF4Channel configuration wrapper/helper/writer may execute afterward,
+ * with checked callers and memory; this does not implement HRTF processing. */
 void h2_audio_guest_entry(xctx *c, uint32_t entry);
 void h2_audio_host_snapshot(h2_audio_device_snapshot *out);
 
