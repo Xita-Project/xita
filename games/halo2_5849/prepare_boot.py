@@ -96,6 +96,12 @@ GAME_STARTUP_WIDGET_CONSTRUCTORS = (
     (0x2B7269, 32, "80197ecb7c788fcdef80d420ace1c23bb3b5b063704d5a2de1b3f0a9a663e90c"),
     (0x2B7388, 6, "9a1381c2d5cae2abe6b261ed8da05f4b4ffb50cd3f83001353654c83aab7ad4c"),
 )
+GAME_TEXT_WIDGET_CONSTRUCTORS = (
+    (0x22F561, 30, "f3dbfe2397a2ad7ad4d86f0fbba196e80b76143b455fc7890bb58ee932689ecd"),
+    (0x22F583, 30, "0af4f3515f9b6b34f00727c0be7369e6e47f14a998372d1a5495982d9ce851e0"),
+    (0x22F4FA, 19, "a27a5c5dad3bab9e240ea5d61bb3be35633de873c4e7f8c9de1251d55fd80775"),
+    (0x22F532, 19, "2ec44c870c40e778e72b6f3d4a7a2b37fa8ab37ae974256d86e49fe9920be02e"),
+)
 
 
 def game_mode_callback_roots(image):
@@ -171,6 +177,21 @@ def game_startup_widget_vtable_roots(image):
     intervening 28 executable slots, including observed slot48h -> 2B7289.
     """
     return _constructor_vtable_roots(image, GAME_STARTUP_WIDGET_CONSTRUCTORS, 0x45BC60, 0x45BCD0)
+
+
+def game_text_widget_vtable_roots(image):
+    """Native147: outer getter returns member+74h; caller invokes member slot4.
+
+    The two original factory branches construct the same outer interface and
+    one of two three-method text members. Root only their executable prefixes;
+    the following zero words and adjacent object tables remain untouched.
+    """
+    roots = _constructor_vtable_roots(image, GAME_TEXT_WIDGET_CONSTRUCTORS, 0x458940, 0x458984)
+    for start, end in ((0x4588B0, 0x4588BC), (0x458930, 0x45893C)):
+        roots.update(_code_vtable_roots(image, start, end))
+    if any(image.u32(end) != 0 for end in (0x458984, 0x4588BC, 0x45893C)):
+        raise ValueError("Halo 2 text interface boundary mismatch")
+    return roots
 
 
 def game_online_interface_roots(image):
@@ -441,6 +462,7 @@ def main():
         roots.update(game_registered_interface_roots(image))
         roots.update(game_state_vtable_roots(image))
         roots.update(game_startup_widget_vtable_roots(image))
+        roots.update(game_text_widget_vtable_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))

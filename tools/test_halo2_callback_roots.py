@@ -30,6 +30,30 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_text_widget_and_embedded_member_prefixes(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        spans = ((0x458940, 0x458984), (0x4588B0, 0x4588BC), (0x458930, 0x45893C))
+        image.targets = {slot: 0x1000 + slot for start, end in spans for slot in range(start, end, 4)}
+        expected = set(image.targets.values())
+        for _, end in spans:
+            image.targets[end] = 0
+            if end + 4 not in image.targets:
+                image.targets[end + 4] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_TEXT_WIDGET_CONSTRUCTORS", (spec,) * 4):
+            self.assertEqual(prepare_boot.game_text_widget_vtable_roots(image), expected)
+            for start, end in spans:
+                saved = image.targets[start]; image.targets[start] = None
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_text_widget_vtable_roots(image)
+                image.targets[start] = saved; image.targets[end] = 0x123456
+                with self.assertRaisesRegex(ValueError, "boundary"):
+                    prepare_boot.game_text_widget_vtable_roots(image)
+                image.targets[end] = 0
+            image.code = b"x" * len(image.code)
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.game_text_widget_vtable_roots(image)
+
     def test_startup_widget_constructor_and_exact_vtable_bounds(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x45BC60, 0x45BCD0, 4))}
