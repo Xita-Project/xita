@@ -53,9 +53,13 @@ decoder:
 dense vtable, that codec table (`47FB24`) has 40-byte rows with callbacks at
 fixed offsets and is indexed as `[format*8*5 + 47FB24]`; its first row begins
 with null fields, so the linear code-word walk does not admit its later rows.
-Admitting it needs the structured, per-row extraction the existing
-`game_packed_vector_roots` already uses for two formats, extended to all nine —
-the next bounded step.
+`game_animation_codec_roots` now extracts it: it fingerprints the two binders,
+the dispatcher and the alternate caller, then walks all nine rows (every codec
+row shares decode callback `28D170` at `+0x18`, so the walk runs while that
+field is title code and then requires exactly nine rows) and roots every
+non-null callback. With it, the boot clears `28C710` and reaches an ordinary
+vtable method, `2243A0`, whose class table the reference walk has not yet named
+— the next bounded step on this path.
 
 The original Microsoft Game Studios intro remains visually verified; the last
 presented frame is still frame 136 and no main-menu frame has rendered. This is
@@ -68,8 +72,21 @@ A separate private experiment enabled the full `.data` code-pointer discovery
 (the same roots Halo CE uses) alongside the referenced-table walk. It lifts
 21,106 functions and boots considerably further — the real audio device is
 created, thousands of stream packets are processed, and `mainmenu.map` is copied
-and loaded — before stopping when the audio device object at guest `0x936000`
-is overwritten during stream-worker callback dispatch (its vtable word is
-zeroed, so the adapter's device-identity check fails). That corruption is the
-next blocker on the deeper path and is recorded for investigation; it is not
-part of this change, which keeps the strict no-data-roots invariant.
+and loaded.
+
+That deeper path exposed a real memory-manager defect, now fixed here. The audio
+adapter allocated the DirectSound device (and its buffers, streams and packet
+mirrors) with `xk_mem_alloc`, which draws from the same virtual pool the game's
+own `NtAllocateVirtualMemory`/free cycle uses. Traced with a device-page write
+watch and `map_page` logging, the failure was exact: the game freed virtual
+`0x936000`, `DirectSoundCreate` immediately reused that just-freed address for
+the long-lived device, and the game then wrote through a stale pointer to
+`0x936000`, zeroing the device's vtable so the identity check failed. The fix
+mirrors real hardware, where kernel/DirectSound objects come from a kernel heap
+distinct from the game's address space: `xk_mem_alloc_high` places kernel-owned,
+game-visible objects just below the kernel area (top-down on the same 64 KB
+grid), away from the game's low, reuse-prone heap. The adapter's ten allocations
+now use it. With the fix the device is created at `0x3CF6008`, the watch never
+fires, and the deeper path advances past the audio device to a later
+stream-completion callback (`335D38`) that invokes a still-absent virtual
+method. The strict no-data-roots default and every audio guard are unchanged.

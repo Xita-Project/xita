@@ -164,6 +164,7 @@ uint32_t xk_mem_arena_size(void);                  /* bytes to allocate for g_xr
 uint32_t xk_phys_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t highest, int top_down);
 int      xk_phys_free(uint32_t pa);
 uint32_t xk_mem_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t highest, int top_down);  /* 0 on failure */
+uint32_t xk_mem_alloc_high(uint32_t size, uint32_t align);   /* kernel-owned guest object, placed above the game heap */
 int      xk_mem_free(uint32_t addr);
 uint32_t xk_mem_size(uint32_t addr);
 uint32_t xk_mem_available(void);

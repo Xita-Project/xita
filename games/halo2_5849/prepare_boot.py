@@ -1207,6 +1207,54 @@ def game_packed_vector_roots(image):
     return roots
 
 
+GAME_ANIMATION_CODEC_TABLE = 0x47FB24
+GAME_ANIMATION_CODEC_BINDINGS = (
+    (0x279BA2, 45, "ae5b4f05401786d52eb8183057ed4ce7f7ed8b9c4b38b3d45510b1d9a291b6fa"),
+    (0x279C6F, 70, "d9fe85669bb7394f774d95bbce234fa3950a02301b12e6b67ca0962456a6f2c5"),
+    (0x27AB40, 40, "2346143ed6b23dc4ff338f97609423db32e2fffaf1fc9f541d33a384d18bc324"),
+    (0x1C73A0, 60, "cf8f4773eeb39b47d0b6813463e35f984a1152bb29c6d323ac7e8435a4b3659e"),
+)
+
+
+def game_animation_codec_roots(image):
+    """The complete animation-codec dispatch table: nine 40-byte format rows,
+    each with seven decode callbacks at offsets 0..0x18. game_packed_vector_roots
+    proves three rows' SSE triplets; this admits every row's callbacks so the
+    per-frame decoder for any animation format is translated.
+
+    The binders index the rows as [format*40 + 47FB24] (via lea reg,[idx*8+base],
+    an addressing form the reference-driven walk does not follow) and dispatch a
+    callback triplet through the decode globals; row0's transform fields are null
+    and skipped. Every codec row shares decode callback 28D170 at +0x18, so the
+    walk runs while that field is title code and then requires exactly nine rows.
+    The two binders, the dispatcher and the alternate caller are fingerprinted,
+    and the pinned-image gate fixes the 40-byte layout; nothing else is inferred.
+    """
+    for address, length, digest in GAME_ANIMATION_CODEC_BINDINGS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 animation codec binding fingerprint mismatch")
+    roots = set()
+    index = 0
+    while True:
+        row = GAME_ANIMATION_CODEC_TABLE + index * 40
+        shared = image.u32(row + 0x18)
+        section = image.section_of(shared) if shared else None
+        if not shared or not image.is_code(shared) or not section or section[4] != ".text":
+            break                       # past the final codec row
+        for offset in range(0, 0x1C, 4):
+            target = image.u32(row + offset)
+            if target == 0:
+                continue                # row0's absent transform callbacks
+            section = image.section_of(target) if target else None
+            if not target or not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError("Halo 2 animation codec callback has invalid target")
+            roots.add(target)
+        index += 1
+    if index != 9:
+        raise ValueError(f"Halo 2 animation codec table has {index} rows, expected 9")
+    return roots
+
+
 def game_map_callback_roots(image):
     """Native83: four per-map lifecycle fields in the same 68-record table.
 
@@ -1405,6 +1453,7 @@ def main():
         roots.update(game_descriptor_child_roots(image))
         roots.update(game_descriptor_object_roots(image))
         roots.update(game_packed_vector_roots(image))
+        roots.update(game_animation_codec_roots(image))
         roots.update(game_action_callback_roots(image))
         roots.update(game_fixed_startup_roots(image))
         roots.update(game_arena_boot_roots(image))

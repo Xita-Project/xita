@@ -41,6 +41,7 @@ uint32_t xk_mem_alloc(uint32_t bytes, uint32_t align, uint32_t low, uint32_t hig
     }
     return 0;
 }
+uint32_t xk_mem_alloc_high(uint32_t bytes, uint32_t align) { return xk_mem_alloc(bytes, align, 0, 0, 0); }
 int xk_mem_free(uint32_t base)
 {
     assert(!(base & 4095) && base >= 0x100000 && base < 0x200000);

@@ -26,6 +26,7 @@ uint32_t xk_mem_alloc(uint32_t n, uint32_t align, uint32_t low, uint32_t high, i
     if (alloc_failure) return 0;
     allocated = 1; g_xpt[5] = 0x4000; return 0x5000;
 }
+uint32_t xk_mem_alloc_high(uint32_t n, uint32_t align) { return xk_mem_alloc(n, align, 0, 0, 0); }
 int xk_mem_free(uint32_t base)
 { assert(base == 0x5000 && allocated && !healthy); ++frees; allocated = 0; g_xpt[5] = 0x8000; return 0; }
 uint32_t xk_mem_size(uint32_t base) { assert(base == 0x5000 && allocated); return 4096; }

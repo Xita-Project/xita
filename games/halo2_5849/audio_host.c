@@ -124,7 +124,7 @@ static void create(xctx *c)
         int opened = h2_audio_backend_open();
         if (opened < -1) fail(c, ip, "output rollback", (uint32_t)opened);
         if (opened < 0) { result(c, 0x88780078, 3); return; }
-        uint32_t base = xk_mem_alloc(4096, 4096, 0, 0, 0);
+        uint32_t base = xk_mem_alloc_high(4096, 4096);
         if (!base) {
             if (h2_audio_backend_close() < 0) fail(c, ip, "allocation rollback", 0);
             result(c, 0x8007000E, 3); return;
@@ -272,7 +272,7 @@ static void submix_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t f
     if (index == XA_MAX_VOICES) { result(c, 0x8007000E, 4); return; }
     /* One allocation owns both the opaque header and a separate mapped bus
      * page. No permissive WAVE parser or PCM voice sees the MIXIN format. */
-    uint32_t base = xk_mem_alloc(8192, 4096, 0, 0, 0);
+    uint32_t base = xk_mem_alloc_high(8192, 4096);
     if (!base) { result(c, 0x8007000E, 4); return; }
     if ((base & 4095) || !mapped(base, 8192) || overlaps_device(base, 8192) ||
         page_overlap(base, 8192, c->r[4], 20) || page_overlap(base, 8192, out, 4) ||
@@ -328,7 +328,7 @@ static void fx_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t field
     unsigned index;
     for (index = 0; index < XA_MAX_VOICES && buffers[index].base; ++index) {}
     if (index == XA_MAX_VOICES) { result(c, 0x8007000E, 4); return; }
-    uint32_t base = xk_mem_alloc(4096, 4096, 0, 0, 0);
+    uint32_t base = xk_mem_alloc_high(4096, 4096);
     if (!base) { result(c, 0x8007000E, 4); return; }
     if ((base & 4095) || !mapped(base, 4096) || overlaps_device(base, 4096) ||
         page_overlap(base, 4096, c->r[4], 20) || page_overlap(base, 4096, out, 4) ||
@@ -381,7 +381,7 @@ static void buffer_create(xctx *c)
     unsigned index;
     for (index = 0; index < XA_MAX_VOICES && buffers[index].base; ++index) {}
     if (index == XA_MAX_VOICES) { result(c, 0x8007000E, 4); return; }
-    uint32_t base = xk_mem_alloc(4096, 4096, 0, 0, 0);
+    uint32_t base = xk_mem_alloc_high(4096, 4096);
     if (!base) { result(c, 0x8007000E, 4); return; }
     if ((base & 4095) || !mapped(base, 4096)) fail(c, ip, "buffer allocation mapping", base);
     x_guest_write(base + 64, format, 18);
@@ -434,7 +434,7 @@ static void global_buffer_create(xctx *c)
         fail(c,ip,"global PCM owner sequence",pcm_sources);
     for (index=0;index<XA_MAX_VOICES && buffers[index].base;++index) {}
     if (index==XA_MAX_VOICES) { result(c,0x8007000E,2); return; }
-    uint32_t base=xk_mem_alloc(4096,4096,0,0,0);
+    uint32_t base=xk_mem_alloc_high(4096,4096);
     if (!base) { result(c,0x8007000E,2); return; }
     if ((base&4095) || !mapped(base,4096) || overlaps_device(base,4096) || page_overlap(base,4096,out,4))
         fail(c,ip,"global PCM allocation mapping",base);
@@ -531,7 +531,7 @@ static void stream_create(xctx *c, uint32_t ip)
     unsigned index;
     for (index = 0; index < XA_MAX_VOICES && streams[index].base; ++index) {}
     if (index == XA_MAX_VOICES) { result(c, 0x8007000E, args); return; }
-    uint32_t base = xk_mem_alloc(4096, 4096, 0, 0, 0);
+    uint32_t base = xk_mem_alloc_high(4096, 4096);
     if (!base) { result(c, 0x8007000E, args); return; }
     if ((base & 4095) || !mapped(base, 4096) || overlaps_device(base, 4096) ||
         page_overlap(base, 4096, c->r[4], stack_bytes) || page_overlap(base, 4096, out, 4) ||
@@ -616,7 +616,7 @@ static void stream_process(xctx *c)
     uint8_t samples[320];x_guest_read(samples,packet[0],sizeof samples);
     for (unsigned i=0;i<sizeof samples;++i) if (samples[i])
         fail(c,ip,"nonzero routed stream input remains unsupported",packet[0]+i);
-    uint32_t mirror=xk_mem_alloc(4096,4096,0,0,0);
+    uint32_t mirror=xk_mem_alloc_high(4096,4096);
     if (!mirror) {result(c,0x8007000E,3);return;}
     if ((mirror&4095) || !mapped(mirror,4096) || overlaps_device(mirror,4096) ||
         page_overlap(mirror,4096,c->r[4],16) || page_overlap(mirror,4096,address,24) ||
@@ -686,7 +686,7 @@ static void buffer_data(xctx *c)
         !mapped(source, bytes) || overlaps_device(source, bytes))
         fail(c, ip, "unsupported external PCM binding", source);
     uint32_t size = (bytes + 4095) & ~4095u;
-    uint32_t mirror = xk_mem_alloc(size, 4096, 0, 0, 0);
+    uint32_t mirror = xk_mem_alloc_high(size, 4096);
     if (!mirror) { result(c, 0x8007000E, 3); return; }
     if ((mirror & 4095) || !mapped(mirror, size)) fail(c, ip, "PCM mirror mapping", mirror);
     uint8_t chunk[4096];
@@ -1266,7 +1266,7 @@ static void effects_download(xctx *c)
         fail(c, ip, "DSP initialization", state.pc);
     }
     uint32_t bytes = 0xB000 + state.scratch_bytes;
-    uint32_t base = xk_mem_alloc(bytes, 4096, 0, 0, 0);
+    uint32_t base = xk_mem_alloc_high(bytes, 4096);
     if (!base) { h2_dsp_destroy(candidate); result(c, 0x8007000E, 4); return; }
     if ((base & 4095) || !mapped(base, bytes) || overlaps_device(base, bytes) ||
         page_overlap(base, bytes, c->r[4], 20) || page_overlap(base, bytes, out, 4))
@@ -1383,7 +1383,7 @@ static void effects_description(xctx *c)
         fail(c,ip,"unsupported reverb preset",words[0]);
     if (!h2_audio_backend_effect_read(effects,index,0,prefix,sizeof prefix))
         fail(c,ip,"reverb current-state read",index);
-    uint32_t base=xk_mem_alloc(4096,4096,0,0,0);
+    uint32_t base=xk_mem_alloc_high(4096,4096);
     if (!base) { result(c,0x8007000e,3);return; }
     if ((base&4095) || base>UINT32_MAX-4096 || !mapped(base,4096) ||
         overlaps_device(base,4096) || page_overlap(base,4096,source,sizeof words) ||

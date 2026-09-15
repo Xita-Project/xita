@@ -109,10 +109,22 @@ static uint32_t phys_free_pages(void) { uint32_t n = 0; for (uint32_t p = 0; p <
 static int vr_find(uint32_t va) { for (int i = 0; i < g_nvr; ++i) if (g_vr[i].va <= va && va < g_vr[i].va + g_vr[i].size) return i; return -1; }
 static int vr_range_free(uint32_t va, uint32_t size) { for (int i = 0; i < g_nvr; ++i) if (va < g_vr[i].va + g_vr[i].size && g_vr[i].va < va + size) return 0; return va + size <= XRAM_SIZE && va >= 0x10000; }
 
-static uint32_t virt_reserve(uint32_t size, uint32_t hint)
+static uint32_t virt_reserve(uint32_t size, uint32_t hint, int top_down)
 {
     size = (size + XK_PAGE - 1) & ~(XK_PAGE - 1);
     if (hint) { hint &= ~(XK_PAGE - 1); if (vr_range_free(hint, size)) goto ok; return 0; }
+    if (top_down) {
+        /* Last fit, same 64 KB grid, just below the kernel area. Kernel-owned
+         * guest objects (e.g. the DirectSound device) live here, away from the
+         * game's heap which grows up from the image: the game frees and reuses
+         * its own low virtual pages, and a stale pointer into one must never
+         * land on a live kernel object we placed at the same address. */
+        if (KERNEL_VA < g_image_hi + size) return 0;
+        hint = KERNEL_VA - size;
+        hint -= (hint - g_image_hi) % 0x10000;                 /* keep the g_image_hi + k*64 KB grid */
+        for (; hint >= g_image_hi; hint -= 0x10000) if (vr_range_free(hint, size)) goto ok;
+        return 0;
+    }
     /* first fit, 64 KB granularity, above the image */
     for (hint = g_image_hi; hint + size <= KERNEL_VA; hint += 0x10000) if (vr_range_free(hint, size)) goto ok;
     return 0;
@@ -173,7 +185,18 @@ static void virt_release(uint32_t va, uint32_t size)
 uint32_t xk_mem_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t highest, int top_down)
 {
     (void)align; (void)lowest; (void)highest; (void)top_down;
-    uint32_t va = virt_reserve(size, 0);
+    uint32_t va = virt_reserve(size, 0, 0);
+    if (!va) return 0;
+    if (virt_commit(va, (size + XK_PAGE - 1) & ~(XK_PAGE - 1)) != 0) { xk_mem_free(va); return 0; }
+    return va;
+}
+
+/* Kernel-owned, game-visible allocation placed high (just below the kernel area),
+ * away from the game's low, reuse-prone heap. Freed with the same xk_mem_free. */
+uint32_t xk_mem_alloc_high(uint32_t size, uint32_t align)
+{
+    (void)align;
+    uint32_t va = virt_reserve(size, 0, 1);
     if (!va) return 0;
     if (virt_commit(va, (size + XK_PAGE - 1) & ~(XK_PAGE - 1)) != 0) { xk_mem_free(va); return 0; }
     return va;
@@ -291,12 +314,12 @@ void xk_NtAllocateVirtualMemory(xctx *c)
         uint32_t lo = base & ~(XK_PAGE - 1), hi = (base + size + XK_PAGE - 1) & ~(XK_PAGE - 1);
         int i = vr_find(lo);
         if (i >= 0 && g_vr[i].flags != 0xFFFFFFFFu) { va = lo; }
-        else { va = virt_reserve(hi - lo, lo); if (!va) { XK_LOG("NtAllocateVirtualMemory: hint %08X busy\n", base); va = virt_reserve(hi - lo, 0); } }
+        else { va = virt_reserve(hi - lo, lo, 0); if (!va) { XK_LOG("NtAllocateVirtualMemory: hint %08X busy\n", base); va = virt_reserve(hi - lo, 0, 0); } }
         if (!va) { c->r[0] = STATUS_NO_MEMORY; X_RET(5); }
         if ((type & 0x1000) && virt_commit(va, hi - lo) != 0) { c->r[0] = STATUS_NO_MEMORY; X_RET(5); }
         X_M32(pbase) = va; X_M32(psize) = hi - lo;
     } else {
-        va = virt_reserve(size, 0);
+        va = virt_reserve(size, 0, 0);
         if (!va) { XK_LOG("NtAllocateVirtualMemory: out of address space (%u KB)\n", size >> 10); c->r[0] = STATUS_NO_MEMORY; X_RET(5); }
         size = (size + XK_PAGE - 1) & ~(XK_PAGE - 1);
         if ((type & 0x1000) && virt_commit(va, size) != 0) { c->r[0] = STATUS_NO_MEMORY; X_RET(5); }

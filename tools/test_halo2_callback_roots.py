@@ -906,6 +906,46 @@ class CallbackRoots(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "fingerprint"):
                     prepare_boot.game_packed_vector_roots(image)
 
+    def test_animation_codec_all_nine_rows_bounded_by_shared_callback(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        base = prepare_boot.GAME_ANIMATION_CODEC_TABLE
+        slots = [base + row * 40 + off for row in range(9) for off in range(0, 0x1C, 4)]
+        image.targets = {slot: 0x1000 + (n % 7) * 16 for n, slot in enumerate(slots)}
+        image.targets[base + 9 * 40 + 0x18] = 0            # no shared callback past row 8
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_ANIMATION_CODEC_BINDINGS", (spec,) * 4):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_animation_codec_roots(image),
+                             set(range(0x1000, 0x1070, 16)))
+            self.assertEqual(image.targets, before)
+            # A null transform callback (row 0's absent fields) is skipped, not rooted.
+            image.targets[base + 0x00] = 0
+            self.assertEqual(len(prepare_boot.game_animation_codec_roots(image)), 7)
+            image.targets[base + 0x00] = before[base + 0x00]
+            # A non-code callback in any row is rejected.
+            for slot in (base + 0x00, base + 8 * 40 + 0x14):
+                saved = image.targets[slot]; image.targets[slot] = 0xDEAD; image.bad_code = 0xDEAD
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_animation_codec_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            # Too few rows (an earlier terminator) is rejected.
+            image.targets[base + 8 * 40 + 0x18] = 0
+            with self.assertRaisesRegex(ValueError, "rows, expected 9"):
+                prepare_boot.game_animation_codec_roots(image)
+            image.targets[base + 8 * 40 + 0x18] = before[base + 8 * 40 + 0x18]
+            # Too many rows (a tenth codec-shaped row) is rejected.
+            for off in range(0, 0x1C, 4):
+                image.targets[base + 9 * 40 + off] = 0x1000 + (off // 4) * 16
+            image.targets[base + 10 * 40 + 0x18] = 0
+            with self.assertRaisesRegex(ValueError, "rows, expected 9"):
+                prepare_boot.game_animation_codec_roots(image)
+            image.targets[base + 9 * 40 + 0x18] = 0
+        for which in range(4):
+            guards = [spec] * 4; guards[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_ANIMATION_CODEC_BINDINGS", guards):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_animation_codec_roots(image)
+
     def test_widget_property_dispatch_bounds_nulls_and_revision(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x470828, 0x4709E8, 4))}
