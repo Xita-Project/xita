@@ -294,11 +294,12 @@ static inline void x_comiss(xctx *c, float a, float b) {
 }
 static inline void x_bitops128(xctx *c, float *d, const float *s, char op) { (void)c;
     uint32_t a[4], b[4]; memcpy(a, d, 16); memcpy(b, s, 16);
-    for (int i = 0; i < 4; ++i) a[i] = op == '^' ? a[i] ^ b[i] : op == '&' ? a[i] & b[i] : a[i] | b[i];
+    for (int i = 0; i < 4; ++i) a[i] = op == '^' ? a[i] ^ b[i] : op == '&' ? a[i] & b[i] : op == 'n' ? (~a[i]) & b[i] : a[i] | b[i];
     memcpy(d, a, 16); }
 static inline void x_shufps(xctx *c, float *d, const float *s, unsigned imm) { (void)c;
     float t[4] = { d[imm & 3], d[(imm >> 2) & 3], s[(imm >> 4) & 3], s[(imm >> 6) & 3] }; memcpy(d, t, 16); }
 static inline void x_unpcklps(xctx *c, float *d, const float *s) { (void)c; float t[4] = { d[0], s[0], d[1], s[1] }; memcpy(d, t, 16); }
+static inline void x_unpckhps(xctx *c, float *d, const float *s) { (void)c; float t[4] = { d[2], s[2], d[3], s[3] }; memcpy(d, t, 16); }
 
 /* Legacy CMPSS: only the low scalar participates, including in exceptions.
  * Any NaN takes priority over a denormal in the other operand. Predicates

@@ -861,11 +861,16 @@ class Emitter:
         if mn in MMX_SHIFT and is_mm0:
             cnt = self.operand(ins, 1, 1) if ins.op1_kind == OpKind.IMMEDIATE8 else self.operand(ins, 1, 8)
             out.append(f"    {self.operand(ins,0,8)} = x_mmx_{mn}({self.operand(ins,0,8)}, (uint64_t){cnt});"); return
+        if mn == "pshufw" and is_mm0:
+            imm = ins.immediate8
+            parts = " | ".join(f"(((s_ >> {((imm >> (i * 2)) & 3) * 16}) & 0xFFFFu) << {i * 16})" for i in range(4))
+            out.append(f"    {{ uint64_t s_ = {self.operand(ins,1,8)}; {self.operand(ins,0,8)} = {parts}; }}"); return
 
         # ---- SSE scalar subset --------------------------------------------------------
         if mn in ("movss", "movaps", "movups", "movlps", "movhps", "movhlps", "movlhps", "addss", "subss", "mulss", "divss", "sqrtss", "minss", "maxss",
                   "cvtsi2ss", "cvttss2si", "cvtss2si", "comiss", "ucomiss", "xorps", "andps", "orps", "addps", "subps", "mulps",
-                  "shufps", "unpcklps", "movd", "rsqrtss", "rcpss", "cvtpi2ps", "rsqrtps", "minps", "maxps", "cmpss", "movmskps"):
+                  "shufps", "unpcklps", "unpckhps", "movd", "rsqrtss", "rcpss", "cvtpi2ps", "cvtps2pi", "cvttps2pi",
+                  "rsqrtps", "minps", "maxps", "cmpss", "movmskps", "divps", "andnps"):
             self.lower_sse(ins, mn, out, U); return
         U()
 
@@ -1036,6 +1041,19 @@ class Emitter:
                 source = f"uint64_t bits_; x_guest_read(&bits_, {self.addr(ins)}, 8);"
             out.append(f"    {{ {source} float pair_[2] = {{ (float)(int32_t)(uint32_t)bits_, (float)(int32_t)(uint32_t)(bits_ >> 32) }}; memcpy({xmm(0)}, pair_, 8); }}")
             return
+        if mn in ("cvtps2pi", "cvttps2pi"):
+            # Two low packed floats -> two signed dwords in an MMX register.
+            # cvtps2pi uses the current rounding mode (round-to-nearest here, as
+            # the guarded MXCSR permits); cvttps2pi truncates. Same native FP
+            # model as cvtss2si/cvttss2si.
+            conv = "truncf" if mn == "cvttps2pi" else "rintf"
+            if is_xmm(1):
+                source = f"float pair_[2] = {{ {xmm(1)}[0], {xmm(1)}[1] }};"
+            else:
+                source = f"float pair_[2]; x_guest_read(pair_, {self.addr(ins)}, 8);"
+            out.append(f"    {{ {source} uint32_t lo_ = (uint32_t)(int32_t){conv}(pair_[0]), hi_ = (uint32_t)(int32_t){conv}(pair_[1]); "
+                       f"{self.operand(ins,0,8)} = ((uint64_t)hi_ << 32) | lo_; }}")
+            return
         if mn == "rsqrtps":
             if is_xmm(1):
                 out.append(f"    x_rsqrtps({xmm(0)}, {xmm(1)});")
@@ -1071,7 +1089,7 @@ class Emitter:
         if mn in SS:
             src = f"{xmm(1)}[0]" if is_xmm(1) else f"X_MF32({self.addr(ins)})"
             out.append(f"    {xmm(0)}[0] = {xmm(0)}[0] {SS[mn]} {src};"); return
-        PS = {"addps": "+", "subps": "-", "mulps": "*"}
+        PS = {"addps": "+", "subps": "-", "mulps": "*", "divps": "/"}
         if mn in PS:
             if is_xmm(1):
                 out.append(f"    for (int i_ = 0; i_ < 4; ++i_) {xmm(0)}[i_] = {xmm(0)}[i_] {PS[mn]} {xmm(1)}[i_];")
@@ -1092,13 +1110,14 @@ class Emitter:
         if mn in ("comiss", "ucomiss"):
             src = f"{xmm(1)}[0]" if is_xmm(1) else f"X_MF32({self.addr(ins)})"
             out.append(f"    x_comiss(c, {xmm(0)}[0], {src});"); return
-        if mn in ("xorps", "andps", "orps"):
+        if mn in ("xorps", "andps", "orps", "andnps"):
+            opc = {'xorps': '^', 'andps': '&', 'orps': '|', 'andnps': 'n'}[mn]
             if is_xmm(1):
                 if mn == "xorps" and ins.op0_register == ins.op1_register:
                     out.append(f"    memset({xmm(0)}, 0, 16);"); return
-                out.append(f"    x_bitops128(c, {xmm(0)}, {xmm(1)}, '{ {'xorps':'^','andps':'&','orps':'|'}[mn] }');")
+                out.append(f"    x_bitops128(c, {xmm(0)}, {xmm(1)}, '{opc}');")
             else:
-                out.append(f"    {{ float t_[4]; x_load128(c, t_, {self.addr(ins)}); x_bitops128(c, {xmm(0)}, t_, '{ {'xorps':'^','andps':'&','orps':'|'}[mn] }'); }}")
+                out.append(f"    {{ float t_[4]; x_load128(c, t_, {self.addr(ins)}); x_bitops128(c, {xmm(0)}, t_, '{opc}'); }}")
             return
         if mn == "shufps":
             imm = ins.immediate(2)
@@ -1107,10 +1126,13 @@ class Emitter:
             else:
                 out.append(f"    {{ float t_[4]; x_load128(c, t_, {self.addr(ins)}); x_shufps(c, {xmm(0)}, t_, {imm}); }}")
             return
-        if mn == "unpcklps":
-            src = xmm(1) if is_xmm(1) else None
-            if src:
-                out.append(f"    x_unpcklps(c, {xmm(0)}, {src});"); return
+        if mn in ("unpcklps", "unpckhps"):
+            helper = "x_unpcklps" if mn == "unpcklps" else "x_unpckhps"
+            if is_xmm(1):
+                out.append(f"    {helper}(c, {xmm(0)}, {xmm(1)});")
+            else:
+                out.append(f"    {{ float t_[4]; x_load128(c, t_, {self.addr(ins)}); {helper}(c, {xmm(0)}, t_); }}")
+            return
         if mn == "movd":
             if is_xmm(0):
                 out.append(f"    {{ uint32_t v_ = {self.operand(ins,1,4)}; memcpy(&{xmm(0)}[0], &v_, 4); {xmm(0)}[1] = {xmm(0)}[2] = {xmm(0)}[3] = 0.0f; }}")
