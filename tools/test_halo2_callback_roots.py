@@ -30,6 +30,42 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_expression_descriptor_prefix_does_not_scan_metadata_or_next_record(self):
+        image=SyntheticImage();image.section_name=".text";image.targets={}
+        for index in range(25):
+            record=0x44B098+index*16
+            image.targets[0x4744E0+index*4]=record
+            image.targets[record+4]=0 if index==3 else 0x1000+(index%14)*16
+        # No metadata, following table index or following descriptor exists.
+        spec=(0x200,len(image.code),hashlib.sha256(image.code).hexdigest())
+        count=len(prepare_boot.GAME_SCRIPT_PRIMITIVE_BINDINGS)
+        with patch.object(prepare_boot,"GAME_SCRIPT_PRIMITIVE_BINDINGS",(spec,)*count):
+            before=dict(image.targets)
+            expected={image.targets[0x44B09C+i*16] for i in range(25)}-{0}
+            self.assertEqual(prepare_boot.game_script_primitive_roots(image),expected)
+            self.assertEqual(image.targets,before)
+            for index in range(25):
+                slot=0x4744E0+index*4
+                for bad in (None,0,0x44B098+(index+1)*16):
+                    image.targets[slot]=bad
+                    with self.assertRaisesRegex(ValueError,"binding"):prepare_boot.game_script_primitive_roots(image)
+                image.targets[slot]=before[slot]
+                slot=0x44B09C+index*16
+                for bad in (None,0xDEAD):
+                    image.targets[slot]=image.bad_code=bad
+                    with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_primitive_roots(image)
+                image.targets[slot]=before[slot];image.bad_code=None
+            with patch.object(image,"section_of",return_value=None):
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_primitive_roots(image)
+            for section in (".data","DSOUND","D3D"):
+                image.section_name=section
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_primitive_roots(image)
+            image.section_name=".text"
+            for index in range(count):
+                guards=[spec]*count;guards[index]=(*spec[:2],"0"*64)
+                with patch.object(prepare_boot,"GAME_SCRIPT_PRIMITIVE_BINDINGS",guards):
+                    with self.assertRaisesRegex(ValueError,"fingerprint"):prepare_boot.game_script_primitive_roots(image)
+
     def test_sound_record_predicate_reads_only_observed_first_slot(self):
         image=SyntheticImage();image.section_name=".text";image.targets={0x44A110:0x1000}
         spec=(0x200,len(image.code),hashlib.sha256(image.code).hexdigest())
