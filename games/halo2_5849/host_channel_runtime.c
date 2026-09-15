@@ -64,11 +64,18 @@ static h2_luma_draw luma_quad;
 #if H2_SPRITE_RENDER
 static h2_sprite_draw sprite_quad;
 #endif
+#if H2_MENU_RENDER
+#include "menu_draw.h"
+static h2_menu_draw menu_quad;
+#endif
 static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
                             uint32_t value, uint32_t source)
 {
     (void)opaque;
-    int screen_active = 0, bc1_active = 0, composition_active = 0, threshold_active = 0, blur_active = 0, blend_active = 0, luma_active = 0, sprite_active = 0;
+    int screen_active = 0, bc1_active = 0, composition_active = 0, threshold_active = 0, blur_active = 0, blend_active = 0, luma_active = 0, sprite_active = 0, menu_active = 0;
+#if H2_MENU_RENDER
+    menu_active = menu_quad.active;
+#endif
 #if H2_SPRITE_RENDER
     sprite_active = sprite_quad.active;
 #endif
@@ -93,7 +100,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
 #if H2_SCREEN_RENDER
     screen_active = screen_quad.active;
 #endif
-    if (!sprite_active && !movie_quad.active && !screen_active && !bc1_active && !composition_active && !threshold_active && !luma_active && !blend_active && !blur_active && method != 0x17FC) return -1;
+    if (!sprite_active && !movie_quad.active && !screen_active && !bc1_active && !composition_active && !threshold_active && !luma_active && !blend_active && !blur_active && !menu_active && method != 0x17FC) return -1;
     uint32_t fpscr = h2_platform_fpscr_read();
     uint64_t before = movie_quad.completed;
     int movie_active = movie_quad.active;
@@ -170,6 +177,26 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
         if(sprite_before!=sprite_quad.completed)
             xv_logf("[h2/sprite] completed=%u original_inline_vertices=4 source=%08X color=%08X RGB committed; not yet presented\n",
                     (unsigned)sprite_quad.completed,source,channel.clear.color_offset);
+    }
+#endif
+#if H2_MENU_RENDER
+    /* Lowest-priority general geometry: claims the BEGIN_END draws the pinned
+     * intro modules reject. Assembles vertices/indices and renders through the
+     * menu backend; with no backend the draw rejects and the run still stops. */
+    if (menu_active || (!movie_active && !screen_active && !bc1_active && !composition_active &&
+                        !threshold_active && !blur_active && !blend_active && !luma_active &&
+                        !sprite_active && !result)) {
+        uint64_t menu_done = menu_quad.completed, menu_rej = menu_quad.rejected;
+        int menu_result = h2_menu_method(&menu_quad, &channel.commands, &channel.clear, sub, method, value);
+        if (menu_result != -1) result = menu_result;
+        if (menu_done != menu_quad.completed)
+            xv_logf("[h2/menu] completed=%u primitive=%u vertices=%u indices=%u arrays=%u source=%08X color=%08X committed; not yet presented\n",
+                    (unsigned)menu_quad.completed, menu_quad.primitive, menu_quad.vertex_count,
+                    menu_quad.index_count, menu_quad.array_count, source, channel.clear.color_offset);
+        else if (menu_rej != menu_quad.rejected)
+            xv_logf("[h2/menu] rejected=%u primitive=%u vertices=%u indices=%u arrays=%u overflow=%u source=%08X; draw not backed\n",
+                    (unsigned)menu_quad.rejected, menu_quad.primitive, menu_quad.vertex_count,
+                    menu_quad.index_count, menu_quad.array_count, menu_quad.overflow, source);
     }
 #endif
 #if H2_COMPOSITION_RENDER
@@ -436,6 +463,11 @@ void h2_host_channel_configure(xctx *c)
     memset(&sprite_quad,0,sizeof sprite_quad);
     sprite_quad.contract=h2_sprite_gxm_contract();
     sprite_quad.render=h2_sprite_gxm_render;
+#endif
+#if H2_MENU_RENDER
+    /* Backend (menu_quad.render) is installed by the GXM increment; until then
+     * the module claims and rejects menu draws (no fabricated success). */
+    memset(&menu_quad, 0, sizeof menu_quad);
 #endif
 #if H2_LUMA_RENDER
     memset(&luma_quad, 0, sizeof luma_quad);
