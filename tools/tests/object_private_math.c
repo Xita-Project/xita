@@ -6,12 +6,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <fenv.h>
 
 uint8_t *g_xram,*g_img_base;
 uint32_t *g_xpt;
 int xv_phase_enabled;
 static unsigned allocations,completed[300],workers;
 static int release_enabled,fast_path,point_enabled;
+static int quat_enabled;
+static int quat_constants_original=1;
+static unsigned quat_ready,quat_done,quat_service_ready,quat_service_done;
 static unsigned private_ready,private_done,service_ready,service_done;
 static pthread_t owner_thread;
 static pthread_barrier_t concurrent;
@@ -79,7 +83,11 @@ static void compare_helper(xctx *c,unsigned kind,unsigned id)
     c->r[4]=sp;c->r[0]=area+128;c->r[1]=0x30000;c->r[2]=0x40000+id*16;
     if(kind==1) {
         X_M32(sp+4)=0x30000;X_M32(sp+8)=0x30100;X_M32(sp+12)=area+128;
-    } else if(kind==2) {c->r[1]=0x40000+id*16;c->r[2]=area+128;}
+    } else if(kind==2) {
+        c->r[1]=id&1?0x40000+id*16:area+64;c->r[2]=area+128;
+        if(!(id&1))memcpy(X_G(c->r[1]),X_G(0x40000+id*16),16);
+        X_M32(sp)=0xA0000+(id&1)*16;
+    }
     else if(kind==3)c->r[5]=0x50000;
     xctx expected=*c;
     memcpy(initial,X_G(area),sizeof initial);
@@ -98,7 +106,8 @@ static void compare_helper(xctx *c,unsigned kind,unsigned id)
 }
 static void *foreign_native_thread(void *opaque)
 {
-    assert(!xv_object_private_point(opaque));return NULL;
+    assert(!xv_object_private_point(opaque));
+    assert(!xv_object_private_quaternion(opaque));return NULL;
 }
 static void wait_flag(unsigned *flag)
 {
@@ -178,6 +187,74 @@ static void check_private_point(xctx *c,unsigned id)
     }
     *c=entry;
 }
+static void quat_audio_commit(xctx *c)
+{
+    assert(pthread_equal(pthread_self(),owner_thread));
+    assert(!xv_object_private_quaternion(c));
+    c->r[4]+=4;__atomic_store_n(&quat_service_done,1,__ATOMIC_RELEASE);
+}
+static void check_private_quaternion(xctx *c,unsigned id)
+{
+    xctx entry=*c;
+    uint32_t area=(c->r[4]&~4095u)+512;
+    c->r[4]=area+512;c->r[1]=area+128;c->r[2]=area+256;
+    memcpy(X_G(c->r[1]),X_G(0x40000+id*16),16);
+    int admitted=quat_enabled&&quat_constants_original&&fast_path&&workers;
+    assert(!!xv_object_private_quaternion(c)==admitted);
+    xctx copy=*c;assert(!xv_object_private_quaternion(&copy));
+    { XV_OBJECT_MATH_GUARD();assert(!xv_object_private_quaternion(c)); }
+    uint32_t saved=c->r[1];c->r[1]=0x40000;assert(!xv_object_private_quaternion(c));c->r[1]=saved;
+    saved=c->r[2];c->r[2]=0x60000;assert(!xv_object_private_quaternion(c));c->r[2]=saved;
+    saved=c->r[4];c->r[4]=0x60000;assert(!xv_object_private_quaternion(c));
+    c->r[4]=8;assert(!xv_object_private_quaternion(c));c->r[4]=saved;
+    uint32_t base=entry.r[4]&~(XV_OBJECT_JOB_STACK_BYTES-1u);
+    saved=c->r[1];c->r[1]=base;assert(!xv_object_private_quaternion(c));
+    c->r[1]=base+XV_OBJECT_JOB_STACK_BYTES-4;assert(!xv_object_private_quaternion(c));
+    c->r[1]=base==0x100000?0x140004:0x100004;assert(!xv_object_private_quaternion(c));c->r[1]=saved;
+    uint32_t page=c->r[1]>>12,old_mapping=g_xpt[page];g_xpt[page]=0x60000;
+    assert(!xv_object_private_quaternion(c));g_xpt[page]=old_mapping;
+    if(id==0) {pthread_t t;assert(!pthread_create(&t,NULL,foreign_native_thread,c));assert(!pthread_join(t,NULL));}
+    static const uint32_t edges[]={0,0x80000000,1,0x007fffff,0x3f800000,0x7f800000,0xff800000,0x7fc12345,0x7f812345,0x7f7fffff};
+    static const int rounding[]={FE_TONEAREST,FE_DOWNWARD,FE_UPWARD,FE_TOWARDZERO};
+    for(unsigned numeric=0;numeric<sizeof edges/sizeof edges[0];numeric++) {
+        assert(!fesetround(rounding[numeric%4]));
+        X_M32(c->r[1])=edges[numeric];
+        xctx before=*c,expected=*c;unsigned char initial[1024],result[1024];
+        memcpy(initial,X_G(area),1024);
+        int accepted;
+        { XV_OBJECT_MATH_GUARD();accepted=xv_math_quaternion_matrix(&expected);
+          memcpy(result,X_G(area),1024);memcpy(X_G(area),initial,1024); }
+        assert(xv_math_quaternion_matrix(c)==accepted);
+        assert(!memcmp(c,&expected,sizeof expected));assert(!memcmp(X_G(area),result,1024));
+        *c=before;
+    }
+    assert(!fesetround(FE_TONEAREST));
+    memcpy(X_G(c->r[1]),X_G(0x40000+id*16),16);
+    if(admitted&&workers==2&&id<2) {
+        int barrier=pthread_barrier_wait(&concurrent);
+        assert(!barrier||barrier==PTHREAD_BARRIER_SERIAL_THREAD);
+        if(id==0) {
+            XV_OBJECT_MATH_GUARD();__atomic_store_n(&quat_ready,1,__ATOMIC_RELEASE);
+            wait_flag(&quat_done);
+        } else {
+            wait_flag(&quat_ready);assert(xv_math_quaternion_matrix(c));c->r[4]-=4;
+            __atomic_store_n(&quat_done,1,__ATOMIC_RELEASE);
+        }
+        if(id==0) {
+            XV_OBJECT_MATH_GUARD();X_M32(c->r[4])=0x291EF;
+            __atomic_store_n(&quat_service_ready,1,__ATOMIC_RELEASE);
+            xv_object_job_hle(c,0x193C1B,quat_audio_commit);c->r[4]-=4;
+        } else {
+            wait_flag(&quat_service_ready);
+            uint64_t until=xk_os_monotonic_us()+5000000;
+            while(!__atomic_load_n(&quat_service_done,__ATOMIC_ACQUIRE)) {
+                assert(xk_os_monotonic_us()<until);
+                assert(xv_math_quaternion_matrix(c));c->r[4]-=4;
+            }
+        }
+    }
+    *c=entry;
+}
 void f_0008FB70(xctx *c)
 {
     unsigned id=c->r[1];assert(id<300);
@@ -185,6 +262,7 @@ void f_0008FB70(xctx *c)
     compare_helper(c,0,id); /* Both first lanes exercise cold guarded config. */
     check_private_point(c,id);
     for(unsigned kind=0;kind<4;kind++)compare_helper(c,kind,id);
+    check_private_quaternion(c,id);
     completed[id]++;c->r[4]+=4;
 }
 int main(void)
@@ -192,6 +270,9 @@ int main(void)
     owner_thread=pthread_self();
 #ifdef XV_OBJECT_POINT_EXPERIMENT
     const char *point=getenv("XV_OBJECT_PRIVATE_POINT");point_enabled=point&&atoi(point);
+#endif
+#if defined(XV_OBJECT_QUAT_EXPERIMENT) && !defined(XV_QUAT_CACHE)
+    const char *quat=getenv("XV_OBJECT_PRIVATE_QUATERNION");quat_enabled=quat&&atoi(quat);
 #endif
     workers=(unsigned)atoi(getenv("XV_OBJECT_JOB_WORKERS"));
     release_enabled=atoi(getenv("XV_OBJECT_PRIVATE_MATH"));
@@ -204,6 +285,15 @@ int main(void)
     X_M32(0x50004)=0x1000;
     for(unsigned i=1;i<14;i++)X_MF32(0x50004+i*4)=(float)i/8;
     X_MF32(0x1F0A68)=0;X_MF32(0x1F0A78)=1;X_MF32(0x1F0B04)=2;
+    /* Image data/mappings may change only while workers are drained. Exercise
+     * both unsupported constant cases without concurrent writes to .rdata. */
+    const char *constant_mode=getenv("OBJECT_QUAT_CONSTANT_MODE");
+    if(constant_mode&&!strcmp(constant_mode,"modified")) {
+        X_MF32(0x1F0B04)=3;quat_constants_original=0;
+    } else if(constant_mode&&!strcmp(constant_mode,"remapped")) {
+        memcpy(g_xram+0x1e0000,g_xram+0x1f0000,4096);
+        g_xpt[0x1f0]=0x1e0000;quat_constants_original=0;
+    }
     setenv("XV_NATIVE_OBJECT_BASIS","1",1);
     xctx c={0};c.r[4]=0x20000;c.fcw=0x37f;
     assert(!xv_object_math_available());
@@ -214,11 +304,18 @@ int main(void)
 #else
     assert(!xv_object_point_available());
 #endif
+#if defined(XV_OBJECT_QUAT_EXPERIMENT) && !defined(XV_QUAT_CACHE)
+    assert(xv_object_quat_available()==(workers!=0&&fast_path));
+#else
+    assert(!xv_object_quat_available());
+#endif
     for(unsigned round=0;round<2;round++) {
         /* Restore default on the second pass without changing worker mode. */
         xv_object_math_override(round?-1:release_enabled);
         xv_object_point_override(round?-1:point_enabled);
+        xv_object_quat_override(round?-1:quat_enabled);
         private_ready=private_done=service_ready=service_done=0;
+        quat_ready=quat_done=quat_service_ready=quat_service_done=0;
         assert(xv_object_jobs_begin(&c));
         for(unsigned id=0;id<300;id++) {
             c.r[1]=id;c.r[4]=0x20000;X_M32(c.r[4])=0x90299;
@@ -234,4 +331,5 @@ int main(void)
     free(g_xram);free(g_xpt);pthread_barrier_destroy(&concurrent);
     printf("PASS: 600 callbacks, context/spill/ownership checks; private point held-guard and owner-service proofs executed: %d\n",
            !!(point_enabled&&fast_path&&workers==2));
+    printf("private quaternion held-guard and owner-service proofs executed: %d\n",!!(quat_enabled&&quat_constants_original&&fast_path&&workers==2));
 }

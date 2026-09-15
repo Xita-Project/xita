@@ -9,40 +9,63 @@ import tempfile
 
 root=Path(__file__).resolve().parents[1]
 point_build=os.environ.get('OBJECT_POINT_TEST_BUILD','1')!='0'
+quat_build=os.environ.get('OBJECT_QUAT_TEST_BUILD','1')!='0'
+quat_cache=os.environ.get('OBJECT_QUAT_CACHE_TEST_BUILD','0')=='1'
+constants_original=os.environ.get('OBJECT_QUAT_CONSTANT_MODE','original')=='original'
+quat_profile=os.environ.get('OBJECT_QUAT_PROFILE_TEST_BUILD','0')=='1'
 with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as directory:
     binary=Path(directory)/'test'
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11',
         '-fno-strict-aliasing','-ffp-contract=off','-ffunction-sections','-fdata-sections',
         '-DXV_EXPERIMENTAL_OBJECT_JOBS','-DXV_NATIVE_OBJECT_BASIS',
         *(['-DXV_OBJECT_POINT_EXPERIMENT'] if point_build else []),
+        *(['-DXV_OBJECT_QUAT_PROFILE'] if quat_profile else []),
+        *(['-DXV_OBJECT_QUAT_EXPERIMENT'] if quat_build else []),
+        *(['-DXV_QUAT_CACHE'] if quat_cache else []),
         '-I'+str(root/'recomp'),*shlex.split(os.environ.get('OBJECT_JOB_TEST_FLAGS','')),
         str(root/'tools/tests/object_private_math.c'),str(root/'recomp/kernel/xk_object_jobs.c'),
         str(root/'recomp/kernel/xk_math.c'),str(root/'recomp/kernel/xk_object_basis.c'),
+        *([str(root/'recomp/kernel/xk_quat_cache.c')] if quat_cache else []),
         str(root/'recomp/xv_x86rt.c'),'-pthread','-lm','-Wl,--gc-sections','-o',str(binary)],check=True)
-    for point in ("0", "1"):
-        for timed in ("0", "1"):
-            for workers,private,fast in (('2','1','1'),('1','1','1'),('0','1','1'),('2','0','1'),('2','1','0')):
-                result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30,
-                    env=dict(os.environ,XV_OBJECT_JOB_WORKERS=workers,XV_OBJECT_PRIVATE_MATH=private,
-                             XV_OBJECT_LOCK_FAST_PATH=fast,XV_OBJECT_TIMED_WAIT=timed,XV_OBJECT_PRIVATE_POINT=point))
-                assert result.returncode==0,(result.returncode,result.stdout,result.stderr)
-                rows=re.findall(r'\[object-private-math\] lane (\d) (\w+) attempted (\d+) released (\d+) nested (\d+) shared (\d+) disabled (\d+)',result.stderr)
-                for kind in ('point','matrix','quaternion','basis'):
-                    releases=sum(int(row[3]) for row in rows if row[1]==kind)
-                    if workers!='0' and private==fast=='1':
-                        assert releases>0,(kind,rows)
-                    else: assert releases==0,(kind,rows)
-                native_rows=re.findall(r'\[native-point\] \d+ frames fast (\d+); fallback disabled (\d+) fp (\d+) layout (\d+) numeric (\d+)',result.stderr)
-                assert len(native_rows)==2 and list(map(int,native_rows[-1]))==[0]*5
-                point_rows=re.findall(r'\[object-point\] lane (\d) checks (\d+) private (\d+) nested (\d+) shared-input (\d+) shared-output (\d+)',result.stderr)
-                assert len(point_rows)==4
-                assert all(list(map(int,row[1:]))==[0]*5 for row in point_rows[-2:])
-                total=sum(int(row[2]) for row in point_rows)
-                assert (total>0)==(point_build and point=='1' and workers!='0' and fast=='1')
-                sites=re.findall(r'\[object-point-site\] lane (\d) pc ([0-9A-F]+) count (\d+) varied (\d+)[^\n]+overflow (\d)',result.stderr)
-                for lane in range(2):
-                    assert sum(int(r[2]) for r in sites if int(r[0])==lane)==sum(int(r[1]) for r in point_rows if int(r[0])==lane)
-                assert all(int(r[3])<int(r[2]) for r in sites)
-                for row in point_rows:
-                    n=list(map(int,row));assert n[1]==sum(n[2:])
-                print(f'point={point}, timed={timed}, workers={workers}, private={private}, fast={fast}: {result.stdout.strip()}')
+    for quat in ('0','1'):
+        for point in ("0", "1"):
+            for timed in ("0", "1"):
+                for workers,private,fast in (('2','1','1'),('1','1','1'),('0','1','1'),('2','0','1'),('2','1','0')):
+                    result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30,
+                        env=dict(os.environ,XV_OBJECT_JOB_WORKERS=workers,XV_OBJECT_PRIVATE_MATH=private,
+                                 XV_OBJECT_LOCK_FAST_PATH=fast,XV_OBJECT_TIMED_WAIT=timed,XV_OBJECT_PRIVATE_POINT=point, XV_OBJECT_PRIVATE_QUATERNION=quat))
+                    assert result.returncode==0,(result.returncode,result.stdout,result.stderr)
+                    quat_rows=re.findall(r'\[object-quat-site\] lane (\d+) pc ([0-9A-F]+) count (\d+) private-input (\d+)',result.stderr)
+                    if quat_profile and not quat_cache and workers!='0' and private==fast=='1':
+                        bypass=quat_build and quat=='1' and constants_original
+                        assert sum(int(r[2]) for r in quat_rows)==(300 if bypass else 6600),quat_rows
+                        assert sum(int(r[3]) for r in quat_rows)==(0 if bypass else 6300),quat_rows
+                        assert sum(int(r[2]) for r in quat_rows if int(r[1],16)==0xA0010)==300,quat_rows
+                    else:assert not quat_rows,quat_rows
+                    rows=re.findall(r'\[object-private-math\] lane (\d) (\w+) attempted (\d+) released (\d+) nested (\d+) shared (\d+) disabled (\d+)',result.stderr)
+                    for kind in ('point','matrix','quaternion','basis'):
+                        releases=sum(int(row[3]) for row in rows if row[1]==kind)
+                        if workers!='0' and private==fast=='1' and not (quat_cache and kind=='quaternion'):
+                            assert releases>0,(kind,rows)
+                        else: assert releases==0,(kind,rows)
+                    native_rows=re.findall(r'\[native-point\] \d+ frames fast (\d+); fallback disabled (\d+) fp (\d+) layout (\d+) numeric (\d+)',result.stderr)
+                    assert len(native_rows)==2 and list(map(int,native_rows[-1]))==[0]*5
+                    point_rows=re.findall(r'\[object-point\] lane (\d) checks (\d+) private (\d+) nested (\d+) shared-input (\d+) shared-output (\d+)',result.stderr)
+                    assert len(point_rows)==4
+                    assert all(list(map(int,row[1:]))==[0]*5 for row in point_rows[-2:])
+                    total=sum(int(row[2]) for row in point_rows)
+                    assert (total>0)==(point_build and point=='1' and workers!='0' and fast=='1')
+                    sites=re.findall(r'\[object-point-site\] lane (\d) pc ([0-9A-F]+) count (\d+) varied (\d+)[^\n]+overflow (\d)',result.stderr)
+                    for lane in range(2):
+                        assert sum(int(r[2]) for r in sites if int(r[0])==lane)==sum(int(r[1]) for r in point_rows if int(r[0])==lane)
+                    assert all(int(r[3])<int(r[2]) for r in sites)
+                    for row in point_rows:
+                        n=list(map(int,row));assert n[1]==sum(n[2:])
+                    quat_stats=re.findall(r'\[object-quat\] lane (\d) checks (\d+) private (\d+) nested (\d+) shared-input (\d+) shared-output (\d+) constants (\d+)',result.stderr)
+                    if quat_build:
+                        assert len(quat_stats)==4
+                        assert all(list(map(int,r[1:]))==[0]*6 for r in quat_stats[-2:])
+                        assert (sum(int(r[2]) for r in quat_stats)>0)==(quat=='1' and not quat_cache and constants_original and workers!='0' and fast=='1')
+                        assert all(int(r[1])==sum(map(int,r[2:])) for r in quat_stats)
+                    else:assert not quat_stats
+                    print(f'quat={quat}, point={point}, timed={timed}, workers={workers}, private={private}, fast={fast}: {result.stdout.strip()}')

@@ -14,6 +14,14 @@
 #endif
 
 static unsigned math_fast[2], math_fallback[2];
+/* Slot zero retains guarded accounting. A bypassed quaternion owns its actual
+ * worker's slot; reports aggregate/reset only after every job has retired. */
+static struct __attribute__((aligned(64))) {
+    unsigned fast, fallback;
+} quaternion_stats[3];
+#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_QUAT_EXPERIMENT) && !defined(XV_QUAT_CACHE)
+static unsigned quaternion_configured;
+#endif
 /* Guarded calls use slot zero; admitted private calls own their worker slot.
  * Reporting occurs after object batches join. No atomic per-operation update. */
 static struct __attribute__((aligned(64))) point_counts {
@@ -50,7 +58,7 @@ static int math_overlap(const void *a, unsigned an, const void *b, unsigned bn)
 }
 void xv_native_math_report(unsigned frames)
 {
-#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POINT_EXPERIMENT)
+#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && (defined(XV_OBJECT_POINT_EXPERIMENT) || defined(XV_OBJECT_QUAT_EXPERIMENT))
     xv_object_math_report_check();
 #endif
     XV_OBJECT_MATH_GUARD();
@@ -86,8 +94,14 @@ void xv_native_math_report(unsigned frames)
     extern unsigned xv_math_clip_register_calls(void) __attribute__((weak));
     if (xv_math_clip_calls) XK_LOG("[native-clip] %u frames: %u calls\n", frames, xv_math_clip_calls());
     if (xv_math_clip_register_calls) XK_LOG("[clip-registers] %u frames: %u calls\n", frames, xv_math_clip_register_calls());
+    unsigned quaternion_fast=0,quaternion_fallback=0;
+    for(unsigned lane=0;lane<3;lane++) {
+        quaternion_fast+=quaternion_stats[lane].fast;
+        quaternion_fallback+=quaternion_stats[lane].fallback;
+    }
     XK_LOG("[native-math] %u frames matrix %u fast / %u fallback; quaternion %u fast / %u fallback\n",
-        frames, math_fast[0], math_fallback[0], math_fast[1], math_fallback[1]);
+        frames, math_fast[0], math_fallback[0], quaternion_fast, quaternion_fallback);
+    memset(quaternion_stats,0,sizeof quaternion_stats);
     memset(math_fast, 0, sizeof math_fast);
     memset(math_fallback, 0, sizeof math_fallback);
     XK_LOG("[matrix-layout] %u frames native disjoint %u left %u right %u both %u; fallback disabled %u alignment %u page %u scratch %u partial %u\n",
@@ -296,27 +310,39 @@ static double math_float_word(uint32_t word)
  * x87 stack dispatch; float scratch spills and final x87 slots are retained. */
 int xv_math_quaternion_matrix(xctx *restrict c)
 {
+    unsigned lane=0;
+#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_QUAT_EXPERIMENT) && !defined(XV_QUAT_CACHE)
+    unsigned ready=__atomic_load_n(&quaternion_configured,__ATOMIC_ACQUIRE);
+    if(ready)lane=(unsigned)xv_object_private_quaternion(c);
+    int xv_object_math_locked_ __attribute__((cleanup(xv_object_math_unlock))) =
+        lane?0:xv_object_math_lock();
+#else
     XV_OBJECT_MATH_GUARD();
+#endif
+    int allowed=math_enabled();
+#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_QUAT_EXPERIMENT) && !defined(XV_QUAT_CACHE)
+    if(!ready)__atomic_store_n(&quaternion_configured,1,__ATOMIC_RELEASE);
+#endif
     uint32_t sp=c->r[4], fp=c->fsp;
     const float *ip=math_span(c->r[1],16);
     float *output=math_span(c->r[2],52), *scratch_out=math_span(sp-24u,24);
     const void *constants = math_span(0x1F0A68u, 0xA0u);
-    if (!math_enabled() || !ip || !output || !scratch_out || !constants ||
+    if (!allowed || !ip || !output || !scratch_out || !constants ||
         math_overlap(ip,16,output,52) || math_overlap(ip,16,scratch_out,24) ||
         math_overlap(output,52,scratch_out,24) || math_overlap(output,52,constants,0xA0u) ||
         math_overlap(scratch_out,24,constants,0xA0u)) {
-        math_fallback[1]++; return 0;
+        quaternion_stats[lane].fallback++; return 0;
     }
 #ifdef XV_QUAT_CACHE
     xv_quat_cache_request cache_request;
     if (xv_quat_cache_restore(c,ip,output,scratch_out,constants,&cache_request)) {
-        c->r[4]=sp+4; math_fast[1]++; return 1;
+        c->r[4]=sp+4; quaternion_stats[lane].fast++; return 1;
     }
 #endif
     float input[4], scratch[6];
     memcpy(input,ip,sizeof input);
     uint32_t zero=X_M32(0x1F0A68u),two=X_M32(0x1F0B04u),one=X_M32(0x1F0A78u);
-    math_fast[1]++;
+    quaternion_stats[lane].fast++;
 #ifndef XV_QUAT_CACHE
     /* The optional shared cache owns a larger transaction; keep its guard. */
     XV_OBJECT_MATH_PRIVATE(c,2,c->r[2],52,sp-24u,24);

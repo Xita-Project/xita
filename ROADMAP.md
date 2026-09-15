@@ -87,6 +87,12 @@ guarded. Emulator checks pass. Six physical comparisons show no consistent gain
 so it remains off by default. Remaining quaternion/matrix lock waits lead the
 next ownership audit; the existing multicore configuration remains active.
 
+A [private quaternion experiment](docs/private-quaternion-workers-20260915.md)
+now avoids the initial shared lock for calculations whose inputs, output and
+scratch are wholly worker-owned. Host race/ownership and ARM arithmetic checks
+pass; the emulator confirms real admissions and off/on/off restoration. It
+defaults off pending physical measurements at unchanged graphics settings.
+
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.
 An optional diagnostic splits comparison/copy cost by span size; it adds no

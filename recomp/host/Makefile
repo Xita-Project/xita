@@ -548,3 +548,12 @@ test-model-hierarchy-benchmark: build/resolution_benchmark_test build/no_model_h
 build/no_model_hierarchy_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_MODEL_HIERARCHY resolution_benchmark_test.c -lm -o $@
+
+.PHONY: test-object-quat-benchmark
+test-object-quat-benchmark: build/resolution_benchmark_test build/no_object_quat_benchmark_test
+	./build/resolution_benchmark_test
+	./build/no_object_quat_benchmark_test
+
+build/no_object_quat_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_OBJECT_QUAT resolution_benchmark_test.c -lm -o $@

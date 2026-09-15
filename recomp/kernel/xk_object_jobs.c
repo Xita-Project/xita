@@ -66,6 +66,13 @@ static unsigned math_wait_enabled;
 static int math_wait_override=-1;
 static unsigned point_private_enabled;
 static int point_private_override=-1;
+#ifdef XV_OBJECT_QUAT_EXPERIMENT
+static unsigned quat_private_enabled;
+static int quat_private_override=-1;
+static struct __attribute__((aligned(64))) {
+    unsigned checks, admitted, nested, shared_input, shared_output, constants;
+} quat_private_stats[WORKERS];
+#endif
 static struct __attribute__((aligned(64))) {
     unsigned checks, admitted, nested, shared_input, shared_output;
 } point_private_stats[WORKERS];
@@ -74,6 +81,13 @@ static struct {
     unsigned count, varied;
     uint32_t pc, output, matrix, vector, object, callback;
 } point_sites[WORKERS][POINT_SITES+1];
+#ifdef XV_OBJECT_QUAT_PROFILE
+enum { QUAT_SITES=16 };
+static struct {
+    unsigned count, private_input;
+    uint32_t pc, input, output;
+} quat_sites[WORKERS][QUAT_SITES+1];
+#endif
 static struct __attribute__((aligned(64))) {
     unsigned attempts, acquired, timeouts;
 } math_wait_stats[WORKERS];
@@ -333,6 +347,23 @@ static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes)
         if(g_xpt[(base>>12)+i]!=stack_pages[lane][i])return 0;
     return 1;
 }
+#ifdef XV_OBJECT_QUAT_PROFILE
+/* Called under the existing guard after private output/scratch admission.
+ * This is an ownership census, not permission to read shared inputs unlocked. */
+static void record_quat_site(unsigned lane,xctx *c)
+{
+    uint32_t pc=private_stack_span(lane,c->r[4],4)?X_M32(c->r[4]):0;
+    unsigned site;
+    for(site=0;site<QUAT_SITES;site++)
+        if(!quat_sites[lane][site].count||quat_sites[lane][site].pc==pc)break;
+    if(!quat_sites[lane][site].count) {
+        quat_sites[lane][site].pc=site<QUAT_SITES?pc:0;
+        quat_sites[lane][site].input=c->r[1];quat_sites[lane][site].output=c->r[2];
+    }
+    quat_sites[lane][site].count++;
+    quat_sites[lane][site].private_input+=private_stack_span(lane,c->r[1],16);
+}
+#endif
 /* Candidate-only bounded caller attribution. Read the return PC only from the
  * current lane's verified stack; other fields are register values, not reads
  * from shared objects. The last bucket records overflow without allocation. */
@@ -390,6 +421,56 @@ void xv_object_math_report_check(void)
 {
     if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
 }
+int xv_object_private_quaternion(xctx *c)
+{
+#if !defined(XV_OBJECT_QUAT_EXPERIMENT) || defined(XV_QUAT_CACHE)
+    (void)c;return 0;
+#else
+    if(!(quat_private_override<0?quat_private_enabled:(unsigned)quat_private_override)||
+       !math_fast_path||__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1||
+       !__atomic_load_n(&running,__ATOMIC_ACQUIRE))return 0;
+    int lane=worker_lane();
+    if(lane<0||c!=&contexts[lane]||!xv_is_object_job(c))return 0;
+    park_worker((unsigned)lane);quat_private_stats[lane].checks++;
+    if(math_depth[lane]) {quat_private_stats[lane].nested++;return 0;}
+    if(c->r[4]<24u||!private_stack_span(lane,c->r[2],52)||
+       !private_stack_span(lane,c->r[4]-24u,28)) {
+        quat_private_stats[lane].shared_output++;return 0;
+    }
+    if(!private_stack_span(lane,c->r[1],16)) {
+        quat_private_stats[lane].shared_input++;return 0;
+    }
+    /* Halo 3925's 0/1/2 constants are in non-writable .rdata (1D6620..1F1250).
+     * Require the original image mapping and canonical words. There are no
+     * mutable tag/pose reads here; remapped or modified constants retain the
+     * guarded path. Map/image replacement occurs with object workers drained. */
+    if((uintptr_t)X_G(0x1f0a68u)!=(uintptr_t)g_img_base+0x1f0a68u||
+       X_M32(0x1f0a68u)!=0||X_M32(0x1f0a78u)!=0x3f800000u||
+       X_M32(0x1f0b04u)!=0x40000000u) {
+        quat_private_stats[lane].constants++;return 0;
+    }
+    quat_private_stats[lane].admitted++;return lane+1;
+#endif
+}
+int xv_object_quat_available(void)
+{
+#if !defined(XV_OBJECT_QUAT_EXPERIMENT) || defined(XV_QUAT_CACHE)
+    return 0;
+#else
+    const char *math=getenv("XV_NATIVE_MATH");
+    return (!math||atoi(math)!=0)&&initialized==1&&active_workers&&math_fast_path&&!xv_phase_enabled&&
+        (override<0?configured:override)>0;
+#endif
+}
+void xv_object_quat_override(int value)
+{
+    xv_object_math_report_check();
+#ifdef XV_OBJECT_QUAT_EXPERIMENT
+    quat_private_override=value<0?-1:!!value;
+#else
+    (void)value;
+#endif
+}
 int xv_object_point_available(void)
 {
 #ifndef XV_OBJECT_POINT_EXPERIMENT
@@ -421,6 +502,9 @@ int xv_object_math_release_private(xctx *c,int *locked,unsigned kind,
         private_stats[lane][kind].shared++;return 0;
     }
     private_stats[lane][kind].released++;
+#ifdef XV_OBJECT_QUAT_PROFILE
+    if(kind==2)record_quat_site(lane,c);
+#endif
     xv_object_math_unlock(locked);*locked=0;
     return 1;
 }
@@ -499,6 +583,10 @@ static int initialize(void)
 #ifdef XV_OBJECT_POINT_EXPERIMENT
     const char *point=getenv("XV_OBJECT_PRIVATE_POINT");
     point_private_enabled=point&&atoi(point)!=0;
+#endif
+#ifdef XV_OBJECT_QUAT_EXPERIMENT
+    const char *quat=getenv("XV_OBJECT_PRIVATE_QUATERNION");
+    quat_private_enabled=quat&&atoi(quat)!=0;
 #endif
     const char *timed=getenv("XV_OBJECT_TIMED_WAIT");
     math_wait_enabled=timed&&atoi(timed)!=0;
@@ -664,6 +752,14 @@ void xv_object_jobs_report(unsigned frames)
             point_private_stats[lane].nested,point_private_stats[lane].shared_input,
             point_private_stats[lane].shared_output);
     memset(point_private_stats,0,sizeof point_private_stats);
+#ifdef XV_OBJECT_QUAT_EXPERIMENT
+    for(unsigned lane=0;lane<WORKERS;lane++)
+        XK_LOG("[object-quat] lane %u checks %u private %u nested %u shared-input %u shared-output %u constants %u\n",
+            lane,quat_private_stats[lane].checks,quat_private_stats[lane].admitted,
+            quat_private_stats[lane].nested,quat_private_stats[lane].shared_input,
+            quat_private_stats[lane].shared_output,quat_private_stats[lane].constants);
+    memset(quat_private_stats,0,sizeof quat_private_stats);
+#endif
     for(unsigned lane=0;lane<WORKERS;lane++)for(unsigned site=0;site<=POINT_SITES;site++)
         if(point_sites[lane][site].count)
             XK_LOG("[object-point-site] lane %u pc %08X count %u varied %u first output %08X matrix %08X vector %08X object %08X callback %08X overflow %u\n",
@@ -671,6 +767,14 @@ void xv_object_jobs_report(unsigned frames)
                 point_sites[lane][site].output,point_sites[lane][site].matrix,point_sites[lane][site].vector,
                 point_sites[lane][site].object,point_sites[lane][site].callback,site==POINT_SITES);
     memset(point_sites,0,sizeof point_sites);
+#ifdef XV_OBJECT_QUAT_PROFILE
+    for(unsigned lane=0;lane<WORKERS;lane++)for(unsigned site=0;site<=QUAT_SITES;site++)
+        if(quat_sites[lane][site].count)
+            XK_LOG("[object-quat-site] lane %u pc %08X count %u private-input %u first input %08X output %08X overflow %u\n",
+                lane,quat_sites[lane][site].pc,quat_sites[lane][site].count,quat_sites[lane][site].private_input,
+                quat_sites[lane][site].input,quat_sites[lane][site].output,site==QUAT_SITES);
+    memset(quat_sites,0,sizeof quat_sites);
+#endif
     XK_LOG("[object-jobs] probed stack peak bytes %u/%u/%u of %u; excludes unprobed small frames\n",stack_peak[0],stack_peak[1],stack_peak[2],STACK_BYTES);
     XK_LOG("[object-locks] fast %u idle-owner %u acquired %u/%u/%u nested %u/%u contended %u/%u wait-us %llu/%llu; worker waits overlap\n",
         math_fast_path,math_idle_calls,math_stats[0].acquired,math_stats[1].acquired,math_stats[2].acquired,

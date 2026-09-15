@@ -32,6 +32,8 @@ parser.add_argument('--output-dir', type=Path, required=True)
 parser.add_argument('--cases', type=int, default=128)
 parser.add_argument('--float-edges', action='store_true')
 parser.add_argument('--random-floats', action='store_true')
+parser.add_argument('--admitted-private-quaternion', action='store_true',
+                    help='stub candidate admission to lane 1; verify compiled private arithmetic only, not ownership/scheduling')
 parser.add_argument('--bounded-matrices', action='store_true',
                     help='bounded finite matrix inputs with expanded alias/page layouts')
 parser.add_argument('--matrix-boundaries', action='store_true',
@@ -50,6 +52,8 @@ if any(value & ~0x03c0009f for value in args.fpscr):
     parser.error('--fpscr permits rounding, flush-to-zero, default-NaN and cumulative exception flags only')
 if args.native_matrix and 'f_000B5B40' not in args.functions:
     parser.error('--native-matrix requires f_000B5B40 in --functions')
+if args.admitted_private_quaternion and args.functions != ['f_000B5F60']:
+    parser.error('--admitted-private-quaternion requires only f_000B5F60')
 if sum((args.float_edges, args.random_floats, args.bounded_matrices,
         args.matrix_boundaries)) > 1:
     parser.error('choose one floating-point fixture mode')
@@ -130,6 +134,8 @@ class Machine:
         assert name != 'xv_preempt', 'fixture exhausted scheduling budget'
         if name == 'getenv':
             uc.reg_write(UC_ARM_REG_R0, 0)
+        elif name == 'xv_object_private_quaternion':
+            uc.reg_write(UC_ARM_REG_R0, 1)
         elif name == 'xk_os_log':
             pass  # Native math announces its setting once, during unmeasured warmup.
         else:
@@ -157,8 +163,13 @@ class Machine:
             return struct.unpack('<I', self.uc.mem_read(self.symbols['point_fast'],4)) + struct.unpack('<IIII', self.uc.mem_read(self.symbols['point_fallback'],16))
         point_before=point_counts()
         def math_counts():
-            return sum((struct.unpack('<II', self.uc.mem_read(self.symbols[n], 8))
-                        for n in ('math_fast', 'math_fallback')), ())
+            values=list(sum((struct.unpack('<II', self.uc.mem_read(self.symbols[n], 8))
+                        for n in ('math_fast', 'math_fallback')), ()))
+            if 'quaternion_stats' in self.symbols:
+                slots=[struct.unpack('<II',self.uc.mem_read(self.symbols['quaternion_stats']+lane*64,8)) for lane in range(3)]
+                values[1]=sum(v[0] for v in slots)&0xffffffff
+                values[3]=sum(v[1] for v in slots)&0xffffffff
+            return tuple(values)
         before = math_counts()
         self.uc.mem_write(RAM, memory)
         self.uc.mem_write(CTX, context)
@@ -426,6 +437,9 @@ for name in args.functions:
     memory, context = fixture(name, 0)
     baseline.call(name, memory, context)
     candidate.call(name, memory, context)
+    if args.admitted_private_quaternion:
+        assert 'quaternion_configured' in candidate.symbols, 'candidate lacks private quaternion experiment'
+        candidate.imports[candidate.symbols['xv_object_private_quaternion']&~1]='xv_object_private_quaternion'
     if args.native_matrix:
         candidate.matrix_mode(args.native_matrix)
     for fpscr in args.fpscr:
@@ -458,6 +472,7 @@ for name in args.functions:
                         [sum(r['native_math_counts'][i] for r in rows) for i in range(4)]))}
     (out / (name + '.json')).write_text(json.dumps(rows, indent=2) + '\n')
 report = {'unicorn': unicorn.__version__, 'results': report, 'units': 'instructions, not cycles or FPS',
+          'admission_stubbed': args.admitted_private_quaternion,
           'native_matrix': args.native_matrix,
           'float_edges': args.float_edges, 'random_floats': args.random_floats, 'fpscr': args.fpscr,
           'bounded_matrices': args.bounded_matrices,

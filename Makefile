@@ -412,6 +412,32 @@ $(RECOMP_BUILD)/object-point.config: force-object-point-config
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-point.config
 
+XV_OBJECT_QUAT_PROFILE_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_QUAT_PROFILE))),1,0)
+ifeq ($(XV_OBJECT_QUAT_PROFILE_BUILD),1)
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_QUAT_PROFILE
+endif
+.PHONY: force-object-quat-profile-config
+force-object-quat-profile-config:
+$(RECOMP_BUILD)/object-quat-profile.config: force-object-quat-profile-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_QUAT_PROFILE_BUILD)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-quat-profile.config
+
+XV_OBJECT_QUAT_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_QUAT_EXPERIMENT))),1,0)
+ifeq ($(XV_OBJECT_QUAT_BUILD),1)
+$(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_QUAT_EXPERIMENT
+endif
+.PHONY: force-object-quat-config
+force-object-quat-config:
+$(RECOMP_BUILD)/object-quat.config: force-object-quat-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_QUAT_BUILD)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-quat.config
+
 # Only generated units containing this optional hook depend on its build mode.
 # This also handles changed shard numbering after regeneration.
 HIERARCHY_HOOK_SRCS := $(shell grep -l XV_NATIVE_MODEL_HIERARCHY $(XITA_GUEST_SRCS) 2>/dev/null)
