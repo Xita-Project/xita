@@ -1398,6 +1398,17 @@ void h2_audio_host_snapshot(h2_audio_device_snapshot *out) { *out = device; }
 void h2_audio_trace_buffer(xctx *c, uint32_t ip)
 {
     /* Terminal read-only probes; never repair guest inputs or resume them. */
+    if (ip==0x37B844) {
+        if (!(c->r[4]&3) && mapped(c->r[4],4) && mapped(0x387198,4) && mapped(0x386B0C,4))
+            xv_logf("[h2/audio-work-probe] caller=%08X original_singleton=%08X suspended=%08X adapter_device=%08X refs=%u children=%u dirty=%08X; zero arguments, no work serviced by this probe\n",
+                    X_M32(c->r[4]),X_M32(0x387198),X_M32(0x386B0C),device.base,device.references,device.children,device.dirty);
+        for (unsigned i=0;i<XA_MAX_VOICES;++i) {
+            const h2_audio_stream *s=&streams[i];if (!s->base) continue;
+            xv_logf("[h2/audio-work-probe] stream=%08X flags=%08X callback=%08X submitted=%u completed=%u packet0=%llu packet1=%llu route_count=%u voice=%d\n",
+                    s->base,s->flags,s->callback,s->submitted,s->completed,
+                    (unsigned long long)s->packets[0].ticket,(unsigned long long)s->packets[1].ticket,s->route_count,s->voice);
+        }
+    }
 #if H2_AUDIO_DSP
     if (ip==0x37B60D && !(c->r[4]&3) && mapped(c->r[4],28)) {
         uint32_t index=X_ARG(1),offset=X_ARG(2),source=X_ARG(3),bytes=X_ARG(4),words[2];
