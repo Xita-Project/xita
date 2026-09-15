@@ -1,5 +1,7 @@
 # Deferred reverb writes through the original DSP monitor
 
+The [second-instance follow-up](halo2-reverb-second-instance.md) validates the same publication and original monitor path for effect 8; the evidence below records the initial effect-9 milestone.
+
 `h2_dsp_queue_reverb9` implements the two shadow writes and command publication identified in the [original reverb audit](halo2-reverb-description-audit.md). It supports effect 9's type-12 layout only: a flag word at byte 16 and 66 converted parameter words at byte 280. The original dirty extent is the complete 528-byte region from offset 16 through 543, including the unchanged saved-image gap. The API queues monitor command 2 and leaves live GP memory, histories, registers and frame counters unchanged until the next actual DSP frame.
 
 The function rejects pending monitor work, active/faulted/uninitialized engines, unsupported flags and invalid or incomplete image/state/GP ranges before mutation. Input parameters are copied first, including when their readable host span aliases shadow storage. Raw signed parameter words retain all 32 bits in shadow; the original monitor DMA performs the actual 24-bit conversion. It does not manufacture completion, reset the engine or issue independent immediate writes.

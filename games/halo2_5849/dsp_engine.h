@@ -44,6 +44,9 @@ int h2_dsp_write_effect_pair(h2_dsp_engine *engine, uint32_t index,
  * applies the actual 24-bit representation. No arbitrary effects API. */
 int h2_dsp_queue_reverb9(h2_dsp_engine *engine, uint32_t flags,
                         const uint32_t parameters[66]);
+/* The second observed instance uses the same verified type-12 layout. */
+int h2_dsp_queue_reverb8(h2_dsp_engine *engine, uint32_t flags,
+                        const uint32_t parameters[66]);
 /* Tests/audit can execute another real frame with all input mix bins zero.
  * Any interpreter, DMA, memory or instruction-budget fault poisons the engine;
  * no API may report usable state afterward. */

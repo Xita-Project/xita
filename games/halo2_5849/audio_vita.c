@@ -26,7 +26,7 @@ static _Alignas(64) int16_t gp_pcm_output[1024 * 2];
 static uint64_t fx_submitted, fx_consumed, fx_compute_us, fx_max_compute_us;
 static uint32_t fx_queued, fx_deadline_misses, fx_empty_after_compute;
 static uint64_t fx_source_submitted[H2_FX_SOURCES], fx_source_consumed[H2_FX_SOURCES];
-static unsigned reverb_pending;
+static unsigned reverb_pending, reverb_index;
 static uint64_t reverb_queued_frame;
 #endif
 #include "recomp/kernel/xk_audio.h"
@@ -421,16 +421,20 @@ int h2_audio_backend_effect_write_pair(h2_dsp_engine *engine, unsigned index,
              h2_dsp_write_effect_pair(engine, index, offset, first, second);
     sceKernelUnlockMutex(progress_mutex, 1); return ok;
 }
-int h2_audio_backend_queue_reverb9(h2_dsp_engine *engine, uint32_t flags,
+static int backend_queue_reverb(h2_dsp_engine *engine, unsigned index, uint32_t flags,
                                    const uint32_t parameters[66])
 {
-    if (h2_audio_backend_health() < 0 || progress_mutex < 0) return 0;
+    if ((index != 8 && index != 9) || h2_audio_backend_health() < 0 || progress_mutex < 0) return 0;
     sceKernelLockMutex(progress_mutex, 1, NULL);
     int ok = h2_audio_backend_health() == 0 && fx.engine == engine && fx.playing && !reverb_pending &&
-             h2_dsp_queue_reverb9(engine, flags, parameters);
-    if(ok){reverb_pending=1;reverb_queued_frame=fx.frames;}
+             (index==8 ? h2_dsp_queue_reverb8(engine,flags,parameters) : h2_dsp_queue_reverb9(engine,flags,parameters));
+    if(ok){reverb_pending=1;reverb_index=index;reverb_queued_frame=fx.frames;}
     sceKernelUnlockMutex(progress_mutex, 1); return ok;
 }
+int h2_audio_backend_queue_reverb8(h2_dsp_engine *engine,uint32_t flags,const uint32_t parameters[66])
+{ return backend_queue_reverb(engine,8,flags,parameters); }
+int h2_audio_backend_queue_reverb9(h2_dsp_engine *engine,uint32_t flags,const uint32_t parameters[66])
+{ return backend_queue_reverb(engine,9,flags,parameters); }
 #endif
 
 static int mix_worker(SceSize bytes, void *arg)
@@ -468,12 +472,12 @@ static int mix_worker(SceSize bytes, void *arg)
                 h2_dsp_status state;uint32_t flags;
                 h2_dsp_snapshot(fx.engine,&state);
                 if(state.fault || state.command || fx.frames<=reverb_queued_frame ||
-                   !h2_dsp_read_effect(fx.engine,9,16,&flags,4) || (flags&4)){
+                   !h2_dsp_read_effect(fx.engine,reverb_index,16,&flags,4) || (flags&4)){
                     __atomic_store_n(&error,(uint32_t)-1010,__ATOMIC_RELEASE);
                     sceKernelUnlockMutex(progress_mutex,1);break;
                 }
-                xv_logf("[h2/reverb-worker] original monitor command2 consumed effect9 flags=%08X real_GP_frames=%llu->%llu; grain not yet submitted\n",
-                        flags,(unsigned long long)reverb_queued_frame,(unsigned long long)fx.frames);
+                xv_logf("[h2/reverb-worker] original monitor command2 consumed effect%u flags=%08X real_GP_frames=%llu->%llu; grain not yet submitted\n",
+                        reverb_index,flags,(unsigned long long)reverb_queued_frame,(unsigned long long)fx.frames);
                 reverb_pending=0;
             }
             fx_compute_us += duration;
@@ -612,7 +616,7 @@ int h2_audio_backend_open(void)
     gp_pcm_voice[0]=gp_pcm_voice[1]=-1; gp_pcm_active=gp_pcm_queued=0;
     memset(gp_pcm_submitted,0,sizeof gp_pcm_submitted); memset(gp_pcm_consumed,0,sizeof gp_pcm_consumed);
     fx = (h2_audio_fx){0}; fx_submitted = fx_consumed = fx_compute_us = fx_max_compute_us = 0;
-    reverb_pending=0;reverb_queued_frame=0;
+    reverb_pending=reverb_index=0;reverb_queued_frame=0;
     fx_queued = fx_deadline_misses = fx_empty_after_compute = 0;
     memset(fx_source_submitted, 0, sizeof fx_source_submitted);
     memset(fx_source_consumed, 0, sizeof fx_source_consumed);

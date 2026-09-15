@@ -80,6 +80,7 @@ static unsigned test_stream_callbacks;
 static uint32_t test_stream_callback_context;
 static unsigned test_reverb_calls,test_reverb_queues,test_reverb_failure,test_reverb_corruption;
 static uint32_t test_reverb_parameters[66],test_reverb_flags;
+static unsigned test_reverb_last_index;
 void test_stream_invoke(xctx *c,uint32_t routine)
 {
     if(routine==0x3838a4){
@@ -120,7 +121,7 @@ int h2_audio_backend_fx_forget(unsigned bin)
 { unsigned mask = test_fx_mask(bin); assert((test_fx_bound & mask) && !(test_fx_playing & mask)); test_fx_bound &= ~mask; if (bin == 13) test_fx_routes = 0; return 0; }
 int h2_audio_backend_effect_read(h2_dsp_engine *s, unsigned index, unsigned offset, void *out, unsigned bytes)
 {
-    if (description_probe_enabled && index==9 && !offset && bytes==280) {
+    if (description_probe_enabled && (index==8 || index==9) && !offset && bytes==280) {
         assert(s==effects);++description_probe_read;
         for (unsigned i=0;i<70;++i) ((uint32_t*)out)[i]=0x10000u+i;
         return 1;
@@ -134,12 +135,16 @@ int h2_audio_backend_effect_write_pair(h2_dsp_engine *s, unsigned index, unsigne
     if(dsp_write_failure || ((first|second)&0xff000000u))return 0;
     ++dsp_writes;dsp_written[index-4][0]=first;dsp_written[index-4][1]=second;return 1;
 }
-int h2_audio_backend_queue_reverb9(h2_dsp_engine *s,uint32_t flags,const uint32_t parameters[66])
+static int test_reverb_queue(h2_dsp_engine *s,unsigned index,uint32_t flags,const uint32_t parameters[66])
 {
     assert(s==effects&&!reverb_conversion.context&&!reverb_conversion.arena);
     if(test_reverb_failure)return 0;
-    ++test_reverb_queues;test_reverb_flags=flags;memcpy(test_reverb_parameters,parameters,sizeof test_reverb_parameters);return 1;
+    ++test_reverb_queues;test_reverb_last_index=index;test_reverb_flags=flags;memcpy(test_reverb_parameters,parameters,sizeof test_reverb_parameters);return 1;
 }
+int h2_audio_backend_queue_reverb8(h2_dsp_engine*s,uint32_t flags,const uint32_t parameters[66])
+{ return test_reverb_queue(s,8,flags,parameters); }
+int h2_audio_backend_queue_reverb9(h2_dsp_engine*s,uint32_t flags,const uint32_t parameters[66])
+{ return test_reverb_queue(s,9,flags,parameters); }
 h2_dsp_engine*h2_dsp_asset_open(const char*path,h2_dsp_status*status)
 {
     assert(!strcmp(path,"app0:halo2-dsp.bin")&&healthy);
@@ -202,12 +207,14 @@ static void reverb_expect_stop(xctx *c, uint32_t ip, int original)
 static void reverb_adapter_tests(void)
 {
     description_probe_enabled=1;
-    for(unsigned mode=0;mode<3;++mode){
+    for(unsigned index=8;index<=9;++index)for(unsigned mode=0;mode<3;++mode){
         xctx c=reverb_context();c.fcw=(uint16_t[]){0x37f,0x27f,0x23f}[mode];
+        X_M32(c.r[4]+4)=index;
         unsigned a=allocs,f=frees,q=test_reverb_queues,n=test_reverb_calls;
         uint8_t input[52],after[52];x_guest_read(input,0x6ffe,52);
         call(&c,0x37ba6f,0,3);assert(allocs==a+1&&frees==f+1&&test_reverb_queues==q+1&&test_reverb_calls==n+1);
         assert(test_reverb_flags==0x10004&&!reverb_conversion.context&&!reverb_conversion.arena);
+        assert(test_reverb_last_index==index);
         for(unsigned i=0;i<66;++i)assert(test_reverb_parameters[i]==(i%2?0xff800001u+i:0x123456u+i));
         x_guest_read(after,0x6ffe,52);assert(!memcmp(input,after,52));
     }
@@ -306,7 +313,7 @@ int H2_AUDIO_DSP_TEST_MAIN(void)
     /* Terminal description capture preserves caller, guest memory and DSP
      * ownership; invalid mappings/types never ask the provider to read. */
     uint8_t *probe_ram=malloc(0x200000);assert(probe_ram);
-    for (unsigned scenario=0;scenario<8;++scenario) {
+    for (unsigned scenario=0;scenario<9;++scenario) {
         c=context(9,0x6ffe,0,0);X_M32(c.r[4])=0x21ee74;
         uint32_t desc[13]={scenario==1?4:12};x_guest_write(0x6ffe,desc,sizeof desc);
         if(scenario==2)X_M32(c.r[4]+8)=0xfffffff0;
@@ -314,13 +321,14 @@ int H2_AUDIO_DSP_TEST_MAIN(void)
         if(scenario==4)X_M32(c.r[4]+4)=15;
         if(scenario==5)g_xpt[7]=0x1ff000;
         if(scenario==7){c.fcw=0x7f;c.fsp=3;c.df=1;native_fp=0x100009f;}
+        if(scenario==8)X_M32(c.r[4]+4)=8;
         description_probe_enabled=scenario!=6;
         xctx saved=c;h2_audio_device_snapshot owner=device;
         memcpy(probe_ram,g_xram,0x200000);unsigned writes=dsp_writes,reads=description_probe_read;
         uint32_t fp=native_fp;trace_effect_description(&c);
         assert(!memcmp(&c,&saved,sizeof c)&&!memcmp(&owner,&device,sizeof owner));
         assert(!memcmp(probe_ram,g_xram,0x200000)&&fp==native_fp&&writes==dsp_writes);
-        assert(description_probe_read==reads+(scenario==0||scenario==7));
+        assert(description_probe_read==reads+(scenario==0||scenario==7||scenario==8));
         g_xpt[7]=0x8000;
     }
     description_probe_enabled=0;free(probe_ram);

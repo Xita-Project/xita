@@ -191,6 +191,7 @@ static h2_dsp_engine *reverb_fixture(void)
     s->code_words=32;s->state_offset=0x898;s->state_bytes=0x1000;
     s->status.frames=2;s->core.is_idle=true;
     s->effects[9]=(h2_dsp_effect){.state_offset=0xa00,.state_bytes=0x240};
+    s->effects[8]=(h2_dsp_effect){.state_offset=0xd00,.state_bytes=0x240};
     memset(s->scratch,0xa5,s->scratch_size);
     put32(s->scratch+0x804,32);put32(s->scratch+0x810,0);put32(s->scratch+0x814,0);
     return s;
@@ -199,20 +200,24 @@ static void reverb_queue_tests(void)
 {
     uint32_t parameters[66];
     for(unsigned i=0;i<66;++i)parameters[i]=i%2?0xff800001u+i:0x123456u+i;
+    for(unsigned index=8;index<=9;++index){
+    unsigned shadow=index==8?0xd00:0xa00;
+    int (*submit)(h2_dsp_engine*,uint32_t,const uint32_t*)=index==8?h2_dsp_queue_reverb8:h2_dsp_queue_reverb9;
     for(unsigned aliased=0;aliased<2;++aliased){
         h2_dsp_engine*s=reverb_fixture(),*before=malloc(sizeof *s);
         uint8_t*expected=malloc(s->scratch_size);assert(before&&expected);
         uint32_t copy[66];const uint32_t*source=parameters;
-        if(aliased)source=(const uint32_t*)(s->scratch+0xa10);
+        if(aliased)source=(const uint32_t*)(s->scratch+shadow+16);
         memcpy(copy,source,sizeof copy);*before=*s;memcpy(expected,s->scratch,s->scratch_size);
-        put32(expected+0xa10,7);
-        for(unsigned i=0;i<66;++i)put32(expected+0xb18+i*4,copy[i]);
-        put32(expected+0x800,(0xa10-0x898)/4);put32(expected+0x808,0xa10);
+        put32(expected+shadow+16,7);
+        for(unsigned i=0;i<66;++i)put32(expected+shadow+280+i*4,copy[i]);
+        put32(expected+0x800,(shadow+16-0x898)/4);put32(expected+0x808,shadow+16);
         put32(expected+0x80c,132);put32(expected+0x810,2);
-        assert(h2_dsp_queue_reverb9(s,7,source));
+        assert(submit(s,7,source));
         assert(!memcmp(s,before,sizeof *s)); /* no live GP/history/counter change */
         assert(!memcmp(s->scratch,expected,s->scratch_size)); /* includes saved gap */
-        assert(!h2_dsp_queue_reverb9(s,7,parameters)); /* pending monitor command */
+        assert(!submit(s,7,parameters)); /* pending monitor command */
+        assert(!h2_dsp_queue_reverb8(s,7,parameters)&&!h2_dsp_queue_reverb9(s,7,parameters));
         assert(!memcmp(s,before,sizeof *s)&&!memcmp(s->scratch,expected,s->scratch_size));
         free(before);free(expected);h2_dsp_destroy(s);
     }
@@ -224,7 +229,7 @@ static void reverb_queue_tests(void)
         case 2:active=s;break;
         case 3:s->status.frames=0;break;
         case 4:s->core.is_idle=false;break;
-        case 5:s->effect_count=9;break;
+        case 5:s->effect_count=index;break;
         case 6:s->scratch_size=0x817;break;
         case 7:s->image_size=0x817;break;
         case 8:flags=0x1000007;break;
@@ -233,22 +238,26 @@ static void reverb_queue_tests(void)
         case 11:put32(s->scratch+0x804,33);break;
         case 12:put32(s->scratch+0x810,3);break;
         case 13:put32(s->scratch+0x814,1);break;
-        case 14:s->effects[9].state_offset=0x800;break;
-        case 15:s->effects[9].state_offset=0xa01;break;
-        case 16:s->effects[9].state_bytes=543;break;
-        case 17:s->state_bytes=0x167;break;
-        case 18:s->effects[9].state_offset=0xfffffffcu;break;
-        case 19:s->image_size=0xc1f;break;
-        case 20:s->scratch_size=0xc1f;break;
-        case 21:s->effects[9].state_offset=0x3600;s->state_bytes=0x4000;s->image_size=0x4000;break;
+        case 14:s->effects[index].state_offset=0x800;break;
+        case 15:s->effects[index].state_offset=0xa01;break;
+        case 16:s->effects[index].state_bytes=543;break;
+        case 17:s->state_bytes=shadow-s->state_offset+543;break;
+        case 18:s->effects[index].state_offset=0xfffffffcu;break;
+        case 19:s->image_size=shadow+543;break;
+        case 20:s->scratch_size=shadow+543;break;
+        case 21:s->effects[index].state_offset=0x3600;s->state_bytes=0x4000;s->image_size=0x4000;break;
         }
         h2_dsp_engine*before=malloc(sizeof *s);uint8_t*saved=malloc(0x10000);assert(before&&saved);
         *before=*s;memcpy(saved,s->scratch,0x10000);
-        assert(!h2_dsp_queue_reverb9(s,flags,source));
+        assert(!submit(s,flags,source));
         assert(!memcmp(s,before,sizeof *s)&&!memcmp(s->scratch,saved,0x10000));
         active=NULL;free(before);free(saved);h2_dsp_destroy(s);
     }
-    assert(!h2_dsp_queue_reverb9(NULL,7,parameters));
+    }
+    assert(!h2_dsp_queue_reverb9(NULL,7,parameters)&&!h2_dsp_queue_reverb8(NULL,7,parameters));
+    h2_dsp_engine*s=reverb_fixture();h2_dsp_engine before=*s;uint8_t saved[0x10000];memcpy(saved,s->scratch,sizeof saved);
+    assert(!queue_reverb(s,7,7,parameters)&&!queue_reverb(s,UINT32_MAX,7,parameters));
+    assert(!memcmp(s,&before,sizeof before)&&!memcmp(saved,s->scratch,sizeof saved));h2_dsp_destroy(s);
 }
 int main(void)
 {

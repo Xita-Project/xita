@@ -51,6 +51,9 @@ int main(void)
     assert(!h2_audio_backend_queue_reverb9((h2_dsp_engine*)(uintptr_t)1,7,reverb_parameters));
     assert(!h2_audio_backend_queue_reverb9(NULL,7,reverb_parameters));
     assert(!h2_audio_backend_queue_reverb9(s,7,reverb_parameters));
+    assert(!h2_audio_backend_queue_reverb8((h2_dsp_engine*)(uintptr_t)1,7,reverb_parameters));
+    assert(!h2_audio_backend_queue_reverb8(NULL,7,reverb_parameters));
+    assert(!h2_audio_backend_queue_reverb8(s,7,reverb_parameters));
     assert(!reverb_pending);
     for (unsigned i = 0; i < 20; ++i) {
         uint32_t state[32]; memset(state, 0x55, sizeof state);

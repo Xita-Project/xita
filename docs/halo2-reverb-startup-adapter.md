@@ -1,6 +1,6 @@
 # Original reverb conversion and live worker integration
 
-Native207 executes the original reverb conversion and the real audio worker consumes its deferred DSP update. Startup then reaches the next original FXIN2 volume call. The original Microsoft Game Studios intro is visible; the main menu remains absent. The detailed validation below separates host/oracle tests, native utilities and actual game execution.
+Native207 executes the original reverb conversion and the real audio worker consumes its deferred DSP update. Startup then reaches the next original FXIN2 volume call. The original Microsoft Game Studios intro is visible; the main menu remains absent. The detailed validation below separates host/oracle tests, native utilities and actual game execution. The [second-instance follow-up](halo2-reverb-second-instance.md) extends this same audited path to effect 8.
 
 The opt-in Halo 2 audio adapter now connects the observed `XAudioSetEffectData` call at `37BA6F`, returning to `21EE74`, to the original conversion routine `3838A4` and the [original DSP monitor queue](halo2-reverb-monitor-queue.md). It admits only the captured effect-9 type-12 startup description, with no optional raw output. Other indices, presets, control modes and callers still stop explicitly.
 

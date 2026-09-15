@@ -276,13 +276,13 @@ int h2_dsp_write_effect_pair(h2_dsp_engine*s,uint32_t index,uint32_t offset,uint
     s->core.xram[address/4]=first;s->core.xram[address/4+1]=second;
     return 1;
 }
-int h2_dsp_queue_reverb9(h2_dsp_engine*s,uint32_t flags,const uint32_t parameters[66])
+static int queue_reverb(h2_dsp_engine*s,unsigned index,uint32_t flags,const uint32_t parameters[66])
 {
-    if(!s||!parameters||s->status.fault||active||!s->status.frames||
-       !s->core.is_idle||s->effect_count<=9||!s->scratch||
+    if(!s||!parameters||(index!=8&&index!=9)||s->status.fault||active||!s->status.frames||
+       !s->core.is_idle||s->effect_count<=index||!s->scratch||
        s->scratch_size<0x818||s->image_size<0x818||
        (flags&0xff000000u)||!(flags&4))return 0;
-    const h2_dsp_effect*e=&s->effects[9];
+    const h2_dsp_effect*e=&s->effects[index];
     uint64_t expected=0x818ull+(uint64_t)s->code_words*4;
     uint64_t shadow=e->state_offset,live=0x200ull+shadow-s->state_offset;
     if(expected!=s->state_offset||le32(s->scratch+0x804)!=s->code_words||
@@ -303,6 +303,10 @@ int h2_dsp_queue_reverb9(h2_dsp_engine*s,uint32_t flags,const uint32_t parameter
     put32(s->scratch+0x810,2);
     return 1;
 }
+int h2_dsp_queue_reverb8(h2_dsp_engine*s,uint32_t flags,const uint32_t parameters[66])
+{ return queue_reverb(s,8,flags,parameters); }
+int h2_dsp_queue_reverb9(h2_dsp_engine*s,uint32_t flags,const uint32_t parameters[66])
+{ return queue_reverb(s,9,flags,parameters); }
 int h2_dsp_zero_frame(h2_dsp_engine*s)
 {
     if(!s||s->status.fault||active)return 0;

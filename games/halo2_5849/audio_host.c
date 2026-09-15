@@ -1309,10 +1309,10 @@ static void effects_description(xctx *c)
 {
     const uint32_t ip=0x37BA6F;
     stack(c,ip,3);live(c,ip,device.base+8,0);buffer_operational(c,ip);
-    uint32_t source=X_ARG(1),words[13],prefix[70];
+    uint32_t index=X_ARG(0),source=X_ARG(1),words[13],prefix[70];
     /* Only the observed startup I3DL2 description is admitted. Other effect
      * types, raw-output requests, dynamic presets and FP modes remain strict. */
-    if (X_M32(c->r[4])!=0x21EE74 || X_ARG(0)!=9 || X_ARG(2) || !effects ||
+    if (X_M32(c->r[4])!=0x21EE74 || (index!=8&&index!=9) || X_ARG(2) || !effects ||
         reverb_conversion.context || !mapped(effects_guest,effects_guest_bytes) ||
         !mapped(source,sizeof words) || overlaps_device(source,sizeof words) ||
         aliases(source,sizeof words,c->r[4],16) || c->df || c->fsp ||
@@ -1327,8 +1327,8 @@ static void effects_description(xctx *c)
         words[6]!=(uint32_t)-6400 || words[7] || words[8]!=(uint32_t)-6400 ||
         words[9] || words[10]!=0x42c80000 || words[11]!=0x42c80000 || words[12]!=0x459c4000)
         fail(c,ip,"unsupported reverb preset",words[0]);
-    if (!h2_audio_backend_effect_read(effects,9,0,prefix,sizeof prefix))
-        fail(c,ip,"reverb current-state read",9);
+    if (!h2_audio_backend_effect_read(effects,index,0,prefix,sizeof prefix))
+        fail(c,ip,"reverb current-state read",index);
     uint32_t base=xk_mem_alloc(4096,4096,0,0,0);
     if (!base) { result(c,0x8007000e,3);return; }
     if ((base&4095) || base>UINT32_MAX-4096 || !mapped(base,4096) ||
@@ -1351,10 +1351,10 @@ static void effects_description(xctx *c)
     for(unsigned a=544;a<0x300;++a)intact&=!X_M8(base+a);
     for(unsigned a=0x344;a<0x800;++a)intact&=!X_M8(base+a);
     if (xk_mem_free(base)<0)fail(c,ip,"reverb private arena release",base);
-    if (!intact)fail(c,ip,"original reverb conversion ABI/footprint",9);
-    if (!h2_audio_backend_queue_reverb9(effects,flags,parameters))
-        fail(c,ip,"reverb monitor queue busy/unsupported",9);
-    xv_logf("[h2/reverb] caller=%08X original converter=003838A4 effect=9 flags=%08X parameters=264 bytes command=2 queued; real worker consumption pending\n",X_M32(c->r[4]),flags);
+    if (!intact)fail(c,ip,"original reverb conversion ABI/footprint",index);
+    int queued=index==8 ? h2_audio_backend_queue_reverb8(effects,flags,parameters) : h2_audio_backend_queue_reverb9(effects,flags,parameters);
+    if (!queued)fail(c,ip,"reverb monitor queue busy/unsupported",index);
+    xv_logf("[h2/reverb] caller=%08X original converter=003838A4 effect=%u flags=%08X parameters=264 bytes command=2 queued; real worker consumption pending\n",X_M32(c->r[4]),index,flags);
     result(c,0,3);
 }
 #endif
@@ -1560,7 +1560,7 @@ static void trace_effect_description(xctx *c)
         for (unsigned i=0;i<13;++i)
             xv_logf("[h2/effect-description-probe] input[%u]=%08X\n",i,words[i]);
         uint32_t state[70];
-        int read=effects && index==9 && h2_audio_backend_effect_read(effects,index,0,state,sizeof state);
+        int read=effects && (index==8 || index==9) && h2_audio_backend_effect_read(effects,index,0,state,sizeof state);
         xv_logf("[h2/effect-description-probe] current_state bytes=280 complete=%u\n",read);
         if (read) for (unsigned i=0;i<70;++i)
             xv_logf("[h2/effect-description-probe] state[%u]=%08X\n",i,state[i]);

@@ -85,5 +85,7 @@ int h2_audio_backend_effect_write_pair(h2_dsp_engine *engine, unsigned index,
                                        unsigned offset, uint32_t first, uint32_t second);
 int h2_audio_backend_queue_reverb9(h2_dsp_engine *engine, uint32_t flags,
                                    const uint32_t parameters[66]);
+int h2_audio_backend_queue_reverb8(h2_dsp_engine *engine, uint32_t flags,
+                                   const uint32_t parameters[66]);
 #endif
 _Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32_t value);
