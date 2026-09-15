@@ -193,17 +193,20 @@ static void graphics_snapshot(void)
             xv_logf("[h2/graphics] private decoded channel snapshot complete=%d\n", complete && !closed);
         }
         h2_linear_texture texture;
-        if (h2_linear_texture_read &&
-            h2_linear_texture_read(&channel->commands, &channel->clear, 0, &texture)) {
-            FILE *pixels = fopen("ux0:data/xita-halo2/texture0-at-stop.bin", "wb");
+        for (unsigned unit = 0; unit < 4; ++unit) {
+            if (!h2_linear_texture_read ||
+                !h2_linear_texture_read(&channel->commands, &channel->clear, unit, &texture)) continue;
+            char path[80];
+            snprintf(path, sizeof path, "ux0:data/xita-halo2/texture%u-at-stop.bin", unit);
+            FILE *pixels = fopen(path, "wb");
             if (pixels) {
                 uint32_t header[8] = {1, texture.physical, texture.width, texture.height,
                                       texture.pitch, texture.bytes, texture.method_format, 0};
                 int complete = fwrite(header, 1, sizeof header, pixels) == sizeof header &&
                                fwrite(texture.pixels, 1, texture.bytes, pixels) == texture.bytes;
                 int closed = fclose(pixels);
-                xv_logf("[h2/graphics] private read-only texture0 snapshot address=%08X size=%ux%u pitch=%u bytes=%u complete=%d\n",
-                        texture.physical, texture.width, texture.height, texture.pitch, texture.bytes,
+                xv_logf("[h2/graphics] private read-only texture%u snapshot address=%08X size=%ux%u pitch=%u bytes=%u complete=%d\n",
+                        unit, texture.physical, texture.width, texture.height, texture.pitch, texture.bytes,
                         complete && !closed);
             }
         }
