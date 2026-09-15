@@ -104,6 +104,14 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_BODY_NOTIFICATION_CALLS = (
+    (0x2784C0, 1254, "9c9d70f2970fcf040fa8398375e0699bd9246436a7454071ecf2ef418b3c57bd"),
+    (0x315910, 49, "c46f3da637ecac9641f352e2ce8ac2f873626fdd53a3279afafc7c3eacd2737c"),
+    (0x30AF20, 82, "a17214ac14606be04b16e3c52161e27c4fe7ce4869d498e353300f2371a43d4d"),
+    (0x30AF80, 64, "46e2df461a524d72d95d45df4ffabc0593141762f3c7f0ae7460438a73765820"),
+    (0x2789F0, 123, "606d41b72e42e54dabef6e423c891fbde8b9a8d7f0addfd76bb98c6fcd35f329"),
+    (0x278A70, 103, "9b3ca57fbbe5bf6035b9591ac0ca666b9d46ac7e14d26c29e98f2c6542c7a1a7"),
+)
 GAME_PAIR_LISTENER_CALLS = (
     (0x3101c0, 1850, "42a213f2b6c96033db532ebef5e5e9dc5e4dbc4d8bed28d18a7475214b5a499b"),
     (0x30e4b0, 303, "a3e5389478a81f59a5c47b1f594afeeb2ffa28b9249b9289f823cd3c993672b6"),
@@ -521,6 +529,21 @@ def descriptor_child_field_roots(image, offsets):
     return roots
 
 
+def game_body_notification_roots(image):
+    """Native168: original registered body add/remove notifications only."""
+    for address, length, digest in GAME_BODY_NOTIFICATION_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 body notification fingerprint mismatch")
+    roots = set()
+    for slot in (0x45A768, 0x45A76C):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 body notification target is not title code")
+        roots.add(target)
+    return roots
+
+
 def game_pair_listener_roots(image):
     """Native167: original predicate and constructor-bound pair listeners.
 
@@ -919,6 +942,7 @@ def main():
         roots.update(game_member_query_roots(image))
         roots.update(game_bounds_insert_roots(image))
         roots.update(game_pair_listener_roots(image))
+        roots.update(game_body_notification_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).

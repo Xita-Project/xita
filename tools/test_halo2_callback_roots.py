@@ -30,6 +30,32 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_registered_body_notifications_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x45A768: 0x1000, 0x45A76C: 0x1010,
+                         0x45A764: None, 0x45A770: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_BODY_NOTIFICATION_CALLS)
+        with patch.object(prepare_boot, "GAME_BODY_NOTIFICATION_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_body_notification_roots(image), {0x1000, 0x1010})
+            self.assertEqual(image.targets, before)
+            for slot in (0x45A768, 0x45A76C):
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_body_notification_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_body_notification_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_BODY_NOTIFICATION_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_body_notification_roots(image)
+
     def test_original_pair_predicate_and_constructor_bound_listeners(self):
         image = SyntheticImage(); image.section_name = ".text"
         slots = (0x4138C8, 0x41388C, 0x413890, 0x4137E8, 0x4137EC,
