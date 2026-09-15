@@ -31,8 +31,9 @@ locks. Report/reset happens after the worker join. The sites identify the
 helper does not establish that its own calculation caused the long hold.
 
 Use the exact candidate's private, unstripped ELF to resolve a logged `pc`.
-On ARM, clear the Thumb bit and subtract two bytes from the return address to
-locate the calling instruction, then run:
+Physical hardware can relocate the executable: subtract the verified runtime
+load bias first. Clear the Thumb bit and subtract two bytes from the return
+address to locate the calling instruction, then run:
 
 ```sh
 arm-vita-eabi-addr2line -f -e candidate.elf NORMALIZED_ADDRESS
@@ -82,3 +83,31 @@ This exact candidate reaches Blood Gulch through the normal menu in Vita3K,
 with both worker lanes and frame-aligned site reports present and no STOP in
 the captured log. Emulator timing does not establish a physical speedup.
 Physical performance and rocket-pickup stability still require testing.
+
+## First physical comparison
+
+The exact candidate was installed into slot B through Wi-Fi, with slot A
+preserved and the runtime hash verified. Original quality settings at 360p and
+an uncapped frame rate were retained. In a stationary Blood Gulch view, one
+off/on/off object-worker trial measured **10.077 / 5.250 / 9.963 FPS**. All three
+camera consistency checks passed and configured settings were restored. This
+tests the current experimental mode, including its diagnostics; it does not
+isolate the profiler's overhead or represent driving/campaign performance.
+
+Fully active frame windows record roughly 325–343 object passes per 60 rendered
+frames and about 104–110 ms of joined batch time per rendered frame. Each lane
+records roughly 47–53 ms of elapsed waiting per rendered frame. These waits
+overlap; they must not be added to each other or to the joined batch time.
+
+Matrix multiplication and quaternion-to-matrix conversion are the largest
+waiting callers in this run, followed by basis and point transforms. A uniform
+`0x59000` relocation uniquely maps all nine observed physical return addresses
+to the exact ELF's direct calls to `xv_object_math_lock` (24 compiled sites).
+Resolving the unadjusted addresses produces incorrect function names. The
+emulator had no such relocation in this test.
+
+The next target is independent math preparation with explicitly owned inputs
+and outputs, reducing the shared-lock scope. The comparison confirms that the
+current whole-object worker mode is slower in this view; it does not justify
+removing protection from arbitrary shared game state. Rocket pickup after the
+cache handoff fix remains unverified on hardware.
