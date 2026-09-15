@@ -1461,6 +1461,30 @@ void h2_audio_guest_entry(xctx *c, uint32_t ip)
     h2_platform_fpscr_write(fpscr);
 }
 void h2_audio_host_snapshot(h2_audio_device_snapshot *out) { *out = device; }
+#if H2_AUDIO_DSP
+static void trace_effect_description(xctx *c)
+{
+    /* XAudioSetEffectData has three arguments, including an optional raw
+     * output, not flags. This terminal probe never invokes its conversion,
+     * writes a descriptor, queues a command or resumes the stopped caller. */
+    if ((c->r[4]&3) || !mapped(c->r[4],16)) return;
+    uint32_t fp=h2_platform_fpscr_read(), index=X_ARG(0), input=X_ARG(1);
+    xv_logf("[h2/effect-description-probe] caller=%08X index=%u description=%08X raw_output=%08X\n",
+            X_M32(c->r[4]),index,input,X_ARG(2));
+    if (mapped(input,52)) {
+        uint32_t words[13];x_guest_read(words,input,sizeof words);
+        if (words[0]!=12) { h2_platform_fpscr_write(fp);return; }
+        for (unsigned i=0;i<13;++i)
+            xv_logf("[h2/effect-description-probe] input[%u]=%08X\n",i,words[i]);
+        uint32_t state[70];
+        int read=effects && index==9 && h2_audio_backend_effect_read(effects,index,0,state,sizeof state);
+        xv_logf("[h2/effect-description-probe] current_state bytes=280 complete=%u\n",read);
+        if (read) for (unsigned i=0;i<70;++i)
+            xv_logf("[h2/effect-description-probe] state[%u]=%08X\n",i,state[i]);
+    }
+    h2_platform_fpscr_write(fp);
+}
+#endif
 void h2_audio_trace_buffer(xctx *c, uint32_t ip)
 {
     /* Terminal read-only probes; never repair guest inputs or resume them. */
@@ -1476,6 +1500,7 @@ void h2_audio_trace_buffer(xctx *c, uint32_t ip)
         }
     }
 #if H2_AUDIO_DSP
+    if (ip==0x37BA6F) trace_effect_description(c);
     if (ip==0x37B60D && !(c->r[4]&3) && mapped(c->r[4],28)) {
         uint32_t index=X_ARG(1),offset=X_ARG(2),source=X_ARG(3),bytes=X_ARG(4),words[2];
         xv_logf("[h2/effect-write-probe] caller=%08X index=%u offset=%u source=%08X bytes=%u flags=%08X\n",

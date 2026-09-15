@@ -9,6 +9,7 @@
 struct h2_dsp_engine { uint32_t marker; };
 static unsigned dsp_opens, dsp_closes, dsp_reads, dsp_writes;
 static int dsp_write_failure;
+static unsigned description_probe_read, description_probe_enabled;
 static uint32_t dsp_written[4][2];
 static int dsp_failure;
 static unsigned test_fx_bound, test_fx_routes, test_fx_playing;
@@ -95,6 +96,11 @@ int h2_audio_backend_fx_forget(unsigned bin)
 { unsigned mask = test_fx_mask(bin); assert((test_fx_bound & mask) && !(test_fx_playing & mask)); test_fx_bound &= ~mask; if (bin == 13) test_fx_routes = 0; return 0; }
 int h2_audio_backend_effect_read(h2_dsp_engine *s, unsigned index, unsigned offset, void *out, unsigned bytes)
 {
+    if (description_probe_enabled && index==9 && !offset && bytes==280) {
+        assert(s==effects);++description_probe_read;
+        for (unsigned i=0;i<70;++i) ((uint32_t*)out)[i]=0x10000u+i;
+        return 1;
+    }
     if (index >= 15 || offset > 128 || bytes > 128 - offset) return 0;
     return h2_dsp_read_effect(s, index, offset, out, bytes);
 }
@@ -183,6 +189,26 @@ int H2_AUDIO_DSP_TEST_MAIN(void)
         for(unsigned i=0;i<n;i++)assert(X_M8(at+i)==(uint8_t)(space*31+i));at+=n;
     }
     c=download_context();dsp_reject(&c,0x37B86D); /* no replacement/leaked owner */
+    /* Terminal description capture preserves caller, guest memory and DSP
+     * ownership; invalid mappings/types never ask the provider to read. */
+    uint8_t *probe_ram=malloc(0x200000);assert(probe_ram);
+    for (unsigned scenario=0;scenario<7;++scenario) {
+        c=context(9,0x6ffe,0,0);X_M32(c.r[4])=0x21ee74;
+        uint32_t desc[13]={scenario==1?4:12};x_guest_write(0x6ffe,desc,sizeof desc);
+        if(scenario==2)X_M32(c.r[4]+8)=0xfffffff0;
+        if(scenario==3)c.r[4]|=1;
+        if(scenario==4)X_M32(c.r[4]+4)=15;
+        if(scenario==5)g_xpt[7]=0x1ff000;
+        description_probe_enabled=scenario!=6;
+        xctx saved=c;h2_audio_device_snapshot owner=device;
+        memcpy(probe_ram,g_xram,0x200000);unsigned writes=dsp_writes,reads=description_probe_read;
+        uint32_t fp=native_fp;trace_effect_description(&c);
+        assert(!memcmp(&c,&saved,sizeof c)&&!memcmp(&owner,&device,sizeof owner));
+        assert(!memcmp(probe_ram,g_xram,0x200000)&&fp==native_fp&&writes==dsp_writes);
+        assert(description_probe_read==reads+(scenario==0));
+        g_xpt[7]=0x8000;
+    }
+    description_probe_enabled=0;free(probe_ram);
     for(unsigned index=0;index<15;index++){
         c=query_context(dev,index,7,60);call(&c,0x37B5E6,0,5);
         uint8_t actual[60];x_guest_read(actual,0x8ffe,sizeof actual);
