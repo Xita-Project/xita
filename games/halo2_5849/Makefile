@@ -254,6 +254,22 @@ $(BUILD)/composition-probe-param.sfo: Makefile
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 Composition Probe" $@
 $(BUILD)/composition%.vpk: $(BUILD)/composition%-eboot.bin $(BUILD)/composition-probe-param.sfo $(addprefix $(COMPOSITION_SHADERS)/,$(COMPOSITION_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/composition-probe-param.sfo -b $(BUILD)/composition$*-eboot.bin $(foreach f,$(COMPOSITION_PROBE_FILES),-a $(COMPOSITION_SHADERS)/$(f)=$(f)) $@
+THRESHOLD_SHADERS ?= $(ROOT)/local/halo2_5849/threshold-shaders
+THRESHOLD_PROBE_FILES := threshold.vert.gxp threshold.frag.gxp threshold.constants.bin threshold.vertices.bin threshold.texture.bin
+.PHONY: threshold-probe
+threshold-probe: $(BUILD)/threshold-probe.vpk
+$(BUILD)/threshold-probe.elf: threshold_probe.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Werror -Wl,-q $< -o $@ -lSceGxm_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceProcessmgr_stub
+$(BUILD)/threshold-probe.velf: $(BUILD)/threshold-probe.elf
+	$(VITASDK)/bin/vita-elf-create $< $@
+$(BUILD)/threshold-probe-eboot.bin: $(BUILD)/threshold-probe.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/threshold-probe-param.sfo: Makefile
+	@mkdir -p $(dir $@)
+	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 Threshold Probe" $@
+$(BUILD)/threshold-probe.vpk: $(BUILD)/threshold-probe-eboot.bin $(BUILD)/threshold-probe-param.sfo $(addprefix $(THRESHOLD_SHADERS)/,$(THRESHOLD_PROBE_FILES))
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/threshold-probe-param.sfo -b $(BUILD)/threshold-probe-eboot.bin $(foreach f,$(THRESHOLD_PROBE_FILES),-a $(THRESHOLD_SHADERS)/$(f)=$(f)) $@
 test-host: $(BUILD)/dxt23_layout_test
 test-host: $(BUILD)/geometry_dispatch_test $(BUILD)/screen_draw_test $(BUILD)/bc1_draw_test $(BUILD)/composition_draw_test
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test

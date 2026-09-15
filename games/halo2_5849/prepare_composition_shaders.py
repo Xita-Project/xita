@@ -14,18 +14,20 @@ PUSH_SHA='6ee03a2355bda9dc878ca2412efb320dc849e945e90f4bcabb86c0f3e9f69498'
 TEXTURE3_SHA='66a31947712af4ad13173d1b37f8570dd08c439b6ce532b1b92021d44e1c09a7'
 
 
-def validate_flow(d):
+def validate_flow(d, *, texture_units=(0,2,3), final_product=False):
     """Reject initial vertex colors/temporary components that have no producer.
 
     Stage input operands see the state before its parallel result assignments.
     Mask bits0..2 are RGB, bit3 alpha. No unavailable t1 color is substituted.
     """
-    known={'zero':15,'c0':15,'c1':15,'t0':15,'t2':15,'t3':15,'r0':8,'r1':0,'v0':0,'v1':0}
+    if any(unit not in range(4) for unit in texture_units):raise ValueError('invalid texture unit')
+    known={'zero':15,'c0':15,'c1':15,'r0':8,'r1':0,'v0':0,'v1':0}
+    known.update({f't{unit}':15 for unit in texture_units})
     def read(inp,alpha):
         mask=(8 if inp['channel']=='alpha' else 4) if alpha else (8 if inp['channel']=='alpha_rep' else 7)
         if (known.get(inp['reg'],0)&mask) != mask:
             raise ValueError(f"unproduced {inp['reg']} component")
-    writable={'t0','t2','t3','r0','r1','v0','v1'}
+    writable={'r0','r1','v0','v1'}|{f't{unit}' for unit in texture_units}
     for stage in d['stages']:
         for inp in stage['rgb_in']:read(inp,False)
         for inp in stage['alpha_in']:read(inp,True)
@@ -42,7 +44,9 @@ def validate_flow(d):
                     if out[slot+'_blue_to_alpha'] and out[slot]!='zero':
                         updates[out[slot]]=updates.get(out[slot],0)|8
         for reg,mask in updates.items():known[reg]|=mask
-    for slot in 'abcdef':read(d['final'][slot],False)
+    for slot in 'ef':read(d['final'][slot],False)
+    if final_product:known['ef_prod']=7
+    for slot in 'abcd':read(d['final'][slot],False)
     read(d['final']['g'],True)
     return known
 
