@@ -242,3 +242,14 @@ made. The next patch marshals that existing non-yielding handler to the owner;
 it retains its existing result and stack cleanup, including its diagnostic
 counter. It does not implement a new GPU fence or claim resource-lifetime bugs
 are fixed. A fixture checks both busy and idle results through the bridge.
+
+
+Runtime `904188dc1f5cd90d5d565a69ec851ca302f61f366423d1fbc1d7a636907d52cb`
+loads Blood Gulch, turns for five seconds and walks for five seconds. The charged
+plasma-pistol action reaches `D3DResource_Register` (`184AB0`, return `3223F`).
+The next candidate admits that handler only after all workers park. Its current
+body fixes up the resource header's data address and reference count; it does not
+submit graphics or allocate memory. The ordinary implementation and its return
+convention are retained. A test checks quiescent header mutation, inputs, result
+and stack cleanup alongside simultaneous event, query and cache-yield requests.
+This new candidate still needs gameplay validation before hardware deployment.

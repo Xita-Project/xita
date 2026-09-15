@@ -63,6 +63,25 @@ static void submit_query(xctx *c,unsigned id)
     xv_object_job_hle(c,0x184A20u,resource_query);
     assert(c->r[4]==sp&&c->r[0]==(id&1));
 }
+static unsigned register_calls;
+static void register_resource(xctx *c)
+{
+    assert(pthread_equal(pthread_self(),guest_owner));
+    /* No math lock: ThreadSanitizer checks publication from every parked lane. */
+    for(unsigned i=0;i<300;i++)io_seen[i]=writes[i];
+    unsigned header=X_M32(c->r[4]+4),base=X_M32(c->r[4]+8);
+    X_M32(header+4)=(base+X_M32(header+4))&0x03ffffffu;
+    X_M32(header)=(X_M32(header)&~0xffffu)|1u;
+    c->r[0]=0;c->r[4]+=12;register_calls++;
+}
+static void submit_register(xctx *c,unsigned id)
+{
+    unsigned sp=c->r[4],h=0x80000+id*16;
+    X_M32(h)=0xaabb0012;X_M32(h+4)=id;
+    X_PUSH32(0x80200000);X_PUSH32(h);X_PUSH32(0x3223Fu);
+    xv_object_job_hle(c,0x184AB0u,register_resource);
+    assert(c->r[0]==0&&c->r[4]==sp&&X_M32(h)==0xaabb0001&&X_M32(h+4)==0x200000+id);
+}
 int xv_math_point_transform(xctx *c);
 uint64_t xk_os_monotonic_us(void)
 { struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000; }
@@ -97,6 +116,7 @@ void f_0008FB70(xctx *c)
     /* Requests can also arrive simultaneously, outside the shared lock. */
     submit_event(c,0x70004+id*8);
     if(id%3==1)submit_yield(c);
+    if(id%3==2)submit_register(c,id);
     __atomic_sub_fetch(&active,1,__ATOMIC_SEQ_CST);c->r[4]+=4;
 }
 int main(int argc,char **argv)
@@ -139,10 +159,10 @@ int main(int argc,char **argv)
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
-    assert(query_calls==600);assert(event_calls==1200&&event_value==1200);assert(io_calls>=200&&io_calls<=400);
+    assert(register_calls==200);assert(query_calls==600);assert(event_calls==1200&&event_value==1200);assert(io_calls>=200&&io_calls<=400);
     for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));
     xv_object_jobs_report(2);xv_object_jobs_shutdown();
-    printf("PASS: 600 callbacks and native point transforms exactly once; 600 resource queries, 1,200 owner-thread events and 400 cache yields with quiescent owner I/O reads, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
+    printf("PASS: 600 callbacks and native point transforms exactly once; 200 quiescent registrations, 600 resource queries, 1,200 owner-thread events and 400 cache yields with quiescent owner I/O reads, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
     free(g_xram);free(g_xpt);
 }
