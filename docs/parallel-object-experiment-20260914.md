@@ -19,8 +19,10 @@ whole gap to 30 FPS.
   builds omit it. After the owner requested hardware deployment, the dedicated
   experimental build defaults it on; `XV_EXPERIMENTAL_OBJECT_JOBS=0` disables it.
 - The second object pass queues its original `8FB70` callbacks. Two real SCE
-  worker threads request cores 0 and 1. The guest owner also executes jobs when
-  joining the batch. This executes game routines, beyond the existing copy work.
+  worker threads request cores 0 and 1. The guest owner services permitted kernel
+  requests while joining the batch. This executes game routines, beyond the
+  existing copy work. Earlier candidates also assigned callbacks to the owner;
+  the event-service follow-up below changes that to avoid a lock/wait deadlock.
 - Each lane owns a CPU context, a registered native thread stack and a separate
   64 KiB guest stack. The bounded queue holds 128 callbacks; overflow completes
   the pending batch before reuse. The next object pass and guest-fiber handoff
@@ -31,8 +33,9 @@ whole gap to 30 FPS.
   their shared counters/caches. The whole callback is not under that mutex.
 - Jobs use the immutable guest dispatch table. Unsupported HLE, unknown indirect
   targets, traps or exhausted instruction budgets stop with a diagnostic instead
-  of entering the single-owner kernel/graphics path. Only the stateless memory
-  comparison HLE is currently allowed.
+  of entering the single-owner kernel/graphics path. Stateless memory comparison
+  can execute directly. The non-yielding `NtSetEvent` is marshaled to the owner;
+  other worker kernel calls remain rejected.
 - The remote `object-jobs` test compares off/on/off at the same settings. It
   initializes worker reservations and native-helper locking before the first
   arm. They remain present in every arm, so this experimental baseline includes
@@ -55,7 +58,7 @@ arbitrary guest threads independently.
 
 ## Validation so far
 
-The production worker pool passes a host test with address/undefined-behavior
+The initial three-lane worker pool passed a host test with address/undefined-behavior
 sanitizers and ThreadSanitizer: 600 synthetic callbacks and real native point
 transforms execute exactly once, with three simultaneous
 lanes, capacity overflow, private stacks, nested math locking, caller filtering,
@@ -133,16 +136,55 @@ that delayed execution and stack relocation preserve all gameplay behavior.
 Event signaling still needs a kernel ownership protocol before workers can use
 it. The test does not fabricate a successful event result.
 
-`XV_OBJECT_JOB_WORKERS=0` or `1` selects these isolation modes; the default is
-two workers plus the owner. Tests run the production pool with all three worker
+`XV_OBJECT_JOB_WORKERS=0` or `1` selects these isolation modes; the original default
+was two workers plus the owner. The service follow-up changes the owner's role.
+Tests run the production pool with all three worker
 counts, verifying the expected concurrency, complete callback execution and
 joins. These modes are diagnostics, not evidence of a speedup.
 
-The two-worker diagnostic now records the active indirect-call chain on failure.
+The two-worker diagnostic records the active indirect-call chain on failure.
 It identifies `4C980`, reached through the `90900` callback table, as another path
 to collision traversal outside `96430`. The failed lane's stack pointer is within
 its reserved range and its bottom canary is intact. That observation does not
 exclude every possible memory overwrite. The next candidate guards `4C980`
 with the same recursive mutex; its full 976-byte code/jump-table span is checked.
-The remaining object-pass work stays outside that callback guard. Emulator
-startup validation is pending; the physical Vita retains the working runtime.
+The remaining object-pass work stays outside that callback guard. This candidate
+gets through two emulator windows totaling 7,196 callbacks on all three original
+lanes, then reaches the same `NtSetEvent` boundary as the serial isolation run.
+That removes the observed initial collision failure in this reproduction; it
+does not establish general collision correctness.
+
+### Owner service for non-yielding events
+
+The current candidate assigns callbacks to the two workers. The owner stays
+available to execute an audited `NtSetEvent` request using the paused worker's
+context, then wakes that worker with the real result and stack cleanup. Running
+another object callback on the owner while servicing requests could deadlock:
+it might wait for the same callback lock held by the requesting worker.
+Ordinary main-thread engine work outside this pass still runs on its existing
+thread. Zero-worker isolation mode executes callbacks and services on the owner.
+
+Requests publish through release/acquire state, with coalesced semaphore wakes.
+Each worker has a reply semaphore. Completion is acknowledged before draining
+old notifications or reusing the batch. The only kernel service admitted is
+`NtSetEvent`, whose current implementation updates event/waiter state without
+switching guest fibers. Yielding, waiting, file, sound and graphics services are
+not admitted by this bridge.
+
+Address/undefined-behavior sanitizers and ThreadSanitizer pass for 600 callbacks
+and 1,200 event services per worker-count configuration. Tests verify owner-thread
+execution, unique previous-state outputs, real return values, stack cleanup,
+requests with and without the shared callback lock, complete work and joins.
+The original 28,800 list/datum transaction fixture also passes ThreadSanitizer
+with the new owner/service arrangement.
+
+Runtime `5bc6571ebd00631d7ff3ab42537b566338b3df748bc5397c975dd0382697c7c4`
+completes initial emulator windows with 3,600 and 3,596 callbacks split between
+the two workers, then stops at `NtYieldExecution` (`1D6640`, return `12AA9`) from
+the indirect callback `39450`. A direct call-graph path to this import passes
+through the floating-point error machinery (`180ADA`, `180C8A`, `23D25`,
+`1E445`); that is a static reachability observation, not a captured dynamic call
+stack. Trace the actual reason for yielding before admitting it or choosing an
+owner-only scheduling boundary. No yielding call was replaced with success.
+The physical Vita remains on the working runtime; this is not a hardware FPS
+result or a deployable gameplay candidate yet.

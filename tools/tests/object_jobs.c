@@ -6,12 +6,31 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 
 uint8_t *g_xram,*g_img_base; uint32_t *g_xpt;
 int xv_phase_enabled;
 static int gameplay_ready=1;
 int xd3d_object_jobs_ready(void) {return gameplay_ready;}
 static unsigned writes[300],active,peak,allocations;
+static unsigned event_calls,event_value;
+static unsigned event_seen[1200];
+static pthread_t guest_owner;
+static void event_service(xctx *c)
+{
+    assert(pthread_equal(pthread_self(),guest_owner));
+    assert(X_M32(c->r[4]+4)==0xfaceu);
+    X_M32(X_M32(c->r[4]+8))=event_value++;
+    event_calls++;c->r[0]=0x12340000u;c->r[4]+=12;
+}
+static void submit_event(xctx *c,uint32_t output)
+{
+    uint32_t sp=c->r[4];X_PUSH32(output);X_PUSH32(0xfaceu);X_PUSH32(0x12ccfu);
+    xv_object_job_hle(c,0x1D665Cu,event_service);
+    assert(c->r[4]==sp&&c->r[0]==0x12340000u);
+    unsigned previous=X_M32(output);assert(previous<1200);
+    __atomic_add_fetch(&event_seen[previous],1,__ATOMIC_RELAXED);
+}
 int xv_math_point_transform(xctx *c);
 uint64_t xk_os_monotonic_us(void)
 { struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000; }
@@ -37,12 +56,18 @@ void f_0008FB70(xctx *c)
         assert(X_MF32(0x60004+id*16)==1.0f);
         assert(X_MF32(0x60008+id*16)==2.0f);
         { XV_OBJECT_MATH_GUARD(); writes[id]++; }
+        /* Hold the shared callback lock while parking for a real owner service.
+         * The owner must not run a job that blocks on this same mutex. */
+        submit_event(c,0x70000+id*8);
     }
+    /* Requests can also arrive simultaneously, outside the shared lock. */
+    submit_event(c,0x70004+id*8);
     __atomic_sub_fetch(&active,1,__ATOMIC_SEQ_CST);c->r[4]+=4;
 }
 int main(int argc,char **argv)
 {
     (void)argv;
+    guest_owner=pthread_self();
     g_xram=calloc(1,2<<20);g_img_base=g_xram;g_xpt=calloc(1<<20,4);
     for(unsigned i=0;i<512;i++)g_xpt[i]=i*4096;
     X_MF32(0x30000)=1;X_MF32(0x30004)=1;X_MF32(0x30014)=1;X_MF32(0x30024)=1;
@@ -73,10 +98,12 @@ int main(int argc,char **argv)
     }
     xctx *scope=&c;xv_object_jobs_end(&scope);
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
-    unsigned expected=workers?1u+(unsigned)atoi(workers):3u;
+    unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
+    assert(event_calls==1200&&event_value==1200);
+    for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));
     xv_object_jobs_report(2);xv_object_jobs_shutdown();
-    printf("PASS: 600 callbacks and real native point transforms exactly once, three private guest stacks, peak %u simultaneous jobs, capacity overflow joins, native math lock recursion, capture exclusion, caller filtering and restore\n",peak);
+    printf("PASS: 600 callbacks and native point transforms exactly once; 1,200 owner-thread event services with unique previous states, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
     free(g_xram);free(g_xpt);
 }

@@ -16,6 +16,7 @@
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/cpu.h>
 #include <psp2/kernel/processmgr.h>
+#include <psp2/kernel/error.h>
 #else
 #include <pthread.h>
 #include <semaphore.h>
@@ -29,17 +30,64 @@ static unsigned count, next, running, stopping, active_workers=WORKERS;
 static uint32_t stacks[LANES];
 static uint32_t active_objects[LANES], indirect_stack[LANES][32];
 static unsigned indirect_depth[LANES];
+/* A worker publishes one request, then parks until the guest owner replies.
+ * States: 0 executing, 1 service request, 2 completed, 3 completion consumed. */
+static unsigned service_state[WORKERS], services, owner_notice;
+static xv_fn_t service_fn[WORKERS];
 static int initialized, override=-1;
 static xctx *owner;
 static unsigned batches, submitted, executed[LANES], rejected;
 static uint64_t work_us[LANES], batch_us;
 #ifdef __vita__
 static SceUID threads[WORKERS]={-1,-1}, wakes[WORKERS]={-1,-1}, dones[WORKERS]={-1,-1}, math_mutex=-1;
+static SceUID owner_wake=-1, replies[WORKERS]={-1,-1};
 #else
 static pthread_t threads[WORKERS];
 static sem_t wakes[WORKERS], dones[WORKERS];
+static sem_t owner_wake, replies[WORKERS];
 static pthread_mutex_t math_mutex;
 #endif
+
+#ifndef __vita__
+static void wait_sem(sem_t *s) { while(sem_wait(s))if(errno!=EINTR)abort(); }
+#endif
+static void notify_owner(void)
+{
+    if(__atomic_exchange_n(&owner_notice,1,__ATOMIC_ACQ_REL))return;
+#ifdef __vita__
+    if(sceKernelSignalSema(owner_wake,1)<0)abort();
+#else
+    if(sem_post(&owner_wake))abort();
+#endif
+}
+static void service_owner(void)
+{
+    unsigned completed=0;
+    while(completed<active_workers) {
+#ifdef __vita__
+        if(sceKernelWaitSema(owner_wake,1,NULL)<0)abort();
+#else
+        wait_sem(&owner_wake);
+#endif
+        __atomic_store_n(&owner_notice,0,__ATOMIC_RELEASE);
+        for(unsigned i=0;i<active_workers;i++) {
+            unsigned state=__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE);
+            if(state==1) {
+                /* Only the audited, non-yielding NtSetEvent reaches this path.
+                 * xk_cur and the cooperative scheduler remain on their owner. */
+                service_fn[i](&contexts[i]);services++;
+                __atomic_store_n(&service_state[i],0,__ATOMIC_RELEASE);
+#ifdef __vita__
+                if(sceKernelSignalSema(replies[i],1)<0)abort();
+#else
+                if(sem_post(&replies[i]))abort();
+#endif
+            } else if(state==2) {
+                __atomic_store_n(&service_state[i],3,__ATOMIC_RELEASE);completed++;
+            }
+        }
+    }
+}
 
 int xv_object_math_lock(void)
 {
@@ -91,18 +139,20 @@ static int worker(SceSize size,void *arg)
         if(sceKernelWaitSema(wakes[lane],1,NULL)<0)abort();
         if(__atomic_load_n(&stopping,__ATOMIC_ACQUIRE))return 0;
         execute(lane);
+        __atomic_store_n(&service_state[lane],2,__ATOMIC_RELEASE);notify_owner();
         if(sceKernelSignalSema(dones[lane],1)<0)abort();
     }
 }
 #else
-static void wait_sem(sem_t *s) { while(sem_wait(s))if(errno!=EINTR)abort(); }
 static void *worker(void *arg)
 {
     unsigned lane=(unsigned)(uintptr_t)arg;
     for(;;) {
         wait_sem(&wakes[lane]);
         if(__atomic_load_n(&stopping,__ATOMIC_ACQUIRE))return NULL;
-        execute(lane); sem_post(&dones[lane]);
+        execute(lane);
+        __atomic_store_n(&service_state[lane],2,__ATOMIC_RELEASE);notify_owner();
+        sem_post(&dones[lane]);
     }
 }
 #endif
@@ -112,7 +162,7 @@ static int initialize(void)
     initialized=-1;
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     if(workers && (!strcmp(workers,"0")||!strcmp(workers,"1")))active_workers=(unsigned)atoi(workers);
-    if(active_workers!=WORKERS)XK_LOG("[object-jobs] DIAGNOSTIC: %u active workers plus owner; not the full three-lane experiment\n",active_workers);
+    if(active_workers!=WORKERS)XK_LOG("[object-jobs] DIAGNOSTIC: %u active workers; zero selects owner-only execution\n",active_workers);
     for(unsigned i=0;i<LANES;i++) {
         stacks[i]=xk_mem_alloc(STACK_BYTES,4096,0,0,1);
         if(!stacks[i])goto fail;
@@ -120,10 +170,13 @@ static int initialize(void)
 #ifdef __vita__
     math_mutex=sceKernelCreateMutex("xv_object_math",SCE_KERNEL_MUTEX_ATTR_RECURSIVE,0,NULL);
     if(math_mutex<0)goto fail;
+    owner_wake=sceKernelCreateSema("xv_object_service",0,0,1,NULL);
+    if(owner_wake<0)goto fail;
     for(unsigned i=0;i<WORKERS;i++) {
         wakes[i]=sceKernelCreateSema("xv_object_wake",0,0,1,NULL);
         dones[i]=sceKernelCreateSema("xv_object_done",0,0,1,NULL);
-        if(wakes[i]<0||dones[i]<0)goto fail;
+        replies[i]=sceKernelCreateSema("xv_object_reply",0,0,1,NULL);
+        if(wakes[i]<0||dones[i]<0||replies[i]<0)goto fail;
         threads[i]=sceKernelCreateThread(i?"xv_objects_c1":"xv_objects_c0",worker,
             sceKernelGetThreadCurrentPriority(),512*1024,0,
             i?SCE_KERNEL_CPU_MASK_USER_1:SCE_KERNEL_CPU_MASK_USER_0,NULL);
@@ -135,14 +188,15 @@ static int initialize(void)
     pthread_mutexattr_t attr;pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr,PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&math_mutex,&attr);pthread_mutexattr_destroy(&attr);
+    sem_init(&owner_wake,0,0);
     for(unsigned i=0;i<WORKERS;i++) {
-        sem_init(&wakes[i],0,0);sem_init(&dones[i],0,0);
+        sem_init(&wakes[i],0,0);sem_init(&dones[i],0,0);sem_init(&replies[i],0,0);
         if(pthread_create(&threads[i],NULL,worker,(void *)(uintptr_t)i))abort();
     }
 #endif
     __atomic_store_n(&initialized,1,__ATOMIC_RELEASE);
     XK_LOG("[object-jobs] guest stacks %08X/%08X/%08X, %u bytes each\n",stacks[0],stacks[1],stacks[2],STACK_BYTES);
-    XK_LOG("[object-jobs] EXPERIMENT: whole object callbacks, workers core 0/1 plus owner; shared game state and reordered updates are unproven; private stacks, joined batches, guarded HLE\n");
+    XK_LOG("[object-jobs] EXPERIMENT: whole object callbacks on core 0/1; owner services kernel requests and joins; shared game state and reordered updates are unproven\n");
     return 1;
 fail:
 #ifdef __vita__
@@ -150,8 +204,10 @@ fail:
         if(threads[i]>=0)sceKernelDeleteThread(threads[i]);
         if(wakes[i]>=0)sceKernelDeleteSema(wakes[i]);
         if(dones[i]>=0)sceKernelDeleteSema(dones[i]);
+        if(replies[i]>=0)sceKernelDeleteSema(replies[i]);
     }
     if(math_mutex>=0)sceKernelDeleteMutex(math_mutex);
+    if(owner_wake>=0)sceKernelDeleteSema(owner_wake);
 #endif
     for(unsigned i=0;i<LANES;i++)if(stacks[i]) { xk_mem_free(stacks[i]);stacks[i]=0; }
     XK_LOG("[object-jobs] unavailable: worker or private-stack allocation failed; serial callbacks retained\n");
@@ -186,6 +242,7 @@ void xv_object_jobs_join(void)
     if(!count)return;
     uint64_t started=xk_os_monotonic_us();
     next=0;__atomic_store_n(&running,1,__ATOMIC_RELEASE);
+    memset(service_state,0,sizeof service_state);
     for(unsigned i=0;i<active_workers;i++) {
 #ifdef __vita__
         if(sceKernelSignalSema(wakes[i],1)<0)abort();
@@ -193,7 +250,10 @@ void xv_object_jobs_join(void)
         sem_post(&wakes[i]);
 #endif
     }
-    execute(2);
+    /* The owner must stay available: running a callback here could block on a
+     * mutex held by a worker awaiting its kernel service and deadlock the batch.
+     * Main-thread work outside this joined object pass remains on core 2. */
+    if(active_workers)service_owner();else execute(2);
     for(unsigned i=0;i<active_workers;i++) {
 #ifdef __vita__
         if(sceKernelWaitSema(dones[i],1,NULL)<0)abort();
@@ -201,6 +261,17 @@ void xv_object_jobs_join(void)
         wait_sem(&dones[i]);
 #endif
     }
+    /* Every worker posts its final owner notification before its done semaphore.
+     * With all done semaphores consumed, no old notification can arrive later. */
+#ifdef __vita__
+    int drained;
+    while((drained=sceKernelPollSema(owner_wake,1))==0) {}
+    if(drained!=(int)SCE_KERNEL_ERROR_SEMA_ZERO)abort();
+#else
+    while(sem_trywait(&owner_wake)==0||errno==EINTR) {}
+    if(errno!=EAGAIN)abort();
+#endif
+    __atomic_store_n(&owner_notice,0,__ATOMIC_RELEASE);
     __atomic_store_n(&running,0,__ATOMIC_RELEASE);
     batch_us+=xk_os_monotonic_us()-started;batches++;count=0;
 }
@@ -230,6 +301,7 @@ void xv_object_jobs_report(unsigned frames)
         frames,batches,submitted,executed[0],executed[1],executed[2],
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)work_us[2],
         (unsigned long long)batch_us,rejected);
+    XK_LOG("[object-jobs] owner event services %u\n",services);services=0;
     batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
 }
 void xv_object_job_indirect(xctx *c,unsigned target)
@@ -256,10 +328,22 @@ void xv_object_job_stop(xctx *c,unsigned address,const char *reason)
 }
 void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
 {
-    /* Stateless memory comparison only. Kernel, file, sound and D3D mutations
-     * need a separate ownership protocol before they may run from these jobs. */
-    if(address!=0x1D675Cu)xv_object_job_stop(c,address,"unsupported HLE");
-    fn(c);
+    if(address==0x1D675Cu) {fn(c);return;} /* stateless memory comparison */
+    if(address!=0x1D665Cu||!fn)xv_object_job_stop(c,address,"unsupported HLE");
+    /* NtSetEvent is non-yielding. Preserve its real return value, stack cleanup,
+     * previous-state output and scheduler effects by executing it on the owner. */
+    if(c==&contexts[2]&&!active_workers) {fn(c);services++;return;}
+    for(unsigned i=0;i<active_workers;i++)if(c==&contexts[i]) {
+        service_fn[i]=fn;
+        __atomic_store_n(&service_state[i],1,__ATOMIC_RELEASE);notify_owner();
+#ifdef __vita__
+        if(sceKernelWaitSema(replies[i],1,NULL)<0)abort();
+#else
+        wait_sem(&replies[i]);
+#endif
+        return;
+    }
+    xv_object_job_stop(c,address,"kernel service outside active worker");
 }
 void xv_object_jobs_shutdown(void)
 {
@@ -270,14 +354,17 @@ void xv_object_jobs_shutdown(void)
 #ifdef __vita__
         sceKernelSignalSema(wakes[i],1);sceKernelWaitThreadEnd(threads[i],NULL,NULL);
         sceKernelDeleteThread(threads[i]);sceKernelDeleteSema(wakes[i]);sceKernelDeleteSema(dones[i]);
+        sceKernelDeleteSema(replies[i]);
 #else
-        sem_post(&wakes[i]);pthread_join(threads[i],NULL);sem_destroy(&wakes[i]);sem_destroy(&dones[i]);
+        sem_post(&wakes[i]);pthread_join(threads[i],NULL);sem_destroy(&wakes[i]);sem_destroy(&dones[i]);sem_destroy(&replies[i]);
 #endif
     }
 #ifdef __vita__
     sceKernelDeleteMutex(math_mutex);
+    sceKernelDeleteSema(owner_wake);
 #else
     pthread_mutex_destroy(&math_mutex);
+    sem_destroy(&owner_wake);
 #endif
     for(unsigned i=0;i<LANES;i++)xk_mem_free(stacks[i]);
     initialized=-1;
