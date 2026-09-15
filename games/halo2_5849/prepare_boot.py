@@ -104,6 +104,12 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_OWNER_FIELD_RELEASE_CALLS = (
+    (0x3101C0, 1850, "42a213f2b6c96033db532ebef5e5e9dc5e4dbc4d8bed28d18a7475214b5a499b"),
+    (0x30C1A0, 81, "1536effbf6292521a9ac40436ab335ff1057fb5ccc057fab011d9b3eca2d0ee8"),
+    (0x30CEA0, 40, "c5d0acb75b4151773f8a2ff61cd89696e19a5d4faa2847d85bb509030d4c3b3a"),
+    (0x318970, 7, "9d01063ce344aa9d3d7690b43933c414f74645560f48eb67140b71bd38a3e1d0"),
+)
 GAME_BODY_NOTIFICATION_CALLS = (
     (0x2784C0, 1254, "9c9d70f2970fcf040fa8398375e0699bd9246436a7454071ecf2ef418b3c57bd"),
     (0x315910, 49, "c46f3da637ecac9641f352e2ce8ac2f873626fdd53a3279afafc7c3eacd2737c"),
@@ -529,6 +535,18 @@ def descriptor_child_field_roots(image, offsets):
     return roots
 
 
+def game_owner_field_release_roots(image):
+    """Native169: delete the original constructor-owned field through slot zero."""
+    for address, length, digest in GAME_OWNER_FIELD_RELEASE_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 owner field release fingerprint mismatch")
+    target = image.u32(0x4138C0)
+    section = image.section_of(target) if target else None
+    if not target or not image.is_code(target) or not section or section[4] != ".text":
+        raise ValueError("Halo 2 owner field release target is not title code")
+    return {target}
+
+
 def game_body_notification_roots(image):
     """Native168: original registered body add/remove notifications only."""
     for address, length, digest in GAME_BODY_NOTIFICATION_CALLS:
@@ -943,6 +961,7 @@ def main():
         roots.update(game_bounds_insert_roots(image))
         roots.update(game_pair_listener_roots(image))
         roots.update(game_body_notification_roots(image))
+        roots.update(game_owner_field_release_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).

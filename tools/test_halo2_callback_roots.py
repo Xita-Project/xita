@@ -30,6 +30,29 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_constructor_owned_field_release_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x4138C0: 0x1000, 0x4138BC: None, 0x4138C4: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_OWNER_FIELD_RELEASE_CALLS)
+        with patch.object(prepare_boot, "GAME_OWNER_FIELD_RELEASE_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_owner_field_release_roots(image), {0x1000})
+            self.assertEqual(image.targets, before)
+            for bad in (0, None, 0xDEAD):
+                image.targets[0x4138C0] = image.bad_code = bad
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_owner_field_release_roots(image)
+            image.targets[0x4138C0] = 0x1000; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_owner_field_release_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_OWNER_FIELD_RELEASE_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_owner_field_release_roots(image)
+
     def test_registered_body_notifications_only(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {0x45A768: 0x1000, 0x45A76C: 0x1010,
