@@ -30,6 +30,40 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_noarg_command_descriptor_bounds_and_required_callbacks(self):
+        image=SyntheticImage();image.section_name=".text";image.targets={}
+        for index in range(4):
+            record=0x44DB50+index*16
+            image.targets[0x474D88+index*4]=record
+            image.targets[record+4]=0x1000+index*16
+        spec=(0x200,len(image.code),hashlib.sha256(image.code).hexdigest())
+        count=len(prepare_boot.GAME_SCRIPT_NOARG_COMMAND_BINDINGS)
+        with patch.object(prepare_boot,"GAME_SCRIPT_NOARG_COMMAND_BINDINGS",(spec,)*count):
+            before=dict(image.targets)
+            self.assertEqual(prepare_boot.game_script_noarg_command_roots(image),{0x1000,0x1010,0x1020,0x1030})
+            self.assertEqual(image.targets,before)
+            for index in range(4):
+                slot=0x474D88+index*4
+                for bad in (None,0,0x44DB50+(index+1)*16):
+                    image.targets[slot]=bad
+                    with self.assertRaisesRegex(ValueError,"binding"):prepare_boot.game_script_noarg_command_roots(image)
+                image.targets[slot]=before[slot]
+                slot=0x44DB54+index*16
+                for bad in (None,0,0xDEAD):
+                    image.targets[slot]=image.bad_code=bad
+                    with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_noarg_command_roots(image)
+                image.targets[slot]=before[slot];image.bad_code=None
+            with patch.object(image,"section_of",return_value=None):
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_noarg_command_roots(image)
+            for section in (".data","DSOUND","D3D"):
+                image.section_name=section
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_noarg_command_roots(image)
+            image.section_name=".text"
+            for index in range(count):
+                guards=[spec]*count;guards[index]=(*spec[:2],"0"*64)
+                with patch.object(prepare_boot,"GAME_SCRIPT_NOARG_COMMAND_BINDINGS",guards):
+                    with self.assertRaisesRegex(ValueError,"fingerprint"):prepare_boot.game_script_noarg_command_roots(image)
+
     def test_expression_descriptor_prefix_does_not_scan_metadata_or_next_record(self):
         image=SyntheticImage();image.section_name=".text";image.targets={}
         for index in range(25):

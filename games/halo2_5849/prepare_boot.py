@@ -427,6 +427,33 @@ GAME_SCRIPT_PRIMITIVE_BINDINGS = (
     (0x4744E0, 100, "664eacd7562c4b9f091feb8e5458ef7ddbc3ad6c67bbdeed054c5368a9bf812b"),
     (0x44B098, 400, "9f275cc69f450e2bbf70421fdd6ed5e39e4dadd1d81549545f6053e96515661e"),
 )
+GAME_SCRIPT_NOARG_COMMAND_BINDINGS = (
+    (0x209946, 24, "a59139aaf3efc1c6ed4f31629881441aac80ffc93ea4f6ec531774b28c025e4a"),
+    (0x474D88, 16, "f4739cfa78d9ea2ee01bf35d574db15b9a22476de40ca47e3461bdbd40f2ecef"),
+    (0x44DB50, 64, "a3d15d5cdd4862f79b65446d292b80e463d9bee31bc9f448ceb2a73f746401a3"),
+)
+
+
+def game_script_noarg_command_roots(image):
+    """Native214: four exact zero-argument descriptors at indices22A..22D.
+
+    Their original wrappers update actual game state and finish the current
+    expression. Do not include neighboring commands with input arguments.
+    """
+    for address, length, digest in GAME_SCRIPT_NOARG_COMMAND_BINDINGS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 no-argument command fingerprint mismatch")
+    roots = set()
+    for index in range(4):
+        record = image.u32(0x474D88 + index * 4)
+        if record != 0x44DB50 + index * 16:
+            raise ValueError("Halo 2 no-argument command binding mismatch")
+        target = image.u32(record + 4)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 no-argument command callback is invalid")
+        roots.add(target)
+    return roots
 
 
 def game_script_primitive_roots(image):
@@ -1212,6 +1239,7 @@ def main():
         roots.update(game_move_alignment_roots(image))
         roots.update(game_sound_record_predicate_roots(image))
         roots.update(game_script_primitive_roots(image))
+        roots.update(game_script_noarg_command_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
