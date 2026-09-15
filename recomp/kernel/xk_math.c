@@ -14,7 +14,14 @@
 #endif
 
 static unsigned math_fast[2], math_fallback[2];
-static unsigned point_fast, point_fallback[4];
+/* Guarded calls use slot zero; admitted private calls own their worker slot.
+ * Reporting occurs after object batches join. No atomic per-operation update. */
+static struct __attribute__((aligned(64))) point_counts {
+    unsigned fast, fallback[4];
+} point_stats[3];
+#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POINT_EXPERIMENT)
+static unsigned point_configured;
+#endif
 static int point_override = -1;
 enum { ML_DISJOINT, ML_LEFT, ML_RIGHT, ML_BOTH, ML_DISABLED, ML_ALIGNMENT,
        ML_PAGE, ML_SCRATCH, ML_PARTIAL, ML_COUNT };
@@ -43,13 +50,21 @@ static int math_overlap(const void *a, unsigned an, const void *b, unsigned bn)
 }
 void xv_native_math_report(unsigned frames)
 {
+#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POINT_EXPERIMENT)
+    xv_object_math_report_check();
+#endif
     XV_OBJECT_MATH_GUARD();
 #ifdef XV_NATIVE_MATRIX_NEON
     matrix_neon_report(frames);
 #endif
+    unsigned point_fast=0,point_fallback[4]={0};
+    for(unsigned lane=0;lane<3;lane++) {
+        point_fast+=point_stats[lane].fast;
+        for(unsigned i=0;i<4;i++)point_fallback[i]+=point_stats[lane].fallback[i];
+    }
     XK_LOG("[native-point] %u frames fast %u; fallback disabled %u fp %u layout %u numeric %u\n",
            frames,point_fast,point_fallback[0],point_fallback[1],point_fallback[2],point_fallback[3]);
-    point_fast=0; memset(point_fallback,0,sizeof point_fallback);
+    memset(point_stats,0,sizeof point_stats);
 #ifdef XV_NATIVE_OBJECT_BASIS
     extern void xv_object_basis_report(unsigned);
     xv_object_basis_report(frames);
@@ -81,9 +96,9 @@ void xv_point_math_override(int value)
 {
     point_override=value<0?-1:!!value;
 }
-static int point_decline(unsigned reason)
+static int point_decline(struct point_counts *stats,unsigned reason)
 {
-    point_fallback[reason]++; return 0;
+    stats->fallback[reason]++; return 0;
 }
 static int point_fp_supported(void)
 {
@@ -102,25 +117,40 @@ static int point_fp_supported(void)
  * overlap is declined because the original interleaves matrix reads/stores. */
 int xv_math_point_transform(xctx *c)
 {
+    unsigned lane=0;
+#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POINT_EXPERIMENT)
+    /* Publish immutable configuration before any lock-free helper reads it.
+     * A cold call follows the original guarded initialization path. */
+    unsigned ready=__atomic_load_n(&point_configured,__ATOMIC_ACQUIRE);
+    if(ready)lane=(unsigned)xv_object_private_point(c);
+    int xv_object_math_locked_ __attribute__((cleanup(xv_object_math_unlock))) =
+        lane?0:xv_object_math_lock();
+#else
     XV_OBJECT_MATH_GUARD();
+#endif
+    struct point_counts *stats=&point_stats[lane];
     static int enabled=-1;
     if(enabled<0) {
         const char *value=getenv("XV_NATIVE_POINT_MATH");
         enabled=!value||atoi(value)!=0;
     }
-    if(!math_enabled()||!(point_override<0?enabled:point_override))return point_decline(0);
-    if(!point_fp_supported())return point_decline(1);
+    int allowed=math_enabled();
+#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POINT_EXPERIMENT)
+    if(!ready)__atomic_store_n(&point_configured,1,__ATOMIC_RELEASE);
+#endif
+    if(!allowed||!(point_override<0?enabled:point_override))return point_decline(stats,0);
+    if(!point_fp_supported())return point_decline(stats,1);
     const uint32_t *m=math_span(c->r[1],52), *v=math_span(c->r[2],12);
     float *out=math_span(c->r[0],12);
-    if(!m||!v||!out||c->fsp>7||math_overlap(m,52,out,12))return point_decline(2);
+    if(!m||!v||!out||c->fsp>7||math_overlap(m,52,out,12))return point_decline(stats,2);
     /* Finite inputs avoid changing arithmetic NaN payload/operand priority.
      * Classify integer representations without raising FP exceptions. */
-    for(unsigned i=0;i<13;i++)if((m[i]&0x7f800000u)==0x7f800000u)return point_decline(3);
-    for(unsigned i=0;i<3;i++)if((v[i]&0x7f800000u)==0x7f800000u)return point_decline(3);
+    for(unsigned i=0;i<13;i++)if((m[i]&0x7f800000u)==0x7f800000u)return point_decline(stats,3);
+    for(unsigned i=0;i<3;i++)if((v[i]&0x7f800000u)==0x7f800000u)return point_decline(stats,3);
     float mf[13],vf[3];
     memcpy(mf,m,sizeof mf);memcpy(vf,v,sizeof vf);
     uint32_t scale=m[0];
-    point_fast++;
+    stats->fast++;
     XV_OBJECT_MATH_PRIVATE(c,0,c->r[0],12,0,0);
     double x=vf[0], y=vf[1], z=vf[2];
     if(scale!=0x3f800000u) {

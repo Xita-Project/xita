@@ -61,6 +61,13 @@ emulator switching checks pass. Three physical native-resolution comparisons
 regress from about 9.1–9.2 to 7.2–7.3 FPS, with far more contended handoffs. The
 existing wait is restored; the candidate stays off. Next: reduce lock frequency
 where math inputs and outputs are wholly worker-owned.
+A [private point prototype and caller trace](docs/object-private-point-20260915.md)
+passes ownership and numerical tests, but finds zero eligible calls in two
+emulator views. The trace attributes 98.86% of sampled point calls to the model
+update writing `object+0x50`; the rest retain a collision transaction guard.
+The prototype requires an explicit build flag and is not installed on hardware.
+Next: establish ownership and dependencies for that model-update work before
+batching it across workers.
 
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.

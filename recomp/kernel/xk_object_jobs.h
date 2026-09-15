@@ -27,6 +27,10 @@ int xv_object_math_release_private(xctx *c,int *locked,unsigned kind,
 int xv_object_math_available(void);
 int xv_object_lock_available(void);
 void xv_object_lock_override(int enabled);
+int xv_object_private_point(xctx *c);
+void xv_object_math_report_check(void);
+int xv_object_point_available(void);
+void xv_object_point_override(int enabled);
 int xv_object_wait_available(void);
 void xv_object_wait_override(int enabled);
 void xv_object_math_override(int enabled);

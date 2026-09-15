@@ -394,6 +394,21 @@ RECOMP_CFLAGS += -DXV_EXPERIMENTAL_OBJECT_JOBS
 CFLAGS += -DXV_EXPERIMENTAL_OBJECT_JOBS
 endif
 
+# Explicit research build only. Track this flag for the two affected objects so
+# switching a reused build directory cannot silently retain the previous mode.
+XV_OBJECT_POINT_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_POINT_EXPERIMENT))),1,0)
+ifeq ($(XV_OBJECT_POINT_BUILD),1)
+$(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_POINT_EXPERIMENT
+endif
+.PHONY: force-object-point-config
+force-object-point-config:
+$(RECOMP_BUILD)/object-point.config: force-object-point-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_POINT_BUILD)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-point.config
+
 # Unroll only bounded native math units. Scalar VFP operations retain their
 # established operand order; no global fast-math or guest codegen change.
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off

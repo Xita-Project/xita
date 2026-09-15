@@ -149,6 +149,10 @@ class Machine:
                          if n in self.symbols else 0 for n in names)
         matrix_before = matrix_counts()
         def point_counts():
+            # These fixtures run without object workers; only guarded slot zero
+            # is used by the newer per-lane counter layout.
+            if 'point_stats' in self.symbols:
+                return struct.unpack('<IIIII', self.uc.mem_read(self.symbols['point_stats'],20))
             if 'point_fast' not in self.symbols: return (0,0,0,0,0)
             return struct.unpack('<I', self.uc.mem_read(self.symbols['point_fast'],4)) + struct.unpack('<IIII', self.uc.mem_read(self.symbols['point_fallback'],16))
         point_before=point_counts()

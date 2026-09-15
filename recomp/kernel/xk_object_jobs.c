@@ -64,6 +64,16 @@ enum { WAIT_SITES=32 };
 static unsigned math_profile;
 static unsigned math_wait_enabled;
 static int math_wait_override=-1;
+static unsigned point_private_enabled;
+static int point_private_override=-1;
+static struct __attribute__((aligned(64))) {
+    unsigned checks, admitted, nested, shared_input, shared_output;
+} point_private_stats[WORKERS];
+enum { POINT_SITES=16 };
+static struct {
+    unsigned count, varied;
+    uint32_t pc, output, matrix, vector, object, callback;
+} point_sites[WORKERS][POINT_SITES+1];
 static struct __attribute__((aligned(64))) {
     unsigned attempts, acquired, timeouts;
 } math_wait_stats[WORKERS];
@@ -323,6 +333,77 @@ static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes)
         if(g_xpt[(base>>12)+i]!=stack_pages[lane][i])return 0;
     return 1;
 }
+/* Candidate-only bounded caller attribution. Read the return PC only from the
+ * current lane's verified stack; other fields are register values, not reads
+ * from shared objects. The last bucket records overflow without allocation. */
+#ifdef XV_OBJECT_POINT_EXPERIMENT
+static void record_point_site(unsigned lane,xctx *c)
+{
+    uint32_t pc=private_stack_span(lane,c->r[4],4)?X_M32(c->r[4]):0;
+    unsigned site;
+    for(site=0;site<POINT_SITES;site++)
+        if(!point_sites[lane][site].count||point_sites[lane][site].pc==pc)break;
+    if(!point_sites[lane][site].count) {
+        point_sites[lane][site].pc=site<POINT_SITES?pc:0;
+        point_sites[lane][site].output=c->r[0];
+        point_sites[lane][site].matrix=c->r[1];
+        point_sites[lane][site].vector=c->r[2];
+        point_sites[lane][site].object=active_objects[lane];
+        point_sites[lane][site].callback=indirect_depth[lane]?indirect_stack[lane][indirect_depth[lane]-1]:0;
+    } else if(point_sites[lane][site].output!=c->r[0]||
+              point_sites[lane][site].matrix!=c->r[1]||
+              point_sites[lane][site].vector!=c->r[2])point_sites[lane][site].varied++;
+    point_sites[lane][site].count++;
+}
+#endif
+/* A point helper touches no game-global constants or cache. Only a live worker
+ * with all three spans on its unchanged private stack may bypass the guard.
+ * The helper keeps configuration immutable and owns separate per-lane counters.
+ * Owner audio services retain worker contexts, so context identity alone is not
+ * sufficient: verify the actual native thread before accepting the lane. */
+int xv_object_private_point(xctx *c)
+{
+#ifndef XV_OBJECT_POINT_EXPERIMENT
+    (void)c;return 0;
+#else
+    if(!(point_private_override<0?point_private_enabled:(unsigned)point_private_override)||
+       !math_fast_path||__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1||
+       !__atomic_load_n(&running,__ATOMIC_ACQUIRE))return 0;
+    int lane=worker_lane();
+    if(lane<0||c!=&contexts[lane]||!xv_is_object_job(c))return 0;
+    park_worker((unsigned)lane);
+    point_private_stats[lane].checks++;
+    record_point_site((unsigned)lane,c);
+    if(math_depth[lane]) {point_private_stats[lane].nested++;return 0;}
+    if(!private_stack_span((unsigned)lane,c->r[0],12)) {
+        point_private_stats[lane].shared_output++;return 0;
+    }
+    if(!private_stack_span((unsigned)lane,c->r[1],52)||
+       !private_stack_span((unsigned)lane,c->r[2],12)) {
+        point_private_stats[lane].shared_input++;return 0;
+    }
+    point_private_stats[lane].admitted++;
+    return lane+1;
+#endif
+}
+void xv_object_math_report_check(void)
+{
+    if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
+}
+int xv_object_point_available(void)
+{
+#ifndef XV_OBJECT_POINT_EXPERIMENT
+    return 0;
+#else
+    return initialized==1&&active_workers&&math_fast_path&&!xv_phase_enabled&&
+        (override<0?configured:override)>0;
+#endif
+}
+void xv_object_point_override(int value)
+{
+    if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
+    point_private_override=value<0?-1:!!value;
+}
 int xv_object_math_release_private(xctx *c,int *locked,unsigned kind,
     uint32_t output,unsigned output_bytes,uint32_t scratch,unsigned scratch_bytes)
 {
@@ -415,6 +496,10 @@ static int initialize(void)
     /* Dedicated experimental builds collect contention by default. Set zero
      * for a profiling-overhead comparison; ordinary builds omit this module. */
     math_profile=!profile||atoi(profile)!=0;
+#ifdef XV_OBJECT_POINT_EXPERIMENT
+    const char *point=getenv("XV_OBJECT_PRIVATE_POINT");
+    point_private_enabled=point&&atoi(point)!=0;
+#endif
     const char *timed=getenv("XV_OBJECT_TIMED_WAIT");
     math_wait_enabled=timed&&atoi(timed)!=0;
     const char *private_math=getenv("XV_OBJECT_PRIVATE_MATH");
@@ -455,6 +540,7 @@ static int initialize(void)
     XK_LOG("[object-jobs] guest stacks %08X/%08X/%08X, %u bytes each\n",stacks[0],stacks[1],stacks[2],STACK_BYTES);
     XK_LOG("[object-locks] wait-site profiling %s; elapsed waits include scheduling and parked service time\n",math_profile?"on":"off");
     XK_LOG("[object-locks] backend %s; lightweight available %d\n",xv_object_mutex_name(&math_mutex),math_mutex.light_ready);
+    XK_LOG("[object-point] private input/output bypass %s\n",point_private_enabled?"on":"off");
     XK_LOG("[object-locks] contention wait %s; 50 us service-check budget\n",math_wait_enabled?"bounded mutex":"sleep/poll");
     XK_LOG("[object-locks] code anchor %llX symbol xv_object_math_lock; private math %s\n",
         (unsigned long long)(uintptr_t)xv_object_math_lock,math_private_enabled?"on":"off");
@@ -572,6 +658,19 @@ void xv_object_jobs_report(unsigned frames)
         math_wait_stats[0].acquired,math_wait_stats[1].acquired,
         math_wait_stats[0].timeouts,math_wait_stats[1].timeouts);
     memset(math_wait_stats,0,sizeof math_wait_stats);
+    for(unsigned lane=0;lane<WORKERS;lane++)
+        XK_LOG("[object-point] lane %u checks %u private %u nested %u shared-input %u shared-output %u\n",
+            lane,point_private_stats[lane].checks,point_private_stats[lane].admitted,
+            point_private_stats[lane].nested,point_private_stats[lane].shared_input,
+            point_private_stats[lane].shared_output);
+    memset(point_private_stats,0,sizeof point_private_stats);
+    for(unsigned lane=0;lane<WORKERS;lane++)for(unsigned site=0;site<=POINT_SITES;site++)
+        if(point_sites[lane][site].count)
+            XK_LOG("[object-point-site] lane %u pc %08X count %u varied %u first output %08X matrix %08X vector %08X object %08X callback %08X overflow %u\n",
+                lane,point_sites[lane][site].pc,point_sites[lane][site].count,point_sites[lane][site].varied,
+                point_sites[lane][site].output,point_sites[lane][site].matrix,point_sites[lane][site].vector,
+                point_sites[lane][site].object,point_sites[lane][site].callback,site==POINT_SITES);
+    memset(point_sites,0,sizeof point_sites);
     XK_LOG("[object-jobs] probed stack peak bytes %u/%u/%u of %u; excludes unprobed small frames\n",stack_peak[0],stack_peak[1],stack_peak[2],STACK_BYTES);
     XK_LOG("[object-locks] fast %u idle-owner %u acquired %u/%u/%u nested %u/%u contended %u/%u wait-us %llu/%llu; worker waits overlap\n",
         math_fast_path,math_idle_calls,math_stats[0].acquired,math_stats[1].acquired,math_stats[2].acquired,
