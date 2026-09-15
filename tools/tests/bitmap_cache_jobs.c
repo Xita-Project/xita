@@ -18,8 +18,8 @@ uint64_t xk_os_monotonic_us(void)
 void xk_os_log(const char *fmt,...)
 {va_list a;va_start(a,fmt);vfprintf(stderr,fmt,a);va_end(a);}
 uint32_t xk_mem_alloc(uint32_t n,uint32_t a,uint32_t l,uint32_t h,int top)
-{(void)a;(void)l;(void)h;(void)top;assert(n==65536);return 0x100000+(allocations++)*65536;}
-int xk_mem_free(uint32_t a) {assert(a>=0x100000&&a<0x130000);return 1;}
+{(void)a;(void)l;(void)h;(void)top;assert(n==XV_OBJECT_JOB_STACK_BYTES);return 0x100000+(allocations++)*XV_OBJECT_JOB_STACK_BYTES;}
+int xk_mem_free(uint32_t a) {assert(a>=0x100000&&a<0x100000+3*XV_OBJECT_JOB_STACK_BYTES);return 1;}
 void f_000325C0(xctx *);
 /* The test owns only eight tags; this producer makes one pending cache record
  * per tag. Concurrent callers must observe the same record after publication. */

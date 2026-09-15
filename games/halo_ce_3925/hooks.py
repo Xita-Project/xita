@@ -131,6 +131,10 @@ class HaloHooks(NoGameHooks):
         out = []
         if not self.enabled:
             return out
+        if address == 0x1D130 and hashlib.sha256(
+                self.image.bytes_at(address, 16) or b"").hexdigest() == "810ef7f224dd7cd8feb82821c31ca0997daab985ffc11449ffa287d879ada54e":
+            out.extend(["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS",
+                        "    xv_object_job_stack_probe(c);", "#endif"])
         if address == 0x8FB70 and self.enabled and hashlib.sha256(
                 self.image.bytes_at(address, 0x111) or b"").hexdigest() == "8003e134015d9a4df2a0e3bd501610aafacb7b7693bba77a40094b542c964ae0":
             out.extend(["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS",

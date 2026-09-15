@@ -24,7 +24,7 @@ whole gap to 30 FPS.
   existing copy work. Earlier candidates also assigned callbacks to the owner;
   the event-service follow-up below changes that to avoid a lock/wait deadlock.
 - Each lane owns a CPU context, a registered native thread stack and a separate
-  64 KiB guest stack. The bounded queue holds 128 callbacks; overflow completes
+  256 KiB guest stack, with a checked large-frame allocation helper. The bounded queue holds 128 callbacks; overflow completes
   the pending batch before reuse. The next object pass and guest-fiber handoff
   join outstanding jobs.
 - The pass hooks also cover copies inlined by the recompiler. Both the containing
@@ -308,3 +308,26 @@ STOP. Earlier shots did not exercise the new vertex handler; only the wall test
 establishes that coverage. These are emulator functional results, not hardware
 FPS evidence. A Wi-Fi update to the physical inactive slot was then started;
 working slot A is retained for rollback. Hardware confirmation is still pending.
+
+
+The impact build was confirmed on physical slot B, but the subsequent emulator
+Warthog driving test exposed a guest stack overflow before any hardware gameplay
+measurement. Lane 1 ESP was `614C10`, below its reserved `615000..625000` range;
+the bottom canary had changed to `BE800000`. The eventual instruction-budget stop
+was in `86A40` under the vehicle callback `39450`. The physical unit was rolled
+back and confirmed on working slot A (`7f33dee4...`). Thus the slot-B installation
+is not a completed hardware test or performance result.
+
+The next candidate increases each guest worker stack from 64 to 256 KiB (576 KiB
+additional guest memory across three lanes). Before the original 16-byte stack
+allocation helper at `1D130` runs, a signature-checked hook validates the requested
+size against that worker's remaining space, retaining a 256-byte lower margin.
+The helper still runs unchanged for valid requests; normal owner contexts are
+untouched. This check covers large allocations, not every individual push or
+small frame. A per-lane peak records checked allocations with that limitation.
+Tests execute the original helper on the production pool: 300 callbacks per
+2/1/0-worker configuration retain nested frame data above 64 KiB, including
+zero-size behavior. Oversized requests stop before the original write with an
+intact canary. TSAN and ASAN/UBSAN pass; the mixed-service pool and exact signature
+checks also pass. Runtime `dbe5edfe630fd8e030d044b01c4232334ea0a00de87d8053ac6ef7e0fd142cbf`
+is being tested in the emulator; hardware has not received it.

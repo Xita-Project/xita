@@ -3,6 +3,7 @@
 #include "../xv_x86rt.h"
 
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+enum { XV_OBJECT_JOB_STACK_BYTES=256*1024 };
 extern const char xv_object_job_marker;
 static inline int xv_is_object_job(const xctx *c)
 { return c && c->fiber == &xv_object_job_marker; }
@@ -15,6 +16,7 @@ void xv_object_jobs_override(int enabled);
 void xv_object_jobs_shutdown(void);
 void xv_object_jobs_report(unsigned frames);
 void xv_object_job_hle(xctx *c, unsigned address, xv_fn_t fn);
+void xv_object_job_stack_probe(xctx *c);
 void xv_object_job_stop(xctx *c, unsigned address, const char *reason) __attribute__((noreturn));
 int xv_object_math_lock(void);
 void xv_object_math_unlock(int *locked);

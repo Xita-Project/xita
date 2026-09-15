@@ -23,11 +23,12 @@
 #include <errno.h>
 #endif
 
-enum { WORKERS=2, LANES=3, CAPACITY=128, STACK_BYTES=65536 };
+enum { WORKERS=2, LANES=3, CAPACITY=128, STACK_BYTES=XV_OBJECT_JOB_STACK_BYTES };
 const char xv_object_job_marker=0;
 static xctx jobs[CAPACITY], contexts[LANES];
 static unsigned count, next, running, stopping, active_workers=WORKERS;
 static uint32_t stacks[LANES];
+static unsigned stack_peak[LANES];
 static uint32_t active_objects[LANES], indirect_stack[LANES][32];
 static unsigned indirect_depth[LANES];
 /* A worker publishes one request, then parks until the guest owner replies.
@@ -388,7 +389,24 @@ void xv_object_jobs_report(unsigned frames)
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)work_us[2],
         (unsigned long long)batch_us,rejected);
     XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
+    XK_LOG("[object-jobs] probed stack peak bytes %u/%u/%u of %u; excludes unprobed small frames\n",stack_peak[0],stack_peak[1],stack_peak[2],STACK_BYTES);
     batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
+}
+/* Halo's original large-frame helper adjusts ESP without probing guard pages.
+ * Validate before it writes the relocated return address. Keep all guest
+ * registers/flags and the original allocation body unchanged. */
+void xv_object_job_stack_probe(xctx *c)
+{
+    if(!xv_is_object_job(c))return;
+    for(unsigned i=0;i<LANES;i++)if(c==&contexts[i]) {
+        uint32_t sp=c->r[4],bytes=c->r[0],low=stacks[i]+256,top=stacks[i]+STACK_BYTES;
+        if(sp<low||sp>top-4||bytes>sp-low)
+            xv_object_job_stop(c,0x1D130u,"guest stack allocation exceeds worker capacity");
+        unsigned used=top-(sp-bytes);
+        if(used>stack_peak[i])stack_peak[i]=used;
+        return;
+    }
+    xv_object_job_stop(c,0x1D130u,"stack allocation outside active worker");
 }
 void xv_object_job_indirect(xctx *c,unsigned target)
 {
