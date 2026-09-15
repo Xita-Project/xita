@@ -574,3 +574,87 @@ const uint32_t *h2_threshold_gxm_render(void *opaque,const h2_threshold_request 
     return threshold_target;
 }
 #endif
+
+#if H2_BLUR_RENDER
+/* The original averaging pass uses a clipped 160x120 attachment
+ * without blending. Share the existing H2 context, patcher and geometry buffers. */
+static h2_blur_contract blur_contract;
+static SceGxmVertexProgram *blur_vprog;
+static SceGxmFragmentProgram *blur_fprog;
+static const SceGxmProgramParameter *blur_factors;
+static SceGxmRenderTarget *blur_rt;
+static SceGxmColorSurface blur_color;
+static SceGxmDepthStencilSurface blur_depth;
+static SceGxmTexture blur_tex[4];
+static uint8_t *blur_pixels[4];
+static uint32_t *blur_target;
+static unsigned blur_samplers[4];
+static int blur_attempted,blur_ready;
+const h2_blur_contract *h2_blur_gxm_contract(void)
+{
+    static int loaded;if(loaded)return &blur_contract;
+    FILE *file=fopen("app0:blur.contract.bin","rb");if(!file)return NULL;
+    uint32_t header[2];
+    int ok=fread(header,1,8,file)==8&&header[0]==0x434C3248&&header[1]==1&&
+        fread(&blur_contract,1,sizeof blur_contract,file)==sizeof blur_contract&&fgetc(file)==EOF&&!ferror(file);
+    if(fclose(file))ok=0;
+    if(!ok){memset(&blur_contract,0,sizeof blur_contract);xv_logf("[h2/blur] invalid private contract\n");return NULL;}
+    loaded=1;return &blur_contract;
+}
+static int blur_initialize(void)
+{
+    const SceGxmProgram *vp=load("app0:blur.vert.gxp",596),*fp=load("app0:blur.frag.gxp",1092);
+    REQUIRE(vp&&fp);SceGxmShaderPatcherId vid,fid;
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
+    const char *names[]={"IN.position","IN.blendweight","IN.normal","IN.color0","IN.color1","IN.fog","IN.psize"};
+    SceGxmVertexAttribute attr[7]={{0}};
+    for(unsigned i=0;i<7;++i){const SceGxmProgramParameter *p=parameter(vp,names[i]);REQUIRE(p);
+        attr[i].offset=i*16;attr[i].format=SCE_GXM_ATTRIBUTE_FORMAT_F32;attr[i].componentCount=4;
+        attr[i].regIndex=sceGxmProgramParameterGetResourceIndex(p);}
+    SceGxmVertexStream stream={.stride=112,.indexSource=SCE_GXM_INDEX_SOURCE_INDEX_16BIT};
+    CHECK(sceGxmShaderPatcherCreateVertexProgram(patcher,vid,attr,7,&stream,1,&blur_vprog));
+    CHECK(sceGxmShaderPatcherCreateFragmentProgram(patcher,fid,SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,SCE_GXM_MULTISAMPLE_NONE,NULL,vp,&blur_fprog));
+    blur_factors=parameter(fp,"psc");REQUIRE(blur_factors&&sceGxmProgramParameterGetArraySize(blur_factors)==18);
+    unsigned used=0;
+    for(unsigned i=0;i<4;++i){char name[8];snprintf(name,sizeof name,"tex%u",i);const SceGxmProgramParameter *p=parameter(fp,name);REQUIRE(p);
+        blur_samplers[i]=sceGxmProgramParameterGetResourceIndex(p);REQUIRE(blur_samplers[i]<4&&!(used&(1u<<blur_samplers[i])));used|=1u<<blur_samplers[i];
+        blur_pixels[i]=alloc(160*120*4,0,NULL);REQUIRE(blur_pixels[i]);
+        CHECK(sceGxmTextureInitLinear(&blur_tex[i],blur_pixels[i],SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,160,120,1));
+        CHECK(sceGxmTextureSetMinFilter(&blur_tex[i],SCE_GXM_TEXTURE_FILTER_LINEAR));CHECK(sceGxmTextureSetMagFilter(&blur_tex[i],SCE_GXM_TEXTURE_FILTER_LINEAR));
+        CHECK(sceGxmTextureSetUAddrMode(&blur_tex[i],SCE_GXM_TEXTURE_ADDR_CLAMP));CHECK(sceGxmTextureSetVAddrMode(&blur_tex[i],SCE_GXM_TEXTURE_ADDR_CLAMP));}
+    blur_target=alloc(160*120*4,0,NULL);void *mask=alloc(160*128*4,0,NULL);REQUIRE(blur_target&&mask);
+    SceGxmRenderTargetParams rp={.width=160,.height=120,.multisampleMode=SCE_GXM_MULTISAMPLE_NONE,.scenesPerFrame=1,.driverMemBlock=-1};
+    CHECK(sceGxmCreateRenderTarget(&rp,&blur_rt));
+    CHECK(sceGxmDepthStencilSurfaceInit(&blur_depth,SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24,SCE_GXM_DEPTH_STENCIL_SURFACE_TILED,160,mask,NULL));
+    CHECK(sceGxmColorSurfaceInit(&blur_color,SCE_GXM_COLOR_FORMAT_A8R8G8B8,SCE_GXM_COLOR_SURFACE_LINEAR,SCE_GXM_COLOR_SURFACE_SCALE_NONE,SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT,160,120,160,blur_target));
+    xv_logf("[h2/blur] initialized validated 160x120 four-sampler pass on existing H2 context\n");return 1;
+}
+const uint32_t *h2_blur_gxm_render(void *opaque,const h2_blur_request *request)
+{
+    (void)opaque;if(!request||!request->destination)return NULL;
+    for(unsigned i=0;i<4;++i)if(!request->textures[i].pixels||request->textures[i].bytes!=160*120*4)return NULL;
+    if(!attempted){attempted=1;ready=initialize();}if(!ready)return NULL;
+    if(!blur_attempted){blur_attempted=1;blur_ready=blur_initialize();}if(!blur_ready)return NULL;
+    memcpy(vertices,request->vertices,sizeof request->vertices);
+    for(unsigned i=0;i<4;++i)memcpy(blur_pixels[i],request->textures[i].pixels,160*120*4);
+    CHECK(sceGxmBeginScene(ctx,0,blur_rt,NULL,NULL,NULL,&blur_color,&blur_depth));
+    sceGxmSetViewportEnable(ctx,SCE_GXM_VIEWPORT_ENABLED);sceGxmSetRegionClip(ctx,SCE_GXM_REGION_CLIP_NONE,0,0,159,119);
+    sceGxmSetViewport(ctx,80,80,60,-60,0,1);sceGxmSetCullMode(ctx,SCE_GXM_CULL_NONE);
+    sceGxmSetFrontFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);sceGxmSetBackFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
+    sceGxmSetFrontStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetBackStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetFrontDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);sceGxmSetBackDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);sceGxmSetBackDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);
+    sceGxmSetVertexProgram(ctx,blur_vprog);sceGxmSetFragmentProgram(ctx,blur_fprog);CHECK(sceGxmSetVertexStream(ctx,0,vertices));
+    void *fu;CHECK(sceGxmReserveFragmentDefaultUniformBuffer(ctx,&fu));CHECK(sceGxmSetUniformDataF(fu,blur_factors,0,72,(const float *)request->factors));
+    for(unsigned i=0;i<4;++i)CHECK(sceGxmSetFragmentTexture(ctx,blur_samplers[i],&blur_tex[i]));
+    CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,indices,6));
+    SceGxmNotification done={sceGxmGetNotificationRegion(),++notification};REQUIRE(done.address);
+    CHECK(sceGxmEndScene(ctx,NULL,&done));CHECK(sceGxmNotificationWait(&done));sceGxmFinish(ctx);
+    static unsigned count;
+    if(++count<=4){unsigned nonblack=0;for(unsigned i=0;i<160*120;++i)nonblack+=(blur_target[i]&0xFFFFFF)!=0;
+        uint32_t uv[2];memcpy(uv,request->vertices[0].attribute[1],8);
+        xv_logf("[h2/blur] staged=%u original_texture0=%08X uv0_bits=%08X/%08X nonblack=%u first=%08X; not yet committed/presented\n",count,request->textures[0].physical,uv[0],uv[1],nonblack,blur_target[0]);}
+    return blur_target;
+}
+#endif

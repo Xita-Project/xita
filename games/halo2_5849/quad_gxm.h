@@ -16,3 +16,7 @@ const uint32_t *h2_composition_gxm_render(void *opaque, const h2_composition_req
 #include "threshold_draw.h"
 const h2_threshold_contract *h2_threshold_gxm_contract(void);
 const uint32_t *h2_threshold_gxm_render(void *opaque, const h2_threshold_request *request);
+
+#include "blur_draw.h"
+const h2_blur_contract *h2_blur_gxm_contract(void);
+const uint32_t *h2_blur_gxm_render(void *opaque, const h2_blur_request *request);
