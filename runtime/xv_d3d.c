@@ -1637,8 +1637,9 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         { extern char xd3d_last_stack[400]; XV_LOG("[hist]   stack:%s\n", xd3d_last_stack); }
         XV_LOG("[hist]   textures:%s psc0 %.2f %.2f %.2f %.2f psc1 %.2f %.2f %.2f %.2f\n", tb, c->psc[0][0], c->psc[0][1], c->psc[0][2], c->psc[0][3], c->psc[1][0], c->psc[1][1], c->psc[1][2], c->psc[1][3]);
         if (!S.z_enable && c->streams[0]) {                          /* depth-off draws (sky): where do the first vertices land in clip space? */
-            unsigned st = S.stream_stride[0] ? S.stream_stride[0] : d->stride[0]; char zb[400]; int k = 0;
-            for (unsigned i = 0; i < 6 && k < 360; ++i) {
+            unsigned st = immediate ? d->stride[0] : (S.stream_stride[0] ? S.stream_stride[0] : d->stride[0]);
+            char zb[400] = {0}; int k = 0;
+            for (unsigned i = 0; st >= 3 * sizeof(float) && i < nverts && i < 6 && k < 360; ++i) {
                 const float *p = (const float *)((const uint8_t *)xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[0]) + i * st); float v[4] = { p[0], p[1], p[2], 1.0f }, w[4];
                 for (int r = 0; r < 3; ++r) w[r] = S.vsc[60 + r][0] * v[0] + S.vsc[60 + r][1] * v[1] + S.vsc[60 + r][2] * v[2] + S.vsc[60 + r][3];   /* node 0 */
                 w[3] = 1.0f; float o[4];
@@ -1695,9 +1696,9 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
           XV_LOG("[hist]   indices @%p (guest ib %08X base %u):%s\n", indices, S.indices_dbg, base_vertex, b); }
     }
     if (trace_frame())
-        XV_LOG("[hist] cmd %u: draw %s ps %08X prim %u n %u base %u tex %08X/%08X/%08X/%08X ntex %u blend %u/%u%s z %u/%u cull %u c[%d..%d] c0 %.2f %.2f %.2f %.2f\n",
+        XV_LOG("[hist] cmd %u: draw %s ps %08X prim %u n %u base %u tex %08X/%08X/%08X/%08X ntex %u blend %u/%u%s z %u/%u cull %u c[%d..%d] c0 %.2f %.2f %.2f %.2f query %u color-mask %X\n",
                l->ncmds - 1, d->gxp, S.ps_hash, prim, count, base_vertex, S.tex_guest[0], S.tex_guest[1], S.tex_guest[2], S.tex_guest[3], c->ntex, S.src_blend, S.dst_blend, S.blend_enable ? "" : "(off)",
-               S.z_enable, S.z_write, S.cull, d->c_base, d->c_base + (int)d->c_count, S.vsc[96 + d->c_base][0], S.vsc[96 + d->c_base][1], S.vsc[96 + d->c_base][2], S.vsc[96 + d->c_base][3]);
+               S.z_enable, S.z_write, S.cull, d->c_base, d->c_base + (int)d->c_count, S.vsc[96 + d->c_base][0], S.vsc[96 + d->c_base][1], S.vsc[96 + d->c_base][2], S.vsc[96 + d->c_base][3], (unsigned)c->visibility, S.color_mask);
     xv_draw_profile_step(XV_DRAW_DIAGNOSTICS, &profile);
 }
 
@@ -2266,6 +2267,17 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             continue;
         if (!fs) fs = &v->fs[c->fs_kind][c->blend];
         xv_fshader_t *depth_fs = depth_only_fragment(v, c, fs);
+        if (c->visibility && c->geometry_bytes[XV_MAX_STREAMS]) {
+            /* The retained histogram marker belongs to this command, unlike
+             * trace_frame(), whose recording frame can advance during replay. */
+            unsigned samplers = 0;
+            for (unsigned t = 0; t < 4; ++t)
+                if (depth_fs->tex_index[t] >= 0) samplers |= 1u << t;
+            XV_LOG("[query-replay] frame %u cmd %u query %u mask %X entry %d atest %08X alpha-mode %d discard %u depth-write %u depth-only %u samplers %X prepared %u\n",
+                frame, i, (unsigned)c->visibility, g_blend_combo[c->blend].mask,
+                (int)c->ps_entry, c->atest, alpha_mode, (unsigned)fs->uses_discard,
+                (unsigned)fs->replaces_depth, depth_fs != fs, samplers, (unsigned)c->ntex);
+        }
         if (depth_fs != fs) {
             fs = depth_fs; fp = fs->fprog; cube_mask = 0;
             xv_render_profile_depth_only(c->index_count);

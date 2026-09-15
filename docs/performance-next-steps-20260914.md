@@ -148,3 +148,9 @@ trace windows and resumes both object workers afterward. The cryo view enters th
 visibility-query wrapper 292 times/frame; audit its immediate submission path
 next. Entries include rejected queries and are not GPU draw counts. Hardware
 attribution remains required before claiming a larger native batch will help.
+
+The [query submission audit](query-submission-audit-20260915.md) confirms that
+accepted queries use the main 3D list and repeat full draw preparation. A native
+projection experiment was withdrawn after linked ARM checks found exceptional
+value mismatches and little instruction-count benefit. Continue with the larger
+submission boundary; preserve query identity, coverage and frame-slot ownership.

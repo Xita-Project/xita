@@ -12,7 +12,7 @@ audit = importlib.util.module_from_spec(spec); spec.loader.exec_module(audit)
 
 class ReleaseAudit(unittest.TestCase):
     def test_categories(self):
-        for name in ['recomp/code_123.c', 'recomp/kernel/xk_bounds.c', 'shaders/halo_vs_00.cg',
+        for name in ['recomp/code_123.c', 'recomp/kernel/xk_bounds.c', 'recomp/kernel/xk_query_projection.c', 'shaders/halo_vs_00.cg',
                      'shaders/psdefs/example.bin', 'shaders/xv_vs_gxp.h', 'game_manifest.json',
                      'haloce/default.xbe', 'private.iso', 'libshacccg.suprx',
                      'save/checkpoint.sav', 'local/halo_ce_3925/halo_symbols.json', 'local/tools/extract-xiso', 'app/eboot.bin', 'site/img/test.png']:

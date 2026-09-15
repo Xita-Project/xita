@@ -5,7 +5,8 @@ Uses synthetic fixtures, including aliases and split guest pages. Optional math
 edge cases cover exceptional floats and caller-selected native FP controls.
 Requires Unicorn/pyelftools and VitaSDK. Firmware memory copies are modeled;
 libgcc executes normally. Instruction counts are not CPU cycles or game FPS.
-The full guest context and 2 MiB guest arena must match byte for byte.
+The full guest context and guest arena (4 MiB for query projection, otherwise
+2 MiB) must match byte for byte.
 """
 import argparse
 import hashlib
@@ -40,7 +41,7 @@ parser.add_argument('--native-matrix', choices=['default', 'off', 'on'],
                     help='set the candidate compiled NEON matrix override')
 parser.add_argument('--functions', nargs='+',
                     choices=['f_000B77C0', 'xv_math_polygon_clip', 'f_000B71C0',
-                             'f_000B5B40', 'f_000B5F60', 'f_000B5EA0'],
+                             'f_000B5B40', 'f_000B5F60', 'f_000B5EA0', 'f_000637A0'],
                     default=['f_000B77C0', 'xv_math_polygon_clip'])
 args = parser.parse_args()
 if not 1 <= args.cases <= 10000:
@@ -71,9 +72,13 @@ with obj.open('rb') as file:
     layout = dict(zip(['size'] + fields, struct.unpack('<' + 'I' * (len(fields) + 1), data)))
 
 RAM, PT, STACK, CTX, END = 0x20000000, 0x21000000, 0x22000000, 0x23000000, 0x24000000
-SIZE = 2 << 20
+SIZE = (4 if 'f_000637A0' in args.functions else 2) << 20
 pages = [(i ^ 1) * 4096 for i in range(SIZE // 4096)]
 pages[0x38], pages[0x39] = pages[0x18], pages[0x19]
+if 'f_000637A0' in args.functions:
+    # Image loads and guest reads must address the same pinned high globals.
+    for i in range(0x1f0, SIZE // 4096):
+        pages[i] = i * 4096
 page_table = struct.pack('<' + 'I' * len(pages), *pages)
 
 
@@ -230,7 +235,51 @@ def fixture(name, k):
         angle = (1 if k % 3 else -1) * i * 2 * math.pi / max(count, 1)
         fl(source + i * 8, math.cos(angle) * 3)
         fl(source + i * 8 + 4, math.sin(angle) * 3)
-    if name == 'f_000B77C0':
+    if name == 'f_000637A0':
+        source, output, parameter, sp = 0x18000, 0x22000, 0x31000, 0x62100
+        variant = k % 16
+        if variant == 1: source += 4092
+        elif variant == 2: output += 4092
+        elif variant == 3: parameter += 4093
+        elif variant == 4: sp = 0x62004
+        elif variant == 5: output = source
+        elif variant == 6: parameter = output + 4
+        elif variant == 7: output = sp - 40
+        elif variant == 8: parameter = sp - 16
+        elif variant == 9: output = source + 0x20000
+        elif variant == 10: output = 0x2fc894
+        elif variant == 11: parameter = 0x2fc860
+        elif variant == 12: source = sp - 12
+        elif variant == 13: output += 1; parameter += 2; source += 3
+        elif variant == 14: source = 0x2fc73c
+        elif variant == 15: sp += 1
+        reg(4, sp); reg(2, source); field('fsp', (k // 16) & 7)
+        field('fcw', 0x37f | (((k // 128) & 3) << 10), 'H')
+        word(0x2fc6f4, 0); word(0x2fc6f8, (480 << 16) | 640)
+        fl(0x1f0aa0, .5)
+        for i in range(13): fl(0x2fc72c + 4*i, 1 if i in (0,1,5,9) else 0)
+        for i in range(16): fl(0x2fc860 + 4*i, 1 if i % 5 == 0 else 0)
+        for i in range(3): fl(source + 4*i, (i+1)*.25)
+        word(sp, 0x12345678); fl(sp+4, .25); word(sp+8, output); word(sp+12, parameter)
+        shape = (k // 16) % 8
+        if shape == 1: fl(sp+4, -.25)
+        elif shape == 2: fl(source+8, -.5)
+        elif shape == 3: fl(source+8, 1.5)
+        elif shape == 4: fl(0x2fc72c, 1.125)
+        elif shape == 5: word(0x2fc6f4, 0xfffdfffe); word(0x2fc6f8, 0x7fff8000)
+        elif shape == 6:
+            for i in range(16): fl(0x2fc860+4*i, rng.randrange(-16,17)/8)
+        elif shape == 7: fl(0x2fc89c, 0)
+        if args.float_edges or args.random_floats:
+            groups = [[source+4*i for i in range(3)],
+                      [0x2fc860+4*i for i in range(16)], [sp+4],
+                      [0x2fc72c+4*i for i in range(13)]]
+            for group, addresses in enumerate(groups):
+                if k % 5 != 4 and group != k % 5: continue
+                for i, address in enumerate(addresses):
+                    word(address, rng.getrandbits(32) if args.random_floats else
+                         edges[(k // 5 + 3*i + group) % len(edges)])
+    elif name == 'f_000B77C0':
         reg(1, source)
         word(sp + 4, count)
         word(sp + 8, parameter)

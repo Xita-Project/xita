@@ -30,7 +30,7 @@ def path_risks(name):
     p = PurePosixPath(name)
     low = name.lower()
     reasons = []
-    if GENERATED.search(name) or name in {'recomp/kernel/xk_clip.c', 'recomp/kernel/xk_bounds.c'}: reasons.append('generated-game-code')
+    if GENERATED.search(name) or name in {'recomp/kernel/xk_clip.c', 'recomp/kernel/xk_bounds.c', 'recomp/kernel/xk_query_projection.c'}: reasons.append('generated-game-code')
     if p.suffix.lower() in {'.xbe', '.xiso', '.iso', '.map', '.psp2dmp', '.suprx', '.skprx', '.vpk', '.elf', '.velf', '.o', '.a', '.exe', '.dll'} or p.name.lower() == 'eboot.bin':
         reasons.append('game-build-dump-or-sdk-binary')
     if p.suffix.lower() in {'.bin', '.gxp'}: reasons.append('binary-provenance-review')

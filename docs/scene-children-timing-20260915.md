@@ -95,3 +95,6 @@ service remains unreachable; no new hardware build has been installed.
 Private generated-body proofs, host logs, exact package, boot receipt, trace and
 restoration evidence are under `engine-restructure-20260914T2300Z`, particularly
 `scene-children-evidence.json` and `emulator-scene-children/`.
+
+The [query submission follow-up](query-submission-audit-20260915.md) records the
+actual immediate draw path and the withdrawn projection experiment.
