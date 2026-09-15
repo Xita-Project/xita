@@ -56,3 +56,18 @@ Runtime SHA-256:
 
 Physical firing verification and representative campaign/driving stability
 remain required. No new FPS gain is claimed for this handoff fix.
+
+## Installation
+
+The exact candidate reaches Blood Gulch through the normal split-screen menus
+in the private emulator, with no worker STOP or fragment-constant failure in
+its captured log. The new volume counter is present but remains zero in that
+sample, so it is not a reproduction of the hardware-only call path.
+
+Wi-Fi installation is complete and the physical dashboard confirms runtime
+`e6d9b04d…` in slot B1, updater state 0, with no pending request. Before uploading,
+slot A0 was restored and verified as `7f33dee4…`; that rollback build remains
+preserved. The user is taking over controls for the rocket pickup/firing test.
+The installed build retains both experimental object workers and the measured
+lightweight-mutex default. A successful installation does not close the physical
+firing retest or the sustained-frame-rate goal.
