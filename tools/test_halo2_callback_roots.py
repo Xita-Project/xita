@@ -30,6 +30,45 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_member_query_constructor_slots_and_original_counter(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        ctors = [(*spec, vtable) for *_, vtable in prepare_boot.GAME_MEMBER_QUERY_CTORS]
+        calls = [spec] * len(prepare_boot.GAME_MEMBER_QUERY_CALLS)
+        image.targets = {0x414FE0: 0x1010}
+        for n, (*_, vtable) in enumerate(ctors):
+            image.targets.update({vtable + 4: 0x1020 + n * 16,
+                                  vtable + 8: 0x1080 + n * 16, vtable + 0x14: 0x1000})
+            for neighbor in (0, 0xC, 0x10, 0x18): image.targets[vtable + neighbor] = None
+        image.targets[0x414FE4] = None
+        expected = set(v for v in image.targets.values() if v)
+        with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CALLS", calls):
+            with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CTORS", ctors):
+                before = dict(image.targets)
+                self.assertEqual(prepare_boot.game_member_query_roots(image), expected)
+                self.assertEqual(image.targets, before)
+                for slot, saved in before.items():
+                    if saved is None: continue
+                    for bad in (0, None, 0xDEAD):
+                        image.targets[slot] = image.bad_code = bad
+                        with self.assertRaisesRegex(ValueError, "title code"):
+                            prepare_boot.game_member_query_roots(image)
+                    image.targets[slot] = saved; image.bad_code = None
+                image.section_name = "DSOUND"
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_member_query_roots(image)
+            for which in range(len(ctors)):
+                bad = list(ctors); bad[which] = (*spec[:2], "0" * 64, ctors[which][3])
+                with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CTORS", bad):
+                    with self.assertRaisesRegex(ValueError, "constructor fingerprint"):
+                        prepare_boot.game_member_query_roots(image)
+        with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CTORS", ctors):
+            for which in range(len(calls)):
+                bad = list(calls); bad[which] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CALLS", bad):
+                    with self.assertRaisesRegex(ValueError, "caller fingerprint"):
+                        prepare_boot.game_member_query_roots(image)
+
     def test_boot_factory_and_deletion_slots_only(self):
         image = SyntheticImage(); image.section_name = ".text"
         slots = (0x411D20, 0x411D2C, 0x411D30, 0x411D3C, 0x411DA4,

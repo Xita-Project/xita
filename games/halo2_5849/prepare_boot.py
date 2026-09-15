@@ -104,6 +104,21 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_MEMBER_QUERY_CALLS = (
+    (0x316C90, 81, "c208200cd4add2e249bd6d4e742807b62b241778847f0b653c9828bd6a3e8bb1"),
+    (0x316000, 82, "06d552d68c397980a59ed4417a66ac7b6dbb8e9e5329183542151a88434200be"),
+    (0x316A20, 257, "0565bb2f3d1512723b4b501713774a70f4b94dd5b2dd7861cc644337b1f4f6ac"),
+    (0x3171A0, 194, "6104830a51dbef00c8170a8e1f5ec8fcc053f05136ed457d96d0a94f5e70e929"),
+    (0x31AAC0, 6, "c5264b41ff2cd91ca34fc5b460d7a9373bf0f98ec1b6f41fec25d8e1abff46b4"),
+)
+GAME_MEMBER_QUERY_CTORS = (
+    (0x311890, 130, "c3bde928130529e6c0e71dcb207963dbe5b4070ce2d07134b3ba5acc3e0b28ff", 0x4143A8),
+    (0x311920, 32, "054f3a7fcdacc140ce06b0282e6b92c0ef3bc39c075f4c03d7a0929e848a07a1", 0x414428),
+    (0x3193C0, 102, "3a2850468a44321a657945717d1af0d6776aa851561a33efbbb6e502fa1bbb2d", 0x415130),
+    (0x31A6B0, 96, "e0eeb32fff30ccddff70bbbaf37abdc576d24051b24e499087a76e3060d97898", 0x4151B0),
+    (0x31A870, 32, "444c41ce48aa0e05bbea08a6d5a3b9378949d1d2005591417cb9395007a116c4", 0x415230),
+    (0x31AD80, 109, "cea965d9cbe1e8d841b8a813ed95a5e864c32f26397b5b1d234d7d665aaa8587", 0x4152B0),
+)
 GAME_BOOT_FACTORY_CALLS = (
     (0x2D8780, 259, "1654647adb4f74b28facc24dd59797bbe9924e99cdda959a70a9f0f6e7c816c2"),
     (0x2D7570, 224, "c2872aa7f20959a5ff9efe644436e8084041b15ccdc5a1ebf3639c19cb997ef4"),
@@ -484,6 +499,30 @@ def descriptor_child_field_roots(image, offsets):
     return roots
 
 
+def game_member_query_roots(image):
+    """Native165 member query, original aggregate counter and update slots.
+
+    Six constructor-bound tables share the queried getter. Do not infer one
+    concrete runtime type from that shared address or scan adjacent methods.
+    """
+    for address, length, digest in GAME_MEMBER_QUERY_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 member query caller fingerprint mismatch")
+    slots = [0x414FE0]  # Aggregate offset10h: add, or original negated removal.
+    for address, length, digest, vtable in GAME_MEMBER_QUERY_CTORS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 member query constructor fingerprint mismatch")
+        slots.extend(vtable + offset for offset in (4, 8, 0x14))
+    roots = set()
+    for slot in slots:
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 member query target is not title code")
+        roots.add(target)
+    return roots
+
+
 def game_boot_factory_roots(image):
     """Native163: original startup factory, owned objects and arena free path.
 
@@ -820,6 +859,7 @@ def main():
         roots.update(game_fixed_startup_roots(image))
         roots.update(game_arena_boot_roots(image))
         roots.update(game_boot_factory_roots(image))
+        roots.update(game_member_query_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
