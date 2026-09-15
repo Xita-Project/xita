@@ -141,8 +141,16 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
          * Bits 8..31 are byte stride; no vertex is fetched or converted here.
          * Active immediate draws are routed to their consumer before setup. */
         unsigned type = value & 15, count = (value >> 4) & 15;
-        if (!((type == 2 && count <= 4) || (type == 6 && count == 1) ||
-              (type == 0 && count == 4))) return 0;
+        /* Admitted NV2A array types. The menu uses signed-short (type 1) and
+         * float/packed alongside the movie's set; a draw backend still fetches
+         * and validates each selected span. UB (0/4) is D3DCOLOR/OGL bytes. */
+        if (!((type == 2 && count <= 4) ||               /* float */
+              (type == 6 && count == 1) ||               /* packed 11/11/10 */
+              (type == 0 && count == 4) ||               /* UB D3DCOLOR */
+              (type == 4 && count == 4) ||               /* UB OGL */
+              (type == 1 && count >= 1 && count <= 4) ||  /* signed short normalized */
+              (type == 5 && count >= 1 && count <= 4)))   /* signed short */
+            return 0;
     } else if (method >= 0x1AF0 && method <= 0x1AFC) {
         /* SET_VERTEX_DATA4F attribute 15, one exact component per method.
          * Attribute 0's final component emits a vertex and stays unsupported.

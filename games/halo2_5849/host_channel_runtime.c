@@ -66,6 +66,7 @@ static h2_sprite_draw sprite_quad;
 #endif
 #if H2_MENU_RENDER
 #include "menu_draw.h"
+#include "menu_render.h"
 static h2_menu_draw menu_quad;
 #endif
 static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
@@ -465,9 +466,8 @@ void h2_host_channel_configure(xctx *c)
     sprite_quad.render=h2_sprite_gxm_render;
 #endif
 #if H2_MENU_RENDER
-    /* Backend (menu_quad.render) is installed by the GXM increment; until then
-     * the module claims and rejects menu draws (no fabricated success). */
     memset(&menu_quad, 0, sizeof menu_quad);
+    menu_quad.render = h2_menu_software_render; /* software transform + rasterize into back buffer */
 #endif
 #if H2_LUMA_RENDER
     memset(&luma_quad, 0, sizeof luma_quad);
