@@ -30,6 +30,43 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_object_release_interface_revision_slots_and_boundary(self):
+        image = SyntheticImage()
+        image.section_name = ".text"
+        image.targets = {slot: 0x1000 + (index % 4) * 16
+                         for index, slot in enumerate(range(0x414310, 0x414324, 4))}
+        expected = set(image.targets.values())
+        image.targets[0x414324] = 0
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_OBJECT_RELEASE_BINDINGS)
+        with patch.object(prepare_boot, "GAME_OBJECT_RELEASE_BINDINGS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_object_release_roots(image), expected)
+            self.assertEqual(image.targets, before)
+            for bad in (None, 1, 0x1000):
+                image.targets[0x414324] = bad
+                with self.assertRaisesRegex(ValueError, "boundary"):
+                    prepare_boot.game_object_release_roots(image)
+            image.targets[0x414324] = 0
+            for slot in range(0x414310, 0x414324, 4):
+                for bad in (None, 0, 0xDEAD):
+                    image.targets[slot] = bad
+                    image.bad_code = 0xDEAD
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_object_release_roots(image)
+                image.targets[slot] = before[slot]
+            image.bad_code = None
+            for section in (None, (0, 0, 0, 0, ".data"), (0, 0, 0, 0, "DSOUND")):
+                with patch.object(image, "section_of", return_value=section):
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_object_release_roots(image)
+            for index in range(count):
+                guards = [spec] * count
+                guards[index] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_OBJECT_RELEASE_BINDINGS", guards):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_object_release_roots(image)
+
     def test_object_query_constructor_and_exact_interface_extent(self):
         image = SyntheticImage()
         image.section_name = ".text"

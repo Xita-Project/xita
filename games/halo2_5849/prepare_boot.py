@@ -449,6 +449,24 @@ GAME_OBJECT_QUERY_BINDINGS = (
 )
 
 
+GAME_OBJECT_RELEASE_BINDINGS = (
+    (0x311BC8, 6, "4056e4813f1ad06d14388150239a24126e6480cbf26e1d830c1f2ae1c9a2a344"),
+    (0x311428, 12, "a834d6c7fefb0f7428e9e614a26fc7a01938532a1c9aa0aed2f2cc572ee85c0d"),
+    (0x1D031B, 8, "fe87bf343218252aeba2cf1f6fdb4ba2b218345ea56a9ed651d74f9e15aa2384"),
+    (0x414310, 24, "ff1dcb4a77cae91429205f1f5efcc25da6513714804c1fcc51faaddf6bd5b4ca"),
+)
+
+
+def game_object_release_roots(image):
+    """Native217: original five-slot rigid-body interface and release path."""
+    for address, length, digest in GAME_OBJECT_RELEASE_BINDINGS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 object release fingerprint mismatch")
+    if image.u32(0x414324) != 0:
+        raise ValueError("Halo 2 object release boundary mismatch")
+    return _code_vtable_roots(image, 0x414310, 0x414324)
+
+
 def game_object_query_roots(image):
     """Native216: original member C4h interface, constructor and 16 slots."""
     for address, length, digest in GAME_OBJECT_QUERY_BINDINGS:
@@ -1299,6 +1317,7 @@ def main():
         roots.update(game_script_noarg_command_roots(image))
         roots.update(game_script_typed_roots(image))
         roots.update(game_object_query_roots(image))
+        roots.update(game_object_release_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
