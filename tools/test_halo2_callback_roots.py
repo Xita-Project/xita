@@ -30,6 +30,43 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_boot_factory_and_deletion_slots_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = (0x411D20, 0x411D2C, 0x411D30, 0x411D3C, 0x411DA4,
+                 0x4537A0, 0x4576B0, 0x4576B8)
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        for neighbor in (0x411D24, 0x411D28, 0x411D34, 0x411D38, 0x411D40,
+                         0x411DA8, 0x4537A4, 0x4576BC):
+            image.targets[neighbor] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_BOOT_FACTORY_CALLS)
+        with patch.object(prepare_boot, "GAME_ARENA_BOOT_CALLS", (spec,) * 3):
+            with patch.object(prepare_boot, "GAME_BOOT_FACTORY_CALLS", (spec,) * count):
+                before = dict(image.targets)
+                self.assertEqual(prepare_boot.game_boot_factory_roots(image), set(range(0x1000, 0x1080, 16)))
+                self.assertEqual(image.targets, before)
+                for slot in slots:
+                    saved = image.targets[slot]
+                    for bad in (0, None, 0xDEAD):
+                        image.targets[slot] = image.bad_code = bad
+                        with self.assertRaisesRegex(ValueError, "title code"):
+                            prepare_boot.game_boot_factory_roots(image)
+                    image.targets[slot] = saved; image.bad_code = None
+                image.section_name = "DSOUND"
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_boot_factory_roots(image)
+            for which in range(count):
+                specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_BOOT_FACTORY_CALLS", specs):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_boot_factory_roots(image)
+        with patch.object(prepare_boot, "GAME_BOOT_FACTORY_CALLS", (spec,) * count):
+            for which in range(3):
+                specs = [spec] * 3; specs[which] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_ARENA_BOOT_CALLS", specs):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_boot_factory_roots(image)
+
     def test_arena_boot_forwarding_slots_and_guards(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {0x4576AC: 0x1000, 0x4576B4: 0x1010,

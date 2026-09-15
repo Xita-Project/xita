@@ -104,6 +104,22 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_BOOT_FACTORY_CALLS = (
+    (0x2D8780, 259, "1654647adb4f74b28facc24dd59797bbe9924e99cdda959a70a9f0f6e7c816c2"),
+    (0x2D7570, 224, "c2872aa7f20959a5ff9efe644436e8084041b15ccdc5a1ebf3639c19cb997ef4"),
+    (0x2D76F0, 36, "4a2f1921e57804b3624ba04cc1398b0e15a8bc564e07b739a5480d6861287639"),
+    (0x2D73F0, 101, "58b873cd65b14edad3b22cbf5db8554d110eb876b8010e31e248a21d217d9df1"),
+    (0x2D7460, 101, "6cff4d98fd5f8cc3356c6df8c7e35346e336f8e7ad039c63a20041702cbadb22"),
+    (0x2D74D0, 101, "a8518be520afdb5a7ae2ac804d046291b1343da0ad43e015d6108aec80c716b7"),
+    (0x2D7670, 40, "7e9d098ad5485d0e85b1d7258d4f340820bf6de307be86c5bc1d35761b8c1a11"),
+    (0x2D7720, 40, "6b3e5d3cf6d878be4406389abf8cce2966f1acca9dcc7102efc16d33136ae476"),
+    (0x2DA270, 40, "c3d27d90626c6ade01f275b2924c510e493adf79ef4468532abe7940e17e6c3a"),
+    (0x2D84E0, 40, "7e9d098ad5485d0e85b1d7258d4f340820bf6de307be86c5bc1d35761b8c1a11"),
+    (0x2D8E70, 114, "1d9c91e2ac71f9c7781f18738d093adc2d5147f844531dac1314ef92f924a61e"),
+    (0x2D9090, 22, "8ca74b5e1f1560d65bc1fa8fc1cff3ab46e43ea039f44a8275f00cc3e269a022"),
+    (0x147320, 129, "1ca08108d766acef4f3b29045d57558acb930280a992c97938522bcb5f1d7fd6"),
+    (0x22C320, 13, "8df868c5db9147d935b75030b37dd4604e925bffabdef023d78cbae2961c5583"),
+)
 GAME_ARENA_BOOT_CALLS = (
     (0x146A20, 146, "75f53bc57da723bcf62196fb9e3e3632d6a1c4dc842d5caf8e46fbe79dc34b73"),
     (0x1472C0, 82, "cf2b2e35cb786b94043345fb459404465072170134b691332a57fe5a760bbe70"),
@@ -468,6 +484,26 @@ def descriptor_child_field_roots(image, offsets):
     return roots
 
 
+def game_boot_factory_roots(image):
+    """Native163: original startup factory, owned objects and arena free path.
+
+    Keep original reference counts, destructor flags and allocator metadata.
+    Only the observed factory method and proven deletion slots become roots.
+    """
+    for address, length, digest in (*GAME_BOOT_FACTORY_CALLS, *GAME_ARENA_BOOT_CALLS):
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 boot factory call fingerprint mismatch")
+    roots = set()
+    for slot in (0x411D20, 0x411D2C, 0x411D30, 0x411D3C, 0x411DA4,
+                 0x4537A0, 0x4576B0, 0x4576B8):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 boot factory target is not title code")
+        roots.add(target)
+    return roots
+
+
 def game_arena_boot_roots(image):
     """Native162: original arena wrapper forwards to its aligned allocator."""
     for address, length, digest in GAME_ARENA_BOOT_CALLS:
@@ -783,6 +819,7 @@ def main():
         roots.update(game_action_callback_roots(image))
         roots.update(game_fixed_startup_roots(image))
         roots.update(game_arena_boot_roots(image))
+        roots.update(game_boot_factory_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
