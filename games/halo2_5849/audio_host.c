@@ -1567,6 +1567,33 @@ static void trace_effect_description(xctx *c)
     }
     h2_platform_fpscr_write(fp);
 }
+
+static void trace_deferred_commit(xctx *c)
+{
+    /* Public wrapper37D141 has one interface argument and ret4. The
+     * following stack word is not an output pointer. This only records
+     * adapter-owned pending state at the terminal unsupported entry. */
+    if ((c->r[4]&3) || !mapped(c->r[4],8)) return;
+    uint32_t fp=h2_platform_fpscr_read();
+    xv_logf("[h2/deferred-commit-probe] caller=%08X interface=%08X device=%08X refs=%u children=%u fcw=%04X fsp=%u df=%u fpscr=%08X dirty=%08X\n",
+            X_M32(c->r[4]),X_ARG(0),device.base,device.references,device.children,
+            (unsigned)c->fcw,(unsigned)c->fsp,(unsigned)c->df,fp,device.dirty);
+    xv_logf("[h2/deferred-commit-probe] scalar active=%08X,%08X,%08X pending=%08X,%08X,%08X\n",
+            device.distance,device.rolloff,device.doppler,
+            device.pending_distance,device.pending_rolloff,device.pending_doppler);
+    for(unsigned i=0;i<3;++i)xv_logf("[h2/deferred-commit-probe] pending_position[%u]=%08X\n",i,device.pending_position[i]);
+    for(unsigned i=0;i<6;++i)xv_logf("[h2/deferred-commit-probe] pending_orientation[%u]=%08X\n",i,device.pending_orientation[i]);
+    for(unsigned i=0;i<XA_MAX_VOICES;++i){
+        const h2_audio_buffer*b=&buffers[i];if(!b->base||!b->submix)continue;
+        xv_logf("[h2/deferred-commit-probe] buffer=%08X submix=%u key=%X refs=%u started=%u stopped=%u volume=%d headroom=%u routes=%u\n",
+                b->base+0x1C,b->submix,b->fx_bin,b->references,b->started,b->stopped,b->volume,b->headroom,b->route_count);
+        for(unsigned j=0;j<6;++j)xv_logf("[h2/deferred-commit-probe] buffer=%08X route[%u]=%u,%d filter[%u]=%08X\n",
+                b->base+0x1C,j,b->route_bins[j],b->route_gains[j],j,b->filter[j]);
+        for(unsigned j=0;j<41;++j)xv_logf("[h2/deferred-commit-probe] buffer=%08X spatial[%u]=%08X\n",b->base+0x1C,j,b->spatial[j]);
+    }
+    h2_platform_fpscr_write(fp);
+}
+
 #endif
 void h2_audio_trace_buffer(xctx *c, uint32_t ip)
 {
@@ -1584,6 +1611,7 @@ void h2_audio_trace_buffer(xctx *c, uint32_t ip)
     }
 #if H2_AUDIO_DSP
     if (ip==0x37BA6F) trace_effect_description(c);
+    if (ip==0x37D141) trace_deferred_commit(c);
     if (ip==0x37B60D && !(c->r[4]&3) && mapped(c->r[4],28)) {
         uint32_t index=X_ARG(1),offset=X_ARG(2),source=X_ARG(3),bytes=X_ARG(4),words[2];
         xv_logf("[h2/effect-write-probe] caller=%08X index=%u offset=%u source=%08X bytes=%u flags=%08X\n",

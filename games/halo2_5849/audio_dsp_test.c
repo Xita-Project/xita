@@ -331,7 +331,28 @@ int H2_AUDIO_DSP_TEST_MAIN(void)
         assert(description_probe_read==reads+(scenario==0||scenario==7||scenario==8));
         g_xpt[7]=0x8000;
     }
-    description_probe_enabled=0;free(probe_ram);
+    description_probe_enabled=0;
+    h2_audio_buffer *saved_buffers=malloc(sizeof buffers);assert(saved_buffers);
+    memcpy(saved_buffers,buffers,sizeof buffers);
+    for(unsigned scenario=0;scenario<4;++scenario){
+        c=context(dev,0xdeadbeef,0,0);X_M32(c.r[4])=0x21f201;
+        c.fcw=0x23f;c.fsp=3;c.df=1;native_fp=0x100009f;
+        if(scenario==1)c.r[4]|=1;
+        if(scenario==2)c.r[4]=0xfffffffcu;
+        memset(buffers,0,sizeof buffers);
+        buffers[0]=(h2_audio_buffer){.base=0x111100,.submix=2,.fx_bin=0x10019,.route_count=UINT32_MAX};
+        for(unsigned j=0;j<41;++j)buffers[0].spatial[j]=0x80000000u+j;
+        if(scenario==3)buffers[0].base=0;
+        h2_audio_buffer *before_buffers=malloc(sizeof buffers);assert(before_buffers);
+        memcpy(before_buffers,buffers,sizeof buffers);memcpy(probe_ram,g_xram,0x200000);
+        h2_audio_device_snapshot owner=device;xctx before=c;uint32_t fp=native_fp;
+        unsigned writes=dsp_writes,reads=description_probe_read;
+        trace_deferred_commit(&c);
+        assert(!memcmp(&c,&before,sizeof c)&&!memcmp(&device,&owner,sizeof owner));
+        assert(!memcmp(buffers,before_buffers,sizeof buffers)&&!memcmp(probe_ram,g_xram,0x200000));
+        assert(fp==native_fp&&writes==dsp_writes&&reads==description_probe_read);free(before_buffers);
+    }
+    memcpy(buffers,saved_buffers,sizeof buffers);free(saved_buffers);free(probe_ram);
     reverb_adapter_tests();
     for(unsigned index=0;index<15;index++){
         c=query_context(dev,index,7,60);call(&c,0x37B5E6,0,5);
