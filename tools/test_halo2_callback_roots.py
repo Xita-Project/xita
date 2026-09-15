@@ -458,6 +458,42 @@ class DescriptorRoots(unittest.TestCase):
     def chain(self):
         return prepare_boot.game_descriptor_initialization_chain(self.image)
 
+    def test_direct_child_fields_bounds_holes_and_no_recursion(self):
+        a, b = self.image.parents[:2]; shared = 0x464000; last = self.image.parents[-1]
+        for parent in (a, b, last):
+            self.image.write(parent + 0x84, shared)
+            self.image.write(parent + 0x8C, 0xDEAD)  # ignored after null at88h
+            self.image.write(parent + 0x20, 0xDEAD)  # parent itself not selected
+        self.image.write(shared + 0x84, 0xDEAD)  # no recursive child traversal
+        self.image.write(shared + 0x20, 0x1100)
+        self.image.write(shared + 0x24, 0x1200)
+        self.image.write(shared + 0x28, 0x1300)
+        self.image.write(shared + 0x2C, 0x1100)  # duplicate
+        self.image.write(shared + 0x30, 0xDEAD)  # adjacent field is not code
+        spec = (0x200, len(self.image.code), hashlib.sha256(self.image.code).hexdigest())
+        before = bytes(self.image.data)
+        with patch.object(prepare_boot, "GAME_DESCRIPTOR_CHILD_WALKS", (spec,) * 5):
+            self.assertEqual(prepare_boot.game_descriptor_child_roots(self.image), {0x1100, 0x1200, 0x1300})
+            self.assertEqual(bytes(self.image.data), before)
+            for offset in (0x20, 0x24, 0x28, 0x2C):
+                saved = self.image.u32(shared + offset)
+                for bad in (0xDEAD, 0x464000):
+                    self.image.write(shared + offset, bad)
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_descriptor_child_roots(self.image)
+                self.image.write(shared + offset, 0)
+                prepare_boot.game_descriptor_child_roots(self.image)  # original null skip
+                self.image.write(shared + offset, saved)
+            for i in range(16):
+                self.image.write(a + 0x84 + i * 4, shared)
+            with self.assertRaisesRegex(ValueError, "not terminated"):
+                prepare_boot.game_descriptor_child_roots(self.image)
+        for which in range(5):
+            specs = [spec] * 5; specs[which] = (0x200, len(self.image.code), "0" * 64)
+            with patch.object(prepare_boot, "GAME_DESCRIPTOR_CHILD_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_descriptor_child_roots(self.image)
+
     def test_map_fields_reuse_linking_and_skip_unvisited_data(self):
         a, b = self.image.parents[:2]; shared = 0x464000
         for parent in (a, b):

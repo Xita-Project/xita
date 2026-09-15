@@ -74,6 +74,13 @@ GAME_DESCRIPTOR_MAP_WALKS = (
     (0xB69D8, 31, "4850979303eb86790589e6a32dd3bcce89e4d8f58d809678e55869c4f3e51d67"),
     (0xB6AB7, 31, "ea694745b9044ee364ab532d8e5b9ff513a30b50df1127666c9adab5beb432aa"),
 )
+GAME_DESCRIPTOR_CHILD_WALKS = (
+    (0x1088A0, 54, "d6eb603c5f02b788e35ca7cf7c3d9deb074bf7de9ec5713dd13f713a0e296db3"),
+    (0x108960, 101, "7ea8925cd8f074e3813192c97d502b93db4457e76596f1aca5d36acb5bd8439c"),
+    (0x1089D0, 101, "49878cdd6bea74a1154ff2dc9294513ada0489a089e7cc09c892790dc6d03fa3"),
+    (0x108A40, 66, "b80567cf17df1eb4cf294790c5ef58f37dec29e321ff31a4743b8287ae436101"),
+    (0x108A90, 122, "afa08763dab7cffe0330b76bdf026aec29abfe8d8f9ac67117d07b7f13c4b3c3"),
+)
 GAME_MODE_WALK = (0x18EF00, 152, "c499facfbe49993ebd3e15bb55a4f65adafb4bfd53eb99474ba7bb96ad3f8102")
 GAME_INTERFACE_REGISTRATION = (0x3769F0, 45, "46e548c6c8f362dc1ba57b6f7581a1b2c0bffb4b2cb9c2e812dcc7b9544b1611")
 GAME_ONLINE_INTERFACE_DISPATCH = (0x59949, 41, "c68f2b75408f155325c537d83f024b3ff580f096399c7606ca83a739654555a1")
@@ -357,6 +364,37 @@ def game_descriptor_map_roots(image):
     return roots
 
 
+def game_descriptor_child_roots(image):
+    """Native153: four callbacks walk each catalog parent's direct children.
+
+    Validate the existing descriptor spans/link shape, but do not filter by
+    the linked initialization chain: these callers use the child arrays.
+    Require their null terminator before the mutable link field at C4h.
+    """
+    for address, length, digest in GAME_DESCRIPTOR_CHILD_WALKS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 descriptor child walk fingerprint mismatch")
+    game_descriptor_initialization_chain(image)
+    roots = set()
+    for slot in range(0x468630, 0x468664, 4):
+        parent = image.u32(slot)
+        for index in range(16):
+            child = image.u32(parent + 0x84 + index * 4)
+            if child == 0:
+                break
+            for offset in (0x20, 0x24, 0x28, 0x2C):
+                target = image.u32(child + offset)
+                if target == 0:
+                    continue
+                section = image.section_of(target) if target else None
+                if not target or not image.is_code(target) or not section or section[4] != ".text":
+                    raise ValueError(f"Halo 2 descriptor child callback {child + offset:#x} has invalid target")
+                roots.add(target)
+        else:
+            raise ValueError("Halo 2 descriptor child array is not terminated before its link")
+    return roots
+
+
 def game_map_callback_roots(image):
     """Native83: four per-map lifecycle fields in the same 68-record table.
 
@@ -519,6 +557,7 @@ def main():
         roots.update(game_map_callback_roots(image))
         roots.update(game_resource_callback_roots(image))
         roots.update(game_descriptor_map_roots(image))
+        roots.update(game_descriptor_child_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
         roots.add(image.u32(image.u32(0x477058) + 0x10))
