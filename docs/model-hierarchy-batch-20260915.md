@@ -51,6 +51,9 @@ context, memory and FPSCR using the linked candidate ELF. Their modeled
 instruction counts change from 13,366 to 11,053; 4,036 to 4,036; and 6,312 to
 6,524. This small sample shows both an accepted benefit and fallback overhead.
 An additional 148 ARM comparisons cover the subsequent root fast return.
+The complete 2,308-case suite also passes after rebuilding with the same
+matrix-NEON compile flag as the hardware package; that optional matrix path
+remains disabled at runtime in this comparison, matching the Vita configuration.
 Root entry now avoids configuration reads and the shared mutex entirely,
 following the first emulator run's high count of bounds-only calls.
 
@@ -83,3 +86,48 @@ all non-runtime assets are unchanged. Hardware measurement uses the same binary
 for the off/on/off arms; the new batch defaults off outside an explicit
 comparison. Existing object workers, lightweight mutexes and private math remain
 selected.
+
+
+Six physical comparisons at 960×544 show no consistent whole-frame improvement:
+
+| View / trial | Off before | On | Off after |
+| --- | ---: | ---: | ---: |
+| Base 1 | 10.177 | 10.118 | 9.849 |
+| Base 2 | 10.058 | 10.071 | 10.137 |
+| Base 3 | 10.122 | 10.066 | 10.136 |
+| Valley 1 | 10.844 | 10.848 | 10.772 |
+| Valley 2 | 10.842 | 10.874 | 10.839 |
+| Valley 3 | 10.816 | 10.437 | 10.807 |
+
+Pooled from exact frame counts and elapsed times, the base view measures
+10.0788 FPS off versus 10.0852 on (+0.064%). The valley view measures 10.8200
+off versus 10.7155 on (−0.966%). Every trial passes camera consistency and
+restores the configured defaults. No STOP/FATAL/ABORT appears in the captured
+comparison logs. These results do not justify enabling the batch by default.
+The existing multicore configuration remains active.
+
+Two subsequent hardware plasma-firing checks complete, with energy changing
+from 100 to 89 to 78. These happen after the batch is restored off; they validate
+ordinary operation of this build, not sustained combat with the batch enabled.
+The short first trigger hold also consumed 11 energy, so it is not presented
+as proof of a single uncharged shot. Driving, rocket pickup/death and campaign
+crash coverage remain incomplete.
+
+## Next boundary: private quaternion work
+
+The trace resolves the physical lock return PCs against actual calls in this
+ELF, accounting for its `0x23000` load displacement. In base-view report windows,
+quaternion helper waits sum to 9.60 ms/frame across both lanes with the batch off
+and 8.91 with it on. Matrix helper waits sum to 5.30 and 4.83 ms/frame. Those lane
+waits overlap and must not be added to frame latency. Object-batch wall time
+changes from 26.49 to 26.01 ms/frame, much smaller than the change in helper count.
+
+The batch reduces quaternion calls from about 767 to 504 per frame in these
+windows. About 440 calls per frame still release their lock only after input
+capture because their output and scratch are on the calling worker's private
+stack. This proves output ownership, not input ownership: the quaternion input
+and shared constants still need an audit. The next candidate is a fully private
+quaternion path that avoids acquiring the shared mutex only when every required
+input, output, configuration and counter has a valid lifetime. Nested shared
+transactions must keep their existing scope. No additional lock bypass is
+implemented or claimed safe by this report.

@@ -36,7 +36,7 @@ unsigned long strtoul(const char *s,char **end,int radix) { (void)s;(void)end;(v
 int sceClibPrintf(const char *fmt,...) { (void)fmt;return 0; }
 ''')
     common=[cc,'-std=gnu11','-fno-strict-aliasing','-ffp-contract=off','-mthumb',
-        '-mcpu=cortex-a9','-mfpu=neon','-I'+str(ROOT/'recomp'),'-DXV_NATIVE_MODEL_HIERARCHY',
+        '-mcpu=cortex-a9','-mfpu=neon','-I'+str(ROOT/'recomp'),'-DXV_NATIVE_MODEL_HIERARCHY','-DXV_NATIVE_MATRIX_NEON',
         '-ffunction-sections','-fdata-sections']
     sources=[reference,harness,ROOT/'recomp/kernel/xk_hierarchy.c',ROOT/'recomp/kernel/xk_math.c',ROOT/'recomp/xv_x86rt.c']
     objects=[];commands=[]

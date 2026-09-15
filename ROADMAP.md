@@ -82,8 +82,10 @@ native hierarchy extraction with explicit inputs/outputs before new scheduling.
 The [native child-hierarchy batch](docs/model-hierarchy-batch-20260915.md) is now
 implemented as an optional synchronous extraction. Differential host and ARM
 tests check outputs, guest state and scheduling; shared publication remains
-guarded. Emulator and physical comparisons will determine whether its smaller
-computational path improves whole-frame time before changing the default.
+guarded. Emulator checks pass. Six physical comparisons show no consistent gain
+(10.08 FPS either way near the base, 10.82 off versus 10.72 on toward the valley),
+so it remains off by default. Remaining quaternion/matrix lock waits lead the
+next ownership audit; the existing multicore configuration remains active.
 
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.
