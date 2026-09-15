@@ -30,17 +30,19 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
-    def test_packed_vector_observed_row_both_triplets_only(self):
+    def test_packed_vector_observed_rows_both_triplets_only(self):
         image = SyntheticImage(); image.section_name = ".text"
-        image.targets = {slot: 0x1000 + (n % 3) * 16
-                         for n, slot in enumerate(range(0x47FB4C, 0x47FB64, 4))}
-        image.targets[0x47FB48] = None; image.targets[0x47FB64] = None
+        bases = (0x47FB4C, 0x47FBC4, 0x47FC14)
+        slots = [base + n * 4 for base in bases for n in range(6)]
+        image.targets = {slot: 0x1000 + (n % 6) * 16 for n, slot in enumerate(slots)}
+        for base in bases:
+            image.targets[base - 4] = None; image.targets[base + 24] = None
         spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
         with patch.object(prepare_boot, "GAME_PACKED_VECTOR_BINDINGS", (spec, spec)):
             before = dict(image.targets)
-            self.assertEqual(prepare_boot.game_packed_vector_roots(image), {0x1000, 0x1010, 0x1020})
+            self.assertEqual(prepare_boot.game_packed_vector_roots(image), set(range(0x1000, 0x1060, 16)))
             self.assertEqual(image.targets, before)
-            for slot in range(0x47FB4C, 0x47FB64, 4):
+            for slot in slots:
                 saved = image.targets[slot]
                 for invalid in (0, None):
                     image.targets[slot] = invalid

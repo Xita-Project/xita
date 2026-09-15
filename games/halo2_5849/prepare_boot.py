@@ -400,22 +400,23 @@ def game_descriptor_child_roots(image):
 
 
 def game_packed_vector_roots(image):
-    """Native154 reaches format 1 of the 40-byte decoder record table.
+    """Native154/155 reach format 1 and the shared format 4/6 callbacks.
 
     Original binders select either triplet at +0/+12; both are proven for
-    this one row. Do not infer other format rows or treat metadata as code.
+    these rows. Do not infer other format rows or treat metadata as code.
     The whole-image revision gate also protects the observed row contents.
     """
     for address, length, digest in GAME_PACKED_VECTOR_BINDINGS:
         if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
             raise ValueError("Halo 2 packed vector binding fingerprint mismatch")
     roots = set()
-    for slot in range(0x47FB4C, 0x47FB64, 4):
-        target = image.u32(slot)
-        section = image.section_of(target) if target else None
-        if not target or not image.is_code(target) or not section or section[4] != ".text":
-            raise ValueError("Halo 2 packed vector callback has invalid target")
-        roots.add(target)
+    for base in (0x47FB4C, 0x47FBC4, 0x47FC14):
+        for slot in range(base, base + 24, 4):
+            target = image.u32(slot)
+            section = image.section_of(target) if target else None
+            if not target or not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError("Halo 2 packed vector callback has invalid target")
+            roots.add(target)
     return roots
 
 
