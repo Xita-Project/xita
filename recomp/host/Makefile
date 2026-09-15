@@ -228,7 +228,7 @@ build/frame_handoff_test: Makefile frame_handoff_test.c ../../runtime/xv_ui_gxm.
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include frame_handoff_test.c -Wl,--gc-sections -lm -o $@
 
-build/ps_cache_test: Makefile ps_cache_test.c ../../runtime/xv_d3d.c ../../runtime/xv_d3d.h ../../runtime/xv_index_copy.h ../../runtime/xv_vertex_refs.h ../../runtime/xv_bytes_equal.h ../../shaders/xv_ps_table.h
+build/ps_cache_test: Makefile ps_cache_test.c ../../runtime/xv_d3d.c ../../runtime/xv_d3d.h ../../runtime/xv_index_copy.h ../../runtime/xv_index_cache.h ../../runtime/xv_vertex_refs.h ../../runtime/xv_bytes_equal.h ../../shaders/xv_ps_table.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include ps_cache_test.c -Wl,--gc-sections -lm -o $@
 
@@ -265,7 +265,7 @@ build/index_copy_test: index_copy_test.c ../../runtime/xv_index_copy.h ../../run
 	mkdir -p build
 	$(CC) $(CFLAGS) $< -o $@
 
-build/draw_state_test: draw_state_test.c ../../runtime/xv_draw_state.h ../../runtime/xv_d3d.c ../../runtime/xv_bytes_equal.h ../../runtime/xv_index_copy.h ../../runtime/xv_vertex_refs.h
+build/draw_state_test: draw_state_test.c ../../runtime/xv_draw_state.h ../../runtime/xv_d3d.c ../../runtime/xv_bytes_equal.h ../../runtime/xv_index_copy.h ../../runtime/xv_index_cache.h ../../runtime/xv_vertex_refs.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include draw_state_test.c -Wl,--gc-sections -lm -o $@
 

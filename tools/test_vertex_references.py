@@ -17,6 +17,7 @@ fixture = r'''
 #include <stdio.h>
 #include "runtime/xv_shader.h"
 #include "runtime/xv_index_copy.h"
+#include "runtime/xv_index_cache.h"
 #define XV_NUM_LISTS 3
 #define XV_SEQ_INDICES 65536
 #define XV_QUAD_INDICES 1024
@@ -69,6 +70,7 @@ int main(void)
     assert(!vertex_reference_layout(&desc,1,32));
     attr.components=0;assert(!vertex_reference_layout(&desc,0,32));
     attr.components=5;assert(!vertex_reference_layout(&desc,0,32));
+    index_reuse_report(60);index_reuse_shutdown();
     puts("PASS: production retention uses captured indices; borrowed/invalid paths clear coverage; stream stride/attribute guards");
 }
 '''
@@ -84,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix='xita-vertex-references-') as temp:
                        ('benchmark', root / 'recomp/host/resolution_benchmark_test.c')]:
         subprocess.run(flags + [str(path), '-lm', '-o', str(temp / name)], check=True)
         if name != 'benchmark':
-            subprocess.run([str(temp / name)], check=True)
+            subprocess.run([str(temp / name)], check=True, env=dict(os.environ,XV_INDEX_REUSE='0'))
     keys = ['XV_BENCHMARK_VERTEX_REFERENCES', 'XV_BENCHMARK_NATIVE_BOUNDS',
             'XV_BENCHMARK_VERTEX_COPY', 'XV_BENCHMARK_DRAW_SCAN']
     for values in itertools.product(['0', '1'], repeat=4):

@@ -20,6 +20,7 @@
 #include "xv_render_profile.h"
 #include "xv_render_target.h"
 #include "xv_index_copy.h"
+#include "xv_index_cache.h"
 #include "xv_bytes_equal.h"
 #include "xv_visibility.h"
 #include "xv_frame_slots.h"
@@ -401,6 +402,7 @@ bad:
 /* ----------------------------------------------------------------------------------
  *  Init / shutdown
  * -------------------------------------------------------------------------------- */
+static void index_reuse_shutdown(void);
 int xv_d3d_init(const xv_vs_desc_t *const *table, unsigned count)
 {
     g_table = table;
@@ -444,6 +446,7 @@ void xv_d3d_shutdown(void)
     frame_constants_shutdown();
     xv_vertex_prepare_shutdown();
     xv_vertex_upload_shutdown();
+    index_reuse_shutdown();
     if (g_visibility_memory) {
         sceGxmUnmapMemory(g_visibility_memory);
         sceKernelFreeMemBlock(g_visibility_uid);
@@ -809,6 +812,7 @@ static int draw_scan_override = -1;
 static unsigned scan_index_calls, scan_constant_checks, scan_constant_reused;
 static unsigned scan_reference_calls, scan_reference_fast;
 static uint64_t scan_indices, scan_constant_bytes;
+static void index_reuse_report(unsigned frames);
 void xv_d3d_draw_scan_override(int enabled)
 { draw_scan_override = enabled < 0 ? -1 : !!enabled; }
 static int draw_scan_neon(void)
@@ -841,6 +845,7 @@ void xv_d3d_prep_cache_report(unsigned frames)
     XV_LOG("[index-coverage] %u frames: %u reference copies / %u NEON batches (at least 256 indices)\n",
         frames, scan_reference_calls, scan_reference_fast);
     scan_reference_calls = scan_reference_fast = 0;
+    index_reuse_report(frames);
     XV_LOG("[sampler-cache] %u frames: %u reused / %u prepared (texture validity still checked)\n", frames, sampler_hits, sampler_misses);
     sampler_hits = sampler_misses = 0;
     XV_LOG("[texture-prep] %u frames: %u stages prepared / %u unused skipped\n", frames, texture_stages_prepared, texture_stages_skipped);
@@ -1155,6 +1160,40 @@ static unsigned index_bounds(const uint16_t *indices, unsigned count)
     return count ? maximum + 1 : 0;
 }
 
+static xv_index_cache *g_index_cache;
+static unsigned index_reuse_hits, index_reuse_misses, index_reuse_ineligible;
+static uint64_t index_reuse_compared, index_reuse_saved;
+static int index_reuse_enabled(void)
+{
+    static int configured=-1, failed;
+    if (configured<0) {
+        const char *e=getenv("XV_INDEX_REUSE");
+        configured=e && atoi(e)!=0; /* hardware comparison required */
+    }
+    if (!configured || failed) return 0;
+    if (!g_index_cache) {
+        g_index_cache=malloc(sizeof *g_index_cache);
+        if (!g_index_cache) { failed=1;return 0; }
+        xv_index_cache_reset(g_index_cache);
+    }
+    return 1;
+}
+
+static void index_reuse_report(unsigned frames)
+{
+    XV_LOG("[index-reuse] %u frames: enabled %d hits %u rebuilt %u ineligible %u; compared %llu KiB avoided %llu KiB GPU copies; exact current-frame indices\n",
+        frames,index_reuse_enabled(),index_reuse_hits,index_reuse_misses,index_reuse_ineligible,
+        (unsigned long long)(index_reuse_compared/1024),(unsigned long long)(index_reuse_saved/1024));
+    index_reuse_hits=index_reuse_misses=index_reuse_ineligible=0;
+    index_reuse_compared=index_reuse_saved=0;
+}
+static void index_reuse_shutdown(void)
+{
+    free(g_index_cache);g_index_cache=NULL;
+    index_reuse_hits=index_reuse_misses=index_reuse_ineligible=0;
+    index_reuse_compared=index_reuse_saved=0;
+}
+
 static int retain_indices(const void **indices, unsigned count, unsigned *nverts)
 {
     g_draw_vertex_refs_valid = 0;
@@ -1174,8 +1213,33 @@ static int retain_indices(const void **indices, unsigned count, unsigned *nverts
         return 1;
     }
     g_index_requested[list] += ((uint64_t)count + 7u) & ~7ull;
+    unsigned references=xv_vertex_references_enabled()!=0;
+    xv_index_cache_entry *entry=NULL;
+    if (index_reuse_enabled()) {
+        entry=xv_index_cache_select(g_index_cache,*indices,count);
+        if (entry) {
+            if (entry->source==*indices && entry->count==count && entry->references==references)
+                index_reuse_compared+=(uint64_t)count*2u;
+            if (xv_index_cache_match(entry,*indices,count,references)) {
+                *indices=entry->retained;*nverts=entry->vertices;
+                if (references) g_draw_vertex_refs=entry->refs;
+                g_draw_vertex_refs_valid=references;
+                index_reuse_hits++;index_reuse_saved+=(uint64_t)count*2u;
+                return 1;
+            }
+            index_reuse_misses++;
+        } else index_reuse_ineligible++;
+    }
     if (g_index_used[list] > XV_FRAME_INDICES || count > XV_FRAME_INDICES - g_index_used[list]) return 0;
     uint16_t *dst = g_frame_indices + list * XV_FRAME_INDICES + g_index_used[list];
+    const void *source=*indices, *captured=source;
+    if (entry) {
+        /* Capture once, then derive both GPU bytes and bounds/coverage from
+         * that exact cached version. Never rescan mutable guest data later. */
+        entry->source=NULL;
+        memcpy(entry->mirror,source,count*sizeof(uint16_t));
+        captured=entry->mirror;
+    }
     static int cached_scan = -1;
     if (cached_scan < 0) {
         const char *e = getenv("XV_INDEX_SCAN_CACHED");
@@ -1183,23 +1247,29 @@ static int retain_indices(const void **indices, unsigned count, unsigned *nverts
         XV_LOG("index bounds: %s\n", cached_scan ? "cached snapshot" : "GPU copy scan (baseline)");
     }
     scan_index_calls++; scan_indices += count;
-    if (xv_vertex_references_enabled()) {
+    if (references) {
         int neon = draw_scan_neon();
         scan_reference_calls++;
 #if defined(__ARM_NEON)
         scan_reference_fast += neon && count >= 256;
 #endif
         *nverts = neon ?
-            xv_index_copy_reference_bounds_neon(dst, *indices, count, &g_draw_vertex_refs) :
-            xv_index_copy_reference_bounds(dst, *indices, count, &g_draw_vertex_refs);
+            xv_index_copy_reference_bounds_neon(dst, captured, count, &g_draw_vertex_refs) :
+            xv_index_copy_reference_bounds(dst, captured, count, &g_draw_vertex_refs);
         g_draw_vertex_refs_valid = 1;
     } else if (cached_scan) *nverts = draw_scan_neon() ?
-        xv_index_copy_bounds_neon(dst, *indices, count) : xv_index_copy_bounds(dst, *indices, count);
+        xv_index_copy_bounds_neon(dst, captured, count) : xv_index_copy_bounds(dst, captured, count);
     else {
-        memcpy(dst, *indices, count * sizeof *dst);
+        memcpy(dst, captured, count * sizeof *dst);
         *nverts = index_bounds(dst, count);
     }
     g_index_used[list] += (count + 7u) & ~7u; /* keep every draw 16-byte aligned */
+    if (entry) {
+        entry->retained=dst;entry->vertices=*nverts;entry->count=count;
+        entry->references=references;
+        if (references) entry->refs=g_draw_vertex_refs;
+        entry->source=source;
+    }
     *indices = dst;
     return 1;
 }
@@ -1876,6 +1946,7 @@ uint32_t xv_d3d_EndFrame(void)
 unsigned xv_d3d_record_slot(void) { return g_build_frame % XV_NUM_LISTS; }
 void xv_d3d_BeginFrame(void)
 {
+    xv_index_cache_reset(g_index_cache);
     xv_vertex_upload_reset(g_build_frame % XV_NUM_LISTS);
     g_frame_constants[g_build_frame % XV_NUM_LISTS].ready = 0;
     g_lists[g_build_frame % XV_NUM_LISTS]->cur_pass = g_record_pass;
@@ -1927,6 +1998,7 @@ void xv_d3d_Swap(void)
     report_draw_drops(l);
     xv_vertex_upload_seal(g_build_frame % XV_NUM_LISTS);
     g_build_frame++;
+    xv_index_cache_reset(g_index_cache);
     /* reset the list the NEXT frame will use (the pump is done with it: at most one
        frame is in flight beyond the one just submitted) */
     cmdlist_t *next = g_lists[g_build_frame % XV_NUM_LISTS];

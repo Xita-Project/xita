@@ -110,6 +110,13 @@ The separate vertex-preparation worker adds 4.394 ms in its tested view and
 stays disabled. These changes preserve exact draw data and standard graphics;
 neither comparison establishes sustained 20 or 30 FPS.
 
+The subsequent [gameplay capture](docs/gameplay-cadence-20260915.md) records
+camera/AR drops and a periodic hitch, with both object workers active. A new
+timer measures the 60-frame profiling report to test whether synchronous logging
+explains that cadence. An [exact index-reuse prototype](docs/index-reuse-20260915.md)
+passes source-mutation and delayed-slot host tests; it remains off pending
+emulator and hardware validation.
+
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.
 An optional diagnostic splits comparison/copy cost by span size; it adds no
