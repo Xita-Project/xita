@@ -86,3 +86,17 @@ void object_test_stream_volume(xctx *c)
     assert(volume_writes==before+(object==0x1234));
     if(object==0x1234)assert(last_volume==volume);
 }
+
+/* Compile and call the existing DS_OK handler rather than supplying a new
+ * success stub in the worker bridge. Its current behavior must stay intact. */
+void object_test_audio_commit(xctx *c)
+{
+    object_test_audio_owner();
+    unsigned sp=c->r[4];
+    uint32_t saved[8];memcpy(saved,c->r,sizeof saved);
+    assert(X_M32(sp)==0x291EF&&X_M32(sp+4)==0x03D07280);
+    xv_hle_IDirectSound_CommitDeferredSettings(c);
+    assert(c->r[0]==0&&c->r[4]==sp+8);
+    for(unsigned i=1;i<8;i++)if(i!=4)assert(c->r[i]==saved[i]);
+    assert(X_M32(sp)==0x291EF&&X_M32(sp+4)==0x03D07280);
+}

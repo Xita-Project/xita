@@ -33,8 +33,10 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
     methods=d3d_source[d3d_source.index('static void xv_hle_CDirectSoundStream_GetStatus'):d3d_source.index('static void xv_hle_CDirectSoundStream_Discontinuity')]
     pump=re.search(r'^void xv_hle_DirectSoundDoWork\(xctx \*c\).*$',d3d_source,re.M)[0]
     volume=re.search(r'^void xv_hle_CDirectSoundStream_SetVolume\(xctx \*c\).*$',d3d_source,re.M)[0]
+    commit_macro=re.search(r'^#define DS_OK\(name, n\).*$',d3d_source,re.M)[0]
+    commit=re.search(r'DS_OK\(IDirectSound_CommitDeferredSettings, 1\)',d3d_source)[0]
     fixture=(root/'tools/tests/object_audio.c').read_text()
-    audio.write_text(fixture.replace('/* PRODUCTION_AUDIO */',d3d_source[begin:end]+'\n'+methods+'\n'+pump+'\n'+volume))
+    audio.write_text(fixture.replace('/* PRODUCTION_AUDIO */',d3d_source[begin:end]+'\n'+methods+'\n'+pump+'\n'+volume+'\n'+commit_macro+'\n'+commit+'\n#undef DS_OK\n'))
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11','-fno-strict-aliasing',
         '-DXV_EXPERIMENTAL_OBJECT_JOBS','-I'+str(root/'recomp'),
         '-ffunction-sections','-fdata-sections','-ffp-contract=off',
@@ -49,6 +51,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                                   capture_output=True,text=True)
             print(result.stdout,end='')
             assert re.findall(r'quiescent owner stream volume updates (\d+)',result.stderr)==['600','0']
+            assert re.findall(r'quiescent owner deferred audio commits (\d+)',result.stderr)==['600','0']
             reports=re.findall(r'^\[object-jobs\] (\d+) frames passes (\d+) batches (\d+) jobs (\d+)',result.stderr,re.M)
             assert reports==[('3','2','6','600'),('3','0','0','0')],reports
             locks=re.findall(r'contended (\d+)/(\d+) wait-us (\d+)/(\d+);',result.stderr)
@@ -80,6 +83,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
     assert failure.returncode<0 and b'STOP vertex lock outside audited impact transaction' in failure.stderr
     print('PASS: vertex locks outside the audited impact transaction stop before invocation')
     for mode,reason in (("unsupported-audio",b'audio pump outside audited cache callback'),
+                        ("unsupported-commit",b'deferred audio commit outside audited sound update'),
                         ("unsupported-volume",b'stream volume outside audited object sound update'),
                         ("unsupported-stream",b'stream service outside quiescent audio callback'),
                         ("unsupported-nested-audio",b'unsupported nested owner audio service')):

@@ -35,6 +35,14 @@ retains both workers and awaits a physical retest. The separate
 buffer-content violation in 11,721 captured emulator draws and adds a guard
 against submitting draws after failed fragment-constant setup.
 
+The next physical valley walk reached a different STOP when firing the plasma
+pistol: a deferred audio-settings commit. The
+[commit/fade handoff](docs/object-audio-commit-20260915.md) services that call and
+the following stream-volume path on the owner, retaining both workers. Host
+memory/race checks and the native build pass; physical firing retesting remains.
+The walk includes a 13.9 FPS logged window at 848×480; it is not a controlled
+gain measurement or a sustained-frame-rate result.
+
 September 15: [lightweight mutex comparisons](docs/object-light-lock-20260915.md)
 repeatedly improve one physical Blood Gulch view from approximately 11.8–12.0
 to 15.1–15.2 FPS, with both workers enabled in every arm. The experimental build

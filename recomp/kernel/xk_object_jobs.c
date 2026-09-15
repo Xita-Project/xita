@@ -38,7 +38,7 @@ static unsigned indirect_depth[LANES];
  * 4 parked (including an event reply held during an I/O handoff). */
 static unsigned service_state[WORKERS], services, owner_notice, pause_workers, io_yields, resource_queries, resource_registers;
 static unsigned vertex_locks;
-static unsigned audio_pumps, audio_volumes;
+static unsigned audio_pumps, audio_volumes, audio_commits;
 /* Only the owner may execute nested stream services during a quiescent pump.
  * Keep the job marker and private stack: arbitrary kernel/scheduler calls still
  * stop instead of masquerading as the owner's guest fiber. */
@@ -148,7 +148,7 @@ static int worker_lane(void)
 }
 static int needs_quiescence(unsigned address)
 {
-    return address==0x1D6640u||address==0x184AB0u||address==0x1858D0u||address==0x193E27u||address==0x193D4Fu;
+    return address==0x1D6640u||address==0x184AB0u||address==0x1858D0u||address==0x193E27u||address==0x193D4Fu||address==0x193C1Bu;
 }
 static void service_audio(xctx *c,xv_fn_t fn)
 {
@@ -207,6 +207,10 @@ static void service_owner(void)
                     } else if(service_address[i]==0x193D4Fu) {
                         /* Original stream volume update; no guest callbacks. */
                         service_fn[i](&contexts[i]);audio_volumes++;
+                    } else if(service_address[i]==0x193C1Bu) {
+                        /* Keep the existing deferred-settings handler on its
+                         * owner, including its one-argument return convention. */
+                        service_fn[i](&contexts[i]);audio_commits++;
                     } else {
                         /* Header fixup or vertex-storage pointer lookup only;
                          * no allocation, draw submission or scheduler entry.
@@ -531,6 +535,7 @@ void xv_object_jobs_report(unsigned frames)
     XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
     XK_LOG("[object-jobs] quiescent owner audio pumps %u\n",audio_pumps);audio_pumps=0;
     XK_LOG("[object-jobs] quiescent owner stream volume updates %u\n",audio_volumes);audio_volumes=0;
+    XK_LOG("[object-jobs] quiescent owner deferred audio commits %u\n",audio_commits);audio_commits=0;
     XK_LOG("[object-jobs] probed stack peak bytes %u/%u/%u of %u; excludes unprobed small frames\n",stack_peak[0],stack_peak[1],stack_peak[2],STACK_BYTES);
     XK_LOG("[object-locks] fast %u idle-owner %u acquired %u/%u/%u nested %u/%u contended %u/%u wait-us %llu/%llu; worker waits overlap\n",
         math_fast_path,math_idle_calls,math_stats[0].acquired,math_stats[1].acquired,math_stats[2].acquired,
@@ -620,9 +625,13 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
     }
     if(__atomic_load_n(&audio_service_context,__ATOMIC_ACQUIRE)==c)
         xv_object_job_stop(c,address,"unsupported nested owner audio service");
-    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u&&address!=0x1858D0u&&address!=0x193E27u&&address!=0x193D4Fu)||!fn)
+    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u&&address!=0x1858D0u&&address!=0x193E27u&&address!=0x193D4Fu&&address!=0x193C1Bu)||!fn)
         xv_object_job_stop(c,address,"unsupported HLE");
-    if(address==0x193D4Fu&&X_M32(c->r[4])!=0x2982Fu)
+    if(address==0x193C1Bu&&X_M32(c->r[4])!=0x291EFu)
+        xv_object_job_stop(c,address,"deferred audio commit outside audited sound update");
+    /* 291D0 also fades the active streams after committing deferred settings.
+     * Both callers pass the stream object and a signed, clamped volume. */
+    if(address==0x193D4Fu&&X_M32(c->r[4])!=0x2982Fu&&X_M32(c->r[4])!=0x292FBu)
         xv_object_job_stop(c,address,"stream volume outside audited object sound update");
     if(address==0x193E27u&&X_M32(c->r[4])!=0x29427u)
         xv_object_job_stop(c,address,"audio pump outside audited cache callback");
@@ -639,6 +648,7 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
             c->r[0]=STATUS_SUCCESS;c->r[4]+=4;io_yields++;
         } else if(address==0x193E27u)service_audio(c,fn);
         else if(address==0x193D4Fu){fn(c);audio_volumes++;}
+        else if(address==0x193C1Bu){fn(c);audio_commits++;}
         else {fn(c);if(address==0x184A20u)resource_queries++;else if(address==0x184AB0u)resource_registers++;else if(address==0x1858D0u)vertex_locks++;else services++;}
         return;
     }

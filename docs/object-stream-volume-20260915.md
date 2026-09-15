@@ -71,3 +71,11 @@ preserved. The user is taking over controls for the rocket pickup/firing test.
 The installed build retains both experimental object workers and the measured
 lightweight-mutex default. A successful installation does not close the physical
 firing retest or the sustained-frame-rate goal.
+
+## Subsequent plasma-pistol run
+
+Walking through Blood Gulch succeeded, then plasma firing reached a different
+explicit STOP: deferred audio commit `193C1B`, return `291EF`. The
+[follow-up audit](object-audio-commit-20260915.md) adds that owner handoff and
+admits the `292FB` volume-fade caller in the same guest function. The earlier
+rejection of `292FB` above describes this document's original candidate.
