@@ -28,3 +28,7 @@ const uint32_t *h2_blend_gxm_render(void *opaque, const h2_blend_request *reques
 #include "luma_draw.h"
 const h2_luma_contract *h2_luma_gxm_contract(void);
 const uint32_t *h2_luma_gxm_render(void *opaque, const h2_luma_request *request);
+
+#include "sprite_draw.h"
+const h2_sprite_contract *h2_sprite_gxm_contract(void);
+const uint32_t *h2_sprite_gxm_render(void *opaque,const h2_sprite_request *request);

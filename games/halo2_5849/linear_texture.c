@@ -101,3 +101,17 @@ int h2_dxt23_texture_snapshot_read(const h2_command_state *s, const h2_kelvin_cl
     uint32_t bytes = ((width + 3) / 4) * ((height + 3) / 4) * 16;
     return block_texture_read(s, c, unit, view, format & ~3u, bytes, width, height);
 }
+
+int h2_dxt23_texture_rect_read(const h2_command_state *s, const h2_kelvin_clear *c,
+                                    unsigned unit, h2_block_texture *view)
+{
+    if (!s || unit >= 4) return 0;
+    uint32_t format = s->setup[(0x1B04 + unit * 64) / 4];
+    unsigned log_width = (format >> 20) & 15, log_height = (format >> 24) & 15;
+    /* Render view: one-level BC2, power-of-two axes up to 1024. The consumer
+     * separately admits sampler, shader, byte budget and destination ownership. */
+    if ((format & ~0x0FF00003u) != 0x00010E28u || log_width > 10 || log_height > 10) return 0;
+    uint32_t width = 1u << log_width, height = 1u << log_height;
+    uint32_t bytes = ((width + 3) / 4) * ((height + 3) / 4) * 16;
+    return block_texture_read(s, c, unit, view, format & ~3u, bytes, width, height);
+}

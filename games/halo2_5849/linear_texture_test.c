@@ -167,6 +167,64 @@ static void snapshot_tests(void)
     block_init(0, 1); block_read = h2_dxt23_texture_read; block_rejected(0);
     block_read = h2_dxt1_texture_read; block_rejected(0); assert(!reads && !maps);
 }
+static void rectangle_tests(void)
+{
+    block_read = h2_dxt23_texture_rect_read;
+    /* All admitted logical powers of two, both DMA selectors and all units.
+     * Large views deliberately fail the real small host allocation; verify
+     * the complete requested span rather than claiming backing it with RAM. */
+    for (unsigned unit = 0; unit < 4; ++unit) for (unsigned selector = 1; selector <= 2; ++selector)
+    for (unsigned x = 0; x <= 10; ++x) for (unsigned y = 0; y <= 10; ++y) {
+        unsigned width = 1u << x, height = 1u << y;
+        block_format = 0x10E28u | (x << 20) | (y << 24);
+        block_bytes = ((width + 3) / 4) * ((height + 3) / 4) * 16;
+        block_init(unit, selector); c.physical_bytes = 64 * 1024 * 1024;
+        unsigned physical = selector == 1 ? 528 : 4112;
+        h2_command_state old = s; h2_kelvin_clear memory = c;
+        uint8_t ram[sizeof f.ram]; memcpy(ram, f.ram, sizeof ram);
+        if (block_bytes > sizeof f.ram - physical) {
+            block_rejected(unit);
+        } else {
+            h2_block_texture out;
+            assert(block_read(&s, &c, unit, &out));
+            assert(out.width == width && out.height == height && out.bytes == block_bytes);
+            assert(out.block_pitch == ((width + 3) / 4) * 16);
+            assert(out.physical == physical && out.blocks == f.ram + physical);
+            assert(out.method_format == (block_format | selector));
+        }
+        assert(reads == 4 && maps == 1 && mapped_offset == physical && mapped_bytes == block_bytes);
+        assert(!memcmp(&s, &old, sizeof s) && !memcmp(&c, &memory, sizeof c));
+        assert(!memcmp(ram, f.ram, sizeof ram));
+    }
+    block_format = 0x03A10E28u; block_bytes = 8192; /* original 1024x8 shape */
+    for (unsigned bit = 0; bit < 32; ++bit) {
+        if (bit >= 20 && bit < 28) continue;
+        block_init(0, 1); set(0, 4, (block_format | 1u) ^ (1u << bit));
+        block_rejected(0); assert(!reads && !maps);
+    }
+    for (unsigned axis = 0; axis < 2; ++axis) for (unsigned value = 13; value < 16; ++value) {
+        block_init(0, 1);
+        set(0, 4, 0x10E29u | (value << (20 + axis * 4)));
+        block_rejected(0); assert(!reads && !maps);
+    }
+    for (unsigned i = 0; i < 3; ++i) {
+        block_init(0, 1); unsigned m = 0x1B00 + (unsigned[]){0,4,12}[i];
+        s.setup_valid[m / 128] &= ~(1u << ((m / 4) % 32));
+        block_rejected(0); assert(!reads && !maps);
+    }
+    block_init(0, 1); f.instance[1]--; block_rejected(0); assert(!maps);
+    block_init(0, 1); c.physical_bytes = 528 + block_bytes - 1; block_rejected(0); assert(!maps);
+    block_init(0, 1); f.instance[0]++; block_rejected(0); assert(!maps);
+    block_init(0, 1); f.overflow_map = 1; block_rejected(0); assert(maps == 1);
+    block_init(0, 1); set(0, 0, UINT32_MAX - 15); block_rejected(0); assert(!maps);
+    block_init(0, 1); block_rejected(4); block_rejected(UINT32_MAX);
+    assert(!block_read(NULL, &c, 0, NULL));
+    assert(!block_read(&s, NULL, 0, NULL));
+    assert(!block_read(&s, &c, 0, NULL));
+    /* Capturing the larger texture never admits it to existing draw readers. */
+    block_init(0, 1); block_read = h2_dxt23_texture_read; block_rejected(0);
+    block_read = h2_dxt1_texture_read; block_rejected(0); assert(!reads && !maps);
+}
 int main(void)
 {
     for (unsigned alpha = 0; alpha < 2; ++alpha)
@@ -221,5 +279,6 @@ int main(void)
         block_tests();
     }
     snapshot_tests();
+    rectangle_tests();
     puts("Linear ARGB/XRGB, exact 8x8 DXT1/DXT23 and stop-only BC2 views: four units, all bounded powers, complete DMA/host spans and read-only rejection passed");
 }

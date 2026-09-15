@@ -61,11 +61,17 @@ static h2_blend_draw blend_quad;
 #if H2_LUMA_RENDER
 static h2_luma_draw luma_quad;
 #endif
+#if H2_SPRITE_RENDER
+static h2_sprite_draw sprite_quad;
+#endif
 static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
                             uint32_t value, uint32_t source)
 {
     (void)opaque;
-    int screen_active = 0, bc1_active = 0, composition_active = 0, threshold_active = 0, blur_active = 0, blend_active = 0, luma_active = 0;
+    int screen_active = 0, bc1_active = 0, composition_active = 0, threshold_active = 0, blur_active = 0, blend_active = 0, luma_active = 0, sprite_active = 0;
+#if H2_SPRITE_RENDER
+    sprite_active = sprite_quad.active;
+#endif
 #if H2_LUMA_RENDER
     luma_active = luma_quad.active;
 #endif
@@ -87,13 +93,13 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
 #if H2_SCREEN_RENDER
     screen_active = screen_quad.active;
 #endif
-    if (!movie_quad.active && !screen_active && !bc1_active && !composition_active && !threshold_active && !luma_active && !blend_active && !blur_active && method != 0x17FC) return -1;
+    if (!sprite_active && !movie_quad.active && !screen_active && !bc1_active && !composition_active && !threshold_active && !luma_active && !blend_active && !blur_active && method != 0x17FC) return -1;
     uint32_t fpscr = h2_platform_fpscr_read();
     uint64_t before = movie_quad.completed;
     int movie_active = movie_quad.active;
-    int result = (screen_active || bc1_active || composition_active || threshold_active || blur_active || blend_active || luma_active) ? 0 : h2_quad_method(&movie_quad, &channel.commands, &channel.clear, sub, method, value);
+    int result = (screen_active || bc1_active || composition_active || threshold_active || blur_active || blend_active || luma_active || sprite_active) ? 0 : h2_quad_method(&movie_quad, &channel.commands, &channel.clear, sub, method, value);
 #if H2_SCREEN_RENDER
-    if (!luma_active && !blend_active && !blur_active && !threshold_active && !composition_active && !bc1_active && (screen_active || (!movie_active && !result))) {
+    if (!sprite_active && !luma_active && !blend_active && !blur_active && !threshold_active && !composition_active && !bc1_active && (screen_active || (!movie_active && !result))) {
         uint64_t screen_before = screen_quad.completed;
         result = h2_screen_method(&screen_quad, &channel.commands, &channel.clear, sub, method, value);
         if (screen_before != screen_quad.completed)
@@ -104,7 +110,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
     (void)movie_active;
 #endif
 #if H2_BC1_RENDER
-    if (!luma_active && !blend_active && !blur_active && !threshold_active && !composition_active && (bc1_active || (!movie_active && !screen_active && !result))) {
+    if (!sprite_active && !luma_active && !blend_active && !blur_active && !threshold_active && !composition_active && (bc1_active || (!movie_active && !screen_active && !result))) {
         uint64_t bc1_before = bc1_quad.completed;
         result = h2_bc1_method(&bc1_quad, &channel.commands, &channel.clear, sub, method, value);
         if (bc1_before != bc1_quad.completed)
@@ -113,7 +119,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
     }
 #endif
 #if H2_COMPOSITION_RENDER
-    if (!luma_active && !blend_active && !blur_active && !threshold_active && (composition_active || (!movie_active && !screen_active && !bc1_active && !result))) {
+    if (!sprite_active && !luma_active && !blend_active && !blur_active && !threshold_active && (composition_active || (!movie_active && !screen_active && !bc1_active && !result))) {
         uint64_t composition_before = composition_quad.completed;
         result = h2_composition_method(&composition_quad, &channel.commands, &channel.clear, sub, method, value);
         if (composition_before != composition_quad.completed)
@@ -122,7 +128,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
     }
 #endif
 #if H2_THRESHOLD_RENDER
-    if (!luma_active && !blend_active && !blur_active && (threshold_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !result))) {
+    if (!sprite_active && !luma_active && !blend_active && !blur_active && (threshold_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !result))) {
         uint64_t threshold_before = threshold_quad.completed;
         result = h2_threshold_method(&threshold_quad, &channel.commands, &channel.clear, sub, method, value);
         if (threshold_before != threshold_quad.completed)
@@ -131,7 +137,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
     }
 #endif
 #if H2_BLUR_RENDER
-    if (!luma_active && !blend_active && (blur_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !result))) {
+    if (!sprite_active && !luma_active && !blend_active && (blur_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !result))) {
         uint64_t blur_before = blur_quad.completed;
         result = h2_blur_method(&blur_quad, &channel.commands, &channel.clear, sub, method, value);
         if (blur_before != blur_quad.completed)
@@ -140,7 +146,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
     }
 #endif
 #if H2_BLEND_RENDER
-    if (!luma_active && (blend_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !blur_active && !result))) {
+    if (!sprite_active && !luma_active && (blend_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !blur_active && !result))) {
         uint64_t blend_before = blend_quad.completed;
         result = h2_blend_method(&blend_quad, &channel.commands, &channel.clear, sub, method, value);
         if (blend_before != blend_quad.completed)
@@ -149,7 +155,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
     }
 #endif
 #if H2_LUMA_RENDER
-    if (luma_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !blur_active && !blend_active && !result)) {
+    if (!sprite_active && (luma_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !blur_active && !blend_active && !result))) {
         uint64_t luma_before = luma_quad.completed;
         result = h2_luma_method(&luma_quad, &channel.commands, &channel.clear, sub, method, value);
         if (luma_before != luma_quad.completed)
@@ -157,8 +163,17 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
                     (unsigned)luma_quad.completed, source, channel.clear.color_offset);
     }
 #endif
+#if H2_SPRITE_RENDER
+    if (sprite_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !blur_active && !blend_active && !luma_active && !result)) {
+        uint64_t sprite_before=sprite_quad.completed;
+        result=h2_sprite_method(&sprite_quad,&channel.commands,&channel.clear,sub,method,value);
+        if(sprite_before!=sprite_quad.completed)
+            xv_logf("[h2/sprite] completed=%u original_inline_vertices=4 source=%08X color=%08X RGB committed; not yet presented\n",
+                    (unsigned)sprite_quad.completed,source,channel.clear.color_offset);
+    }
+#endif
 #if H2_COMPOSITION_RENDER
-    if (!movie_active && !screen_active && !bc1_active && !threshold_active && !luma_active && !blend_active && !blur_active && !result && method == 0x17FC && value == 7) {
+    if (!sprite_active && !movie_active && !screen_active && !bc1_active && !threshold_active && !luma_active && !blend_active && !blur_active && !result && method == 0x17FC && value == 7) {
         xv_logf("[h2/composition] rejected BEGIN contract=%u render=%u diagnostic=%u\n",
                 composition_quad.contract != NULL, composition_quad.render != NULL,
                 h2_composition_probe(&composition_quad, &channel.commands, &channel.clear));
@@ -416,6 +431,11 @@ void h2_host_channel_configure(xctx *c)
     memset(&blend_quad, 0, sizeof blend_quad);
     blend_quad.contract = h2_blend_gxm_contract();
     blend_quad.render = h2_blend_gxm_render;
+#endif
+#if H2_SPRITE_RENDER
+    memset(&sprite_quad,0,sizeof sprite_quad);
+    sprite_quad.contract=h2_sprite_gxm_contract();
+    sprite_quad.render=h2_sprite_gxm_render;
 #endif
 #if H2_LUMA_RENDER
     memset(&luma_quad, 0, sizeof luma_quad);

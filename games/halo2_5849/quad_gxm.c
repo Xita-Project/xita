@@ -861,3 +861,128 @@ const uint32_t *h2_luma_gxm_render(void *opaque, const h2_luma_request *request)
     return target;
 }
 #endif
+
+#if H2_SPRITE_RENDER
+static h2_sprite_contract sprite_contract;
+static SceGxmVertexProgram *sprite_vprog;
+static SceGxmFragmentProgram *sprite_fprog, *sprite_copyprog;
+static const SceGxmProgramParameter *sprite_factors, *sprite_constants;
+static SceGxmTexture sprite_tex, sprite_copytex;
+static uint8_t *sprite_texture;
+static uint32_t *sprite_destination;
+static uint16_t *sprite_indices;
+static unsigned sprite_sampler, sprite_copy_sampler;
+static int sprite_attempted, sprite_ready;
+
+const h2_sprite_contract *h2_sprite_gxm_contract(void)
+{
+    static int loaded;
+    if(loaded)return &sprite_contract;
+    FILE *file=fopen("app0:sprite.contract.bin","rb");if(!file){xv_logf("[h2/sprite] private contract open failed\n");return NULL;}
+    uint32_t header[2];
+    int ok=fread(header,1,8,file)==8&&header[0]==0x43533248&&header[1]==1&&
+        fread(&sprite_contract,1,sizeof sprite_contract,file)==sizeof sprite_contract&&
+        fgetc(file)==EOF&&!ferror(file);
+    if(fclose(file))ok=0;
+    if(!ok){memset(&sprite_contract,0,sizeof sprite_contract);xv_logf("[h2/sprite] invalid private contract\n");return NULL;}
+    loaded=1;xv_logf("[h2/sprite] loaded complete private contract bytes=%u\n",(unsigned)sizeof sprite_contract);return &sprite_contract;
+}
+static int sprite_initialize(void)
+{
+    const SceGxmProgram *vp=load("app0:sprite.vert.gxp",1048),*fp=load("app0:sprite.frag.gxp",392),
+        *copy=load("app0:sprite.copy.frag.gxp",344);
+    REQUIRE(vp&&fp&&copy);
+    SceGxmShaderPatcherId vid,fid,cid;
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,copy,&cid));
+    const char *names[]={"IN.position","IN.blendweight","IN.normal"};
+    SceGxmVertexAttribute attr[3]={{0}};
+    for(unsigned i=0;i<3;++i){
+        const SceGxmProgramParameter *p=parameter(vp,names[i]);REQUIRE(p);
+        attr[i].offset=i*16;attr[i].format=SCE_GXM_ATTRIBUTE_FORMAT_F32;attr[i].componentCount=4;
+        attr[i].regIndex=sceGxmProgramParameterGetResourceIndex(p);
+    }
+    SceGxmVertexStream stream={.stride=48,.indexSource=SCE_GXM_INDEX_SOURCE_INDEX_16BIT};
+    CHECK(sceGxmShaderPatcherCreateVertexProgram(patcher,vid,attr,3,&stream,1,&sprite_vprog));
+    SceGxmBlendInfo sprite={.colorMask=SCE_GXM_COLOR_MASK_R|SCE_GXM_COLOR_MASK_G|SCE_GXM_COLOR_MASK_B,
+        .colorFunc=SCE_GXM_BLEND_FUNC_ADD,.alphaFunc=SCE_GXM_BLEND_FUNC_ADD,
+        .colorSrc=SCE_GXM_BLEND_FACTOR_SRC_ALPHA,.colorDst=SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaSrc=SCE_GXM_BLEND_FACTOR_SRC_ALPHA,.alphaDst=SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA};
+    CHECK(sceGxmShaderPatcherCreateFragmentProgram(patcher,fid,SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,SCE_GXM_MULTISAMPLE_NONE,&sprite,vp,&sprite_fprog));
+    CHECK(sceGxmShaderPatcherCreateFragmentProgram(patcher,cid,SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,SCE_GXM_MULTISAMPLE_NONE,NULL,vp,&sprite_copyprog));
+    sprite_factors=parameter(fp,"psc");REQUIRE(sprite_factors&&sceGxmProgramParameterGetArraySize(sprite_factors)==18);
+    sprite_constants=parameter(vp,"c");REQUIRE(sprite_constants&&sceGxmProgramParameterGetArraySize(sprite_constants)==178);
+    const SceGxmProgramParameter *p0=parameter(fp,"tex0"),*pc=parameter(copy,"copy_source");REQUIRE(p0&&pc);
+    sprite_sampler=sceGxmProgramParameterGetResourceIndex(p0);sprite_copy_sampler=sceGxmProgramParameterGetResourceIndex(pc);
+    REQUIRE(sprite_sampler<4&&sprite_copy_sampler<4);
+    sprite_texture=alloc(8192,0,NULL);sprite_destination=alloc(640*480*4,0,NULL);
+    sprite_indices=alloc(4096,0,NULL);REQUIRE(sprite_indices);
+    const uint16_t front[]={0,1,2,0,2,3};memcpy(sprite_indices,front,sizeof front);
+    REQUIRE(sprite_texture&&sprite_destination);
+    CHECK(sceGxmTextureInitLinear(&sprite_copytex,sprite_destination,SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,640,480,1));
+    CHECK(sceGxmTextureSetMinFilter(&sprite_copytex,SCE_GXM_TEXTURE_FILTER_POINT));
+    CHECK(sceGxmTextureSetMagFilter(&sprite_copytex,SCE_GXM_TEXTURE_FILTER_POINT));
+    CHECK(sceGxmTextureSetUAddrMode(&sprite_copytex,SCE_GXM_TEXTURE_ADDR_CLAMP));
+    CHECK(sceGxmTextureSetVAddrMode(&sprite_copytex,SCE_GXM_TEXTURE_ADDR_CLAMP));
+    xv_logf("[h2/sprite] initialized validated packed-color shader/staging on existing H2 GXM context\n");
+    return 1;
+}
+const uint32_t *h2_sprite_gxm_render(void *opaque, const h2_sprite_request *request)
+{
+    (void)opaque;
+    if(!request||!request->destination||!request->texture0.blocks||request->texture0.bytes>8192)return NULL;
+    if(!attempted){attempted=1;ready=initialize();}if(!ready)return NULL;
+    if(!sprite_attempted){sprite_attempted=1;sprite_ready=sprite_initialize();}if(!sprite_ready)return NULL;
+    REQUIRE(h2_dxt23_gxm_rect(request->texture0.blocks,request->texture0.bytes,
+                             sprite_texture,request->texture0.bytes,request->texture0.width,request->texture0.height));
+    CHECK(sceGxmTextureInitSwizzled(&sprite_tex,sprite_texture,SCE_GXM_TEXTURE_FORMAT_UBC2_ABGR,
+                                   request->texture0.width,request->texture0.height,1));
+    CHECK(sceGxmTextureSetMinFilter(&sprite_tex,SCE_GXM_TEXTURE_FILTER_LINEAR));
+    CHECK(sceGxmTextureSetMagFilter(&sprite_tex,SCE_GXM_TEXTURE_FILTER_LINEAR));
+    CHECK(sceGxmTextureSetUAddrMode(&sprite_tex,SCE_GXM_TEXTURE_ADDR_CLAMP));
+    CHECK(sceGxmTextureSetVAddrMode(&sprite_tex,SCE_GXM_TEXTURE_ADDR_CLAMP));
+    memcpy(sprite_destination,request->destination,640*480*4);
+    /* Copy the full destination into private GPU staging using the pinned
+     * screen projection. Then restore all original input vertices/uniforms. */
+    for(unsigned v=0;v<4;++v){
+        float x=v==1||v==2?640:0,y=v>=2?480:0;
+        const float seed[12]={x,y,0,1,x,y,0,1,1,1,1,1};memcpy(vertices+v*12,seed,sizeof seed);
+    }
+    CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,&depth));
+    sceGxmSetViewportEnable(ctx,SCE_GXM_VIEWPORT_ENABLED);sceGxmSetRegionClip(ctx,SCE_GXM_REGION_CLIP_NONE,0,0,639,479);
+    sceGxmSetViewport(ctx,320,320,240,-240,0.0f,1.0f);sceGxmSetCullMode(ctx,SCE_GXM_CULL_NONE);
+    sceGxmSetFrontFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);sceGxmSetBackFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
+    sceGxmSetFrontStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetBackStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetFrontDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);sceGxmSetBackDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);sceGxmSetBackDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);
+    sceGxmSetVertexProgram(ctx,sprite_vprog);sceGxmSetFragmentProgram(ctx,sprite_copyprog);
+    void *vu;CHECK(sceGxmReserveVertexDefaultUniformBuffer(ctx,&vu));
+    CHECK(sceGxmSetUniformDataF(vu,sprite_constants,0,712,(const float *)request->constants));
+    CHECK(sceGxmSetVertexStream(ctx,0,vertices));CHECK(sceGxmSetFragmentTexture(ctx,sprite_copy_sampler,&sprite_copytex));
+    CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,sprite_indices,6));
+    SceGxmNotification seeded={sceGxmGetNotificationRegion(),++notification};REQUIRE(seeded.address);
+    CHECK(sceGxmEndScene(ctx,NULL,&seeded));CHECK(sceGxmNotificationWait(&seeded));sceGxmFinish(ctx);
+    memcpy(vertices,request->vertices,sizeof request->vertices);
+    CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,&depth));
+    sceGxmSetCullMode(ctx,SCE_GXM_CULL_CCW);
+    sceGxmSetFragmentProgram(ctx,sprite_fprog);
+    CHECK(sceGxmReserveVertexDefaultUniformBuffer(ctx,&vu));
+    CHECK(sceGxmSetUniformDataF(vu,sprite_constants,0,712,(const float *)request->constants));
+    void *fu;CHECK(sceGxmReserveFragmentDefaultUniformBuffer(ctx,&fu));
+    CHECK(sceGxmSetUniformDataF(fu,sprite_factors,0,72,(const float *)request->factors));
+    CHECK(sceGxmSetVertexStream(ctx,0,vertices));
+    CHECK(sceGxmSetFragmentTexture(ctx,sprite_sampler,&sprite_tex));
+    CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,sprite_indices,6));
+    SceGxmNotification done={sceGxmGetNotificationRegion(),++notification};REQUIRE(done.address);
+    CHECK(sceGxmEndScene(ctx,NULL,&done));CHECK(sceGxmNotificationWait(&done));sceGxmFinish(ctx);
+    static unsigned count;
+    if(++count<=4){
+        unsigned changed=0;for(unsigned i=0;i<640*480;++i)changed+=(target[i]&0xFFFFFF)!=(sprite_destination[i]&0xFFFFFF);
+        xv_logf("[h2/sprite] staged=%u original_texture0=%08X changed_rgb=%u first=%08X; not yet committed/presented\n",
+                count,request->texture0.physical,changed,target[0]);
+    }
+    return target;
+}
+#endif

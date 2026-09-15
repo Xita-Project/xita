@@ -30,3 +30,8 @@ int h2_dxt1_texture_read(const h2_command_state *state, const h2_kelvin_clear *m
  * Existing executable 8x8 readers above keep their exact format restrictions. */
 int h2_dxt23_texture_snapshot_read(const h2_command_state *state, const h2_kelvin_clear *memory,
                                     unsigned unit, h2_block_texture *view);
+
+/* Rendering view, one-level BC2 powers of two 1..1024. Full DMA read span;
+ * no sampler/draw admission. Existing exact 8x8 readers remain unchanged. */
+int h2_dxt23_texture_rect_read(const h2_command_state *,const h2_kelvin_clear *,
+                               unsigned unit,h2_block_texture *);
