@@ -15,6 +15,12 @@ static xctx guest, worker_context;
 static jmp_buf fault;
 static uint32_t expected_dpc, expected_a1, expected_a2;
 static int callback_rearm, callback_bad_stack, callback_yield;
+static void (*worker_entry)(xctx *, void *);
+static unsigned service_mode, service_calls, service_yields, service_limit;
+static unsigned service_kicks, service_sleeps;
+static uint32_t service_order[300], service_arguments[300][2];
+static uint64_t catchup_due;
+static jmp_buf service_done;
 extern int xk_game_timer_consume(xk_obj *);
 extern void xk_game_yield_check(xk_thread *);
 
@@ -36,9 +42,20 @@ void __real_xk_KeInitializeTimerEx(xctx *c)
     X_M8(t) = 8 + (X_ARG(1) & 1); X_M32(t + 4) = 0; X_RET(2);
 }
 xk_thread *xk_thread_create_host(void (*entry)(xctx *, void *), void *arg)
-{ assert(entry && !arg); ++creations; return &fake_worker; }
+{ assert(entry && !arg); worker_entry=entry; ++creations; return &fake_worker; }
 void xk_thread_kick(xk_thread *t) { assert(t == &fake_worker); ++kicks; }
-void xk_sleep_us(uint64_t us) { (void)us; abort(); }
+void xk_yield(void)
+{
+    assert(service_mode && service_calls == 64 * (++service_yields));
+    assert(kicks == service_kicks && X_M8(worker_context.fs_base + KPCR_IRQL) == 0);
+    xk_game_yield_check(&fake_worker); /* No callback may still be dispatching. */
+}
+void xk_sleep_us(uint64_t us)
+{
+    assert(service_mode && service_calls == service_limit && us > 0);
+    assert(X_M8(worker_context.fs_base + KPCR_IRQL) == 0 && kicks == service_kicks);
+    ++service_sleeps; longjmp(service_done,1);
+}
 void xk_signal_check(void) { ++signals; }
 static void arguments(unsigned n, const uint32_t *args)
 {
@@ -71,6 +88,22 @@ static void rejected(void (*fn)(xctx *), unsigned n, const uint32_t *args)
 void xv_call(xctx *c, uint32_t routine)
 {
     assert(routine == 0x4000 && X_M32(c->r[4]) == 0xDEAD0002);
+    if (service_mode) {
+        unsigned n=service_calls++;
+        assert(n<300 && X_ARG(1)==0x87654321 && X_M8(c->fs_base+KPCR_IRQL)==2);
+        uint32_t dpc=X_ARG(0); assert(!X_M8(dpc+2));
+        service_order[n]=dpc; service_arguments[n][0]=X_ARG(2); service_arguments[n][1]=X_ARG(3);
+        if (service_mode==1 && dpc==0x3000) {
+            catchup_due+=200000; /* Original 332B6D advances its stored deadline. */
+            arm(0x2000,catchup_due,dpc,0);
+        } else if (service_mode==2 && n+1<service_limit) {
+            uint32_t args[]={dpc,n+1,0xBB000000u+n+1};
+            invoke(__wrap_xk_KeInsertQueueDpc,3,args,1,1);
+            args[1]=0xBAD; invoke(__wrap_xk_KeInsertQueueDpc,3,args,1,0);
+        }
+        uint32_t sp=c->r[4]; memset(c,0x5C,sizeof *c);c->r[4]=sp+20;
+        return;
+    }
     assert(X_ARG(0) == expected_dpc && X_ARG(1) == 0x87654321);
     assert(X_ARG(2) == expected_a1 && X_ARG(3) == expected_a2);
     assert(X_M8(c->fs_base + KPCR_IRQL) == 2 && X_M8(expected_dpc + 2) == 0);
@@ -99,6 +132,7 @@ int main(void)
     for (unsigned i = 0; i < 16; ++i) g_xpt[i] = i * 4096;
     memset(&worker_context, 0xA5, sizeof worker_context); worker_context.r[4] = 0x8000;
     worker_context.fs_base = 0x5000; X_M8(0x5000 + KPCR_IRQL) = 0;
+    fake_worker.ctx=worker_context;
     uint32_t init[] = {0x2000,0}; invoke(__wrap_xk_KeInitializeTimerEx,2,init,0,0);
     assert(X_M8(0x2000) == 8 && X_M8(0x2002) == 10 && !X_M32(0x2004));
     assert(X_M32(0x2008) == 0x2008 && X_M32(0x200C) == 0x2008);
@@ -146,6 +180,37 @@ int main(void)
     invoke(__wrap_xk_KeRemoveQueueDpc,1,queue,1,0);
     invoke(__wrap_xk_KeInsertQueueDpc,3,queue,1,1);
     invoke(__wrap_xk_KeRemoveQueueDpc,1,queue,1,1); poll(5);
+    /* More than 64 real callbacks is not record exhaustion. The original
+     * absolute schedule catches up without rewriting/skipping any deadline.
+     * An already queued peer keeps its FIFO position ahead of the rearm. */
+    dpc[0]=0x3100; invoke(__wrap_xk_KeInitializeDpc,3,dpc,0,0);
+    service_mode=1; service_limit=195; catchup_due=wall-193*200000ull;
+    arm(0x2000,catchup_due,0x3000,0);
+    uint32_t peer[]={0x3100,0x123,0x456};invoke(__wrap_xk_KeInsertQueueDpc,3,peer,1,1);
+    service_kicks=kicks; xctx saved_worker=worker_context;
+    if (!setjmp(service_done)) worker_entry(&worker_context,NULL);
+    assert(service_calls==195 && service_yields==3 && service_sleeps==1);
+    assert(!memcmp(&worker_context,&saved_worker,sizeof worker_context));
+    assert(service_order[0]==0x3000 && service_order[1]==0x3100);
+    for (unsigned n=0;n<service_calls;++n) {
+        assert(service_order[n]==(n==1?0x3100u:0x3000u));
+        assert(service_arguments[n][0]==(n==1?0x123u:(uint32_t)wall));
+        assert(service_arguments[n][1]==(n==1?0x456u:(uint32_t)(wall>>32)));
+    }
+    assert(catchup_due==wall+200000 && X_M8(0x2003) && !X_M8(0x3002) && !X_M8(0x3102));
+    service_mode=0; cancel[0]=0x2000; invoke(__wrap_xk_KeCancelTimer,1,cancel,1,1);
+    /* Direct self-insertion also remains queued across budget boundaries;
+     * duplicate insertions cannot overwrite arguments or consume callbacks. */
+    service_mode=2;service_calls=service_yields=service_sleeps=0;service_limit=193;
+    queue[1]=0;queue[2]=0xBB000000;invoke(__wrap_xk_KeInsertQueueDpc,3,queue,1,1);
+    service_kicks=kicks;
+    if (!setjmp(service_done)) worker_entry(&worker_context,NULL);
+    assert(service_calls==193 && service_yields==3 && service_sleeps==1);
+    assert(!memcmp(&worker_context,&saved_worker,sizeof worker_context));
+    for (unsigned n=0;n<service_calls;++n) {
+        assert(service_order[n]==0x3000 && service_arguments[n][0]==n && service_arguments[n][1]==0xBB000000u+n);
+    }
+    assert(!X_M8(0x3002)); service_mode=0;
     /* Guard/wrap/type/unknown-object/period failures happen before mutation. */
     uint32_t invalid[]={0xD0000000,0,0,0,0}; rejected(__wrap_xk_KeInitializeTimerEx,2,invalid);
     invalid[0]=0xFFFFFFF0; rejected(__wrap_xk_KeInitializeDpc,3,invalid);
@@ -165,6 +230,6 @@ int main(void)
     if (!setjmp(fault)) { h2_timer_poll(&worker_context); abort(); }
     assert(creations == 1 && kicks && signals);
     free(g_xpt); free(g_xram);
-    puts("H2 timers: value ABI, real deadlines, callback arguments/rearm, cancellation, queue coalescing, guards and CPU-state isolation passed.");
+    puts("H2 timers: ABI/deadlines, 195-call overdue catch-up, 193-call self-requeue, FIFO/arguments across passive service yields, coalescing, cancellation, strict guards and full CPU isolation passed.");
     return 0;
 }

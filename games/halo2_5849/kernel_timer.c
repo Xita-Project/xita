@@ -39,6 +39,13 @@ static dpc_record *find_dpc(uint32_t address)
     for (unsigned i = 0; i < 64; ++i) if (dpcs[i].address == address) return &dpcs[i];
     return NULL;
 }
+static dpc_record *first_queued_dpc(void)
+{
+    dpc_record *first = NULL;
+    for (unsigned i = 0; i < 64; ++i)
+        if (dpcs[i].order && (!first || dpcs[i].order < first->order)) first = &dpcs[i];
+    return first;
+}
 static int valid_dpc(uint32_t address)
 {
     return find_dpc(address) && mapped(address, 28) && X_M16(address) == 0x13 &&
@@ -68,6 +75,10 @@ static void worker_entry(xctx *c, void *opaque)
     (void)opaque;
     for (;;) {
         h2_timer_poll(c);
+        /* A callback may legitimately requeue itself at an overdue absolute
+         * deadline. Retain that work and its FIFO position across service
+         * turns; yield only after its complete return restored PASSIVE IRQL. */
+        if (first_queued_dpc()) { xk_yield(); continue; }
         uint64_t now = xk_uptime_100ns(), wait = 10000000; /* 1 second, arm/cancel kicks it */
         for (unsigned i = 0; i < 64; ++i) if (timers[i].active) {
             uint64_t remaining = timers[i].deadline > now ? timers[i].deadline - now : 0;
@@ -141,7 +152,8 @@ static void set_timer(xctx *c, int extended)
     if (!delta) { expire(t, now, wall); xk_signal_check(); }
     xv_logf("[h2/timer] arm timer=%08X due=%08X%08X remaining_us=%llu dpc=%08X period=%u inserted=%u\n",
             address, (uint32_t)(due >> 32), (uint32_t)due, (unsigned long long)(delta / 10), dpc, period, inserted);
-    xk_thread_kick(worker); c->r[0] = inserted; X_RET(words);
+    if (!dispatching) xk_thread_kick(worker);
+    c->r[0] = inserted; X_RET(words);
 }
 void __wrap_xk_KeSetTimer(xctx *c) { set_timer(c, 0); }
 void __wrap_xk_KeSetTimerEx(xctx *c) { set_timer(c, 1); }
@@ -151,7 +163,7 @@ void __wrap_xk_KeCancelTimer(xctx *c)
     timer_record *t = find_timer(X_ARG(0));
     if (!t || !mapped(t->address, 40)) { h2_timer_fault(c, "unknown timer cancellation", X_ARG(0), 0); return; }
     c->r[0] = t->active; t->active = 0; X_M8(t->address + 3) = 0;
-    if (worker) xk_thread_kick(worker);
+    if (worker && !dispatching) xk_thread_kick(worker);
     X_RET(1); /* cancellation does not remove an already queued DPC */
 }
 void __wrap_xk_KeInsertQueueDpc(xctx *c)
@@ -162,7 +174,8 @@ void __wrap_xk_KeInsertQueueDpc(xctx *c)
     if (!ensure_worker(c)) return;
     dpc_record *d = find_dpc(address); unsigned inserted = !d->order;
     if (inserted) queue_dpc(d, X_ARG(1), X_ARG(2));
-    xk_thread_kick(worker); c->r[0] = inserted; X_RET(3);
+    if (!dispatching) xk_thread_kick(worker);
+    c->r[0] = inserted; X_RET(3);
 }
 void __wrap_xk_KeRemoveQueueDpc(xctx *c)
 {
@@ -222,9 +235,7 @@ void h2_timer_poll(xctx *c)
     }
     xk_signal_check();
     for (unsigned count = 0; count < 64; ++count) {
-        dpc_record *d = NULL;
-        for (unsigned i = 0; i < 64; ++i)
-            if (dpcs[i].order && (!d || dpcs[i].order < d->order)) d = &dpcs[i];
+        dpc_record *d = first_queued_dpc();
         if (!d) return;
         if (!valid_dpc(d->address) || c->r[4] < 20 || !mapped(c->r[4] - 20, 20) ||
             c->fs_base > UINT32_MAX - KPCR_IRQL || !mapped(c->fs_base + KPCR_IRQL, 1)) {
@@ -241,7 +252,9 @@ void h2_timer_poll(xctx *c)
         if (c->r[4] != saved.r[4]) { h2_timer_fault(c, "DPC stack imbalance", address, c->r[4]); return; }
         X_M8(saved.fs_base + KPCR_IRQL) = irql; *c = saved;
     }
-    for (unsigned i = 0; i < 64; ++i) if (dpcs[i].order) {
-        h2_timer_fault(c, "DPC queue did not drain", 64, 0); return;
-    }
+    /* 64 is a cooperative service budget, not a limit on callback lifetime.
+     * Do not remove, reinsert, rewrite or execute the next queued callback. */
+    dpc_record *pending = first_queued_dpc();
+    if (pending) xv_logf("[h2/timer] service budget=64 retained dpc=%08X order=%llu args=%08X,%08X\n",
+                        pending->address, (unsigned long long)pending->order, pending->arg1, pending->arg2);
 }
