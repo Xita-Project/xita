@@ -104,6 +104,14 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_BOUNDS_INSERT_CALLS = (
+    (0x30E4B0, 303, "a3e5389478a81f59a5c47b1f594afeeb2ffa28b9249b9289f823cd3c993672b6"),
+    (0x30B480, 135, "27f37fe29acb4f054753b427d91a87819d3adc5e12ef85fa3b9e94fa63534efb"),
+    (0x30B110, 22, "479f7f3051942acc4986a419943e7766242d5c4a1f4d72b3b41ed6907dd26b36"),
+    (0x3101C0, 1850, "42a213f2b6c96033db532ebef5e5e9dc5e4dbc4d8bed28d18a7475214b5a499b"),
+    (0x2E4F70, 125, "761c48f642757d1669faf4b81c1e553bddd093395c5c494195a60bc00acef774"),
+    (0x2E1D10, 1152, "a78d9ceed5f2f0e55eaa1e3d3049c94a7dd54b5948ed3cba500aaba39596412f"),
+)
 GAME_MEMBER_QUERY_CALLS = (
     (0x316C90, 81, "c208200cd4add2e249bd6d4e742807b62b241778847f0b653c9828bd6a3e8bb1"),
     (0x316000, 82, "06d552d68c397980a59ed4417a66ac7b6dbb8e9e5329183542151a88434200be"),
@@ -499,6 +507,21 @@ def descriptor_child_field_roots(image, offsets):
     return roots
 
 
+def game_bounds_insert_roots(image):
+    """Native166: original stored bounds getter and following index insertion."""
+    for address, length, digest in GAME_BOUNDS_INSERT_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 bounds insertion fingerprint mismatch")
+    roots = set()
+    for slot in (0x4137E4, 0x412604):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 bounds insertion target is not title code")
+        roots.add(target)
+    return roots
+
+
 def game_member_query_roots(image):
     """Native165 member query, original aggregate counter and update slots.
 
@@ -860,6 +883,7 @@ def main():
         roots.update(game_arena_boot_roots(image))
         roots.update(game_boot_factory_roots(image))
         roots.update(game_member_query_roots(image))
+        roots.update(game_bounds_insert_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).

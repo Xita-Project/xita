@@ -30,6 +30,32 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_bounds_getter_and_index_insert_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x4137E4: 0x1000, 0x412604: 0x1010,
+                         0x4137E0: None, 0x4137E8: None, 0x412600: None, 0x412608: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_BOUNDS_INSERT_CALLS)
+        with patch.object(prepare_boot, "GAME_BOUNDS_INSERT_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_bounds_insert_roots(image), {0x1000, 0x1010})
+            self.assertEqual(image.targets, before)
+            for slot in (0x4137E4, 0x412604):
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_bounds_insert_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_bounds_insert_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_BOUNDS_INSERT_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_bounds_insert_roots(image)
+
     def test_member_query_constructor_slots_and_original_counter(self):
         image = SyntheticImage(); image.section_name = ".text"
         spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
