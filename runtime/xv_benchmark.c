@@ -6,6 +6,7 @@
 void xv_logf(const char *fmt,...);
 void xv_benchmark_optimizations(int enabled) __attribute__((weak));
 void xv_object_jobs_override(int enabled) __attribute__((weak));
+int xv_object_jobs_available(void) __attribute__((weak));
 void xv_point_math_override(int enabled) __attribute__((weak));
 void xv_matrix_neon_override(int enabled) __attribute__((weak));
 void xv_object_scan_override(int enabled) __attribute__((weak));
@@ -39,7 +40,7 @@ int xv_benchmark_remote_request(unsigned kind)
 #ifndef XV_NATIVE_MODEL_PALETTE
     if(kind==XV_BENCH_MODEL_PALETTE)return -1;
 #endif
-    if(kind==XV_BENCH_OBJECT_JOBS&&!xv_object_jobs_override)return -1;
+    if(kind==XV_BENCH_OBJECT_JOBS&&(!xv_object_jobs_override||!xv_object_jobs_available))return -1;
     if(kind==XV_BENCH_POINT_MATH&&!xv_point_math_override)return -1;
     if(kind==XV_BENCH_MATRIX_NEON&&!xv_matrix_neon_override)return -1;
     if(kind==XV_BENCH_OBJECT_SCAN&&!xv_object_scan_override)return -1;
@@ -114,7 +115,7 @@ static int native_math_selected(void)
 }
 static int candidate_available(void)
 {
-    if (xv_benchmark_compare_object_jobs()) return xv_object_jobs_override != 0;
+    if (xv_benchmark_compare_object_jobs()) return xv_object_jobs_override && xv_object_jobs_available && xv_object_jobs_available();
     if (xv_benchmark_compare_prep_bundle()) {
         const char *math=getenv("XV_NATIVE_MATH");
         return xv_matrix_neon_override && xv_object_scan_override && (!math || atoi(math)!=0);

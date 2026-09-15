@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #ifdef __vita__
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/cpu.h>
 #include <psp2/kernel/processmgr.h>
 #else
 #include <pthread.h>
@@ -25,6 +26,7 @@ const char xv_object_job_marker=0;
 static xctx jobs[CAPACITY], contexts[LANES];
 static unsigned count, next, running, stopping;
 static uint32_t stacks[LANES];
+static uint32_t active_objects[LANES];
 static int initialized, override=-1;
 static xctx *owner;
 static unsigned batches, submitted, executed[LANES], rejected;
@@ -62,6 +64,7 @@ static void execute(unsigned lane)
     unsigned i;
     while((i=__atomic_fetch_add(&next,1,__ATOMIC_RELAXED))<count) {
         xctx *c=&contexts[lane]; *c=jobs[i];
+        active_objects[lane]=c->r[1];
         c->r[4]=stacks[lane]+STACK_BYTES-256;
         X_M32(c->r[4])=0x90299u;
         c->fiber=(void *)&xv_object_job_marker;
@@ -117,7 +120,8 @@ static int initialize(void)
         dones[i]=sceKernelCreateSema("xv_object_done",0,0,1,NULL);
         if(wakes[i]<0||dones[i]<0)goto fail;
         threads[i]=sceKernelCreateThread(i?"xv_objects_c1":"xv_objects_c0",worker,
-            sceKernelGetThreadCurrentPriority(),512*1024,0,1u<<i,NULL);
+            sceKernelGetThreadCurrentPriority(),512*1024,0,
+            i?SCE_KERNEL_CPU_MASK_USER_1:SCE_KERNEL_CPU_MASK_USER_0,NULL);
         if(threads[i]<0)goto fail;
     }
     for(unsigned i=0;i<WORKERS;i++)
@@ -155,6 +159,9 @@ int xv_object_jobs_begin(xctx *c)
     if(!initialize())return 0;
     owner=c;return 1;
 }
+/* Guest-owner admission, never called by the network service thread. */
+int xv_object_jobs_available(void)
+{ return !xv_phase_enabled && initialize(); }
 int xv_object_jobs_queue(xctx *c)
 {
     if(c!=owner||X_M32(c->r[4])!=0x90299u)return 0;
@@ -217,8 +224,10 @@ void xv_object_jobs_report(unsigned frames)
 }
 void xv_object_job_stop(xctx *c,unsigned address,const char *reason)
 {
+    uint32_t object=c->r[1];
+    for(unsigned i=0;i<LANES;i++)if(c==&contexts[i])object=active_objects[i];
     XK_LOG("[object-jobs] STOP %s target %08X return %08X object %08X; experiment cannot enter owner-only services\n",
-        reason,address,X_M32(c->r[4]),c->r[1]);
+        reason,address,X_M32(c->r[4]),object);
     abort();
 }
 void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)

@@ -62,5 +62,12 @@ profiling exclusion and restoration. Unsupported file-write HLE stops before
 invocation. This tests the scheduling machinery, **not Halo's shared state**.
 
 The frame acquisition checks, remote HTTP selection/exclusion tests and benchmark
-controller checks also pass. The Vita build and actual Halo execution are pending.
+controller checks also pass. Worker initialization failure rejects the experiment
+before its first comparison arm, so a serial fallback cannot masquerade as a
+multicore result. The Vita build passes and boots to the dashboard and original
+Halo CE menu in the isolated emulator. Actual concurrent Halo execution is pending.
+The worker affinity requests use the SDK user-core masks (`0x10000`/`0x20000`).
+The native clipping helper also guards its counters and avoids owner trace globals
+when called from an object worker.
+
 Private build artifacts, logs and screenshots remain outside Git.

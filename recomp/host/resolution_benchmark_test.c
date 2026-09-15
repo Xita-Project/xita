@@ -4,6 +4,8 @@
 void xv_logf(const char *fmt,...) { (void)fmt; }
 static int optimization=-1;
 #ifndef TEST_NO_OBJECT_JOBS
+static int object_jobs_ready=1;
+int xv_object_jobs_available(void) { return object_jobs_ready; }
 void xv_object_jobs_override(int enabled) { (void)enabled; }
 #endif
 static unsigned switches;
@@ -261,6 +263,35 @@ int main(void)
     assert(switches==bundle_switches && !xv_benchmark_active());
     unsetenv("XV_NATIVE_MATH");
     puts("PASS: combined candidate completes, cancels, loses view and restores without rewriting independently configured defaults");
+#endif
+#ifndef TEST_NO_OBJECT_JOBS
+    object_jobs_ready=0;
+    unsigned jobs_switches=switches;
+    assert(!xv_benchmark_remote_request(XV_BENCH_OBJECT_JOBS));
+    xv_benchmark_remote_poll(1);
+    assert(!xv_benchmark_step(now,360,1,view));
+    assert(switches==jobs_switches&&!xv_benchmark_active());
+    object_jobs_ready=1;
+    for(unsigned stop=0;stop<3;stop++) {
+        unsigned initial_switches=switches;
+        assert(!xv_benchmark_remote_request(XV_BENCH_OBJECT_JOBS));
+        xv_benchmark_remote_poll(1);
+        assert(xv_benchmark_step(now,360,1,view)==360&&optimization==0);
+        xv_benchmark_applied(now,360);
+        for(unsigned i=0;i<(stop?181u:540u);i++) {
+            now+=100000;unsigned next=xv_benchmark_step(now,360,1,view);
+            if(next)xv_benchmark_applied(now,next);
+        }
+        if(stop) {
+            assert(optimization==1);
+            if(stop==1)xv_benchmark_compare_toggle();
+            assert(xv_benchmark_step(now,360,stop==1,view)==360);
+            xv_benchmark_applied(now,360);
+        }
+        assert(optimization==-1&&!xv_benchmark_active()&&!remote_kind);
+        assert(switches-initial_switches==(stop?3u:4u));
+    }
+    puts("PASS: object jobs reject failed initialization and restore on completion, cancellation and lost view");
 #endif
     snapshot_worker_ready=0;
     assert(!xv_benchmark_remote_request(XV_BENCH_SNAPSHOT_WORKER));xv_benchmark_remote_poll(1);
