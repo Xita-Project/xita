@@ -30,6 +30,37 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_object_query_constructor_and_exact_interface_extent(self):
+        image = SyntheticImage()
+        image.section_name = ".text"
+        image.targets = {slot: 0x1000 + (index % 15) * 16
+                         for index, slot in enumerate(range(0x412600, 0x412640, 4))}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_OBJECT_QUERY_BINDINGS)
+        with patch.object(prepare_boot, "GAME_OBJECT_QUERY_BINDINGS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_object_query_roots(image), set(before.values()))
+            self.assertEqual(image.targets, before)
+            # Neighboring constants/strings are deliberately absent.
+            for slot in before:
+                for bad in (None, 0, 0xDEAD):
+                    image.targets[slot] = bad
+                    image.bad_code = 0xDEAD
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_object_query_roots(image)
+                image.targets[slot] = before[slot]
+            image.bad_code = None
+            for section in (None, (0, 0, 0, 0, ".data"), (0, 0, 0, 0, "DSOUND")):
+                with patch.object(image, "section_of", return_value=section):
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_object_query_roots(image)
+            for index in range(count):
+                guards = [spec] * count
+                guards[index] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_OBJECT_QUERY_BINDINGS", guards):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_object_query_roots(image)
+
     def test_typed_script_descriptor_chain_extents_and_only_callback_field(self):
         image=SyntheticImage();image.section_name=".text";image.targets={};headers={}
         table=0x8000;start=cursor=0x80000;count=10;records=[]

@@ -441,6 +441,22 @@ GAME_SCRIPT_TYPED_BINDINGS = (
 )
 
 
+GAME_OBJECT_QUERY_BINDINGS = (
+    (0x2E1D30, 24, "1250b15b6588ee8a0d2639fcf219b18e492b3307ccb4ac4f74081c3f83bd09e3"),
+    (0x2E5008, 12, "fec30c9c6624a1048ac99c5a42dc53da89f832a0906211ea74c4cbe0cb4bdb9f"),
+    (0x30E186, 20, "dc23e3259f75324a74fdfdec429e37c59b03f1cc57d6b187a0bc721d604373b9"),
+    (0x412600, 64, "02991a1f675cac892c6198b9a242fd1ee1641294dea19338659583b8f1cb922e"),
+)
+
+
+def game_object_query_roots(image):
+    """Native216: original member C4h interface, constructor and 16 slots."""
+    for address, length, digest in GAME_OBJECT_QUERY_BINDINGS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 object query fingerprint mismatch")
+    return _code_vtable_roots(image, 0x412600, 0x412640)
+
+
 def game_script_typed_roots(image):
     """Native215: checked descriptor prefix including parameterized commands.
 
@@ -1282,6 +1298,7 @@ def main():
         roots.update(game_script_primitive_roots(image))
         roots.update(game_script_noarg_command_roots(image))
         roots.update(game_script_typed_roots(image))
+        roots.update(game_object_query_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
