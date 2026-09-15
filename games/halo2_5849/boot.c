@@ -28,8 +28,8 @@
 extern const h2_host_channel *h2_host_channel_current(void) __attribute__((weak));
 extern int h2_linear_texture_read(const h2_command_state *, const h2_kelvin_clear *,
                                   unsigned, h2_linear_texture *) __attribute__((weak));
-extern int h2_dxt23_texture_read(const h2_command_state *, const h2_kelvin_clear *,
-                                 unsigned, h2_block_texture *) __attribute__((weak));
+extern int h2_dxt23_texture_snapshot_read(const h2_command_state *, const h2_kelvin_clear *,
+                                          unsigned, h2_block_texture *) __attribute__((weak));
 extern int h2_dxt1_texture_read(const h2_command_state *, const h2_kelvin_clear *,
                                  unsigned, h2_block_texture *) __attribute__((weak));
 
@@ -211,9 +211,12 @@ static void graphics_snapshot(void)
             }
         }
         h2_block_texture blocks;
-        if (h2_dxt23_texture_read &&
-            h2_dxt23_texture_read(&channel->commands, &channel->clear, 2, &blocks)) {
-            FILE *pixels = fopen("ux0:data/xita-halo2/texture2-dxt23-at-stop.bin", "wb");
+        for (unsigned unit = 0; unit < 4; ++unit) {
+            if (!h2_dxt23_texture_snapshot_read ||
+                !h2_dxt23_texture_snapshot_read(&channel->commands, &channel->clear, unit, &blocks)) continue;
+            char path[80];
+            snprintf(path, sizeof path, "ux0:data/xita-halo2/texture%u-dxt23-at-stop.bin", unit);
+            FILE *pixels = fopen(path, "wb");
             if (pixels) {
                 /* Layout 1 denotes rows of 4x4, 16-byte compressed blocks. */
                 uint32_t header[8] = {1, blocks.physical, blocks.width, blocks.height,
@@ -221,8 +224,8 @@ static void graphics_snapshot(void)
                 int complete = fwrite(header, 1, sizeof header, pixels) == sizeof header &&
                                fwrite(blocks.blocks, 1, blocks.bytes, pixels) == blocks.bytes;
                 int closed = fclose(pixels);
-                xv_logf("[h2/graphics] private read-only DXT23 texture2 snapshot address=%08X bytes=%u complete=%d\n",
-                        blocks.physical, blocks.bytes, complete && !closed);
+                xv_logf("[h2/graphics] private read-only DXT23 texture%u snapshot address=%08X size=%ux%u bytes=%u complete=%d\n",
+                        unit, blocks.physical, blocks.width, blocks.height, blocks.bytes, complete && !closed);
             }
         }
         /* Stop-only, read-only capture of every enabled original BC1 input.

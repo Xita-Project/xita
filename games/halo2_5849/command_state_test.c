@@ -137,7 +137,8 @@ int main(void)
     const uint32_t array_offsets[] = {0, 1, 0x03131000, 0x0313100C, 0x7FFFFFFF,
                                       0x80000000, 0x80000001, 0xFFFFFFFF};
     const uint32_t array_formats[] = {2, 0x12, 0x22, 0x32, 0x42, 0x16,
-                                      0x1032, 0x1016, 0x1002, 0xFFFFFF42, 0xFFFFFF16};
+                                      0x1032, 0x1016, 0x1002, 0xFFFFFF42, 0xFFFFFF16,
+                                      0x40, 0x140, 0x1440, 0xFFFFFF40};
     for (unsigned bank = 0; bank < 2; ++bank) for (unsigned slot = 0; slot < 16; ++slot) {
         unsigned method = (bank ? 0x1760 : 0x1720) + slot * 4;
         unsigned count = bank ? sizeof array_formats / sizeof *array_formats :
@@ -157,7 +158,8 @@ int main(void)
     }
     for (unsigned slot = 0; slot < 16; ++slot) for (unsigned count = 0; count < 16; ++count)
     for (unsigned type = 0; type < 16; ++type) {
-        if ((type == 2 && count <= 4) || (type == 6 && count == 1)) continue;
+        if ((type == 2 && count <= 4) || (type == 6 && count == 1) ||
+            (type == 0 && count == 4)) continue;
         reject(0, 0x1760 + slot * 4, 0x12340000 | (count << 4) | type);
     }
     reject(0, 0x171C, 0); reject(0, 0x17A0, 0); reject(0, 0x17A4, 0);

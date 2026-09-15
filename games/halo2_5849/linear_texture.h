@@ -24,3 +24,9 @@ int h2_dxt23_texture_read(const h2_command_state *state, const h2_kelvin_clear *
  * Returned ownership, read-only behavior and rejection match DXT23 above. */
 int h2_dxt1_texture_read(const h2_command_state *state, const h2_kelvin_clear *memory,
                          unsigned unit, h2_block_texture *view);
+/* Stop-only diagnostic view: one-level BC2 powers of two, 1..4096 per axis.
+ * Complete row-ordered 4x4 blocks; logical dimensions below four still occupy
+ * a full block. No sampler validation, decoding, GPU upload or draw admission.
+ * Existing executable 8x8 readers above keep their exact format restrictions. */
+int h2_dxt23_texture_snapshot_read(const h2_command_state *state, const h2_kelvin_clear *memory,
+                                    unsigned unit, h2_block_texture *view);

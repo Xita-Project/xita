@@ -136,11 +136,13 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
          * belong to draw execution, which is not provided by this path. */
     } else if (method >= 0x1760 && method <= 0x179C) {
         /* Native179 uses FLOAT arrays (including disabled size zero) and the
-         * packed signed 11/11/10 type. Only these audited formats are stored.
+         * packed signed 11/11/10 type. Native195 adds UB_D3D count four:
+         * normalized BGRA bytes, still only an exact state assignment here.
          * Bits 8..31 are byte stride; no vertex is fetched or converted here.
          * Active immediate draws are routed to their consumer before setup. */
         unsigned type = value & 15, count = (value >> 4) & 15;
-        if (!((type == 2 && count <= 4) || (type == 6 && count == 1))) return 0;
+        if (!((type == 2 && count <= 4) || (type == 6 && count == 1) ||
+              (type == 0 && count == 4))) return 0;
     } else if (method >= 0x1AF0 && method <= 0x1AFC) {
         /* SET_VERTEX_DATA4F attribute 15, one exact component per method.
          * Attribute 0's final component emits a vertex and stays unsupported.

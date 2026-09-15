@@ -44,7 +44,8 @@ int h2_linear_texture_read(const h2_command_state *s, const h2_kelvin_clear *c,
 
 static int block_texture_read(const h2_command_state *s, const h2_kelvin_clear *c,
                               unsigned unit, h2_block_texture *view,
-                              uint32_t expected_format, uint32_t bytes)
+                              uint32_t expected_format, uint32_t bytes,
+                              uint32_t width, uint32_t height)
 {
     if (!s || !c || !view || !c->read_instance || !c->map_physical || unit >= 4) return 0;
     unsigned base = 0x1B00 + unit * 64;
@@ -54,9 +55,8 @@ static int block_texture_read(const h2_command_state *s, const h2_kelvin_clear *
         if (!(s->setup_valid[method / 128] & (1u << ((method / 4) % 32)))) return 0;
     }
     uint32_t format = s->setup[(base + 4) / 4], selector = format & 3;
-    /* Pinned 2D, border color, one-level 8x8 block textures only.
-     * Four row-ordered 4x4 blocks: BC1 has 8-byte blocks; BC2 has 16.
-     * Wrappers select the complete format and extent; no decoding here. */
+    /* Wrappers validate/select the complete one-level format and extent.
+     * Returned compressed blocks remain read-only; no decoding here. */
     if ((selector != 1 && selector != 2) || (format & ~3u) != expected_format ||
         !(s->setup[(base + 0xC) / 4] & 0x40000000u) ||
         !(s->dma_valid & (1u << selector))) return 0;
@@ -68,7 +68,8 @@ static int block_texture_read(const h2_command_state *s, const h2_kelvin_clear *
     if (!blocks || (uintptr_t)blocks > UINTPTR_MAX - (bytes - 1)) return 0;
     h2_block_texture result = {0};
     result.blocks = blocks; result.physical = address; result.bytes = bytes;
-    result.width = result.height = 8; result.block_pitch = bytes / 2;
+    result.width = width; result.height = height;
+    result.block_pitch = bytes / ((height + 3) / 4);
     result.method_format = format;
     *view = result;
     return 1;
@@ -77,10 +78,26 @@ static int block_texture_read(const h2_command_state *s, const h2_kelvin_clear *
 int h2_dxt23_texture_read(const h2_command_state *s, const h2_kelvin_clear *c,
                            unsigned unit, h2_block_texture *view)
 {
-    return block_texture_read(s, c, unit, view, 0x03310E28u, 64);
+    return block_texture_read(s, c, unit, view, 0x03310E28u, 64, 8, 8);
 }
 int h2_dxt1_texture_read(const h2_command_state *s, const h2_kelvin_clear *c,
                          unsigned unit, h2_block_texture *view)
 {
-    return block_texture_read(s, c, unit, view, 0x03310C28u, 32);
+    return block_texture_read(s, c, unit, view, 0x03310C28u, 32, 8, 8);
+}
+
+int h2_dxt23_texture_snapshot_read(const h2_command_state *s, const h2_kelvin_clear *c,
+                                    unsigned unit, h2_block_texture *view)
+{
+    if (!s || unit >= 4) return 0;
+    uint32_t format = s->setup[(0x1B04 + unit * 64) / 4];
+    unsigned log_width = (format >> 20) & 15, log_height = (format >> 24) & 15;
+    /* Stop-only diagnostics: 2D, border color, BC2, one mip, no cube/depth.
+     * 4096 is a capture limit, not an extension of any draw admission rule.
+     * Clamp each physical block dimension to four texels, including 1x1.
+     * All format validity, permissions and full-span mapping follow below. */
+    if ((format & ~0x0FF00003u) != 0x00010E28u || log_width > 12 || log_height > 12) return 0;
+    uint32_t width = 1u << log_width, height = 1u << log_height;
+    uint32_t bytes = ((width + 3) / 4) * ((height + 3) / 4) * 16;
+    return block_texture_read(s, c, unit, view, format & ~3u, bytes, width, height);
 }
