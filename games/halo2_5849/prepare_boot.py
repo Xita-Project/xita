@@ -64,6 +64,11 @@ GAME_MAP_WALKS = (
     (0x137D7B, 28, "a96f07c6fb9bebebfe3c9c11c3991c16c39ea99e73e03f0e281734cf1549cf06"),
     (0x137DA1, 24, "602be11a670b15871af4b680707d5daef495dfe3c96e1397204b8e5f580dd7d2"),
 )
+GAME_REMAINING_LIFECYCLE_WALKS = (
+    (0x12B690, 82, "48f5b814b9988bc9a84a51edb0f8e887100bb821037c4fa9789297b2cd43eeaf"),
+    (0x11C1B0, 456, "8cfd851b1f5935613673c08ab78bd6e32cf9061b28c7fc41a3f55850cb9d6035"),
+    (0x138C10, 411, "0d8b69bf6eae66d95d49af226c4df2f8cb4a74f75262226da3d72fa344f6ccf4"),
+)
 GAME_RESOURCE_WALKS = (
     (0xD48A1, 29, "0791d3646b316f6c184aabc27feed7cb52baae825f512b69619b288d7e6e06c2"),
     (0xD48D2, 28, "0590129ef3b973f39b577ebb22e78a02e28b830fd15d1810386c95aab9c7738d"),
@@ -518,6 +523,28 @@ def game_map_callback_roots(image):
     return roots
 
 
+def game_remaining_lifecycle_roots(image):
+    """Native159 reaches field18 of the existing 68-record lifecycle table.
+
+    Complete callers also prove the reverse required disposal field4 and
+    optional mask-change fields1C/20. Preserve all original transitions.
+    """
+    for address, length, digest in GAME_REMAINING_LIFECYCLE_WALKS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 remaining lifecycle walk fingerprint mismatch")
+    roots = set()
+    for base in (0x440DDC, 0x440DF0, 0x440DF4, 0x440DF8):
+        for slot in range(base, base + 0x990, 0x24):
+            target = image.u32(slot)
+            if base != 0x440DDC and target == 0:
+                continue
+            section = image.section_of(target) if target else None
+            if not target or not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError(f"Halo 2 remaining lifecycle slot {slot:#x} has invalid target")
+            roots.add(target)
+    return roots
+
+
 def game_resource_callback_roots(image):
     """Native84: three original three-record walks, each at stride0x38.
 
@@ -654,6 +681,7 @@ def main():
         roots.update(image.u32(slot) for slot in range(0x4170E4, 0x4170F4, 4))
         roots.update(game_initialization_roots(image))
         roots.update(game_map_callback_roots(image))
+        roots.update(game_remaining_lifecycle_roots(image))
         roots.update(game_resource_callback_roots(image))
         roots.update(game_descriptor_map_roots(image))
         roots.update(game_descriptor_child_roots(image))

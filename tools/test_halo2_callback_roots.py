@@ -240,6 +240,47 @@ class CallbackRoots(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "fingerprint"):
                     prepare_boot.game_map_callback_roots(image)
 
+    def test_remaining_lifecycle_fields_required_disposal_and_guards(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        bases = (0x440DDC, 0x440DF0, 0x440DF4, 0x440DF8)
+        image.targets = {base + n * 0x24: 0x1000 + ((n + phase) % 47) * 16
+                         for phase, base in enumerate(bases) for n in range(68)}
+        expected = set(image.targets.values())
+        # Every unselected field and record69 is poisoned, never scanned.
+        for n in range(69):
+            for field in (0x440DD8, 0x440DE0, 0x440DE4, 0x440DE8, 0x440DEC):
+                image.targets[field + n * 0x24] = None
+        for base in bases: image.targets[base + 68 * 0x24] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_REMAINING_LIFECYCLE_WALKS", (spec,) * 3):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_remaining_lifecycle_roots(image), expected)
+            self.assertEqual(image.targets, before)
+            for base in bases:
+                for n in range(68):
+                    slot = base + n * 0x24; saved = image.targets[slot]
+                    image.targets[slot] = 0
+                    if base == 0x440DDC:
+                        with self.assertRaisesRegex(ValueError, "invalid target"):
+                            prepare_boot.game_remaining_lifecycle_roots(image)
+                    else:
+                        prepare_boot.game_remaining_lifecycle_roots(image)
+                    image.targets[slot] = saved
+                last = base + 67 * 0x24; saved = image.targets[last]
+                for bad in (None, 0xDEAD):
+                    image.targets[last] = bad; image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_remaining_lifecycle_roots(image)
+                image.targets[last] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_remaining_lifecycle_roots(image)
+        for which in range(3):
+            specs = [spec] * 3; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_REMAINING_LIFECYCLE_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_remaining_lifecycle_roots(image)
+
     def test_mixed_bink_pixel_descriptor(self):
         image = SyntheticImage(); image.section_name = "BINK32"
         offsets = (*range(8, 0x34, 8), *range(0x74, 0xB4, 4))
