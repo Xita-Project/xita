@@ -118,6 +118,8 @@ def main():
         (data / "remote.key").write_text(key + "\n")
         log = b"frame evidence\n" * 10000
         (data / "xita.log").write_bytes(log)
+        old_logs={i:(f"previous run {i}: crash evidence\n".encode()*5000) for i in (1,2,3)}
+        for i,contents in old_logs.items():(data/f"xita.{i}.log").write_bytes(contents)
         (data / "update").mkdir()
         launcher_log=b"update failed: open inactive app slot for writing (errno 13)\n"
         (data / "update/launcher.log").write_bytes(launcher_log)
@@ -191,6 +193,7 @@ def main():
                 assert pixels[offset:offset+3] == bytes((x & 255, y & 255, 0x55))
             assert command("b") == "ACK"
             assert request("/screen")[0] == request("/log?offset=0")[0] == request('/launcher-log?offset=0')[0] == 409
+            assert request('/log/1?offset=0')[0]==409
             assert json.loads(request("/status")[2])["benchmark"] == 1
             assert request("/update")[0] == 409
             assert command("n") == "ACK"
@@ -207,6 +210,20 @@ def main():
             assert request("/log?offset=65536")[2] == log[65536:131072]
             assert request("/log?offset=" + str(len(log)))[2] == b""
             assert request("/log?offset=" + str(len(log)+1))[0] == 416
+            for i,contents in old_logs.items():
+                assert request(f'/log/{i}?offset=0',token='f'*32)[0]==403
+                code,headers,body=request(f'/log/{i}?offset=65536')
+                assert code==200 and body==contents[65536:131072]
+                assert headers['X-Log-Run']==str(i) and int(headers['X-Log-Size'])==len(contents)
+                assert request(f'/log/{i}?offset={len(contents)+1}')[0]==416
+            for target in ('/log/','/log/0?offset=0','/log/4?offset=0','/log/12?offset=0',
+                           '/log/../remote.key?offset=0','/log/1?offset=-1',
+                           '/log/1?offset=0&path=remote.key','/log/1?offset=0&offset=1',
+                           '/log/1?offset=2147483648'):
+                assert request(target)[0]==400
+            (data/'xita.3.log').unlink()
+            assert request('/log/3?offset=0')[0]==404
+            (data/'xita.3.log').write_bytes(old_logs[3])
             assert request('/launcher-log?offset=0',token='f'*32)[0]==403
             assert request('/launcher-log?offset=0')[2]==launcher_log
             assert request('/launcher-log?offset=7')[2]==launcher_log[7:]
@@ -226,6 +243,21 @@ def main():
             assert client.status()["protocol"] == 1
             assert client.log(tmp / "client.log") == len(log)
             assert (tmp / "client.log").read_bytes() == log
+            for i,contents in old_logs.items():
+                path=tmp/f'client-previous-{i}.log'
+                assert client.log(path,previous=i)==len(contents) and path.read_bytes()==contents
+                assert (data/f'xita.{i}.log').read_bytes()==contents
+            for previous in (-1,4,'1'):
+                try:client.log(tmp/'invalid-history.log',previous=previous)
+                except ValueError:pass
+                else:raise AssertionError('Invalid previous log accepted')
+            assert not (tmp/'invalid-history.log').exists()
+            try:client.log(tmp/'invalid-history.log',launcher=True,previous=1)
+            except ValueError:pass
+            else:raise AssertionError('Launcher log mixed with game history')
+            subprocess.run(['python3',str(ROOT/'tools/vita_remote.py'),'--config',str(conf),
+                            'log',str(tmp/'cli-previous.log'),'--previous','2'],check=True)
+            assert (tmp/'cli-previous.log').read_bytes()==old_logs[2]
             assert client.log(tmp/'launcher.log',launcher=True)==len(launcher_log)
             assert (tmp/'launcher.log').read_bytes()==launcher_log
             assert client.screen(tmp / "client.ppm")["frame"] > 0

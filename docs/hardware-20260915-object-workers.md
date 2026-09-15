@@ -46,6 +46,8 @@ responsive status endpoint. Following the second shot, the status request timed
 out; two additional observations also timed out. No restart was performed and
 no post-failure log was obtained. A Wi-Fi timeout alone cannot distinguish a game
 crash, a hang or a connection failure. The error screen and log are still needed.
+Later ICMP probes received replies from the Vita while the application endpoint
+continued to time out. The device remained reachable at its recorded address.
 Driving and campaign hardware validation are outstanding.
 
 Before deployment, the same runtime completed an emulator Warthog sequence of
@@ -80,6 +82,31 @@ TSAN. Original bitmap-cache and spatial-list bodies pass TSAN, including 28,800
 list remove/insert pairs. This does not prove all original object dependencies
 safe under reordered updates. Hardware performance of the new lock path remains
 unmeasured.
+
+Runtime `79537faea5e26bb9802ec6b3409e80e84d00a868949782b57b35fc4d23bc7896`
+then completed five charged shots, a grenade input, movement and turning in the
+emulator. Captured reports include nine vertex-pointer handoffs, three resource
+registrations and 17 cache yields. A subsequent vehicle test enters the driver
+seat through normal input and completes six seconds forward, eight seconds
+steering and four seconds reversing. Screenshots show the driver and Warthog
+throughout; vehicle-camera traces move from approximately (104.6, -146.1) to
+(52.0, -119.1). No worker STOP appears in the captured log. These remain emulator
+functional checks, not hardware stability or performance results.
+
+The follow-up package adds remote access to the existing three saved run logs.
+This is needed because starting a new runtime rotates the failed run out of
+`xita.log`. The old endpoint could only read the current file. See
+[remote log retrieval](remote-testing.md#operating-it); the extension does not
+change rotation or delete evidence and requires an updated runtime.
+
+Combined runtime `1c9605c9bbbefe0d153e18804b187f3285dee706dea81fb9770df67dab0c1472`
+booted in the isolated emulator. All three prior logs were downloaded through
+the new endpoint and matched the saved files byte for byte (2,633,728;
+5,787,648; and 1,339,392 bytes). The first also matches the separately preserved
+log from the stopped driving test. Real socket tests with ASAN/UBSAN cover
+authentication, chunking, missing files, invalid indices/offsets, benchmark
+exclusion and the Python CLI. The compatible package changes only the runtime
+and its boot record; no physical installation or hardware gain is claimed for it.
 
 Private captures are under `validation/engine-restructure-20260914T2300Z` in the
 worker-sizing workspace. The comparison receipt is

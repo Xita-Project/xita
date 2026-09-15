@@ -76,15 +76,19 @@ class Client:
         return {"path": str(path), "frame": int(headers["x-xita-frame"]),
                 "ppm_sha256": hashlib.sha256(data).hexdigest()}
 
-    def log(self, path, *, launcher=False):
+    def log(self, path, *, launcher=False, previous=0):
         # Pin the first response's file length, so continuous logging cannot
         # make a pull run indefinitely. App restart/rotation requires a new pull.
+        if type(previous) is not int or previous not in range(4) or (launcher and previous):
+            raise ValueError("Previous game log must be 0–3; launcher history is unavailable")
         offset = 0
         limit = None
         with Path(path).open("xb") as out:
             while limit is None or offset < limit:
-                endpoint="launcher-log" if launcher else "log"
+                endpoint="launcher-log" if launcher else f"log/{previous}" if previous else "log"
                 headers, data = self.request(f"/{endpoint}?offset={offset}")
+                if previous and headers.get("x-log-run") != str(previous):
+                    raise RuntimeError("Server did not confirm the requested previous log")
                 size = int(headers["x-log-size"])
                 if limit is None:
                     limit = size
@@ -275,6 +279,8 @@ def main():
     commands.add_parser("rollback", help="restart into the previous confirmed executable")
     shot = commands.add_parser("screen"); shot.add_argument("output", type=Path)
     log = commands.add_parser("log"); log.add_argument("output", type=Path)
+    log.add_argument("--previous", type=int, choices=range(4), default=0,
+                     help="0=current run; 1–3 select saved runs after a restart (requires updated runtime)")
     launcher_log = commands.add_parser("launcher-log"); launcher_log.add_argument("output", type=Path)
     lease = commands.add_parser("lease"); lease.add_argument("seconds", type=int)
     pad = commands.add_parser("pad")
@@ -312,7 +318,7 @@ def main():
     elif args.command == "screen":
         print(json.dumps(client.screen(args.output)))
     elif args.command == "log":
-        print(f"Saved {client.log(args.output)} bytes")
+        print(f"Saved {client.log(args.output,previous=args.previous)} bytes")
     elif args.command == "launcher-log":
         print(f"Saved {client.log(args.output,launcher=True)} bytes")
     elif args.command == "release":

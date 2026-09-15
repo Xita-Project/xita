@@ -248,11 +248,22 @@ static void serve(int s)
                 while(LOAD(&capture)==2)remote_sleep(1000);
                 STORE(&capture,0);reply(s,504,"No completed display frame\n");
             }
-        } else if(!strcmp(method,"GET")&&(!strncmp(target,"/log?offset=",12)||!strncmp(target,"/launcher-log?offset=",21))) {
+        } else if(!strcmp(method,"GET")&&(!strncmp(target,"/log?offset=",12)||!strncmp(target,"/launcher-log?offset=",21)||!strncmp(target,"/log/",5))) {
             if(xv_benchmark_status()||xv_benchmark_remote_busy()) {reply(s,409,"Bulk log reads disabled during benchmark\n");return;}
             int launcher=!strncmp(target,"/launcher-log?offset=",21);
-            unsigned offset;if(!uint_value(target+(launcher?21:12),0x7fffffffu,&offset)) {reply(s,400,"Invalid log offset\n");return;}
-            FILE *f=fopen(launcher?ROOT "update/launcher.log":ROOT "xita.log","rb");if(!f) {reply(s,404,"Log unavailable\n");return;}
+            unsigned run=0;
+            const char *digits=target+(launcher?21:12);
+            if(!strncmp(target,"/log/",5)) {
+                if(target[5]<'1'||target[5]>'3'||strncmp(target+6,"?offset=",8)) {
+                    reply(s,400,"Invalid previous log\n");return;
+                }
+                run=(unsigned)(target[5]-'0');digits=target+14;
+            }
+            unsigned offset;if(!uint_value(digits,0x7fffffffu,&offset)) {reply(s,400,"Invalid log offset\n");return;}
+            /* Match xv_log.c's fixed rotation slots. No client-supplied path
+             * enters fopen, and reading evidence never rotates or removes it. */
+            static const char *const logs[]={ROOT "xita.log",ROOT "xita.1.log",ROOT "xita.2.log",ROOT "xita.3.log"};
+            FILE *f=fopen(launcher?ROOT "update/launcher.log":logs[run],"rb");if(!f) {reply(s,404,"Log unavailable\n");return;}
             if(fseek(f,0,SEEK_END)) {fclose(f);reply(s,500,"Log seek failed\n");return;}
             long size=ftell(f);
             if(size<0 || offset>(unsigned long)size || fseek(f,offset,SEEK_SET)) {fclose(f);reply(s,416,"Log offset unavailable\n");return;}
@@ -260,7 +271,7 @@ static void serve(int s)
             size_t amount=(unsigned long)size-offset;if(amount>LOG_CHUNK)amount=LOG_CHUNK;
             size_t got=fread(chunk,1,amount,f);int failed=ferror(f);fclose(f);
             if(failed)reply(s,500,"Log read failed\n");
-            else {char extra[80];snprintf(extra,sizeof extra,"X-Log-Size: %ld\r\n",size);
+            else {char extra[80];snprintf(extra,sizeof extra,"X-Log-Size: %ld\r\nX-Log-Run: %u\r\n",size,run);
                 if(!header(s,200,"text/plain",got,extra))send_all(s,chunk,got,remote_now()+5000000);}
             free(chunk);
         } else reply(s,404,"Unknown operation\n");

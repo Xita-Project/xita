@@ -55,6 +55,7 @@ python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.j
 python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json pad cross
 python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json pad --rx 180 --duration 1
 python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json log /private/path/run.log
+python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json log /private/path/previous-run.log --previous 1
 python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.json launcher-log /private/path/launcher.log
 ```
 
@@ -71,6 +72,16 @@ uses Pillow on the computer. Each screenshot copies one completed framebuffer
 before its display slot can be reused. The service never reads a GPU buffer in
 flight and adds no `sceGxmFinish` calls. It refuses screenshots and bulk log
 reads during a measured benchmark. Status reads remain small and available.
+
+After a crash and restart, `log --previous 1` retrieves `xita.1.log`, the previous
+runtime's log. Values 2 and 3 select the two older saved runs; 0 selects the
+current log. This requires a runtime with the log-history endpoint. Retrieve
+evidence before further restarts: the existing logger retains only three old
+runs, and each new runtime shifts their indices. Missing logs return an error;
+the tool never substitutes the current run. Reads are authenticated, bounded,
+excluded during benchmarks, and limited to these fixed files. The launcher log
+has no numbered history. A frozen application still needs to recover or restart
+before its network service can answer.
 
 To keep the display active and prevent automatic suspend for up to an hour:
 
@@ -163,7 +174,8 @@ and opt-in, with fixed update paths and no writes to game data or settings.
 host loopback sockets. `SANITIZE=1` adds ASan/UBSan. Cases include disabled/missing
 credentials, authentication and malformed framing, bounded values, input expiry,
 physical priority, screenshot colors and lifetime, benchmark transfer exclusion,
-log chunks, capture timeout recovery, pairing permissions and the Python client.
+log chunks and all three saved runs, malformed history selectors, capture timeout
+recovery, pairing permissions and the Python client.
 `make -C recomp/host test-input` also checks that remote chords pass through the
 real Vita input/benchmark path.
 
