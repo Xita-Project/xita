@@ -82,11 +82,22 @@ GAME_DESCRIPTOR_CHILD_WALKS = (
     (0x108A90, 122, "afa08763dab7cffe0330b76bdf026aec29abfe8d8f9ac67117d07b7f13c4b3c3"),
 )
 GAME_DESCRIPTOR_OBJECT_WALKS = (
-    (0x108FD0, 114, "bb174c0f12b280811288ac9a93a8fd15e24bc04546c4ec8ac160b96f2d49b1e1"),
-    (0x109290, 100, "c3b23ff93c8be4da1da58815fa9eba30130233d88bc392525625b62002eee686"),
-    (0x109050, 115, "fe250c4ad31ff7e8f84b0784fac61f03bea2c9a2482455ef28d5af23d995b85e"),
-    (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1"),
-    (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e"),
+    (0x108B10, 105, "261722d636dcff18acdce3c501d083797986c3504cf426dd9cd30ea47360005d", 0x30),
+    (0x108B80, 101, "46dfd64e84599b7b90a05c402b6ec2cb1f627b6c04b4b57c620a249b5a8d6c2e", 0x38),
+    (0x108BF0, 101, "d1009849ca1aabae6081d6858ccd634538c9535a9295742bc4788ecf7143d247", 0x3C),
+    (0x108C60, 110, "16cbad1fedde74fbfe563a6d1ce08801832558d5c8fd29098997f26b5fa746ce", 0x40),
+    (0x108CD0, 81, "b3af928d6accc978775d53f1d4759e1f47f5ad44b1fed48f5f0a90d953102538", 0x44),
+    (0x108D30, 81, "a907ee29e25bd27db17da3a093a958cd8fe61f10d04afb5e10f750c3a76737a3", 0x48),
+    (0x108D90, 117, "6dd300c5fd7385d636ebeec940ed433fa0067d39a7307bc85d0c07bd15cd43fb", 0x4C),
+    (0x108E10, 101, "64c1a3061d9e139b33cee350f849ca045d8f5f01dd21ce6a2e537812d527e011", 0x50),
+    (0x108E80, 101, "b9c77763366bc91b115c78332c2200c3fc3af8128eca1abf5e61bf2f1d9afe92", 0x54),
+    (0x108EF0, 105, "bf94425ef9deaf4e5522c0bc751c048ec97c3a45404fb81e89be28fd47056bdf", 0x58),
+    (0x108F60, 105, "f120124e8a08da4a3a6fc92abcef5a78250efdb1775058f039ecc2354694eb5b", 0x5C),
+    (0x108FD0, 114, "bb174c0f12b280811288ac9a93a8fd15e24bc04546c4ec8ac160b96f2d49b1e1", 0x64),
+    (0x109290, 100, "c3b23ff93c8be4da1da58815fa9eba30130233d88bc392525625b62002eee686", 0x68),
+    (0x109050, 115, "fe250c4ad31ff7e8f84b0784fac61f03bea2c9a2482455ef28d5af23d995b85e", 0x6C),
+    (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
+    (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
 GAME_PACKED_VECTOR_BINDINGS = (
     (0x279BA2, 45, "ae5b4f05401786d52eb8183057ed4ce7f7ed8b9c4b38b3d45510b1d9a291b6fa"),
@@ -392,12 +403,12 @@ def game_descriptor_object_roots(image):
     """Native156: original object dispatch uses the same direct child arrays.
 
     Preserve original arguments and AL aggregation in translated callers.
-    Only the five fields proven by the complete fingerprinted walks are code.
+    Only fields proven by the complete fingerprinted walks are code.
     """
-    for address, length, digest in GAME_DESCRIPTOR_OBJECT_WALKS:
+    for address, length, digest, _offset in GAME_DESCRIPTOR_OBJECT_WALKS:
         if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
             raise ValueError("Halo 2 descriptor object walk fingerprint mismatch")
-    return descriptor_child_field_roots(image, (0x64, 0x68, 0x6C, 0x70, 0x74))
+    return descriptor_child_field_roots(image, tuple(spec[3] for spec in GAME_DESCRIPTOR_OBJECT_WALKS))
 
 
 def descriptor_child_field_roots(image, offsets):

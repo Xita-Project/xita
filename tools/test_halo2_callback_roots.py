@@ -525,21 +525,23 @@ class DescriptorRoots(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "fingerprint"):
                     prepare_boot.game_descriptor_child_roots(self.image)
 
-    def test_object_child_fields_bounds_and_five_walk_guards(self):
+    def test_object_child_fields_bounds_and_all_walk_guards(self):
         shared = 0x464000; parent = self.image.parents[-1]
         self.image.write(parent + 0x84, shared)
         self.image.write(parent + 0x8C, 0xDEAD)  # after the null terminator
         self.image.write(shared + 0x84, 0xDEAD)  # no recursive walk
+        self.image.write(shared + 0x34, 0xDEAD)
         self.image.write(shared + 0x60, 0xDEAD)
         self.image.write(shared + 0x78, 0xDEAD)
-        fields = (0x64, 0x68, 0x6C, 0x70, 0x74)
+        fields = (0x30, 0x38, 0x3C, 0x40, 0x44, 0x48, 0x4C, 0x50, 0x54, 0x58, 0x5C,
+                  0x64, 0x68, 0x6C, 0x70, 0x74)
         for i, offset in enumerate(fields):
             self.image.write(shared + offset, 0x1100 + i * 16)
             self.image.write(parent + offset, 0xDEAD)  # only children are called
         spec = (0x200, len(self.image.code), hashlib.sha256(self.image.code).hexdigest())
         before = bytes(self.image.data)
-        with patch.object(prepare_boot, "GAME_DESCRIPTOR_OBJECT_WALKS", (spec,) * 5):
-            expected = set(range(0x1100, 0x1150, 16))
+        with patch.object(prepare_boot, "GAME_DESCRIPTOR_OBJECT_WALKS", [(*spec, field) for field in fields]):
+            expected = set(range(0x1100, 0x1200, 16))
             self.assertEqual(prepare_boot.game_descriptor_object_roots(self.image), expected)
             self.assertEqual(bytes(self.image.data), before)
             for offset in fields:
@@ -554,8 +556,9 @@ class DescriptorRoots(unittest.TestCase):
             for i in range(16): self.image.write(parent + 0x84 + i * 4, shared)
             with self.assertRaisesRegex(ValueError, "not terminated"):
                 prepare_boot.game_descriptor_object_roots(self.image)
-        for which in range(5):
-            specs = [spec] * 5; specs[which] = (*spec[:2], "0" * 64)
+        for which in range(len(fields)):
+            specs = [(*spec, field) for field in fields]
+            specs[which] = (*spec[:2], "0" * 64, fields[which])
             with patch.object(prepare_boot, "GAME_DESCRIPTOR_OBJECT_WALKS", specs):
                 with self.assertRaisesRegex(ValueError, "fingerprint"):
                     prepare_boot.game_descriptor_object_roots(self.image)
