@@ -45,6 +45,13 @@ int main(void)
     assert(status.fx_submitted_frames >= status.fx_consumed_frames && status.fx_consumed_frames >= XA_GRAIN);
     assert(status.fx_compute_us && status.fx_max_compute_us && status.last_peak_left == 1953 && status.last_peak_right == 1953);
     assert(status.fx_deadline_misses >= 3 && status.fx_empty_after_compute >= 2);
+    uint32_t reverb_parameters[66]={0};
+    /* Concurrent worker ownership is checked before dereferencing foreign
+     * engines. This fixture has no effect9, so it cannot publish a fake ack. */
+    assert(!h2_audio_backend_queue_reverb9((h2_dsp_engine*)(uintptr_t)1,7,reverb_parameters));
+    assert(!h2_audio_backend_queue_reverb9(NULL,7,reverb_parameters));
+    assert(!h2_audio_backend_queue_reverb9(s,7,reverb_parameters));
+    assert(!reverb_pending);
     for (unsigned i = 0; i < 20; ++i) {
         uint32_t state[32]; memset(state, 0x55, sizeof state);
         assert(h2_audio_backend_effect_read(s, 0, 0, state, sizeof state));

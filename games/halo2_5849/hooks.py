@@ -264,6 +264,7 @@ class Halo2AudioUnavailableHooks(Halo2HostChannelHooks):
 
 
 AUDIO_HOST_BOUNDARIES = {
+    0x37BA6F: (511, "7fbe183d305c3622314ae67063fd432e11afcce608562ddc2d364b6ffed91cca"),
     0x37B60D: (42, "44c132bd6ab2aea37ba22efdbf45a52e6553badae5d956d0dcc057e6bb55c2bc"),
     0x37AD25: (119, "7a182f2613dd476b6f5c86e101220a58cc389291b4acf5f4fce67aa9775d3bc4"),
     0x37D835: (87, "51775a4ae6d24d39db3ab4f2b8b66a190acba4bfffeed8f358aa4738dde0fd2e"),
@@ -313,6 +314,24 @@ AUDIO_HOST_BOUNDARIES = {
 # These execute original generated code after a read-only runtime guard. They
 # configure algorithm pointers or invoke the audited common Release header;
 # none of the selected HRTF processing bodies is HLE'd.
+AUDIO_REVERB_ORIGINAL_BOUNDARIES = {
+    0x379D4B: (9, "ae4a39f1f86ea5a10dc0f01ad19c2ede2c9ddf1aed58b048c690bc9f8fdebf83"),
+    0x383167: (78, "d35c455c71b156256dee1f51d47eba2a54645641cbfda856e5f0e3ef06ee1704"),
+    0x3831B5: (142, "2dc7f1b6e32fac60a4b5d4fef08286800f0d1ff51ba1099cf5693cd72766028e"),
+    0x383243: (57, "f81572723928d72033f1c93530a77a7ab1d4d43f0ab1a85260b90cd4554634b5"),
+    0x38327C: (30, "10f033e83f520551f87b3ed1889a6fec501bfe343b0a8df225d9847192b870ae"),
+    0x38329A: (56, "866714e8d1adba1ec0cac3cf84436beed2afda0259cfe7a2314d92c3946dd963"),
+    0x3832D2: (154, "11eac0dd3b81f8239248e530bd67dfee7d1f3d1286f4da45bc17a3b252156292"),
+    0x38336C: (125, "20d2fdb36658d474603f988ea4aca7e486691435e99f8d21d21dcfbdde0a649d"),
+    0x3833E9: (77, "5d23b9cb18e208196c59d122638b199e8bbbd84c83f3a5f08d1b9d5d9f106350"),
+    0x383436: (189, "bd95df87f5b45e9df520438842e0e9ef21f25d7276615b4943bad4d566804a82"),
+    0x38357F: (97, "32c364673a64610131a7e10c00c2a06ba6d09a95a3a1c3425f0cd933fc2441e9"),
+    0x3835E0: (171, "c7376af8264943a26dbe2b354d502e7b134203e31f530fcfbc108ab656ac46cb"),
+    0x3837BA: (234, "c54581e440dd7f2945f857f5fbc5ab78f7eb77ab8932c41e0ef158cc924aa91e"),
+    0x3838A4: (904, "1ce2988d1ca62104653fabb0fdd306ef276f84c7402fe1c2ff94eb69fad4642f"),
+}
+
+
 AUDIO_ORIGINAL_BOUNDARIES = {
     0x37B844: (41, "edd97faddb280cb5fe23b85740d14540772206c0cc5af4f08e0cdb1b9b7931b7"),
     0x379F2A: (22, "0a72b625b8e9e1a301ddf3c84ec304eded77fc8886c86f41f03efd6fa1fac2b5"),
@@ -335,7 +354,7 @@ class Halo2AudioHostHooks(Halo2HostChannelHooks):
     def __init__(self, image):
         super().__init__(image)
         self.image = image
-        for address, (length, digest) in (AUDIO_HOST_BOUNDARIES | AUDIO_ORIGINAL_BOUNDARIES | AUDIO_CALLBACK_BOUNDARIES).items():
+        for address, (length, digest) in (AUDIO_HOST_BOUNDARIES | AUDIO_ORIGINAL_BOUNDARIES | AUDIO_CALLBACK_BOUNDARIES | AUDIO_REVERB_ORIGINAL_BOUNDARIES).items():
             if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
                 raise ValueError(f"Halo 2 audio host boundary mismatch at {address:#x}")
         if (image.u32(0x417124) != 0x37A14F or image.u32(0x417128) != 0x37C70F or

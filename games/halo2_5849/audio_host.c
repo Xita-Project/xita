@@ -8,6 +8,7 @@
 #include "dsp_asset.h"
 static h2_dsp_engine *effects;
 static uint32_t effects_guest, effects_guest_bytes;
+static struct { xctx *context; uint32_t arena; } reverb_conversion;
 #endif
 
 static h2_audio_device_snapshot device;
@@ -1282,6 +1283,71 @@ static void effects_write(xctx *c)
             X_M32(c->r[4]), index, offset, words[0], words[1]);
     result(c, 0, 6);
 }
+static int original_reverb_entry(xctx *c, uint32_t ip)
+{
+    if (!reverb_conversion.context || c!=reverb_conversion.context) return 0;
+    static const uint32_t entries[]={0x379D4B,0x383167,0x3831B5,0x383243,0x38327C,
+        0x38329A,0x3832D2,0x38336C,0x3833E9,0x383436,0x38357F,0x3835E0,0x3837BA,0x3838A4};
+    int found=0;for(unsigned i=0;i<sizeof entries/sizeof *entries;++i)found|=ip==entries[i];
+    uint32_t base=reverb_conversion.arena;
+    if (!found || !base || !mapped(base,4096) || (c->r[4]&3) ||
+        c->r[4]<base+0x800 || c->r[4]>base+0xf00 || c->df ||
+        (ip==0x3838A4 && c->r[1]!=base+0x340))
+        fail(c,ip,"original reverb conversion scope",ip);
+    return 1;
+}
+static void effects_description(xctx *c)
+{
+    const uint32_t ip=0x37BA6F;
+    stack(c,ip,3);live(c,ip,device.base+8,0);buffer_operational(c,ip);
+    uint32_t source=X_ARG(1),words[13],prefix[70];
+    /* Only the observed startup I3DL2 description is admitted. Other effect
+     * types, raw-output requests, dynamic presets and FP modes remain strict. */
+    if (X_M32(c->r[4])!=0x21EE74 || X_ARG(0)!=9 || X_ARG(2) || !effects ||
+        reverb_conversion.context || !mapped(effects_guest,effects_guest_bytes) ||
+        !mapped(source,sizeof words) || overlaps_device(source,sizeof words) ||
+        aliases(source,sizeof words,c->r[4],16) || c->df || c->fsp ||
+        /* Observed 023F has the same control fields as 027F; bit 6 is reserved.
+         * Preserve the caller's word unchanged, including that bit. */
+        (c->fcw!=0x37f && c->fcw!=0x27f && c->fcw!=0x23f) ||
+        (h2_platform_fpscr_read()&0x03f79f00u))
+        fail(c,ip,"unreviewed reverb description/caller/control",source);
+    x_guest_read(words,source,sizeof words);
+    if (words[0]!=12 || words[1]!=(uint32_t)-6400 || words[2]!=(uint32_t)-6400 ||
+        words[3] || words[4]!=0x3f800000 || words[5]!=0x3f800000 ||
+        words[6]!=(uint32_t)-6400 || words[7] || words[8]!=(uint32_t)-6400 ||
+        words[9] || words[10]!=0x42c80000 || words[11]!=0x42c80000 || words[12]!=0x459c4000)
+        fail(c,ip,"unsupported reverb preset",words[0]);
+    if (!h2_audio_backend_effect_read(effects,9,0,prefix,sizeof prefix))
+        fail(c,ip,"reverb current-state read",9);
+    uint32_t base=xk_mem_alloc(4096,4096,0,0,0);
+    if (!base) { result(c,0x8007000e,3);return; }
+    if ((base&4095) || base>UINT32_MAX-4096 || !mapped(base,4096) ||
+        overlaps_device(base,4096) || page_overlap(base,4096,source,sizeof words) ||
+        page_overlap(base,4096,c->r[4],16)) fail(c,ip,"reverb private arena",base);
+    uint8_t zero[4096]={0};x_guest_write(base,zero,sizeof zero);
+    x_guest_write(base,prefix,sizeof prefix);x_guest_write(base+0x300,words,sizeof words);
+    uint32_t frame[3]={0xdead0004,base+0x300,base};x_guest_write(base+0xf00,frame,sizeof frame);
+    xctx converted=*c;converted.r[1]=base+0x340;converted.r[4]=base+0xf00;
+    uint32_t conversion_fp=h2_platform_fpscr_read();
+    reverb_conversion.context=&converted;reverb_conversion.arena=base;
+    xv_call(&converted,0x3838A4);
+    reverb_conversion.context=NULL;reverb_conversion.arena=0;
+    h2_platform_fpscr_write(conversion_fp);
+    uint32_t after[13],parameters[66],flags=X_M32(base+16)|4;
+    x_guest_read(after,base+0x300,sizeof after);x_guest_read(parameters,base+280,sizeof parameters);
+    int intact=converted.r[4]==base+0xf0c && !converted.df && !converted.fsp && converted.fcw==c->fcw &&
+        converted.r[3]==c->r[3] && converted.r[5]==c->r[5] && converted.r[6]==c->r[6] && converted.r[7]==c->r[7] &&
+        X_M32(base+0x340)==base && !memcmp(after,words,sizeof words);
+    for(unsigned a=544;a<0x300;++a)intact&=!X_M8(base+a);
+    for(unsigned a=0x344;a<0x800;++a)intact&=!X_M8(base+a);
+    if (xk_mem_free(base)<0)fail(c,ip,"reverb private arena release",base);
+    if (!intact)fail(c,ip,"original reverb conversion ABI/footprint",9);
+    if (!h2_audio_backend_queue_reverb9(effects,flags,parameters))
+        fail(c,ip,"reverb monitor queue busy/unsupported",9);
+    xv_logf("[h2/reverb] caller=%08X original converter=003838A4 effect=9 flags=%08X parameters=264 bytes command=2 queued; real worker consumption pending\n",X_M32(c->r[4]),flags);
+    result(c,0,3);
+}
 #endif
 #if H2_AUDIO_EFFECTS_UNAVAILABLE
 /* Explicit failure experiment, not an effects implementation. No output,
@@ -1332,6 +1398,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37B797: buffer_rewind(c); break;
     case 0x37B777: buffer_cursor(c); break;
 #if H2_AUDIO_DSP
+    case 0x37BA6F: effects_description(c); break;
     case 0x37AD25: stream_process(c); break;
     case 0x37B86D: effects_download(c); break;
     case 0x37B5E6: effects_query(c); break;
@@ -1417,6 +1484,9 @@ static void original_empty_work(xctx *c, uint32_t ip)
 }
 void h2_audio_guest_entry(xctx *c, uint32_t ip)
 {
+#if H2_AUDIO_DSP
+    if (original_reverb_entry(c,ip)) return;
+#endif
     if (!device.ever_created) return;
     if (ip==0x37B844 || (ip==0x379E9E && !(c->r[4]&3) && mapped(c->r[4],4) && X_M32(c->r[4])==0x37B84A)) {
         uint32_t fpscr=h2_platform_fpscr_read();original_empty_work(c,ip);
@@ -1471,6 +1541,10 @@ static void trace_effect_description(xctx *c)
     uint32_t fp=h2_platform_fpscr_read(), index=X_ARG(0), input=X_ARG(1);
     xv_logf("[h2/effect-description-probe] caller=%08X index=%u description=%08X raw_output=%08X\n",
             X_M32(c->r[4]),index,input,X_ARG(2));
+    xv_logf("[h2/effect-description-probe] fcw=%04X fsp=%u df=%u fpscr=%08X conversion_active=%u effects=%u effects_mapped=%u input_mapped=%u owned_alias=%u frame_alias=%u\n",
+            (unsigned)c->fcw,(unsigned)c->fsp,(unsigned)c->df,fp,
+            reverb_conversion.context!=NULL,effects!=NULL,mapped(effects_guest,effects_guest_bytes),
+            mapped(input,52),overlaps_device(input,52),aliases(input,52,c->r[4],16));
     if (mapped(input,52)) {
         uint32_t words[13];x_guest_read(words,input,sizeof words);
         if (words[0]!=12) { h2_platform_fpscr_write(fp);return; }

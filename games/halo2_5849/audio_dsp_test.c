@@ -71,8 +71,25 @@ void xk_thread_kick(xk_thread *thread) { assert(thread==&test_stream_worker); }
 void xk_sleep_us(uint64_t us) { (void)us;assert(0); }
 static unsigned test_stream_callbacks;
 static uint32_t test_stream_callback_context;
+static unsigned test_reverb_calls,test_reverb_queues,test_reverb_failure,test_reverb_corruption;
+static uint32_t test_reverb_parameters[66],test_reverb_flags;
 void test_stream_invoke(xctx *c,uint32_t routine)
 {
+    if(routine==0x3838a4){
+        uint32_t base=reverb_conversion.arena;
+        assert(reverb_conversion.context==c && base && c->r[4]==base+0xf00);
+        assert(X_M32(c->r[4])==0xdead0004 && X_M32(c->r[4]+4)==base+0x300 && X_M32(c->r[4]+8)==base);
+        const uint32_t entries[]={0x379d4b,0x383167,0x3831b5,0x383243,0x38327c,0x38329a,0x3832d2,
+            0x38336c,0x3833e9,0x383436,0x38357f,0x3835e0,0x3837ba,0x3838a4};
+        for(unsigned i=0;i<sizeof entries/sizeof *entries;++i)h2_audio_guest_entry(c,entries[i]);
+        xctx other=*c;assert(!original_reverb_entry(&other,0x3838a4));
+        for(unsigned i=0;i<66;++i)X_M32(base+280+4*i)=i%2?0xff800001+i:0x123456+i;
+        X_M32(base+0x340)=base;c->r[4]+=12;c->r[0]^=0xabcdef;native_fp^=0x777777;++test_reverb_calls;
+        if(test_reverb_corruption==1)c->r[3]^=1;
+        if(test_reverb_corruption==2)c->r[4]+=4;
+        if(test_reverb_corruption==3)X_M8(base+544)=1;
+        return;
+    }
     assert(routine==0x335d82 && X_M32(c->r[4])==0xdead0003 && X_M32(c->r[4]+4)==test_stream_callback_context &&
         X_M32(c->r[4]+8)==test_stream_callbacks && !X_M32(c->r[4]+12) && X_M8(c->fs_base+0x24)==2);
     ++test_stream_callbacks;c->r[0]^=0xabcdef;c->r[1]^=0x123456;c->r[4]+=16;native_fp^=0x777777;
@@ -109,6 +126,12 @@ int h2_audio_backend_effect_write_pair(h2_dsp_engine *s, unsigned index, unsigne
     assert(s==effects && index>=4 && index<=7 && offset==32);
     if(dsp_write_failure || ((first|second)&0xff000000u))return 0;
     ++dsp_writes;dsp_written[index-4][0]=first;dsp_written[index-4][1]=second;return 1;
+}
+int h2_audio_backend_queue_reverb9(h2_dsp_engine *s,uint32_t flags,const uint32_t parameters[66])
+{
+    assert(s==effects&&!reverb_conversion.context&&!reverb_conversion.arena);
+    if(test_reverb_failure)return 0;
+    ++test_reverb_queues;test_reverb_flags=flags;memcpy(test_reverb_parameters,parameters,sizeof test_reverb_parameters);return 1;
 }
 h2_dsp_engine*h2_dsp_asset_open(const char*path,h2_dsp_status*status)
 {
@@ -154,6 +177,90 @@ static xctx write_context(uint32_t dev,unsigned index)
     xctx c=context(dev,index,32,0x6ffe);X_M32(c.r[4])=callers[index-4];
     X_M32(c.r[4]+20)=8;X_M32(c.r[4]+24)=0;return c;
 }
+static xctx reverb_context(void)
+{
+    const uint32_t desc[13]={12,(uint32_t)-6400,(uint32_t)-6400,0,0x3f800000,0x3f800000,
+        (uint32_t)-6400,0,(uint32_t)-6400,0,0x42c80000,0x42c80000,0x459c4000};
+    x_guest_write(0x6ffe,desc,sizeof desc);xctx c=context(9,0x6ffe,0,0);X_M32(c.r[4])=0x21ee74;
+    c.df=c.fsp=0;c.fcw=0x37f;c.fsw=0;native_fp=0xa0000011;return c;
+}
+static void reverb_expect_stop(xctx *c, uint32_t ip, int original)
+{
+    if (!setjmp(stopped)) {
+        if (original) h2_audio_guest_entry(c, ip);
+        else h2_audio_host_call(c, ip);
+        assert(0);
+    }
+}
+static void reverb_adapter_tests(void)
+{
+    description_probe_enabled=1;
+    for(unsigned mode=0;mode<3;++mode){
+        xctx c=reverb_context();c.fcw=(uint16_t[]){0x37f,0x27f,0x23f}[mode];
+        unsigned a=allocs,f=frees,q=test_reverb_queues,n=test_reverb_calls;
+        uint8_t input[52],after[52];x_guest_read(input,0x6ffe,52);
+        call(&c,0x37ba6f,0,3);assert(allocs==a+1&&frees==f+1&&test_reverb_queues==q+1&&test_reverb_calls==n+1);
+        assert(test_reverb_flags==0x10004&&!reverb_conversion.context&&!reverb_conversion.arena);
+        for(unsigned i=0;i<66;++i)assert(test_reverb_parameters[i]==(i%2?0xff800001u+i:0x123456u+i));
+        x_guest_read(after,0x6ffe,52);assert(!memcmp(input,after,52));
+    }
+    for(unsigned field=0;field<13;++field){
+        xctx c=reverb_context();uint32_t words[13];x_guest_read(words,0x6ffe,sizeof words);words[field]^=1;x_guest_write(0x6ffe,words,sizeof words);
+        dsp_reject(&c,0x37ba6f);
+    }
+    for(unsigned bad=0;bad<10;++bad){
+        xctx c=reverb_context();
+        switch(bad){
+        case 0:X_M32(c.r[4])^=4;break;
+        case 1:X_M32(c.r[4]+4)=10;break;
+        case 2:X_M32(c.r[4]+12)=0x6000;break;
+        case 3:X_M32(c.r[4]+8)=0xfffffff0;break;
+        case 4:X_M32(c.r[4]+8)=effects_guest;break;
+        case 5:X_M32(c.r[4]+8)=c.r[4];break;
+        case 6:c.df=1;break;
+        case 7:c.fsp=1;break;
+        case 8:c.fcw=0x7f;break;
+        case 9:native_fp|=0x1000000;break;
+        }
+        dsp_reject(&c,0x37ba6f);
+    }
+    for(unsigned bit=0;bit<32;++bit)if(0x03f79f00u&(1u<<bit)){
+        xctx c=reverb_context();native_fp|=1u<<bit;dsp_reject(&c,0x37ba6f);
+    }
+    xctx c=reverb_context();allocation_failure=1;unsigned a=allocs,f=frees,q=test_reverb_queues;
+    call(&c,0x37ba6f,0x8007000e,3);assert(allocs==a+1&&frees==f&&test_reverb_queues==q);allocation_failure=0;
+    c=reverb_context();xctx saved=c;uint32_t fp=native_fp;h2_audio_device_snapshot owner=device;
+    a=allocs;f=frees;test_reverb_failure=1;
+    reverb_expect_stop(&c,0x37ba6f,0);
+    assert(!memcmp(&c,&saved,sizeof c)&&!memcmp(&owner,&device,sizeof owner)&&fp==native_fp);
+    assert(allocs==a+1&&frees==f+1&&test_reverb_queues==q&&!reverb_conversion.context&&!reverb_conversion.arena);
+    test_reverb_failure=0;
+    for(unsigned damage=1;damage<=3;++damage){
+        c=reverb_context();saved=c;fp=native_fp;a=allocs;f=frees;test_reverb_corruption=damage;
+        reverb_expect_stop(&c,0x37ba6f,0);
+        assert(!memcmp(&c,&saved,sizeof c)&&!memcmp(&owner,&device,sizeof owner)&&fp==native_fp);
+        assert(allocs==a+1&&frees==f+1&&test_reverb_queues==q&&!reverb_conversion.context&&!reverb_conversion.arena);
+    }
+    test_reverb_corruption=description_probe_enabled=0;
+    uint32_t base=xk_mem_alloc(4096,4096,0,0,0);assert(base);
+    for(unsigned bad=0;bad<7;++bad){
+        c=reverb_context();c.r[1]=base+0x340;c.r[4]=base+0xf00;uint32_t ip=0x3838a4;
+        reverb_conversion.context=&c;reverb_conversion.arena=base;
+        switch(bad){
+        case 0:ip=0x37ba6f;break;
+        case 1:reverb_conversion.arena=0;break;
+        case 2:c.r[4]=base+0x7fc;break;
+        case 3:c.r[4]=base+0xf04;break;
+        case 4:c.r[4]|=1;break;
+        case 5:c.df=1;break;
+        case 6:c.r[1]^=4;break;
+        }
+        saved=c;fp=native_fp;
+        reverb_expect_stop(&c,ip,1);
+        assert(!memcmp(&c,&saved,sizeof c)&&fp==native_fp);
+    }
+    reverb_conversion.context=NULL;reverb_conversion.arena=0;assert(xk_mem_free(base)==0);
+}
 #ifndef H2_AUDIO_DSP_TEST_MAIN
 #define H2_AUDIO_DSP_TEST_MAIN main
 #endif
@@ -192,23 +299,25 @@ int H2_AUDIO_DSP_TEST_MAIN(void)
     /* Terminal description capture preserves caller, guest memory and DSP
      * ownership; invalid mappings/types never ask the provider to read. */
     uint8_t *probe_ram=malloc(0x200000);assert(probe_ram);
-    for (unsigned scenario=0;scenario<7;++scenario) {
+    for (unsigned scenario=0;scenario<8;++scenario) {
         c=context(9,0x6ffe,0,0);X_M32(c.r[4])=0x21ee74;
         uint32_t desc[13]={scenario==1?4:12};x_guest_write(0x6ffe,desc,sizeof desc);
         if(scenario==2)X_M32(c.r[4]+8)=0xfffffff0;
         if(scenario==3)c.r[4]|=1;
         if(scenario==4)X_M32(c.r[4]+4)=15;
         if(scenario==5)g_xpt[7]=0x1ff000;
+        if(scenario==7){c.fcw=0x7f;c.fsp=3;c.df=1;native_fp=0x100009f;}
         description_probe_enabled=scenario!=6;
         xctx saved=c;h2_audio_device_snapshot owner=device;
         memcpy(probe_ram,g_xram,0x200000);unsigned writes=dsp_writes,reads=description_probe_read;
         uint32_t fp=native_fp;trace_effect_description(&c);
         assert(!memcmp(&c,&saved,sizeof c)&&!memcmp(&owner,&device,sizeof owner));
         assert(!memcmp(probe_ram,g_xram,0x200000)&&fp==native_fp&&writes==dsp_writes);
-        assert(description_probe_read==reads+(scenario==0));
+        assert(description_probe_read==reads+(scenario==0||scenario==7));
         g_xpt[7]=0x8000;
     }
     description_probe_enabled=0;free(probe_ram);
+    reverb_adapter_tests();
     for(unsigned index=0;index<15;index++){
         c=query_context(dev,index,7,60);call(&c,0x37B5E6,0,5);
         uint8_t actual[60];x_guest_read(actual,0x8ffe,sizeof actual);
