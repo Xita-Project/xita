@@ -25,7 +25,14 @@ Vita3K pass. Physical profiling measures 11.4 ms/frame comparing indexed
 vertices and 7.0 ms creating snapshots in one fixed campaign view.
 The [large snapshot worker experiment](docs/snapshot-worker-20260914.md) now
 shares bounded initial copies with idle core 0 and joins before guest execution
-resumes. Host memory/race checks pass; hardware timing remains pending.
+resumes. Host memory/race checks pass.
+
+The completed physical snapshot comparisons show no pooled gain: polling was
+0.91 ms/frame slower, and event notification was 0.84 ms/frame slower in the
+tested cryo-room comparisons. Shared snapshots stay off. The next larger target
+is [character pose and scene preparation](docs/pose-job-boundary-20260914.md).
+The new [bounded remote phase capture](docs/guest-phase-timing-20260912.md#bounded-remote-capture-september-14-follow-up)
+passes host accounting, controller and HTTP checks; native validation is underway.
 
 [~] September 14 [campaign results and next steps](docs/performance-next-steps-20260914.md):
 indexed vertex validation saved 13.9 ms/frame across three cryo-room comparisons,
