@@ -104,6 +104,19 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_BOUNDS_DELEGATE_CALLS = (
+    (0x30DF80, 442, "567b689b1b79b30997baf3646506b2faab56711b377f84cc2668d0158a8a810b"),
+    (0x1C3B70, 388, "8c450ec47a3b70909a1eabf9e93fe09e2760777468e75ff74f629d294dcaa436"),
+    (0x1C3B20, 68, "dfa6788a5447e2b633799c6029ec87195413ca443b8d8c7327654b8fd9c42783"),
+    (0x1EED40, 671, "9005cfa1a0f4e793dacb0bf2795d7e15b9d5726df5fb3b95ed22ce7a323f27b5"),
+    (0x2DF760, 99, "16578349618bab1e1a68786c10a127336141094263bfdd749113b9de472ca065"),
+    (0x246C60, 108, "f3da8c81b2bb6709ab458c4e992d8c79690820a8e3aa921d0fa6a82179359dc1"),
+    (0x2DF5D0, 8, "13ac41bffee8722e85524ce52fc5b9a5bbca8b11c8b496f7b5caefd0179e53fd"),
+    (0x1EF040, 34, "d5d178b3111f222cc4f0e76fdcd39bf074f8d70eb6b1cd1c6b62ddeb4cea83dd"),
+    (0x3728C0, 378, "b7c25a0fe7b69cda2e84c1d0505a4a9cf787135741f36f5ed16f26247a72cf5e"),
+    (0x30DAD0, 197, "a06ab388df6b9f65a98e8678a1b71f4021f8eb76255600095e6a2d48954099cb"),
+    (0x30DBA0, 141, "01830a5ab12d23fb524f3811d316a8a1d2cba22bea005d9e9b549e419c49b22c"),
+)
 GAME_POOL_ALLOCATION_CALLS = (
     (0x146A20, 146, "75f53bc57da723bcf62196fb9e3e3632d6a1c4dc842d5caf8e46fbe79dc34b73"),
     (0x22C3E0, 829, "318c0599b038ccfd47aa02d8256054f2b19eadb31f55eff15e19975a37328bc0"),
@@ -554,6 +567,22 @@ def descriptor_child_field_roots(image, offsets):
                 roots.add(target)
         else:
             raise ValueError("Halo 2 descriptor child array is not terminated before its link")
+    return roots
+
+
+def game_bounds_delegate_roots(image):
+    """Native172: constructor-bound bounds chains and temporary pair listeners."""
+    for address, length, digest in GAME_BOUNDS_DELEGATE_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 bounds delegate fingerprint mismatch")
+    roots = set()
+    for slot in (0x455558, 0x456178, 0x455F70, 0x456110, 0x4561AC,
+                 0x4138F4, 0x4138F8):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 bounds delegate target is not title code")
+        roots.add(target)
     return roots
 
 
@@ -1016,6 +1045,7 @@ def main():
         roots.update(game_owner_field_release_roots(image))
         roots.update(game_predicate_replacement_roots(image))
         roots.update(game_pool_allocation_roots(image))
+        roots.update(game_bounds_delegate_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).

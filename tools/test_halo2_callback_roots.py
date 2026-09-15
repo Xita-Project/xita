@@ -30,6 +30,38 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_bounds_delegate_chains_and_temporary_pair_listeners(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x455558: 0x1000, 0x456178: 0x1000, 0x455F70: 0x1000,
+                         0x456110: 0x1010, 0x4561AC: 0x1010,
+                         0x4138F4: 0x1020, 0x4138F8: 0x1030}
+        slots = tuple(image.targets)
+        for neighbor in (0x455554, 0x45555C, 0x45617C, 0x455F74,
+                         0x456114, 0x4561B0, 0x4138F0, 0x4138FC):
+            image.targets[neighbor] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_BOUNDS_DELEGATE_CALLS)
+        with patch.object(prepare_boot, "GAME_BOUNDS_DELEGATE_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_bounds_delegate_roots(image),
+                             {0x1000, 0x1010, 0x1020, 0x1030})
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_bounds_delegate_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_bounds_delegate_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_BOUNDS_DELEGATE_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_bounds_delegate_roots(image)
+
     def test_original_pool_allocation_and_free_targets(self):
         image = SyntheticImage(); image.section_name = ".text"
         slots = (0x457630, 0x457634, 0x461DDC)
