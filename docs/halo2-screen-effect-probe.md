@@ -81,8 +81,8 @@ SceShaccCg compiles the translated vertex program to 596 bytes, effect fragment
 to 1,316 bytes and staging-copy fragment to 344 bytes, with zero failures.
 The effect produces only unused-temporary warnings. The eight GPU fixtures
 compare 2,457,600 pixels against independent normalized BC2, dot-product,
-combiner and blend equations. The captured-input effect and direct original
-texture sample match exactly; other fixtures differ by at most one UNORM8
+combiner and blend equations. The captured-program/vertex/texture effect fixture uses a synthetic zero
+destination; it and the direct original texture sample match exactly; other fixtures differ by at most one UNORM8
 level per channel. Opposite winding results are byte-identical. Fixtures cover
 ARGB gradients, both dependent coordinates, compressed block placement, all
 alpha nibbles, endpoint order, selectors and a nonzero checkerboard destination.

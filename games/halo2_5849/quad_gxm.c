@@ -1,5 +1,6 @@
 /* H2-only private RGB staging backend for the pinned movie-quad contract. */
 #include "quad_gxm.h"
+#include "dxt23_layout.h"
 #include <psp2/gxm.h>
 #include <psp2/kernel/sysmem.h>
 #include <stdio.h>
@@ -40,6 +41,7 @@ static const SceGxmProgramParameter *parameter(const SceGxmProgram *p,const char
 }
 
 static SceGxmContext *ctx;
+static SceGxmShaderPatcher *patcher;
 static SceGxmRenderTarget *rt;
 static SceGxmColorSurface color;
 static SceGxmDepthStencilSurface depth;
@@ -83,7 +85,7 @@ static int initialize(void)
     pp.vertexUsseMemSize=256*1024;pp.vertexUsseMem=alloc(pp.vertexUsseMemSize,1,&pp.vertexUsseOffset);
     pp.fragmentUsseMemSize=256*1024;pp.fragmentUsseMem=alloc(pp.fragmentUsseMemSize,2,&pp.fragmentUsseOffset);
     REQUIRE(pp.bufferMem && pp.vertexUsseMem && pp.fragmentUsseMem);
-    SceGxmShaderPatcher *patcher=NULL;CHECK(sceGxmShaderPatcherCreate(&pp,&patcher));
+    patcher=NULL;CHECK(sceGxmShaderPatcherCreate(&pp,&patcher));
     const SceGxmProgram *vp=load("app0:quad.vert.gxp",1112),*fp=load("app0:quad.frag.gxp",400);
     REQUIRE(vp && fp);
     SceGxmShaderPatcherId vid,fid;CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
@@ -181,3 +183,112 @@ const uint32_t *h2_quad_gxm_render(void *opaque, const h2_quad_request *request)
     trace_pixels(request);
     return target;
 }
+
+#if H2_SCREEN_RENDER
+/* Shares the existing H2 GXM context, target, mask and patcher. Each draw binds
+ * all its own state. No second GXM initialization or CE renderer dependency. */
+static h2_screen_contract screen_contract;
+static SceGxmVertexProgram *screen_vprog;
+static SceGxmFragmentProgram *screen_fprog, *screen_copyprog;
+static const SceGxmProgramParameter *screen_factors;
+static SceGxmTexture screen_tex[2], screen_copytex;
+static uint32_t *screen_texture, *screen_destination;
+static uint8_t *screen_blocks;
+static unsigned screen_samplers[2], screen_copy_sampler;
+static int screen_attempted, screen_ready;
+
+const h2_screen_contract *h2_screen_gxm_contract(void)
+{
+    static int loaded;
+    if(loaded)return &screen_contract;
+    FILE *file=fopen("app0:screen.contract.bin","rb");if(!file)return NULL;
+    uint32_t header[2];
+    int ok=fread(header,1,8,file)==8&&header[0]==0x43533248&&header[1]==2&&
+        fread(&screen_contract,1,sizeof screen_contract,file)==sizeof screen_contract&&
+        fgetc(file)==EOF&&!ferror(file);
+    if(fclose(file))ok=0;
+    if(!ok){memset(&screen_contract,0,sizeof screen_contract);xv_logf("[h2/screen] invalid private contract\n");return NULL;}
+    loaded=1;return &screen_contract;
+}
+static int screen_initialize(void)
+{
+    const SceGxmProgram *vp=load("app0:screen.vert.gxp",596),*fp=load("app0:screen.frag.gxp",1316),
+        *copy=load("app0:screen.copy.frag.gxp",344);
+    REQUIRE(vp&&fp&&copy);
+    SceGxmShaderPatcherId vid,fid,cid;
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,copy,&cid));
+    const char *names[]={"IN.position","IN.blendweight","IN.normal","IN.color0","IN.color1","IN.fog","IN.psize"};
+    SceGxmVertexAttribute attr[7]={{0}};
+    for(unsigned i=0;i<7;++i){
+        const SceGxmProgramParameter *p=parameter(vp,names[i]);REQUIRE(p);
+        attr[i].offset=i*16;attr[i].format=SCE_GXM_ATTRIBUTE_FORMAT_F32;attr[i].componentCount=4;
+        attr[i].regIndex=sceGxmProgramParameterGetResourceIndex(p);
+    }
+    SceGxmVertexStream stream={.stride=112,.indexSource=SCE_GXM_INDEX_SOURCE_INDEX_16BIT};
+    CHECK(sceGxmShaderPatcherCreateVertexProgram(patcher,vid,attr,7,&stream,1,&screen_vprog));
+    SceGxmBlendInfo blend={.colorMask=SCE_GXM_COLOR_MASK_R|SCE_GXM_COLOR_MASK_G|SCE_GXM_COLOR_MASK_B|SCE_GXM_COLOR_MASK_A,
+        .colorFunc=SCE_GXM_BLEND_FUNC_ADD,.alphaFunc=SCE_GXM_BLEND_FUNC_ADD,
+        .colorSrc=SCE_GXM_BLEND_FACTOR_ONE,.colorDst=SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaSrc=SCE_GXM_BLEND_FACTOR_ZERO,.alphaDst=SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA};
+    CHECK(sceGxmShaderPatcherCreateFragmentProgram(patcher,fid,SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,SCE_GXM_MULTISAMPLE_NONE,&blend,vp,&screen_fprog));
+    CHECK(sceGxmShaderPatcherCreateFragmentProgram(patcher,cid,SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,SCE_GXM_MULTISAMPLE_NONE,NULL,vp,&screen_copyprog));
+    screen_factors=parameter(fp,"psc");REQUIRE(screen_factors&&sceGxmProgramParameterGetArraySize(screen_factors)==18);
+    const SceGxmProgramParameter *p0=parameter(fp,"tex0"),*p2=parameter(fp,"tex2"),*pc=parameter(copy,"copy_source");
+    REQUIRE(p0&&p2&&pc);
+    screen_samplers[0]=sceGxmProgramParameterGetResourceIndex(p0);screen_samplers[1]=sceGxmProgramParameterGetResourceIndex(p2);
+    screen_copy_sampler=sceGxmProgramParameterGetResourceIndex(pc);
+    REQUIRE(screen_samplers[0]<4&&screen_samplers[1]<4&&screen_samplers[0]!=screen_samplers[1]&&screen_copy_sampler<4);
+    screen_texture=alloc(640*480*4,0,NULL);screen_destination=alloc(640*480*4,0,NULL);screen_blocks=alloc(4096,0,NULL);
+    REQUIRE(screen_texture&&screen_destination&&screen_blocks);
+    CHECK(sceGxmTextureInitLinear(&screen_tex[0],screen_texture,SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,640,480,1));
+    CHECK(sceGxmTextureInitSwizzled(&screen_tex[1],screen_blocks,SCE_GXM_TEXTURE_FORMAT_UBC2_ABGR,8,8,1));
+    CHECK(sceGxmTextureInitLinear(&screen_copytex,screen_destination,SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,640,480,1));
+    for(unsigned i=0;i<3;++i){
+        SceGxmTexture *t=i==2?&screen_copytex:&screen_tex[i];
+        CHECK(sceGxmTextureSetMinFilter(t,i==1?SCE_GXM_TEXTURE_FILTER_LINEAR:SCE_GXM_TEXTURE_FILTER_POINT));
+        CHECK(sceGxmTextureSetMagFilter(t,i==1?SCE_GXM_TEXTURE_FILTER_LINEAR:SCE_GXM_TEXTURE_FILTER_POINT));
+        CHECK(sceGxmTextureSetUAddrMode(t,SCE_GXM_TEXTURE_ADDR_CLAMP));CHECK(sceGxmTextureSetVAddrMode(t,SCE_GXM_TEXTURE_ADDR_CLAMP));
+    }
+    xv_logf("[h2/screen] initialized validated screen-effect shader/staging on existing H2 GXM context\n");
+    return 1;
+}
+const uint32_t *h2_screen_gxm_render(void *opaque, const h2_screen_request *request)
+{
+    (void)opaque;
+    if(!request||!request->destination||!request->texture0.pixels||request->texture0.bytes!=640*480*4||
+        !request->texture2.blocks||request->texture2.bytes!=64)return NULL;
+    if(!attempted){attempted=1;ready=initialize();}if(!ready)return NULL;
+    if(!screen_attempted){screen_attempted=1;screen_ready=screen_initialize();}if(!screen_ready)return NULL;
+    memcpy(vertices,request->vertices,sizeof request->vertices);
+    memcpy(screen_texture,request->texture0.pixels,640*480*4);
+    memcpy(screen_destination,request->destination,640*480*4);
+    REQUIRE(h2_dxt23_gxm_8x8(request->texture2.blocks,64,screen_blocks,64));
+    CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,&depth));
+    sceGxmSetViewportEnable(ctx,SCE_GXM_VIEWPORT_ENABLED);sceGxmSetRegionClip(ctx,SCE_GXM_REGION_CLIP_NONE,0,0,639,479);
+    sceGxmSetViewport(ctx,320,320,240,-240,0.0f,1.0f);sceGxmSetCullMode(ctx,SCE_GXM_CULL_NONE);
+    sceGxmSetFrontFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);sceGxmSetBackFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
+    sceGxmSetFrontStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetBackStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetFrontDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);sceGxmSetBackDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);sceGxmSetBackDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);
+    sceGxmSetVertexProgram(ctx,screen_vprog);sceGxmSetFragmentProgram(ctx,screen_copyprog);
+    CHECK(sceGxmSetVertexStream(ctx,0,vertices));CHECK(sceGxmSetFragmentTexture(ctx,screen_copy_sampler,&screen_copytex));
+    CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,indices,6));
+    sceGxmSetFragmentProgram(ctx,screen_fprog);
+    void *fu;CHECK(sceGxmReserveFragmentDefaultUniformBuffer(ctx,&fu));
+    CHECK(sceGxmSetUniformDataF(fu,screen_factors,0,72,(const float *)request->factors));
+    for(unsigned i=0;i<2;++i)CHECK(sceGxmSetFragmentTexture(ctx,screen_samplers[i],&screen_tex[i]));
+    CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,indices,6));
+    SceGxmNotification done={sceGxmGetNotificationRegion(),++notification};REQUIRE(done.address);
+    CHECK(sceGxmEndScene(ctx,NULL,&done));CHECK(sceGxmNotificationWait(&done));sceGxmFinish(ctx);
+    static unsigned count;
+    if(++count<=4){
+        unsigned nonblack=0;for(unsigned i=0;i<640*480;++i)nonblack+=(target[i]&0xFFFFFF)!=0;
+        xv_logf("[h2/screen] staged=%u original_texture0=%08X texture2=%08X nonblack=%u first=%08X; not yet committed/presented\n",
+                count,request->texture0.physical,request->texture2.physical,nonblack,target[0]);
+    }
+    return target;
+}
+#endif

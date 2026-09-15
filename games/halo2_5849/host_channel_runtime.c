@@ -40,14 +40,33 @@ extern volatile uint32_t xv_cur_fn;
 extern uint32_t xk_mem_arena_size(void);
 #if H2_QUAD_RENDER
 static h2_quad_draw movie_quad;
+#if H2_SCREEN_RENDER
+static h2_screen_draw screen_quad;
+#endif
 static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
                             uint32_t value, uint32_t source)
 {
     (void)opaque;
-    if (!movie_quad.active && method != 0x17FC) return -1;
+    int screen_active = 0;
+#if H2_SCREEN_RENDER
+    screen_active = screen_quad.active;
+#endif
+    if (!movie_quad.active && !screen_active && method != 0x17FC) return -1;
     uint32_t fpscr = h2_platform_fpscr_read();
     uint64_t before = movie_quad.completed;
-    int result = h2_quad_method(&movie_quad, &channel.commands, &channel.clear, sub, method, value);
+    int movie_active = movie_quad.active;
+    int result = screen_active ? 0 : h2_quad_method(&movie_quad, &channel.commands, &channel.clear, sub, method, value);
+#if H2_SCREEN_RENDER
+    if (screen_active || (!movie_active && !result)) {
+        uint64_t screen_before = screen_quad.completed;
+        result = h2_screen_method(&screen_quad, &channel.commands, &channel.clear, sub, method, value);
+        if (screen_before != screen_quad.completed)
+            xv_logf("[h2/screen] completed=%u original_vertices=4 source=%08X color=%08X RGBA committed; not yet presented\n",
+                    (unsigned)screen_quad.completed, source, channel.clear.color_offset);
+    }
+#else
+    (void)movie_active;
+#endif
     if (movie_quad.completed != before && (movie_quad.completed <= 4 || !(movie_quad.completed % 60)))
         xv_logf("[h2/quad] completed=%u original_vertices=4 source=%08X color=%08X texture=%08X RGB committed; not yet presented\n",
                 (unsigned)movie_quad.completed, source, channel.clear.color_offset,
@@ -256,6 +275,11 @@ void h2_host_channel_configure(xctx *c)
     memset(&movie_quad, 0, sizeof movie_quad);
     uint32_t contract_fpscr = h2_platform_fpscr_read();
     movie_quad.contract = h2_quad_gxm_contract();
+#if H2_SCREEN_RENDER
+    memset(&screen_quad, 0, sizeof screen_quad);
+    screen_quad.contract = h2_screen_gxm_contract();
+    screen_quad.render = h2_screen_gxm_render;
+#endif
     h2_platform_fpscr_write(contract_fpscr);
     movie_quad.render = h2_quad_gxm_render;
     channel.geometry_method = geometry_method;

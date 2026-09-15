@@ -178,6 +178,8 @@ def prepare(xbe, snapshot, out, push=None, texture=None):
         raise ValueError("probe requires both push and texture captures")
     if push is not None:
         artifacts.update(probe_inputs(push, texture))
+        artifacts["screen.contract.bin"] = (struct.pack("<II", 0x43533248, 2) +
+            artifacts["screen.contract.bin"][8:] + artifacts["screen.vertices.bin"])
     out.mkdir(parents=True, exist_ok=True)
     for name, data in artifacts.items():
         (out / name).write_bytes(data)
