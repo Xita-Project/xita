@@ -23,6 +23,7 @@ def synthetic(test,unit):
 
 def compare(prepared,results,sample_results=None,encoding=None):
     vertices=np.fromfile(prepared/'blur.vertices.bin',dtype='<f4').reshape(4,7,4).astype(float)
+    variants=np.fromfile(prepared/'blur.variants.bin',dtype='<f4').reshape(4,4,7,4).astype(float)
     constants=np.fromfile(prepared/'blur.constants.bin',dtype='<f4').reshape(18,4).astype(float)
     image=rgba((prepared/'blur.texture.bin').read_bytes(),160,120)
     expected_positions=np.array([[0,0],[0,480],[640,480],[640,0]])
@@ -30,12 +31,12 @@ def compare(prepared,results,sample_results=None,encoding=None):
     if not np.all(vertices[:,0,3]==vertices[0,0,3])or vertices[0,0,3]<=0:raise ValueError('nonconstant positive W required')
     if not np.all(vertices[:,1:5,3]==1):raise ValueError('unsupported projected coordinates')
     y,x=np.indices((120,160));reports=[]
-    for test in range(8):
+    for test in range(11):
         average=0
         for unit in range(4):
             # Keep the original 640x480 window quad; only its visible 160x120
             # portion is rasterized. A smaller replacement quad is incorrect.
-            attr=vertices[:,unit+1];u=attr[0,0]+(x+.5)*(attr[3,0]-attr[0,0])/640
+            attr=(variants[test-7]if test>=8 else vertices)[:,unit+1];u=attr[0,0]+(x+.5)*(attr[3,0]-attr[0,0])/640
             v=attr[0,1]+(y+.5)*(attr[1,1]-attr[0,1])/480
             if test==5:u=u+.5;v=v+.25
             average=average+sample(image if test==0 else synthetic(test,unit),u/160,v/120)/4
@@ -55,7 +56,7 @@ def compare(prepared,results,sample_results=None,encoding=None):
             first_expected=wanted[0,0].tolist(),first_actual=actual[0,0].tolist()))
     winding=(results/'blur-probe-3.bin').read_bytes()==(results/'blur-probe-4.bin').read_bytes()
     isolation=isolate(prepared,results,sample_results,encoding) if sample_results is not None else None
-    return dict(passed=bool(winding and isolation and isolation['passed'] and all(not r['outside_bound'] for r in reports)),pixels=8*160*120,
+    return dict(passed=bool(winding and isolation and isolation['passed'] and all(not r['outside_bound'] for r in reports)),pixels=11*160*120,
                 sample_isolation=isolation,
                 opposite_winding_identical=winding,fixtures=reports,
                 inputs={f.name:hashlib.sha256(f.read_bytes()).hexdigest()for f in prepared.glob('*.bin')})
@@ -72,16 +73,17 @@ def decode_sampler(raw,encoding):
 def isolate(prepared,results,sample_results,encoding):
     if encoding not in ('half','vita3k-unorm16'):raise ValueError('explicit RGBA16 readback encoding required')
     vertices=np.fromfile(prepared/'blur.vertices.bin',dtype='<f4').reshape(4,7,4).astype(float)
+    variants=np.fromfile(prepared/'blur.variants.bin',dtype='<f4').reshape(4,4,7,4).astype(float)
     constants=np.fromfile(prepared/'blur.constants.bin',dtype='<f4').reshape(18,4).astype(float)
     image=rgba((prepared/'blur.texture.bin').read_bytes(),160,120)
     y,x=np.indices((120,160));samplers=[];combiners=[]
-    for test in range(8):
+    for test in range(11):
         measured=[]
         for unit in range(4):
             raw=(sample_results/f'blur-probe-sample-{test}-{unit}.rgba16').read_bytes()
             actual=decode_sampler(raw,encoding)
             measured.append(actual)
-            attr=vertices[:,unit+1];u=attr[0,0]+(x+.5)*(attr[3,0]-attr[0,0])/640
+            attr=(variants[test-7]if test>=8 else vertices)[:,unit+1];u=attr[0,0]+(x+.5)*(attr[3,0]-attr[0,0])/640
             v=attr[0,1]+(y+.5)*(attr[1,1]-attr[0,1])/480
             if test==5:u+=.5;v+=.25
             expected=sample(image if test==0 else synthetic(test,unit),u/160,v/120)

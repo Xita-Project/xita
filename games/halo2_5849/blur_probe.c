@@ -70,6 +70,7 @@ int main(void)
     unsigned samplers[4],used=0;
     for(unsigned i=0;i<4;++i){char name[16];snprintf(name,sizeof name,"tex%u",i);samplers[i]=sceGxmProgramParameterGetResourceIndex(parameter(fp,name));REQUIRE(samplers[i]<4&&!(used&(1u<<samplers[i])));used|=1u<<samplers[i];}
     float *constants=load("app0:blur.constants.bin",72*4),*original_vertices=load("app0:blur.vertices.bin",4*112);
+    float *variants=load("app0:blur.variants.bin",4*4*112);
     uint32_t *original_texture=load("app0:blur.texture.bin",160*120*4);
     float *vertices=alloc(4096,0,NULL);uint16_t *indices=alloc(4096,0,NULL);
     const uint16_t front[]={0,1,2,0,2,3},back[]={0,2,1,0,3,2};
@@ -83,8 +84,8 @@ int main(void)
     SceGxmDepthStencilSurface depth;void *depth_data=alloc(160*128*4,0,NULL);
     CHECK(sceGxmDepthStencilSurfaceInit(&depth,SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24,SCE_GXM_DEPTH_STENCIL_SURFACE_TILED,160,depth_data,NULL));
     SceGxmColorSurface color;CHECK(sceGxmColorSurfaceInit(&color,H2_BLUR_FLOAT_SAMPLE?SCE_GXM_COLOR_FORMAT_F16F16F16F16_ABGR:SCE_GXM_COLOR_FORMAT_A8R8G8B8,SCE_GXM_COLOR_SURFACE_LINEAR,SCE_GXM_COLOR_SURFACE_SCALE_NONE,H2_BLUR_FLOAT_SAMPLE?SCE_GXM_OUTPUT_REGISTER_SIZE_64BIT:SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT,160,120,160,target));
-    for(unsigned test=0;test<8;++test){
-        memcpy(vertices,original_vertices,4*112);memcpy(indices,test==4?back:front,sizeof front);
+    for(unsigned test=0;test<11;++test){
+        memcpy(vertices,test>=8?variants+(test-7)*112:original_vertices,4*112);memcpy(indices,test==4?back:front,sizeof front);
         float factors[72];memcpy(factors,constants,sizeof factors);
         if(test==5)for(unsigned v=0;v<4;++v)for(unsigned a=1;a<=4;++a){vertices[v*28+a*4]+=.5f;vertices[v*28+a*4+1]+=.25f;}
         if(test==6)factors[10*4+3]=.125f;
@@ -130,6 +131,6 @@ int main(void)
             sceClibPrintf("[blur-probe] test=%u nonblack=%u first=%08X last=%08X\n",test,nonblack,target[0],target[160*120-1]);}
         }
     }
-    sceClibPrintf("[blur-probe] complete; eight captured/synthetic fixtures, no guest draw or menu\n");
+    sceClibPrintf("[blur-probe] complete; eleven captured/synthetic fixtures, no guest draw or menu\n");
     sceKernelExitProcess(0);return 0;
 }

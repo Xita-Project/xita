@@ -44,7 +44,7 @@ with the same retained setup/validity and program; only its four sampled
 addresses change to the just-completed output. That captured input contains
 exactly 76,800 zero bytes. The consumer then rejects method `1A40` at
 `03B7D2E0`, value `3F200000` (0.625), because its contract currently authorizes
-only the first pass's0.5 offset. The active primitive retains ownership of the
+only the first pass's 0.5 offset. The active primitive retains ownership of the
 rejection. PUT remains `03B80158`, EIP `003FAC58`.
 
 The Microsoft Game Studios intro was visually checked again. The diagnostic
@@ -54,7 +54,7 @@ last actual presented game buffer remains black frame135, SHA256
 **The original main menu has not appeared.** Normal Start followed the full
 original 59,670,016-byte map copy. The owned emulator was stopped after archiving.
 
-All177 dependencies were checked. ELF SHA256:
+All 177 dependencies were checked. ELF SHA256:
 `e6c40cec0e16777ebc6f6fcced81c2305908d0de1dc66bad3f38d079834f19fc`;
 EBOOT `280a9ceb1f949d7c1f74f579cfde509635a3b158dfed59d0fa307786ff09ee91`;
 trace `d612a79f569e50c3fbe2963111f2f8967a8a92d326db8e8678f6c598537bed6b`;
@@ -72,3 +72,47 @@ python3 drive_startup.py 192-replay native-192-artifacts
 
 Next is the bounded original sequence of remaining filter offsets, preserving
 complete packet-pattern consistency and original input/output ownership.
+
+The next version2 private contract contains four complete observed vertex
+patterns in 10,360 bytes. Admission starts with four candidates; each original
+vertex word narrows that set. Rejection leaves the set and all guest/state bytes
+unchanged. END rechecks the complete vertices against the remaining candidates.
+A primitive cannot combine coordinates from different allowed patterns.
+The shader, sampler, DMA, attachment and output-ownership guards are unchanged.
+All 51 host executables and the consumer ASan/UBSan checks pass, including all
+four complete valid patterns and a deliberately spliced invalid primitive. The existing
+six-consumer ownership/FPSCR test still passes. The original vertex patterns
+are GPU-validated in the additional probe above.
+
+
+Native193 completes all four original averaging draws. Their END payloads are
+`03BB5350`, `03BB57C4`, `03BB5C38` and `03BB60AC`; the original sources alternate
+between `02B1B000` and `02B31800`. Each live input and committed 160×120 output
+is black. The next rejected BEGIN payload is `03BB6400`, PUT `03BB7414`,
+EIP `003FAC58`. Its captured state uses one sampled texture and a different
+composition/blend pipeline; it remains unsupported.
+
+The Microsoft Game Studios intro and terminal black game window were visually
+checked. The last presented game buffer is black frame269 (zero nonblack RGB
+pixels), SHA256 `79199516ee0db59ef2056318ab42d710186c25e22e0e669206550b59def063f9`.
+**The original main menu has not appeared.** The first startup driver received
+SIGTERM before sending Start, for an unidentified reason; the game process
+remained healthy. Its receipt and intro clip were preserved. A separate resume
+receipt records normal Start on that same owned window after the complete
+59,670,016-byte original map copy. No guest memory or control flow was changed.
+The delayed Start changes ring addresses and frame counts, so these numbers
+are not an exact-address reproduction of the standard earlier-start driver.
+The owned game process was stopped after archiving; the isolated X server remains.
+
+All 177 native dependencies were verified. Both disabled-option objects remain
+byte-identical to native191. ELF SHA256:
+`e2c33d990f2de01a5338097c352154e7056549f09613f282f91cb48aace292e1`;
+EBOOT `fc6654b36945e76970b60e0038fec32ad3f993d51bd55876e4e8f81faa88e12f`;
+trace `3bce4ca4053fa134ee0f58cdda6dfaecafcd7818ede17ac16baaba5b57f481f0`;
+channel `4cb09224506c8151fdfdf216d07b53979d032fd35f2133745738110b796ce4f3`;
+push `4c308fef527b9988b70be4bd23bedc3924bfb6fa5102eeed2661e78f78a201b7`.
+The private build is `blur-variants/build`; frozen artifacts are
+`native-193-artifacts/`, visual/driver receipts `native-193-view/`.
+For a fresh normal-start replay, use the commands above with attempt
+`193-replay` and frozen build `native-193-artifacts` (expect different addresses
+and frame count). Next is the captured single-texture composition draw.

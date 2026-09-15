@@ -2,15 +2,15 @@
 #include "linear_texture.h"
 
 typedef struct h2_blur_vertex { float attribute[7][4]; } h2_blur_vertex;
-/* Private version1 contract: owned program/state and exact observed
+/* Private version2 contract: owned program/state and exact observed
  * 24-word vertex packets. Every accepted vertex comes from live commands;
  * the contract is not a source of emitted vertices. */
 typedef struct h2_blur_contract {
     uint32_t setup[2048], setup_valid[64], program[7][4];
-    h2_blur_vertex vertices[4];
+    h2_blur_vertex vertices[4][4];
 } h2_blur_contract;
 _Static_assert(sizeof(h2_blur_vertex) == 112, "blur vertex layout");
-_Static_assert(sizeof(h2_blur_contract) == 9008, "private blur contract layout");
+_Static_assert(sizeof(h2_blur_contract) == 10352, "private blur contract layout");
 typedef struct h2_blur_request {
     h2_linear_texture textures[4];
     const uint8_t *destination;
@@ -24,7 +24,7 @@ typedef struct h2_blur_draw {
     h2_blur_vertex vertices[4];
     uint32_t vertex, phase;
     uint64_t completed;
-    uint8_t active, subchannel;
+    uint8_t active, subchannel, candidates;
     const h2_blur_contract *contract;
     h2_blur_render render;
     void *opaque;

@@ -11,7 +11,7 @@ static h2_command_state s;
 static h2_kelvin_clear c;
 static h2_blur_draw q;
 static h2_blur_contract reference;
-static unsigned reads, maps, renders, attachments;
+static unsigned reads, maps, renders, attachments, selected_pattern;
 static int read_failure, map_failure, alias_map, overflow_map, render_failure, render_alias, attachment_failure, readonly;
 static int read_word(void *opaque, uint32_t offset, uint32_t *word)
 {
@@ -88,18 +88,23 @@ static void init(void)
     const float xy[][2]={{0,0},{0,480},{640,480},{640,0}};
     for (unsigned i=0;i<4;++i) {
         for (unsigned a=0;a<=5;++a) {
-            reference.vertices[i].attribute[a][0] = a ? (float)(i+a)*.125f-1.0f : xy[i][0];
-            reference.vertices[i].attribute[a][1] = a ? (float)(i+a)*.25f-.5f : xy[i][1];
-            reference.vertices[i].attribute[a][2] = a==0?16777215.0f:0;
-            reference.vertices[i].attribute[a][3] = a==0?16384.0f:1;
+            reference.vertices[0][i].attribute[a][0] = a ? (float)(i+a)*.125f-1.0f : xy[i][0];
+            reference.vertices[0][i].attribute[a][1] = a ? (float)(i+a)*.25f-.5f : xy[i][1];
+            reference.vertices[0][i].attribute[a][2] = a==0?16777215.0f:0;
+            reference.vertices[0][i].attribute[a][3] = a==0?16384.0f:1;
         }
+    }
+    for(unsigned pattern=1;pattern<4;++pattern){
+        memcpy(reference.vertices[pattern],reference.vertices[0],sizeof reference.vertices[0]);
+        for(unsigned v=0;v<4;++v)for(unsigned attr=1;attr<=4;++attr)for(unsigned component=0;component<2;++component)
+            reference.vertices[pattern][v].attribute[attr][component]+=(float)pattern*.0625f;
     }
     c.read_instance=read_word;c.map_physical=map_ram;c.check_attachment=attachment;c.physical_bytes=sizeof ram;
     c.has_color_dma=c.has_zeta_dma=1;c.dma_color=c.dma_zeta=0x13000;
     c.color_offset=4*INPUT_BYTES+4096;c.zeta_offset=4096;c.format=0x128;c.pitch=0x0A000280;
     c.clip_horizontal=160u<<16;c.clip_vertical=120u<<16;
     q.contract=&reference;q.render=render;
-    reads=maps=renders=attachments=0;
+    reads=maps=renders=attachments=selected_pattern=0;
     read_failure=map_failure=alias_map=overflow_map=render_failure=render_alias=attachment_failure=readonly=0;
     memcpy(prior,ram,sizeof ram);
 }
@@ -116,7 +121,7 @@ static void vertices(int check_rejections)
     static const unsigned methods[]={0x1A50,0x1A40,0x1A30,0x1A20,0x1A10,0x1518};
     for(unsigned v=0;v<4;++v)for(unsigned field=0;field<6;++field)for(unsigned component=0;component<4;++component){
         unsigned method=methods[field]+component*4;uint32_t value;
-        memcpy(&value,&reference.vertices[v].attribute[5-field][component],4);
+        memcpy(&value,&reference.vertices[selected_pattern][v].attribute[5-field][component],4);
         if(check_rejections){reject(0,method,value^1);reject(0,method+1,value);reject(1,method,value);reject(0,0x17FC,0);}
         assert(h2_blur_method(&q,&s,&c,0,method,value));
     }
@@ -174,5 +179,20 @@ int main(void)
         memcpy(&q.vertices[v].attribute[a][0],&bad,4);reject(0,0x17FC,0);assert(!renders);
     }
     for(unsigned u=0;u<4;++u){init();s.setup[(0x1B00+u*64)/4]=c.color_offset;reject(0,0x17FC,7);}
+    for(unsigned pattern=0;pattern<4;++pattern){
+        init();selected_pattern=pattern;begin();vertices(0);
+        assert(q.candidates==(1u<<pattern));assert(h2_blur_method(&q,&s,&c,0,0x17FC,0));
+    }
+    /* A later word from another otherwise valid pattern cannot be spliced
+     * into the chosen primitive; rejection preserves the narrowed candidate. */
+    init();begin();
+    for(unsigned component=0;component<4;++component){
+        uint32_t value;memcpy(&value,&reference.vertices[0][0].attribute[5][component],4);
+        assert(h2_blur_method(&q,&s,&c,0,0x1A50+component*4,value));
+    }
+    uint32_t first,wrong;memcpy(&first,&reference.vertices[0][0].attribute[4][0],4);
+    memcpy(&wrong,&reference.vertices[1][0].attribute[4][1],4);
+    assert(h2_blur_method(&q,&s,&c,0,0x1A40,first));assert(q.candidates==1);
+    reject(0,0x1A44,wrong);assert(q.candidates==1);
     puts("blur draw: exact original ordering, RGBA commit, resource/alias and failed-render isolation passed");
 }

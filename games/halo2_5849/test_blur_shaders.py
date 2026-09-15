@@ -1,5 +1,6 @@
 """Synthetic averaging, clamped edges, alpha gain and shader admission tests."""
 import copy
+import struct
 from pathlib import Path
 import tempfile
 import unittest
@@ -80,6 +81,21 @@ class BlurPreparation(unittest.TestCase):
         with self.assertRaises(ValueError):decode_sampler(raw,'half') # 0xffff is NaN
         half=np.tile(np.array([0,.25,.5,1],dtype='<f2'),(160*120,1)).tobytes()
         self.assertTrue(np.array_equal(decode_sampler(half,'half')[0,0],[0,.25,.5,1]))
+
+    def test_complete_consistent_original_variant_inputs(self):
+        patterns=[]
+        for radius in (.5,.625,.78125,.96875):
+            v=np.zeros((4,7,4),dtype='<f4')
+            for index,(x,y)in enumerate(((0,0),(0,480),(640,480),(640,0))):
+                v[index,0]=[x,y,1,1]
+                for unit,(dx,dy)in enumerate(((-1,-1),(1,-1),(-1,1),(1,1))):v[index,unit+1]=[x+dx*radius,y+dy*radius,0,1]
+            patterns.append(v.tobytes())
+        self.assertEqual(h.validate_variants(patterns),b''.join(patterns))
+        for bad in (patterns[:3],patterns+[patterns[0]],[patterns[0][:-1]]+patterns[1:]):
+            with self.assertRaises(ValueError):h.validate_variants(bad)
+        for offset,value in ((0,1),(6*4,1),(4*4,0x7FC12345),(4*4,0xC0000000)):
+            altered=bytearray(patterns[1]);struct.pack_into('<I',altered,offset,value)
+            with self.assertRaises(ValueError):h.validate_variants([patterns[0],bytes(altered),*patterns[2:]])
 
     def test_wrong_owned_inputs_write_nothing(self):
         with tempfile.TemporaryDirectory()as tmp:

@@ -86,3 +86,22 @@ decoded pixel state and offsets±0.625, ±0.78125 and approximately±0.96875.
 Those packets are read-only evidence, not yet executed game draws. Next is
 bounded original-command integration with complete sampler/output ownership,
 followed by native replay toward the original menu.
+
+The subsequent coordinate-pattern probe adds the three remaining original
+packets, extracted from the same pinned ring. It checks all positions/color
+inputs remain identical, projected texture Z/W stay 0/1, and coordinates remain
+within the observed window margin. The exact raw patterns are supplied as a
+private 1792-byte input, never embedded in source. Eleven full fixtures now cover
+211,200 pixels, with 44 separate sampler captures covering 844,800 pixels. Each
+added offset pattern matches ideal sampling/averaging within one UNORM8 level
+on every channel; the measured-sample combiner checks also pass. All prior
+fixtures retain their documented bounds. Shader source and GXP remain unchanged.
+Eight blur preparation tests and the existing 13 threshold/composition tests pass.
+Private records are `blur-pass/probe03-variants` and `sample02-variants`.
+
+The expanded normal and sampler probes both finish all captures and then hit
+the previously observed Vita3K utility-exit SIGSEGV at access `0x480400008`.
+The successful draw/readback results precede that separate exit fault; shared
+Vita3K was not changed. Final comparison SHA256:
+`d6e13083f292af867a252f2ee654f178540ab28302e30dc3b2a7dcb5cd6c38c4`.
+Native193 now executes all four original packets; see the consumer record.

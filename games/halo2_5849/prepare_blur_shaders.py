@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import struct
 from prepare_screen_shaders import XBE_SHA,PROGRAM_SHA,pixel_definition,pg
@@ -49,6 +50,23 @@ float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1,
     return '\n'.join(lines+['}'])+'\n'
 
 
+def validate_variants(variants):
+    if len(variants)!=4 or any(len(v)!=448 for v in variants):raise ValueError('requires four complete vertex patterns')
+    reference=struct.unpack('<112I',variants[0])
+    for raw in variants:
+        words=struct.unpack('<112I',raw);values=struct.unpack('<112f',raw)
+        for v in range(4):
+            for attr in (0,5,6):
+                first=v*28+attr*4
+                if words[first:first+4]!=reference[first:first+4]:raise ValueError('changed position/color pattern')
+            for attr in range(1,5):
+                first=v*28+attr*4
+                if words[first+2:first+4]!=(0,0x3F800000):raise ValueError('unsupported projected pattern')
+                x,y=values[first:first+2]
+                if not math.isfinite(x)or not math.isfinite(y)or not -1<=x<=641 or not -1<=y<=481:raise ValueError('unsupported texture-coordinate extent')
+    return b''.join(variants)
+
+
 def prepare(xbe,snapshot,push,texture,out):
     for path,expected in ((xbe,XBE_SHA),(snapshot,SNAPSHOT_SHA),(push,PUSH_SHA),(texture,TEXTURE_SHA)):
         if hashlib.sha256(path.read_bytes()).hexdigest()!=expected:raise ValueError('requires exact owned native191 capture')
@@ -65,9 +83,13 @@ float4 main(VertOut IN, uniform sampler2D copy_source):COLOR {
 }
 ''',
         'blur.constants.bin':struct.pack('<72f',*[(x>>shift&255)/255 for x in factors for shift in (16,8,0,24)])}
-    data['blur.contract.bin']=(struct.pack('<II',0x434C3248,1)+
+    # All four complete packets come from the same pinned original ring. The
+    # runtime still validates its pipeline independently at each actual draw.
+    begins=(0x03B7CE4C,0x03B7D2C0,0x03B7D734,0x03B7DBA8)
+    data['blur.variants.bin']=validate_variants([vertices_from_push(push.read_bytes(),address) for address in begins])
+    data['blur.contract.bin']=(struct.pack('<II',0x434C3248,2)+
         struct.pack('<2048I',*state['setup'])+struct.pack('<64I',*state['setup_valid'])+
-        program+data['blur.vertices.bin'])
+        program+data['blur.variants.bin'])
     out.mkdir(parents=True,exist_ok=True)
     for name,b in data.items():(out/name).write_bytes(b)
     report=dict(scope='private blur shader and exact command contract',vertex_plan=plan,

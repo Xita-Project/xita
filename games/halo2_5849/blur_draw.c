@@ -74,12 +74,16 @@ static int resources(const h2_command_state *s, const h2_kelvin_clear *c,
     return 1;
 }
 
-static int component_valid(const h2_blur_draw *q, unsigned vertex,
-                             unsigned attribute, unsigned component, uint32_t value)
+static unsigned matching_patterns(const h2_blur_draw *q, unsigned vertex,
+                                  unsigned attribute, unsigned component, uint32_t value)
 {
-    uint32_t expected;
-    memcpy(&expected, &q->contract->vertices[vertex].attribute[attribute][component], 4);
-    return value == expected;
+    unsigned matches = 0;
+    for (unsigned pattern = 0; pattern < 4; ++pattern) {
+        uint32_t expected;
+        memcpy(&expected, &q->contract->vertices[pattern][vertex].attribute[attribute][component], 4);
+        if (value == expected) matches |= 1u << pattern;
+    }
+    return matches;
 }
 static int finish(h2_blur_draw *q, h2_command_state *s, h2_kelvin_clear *c)
 {
@@ -87,9 +91,11 @@ static int finish(h2_blur_draw *q, h2_command_state *s, h2_kelvin_clear *c)
     uint8_t *destination;
     if (q->vertex != 4 || q->phase || !pipeline(q, s, c) ||
         !resources(s, c, &request, &destination)) return 0;
+    unsigned candidates = q->candidates & 15;
     for (unsigned v=0;v<4;++v) for (unsigned a=0;a<7;++a) for (unsigned k=0;k<4;++k) {
         uint32_t value;memcpy(&value,&q->vertices[v].attribute[a][k],4);
-        if (!component_valid(q,v,a,k,value)) return 0;
+        candidates &= matching_patterns(q,v,a,k,value);
+        if (!candidates) return 0;
     }
     memcpy(request.vertices, q->vertices, sizeof request.vertices);
     for (unsigned i = 0; i < 18; ++i) {
@@ -118,7 +124,7 @@ int h2_blur_method(h2_blur_draw *q, h2_command_state *s, h2_kelvin_clear *c,
         if (method != 0x17FC || value != 7 || !pipeline(q, s, c) ||
             !resources(s, c, &request, &destination)) return 0;
         memset(q->vertices, 0, sizeof q->vertices);
-        q->vertex = q->phase = 0; q->active = 1; q->subchannel = sub;
+        q->vertex = q->phase = 0; q->active = 1; q->subchannel = sub; q->candidates = 15;
         return 1;
     }
     if (sub != q->subchannel) return 0;
@@ -127,9 +133,12 @@ int h2_blur_method(h2_blur_draw *q, h2_command_state *s, h2_kelvin_clear *c,
     static const unsigned methods[] = {0x1A50,0x1A40,0x1A30,0x1A20,0x1A10,0x1518};
     unsigned field = q->phase / 4, component = q->phase % 4, attribute = 5 - field;
     if (method != methods[field] + component * 4) return 0;
-    /* Consume the exact observed 24-word packet; preserve original bits.
+    /* Narrow to complete observed patterns; mixed-pattern primitives reject.
+     * Consume the actual 24-word packets and preserve their bits.
      * The pinned contract authorizes inputs but never supplies commands. */
-    if (!component_valid(q,q->vertex,attribute,component,value)) return 0;
+    unsigned candidates = q->candidates & matching_patterns(q,q->vertex,attribute,component,value);
+    if (!candidates) return 0;
+    q->candidates = candidates;
     memcpy(&q->vertices[q->vertex].attribute[attribute][component], &value, 4);
     if (++q->phase == 24) { q->phase = 0; ++q->vertex; }
     return 1;

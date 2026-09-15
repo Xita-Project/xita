@@ -595,7 +595,7 @@ const h2_blur_contract *h2_blur_gxm_contract(void)
     static int loaded;if(loaded)return &blur_contract;
     FILE *file=fopen("app0:blur.contract.bin","rb");if(!file)return NULL;
     uint32_t header[2];
-    int ok=fread(header,1,8,file)==8&&header[0]==0x434C3248&&header[1]==1&&
+    int ok=fread(header,1,8,file)==8&&header[0]==0x434C3248&&header[1]==2&&
         fread(&blur_contract,1,sizeof blur_contract,file)==sizeof blur_contract&&fgetc(file)==EOF&&!ferror(file);
     if(fclose(file))ok=0;
     if(!ok){memset(&blur_contract,0,sizeof blur_contract);xv_logf("[h2/blur] invalid private contract\n");return NULL;}

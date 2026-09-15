@@ -291,7 +291,7 @@ $(BUILD)/threshold-probe-param.sfo: Makefile
 $(BUILD)/threshold-probe.vpk: $(BUILD)/threshold-probe-eboot.bin $(BUILD)/threshold-probe-param.sfo $(addprefix $(THRESHOLD_SHADERS)/,$(THRESHOLD_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/threshold-probe-param.sfo -b $(BUILD)/threshold-probe-eboot.bin $(foreach f,$(THRESHOLD_PROBE_FILES),-a $(THRESHOLD_SHADERS)/$(f)=$(f)) $@
 BLUR_SHADERS ?= $(ROOT)/local/halo2_5849/blur-shaders
-BLUR_PROBE_FILES := blur.vert.gxp blur.frag.gxp blur.copy.frag.gxp blur.constants.bin blur.vertices.bin blur.texture.bin
+BLUR_PROBE_FILES := blur.vert.gxp blur.frag.gxp blur.copy.frag.gxp blur.constants.bin blur.vertices.bin blur.variants.bin blur.texture.bin
 .PHONY: blur-probe blur-sample-probe
 blur-probe: $(BUILD)/blur-probe.vpk
 blur-sample-probe: $(BUILD)/blur-sample-probe.vpk
