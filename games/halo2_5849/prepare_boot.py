@@ -416,6 +416,30 @@ def game_widget_property_roots(image):
     return roots
 
 
+GAME_SOUND_RECORD_PREDICATE_WALKS = (
+    (0x21BAEA, 31, "2310890e9b1f16b1c7ff0212a4efb49e274b3280882921e7028fac5548c0ddaf"),
+    (0x127FC0, 94, "b110d7494dd2b19ca0882f4d1fc60b58e00f2ae352657ee56f03d3b6a27ccdf0"),
+    (0x127F10, 85, "2b74f573294b7f75889852f047e8fc4dad958bcfaecbc45ffe096c65095f4298"),
+)
+
+
+def game_sound_record_predicate_roots(image):
+    """Native202: record+14h registration -> optional table -> first callback.
+
+    The original constructor installs 44A110, the update tests its first slot,
+    and 127F10 invokes that slot with four original record-derived arguments.
+    Only discover this observed field; adjacent methods/data are not inferred.
+    """
+    for address, length, digest in GAME_SOUND_RECORD_PREDICATE_WALKS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 sound record predicate fingerprint mismatch")
+    target=image.u32(0x44A110)
+    section=image.section_of(target) if target else None
+    if not target or not image.is_code(target) or not section or section[4]!=".text":
+        raise ValueError("Halo 2 sound record predicate target is invalid")
+    return {target}
+
+
 GAME_MOVE_ALIGNMENT_WALKS = (
     (0x3208B0, 52, "812db41d8c8d8516ab85e54dca20659cea44200710058ae41f2db46cc1128a47"),
     (0x3208F4, 12, "65c6a28b3ff85a42a25294ffded5c2ba0605480712192386898a26bfc92d856a"),
@@ -1155,6 +1179,7 @@ def main():
         roots.update(game_widget_property_roots(image))
         roots.update(game_text_token_roots(image))
         roots.update(game_move_alignment_roots(image))
+        roots.update(game_sound_record_predicate_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))

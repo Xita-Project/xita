@@ -30,6 +30,27 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_sound_record_predicate_reads_only_observed_first_slot(self):
+        image=SyntheticImage();image.section_name=".text";image.targets={0x44A110:0x1000}
+        spec=(0x200,len(image.code),hashlib.sha256(image.code).hexdigest())
+        count=len(prepare_boot.GAME_SOUND_RECORD_PREDICATE_WALKS)
+        with patch.object(prepare_boot,"GAME_SOUND_RECORD_PREDICATE_WALKS",(spec,)*count):
+            self.assertEqual(prepare_boot.game_sound_record_predicate_roots(image),{0x1000})
+            self.assertEqual(image.targets,{0x44A110:0x1000})
+            for bad in (None,0,0xDEAD):
+                image.targets[0x44A110]=image.bad_code=bad
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_sound_record_predicate_roots(image)
+            image.targets[0x44A110]=0x1000;image.bad_code=None
+            with patch.object(image,"section_of",return_value=None):
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_sound_record_predicate_roots(image)
+            image.section_name=".data"
+            with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_sound_record_predicate_roots(image)
+            image.section_name=".text"
+            for i in range(count):
+                guards=[spec]*count;guards[i]=(*spec[:2],"0"*64)
+                with patch.object(prepare_boot,"GAME_SOUND_RECORD_PREDICATE_WALKS",guards):
+                    with self.assertRaisesRegex(ValueError,"fingerprint"):prepare_boot.game_sound_record_predicate_roots(image)
+
     def test_copy_alignment_tables_exclude_instruction_bytes(self):
         image = SyntheticImage(); image.section_name = ".text"
         slots = [base + i*4 for base in (0x3208F0, 0x320A7C) for i in (1, 2, 3)]
