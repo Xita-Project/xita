@@ -711,6 +711,15 @@ static void buffer_control(xctx *c, uint32_t ip)
     if (b->submix == 2) {
 #if H2_AUDIO_DSP
         uint32_t caller = X_M32(c->r[4]);
+        if (ip==0x37B66F && caller==0x21F1A0 && b->fx_bin>=15 && b->fx_bin<=22) {
+            if(value!=(uint32_t)-6400 || !b->started || b->stopped || b->headroom ||
+               b->route_count!=1 || b->route_bins[0]!=6+(b->fx_bin-15)%4 || b->route_gains[0] ||
+               (b->volume && b->volume!=-6400))fail(c,ip,"unsupported FX15..22 mute state/value",value);
+            if(h2_audio_backend_fx_mute(b->fx_bin)<0)fail(c,ip,"FX15..22 mixer mute rejected",b->fx_bin);
+            b->volume=-6400;
+            xv_logf("[h2/fxin2] caller=0021F1A0 interface=%08X bin=%u volume=-6400 original attenuationFFF; route/source/GP time retained\n",b->base+0x1c,b->fx_bin);
+            result(c,0,2);return;
+        }
         uint32_t muted_key = caller == 0x2AECA6 ? H2_FX_SPATIAL23 : caller == 0x2AEDF8 ? H2_FX_SPATIAL24 : caller == 0x2AEF43 ? 25 : 0;
         if (ip == 0x37B66F && muted_key) {
             if (value != (uint32_t)-6400 || b->fx_bin != muted_key || !b->started || b->stopped ||

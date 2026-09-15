@@ -276,8 +276,30 @@ int H2_AUDIO_FX_TEST_MAIN(void)
     }
     for(unsigned i=0;i<32;++i)assert(s->core.mixbuffer[2*32+i]==0x100000);
     for(unsigned v=0;v<H2_FX_SOURCES;++v)assert(fx.sources[v].frames==before.sources[v].frames+1);
+    /* Active FX15..22 mute removes only its routed samples. Every source
+     * still reads and advances; existing spatial/filter histories survive. */
+    for(unsigned bin=15;bin<=22;++bin)for(unsigned i=0;i<32;++i)
+        put32(s->scratch+0xb000+(bin-11)*128+4*i,0x200000);
+    before=fx;fx.muted_extra=256;invalid=fx;
+    assert(!h2_audio_fx_mute(&fx,15)&&!memcmp(&fx,&invalid,sizeof fx));fx=before;
+    fx.muted_extra=1;invalid=fx;
+    assert(!h2_audio_fx_mute(&fx,15)&&!memcmp(&fx,&invalid,sizeof fx));fx=before;
+    for(unsigned bin=15;bin<=22;++bin){
+        before=fx;assert(h2_audio_fx_mute(&fx,bin));
+        h2_audio_fx expected=before;expected.muted_extra|=1u<<(bin-15);expected.sources[7+bin-15].output_mask=0;
+        assert(!memcmp(&fx,&expected,sizeof fx)&&h2_audio_fx_mute(&fx,bin)&&!memcmp(&fx,&expected,sizeof fx));
+        assert(h2_audio_fx_render(&fx,out,32));
+        for(unsigned route=8;route<=9;++route){
+            unsigned remaining=0;for(unsigned b=bin+1;b<=22;++b)remaining+=6+(b-15)%4==route;
+            for(unsigned i=0;i<32;++i)assert(s->core.mixbuffer[route*32+i]==remaining*0x200000);
+        }
+        for(unsigned v=0;v<H2_FX_SOURCES;++v)assert(fx.sources[v].frames==before.sources[v].frames+1);
+        assert(fx.playing==before.playing&&fx.bound==before.bound&&fx.engine==before.engine);
+    }
+    before=fx;assert(h2_audio_fx_filter(&fx,23)&&h2_audio_fx_route_mask(&fx,24,128));
+    assert(h2_audio_fx_mute(&fx,H2_FX_SPATIAL23)&&!memcmp(&fx,&before,sizeof fx));
     /* A subsequent frame fault is terminal, with no completed frame counted. */
-    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == 42 && s->status.fault);
+    s->core.pc = 0x1000; assert(!h2_audio_fx_render(&fx, out, 32) && fx.frames == before.frames && s->status.fault);
     assert(!h2_audio_fx_render(&fx, out, 32)); h2_dsp_destroy(s);
     puts("Halo 2 FX source: checked ownership, six independent unity routes, real DSP frames and signed GP output pass");
     return 0;

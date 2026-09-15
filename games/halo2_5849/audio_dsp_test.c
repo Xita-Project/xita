@@ -28,6 +28,8 @@ int h2_audio_backend_fx_route(unsigned bin, unsigned routes)
 { assert(bin == 13 && (test_fx_bound & 1) && !(test_fx_playing & 1) && routes == 6); test_fx_routes = routes; return 0; }
 static unsigned test_fx23_output_mask, test_fx24_output_mask, test_fx25_routed;
 static unsigned test_fx23_muted, test_fx24_muted, test_fx25_muted;
+static unsigned test_extra_muted;
+static int test_extra_mute_failure;
 int h2_audio_backend_fx_route_mask(unsigned key, unsigned output_mask)
 {
     if (key >= 15 && key <= 22) {
@@ -42,6 +44,11 @@ int h2_audio_backend_fx_route_mask(unsigned key, unsigned output_mask)
 }
 int h2_audio_backend_fx_mute(unsigned key)
 {
+    if(key>=15&&key<=22){
+        assert(test_fx_bound==0x7fff&&test_fx_playing==0x7fff);
+        if(test_extra_mute_failure)return -1;
+        test_extra_muted|=1u<<(key-15);return 0;
+    }
     assert(test_fx_bound == 127 && test_fx_playing == 127);
     if (key == H2_FX_SPATIAL23) { assert(test_fx23_output_mask == 64); test_fx23_muted = 1; }
     else if (key == H2_FX_SPATIAL24) { assert(test_fx24_output_mask == 128); test_fx24_muted = 1; }

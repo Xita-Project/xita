@@ -20,7 +20,7 @@ typedef struct {
     uint64_t frames;
     h2_audio_fx_source sources[H2_FX_SOURCES];
     h2_hrtf_model spatial[3];
-    unsigned filtered;
+    unsigned filtered, muted_extra; /* bits 0..7: audited active FX15..22 mute */
     h2_audio_filter lowpass[2]; /* independent nonspatial23/24 histories */
 } h2_audio_fx;
 /* Stable source bits are defined in audio_fx_limits.h. Zero is unsupported. */

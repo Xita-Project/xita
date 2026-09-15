@@ -49,11 +49,13 @@ static int completed_configuration(const h2_audio_fx *fx)
 {
     static const unsigned counts[7]={6,4,5,4,5,2,5};
     static const unsigned outputs[7]={63,64,0,128,0,0,1024};
-    if(!fx || !fx->engine || fx->bound!=0x7fff || fx->playing!=0x7fff || fx->filtered!=3)return 0;
+    if(!fx || !fx->engine || fx->bound!=0x7fff || fx->playing!=0x7fff || fx->filtered!=3 ||
+       (fx->muted_extra&~255u))return 0;
     for(unsigned i=0;i<7;++i)
         if(fx->sources[i].routes!=counts[i] || fx->sources[i].output_mask!=outputs[i])return 0;
     for(unsigned i=7;i<H2_FX_SOURCES;++i)
-        if(fx->sources[i].routes!=1 || fx->sources[i].output_mask!=(1u<<(6+(i-7)%4)))return 0;
+        if(fx->sources[i].routes!=1 || fx->sources[i].output_mask!=
+           ((fx->muted_extra&(1u<<(i-7))) ? 0u : (1u<<(6+(i-7)%4))))return 0;
     return 1;
 }
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned key, unsigned output_mask)
@@ -80,6 +82,12 @@ int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned key, unsigned output_mask)
 }
 int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key)
 {
+    if (key>=15 && key<=22) {
+        if(!completed_configuration(fx))return 0;
+        /* Original active SetVolume(-6400) emits FFF attenuation in every
+         * slot. Retain the route, source ownership and all processing time. */
+        fx->sources[7+key-15].output_mask=0;fx->muted_extra|=1u<<(key-15);return 1;
+    }
     if(completed_configuration(fx))return key==H2_FX_SPATIAL23 || key==H2_FX_SPATIAL24 || key==25;
     if (!fx || fx->bound != 127 || fx->playing != 127) return 0;
     unsigned index;

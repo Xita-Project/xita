@@ -234,6 +234,30 @@ int main(int argc, char **argv)
                     c = fx_context(handle,0,0x21EA29); reject(&c,0x379F45);
                 }
                 assert(device.references == 16 && device.children == 15);
+                for(unsigned bin=15;bin<=22;++bin){
+                    uint32_t handle=extra_sources[bin-15];h2_audio_buffer *target=find_buffer(handle-0x1c);
+                    h2_audio_buffer before=*target;unsigned mask=test_extra_muted;
+                    c=fx_context(handle,(uint32_t)-6400,0x21F1A1);reject(&c,0x37B66F);
+                    c=fx_context(handle,(uint32_t)-6399,0x21F1A0);reject(&c,0x37B66F);
+                    c=fx_context(handle,(uint32_t)-6400,0x21F1A0);reject(&c,0x37B6A7);
+                    for(unsigned bad=0;bad<7;++bad){
+                        *target=before;
+                        switch(bad){case 0:target->started=0;break;case 1:target->stopped=1;break;
+                        case 2:target->headroom=1;break;case 3:target->route_count=2;break;
+                        case 4:target->route_bins[0]^=1;break;case 5:target->route_gains[0]=1;break;
+                        case 6:target->volume=-1;break;}
+                        h2_audio_buffer invalid=*target;c=fx_context(handle,(uint32_t)-6400,0x21F1A0);reject(&c,0x37B66F);
+                        assert(!memcmp(target,&invalid,sizeof invalid)&&test_extra_muted==mask);
+                    }
+                    *target=before;test_extra_mute_failure=1;
+                    c=fx_context(handle,(uint32_t)-6400,0x21F1A0);reject(&c,0x37B66F);
+                    assert(!memcmp(target,&before,sizeof before)&&test_extra_muted==mask);test_extra_mute_failure=0;
+                    c=fx_context(handle,(uint32_t)-6400,0x21F1A0);call(&c,0x37B66F,0,2);
+                    before.volume=-6400;assert(!memcmp(target,&before,sizeof before));
+                    assert(test_extra_muted==(1u<<(bin-14))-1);
+                    c=fx_context(handle,(uint32_t)-6400,0x21F1A0);call(&c,0x37B66F,0,2);
+                    c=fx_context(handle,0,0x21F1A0);reject(&c,0x37B66F); /* unmute remains unsupported */
+                }
                 for (unsigned field=0;field<6;++field) {
                     c=global_pcm_description();uint32_t value=read32(0x3ffd+field*4)^1;x_guest_write(0x3ffd+field*4,&value,4);
                     reject(&c,0x37D7DE);

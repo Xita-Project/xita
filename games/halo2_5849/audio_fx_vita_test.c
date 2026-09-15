@@ -155,6 +155,16 @@ int main(void)
         assert(status.last_peak_left == 1953 && status.last_peak_right == 1953);
     }
     assert(status.fx_playing_mask == 0x7fff && status.fx_bound_mask == 0x7fff);
+    atomic_store(&faults,1u<<F_HOLD);
+    for(;;){h2_audio_backend_snapshot(&status);if(status.fx_computed_frames>status.fx_submitted_frames)break;usleep(1000);}
+    uint64_t mute_computed=status.fx_computed_frames,prior_sources[H2_FX_SOURCES];
+    memcpy(prior_sources,status.fx_source_consumed,sizeof prior_sources);
+    for(unsigned bin=15;bin<=22;++bin)assert(h2_audio_backend_fx_mute(bin)==0);
+    h2_audio_backend_snapshot(&status);assert(status.fx_computed_frames==mute_computed&&!status.error);
+    atomic_store(&faults,0);
+    for(;;){h2_audio_backend_snapshot(&status);if(status.fx_consumed_frames>mute_computed)break;usleep(1000);}
+    for(unsigned v=0;v<H2_FX_SOURCES;++v)assert(status.fx_source_consumed[v]>prior_sources[v]);
+    assert(status.fx_playing_mask==0x7fff&&status.last_peak_left==1953&&!status.error);
     assert(h2_audio_backend_fx_forget(23) < 0);
     assert(h2_audio_backend_fx_forget(13) < 0 && h2_audio_backend_fx_route(13, 2) < 0 && h2_audio_backend_fx_play(13) < 0);
     assert(h2_audio_backend_close() == 0 && !resources && !atomic_load(&queued));
