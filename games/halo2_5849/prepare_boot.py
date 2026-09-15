@@ -104,6 +104,20 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_PAIR_LISTENER_CALLS = (
+    (0x3101c0, 1850, "42a213f2b6c96033db532ebef5e5e9dc5e4dbc4d8bed28d18a7475214b5a499b"),
+    (0x30e4b0, 303, "a3e5389478a81f59a5c47b1f594afeeb2ffa28b9249b9289f823cd3c993672b6"),
+    (0x30d1b0, 71, "a5dad4dc610aaf7f391f9b57c49cb34a49c3a51f32532f2d9e24b3112cbd58d0"),
+    (0x30d220, 10, "1b29e5c75b1678cc4c4a0a94119b5ae94b2f2fa3ac98f07ded2d28a6b207ec04"),
+    (0x3728c0, 378, "b7c25a0fe7b69cda2e84c1d0505a4a9cf787135741f36f5ed16f26247a72cf5e"),
+    (0x372a40, 56, "79e0a0f3f0b3b7d66891947bede9ed32c2f156ba3275525d9aa855ecdfc2a2b5"),
+    (0x315e70, 122, "a154d313fe2c59a1f44ecb703904ca5da0f506717eb9266d2f1bee09cdbab7f8"),
+    (0x315ef0, 97, "70bf5dd4e2482460054391d1f66517201465ae6a30608a5e3a9a2988c604b85d"),
+    (0x30b480, 135, "27f37fe29acb4f054753b427d91a87819d3adc5e12ef85fa3b9e94fa63534efb"),
+    (0x30b2a0, 146, "6f91a41740a5b74a4683c597e195e9ff96dc9828b5636a73d4059a497176cb36"),
+    (0x30b0a0, 104, "f2fb3a2223dd01f25a2d15a7e8ec09df6389e0a3d96763d07f1f9530f72d2e14"),
+    (0x72c70, 3, "e598d0c3ba86d917b177d7adde0556aa99bc355543c57aee0a3e50b684dd7e99"),
+)
 GAME_BOUNDS_INSERT_CALLS = (
     (0x30E4B0, 303, "a3e5389478a81f59a5c47b1f594afeeb2ffa28b9249b9289f823cd3c993672b6"),
     (0x30B480, 135, "27f37fe29acb4f054753b427d91a87819d3adc5e12ef85fa3b9e94fa63534efb"),
@@ -507,6 +521,26 @@ def descriptor_child_field_roots(image, offsets):
     return roots
 
 
+def game_pair_listener_roots(image):
+    """Native167: original predicate and constructor-bound pair listeners.
+
+    Keep the guest predicate, matrix routing, member bookkeeping and tailcalls.
+    The default listener is an existing original ret4 body, not a host stub.
+    """
+    for address, length, digest in GAME_PAIR_LISTENER_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 pair listener fingerprint mismatch")
+    roots = set()
+    for slot in (0x4138C8, 0x41388C, 0x413890, 0x4137E8, 0x4137EC,
+                 0x43E538, 0x43E53C):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 pair listener target is not title code")
+        roots.add(target)
+    return roots
+
+
 def game_bounds_insert_roots(image):
     """Native166: original stored bounds getter and following index insertion."""
     for address, length, digest in GAME_BOUNDS_INSERT_CALLS:
@@ -884,6 +918,7 @@ def main():
         roots.update(game_boot_factory_roots(image))
         roots.update(game_member_query_roots(image))
         roots.update(game_bounds_insert_roots(image))
+        roots.update(game_pair_listener_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
