@@ -32,8 +32,9 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
     end=d3d_source.index('/* debug: detect a stream',begin)
     methods=d3d_source[d3d_source.index('static void xv_hle_CDirectSoundStream_GetStatus'):d3d_source.index('static void xv_hle_CDirectSoundStream_Discontinuity')]
     pump=re.search(r'^void xv_hle_DirectSoundDoWork\(xctx \*c\).*$',d3d_source,re.M)[0]
+    volume=re.search(r'^void xv_hle_CDirectSoundStream_SetVolume\(xctx \*c\).*$',d3d_source,re.M)[0]
     fixture=(root/'tools/tests/object_audio.c').read_text()
-    audio.write_text(fixture.replace('/* PRODUCTION_AUDIO */',d3d_source[begin:end]+'\n'+methods+'\n'+pump))
+    audio.write_text(fixture.replace('/* PRODUCTION_AUDIO */',d3d_source[begin:end]+'\n'+methods+'\n'+pump+'\n'+volume))
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11','-fno-strict-aliasing',
         '-DXV_EXPERIMENTAL_OBJECT_JOBS','-I'+str(root/'recomp'),
         '-ffunction-sections','-fdata-sections','-ffp-contract=off',
@@ -47,6 +48,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
             result=subprocess.run([str(binary)],check=True,timeout=30,env=env,
                                   capture_output=True,text=True)
             print(result.stdout,end='')
+            assert re.findall(r'quiescent owner stream volume updates (\d+)',result.stderr)==['600','0']
             reports=re.findall(r'^\[object-jobs\] (\d+) frames passes (\d+) batches (\d+) jobs (\d+)',result.stderr,re.M)
             assert reports==[('3','2','6','600'),('3','0','0','0')],reports
             locks=re.findall(r'contended (\d+)/(\d+) wait-us (\d+)/(\d+);',result.stderr)
@@ -78,6 +80,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
     assert failure.returncode<0 and b'STOP vertex lock outside audited impact transaction' in failure.stderr
     print('PASS: vertex locks outside the audited impact transaction stop before invocation')
     for mode,reason in (("unsupported-audio",b'audio pump outside audited cache callback'),
+                        ("unsupported-volume",b'stream volume outside audited object sound update'),
                         ("unsupported-stream",b'stream service outside quiescent audio callback'),
                         ("unsupported-nested-audio",b'unsupported nested owner audio service')):
         failure=subprocess.run([str(binary),mode],capture_output=True,timeout=10,preexec_fn=no_core)

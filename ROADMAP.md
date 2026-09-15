@@ -28,8 +28,12 @@ Physical worker affinity is verified. Follow-ups protect collision work, gate
 jobs on loaded gameplay and service supported cache I/O and audio requests with
 the other lanes parked. The [rocket-pickup audit](docs/object-audio-handoff-20260915.md)
 identified another sound-cache yield. A physical pickup now succeeds with cache
-I/O serviced, but the subsequent firing test loses remote connectivity; its
-fault log and cause remain unresolved.
+I/O serviced. The recovered firing log identifies another intentional worker
+STOP in a stream-volume update; the [owner handoff fix](docs/object-stream-volume-20260915.md)
+retains both workers and awaits a physical retest. The separate
+[submission audit](docs/rocket-submission-audit-20260915.md) found no stride or
+buffer-content violation in 11,721 captured emulator draws and adds a guard
+against submitting draws after failed fragment-constant setup.
 
 September 15: [lightweight mutex comparisons](docs/object-light-lock-20260915.md)
 repeatedly improve one physical Blood Gulch view from approximately 11.8–12.0

@@ -2265,6 +2265,53 @@ static int texture_state_enabled(void)
     int override = __atomic_load_n(&texture_state_override, __ATOMIC_ACQUIRE);
     return override < 0 ? enabled : override;
 }
+/* A failed reservation leaves no constants for this draw. Never submit using
+ * a previous draw's buffer; a partial write is equally unusable. */
+static int bind_fragment_constants(SceGxmContext *ctx, const cmd_t *c,
+    const xv_fshader_t *fs, uint32_t frame, unsigned command)
+{
+    if (!fs->p_psc && !fs->p_fogcolor && !fs->p_atest && !fs->p_texscale) return 1;
+    void *fub = NULL;
+    const char *stage = "reserve";
+    int err = XV_RENDER_CALL(XV_RENDER_FRAGMENT_UNIFORM,
+        sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub));
+    if (err != 0 || !fub) goto fail;
+    if (fs->p_psc) {
+        stage = "psc";
+        err = sceGxmSetUniformDataF(fub, fs->p_psc, 0, 18 * 4, &c->psc[0][0]);
+        if (err != 0) goto fail;
+    }
+    if (fs->p_fogcolor) {
+        uint32_t fc = c->fog_color;
+        float fog[4] = { ((fc >> 16) & 0xFF) / 255.0f, ((fc >> 8) & 0xFF) / 255.0f,
+            (fc & 0xFF) / 255.0f, ((fc >> 24) & 0xFF) / 255.0f };
+        stage = "fog";
+        err = sceGxmSetUniformDataF(fub, fs->p_fogcolor, 0, 4, fog);
+        if (err != 0) goto fail;
+    }
+    if (fs->p_texscale) {
+        stage = "texscale";
+        err = sceGxmSetUniformDataF(fub, fs->p_texscale, 0, 16, &c->texscale[0][0]);
+        if (err != 0) goto fail;
+    }
+    if (fs->p_atest) {
+        uint32_t at = c->atest;
+        static int noat = -1;
+        if (noat < 0) { const char *e = getenv("XV_NO_ATEST"); noat = e ? atoi(e) : 0; }
+        float av[4] = { (at & 0xFF) / 255.0f, (float)((at >> 8) & 7),
+            (noat || !((at >> 16) & 1)) ? 0.0f : 1.0f, 0.0f };
+        stage = "atest";
+        err = sceGxmSetUniformDataF(fub, fs->p_atest, 0, 4, av);
+        if (err != 0) goto fail;
+    }
+    return 1;
+fail:
+    { static unsigned warnings;
+      if (warnings++ < 8) XV_LOG("[fragment-uniform] frame %u cmd %u %s failed 0x%08X buffer %p; draw skipped\n",
+          frame, command, stage, (unsigned)err, fub); }
+    return 0;
+}
+
 static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsigned end, unsigned *clear_slot_io, uint32_t frame, unsigned clear_limit)
 {
     unsigned clear_slot = *clear_slot_io;
@@ -2366,20 +2413,8 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
         xv_vshader_set_streams(ctx, &v->vs, c->streams);
         if (v->vs.const_stream != 0xFF && c->constant_stream)
             sceGxmSetVertexStream(ctx, v->vs.const_stream, c->constant_stream);
-        if (fs->p_psc || fs->p_fogcolor || fs->p_atest || fs->p_texscale) {
-            void *fub;
-            if (XV_RENDER_CALL(XV_RENDER_FRAGMENT_UNIFORM, sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub)) == 0) {
-                uint32_t fc = c->fog_color;                                            /* D3DCOLOR ARGB, captured at record time */
-                float fog[4] = { ((fc >> 16) & 0xFF) / 255.0f, ((fc >> 8) & 0xFF) / 255.0f, (fc & 0xFF) / 255.0f, ((fc >> 24) & 0xFF) / 255.0f };
-                if (fs->p_psc) sceGxmSetUniformDataF(fub, fs->p_psc, 0, 18 * 4, &c->psc[0][0]);
-                if (fs->p_fogcolor) sceGxmSetUniformDataF(fub, fs->p_fogcolor, 0, 4, fog);
-                if (fs->p_texscale) sceGxmSetUniformDataF(fub, fs->p_texscale, 0, 16, &c->texscale[0][0]);
-                if (fs->p_atest) { uint32_t at = c->atest;                            /* alpha test: (ref, func, enable) */
-                    static int noat = -1; if (noat < 0) { const char *e = getenv("XV_NO_ATEST"); noat = e ? atoi(e) : 0; }
-                    float av[4] = { (at & 0xFF) / 255.0f, (float)((at >> 8) & 7), (noat || !((at >> 16) & 1)) ? 0.0f : 1.0f, 0.0f };
-                    sceGxmSetUniformDataF(fub, fs->p_atest, 0, 4, av); }
-            }
-        }
+        if (!bind_fragment_constants(ctx, c, fs, frame, i))
+            continue;
         if (fs->alpha_test_mode == 2) xv_render_profile_cutout(c->index_count);
         XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, (SceGxmPrimitiveType)c->prim, SCE_GXM_INDEX_FORMAT_U16, c->indices, c->index_count));
     }

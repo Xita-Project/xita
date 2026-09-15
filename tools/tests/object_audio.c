@@ -6,7 +6,8 @@
 #include <limits.h>
 #include <stdlib.h>
 void object_test_audio_owner(void);
-static unsigned callbacks;
+static unsigned callbacks, volume_writes;
+static int32_t last_volume;
 static void ds_state_log(const char *event,uint32_t obj,ds_state *s,int queued)
 { (void)event;(void)obj;(void)s;(void)queued;object_test_audio_owner(); }
 #define XD3D_COUNT(name) object_test_audio_owner()
@@ -18,6 +19,12 @@ int xk_audio_stream_push(int voice,uint32_t guest,uint32_t size)
 { assert(voice==0&&guest==0xC0000&&size==192000);object_test_audio_owner();return 0; }
 xk_obj *xk_handle_get_type(uint32_t h,xk_objtype type) { (void)h;(void)type;abort(); }
 void xk_signal_check(void) { abort(); }
+
+void xk_audio_voice_set_volume_db100(int voice,int32_t volume)
+{
+    object_test_audio_owner();assert(voice==3);
+    volume_writes++;last_volume=volume;
+}
 
 /* PRODUCTION_AUDIO */
 
@@ -62,4 +69,20 @@ void object_test_audio_pump(xctx *c)
     xv_hle_DirectSoundDoWork(c);
     assert(c->r[4]==sp+4&&callbacks==before+1);
     assert(s->nq==1&&s->q[0].context==0xD00D&&X_M32(0xA0014)==1);
+}
+
+/* Exercise actual stream lookup and stdcall cleanup, including an unknown
+ * stream. The wrapper prepares its fixture only after all workers park. */
+void object_test_stream_volume(xctx *c)
+{
+    object_test_audio_owner();
+    unsigned sp=c->r[4],before=volume_writes;
+    uint32_t object=X_M32(sp+4);
+    int32_t volume=(int32_t)X_M32(sp+8);
+    memset(g_ds_streams,0,sizeof g_ds_streams);
+    g_ds_streams[0].obj=0x1234;g_ds_streams[0].voice=3;
+    xv_hle_CDirectSoundStream_SetVolume(c);
+    assert(c->r[0]==0&&c->r[4]==sp+12);
+    assert(volume_writes==before+(object==0x1234));
+    if(object==0x1234)assert(last_volume==volume);
 }

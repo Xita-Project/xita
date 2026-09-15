@@ -112,3 +112,11 @@ next useful measurement is contention by shared transaction/helper within the
 same rendered-frame interval. The run's gameplay render windows span roughly
 5.2–7.1 FPS with changing views and initial texture loading; they are not a
 controlled performance comparison.
+
+## Recovered firing failure
+
+After the user reopened Xita, the saved run identified a worker-lane-0 STOP at
+`CDirectSoundStream_SetVolume`, target `193D4F`, return `2982F`, with an intact
+stack canary. The [stream-volume owner handoff](object-stream-volume-20260915.md)
+addresses this rejected service. The recovered log establishes an intentional
+worker abort for this run; the fragment-submission audit is a separate change.
