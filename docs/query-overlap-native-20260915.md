@@ -42,5 +42,37 @@ The default-selection and restoration tests cover absent, zero and one settings,
 including query reuse, late completion, missing history, all dependency barriers
 and concurrent history publication under ASan/UBSan. Emulator validation checks
 startup, actual retained generations, off/on/off restoration to the new default,
-and plasma firing. Physical installation and gameplay validation follow those
-checks. No stable 20 or 30 FPS claim follows from this one heavy campaign view.
+and plasma firing. Physical installation and gameplay validation also completed.
+No stable 20 or 30 FPS claim follows from this one heavy campaign view.
+
+The final candidate is runtime
+`8f7113bca776aa0b1547cd20ccb41a115d66e08d2b1fac6bd5d50d94c7769843`.
+Its package changes only the runtime and boot marker under the existing updater
+contract. The emulator enters ordinary solo Blood Gulch, completes the remote
+comparison, and resumes retained-generation batches afterward without an explicit
+configuration override. A charged plasma shot consumes energy from 100 to 89;
+query-history counters remain active and no fatal stop is recorded. This is an
+integration check, not evidence of emulator FPS translating to hardware FPS.
+
+The physical updater verified the final runtime in slot B and retained the
+known A-slot executable for rollback. No VPK reinstall was needed. Graphics
+configuration files were unchanged; omission of the query override now selects
+the measured scheduling path. In measured campaign windows, reported average
+C2 activity rose from about 66% to 80%, consistent with removing a wait. These
+utilization samples are descriptive and do not substitute for frame timing.
+
+On the final installed build, ordinary solo Blood Gulch launched through the
+split-screen menus. A charged plasma shot reduced energy from 100 to 89,
+both camera-turn directions changed the view, and forward movement changed
+the camera position. Retained-generation batches continued during normal play
+(58–59 batches per 60-frame sample), while private quaternion checks stayed
+at zero. No crash occurred during this short check. Its roughly 10–17 FPS
+samples span different views and input activity; they are not a controlled
+performance comparison. Rocket explosions and vehicle driving remain outside
+this check, so the earlier combat and vehicle crash reports are not closed.
+
+The remaining frame time is still substantial: after overlap this view averages
+173.54 ms/frame, while object batches account for about 19 ms. Next profiling
+and restructuring should prioritize the remaining rendering preparation and
+submission dependencies, alongside moving-camera, combat and vehicle stability.
+The quaternion bypass should not be enabled simply to increase core activity.
