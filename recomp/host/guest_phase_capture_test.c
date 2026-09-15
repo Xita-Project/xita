@@ -7,8 +7,13 @@
 #include <string.h>
 #include "../xv_phase.h"
 #include "../../runtime/xv_benchmark.h"
+void xv_phase_capture_override(int) __attribute__((weak));
+void xv_object_jobs_override(int) __attribute__((weak));
 static uint64_t now;
 static unsigned clock_reads, reports, capture_on, capture_off;
+static int object_override=-1;
+static unsigned object_restore, object_serial;
+
 uint64_t xk_os_monotonic_us(void) { clock_reads++; return now; }
 void xk_os_log(const char *fmt, ...)
 {
@@ -22,14 +27,22 @@ void xk_os_log(const char *fmt, ...)
 }
 void xv_logf(const char *fmt, ...) { (void)fmt; }
 #include "../../runtime/xv_benchmark.c"
-#include "../xv_phase.c"
-const xv_phase_target xv_phase_targets[]={{1,"child"}};
-const unsigned xv_phase_target_count=1;
 void xv_benchmark_optimizations(int enabled)
 {
     assert(xv_benchmark_compare_guest_phases());
-    xv_phase_capture_override(enabled);
+    /* Extracted by test_guest_phases.py from the actual Present controller. */
+#include "phase_apply.inc"
+    assert(0);
 }
+void xv_object_jobs_override(int enabled)
+{
+    assert(enabled==0 || enabled==-1);
+    object_override=enabled;
+    if(enabled<0)object_restore++;else object_serial++;
+}
+#include "../xv_phase.c"
+const xv_phase_target xv_phase_targets[]={{1,"child"}};
+const unsigned xv_phase_target_count=1;
 static float view[6]={1,2,3,0,1,0};
 static unsigned frame;
 static int context;
@@ -51,14 +64,18 @@ static void start(void)
     assert(!xv_benchmark_remote_request(XV_BENCH_GUEST_PHASES));
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)<0);
     xv_benchmark_remote_poll(1);present(1);
-    assert(xv_benchmark_active()&&!xv_phase_enabled);
+    assert(xv_benchmark_active()&&!xv_phase_enabled && object_override==0);
 }
 int main(void)
 {
     setenv("XV_PHASE_TIMING","0",1);xv_phase_init();
     assert(xv_phase_capture_available());start();
-    for(unsigned i=0;i<540;i++)one_frame();
+    for(unsigned i=0;i<540;i++) {
+        one_frame();
+        assert(object_override==(xv_benchmark_active()?0:-1));
+    }
     assert(reports==3 && capture_on==1 && capture_off==3);
+    assert(object_restore==1 && object_serial==3 && object_override==-1);
     assert(!xv_benchmark_active()&&!xv_phase_enabled&&!invalid&&!dropped);
     unsigned clocks=clock_reads;
     for(unsigned i=0;i<60;i++)one_frame();
@@ -70,8 +87,9 @@ int main(void)
         assert(xv_phase_enabled && frames==30);
         if(!lost)xv_benchmark_compare_toggle();
         present(!lost);
-        assert(!xv_benchmark_active()&&!xv_phase_enabled&&!frames);
+        assert(!xv_benchmark_active()&&!xv_phase_enabled&&!frames && object_override==-1);
     }
     assert(reports==5 && capture_on==3 && !invalid&&!dropped);
-    puts("PASS: remote phase capture, 3 complete windows, owner-boundary cleanup, cancellation/lost view and zero off-state timer reads");
+    assert(object_restore==3);
+    puts("PASS: remote phase capture, serial object policy in all 3 arms, configured-policy restoration on completion/cancel/lost view, complete windows and zero off-state timer reads");
 }

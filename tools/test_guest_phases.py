@@ -53,7 +53,11 @@ with tempfile.TemporaryDirectory(prefix="xita-guest-phases-") as tmp:
     subprocess.run([str(p / "runtime")], check=True)
     subprocess.run([*flags, str(ROOT / "recomp/host/guest_phase_batch_test.c"), "-o", str(p / "batch")], check=True)
     subprocess.run([str(p / "batch")], check=True)
-    subprocess.run([*flags, str(ROOT / "recomp/host/guest_phase_capture_test.c"), "-lm", "-o", str(p / "capture")], check=True)
+    main = (ROOT / "runtime/main.c").read_text()
+    begin = main.index("    if (xv_benchmark_compare_guest_phases()) {", main.index("void xv_benchmark_optimizations("))
+    end = main.index("    if (xv_benchmark_compare_snapshot_worker())", begin)
+    (p / "phase_apply.inc").write_text(main[begin:end])
+    subprocess.run([*flags, "-I", str(p), str(ROOT / "recomp/host/guest_phase_capture_test.c"), "-lm", "-o", str(p / "capture")], check=True)
     subprocess.run([str(p / "capture")], check=True)
     # Opt-in on a regular, uninstrumented build must stay disabled.
     (p / "absent.c").write_text('''#include "xv_phase.h"

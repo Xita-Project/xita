@@ -63,9 +63,13 @@ measured frames in each arm. Only the middle arm enables scope timing. Its
 180 frames emit three 60-frame reports; final performance values explicitly
 represent **profiling overhead**, not an optimization gain. Camera checks,
 benchmark exclusion of bulk reads/updates, cancellation and lost-control
-restoration use the existing controller. All rendering and gameplay options
-remain unchanged. Configured always-on tracing and builds without scope metadata
-reject this capture.
+restoration use the existing controller. Rendering settings remain unchanged.
+On the object-job experiment, the September 15 controller holds serial object
+callbacks in all three arms, then restores the configured worker policy. This
+keeps the scheduling reference consistent with the serialized scope collector;
+it does not measure normal parallel gameplay. See the
+[scene-child follow-up](scene-children-timing-20260915.md). Configured always-on
+tracing and builds without scope metadata reject this capture.
 
 Enabling and disabling run on the serialized guest owner at Present. A generation
 change invalidates old scope chains before the next capture; later cleanup of an

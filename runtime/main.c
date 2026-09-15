@@ -1260,7 +1260,16 @@ void xv_benchmark_optimizations(int enabled)
     }
     if (xv_benchmark_compare_guest_phases()) {
         extern void xv_phase_capture_override(int) __attribute__((weak));
-        if(xv_phase_capture_override)xv_phase_capture_override(enabled);
+        extern void xv_object_jobs_override(int) __attribute__((weak));
+        /* The scope collector requires serialized guest execution. Object jobs
+         * already decline during tracing; hold that same scheduling policy in
+         * both surrounding arms so their difference measures tracing overhead.
+         * Restore the configured policy on completion, cancellation or lost view.
+         * Present has joined guest jobs before this drained boundary. */
+        if(xv_phase_capture_override) {
+            if(xv_object_jobs_override)xv_object_jobs_override(enabled<0?-1:0);
+            xv_phase_capture_override(enabled);
+        }
         return;
     }
     if (xv_benchmark_compare_snapshot_worker()) {

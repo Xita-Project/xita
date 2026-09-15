@@ -247,7 +247,7 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
             else if (xv_benchmark_compare_prep_bundle())
                 xv_logf("[prep-bundle-compare] start off/on/off at %up; matrix NEON, empty-object scanning and texture-state reuse switch together; indexed vertices, upload worker, flares, other math and saved settings retained; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_guest_phases())
-                xv_logf("[guest-phases-compare] start off/on/off diagnostic at %up; selected guest timings only, no optimization or gameplay changes; already-open parent scopes are absent; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+                xv_logf("[guest-phases-compare] start off/on/off diagnostic at %up; selected guest timings only; serial object callbacks across all arms, configured policy restored afterward; already-open parent scopes are absent; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_snapshot_worker())
                 xv_logf("[snapshot-worker-compare] start off/on/off at %up; owner/shared/owner cached snapshot copies; idle C0 only, source loan joined before guest resumes; GPU copies and other settings unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_guest_affinity())

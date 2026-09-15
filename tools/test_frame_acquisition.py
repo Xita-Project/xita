@@ -133,7 +133,7 @@ int main(int argc,char **argv)
         assert(snapshot_override==(candidate==16?mode:-99));
         assert(phase_override==(candidate==17?mode:-99));
         assert(prepare_override==(candidate==20?mode:-99));
-        assert(object_jobs_override==(candidate==19?mode:-99));
+        assert(object_jobs_override==(candidate==19?mode:candidate==17?(mode<0?-1:0):-99));
         assert(basis_override==(candidate==6?mode:-99));
         assert(palette_override==(candidate==7?mode:-99));
         assert(point_override==(candidate==9?mode:-99));

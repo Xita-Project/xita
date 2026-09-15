@@ -137,3 +137,14 @@ draw-scan option now reaches the indexed path, using NEON maximum/popcount
 reductions while keeping exact output order and coverage. ARM checks show fewer
 instructions on tested large lists; physical whole-frame improvement is still
 unmeasured. The option remains off by default.
+
+The [scene-child capture](scene-children-timing-20260915.md) follows the remaining
+scene cost into visibility traversal, model preparation and flare projection.
+The finer historical trace leaves only 0.242 ms/frame in the scene wrapper
+itself. Bounded captures now keep serial object scheduling in all three arms,
+then restore the configured worker policy, so scheduling differences cannot be
+mistaken for tracing overhead. The exact candidate completes three valid emulator
+trace windows and resumes both object workers afterward. The cryo view enters the
+visibility-query wrapper 292 times/frame; audit its immediate submission path
+next. Entries include rejected queries and are not GPU draw counts. Hardware
+attribution remains required before claiming a larger native batch will help.
