@@ -154,8 +154,12 @@ fail:
 int xv_object_jobs_begin(xctx *c)
 {
     static int configured=-1;
-    if(configured<0) { const char *e=getenv("XV_EXPERIMENTAL_OBJECT_JOBS");configured=e&&atoi(e)!=0; }
+    if(configured<0) { const char *e=getenv("XV_EXPERIMENTAL_OBJECT_JOBS");configured=e?atoi(e)!=0:1; }
     if(!(override<0?configured:override)||owner||xv_phase_enabled||xv_is_object_job(c))return 0;
+    /* Map construction/cinematic initialization has ordering dependencies.
+     * Only opt into jobs once the owner observes a rendered gameplay view. */
+    extern int xd3d_object_jobs_ready(void) __attribute__((weak));
+    if(!xd3d_object_jobs_ready || !xd3d_object_jobs_ready())return 0;
     if(!initialize())return 0;
     owner=c;return 1;
 }

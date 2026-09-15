@@ -397,6 +397,21 @@ void xv_hle_D3DDevice_SetViewport(xctx *c)
 void xv_hle_D3DDevice_SetTransform(xctx *c) { XD3D_COUNT("D3DDevice_SetTransform"); X_RET(2); }
 void xv_hle_D3DDevice_GetTransform(xctx *c) { XD3D_COUNT("D3DDevice_GetTransform"); memset(X_G(X_ARG(1)), 0, 64); X_MF32(X_ARG(1)) = X_MF32(X_ARG(1) + 20) = X_MF32(X_ARG(1) + 40) = X_MF32(X_ARG(1) + 60) = 1.0f; X_RET(2); }
 
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+/* Called only by the guest owner, before any object jobs are submitted.
+ * Each new map and scripted-camera transition must re-establish gameplay. */
+int xd3d_object_jobs_ready(void)
+{
+    static unsigned last_frame, stable_frames;
+    uint32_t gg=X_M32(0x2F8CA0u),mode=X_M32(0x271100u);
+    if(xk_file_in_ui_map||!gg||!X_M8(gg)||!X_M8(gg+1)||X_M8(gg+2)||
+       X_M32(0x2E4000u)||(mode!=0x11E750u&&mode!=0x11DF50u)||
+       g_vp_frame!=g_dev.frame-1u) { stable_frames=0;last_frame=g_dev.frame;return 0; }
+    if(last_frame!=g_dev.frame) {last_frame=g_dev.frame;if(stable_frames<3)stable_frames++;}
+    return stable_frames>=3;
+}
+#endif
+
 /* Read-only camera signature for the resolution comparison. */
 int xd3d_benchmark_view(float view[6])
 {

@@ -8,6 +8,8 @@
 #include <time.h>
 uint8_t *g_xram,*g_img_base;uint32_t *g_xpt;
 int xv_phase_enabled;
+static int gameplay_ready=1;
+int xd3d_object_jobs_ready(void) {return gameplay_ready;}
 static unsigned allocations;
 enum { N=300,TABLE=0x23000,CLUSTERS=0x24000,HEADS=0x50000,LOCATION=0x60000 };
 void f_000565E0(xctx *);void f_00056670(xctx *);

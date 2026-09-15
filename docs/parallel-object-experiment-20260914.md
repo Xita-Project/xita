@@ -16,7 +16,8 @@ whole gap to 30 FPS.
 ## Implemented prototype
 
 - A build flag, `XV_EXPERIMENTAL_OBJECT_JOBS=1`, includes the prototype. Ordinary
-  builds omit it. Its runtime setting defaults off.
+  builds omit it. After the owner requested hardware deployment, the dedicated
+  experimental build defaults it on; `XV_EXPERIMENTAL_OBJECT_JOBS=0` disables it.
 - The second object pass queues its original `8FB70` callbacks. Two real SCE
   worker threads request cores 0 and 1. The guest owner also executes jobs when
   joining the batch. This executes game routines, beyond the existing copy work.
@@ -69,7 +70,7 @@ Halo CE menu and campaign cryo room in the isolated emulator. The first concurre
 run creates both worker threads with the requested user-core masks, then stops
 during the on-arm settling period when an object callback exhausts its loop
 budget. There is no completed comparison or performance gain from this run.
-Resolving that callback dependency is the next implementation task.
+The first list/datum synchronization fix below gets past that failure.
 The worker affinity requests use the SDK user-core masks (`0x10000`/`0x20000`).
 The native clipping helper also guards its counters and avoids owner trace globals
 when called from an object worker.
@@ -93,5 +94,30 @@ object's membership, rejects cycles and checks both datum-pool counts. Address/
 undefined-behavior sanitizers and ThreadSanitizer pass. Removing only the four
 transaction guards in a private negative control produces a ThreadSanitizer
 data race in datum allocation. This establishes the shared-list race and guard
-coverage in the fixture, not safety of every game callback. The patched campaign
-run is pending.
+coverage in the fixture, not safety of every game callback. The patched campaign completes the full
+emulator off/on/off test with stable camera and restoration. Four logged
+60-pass windows each complete 3,480 callbacks distributed across both workers
+and the owner. The emulator is capped at 20 FPS, so its near-cap results do not
+establish a hardware performance gain. Hardware validation remains pending.
+
+### Hardware startup follow-up
+
+The first default-on package was installed through Wi-Fi with the prior working
+runtime preserved in slot A. Physical thread records confirm the two SCE workers
+running on core 0 (`0x10000`) and core 1 (`0x20000`). The captured enlisted-player
+screen has no object callbacks to submit, so this is thread-affinity evidence,
+not completed gameplay-work evidence. The owner then reported a Blood Gulch
+loading crash. The Vita was restored to the working slot while the next patch
+was prepared; the first default-on package is not a successful hardware test.
+
+Default-on emulator startup also exposed loop failures in collision traversals
+`86F50` and `87EA0`. A gate that requires an active first-person or vehicle view,
+fresh view data, and three distinct rendered frames prevents jobs during menu,
+loading and scripted-camera states. It resets whenever that readiness is lost.
+The gate's production-body tests pass, but the gate alone did not fix the
+collision failure. The current candidate also guards the complete `96430`
+object callback, the only direct child of `8FB70` whose audited call graph
+reaches those traversals. This uses the same recursive shared-state mutex; other
+parts of `8FB70` remain outside it. Its complete 1,025-byte signature is checked.
+This is a pending concurrency experiment, not proof of an independent collision
+subsystem or a hardware FPS gain.

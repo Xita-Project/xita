@@ -21,6 +21,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
         str(root/'recomp/kernel/xk_math.c'),str(root/'recomp/xv_x86rt.c'),
         '-pthread','-Wl,--gc-sections','-lm','-o',str(binary)],check=True)
     subprocess.run([str(binary)],check=True,timeout=30)
+    subprocess.run([str(binary),"default-on"],check=True,timeout=10)
     def no_core(): resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     failure=subprocess.run([str(binary),'unsupported-hle'],capture_output=True,
                            timeout=10,preexec_fn=no_core)

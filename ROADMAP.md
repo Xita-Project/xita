@@ -21,8 +21,12 @@ original main menu in Vita3K. See the [implementation order](docs/performance-ne
 the next task now runs whole second-pass object callbacks on workers requesting
 cores 0 and 1, with the guest owner participating. This follows explicit approval
 to accept broken gameplay/rendering while finding dependencies. The ordinary
-build remains separate. Host scheduling/control checks pass; actual Halo
-execution and frame-rate benefit remain unverified.
+build remains separate. Host scheduling/control checks pass. The first actual
+campaign run exposed a shared cluster-list race; guarded list/datum operations
+now complete the emulator off/on/off trial with real work on all three threads.
+Physical worker affinity is verified, but the first default-on build crashed
+while loading Blood Gulch and was rolled back. The follow-up protects collision
+work and gates jobs on loaded gameplay; hardware frame-rate benefit is unverified.
 
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.

@@ -9,6 +9,8 @@
 
 uint8_t *g_xram,*g_img_base; uint32_t *g_xpt;
 int xv_phase_enabled;
+static int gameplay_ready=1;
+int xd3d_object_jobs_ready(void) {return gameplay_ready;}
 static unsigned writes[300],active,peak,allocations;
 int xv_math_point_transform(xctx *c);
 uint64_t xk_os_monotonic_us(void)
@@ -47,9 +49,16 @@ int main(int argc,char **argv)
     for(unsigned i=0;i<300;i++) {X_MF32(0x50000+i*12)=(float)i;X_MF32(0x50004+i*12)=1;X_MF32(0x50008+i*12)=2;}
     setenv("XV_EXPERIMENTAL_OBJECT_JOBS","0",1);
     xctx c={0};c.r[4]=0x20000;c.fs_base=0x10000;
+    if(argc>1&&!strcmp(argv[1],"default-on")) {
+        unsetenv("XV_EXPERIMENTAL_OBJECT_JOBS");
+        assert(xv_object_jobs_begin(&c));xv_object_jobs_finish(&c);xv_object_jobs_shutdown();
+        puts("PASS: dedicated experimental build starts object workers by default");
+        free(g_xram);free(g_xpt);return 0;
+    }
     assert(!xv_object_jobs_begin(&c));
     xv_object_jobs_override(0);assert(allocations==3);assert(!xv_object_jobs_begin(&c));
     xv_object_jobs_override(1);
+    gameplay_ready=0;assert(!xv_object_jobs_begin(&c));gameplay_ready=1;
     xv_phase_enabled=1;assert(!xv_object_jobs_begin(&c));xv_phase_enabled=0;
     assert(xv_object_jobs_begin(&c));assert(!xv_object_jobs_begin(&c));
     X_M32(c.r[4])=0x902DF;assert(!xv_object_jobs_queue(&c));
