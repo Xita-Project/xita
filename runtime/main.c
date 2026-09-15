@@ -60,6 +60,7 @@
 #include "xv_shader.h"
 #include "xv_d3d.h"
 #include "xv_vertex_upload.h"
+#include "xv_vertex_prepare.h"
 #include "xv_scene.h"
 #include "xv_quality_settings.h"
 #include "xv_ui_gxm.h"
@@ -1236,6 +1237,10 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
+    if (xv_benchmark_compare_vertex_prepare()) {
+        xv_vertex_prepare_override(enabled,16384);
+        return;
+    }
     if (xv_benchmark_compare_object_jobs()) {
         extern void xv_object_jobs_override(int) __attribute__((weak));
         if(xv_object_jobs_override)xv_object_jobs_override(enabled);

@@ -94,3 +94,65 @@ Private candidate `vertex-prepare2` runtime SHA256:
 The package contract is unchanged. Captures, complete logs, build identity and
 sanitizer output are retained outside Git under
 `2026-09-13-worker-sizing/validation/engine-restructure-20260914T2300Z`.
+
+## Controlled comparison
+
+The authenticated remote command accepts
+`benchmark OUTPUT --kind vertex-prepare --runs 1`. It holds resolution and the other graphics/CPU options fixed while
+running 60 settling and 120 measured frames each with preparation on the owner,
+on core 0, then on the owner again. The middle arm uses a 16 KiB batch cutoff;
+this deliberately includes batches missed by the default 64 KiB cutoff without
+dispatching every small draw. Source snapshots and GPU-copy semantics are the
+same in every arm. Preparation timings overlap material work and must not be
+added to whole-frame time.
+
+Worker availability is checked by the recording owner before a comparison
+starts. Phase changes drain outstanding frame work, and the original enabled
+setting and configured cutoff return on completion, cancellation or loss of the
+gameplay view. No saved setting is rewritten. A build without this worker, or a
+worker that fails initialization, declines the comparison.
+
+Production worker tests cover an initially disabled configuration as well as
+restoring an enabled configuration with a different cutoff. The state machine
+covers all three exit paths and failed availability; the real frame-boundary
+code and remote HTTP/client tests include this mode. The modified worker passes
+ASan/UBSan and ThreadSanitizer, including 600 upload-slot generations with both
+actual worker implementations. The benchmark state machine passes ASan/UBSan.
+The native package builds and retains the existing asset contract. These checks
+establish a runnable comparison, not a measured improvement on physical Vita.
+
+
+The earlier `vertex-prepare2` candidate has now also completed Warthog driver
+entry, forward movement into the cliff, reversing, steering away and driving
+along the field, followed by exit. Screenshots and changing world-camera
+positions confirm vehicle movement. The final preserved emulator log contains
+489 profiling windows, 861,017 completed worker batches and no STOP record.
+This includes substantial stationary time and is not a sustained-driving FPS
+measurement. The hardware crash remains unresolved; an emulator pass cannot
+exclude it. The physical remote status request still timed out at this
+checkpoint, and no physical update was performed.
+
+
+Candidate `vertex-compare` (runtime SHA256
+`812d667068ce5cf927593c561f2e10edf3da06914e8656e9d7261da1d0c5ef3d`)
+completes the real remote comparison in Blood Gulch. Each measured off arm
+reports zero worker batches; the on arm reports 1440 completed worker batches
+per 60-frame window with the 16 KiB cutoff. All three camera checks match. The
+saved 4 KiB emulator cutoff returns after completion and dispatch resumes.
+The 20 FPS emulator cap binds every arm, so its approximately 19.97 FPS results
+are only validation of phase switching, ownership and restoration. They do not
+measure the benefit or cost on Vita. The existing object-worker options and
+all other settings remain the same across these arms; the off arms isolate
+this one change within that configuration, not an unmodified-engine baseline.
+
+
+The same candidate subsequently completes two charged plasma shots in Blood
+Gulch and returns through Leave Game to the original main menu. Pillar of
+Autumn loads through the campaign menu into the cryo-room first-person view;
+turning and walking work. A second real comparison completes there with matching
+camera checks, zero worker batches in measured off windows, and 3120 completed
+worker batches per 60-frame on window. The largest observed batch is 331,520
+bytes. The 4 KiB configured cutoff and normal worker dispatch return afterward.
+These are cryo-room functional checks; NPC combat and hardware performance are
+still unverified for this candidate. No checkpoint-resume conclusion is drawn
+from this load-level path.

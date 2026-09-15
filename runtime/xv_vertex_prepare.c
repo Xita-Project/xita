@@ -12,7 +12,9 @@ static SceUID thread=-1, wake=-1, done=-1;
 static int unavailable, stopping, complete;
 static xv_vertex_prepare_batch *pending;
 static unsigned batches, inline_batches, maximum_bytes;
-static int minimum_bytes=65536;
+static int minimum_bytes=65536, enabled=-1, override_enabled=-1;
+static unsigned override_minimum;
+static unsigned cutoff(void) { return override_enabled<0 ? (unsigned)minimum_bytes : override_minimum; }
 static uint64_t bytes_total, worker_us, join_us, dispatch_us;
 
 static void execute(xv_vertex_prepare_batch *b)
@@ -70,10 +72,19 @@ fail:
     xv_logf("[cpu-work] vertex preparation unavailable (thread %d wake %d done %d); caller fallback\n",thread,wake,done);
     release_handles();unavailable=1;return 0;
 }
+/* Called on the recording owner at a drained benchmark boundary. */
+int xv_vertex_prepare_available(void)
+{ assert(!pending);return start_worker(); }
+void xv_vertex_prepare_override(int value,unsigned minimum)
+{
+    assert(!pending);
+    assert(value<0 || (minimum>=1 && minimum<=32u*1024u*1024u));
+    override_enabled=value<0 ? -1 : !!value;
+    override_minimum=minimum;
+}
 void xv_vertex_prepare_begin(xv_vertex_prepare_batch *b)
 {
     assert(b && !pending);
-    static int enabled=-1;
     if(enabled<0) {
         enabled=xv_quality_int("XV_VERTEX_PREPARE",0,0,1);
         minimum_bytes=xv_quality_int("XV_VERTEX_PREPARE_MIN_BYTES",65536,1,32*1024*1024);
@@ -83,7 +94,7 @@ void xv_vertex_prepare_begin(xv_vertex_prepare_batch *b)
         for(unsigned i=0;i<b->count;i++)bytes+=b->streams[i].bytes;
     if(bytes>maximum_bytes)maximum_bytes=bytes>UINT32_MAX?UINT32_MAX:(unsigned)bytes;
     b->ok=0;
-    if(enabled && b->count<=XV_VERTEX_PREPARE_STREAMS && bytes>=(unsigned)minimum_bytes && start_worker()) {
+    if((override_enabled<0 ? enabled : override_enabled) && b->count<=XV_VERTEX_PREPARE_STREAMS && bytes>=cutoff() && start_worker()) {
         uint64_t start=sceKernelGetProcessTimeWide();
         __atomic_store_n(&complete,0,__ATOMIC_RELAXED);
         __atomic_store_n(&pending,b,__ATOMIC_RELEASE);
@@ -124,8 +135,8 @@ void xv_vertex_prepare_shutdown(void)
 void xv_vertex_prepare_report(unsigned frames)
 {
     assert(!pending);
-    if(batches || inline_batches)xv_logf("[vertex-prepare] %u frames: %u worker / %u inline batches, %llu KiB; worker %llu us, dispatch %llu us, join %llu us; max %u cutoff %d bytes (overlapping times)\n",
+    if(batches || inline_batches)xv_logf("[vertex-prepare] %u frames: %u worker / %u inline batches, %llu KiB; worker %llu us, dispatch %llu us, join %llu us; max %u cutoff %u bytes (overlapping times)\n",
         frames,batches,inline_batches,(unsigned long long)(bytes_total>>10),
-        (unsigned long long)worker_us,(unsigned long long)dispatch_us,(unsigned long long)join_us,maximum_bytes,minimum_bytes);
+        (unsigned long long)worker_us,(unsigned long long)dispatch_us,(unsigned long long)join_us,maximum_bytes,cutoff());
     batches=inline_batches=maximum_bytes=0;bytes_total=worker_us=dispatch_us=join_us=0;
 }

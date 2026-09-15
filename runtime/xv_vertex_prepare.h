@@ -21,6 +21,10 @@ typedef struct {
 /* Disabled/unavailable/small batches execute synchronously. Always finish. */
 void xv_vertex_prepare_begin(xv_vertex_prepare_batch *batch);
 int xv_vertex_prepare_finish(xv_vertex_prepare_batch *batch);
+/* Recording owner only at a drained boundary. Negative value restores both
+ * configured enable state and cutoff; comparison cutoff is explicit. */
+int xv_vertex_prepare_available(void);
+void xv_vertex_prepare_override(int value, unsigned minimum_bytes);
 void xv_vertex_prepare_shutdown(void);
 void xv_vertex_prepare_report(unsigned frames);
 #endif

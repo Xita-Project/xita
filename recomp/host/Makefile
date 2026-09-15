@@ -480,7 +480,17 @@ build/no_guest_affinity_benchmark_test: resolution_benchmark_test.c ../../runtim
 .PHONY: test-vertex-prepare
 test-vertex-prepare: build/vertex_prepare_test
 	./build/vertex_prepare_test
+	./build/vertex_prepare_test configured-off
 
 build/vertex_prepare_test: vertex_prepare_test.c vertex_upload_test.c ../../runtime/xv_vertex_prepare.c ../../runtime/xv_vertex_prepare.h ../../runtime/xv_vertex_upload.c ../../runtime/xv_upload_worker.c
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include vertex_prepare_test.c ../../runtime/xv_upload_worker.c -pthread -o $@
+
+.PHONY: test-vertex-prepare-benchmark
+test-vertex-prepare-benchmark: build/resolution_benchmark_test build/no_vertex_prepare_benchmark_test
+	./build/resolution_benchmark_test
+	./build/no_vertex_prepare_benchmark_test
+
+build/no_vertex_prepare_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_VERTEX_PREPARE resolution_benchmark_test.c -lm -o $@

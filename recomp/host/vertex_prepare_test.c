@@ -118,17 +118,38 @@ static void reset(void)
     for(unsigned i=10;i<hid;i++)assert(!handles[i].type);
     memset(handles,0,sizeof handles);hid=10;next_id=1;create_calls=fail_create=0;
 }
-int main(void)
+int main(int argc,char **argv)
 {
-    setenv("XV_VERTEX_PREPARE","1",1);
+    setenv("XV_VERTEX_PREPARE",argc>1?"0":"1",1);
     unsigned char *src=malloc(65536),*expected=malloc(65536);assert(src && expected);
     for(unsigned i=0;i<65536;i++)src[i]=(unsigned char)(i*17+23);
     xv_vertex_prepare_batch b={.slot=0,.count=1,.streams={{.source=src,.bytes=65536}}};
+    if(argc>1) {
+        /* Off/on/off and restoration must use the real runtime setting. */
+        assert(xv_vertex_prepare_available());
+        for(int mode=0;mode<4;mode++) {
+            int value=mode==3?-1:mode==1;
+            xv_vertex_prepare_override(value,16384);
+            xv_vertex_prepare_begin(&b);
+            assert(!!pending==(mode==1));
+            assert(xv_vertex_prepare_finish(&b));
+            assert(!memcmp(b.streams[0].result,src,65536));
+        }
+        assert(cutoff()==65536 && enabled==0 && override_enabled==-1);
+        reset();free(src);free(expected);
+        puts("PASS: actual disabled/on/off/restore behavior and configured cutoff restored");return 0;
+    }
     for(unsigned fail=1;fail<=4;fail++) {
         fail_create=fail;xv_vertex_prepare_begin(&b);assert(xv_vertex_prepare_finish(&b));
         assert(!memcmp(b.streams[0].result,src,65536));reset();
     }
     fail_wake=1;xv_vertex_prepare_begin(&b);assert(!pending && xv_vertex_prepare_finish(&b));reset();
+    /* Explicit comparison cutoff and restoration to enabled configuration. */
+    xv_vertex_prepare_override(1,131072);
+    xv_vertex_prepare_begin(&b);assert(!pending && xv_vertex_prepare_finish(&b));
+    xv_vertex_prepare_override(-1,16384);
+    xv_vertex_prepare_begin(&b);assert(pending && xv_vertex_prepare_finish(&b));
+    assert(cutoff()==65536 && enabled==1);reset();
     /* Owner material work demonstrably proceeds while the source loan is live. */
     __atomic_store_n(&pause_prepare,1,__ATOMIC_RELEASE);
     xv_vertex_prepare_begin(&b);assert(pending==&b);
