@@ -133,7 +133,7 @@ map and Slayer menus on the physical Vita. Saved graphics remain unchanged at
 from 100 to 99; a held/released charged shot reduces it to 88. Both completed-frame
 captures return normally and the game continues running.
 
-The full captured log records **one quiescent owner deferred audio commit**, with
+The full captured log records **two quiescent owner deferred audio commits**, with
 no worker STOP or fragment-uniform error. This exercises the service that stopped
 both preceding physical runs. It closes the reproduction for this specific
 commit handoff; it is not a claim of complete combat/rocket stability. Stream
@@ -144,3 +144,5 @@ Evidence: `physical-object-audio-commit/gameplay/`, including captures, the full
 log and a result receipt with the exact runtime, log hash, frame advancement and
 service counts. Performance in this stationary view is around 9–10 FPS at native
 resolution; this was a correctness check, not a benchmark or demonstrated gain.
+The full log SHA-256 is
+`46c0586460565675f34d5b34bdeef245fa0731257cf57b5f98b632ef4f2a662d`.
