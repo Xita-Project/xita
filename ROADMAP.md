@@ -69,6 +69,16 @@ The prototype requires an explicit build flag and is not installed on hardware.
 Next: establish ownership and dependencies for that model-update work before
 batching it across workers.
 
+The [combined worker comparison](docs/object-workers-combined-20260915.md) now
+tests the current lightweight-lock/private-math build with object workers off,
+on and off. Six physical native-resolution trials across two Blood Gulch views
+place workers on at 9.12/9.19 FPS versus 9.68/9.66 off: about 5–6% slower.
+The previous mutex-backend improvement remains valid, but a net whole-object
+parallel gain is not established in these views. Normal and charged plasma shots
+complete. The [model ownership follow-up](docs/model-update-ownership-20260915.md)
+traces concrete bounds readers and nested collision paths; next is the serial
+native hierarchy extraction with explicit inputs/outputs before new scheduling.
+
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.
 An optional diagnostic splits comparison/copy cost by span size; it adds no
