@@ -124,3 +124,23 @@ receipts and the returned dashboard capture are saved privately in
 update. Both experimental object workers and the lightweight-mutex default
 remain enabled. The next hardware check is normal and charged plasma firing,
 then continued walking/combat to expose any further worker-service dependency.
+
+## Physical firing retest
+
+Runtime `d44b9936…` subsequently enters Blood Gulch through the normal profile,
+map and Slayer menus on the physical Vita. Saved graphics remain unchanged at
+960×544 native. A normal plasma shot into the blue-base entrance reduces charge
+from 100 to 99; a held/released charged shot reduces it to 88. Both completed-frame
+captures return normally and the game continues running.
+
+The full captured log records **one quiescent owner deferred audio commit**, with
+no worker STOP or fragment-uniform error. This exercises the service that stopped
+both preceding physical runs. It closes the reproduction for this specific
+commit handoff; it is not a claim of complete combat/rocket stability. Stream
+volume updates remain zero in this sample. The game is left running at the
+blue-base entrance, with controller input released.
+
+Evidence: `physical-object-audio-commit/gameplay/`, including captures, the full
+log and a result receipt with the exact runtime, log hash, frame advancement and
+service counts. Performance in this stationary view is around 9–10 FPS at native
+resolution; this was a correctness check, not a benchmark or demonstrated gain.

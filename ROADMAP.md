@@ -39,7 +39,9 @@ The next physical valley walk reached a different STOP when firing the plasma
 pistol: a deferred audio-settings commit. The
 [commit/fade handoff](docs/object-audio-commit-20260915.md) services that call and
 the following stream-volume path on the owner, retaining both workers. Host
-memory/race checks and the native build pass; physical firing retesting remains.
+memory/race checks and the native build pass. The installed candidate completes
+normal and charged plasma shots on hardware, and its log confirms the formerly
+rejected audio commit executes successfully. Broader combat stability remains.
 The walk includes a 13.9 FPS logged window at 848×480; it is not a controlled
 gain measurement or a sustained-frame-rate result.
 
