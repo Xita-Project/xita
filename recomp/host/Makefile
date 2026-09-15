@@ -521,3 +521,12 @@ test-object-lock-benchmark: build/resolution_benchmark_test build/no_object_lock
 build/no_object_lock_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_OBJECT_LOCK resolution_benchmark_test.c -lm -o $@
+
+.PHONY: test-object-wait-benchmark
+test-object-wait-benchmark: build/resolution_benchmark_test build/no_object_wait_benchmark_test
+	./build/resolution_benchmark_test
+	./build/no_object_wait_benchmark_test
+
+build/no_object_wait_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_OBJECT_WAIT resolution_benchmark_test.c -lm -o $@

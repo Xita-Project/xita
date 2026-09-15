@@ -54,6 +54,14 @@ driving gains remain unverified. [Private math](docs/object-private-math-2026091
 alone did not improve the earlier kernel-mutex comparison. Both changes remain
 available for combined testing. Neither sustained frame-rate target is complete.
 
+A [bounded mutex-wait candidate](docs/object-bounded-wait-20260915.md) replaces
+contended sleep/poll attempts with finite waits that wake on unlock. It retains
+both workers and all owner-service/critical-section rules. Host memory/race and
+emulator switching checks pass. Three physical native-resolution comparisons
+regress from about 9.1–9.2 to 7.2–7.3 FPS, with far more contended handoffs. The
+existing wait is restored; the candidate stays off. Next: reduce lock frequency
+where math inputs and outputs are wholly worker-owned.
+
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.
 An optional diagnostic splits comparison/copy cost by span size; it adds no

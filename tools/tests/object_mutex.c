@@ -11,6 +11,7 @@ static pthread_mutex_t locks[2];
 static SceKernelLwMutexWork *work;
 static int fail_full,fail_light,fault;
 static unsigned created[2],deleted[2],tries[2],waits[2],releases[2],value;
+static unsigned bounded_started;
 static xv_object_mutex tested;
 static void init(unsigned i)
 {
@@ -36,18 +37,40 @@ static int attempt(unsigned i)
 }
 int sceKernelTryLockMutex(SceUID id,int count) {assert(id==17&&count==1);return attempt(0);}
 int sceKernelTryLockLwMutex(SceKernelLwMutexWork *p,int count) {assert(p==work&&count==1);return attempt(1);}
-static int wait_lock(unsigned i)
-{__atomic_add_fetch(&waits[i],1,__ATOMIC_RELAXED);return fault==2?-1:pthread_mutex_lock(&locks[i]);}
+static int wait_lock(unsigned i,unsigned *timeout)
+{
+    __atomic_add_fetch(&waits[i],1,__ATOMIC_RELAXED);
+    if(!timeout)return fault==2?-1:pthread_mutex_lock(&locks[i]);
+    assert(*timeout==50||*timeout==1000000);
+    if(fault==4)return -1;
+    struct timespec deadline;assert(!clock_gettime(CLOCK_REALTIME,&deadline));
+    deadline.tv_sec+=*timeout/1000000;deadline.tv_nsec+=(*timeout%1000000)*1000;
+    if(deadline.tv_nsec>=1000000000L){deadline.tv_sec++;deadline.tv_nsec-=1000000000L;}
+    __atomic_store_n(&bounded_started,1,__ATOMIC_RELEASE);
+    int result=pthread_mutex_timedlock(&locks[i],&deadline);
+    *timeout=0; /* Verify each subsequent attempt resets its budget. */
+    return result==ETIMEDOUT?(int)SCE_KERNEL_ERROR_WAIT_TIMEOUT:result;
+}
 int sceKernelLockMutex(SceUID id,int count,unsigned *timeout)
-{assert(id==17&&count==1&&!timeout);return wait_lock(0);}
+{assert(id==17&&count==1);return wait_lock(0,timeout);}
 int sceKernelLockLwMutex(SceKernelLwMutexWork *p,int count,unsigned *timeout)
-{assert(p==work&&count==1&&!timeout);return wait_lock(1);}
+{assert(p==work&&count==1);return wait_lock(1,timeout);}
 static int release(unsigned i)
 {__atomic_add_fetch(&releases[i],1,__ATOMIC_RELAXED);return fault==3?-1:pthread_mutex_unlock(&locks[i]);}
 int sceKernelUnlockMutex(SceUID id,int count) {assert(id==17&&count==1);return release(0);}
 int sceKernelUnlockLwMutex(SceKernelLwMutexWork *p,int count) {assert(p==work&&count==1);return release(1);}
 static void *contend(void *unused)
-{(void)unused;assert(xv_object_mutex_try(&tested)==1);return NULL;}
+{
+    (void)unused;assert(xv_object_mutex_try(&tested)==1);
+    assert(xv_object_mutex_wait_bounded(&tested,50)==1);
+    assert(xv_object_mutex_wait_bounded(&tested,50)==1);
+    return NULL;
+}
+static void *wake_on_release(void *unused)
+{
+    (void)unused;assert(!xv_object_mutex_wait_bounded(&tested,1000000));
+    value++;xv_object_mutex_release(&tested);return NULL;
+}
 static void *increment(void *unused)
 {
     (void)unused;
@@ -65,6 +88,7 @@ int main(int argc,char **argv)
         if(fault==1)xv_object_mutex_try(&tested);
         if(fault==2)xv_object_mutex_wait(&tested);
         if(fault==3)xv_object_mutex_release(&tested);
+        if(fault==4)xv_object_mutex_wait_bounded(&tested,50);
         assert(0);
     }
     fail_full=1;assert(xv_object_mutex_init(&tested,1)==-1);
@@ -87,6 +111,17 @@ int main(int argc,char **argv)
             pthread_t other;assert(!pthread_create(&other,NULL,contend,NULL));assert(!pthread_join(other,NULL));
             xv_object_mutex_release(&tested);xv_object_mutex_release(&tested);
             assert(tries[selected]==previous_tries[selected]+3&&tries[!selected]==previous_tries[!selected]);
+            assert(!xv_object_mutex_wait_bounded(&tested,50));
+            assert(!xv_object_mutex_wait_bounded(&tested,50)); /* Recursive. */
+            xv_object_mutex_release(&tested);xv_object_mutex_release(&tested);
+            xv_object_mutex_wait(&tested);value=0;
+            __atomic_store_n(&bounded_started,0,__ATOMIC_RELEASE);
+            assert(!pthread_create(&other,NULL,wake_on_release,NULL));
+            while(!__atomic_load_n(&bounded_started,__ATOMIC_ACQUIRE)) {
+                struct timespec delay={0,1000};nanosleep(&delay,NULL);
+            }
+            xv_object_mutex_release(&tested);
+            assert(!pthread_join(other,NULL));assert(value==1);
             value=0;pthread_t a,b;
             assert(!pthread_create(&a,NULL,increment,NULL));assert(!pthread_create(&b,NULL,increment,NULL));
             assert(!pthread_join(a,NULL));assert(!pthread_join(b,NULL));assert(value==2000);

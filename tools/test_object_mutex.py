@@ -20,8 +20,8 @@ with tempfile.TemporaryDirectory(prefix='xita-object-mutex-') as directory:
     subprocess.run([str(binary)],check=True,timeout=20)
     def no_core():resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     for light in ('0','1'):
-        for fault in ('1','2','3'):
+        for fault in ('1','2','3','4'):
             result=subprocess.run([str(binary),light,fault],capture_output=True,
                 timeout=10,preexec_fn=no_core)
             assert result.returncode==-signal.SIGABRT,(light,fault,result.returncode)
-    print('PASS: unexpected try/lock/unlock errors terminate for both backends')
+    print('PASS: bounded timeout, reset, unlock wake and unexpected try/lock/unlock/timed errors for both backends')

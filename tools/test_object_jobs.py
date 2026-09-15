@@ -44,30 +44,37 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
         str(root/'tools/tests/object_jobs.c'),str(d3d),str(audio),str(root/'recomp/kernel/xk_object_jobs.c'),
         str(root/'recomp/kernel/xk_math.c'),str(root/'recomp/xv_x86rt.c'),
         '-pthread','-Wl,--gc-sections','-lm','-o',str(binary)],check=True)
-    for profile in ("0", "1"):
-        for workers in ("2", "1", "0"):
-            env=dict(os.environ,XV_OBJECT_JOB_WORKERS=workers,XV_OBJECT_LOCK_PROFILE=profile)
-            result=subprocess.run([str(binary)],check=True,timeout=30,env=env,
-                                  capture_output=True,text=True)
-            print(result.stdout,end='')
-            assert re.findall(r'quiescent owner stream volume updates (\d+)',result.stderr)==['600','0']
-            assert re.findall(r'quiescent owner deferred audio commits (\d+)',result.stderr)==['600','0']
-            reports=re.findall(r'^\[object-jobs\] (\d+) frames passes (\d+) batches (\d+) jobs (\d+)',result.stderr,re.M)
-            assert reports==[('3','2','6','600'),('3','0','0','0')],reports
-            locks=re.findall(r'contended (\d+)/(\d+) wait-us (\d+)/(\d+);',result.stderr)
-            assert len(locks)==2 and locks[1]==('0','0','0','0'),locks
-            sites=re.findall(r'^\[object-lock-site\] lane (\d+) pc ([0-9A-F]+) count (\d+) wait-us (\d+) max-us (\d+) overflow (\d+)',result.stderr,re.M)
-            if profile=='0': assert not sites
-            else:
-                for lane in range(2):
-                    rows=[tuple(int(x,16 if i==1 else 10) for i,x in enumerate(row))
-                          for row in sites if int(row[0])==lane]
-                    assert sum(row[2] for row in rows)==int(locks[0][lane])
-                    assert sum(row[3] for row in rows)==int(locks[0][lane+2])
-                    assert len(rows)<=33
-                    assert all(row[4]<=row[3] and (row[1]!=0 or row[5]) for row in rows)
-                if workers=='2': assert sites,'two contending worker callbacks must be attributed'
-            print(f'PASS: {workers} workers, profile {profile}: two object passes in three render frames; retired/reset totals and wait-site accounting')
+    for timed in ("0", "1"):
+        for profile in ("0", "1"):
+            for workers in ("2", "1", "0"):
+                env=dict(os.environ,XV_OBJECT_JOB_WORKERS=workers,XV_OBJECT_LOCK_PROFILE=profile,XV_OBJECT_TIMED_WAIT=timed)
+                result=subprocess.run([str(binary)],check=True,timeout=30,env=env,
+                                      capture_output=True,text=True)
+                print(result.stdout,end='')
+                assert re.findall(r'quiescent owner stream volume updates (\d+)',result.stderr)==['600','0']
+                assert re.findall(r'quiescent owner deferred audio commits (\d+)',result.stderr)==['600','0']
+                timed_rows=re.findall(r'\[object-wait\] timed (\d) attempts (\d+)/(\d+) acquired (\d+)/(\d+) timeouts (\d+)/(\d+)',result.stderr)
+                assert len(timed_rows)==2 and timed_rows[1]==(timed,'0','0','0','0','0','0'),timed_rows
+                values=list(map(int,timed_rows[0]));assert values[0]==int(timed)
+                for lane in range(2):assert values[1+lane]==values[3+lane]+values[5+lane]
+                if timed=='0' or workers!='2':assert not any(values[1:])
+                else:assert sum(values[5:])>0,'held owner-service transactions must exercise timeout/park'
+                reports=re.findall(r'^\[object-jobs\] (\d+) frames passes (\d+) batches (\d+) jobs (\d+)',result.stderr,re.M)
+                assert reports==[('3','2','6','600'),('3','0','0','0')],reports
+                locks=re.findall(r'contended (\d+)/(\d+) wait-us (\d+)/(\d+);',result.stderr)
+                assert len(locks)==2 and locks[1]==('0','0','0','0'),locks
+                sites=re.findall(r'^\[object-lock-site\] lane (\d+) pc ([0-9A-F]+) count (\d+) wait-us (\d+) max-us (\d+) overflow (\d+)',result.stderr,re.M)
+                if profile=='0': assert not sites
+                else:
+                    for lane in range(2):
+                        rows=[tuple(int(x,16 if i==1 else 10) for i,x in enumerate(row))
+                              for row in sites if int(row[0])==lane]
+                        assert sum(row[2] for row in rows)==int(locks[0][lane])
+                        assert sum(row[3] for row in rows)==int(locks[0][lane+2])
+                        assert len(rows)<=33
+                        assert all(row[4]<=row[3] and (row[1]!=0 or row[5]) for row in rows)
+                    if workers=='2': assert sites,'two contending worker callbacks must be attributed'
+                print(f'PASS: {workers} workers, profile {profile}, bounded wait {timed}: two object passes in three render frames; retired/reset totals and wait-site accounting')
     subprocess.run([str(binary),"default-on"],check=True,timeout=10)
     def no_core(): resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     failure=subprocess.run([str(binary),'unsupported-hle'],capture_output=True,

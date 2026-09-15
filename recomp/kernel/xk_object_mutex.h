@@ -10,6 +10,7 @@
 #else
 #include <pthread.h>
 #include <errno.h>
+#include <time.h>
 #endif
 
 typedef struct {
@@ -75,6 +76,27 @@ static inline void xv_object_mutex_wait(xv_object_mutex *m)
     int result=pthread_mutex_lock(&m->full);
 #endif
     if(result)abort();
+}
+/* A worker must periodically acknowledge quiescent owner services even while
+ * another worker retains this guard. Never use an infinite wait for that path.
+ * Firmware may update timeout; give every attempt its own original budget. */
+static inline int xv_object_mutex_wait_bounded(xv_object_mutex *m,unsigned timeout_us)
+{
+#ifdef __vita__
+    unsigned timeout=timeout_us;
+    int result=m->use_light?sceKernelLockLwMutex(&m->light,1,&timeout):sceKernelLockMutex(m->full,1,&timeout);
+    if(result==(int)SCE_KERNEL_ERROR_WAIT_TIMEOUT)return 1;
+#else
+    struct timespec deadline;
+    if(clock_gettime(CLOCK_REALTIME,&deadline))abort();
+    deadline.tv_sec+=timeout_us/1000000u;
+    deadline.tv_nsec+=(long)(timeout_us%1000000u)*1000;
+    if(deadline.tv_nsec>=1000000000L) {deadline.tv_nsec-=1000000000L;deadline.tv_sec++;}
+    int result=pthread_mutex_timedlock(&m->full,&deadline);
+    if(result==ETIMEDOUT)return 1;
+#endif
+    if(result)abort();
+    return 0;
 }
 static inline void xv_object_mutex_release(xv_object_mutex *m)
 {

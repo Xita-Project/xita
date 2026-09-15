@@ -62,6 +62,11 @@ static struct __attribute__((aligned(64))) {
  * This identifies waiters, not the helper holding the mutex during the wait. */
 enum { WAIT_SITES=32 };
 static unsigned math_profile;
+static unsigned math_wait_enabled;
+static int math_wait_override=-1;
+static struct __attribute__((aligned(64))) {
+    unsigned attempts, acquired, timeouts;
+} math_wait_stats[WORKERS];
 static unsigned math_private_enabled=1;
 static int math_private_override=-1;
 static struct __attribute__((aligned(64))) {
@@ -248,13 +253,25 @@ __attribute__((noinline)) int xv_object_math_lock(void)
         if(math_fast_path&&math_depth[lane]) {
             math_depth[lane]++;math_stats[lane].nested++;return lane+2;
         }
-        if(!xv_object_mutex_try(&math_mutex)) {
+        int acquired=!xv_object_mutex_try(&math_mutex);
+        if(!acquired) {
+            if(!waiting) { waiting=xk_os_monotonic_us();math_stats[lane].contended++; }
+            if(math_wait_override<0?math_wait_enabled:(unsigned)math_wait_override) {
+                math_wait_stats[lane].attempts++;
+                acquired=!xv_object_mutex_wait_bounded(&math_mutex,50);
+                if(acquired)math_wait_stats[lane].acquired++;
+                else math_wait_stats[lane].timeouts++;
+            }
+        }
+        if(acquired) {
             math_stats[lane].acquired++;
             if(waiting)record_math_wait((unsigned)lane,(uintptr_t)__builtin_return_address(0),xk_os_monotonic_us()-waiting);
             if(math_fast_path) { math_depth[lane]=1;return lane+2; }
             return 1;
         }
-        if(!waiting) { waiting=xk_os_monotonic_us();math_stats[lane].contended++; }
+        /* A timed-out lock already waited. Return directly to the park check;
+         * adding the old sleep here would defer the service acknowledgement. */
+        if(math_wait_override<0?math_wait_enabled:(unsigned)math_wait_override)continue;
 #ifdef __vita__
         sceKernelDelayThread(50);
 #else
@@ -285,6 +302,16 @@ void xv_object_lock_override(int value)
 {
     if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
     xv_object_mutex_select(&math_mutex,value);
+}
+int xv_object_wait_available(void)
+{
+    return initialized==1&&active_workers&&math_mutex.ready&&!xv_phase_enabled&&
+        (override<0?configured:override)>0;
+}
+void xv_object_wait_override(int value)
+{
+    if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
+    math_wait_override=value<0?-1:!!value;
 }
 static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes)
 {
@@ -388,6 +415,8 @@ static int initialize(void)
     /* Dedicated experimental builds collect contention by default. Set zero
      * for a profiling-overhead comparison; ordinary builds omit this module. */
     math_profile=!profile||atoi(profile)!=0;
+    const char *timed=getenv("XV_OBJECT_TIMED_WAIT");
+    math_wait_enabled=timed&&atoi(timed)!=0;
     const char *private_math=getenv("XV_OBJECT_PRIVATE_MATH");
     math_private_enabled=!private_math||atoi(private_math)!=0;
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
@@ -426,6 +455,7 @@ static int initialize(void)
     XK_LOG("[object-jobs] guest stacks %08X/%08X/%08X, %u bytes each\n",stacks[0],stacks[1],stacks[2],STACK_BYTES);
     XK_LOG("[object-locks] wait-site profiling %s; elapsed waits include scheduling and parked service time\n",math_profile?"on":"off");
     XK_LOG("[object-locks] backend %s; lightweight available %d\n",xv_object_mutex_name(&math_mutex),math_mutex.light_ready);
+    XK_LOG("[object-locks] contention wait %s; 50 us service-check budget\n",math_wait_enabled?"bounded mutex":"sleep/poll");
     XK_LOG("[object-locks] code anchor %llX symbol xv_object_math_lock; private math %s\n",
         (unsigned long long)(uintptr_t)xv_object_math_lock,math_private_enabled?"on":"off");
     XK_LOG("[object-jobs] EXPERIMENT: whole object callbacks on core 0/1; owner services kernel requests and joins; shared game state and reordered updates are unproven\n");
@@ -536,6 +566,12 @@ void xv_object_jobs_report(unsigned frames)
     XK_LOG("[object-jobs] quiescent owner audio pumps %u\n",audio_pumps);audio_pumps=0;
     XK_LOG("[object-jobs] quiescent owner stream volume updates %u\n",audio_volumes);audio_volumes=0;
     XK_LOG("[object-jobs] quiescent owner deferred audio commits %u\n",audio_commits);audio_commits=0;
+    XK_LOG("[object-wait] timed %u attempts %u/%u acquired %u/%u timeouts %u/%u\n",
+        math_wait_override<0?math_wait_enabled:(unsigned)math_wait_override,
+        math_wait_stats[0].attempts,math_wait_stats[1].attempts,
+        math_wait_stats[0].acquired,math_wait_stats[1].acquired,
+        math_wait_stats[0].timeouts,math_wait_stats[1].timeouts);
+    memset(math_wait_stats,0,sizeof math_wait_stats);
     XK_LOG("[object-jobs] probed stack peak bytes %u/%u/%u of %u; excludes unprobed small frames\n",stack_peak[0],stack_peak[1],stack_peak[2],STACK_BYTES);
     XK_LOG("[object-locks] fast %u idle-owner %u acquired %u/%u/%u nested %u/%u contended %u/%u wait-us %llu/%llu; worker waits overlap\n",
         math_fast_path,math_idle_calls,math_stats[0].acquired,math_stats[1].acquired,math_stats[2].acquired,
