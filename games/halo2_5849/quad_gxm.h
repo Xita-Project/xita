@@ -20,3 +20,7 @@ const uint32_t *h2_threshold_gxm_render(void *opaque, const h2_threshold_request
 #include "blur_draw.h"
 const h2_blur_contract *h2_blur_gxm_contract(void);
 const uint32_t *h2_blur_gxm_render(void *opaque, const h2_blur_request *request);
+
+#include "blend_draw.h"
+const h2_blend_contract *h2_blend_gxm_contract(void);
+const uint32_t *h2_blend_gxm_render(void *opaque, const h2_blend_request *request);

@@ -11,6 +11,7 @@ BC1_RENDER ?= 0
 COMPOSITION_RENDER ?= 0
 THRESHOLD_RENDER ?= 0
 BLUR_RENDER ?= 0
+BLEND_RENDER ?= 0
 AUDIO_HOST ?= 0
 AUDIO_DSP ?= 0
 AUDIO_SPATIAL_MODEL ?= 0
@@ -112,6 +113,15 @@ OBJECTS += $(BUILD)/blur_draw.o
 $(BUILD)/host_channel_runtime.o $(BUILD)/quad_gxm.o: CFLAGS += -DH2_BLUR_RENDER=1
 BLUR_FILES = $(addprefix $(BLUR_SHADERS)/,blur.vert.gxp blur.frag.gxp blur.contract.bin)
 BLUR_PACK = $(foreach f,$(BLUR_FILES),-a $(f)=$(notdir $(f)))
+endif
+ifeq ($(BLEND_RENDER),1)
+ifneq ($(BLUR_RENDER),1)
+$(error BLEND_RENDER=1 requires BLUR_RENDER=1)
+endif
+OBJECTS += $(BUILD)/blend_draw.o
+$(BUILD)/host_channel_runtime.o $(BUILD)/quad_gxm.o: CFLAGS += -DH2_BLEND_RENDER=1
+BLEND_FILES = $(addprefix $(BLEND_SHADERS)/,blend.vert.gxp blend.frag.gxp blend.copy.frag.gxp blend.contract.bin)
+BLEND_PACK = $(foreach f,$(BLEND_FILES),-a $(f)=$(notdir $(f)))
 endif
 comma := ,
 WRAPS := xk_MmCreateKernelStack xk_MmDeleteKernelStack xk_MmClaimGpuInstanceMemory xv_unimpl xk_NtOpenFile xk_NtReadFile xk_NtWriteFile xk_NtDeviceIoControlFile xk_NtFsControlFile xk_NtQueryVolumeInformationFile
@@ -274,6 +284,23 @@ $(BUILD)/composition-probe-param.sfo: Makefile
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 Composition Probe" $@
 $(BUILD)/composition%.vpk: $(BUILD)/composition%-eboot.bin $(BUILD)/composition-probe-param.sfo $(addprefix $(COMPOSITION_SHADERS)/,$(COMPOSITION_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/composition-probe-param.sfo -b $(BUILD)/composition$*-eboot.bin $(foreach f,$(COMPOSITION_PROBE_FILES),-a $(COMPOSITION_SHADERS)/$(f)=$(f)) $@
+BLEND_SHADERS ?= $(ROOT)/local/halo2_5849/blend-shaders
+BLEND_PROBE_FILES := blend.vert.gxp blend.frag.gxp blend.copy.frag.gxp blend.constants.bin blend.vertices.bin blend.texture.bin
+.PHONY: blend-probe blend-source-probe
+blend-probe: $(BUILD)/blend-probe.vpk
+blend-source-probe: $(BUILD)/blend-source-probe.vpk
+$(BUILD)/blend-probe.elf $(BUILD)/blend-source-probe.elf: blend_probe.c
+	@mkdir -p $(dir $@)
+	$(CC) -DH2_BLEND_SOURCE_PROBE=$(if $(findstring -source,$(notdir $@)),1,0) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Werror -Wl,-q blend_probe.c -o $@ -lSceGxm_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceProcessmgr_stub
+$(BUILD)/blend%.velf: $(BUILD)/blend%.elf
+	$(VITASDK)/bin/vita-elf-create $< $@
+$(BUILD)/blend%-eboot.bin: $(BUILD)/blend%.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/blend-probe-param.sfo: Makefile
+	@mkdir -p $(dir $@)
+	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 Blend Probe" $@
+$(BUILD)/blend%.vpk: $(BUILD)/blend%-eboot.bin $(BUILD)/blend-probe-param.sfo $(addprefix $(BLEND_SHADERS)/,$(BLEND_PROBE_FILES))
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/blend-probe-param.sfo -b $(BUILD)/blend$*-eboot.bin $(foreach f,$(BLEND_PROBE_FILES),-a $(BLEND_SHADERS)/$(f)=$(f)) $@
 THRESHOLD_SHADERS ?= $(ROOT)/local/halo2_5849/threshold-shaders
 THRESHOLD_PROBE_FILES := threshold.vert.gxp threshold.frag.gxp threshold.constants.bin threshold.vertices.bin threshold.texture.bin
 .PHONY: threshold-probe
@@ -308,6 +335,7 @@ $(BUILD)/blur-probe-param.sfo: Makefile
 $(BUILD)/blur%.vpk: $(BUILD)/blur%-eboot.bin $(BUILD)/blur-probe-param.sfo $(addprefix $(BLUR_SHADERS)/,$(BLUR_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/blur-probe-param.sfo -b $(BUILD)/blur$*-eboot.bin $(foreach f,$(BLUR_PROBE_FILES),-a $(BLUR_SHADERS)/$(f)=$(f)) $@
 test-host: $(BUILD)/dxt23_layout_test
+test-host: $(BUILD)/blend_draw_test
 test-host: $(BUILD)/geometry_dispatch_test $(BUILD)/screen_draw_test $(BUILD)/bc1_draw_test $(BUILD)/composition_draw_test $(BUILD)/threshold_draw_test $(BUILD)/blur_draw_test
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
 test-host: $(BUILD)/quad_draw_test
@@ -331,6 +359,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/composition_draw_test
 	$(BUILD)/threshold_draw_test
 	$(BUILD)/blur_draw_test
+	$(BUILD)/blend_draw_test
 	$(BUILD)/geometry_dispatch_test
 	$(BUILD)/quad_draw_test
 	$(BUILD)/blit_copy_test
@@ -462,6 +491,9 @@ $(BUILD)/blur_draw_test: blur_draw_test.c blur_draw.c blur_draw.h linear_texture
 $(BUILD)/composition_draw_test: composition_draw_test.c composition_draw.c composition_draw.h linear_texture.c linear_texture.h gpu_objects.c gpu_objects.h command_state.h kelvin_clear.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror composition_draw_test.c composition_draw.c linear_texture.c gpu_objects.c -o $@
+$(BUILD)/blend_draw_test: blend_draw_test.c blend_draw.c blend_draw.h linear_texture.c linear_texture.h gpu_objects.c gpu_objects.h command_state.h kelvin_clear.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror blend_draw_test.c blend_draw.c linear_texture.c gpu_objects.c -o $@
 $(BUILD)/screen_draw_test: screen_draw_test.c screen_draw.c screen_draw.h linear_texture.c linear_texture.h gpu_objects.c gpu_objects.h command_state.h kelvin_clear.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror screen_draw_test.c screen_draw.c linear_texture.c gpu_objects.c -o $@
@@ -520,7 +552,7 @@ $(BUILD)/nv2a_regs.o: nv2a_regs.c
 $(BUILD)/linear_texture.o $(BUILD)/fp_environment.o $(BUILD)/kernel_timer.o $(BUILD)/kernel_stack.o $(BUILD)/command_snapshot.o $(BUILD)/host_channel_runtime.o $(BUILD)/command_state.o $(BUILD)/host_channel.o $(BUILD)/host_tiles.o $(BUILD)/push_stream.o $(BUILD)/gpu_objects.o $(BUILD)/kelvin_clear.o $(BUILD)/scanout.o $(BUILD)/input.o $(BUILD)/audio_unavailable.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/audio_mixer_bridge.o $(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/screen_draw.o $(BUILD)/bc1_draw.o $(BUILD)/composition_draw.o $(BUILD)/threshold_draw.o $(BUILD)/blur_draw.o $(BUILD)/dxt23_layout.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/audio_fx.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
+$(BUILD)/audio_mixer_bridge.o $(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/screen_draw.o $(BUILD)/bc1_draw.o $(BUILD)/composition_draw.o $(BUILD)/threshold_draw.o $(BUILD)/blur_draw.o $(BUILD)/blend_draw.o $(BUILD)/dxt23_layout.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/audio_fx.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/dsp_core.o: dsp/interp/dsp_cpu.c
@@ -538,8 +570,8 @@ $(BUILD)/eboot.bin: $(BUILD)/halo2-boot.velf
 $(BUILD)/param.sfo: Makefile
 	@mkdir -p $(dir $@)
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2B00001 -d ATTRIBUTE2=12 "Xita Halo 2 Boot" $@
-$(BUILD)/halo2-boot.vpk: $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(BC1_FILES) $(COMPOSITION_FILES) $(THRESHOLD_FILES) $(BLUR_FILES) $(DSP_FILES)
-	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(BC1_PACK) $(COMPOSITION_PACK) $(THRESHOLD_PACK) $(BLUR_PACK) $(DSP_PACK) $@
+$(BUILD)/halo2-boot.vpk: $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(BC1_FILES) $(COMPOSITION_FILES) $(THRESHOLD_FILES) $(BLUR_FILES) $(BLEND_FILES) $(DSP_FILES)
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(BC1_PACK) $(COMPOSITION_PACK) $(THRESHOLD_PACK) $(BLUR_PACK) $(BLEND_PACK) $(DSP_PACK) $@
 -include $(OBJECTS:.o=.d)
 
 $(BUILD)/audio_hrtf_model_test: audio_hrtf_model_test.c audio_hrtf_model.h

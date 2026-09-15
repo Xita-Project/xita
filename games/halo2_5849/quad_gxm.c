@@ -658,3 +658,114 @@ const uint32_t *h2_blur_gxm_render(void *opaque,const h2_blur_request *request)
     return blur_target;
 }
 #endif
+
+#if H2_BLEND_RENDER
+/* Shares the existing H2 GXM context, target, mask and patcher. Each draw binds
+ * all its own state. No second GXM initialization or CE renderer dependency. */
+static h2_blend_contract blend_contract;
+static SceGxmVertexProgram *blend_vprog;
+static SceGxmFragmentProgram *blend_fprog, *blend_copyprog;
+static const SceGxmProgramParameter *blend_factors;
+static SceGxmTexture blend_tex, blend_copytex;
+static uint32_t *blend_texture, *blend_destination;
+static unsigned blend_sampler, blend_copy_sampler;
+static int blend_attempted, blend_ready;
+
+const h2_blend_contract *h2_blend_gxm_contract(void)
+{
+    static int loaded;
+    if(loaded)return &blend_contract;
+    FILE *file=fopen("app0:blend.contract.bin","rb");if(!file){xv_logf("[h2/blend] private contract open failed\n");return NULL;}
+    uint32_t header[2];
+    int ok=fread(header,1,8,file)==8&&header[0]==0x43473248&&header[1]==1&&
+        fread(&blend_contract,1,sizeof blend_contract,file)==sizeof blend_contract&&
+        fgetc(file)==EOF&&!ferror(file);
+    if(fclose(file))ok=0;
+    if(!ok){memset(&blend_contract,0,sizeof blend_contract);xv_logf("[h2/blend] invalid private contract\n");return NULL;}
+    loaded=1;xv_logf("[h2/blend] loaded complete private contract bytes=%u\n",(unsigned)sizeof blend_contract);return &blend_contract;
+}
+static int blend_initialize(void)
+{
+    const SceGxmProgram *vp=load("app0:blend.vert.gxp",596),*fp=load("app0:blend.frag.gxp",496),
+        *copy=load("app0:blend.copy.frag.gxp",344);
+    REQUIRE(vp&&fp&&copy);
+    SceGxmShaderPatcherId vid,fid,cid;
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,copy,&cid));
+    const char *names[]={"IN.position","IN.blendweight","IN.normal","IN.color0","IN.color1","IN.fog","IN.psize"};
+    SceGxmVertexAttribute attr[7]={{0}};
+    for(unsigned i=0;i<7;++i){
+        const SceGxmProgramParameter *p=parameter(vp,names[i]);REQUIRE(p);
+        attr[i].offset=i*16;attr[i].format=SCE_GXM_ATTRIBUTE_FORMAT_F32;attr[i].componentCount=4;
+        attr[i].regIndex=sceGxmProgramParameterGetResourceIndex(p);
+    }
+    SceGxmVertexStream stream={.stride=112,.indexSource=SCE_GXM_INDEX_SOURCE_INDEX_16BIT};
+    CHECK(sceGxmShaderPatcherCreateVertexProgram(patcher,vid,attr,7,&stream,1,&blend_vprog));
+    SceGxmBlendInfo blend={.colorMask=SCE_GXM_COLOR_MASK_R|SCE_GXM_COLOR_MASK_G|SCE_GXM_COLOR_MASK_B|SCE_GXM_COLOR_MASK_A,
+        .colorFunc=SCE_GXM_BLEND_FUNC_ADD,.alphaFunc=SCE_GXM_BLEND_FUNC_ADD,
+        .colorSrc=SCE_GXM_BLEND_FACTOR_ONE_MINUS_DST_COLOR,.colorDst=SCE_GXM_BLEND_FACTOR_ONE,
+        .alphaSrc=SCE_GXM_BLEND_FACTOR_ONE_MINUS_DST_ALPHA,.alphaDst=SCE_GXM_BLEND_FACTOR_ONE};
+    CHECK(sceGxmShaderPatcherCreateFragmentProgram(patcher,fid,SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,SCE_GXM_MULTISAMPLE_NONE,&blend,vp,&blend_fprog));
+    CHECK(sceGxmShaderPatcherCreateFragmentProgram(patcher,cid,SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,SCE_GXM_MULTISAMPLE_NONE,NULL,vp,&blend_copyprog));
+    blend_factors=parameter(fp,"psc");REQUIRE(blend_factors&&sceGxmProgramParameterGetArraySize(blend_factors)==18);
+    const SceGxmProgramParameter *p0=parameter(fp,"tex0"),*pc=parameter(copy,"copy_source");REQUIRE(p0&&pc);
+    blend_sampler=sceGxmProgramParameterGetResourceIndex(p0);blend_copy_sampler=sceGxmProgramParameterGetResourceIndex(pc);
+    REQUIRE(blend_sampler<4&&blend_copy_sampler<4);
+    blend_texture=alloc(160*120*4,0,NULL);blend_destination=alloc(640*480*4,0,NULL);
+    REQUIRE(blend_texture&&blend_destination);
+    CHECK(sceGxmTextureInitLinear(&blend_tex,blend_texture,SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,160,120,1));
+    CHECK(sceGxmTextureInitLinear(&blend_copytex,blend_destination,SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,640,480,1));
+    for(unsigned i=0;i<2;++i){
+        SceGxmTexture *t=i?&blend_copytex:&blend_tex;
+        CHECK(sceGxmTextureSetMinFilter(t,i?SCE_GXM_TEXTURE_FILTER_POINT:SCE_GXM_TEXTURE_FILTER_LINEAR));
+        CHECK(sceGxmTextureSetMagFilter(t,i?SCE_GXM_TEXTURE_FILTER_POINT:SCE_GXM_TEXTURE_FILTER_LINEAR));
+        CHECK(sceGxmTextureSetUAddrMode(t,SCE_GXM_TEXTURE_ADDR_CLAMP));CHECK(sceGxmTextureSetVAddrMode(t,SCE_GXM_TEXTURE_ADDR_CLAMP));
+    }
+    xv_logf("[h2/blend] initialized validated blend-effect shader/staging on existing H2 GXM context\n");
+    return 1;
+}
+const uint32_t *h2_blend_gxm_render(void *opaque, const h2_blend_request *request)
+{
+    (void)opaque;
+    if(!request||!request->destination||!request->texture0.pixels||request->texture0.bytes!=160*120*4)return NULL;
+    if(!attempted){attempted=1;ready=initialize();}if(!ready)return NULL;
+    if(!blend_attempted){blend_attempted=1;blend_ready=blend_initialize();}if(!blend_ready)return NULL;
+    memcpy(vertices,request->vertices,sizeof request->vertices);
+    memcpy(blend_texture,request->texture0.pixels,160*120*4);
+    memcpy(blend_destination,request->destination,640*480*4);
+    /* Copy-only UVs address the full destination; restore original input
+     * vertices after completed seeding, before the original fragment draw. */
+    for(unsigned v=0;v<4;++v){vertices[v*28+4]=vertices[v*28];vertices[v*28+5]=vertices[v*28+1];}
+    CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,&depth));
+    sceGxmSetViewportEnable(ctx,SCE_GXM_VIEWPORT_ENABLED);sceGxmSetRegionClip(ctx,SCE_GXM_REGION_CLIP_NONE,0,0,639,479);
+    sceGxmSetViewport(ctx,320,320,240,-240,0.0f,1.0f);sceGxmSetCullMode(ctx,SCE_GXM_CULL_NONE);
+    sceGxmSetFrontFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);sceGxmSetBackFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
+    sceGxmSetFrontStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetBackStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetFrontDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);sceGxmSetBackDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);sceGxmSetBackDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);
+    sceGxmSetVertexProgram(ctx,blend_vprog);sceGxmSetFragmentProgram(ctx,blend_copyprog);
+    CHECK(sceGxmSetVertexStream(ctx,0,vertices));CHECK(sceGxmSetFragmentTexture(ctx,blend_copy_sampler,&blend_copytex));
+    CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,indices,6));
+    SceGxmNotification seeded={sceGxmGetNotificationRegion(),++notification};REQUIRE(seeded.address);
+    CHECK(sceGxmEndScene(ctx,NULL,&seeded));CHECK(sceGxmNotificationWait(&seeded));sceGxmFinish(ctx);
+    memcpy(vertices,request->vertices,sizeof request->vertices);
+    CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,&depth));
+    sceGxmSetFragmentProgram(ctx,blend_fprog);
+    void *fu;CHECK(sceGxmReserveFragmentDefaultUniformBuffer(ctx,&fu));
+    CHECK(sceGxmSetUniformDataF(fu,blend_factors,0,72,(const float *)request->factors));
+    CHECK(sceGxmSetVertexStream(ctx,0,vertices));
+    CHECK(sceGxmSetFragmentTexture(ctx,blend_sampler,&blend_tex));
+    CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,indices,6));
+    SceGxmNotification done={sceGxmGetNotificationRegion(),++notification};REQUIRE(done.address);
+    CHECK(sceGxmEndScene(ctx,NULL,&done));CHECK(sceGxmNotificationWait(&done));sceGxmFinish(ctx);
+    static unsigned count;
+    if(++count<=4){
+        unsigned nonblack=0;for(unsigned i=0;i<640*480;++i)nonblack+=(target[i]&0xFFFFFF)!=0;
+        xv_logf("[h2/blend] staged=%u original_texture0=%08X nonblack=%u first=%08X; not yet committed/presented\n",
+                count,request->texture0.physical,nonblack,target[0]);
+    }
+    return target;
+}
+#endif
