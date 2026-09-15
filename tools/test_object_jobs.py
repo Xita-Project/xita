@@ -29,3 +29,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                            timeout=10,preexec_fn=no_core)
     assert failure.returncode<0 and b'STOP unsupported HLE target 001D66EC' in failure.stderr
     print('PASS: unsupported file-write HLE stops before invocation')
+    failure=subprocess.run([str(binary),'unsupported-yield'],capture_output=True,
+                           timeout=10,preexec_fn=no_core)
+    assert failure.returncode<0 and b'STOP yield outside audited cache wait' in failure.stderr
+    print('PASS: unrelated guest yields stop before scheduling any fiber')

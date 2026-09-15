@@ -31,8 +31,10 @@ static uint32_t stacks[LANES];
 static uint32_t active_objects[LANES], indirect_stack[LANES][32];
 static unsigned indirect_depth[LANES];
 /* A worker publishes one request, then parks until the guest owner replies.
- * States: 0 executing, 1 service request, 2 completed, 3 completion consumed. */
-static unsigned service_state[WORKERS], services, owner_notice;
+ * States: 0 executing, 1 service request, 2 completed, 3 completion consumed,
+ * 4 parked (including an event reply held during an I/O handoff). */
+static unsigned service_state[WORKERS], services, owner_notice, pause_workers, io_yields;
+static unsigned service_address[WORKERS];
 static xv_fn_t service_fn[WORKERS];
 static int initialized, override=-1;
 static xctx *owner;
@@ -60,6 +62,43 @@ static void notify_owner(void)
     if(sem_post(&owner_wake))abort();
 #endif
 }
+static void reply_worker(unsigned i)
+{
+    __atomic_store_n(&service_state[i],0,__ATOMIC_RELEASE);
+#ifdef __vita__
+    if(sceKernelSignalSema(replies[i],1)<0)abort();
+#else
+    if(sem_post(&replies[i]))abort();
+#endif
+}
+static void wait_reply(unsigned i)
+{
+#ifdef __vita__
+    if(sceKernelWaitSema(replies[i],1,NULL)<0)abort();
+#else
+    wait_sem(&replies[i]);
+#endif
+}
+/* Called only by a worker at a job boundary or before acquiring a native lock.
+ * It may retain a recursive callback lock: the admitted file fiber never enters
+ * an object/math callback. All workers acknowledge before that fiber runs. */
+static void park_worker(unsigned i)
+{
+    if(!__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE))return;
+    __atomic_store_n(&service_state[i],4,__ATOMIC_RELEASE);notify_owner();
+    wait_reply(i);
+}
+static int worker_lane(void)
+{
+#ifdef __vita__
+    SceUID id=sceKernelGetThreadId();
+    for(unsigned i=0;i<active_workers;i++)if(id==threads[i])return (int)i;
+#else
+    pthread_t id=pthread_self();
+    for(unsigned i=0;i<active_workers;i++)if(pthread_equal(id,threads[i]))return (int)i;
+#endif
+    return -1;
+}
 static void service_owner(void)
 {
     unsigned completed=0;
@@ -70,21 +109,33 @@ static void service_owner(void)
         wait_sem(&owner_wake);
 #endif
         __atomic_store_n(&owner_notice,0,__ATOMIC_RELEASE);
+        unsigned yielding=0,quiet=1;
         for(unsigned i=0;i<active_workers;i++) {
             unsigned state=__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE);
-            if(state==1) {
-                /* Only the audited, non-yielding NtSetEvent reaches this path.
-                 * xk_cur and the cooperative scheduler remain on their owner. */
+            if(state==0)quiet=0;
+            else if(state==1) {
+                if(service_address[i]==0x1D6640u) {yielding++;continue;}
                 service_fn[i](&contexts[i]);services++;
-                __atomic_store_n(&service_state[i],0,__ATOMIC_RELEASE);
-#ifdef __vita__
-                if(sceKernelSignalSema(replies[i],1)<0)abort();
-#else
-                if(sem_post(&replies[i]))abort();
-#endif
+                if(__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE))
+                    __atomic_store_n(&service_state[i],4,__ATOMIC_RELEASE);
+                else {reply_worker(i);quiet=0;}
             } else if(state==2) {
                 __atomic_store_n(&service_state[i],3,__ATOMIC_RELEASE);completed++;
             }
+        }
+        if(yielding&&quiet) {
+            /* Every lane is parked or completed. Run only the original cache
+             * file fiber, preserving its stack, TLS, real reads and APCs. */
+            extern int xk_object_io_step(void);
+            if(xk_object_io_step()<0)abort();
+            for(unsigned i=0;i<active_workers;i++)
+                if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==1) {
+                    contexts[i].r[0]=STATUS_SUCCESS;contexts[i].r[4]+=4;io_yields++;
+                    __atomic_store_n(&service_state[i],4,__ATOMIC_RELEASE);
+                }
+            __atomic_store_n(&pause_workers,0,__ATOMIC_RELEASE);
+            for(unsigned i=0;i<active_workers;i++)
+                if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==4)reply_worker(i);
         }
     }
 }
@@ -92,6 +143,21 @@ static void service_owner(void)
 int xv_object_math_lock(void)
 {
     if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
+    int lane=worker_lane();
+    if(lane>=0)for(;;) {
+        park_worker((unsigned)lane);
+#ifdef __vita__
+        int result=sceKernelTryLockMutex(math_mutex,1);
+        if(!result)return 1;
+        if(result!=(int)SCE_KERNEL_ERROR_MUTEX_FAILED_TO_OWN)abort();
+        sceKernelDelayThread(50);
+#else
+        int result=pthread_mutex_trylock(&math_mutex);
+        if(!result)return 1;
+        if(result!=EBUSY)abort();
+        struct timespec delay={0,50000};nanosleep(&delay,NULL);
+#endif
+    }
 #ifdef __vita__
     if(sceKernelLockMutex(math_mutex,1,NULL)<0)abort();
 #else
@@ -99,6 +165,7 @@ int xv_object_math_lock(void)
 #endif
     return 1;
 }
+
 void xv_object_math_unlock(int *locked)
 {
     if(!*locked)return;
@@ -113,6 +180,7 @@ static void execute(unsigned lane)
     extern void f_0008FB70(xctx *);
     unsigned i;
     while((i=__atomic_fetch_add(&next,1,__ATOMIC_RELAXED))<count) {
+        if(lane<active_workers)park_worker(lane);
         xctx *c=&contexts[lane]; *c=jobs[i];
         active_objects[lane]=c->r[1];
         c->r[4]=stacks[lane]+STACK_BYTES-256;
@@ -301,7 +369,7 @@ void xv_object_jobs_report(unsigned frames)
         frames,batches,submitted,executed[0],executed[1],executed[2],
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)work_us[2],
         (unsigned long long)batch_us,rejected);
-    XK_LOG("[object-jobs] owner event services %u\n",services);services=0;
+    XK_LOG("[object-jobs] owner event services %u cache yields %u\n",services,io_yields);services=io_yields=0;
     batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
 }
 void xv_object_job_indirect(xctx *c,unsigned target)
@@ -319,6 +387,16 @@ void xv_object_job_stop(xctx *c,unsigned address,const char *reason)
     for(unsigned i=0;i<LANES;i++)if(c==&contexts[i]) {
         object=active_objects[i];char chain[300];unsigned used=0;
         XK_LOG("[object-jobs] fault stack %08X..%08X esp %08X canary %08X\n",stacks[i],stacks[i]+STACK_BYTES,c->r[4],X_M32(stacks[i]));
+        XK_LOG("[object-jobs] fault registers %08X %08X %08X %08X %08X %08X %08X %08X\n",c->r[0],c->r[1],c->r[2],c->r[3],c->r[4],c->r[5],c->r[6],c->r[7]);
+        for(unsigned word=0;word<24&&c->r[4]>=stacks[i]&&c->r[4]<=stacks[i]+STACK_BYTES-4-4*word;word++)
+            XK_LOG("[object-jobs] fault stack +%02X %08X\n",4*word,X_M32(c->r[4]+4*word));
+        uint32_t frame=c->r[5];
+        for(unsigned depth=0;depth<16&&frame>=stacks[i]&&frame<=stacks[i]+STACK_BYTES-8;depth++) {
+            uint32_t previous=X_M32(frame),back=X_M32(frame+4);
+            XK_LOG("[object-jobs] guest frame %u bp %08X return %08X previous %08X\n",depth,frame,back,previous);
+            if(previous<=frame)break;
+            frame=previous;
+        }
         for(unsigned k=0;k<indirect_depth[i]&&k<32;k++)used+=(unsigned)snprintf(chain+used,sizeof chain-used," %08X",indirect_stack[i][k]);
         chain[used]=0;XK_LOG("[object-jobs] fault lane %u indirect-depth %u targets%s\n",i,indirect_depth[i],chain);
     }
@@ -329,19 +407,23 @@ void xv_object_job_stop(xctx *c,unsigned address,const char *reason)
 void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
 {
     if(address==0x1D675Cu) {fn(c);return;} /* stateless memory comparison */
-    if(address!=0x1D665Cu||!fn)xv_object_job_stop(c,address,"unsupported HLE");
-    /* NtSetEvent is non-yielding. Preserve its real return value, stack cleanup,
-     * previous-state output and scheduler effects by executing it on the owner. */
-    if(c==&contexts[2]&&!active_workers) {fn(c);services++;return;}
-    for(unsigned i=0;i<active_workers;i++)if(c==&contexts[i]) {
-        service_fn[i]=fn;
-        __atomic_store_n(&service_state[i],1,__ATOMIC_RELEASE);notify_owner();
-#ifdef __vita__
-        if(sceKernelWaitSema(replies[i],1,NULL)<0)abort();
-#else
-        wait_sem(&replies[i]);
-#endif
+    if((address!=0x1D665Cu&&address!=0x1D6640u)||!fn)
+        xv_object_job_stop(c,address,"unsupported HLE");
+    if(address==0x1D6640u && (X_M32(c->r[4])!=0x12AA9u||X_M32(c->r[4]+4)!=0x32B60u))
+        xv_object_job_stop(c,address,"yield outside audited cache wait");
+    if(c==&contexts[2]&&!active_workers) {
+        if(address==0x1D6640u) {
+            extern int xk_object_io_step(void);
+            if(xk_object_io_step()<0)abort();
+            c->r[0]=STATUS_SUCCESS;c->r[4]+=4;io_yields++;
+        } else {fn(c);services++;}
         return;
+    }
+    for(unsigned i=0;i<active_workers;i++)if(c==&contexts[i]) {
+        service_fn[i]=fn;service_address[i]=address;
+        if(address==0x1D6640u)__atomic_store_n(&pause_workers,1,__ATOMIC_RELEASE);
+        __atomic_store_n(&service_state[i],1,__ATOMIC_RELEASE);notify_owner();
+        wait_reply(i);return;
     }
     xv_object_job_stop(c,address,"kernel service outside active worker");
 }

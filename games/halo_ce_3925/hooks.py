@@ -87,6 +87,8 @@ class HaloHooks(NoGameHooks):
     # campaign test cycled at 56643 in removal after unguarded list mutation.
     # Use the existing recursive shared-helper mutex to avoid a lock-order pair.
     object_shared = {
+        0x32B00: (142, "d003de5fabd8c9399c4e893f88b150ac128b2f250d2d2b98a3716a9f476dfcc0"),  # cache/queue transaction
+        0x33A20: (121, "9709750dd0b4fcbb05e409f5fefddac60b2286bd6360402625698d86e25d35a0"),  # cache/queue transaction
         0x4C980: (976, "d566b124ef1a74ef77392465cd04524c704426497c4a0f2835890bc1124fb106"),  # indirect object callback, including its jump table
         0x96430: (1025, "99502556c4292e6e48fef7c8e51a27402edce60c2b67490dbddf019e07b69bde"),  # collision-producing object callback
         0x565E0: (139, "a545d5f623d8b3e606350417a39ad062380c8d92a1df0aadbb8074cfc18d03ef"),

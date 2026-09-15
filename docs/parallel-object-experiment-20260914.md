@@ -181,10 +181,53 @@ with the new owner/service arrangement.
 Runtime `5bc6571ebd00631d7ff3ab42537b566338b3df748bc5397c975dd0382697c7c4`
 completes initial emulator windows with 3,600 and 3,596 callbacks split between
 the two workers, then stops at `NtYieldExecution` (`1D6640`, return `12AA9`) from
-the indirect callback `39450`. A direct call-graph path to this import passes
-through the floating-point error machinery (`180ADA`, `180C8A`, `23D25`,
-`1E445`); that is a static reachability observation, not a captured dynamic call
-stack. Trace the actual reason for yielding before admitting it or choosing an
-owner-only scheduling boundary. No yielding call was replaced with success.
+the indirect callback `39450`. The initially recorded path through floating-point
+error handling was incorrect: it ended at `12A4D` (`RtlRaiseException`), not the
+yield wrapper `12AA3`. Auditing the exact import callsite identifies the path
+`39450 -> 95680 -> 10D920 -> 26B10 -> 32B00 -> 12AA3`.
+
+`32B00` waits for a cache entry's completion byte. Its request path allocates an
+entry, queues a 512-byte-aligned read through `33A20`, and signals the event at
+`2E2D08`. Letting a worker call the normal guest scheduler would recursively
+join its own unfinished batch. The next task is to establish a safe cache/I/O
+ownership boundary; the static call graph is not yet a captured dynamic stack.
+No yielding call was replaced with success.
 The physical Vita remains on the working runtime; this is not a hardware FPS
 result or a deployable gameplay candidate yet.
+
+
+### Quiescent cache-file handoff (candidate)
+
+The next candidate admits the single `NtYieldExecution` callsite under `32B00`
+(return addresses `12AA9` and `32B60`). A yield request parks both workers at a
+job boundary, native-lock acquisition, or their own service request. Mutex
+acquisition uses a short try/wait loop so a lane waiting on another lane's held
+callback lock can acknowledge the pause. The owner services events normally,
+but holds replies during a cache handoff until every lane has acknowledged.
+
+The owner then selects the existing `33AF0` cache-file thread using the game's
+thread handle at `2E2D0C`. It executes that thread's real saved fiber, guest stack,
+TLS and APC queue until its next yield, returning directly to the object-pass
+owner. Other guest fibers are not selected during this interval. No read,
+completion flag, or sample data is synthesized. Missing, suspended or unexpected
+file threads fail the candidate. All other object-worker yields remain rejected.
+The complete `32B00` cache transaction and `33A20` request publication are guarded
+by the shared recursive mutex, with full original-body signatures checked.
+
+The production pool passes address/undefined and thread sanitizers for 600
+callbacks, 1,200 event services and 400 cache yields in each worker configuration
+(2, 1 and 0). The file-step test uses the production kernel and fibers with a
+synthetic read body; it verifies 100 actual event-wait/APC-delivery cycles,
+restored owner context, no recursive object join, and invalid-target rejection.
+It does not validate actual map bytes or Halo gameplay. Short native mutex waits
+and pause barriers have a cost that must be measured after functional validation.
+
+
+Runtime `872a179189b1d93c20f6ae328af49fd69e1660d18436f5a5402daab487e05a64`
+passes the previous campaign cache-wait failure in Vita3K. The first saved running
+capture records 97,692 completed callbacks across 28 reporting windows
+(50,457 / 47,235 on the workers), 12 real event-service requests and 12 cache-yield
+handoffs, with no object-job stop. The cryo-room technician and look-around
+instruction render. This is emulator functional evidence, not hardware FPS or
+proof of whole-campaign correctness. The physical Vita remains on working slot A
+(`7f33dee4...`); the new candidate has not been installed there yet.

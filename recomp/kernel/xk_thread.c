@@ -76,6 +76,13 @@ uint32_t xk_var_KeTickCount, xk_var_XboxHardwareInfo, xk_var_LaunchDataPage, xk_
 /* ---- threads ---------------------------------------------------------------------------------- */
 xk_thread *xk_cur;
 static xk_thread *g_threads;          /* all live threads */
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+/* An explicitly selected cache file fiber may temporarily run while every
+ * object worker is parked. Its yield returns to the guest owner, not the
+ * ordinary scheduler, which must not admit unrelated game fibers here. */
+static xk_thread *g_object_io_thread;
+static xk_fiber *g_object_io_return;
+#endif
 static int g_next_tid = 4;
 static uint32_t g_tls_dir;            /* IMAGE_TLS_DIRECTORY in guest memory (0 = none) */
 extern uint32_t xv_game_tls_dir;      /* from xv_fn_table.c (0 if unknown) */
@@ -177,6 +184,9 @@ void xk_thread_exit(uint32_t status)
     XK_LOG("thread %d exited (%08X)\n", t->id, status);
     t->state = 3; t->exit_status = status; X_M32(t->kthread + KTHREAD_EXITSTATUS) = status; X_M8(t->kthread + KTHREAD_SIGNALSTATE) = 1;   /* GetExitCodeThread: SignalState ? ExitStatus : STILL_ACTIVE */
     xk_signal_check();
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    if(t==g_object_io_thread)xk_os_fiber_switch(g_object_io_return);
+#endif
     xk_os_fiber_switch(xk_os_fiber_main());       /* never returns */
     for (;;) ;
 }
@@ -269,10 +279,44 @@ static xk_thread *pick_next(xk_thread *after)
     return NULL;
 }
 
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+int xk_object_io_step(void)
+{
+    /* The exact Halo 3925 queue initializer stores this thread handle. No
+     * arbitrary runnable thread can be selected through this entry point. */
+    xk_obj *object=xk_handle_get_type(X_M32(0x2E2D0Cu),XO_THREAD);
+    xk_thread *t=object?object->u.thread:NULL, *me=xk_cur;
+    if(g_object_io_thread||!me||!t||t==me||t->start_routine!=0x33AF0u||!t->fiber||t->state>=2) {
+        XK_LOG("[object-jobs] cache file fiber unavailable or unexpected\n");return -1;
+    }
+    if(t->state==1 && (try_satisfy(t)||(t->wait_until&&now100()>=t->wait_until&&(t->wait_result=-1,1))))t->state=0;
+    if(t->state!=0)return 0;
+    extern volatile uint32_t xv_cur_fn __attribute__((weak));
+    uint32_t saved_fn=&xv_cur_fn?xv_cur_fn:0;
+    g_object_io_return=xk_os_fiber_current();g_object_io_thread=t;
+    if(xv_phase_suspend)xv_phase_suspend(&me->ctx);
+    xk_cur=t;xk_os_fiber_switch(t->fiber);xk_cur=me;
+    g_object_io_thread=NULL;g_object_io_return=NULL;
+    if(xv_phase_resume)xv_phase_resume(&me->ctx);
+    if(&xv_cur_fn)xv_cur_fn=saved_fn;
+    if(t->state==3) {XK_LOG("[object-jobs] cache file fiber exited during service\n");return -1;}
+    return 1;
+}
+#endif
+
 void xd3d_ds_check(const char *where, uint32_t eip) __attribute__((weak));
 void xk_yield(void)
 {
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    if(xk_cur==g_object_io_thread&&g_object_io_return) {
+        xk_thread *io=xk_cur;
+        io->ctx.eip_hint=X_M32(io->ctx.r[4]);
+        if(xv_phase_suspend)xv_phase_suspend(&io->ctx);
+        xk_os_fiber_switch(g_object_io_return);
+        xk_cur=io;
+        if(xv_phase_resume)xv_phase_resume(&io->ctx);
+        return;
+    }
     extern void xv_object_jobs_join(void);
     xv_object_jobs_join(); /* No outstanding object jobs when another fiber resumes. */
 #endif

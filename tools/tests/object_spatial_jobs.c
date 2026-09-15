@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+int xk_object_io_step(void) {assert(0);return -1;}
 uint8_t *g_xram,*g_img_base;uint32_t *g_xpt;
 int xv_phase_enabled;
 static int gameplay_ready=1;

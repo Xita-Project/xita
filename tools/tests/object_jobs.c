@@ -16,6 +16,24 @@ static unsigned writes[300],active,peak,allocations;
 static unsigned event_calls,event_value;
 static unsigned event_seen[1200];
 static pthread_t guest_owner;
+static unsigned io_calls, io_seen[300];
+/* Read callback outputs without the math lock: the service protocol must have
+ * parked every lane, including one waiting for another worker's held mutex. */
+int xk_object_io_step(void)
+{
+    assert(pthread_equal(pthread_self(),guest_owner));
+    for(unsigned i=0;i<300;i++)io_seen[i]=writes[i];
+    io_calls++;return 1;
+}
+static void submit_yield(xctx *c)
+{
+    uint32_t sp=c->r[4];X_PUSH32(0x32B60u);X_PUSH32(0x12AA9u);
+    extern void should_not_call_yield(xctx *);
+    xv_object_job_hle(c,0x1D6640u,should_not_call_yield);
+    assert(c->r[0]==0&&c->r[4]==sp-4);c->r[4]+=4;
+}
+void should_not_call_yield(xctx *c) {(void)c;assert(0);}
+
 static void event_service(xctx *c)
 {
     assert(pthread_equal(pthread_self(),guest_owner));
@@ -59,9 +77,11 @@ void f_0008FB70(xctx *c)
         /* Hold the shared callback lock while parking for a real owner service.
          * The owner must not run a job that blocks on this same mutex. */
         submit_event(c,0x70000+id*8);
+        if(id%3==0)submit_yield(c);
     }
     /* Requests can also arrive simultaneously, outside the shared lock. */
     submit_event(c,0x70004+id*8);
+    if(id%3==1)submit_yield(c);
     __atomic_sub_fetch(&active,1,__ATOMIC_SEQ_CST);c->r[4]+=4;
 }
 int main(int argc,char **argv)
@@ -87,6 +107,10 @@ int main(int argc,char **argv)
     xv_phase_enabled=1;assert(!xv_object_jobs_begin(&c));xv_phase_enabled=0;
     assert(xv_object_jobs_begin(&c));assert(!xv_object_jobs_begin(&c));
     X_M32(c.r[4])=0x902DF;assert(!xv_object_jobs_queue(&c));
+    if(argc>1&&!strcmp(argv[1],"unsupported-yield")) {
+        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x12AA9;X_M32(c.r[4]+4)=0xDEADBEEF;
+        xv_object_job_hle(&c,0x1D6640u,should_not_call_yield);assert(0);
+    }
     if(argc>1) {c.fiber=(void *)&xv_object_job_marker;xv_object_job_hle(&c,0x1D66EC,NULL);assert(0);}
     for(unsigned round=0;round<2;round++) {
         for(unsigned i=0;i<300;i++) {
@@ -100,10 +124,10 @@ int main(int argc,char **argv)
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
-    assert(event_calls==1200&&event_value==1200);
+    assert(event_calls==1200&&event_value==1200);assert(io_calls>=200&&io_calls<=400);
     for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));
     xv_object_jobs_report(2);xv_object_jobs_shutdown();
-    printf("PASS: 600 callbacks and native point transforms exactly once; 1,200 owner-thread event services with unique previous states, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
+    printf("PASS: 600 callbacks and native point transforms exactly once; 1,200 owner-thread events and 400 cache yields with quiescent owner I/O reads, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
     free(g_xram);free(g_xpt);
 }
