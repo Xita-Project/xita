@@ -62,8 +62,10 @@ No code from that project's Source Engine tree was imported for this research.
    initial snapshots in the cryo room. Continue to break down vertex-preparation cost by span size, cache hit or
    miss, index-mask construction and snapshot copy. Keep this instrumentation
    bounded and separate from the ordinary performance build.
-3. The first [shared snapshot experiment](snapshot-worker-20260914.md) is built
-   and installed for hardware comparison. Continue parallel preparation only
+3. The first [shared snapshot experiment](snapshot-worker-20260914.md) was
+   slightly slower in physical comparisons and remains disabled. Its event
+   notification follow-up also showed no pooled gain across three physical trials.
+   Continue parallel preparation only
    for inputs whose lifetime is defined.
    `xv_index_copy.h` constructs coverage from the retained index chunks;
    `xv_vertex_upload.c` compares live guest bytes before creating or reusing a
@@ -76,6 +78,9 @@ No code from that project's Source Engine tree was imported for this research.
    animation and visibility work are candidates only where measured cost
    warrants replacing the translated routine. Establish read/write boundaries
    before moving simulation or physics updates into simultaneous jobs.
+   The latest [campaign observation](campaign-npc-observation-20260914.md),
+   [pose job boundary](pose-job-boundary-20260914.md) and
+   [light-update audit](light-update-audit-20260914.md) narrow this investigation.
 
 The [presenting-thread affinity experiment](guest-affinity-experiment-20260914.md)
 tests whether avoiding migrations helps the existing critical thread. It does

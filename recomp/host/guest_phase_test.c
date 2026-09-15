@@ -44,6 +44,30 @@ int main(void)
     }
     assert(clock_reads==0 && !owners[0].context && !stats[0].calls);
 
+    /* Captures attach only newly entered scopes. Stop/restart while callers
+     * remain on the stack must never retain their chains or corrupt a new one. */
+    assert(xv_phase_capture_available());
+    xv_phase_scope old, fresh, child;
+    xv_phase_capture_override(1);now=10;xv_phase_begin(&old,&contexts[0],0);
+    now=30;xv_phase_suspend(&contexts[0]);now=50;xv_phase_capture_override(-1);
+    assert(!xv_phase_enabled && !frames && !stats[0].calls && !owners[0].context);
+    unsigned stopped_clock=clock_reads;
+    xv_phase_end(&old);xv_phase_frame(1);assert(clock_reads==stopped_clock);
+    xv_phase_capture_override(1);now=60;xv_phase_begin(&old,&contexts[0],0);
+    now=70;xv_phase_capture_override(0);xv_phase_capture_override(1);
+    now=80;xv_phase_begin(&fresh,&contexts[0],1);
+    xv_phase_end(&old);assert(owners[0].top==&fresh && !invalid);
+    now=100;xv_phase_begin(&child,&contexts[0],2);now=130;report();
+    assert(!invalid && !dropped && strstr(logs,"child calls 1 active-us 50 self-us 20"));
+    xv_phase_capture_override(-1);stopped_clock=clock_reads;
+    xv_phase_end(&child);xv_phase_end(&fresh);assert(clock_reads==stopped_clock);
+
+    /* A configured trace cannot be disabled or reset by the remote capture. */
+    reset(1);assert(!xv_phase_capture_available());
+    now=10;xv_phase_begin(&fresh,&contexts[0],1);now=20;
+    xv_phase_capture_override(0);assert(xv_phase_enabled && owners[0].top==&fresh);
+    now=30;xv_phase_end(&fresh);assert(stats[1].self==20);
+
     reset(1);now=10;xv_phase_scope a,b,c;
     xv_phase_begin(&a,&contexts[0],0);now=20;xv_phase_begin(&b,&contexts[0],1);
     now=50;xv_phase_end(&b);now=60;xv_phase_suspend(&contexts[0]);

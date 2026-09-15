@@ -88,9 +88,30 @@ wait and all GPU slot-retirement rules remain unchanged.
 
 Additional real-thread tests inject event creation, signal and wait failures,
 deliberately stale notifications, and delayed consumer completion. ASan/UBSan
-and ThreadSanitizer pass. This follow-up still requires its own emulator and
-hardware measurements; the polling result above must not be attributed to it.
+and ThreadSanitizer pass. Vita3K renders campaign and completes a camera-matched
+off/on/off trial with 259 worker halves, no recorded upload failures and
+restoration to the disabled mode. Those emulator timings do not establish a
+hardware gain; the polling result above must not be attributed to this version.
 
 The completion-notification candidate runtime is
 `0c58ac29dd9cf5f06ab3aab37d68717d9a8c96dbe37726d73dae2f099fd10c16`.
 Its package preserves the same updater helper, contract and asset set.
+The physical updater confirms this exact executable in slot B; the preceding
+`7f33...` runtime remains in slot A at installation.
+
+The three completed physical notification trials use the same cryo-room view
+and fixed settings within each comparison:
+
+| Trial | Off before | Shared snapshots | Off after | Saved ms/frame |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 6.806 FPS | 6.741 FPS | 6.765 FPS | -0.964 |
+| 2 | 6.754 FPS | 6.669 FPS | 6.748 FPS | -1.829 |
+| 3 | 6.762 FPS | 6.758 FPS | 6.730 FPS | +0.261 |
+
+Pooled exact elapsed times give **6.761 FPS off versus 6.722 FPS on**, or
+**0.844 ms/frame slower** with sharing. All three camera checks pass, core 0
+executes 358/356/359 shared halves, and the captured upload reports contain zero
+failures. Every trial restores the disabled mode. This result does not support
+enabling the snapshot experiment or further treating notification replacement as
+a demonstrated FPS optimization. The next investigation is the larger
+[object and scene workload](campaign-npc-observation-20260914.md).

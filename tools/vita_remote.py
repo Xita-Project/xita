@@ -14,7 +14,7 @@ import zipfile
 
 BUTTONS = dict(select=1, start=8, up=16, right=32, down=64, left=128,
                l=256, r=512, triangle=4096, circle=8192, cross=16384, square=32768)
-BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker")
+BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases")
 RESULT = re.compile(r"\[([a-z-]+-compare|resolution-test)\] result (?:off-before|544-before) ([\d.]+) (?:on|360) ([\d.]+) (?:off-after|544-after) ([\d.]+) fps comparable-view ([01])")
 RESTORED = re.compile(rb"\[(?:[a-z-]+-compare|resolution-test)\] restored [^\n]*\n")
 
@@ -235,6 +235,9 @@ def benchmark(client, out, runs, timeout, kind=None):
                 raise RuntimeError("Camera consistency check failed; trial is not comparable")
             trial = dict(candidate=tag, off_before_fps=float(before), on_fps=float(on), off_after_fps=float(after),
                          log=str(logfile), comparable=True)
+            if kind=="guest-phases":
+                trial["diagnostic"]=True
+                trial["note"]="Timing is enabled only in the middle arm. This measures profiling overhead, not an optimization gain; already-open parent scopes are absent."
             if kind=="resolution":
                 trial["fps_544_before"]=trial.pop("off_before_fps")
                 trial["fps_360"]=trial.pop("on_fps")

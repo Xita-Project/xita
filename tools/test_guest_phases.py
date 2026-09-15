@@ -53,12 +53,14 @@ with tempfile.TemporaryDirectory(prefix="xita-guest-phases-") as tmp:
     subprocess.run([str(p / "runtime")], check=True)
     subprocess.run([*flags, str(ROOT / "recomp/host/guest_phase_batch_test.c"), "-o", str(p / "batch")], check=True)
     subprocess.run([str(p / "batch")], check=True)
+    subprocess.run([*flags, str(ROOT / "recomp/host/guest_phase_capture_test.c"), "-lm", "-o", str(p / "capture")], check=True)
+    subprocess.run([str(p / "capture")], check=True)
     # Opt-in on a regular, uninstrumented build must stay disabled.
     (p / "absent.c").write_text('''#include "xv_phase.h"
 #include <assert.h>
 uint64_t xk_os_monotonic_us(void) { assert(0);return 0; }
 void xk_os_log(const char *fmt,...) {(void)fmt;}
-int main(void){xv_phase_init();assert(!xv_phase_enabled);xv_phase_frame(60);}
+int main(void){xv_phase_init();assert(!xv_phase_enabled&&!xv_phase_capture_available());xv_phase_capture_override(1);assert(!xv_phase_enabled);xv_phase_frame(60);}
 ''')
     subprocess.run([*flags, "-I", str(ROOT / "recomp"), str(p / "absent.c"),
                     str(ROOT / "recomp/xv_phase.c"), "-o", str(p / "absent")], check=True)

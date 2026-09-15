@@ -18,6 +18,11 @@ void xv_phase_suspend(void *context);
 void xv_phase_resume(void *context);
 void xv_phase_forget(void *context);
 void xv_phase_frame(unsigned end_frame);
+/* Admission is an atomic capability read. Override runs only on the serialized
+ * guest owner, at a Present boundary, through the bounded benchmark controller.
+ * Configured always-on tracing is deliberately ineligible for this capture. */
+int xv_phase_capture_available(void);
+void xv_phase_capture_override(int enabled);
 
 static inline void xv_phase_cleanup(xv_phase_scope *scope)
 {

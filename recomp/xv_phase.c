@@ -27,6 +27,7 @@ static phase_owner owners[XV_PHASE_MAX_OWNERS];
 static phase_stat stats[XV_PHASE_MAX_TARGETS];
 static unsigned target_count, frames, dropped, invalid;
 static uint64_t window_start;
+static unsigned capture_available;
 /* Bounded static storage: the serialized guest owns reports. Even 48 maximum
  * length labels and UINT64_MAX counters fit without growing guest stacks. */
 static char report_buffer[(XV_PHASE_MAX_TARGETS + 2) * 320];
@@ -94,9 +95,33 @@ void xv_phase_init(void)
     target_count = &xv_phase_target_count ? xv_phase_target_count : 0;
     xv_phase_enabled = e && atoi(e) != 0 && xv_phase_targets &&
         target_count && target_count <= XV_PHASE_MAX_TARGETS;
+    __atomic_store_n(&capture_available, !xv_phase_enabled && xv_phase_targets &&
+        target_count && target_count <= XV_PHASE_MAX_TARGETS, __ATOMIC_RELEASE);
     xk_os_log("[guest-phase] %s; %u compiled scopes; active includes native waits, parked is guest handoff time; inclusive rows overlap\n",
         xv_phase_enabled ? "on" : "off", target_count);
     if (xv_phase_enabled) window_start = xk_os_monotonic_us();
+}
+
+int xv_phase_capture_available(void)
+{
+    return __atomic_load_n(&capture_available, __ATOMIC_ACQUIRE) != 0;
+}
+
+void xv_phase_capture_override(int enabled)
+{
+    if (!xv_phase_capture_available()) return;
+    /* A caller can outlive this capture. Invalidate, rather than traversing or
+     * retaining, its old native-stack scopes. Later cleanup checks generations
+     * before touching accounting. New scopes cannot attach to an old chain. */
+    for (unsigned i = 0; i < XV_PHASE_MAX_OWNERS; i++) {
+        owners[i].context = NULL; owners[i].top = NULL;
+        owners[i].depth = owners[i].parked = 0; owners[i].generation++;
+    }
+    memset(stats, 0, sizeof stats); frames = dropped = invalid = 0;
+    xv_phase_enabled = enabled > 0;
+    if (xv_phase_enabled) window_start = xk_os_monotonic_us();
+    xk_os_log("[guest-phase-capture] %s; only scopes entered during capture are timed; partial windows discarded\n",
+        xv_phase_enabled ? "on" : "off");
 }
 
 void xv_phase_begin(xv_phase_scope *scope, void *context, unsigned id)

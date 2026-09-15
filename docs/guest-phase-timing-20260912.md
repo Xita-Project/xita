@@ -48,6 +48,44 @@ reports incomplete windows instead of silently treating them as valid.
 
 ## Reading the measurements
 
+### Bounded remote capture (September 14 follow-up)
+
+A build with reviewed compiled scopes can now collect a short trace without
+editing device settings or restarting. With `XV_PHASE_TIMING` off and the paired
+remote service enabled, enter loaded first-person gameplay and run:
+
+```sh
+python tools/vita_remote.py --config PRIVATE_CLIENT_JSON benchmark PRIVATE_OUTPUT_DIRECTORY --kind guest-phases --runs 1
+```
+
+The existing comparison controller runs off/on/off, with 60 settling and 120
+measured frames in each arm. Only the middle arm enables scope timing. Its
+180 frames emit three 60-frame reports; final performance values explicitly
+represent **profiling overhead**, not an optimization gain. Camera checks,
+benchmark exclusion of bulk reads/updates, cancellation and lost-control
+restoration use the existing controller. All rendering and gameplay options
+remain unchanged. Configured always-on tracing and builds without scope metadata
+reject this capture.
+
+Enabling and disabling run on the serialized guest owner at Present. A generation
+change invalidates old scope chains before the next capture; later cleanup of an
+old caller cannot alter a new chain. Partial windows are discarded on cancellation.
+The network thread only requests the capture and reads an atomic capability flag.
+
+Only functions entered while capture is active are timed. Long-lived parent
+functions already on the stack, such as the main loop, will be absent. Rank the
+captured children using the existing analyzer, but do not describe them as a
+complete CPU frame breakdown or sum inclusive parents with children. A startup
+trace remains available when those long-lived parent scopes are needed.
+
+Production accounting/controller tests cover three complete windows, zero timer
+reads after return to off, nested/parked callers, stop/restart with live scopes,
+cancellation, lost first-person control and unavailable configurations. The
+remote HTTP and production frame-acquisition fixtures cover the new selector.
+ASan/UBSan pass. Native emulator/hardware validation of this follow-up is pending.
+
+### Report fields
+
 Reports cover 60 guest Present/Swap calls. `end-frame` correlates them with
 other frame-numbered diagnostics. Row values are window totals in microseconds;
 the analyzer divides by frames and ranks milliseconds/frame of selected self
