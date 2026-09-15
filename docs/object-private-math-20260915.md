@@ -53,3 +53,30 @@ These tests validate the new ownership boundary, not every shared dependency
 inside Halo's whole-object callbacks. The latter remains experimental. A
 physical comparison is required before claiming a performance gain; emulator
 frame rates and instruction counts do not establish one.
+
+## Physical result
+
+The exact candidate was installed through Wi-Fi into slot B while retaining
+the previous slot A. Runtime SHA-256:
+`a7a9769de301cea0d25bce60dabd60063da9668df82a4112659675817db4ad3f`.
+The repository remains private.
+
+One stationary Blood Gulch comparison at 360p with original material, model,
+glow and particle settings measured **12.143 / 12.034 / 12.295 FPS** with private
+math off/on/off. Both object workers stayed enabled, and all three camera
+checks passed. This does **not** demonstrate a speedup. Its blue-base view
+differs from the earlier red-base object-worker comparison, so the absolute
+frame rates must not be compared across those runs.
+
+The new counters confirm actual private releases for matrix, quaternion and
+basis calculations; point outputs in this view remain shared. Most matrix
+outputs also remain shared. Joined object work still occupies about 46–48 ms
+per displayed frame, with roughly 20–24 ms of overlapping elapsed lock wait on
+each worker. About 140,000–150,000 non-nested lock acquisitions occur per
+60-frame window. Shortening these calculations alone has not removed the cost
+of acquiring the shared guard or its contention delays.
+
+The next investigation is the synchronization mechanism and its scheduling
+cost. Keep the ownership checks and comparison toggle available for combined
+experiments. Rocket pickup and representative campaign/driving stability still
+need direct physical verification.
