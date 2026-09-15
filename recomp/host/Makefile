@@ -503,3 +503,12 @@ test-depth-prepare-benchmark: build/resolution_benchmark_test build/no_depth_pre
 build/no_depth_prepare_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_DEPTH_PREPARE resolution_benchmark_test.c -lm -o $@
+
+.PHONY: test-object-math-benchmark
+test-object-math-benchmark: build/resolution_benchmark_test build/no_object_math_benchmark_test
+	./build/resolution_benchmark_test
+	./build/no_object_math_benchmark_test
+
+build/no_object_math_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_OBJECT_MATH resolution_benchmark_test.c -lm -o $@

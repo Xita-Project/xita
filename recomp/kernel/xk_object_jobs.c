@@ -28,6 +28,7 @@ const char xv_object_job_marker=0;
 static xctx jobs[CAPACITY], contexts[LANES];
 static unsigned count, next, running, stopping, active_workers=WORKERS;
 static uint32_t stacks[LANES];
+static uint32_t stack_pages[LANES][STACK_BYTES/4096];
 static unsigned stack_peak[LANES];
 static uint32_t active_objects[LANES], indirect_stack[LANES][32];
 static unsigned indirect_depth[LANES];
@@ -43,7 +44,7 @@ static unsigned audio_pumps;
 static xctx *audio_service_context;
 static unsigned service_address[WORKERS];
 static xv_fn_t service_fn[WORKERS];
-static int initialized, override=-1;
+static int initialized, override=-1, configured=-1;
 static xctx *owner;
 static unsigned passes, batches, submitted, executed[LANES], rejected;
 static uint64_t work_us[LANES], batch_us;
@@ -60,6 +61,11 @@ static struct __attribute__((aligned(64))) {
  * This identifies waiters, not the helper holding the mutex during the wait. */
 enum { WAIT_SITES=32 };
 static unsigned math_profile;
+static unsigned math_private_enabled=1;
+static int math_private_override=-1;
+static struct __attribute__((aligned(64))) {
+    unsigned attempted, released, nested, shared, disabled;
+} private_stats[WORKERS][4];
 static struct {
     uintptr_t pc;
     unsigned count;
@@ -280,6 +286,47 @@ void xv_object_math_unlock(int *locked)
     if(pthread_mutex_unlock(&math_mutex))abort();
 #endif
 }
+static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes)
+{
+    if(!bytes)return 1;
+    uint32_t base=stacks[lane];
+    if(address<base+4u || address-base>=STACK_BYTES || bytes>STACK_BYTES-(address-base))return 0;
+    unsigned first=(address-base)/4096,last=(address-base+bytes-1)/4096;
+    for(unsigned i=first;i<=last;i++)
+        if(g_xpt[(base>>12)+i]!=stack_pages[lane][i])return 0;
+    return 1;
+}
+int xv_object_math_release_private(xctx *c,int *locked,unsigned kind,
+    uint32_t output,unsigned output_bytes,uint32_t scratch,unsigned scratch_bytes)
+{
+    if(*locked<2||*locked>=2+WORKERS||kind>=4)return 0;
+    unsigned lane=(unsigned)*locked-2;
+    if(c!=&contexts[lane]||!xv_is_object_job(c))return 0;
+    private_stats[lane][kind].attempted++;
+    if(!(math_private_override<0?math_private_enabled:(unsigned)math_private_override)) {
+        private_stats[lane][kind].disabled++;return 0;
+    }
+    /* Never shorten an enclosing cache, collision, or object transaction. */
+    if(math_depth[lane]!=1) {private_stats[lane][kind].nested++;return 0;}
+    if(!output_bytes||!private_stack_span(lane,output,output_bytes)||
+       !private_stack_span(lane,scratch,scratch_bytes)) {
+        private_stats[lane][kind].shared++;return 0;
+    }
+    private_stats[lane][kind].released++;
+    xv_object_math_unlock(locked);*locked=0;
+    return 1;
+}
+int xv_object_math_available(void)
+{
+    return initialized==1&&active_workers&&math_fast_path&&!xv_phase_enabled&&
+        (override<0?configured:override)>0;
+}
+void xv_object_math_override(int enabled)
+{
+    /* Only the drained guest frame boundary may change this policy. */
+    if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
+    math_private_override=enabled<0?-1:!!enabled;
+}
 static void execute(unsigned lane)
 {
     extern void f_0008FB70(xctx *);
@@ -341,12 +388,15 @@ static int initialize(void)
     /* Dedicated experimental builds collect contention by default. Set zero
      * for a profiling-overhead comparison; ordinary builds omit this module. */
     math_profile=!profile||atoi(profile)!=0;
+    const char *private_math=getenv("XV_OBJECT_PRIVATE_MATH");
+    math_private_enabled=!private_math||atoi(private_math)!=0;
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     if(workers && (!strcmp(workers,"0")||!strcmp(workers,"1")))active_workers=(unsigned)atoi(workers);
     if(active_workers!=WORKERS)XK_LOG("[object-jobs] DIAGNOSTIC: %u active workers; zero selects owner-only execution\n",active_workers);
     for(unsigned i=0;i<LANES;i++) {
         stacks[i]=xk_mem_alloc(STACK_BYTES,4096,0,0,1);
         if(!stacks[i])goto fail;
+        for(unsigned p=0;p<STACK_BYTES/4096;p++)stack_pages[i][p]=g_xpt[(stacks[i]>>12)+p];
     }
 #ifdef __vita__
     math_mutex=sceKernelCreateMutex("xv_object_math",SCE_KERNEL_MUTEX_ATTR_RECURSIVE,0,NULL);
@@ -378,6 +428,8 @@ static int initialize(void)
     __atomic_store_n(&initialized,1,__ATOMIC_RELEASE);
     XK_LOG("[object-jobs] guest stacks %08X/%08X/%08X, %u bytes each\n",stacks[0],stacks[1],stacks[2],STACK_BYTES);
     XK_LOG("[object-locks] wait-site profiling %s; elapsed waits include scheduling and parked service time\n",math_profile?"on":"off");
+    XK_LOG("[object-locks] code anchor %llX symbol xv_object_math_lock; private math %s\n",
+        (unsigned long long)(uintptr_t)xv_object_math_lock,math_private_enabled?"on":"off");
     XK_LOG("[object-jobs] EXPERIMENT: whole object callbacks on core 0/1; owner services kernel requests and joins; shared game state and reordered updates are unproven\n");
     return 1;
 fail:
@@ -397,7 +449,6 @@ fail:
 }
 int xv_object_jobs_begin(xctx *c)
 {
-    static int configured=-1;
     if(configured<0) { const char *e=getenv("XV_EXPERIMENTAL_OBJECT_JOBS");configured=e?atoi(e)!=0:1; }
     if(!(override<0?configured:override)||owner||xv_phase_enabled||xv_is_object_job(c))return 0;
     /* Map construction/cinematic initialization has ordering dependencies.
@@ -498,6 +549,15 @@ void xv_object_jobs_report(unsigned frames)
                 (unsigned long long)wait_sites[lane][site].max_us,site==WAIT_SITES);
         }
     memset(wait_sites,0,sizeof wait_sites);
+    for(unsigned lane=0;lane<WORKERS;lane++)for(unsigned kind=0;kind<4;kind++)
+        if(private_stats[lane][kind].attempted) {
+            static const char *names[]={"point","matrix","quaternion","basis"};
+            XK_LOG("[object-private-math] lane %u %s attempted %u released %u nested %u shared %u disabled %u\n",
+                lane,names[kind],private_stats[lane][kind].attempted,
+                private_stats[lane][kind].released,private_stats[lane][kind].nested,
+                private_stats[lane][kind].shared,private_stats[lane][kind].disabled);
+        }
+    memset(private_stats,0,sizeof private_stats);
     math_idle_calls=0;memset(math_stats,0,sizeof math_stats);
     passes=batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
 }

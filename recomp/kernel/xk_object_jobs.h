@@ -20,12 +20,21 @@ void xv_object_job_stack_probe(xctx *c);
 void xv_object_job_stop(xctx *c, unsigned address, const char *reason) __attribute__((noreturn));
 int xv_object_math_lock(void);
 void xv_object_math_unlock(int *locked);
+/* Inputs and shared bookkeeping must be captured before this call. Only the
+ * current lane's unchanged private stack mappings may be written afterwards. */
+int xv_object_math_release_private(xctx *c,int *locked,unsigned kind,
+    uint32_t output,unsigned output_bytes,uint32_t scratch,unsigned scratch_bytes);
+int xv_object_math_available(void);
+void xv_object_math_override(int enabled);
 #define XV_OBJECT_JOB_SCOPE(c) \
     xctx *xv_object_owner_ __attribute__((cleanup(xv_object_jobs_end))) = \
         xv_object_jobs_begin(c) ? (c) : NULL
 #define XV_OBJECT_MATH_GUARD() \
     int xv_object_math_locked_ __attribute__((cleanup(xv_object_math_unlock))) = xv_object_math_lock()
+#define XV_OBJECT_MATH_PRIVATE(c,kind,out,bytes,scratch,scratch_bytes) \
+    ((void)xv_object_math_release_private(c,&xv_object_math_locked_,kind,out,bytes,scratch,scratch_bytes))
 #else
 #define XV_OBJECT_JOB_SCOPE(c) ((void)0)
 #define XV_OBJECT_MATH_GUARD() ((void)0)
+#define XV_OBJECT_MATH_PRIVATE(c,kind,out,bytes,scratch,scratch_bytes) ((void)0)
 #endif

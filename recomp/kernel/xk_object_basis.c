@@ -1,6 +1,7 @@
 /* Opt-in Halo 3925 object basis preparation, 0x8E166..0x8E292.
  * Keep both matrices and the lifted x87/flag effects. The guest owner invokes
- * this synchronously; there is no worker or cross-frame object cache. */
+ * this synchronously. Experimental object workers snapshot inputs and may
+ * calculate private stack outputs outside the shared guard. */
 #ifdef XV_NATIVE_OBJECT_BASIS
 #include "xk.h"
 #include "xk_object_jobs.h"
@@ -121,8 +122,11 @@ int xv_math_object_basis(xctx *c)
     if (!input || !output) return decline(2);
     uintptr_t a = (uintptr_t)input, b = (uintptr_t)output;
     if (a < b + 104u && b < a + 56u) return decline(2);
-    const uint32_t *in = input;
+    uint32_t in[14];memcpy(in,input,sizeof in);
     uint32_t *out = output;
+    basis_used++;
+    if(in[0]&0x1000u)basis_mirrored++;
+    XV_OBJECT_MATH_PRIVATE(c,3,sp+0x40u,104,0,0);
     /* These six products follow the original double x87 emulation order;
      * each cross component rounds to float before optional mirroring. */
     double x = sub(mul(load_float(in[10]), load_float(in[12])),
@@ -142,13 +146,11 @@ int xv_math_object_basis(xctx *c)
         out[5] = store_float(negate(load_float(out[5])));
         z = negate(load_float(out[6]));
         out[6] = store_float(z);
-        basis_mirrored++;
     }
     c->st[(c->fsp - 1u) & 7u] = z;
     c->st[(c->fsp - 2u) & 7u] = second;
     c->r[0] = in[0]; c->r[1] = in[13]; c->r[2] = in[11];
     X_FLAGS(XK_LOGIC, 0, 0, (in[0] >> 8) & 0x10u, 8);
-    basis_used++;
     return 1;
 }
 

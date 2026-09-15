@@ -117,9 +117,12 @@ int xv_math_point_transform(xctx *c)
      * Classify integer representations without raising FP exceptions. */
     for(unsigned i=0;i<13;i++)if((m[i]&0x7f800000u)==0x7f800000u)return point_decline(3);
     for(unsigned i=0;i<3;i++)if((v[i]&0x7f800000u)==0x7f800000u)return point_decline(3);
-    const float *mf=(const float *)m,*vf=(const float *)v;
-    double x=vf[0], y=vf[1], z=vf[2];
+    float mf[13],vf[3];
+    memcpy(mf,m,sizeof mf);memcpy(vf,v,sizeof vf);
     uint32_t scale=m[0];
+    point_fast++;
+    XV_OBJECT_MATH_PRIVATE(c,0,c->r[0],12,0,0);
+    double x=vf[0], y=vf[1], z=vf[2];
     if(scale!=0x3f800000u) {
         double s=mf[0]; x=x*s; y=y*s; z=z*s;
     }
@@ -138,7 +141,7 @@ int xv_math_point_transform(xctx *c)
     c->st[(top-5)&7]=y_last;
     c->r[2]=scale;
     X_FLAGS(XK_SUB,scale,0x3f800000u,scale-0x3f800000u,32);
-    c->r[4]+=4;point_fast++;return 1;
+    c->r[4]+=4;return 1;
 }
 
 /* Keep the prior native VFP operand order while unrolling fixed-size loops.
@@ -179,11 +182,16 @@ int xv_math_matrix_multiply(xctx *restrict c)
         return matrix_decline(ML_PARTIAL);
     matrix_layout[(op==ap?ML_LEFT:0)+(op==bp?ML_RIGHT:0)]++;
     float l[13], r[13], v[8][4];
-#ifdef XV_NATIVE_MATRIX_NEON
-    float left_scale=ap[0],right_scale=bp[0];
-    if (!matrix_neon_try(ap,bp,op,v)) {
-#endif
     memcpy(l, ap, sizeof l); memcpy(r, bp, sizeof r);
+#ifdef XV_NATIVE_MATRIX_NEON
+    int use_neon=matrix_neon_admit(l,r);
+#endif
+    math_fast[0]++;
+    XV_OBJECT_MATH_PRIVATE(c,1,out,52,sp-16u,32);
+#ifdef XV_NATIVE_MATRIX_NEON
+    if (use_neon) matrix_neon_run(l,r,op,v);
+    else {
+#endif
     /* SSE lanes are x, zero, y, z. Preserve even the otherwise unused lane,
      * including NaN/zero behavior, and each float rounding point. */
     for (unsigned i = 0; i < 3; i++) {
@@ -230,11 +238,7 @@ int xv_math_matrix_multiply(xctx *restrict c)
     double scale;
 #if defined(__arm__)
     /* Preserve the previous compiled scale product's NaN operand priority. */
-#ifdef XV_NATIVE_MATRIX_NEON
-    double left=(double)left_scale,right=(double)right_scale;
-#else
     double left=(double)l[0],right=(double)r[0];
-#endif
     __asm__("vmul.f64 %P0, %P1, %P2" : "=w"(scale) : "w"(right),"w"(left));
 #else
     scale = (double)l[0] * (double)r[0];
@@ -244,8 +248,14 @@ int xv_math_matrix_multiply(xctx *restrict c)
     c->st[(c->fsp - 1u) & 7u] = scale;
     stack[0]=a; stack[1]=out+4; stack[2]=b+4; stack[3]=a+4;
     c->r[0]=b; c->r[1]=out; c->r[2]=a; c->r[4]=sp+16;
-    math_fast[0]++;
     return 1;
+}
+
+/* Preserve conversion at the original operation, after taking an integer
+ * snapshot of shared constants under the guard. */
+static double math_float_word(uint32_t word)
+{
+    float value;memcpy(&value,&word,4);return (double)value;
 }
 
 /* 0xB5F60: quaternion to scaled transform. Fixed native temporaries replace
@@ -257,7 +267,7 @@ int xv_math_quaternion_matrix(xctx *restrict c)
     const float *ip=math_span(c->r[1],16);
     float *output=math_span(c->r[2],52), *scratch_out=math_span(sp-24u,24);
     const void *constants = math_span(0x1F0A68u, 0xA0u);
-    if (!math_enabled() || !ip || !output || !scratch_out ||
+    if (!math_enabled() || !ip || !output || !scratch_out || !constants ||
         math_overlap(ip,16,output,52) || math_overlap(ip,16,scratch_out,24) ||
         math_overlap(output,52,scratch_out,24) || math_overlap(output,52,constants,0xA0u) ||
         math_overlap(scratch_out,24,constants,0xA0u)) {
@@ -271,6 +281,12 @@ int xv_math_quaternion_matrix(xctx *restrict c)
 #endif
     float input[4], scratch[6];
     memcpy(input,ip,sizeof input);
+    uint32_t zero=X_M32(0x1F0A68u),two=X_M32(0x1F0B04u),one=X_M32(0x1F0A78u);
+    math_fast[1]++;
+#ifndef XV_QUAT_CACHE
+    /* The optional shared cache owns a larger transaction; keep its guard. */
+    XV_OBJECT_MATH_PRIVATE(c,2,c->r[2],52,sp-24u,24);
+#endif
     double s0=c->st[(fp+0)&7u];
     double s1=c->st[(fp+1)&7u];
     double s2=c->st[(fp+2)&7u];
@@ -296,15 +312,15 @@ int xv_math_quaternion_matrix(xctx *restrict c)
     s3 = s3 + s2;
     s7 = s3;
     c->fsp=(fp+7u)&7u;
-    x87_compare(c, s7, x87_load_f32(c, (0x1F0A68u)), 0);
+    x87_compare(c, s7, math_float_word(zero), 0);
     c->fsp=fp;
     X_R16(0) = c->fsw;
     { uint8_t r_ = X_R8H(0) & 0x44u; X_FLAGS(XK_LOGIC, 0, 0, r_, 8); }
     if (!XF_P(c)) goto L_000B5FA1;
-    s7 = x87_load_f32(c, (0x1F0B04u)) / s7;
+    s7 = math_float_word(two) / s7;
     goto L_000B5FA9;
 L_000B5FA1:
-    s7 = x87_load_f32(c, (0x1F0A68u));
+    s7 = math_float_word(zero);
 L_000B5FA9:
     s6 = s7;
     { uint32_t a_ = c->r[0], b_ = c->r[0]; uint32_t r_ = (uint32_t)(a_ ^ b_); c->r[0] = r_; }
@@ -343,7 +359,7 @@ L_000B5FA9:
     ((uint32_t *)output)[11] = c->r[0];
     s3 = s3 + s4;
     ((uint32_t *)output)[12] = c->r[0];
-    s3 = x87_load_f32(c, (0x1F0A78u)) - s3;
+    s3 = math_float_word(one) - s3;
     output[1] = (float)(s3);
     s3 = s6;
     s3 = s3 - (double)scratch[2];
@@ -356,7 +372,7 @@ L_000B5FA9:
     output[4] = (float)(s4);
     { double t_ = s5; s5 = s6; s6 = t_; }
     s5 = s5 + s7;
-    s5 = x87_load_f32(c, (0x1F0A78u)) - s5;
+    s5 = math_float_word(one) - s5;
     output[5] = (float)(s5);
     s5 = (double)scratch[1];
     s5 = s5 - (double)scratch[4];
@@ -368,7 +384,7 @@ L_000B5FA9:
     output[8] = (float)(s6);
     s6 = (double)scratch[5];
     s6 = s6 + s7;
-    s6 = x87_load_f32(c, (0x1F0A78u)) - s6;
+    s6 = math_float_word(one) - s6;
     output[9] = (float)(s6);
     memcpy(scratch_out,scratch,sizeof scratch);
     c->st[(fp+0)&7u]=s0;
@@ -383,6 +399,5 @@ L_000B5FA9:
     xv_quat_cache_store(c,output,scratch_out,&cache_request);
 #endif
     c->r[4]=sp+4;
-    math_fast[1]++;
     return 1;
 }

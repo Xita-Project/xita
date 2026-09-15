@@ -3,6 +3,11 @@
 #include "../../runtime/xv_benchmark.c"
 void xv_logf(const char *fmt,...) { (void)fmt; }
 static int optimization=-1;
+#ifndef TEST_NO_OBJECT_MATH
+static int object_math_ready=1;
+int xv_object_math_available(void) { return object_math_ready; }
+void xv_object_math_override(int enabled) { (void)enabled; }
+#endif
 #ifndef TEST_NO_OBJECT_JOBS
 static int object_jobs_ready=1;
 int xv_object_jobs_available(void) { return object_jobs_ready; }
@@ -143,7 +148,7 @@ int main(void)
     xv_benchmark_remote_poll(0);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==-1);
     xv_benchmark_remote_poll(1);
-    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_DEPTH_PREPARE+1)==-1);
+    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_OBJECT_MATH+1)==-1);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==0 && !b.request && !b.active);
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_remote_poll(0);assert(!xv_benchmark_remote_busy());
@@ -154,7 +159,7 @@ int main(void)
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_toggle();assert(xv_benchmark_step(now,544,1,view)==360);
     xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
-    unsigned kinds[]={XV_BENCH_DEPTH_PREPARE,XV_BENCH_VERTEX_PREPARE,XV_BENCH_OBJECT_JOBS,XV_BENCH_PREP_BUNDLE,XV_BENCH_GUEST_PHASES,XV_BENCH_SNAPSHOT_WORKER,XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
+    unsigned kinds[]={XV_BENCH_OBJECT_MATH,XV_BENCH_DEPTH_PREPARE,XV_BENCH_VERTEX_PREPARE,XV_BENCH_OBJECT_JOBS,XV_BENCH_PREP_BUNDLE,XV_BENCH_GUEST_PHASES,XV_BENCH_SNAPSHOT_WORKER,XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
     for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++) {
         int compiled=1;
 #ifdef TEST_NO_DEPTH_PREPARE
@@ -193,11 +198,15 @@ int main(void)
 #ifndef XV_NATIVE_MODEL_PALETTE
         if(kinds[i]==XV_BENCH_MODEL_PALETTE)compiled=0;
 #endif
+#ifdef TEST_NO_OBJECT_MATH
+        if(kinds[i]==XV_BENCH_OBJECT_MATH)compiled=0;
+#endif
         assert(xv_benchmark_remote_request(kinds[i])==(compiled?0:-1));
         if(!compiled)continue;
         xv_benchmark_remote_poll(1);
         assert(xv_benchmark_compare_point_math()==(kinds[i]==XV_BENCH_POINT_MATH));
         assert(xv_benchmark_compare_matrix_neon()==(kinds[i]==XV_BENCH_MATRIX_NEON));
+        assert(xv_benchmark_compare_object_math()==(kinds[i]==XV_BENCH_OBJECT_MATH));
         assert(xv_benchmark_compare_depth_prepare()==(kinds[i]==XV_BENCH_DEPTH_PREPARE));
         assert(xv_benchmark_compare_vertex_prepare()==(kinds[i]==XV_BENCH_VERTEX_PREPARE));
         assert(xv_benchmark_compare_object_jobs()==(kinds[i]==XV_BENCH_OBJECT_JOBS));
@@ -340,6 +349,35 @@ int main(void)
         assert(switches-initial_switches==(stop?3u:4u));
     }
     puts("PASS: object jobs reject failed initialization and restore on completion, cancellation and lost view");
+#endif
+#ifndef TEST_NO_OBJECT_MATH
+    object_math_ready=0;
+    unsigned math_switches=switches;
+    assert(!xv_benchmark_remote_request(XV_BENCH_OBJECT_MATH));
+    xv_benchmark_remote_poll(1);
+    assert(!xv_benchmark_step(now,360,1,view));
+    assert(switches==math_switches&&!xv_benchmark_active());
+    object_math_ready=1;
+    for(unsigned stop=0;stop<3;stop++) {
+        unsigned initial_switches=switches;
+        assert(!xv_benchmark_remote_request(XV_BENCH_OBJECT_MATH));
+        xv_benchmark_remote_poll(1);
+        assert(xv_benchmark_step(now,360,1,view)==360&&optimization==0);
+        xv_benchmark_applied(now,360);
+        for(unsigned i=0;i<(stop?181u:540u);i++) {
+            now+=100000;unsigned next=xv_benchmark_step(now,360,1,view);
+            if(next)xv_benchmark_applied(now,next);
+        }
+        if(stop) {
+            assert(optimization==1);
+            if(stop==1)xv_benchmark_compare_toggle();
+            assert(xv_benchmark_step(now,360,stop==1,view)==360);
+            xv_benchmark_applied(now,360);
+        }
+        assert(optimization==-1&&!xv_benchmark_active()&&!remote_kind);
+        assert(switches-initial_switches==(stop?3u:4u));
+    }
+    puts("PASS: private math rejects inactive workers and restore on completion, cancellation and lost view");
 #endif
 #ifdef TEST_NO_DEPTH_PREPARE
     assert(xv_benchmark_remote_request(XV_BENCH_DEPTH_PREPARE)==-1);

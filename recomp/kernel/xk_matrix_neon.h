@@ -1,4 +1,5 @@
-/* Optional matrix SIMD path, owned by the serialized guest thread.
+/* Optional matrix SIMD path. Admission and counters remain guarded;
+ * computation uses caller snapshots and has no shared bookkeeping.
  * Include only from xk_math.c with XV_NATIVE_MATRIX_NEON enabled.
  * Layout/overlap guards in the caller run before this helper. All numeric
  * checks precede writes. Left rotation vectors are loaded before output;
@@ -36,7 +37,7 @@ static void matrix_neon_report(unsigned frames)
            frames, matrix_neon_accepted, matrix_neon_disabled, matrix_neon_fp, matrix_neon_numeric);
     matrix_neon_accepted = matrix_neon_disabled = matrix_neon_fp = matrix_neon_numeric = 0;
 }
-static int matrix_neon_try(const float l[13], const float r[13], float op[13], float v[8][4])
+static int matrix_neon_admit(const float l[13], const float r[13])
 {
     if (!matrix_neon_enabled()) {
         matrix_neon_disabled++;
@@ -74,6 +75,11 @@ static int matrix_neon_try(const float l[13], const float r[13], float op[13], f
         matrix_neon_numeric++;
         return 0;
     }
+    matrix_neon_accepted++;
+    return 1;
+}
+static void matrix_neon_run(const float l[13], const float r[13], float op[13], float v[8][4])
+{
     float32x4_t left[3];
     for (unsigned i = 0; i < 3; i++) {
         float32x4_t raw = vld1q_f32(l + 1 + i * 3);
@@ -110,6 +116,4 @@ static int matrix_neon_try(const float l[13], const float r[13], float op[13], f
     op[10] = vgetq_lane_f32(translated, 0);
     op[11] = vgetq_lane_f32(translated, 2);
     op[12] = vgetq_lane_f32(translated, 3);
-    matrix_neon_accepted++;
-    return 1;
 }

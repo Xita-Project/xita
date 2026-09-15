@@ -5,6 +5,8 @@
 
 void xv_logf(const char *fmt,...);
 void xv_benchmark_optimizations(int enabled) __attribute__((weak));
+void xv_object_math_override(int) __attribute__((weak));
+int xv_object_math_available(void) __attribute__((weak));
 void xv_object_jobs_override(int enabled) __attribute__((weak));
 int xv_object_jobs_available(void) __attribute__((weak));
 void xv_vertex_prepare_override(int,unsigned) __attribute__((weak));
@@ -37,7 +39,7 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_DEPTH_PREPARE||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_OBJECT_MATH||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
 #ifndef XV_NATIVE_OBJECT_BASIS
     if(kind==XV_BENCH_OBJECT_BASIS)return -1;
 #endif
@@ -46,6 +48,7 @@ int xv_benchmark_remote_request(unsigned kind)
 #endif
     if(kind==XV_BENCH_VERTEX_PREPARE&&(!xv_vertex_prepare_override||!xv_vertex_prepare_available))return -1;
     if(kind==XV_BENCH_DEPTH_PREPARE&&(!xv_depth_prepare_override||!xv_depth_prepare_available||!xv_depth_prepare_available()))return -1;
+    if(kind==XV_BENCH_OBJECT_MATH&&(!xv_object_math_override||!xv_object_math_available))return -1;
     if(kind==XV_BENCH_OBJECT_JOBS&&(!xv_object_jobs_override||!xv_object_jobs_available))return -1;
     if(kind==XV_BENCH_POINT_MATH&&!xv_point_math_override)return -1;
     if(kind==XV_BENCH_MATRIX_NEON&&!xv_matrix_neon_override)return -1;
@@ -93,6 +96,7 @@ int xv_benchmark_compare_flare_query_overlap(void) { return remote_kind==XV_BENC
 int xv_benchmark_compare_snapshot_worker(void) { return remote_kind==XV_BENCH_SNAPSHOT_WORKER; }
 int xv_benchmark_compare_guest_phases(void) { return remote_kind==XV_BENCH_GUEST_PHASES; }
 int xv_benchmark_compare_vertex_prepare(void) { return remote_kind==XV_BENCH_VERTEX_PREPARE; }
+int xv_benchmark_compare_object_math(void) { return remote_kind==XV_BENCH_OBJECT_MATH; }
 int xv_benchmark_compare_depth_prepare(void) { return remote_kind==XV_BENCH_DEPTH_PREPARE; }
 int xv_benchmark_compare_object_jobs(void) { return remote_kind==XV_BENCH_OBJECT_JOBS; }
 int xv_benchmark_compare_prep_bundle(void) { return remote_kind==XV_BENCH_PREP_BUNDLE; }
@@ -123,6 +127,7 @@ static int native_math_selected(void)
 }
 static int candidate_available(void)
 {
+    if (xv_benchmark_compare_object_math()) return xv_object_math_override && xv_object_math_available && xv_object_math_available();
     if (xv_benchmark_compare_depth_prepare()) return xv_depth_prepare_override && xv_depth_prepare_available && xv_depth_prepare_available();
     if (xv_benchmark_compare_vertex_prepare()) return xv_vertex_prepare_override && xv_vertex_prepare_available && xv_vertex_prepare_available();
     if (xv_benchmark_compare_object_jobs()) return xv_object_jobs_override && xv_object_jobs_available && xv_object_jobs_available();
@@ -199,7 +204,8 @@ int xv_benchmark_compare_draw_scan(void)
     return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_depth_prepare() ? "depth-prepare-compare" :
+    (xv_benchmark_compare_object_math() ? "object-math-compare" :
+     xv_benchmark_compare_depth_prepare() ? "depth-prepare-compare" :
      xv_benchmark_compare_vertex_prepare() ? "vertex-prepare-compare" :
      xv_benchmark_compare_object_jobs() ? "object-jobs-compare" :
      xv_benchmark_compare_prep_bundle() ? "prep-bundle-compare" :
@@ -246,7 +252,9 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
             xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_depth_prepare())
+            if (xv_benchmark_compare_object_math())
+                xv_logf("[object-math-compare] start off/on/off at %up; snapshot math inputs under shared guard, calculate private worker stack outputs outside it; same object workers, native helpers, graphics and nested shared transactions in all arms; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_depth_prepare())
                 xv_logf("[depth-prepare-compare] start off/on/off at %up; omit texture preparation for published depth-only shader proofs; query identity, draw order, geometry and graphics settings retained; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_vertex_prepare())
                 xv_logf("[vertex-prepare-compare] start off/on/off at %up; exact vertex snapshots on owner/C0/owner, on-phase cutoff 16384 bytes; material preparation overlaps before source-loan join; existing GPU copies, shaders, draw order and graphics settings retained; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
