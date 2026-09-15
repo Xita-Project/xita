@@ -128,7 +128,7 @@ int main(void)
     xv_benchmark_remote_poll(0);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==-1);
     xv_benchmark_remote_poll(1);
-    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_GUEST_PHASES+1)==-1);
+    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_PREP_BUNDLE+1)==-1);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==0 && !b.request && !b.active);
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_remote_poll(0);assert(!xv_benchmark_remote_busy());
@@ -139,7 +139,7 @@ int main(void)
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_toggle();assert(xv_benchmark_step(now,544,1,view)==360);
     xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
-    unsigned kinds[]={XV_BENCH_GUEST_PHASES,XV_BENCH_SNAPSHOT_WORKER,XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
+    unsigned kinds[]={XV_BENCH_PREP_BUNDLE,XV_BENCH_GUEST_PHASES,XV_BENCH_SNAPSHOT_WORKER,XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
     for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++) {
         int compiled=1;
 #ifdef TEST_NO_GUEST_PHASES
@@ -155,13 +155,13 @@ int main(void)
         if(kinds[i]==XV_BENCH_POINT_MATH)compiled=0;
 #endif
 #ifdef TEST_NO_MATRIX_NEON
-        if(kinds[i]==XV_BENCH_MATRIX_NEON)compiled=0;
+        if(kinds[i]==XV_BENCH_MATRIX_NEON||kinds[i]==XV_BENCH_PREP_BUNDLE)compiled=0;
 #endif
 #ifdef TEST_NO_HLE_DISPATCH
         if(kinds[i]==XV_BENCH_HLE_DISPATCH)compiled=0;
 #endif
 #ifdef TEST_NO_OBJECT_SCAN
-        if(kinds[i]==XV_BENCH_OBJECT_SCAN)compiled=0;
+        if(kinds[i]==XV_BENCH_OBJECT_SCAN||kinds[i]==XV_BENCH_PREP_BUNDLE)compiled=0;
 #endif
 #ifndef XV_NATIVE_OBJECT_BASIS
         if(kinds[i]==XV_BENCH_OBJECT_BASIS)compiled=0;
@@ -174,6 +174,7 @@ int main(void)
         xv_benchmark_remote_poll(1);
         assert(xv_benchmark_compare_point_math()==(kinds[i]==XV_BENCH_POINT_MATH));
         assert(xv_benchmark_compare_matrix_neon()==(kinds[i]==XV_BENCH_MATRIX_NEON));
+        assert(xv_benchmark_compare_prep_bundle()==(kinds[i]==XV_BENCH_PREP_BUNDLE));
         assert(xv_benchmark_compare_guest_phases()==(kinds[i]==XV_BENCH_GUEST_PHASES));
         assert(xv_benchmark_compare_snapshot_worker()==(kinds[i]==XV_BENCH_SNAPSHOT_WORKER));
         assert(xv_benchmark_compare_guest_affinity()==(kinds[i]==XV_BENCH_GUEST_AFFINITY));
@@ -214,6 +215,45 @@ int main(void)
     xv_benchmark_remote_poll(1);phase_ready=0;switches=0;
     assert(!xv_benchmark_step(now,360,1,view)&&!switches&&!xv_benchmark_remote_busy());
     phase_ready=1;
+#endif
+#if !defined(TEST_NO_MATRIX_NEON) && !defined(TEST_NO_OBJECT_SCAN)
+    /* Bundle completion and every enabled-phase exit release all overrides.
+     * Preserve independently configured member defaults and the established
+     * vertex/worker/flare baseline rather than rewriting saved settings. */
+    const char *members[]={"XV_NATIVE_MATRIX_NEON","XV_NATIVE_OBJECT_SCAN","XV_TEXTURE_STATE_CACHE"};
+    for(unsigned i=0;i<3;i++)setenv(members[i],i==1?"0":"1",1);
+    for(unsigned stop=0;stop<3;stop++) {
+        unsigned initial_switches=switches;
+        assert(!xv_benchmark_remote_request(XV_BENCH_PREP_BUNDLE));
+        xv_benchmark_remote_poll(1);
+        assert(xv_benchmark_step(now,360,1,view)==360 && optimization==0);
+        assert(!strcmp(tag(),"prep-bundle-compare"));
+        xv_benchmark_applied(now,360);
+        unsigned count=stop?181:540;
+        for(unsigned i=0;i<count;i++) {
+            now+=100000;
+            unsigned next=xv_benchmark_step(now,360,1,view);
+            if(next)xv_benchmark_applied(now,next);
+        }
+        if(stop) {
+            assert(optimization==1);
+            if(stop==1)xv_benchmark_compare_toggle();
+            assert(xv_benchmark_step(now,360,stop==1,view)==360);
+            xv_benchmark_applied(now,360);
+        }
+        assert(optimization==-1 && !xv_benchmark_active() && !remote_kind);
+        assert(switches-initial_switches==(stop?3u:4u));
+        for(unsigned i=0;i<3;i++)assert(!strcmp(getenv(members[i]),i==1?"0":"1"));
+    }
+    for(unsigned i=0;i<3;i++)unsetenv(members[i]);
+    setenv("XV_NATIVE_MATH","0",1);
+    unsigned bundle_switches=switches;
+    assert(!xv_benchmark_remote_request(XV_BENCH_PREP_BUNDLE));
+    xv_benchmark_remote_poll(1);
+    assert(!xv_benchmark_step(now,360,1,view));
+    assert(switches==bundle_switches && !xv_benchmark_active());
+    unsetenv("XV_NATIVE_MATH");
+    puts("PASS: combined candidate completes, cancels, loses view and restores without rewriting independently configured defaults");
 #endif
     snapshot_worker_ready=0;
     assert(!xv_benchmark_remote_request(XV_BENCH_SNAPSHOT_WORKER));xv_benchmark_remote_poll(1);

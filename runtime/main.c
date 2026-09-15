@@ -1236,6 +1236,18 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
+    if (xv_benchmark_compare_prep_bundle()) {
+        extern void xv_matrix_neon_override(int) __attribute__((weak));
+        extern void xv_object_scan_override(int) __attribute__((weak));
+        /* Admission requires both native helpers. Apply as one drained guest
+         * boundary; -1 restores each member's own configured value. */
+        if(xv_matrix_neon_override && xv_object_scan_override) {
+            xv_matrix_neon_override(enabled);
+            xv_object_scan_override(enabled);
+            xv_d3d_texture_state_override(enabled);
+        }
+        return;
+    }
     if (xv_benchmark_compare_guest_phases()) {
         extern void xv_phase_capture_override(int) __attribute__((weak));
         if(xv_phase_capture_override)xv_phase_capture_override(enabled);

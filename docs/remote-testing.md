@@ -108,13 +108,21 @@ python3 tools/vita_remote.py --config /private/path/vita-pairing/remote-client.j
 
 Available names are `object-basis`, `model-palette`, `vertex-worker`,
 `vertex-references`, `native-bounds`, `vertex-copy`, `draw-scan`, `flare`,
-`resolution`, `early-visibility`, `point-math`, and `texture-state`. Resolution runs 544/360/544;
+`resolution`, `early-visibility`, `point-math`, `texture-state`, `matrix-neon`,
+`object-scan`, `hle-dispatch`, `flare-query-overlap`, `guest-affinity`,
+`snapshot-worker`, `guest-phases`, and `prep-bundle`. Resolution runs 544/360/544;
 the others run off/on/off. Each restores
 the prior override and resolution. The network thread only publishes a request;
 the guest input owner checks first-person control and starts it at the existing
 frame boundary. Menus, overlapping tests, incomplete uploads and pending updates
 reject new requests. A native helper must be compiled into that build to select
 it. The runner also verifies that the result belongs to the requested test.
+
+`guest-phases` is a [bounded profiling capture](guest-phase-timing-20260912.md#bounded-remote-capture-september-14-follow-up),
+with timing on only in the middle arm. It requires compiled phase scopes and
+configured timing off. The result is marked diagnostic: its FPS values measure
+profiling overhead, not an optimization gain. Already-open parent functions are
+absent from the captured child timings. No saved settings are edited.
 
 `texture-state` compares uncached and [cached mesh texture bindings](texture-state-cache-20260914.md).
 The cache defaults off; the comparison preserves draw order and invalidates
@@ -196,3 +204,12 @@ Platform references: [VitaSDK network initialization sample](https://github.com/
 `psp2/kernel/processmgr.h` automatic-suspend tick contract. The transport supplies
 explicit peer-address storage for accept, matching both firmware and Vita3K's
 [socket implementation](https://github.com/Vita3K/Vita3K/blob/master/vita3k/net/src/posixsocket.cpp).
+
+The `prep-bundle` comparison enables native matrix NEON, empty-object scanning,
+and texture-binding reuse together in its middle arm. It holds resolution and
+the existing indexed-vertex, upload-worker and flare settings constant. The
+outer arms disable only those three candidates; completion, cancellation and
+lost view restore each member’s own configured value. Both native helpers must
+be compiled and native math must be enabled. This tests the combined change;
+it does not attribute any gain to an individual member. See the
+[bundle experiment](optimization-bundle-20260914.md).

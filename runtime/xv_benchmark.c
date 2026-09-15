@@ -31,7 +31,7 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_GUEST_PHASES||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_PREP_BUNDLE||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
 #ifndef XV_NATIVE_OBJECT_BASIS
     if(kind==XV_BENCH_OBJECT_BASIS)return -1;
 #endif
@@ -41,6 +41,7 @@ int xv_benchmark_remote_request(unsigned kind)
     if(kind==XV_BENCH_POINT_MATH&&!xv_point_math_override)return -1;
     if(kind==XV_BENCH_MATRIX_NEON&&!xv_matrix_neon_override)return -1;
     if(kind==XV_BENCH_OBJECT_SCAN&&!xv_object_scan_override)return -1;
+    if(kind==XV_BENCH_PREP_BUNDLE&&(!xv_matrix_neon_override||!xv_object_scan_override))return -1;
     if(kind==XV_BENCH_FLARE_QUERY_OVERLAP&&!xv_flare_query_overlap_override)return -1;
     if(kind==XV_BENCH_HLE_DISPATCH&&!xv_hle_dispatch_override)return -1;
     if(kind==XV_BENCH_GUEST_AFFINITY&&(!xv_guest_affinity_override||!xv_guest_affinity_valid))return -1;
@@ -82,6 +83,7 @@ int xv_benchmark_compare_object_scan(void) { return remote_kind==XV_BENCH_OBJECT
 int xv_benchmark_compare_flare_query_overlap(void) { return remote_kind==XV_BENCH_FLARE_QUERY_OVERLAP; }
 int xv_benchmark_compare_snapshot_worker(void) { return remote_kind==XV_BENCH_SNAPSHOT_WORKER; }
 int xv_benchmark_compare_guest_phases(void) { return remote_kind==XV_BENCH_GUEST_PHASES; }
+int xv_benchmark_compare_prep_bundle(void) { return remote_kind==XV_BENCH_PREP_BUNDLE; }
 int xv_benchmark_compare_guest_affinity(void) { return remote_kind==XV_BENCH_GUEST_AFFINITY; }
 int xv_benchmark_compare_hle_dispatch(void) { return remote_kind==XV_BENCH_HLE_DISPATCH; }
 int xv_benchmark_compare_early_visibility(void) { return remote_kind==XV_BENCH_EARLY_VISIBILITY; }
@@ -109,6 +111,10 @@ static int native_math_selected(void)
 }
 static int candidate_available(void)
 {
+    if (xv_benchmark_compare_prep_bundle()) {
+        const char *math=getenv("XV_NATIVE_MATH");
+        return xv_matrix_neon_override && xv_object_scan_override && (!math || atoi(math)!=0);
+    }
     if (xv_benchmark_compare_guest_phases()) return xv_phase_capture_override && xv_phase_capture_available && xv_phase_capture_available();
     if (xv_benchmark_compare_snapshot_worker()) return xv_snapshot_worker_override && xv_vertex_worker_enabled && xv_vertex_worker_enabled();
     if (xv_benchmark_compare_guest_affinity()) return xv_guest_affinity_override && xv_guest_affinity_valid;
@@ -178,7 +184,8 @@ int xv_benchmark_compare_draw_scan(void)
     return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_guest_phases() ? "guest-phases-compare" :
+    (xv_benchmark_compare_prep_bundle() ? "prep-bundle-compare" :
+     xv_benchmark_compare_guest_phases() ? "guest-phases-compare" :
      xv_benchmark_compare_snapshot_worker() ? "snapshot-worker-compare" :
      xv_benchmark_compare_guest_affinity() ? "guest-affinity-compare" :
      xv_benchmark_compare_flare_query_overlap() ? "flare-query-overlap-compare" :
@@ -221,7 +228,9 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
             xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_guest_phases())
+            if (xv_benchmark_compare_prep_bundle())
+                xv_logf("[prep-bundle-compare] start off/on/off at %up; matrix NEON, empty-object scanning and texture-state reuse switch together; indexed vertices, upload worker, flares, other math and saved settings retained; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_guest_phases())
                 xv_logf("[guest-phases-compare] start off/on/off diagnostic at %up; selected guest timings only, no optimization or gameplay changes; already-open parent scopes are absent; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_snapshot_worker())
                 xv_logf("[snapshot-worker-compare] start off/on/off at %up; owner/shared/owner cached snapshot copies; idle C0 only, source loan joined before guest resumes; GPU copies and other settings unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);

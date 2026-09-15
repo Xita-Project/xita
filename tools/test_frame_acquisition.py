@@ -29,6 +29,7 @@ static int neon_override=-99, object_scan_override=-99, hle_override=-99, overla
 int xv_benchmark_compare_matrix_neon(void) { return candidate==11; }
 int xv_benchmark_compare_object_scan(void) { return candidate==12; }
 int xv_benchmark_compare_hle_dispatch(void) { return candidate==13; }
+int xv_benchmark_compare_prep_bundle(void) { return candidate==18; }
 int xv_benchmark_compare_guest_phases(void) { return candidate==17; }
 int xv_benchmark_compare_snapshot_worker(void) { return candidate==16; }
 void xv_snapshot_worker_override(int enabled) { snapshot_override=enabled; }
@@ -129,9 +130,9 @@ int main(int argc,char **argv)
         assert(basis_override==(candidate==6?mode:-99));
         assert(palette_override==(candidate==7?mode:-99));
         assert(point_override==(candidate==9?mode:-99));
-        assert(texture_override==(candidate==10?mode:-99));
-        assert(neon_override==(candidate==11?mode:-99));
-        assert(object_scan_override==(candidate==12?mode:-99));
+        assert(texture_override==((candidate==10 || candidate==18)?mode:-99));
+        assert(neon_override==((candidate==11 || candidate==18)?mode:-99));
+        assert(object_scan_override==((candidate==12 || candidate==18)?mode:-99));
         assert(hle_override==(candidate==13?mode:-99));
         assert(affinity_override==(candidate==15?mode:-99));
         assert(overlap_override==(candidate==14?mode:-99));
@@ -145,7 +146,7 @@ int main(int argc,char **argv)
 }
 '''
 with tempfile.TemporaryDirectory(prefix='xita-frame-acquire-') as tmp:
-    count=18
+    count=19
     p=pathlib.Path(tmp);(p/'test.c').write_text(f'#define CANDIDATE_COUNT {count}\n'+prefix+globals_+fixture+code+suffix)
     sdk=pathlib.Path(os.environ.get('VITASDK',str(pathlib.Path.home()/'vitasdk')))
     subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP','-DXV_NATIVE_OBJECT_BASIS','-DXV_NATIVE_MODEL_PALETTE','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-unused-variable',

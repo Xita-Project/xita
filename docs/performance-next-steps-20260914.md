@@ -74,7 +74,11 @@ No code from that project's Source Engine tree was imported for this research.
    Compare worker designs against their input-copy, wakeup and join costs.
    A bounded parallel comparison must finish before guest mutation resumes;
    a deferred job must own its input. Preserve draw order and slot retirement.
-4. Use representative captures to choose the next native game routines. Matrix,
+4. Compare the [matrix/object-scan/texture-state bundle](optimization-bundle-20260914.md)
+   against the existing combined baseline. Small individual results do not rule
+   out a useful combination. Require repeated complete-frame measurements and
+   rendering checks, then remove members individually if the bundle helps.
+5. Use representative captures to choose the next native game routines. Matrix,
    animation and visibility work are candidates only where measured cost
    warrants replacing the translated routine. Establish read/write boundaries
    before moving simulation or physics updates into simultaneous jobs.
