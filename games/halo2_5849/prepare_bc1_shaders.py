@@ -110,6 +110,8 @@ def prepare(xbe, snapshot, push, texture, out):
     artifacts = {'bc1.vert.cg':vertex.encode(),'bc1.frag.cg':fragment_source(d).encode(),
         'bc1.copy.frag.cg':COPY_FRAGMENT.encode(),'bc1.texture.bin':data[32:],
         'bc1.vertices.bin':vertices_from_push(push.read_bytes(),s['header_address']),
+        'bc1.contract.bin':struct.pack('<II',0x43423148,1)+struct.pack('<2048I',*s['setup'])+
+            struct.pack('<64I',*s['setup_valid'])+program+vertices_from_push(push.read_bytes(),s['header_address']),
         'bc1.constants.bin':struct.pack('<72f',*[(v >> k & 255)/255 for v in factors for k in (16,8,0,24)])}
     out.mkdir(parents=True,exist_ok=True)
     for name,data in artifacts.items():

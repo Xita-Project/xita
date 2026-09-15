@@ -7,6 +7,7 @@ GUEST_OPT ?= -O1
 HOST_CHANNEL ?= 0
 QUAD_RENDER ?= 0
 SCREEN_RENDER ?= 0
+BC1_RENDER ?= 0
 AUDIO_HOST ?= 0
 AUDIO_DSP ?= 0
 AUDIO_SPATIAL_MODEL ?= 0
@@ -72,6 +73,15 @@ ifneq ($(AUDIO_HOST),1)
 $(error AUDIO_MULTIBIN_UNAVAILABLE=1 requires AUDIO_HOST=1)
 endif
 $(BUILD)/audio_host.o: CFLAGS += -DH2_AUDIO_MULTIBIN_UNAVAILABLE=1
+endif
+ifeq ($(BC1_RENDER),1)
+ifneq ($(SCREEN_RENDER),1)
+$(error BC1_RENDER=1 requires SCREEN_RENDER=1)
+endif
+OBJECTS += $(BUILD)/bc1_draw.o
+$(BUILD)/host_channel_runtime.o $(BUILD)/quad_gxm.o: CFLAGS += -DH2_BC1_RENDER=1
+BC1_FILES = $(addprefix $(BC1_SHADERS)/,bc1.vert.gxp bc1.frag.gxp bc1.contract.bin)
+BC1_PACK = $(foreach f,$(BC1_FILES),-a $(f)=$(notdir $(f)))
 endif
 comma := ,
 WRAPS := xk_MmCreateKernelStack xk_MmDeleteKernelStack xk_MmClaimGpuInstanceMemory xv_unimpl xk_NtOpenFile xk_NtReadFile xk_NtWriteFile xk_NtDeviceIoControlFile xk_NtFsControlFile xk_NtQueryVolumeInformationFile
@@ -218,7 +228,7 @@ $(BUILD)/bc1-probe-param.sfo: Makefile
 $(BUILD)/bc1%.vpk: $(BUILD)/bc1%-eboot.bin $(BUILD)/bc1-probe-param.sfo $(addprefix $(BC1_SHADERS)/,$(BC1_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/bc1-probe-param.sfo -b $(BUILD)/bc1$*-eboot.bin $(foreach f,$(BC1_PROBE_FILES),-a $(BC1_SHADERS)/$(f)=$(f)) $@
 test-host: $(BUILD)/dxt23_layout_test
-test-host: $(BUILD)/screen_draw_test
+test-host: $(BUILD)/screen_draw_test $(BUILD)/bc1_draw_test
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
 test-host: $(BUILD)/quad_draw_test
 test-host: $(BUILD)/blit_copy_test
@@ -237,6 +247,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/linear_texture_test
 	$(BUILD)/dxt23_layout_test
 	$(BUILD)/screen_draw_test
+	$(BUILD)/bc1_draw_test
 	$(BUILD)/quad_draw_test
 	$(BUILD)/blit_copy_test
 	$(BUILD)/eflags_id_test
@@ -352,6 +363,9 @@ $(BUILD)/quad_draw_test: quad_draw_test.c quad_draw.c quad_draw.h linear_texture
 $(BUILD)/dxt23_layout_test: dxt23_layout_test.c dxt23_layout.c dxt23_layout.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror dxt23_layout_test.c dxt23_layout.c -o $@
+$(BUILD)/bc1_draw_test: bc1_draw_test.c bc1_draw.c bc1_draw.h linear_texture.c linear_texture.h gpu_objects.c gpu_objects.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -O1 -Wall -Wextra -Werror bc1_draw_test.c bc1_draw.c linear_texture.c gpu_objects.c -o $@
 $(BUILD)/screen_draw_test: screen_draw_test.c screen_draw.c screen_draw.h linear_texture.c linear_texture.h gpu_objects.c gpu_objects.h command_state.h kelvin_clear.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror screen_draw_test.c screen_draw.c linear_texture.c gpu_objects.c -o $@
@@ -410,7 +424,7 @@ $(BUILD)/nv2a_regs.o: nv2a_regs.c
 $(BUILD)/linear_texture.o $(BUILD)/fp_environment.o $(BUILD)/kernel_timer.o $(BUILD)/kernel_stack.o $(BUILD)/command_snapshot.o $(BUILD)/host_channel_runtime.o $(BUILD)/command_state.o $(BUILD)/host_channel.o $(BUILD)/host_tiles.o $(BUILD)/push_stream.o $(BUILD)/gpu_objects.o $(BUILD)/kelvin_clear.o $(BUILD)/scanout.o $(BUILD)/input.o $(BUILD)/audio_unavailable.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/audio_mixer_bridge.o $(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/screen_draw.o $(BUILD)/dxt23_layout.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/audio_fx.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
+$(BUILD)/audio_mixer_bridge.o $(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/screen_draw.o $(BUILD)/bc1_draw.o $(BUILD)/dxt23_layout.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/audio_fx.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/dsp_core.o: dsp/interp/dsp_cpu.c
@@ -428,8 +442,8 @@ $(BUILD)/eboot.bin: $(BUILD)/halo2-boot.velf
 $(BUILD)/param.sfo: Makefile
 	@mkdir -p $(dir $@)
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2B00001 -d ATTRIBUTE2=12 "Xita Halo 2 Boot" $@
-$(BUILD)/halo2-boot.vpk: $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(DSP_FILES)
-	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(DSP_PACK) $@
+$(BUILD)/halo2-boot.vpk: $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(BC1_FILES) $(DSP_FILES)
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(BC1_PACK) $(DSP_PACK) $@
 -include $(OBJECTS:.o=.d)
 
 $(BUILD)/audio_hrtf_model_test: audio_hrtf_model_test.c audio_hrtf_model.h

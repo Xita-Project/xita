@@ -43,21 +43,27 @@ static h2_quad_draw movie_quad;
 #if H2_SCREEN_RENDER
 static h2_screen_draw screen_quad;
 #endif
+#if H2_BC1_RENDER
+static h2_bc1_draw bc1_quad;
+#endif
 static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
                             uint32_t value, uint32_t source)
 {
     (void)opaque;
-    int screen_active = 0;
+    int screen_active = 0, bc1_active = 0;
+#if H2_BC1_RENDER
+    bc1_active = bc1_quad.active;
+#endif
 #if H2_SCREEN_RENDER
     screen_active = screen_quad.active;
 #endif
-    if (!movie_quad.active && !screen_active && method != 0x17FC) return -1;
+    if (!movie_quad.active && !screen_active && !bc1_active && method != 0x17FC) return -1;
     uint32_t fpscr = h2_platform_fpscr_read();
     uint64_t before = movie_quad.completed;
     int movie_active = movie_quad.active;
-    int result = screen_active ? 0 : h2_quad_method(&movie_quad, &channel.commands, &channel.clear, sub, method, value);
+    int result = (screen_active || bc1_active) ? 0 : h2_quad_method(&movie_quad, &channel.commands, &channel.clear, sub, method, value);
 #if H2_SCREEN_RENDER
-    if (screen_active || (!movie_active && !result)) {
+    if (!bc1_active && (screen_active || (!movie_active && !result))) {
         uint64_t screen_before = screen_quad.completed;
         result = h2_screen_method(&screen_quad, &channel.commands, &channel.clear, sub, method, value);
         if (screen_before != screen_quad.completed)
@@ -66,6 +72,15 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
     }
 #else
     (void)movie_active;
+#endif
+#if H2_BC1_RENDER
+    if (bc1_active || (!movie_active && !screen_active && !result)) {
+        uint64_t bc1_before = bc1_quad.completed;
+        result = h2_bc1_method(&bc1_quad, &channel.commands, &channel.clear, sub, method, value);
+        if (bc1_before != bc1_quad.completed)
+            xv_logf("[h2/bc1] completed=%u original_vertices=4 source=%08X color=%08X RGBA committed; not yet presented\n",
+                    (unsigned)bc1_quad.completed, source, channel.clear.color_offset);
+    }
 #endif
     if (movie_quad.completed != before && (movie_quad.completed <= 4 || !(movie_quad.completed % 60)))
         xv_logf("[h2/quad] completed=%u original_vertices=4 source=%08X color=%08X texture=%08X RGB committed; not yet presented\n",
@@ -279,6 +294,11 @@ void h2_host_channel_configure(xctx *c)
     memset(&screen_quad, 0, sizeof screen_quad);
     screen_quad.contract = h2_screen_gxm_contract();
     screen_quad.render = h2_screen_gxm_render;
+#endif
+#if H2_BC1_RENDER
+    memset(&bc1_quad, 0, sizeof bc1_quad);
+    bc1_quad.contract = h2_bc1_gxm_contract();
+    bc1_quad.render = h2_bc1_gxm_render;
 #endif
     h2_platform_fpscr_write(contract_fpscr);
     movie_quad.render = h2_quad_gxm_render;
