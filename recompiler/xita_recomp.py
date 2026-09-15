@@ -783,7 +783,7 @@ class Emitter:
         # ---- SSE scalar subset --------------------------------------------------------
         if mn in ("movss", "movaps", "movups", "movlps", "movhps", "movhlps", "movlhps", "addss", "subss", "mulss", "divss", "sqrtss", "minss", "maxss",
                   "cvtsi2ss", "cvttss2si", "cvtss2si", "comiss", "ucomiss", "xorps", "andps", "orps", "addps", "subps", "mulps",
-                  "shufps", "unpcklps", "movd", "rsqrtss", "rcpss", "cvtpi2ps", "rsqrtps"):
+                  "shufps", "unpcklps", "movd", "rsqrtss", "rcpss", "cvtpi2ps", "rsqrtps", "minps", "maxps"):
             self.lower_sse(ins, mn, out, U); return
         U()
 
@@ -959,6 +959,14 @@ class Emitter:
                 out.append(f"    x_rsqrtps({xmm(0)}, {xmm(1)});")
             else:
                 out.append(f"    {{ float source_[4]; x_load128(c, source_, {self.addr(ins)}); x_rsqrtps({xmm(0)}, source_); }}")
+            return
+        if mn in ("minps", "maxps"):
+            maximum = int(mn == "maxps")
+            check = f'if (!x_minmaxps({xmm(0)}, SOURCE, {maximum})) {{ xv_unimpl(c, 0x{ins.ip:X}u, "{mn} FP control"); return; }}'
+            if is_xmm(1):
+                out.append("    " + check.replace("SOURCE", xmm(1)))
+            else:
+                out.append(f"    {{ float source_[4]; x_load128(c, source_, {self.addr(ins)}); " + check.replace("SOURCE", "source_") + " }")
             return
         if mn in ("movlps", "movhps"):
             lo = 0 if mn == "movlps" else 2

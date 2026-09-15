@@ -300,6 +300,53 @@ static inline void x_shufps(xctx *c, float *d, const float *s, unsigned imm) { (
     float t[4] = { d[imm & 3], d[(imm >> 2) & 3], s[(imm >> 4) & 3], s[(imm >> 6) & 3] }; memcpy(d, t, 16); }
 static inline void x_unpcklps(xctx *c, float *d, const float *s) { (void)c; float t[4] = { d[0], s[0], d[1], s[1] }; memcpy(d, t, 16); }
 
+/* Legacy MINPS/MAXPS select source two for NaNs and equal signed zeros.
+ * Return its bits unchanged, including an SNaN payload. For a lane containing
+ * a NaN, invalid has priority over denormal; other lanes still accumulate
+ * their own status. Status uses ARM FPSCR IOC/IDC bits (0/7). */
+static inline uint32_t x_minmax_bits(uint32_t a, uint32_t b, int maximum,
+                                    uint32_t *status)
+{
+    uint32_t aa = a & 0x7FFFFFFFu, bb = b & 0x7FFFFFFFu;
+    if (aa > 0x7F800000u || bb > 0x7F800000u) {
+        *status |= 1u;
+        return b;
+    }
+    if ((aa && aa < 0x00800000u) || (bb && bb < 0x00800000u)) *status |= 0x80u;
+    if (!(aa | bb) || a == b) return b;
+    int less = ((a ^ b) >> 31) ? (int)(a >> 31) : (a >> 31) ? a > b : a < b;
+    return (maximum ? !less : less) ? a : b;
+}
+static inline int x_minmaxps(float *destination, const float *source, int maximum)
+{
+#if defined(__arm__) && defined(__VFP_FP__)
+    uint32_t fpscr;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr) :: "memory");
+    /* No emulation of DN/FZ, vector Len/Stride or unmasked exceptions.
+     * All rounding modes are valid: this instruction only selects bits.
+     * H2's existing LDMXCSR adapter already enforces supported controls. */
+    if (fpscr & 0x03379F00u) return 0;
+    uint32_t a[4], b[4], status = 0;
+    memcpy(a, destination, 16); memcpy(b, source, 16);
+    for (unsigned lane = 0; lane < 4; ++lane)
+        a[lane] = x_minmax_bits(a[lane], b[lane], maximum, &status);
+    fpscr |= status;
+    __asm__ volatile("vmsr fpscr, %0" :: "r"(fpscr) : "memory");
+    memcpy(destination, a, 16);
+    return 1;
+#elif defined(__SSE__)
+    typedef float vector4 __attribute__((vector_size(16)));
+    vector4 a, b; memcpy(&a, destination, 16); memcpy(&b, source, 16);
+    if (maximum) __asm__ volatile("maxps %1,%0" : "+x"(a) : "x"(b) : "memory");
+    else __asm__ volatile("minps %1,%0" : "+x"(a) : "x"(b) : "memory");
+    memcpy(destination, &a, 16);
+    return 1;
+#else
+    (void)destination; (void)source; (void)maximum;
+    return 0;
+#endif
+}
+
 /* Legacy RSQRTPS: no FP exceptions and independent of the host rounding mode.
  * Integer Q30 Newton steps avoid modifying FPSCR/MXCSR even for signaling NaNs.
  * This meets Intel's relative-error bound, not a particular CPU's estimate bits.
