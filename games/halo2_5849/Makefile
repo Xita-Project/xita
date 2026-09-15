@@ -199,6 +199,24 @@ $(BUILD)/screen-probe-param.sfo: Makefile
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 Screen Effect Probe" $@
 $(BUILD)/screen-probe.vpk: $(BUILD)/screen-probe-eboot.bin $(BUILD)/screen-probe-param.sfo $(addprefix $(SCREEN_SHADERS)/,$(SCREEN_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/screen-probe-param.sfo -b $(BUILD)/screen-probe-eboot.bin $(foreach f,$(SCREEN_PROBE_FILES),-a $(SCREEN_SHADERS)/$(f)=$(f)) $@
+# Separate BC1 validation utilities. They never alter the game draw consumer.
+BC1_SHADERS ?= $(ROOT)/local/halo2_5849/bc1-shaders
+BC1_PROBE_FILES := bc1.vert.gxp bc1.frag.gxp bc1.copy.frag.gxp bc1.constants.bin bc1.vertices.bin bc1.texture.bin
+.PHONY: bc1-probe bc1-sample-probe
+bc1-probe: $(BUILD)/bc1-probe.vpk
+bc1-sample-probe: $(BUILD)/bc1-sample-probe.vpk
+$(BUILD)/bc1-probe.elf $(BUILD)/bc1-sample-probe.elf: bc1_probe.c dxt23_layout.c dxt23_layout.h
+	@mkdir -p $(dir $@)
+	$(CC) -DH2_BC1_FLOAT_SAMPLE=$(if $(findstring -sample,$(notdir $@)),1,0) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Werror -Wl,-q bc1_probe.c dxt23_layout.c -o $@ -lSceGxm_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceProcessmgr_stub
+$(BUILD)/bc1%.velf: $(BUILD)/bc1%.elf
+	$(VITASDK)/bin/vita-elf-create $< $@
+$(BUILD)/bc1%-eboot.bin: $(BUILD)/bc1%.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/bc1-probe-param.sfo: Makefile
+	@mkdir -p $(dir $@)
+	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 BC1 Pixel Probe" $@
+$(BUILD)/bc1%.vpk: $(BUILD)/bc1%-eboot.bin $(BUILD)/bc1-probe-param.sfo $(addprefix $(BC1_SHADERS)/,$(BC1_PROBE_FILES))
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/bc1-probe-param.sfo -b $(BUILD)/bc1$*-eboot.bin $(foreach f,$(BC1_PROBE_FILES),-a $(BC1_SHADERS)/$(f)=$(f)) $@
 test-host: $(BUILD)/dxt23_layout_test
 test-host: $(BUILD)/screen_draw_test
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
