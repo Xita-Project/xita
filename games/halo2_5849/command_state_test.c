@@ -115,7 +115,7 @@ int main(void)
     reject(0, 0x1E94, 7); reject(0, 0x1E94, 8); reject(0, 0x1E98, 2);
     reject(0, 0x1E90, 0); /* executing a program remains unsupported */
     assert(emit(0, 0x194C, 0x11223344) && s.vertex4ub[3] == 0x11223344);
-    reject(0, 0x1940, 1); /* position attribute would emit a vertex */
+    assert(emit(0, 0x1940, 1)); /* current attribute 0 stores; no emission outside a draw */
     /* Full polygon-stipple bank and Boolean enable are state assignments.
      * No mapped memory, resource callback or draw is touched by any row. */
     const uint32_t stipple[] = {0, 1, UINT32_MAX, 0x80000000, 0x55555555, 0xAAAAAAAA, 0x01234567};
@@ -131,7 +131,10 @@ int main(void)
         assert(!memcmp(&f, &memory, sizeof f) && prior_reads == instance_reads && prior_maps == mappings);
         reject(1, method, stipple[v]); reject(0, method + 1, stipple[v]);
     }
-    reject(0, 0x1478, 0); reject(0, 0x147C, 2); reject(0, 0x1500, 0);
+    reject(0, 0x1478, 0); reject(0, 0x147C, 2); reject(0, 0x1530, 0);
+    /* Viewport/clip float bounds 0x1500..0x152C store any bit pattern. */
+    for (unsigned method = 0x1500; method <= 0x152C; method += 4)
+        assert(emit(0, method, 0x4B7FFFFF));
     /* Offset/format setup is non-executing: exact raw input + one validity bit,
      * no instance/DMA reads, no guest mapping, and no changed clear/guest state. */
     const uint32_t array_offsets[] = {0, 1, 0x03131000, 0x0313100C, 0x7FFFFFFF,
@@ -185,8 +188,12 @@ int main(void)
             reject(1, method, 0); reject(0, method + 1, 0);
         }
     }
-    for (unsigned method = 0x1A00; method < 0x1AF0; method += 4) reject(0, method, 0);
-    reject(0, 0x197C, 0); /* packed alias of attribute 15 is not implemented */
+    /* Immediate current-vertex attributes 0x1880..0x1AEC store the raw bits
+     * (attributes 0..14, all vertex-data encodings); no vertex is emitted. */
+    for (unsigned method = 0x1880; method <= 0x1AEC; method += 4) {
+        if (method == 0x194C || method == 0x1950 || method == 0x195C || method == 0x1960) continue; /* vertex4ub */
+        assert(emit(0, method, 0x3F800000));
+    }
     reject(0, 0x17FC, 0); reject(0, 0x17FC, 5); /* no begin/end or emission */
     assert(emit(0, 0xA20, 0x7FC12345) && s.constants[0x3B][0] == 0x7FC12345);
     assert(emit(0, 0xAF8, 0x80000000) && s.constants[0x3A][2] == 0x80000000);
@@ -214,7 +221,7 @@ int main(void)
     reject(0, 0x1E1C, 0); reject(0, 0x1E28, 0); reject(0, 0x1E64, 0);
     reject(0, 0x1E74, 0x1000); reject(0, 0x1E74, 0x80000000);
     reject(0, 0x17FC, 7); reject(0, 0x17FC, 0); /* no quad or END execution */
-    reject(0, 0x1880, 0); reject(0, 0x1884, 0); /* no immediate position */
+    assert(emit(0, 0x1880, 0) && emit(0, 0x1884, 0)); /* current attributes store; no draw */
     assert(emit(0, 0x1BFC, 0x80000000) && s.setup[0x1BFC / 4] == 0x80000000);
     /* Palette writes only retain a descriptor, even for an unmapped offset.
      * All four units have independent state, preserved verbatim; no instance,
@@ -235,7 +242,7 @@ int main(void)
     }
     reject(0, 0x1C20, 0); /* no fifth texture unit */
     reject(0, 0x17FC, 3); reject(0, 0x1800, 0); reject(0, 0x1810, 0);
-    reject(0, 0x1818, 0); reject(0, 0x1940, 0); /* no vertex/draw execution */
+    reject(0, 0x1818, 0); assert(emit(0, 0x1940, 0)); /* inline-array draw rejects; current attr stores */
     /* Descriptors are inert until a draw backend validates their full mapping.
      * Failed mappers and unreadable DMA objects cannot affect state writes. */
     const unsigned texture_offsets[] = {0, 4, 8, 0x10, 0x14, 0x1C};
@@ -284,7 +291,7 @@ int main(void)
     assert(emit(0, 0x3BC, 0xFFFF) && emit(0, 0x43C, 0x1FF));
     reject(0, 0x9CC, 0); reject(0, 0x298, 0); /* no neighboring material/FP state */
     reject(0, 0x17FC, 7); reject(0, 0x17FC, 0);
-    reject(0, 0x1880, 0); reject(0, 0x1884, 0); reject(0, 0x1964, 0xFFFFFFFF);
+    assert(emit(0, 0x1880, 0) && emit(0, 0x1884, 0) && emit(0, 0x1964, 0xFFFFFFFF)); /* current attrs store */
     assert(emit(0, 0x300, 1) && emit(0, 0x328, 6));
     reject(0, 0x300, 2); reject(0, 0x328, 7); reject(0, 0x33C, 0x208);
     reject(0, 0x358, 2); reject(0, 0x370, 0x1234); reject(0, 0x380, 0x200);

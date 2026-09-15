@@ -162,7 +162,7 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
         } else if (r->array_count) {
             maxv = r->array_start + r->array_count - 1; lo = r->array_start; count = r->array_count;
         } else {
-            return 0;
+            return 1; /* BEGIN/END with no emission draws nothing; still a valid draw */
         }
         if (maxv + 1 > MAX_VERTS) return 0;
         vattr attrs[16];

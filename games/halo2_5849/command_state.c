@@ -127,6 +127,10 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
          * eight-stage bank and the final words retain all input bits. A future
          * draw backend must validate the selected combiner modes and sources;
          * BEGIN_END and every emission path still reject without mutation. */
+    } else if (method >= 0x1500 && method <= 0x152C) {
+        /* Viewport/clip float bounds the menu sets per batch: observed corners
+         * (0,0)/(640,480) and max depth 16777215. Stored as exact float bits;
+         * a draw backend applies them as the scissor/clip. No execution here. */
     } else if (method >= 0x1480 && method <= 0x14FC) {
         /* Native182: 32 original all-ones polygon-stipple rows. Retain every
          * bit of all rows; no framebuffer, geometry or mask execution here. */
@@ -151,6 +155,14 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
               (type == 1 && count >= 1 && count <= 4) ||  /* signed short normalized */
               (type == 5 && count >= 1 && count <= 4)))   /* signed short */
             return 0;
+    } else if (method >= 0x1880 && method <= 0x1AEC) {
+        /* Immediate "current vertex" attributes (SET_VERTEX_DATA 2F/2S/4UB/4S/4F,
+         * attributes 0..14) written outside BEGIN/END. On hardware these set the
+         * persistent current-vertex value; no vertex is emitted here. Store the
+         * exact bits; the draw backend seeds per-vertex inputs the arrays do not
+         * supply from these. Emission inside a draw is owned by the geometry
+         * consumer, which intercepts these before this path. (kelvin() routes the
+         * 4UB slots 0x194C-0x1960 to vertex4ub before reaching here.) */
     } else if (method >= 0x1AF0 && method <= 0x1AFC) {
         /* SET_VERTEX_DATA4F attribute 15, one exact component per method.
          * Attribute 0's final component emits a vertex and stays unsupported.
