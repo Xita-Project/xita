@@ -280,6 +280,23 @@ $(BUILD)/threshold-probe-param.sfo: Makefile
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 Threshold Probe" $@
 $(BUILD)/threshold-probe.vpk: $(BUILD)/threshold-probe-eboot.bin $(BUILD)/threshold-probe-param.sfo $(addprefix $(THRESHOLD_SHADERS)/,$(THRESHOLD_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/threshold-probe-param.sfo -b $(BUILD)/threshold-probe-eboot.bin $(foreach f,$(THRESHOLD_PROBE_FILES),-a $(THRESHOLD_SHADERS)/$(f)=$(f)) $@
+BLUR_SHADERS ?= $(ROOT)/local/halo2_5849/blur-shaders
+BLUR_PROBE_FILES := blur.vert.gxp blur.frag.gxp blur.copy.frag.gxp blur.constants.bin blur.vertices.bin blur.texture.bin
+.PHONY: blur-probe blur-sample-probe
+blur-probe: $(BUILD)/blur-probe.vpk
+blur-sample-probe: $(BUILD)/blur-sample-probe.vpk
+$(BUILD)/blur-probe.elf $(BUILD)/blur-sample-probe.elf: blur_probe.c
+	@mkdir -p $(dir $@)
+	$(CC) -DH2_BLUR_FLOAT_SAMPLE=$(if $(findstring -sample,$(notdir $@)),1,0) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Werror -Wl,-q $< -o $@ -lSceGxm_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceProcessmgr_stub
+$(BUILD)/blur%.velf: $(BUILD)/blur%.elf
+	$(VITASDK)/bin/vita-elf-create $< $@
+$(BUILD)/blur%-eboot.bin: $(BUILD)/blur%.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/blur-probe-param.sfo: Makefile
+	@mkdir -p $(dir $@)
+	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 Blur Probe" $@
+$(BUILD)/blur%.vpk: $(BUILD)/blur%-eboot.bin $(BUILD)/blur-probe-param.sfo $(addprefix $(BLUR_SHADERS)/,$(BLUR_PROBE_FILES))
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/blur-probe-param.sfo -b $(BUILD)/blur$*-eboot.bin $(foreach f,$(BLUR_PROBE_FILES),-a $(BLUR_SHADERS)/$(f)=$(f)) $@
 test-host: $(BUILD)/dxt23_layout_test
 test-host: $(BUILD)/geometry_dispatch_test $(BUILD)/screen_draw_test $(BUILD)/bc1_draw_test $(BUILD)/composition_draw_test $(BUILD)/threshold_draw_test
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
