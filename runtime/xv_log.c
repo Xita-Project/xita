@@ -3,6 +3,7 @@
 #ifdef __vita__
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/clib.h>
@@ -12,6 +13,42 @@
 
 static SceUID g_fd = -2;        /* -2 = not opened yet, -1 = open failed (stay console-only) */
 static SceUID g_mtx = -1;
+/* Used only while the presenting thread formats a periodic report. No worker,
+ * deferred I/O or per-frame allocation: end writes the complete report before
+ * gameplay resumes. Foreign-thread errors retain the ordinary immediate sink. */
+#define XV_LOG_REPORT_BYTES 32768u
+static char g_report[XV_LOG_REPORT_BYTES];
+static unsigned g_report_used;
+static SceUID g_report_owner;
+static void log_write_immediate(const char *buf, unsigned n);
+
+int xv_log_report_begin(void)
+{
+    SceUID expected=0, current=sceKernelGetThreadId();
+    if (current<=0 || !__atomic_compare_exchange_n(&g_report_owner,&expected,current,
+            0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return 0;
+    g_report_used=0;
+    return 1;
+}
+
+static int report_is_owner(void)
+{
+    SceUID owner=__atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE);
+    return owner>0 && owner==sceKernelGetThreadId();
+}
+
+static void report_flush(void)
+{
+    if (g_report_used) log_write_immediate(g_report,g_report_used);
+    g_report_used=0;
+}
+
+void xv_log_report_end(void)
+{
+    if (!report_is_owner()) return;
+    report_flush();
+    __atomic_store_n(&g_report_owner,0,__ATOMIC_RELEASE);
+}
 
 void xv_logf(const char *fmt, ...)
 {
@@ -27,6 +64,19 @@ void xv_logf(const char *fmt, ...)
 void xv_log_write(const char *buf, unsigned n)
 {
     if (!buf || !n) return;
+    if (report_is_owner()) {
+        if (n>XV_LOG_REPORT_BYTES-g_report_used) report_flush();
+        if (n<=XV_LOG_REPORT_BYTES) {
+            memcpy(g_report+g_report_used,buf,n);
+            g_report_used+=n;
+        } else log_write_immediate(buf,n);
+        return;
+    }
+    log_write_immediate(buf,n);
+}
+
+static void log_write_immediate(const char *buf, unsigned n)
+{
     /* Keep individual console messages within the existing formatting limit.
      * The file receives the complete batch under one mutex acquisition. */
     for (unsigned at = 0; at < n;) {
@@ -70,5 +120,9 @@ void xv_log_write(const char *buf, unsigned n)
     if (g_mtx >= 0) sceKernelUnlockMutex(g_mtx, 1);
 }
 
-void xv_log_flush(void) { if (g_fd >= 0) sceIoSyncByFd(g_fd, 0); }
+void xv_log_flush(void)
+{
+    if (report_is_owner()) report_flush();
+    if (g_fd >= 0) sceIoSyncByFd(g_fd, 0);
+}
 #endif

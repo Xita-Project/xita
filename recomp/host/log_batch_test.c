@@ -5,9 +5,13 @@
 #include <string.h>
 #include "../../runtime/xv_log.c"
 
-static char console_text[32768], file_text[32768];
+static char console_text[131072], file_text[131072];
 static unsigned console_n, file_n, writes, locks, unlocks, short_limit;
 static int held, fail_write, zero_write;
+static SceUID caller=100;
+static unsigned syncs;
+
+SceUID sceKernelGetThreadId(void) { return caller; }
 
 int sceClibPrintf(const char *fmt, ...)
 {
@@ -37,12 +41,13 @@ int sceIoRename(const char *a, const char *b) { (void)a; (void)b; return 0; }
 int sceIoRemove(const char *p) { (void)p; return 0; }
 SceUID sceIoOpen(const char *p, int flags, SceMode mode)
 { (void)p; (void)flags; (void)mode; return 10; }
-int sceIoSyncByFd(SceUID fd, int flag) { assert(fd == 10 && !flag); return 0; }
+int sceIoSyncByFd(SceUID fd, int flag) { assert(fd == 10 && !flag); syncs++; return 0; }
 
 static void reset(void)
 {
     console_n = file_n = writes = locks = unlocks = short_limit = 0;
     held = fail_write = zero_write = 0; g_fd = 10; g_mtx = 20;
+    assert(!g_report_owner && !g_report_used); caller=100; syncs=0;
     memset(console_text, 0, sizeof console_text); memset(file_text, 0, sizeof file_text);
 }
 int main(void)
@@ -67,6 +72,41 @@ int main(void)
     assert(console_n == file_n && !memcmp(console_text, file_text, file_n));
     reset(); g_fd = -2; g_mtx = -1; xv_logf("initial record\n");
     assert(g_fd == 10 && g_mtx == 20 && writes == 1 && !held);
-    puts("PASS: full batch, one file write/lock, short writes, failures and ordinary log compatibility");
+    /* Many production-style logf calls become one file write. Nested scopes
+     * cannot steal ownership, and foreign-thread failures bypass the batch. */
+    reset(); assert(xv_log_report_begin());
+    for(unsigned i=0;i<100;i++)xv_logf("report %u\n",i);
+    assert(!writes && !console_n && !locks && g_report_used);
+    assert(!xv_log_report_begin());
+    caller=200; assert(!xv_log_report_begin());
+    xv_logf("worker error\n");
+    assert(writes==1 && !strcmp(file_text,"worker error\n"));
+    xv_log_report_end();assert(g_report_owner==100); /* foreign end is harmless */
+    caller=100;xv_log_report_end();
+    assert(writes==2 && !g_report_owner && !g_report_used);
+    assert(!strcmp(file_text+file_n-10,"report 99\n"));
+    assert(console_n==file_n && !memcmp(console_text,file_text,file_n));
+    xv_logf("ordinary\n");assert(writes==3);
+    /* Flush must preserve report bytes before syncing; the scope can continue. */
+    reset();assert(xv_log_report_begin());xv_logf("before sync\n");xv_log_flush();
+    assert(writes==1 && syncs==1 && !strcmp(file_text,"before sync\n"));
+    xv_logf("after sync\n");xv_log_report_end();assert(writes==2);
+    /* Overflow and individually oversized messages preserve every byte. */
+    reset();assert(xv_log_report_begin());
+    for(unsigned i=0;i<4;i++)xv_log_write(report,sizeof report);
+    xv_log_report_end();assert(writes==2 && file_n==4*sizeof report);
+    for(unsigned i=0;i<4;i++)assert(!memcmp(file_text+i*sizeof report,report,sizeof report));
+    static char oversized[XV_LOG_REPORT_BYTES+1];memset(oversized,'z',sizeof oversized);
+    reset();assert(xv_log_report_begin());xv_logf("first\n");
+    xv_log_write(oversized,sizeof oversized);xv_logf("last\n");xv_log_report_end();
+    assert(writes==3 && file_n==6+sizeof oversized+5);
+    assert(!memcmp(file_text,"first\n",6) && !memcmp(file_text+6,oversized,sizeof oversized));
+    assert(!strcmp(file_text+6+sizeof oversized,"last\n"));
+    reset();short_limit=37;assert(xv_log_report_begin());xv_log_write(report,sizeof report);xv_log_report_end();
+    assert(file_n==sizeof report && !memcmp(file_text,report,sizeof report) && !held);
+    reset();fail_write=1;assert(xv_log_report_begin());xv_logf("failed write\n");xv_log_report_end();
+    assert(writes==1 && !held && !g_report_owner && !g_report_used);
+    reset();caller=-1;assert(!xv_log_report_begin());xv_logf("invalid thread\n");assert(writes==1);
+    puts("PASS: complete reports, immediate foreign logs, nesting, flush, overflow, short writes, failures and ordinary compatibility");
     return 0;
 }

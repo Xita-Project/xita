@@ -12,6 +12,12 @@ void xv_vertex_upload_report(unsigned n) {}
 static unsigned submitted, consumed, sealed, begun, queued_ui, published_ui;
 static struct { unsigned slot, verts, batches; } packets[128];
 static int dirty_ui;
+static unsigned reports_started,reports_ended;
+static int report_active;
+int xv_log_report_begin(void)
+{ assert(!report_active);report_active=1;reports_started++;return 1; }
+void xv_log_report_end(void)
+{ assert(report_active);report_active=0;reports_ended++; }
 void xv_settings_snapshot(xv_dash_graphics_view *view)
 { memset(view,0,sizeof(*view));view->active=1;view->selected=(int)submitted; }
 volatile uint64_t xv_pump_us_acc;
@@ -64,5 +70,8 @@ int main(void)
     }
     xv_present_drain();
     assert(consumed==120 && sealed==120 && begun==120);
+    const char *batch=getenv("XV_PROFILE_BATCH");
+    unsigned expected=batch && !atoi(batch) ? 0u : 2u;
+    assert(!report_active && reports_started==expected && reports_ended==expected);
     puts("PASS: triple UI ownership, late write publication, slow consumer and 120 frame rotations");
 }

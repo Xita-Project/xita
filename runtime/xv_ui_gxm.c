@@ -1458,6 +1458,12 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
         /* Measure the periodic report itself: its synchronous file writes
          * occur after t1 and are otherwise hidden in the next game interval. */
         uint64_t report_start=t_us();
+        static int report_batch=-1;
+        if (report_batch<0) {
+            const char *e=getenv("XV_PROFILE_BATCH");
+            report_batch=!e || atoi(e)!=0;
+        }
+        int grouped=report_batch && xv_log_report_begin();
         { extern void xv_native_math_report(unsigned); extern void xd3d_prepare_report(unsigned);
           xv_native_math_report(g_t_frames); xd3d_prepare_report(g_t_frames); }
         { extern void xv_hle_dispatch_report(unsigned) __attribute__((weak));
@@ -1481,7 +1487,8 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
         { extern unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc, xv_n_kicks, xv_n_fires; extern uint64_t xv_t_vbcb_us, xv_t_draw_us, xv_t_present_us; UI_LOG("frame time: game %.1f ms + wait %.1f ms = %.1f fps | pump %.1f ms | %u textures %u KB | decode %u tex %.1f ms | draws/frame %u bsp %u | frames %u | kicks %u fires %u vbcb %.1f ms draw-hle %.1f ms present %.1f ms (per frame)\n",
                g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), xv_pump_us_acc / 60000.0, g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1), g_t_frames, xv_n_kicks / (g_t_frames ? g_t_frames : 1), xv_n_fires / (g_t_frames ? g_t_frames : 1), xv_t_vbcb_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_draw_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_present_us / 1000.0 / (g_t_frames ? g_t_frames : 1)); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; xv_n_kicks = xv_n_fires = 0; xv_t_vbcb_us = xv_t_draw_us = xv_t_present_us = 0; } g_dec_n = 0; g_dec_us = 0; xv_texture_worker_report(); xv_geometry_worker_report();
         g_t_frames = 0; g_t_game_acc = g_t_render_acc = 0; xv_pump_us_acc = 0;
-        UI_LOG("[profile-cost] frame %u report-us %llu; includes formatting and synchronous log writes, excludes this line\n",
-            frame,(unsigned long long)(t_us()-report_start));
+        if (grouped) xv_log_report_end();
+        UI_LOG("[profile-cost] frame %u batch %d report-us %llu; includes formatting and synchronous log writes, excludes this line\n",
+            frame,grouped,(unsigned long long)(t_us()-report_start));
     }
 }

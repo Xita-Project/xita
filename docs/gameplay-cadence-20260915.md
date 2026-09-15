@@ -41,3 +41,34 @@ draw preparation and is not presented as a proven fix for the periodic hitch.
 
 Private evidence: `engine-restructure-20260914T2300Z/user-ar-gameplay-20260915T223221Z`
 contains the original log, status/hash, screenshot and parsed window data.
+
+## Physical timing and the batching candidate
+
+Runtime `8785a7e301ad8ececc351b6fd2ba54f06c838dbe6caaf84d3af767a086985d27`
+was installed through the updater after preserving all four physical logs. Index
+reuse remains disabled. The first menu report took 181,970 us. In a later
+stationary native-resolution Blood Gulch snapshot, seven consecutive reports
+measured 389,607 / 347,484 / 383,057 / 682,846 / 335,726 / 377,710 / 410,982 us
+(median 383.057 ms). An earlier gameplay report reached 1,114,356 us.
+These are complete report wall times, not individual disk syscall measurements.
+They establish a substantial periodic stall on hardware without proving that
+all camera-turn and firing hitches share its cause.
+
+The next candidate groups only this report's calling-thread log writes in a
+fixed 32 KiB buffer. End-of-report flushes synchronously before gameplay resumes;
+there is no background queue or new worker. Other threads and calls outside the
+scope retain immediate logging. Overflow spills complete chunks, large messages
+bypass the buffer after its pending bytes, and explicit owner flush writes its
+pending report before syncing. The option `XV_PROFILE_BATCH=0` restores separate
+writes; batching is enabled by default in this candidate.
+
+Host tests cover report grouping, foreign-thread calls, nested scopes, explicit
+flush, overflow, oversized records, short writes and write failure. ASan/UBSan
+passes. The actual present path also passes its 120-frame delayed-consumer test
+with batching enabled and disabled. Native compilation and package verification
+pass; only the runtime and its digest file change. The owned CE emulator boots
+runtime `b64e2b984f0d328d5a0ec7f44a94a442f54aba7022e3e43e955b090c30ac22e9`,
+enters Blood Gulch and fires a charged plasma shot. The saved emulator log
+contains 127 completed batched reports and no fatal-stop marker. This is limited
+smoke coverage, not proof of physical FPS or resolution of prior combat crashes.
+Physical batched timings remain pending.
