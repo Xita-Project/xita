@@ -36,6 +36,11 @@ static unsigned indirect_depth[LANES];
  * 4 parked (including an event reply held during an I/O handoff). */
 static unsigned service_state[WORKERS], services, owner_notice, pause_workers, io_yields, resource_queries, resource_registers;
 static unsigned vertex_locks;
+static unsigned audio_pumps;
+/* Only the owner may execute nested stream services during a quiescent pump.
+ * Keep the job marker and private stack: arbitrary kernel/scheduler calls still
+ * stop instead of masquerading as the owner's guest fiber. */
+static xctx *audio_service_context;
 static unsigned service_address[WORKERS];
 static xv_fn_t service_fn[WORKERS];
 static int initialized, override=-1;
@@ -110,7 +115,15 @@ static int worker_lane(void)
 }
 static int needs_quiescence(unsigned address)
 {
-    return address==0x1D6640u||address==0x184AB0u||address==0x1858D0u;
+    return address==0x1D6640u||address==0x184AB0u||address==0x1858D0u||address==0x193E27u;
+}
+static void service_audio(xctx *c,xv_fn_t fn)
+{
+    if(__atomic_load_n(&audio_service_context,__ATOMIC_ACQUIRE))abort();
+    __atomic_store_n(&audio_service_context,c,__ATOMIC_RELEASE);
+    fn(c);
+    __atomic_store_n(&audio_service_context,NULL,__ATOMIC_RELEASE);
+    audio_pumps++;
 }
 static void service_owner(void)
 {
@@ -148,6 +161,10 @@ static void service_owner(void)
                 if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==1) {
                     if(service_address[i]==0x1D6640u) {
                         contexts[i].r[0]=STATUS_SUCCESS;contexts[i].r[4]+=4;io_yields++;
+                    } else if(service_address[i]==0x193E27u) {
+                        /* Preserve real packet completion and original callback
+                         * execution, with every other object lane parked. */
+                        service_audio(&contexts[i],service_fn[i]);
                     } else {
                         /* Header fixup or vertex-storage pointer lookup only;
                          * no allocation, draw submission or scheduler entry.
@@ -430,6 +447,7 @@ void xv_object_jobs_report(unsigned frames)
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)work_us[2],
         (unsigned long long)batch_us,rejected);
     XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
+    XK_LOG("[object-jobs] quiescent owner audio pumps %u\n",audio_pumps);audio_pumps=0;
     XK_LOG("[object-jobs] probed stack peak bytes %u/%u/%u of %u; excludes unprobed small frames\n",stack_peak[0],stack_peak[1],stack_peak[2],STACK_BYTES);
     XK_LOG("[object-locks] fast %u idle-owner %u acquired %u/%u/%u nested %u/%u contended %u/%u wait-us %llu/%llu; worker waits overlap\n",
         math_fast_path,math_idle_calls,math_stats[0].acquired,math_stats[1].acquired,math_stats[2].acquired,
@@ -489,8 +507,22 @@ void xv_object_job_stop(xctx *c,unsigned address,const char *reason)
 void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
 {
     if(address==0x1D675Cu) {fn(c);return;} /* stateless memory comparison */
-    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u&&address!=0x1858D0u)||!fn)
+    if(address==0x19384Fu||address==0x193884u) {
+        /* Original completion callback 29590 can refill through 28B00/28870.
+         * These two vtable services execute inline on the servicing owner;
+         * queueing a second RPC here would wait for that same owner forever. */
+        unsigned back=address==0x19384Fu?0x28B35u:0x289FDu;
+        if(!fn||__atomic_load_n(&audio_service_context,__ATOMIC_ACQUIRE)!=c||
+           worker_lane()>=0||X_M32(c->r[4])!=back)
+            xv_object_job_stop(c,address,"stream service outside quiescent audio callback");
+        fn(c);return;
+    }
+    if(__atomic_load_n(&audio_service_context,__ATOMIC_ACQUIRE)==c)
+        xv_object_job_stop(c,address,"unsupported nested owner audio service");
+    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u&&address!=0x1858D0u&&address!=0x193E27u)||!fn)
         xv_object_job_stop(c,address,"unsupported HLE");
+    if(address==0x193E27u&&X_M32(c->r[4])!=0x29427u)
+        xv_object_job_stop(c,address,"audio pump outside audited cache callback");
     if(address==0x1858D0u&&X_M32(c->r[4])!=0x116240u)
         xv_object_job_stop(c,address,"vertex lock outside audited impact transaction");
     if(address==0x1D6640u && (X_M32(c->r[4])!=0x12AA9u||
@@ -501,7 +533,8 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
             extern int xk_object_io_step(void);
             if(xk_object_io_step()<0)abort();
             c->r[0]=STATUS_SUCCESS;c->r[4]+=4;io_yields++;
-        } else {fn(c);if(address==0x184A20u)resource_queries++;else if(address==0x184AB0u)resource_registers++;else if(address==0x1858D0u)vertex_locks++;else services++;}
+        } else if(address==0x193E27u)service_audio(c,fn);
+        else {fn(c);if(address==0x184A20u)resource_queries++;else if(address==0x184AB0u)resource_registers++;else if(address==0x1858D0u)vertex_locks++;else services++;}
         return;
     }
     for(unsigned i=0;i<active_workers;i++)if(c==&contexts[i]) {

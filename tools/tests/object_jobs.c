@@ -26,7 +26,21 @@ static void nested_guard_return(void)
 static unsigned event_calls,event_value;
 static unsigned event_seen[1200];
 static pthread_t guest_owner;
-static unsigned io_calls, io_seen[300];
+static unsigned io_calls, io_seen[300], audio_calls;
+void object_test_audio_owner(void)
+{
+    assert(pthread_equal(pthread_self(),guest_owner));
+    /* Reading unguarded worker outputs tests the all-lanes-parked publication. */
+    for(unsigned i=0;i<300;i++)io_seen[i]=writes[i];
+}
+void object_test_audio_pump(xctx *c);
+static void submit_audio(xctx *c)
+{
+    unsigned sp=c->r[4];X_PUSH32(0x29427u);
+    xv_object_job_hle(c,0x193E27u,object_test_audio_pump);
+    assert(c->r[4]==sp);
+    __atomic_add_fetch(&audio_calls,1,__ATOMIC_RELAXED);
+}
 /* Read callback outputs without the math lock: the service protocol must have
  * parked every lane, including one waiting for another worker's held mutex. */
 int xk_object_io_step(void)
@@ -145,6 +159,7 @@ void f_0008FB70(xctx *c)
         if(id%3==0)submit_yield(c,0x32B60u);
         submit_query(c,id);
         if(id%2==0)submit_vertex_lock(c,id);
+        if(id%2==0)submit_audio(c);
         assert(shared_guarded_value==before+1);
     }
     /* Requests can also arrive simultaneously, outside the shared lock. */
@@ -152,6 +167,7 @@ void f_0008FB70(xctx *c)
     if(id%3==1)submit_yield(c,0x3268Au);
     if(id%3==2)submit_register(c,id);
     if(id%2==1)submit_vertex_lock(c,id);
+    if(id%2==1)submit_audio(c);
     __atomic_sub_fetch(&active,1,__ATOMIC_SEQ_CST);c->r[4]+=4;
 }
 int main(int argc,char **argv)
@@ -189,6 +205,17 @@ int main(int argc,char **argv)
         c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0xDEADBEEF;
         xv_object_job_hle(&c,0x1858D0u,vertex_lock);assert(0);
     }
+    if(argc>1&&!strcmp(argv[1],"unsupported-audio")) {
+        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0xDEADBEEF;
+        xv_object_job_hle(&c,0x193E27u,object_test_audio_pump);assert(0);
+    }
+    if(argc>1&&!strcmp(argv[1],"unsupported-stream")) {
+        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x28B35;
+        xv_call(&c,0x19384Fu);assert(0);
+    }
+    if(argc>1&&!strcmp(argv[1],"unsupported-nested-audio")) {
+        setenv("OBJECT_AUDIO_NESTED_FAIL","1",1);argc=1;
+    }
     if(argc>1) {c.fiber=(void *)&xv_object_job_marker;xv_object_job_hle(&c,0x1D66EC,NULL);assert(0);}
     for(unsigned round=0;round<2;round++) {
         for(unsigned i=0;i<300;i++) {
@@ -203,6 +230,7 @@ int main(int argc,char **argv)
     unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
     assert(vertex_lock_calls==600);assert(register_calls==200);assert(query_calls==600);assert(event_calls==1200&&event_value==1200);assert(io_calls>=200&&io_calls<=400);
+    assert(audio_calls==600);
     assert(shared_guarded_value==600);
     for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));

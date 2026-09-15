@@ -25,11 +25,20 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                    '#define XD3D_COUNT(name) object_test_d3d_count(name)\n'+
                    '\n'.join(re.search(r'^#define '+name+r'\(.*$',d3d_source,re.M)[0]
                              for name in ('RES_DATA','GUEST_PTR'))+'\n'+handler[0]+'\n')
+    audio=Path(directory)/'audio_pump.c'
+    # Actual queue completion, GetStatus and Process bodies. Platform audio and
+    # original callback execution are supplied by a deterministic host fixture.
+    begin=d3d_source.index('#define DS_MAX_STREAMS')
+    end=d3d_source.index('/* debug: detect a stream',begin)
+    methods=d3d_source[d3d_source.index('static void xv_hle_CDirectSoundStream_GetStatus'):d3d_source.index('static void xv_hle_CDirectSoundStream_Discontinuity')]
+    pump=re.search(r'^void xv_hle_DirectSoundDoWork\(xctx \*c\).*$',d3d_source,re.M)[0]
+    fixture=(root/'tools/tests/object_audio.c').read_text()
+    audio.write_text(fixture.replace('/* PRODUCTION_AUDIO */',d3d_source[begin:end]+'\n'+methods+'\n'+pump))
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11','-fno-strict-aliasing',
         '-DXV_EXPERIMENTAL_OBJECT_JOBS','-I'+str(root/'recomp'),
         '-ffunction-sections','-fdata-sections','-ffp-contract=off',
         *shlex.split(os.environ.get('OBJECT_JOB_TEST_FLAGS','')),
-        str(root/'tools/tests/object_jobs.c'),str(d3d),str(root/'recomp/kernel/xk_object_jobs.c'),
+        str(root/'tools/tests/object_jobs.c'),str(d3d),str(audio),str(root/'recomp/kernel/xk_object_jobs.c'),
         str(root/'recomp/kernel/xk_math.c'),str(root/'recomp/xv_x86rt.c'),
         '-pthread','-Wl,--gc-sections','-lm','-o',str(binary)],check=True)
     for workers in ("2", "1", "0"):
@@ -49,3 +58,9 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                            timeout=10,preexec_fn=no_core)
     assert failure.returncode<0 and b'STOP vertex lock outside audited impact transaction' in failure.stderr
     print('PASS: vertex locks outside the audited impact transaction stop before invocation')
+    for mode,reason in (("unsupported-audio",b'audio pump outside audited cache callback'),
+                        ("unsupported-stream",b'stream service outside quiescent audio callback'),
+                        ("unsupported-nested-audio",b'unsupported nested owner audio service')):
+        failure=subprocess.run([str(binary),mode],capture_output=True,timeout=10,preexec_fn=no_core)
+        assert failure.returncode<0 and reason in failure.stderr,(mode,failure.stderr)
+    print('PASS: unrelated audio callers, worker stream calls and recursive owner RPCs stop before invocation')

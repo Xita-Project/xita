@@ -147,6 +147,14 @@ void xv_call(xctx *c, uint32_t target)
         /* Immutable guest table only: do not race the ordinary dispatch cache
          * or enter an HLE callback through a vtable. */
         xv_fn_t job_fn=xv_lookup(target);
+        if(!job_fn&&(target==0x19384Fu||target==0x193884u)&&xv_hle_extra) {
+            /* Immutable audio vtable only. The owner-service boundary verifies
+             * the active quiescent pump and exact original refill call site. */
+            for(unsigned i=0;xv_hle_extra[i].eip;i++)
+                if(xv_hle_extra[i].eip==target) {
+                    xv_object_job_hle(c,target,xv_hle_extra[i].fn);return;
+                }
+        }
         if(!job_fn)xv_object_job_stop(c,target,"indirect non-guest target");
         extern void xv_object_job_indirect(xctx *,unsigned);
         xv_object_job_indirect(c,target);job_fn(c);xv_object_job_indirect(c,0);return;
