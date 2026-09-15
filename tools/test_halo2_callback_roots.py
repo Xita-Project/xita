@@ -30,6 +30,57 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_text_token_table_bounds_fields_and_nulls(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        records = tuple(range(0x470200, 0x470824, 12))
+        self.assertEqual(len(records), 131)
+        image.targets = {}
+        for n, record in enumerate(records):
+            image.targets[record + 4] = 0xE000 + n
+            image.targets[record + 8] = 0 if n % 3 == 0 else 0x1000 + (n % 17) * 16
+        # Field0 and surrounding bytes intentionally do not exist: they must
+        # never be inspected as callbacks. Out-of-range input tokens cannot
+        # select a callback, even when its unrelated value looks executable.
+        image.targets[records[0] + 4] = 0x26
+        image.targets[records[1] + 4] = 0xF900
+        del image.targets[records[0] + 8], image.targets[records[1] + 8]
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_TEXT_TOKEN_WALKS", (spec, spec)):
+            before = dict(image.targets)
+            expected = {before[r + 8] for r in records[2:] if before[r + 8]}
+            self.assertEqual(prepare_boot.game_text_token_roots(image), expected)
+            self.assertEqual(image.targets, before)
+            # Both ends of the original input range are selectable.
+            for value in (0xE000, 0xF8FF):
+                image.targets[records[-1] + 4] = value
+                image.targets[records[-1] + 8] = 0xDEAD
+                self.assertIn(0xDEAD, prepare_boot.game_text_token_roots(image))
+            image.targets = dict(before)
+            for record in records[2:]:
+                saved = image.targets[record + 8]
+                for invalid in (None, 0xDEAD):
+                    image.targets[record + 8] = image.bad_code = invalid
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_text_token_roots(image)
+                image.targets[record + 8] = saved; image.bad_code = None
+            for name in (".data", "DSOUND", "D3D"):
+                image.section_name = name
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_text_token_roots(image)
+            image.section_name = ".text"
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_text_token_roots(image)
+            image.targets[records[-1] + 4] = None
+            with self.assertRaisesRegex(ValueError, "incomplete"):
+                prepare_boot.game_text_token_roots(image)
+            image.targets = dict(before)
+            for which in range(2):
+                specs = [spec, spec]; specs[which] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_TEXT_TOKEN_WALKS", specs):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_text_token_roots(image)
+
     def test_incoming_widget_member_exact_interface(self):
         image = SyntheticImage(); image.section_name = ".text"
         slots = tuple(range(0x45A628, 0x45A670, 4))

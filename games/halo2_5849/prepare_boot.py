@@ -416,6 +416,40 @@ def game_widget_property_roots(image):
     return roots
 
 
+GAME_TEXT_TOKEN_WALKS = (
+    (0x22D315, 57, "08c487dfffe41d875df3af507d13d1a732cbd46a444966e0c0f495f5634dbff5"),
+    (0x22D42B, 43, "a6b8e2f58e9038c19a2733011e4fe8017445f9b6a80aaa96b6c5979f21d69357"),
+)
+
+
+def game_text_token_roots(image):
+    """Native197: original UTF-16 substitution scans 131 twelve-byte records.
+
+    The caller matches tokens E000..F8FF at field4, invokes optional field8
+    with (token, output), and handles replacement itself. Field0 is a name,
+    never code. The observed E415 callback is the original three-byte RET8.
+    """
+    for address, length, digest in GAME_TEXT_TOKEN_WALKS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 text token walk fingerprint mismatch")
+    roots = set()
+    for record in range(0x470200, 0x470824, 12):
+        token = image.u32(record + 4)
+        if token is None:
+            raise ValueError("Halo 2 text token record is incomplete")
+        # Original search cannot select a record outside this input range.
+        if not 0xE000 <= token <= 0xF8FF:
+            continue
+        target = image.u32(record + 8)
+        if target == 0:
+            continue
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 text token callback has invalid target")
+        roots.add(target)
+    return roots
+
+
 def game_online_interface_roots(image):
     """Native59: the same original update calls two statically bound interfaces."""
     address, length, digest = GAME_ONLINE_INTERFACE_DISPATCH
@@ -1090,6 +1124,7 @@ def main():
         roots.update(game_startup_widget_vtable_roots(image))
         roots.update(game_text_widget_vtable_roots(image))
         roots.update(game_widget_property_roots(image))
+        roots.update(game_text_token_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
