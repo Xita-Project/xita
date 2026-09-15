@@ -13,6 +13,16 @@ static xctx packet(uint32_t handle,unsigned index,uint32_t caller)
     uint32_t fields[6]={0xc000+index*320,320,0,0,index,0};x_guest_write(0x3ffd,fields,24);
     xctx c=context(handle,0x3ffd,0,0);X_M32(c.r[4])=caller;return c;
 }
+static void work_guard(h2_audio_stream *s,int allowed)
+{
+    xctx c=context(0,0,0,0);c.fs_base=0x7000;X_M8(c.fs_base+0x24)=0;X_M32(c.r[4])=0x21EC3C;
+    xctx before=c;h2_audio_stream state=*s;h2_audio_device_snapshot owner=device;
+    uint32_t fp=native_fp;unsigned callbacks=test_stream_callbacks;
+    uint8_t *memory=malloc(0x200000);assert(memory);memcpy(memory,g_xram,0x200000);
+    if(!setjmp(stopped)){h2_audio_guest_entry(&c,0x37B844);assert(allowed);}else assert(!allowed);
+    assert(!memcmp(&c,&before,sizeof c)&&!memcmp(s,&state,sizeof state)&&!memcmp(&device,&owner,sizeof owner));
+    assert(native_fp==fp&&test_stream_callbacks==callbacks&&!memcmp(memory,g_xram,0x200000));free(memory);
+}
 int main(void)
 {
     g_xram=calloc(1,0x200000);g_img_base=g_xram;g_xpt=malloc((1u<<20)*4);assert(g_xram&&g_xpt);
@@ -34,6 +44,14 @@ int main(void)
     test_stream_submit_failure=0;
     for(unsigned i=0;i<2;++i){c=packet(handle,i,0x33610e);call(&c,0x37AD25,0,3);assert(s->packets[i].mirror&&s->packets[i].ticket==i+1);}
     assert(s->submitted==2&&g_v[s->voice].nq==2);
+    work_guard(s,1);assert(g_v[s->voice].nq==2);
+    s->flags=0x20000000;work_guard(s,0);s->flags=0x40000000;
+    s->callback++;work_guard(s,0);s->callback--;
+    xk_thread *worker=stream_worker;stream_worker=NULL;work_guard(s,0);stream_worker=worker;
+    uint32_t mirror=s->packets[0].mirror;s->packets[0].mirror=0;work_guard(s,0);s->packets[0].mirror=mirror;
+    s->completed=3;work_guard(s,0);s->completed=0;
+    ++s->submitted;work_guard(s,0);--s->submitted;
+
     c=packet(handle,0,0x33610e);call(&c,0x37AD25,0x88780032,3);assert(s->submitted==2);
     c=context(handle,0,0,0);reject(&c,0x37AB87);
     /* Only the scripted sink's explicit completion permits callback/free. */
@@ -41,7 +59,9 @@ int main(void)
     stream_callbacks(&c);assert(!test_stream_callbacks&&s->packets[0].mirror);
     int16_t output[2048];xk_audio_mix(output,1024);xk_audio_mix(output,1024);
     assert(xk_audio_stream_pop_consumed(s->voice)==1 && xk_audio_stream_pop_consumed(s->voice)==1);
-    test_stream_ready=2;test_stream_callback_context=s->context;stream_callbacks(&c);
+    test_stream_ready=2;test_stream_callback_context=s->context;
+    work_guard(s,1);assert(!test_stream_callbacks); /* no premature/DoWork retirement */
+    stream_callbacks(&c);
     assert(test_stream_callbacks==2 && s->completed==2 && !s->packets[0].mirror && !s->packets[1].mirror);
     assert(!memcmp(&c,&saved,sizeof c)&&native_fp==fp&&!X_M8(c.fs_base+0x24));
     /* No flush API is claimed: this is fixture-only inactive teardown. */

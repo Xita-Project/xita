@@ -58,6 +58,16 @@ static void direct_codec_fixture(h2_audio_stream *s,unsigned kind,int expected)
     /* Reset only the synthetic feed's resampler history. No guest API does this. */
     g_v[s->voice].frac=0;memset(g_v[s->voice].last,0,sizeof g_v[s->voice].last);memset(g_v[s->voice].prev,0,sizeof g_v[s->voice].prev);
 }
+static void empty_stream_work(h2_audio_stream *s,int allowed)
+{
+    g_xpt[0x387]=0x1e0000;X_M32(0x387198)=0;
+    xctx c=context(0,0,0,0);c.fs_base=0x7000;X_M8(c.fs_base+0x24)=0;X_M32(c.r[4])=0x21EC3C;
+    xctx saved=c;h2_audio_stream state=*s;h2_audio_device_snapshot owner=device;uint32_t fp=native_fp;
+    uint8_t *memory=malloc(0x200000);assert(memory);memcpy(memory,g_xram,0x200000);
+    if(!setjmp(stopped)){h2_audio_guest_entry(&c,0x37B844);assert(allowed);}else assert(!allowed);
+    assert(!memcmp(&c,&saved,sizeof c)&&!memcmp(s,&state,sizeof state)&&!memcmp(&device,&owner,sizeof owner));
+    assert(fp==native_fp&&!memcmp(memory,g_xram,0x200000));free(memory);
+}
 int main(void)
 {
     g_xram=malloc(0x200000);g_img_base=g_xram;g_xpt=malloc((1u<<20)*4);assert(g_xram&&g_xpt);
@@ -88,6 +98,9 @@ int main(void)
         assert(X_M32(handle)==0x417170&&X_M32(handle+4)==0x417160&&X_M32(handle+8)==1);
         assert(v->used&&v->kind==2&&!v->playing&&!v->nq&&v->adpcm==(kind!=2)&&v->channels==(kind==0?1:2)&&v->rate==44100);
         assert(device.children==1&&device.references==2&&xk_audio_free_voices()==XA_MAX_VOICES-1);
+        empty_stream_work(s,1);
+        v->playing=1;empty_stream_work(s,0);v->playing=0;
+        s->submitted=1;empty_stream_work(s,0);s->submitted=0;
         direct_codec_fixture(s,kind,500); /* fixed-point mixer rounds 600 dB100 to 128/256 */
         c=context(handle,0,0,0);call(&c,0x37B818,0,2);assert(s->headroom==0&&v->volume==1.0f);
         direct_codec_fixture(s,kind,1000);

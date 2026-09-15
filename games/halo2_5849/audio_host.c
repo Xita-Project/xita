@@ -1354,9 +1354,75 @@ static int aliases(uint32_t a, unsigned an, uint32_t b, unsigned bn)
     }
     return 0;
 }
+/* The host owns the real device, so there is no original hardware singleton.
+ * Permit the original void wrapper's empty low-priority path only while all
+ * ordinary streams remain unsubmitted. Accurate notifications keep their
+ * existing sink-gated worker; this check never retires a packet or commits
+ * deferred listener state. Timed/normal-stream APIs still stop at their entries. */
+static void original_empty_work(xctx *c, uint32_t ip)
+{
+    int helper=ip==0x379E9E;stack(c,ip,helper?2:0);
+    uint32_t frame=c->r[4];
+    if (helper) {
+        if (X_M32(frame)!=0x37B84A || frame>UINT32_MAX-8)
+            fail(c,ip,"original work helper caller",X_M32(frame));
+        frame+=8;
+    }
+    if (X_M32(frame)!=0x21EC3C || frame<32 ||
+        !mapped(0x387198,4) || !mapped(0x386B0C,4) ||
+        X_M32(0x387198) || X_M32(0x386B0C))
+        fail(c,ip,"original work caller/hardware owner",frame);
+    live(c,ip,device.base+8,0);
+    if (c->fs_base>UINT32_MAX-0x24 || !mapped(c->fs_base+0x24,1) || X_M8(c->fs_base+0x24))
+        fail(c,ip,"original work passive IRQL",c->fs_base);
+    uint32_t low=frame-32,irql=c->fs_base+0x24;
+    output(c,ip,low,36);output(c,ip,0x386B18,28);
+    if (aliases(low,36,0x386B18,28) || aliases(low,36,0x387198,4) ||
+        aliases(low,36,0x386B0C,4) || aliases(low,36,irql,1) ||
+        aliases(0x386B18,28,0x387198,4) || aliases(0x386B18,28,0x386B0C,4) ||
+        aliases(0x386B18,28,irql,1))
+        fail(c,ip,"original work control alias",frame);
+    for (unsigned i=0;i<XA_MAX_VOICES;++i) {
+        const h2_audio_buffer *b=&buffers[i];
+        if (b->base && b->locked) fail(c,ip,"original work with uncommitted buffer lock",b->base);
+        const h2_audio_stream *s=&streams[i];if (!s->base) continue;
+        if (!s->references || (s->base&4095) || !mapped(s->base,4096) ||
+            X_M32(s->base)!=0x417170 || X_M32(s->base+4)!=0x417160 || X_M32(s->base+8)!=s->references ||
+            s->voice<0 || s->voice>=XA_MAX_VOICES || (s->flags!=0x20000000 && s->flags!=0x40000000) ||
+            s->completed>s->submitted || s->submitted-s->completed>2)
+            fail(c,ip,"original work stream accounting",s->base);
+        unsigned pending=0;
+        for (unsigned n=0;n<2;++n) {
+            if (!!s->packets[n].mirror != !!s->packets[n].ticket)
+                fail(c,ip,"original work packet ownership",s->base);
+            pending+=s->packets[n].mirror!=0;
+        }
+        if (pending!=s->submitted-s->completed ||
+            (s->flags==0x20000000 && (s->callback!=0x220730 || s->route_count || s->submitted || s->completed || pending)))
+            fail(c,ip,"ordinary stream requires low-priority work",s->base);
+        if (!s->submitted) {
+            xk_audio_lock();int playing=xk_audio_voice_playing(s->voice);xk_audio_unlock();
+            if (playing) fail(c,ip,"untracked active stream needs work",s->base);
+        }
+        if (s->submitted) {
+#if H2_AUDIO_DSP
+            if (!stream_worker || s->callback!=0x335D82 || s->route_count!=1 ||
+                s->route_bin<27 || s->route_bin>30)
+                fail(c,ip,"original work accurate worker contract",s->base);
+#else
+            fail(c,ip,"original work needs real stream worker",s->base);
+#endif
+        }
+    }
+}
 void h2_audio_guest_entry(xctx *c, uint32_t ip)
 {
     if (!device.ever_created) return;
+    if (ip==0x37B844 || (ip==0x379E9E && !(c->r[4]&3) && mapped(c->r[4],4) && X_M32(c->r[4])==0x37B84A)) {
+        uint32_t fpscr=h2_platform_fpscr_read();original_empty_work(c,ip);
+        if (ip==0x37B844) xv_logf("[h2/audio-work] original void wrapper executes with no ordinary pending work; accurate notifications remain on real sink worker, listener dirty=%08X retained\n",device.dirty);
+        h2_platform_fpscr_write(fpscr);return;
+    }
     if (ip == 0x379F2A) {
         /* Audited public Release wrapper: the original code adjusts base+8
          * then invokes the existing common-header Release adapter. */

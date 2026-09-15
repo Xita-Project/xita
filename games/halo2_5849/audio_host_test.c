@@ -186,6 +186,31 @@ static void original_configuration_tests(void)
     g_xpt[0x417] = 0x8000; original_entry(&c, 0x379F2A, 0); g_xpt[0x417] = 0x7000;
     X_M32(c.r[4] + 4) = 0x5000; original_entry(&c, 0x379F2A, 0);
 }
+static void original_work_tests(void)
+{
+    g_xpt[0x387]=0x6000;g_xpt[7]=0x7000;X_M32(0x387198)=0;X_M32(0x386B0C)=0;
+    xctx c=context(0,0,0);c.fs_base=0x7000;X_M8(0x7024)=0;X_M32(c.r[4])=0x21EC3C;
+    original_entry(&c,0x37B844,1);
+    for(unsigned field=0;field<3;++field){
+        uint32_t a=field==0?0x387198:field==1?0x386B0C:c.r[4],old=X_M32(a);
+        X_M32(a)^=1;original_entry(&c,0x37B844,0);X_M32(a)=old;
+    }
+    for(unsigned value=1;value<=2;++value){X_M8(0x7024)=value;original_entry(&c,0x37B844,0);}X_M8(0x7024)=0;
+    c.r[4]++;original_entry(&c,0x37B844,0);c.r[4]--;
+    healthy=0;original_entry(&c,0x37B844,0);healthy=1;
+    uint32_t sp=c.r[4];c.r[4]-=8;X_M32(c.r[4])=0x37B84A;
+    original_entry(&c,0x379E9E,1);X_M32(sp)^=4;original_entry(&c,0x379E9E,0);X_M32(sp)^=4;c.r[4]=sp;
+    for(unsigned page=0;page<3;++page){
+        unsigned pages[]={1,0x386,0x387};uint32_t old=g_xpt[pages[page]];
+        g_xpt[pages[page]]=0x8000;original_entry(&c,0x37B844,0);g_xpt[pages[page]]=old;
+    }
+    c.r[4]=0x1000;X_M32(c.r[4])=0x21EC3C;original_entry(&c,0x37B844,0);c.r[4]=sp;
+    c.fs_base=0x386B18-0x24;original_entry(&c,0x37B844,0);
+    c.fs_base=sp-16-0x24;original_entry(&c,0x37B844,0);c.fs_base=0x7000;
+    buffers[0].base=0x3000;buffers[0].locked=1;original_entry(&c,0x37B844,0);buffers[0]=(h2_audio_buffer){0};
+    streams[0].base=0x3000;original_entry(&c,0x37B844,0);streams[0]=(h2_audio_stream){0};
+    original_entry(&c,0x37B844,1);
+}
 #if H2_AUDIO_EFFECTS_UNAVAILABLE
 static xctx effects_context(void)
 {
@@ -325,6 +350,7 @@ int main(void)
     c = context(0x5008, 0, 0); healthy = 0; reject(&c, 0x37B637); healthy = 1;
     reject(&c, 0x37B86D); /* no success fallback for the effects image loader */
     original_configuration_tests();
+    original_work_tests();
 #if H2_AUDIO_EFFECTS_UNAVAILABLE
     effects_failure_tests();
 #endif

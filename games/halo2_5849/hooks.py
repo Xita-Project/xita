@@ -314,6 +314,7 @@ AUDIO_HOST_BOUNDARIES = {
 # configure algorithm pointers or invoke the audited common Release header;
 # none of the selected HRTF processing bodies is HLE'd.
 AUDIO_ORIGINAL_BOUNDARIES = {
+    0x37B844: (41, "edd97faddb280cb5fe23b85740d14540772206c0cc5af4f08e0cdb1b9b7931b7"),
     0x379F2A: (22, "0a72b625b8e9e1a301ddf3c84ec304eded77fc8886c86f41f03efd6fa1fac2b5"),
     0x379F5B: (31, "7f397c78fa9ddaa3fc01f85707ae08b470294586a72dacef5c6dec704dea2f73"),
     0x379E9E: (30, "c66d5fef481a4aa92bb4e6df72e3f1e2cfb1fc0a9f0bc0ac8ff03aeaf34c597c"),
