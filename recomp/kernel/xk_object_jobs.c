@@ -9,6 +9,7 @@
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
 #include "xk.h"
 #include "xk_object_jobs.h"
+#include "xk_object_mutex.h"
 #include "../xv_phase.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -86,14 +87,15 @@ static void record_math_wait(unsigned lane,uintptr_t pc,uint64_t elapsed)
     if(elapsed>wait_sites[lane][site].max_us)wait_sites[lane][site].max_us=elapsed;
 }
 #ifdef __vita__
-static SceUID threads[WORKERS]={-1,-1}, wakes[WORKERS]={-1,-1}, dones[WORKERS]={-1,-1}, math_mutex=-1;
+static SceUID threads[WORKERS]={-1,-1}, wakes[WORKERS]={-1,-1}, dones[WORKERS]={-1,-1};
 static SceUID owner_wake=-1, replies[WORKERS]={-1,-1};
 #else
 static pthread_t threads[WORKERS];
 static sem_t wakes[WORKERS], dones[WORKERS];
 static sem_t owner_wake, replies[WORKERS];
-static pthread_mutex_t math_mutex;
 #endif
+
+static xv_object_mutex math_mutex;
 
 #ifndef __vita__
 static void wait_sem(sem_t *s) { while(sem_wait(s))if(errno!=EINTR)abort(); }
@@ -239,35 +241,20 @@ __attribute__((noinline)) int xv_object_math_lock(void)
         if(math_fast_path&&math_depth[lane]) {
             math_depth[lane]++;math_stats[lane].nested++;return lane+2;
         }
-#ifdef __vita__
-        int result=sceKernelTryLockMutex(math_mutex,1);
-        if(!result) {
+        if(!xv_object_mutex_try(&math_mutex)) {
             math_stats[lane].acquired++;
             if(waiting)record_math_wait((unsigned)lane,(uintptr_t)__builtin_return_address(0),xk_os_monotonic_us()-waiting);
             if(math_fast_path) { math_depth[lane]=1;return lane+2; }
             return 1;
         }
-        if(result!=(int)SCE_KERNEL_ERROR_MUTEX_FAILED_TO_OWN)abort();
         if(!waiting) { waiting=xk_os_monotonic_us();math_stats[lane].contended++; }
+#ifdef __vita__
         sceKernelDelayThread(50);
 #else
-        int result=pthread_mutex_trylock(&math_mutex);
-        if(!result) {
-            math_stats[lane].acquired++;
-            if(waiting)record_math_wait((unsigned)lane,(uintptr_t)__builtin_return_address(0),xk_os_monotonic_us()-waiting);
-            if(math_fast_path) { math_depth[lane]=1;return lane+2; }
-            return 1;
-        }
-        if(result!=EBUSY)abort();
-        if(!waiting) { waiting=xk_os_monotonic_us();math_stats[lane].contended++; }
         struct timespec delay={0,50000};nanosleep(&delay,NULL);
 #endif
     }
-#ifdef __vita__
-    if(sceKernelLockMutex(math_mutex,1,NULL)<0)abort();
-#else
-    if(pthread_mutex_lock(&math_mutex))abort();
-#endif
+    xv_object_mutex_wait(&math_mutex);
     math_stats[2].acquired++;
     return 1;
 }
@@ -280,11 +267,17 @@ void xv_object_math_unlock(int *locked)
         if(lane>=WORKERS||!math_depth[lane])abort();
         if(--math_depth[lane])return;
     }
-#ifdef __vita__
-    if(sceKernelUnlockMutex(math_mutex,1)<0)abort();
-#else
-    if(pthread_mutex_unlock(&math_mutex))abort();
-#endif
+    xv_object_mutex_release(&math_mutex);
+}
+int xv_object_lock_available(void)
+{
+    return initialized==1&&active_workers&&math_mutex.light_ready&&!xv_phase_enabled&&
+        (override<0?configured:override)>0;
+}
+void xv_object_lock_override(int value)
+{
+    if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
+    xv_object_mutex_select(&math_mutex,value);
 }
 static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes)
 {
@@ -398,9 +391,9 @@ static int initialize(void)
         if(!stacks[i])goto fail;
         for(unsigned p=0;p<STACK_BYTES/4096;p++)stack_pages[i][p]=g_xpt[(stacks[i]>>12)+p];
     }
+    const char *light=getenv("XV_OBJECT_LIGHT_LOCK");
+    if(xv_object_mutex_init(&math_mutex,light&&atoi(light)!=0))goto fail;
 #ifdef __vita__
-    math_mutex=sceKernelCreateMutex("xv_object_math",SCE_KERNEL_MUTEX_ATTR_RECURSIVE,0,NULL);
-    if(math_mutex<0)goto fail;
     owner_wake=sceKernelCreateSema("xv_object_service",0,0,1,NULL);
     if(owner_wake<0)goto fail;
     for(unsigned i=0;i<WORKERS;i++) {
@@ -416,9 +409,6 @@ static int initialize(void)
     for(unsigned i=0;i<WORKERS;i++)
         if(sceKernelStartThread(threads[i],sizeof i,&i)<0)abort();
 #else
-    pthread_mutexattr_t attr;pthread_mutexattr_init(&attr);
-    pthread_mutexattr_settype(&attr,PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init(&math_mutex,&attr);pthread_mutexattr_destroy(&attr);
     sem_init(&owner_wake,0,0);
     for(unsigned i=0;i<WORKERS;i++) {
         sem_init(&wakes[i],0,0);sem_init(&dones[i],0,0);sem_init(&replies[i],0,0);
@@ -428,6 +418,7 @@ static int initialize(void)
     __atomic_store_n(&initialized,1,__ATOMIC_RELEASE);
     XK_LOG("[object-jobs] guest stacks %08X/%08X/%08X, %u bytes each\n",stacks[0],stacks[1],stacks[2],STACK_BYTES);
     XK_LOG("[object-locks] wait-site profiling %s; elapsed waits include scheduling and parked service time\n",math_profile?"on":"off");
+    XK_LOG("[object-locks] backend %s; lightweight available %d\n",xv_object_mutex_name(&math_mutex),math_mutex.light_ready);
     XK_LOG("[object-locks] code anchor %llX symbol xv_object_math_lock; private math %s\n",
         (unsigned long long)(uintptr_t)xv_object_math_lock,math_private_enabled?"on":"off");
     XK_LOG("[object-jobs] EXPERIMENT: whole object callbacks on core 0/1; owner services kernel requests and joins; shared game state and reordered updates are unproven\n");
@@ -440,9 +431,9 @@ fail:
         if(dones[i]>=0)sceKernelDeleteSema(dones[i]);
         if(replies[i]>=0)sceKernelDeleteSema(replies[i]);
     }
-    if(math_mutex>=0)sceKernelDeleteMutex(math_mutex);
     if(owner_wake>=0)sceKernelDeleteSema(owner_wake);
 #endif
+    xv_object_mutex_destroy(&math_mutex);
     for(unsigned i=0;i<LANES;i++)if(stacks[i]) { xk_mem_free(stacks[i]);stacks[i]=0; }
     XK_LOG("[object-jobs] unavailable: worker or private-stack allocation failed; serial callbacks retained\n");
     return 0;
@@ -548,6 +539,7 @@ void xv_object_jobs_report(unsigned frames)
                 (unsigned long long)wait_sites[lane][site].us,
                 (unsigned long long)wait_sites[lane][site].max_us,site==WAIT_SITES);
         }
+    XK_LOG("[object-lock-backend] %s\n",xv_object_mutex_name(&math_mutex));
     memset(wait_sites,0,sizeof wait_sites);
     for(unsigned lane=0;lane<WORKERS;lane++)for(unsigned kind=0;kind<4;kind++)
         if(private_stats[lane][kind].attempted) {
@@ -666,12 +658,11 @@ void xv_object_jobs_shutdown(void)
 #endif
     }
 #ifdef __vita__
-    sceKernelDeleteMutex(math_mutex);
     sceKernelDeleteSema(owner_wake);
 #else
-    pthread_mutex_destroy(&math_mutex);
     sem_destroy(&owner_wake);
 #endif
+    xv_object_mutex_destroy(&math_mutex);
     for(unsigned i=0;i<LANES;i++)xk_mem_free(stacks[i]);
     initialized=-1;
 }

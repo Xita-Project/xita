@@ -25,6 +25,8 @@ void xv_object_math_unlock(int *locked);
 int xv_object_math_release_private(xctx *c,int *locked,unsigned kind,
     uint32_t output,unsigned output_bytes,uint32_t scratch,unsigned scratch_bytes);
 int xv_object_math_available(void);
+int xv_object_lock_available(void);
+void xv_object_lock_override(int enabled);
 void xv_object_math_override(int enabled);
 #define XV_OBJECT_JOB_SCOPE(c) \
     xctx *xv_object_owner_ __attribute__((cleanup(xv_object_jobs_end))) = \

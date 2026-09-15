@@ -8,7 +8,7 @@ enum {
     XV_BENCH_POINT_MATH, XV_BENCH_TEXTURE_STATE, XV_BENCH_MATRIX_NEON,
     XV_BENCH_OBJECT_SCAN, XV_BENCH_HLE_DISPATCH, XV_BENCH_FLARE_QUERY_OVERLAP, XV_BENCH_GUEST_AFFINITY, XV_BENCH_SNAPSHOT_WORKER,
     XV_BENCH_GUEST_PHASES, XV_BENCH_PREP_BUNDLE, XV_BENCH_OBJECT_JOBS, XV_BENCH_VERTEX_PREPARE,
-    XV_BENCH_DEPTH_PREPARE, XV_BENCH_OBJECT_MATH
+    XV_BENCH_DEPTH_PREPARE, XV_BENCH_OBJECT_MATH, XV_BENCH_OBJECT_LOCK
 };
 /* Network admission only publishes a request. The ordinary guest input owner
  * validates first-person control and consumes it before the present boundary. */
@@ -37,6 +37,7 @@ int xv_benchmark_compare_object_jobs(void);
 int xv_benchmark_compare_vertex_prepare(void);
 int xv_benchmark_compare_depth_prepare(void);
 int xv_benchmark_compare_object_math(void);
+int xv_benchmark_compare_object_lock(void);
 int xv_benchmark_compare_texture_state(void);
 int xv_benchmark_compare_model_palette(void);
 int xv_benchmark_compare_vertex_worker(void);
