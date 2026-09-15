@@ -417,7 +417,7 @@ $(BUILD)/blur-probe-param.sfo: Makefile
 $(BUILD)/blur%.vpk: $(BUILD)/blur%-eboot.bin $(BUILD)/blur-probe-param.sfo $(addprefix $(BLUR_SHADERS)/,$(BLUR_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/blur-probe-param.sfo -b $(BUILD)/blur$*-eboot.bin $(foreach f,$(BLUR_PROBE_FILES),-a $(BLUR_SHADERS)/$(f)=$(f)) $@
 test-host: $(BUILD)/dxt23_layout_test
-test-host: $(BUILD)/luma_draw_test $(BUILD)/sprite_draw_test $(BUILD)/menu_draw_test
+test-host: $(BUILD)/luma_draw_test $(BUILD)/sprite_draw_test $(BUILD)/menu_draw_test $(BUILD)/nv2a_vsh_test
 test-host: $(BUILD)/blend_draw_test
 test-host: $(BUILD)/geometry_dispatch_test $(BUILD)/screen_draw_test $(BUILD)/bc1_draw_test $(BUILD)/composition_draw_test $(BUILD)/threshold_draw_test $(BUILD)/blur_draw_test
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
@@ -446,6 +446,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/luma_draw_test
 	$(BUILD)/sprite_draw_test
 	$(BUILD)/menu_draw_test
+	$(BUILD)/nv2a_vsh_test
 	$(BUILD)/geometry_dispatch_test
 	$(BUILD)/quad_draw_test
 	$(BUILD)/blit_copy_test
@@ -553,6 +554,9 @@ $(BUILD)/command_state_test: command_state_test.c command_state.c command_state.
 $(BUILD)/menu_draw_test: menu_draw_test.c menu_draw.c menu_draw.h command_state.h kelvin_clear.h gpu_objects.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror menu_draw_test.c -o $@
+$(BUILD)/nv2a_vsh_test: nv2a_vsh_test.c nv2a_vsh.c nv2a_vsh.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror nv2a_vsh_test.c -lm -o $@
 $(BUILD)/blit_copy_test: blit_copy_test.c command_state.c command_state.h kelvin_clear.c kelvin_clear.h gpu_objects.c gpu_objects.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror blit_copy_test.c command_state.c kelvin_clear.c gpu_objects.c -o $@
