@@ -17,6 +17,7 @@ GENERATED ?= $(ROOT)/local/halo2_5849/boot/generated
 BUILD ?= $(ROOT)/local/halo2_5849/boot/build
 IMAGE ?= $(ROOT)/local/halo2_5849/boot/halo2_image.bin
 QUAD_SHADERS ?= $(ROOT)/local/halo2_5849/quad-shaders
+SCREEN_SHADERS ?= $(ROOT)/local/halo2_5849/screen-shaders
 CFLAGS := -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -std=gnu11 -fno-strict-aliasing -ffunction-sections -fdata-sections -DXV_CHECK_GUEST_ADDRESS=1 -MMD -MP -I$(ROOT) -I$(ROOT)/runtime -I$(ROOT)/recomp -I$(ROOT)/recomp/kernel
 CFLAGS += -DXV_EFLAGS_ID=1
 SYS := recomp/xv_x86rt.c recomp/kernel/xk_mem.c recomp/kernel/xk_rtl.c recomp/kernel/xk_file.c recomp/kernel/xk_thread.c recomp/kernel/xk_xapi.c recomp/kernel/xk_crypto.c recomp/kernel/xk_os_vita.c runtime/xv_cpu.c
@@ -171,6 +172,24 @@ $(BUILD)/quad-probe-param.sfo: Makefile
 $(BUILD)/quad-probe.vpk: $(BUILD)/quad-probe-eboot.bin $(BUILD)/quad-probe-param.sfo $(QUAD_SHADERS)/quad.vert.gxp $(QUAD_SHADERS)/quad.frag.gxp $(QUAD_SHADERS)/constants.bin
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/quad-probe-param.sfo -b $(BUILD)/quad-probe-eboot.bin -a $(QUAD_SHADERS)/quad.vert.gxp=quad.vert.gxp -a $(QUAD_SHADERS)/quad.frag.gxp=quad.frag.gxp -a $(QUAD_SHADERS)/constants.bin=constants.bin $@
 .PHONY: all test-host
+SCREEN_PROBE_FILES := screen.vert.gxp screen.frag.gxp screen.copy.frag.gxp screen.constants.bin screen.vertices.bin screen.texture2.bin
+.PHONY: screen-probe
+# Isolated pixel validation only. Owned shaders/captured fixtures stay private;
+# this optional utility does not change the game executable or accept a draw.
+screen-probe: $(BUILD)/screen-probe.vpk
+$(BUILD)/screen-probe.elf: screen_probe.c dxt23_layout.c dxt23_layout.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Werror -Wl,-q screen_probe.c dxt23_layout.c -o $@ -lSceGxm_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceProcessmgr_stub
+$(BUILD)/screen-probe.velf: $(BUILD)/screen-probe.elf
+	$(VITASDK)/bin/vita-elf-create $< $@
+$(BUILD)/screen-probe-eboot.bin: $(BUILD)/screen-probe.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/screen-probe-param.sfo: Makefile
+	@mkdir -p $(dir $@)
+	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 Screen Effect Probe" $@
+$(BUILD)/screen-probe.vpk: $(BUILD)/screen-probe-eboot.bin $(BUILD)/screen-probe-param.sfo $(addprefix $(SCREEN_SHADERS)/,$(SCREEN_PROBE_FILES))
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/screen-probe-param.sfo -b $(BUILD)/screen-probe-eboot.bin $(foreach f,$(SCREEN_PROBE_FILES),-a $(SCREEN_SHADERS)/$(f)=$(f)) $@
+test-host: $(BUILD)/dxt23_layout_test
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
 test-host: $(BUILD)/quad_draw_test
 test-host: $(BUILD)/blit_copy_test
@@ -187,6 +206,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/audio_fx_host_test
 	$(BUILD)/kernel_timer_test
 	$(BUILD)/linear_texture_test
+	$(BUILD)/dxt23_layout_test
 	$(BUILD)/quad_draw_test
 	$(BUILD)/blit_copy_test
 	$(BUILD)/eflags_id_test
@@ -299,6 +319,9 @@ $(BUILD)/linear_texture_test: linear_texture_test.c linear_texture.c linear_text
 $(BUILD)/quad_draw_test: quad_draw_test.c quad_draw.c quad_draw.h linear_texture.c linear_texture.h command_state.h kelvin_clear.h gpu_objects.c gpu_objects.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror quad_draw_test.c quad_draw.c linear_texture.c gpu_objects.c -o $@
+$(BUILD)/dxt23_layout_test: dxt23_layout_test.c dxt23_layout.c dxt23_layout.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror dxt23_layout_test.c dxt23_layout.c -o $@
 $(BUILD)/host_channel_test: host_channel_test.c host_channel.c host_channel.h command_state.c command_state.h kelvin_clear.c kelvin_clear.h gpu_objects.c gpu_objects.h push_stream.c push_stream.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror host_channel_test.c host_channel.c command_state.c kelvin_clear.c gpu_objects.c push_stream.c -o $@
