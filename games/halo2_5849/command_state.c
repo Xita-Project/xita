@@ -127,6 +127,17 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
          * eight-stage bank and the final words retain all input bits. A future
          * draw backend must validate the selected combiner modes and sources;
          * BEGIN_END and every emission path still reject without mutation. */
+    } else if (method >= 0x1720 && method <= 0x175C) {
+        /* Vertex-array offsets: bit 31 selects DMA B, the other bits are the
+         * byte offset. Retain the complete input; mapping and full-span checks
+         * belong to draw execution, which is not provided by this path. */
+    } else if (method >= 0x1760 && method <= 0x179C) {
+        /* Native179 uses FLOAT arrays (including disabled size zero) and the
+         * packed signed 11/11/10 type. Only these audited formats are stored.
+         * Bits 8..31 are byte stride; no vertex is fetched or converted here.
+         * Active immediate draws are routed to their consumer before setup. */
+        unsigned type = value & 15, count = (value >> 4) & 15;
+        if (!((type == 2 && count <= 4) || (type == 6 && count == 1))) return 0;
     } else if (method >= 0x1AF0 && method <= 0x1AFC) {
         /* SET_VERTEX_DATA4F attribute 15, one exact component per method.
          * Attribute 0's final component emits a vertex and stays unsupported.

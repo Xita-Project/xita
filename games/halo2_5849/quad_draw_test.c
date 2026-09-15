@@ -166,6 +166,14 @@ int main(void)
         s.setup[(0x1B20 + unit * 64) / 4] = 0xFFFFF000u + unit * 64;
     assert(h2_quad_method(&q, &s, &c, 0, 0x17FC, 7));
     reject(0, 0x17FC, 7); reject(0, 0x17FC, 0); reject(0, 0x1B00, 4096);
+    /* An active immediate draw owns all command dispatch. Array setup cannot
+     * fall back to the state writer or alter its in-flight vertices. */
+    for (unsigned method = 0x1720; method <= 0x179C; method += 4) {
+        unsigned prior_reads = reads, prior_maps = maps, prior_calls = calls;
+        reject(0, method, method < 0x1760 ? 0x80001000 : 0x1032);
+        assert(reads == prior_reads && maps == prior_maps && calls == prior_calls);
+        assert(!memcmp(ram, prior_ram, sizeof ram));
+    }
     reject(0, 0x1964, 0xFFFFFFFE); reject(0, 0x1898, 0);
     s.bound[1] = 1; reject(1, 0x1964, UINT32_MAX);
     assert(h2_quad_method(&q, &s, &c, 0, 0x1964, UINT32_MAX));

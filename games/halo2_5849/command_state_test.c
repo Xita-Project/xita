@@ -9,17 +9,18 @@ typedef struct fixture {
     int fail_map, misalign_map;
 } fixture;
 static fixture f;
+static unsigned instance_reads, mappings;
 static h2_command_state s;
 static h2_kelvin_clear c;
 static int read_instance(void *opaque, uint32_t offset, uint32_t *word)
 {
-    fixture *v = opaque;
+    fixture *v = opaque; ++instance_reads;
     if ((offset & 3) || offset < 0x10000 || offset >= 0x15000 || offset == v->failed_instance) return 0;
     *word = v->instance[(offset - 0x10000) / 4]; return 1;
 }
 static void *map_ram(void *opaque, uint32_t address, uint32_t bytes)
 {
-    fixture *v = opaque;
+    fixture *v = opaque; ++mappings;
     if (v->fail_map || address > sizeof v->ram || bytes > sizeof v->ram - address) return NULL;
     return (uint8_t *)v->ram + address + v->misalign_map;
 }
@@ -115,6 +116,36 @@ int main(void)
     reject(0, 0x1E90, 0); /* executing a program remains unsupported */
     assert(emit(0, 0x194C, 0x11223344) && s.vertex4ub[3] == 0x11223344);
     reject(0, 0x1940, 1); /* position attribute would emit a vertex */
+    /* Offset/format setup is non-executing: exact raw input + one validity bit,
+     * no instance/DMA reads, no guest mapping, and no changed clear/guest state. */
+    const uint32_t array_offsets[] = {0, 1, 0x03131000, 0x0313100C, 0x7FFFFFFF,
+                                      0x80000000, 0x80000001, 0xFFFFFFFF};
+    const uint32_t array_formats[] = {2, 0x12, 0x22, 0x32, 0x42, 0x16,
+                                      0x1032, 0x1016, 0x1002, 0xFFFFFF42, 0xFFFFFF16};
+    for (unsigned bank = 0; bank < 2; ++bank) for (unsigned slot = 0; slot < 16; ++slot) {
+        unsigned method = (bank ? 0x1760 : 0x1720) + slot * 4;
+        unsigned count = bank ? sizeof array_formats / sizeof *array_formats :
+                                sizeof array_offsets / sizeof *array_offsets;
+        for (unsigned i = 0; i < count; ++i) {
+            uint32_t value = bank ? array_formats[i] : array_offsets[i];
+            h2_command_state expected = s; h2_kelvin_clear clear = c; fixture memory = f;
+            unsigned prior_reads = instance_reads, prior_maps = mappings;
+            expected.setup[method / 4] = value;
+            expected.setup_valid[method / 128] |= 1u << ((method / 4) % 32);
+            assert(emit(0, method, value));
+            assert(!memcmp(&s, &expected, sizeof s) && !memcmp(&c, &clear, sizeof c));
+            assert(!memcmp(&f, &memory, sizeof f));
+            assert(instance_reads == prior_reads && mappings == prior_maps);
+            reject(1, method, value); reject(0, method + 1, value);
+        }
+    }
+    for (unsigned slot = 0; slot < 16; ++slot) for (unsigned count = 0; count < 16; ++count)
+    for (unsigned type = 0; type < 16; ++type) {
+        if ((type == 2 && count <= 4) || (type == 6 && count == 1)) continue;
+        reject(0, 0x1760 + slot * 4, 0x12340000 | (count << 4) | type);
+    }
+    reject(0, 0x171C, 0); reject(0, 0x17A0, 0); reject(0, 0x17A4, 0);
+    reject(0, 0x17FC, 7); reject(0, 0x1800, 0); reject(0, 0x1810, 0);
     /* Constant attribute 15 writes retain every float bit independently,
      * including NaNs, infinities, signed zero and repeated components. */
     const uint32_t attribute_bits[] = {0, 0x3F000000, 0x3F800000, 0x42280000,
