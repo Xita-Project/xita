@@ -11,7 +11,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from recompiler.core.profile import load_profile
 from recompiler.xita_recomp import Image, KERNEL_DATA_EXPORTS, KERNEL_EXPORTS
-from games.halo2_5849.hooks import reviewed_sparse_jump_roots, reviewed_widget_kind_roots
+from games.halo2_5849.hooks import (reviewed_sparse_jump_roots, reviewed_widget_kind_roots,
+                                  reviewed_widget_field_roots)
 
 
 HOST_CALLBACK_WALK = (0x3FBA54, 135, "e0cc1649c0b744615b3de0f5b2446411bb408d0b3ce4d1d3da59980219abc70c")
@@ -490,6 +491,7 @@ def main():
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
         roots.update(reviewed_widget_kind_roots(image))
+        roots.update(reviewed_widget_field_roots(image))
         # Native49: 1A474C passes the global arena object 47D924 to 18E1F0.
         # Its stored vtable is 4508FC: allocate/free, followed by string data.
         if image.u32(0x47D924) != 0x4508FC:

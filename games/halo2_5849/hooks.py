@@ -20,6 +20,12 @@ WIDGET_KIND_JUMP_GUARDS = (
     (0x216B00, 48, "0717fb224fbb378fd62e0c4c59f813e1be584356d8821d70e7d5391a84e012b1"),
     (0x216B30, 36, "5f702a0b28f1e274ee1cbf2018a6ca465050a4bfcf0d44f715d748aa0a6b770e"),
 )
+WIDGET_FIELD_JUMP_IP = 0x216A54
+WIDGET_FIELD_JUMP_TABLE = 0x216A88
+WIDGET_FIELD_JUMP_GUARDS = (
+    (0x216A50, 56, "e59cb4e3aba68854c97772c9fbd695217fb19d4e4caa305730d804b5d7c7b835"),
+    (0x216A88, 36, "3a12572e353c32577d20ce9d33cf70adfc65dd9b8f3227b14b40c0209baf7005"),
+)
 INLINE_QUEUE_STATUS_GUARD = (
     0x12D0CF, 26, "76248680a6285ea26e18db9d8eddf97bdf349746e8281507c8876dfd43090850")
 INLINE_QUEUE_STATUS = {
@@ -46,14 +52,17 @@ def reviewed_sparse_jump_roots(image):
 
 
 def lower_sparse_jump(emitter, instruction, output):
+    index = Register.EAX
     if instruction.ip == SPARSE_JUMP_IP:
         table = SPARSE_JUMP_TABLE
     elif instruction.ip == WIDGET_KIND_JUMP_IP:
         table = WIDGET_KIND_JUMP_TABLE
+    elif instruction.ip == WIDGET_FIELD_JUMP_IP:
+        table, index = WIDGET_FIELD_JUMP_TABLE, Register.ECX
     else:
         return False
     if (instruction.mnemonic != Mnemonic.JMP or instruction.op0_kind != OpKind.MEMORY or
-            instruction.memory_base != Register.NONE or instruction.memory_index != Register.EAX or
+            instruction.memory_base != Register.NONE or instruction.memory_index != index or
             instruction.memory_index_scale != 4 or instruction.memory_displacement != table):
         raise ValueError("Halo 2 sparse jump instruction shape mismatch")
     # Use the existing generic indirect-tail-jump form. It reads the actual
@@ -74,6 +83,22 @@ def reviewed_widget_kind_roots(image):
             continue
         if not image.is_code(target):
             raise ValueError("Halo 2 widget kind jump target is not executable")
+        roots.add(target)
+    return roots
+
+
+def reviewed_widget_field_roots(image):
+    """Native151: field44h uses an ECX-indexed table with null holes 4 and 5."""
+    for address, length, digest in WIDGET_FIELD_JUMP_GUARDS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 widget field jump fingerprint mismatch")
+    roots = set()
+    for index in range(9):
+        target = image.u32(WIDGET_FIELD_JUMP_TABLE + index * 4)
+        if target == 0:
+            continue
+        if not image.is_code(target):
+            raise ValueError("Halo 2 widget field jump target is not executable")
         roots.add(target)
     return roots
 
@@ -206,6 +231,7 @@ class Halo2HostChannelHooks(Halo2GraphicsHooks):
                 raise ValueError(f"Halo 2 host channel boundary mismatch at {address:#x}")
         reviewed_sparse_jump_roots(image)
         reviewed_widget_kind_roots(image)
+        reviewed_widget_field_roots(image)
         address, length, digest = INLINE_QUEUE_STATUS_GUARD
         if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
             raise ValueError("Halo 2 inline queue-status fingerprint mismatch")

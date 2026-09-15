@@ -21,12 +21,12 @@ class SparseHooks(NoGameHooks):
         return hooks.lower_sparse_jump(emitter, instruction, output)
 
 
-def synthetic_image(path):
+def synthetic_image(path, index=0):
     data = bytearray(fixture()[0]); data.extend(bytes(0x1200 - len(data)))
     struct.pack_into("<I", data, 0x408, 0x200)
     struct.pack_into("<I", data, 0x410, 0x200)
     data[0x1000:] = bytes(len(data) - 0x1000)
-    data[0x1000:0x1007] = bytes.fromhex("ff248580100100")
+    data[0x1000:0x1007] = bytes((0xFF, 0x24, 0x85 | (index << 3))) + struct.pack("<I", 0x11080)
     for offset, value in ((0x1010, 0xA1), (0x1020, 0xB2), (0x1030, 0xC3)):
         data[offset:offset + 6] = b"\xBA" + struct.pack("<I", value) + b"\xC3"
     struct.pack_into("<7I", data, 0x107C, 0x11030, 0x11010, 0, 0x11020, 0, 0x11020, 0x11030)
@@ -36,6 +36,12 @@ def synthetic_image(path):
 
 class SparseJump(unittest.TestCase):
     def test_widget_kind_revision_roots_and_shape(self):
+        self.check_widget_roots("WIDGET_KIND_JUMP", hooks.reviewed_widget_kind_roots)
+
+    def test_widget_field_revision_roots_and_shape(self):
+        self.check_widget_roots("WIDGET_FIELD_JUMP", hooks.reviewed_widget_field_roots)
+
+    def check_widget_roots(self, prefix, roots):
         with tempfile.TemporaryDirectory() as directory:
             image = synthetic_image(Path(directory) / "synthetic.xbe")
             changed = bytearray(image.data)
@@ -43,16 +49,16 @@ class SparseJump(unittest.TestCase):
             image.data = bytes(changed)
             guards = tuple((a, n, hashlib.sha256(image.bytes_at(a, n)).hexdigest())
                            for a, n in ((0x11000, 7), (0x11080, 36)))
-            with patch.object(hooks, "WIDGET_KIND_JUMP_TABLE", 0x11080), patch.object(hooks, "WIDGET_KIND_JUMP_GUARDS", guards):
-                self.assertEqual(hooks.reviewed_widget_kind_roots(image), {0x11010, 0x11020, 0x11030})
+            with patch.object(hooks, prefix + "_TABLE", 0x11080), patch.object(hooks, prefix + "_GUARDS", guards):
+                self.assertEqual(roots(image), {0x11010, 0x11020, 0x11030})
                 with patch.object(image, "is_code", return_value=False):
                     with self.assertRaisesRegex(ValueError, "not executable"):
-                        hooks.reviewed_widget_kind_roots(image)
+                        roots(image)
                 changed[0x10A0] ^= 1; image.data = bytes(changed)
                 with self.assertRaisesRegex(ValueError, "fingerprint"):
-                    hooks.reviewed_widget_kind_roots(image)
-            with patch.object(hooks, "WIDGET_KIND_JUMP_IP", 0x11000), patch.object(hooks, "WIDGET_KIND_JUMP_TABLE", 0x11080):
-                wrong = recomp.Decoder(32, bytes.fromhex("ff248d80100100"), ip=0x11000).decode()
+                    roots(image)
+            with patch.object(hooks, prefix + "_IP", 0x11000), patch.object(hooks, prefix + "_TABLE", 0x11080):
+                wrong = recomp.Decoder(32, bytes.fromhex("ff248580100100" if prefix == "WIDGET_FIELD_JUMP" else "ff248d80100100"), ip=0x11000).decode()
                 with self.assertRaisesRegex(ValueError, "shape mismatch"):
                     hooks.lower_sparse_jump(None, wrong, [])
 
@@ -82,11 +88,15 @@ class SparseJump(unittest.TestCase):
     def test_widget_kind_tail_dispatch_and_unchanged_default(self):
         self.check_tail_dispatch("WIDGET_KIND_JUMP")
 
+    def test_widget_field_tail_dispatch_and_unchanged_default(self):
+        self.check_tail_dispatch("WIDGET_FIELD_JUMP")
+
     def check_tail_dispatch(self, prefix):
+        index_register = 1 if prefix == "WIDGET_FIELD_JUMP" else 0
         compiler = shutil.which("cc"); self.assertIsNotNone(compiler)
         for enabled in (False, True):
             with self.subTest(hook=enabled), tempfile.TemporaryDirectory(prefix="xita-sparse-") as directory:
-                root = Path(directory); image = synthetic_image(root / "synthetic.xbe")
+                root = Path(directory); image = synthetic_image(root / "synthetic.xbe", index_register)
                 discovery = recomp.Discovery(image, {}, {}, lambda *_: None)
                 for address in (0x11000, 0x11010, 0x11020, 0x11030): discovery.add_root(address)
                 discovery.run()
@@ -97,7 +107,7 @@ class SparseJump(unittest.TestCase):
                     emitter.write_all()
                 self.assertFalse(emitter.unimpl)
                 body = (root / "code_000.c").read_text()
-                self.assertEqual("switch (c->r[0])" in body, not enabled)
+                self.assertEqual(f"switch (c->r[{index_register}])" in body, not enabled)
                 harness = root / "harness.c"
                 harness.write_text('''
 #include <assert.h>
@@ -147,6 +157,7 @@ int main(void) {
     check(0,0,0xA1,0); check(UINT32_MAX,0,0xC3,0);
     for (unsigned i = 1; i <= 6; ++i) check(i,1,0,0);
 ''') + "free(g_xpt); free(g_xram); return 0;\n}\n")
+                harness.write_text(harness.read_text().replace("cpu.r[0] = index", f"cpu.r[{index_register}] = index"))
                 executable = root / "harness"
                 built = subprocess.run([compiler, "-std=gnu11", "-O2", "-I", str(ROOT / "recomp"),
                                         str(harness), "-o", str(executable)], capture_output=True, text=True)
