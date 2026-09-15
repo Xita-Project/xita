@@ -65,9 +65,33 @@ The frame acquisition checks, remote HTTP selection/exclusion tests and benchmar
 controller checks also pass. Worker initialization failure rejects the experiment
 before its first comparison arm, so a serial fallback cannot masquerade as a
 multicore result. The Vita build passes and boots to the dashboard and original
-Halo CE menu in the isolated emulator. Actual concurrent Halo execution is pending.
+Halo CE menu and campaign cryo room in the isolated emulator. The first concurrent
+run creates both worker threads with the requested user-core masks, then stops
+during the on-arm settling period when an object callback exhausts its loop
+budget. There is no completed comparison or performance gain from this run.
+Resolving that callback dependency is the next implementation task.
 The worker affinity requests use the SDK user-core masks (`0x10000`/`0x20000`).
 The native clipping helper also guards its counters and avoids owner trace globals
 when called from an object worker.
 
 Private build artifacts, logs and screenshots remain outside Git.
+
+### First shared-state failure
+
+The first two campaign attempts stop at the backward branch `56643` in `565E0`,
+which traverses and removes cluster-list nodes. The same structure is populated
+by `56670`; both use mutable datum allocation state. The experimental hooks now
+hold the existing recursive shared-helper mutex over the list insertion/removal
+transactions and datum allocate/free (`A9330`/`A92C0`). The four complete original
+routine signatures are checked before emitting these hooks. These locks do not
+cover the whole object callback. The current generated image contains one entry
+body for each of these routines; this must be rechecked if discovery changes.
+
+A focused test uses the original translated list/datum routines with the
+production worker pool. It completes 28,800 remove/insert pairs, verifies every
+object's membership, rejects cycles and checks both datum-pool counts. Address/
+undefined-behavior sanitizers and ThreadSanitizer pass. Removing only the four
+transaction guards in a private negative control produces a ThreadSanitizer
+data race in datum allocation. This establishes the shared-list race and guard
+coverage in the fixture, not safety of every game callback. The patched campaign
+run is pending.

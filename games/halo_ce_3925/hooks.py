@@ -83,6 +83,16 @@ class HaloHooks(NoGameHooks):
         self.object_scan_enabled = self.enabled and hashlib.sha256(
             image.bytes_at(0x900E0, 0x239) or b"").hexdigest() == "5bcdb3c78aa2f0b4ba4da986cfe59cb0d28c1004cbcc804abdafabd8200f520a"
 
+    # Shared cluster lists and datum allocation/free. The first concurrent
+    # campaign test cycled at 56643 in removal after unguarded list mutation.
+    # Use the existing recursive shared-helper mutex to avoid a lock-order pair.
+    object_shared = {
+        0x565E0: (139, "a545d5f623d8b3e606350417a39ad062380c8d92a1df0aadbb8074cfc18d03ef"),
+        0x56670: (273, "54d374355fdeb944c482141e466359117060ab5f6db257a02a382d1ea9008154"),
+        0xA92C0: (108, "91de09c33f100a0543ffaabea4a5472f146b763cefc409831186d16e412fc1e6"),
+        0xA9330: (131, "2563d84b6197cd72ccfce86a6bb43ab8a83ae9068476a89432dfb8dd5eecce54"),
+    }
+
     def before_instruction(self, address):
         if self.object_scan_enabled and address in (0x900E0, 0x902A9, 0x90314):
             line = {0x900E0: "(void)xv_object_jobs_begin(c);",
@@ -116,6 +126,11 @@ class HaloHooks(NoGameHooks):
                 self.image.bytes_at(address, 0x111) or b"").hexdigest() == "8003e134015d9a4df2a0e3bd501610aafacb7b7693bba77a40094b542c964ae0":
             out.extend(["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS",
                         "    if (xv_object_jobs_queue(c)) return;", "#endif"])
+        if address in self.object_shared:
+            size, digest = self.object_shared[address]
+            if hashlib.sha256(self.image.bytes_at(address, size) or b"").hexdigest() == digest:
+                out.extend(["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS",
+                            "    XV_OBJECT_MATH_GUARD(); /* shared list/datum transaction */", "#endif"])
         if self.flare_enabled and address == ENTRY:
             out.append(ENTRY_HOOK)
         native_math = {

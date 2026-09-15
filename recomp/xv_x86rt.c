@@ -38,7 +38,16 @@ void __attribute__((weak)) xk_yield(void);
 void xv_preempt(xctx *c)
 {
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
-    if(xv_is_object_job(c))xv_object_job_stop(c,0,"job instruction budget exceeded");
+    if(xv_is_object_job(c)) {
+#if defined(__vita__)
+        uintptr_t caller=(uintptr_t)__builtin_return_address(0);
+        XV_RT_LOG("object job spin ARM caller %08X relative-to-xv_preempt %d\n",
+                  (unsigned)caller,(int32_t)(caller-(uintptr_t)xv_preempt));
+#endif
+        XV_RT_LOG("object job spin regs %08X %08X %08X %08X %08X %08X %08X %08X\n",
+                  c->r[0],c->r[1],c->r[2],c->r[3],c->r[4],c->r[5],c->r[6],c->r[7]);
+        xv_object_job_stop(c,0,"job instruction budget exceeded");
+    }
 #endif
     static uint64_t n;
     /* Slice between cooperative yields.  Halo's vblank wait (0xBB060) is a pure busy loop when its
