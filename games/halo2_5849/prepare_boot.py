@@ -104,6 +104,13 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_FIXED_STARTUP_CALLS = (
+    (0x1C2695, 6, "9a975fa7706c2abfb3aedac6efe53ace2da0647b79028bf3fd1181c5e82b6029"),
+    (0x1C2862, 6, "2ee5d11f38026183c4cded56144a85988d8437d36cee1443eea0a3a78e0b8692"),
+    (0x1473B0, 6, "800c60f4c2941676ba2f79b9e737973518adb9da705961d1007d2079fea96a8d"),
+    (0x2D8780, 259, "1654647adb4f74b28facc24dd59797bbe9924e99cdda959a70a9f0f6e7c816c2"),
+    (0x2D6FE0, 63, "4160dcd7eb24ef4504ecc06f739483dcacbd55b608f2b7d2598fa4ccb76f86d2"),
+)
 GAME_ACTION_WALKS = (
     (0xE6830, 137, "74cc8d6fbd2cf6c4f8ecb86836d10796283f833809d7f89d09145e81b07b9125"),
     (0xE6900, 88, "8fe963a2c722ff6daee79d421a47125d2f65f32398eda43ef7738384d624a661"),
@@ -445,6 +452,28 @@ def descriptor_child_field_roots(image, offsets):
     return roots
 
 
+def game_fixed_startup_roots(image):
+    """Native161 reaches a fixed initializer and its paired disposal callback.
+
+    The initializer's original getter selects static allocator4798B0. Only
+    its allocation slot10h and release slot20h are proven here; other virtual
+    calls retain checked dispatch. No callback or allocator is replaced.
+    """
+    for address, length, digest in GAME_FIXED_STARTUP_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 fixed startup call fingerprint mismatch")
+    if image.u32(0x4798B0) != 0x45378C:
+        raise ValueError("Halo 2 fixed startup allocator binding mismatch")
+    roots = set()
+    for slot in (0x461DF0, 0x461DF4, 0x45379C, 0x4537AC):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 fixed startup target is not title code")
+        roots.add(target)
+    return roots
+
+
 def game_action_callback_roots(image):
     """Native158: the original 60-entry action table shares four-word records.
 
@@ -688,6 +717,7 @@ def main():
         roots.update(game_descriptor_object_roots(image))
         roots.update(game_packed_vector_roots(image))
         roots.update(game_action_callback_roots(image))
+        roots.update(game_fixed_startup_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
         roots.add(image.u32(image.u32(0x477058) + 0x10))

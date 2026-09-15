@@ -30,6 +30,39 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_fixed_startup_pair_and_allocator_slots_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = (0x461DF0, 0x461DF4, 0x45379C, 0x4537AC)
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        image.targets[0x4798B0] = 0x45378C
+        for neighbor in (0x461DEC, 0x461DF8, 0x45378C, 0x453798, 0x4537A0, 0x4537A8, 0x4537B0):
+            image.targets[neighbor] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_FIXED_STARTUP_CALLS", (spec,) * 5):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_fixed_startup_roots(image), set(range(0x1000, 0x1040, 16)))
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_fixed_startup_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_fixed_startup_roots(image)
+            image.section_name = ".text"
+            for bad in (0, None, 0x453790):
+                image.targets[0x4798B0] = bad
+                with self.assertRaisesRegex(ValueError, "binding mismatch"):
+                    prepare_boot.game_fixed_startup_roots(image)
+        for which in range(5):
+            specs = [spec] * 5; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_FIXED_STARTUP_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_fixed_startup_roots(image)
+
     def test_packed_vector_observed_rows_both_triplets_only(self):
         image = SyntheticImage(); image.section_name = ".text"
         bases = (0x47FB4C, 0x47FBC4, 0x47FC14)
