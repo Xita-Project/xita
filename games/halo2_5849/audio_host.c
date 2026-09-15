@@ -36,7 +36,7 @@ typedef struct {
     uint32_t flags, route_bin;
     uint32_t route_count, route_bins[5];
     int32_t route_gains[5];
-    struct { uint32_t mirror, source, context; uint64_t ticket; } packets[2];
+    struct { uint32_t mirror, source, context, ready; uint64_t ticket; } packets[2];
     uint32_t submitted, completed;
     int voice;
 } h2_audio_stream;
@@ -560,7 +560,14 @@ static void stream_create(xctx *c, uint32_t ip)
     result(c, 0, args);
 }
 #if H2_AUDIO_DSP
-static void stream_callbacks(xctx *c)
+/* Xbox DirectSound invokes stream packet-completion callbacks from
+ * DirectSoundDoWork on the calling thread, not asynchronously. The worker only
+ * observes the real sink fence and marks packets ready; retirement and the
+ * guest callback happen when the game calls DirectSoundDoWork. Native222 showed
+ * why this matters: at the intro-to-menu transition the game frees its stream
+ * context records and reuses the memory before any Flush/Release, which is safe
+ * on hardware only because no callback can run until it services DirectSound. */
+static void stream_poll(xctx *c)
 {
     for (unsigned i=0;i<XA_MAX_VOICES;++i) {
         h2_audio_stream *s=&streams[i];if (!s->base || !s->submitted) continue;
@@ -569,24 +576,43 @@ static void stream_callbacks(xctx *c)
             if (ready<0) fail(c,0x37AD25,"stream sink completion failed",s->base);
             if (!ready) break;
             unsigned p;for(p=0;p<2 && s->packets[p].ticket!=ticket;++p) {}
-            if (p==2 || !s->packets[p].mirror || !mapped(s->packets[p].mirror,4096) ||
+            if (p==2 || !s->packets[p].mirror || s->packets[p].ready)
+                fail(c,0x37AD25,"stream completion ownership",s->base);
+            s->packets[p].ready=1;
+            xv_logf("[h2/audio-packet] sink completed ticket=%llu stream=%08X context=%u; callback deferred to DirectSoundDoWork\n",
+                    (unsigned long long)ticket,s->base,s->packets[p].context);
+        }
+    }
+}
+static void stream_deliver(xctx *c, uint32_t ip)
+{
+    for (unsigned i=0;i<XA_MAX_VOICES;++i) {
+        h2_audio_stream *s=&streams[i];if (!s->base) continue;
+        for (unsigned n=0;n<2;++n) {
+            /* Deliver in ticket order. */
+            unsigned p=2;
+            for (unsigned q=0;q<2;++q)
+                if (s->packets[q].ready && (p==2 || s->packets[q].ticket<s->packets[p].ticket)) p=q;
+            if (p==2) break;
+            if (!s->packets[p].mirror || !mapped(s->packets[p].mirror,4096) ||
                 s->callback!=0x335D82 || !mapped(s->context,0x48) || c->r[4]<16 ||
                 !mapped(c->r[4]-16,16) || c->fs_base>UINT32_MAX-0x24 || !mapped(c->fs_base+0x24,1))
-                fail(c,0x37AD25,"stream callback ownership/stack",s->base);
+                fail(c,ip,"stream callback ownership/stack",s->base);
             uint32_t packet_context=s->packets[p].context,mirror=s->packets[p].mirror;
-            output(c,0x37AD25,c->r[4]-16,16);output(c,0x37AD25,c->fs_base+0x24,1);
+            uint64_t ticket=s->packets[p].ticket;
+            output(c,ip,c->r[4]-16,16);output(c,ip,c->fs_base+0x24,1);
             if (X_M8(c->fs_base+0x24)>1 || aliases(c->r[4]-16,16,c->fs_base+0x24,1) ||
                 aliases(c->r[4]-16,16,s->context,0x48))
-                fail(c,0x37AD25,"stream callback control alias/IRQL",c->fs_base);
-            if (xk_mem_free(mirror)<0) fail(c,0x37AD25,"stream mirror retirement",mirror);
-            s->packets[p].mirror=0;s->packets[p].ticket=0;++s->completed;
+                fail(c,ip,"stream callback control alias/IRQL",c->fs_base);
+            if (xk_mem_free(mirror)<0) fail(c,ip,"stream mirror retirement",mirror);
+            s->packets[p].mirror=0;s->packets[p].ticket=0;s->packets[p].ready=0;++s->completed;
             xctx saved=*c;uint32_t fpscr=h2_platform_fpscr_read();uint8_t irql=X_M8(c->fs_base+0x24);
             X_M8(c->fs_base+0x24)=2;c->preempt=0x7fffffff;
             X_PUSH32(0);X_PUSH32(packet_context);X_PUSH32(s->context);X_PUSH32(0xDEAD0003u);
-            xv_logf("[h2/audio-packet] consumed ticket=%llu stream=%08X callback=%08X context=%u; real sink fence passed before retirement\n",
+            xv_logf("[h2/audio-packet] consumed ticket=%llu stream=%08X callback=%08X context=%u; delivered from DirectSoundDoWork after the real sink fence\n",
                     (unsigned long long)ticket,s->base,s->callback,packet_context);
             xv_call(c,s->callback);
-            if (c->r[4]!=saved.r[4]) fail(c,0x37AD25,"stream callback stack imbalance",c->r[4]);
+            if (c->r[4]!=saved.r[4]) fail(c,ip,"stream callback stack imbalance",c->r[4]);
             X_M8(saved.fs_base+0x24)=irql;*c=saved;h2_platform_fpscr_write(fpscr);
         }
     }
@@ -594,7 +620,7 @@ static void stream_callbacks(xctx *c)
 static void stream_worker_entry(xctx *c,void *unused)
 {
     (void)unused;
-    for (;;) { stream_callbacks(c);xk_sleep_us(1000); }
+    for (;;) { stream_poll(c);xk_sleep_us(1000); }
 }
 static void stream_process(xctx *c)
 {
@@ -633,7 +659,7 @@ static void stream_process(xctx *c)
         if (xk_mem_free(mirror)<0) fail(c,ip,"stream submission rollback",mirror);
         fail(c,ip,"stream real decoder/GP submission rejected",s->base);
     }
-    s->packets[p].mirror=mirror;s->packets[p].source=packet[0];s->packets[p].context=p;s->packets[p].ticket=ticket;
+    s->packets[p].mirror=mirror;s->packets[p].source=packet[0];s->packets[p].context=p;s->packets[p].ticket=ticket;s->packets[p].ready=0;
     ++s->submitted;xk_thread_kick(stream_worker);
     xv_logf("[h2/audio-packet] Process caller=%08X stream=%08X context=%u source=%08X mirror=%08X ticket=%llu;320 verified zero PCM bytes queued to real decoder/GP%u, completion pending\n",
             caller,s->base,p,packet[0],mirror,(unsigned long long)ticket,s->route_bin);
@@ -1553,8 +1579,12 @@ void h2_audio_guest_entry(xctx *c, uint32_t ip)
 #endif
     if (!device.ever_created) return;
     if (ip==0x37B844 || (ip==0x379E9E && !(c->r[4]&3) && mapped(c->r[4],4) && X_M32(c->r[4])==0x37B84A)) {
-        uint32_t fpscr=h2_platform_fpscr_read();original_empty_work(c,ip);
-        if (ip==0x37B844) xv_logf("[h2/audio-work] original void wrapper executes with no ordinary pending work; accurate notifications remain on real sink worker, listener dirty=%08X retained\n",device.dirty);
+        uint32_t fpscr=h2_platform_fpscr_read();
+#if H2_AUDIO_DSP
+        if (ip==0x37B844) stream_deliver(c,ip);
+#endif
+        original_empty_work(c,ip);
+        if (ip==0x37B844) xv_logf("[h2/audio-work] original void wrapper executes with no ordinary pending work; completed stream packets delivered here, listener dirty=%08X retained\n",device.dirty);
         h2_platform_fpscr_write(fpscr);return;
     }
     if (ip == 0x379F2A) {

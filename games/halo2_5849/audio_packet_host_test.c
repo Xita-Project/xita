@@ -54,16 +54,26 @@ int main(void)
 
     c=packet(handle,0,0x33610e);call(&c,0x37AD25,0x88780032,3);assert(s->submitted==2);
     c=context(handle,0,0,0);reject(&c,0x37AB87);
-    /* Only the scripted sink's explicit completion permits callback/free. */
+    /* Only the scripted sink's explicit completion marks a packet ready; the
+     * worker never retires or calls back on its own. */
     c=context(0,0,0,0);c.fs_base=0x7000;X_M8(c.fs_base+0x24)=0;xctx saved=c;uint32_t fp=native_fp;
-    stream_callbacks(&c);assert(!test_stream_callbacks&&s->packets[0].mirror);
+    stream_poll(&c);assert(!test_stream_callbacks&&s->packets[0].mirror&&!s->packets[0].ready);
     int16_t output[2048];xk_audio_mix(output,1024);xk_audio_mix(output,1024);
     assert(xk_audio_stream_pop_consumed(s->voice)==1 && xk_audio_stream_pop_consumed(s->voice)==1);
     test_stream_ready=2;test_stream_callback_context=s->context;
-    work_guard(s,1);assert(!test_stream_callbacks); /* no premature/DoWork retirement */
-    stream_callbacks(&c);
-    assert(test_stream_callbacks==2 && s->completed==2 && !s->packets[0].mirror && !s->packets[1].mirror);
+    work_guard(s,1);assert(!test_stream_callbacks); /* nothing polled yet: DoWork has nothing to deliver */
+    stream_poll(&c);
+    assert(!test_stream_callbacks && s->completed==0 && s->packets[0].ready && s->packets[1].ready &&
+           s->packets[0].mirror && s->packets[1].mirror);           /* ready, still owned: no callback off DoWork */
     assert(!memcmp(&c,&saved,sizeof c)&&native_fp==fp&&!X_M8(c.fs_base+0x24));
+    /* DirectSoundDoWork retires ready packets in ticket order and invokes the
+     * original callbacks on the calling thread, then restores its context. */
+    c=context(0,0,0,0);c.fs_base=0x7000;X_M8(c.fs_base+0x24)=0;X_M32(c.r[4])=0x21EC3C;saved=c;fp=native_fp;
+    h2_audio_guest_entry(&c,0x37B844);
+    assert(test_stream_callbacks==2 && s->completed==2 && !s->packets[0].mirror && !s->packets[1].mirror &&
+           !s->packets[0].ready && !s->packets[1].ready);
+    assert(!memcmp(&c,&saved,sizeof c)&&native_fp==fp&&!X_M8(c.fs_base+0x24));
+    work_guard(s,1);assert(test_stream_callbacks==2);              /* nothing left to deliver */
     /* No flush API is claimed: this is fixture-only inactive teardown. */
     xk_audio_voice_stop(s->voice);s->submitted=0;c=context(handle,0,0,0);call(&c,0x37AB87,0,1);
     uint32_t dev=read32(0x6200);c=context(dev-8,0,0,0);call(&c,0x37C70F,0,1);

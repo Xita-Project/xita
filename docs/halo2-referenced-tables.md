@@ -87,6 +87,53 @@ distinct from the game's address space: `xk_mem_alloc_high` places kernel-owned,
 game-visible objects just below the kernel area (top-down on the same 64 KB
 grid), away from the game's low, reuse-prone heap. The adapter's ten allocations
 now use it. With the fix the device is created at `0x3CF6008`, the watch never
-fires, and the deeper path advances past the audio device to a later
-stream-completion callback (`335D38`) that invokes a still-absent virtual
-method. The strict no-data-roots default and every audio guard are unchanged.
+fires, and the deeper path advances past the audio device.
+
+## Stream completions are delivered from DirectSoundDoWork
+
+The next stop was the original stream-completion callback (`335D82` →
+`335D38`) calling through a null virtual method. An identity-alias write watch
+and the arena snapshot showed why: at the intro-to-menu transition the game
+frees its stream-context records (`0x824558E4..`, 96-byte slots) and reuses the
+memory for other objects (`2DD930` writes matrices there) without ever calling
+`Flush` or `Release` on the DirectSound streams. That is only safe on hardware
+because Xbox DirectSound invokes packet-completion callbacks from
+`DirectSoundDoWork` on the calling thread; the adapter's worker had been
+invoking them from its own cooperative thread at arbitrary points, so a stale
+completion ran against the freed record.
+
+The adapter now separates the two: the worker only observes the real sink
+fence and marks a packet ready (`stream_poll`), and `DirectSoundDoWork`
+(`37B844`) retires ready packets in ticket order and invokes the original
+callbacks on the caller's thread with the same stack, alias and IRQL guards
+(`stream_deliver`). Nothing is retired or called back off DoWork; the packet
+host test encodes this. The run then proceeds from a stop two seconds after
+Start to nearly six minutes of execution, with sixteen sink completions and
+eight DoWork deliveries and no audio failure.
+
+## Halo 2 target now uses data-section pointer roots
+
+`prepare_boot.py` translates the host-channel startup target with the
+initialized data sections' code pointers (the same discovery Halo CE uses) plus
+the referenced-table walk. It regenerates byte-identical code to the private
+stage verified here. The other diagnostic profiles keep the original
+`--no-data-roots` translation. Only original code is translated; unknown
+indirect targets, missing kernel exports, unsupported instructions and MMIO
+still stop explicitly.
+
+## Current stop
+
+```
+[h2/blocked] kernel stack reason=unmapped stack window first=D0000000 fn=002DD930 esp=005DDF50
+```
+
+On the first main-loop iteration after the intro, `2CBF0` creates two
+render-list records (table `4BA138`, 32-byte slots, count at `4C0B7C`) whose
+tag index is −1 — an upstream model lookup that returned nothing. The
+per-record renderer `44E90` then takes its no-tag path and derives a node
+descriptor from game state that yields a bogus count, and `2DD930`'s
+`esp`-relative node loop runs on the order of 2³⁰ iterations, writing upward
+through memory (the same routine that scribbled the device page and the stream
+contexts in earlier layouts) until it reaches the guard page below the sound
+system's kernel stack. No frame past 136 renders. The next bounded step is the
+caller of `2CBF0` (`133520` region) and why its model lookup yields −1.
