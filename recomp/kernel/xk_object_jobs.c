@@ -392,7 +392,7 @@ static int initialize(void)
         for(unsigned p=0;p<STACK_BYTES/4096;p++)stack_pages[i][p]=g_xpt[(stacks[i]>>12)+p];
     }
     const char *light=getenv("XV_OBJECT_LIGHT_LOCK");
-    if(xv_object_mutex_init(&math_mutex,light&&atoi(light)!=0))goto fail;
+    if(xv_object_mutex_init(&math_mutex,!light||atoi(light)!=0))goto fail;
 #ifdef __vita__
     owner_wake=sceKernelCreateSema("xv_object_service",0,0,1,NULL);
     if(owner_wake<0)goto fail;

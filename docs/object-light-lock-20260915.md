@@ -20,8 +20,9 @@ switching with an active object scope or batch terminates the experiment. The
 backend stays fixed while any worker or owner can hold the guard. Shutdown
 joins workers before destroying both successfully created mutexes.
 
-`XV_OBJECT_LIGHT_LOCK=1` selects the lightweight mutex at startup. The default is
-the existing kernel mutex. The remote `object-lock` comparison runs kernel /
+`XV_OBJECT_LIGHT_LOCK=0` selects the existing kernel mutex at startup. After the
+physical comparison below, the experimental worker build defaults to the
+lightweight mutex when available. The remote `object-lock` comparison runs kernel /
 lightweight / kernel with identical workers, math and graphics settings. It
 restores the configured selection on completion, cancellation or lost control.
 `[object-lock-backend]` records the selected implementation beside frame reports.
@@ -36,3 +37,42 @@ acquisition and benchmark restoration checks also pass.
 
 Host shims do not establish firmware correctness or performance. Native emulator
 and physical validation are required before calling this an optimization.
+
+## Physical comparison
+
+The comparison candidate ran in physical slot B with runtime SHA-256
+`7becdd272289b5f6cc3f8eaf9cd39f4fad2542826e77518d247108ae43000034`.
+Slot A was retained. The exact candidate also passed an emulator comparison,
+including the real backend switches and restoration; its capped 20 FPS timing
+is not a hardware result.
+
+Three stationary Blood Gulch trials measured:
+
+| Trial | Kernel before | Lightweight | Kernel after |
+| --- | ---: | ---: | ---: |
+| 1 | 11.805 FPS | 15.060 FPS | 11.807 FPS |
+| 2 | 11.961 FPS | 15.198 FPS | 11.848 FPS |
+| 3 | 11.851 FPS | 15.165 FPS | 11.701 FPS |
+
+All camera checks passed at the same blue-base position and direction. Render
+resolution remained 360p with original material, model, particle and glow
+settings, standard texture detail and no frame cap. Private math and both
+object workers remained enabled in every arm. This is approximately a 28%
+frame-rate gain in this view, not a campaign or driving result.
+
+Fully contained 60-frame windows in the first comparison show joined object
+work near 48–49 ms per displayed frame with the kernel mutex, versus about
+18 ms with the lightweight mutex. Per-lane elapsed lock waits fall from about
+21–24 ms to 7–8 ms. These waits overlap and include scheduling time; do not add
+them together as CPU time saved. The faster frames also require fewer original
+simulation passes per displayed frame, with both arms still reporting about
+30 passes per second. No simulation work was deliberately removed.
+
+The first automated menu sequence accidentally entered campaign; that capture
+is not the comparison. The actual trials started only after returning through
+the normal menus and verifying Blood Gulch. The startup code anchor establishes
+the candidate's physical relocation before symbolizing lock sites.
+
+These results justify enabling the lightweight backend in the next experimental
+candidate. Gameplay with the new default, rocket pickup and representative
+campaign/driving stability still require direct physical verification.
