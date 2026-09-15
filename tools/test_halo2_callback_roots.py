@@ -30,6 +30,29 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_observed_shared_type_entry_without_inferred_vtable(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {}  # No class table is inferred or read.
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_OBSERVED_TYPE_QUERY_CALLS)
+        with patch.object(prepare_boot, "GAME_OBSERVED_TYPE_QUERY_CALLS", (spec,) * count):
+            self.assertEqual(prepare_boot.game_observed_type_query_roots(image), {0x9B910})
+            self.assertEqual(image.targets, {})
+            image.bad_code = 0x9B910
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_observed_type_query_roots(image)
+            image.bad_code = None; image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_observed_type_query_roots(image)
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_observed_type_query_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_OBSERVED_TYPE_QUERY_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_observed_type_query_roots(image)
+
     def test_bounds_delegate_chains_and_temporary_pair_listeners(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {0x455558: 0x1000, 0x456178: 0x1000, 0x455F70: 0x1000,

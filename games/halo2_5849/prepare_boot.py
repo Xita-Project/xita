@@ -104,6 +104,10 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_OBSERVED_TYPE_QUERY_CALLS = (
+    (0x1D6D00, 965, "402c51d7957f6713dd1c496940943f8ac9f2dc46734e3779f499ad9b79da3e96"),
+    (0x9B910, 6, "7500687ab6484f894dd29beddc484e671de6539e4faf19ef80805cfd49e55624"),
+)
 GAME_BOUNDS_DELEGATE_CALLS = (
     (0x30DF80, 442, "567b689b1b79b30997baf3646506b2faab56711b377f84cc2668d0158a8a810b"),
     (0x1C3B70, 388, "8c450ec47a3b70909a1eabf9e93fe09e2760777468e75ff74f629d294dcaa436"),
@@ -568,6 +572,18 @@ def descriptor_child_field_roots(image, offsets):
         else:
             raise ValueError("Halo 2 descriptor child array is not terminated before its link")
     return roots
+
+
+def game_observed_type_query_roots(image):
+    """Native173 directly observes this shared entry; do not infer a class table."""
+    for address, length, digest in GAME_OBSERVED_TYPE_QUERY_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 observed type query fingerprint mismatch")
+    target = 0x9B910  # Exact original indirect-call destination in native173.
+    section = image.section_of(target)
+    if not image.is_code(target) or not section or section[4] != ".text":
+        raise ValueError("Halo 2 observed type query target is not title code")
+    return {target}
 
 
 def game_bounds_delegate_roots(image):
@@ -1046,6 +1062,7 @@ def main():
         roots.update(game_predicate_replacement_roots(image))
         roots.update(game_pool_allocation_roots(image))
         roots.update(game_bounds_delegate_roots(image))
+        roots.update(game_observed_type_query_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
