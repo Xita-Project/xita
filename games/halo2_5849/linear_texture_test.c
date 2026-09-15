@@ -54,16 +54,71 @@ static void rejected(unsigned unit)
     assert(!memcmp(&out, &before, sizeof out) && !memcmp(&old, &s, sizeof s));
     assert(!memcmp(&memory, &c, sizeof c) && !memcmp(ram, f.ram, sizeof ram));
 }
-int main(void)
+static void block_init(unsigned unit, unsigned selector)
+{
+    init(unit, selector); set(unit, 4, 0x03310E28u | selector);
+    f.instance[1] = f.instance[5] = 79; /* offset16 + exactly64 readable bytes */
+}
+static void block_rejected(unsigned unit)
+{
+    h2_block_texture out, before; memset(&out, 0xA5, sizeof out); before = out;
+    h2_command_state old = s; h2_kelvin_clear memory = c; uint8_t ram[sizeof f.ram];
+    memcpy(ram, f.ram, sizeof ram);
+    assert(!h2_dxt23_texture_read(&s, &c, unit, &out));
+    assert(!memcmp(&out, &before, sizeof out) && !memcmp(&old, &s, sizeof s));
+    assert(!memcmp(&memory, &c, sizeof c) && !memcmp(ram, f.ram, sizeof ram));
+}
+static void block_tests(void)
 {
     for (unsigned unit = 0; unit < 4; ++unit) for (unsigned selector = 1; selector <= 2; ++selector) {
-        init(unit, selector); h2_command_state old = s; h2_kelvin_clear memory = c;
+        block_init(unit, selector); h2_command_state old = s; h2_kelvin_clear memory = c;
+        uint8_t ram[sizeof f.ram]; memcpy(ram, f.ram, sizeof ram); h2_block_texture out;
+        assert(h2_dxt23_texture_read(&s, &c, unit, &out));
+        assert(out.physical == (selector == 1 ? 528 : 4112) && out.blocks == f.ram + out.physical);
+        assert(out.bytes == 64 && out.width == 8 && out.height == 8 && out.block_pitch == 32);
+        assert(out.method_format == (0x03310E28u | selector) && reads == 4 && maps == 1);
+        assert(!memcmp(&old, &s, sizeof s) && !memcmp(&memory, &c, sizeof c));
+        assert(!memcmp(ram, f.ram, sizeof ram));
+    }
+    for (unsigned bit = 0; bit < 32; ++bit) {
+        block_init(2, 1); set(2, 4, 0x03310E29u ^ (1u << bit));
+        block_rejected(2); assert(!reads && !maps);
+    }
+    for (unsigned i = 0; i < 3; ++i) {
+        block_init(2, 1); unsigned m = 0x1B80 + (unsigned[]){0,4,12}[i];
+        s.setup_valid[m / 128] &= ~(1u << ((m / 4) % 32));
+        block_rejected(2); assert(!reads && !maps);
+    }
+    block_init(2, 1); set(2, 12, 0); block_rejected(2); assert(!reads && !maps);
+    block_init(2, 1); s.dma_valid &= ~2u; block_rejected(2); assert(!reads && !maps);
+    block_init(2, 1); s.dma[1]++; block_rejected(2); assert(!maps);
+    block_init(2, 1); f.fail_read = 1; block_rejected(2); assert(!maps);
+    block_init(2, 1); f.instance[0]++; block_rejected(2); assert(!maps);
+    block_init(2, 1); f.instance[0] |= 0x10000; block_rejected(2); assert(!maps);
+    block_init(2, 1); f.instance[3] ^= 4096; block_rejected(2); assert(!maps);
+    block_init(2, 1); f.instance[1]--; block_rejected(2); assert(!maps);
+    block_init(2, 1); c.physical_bytes = 591; block_rejected(2); assert(!maps);
+    block_init(2, 1); set(2, 0, UINT32_MAX - 15); block_rejected(2); assert(!maps);
+    block_init(2, 1); f.fail_map = 1; block_rejected(2); assert(maps == 1);
+    block_init(2, 1); f.overflow_map = 1; block_rejected(2); assert(maps == 1);
+    block_init(2, 1); block_rejected(4); block_rejected(UINT32_MAX);
+    c.read_instance = NULL; block_rejected(2); c.read_instance = read_word; c.map_physical = NULL; block_rejected(2);
+    assert(!h2_dxt23_texture_read(NULL, &c, 0, NULL));
+    assert(!h2_dxt23_texture_read(&s, NULL, 0, NULL));
+}
+int main(void)
+{
+    for (unsigned alpha = 0; alpha < 2; ++alpha)
+    for (unsigned unit = 0; unit < 4; ++unit) for (unsigned selector = 1; selector <= 2; ++selector) {
+        init(unit, selector);
+        uint32_t format = (alpha ? 0x11228u : 0x11E28u) | selector; set(unit, 4, format);
+        h2_command_state old = s; h2_kelvin_clear memory = c;
         uint8_t ram[sizeof f.ram]; memcpy(ram, f.ram, sizeof ram);
         h2_linear_texture out;
         assert(h2_linear_texture_read(&s, &c, unit, &out));
         assert(reads == 4 && maps == 1 && out.physical == (selector == 1 ? 528 : 4112));
         assert(out.pixels == f.ram + out.physical && out.bytes == 32);
-        assert(out.width == 3 && out.height == 2 && out.pitch == 16 && out.method_format == (0x11E28 | selector));
+        assert(out.width == 3 && out.height == 2 && out.pitch == 16 && out.method_format == format);
         assert(!memcmp(&s, &old, sizeof s) && !memcmp(&c, &memory, sizeof c));
         assert(!memcmp(ram, f.ram, sizeof ram));
     }
@@ -72,7 +127,7 @@ int main(void)
         init(0, 1); unsigned m = 0x1B00 + fields[i];
         s.setup_valid[m / 128] &= ~(1u << ((m / 4) % 32)); rejected(0); assert(!reads && !maps);
     }
-    const uint32_t formats[] = {0x11E28, 0x11E2B, 0x11E2D, 0x11E21, 0x11E19, 0x11229, 0x21E29, 0x111E29};
+    const uint32_t formats[] = {0x11E28, 0x11E2B, 0x11E2D, 0x11E21, 0x11E19, 0x10629, 0x21E29, 0x111E29};
     for (unsigned i = 0; i < sizeof formats / sizeof *formats; ++i) {
         init(0, 1); set(0, 4, formats[i]); rejected(0); assert(!reads && !maps);
     }
@@ -98,5 +153,6 @@ int main(void)
     c.read_instance = NULL; rejected(0); c.read_instance = read_word; c.map_physical = NULL; rejected(0);
     assert(!h2_linear_texture_read(NULL, &c, 0, NULL));
     assert(!h2_linear_texture_read(&s, NULL, 0, NULL));
-    puts("Linear texture view: four units, DMA permissions/extents, format bounds and read-only rejection passed");
+    block_tests();
+    puts("Linear ARGB/XRGB and 8x8 DXT23 views: four units, DMA permissions/extents, format bounds and read-only rejection passed");
 }

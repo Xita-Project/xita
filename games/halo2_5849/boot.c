@@ -28,6 +28,8 @@
 extern const h2_host_channel *h2_host_channel_current(void) __attribute__((weak));
 extern int h2_linear_texture_read(const h2_command_state *, const h2_kelvin_clear *,
                                   unsigned, h2_linear_texture *) __attribute__((weak));
+extern int h2_dxt23_texture_read(const h2_command_state *, const h2_kelvin_clear *,
+                                 unsigned, h2_block_texture *) __attribute__((weak));
 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
 uint8_t *g_xram;
@@ -201,6 +203,21 @@ static void graphics_snapshot(void)
                 xv_logf("[h2/graphics] private read-only texture0 snapshot address=%08X size=%ux%u pitch=%u bytes=%u complete=%d\n",
                         texture.physical, texture.width, texture.height, texture.pitch, texture.bytes,
                         complete && !closed);
+            }
+        }
+        h2_block_texture blocks;
+        if (h2_dxt23_texture_read &&
+            h2_dxt23_texture_read(&channel->commands, &channel->clear, 2, &blocks)) {
+            FILE *pixels = fopen("ux0:data/xita-halo2/texture2-dxt23-at-stop.bin", "wb");
+            if (pixels) {
+                /* Layout 1 denotes rows of 4x4, 16-byte compressed blocks. */
+                uint32_t header[8] = {1, blocks.physical, blocks.width, blocks.height,
+                                      blocks.block_pitch, blocks.bytes, blocks.method_format, 1};
+                int complete = fwrite(header, 1, sizeof header, pixels) == sizeof header &&
+                               fwrite(blocks.blocks, 1, blocks.bytes, pixels) == blocks.bytes;
+                int closed = fclose(pixels);
+                xv_logf("[h2/graphics] private read-only DXT23 texture2 snapshot address=%08X bytes=%u complete=%d\n",
+                        blocks.physical, blocks.bytes, complete && !closed);
             }
         }
     }

@@ -138,6 +138,11 @@ int main(void)
         init(); s.setup[(0x1B20 + unit * 64) / 4] = 1u << bit;
         reject(0, 0x17FC, 7); assert(!maps && !reads && !calls);
     }
+    /* A read-only ARGB view does not widen the movie draw's XRGB contract,
+     * even if a changed private reference also requests ARGB. */
+    init(); s.setup[0x1B04 / 4] = 0x00011229;
+    memcpy(reference.setup, s.setup, sizeof reference.setup);
+    reject(0, 0x17FC, 7); assert(!maps && !reads && !calls);
     /* A changed reference cannot grant indexed or additional sampled units. */
     for (unsigned unit = 0; unit < 4; ++unit) {
         init();
