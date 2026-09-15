@@ -30,6 +30,32 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_map_bound_two_point_query_exact_slot(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x455518: 0x1000, 0x455514: None, 0x45551C: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_TWO_POINT_BOUNDS_CALLS)
+        with patch.object(prepare_boot, "GAME_TWO_POINT_BOUNDS_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_two_point_bounds_roots(image), {0x1000})
+            self.assertEqual(image.targets, before)
+            for bad in (0, None, 0xDEAD):
+                image.targets[0x455518] = image.bad_code = bad
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_two_point_bounds_roots(image)
+            image.targets[0x455518] = 0x1000; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_two_point_bounds_roots(image)
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_two_point_bounds_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_TWO_POINT_BOUNDS_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_two_point_bounds_roots(image)
+
     def test_observed_shared_type_entry_without_inferred_vtable(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {}  # No class table is inferred or read.

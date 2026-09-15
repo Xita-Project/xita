@@ -104,6 +104,12 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_TWO_POINT_BOUNDS_CALLS = (
+    (0x30DF80, 442, "567b689b1b79b30997baf3646506b2faab56711b377f84cc2668d0158a8a810b"),
+    (0x1C2390, 207, "8ab9e395123d60584f307a623247daa83d96df57dee471e40666e292d20e66c5"),
+    (0x1EA9C0, 1388, "d582148f5f262c9afc051d100110d864fa8fc2a76169781b9766d1cf6517bd9f"),
+    (0x2DE0F0, 178, "9a5ea8d64f9956c437fe939b50b717427e2be2d77fd5db83a53e5953df191cf7"),
+)
 GAME_OBSERVED_TYPE_QUERY_CALLS = (
     (0x1D6D00, 965, "402c51d7957f6713dd1c496940943f8ac9f2dc46734e3779f499ad9b79da3e96"),
     (0x9B910, 6, "7500687ab6484f894dd29beddc484e671de6539e4faf19ef80805cfd49e55624"),
@@ -572,6 +578,18 @@ def descriptor_child_field_roots(image, offsets):
         else:
             raise ValueError("Halo 2 descriptor child array is not terminated before its link")
     return roots
+
+
+def game_two_point_bounds_roots(image):
+    """Native174: original map-bound shape query, preserving all guest math."""
+    for address, length, digest in GAME_TWO_POINT_BOUNDS_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 two-point bounds fingerprint mismatch")
+    target = image.u32(0x455518)  # Observed table455500, query offset18h.
+    section = image.section_of(target) if target else None
+    if not target or not image.is_code(target) or not section or section[4] != ".text":
+        raise ValueError("Halo 2 two-point bounds target is not title code")
+    return {target}
 
 
 def game_observed_type_query_roots(image):
@@ -1063,6 +1081,7 @@ def main():
         roots.update(game_pool_allocation_roots(image))
         roots.update(game_bounds_delegate_roots(image))
         roots.update(game_observed_type_query_roots(image))
+        roots.update(game_two_point_bounds_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
