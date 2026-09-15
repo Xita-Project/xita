@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the private native186 composition pass; no guest draw is enabled."""
+"""Prepare the private native186 composition pass; shader and consumer contract."""
 import argparse
 import hashlib
 import json
@@ -106,9 +106,12 @@ def prepare(xbe,snapshot,push,texture0,texture2,texture3,out):
         'composition.texture2.bin':blocks[32:],'composition.texture3.bin':linear(texture3,0x02B48000,320,240,1280),
         'composition.vertices.bin':vertices_from_push(push.read_bytes(),state['header_address']),
         'composition.constants.bin':struct.pack('<72f',*[(v>>shift&255)/255 for v in factors for shift in (16,8,0,24)])}
+    artifacts['composition.contract.bin']=(struct.pack('<II',0x43433248,1)+
+        struct.pack('<2048I',*state['setup'])+struct.pack('<64I',*state['setup_valid'])+
+        program+artifacts['composition.vertices.bin'])
     out.mkdir(parents=True,exist_ok=True)
     for name,data in artifacts.items():(out/name).write_bytes(data)
-    report=dict(scope='private composition probe only; no guest draw accepted',vertex_plan=plan,
+    report=dict(scope='private composition shader and exact command contract',vertex_plan=plan,
                 pixel_definition=pixel,component_producers=validate_flow(pixel),
                 files={n:hashlib.sha256(v).hexdigest()for n,v in artifacts.items()})
     (out/'composition-shaders.json').write_text(json.dumps(report,indent=2)+'\n');return report['files']

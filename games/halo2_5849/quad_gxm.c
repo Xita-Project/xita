@@ -376,3 +376,117 @@ const uint32_t *h2_bc1_gxm_render(void *opaque,const h2_bc1_request *request)
     return bc1_target;
 }
 #endif
+
+#if H2_COMPOSITION_RENDER
+/* Shares the existing H2 GXM context, target, mask and patcher. Each draw binds
+ * all its own state. No second GXM initialization or CE renderer dependency. */
+static h2_composition_contract composition_contract;
+static SceGxmVertexProgram *composition_vprog;
+static SceGxmFragmentProgram *composition_fprog, *composition_copyprog;
+static const SceGxmProgramParameter *composition_factors;
+static SceGxmTexture composition_tex[3], composition_copytex;
+static uint32_t *composition_texture, *composition_texture3, *composition_destination;
+static uint8_t *composition_blocks;
+static unsigned composition_samplers[3], composition_copy_sampler;
+static int composition_attempted, composition_ready;
+
+const h2_composition_contract *h2_composition_gxm_contract(void)
+{
+    static int loaded;
+    if(loaded)return &composition_contract;
+    FILE *file=fopen("app0:composition.contract.bin","rb");if(!file){xv_logf("[h2/composition] private contract open failed\n");return NULL;}
+    uint32_t header[2];
+    int ok=fread(header,1,8,file)==8&&header[0]==0x43433248&&header[1]==1&&
+        fread(&composition_contract,1,sizeof composition_contract,file)==sizeof composition_contract&&
+        fgetc(file)==EOF&&!ferror(file);
+    if(fclose(file))ok=0;
+    if(!ok){memset(&composition_contract,0,sizeof composition_contract);xv_logf("[h2/composition] invalid private contract\n");return NULL;}
+    loaded=1;xv_logf("[h2/composition] loaded complete private contract bytes=%u\n",(unsigned)sizeof composition_contract);return &composition_contract;
+}
+static int composition_initialize(void)
+{
+    const SceGxmProgram *vp=load("app0:composition.vert.gxp",596),*fp=load("app0:composition.frag.gxp",1528),
+        *copy=load("app0:composition.copy.frag.gxp",344);
+    REQUIRE(vp&&fp&&copy);
+    SceGxmShaderPatcherId vid,fid,cid;
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,copy,&cid));
+    const char *names[]={"IN.position","IN.blendweight","IN.normal","IN.color0","IN.color1","IN.fog","IN.psize"};
+    SceGxmVertexAttribute attr[7]={{0}};
+    for(unsigned i=0;i<7;++i){
+        const SceGxmProgramParameter *p=parameter(vp,names[i]);REQUIRE(p);
+        attr[i].offset=i*16;attr[i].format=SCE_GXM_ATTRIBUTE_FORMAT_F32;attr[i].componentCount=4;
+        attr[i].regIndex=sceGxmProgramParameterGetResourceIndex(p);
+    }
+    SceGxmVertexStream stream={.stride=112,.indexSource=SCE_GXM_INDEX_SOURCE_INDEX_16BIT};
+    CHECK(sceGxmShaderPatcherCreateVertexProgram(patcher,vid,attr,7,&stream,1,&composition_vprog));
+    SceGxmBlendInfo blend={.colorMask=SCE_GXM_COLOR_MASK_R|SCE_GXM_COLOR_MASK_G|SCE_GXM_COLOR_MASK_B|SCE_GXM_COLOR_MASK_A,
+        .colorFunc=SCE_GXM_BLEND_FUNC_ADD,.alphaFunc=SCE_GXM_BLEND_FUNC_ADD,
+        .colorSrc=SCE_GXM_BLEND_FACTOR_ONE,.colorDst=SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaSrc=SCE_GXM_BLEND_FACTOR_ZERO,.alphaDst=SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA};
+    CHECK(sceGxmShaderPatcherCreateFragmentProgram(patcher,fid,SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,SCE_GXM_MULTISAMPLE_NONE,&blend,vp,&composition_fprog));
+    CHECK(sceGxmShaderPatcherCreateFragmentProgram(patcher,cid,SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,SCE_GXM_MULTISAMPLE_NONE,NULL,vp,&composition_copyprog));
+    composition_factors=parameter(fp,"psc");REQUIRE(composition_factors&&sceGxmProgramParameterGetArraySize(composition_factors)==18);
+    const SceGxmProgramParameter *p0=parameter(fp,"tex0"),*p2=parameter(fp,"tex2"),*p3=parameter(fp,"tex3"),*pc=parameter(copy,"copy_source");
+    REQUIRE(p0&&p2&&p3&&pc);
+    composition_samplers[0]=sceGxmProgramParameterGetResourceIndex(p0);composition_samplers[1]=sceGxmProgramParameterGetResourceIndex(p2);
+    composition_samplers[2]=sceGxmProgramParameterGetResourceIndex(p3);
+    composition_copy_sampler=sceGxmProgramParameterGetResourceIndex(pc);
+    REQUIRE(composition_samplers[0]<4&&composition_samplers[1]<4&&composition_samplers[0]!=composition_samplers[1]&&composition_samplers[2]<4&&composition_samplers[2]!=composition_samplers[0]&&composition_samplers[2]!=composition_samplers[1]&&composition_copy_sampler<4);
+    composition_texture=alloc(640*480*4,0,NULL);composition_destination=alloc(640*480*4,0,NULL);composition_blocks=alloc(4096,0,NULL);
+    composition_texture3=alloc(320*240*4,0,NULL);
+    REQUIRE(composition_texture&&composition_texture3&&composition_destination&&composition_blocks);
+    CHECK(sceGxmTextureInitLinear(&composition_tex[0],composition_texture,SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,640,480,1));
+    CHECK(sceGxmTextureInitSwizzled(&composition_tex[1],composition_blocks,SCE_GXM_TEXTURE_FORMAT_UBC2_ABGR,8,8,1));
+    CHECK(sceGxmTextureInitLinear(&composition_copytex,composition_destination,SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,640,480,1));
+    CHECK(sceGxmTextureInitLinear(&composition_tex[2],composition_texture3,SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,320,240,1));
+    for(unsigned i=0;i<4;++i){
+        SceGxmTexture *t=i==3?&composition_copytex:&composition_tex[i];
+        CHECK(sceGxmTextureSetMinFilter(t,(i==1||i==2)?SCE_GXM_TEXTURE_FILTER_LINEAR:SCE_GXM_TEXTURE_FILTER_POINT));
+        CHECK(sceGxmTextureSetMagFilter(t,(i==1||i==2)?SCE_GXM_TEXTURE_FILTER_LINEAR:SCE_GXM_TEXTURE_FILTER_POINT));
+        CHECK(sceGxmTextureSetUAddrMode(t,SCE_GXM_TEXTURE_ADDR_CLAMP));CHECK(sceGxmTextureSetVAddrMode(t,SCE_GXM_TEXTURE_ADDR_CLAMP));
+    }
+    xv_logf("[h2/composition] initialized validated composition-effect shader/staging on existing H2 GXM context\n");
+    return 1;
+}
+const uint32_t *h2_composition_gxm_render(void *opaque, const h2_composition_request *request)
+{
+    (void)opaque;
+    if(!request||!request->destination||!request->texture0.pixels||request->texture0.bytes!=640*480*4||
+        !request->texture2.blocks||request->texture2.bytes!=64||
+        !request->texture3.pixels||request->texture3.bytes!=320*240*4)return NULL;
+    if(!attempted){attempted=1;ready=initialize();}if(!ready)return NULL;
+    if(!composition_attempted){composition_attempted=1;composition_ready=composition_initialize();}if(!composition_ready)return NULL;
+    memcpy(vertices,request->vertices,sizeof request->vertices);
+    memcpy(composition_texture,request->texture0.pixels,640*480*4);
+    memcpy(composition_destination,request->destination,640*480*4);
+    memcpy(composition_texture3,request->texture3.pixels,320*240*4);
+    REQUIRE(h2_dxt23_gxm_8x8(request->texture2.blocks,64,composition_blocks,64));
+    CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,&depth));
+    sceGxmSetViewportEnable(ctx,SCE_GXM_VIEWPORT_ENABLED);sceGxmSetRegionClip(ctx,SCE_GXM_REGION_CLIP_NONE,0,0,639,479);
+    sceGxmSetViewport(ctx,320,320,240,-240,0.0f,1.0f);sceGxmSetCullMode(ctx,SCE_GXM_CULL_NONE);
+    sceGxmSetFrontFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);sceGxmSetBackFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
+    sceGxmSetFrontStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetBackStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetFrontDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);sceGxmSetBackDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);sceGxmSetBackDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);
+    sceGxmSetVertexProgram(ctx,composition_vprog);sceGxmSetFragmentProgram(ctx,composition_copyprog);
+    CHECK(sceGxmSetVertexStream(ctx,0,vertices));CHECK(sceGxmSetFragmentTexture(ctx,composition_copy_sampler,&composition_copytex));
+    CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,indices,6));
+    sceGxmSetFragmentProgram(ctx,composition_fprog);
+    void *fu;CHECK(sceGxmReserveFragmentDefaultUniformBuffer(ctx,&fu));
+    CHECK(sceGxmSetUniformDataF(fu,composition_factors,0,72,(const float *)request->factors));
+    for(unsigned i=0;i<3;++i)CHECK(sceGxmSetFragmentTexture(ctx,composition_samplers[i],&composition_tex[i]));
+    CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,indices,6));
+    SceGxmNotification done={sceGxmGetNotificationRegion(),++notification};REQUIRE(done.address);
+    CHECK(sceGxmEndScene(ctx,NULL,&done));CHECK(sceGxmNotificationWait(&done));sceGxmFinish(ctx);
+    static unsigned count;
+    if(++count<=4){
+        unsigned nonblack=0;for(unsigned i=0;i<640*480;++i)nonblack+=(target[i]&0xFFFFFF)!=0;
+        xv_logf("[h2/composition] staged=%u original_texture0=%08X texture3=%08X nonblack=%u first=%08X; not yet committed/presented\n",
+                count,request->texture0.physical,request->texture3.physical,nonblack,target[0]);
+    }
+    return target;
+}
+#endif
