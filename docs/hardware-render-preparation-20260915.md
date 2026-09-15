@@ -67,6 +67,14 @@ object workers, and disabled vertex preparation. A charged plasma shot consumes
 captured log. The emulator is capped at 20 FPS; this is functionality evidence,
 not a hardware speed measurement or clearance of all previously reported crashes.
 
+The authenticated updater then installed this exact candidate into physical
+slot B and confirmed its boot hash. Slot A remains the preserved fallback
+`7f33dee4f5df113b7d62a00b195acc859dd36ebf84a2a17f85c1ca7c9f514946`.
+All four pre-update logs were captured before restarting. The device is ready
+for the user's native-resolution Blood Gulch walk, plasma/rocket and Warthog
+test; that test has not yet been evaluated. No new physical gameplay average
+is inferred from successful installation.
+
 Pause-menu navigation still needs investigation: during remote Blood Gulch
 testing, directional input moved the character while the visible menu remained
 on Resume. Existing UI-root recognition was active in the log, so the cause is
