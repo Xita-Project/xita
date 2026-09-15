@@ -38,7 +38,7 @@ static unsigned indirect_depth[LANES];
  * 4 parked (including an event reply held during an I/O handoff). */
 static unsigned service_state[WORKERS], services, owner_notice, pause_workers, io_yields, resource_queries, resource_registers;
 static unsigned vertex_locks;
-static unsigned audio_pumps, audio_volumes, audio_commits;
+static unsigned audio_pumps, audio_volumes, audio_commits, audio_stops;
 /* Only the owner may execute nested stream services during a quiescent pump.
  * Keep the job marker and private stack: arbitrary kernel/scheduler calls still
  * stop instead of masquerading as the owner's guest fiber. */
@@ -177,7 +177,7 @@ static int worker_lane(void)
 }
 static int needs_quiescence(unsigned address)
 {
-    return address==0x1D6640u||address==0x184AB0u||address==0x1858D0u||address==0x193E27u||address==0x193D4Fu||address==0x193C1Bu;
+    return address==0x1D6640u||address==0x184AB0u||address==0x1858D0u||address==0x193E27u||address==0x193D4Fu||address==0x193C1Bu||address==0x19C5FFu;
 }
 static void service_audio(xctx *c,xv_fn_t fn)
 {
@@ -240,6 +240,10 @@ static void service_owner(void)
                         /* Keep the existing deferred-settings handler on its
                          * owner, including its one-argument return convention. */
                         service_fn[i](&contexts[i]);audio_commits++;
+                    } else if(service_address[i]==0x19C5FFu) {
+                        /* Retire the voice's reporting state on the audio
+                         * owner; the existing handler dispatches no callbacks. */
+                        service_fn[i](&contexts[i]);audio_stops++;
                     } else {
                         /* Header fixup or vertex-storage pointer lookup only;
                          * no allocation, draw submission or scheduler entry.
@@ -740,6 +744,7 @@ void xv_object_jobs_report(unsigned frames)
     XK_LOG("[object-jobs] quiescent owner audio pumps %u\n",audio_pumps);audio_pumps=0;
     XK_LOG("[object-jobs] quiescent owner stream volume updates %u\n",audio_volumes);audio_volumes=0;
     XK_LOG("[object-jobs] quiescent owner deferred audio commits %u\n",audio_commits);audio_commits=0;
+    XK_LOG("[object-jobs] quiescent owner voice stops %u\n",audio_stops);audio_stops=0;
     XK_LOG("[object-wait] timed %u attempts %u/%u acquired %u/%u timeouts %u/%u\n",
         math_wait_override<0?math_wait_enabled:(unsigned)math_wait_override,
         math_wait_stats[0].attempts,math_wait_stats[1].attempts,
@@ -864,8 +869,12 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
     }
     if(__atomic_load_n(&audio_service_context,__ATOMIC_ACQUIRE)==c)
         xv_object_job_stop(c,address,"unsupported nested owner audio service");
-    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u&&address!=0x1858D0u&&address!=0x193E27u&&address!=0x193D4Fu&&address!=0x193C1Bu)||!fn)
+    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u&&address!=0x1858D0u&&address!=0x193E27u&&address!=0x193D4Fu&&address!=0x193C1Bu&&address!=0x19C5FFu)||!fn)
         xv_object_job_stop(c,address,"unsupported HLE");
+    /* Object sound cleanup 28710 stops its active voice before marking the
+     * guest slot inactive. Preserve the real handler and ret 4 convention. */
+    if(address==0x19C5FFu&&X_M32(c->r[4])!=0x28745u)
+        xv_object_job_stop(c,address,"voice stop outside audited object sound cleanup");
     if(address==0x193C1Bu&&X_M32(c->r[4])!=0x291EFu)
         xv_object_job_stop(c,address,"deferred audio commit outside audited sound update");
     /* 291D0 also fades the active streams after committing deferred settings.
@@ -888,6 +897,7 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
         } else if(address==0x193E27u)service_audio(c,fn);
         else if(address==0x193D4Fu){fn(c);audio_volumes++;}
         else if(address==0x193C1Bu){fn(c);audio_commits++;}
+        else if(address==0x19C5FFu){fn(c);audio_stops++;}
         else {fn(c);if(address==0x184A20u)resource_queries++;else if(address==0x184AB0u)resource_registers++;else if(address==0x1858D0u)vertex_locks++;else services++;}
         return;
     }

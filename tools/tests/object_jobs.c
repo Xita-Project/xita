@@ -60,7 +60,7 @@ static void nested_guard_return(void)
 static unsigned event_calls,event_value;
 static unsigned event_seen[1200];
 static pthread_t guest_owner;
-static unsigned io_calls, io_seen[300], audio_calls, volume_calls, commit_calls;
+static unsigned io_calls, io_seen[300], audio_calls, volume_calls, commit_calls, stop_calls;
 void object_test_audio_owner(void)
 {
     assert(pthread_equal(pthread_self(),guest_owner));
@@ -92,6 +92,15 @@ static void submit_commit(xctx *c)
     xv_object_job_hle(c,0x193C1Bu,object_test_audio_commit);
     assert(c->r[4]==sp&&c->r[0]==0);
     __atomic_add_fetch(&commit_calls,1,__ATOMIC_RELAXED);
+}
+void object_test_voice_stop(xctx *c);
+static void submit_stop(xctx *c,unsigned id)
+{
+    static const uint32_t objects[]={0xB1000,0xB2000,0xB3000,0xB4000,0,0xB5000,0xB6000,0xB7000};
+    unsigned sp=c->r[4];X_PUSH32(objects[id%8]);X_PUSH32(0x28745u);
+    xv_object_job_hle(c,0x19C5FFu,object_test_voice_stop);
+    assert(c->r[4]==sp&&c->r[0]==0);
+    __atomic_add_fetch(&stop_calls,1,__ATOMIC_RELAXED);
 }
 /* Read callback outputs without the math lock: the service protocol must have
  * parked every lane, including one waiting for another worker's held mutex. */
@@ -217,6 +226,7 @@ void f_0008FB70(xctx *c)
         if(id%2==0)submit_audio(c);
         if(id%2==0)submit_commit(c);
         if(id%2==0)submit_volume(c,id);
+        if(id%2==0)submit_stop(c,id);
         assert(shared_guarded_value==before+1);
     }
     /* Requests can also arrive simultaneously, outside the shared lock. */
@@ -228,6 +238,7 @@ void f_0008FB70(xctx *c)
     if(id%2==1)submit_audio(c);
     if(id%2==1)submit_commit(c);
     if(id%2==1)submit_volume(c,id);
+    if(id%2==1)submit_stop(c,id);
     __atomic_sub_fetch(&active,1,__ATOMIC_SEQ_CST);c->r[4]+=4;
 }
 int main(int argc,char **argv)
@@ -281,6 +292,14 @@ int main(int argc,char **argv)
         c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x28BB6;
         xv_object_job_hle(&c,0x193C1Bu,object_test_audio_commit);assert(0);
     }
+    if(argc>1&&!strcmp(argv[1],"unsupported-stop")) {
+        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0xDEADBEEF;
+        xv_object_job_hle(&c,0x19C5FFu,object_test_voice_stop);assert(0);
+    }
+    if(argc>1&&!strcmp(argv[1],"unsupported-stop-null")) {
+        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x28745;
+        xv_object_job_hle(&c,0x19C5FFu,NULL);assert(0);
+    }
     if(argc>1&&!strcmp(argv[1],"unsupported-stream")) {
         c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x28B35;
         xv_call(&c,0x19384Fu);assert(0);
@@ -305,7 +324,7 @@ int main(int argc,char **argv)
     unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
     assert(vertex_lock_calls==600);assert(register_calls==200);assert(query_calls==600);assert(event_calls==1200&&event_value==1200);assert(io_calls>=300&&io_calls<=600);
-    assert(audio_calls==600&&volume_calls==600&&commit_calls==600);
+    assert(audio_calls==600&&volume_calls==600&&commit_calls==600&&stop_calls==600);
     assert(shared_guarded_value==600);
     for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));

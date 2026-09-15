@@ -35,8 +35,11 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
     volume=re.search(r'^void xv_hle_CDirectSoundStream_SetVolume\(xctx \*c\).*$',d3d_source,re.M)[0]
     commit_macro=re.search(r'^#define DS_OK\(name, n\).*$',d3d_source,re.M)[0]
     commit=re.search(r'DS_OK\(IDirectSound_CommitDeferredSettings, 1\)',d3d_source)[0]
+    buffers=d3d_source[d3d_source.index('#define DS_MAX_BUFFERS'):d3d_source.index('static uint32_t ds_buffer_obj')]
+    voice_state=d3d_source[d3d_source.index('static ds_state *ds_voice_state'):d3d_source.index('void xv_hle_DSoundVoiceIsPlaying')]
+    voice_stop=d3d_source[d3d_source.index('void xv_hle_DSoundVoiceStop'):d3d_source.index('void xv_hle_DirectSoundCreateBuffer')]
     fixture=(root/'tools/tests/object_audio.c').read_text()
-    audio.write_text(fixture.replace('/* PRODUCTION_AUDIO */',d3d_source[begin:end]+'\n'+methods+'\n'+pump+'\n'+volume+'\n'+commit_macro+'\n'+commit+'\n#undef DS_OK\n'))
+    audio.write_text(fixture.replace('/* PRODUCTION_AUDIO */',d3d_source[begin:end]+'\n'+methods+'\n'+pump+'\n'+volume+'\n'+commit_macro+'\n'+commit+'\n#undef DS_OK\n'+buffers+voice_state+voice_stop))
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11','-fno-strict-aliasing',
         '-DXV_EXPERIMENTAL_OBJECT_JOBS','-DXV_NATIVE_MODEL_HIERARCHY','-I'+str(root/'recomp'),
         '-ffunction-sections','-fdata-sections','-ffp-contract=off',
@@ -55,6 +58,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                 assert re.findall(r'\[model-hierarchy\] 3 frames batches (\d+) child nodes (\d+)',result.stderr)==[('600','3600'),('0','0')]
                 assert re.findall(r'quiescent owner stream volume updates (\d+)',result.stderr)==['600','0']
                 assert re.findall(r'quiescent owner deferred audio commits (\d+)',result.stderr)==['600','0']
+                assert re.findall(r'quiescent owner voice stops (\d+)',result.stderr)==['600','0']
                 timed_rows=re.findall(r'\[object-wait\] timed (\d) attempts (\d+)/(\d+) acquired (\d+)/(\d+) timeouts (\d+)/(\d+)',result.stderr)
                 assert len(timed_rows)==2 and timed_rows[1]==(timed,'0','0','0','0','0','0'),timed_rows
                 values=list(map(int,timed_rows[0]));assert values[0]==int(timed)
@@ -92,6 +96,8 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
     assert failure.returncode<0 and b'STOP vertex lock outside audited impact transaction' in failure.stderr
     print('PASS: vertex locks outside the audited impact transaction stop before invocation')
     for mode,reason in (("unsupported-audio",b'audio pump outside audited cache callback'),
+                        ("unsupported-stop",b'voice stop outside audited object sound cleanup'),
+                        ("unsupported-stop-null",b'unsupported HLE'),
                         ("unsupported-commit",b'deferred audio commit outside audited sound update'),
                         ("unsupported-volume",b'stream volume outside audited object sound update'),
                         ("unsupported-stream",b'stream service outside quiescent audio callback'),

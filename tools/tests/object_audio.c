@@ -100,3 +100,37 @@ void object_test_audio_commit(xctx *c)
     for(unsigned i=1;i<8;i++)if(i!=4)assert(c->r[i]==saved[i]);
     assert(X_M32(sp)==0x291EF&&X_M32(sp+4)==0x03D07280);
 }
+
+/* Real lookup/stop code, including native wrappers and empty/unknown handles.
+ * No fixture state is touched until the owner has parked every worker. */
+void object_test_voice_stop(xctx *c)
+{
+    object_test_audio_owner();
+    unsigned sp=c->r[4],before=callbacks;
+    uint32_t saved[8];memcpy(saved,c->r,sizeof saved);
+    uint32_t object=X_M32(sp+4);
+    assert(X_M32(sp)==0x28745);
+    memset(g_ds_buffers,0,sizeof g_ds_buffers);
+    memset(g_ds_streams,0,sizeof g_ds_streams);
+    ds_buffer *b=&g_ds_buffers[0];b->obj=0xB1000;
+    ds_stream *s=&g_ds_streams[0];s->obj=0xB2000;s->nq=2;
+    uint64_t now=xk_os_monotonic_us();
+    b->state=(ds_state){.start_us=now,.end_us=now+1000000,.duration_us=1000000};
+    s->state=b->state;
+    s->q[0]=(ds_pkt){.report_due_us=now+1000000,.due_us=now+2000000,.context=0xABCD};
+    s->q[1]=s->q[0];
+    X_M32(0xB3000+0x24)=b->obj;X_M32(0xB4000+0x24)=s->obj;
+    X_M32(0xB5000+0x24)=0;X_M32(0xB6000+0x24)=0xB8000;
+    X_M32(0xB7000+0x24)=0;
+    xv_hle_DSoundVoiceStop(c);
+    assert(c->r[0]==0&&c->r[4]==sp+8&&callbacks==before);
+    for(unsigned i=1;i<8;i++)if(i!=4)assert(c->r[i]==saved[i]);
+    assert(X_M32(sp)==0x28745&&X_M32(sp+4)==object);
+    assert(b->state.stopped==(object==0xB1000||object==0xB3000));
+    int stream=object==0xB2000||object==0xB4000;
+    assert(s->state.stopped==stream&&s->nq==2);
+    for(unsigned i=0;i<2;i++) {
+        assert(s->q[i].report_due_us==(stream?0:now+1000000));
+        assert(s->q[i].due_us==now+2000000&&s->q[i].context==0xABCD);
+    }
+}

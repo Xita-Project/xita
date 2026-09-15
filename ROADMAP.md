@@ -45,6 +45,12 @@ rejected audio commit executes successfully. Broader combat stability remains.
 The walk includes a 13.9 FPS logged window at 848×480; it is not a controlled
 gain measurement or a sustained-frame-rate result.
 
+A longer physical run exposed another owner-service STOP in object sound cleanup.
+The [voice-stop handoff](docs/object-voice-stop-20260915.md) routes that exact
+caller through the parked-worker audio path. Production memory/race tests and
+native compilation pass. The installed build loads Blood Gulch on hardware;
+the exact cleanup path and longer combat stability still need a gameplay retest.
+
 September 15: [lightweight mutex comparisons](docs/object-light-lock-20260915.md)
 repeatedly improve one physical Blood Gulch view from approximately 11.8–12.0
 to 15.1–15.2 FPS, with both workers enabled in every arm. The experimental build
