@@ -73,7 +73,7 @@ The original main menu has not yet appeared; native replay follows the GPU proof
 Native194 completes the original blend END at `03B7E1E0`, writing all 307,200
 nonblack pixels into `038E8000`; first pixel is `00786959`. It then strictly
 rejects the next original BEGIN6 at GET `03B7E62C`, PUT `03B80158`,
-EIP `003FAC58`. That triangle-fan route has a newly uploaded 12-slot vertex
+EIP `003FAC58`. That triangle-strip route has a newly uploaded 12-slot vertex
 program and remains unsupported. The original game has not presented this
 composition result yet. The Microsoft intro and terminal black game window
 were visually checked; raw last-presented frame135 has zero nonblack RGB
@@ -98,5 +98,5 @@ python3 capture_run.py 194-replay native-194-artifacts
 python3 drive_startup.py 194-replay native-194-artifacts
 ```
 
-Next is the captured triangle-fan vertex program, original inputs, texture and
+Next is the captured triangle-strip vertex program, original inputs, texture and
 combiner/blend state; no replacement image or premature presentation is added.

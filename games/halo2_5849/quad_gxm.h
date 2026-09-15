@@ -24,3 +24,7 @@ const uint32_t *h2_blur_gxm_render(void *opaque, const h2_blur_request *request)
 #include "blend_draw.h"
 const h2_blend_contract *h2_blend_gxm_contract(void);
 const uint32_t *h2_blend_gxm_render(void *opaque, const h2_blend_request *request);
+
+#include "luma_draw.h"
+const h2_luma_contract *h2_luma_gxm_contract(void);
+const uint32_t *h2_luma_gxm_render(void *opaque, const h2_luma_request *request);

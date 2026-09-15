@@ -769,3 +769,95 @@ const uint32_t *h2_blend_gxm_render(void *opaque, const h2_blend_request *reques
     return target;
 }
 #endif
+
+#if H2_LUMA_RENDER
+/* Shares the existing H2 GXM context, target, mask and patcher. Each draw binds
+ * all its own state. No second GXM initialization or CE renderer dependency. */
+static h2_luma_contract luma_contract;
+static SceGxmVertexProgram *luma_vprog;
+static SceGxmFragmentProgram *luma_fprog;
+static const SceGxmProgramParameter *luma_factors, *luma_constants;
+static SceGxmTexture luma_tex;
+static uint32_t *luma_texture;
+static uint16_t *luma_indices;
+static unsigned luma_sampler;
+static int luma_attempted, luma_ready;
+
+const h2_luma_contract *h2_luma_gxm_contract(void)
+{
+    static int loaded;
+    if(loaded)return &luma_contract;
+    FILE *file=fopen("app0:luma.contract.bin","rb");if(!file){xv_logf("[h2/luma] private contract open failed\n");return NULL;}
+    uint32_t header[2];
+    int ok=fread(header,1,8,file)==8&&header[0]==0x43553248&&header[1]==1&&
+        fread(&luma_contract,1,sizeof luma_contract,file)==sizeof luma_contract&&
+        fgetc(file)==EOF&&!ferror(file);
+    if(fclose(file))ok=0;
+    if(!ok){memset(&luma_contract,0,sizeof luma_contract);xv_logf("[h2/luma] invalid private contract\n");return NULL;}
+    loaded=1;xv_logf("[h2/luma] loaded complete private contract bytes=%u\n",(unsigned)sizeof luma_contract);return &luma_contract;
+}
+static int luma_initialize(void)
+{
+    const SceGxmProgram *vp=load("app0:luma.vert.gxp",868),*fp=load("app0:luma.frag.gxp",528);
+    REQUIRE(vp&&fp);
+    SceGxmShaderPatcherId vid,fid;
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));
+    CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
+    const char *names[]={"IN.position","IN.blendweight","IN.normal","IN.color0","IN.color1","IN.fog","IN.psize","IN.backcolor0"};
+    SceGxmVertexAttribute attr[8]={{0}};
+    for(unsigned i=0;i<8;++i){
+        const SceGxmProgramParameter *p=parameter(vp,names[i]);REQUIRE(p);
+        attr[i].offset=i*16;attr[i].format=SCE_GXM_ATTRIBUTE_FORMAT_F32;attr[i].componentCount=4;
+        attr[i].regIndex=sceGxmProgramParameterGetResourceIndex(p);
+    }
+    SceGxmVertexStream stream={.stride=128,.indexSource=SCE_GXM_INDEX_SOURCE_INDEX_16BIT};
+    CHECK(sceGxmShaderPatcherCreateVertexProgram(patcher,vid,attr,8,&stream,1,&luma_vprog));
+    CHECK(sceGxmShaderPatcherCreateFragmentProgram(patcher,fid,SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,SCE_GXM_MULTISAMPLE_NONE,NULL,vp,&luma_fprog));
+    luma_factors=parameter(fp,"psc");REQUIRE(luma_factors&&sceGxmProgramParameterGetArraySize(luma_factors)==18);
+    luma_constants=parameter(vp,"c");REQUIRE(luma_constants&&sceGxmProgramParameterGetArraySize(luma_constants)==8);
+    const SceGxmProgramParameter *p0=parameter(fp,"tex0");REQUIRE(p0);
+    luma_sampler=sceGxmProgramParameterGetResourceIndex(p0);REQUIRE(luma_sampler<4);
+    luma_texture=alloc(640*480*4,0,NULL);luma_indices=alloc(4096,0,NULL);REQUIRE(luma_texture&&luma_indices);
+    for(unsigned i=0;i<4;++i)luma_indices[i]=i;
+    CHECK(sceGxmTextureInitLinear(&luma_tex,luma_texture,SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,640,480,1));
+    CHECK(sceGxmTextureSetMinFilter(&luma_tex,SCE_GXM_TEXTURE_FILTER_LINEAR));CHECK(sceGxmTextureSetMagFilter(&luma_tex,SCE_GXM_TEXTURE_FILTER_LINEAR));
+    CHECK(sceGxmTextureSetUAddrMode(&luma_tex,SCE_GXM_TEXTURE_ADDR_CLAMP));CHECK(sceGxmTextureSetVAddrMode(&luma_tex,SCE_GXM_TEXTURE_ADDR_CLAMP));
+    xv_logf("[h2/luma] initialized validated luma-effect shader/staging on existing H2 GXM context\n");
+    return 1;
+}
+const uint32_t *h2_luma_gxm_render(void *opaque, const h2_luma_request *request)
+{
+    (void)opaque;
+    if(!request||!request->destination||!request->texture0.pixels||request->texture0.bytes!=640*480*4)return NULL;
+    if(!attempted){attempted=1;ready=initialize();}if(!ready)return NULL;
+    if(!luma_attempted){luma_attempted=1;luma_ready=luma_initialize();}if(!luma_ready)return NULL;
+    memcpy(vertices,request->vertices,sizeof request->vertices);
+    /* Snapshot the entire aliased guest image before any draw. Output remains
+     * separate host staging until the command consumer commits at END. */
+    memcpy(luma_texture,request->texture0.pixels,640*480*4);
+    CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,&depth));
+    sceGxmSetViewportEnable(ctx,SCE_GXM_VIEWPORT_ENABLED);sceGxmSetRegionClip(ctx,SCE_GXM_REGION_CLIP_NONE,0,0,639,479);
+    sceGxmSetViewport(ctx,320,320,240,-240,0.0f,1.0f);sceGxmSetCullMode(ctx,SCE_GXM_CULL_NONE);
+    sceGxmSetFrontFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);sceGxmSetBackFragmentProgramEnable(ctx,SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
+    sceGxmSetFrontStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetBackStencilFunc(ctx,SCE_GXM_STENCIL_FUNC_ALWAYS,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,SCE_GXM_STENCIL_OP_KEEP,0xFF,0);
+    sceGxmSetFrontDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);sceGxmSetBackDepthFunc(ctx,SCE_GXM_DEPTH_FUNC_ALWAYS);
+    sceGxmSetFrontDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);sceGxmSetBackDepthWriteEnable(ctx,SCE_GXM_DEPTH_WRITE_DISABLED);
+    sceGxmSetVertexProgram(ctx,luma_vprog);sceGxmSetFragmentProgram(ctx,luma_fprog);
+    void *vu,*fu;CHECK(sceGxmReserveVertexDefaultUniformBuffer(ctx,&vu));
+    CHECK(sceGxmSetUniformDataF(vu,luma_constants,0,32,(const float *)request->constants));
+    CHECK(sceGxmReserveFragmentDefaultUniformBuffer(ctx,&fu));
+    CHECK(sceGxmSetUniformDataF(fu,luma_factors,0,72,(const float *)request->factors));
+    CHECK(sceGxmSetVertexStream(ctx,0,vertices));CHECK(sceGxmSetFragmentTexture(ctx,luma_sampler,&luma_tex));
+    CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLE_STRIP,SCE_GXM_INDEX_FORMAT_U16,luma_indices,4));
+    SceGxmNotification done={sceGxmGetNotificationRegion(),++notification};REQUIRE(done.address);
+    CHECK(sceGxmEndScene(ctx,NULL,&done));CHECK(sceGxmNotificationWait(&done));sceGxmFinish(ctx);
+    static unsigned count;
+    if(++count<=4){
+        unsigned nonblack=0;for(unsigned i=0;i<640*480;++i)nonblack+=(target[i]&0xFFFFFF)!=0;
+        xv_logf("[h2/luma] staged=%u original_texture0=%08X nonblack=%u first=%08X; not yet committed/presented\n",
+                count,request->texture0.physical,nonblack,target[0]);
+    }
+    return target;
+}
+#endif
