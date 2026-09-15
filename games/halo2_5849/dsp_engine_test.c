@@ -185,6 +185,71 @@ static void effect_write_tests(void)
     s->effects[0].state_offset=0x818;s->image_size=0x83f;assert(!h2_dsp_write_effect_pair(s,0,32,0,30));
     assert(!memcmp(s->scratch,scratch,s->scratch_size));free(before);free(scratch);h2_dsp_destroy(s);
 }
+static h2_dsp_engine *reverb_fixture(void)
+{
+    h2_dsp_engine*s=fixture();s->image_size=0x2000;s->effect_count=10;
+    s->code_words=32;s->state_offset=0x898;s->state_bytes=0x1000;
+    s->status.frames=2;s->core.is_idle=true;
+    s->effects[9]=(h2_dsp_effect){.state_offset=0xa00,.state_bytes=0x240};
+    memset(s->scratch,0xa5,s->scratch_size);
+    put32(s->scratch+0x804,32);put32(s->scratch+0x810,0);put32(s->scratch+0x814,0);
+    return s;
+}
+static void reverb_queue_tests(void)
+{
+    uint32_t parameters[66];
+    for(unsigned i=0;i<66;++i)parameters[i]=i%2?0xff800001u+i:0x123456u+i;
+    for(unsigned aliased=0;aliased<2;++aliased){
+        h2_dsp_engine*s=reverb_fixture(),*before=malloc(sizeof *s);
+        uint8_t*expected=malloc(s->scratch_size);assert(before&&expected);
+        uint32_t copy[66];const uint32_t*source=parameters;
+        if(aliased)source=(const uint32_t*)(s->scratch+0xa10);
+        memcpy(copy,source,sizeof copy);*before=*s;memcpy(expected,s->scratch,s->scratch_size);
+        put32(expected+0xa10,7);
+        for(unsigned i=0;i<66;++i)put32(expected+0xb18+i*4,copy[i]);
+        put32(expected+0x800,(0xa10-0x898)/4);put32(expected+0x808,0xa10);
+        put32(expected+0x80c,132);put32(expected+0x810,2);
+        assert(h2_dsp_queue_reverb9(s,7,source));
+        assert(!memcmp(s,before,sizeof *s)); /* no live GP/history/counter change */
+        assert(!memcmp(s->scratch,expected,s->scratch_size)); /* includes saved gap */
+        assert(!h2_dsp_queue_reverb9(s,7,parameters)); /* pending monitor command */
+        assert(!memcmp(s,before,sizeof *s)&&!memcmp(s->scratch,expected,s->scratch_size));
+        free(before);free(expected);h2_dsp_destroy(s);
+    }
+    for(unsigned bad=0;bad<22;++bad){
+        h2_dsp_engine*s=reverb_fixture();uint32_t flags=7;const uint32_t*source=parameters;
+        switch(bad){
+        case 0:source=NULL;break;
+        case 1:s->status.fault="injected";break;
+        case 2:active=s;break;
+        case 3:s->status.frames=0;break;
+        case 4:s->core.is_idle=false;break;
+        case 5:s->effect_count=9;break;
+        case 6:s->scratch_size=0x817;break;
+        case 7:s->image_size=0x817;break;
+        case 8:flags=0x1000007;break;
+        case 9:flags=3;break;
+        case 10:s->state_offset++;break;
+        case 11:put32(s->scratch+0x804,33);break;
+        case 12:put32(s->scratch+0x810,3);break;
+        case 13:put32(s->scratch+0x814,1);break;
+        case 14:s->effects[9].state_offset=0x800;break;
+        case 15:s->effects[9].state_offset=0xa01;break;
+        case 16:s->effects[9].state_bytes=543;break;
+        case 17:s->state_bytes=0x167;break;
+        case 18:s->effects[9].state_offset=0xfffffffcu;break;
+        case 19:s->image_size=0xc1f;break;
+        case 20:s->scratch_size=0xc1f;break;
+        case 21:s->effects[9].state_offset=0x3600;s->state_bytes=0x4000;s->image_size=0x4000;break;
+        }
+        h2_dsp_engine*before=malloc(sizeof *s);uint8_t*saved=malloc(0x10000);assert(before&&saved);
+        *before=*s;memcpy(saved,s->scratch,0x10000);
+        assert(!h2_dsp_queue_reverb9(s,flags,source));
+        assert(!memcmp(s,before,sizeof *s)&&!memcmp(s->scratch,saved,0x10000));
+        active=NULL;free(before);free(saved);h2_dsp_destroy(s);
+    }
+    assert(!h2_dsp_queue_reverb9(NULL,7,parameters));
+}
 int main(void)
 {
     uint32_t value=0x12345678;
@@ -193,5 +258,5 @@ int main(void)
         uint32_t expected=low&(1u<<(bits-1))?low|~mask:low;
         assert(dsp_signextend((int)bits,value)==expected);
     }
-    dma_tests();fault_tests();image_tests();signal_tests();effect_write_tests();puts("DSP engine: synthetic transfers, checked signal frames/FX export, faults, no false ack, effect reads/writes/real consumption and 31,744 sign-extension cases pass");return 0;
+    dma_tests();fault_tests();image_tests();signal_tests();effect_write_tests();reverb_queue_tests();puts("DSP engine: synthetic transfers, checked signal frames/FX export, faults, no false ack, effect reads/writes/real consumption, deferred reverb queue and 31,744 sign-extension cases pass");return 0;
 }

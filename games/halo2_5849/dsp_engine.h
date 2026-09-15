@@ -34,6 +34,16 @@ int h2_dsp_read_effect(const h2_dsp_engine *engine, uint32_t index,
  * Caller serializes with frame execution; no deferred command is implied. */
 int h2_dsp_write_effect_pair(h2_dsp_engine *engine, uint32_t index,
                             uint32_t offset, uint32_t first, uint32_t second);
+/* Audited effect-9/type-12 reverb commit: two shadow writes (flag word at
+ * byte16, 66 raw words at byte280), followed by original monitor command2
+ * for the entire byte16..543 span, including its unchanged shadow gap.
+ * No live GP writes or frame execution here. The next real frame consumes
+ * the command. Caller serializes with the mixer and supplies 66 readable
+ * words; they are copied before mutation. Busy/faulted/invalid state rejects
+ * without changes. Raw signed words retain all bits in shadow; monitor DMA
+ * applies the actual 24-bit representation. No arbitrary effects API. */
+int h2_dsp_queue_reverb9(h2_dsp_engine *engine, uint32_t flags,
+                        const uint32_t parameters[66]);
 /* Tests/audit can execute another real frame with all input mix bins zero.
  * Any interpreter, DMA, memory or instruction-budget fault poisons the engine;
  * no API may report usable state afterward. */

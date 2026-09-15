@@ -276,6 +276,33 @@ int h2_dsp_write_effect_pair(h2_dsp_engine*s,uint32_t index,uint32_t offset,uint
     s->core.xram[address/4]=first;s->core.xram[address/4+1]=second;
     return 1;
 }
+int h2_dsp_queue_reverb9(h2_dsp_engine*s,uint32_t flags,const uint32_t parameters[66])
+{
+    if(!s||!parameters||s->status.fault||active||!s->status.frames||
+       !s->core.is_idle||s->effect_count<=9||!s->scratch||
+       s->scratch_size<0x818||s->image_size<0x818||
+       (flags&0xff000000u)||!(flags&4))return 0;
+    const h2_dsp_effect*e=&s->effects[9];
+    uint64_t expected=0x818ull+(uint64_t)s->code_words*4;
+    uint64_t shadow=e->state_offset,live=0x200ull+shadow-s->state_offset;
+    if(expected!=s->state_offset||le32(s->scratch+0x804)!=s->code_words||
+       le32(s->scratch+0x810)||le32(s->scratch+0x814)||
+       shadow<s->state_offset||(shadow&3)||e->state_bytes<544||
+       shadow+544>(uint64_t)s->state_offset+s->state_bytes||
+       shadow+544>s->image_size||shadow+544>s->scratch_size||
+       live+544>0xc00u*4)return 0;
+    uint32_t copy[66];memcpy(copy,parameters,sizeof copy);
+    /* Original deferred coalescing starts at offset16, retains the saved
+     * image gap at20..279, and ends after the 264-byte parameter payload. */
+    put32(s->scratch+shadow+16,flags);
+    for(unsigned i=0;i<66;++i)put32(s->scratch+shadow+280+i*4,copy[i]);
+    put32(s->scratch+0x800,(uint32_t)((shadow+16-s->state_offset)/4));
+    put32(s->scratch+0x808,(uint32_t)shadow+16);
+    put32(s->scratch+0x80c,132);
+    /* Publish last. The caller's mixer lock prevents a partial observation. */
+    put32(s->scratch+0x810,2);
+    return 1;
+}
 int h2_dsp_zero_frame(h2_dsp_engine*s)
 {
     if(!s||s->status.fault||active)return 0;
