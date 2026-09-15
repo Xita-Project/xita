@@ -104,6 +104,15 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_POOL_ALLOCATION_CALLS = (
+    (0x146A20, 146, "75f53bc57da723bcf62196fb9e3e3632d6a1c4dc842d5caf8e46fbe79dc34b73"),
+    (0x22C3E0, 829, "318c0599b038ccfd47aa02d8256054f2b19eadb31f55eff15e19975a37328bc0"),
+    (0x1472C0, 82, "cf2b2e35cb786b94043345fb459404465072170134b691332a57fe5a760bbe70"),
+    (0x147320, 129, "1ca08108d766acef4f3b29045d57558acb930280a992c97938522bcb5f1d7fd6"),
+    (0x22C830, 450, "f03f50c74c75f8c8ba0c40c021cfd08fbb41c4f913da2326385a9fb40c594499"),
+    (0x22CA00, 103, "a8387b63c9c5c8433f64de75619825e9364519e1ead845887b5d98ac0ac2748e"),
+    (0x2D6FB0, 5, "38a954aef89865bb719b80c3c7ceeedfd6a51546fbdd9dbb876a728e1d306481"),
+)
 GAME_PREDICATE_REPLACEMENT_CALLS = (
     (0x1C2D40, 1421, "33856e0e9b24f67237de4e56494cff0f1e3b884b420fab0024e64b19fd283888"),
     (0x3101C0, 1850, "42a213f2b6c96033db532ebef5e5e9dc5e4dbc4d8bed28d18a7475214b5a499b"),
@@ -545,6 +554,21 @@ def descriptor_child_field_roots(image, offsets):
                 roots.add(target)
         else:
             raise ValueError("Halo 2 descriptor child array is not terminated before its link")
+    return roots
+
+
+def game_pool_allocation_roots(image):
+    """Native171: original size-class allocation/free and fixed free callback."""
+    for address, length, digest in GAME_POOL_ALLOCATION_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 pool allocation fingerprint mismatch")
+    roots = set()
+    for slot in (0x457630, 0x457634, 0x461DDC):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 pool allocation target is not title code")
+        roots.add(target)
     return roots
 
 
@@ -991,6 +1015,7 @@ def main():
         roots.update(game_body_notification_roots(image))
         roots.update(game_owner_field_release_roots(image))
         roots.update(game_predicate_replacement_roots(image))
+        roots.update(game_pool_allocation_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).

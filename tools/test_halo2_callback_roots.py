@@ -30,6 +30,34 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_original_pool_allocation_and_free_targets(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = (0x457630, 0x457634, 0x461DDC)
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        for neighbor in (0x45762C, 0x457638, 0x461DD8, 0x461DE0):
+            image.targets[neighbor] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_POOL_ALLOCATION_CALLS)
+        with patch.object(prepare_boot, "GAME_POOL_ALLOCATION_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_pool_allocation_roots(image), {0x1000, 0x1010, 0x1020})
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_pool_allocation_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_pool_allocation_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_POOL_ALLOCATION_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_pool_allocation_roots(image)
+
     def test_original_predicate_replacement_and_lifetime(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {0x4138DC: 0x1000, 0x4555E8: 0x1010,
