@@ -783,7 +783,7 @@ class Emitter:
         # ---- SSE scalar subset --------------------------------------------------------
         if mn in ("movss", "movaps", "movups", "movlps", "movhps", "movhlps", "movlhps", "addss", "subss", "mulss", "divss", "sqrtss", "minss", "maxss",
                   "cvtsi2ss", "cvttss2si", "cvtss2si", "comiss", "ucomiss", "xorps", "andps", "orps", "addps", "subps", "mulps",
-                  "shufps", "unpcklps", "movd", "rsqrtss", "rcpss", "cvtpi2ps", "rsqrtps", "minps", "maxps"):
+                  "shufps", "unpcklps", "movd", "rsqrtss", "rcpss", "cvtpi2ps", "rsqrtps", "minps", "maxps", "cmpss", "movmskps"):
             self.lower_sse(ins, mn, out, U); return
         U()
 
@@ -967,6 +967,16 @@ class Emitter:
                 out.append("    " + check.replace("SOURCE", xmm(1)))
             else:
                 out.append(f"    {{ float source_[4]; x_load128(c, source_, {self.addr(ins)}); " + check.replace("SOURCE", "source_") + " }")
+            return
+        if mn == "cmpss":
+            if ins.immediate8 > 7:
+                U(); out.append("    return;"); return
+            source = (f"memcpy(&source_, {xmm(1)}, 4);" if is_xmm(1) else
+                      f"x_guest_read(&source_, {self.addr(ins)}, 4);")
+            out.append(f'    {{ uint32_t source_; {source} if (!x_cmpss({xmm(0)}, source_, {ins.immediate8})) {{ xv_unimpl(c, 0x{ins.ip:X}u, "cmpss FP control"); return; }} }}')
+            return
+        if mn == "movmskps":
+            out.append(f"    {self.operand(ins, 0, 4)} = x_movmskps({xmm(1)});")
             return
         if mn in ("movlps", "movhps"):
             lo = 0 if mn == "movlps" else 2

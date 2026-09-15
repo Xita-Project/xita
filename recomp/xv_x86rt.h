@@ -300,6 +300,76 @@ static inline void x_shufps(xctx *c, float *d, const float *s, unsigned imm) { (
     float t[4] = { d[imm & 3], d[(imm >> 2) & 3], s[(imm >> 4) & 3], s[(imm >> 6) & 3] }; memcpy(d, t, 16); }
 static inline void x_unpcklps(xctx *c, float *d, const float *s) { (void)c; float t[4] = { d[0], s[0], d[1], s[1] }; memcpy(d, t, 16); }
 
+/* Legacy CMPSS: only the low scalar participates, including in exceptions.
+ * Any NaN takes priority over a denormal in the other operand. Predicates
+ * 1/2/5/6 signal for QNaNs; every predicate signals for SNaNs. */
+static inline uint32_t x_cmpss_bits(uint32_t a, uint32_t b, unsigned predicate,
+                                   uint32_t *status)
+{
+    uint32_t aa = a & 0x7FFFFFFFu, bb = b & 0x7FFFFFFFu;
+    int unordered = aa > 0x7F800000u || bb > 0x7F800000u;
+    int equal = 0, less = 0;
+    if (unordered) {
+        if ((aa > 0x7F800000u && !(a & 0x00400000u)) ||
+            (bb > 0x7F800000u && !(b & 0x00400000u)) ||
+            predicate == 1 || predicate == 2 || predicate == 5 || predicate == 6)
+            *status |= 1u;
+    } else {
+        if ((aa && aa < 0x00800000u) || (bb && bb < 0x00800000u)) *status |= 0x80u;
+        equal = a == b || !(aa | bb);
+        less = !equal && (((a ^ b) >> 31) ? (int)(a >> 31) : (a >> 31) ? a > b : a < b);
+    }
+    int result;
+    switch (predicate) {
+    case 0: result = equal; break;
+    case 1: result = less; break;
+    case 2: result = less || equal; break;
+    case 3: result = unordered; break;
+    case 4: result = !equal; break;
+    case 5: result = !less; break;
+    case 6: result = !(less || equal); break;
+    case 7: result = !unordered; break;
+    default: return 0; /* Reserved predicate: rejected by the public helper. */
+    }
+    return 0u - (uint32_t)result;
+}
+static inline int x_cmpss(float *destination, uint32_t source, unsigned predicate)
+{
+    if (predicate > 7) return 0; /* Reserved legacy encodings remain unsupported. */
+#if defined(__arm__) && defined(__VFP_FP__)
+    uint32_t fpscr, left, status = 0;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr) :: "memory");
+    if (fpscr & 0x03379F00u) return 0; /* Same supported controls as MINPS/MAXPS. */
+    memcpy(&left, destination, 4);
+    uint32_t result = x_cmpss_bits(left, source, predicate, &status);
+    fpscr |= status;
+    __asm__ volatile("vmsr fpscr, %0" :: "r"(fpscr) : "memory");
+    memcpy(destination, &result, 4);
+    return 1;
+#elif defined(__SSE__)
+    typedef float vector4 __attribute__((vector_size(16)));
+    vector4 a, b = {0, 0, 0, 0};
+    memcpy(&a, destination, 16); memcpy(&b, &source, 4);
+#define X_CMPSS_CASE(N) case N: __asm__ volatile("cmpss $" #N ",%1,%0" : "+x"(a) : "x"(b) : "memory"); break
+    switch (predicate) {
+        X_CMPSS_CASE(0); X_CMPSS_CASE(1); X_CMPSS_CASE(2); X_CMPSS_CASE(3);
+        X_CMPSS_CASE(4); X_CMPSS_CASE(5); X_CMPSS_CASE(6); X_CMPSS_CASE(7);
+    }
+#undef X_CMPSS_CASE
+    memcpy(destination, &a, 4);
+    return 1;
+#else
+    (void)destination; (void)source;
+    return 0;
+#endif
+}
+static inline uint32_t x_movmskps(const float *source)
+{
+    uint32_t bits[4]; memcpy(bits, source, 16);
+    return (bits[0] >> 31) | ((bits[1] >> 30) & 2u) |
+           ((bits[2] >> 29) & 4u) | ((bits[3] >> 28) & 8u);
+}
+
 /* Legacy MINPS/MAXPS select source two for NaNs and equal signed zeros.
  * Return its bits unchanged, including an SNaN payload. For a lane containing
  * a NaN, invalid has priority over denormal; other lanes still accumulate
