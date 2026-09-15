@@ -30,6 +30,36 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_copy_alignment_tables_exclude_instruction_bytes(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = [base + i*4 for base in (0x3208F0, 0x320A7C) for i in (1, 2, 3)]
+        image.targets = {slot: 0x1000 + n*16 for n, slot in enumerate(slots)}
+        # Index0 and adjacent words deliberately do not exist in this fixture.
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_MOVE_ALIGNMENT_WALKS)
+        with patch.object(prepare_boot, "GAME_MOVE_ALIGNMENT_WALKS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_move_alignment_roots(image), set(before.values()))
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid"):
+                        prepare_boot.game_move_alignment_roots(image)
+                image.targets[slot] = before[slot]; image.bad_code = None
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "invalid"):
+                    prepare_boot.game_move_alignment_roots(image)
+            image.section_name = ".data"
+            with self.assertRaisesRegex(ValueError, "invalid"):
+                prepare_boot.game_move_alignment_roots(image)
+            image.section_name = ".text"
+            for which in range(count):
+                specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_MOVE_ALIGNMENT_WALKS", specs):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_move_alignment_roots(image)
+
     def test_text_token_table_bounds_fields_and_nulls(self):
         image = SyntheticImage(); image.section_name = ".text"
         records = tuple(range(0x470200, 0x470824, 12))

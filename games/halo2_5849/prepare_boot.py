@@ -416,6 +416,35 @@ def game_widget_property_roots(image):
     return roots
 
 
+GAME_MOVE_ALIGNMENT_WALKS = (
+    (0x3208B0, 52, "812db41d8c8d8516ab85e54dca20659cea44200710058ae41f2db46cc1128a47"),
+    (0x3208F4, 12, "65c6a28b3ff85a42a25294ffded5c2ba0605480712192386898a26bfc92d856a"),
+    (0x320A34, 68, "36ac739ddd4ee4393de27538d27ccea0652969aeb248220b8136f03a8ddc08bb"),
+    (0x320A80, 12, "3783c15b3d36195e1b8b6f03a715623242b47cad766bdb5d68b3f875223c5b82"),
+)
+
+
+def game_move_alignment_roots(image):
+    """Native198: the original copy routine's forward/backward alignment tails.
+
+    TEST alignment, nonzero branch and AND3 prove indices 1..3. Index0 is
+    overlapping instruction bytes, not a callable table entry. Only discover
+    these six original tails; generic indirect jumps and epilogues stay intact.
+    """
+    for address, length, digest in GAME_MOVE_ALIGNMENT_WALKS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 copy alignment fingerprint mismatch")
+    roots = set()
+    for base in (0x3208F0, 0x320A7C):
+        for index in (1, 2, 3):
+            target = image.u32(base + index * 4)
+            section = image.section_of(target) if target else None
+            if not target or not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError("Halo 2 copy alignment target is invalid")
+            roots.add(target)
+    return roots
+
+
 GAME_TEXT_TOKEN_WALKS = (
     (0x22D315, 57, "08c487dfffe41d875df3af507d13d1a732cbd46a444966e0c0f495f5634dbff5"),
     (0x22D42B, 43, "a6b8e2f58e9038c19a2733011e4fe8017445f9b6a80aaa96b6c5979f21d69357"),
@@ -1125,6 +1154,7 @@ def main():
         roots.update(game_text_widget_vtable_roots(image))
         roots.update(game_widget_property_roots(image))
         roots.update(game_text_token_roots(image))
+        roots.update(game_move_alignment_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
