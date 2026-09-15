@@ -227,6 +227,23 @@ $(BUILD)/bc1-probe-param.sfo: Makefile
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 BC1 Pixel Probe" $@
 $(BUILD)/bc1%.vpk: $(BUILD)/bc1%-eboot.bin $(BUILD)/bc1-probe-param.sfo $(addprefix $(BC1_SHADERS)/,$(BC1_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/bc1-probe-param.sfo -b $(BUILD)/bc1$*-eboot.bin $(foreach f,$(BC1_PROBE_FILES),-a $(BC1_SHADERS)/$(f)=$(f)) $@
+COMPOSITION_SHADERS ?= $(ROOT)/local/halo2_5849/composition-shaders
+COMPOSITION_PROBE_FILES := composition.vert.gxp composition.frag.gxp composition.copy.frag.gxp composition.constants.bin composition.vertices.bin composition.texture0.bin composition.texture2.bin composition.texture3.bin
+.PHONY: composition-probe composition-source-probe
+composition-probe: $(BUILD)/composition-probe.vpk
+composition-source-probe: $(BUILD)/composition-source-probe.vpk
+$(BUILD)/composition-probe.elf $(BUILD)/composition-source-probe.elf: composition_probe.c dxt23_layout.c dxt23_layout.h
+	@mkdir -p $(dir $@)
+	$(CC) -DH2_COMPOSITION_SOURCE_PROBE=$(if $(findstring -source,$(notdir $@)),1,0) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Werror -Wl,-q composition_probe.c dxt23_layout.c -o $@ -lSceGxm_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceProcessmgr_stub
+$(BUILD)/composition%.velf: $(BUILD)/composition%.elf
+	$(VITASDK)/bin/vita-elf-create $< $@
+$(BUILD)/composition%-eboot.bin: $(BUILD)/composition%.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/composition-probe-param.sfo: Makefile
+	@mkdir -p $(dir $@)
+	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 Composition Probe" $@
+$(BUILD)/composition%.vpk: $(BUILD)/composition%-eboot.bin $(BUILD)/composition-probe-param.sfo $(addprefix $(COMPOSITION_SHADERS)/,$(COMPOSITION_PROBE_FILES))
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/composition-probe-param.sfo -b $(BUILD)/composition$*-eboot.bin $(foreach f,$(COMPOSITION_PROBE_FILES),-a $(COMPOSITION_SHADERS)/$(f)=$(f)) $@
 test-host: $(BUILD)/dxt23_layout_test
 test-host: $(BUILD)/screen_draw_test $(BUILD)/bc1_draw_test
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
