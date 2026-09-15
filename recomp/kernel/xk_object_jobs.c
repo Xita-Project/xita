@@ -526,7 +526,8 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
     if(address==0x1858D0u&&X_M32(c->r[4])!=0x116240u)
         xv_object_job_stop(c,address,"vertex lock outside audited impact transaction");
     if(address==0x1D6640u && (X_M32(c->r[4])!=0x12AA9u||
-        (X_M32(c->r[4]+4)!=0x32B60u&&X_M32(c->r[4]+4)!=0x3268Au)))
+        (X_M32(c->r[4]+4)!=0x32B60u&&X_M32(c->r[4]+4)!=0x3268Au&&
+         X_M32(c->r[4]+4)!=0x17A804u)))
         xv_object_job_stop(c,address,"yield outside audited cache wait");
     if(c==&contexts[2]&&!active_workers) {
         if(address==0x1D6640u) {

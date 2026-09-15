@@ -58,3 +58,51 @@ STOP in the captured log. All observed owner-audio-pump counters remain zero:
 this is an integration check, not a reproduction of the physical cache wait.
 Physical execution of the repaired path and representative driving/campaign
 stability remain required. No FPS improvement is claimed for this fix.
+
+## Physical follow-up: rocket launcher pickup
+
+The audio candidate was installed through Wi-Fi with its exact hash confirmed
+in slot B; the previously working slot A was preserved. Standard texture detail
+and original material, particle, glow, decal and model settings were verified
+at 360p, with the frame cap off. The user observed work on all three CPU cores
+without a noticeable performance improvement.
+
+The next pickup-related crash has a different explicit STOP: yield `1D6640`
+via `12AA9`, caller `17A804`, inside `17A750 -> 17A840`, indirect object callback
+`44AD0`. The stack canary remains intact. No audio-pump service was reported in
+the captured completed windows, so this run does not validate that repaired
+path or establish that it caused this failure.
+
+`17A750` preloads a sound tag's cache entries. `32A70` submits missing data
+through `33A20`, passing the entry's ready byte at offset 2 as the completion
+pointer. The preload's yield is reached when that same ready byte is zero.
+`33A20` uses the queue and event consumed by the already supported `33AF0` file
+fiber. The follow-up admits only this additional return site to the existing
+quiescent file-fiber handoff. It does not allow general yielding from workers.
+
+The follow-up worker tests cover 600 cache yields per run, including 200 from
+the preload site, with two, one and zero worker threads. Plain, ASan/UBSan and
+ThreadSanitizer runs pass. The production file-fiber test also passes 100
+event/read-completion/APC cycles with preserved owner/fiber state and rejects
+unrelated file-thread targets. The native package retains the updater contract.
+Its runtime SHA-256 is
+`c90d8400839cfd62c2a3b98b7d6c1c961136c41b10a844609fb8f7f332623f8a`.
+The exact candidate reaches Blood Gulch through the normal menu in Vita3K;
+the captured integration log contains no STOP. A physical rocket-pickup retest
+is still required.
+
+## Performance lead from the failed run
+
+One 60-pass object report records 1,138,967 us of joined batch time, with
+497,106 / 547,906 us of elapsed mutex waits on the two lanes: approximately
+19.0 ms per pass, including 8.3 / 9.1 ms of waiting per lane. These times overlap;
+they are not additive CPU costs. This window reports no cache I/O services.
+
+The render reports contain multiple simulation passes per displayed frame.
+Their independent reporting windows do not align exactly, so dividing the
+19 ms pass cost by one rendered frame would understate its contribution, and
+adding whole independently collected windows would overstate precision. The
+next useful measurement is contention by shared transaction/helper within the
+same rendered-frame interval. The run's gameplay render windows span roughly
+5.2–7.1 FPS with changing views and initial texture loading; they are not a
+controlled performance comparison.
