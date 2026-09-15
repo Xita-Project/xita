@@ -42,6 +42,13 @@ static int initialized, override=-1;
 static xctx *owner;
 static unsigned batches, submitted, executed[LANES], rejected;
 static uint64_t work_us[LANES], batch_us;
+/* A worker's recursive scopes stay on its native thread, including while it
+ * parks for an owner service. Only the outer scope needs the OS mutex. */
+static unsigned math_depth[WORKERS], math_fast_path=1, math_idle_calls;
+static struct __attribute__((aligned(64))) {
+    unsigned acquired, nested, contended;
+    uint64_t wait_us;
+} math_stats[LANES];
 #ifdef __vita__
 static SceUID threads[WORKERS]={-1,-1}, wakes[WORKERS]={-1,-1}, dones[WORKERS]={-1,-1}, math_mutex=-1;
 static SceUID owner_wake=-1, replies[WORKERS]={-1,-1};
@@ -162,18 +169,42 @@ static void service_owner(void)
 int xv_object_math_lock(void)
 {
     if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
+    /* running is published before waking workers and cleared only after every
+     * done semaphore is consumed. Outside that interval the guest owner is the
+     * sole caller of these helpers; retain normal locks during owner services. */
+    if(math_fast_path&&!__atomic_load_n(&running,__ATOMIC_ACQUIRE)) {
+        math_idle_calls++;return 0;
+    }
     int lane=worker_lane();
+    uint64_t waiting=0;
     if(lane>=0)for(;;) {
+        /* Do not bypass this acknowledgement for recursive scopes: a parked
+         * worker may hold the mutex while the owner services a cache request. */
         park_worker((unsigned)lane);
+        if(math_fast_path&&math_depth[lane]) {
+            math_depth[lane]++;math_stats[lane].nested++;return lane+2;
+        }
 #ifdef __vita__
         int result=sceKernelTryLockMutex(math_mutex,1);
-        if(!result)return 1;
+        if(!result) {
+            math_stats[lane].acquired++;
+            if(waiting)math_stats[lane].wait_us+=xk_os_monotonic_us()-waiting;
+            if(math_fast_path) { math_depth[lane]=1;return lane+2; }
+            return 1;
+        }
         if(result!=(int)SCE_KERNEL_ERROR_MUTEX_FAILED_TO_OWN)abort();
+        if(!waiting) { waiting=xk_os_monotonic_us();math_stats[lane].contended++; }
         sceKernelDelayThread(50);
 #else
         int result=pthread_mutex_trylock(&math_mutex);
-        if(!result)return 1;
+        if(!result) {
+            math_stats[lane].acquired++;
+            if(waiting)math_stats[lane].wait_us+=xk_os_monotonic_us()-waiting;
+            if(math_fast_path) { math_depth[lane]=1;return lane+2; }
+            return 1;
+        }
         if(result!=EBUSY)abort();
+        if(!waiting) { waiting=xk_os_monotonic_us();math_stats[lane].contended++; }
         struct timespec delay={0,50000};nanosleep(&delay,NULL);
 #endif
     }
@@ -182,12 +213,18 @@ int xv_object_math_lock(void)
 #else
     if(pthread_mutex_lock(&math_mutex))abort();
 #endif
+    math_stats[2].acquired++;
     return 1;
 }
 
 void xv_object_math_unlock(int *locked)
 {
     if(!*locked)return;
+    if(*locked>=2) {
+        unsigned lane=(unsigned)*locked-2;
+        if(lane>=WORKERS||!math_depth[lane])abort();
+        if(--math_depth[lane])return;
+    }
 #ifdef __vita__
     if(sceKernelUnlockMutex(math_mutex,1)<0)abort();
 #else
@@ -210,6 +247,8 @@ static void execute(unsigned lane)
         X_M32(stacks[lane])=0x584a4f42u;
         uint64_t started=xk_os_monotonic_us();
         f_0008FB70(c);
+        if(lane<WORKERS&&math_depth[lane])
+            xv_object_job_stop(c,0x8FB70u,"unbalanced shared transaction lock");
         work_us[lane]+=xk_os_monotonic_us()-started;
         executed[lane]++;
         if(c->r[4]!=stacks[lane]+STACK_BYTES-252 || X_M32(stacks[lane])!=0x584a4f42u)
@@ -247,6 +286,8 @@ static int initialize(void)
 {
     if(initialized)return initialized>0;
     initialized=-1;
+    const char *fast=getenv("XV_OBJECT_LOCK_FAST_PATH");
+    math_fast_path=!fast||atoi(fast)!=0;
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     if(workers && (!strcmp(workers,"0")||!strcmp(workers,"1")))active_workers=(unsigned)atoi(workers);
     if(active_workers!=WORKERS)XK_LOG("[object-jobs] DIAGNOSTIC: %u active workers; zero selects owner-only execution\n",active_workers);
@@ -390,6 +431,11 @@ void xv_object_jobs_report(unsigned frames)
         (unsigned long long)batch_us,rejected);
     XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
     XK_LOG("[object-jobs] probed stack peak bytes %u/%u/%u of %u; excludes unprobed small frames\n",stack_peak[0],stack_peak[1],stack_peak[2],STACK_BYTES);
+    XK_LOG("[object-locks] fast %u idle-owner %u acquired %u/%u/%u nested %u/%u contended %u/%u wait-us %llu/%llu; worker waits overlap\n",
+        math_fast_path,math_idle_calls,math_stats[0].acquired,math_stats[1].acquired,math_stats[2].acquired,
+        math_stats[0].nested,math_stats[1].nested,math_stats[0].contended,math_stats[1].contended,
+        (unsigned long long)math_stats[0].wait_us,(unsigned long long)math_stats[1].wait_us);
+    math_idle_calls=0;memset(math_stats,0,sizeof math_stats);
     batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
 }
 /* Halo's original large-frame helper adjusts ESP without probing guard pages.

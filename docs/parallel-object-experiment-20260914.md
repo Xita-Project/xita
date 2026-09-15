@@ -331,3 +331,9 @@ zero-size behavior. Oversized requests stop before the original write with an
 intact canary. TSAN and ASAN/UBSAN pass; the mixed-service pool and exact signature
 checks also pass. Runtime `dbe5edfe630fd8e030d044b01c4232334ea0a00de87d8053ac6ef7e0fd142cbf`
 is being tested in the emulator; hardware has not received it.
+
+The subsequent stack256 hardware deployment and completed comparison are
+recorded in [the September 15 results](hardware-20260915-object-workers.md).
+Both worker lanes execute on hardware, with a modest gain in the tested view.
+A later plasma-pistol test lost the remote connection and remains undiagnosed;
+the experiment is not yet a stable gameplay build.

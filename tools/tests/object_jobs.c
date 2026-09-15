@@ -13,6 +13,16 @@ int xv_phase_enabled;
 static int gameplay_ready=1;
 int xd3d_object_jobs_ready(void) {return gameplay_ready;}
 static unsigned writes[300],active,peak,allocations;
+static unsigned shared_guarded_value;
+static void nested_guard_return(void)
+{
+    XV_OBJECT_MATH_GUARD();
+    unsigned before=shared_guarded_value;
+    { XV_OBJECT_MATH_GUARD(); shared_guarded_value=before+1; }
+    /* Returning from nested cleanup must leave the caller's lock held. */
+    struct timespec delay={0,50000};nanosleep(&delay,NULL);
+    assert(shared_guarded_value==before+1);
+}
 static unsigned event_calls,event_value;
 static unsigned event_seen[1200];
 static pthread_t guest_owner;
@@ -120,6 +130,8 @@ void f_0008FB70(xctx *c)
     unsigned id=c->r[1];
     {
         XV_OBJECT_MATH_GUARD();
+        unsigned before=shared_guarded_value;
+        nested_guard_return();
         c->r[0]=0x60000+id*16;c->r[1]=0x30000;c->r[2]=0x50000+id*12;
         X_PUSH32(0x123456u);
         assert(xv_math_point_transform(c));
@@ -133,6 +145,7 @@ void f_0008FB70(xctx *c)
         if(id%3==0)submit_yield(c,0x32B60u);
         submit_query(c,id);
         if(id%2==0)submit_vertex_lock(c,id);
+        assert(shared_guarded_value==before+1);
     }
     /* Requests can also arrive simultaneously, outside the shared lock. */
     submit_event(c,0x70004+id*8);
@@ -159,6 +172,10 @@ int main(int argc,char **argv)
     }
     assert(!xv_object_jobs_begin(&c));
     xv_object_jobs_override(0);assert(allocations==3);assert(!xv_object_jobs_begin(&c));
+    int idle_lock=xv_object_math_lock();
+    const char *fast=getenv("XV_OBJECT_LOCK_FAST_PATH");
+    assert(idle_lock==((!fast||atoi(fast))?0:1));
+    xv_object_math_unlock(&idle_lock);
     xv_object_jobs_override(1);
     gameplay_ready=0;assert(!xv_object_jobs_begin(&c));gameplay_ready=1;
     xv_phase_enabled=1;assert(!xv_object_jobs_begin(&c));xv_phase_enabled=0;
@@ -186,6 +203,7 @@ int main(int argc,char **argv)
     unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
     assert(vertex_lock_calls==600);assert(register_calls==200);assert(query_calls==600);assert(event_calls==1200&&event_value==1200);assert(io_calls>=200&&io_calls<=400);
+    assert(shared_guarded_value==600);
     for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));
     xv_object_jobs_report(2);xv_object_jobs_shutdown();
