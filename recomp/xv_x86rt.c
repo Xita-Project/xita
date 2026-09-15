@@ -148,7 +148,8 @@ void xv_call(xctx *c, uint32_t target)
          * or enter an HLE callback through a vtable. */
         xv_fn_t job_fn=xv_lookup(target);
         if(!job_fn)xv_object_job_stop(c,target,"indirect non-guest target");
-        job_fn(c);return;
+        extern void xv_object_job_indirect(xctx *,unsigned);
+        xv_object_job_indirect(c,target);job_fn(c);xv_object_job_indirect(c,0);return;
     }
 #endif
     { static uint64_t n; static int on = -1; if (on < 0) on = getenv("XV_CALL_SAMPLE") != NULL;

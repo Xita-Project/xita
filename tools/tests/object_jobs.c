@@ -71,7 +71,10 @@ int main(int argc,char **argv)
         xv_object_jobs_join();assert(!active);
         for(unsigned i=0;i<300;i++)assert(writes[i]==round+1);
     }
-    xctx *scope=&c;xv_object_jobs_end(&scope);assert(peak>=2);
+    xctx *scope=&c;xv_object_jobs_end(&scope);
+    const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
+    unsigned expected=workers?1u+(unsigned)atoi(workers):3u;
+    assert(peak==expected);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));
     xv_object_jobs_report(2);xv_object_jobs_shutdown();
     printf("PASS: 600 callbacks and real native point transforms exactly once, three private guest stacks, peak %u simultaneous jobs, capacity overflow joins, native math lock recursion, capture exclusion, caller filtering and restore\n",peak);

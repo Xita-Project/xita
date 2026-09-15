@@ -121,3 +121,28 @@ reaches those traversals. This uses the same recursive shared-state mutex; other
 parts of `8FB70` remain outside it. Its complete 1,025-byte signature is checked.
 This is a pending concurrency experiment, not proof of an independent collision
 subsystem or a hardware FPS gain.
+
+### Isolating the remaining collision failure
+
+Guarding `96430` did not resolve the startup failure. A diagnostic that keeps the
+same queued contexts and private stacks but runs them through the owner alone
+gets past the initial collision traversal: two windows complete 3,600 and 3,596
+callbacks. It later stops at the unsupported `NtSetEvent` import (`1D665C`). This
+is evidence that concurrency affects the collision failure; it does not prove
+that delayed execution and stack relocation preserve all gameplay behavior.
+Event signaling still needs a kernel ownership protocol before workers can use
+it. The test does not fabricate a successful event result.
+
+`XV_OBJECT_JOB_WORKERS=0` or `1` selects these isolation modes; the default is
+two workers plus the owner. Tests run the production pool with all three worker
+counts, verifying the expected concurrency, complete callback execution and
+joins. These modes are diagnostics, not evidence of a speedup.
+
+The two-worker diagnostic now records the active indirect-call chain on failure.
+It identifies `4C980`, reached through the `90900` callback table, as another path
+to collision traversal outside `96430`. The failed lane's stack pointer is within
+its reserved range and its bottom canary is intact. That observation does not
+exclude every possible memory overwrite. The next candidate guards `4C980`
+with the same recursive mutex; its full 976-byte code/jump-table span is checked.
+The remaining object-pass work stays outside that callback guard. Emulator
+startup validation is pending; the physical Vita retains the working runtime.

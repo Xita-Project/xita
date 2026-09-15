@@ -11,6 +11,7 @@
 #include "xk_object_jobs.h"
 #include "../xv_phase.h"
 #include <stdlib.h>
+#include <stdio.h>
 #ifdef __vita__
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/cpu.h>
@@ -24,9 +25,10 @@
 enum { WORKERS=2, LANES=3, CAPACITY=128, STACK_BYTES=65536 };
 const char xv_object_job_marker=0;
 static xctx jobs[CAPACITY], contexts[LANES];
-static unsigned count, next, running, stopping;
+static unsigned count, next, running, stopping, active_workers=WORKERS;
 static uint32_t stacks[LANES];
-static uint32_t active_objects[LANES];
+static uint32_t active_objects[LANES], indirect_stack[LANES][32];
+static unsigned indirect_depth[LANES];
 static int initialized, override=-1;
 static xctx *owner;
 static unsigned batches, submitted, executed[LANES], rejected;
@@ -108,6 +110,9 @@ static int initialize(void)
 {
     if(initialized)return initialized>0;
     initialized=-1;
+    const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
+    if(workers && (!strcmp(workers,"0")||!strcmp(workers,"1")))active_workers=(unsigned)atoi(workers);
+    if(active_workers!=WORKERS)XK_LOG("[object-jobs] DIAGNOSTIC: %u active workers plus owner; not the full three-lane experiment\n",active_workers);
     for(unsigned i=0;i<LANES;i++) {
         stacks[i]=xk_mem_alloc(STACK_BYTES,4096,0,0,1);
         if(!stacks[i])goto fail;
@@ -136,6 +141,7 @@ static int initialize(void)
     }
 #endif
     __atomic_store_n(&initialized,1,__ATOMIC_RELEASE);
+    XK_LOG("[object-jobs] guest stacks %08X/%08X/%08X, %u bytes each\n",stacks[0],stacks[1],stacks[2],STACK_BYTES);
     XK_LOG("[object-jobs] EXPERIMENT: whole object callbacks, workers core 0/1 plus owner; shared game state and reordered updates are unproven; private stacks, joined batches, guarded HLE\n");
     return 1;
 fail:
@@ -180,7 +186,7 @@ void xv_object_jobs_join(void)
     if(!count)return;
     uint64_t started=xk_os_monotonic_us();
     next=0;__atomic_store_n(&running,1,__ATOMIC_RELEASE);
-    for(unsigned i=0;i<WORKERS;i++) {
+    for(unsigned i=0;i<active_workers;i++) {
 #ifdef __vita__
         if(sceKernelSignalSema(wakes[i],1)<0)abort();
 #else
@@ -188,7 +194,7 @@ void xv_object_jobs_join(void)
 #endif
     }
     execute(2);
-    for(unsigned i=0;i<WORKERS;i++) {
+    for(unsigned i=0;i<active_workers;i++) {
 #ifdef __vita__
         if(sceKernelWaitSema(dones[i],1,NULL)<0)abort();
 #else
@@ -226,10 +232,24 @@ void xv_object_jobs_report(unsigned frames)
         (unsigned long long)batch_us,rejected);
     batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
 }
+void xv_object_job_indirect(xctx *c,unsigned target)
+{
+    for(unsigned i=0;i<LANES;i++)if(c==&contexts[i]) {
+        unsigned *depth=&indirect_depth[i];
+        if(target) {if(*depth<32)indirect_stack[i][*depth]=target;(*depth)++;}
+        else if(*depth)(*depth)--;
+        return;
+    }
+}
 void xv_object_job_stop(xctx *c,unsigned address,const char *reason)
 {
     uint32_t object=c->r[1];
-    for(unsigned i=0;i<LANES;i++)if(c==&contexts[i])object=active_objects[i];
+    for(unsigned i=0;i<LANES;i++)if(c==&contexts[i]) {
+        object=active_objects[i];char chain[300];unsigned used=0;
+        XK_LOG("[object-jobs] fault stack %08X..%08X esp %08X canary %08X\n",stacks[i],stacks[i]+STACK_BYTES,c->r[4],X_M32(stacks[i]));
+        for(unsigned k=0;k<indirect_depth[i]&&k<32;k++)used+=(unsigned)snprintf(chain+used,sizeof chain-used," %08X",indirect_stack[i][k]);
+        chain[used]=0;XK_LOG("[object-jobs] fault lane %u indirect-depth %u targets%s\n",i,indirect_depth[i],chain);
+    }
     XK_LOG("[object-jobs] STOP %s target %08X return %08X object %08X; experiment cannot enter owner-only services\n",
         reason,address,X_M32(c->r[4]),object);
     abort();

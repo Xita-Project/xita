@@ -20,7 +20,9 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
         str(root/'tools/tests/object_jobs.c'),str(root/'recomp/kernel/xk_object_jobs.c'),
         str(root/'recomp/kernel/xk_math.c'),str(root/'recomp/xv_x86rt.c'),
         '-pthread','-Wl,--gc-sections','-lm','-o',str(binary)],check=True)
-    subprocess.run([str(binary)],check=True,timeout=30)
+    for workers in ("2", "1", "0"):
+        env=dict(os.environ,XV_OBJECT_JOB_WORKERS=workers)
+        subprocess.run([str(binary)],check=True,timeout=30,env=env)
     subprocess.run([str(binary),"default-on"],check=True,timeout=10)
     def no_core(): resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     failure=subprocess.run([str(binary),'unsupported-hle'],capture_output=True,
