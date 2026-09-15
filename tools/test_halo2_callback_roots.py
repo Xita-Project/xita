@@ -30,6 +30,35 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_packed_vector_observed_row_both_triplets_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + (n % 3) * 16
+                         for n, slot in enumerate(range(0x47FB4C, 0x47FB64, 4))}
+        image.targets[0x47FB48] = None; image.targets[0x47FB64] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_PACKED_VECTOR_BINDINGS", (spec, spec)):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_packed_vector_roots(image), {0x1000, 0x1010, 0x1020})
+            self.assertEqual(image.targets, before)
+            for slot in range(0x47FB4C, 0x47FB64, 4):
+                saved = image.targets[slot]
+                for invalid in (0, None):
+                    image.targets[slot] = invalid
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_packed_vector_roots(image)
+                image.targets[slot] = saved
+            image.bad_code = 0x1020
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_packed_vector_roots(image)
+            image.bad_code = None; image.section_name = "D3D"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_packed_vector_roots(image)
+        for which in range(2):
+            guards = [spec, spec]; guards[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_PACKED_VECTOR_BINDINGS", guards):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_packed_vector_roots(image)
+
     def test_widget_property_dispatch_bounds_nulls_and_revision(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x470828, 0x4709E8, 4))}

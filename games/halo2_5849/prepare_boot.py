@@ -81,6 +81,10 @@ GAME_DESCRIPTOR_CHILD_WALKS = (
     (0x108A40, 66, "b80567cf17df1eb4cf294790c5ef58f37dec29e321ff31a4743b8287ae436101"),
     (0x108A90, 122, "afa08763dab7cffe0330b76bdf026aec29abfe8d8f9ac67117d07b7f13c4b3c3"),
 )
+GAME_PACKED_VECTOR_BINDINGS = (
+    (0x279BA2, 45, "ae5b4f05401786d52eb8183057ed4ce7f7ed8b9c4b38b3d45510b1d9a291b6fa"),
+    (0x279C6F, 70, "d9fe85669bb7394f774d95bbce234fa3950a02301b12e6b67ca0962456a6f2c5"),
+)
 GAME_MODE_WALK = (0x18EF00, 152, "c499facfbe49993ebd3e15bb55a4f65adafb4bfd53eb99474ba7bb96ad3f8102")
 GAME_INTERFACE_REGISTRATION = (0x3769F0, 45, "46e548c6c8f362dc1ba57b6f7581a1b2c0bffb4b2cb9c2e812dcc7b9544b1611")
 GAME_ONLINE_INTERFACE_DISPATCH = (0x59949, 41, "c68f2b75408f155325c537d83f024b3ff580f096399c7606ca83a739654555a1")
@@ -395,6 +399,26 @@ def game_descriptor_child_roots(image):
     return roots
 
 
+def game_packed_vector_roots(image):
+    """Native154 reaches format 1 of the 40-byte decoder record table.
+
+    Original binders select either triplet at +0/+12; both are proven for
+    this one row. Do not infer other format rows or treat metadata as code.
+    The whole-image revision gate also protects the observed row contents.
+    """
+    for address, length, digest in GAME_PACKED_VECTOR_BINDINGS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 packed vector binding fingerprint mismatch")
+    roots = set()
+    for slot in range(0x47FB4C, 0x47FB64, 4):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 packed vector callback has invalid target")
+        roots.add(target)
+    return roots
+
+
 def game_map_callback_roots(image):
     """Native83: four per-map lifecycle fields in the same 68-record table.
 
@@ -558,6 +582,7 @@ def main():
         roots.update(game_resource_callback_roots(image))
         roots.update(game_descriptor_map_roots(image))
         roots.update(game_descriptor_child_roots(image))
+        roots.update(game_packed_vector_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
         roots.add(image.u32(image.u32(0x477058) + 0x10))

@@ -300,6 +300,44 @@ static inline void x_shufps(xctx *c, float *d, const float *s, unsigned imm) { (
     float t[4] = { d[imm & 3], d[(imm >> 2) & 3], s[(imm >> 4) & 3], s[(imm >> 6) & 3] }; memcpy(d, t, 16); }
 static inline void x_unpcklps(xctx *c, float *d, const float *s) { (void)c; float t[4] = { d[0], s[0], d[1], s[1] }; memcpy(d, t, 16); }
 
+/* Legacy RSQRTPS: no FP exceptions and independent of the host rounding mode.
+ * Integer Q30 Newton steps avoid modifying FPSCR/MXCSR even for signaling NaNs.
+ * This meets Intel's relative-error bound, not a particular CPU's estimate bits.
+ * Seeds are round(2^30 / sqrt(1 + (index + 0.5)/16)), not game data. */
+static inline uint32_t x_rsqrt_bits(uint32_t bits)
+{
+    uint32_t exponent = (bits >> 23) & 255u, fraction = bits & 0x7FFFFFu;
+    if (!exponent) return (bits & 0x80000000u) | 0x7F800000u;
+    if (exponent == 255u && fraction) return bits | 0x00400000u;
+    if (bits & 0x80000000u) return 0xFFC00000u;
+    if (exponent == 255u) return 0;
+    static const uint32_t seeds[16] = {
+        1057347856u, 1026693558u, 998559613u, 972618566u,
+        948599586u, 926276469u, 905458609u, 885984104u,
+        867714429u, 850530263u, 834328203u, 819018128u,
+        804521086u, 790767575u, 777696137u, 765252196u
+    };
+    uint64_t m = (uint64_t)(fraction | 0x800000u) << 7;
+    uint64_t y = seeds[fraction >> 19];
+    for (unsigned step = 0; step < 2; ++step) {
+        uint64_t yy = (y * y) >> 30;
+        y = (y * ((3ull << 30) - ((m * yy) >> 30))) >> 31;
+    }
+    int e = (int)exponent - 127;
+    unsigned odd = (unsigned)(e + 126) & 1u;
+    if (odd) y = (y * 759250125u) >> 30; /* round(2^30 / sqrt(2)) */
+    unsigned output_exponent = (unsigned)(126 - (e - (int)odd) / 2);
+    uint32_t significand = (uint32_t)((y + 32u) >> 6);
+    if (significand == 0x1000000u) { significand >>= 1; ++output_exponent; }
+    return (output_exponent << 23) | (significand & 0x7FFFFFu);
+}
+static inline void x_rsqrtps(float *destination, const float *source)
+{
+    uint32_t bits[4]; memcpy(bits, source, sizeof bits);
+    for (unsigned lane = 0; lane < 4; ++lane) bits[lane] = x_rsqrt_bits(bits[lane]);
+    memcpy(destination, bits, sizeof bits);
+}
+
 
 /* ---- MMX ------------------------------------------------------------------------------ */
 static inline int32_t x_sat8(int32_t v)  { return v < -128 ? -128 : v > 127 ? 127 : v; }

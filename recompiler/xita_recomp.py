@@ -783,7 +783,7 @@ class Emitter:
         # ---- SSE scalar subset --------------------------------------------------------
         if mn in ("movss", "movaps", "movups", "movlps", "movhps", "movhlps", "movlhps", "addss", "subss", "mulss", "divss", "sqrtss", "minss", "maxss",
                   "cvtsi2ss", "cvttss2si", "cvtss2si", "comiss", "ucomiss", "xorps", "andps", "orps", "addps", "subps", "mulps",
-                  "shufps", "unpcklps", "movd", "rsqrtss", "rcpss"):
+                  "shufps", "unpcklps", "movd", "rsqrtss", "rcpss", "cvtpi2ps", "rsqrtps"):
             self.lower_sse(ins, mn, out, U); return
         U()
 
@@ -945,6 +945,20 @@ class Emitter:
             # Legacy SSE half-register moves preserve all bits, including NaN
             # payloads. The two eight-byte ranges are disjoint even for src=dst.
             out.append(f"    memcpy(&{xmm(0)}[{dst}], &{xmm(1)}[{src}], 8);")
+            return
+        if mn == "cvtpi2ps":
+            # Same native FP model as CVTSI2SS; retain the high quadword's bits.
+            if ins.op1_kind == OpKind.REGISTER:
+                source = f"uint64_t bits_ = {self.operand(ins, 1, 8)};"
+            else:
+                source = f"uint64_t bits_; x_guest_read(&bits_, {self.addr(ins)}, 8);"
+            out.append(f"    {{ {source} float pair_[2] = {{ (float)(int32_t)(uint32_t)bits_, (float)(int32_t)(uint32_t)(bits_ >> 32) }}; memcpy({xmm(0)}, pair_, 8); }}")
+            return
+        if mn == "rsqrtps":
+            if is_xmm(1):
+                out.append(f"    x_rsqrtps({xmm(0)}, {xmm(1)});")
+            else:
+                out.append(f"    {{ float source_[4]; x_load128(c, source_, {self.addr(ins)}); x_rsqrtps({xmm(0)}, source_); }}")
             return
         if mn in ("movlps", "movhps"):
             lo = 0 if mn == "movlps" else 2
