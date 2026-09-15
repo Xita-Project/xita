@@ -219,14 +219,17 @@ int main(int argc,char **argv)
     }
     if(argc>1) {c.fiber=(void *)&xv_object_job_marker;xv_object_job_hle(&c,0x1D66EC,NULL);assert(0);}
     for(unsigned round=0;round<2;round++) {
+        if(round)assert(xv_object_jobs_begin(&c));
         for(unsigned i=0;i<300;i++) {
             c.r[1]=i;c.r[0]=0xabcdef88;c.r[4]=0x20000;X_M32(c.r[4])=0x90299;
             assert(xv_object_jobs_queue(&c));assert(c.r[4]==0x20004&&c.r[0]==0xabcdef01);
         }
         xv_object_jobs_join();assert(!active);
         for(unsigned i=0;i<300;i++)assert(writes[i]==round+1);
+        /* A report attempted before scope retirement must not clear counters. */
+        xv_object_jobs_report(999);
+        xctx *scope=&c;xv_object_jobs_end(&scope);
     }
-    xctx *scope=&c;xv_object_jobs_end(&scope);
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
@@ -235,7 +238,7 @@ int main(int argc,char **argv)
     assert(shared_guarded_value==600);
     for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));
-    xv_object_jobs_report(2);xv_object_jobs_shutdown();
+    xv_object_jobs_report(3);xv_object_jobs_report(3);xv_object_jobs_shutdown();
     printf("PASS: 600 callbacks and native point transforms exactly once; 600 quiescent vertex locks, 200 registrations, 600 resource queries, 1,200 owner-thread events and 600 cache yields (including 200 preload yields) with quiescent owner I/O reads, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
     free(g_xram);free(g_xpt);
 }

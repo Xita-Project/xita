@@ -45,7 +45,7 @@ static unsigned service_address[WORKERS];
 static xv_fn_t service_fn[WORKERS];
 static int initialized, override=-1;
 static xctx *owner;
-static unsigned batches, submitted, executed[LANES], rejected;
+static unsigned passes, batches, submitted, executed[LANES], rejected;
 static uint64_t work_us[LANES], batch_us;
 /* A worker's recursive scopes stay on its native thread, including while it
  * parks for an owner service. Only the outer scope needs the OS mutex. */
@@ -54,6 +54,31 @@ static struct __attribute__((aligned(64))) {
     unsigned acquired, nested, contended;
     uint64_t wait_us;
 } math_stats[LANES];
+/* Optional, bounded attribution of elapsed mutex waits to the requesting
+ * native call site. There is no clock read or table search for uncontended
+ * locks. Each worker owns its table; the owner reports only after a join.
+ * This identifies waiters, not the helper holding the mutex during the wait. */
+enum { WAIT_SITES=32 };
+static unsigned math_profile;
+static struct {
+    uintptr_t pc;
+    unsigned count;
+    uint64_t us, max_us;
+} wait_sites[WORKERS][WAIT_SITES+1];
+
+static void record_math_wait(unsigned lane,uintptr_t pc,uint64_t elapsed)
+{
+    math_stats[lane].wait_us+=elapsed;
+    if(!math_profile)return;
+    unsigned site;
+    for(site=0;site<WAIT_SITES;site++)
+        if(!wait_sites[lane][site].count||wait_sites[lane][site].pc==pc)break;
+    /* The last bucket retains overflow totals without allocating memory. */
+    if(site<WAIT_SITES)wait_sites[lane][site].pc=pc;
+    wait_sites[lane][site].count++;
+    wait_sites[lane][site].us+=elapsed;
+    if(elapsed>wait_sites[lane][site].max_us)wait_sites[lane][site].max_us=elapsed;
+}
 #ifdef __vita__
 static SceUID threads[WORKERS]={-1,-1}, wakes[WORKERS]={-1,-1}, dones[WORKERS]={-1,-1}, math_mutex=-1;
 static SceUID owner_wake=-1, replies[WORKERS]={-1,-1};
@@ -134,7 +159,13 @@ static void service_owner(void)
 #else
         wait_sem(&owner_wake);
 #endif
-        __atomic_store_n(&owner_notice,0,__ATOMIC_RELEASE);
+        /* Consume the coalesced publication before scanning worker predicates.
+         * A release-only store allows the following loads to happen before the
+         * reset is visible. A worker can then publish after its state was read,
+         * see the old notice=1 and omit its signal: all lanes sleep forever.
+         * The exchange acquires even coalesced notifications and orders the
+         * reset before the scan. Notifications after it post a new wake. */
+        (void)__atomic_exchange_n(&owner_notice,0,__ATOMIC_SEQ_CST);
         unsigned yielding=0,quiescent=0,quiet=1;
         for(unsigned i=0;i<active_workers;i++) {
             unsigned state=__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE);
@@ -183,7 +214,8 @@ static void service_owner(void)
     }
 }
 
-int xv_object_math_lock(void)
+/* Keep the captured return address at the guarded caller, including LTO builds. */
+__attribute__((noinline)) int xv_object_math_lock(void)
 {
     if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
     /* running is published before waking workers and cleared only after every
@@ -205,7 +237,7 @@ int xv_object_math_lock(void)
         int result=sceKernelTryLockMutex(math_mutex,1);
         if(!result) {
             math_stats[lane].acquired++;
-            if(waiting)math_stats[lane].wait_us+=xk_os_monotonic_us()-waiting;
+            if(waiting)record_math_wait((unsigned)lane,(uintptr_t)__builtin_return_address(0),xk_os_monotonic_us()-waiting);
             if(math_fast_path) { math_depth[lane]=1;return lane+2; }
             return 1;
         }
@@ -216,7 +248,7 @@ int xv_object_math_lock(void)
         int result=pthread_mutex_trylock(&math_mutex);
         if(!result) {
             math_stats[lane].acquired++;
-            if(waiting)math_stats[lane].wait_us+=xk_os_monotonic_us()-waiting;
+            if(waiting)record_math_wait((unsigned)lane,(uintptr_t)__builtin_return_address(0),xk_os_monotonic_us()-waiting);
             if(math_fast_path) { math_depth[lane]=1;return lane+2; }
             return 1;
         }
@@ -305,6 +337,10 @@ static int initialize(void)
     initialized=-1;
     const char *fast=getenv("XV_OBJECT_LOCK_FAST_PATH");
     math_fast_path=!fast||atoi(fast)!=0;
+    const char *profile=getenv("XV_OBJECT_LOCK_PROFILE");
+    /* Dedicated experimental builds collect contention by default. Set zero
+     * for a profiling-overhead comparison; ordinary builds omit this module. */
+    math_profile=!profile||atoi(profile)!=0;
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     if(workers && (!strcmp(workers,"0")||!strcmp(workers,"1")))active_workers=(unsigned)atoi(workers);
     if(active_workers!=WORKERS)XK_LOG("[object-jobs] DIAGNOSTIC: %u active workers; zero selects owner-only execution\n",active_workers);
@@ -341,6 +377,7 @@ static int initialize(void)
 #endif
     __atomic_store_n(&initialized,1,__ATOMIC_RELEASE);
     XK_LOG("[object-jobs] guest stacks %08X/%08X/%08X, %u bytes each\n",stacks[0],stacks[1],stacks[2],STACK_BYTES);
+    XK_LOG("[object-locks] wait-site profiling %s; elapsed waits include scheduling and parked service time\n",math_profile?"on":"off");
     XK_LOG("[object-jobs] EXPERIMENT: whole object callbacks on core 0/1; owner services kernel requests and joins; shared game state and reordered updates are unproven\n");
     return 1;
 fail:
@@ -424,10 +461,9 @@ void xv_object_jobs_end(xctx **c)
 { if(*c)xv_object_jobs_finish(*c); }
 void xv_object_jobs_finish(xctx *c)
 {
-    static unsigned passes;
     if(c==owner) {
         xv_object_jobs_join();owner=NULL;
-        if(++passes==60) { xv_object_jobs_report(passes);passes=0; }
+        passes++;
     }
 }
 void xv_object_jobs_override(int enabled)
@@ -440,10 +476,11 @@ void xv_object_jobs_override(int enabled)
 }
 void xv_object_jobs_report(unsigned frames)
 {
-    if(!initialized)return;
-    xv_object_jobs_join();
-    XK_LOG("[object-jobs] %u passes batches %u jobs %u lanes %u/%u/%u work-us %llu/%llu/%llu batch-us %llu rejected %u; work sums overlap wall time\n",
-        frames,batches,submitted,executed[0],executed[1],executed[2],
+    /* Called with the renderer's frame window, not every 60 simulation passes.
+     * Reporting must never dispatch callbacks or reset live worker counters. */
+    if(initialized!=1||owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))return;
+    XK_LOG("[object-jobs] %u frames passes %u batches %u jobs %u lanes %u/%u/%u work-us %llu/%llu/%llu batch-us %llu rejected %u; work sums overlap wall time\n",
+        frames,passes,batches,submitted,executed[0],executed[1],executed[2],
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)work_us[2],
         (unsigned long long)batch_us,rejected);
     XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
@@ -453,8 +490,16 @@ void xv_object_jobs_report(unsigned frames)
         math_fast_path,math_idle_calls,math_stats[0].acquired,math_stats[1].acquired,math_stats[2].acquired,
         math_stats[0].nested,math_stats[1].nested,math_stats[0].contended,math_stats[1].contended,
         (unsigned long long)math_stats[0].wait_us,(unsigned long long)math_stats[1].wait_us);
+    for(unsigned lane=0;lane<WORKERS;lane++)for(unsigned site=0;site<=WAIT_SITES;site++)
+        if(wait_sites[lane][site].count) {
+            XK_LOG("[object-lock-site] lane %u pc %llX count %u wait-us %llu max-us %llu overflow %u\n",
+                lane,(unsigned long long)wait_sites[lane][site].pc,wait_sites[lane][site].count,
+                (unsigned long long)wait_sites[lane][site].us,
+                (unsigned long long)wait_sites[lane][site].max_us,site==WAIT_SITES);
+        }
+    memset(wait_sites,0,sizeof wait_sites);
     math_idle_calls=0;memset(math_stats,0,sizeof math_stats);
-    batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
+    passes=batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
 }
 /* Halo's original large-frame helper adjusts ESP without probing guard pages.
  * Validate before it writes the relocated return address. Keep all guest

@@ -1462,6 +1462,9 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
 #ifdef XV_NATIVE_OBJECT_SCAN
         { extern void xv_object_scan_report(unsigned); xv_object_scan_report(g_t_frames); }
 #endif
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+        { extern void xv_object_jobs_report(unsigned); xv_object_jobs_report(g_t_frames); }
+#endif
         xv_draw_profile_report(g_t_frames);
         xv_vertex_upload_report(g_t_frames);
         UI_LOG("[palette-cache] %u frames: %u reused / %u hashed (all 1024 bytes checked)\n",
