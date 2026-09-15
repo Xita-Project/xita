@@ -30,6 +30,47 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_motion_release_only_proven_slots_and_each_binding(self):
+        image = SyntheticImage()
+        image.section_name = ".text"
+        image.targets = {}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        constructors = [(*spec, row[3]) for row in prepare_boot.GAME_MEMBER_QUERY_CTORS]
+        for index, (_, _, _, table) in enumerate(constructors):
+            image.targets[table] = 0x1000 + (index % 2) * 16
+            image.targets[table + 0x18] = 0x1100 + index * 16
+        count = len(prepare_boot.GAME_MOTION_RELEASE_BINDINGS)
+        with patch.object(prepare_boot, "GAME_MOTION_RELEASE_BINDINGS", (spec,) * count), \
+             patch.object(prepare_boot, "GAME_MEMBER_QUERY_CTORS", constructors):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_motion_release_roots(image), set(before.values()))
+            self.assertEqual(image.targets, before)
+            # Other vtable slots and neighboring tables are not readable.
+            for slot in before:
+                for bad in (None, 0, 0xDEAD):
+                    image.targets[slot] = bad
+                    image.bad_code = 0xDEAD
+                    with self.assertRaisesRegex(ValueError, "not title code"):
+                        prepare_boot.game_motion_release_roots(image)
+                image.targets[slot] = before[slot]
+            image.bad_code = None
+            for section in (None, (0, 0, 0, 0, ".data"), (0, 0, 0, 0, "DSOUND")):
+                with patch.object(image, "section_of", return_value=section):
+                    with self.assertRaisesRegex(ValueError, "not title code"):
+                        prepare_boot.game_motion_release_roots(image)
+            for index in range(count):
+                guards = [spec] * count
+                guards[index] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_MOTION_RELEASE_BINDINGS", guards):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_motion_release_roots(image)
+            for index, row in enumerate(constructors):
+                guards = list(constructors)
+                guards[index] = (*row[:2], "0" * 64, row[3])
+                with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CTORS", guards):
+                    with self.assertRaisesRegex(ValueError, "constructor fingerprint"):
+                        prepare_boot.game_motion_release_roots(image)
+
     def test_object_release_interface_revision_slots_and_boundary(self):
         image = SyntheticImage()
         image.section_name = ".text"

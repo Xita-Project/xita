@@ -457,6 +457,37 @@ GAME_OBJECT_RELEASE_BINDINGS = (
 )
 
 
+GAME_MOTION_RELEASE_BINDINGS = (
+    (0x311410, 154, "028693083263768ef62c0c580069fc578a20b19cb540d04a2e6e9cddf517d909"),
+    (0x311BA0, 361, "863e5b542ff79db910ac23faa5d3d9d9444fe2748083be582ed41062c5bd14a6"),
+    (0x311940, 604, "ed527d39ef85a9b7b287885780710299f518d9a69745644bba035528dcc0567f"),
+    (0x4143A8, 28, "fecb267f695b24f38e4edcc0e873d4b202855e0bcbcc3c8059a086e7422b483c"),
+    (0x414428, 28, "ca59e934b6785f211c2976bb13b762cf68a8c142ef5a50819bd984fddc3086fc"),
+    (0x415130, 28, "05c9d757a1098ac3acce6539c5205a15175036d1a563d1bd8f8d2eed4f178e5b"),
+    (0x4151B0, 28, "3431f5b912f8edfa50d9b7f39683ac52190785fd73fa0bd4dcbb8b7fd35000d4"),
+    (0x415230, 28, "981dc873619383cf6c4956284c2303e26fe1b9d37978730c0374ab8244ef26c8"),
+    (0x4152B0, 28, "c60769abf15240c29a98788e01d41e2be3a9d4c75ee737f3120069901886b798"),
+)
+
+
+def game_motion_release_roots(image):
+    """Native218: original selected motion type and deleting-destructor slots."""
+    for address, length, digest in GAME_MOTION_RELEASE_BINDINGS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 motion release fingerprint mismatch")
+    roots = set()
+    for address, length, digest, table in GAME_MEMBER_QUERY_CTORS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 motion release constructor fingerprint mismatch")
+        for offset in (0, 0x18):
+            target = image.u32(table + offset)
+            section = image.section_of(target) if target else None
+            if not target or not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError("Halo 2 motion release target is not title code")
+            roots.add(target)
+    return roots
+
+
 def game_object_release_roots(image):
     """Native217: original five-slot rigid-body interface and release path."""
     for address, length, digest in GAME_OBJECT_RELEASE_BINDINGS:
@@ -1318,6 +1349,7 @@ def main():
         roots.update(game_script_typed_roots(image))
         roots.update(game_object_query_roots(image))
         roots.update(game_object_release_roots(image))
+        roots.update(game_motion_release_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
