@@ -470,6 +470,24 @@ GAME_MOTION_RELEASE_BINDINGS = (
 )
 
 
+GAME_ASSOCIATED_RELEASE_BINDINGS = (
+    (0x1D1820, 78, "6eb9a9b9333e991fec1339130ec214539ece37828ac259eb118fac62fd7ee542"),
+    (0x1D19D0, 73, "9d7ecd222874de1448bce001096192339944515bd360f963d63a841fda20f404"),
+    (0x30BF82, 50, "80a7d375c94cf41c97ba24a57a8279e92579602419b786e721e2ffa342d1ce3f"),
+    (0x455950, 44, "4c96ba80a10eabbed52a9fbd911f36d4c77bc80ef32cce5a49de347247f6ddd0"),
+)
+
+
+def game_associated_release_roots(image):
+    """Native219: original member54h object's bounded ten-slot interface."""
+    for address, length, digest in GAME_ASSOCIATED_RELEASE_BINDINGS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 associated release fingerprint mismatch")
+    if image.u32(0x455978) != 0:
+        raise ValueError("Halo 2 associated release boundary mismatch")
+    return _code_vtable_roots(image, 0x455950, 0x455978)
+
+
 def game_motion_release_roots(image):
     """Native218: original selected motion type and deleting-destructor slots."""
     for address, length, digest in GAME_MOTION_RELEASE_BINDINGS:
@@ -1350,6 +1368,7 @@ def main():
         roots.update(game_object_query_roots(image))
         roots.update(game_object_release_roots(image))
         roots.update(game_motion_release_roots(image))
+        roots.update(game_associated_release_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))
