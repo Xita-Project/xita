@@ -70,18 +70,21 @@ int main(void)
     uint32_t *previous=malloc(640*480*4); REQUIRE(previous);
     SceGxmRenderTargetParams rp={.width=640,.height=480,.multisampleMode=SCE_GXM_MULTISAMPLE_NONE,.scenesPerFrame=1,.driverMemBlock=-1};
     SceGxmRenderTarget *rt=NULL;CHECK(sceGxmCreateRenderTarget(&rp,&rt));
+    SceGxmDepthStencilSurface depth;void *depth_data=alloc(640*480*4,0,NULL);
+    CHECK(sceGxmDepthStencilSurfaceInit(&depth,SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24,
+        SCE_GXM_DEPTH_STENCIL_SURFACE_TILED,640,depth_data,NULL));
     SceGxmColorSurface color;CHECK(sceGxmColorSurfaceInit(&color,SCE_GXM_COLOR_FORMAT_A8R8G8B8,SCE_GXM_COLOR_SURFACE_LINEAR,SCE_GXM_COLOR_SURFACE_SCALE_NONE,SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT,640,480,640,target));
     SceGxmTexture tex;CHECK(sceGxmTextureInitLinear(&tex,texture,SCE_GXM_TEXTURE_FORMAT_X8U8U8U8_1RGB,640,480,1));
     CHECK(sceGxmTextureSetMinFilter(&tex,SCE_GXM_TEXTURE_FILTER_LINEAR));CHECK(sceGxmTextureSetMagFilter(&tex,SCE_GXM_TEXTURE_FILTER_LINEAR));
     CHECK(sceGxmTextureSetUAddrMode(&tex,SCE_GXM_TEXTURE_ADDR_CLAMP));CHECK(sceGxmTextureSetVAddrMode(&tex,SCE_GXM_TEXTURE_ADDR_CLAMP));
     unsigned failures=0;
-    for(unsigned test=0;test<3;++test){
+    for(unsigned round=0;round<4;++round)for(unsigned test=0;test<3;++test){
         for(unsigned y=0;y<480;++y)for(unsigned x=0;x<640;++x){unsigned i=y*640+x;if(!test)target[i]=0;
             const uint32_t quadrant[]={0x00FF0000,0x0000FF00,0x000000FF,0x00FFFFFF};
             texture[i]=test==0?quadrant[(y>=240)*2+(x>=320)]:((x*13+y*17)&255)|(((x*37+y*19)&255)<<8)|(((x*11+y*23)&255)<<16);
         }
         memcpy(indices,test==2?back:front,sizeof front);
-        CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,NULL));
+        CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,&depth));
         sceGxmSetViewportEnable(ctx,SCE_GXM_VIEWPORT_ENABLED);
         sceGxmSetRegionClip(ctx,SCE_GXM_REGION_CLIP_NONE,0,0,639,479);
         sceGxmSetViewport(ctx,320,320,240,-240,0.0f,1.0f);sceGxmSetCullMode(ctx,SCE_GXM_CULL_CCW);
@@ -96,14 +99,14 @@ int main(void)
         const float dims[]={640,480,16777215,0},inv[]={1.0f/640,1.0f/480,0,0};
         CHECK(sceGxmSetUniformDataF(vu,surface,0,4,dims));CHECK(sceGxmReserveFragmentDefaultUniformBuffer(ctx,&fu));CHECK(sceGxmSetUniformDataF(fu,scale,0,4,inv));
         CHECK(sceGxmSetVertexStream(ctx,0,vertices));CHECK(sceGxmSetFragmentTexture(ctx,sampler_index,&tex));
-        CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,indices,6));SceGxmNotification done={sceGxmGetNotificationRegion(),test+1}; REQUIRE(done.address);
+        CHECK(sceGxmDraw(ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,indices,6));SceGxmNotification done={sceGxmGetNotificationRegion(),round*3+test+1}; REQUIRE(done.address);
         CHECK(sceGxmEndScene(ctx,NULL,&done));CHECK(sceGxmNotificationWait(&done));sceGxmFinish(ctx);
         unsigned mismatches=0;for(unsigned i=0;i<640*480;++i){uint32_t want=test==2?previous[i]:texture[i];if((target[i]&0xFFFFFF)!=(want&0xFFFFFF))++mismatches;
 }
 
         if(mismatches)++failures;
         memcpy(previous,target,640*480*4);
-        sceClibPrintf("[quad-probe] test=%u mismatches=%u first=%08X last=%08X\n",test,mismatches,target[0],target[640*480-1]);
+        sceClibPrintf("[quad-probe] round=%u test=%u mismatches=%u first=%08X last=%08X\n",round,test,mismatches,target[0],target[640*480-1]);
         char path[128];snprintf(path,sizeof path,"ux0:data/xita-halo2/probe-%u.bin",test);FILE *f=fopen(path,"wb");REQUIRE(f);REQUIRE(fwrite(target,4,640*480,f)==640*480);REQUIRE(!fclose(f));
     }
     sceClibPrintf("[quad-probe] complete; synthetic images only, no guest draw; failures=%u\n",failures);sceKernelExitProcess(failures?1:0);return 0;

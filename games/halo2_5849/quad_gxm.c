@@ -42,6 +42,7 @@ static const SceGxmProgramParameter *parameter(const SceGxmProgram *p,const char
 static SceGxmContext *ctx;
 static SceGxmRenderTarget *rt;
 static SceGxmColorSurface color;
+static SceGxmDepthStencilSurface depth;
 static SceGxmTexture tex;
 static SceGxmVertexProgram *vprog;
 static SceGxmFragmentProgram *fprog;
@@ -103,14 +104,20 @@ static int initialize(void)
     REQUIRE(!sceGxmProgramFindParameterByName(fp,"tex1")&&!sceGxmProgramFindParameterByName(fp,"tex2"));
     vertices=alloc(4096,0,NULL);indices=alloc(4096,0,NULL);REQUIRE(vertices && indices);
     const uint16_t front[]={0,1,2,0,2,3};memcpy(indices,front,sizeof front);
-    texture=alloc(640*480*4,0,NULL);target=alloc(640*480*4,0,NULL);REQUIRE(texture && target);
+    texture=alloc(640*480*4,0,NULL);target=alloc(640*480*4,0,NULL);
+    void *depth_data=alloc(640*480*4,0,NULL);REQUIRE(texture && target && depth_data);
     SceGxmRenderTargetParams rp={.width=640,.height=480,.multisampleMode=SCE_GXM_MULTISAMPLE_NONE,.scenesPerFrame=1,.driverMemBlock=-1};
     CHECK(sceGxmCreateRenderTarget(&rp,&rt));
+    /* This private staging surface initializes GXM's background mask through
+     * the standard API. It is never copied to the guest depth attachment;
+     * the accepted movie pipeline keeps depth/stencil writes disabled. */
+    CHECK(sceGxmDepthStencilSurfaceInit(&depth,SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24,
+        SCE_GXM_DEPTH_STENCIL_SURFACE_TILED,640,depth_data,NULL));
     CHECK(sceGxmColorSurfaceInit(&color,SCE_GXM_COLOR_FORMAT_A8R8G8B8,SCE_GXM_COLOR_SURFACE_LINEAR,SCE_GXM_COLOR_SURFACE_SCALE_NONE,SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT,640,480,640,target));
     CHECK(sceGxmTextureInitLinear(&tex,texture,SCE_GXM_TEXTURE_FORMAT_X8U8U8U8_1RGB,640,480,1));
     CHECK(sceGxmTextureSetMinFilter(&tex,SCE_GXM_TEXTURE_FILTER_LINEAR));CHECK(sceGxmTextureSetMagFilter(&tex,SCE_GXM_TEXTURE_FILTER_LINEAR));
     CHECK(sceGxmTextureSetUAddrMode(&tex,SCE_GXM_TEXTURE_ADDR_CLAMP));CHECK(sceGxmTextureSetVAddrMode(&tex,SCE_GXM_TEXTURE_ADDR_CLAMP));
-    xv_logf("[h2/quad] GXM staging initialized 640x480; observed shader/combiner only\n");
+    xv_logf("[h2/quad] GXM staging initialized 640x480 with private depth/mask; observed shader/combiner only\n");
     return 1;
 }
 
@@ -154,7 +161,7 @@ const uint32_t *h2_quad_gxm_render(void *opaque, const h2_quad_request *request)
     if (!ready) return NULL;
     memcpy(vertices,request->vertices,sizeof request->vertices);
     memcpy(texture,request->texture.pixels,640*480*4);
-    CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,NULL));
+    CHECK(sceGxmBeginScene(ctx,0,rt,NULL,NULL,NULL,&color,&depth));
     sceGxmSetViewportEnable(ctx,SCE_GXM_VIEWPORT_ENABLED);
     sceGxmSetRegionClip(ctx,SCE_GXM_REGION_CLIP_NONE,0,0,639,479);
     sceGxmSetViewport(ctx,320,320,240,-240,0.0f,1.0f);sceGxmSetCullMode(ctx,SCE_GXM_CULL_CCW);
