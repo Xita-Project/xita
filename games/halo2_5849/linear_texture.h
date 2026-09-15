@@ -19,3 +19,8 @@ typedef struct h2_block_texture {
 } h2_block_texture;
 int h2_dxt23_texture_read(const h2_command_state *state, const h2_kelvin_clear *memory,
                            unsigned unit, h2_block_texture *view);
+/* Native183's four enabled samplers reference the same 8x8 BC1 allocation.
+ * Resolve only its exact one-level 2D format and all 32 compressed bytes.
+ * Returned ownership, read-only behavior and rejection match DXT23 above. */
+int h2_dxt1_texture_read(const h2_command_state *state, const h2_kelvin_clear *memory,
+                         unsigned unit, h2_block_texture *view);

@@ -30,6 +30,8 @@ extern int h2_linear_texture_read(const h2_command_state *, const h2_kelvin_clea
                                   unsigned, h2_linear_texture *) __attribute__((weak));
 extern int h2_dxt23_texture_read(const h2_command_state *, const h2_kelvin_clear *,
                                  unsigned, h2_block_texture *) __attribute__((weak));
+extern int h2_dxt1_texture_read(const h2_command_state *, const h2_kelvin_clear *,
+                                 unsigned, h2_block_texture *) __attribute__((weak));
 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
 uint8_t *g_xram;
@@ -218,6 +220,25 @@ static void graphics_snapshot(void)
                 int closed = fclose(pixels);
                 xv_logf("[h2/graphics] private read-only DXT23 texture2 snapshot address=%08X bytes=%u complete=%d\n",
                         blocks.physical, blocks.bytes, complete && !closed);
+            }
+        }
+        /* Stop-only, read-only capture of every enabled original BC1 input.
+         * Keep each unit separately even when physical ranges coincide. */
+        for (unsigned unit = 0; unit < 4; ++unit) {
+            if (!h2_dxt1_texture_read ||
+                !h2_dxt1_texture_read(&channel->commands, &channel->clear, unit, &blocks)) continue;
+            char path[80];
+            snprintf(path, sizeof path, "ux0:data/xita-halo2/texture%u-dxt1-at-stop.bin", unit);
+            FILE *pixels = fopen(path, "wb");
+            if (pixels) {
+                /* Layout 2 denotes rows of 4x4, 8-byte BC1 blocks. */
+                uint32_t header[8] = {1, blocks.physical, blocks.width, blocks.height,
+                                      blocks.block_pitch, blocks.bytes, blocks.method_format, 2};
+                int complete = fwrite(header, 1, sizeof header, pixels) == sizeof header &&
+                               fwrite(blocks.blocks, 1, blocks.bytes, pixels) == blocks.bytes;
+                int closed = fclose(pixels);
+                xv_logf("[h2/graphics] private read-only DXT1 texture%u snapshot address=%08X bytes=%u complete=%d\n",
+                        unit, blocks.physical, blocks.bytes, complete && !closed);
             }
         }
     }

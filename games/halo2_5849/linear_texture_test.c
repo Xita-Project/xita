@@ -54,17 +54,19 @@ static void rejected(unsigned unit)
     assert(!memcmp(&out, &before, sizeof out) && !memcmp(&old, &s, sizeof s));
     assert(!memcmp(&memory, &c, sizeof c) && !memcmp(ram, f.ram, sizeof ram));
 }
+static uint32_t block_format, block_bytes;
+static int (*block_read)(const h2_command_state *, const h2_kelvin_clear *, unsigned, h2_block_texture *);
 static void block_init(unsigned unit, unsigned selector)
 {
-    init(unit, selector); set(unit, 4, 0x03310E28u | selector);
-    f.instance[1] = f.instance[5] = 79; /* offset16 + exactly64 readable bytes */
+    init(unit, selector); set(unit, 4, block_format | selector);
+    f.instance[1] = f.instance[5] = 16 + block_bytes - 1; /* inclusive full-block extent */
 }
 static void block_rejected(unsigned unit)
 {
     h2_block_texture out, before; memset(&out, 0xA5, sizeof out); before = out;
     h2_command_state old = s; h2_kelvin_clear memory = c; uint8_t ram[sizeof f.ram];
     memcpy(ram, f.ram, sizeof ram);
-    assert(!h2_dxt23_texture_read(&s, &c, unit, &out));
+    assert(!block_read(&s, &c, unit, &out));
     assert(!memcmp(&out, &before, sizeof out) && !memcmp(&old, &s, sizeof s));
     assert(!memcmp(&memory, &c, sizeof c) && !memcmp(ram, f.ram, sizeof ram));
 }
@@ -73,15 +75,15 @@ static void block_tests(void)
     for (unsigned unit = 0; unit < 4; ++unit) for (unsigned selector = 1; selector <= 2; ++selector) {
         block_init(unit, selector); h2_command_state old = s; h2_kelvin_clear memory = c;
         uint8_t ram[sizeof f.ram]; memcpy(ram, f.ram, sizeof ram); h2_block_texture out;
-        assert(h2_dxt23_texture_read(&s, &c, unit, &out));
+        assert(block_read(&s, &c, unit, &out));
         assert(out.physical == (selector == 1 ? 528 : 4112) && out.blocks == f.ram + out.physical);
-        assert(out.bytes == 64 && out.width == 8 && out.height == 8 && out.block_pitch == 32);
-        assert(out.method_format == (0x03310E28u | selector) && reads == 4 && maps == 1);
+        assert(out.bytes == block_bytes && out.width == 8 && out.height == 8 && out.block_pitch == block_bytes / 2);
+        assert(out.method_format == (block_format | selector) && reads == 4 && maps == 1);
         assert(!memcmp(&old, &s, sizeof s) && !memcmp(&memory, &c, sizeof c));
         assert(!memcmp(ram, f.ram, sizeof ram));
     }
     for (unsigned bit = 0; bit < 32; ++bit) {
-        block_init(2, 1); set(2, 4, 0x03310E29u ^ (1u << bit));
+        block_init(2, 1); set(2, 4, (block_format | 1u) ^ (1u << bit));
         block_rejected(2); assert(!reads && !maps);
     }
     for (unsigned i = 0; i < 3; ++i) {
@@ -97,14 +99,14 @@ static void block_tests(void)
     block_init(2, 1); f.instance[0] |= 0x10000; block_rejected(2); assert(!maps);
     block_init(2, 1); f.instance[3] ^= 4096; block_rejected(2); assert(!maps);
     block_init(2, 1); f.instance[1]--; block_rejected(2); assert(!maps);
-    block_init(2, 1); c.physical_bytes = 591; block_rejected(2); assert(!maps);
+    block_init(2, 1); c.physical_bytes = 528 + block_bytes - 1; block_rejected(2); assert(!maps);
     block_init(2, 1); set(2, 0, UINT32_MAX - 15); block_rejected(2); assert(!maps);
     block_init(2, 1); f.fail_map = 1; block_rejected(2); assert(maps == 1);
     block_init(2, 1); f.overflow_map = 1; block_rejected(2); assert(maps == 1);
     block_init(2, 1); block_rejected(4); block_rejected(UINT32_MAX);
     c.read_instance = NULL; block_rejected(2); c.read_instance = read_word; c.map_physical = NULL; block_rejected(2);
-    assert(!h2_dxt23_texture_read(NULL, &c, 0, NULL));
-    assert(!h2_dxt23_texture_read(&s, NULL, 0, NULL));
+    assert(!block_read(NULL, &c, 0, NULL));
+    assert(!block_read(&s, NULL, 0, NULL));
 }
 int main(void)
 {
@@ -153,6 +155,11 @@ int main(void)
     c.read_instance = NULL; rejected(0); c.read_instance = read_word; c.map_physical = NULL; rejected(0);
     assert(!h2_linear_texture_read(NULL, &c, 0, NULL));
     assert(!h2_linear_texture_read(&s, NULL, 0, NULL));
-    block_tests();
-    puts("Linear ARGB/XRGB and 8x8 DXT23 views: four units, DMA permissions/extents, format bounds and read-only rejection passed");
+    for (unsigned bc1 = 0; bc1 < 2; ++bc1) {
+        block_format = bc1 ? 0x03310C28u : 0x03310E28u;
+        block_bytes = bc1 ? 32 : 64;
+        block_read = bc1 ? h2_dxt1_texture_read : h2_dxt23_texture_read;
+        block_tests();
+    }
+    puts("Linear ARGB/XRGB and 8x8 DXT1/DXT23 views: four units, DMA permissions/extents, format bounds and read-only rejection passed");
 }

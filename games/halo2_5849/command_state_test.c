@@ -116,6 +116,22 @@ int main(void)
     reject(0, 0x1E90, 0); /* executing a program remains unsupported */
     assert(emit(0, 0x194C, 0x11223344) && s.vertex4ub[3] == 0x11223344);
     reject(0, 0x1940, 1); /* position attribute would emit a vertex */
+    /* Full polygon-stipple bank and Boolean enable are state assignments.
+     * No mapped memory, resource callback or draw is touched by any row. */
+    const uint32_t stipple[] = {0, 1, UINT32_MAX, 0x80000000, 0x55555555, 0xAAAAAAAA, 0x01234567};
+    for (unsigned method = 0x147C; method <= 0x14FC; method += 4)
+    for (unsigned v = 0; v < sizeof stipple / sizeof *stipple; ++v) {
+        if (method == 0x147C && stipple[v] > 1) { reject(0, method, stipple[v]); continue; }
+        h2_command_state expected = s; h2_kelvin_clear clear = c; fixture memory = f;
+        unsigned prior_reads = instance_reads, prior_maps = mappings;
+        expected.setup[method / 4] = stipple[v];
+        expected.setup_valid[method / 128] |= 1u << ((method / 4) % 32);
+        assert(emit(0, method, stipple[v]));
+        assert(!memcmp(&s, &expected, sizeof s) && !memcmp(&c, &clear, sizeof c));
+        assert(!memcmp(&f, &memory, sizeof f) && prior_reads == instance_reads && prior_maps == mappings);
+        reject(1, method, stipple[v]); reject(0, method + 1, stipple[v]);
+    }
+    reject(0, 0x1478, 0); reject(0, 0x147C, 2); reject(0, 0x1500, 0);
     /* Offset/format setup is non-executing: exact raw input + one validity bit,
      * no instance/DMA reads, no guest mapping, and no changed clear/guest state. */
     const uint32_t array_offsets[] = {0, 1, 0x03131000, 0x0313100C, 0x7FFFFFFF,

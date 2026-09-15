@@ -42,8 +42,9 @@ int h2_linear_texture_read(const h2_command_state *s, const h2_kelvin_clear *c,
     return 1;
 }
 
-int h2_dxt23_texture_read(const h2_command_state *s, const h2_kelvin_clear *c,
-                           unsigned unit, h2_block_texture *view)
+static int block_texture_read(const h2_command_state *s, const h2_kelvin_clear *c,
+                              unsigned unit, h2_block_texture *view,
+                              uint32_t expected_format, uint32_t bytes)
 {
     if (!s || !c || !view || !c->read_instance || !c->map_physical || unit >= 4) return 0;
     unsigned base = 0x1B00 + unit * 64;
@@ -53,21 +54,33 @@ int h2_dxt23_texture_read(const h2_command_state *s, const h2_kelvin_clear *c,
         if (!(s->setup_valid[method / 128] & (1u << ((method / 4) % 32)))) return 0;
     }
     uint32_t format = s->setup[(base + 4) / 4], selector = format & 3;
-    /* Native180: 2D, border color, DXT23, one level, log2 dimensions 3x3.
-     * Four 4x4 blocks of 16 bytes, in row order. Other layouts stay rejected. */
-    if ((selector != 1 && selector != 2) || (format & ~3u) != 0x03310E28u ||
+    /* Pinned 2D, border color, one-level 8x8 block textures only.
+     * Four row-ordered 4x4 blocks: BC1 has 8-byte blocks; BC2 has 16.
+     * Wrappers select the complete format and extent; no decoding here. */
+    if ((selector != 1 && selector != 2) || (format & ~3u) != expected_format ||
         !(s->setup[(base + 0xC) / 4] & 0x40000000u) ||
         !(s->dma_valid & (1u << selector))) return 0;
     h2_dma_object dma;
     uint32_t address;
     if (!h2_dma_load(c->read_instance, c->opaque, s->dma[selector], &dma) ||
-        !h2_dma_resolve(&dma, s->setup[base / 4], 64, 0, c->physical_bytes, &address)) return 0;
-    const uint8_t *blocks = c->map_physical(c->opaque, address, 64);
-    if (!blocks || (uintptr_t)blocks > UINTPTR_MAX - 63) return 0;
+        !h2_dma_resolve(&dma, s->setup[base / 4], bytes, 0, c->physical_bytes, &address)) return 0;
+    const uint8_t *blocks = c->map_physical(c->opaque, address, bytes);
+    if (!blocks || (uintptr_t)blocks > UINTPTR_MAX - (bytes - 1)) return 0;
     h2_block_texture result = {0};
-    result.blocks = blocks; result.physical = address; result.bytes = 64;
-    result.width = result.height = 8; result.block_pitch = 32;
+    result.blocks = blocks; result.physical = address; result.bytes = bytes;
+    result.width = result.height = 8; result.block_pitch = bytes / 2;
     result.method_format = format;
     *view = result;
     return 1;
+}
+
+int h2_dxt23_texture_read(const h2_command_state *s, const h2_kelvin_clear *c,
+                           unsigned unit, h2_block_texture *view)
+{
+    return block_texture_read(s, c, unit, view, 0x03310E28u, 64);
+}
+int h2_dxt1_texture_read(const h2_command_state *s, const h2_kelvin_clear *c,
+                         unsigned unit, h2_block_texture *view)
+{
+    return block_texture_read(s, c, unit, view, 0x03310C28u, 32);
 }
