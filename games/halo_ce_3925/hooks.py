@@ -163,6 +163,18 @@ class HaloHooks(NoGameHooks):
         return out
 
     def transform_body(self, address, body):
+        if self.enabled and address == 0x87EA0 and hashlib.sha256(
+                self.image.bytes_at(0x87ECC, 0x1A) or b"").hexdigest() == "68ec0f334940aa871ae2fede180af8adf67f37fd58a0f094857397e9445970b0":
+            def sphere_distance(match):
+                return ("#ifdef XV_NATIVE_BSP_SPHERE\n"
+                        "    { extern int xv_bsp_sphere_plane_distance(xctx *);\n"
+                        "      if (!xv_bsp_sphere_plane_distance(c)) {\n"
+                        "#endif\n" + match[0] +
+                        "#ifdef XV_NATIVE_BSP_SPHERE\n    } }\n#endif\n")
+            # The emitted first-node and loop-body copies both need the same
+            # hook. Original arithmetic remains the exceptional-input fallback.
+            body = re.sub(r"    /\* 00087ECC .*?(?=    /\* 00087EE6 )",
+                          sphere_distance, body, flags=re.S)
         if self.enabled and address == 0x88B80 and hashlib.sha256(
                 self.image.bytes_at(0x88BA5, 0x54) or b"").hexdigest() == "8cff0b4dd7978f4e88a2872a32b2d9a8df712111a33aed2f8ef29208df959b3f":
             body = re.sub(r"    /\* 00088BA5 .*?(?=    /\* 00088BF9 )",

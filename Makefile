@@ -359,6 +359,9 @@ XITA_GUEST_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GUEST
 XITA_SYS_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_SYS_SRCS))
 XITA_GAME_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GAME_SRCS))
 RECOMP_CFLAGS := -O2 -fno-strict-aliasing -mthumb -mcpu=cortex-a9 -mfpu=neon -w -std=gnu11 -I. -Iruntime -I$(RECOMP_DIR) -I$(RECOMP_DIR)/kernel
+ifeq ($(XV_NATIVE_BSP_SPHERE),1)
+RECOMP_CFLAGS += -DXV_NATIVE_BSP_SPHERE
+endif
 ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_MODEL_PALETTE
 CFLAGS += -DXV_NATIVE_MODEL_PALETTE

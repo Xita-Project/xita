@@ -112,3 +112,18 @@ Private captures are under `validation/engine-restructure-20260914T2300Z` in the
 worker-sizing workspace. The comparison receipt is
 `physical-stack256-object-compare/result.json`. No game assets or private logs
 are included in this document.
+
+## Campaign initialization and next arithmetic candidate
+
+The combined log-retrieval runtime also loads Pillar of Autumn on Normal,
+completes the original cryo-tube exit animation and returns to first-person
+control. The saved tutorial capture contains 626 complete reporting windows:
+37,560 simulation passes and 2,197,356 completed object callbacks, split
+1,148,814 / 1,048,542 between the two worker lanes. No worker STOP appears in
+that capture. The checked stack peak rises to 99,320 bytes on both lanes.
+This is mostly the cryo tutorial, not NPC combat or verified checkpoint resume.
+
+The physical application's endpoint continues to time out. No physical update
+or restart was performed during these checks. The next isolated candidate is
+the [native sphere-plane calculation](native-bsp-sphere-20260915.md); its
+instruction-level result does not establish a hardware FPS gain.
