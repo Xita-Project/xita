@@ -99,6 +99,12 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_ACTION_WALKS = (
+    (0xE6830, 137, "74cc8d6fbd2cf6c4f8ecb86836d10796283f833809d7f89d09145e81b07b9125"),
+    (0xE6900, 88, "8fe963a2c722ff6daee79d421a47125d2f65f32398eda43ef7738384d624a661"),
+    (0xE6960, 84, "fcd6bd4ff031fe366f720daea5bcec15ed708b7220e290716b5bacc49e7cbbe9"),
+    (0xE69C0, 84, "6df98094d9647e78eded72ec43008f54445f6bb2a6c0443948a0a36a0f82d9b7"),
+)
 GAME_PACKED_VECTOR_BINDINGS = (
     (0x279BA2, 45, "ae5b4f05401786d52eb8183057ed4ce7f7ed8b9c4b38b3d45510b1d9a291b6fa"),
     (0x279C6F, 70, "d9fe85669bb7394f774d95bbce234fa3950a02301b12e6b67ca0962456a6f2c5"),
@@ -434,6 +440,39 @@ def descriptor_child_field_roots(image, offsets):
     return roots
 
 
+def game_action_callback_roots(image):
+    """Native158: the original 60-entry action table shares four-word records.
+
+    E6830 proves indices 0..59 and optional field4; E6900 calls field0,
+    E6960 field8, and E69C0 fieldC. Keep their original AL/bit handling.
+    The owned records occupy a separate bounded, aligned data arena.
+    """
+    for address, length, digest in GAME_ACTION_WALKS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 action callback walk fingerprint mismatch")
+    records = set()
+    for slot in range(0x4677C8, 0x4678B8, 4):
+        record = image.u32(slot)
+        section = image.section_of(record) if record else None
+        if (not record or not 0x467564 <= record < 0x4677C4 or
+                (record - 0x467564) % 16 or not section or section[4] != ".data" or
+                record + 16 > section[0] + section[2] or
+                len(image.bytes_at(record, 16)) != 16):
+            raise ValueError("Halo 2 action callback record has invalid data span")
+        records.add(record)
+    roots = set()
+    for record in records:
+        for offset in (0, 4, 8, 12):
+            target = image.u32(record + offset)
+            if offset and target == 0:
+                continue
+            section = image.section_of(target) if target else None
+            if not target or not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError("Halo 2 action callback target is not title code")
+            roots.add(target)
+    return roots
+
+
 def game_packed_vector_roots(image):
     """Native154/155 reach format 1 and the shared format 4/6 callbacks.
 
@@ -620,6 +659,7 @@ def main():
         roots.update(game_descriptor_child_roots(image))
         roots.update(game_descriptor_object_roots(image))
         roots.update(game_packed_vector_roots(image))
+        roots.update(game_action_callback_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
         roots.add(image.u32(image.u32(0x477058) + 0x10))

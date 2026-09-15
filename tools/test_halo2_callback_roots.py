@@ -446,6 +446,118 @@ class CallbackRoots(unittest.TestCase):
                 prepare_boot.host_channel_callback_roots(image)
 
 
+class ActionImage:
+    def __init__(self):
+        self.code = b"synthetic action callers"
+        self.words = {slot: 0x467564 + (n % 38) * 16
+                      for n, slot in enumerate(range(0x4677C8, 0x4678B8, 4))}
+        for n in range(38):
+            for field in range(4):
+                self.words[0x467564 + n * 16 + field * 4] = 0x1000 + n * 64 + field * 16
+        self.bad_code = None
+        self.data_name = ".data"
+        self.code_name = ".text"
+        self.data_end = 0x4677C4
+        self.short_record = None
+
+    def u32(self, address):
+        return self.words[address]
+
+    def bytes_at(self, address, size):
+        if address == 0x200:
+            assert size == len(self.code)
+            return self.code
+        assert size == 16
+        data = struct.pack("<4I", *(self.words[address + n * 4] or 0 for n in range(4)))
+        return data[:-1] if address == self.short_record else data
+
+    def section_of(self, address):
+        if 0x467564 <= address < 0x4677C4:
+            return (0x467564, 0, self.data_end - 0x467564, 0, self.data_name)
+        return (0x1000, 0, 0x1000, 0, self.code_name)
+
+    def is_code(self, address):
+        return 0x1000 <= address < 0x2000 and address != self.bad_code
+
+
+class ActionRoots(unittest.TestCase):
+    def setUp(self):
+        self.image = ActionImage()
+        self.spec = (0x200, len(self.image.code), hashlib.sha256(self.image.code).hexdigest())
+        self.guards = patch.object(prepare_boot, "GAME_ACTION_WALKS", (self.spec,) * 4)
+        self.guards.start()
+        self.addCleanup(self.guards.stop)
+
+    def test_all_slots_four_fields_duplicates_and_no_mutation(self):
+        before = dict(self.image.words)
+        expected = set(range(0x1000, 0x1980, 16))
+        self.assertEqual(prepare_boot.game_action_callback_roots(self.image), expected)
+        self.assertEqual(self.image.words, before)
+        # Non-callback neighbors are deliberately invalid and never read.
+        self.image.words[0x4677C4] = None
+        self.image.words[0x4678B8] = None
+        self.assertEqual(prepare_boot.game_action_callback_roots(self.image), expected)
+        for slot in range(0x4677C8, 0x4678B8, 4):
+            saved = self.image.words[slot]
+            self.image.words[slot] = 0
+            with self.assertRaisesRegex(ValueError, "data span"):
+                prepare_boot.game_action_callback_roots(self.image)
+            self.image.words[slot] = saved
+
+    def test_record_arena_alignment_section_and_readable_span(self):
+        slot = 0x4677C8
+        for bad in (None, 0, 0x467560, 0x467565, 0x467568, 0x4677C4, 0x4677C8, 0xFFFFfff0):
+            self.image.words[slot] = bad
+            with self.assertRaisesRegex(ValueError, "data span"):
+                prepare_boot.game_action_callback_roots(self.image)
+        self.image.words[slot] = 0x467564
+        self.image.data_name = ".text"
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_action_callback_roots(self.image)
+        self.image.data_name = ".data"
+        self.image.data_end -= 1
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_action_callback_roots(self.image)
+        self.image.data_end += 1
+        self.image.short_record = 0x467564
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_action_callback_roots(self.image)
+
+    def test_required_entry_optional_callbacks_and_code_sections(self):
+        for field in (4, 8, 12):
+            self.image.words[0x467564 + field] = 0
+        roots = prepare_boot.game_action_callback_roots(self.image)
+        self.assertIn(0x1000, roots)
+        for missing in (0x1010, 0x1020, 0x1030): self.assertNotIn(missing, roots)
+        for field in (0, 4, 8, 12):
+            slot = 0x467574 + field
+            saved = self.image.words[slot]
+            for bad in (None, 0x3000):
+                self.image.words[slot] = bad
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_action_callback_roots(self.image)
+            self.image.words[slot] = saved
+            self.image.bad_code = saved
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_action_callback_roots(self.image)
+            self.image.bad_code = None
+        self.image.code_name = "D3D"
+        with self.assertRaisesRegex(ValueError, "title code"):
+            prepare_boot.game_action_callback_roots(self.image)
+        self.image.code_name = ".text"
+        self.image.words[0x467564] = 0
+        with self.assertRaisesRegex(ValueError, "title code"):
+            prepare_boot.game_action_callback_roots(self.image)
+
+    def test_all_four_original_walk_guards(self):
+        for which in range(4):
+            specs = [self.spec] * 4
+            specs[which] = (*self.spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_ACTION_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_action_callback_roots(self.image)
+
+
 class DescriptorImage:
     def __init__(self):
         self.code = b"synthetic descriptor caller"
