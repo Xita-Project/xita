@@ -38,11 +38,12 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
     fixture=(root/'tools/tests/object_audio.c').read_text()
     audio.write_text(fixture.replace('/* PRODUCTION_AUDIO */',d3d_source[begin:end]+'\n'+methods+'\n'+pump+'\n'+volume+'\n'+commit_macro+'\n'+commit+'\n#undef DS_OK\n'))
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11','-fno-strict-aliasing',
-        '-DXV_EXPERIMENTAL_OBJECT_JOBS','-I'+str(root/'recomp'),
+        '-DXV_EXPERIMENTAL_OBJECT_JOBS','-DXV_NATIVE_MODEL_HIERARCHY','-I'+str(root/'recomp'),
         '-ffunction-sections','-fdata-sections','-ffp-contract=off',
         *shlex.split(os.environ.get('OBJECT_JOB_TEST_FLAGS','')),
         str(root/'tools/tests/object_jobs.c'),str(d3d),str(audio),str(root/'recomp/kernel/xk_object_jobs.c'),
         str(root/'recomp/kernel/xk_math.c'),str(root/'recomp/xv_x86rt.c'),
+        str(root/'recomp/kernel/xk_hierarchy.c'),
         '-pthread','-Wl,--gc-sections','-lm','-o',str(binary)],check=True)
     for timed in ("0", "1"):
         for profile in ("0", "1"):
@@ -51,6 +52,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                 result=subprocess.run([str(binary)],check=True,timeout=30,env=env,
                                       capture_output=True,text=True)
                 print(result.stdout,end='')
+                assert re.findall(r'\[model-hierarchy\] 3 frames batches (\d+) child nodes (\d+)',result.stderr)==[('600','3600'),('0','0')]
                 assert re.findall(r'quiescent owner stream volume updates (\d+)',result.stderr)==['600','0']
                 assert re.findall(r'quiescent owner deferred audio commits (\d+)',result.stderr)==['600','0']
                 timed_rows=re.findall(r'\[object-wait\] timed (\d) attempts (\d+)/(\d+) acquired (\d+)/(\d+) timeouts (\d+)/(\d+)',result.stderr)

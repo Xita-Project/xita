@@ -76,6 +76,10 @@ void xv_native_math_report(unsigned frames)
     extern void xv_model_palette_report(unsigned);
     xv_model_palette_report(frames);
 #endif
+#ifdef XV_NATIVE_MODEL_HIERARCHY
+    extern void xv_model_hierarchy_report(unsigned);
+    xv_model_hierarchy_report(frames);
+#endif
     extern unsigned xv_math_bounds_calls(void) __attribute__((weak));
     if (xv_math_bounds_calls) XK_LOG("[native-bounds] %u frames: %u calls\n", frames, xv_math_bounds_calls());
     extern unsigned xv_math_clip_calls(void) __attribute__((weak));

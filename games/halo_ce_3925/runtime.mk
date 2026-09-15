@@ -11,6 +11,9 @@ endif
 ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
 XITA_GAME_SRCS += recomp/kernel/xk_palette.c
 endif
+ifeq ($(XV_NATIVE_MODEL_HIERARCHY),1)
+XITA_GAME_SRCS += recomp/kernel/xk_hierarchy.c
+endif
 ifeq ($(XV_NATIVE_OBJECT_SCAN),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_scan.c
 endif

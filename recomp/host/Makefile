@@ -539,3 +539,12 @@ test-object-point-benchmark: build/resolution_benchmark_test build/no_object_poi
 build/no_object_point_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_OBJECT_POINT resolution_benchmark_test.c -lm -o $@
+
+.PHONY: test-model-hierarchy-benchmark
+test-model-hierarchy-benchmark: build/resolution_benchmark_test build/no_model_hierarchy_benchmark_test
+	./build/resolution_benchmark_test
+	./build/no_model_hierarchy_benchmark_test
+
+build/no_model_hierarchy_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_MODEL_HIERARCHY resolution_benchmark_test.c -lm -o $@

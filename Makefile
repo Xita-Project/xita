@@ -366,6 +366,9 @@ ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_MODEL_PALETTE
 CFLAGS += -DXV_NATIVE_MODEL_PALETTE
 endif
+ifeq ($(XV_NATIVE_MODEL_HIERARCHY),1)
+RECOMP_CFLAGS += -DXV_NATIVE_MODEL_HIERARCHY
+endif
 ifeq ($(XV_NATIVE_OBJECT_BASIS),1)
 RECOMP_CFLAGS += -DXV_NATIVE_OBJECT_BASIS
 CFLAGS += -DXV_NATIVE_OBJECT_BASIS
@@ -409,6 +412,19 @@ $(RECOMP_BUILD)/object-point.config: force-object-point-config
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-point.config
 
+# Only generated units containing this optional hook depend on its build mode.
+# This also handles changed shard numbering after regeneration.
+HIERARCHY_HOOK_SRCS := $(shell grep -l XV_NATIVE_MODEL_HIERARCHY $(XITA_GUEST_SRCS) 2>/dev/null)
+HIERARCHY_HOOK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(HIERARCHY_HOOK_SRCS))
+.PHONY: force-model-hierarchy-config
+force-model-hierarchy-config:
+$(RECOMP_BUILD)/model-hierarchy.config: force-model-hierarchy-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_NATIVE_MODEL_HIERARCHY)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(HIERARCHY_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_hierarchy.o: $(RECOMP_BUILD)/model-hierarchy.config
+
 # Unroll only bounded native math units. Scalar VFP operations retain their
 # established operand order; no global fast-math or guest codegen change.
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off
@@ -418,6 +434,7 @@ endif
 # The optional batch validates layouts, scheduling and numeric inputs before
 # using bounded products. Keep reassociation/FMA disabled while unrolling it.
 $(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off
+$(RECOMP_BUILD)/kernel/xk_hierarchy.o: RECOMP_CFLAGS += -O3 -ffp-contract=off
 ifeq ($(XV_PALETTE_JOB_PROFILE),1)
 $(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -DXV_PALETTE_JOB_PROFILE=1
 endif

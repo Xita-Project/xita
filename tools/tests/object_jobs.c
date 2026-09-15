@@ -14,6 +14,40 @@ static int gameplay_ready=1;
 int xd3d_object_jobs_ready(void) {return gameplay_ready;}
 static unsigned writes[300],active,peak,allocations;
 static unsigned shared_guarded_value;
+#ifdef XV_NATIVE_MODEL_HIERARCHY
+int xv_math_model_hierarchy(xctx *);
+void xv_model_hierarchy_override(int);
+void xv_model_hierarchy_report(unsigned);
+static void hierarchy_job(xctx *c,unsigned id)
+{
+    /* Each callback owns this guest stack region. Constants are shared read-only.
+     * Run outside any outer math scope, exercising the production guard itself. */
+    xctx saved=*c;
+    unsigned sp=c->r[4]-8192u,model=sp+512u,poses=sp+768u;
+    unsigned nodes=sp+1024u,matrices=sp+2560u;
+    memset(X_G(sp),0,4096);
+    X_M32(model+0xb8)=8;X_M32(model+0xbc)=nodes;
+    X_M32(sp+0x24)=matrices;X_M32(sp+0x28)=poses;X_M32(sp+0x2c)=model;
+    X_M32(sp+0x10)=2;X_M16(sp+0x178)=0;X_M16(sp+0x17a)=1;
+    for(unsigned n=0;n<8;n++) {
+        X_M16(nodes+n*156+0x20)=n==7?0xffff:n+1;
+        X_M16(nodes+n*156+0x22)=0xffff;
+        X_M16(nodes+n*156+0x24)=n?n-1:0xffff;
+        X_MF32(poses+n*32+12)=1;X_MF32(poses+n*32+28)=1;
+        X_MF32(poses+n*32+16)=(float)id;
+    }
+    X_MF32(matrices)=X_MF32(matrices+4)=X_MF32(matrices+20)=X_MF32(matrices+36)=1;
+    c->r[4]=sp;c->r[0]=1;c->preempt=100;
+    assert(xv_math_model_hierarchy(c));
+    assert(c->r[0]==7&&c->preempt==94&&X_M32(sp+0x10)==8);
+    for(unsigned n=1;n<7;n++) {
+        float expected[13]={1,1,0,0,0,1,0,0,0,1,(float)(n*id),0,0};
+        assert(!memcmp(X_G(matrices+n*52),expected,sizeof expected));
+    }
+    for(unsigned n=0;n<13;n++)assert(X_M32(matrices+7*52+n*4)==0);
+    *c=saved;
+}
+#endif
 static void nested_guard_return(void)
 {
     XV_OBJECT_MATH_GUARD();
@@ -160,6 +194,9 @@ void f_0008FB70(xctx *c)
     /* Simulate substantial work while exercising nested native-helper locks. */
     struct timespec delay={0,1000000};nanosleep(&delay,NULL);
     unsigned id=c->r[1];
+#ifdef XV_NATIVE_MODEL_HIERARCHY
+    hierarchy_job(c,id);
+#endif
     {
         XV_OBJECT_MATH_GUARD();
         unsigned before=shared_guarded_value;
@@ -199,6 +236,10 @@ int main(int argc,char **argv)
     guest_owner=pthread_self();
     g_xram=calloc(1,2<<20);g_img_base=g_xram;g_xpt=calloc(1<<20,4);
     for(unsigned i=0;i<512;i++)g_xpt[i]=i*4096;
+#ifdef XV_NATIVE_MODEL_HIERARCHY
+    X_M32(0x1f0a68)=0;X_M32(0x1f0a78)=0x3f800000;X_M32(0x1f0b04)=0x40000000;
+    xv_model_hierarchy_override(1);
+#endif
     X_MF32(0x30000)=1;X_MF32(0x30004)=1;X_MF32(0x30014)=1;X_MF32(0x30024)=1;
     for(unsigned i=0;i<300;i++) {X_MF32(0x50000+i*12)=(float)i;X_MF32(0x50004+i*12)=1;X_MF32(0x50008+i*12)=2;}
     setenv("XV_EXPERIMENTAL_OBJECT_JOBS","0",1);
@@ -268,6 +309,10 @@ int main(int argc,char **argv)
     assert(shared_guarded_value==600);
     for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));
+#ifdef XV_NATIVE_MODEL_HIERARCHY
+    xv_model_hierarchy_override(0);
+    xv_model_hierarchy_report(3);xv_model_hierarchy_report(3);
+#endif
     xv_object_jobs_report(3);xv_object_jobs_report(3);xv_object_jobs_shutdown();
     printf("PASS: 600 callbacks and native point transforms exactly once; 600 quiescent vertex locks, 200 registrations, 600 resource queries, 1,200 owner-thread events and 600 cache yields (including 200 preload yields) with quiescent owner I/O reads, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
     free(g_xram);free(g_xpt);

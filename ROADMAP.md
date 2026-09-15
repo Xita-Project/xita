@@ -79,6 +79,12 @@ complete. The [model ownership follow-up](docs/model-update-ownership-20260915.m
 traces concrete bounds readers and nested collision paths; next is the serial
 native hierarchy extraction with explicit inputs/outputs before new scheduling.
 
+The [native child-hierarchy batch](docs/model-hierarchy-batch-20260915.md) is now
+implemented as an optional synchronous extraction. Differential host and ARM
+tests check outputs, guest state and scheduling; shared publication remains
+guarded. Emulator and physical comparisons will determine whether its smaller
+computational path improves whole-frame time before changing the default.
+
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.
 An optional diagnostic splits comparison/copy cost by span size; it adds no

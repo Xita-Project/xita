@@ -83,6 +83,12 @@ class HaloHooks(NoGameHooks):
                 (0xB5B40, 339, "21273987e0276cda51a2d70b2b576abc42195b8efeff9ab4e8f552a15b323726")))
         self.object_scan_enabled = self.enabled and hashlib.sha256(
             image.bytes_at(0x900E0, 0x239) or b"").hexdigest() == "5bcdb3c78aa2f0b4ba4da986cfe59cb0d28c1004cbcc804abdafabd8200f520a"
+        self.hierarchy_enabled = self.enabled and all(
+            hashlib.sha256(image.bytes_at(address, size) or b"").hexdigest() == digest
+            for address, size, digest in (
+                (0x8DDF0, 2218, "247190d1cd001f43646b9627fd2f538c64b15efefaad1f9510f5137f04e4dc63"),
+                (0xB5B40, 339, "21273987e0276cda51a2d70b2b576abc42195b8efeff9ab4e8f552a15b323726"),
+                (0xB5F60, 291, "9f10d4414ec5fb6b39f5f20f6100791e0aec209d77f6c60599402dff6bdb5d78")))
 
     # Shared cluster lists and datum allocation/free. The first concurrent
     # campaign test cycled at 56643 in removal after unguarded list mutation.
@@ -104,6 +110,10 @@ class HaloHooks(NoGameHooks):
     object_shared_aliases = {0x115423: 0x114D30, 0x115FDF: 0x114D30}
 
     def before_instruction(self, address):
+        if self.hierarchy_enabled and address == 0x8E0F0:
+            return ["#ifdef XV_NATIVE_MODEL_HIERARCHY",
+                    "    { extern int xv_math_model_hierarchy(xctx *); (void)xv_math_model_hierarchy(c); }",
+                    "#endif"]
         if self.object_scan_enabled and address in (0x900E0, 0x902A9, 0x90314):
             line = {0x900E0: "(void)xv_object_jobs_begin(c);",
                     0x902A9: "xv_object_jobs_join();",

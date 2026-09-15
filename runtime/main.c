@@ -1237,6 +1237,11 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
+    if (xv_benchmark_compare_model_hierarchy()) {
+        extern void xv_model_hierarchy_override(int) __attribute__((weak));
+        if(xv_model_hierarchy_override)xv_model_hierarchy_override(enabled);
+        return;
+    }
     if (xv_benchmark_compare_object_point()) {
         extern void xv_object_point_override(int) __attribute__((weak));
         if(xv_object_point_override)xv_object_point_override(enabled);

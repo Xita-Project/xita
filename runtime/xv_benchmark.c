@@ -5,6 +5,8 @@
 
 void xv_logf(const char *fmt,...);
 void xv_benchmark_optimizations(int enabled) __attribute__((weak));
+void xv_model_hierarchy_override(int) __attribute__((weak));
+int xv_model_hierarchy_available(void) __attribute__((weak));
 void xv_object_point_override(int) __attribute__((weak));
 int xv_object_point_available(void) __attribute__((weak));
 void xv_object_wait_override(int) __attribute__((weak));
@@ -45,7 +47,8 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_OBJECT_POINT||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_MODEL_HIERARCHY||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind==XV_BENCH_MODEL_HIERARCHY&&(!xv_model_hierarchy_override||!xv_model_hierarchy_available))return -1;
 #ifndef XV_NATIVE_OBJECT_BASIS
     if(kind==XV_BENCH_OBJECT_BASIS)return -1;
 #endif
@@ -108,6 +111,7 @@ int xv_benchmark_compare_vertex_prepare(void) { return remote_kind==XV_BENCH_VER
 int xv_benchmark_compare_object_lock(void) { return remote_kind==XV_BENCH_OBJECT_LOCK; }
 int xv_benchmark_compare_object_wait(void) { return remote_kind==XV_BENCH_OBJECT_WAIT; }
 int xv_benchmark_compare_object_point(void) { return remote_kind==XV_BENCH_OBJECT_POINT; }
+int xv_benchmark_compare_model_hierarchy(void) { return remote_kind==XV_BENCH_MODEL_HIERARCHY; }
 int xv_benchmark_compare_object_math(void) { return remote_kind==XV_BENCH_OBJECT_MATH; }
 int xv_benchmark_compare_depth_prepare(void) { return remote_kind==XV_BENCH_DEPTH_PREPARE; }
 int xv_benchmark_compare_object_jobs(void) { return remote_kind==XV_BENCH_OBJECT_JOBS; }
@@ -139,6 +143,7 @@ static int native_math_selected(void)
 }
 static int candidate_available(void)
 {
+    if (xv_benchmark_compare_model_hierarchy()) return xv_model_hierarchy_override && xv_model_hierarchy_available && xv_model_hierarchy_available();
     if (xv_benchmark_compare_object_wait()) return xv_object_wait_override && xv_object_wait_available && xv_object_wait_available();
     if (xv_benchmark_compare_object_point()) return xv_object_point_override && xv_object_point_available && xv_object_point_available();
     if (xv_benchmark_compare_object_lock()) return xv_object_lock_override && xv_object_lock_available && xv_object_lock_available();
@@ -219,7 +224,8 @@ int xv_benchmark_compare_draw_scan(void)
     return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_object_point() ? "object-point-compare" :
+    (xv_benchmark_compare_model_hierarchy() ? "model-hierarchy-compare" :
+     xv_benchmark_compare_object_point() ? "object-point-compare" :
      xv_benchmark_compare_object_wait() ? "object-wait-compare" :
      xv_benchmark_compare_object_lock() ? "object-lock-compare" :
      xv_benchmark_compare_object_math() ? "object-math-compare" :
@@ -270,7 +276,9 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
             xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_object_point())
+            if (xv_benchmark_compare_model_hierarchy())
+                xv_logf("[model-hierarchy-compare] start off/on/off at %up; synchronous child-node batch, validated parent order, original root and final node, same workers/graphics; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_object_point())
                 xv_logf("[object-point-compare] start off/on/off at %up; bypass point guard only for wholly worker-owned stack inputs/outputs, same arithmetic and shared transactions; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_object_wait())
                 xv_logf("[object-wait-compare] start sleep-poll/bounded-mutex/sleep-poll at %up; 50 us wait budget, same mutex backend, critical sections, workers, private math and owner services; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
