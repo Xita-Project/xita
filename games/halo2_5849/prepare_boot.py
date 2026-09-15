@@ -104,6 +104,12 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_ANIMATED_WIDGET_CALLS = (
+    (0x2B01EB, 317, "c99e6dd724f711f9504429692fa593a048427debfa09be3bbbec8bbe59c07076"),
+    (0x22E391, 35, "52e55eed8eb8d153931042d427dc9039b26a0e1b032d0122c434f7e7b1d398bf"),
+    (0x2B0328, 536, "1e161d13865eb1bfac75386a5f58ca26eb87ae13b42f68cc2536b1dbdd0cd6c4"),
+    (0x2B0B5E, 56, "6660e1b8766c58d360de7dd9e23f922e96f8143b5fb2fb43401670f81185e4bb"),
+)
 GAME_TWO_POINT_BOUNDS_CALLS = (
     (0x30DF80, 442, "567b689b1b79b30997baf3646506b2faab56711b377f84cc2668d0158a8a810b"),
     (0x1C2390, 207, "8ab9e395123d60584f307a623247daa83d96df57dee471e40666e292d20e66c5"),
@@ -577,6 +583,19 @@ def descriptor_child_field_roots(image, offsets):
                 roots.add(target)
         else:
             raise ValueError("Halo 2 descriptor child array is not terminated before its link")
+    return roots
+
+
+def game_animated_widget_roots(image):
+    """Native175: original widget update/draw interfaces, bounded by nulls."""
+    for address, length, digest in GAME_ANIMATED_WIDGET_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 animated widget fingerprint mismatch")
+    roots = set()
+    for start, end in ((0x45AD60, 0x45ADA4), (0x45ADA8, 0x45ADEC)):
+        if image.u32(end) != 0:
+            raise ValueError("Halo 2 animated widget interface boundary mismatch")
+        roots.update(_code_vtable_roots(image, start, end))
     return roots
 
 
@@ -1082,6 +1101,7 @@ def main():
         roots.update(game_bounds_delegate_roots(image))
         roots.update(game_observed_type_query_roots(image))
         roots.update(game_two_point_bounds_roots(image))
+        roots.update(game_animated_widget_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).

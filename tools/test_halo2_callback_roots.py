@@ -30,6 +30,42 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_animated_widget_interfaces_preserve_null_boundaries(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = tuple(range(0x45AD60, 0x45ADA4, 4)) + tuple(range(0x45ADA8, 0x45ADEC, 4))
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        image.targets.update({0x45ADA4: 0, 0x45ADEC: 0, 0x45AD5C: None, 0x45ADF0: None})
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_ANIMATED_WIDGET_CALLS)
+        with patch.object(prepare_boot, "GAME_ANIMATED_WIDGET_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_animated_widget_roots(image),
+                             {before[slot] for slot in slots})
+            self.assertEqual(image.targets, before)
+            for end in (0x45ADA4, 0x45ADEC):
+                image.targets[end] = 0x1000
+                with self.assertRaisesRegex(ValueError, "boundary"):
+                    prepare_boot.game_animated_widget_roots(image)
+                image.targets[end] = 0
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_animated_widget_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_animated_widget_roots(image)
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_animated_widget_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_ANIMATED_WIDGET_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_animated_widget_roots(image)
+
     def test_map_bound_two_point_query_exact_slot(self):
         image = SyntheticImage(); image.section_name = ".text"
         image.targets = {0x455518: 0x1000, 0x455514: None, 0x45551C: None}
