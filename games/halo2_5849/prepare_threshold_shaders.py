@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the private native190 four-sample threshold pass; no accepted draw."""
+"""Prepare the private native190 four-sample threshold shaders and command contract."""
 import argparse
 import hashlib
 import json
@@ -89,9 +89,12 @@ def prepare(xbe,snapshot,push,texture,out):
         'threshold.texture.bin':linear(texture,0x038E8000,640,480,2560),
         'threshold.vertices.bin':vertices_from_push(push.read_bytes(),state['header_address']),
         'threshold.constants.bin':struct.pack('<72f',*[(x>>shift&255)/255 for x in factors for shift in (16,8,0,24)])}
+    data['threshold.contract.bin']=(struct.pack('<II',0x43543248,1)+
+        struct.pack('<2048I',*state['setup'])+struct.pack('<64I',*state['setup_valid'])+
+        program+data['threshold.vertices.bin'])
     out.mkdir(parents=True,exist_ok=True)
     for name,b in data.items():(out/name).write_bytes(b)
-    report=dict(scope='private threshold probe only; no additional guest draw accepted',vertex_plan=plan,
+    report=dict(scope='private threshold shader and exact command contract',vertex_plan=plan,
                 pixel_definition=pixel,files={name:hashlib.sha256(b).hexdigest()for name,b in data.items()})
     (out/'threshold-shaders.json').write_text(json.dumps(report,indent=2)+'\n');return report['files']
 

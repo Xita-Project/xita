@@ -72,3 +72,6 @@ comparison `bb16576db691ece42548561174262035e95059f2c8722d3a27cedc8d4a021461`.
 Next is a bounded original-command consumer with 24-word vertices, complete
 read-only sampler views, an isolated160×120 output and no inactive-depth read,
 followed by actual game replay.
+
+The validated original-command integration and native191 result are documented
+in [the threshold consumer](halo2-threshold-consumer.md).

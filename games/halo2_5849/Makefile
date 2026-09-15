@@ -9,6 +9,7 @@ QUAD_RENDER ?= 0
 SCREEN_RENDER ?= 0
 BC1_RENDER ?= 0
 COMPOSITION_RENDER ?= 0
+THRESHOLD_RENDER ?= 0
 AUDIO_HOST ?= 0
 AUDIO_DSP ?= 0
 AUDIO_SPATIAL_MODEL ?= 0
@@ -92,6 +93,15 @@ OBJECTS += $(BUILD)/composition_draw.o
 $(BUILD)/host_channel_runtime.o $(BUILD)/quad_gxm.o: CFLAGS += -DH2_COMPOSITION_RENDER=1
 COMPOSITION_FILES = $(addprefix $(COMPOSITION_SHADERS)/,composition.vert.gxp composition.frag.gxp composition.copy.frag.gxp composition.contract.bin)
 COMPOSITION_PACK = $(foreach f,$(COMPOSITION_FILES),-a $(f)=$(notdir $(f)))
+endif
+ifeq ($(THRESHOLD_RENDER),1)
+ifneq ($(COMPOSITION_RENDER),1)
+$(error THRESHOLD_RENDER=1 requires COMPOSITION_RENDER=1)
+endif
+OBJECTS += $(BUILD)/threshold_draw.o
+$(BUILD)/host_channel_runtime.o $(BUILD)/quad_gxm.o: CFLAGS += -DH2_THRESHOLD_RENDER=1
+THRESHOLD_FILES = $(addprefix $(THRESHOLD_SHADERS)/,threshold.vert.gxp threshold.frag.gxp threshold.contract.bin)
+THRESHOLD_PACK = $(foreach f,$(THRESHOLD_FILES),-a $(f)=$(notdir $(f)))
 endif
 comma := ,
 WRAPS := xk_MmCreateKernelStack xk_MmDeleteKernelStack xk_MmClaimGpuInstanceMemory xv_unimpl xk_NtOpenFile xk_NtReadFile xk_NtWriteFile xk_NtDeviceIoControlFile xk_NtFsControlFile xk_NtQueryVolumeInformationFile
@@ -271,7 +281,7 @@ $(BUILD)/threshold-probe-param.sfo: Makefile
 $(BUILD)/threshold-probe.vpk: $(BUILD)/threshold-probe-eboot.bin $(BUILD)/threshold-probe-param.sfo $(addprefix $(THRESHOLD_SHADERS)/,$(THRESHOLD_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/threshold-probe-param.sfo -b $(BUILD)/threshold-probe-eboot.bin $(foreach f,$(THRESHOLD_PROBE_FILES),-a $(THRESHOLD_SHADERS)/$(f)=$(f)) $@
 test-host: $(BUILD)/dxt23_layout_test
-test-host: $(BUILD)/geometry_dispatch_test $(BUILD)/screen_draw_test $(BUILD)/bc1_draw_test $(BUILD)/composition_draw_test
+test-host: $(BUILD)/geometry_dispatch_test $(BUILD)/screen_draw_test $(BUILD)/bc1_draw_test $(BUILD)/composition_draw_test $(BUILD)/threshold_draw_test
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
 test-host: $(BUILD)/quad_draw_test
 test-host: $(BUILD)/blit_copy_test
@@ -292,6 +302,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/screen_draw_test
 	$(BUILD)/bc1_draw_test
 	$(BUILD)/composition_draw_test
+	$(BUILD)/threshold_draw_test
 	$(BUILD)/geometry_dispatch_test
 	$(BUILD)/quad_draw_test
 	$(BUILD)/blit_copy_test
@@ -411,9 +422,12 @@ $(BUILD)/dxt23_layout_test: dxt23_layout_test.c dxt23_layout.c dxt23_layout.h
 $(BUILD)/bc1_draw_test: bc1_draw_test.c bc1_draw.c bc1_draw.h linear_texture.c linear_texture.h gpu_objects.c gpu_objects.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -O1 -Wall -Wextra -Werror bc1_draw_test.c bc1_draw.c linear_texture.c gpu_objects.c -o $@
-$(BUILD)/geometry_dispatch_test: geometry_dispatch_test.c host_channel_runtime.c host_channel_runtime.h quad_gxm.h quad_draw.h screen_draw.h bc1_draw.h composition_draw.h
+$(BUILD)/geometry_dispatch_test: geometry_dispatch_test.c host_channel_runtime.c host_channel_runtime.h quad_gxm.h quad_draw.h screen_draw.h bc1_draw.h composition_draw.h threshold_draw.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -ffunction-sections -fdata-sections -I$(ROOT)/recomp $< -Wl,--gc-sections -o $@
+$(BUILD)/threshold_draw_test: threshold_draw_test.c threshold_draw.c threshold_draw.h linear_texture.c linear_texture.h gpu_objects.c gpu_objects.h command_state.h kelvin_clear.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror threshold_draw_test.c threshold_draw.c linear_texture.c gpu_objects.c -o $@
 $(BUILD)/composition_draw_test: composition_draw_test.c composition_draw.c composition_draw.h linear_texture.c linear_texture.h gpu_objects.c gpu_objects.h command_state.h kelvin_clear.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror composition_draw_test.c composition_draw.c linear_texture.c gpu_objects.c -o $@
@@ -475,7 +489,7 @@ $(BUILD)/nv2a_regs.o: nv2a_regs.c
 $(BUILD)/linear_texture.o $(BUILD)/fp_environment.o $(BUILD)/kernel_timer.o $(BUILD)/kernel_stack.o $(BUILD)/command_snapshot.o $(BUILD)/host_channel_runtime.o $(BUILD)/command_state.o $(BUILD)/host_channel.o $(BUILD)/host_tiles.o $(BUILD)/push_stream.o $(BUILD)/gpu_objects.o $(BUILD)/kelvin_clear.o $(BUILD)/scanout.o $(BUILD)/input.o $(BUILD)/audio_unavailable.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/audio_mixer_bridge.o $(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/screen_draw.o $(BUILD)/bc1_draw.o $(BUILD)/composition_draw.o $(BUILD)/dxt23_layout.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/audio_fx.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
+$(BUILD)/audio_mixer_bridge.o $(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/screen_draw.o $(BUILD)/bc1_draw.o $(BUILD)/composition_draw.o $(BUILD)/threshold_draw.o $(BUILD)/dxt23_layout.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/audio_fx.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/dsp_core.o: dsp/interp/dsp_cpu.c
@@ -493,8 +507,8 @@ $(BUILD)/eboot.bin: $(BUILD)/halo2-boot.velf
 $(BUILD)/param.sfo: Makefile
 	@mkdir -p $(dir $@)
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2B00001 -d ATTRIBUTE2=12 "Xita Halo 2 Boot" $@
-$(BUILD)/halo2-boot.vpk: $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(BC1_FILES) $(COMPOSITION_FILES) $(DSP_FILES)
-	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(BC1_PACK) $(COMPOSITION_PACK) $(DSP_PACK) $@
+$(BUILD)/halo2-boot.vpk: $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(BC1_FILES) $(COMPOSITION_FILES) $(THRESHOLD_FILES) $(DSP_FILES)
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(BC1_PACK) $(COMPOSITION_PACK) $(THRESHOLD_PACK) $(DSP_PACK) $@
 -include $(OBJECTS:.o=.d)
 
 $(BUILD)/audio_hrtf_model_test: audio_hrtf_model_test.c audio_hrtf_model.h
