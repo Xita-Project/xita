@@ -67,7 +67,7 @@ int main(void)
 {
     g_xram=malloc(4u<<20);g_img_base=g_xram;g_xpt=calloc(1u<<20,4);
     assert(g_xram&&g_xpt);for(unsigned i=0;i<1024;i++)g_xpt[i]=i*4096;
-    const char *e=getenv("XV_FLARE_QUERY_OVERLAP");int configured=e&&atoi(e)!=0;
+    const char *e=getenv("XV_FLARE_QUERY_OVERLAP");int configured=!e||atoi(e)!=0;
     xctx c=seed(0);assert(xv_flare_defer(&c));assert(pending_overlap==configured);
     for(unsigned i=0;i<3;i++)xv_visibility_publish(results,i,old_serial[i],128);
     xv_flare_barrier(XV_FLARE_PRESENT);assert(!pending);

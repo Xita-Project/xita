@@ -27,7 +27,9 @@ visibility draws; brightness consumption remains guarded separately. Existing
 game-version checks and all non-query barriers are retained.
 
 The option is excluded from ordinary builds. In a build that includes it,
-`XV_FLARE_QUERY_OVERLAP=1` enables it at runtime; omission means off. The remote
+it now defaults on after the native-resolution September 15 follow-up;
+`XV_FLARE_QUERY_OVERLAP=0` explicitly disables it. The original September 14
+packages documented below defaulted off. The remote
 benchmark selector is `flare-query-overlap`, using off/on/off phases and restoring
 the configured setting. It rejects comparisons when exact deferred flare reads
 are disabled or stale-result mode is selected.

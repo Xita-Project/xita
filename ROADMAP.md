@@ -91,7 +91,16 @@ A [private quaternion experiment](docs/private-quaternion-workers-20260915.md)
 now avoids the initial shared lock for calculations whose inputs, output and
 scratch are wholly worker-owned. Host race/ownership and ARM arithmetic checks
 pass; the emulator confirms real admissions and off/on/off restoration. It
-defaults off pending physical measurements at unchanged graphics settings.
+defaults off: three native-resolution cryobay comparisons change total FPS by
+only +0.34%; reduced quaternion waits move to another helper, while whole object
+batches stay near 19 ms.
+
+The [native-resolution query follow-up](docs/query-overlap-native-20260915.md)
+finds a larger dependency: three cryobay comparisons improve from 4.691 to 5.762
+FPS (+22.83%), saving 39.62 ms/frame by overlapping exact query generations.
+The follow-up enables this existing option by default in builds that include
+query history, while retaining the multicore work and standard graphics.
+Broader gameplay validation and the sustained FPS goals remain open.
 
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.

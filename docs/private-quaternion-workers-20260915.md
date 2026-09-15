@@ -64,6 +64,34 @@ host tests, not that stub. Firmware copy imports are modeled. Instruction counts
 are not hardware cycles or FPS.
 
 Benchmark tests cover unavailable builds/modes, cancellation, loss of view,
-restoration and selection after frame retirement. Hardware results are pending.
+restoration and selection after frame retirement.
 This bounded change does not prove general object independence or resolve the
 reported combat crashes by itself.
+
+## Physical campaign result
+
+The updater installed and confirmed runtime
+`d5d301748ea0981621db35b772486bd9e8a03fe997ef93d1237cf864e593eca5`,
+while retaining the previous A-slot executable. Resolution remained 960×544,
+with standard graphics, both object workers, lightweight mutexes and private
+output math. The new bypass remained off outside its comparison phases.
+
+Three stationary first-person cryobay comparisons each settled 60 and measured
+120 frames per arm. FPS off/on/off was 4.684/4.696/4.675,
+4.691/4.677/4.673 and 4.646/4.700/4.682. Pooling exact elapsed times gives
+4.675 off versus 4.691 on, approximately +0.34% or 0.73 ms/frame. This does not
+establish a meaningful, repeatable improvement.
+
+During measured counter windows, 92 quaternion calls per frame bypassed the
+lock. Summed quaternion waits across both workers fell from 4.95 to 3.28 ms per
+frame, but object-basis waits rose from 0.77 to 2.40 ms. Whole object batches
+remained essentially unchanged at 18.88 versus 18.94 ms/frame. These overlapping
+worker waits are not additive frame latency: reducing one acquisition moved
+contention elsewhere without shortening the complete job batch.
+
+Exact flare-result waits in this view averaged about 40.45 ms/frame in both
+arms. The existing query-overlap experiment is the next comparison at this
+resolution. Earlier low-resolution campaign results with negligible query waits
+do not answer that question. The private quaternion bypass remains off by
+default; the validated implementation is retained for future larger scheduling
+changes and combined comparisons.

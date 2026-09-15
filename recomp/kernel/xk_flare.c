@@ -45,7 +45,10 @@ static int overlap_enabled(void)
 {
     static int configured=-1;
     if (configured<0) {
-        const char *e=getenv("XV_FLARE_QUERY_OVERLAP"); configured=e && atoi(e)!=0;
+        /* This code exists only in the opt-in history build. Native-resolution
+         * hardware comparisons expose a substantial first-query wait; retain
+         * exact generations by default here, with an explicit off switch. */
+        const char *e=getenv("XV_FLARE_QUERY_OVERLAP"); configured=!e || atoi(e)!=0;
     }
     return overlap_override<0 ? configured : overlap_override;
 }
