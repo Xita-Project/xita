@@ -82,7 +82,10 @@ Production accounting/controller tests cover three complete windows, zero timer
 reads after return to off, nested/parked callers, stop/restart with live scopes,
 cancellation, lost first-person control and unavailable configurations. The
 remote HTTP and production frame-acquisition fixtures cover the new selector.
-ASan/UBSan pass. Native emulator/hardware validation of this follow-up is pending.
+ASan/UBSan pass. Vita3K and the physical Vita each complete a bounded capture
+with three usable 60-frame windows, zero invalid/dropped scopes and no reports
+in the final off arm. The [hardware capture](hardware-20260914-bounded-phases.md)
+records its overhead, scope coverage and remaining limits.
 
 ### Report fields
 

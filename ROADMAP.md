@@ -32,7 +32,16 @@ The completed physical snapshot comparisons show no pooled gain: polling was
 tested cryo-room comparisons. Shared snapshots stay off. The next larger target
 is [character pose and scene preparation](docs/pose-job-boundary-20260914.md).
 The new [bounded remote phase capture](docs/guest-phase-timing-20260912.md#bounded-remote-capture-september-14-follow-up)
-passes host accounting, controller and HTTP checks; native validation is underway.
+passes host checks and completes three valid windows on both Vita3K and
+hardware. The [physical capture](docs/hardware-20260914-bounded-phases.md)
+places the scene path at about 110 ms/frame inclusive, including native waits;
+the next trace separates its unselected children.
+
+The [combined matrix/object-scan/texture-state comparison](docs/optimization-bundle-20260914.md)
+retains the established improvements and tests three additional candidates
+together. Three physical cryo-room trials measure 6.768 FPS off versus
+6.760 FPS on, with mixed trial directions. The options remain available;
+this combination has no demonstrated gain in this room.
 
 [~] September 14 [campaign results and next steps](docs/performance-next-steps-20260914.md):
 indexed vertex validation saved 13.9 ms/frame across three cryo-room comparisons,

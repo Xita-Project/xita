@@ -33,8 +33,44 @@ Host validation covers the production frame-acquisition/override code, all
 candidate selectors, full bundle completion, cancellation and lost-view
 restoration, mixed configured member values, absent helper variants, disabled
 native math, and real HTTP admission/exclusion. Sanitizer checks pass.
-The Vita build and unchanged updater asset contract are verified. Emulator and
-physical comparisons are pending; no performance gain is claimed yet.
+The Vita build and unchanged updater asset contract are verified. Vita3K
+completes the combined comparison with a stable camera and no vertex-upload
+failures. The on arm exercises matrix NEON and object scanning; ordinary
+configuration is restored afterward.
+
+## First physical comparison
+
+Runtime `2ecbca0853495a5634c8789b97097b81392361125a3354ed253ffb3cb69a1a4a`
+was installed through the updater and boot-confirmed in slot B. The previously
+liked `7f33dee4…` build remains in slot A. Three stationary cryo-room trials
+retain 640 × 360 rendering, texture maximum 128, the 30 FPS cap, indexed vertex
+checks, upload worker and native object basis. Detailed phase timing stays off.
+The requested 500 MHz CPU clock reads back as 444 MHz; GPU/bus are 222 MHz.
+
+| Trial | Off before FPS | All three on FPS | Off after FPS | Saved ms/frame |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 6.764 | 6.750 | 6.751 | -0.167 |
+| 2 | 6.781 | 6.737 | 6.778 | -0.934 |
+| 3 | 6.731 | 6.792 | 6.804 | +0.540 |
+
+Pooling exact measured elapsed times gives **6.768 FPS off and 6.760 FPS on**:
+the combined arm is **0.187 ms/frame slower** on average. The small difference
+and mixed directions do not establish a useful gain or a general regression.
+All camera checks pass, all 28 recorded upload windows report zero failures,
+and each comparison restores the configured defaults. Screenshots retain the
+same room and technician; live animation continues.
+
+The matrix helper accepts work, but the empty-object helper skips **zero**
+entries in this room despite being called. That limits what this scene says
+about combinations that include empty-object scanning. These counters use
+60-frame windows that can straddle arm boundaries; they establish coverage,
+not exact measured-arm totals.
+
+The three options remain available and disabled in ordinary configuration.
+This is one combined candidate in one workload, not evidence against stacking
+optimizations generally. Further combinations should target work present in the
+scene and include comparisons with individual members removed. The established
+indexed-vertex, upload-worker, math and flare improvements remain combined.
 
 Private captures and exact executable/package hashes are retained under
 `2026-09-13-worker-sizing/validation/engine-restructure-20260914T2300Z`.
