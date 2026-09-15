@@ -767,6 +767,7 @@ int xv_d3d_record_ui(unsigned frame, unsigned batch)
 
 static int draw_scan_override = -1;
 static unsigned scan_index_calls, scan_constant_checks, scan_constant_reused;
+static unsigned scan_reference_calls, scan_reference_fast;
 static uint64_t scan_indices, scan_constant_bytes;
 void xv_d3d_draw_scan_override(int enabled)
 { draw_scan_override = enabled < 0 ? -1 : !!enabled; }
@@ -795,6 +796,9 @@ void xv_d3d_prep_cache_report(unsigned frames)
         scan_constant_checks, scan_constant_reused, (unsigned long long)(scan_constant_bytes >> 10));
     scan_index_calls = scan_constant_checks = scan_constant_reused = 0;
     scan_indices = scan_constant_bytes = 0;
+    XV_LOG("[index-coverage] %u frames: %u reference copies / %u NEON batches (at least 256 indices)\n",
+        frames, scan_reference_calls, scan_reference_fast);
+    scan_reference_calls = scan_reference_fast = 0;
     XV_LOG("[sampler-cache] %u frames: %u reused / %u prepared (texture validity still checked)\n", frames, sampler_hits, sampler_misses);
     sampler_hits = sampler_misses = 0;
     XV_LOG("[texture-prep] %u frames: %u stages prepared / %u unused skipped\n", frames, texture_stages_prepared, texture_stages_skipped);
@@ -1135,7 +1139,14 @@ static int retain_indices(const void **indices, unsigned count, unsigned *nverts
     }
     scan_index_calls++; scan_indices += count;
     if (xv_vertex_references_enabled()) {
-        *nverts = xv_index_copy_reference_bounds(dst, *indices, count, &g_draw_vertex_refs);
+        int neon = draw_scan_neon();
+        scan_reference_calls++;
+#if defined(__ARM_NEON)
+        scan_reference_fast += neon && count >= 256;
+#endif
+        *nverts = neon ?
+            xv_index_copy_reference_bounds_neon(dst, *indices, count, &g_draw_vertex_refs) :
+            xv_index_copy_reference_bounds(dst, *indices, count, &g_draw_vertex_refs);
         g_draw_vertex_refs_valid = 1;
     } else if (cached_scan) *nverts = draw_scan_neon() ?
         xv_index_copy_bounds_neon(dst, *indices, count) : xv_index_copy_bounds(dst, *indices, count);

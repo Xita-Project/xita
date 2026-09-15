@@ -25,27 +25,29 @@ fixture = r'''
 static uint16_t seq[XV_SEQ_INDICES], quads[3*XV_QUAD_INDICES], indices[3*XV_FRAME_INDICES];
 static uint16_t *g_seq_indices=seq, *g_quad_indices=quads, *g_frame_indices=indices;
 static unsigned g_build_frame, g_index_used[3], scan_index_calls;
+static unsigned scan_reference_calls, scan_reference_fast;
 static uint64_t g_index_requested[3], scan_indices;
 static xv_vertex_refs g_draw_vertex_refs;
-static int g_draw_vertex_refs_valid, enabled;
+static int g_draw_vertex_refs_valid, enabled, scan;
 static int xv_vertex_references_enabled(void) { return enabled; }
-static int draw_scan_neon(void) { return 0; }
+static int draw_scan_neon(void) { return scan; }
 '''
 checks = r'''
 int main(void)
 {
     uint16_t source[5]={0,1023,7,500,1023};
-    for (unsigned mode=0;mode<2;mode++) {
-        enabled=mode;const void *p=source;unsigned vertices=0;
+    for (unsigned mode=0;mode<4;mode++) {
+        enabled=mode&1;scan=mode>>1;source[1]=1023;const void *p=source;unsigned vertices=0;
         assert(retain_indices(&p,5,&vertices) && vertices==1024 && p!=source);
         assert(!memcmp(p,source,sizeof source));
-        assert(g_draw_vertex_refs_valid==(int)mode);
-        if(mode) {
+        assert(g_draw_vertex_refs_valid==enabled);
+        if(enabled) {
             assert(g_draw_vertex_refs.vertices==1024 && g_draw_vertex_refs.groups==3);
             source[1]=999; assert(((const uint16_t*)p)[1]==1023);
             assert(g_draw_vertex_refs.bits[3] & (1u<<31));
         }
     }
+    assert(scan_reference_calls==2 && scan_reference_fast==0); /* host fallback */
     const void *p=g_seq_indices;unsigned n;
     assert(retain_indices(&p,30,&n) && n==30 && !g_draw_vertex_refs_valid);
     quads[0]=0;quads[1]=3;quads[2]=1;p=quads;

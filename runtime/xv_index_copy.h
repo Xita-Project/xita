@@ -26,6 +26,56 @@ static inline unsigned xv_index_copy_reference_bounds(void *destination, const v
     return refs->vertices;
 }
 
+/* Keep the exact coverage mask while separating maximum/count reductions from
+ * the per-index bit insertion. Repeated triangle indices need no conditional
+ * group-count update. The bitmap is only 1 KiB; NEON counts its occupied bits
+ * once after capture. Small draws retain the original short path. */
+static inline unsigned xv_index_copy_reference_bounds_neon(void *destination,
+    const void *source, unsigned count, xv_vertex_refs *refs)
+{
+#if defined(__ARM_NEON)
+    if (count < 256) return xv_index_copy_reference_bounds(destination, source, count, refs);
+    uint16_t chunk[256];
+    const uint8_t *src = source;
+    uint8_t *dst = destination;
+    unsigned maximum = 0;
+    uint16x8_t maxima = vdupq_n_u16(0);
+    xv_vertex_refs_clear(refs);
+    while (count) {
+        unsigned n = count < 256 ? count : 256;
+        memcpy(chunk, src, n * sizeof *chunk);
+        for (unsigned i = 0; i < n; i++) {
+            unsigned group = chunk[i] >> 3;
+            refs->bits[group >> 5] |= 1u << (group & 31);
+        }
+        unsigned i = 0;
+        for (; i + 8 <= n; i += 8)
+            maxima = vmaxq_u16(maxima, vld1q_u16(chunk + i));
+        for (; i < n; i++) if (chunk[i] > maximum) maximum = chunk[i];
+        memcpy(dst, chunk, n * sizeof *chunk);
+        src += n * sizeof *chunk; dst += n * sizeof *chunk; count -= n;
+    }
+    uint16x4_t reduced = vmax_u16(vget_low_u16(maxima), vget_high_u16(maxima));
+    reduced = vpmax_u16(reduced, reduced);
+    reduced = vpmax_u16(reduced, reduced);
+    if (vget_lane_u16(reduced, 0) > maximum) maximum = vget_lane_u16(reduced, 0);
+    refs->vertices = maximum + 1;
+    uint16x8_t counts = vdupq_n_u16(0);
+    /* Round to four words inside the fully initialized 256-word bitmap. Extra
+     * words contain zero and no access crosses its end, even for index 65535. */
+    for (unsigned i = 0; i <= maximum / 256; i += 4)
+        counts = vaddq_u16(counts, vpaddlq_u8(vcntq_u8(
+            vld1q_u8((const uint8_t *)(refs->bits + i)))));
+    uint32x4_t words = vpaddlq_u16(counts);
+    uint32x2_t sum = vadd_u32(vget_low_u32(words), vget_high_u32(words));
+    sum = vpadd_u32(sum, sum);
+    refs->groups = vget_lane_u32(sum, 0);
+    return refs->vertices;
+#else
+    return xv_index_copy_reference_bounds(destination, source, count, refs);
+#endif
+}
+
 /* GPU scratch is uncached on Vita. Derive the vertex range from a small cached
  * snapshot, then publish those exact indices with bulk writes. Never read back
  * the GPU destination or scan the live guest list separately from its copy.

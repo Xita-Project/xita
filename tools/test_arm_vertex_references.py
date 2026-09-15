@@ -6,6 +6,7 @@ this checks correctness, not cache traffic, firmware behavior, cycles or FPS.
 """
 import argparse
 import json
+import hashlib
 from pathlib import Path
 import random
 import struct
@@ -25,6 +26,8 @@ out.mkdir(parents=True, exist_ok=True)
 #include "runtime/xv_bytes_equal.h"
 unsigned test_capture(void *dst,const void *src,unsigned n,xv_vertex_refs *r)
 { return xv_index_copy_reference_bounds(dst,src,n,r); }
+unsigned test_capture_neon(void *dst,const void *src,unsigned n,xv_vertex_refs *r)
+{ return xv_index_copy_reference_bounds_neon(dst,src,n,r); }
 static int equal(const void *a,const void *b,unsigned n) { return xv_bytes_equal(a,b,n); }
 int test_equal(const void *a,const void *b,const xv_vertex_refs *r,unsigned stride)
 {
@@ -53,7 +56,7 @@ elf_ranges=[];elf_write_ranges=[]
 with binary.open('rb') as f:
     elf=ELFFile(f);symbols=elf.get_section_by_name('.symtab')
     functions={n:symbols.get_symbol_by_name(n)[0]['st_value'] for n in
-               ['test_capture','test_equal','test_hooks','sceClibMemcpy','sceClibMemset']}
+               ['test_capture','test_capture_neon','test_equal','test_hooks','sceClibMemcpy','sceClibMemset']}
     pages=set()
     for segment in elf.iter_segments():
         if segment['p_type']!='PT_LOAD':continue
@@ -109,9 +112,12 @@ def capture(values,a,b):
     vertices=max(values)+1 if values else 0;groups={v>>3 for v in values};bits=[0]*256
     for g in groups:bits[g>>5]|=1<<(g&31)
     expected=struct.pack('<258I',*bits,vertices,len(groups))
-    assert invoke('test_capture',b,a,len(values),R)==vertices
-    assert bytes(uc.mem_read(b,len(data)))==data
-    assert bytes(uc.mem_read(R,1032))==expected
+    for name in ['test_capture','test_capture_neon']:
+        uc.mem_write(R,b'\xa5'*1032);uc.mem_write(b,b'\x5a'*len(data))
+        assert invoke(name,b,a,len(values),R)==vertices
+        assert bytes(uc.mem_read(b,len(data)))==data
+        assert bytes(uc.mem_read(R,1032))==expected
+        assert bytes(uc.mem_read(a,len(data)))==data
     return vertices,groups
 
 counts=[0,1,7,8,9,31,32,33,255,256,257,1023,1024,4096]
@@ -121,6 +127,13 @@ for count in counts:
 capture(list(range(65536)),A+3,B+1)
 for count in [1,7,8,255,256,257,4096]:
     capture([rng.randrange(65536) for _ in range(count)],A+CAP-count*2,B+CAP-count*2)
+# Exercise the vector reduction and scalar tail with a lone maximum in every
+# lane, both sides of the 256-index cutoff and every bitmap word boundary.
+for n in [255,256,257,263,264]:
+    for pos in range(n):
+        values=[0]*n;values[pos]=65535;capture(values,A+1,B+3)
+for word in range(256):
+    capture([word*256,word*256+255]*128,A+3,B+1)
 capture_cases=calls-capture_start
 for vertices in [511,512,513,1024,1025,65535,65536]:
     for stride in [1,3,8,12]:
@@ -145,8 +158,34 @@ for vertices in [511,512,513,1024,1025,65535,65536]:
             allowed_write=[]
             expected=int(changed is None or changed not in selected_bytes)
             assert invoke('test_equal',left,right,R,stride)==expected,(vertices,stride,changed)
+# Instruction counts describe generated work only; firmware bodies, memory
+# latency, CPU cycles and FPS are not modeled by this harness.
+instructions=0
+copy_calls=copy_bytes=0
+def count_instruction(emu,address,size,user):
+    global instructions,copy_calls,copy_bytes
+    instructions+=1
+    if address==(functions['sceClibMemcpy']&~1):
+        copy_calls+=1;copy_bytes+=emu.reg_read(UC_ARM_REG_R2)
+hook=uc.hook_add(UC_HOOK_CODE,count_instruction)
+for lo,hi in elf_ranges:uc.ctl_remove_cache(lo,hi)
+rows=[]
+for n in [128,256,512,4096]:
+    for pattern in ['repeated-high','sequential','random']:
+        values=[65535]*n if pattern=='repeated-high' else list(range(n)) if pattern=='sequential' else [rng.randrange(65536) for _ in range(n)]
+        capture(values,A+1,B+3)
+        row={'indices':n,'pattern':pattern}
+        for name in ['test_capture','test_capture_neon']:
+            instructions=copy_calls=copy_bytes=0
+            assert invoke(name,B+3,A+1,n,R)==max(values)+1
+            row[name]={'instructions':instructions,'firmware_copy_calls':copy_calls,'firmware_copy_bytes':copy_bytes}
+        rows.append(row)
+uc.hook_del(hook)
 result=dict(index_capture_cases=capture_cases,total_calls=calls,strict_access_bounds=True,
             unicorn_version=unicorn.__version__,thumb_memory_hook_self_check=True,
             elf_writes_restricted_to_writable_segments=True,
+            elf_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+            index_header_sha256=hashlib.sha256((root/'runtime/xv_index_copy.h').read_bytes()).hexdigest(),
+            instruction_counts_not_cycles=rows,
             modeled_firmware=['sceClibMemcpy','sceClibMemset'],performance_measured=False)
 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');print('PASS:',json.dumps(result))

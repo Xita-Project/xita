@@ -129,3 +129,11 @@ native-build and real emulator phase-switch checks pass. Warthog movement and
 two charged plasma shots have also been checked in the emulator with preparation
 active. Physical frame-time comparisons and the unresolved physical GPU crash
 remain the deciding checks before enabling this path by default.
+
+
+[Indexed coverage reduction](index-coverage-neon-20260915.md) addresses the
+additional index-walk cost introduced by indexed vertex validation. Its existing
+draw-scan option now reaches the indexed path, using NEON maximum/popcount
+reductions while keeping exact output order and coverage. ARM checks show fewer
+instructions on tested large lists; physical whole-frame improvement is still
+unmeasured. The option remains off by default.
