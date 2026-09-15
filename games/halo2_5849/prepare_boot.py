@@ -81,6 +81,13 @@ GAME_DESCRIPTOR_CHILD_WALKS = (
     (0x108A40, 66, "b80567cf17df1eb4cf294790c5ef58f37dec29e321ff31a4743b8287ae436101"),
     (0x108A90, 122, "afa08763dab7cffe0330b76bdf026aec29abfe8d8f9ac67117d07b7f13c4b3c3"),
 )
+GAME_DESCRIPTOR_OBJECT_WALKS = (
+    (0x108FD0, 114, "bb174c0f12b280811288ac9a93a8fd15e24bc04546c4ec8ac160b96f2d49b1e1"),
+    (0x109290, 100, "c3b23ff93c8be4da1da58815fa9eba30130233d88bc392525625b62002eee686"),
+    (0x109050, 115, "fe250c4ad31ff7e8f84b0784fac61f03bea2c9a2482455ef28d5af23d995b85e"),
+    (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1"),
+    (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e"),
+)
 GAME_PACKED_VECTOR_BINDINGS = (
     (0x279BA2, 45, "ae5b4f05401786d52eb8183057ed4ce7f7ed8b9c4b38b3d45510b1d9a291b6fa"),
     (0x279C6F, 70, "d9fe85669bb7394f774d95bbce234fa3950a02301b12e6b67ca0962456a6f2c5"),
@@ -378,6 +385,23 @@ def game_descriptor_child_roots(image):
     for address, length, digest in GAME_DESCRIPTOR_CHILD_WALKS:
         if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
             raise ValueError("Halo 2 descriptor child walk fingerprint mismatch")
+    return descriptor_child_field_roots(image, (0x20, 0x24, 0x28, 0x2C))
+
+
+def game_descriptor_object_roots(image):
+    """Native156: original object dispatch uses the same direct child arrays.
+
+    Preserve original arguments and AL aggregation in translated callers.
+    Only the five fields proven by the complete fingerprinted walks are code.
+    """
+    for address, length, digest in GAME_DESCRIPTOR_OBJECT_WALKS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 descriptor object walk fingerprint mismatch")
+    return descriptor_child_field_roots(image, (0x64, 0x68, 0x6C, 0x70, 0x74))
+
+
+def descriptor_child_field_roots(image, offsets):
+    """Share checked catalog/child bounds, without recursively following children."""
     game_descriptor_initialization_chain(image)
     roots = set()
     for slot in range(0x468630, 0x468664, 4):
@@ -386,7 +410,7 @@ def game_descriptor_child_roots(image):
             child = image.u32(parent + 0x84 + index * 4)
             if child == 0:
                 break
-            for offset in (0x20, 0x24, 0x28, 0x2C):
+            for offset in offsets:
                 target = image.u32(child + offset)
                 if target == 0:
                     continue
@@ -583,6 +607,7 @@ def main():
         roots.update(game_resource_callback_roots(image))
         roots.update(game_descriptor_map_roots(image))
         roots.update(game_descriptor_child_roots(image))
+        roots.update(game_descriptor_object_roots(image))
         roots.update(game_packed_vector_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
