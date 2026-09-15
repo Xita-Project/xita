@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include "xv_x86rt.h"
+#include "kernel/xk_object_jobs.h"
 
 #ifndef XV_RT_LOG
 #  if defined(__vita__)
@@ -23,6 +24,9 @@ static unsigned g_unimpl_count;
 
 void xv_unimpl(xctx *c, uint32_t eip, const char *what)
 {
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    if(xv_is_object_job(c))xv_object_job_stop(c,eip,what);
+#endif
     if (g_unimpl_count < 64)
         XV_RT_LOG("unimplemented %s at %08X (eax=%08X esp=%08X)\n", what, eip, c->r[0], c->r[4]);
     g_unimpl_count++;
@@ -33,6 +37,9 @@ void xv_unimpl(xctx *c, uint32_t eip, const char *what)
 void __attribute__((weak)) xk_yield(void);
 void xv_preempt(xctx *c)
 {
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    if(xv_is_object_job(c))xv_object_job_stop(c,0,"job instruction budget exceeded");
+#endif
     static uint64_t n;
     /* Slice between cooperative yields.  Halo's vblank wait (0xBB060) is a pure busy loop when its
      * sleep flag is off, so the game thread only lets the vblank thread fire at these yields: 200k
@@ -75,6 +82,9 @@ void xv_preempt(xctx *c)
 
 void xv_trap(xctx *c, uint32_t eip)
 {
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    if(xv_is_object_job(c))xv_object_job_stop(c,eip,"guest trap");
+#endif
     XV_RT_LOG("TRAP at %08X: eax=%08X ecx=%08X edx=%08X ebx=%08X esp=%08X ebp=%08X esi=%08X edi=%08X\n",
               eip, c->r[0], c->r[1], c->r[2], c->r[3], c->r[4], c->r[5], c->r[6], c->r[7]);
     { char sb[512]; int n = 0;                                 /* guest stack words that look like code addresses */
@@ -123,6 +133,15 @@ extern volatile uint32_t xv_cur_fn __attribute__((weak));
 
 void xv_call(xctx *c, uint32_t target)
 {
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    if(xv_is_object_job(c)) {
+        /* Immutable guest table only: do not race the ordinary dispatch cache
+         * or enter an HLE callback through a vtable. */
+        xv_fn_t job_fn=xv_lookup(target);
+        if(!job_fn)xv_object_job_stop(c,target,"indirect non-guest target");
+        job_fn(c);return;
+    }
+#endif
     { static uint64_t n; static int on = -1; if (on < 0) on = getenv("XV_CALL_SAMPLE") != NULL;
       if (on && (++n & 0xFFFFF) == 0) XV_RT_LOG("call sample #%lluM: target %08X\n", (unsigned long long)(n >> 20), target); }
     int traced = &xv_guest_trace_enabled && xv_guest_trace_enabled && &xv_cur_fn;

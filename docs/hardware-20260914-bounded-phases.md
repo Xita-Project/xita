@@ -57,15 +57,27 @@ show roughly 430 draws/frame and about 34–35 ms/frame in draw HLE; that work
 overlaps the scene timings. This view differs from the earlier bridge capture
 and cannot quantify the causal cost of extra visible NPCs.
 
-## Next boundary
+## Finer scene capture
 
-Prioritize the scene-preparation and render-callback paths. The source game
-adapter already provides a complementary 48-scope set for immediate scene
-children. A separate diagnostic build is being prepared with those scopes;
-its translated instruction bodies remain unchanged after removing timing
-prologues. The currently installed comparison build retains its reviewed
-41-scope table. The next capture should separate the large scene remainder
-before selecting a native batch or independent worker boundary.
+The complementary 48-scope build, runtime
+`5a024a145c87ed5f3e59f5c1bbc61ada694960c0b8e8e487c4784c5b831d7e00`,
+is now boot-confirmed in physical slot B. The earlier working runtime remains in
+slot A. Its ordinary translated instruction bodies match the preceding build
+when timing prologues are removed.
+
+Vita3K and physical campaign captures each complete three valid 60-frame
+windows, with no dropped/invalid scopes. The physical comparison reports
+6.768/6.712/6.660 FPS for off/on/off; this is a diagnostic, not an optimization.
+Selected inclusive times include scene callbacks `54010` at 35.90 ms/frame,
+object updates `8FB70` at 17.26, flare-query preparation `60560` at 10.29,
+scene setup `539C0` at 9.86, light work `92890` at 7.27 and `5E270` at 6.82.
+Rows overlap and contain native blocking or unselected descendants.
+
+The owner subsequently requested a more aggressive multicore approach, accepting
+broken gameplay/rendering during development. The next implementation is the
+[concurrent-object experiment](parallel-object-experiment-20260914.md), with whole
+object callbacks, private stacks and joined batches. Shared game-state ordering
+is intentionally unproven; no hardware speedup is claimed for the prototype.
 
 Private logs, camera captures, parsed windows and exact elapsed-time receipts
 are under `engine-restructure-20260914T2300Z/physical-guest-phases`, alongside

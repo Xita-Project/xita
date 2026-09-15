@@ -52,6 +52,13 @@ No code from that project's Source Engine tree was imported for this research.
 
 ## Implementation order
 
+**September 14 steering:** the owner explicitly requested a more aggressive
+multicore experiment, accepting broken gameplay/rendering. The next implementation
+is [whole-object parallel execution](parallel-object-experiment-20260914.md),
+with private stacks and joins but intentionally unproven shared game state.
+The smaller candidates below remain retained; repeating marginal helper tests
+is no longer the immediate task.
+
 1. Validate indexed vertex checks during ordinary campaign and multiplayer
    play, including firing, driving and death/respawn. Run additional matched
    scene comparisons before changing the default. The benchmark restores the

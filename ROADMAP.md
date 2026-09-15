@@ -17,6 +17,13 @@ settings and retain private checkpoints. Stable 20 FPS is an intermediate
 milestone; neither target is complete. The separate Halo 2 agent is pursuing the
 original main menu in Vita3K. See the [implementation order](docs/performance-next-steps-20260914.md).
 
+[~] [Experimental concurrent object updates](docs/parallel-object-experiment-20260914.md):
+the next task now runs whole second-pass object callbacks on workers requesting
+cores 0 and 1, with the guest owner participating. This follows explicit approval
+to accept broken gameplay/rendering while finding dependencies. The ordinary
+build remains separate. Host scheduling/control checks pass; actual Halo
+execution and frame-rate benefit remain unverified.
+
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.
 An optional diagnostic splits comparison/copy cost by span size; it adds no
@@ -35,7 +42,9 @@ The new [bounded remote phase capture](docs/guest-phase-timing-20260912.md#bound
 passes host checks and completes three valid windows on both Vita3K and
 hardware. The [physical capture](docs/hardware-20260914-bounded-phases.md)
 places the scene path at about 110 ms/frame inclusive, including native waits;
-the next trace separates its unselected children.
+the finer 48-scope trace is now validated on hardware. It measures about
+17.26 ms/frame inclusive in object updates and 35.90 ms in scene callbacks.
+These overlapping regions guide the concurrent-object experiment.
 
 The [combined matrix/object-scan/texture-state comparison](docs/optimization-bundle-20260914.md)
 retains the established improvements and tests three additional candidates

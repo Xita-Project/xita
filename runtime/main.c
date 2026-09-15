@@ -1236,6 +1236,11 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
+    if (xv_benchmark_compare_object_jobs()) {
+        extern void xv_object_jobs_override(int) __attribute__((weak));
+        if(xv_object_jobs_override)xv_object_jobs_override(enabled);
+        return;
+    }
     if (xv_benchmark_compare_prep_bundle()) {
         extern void xv_matrix_neon_override(int) __attribute__((weak));
         extern void xv_object_scan_override(int) __attribute__((weak));
@@ -1857,6 +1862,9 @@ int main(int argc, char *argv[])
             if(!__atomic_load_n(&g_update_quiesced,__ATOMIC_ACQUIRE))sceKernelWaitThreadEnd(eng,NULL,NULL);
         } else XV_LOG("recomp thread start failed\n");
         if(!__atomic_load_n(&g_update_quiesced,__ATOMIC_ACQUIRE))sceKernelDeleteThread(eng);
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+        { extern void xv_object_jobs_shutdown(void); xv_object_jobs_shutdown(); }
+#endif
         xv_present_drain(); g_running = 0;
         xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
         sceKernelWaitThreadEnd(pump, NULL, NULL); sceKernelDeleteThread(pump);

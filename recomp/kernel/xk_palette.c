@@ -3,6 +3,7 @@
  * Keep this out of ordinary builds until hardware comparisons justify it. */
 #ifdef XV_NATIVE_MODEL_PALETTE
 #include "xk.h"
+#include "xk_object_jobs.h"
 #include <stdlib.h>
 #if defined(__arm__)
 #include <arm_neon.h>
@@ -139,6 +140,7 @@ static int palette_numeric(const float *left, const uint8_t *right, unsigned cou
 
 int xv_math_model_palette(xctx *c)
 {
+    XV_OBJECT_MATH_GUARD();
     if (!palette_enabled()) return decline(0);
     uint32_t sp = c->r[4], model = c->r[5], pose = c->r[7];
     if (!pose || sp < 32 || model > UINT32_MAX - 0xc0u) return decline(1);
@@ -187,6 +189,7 @@ int xv_math_model_palette(xctx *c)
 
 void xv_model_palette_report(unsigned frames)
 {
+    XV_OBJECT_MATH_GUARD();
     XK_LOG("[model-palette] %u frames batches %u matrices %u declined disabled %u bounds %u budget %u layout %u numeric/fp %u\n",
         frames,palette_batches,palette_matrices,palette_declined[0],palette_declined[1],
         palette_declined[2],palette_declined[3],palette_declined[4]);

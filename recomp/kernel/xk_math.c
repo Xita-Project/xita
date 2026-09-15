@@ -1,6 +1,7 @@
 /* Halo 3925 leaf math. Keep the original operation order and precision;
  * unusual layouts use the unchanged lifted function without side effects. */
 #include "xk.h"
+#include "xk_object_jobs.h"
 #include <stdlib.h>
 #if defined(__x86_64__)
 #include <xmmintrin.h>
@@ -42,6 +43,7 @@ static int math_overlap(const void *a, unsigned an, const void *b, unsigned bn)
 }
 void xv_native_math_report(unsigned frames)
 {
+    XV_OBJECT_MATH_GUARD();
 #ifdef XV_NATIVE_MATRIX_NEON
     matrix_neon_report(frames);
 #endif
@@ -100,6 +102,7 @@ static int point_fp_supported(void)
  * overlap is declined because the original interleaves matrix reads/stores. */
 int xv_math_point_transform(xctx *c)
 {
+    XV_OBJECT_MATH_GUARD();
     static int enabled=-1;
     if(enabled<0) {
         const char *value=getenv("XV_NATIVE_POINT_MATH");
@@ -157,6 +160,7 @@ static float matrix_mla(float sum,float a,float b)
 
 int xv_math_matrix_multiply(xctx *restrict c)
 {
+    XV_OBJECT_MATH_GUARD();
     uint32_t sp = c->r[4];
     uint32_t *stack = math_span(sp - 16u, 32);
     if (!math_enabled()) return matrix_decline(ML_DISABLED);
@@ -248,6 +252,7 @@ int xv_math_matrix_multiply(xctx *restrict c)
  * x87 stack dispatch; float scratch spills and final x87 slots are retained. */
 int xv_math_quaternion_matrix(xctx *restrict c)
 {
+    XV_OBJECT_MATH_GUARD();
     uint32_t sp=c->r[4], fp=c->fsp;
     const float *ip=math_span(c->r[1],16);
     float *output=math_span(c->r[2],52), *scratch_out=math_span(sp-24u,24);

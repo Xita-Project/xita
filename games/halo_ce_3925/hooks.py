@@ -84,6 +84,11 @@ class HaloHooks(NoGameHooks):
             image.bytes_at(0x900E0, 0x239) or b"").hexdigest() == "5bcdb3c78aa2f0b4ba4da986cfe59cb0d28c1004cbcc804abdafabd8200f520a"
 
     def before_instruction(self, address):
+        if self.object_scan_enabled and address in (0x900E0, 0x902A9, 0x90314):
+            line = {0x900E0: "(void)xv_object_jobs_begin(c);",
+                    0x902A9: "xv_object_jobs_join();",
+                    0x90314: "xv_object_jobs_finish(c);"}[address]
+            return ["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS", "    " + line, "#endif"]
         if self.object_scan_enabled and address in (0x90190, 0x90240, 0x902B6):
             index = (0x90190, 0x90240, 0x902B6).index(address)
             return ["#ifdef XV_NATIVE_OBJECT_SCAN",
@@ -107,6 +112,10 @@ class HaloHooks(NoGameHooks):
         out = []
         if not self.enabled:
             return out
+        if address == 0x8FB70 and self.enabled and hashlib.sha256(
+                self.image.bytes_at(address, 0x111) or b"").hexdigest() == "8003e134015d9a4df2a0e3bd501610aafacb7b7693bba77a40094b542c964ae0":
+            out.extend(["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS",
+                        "    if (xv_object_jobs_queue(c)) return;", "#endif"])
         if self.flare_enabled and address == ENTRY:
             out.append(ENTRY_HOOK)
         native_math = {

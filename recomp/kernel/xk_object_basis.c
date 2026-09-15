@@ -3,6 +3,7 @@
  * this synchronously; there is no worker or cross-frame object cache. */
 #ifdef XV_NATIVE_OBJECT_BASIS
 #include "xk.h"
+#include "xk_object_jobs.h"
 #include <stdlib.h>
 #if defined(__x86_64__)
 #include <xmmintrin.h>
@@ -108,6 +109,7 @@ static double negate(double value)
 
 int xv_math_object_basis(xctx *c)
 {
+    XV_OBJECT_MATH_GUARD();
     if (!enabled()) return decline(0);
     /* Reordering guest stores around native math is safe only with masked
      * native FP exceptions. Unsupported controls use the original region. */
@@ -152,6 +154,7 @@ int xv_math_object_basis(xctx *c)
 
 void xv_object_basis_report(unsigned frames)
 {
+    XV_OBJECT_MATH_GUARD();
     XK_LOG("[object-basis] %u frames used %u mirrored %u declined disabled %u fp %u layout %u\n",
            frames,basis_used,basis_mirrored,basis_declined[0],basis_declined[1],basis_declined[2]);
     basis_used = basis_mirrored = 0;

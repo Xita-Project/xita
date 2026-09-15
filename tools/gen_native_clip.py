@@ -30,7 +30,7 @@ def register_body(body):
     helpers = set(re.findall(r'\b(\w+)\(c(?:,|\))', text))
     assert helpers <= {'XF_Z', 'XF_S', 'XF_O', 'XF_C', 'XF_P', 'x_shl32', 'x_shr32',
                        'x87_load_f32', 'x87_store_f32', 'x87_compare',
-                       'x_str_movs', 'f_0001D130'}, helpers
+                       'x_str_movs', 'f_0001D130', 'CLIP_TRACE_ALLOWED'}, helpers
     result = []
     for line in body:
         line = re.sub(r'c->r\[([0-7])\]', r'r\1', line)
@@ -126,7 +126,7 @@ def generate():
         body.append(line)
         if line.strip() == 'f_0001D130(c);':
             body.extend([
-                '    if (&xv_cur_fn) {',
+                '    if (CLIP_TRACE_ALLOWED(c) && &xv_cur_fn) {',
                 '        if (&xv_watch_n && xv_watch_n && xv_watch_leave)',
                 '            xv_watch_leave(xv_cur_fn, saved_fn, c);',
                 '        xv_cur_fn = saved_fn;',
@@ -141,23 +141,30 @@ def generate():
  * Native FP locals; original rounding, memory aliases, flags and preemption.
  */
 #include "../xv_x86rt.h"
+#include "xk_object_jobs.h"
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+#define CLIP_TRACE_ALLOWED(c) (!xv_is_object_job(c))
+#else
+#define CLIP_TRACE_ALLOWED(c) 1
+#endif
 #include <stdlib.h>
 extern void f_0001D130(xctx *);
 extern volatile uint32_t xv_cur_fn __attribute__((weak));
 extern int xv_watch_n __attribute__((weak));
 extern void xv_watch_leave(uint32_t, uint32_t, xctx *) __attribute__((weak));
 static unsigned clip_calls;
-unsigned xv_math_clip_calls(void) {{ unsigned n=clip_calls; clip_calls=0; return n; }}
+unsigned xv_math_clip_calls(void) {{ XV_OBJECT_MATH_GUARD(); unsigned n=clip_calls; clip_calls=0; return n; }}
 #define CLIP_SAVE(d) do {{ {save} c->fsp = (fp + (d)) & 7u; }} while (0)
 #define CLIP_LOAD() do {{ {load} }} while (0)
 #define CLIP_PREEMPT(d) do {{ if (--c->preempt <= 0) {{ CLIP_SAVE(d); xv_preempt(c); fp=(c->fsp-(d)) & 7u; CLIP_LOAD(); }} }} while (0)
 int xv_math_polygon_clip(xctx *restrict c)
 {{
+    XV_OBJECT_MATH_GUARD();
     static int enabled = -1;
     if (enabled < 0) {{ const char *e=getenv("XV_NATIVE_CLIP"); enabled=!e || atoi(e)!=0; }}
     if (!enabled) return 0;
     clip_calls++;
-    uint32_t saved_fn = &xv_cur_fn ? xv_cur_fn : 0;
+    uint32_t saved_fn = CLIP_TRACE_ALLOWED(c) && &xv_cur_fn ? xv_cur_fn : 0;
     unsigned fp = c->fsp;
     double {', '.join(f's{i}' for i in range(8))};
     uint8_t *const xram_ = g_xram; const uint32_t *const xpt_ = g_xpt; (void)xram_; (void)xpt_;
@@ -181,7 +188,7 @@ int xv_math_polygon_clip(xctx *restrict c)
 static unsigned clip_register_calls;
 static int clip_register_override=-1;
 void xv_clip_registers_override(int enabled) {{ clip_register_override=enabled; }}
-unsigned xv_math_clip_register_calls(void) {{ unsigned n=clip_register_calls; clip_register_calls=0; return n; }}
+unsigned xv_math_clip_register_calls(void) {{ XV_OBJECT_MATH_GUARD(); unsigned n=clip_register_calls; clip_register_calls=0; return n; }}
 '''
     entry = header[header.index('int xv_math_polygon_clip('):]
     entry = entry.replace('    static int enabled = -1;', '''    static int registers = -1;

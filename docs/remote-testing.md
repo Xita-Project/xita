@@ -110,7 +110,7 @@ Available names are `object-basis`, `model-palette`, `vertex-worker`,
 `vertex-references`, `native-bounds`, `vertex-copy`, `draw-scan`, `flare`,
 `resolution`, `early-visibility`, `point-math`, `texture-state`, `matrix-neon`,
 `object-scan`, `hle-dispatch`, `flare-query-overlap`, `guest-affinity`,
-`snapshot-worker`, `guest-phases`, and `prep-bundle`. Resolution runs 544/360/544;
+`snapshot-worker`, `guest-phases`, `prep-bundle`, and `object-jobs`. Resolution runs 544/360/544;
 the others run off/on/off. Each restores
 the prior override and resolution. The network thread only publishes a request;
 the guest input owner checks first-person control and starts it at the existing
@@ -213,3 +213,10 @@ lost view restore each member’s own configured value. Both native helpers must
 be compiled and native math must be enabled. This tests the combined change;
 it does not attribute any gain to an individual member. See the
 [bundle experiment](optimization-bundle-20260914.md).
+
+The `object-jobs` selector requires the explicitly experimental parallel-object
+build. It can break gameplay or stop at an unsupported worker service; see the
+[prototype and its limits](parallel-object-experiment-20260914.md). It runs real
+object callbacks on two workers plus the guest owner, retaining an off/on/off
+comparison and the same worker reservations/native-helper locking in all arms.
+It is not included in ordinary release builds.

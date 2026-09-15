@@ -272,6 +272,10 @@ static xk_thread *pick_next(xk_thread *after)
 void xd3d_ds_check(const char *where, uint32_t eip) __attribute__((weak));
 void xk_yield(void)
 {
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    extern void xv_object_jobs_join(void);
+    xv_object_jobs_join(); /* No outstanding object jobs when another fiber resumes. */
+#endif
     xk_thread *me = xk_cur;
     if (__atomic_load_n(&g_wait_dump_requested,__ATOMIC_RELAXED) &&
         __atomic_exchange_n(&g_wait_dump_requested,0,__ATOMIC_ACQ_REL))

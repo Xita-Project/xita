@@ -386,6 +386,11 @@ CFLAGS += -DXV_FLARE_QUERY_OVERLAP
 endif
 
 # Native replacements must retain the lifted multiply/add rounding points.
+ifeq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
+RECOMP_CFLAGS += -DXV_EXPERIMENTAL_OBJECT_JOBS
+CFLAGS += -DXV_EXPERIMENTAL_OBJECT_JOBS
+endif
+
 # Unroll only bounded native math units. Scalar VFP operations retain their
 # established operand order; no global fast-math or guest codegen change.
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off
