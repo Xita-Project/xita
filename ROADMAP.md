@@ -111,11 +111,13 @@ stays disabled. These changes preserve exact draw data and standard graphics;
 neither comparison establishes sustained 20 or 30 FPS.
 
 The subsequent [gameplay capture](docs/gameplay-cadence-20260915.md) records
-camera/AR drops and a periodic hitch, with both object workers active. A new
-timer measures the 60-frame profiling report to test whether synchronous logging
-explains that cadence. An [exact index-reuse prototype](docs/index-reuse-20260915.md)
-passes source-mutation and delayed-slot host tests; it remains off pending
-emulator and hardware validation.
+camera/AR drops and a periodic hitch, with both object workers active. Hardware
+timing confirms that the 60-frame profiling report can stall for hundreds of
+milliseconds. The installed report-batching fix reduces the measured Blood Gulch
+median report cost from 383.057 to 11.277 ms; one 145.840 ms outlier remains.
+This is a report-cost result, not a controlled overall-FPS comparison. An [exact index-reuse prototype](docs/index-reuse-20260915.md)
+passes source-mutation, delayed-slot and emulator smoke tests; it remains off
+pending a physical performance comparison.
 
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.
