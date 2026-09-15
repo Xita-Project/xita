@@ -104,6 +104,19 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_PREDICATE_REPLACEMENT_CALLS = (
+    (0x1C2D40, 1421, "33856e0e9b24f67237de4e56494cff0f1e3b884b420fab0024e64b19fd283888"),
+    (0x3101C0, 1850, "42a213f2b6c96033db532ebef5e5e9dc5e4dbc4d8bed28d18a7475214b5a499b"),
+    (0x310900, 165, "5e9c98da71370a55a9a5a8942a132858dd39fc8786055ae33e38dffaae2b9689"),
+    (0x30D1B0, 71, "a5dad4dc610aaf7f391f9b57c49cb34a49c3a51f32532f2d9e24b3112cbd58d0"),
+    (0x30D250, 40, "f248b75c7e17e440018d2089ee5b4c5d57c4a12cf26e05e9be9d50186471de11"),
+    (0x30D280, 48, "4561789399d61d12c8f75fcd36edd3b60844e863934bfe230819c7f65e84b673"),
+    (0xDC370, 43, "8e87f292ae697c792658a23cb2e8a0f2a7d4e6523b1b02db915a0acdcb90d098"),
+    (0x30E4B0, 303, "a3e5389478a81f59a5c47b1f594afeeb2ffa28b9249b9289f823cd3c993672b6"),
+    (0x3728C0, 378, "b7c25a0fe7b69cda2e84c1d0505a4a9cf787135741f36f5ed16f26247a72cf5e"),
+    (0x2DFBF0, 198, "cbf97a8357e501bd9b6ea3ee799a16d7770f1d90f7bc4e225de2e76bf09d4b16"),
+    (0x2DF9D0, 79, "a197f54b1004b8ee27c72b731094816d054088815258f06f26fe6941a8b2013f"),
+)
 GAME_OWNER_FIELD_RELEASE_CALLS = (
     (0x3101C0, 1850, "42a213f2b6c96033db532ebef5e5e9dc5e4dbc4d8bed28d18a7475214b5a499b"),
     (0x30C1A0, 81, "1536effbf6292521a9ac40436ab335ff1057fb5ccc057fab011d9b3eca2d0ee8"),
@@ -535,6 +548,21 @@ def descriptor_child_field_roots(image, offsets):
     return roots
 
 
+def game_predicate_replacement_roots(image):
+    """Native170: release the old predicate and dispatch the original new one."""
+    for address, length, digest in GAME_PREDICATE_REPLACEMENT_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 predicate replacement fingerprint mismatch")
+    roots = set()
+    for slot in (0x4138DC, 0x4555E8):
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 predicate replacement target is not title code")
+        roots.add(target)
+    return roots
+
+
 def game_owner_field_release_roots(image):
     """Native169: delete the original constructor-owned field through slot zero."""
     for address, length, digest in GAME_OWNER_FIELD_RELEASE_CALLS:
@@ -962,6 +990,7 @@ def main():
         roots.update(game_pair_listener_roots(image))
         roots.update(game_body_notification_roots(image))
         roots.update(game_owner_field_release_roots(image))
+        roots.update(game_predicate_replacement_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).

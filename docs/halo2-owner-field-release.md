@@ -31,9 +31,10 @@ and `owner-release-full-bodies.txt`. Native 170 uses private
 The diagnostic package embeds owned game content and must not be distributed.
 Native 170 executes the prior-field destructor and reaches original cleanup
 `310900`. Its next strict stop is target `30D250`, return `31095F`, object
-`014E2E60`, ESP `005E5E60`. The next task is to audit that cleanup's bound
-objects and caller path; this trace alone does not establish whether the
-cleanup is normal reinitialization or a failure path.
+`014E2E60`, ESP `005E5E60`. The subsequent full caller audit identifies `310900` as a predicate
+replacement setter for owner field `D0h`, invoked during initialization
+by `1C2D40`. It is not a whole-owner teardown. See
+[the predicate replacement audit](halo2-predicate-replacement.md).
 
 The original Microsoft Game Studios intro is visibly present in
 `native-170-view/early-movie-middle.png`, SHA-256 `ae39365d0d19dac92fa92ff4dbd90ef2fc7fe62632a535dd5ceeb1a000281720`.
