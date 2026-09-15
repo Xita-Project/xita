@@ -34,6 +34,7 @@ static unsigned indirect_depth[LANES];
  * States: 0 executing, 1 service request, 2 completed, 3 completion consumed,
  * 4 parked (including an event reply held during an I/O handoff). */
 static unsigned service_state[WORKERS], services, owner_notice, pause_workers, io_yields, resource_queries, resource_registers;
+static unsigned vertex_locks;
 static unsigned service_address[WORKERS];
 static xv_fn_t service_fn[WORKERS];
 static int initialized, override=-1;
@@ -99,6 +100,10 @@ static int worker_lane(void)
 #endif
     return -1;
 }
+static int needs_quiescence(unsigned address)
+{
+    return address==0x1D6640u||address==0x184AB0u||address==0x1858D0u;
+}
 static void service_owner(void)
 {
     unsigned completed=0;
@@ -114,7 +119,7 @@ static void service_owner(void)
             unsigned state=__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE);
             if(state==0)quiet=0;
             else if(state==1) {
-                if(service_address[i]==0x1D6640u||service_address[i]==0x184AB0u) {
+                if(needs_quiescence(service_address[i])) {
                     quiescent++;yielding+=service_address[i]==0x1D6640u;continue;
                 }
                 service_fn[i](&contexts[i]);
@@ -133,11 +138,17 @@ static void service_owner(void)
             if(yielding&&xk_object_io_step()<0)abort();
             for(unsigned i=0;i<active_workers;i++)
                 if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==1) {
-                    if(service_address[i]==0x184AB0u) {
-                        /* Header address/refcount fixup only; no allocation,
-                         * draw submission or scheduler entry in this handler. */
-                        service_fn[i](&contexts[i]);resource_registers++;
-                    } else {contexts[i].r[0]=STATUS_SUCCESS;contexts[i].r[4]+=4;io_yields++;}
+                    if(service_address[i]==0x1D6640u) {
+                        contexts[i].r[0]=STATUS_SUCCESS;contexts[i].r[4]+=4;io_yields++;
+                    } else {
+                        /* Header fixup or vertex-storage pointer lookup only;
+                         * no allocation, draw submission or scheduler entry.
+                         * The guest impact transaction holds the shared guard
+                         * across its allocation, pointer lookup and writes. */
+                        service_fn[i](&contexts[i]);
+                        if(service_address[i]==0x184AB0u)resource_registers++;
+                        else vertex_locks++;
+                    }
                     __atomic_store_n(&service_state[i],4,__ATOMIC_RELEASE);
                 }
             __atomic_store_n(&pause_workers,0,__ATOMIC_RELEASE);
@@ -376,7 +387,7 @@ void xv_object_jobs_report(unsigned frames)
         frames,batches,submitted,executed[0],executed[1],executed[2],
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)work_us[2],
         (unsigned long long)batch_us,rejected);
-    XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u\n",services,io_yields,resource_queries,resource_registers);services=io_yields=resource_queries=resource_registers=0;
+    XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
     batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
 }
 void xv_object_job_indirect(xctx *c,unsigned target)
@@ -414,8 +425,10 @@ void xv_object_job_stop(xctx *c,unsigned address,const char *reason)
 void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
 {
     if(address==0x1D675Cu) {fn(c);return;} /* stateless memory comparison */
-    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u)||!fn)
+    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u&&address!=0x1858D0u)||!fn)
         xv_object_job_stop(c,address,"unsupported HLE");
+    if(address==0x1858D0u&&X_M32(c->r[4])!=0x116240u)
+        xv_object_job_stop(c,address,"vertex lock outside audited impact transaction");
     if(address==0x1D6640u && (X_M32(c->r[4])!=0x12AA9u||
         (X_M32(c->r[4]+4)!=0x32B60u&&X_M32(c->r[4]+4)!=0x3268Au)))
         xv_object_job_stop(c,address,"yield outside audited cache wait");
@@ -424,12 +437,12 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
             extern int xk_object_io_step(void);
             if(xk_object_io_step()<0)abort();
             c->r[0]=STATUS_SUCCESS;c->r[4]+=4;io_yields++;
-        } else {fn(c);if(address==0x184A20u)resource_queries++;else if(address==0x184AB0u)resource_registers++;else services++;}
+        } else {fn(c);if(address==0x184A20u)resource_queries++;else if(address==0x184AB0u)resource_registers++;else if(address==0x1858D0u)vertex_locks++;else services++;}
         return;
     }
     for(unsigned i=0;i<active_workers;i++)if(c==&contexts[i]) {
         service_fn[i]=fn;service_address[i]=address;
-        if(address==0x1D6640u||address==0x184AB0u)__atomic_store_n(&pause_workers,1,__ATOMIC_RELEASE);
+        if(needs_quiescence(address))__atomic_store_n(&pause_workers,1,__ATOMIC_RELEASE);
         __atomic_store_n(&service_state[i],1,__ATOMIC_RELEASE);notify_owner();
         wait_reply(i);return;
     }

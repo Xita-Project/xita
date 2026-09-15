@@ -96,7 +96,11 @@ class HaloHooks(NoGameHooks):
         0x56670: (273, "54d374355fdeb944c482141e466359117060ab5f6db257a02a382d1ea9008154"),
         0xA92C0: (108, "91de09c33f100a0543ffaabea4a5472f146b763cefc409831186d16e412fc1e6"),
         0xA9330: (131, "2563d84b6197cd72ccfce86a6bb43ab8a83ae9068476a89432dfb8dd5eecce54"),
+        0x114D30: (6661, "f69b2229fb307116fcaef1542e2d2f1099d67f1705edea176c2f6df3e0b9373e"),  # impact geometry allocation/write/publication
     }
+    # Independently emitted entry points share backward branches into the same
+    # original function. Verify its whole body, not just the suffix at the alias.
+    object_shared_aliases = {0x115423: 0x114D30, 0x115FDF: 0x114D30}
 
     def before_instruction(self, address):
         if self.object_scan_enabled and address in (0x900E0, 0x902A9, 0x90314):
@@ -131,11 +135,12 @@ class HaloHooks(NoGameHooks):
                 self.image.bytes_at(address, 0x111) or b"").hexdigest() == "8003e134015d9a4df2a0e3bd501610aafacb7b7693bba77a40094b542c964ae0":
             out.extend(["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS",
                         "    if (xv_object_jobs_queue(c)) return;", "#endif"])
-        if address in self.object_shared:
-            size, digest = self.object_shared[address]
-            if hashlib.sha256(self.image.bytes_at(address, size) or b"").hexdigest() == digest:
+        shared_address = self.object_shared_aliases.get(address, address)
+        if shared_address in self.object_shared:
+            size, digest = self.object_shared[shared_address]
+            if hashlib.sha256(self.image.bytes_at(shared_address, size) or b"").hexdigest() == digest:
                 out.extend(["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS",
-                            "    XV_OBJECT_MATH_GUARD(); /* shared list/datum transaction */", "#endif"])
+                            "    XV_OBJECT_MATH_GUARD(); /* shared guest transaction */", "#endif"])
         if self.flare_enabled and address == ENTRY:
             out.append(ENTRY_HOOK)
         native_math = {

@@ -82,6 +82,26 @@ static void submit_register(xctx *c,unsigned id)
     xv_object_job_hle(c,0x184AB0u,register_resource);
     assert(c->r[0]==0&&c->r[4]==sp&&X_M32(h)==0xaabb0001&&X_M32(h+4)==0x200000+id);
 }
+static unsigned vertex_lock_calls;
+void object_test_d3d_count(const char *name)
+{ assert(!strcmp(name,"D3DVertexBuffer_Lock"));vertex_lock_calls++; }
+void xv_hle_D3DVertexBuffer_Lock(xctx *);
+static void vertex_lock(xctx *c)
+{
+    assert(pthread_equal(pthread_self(),guest_owner));
+    for(unsigned i=0;i<300;i++)io_seen[i]=writes[i];
+    assert(X_M32(c->r[4]+12)==64&&X_M32(c->r[4]+20)==0x80);
+    xv_hle_D3DVertexBuffer_Lock(c);
+}
+static void submit_vertex_lock(xctx *c,unsigned id)
+{
+    unsigned sp=c->r[4],header=0x90000+id*8;
+    X_M32(header+4)=0x123000;X_PUSH32(0);unsigned output=c->r[4];
+    X_PUSH32(0x80);X_PUSH32(output);X_PUSH32(64);X_PUSH32(id*64);X_PUSH32(header);X_PUSH32(0x116240);
+    xv_object_job_hle(c,0x1858D0u,vertex_lock);
+    assert(c->r[0]==0&&c->r[4]==sp-4&&X_M32(output)==0x80123000+id*64);
+    c->r[4]+=4;
+}
 int xv_math_point_transform(xctx *c);
 uint64_t xk_os_monotonic_us(void)
 { struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000; }
@@ -112,11 +132,13 @@ void f_0008FB70(xctx *c)
         submit_event(c,0x70000+id*8);
         if(id%3==0)submit_yield(c,0x32B60u);
         submit_query(c,id);
+        if(id%2==0)submit_vertex_lock(c,id);
     }
     /* Requests can also arrive simultaneously, outside the shared lock. */
     submit_event(c,0x70004+id*8);
     if(id%3==1)submit_yield(c,0x3268Au);
     if(id%3==2)submit_register(c,id);
+    if(id%2==1)submit_vertex_lock(c,id);
     __atomic_sub_fetch(&active,1,__ATOMIC_SEQ_CST);c->r[4]+=4;
 }
 int main(int argc,char **argv)
@@ -146,6 +168,10 @@ int main(int argc,char **argv)
         c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x12AA9;X_M32(c.r[4]+4)=0xDEADBEEF;
         xv_object_job_hle(&c,0x1D6640u,should_not_call_yield);assert(0);
     }
+    if(argc>1&&!strcmp(argv[1],"unsupported-vertex-lock")) {
+        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0xDEADBEEF;
+        xv_object_job_hle(&c,0x1858D0u,vertex_lock);assert(0);
+    }
     if(argc>1) {c.fiber=(void *)&xv_object_job_marker;xv_object_job_hle(&c,0x1D66EC,NULL);assert(0);}
     for(unsigned round=0;round<2;round++) {
         for(unsigned i=0;i<300;i++) {
@@ -159,10 +185,10 @@ int main(int argc,char **argv)
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
-    assert(register_calls==200);assert(query_calls==600);assert(event_calls==1200&&event_value==1200);assert(io_calls>=200&&io_calls<=400);
+    assert(vertex_lock_calls==600);assert(register_calls==200);assert(query_calls==600);assert(event_calls==1200&&event_value==1200);assert(io_calls>=200&&io_calls<=400);
     for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));
     xv_object_jobs_report(2);xv_object_jobs_shutdown();
-    printf("PASS: 600 callbacks and native point transforms exactly once; 200 quiescent registrations, 600 resource queries, 1,200 owner-thread events and 400 cache yields with quiescent owner I/O reads, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
+    printf("PASS: 600 callbacks and native point transforms exactly once; 600 quiescent vertex locks, 200 registrations, 600 resource queries, 1,200 owner-thread events and 400 cache yields with quiescent owner I/O reads, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
     free(g_xram);free(g_xpt);
 }

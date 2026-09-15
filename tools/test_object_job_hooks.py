@@ -23,6 +23,8 @@ for address,call in ((0x900E0,'xv_object_jobs_begin(c)'),
 assert 'xv_object_jobs_queue(c)' in '\n'.join(hooks.function_entry(0x8FB70))
 for address in hooks.object_shared:
     assert 'XV_OBJECT_MATH_GUARD()' in '\n'.join(hooks.function_entry(address))
+for address in hooks.object_shared_aliases:
+    assert 'XV_OBJECT_MATH_GUARD()' in '\n'.join(hooks.function_entry(address))
 read=img.bytes_at
 def changed(address,size):
     data=bytearray(read(address,size))
@@ -34,5 +36,7 @@ assert not modified.object_scan_enabled
 assert 'xv_object_jobs_queue' not in '\n'.join(modified.function_entry(0x8FB70))
 for address in (0x900E0,0x902A9,0x90314):assert not modified.before_instruction(address)
 for address in hooks.object_shared:
+    assert 'XV_OBJECT_MATH_GUARD()' not in '\n'.join(modified.function_entry(address))
+for address in hooks.object_shared_aliases:
     assert 'XV_OBJECT_MATH_GUARD()' not in '\n'.join(modified.function_entry(address))
 print('PASS: exact object callback and pass signatures; instruction hooks cover inlined copies; modified bodies decline')

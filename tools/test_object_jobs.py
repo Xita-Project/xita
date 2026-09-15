@@ -6,6 +6,7 @@ This validates the worker pool, not Halo's unproven shared object dependencies.
 from pathlib import Path
 import os
 import resource
+import re
 import shlex
 import subprocess
 import tempfile
@@ -13,11 +14,22 @@ import tempfile
 root=Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
     binary=Path(directory)/'test'
+    # Compile the actual pointer-return handler; only its diagnostic counter is
+    # supplied by the fixture. This keeps its ABI/result test tied to production.
+    d3d_source=(root/'recomp/kernel/xd3d.c').read_text()
+    handler=re.search(r'^void xv_hle_D3DVertexBuffer_Lock\(xctx \*c\) \{.*?\}$',d3d_source,re.M)
+    assert handler
+    d3d=Path(directory)/'vertex_lock.c'
+    d3d.write_text('#include "kernel/xk.h"\n'
+                   'void object_test_d3d_count(const char *);\n'
+                   '#define XD3D_COUNT(name) object_test_d3d_count(name)\n'+
+                   '\n'.join(re.search(r'^#define '+name+r'\(.*$',d3d_source,re.M)[0]
+                             for name in ('RES_DATA','GUEST_PTR'))+'\n'+handler[0]+'\n')
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11','-fno-strict-aliasing',
         '-DXV_EXPERIMENTAL_OBJECT_JOBS','-I'+str(root/'recomp'),
         '-ffunction-sections','-fdata-sections','-ffp-contract=off',
         *shlex.split(os.environ.get('OBJECT_JOB_TEST_FLAGS','')),
-        str(root/'tools/tests/object_jobs.c'),str(root/'recomp/kernel/xk_object_jobs.c'),
+        str(root/'tools/tests/object_jobs.c'),str(d3d),str(root/'recomp/kernel/xk_object_jobs.c'),
         str(root/'recomp/kernel/xk_math.c'),str(root/'recomp/xv_x86rt.c'),
         '-pthread','-Wl,--gc-sections','-lm','-o',str(binary)],check=True)
     for workers in ("2", "1", "0"):
@@ -33,3 +45,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                            timeout=10,preexec_fn=no_core)
     assert failure.returncode<0 and b'STOP yield outside audited cache wait' in failure.stderr
     print('PASS: unrelated guest yields stop before scheduling any fiber')
+    failure=subprocess.run([str(binary),'unsupported-vertex-lock'],capture_output=True,
+                           timeout=10,preexec_fn=no_core)
+    assert failure.returncode<0 and b'STOP vertex lock outside audited impact transaction' in failure.stderr
+    print('PASS: vertex locks outside the audited impact transaction stop before invocation')

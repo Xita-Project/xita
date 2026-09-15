@@ -277,3 +277,34 @@ The third charge stops at `D3DVertexBuffer_Lock` (`1858D0`, return `116240`),
 inside impact-geometry preparation (`114D30`) under callback `C3A00`.
 This gives the next ownership boundary to address; it is not a hardware gain.
 The physical Vita still runs working slot A and has not received this candidate.
+
+
+The impact candidate marshals the existing `D3DVertexBuffer_Lock` handler only
+from return `116240`, after all workers acknowledge a pause. The handler returns
+a guest pointer and updates the normal diagnostic counter; it does not perform
+a GXM draw or introduce a new GPU wait. A full-body guard covers `114D30`'s
+allocation, geometry writes and publication. Emitted alternate entries `115423`
+and `115FDF` use the same guard and verify the complete containing function,
+including backward branches. The original lookup handler is compiled into the
+host pool test: 600 vertex locks per worker configuration preserve output,
+arguments and cleanup while interleaved with events/cache waits/registration.
+ASAN/UBSAN and TSAN pass. Exact original-body signatures and modified-body
+rejection pass for the main entry and both aliases. Full gameplay and hardware
+performance remain to be tested.
+
+A direct-call audit from the object pass and observed callback roots finds 17
+HLE entries across 864 emitted functions. This is a conservative graph, not proof
+that all branches run. Most remaining entries lie under assertion/error or file
+write paths; they remain rejected. It excludes unknown indirect targets and must
+not be treated as complete coverage or a reason to admit those calls blindly.
+
+
+Impact runtime `6f409cdc25c8886008058ff438031746c26129cfee56bd55823f987b5c804acc`
+loads Blood Gulch and completes turns, walking, five charges, a grenade, then
+three shots directly at a base wall and a second grenade input. The wall test
+records three vertex-pointer handoffs, three registrations, 594 resource queries
+and 16 cache yields across 74 completed worker report windows, without a worker
+STOP. Earlier shots did not exercise the new vertex handler; only the wall test
+establishes that coverage. These are emulator functional results, not hardware
+FPS evidence. A Wi-Fi update to the physical inactive slot was then started;
+working slot A is retained for rollback. Hardware confirmation is still pending.
