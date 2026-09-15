@@ -49,6 +49,20 @@ static void submit_event(xctx *c,uint32_t output)
     unsigned previous=X_M32(output);assert(previous<1200);
     __atomic_add_fetch(&event_seen[previous],1,__ATOMIC_RELAXED);
 }
+static unsigned query_calls;
+static void resource_query(xctx *c)
+{
+    assert(pthread_equal(pthread_self(),guest_owner));
+    /* Both answers must survive owner dispatch; the bridge cannot hardcode
+     * an idle resource or change its one-argument stack convention. */
+    c->r[0]=(X_M32(c->r[4]+4)&1);c->r[4]+=8;query_calls++;
+}
+static void submit_query(xctx *c,unsigned id)
+{
+    unsigned sp=c->r[4];X_PUSH32(id);X_PUSH32(0x32084u);
+    xv_object_job_hle(c,0x184A20u,resource_query);
+    assert(c->r[4]==sp&&c->r[0]==(id&1));
+}
 int xv_math_point_transform(xctx *c);
 uint64_t xk_os_monotonic_us(void)
 { struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000; }
@@ -78,6 +92,7 @@ void f_0008FB70(xctx *c)
          * The owner must not run a job that blocks on this same mutex. */
         submit_event(c,0x70000+id*8);
         if(id%3==0)submit_yield(c);
+        submit_query(c,id);
     }
     /* Requests can also arrive simultaneously, outside the shared lock. */
     submit_event(c,0x70004+id*8);
@@ -124,10 +139,10 @@ int main(int argc,char **argv)
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
-    assert(event_calls==1200&&event_value==1200);assert(io_calls>=200&&io_calls<=400);
+    assert(query_calls==600);assert(event_calls==1200&&event_value==1200);assert(io_calls>=200&&io_calls<=400);
     for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);
     xv_object_jobs_override(-1);assert(!xv_object_jobs_begin(&c));
     xv_object_jobs_report(2);xv_object_jobs_shutdown();
-    printf("PASS: 600 callbacks and native point transforms exactly once; 1,200 owner-thread events and 400 cache yields with quiescent owner I/O reads, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
+    printf("PASS: 600 callbacks and native point transforms exactly once; 600 resource queries, 1,200 owner-thread events and 400 cache yields with quiescent owner I/O reads, results and stack cleanup, with/without shared locks; peak %u jobs, overflow joins and restore\n",peak);
     free(g_xram);free(g_xpt);
 }

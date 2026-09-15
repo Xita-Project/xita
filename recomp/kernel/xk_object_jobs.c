@@ -33,7 +33,7 @@ static unsigned indirect_depth[LANES];
 /* A worker publishes one request, then parks until the guest owner replies.
  * States: 0 executing, 1 service request, 2 completed, 3 completion consumed,
  * 4 parked (including an event reply held during an I/O handoff). */
-static unsigned service_state[WORKERS], services, owner_notice, pause_workers, io_yields;
+static unsigned service_state[WORKERS], services, owner_notice, pause_workers, io_yields, resource_queries;
 static unsigned service_address[WORKERS];
 static xv_fn_t service_fn[WORKERS];
 static int initialized, override=-1;
@@ -115,7 +115,8 @@ static void service_owner(void)
             if(state==0)quiet=0;
             else if(state==1) {
                 if(service_address[i]==0x1D6640u) {yielding++;continue;}
-                service_fn[i](&contexts[i]);services++;
+                service_fn[i](&contexts[i]);
+                if(service_address[i]==0x184A20u)resource_queries++;else services++;
                 if(__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE))
                     __atomic_store_n(&service_state[i],4,__ATOMIC_RELEASE);
                 else {reply_worker(i);quiet=0;}
@@ -369,7 +370,7 @@ void xv_object_jobs_report(unsigned frames)
         frames,batches,submitted,executed[0],executed[1],executed[2],
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)work_us[2],
         (unsigned long long)batch_us,rejected);
-    XK_LOG("[object-jobs] owner event services %u cache yields %u\n",services,io_yields);services=io_yields=0;
+    XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u\n",services,io_yields,resource_queries);services=io_yields=resource_queries=0;
     batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
 }
 void xv_object_job_indirect(xctx *c,unsigned target)
@@ -407,7 +408,7 @@ void xv_object_job_stop(xctx *c,unsigned address,const char *reason)
 void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
 {
     if(address==0x1D675Cu) {fn(c);return;} /* stateless memory comparison */
-    if((address!=0x1D665Cu&&address!=0x1D6640u)||!fn)
+    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u)||!fn)
         xv_object_job_stop(c,address,"unsupported HLE");
     if(address==0x1D6640u && (X_M32(c->r[4])!=0x12AA9u||X_M32(c->r[4]+4)!=0x32B60u))
         xv_object_job_stop(c,address,"yield outside audited cache wait");
@@ -416,7 +417,7 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
             extern int xk_object_io_step(void);
             if(xk_object_io_step()<0)abort();
             c->r[0]=STATUS_SUCCESS;c->r[4]+=4;io_yields++;
-        } else {fn(c);services++;}
+        } else {fn(c);if(address==0x184A20u)resource_queries++;else services++;}
         return;
     }
     for(unsigned i=0;i<active_workers;i++)if(c==&contexts[i]) {

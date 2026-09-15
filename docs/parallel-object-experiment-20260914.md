@@ -231,3 +231,14 @@ handoffs, with no object-job stop. The cryo-room technician and look-around
 instruction render. This is emulator functional evidence, not hardware FPS or
 proof of whole-campaign correctness. The physical Vita remains on working slot A
 (`7f33dee4...`); the new candidate has not been installed there yet.
+
+
+The same candidate completes a campaign off/on/off comparison at the emulator's
+20 FPS cap (19.961 / 19.966 / 19.944 FPS, comparable view, restoration confirmed),
+returns through Save and Quit, and loads solo Blood Gulch through normal menus.
+Movement then reaches another explicit worker-HLE stop: `D3DResource_IsBusy`
+at `184A20`, return `32084`, through `C3A00 -> 32060`. No new hardware update was
+made. The next patch marshals that existing non-yielding handler to the owner;
+it retains its existing result and stack cleanup, including its diagnostic
+counter. It does not implement a new GPU fence or claim resource-lifetime bugs
+are fixed. A fixture checks both busy and idle results through the bridge.
