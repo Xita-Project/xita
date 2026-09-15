@@ -32,6 +32,19 @@ void xv_fshader_unload(xv_fshader_t *fs)
 
 int main(void)
 {
+    /* Runtime benchmark overrides must restore the startup policy, including
+     * an explicit user opt-out. Each invocation has a fresh cached policy. */
+    const char *expected_scan = getenv("XV_TEST_EXPECT_SCAN");
+    if (expected_scan) {
+        int expected = atoi(expected_scan);
+        assert(draw_scan_neon() == expected);
+        xv_d3d_draw_scan_override(0);
+        assert(!draw_scan_neon());
+        xv_d3d_draw_scan_override(1);
+        assert(draw_scan_neon());
+        xv_d3d_draw_scan_override(-1);
+        assert(draw_scan_neon() == expected);
+    }
     /* Low material detail selects the basic model VS. Its combiner must use
      * that VS's reduced varying set rather than the texture-color fallback. */
     assert(ps_entry_for(0x109DB448u,0x1955B8E9u,0)>=0);

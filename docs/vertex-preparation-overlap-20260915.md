@@ -1,5 +1,9 @@
 # Vertex preparation while the owner prepares materials
 
+**Physical result:** the 16 KiB comparison increased whole-frame time by
+4.394 ms in one native-resolution cryobay view. This worker remains disabled
+by default. See the [hardware follow-up](hardware-render-preparation-20260915.md).
+
 `XV_VERTEX_PREPARE=1` is a new opt-in experiment. For a draw with at least
 64 KiB of source vertex spans, core 0 performs the existing exact comparisons
 and owned vertex snapshots while the recording owner prepares that draw's

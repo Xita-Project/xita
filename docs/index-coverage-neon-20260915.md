@@ -12,7 +12,8 @@ The existing `XV_DRAW_SCAN_NEON` option accelerated plain index bounding, but
 indexed validation selected a different scalar coverage builder first. With
 `XV_VERTEX_REFERENCES=1`, that NEON index-bound helper was bypassed. This change
 adds an exact NEON reduction to the coverage builder and selects it through the
-same existing draw-scan option. The option remains off by default.
+same existing draw-scan option. It was initially off; the physical follow-up
+below supports enabling it by default while preserving `XV_DRAW_SCAN_NEON=0`.
 
 For at least 256 indices, the new helper captures the same cached 256-index
 chunks as the original helper. Each index sets its eight-vertex coverage bit
@@ -67,7 +68,7 @@ combined option, not this helper alone. Resolution, other graphics options,
 object workers and vertex-preparation configuration remain fixed. Completion,
 cancellation and lost-view paths restore the configured option.
 
-Physical hardware remains on the prior confirmed runtime while its remote
+At the initial checkpoint, physical hardware remained on the prior runtime while its remote
 service is unavailable. No hardware update, FPS gain or GPU-crash resolution
 is claimed. The hardware comparison and representative driving/NPC gameplay
 remain required before changing the default.
@@ -95,3 +96,25 @@ new path active; a later 60-frame window records 6360 large NEON batches among
 limited cryo-room functionality, not campaign combat, driving or hardware crash
 validation. The emulator configuration change does not change physical settings
 or the source default.
+
+## Physical follow-up
+
+Three native 960×544 campaign off/on/off comparisons completed with matching
+camera checks and restored configuration. Exact query overlap and both object
+workers stayed enabled in all arms; vertex preparation stayed on the owner.
+The pooled measured totals were 720 off frames in 125,237,068 µs and 360 on
+frames in 62,022,707 µs: 173.940 versus 172.285 ms/frame, or 5.749 versus
+5.804 FPS. The three paired savings were 1.073, 2.420 and 1.473 ms/frame.
+This is a modest 0.96% throughput improvement in one heavy cryobay view.
+The later off arms drifted slower; it is not a representative gameplay average.
+
+Profile windows put index preparation near 8.0 ms/frame off and 6.8 ms on.
+The enabled arm records 7980 large NEON batches per 60 frames among 18,960
+reference copies. As described above, the option also selects the existing
+constant-byte comparison path; this is not an isolated helper measurement.
+
+The follow-up selects the measured option by default. Explicit zero still
+disables it, and benchmark completion restores startup policy. Production host
+checks cover default-on, explicit off/on, and override restoration, alongside
+retention and constant-tracking sanitizer tests. See the
+[combined hardware report](hardware-render-preparation-20260915.md).

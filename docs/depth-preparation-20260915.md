@@ -1,5 +1,11 @@
 # Earlier depth-only preparation — September 15
 
+**Physical follow-up:** one native-resolution cryobay comparison completed with
+matching camera checks and restored state. It measured 5.764 / 5.753 / 5.718 FPS
+off/on/off. The on arm falls between the off arms; a pooled 0.373 ms/frame
+difference does not establish a repeatable gain. This option remains off.
+See the [render-preparation report](hardware-render-preparation-20260915.md).
+
 The [query audit](query-submission-audit-20260915.md) found 119 draws in a cryo-room
 capture that prepared texture stage 0 before replay selected a constant fragment
 program with no samplers. The new optional path eliminates that preparation and

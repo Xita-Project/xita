@@ -816,7 +816,9 @@ static int draw_scan_neon(void)
     static int configured = -1;
     if (configured < 0) {
         const char *e = getenv("XV_DRAW_SCAN_NEON");
-        configured = e && atoi(e) != 0; /* opt-in until measured on Vita */
+        /* Three native-resolution campaign comparisons reduce index work and
+         * complete-frame time. Preserve explicit zero and benchmark restore. */
+        configured = !e || atoi(e) != 0;
     }
     return draw_scan_override < 0 ? configured : draw_scan_override;
 }

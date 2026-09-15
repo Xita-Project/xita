@@ -102,6 +102,14 @@ The follow-up enables this existing option by default in builds that include
 query history, while retaining the multicore work and standard graphics.
 Broader gameplay validation and the sustained FPS goals remain open.
 
+The [render-preparation hardware follow-up](docs/hardware-render-preparation-20260915.md)
+retains query overlap and measures the existing NEON draw-scan option in three
+native-resolution campaign trials. Pooled frame time falls by 1.655 ms (0.96%
+throughput gain); the option now defaults on with explicit opt-out preserved.
+The separate vertex-preparation worker adds 4.394 ms in its tested view and
+stays disabled. These changes preserve exact draw data and standard graphics;
+neither comparison establishes sustained 20 or 30 FPS.
+
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.
 An optional diagnostic splits comparison/copy cost by span size; it adds no

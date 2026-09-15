@@ -256,8 +256,9 @@ test-draw-prep: build/index_copy_test build/draw_profile_test build/draw_profile
 	./build/draw_profile_test
 	./build/draw_profile_test disabled
 	./build/draw_profile_no_clock_test
-	./build/ps_cache_test
-	XV_DRAW_SCAN_NEON=1 ./build/ps_cache_test
+	env -u XV_DRAW_SCAN_NEON XV_TEST_EXPECT_SCAN=1 ./build/ps_cache_test
+	XV_DRAW_SCAN_NEON=0 XV_TEST_EXPECT_SCAN=0 ./build/ps_cache_test
+	XV_DRAW_SCAN_NEON=1 XV_TEST_EXPECT_SCAN=1 ./build/ps_cache_test
 	XV_INDEX_SCAN_CACHED=0 ./build/ps_cache_test
 
 build/index_copy_test: index_copy_test.c ../../runtime/xv_index_copy.h ../../runtime/xv_vertex_refs.h
