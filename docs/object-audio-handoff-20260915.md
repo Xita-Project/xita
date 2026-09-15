@@ -88,8 +88,14 @@ unrelated file-thread targets. The native package retains the updater contract.
 Its runtime SHA-256 is
 `c90d8400839cfd62c2a3b98b7d6c1c961136c41b10a844609fb8f7f332623f8a`.
 The exact candidate reaches Blood Gulch through the normal menu in Vita3K;
-the captured integration log contains no STOP. A physical rocket-pickup retest
-is still required.
+the captured integration log contains no STOP. At that point, a physical pickup
+retest remained required.
+
+The later [lightweight-mutex build](object-light-lock-20260915.md#default-enabled-gameplay-follow-up)
+successfully picks up the rocket launcher on hardware with both workers active
+and nine cache yields serviced. The following firing test loses remote
+connectivity; no fault log has yet been recovered. Pickup success does not close
+that firing failure or verify every owner audio/cache path.
 
 ## Performance lead from the failed run
 

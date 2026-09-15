@@ -95,6 +95,9 @@ After a 0.3-second firing input, the completed-frame capture timed out. Subseque
 status, log and updater requests also timed out. No post-shot screenshot or
 fault log has been recovered, so this is an unresolved firing failure, not a
 verified GPU-driver diagnosis. No deliberate self-damage test was performed.
-The next step is reproducing the shot in Vita3K and recovering the hardware
-fault log when the console is reachable again. Representative campaign and
-driving stability remain open.
+Vita3K subsequently completed a shot from a similar central-map position and
+direction, followed by a separate downward shot, visible player death and
+respawn. The saved log contains no object-worker STOP. This does not reproduce
+the physical failure or validate the physical GPU path. Recover the hardware
+fault log when the console is reachable again before assigning a cause.
+Representative campaign and driving stability remain open.
