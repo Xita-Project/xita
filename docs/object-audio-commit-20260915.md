@@ -113,3 +113,14 @@ then reduce or batch synchronization where object ownership permits. Preserve
 the measured lightweight-mutex improvement and both workers while investigating
 the imbalance. Detailed mapped windows are saved privately in
 `physical-plasma-more-20260915T164431Z/worker-timing.json`.
+
+## Installation
+
+The physical updater verifies runtime `d44b9936…` in slot B1 and confirms its
+dashboard boot, state 0 and no pending request. Slot A0 was restored and verified
+as `7f33dee4…` before uploading, preserving that rollback build. Installation
+receipts and the returned dashboard capture are saved privately in
+`physical-object-audio-commit/`. Graphics settings were not changed by this
+update. Both experimental object workers and the lightweight-mutex default
+remain enabled. The next hardware check is normal and charged plasma firing,
+then continued walking/combat to expose any further worker-service dependency.
