@@ -185,6 +185,10 @@ class Discovery:
         self.queue: deque = deque()
         self.stats = Counter()
         self.candidates: Set[int] = set()          # code addresses seen as immediates (function pointers)
+        self.referenced_tables = False              # --referenced-tables: walk pointer tables named by lifted code
+        self.table_refs: Set[int] = set()           # (table address, single-slot) pending walks
+        self.single_slots: Set[int] = set()
+        self.tables: Dict[int, int] = {}            # walked table -> number of code words admitted
 
     def decode_at(self, va: int) -> Optional[Instruction]:
         b = self.img.bytes_at(va, 16)
@@ -226,6 +230,45 @@ class Discovery:
             ip = ins.next_ip
         return True
 
+    TABLE_SECTIONS = {".rdata", ".data", ".data1", "XON_RD"}
+
+    def table_address(self, va: int) -> bool:
+        """An aligned address with raw bytes in an initialized data section that can hold pointer tables."""
+        if va & 3:
+            return False
+        s = self.img.section_of(va)
+        return bool(s) and s[4] in self.TABLE_SECTIONS and self.img.u32(va) is not None
+
+    def note_table_refs(self, ins: Instruction):
+        """Record data addresses this instruction names: vtable installs, table immediates, indexed
+        pointer arrays and absolute call/jmp slots. Nothing is walked until the reference is seen."""
+        mn = MN[ins.mnemonic]
+        for oi in range(ins.op_count):
+            k = ins.op_kind(oi)
+            if k == OpKind.IMMEDIATE32 and mn in ("mov", "push"):
+                imm = ins.immediate(oi) & 0xFFFFFFFF
+                if self.table_address(imm):
+                    self.table_refs.add(imm)
+            elif k == OpKind.MEMORY and ins.memory_base == Register.NONE:
+                disp = ins.memory_displacement & 0xFFFFFFFF
+                if ins.memory_index != Register.NONE and ins.memory_index_scale == 4:
+                    if self.table_address(disp):
+                        self.table_refs.add(disp)
+                elif (ins.memory_index == Register.NONE and mn in ("call", "jmp") and
+                      disp not in self.kthunks and self.table_address(disp)):
+                    self.single_slots.add(disp)
+
+    def walk_table(self, table: int, limit: int = 4096) -> int:
+        """Admit consecutive words that point at executable code; stop at the first that does not."""
+        count = 0
+        for i in range(limit):
+            v = self.img.u32(table + i * 4)
+            if v is None or not self.img.is_code(v):
+                break
+            self.candidates.add(v)
+            count += 1
+        return count
+
     def in_lifted_block(self, va: int) -> bool:
         for fn in self.functions.values():
             for b in fn.blocks.values():
@@ -238,6 +281,19 @@ class Discovery:
         while True:
             while self.queue:
                 self.lift_function(self.functions[self.queue.popleft()])
+            if self.referenced_tables:
+                for table in sorted(self.table_refs):
+                    if table not in self.tables:
+                        self.stats["table_refs"] += 1
+                        self.tables[table] = self.walk_table(table)
+                        self.stats["table_roots"] += self.tables[table]
+                for slot in sorted(self.single_slots):
+                    if slot not in self.tables:
+                        self.stats["table_refs"] += 1
+                        self.tables[slot] = self.walk_table(slot, limit=1)
+                        self.stats["table_roots"] += self.tables[slot]
+                self.table_refs.clear()
+                self.single_slots.clear()
             new = [va for va in self.candidates if va not in self.functions and va not in self.hle and self.plausible_entry(va)]
             self.candidates.clear()
             if not new:
@@ -277,6 +333,8 @@ class Discovery:
                         imm = ins.immediate(oi) & 0xFFFFFFFF
                         if self.img.is_code(imm):
                             self.candidates.add(imm)
+                if self.referenced_tables:
+                    self.note_table_refs(ins)
                 if fc == FlowControl.NEXT or fc == FlowControl.CALL or fc == FlowControl.INDIRECT_CALL:
                     if fc == FlowControl.CALL:
                         tgt = ins.near_branch_target
@@ -1338,6 +1396,9 @@ def main() -> int:
     ap.add_argument("--files", type=int, default=32, help="number of .c files to split into")
     ap.add_argument("--roots", nargs="*", default=[], help="extra root addresses (hex); first one is treated as main()")
     ap.add_argument("--no-data-roots", action="store_true", help="do not treat code pointers in data sections as roots")
+    ap.add_argument("--referenced-tables", action="store_true",
+                    help="walk function-pointer tables whose addresses lifted code installs, loads, pushes, indexes or calls through "
+                         "(bounded alternative to data-section root scanning)")
     ap.add_argument("--lift", nargs="*", default=[], help="symbol names to recompile instead of HLE (XAPI internals)")
     ap.add_argument("--trace-calls", action="store_true", help="instrument kernel/HLE call sites (runtime flag xv_trace_enabled)")
     ap.add_argument("--trace-funcs", action="store_true", help="count every recompiled function entry (runtime: XV_FUNC_HIST=<frame> dumps that frame's histogram)")
@@ -1413,7 +1474,13 @@ def main() -> int:
         ptrs = img.data_code_pointers()
         disc.candidates.update(ptrs)
         print(f"{len(ptrs)} code pointers in data sections queued as candidate roots")
+    disc.referenced_tables = args.referenced_tables
     disc.run()
+    if args.referenced_tables:
+        os.makedirs(args.outdir, exist_ok=True)
+        with open(os.path.join(args.outdir, "referenced-tables.json"), "w") as fh:
+            json.dump({f"0x{table:08X}": count for table, count in sorted(disc.tables.items())}, fh, indent=1)
+        print(f"referenced tables: {len(disc.tables)} walked, {sum(disc.tables.values())} code words")
     nblocks = sum(len(f.blocks) for f in disc.functions.values())
     ninsn = sum(len(b.insns) for f in disc.functions.values() for b in f.blocks.values())
     print(f"discovered {len(disc.functions)} functions, {nblocks} blocks, {ninsn:,} instructions "

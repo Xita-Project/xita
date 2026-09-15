@@ -166,8 +166,34 @@ int h2_platform_blank(int blank)
     if (result < 0) return result;
     return sceDisplayWaitVblankStart();
 }
+/* Stop-only, read-only copy of the entire guest arena (physical RAM, XBE image
+ * copy, trash page) and the virtual page table, so a strict stop can be
+ * inspected offline without another emulator cycle. The arena embeds owned
+ * game code and data: private emulator lab only, never distributed. */
+static void arena_snapshot(void)
+{
+    static int written;
+    if (written || !g_xram || !g_xpt) return;
+    written = 1;
+    uint32_t bytes = xk_mem_arena_size();
+    FILE *out = fopen("ux0:data/xita-halo2/arena-at-stop.bin", "wb");
+    int complete = 0, closed = -1;
+    if (out) {
+        complete = fwrite(g_xram, 1, bytes, out) == bytes;
+        closed = fclose(out);
+    }
+    xv_logf("[h2/memory] private arena snapshot bytes=%u complete=%d\n", bytes, complete && closed == 0);
+    out = fopen("ux0:data/xita-halo2/pagetable-at-stop.bin", "wb");
+    complete = 0; closed = -1;
+    if (out) {
+        complete = fwrite(g_xpt, 4, 1u << 20, out) == (1u << 20);
+        closed = fclose(out);
+    }
+    xv_logf("[h2/memory] private page table snapshot entries=%u complete=%d\n", 1u << 20, complete && closed == 0);
+}
 static void graphics_snapshot(void)
 {
+    arena_snapshot();
     /* Stop-only capture: keep the latest successfully presented buffer without
      * adding file I/O to recurring presentation. It can remain stored while
      * the display is blanked; this records the last presented frame, not an

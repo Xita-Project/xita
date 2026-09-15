@@ -1450,8 +1450,15 @@ def main():
         roots.update((0x37A14F, 0x37C70F))
         roots.update(audio_stream_roots(image))
         roots.update(game_sound_owner_roots(image))
+    # Native221: the host-channel target also walks pointer tables that lifted
+    # code names (vtable installs, table immediates, indexed arrays, absolute
+    # slots). Every admitted word must point at executable code; nothing else
+    # in a data section is scanned, and unknown indirect targets still stop
+    # explicitly at runtime. This replaces the one-vtable-per-build discovery
+    # while keeping the strict, no-data-roots translation invariant.
+    discovery = ["--referenced-tables"] if args.host_channel else []
     subprocess.run([sys.executable, "-m", "recompiler", str(args.xbe.resolve()),
-                    "--profile", profile, "--no-data-roots", "--trace-calls", "--trace-funcs",
+                    "--profile", profile, "--no-data-roots", *discovery, "--trace-calls", "--trace-funcs",
                     "--files", "128", "-o", str(generated),
                     "--roots", f"{image.entry:X}", *(f"{root:X}" for root in sorted(roots - {image.entry}))], cwd=ROOT, check=True)
     # xv_game_main is the startup entry in this entry-only diagnostic target;
