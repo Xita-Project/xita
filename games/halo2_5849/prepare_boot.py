@@ -432,6 +432,47 @@ GAME_SCRIPT_NOARG_COMMAND_BINDINGS = (
     (0x474D88, 16, "f4739cfa78d9ea2ee01bf35d574db15b9a22476de40ca47e3461bdbd40f2ecef"),
     (0x44DB50, 64, "a3d15d5cdd4862f79b65446d292b80e463d9bee31bc9f448ceb2a73f746401a3"),
 )
+GAME_SCRIPT_TYPED_PREFIX = (0x4744E0, 911, 0x44B098, 0x44F6BC)
+GAME_SCRIPT_TYPED_BINDINGS = (
+    (0x209946, 24, "a59139aaf3efc1c6ed4f31629881441aac80ffc93ea4f6ec531774b28c025e4a"),
+    (0x2AB6C0, 54, "0500d972b6b55af665ef482f3f436759eb5697d1950b90f304383573e6b5eaf8"),
+    (0x4744E0, 3644, "b871aa1cc916727c27e669ff2e5b8bad5cc19a644185aaf3113e1768aa60e5b7"),
+    (0x44B098, 17956, "72cacb467c843ef0731d3935a64859af652bc30b2dae4e78263b1c6d8fe0d9bf"),
+)
+
+
+def game_script_typed_roots(image):
+    """Native215: checked descriptor prefix including parameterized commands.
+
+    Every pointer follows the preceding record's exact aligned extent; only
+    field4 is callable. Stop before the following unrelated string pointers.
+    This admits original code, not host implementations of script commands.
+    """
+    for address, length, digest in GAME_SCRIPT_TYPED_BINDINGS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 typed script fingerprint mismatch")
+    table, count, cursor, end = GAME_SCRIPT_TYPED_PREFIX
+    roots = set()
+    for index in range(count):
+        if image.u32(table + index * 4) != cursor or cursor + 16 > end:
+            raise ValueError("Halo 2 typed script record binding or extent mismatch")
+        header = image.bytes_at(cursor, 16)
+        if len(header) != 16:
+            raise ValueError("Halo 2 typed script header is incomplete")
+        parameters = int.from_bytes(header[12:14], "little")
+        size = (16 + 2 * parameters + 3) & ~3
+        if parameters > 8 or cursor + size > end:
+            raise ValueError("Halo 2 typed script parameter extent mismatch")
+        target = int.from_bytes(header[4:8], "little")
+        if target:
+            section = image.section_of(target)
+            if not image.is_code(target) or not section or section[4] != ".text":
+                raise ValueError("Halo 2 typed script callback is invalid")
+            roots.add(target)
+        cursor += size
+    if cursor != end:
+        raise ValueError("Halo 2 typed script final extent mismatch")
+    return roots
 
 
 def game_script_noarg_command_roots(image):
@@ -1240,6 +1281,7 @@ def main():
         roots.update(game_sound_record_predicate_roots(image))
         roots.update(game_script_primitive_roots(image))
         roots.update(game_script_noarg_command_roots(image))
+        roots.update(game_script_typed_roots(image))
         roots.update(game_online_interface_roots(image))
         roots.update(bink_pixel_callback_roots(image))
         roots.update(reviewed_sparse_jump_roots(image))

@@ -30,6 +30,54 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_typed_script_descriptor_chain_extents_and_only_callback_field(self):
+        image=SyntheticImage();image.section_name=".text";image.targets={};headers={}
+        table=0x8000;start=cursor=0x80000;count=10;records=[]
+        for index in range(count):
+            parameters=index%9;target=0 if index==3 else 0x1000+(index%4)*16
+            image.targets[table+index*4]=cursor;records.append(cursor)
+            # Other fields look executable but must not become code roots.
+            headers[cursor]=struct.pack("<HHIIHH",0xE000,0xE010,target,0xE020,parameters,0xE030)
+            cursor+=(16+2*parameters+3)&~3
+        end=cursor;spec=(0x200,len(image.code),hashlib.sha256(image.code).hexdigest())
+        def read(address,length):
+            if address==0x200:
+                self.assertEqual(length,len(image.code));return image.code
+            self.assertEqual(length,16);return headers[address]
+        with patch.object(image,"bytes_at",side_effect=read), \
+             patch.object(prepare_boot,"GAME_SCRIPT_TYPED_PREFIX",(table,count,start,end)), \
+             patch.object(prepare_boot,"GAME_SCRIPT_TYPED_BINDINGS",(spec,)*4):
+            before=dict(headers);bindings=dict(image.targets)
+            self.assertEqual(prepare_boot.game_script_typed_roots(image),{0x1000,0x1010,0x1020,0x1030})
+            self.assertEqual(headers,before);self.assertEqual(image.targets,bindings)
+            for index,record in enumerate(records):
+                slot=table+index*4
+                for bad in (None,0,record+4):
+                    image.targets[slot]=bad
+                    with self.assertRaisesRegex(ValueError,"binding"):prepare_boot.game_script_typed_roots(image)
+                image.targets[slot]=record
+                headers[record]=before[record][:15]
+                with self.assertRaisesRegex(ValueError,"incomplete"):prepare_boot.game_script_typed_roots(image)
+                for arity in (9,0x8000,0xFFFF):
+                    headers[record]=before[record][:12]+struct.pack('<H',arity)+before[record][14:]
+                    with self.assertRaisesRegex(ValueError,"parameter"):prepare_boot.game_script_typed_roots(image)
+                headers[record]=before[record][:4]+struct.pack('<I',0xDEAD)+before[record][8:];image.bad_code=0xDEAD
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_typed_roots(image)
+                headers[record]=before[record];image.bad_code=None
+            for limit in (start+15,end-1,end+4):
+                with patch.object(prepare_boot,"GAME_SCRIPT_TYPED_PREFIX",(table,count,start,limit)):
+                    with self.assertRaisesRegex(ValueError,"extent"):prepare_boot.game_script_typed_roots(image)
+            headers[start]=before[start][:12]+struct.pack('<H',1)+before[start][14:]
+            with self.assertRaisesRegex(ValueError,"binding"):prepare_boot.game_script_typed_roots(image)
+            headers[start]=before[start]
+            for section in (None,(0,0,0,0,".data"),(0,0,0,0,"DSOUND")):
+                with patch.object(image,"section_of",return_value=section):
+                    with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_typed_roots(image)
+            for index in range(4):
+                guards=[spec]*4;guards[index]=(*spec[:2],"0"*64)
+                with patch.object(prepare_boot,"GAME_SCRIPT_TYPED_BINDINGS",guards):
+                    with self.assertRaisesRegex(ValueError,"fingerprint"):prepare_boot.game_script_typed_roots(image)
+
     def test_noarg_command_descriptor_bounds_and_required_callbacks(self):
         image=SyntheticImage();image.section_name=".text";image.targets={}
         for index in range(4):
