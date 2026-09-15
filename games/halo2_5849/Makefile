@@ -328,6 +328,38 @@ $(BUILD)/threshold-probe-param.sfo: Makefile
 $(BUILD)/threshold-probe.vpk: $(BUILD)/threshold-probe-eboot.bin $(BUILD)/threshold-probe-param.sfo $(addprefix $(THRESHOLD_SHADERS)/,$(THRESHOLD_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/threshold-probe-param.sfo -b $(BUILD)/threshold-probe-eboot.bin $(foreach f,$(THRESHOLD_PROBE_FILES),-a $(THRESHOLD_SHADERS)/$(f)=$(f)) $@
 LUMA_SHADERS ?= $(ROOT)/local/halo2_5849/luma-shaders
+SPRITE_SHADERS ?= $(ROOT)/local/halo2_5849/sprite-shaders
+SPRITE_PROBE_FILES := sprite.vert.gxp sprite.frag.gxp sprite.copy.frag.gxp sprite.constants.bin sprite.vertices.bin sprite.texture.bin sprite.vertex-constants.bin
+.PHONY: sprite-probe sprite-source-probe
+sprite-probe: $(BUILD)/sprite-probe.vpk
+sprite-source-probe: $(BUILD)/sprite-source-probe.vpk
+.PHONY: sprite-point-probe
+sprite-point-probe: $(BUILD)/sprite-point-probe.vpk
+$(BUILD)/sprite-point-probe.elf: sprite_point_probe.c dxt23_layout.c dxt23_layout.h Makefile
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Werror -Wl,-q,--defsym=__sce_headroom=0x1000 sprite_point_probe.c dxt23_layout.c -o $@ -lSceGxm_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceProcessmgr_stub
+$(BUILD)/sprite-point-probe.velf: $(BUILD)/sprite-point-probe.elf
+	$(VITASDK)/bin/vita-elf-create $< $@
+$(BUILD)/sprite-point-probe-eboot.bin: $(BUILD)/sprite-point-probe.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/sprite-point-probe.vpk: $(BUILD)/sprite-point-probe-eboot.bin $(BUILD)/sprite-probe-param.sfo $(addprefix $(SPRITE_SHADERS)/,$(SPRITE_PROBE_FILES))
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/sprite-probe-param.sfo -b $(BUILD)/sprite-point-probe-eboot.bin $(foreach f,$(SPRITE_PROBE_FILES),-a $(SPRITE_SHADERS)/$(f)=$(f)) $@
+$(BUILD)/sprite-probe.elf $(BUILD)/sprite-source-probe.elf: sprite_probe.c dxt23_layout.c dxt23_layout.h Makefile
+	@mkdir -p $(dir $@)
+	$(CC) -DH2_SPRITE_SOURCE_PROBE=$(if $(findstring -source,$(notdir $@)),1,0) -std=gnu11 -O1 -mthumb -mcpu=cortex-a9 -mfpu=neon -Wall -Wextra -Werror -Wl,-q,--defsym=__sce_headroom=0x1000 sprite_probe.c dxt23_layout.c -o $@ -lSceGxm_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceProcessmgr_stub
+$(BUILD)/sprite-probe.velf $(BUILD)/sprite-source-probe.velf: $(BUILD)/%.velf: $(BUILD)/%.elf
+	$(VITASDK)/bin/vita-elf-create $< $@
+$(BUILD)/sprite-probe-eboot.bin: $(BUILD)/sprite-probe.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/sprite-source-probe-eboot.bin: $(BUILD)/sprite-source-probe.velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+$(BUILD)/sprite-probe-param.sfo: Makefile
+	@mkdir -p $(dir $@)
+	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2T00001 "H2 Packed Color Probe" $@
+$(BUILD)/sprite-probe.vpk: $(BUILD)/sprite-probe-eboot.bin $(BUILD)/sprite-probe-param.sfo $(addprefix $(SPRITE_SHADERS)/,$(SPRITE_PROBE_FILES))
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/sprite-probe-param.sfo -b $(BUILD)/sprite-probe-eboot.bin $(foreach f,$(SPRITE_PROBE_FILES),-a $(SPRITE_SHADERS)/$(f)=$(f)) $@
+$(BUILD)/sprite-source-probe.vpk: $(BUILD)/sprite-source-probe-eboot.bin $(BUILD)/sprite-probe-param.sfo $(addprefix $(SPRITE_SHADERS)/,$(SPRITE_PROBE_FILES))
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/sprite-probe-param.sfo -b $(BUILD)/sprite-source-probe-eboot.bin $(foreach f,$(SPRITE_PROBE_FILES),-a $(SPRITE_SHADERS)/$(f)=$(f)) $@
 LUMA_PROBE_FILES := luma.vert.gxp luma.frag.gxp luma.constants.bin luma.vertices.bin luma.texture.bin luma.vertex-constants.bin
 .PHONY: luma-probe
 luma-probe: $(BUILD)/luma-probe.vpk
