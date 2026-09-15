@@ -121,6 +121,33 @@ stage verified here. The other diagnostic profiles keep the original
 indirect targets, missing kernel exports, unsupported instructions and MMIO
 still stop explicitly.
 
+## Recompiler correctness fixes reached through the render path
+
+Clearing the audio path let the boot reach the game's first main-loop render,
+which exposed three recompiler defects, each fixed generally (not per-game):
+
+- **Overlapping basic blocks.** A straight-line lift that ran through what a
+  later back-edge turned into its own block left the two blocks overlapping;
+  `split_blocks` refused to split at an address that was already a block start,
+  so the shared tail was emitted twice with inconsistent flag liveness. In one
+  copy a loop's `dec edi; jne` lost its zero-flag store, so the loop ran ~2^32
+  iterations and walked off the end of memory. `split_blocks` now truncates the
+  earlier block at the later one's start. Across the image this removed ~370,000
+  duplicated instructions (2,097,659 -> 1,727,296 emitted).
+
+- **movntq.** The non-temporal MMX store used in D3D's 64-byte block fills was
+  unimplemented; it is a plain 8-byte store (the cache hint has no effect here).
+
+- **Sparse switch tables.** `jmp [reg*4 + table]` stopped at the first null
+  word, truncating tables with unused-case holes (a 43-entry D3D dispatch was
+  cut to one entry, trapping on index 24). The walk now skips null holes and
+  ends at the first real, non-pointer word.
+
+`tools/test_block_split.py` covers block-overlap truncation and sparse-table
+recovery. With all three, the boot runs the first render pass and stops on the
+next unimplemented SSE conversion, `cvtps2pi` (packed float to integer) in a
+vertex transform; no frame past 136 renders yet.
+
 ## Current stop
 
 ```

@@ -390,22 +390,41 @@ class Discovery:
         self.split_blocks(fn)
 
     def split_blocks(self, fn: Function):
-        starts = sorted(fn.blocks)
-        targets = set()
-        for b in fn.blocks.values():
-            targets.update(b.succ)
-        for s in starts:
-            b = fn.blocks[s]
-            for i, ins in enumerate(b.insns):
-                if i and ins.ip in targets and ins.ip not in fn.blocks:
-                    nb = Block(ins.ip)
-                    nb.insns = b.insns[i:]
-                    nb.end = b.end
-                    nb.succ = b.succ
-                    b.insns = b.insns[:i]
-                    b.end = ins.ip
-                    b.succ = [ins.ip]
-                    fn.blocks[ins.ip] = nb
+        # No instruction may belong to two blocks. A straight-line lift can run
+        # through what a later back-edge turns into its own block; the earlier
+        # block must be truncated at that start, not left overlapping it, or the
+        # duplicated tail is emitted twice with inconsistent flag/liveness
+        # analysis (a loop's dec;jne lost its zero-flag store in one copy).
+        # Iterate to a fixpoint: truncating or splitting can expose a further one.
+        changed = True
+        while changed:
+            changed = False
+            targets = set()
+            for b in fn.blocks.values():
+                targets.update(b.succ)
+            for s in sorted(fn.blocks):
+                b = fn.blocks[s]
+                for i, ins in enumerate(b.insns):
+                    if not i:
+                        continue
+                    if ins.ip in fn.blocks:                     # overlaps an existing block: drop the tail
+                        b.insns = b.insns[:i]
+                        b.end = ins.ip
+                        b.succ = [ins.ip]
+                        changed = True
+                        break
+                    if ins.ip in targets:                       # a branch target mid-block: split off a new block
+                        nb = Block(ins.ip)
+                        nb.insns = b.insns[i:]
+                        nb.end = b.end
+                        nb.succ = b.succ
+                        b.insns = b.insns[:i]
+                        b.end = ins.ip
+                        b.succ = [ins.ip]
+                        fn.blocks[ins.ip] = nb
+                        changed = True
+                        break
+                if changed:
                     break
 
     def switch_targets(self, fn: Function, ins: Instruction) -> List[int]:
@@ -418,8 +437,12 @@ class Discovery:
         out = []
         for i in range(512):
             v = self.img.u32(table + i * 4)
-            if v is None or not self.img.is_code(v):
-                break
+            if v is None:
+                break                  # unmapped: past the end of the section
+            if v == 0:
+                continue               # sparse switch table: a null hole is an unused case (falls to default)
+            if not self.img.is_code(v):
+                break                  # the first real, non-pointer word ends the table
             out.append((i, v))
         # Tables indexed from the top down: the CRT's memcpy/memmove tails do `neg ecx; jmp [ecx*4+T]`
         # with ecx <= 0, so the live entries sit BELOW the displacement.  Walk downward as well and keep
@@ -822,7 +845,8 @@ class Emitter:
         is_mm1 = ins.op_count > 1 and ins.op1_kind == OpKind.REGISTER and REGNAME[ins.op1_register].startswith("mm")
         if mn == "emms":
             return
-        if mn == "movq" and (is_mm0 or is_mm1):
+        if mn in ("movq", "movntq") and (is_mm0 or is_mm1):
+            # movntq is a non-temporal MMX store; the cache hint has no semantic effect here.
             out.append(f"    {self.operand(ins,0,8)} = {self.operand(ins,1,8)};"); return
         if mn == "movd" and (is_mm0 or is_mm1):
             if is_mm0:
