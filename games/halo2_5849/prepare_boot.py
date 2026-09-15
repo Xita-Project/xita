@@ -104,6 +104,22 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_ARENA_BOOT_CALLS = (
+    (0x146A20, 146, "75f53bc57da723bcf62196fb9e3e3632d6a1c4dc842d5caf8e46fbe79dc34b73"),
+    (0x1472C0, 82, "cf2b2e35cb786b94043345fb459404465072170134b691332a57fe5a760bbe70"),
+    (0x22C300, 20, "b80aaf8d178411bebef13a252b87a31d9c5882ad7fe51dd28071fc6dc27026a8"),
+)
+GAME_SINGLETON_WALK = (0x2D7CA0, 295, "3e9e43cc8881a31c581803d5b1273e856d95098046427ca21d86579036328fe7")
+GAME_SINGLETON_REGISTRATIONS = (
+    (0x378ad0, 21, "29f3d937141478c3269a41fd0e98b088c040b7d994d24b89c4fa7eac096cefc2", 0x461de4, 0x48011c, 0x46119c),
+    (0x378af0, 21, "08c19f745b3271135c7abc1fa9f307e3377de97de628170e09ce9e95d7b97502", 0x461df8, 0x480148, 0x4611a0),
+    (0x378b10, 21, "53fea3995eaa81d6fd2e0a5bddfabd74bb5f4327f46d6b1e538ae7d4cfd9c094", 0x461e04, 0x480160, 0x4611a4),
+    (0x378ba0, 21, "65a580047695366bff6365feb4e88268c67dac40a6c06f2dcfd7d3bd6c9df2a2", 0x461e7c, 0x4801d4, 0x4611b0),
+    (0x378c00, 21, "2892764c3d510b7e6071a2da50c4698d43a0e16ee902e5b07769c338d3041f89", 0x461ee0, 0x4802a4, 0x4611b8),
+    (0x379630, 21, "5d87678759032f5c183c30b05d76df1234129ab3721c0a673eb1516c4d0bda88", 0x466dd8, 0x484b38, 0x46129c),
+    (0x379650, 21, "d1a6eb61d8f320b979e78672dfaa91b4f167c249859951ff6951174cefbe053e", 0x466de4, 0x484b40, 0x4612a0),
+    (0x379670, 21, "6ef48a0b1e2d0d5abe7a4d2685d50563e30c204c0e8c17fe8c7c1163bb456109", 0x466df0, 0x484b44, 0x4612a4),
+)
 GAME_FIXED_STARTUP_CALLS = (
     (0x1C2695, 6, "9a975fa7706c2abfb3aedac6efe53ace2da0647b79028bf3fd1181c5e82b6029"),
     (0x1C2862, 6, "2ee5d11f38026183c4cded56144a85988d8437d36cee1443eea0a3a78e0b8692"),
@@ -452,6 +468,54 @@ def descriptor_child_field_roots(image, offsets):
     return roots
 
 
+def game_arena_boot_roots(image):
+    """Native162: original arena wrapper forwards to its aligned allocator."""
+    for address, length, digest in GAME_ARENA_BOOT_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 arena boot call fingerprint mismatch")
+    roots = set()
+    for slot in (0x4576AC, 0x4576B4):  # arena vtable offsets8 and10h only
+        target = image.u32(slot)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 arena boot target is not title code")
+        roots.add(target)
+    return roots
+
+
+def game_singleton_creator_roots(image):
+    """Eight CRT-registered creator nodes used by original resolver2D7CA0.
+
+    Root creators only. Original registration order, pending/retry handling,
+    storage writes and object lifetime remain in translated code.
+    """
+    address, length, digest = GAME_SINGLETON_WALK
+    if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+        raise ValueError("Halo 2 singleton resolver fingerprint mismatch")
+    roots = set()
+    for address, length, digest, node, storage, crt_slot in GAME_SINGLETON_REGISTRATIONS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 singleton registration fingerprint mismatch")
+        if image.u32(crt_slot) != address:
+            raise ValueError("Halo 2 singleton CRT binding mismatch")
+        section = image.section_of(node)
+        if (not section or section[4] != ".data" or node & 3 or
+                node + 12 > section[0] + section[2] or len(image.bytes_at(node, 12)) != 12):
+            raise ValueError("Halo 2 singleton node has invalid data span")
+        if image.u32(node + 4) != 0 or image.u32(node + 8) != storage:
+            raise ValueError("Halo 2 singleton initial node binding mismatch")
+        section = image.section_of(storage)
+        if (storage & 3 or not section or section[4] not in (".data", ".bss") or
+                storage + 4 > section[0] + max(section[2], section[3])):
+            raise ValueError("Halo 2 singleton storage has invalid image span")
+        target = image.u32(node)
+        section = image.section_of(target) if target else None
+        if not target or not image.is_code(target) or not section or section[4] != ".text":
+            raise ValueError("Halo 2 singleton creator is not title code")
+        roots.add(target)
+    return roots
+
+
 def game_fixed_startup_roots(image):
     """Native161 reaches a fixed initializer and its paired disposal callback.
 
@@ -718,6 +782,8 @@ def main():
         roots.update(game_packed_vector_roots(image))
         roots.update(game_action_callback_roots(image))
         roots.update(game_fixed_startup_roots(image))
+        roots.update(game_arena_boot_roots(image))
+        roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
         roots.add(image.u32(image.u32(0x477058) + 0x10))

@@ -30,6 +30,31 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_arena_boot_forwarding_slots_and_guards(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x4576AC: 0x1000, 0x4576B4: 0x1010,
+                         0x4576A8: None, 0x4576B0: None, 0x4576B8: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_ARENA_BOOT_CALLS", (spec,) * 3):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_arena_boot_roots(image), {0x1000, 0x1010})
+            self.assertEqual(image.targets, before)
+            for slot in (0x4576AC, 0x4576B4):
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_arena_boot_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_arena_boot_roots(image)
+        for which in range(3):
+            specs = [spec] * 3; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_ARENA_BOOT_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_arena_boot_roots(image)
+
     def test_fixed_startup_pair_and_allocator_slots_only(self):
         image = SyntheticImage(); image.section_name = ".text"
         slots = (0x461DF0, 0x461DF4, 0x45379C, 0x4537AC)
@@ -518,6 +543,97 @@ class CallbackRoots(unittest.TestCase):
         with patch.object(prepare_boot, "HOST_CALLBACK_WALK", (0x200, len(image.code), "0" * 64)):
             with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
                 prepare_boot.host_channel_callback_roots(image)
+
+
+class SingletonImage:
+    def __init__(self):
+        self.code = b"synthetic complete registration and resolver"
+        self.spec = (0x200, len(self.code), hashlib.sha256(self.code).hexdigest())
+        self.registrations = [(*self.spec, node, storage, crt)
+                              for _, _, _, node, storage, crt in prepare_boot.GAME_SINGLETON_REGISTRATIONS]
+        self.words = {0x461E10: None}  # adjacent non-node metadata
+        for n, (_, _, _, node, storage, crt) in enumerate(self.registrations):
+            self.words.update({crt: 0x200, node: 0x1000 + n * 16, node + 4: 0, node + 8: storage})
+        self.data_end = 0x467000; self.storage_end = 0x485000
+        self.data_name = ".data"; self.storage_name = ".bss"; self.code_name = ".text"
+        self.short_node = None; self.bad_code = None
+
+    def bytes_at(self, address, size):
+        if address == 0x200:
+            assert size == len(self.code)
+            return self.code
+        assert size == 12
+        return bytes(11 if address == self.short_node else 12)
+
+    def u32(self, address): return self.words[address]
+    def is_code(self, address): return 0x1000 <= address < 0x1080 and address != self.bad_code
+    def section_of(self, address):
+        if 0x461000 <= address < 0x467000:
+            return (0x461000, 0, self.data_end - 0x461000, 0, self.data_name)
+        if 0x480000 <= address < 0x485000:
+            return (0x480000, 0, 0, self.storage_end - 0x480000, self.storage_name)
+        return (0x1000, 0, 0x80, 0, self.code_name)
+
+
+class SingletonRoots(unittest.TestCase):
+    def setUp(self):
+        self.image = SingletonImage()
+        for name, value in (("GAME_SINGLETON_WALK", self.image.spec),
+                            ("GAME_SINGLETON_REGISTRATIONS", self.image.registrations)):
+            guard = patch.object(prepare_boot, name, value); guard.start(); self.addCleanup(guard.stop)
+
+    def test_eight_creators_bindings_targets_and_no_mutation(self):
+        im = self.image; before = dict(im.words)
+        self.assertEqual(prepare_boot.game_singleton_creator_roots(im), set(range(0x1000, 0x1080, 16)))
+        self.assertEqual(im.words, before)
+        for _, _, _, node, storage, crt in im.registrations:
+            for field in (crt, node + 4, node + 8):
+                saved = im.words[field]; im.words[field] = 0xDEAD
+                with self.assertRaisesRegex(ValueError, "binding mismatch"):
+                    prepare_boot.game_singleton_creator_roots(im)
+                im.words[field] = saved
+            saved = im.words[node]
+            for bad in (None, 0, 0x3000):
+                im.words[node] = bad
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_singleton_creator_roots(im)
+            im.words[node] = saved; im.bad_code = saved
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_singleton_creator_roots(im)
+            im.bad_code = None
+        im.code_name = "DSOUND"
+        with self.assertRaisesRegex(ValueError, "title code"):
+            prepare_boot.game_singleton_creator_roots(im)
+
+    def test_node_and_zero_fill_storage_spans(self):
+        im = self.image
+        im.data_name = ".text"
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_singleton_creator_roots(im)
+        im.data_name = ".data"; im.data_end = max(r[3] for r in im.registrations) + 11
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_singleton_creator_roots(im)
+        im.data_end = 0x467000; im.short_node = im.registrations[0][3]
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_singleton_creator_roots(im)
+        im.short_node = None; im.storage_end = max(r[4] for r in im.registrations) + 3
+        with self.assertRaisesRegex(ValueError, "image span"):
+            prepare_boot.game_singleton_creator_roots(im)
+        im.storage_end = 0x485000; im.storage_name = ".text"
+        with self.assertRaisesRegex(ValueError, "image span"):
+            prepare_boot.game_singleton_creator_roots(im)
+
+    def test_resolver_and_all_registration_guards(self):
+        im = self.image
+        with patch.object(prepare_boot, "GAME_SINGLETON_WALK", (*im.spec[:2], "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "resolver fingerprint"):
+                prepare_boot.game_singleton_creator_roots(im)
+        for which in range(8):
+            specs = list(im.registrations)
+            specs[which] = (*specs[which][:2], "0" * 64, *specs[which][3:])
+            with patch.object(prepare_boot, "GAME_SINGLETON_REGISTRATIONS", specs):
+                with self.assertRaisesRegex(ValueError, "registration fingerprint"):
+                    prepare_boot.game_singleton_creator_roots(im)
 
 
 class ActionImage:
