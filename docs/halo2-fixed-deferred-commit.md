@@ -1,0 +1,33 @@
+# Fixed original deferred sound commit
+
+Native212 executes this commit and advances to a separate timer callback scheduling guard. The original Microsoft Game Studios intro is visible, but the main menu is still absent and the last original present (frame 136) is RGB-zero.
+
+The opt-in Halo 2 audio adapter admits the exact `37D141`/`21F201` deferred commit captured in [native211](halo2-deferred-commit-boundary.md). It requires the fixed zero-position, +X/+Y listener and the three already-active spatial FX23/24/25 records, with their checked routes, gains and parameter blocks. Dynamic positions, orientations, presets, unsupported voice states and other callers retain strict stops.
+
+The 24-byte public wrapper is fingerprinted as `f2686cd655572ae407670b574ca71af5b8937c884f336521343f73822599a917`. It has one interface argument and `ret 4`. Original `37CD15` updates listener state, checks pending listener effects, visits spatial children and clears listener dirtiness. It does not apply deferred parameters to every sound object indiscriminately: original registration `37BE6C` links only parameter flags containing `10`. The currently accepted ordinary/accurate streams and nonspatial FX/PCM objects do not have that flag.
+
+`tools/verify_halo2_listener_commit.py` executes the original parameter constructor `37CC6A`, initial immediate distance/rolloff setters and their real commits, deferred Doppler, the download location helper, deferred position/orientation setters and the public commit with an empty child list. All 448 distinct original instruction addresses execute without function substitutions or MMIO, preserving nonvolatile registers and stack cleanup. The actual constructor starts with listener dirty `3F` and listener-effect dirty `FFF`; the first immediate scalar commit clears both while no effect is assigned. Original helper `37A110` later stores only effect locations 9/10. It does not dirty listener effects again. Thus the later fixed commit does not overwrite the separately updated reverb presets. This fixture validates the location helper, not a replacement implementation of DSP upload.
+
+Separate owned-code fixtures execute original parameter/voice construction, setup, observed deferred setters/Play/routing/mutes, original spatial registration and the public device commit. All four captured child classes match native211's complete spatial blocks byte for byte before commit. Spatial FX23 and FX24 change neither parameter nor voice state. FX25 clears only its `007F0000` pending I3DL2 dirty word. The inactive submix retains its entire pending block: original `382032` requires voice status `&3 == 3` before processing it. None of these commits issues MMIO. Original Play had already calculated the basis and fixed voice gains; its derived listener bit explains the original `65` dirty value compared with the adapter's pending API bits `25`.
+
+The runtime validates all admitted listener/child inputs before mutation, then checks the actual live FX engine under its existing mixer mutex. That check requires the completed route/filter/source configuration and all FX15–22 mutes. It does not reset histories, modify routes, discard an already-computed grain, consume a packet or advance DSP time. An independent pending reverb update can remain queued because this fixed geometry commit writes no DSP state. Only after successful validation does the adapter mark Doppler zero active, clear listener pending bits and clear FX25's proven dirty word. All inactive pending records and nonspatial stream/voice ownership remain intact. Unchanged repetition is accepted; changed geometry still stops.
+
+The 54 host executables pass. The private owned-filter ABI run executes the complete real adapter creation/configuration sequence, checks first and repeated commits, and rejects altered listener fields, every spatial-block word, gains, stopped/unknown interfaces, wrong callers and failed backend readiness without mutation. Full guest CPU/native FP state and stack cleanup are checked. Synthetic real-DSP/mixer tests preserve the complete source/filter state and GP fingerprint while a previously computed grain is held by the sink; draining afterward preserves each source's actual progress. Three ASan/UBSan executables, including the owned-filter ABI path and concurrent worker, pass. Eight revision/selection hook tests pass.
+
+Regeneration retains the same 12,615 discovered functions and changes only the `37D141` entry hook; all other 12,614 generated bodies and the owned image are identical. These are automatic translation counts, not runtime compatibility. All 180 dependency targets, 130 generated source references and 179 object identities are checked. Only `audio_host.o`, `audio_vita.o`, `audio_fx.o` and `code_107.o` differ from native211.
+
+Private audit/build evidence is `private/sound-query211/` and `private/fixed-commit212/`. Owned code, filter coefficients, DSP data, generated output, traces, captures and packages remain outside Git. Diagnostic packages embed owned game material and must never be uploaded as distributable releases. The shared emulator, Halo CE and physical hardware are untouched.
+
+Native212 logs `21F201` completing the fixed listener commit with all retained sources/history intact, then stops in the H2 timer worker after 64 callbacks (`DPC queue did not drain`, function `804115BC`, stack `00606020`). The repeated original callback `332F4C` rearms timer `484248` using past absolute deadlines that advance by 20 ms. This is a new scheduling boundary, not evidence of a rendered menu. Its cause remains under investigation. The last channel snapshot is complete and the original intro capture was visually checked. The owned emulator process was stopped after capture.
+
+Exact private native212 identities:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| ELF | `1b1a5bf662afb34e0222cfb00e08cc2c133bc3fd5479a480d2cf858afd24700c` |
+| EBOOT | `8b57a1460f6295c92d21f481e31e82aced2d14658b6f9535f99c31e11c05072f` |
+| Boot trace | `5f3260646275d881315105d839c4367fd0e0ca9bc62ba3232f0677edbc499aa5` |
+| Channel snapshot | `eb76b6b5f524242f6a232ddf9985b296f3183f7509c7780b391845b82de11f7e` |
+| Last present | `82f9ef8f261e820982a3f362c92587e1178f0c815958458091527532a8e31d54` |
+
+From the private directory, an exact-build replay uses `python3 preserve_fresh_cache.py replay212`, `python3 capture_run.py replay212 native-212-artifacts`, then `python3 drive_startup.py replay212 native-212-artifacts`. Run these sequentially with successful exit checks and no other owned main-lab process active. Archived output is in `native-212-artifacts/`; the checked intro is `native-212-view/early-movie-middle.png`. The executable remains a private diagnostic containing owned material.

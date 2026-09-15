@@ -58,6 +58,12 @@ static int completed_configuration(const h2_audio_fx *fx)
            ((fx->muted_extra&(1u<<(i-7))) ? 0u : (1u<<(6+(i-7)%4))))return 0;
     return 1;
 }
+int h2_audio_fx_fixed_commit_ready(const h2_audio_fx *fx)
+{
+    /* Original commit leaves this already-active fixed geometry/routing
+     * unchanged. Readiness never clears filters, grains, histories or time. */
+    return completed_configuration(fx) && fx->muted_extra==255 && fx->frames;
+}
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned key, unsigned output_mask)
 {
     if(completed_configuration(fx))

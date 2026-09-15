@@ -21,6 +21,46 @@ static xctx global_pcm_description(void)
 }
 static xctx fx_context(uint32_t handle, uint32_t arg, uint32_t caller)
 { xctx c = context(handle, arg, 0, 0); X_M32(c.r[4]) = caller; return c; }
+#if H2_AUDIO_FILTER_MODEL
+static void fixed_commit_tests(uint32_t dev)
+{
+    h2_audio_buffer*spatial[3]={0};
+    for(unsigned i=0;i<XA_MAX_VOICES;++i)if(buffers[i].base && (buffers[i].fx_bin&0x10000))
+        spatial[(buffers[i].fx_bin&0xffff)-23]=&buffers[i];
+    assert(spatial[0]&&spatial[1]&&spatial[2]);
+    xctx c=fx_context(dev,0,0x21f201);reject(&c,0x37D141); /* prior synthetic dynamic I3DL2 input */
+    uint32_t input[9]={0,0,0,0,0,0,0,0,0x3e800000};x_guest_write(0x5ffb,input,sizeof input);
+    c=context(spatial[2]->base+0x1c,0x5ffb,1,0);X_M32(c.r[4])=0x2AEF6A;call(&c,0x37C6E5,0,3);
+    h2_audio_device_snapshot owner=device;
+    for(unsigned field=0;field<13;++field){
+        device=owner;
+        if(field==0)device.dirty=1;else if(field==1)device.distance^=1;
+        else if(field==2)device.rolloff=1;else if(field==3)device.doppler=1;
+        else if(field==4)device.pending_distance^=1;else if(field==5)device.pending_rolloff=1;
+        else if(field==6)device.pending_doppler=1;else device.pending_orientation[field-7]^=1;
+        c=fx_context(dev,0,0x21f201);reject(&c,0x37D141);
+    }
+    device=owner;
+    for(unsigned field=0;field<3;++field){device.pending_position[field]=1;c=fx_context(dev,0,0x21f201);reject(&c,0x37D141);device=owner;}
+    for(unsigned n=0;n<3;++n){
+        h2_audio_buffer saved=*spatial[n];
+        for(unsigned j=0;j<41;++j){spatial[n]->spatial[j]^=1;c=fx_context(dev,0,0x21f201);reject(&c,0x37D141);*spatial[n]=saved;}
+        for(unsigned j=0;j<5;++j){spatial[n]->route_gains[j]^=1;c=fx_context(dev,0,0x21f201);reject(&c,0x37D141);*spatial[n]=saved;}
+        spatial[n]->stopped=1;c=fx_context(dev,0,0x21f201);reject(&c,0x37D141);*spatial[n]=saved;
+    }
+    c=fx_context(dev,0,0x21f202);reject(&c,0x37D141);
+    c=fx_context(dev+1,0,0x21f201);reject(&c,0x37D141);
+    test_commit_failure=1;c=fx_context(dev,0,0x21f201);reject(&c,0x37D141);test_commit_failure=0;
+    h2_audio_buffer *before=malloc(sizeof buffers);assert(before);memcpy(before,buffers,sizeof buffers);
+    ((h2_audio_buffer*)before)[spatial[2]-buffers].spatial[0x7c/4]=0;
+    owner.doppler=0;owner.dirty=0;
+    for(unsigned repeat=0;repeat<2;++repeat){unsigned calls=test_commit_calls;
+        c=fx_context(dev,0,0x21f201);call(&c,0x37D141,0,1);
+        assert(test_commit_calls==calls+1&&!memcmp(&device,&owner,sizeof owner)&&!memcmp(before,buffers,sizeof buffers));
+    }
+    free(before);
+}
+#endif
 int main(int argc, char **argv)
 {
     g_xram = malloc(0x200000); g_img_base = g_xram; g_xpt = malloc((1u << 20) * 4); assert(g_xram && g_xpt);
@@ -28,6 +68,8 @@ int main(int argc, char **argv)
     for (unsigned i = 1; i < 16; ++i) g_xpt[i] = (i - 1) * 4096;
     g_xpt[3] = 0x8000; g_xpt[7] = 0x9000; g_xpt[0x386] = 0xf000; g_xpt[0x387] = 0x1e0000; X_M32(0x386B0C) = 0;
     xctx c = context(0, 0x6200, 0, 0); call(&c, 0x37D797, 0, 3); uint32_t dev = read32(0x6200);
+    c = context(dev,0x4043126f,0,0);call(&c,0x37D506,0,3);
+    c = context(dev,0,0,0);call(&c,0x37D5CD,0,3);
     c = fx_description(dev); reject(&c, 0x37D4BE);
     c = download_context(); call(&c, 0x37B86D, 0, 4);
     for (unsigned i = 0; i < 6; ++i) {
@@ -258,6 +300,7 @@ int main(int argc, char **argv)
                     c=fx_context(handle,(uint32_t)-6400,0x21F1A0);call(&c,0x37B66F,0,2);
                     c=fx_context(handle,0,0x21F1A0);reject(&c,0x37B66F); /* unmute remains unsupported */
                 }
+                fixed_commit_tests(dev);
                 for (unsigned field=0;field<6;++field) {
                     c=global_pcm_description();uint32_t value=read32(0x3ffd+field*4)^1;x_guest_write(0x3ffd+field*4,&value,4);
                     reject(&c,0x37D7DE);

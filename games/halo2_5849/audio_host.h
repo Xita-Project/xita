@@ -6,7 +6,8 @@ typedef struct {
     uint32_t base, references, ever_created, children;
     uint32_t distance, rolloff, doppler;
     uint32_t pending_distance, pending_rolloff, pending_doppler, dirty;
-    /* Valid only when dirty bit 1/4 is set. Spatial commit is unsupported. */
+    /* Pending vectors remain stored after the admitted fixed-geometry commit.
+     * Dynamic spatial commits remain unsupported. */
     uint32_t pending_position[3], pending_orientation[6];
     uint8_t headroom[32];
 } h2_audio_device_snapshot;
@@ -73,6 +74,9 @@ int h2_audio_backend_fx_route(unsigned bin, unsigned routes);
 int h2_audio_backend_fx_route_mask(unsigned bin, unsigned output_mask);
 int h2_audio_backend_fx_mute(unsigned key);
 int h2_audio_backend_fx_filter(unsigned key);
+/* Validate the actual fixed FX configuration under its mixer mutex. No
+ * processing, history reset, pending DSP update or grain mutation. */
+int h2_audio_backend_fixed_commit_ready(h2_dsp_engine *engine);
 /* Only the validated looping, fully muted mono8/1000Hz voices into GP14. */
 int h2_audio_backend_gp_pcm_play(int voice);
 int h2_audio_backend_stream_submit(int voice, uint32_t mirror, uint64_t *ticket);

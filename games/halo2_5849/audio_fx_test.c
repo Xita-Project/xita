@@ -296,6 +296,16 @@ int H2_AUDIO_FX_TEST_MAIN(void)
         for(unsigned v=0;v<H2_FX_SOURCES;++v)assert(fx.sources[v].frames==before.sources[v].frames+1);
         assert(fx.playing==before.playing&&fx.bound==before.bound&&fx.engine==before.engine);
     }
+    before=fx;h2_dsp_engine engine_before=*s;uint8_t scratch_before[0x10000];memcpy(scratch_before,s->scratch,sizeof scratch_before);
+    assert(h2_audio_fx_fixed_commit_ready(&fx)&&!memcmp(&fx,&before,sizeof fx));
+    assert(!memcmp(s,&engine_before,sizeof *s)&&!memcmp(scratch_before,s->scratch,sizeof scratch_before));
+    assert(!h2_audio_fx_fixed_commit_ready(NULL));
+    for(unsigned bad=0;bad<5;++bad){fx=before;
+        if(bad==0)fx.muted_extra=127;else if(bad==1)fx.filtered=1;else if(bad==2)fx.playing^=4;
+        else if(bad==3)fx.sources[6].output_mask=64;else fx.frames=0;
+        invalid=fx;assert(!h2_audio_fx_fixed_commit_ready(&fx)&&!memcmp(&fx,&invalid,sizeof fx));
+    }
+    fx=before;
     before=fx;assert(h2_audio_fx_filter(&fx,23)&&h2_audio_fx_route_mask(&fx,24,128));
     assert(h2_audio_fx_mute(&fx,H2_FX_SPATIAL23)&&!memcmp(&fx,&before,sizeof fx));
     /* A subsequent frame fault is terminal, with no completed frame counted. */

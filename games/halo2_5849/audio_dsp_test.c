@@ -13,6 +13,10 @@ static unsigned description_probe_read, description_probe_enabled;
 static uint32_t dsp_written[4][2];
 static int dsp_failure;
 static unsigned test_fx_bound, test_fx_routes, test_fx_playing;
+static unsigned test_commit_failure,test_commit_calls;
+int h2_audio_backend_fixed_commit_ready(h2_dsp_engine*s)
+{ assert(s==effects);++test_commit_calls;return !test_commit_failure && test_fx_playing==0x7fff; }
+
 static unsigned test_fx_mask(unsigned key)
 {
     if (key == 13) return 1;

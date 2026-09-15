@@ -431,6 +431,14 @@ static int backend_queue_reverb(h2_dsp_engine *engine, unsigned index, uint32_t 
     if(ok){reverb_pending=1;reverb_index=index;reverb_queued_frame=fx.frames;}
     sceKernelUnlockMutex(progress_mutex, 1); return ok;
 }
+int h2_audio_backend_fixed_commit_ready(h2_dsp_engine *engine)
+{
+    if (h2_audio_backend_health()<0 || progress_mutex<0) return 0;
+    sceKernelLockMutex(progress_mutex,1,NULL);
+    int ok=h2_audio_backend_health()==0 && engine && fx.engine==engine && h2_audio_fx_fixed_commit_ready(&fx);
+    if(ok){h2_dsp_status state;h2_dsp_snapshot(engine,&state);ok=!state.fault;}
+    sceKernelUnlockMutex(progress_mutex,1);return ok;
+}
 int h2_audio_backend_queue_reverb8(h2_dsp_engine *engine,uint32_t flags,const uint32_t parameters[66])
 { return backend_queue_reverb(engine,8,flags,parameters); }
 int h2_audio_backend_queue_reverb9(h2_dsp_engine *engine,uint32_t flags,const uint32_t parameters[66])

@@ -160,9 +160,14 @@ int main(void)
     assert(status.fx_playing_mask == 0x7fff && status.fx_bound_mask == 0x7fff);
     atomic_store(&faults,1u<<F_HOLD);
     for(;;){h2_audio_backend_snapshot(&status);if(status.fx_computed_frames>status.fx_submitted_frames)break;usleep(1000);}
+    assert(!h2_audio_backend_fixed_commit_ready(s)); /* active extra routes not muted yet */
     uint64_t mute_computed=status.fx_computed_frames,prior_sources[H2_FX_SOURCES];
     memcpy(prior_sources,status.fx_source_consumed,sizeof prior_sources);
     for(unsigned bin=15;bin<=22;++bin)assert(h2_audio_backend_fx_mute(bin)==0);
+    assert(!h2_audio_backend_fixed_commit_ready(NULL)&&!h2_audio_backend_fixed_commit_ready((h2_dsp_engine*)(uintptr_t)1));
+    h2_audio_fx commit_before=fx;h2_dsp_status dsp_before,dsp_after;h2_dsp_snapshot(s,&dsp_before);
+    assert(h2_audio_backend_fixed_commit_ready(s));h2_dsp_snapshot(s,&dsp_after);
+    assert(!memcmp(&commit_before,&fx,sizeof fx)&&dsp_before.state_fingerprint==dsp_after.state_fingerprint);
     h2_audio_backend_snapshot(&status);assert(status.fx_computed_frames==mute_computed&&!status.error);
     atomic_store(&faults,0);
     for(;;){h2_audio_backend_snapshot(&status);if(status.fx_consumed_frames>mute_computed)break;usleep(1000);}

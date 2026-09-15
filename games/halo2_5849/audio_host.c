@@ -1174,6 +1174,60 @@ static void listener_vector(xctx *c, uint32_t ip)
             ip, X_M32(c->r[4]), value[0], value[1], value[2], value[3], value[4], value[5], device.dirty);
     result(c, 0, count + 2);
 }
+static void deferred_commit(xctx *c)
+{
+    const uint32_t ip=0x37D141;
+    stack(c,ip,1);live(c,ip,X_ARG(0),0);buffer_operational(c,ip);
+#if H2_AUDIO_DSP && H2_AUDIO_SPATIAL_MODEL && H2_AUDIO_FILTER_MODEL
+    const uint32_t zero[3]={0},orientation[6]={0x3f800000,0,0,0,0x3f800000,0};
+    if(X_M32(c->r[4])!=0x21F201 || !effects || !mapped(0x386B0C,4) || X_M32(0x386B0C) ||
+       (device.dirty!=0x25 && device.dirty) || device.distance!=0x4043126f || device.rolloff ||
+       (device.doppler!=0x3f800000 && device.doppler) || device.pending_distance!=0x4043126f ||
+       device.pending_rolloff || device.pending_doppler ||
+       memcmp(device.pending_position,zero,sizeof zero) || memcmp(device.pending_orientation,orientation,sizeof orientation))
+        fail(c,ip,"unsupported fixed listener commit",device.dirty);
+    h2_audio_buffer *active[3]={0};
+    for(unsigned i=0;i<XA_MAX_VOICES;++i){
+        h2_audio_buffer*b=&buffers[i];if(!b->base || !b->submix)continue;
+        if(b->submix==1){
+            /* Original registered inactive voice fails status&3==3 and
+             * retains every pending spatial field. No activation here. */
+            if(b->started || b->stopped)fail(c,ip,"unsupported active submix commit",b->base);
+            continue;
+        }
+        if(b->submix!=2)fail(c,ip,"unsupported spatial owner class",b->base);
+        if(!(b->fx_bin&0x10000))continue; /* Original registration excludes it. */
+        unsigned bin=b->fx_bin&0xffff;
+        if(bin<23 || bin>25 || active[bin-23] || b->fx_bin!=(0x10000u|bin) ||
+           !b->started || b->stopped || b->locked || b->headroom || b->volume!=(bin==25?0:-6400) || b->route_count!=5)
+            fail(c,ip,"unsupported fixed spatial voice",b->base);
+        static const uint8_t routes[5]={6,8,7,9,10};
+        if(memcmp(b->route_bins,routes,sizeof routes))fail(c,ip,"changed fixed spatial route",b->base);
+        for(unsigned j=0;j<5;++j)if(b->route_gains[j]!=(bin==25&&j<4?-6400:0))
+            fail(c,ip,"changed fixed spatial gain",b->base);
+        uint32_t expected[41];spatial_defaults(expected);
+        expected[0]=expected[0x7c/4]=0;expected[1]=0xf8000000;
+        expected[0x38/4]=expected[0x3c/4]=0x7f7fffff;expected[0x70/4]=0x43340000;
+        if(bin==25 && b->spatial[0x7c/4]==0x007f0000)expected[0x7c/4]=0x007f0000;
+        if(memcmp(expected,b->spatial,sizeof expected))fail(c,ip,"changed fixed spatial parameters",b->base);
+        active[bin-23]=b;
+    }
+    /* The currently supported stream descriptors never register as spatial. */
+    for(unsigned i=0;i<XA_MAX_VOICES;++i)if(streams[i].base && (streams[i].flags&0x10))
+        fail(c,ip,"unsupported spatial stream commit",streams[i].base);
+    if(!active[0] || !active[1] || !active[2] || !h2_audio_backend_fixed_commit_ready(effects))
+        fail(c,ip,"fixed commit live mixer configuration",device.base);
+    /* Original calls for these exact records emit no hardware/DSP writes:
+     * retain all actual mixer state and commit only the pending API fields. */
+    active[2]->spatial[0x7c/4]=0;
+    device.distance=device.pending_distance;device.rolloff=device.pending_rolloff;
+    device.doppler=device.pending_doppler;device.dirty=0;
+    xv_logf("[h2/audio-commit] caller=0021F201 fixed zero-position/+X+Y listener committed, Doppler0; original FX25 dirty cleared, inactive pending records and real filters/sources/GP history/grains retained\n");
+    result(c,0,1);
+#else
+    fail(c,ip,"fixed spatial commit model disabled",ip);
+#endif
+}
 static void mix_bin(xctx *c, uint32_t ip)
 {
     stack(c, ip, 3);
@@ -1387,6 +1441,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37AB40: case 0x37AB87: stream_reference(c, ip); break;
     case 0x37B818: stream_headroom(c); break;
     case 0x37D598: case 0x37D54E: listener_vector(c, ip); break;
+    case 0x37D141: deferred_commit(c); break;
     case 0x37D797: create(c); break;
     case 0x37A14F: case 0x37C70F: case 0x379F45: case 0x37A795: reference(c, ip); break;
     case 0x37D4BE: buffer_create(c); break;

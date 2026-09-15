@@ -34,6 +34,8 @@ int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes);
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned bin, unsigned output_mask);
 int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key);
 int h2_audio_fx_filter(h2_audio_fx *fx, unsigned key);
+/* Read-only admission for the observed unchanged fixed-geometry commit. */
+int h2_audio_fx_fixed_commit_ready(const h2_audio_fx *fx);
 int h2_audio_fx_play(h2_audio_fx *fx, unsigned bin);
 int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin);
 /* Execute complete 32-sample frames, reading every active source before
