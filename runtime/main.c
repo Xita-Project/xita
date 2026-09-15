@@ -1237,6 +1237,10 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
+    if (xv_benchmark_compare_depth_prepare()) {
+        xv_depth_prepare_override(enabled);
+        return;
+    }
     if (xv_benchmark_compare_vertex_prepare()) {
         xv_vertex_prepare_override(enabled,16384);
         return;

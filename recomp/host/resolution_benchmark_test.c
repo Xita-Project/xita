@@ -14,6 +14,11 @@ int xv_vertex_prepare_available(void) { return prepare_ready; }
 void xv_vertex_prepare_override(int enabled,unsigned minimum) { (void)enabled;(void)minimum; }
 #endif
 static unsigned switches;
+#ifndef TEST_NO_DEPTH_PREPARE
+static int depth_ready=1;
+int xv_depth_prepare_available(void) { return depth_ready; }
+void xv_depth_prepare_override(int enabled) { (void)enabled; }
+#endif
 static int affinity_ok=1;
 static int snapshot_worker_ready=1;
 #ifndef TEST_NO_GUEST_PHASES
@@ -138,7 +143,7 @@ int main(void)
     xv_benchmark_remote_poll(0);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==-1);
     xv_benchmark_remote_poll(1);
-    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_VERTEX_PREPARE+1)==-1);
+    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_DEPTH_PREPARE+1)==-1);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==0 && !b.request && !b.active);
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_remote_poll(0);assert(!xv_benchmark_remote_busy());
@@ -149,9 +154,12 @@ int main(void)
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_toggle();assert(xv_benchmark_step(now,544,1,view)==360);
     xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
-    unsigned kinds[]={XV_BENCH_VERTEX_PREPARE,XV_BENCH_OBJECT_JOBS,XV_BENCH_PREP_BUNDLE,XV_BENCH_GUEST_PHASES,XV_BENCH_SNAPSHOT_WORKER,XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
+    unsigned kinds[]={XV_BENCH_DEPTH_PREPARE,XV_BENCH_VERTEX_PREPARE,XV_BENCH_OBJECT_JOBS,XV_BENCH_PREP_BUNDLE,XV_BENCH_GUEST_PHASES,XV_BENCH_SNAPSHOT_WORKER,XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
     for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++) {
         int compiled=1;
+#ifdef TEST_NO_DEPTH_PREPARE
+        if(kinds[i]==XV_BENCH_DEPTH_PREPARE)compiled=0;
+#endif
 #ifdef TEST_NO_VERTEX_PREPARE
         if(kinds[i]==XV_BENCH_VERTEX_PREPARE)compiled=0;
 #endif
@@ -190,6 +198,7 @@ int main(void)
         xv_benchmark_remote_poll(1);
         assert(xv_benchmark_compare_point_math()==(kinds[i]==XV_BENCH_POINT_MATH));
         assert(xv_benchmark_compare_matrix_neon()==(kinds[i]==XV_BENCH_MATRIX_NEON));
+        assert(xv_benchmark_compare_depth_prepare()==(kinds[i]==XV_BENCH_DEPTH_PREPARE));
         assert(xv_benchmark_compare_vertex_prepare()==(kinds[i]==XV_BENCH_VERTEX_PREPARE));
         assert(xv_benchmark_compare_object_jobs()==(kinds[i]==XV_BENCH_OBJECT_JOBS));
         assert(xv_benchmark_compare_prep_bundle()==(kinds[i]==XV_BENCH_PREP_BUNDLE));
@@ -331,6 +340,34 @@ int main(void)
         assert(switches-initial_switches==(stop?3u:4u));
     }
     puts("PASS: object jobs reject failed initialization and restore on completion, cancellation and lost view");
+#endif
+#ifdef TEST_NO_DEPTH_PREPARE
+    assert(xv_benchmark_remote_request(XV_BENCH_DEPTH_PREPARE)==-1);
+#else
+    depth_ready=0;
+    assert(xv_benchmark_remote_request(XV_BENCH_DEPTH_PREPARE)==-1);
+    depth_ready=1;
+    for(unsigned stop=0;stop<3;stop++) {
+        unsigned initial_switches=switches;
+        assert(!xv_benchmark_remote_request(XV_BENCH_DEPTH_PREPARE));
+        xv_benchmark_remote_poll(1);
+        assert(xv_benchmark_step(now,360,1,view)==360&&optimization==0);
+        assert(!strcmp(tag(),"depth-prepare-compare"));
+        xv_benchmark_applied(now,360);
+        for(unsigned i=0;i<(stop?181u:540u);i++) {
+            now+=100000;unsigned next=xv_benchmark_step(now,360,1,view);
+            if(next)xv_benchmark_applied(now,next);
+        }
+        if(stop) {
+            assert(optimization==1);
+            if(stop==1)xv_benchmark_compare_toggle();
+            assert(xv_benchmark_step(now,360,stop==1,view)==360);
+            xv_benchmark_applied(now,360);
+        }
+        assert(optimization==-1&&!xv_benchmark_active()&&!remote_kind);
+        assert(switches-initial_switches==(stop?3u:4u));
+    }
+    puts("PASS: depth preparation rejects incompatible modes and restores on completion, cancellation and lost view");
 #endif
     snapshot_worker_ready=0;
     assert(!xv_benchmark_remote_request(XV_BENCH_SNAPSHOT_WORKER));xv_benchmark_remote_poll(1);

@@ -18,6 +18,10 @@
 #include "xv_shader.h"
 #include "xv_stencil.h"
 
+/* Internal comparison control: -1 restores the configured default. */
+void xv_depth_prepare_override(int enabled);
+int xv_depth_prepare_available(void);
+
 /* --- Xbox D3D structures / enums as the game sees them --------------------------- */
 
 typedef struct { uint32_t Common, Data, Lock; } X_D3DResource;

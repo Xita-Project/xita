@@ -72,7 +72,9 @@ omit texture preparation and select the already linked constant fragment. It
 must be tied to the vertex layout, canonical pixel program and alpha mode, with
 explicit publication between the render and recording threads. Unknown variants,
 texture-dependent clipping, depth-writing shaders, overrides and failed links
-must retain the original path. This optimization is not implemented yet.
+must retain the original path.
+The subsequent [depth preparation experiment](depth-preparation-20260915.md)
+implements this boundary with explicit publication and a captured command flag.
 
 The on-demand query/color-mask diagnostic changes no ordinary draw behavior.
 The ARM comparison tool now includes `637A0` fixtures to retain the evidence that

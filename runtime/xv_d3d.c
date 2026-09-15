@@ -27,6 +27,7 @@
 #include "xv_vertex_prepare.h"
 #include "xv_gpu_upload.h"
 #include "xv_texture_alpha.h"
+#include "xv_depth_prepare.h"
 
 #include "xv_log.h"
 #define XV_LOG(...)     xv_logf("[xv/d3d] " __VA_ARGS__)
@@ -74,6 +75,31 @@ static unsigned g_ps_count;
 static uint8_t g_ps_texture_masks[XV_PS_TABLE_COUNT]; /* bit 4 marks initialized */
 static unsigned texture_stages_prepared, texture_stages_skipped;
 static unsigned opaque_candidates, opaque_proven;
+static xv_depth_proofs g_depth_proofs;
+static unsigned depth_prepare_hits;
+static int depth_prepare_override = -1;
+void xv_depth_prepare_override(int enabled)
+{ __atomic_store_n(&depth_prepare_override, enabled < 0 ? -1 : !!enabled, __ATOMIC_RELEASE); }
+int xv_depth_prepare_available(void)
+{
+    const char *override = getenv("XV_SHADER_OVERRIDE");
+    const char *depth = getenv("XV_DEPTH_ONLY_SHADER");
+    const char *alpha = getenv("XV_ALPHA_SPECIALIZE");
+    return (!override || atoi(override) == 0) && (!depth || atoi(depth) != 0) &&
+        (!alpha || atoi(alpha) != 0);
+}
+static int depth_prepare_enabled(void)
+{
+    /* Recorder-owned configuration. Development shader files can change after
+     * a proof was published, so overrides always retain ordinary preparation. */
+    static int configured = -1, compatible;
+    if (configured < 0) {
+        const char *e = getenv("XV_DEPTH_PREPARE"); configured = e && atoi(e) != 0;
+        compatible = xv_depth_prepare_available();
+    }
+    int override = __atomic_load_n(&depth_prepare_override, __ATOMIC_ACQUIRE);
+    return compatible && (override < 0 ? configured : override);
+}
 static int opaque_material_override = -1;
 void xv_opaque_material_override(int enabled)
 { opaque_material_override = enabled < 0 ? -1 : !!enabled; }
@@ -96,6 +122,8 @@ void xv_unused_textures_override(int enabled)
 
 static void ps_links_shutdown(void)
 {
+    /* Shutdown is already drained; no retained command may outlive its shader. */
+    memset(&g_depth_proofs, 0, sizeof g_depth_proofs);
     for (unsigned i = 0; i < g_ps_count; i++) xv_fshader_unload(&g_ps_links[i].fs);
     memset(g_ps_links, 0, sizeof g_ps_links);
     memset(g_ps_buckets, 0, sizeof g_ps_buckets);
@@ -134,12 +162,24 @@ typedef struct {
     uint8_t   pass;                 /* 0 = back buffer, n = offscreen pass n           */
     uint8_t   previous_frame;       /* stages sampling the last completed backbuffer */
     uint8_t   opaque_alpha;         /* pinned tex0 upload proves the captured test always passes */
+    uint8_t   depth_prepared;       /* published proof selects the retained constant fragment */
     float     psc[18][4];           /* combiner constants: per-stage c0[8], c1[8], final c0, c1 */
     uint32_t  clear_color;          /* clear only                                     */
     float     clear_z;
     uint8_t   clear_flags, clear_stencil;
     xv_stencil stencil;
 } cmd_t;
+
+/* Alpha-disabled variants only. Texture-kind-dependent variants may change
+ * entry during recording, so they cannot use this proof before texture capture. */
+static uint32_t depth_prepare_key(const cmd_t *c)
+{
+    if (c->vs >= XV_MAX_VS || c->ps_entry < 0 || (unsigned)c->ps_entry >= XV_PS_TABLE_COUNT ||
+        c->blend >= BLEND_MODES || g_blend_combo[c->blend].mask ||
+        xv_ps_table[c->ps_entry].cube_modes ||
+        ((c->atest & (1u << 16)) && ((c->atest >> 8) & 7u) != 7u)) return 0;
+    return xv_depth_proof_key(c->vs, c->ps_entry, c->blend);
+}
 
 /* Commands retain their target identity; replay visits contiguous ranges in order. */
 #define XV_RT_SLOTS 8
@@ -803,6 +843,9 @@ void xv_d3d_prep_cache_report(unsigned frames)
     sampler_hits = sampler_misses = 0;
     XV_LOG("[texture-prep] %u frames: %u stages prepared / %u unused skipped\n", frames, texture_stages_prepared, texture_stages_skipped);
     texture_stages_prepared = texture_stages_skipped = 0;
+    XV_LOG("[depth-prepare] %u frames: enabled %d; %u draws omitted texture preparation using published shader proofs\n",
+        frames, depth_prepare_enabled(), depth_prepare_hits);
+    depth_prepare_hits = 0;
     XV_LOG("[opaque-material] %u frames: %u eligible / %u proven opaque (captured upload; alpha test retained otherwise)\n", frames, opaque_candidates, opaque_proven);
     opaque_candidates = opaque_proven = 0;
 }
@@ -1325,6 +1368,19 @@ static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
     return texok;
 }
 
+static unsigned record_material(cmd_t *c, const xv_vs_desc_t *d, int immediate)
+{
+    c->depth_prepared = depth_prepare_enabled() &&
+        xv_depth_proof_read(&g_depth_proofs, depth_prepare_key(c));
+    if (c->depth_prepared) {
+        /* new_cmd zeroed textures/previous_frame. This immutable command will
+         * use the proved constant fragment even if the option changes later. */
+        depth_prepare_hits++;
+        return 0;
+    }
+    return record_textures(c, d, immediate);
+}
+
 static int vertex_reference_layout(const xv_vs_desc_t *d, unsigned stream, unsigned stride)
 {
     if (!stride || stream >= d->nstreams || stride != d->stride[stream]) return 0;
@@ -1497,7 +1553,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     }
 
     xv_draw_profile_step(XV_DRAW_CONSTANTS, &profile);
-    unsigned texok = record_textures(c, d, immediate != NULL);
+    unsigned texok = record_material(c, d, immediate != NULL);
     xv_draw_profile_step(XV_DRAW_TEXTURES, &profile);
     if (!xv_vertex_prepare_finish(&prep)) {
         cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_attributes++;
@@ -2135,6 +2191,16 @@ static xv_fshader_t *depth_only_fragment(vs_slot_t *v, const cmd_t *c, xv_fshade
     return &v->fs[FS_COLOR][BLEND_NOCOLOR];
 }
 
+static void depth_prepare_learn(const cmd_t *c, const xv_fshader_t *linked, const xv_fshader_t *depth)
+{
+    /* 'linked' is NULL for heuristic fallbacks. Check the actual linked alpha
+     * variant, not the requested mode: failed _na links can return mode 0. */
+    if (!linked || !linked->fprog || linked->alpha_test_mode != 1 ||
+        linked->uses_discard || linked->replaces_depth ||
+        !depth || depth == linked || !depth->fprog) return;
+    xv_depth_proof_publish(&g_depth_proofs, depth_prepare_key(c));
+}
+
 static SceGxmTexture g_previous_frame_texture, g_scene_backbuffer_texture;
 void xv_d3d_SetPreviousFrameTexture(const SceGxmTexture *texture) { g_previous_frame_texture = *texture; }
 void xv_d3d_SetSceneBackbufferTexture(const SceGxmTexture *texture) { g_scene_backbuffer_texture = *texture; }
@@ -2258,15 +2324,18 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
         }
         int no_alpha = specialize_alpha && (!draw_needs_alpha_test(c->atest) || c->opaque_alpha);
         int alpha_mode = material_alpha_mode(c, no_alpha);
-        xv_fshader_t *fs = c->ps_entry >= 0 ?
+        xv_fshader_t *fs = c->depth_prepared ? &v->fs[FS_COLOR][BLEND_NOCOLOR] : c->ps_entry >= 0 ?
             XV_RENDER_CALL(XV_RENDER_SHADER_LOOKUP, fragment_for_ps_mode(v, c->ps_entry, c->blend, alpha_mode)) : NULL;
+        xv_fshader_t *linked = c->depth_prepared ? NULL : fs;
         /* Heuristic fragments use only 2D samplers, even if the requested combiner used cubes. */
-        unsigned cube_mask = fs ? xv_ps_table[c->ps_entry].cube_mask : 0;
+        unsigned cube_mask = !c->depth_prepared && fs ? xv_ps_table[c->ps_entry].cube_mask : 0;
         SceGxmFragmentProgram *fp = fs ? fs->fprog : fragment_for(v, c->fs_kind, c->blend, NULL);
         if (!fp)
             continue;
         if (!fs) fs = &v->fs[c->fs_kind][c->blend];
-        xv_fshader_t *depth_fs = depth_only_fragment(v, c, fs);
+        xv_fshader_t *depth_fs = c->depth_prepared ? fs : depth_only_fragment(v, c, fs);
+        int depth_only = c->depth_prepared || depth_fs != fs;
+        if (!c->depth_prepared) depth_prepare_learn(c, linked, depth_fs);
         if (c->visibility && c->geometry_bytes[XV_MAX_STREAMS]) {
             /* The retained histogram marker belongs to this command, unlike
              * trace_frame(), whose recording frame can advance during replay. */
@@ -2276,12 +2345,12 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             XV_LOG("[query-replay] frame %u cmd %u query %u mask %X entry %d atest %08X alpha-mode %d discard %u depth-write %u depth-only %u samplers %X prepared %u\n",
                 frame, i, (unsigned)c->visibility, g_blend_combo[c->blend].mask,
                 (int)c->ps_entry, c->atest, alpha_mode, (unsigned)fs->uses_discard,
-                (unsigned)fs->replaces_depth, depth_fs != fs, samplers, (unsigned)c->ntex);
+                (unsigned)fs->replaces_depth, depth_only, samplers, (unsigned)c->ntex);
         }
         if (depth_fs != fs) {
             fs = depth_fs; fp = fs->fprog; cube_mask = 0;
-            xv_render_profile_depth_only(c->index_count);
         }
+        if (depth_only) xv_render_profile_depth_only(c->index_count);
         if (!bind_draw_textures(texture_state,ctx,c,fs,cube_mask)) continue;
         xv_render_profile_work(c->ps_entry >= 0 && (unsigned)c->ps_entry < XV_PS_TABLE_COUNT ? xv_ps_table[c->ps_entry].ps_key : 0,
             c->index_count, no_alpha && !fs->p_atest);

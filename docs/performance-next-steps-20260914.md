@@ -154,3 +154,9 @@ accepted queries use the main 3D list and repeat full draw preparation. A native
 projection experiment was withdrawn after linked ARM checks found exceptional
 value mismatches and little instruction-count benefit. Continue with the larger
 submission boundary; preserve query identity, coverage and frame-slot ownership.
+
+[Earlier depth-only preparation](depth-preparation-20260915.md) now implements
+that specific work removal behind an opt-in setting and an off/on/off remote
+comparison. The recorder uses atomically published successful-link proofs to omit
+textures only when the retained command will select the constant depth fragment.
+It preserves query draws and geometry; hardware improvement is still unmeasured.
