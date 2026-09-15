@@ -74,5 +74,27 @@ the normal menus and verifying Blood Gulch. The startup code anchor establishes
 the candidate's physical relocation before symbolizing lock sites.
 
 These results justify enabling the lightweight backend in the next experimental
-candidate. Gameplay with the new default, rocket pickup and representative
-campaign/driving stability still require direct physical verification.
+candidate. They do not establish a benefit over serial object updates.
+
+## Default-enabled gameplay follow-up
+
+Runtime `a8d89663d2b9afb922addde1670f60a4872a79c08e9923dbccacbe8881c0d5a1`
+enables the measured backend by default. Adapter and restoration tests pass;
+the exact executable reaches Blood Gulch, turns, moves and fires the plasma
+pistol in Vita3K without a captured STOP. It was installed and verified in
+physical slot B, retaining slot A.
+
+On hardware, the new default reaches Blood Gulch, moves from the red base to
+the central rocket launcher and successfully picks it up. Captures show the
+launcher equipped and continuing frames with the lightweight backend and both
+object workers active. The pickup window records nine cache yields and no
+owner audio pumps. This validates one physical pickup, not all audio or cache
+paths.
+
+After a 0.3-second firing input, the completed-frame capture timed out. Subsequent
+status, log and updater requests also timed out. No post-shot screenshot or
+fault log has been recovered, so this is an unresolved firing failure, not a
+verified GPU-driver diagnosis. No deliberate self-damage test was performed.
+The next step is reproducing the shot in Vita3K and recovering the hardware
+fault log when the console is reachable again. Representative campaign and
+driving stability remain open.

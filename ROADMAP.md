@@ -9,7 +9,7 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
-**Active objective (September 14):** restructure costly Halo CE engine and rendering
+**Active objective (September 15):** restructure costly Halo CE engine and rendering
 work into efficient native routines and independent worker jobs until sustained
 30 FPS is verified on the physical Vita in representative campaign, combat and
 vehicle gameplay. Keep rendering and gameplay correct, document fixed comparison
@@ -24,12 +24,21 @@ to accept broken gameplay/rendering while finding dependencies. The ordinary
 build remains separate. Host scheduling/control checks pass. The first actual
 campaign run exposed a shared cluster-list race; guarded list/datum operations
 now complete the emulator off/on/off trial with real work on all three threads.
-Physical worker affinity is verified, but the first default-on build crashed
-while loading Blood Gulch and was rolled back. The follow-up protects collision
-work and gates jobs on loaded gameplay. The latest emulator candidate completes
-initial callback batches on both workers and advances past event signaling, then
-stops at a guest yield request whose cause is still being audited. Hardware
-frame-rate benefit is unverified; the working Vita runtime remains installed.
+Physical worker affinity is verified. Follow-ups protect collision work, gate
+jobs on loaded gameplay and service supported cache I/O and audio requests with
+the other lanes parked. The [rocket-pickup audit](docs/object-audio-handoff-20260915.md)
+identified another sound-cache yield. A physical pickup now succeeds with cache
+I/O serviced, but the subsequent firing test loses remote connectivity; its
+fault log and cause remain unresolved.
+
+September 15: [lightweight mutex comparisons](docs/object-light-lock-20260915.md)
+repeatedly improve one physical Blood Gulch view from approximately 11.8–12.0
+to 15.1–15.2 FPS, with both workers enabled in every arm. The experimental build
+now selects that mutex by default. This compares synchronization implementations,
+not parallel versus serial object updates; representative campaign, combat and
+driving gains remain unverified. [Private math](docs/object-private-math-20260915.md)
+alone did not improve the earlier kernel-mutex comparison. Both changes remain
+available for combined testing. Neither sustained frame-rate target is complete.
 
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.
