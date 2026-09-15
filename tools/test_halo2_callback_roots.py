@@ -30,6 +30,37 @@ class SyntheticImage:
 
 
 class CallbackRoots(unittest.TestCase):
+    def test_incoming_widget_member_exact_interface(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = tuple(range(0x45A628, 0x45A670, 4))
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        image.targets.update({0x45A624: None, 0x45A670: None})
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_WIDGET_MEMBER_CALLS)
+        with patch.object(prepare_boot, "GAME_WIDGET_MEMBER_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_widget_member_roots(image),
+                             {before[slot] for slot in slots})
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_widget_member_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_widget_member_roots(image)
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_widget_member_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_WIDGET_MEMBER_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_widget_member_roots(image)
+
     def test_incoming_widget_setup_and_bound_event_dispatch(self):
         image = SyntheticImage(); image.section_name = ".text"
         slots = tuple(range(0x4587D0, 0x458840, 4)) + (0x45BDB0,)

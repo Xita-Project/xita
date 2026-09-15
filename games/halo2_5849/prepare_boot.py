@@ -104,6 +104,15 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_WIDGET_MEMBER_CALLS = (
+    (0x22F15D, 85, "e616c1b64117e8357f37096141811f09fa06471be2d9a99e4d5588674e8861ba"),
+    (0x253C8B, 61, "1beb7aa5404db1fecdd0280e1e250773f09381695345a88f3332f55d6be7099a"),
+    (0x22E65E, 574, "0c2ba9f3d15f2d0304db23f3ed7e1596c9d29f057459d3bf43444c6fde0fbd1c"),
+    (0x253CC8, 55, "b87126b734c8172a03f37dee43e8b3e9e2bb06721d8d8932fe8538b4ec1e0206"),
+    (0x2540D3, 21, "772ad402f64dd835b0b64dc428c23b3e9c739e867fbae4599f3deb1634650c8b"),
+    (0x254173, 63, "0bdaba469b11b54d3114de960371bed5d52b3b42cfde1b10c6d2f2f17766dfe9"),
+    (0x45A628, 72, "a284e4b90a5e6ac9a2d0d358f958fa89f42107d1c8eb5e9cb38abd3fdf0fce20"),
+)
 GAME_WIDGET_SETUP_CALLS = (
     (0x234EBC, 208, "c12cfa2dbb1b69c3c008f635f20ec8556aa8392ba58d2fdb48ec8e1e4ff45f68"),
     (0x22F15D, 85, "e616c1b64117e8357f37096141811f09fa06471be2d9a99e4d5588674e8861ba"),
@@ -593,6 +602,14 @@ def descriptor_child_field_roots(image, offsets):
         else:
             raise ValueError("Halo 2 descriptor child array is not terminated before its link")
     return roots
+
+
+def game_widget_member_roots(image):
+    """Native177: incoming widget member610h; exact 18-method interface."""
+    for address, length, digest in GAME_WIDGET_MEMBER_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 widget member fingerprint mismatch")
+    return _code_vtable_roots(image, 0x45A628, 0x45A670)
 
 
 def game_widget_setup_roots(image):
@@ -1125,6 +1142,7 @@ def main():
         roots.update(game_two_point_bounds_roots(image))
         roots.update(game_animated_widget_roots(image))
         roots.update(game_widget_setup_roots(image))
+        roots.update(game_widget_member_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
