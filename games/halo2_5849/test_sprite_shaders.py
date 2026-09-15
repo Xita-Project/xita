@@ -89,6 +89,13 @@ class SpritePreparation(unittest.TestCase):
         screen,uv,color=transformed(vertices,c)
         np.testing.assert_array_equal(screen,vertices[:,0,:2]);np.testing.assert_array_equal(uv,vertices[:,1,:2])
         np.testing.assert_array_equal(color,vertices[:,2])
+        saved_uv=vertices[:,1].copy();vertices[:,1,:2]=0
+        np.testing.assert_array_equal(transformed(vertices,c)[1],np.zeros((4,2)))
+        # The constant coordinate must reach the ordinary clamp sampler; a
+        # nonuniform synthetic image distinguishes it from a replacement color.
+        image=np.arange(4*4*4).reshape(4,4,4)/63
+        np.testing.assert_array_equal(sample(image,np.zeros(4),np.zeros(4)),np.tile(image[0,0],(4,1)))
+        vertices[:,1]=saved_uv
         c[174,2:]=[.125,-.25]
         np.testing.assert_array_equal(transformed(vertices,c)[1],vertices[:,1,:2]+[.125,-.25])
 

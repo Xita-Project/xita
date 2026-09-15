@@ -57,8 +57,8 @@ def transformed(vertices,c):
 
 
 def fixture(prepared,test):
-    width=8 if test in (12,13)else 1 if test==15 else 1024
-    height=1 if test in (12,15)else 1024 if test==13 else 4 if test==14 else 8
+    width=4 if test>=16 else 8 if test in (12,13)else 1 if test==15 else 1024
+    height=4 if test>=16 else 1 if test in (12,15)else 1024 if test==13 else 4 if test==14 else 8
     vertices=np.fromfile(prepared/'sprite.vertices.bin',dtype='<f4').reshape(4,3,4).copy()
     c=np.fromfile(prepared/'sprite.vertex-constants.bin',dtype='<f4').reshape(178,4).copy()
     factors=np.fromfile(prepared/'sprite.constants.bin',dtype='<f4').reshape(18,4).copy()
@@ -72,7 +72,11 @@ def fixture(prepared,test):
         factors[0]=[.25,.5,.75,.8]
     if test==10:c[177-10,3]+=np.float32(.05);c[178-10,3]-=np.float32(1/30)
     if test==11:c[184-10,2]+=np.float32(.125);c[184-10,3]-=np.float32(.25)
-    data=(prepared/'sprite.texture.bin').read_bytes()if test<2 else synthetic_blocks(width,height)
+    if test>=16:vertices[:,1,:2]=0
+    if test==17:vertices[:,2,:3]=0
+    if test==18:vertices[:,2]=np.array([64,128,192,128])/255
+    if test==19:vertices[:,2,3]=0
+    data=(prepared/'sprite.constant.texture.bin').read_bytes()if test>=16 else (prepared/'sprite.texture.bin').read_bytes()if test<2 else synthetic_blocks(width,height)
     return vertices,c,factors,decode_bc2(data,width,height)
 
 
@@ -83,11 +87,12 @@ def read_rgba(path,width,height):
     return np.stack([(words>>shift)&255 for shift in (16,8,0,24)],axis=-1).astype(int)
 
 
-def compare(prepared,results,source_probe=False,point_results=None,measured_sources=None):
+def compare(prepared,results,source_probe=False,point_results=None,measured_sources=None,constant_uv=False):
     y,x=np.indices((480,640))
     destination=np.stack([(x*3+y*17)&255,(x*11+y*13)&255,(x*7+y*5)&255,(x*19+y*23)&255],axis=-1).astype(float)
     reports=[]
-    for test in range(16):
+    tests=range(16,20)if constant_uv else range(16)
+    for test in tests:
         vertices,c,factors,image=fixture(prepared,test)
         if point_results:
             point={0:0,1:0,12:2,13:3,14:4,15:5}.get(test,1)
@@ -120,11 +125,11 @@ def compare(prepared,results,source_probe=False,point_results=None,measured_sour
             destination_alpha_exact=bool(np.array_equal(actual[...,3],destination[...,3]))if not source_probe else None,
             changed=int(np.any(actual!=destination,axis=-1).sum())))
     prefix='sprite-probe-source'if source_probe else'sprite-probe'
-    winding=(results/f'{prefix}-3.bin').read_bytes()==(results/f'{prefix}-5.bin').read_bytes()
-    return dict(passed=bool(winding and all(not r['outside_1']and r['unchanged_outside']and
+    winding=None if constant_uv else (results/f'{prefix}-3.bin').read_bytes()==(results/f'{prefix}-5.bin').read_bytes()
+    return dict(passed=bool((constant_uv or winding) and all(not r['outside_1']and r['unchanged_outside']and
                  (source_probe or r['destination_alpha_exact'])for r in reports)),
         reference='independent original DPH/viewport, normalized BC2, bilinear/projected UV, vertex color, staged clamps and UCHAR4 source blend',
-        source_probe=source_probe,pixels=16*640*480,unculled_reverse_identical=winding,fixtures=reports,
+        source_probe=source_probe,constant_uv=constant_uv,pixels=len(tests)*640*480,unculled_reverse_identical=winding,fixtures=reports,
         inputs={f.name:hashlib.sha256(f.read_bytes()).hexdigest()for f in prepared.glob('*.bin')})
 
 
@@ -162,8 +167,9 @@ if __name__=='__main__':
     ap=argparse.ArgumentParser(description=__doc__)
     for name in ('prepared','results'):ap.add_argument('--'+name,type=Path,required=True)
     ap.add_argument('--source-probe',action='store_true')
+    ap.add_argument('--constant-uv',action='store_true')
     ap.add_argument('--point-results',type=Path);ap.add_argument('--source-results',type=Path);a=ap.parse_args()
-    if bool(a.point_results)!=bool(a.source_results) or (a.source_probe and a.point_results):
+    if bool(a.point_results)!=bool(a.source_results) or ((a.source_probe or a.constant_uv) and a.point_results):
         ap.error('staged validation requires both point/source results and no source-probe switch')
-    report=staged_compare(a.prepared,a.results,a.source_results,a.point_results)if a.point_results else compare(a.prepared,a.results,a.source_probe)
+    report=staged_compare(a.prepared,a.results,a.source_results,a.point_results)if a.point_results else compare(a.prepared,a.results,a.source_probe,constant_uv=a.constant_uv)
     print(json.dumps(report,indent=2));sys.exit(0 if report['passed']else 1)

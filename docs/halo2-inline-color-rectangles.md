@@ -2,7 +2,7 @@
 
 The opt-in `SPRITE_RENDER=1` consumer connects the [native196 GPU proof](halo2-packed-color-probe.md) to original inline commands. It requires `LUMA_RENDER=1`. Owned shader programs, reference data and diagnostic packages remain private; the package embeds owned game image/code and must not be uploaded as a distributable release.
 
-Admission is deliberately bounded: original `BEGIN QUADS` (8), exactly twenty non-increasing `INLINE_ARRAY` (0x1818) words and `END`. Each of four vertices is float2 position, float2 UV and normalized little-endian BGRA color. The supported geometry is an axis-aligned clockwise rectangle in coordinate range −2048..2048, full normalized UV corners and equal packed colors at all four vertices. It uses the exact owned 21-slot program, constant bank, setup validity and pipeline from native196. Other geometry, varying colors, depth/stencil, alpha tests, texture routes or combiner states reject.
+Admission is deliberately bounded: original `BEGIN QUADS` (8), exactly twenty non-increasing `INLINE_ARRAY` (0x1818) words and `END`. Each of four vertices is float2 position, float2 UV and normalized little-endian BGRA color. The supported geometry is an axis-aligned clockwise rectangle in coordinate range −2048..2048, full normalized UV corners (or the later validated all-zero UV pairs) and equal packed colors at all four vertices. It uses the exact owned 21-slot program, constant bank, setup validity and pipeline from native196. Other geometry, varying colors, depth/stencil, alpha tests, texture routes or combiner states reject.
 
 Texture0 is a single-level power-of-two BC2 image, at most 1024 per axis and 8192 compressed bytes. A separate rendering view reader validates its complete DMA read span; existing exact 8×8 readers and the diagnostic snapshot reader keep their prior restrictions. Texture stages whose values cannot reach the final output and disabled depth do not authorize memory access. Source and destination must have disjoint physical and returned host spans. The full 640×480 ARGB destination requires both read and write permissions because blending reads its previous RGB.
 
@@ -27,3 +27,5 @@ python3 drive_startup.py 197-replay native-197-artifacts
 ```
 
 The helper preserves the previous private cache; the original game performs the new cache copy. Do not reuse another running emulator's lab or copy generated artifacts into Git.
+
+The subsequent all-zero UV route and native200 evidence are documented in [constant texture coordinates](halo2-constant-uv.md).

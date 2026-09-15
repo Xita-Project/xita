@@ -13,6 +13,9 @@ unsigned int _newlib_heap_size_user = 4 * 1024 * 1024;
 #ifndef H2_SPRITE_SOURCE_PROBE
 #define H2_SPRITE_SOURCE_PROBE 0
 #endif
+#ifndef H2_SPRITE_CONSTANT_PROBE
+#define H2_SPRITE_CONSTANT_PROBE 0
+#endif
 #define CHECK(x) do { int err=(x); if(err<0){sceClibPrintf("[sprite-probe] FAIL %s = %08X\n",#x,err);sceKernelExitProcess(1);} }while(0)
 #define REQUIRE(x) do { if(!(x)){sceClibPrintf("[sprite-probe] FAIL %s\n",#x);sceKernelExitProcess(1);} }while(0)
 static void *alloc(unsigned size, int kind, unsigned *offset)
@@ -74,6 +77,7 @@ int main(void)
     REQUIRE(sceGxmProgramParameterGetArraySize(uniform)==18);
     float *constants=load("app0:sprite.constants.bin",72*4),*original_vertices=load("app0:sprite.vertices.bin",4*48);
     uint8_t *original_texture=load("app0:sprite.texture.bin",8192);
+    uint8_t *constant_texture=H2_SPRITE_CONSTANT_PROBE?load("app0:sprite.constant.texture.bin",16):NULL;
     const SceGxmProgramParameter *vc=parameter(vp,"c");REQUIRE(sceGxmProgramParameterGetArraySize(vc)==178);
     float *original_vc=load("app0:sprite.vertex-constants.bin",712*4);
     float *vertices=alloc(4096,0,NULL);uint16_t *indices=alloc(4096,0,NULL);
@@ -89,12 +93,13 @@ int main(void)
     SceGxmTexture copytex;CHECK(sceGxmTextureInitLinear(&copytex,destination,SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,640,480,1));
     CHECK(sceGxmTextureSetMinFilter(&copytex,SCE_GXM_TEXTURE_FILTER_POINT));CHECK(sceGxmTextureSetMagFilter(&copytex,SCE_GXM_TEXTURE_FILTER_POINT));
     CHECK(sceGxmTextureSetUAddrMode(&copytex,SCE_GXM_TEXTURE_ADDR_CLAMP));CHECK(sceGxmTextureSetVAddrMode(&copytex,SCE_GXM_TEXTURE_ADDR_CLAMP));
-    for(unsigned test=0;test<16;++test){
-        unsigned width=test==12||test==13?8:test==15?1:1024;
-        unsigned height=test==12||test==15?1:test==13?1024:test==14?4:8;
+    for(unsigned test=H2_SPRITE_CONSTANT_PROBE?16:0;test<(H2_SPRITE_CONSTANT_PROBE?20:16);++test){
+        unsigned width=test>=16?4:test==12||test==13?8:test==15?1:1024;
+        unsigned height=test>=16?4:test==12||test==15?1:test==13?1024:test==14?4:8;
         unsigned blocks=((width+3)/4)*((height+3)/4),bytes=blocks*16;
         uint8_t rows[8192];
-        if(test<2)memcpy(rows,original_texture,8192);
+        if(test>=16)memcpy(rows,constant_texture,16);
+        else if(test<2)memcpy(rows,original_texture,8192);
         else for(unsigned b=0;b<blocks;++b){
             uint64_t alpha=0;uint32_t selectors=0;
             for(unsigned i=0;i<16;++i){alpha|=(uint64_t)((b*3+i)%16)<<(i*4);selectors|=((i+b)%4)<<(i*2);}
@@ -139,6 +144,10 @@ int main(void)
                 if(test==6){a[4]+=.25f/width;a[5]+=.25f/height;}
                 if(test==7)a[11]=0;
                 if(test==8){a[8]=v==1||v==2?1:0;a[9]=v>=2?1:0;a[10]=64.0f/255;a[11]=128.0f/255;}
+                if(test>=16){a[4]=a[5]=0;}
+                if(test==17){a[8]=a[9]=a[10]=0;}
+                if(test==18){a[8]=64.0f/255;a[9]=128.0f/255;a[10]=192.0f/255;a[11]=128.0f/255;}
+                if(test==19){a[11]=0;}
             }
             if(test==8){factors[0]=.25f;factors[1]=.5f;factors[2]=.75f;factors[3]=.8f;}
             if(test==10){vconstants[(177-10)*4+3]+=.05f;vconstants[(178-10)*4+3]-=1.0f/30;}
@@ -159,6 +168,6 @@ int main(void)
         char path[128];snprintf(path,sizeof path,H2_SPRITE_SOURCE_PROBE?"ux0:data/xita-halo2/sprite-probe-source-%u.bin":"ux0:data/xita-halo2/sprite-probe-%u.bin",test);
         FILE *f=fopen(path,"wb");REQUIRE(f);REQUIRE(fwrite(target,4,640*480,f)==640*480);REQUIRE(!fclose(f));
     }
-    sceClibPrintf("[sprite-probe] complete; sixteen captured/synthetic fixtures, no guest draw or menu\n");
+    sceClibPrintf("[sprite-probe] complete; %s captured/synthetic fixtures, no guest draw or menu\n",H2_SPRITE_CONSTANT_PROBE?"four constant-UV":"sixteen");
     sceKernelExitProcess(0);return 0;
 }

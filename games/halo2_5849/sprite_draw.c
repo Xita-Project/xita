@@ -70,17 +70,20 @@ static float as_float(uint32_t value)
 { float f; memcpy(&f,&value,4); return f; }
 static int rectangle(const h2_sprite_draw *q, h2_sprite_vertex vertices[4])
 {
-    float xy[4][2];
+    float xy[4][2]; int corners=1, zero_uv=1;
     for (unsigned v=0;v<4;++v) {
         const uint32_t *w=q->words+v*5;
         for (unsigned k=0;k<2;++k) {
             xy[v][k]=as_float(w[k]);
             if (!(xy[v][k] >= -2048 && xy[v][k] <= 2048)) return 0;
         }
-        /* The audited path uses a complete normalized rectangle and constant
-         * packed color; varying/perspective attributes remain unsupported. */
+        /* Support the original full-texture corners or all-positive-zero UVs.
+         * Do not combine these patterns per vertex or substitute a solid fill:
+         * the original shader still samples texture0 and multiplies its color. */
         if (w[2] != (v==1||v==2 ? 0x3F800000u : 0) ||
-            w[3] != (v>=2 ? 0x3F800000u : 0) || w[4] != q->words[4]) return 0;
+            w[3] != (v>=2 ? 0x3F800000u : 0)) corners=0;
+        if (w[2] || w[3]) zero_uv=0;
+        if (w[4] != q->words[4]) return 0;
         for (unsigned a=0;a<2;++a) {
             memcpy(vertices[v].attribute[a],w+a*2,8);
             vertices[v].attribute[a][2]=0; vertices[v].attribute[a][3]=1;
@@ -88,7 +91,7 @@ static int rectangle(const h2_sprite_draw *q, h2_sprite_vertex vertices[4])
         static const unsigned shifts[]={16,8,0,24};
         for (unsigned k=0;k<4;++k) vertices[v].attribute[2][k]=((w[4]>>shifts[k])&255)/255.0f;
     }
-    return xy[0][0] < xy[1][0] && xy[0][1] < xy[3][1] &&
+    return (corners || zero_uv) && xy[0][0] < xy[1][0] && xy[0][1] < xy[3][1] &&
         xy[0][0]==xy[3][0] && xy[1][0]==xy[2][0] &&
         xy[0][1]==xy[1][1] && xy[2][1]==xy[3][1];
 }

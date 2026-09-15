@@ -29,6 +29,7 @@ typedef struct h2_sprite_draw {
     void *opaque;
 } h2_sprite_draw;
 /* Bounded float2/float2/UB_D3D inline rectangle, exact owned program/state,
+ * full normalized UV corners or four positive-zero pairs, uniform packed color,
  * one-level BC2 <=1024 per axis and <=8192 bytes. RGB-only commit after END
  * revalidation and successful staging; rejection preserves guest/state. */
 int h2_sprite_method(h2_sprite_draw *, h2_command_state *, h2_kelvin_clear *,

@@ -13,6 +13,7 @@ static h2_kelvin_clear c;
 static h2_sprite_draw q;
 static h2_sprite_contract reference;
 static unsigned reads, maps, renders, attachments;
+static unsigned expected_texture_bytes;
 static int read_failure, map_failure, alias_map, overflow_map, render_failure, render_alias, attachment_failure, readonly;
 static int read_word(void *opaque, uint32_t offset, uint32_t *word)
 {
@@ -43,8 +44,8 @@ static int attachment(void *opaque, uint32_t address, uint32_t bytes, uint32_t p
 static const uint32_t *render(void *opaque, const h2_sprite_request *r)
 {
     assert(!opaque); ++renders;
-    assert(r->texture0.blocks == ram + 4096 && r->texture0.bytes == IMAGE_BYTES);
-    assert(!memcmp(r->texture0.blocks, prior + 4096, IMAGE_BYTES));
+    assert(r->texture0.blocks == ram + 4096 && r->texture0.bytes == expected_texture_bytes);
+    assert(!memcmp(r->texture0.blocks, prior + 4096, expected_texture_bytes));
     assert(r->destination == ram + c.color_offset);
     assert(!memcmp(r->destination, prior + c.color_offset, BYTES));
     for(unsigned v=0;v<4;++v) {
@@ -110,6 +111,7 @@ static void init(void)
     c.clip_horizontal=640u<<16;c.clip_vertical=480u<<16;
     q.contract=&reference;q.render=render;
     reads=maps=renders=attachments=0;
+    expected_texture_bytes=IMAGE_BYTES;
     read_failure=map_failure=alias_map=overflow_map=render_failure=render_alias=attachment_failure=readonly=0;
     memcpy(prior,ram,sizeof ram);
 }
@@ -180,6 +182,31 @@ int main(void)
     for(unsigned i=0;i<sizeof bad/sizeof *bad;++i){init();begin();reject(0,0x1818,bad[i]);}
     init();begin();vertices(0);q.words[0]=q.words[5];reject(0,0x17FC,0);assert(!renders);
     init();begin();vertices(0);q.words[2]=0x3F000000;reject(0,0x17FC,0);assert(!renders);
+    /* The constant-UV route preserves all original attribute lanes, texture
+     * ownership and RGB-only commits. It cannot become a replacement fill. */
+    const uint32_t colors[]={0xFFFFFFFF,0xFF000000,0x804080C0,0x00FFFFFF};
+    for(unsigned color=0;color<4;++color){
+        init();s.setup[0x1B04/4]=0x02210E29;expected_texture_bytes=16;
+        begin();vertices(0);
+        for(unsigned v=0;v<4;++v){q.words[v*5+2]=q.words[v*5+3]=0;q.words[v*5+4]=colors[color];}
+        assert(h2_sprite_method(&q,&s,&c,0,0x17FC,0)&&renders==1&&!q.active&&q.completed==1);
+        for(unsigned i=0;i<BYTES;i+=4)memcpy(prior+c.color_offset+i,(uint8_t *)pixels+i,3);
+        assert(!memcmp(ram,prior,sizeof ram));
+    }
+    /* All intermediate mixtures of the four nonzero corner words reject. */
+    const unsigned corner_words[]={7,12,13,18};
+    for(unsigned mask=1;mask<15;++mask){
+        init();begin();vertices(0);
+        for(unsigned i=0;i<4;++i)if(!(mask&(1u<<i)))q.words[corner_words[i]]=0;
+        reject(0,0x17FC,0);assert(!renders);
+    }
+    const uint32_t bad_uv[]={0x80000000,0x3F000000,0x3F800000,0x7FC00000};
+    for(unsigned i=0;i<4;++i){
+        init();begin();vertices(0);for(unsigned v=0;v<4;++v)q.words[v*5+2]=q.words[v*5+3]=0;
+        q.words[2]=bad_uv[i];reject(0,0x17FC,0);assert(!renders);
+    }
+    init();begin();vertices(0);for(unsigned v=0;v<4;++v)q.words[v*5+2]=q.words[v*5+3]=0;
+    render_failure=1;reject(0,0x17FC,0);assert(renders==1);
     init();q.completed=UINT64_MAX;reject(0,0x17FC,8);assert(!maps);
     init();begin();vertices(0);q.completed=UINT64_MAX;reject(0,0x17FC,0);assert(!renders);
     init();begin();vertices(0);reject(0,0x1818,0);
