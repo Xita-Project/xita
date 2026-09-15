@@ -104,6 +104,15 @@ GAME_DESCRIPTOR_OBJECT_WALKS = (
     (0x1090D0, 105, "b8d52ae03c3f06fe935b51d94ecab2e378e3515ee6492b65fa8b82fbaac06ab1", 0x70),
     (0x109140, 110, "6e5355dcb984bc4ce4fdb2264bbedb8ffcae2f46b3b5afb73279b7d4e1438a0e", 0x74),
 )
+GAME_WIDGET_SETUP_CALLS = (
+    (0x234EBC, 208, "c12cfa2dbb1b69c3c008f635f20ec8556aa8392ba58d2fdb48ec8e1e4ff45f68"),
+    (0x22F15D, 85, "e616c1b64117e8357f37096141811f09fa06471be2d9a99e4d5588674e8861ba"),
+    (0x22F5CA, 168, "ebb1100ef959dba20f749508f3b127b1dc39d1f7cd6a4c4fc4035d3c51b34dd4"),
+    (0x22F1F7, 149, "7588db8a5b167ff350dd8cc9c7b36bdd480797264bfe5d1f99ffbc2d7cda0844"),
+    (0x2B27F9, 8, "7235e86b8532503638735fef23dfb7b28a422c493facd9cceb27e3b188a57505"),
+    (0x22F3B5, 275, "48e521f6e7d1644313dd1b57378f21ac9ad33bd737211fc450231640d2e9c98c"),
+    (0x230427, 42, "cc111adfdee774f674b04ec5719079035c1676d7f1e08ae067bcf963b237b899"),
+)
 GAME_ANIMATED_WIDGET_CALLS = (
     (0x2B01EB, 317, "c99e6dd724f711f9504429692fa593a048427debfa09be3bbbec8bbe59c07076"),
     (0x22E391, 35, "52e55eed8eb8d153931042d427dc9039b26a0e1b032d0122c434f7e7b1d398bf"),
@@ -583,6 +592,19 @@ def descriptor_child_field_roots(image, offsets):
                 roots.add(target)
         else:
             raise ValueError("Halo 2 descriptor child array is not terminated before its link")
+    return roots
+
+
+def game_widget_setup_roots(image):
+    """Native176: original incoming-widget setup and bound event dispatch."""
+    for address, length, digest in GAME_WIDGET_SETUP_CALLS:
+        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+            raise ValueError("Halo 2 widget setup fingerprint mismatch")
+    # Derived table ends where its separately fingerprinted base table starts.
+    roots = _code_vtable_roots(image, 0x4587D0, 0x458840)
+    if image.u32(0x45BDB4) != 0:
+        raise ValueError("Halo 2 widget setup event boundary mismatch")
+    roots.update(_code_vtable_roots(image, 0x45BDB0, 0x45BDB4))
     return roots
 
 
@@ -1102,6 +1124,7 @@ def main():
         roots.update(game_observed_type_query_roots(image))
         roots.update(game_two_point_bounds_roots(image))
         roots.update(game_animated_widget_roots(image))
+        roots.update(game_widget_setup_roots(image))
         roots.update(game_singleton_creator_roots(image))
         # Native42: 0x66305 calls [ [0x477058] + 0x10 ]; the pinned record
         # is 0x467140, whose callback is 0x662E0 (ten-byte original body).
