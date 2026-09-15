@@ -24,6 +24,7 @@
 #include "xv_visibility.h"
 #include "xv_frame_slots.h"
 #include "xv_vertex_upload.h"
+#include "xv_vertex_prepare.h"
 #include "xv_gpu_upload.h"
 #include "xv_texture_alpha.h"
 
@@ -401,6 +402,7 @@ static void rt_shutdown(void);
 void xv_d3d_shutdown(void)
 {
     frame_constants_shutdown();
+    xv_vertex_prepare_shutdown();
     xv_vertex_upload_shutdown();
     if (g_visibility_memory) {
         sceGxmUnmapMemory(g_visibility_memory);
@@ -1432,7 +1434,11 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     }
 
     xv_draw_profile_step(XV_DRAW_PROGRAM, &profile);
-    /* Snapshot raw streams after applying the existing base-vertex offset. */
+    /* Resolve the complete source loan before handing upload-pool ownership to
+     * core 0. Guest execution cannot resume until finish below. */
+    _Static_assert(XV_MAX_STREAMS <= XV_VERTEX_PREPARE_STREAMS, "stream batch capacity");
+    xv_vertex_prepare_batch prep = {.slot=g_build_frame % XV_NUM_LISTS};
+    unsigned prep_stream[XV_VERTEX_PREPARE_STREAMS];
     for (unsigned s = 0; s < d->nstreams; ++s) {
         if (immediate && s == 0) { c->streams[s] = immediate; continue; }
         if (!S.stream_guest[s]) {
@@ -1447,19 +1453,48 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         const uint8_t *p = (const uint8_t *)xv_guest_ptr(0x80000000u | vb->Data) + base_vertex * stride;
         const xv_vertex_refs *refs = g_draw_vertex_refs_valid &&
             vertex_reference_layout(d, s, stride) ? &g_draw_vertex_refs : NULL;
-        if (!stride || nverts > UINT32_MAX / stride ||
-            !(c->streams[s] = refs ? xv_vertex_upload_referenced(g_build_frame % XV_NUM_LISTS,
-                p, nverts * stride, stride, refs) :
-                xv_vertex_upload(g_build_frame % XV_NUM_LISTS, p, nverts * stride))) {
+        if (!stride || nverts > UINT32_MAX / stride || prep.count==XV_VERTEX_PREPARE_STREAMS) {
             cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_attributes++;
             return;
         }
+        prep_stream[prep.count]=s;
+        prep.streams[prep.count++]=(xv_vertex_prepare_stream){
+            .source=p,.bytes=nverts*stride,.stride=stride,.refs=refs};
         if (trace_frame()) XV_LOG("[hist] stream %u vb %08X common %08X data %08X vertices %u stride %u\n",
             s, S.stream_guest[s], vb->Common, vb->Data, nverts, stride);
         /* Only the owned upload is published; the cached source stays on CPU. */
     }
     if (indices)
         xv_gpu_flush(indices, count * 2);
+    xv_vertex_prepare_begin(&prep);
+    xv_draw_profile_step(XV_DRAW_STREAMS, &profile);
+    /* constants: snapshot the window this program reads.  Consecutive draws with unchanged c[] share one
+     * snapshot (Halo draws hundreds of BSP pieces per frame with full-window programs: 768 floats each) */
+    cmdlist_t *l = cur_list();
+    if (v->vs.p_c) {
+        if (l->nconsts && l->last_gen == S.vsc_gen && l->last_base == d->c_base && l->last_n == d->c_count) {
+            c->const_off = l->last_off; c->const_n = d->c_count;
+        } else if (l->nconsts + d->c_count * 4 <= XV_CONST_POOL) {
+            c->const_off = l->nconsts / 4;
+            c->const_n = d->c_count;
+            xv_constant_window_copy(&l->consts[l->nconsts], S.vsc, d->c_base, d->c_count);
+            l->nconsts += d->c_count * 4u;
+            l->last_gen = S.vsc_gen; l->last_off = c->const_off; l->last_n = d->c_count; l->last_base = d->c_base;
+        } else {
+            l->const_dropped++;               /* rejected during replay; never reuse stale constants */
+        }
+    }
+
+    xv_draw_profile_step(XV_DRAW_CONSTANTS, &profile);
+    unsigned texok = record_textures(c, d, immediate != NULL);
+    xv_draw_profile_step(XV_DRAW_TEXTURES, &profile);
+    if (!xv_vertex_prepare_finish(&prep)) {
+        cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_attributes++;
+        return;
+    }
+    for (unsigned i=0;i<prep.count;i++) c->streams[prep_stream[i]]=prep.streams[i].result;
+    /* This stage now measures owner setup plus its remaining join, not worker
+     * execution. The worker reports its overlapping duration separately. */
     xv_draw_profile_step(XV_DRAW_STREAMS, &profile);
     if (trace_frame()) {
         /* Opt-in capture for offline skin/mesh diagnosis. Defaults to the first
@@ -1573,26 +1608,6 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     }
 
     xv_draw_profile_step(XV_DRAW_DIAGNOSTICS, &profile);
-    /* constants: snapshot the window this program reads.  Consecutive draws with unchanged c[] share one
-     * snapshot (Halo draws hundreds of BSP pieces per frame with full-window programs: 768 floats each) */
-    cmdlist_t *l = cur_list();
-    if (v->vs.p_c) {
-        if (l->nconsts && l->last_gen == S.vsc_gen && l->last_base == d->c_base && l->last_n == d->c_count) {
-            c->const_off = l->last_off; c->const_n = d->c_count;
-        } else if (l->nconsts + d->c_count * 4 <= XV_CONST_POOL) {
-            c->const_off = l->nconsts / 4;
-            c->const_n = d->c_count;
-            xv_constant_window_copy(&l->consts[l->nconsts], S.vsc, d->c_base, d->c_count);
-            l->nconsts += d->c_count * 4u;
-            l->last_gen = S.vsc_gen; l->last_off = c->const_off; l->last_n = d->c_count; l->last_base = d->c_base;
-        } else {
-            l->const_dropped++;               /* rejected during replay; never reuse stale constants */
-        }
-    }
-
-    xv_draw_profile_step(XV_DRAW_CONSTANTS, &profile);
-    unsigned texok = record_textures(c, d, immediate != NULL);
-    xv_draw_profile_step(XV_DRAW_TEXTURES, &profile);
     if (trace_frame()) {
         XV_LOG("[stencil] cmd %u vs %s enable %u func %u ref %u mask %02X/%02X ops %u/%u/%u\n",
             cur_list()->ncmds-1, d->gxp, c->stencil.enabled, c->stencil.func,

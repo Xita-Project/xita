@@ -109,3 +109,15 @@ Private evidence for this session is under
 `2026-09-13-worker-sizing/validation/hardware-updater-20260914T122650Z`.
 The YouTube post text and attachments are retained there in `hl2-port-research`;
 game assets, screenshots, logs and executable artifacts remain outside Git.
+
+## September 15 continuation
+
+The object-worker experiment remains active, but the measured scene-rendering
+path is still the larger cost. The next implementation is
+[vertex preparation overlapped with material preparation](vertex-preparation-overlap-20260915.md).
+It moves exact vertex comparisons and snapshot creation to core 0 during an
+explicit source loan, then joins before guest execution resumes. Whole material
+callbacks remain ordered because they write shared shader and device state.
+Tune dispatch from batch sizes and complete-frame comparisons; core activity
+alone cannot demonstrate a gain. Hardware remains on its last verified build
+until the remote service recovers and the failed-run logs can be preserved.

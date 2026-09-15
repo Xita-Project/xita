@@ -29,6 +29,8 @@ void xv_draw_profile_step(enum xv_draw_stage stage, uint64_t *stamp)
 void xv_draw_profile_report(unsigned frames)
 {
     if (enabled <= 0 || !frames) return;
+    extern void xv_vertex_prepare_report(unsigned) __attribute__((weak));
+    if (xv_vertex_prepare_report) xv_vertex_prepare_report(frames);
     extern void xv_d3d_prep_cache_report(unsigned) __attribute__((weak));
     if (xv_d3d_prep_cache_report) xv_d3d_prep_cache_report(frames);
     double scale = 1.0 / (1000.0 * frames);
