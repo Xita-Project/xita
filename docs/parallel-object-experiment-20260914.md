@@ -253,3 +253,27 @@ submit graphics or allocate memory. The ordinary implementation and its return
 convention are retained. A test checks quiescent header mutation, inputs, result
 and stack cleanup alongside simultaneous event, query and cache-yield requests.
 This new candidate still needs gameplay validation before hardware deployment.
+
+
+Runtime `2208b4b318c85bb59097efe6b2959fa06e74f494c5556d5d260b260808e484f1`
+completes turning, walking and one charged shot. Repeated charges expose the
+sibling bitmap-cache wait at `325C0`: the captured guest stack contains `12AA9`
+and `3268A`, under indirect callback `C3A00`. This loop consumes the same file
+request queue and completion bytes as the admitted sound-cache path. The next
+patch admits that exact second return address and guards the full 268-byte
+bitmap-cache transaction, including request allocation/publication. Other yield
+calls remain rejected. Tests alternate sound/bitmap callsites with registration,
+query and event traffic. This is still a candidate, without a hardware FPS claim.
+
+
+Bitmap candidate `43857d6b0837fadaf9884aef1a09b77e02b91c8345927ebdcb88e94243b86c0e`
+passes 1,200 calls through the original bitmap-cache body per 2/1/0-worker
+configuration, with 32 unique request publications/completions and correct
+returned headers. The completion producer is synthetic; the wait/transaction
+body and worker pool are production code. ThreadSanitizer and AddressSanitizer/
+UndefinedBehaviorSanitizer pass, as do the mixed-service pool and exact-image
+hook checks. Blood Gulch loads, turning/walking and two charged shots complete.
+The third charge stops at `D3DVertexBuffer_Lock` (`1858D0`, return `116240`),
+inside impact-geometry preparation (`114D30`) under callback `C3A00`.
+This gives the next ownership boundary to address; it is not a hardware gain.
+The physical Vita still runs working slot A and has not received this candidate.

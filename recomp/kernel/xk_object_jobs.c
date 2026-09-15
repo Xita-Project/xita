@@ -416,7 +416,8 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
     if(address==0x1D675Cu) {fn(c);return;} /* stateless memory comparison */
     if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u)||!fn)
         xv_object_job_stop(c,address,"unsupported HLE");
-    if(address==0x1D6640u && (X_M32(c->r[4])!=0x12AA9u||X_M32(c->r[4]+4)!=0x32B60u))
+    if(address==0x1D6640u && (X_M32(c->r[4])!=0x12AA9u||
+        (X_M32(c->r[4]+4)!=0x32B60u&&X_M32(c->r[4]+4)!=0x3268Au)))
         xv_object_job_stop(c,address,"yield outside audited cache wait");
     if(c==&contexts[2]&&!active_workers) {
         if(address==0x1D6640u) {

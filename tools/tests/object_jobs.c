@@ -25,9 +25,9 @@ int xk_object_io_step(void)
     for(unsigned i=0;i<300;i++)io_seen[i]=writes[i];
     io_calls++;return 1;
 }
-static void submit_yield(xctx *c)
+static void submit_yield(xctx *c,unsigned caller)
 {
-    uint32_t sp=c->r[4];X_PUSH32(0x32B60u);X_PUSH32(0x12AA9u);
+    uint32_t sp=c->r[4];X_PUSH32(caller);X_PUSH32(0x12AA9u);
     extern void should_not_call_yield(xctx *);
     xv_object_job_hle(c,0x1D6640u,should_not_call_yield);
     assert(c->r[0]==0&&c->r[4]==sp-4);c->r[4]+=4;
@@ -110,12 +110,12 @@ void f_0008FB70(xctx *c)
         /* Hold the shared callback lock while parking for a real owner service.
          * The owner must not run a job that blocks on this same mutex. */
         submit_event(c,0x70000+id*8);
-        if(id%3==0)submit_yield(c);
+        if(id%3==0)submit_yield(c,0x32B60u);
         submit_query(c,id);
     }
     /* Requests can also arrive simultaneously, outside the shared lock. */
     submit_event(c,0x70004+id*8);
-    if(id%3==1)submit_yield(c);
+    if(id%3==1)submit_yield(c,0x3268Au);
     if(id%3==2)submit_register(c,id);
     __atomic_sub_fetch(&active,1,__ATOMIC_SEQ_CST);c->r[4]+=4;
 }
