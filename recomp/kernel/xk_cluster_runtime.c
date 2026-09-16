@@ -29,7 +29,7 @@ static struct {
     unsigned valid,invalidations;
     uint32_t bsp,projection,arena,image_lo,image_hi;
     unsigned char *ram,*image;uint32_t *pages;
-    Span visited[2],epoch,marker;unsigned visited_spans;
+    Span visited[2],epoch,marker;unsigned visited_spans,visited_bytes;
     uint64_t builds,failed,build_us,owned_bytes;
     unsigned last_invalidation;
 } batch;
@@ -108,6 +108,10 @@ void xv_cluster_runtime_begin(void)
     XvClusterSource source={batch.bsp,batch.projection,0x1eaf30,0x1f0a68};
     batch.snapshot=xv_cluster_snapshot_build(source_read,NULL,&source,1u<<20);
     if(!batch.snapshot)goto failed;
+    /* The validated traversal reads stamps only for clusters in this BSP.
+     * Keep the full backing spans for alias/page validation, but capture and
+     * compare only the live entries. No epoch wrap clears unrelated entries. */
+    batch.visited_bytes=4*xv_cluster_snapshot_geometry(batch.snapshot)->cluster_count;
     batch.owned_bytes+=xv_cluster_snapshot_bytes(batch.snapshot);
     batch.build_us+=xk_os_monotonic_us()-begin;
     fesetenv(&owner_fp);
@@ -138,11 +142,13 @@ static int read_input(Lane *v,uint32_t address,void *out,unsigned bytes)
     return 1;
 }
 static void copy_visited(uint32_t out[256])
-{unsigned done=0;for(unsigned i=0;i<batch.visited_spans;i++){
-    memcpy((unsigned char*)out+done,batch.visited[i].pointer,batch.visited[i].bytes);done+=batch.visited[i].bytes;}}
+{unsigned done=0;for(unsigned i=0;done<batch.visited_bytes;i++){
+    unsigned n=batch.visited[i].bytes;
+    if(n>batch.visited_bytes-done)n=batch.visited_bytes-done;
+    memcpy((unsigned char*)out+done,batch.visited[i].pointer,n);done+=n;}}
 /* These captures and page fragments are word-aligned and have whole-word sizes.
  * Four-word equality groups avoid the generic SDK comparison's per-word branch
- * and byte-ordering fallback while checking context and 256 visited stamps. */
+ * and byte-ordering fallback while checking context and live visited stamps. */
 static int same_words(const void *left,const void *right,unsigned bytes)
 {
     const uint32_t *a=left,*b=right;unsigned n=bytes/4,i=0;
@@ -154,10 +160,11 @@ static int same_words(const void *left,const void *right,unsigned bytes)
 static int visited_current(const Lane *v)
 {
     unsigned done=0;
-    for(unsigned i=0;i<batch.visited_spans;i++){
+    for(unsigned i=0;done<batch.visited_bytes;i++){
         const Span *s=&batch.visited[i];
-        if(pointer(s->address,s->bytes,0)!=s->pointer||!same_words(s->pointer,(const unsigned char*)v->visited+done,s->bytes))return 0;
-        done+=s->bytes;
+        unsigned n=s->bytes;if(n>batch.visited_bytes-done)n=batch.visited_bytes-done;
+        if(pointer(s->address,s->bytes,0)!=s->pointer||!same_words(s->pointer,(const unsigned char*)v->visited+done,n))return 0;
+        done+=n;
     }
     return 1;
 }

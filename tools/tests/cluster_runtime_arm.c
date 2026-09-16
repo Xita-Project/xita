@@ -14,6 +14,7 @@ enum { RAM=4<<20,ARENA=8<<20,BSP=0x10000,COLL=0x11000,PLANES=0x12000,
 uint8_t *g_xram,*g_img_base;uint32_t *g_xpt;
 int xv_phase_enabled;
 unsigned arm_admitted,arm_allocations,arm_allocated_bytes;
+unsigned arm_arena_bytes=ARENA;
 xctx *const arm_context_ptr=&contexts[0];
 const unsigned layout[]={sizeof(xctx),offsetof(xctx,r),offsetof(xctx,st),offsetof(xctx,fsp),
  offsetof(xctx,fsw),offsetof(xctx,fcw),offsetof(xctx,preempt),offsetof(xctx,f_kind),offsetof(xctx,f_bits),offsetof(xctx,xmm)};
@@ -76,7 +77,7 @@ void arm_candidate(void){query_enabled=1;f_00056670(&contexts[0]);}
 void arm_snapshot(void);
 void arm_finish(void){xv_cluster_runtime_end();}
 void xv_worker_query_test_ready(xctx *c,unsigned lane){(void)c;(void)lane;arm_admitted++;}
-unsigned xk_mem_arena_size(void){return ARENA;}
+unsigned xk_mem_arena_size(void){return arm_arena_bytes;}
 uint32_t xk_mem_image_lo(void){return 0;}
 uint32_t xk_mem_image_hi(void){return RAM;}
 uint64_t xk_os_monotonic_us(void){return 0;}

@@ -116,8 +116,34 @@ accounts for **10.3% of calls and 57.3% of counted loop backedges**. This suppor
 investigating selective acceleration and reducing adapter overhead. It does not
 establish CPU-time shares: backedges are not cycles, and output size is known
 only after traversal. An inexpensive eligibility rule still needs evidence.
-The typed adapter remains absent from the installed executable. Other views,
-campaign, driving and combat remain unmeasured with this census.
+The typed adapter remains absent from the installed executable. Other map
+locations, campaign, driving and combat remain unmeasured with this census.
+
+### Ground-facing follow-up
+
+A second same-session sample, looking straight down in the same area with the
+same graphics settings, completes at **19.986 / 19.502 / 20.099 FPS** for
+observer Off/On/Off. Both camera checks pass within their respective trials;
+these are different views, not a before/after optimization comparison.
+
+The ground view records 7,215 queries in 120 measured frames. Normalize by
+elapsed time before interpreting the lower per-frame count:
+
+| View | Queries/frame | Queries/second while counting | Backedges/second |
+| --- | ---: | ---: | ---: |
+| Valley | 129.025 | 1,172.06 | 51,961 |
+| Ground | 60.125 | 1,172.56 | 50,991 |
+
+Spatial-query throughput per second is nearly unchanged while rendering twice
+as many frames. This is consistent with simulation work tied to elapsed game
+time; it does not measure simulation scheduling directly or establish its CPU
+cost. Adjacent 60-frame reports show roughly 194 draws/frame in the valley
+versus 40 looking down, and draw-HLE elapsed time of 12.8 versus 1.9 ms/frame.
+GPU completion latencies of about 55 and 45 ms overlap CPU work and must not be
+added to frame time. There is substantial view-dependent work outside these
+queries. Further critical-path profiling should cover world preparation and
+submission as well as the selective query replacement. Neither sample proves
+stable 20 FPS in ordinary valley gameplay, driving or campaign.
 
 ## Hardware comparison
 

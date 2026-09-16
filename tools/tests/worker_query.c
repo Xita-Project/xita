@@ -151,6 +151,8 @@ static void mutate(xctx *c,unsigned kind)
     case 6:X_IMG32(0x39be58)=COLL;break; /* simulated reset, discard only */
     case 7:g_xpt[(c->r[4]-4096)>>12]^=4096;break;
     case 8:c->fsp^=1;break;
+    case 9:w32(0x2d2fb0+4*6,101);break; /* last live stamp, first page */
+    case 10:w32(0x2d2fb0+4*30,101);break; /* last live stamp, second page */
     }
 }
 void xv_worker_query_test_ready(xctx *c,unsigned lane)
@@ -313,10 +315,11 @@ int main(int argc,char **argv)
     query_work_owner_test();
 #endif
 #ifdef XV_TYPED_CLUSTER_QUERY
-    unsigned cases=mode==0?168:mode==1?12:mode==2||mode==3?8:mode==7?6:1;
+    unsigned cases=mode==0?168:mode==1?12:mode==3?10:mode==2?8:mode==7?6:1;
     for(batch_case=0;batch_case<cases;batch_case++){
         unsigned sizes[]={1,7,65,256},caps[]={0,1,8,1024};
-        graph(mode==0?sizes[(batch_case/7)%4]:7,mode==0?caps[(batch_case/28)%4]:1024);
+        graph(mode==0?sizes[(batch_case/7)%4]:mode==3&&batch_case==9?31:7,
+              mode==0?caps[(batch_case/28)%4]:1024);
         if(mode==7)switch(batch_case){
         case 0:w32(0x1f0a68,1);break; /* modified constant */
         case 1:w32(BSP+0xb0,0);break; /* missing collision block */
@@ -345,7 +348,7 @@ int main(int argc,char **argv)
     if(mode==1)assert(!ready_count);
     if(mode==3)assert(mutation_count==
 #ifdef XV_TYPED_CLUSTER_QUERY
-        8
+        10
 #else
         16
 #endif

@@ -158,6 +158,12 @@ Off/On/Off is 9.345/9.084/9.350 FPS, about 2.9% added frame time while counting.
 This guides selective acceleration; backedges are not CPU-time shares. The
 typed adapter remains uninstalled and needs a cheap eligibility rule plus the
 source-lifetime audit before hardware deployment.
+The [map-cost follow-up](docs/query-adapter-map-cost-20260916.md) reduces stamp
+capture to the BSP's cluster count and passes 460 synthetic plus 960 owned-map
+complete ARM comparisons. Multi-cluster samples save instructions, but tiny
+queries still regress. A ground-facing physical trial reaches about 20 FPS with
+almost the same queries/second as the 9.35 FPS valley view; world preparation
+and submission must also be profiled. This is not an installed optimization gain.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)

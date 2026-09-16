@@ -112,7 +112,9 @@ def main():
     subprocess.run(command, check=True); commands.append(command)
     (a.out / 'commands.json').write_text(json.dumps(commands, indent=2) + '\n')
     m = RuntimeMachine(elf, a.profile); rows = []
-    specs = [(n, 1024, 0) for n in (1, 7, 31, 65, 256)] + [(7, 1024, t) for t in range(1, 7)]
+    # The live visited table crosses a page after entry 20. Include both sides
+    # and Blood Gulch's 30-cluster size, not just large synthetic traversals.
+    specs = [(n, 1024, 0) for n in (1, 7, 20, 21, 30, 31, 65, 256)] + [(7, 1024, t) for t in range(1, 7)]
     if not a.quick:
         specs += [(n, capacity, 0) for n in (7, 65, 256) for capacity in (0, 1, 8)]
     for n, capacity, tweak in specs:

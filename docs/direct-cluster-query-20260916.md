@@ -10,6 +10,11 @@ The [earlier guarded adapter](worker-query-adapter-20260916.md) remains off.
 This is a candidate for reducing measured world/light preparation, not a
 demonstrated frame-rate improvement.
 
+The [latest complete-call map tests](query-adapter-map-cost-20260916.md) reduce
+visited-stamp capture to the BSP size and cover actual Blood Gulch/Battle Creek
+geometry. Multi-cluster queries improve in instruction counts, but some small
+queries still regress; selective admission and the lifetime audit remain open.
+
 The [latest physical valley comparison](world-preparation-20260916.md#later-red-base-valley-capture)
 barely changes FPS with resolution despite earlier observed GPU completion.
 The phase trace identifies spatial polygon tests among the larger CPU targets.
@@ -278,7 +283,7 @@ admission, scheduler and hook, with a generated original reference kept private:
 | --- | --- |
 | ASan/UBSan original-versus-hook comparison | 336 exact full-context, memory and FP comparisons; 68 typed admissions after cheap-case bypasses |
 | Runtime disabled | 24 exact original-route comparisons; no typed admission |
-| Aliases / mutable-input conflicts / invalid sources | 16 / 8 / 12 comparisons preserving the original state on decline |
+| Aliases / mutable-input conflicts / invalid sources | 16 / 10 / 12 comparisons preserving the original state on decline, including last-live-stamp changes across a page boundary |
 | Concurrent list updates and removals | 128 typed queries across both workers; expected final epoch and list memberships |
 | Owner parking/service | Batch invalidated; original query remains usable afterward |
 | Owner service during private computation | Publication declined; caller context, scratch, epoch and marker remain unchanged |
