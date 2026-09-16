@@ -19,6 +19,9 @@ enum { RAM=4<<20,ARENA=8<<20,BSP=0x10000,COLL=0x11000,PLANES=0x12000,
 uint8_t *g_xram,*g_img_base;uint32_t *g_xpt;
 int xv_phase_enabled;
 static unsigned allocations,comparisons,ready_count,mutation_count;
+#ifdef XV_TYPED_CLUSTER_QUERY
+static unsigned batch_case;
+#endif
 static unsigned lane_seen[2],service_ready,service_done,park_ack;
 static unsigned query_held,query_tried;
 static pthread_barrier_t rendezvous;
@@ -48,7 +51,7 @@ static void clear(uint32_t a,unsigned n){for(unsigned i=0;i<n;i++)X_M8(a+i)=0;}
 static void graph(unsigned n,unsigned capacity)
 {
     clear(BSP,0x15c);clear(COLL,0x14);X_IMG32(0x39be58)=BSP;X_IMG32(0x39be50)=COLL;
-    w32(BSP+0xb4,COLL);w32(COLL+0x10,PLANES);
+    w32(BSP+0xb0,1);w32(BSP+0xb4,COLL);w32(COLL+0xc,1);w32(COLL+0x10,PLANES);
     w32(BSP+0x134,n);w32(BSP+0x138,CLUSTERS);w32(BSP+0x154,n-1);w32(BSP+0x158,PORTALS);
     float plane[]={0,0,1,0};put(PLANES,plane,sizeof plane);fp32(0x1f0a68,0);put(0x1eaf30,axes,24);
     for(unsigned k=0;k<n;k++){
@@ -100,7 +103,14 @@ void xv_worker_query_test_ready(xctx *c,unsigned lane)
 {
     assert(lane<2&&worker_lane()==(int)lane&&c==&contexts[lane]&&math_depth[lane]==1);
     ready_count++;lane_seen[lane]++;
-    if(mutation){mutate(c,mutation);mutation_count++;}
+    if(mutation){
+#ifdef XV_TYPED_CLUSTER_QUERY
+        /* Geometry replacement is an explicit invalidation boundary. Scalar
+         * conflicts below exercise the per-query validation independently. */
+        if(mutation==2||mutation==4||mutation==6)xv_cluster_runtime_invalidate(0xfeed);
+#endif
+        mutate(c,mutation);mutation_count++;
+    }
     if(mode==6&&!__atomic_load_n(&query_held,__ATOMIC_ACQUIRE)){
         __atomic_store_n(&query_held,1,__ATOMIC_RELEASE);
         uint64_t end=xk_os_monotonic_us()+5000000;
@@ -129,7 +139,14 @@ void f_0008FB70(xctx *c)
             wait_flag(&service_ready);while(!__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE)){}
             __atomic_store_n(&park_ack,1,__ATOMIC_RELEASE);
             XV_OBJECT_MATH_GUARD();assert(__atomic_load_n(&service_done,__ATOMIC_ACQUIRE));
-            prepare(c,sp,7);assert(xv_worker_query(c,xv_object_math_locked_));ref_commit(c);
+            prepare(c,sp,7);
+#ifdef XV_TYPED_CLUSTER_QUERY
+            /* Owner service invalidates the whole batch, including queries
+             * begun after it. The original guarded route remains available. */
+            assert(!xv_worker_query(c,xv_object_math_locked_));ref_00056670(c);
+#else
+            assert(xv_worker_query(c,xv_object_math_locked_));ref_commit(c);
+#endif
         }
     }else if(mode==6){
         if(id){wait_flag(&query_held);assert(xv_object_mutex_try(&math_mutex)!=0);__atomic_store_n(&query_tried,1,__ATOMIC_RELEASE);}
@@ -138,14 +155,29 @@ void f_0008FB70(xctx *c)
             prepare(c,sp,7);c->df=0;w32(sp+4,0x80000000u+id);w32(sp+8,LIGHTS+id*4);f_00056670(c);assert(c->r[4]==sp+20);
         }
     }else if(mode==5){
-        graph(7,1024);prepare(c,sp,7);c->preempt=1;f_00056670(c);abort();
+        prepare(c,sp,7);c->preempt=1;f_00056670(c);abort();
+#ifdef XV_TYPED_CLUSTER_QUERY
+    }else for(unsigned k=batch_case;k==batch_case;k++){
+        /* Only one lane injects a conflict. Invalidated immutable storage is
+         * retained until the other lane completes, then rebuilt next batch. */
+        if(mode==3&&id)break;
+#else
     }else for(unsigned k=0;k<(mode==0?168:mode==1?12:8);k++){
+#endif
         pthread_mutex_lock(&oracle);
+#ifndef XV_TYPED_CLUSTER_QUERY
         unsigned sizes[]={1,7,65,256},caps[]={0,1,8,1024};graph(sizes[(k/7)%4],caps[(k/28)%4]);prepare(c,sp,k);
         if(mode==2||mode==3){graph(7,1024);prepare(c,sp,7);}
+#else
+        prepare(c,sp,mode==2||mode==3?7:k);
+#endif
         if(k%17==0)X_IMG32(0x2d2fac)=UINT32_MAX;
         unsigned old_page=0,changed_page=0;
-        if(mode==2){
+        if(mode==7){
+            xctx entry=*c;memcpy(before,g_xram,ARENA);XV_OBJECT_MATH_GUARD();
+            assert(!xv_worker_query(c,xv_object_math_locked_));
+            equal(&entry,c,sizeof *c,"source context",k);equal(before,g_xram,ARENA,"source memory",k);
+        }else if(mode==2){
             switch(k%4){
             case 0:changed_page=(sp-4096)>>12;old_page=g_xpt[changed_page];g_xpt[changed_page]=g_xpt[PORTALS>>12];break;
             case 1:w32(sp+12,0x2d2fb0);break;
@@ -177,17 +209,44 @@ void f_0008FB70(xctx *c)
 }
 int main(int argc,char **argv)
 {
-    assert(argc==2);char *names[]={"normal","disabled","alias","mutation","parking","budget","concurrent"};for(mode=0;mode<7&&strcmp(argv[1],names[mode]);mode++){}assert(mode<7);
+    assert(argc==2);char *names[]={"normal","disabled","alias","mutation","parking","budget","concurrent","source"};for(mode=0;mode<8&&strcmp(argv[1],names[mode]);mode++){}assert(mode<8);
     setenv("XV_WORKER_QUERY",mode==1?"invalid":"1",1);
     g_xram=calloc(1,ARENA);g_img_base=g_xram+RAM;g_xpt=calloc(1<<20,4);before=malloc(ARENA);expected=malloc(ARENA);
     for(unsigned i=0;i<RAM/4096;i++)g_xpt[i]=(i^1u)*4096;
     assert(!pthread_barrier_init(&rendezvous,NULL,2));graph(7,1024);
-    xctx owner_ctx={0};xv_object_jobs_override(1);assert(xv_object_jobs_begin(&owner_ctx));
+    xctx owner_ctx={0};xv_object_jobs_override(1);
+#ifdef XV_TYPED_CLUSTER_QUERY
+    unsigned cases=mode==0?168:mode==1?12:mode==2||mode==3?8:mode==7?6:1;
+    for(batch_case=0;batch_case<cases;batch_case++){
+        unsigned sizes[]={1,7,65,256},caps[]={0,1,8,1024};
+        graph(mode==0?sizes[(batch_case/7)%4]:7,mode==0?caps[(batch_case/28)%4]:1024);
+        if(mode==7)switch(batch_case){
+        case 0:w32(0x1f0a68,1);break; /* modified constant */
+        case 1:w32(BSP+0xb0,0);break; /* missing collision block */
+        case 2:w32(BSP+0x138,stacks[0]);break; /* private-stack source */
+        case 3:w32(COLL+0x10,0x2d2fb0);break; /* mutable visited source */
+        case 4:w32(PORTALS+20,0x7f800001);break; /* signaling NaN */
+        case 5:w32(BSP+0x134,257);break; /* unsupported graph size */
+        }
+        fesetround(FE_DOWNWARD);feclearexcept(FE_ALL_EXCEPT);feraiseexcept(FE_DIVBYZERO|FE_INEXACT);
+        int owner_flags=fetestexcept(FE_ALL_EXCEPT);
+#endif
+    assert(xv_object_jobs_begin(&owner_ctx));
     for(unsigned i=0;i<(mode==5?1:2);i++){owner_ctx.r[1]=i;owner_ctx.r[4]=0xc0000;X_M32(owner_ctx.r[4])=0x90299;assert(xv_object_jobs_queue(&owner_ctx));}
     xv_object_jobs_finish(&owner_ctx);
+#ifdef XV_TYPED_CLUSTER_QUERY
+    assert(fegetround()==FE_DOWNWARD&&fetestexcept(FE_ALL_EXCEPT)==owner_flags);
+    }
+#endif
     if(mode==0){assert(ready_count>100&&lane_seen[0]&&lane_seen[1]);}
     if(mode==1)assert(!ready_count);
-    if(mode==3)assert(mutation_count==16);
+    if(mode==3)assert(mutation_count==
+#ifdef XV_TYPED_CLUSTER_QUERY
+        8
+#else
+        16
+#endif
+    );
     if(mode==4)assert(service_done);
     if(mode==6){
         assert(query_tried&&ready_count==128&&X_IMG32(0x2d2fac)==228);

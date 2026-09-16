@@ -11,6 +11,7 @@
 #include "xk_object_jobs.h"
 #include "xk_light_census.h"
 #include "xk_worker_query.h"
+#include "xk_cluster_runtime.h"
 #include "xk_object_mutex.h"
 #include "../xv_phase.h"
 #include <stdlib.h>
@@ -32,6 +33,9 @@ static xctx jobs[CAPACITY], contexts[LANES];
 static unsigned count, next, running, stopping, active_workers=WORKERS;
 static uint32_t stacks[LANES];
 static uint32_t stack_pages[LANES][STACK_BYTES/4096];
+#ifdef XV_TYPED_CLUSTER_QUERY
+static uint32_t query_stack_low[LANES],query_stack_high[LANES];
+#endif
 static unsigned stack_peak[LANES];
 static uint32_t active_objects[LANES], indirect_stack[LANES][32];
 static unsigned indirect_depth[LANES];
@@ -311,6 +315,9 @@ static void service_owner(void)
                 if(needs_quiescence(service_address[i])) {
                     quiescent++;yielding+=service_address[i]==0x1D6640u;continue;
                 }
+#ifdef XV_TYPED_CLUSTER_QUERY
+                xv_cluster_runtime_invalidate(service_address[i]);
+#endif
                 service_fn[i](&contexts[i]);
                 if(service_address[i]==0x184A20u)resource_queries++;else services++;
                 if(__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE))
@@ -321,6 +328,9 @@ static void service_owner(void)
             }
         }
         if(quiescent&&quiet) {
+#ifdef XV_TYPED_CLUSTER_QUERY
+            xv_cluster_runtime_invalidate(yielding?0x1d6640u:0xffffffffu);
+#endif
             /* Every lane is parked or completed. Run only the original cache
              * file fiber, preserving its stack, TLS, real reads and APCs. */
             extern int xk_object_io_step(void);
@@ -667,6 +677,25 @@ int xv_object_query_lane(xctx *c,int guard,uint32_t base,unsigned bytes)
     return reason?0:lane+1;
 }
 #endif
+#ifdef XV_TYPED_CLUSTER_QUERY
+int xv_object_query_private(xctx *c,int guard,uint32_t address,unsigned bytes)
+{
+    int lane=worker_lane();
+    return lane>=0&&c==&contexts[lane]&&xv_is_object_job(c)&&guard==lane+2&&
+        math_depth[lane]==1&&private_stack_span((unsigned)lane,address,bytes);
+}
+int xv_object_query_source_allowed(uintptr_t pointer,unsigned bytes)
+{
+    /* Snapshot construction runs on the drained owner. A conservative physical
+     * envelope also rejects aliases into another worker's private stack. */
+    if(!bytes||pointer>UINTPTR_MAX-bytes||initialized!=1)return 0;
+    for(unsigned lane=0;lane<LANES;lane++){
+        uintptr_t low=(uintptr_t)g_xram+query_stack_low[lane],high=(uintptr_t)g_xram+query_stack_high[lane]+4096;
+        if(pointer<high&&low<pointer+bytes)return 0;
+    }
+    return 1;
+}
+#endif
 int xv_object_math_release_private(xctx *c,int *locked,unsigned kind,
     uint32_t output,unsigned output_bytes,uint32_t scratch,unsigned scratch_bytes)
 {
@@ -799,6 +828,14 @@ static int initialize(void)
         stacks[i]=xk_mem_alloc(STACK_BYTES,4096,0,0,1);
         if(!stacks[i])goto fail;
         for(unsigned p=0;p<STACK_BYTES/4096;p++)stack_pages[i][p]=g_xpt[(stacks[i]>>12)+p];
+#ifdef XV_TYPED_CLUSTER_QUERY
+        query_stack_low[i]=UINT32_MAX;query_stack_high[i]=0;
+        for(unsigned p=0;p<STACK_BYTES/4096;p++){
+            uint32_t offset=stack_pages[i][p];
+            if(offset<query_stack_low[i])query_stack_low[i]=offset;
+            if(offset>query_stack_high[i])query_stack_high[i]=offset;
+        }
+#endif
     }
     const char *light=getenv("XV_OBJECT_LIGHT_LOCK");
     if(xv_object_mutex_init(&math_mutex,!light||atoi(light)!=0))goto fail;
@@ -876,6 +913,9 @@ void xv_object_jobs_join(void)
 {
     if(!count)return;
     uint64_t started=xk_os_monotonic_us();
+#ifdef XV_TYPED_CLUSTER_QUERY
+    if(active_workers&&query_enabled)xv_cluster_runtime_begin();
+#endif
     next=0;__atomic_store_n(&running,1,__ATOMIC_RELEASE);
     memset(service_state,0,sizeof service_state);
     for(unsigned i=0;i<active_workers;i++) {
@@ -908,6 +948,9 @@ void xv_object_jobs_join(void)
 #endif
     __atomic_store_n(&owner_notice,0,__ATOMIC_RELEASE);
     __atomic_store_n(&running,0,__ATOMIC_RELEASE);
+#ifdef XV_TYPED_CLUSTER_QUERY
+    xv_cluster_runtime_end();
+#endif
     batch_us+=xk_os_monotonic_us()-started;batches++;count=0;
 }
 void xv_object_jobs_end(xctx **c)

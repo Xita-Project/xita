@@ -132,8 +132,13 @@ and scratch in 3,728 host, 350 accepted ARM and 3,328 owned-map cases, plus 928
 comparisons through the original allocation/list tail. Full reconstruction
 reduces the instruction saving to about 1.9x, before live admission/publication
 costs. The source snapshot retains the numeric metadata needed for replay;
-live guarded publication and hardware timing remain pending. None of these
-prototypes is installed on Vita.
+an experimental adapter now connects guarded publication to actual worker
+batches. It passes 336 full original-versus-hook comparisons, disabled/alias/
+conflict/source rejection tests, concurrent list updates and owner-service
+invalidation. ASan/UBSan and the concurrent/parking TSan checks pass. Vita SDK
+compilation and Makefile OFF/ON/OFF transitions pass. The final live geometry
+writer/lifetime audit, whole-path timing and controlled hardware comparison
+remain pending. None of these prototypes is installed on Vita.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)

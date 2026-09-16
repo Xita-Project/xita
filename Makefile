@@ -476,16 +476,23 @@ $(error XV_WORKER_QUERY requires XV_EXPERIMENTAL_OBJECT_JOBS=1)
 endif
 RECOMP_CFLAGS += -DXV_WORKER_QUERY
 endif
+ifeq ($(XV_TYPED_CLUSTER_QUERY),1)
+ifneq ($(XV_WORKER_QUERY),1)
+$(error XV_TYPED_CLUSTER_QUERY requires XV_WORKER_QUERY=1)
+endif
+RECOMP_CFLAGS += -DXV_TYPED_CLUSTER_QUERY
+endif
 .PHONY: force-worker-query-config
 force-worker-query-config:
 $(RECOMP_BUILD)/worker-query.config: force-worker-query-config
 	@mkdir -p $(RECOMP_BUILD)
-	@printf '%s\n' '$(if $(filter 1,$(XV_WORKER_QUERY)),1,0)' > $@.tmp
+	@printf '%s\n' '$(if $(filter 1,$(XV_WORKER_QUERY)),1,0)/$(if $(filter 1,$(XV_TYPED_CLUSTER_QUERY)),1,0)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(XITA_GUEST_OBJS) $(XITA_GAME_OBJS) $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/worker-query.config
 $(RECOMP_BUILD)/kernel/xk_worker_query.o: recomp/kernel/xk_worker_query_generated.inc
 $(RECOMP_BUILD)/kernel/xk_worker_query.o: RECOMP_CFLAGS += -ffp-contract=off -frounding-math
+$(addprefix $(RECOMP_BUILD)/kernel/,xk_cluster_runtime.o xk_cluster_snapshot.o xk_cluster_query.o xk_cluster_query_replay.o): RECOMP_CFLAGS += -ffp-contract=off -frounding-math
 recomp/kernel/xk_worker_query_generated.inc: tools/gen_worker_query.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_worker_query.py --xbe $(XBE) --manifest $(XBE_JSON)
 

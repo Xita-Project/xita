@@ -21,7 +21,12 @@ ifeq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_jobs.c
 endif
 ifeq ($(XV_WORKER_QUERY),1)
+ifeq ($(XV_TYPED_CLUSTER_QUERY),1)
+XITA_GAME_SRCS += recomp/kernel/xk_cluster_runtime.c recomp/kernel/xk_cluster_snapshot.c \
+                  recomp/kernel/xk_cluster_query.c recomp/kernel/xk_cluster_query_replay.c
+else
 XITA_GAME_SRCS += recomp/kernel/xk_worker_query.c
+endif
 endif
 ifeq ($(XV_QUAT_CACHE),1)
 XITA_GAME_SRCS += recomp/kernel/xk_quat_cache.c

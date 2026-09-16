@@ -22,11 +22,11 @@ IMAGE = '4094e994243ddeae3f1b478bde6a7ee81498218ccd7c9d7bc2327db547d95aae'
 PCS = (0x56670, 0x52240, 0x51E90, 0x11840, 0xB77C0)
 
 
-def generate(xbe, manifest, out, *, full=False):
+def generate(xbe, manifest, out, *, full=False, extra_pcs=()):
     img = r.Image(str(xbe), str(manifest))
     assert hashlib.sha256(img.data).hexdigest() == IMAGE, 'unsupported image'
     disc = r.Discovery(img, {}, img.kernel_imports(), lambda *args: None)
-    pcs = PCS + ((0xA9330,) if full else ())
+    pcs = PCS + ((0xA9330,) if full else ()) + tuple(extra_pcs)
     for pc in pcs:
         disc.add_root(pc)
         disc.lift_function(disc.functions[pc])
@@ -51,6 +51,7 @@ def generate(xbe, manifest, out, *, full=False):
             sha256=hashlib.sha256(b''.join(after[k] for k in sorted(after))).hexdigest())
     emit = r.Emitter(img, disc, {}, img.kernel_imports(), 'unused', 1, hooks=NoGameHooks())
     bodies = {pc: emit.emit_function(disc.functions[pc]) for pc in pcs}
+    original = dict(bodies)
     body = bodies[0x56670]
     bodies[0x56670] = body[:body.index('L_000566DE:')] + 'L_000566DE:\n    return;\n}\n'
     text = '#include "xv_x86rt.h"\n'
@@ -69,6 +70,7 @@ def generate(xbe, manifest, out, *, full=False):
     (out / 'cluster_axes.h').write_text('static const unsigned char axes[24]={' +
                                       ','.join(map(str, axes)) + '};\n')
     (out / 'original-proof.json').write_text(json.dumps(proof, indent=2) + '\n')
+    return original
 
 
 def main():

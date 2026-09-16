@@ -1,8 +1,9 @@
 # Direct spatial query prototype
 
 The new `xk_cluster_query.c` replaces the numerical part of Halo 3925's
-`56670..566DE` spatial query with a typed traversal. It is **source-only**:
-there is no Makefile registration, guest hook, live unlock, or hardware update.
+`56670..566DE` spatial query with a typed traversal. An experimental guarded
+runtime now connects it to the existing guest hook and worker pool. It is
+**disabled by default and uninstalled**; there is no live unlock or hardware update.
 The [earlier guarded adapter](worker-query-adapter-20260916.md) remains off.
 This is a candidate for reducing measured world/light preparation, not a
 demonstrated frame-rate improvement.
@@ -242,30 +243,69 @@ stack, excluding callees. The ARM replay output occupies 17,768 caller-owned
 bytes, separate from numerical output and snapshot storage. This remains an
 uninstalled prototype, not a measured frame-time improvement.
 
+## Guarded batch runtime candidate
+
+`xk_cluster_runtime.c` now builds an owned geometry snapshot on the guest owner
+immediately before each queued worker batch starts. It releases the snapshot
+only after all worker completion semaphores have been consumed. Any owner service
+invalidates the batch before executing; invalidation cancels publication without
+freeing storage still used by another worker. The owner FP environment is restored
+after construction, including on failure.
+
+Each lane has private replay storage. Admission checks the actual native worker,
+context, depth-one math guard, captured stack mappings and private scalar inputs.
+Physical overlaps between writable spans are rejected. Geometry sources cannot
+alias worker stacks, the visited table, epoch or marker. The adapter captures
+context, arguments, visited words, epoch, marker and FP state, computes privately,
+then rechecks them and the mappings before publishing only marked scratch bytes
+and changed visited words. The original allocation/list tail remains unchanged.
+Every decline restores entry FP state and uses the original route. No query
+unlocks the shared guard, and no epoch is reserved ahead of publication.
+
+Build with `XV_EXPERIMENTAL_OBJECT_JOBS=1 XV_WORKER_QUERY=1
+XV_TYPED_CLUSTER_QUERY=1`; the existing exact runtime opt-in `XV_WORKER_QUERY=1`
+is also required. The typed mode selects these new objects instead of the older
+generated-C adapter. The build stamp tracks both query switches, including the
+transition back to an ordinary build. No benchmark selector has been added yet.
+
+The actual-pool fixture now prepares immutable geometry before each batch,
+rather than rewriting it inside callbacks. Tests use the real production guard,
+admission, scheduler and hook, with a generated original reference kept private:
+
+| Check | Result |
+| --- | --- |
+| ASan/UBSan original-versus-hook comparison | 336 exact full-context, memory and FP comparisons; 248 typed admissions |
+| Runtime disabled | 24 exact original-route comparisons; no typed admission |
+| Aliases / mutable-input conflicts / invalid sources | 16 / 8 / 12 comparisons preserving the original state on decline |
+| Concurrent list updates and removals | 128 typed queries across both workers; expected final epoch and list memberships |
+| Owner parking/service | Batch invalidated; original query remains usable afterward |
+| Instruction budget exhausted | Original worker stop is preserved |
+| TSan | Concurrent-list and owner-parking scenarios pass |
+| Vita SDK / actual Makefile | All new objects compile; worker object OFF / typed ON / OFF symbols and stamps verified |
+
+These tests prove behavior with a controlled immutable source and explicit
+invalidation. They do **not** prove that every live guest writer obeys that
+contract. The source/retirement audit below remains a deployment prerequisite.
+Per-batch allocation, geometry copying, input capture, validation and publication
+are also additional costs; the earlier 1.9x prefix instruction result excludes them.
+
 ## Integration work still required
 
-1. **Connect lifetime to the game.** The owned snapshot/store API above is ready
-   for integration. The original reset `58440` clears roots at
+1. **Complete the live source-lifetime audit.** The original reset `58440` clears roots at
    `58492/5849E`, after calls that can retire data. BSP switching `58CD0` invokes
    load/unload helpers before publishing roots at `58D87/58D97`. Invalidate before
    retirement, construct after successful loading with workers drained, and
-   publish an owned generation. A snapshot scoped to a fully joined object pass
-   is another possible boundary, but its source consistency and construction cost
-   still need proof. Pointer equality and the existing large-read
+   publish an owned generation if a persistent cache is introduced. The current
+   per-batch snapshot drains workers and invalidates all owner services, but still
+   needs an audit of worker writes to the consumed geometry and mapping storage.
+   Its construction cost also needs measurement. Pointer equality and the existing large-read
    texture-purge heuristic do not establish that lifetime. Generated overlapping
    entries also need coverage; an entry at `58D8A` contains the later root store.
-2. **Connect state reconstruction to real admission.** The private replay now
-   passes full-prefix and original-tail oracles. The live adapter still needs
-   validated scalar input capture, source/layout consistency, private-stack
-   mapping and alias checks, correct native FP rollback, and a captured geometry
-   generation. Keep the current guard held for the first integrated candidate;
-   a numerically valid private descriptor is not permission to publish.
-3. **Publish in one guarded transaction.** Capture mutable inputs, compute on
-   owned arrays, validate the generation and shared visited/epoch state, and
-   publish with the original allocation/list tail. Any failure must preserve
-   the original fallback. Release the guard only at a proven depth-one boundary;
-   do not reserve an epoch early or wait for other workers while holding it.
-4. **Measure the complete path.** Compare end-to-end guard occupancy and hardware
+2. **Add controlled measurement and deployment.** Admission and publication now
+   pass the actual-pool tests above. Keep the guard held, add an owner-side
+   OFF/ON/OFF selector at drained boundaries, and validate the complete private
+   game build before considering an update. The current hardware remains unchanged.
+3. **Measure the complete path.** Compare end-to-end guard occupancy and hardware
    frame time, then exercise combat, driving and campaign BSP transitions. The
    kernel's instruction reduction alone is insufficient to retain a runtime
    change or claim stable 20 FPS.
@@ -285,6 +325,12 @@ python tools/test_owned_cluster_query.py --xbe "$XBE" --manifest "$MANIFEST" \
     "$MAPS/beavercreek.map" "$MAPS/a10.map" "$MAPS/a30.map"
 python tools/test_cluster_snapshot.py --out "$RESULTS/snapshot-asan"
 python tools/test_cluster_snapshot.py --out "$RESULTS/snapshot-tsan" --sanitize thread
+python tools/test_cluster_runtime.py --xbe "$XBE" --manifest "$MANIFEST" \
+    --out "$RESULTS/runtime-asan" --sanitize address
+python tools/test_cluster_runtime.py --xbe "$XBE" --manifest "$MANIFEST" \
+    --out "$RESULTS/runtime-tsan" --sanitize thread --mode concurrent --mode parking
+python tools/test_cluster_runtime.py --xbe "$XBE" --manifest "$MANIFEST" \
+    --out "$RESULTS/runtime-arm" --arm
 python tools/test_cluster_query_rebase.py --xbe "$XBE" --manifest "$MANIFEST" \
     --out "$RESULTS/epoch-rebase"
 python tools/test_cluster_query_fpu.py --xbe "$XBE" --manifest "$MANIFEST" \
