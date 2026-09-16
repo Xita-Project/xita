@@ -39,6 +39,7 @@ static unsigned indirect_depth[LANES];
 static unsigned service_state[WORKERS], services, owner_notice, pause_workers, io_yields, resource_queries, resource_registers;
 static unsigned vertex_locks;
 static unsigned audio_pumps, audio_volumes, audio_commits, audio_stops;
+static unsigned audio_frequencies, audio_parameters;
 /* Only the owner may execute nested stream services during a quiescent pump.
  * Keep the job marker and private stack: arbitrary kernel/scheduler calls still
  * stop instead of masquerading as the owner's guest fiber. */
@@ -175,9 +176,23 @@ static int worker_lane(void)
 #endif
     return -1;
 }
+/* Audited stream-property calls in object sound update 297B0 and its 296D0
+ * helper. All use existing non-callback handlers on the guest owner. */
+static unsigned sound_parameter_return(unsigned address)
+{
+    switch(address) {
+    case 0x194470u:return 0x29898u; /* frequency */
+    case 0x193D9Bu:return 0x298E7u; /* maximum distance */
+    case 0x193DB3u:return 0x2992Au; /* minimum distance */
+    case 0x193D68u:return 0x2999Du; /* cone angles */
+    case 0x193D96u:return 0x299F0u; /* cone outside volume */
+    case 0x193E22u:return 0x2979Au; /* I3DL2 source */
+    default:return 0;
+    }
+}
 static int needs_quiescence(unsigned address)
 {
-    return address==0x1D6640u||address==0x184AB0u||address==0x1858D0u||address==0x193E27u||address==0x193D4Fu||address==0x193C1Bu||address==0x19C5FFu;
+    return address==0x1D6640u||address==0x184AB0u||address==0x1858D0u||address==0x193E27u||address==0x193D4Fu||address==0x193C1Bu||address==0x19C5FFu||sound_parameter_return(address);
 }
 static void service_audio(xctx *c,xv_fn_t fn)
 {
@@ -244,6 +259,10 @@ static void service_owner(void)
                         /* Retire the voice's reporting state on the audio
                          * owner; the existing handler dispatches no callbacks. */
                         service_fn[i](&contexts[i]);audio_stops++;
+                    } else if(sound_parameter_return(service_address[i])) {
+                        service_fn[i](&contexts[i]);
+                        if(service_address[i]==0x194470u)audio_frequencies++;
+                        else audio_parameters++;
                     } else {
                         /* Header fixup or vertex-storage pointer lookup only;
                          * no allocation, draw submission or scheduler entry.
@@ -745,6 +764,7 @@ void xv_object_jobs_report(unsigned frames)
     XK_LOG("[object-jobs] quiescent owner stream volume updates %u\n",audio_volumes);audio_volumes=0;
     XK_LOG("[object-jobs] quiescent owner deferred audio commits %u\n",audio_commits);audio_commits=0;
     XK_LOG("[object-jobs] quiescent owner voice stops %u\n",audio_stops);audio_stops=0;
+    XK_LOG("[object-jobs] quiescent owner frequency updates %u spatial parameters %u\n",audio_frequencies,audio_parameters);audio_frequencies=audio_parameters=0;
     XK_LOG("[object-wait] timed %u attempts %u/%u acquired %u/%u timeouts %u/%u\n",
         math_wait_override<0?math_wait_enabled:(unsigned)math_wait_override,
         math_wait_stats[0].attempts,math_wait_stats[1].attempts,
@@ -869,8 +889,11 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
     }
     if(__atomic_load_n(&audio_service_context,__ATOMIC_ACQUIRE)==c)
         xv_object_job_stop(c,address,"unsupported nested owner audio service");
-    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u&&address!=0x1858D0u&&address!=0x193E27u&&address!=0x193D4Fu&&address!=0x193C1Bu&&address!=0x19C5FFu)||!fn)
+    unsigned parameter_return=sound_parameter_return(address);
+    if((address!=0x1D665Cu&&address!=0x1D6640u&&address!=0x184A20u&&address!=0x184AB0u&&address!=0x1858D0u&&address!=0x193E27u&&address!=0x193D4Fu&&address!=0x193C1Bu&&address!=0x19C5FFu&&!parameter_return)||!fn)
         xv_object_job_stop(c,address,"unsupported HLE");
+    if(parameter_return&&X_M32(c->r[4])!=parameter_return)
+        xv_object_job_stop(c,address,"stream parameter outside audited object sound update");
     /* Object sound cleanup 28710 stops its active voice before marking the
      * guest slot inactive. Preserve the real handler and ret 4 convention. */
     if(address==0x19C5FFu&&X_M32(c->r[4])!=0x28745u)
@@ -898,6 +921,7 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
         else if(address==0x193D4Fu){fn(c);audio_volumes++;}
         else if(address==0x193C1Bu){fn(c);audio_commits++;}
         else if(address==0x19C5FFu){fn(c);audio_stops++;}
+        else if(parameter_return){fn(c);if(address==0x194470u)audio_frequencies++;else audio_parameters++;}
         else {fn(c);if(address==0x184A20u)resource_queries++;else if(address==0x184AB0u)resource_registers++;else if(address==0x1858D0u)vertex_locks++;else services++;}
         return;
     }

@@ -51,6 +51,19 @@ caller through the parked-worker audio path. Production memory/race tests and
 native compilation pass. The installed build loads Blood Gulch on hardware;
 the exact cleanup path and longer combat stability still need a gameplay retest.
 
+A subsequent retained run reached a frequency-update STOP. The
+[sound-property audit](docs/object-sound-parameters-20260915.md) covers frequency
+and five related spatial-setting calls in the same update routine; all retain
+the existing owner-side handlers. Host memory/race checks and compilation pass;
+the emulator completes a charged shot and the physical updater confirms the
+new build. Longer gameplay still needs to exercise these property handoffs.
+
+[World and effect rendering](docs/world-rendering-20260915.md) is the next focus:
+physical views range from 55 to 131 draws/frame with much higher completion
+latency in the heavier view. An opt-in replacement-blend candidate preserves
+channel masks and alpha tests; host/native checks pass, hardware benefit is
+unmeasured and the default remains off.
+
 September 15: [lightweight mutex comparisons](docs/object-light-lock-20260915.md)
 repeatedly improve one physical Blood Gulch view from approximately 11.8–12.0
 to 15.1–15.2 FPS, with both workers enabled in every arm. The experimental build

@@ -8,6 +8,7 @@
 void object_test_audio_owner(void);
 static unsigned callbacks, volume_writes;
 static int32_t last_volume;
+static unsigned frequency_writes,last_frequency;
 static void ds_state_log(const char *event,uint32_t obj,ds_state *s,int queued)
 { (void)event;(void)obj;(void)s;(void)queued;object_test_audio_owner(); }
 #define XD3D_COUNT(name) object_test_audio_owner()
@@ -24,6 +25,11 @@ void xk_audio_voice_set_volume_db100(int voice,int32_t volume)
 {
     object_test_audio_owner();assert(voice==3);
     volume_writes++;last_volume=volume;
+}
+void xk_audio_voice_set_frequency(int voice,uint32_t frequency)
+{
+    object_test_audio_owner();assert(voice==3);
+    frequency_writes++;last_frequency=frequency;
 }
 
 /* PRODUCTION_AUDIO */
@@ -133,4 +139,61 @@ void object_test_voice_stop(xctx *c)
         assert(s->q[i].report_due_us==(stream?0:now+1000000));
         assert(s->q[i].due_us==now+2000000&&s->q[i].context==0xABCD);
     }
+}
+
+void object_test_stream_frequency(xctx *c)
+{
+    object_test_audio_owner();
+    unsigned sp=c->r[4],before=frequency_writes,cb=callbacks;
+    uint32_t saved[8];memcpy(saved,c->r,sizeof saved);
+    uint32_t object=X_M32(sp+4),frequency=X_M32(sp+8);
+    assert(X_M32(sp)==0x29898);
+    memset(g_ds_streams,0,sizeof g_ds_streams);
+    ds_stream *s=&g_ds_streams[0];s->obj=0x1234;s->voice=3;s->nq=2;
+    uint64_t now=xk_os_monotonic_us();
+    s->state=(ds_state){.rate=48000,.align=4,.size=192000,.start_us=now,
+        .end_us=now+1000000,.duration_us=1000000};
+    s->q[0]=(ds_pkt){.report_due_us=now+500000,.due_us=now+750000,.context=0xABCD};
+    s->q[1]=(ds_pkt){.report_due_us=now-1,.due_us=now-1,.context=0xDCBA};
+    ds_stream original=*s;
+    xv_hle_CDirectSoundStream_SetFrequency(c);
+    uint64_t after=xk_os_monotonic_us();
+    assert(c->r[0]==0&&c->r[4]==sp+12&&callbacks==cb);
+    for(unsigned i=1;i<8;i++)if(i!=4)assert(c->r[i]==saved[i]);
+    assert(X_M32(sp)==0x29898&&X_M32(sp+4)==object&&X_M32(sp+8)==frequency);
+    assert(frequency_writes==before+(object==0x1234));
+    if(object!=0x1234) {assert(!memcmp(s,&original,sizeof *s));return;}
+    unsigned valid=frequency>=100&&frequency<=192000;
+    unsigned rate=valid?frequency:48000;
+    assert(last_frequency==frequency&&s->state.frequency==(valid?frequency:0));
+    assert(s->state.duration_us==(192000ull*1000000+4*rate-1)/(4*rate));
+    /* Bound the retimed deadline using timestamps around the real handler,
+     * rather than replacing its clock or changing scheduling in the test. */
+    uint64_t start=now+500000ull*48000/rate;
+    uint64_t end=after+(now+500000-after)*48000/rate;
+    assert(s->q[0].report_due_us>=(start<end?start:end));
+    assert(s->q[0].report_due_us<=(start>end?start:end));
+    assert(s->q[0].due_us==original.q[0].due_us&&s->q[0].context==0xABCD);
+    assert(!memcmp(&s->q[1],&original.q[1],sizeof s->q[1])&&s->nq==2);
+}
+
+/* Current spatial methods are DS_OK stubs. Keep those production handlers and
+ * their distinct argument counts; do not add another success stub in the RPC. */
+void object_test_stream_parameter(xctx *c)
+{
+    object_test_audio_owner();
+    xv_fn_t fn=NULL;unsigned args=3,sp=c->r[4];
+    switch(X_M32(sp)) {
+    case 0x298E7:fn=xv_hle_IDirectSoundStream_SetMaxDistance;break;
+    case 0x2992A:fn=xv_hle_IDirectSoundStream_SetMinDistance;break;
+    case 0x2999D:fn=xv_hle_IDirectSoundStream_SetConeAngles;args=4;break;
+    case 0x299F0:fn=xv_hle_IDirectSoundStream_SetConeOutsideVolume;break;
+    case 0x2979A:fn=xv_hle_IDirectSoundStream_SetI3DL2Source;break;
+    }
+    assert(fn);uint32_t saved[8],stack[5];memcpy(saved,c->r,sizeof saved);
+    for(unsigned i=0;i<=args;i++)stack[i]=X_M32(sp+4*i);
+    fn(c);
+    assert(c->r[0]==0&&c->r[4]==sp+4*(args+1));
+    for(unsigned i=1;i<8;i++)if(i!=4)assert(c->r[i]==saved[i]);
+    for(unsigned i=0;i<=args;i++)assert(stack[i]==X_M32(sp+4*i));
 }

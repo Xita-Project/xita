@@ -38,8 +38,12 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
     buffers=d3d_source[d3d_source.index('#define DS_MAX_BUFFERS'):d3d_source.index('static uint32_t ds_buffer_obj')]
     voice_state=d3d_source[d3d_source.index('static ds_state *ds_voice_state'):d3d_source.index('void xv_hle_DSoundVoiceIsPlaying')]
     voice_stop=d3d_source[d3d_source.index('void xv_hle_DSoundVoiceStop'):d3d_source.index('void xv_hle_DirectSoundCreateBuffer')]
+    frequency=d3d_source[d3d_source.index('void xv_hle_CDirectSoundStream_SetFrequency'):d3d_source.index('void xv_hle_CDirectSoundStream_SetVolume')]
+    spatial='\n'.join(re.search(r'DS_OK\('+name+r', \d+\)',d3d_source)[0] for name in
+        ('IDirectSoundStream_SetMaxDistance','IDirectSoundStream_SetMinDistance',
+         'IDirectSoundStream_SetConeAngles','IDirectSoundStream_SetConeOutsideVolume','IDirectSoundStream_SetI3DL2Source'))
     fixture=(root/'tools/tests/object_audio.c').read_text()
-    audio.write_text(fixture.replace('/* PRODUCTION_AUDIO */',d3d_source[begin:end]+'\n'+methods+'\n'+pump+'\n'+volume+'\n'+commit_macro+'\n'+commit+'\n#undef DS_OK\n'+buffers+voice_state+voice_stop))
+    audio.write_text(fixture.replace('/* PRODUCTION_AUDIO */',d3d_source[begin:end]+'\n'+methods+'\n'+pump+'\n'+volume+'\n'+commit_macro+'\n'+commit+'\n'+spatial+'\n#undef DS_OK\n'+buffers+voice_state+voice_stop+frequency))
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11','-fno-strict-aliasing',
         '-DXV_EXPERIMENTAL_OBJECT_JOBS','-DXV_NATIVE_MODEL_HIERARCHY','-I'+str(root/'recomp'),
         '-ffunction-sections','-fdata-sections','-ffp-contract=off',
@@ -59,6 +63,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                 assert re.findall(r'quiescent owner stream volume updates (\d+)',result.stderr)==['600','0']
                 assert re.findall(r'quiescent owner deferred audio commits (\d+)',result.stderr)==['600','0']
                 assert re.findall(r'quiescent owner voice stops (\d+)',result.stderr)==['600','0']
+                assert re.findall(r'quiescent owner frequency updates (\d+) spatial parameters (\d+)',result.stderr)==[('600','3000'),('0','0')]
                 timed_rows=re.findall(r'\[object-wait\] timed (\d) attempts (\d+)/(\d+) acquired (\d+)/(\d+) timeouts (\d+)/(\d+)',result.stderr)
                 assert len(timed_rows)==2 and timed_rows[1]==(timed,'0','0','0','0','0','0'),timed_rows
                 values=list(map(int,timed_rows[0]));assert values[0]==int(timed)
@@ -105,3 +110,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
         failure=subprocess.run([str(binary),mode],capture_output=True,timeout=10,preexec_fn=no_core)
         assert failure.returncode<0 and reason in failure.stderr,(mode,failure.stderr)
     print('PASS: unrelated audio callers, worker stream calls and recursive owner RPCs stop before invocation')
+    for address in ('194470','193D9B','193DB3','193D68','193D96','193E22'):
+        failure=subprocess.run([str(binary),'unsupported-parameter',address],capture_output=True,timeout=10,preexec_fn=no_core)
+        assert failure.returncode<0 and b'stream parameter outside audited object sound update' in failure.stderr
+    print('PASS: frequency and five spatial-property calls reject unrelated callers')
