@@ -90,6 +90,15 @@ class HaloHooks(NoGameHooks):
                 (0xB5B40, 339, "21273987e0276cda51a2d70b2b576abc42195b8efeff9ab4e8f552a15b323726"),
                 (0xB5F60, 291, "9f10d4414ec5fb6b39f5f20f6100791e0aec209d77f6c60599402dff6bdb5d78")))
         self.pose_coalesce_enabled = self.hierarchy_enabled
+        self.light_census_enabled = self.enabled and all(
+            hashlib.sha256(image.bytes_at(a, n) or b"").hexdigest() == digest
+            for a, n, digest in (
+                (0x8D760, 218, "3d10c3ea21c7ed098485d57533f9b293e43e9096eaef7078f09399dee5f8fa2a"),
+                (0x92330, 656, "78bf7b299611b6fce621ebbaa1406ee7537fa38cb1beb31f2ea7ac49442a0110"),
+                (0x58CD0, 16, "a9f13e55c80e9521bdf84c9387d687d15c8435557200eb1988d4b0471ae55234"),
+                (0x58440, 16, "3924ff434ffec9f8ce90fe82c10ad0c8d906da3ad177e495fd4e24e77df2a24a"),
+                (0x91D10, 16, "b65838221f19be5267c558dd49e057246ac9fb23ba9f34c13db055b19aa4590d"),
+                (0x92230, 16, "9e4ab43e59f6e617a0672f43b5b4f2d23e771aa95e66e5943c90578983b7779a")))
 
     # Shared cluster lists and datum allocation/free. The first concurrent
     # campaign test cycled at 56643 in removal after unguarded list mutation.
@@ -110,7 +119,43 @@ class HaloHooks(NoGameHooks):
     # original function. Verify its whole body, not just the suffix at the alias.
     object_shared_aliases = {0x115423: 0x114D30, 0x115FDF: 0x114D30}
 
+    def light_census_entry(self, address):
+        if not self.light_census_enabled:
+            return []
+        if address in (0x8D760, 0x8D7A6):
+            hook = "SCOPE" if address == 0x8D760 else "SUFFIX"
+            return ["#ifdef XV_LIGHT_QUERY_CENSUS", f"    XV_LIGHT_CENSUS_{hook}(c);", "#endif"]
+        lifetime = {0x58CD0: "BSP_SWITCH", 0x58440: "MAP_END", 0x91D10: "LIST_RESET", 0x92230: "LIGHT_DELETE"}
+        if address in lifetime:
+            return ["#ifdef XV_LIGHT_QUERY_CENSUS", f"    XV_LIGHT_CENSUS_CANCEL(c,XV_LC_{lifetime[address]});", "#endif"]
+        return []
+
+    def light_census_before(self, address):
+        if self.light_census_enabled and address == 0x8D837:
+            return ["#ifdef XV_LIGHT_QUERY_CENSUS", "    XV_LIGHT_CENSUS_END(c);", "#endif"]
+        return []
+
+    def light_census_body(self, address, body):
+        # Call hooks run after the original return-address push, before callee
+        # scope/guard entry. Preserve every emitted original instruction.
+        if not self.light_census_enabled:
+            return body
+        if address == 0x92330:
+            needle = "    X_PUSH32(0x925B0u);\n    f_00056670(c);"
+            assert body.count(needle) == 1, "light query callsite drift"
+            body = body.replace(needle, "    X_PUSH32(0x925B0u);\n#ifdef XV_LIGHT_QUERY_CENSUS\n"
+                "    XV_LIGHT_CENSUS_QUERY(c);\n#endif\n    f_00056670(c);")
+        if address in (0x8D760, 0x8D7A6):
+            needle = "    X_PUSH32(0x8D7FFu);\n    f_000565E0(c);"
+            assert body.count(needle) == 1, "light removal callsite drift"
+            body = body.replace(needle, "    X_PUSH32(0x8D7FFu);\n#ifdef XV_LIGHT_QUERY_CENSUS\n"
+                "    XV_LIGHT_CENSUS_REMOVE(c);\n#endif\n    f_000565E0(c);")
+        return body
+
     def before_instruction(self, address):
+        census = self.light_census_before(address)
+        if census:
+            return census
         if address == 0x8E0F0:
             out = []
             if self.pose_coalesce_enabled:
@@ -152,6 +197,7 @@ class HaloHooks(NoGameHooks):
         out = []
         if not self.enabled:
             return out
+        out.extend(self.light_census_entry(address))
         if self.pose_coalesce_enabled and address in (0x8DDF0, 0x8E087):
             out.extend(["#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POSE_EXPERIMENT)",
                         "    XV_OBJECT_POSE_SCOPE();", "#endif"])
@@ -192,6 +238,7 @@ class HaloHooks(NoGameHooks):
         return out
 
     def transform_body(self, address, body):
+        body = self.light_census_body(address, body)
         if self.enabled and address == 0x87EA0 and hashlib.sha256(
                 self.image.bytes_at(0x87ECC, 0x1A) or b"").hexdigest() == "68ec0f334940aa871ae2fede180af8adf67f37fd58a0f094857397e9445970b0":
             def sphere_distance(match):

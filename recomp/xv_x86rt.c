@@ -10,6 +10,7 @@
 #include <time.h>
 #include "xv_x86rt.h"
 #include "kernel/xk_object_jobs.h"
+#include "kernel/xk_light_census.h"
 
 #ifndef XV_RT_LOG
 #  if defined(__vita__)
@@ -24,6 +25,7 @@ static unsigned g_unimpl_count;
 
 void xv_unimpl(xctx *c, uint32_t eip, const char *what)
 {
+    XV_LIGHT_CENSUS_CANCEL(c,XV_LC_STOP);
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
     if(xv_is_object_job(c))xv_object_job_stop(c,eip,what);
 #endif
@@ -37,6 +39,7 @@ void xv_unimpl(xctx *c, uint32_t eip, const char *what)
 void __attribute__((weak)) xk_yield(void);
 void xv_preempt(xctx *c)
 {
+    XV_LIGHT_CENSUS_CANCEL(c,XV_LC_HANDOFF);
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
     if(xv_is_object_job(c)) {
 #if defined(__vita__)
@@ -91,6 +94,7 @@ void xv_preempt(xctx *c)
 
 void xv_trap(xctx *c, uint32_t eip)
 {
+    XV_LIGHT_CENSUS_CANCEL(c,XV_LC_STOP);
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
     if(xv_is_object_job(c))xv_object_job_stop(c,eip,"guest trap");
 #endif

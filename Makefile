@@ -413,6 +413,24 @@ RECOMP_CFLAGS += -DXV_EXPERIMENTAL_OBJECT_JOBS
 CFLAGS += -DXV_EXPERIMENTAL_OBJECT_JOBS
 endif
 
+# Count-only diagnostic build; disabled unless explicitly requested. All guard
+# users share the same scope instrumentation, including unchanged idle guards.
+ifeq ($(XV_LIGHT_QUERY_CENSUS),1)
+ifneq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
+$(error XV_LIGHT_QUERY_CENSUS requires XV_EXPERIMENTAL_OBJECT_JOBS=1)
+endif
+RECOMP_CFLAGS += -DXV_LIGHT_QUERY_CENSUS
+CFLAGS += -DXV_LIGHT_QUERY_CENSUS
+endif
+.PHONY: force-light-census-config
+force-light-census-config:
+$(RECOMP_BUILD)/light-census.config: force-light-census-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_LIGHT_QUERY_CENSUS)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(OBJS) $(XITA_GUEST_OBJS) $(XITA_SYS_OBJS) $(XITA_GAME_OBJS): $(RECOMP_BUILD)/light-census.config
+
 # Explicit research build only. Track this flag for the two affected objects so
 # switching a reused build directory cannot silently retain the previous mode.
 XV_OBJECT_POINT_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_POINT_EXPERIMENT))),1,0)

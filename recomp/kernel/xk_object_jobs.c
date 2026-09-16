@@ -9,6 +9,7 @@
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
 #include "xk.h"
 #include "xk_object_jobs.h"
+#include "xk_light_census.h"
 #include "xk_object_mutex.h"
 #include "../xv_phase.h"
 #include <stdlib.h>
@@ -53,6 +54,60 @@ static uint64_t work_us[LANES], batch_us;
 /* A worker's recursive scopes stay on its native thread, including while it
  * parks for an owner service. Only the outer scope needs the OS mutex. */
 static unsigned math_depth[WORKERS], math_fast_path=1, math_idle_calls;
+#ifdef XV_LIGHT_QUERY_CENSUS
+#ifdef __vita__
+static SceUID census_owner_thread;
+#else
+static pthread_t census_owner_thread;
+#endif
+static unsigned census_owner_scopes;
+static int census_is_owner(void)
+{
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
+#ifdef __vita__
+    return sceKernelGetThreadId()==census_owner_thread;
+#else
+    return pthread_equal(pthread_self(),census_owner_thread);
+#endif
+}
+/* Register/queue/fiber inspection is legal only after native owner identity.
+ * A borrowed worker xctx in an owner service is never the current guest xctx. */
+unsigned xv_object_census_admit(const xctx *c)
+{
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return XV_LC_UNINITIALIZED;
+    if(xv_object_is_worker_thread())return XV_LC_WORKER;
+    if(!census_is_owner())return XV_LC_NATIVE_OWNER;
+    for(unsigned i=0;i<LANES;i++)if(c==&contexts[i]&&xv_is_object_job(c))return XV_LC_MARKED;
+    if(!xk_cur||c!=&xk_cur->ctx)return XV_LC_CONTEXT;
+    if(xv_is_object_job(c))return XV_LC_MARKED;
+    if(!xk_cur->fiber||xk_os_fiber_current()!=xk_cur->fiber||xk_cur->state!=0)
+        return XV_LC_CONTEXT;
+    if(count||__atomic_load_n(&running,__ATOMIC_ACQUIRE)||
+       __atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE)||
+       __atomic_load_n(&owner_notice,__ATOMIC_ACQUIRE)||
+       __atomic_load_n(&audio_service_context,__ATOMIC_ACQUIRE))return XV_LC_QUEUE;
+    if(census_owner_scopes)return XV_LC_GUARD;
+    return XV_LC_OK;
+}
+int xv_object_census_is_owner(void) {return census_is_owner();}
+unsigned xv_object_census_boundary(const xctx *c)
+{
+    unsigned r=xv_object_census_admit(c);
+    return r?r:owner?XV_LC_QUEUE:XV_LC_OK;
+}
+int xv_object_census_scope_begin(void)
+{
+    if(!census_is_owner())return 0;
+    census_owner_scopes++;return 1;
+}
+void xv_object_census_scope_end(int *token)
+{
+    if(!*token)return;
+    if(!census_is_owner()||!census_owner_scopes)abort();
+    census_owner_scopes--;*token=0;
+}
+#endif
+
 #ifdef XV_OBJECT_POSE_EXPERIMENT
 /* No environment/default enable: only the drained guest owner may opt in.
  * Each worker owns its scope accounting until the joined report boundary. */
@@ -682,6 +737,13 @@ static int initialize(void)
 {
     if(initialized)return initialized>0;
     initialized=-1;
+#ifdef XV_LIGHT_QUERY_CENSUS
+#ifdef __vita__
+    census_owner_thread=sceKernelGetThreadId();
+#else
+    census_owner_thread=pthread_self();
+#endif
+#endif
 #ifdef XV_OBJECT_POSE_EXPERIMENT
 #ifdef __vita__
     pose_owner_thread=sceKernelGetThreadId();
@@ -954,6 +1016,7 @@ void xv_object_job_indirect(xctx *c,unsigned target)
 }
 void xv_object_job_stop(xctx *c,unsigned address,const char *reason)
 {
+    XV_LIGHT_CENSUS_CANCEL(c,XV_LC_STOP);
     uint32_t object=c->r[1];
     for(unsigned i=0;i<LANES;i++)if(c==&contexts[i]) {
         object=active_objects[i];char chain[300];unsigned used=0;
@@ -1036,6 +1099,9 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
 }
 void xv_object_jobs_shutdown(void)
 {
+#ifdef XV_LIGHT_QUERY_CENSUS
+    xv_light_census_cancel(NULL,XV_LC_STOP);
+#endif
     if(initialized!=1)return;
     xv_object_jobs_join();owner=NULL;
     __atomic_store_n(&stopping,1,__ATOMIC_RELEASE);
