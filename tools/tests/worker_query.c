@@ -24,6 +24,7 @@ static unsigned batch_case;
 #endif
 static unsigned lane_seen[2],service_ready,service_done,park_ack;
 static unsigned query_held,query_tried;
+static void wait_flag(unsigned *flag);
 static pthread_barrier_t rendezvous;
 static int mode;
 static _Thread_local unsigned mutation;
@@ -116,6 +117,12 @@ void xv_worker_query_test_ready(xctx *c,unsigned lane)
         uint64_t end=xk_os_monotonic_us()+5000000;
         while(!__atomic_load_n(&query_tried,__ATOMIC_ACQUIRE))assert(xk_os_monotonic_us()<end);
     }
+#ifdef XV_TYPED_CLUSTER_QUERY
+    if(mode==8){
+        __atomic_store_n(&query_held,1,__ATOMIC_RELEASE);
+        wait_flag(&service_done);
+    }
+#endif
 }
 static void equal(const void *a,const void*b,unsigned n,const char *what,unsigned k)
 {
@@ -126,10 +133,38 @@ static void wait_flag(unsigned *flag)
 {uint64_t end=xk_os_monotonic_us()+5000000;while(!__atomic_load_n(flag,__ATOMIC_ACQUIRE)){assert(xk_os_monotonic_us()<end);struct timespec t={0,1000};nanosleep(&t,NULL);}}
 static void service(xctx*c)
 {assert(worker_lane()<0);assert(!xv_object_query_lane(c,2,c->r[4]-16384,16404));assert(__atomic_load_n(&park_ack,__ATOMIC_ACQUIRE));c->r[4]+=4;__atomic_store_n(&service_done,1,__ATOMIC_RELEASE);}
+#ifdef XV_TYPED_CLUSTER_QUERY
+static void invalidating_service(xctx*c)
+{assert(worker_lane()<0);c->r[0]=0;c->r[4]+=8;__atomic_store_n(&service_done,1,__ATOMIC_RELEASE);}
+#endif
 void f_0008FB70(xctx *c)
 {
     xctx saved=*c;unsigned id=c->r[1],sp=c->r[4]-256;int lane=worker_lane();assert(lane>=0);
+#ifdef XV_TYPED_CLUSTER_QUERY
+    if(mode==0){
+        /* Exercise direct publication through first/last partial stack pages,
+         * including a six-fragment capture when the arguments cross a page. */
+        static const unsigned offsets[]={0,4,64,2048,4016,4076,4092};
+        sp=(sp&~4095u)-4096+offsets[(batch_case/7)%7];
+    }
+#endif
     if(mode!=5){int b=pthread_barrier_wait(&rendezvous);assert(!b||b==PTHREAD_BARRIER_SERIAL_THREAD);}
+#ifdef XV_TYPED_CLUSTER_QUERY
+    if(mode==8){
+        if(id){
+            wait_flag(&query_held);X_M32(c->r[4])=0x32084;
+            xv_object_job_hle(c,0x184a20,invalidating_service);
+        }else{
+            XV_OBJECT_MATH_GUARD();prepare(c,sp,7);xctx entry=*c;
+            x_guest_read(before,sp-16384,16404);
+            assert(!xv_worker_query(c,xv_object_math_locked_));
+            x_guest_read(expected,sp-16384,16404);
+            equal(&entry,c,sizeof *c,"in-flight context",0);
+            equal(before,expected,16404,"in-flight scratch",0);
+            assert(X_IMG32(0x2d2fac)==100&&X_IMG8(0x2d2fa9)==0);
+        }
+    }else
+#endif
     if(mode==4){
         if(!id){
             XV_OBJECT_MATH_GUARD();X_M32(c->r[4])=0x291ef;
@@ -209,7 +244,7 @@ void f_0008FB70(xctx *c)
 }
 int main(int argc,char **argv)
 {
-    assert(argc==2);char *names[]={"normal","disabled","alias","mutation","parking","budget","concurrent","source"};for(mode=0;mode<8&&strcmp(argv[1],names[mode]);mode++){}assert(mode<8);
+    assert(argc==2);char *names[]={"normal","disabled","alias","mutation","parking","budget","concurrent","source","inflight"};for(mode=0;mode<9&&strcmp(argv[1],names[mode]);mode++){}assert(mode<9);
     setenv("XV_WORKER_QUERY",mode==1?"invalid":"1",1);
     g_xram=calloc(1,ARENA);g_img_base=g_xram+RAM;g_xpt=calloc(1<<20,4);before=malloc(ARENA);expected=malloc(ARENA);
     for(unsigned i=0;i<RAM/4096;i++)g_xpt[i]=(i^1u)*4096;
@@ -238,7 +273,13 @@ int main(int argc,char **argv)
     assert(fegetround()==FE_DOWNWARD&&fetestexcept(FE_ALL_EXCEPT)==owner_flags);
     }
 #endif
-    if(mode==0){assert(ready_count>100&&lane_seen[0]&&lane_seen[1]);}
+    if(mode==0){assert(ready_count>
+#ifdef XV_TYPED_CLUSTER_QUERY
+        64 /* Nonpositive/nonfinite and invalid-start inputs use the original. */
+#else
+        100
+#endif
+        &&lane_seen[0]&&lane_seen[1]);}
     if(mode==1)assert(!ready_count);
     if(mode==3)assert(mutation_count==
 #ifdef XV_TYPED_CLUSTER_QUERY
@@ -248,6 +289,7 @@ int main(int argc,char **argv)
 #endif
     );
     if(mode==4)assert(service_done);
+    if(mode==8)assert(service_done&&ready_count==1&&query_held);
     if(mode==6){
         assert(query_tried&&ready_count==128&&X_IMG32(0x2d2fac)==228);
         assert(X_M16(POOL0+0x30)==14&&X_M16(POOL1+0x30)==14);

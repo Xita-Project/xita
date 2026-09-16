@@ -139,6 +139,14 @@ invalidation. ASan/UBSan and the concurrent/parking TSan checks pass. Vita SDK
 compilation and Makefile OFF/ON/OFF transitions pass. The final live geometry
 writer/lifetime audit, whole-path timing and controlled hardware comparison
 remain pending. None of these prototypes is installed on Vita.
+The integrated ARM follow-up now passes 400 full query context/memory/FPSCR
+comparisons, including the original allocation tail. Initial adapter overhead
+erased the saving on small inputs. Faster validation/publication and cheap-case
+bypasses reduce complete synthetic query instructions about 13–43% on traversals
+of 7–256 clusters, excluding per-batch construction and firmware/kernel costs.
+Queries that visit only one cluster can still regress. Measure actual worker
+query sizes before choosing an eligibility rule; this remains disabled and is
+not a physical FPS improvement.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)

@@ -10,6 +10,7 @@
 
 enum { T_LANES=2,T_MAPS=12 };
 enum { T_LAYOUT,T_INPUT,T_NUMERIC,T_CHANGED,T_REASONS };
+_Static_assert(sizeof(xctx)%4==0,"wordwise context comparison requires whole words");
 typedef struct {uint32_t address,bytes;unsigned image;unsigned char *pointer;} Span;
 typedef struct __attribute__((aligned(64))) {
     XvClusterReplay replay;
@@ -20,7 +21,7 @@ typedef struct __attribute__((aligned(64))) {
     float center[3];
     Span maps[T_MAPS];unsigned maps_count;
     fenv_t entry_fp,result_fp;
-    uint64_t attempts,applied,declines[T_REASONS],dirty_bytes,backedges;
+    uint64_t attempts,applied,bypassed,declines[T_REASONS],dirty_bytes,backedges;
 } Lane;
 static Lane lanes[T_LANES];
 static struct {
@@ -139,31 +140,37 @@ static int read_input(Lane *v,uint32_t address,void *out,unsigned bytes)
 static void copy_visited(uint32_t out[256])
 {unsigned done=0;for(unsigned i=0;i<batch.visited_spans;i++){
     memcpy((unsigned char*)out+done,batch.visited[i].pointer,batch.visited[i].bytes);done+=batch.visited[i].bytes;}}
+/* These captures and page fragments are word-aligned and have whole-word sizes.
+ * Four-word equality groups avoid the generic SDK comparison's per-word branch
+ * and byte-ordering fallback while checking context and 256 visited stamps. */
+static int same_words(const void *left,const void *right,unsigned bytes)
+{
+    const uint32_t *a=left,*b=right;unsigned n=bytes/4,i=0;
+    for(;i+4<=n;i+=4)
+        if((a[i]^b[i])|(a[i+1]^b[i+1])|(a[i+2]^b[i+2])|(a[i+3]^b[i+3]))return 0;
+    for(;i<n;i++)if(a[i]!=b[i])return 0;
+    return 1;
+}
 static int visited_current(const Lane *v)
 {
     unsigned done=0;
     for(unsigned i=0;i<batch.visited_spans;i++){
         const Span *s=&batch.visited[i];
-        if(pointer(s->address,s->bytes,0)!=s->pointer||memcmp(s->pointer,(const unsigned char*)v->visited+done,s->bytes))return 0;
+        if(pointer(s->address,s->bytes,0)!=s->pointer||!same_words(s->pointer,(const unsigned char*)v->visited+done,s->bytes))return 0;
         done+=s->bytes;
     }
     return 1;
-}
-static unsigned char *captured_pointer(const Lane *v,uint32_t address,unsigned bytes,unsigned image)
-{
-    for(unsigned i=0;i<v->maps_count;i++){
-        const Span *s=&v->maps[i];
-        if(s->image==image&&address>=s->address&&address-s->address<=s->bytes&&bytes<=s->bytes-(address-s->address))
-            return s->pointer+address-s->address;
-    }
-    return NULL;
 }
 static void publish(Lane *v,xctx *c,uint32_t entry_epoch)
 {
     /* Every mapping has been checked. No callback, allocation, failure or lock
      * operation is permitted once the first live byte is written. */
     uint32_t base=v->entry.r[4]-XV_CLUSTER_SCRATCH;
-    for(unsigned word=0;word<XV_CLUSTER_DIRTY_WORDS;word++){
+    /* The replay uses 44 bytes per recursive cluster frame and at most 1,104
+     * additional bytes below a frame for portal work. Include another frame of
+     * margin; bytes below this bound cannot have been written. */
+    unsigned first=(XV_CLUSTER_SCRATCH-1284-44*v->result.maximum_depth)/64;
+    for(unsigned word=first;word<XV_CLUSTER_DIRTY_WORDS;word++){
         uint32_t bits=v->replay.dirty[word];
         while(bits){
             unsigned start=__builtin_ctz(bits),n=32-start;
@@ -171,7 +178,9 @@ static void publish(Lane *v,xctx *c,uint32_t entry_epoch)
             unsigned offset=(word*32+start)*2,remaining=n*2;
             while(remaining){
                 unsigned take=4096-((base+offset)&4095);if(take>remaining)take=remaining;
-                memcpy(captured_pointer(v,base+offset,take,0),v->replay.scratch+offset,take);
+                /* Stack spans were captured first, in virtual page order. */
+                const Span *s=&v->maps[((base&4095)+offset)/4096];
+                memcpy(s->pointer+(base+offset-s->address),v->replay.scratch+offset,take);
                 v->dirty_bytes+=take;offset+=take;remaining-=take;
             }
             bits&=~((n==32?UINT32_MAX:(1u<<n)-1)<<start);
@@ -182,7 +191,10 @@ static void publish(Lane *v,xctx *c,uint32_t entry_epoch)
         for(unsigned word=0;word<8;word++){
             uint32_t bits=v->result.changed[word];
             while(bits){unsigned bit=__builtin_ctz(bits);bits&=bits-1;
-                memcpy(captured_pointer(v,0x2d2fb0+4*(word*32+bit),4,0),&v->result.epoch,4);}
+                unsigned offset=4*(word*32+bit),first_bytes=batch.visited[0].bytes;
+                unsigned char *dst=offset<first_bytes?batch.visited[0].pointer+offset:
+                    batch.visited[1].pointer+offset-first_bytes;
+                memcpy(dst,&v->result.epoch,4);}
         }
     }
     *c=v->replay.context;fesetenv(&v->result_fp);
@@ -192,15 +204,26 @@ int xv_worker_query(xctx *c,int guard)
     extern int xv_watch_n __attribute__((weak)),xv_trace_funcs __attribute__((weak));
     if((&xv_watch_n&&xv_watch_n)||(&xv_trace_funcs&&xv_trace_funcs))return 0;
     if(c->r[4]<XV_CLUSTER_SCRATCH||c->r[4]>UINT32_MAX-20||(c->r[4]&3)||c->fsp>7||!globals_current())return 0;
+    /* A one-cluster graph cannot have a costly recursive traversal. */
+    if(xv_cluster_snapshot_geometry(batch.snapshot)->cluster_count==1)return 0;
     int lane=xv_object_query_lane(c,guard,c->r[4]-XV_CLUSTER_SCRATCH,XV_CLUSTER_SCRATCH+20)-1;
     if(lane<0||lane>=T_LANES)return 0;
-    Lane *v=&lanes[lane];v->attempts++;v->entry=*c;v->maps_count=0;
-    unsigned reason=T_LAYOUT;fegetenv(&v->entry_fp);
+    Lane *v=&lanes[lane];v->attempts++;v->maps_count=0;
+    /* The original handles these cases in a handful of instructions. Inspect
+     * only validated private bytes using integers, without changing native FP
+     * state or allocating/copying a complete query capture. */
+    x_guest_read(v->args,c->r[4],20);
+    uint32_t radius=v->args[4];
+    if(!radius||(radius&0x80000000u)||radius>=0x7f800000u){v->bypassed++;return 0;}
+    if(v->args[0]!=0x925b0||c->r[0]<c->r[4]+20||v->args[3]<c->r[4]+20||
+       !xv_object_query_private(c,guard,c->r[0],6)||!xv_object_query_private(c,guard,v->args[3],12)){
+        v->declines[T_LAYOUT]++;return 0;
+    }
+    uint16_t start_cluster;x_guest_read(&start_cluster,c->r[0]+4,2);
+    if(start_cluster==65535){v->bypassed++;return 0;}
+    v->entry=*c;unsigned reason=T_LAYOUT;fegetenv(&v->entry_fp);
     if(!add_span(v,c->r[4]-XV_CLUSTER_SCRATCH,XV_CLUSTER_SCRATCH+20,0)||
        !add_span(v,0x2d2fb0,1024,0)||!add_span(v,0x2d2fac,4,1)||!add_span(v,0x2d2fa9,1,1))goto decline;
-    x_guest_read(v->args,c->r[4],20);
-    if(v->args[0]!=0x925b0||c->r[0]<c->r[4]+20||v->args[3]<c->r[4]+20||
-       !xv_object_query_private(c,guard,c->r[0],6)||!xv_object_query_private(c,guard,v->args[3],12))goto decline;
     reason=T_INPUT;
     if(!read_input(v,c->r[0],v->start,6)||!read_input(v,v->args[3],v->center,12))goto decline;
     for(unsigned i=0;i<batch.visited_spans;i++)
@@ -220,7 +243,7 @@ int xv_worker_query(xctx *c,int guard)
     xv_worker_query_test_ready(c,(unsigned)lane);
 #endif
     reason=T_CHANGED;
-    if(!globals_current()||memcmp(c,&v->entry,sizeof *c)||
+    if(!globals_current()||!same_words(c,&v->entry,sizeof *c)||
        xv_object_query_lane(c,guard,c->r[4]-XV_CLUSTER_SCRATCH,XV_CLUSTER_SCRATCH+20)!=lane+1)goto decline;
     for(unsigned i=0;i<v->maps_count;i++){
         Span *s=&v->maps[i];if(pointer(s->address,s->bytes,s->image)!=s->pointer)goto decline;
@@ -239,11 +262,11 @@ void xv_worker_query_report(void)
 {
     for(unsigned i=0;i<T_LANES;i++){
         Lane *v=&lanes[i];
-        XK_LOG("[typed-query] lane %u attempts %llu applied %llu dirty-bytes %llu backedges %llu declines layout/input/numeric/changed %llu/%llu/%llu/%llu\n",i,
-            (unsigned long long)v->attempts,(unsigned long long)v->applied,(unsigned long long)v->dirty_bytes,(unsigned long long)v->backedges,
+        XK_LOG("[typed-query] lane %u attempts %llu applied %llu bypassed %llu dirty-bytes %llu backedges %llu declines layout/input/numeric/changed %llu/%llu/%llu/%llu\n",i,
+            (unsigned long long)v->attempts,(unsigned long long)v->applied,(unsigned long long)v->bypassed,(unsigned long long)v->dirty_bytes,(unsigned long long)v->backedges,
             (unsigned long long)v->declines[T_LAYOUT],(unsigned long long)v->declines[T_INPUT],
             (unsigned long long)v->declines[T_NUMERIC],(unsigned long long)v->declines[T_CHANGED]);
-        v->attempts=v->applied=v->dirty_bytes=v->backedges=0;memset(v->declines,0,sizeof v->declines);
+        v->attempts=v->applied=v->bypassed=v->dirty_bytes=v->backedges=0;memset(v->declines,0,sizeof v->declines);
     }
     XK_LOG("[typed-query] snapshots %llu failed %llu build-us %llu owned-bytes-sum %llu invalidations %u last-service %08X; guard retained, batch lifetime only\n",
         (unsigned long long)batch.builds,(unsigned long long)batch.failed,(unsigned long long)batch.build_us,(unsigned long long)batch.owned_bytes,

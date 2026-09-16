@@ -274,13 +274,14 @@ admission, scheduler and hook, with a generated original reference kept private:
 
 | Check | Result |
 | --- | --- |
-| ASan/UBSan original-versus-hook comparison | 336 exact full-context, memory and FP comparisons; 248 typed admissions |
+| ASan/UBSan original-versus-hook comparison | 336 exact full-context, memory and FP comparisons; 68 typed admissions after cheap-case bypasses |
 | Runtime disabled | 24 exact original-route comparisons; no typed admission |
 | Aliases / mutable-input conflicts / invalid sources | 16 / 8 / 12 comparisons preserving the original state on decline |
 | Concurrent list updates and removals | 128 typed queries across both workers; expected final epoch and list memberships |
 | Owner parking/service | Batch invalidated; original query remains usable afterward |
+| Owner service during private computation | Publication declined; caller context, scratch, epoch and marker remain unchanged |
 | Instruction budget exhausted | Original worker stop is preserved |
-| TSan | Concurrent-list and owner-parking scenarios pass |
+| TSan | Concurrent-list, owner-parking and in-flight invalidation scenarios pass |
 | Vita SDK / actual Makefile | All new objects compile; worker object OFF / typed ON / OFF symbols and stamps verified |
 
 These tests prove behavior with a controlled immutable source and explicit
@@ -288,6 +289,65 @@ invalidation. They do **not** prove that every live guest writer obeys that
 contract. The source/retirement audit below remains a deployment prerequisite.
 Per-batch allocation, geometry copying, input capture, validation and publication
 are also additional costs; the earlier 1.9x prefix instruction result excludes them.
+
+## Complete-path ARM follow-up
+
+The first integrated adapter loses its numerical advantage on small inputs.
+In the seven-cluster chain it executes 39,540 instructions versus 37,926 for the
+original, before the snapshot build. Nonpositive-radius and invalid-start cases
+are substantially worse. This is a reason to keep it disabled, not a hardware gain.
+
+The revised adapter uses wordwise equality checks for aligned captures, publishes
+through already-validated page spans without searching the span list per write,
+and scans only scratch-mask words within the replay's maximum-depth bound. It
+also sends nonpositive/nonfinite radii, invalid starts and one-cluster graphs
+directly to the original route before full capture. No mapping, ownership or
+mutable-state validation is removed.
+
+`test_arm_cluster_runtime.py` now executes the production hook, actual pool guard
+and admission code, full adapter and original allocation/list tail. Four native
+rounding modes and five FP controls, including FZ/DN/sticky status, give **400
+exact context/arena/FPSCR comparisons**, with 300 admitted typed queries. Pool
+capacities 0, 1, 8 and 1,024 exercise allocation failures. The host pool additionally
+tests stack offsets at both page edges, including a six-fragment stack/argument
+capture. Concurrent-list and owner-parking TSan checks still pass.
+An additional actual-pool test holds one lane after private computation while
+the other requests an owner resource service. ASan/UBSan and TSan both confirm
+that invalidation cancels publication without changing the captured caller
+context, scratch, epoch or marker.
+
+| Synthetic chain | Original query instructions | Revised query instructions | Snapshot construction, once per batch |
+| --- | ---: | ---: | ---: |
+| 7 clusters | 37,927 | 32,903 | 10,913 |
+| 31 clusters | 180,391 | 126,460 | 43,239 |
+| 65 clusters | 380,666 | 255,013 | 88,983 |
+| 256 clusters | 1,222,594 | 693,716 | 345,447 |
+
+These are instruction counts, not cycles or FPS. The fixture runs actual SDK
+`memcmp` and integer/floating-point code, but models the firmware targets of
+`memcpy`/`memset` separately. Copied/cleared bytes rise from 168 to 4,252 in the
+seven-cluster query and from 1,536 to 17,392 in the 256-cluster query. There are
+six additional thread-ID imports per admitted query. Kernel latency, contention,
+cache behavior and real allocator bookkeeping are excluded; snapshot allocations
+use a bounded fixture allocator. The original and candidate share the unchanged
+uncontended guard and original tail. A tiny readiness callback adds test-only work.
+
+The small-work regression is **not fully solved**. A seven-cluster graph whose
+sphere rejects its first portal takes 9,595 candidate instructions versus 3,128
+original instructions. Positive queries in a larger map can still visit only
+one cluster. Map size alone is therefore not a sufficient eligibility test.
+Actual worker query sizes/portal work need measurement before selecting this
+path on hardware. The earlier physical census counted 12,578 worker queries but
+did not measure their work. Avoid attributing the user's existing 20 FPS reports
+to this uninstalled candidate.
+
+The source audit finds 756 functions in the direct `8FB70` call closure and no
+directly reachable writes to roots `39BE58/39BE50`. However, 45 functions contain
+indirect calls, and field-level geometry writes are not fully covered by a root
+search. `D3DResource_IsBusy` only updates its caller context; the known `12CC3`
+event wrapper passes a null previous-state output. Other owner services are
+quiescent. These observations narrow the audit but do not complete its lifetime
+proof; conservative invalidation remains in place.
 
 ## Integration work still required
 
@@ -298,17 +358,19 @@ are also additional costs; the earlier 1.9x prefix instruction result excludes t
    publish an owned generation if a persistent cache is introduced. The current
    per-batch snapshot drains workers and invalidates all owner services, but still
    needs an audit of worker writes to the consumed geometry and mapping storage.
-   Its construction cost also needs measurement. Pointer equality and the existing large-read
+   Real construction/allocator cost also needs measurement. Pointer equality and the existing large-read
    texture-purge heuristic do not establish that lifetime. Generated overlapping
    entries also need coverage; an entry at `58D8A` contains the later root store.
 2. **Add controlled measurement and deployment.** Admission and publication now
    pass the actual-pool tests above. Keep the guard held, add an owner-side
    OFF/ON/OFF selector at drained boundaries, and validate the complete private
    game build before considering an update. The current hardware remains unchanged.
-3. **Measure the complete path.** Compare end-to-end guard occupancy and hardware
-   frame time, then exercise combat, driving and campaign BSP transitions. The
-   kernel's instruction reduction alone is insufficient to retain a runtime
-   change or claim stable 20 FPS.
+3. **Measure real query work and frame time.** Obtain worker count/portal/budget
+   distributions before choosing an eligibility rule or restructuring the whole
+   call boundary. Compare end-to-end guard occupancy and hardware frame time,
+   then exercise combat, driving and campaign BSP transitions. Even the complete
+   synthetic instruction reduction is insufficient to retain a runtime change
+   or claim stable 20 FPS.
 
 ## Reproduction
 
@@ -331,6 +393,8 @@ python tools/test_cluster_runtime.py --xbe "$XBE" --manifest "$MANIFEST" \
     --out "$RESULTS/runtime-tsan" --sanitize thread --mode concurrent --mode parking
 python tools/test_cluster_runtime.py --xbe "$XBE" --manifest "$MANIFEST" \
     --out "$RESULTS/runtime-arm" --arm
+python tools/test_arm_cluster_runtime.py --xbe "$XBE" --manifest "$MANIFEST" \
+    --out "$RESULTS/runtime-cost"
 python tools/test_cluster_query_rebase.py --xbe "$XBE" --manifest "$MANIFEST" \
     --out "$RESULTS/epoch-rebase"
 python tools/test_cluster_query_fpu.py --xbe "$XBE" --manifest "$MANIFEST" \

@@ -19,6 +19,19 @@ from recompiler import xita_recomp as r
 from tools.test_cluster_query import generate
 
 
+def generate_worker_reference(xbe, manifest, out):
+    raw = generate(xbe, manifest, out, full=True, extra_pcs=(0x565E0, 0xA92C0))
+    hooks = HaloHooks(r.Image(str(xbe), str(manifest)))
+    assert hooks.enabled
+    text = '#include "kernel/xk_object_jobs.h"\n'
+    text += ''.join(f'void f_{pc:08X}(xctx *);\nvoid ref_{pc:08X}(xctx *);\n' for pc in raw)
+    for pc, body in raw.items():
+        text += re.sub(r'\bf_([0-9A-F]{8})', r'ref_\1', body)
+        text += body.replace('{\n', '{\n' + '\n'.join(hooks.function_entry(pc)) + '\n', 1)
+    (out / 'worker-reference.c').write_text(text)
+    (out / 'worker_query_axes.h').write_text((out / 'cluster_axes.h').read_text())
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ('xbe', 'manifest', 'out'):
@@ -28,16 +41,7 @@ def main():
     p.add_argument('--mode', action='append')
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
-    raw = generate(a.xbe, a.manifest, a.out, full=True, extra_pcs=(0x565E0, 0xA92C0))
-    hooks = HaloHooks(r.Image(str(a.xbe), str(a.manifest)))
-    assert hooks.enabled
-    text = '#include "kernel/xk_object_jobs.h"\n'
-    text += ''.join(f'void f_{pc:08X}(xctx *);\nvoid ref_{pc:08X}(xctx *);\n' for pc in raw)
-    for pc, body in raw.items():
-        text += re.sub(r'\bf_([0-9A-F]{8})', r'ref_\1', body)
-        text += body.replace('{\n', '{\n' + '\n'.join(hooks.function_entry(pc)) + '\n', 1)
-    (a.out / 'worker-reference.c').write_text(text)
-    (a.out / 'worker_query_axes.h').write_text((a.out / 'cluster_axes.h').read_text())
+    generate_worker_reference(a.xbe, a.manifest, a.out)
     flags = ['-O2', '-g', '-std=gnu11', '-fno-strict-aliasing', '-ffp-contract=off',
              '-frounding-math', '-ffunction-sections', '-fdata-sections',
              '-DXV_EXPERIMENTAL_OBJECT_JOBS', '-DXV_WORKER_QUERY', '-DXV_TYPED_CLUSTER_QUERY',
@@ -61,7 +65,7 @@ def main():
                str(ROOT / 'recomp/xv_x86rt.c'), '-pthread', '-Wl,--gc-sections', '-lm', '-o', str(binary)]
     (a.out / 'command.json').write_text(json.dumps(command, indent=2) + '\n')
     subprocess.run(command, check=True)
-    for mode in a.mode or ('normal', 'disabled', 'alias', 'mutation', 'parking', 'concurrent', 'source', 'budget'):
+    for mode in a.mode or ('normal', 'disabled', 'alias', 'mutation', 'parking', 'concurrent', 'source', 'inflight', 'budget'):
         run = subprocess.run([str(binary), mode], capture_output=True, text=True, timeout=120,
                              env=dict(os.environ, ASAN_OPTIONS='detect_leaks=0'))
         (a.out / (mode + '.log')).write_text(run.stdout + run.stderr)
