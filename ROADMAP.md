@@ -114,7 +114,13 @@ outer lock acquisitions by about 59%, but three native-resolution trials remain
 near 10.7 FPS with no meaningful gain. It is restored off. A small material-state
 prototype also remains separate after weak ARM sizing results. Current larger
 work targets private spatial queries with ordered publication and larger native
-geometry regions. The [polygon-edge comparison](docs/native-polygon-edge.md)
+geometry regions. The [direct query prototype](docs/direct-cluster-query-20260916.md)
+passes 4,096 host, 350 admitted ARM and 26,624 owned-map numerical comparisons;
+90 exceptional/budget ARM cases decline. Its typed traversal uses about one-seventh
+the original prefix's ARM instructions in ordinary synthetic cases. It remains
+source-only: snapshot lifetime, observable-state preservation and guarded result
+publication must be completed before a hardware comparison. This is not a measured
+FPS gain. The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)
 now completes three long native-resolution hardware trials: roughly 9.66–9.68
