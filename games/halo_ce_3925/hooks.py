@@ -89,6 +89,7 @@ class HaloHooks(NoGameHooks):
                 (0x8DDF0, 2218, "247190d1cd001f43646b9627fd2f538c64b15efefaad1f9510f5137f04e4dc63"),
                 (0xB5B40, 339, "21273987e0276cda51a2d70b2b576abc42195b8efeff9ab4e8f552a15b323726"),
                 (0xB5F60, 291, "9f10d4414ec5fb6b39f5f20f6100791e0aec209d77f6c60599402dff6bdb5d78")))
+        self.pose_coalesce_enabled = self.hierarchy_enabled
 
     # Shared cluster lists and datum allocation/free. The first concurrent
     # campaign test cycled at 56643 in removal after unguarded list mutation.
@@ -110,10 +111,19 @@ class HaloHooks(NoGameHooks):
     object_shared_aliases = {0x115423: 0x114D30, 0x115FDF: 0x114D30}
 
     def before_instruction(self, address):
-        if self.hierarchy_enabled and address == 0x8E0F0:
-            return ["#ifdef XV_NATIVE_MODEL_HIERARCHY",
-                    "    { extern int xv_math_model_hierarchy(xctx *); (void)xv_math_model_hierarchy(c); }",
-                    "#endif"]
+        if address == 0x8E0F0:
+            out = []
+            if self.pose_coalesce_enabled:
+                out.extend(["#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POSE_EXPERIMENT)",
+                            "    XV_OBJECT_POSE_BEGIN(c);", "#endif"])
+            if self.hierarchy_enabled:
+                out.extend(["#ifdef XV_NATIVE_MODEL_HIERARCHY",
+                            "    { extern int xv_math_model_hierarchy(xctx *); (void)xv_math_model_hierarchy(c); }",
+                            "#endif"])
+            return out
+        if self.pose_coalesce_enabled and address == 0x8E5D0:
+            return ["#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POSE_EXPERIMENT)",
+                    "    XV_OBJECT_POSE_FINISH();", "#endif"]
         if self.object_scan_enabled and address in (0x900E0, 0x902A9, 0x90314):
             line = {0x900E0: "(void)xv_object_jobs_begin(c);",
                     0x902A9: "xv_object_jobs_join();",
@@ -142,6 +152,9 @@ class HaloHooks(NoGameHooks):
         out = []
         if not self.enabled:
             return out
+        if self.pose_coalesce_enabled and address in (0x8DDF0, 0x8E087):
+            out.extend(["#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POSE_EXPERIMENT)",
+                        "    XV_OBJECT_POSE_SCOPE();", "#endif"])
         if address == 0x1D130 and hashlib.sha256(
                 self.image.bytes_at(address, 16) or b"").hexdigest() == "810ef7f224dd7cd8feb82821c31ca0997daab985ffc11449ffa287d879ada54e":
             out.extend(["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS",
