@@ -66,6 +66,22 @@ $(BUILD)/gpu-packet.config: force-gpu-packet-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o: $(BUILD)/gpu-packet.config
+# Optional read-only continuation proof. Default OFF; both compile transitions
+# rebuild every owner of the guarded interface.
+ifeq ($(XV_DEPTH_STORE),1)
+ifneq ($(RECOMP),1)
+$(error XV_DEPTH_STORE requires RECOMP=1)
+endif
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o $(BUILD)/runtime/xv_shader.o: CFLAGS += -DXV_DEPTH_STORE
+endif
+.PHONY: force-depth-store-config
+force-depth-store-config:
+$(BUILD)/depth-store.config: force-depth-store-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_DEPTH_STORE)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o $(BUILD)/runtime/xv_shader.o: $(BUILD)/depth-store.config
 # Existing-scene exact query completion candidate; compiled and runtime OFF by default.
 ifeq ($(XV_QUERY_BOUNDARY),1)
 ifneq ($(RECOMP),1)

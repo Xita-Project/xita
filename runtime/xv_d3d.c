@@ -674,6 +674,7 @@ typedef struct {
 } rt_alias_t;
 static rt_alias_t g_rt[XV_RT_SLOTS];
 #include "xv_query_boundary.h"
+#include "xv_depth_store.h"
 static unsigned g_rt_bytes;
 extern void xv_render_target_drain(void); /* wait for pump AND GPU, outside a scene */
 
@@ -2563,6 +2564,7 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
 {
     cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
     SceGxmDepthStencilSurface bd = *depth;
+    XV_DS_SETUP(l);
     sceGxmDepthStencilSurfaceSetForceStoreMode(&bd, SCE_GXM_DEPTH_STENCIL_FORCE_STORE_ENABLED);
     unsigned clear_slot = 0, current = 0xff;
     int open = 0;
@@ -2609,9 +2611,11 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
                     xv_render_profile_stage(XV_RENDER_SUBMIT);
                 }
                 if (err < 0) { XV_LOG("RT EndScene failed %08X\n", err); return -1; }
+                XV_DS_STORED(current);
                 open = 0;
             }
             rt_alias_t *r = target ? &g_rt[target - 1] : NULL;
+            XV_DS_SURFACE(l,i,u,target,&bd,back_width,back_height);
             int err = XV_RENDER_CALL(XV_RENDER_SCENE_BEGIN, sceGxmBeginScene(ctx, 0, r ? r->rt : back, NULL, NULL,
                 r ? NULL : sync, r ? &r->color : color, r ? &r->depth : &bd));
             if (err < 0) {
