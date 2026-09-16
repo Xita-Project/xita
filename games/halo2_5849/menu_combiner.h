@@ -13,6 +13,7 @@
 typedef struct menu_combiner {
     uint32_t rgb_in[8], rgb_out[8], alpha_in[8], alpha_out[8];
     uint32_t factor0[8], factor1[8];   /* per-stage c0/c1, ARGB packed */
+    uint32_t final_factor0, final_factor1; /* final combiner c0/c1: SET_SPECULAR_FOG_FACTOR0/1 */
     uint32_t final_abcd, final_efg;
     unsigned stages;
     int mux_msb;

@@ -63,8 +63,29 @@ static void test_final_lerp(void)
     assert(feq(out[0],0.2f)&&feq(out[1],0.4f)&&feq(out[2],0.8f));
 }
 
+
+static void test_final_combiner_uses_final_factors(void)
+{
+    /* stage0: r0 = dot(t0, c0=luma weights); final: A=r0, B=c0 -> tint must be the FINAL c0
+     * (SET_SPECULAR_FOG_FACTOR0), not the stage-0 weights. */
+    menu_combiner cb; memset(&cb,0,sizeof cb);
+    cb.stages = 1;
+    cb.rgb_in[0]  = (0x08u<<24) | (0x01u<<16);     /* A=t0 B=c0 */
+    cb.rgb_out[0] = (0xCu<<4) | (0x2u<<12);        /* ab -> r0, AB dot */
+    cb.factor0[0] = 0x0080B333;                     /* luma weights .5,.7,.2 */
+    cb.final_factor0 = 0x00FF8040;                  /* tint 1.0,.5,.25 */
+    cb.final_abcd = 0x0C010000;                     /* rgb = r0*c0 */
+    cb.final_efg  = 0x00000080;
+    float tex[4][4]={{1,1,1,1},{0,0,0,0},{0,0,0,0},{0,0,0,0}};
+    float diff[4]={1,1,1,1}, spec[4]={0,0,0,0}, out[4];
+    menu_combiner_eval(&cb, tex, diff, spec, FOG, out);
+    /* luma of white = 1.4 -> saturates to 1; out = tint */
+    assert(feq(out[0],1.0f) && feq(out[1],0.5f) && feq(out[2],0.25f));
+}
+
 int main(void)
 {
+    test_final_combiner_uses_final_factors();
     test_passthrough_tex0();
     test_diffuse_times_tex();
     test_dot_product();

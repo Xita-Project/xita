@@ -185,22 +185,18 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     rs.target.pixels = target; rs.target.width = W; rs.target.height = H; rs.target.pitch = W * 4;
     rs.clip_x0 = 0; rs.clip_y0 = 0; rs.clip_x1 = (int32_t)W - 1; rs.clip_y1 = (int32_t)H - 1;
 
-    /* Decoded texture scratch: the menu binds up to 640x480 linear images
-     * (screen-space passes) and 512x512 materials, so allow 1024x1024 per unit. */
+    /* Decoded textures come from the content-hashed cache (menu_texture.c); the
+     * menu binds up to 640x480 linear screen images and 512x512 materials, so
+     * allow 1024x1024 per unit. The draw serial pins this draw's entries. */
     enum { TEX_CAP = 1024 * 1024 };
-    static uint32_t *g_tex[4];
-    static int tex_alloc_failed;
+    static uint64_t drawn;
     int textured = 0;
     for (unsigned u = 0; u < 4; ++u) {
-        if (!g_tex[u]) g_tex[u] = malloc((size_t)TEX_CAP * 4);
-        if (!g_tex[u]) {
-            if (!tex_alloc_failed++) xv_logf("[h2/menu-render] texture scratch allocation failed\n");
-            continue;
-        }
         uint32_t tw = 0, th = 0;
         int linear = 0;
-        if (menu_texture_load(s, c, u, g_tex[u], TEX_CAP, &tw, &th, &linear)) {
-            rs.tex[u].texels = g_tex[u]; rs.tex[u].width = tw; rs.tex[u].height = th;
+        const uint32_t *px = menu_texture_acquire(s, c, u, drawn + 1, TEX_CAP, &tw, &th, &linear);
+        if (px) {
+            rs.tex[u].texels = px; rs.tex[u].width = tw; rs.tex[u].height = th;
             rs.tex[u].texel_coords = linear;
             textured = 1;
         }
@@ -277,7 +273,6 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
         assemble(&rs, r->primitive, n, indices, count, lo);
     }
 
-    static uint64_t drawn;
     static int detail = -1;
     if (detail < 0) detail = knob("XV_MENU_DETAIL", 40);
     if (drawn < (uint64_t)detail || !(drawn % 200)) {
@@ -308,8 +303,9 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
      * (the font cache) get their decoded unit-0 image dumped privately plus the
      * combiner/texture registers logged, to see what the glyph quads really sample. */
     static int text_dumps;
+    static unsigned text_quads;
     if (r->primitive == 7 && r->vertex_count && !s->setup[0x30C / 4] && rs.tex[0].texels &&
-        rs.tex[0].texel_coords && text_dumps < 2) {
+        rs.tex[0].texel_coords && text_dumps < 8 && (text_quads++ % 400) < 2) {
         char path[96];
         snprintf(path, sizeof path, "ux0:data/xita-halo2/menu-tex0-%d.bin", text_dumps);
         FILE *fp = fopen(path, "wb");
@@ -332,11 +328,47 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
                     g_verts[i].color[3], g_verts[i].uv[0][0], g_verts[i].uv[0][1], g_verts[i].uv[1][0], g_verts[i].uv[1][1]);
         ++text_dumps;
     }
+    /* Post-process diagnostic: the first few full-screen quads (screen-space passes
+     * that sample the 640x480 scene image) get their complete combiner state logged,
+     * since they decide the presented frame's tone. */
+    static int fullscreen_dumps;
+    if (fullscreen_dumps < 3 && n >= 4 && n <= 6 && (r->primitive == 6 || r->primitive == 7 || r->primitive == 8)) {
+        float fx0 = 1e9f, fy0 = 1e9f, fx1 = -1e9f, fy1 = -1e9f;
+        for (uint32_t i = 0; i < n; ++i) {
+            if (g_verts[i].x < fx0) fx0 = g_verts[i].x;
+            if (g_verts[i].x > fx1) fx1 = g_verts[i].x;
+            if (g_verts[i].y < fy0) fy0 = g_verts[i].y;
+            if (g_verts[i].y > fy1) fy1 = g_verts[i].y;
+        }
+        if (fx0 <= 1.0f && fy0 <= 1.0f && fx1 >= (float)W - 1.0f && fy1 >= (float)H - 1.0f) {
+            char tex[128] = ""; size_t used = 0;
+            for (unsigned u = 0; u < 4; ++u) {
+                uint32_t code = 0, tw = 0, th = 0;
+                if (menu_texture_describe(s, u, &code, &tw, &th))
+                    used += (size_t)snprintf(tex + used, sizeof tex - used, " t%u=%02X/%ux%u@%08X%s", u, code, tw, th,
+                                              s->setup[(0x1B00 + u * 64) / 4], rs.tex[u].texels ? "" : "!");
+            }
+            xv_logf("[h2/menu-render] fullscreen draw=%llu prim=%u color=%08X blend=%d/%04X/%04X/%04X stages=%u final_abcd=%08X final_efg=%08X%s\n",
+                    (unsigned long long)drawn, r->primitive, c->color_offset, rs.blend, rs.sfactor, rs.dfactor, rs.equation,
+                    cb.stages, cb.final_abcd, cb.final_efg, tex);
+            for (unsigned i = 0; i < cb.stages && i < 8; ++i)
+                xv_logf("[h2/menu-render]   stage%u rgb_in=%08X rgb_out=%08X alpha_in=%08X alpha_out=%08X c0=%08X c1=%08X\n",
+                        i, cb.rgb_in[i], cb.rgb_out[i], cb.alpha_in[i], cb.alpha_out[i], cb.factor0[i], cb.factor1[i]);
+            xv_logf("[h2/menu-render]   v0 rgba=(%.2f,%.2f,%.2f,%.2f) uv0=(%.1f,%.1f) uv1=(%.1f,%.1f) uv2=(%.1f,%.1f) uv3=(%.1f,%.1f)\n",
+                    g_verts[0].color[0], g_verts[0].color[1], g_verts[0].color[2], g_verts[0].color[3],
+                    g_verts[0].uv[0][0], g_verts[0].uv[0][1], g_verts[0].uv[1][0], g_verts[0].uv[1][1],
+                    g_verts[0].uv[2][0], g_verts[0].uv[2][1], g_verts[0].uv[3][0], g_verts[0].uv[3][1]);
+            ++fullscreen_dumps;
+        }
+    }
     ++drawn;
     if (!(drawn % 500)) {
         char stats[512];
+        uint64_t hits = 0, misses = 0; size_t bytes = 0;
         menu_texture_stats(stats, sizeof stats);
-        xv_logf("[h2/menu-render] texture formats ok/unsupported/toolarge/nomap: %s\n", stats);
+        menu_texture_cache_stats(&hits, &misses, &bytes);
+        xv_logf("[h2/menu-render] texture formats ok/unsupported/toolarge/nomap: %s; cache hits=%llu misses=%llu bytes=%lu\n",
+                stats, (unsigned long long)hits, (unsigned long long)misses, (unsigned long)bytes);
     }
     /* Re-dump every 20 non-empty draws (overwrites): the last dump before a stall
      * holds the fully composited menu frame for offline inspection. */

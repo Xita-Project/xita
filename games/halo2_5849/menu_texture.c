@@ -1,5 +1,6 @@
 #include "menu_texture.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static uint32_t argb(uint8_t a, uint8_t r, uint8_t g, uint8_t b)
@@ -194,45 +195,52 @@ int menu_texture_describe(const h2_command_state *s, unsigned unit,
     return !!(ctrl & 0x40000000u);
 }
 
-int menu_texture_load(const h2_command_state *s, const h2_kelvin_clear *c,
-                      unsigned unit, uint32_t *rgba, uint32_t cap, uint32_t *ow, uint32_t *oh,
-                      int *out_linear)
+/* A located texture unit: validated registers, mapped source span and palette. */
+typedef struct {
+    fmt_desc d;
+    unsigned code, lw, lh;
+    uint32_t w, h, pitch, src_bytes, blocks_x, blocks_y;
+    const uint8_t *src;
+    uint32_t palette[256], pal_mask;
+    uint32_t key[6];                                     /* offset, fmt, ctrl1, rect, palette, dma */
+} located;
+
+static int locate(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit, uint32_t cap, located *L)
 {
     if (!s || !c || !c->read_instance || !c->map_physical || unit >= 4) return 0;
     unsigned base = 0x1B00 + unit * 64;
     uint32_t fmt = s->setup[(base + 4) / 4], ctrl = s->setup[(base + 0xC) / 4];
     if (!(ctrl & 0x40000000u)) return 0;                 /* unit disabled */
-    unsigned code = (fmt >> 8) & 0xFF, lw = (fmt >> 20) & 15, lh = (fmt >> 24) & 15;
-    unsigned selector = fmt & 3;
+    memset(L, 0, sizeof *L);
+    L->code = (fmt >> 8) & 0xFF; L->lw = (fmt >> 20) & 15; L->lh = (fmt >> 24) & 15;
+    unsigned selector = fmt & 3, code = L->code;
     fmt_desc d;
     if (!describe_format(code, &d)) { note(code, O_UNSUPPORTED); return 0; }
+    L->d = d;
     if ((selector != 1 && selector != 2) || !(s->dma_valid & (1u << selector))) { note(code, O_NOMAP); return 0; }
 
-    uint32_t w, h, pitch = 0, src_bytes, blocks_x = 0, blocks_y = 0;
     if (d.linear) {
         uint32_t rect = s->setup[(base + 0x1C) / 4];
-        w = rect >> 16; h = rect & 0xFFFF; pitch = s->setup[(base + 0x10) / 4] >> 16;
-        if (!w || !h || w > 4096 || h > 4096 || (uint64_t)w * d.bytes > pitch) { note(code, O_NOMAP); return 0; }
-        src_bytes = (uint32_t)((uint64_t)(h - 1) * pitch + (uint64_t)w * d.bytes);
+        L->w = rect >> 16; L->h = rect & 0xFFFF; L->pitch = s->setup[(base + 0x10) / 4] >> 16;
+        if (!L->w || !L->h || L->w > 4096 || L->h > 4096 || (uint64_t)L->w * d.bytes > L->pitch) { note(code, O_NOMAP); return 0; }
+        L->src_bytes = (uint32_t)((uint64_t)(L->h - 1) * L->pitch + (uint64_t)L->w * d.bytes);
     } else {
-        if (lw > 12 || lh > 12) { note(code, O_TOOLARGE); return 0; }
-        w = 1u << lw; h = 1u << lh;
-        if (d.dxt) { blocks_x = (w + 3) / 4; blocks_y = (h + 3) / 4; src_bytes = blocks_x * blocks_y * d.bytes; }
-        else src_bytes = w * h * d.bytes;
+        if (L->lw > 12 || L->lh > 12) { note(code, O_TOOLARGE); return 0; }
+        L->w = 1u << L->lw; L->h = 1u << L->lh;
+        if (d.dxt) { L->blocks_x = (L->w + 3) / 4; L->blocks_y = (L->h + 3) / 4; L->src_bytes = L->blocks_x * L->blocks_y * d.bytes; }
+        else L->src_bytes = L->w * L->h * d.bytes;
     }
-    if ((uint64_t)w * h > cap) { note(code, O_TOOLARGE); return 0; }
+    if ((uint64_t)L->w * L->h > cap) { note(code, O_TOOLARGE); return 0; }
 
     h2_dma_object dma;
     uint32_t phys;
     if (!h2_dma_load(c->read_instance, c->opaque, s->dma[selector], &dma) ||
-        !h2_dma_resolve(&dma, s->setup[base / 4], src_bytes, 0, c->physical_bytes, &phys)) { note(code, O_NOMAP); return 0; }
-    const uint8_t *src = c->map_physical(c->opaque, phys, src_bytes);
-    if (!src) { note(code, O_NOMAP); return 0; }
+        !h2_dma_resolve(&dma, s->setup[base / 4], L->src_bytes, 0, c->physical_bytes, &phys)) { note(code, O_NOMAP); return 0; }
+    L->src = c->map_physical(c->opaque, phys, L->src_bytes);
+    if (!L->src) { note(code, O_NOMAP); return 0; }
 
     /* P8 texels index the unit's palette (SET_TEXTURE_PALETTE: DMA bit 0 A/B,
      * length bits 2-3 = 256>>n entries, offset bits 6-31), A8R8G8B8 entries. */
-    uint32_t palette[256];
-    uint32_t pal_mask = 0;
     if (d.kind == PF_P8) {
         uint32_t pal = s->setup[(base + 0x20) / 4];
         unsigned pal_sel = (pal & 1) ? 2 : 1, pal_len = 256u >> ((pal >> 2) & 3);
@@ -243,14 +251,24 @@ int menu_texture_load(const h2_command_state *s, const h2_kelvin_clear *c,
             !h2_dma_load(c->read_instance, c->opaque, s->dma[pal_sel], &pdma) ||
             !h2_dma_resolve(&pdma, pal & ~0x3Fu, pal_len * 4, 0, c->physical_bytes, &pphys) ||
             !(psrc = c->map_physical(c->opaque, pphys, pal_len * 4))) { note(code, O_NOMAP); return 0; }
-        memcpy(palette, psrc, pal_len * 4);
-        pal_mask = pal_len - 1;
+        memcpy(L->palette, psrc, pal_len * 4);
+        L->pal_mask = pal_len - 1;
     }
+    L->key[0] = s->setup[base / 4]; L->key[1] = fmt; L->key[2] = s->setup[(base + 0x10) / 4];
+    L->key[3] = s->setup[(base + 0x1C) / 4]; L->key[4] = s->setup[(base + 0x20) / 4]; L->key[5] = s->dma[selector];
+    return 1;
+}
 
+static void decode(const located *L, uint32_t *rgba)
+{
+    const fmt_desc d = L->d;
+    const uint8_t *src = L->src;
+    uint32_t w = L->w, h = L->h, pitch = L->pitch;
+    unsigned lw = L->lw, lh = L->lh;
     if (d.dxt) {
         unsigned lbw = lw > 2 ? lw - 2 : 0, lbh = lh > 2 ? lh - 2 : 0;
-        for (uint32_t by = 0; by < blocks_y; ++by)
-            for (uint32_t bx = 0; bx < blocks_x; ++bx) {
+        for (uint32_t by = 0; by < L->blocks_y; ++by)
+            for (uint32_t bx = 0; bx < L->blocks_x; ++bx) {
                 uint32_t bi = morton(bx, by, lbw, lbh), tile[16];
                 const uint8_t *blk = src + (size_t)bi * d.bytes;
                 if (d.dxt == 1) menu_dxt1_block(blk, tile, 4);
@@ -267,14 +285,93 @@ int menu_texture_load(const h2_command_state *s, const h2_kelvin_clear *c,
     } else if (d.kind == PF_P8) {
         for (uint32_t y = 0; y < h; ++y)
             for (uint32_t x = 0; x < w; ++x)
-                rgba[(size_t)y * w + x] = palette[src[morton(x, y, lw, lh)] & pal_mask];
+                rgba[(size_t)y * w + x] = L->palette[src[morton(x, y, lw, lh)] & L->pal_mask];
     } else {
         for (uint32_t y = 0; y < h; ++y)
             for (uint32_t x = 0; x < w; ++x)
                 rgba[(size_t)y * w + x] = convert(d.kind, src + (size_t)morton(x, y, lw, lh) * d.bytes);
     }
-    note(code, O_OK);
-    *ow = w; *oh = h;
-    if (out_linear) *out_linear = d.linear;   /* linear images are addressed in texels, not [0,1] */
+}
+
+int menu_texture_load(const h2_command_state *s, const h2_kelvin_clear *c,
+                      unsigned unit, uint32_t *rgba, uint32_t cap, uint32_t *ow, uint32_t *oh,
+                      int *out_linear)
+{
+    located L;
+    if (!locate(s, c, unit, cap, &L)) return 0;
+    decode(&L, rgba);
+    note(L.code, O_OK);
+    *ow = L.w; *oh = L.h;
+    if (out_linear) *out_linear = L.d.linear;   /* linear images are addressed in texels, not [0,1] */
     return 1;
 }
+
+/* Decoded-texture cache. Menu draws rebind the same material and screen images
+ * thousands of times per second; decoding a 512x512 DXT5 or a 640x480 screen
+ * image per draw dominated frame time. Entries are keyed by the unit registers
+ * AND a hash of every source byte (plus palette), so a CPU-updated font cache or
+ * a re-rendered screen image can never be served stale. LRU within a byte budget;
+ * entries used by the current draw are never evicted. */
+static uint64_t content_hash(const uint8_t *p, size_t n, uint64_t h)
+{
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        uint64_t w; memcpy(&w, p + i, 8);
+        h = (h ^ w) * 0x9E3779B97F4A7C15ull; h ^= h >> 29;
+    }
+    for (; i < n; ++i) { h = (h ^ p[i]) * 0x100000001B3ull; }
+    return h;
+}
+
+typedef struct { uint32_t key[6]; uint64_t hash; uint32_t *texels; uint32_t w, h, bytes; int linear; uint64_t used; } tex_entry;
+enum { TEX_CACHE_ENTRIES = 64, TEX_CACHE_BUDGET = 40u << 20 };
+static tex_entry g_entries[TEX_CACHE_ENTRIES];
+static size_t g_cache_bytes;
+static uint64_t g_hits, g_misses;
+
+const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit,
+                                     uint64_t serial, uint32_t cap, uint32_t *ow, uint32_t *oh, int *out_linear)
+{
+    located L;
+    if (!locate(s, c, unit, cap, &L)) return NULL;
+    uint64_t hash = content_hash(L.src, L.src_bytes, 0x243F6A8885A308D3ull ^ L.src_bytes);
+    if (L.d.kind == PF_P8) hash = content_hash((const uint8_t *)L.palette, (L.pal_mask + 1) * 4, hash);
+    tex_entry *e = NULL, *victim = NULL;
+    for (unsigned i = 0; i < TEX_CACHE_ENTRIES; ++i) {
+        tex_entry *t = &g_entries[i];
+        if (t->texels && t->hash == hash && !memcmp(t->key, L.key, sizeof L.key)) { e = t; break; }
+        if (!t->texels) { if (!victim || victim->texels) victim = t; }
+        else if (t->used != serial && (!victim || (victim->texels && t->used < victim->used))) victim = t;
+    }
+    if (e) { ++g_hits; }
+    else {
+        ++g_misses;
+        uint32_t bytes = L.w * L.h * 4;
+        /* Evict least-recently-used entries (never this draw's) until the budget fits. */
+        while (g_cache_bytes + bytes > TEX_CACHE_BUDGET) {
+            tex_entry *old = NULL;
+            for (unsigned i = 0; i < TEX_CACHE_ENTRIES; ++i)
+                if (g_entries[i].texels && g_entries[i].used != serial && (!old || g_entries[i].used < old->used)) old = &g_entries[i];
+            if (!old) break;
+            g_cache_bytes -= old->bytes; free(old->texels); old->texels = NULL;
+            if (!victim || victim->texels) victim = old;
+        }
+        if (!victim) return NULL;
+        if (victim->texels) { g_cache_bytes -= victim->bytes; free(victim->texels); victim->texels = NULL; }
+        uint32_t *px = malloc(bytes);
+        if (!px) return NULL;
+        decode(&L, px);
+        note(L.code, O_OK);
+        memcpy(victim->key, L.key, sizeof L.key);
+        victim->hash = hash; victim->texels = px; victim->w = L.w; victim->h = L.h; victim->bytes = bytes;
+        victim->linear = L.d.linear; g_cache_bytes += bytes;
+        e = victim;
+    }
+    e->used = serial;
+    *ow = e->w; *oh = e->h;
+    if (out_linear) *out_linear = e->linear;
+    return e->texels;
+}
+
+void menu_texture_cache_stats(uint64_t *hits, uint64_t *misses, size_t *bytes)
+{ *hits = g_hits; *misses = g_misses; *bytes = g_cache_bytes; }

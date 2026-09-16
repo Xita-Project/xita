@@ -13,6 +13,14 @@ int menu_texture_load(const h2_command_state *state, const h2_kelvin_clear *clea
                       unsigned unit, uint32_t *rgba, uint32_t cap_texels,
                       uint32_t *out_w, uint32_t *out_h, int *out_linear);
 
+/* Cached variant: returns a cache-owned decoded image (valid until a later
+ * acquire with a different serial evicts it; entries used by `serial` are kept).
+ * Keyed by the unit registers plus a hash of all source bytes, so never stale. */
+const uint32_t *menu_texture_acquire(const h2_command_state *state, const h2_kelvin_clear *clear,
+                                     unsigned unit, uint64_t serial, uint32_t cap_texels,
+                                     uint32_t *out_w, uint32_t *out_h, int *out_linear);
+void menu_texture_cache_stats(uint64_t *hits, uint64_t *misses, size_t *bytes);
+
 /* Register-only view of a unit (no guest memory access): returns the enable bit
  * and reports the colour format code and the described size, for logging. */
 int menu_texture_describe(const h2_command_state *state, unsigned unit,

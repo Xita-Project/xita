@@ -82,6 +82,9 @@ void h2_input_state(xctx *c)
     uint8_t bytes[22], old[18]; sample_bytes(bytes + 4, &current); sample_bytes(old, &previous);
     if (memcmp(bytes + 4, old, sizeof old)) { ++packet; previous = current; }
     put32(bytes, packet); x_guest_write(destination, bytes, sizeof bytes);
+    static unsigned polls;                       /* poll cadence + button evidence for the menu */
+    if (!(++polls % 64) || (current.buttons && !(polls % 4)))
+        xv_logf("[h2/input] poll #%u buttons=%04X packet=%u\n", polls, current.buttons, packet);
     c->r[0] = 0; X_RET(2);
 }
 void h2_input_capabilities(xctx *c)

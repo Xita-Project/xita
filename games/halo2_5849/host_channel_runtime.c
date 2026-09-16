@@ -195,7 +195,9 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
              * state and keep the draw open (the draw reads it at END). */
             menu_result = h2_command_method(&channel.commands, &channel.clear, sub, method, value, source) ? 1 : 0;
         if (menu_result != -1) result = menu_result;
-        if (menu_done != menu_quad.completed)
+        /* One line per completed draw was ~740 lines per menu frame; keep the first
+         * 200 and then every 100th (the renderer logs its own sampled detail). */
+        if (menu_done != menu_quad.completed && (menu_quad.completed <= 200 || !(menu_quad.completed % 100)))
             xv_logf("[h2/menu] completed=%u primitive=%u vertices=%u indices=%u arrays=%u source=%08X color=%08X committed; not yet presented\n",
                     (unsigned)menu_quad.completed, menu_quad.primitive, menu_quad.vertex_count,
                     menu_quad.index_count, menu_quad.array_count, source, channel.clear.color_offset);

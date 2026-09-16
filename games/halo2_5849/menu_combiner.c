@@ -19,6 +19,8 @@ void menu_combiner_decode(const h2_command_state *s, menu_combiner *cb)
     }
     cb->final_abcd = s->setup[0x288 / 4];
     cb->final_efg = s->setup[0x28C / 4];
+    cb->final_factor0 = s->setup[0x1E20 / 4];
+    cb->final_factor1 = s->setup[0x1E24 / 4];
     uint32_t control = s->setup[0x1E60 / 4];
     cb->stages = control & 0xF;
     if (cb->stages > 8) cb->stages = 8;
@@ -129,8 +131,13 @@ void menu_combiner_eval(const menu_combiner *cb, const float tex[4][4],
         combine(cb->alpha_in[i], cb->alpha_out[i], reg, 1, cb->mux_msb, 3, 1); /* alpha -> [3] */
     }
 
-    /* Derived final-combiner registers. */
+    /* Derived final-combiner registers. The final combiner's c0/c1 are its own
+     * registers (SET_SPECULAR_FOG_FACTOR0/1), not the last stage's factors: the
+     * menu's desaturation pass dots the scene with the stage-0 luma weights and
+     * then tints by the final c0, which must not be those same weights. */
     for (unsigned k = 0; k < 4; ++k) reg[R_V1R0][k] = reg[R_V1][k] + reg[R_R0][k];
+    unpack_argb(cb->final_factor0, reg[R_C0]);
+    unpack_argb(cb->final_factor1, reg[R_C1]);
 
     if (!cb->final_abcd && !cb->final_efg) {           /* no final combiner: pass r0 */
         memcpy(out, reg[R_R0], 16);
