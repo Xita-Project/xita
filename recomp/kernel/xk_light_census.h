@@ -36,6 +36,19 @@ typedef struct xv_light_census_stats {
     uint32_t declined[XV_LC_REASONS]; /* all gates + first structural failure */
 } xv_light_census_stats;
 extern unsigned xv_light_census_enabled;
+/* Armed only by owner-side benchmark37 request consumption, not by the network.
+ * A capability carries the exact Present/Swap HLE context to the renderer. */
+extern unsigned xv_light_census_present_requested;
+/* begin returns a cleanup token even for a rejected owner context. Only
+ * current() returns an admitted capability; it rechecks the live boundary. */
+unsigned xv_light_census_present_begin(xctx *);
+void xv_light_census_present_end(unsigned *);
+xctx *xv_light_census_present_current(void);
+static inline void xv_light_census_present_cleanup(unsigned *token)
+{if(*token)xv_light_census_present_end(token);}
+#define XV_LIGHT_CENSUS_PRESENT_SCOPE(c) \
+    unsigned xv_light_present_token_ __attribute__((cleanup(xv_light_census_present_cleanup))) = \
+        __atomic_load_n(&xv_light_census_present_requested,__ATOMIC_RELAXED) ? xv_light_census_present_begin(c) : 0
 unsigned xv_object_census_admit(const xctx *);
 int xv_object_census_is_owner(void);
 unsigned xv_object_census_boundary(const xctx *);
@@ -57,7 +70,7 @@ void xv_light_census_remove(xctx *);
 void xv_light_census_cancel(xctx *,unsigned reason);
 const char *xv_light_census_reason_name(unsigned);
 #define XV_LIGHT_CENSUS_ON() __atomic_load_n(&xv_light_census_enabled,__ATOMIC_RELAXED)
-#define XV_LIGHT_CENSUS_CANCEL(c,r) do { if(XV_LIGHT_CENSUS_ON()) xv_light_census_cancel(c,r); } while(0)
+#define XV_LIGHT_CENSUS_CANCEL(c,r) do { if(XV_LIGHT_CENSUS_ON()||__atomic_load_n(&xv_light_census_present_requested,__ATOMIC_RELAXED)) xv_light_census_cancel(c,r); } while(0)
 #define XV_LIGHT_CENSUS_SCOPE(c) \
     unsigned xv_light_census_token_ __attribute__((cleanup(xv_light_census_scope_cleanup))) = \
         XV_LIGHT_CENSUS_ON() ? xv_light_census_begin(c) : 0
@@ -71,5 +84,6 @@ const char *xv_light_census_reason_name(unsigned);
 }
 #endif
 #else
+#define XV_LIGHT_CENSUS_PRESENT_SCOPE(c) ((void)0)
 #define XV_LIGHT_CENSUS_CANCEL(c,r) ((void)0)
 #endif

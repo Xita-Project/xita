@@ -217,6 +217,7 @@ static void serve(int s)
             for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++)if(!strcmp(target+16,kinds[i]))kind=i+1;
             if(!strcmp(target+16,"diagnostic-shot"))kind=XV_BENCH_DIAGNOSTIC_POLL;
             if(!strcmp(target+16,"diagnostic-hist"))kind=XV_BENCH_DIAGNOSTIC_HIST;
+            if(!strcmp(target+16,"light-census"))kind=XV_BENCH_LIGHT_CENSUS;
             if(!kind)reply(s,400,"Unknown benchmark kind\n");
             else if(upload_in_progress||xv_update_requested()||xv_benchmark_remote_request(kind))reply(s,409,"Benchmark unavailable: enter first-person gameplay and finish any active operation\n");
             else reply(s,204,"");

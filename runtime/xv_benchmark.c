@@ -2,6 +2,11 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#ifdef XV_LIGHT_QUERY_CENSUS
+#include "../recomp/kernel/xk_light_census.h"
+uint64_t xv_benchmark_boundary_time(void) __attribute__((weak));
+#endif
 
 void xv_logf(const char *fmt,...);
 int xv_diag_poll_available(unsigned) __attribute__((weak));
@@ -58,7 +63,7 @@ static struct {
     int active,request,cancel,configuring,restoring,view_ok,compare;
     unsigned original,phase,frames;
     uint64_t measure_start, last_sample, restore_retry;
-    int log_original, transition_error, failed;
+    int log_original, census_original, transition_error, failed;
     unsigned sample_count;
     uint64_t intervals[LOG_MEASURE];
     float view[6];
@@ -70,9 +75,12 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||(kind>XV_BENCH_LOG_WRITER&&kind!=XV_BENCH_DIAGNOSTIC_POLL&&kind!=XV_BENCH_DIAGNOSTIC_HIST)||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||(kind>XV_BENCH_LOG_WRITER&&kind!=XV_BENCH_DIAGNOSTIC_POLL&&kind!=XV_BENCH_DIAGNOSTIC_HIST&&kind!=XV_BENCH_LIGHT_CENSUS)||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
     if((kind==XV_BENCH_DIAGNOSTIC_POLL||kind==XV_BENCH_DIAGNOSTIC_HIST)&&
        (!xv_diag_poll_available||!xv_diag_poll_override||!xv_diag_poll_measure||!xv_diag_poll_frame||!xv_diag_poll_report))return -1;
+#ifndef XV_LIGHT_QUERY_CENSUS
+    if(kind==XV_BENCH_LIGHT_CENSUS)return -1;
+#endif
     if(kind==XV_BENCH_LOG_WRITER&&(!xv_log_async_available||!xv_log_async_init||!xv_log_async_enabled||!xv_log_async_set_enabled||!xv_log_async_available()))return -1;
     if(kind==XV_BENCH_POLYGON_EDGE&&(!xv_native_polygon_edge_init||!xv_native_polygon_edge_override||!xv_native_polygon_edge_available))return -1;
     if(kind==XV_BENCH_OBJECT_POSE&&(!xv_object_pose_override||!xv_object_pose_available))return -1;
@@ -117,11 +125,18 @@ void xv_benchmark_remote_poll(int control)
         __atomic_store_n(&request_state,0,__ATOMIC_RELEASE);return;
     }
     remote_kind=kind;b.request=kind==XV_BENCH_RESOLUTION?1:2;
+#ifdef XV_LIGHT_QUERY_CENSUS
+    __atomic_store_n(&xv_light_census_present_requested,kind==XV_BENCH_LIGHT_CENSUS,__ATOMIC_RELEASE);
+#endif
 }
 static void toggle(int compare)
 {
     if(b.active) {b.cancel=1;return;}
-    if(b.request) {b.request=0;__atomic_store_n(&request_state,0,__ATOMIC_RELEASE);return;}
+    if(b.request) {b.request=0;
+#ifdef XV_LIGHT_QUERY_CENSUS
+        __atomic_store_n(&xv_light_census_present_requested,0,__ATOMIC_RELEASE);
+#endif
+        __atomic_store_n(&request_state,0,__ATOMIC_RELEASE);return;}
     unsigned expected=0;
     if(__atomic_compare_exchange_n(&request_state,&expected,BENCH_RUNNING,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)) {
         remote_kind=0;b.request=compare?2:1;
@@ -150,6 +165,7 @@ int xv_benchmark_compare_object_pose(void) { return remote_kind==XV_BENCH_OBJECT
 int xv_benchmark_compare_material_packet(void) { return remote_kind==XV_BENCH_MATERIAL_PACKET; }
 int xv_benchmark_compare_diagnostic_poll(void) {return remote_kind==XV_BENCH_DIAGNOSTIC_POLL||remote_kind==XV_BENCH_DIAGNOSTIC_HIST;}
 static unsigned diagnostic_path(void) {return remote_kind==XV_BENCH_DIAGNOSTIC_HIST?2:1;}
+int xv_benchmark_compare_light_census(void) { return remote_kind==XV_BENCH_LIGHT_CENSUS; }
 int xv_benchmark_compare_log_writer(void) { return remote_kind==XV_BENCH_LOG_WRITER; }
 int xv_benchmark_compare_polygon_edge(void) { return remote_kind==XV_BENCH_POLYGON_EDGE; }
 int xv_benchmark_compare_object_quat(void) { return remote_kind==XV_BENCH_OBJECT_QUAT; }
@@ -185,6 +201,14 @@ static int native_math_selected(void)
 static int candidate_available(void)
 {
     if(xv_benchmark_compare_diagnostic_poll())return xv_diag_poll_available&&xv_diag_poll_available(diagnostic_path());
+    if(xv_benchmark_compare_light_census()) {
+#ifdef XV_LIGHT_QUERY_CENSUS
+        if(!xv_benchmark_boundary_time||!xv_light_census_present_current())return 0;
+        b.census_original=!!__atomic_load_n(&xv_light_census_enabled,__ATOMIC_RELAXED);return 1;
+#else
+        return 0;
+#endif
+    }
     if(xv_benchmark_compare_log_writer()) {
         if(!xv_log_async_available||!xv_log_async_init||!xv_log_async_enabled||!xv_log_async_set_enabled||!xv_log_async_available())return 0;
         /* Only the joined recording owner may bind controls. Network admission
@@ -288,6 +312,7 @@ int xv_benchmark_compare_draw_scan(void)
 }
 static const char *tag(void) { return b.compare ?
     (xv_benchmark_compare_diagnostic_poll() ? (diagnostic_path()==1?"diagnostic-shot-compare":"diagnostic-hist-compare") :
+     xv_benchmark_compare_light_census() ? "light-census-compare" :
      xv_benchmark_compare_log_writer() ? "log-writer-compare" :
      xv_benchmark_compare_polygon_edge() ? "polygon-edge-compare" :
      xv_benchmark_compare_object_pose() ? "object-pose-compare" :
@@ -341,23 +366,98 @@ static void report_intervals(void)
         (unsigned long long)b.intervals[(n*990u+999)/1000-1],(unsigned long long)b.intervals[(n*999u+999)/1000-1],
         (unsigned long long)b.intervals[n-1],over50,over100,over150,over200);
 }
+static int boundary_result(int rc)
+{
+    if(rc) {
+        b.failed=1;b.view_ok=0;
+        if(rc!=b.transition_error)xv_logf("[%s] boundary failure %d; no successful mode change or restoration claimed\n",tag(),rc);
+    }
+    b.transition_error=rc;return rc;
+}
 static int apply_comparison(int enabled)
 {
     xv_benchmark_optimizations(enabled); /* joined GPU/pump boundary */
     if(xv_benchmark_compare_diagnostic_poll()) {xv_diag_poll_override(diagnostic_path(),enabled);return 0;}
-    if(!xv_benchmark_compare_log_writer())return 0;
-    int rc=xv_log_async_set_enabled(enabled<0?b.log_original:enabled,5000000);
-    if(rc) {
-        b.failed=1;b.view_ok=0;
-        if(rc!=b.transition_error)xv_logf("[log-writer-compare] boundary failure %d; no successful mode change or restoration claimed\n",rc);
+    if(xv_benchmark_compare_log_writer())return boundary_result(xv_log_async_set_enabled(enabled<0?b.log_original:enabled,5000000));
+    if(xv_benchmark_compare_light_census()) {
+#ifdef XV_LIGHT_QUERY_CENSUS
+        xctx *c=xv_light_census_present_current();
+        return boundary_result(c&&xv_light_census_control(c,enabled<0?b.census_original:enabled,enabled>=0)?0:-1);
+#else
+        return boundary_result(-1);
+#endif
     }
-    b.transition_error=rc;return rc;
+    return 0;
 }
+#ifdef XV_LIGHT_QUERY_CENSUS
+int xv_benchmark_light_census_boundary_ok(void)
+{return xv_light_census_present_current()!=NULL;}
+/* Called before the camera probe: a bad capability must not read guest fields,
+ * drain a GPU on a borrowed context, or claim a restoration. Native strangers
+ * cannot mutate the guest-owner state machine. Retry only at a valid Present. */
+void xv_benchmark_light_census_boundary_lost(uint64_t now)
+{
+    if(!xv_object_census_is_owner())return;
+    if(b.request){b.request=0;__atomic_store_n(&xv_light_census_present_requested,0,__ATOMIC_RELEASE);
+        __atomic_store_n(&request_state,0,__ATOMIC_RELEASE);
+        xv_logf("[light-census-compare] boundary failure -1; initial Present admission rejected, no mode changed\n");return;}
+    if(!b.active)return;
+    boundary_result(-1);b.restoring=1;b.configuring=b.cancel=0;b.restore_retry=now+250000;
+    /* Active status already remains published; next admitted Present retries. */
+}
+#endif
 static void publish(void)
 {
     unsigned progress=b.frames*100/(SETTLE+measure_frames());
     __atomic_store_n(&status,b.active&&(!b.restoring||b.transition_error) ? phase_height()|(progress<<10)|(((b.phase<PHASES?b.phase:PHASES-1)+1)<<17)|((unsigned)b.compare<<19):0,__ATOMIC_RELEASE);
 }
+#ifdef XV_LIGHT_QUERY_CENSUS
+/* Only host counters are copied. Drain/reset precedes the start timestamp;
+ * drain/copy/format follows the end timestamp. No hot-path clocks or output. */
+_Static_assert(XV_LC_REASONS==28&&XV_LC_SOURCES==16&&XV_LC_GUARD==7,"update census schema/parser for new counters");
+static void census_row(const char *key,const uint64_t *v,unsigned n)
+{
+    char values[384];size_t used=0;
+    for(unsigned i=0;i<n;i++)used+=(size_t)snprintf(values+used,sizeof values-used,
+        "%s%llu",i?"/":"",(unsigned long long)v[i]);
+    xv_logf("[light-census-count] phase %u %s %s\n",b.phase+1,key,values);
+}
+static int census_boundary(int reset)
+{
+    static xv_light_census_stats snapshot;
+    xv_benchmark_optimizations(b.phase==1);
+    xctx *c=xv_light_census_present_current();
+    if(!c||!!__atomic_load_n(&xv_light_census_enabled,__ATOMIC_RELAXED)!=(b.phase==1))return boundary_result(-1);
+    if(reset)return boundary_result(xv_light_census_control(c,b.phase==1,1)?0:-1);
+    if(!xv_light_census_take(c,&snapshot,0))return boundary_result(-1);
+    const xv_light_census_stats *s=&snapshot;
+#define ROW(key,...) do {const uint64_t v[]={__VA_ARGS__};census_row(key,v,sizeof v/sizeof *v);}while(0)
+    ROW("window",MEASURE,b.phase==1);
+    ROW("groups",s->entries,s->opened,s->completed,s->cancelled,s->candidates);
+    ROW("work",s->queries,s->traversals,s->removals,s->multi_groups,s->multi_traversals,s->candidate_multi_groups,s->candidate_multi_traversals);
+    ROW("orphans",s->orphan_queries,s->orphan_removals);
+    ROW("reads",s->guest_reads,s->guest_bytes,s->entry_reads,s->entry_bytes,s->max_entry_bytes,s->max_group_bytes);
+    ROW("storage",s->group_storage_bytes,s->stats_storage_bytes);
+    ROW("budget",s->entry_budget_nonpositive);
+#undef ROW
+    census_row("tags",s->tag_count,10);census_row("queries",s->query_count,10);
+    census_row("traversals",s->traversal_count,10);census_row("candidate-traversals",s->candidate_traversal_count,10);
+    census_row("mode",s->mode,4);
+    uint64_t v[XV_LC_REASONS];
+    const char *keys[]={"entry-admission","query-admission","removal-admission"};
+    for(unsigned site=0;site<3;site++) {
+        for(unsigned i=0;i<=XV_LC_GUARD;i++)v[i]=s->admission[site][i];
+        census_row(keys[site],v,XV_LC_GUARD+1);
+    }
+    for(unsigned i=0;i<XV_LC_REASONS;i++)v[i]=s->declined[i];
+    census_row("declines",v,XV_LC_REASONS);
+    for(unsigned i=0;i<=XV_LC_SOURCES;i++)v[i]=s->sources[i].pc;
+    census_row("source-pcs",v,XV_LC_SOURCES+1);
+    for(unsigned i=0;i<=XV_LC_SOURCES;i++)v[i]=s->sources[i].groups;
+    census_row("source-groups",v,XV_LC_SOURCES+1);
+    return 0;
+}
+#endif
 static unsigned restore(const char *why)
 {
     xv_logf("[%s] %s; restoring %up\n",tag(),why,b.original);
@@ -370,10 +470,17 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         int compare=b.request==2;
         memset(&b,0,sizeof b);
         b.compare=compare;
-        if(!valid || (compare&&!xv_benchmark_optimizations)) {xv_logf("[%s] start requires a loaded first-person view and available test hooks\n",tag());__atomic_store_n(&request_state,0,__ATOMIC_RELEASE);return 0;}
+        if(!valid || (compare&&!xv_benchmark_optimizations)) {xv_logf("[%s] start requires a loaded first-person view and available test hooks\n",tag());__atomic_store_n(&request_state,0,__ATOMIC_RELEASE);
+#ifdef XV_LIGHT_QUERY_CENSUS
+            __atomic_store_n(&xv_light_census_present_requested,0,__ATOMIC_RELEASE);
+#endif
+            return 0;}
         if(compare && !candidate_available()) {
             xv_logf("[%s] selected experiment is unavailable or its required mode is disabled; no settings changed\n",tag());
             __atomic_store_n(&request_state,0,__ATOMIC_RELEASE);
+#ifdef XV_LIGHT_QUERY_CENSUS
+            __atomic_store_n(&xv_light_census_present_requested,0,__ATOMIC_RELEASE);
+#endif
             return 0;
         }
         b.active=b.configuring=b.view_ok=1;b.original=height;
@@ -381,6 +488,8 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
             if(apply_comparison(0))return restore("initial boundary failed");
             if (xv_benchmark_compare_diagnostic_poll())
                 xv_logf("[%s] start baseline/suppressed/baseline at %up; selected %s poll only, configured watcher never forced on; 60 settle + 1800 measured frames, input/screenshots and other diagnostic triggers retained\n",tag(),height,diagnostic_path()==1?"screenshot-directory":"hist.now");
+            else if (xv_benchmark_compare_light_census())
+                xv_logf("[light-census-compare] start off/on/off diagnostic at %up; count-only original queries, same camera/graphics/workers, restore initial observer %d; %u settle + %u measured frames each; no query parallelism\n",height,b.census_original,SETTLE,MEASURE);
             else if (xv_benchmark_compare_log_writer())
                 xv_logf("[log-writer-compare] start off/on/off at %up; synchronous/background/synchronous periodic output, same formatting/graphics/workers, restore initial mode %d; %u settle + %u measured frames each\n",height,b.log_original,SETTLE,LOG_MEASURE);
             else if (xv_benchmark_compare_polygon_edge())
@@ -459,6 +568,12 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         if(xv_benchmark_compare_diagnostic_poll())xv_diag_poll_measure();
         xv_logf("[%s] phase %u %up measure begin view %.4f %.4f %.4f / %.5f %.5f %.5f\n",
             tag(),b.phase+1,height,view[0],view[1],view[2],view[3],view[4],view[5]);
+#ifdef XV_LIGHT_QUERY_CENSUS
+        if(xv_benchmark_compare_light_census()) {
+            if(census_boundary(1))return restore("measurement reset failed");
+            b.measure_start=b.last_sample=xv_benchmark_boundary_time();
+        }
+#endif
     }
     if(b.frames>=SETTLE)for(unsigned i=0;i<6;i++)
         if(!isfinite(view[i])||fabsf(view[i]-b.view[i])>(i<3?.05f:.005f))b.view_ok=0;
@@ -471,6 +586,9 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         uint64_t elapsed=now-b.measure_start;
         b.fps[b.phase]=elapsed?measure_frames()*1e6/(double)elapsed:0;
         if(xv_benchmark_compare_diagnostic_poll()&&!xv_diag_poll_report(b.phase+1))b.view_ok=0;
+#ifdef XV_LIGHT_QUERY_CENSUS
+        if(xv_benchmark_compare_light_census()&&census_boundary(0))return restore("measurement copy failed");
+#endif
         report_intervals();
         xv_logf("[%s] phase %u %up %u frames elapsed-us %llu fps %.3f view-ok %d\n",
             tag(),b.phase+1,height,measure_frames(),(unsigned long long)elapsed,b.fps[b.phase],b.view_ok);
@@ -493,6 +611,9 @@ void xv_benchmark_applied(uint64_t now,unsigned height)
         if(b.transition_error) {b.configuring=0;b.restore_retry=now+250000;publish();return;}
         xv_logf("[%s] restored %up (requested %up)\n",tag(),height,b.original);
         b.active=b.configuring=b.restoring=0;publish();remote_kind=0;
+#ifdef XV_LIGHT_QUERY_CENSUS
+        __atomic_store_n(&xv_light_census_present_requested,0,__ATOMIC_RELEASE);
+#endif
         __atomic_store_n(&request_state,0,__ATOMIC_RELEASE);return;
     }
     if(height!=phase_height()) {

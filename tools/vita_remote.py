@@ -14,7 +14,7 @@ import zipfile
 
 BUTTONS = dict(select=1, start=8, up=16, right=32, down=64, left=128,
                l=256, r=512, triangle=4096, circle=8192, cross=16384, square=32768)
-BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer","diagnostic-shot","diagnostic-hist")
+BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer","light-census","diagnostic-shot","diagnostic-hist")
 RESULT = re.compile(r"\[([a-z-]+-compare|resolution-test)\] result (?:off-before|544-before) ([\d.]+) (?:on|360) ([\d.]+) (?:off-after|544-after) ([\d.]+) fps comparable-view ([01])")
 RESTORED = re.compile(rb"\[(?:[a-z-]+-compare|resolution-test)\] restored [^\n]*\n")
 
@@ -56,6 +56,38 @@ def parse_diagnostic_polls(text,kind):
     if sorted(summaries)!=[(str(p),'1800','0','1') for p in (1,2,3)]:
         raise RuntimeError("Incomplete diagnostic polling frame attribution")
     return rows
+
+
+# Stable census schema v1. Each row is copied after its timed window ends.
+CENSUS_FIELDS=dict(window=2,groups=5,work=7,orphans=2,reads=6,storage=2,budget=1,
+    tags=10,queries=10,traversals=10,**{"candidate-traversals":10,"mode":4,
+    "entry-admission":8,"query-admission":8,"removal-admission":8,"declines":28,
+    "source-pcs":17,"source-groups":17})
+
+def parse_light_census(text):
+    arms={p:{} for p in (1,2,3)}
+    for line in text.splitlines():
+        if "[light-census-count]" not in line:continue
+        match=re.fullmatch(r".*\[light-census-count\] phase ([123]) ([a-z-]+) ([0-9/]+)",line)
+        if not match:raise RuntimeError("Malformed light census row")
+        phase,key,raw=match.groups();phase=int(phase)
+        try:values=list(map(int,raw.split('/')))
+        except ValueError:raise RuntimeError("Malformed light census values") from None
+        if key not in CENSUS_FIELDS or key in arms[phase] or len(values)!=CENSUS_FIELDS[key] or any(v>2**64-1 for v in values):
+            raise RuntimeError("Invalid or duplicate light census row")
+        arms[phase][key]=values
+    for phase,rows in arms.items():
+        if set(rows)!=set(CENSUS_FIELDS) or rows["window"]!=[120,int(phase==2)] or not all(rows["storage"]):
+            raise RuntimeError("Expected complete 120-frame OFF/ON/OFF census windows")
+        if phase!=2 and any(any(v) for k,v in rows.items() if k not in ('window','storage')):
+            raise RuntimeError("OFF census window contains observer counts")
+        entries,opened,completed,cancelled,candidates=rows['groups']
+        queries,traversals,removals,multi,multi_work,eligible,eligible_work=rows['work']
+        if not candidates<=completed<=opened<=entries or completed+cancelled!=opened or not eligible<=multi<=completed or not eligible<=candidates or not eligible_work<=multi_work<=traversals<=queries:
+            raise RuntimeError("Inconsistent light census groups/work")
+        if entries+rows['declines'][9]!=rows['entry-admission'][0] or queries+rows['orphans'][0]!=rows['query-admission'][0] or removals+rows['orphans'][1]!=rows['removal-admission'][0]:
+            raise RuntimeError("Inconsistent census entries versus query hooks")
+    return [dict(phase=p,**arms[p]) for p in (1,2,3)]
 
 
 class Client:
@@ -272,6 +304,8 @@ def benchmark(client, out, runs, timeout, kind=None):
                 raise RuntimeError("Affinity change or restoration failed; no valid comparison claimed")
             if kind=="log-writer" and "[log-writer-compare] boundary failure" in logfile.read_bytes()[trial_offset:].decode(errors="replace"):
                 raise RuntimeError("Logger boundary failed; no valid comparison claimed")
+            if kind=="light-census" and "[light-census-compare] boundary failure" in logfile.read_bytes()[trial_offset:].decode(errors="replace"):
+                raise RuntimeError("Census boundary failed; no valid comparison claimed")
             matches = RESULT.findall(text)
             if len(matches) != prior + 1:
                 raise RuntimeError("Expected one fresh benchmark result; cancelled/incomplete run or restarted application")
@@ -294,6 +328,10 @@ def benchmark(client, out, runs, timeout, kind=None):
                 trial["suppressed_fps"]=trial.pop("on_fps")
                 trial["baseline_after_fps"]=trial.pop("off_after_fps")
                 trial["note"]="Baseline/suppressed/baseline for one diagnostic poll; input and screenshot capture unchanged. Poll elapsed includes scheduling. Invalid scans/trace triggers invalidate the comparison."
+            if kind=="light-census":
+                trial["census"]=parse_light_census(logfile.read_bytes()[trial_offset:].decode(errors="replace"))
+                trial["diagnostic"]=True
+                trial["note"]="Count-only observer overhead, no query parallelism. Owner candidates and worker declines are distinct; absent owner groups do not imply absent worker workload. Setup/counter reports lie outside 120-frame timing windows."
             if kind=="guest-phases":
                 trial["diagnostic"]=True
                 trial["note"]="Timing is enabled only in the middle arm. This measures profiling overhead, not an optimization gain; already-open parent scopes are absent."

@@ -51,6 +51,16 @@ def benchmark_cases(tmp):
                             errors=1 if self.mode=="poll-error" else 0
                             self.records+=f"[diagnostic-poll] phase {phase} path {path} polls {polls} due {due} skipped {skip} runs {due-skip} us 2000 max-us 100 max-frame 99 entries 8 errors {errors} triggers 0\n"
                         self.records+=f"[diagnostic-poll] phase {phase} frames 1800 event-overflow 0 valid 1\n"
+            if self.kind=="light-census":
+                from vita_remote import CENSUS_FIELDS
+                if self.mode=="census-failure":self.records+="[light-census-compare] boundary failure -1\n"
+                if self.mode!="missing-counts":
+                    for phase in (1,2,3):
+                        for key,n in CENSUS_FIELDS.items():
+                            values=[0]*n
+                            if key=="window":values=[120,int(phase==2)]
+                            if key=="storage":values=[192,1216]
+                            self.records+=f"[light-census-count] phase {phase} {key} "+"/".join(map(str,values))+"\n"
             if self.mode == "affinity-failure": self.records += "[guest-affinity] failure restoring mask\n"
             if self.mode != "missing-result":
                 self.records += "[" + self.kind + "-compare] result off-before 10.000 on 12.000 off-after 10.000 fps comparable-view " + ("0" if self.mode == "camera" else "1") + "\n"
@@ -74,10 +84,10 @@ def benchmark_cases(tmp):
         if mode != "success":
             assert result["error"]
     with patch("vita_remote.time.sleep",lambda _:None):
-        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer','diagnostic-shot','diagnostic-hist'):
+        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer','light-census','diagnostic-shot','diagnostic-hist'):
             benchmark(Fake('success', kind),tmp/('selected-'+kind),1,30,kind)
             record=json.loads((tmp/('selected-'+kind)/'result.json').read_text())['trials'][0]
-            assert record.get('diagnostic',False)==(kind=='guest-phases')
+            assert record.get('diagnostic',False)==(kind in ('guest-phases','light-census'))
         failed=Fake('affinity-failure','guest-affinity')
         try: benchmark(failed,tmp/'failed-affinity',1,30,'guest-affinity')
         except RuntimeError as error: assert 'Affinity' in str(error)
@@ -94,6 +104,14 @@ def benchmark_cases(tmp):
             try:benchmark(failed,tmp/mode,1,1200,"diagnostic-shot")
             except RuntimeError:pass
             else:raise AssertionError("Invalid diagnostic poll comparison accepted")
+        for mode in ('census-failure','missing-counts'):
+            failed=Fake(mode,'light-census')
+            try:benchmark(failed,tmp/mode,1,180,'light-census')
+            except RuntimeError:pass
+            else:raise AssertionError('Invalid census comparison accepted')
+            assert failed.released and not json.loads((tmp/mode/'result.json').read_text())['complete']
+        historical_census=Fake('success','light-census');historical_census.records='[light-census-compare] boundary failure -1 from previous run\n'
+        benchmark(historical_census,tmp/'historical-census-failure',1,180,'light-census')
         historical_log=Fake('success','log-writer');historical_log.records='[log-writer-compare] boundary failure -2 from previous run\n'
         benchmark(historical_log,tmp/'historical-log-failure',1,1800,'log-writer')
         historical=Fake('success','guest-affinity')
@@ -227,7 +245,7 @@ def main():
             assert request('/benchmark?kind=unknown','POST')[0]==400
             assert request('/benchmark?kind=model-palette&kind=flare','POST')[0]==400
             assert request('/benchmark?kind=model-palette','POST',token='f'*32)[0]==403
-            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer','diagnostic-shot','diagnostic-hist'):
+            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer','light-census','diagnostic-shot','diagnostic-hist'):
                 assert request('/benchmark?kind='+kind,'POST')[0]==204
                 if kind.startswith('diagnostic-'):
                     assert json.loads(request('/status')[2])['benchmark']==(38 if kind=='diagnostic-shot' else 294)

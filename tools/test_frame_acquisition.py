@@ -26,6 +26,7 @@ void xv_vertex_compare_override(int enabled) { compare_override=enabled; }
 static int candidate, scan_override=-99, copy_override=-99, bounds_override=-99, references_override=-99;
 static int edge_override=-99;
 int xv_benchmark_compare_diagnostic_poll(void) {return candidate==34;}
+int xv_benchmark_compare_light_census(void) { return candidate==35; }
 int xv_benchmark_compare_log_writer(void) { return candidate==33; }
 int xv_benchmark_compare_polygon_edge(void) { return candidate==32; }
 static int pose_override=-99, material_override=-99;

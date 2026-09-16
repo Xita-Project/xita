@@ -14,6 +14,7 @@
 #include <string.h>
 #include <math.h>
 #include "xk.h"
+#include "xk_light_census.h"
 #include "xd3d.h"
 #include "xk_flare.h"
 extern void xv_flare_barrier(unsigned) __attribute__((weak));
@@ -445,7 +446,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
     g_dev.frame++;
     { extern void xv_phase_frame(unsigned) __attribute__((weak)); if (xv_phase_frame) xv_phase_frame(g_dev.frame); }
     hist_level_track();
-    xd3d_r_present(g_dev.frame, g_dev.draws);
+    { XV_LIGHT_CENSUS_PRESENT_SCOPE(c); xd3d_r_present(g_dev.frame, g_dev.draws); }
     if (g_dev.frame % 60 == 0) {
         extern int xv_log_report_begin_async_frame(unsigned) __attribute__((weak));
         extern void xv_log_report_end(void) __attribute__((weak));
@@ -497,7 +498,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
     xk_yield();
     c->r[0] = 0; X_RET(4);
 }
-void xv_hle_D3DDevice_Swap(xctx *c) { XD3D_COUNT("D3DDevice_Swap"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_PRESENT); g_dev.frame++; { extern void xv_phase_frame(unsigned) __attribute__((weak)); if (xv_phase_frame) xv_phase_frame(g_dev.frame); } xd3d_r_present(g_dev.frame, g_dev.draws); g_dev.draws = 0; g_dev.clears = 0; xk_yield(); c->r[0] = 0; X_RET(1); }
+void xv_hle_D3DDevice_Swap(xctx *c) { XD3D_COUNT("D3DDevice_Swap"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_PRESENT); g_dev.frame++; { extern void xv_phase_frame(unsigned) __attribute__((weak)); if (xv_phase_frame) xv_phase_frame(g_dev.frame); } { XV_LIGHT_CENSUS_PRESENT_SCOPE(c); xd3d_r_present(g_dev.frame, g_dev.draws); } g_dev.draws = 0; g_dev.clears = 0; xk_yield(); c->r[0] = 0; X_RET(1); }
 void xd3d_r_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil) __attribute__((weak));
 void xd3d_r_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil) { (void)flags; (void)color; (void)z; (void)stencil; }
 /* D3DDevice_Clear(Count, pRects, Flags, Color, Z, Stencil) */

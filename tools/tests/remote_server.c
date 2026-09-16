@@ -4,7 +4,7 @@ static unsigned benchmark;
 uint32_t xv_benchmark_status(void) {return LOAD(&benchmark);}
 unsigned xv_benchmark_remote_busy(void) {return LOAD(&benchmark)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
-{unsigned expected=0;return ((kind>=1&&kind<=XV_BENCH_LOG_WRITER)||kind==XV_BENCH_DIAGNOSTIC_POLL||kind==XV_BENCH_DIAGNOSTIC_HIST)&&__atomic_compare_exchange_n(&benchmark,&expected,kind,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)?0:-1;}
+{unsigned expected=0;return ((kind>=1&&kind<=XV_BENCH_LOG_WRITER)||kind==XV_BENCH_LIGHT_CENSUS||kind==XV_BENCH_DIAGNOSTIC_POLL||kind==XV_BENCH_DIAGNOSTIC_HIST)&&__atomic_compare_exchange_n(&benchmark,&expected,kind,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)?0:-1;}
 void xv_logf(const char *fmt,...) {(void)fmt;}
 void xv_log_get_status(xv_log_status *out)
 {
