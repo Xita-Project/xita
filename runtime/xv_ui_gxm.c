@@ -772,6 +772,18 @@ void xv_ui_gxm_shutdown(void)
 
 int xv_ui_gxm_ready(void) { return g.ready; }
 
+#ifdef XV_DEPTH_STORE
+int xv_ui_gxm_depth_tail_readonly(unsigned frame)
+{
+    /* replay_overlay and replay_settings both disable stencil and depth writes.
+     * Verify their actual linked fragment programs cannot export depth either.
+     * No UI batches, clears or callbacks are covered by this contract. */
+    return g.ready && frame < UI_FRAMES &&
+        g.clear_fs.fprog && !g.clear_fs.replaces_depth &&
+        g.settings_fs.fprog && !g.settings_fs.replaces_depth;
+}
+#endif
+
 /* ---- recording (game fiber) ------------------------------------------------------------------- */
 static inline uint32_t pack_argb(const float c[4])
 {

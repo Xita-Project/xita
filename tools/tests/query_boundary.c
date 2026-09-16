@@ -30,7 +30,7 @@ static void execute(int on,int expect)
     if(eligible)xv_d3d_query_boundary_arm(0,&fence);
     assert(!memcmp(l,&before,sizeof *l));
     SceGxmDepthStencilSurface depth={0};
-    int err=xv_d3d_render_targets(NULL,0,&targets[0],NULL,NULL,&depth,960,544);
+    int err=xv_d3d_render_targets(NULL,0,&targets[0],NULL,NULL,&depth,960,544,0);
     if(err>=0) {
         assert(notification_count==(unsigned)eligible);
         if(eligible) {

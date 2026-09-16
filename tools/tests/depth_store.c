@@ -9,6 +9,7 @@
 #include "../../runtime/xv_render_profile.h"
 #include "../../runtime/xv_stencil.h"
 #define XV_NUM_LISTS 3
+#define UI_FRAMES 3
 #define XV_MAX_CMDS 32
 #define XV_RT_SLOTS 8
 #define XV_CLEAR_SLOTS 64
@@ -28,6 +29,12 @@ static int sceGxmProgramGetType(const SceGxmProgram *p){return p->type;}
 static int sceGxmProgramIsDepthReplaceUsed(const SceGxmProgram *p){return p->depth;}
 #include "programs.h"
 #include "shader.inc"
+static const unsigned ui_program=1;
+static struct {
+ int ready;
+ struct {const void *fprog;unsigned replaces_depth;} clear_fs,settings_fs;
+} g;
+#include "ui_tail.inc"
 static const char *FS_GXP[]={"app0:shaders/f0.frag.gxp","app0:shaders/f1.frag.gxp","app0:shaders/f2.frag.gxp","app0:shaders/f3.frag.gxp"};
 typedef struct {const char *gxp;unsigned ps_key;} xv_ps_entry_t;
 static const xv_ps_entry_t xv_ps_table[]={
@@ -80,7 +87,10 @@ static void gpu(void)
    else {if(c->depth_write || c->export_depth)tile_depth=c->value;if(c->stencil.enabled)tile_stencil=c->value;
      if(c->visibility)queries[c->visibility-1]=tile_depth*257+tile_stencil;}
    colors[active]=colors[active]*33+c->value;
-  } else if(e->kind==4)colors[active]=colors[active]*33+e->target;
+  } else if(e->kind==4) {
+   colors[active]=colors[active]*33+e->target;
+   if(c->export_depth)tile_depth=e->target;
+  }
  }
 }
 static SceGxmDepthStencilSurface current_depth;
@@ -102,12 +112,14 @@ static void visibility_draw_state(SceGxmContext *c,cmdlist_t *l,const cmd_t *cmd
 static void render_range(SceGxmContext *c,cmdlist_t *l,unsigned a,unsigned b,unsigned *slot,uint32_t frame,unsigned limit)
 {assert(opened);for(unsigned i=a;i<b;i++){event(3,i);events[nevents-1].command=l->cmds[i];}}
 void xv_ui_gxm_replay_batch(SceGxmContext *c,unsigned frame,unsigned batch,const void *target){assert(opened);event(4,batch);}
-void xv_ui_gxm_replay_overlay(SceGxmContext *c,unsigned frame){assert(opened);event(4,99);}
+void xv_ui_gxm_replay_overlay(SceGxmContext *c,unsigned frame)
+{assert(opened);if(g.ready && frame<UI_FRAMES){event(4,99);events[nevents-1].command.export_depth=g.clear_fs.replaces_depth;}}
 #include "replay.inc"
 typedef struct {unsigned depth[9],stencil[9],color[9],query[512],notice,events,finishes,failed;uint64_t trace;unsigned accepted;} receipt;
 static receipt run(unsigned mode,unsigned variant,unsigned frame,unsigned scaled)
 {
  memset(lists,0,sizeof lists);memset(events,0,sizeof events);memset(queries,0,sizeof queries);memset(colors,0,sizeof colors);
+ memset(&g,0,sizeof g);g.ready=1;g.clear_fs.fprog=g.settings_fs.fprog=&ui_program;
  nevents=executed=opened=begins=ends=finishes=fail_begin=fail_end=no_store=notice=0;
  for(unsigned i=0;i<9;i++)mem_depth[i]=100+i,mem_stencil[i]=200+i;
  for(unsigned i=0;i<8;i++)g_rt[i]=(rt_alias_t){.rt=&targets[i+1],.color={i+1},.depth={1,1,i+1,0xaaaa},.w=64,.h=64};
@@ -141,7 +153,7 @@ static receipt run(unsigned mode,unsigned variant,unsigned frame,unsigned scaled
  if(variant==27)l->cmds[3].ps_entry=XV_PS_TABLE_COUNT;
  if(variant==28)l->cmds[4].pass=9; /* invalid later target */
  if(variant==29)l->nui=2,l->ui[0].before=6,l->ui[1].before=3;
- if(variant>=30) {
+ if(variant>=30 && variant<35) {
    /* Several read-only returns must keep the earlier stored memory valid.
     * A writable return in the middle establishes a new value for later loads. */
    unsigned passes[]={0,1,0,1,0,2,0,1,0};l->ncmds=9;
@@ -150,6 +162,19 @@ static receipt run(unsigned mode,unsigned variant,unsigned frame,unsigned scaled
    if(variant==31)l->cmds[4].depth_write=1;
    if(variant>=32){l->nui=1;l->ui[0].before=variant==32?2:3;l->ui[0].target=variant==33?0:2;l->ui[0].batch=8;}
  }
+ int readonly_tail=variant>=35;
+ if(variant==36)readonly_tail=0;
+ if(variant==37)g.clear_fs.replaces_depth=1;
+ if(variant==38)g.settings_fs.replaces_depth=1;
+ if(variant==39)g.settings_fs.fprog=NULL;
+ if(variant==40)l->cmds[5].depth_write=1;
+ if(variant==41)l->nui=1,l->ui[0].before=6,l->ui[0].batch=8;
+ if(variant==42)l->cmds[5].ps_entry=-1;
+ if(variant==43)l->ui_frame=UI_FRAMES;
+ if(variant==44)g.ready=0;
+ if(variant==45)l->ncmds=5; /* final span contains only the proved tail */
+ if(variant==46)g.clear_fs.fprog=NULL;
+ if(variant==47)l->cmds[5].stencil.enabled=1;
  cmdlist_t before=*l;
  xv_depth_store_override(mode);
 #ifdef XV_QUERY_BOUNDARY
@@ -158,8 +183,10 @@ static receipt run(unsigned mode,unsigned variant,unsigned frame,unsigned scaled
  if(xv_d3d_query_boundary_prepare(frame,1)){SceGxmNotification f={&notice,999};xv_d3d_query_boundary_arm(frame,&f);}
 #endif
  SceGxmDepthStencilSurface depth={0,0,0,0x11223344},original=depth;SceGxmColorSurface color={0};
- int failed=xv_d3d_render_targets(NULL,frame,targets,NULL,&color,&depth,scaled?640:960,scaled?360:544)<0;
- if(opened){/* Final external settings path, also kept on ordinary stores. */event(4,123);sceGxmEndScene(NULL,NULL,NULL);}
+ int failed=xv_d3d_render_targets(NULL,frame,targets,NULL,&color,&depth,scaled?640:960,scaled?360:544,readonly_tail)<0;
+ if(opened){/* Independent external settings operation; unknown depth exporters
+              must keep stores even when the caller requests final admission. */
+   event(4,123);events[nevents-1].command.export_depth=g.settings_fs.replaces_depth;sceGxmEndScene(NULL,NULL,NULL);}
  sceGxmFinish(NULL);assert(!memcmp(&depth,&original,sizeof depth)&&!memcmp(l,&before,sizeof before));
  receipt r={.notice=notice,.events=nevents,.finishes=finishes,.failed=failed,.accepted=no_store,.trace=1469598103934665603ull};
  memcpy(r.depth,mem_depth,sizeof mem_depth);memcpy(r.stencil,mem_stencil,sizeof mem_stencil);
@@ -173,13 +200,14 @@ int main(void)
  assert(!xv_depth_store_enabled());xv_depth_store_override(1);xv_depth_store_override(-1);assert(!xv_depth_store_enabled());
  assert(!xv_fshader_embedded_no_depth(NULL)&&!xv_fshader_embedded_no_depth("missing"));
  unsigned frames[]={0,2,3,UINT32_MAX,0};unsigned checked=0;
- for(unsigned k=0;k<sizeof frames/sizeof frames[0];k++)for(unsigned scaled=0;scaled<2;scaled++)for(unsigned variant=0;variant<35;variant++) {
+ for(unsigned k=0;k<sizeof frames/sizeof frames[0];k++)for(unsigned scaled=0;scaled<2;scaled++)for(unsigned variant=0;variant<48;variant++) {
    receipt a=run(0,variant,frames[k],scaled),b=run(1,variant,frames[k],scaled);
    assert(!a.accepted);unsigned accepted=b.accepted;b.accepted=0;
    if(memcmp(&a,&b,sizeof a)){fprintf(stderr,"mismatch variant %u frame %u scaled %u\n",variant,frames[k],scaled);abort();}
    if(variant==0||variant==20||variant==21||variant==23)assert(accepted==1);
    if(variant==1||variant==2||variant==3||variant==4||variant==5||(variant>=6&&variant<=16)||variant==19||variant==22||(variant>=24&&variant<30))assert(!accepted);
-   if(variant>=30)assert(accepted==((variant==31 || variant==33)?2:3));
+   if(variant>=30 && variant<35)assert(accepted==((variant==31 || variant==33)?2:3));
+   if(variant>=35)assert(accepted==((variant==35 || variant==45)?2:1));
    checked++;
  }
  /* Bounds failure is declined before any command access by the proof. The

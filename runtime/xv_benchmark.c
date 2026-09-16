@@ -583,7 +583,7 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
             else if (xv_benchmark_compare_texture_state())
                 xv_logf("[texture-state-compare] start off/on/off at %up; only identical resolved mesh texture bindings are cached within uninterrupted ranges; draw order, shaders, geometry, workers and settings unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_depth_store())
-                xv_logf("[depth-store-compare] start off/on/off at %up; proved read-only intermediate backbuffer scenes only; loads, first/final/offscreen stores and query policy retained; restore initial mode %d; %u settle + %u measured frames each\n",height,b.depth_store_original,SETTLE,MEASURE);
+                xv_logf("[depth-store-compare] start off/on/off at %up; proved read-only backbuffer scenes with explicit final UI-tail contract; loads, first/offscreen stores and query policy retained; restore initial mode %d; %u settle + %u measured frames each\n",height,b.depth_store_original,SETTLE,MEASURE);
             else if (xv_benchmark_compare_query_boundary())
                 xv_logf("[query-boundary-compare] start off/on/off at %up; exact results at existing RTT fragment boundary, final storage ownership retained; existing world-fence setting/graphics/workers unchanged, restore initial mode %d; %u settle + %u measured frames each\n",height,b.query_boundary_original,SETTLE,MEASURE);
             else if (xv_benchmark_compare_early_visibility())

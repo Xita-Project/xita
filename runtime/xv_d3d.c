@@ -2560,11 +2560,11 @@ int xv_d3d_has_render_targets(uint32_t frame)
 int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
     SceGxmRenderTarget *back, SceGxmSyncObject *sync,
     const SceGxmColorSurface *color, const SceGxmDepthStencilSurface *depth,
-    unsigned back_width, unsigned back_height)
+    unsigned back_width, unsigned back_height, int depth_tail_readonly)
 {
     cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
     SceGxmDepthStencilSurface bd = *depth;
-    XV_DS_SETUP(l);
+    XV_DS_SETUP(l, depth_tail_readonly);
     sceGxmDepthStencilSurfaceSetForceStoreMode(&bd, SCE_GXM_DEPTH_STENCIL_FORCE_STORE_ENABLED);
     unsigned clear_slot = 0, current = 0xff;
     int open = 0;

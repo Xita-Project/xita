@@ -1,10 +1,12 @@
 /* Pump-only proof over retained commands. Include after cmdlist_t/g_rt.
  * Stores are optional only after an earlier backbuffer scene stored the same
- * attachment, and only before a known later target transition. */
+ * attachment. The final span also requires the caller's explicit tail contract
+ * and the linked program proof for the replay-owned performance overlay. */
 #pragma once
 #ifdef XV_DEPTH_STORE
 enum { DS_OFF, DS_READY, DS_FIRST, DS_FINAL, DS_BOUNDS, DS_UI, DS_CLEAR,
-       DS_WRITE, DS_STENCIL, DS_SHADER, DS_EMPTY, DS_REASONS };
+       DS_WRITE, DS_STENCIL, DS_SHADER, DS_EMPTY, DS_READY_FINAL, DS_REASONS };
+int xv_ui_gxm_depth_tail_readonly(unsigned frame);
 static unsigned g_depth_store_mode;
 static uint32_t g_depth_store_reasons[DS_REASONS];
 static uint64_t g_depth_store_pixels;
@@ -62,7 +64,7 @@ static int ds_list_valid(const cmdlist_t *l)
     }
     return 1;
 }
-static unsigned ds_scene(const cmdlist_t *l,unsigned i,unsigned u,int stored)
+static unsigned ds_scene(const cmdlist_t *l,unsigned i,unsigned u,int stored,int readonly_tail)
 {
     if(!stored)return DS_FIRST;
     unsigned draws=0;
@@ -71,9 +73,9 @@ static unsigned ds_scene(const cmdlist_t *l,unsigned i,unsigned u,int stored)
         int done=i>=l->ncmds && !ui;
         unsigned target=ui?l->ui[u].target:done?0:l->cmds[i].pass;
         if(target)return draws?DS_READY:DS_EMPTY;
-        /* The final open scene also includes external settings/upscale work;
-         * UI/clears retain stores until their full interfaces are proved. */
-        if(done)return DS_FINAL;
+        /* No unrecorded writer may follow an accepted final span. Ordinary
+         * recorded UI batches and clears remain on the original policy. */
+        if(done)return readonly_tail && xv_ui_gxm_depth_tail_readonly(l->ui_frame) ? DS_READY_FINAL : DS_FINAL;
         if(ui)return DS_UI;
         const cmd_t *c=&l->cmds[i++];
         if(c->kind)return DS_CLEAR;
@@ -85,28 +87,29 @@ static unsigned ds_scene(const cmdlist_t *l,unsigned i,unsigned u,int stored)
 }
 void xv_d3d_depth_store_report(void)
 {
-    if(!xv_depth_store_enabled() && !g_depth_store_reasons[DS_READY]) {
+    if(!xv_depth_store_enabled() && !g_depth_store_reasons[DS_READY] && !g_depth_store_reasons[DS_READY_FINAL]) {
         memset(g_depth_store_reasons,0,sizeof g_depth_store_reasons);return;
     }
-    XV_LOG("[depth-store] backbuffer scenes off/accepted/first/final/bounds/ui/clear/write/stencil/shader/empty %u/%u/%u/%u/%u/%u/%u/%u/%u/%u/%u; accepted logical samples %llu; forced-store disabled only, loads and final scene retained; no measured bandwidth claim\n",
+    XV_LOG("[depth-store] backbuffer scenes off/accepted/first/final/bounds/ui/clear/write/stencil/shader/empty/accepted-final %u/%u/%u/%u/%u/%u/%u/%u/%u/%u/%u/%u; accepted logical samples %llu; forced-store disabled only, loads retained, explicit final-tail proof; no measured bandwidth claim\n",
         g_depth_store_reasons[DS_OFF],g_depth_store_reasons[DS_READY],g_depth_store_reasons[DS_FIRST],
         g_depth_store_reasons[DS_FINAL],g_depth_store_reasons[DS_BOUNDS],g_depth_store_reasons[DS_UI],
         g_depth_store_reasons[DS_CLEAR],g_depth_store_reasons[DS_WRITE],g_depth_store_reasons[DS_STENCIL],
-        g_depth_store_reasons[DS_SHADER],g_depth_store_reasons[DS_EMPTY],(unsigned long long)g_depth_store_pixels);
+        g_depth_store_reasons[DS_SHADER],g_depth_store_reasons[DS_EMPTY],g_depth_store_reasons[DS_READY_FINAL],(unsigned long long)g_depth_store_pixels);
     memset(g_depth_store_reasons,0,sizeof g_depth_store_reasons);g_depth_store_pixels=0;
 }
-#define XV_DS_SETUP(l) int ds_enabled=xv_depth_store_enabled()&&xv_depth_store_available(); \
-    int ds_valid=ds_enabled?ds_list_valid(l):0, ds_stored=0
+#define XV_DS_SETUP(l,tail) int ds_enabled=xv_depth_store_enabled()&&xv_depth_store_available(); \
+    int ds_valid=ds_enabled?ds_list_valid(l):0, ds_stored=0, ds_tail=!!(tail)
 #define XV_DS_STORED(t) do {if(!(t))ds_stored=1;} while(0)
 #define XV_DS_SURFACE(l,i,u,t,d,w,h) do {if(!(t)) { \
-    unsigned why=!ds_enabled?DS_OFF:!ds_valid?DS_BOUNDS:ds_scene(l,i,u,ds_stored); \
+    unsigned why=!ds_enabled?DS_OFF:!ds_valid?DS_BOUNDS:ds_scene(l,i,u,ds_stored,ds_tail); \
+    int accepted=why==DS_READY || why==DS_READY_FINAL; \
     g_depth_store_reasons[why]++; \
-    if(why==DS_READY)g_depth_store_pixels+=(uint64_t)(w)*(h); \
-    sceGxmDepthStencilSurfaceSetForceStoreMode(d,why==DS_READY? \
+    if(accepted)g_depth_store_pixels+=(uint64_t)(w)*(h); \
+    sceGxmDepthStencilSurfaceSetForceStoreMode(d,accepted? \
         SCE_GXM_DEPTH_STENCIL_FORCE_STORE_DISABLED:SCE_GXM_DEPTH_STENCIL_FORCE_STORE_ENABLED); \
 }} while(0)
 #else
-#define XV_DS_SETUP(l) ((void)0)
+#define XV_DS_SETUP(l,tail) ((void)(tail))
 #define XV_DS_STORED(t) ((void)0)
 #define XV_DS_SURFACE(l,i,u,t,d,w,h) ((void)0)
 #endif

@@ -28,6 +28,10 @@
 int  xv_ui_gxm_init(void);
 void xv_ui_gxm_shutdown(void);
 int  xv_ui_gxm_ready(void);
+#ifdef XV_DEPTH_STORE
+/* Pump-only proof for replay_overlay/settings, excluding ordinary UI batches. */
+int xv_ui_gxm_depth_tail_readonly(unsigned frame);
+#endif
 /* Apply explicit pre-launch sampler overrides to a copied descriptor. Defaults
  * preserve the game's filters and only existing mip chains can be sampled. */
 void xv_ui_gxm_apply_texture_options(SceGxmTexture *texture);

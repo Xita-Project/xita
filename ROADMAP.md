@@ -31,9 +31,11 @@ capture also identifies a missing model shader variant for follow-up.
 
 [~] [Read-only backbuffer depth stores](docs/backbuffer-depth-store-20260916.md):
 the guarded candidate and Off/On/Off comparison are implemented, host-tested
-and built for Vita. It preserves loads, writable passes, first/final scenes and
-query lifetime. It remains disabled and awaits physical eligibility, correctness
-and performance measurements; the user's active build is unchanged.
+and built for Vita. The first 360p blue-base trial is flat at 19.52/19.47/19.71
+FPS: only first/final backbuffer scenes occur, with zero intermediate stores
+eligible. The follow-up proves the final overlay/settings tail as well, while
+preserving loads, writable passes, first scenes and query lifetime. It remains
+disabled pending a positive physical comparison.
 
 **Active objective (September 15):** restructure costly Halo CE engine and rendering
 work into efficient native routines and independent worker jobs until sustained

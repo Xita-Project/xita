@@ -14,7 +14,7 @@
 #pragma once
 #ifdef XV_DEPTH_STORE
 /* Mode changes only at the drained recording-owner/pump boundary; default OFF.
- * Reporting is pump-owned. No first/final/offscreen scene stores are changed. */
+ * Reporting is pump-owned. First/offscreen stores retain their policy. */
 int xv_depth_store_available(void);
 int xv_depth_store_enabled(void);
 void xv_depth_store_override(int enabled);
@@ -153,7 +153,7 @@ int xv_d3d_has_render_targets(uint32_t frame);
 int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
     SceGxmRenderTarget *back, SceGxmSyncObject *sync,
     const SceGxmColorSurface *color, const SceGxmDepthStencilSurface *depth,
-    unsigned back_width, unsigned back_height);
+    unsigned back_width, unsigned back_height, int depth_tail_readonly);
 
 unsigned xv_d3d_record_slot(void);
 void xv_d3d_BeginFrame(void);

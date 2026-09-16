@@ -208,7 +208,7 @@ int main(int argc, char **argv)
     int queued = atoi(getenv("XV_RT_QUEUE"));
     unsigned before_finishes = finishes;
     assert(xv_d3d_has_render_targets(0));
-    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480) == 0);
+    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480,0) == 0);
     assert(viewport_width == 848 && viewport_height == 480);
     assert(begun == 5 && ended == 4 && ui_draws == 1 && !strcmp(order, "01U234"));
     assert(finishes - before_finishes == (queued ? 0u : 4u));
@@ -227,7 +227,7 @@ int main(int argc, char **argv)
     l->ncmds=3;
     for(unsigned i=0;i<3;++i){l->cmds[i].pass=0;l->cmds[i].ntex=0;}
     range_calls=max_range=order_n=0;memset(order,0,sizeof order);
-    assert(xv_d3d_render_targets(NULL,0,&back_rt,NULL,&back_color,&back_depth,704,400)==0);
+    assert(xv_d3d_render_targets(NULL,0,&back_rt,NULL,&back_color,&back_depth,704,400,0)==0);
     assert(range_calls==2&&max_range==2&&!strcmp(order,"01U2"));
     assert(viewport_width==704&&viewport_height==400);
     sceGxmEndScene(NULL,NULL,NULL);sceGxmFinish(NULL);
@@ -257,34 +257,34 @@ int main(int argc, char **argv)
     memset(lists, 0, sizeof lists);
     assert(!xv_d3d_has_render_targets(0));
     fail_begin = begun + 1;
-    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480) < 0);
+    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480,0) < 0);
     assert(!open_scene); fail_begin = 0;
     /* A later BeginScene failure must drain every previously queued pass. */
     lists[0].ncmds = 1; lists[0].cmds[0].pass = 1;
     assert(rt_register(0x10000, 64, 64, 0x12));
     fail_begin = begun + 2;
-    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480) < 0);
+    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480,0) < 0);
     assert(!open_scene && !pending && !gpu_count); fail_begin = 0;
     lists[0].ncmds = 1; lists[0].cmds[0].pass = 1;
     assert(rt_register(0x10000, 64, 64, 0x12));
     fail_end = 1;
-    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480) < 0);
+    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480,0) < 0);
     assert(!open_scene && !pending); fail_end = 0;
     rt_shutdown();
     /* The hardware crash log had target 90 with only eight slots. Reject a
      * malformed target before indexing the pool or submitting invalid pointers. */
     memset(lists, 0, sizeof lists);
     lists[0].ncmds = 1; lists[0].cmds[0].pass = 90;
-    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480) < 0);
+    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480,0) < 0);
     assert(!open_scene && !pending);
     lists[0].ncmds = 2; lists[0].cmds[0].pass = 0; lists[0].cmds[1].pass = 90;
-    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480) < 0);
+    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480,0) < 0);
     assert(!open_scene && !pending);
     lists[0].ncmds = 0; lists[0].nui = 1; lists[0].ui[0].target = 90;
-    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480) < 0);
+    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480,0) < 0);
     assert(!open_scene && !pending);
     lists[0].ui[0].target = 1; /* valid index, no live target */
-    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480) < 0);
+    assert(xv_d3d_render_targets(NULL, 0, &back_rt, NULL, &back_color, &back_depth, 848, 480,0) < 0);
     assert(!open_scene && !pending);
     for (unsigned i = 1; i <= next_uid; ++i) assert(!blocks[i]);
     capacity_tests();

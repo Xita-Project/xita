@@ -4,10 +4,13 @@ import argparse, json, os, pathlib, re, struct, subprocess, tempfile
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 ap=argparse.ArgumentParser();ap.add_argument('--stage',type=pathlib.Path);args=ap.parse_args()
 src=(ROOT/'runtime/xv_d3d.c').read_text();shader=(ROOT/'runtime/xv_shader.c').read_text()
+ui=(ROOT/'runtime/xv_ui_gxm.c').read_text()
+ua=ui.index('int xv_ui_gxm_depth_tail_readonly(');ub=ui.index('\n#endif',ua)
 a=src.index('void xv_d3d_render(SceGxmContext *ctx, uint32_t frame)');b=src.index('/* The clear quad',a)
 c=shader.index('int xv_fshader_embedded_no_depth(');d=shader.index('\n#endif',c)
 with tempfile.TemporaryDirectory(prefix='xita-depth-store-') as tmp:
  p=pathlib.Path(tmp);(p/'replay.inc').write_text(src[a:b]);(p/'shader.inc').write_text(shader[c:d])
+ (p/'ui_tail.inc').write_text(ui[ua:ub])
  programs={}
  for i in range(8):
   for variant in ('','_na','_gt'):

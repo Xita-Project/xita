@@ -134,3 +134,11 @@ variants generate without warnings, but have not been compiled, installed or
 validated visually. The nearest existing definition differs in an alpha-stage
 operation; no unproved shader alias was installed. This remains a rendering
 follow-up and limits claims of complete visual correctness.
+
+The full pre-update log also confirms loading `beavercreek.map`, followed by
+66 world-rendering report windows, 30 at or above 20 FPS. The window median is
+19.5 FPS, with a 6.3–27.4 range including load/transition effects. This supports
+the user's Battle Creek observation but is not sustained 20 FPS or a controlled
+gain measurement. Menu/loading-only reports are excluded from those 66 windows.
+The archive is `depth-store-validation/install/before-0.log`; the extracted
+rows and map markers are in `depth-store-validation/battle-creek-prior-run.json`.

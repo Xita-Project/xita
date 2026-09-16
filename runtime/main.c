@@ -654,10 +654,18 @@ static int xv_gfx_render_frame(uint32_t mesh_frame, unsigned ui_frame,
             sceGxmTextureSetVAddrMode(&scene, SCE_GXM_TEXTURE_ADDR_CLAMP);
         }
         xv_d3d_SetSceneBackbufferTexture(&scene);
+        int depth_tail_readonly = 0;
+#ifdef XV_DEPTH_STORE
+        /* After RTT replay, this branch only sets viewport, appends the owned
+         * settings panel (native output) and ends the world scene. Scaled
+         * settings draw in a separate depthless scene. Keep unknown dialogs on
+         * the original policy. The replay separately proves its own overlay. */
+        depth_tail_readonly = !g_net_dialog && xv_ui_gxm_depth_tail_readonly(ui_frame);
+#endif
         if (xv_d3d_render_targets(g->ctx, mesh_frame, scaled ? g->scaled_target : g->render_target,
                 scaled ? NULL : g->display_sync[g->back_index],
                 scaled ? &g->scaled_surface[g->back_index] : &g->display_surface[g->back_index],
-                &g->depth_surface, g->render_width, g->render_height) < 0) return -1;
+                &g->depth_surface, g->render_width, g->render_height, depth_tail_readonly) < 0) return -1;
     } else
 #endif
     {

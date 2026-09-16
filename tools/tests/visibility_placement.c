@@ -146,7 +146,7 @@ static void run(unsigned frame,int expected)
     cmdlist_t *l=&lists[frame%3];before=*l;
     XV_VP_BEGIN(l,frame);
     SceGxmDepthStencilSurface depth={0};
-    int result=xv_d3d_render_targets(NULL,frame,&targets[0],NULL,NULL,&depth,960,544);
+    int result=xv_d3d_render_targets(NULL,frame,&targets[0],NULL,NULL,&depth,960,544,0);
     assert((result<0)==(expected<0));
     XV_VP_COMPLETE(l,frame);assert(!memcmp(&before,l,sizeof *l));
 #ifdef XV_VISIBILITY_PLACEMENT
@@ -245,7 +245,7 @@ static void metadata_only(void)
     reset(0);l=&lists[0];slot(l,0,0,1);cmd(l,0,1,6);cmd(l,1,0,9);cmd(l,0,0,12);
     for(unsigned i=0;i<60;i++) {
         vp_begin(l,i*3);SceGxmDepthStencilSurface d={0};
-        assert(!xv_d3d_render_targets(NULL,i*3,&targets[0],NULL,NULL,&d,960,544));
+        assert(!xv_d3d_render_targets(NULL,i*3,&targets[0],NULL,NULL,&d,960,544,0));
         vp_complete(l,i*3);sceGxmEndScene(NULL,NULL,NULL);
     }
     assert(report_lines==6 && !g_visibility_placement_totals.packets);
