@@ -438,6 +438,26 @@ RECOMP_CFLAGS += -DXV_EXPERIMENTAL_OBJECT_JOBS
 CFLAGS += -DXV_EXPERIMENTAL_OBJECT_JOBS
 endif
 
+# Guard-retained C query adapter. Ordinary builds contain no adapter/state.
+ifeq ($(XV_WORKER_QUERY),1)
+ifneq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
+$(error XV_WORKER_QUERY requires XV_EXPERIMENTAL_OBJECT_JOBS=1)
+endif
+RECOMP_CFLAGS += -DXV_WORKER_QUERY
+endif
+.PHONY: force-worker-query-config
+force-worker-query-config:
+$(RECOMP_BUILD)/worker-query.config: force-worker-query-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_WORKER_QUERY)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(XITA_GUEST_OBJS) $(XITA_GAME_OBJS) $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/worker-query.config
+$(RECOMP_BUILD)/kernel/xk_worker_query.o: recomp/kernel/xk_worker_query_generated.inc
+$(RECOMP_BUILD)/kernel/xk_worker_query.o: RECOMP_CFLAGS += -ffp-contract=off -frounding-math
+recomp/kernel/xk_worker_query_generated.inc: tools/gen_worker_query.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
+	$(PYTHON) tools/gen_worker_query.py --xbe $(XBE) --manifest $(XBE_JSON)
+
 # Count-only diagnostic build; disabled unless explicitly requested. All guard
 # users share the same scope instrumentation, including unchanged idle guards.
 ifeq ($(XV_LIGHT_QUERY_CENSUS),1)

@@ -20,6 +20,9 @@ endif
 ifeq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_jobs.c
 endif
+ifeq ($(XV_WORKER_QUERY),1)
+XITA_GAME_SRCS += recomp/kernel/xk_worker_query.c
+endif
 ifeq ($(XV_QUAT_CACHE),1)
 XITA_GAME_SRCS += recomp/kernel/xk_quat_cache.c
 endif

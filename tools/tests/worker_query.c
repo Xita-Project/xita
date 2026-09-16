@@ -1,0 +1,204 @@
+#define _POSIX_C_SOURCE 200809L
+#include "kernel/xk_object_jobs.h"
+#include "kernel/xk_worker_query.h"
+#include <assert.h>
+#include <fenv.h>
+#include <pthread.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include "worker_query_axes.h"
+/* Include the actual pool to inspect guard ownership during the test callback.
+ * No production admission, mutex, parking or service function is replaced. */
+#include "kernel/xk_object_jobs.c"
+enum { RAM=4<<20,ARENA=8<<20,BSP=0x10000,COLL=0x11000,PLANES=0x12000,
+ CLUSTERS=0x20000,ADJ=0x40000,PORTALS=0x50000,VERTS=0x70000,
+ LISTS=0x90000,HEADS=0x91000,POOL0=0x92000,POOL1=0x93000,
+ NODES0=0x94000,NODES1=0xa4000,LIGHTS=0xb4000 };
+uint8_t *g_xram,*g_img_base;uint32_t *g_xpt;
+int xv_phase_enabled;
+static unsigned allocations,comparisons,ready_count,mutation_count;
+static unsigned lane_seen[2],service_ready,service_done,park_ack;
+static unsigned query_held,query_tried;
+static pthread_barrier_t rendezvous;
+static int mode;
+static _Thread_local unsigned mutation;
+static pthread_mutex_t oracle=PTHREAD_MUTEX_INITIALIZER;
+static unsigned char *before,*expected;
+void f_00056670(xctx *),ref_00056670(xctx *),ref_commit(xctx *);
+void f_000565E0(xctx *);
+int xd3d_object_jobs_ready(void){return 1;}
+int xk_object_io_step(void){assert(0);return -1;}
+unsigned xk_mem_arena_size(void){return ARENA;}
+uint32_t xk_mem_image_lo(void){return 0;}
+uint32_t xk_mem_image_hi(void){return RAM;}
+uint64_t xk_os_monotonic_us(void)
+{struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000;}
+void xk_os_log(const char *fmt,...)
+{va_list a;va_start(a,fmt);vfprintf(stderr,fmt,a);va_end(a);}
+uint32_t xk_mem_alloc(uint32_t n,uint32_t a,uint32_t l,uint32_t h,int t)
+{(void)a;(void)l;(void)h;(void)t;assert(n==XV_OBJECT_JOB_STACK_BYTES);return 0x100000+allocations++*n;}
+int xk_mem_free(uint32_t a){(void)a;return 1;}
+static void put(uint32_t a,const void*p,unsigned n){x_guest_write(a,p,n);}
+static void w32(uint32_t a,uint32_t x){put(a,&x,4);}
+static void w16(uint32_t a,uint16_t x){put(a,&x,2);}
+static void fp32(uint32_t a,float f){put(a,&f,4);}
+static void clear(uint32_t a,unsigned n){for(unsigned i=0;i<n;i++)X_M8(a+i)=0;}
+static void graph(unsigned n,unsigned capacity)
+{
+    clear(BSP,0x15c);clear(COLL,0x14);X_IMG32(0x39be58)=BSP;X_IMG32(0x39be50)=COLL;
+    w32(BSP+0xb4,COLL);w32(COLL+0x10,PLANES);
+    w32(BSP+0x134,n);w32(BSP+0x138,CLUSTERS);w32(BSP+0x154,n-1);w32(BSP+0x158,PORTALS);
+    float plane[]={0,0,1,0};put(PLANES,plane,sizeof plane);fp32(0x1f0a68,0);put(0x1eaf30,axes,24);
+    for(unsigned k=0;k<n;k++){
+        clear(CLUSTERS+k*104,104);unsigned adj=0;
+        if(k)w16(ADJ+k*64+2*adj++,k-1);
+        if(k+1<n)w16(ADJ+k*64+2*adj++,k);
+        w32(CLUSTERS+k*104+0x5c,adj);w32(CLUSTERS+k*104+0x60,ADJ+k*64);
+        w32(0x2d2fb0+4*k,0x12340000+k);w32(HEADS+4*k,UINT32_MAX);
+        if(k+1==n)continue;
+        clear(PORTALS+k*64,64);w16(PORTALS+k*64,k);w16(PORTALS+k*64+2,k+1);
+        float bound[]={0,0,0,100};put(PORTALS+k*64+8,bound,sizeof bound);
+        w32(PORTALS+k*64+0x34,4);w32(PORTALS+k*64+0x38,VERTS+k*128);
+        float vertices[]={-10,-10,0,10,-10,0,10,10,0,-10,10,0};put(VERTS+k*128,vertices,sizeof vertices);
+    }
+    X_IMG32(0x2d2fac)=100;X_IMG8(0x2d2fa9)=0;
+    w32(LISTS,HEADS);w32(LISTS+4,POOL0);w32(LISTS+8,POOL1);
+    for(unsigned j=0;j<2;j++){
+        unsigned p=j?POOL1:POOL0,nodes=j?NODES1:NODES0;clear(p,0x38);clear(nodes,1024*12);
+        w16(p+0x20,capacity);w16(p+0x22,12);w16(p+0x32,0x8001);w32(p+0x34,nodes);
+    }
+    for(unsigned k=0;k<8;k++)w32(LIGHTS+4*k,UINT32_MAX);
+}
+static void prepare(xctx *c,unsigned sp,unsigned k)
+{
+    for(unsigned i=0;i<8;i++){c->r[i]=0x13570000+k*71+i*13;c->st[i]=i+0.25;}
+    c->r[0]=sp+64;c->r[4]=sp;c->r[7]=LISTS;c->fsp=k&7;c->fcw=0x37f;c->fsw=(k*0x9123)&65535;c->preempt=1000000;
+    c->f_kind=XK_SUB;c->f_bits=32;c->f_op1=7;c->f_op2=9;c->f_res=(uint32_t)-2;
+    c->df=k&1;c->fs_base=k*935;c->eip_hint=k*619;c->scratch=k*97;
+    if(k&1)for(unsigned i=0;i<8;i++){uint64_t bits=UINT64_C(0x7ff8123456780000)+k+i;memcpy(&c->st[i],&bits,8);}
+    for(unsigned i=0;i<8;i++){c->mm[i]=(uint64_t)k*7654321+i;for(unsigned j=0;j<4;j++)c->xmm[i][j]=k+i+j;}
+    w32(sp,0x925b0);w32(sp+4,0x80000000);w32(sp+8,LIGHTS);w32(sp+12,sp+80);
+    float radii[]={100,0,-1,1,INFINITY,NAN,-0.0f};fp32(sp+16,radii[k%7]);
+    w32(sp+64,0);w16(sp+68,k%13==0?65535:0);float center[]={k%11==0?200:0,0,0};put(sp+80,center,12);
+}
+static void mutate(xctx *c,unsigned kind)
+{
+    switch(kind){
+    case 1:X_IMG32(0x2d2fac)++;break;
+    case 2:fp32(VERTS,77);break;
+    case 3:w32(0x2d2fb0,101);break;
+    case 4:g_xpt[VERTS>>12]^=4096;break;
+    case 5:fp32(c->r[4]+80,30);break;
+    case 6:X_IMG32(0x39be58)=COLL;break; /* simulated reset, discard only */
+    case 7:g_xpt[(c->r[4]-4096)>>12]^=4096;break;
+    case 8:c->fsp^=1;break;
+    }
+}
+void xv_worker_query_test_ready(xctx *c,unsigned lane)
+{
+    assert(lane<2&&worker_lane()==(int)lane&&c==&contexts[lane]&&math_depth[lane]==1);
+    ready_count++;lane_seen[lane]++;
+    if(mutation){mutate(c,mutation);mutation_count++;}
+    if(mode==6&&!__atomic_load_n(&query_held,__ATOMIC_ACQUIRE)){
+        __atomic_store_n(&query_held,1,__ATOMIC_RELEASE);
+        uint64_t end=xk_os_monotonic_us()+5000000;
+        while(!__atomic_load_n(&query_tried,__ATOMIC_ACQUIRE))assert(xk_os_monotonic_us()<end);
+    }
+}
+static void equal(const void *a,const void*b,unsigned n,const char *what,unsigned k)
+{
+    if(memcmp(a,b,n)){for(unsigned i=0;i<n;i++)if(((const unsigned char*)a)[i]!=((const unsigned char*)b)[i]){
+      fprintf(stderr,"case %u %s byte %x expected %02x actual %02x\n",k,what,i,((const unsigned char*)a)[i],((const unsigned char*)b)[i]);abort();}}
+}
+static void wait_flag(unsigned *flag)
+{uint64_t end=xk_os_monotonic_us()+5000000;while(!__atomic_load_n(flag,__ATOMIC_ACQUIRE)){assert(xk_os_monotonic_us()<end);struct timespec t={0,1000};nanosleep(&t,NULL);}}
+static void service(xctx*c)
+{assert(worker_lane()<0);assert(!xv_object_query_lane(c,2,c->r[4]-16384,16404));assert(__atomic_load_n(&park_ack,__ATOMIC_ACQUIRE));c->r[4]+=4;__atomic_store_n(&service_done,1,__ATOMIC_RELEASE);}
+void f_0008FB70(xctx *c)
+{
+    xctx saved=*c;unsigned id=c->r[1],sp=c->r[4]-256;int lane=worker_lane();assert(lane>=0);
+    if(mode!=5){int b=pthread_barrier_wait(&rendezvous);assert(!b||b==PTHREAD_BARRIER_SERIAL_THREAD);}
+    if(mode==4){
+        if(!id){
+            XV_OBJECT_MATH_GUARD();X_M32(c->r[4])=0x291ef;
+            __atomic_store_n(&service_ready,1,__ATOMIC_RELEASE);
+            xv_object_job_hle(c,0x193c1b,service);c->r[4]-=4;
+        }else{
+            wait_flag(&service_ready);while(!__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE)){}
+            __atomic_store_n(&park_ack,1,__ATOMIC_RELEASE);
+            XV_OBJECT_MATH_GUARD();assert(__atomic_load_n(&service_done,__ATOMIC_ACQUIRE));
+            prepare(c,sp,7);assert(xv_worker_query(c,xv_object_math_locked_));ref_commit(c);
+        }
+    }else if(mode==6){
+        if(id){wait_flag(&query_held);assert(xv_object_mutex_try(&math_mutex)!=0);__atomic_store_n(&query_tried,1,__ATOMIC_RELEASE);}
+        for(unsigned k=0;k<64;k++){
+            c->r[4]=sp;c->r[3]=LISTS;X_PUSH32(LIGHTS+id*4);X_PUSH32(0x80000000u+id);X_PUSH32(0x8d7ff);f_000565E0(c);assert(c->r[4]==sp);
+            prepare(c,sp,7);c->df=0;w32(sp+4,0x80000000u+id);w32(sp+8,LIGHTS+id*4);f_00056670(c);assert(c->r[4]==sp+20);
+        }
+    }else if(mode==5){
+        graph(7,1024);prepare(c,sp,7);c->preempt=1;f_00056670(c);abort();
+    }else for(unsigned k=0;k<(mode==0?168:mode==1?12:8);k++){
+        pthread_mutex_lock(&oracle);
+        unsigned sizes[]={1,7,65,256},caps[]={0,1,8,1024};graph(sizes[(k/7)%4],caps[(k/28)%4]);prepare(c,sp,k);
+        if(mode==2||mode==3){graph(7,1024);prepare(c,sp,7);}
+        if(k%17==0)X_IMG32(0x2d2fac)=UINT32_MAX;
+        unsigned old_page=0,changed_page=0;
+        if(mode==2){
+            switch(k%4){
+            case 0:changed_page=(sp-4096)>>12;old_page=g_xpt[changed_page];g_xpt[changed_page]=g_xpt[PORTALS>>12];break;
+            case 1:w32(sp+12,0x2d2fb0);break;
+            case 2:c->r[0]=sp-64;break;
+            case 3:c->r[4]=stacks[lane]+1024;break;
+            }
+            xctx entry=*c;memcpy(before,g_xram,ARENA);XV_OBJECT_MATH_GUARD();
+            assert(!xv_worker_query(c,xv_object_math_locked_));equal(&entry,c,sizeof *c,"alias context",k);equal(before,g_xram,ARENA,"alias memory",k);
+            if(changed_page)g_xpt[changed_page]=old_page;
+        }else if(mode==3){
+            unsigned page=(sp-4096)>>12,old=g_xpt[page],oldvert=g_xpt[VERTS>>12];
+            xctx entry=*c;memcpy(before,g_xram,ARENA);mutate(c,k+1);xctx changed=*c;memcpy(expected,g_xram,ARENA);
+            *c=entry;memcpy(g_xram,before,ARENA);g_xpt[page]=old;g_xpt[VERTS>>12]=oldvert;
+            {XV_OBJECT_MATH_GUARD();mutation=k+1;assert(!xv_worker_query(c,xv_object_math_locked_));mutation=0;}
+            equal(&changed,c,sizeof *c,"rejected context",k);equal(expected,g_xram,ARENA,"rejected memory",k);
+            g_xpt[page]=old;g_xpt[VERTS>>12]=oldvert;
+        }else{
+            int rounds[]={FE_TONEAREST,FE_DOWNWARD,FE_UPWARD,FE_TOWARDZERO};fesetround(rounds[(k/42)%4]);
+            xctx entry=*c,ref=*c;memcpy(before,g_xram,ARENA);feclearexcept(FE_ALL_EXCEPT);feraiseexcept(FE_DIVBYZERO);
+            ref_00056670(&ref);int flags=fetestexcept(FE_ALL_EXCEPT);memcpy(expected,g_xram,ARENA);
+            memcpy(g_xram,before,ARENA);feclearexcept(FE_ALL_EXCEPT);feraiseexcept(FE_DIVBYZERO);
+            f_00056670(c);equal(&ref,c,sizeof *c,"full context",k);equal(expected,g_xram,ARENA,"full memory",k);assert(flags==fetestexcept(FE_ALL_EXCEPT));
+            *c=entry;
+            {XV_OBJECT_MATH_GUARD();{XV_OBJECT_MATH_GUARD();assert(!xv_worker_query(c,xv_object_math_locked_));}}
+        }
+        comparisons++;*c=saved;pthread_mutex_unlock(&oracle);
+    }
+    *c=saved;c->r[4]+=4;
+}
+int main(int argc,char **argv)
+{
+    assert(argc==2);char *names[]={"normal","disabled","alias","mutation","parking","budget","concurrent"};for(mode=0;mode<7&&strcmp(argv[1],names[mode]);mode++){}assert(mode<7);
+    setenv("XV_WORKER_QUERY",mode==1?"invalid":"1",1);
+    g_xram=calloc(1,ARENA);g_img_base=g_xram+RAM;g_xpt=calloc(1<<20,4);before=malloc(ARENA);expected=malloc(ARENA);
+    for(unsigned i=0;i<RAM/4096;i++)g_xpt[i]=(i^1u)*4096;
+    assert(!pthread_barrier_init(&rendezvous,NULL,2));graph(7,1024);
+    xctx owner_ctx={0};xv_object_jobs_override(1);assert(xv_object_jobs_begin(&owner_ctx));
+    for(unsigned i=0;i<(mode==5?1:2);i++){owner_ctx.r[1]=i;owner_ctx.r[4]=0xc0000;X_M32(owner_ctx.r[4])=0x90299;assert(xv_object_jobs_queue(&owner_ctx));}
+    xv_object_jobs_finish(&owner_ctx);
+    if(mode==0){assert(ready_count>100&&lane_seen[0]&&lane_seen[1]);}
+    if(mode==1)assert(!ready_count);
+    if(mode==3)assert(mutation_count==16);
+    if(mode==4)assert(service_done);
+    if(mode==6){
+        assert(query_tried&&ready_count==128&&X_IMG32(0x2d2fac)==228);
+        assert(X_M16(POOL0+0x30)==14&&X_M16(POOL1+0x30)==14);
+        for(unsigned k=0;k<7;k++){
+            unsigned node=X_M32(HEADS+4*k),seen=0;
+            while(node!=UINT32_MAX){unsigned p=NODES0+(node&65535)*12;unsigned id=X_M32(p+4)-0x80000000;assert(id<2&&!(seen&(1u<<id)));seen|=1u<<id;node=X_M32(p+8);}
+            assert(seen==3);
+        }
+    }
+    xv_object_jobs_report(1);xv_object_jobs_shutdown();
+    printf("%u exact comparisons; %u private-ready visits; lanes %u/%u; mutations %u; guard retained\n",comparisons,ready_count,lane_seen[0],lane_seen[1],mutation_count);
+    free(before);free(expected);free(g_xram);free(g_xpt);return 0;
+}

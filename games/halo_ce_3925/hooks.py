@@ -217,6 +217,11 @@ class HaloHooks(NoGameHooks):
             if hashlib.sha256(self.image.bytes_at(shared_address, size) or b"").hexdigest() == digest:
                 out.extend(["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS",
                             "    XV_OBJECT_MATH_GUARD(); /* shared guest transaction */", "#endif"])
+                if address == 0x56670:
+                    out.extend(["#ifdef XV_WORKER_QUERY",
+                                "    { extern int xv_worker_query(xctx *, int);",
+                                "      if (xv_worker_query(c, xv_object_math_locked_)) goto L_000566DE; }",
+                                "#endif"])
         if self.flare_enabled and address == ENTRY:
             out.append(ENTRY_HOOK)
         if address == 0xB77C0 and hashlib.sha256(
