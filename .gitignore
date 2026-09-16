@@ -79,3 +79,9 @@ recomp/kernel/xk_query_projection.c
 # Private credentials for the opt-in LAN test service.
 remote.key
 remote-client.json
+
+recomp/kernel/xk_clip_region.c
+
+# Symlinks to private owned inputs are also local.
+/haloce
+/local

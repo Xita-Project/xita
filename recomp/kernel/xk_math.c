@@ -94,6 +94,8 @@ void xv_native_math_report(unsigned frames)
     extern unsigned xv_math_polygon_edge_calls(void) __attribute__((weak));
     if(xv_native_polygon_edge_available && xv_native_polygon_edge_available() && xv_math_polygon_edge_calls)
         XK_LOG("[polygon-edge] %u frames: %u native calls\n",frames,xv_math_polygon_edge_calls());
+    extern void xv_clip_region_report(unsigned) __attribute__((weak));
+    if (xv_clip_region_report) xv_clip_region_report(frames);
     extern unsigned xv_math_clip_calls(void) __attribute__((weak));
     extern unsigned xv_math_clip_register_calls(void) __attribute__((weak));
     if (xv_math_clip_calls) XK_LOG("[native-clip] %u frames: %u calls\n", frames, xv_math_clip_calls());

@@ -28,3 +28,7 @@ endif
 ifeq ($(XV_NATIVE_POLYGON_EDGE),1)
 XITA_GAME_SRCS += recomp/kernel/xk_polygon_edge.c recomp/kernel/xk_polygon_edge_control.c
 endif
+
+ifeq ($(XV_NATIVE_CLIP_REGION),1)
+XITA_GAME_SRCS += recomp/kernel/xk_clip_region.c recomp/kernel/xk_clip_region_control.c
+endif

@@ -1257,6 +1257,11 @@ void xv_benchmark_optimizations(int enabled)
         if(xv_native_polygon_edge_override)xv_native_polygon_edge_override(enabled);
         return;
     }
+    if (xv_benchmark_compare_clip_region()) {
+        extern void xv_native_clip_region_override(int) __attribute__((weak));
+        if(xv_native_clip_region_override)xv_native_clip_region_override(enabled);
+        return;
+    }
     if (xv_benchmark_compare_object_pose()) {
         extern void xv_object_pose_override(int) __attribute__((weak));
         if(xv_object_pose_override)xv_object_pose_override(enabled);
