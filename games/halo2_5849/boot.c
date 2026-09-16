@@ -36,7 +36,7 @@ extern int h2_dxt1_texture_read(const h2_command_state *, const h2_kelvin_clear 
 unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
 uint8_t *g_xram;
 volatile uint32_t xv_cur_fn;
-int xv_trace_enabled = 1, xv_trace_funcs = 1, xv_watch_n;
+int xv_trace_enabled = 1, xv_trace_funcs = 1, xv_watch_n = -1;
 extern const uint32_t xv_game_tls_dir;
 static SceUID log_fd = -1;
 static const char disk_header_path[] = "ux0:data/xita-halo2/save/disk-header.bin";
@@ -363,8 +363,40 @@ void h2_fp_environment_fault(xctx *c, uint32_t ip, uint32_t address, uint32_t va
     sceKernelExitProcess(28);
     for (;;) sceKernelDelayThread(1000);
 }
-void xv_watch_enter(uint32_t address, xctx *c) { (void)address; (void)c; }
-void xv_watch_leave(uint32_t address, uint32_t back, xctx *c) { (void)address; (void)back; (void)c; }
+/* Function-watch (XV_WATCH_FN=hex,hex,...): log entry (caller return address + first stack args +
+ * regs) and return value of specific recompiled guest functions.  Lazily parsed on first entry so it
+ * costs nothing unless the env var is set.  Used to walk the render call chain during RE. */
+static uint32_t xv_watch_addr[16];
+static uint32_t xv_watch_lastptr[16];
+static int xv_watched_fn(uint32_t fn)
+{
+    for (int i = 0; i < xv_watch_n; ++i) if (xv_watch_addr[i] == fn) return 1;
+    return 0;
+}
+void xv_watch_enter(uint32_t address, xctx *c)
+{
+    if (xv_watch_n < 0) {
+        xv_watch_n = 0;
+        const char *e = getenv("XV_WATCH_FN");
+        while (e && *e && xv_watch_n < 16) {
+            xv_watch_addr[xv_watch_n++] = (uint32_t)strtoul(e, NULL, 16);
+            while (*e && *e != ',') e++;
+            if (*e == ',') e++;
+        }
+        xv_logf("[watch] armed %d function(s)\n", xv_watch_n);
+    }
+    if (xv_watch_n <= 0 || !xv_watched_fn(address)) return;
+    uint32_t sp = c->r[4];
+    xv_logf("[watch] enter %05X from %05X esp %08X args %08X %08X %08X %08X eax %08X ecx %08X edx %08X\n",
+            address, X_M32(sp), sp, X_M32(sp + 4), X_M32(sp + 8), X_M32(sp + 12), X_M32(sp + 16),
+            c->r[0], c->r[1], c->r[2]);
+    for (int i = 0; i < xv_watch_n; ++i) if (xv_watch_addr[i] == address) xv_watch_lastptr[i] = X_M32(sp + 4);
+}
+void xv_watch_leave(uint32_t address, uint32_t back, xctx *c)
+{
+    if (xv_watch_n <= 0 || !xv_watched_fn(address)) return;
+    xv_logf("[watch] leave %05X -> eax %08X back %05X\n", address, c->r[0], back);
+}
 static void trace_mapped_word(uint32_t address)
 {
     /* Diagnostic reads must never resolve through the shared trash page. */
@@ -655,6 +687,30 @@ _Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32
 }
 #endif
 
+/* Diagnostic env delivery for the native H2 build: runtime/main.c (xv_load_settings) is not linked
+ * into this target, so the XV_* getenv knobs would otherwise never be set.  Read ux0:data/xita/env.txt
+ * and export each KEY=VALUE so lab runs can enable the recompiler trace/watch/histogram facilities and
+ * the other diagnostic toggles.  Absent on a normal run (fopen fails silently) -> zero behaviour change. */
+static void h2_load_env(void)
+{
+    FILE *f = fopen("ux0:data/xita/env.txt", "r");
+    if (!f) return;
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        if (!strchr(line, '\n') && !feof(f)) { int c; while ((c = fgetc(f)) != EOF && c != '\n') {} continue; }
+        char *key = line;
+        while (*key == ' ' || *key == '\t') key++;
+        if (*key == '#' || *key == ';' || *key == '\r' || *key == '\n' || !*key) continue;
+        char *eq = strchr(key, '='); if (!eq) continue;
+        char *end = eq; while (end > key && (end[-1] == ' ' || end[-1] == '\t')) end--; *end = 0;
+        char *val = eq + 1; while (*val == ' ' || *val == '\t') val++;
+        char *ve = val; while (*ve && *ve != '#' && *ve != ';' && *ve != '\r' && *ve != '\n') ve++;
+        while (ve > val && (ve[-1] == ' ' || ve[-1] == '\t')) ve--; *ve = 0;
+        if (*key) { setenv(key, val, 1); xv_logf("[h2/cfg] %s=%s\n", key, val); }
+    }
+    fclose(f);
+}
+
 int main(void)
 {
     sceIoMkdir("ux0:data", 0777);
@@ -662,6 +718,7 @@ int main(void)
     sceIoMkdir("ux0:data/xita-halo2/save", 0777);
     log_fd = sceIoOpen("ux0:data/xita-halo2/boot.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
     xv_logf("[h2/boot] native XBE startup harness, title XH2B00001\n");
+    h2_load_env();
     FILE *input = fopen("app0:halo2_image.bin", "rb");
     uint32_t base, size;
     if (!input || fread(&base, 4, 1, input) != 1 || fread(&size, 4, 1, input) != 1) {
