@@ -79,8 +79,13 @@ The [pose-loop comparison](docs/parallel-preparation-20260916.md) reduces physic
 outer lock acquisitions by about 59%, but three native-resolution trials remain
 near 10.7 FPS with no meaningful gain. It is restored off. A small material-state
 prototype also remains separate after weak ARM sizing results. Current larger
-work targets private spatial queries with ordered publication, native polygon
-math, and asynchronous periodic reports; these are prototypes, not measured gains.
+work targets private spatial queries with ordered publication and larger native
+geometry regions. The [polygon-edge comparison](docs/native-polygon-edge.md)
+is slightly positive in one physical view but mixed in another; it remains off.
+The asynchronous periodic-report prototype is undergoing independent review
+and is not installed. Neither establishes a stable 20 FPS result. Official
+[MCC reference tags](docs/mcc-mod-tools-reference.md) have been privately
+inventoried for content investigation, without changing the Xbox maps.
 
 September 15: [lightweight mutex comparisons](docs/object-light-lock-20260915.md)
 repeatedly improve one physical Blood Gulch view from approximately 11.8–12.0

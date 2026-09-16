@@ -3,8 +3,13 @@
 This is an **off-by-default candidate for physical comparison**, not a measured
 frame-rate improvement. `XV_NATIVE_POLYGON_EDGE=1` includes the helper and guarded
 entry hook. Without that build flag the ordinary translated function is unchanged.
-The enabled build also starts with the runtime mode disabled; this change does
-not wire benchmark, startup, remote-control, or reporting calls.
+The enabled build also starts with the runtime mode disabled. The remote
+`polygon-edge` comparison measures original/native/original at the same camera
+and resolution, then restores the disabled default on completion or cancellation.
+The first valid gameplay request initializes the controller on the joined guest
+recording owner. Network admission never initializes it. Periodic native-call
+counts establish coverage after initialization; unavailable builds reject the
+request without changing settings.
 
 The generator accepts only the owned Halo CE 3925 image with SHA256
 `4094e994243ddeae3f1b478bde6a7ee81498218ccd7c9d7bc2327db547d95aae` and the
@@ -120,4 +125,54 @@ VitaSDK reports 360 bytes for the native kernel plus an 8-byte public wrapper
 (368 bytes combined, excluding called runtime/scheduler frames). The earlier
 full-slot private prototype used 440 bytes; the dirty-slot prototype used 360.
 The disabled public path uses its small wrapper and admission function only.
-No emulator or hardware deployment was performed for this candidate.
+These differential checks do not establish a hardware performance improvement.
+
+## Physical comparison
+
+Runtime `bd24033a500577df43cbd5393d190734fcf565d89b3be4abe1ba57aabd346b6a`
+was installed and boot-confirmed through the Wi-Fi updater. All 1,588 package
+members and the existing asset contract are preserved; only the executable and
+boot record change. The preserved A slot remains available. No emulator was run.
+
+Six same-session Blood Gulch comparisons use native 960×544 with unchanged saved
+graphics, existing workers/optimizations, 60 settling and 120 measured frames
+per arm. Each trial keeps an identical camera across its three arms. Live game
+simulation and remote status polling continue. The second group rotates the
+camera without moving the player.
+
+| View / trial | Off before FPS | On FPS | Off after FPS | Frame time saved vs bracket mean |
+| --- | ---: | ---: | ---: | ---: |
+| First / 1 | 9.115 | 9.355 | 9.260 | 1.953 ms |
+| First / 2 | 9.319 | 9.349 | 9.294 | 0.494 ms |
+| First / 3 | 9.284 | 9.354 | 9.264 | 0.928 ms |
+| Second / 1 | 10.598 | 10.641 | 10.598 | 0.379 ms |
+| Second / 2 | 10.671 | 10.380 | 10.724 | -2.853 ms |
+| Second / 3 | 10.771 | 10.765 | 10.733 | 0.114 ms |
+
+Frame deltas use actual elapsed microseconds, not rounded FPS. Complete counter
+windows establish 276.16 and 253.87 native calls/frame in the enabled arms of
+the two views, and zero in their disabled arms. Each counter sample excludes
+the first partial report after measurement starts and covers 180 frames per
+arm across three trials; FPS covers 360. All camera/restoration checks pass.
+The regression is retained in the result; its two measured report writes take
+52.79 ms total, versus 31.56/23.36 ms in the surrounding arms, which cannot alone
+explain its roughly 342 ms total-frame penalty.
+
+The first view is slightly positive, but the second does not demonstrate a
+repeatable gain. **The runtime override is restored OFF; default promotion is
+not justified.** The candidate remains available for cumulative or broader
+experiments. These views do not establish driving, campaign, combat stability
+or resolution of reported crashes, and they do not meet the 20 FPS goal.
+
+The disabled arm still includes the experimental admission call. A separate
+linked ARM check of the exact hook shows 122,153 instructions without the hook
+versus 123,925 with it disabled across the selected 28 fixtures (about 1.45%
+extra for this routine); enabled remains 101,787. All 768 full-state checks pass.
+This bounds the modeled hook tax, not its physical latency. The comparisons do
+not prove a gain over an otherwise identical executable with the hook omitted.
+
+Private receipts, images, logs and analysis are under
+`engine-restructure-20260914T2300Z/physical-polygon-edge`; package/build evidence
+is in `edge-pipeline*`. Generated code, original bytes and game assets remain
+outside Git. The separately inspected [MCC reference tags](mcc-mod-tools-reference.md)
+were not used to replace the Xbox math or map data in this build.

@@ -76,13 +76,14 @@ being prototyped and is not in this build.
   556 instructions per path. It remains on an isolated research branch and is
   omitted from this hardware build. The reserved remote comparison rejects an
   unavailable implementation without changing settings.
-- A private polygon-edge prototype preserves complete guest state, mapped-memory
-  aliases, exceptional comparisons and original scheduler handoffs. Avoiding
-  unused incoming x87 loads reduces selected modeled ARM instructions from
-  122,153 to 101,860 across 28 fixtures; this is not a cycle or FPS measurement.
-  The zero-count case remains slower. All 4,096 host fixtures, sanitizers and
-  768 ARM fixtures pass, with additional mutated-handoff checks. It is not part
-  of the installed game.
+- The [optional polygon-edge helper](native-polygon-edge.md) now has an isolated
+  physical comparison. Its final linked model reduces selected ARM instructions
+  from 122,153 to 101,787 across 28 fixtures; this is not a cycle measurement.
+  The zero-count case remains slower. Both sets of 4,096 host fixtures,
+  sanitizers and 768 ARM fixtures pass, including mutated scheduler handoffs.
+  Hardware results and the distinction between runtime-OFF and a build without
+  the optional hook are recorded in its own report. It remains disabled after
+  each comparison pending broader acceptance.
 - Periodic reporting has occasional long synchronous stalls. A bounded native
   writer is a separate hitch-reduction prototype; it must preserve owned bytes,
   ordering, immediate crash logs, backpressure and updater drain guarantees.
