@@ -107,6 +107,24 @@ int main(int argc,char **argv)
     if(on&&!fail_allocation)assert(index_reuse_hits>0 && index_reuse_misses>0 && index_reuse_ineligible>0);
     else assert(!index_reuse_hits && !index_reuse_misses);
     assert(allocation_calls==(unsigned)on);
+    /* Each benchmark transition discards CPU identities, but never modifies
+     * already published index bytes. Restoring -1 respects the startup value. */
+    begin_frame(61);enabled=1;
+    for(int policy=0;policy<=1;policy++) {
+        xv_d3d_index_reuse_override(policy);
+        const void *a=capture(inputs[0],256),*b=capture(inputs[0],256);
+        assert((a==b)==(policy&&!fail_allocation));
+        xv_d3d_index_reuse_override(0);
+        const void *c=capture(inputs[0],256);assert(c!=a && c!=b);
+        xv_d3d_index_reuse_override(1);
+        const void *d=capture(inputs[0],256);assert(d!=c && d!=a);
+        assert((capture(inputs[0],256)==d)==!fail_allocation);
+        xv_d3d_index_reuse_override(-1);
+        const void *e=capture(inputs[0],256);assert(e!=d);
+        assert((capture(inputs[0],256)==e)==(on&&!fail_allocation));
+        verify_saved();
+    }
+    assert(allocation_calls==1);
     unsigned hits=index_reuse_hits;index_reuse_report(60);
     assert(!index_reuse_hits&&!index_reuse_misses&&!index_reuse_ineligible);
     index_reuse_shutdown();assert(!g_index_cache);

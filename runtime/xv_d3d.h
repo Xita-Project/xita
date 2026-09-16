@@ -112,6 +112,7 @@ void     xv_d3d_SetTrackedConstants(const float (*vsc)[4], uint32_t *dirty_lo, u
 void     xv_d3d_draw_scan_override(int enabled);
 /* Set only at a drained frame boundary; -1 restores the configured default. */
 void     xv_d3d_texture_state_override(int enabled);
+void xv_d3d_index_reuse_override(int enabled);
 uint32_t xv_d3d_EndFrame(void);                           /* close the recorded list; returns its frame number */
 
 /* Handle (from xv_d3d_RegisterVertexShader) of the clear-quad program xv_clear.gxp. */

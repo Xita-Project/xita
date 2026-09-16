@@ -6,6 +6,7 @@
 void xv_logf(const char *fmt,...);
 void xv_benchmark_optimizations(int enabled) __attribute__((weak));
 void xv_d3d_blend_replace_override(int) __attribute__((weak));
+void xv_d3d_index_reuse_override(int) __attribute__((weak));
 void xv_model_hierarchy_override(int) __attribute__((weak));
 void xv_object_quat_override(int) __attribute__((weak));
 int xv_model_hierarchy_available(void) __attribute__((weak));
@@ -50,8 +51,9 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_BLEND_REPLACE||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_INDEX_REUSE||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
     if(kind==XV_BENCH_BLEND_REPLACE&&!xv_d3d_blend_replace_override)return -1;
+    if(kind==XV_BENCH_INDEX_REUSE&&!xv_d3d_index_reuse_override)return -1;
     if(kind==XV_BENCH_MODEL_HIERARCHY&&(!xv_model_hierarchy_override||!xv_model_hierarchy_available))return -1;
     if(kind==XV_BENCH_OBJECT_QUAT&&(!xv_object_quat_override||!xv_object_quat_available))return -1;
 #ifndef XV_NATIVE_OBJECT_BASIS
@@ -118,6 +120,7 @@ int xv_benchmark_compare_object_wait(void) { return remote_kind==XV_BENCH_OBJECT
 int xv_benchmark_compare_object_point(void) { return remote_kind==XV_BENCH_OBJECT_POINT; }
 int xv_benchmark_compare_model_hierarchy(void) { return remote_kind==XV_BENCH_MODEL_HIERARCHY; }
 int xv_benchmark_compare_blend_replace(void) { return remote_kind==XV_BENCH_BLEND_REPLACE; }
+int xv_benchmark_compare_index_reuse(void) { return remote_kind==XV_BENCH_INDEX_REUSE; }
 int xv_benchmark_compare_object_quat(void) { return remote_kind==XV_BENCH_OBJECT_QUAT; }
 int xv_benchmark_compare_object_math(void) { return remote_kind==XV_BENCH_OBJECT_MATH; }
 int xv_benchmark_compare_depth_prepare(void) { return remote_kind==XV_BENCH_DEPTH_PREPARE; }
@@ -151,6 +154,7 @@ static int native_math_selected(void)
 static int candidate_available(void)
 {
     if(xv_benchmark_compare_blend_replace())return xv_d3d_blend_replace_override!=NULL;
+    if(xv_benchmark_compare_index_reuse())return xv_d3d_index_reuse_override!=NULL;
     if (xv_benchmark_compare_model_hierarchy()) return xv_model_hierarchy_override && xv_model_hierarchy_available && xv_model_hierarchy_available();
     if (xv_benchmark_compare_object_quat()) return xv_object_quat_override && xv_object_quat_available && xv_object_quat_available();
     if (xv_benchmark_compare_object_wait()) return xv_object_wait_override && xv_object_wait_available && xv_object_wait_available();
@@ -233,7 +237,8 @@ int xv_benchmark_compare_draw_scan(void)
     return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_blend_replace() ? "blend-replace-compare" :
+    (xv_benchmark_compare_index_reuse() ? "index-reuse-compare" :
+     xv_benchmark_compare_blend_replace() ? "blend-replace-compare" :
      xv_benchmark_compare_object_quat() ? "object-quat-compare" :
      xv_benchmark_compare_model_hierarchy() ? "model-hierarchy-compare" :
      xv_benchmark_compare_object_point() ? "object-point-compare" :
@@ -287,7 +292,9 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
             xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_blend_replace())
+            if (xv_benchmark_compare_index_reuse())
+                xv_logf("[index-reuse-compare] start off/on/off at %up; exact same-frame indices and vertex coverage, unchanged draws and owned lifetimes; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_blend_replace())
                 xv_logf("[blend-replace-compare] start off/on/off at %up; ADD ONE/ZERO versus NONE with identical color mask, shaders, alpha test and ordering; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_object_quat())
                 xv_logf("[object-quat-compare] start off/on/off at %up; bypass quaternion guard only for worker-owned inputs/output/scratch and immutable image constants; same arithmetic, workers and shared transactions; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);

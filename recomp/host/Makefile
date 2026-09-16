@@ -571,3 +571,12 @@ test-blend-replace: build/ps_cache_test build/resolution_benchmark_test build/no
 build/no_blend_replace_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_BLEND_REPLACE resolution_benchmark_test.c -lm -o $@
+
+.PHONY: test-index-reuse-benchmark
+test-index-reuse-benchmark: build/resolution_benchmark_test build/no_index_reuse_benchmark_test
+	./build/resolution_benchmark_test
+	./build/no_index_reuse_benchmark_test
+
+build/no_index_reuse_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_INDEX_REUSE resolution_benchmark_test.c -lm -o $@

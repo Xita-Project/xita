@@ -73,10 +73,38 @@ Vita3K completes off/on/off with the same view and 13 candidate shader links.
 The capped emulator reports 19.942 / 19.958 / 19.967 FPS; these values do not
 measure Vita performance. A second run captures the enabled rendering on owned
 DISPLAY112 and verifies restoration. The enabled world/HUD/weapon view shows
-no obvious change in this scene. Hardware benefit is still unmeasured.
-Keep it disabled until physical off/on/off comparisons show a repeatable benefit
-without damaged cutouts, effects or HUD elements. Next, separate effect startup
-costs from sustained transparent overdraw and audit expensive world passes.
+no obvious change in this scene. The subsequent physical comparison below finds
+no useful performance gain, so the candidate remains disabled. Next, separate
+effect startup costs from sustained transparent overdraw and audit expensive
+world passes.
+
+## Physical blend comparison
+
+Runtime `37f761dc071a7489f8dcd176bcbbe6e4152d4a0f03d3a9dbff2e13e842c28627`
+completed three native-resolution off/on/off trials at the same stationary
+Blood Gulch view, with standard graphics and the existing workers retained:
+
+| Trial | Off before | On | Off after |
+| --- | ---: | ---: | ---: |
+| 1 | 10.732 FPS | 10.714 FPS | 10.712 FPS |
+| 2 | 10.717 FPS | 10.718 FPS | 10.652 FPS |
+| 3 | 10.625 FPS | 10.670 FPS | 10.655 FPS |
+
+Eight candidate links were created and all trials passed the camera check and
+restored the configured policy. Relative to the mean of each trial's off arms,
+the differences are -0.075%, +0.314% and +0.282%. This does not establish a useful
+performance gain. Leave replacement blending disabled. No STOP was logged in
+the captured run; this stationary comparison does not validate crash-free combat.
+
+The view contains about 130 draws/frame. Representative preparation scopes are
+1.52 ms/frame for indices and 3.05 ms for streams; stream uploads retain about
+327 KiB/frame and compare about 329 KiB. These caller timings overlap other
+pipeline work. Next, measure the existing exact index-reuse candidate while
+preserving the immutable vertex snapshots that protect against geometry spikes.
+
+Physical evidence: `world-followup-20260916T002003Z/blend-comparison/` under the
+engine-restructure validation directory. Its UTC date is September 16; local
+testing occurred on September 15.
 
 Private evidence: `physical-object-voice-stop/`,
 `replace-blend-hist-summary.json`, `replace-blend-eligible-draws.json`,

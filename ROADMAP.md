@@ -61,8 +61,11 @@ new build. Longer gameplay still needs to exercise these property handoffs.
 [World and effect rendering](docs/world-rendering-20260915.md) is the next focus:
 physical views range from 55 to 131 draws/frame with much higher completion
 latency in the heavier view. An opt-in replacement-blend candidate preserves
-channel masks and alpha tests; host/native checks pass, hardware benefit is
-unmeasured and the default remains off.
+channel masks and alpha tests. Three native-resolution Blood Gulch off/on/off
+trials differ by less than 0.4%, without a useful demonstrated gain; it remains
+off. Exact same-frame index reuse also shows no gain in three physical trials
+and remains disabled. Next, isolate expensive world and effect passes and the
+remaining translated CPU work, preserving the existing crash and scheduling fixes.
 
 September 15: [lightweight mutex comparisons](docs/object-light-lock-20260915.md)
 repeatedly improve one physical Blood Gulch view from approximately 11.8–12.0
@@ -136,7 +139,10 @@ milliseconds. The installed report-batching fix reduces the measured Blood Gulch
 median report cost from 383.057 to 11.277 ms; one 145.840 ms outlier remains.
 This is a report-cost result, not a controlled overall-FPS comparison. An [exact index-reuse prototype](docs/index-reuse-20260915.md)
 passes source-mutation, delayed-slot and emulator smoke tests; it remains off
-pending a physical performance comparison.
+after three physical off/on/off comparisons show no FPS gain. Its controlled
+selector remains available; CPU cache validation and miss capture offset the
+saved copies in the tested views. Further performance validation uses host
+correctness checks and the physical Vita, as requested by the user.
 
 [~] [Vertex preparation work sizing](docs/vertex-work-profile-20260914.md):
 indexed checks are selectable in Graphics for ordinary gameplay validation.

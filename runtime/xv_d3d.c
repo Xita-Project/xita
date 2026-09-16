@@ -1183,6 +1183,14 @@ static unsigned index_bounds(const uint16_t *indices, unsigned count)
 static xv_index_cache *g_index_cache;
 static unsigned index_reuse_hits, index_reuse_misses, index_reuse_ineligible;
 static uint64_t index_reuse_compared, index_reuse_saved;
+static int index_reuse_override = -1;
+/* Recording owner, after the submission drain. Invalidate CPU lookup metadata
+ * without changing any indices already owned by a live frame. */
+void xv_d3d_index_reuse_override(int enabled)
+{
+    index_reuse_override = enabled < 0 ? -1 : !!enabled;
+    xv_index_cache_reset(g_index_cache);
+}
 static int index_reuse_enabled(void)
 {
     static int configured=-1, failed;
@@ -1190,7 +1198,7 @@ static int index_reuse_enabled(void)
         const char *e=getenv("XV_INDEX_REUSE");
         configured=e && atoi(e)!=0; /* hardware comparison required */
     }
-    if (!configured || failed) return 0;
+    if (!(index_reuse_override < 0 ? configured : index_reuse_override) || failed) return 0;
     if (!g_index_cache) {
         g_index_cache=malloc(sizeof *g_index_cache);
         if (!g_index_cache) { failed=1;return 0; }
