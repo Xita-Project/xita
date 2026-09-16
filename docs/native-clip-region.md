@@ -89,7 +89,7 @@ Each existing periodic native-math report includes:
 ```
 
 These are completed admitted regions, executed plane calls, executed clip calls,
-sum of positive input counts already loaded by the original clip, observed
+sum of positive input count loads executed by the original clip, observed
 `AX=FFFF` clip failures, and the greatest clip count within one region. No extra
 guest read, timing call or per-call thread identity is needed. Totals use unsigned
 interval counters. OFF or a rejected diagnostic/mode reports no admitted work;
@@ -97,6 +97,10 @@ common `[native-clip]` totals still count the ordinary calls. Compare ON workloa
 per frame across views/effects, rather than interpreting zero OFF regions as no
 clipping. These counters do not attribute periodic log/SD hitches or prove their
 cause. Percentile frame pacing and average FPS require separate physical data.
+The historical `input-vertices` label is not a unique-vertex count: an in-place
+copy path can load and count the input twice. Do not divide it by clip calls to
+claim mean vertices per clip. The first [physical comparison](hardware-20260916-clip-census.md)
+found no consistent FPS benefit, so the region remains disabled.
 
 ## Generation and selective build
 

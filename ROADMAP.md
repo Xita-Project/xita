@@ -90,10 +90,15 @@ of frames over 150 ms falls about 85%. Median frames remain near 99.5 ms;
 this is a periodic-hitch improvement, not stable 20 FPS. The logger fully drains
 without errors and restores its original mode. The installed private follow-up
 retains this policy and loads Blood Gulch with a successful charged plasma shot;
-ordinary builds remain opt-in. Updater shutdown from startup-ON reporting still
-needs physical verification. Independent comparisons of
-[diagnostic filesystem polling](docs/diagnostic-poll-20260916.md) are ready,
-without changing controller reads, screenshots or default polling behavior. Official
+ordinary builds remain opt-in. A subsequent physical update now verifies the
+checked startup-ON logger shutdown and boot-helper handoff. The
+[clipping/census follow-up](docs/hardware-20260916-clip-census.md) finds no
+consistent clipping-region FPS gain, so it remains off. Lighting calls in the
+measured scene already run on object workers; the next restructuring target
+is their shared-state boundary, with eligibility still unmeasured. Independent
+[diagnostic filesystem polling](docs/diagnostic-poll-20260916.md) measurements
+find no useful FPS gain from suppressing screenshot scans in the tested empty
+directory. Existing controller reads, screenshots and polling remain unchanged. Official
 [MCC reference tags](docs/mcc-mod-tools-reference.md) have been privately
 inventoried for content investigation, without changing the Xbox maps.
 
