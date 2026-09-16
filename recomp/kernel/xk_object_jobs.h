@@ -18,6 +18,8 @@ void xv_object_jobs_report(unsigned frames);
 void xv_object_job_hle(xctx *c, unsigned address, xv_fn_t fn);
 void xv_object_job_stack_probe(xctx *c);
 void xv_object_job_stop(xctx *c, unsigned address, const char *reason) __attribute__((noreturn));
+/* Actual native-thread identity only; false is not proof of guest ownership. */
+int xv_object_is_worker_thread(void);
 int xv_object_math_lock(void);
 void xv_object_math_unlock(int *locked);
 /* Inputs and shared bookkeeping must be captured before this call. Only the
@@ -37,6 +39,21 @@ void xv_object_point_override(int enabled);
 int xv_object_wait_available(void);
 void xv_object_wait_override(int enabled);
 void xv_object_math_override(int enabled);
+#ifdef XV_OBJECT_POSE_EXPERIMENT
+/* Owner selects only after jobs drain. Negative restores the disabled default.
+ * Tokens belong to one native worker and are never stored in guest memory. */
+int xv_object_pose_available(void);
+void xv_object_pose_override(int enabled);
+int xv_object_pose_begin(xctx *c);
+void xv_object_pose_finish(int *token);
+void xv_object_pose_cleanup(int *token);
+#define XV_OBJECT_POSE_SCOPE() \
+    int xv_object_pose_locked_ __attribute__((cleanup(xv_object_pose_cleanup))) = -1
+#define XV_OBJECT_POSE_BEGIN(c) do { \
+    if (xv_object_pose_locked_ < 0) xv_object_pose_locked_ = xv_object_pose_begin(c); \
+} while (0)
+#define XV_OBJECT_POSE_FINISH() xv_object_pose_finish(&xv_object_pose_locked_)
+#endif
 #define XV_OBJECT_JOB_SCOPE(c) \
     xctx *xv_object_owner_ __attribute__((cleanup(xv_object_jobs_end))) = \
         xv_object_jobs_begin(c) ? (c) : NULL

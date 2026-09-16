@@ -53,6 +53,19 @@ static uint64_t work_us[LANES], batch_us;
 /* A worker's recursive scopes stay on its native thread, including while it
  * parks for an owner service. Only the outer scope needs the OS mutex. */
 static unsigned math_depth[WORKERS], math_fast_path=1, math_idle_calls;
+#ifdef XV_OBJECT_POSE_EXPERIMENT
+/* No environment/default enable: only the drained guest owner may opt in.
+ * Each worker owns its scope accounting until the joined report boundary. */
+static unsigned pose_enabled, pose_depth[WORKERS];
+static struct __attribute__((aligned(64))) {
+    unsigned entered, enclosing, finished, cleanup, recursive_locks;
+} pose_stats[WORKERS];
+#ifdef __vita__
+static SceUID pose_owner_thread;
+#else
+static pthread_t pose_owner_thread;
+#endif
+#endif
 static struct __attribute__((aligned(64))) {
     unsigned acquired, nested, contended;
     uint64_t wait_us;
@@ -176,6 +189,18 @@ static int worker_lane(void)
 #endif
     return -1;
 }
+int xv_object_is_worker_thread(void)
+{
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
+#ifdef __vita__
+    SceUID id=sceKernelGetThreadId();
+    for(unsigned i=0;i<WORKERS;i++)if(id==threads[i])return 1;
+#else
+    pthread_t id=pthread_self();
+    for(unsigned i=0;i<WORKERS;i++)if(pthread_equal(id,threads[i]))return 1;
+#endif
+    return 0;
+}
 /* Audited stream-property calls in object sound update 297B0 and its 296D0
  * helper. All use existing non-callback handlers on the guest owner. */
 static unsigned sound_parameter_return(unsigned address)
@@ -298,6 +323,9 @@ __attribute__((noinline)) int xv_object_math_lock(void)
          * worker may hold the mutex while the owner services a cache request. */
         park_worker((unsigned)lane);
         if(math_fast_path&&math_depth[lane]) {
+#ifdef XV_OBJECT_POSE_EXPERIMENT
+            if(pose_depth[lane])pose_stats[lane].recursive_locks++;
+#endif
             math_depth[lane]++;math_stats[lane].nested++;return lane+2;
         }
         int acquired=!xv_object_mutex_try(&math_mutex);
@@ -340,6 +368,63 @@ void xv_object_math_unlock(int *locked)
     }
     xv_object_mutex_release(&math_mutex);
 }
+#ifdef XV_OBJECT_POSE_EXPERIMENT
+static int pose_is_owner(void)
+{
+#ifdef __vita__
+    return sceKernelGetThreadId()==pose_owner_thread;
+#else
+    return pthread_equal(pthread_self(),pose_owner_thread);
+#endif
+}
+static int pose_backend_available(void)
+{
+#ifdef __vita__
+    return math_mutex.use_light;
+#else
+    return math_mutex.ready; /* Host fixture uses the recursive pthread adapter. */
+#endif
+}
+int xv_object_pose_available(void)
+{
+    return __atomic_load_n(&initialized,__ATOMIC_ACQUIRE)==1&&pose_is_owner()&&
+        active_workers&&math_fast_path&&pose_backend_available()&&!xv_phase_enabled&&
+        (override<0?configured:override)>0;
+}
+void xv_object_pose_override(int enabled)
+{
+    xv_object_math_report_check();
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1||!pose_is_owner())abort();
+    pose_enabled=enabled>0;
+}
+int xv_object_pose_begin(xctx *c)
+{
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1||
+       !__atomic_load_n(&running,__ATOMIC_ACQUIRE)||!pose_enabled||!math_fast_path||
+       !pose_backend_available())return 0;
+    int lane=worker_lane();
+    /* Owner audio services retain a worker context: verify the native thread as
+     * well as the exact live context and job marker. No guest span is borrowed. */
+    if(lane<0||c!=&contexts[lane]||!xv_is_object_job(c))return 0;
+    unsigned enclosing=math_depth[lane]!=0;
+    int token=xv_object_math_lock();
+    if(token!=lane+2)abort();
+    pose_depth[lane]++;pose_stats[lane].entered++;
+    pose_stats[lane].enclosing+=enclosing;
+    return token;
+}
+static void pose_close(int *token,int cleanup)
+{
+    if(*token<=0) {*token=0;return;}
+    int lane=worker_lane();
+    if(lane<0||*token!=lane+2||!pose_depth[lane])abort();
+    pose_depth[lane]--;
+    if(cleanup)pose_stats[lane].cleanup++;else pose_stats[lane].finished++;
+    xv_object_math_unlock(token);*token=0;
+}
+void xv_object_pose_finish(int *token) {pose_close(token,0);}
+void xv_object_pose_cleanup(int *token) {pose_close(token,1);}
+#endif
 int xv_object_lock_available(void)
 {
     return initialized==1&&active_workers&&math_mutex.light_ready&&!xv_phase_enabled&&
@@ -597,6 +682,13 @@ static int initialize(void)
 {
     if(initialized)return initialized>0;
     initialized=-1;
+#ifdef XV_OBJECT_POSE_EXPERIMENT
+#ifdef __vita__
+    pose_owner_thread=sceKernelGetThreadId();
+#else
+    pose_owner_thread=pthread_self();
+#endif
+#endif
     const char *fast=getenv("XV_OBJECT_LOCK_FAST_PATH");
     math_fast_path=!fast||atoi(fast)!=0;
     const char *profile=getenv("XV_OBJECT_LOCK_PROFILE");
@@ -771,6 +863,15 @@ void xv_object_jobs_report(unsigned frames)
         math_wait_stats[0].acquired,math_wait_stats[1].acquired,
         math_wait_stats[0].timeouts,math_wait_stats[1].timeouts);
     memset(math_wait_stats,0,sizeof math_wait_stats);
+#ifdef XV_OBJECT_POSE_EXPERIMENT
+    for(unsigned lane=0;lane<WORKERS;lane++) {
+        if(pose_depth[lane])abort();
+        XK_LOG("[object-pose] lane %u enabled %u entered %u enclosing %u finished %u cleanup %u recursive-locks %u\n",
+            lane,pose_enabled,pose_stats[lane].entered,pose_stats[lane].enclosing,
+            pose_stats[lane].finished,pose_stats[lane].cleanup,pose_stats[lane].recursive_locks);
+    }
+    memset(pose_stats,0,sizeof pose_stats);
+#endif
     for(unsigned lane=0;lane<WORKERS;lane++)
         XK_LOG("[object-point] lane %u checks %u private %u nested %u shared-input %u shared-output %u\n",
             lane,point_private_stats[lane].checks,point_private_stats[lane].admitted,
