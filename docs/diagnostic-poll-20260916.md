@@ -130,3 +130,43 @@ hardware was accessed for this candidate.
 Private evidence: `engine-restructure-20260914T2300Z/physical-async-reports/initial-trial-tail.log`
 and `physical-async-priority/log-compare/trial-1.log`. No game assets or generated
 guest code are included.
+
+## Physical screenshot-poll result
+
+Runtime `575ecdbca2b516cf34c47f299637ce81d0c69a8e78ed7737bc47ca121b2a643c`
+boots on hardware, loads Blood Gulch through Split Screen and completes a charged
+plasma shot. Startup reporting stays ON without errors. One subsequent long
+comparison uses the same native-resolution view facing the blue base, saved
+graphics and both object workers throughout. Camera and counter checks pass;
+the original polling gate is restored afterward.
+
+| Arm | FPS | Median frame, ms | P99 frame, ms | Screenshot scans | Scan time/frame, ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline before | 11.186 | 87.381 | 103.546 | 10 | 0.114 |
+| Screenshot polling suppressed | 11.202 | 87.318 | 106.896 | 0 | 0 |
+| Baseline after | 11.219 | 87.336 | 107.711 | 10 | 0.117 |
+
+**No useful frame-rate gain is established; retain the original polling policy.**
+The suppressed result lies between the baseline arms. Each arm has exactly
+1,800 controller-poll calls, so the watcher runs every 180 displayed frames in
+this sample, rather than the possible three-calls-per-frame cadence discussed
+above. Scans report zero enumerated entries and no I/O errors or trace triggers.
+Maximum scan time is 21.447 / 24.581 ms in the baseline arms. This does not
+characterize a directory containing many saved screenshots.
+
+The independent `hist.now` probe remains active in all arms. It runs 112 / 112 /
+113 times, costing 0.109 / 0.077 / 0.110 ms per frame, with maximum calls around
+8.3–8.9 ms and no errors or trace triggers. These are direct timing observations,
+not a separate hist-suppression comparison. The largest interval with either
+poll is 118.354 ms. The suppressed arm still contains a 248.601 ms interval,
+and all three of its intervals above 150 ms have no poll event. Therefore these
+two polls do not explain those remaining hitches. Avoid another long polling
+comparison solely to pursue a roughly tenth-of-a-millisecond average budget;
+prioritize the larger geometry/object costs unless new workload evidence changes
+that priority.
+
+Private receipt, logs, event attribution and analysis:
+`engine-restructure-20260914T2300Z/physical-diagnostic-poll/shot-compare/` and
+`shot-analysis.json`. This view differs from the earlier logger comparison;
+11.2 FPS versus its 9.8 FPS cannot be interpreted as a build improvement. The
+test does not establish campaign/driving performance or broad crash stability.
