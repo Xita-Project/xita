@@ -19,7 +19,7 @@ int xv_log_report_begin(void)
 int xv_log_report_begin_frame(unsigned frame)
 { (void)frame;return xv_log_report_begin(); }
 void xv_log_get_status(xv_log_status *out)
-{ memset(out,0,sizeof *out); }
+{ memset(out,0,sizeof *out);out->state=XV_LOG_RUNNING; /* created, idle/OFF */ }
 void xv_log_report_end(void)
 { assert(report_active);report_active=0;reports_ended++; }
 void xv_settings_snapshot(xv_dash_graphics_view *view)

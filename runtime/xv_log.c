@@ -120,20 +120,23 @@ static int report_is_owner(void)
     SceUID owner=__atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE);
     return owner>0 && owner==sceKernelGetThreadId();
 }
-int xv_log_report_begin_frame(unsigned frame)
+static int report_begin(unsigned frame,int async_only)
 {
     SceUID expected=0,current=sceKernelGetThreadId();
     if(current<=0 || !__atomic_compare_exchange_n(&g_report_owner,&expected,current,
             0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return 0;
     g_report_async=async_report_begin(frame);
-    if(g_report_async<0) { __atomic_store_n(&g_report_owner,0,__ATOMIC_RELEASE); return 0; }
+    if(g_report_async<0 || (async_only && !g_report_async)) {
+        __atomic_store_n(&g_report_owner,0,__ATOMIC_RELEASE);return 0;
+    }
     g_report_used=0; return 1;
 }
+int xv_log_report_begin_frame(unsigned frame) { return report_begin(frame,0); }
 int xv_log_report_begin(void) { return xv_log_report_begin_frame(0); }
 int xv_log_report_begin_async_frame(unsigned frame)
 {
     xv_log_status status; xv_log_get_status(&status);
-    return (status.state==XV_LOG_RUNNING || status.state==XV_LOG_ERROR) && xv_log_report_begin_frame(frame);
+    return status.enabled && report_begin(frame,1);
 }
 static int report_flush(unsigned final,unsigned timeout_us)
 {

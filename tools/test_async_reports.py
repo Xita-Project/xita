@@ -12,7 +12,10 @@ CASES = ['disabled', 'cold', *['startup' + str(i) for i in range(1, 7)],
          'self', 'join', 'hints', 'ownercritical', 'openflush', 'console', 'syncerror', 'partial', 'zero', 'impossible',
          'negative', 'consoleerror', 'update-write', 'update-console',
          *[f'status-console-{status}-{mode}' for status in (0, 1, 2048) for mode in ('off', 'on')],
-         'deadline-wrap', 'simultaneous-flushers']
+         'deadline-wrap', 'simultaneous-flushers',
+         'toggle-cycle', 'toggle-startup', 'toggle-open', 'toggle-ordinary', 'toggle-ordinary-timeout',
+         'toggle-sync-error', 'toggle-error', 'toggle-barrier', 'toggle-blocked-file',
+         'toggle-blocked-console', 'toggle-deadline']
 
 
 def run(out, modes):
