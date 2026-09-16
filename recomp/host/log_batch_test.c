@@ -55,6 +55,9 @@ static void reset(void)
 }
 int main(void)
 {
+    assert(!xv_log_async_available() && !xv_log_async_enabled());
+    assert(xv_log_async_init()==XV_LOG_UNAVAILABLE && xv_log_async_set_enabled(1,1000)==XV_LOG_UNAVAILABLE);
+    assert(!g_init && g_fd==-2 && g_mtx==-1); /* OFF stubs allocate nothing */
     char report[15000];
     for (unsigned i = 0; i < sizeof report; i++) report[i] = i % 97 ? 'a' + i % 26 : '\n';
     reset(); xv_log_write(report, sizeof report);

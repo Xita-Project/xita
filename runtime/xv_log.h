@@ -14,6 +14,21 @@ void xv_log_flush(void);
 /* Explicit opt-in build + startup environment XV_PROFILE_ASYNC_REPORT=1.
  * Call once after configuration, before starting report producers. */
 int xv_log_async_start(void);
+/* Compile capability only; safe to query without initializing a writer. */
+int xv_log_async_available(void);
+/* Thread-safe committed mode; no initialization, compile-OFF returns zero.
+ * An in-progress or failed transition still reports the prior mode. */
+int xv_log_async_enabled(void);
+/* Called only at a joined recording-owner boundary, never a network callback.
+ * Claims control for the caller's native thread. Creates an OFF writer if
+ * absent; claiming an environment-started writer preserves its current mode.
+ * Guest-job joins are a caller precondition, not established by this API. */
+int xv_log_async_init(void);
+/* Only that claimed owner may toggle, with no open reports/barrier users.
+ * Values are exactly 0 or 1. Even a same-mode call drains and syncs a new
+ * boundary. A failed call preserves the prior mode and pending bytes/handles;
+ * it is not a successful measurement boundary or restoration. */
+int xv_log_async_set_enabled(int enabled, unsigned timeout_us);
 enum { XV_LOG_SYNC, XV_LOG_STARTING, XV_LOG_RUNNING, XV_LOG_DRAINING,
        XV_LOG_STOPPED, XV_LOG_ERROR };
 enum { XV_LOG_OK=0, XV_LOG_TIMEOUT=-1, XV_LOG_IO=-2, XV_LOG_BUSY=-3,
@@ -23,6 +38,9 @@ typedef struct {
      * error also exposes a sticky loss on the immediate sink; that loss cannot
      * be erased by retrying an unrelated periodic chunk. */
     unsigned state, queued, high_water, open_report;
+    /* Writer lifecycle is independent of report admission: RUNNING can be
+     * idle/OFF. transition briefly rejects report admission during a toggle. */
+    unsigned enabled, transition;
     int error, startup_error;
     uint64_t accepted, written, synced, accepted_bytes, written_bytes, synced_bytes;
     uint64_t completed_report, failed_sequence;

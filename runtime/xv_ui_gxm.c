@@ -1490,7 +1490,7 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
         if (grouped) xv_log_report_end();
         uint64_t report_us=t_us()-report_start;
         xv_log_status logs; xv_log_get_status(&logs);
-        if(logs.state==XV_LOG_RUNNING || logs.state==XV_LOG_ERROR) {
+        if(logs.enabled) {
             int cost_group=xv_log_report_begin_frame(frame);
             UI_LOG("[profile-cost] frame %u batch %d producer-us %llu; formatting/enqueue/backpressure, excludes worker output and this line\n",
                 frame,grouped,(unsigned long long)report_us);

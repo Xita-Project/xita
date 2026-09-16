@@ -17,6 +17,8 @@ static pthread_mutex_t io=PTHREAD_MUTEX_INITIALIZER,sink=PTHREAD_MUTEX_INITIALIZ
 static pthread_cond_t changed=PTHREAD_COND_INITIALIZER;
 static _Thread_local SceUID identity=1;
 static atomic_int creates,opens,deleted_threads,deleted_semas,writer_entered,console_entered;
+static atomic_int file_calls,writer_file_calls,sync_calls,ordinary_entered;
+static int ordinary_block,ordinary_permits;
 static int fail_init,write_block,write_permits,console_block,console_permits,short_write;
 static int fail_after=-1,write_error=-77,sync_error,console_fail_after=-1,console_error=-78;
 static int console_status=-1;
@@ -104,12 +106,20 @@ SceUID sceIoOpen(const char *p,int flags,SceMode mode)
 SceSSize sceIoWrite(SceUID fd,const void *text,SceSize size)
 {
     assert(fd==10);pthread_mutex_lock(&io);
+    atomic_fetch_add(&file_calls,1);
+    if(identity!=100 && ordinary_block) {
+        atomic_fetch_add(&ordinary_entered,1);pthread_cond_broadcast(&changed);
+        while(!ordinary_permits)pthread_cond_wait(&changed,&io);
+        ordinary_permits--;
+    }
     if(identity==100) {
+        atomic_fetch_add(&writer_file_calls,1);
         atomic_fetch_add(&writer_entered,1);pthread_cond_broadcast(&changed);
         while(write_block && !write_permits)pthread_cond_wait(&changed,&io);
         if(write_block)write_permits--;
         if(self_check) { self_check=0;pthread_mutex_unlock(&io);
             assert(xv_log_flush_wait(1000)==XV_LOG_SELF);assert(xv_log_shutdown(1000)==XV_LOG_SELF);
+            assert(xv_log_async_init()==XV_LOG_SELF);assert(xv_log_async_set_enabled(0,1000)==XV_LOG_SELF);
             atomic_store(&self_checked,1);pthread_mutex_lock(&io); }
     }
     if(fail_after>=0 && output_n>=(unsigned)fail_after) {
@@ -121,7 +131,7 @@ SceSSize sceIoWrite(SceUID fd,const void *text,SceSize size)
     pthread_mutex_unlock(&io);return size;
 }
 int sceIoSyncByFd(SceUID fd,int flag)
-{ assert(fd==10 && !flag);pthread_mutex_lock(&io);int rc=sync_error;pthread_mutex_unlock(&io);return rc; }
+{ assert(fd==10 && !flag);pthread_mutex_lock(&io);atomic_fetch_add(&sync_calls,1);int rc=sync_error;pthread_mutex_unlock(&io);return rc; }
 int sceClibPrintf(const char *fmt,...)
 {
     char b[1024];va_list ap;va_start(ap,fmt);int n=vsnprintf(b,sizeof b,fmt,ap);va_end(ap);
@@ -168,6 +178,43 @@ static void *critical(void *unused)
 { (void)unused;identity=4;assert(!xv_log_report_begin());xv_log_report_end();xv_log_criticalf("CRIT");return NULL; }
 static void *cold_log(void *id)
 { identity=10+(int)(uintptr_t)id;xv_log_criticalf("cold %d\n",identity);return NULL; }
+static void *foreign_control(void *unused)
+{
+    (void)unused;identity=6;assert(xv_log_async_available());
+    assert(xv_log_async_init()==XV_LOG_BUSY);
+    assert(xv_log_async_set_enabled(!xv_log_async_enabled(),100000)==XV_LOG_BUSY);return NULL;
+}
+static void *claim_startup(void *unused)
+{
+    (void)unused;identity=6;int before=atomic_load(&sync_calls);
+    assert(xv_log_async_init()==XV_LOG_OK && xv_log_async_enabled());
+    assert(xv_log_async_init()==XV_LOG_OK && xv_log_async_enabled());
+    assert(atomic_load(&sync_calls)==before && status().accepted==1);
+    assert(xv_log_async_set_enabled(0,1000000)==XV_LOG_OK);
+    assert(xv_log_async_init()==XV_LOG_OK && !xv_log_async_enabled());return NULL;
+}
+static atomic_int foreign_open,foreign_end;
+static void *foreign_report(void *unused)
+{
+    (void)unused;identity=6;assert(xv_log_report_begin_frame(7));xv_log_write("F",1);
+    atomic_store(&foreign_open,1);while(!atomic_load(&foreign_end))sceKernelDelayThread(100);
+    xv_log_report_end();return NULL;
+}
+static void *ordinary_log(void *unused)
+{ (void)unused;identity=4;xv_log_criticalf("CRIT");return NULL; }
+static void release_ordinary(void)
+{ pthread_mutex_lock(&io);ordinary_permits=10;pthread_cond_broadcast(&changed);pthread_mutex_unlock(&io); }
+static void *transition_observer(void *unused)
+{
+    (void)unused;identity=6;
+    uint64_t start=log_now();while(!status().transition) {assert(log_now()-start<2000000);sceKernelDelayThread(100);}
+    assert(!xv_log_async_enabled());
+    assert(!xv_log_report_begin_frame(99) && !xv_log_report_begin_async_frame(99));
+    assert(!status().open_report);
+    assert(xv_log_async_init()==XV_LOG_BUSY && xv_log_async_set_enabled(1,1000)==XV_LOG_BUSY);
+    assert(xv_log_shutdown(1000)==XV_LOG_BUSY && xv_log_flush_wait(1000)==XV_LOG_BUSY);
+    release_ordinary();return NULL;
+}
 
 #ifdef TEST_EXIT_PROTOCOL
 #include "../../runtime/xv_update.h"
@@ -193,10 +240,112 @@ static void *exit_thread(void *unused)
 { (void)unused;identity=5;xv_finish_for_exit();atomic_store(&exit_done,1);return NULL; }
 #endif
 
+static void toggle_test(const char *test)
+{
+    assert(xv_log_async_available() && !xv_log_async_enabled() && !atomic_load(&creates));
+    assert(xv_log_async_set_enabled(1,1000)==XV_LOG_UNAVAILABLE);
+    if(!strcmp(test,"toggle-startup")) {
+        start();report("A",1,1);pthread_t owner;assert(!pthread_create(&owner,NULL,claim_startup,NULL));
+        assert(!pthread_join(owner,NULL));assert(!xv_log_async_enabled());
+        assert(xv_log_async_init()==XV_LOG_BUSY && xv_log_async_set_enabled(1,1000)==XV_LOG_BUSY);
+        /* Startup idempotence also must not undo an explicitly selected OFF. */
+        assert(xv_log_async_start()==XV_LOG_OK && !xv_log_async_enabled());
+        assert(xv_log_shutdown(1000000)==XV_LOG_OK);verify("A",1);return;
+    }
+    unsetenv("XV_PROFILE_ASYNC_REPORT");assert(xv_log_async_init()==XV_LOG_OK);
+    assert(status().state==XV_LOG_RUNNING && !status().enabled && !status().transition);
+    if(!strcmp(test,"toggle-cycle")) {
+        assert(xv_log_async_init()==XV_LOG_OK && atomic_load(&creates)==1);
+        assert(xv_log_async_set_enabled(-1,1000)==XV_LOG_BUSY && xv_log_async_set_enabled(2,1000)==XV_LOG_BUSY);
+        pthread_t foreign;assert(!pthread_create(&foreign,NULL,foreign_control,NULL));assert(!pthread_join(foreign,NULL));
+        assert(xv_log_report_begin_frame(1));xv_log_write("x",1);xv_log_write("y",1);xv_log_write("z",1);
+        assert(!atomic_load(&file_calls));xv_log_report_end();
+        assert(atomic_load(&file_calls)==1 && !atomic_load(&writer_file_calls) && !status().accepted);
+        assert(!xv_log_report_begin_async_frame(1));
+        int sync=atomic_load(&sync_calls);
+        assert(xv_log_async_set_enabled(0,1000000)==XV_LOG_OK && atomic_load(&sync_calls)==++sync);
+        assert(xv_log_async_set_enabled(0,1000000)==XV_LOG_OK && atomic_load(&sync_calls)==++sync);
+        assert(xv_log_async_set_enabled(1,1000000)==XV_LOG_OK && atomic_load(&sync_calls)==++sync);
+        assert(xv_log_async_enabled());report("B",1,2);
+        assert(xv_log_async_set_enabled(0,1000000)==XV_LOG_OK && atomic_load(&sync_calls)==++sync);
+        assert(!xv_log_async_enabled() && status().accepted==1 && status().synced==1);
+        assert(atomic_load(&file_calls)==2 && atomic_load(&writer_file_calls)==1);
+        report("C",1,3);assert(atomic_load(&file_calls)==3 && atomic_load(&writer_file_calls)==1);
+        assert(xv_log_async_set_enabled(0,1000000)==XV_LOG_OK && atomic_load(&sync_calls)==++sync);
+        assert(!atomic_load(&deleted_threads) && native_started);verify("xyzBC",5);
+    } else if(!strcmp(test,"toggle-open")) {
+        assert(xv_log_report_begin_frame(1));xv_log_write("A",1);
+        assert(xv_log_async_init()==XV_LOG_BUSY && xv_log_async_set_enabled(1,1000)==XV_LOG_BUSY);
+        assert(!xv_log_async_enabled() && !atomic_load(&file_calls));xv_log_report_end();
+        assert(xv_log_async_set_enabled(1,1000000)==XV_LOG_OK);
+        assert(xv_log_report_begin_frame(2));xv_log_write("B",1);
+        assert(xv_log_async_set_enabled(0,1000)==XV_LOG_BUSY && xv_log_async_enabled());
+        xv_log_report_end();assert(xv_log_async_set_enabled(0,1000000)==XV_LOG_OK);
+        pthread_t foreign;assert(!pthread_create(&foreign,NULL,foreign_report,NULL));wait_value(&foreign_open,1);
+        assert(xv_log_async_init()==XV_LOG_BUSY && xv_log_async_set_enabled(1,1000)==XV_LOG_BUSY);
+        atomic_store(&foreign_end,1);assert(!pthread_join(foreign,NULL));verify("ABF",3);
+    } else if(!strcmp(test,"toggle-ordinary") || !strcmp(test,"toggle-ordinary-timeout")) {
+        pthread_mutex_lock(&io);ordinary_block=1;pthread_mutex_unlock(&io);
+        pthread_t ordinary;assert(!pthread_create(&ordinary,NULL,ordinary_log,NULL));wait_value(&ordinary_entered,1);
+        if(!strcmp(test,"toggle-ordinary")) {
+            pthread_t observer;assert(!pthread_create(&observer,NULL,transition_observer,NULL));
+            assert(xv_log_async_set_enabled(1,1000000)==XV_LOG_OK);assert(!pthread_join(observer,NULL));
+        } else {
+            assert(xv_log_async_set_enabled(1,10000)==XV_LOG_TIMEOUT);
+            assert(!xv_log_async_enabled() && !status().transition && !atomic_load(&deleted_threads));
+            release_ordinary();assert(xv_log_async_set_enabled(1,1000000)==XV_LOG_OK);
+        }
+        assert(!pthread_join(ordinary,NULL));assert(xv_log_async_enabled());
+        report("A",1,1);assert(xv_log_async_set_enabled(0,1000000)==XV_LOG_OK);verify("CRITA",5);
+    } else if(!strcmp(test,"toggle-sync-error")) {
+        pthread_mutex_lock(&io);sync_error=-99;pthread_mutex_unlock(&io);
+        assert(xv_log_async_set_enabled(1,1000000)==XV_LOG_IO && !xv_log_async_enabled());
+        assert(status().state==XV_LOG_ERROR && !status().transition && !atomic_load(&deleted_threads));
+        assert(xv_log_async_init()==XV_LOG_IO && xv_log_async_set_enabled(1,1000)==XV_LOG_IO);
+        pthread_mutex_lock(&io);sync_error=0;pthread_mutex_unlock(&io);assert(xv_log_retry()==XV_LOG_OK);
+        assert(xv_log_async_set_enabled(1,1000000)==XV_LOG_OK);report("A",1,1);
+        assert(xv_log_async_set_enabled(0,1000000)==XV_LOG_OK);verify("A",1);
+    } else {
+        assert(xv_log_async_set_enabled(1,1000000)==XV_LOG_OK);
+        pthread_mutex_lock(&io);
+        if(!strcmp(test,"toggle-error"))fail_after=0;
+        else if(!strcmp(test,"toggle-blocked-console"))console_block=1;
+        else write_block=1;
+        pthread_mutex_unlock(&io);report("A",1,1);
+        if(!strcmp(test,"toggle-error")) {
+            wait_error();assert(xv_log_async_set_enabled(0,1000)==XV_LOG_IO);
+            assert(xv_log_async_enabled() && status().queued==1 && !status().transition);
+            pthread_mutex_lock(&io);fail_after=-1;pthread_mutex_unlock(&io);assert(xv_log_retry()==XV_LOG_OK);
+        } else {
+            wait_value(!strcmp(test,"toggle-blocked-console") ? &console_entered : &writer_entered,1);
+            if(!strcmp(test,"toggle-barrier")) {
+                pthread_t flush;assert(!pthread_create(&flush,NULL,flusher,NULL));
+                for(;;) {queue_lock();int ready=log_users!=0;queue_unlock();if(ready)break;sceKernelDelayThread(100);}
+                assert(xv_log_async_set_enabled(0,1000)==XV_LOG_BUSY && xv_log_async_enabled());
+                release_writes(1);wait_value(&flush_done,1);assert(!pthread_join(flush,NULL));assert(flush_result==XV_LOG_OK);
+            } else {
+                if(!strcmp(test,"toggle-deadline")) {deadline_reads=0;deadline_clock=1;}
+                int rc=xv_log_async_set_enabled(0,10000);deadline_clock=0;
+                assert(rc==XV_LOG_TIMEOUT && xv_log_async_enabled() && !status().transition);
+                assert(status().queued==1 && !status().synced && !atomic_load(&deleted_threads));
+                report("B",1,2);assert(status().accepted==2);
+                pthread_mutex_lock(&io);console_permits=write_permits=10;pthread_cond_broadcast(&changed);pthread_mutex_unlock(&io);
+            }
+        }
+        assert(xv_log_async_set_enabled(0,1000000)==XV_LOG_OK);
+        if(!strcmp(test,"toggle-error") || !strcmp(test,"toggle-barrier"))verify("A",1);else verify("AB",2);
+    }
+    assert(!status().transition && !xv_log_async_enabled());
+    assert(xv_log_shutdown(1000000)==XV_LOG_OK && atomic_load(&deleted_threads)==1);
+    assert(xv_log_async_init()==XV_LOG_BUSY && xv_log_async_set_enabled(1,1000)==XV_LOG_UNAVAILABLE);
+}
+
 int main(int argc,char **argv)
 {
     assert(argc==2);const char *test=argv[1];
-    if(!strncmp(test,"startup",7)) {
+    if(!strncmp(test,"toggle-",7)) {
+        toggle_test(test);
+    } else if(!strncmp(test,"startup",7)) {
         fail_init=atoi(test+7);setenv("XV_PROFILE_ASYNC_REPORT","1",1);
         assert(xv_log_async_start()==XV_LOG_UNAVAILABLE);assert(!native_started);
         assert(atomic_load(&deleted_semas)==(int)sem_count);

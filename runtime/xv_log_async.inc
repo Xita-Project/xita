@@ -10,6 +10,7 @@ typedef struct {
 static log_slot log_queue[LOG_SLOTS];
 static unsigned log_guard, log_stop_guard, log_users, log_quit, log_exited, log_draining;
 static SceUID log_thread=-1, log_wake=-1, log_changed=-1;
+static SceUID log_control_owner;
 static xv_log_status log_status;
 static uint64_t log_sync_request, log_sync_done, log_sync_target;
 static uint64_t log_report_id;
@@ -93,14 +94,30 @@ static int log_writer(SceSize args,void *argp)
     }
 }
 
-int xv_log_async_start(void)
+int xv_log_async_available(void) { return 1; }
+int xv_log_async_enabled(void)
+{ queue_lock();int enabled=log_status.enabled;queue_unlock();return enabled; }
+
+static int async_create(int enabled,int claim)
 {
-    const char *e=getenv("XV_PROFILE_ASYNC_REPORT");
-    if(!e || strcmp(e,"1")) return XV_LOG_UNAVAILABLE;
+    if(__atomic_exchange_n(&log_stop_guard,1,__ATOMIC_ACQUIRE)) return XV_LOG_BUSY;
+    int result=XV_LOG_OK;SceUID current=sceKernelGetThreadId();
     queue_lock();
-    if(log_status.state!=XV_LOG_SYNC || __atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE)) {
-        int rc=log_status.state==XV_LOG_RUNNING ? XV_LOG_OK : XV_LOG_BUSY;
-        queue_unlock(); return rc;
+    if(current==log_thread) { queue_unlock();result=XV_LOG_SELF;goto out; }
+    if(current<=0 || (claim && log_control_owner && log_control_owner!=current) ||
+       log_users || __atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE)) {
+        queue_unlock();result=XV_LOG_BUSY;goto out;
+    }
+    if(log_draining || log_quit || log_status.state==XV_LOG_STARTING ||
+       log_status.state==XV_LOG_DRAINING || log_status.state==XV_LOG_STOPPED) {
+        queue_unlock();result=XV_LOG_BUSY;goto out;
+    }
+    if(log_status.error || __atomic_load_n(&g_immediate_error,__ATOMIC_ACQUIRE)) {
+        queue_unlock();result=XV_LOG_IO;goto out;
+    }
+    if(log_thread>=0) {
+        if(claim)log_control_owner=current;
+        queue_unlock();goto out; /* claim never implicitly changes admission */
     }
     log_status.state=XV_LOG_STARTING; queue_unlock();
     /* Initialize/rotate on the native startup caller before publication. */
@@ -116,8 +133,9 @@ int xv_log_async_start(void)
     if(log_thread<0) { error=log_thread; goto fail; }
     error=sceKernelStartThread(log_thread,0,NULL);
     if(error<0) goto fail;
-    queue_lock(); log_status.state=XV_LOG_RUNNING; queue_unlock();
-    log_hint(log_wake); return XV_LOG_OK;
+    queue_lock(); log_status.state=XV_LOG_RUNNING;log_status.enabled=enabled;
+    log_status.startup_error=0;if(claim)log_control_owner=current;
+    queue_unlock();log_hint(log_wake);goto out;
 fail:
     if(log_thread>=0) sceKernelDeleteThread(log_thread);
     if(log_changed>=0) sceKernelDeleteSema(log_changed);
@@ -125,15 +143,24 @@ fail:
     log_thread=log_changed=log_wake=-1;
     queue_lock(); log_status.startup_error=error ? error : XV_LOG_UNAVAILABLE;
     log_status.state=XV_LOG_SYNC; queue_unlock();
-    return XV_LOG_UNAVAILABLE;
+    result=XV_LOG_UNAVAILABLE;
+out:
+    __atomic_store_n(&log_stop_guard,0,__ATOMIC_RELEASE);return result;
+}
+
+int xv_log_async_init(void) { return async_create(0,1); }
+int xv_log_async_start(void)
+{
+    const char *e=getenv("XV_PROFILE_ASYNC_REPORT");
+    return e && !strcmp(e,"1") ? async_create(1,0) : XV_LOG_UNAVAILABLE;
 }
 
 static int async_report_begin(unsigned frame)
 {
     queue_lock();
-    int active=log_status.state==XV_LOG_RUNNING || log_status.state==XV_LOG_ERROR;
-    int blocked=log_status.state==XV_LOG_STARTING || log_status.state==XV_LOG_DRAINING || log_draining;
-    if(active) { ++log_report_id; log_report_frame=frame; log_report_chunk=0; }
+    int active=log_status.enabled && (log_status.state==XV_LOG_RUNNING || log_status.state==XV_LOG_ERROR);
+    int blocked=log_status.transition || log_status.state==XV_LOG_STARTING || log_status.state==XV_LOG_DRAINING || log_draining;
+    if(active && !blocked) { ++log_report_id; log_report_frame=frame; log_report_chunk=0; }
     queue_unlock();
     return blocked ? -1 : active;
 }
@@ -189,7 +216,7 @@ static int async_barrier(unsigned timeout_us,int stopping)
     queue_lock();
     if(log_status.state==XV_LOG_STARTING) { queue_unlock(); return XV_LOG_BUSY; }
     if(sceKernelGetThreadId()==log_thread) { queue_unlock(); return XV_LOG_SELF; }
-    if(!stopping && log_status.state==XV_LOG_DRAINING) { queue_unlock(); return XV_LOG_BUSY; }
+    if(!stopping && (log_status.transition || log_status.state==XV_LOG_DRAINING)) { queue_unlock(); return XV_LOG_BUSY; }
     if(log_thread<0 || log_status.state==XV_LOG_STOPPED || log_status.state==XV_LOG_SYNC) {
         queue_unlock(); return XV_LOG_UNAVAILABLE;
     }
@@ -212,6 +239,36 @@ static int async_barrier(unsigned timeout_us,int stopping)
     }
     queue_lock(); --log_users; queue_unlock();
     return result;
+}
+
+int xv_log_async_set_enabled(int enabled,unsigned timeout_us)
+{
+    if(enabled!=0 && enabled!=1) return XV_LOG_BUSY;
+    uint64_t start=log_now();
+    if(__atomic_exchange_n(&log_stop_guard,1,__ATOMIC_ACQUIRE)) return XV_LOG_BUSY;
+    int result=XV_LOG_OK;SceUID current=sceKernelGetThreadId();
+    queue_lock();
+    if(current==log_thread) { queue_unlock();result=XV_LOG_SELF;goto out; }
+    if(log_thread<0 || !log_control_owner) { queue_unlock();result=XV_LOG_UNAVAILABLE;goto out; }
+    if(current!=log_control_owner || log_draining || log_quit || log_users ||
+       __atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE)) {
+        queue_unlock();result=XV_LOG_BUSY;goto out;
+    }
+    if(log_status.error || __atomic_load_n(&g_immediate_error,__ATOMIC_ACQUIRE)) {
+        queue_unlock();result=XV_LOG_IO;goto out;
+    }
+    /* Serialize admission against report_begin's queue check. Ordinary logs
+     * keep their immediate sink and never require this lifecycle guard. */
+    log_status.transition=1;queue_unlock();
+    uint64_t elapsed=log_now()-start;
+    unsigned left=elapsed>=timeout_us ? 0 : timeout_us-(unsigned)elapsed;
+    result=async_barrier(left,1);
+    queue_lock();
+    if(!result && (log_status.error || __atomic_load_n(&g_immediate_error,__ATOMIC_ACQUIRE))) result=XV_LOG_IO;
+    if(!result)log_status.enabled=enabled;
+    log_status.transition=0;queue_unlock();
+out:
+    __atomic_store_n(&log_stop_guard,0,__ATOMIC_RELEASE);return result;
 }
 
 int xv_log_retry(void)
@@ -264,7 +321,8 @@ int xv_log_shutdown(unsigned timeout_us)
     { unsigned left=1000;
       if(sceKernelWaitThreadEnd(log_thread,NULL,&left)<0) { result=XV_LOG_TIMEOUT; goto out; } }
     sceKernelDeleteThread(log_thread); sceKernelDeleteSema(log_changed); sceKernelDeleteSema(log_wake);
-    queue_lock(); log_thread=log_changed=log_wake=-1; log_status.state=XV_LOG_STOPPED; log_draining=0; queue_unlock();
+    queue_lock(); log_thread=log_changed=log_wake=-1; log_status.state=XV_LOG_STOPPED;
+    log_status.enabled=0;log_draining=0;queue_unlock();
 out:
     __atomic_store_n(&log_stop_guard,0,__ATOMIC_RELEASE); return result;
 }
@@ -276,6 +334,11 @@ static int async_is_worker(void) { return 0; }
 static int async_barrier(unsigned timeout_us,int stopping)
 { (void)timeout_us; (void)stopping; return XV_LOG_UNAVAILABLE; }
 int xv_log_async_start(void) { return XV_LOG_UNAVAILABLE; }
+int xv_log_async_available(void) { return 0; }
+int xv_log_async_enabled(void) { return 0; }
+int xv_log_async_init(void) { return XV_LOG_UNAVAILABLE; }
+int xv_log_async_set_enabled(int enabled,unsigned timeout_us)
+{ (void)enabled;(void)timeout_us;return XV_LOG_UNAVAILABLE; }
 void xv_log_get_status(xv_log_status *out)
 { if(out) { memset(out,0,sizeof *out); out->error=__atomic_load_n(&g_immediate_error,__ATOMIC_ACQUIRE); } }
 int xv_log_retry(void) { return XV_LOG_UNAVAILABLE; }
