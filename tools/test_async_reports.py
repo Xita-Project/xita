@@ -10,7 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = ['disabled', 'cold', *['startup' + str(i) for i in range(1, 7)],
          'fifo', 'capacity', 'critical', 'ownerflush', 'errorfull', 'barrier',
          'self', 'join', 'hints', 'ownercritical', 'openflush', 'console', 'syncerror', 'partial', 'zero', 'impossible',
-         'negative', 'consoleerror', 'update-write', 'update-console']
+         'negative', 'consoleerror', 'update-write', 'update-console',
+         *[f'status-console-{status}-{mode}' for status in (0, 1, 2048) for mode in ('off', 'on')],
+         'deadline-wrap', 'simultaneous-flushers']
 
 
 def run(out, modes):

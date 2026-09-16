@@ -19,6 +19,8 @@ static _Thread_local SceUID identity=1;
 static atomic_int creates,opens,deleted_threads,deleted_semas,writer_entered,console_entered;
 static int fail_init,write_block,write_permits,console_block,console_permits,short_write;
 static int fail_after=-1,write_error=-77,sync_error,console_fail_after=-1,console_error=-78;
+static int console_status=-1;
+static _Thread_local unsigned deadline_clock,deadline_reads;
 static int self_check;
 static int join_timeouts;
 static atomic_int failed_hints;
@@ -31,7 +33,15 @@ static sema sems[2]; static unsigned sem_count;
 
 SceUID sceKernelGetThreadId(void) { return identity; }
 SceUInt64 sceKernelGetProcessTimeWide(void)
-{ struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000; }
+{
+    /* Cross a 10 ms shutdown deadline precisely between successive clock
+     * reads; the writer keeps its real clock. No scheduling luck is required. */
+    if(deadline_clock) {
+        unsigned read=deadline_reads++;
+        return read==0 ? 1000 : read==1 ? 10999 : 11001+(uint64_t)(read-2)*1000;
+    }
+    struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000;
+}
 int sceKernelDelayThread(SceUInt us)
 { struct timespec t={us/1000000,(long)(us%1000000)*1000}; nanosleep(&t,NULL); return 0; }
 SceUID sceKernelCreateMutex(const char *name,SceUInt attr,int initial,SceKernelMutexOptParam *opt)
@@ -63,6 +73,9 @@ int sceKernelSignalSema(SceUID uid,int count)
 int sceKernelWaitSema(SceUID uid,int count,unsigned *timeout)
 {
     assert(uid>=30 && uid<32 && count==1 && timeout);sema *s=&sems[uid-30];
+    /* The scripted deadline is already expired. A second clock read in the
+     * remaining-budget subtraction used to underflow and reach this wait. */
+    assert(!deadline_clock);
     struct timespec t;clock_gettime(CLOCK_REALTIME,&t);t.tv_nsec+=(long)*timeout*1000;
     t.tv_sec+=t.tv_nsec/1000000000;t.tv_nsec%=1000000000;
     pthread_mutex_lock(&s->mutex);assert(!s->deleted);s->waiters++;
@@ -120,11 +133,11 @@ int sceClibPrintf(const char *fmt,...)
         if(console_block)console_permits--;
         if(console_fail_after>=0) {
             if(console_n>=(unsigned)console_fail_after) { int rc=console_error;pthread_mutex_unlock(&io);return rc; }
-            if((unsigned)n>(unsigned)console_fail_after-console_n)n=(unsigned)console_fail_after-console_n;
         }
     }
     assert((unsigned)n<CAP-console_n);memcpy(console_output+console_n,b,n);console_n+=n;
-    pthread_mutex_unlock(&io);return n;
+    int rc=console_status>=0 ? console_status : n;
+    pthread_mutex_unlock(&io);return rc;
 }
 
 static xv_log_status status(void) { xv_log_status s;xv_log_get_status(&s);return s; }
@@ -145,6 +158,12 @@ static void *producer(void *unused)
 { (void)unused;identity=2;report("E",1,55);atomic_store(&producer_done,1);return NULL; }
 static void *flusher(void *unused)
 { (void)unused;identity=3;flush_result=xv_log_flush_wait(1000000);atomic_store(&flush_done,1);return NULL; }
+typedef struct { SceUID id; int result; atomic_int done; } flush_call;
+static void *concurrent_flusher(void *arg)
+{
+    flush_call *call=arg;identity=call->id;
+    call->result=xv_log_flush_wait(1000000);atomic_store(&call->done,1);return NULL;
+}
 static void *critical(void *unused)
 { (void)unused;identity=4;assert(!xv_log_report_begin());xv_log_report_end();xv_log_criticalf("CRIT");return NULL; }
 static void *cold_log(void *id)
@@ -194,6 +213,25 @@ int main(int argc,char **argv)
         setenv("XV_PROFILE_ASYNC_REPORT","1x",1);assert(xv_log_async_start()==XV_LOG_UNAVAILABLE);
         report("sync",4,1);verify("sync",4);assert(!xv_log_report_begin_async_frame(2));
         assert(xv_log_shutdown(1000)==XV_LOG_OK);assert(!native_started);
+    } else if(!strncmp(test,"status-console-",15)) {
+        /* Test both status and byte-count-style console success conventions
+         * in the same production sink, with runtime async enabled/disabled. */
+        console_status=atoi(test+15);
+        int enabled=strstr(test,"-on")!=NULL;
+        if(enabled)start();else {unsetenv("XV_PROFILE_ASYNC_REPORT");assert(xv_log_async_start()==XV_LOG_UNAVAILABLE);}
+        char text[1024];memset(text,'C',sizeof text);
+        report(text,sizeof text,1);assert(xv_log_shutdown(1000000)==XV_LOG_OK);
+        verify(text,sizeof text);assert(console_n==sizeof text && !memcmp(console_output,text,sizeof text));
+        xv_log_status s=status();assert(!s.error && s.synced_bytes==(enabled ? sizeof text : 0));
+        assert(!native_started);
+    } else if(!strcmp(test,"deadline-wrap")) {
+        start();pthread_mutex_lock(&io);write_block=1;pthread_mutex_unlock(&io);
+        report("A",1,1);wait_value(&writer_entered,1);
+        deadline_reads=0;deadline_clock=1;
+        int rc=xv_log_shutdown(10000);deadline_clock=0;
+        assert(rc==XV_LOG_TIMEOUT && !atomic_load(&deleted_threads));
+        assert(status().state==XV_LOG_DRAINING && status().queued==1 && !status().synced);
+        release_writes(1);assert(xv_log_shutdown(1000000)==XV_LOG_OK);verify("A",1);
     } else if(!strcmp(test,"fifo")) {
         start();short_write=137;char text[65537];unsigned seed=1234;
         for(unsigned r=0;r<200;r++) {
@@ -272,6 +310,22 @@ int main(int argc,char **argv)
         assert(flush_result==XV_LOG_OK && status().synced==1 && status().accepted==2);
         wait_value(&writer_entered,2);assert(status().written==1);release_writes(1);
         assert(xv_log_shutdown(1000000)==XV_LOG_OK);verify("AB",2);
+    } else if(!strcmp(test,"simultaneous-flushers")) {
+        start();pthread_mutex_lock(&io);write_block=1;pthread_mutex_unlock(&io);
+        report("A",1,1);wait_value(&writer_entered,1);
+        flush_call first={.id=3},second={.id=6};pthread_t a,b;
+        assert(!pthread_create(&a,NULL,concurrent_flusher,&first));
+        for(;;) {queue_lock();int ready=log_users==1 && log_sync_request>log_sync_done && log_sync_target==1;queue_unlock();if(ready)break;sceKernelDelayThread(100);}
+        report("B",1,2);assert(!pthread_create(&b,NULL,concurrent_flusher,&second));
+        for(;;) {queue_lock();int ready=log_users==2;assert(log_sync_target==1);queue_unlock();if(ready)break;sceKernelDelayThread(100);}
+        assert(!atomic_load(&first.done) && !atomic_load(&second.done));
+        release_writes(1);wait_value(&first.done,1);assert(!pthread_join(a,NULL));
+        wait_value(&writer_entered,2);
+        assert(first.result==XV_LOG_OK && !atomic_load(&second.done));
+        assert(status().written==1 && status().synced==1 && status().accepted==2);
+        release_writes(1);wait_value(&second.done,1);assert(!pthread_join(b,NULL));
+        assert(second.result==XV_LOG_OK && status().synced==2);
+        assert(xv_log_shutdown(1000000)==XV_LOG_OK);verify("AB",2);
     } else if(!strcmp(test,"openflush")) {
         start();assert(xv_log_report_begin_frame(7));xv_log_write("A",1);
         assert(xv_log_flush_wait(1000000)==XV_LOG_OK);assert(status().synced==1 && !status().completed_report);
@@ -308,7 +362,10 @@ int main(int argc,char **argv)
         start();pthread_mutex_lock(&io);
         if(!strcmp(test,"consoleerror"))console_fail_after=5;
         else {fail_after=!strcmp(test,"partial") ? 5 : 0;write_error=!strcmp(test,"zero") ? 0 : !strcmp(test,"impossible") ? 99 : -77;short_write=3;}
-        pthread_mutex_unlock(&io);report("abcdefghijk\n",12,42);wait_error();
+        /* Console failure occurs after a whole accepted newline-terminated
+         * chunk. Its return value cannot describe a partial console write. */
+        const char *text=!strcmp(test,"consoleerror") ? "abcd\nfghijkX" : "abcdefghijk\n";
+        pthread_mutex_unlock(&io);report(text,12,42);wait_error();
         xv_log_status s=status();assert(s.accepted==1 && !s.written && !s.synced && !s.completed_report);
         assert(s.failed_sequence==1 && s.pending_frame==42 && s.queued==1);
         if(!strcmp(test,"partial"))assert(s.failed_file_offset==5 && s.written_bytes==5);
@@ -316,7 +373,7 @@ int main(int argc,char **argv)
         assert(xv_log_flush_wait(10000)==XV_LOG_IO && xv_log_shutdown(10000)==XV_LOG_IO);
         assert(!atomic_load(&deleted_threads));pthread_mutex_lock(&io);fail_after=console_fail_after=-1;pthread_mutex_unlock(&io);
         assert(xv_log_retry()==XV_LOG_OK);assert(xv_log_shutdown(1000000)==XV_LOG_OK);
-        verify("abcdefghijk\n",12);s=status();assert(s.written==1 && s.synced==1 && s.completed_report==1 && s.written_bytes==12);
+        verify(text,12);s=status();assert(s.written==1 && s.synced==1 && s.completed_report==1 && s.written_bytes==12);
     }
     printf("PASS: %s\n",test);return 0;
 }

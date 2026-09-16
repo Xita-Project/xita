@@ -74,8 +74,10 @@ static int log_console(const char *buf,unsigned n,unsigned *offset,uint64_t *ela
         if(chunk>511) chunk=511;
         for(unsigned i=chunk;i;--i) if(buf[*offset+i-1]=='\n') { chunk=i; break; }
         int r=sceClibPrintf("%.*s",(int)chunk,buf+*offset);
-        if(r<=0 || (unsigned)r>chunk) { error=r<0 ? r : XV_LOG_IO; break; }
-        *offset+=(unsigned)r;
+        /* sceClibPrintf is not a byte-counted write: a successful console
+         * implementation may return zero or another nonnegative status. */
+        if(r<0) { error=r; break; }
+        *offset+=chunk;
     }
     *elapsed+=sink_now()-start; return error;
 }

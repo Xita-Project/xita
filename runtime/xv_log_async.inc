@@ -247,7 +247,8 @@ int xv_log_shutdown(unsigned timeout_us)
         log_wait_hint(log_changed);
     }
     if(!log_quit) {
-        unsigned left=log_expired(start,timeout_us) ? 0 : timeout_us-(unsigned)(log_now()-start);
+        uint64_t elapsed=log_now()-start;
+        unsigned left=elapsed>=timeout_us ? 0 : timeout_us-(unsigned)elapsed;
         result=async_barrier(left,1);
         if(result) goto out;
         queue_lock(); log_quit=1; queue_unlock(); log_hint(log_wake);

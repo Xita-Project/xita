@@ -61,10 +61,14 @@ may appear between them, including inside a multi-chunk report.
 
 ## Failure and barriers
 
-Partial positive console/file returns advance the saved offset. Zero, negative,
-or impossible counts enter ERROR without completing the head. A retry resumes
-from the saved offsets; the accepted slot remains owned. Consumer failure
-diagnostics use the direct console path, never the queue or file mutex.
+Positive `sceIoWrite` counts advance the exact saved file offset. Zero, negative,
+or impossible file counts enter ERROR without completing the head. Console
+output has a separate contract: every nonnegative `sceClibPrintf` return accepts
+the whole supplied chunk; it is not a partial-byte count. This supports both
+zero-status and positive-return implementations. A negative console result
+retains the last wholly accepted chunk boundary. Retry resumes at the saved
+offsets, with the accepted slot still owned. Consumer failure diagnostics use
+the direct console path, never the queue or file mutex.
 
 `xv_log_get_status()` distinguishes accepted, written and synced sequences and
 bytes. `written` advances only after the full chunk succeeds; partial file bytes
@@ -94,9 +98,12 @@ alive for final exit diagnostics. Restart after a successful stop is unsupported
 `xv_log_retry()` is an explicit C API for a failed periodic sink, preserving a
 pending shutdown's closed admission. There is no automatic retry loop and no
 new remote retry command. A full queue under persistent ERROR intentionally
-keeps its producer waiting until recovery. Impossible OS counts cannot establish
-what a broken sink actually committed; retries assume the normal syscall count
-contract. Console output has no durability guarantee.
+keeps its producer waiting until recovery. Impossible file counts cannot establish
+what a broken sink actually committed; file retries assume the normal syscall
+count contract. Console output has no durability guarantee. A negative console
+result cannot reveal whether part of its failing chunk was displayed, so an
+explicit retry can repeat that unknown part; exact partial-file accounting does
+not imply an exact console offset within a failed call.
 
 ## Report and updater integration
 
@@ -136,29 +143,39 @@ timed-out logger; the updater cannot use that as a successful drain.
 ```
 python3 tools/test_async_reports.py --output-dir recomp/host/build/async-report
 make -C recomp/host test-log-batch
+make -C recomp/host test-frames
 python3 tools/test_update_handoff.py
 python3 tools/test_log_handoff_markers.py
 python3 tools/test_remote.py
 ```
 
 The real production queue/sink runs against deterministic blocked syscalls and
-real host pthreads in 28 scenarios, each under ordinary execution, ASan/UBSan and
-TSan. They cover:
+real host pthreads in 36 scenarios, each under ordinary execution, ASan/UBSan and
+TSan (108 successful scenario runs). They cover:
 
 - Owned copies/caller overwrite, empty and 32 KiB boundaries, 65,537-byte input,
   200-report randomized FIFO/wraparound and exact file/console bytes.
 - Full capacity and persistent-error backpressure, owner/foreign scopes,
   owner critical bypass, concurrent cold initialization, and worker self-calls.
-- Partial/zero/negative/impossible writes, console failure, failed sync,
-  exact-offset retry, startup failure at six stages, failed wake hints, and
-  truthful incomplete sequences/report markers.
+- Partial/zero/negative/impossible file writes, console failure after a whole
+  accepted chunk, failed sync, exact file-offset retry, startup failure at six
+  stages, failed wake hints, and truthful incomplete sequences/report markers.
+- Console success returns of zero, one and 2,048, each with runtime async both
+  enabled and disabled; complete 1,024-byte console/file output and checked
+  shutdown without a false sticky error.
 - Owner flush/continued formatting, a flush target racing later admission,
-  blocked console and file output, bounded stop, join timeout/retry and repeated
-  stop with no deleted handle exposed to a waiter.
+  two simultaneous flushers retaining different FIFO targets, blocked console
+  and file output, bounded stop, join timeout/retry and repeated stop with no
+  deleted handle exposed to a waiter. An injected clock crosses the shutdown
+  deadline between reads; the saturated remaining budget cannot wrap unsigned.
 - The extracted production GPU/display/logger shutdown function with real
   blocked logger I/O: remote remains live until the logger drains.
 
-The existing synchronous log fixture passes ordinarily and under ASan/UBSan.
+The existing synchronous log fixture passes ordinarily and under ASan/UBSan,
+including the three console-success conventions with async compiled out.
+`make -C recomp/host test-frames` passes with the new log API stubs. The six
+console-status regressions and deadline regression each reject their respective
+original production defect when tested against the pre-fix source.
 Shutdown/lease tests and six extracted production exit-tail cases pass. Real
 loopback HTTP tests preserve existing update behavior and validate maximum-width
 logger telemetry as complete JSON. No external device or service is accessed.
@@ -174,6 +191,10 @@ Vita3K, deployment or authoritative source/stage mutation was performed.
 ## Review and physical acceptance
 
 This isolated branch starts at `1ad76da027552d2611dbf1a984564af1a23d71f5`.
+Independent review of the initial prototype `75ef5d6` found three blockers that
+its original 28 scenarios missed: console status misinterpreted as a byte count,
+deadline subtraction using two clock reads, and missing frame-test API stubs.
+The follow-up corrects all three and expands the coverage described above.
 The focused `runtime/main.c` integration patch is provided separately for root
 integration; runtime benchmark branches are untouched. Keep both build and
 runtime opt-ins disabled until a matched physical comparison establishes value.
