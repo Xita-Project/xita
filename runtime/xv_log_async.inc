@@ -128,7 +128,9 @@ static int async_create(int enabled,int claim)
     if(log_wake<0) { error=log_wake; goto fail; }
     log_changed=sceKernelCreateSema("xv_log_changed",0,0,1,NULL);
     if(log_changed<0) { error=log_changed; goto fail; }
-    log_thread=sceKernelCreateThread("xv_periodic_log",log_writer,0x10000120,
+    /* Match the admitted native remote-service priority. Physical firmware
+     * rejected 0x10000120 with SCE_KERNEL_ERROR_ILLEGAL_PRIORITY. */
+    log_thread=sceKernelCreateThread("xv_periodic_log",log_writer,0x10000110,
         64*1024,0,SCE_KERNEL_CPU_MASK_USER_ALL,NULL);
     if(log_thread<0) { error=log_thread; goto fail; }
     error=sceKernelStartThread(log_thread,0,NULL);
