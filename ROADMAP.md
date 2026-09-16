@@ -164,6 +164,11 @@ complete ARM comparisons. Multi-cluster samples save instructions, but tiny
 queries still regress. A ground-facing physical trial reaches about 20 FPS with
 almost the same queries/second as the 9.35 FPS valley view; world preparation
 and submission must also be profiled. This is not an installed optimization gain.
+The [bounded surface-scan prototype](docs/surface-scan-prototype-20260916.md)
+passes full-state host/ARM comparisons, but its short-input regressions keep it
+uninstalled. A fresh native valley trace and live campaign log continue to
+point to ordered scene work and vertex preparation; the scan's actual share
+within its parent routine has not yet been measured.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)

@@ -181,3 +181,45 @@ show jobs on both worker lanes, with zero rejected jobs and 360p retained.
 Private receipts are in
 `depth-store-tail-validation/valley-serial-phases/` under the existing validation
 directory; `analysis.json` retains all ranked rows and diagnostic limits.
+
+## Native valley follow-up on the query diagnostic build
+
+Installed runtime `b3ace3af9da6b78654d2bc0fda026b6549bbf61338b6764f6fef11bf07a86fa5`
+retains the original query implementation and adds workload counters only for
+the explicitly requested census. Native 544p and standard visual settings are
+restored. The new phase capture again serializes object callbacks in every arm,
+then restores the configured workers. Timing Off/On/Off is **9.405 / 7.453 /
+9.452 FPS** with matching camera checks, three complete 60-frame timing windows
+and no invalid or dropped scopes. The observer adds about 28 ms/frame; this is
+not a normal parallel-gameplay cost or an optimization gain.
+
+| Selected routine | Calls/frame | Selected self, ms/frame |
+| --- | ---: | ---: |
+| Object update `900E0` | 4.01 | 19.757 |
+| Object pose `8DDF0` | 397.47 | 14.374 |
+| Polygon clipping wrapper `B7F10` | 77 | 11.631 |
+| Material/draw helper `70110` | 64 | 11.221 |
+| Ordered scene callbacks `54010` | 10 | 10.198 |
+| Spatial polygon test `51E90` | 1,708.02 | 8.093 |
+| Matrix multiply `B5B40` | 2,161.94 | 5.680 |
+
+Selected self time still includes uninstrumented descendants. In particular,
+`54010` runs before/draw/after callbacks, so its whole value cannot be assigned
+to its surface-index scan. The [bounded scan prototype](surface-scan-prototype-20260916.md)
+preserves exact state in host/ARM comparisons, but short-input regressions and
+unmeasured run distribution keep it uninstalled.
+
+A later live campaign collection confirms the same installed runtime and zero
+logger errors. One ordinary 60-frame window records 342 draws/frame, 35 BSP
+draws/frame, 7.9 FPS and 26.7 ms/frame in draw HLE. Its draw-preparation stream
+category is 15.203 ms/frame, covering source setup, inline upload work and any
+remaining preparation join. It does not isolate pure memcpy time. The whole
+window is live gameplay, not a controlled benchmark or a comparison to the
+stationary valley. Continue the vertex preparation/submission investigation
+alongside native scene work; avoid adding overlapping phase, worker and GPU
+completion measurements.
+
+Private receipts: `direct-cluster-query/world-prep-native-valley/` and
+`direct-cluster-query/surface-scan-current-tail.log` in the existing validation
+directory. The latter screenshot shows campaign gameplay; no update or input
+was sent during that collection.
