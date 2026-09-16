@@ -346,7 +346,22 @@ static void toggle_test(const char *test)
 int main(int argc,char **argv)
 {
     assert(argc==2);const char *test=argv[1];
-    if(!strncmp(test,"toggle-",7)) {
+    if(!strncmp(test,"policy-",7)) {
+        int enabled;
+        if(!strcmp(test,"policy-default")) {
+            unsetenv("XV_PROFILE_ASYNC_REPORT");enabled=XV_PROFILE_ASYNC_REPORT_DEFAULT==1;
+        } else {
+            const char *value=!strcmp(test,"policy-on") ? "1" :
+                !strcmp(test,"policy-off") ? "0" : "1x";
+            setenv("XV_PROFILE_ASYNC_REPORT",value,1);enabled=!strcmp(value,"1");
+        }
+        assert(xv_log_async_start()==(enabled ? XV_LOG_OK : XV_LOG_UNAVAILABLE));
+        assert(xv_log_async_enabled()==enabled);
+        report("startup-policy\n",15,1);
+        assert(xv_log_shutdown(1000000)==XV_LOG_OK);verify("startup-policy\n",15);
+        xv_log_status s=status();assert(!s.error && s.synced_bytes==(enabled ? 15u : 0u));
+        assert(!native_started);
+    } else if(!strncmp(test,"toggle-",7)) {
         toggle_test(test);
     } else if(!strncmp(test,"startup",7)) {
         fail_init=atoi(test+7);setenv("XV_PROFILE_ASYNC_REPORT","1",1);

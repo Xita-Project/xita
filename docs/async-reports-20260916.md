@@ -5,14 +5,19 @@ Formatting, report callbacks, live counter snapshots/resets, game state and GXM
 work stay on their existing owner. Both console and file output move for these
 explicit scopes. Ordinary and critical logging remain immediate.
 
-It is **disabled by default** and has no hardware performance result. Build with
+It is **disabled by default in ordinary builds**. Build with
 `make RECOMP=1 XV_PROFILE_ASYNC_REPORT=1`, then set the startup environment/config
 `XV_PROFILE_ASYNC_REPORT=1` to opt in. The exact value `1` is required. The normal
 build omits the queue and writer. An explicit recording-owner API can also
 initialize an idle writer and select admission for a same-session comparison;
 it does not require enabling the startup environment option. The remote
 `log-writer` benchmark uses this API for a temporary comparison; there is no
-new graphics setting. The environment-start path starts the worker after
+new graphics setting. An explicitly selected
+`XV_PROFILE_ASYNC_REPORT_DEFAULT=1` build starts the compiled writer when the
+configuration omits this option. An explicit `XV_PROFILE_ASYNC_REPORT=0` or an
+invalid value still disables startup; exact `1` enables it. This build selection
+does not edit saved graphics or change the owner-controlled comparison's saved
+mode restoration. The environment-start path starts the worker after
 loading configuration, before game/report producers.
 
 ## Why this target
@@ -69,6 +74,12 @@ changes and failed restoration followed by retry. Remote tests check fresh
 results, complete pacing summaries, diagnostic reads, update exclusion and
 maximum-width queue status. Host memory/race tests and a native package build
 pass; hardware results are still pending.
+
+The startup-default selection is separately exercised with missing, explicit ON,
+explicit OFF and invalid environment values in both build modes. These use the
+production writer and checked shutdown, under normal execution, ASan/UBSan and
+TSan. The build tracks changes to both feature and startup-default flags so an
+incremental build cannot silently retain the previous logger policy.
 
 ## Ownership, ordering and memory
 

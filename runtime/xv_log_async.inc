@@ -154,7 +154,11 @@ int xv_log_async_init(void) { return async_create(0,1); }
 int xv_log_async_start(void)
 {
     const char *e=getenv("XV_PROFILE_ASYNC_REPORT");
-    return e && !strcmp(e,"1") ? async_create(1,0) : XV_LOG_UNAVAILABLE;
+#ifndef XV_PROFILE_ASYNC_REPORT_DEFAULT
+#define XV_PROFILE_ASYNC_REPORT_DEFAULT 0
+#endif
+    int enabled=e ? !strcmp(e,"1") : XV_PROFILE_ASYNC_REPORT_DEFAULT==1;
+    return enabled ? async_create(1,0) : XV_LOG_UNAVAILABLE;
 }
 
 static int async_report_begin(unsigned frame)

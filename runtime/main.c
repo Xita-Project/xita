@@ -1896,7 +1896,7 @@ int main(int argc, char *argv[])
     XV_LOG("clocks: cpu %d bus %d gpu %d xbar %d MHz\n", scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(), scePowerGetGpuXbarClockFrequency());
     xv_log_memory_budget("boot");
     xv_load_settings();
-    (void)xv_log_async_start(); /* explicit opt-in, after environment/config */
+    (void)xv_log_async_start(); /* selected build default, after environment/config */
 
     uint64_t gfx_started = sceKernelGetProcessTimeWide();
     if (xv_gfx_init() != 0) {           /* GXM first: sceGxmMapMemory needs it live */

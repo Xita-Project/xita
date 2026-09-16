@@ -15,7 +15,8 @@ CASES = ['disabled', 'cold', *['startup' + str(i) for i in range(1, 7)],
          'deadline-wrap', 'simultaneous-flushers',
          'toggle-cycle', 'toggle-startup', 'toggle-open', 'toggle-ordinary', 'toggle-ordinary-timeout',
          'toggle-sync-error', 'toggle-error', 'toggle-barrier', 'toggle-blocked-file',
-         'toggle-blocked-console', 'toggle-deadline']
+         'toggle-blocked-console', 'toggle-deadline',
+         'policy-default', 'policy-off', 'policy-invalid', 'policy-on']
 
 
 def run(out, modes):
@@ -43,6 +44,19 @@ def run(out, modes):
             print(mode, result.stdout.strip(), flush=True)
             if result.returncode:
                 raise RuntimeError(f'{mode}/{case}: {result.returncode}\n{result.stdout}\n{result.stderr}')
+        # The measured hardware candidate can retain async reporting without
+        # modifying saved graphics/config. Explicit OFF/invalid values still win.
+        default_exe = out / ('log-async-default-' + mode)
+        subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-O1', '-g', '-Wall', '-Wextra',
+                        '-Werror', '-Wno-misleading-indentation', '-DXV_PROFILE_ASYNC_REPORT',
+                        '-DXV_PROFILE_ASYNC_REPORT_DEFAULT=1', '-DTEST_EXIT_PROTOCOL', '-I' + str(out),
+                        '-idirafter', str(sdk / 'arm-vita-eabi/include'),
+                        str(ROOT / 'tools/tests/log_async.c'), '-pthread', *flags, '-o', str(default_exe)], check=True)
+        for case in ('policy-default', 'policy-off', 'policy-invalid', 'policy-on'):
+            result = subprocess.run([str(default_exe), case], env=env, text=True, capture_output=True, timeout=15)
+            print(mode, 'startup-default-on', result.stdout.strip(), flush=True)
+            if result.returncode:
+                raise RuntimeError(f'{mode}/default-on/{case}: {result.returncode}\n{result.stdout}\n{result.stderr}')
     print('PASS: production native writer, exact FIFO/lifetime/backpressure, partial/error retry, barriers and shutdown')
 
 
