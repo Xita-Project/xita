@@ -368,6 +368,8 @@ void h2_fp_environment_fault(xctx *c, uint32_t ip, uint32_t address, uint32_t va
  * costs nothing unless the env var is set.  Used to walk the render call chain during RE. */
 static uint32_t xv_watch_addr[16];
 static uint32_t xv_watch_lastptr[16];
+static uint32_t xv_watch_mem[16];
+static int xv_watch_mem_n;
 static int xv_watched_fn(uint32_t fn)
 {
     for (int i = 0; i < xv_watch_n; ++i) if (xv_watch_addr[i] == fn) return 1;
@@ -383,13 +385,21 @@ void xv_watch_enter(uint32_t address, xctx *c)
             while (*e && *e != ',') e++;
             if (*e == ',') e++;
         }
-        xv_logf("[watch] armed %d function(s)\n", xv_watch_n);
+        const char *m = getenv("XV_WATCH_MEM");             /* globals to dump on each hit */
+        while (m && *m && xv_watch_mem_n < 16) {
+            xv_watch_mem[xv_watch_mem_n++] = (uint32_t)strtoul(m, NULL, 16);
+            while (*m && *m != ',') m++;
+            if (*m == ',') m++;
+        }
+        xv_logf("[watch] armed %d function(s), %d mem\n", xv_watch_n, xv_watch_mem_n);
     }
     if (xv_watch_n <= 0 || !xv_watched_fn(address)) return;
     uint32_t sp = c->r[4];
     xv_logf("[watch] enter %05X from %05X esp %08X args %08X %08X %08X %08X eax %08X ecx %08X edx %08X\n",
             address, X_M32(sp), sp, X_M32(sp + 4), X_M32(sp + 8), X_M32(sp + 12), X_M32(sp + 16),
             c->r[0], c->r[1], c->r[2]);
+    for (int i = 0; i < xv_watch_mem_n; ++i)
+        xv_logf("[watch]   mem[%08X]=%08X\n", xv_watch_mem[i], X_M32(xv_watch_mem[i]));
     for (int i = 0; i < xv_watch_n; ++i) if (xv_watch_addr[i] == address) xv_watch_lastptr[i] = X_M32(sp + 4);
 }
 void xv_watch_leave(uint32_t address, uint32_t back, xctx *c)
