@@ -3,6 +3,16 @@
 #include "../../runtime/xv_benchmark.c"
 void xv_logf(const char *fmt,...) { (void)fmt; }
 static int optimization=-1;
+#ifndef TEST_NO_OBJECT_POSE
+static int object_pose_ready=1;
+int xv_object_pose_available(void) { return object_pose_ready; }
+void xv_object_pose_override(int enabled) { (void)enabled; }
+#endif
+#ifndef TEST_NO_MATERIAL_PACKET
+static int material_packet_ready=1;
+int xv_material_packet_available(void) { return material_packet_ready; }
+void xv_material_packet_override(int enabled) { (void)enabled; }
+#endif
 #ifndef TEST_NO_INDEX_REUSE
 void xv_d3d_index_reuse_override(int value) { (void)value; }
 #endif
@@ -179,7 +189,7 @@ int main(void)
     xv_benchmark_remote_poll(0);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==-1);
     xv_benchmark_remote_poll(1);
-    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_INDEX_REUSE+1)==-1);
+    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_MATERIAL_PACKET+1)==-1);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==0 && !b.request && !b.active);
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_remote_poll(0);assert(!xv_benchmark_remote_busy());
@@ -190,9 +200,15 @@ int main(void)
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_toggle();assert(xv_benchmark_step(now,544,1,view)==360);
     xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
-    unsigned kinds[]={XV_BENCH_INDEX_REUSE,XV_BENCH_BLEND_REPLACE,XV_BENCH_OBJECT_QUAT,XV_BENCH_MODEL_HIERARCHY,XV_BENCH_OBJECT_POINT,XV_BENCH_OBJECT_WAIT,XV_BENCH_OBJECT_LOCK,XV_BENCH_OBJECT_MATH,XV_BENCH_DEPTH_PREPARE,XV_BENCH_VERTEX_PREPARE,XV_BENCH_OBJECT_JOBS,XV_BENCH_PREP_BUNDLE,XV_BENCH_GUEST_PHASES,XV_BENCH_SNAPSHOT_WORKER,XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
+    unsigned kinds[]={XV_BENCH_OBJECT_POSE,XV_BENCH_MATERIAL_PACKET,XV_BENCH_INDEX_REUSE,XV_BENCH_BLEND_REPLACE,XV_BENCH_OBJECT_QUAT,XV_BENCH_MODEL_HIERARCHY,XV_BENCH_OBJECT_POINT,XV_BENCH_OBJECT_WAIT,XV_BENCH_OBJECT_LOCK,XV_BENCH_OBJECT_MATH,XV_BENCH_DEPTH_PREPARE,XV_BENCH_VERTEX_PREPARE,XV_BENCH_OBJECT_JOBS,XV_BENCH_PREP_BUNDLE,XV_BENCH_GUEST_PHASES,XV_BENCH_SNAPSHOT_WORKER,XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
     for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++) {
         int compiled=1;
+#ifdef TEST_NO_OBJECT_POSE
+        if(kinds[i]==XV_BENCH_OBJECT_POSE)compiled=0;
+#endif
+#ifdef TEST_NO_MATERIAL_PACKET
+        if(kinds[i]==XV_BENCH_MATERIAL_PACKET)compiled=0;
+#endif
 #ifdef TEST_NO_INDEX_REUSE
         if(kinds[i]==XV_BENCH_INDEX_REUSE)compiled=0;
 #endif
@@ -262,6 +278,8 @@ int main(void)
         assert(xv_benchmark_compare_object_point()==(kinds[i]==XV_BENCH_OBJECT_POINT));
         assert(xv_benchmark_compare_blend_replace()==(kinds[i]==XV_BENCH_BLEND_REPLACE));
         assert(xv_benchmark_compare_index_reuse()==(kinds[i]==XV_BENCH_INDEX_REUSE));
+        assert(xv_benchmark_compare_object_pose()==(kinds[i]==XV_BENCH_OBJECT_POSE));
+        assert(xv_benchmark_compare_material_packet()==(kinds[i]==XV_BENCH_MATERIAL_PACKET));
         assert(xv_benchmark_compare_object_quat()==(kinds[i]==XV_BENCH_OBJECT_QUAT));
         assert(xv_benchmark_compare_model_hierarchy()==(kinds[i]==XV_BENCH_MODEL_HIERARCHY));
         assert(xv_benchmark_compare_object_lock()==(kinds[i]==XV_BENCH_OBJECT_LOCK));
@@ -285,6 +303,64 @@ int main(void)
         xv_benchmark_compare_toggle();assert(xv_benchmark_step(now,360,1,view)==360 && optimization==-1);
         xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
     }
+#ifndef TEST_NO_OBJECT_POSE
+    object_pose_ready=0;
+    unsigned before_object_pose=switches;
+    assert(!xv_benchmark_remote_request(XV_BENCH_OBJECT_POSE));
+    xv_benchmark_remote_poll(1);
+    assert(!xv_benchmark_step(now,544,1,view));
+    assert(switches==before_object_pose && !xv_benchmark_remote_busy());
+    object_pose_ready=1;
+    for(unsigned stop=0;stop<3;stop++) {
+        unsigned initial_switches=switches;
+        assert(!xv_benchmark_remote_request(XV_BENCH_OBJECT_POSE));
+        xv_benchmark_remote_poll(1);
+        assert(xv_benchmark_step(now,544,1,view)==544 && optimization==0);
+        assert(!strcmp(tag(),"object-pose-compare"));
+        xv_benchmark_applied(now,544);
+        for(unsigned i=0;i<(stop?181u:540u);i++) {
+            now+=100000;unsigned next=xv_benchmark_step(now,544,1,view);
+            if(next)xv_benchmark_applied(now,next);
+        }
+        if(stop) {
+            assert(optimization==1);
+            if(stop==1)xv_benchmark_toggle();
+            assert(xv_benchmark_step(now,544,stop==1,view)==544);
+            xv_benchmark_applied(now,544);
+        }
+        assert(optimization==-1 && !xv_benchmark_active() && !remote_kind);
+        assert(switches-initial_switches==(stop?3u:4u));
+    }
+#endif
+#ifndef TEST_NO_MATERIAL_PACKET
+    material_packet_ready=0;
+    unsigned before_material_packet=switches;
+    assert(!xv_benchmark_remote_request(XV_BENCH_MATERIAL_PACKET));
+    xv_benchmark_remote_poll(1);
+    assert(!xv_benchmark_step(now,544,1,view));
+    assert(switches==before_material_packet && !xv_benchmark_remote_busy());
+    material_packet_ready=1;
+    for(unsigned stop=0;stop<3;stop++) {
+        unsigned initial_switches=switches;
+        assert(!xv_benchmark_remote_request(XV_BENCH_MATERIAL_PACKET));
+        xv_benchmark_remote_poll(1);
+        assert(xv_benchmark_step(now,544,1,view)==544 && optimization==0);
+        assert(!strcmp(tag(),"material-packet-compare"));
+        xv_benchmark_applied(now,544);
+        for(unsigned i=0;i<(stop?181u:540u);i++) {
+            now+=100000;unsigned next=xv_benchmark_step(now,544,1,view);
+            if(next)xv_benchmark_applied(now,next);
+        }
+        if(stop) {
+            assert(optimization==1);
+            if(stop==1)xv_benchmark_toggle();
+            assert(xv_benchmark_step(now,544,stop==1,view)==544);
+            xv_benchmark_applied(now,544);
+        }
+        assert(optimization==-1 && !xv_benchmark_active() && !remote_kind);
+        assert(switches-initial_switches==(stop?3u:4u));
+    }
+#endif
 #ifndef TEST_NO_INDEX_REUSE
     for(unsigned stop=0;stop<3;stop++) {
         unsigned initial_switches=switches;

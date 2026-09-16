@@ -7,6 +7,10 @@ void xv_logf(const char *fmt,...);
 void xv_benchmark_optimizations(int enabled) __attribute__((weak));
 void xv_d3d_blend_replace_override(int) __attribute__((weak));
 void xv_d3d_index_reuse_override(int) __attribute__((weak));
+void xv_object_pose_override(int) __attribute__((weak));
+int xv_object_pose_available(void) __attribute__((weak));
+void xv_material_packet_override(int) __attribute__((weak));
+int xv_material_packet_available(void) __attribute__((weak));
 void xv_model_hierarchy_override(int) __attribute__((weak));
 void xv_object_quat_override(int) __attribute__((weak));
 int xv_model_hierarchy_available(void) __attribute__((weak));
@@ -51,7 +55,9 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_INDEX_REUSE||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_MATERIAL_PACKET||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind==XV_BENCH_OBJECT_POSE&&(!xv_object_pose_override||!xv_object_pose_available))return -1;
+    if(kind==XV_BENCH_MATERIAL_PACKET&&(!xv_material_packet_override||!xv_material_packet_available))return -1;
     if(kind==XV_BENCH_BLEND_REPLACE&&!xv_d3d_blend_replace_override)return -1;
     if(kind==XV_BENCH_INDEX_REUSE&&!xv_d3d_index_reuse_override)return -1;
     if(kind==XV_BENCH_MODEL_HIERARCHY&&(!xv_model_hierarchy_override||!xv_model_hierarchy_available))return -1;
@@ -121,6 +127,8 @@ int xv_benchmark_compare_object_point(void) { return remote_kind==XV_BENCH_OBJEC
 int xv_benchmark_compare_model_hierarchy(void) { return remote_kind==XV_BENCH_MODEL_HIERARCHY; }
 int xv_benchmark_compare_blend_replace(void) { return remote_kind==XV_BENCH_BLEND_REPLACE; }
 int xv_benchmark_compare_index_reuse(void) { return remote_kind==XV_BENCH_INDEX_REUSE; }
+int xv_benchmark_compare_object_pose(void) { return remote_kind==XV_BENCH_OBJECT_POSE; }
+int xv_benchmark_compare_material_packet(void) { return remote_kind==XV_BENCH_MATERIAL_PACKET; }
 int xv_benchmark_compare_object_quat(void) { return remote_kind==XV_BENCH_OBJECT_QUAT; }
 int xv_benchmark_compare_object_math(void) { return remote_kind==XV_BENCH_OBJECT_MATH; }
 int xv_benchmark_compare_depth_prepare(void) { return remote_kind==XV_BENCH_DEPTH_PREPARE; }
@@ -153,6 +161,8 @@ static int native_math_selected(void)
 }
 static int candidate_available(void)
 {
+    if(xv_benchmark_compare_object_pose())return xv_object_pose_override && xv_object_pose_available && xv_object_pose_available();
+    if(xv_benchmark_compare_material_packet())return xv_material_packet_override && xv_material_packet_available && xv_material_packet_available();
     if(xv_benchmark_compare_blend_replace())return xv_d3d_blend_replace_override!=NULL;
     if(xv_benchmark_compare_index_reuse())return xv_d3d_index_reuse_override!=NULL;
     if (xv_benchmark_compare_model_hierarchy()) return xv_model_hierarchy_override && xv_model_hierarchy_available && xv_model_hierarchy_available();
@@ -237,7 +247,9 @@ int xv_benchmark_compare_draw_scan(void)
     return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_index_reuse() ? "index-reuse-compare" :
+    (xv_benchmark_compare_object_pose() ? "object-pose-compare" :
+     xv_benchmark_compare_material_packet() ? "material-packet-compare" :
+     xv_benchmark_compare_index_reuse() ? "index-reuse-compare" :
      xv_benchmark_compare_blend_replace() ? "blend-replace-compare" :
      xv_benchmark_compare_object_quat() ? "object-quat-compare" :
      xv_benchmark_compare_model_hierarchy() ? "model-hierarchy-compare" :
@@ -292,7 +304,11 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
             xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_index_reuse())
+            if (xv_benchmark_compare_object_pose())
+                xv_logf("[object-pose-compare] start off/on/off at %up; one recursive guard around the original pose loop, same workers, math, graphics and owner services; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_material_packet())
+                xv_logf("[material-packet-compare] start off/on/off at %up; native material state islands, original texture resolvers, ordered writes and draws; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_index_reuse())
                 xv_logf("[index-reuse-compare] start off/on/off at %up; exact same-frame indices and vertex coverage, unchanged draws and owned lifetimes; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_blend_replace())
                 xv_logf("[blend-replace-compare] start off/on/off at %up; ADD ONE/ZERO versus NONE with identical color mask, shaders, alpha test and ordering; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
