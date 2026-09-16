@@ -142,6 +142,24 @@ static void test_texel_coords(void)
     menu_raster_triangle(&st, &a, &b, &c);
     assert(B(1, 1) == 255 && G(1, 1) == 0);
 }
+static void test_unused_unit_is_zero(void)
+{
+    /* stage 0: r0 = t1 * v0 (AB) + t0 * v0 (CD) with t1 unused: alpha must be t0.a * v0.a, not saturated */
+    setup(MENU_BLEND_OPAQUE);
+    static menu_combiner cb;
+    memset(&cb, 0, sizeof cb);
+    cb.stages = 1;
+    cb.rgb_in[0] = (0x09u << 24) | (0x04u << 16) | (0x08u << 8) | 0x04u;   /* A=t1 B=v0 C=t0 D=v0 */
+    cb.alpha_in[0] = (0x19u << 24) | (0x14u << 16) | (0x18u << 8) | 0x14u; /* same, alpha channel */
+    cb.rgb_out[0] = 0xCu << 8; cb.alpha_out[0] = 0xCu << 8;                /* sum -> r0 */
+    cb.final_abcd = 0x0000000C; cb.final_efg = 0x00001C00;                  /* rgb = r0, alpha = r0.a */
+    st.combiner = &cb;
+    static const uint32_t tx[1] = {0x40FFFFFF};                              /* white, alpha 0x40 */
+    st.tex[0].texels = tx; st.tex[0].width = 1; st.tex[0].height = 1;
+    menu_vertex_out a = V(0, 0, 1, 1, 1, 1, 0.5f, 0.5f), b = V(8, 0, 1, 1, 1, 1, 0.5f, 0.5f), c = V(0, 8, 1, 1, 1, 1, 0.5f, 0.5f);
+    menu_raster_triangle(&st, &a, &b, &c);
+    assert(R(1, 1) == 255 && buf[(1 * 8 + 1) * 4 + 3] == 0x40);            /* alpha came from t0 only */
+}
 static void test_depth_tolerance(void)
 {
     /* EQUAL passes within a few 24-bit units (multipass jitter), fails beyond. */
@@ -153,6 +171,7 @@ static void test_depth_tolerance(void)
 int main(void)
 {
     test_texel_coords();
+    test_unused_unit_is_zero();
     test_depth_tolerance();
     test_flat_coverage();
     test_color_interpolation();

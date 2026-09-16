@@ -9,7 +9,10 @@ static uint8_t to8(float v) { return (uint8_t)(clampf(v, 0.0f, 1.0f) * 255.0f + 
 
 static void sample_tex(const menu_texture *t, float u, float v, float out[4])
 {
-    if (!t->texels || !t->width || !t->height) { out[0] = out[1] = out[2] = 0.0f; out[3] = 1.0f; return; }
+    /* An unused/disabled stage reads as all zeros (alpha included): the combiner
+     * sums stage products, so a phantom alpha of 1 would saturate e.g. the font
+     * cache's coverage (t2*c0 + t0*v0 in alpha) into solid boxes. */
+    if (!t->texels || !t->width || !t->height) { out[0] = out[1] = out[2] = out[3] = 0.0f; return; }
     int32_t x, y;
     if (t->texel_coords) {                               /* linear image: texel units */
         x = (int32_t)floorf(u); y = (int32_t)floorf(v);

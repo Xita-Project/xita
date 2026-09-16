@@ -22,7 +22,7 @@ typedef struct menu_combiner {
 void menu_combiner_decode(const h2_command_state *state, menu_combiner *cb);
 
 /* Evaluate one fragment. tex[i] is the RGBA (0..1) sample from texture unit i
- * (or {0,0,0,1} if that unit is unused); diffuse/specular are oD0/oD1; fog is
+ * (or {0,0,0,0} if that unit is unused); diffuse/specular are oD0/oD1; fog is
  * the fog colour/factor. out receives the final RGBA (0..1). */
 void menu_combiner_eval(const menu_combiner *cb, const float tex[4][4],
                         const float diffuse[4], const float specular[4],

@@ -56,7 +56,10 @@ static void read_in(uint8_t byte, const float reg[R_COUNT][4], int is_alpha, flo
 {
     unsigned r = byte & 0xF, chan = byte & 0x10, map = byte & 0xE0;
     if (is_alpha) {
-        float s = chan ? reg[r][2] : reg[r][3];   /* .b (blue) or .a */
+        /* Alpha combiner: channel bit set selects .a (PS_CHANNEL_ALPHA=0x10),
+         * clear selects .b (PS_CHANNEL_BLUE=0x00) -- same bit meaning as the RGB
+         * combiner's .aaa/.rgb choice. */
+        float s = chan ? reg[r][3] : reg[r][2];
         out[0] = apply_map(map, s);
     } else {
         for (unsigned k = 0; k < 3; ++k) {

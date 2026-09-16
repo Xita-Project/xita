@@ -304,6 +304,34 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
                 rs.blend, rs.sfactor, rs.dfactor, rs.equation, rs.alpha_test, rs.alpha_func, rs.alpha_ref,
                 rs.depth.pixels ? "on" : (s->setup[0x30C / 4] ? "unmapped" : "off"), rs.depth.func, rs.depth.write, tex);
     }
+    /* Text diagnostic: the first few depth-off 2D quads that sample a linear image
+     * (the font cache) get their decoded unit-0 image dumped privately plus the
+     * combiner/texture registers logged, to see what the glyph quads really sample. */
+    static int text_dumps;
+    if (r->primitive == 7 && r->vertex_count && !s->setup[0x30C / 4] && rs.tex[0].texels &&
+        rs.tex[0].texel_coords && text_dumps < 2) {
+        char path[96];
+        snprintf(path, sizeof path, "ux0:data/xita-halo2/menu-tex0-%d.bin", text_dumps);
+        FILE *fp = fopen(path, "wb");
+        if (fp) {
+            uint32_t hdr[4] = {rs.tex[0].width, rs.tex[0].height, rs.tex[0].width * 4, (uint32_t)drawn};
+            fwrite(hdr, 1, sizeof hdr, fp);
+            fwrite(rs.tex[0].texels, 4, (size_t)rs.tex[0].width * rs.tex[0].height, fp);
+            fclose(fp);
+        }
+        xv_logf("[h2/menu-render] text quad draw=%llu unit0 off=%08X fmt=%08X addr=%08X ctrl0=%08X ctrl1=%08X filter=%08X rect=%08X "
+                "-> %s; combiner stages=%u rgb_in0=%08X rgb_out0=%08X alpha_in0=%08X alpha_out0=%08X "
+                "rgb_in1=%08X alpha_in1=%08X final_abcd=%08X final_efg=%08X c0=%08X c1=%08X\n",
+                (unsigned long long)drawn, s->setup[0x1B00 / 4], s->setup[0x1B04 / 4], s->setup[0x1B08 / 4],
+                s->setup[0x1B0C / 4], s->setup[0x1B10 / 4], s->setup[0x1B14 / 4], s->setup[0x1B1C / 4], path,
+                cb.stages, cb.rgb_in[0], cb.rgb_out[0], cb.alpha_in[0], cb.alpha_out[0], cb.rgb_in[1], cb.alpha_in[1],
+                cb.final_abcd, cb.final_efg, cb.factor0[0], cb.factor1[0]);
+        for (uint32_t i = 0; i < n && i < 4; ++i)
+            xv_logf("[h2/menu-render]   v%u xy=(%.1f,%.1f) rgba=(%.2f,%.2f,%.2f,%.2f) uv0=(%.2f,%.2f) uv1=(%.2f,%.2f)\n",
+                    i, g_verts[i].x, g_verts[i].y, g_verts[i].color[0], g_verts[i].color[1], g_verts[i].color[2],
+                    g_verts[i].color[3], g_verts[i].uv[0][0], g_verts[i].uv[0][1], g_verts[i].uv[1][0], g_verts[i].uv[1][1]);
+        ++text_dumps;
+    }
     ++drawn;
     if (!(drawn % 500)) {
         char stats[512];

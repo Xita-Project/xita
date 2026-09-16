@@ -18,7 +18,7 @@ typedef struct menu_target {
 } menu_target;
 
 typedef struct menu_texture {
-    const uint32_t *texels;        /* decoded 0xAARRGGBB, row-major; NULL => unused unit */
+    const uint32_t *texels;        /* decoded 0xAARRGGBB, row-major; NULL => unused unit (samples 0,0,0,0) */
     uint32_t width, height;
     int texel_coords;              /* linear image: uv are texel units (clamped), not [0,1] wrap */
 } menu_texture;
