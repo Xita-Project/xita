@@ -42,6 +42,15 @@ def benchmark_cases(tmp):
                 if self.mode=="logger-failure":self.records+="[log-writer-compare] boundary failure -2\n"
                 if self.mode!="missing-pacing":
                     for phase in (1,2,3):self.records+=f"[log-writer-pacing] phase {phase} samples 1799 sum-us 89950000 min/p50/p95/p99/p999/max-us 50000/50000/50000/50000/50000/50000 over50/100/150/200ms 0/0/0/0\n"
+            if self.kind in ("diagnostic-shot","diagnostic-hist"):
+                for phase in (1,2,3):
+                    self.records+=f"[diagnostic-poll-pacing] phase {phase} samples 1799 sum-us 89950000 min/p50/p95/p99/p999/max-us 50000/50000/50000/50000/50000/50000 over50/100/150/200ms 0/0/0/0\n"
+                    if self.mode!="missing-polls":
+                        for path,due,polls in (("shot",30,5400),("hist",112,1800)):
+                            skip=due if phase==2 and path==self.kind.removeprefix("diagnostic-") else 0
+                            errors=1 if self.mode=="poll-error" else 0
+                            self.records+=f"[diagnostic-poll] phase {phase} path {path} polls {polls} due {due} skipped {skip} runs {due-skip} us 2000 max-us 100 max-frame 99 entries 8 errors {errors} triggers 0\n"
+                        self.records+=f"[diagnostic-poll] phase {phase} frames 1800 event-overflow 0 valid 1\n"
             if self.mode == "affinity-failure": self.records += "[guest-affinity] failure restoring mask\n"
             if self.mode != "missing-result":
                 self.records += "[" + self.kind + "-compare] result off-before 10.000 on 12.000 off-after 10.000 fps comparable-view " + ("0" if self.mode == "camera" else "1") + "\n"
@@ -65,7 +74,7 @@ def benchmark_cases(tmp):
         if mode != "success":
             assert result["error"]
     with patch("vita_remote.time.sleep",lambda _:None):
-        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer'):
+        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer','diagnostic-shot','diagnostic-hist'):
             benchmark(Fake('success', kind),tmp/('selected-'+kind),1,30,kind)
             record=json.loads((tmp/('selected-'+kind)/'result.json').read_text())['trials'][0]
             assert record.get('diagnostic',False)==(kind=='guest-phases')
@@ -80,6 +89,11 @@ def benchmark_cases(tmp):
             except RuntimeError:pass
             else:raise AssertionError('Invalid logger comparison accepted')
             assert failed.released and not json.loads((tmp/mode/'result.json').read_text())['complete']
+        for mode in ("missing-polls","poll-error"):
+            failed=Fake(mode,"diagnostic-shot")
+            try:benchmark(failed,tmp/mode,1,1200,"diagnostic-shot")
+            except RuntimeError:pass
+            else:raise AssertionError("Invalid diagnostic poll comparison accepted")
         historical_log=Fake('success','log-writer');historical_log.records='[log-writer-compare] boundary failure -2 from previous run\n'
         benchmark(historical_log,tmp/'historical-log-failure',1,1800,'log-writer')
         historical=Fake('success','guest-affinity')
@@ -213,8 +227,10 @@ def main():
             assert request('/benchmark?kind=unknown','POST')[0]==400
             assert request('/benchmark?kind=model-palette&kind=flare','POST')[0]==400
             assert request('/benchmark?kind=model-palette','POST',token='f'*32)[0]==403
-            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer'):
+            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer','diagnostic-shot','diagnostic-hist'):
                 assert request('/benchmark?kind='+kind,'POST')[0]==204
+                if kind.startswith('diagnostic-'):
+                    assert json.loads(request('/status')[2])['benchmark']==(38 if kind=='diagnostic-shot' else 294)
                 assert request('/benchmark?kind='+kind,'POST')[0]==409
                 assert request('/screen')[0]==409
                 assert request('/update')[0]==200
