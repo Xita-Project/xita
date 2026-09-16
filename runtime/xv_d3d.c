@@ -68,10 +68,30 @@ static const char *const FS_GXP[FS_KINDS] = { "app0:shaders/xv_color.frag.gxp", 
 #include "xv_ps_table.h"
 #define XV_PS_LINKS (XV_MAX_VS * 12) /* share the former per-VS capacity */
 #define XV_PS_BUCKETS 2048
-typedef struct { uint16_t vs, next; int16_t entry; uint8_t blend, failed, alpha_mode; xv_fshader_t fs; } ps_link_t;
+typedef struct { uint16_t vs, next; int16_t entry; uint8_t blend, failed, alpha_mode, replace_blend; xv_fshader_t fs; } ps_link_t;
 static ps_link_t g_ps_links[XV_PS_LINKS];
 static uint16_t g_ps_buckets[XV_PS_BUCKETS]; /* slot + 1; zero ends a chain */
 static unsigned g_ps_count;
+static int replace_blend_override=-1;
+void xv_d3d_blend_replace_override(int enabled)
+{ __atomic_store_n(&replace_blend_override,enabled<0?-1:!!enabled,__ATOMIC_RELEASE); }
+static int replace_blend_enabled(void)
+{
+    static int configured=-1;
+    if(configured<0) { const char *e=getenv("XV_BLEND_REPLACE");configured=e && atoi(e)!=0; }
+    int value=__atomic_load_n(&replace_blend_override,__ATOMIC_ACQUIRE);
+    return value<0?configured:value; /* opt in until measured on hardware */
+}
+static int replace_blend_eligible(unsigned blend)
+{
+    /* UCHAR4 output and normalized color surfaces: adding destination*0 to
+     * source*1 replaces exactly the selected channels. Retain the mask, which
+     * often preserves destination alpha for a later pass. No other equation
+     * or factor pair is changed, including subtraction, min/max and blending. */
+    return blend>BLEND_OPAQUE && blend<BLEND_NOCOLOR &&
+        g_blend_combo[blend].src==X_D3DBLEND_ONE &&
+        g_blend_combo[blend].dst==X_D3DBLEND_ZERO && !g_blend_combo[blend].op;
+}
 /* Guest-owned preparation metadata; it never reads the pump's link cache. */
 static uint8_t g_ps_texture_masks[XV_PS_TABLE_COUNT]; /* bit 4 marks initialized */
 static unsigned texture_stages_prepared, texture_stages_skipped;
@@ -2192,45 +2212,57 @@ static const SceGxmTexture *cube_fallback(void)
 }
 
 /* combiner program from the table; NULL when it cannot be linked (caller falls back to fragment_for) */
-static xv_fshader_t *fragment_for_ps_mode(vs_slot_t *v, int entry, unsigned blend, int alpha_mode)
+static xv_fshader_t *fragment_for_ps_policy(vs_slot_t *v, int entry, unsigned blend, int alpha_mode, unsigned replace)
 {
     if (entry < 0 || (unsigned)entry >= XV_PS_TABLE_COUNT || blend >= BLEND_MODES) return NULL;
     if (alpha_mode < 0 || alpha_mode > 2) return NULL;
     if (alpha_mode == 2 && xv_ps_table[entry].ps_key != 0x154066FDu)
-        return fragment_for_ps_mode(v, entry, blend, 0);
+        return fragment_for_ps_policy(v, entry, blend, 0, replace);
     unsigned vs = (unsigned)(v - g_vs);
-    unsigned bucket = (vs * 131u + (unsigned)entry * 33u + blend + alpha_mode * 521u) & (XV_PS_BUCKETS - 1);
+    unsigned bucket = (vs * 131u + (unsigned)entry * 33u + blend + alpha_mode * 521u + replace * 977u) & (XV_PS_BUCKETS - 1);
     for (unsigned p = g_ps_buckets[bucket]; p; p = g_ps_links[p - 1].next) {
         ps_link_t *l = &g_ps_links[p - 1];
-        if (l->vs == vs && l->entry == entry && l->blend == blend && l->alpha_mode == alpha_mode)
-            return l->failed ? (alpha_mode ? fragment_for_ps_mode(v, entry, blend, 0) : NULL) : &l->fs;
+        if (l->vs == vs && l->entry == entry && l->blend == blend && l->alpha_mode == alpha_mode && l->replace_blend == replace) {
+            if(!l->failed)return &l->fs;
+            if(replace)return fragment_for_ps_policy(v,entry,blend,alpha_mode,0);
+            return alpha_mode ? fragment_for_ps_policy(v,entry,blend,0,0) : NULL;
+        }
     }
     if (g_ps_count == XV_PS_LINKS) {
         XV_ONCE(warn_ps_full, "combiner link cache full (%u): using fallback\n", g_ps_count);
-        return alpha_mode ? fragment_for_ps_mode(v, entry, blend, 0) : NULL;
+        if(replace)return fragment_for_ps_policy(v,entry,blend,alpha_mode,0);
+        return alpha_mode ? fragment_for_ps_policy(v, entry, blend, 0, 0) : NULL;
     }
     ps_link_t *l = &g_ps_links[g_ps_count++];
     l->vs = (uint16_t)vs; l->next = g_ps_buckets[bucket];
     g_ps_buckets[bucket] = (uint16_t)g_ps_count;
     l->entry = (int16_t)entry; l->blend = (uint8_t)blend; l->failed = 0; l->alpha_mode = alpha_mode;
+    l->replace_blend=replace;
     SceGxmBlendInfo bi; const SceGxmBlendInfo *pbi = blend_info_for(blend, &bi);
+    if(replace) { bi.colorFunc=SCE_GXM_BLEND_FUNC_NONE;bi.alphaFunc=SCE_GXM_BLEND_FUNC_NONE; }
     const char *path = xv_ps_table[entry].gxp; char variant[160];
     if (alpha_mode) {
         size_t len = strlen(path);
         if (len < 9 || len + 4 > sizeof variant || strcmp(path + len - 9, ".frag.gxp")) {
             l->failed = 1;
-            return fragment_for_ps_mode(v, entry, blend, 0);
+            return fragment_for_ps_policy(v, entry, blend, 0, replace);
         }
         snprintf(variant, sizeof variant, "%.*s_%s.frag.gxp", (int)(len - 9), path, alpha_mode == 2 ? "gt" : "na");
         path = variant;
     }
     if (xv_fshader_load(&l->fs, path, &v->vs, pbi) != 0) {
         static unsigned n; if (n++ < 12) XV_LOG("combiner %s does not link against %s (blend %u) - using heuristic fragment\n", xv_ps_table[entry].gxp, v->vs.desc ? v->vs.desc->gxp : "?", blend);
-        l->failed = 1; return alpha_mode ? fragment_for_ps_mode(v, entry, blend, 0) : NULL;
+        l->failed = 1;
+        if(replace)return fragment_for_ps_policy(v,entry,blend,alpha_mode,0);
+        return alpha_mode ? fragment_for_ps_policy(v, entry, blend, 0, 0) : NULL;
     }
+    if(replace)XV_LOG("[replace-blend] linked vs %u entry %d blend %u mask %X alpha-mode %d; source replacement, channels preserved\n",vs,entry,blend,g_blend_combo[blend].mask,alpha_mode);
     l->fs.alpha_test_mode = alpha_mode;
     return &l->fs;
 }
+static xv_fshader_t *fragment_for_ps_mode(vs_slot_t *v, int entry, unsigned blend, int alpha_mode)
+{ return fragment_for_ps_policy(v,entry,blend,alpha_mode,
+      replace_blend_enabled() && replace_blend_eligible(blend)); }
 static xv_fshader_t *fragment_for_ps(vs_slot_t *v, int entry, unsigned blend)
 { return fragment_for_ps_mode(v, entry, blend, 0); }
 /* Captured function and enable are prerequisites: the dedicated program keeps

@@ -11,6 +11,8 @@ void xv_gpu_flush_pump(const void *p, uint32_t n) {}
 
 static unsigned loads, unloads;
 static int fail_load, fail_no_alpha, fail_gt;
+static int fail_replace, captured_blend;
+static SceGxmBlendInfo last_blend;
 static char loaded_path[160];
 void xv_logf(const char *fmt, ...) { (void)fmt; }
 int xv_fshader_load(xv_fshader_t *fs, const char *path, const xv_vshader_t *vs,
@@ -18,9 +20,11 @@ int xv_fshader_load(xv_fshader_t *fs, const char *path, const xv_vshader_t *vs,
 {
     (void)path; (void)vs; (void)blend;
     loads++;
+    captured_blend=blend!=NULL;
+    if(blend)last_blend=*blend;
     snprintf(loaded_path, sizeof loaded_path, "%s", path);
     memset(fs, 0, sizeof *fs);
-    if (fail_load || (fail_no_alpha && strstr(path,"_na.frag.gxp")) || (fail_gt && strstr(path,"_gt.frag.gxp"))) return -1;
+    if (fail_load || (fail_replace && blend && blend->colorFunc==SCE_GXM_BLEND_FUNC_NONE) || (fail_no_alpha && strstr(path,"_na.frag.gxp")) || (fail_gt && strstr(path,"_gt.frag.gxp"))) return -1;
     fs->prog = (const SceGxmProgram *)(uintptr_t)loads;
     return 0;
 }
@@ -30,8 +34,65 @@ void xv_fshader_unload(xv_fshader_t *fs)
     memset(fs, 0, sizeof *fs);
 }
 
+static void test_replace_blend(void)
+{
+    unsigned entry=0;
+    while(entry<XV_PS_TABLE_COUNT && xv_ps_table[entry].ps_key!=0x154066FDu)entry++;
+    assert(entry<XV_PS_TABLE_COUNT);
+    const char *env=getenv("XV_BLEND_REPLACE");int configured=env && atoi(env)!=0;
+    assert(replace_blend_enabled()==configured);
+    for(unsigned mask=0;mask<16;mask++)for(unsigned mode=0;mode<3;mode++) {
+        ps_links_shutdown();
+        g_blend_combos=3;S.blend_enable=0;S.color_mask=mask;
+        unsigned blend=blend_mode();
+        xv_d3d_blend_replace_override(0);
+        xv_fshader_t *original=fragment_for_ps_mode(&g_vs[0],entry,blend,mode);
+        assert(original && original->alpha_test_mode==mode);
+        SceGxmBlendInfo before=last_blend;
+        if(mask==15)assert(!captured_blend);else assert(captured_blend && before.colorFunc==SCE_GXM_BLEND_FUNC_ADD);
+        xv_d3d_blend_replace_override(1);
+        xv_fshader_t *replaced=fragment_for_ps_mode(&g_vs[0],entry,blend,mode);
+        assert(replaced && replaced->alpha_test_mode==mode);
+        if(mask==15)assert(replaced==original);
+        else {
+            assert(replaced!=original && captured_blend);
+            assert(last_blend.colorFunc==SCE_GXM_BLEND_FUNC_NONE && last_blend.alphaFunc==SCE_GXM_BLEND_FUNC_NONE);
+            before.colorFunc=before.alphaFunc=SCE_GXM_BLEND_FUNC_NONE;
+            assert(!memcmp(&last_blend,&before,sizeof before));
+        }
+        unsigned count=loads;
+        xv_d3d_blend_replace_override(0);assert(fragment_for_ps_mode(&g_vs[0],entry,blend,mode)==original);
+        xv_d3d_blend_replace_override(1);assert(fragment_for_ps_mode(&g_vs[0],entry,blend,mode)==replaced);
+        xv_d3d_blend_replace_override(-1);
+        assert(replace_blend_enabled()==configured && fragment_for_ps_mode(&g_vs[0],entry,blend,mode)==(configured?replaced:original));
+        assert(loads==count); /* both programs survive toggle/restore */
+    }
+    for(unsigned mode=0;mode<3;mode++) {
+        ps_links_shutdown();g_blend_combos=3;S.color_mask=7;S.blend_enable=0;unsigned blend=blend_mode();
+        xv_d3d_blend_replace_override(0);xv_fshader_t *original=fragment_for_ps_mode(&g_vs[0],entry,blend,mode);assert(original);
+        fail_replace=1;xv_d3d_blend_replace_override(1);
+        assert(fragment_for_ps_mode(&g_vs[0],entry,blend,mode)==original);
+        unsigned count=loads;fail_replace=0;
+        assert(fragment_for_ps_mode(&g_vs[0],entry,blend,mode)==original && loads==count);
+        ps_links_shutdown();xv_d3d_blend_replace_override(0);
+        original=fragment_for_ps_mode(&g_vs[0],entry,blend,mode);assert(original);
+        g_ps_count=XV_PS_LINKS;xv_d3d_blend_replace_override(1);
+        assert(fragment_for_ps_mode(&g_vs[0],entry,blend,mode)==original);
+    }
+    ps_links_shutdown();
+    /* No other equation/factor pair is eligible for replacement. */
+    for(unsigned op=0;op<5;op++)for(unsigned src=1;src<=11;src++)for(unsigned dst=1;dst<=11;dst++) {
+        g_blend_combo[3]=(typeof(g_blend_combo[3])){src,dst,7,op};
+        assert(replace_blend_eligible(3)==(op==0 && src==X_D3DBLEND_ONE && dst==X_D3DBLEND_ZERO));
+    }
+    assert(!replace_blend_eligible(BLEND_OPAQUE) && !replace_blend_eligible(BLEND_NOCOLOR) && !replace_blend_eligible(255));
+    xv_d3d_blend_replace_override(-1);
+    puts("PASS: replacement links preserve every channel mask and alpha mode; toggle/restore, failed links and full caches preserve baseline shaders");
+}
+
 int main(void)
 {
+    if(getenv("XV_TEST_BLEND_REPLACE")) { test_replace_blend();return 0; }
     /* Runtime benchmark overrides must restore the startup policy, including
      * an explicit user opt-out. Each invocation has a fresh cached policy. */
     const char *expected_scan = getenv("XV_TEST_EXPECT_SCAN");

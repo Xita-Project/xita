@@ -558,3 +558,16 @@ test-object-quat-benchmark: build/resolution_benchmark_test build/no_object_quat
 build/no_object_quat_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_OBJECT_QUAT resolution_benchmark_test.c -lm -o $@
+
+.PHONY: test-blend-replace
+test-blend-replace: build/ps_cache_test build/resolution_benchmark_test build/no_blend_replace_benchmark_test
+	./build/ps_cache_test
+	env -u XV_BLEND_REPLACE XV_TEST_BLEND_REPLACE=1 ./build/ps_cache_test
+	XV_BLEND_REPLACE=0 XV_TEST_BLEND_REPLACE=1 ./build/ps_cache_test
+	XV_BLEND_REPLACE=1 XV_TEST_BLEND_REPLACE=1 ./build/ps_cache_test
+	./build/resolution_benchmark_test
+	./build/no_blend_replace_benchmark_test
+
+build/no_blend_replace_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_BLEND_REPLACE resolution_benchmark_test.c -lm -o $@
