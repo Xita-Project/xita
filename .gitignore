@@ -81,6 +81,9 @@ remote.key
 remote-client.json
 
 recomp/kernel/xk_clip_region.c
+recomp/kernel/xk_worker_query_generated.inc
+recomp/kernel/worker_query_original.json
+recomp/kernel/worker_query_axes.h
 
 # Symlinks to private owned inputs are also local.
 /haloce

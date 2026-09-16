@@ -10,6 +10,7 @@
 #include "xk.h"
 #include "xk_object_jobs.h"
 #include "xk_light_census.h"
+#include "xk_worker_query.h"
 #include "xk_object_mutex.h"
 #include "../xv_phase.h"
 #include <stdlib.h>
@@ -54,6 +55,10 @@ static uint64_t work_us[LANES], batch_us;
 /* A worker's recursive scopes stay on its native thread, including while it
  * parks for an owner service. Only the outer scope needs the OS mutex. */
 static unsigned math_depth[WORKERS], math_fast_path=1, math_idle_calls;
+#ifdef XV_WORKER_QUERY
+static unsigned query_enabled;
+static unsigned query_admission[WORKERS][4]; /* accepted, disabled, nested, stack */
+#endif
 #ifdef XV_LIGHT_QUERY_CENSUS
 #ifdef __vita__
 static SceUID census_owner_thread;
@@ -648,6 +653,20 @@ void xv_object_point_override(int value)
     if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
     point_private_override=value<0?-1:!!value;
 }
+#ifdef XV_WORKER_QUERY
+int xv_object_query_lane(xctx *c,int guard,uint32_t base,unsigned bytes)
+{
+    if(initialized!=1||!math_fast_path||!__atomic_load_n(&running,__ATOMIC_ACQUIRE))return 0;
+    int lane=worker_lane();
+    if(lane<0||c!=&contexts[lane]||!xv_is_object_job(c)||guard!=lane+2)return 0;
+    /* Guard acquisition already acknowledged any pending owner pause. Never
+     * park again during capture/validate/publication: there is no guest callback. */
+    unsigned reason=!query_enabled?1:math_depth[lane]!=1?2:
+        !private_stack_span((unsigned)lane,base,bytes)?3:0;
+    query_admission[lane][reason]++;
+    return reason?0:lane+1;
+}
+#endif
 int xv_object_math_release_private(xctx *c,int *locked,unsigned kind,
     uint32_t output,unsigned output_bytes,uint32_t scratch,unsigned scratch_bytes)
 {
@@ -753,6 +772,10 @@ static int initialize(void)
 #endif
     const char *fast=getenv("XV_OBJECT_LOCK_FAST_PATH");
     math_fast_path=!fast||atoi(fast)!=0;
+#ifdef XV_WORKER_QUERY
+    const char *query=getenv("XV_WORKER_QUERY");
+    query_enabled=query&&!strcmp(query,"1");
+#endif
     const char *profile=getenv("XV_OBJECT_LOCK_PROFILE");
     /* Dedicated experimental builds collect contention by default. Set zero
      * for a profiling-overhead comparison; ordinary builds omit this module. */
@@ -909,6 +932,12 @@ void xv_object_jobs_report(unsigned frames)
     /* Called with the renderer's frame window, not every 60 simulation passes.
      * Reporting must never dispatch callbacks or reset live worker counters. */
     if(initialized!=1||owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))return;
+#ifdef XV_WORKER_QUERY
+    for(unsigned lane=0;lane<WORKERS;lane++)
+        XK_LOG("[worker-query] lane %u admission-checks accepted/disabled/nested/stack %u/%u/%u/%u\n",lane,
+            query_admission[lane][0],query_admission[lane][1],query_admission[lane][2],query_admission[lane][3]);
+    memset(query_admission,0,sizeof query_admission);xv_worker_query_report();
+#endif
     XK_LOG("[object-jobs] %u frames passes %u batches %u jobs %u lanes %u/%u/%u work-us %llu/%llu/%llu batch-us %llu rejected %u; work sums overlap wall time\n",
         frames,passes,batches,submitted,executed[0],executed[1],executed[2],
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)work_us[2],
