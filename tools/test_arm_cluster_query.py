@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""VitaSDK instruction-level numerical oracle for the direct query prototype.
+"""VitaSDK instruction-level oracle for the direct query prototypes.
 
 Snapshot construction and publication are outside this test. Instruction counts
 exclude modeled libc copies/clears and are not Vita cycles or FPS estimates.
+--replay checks the entire context and arena after modeled private publication;
+it does not model the live guard, mapping validation or allocation/list tail.
 """
 from pathlib import Path
 import argparse
@@ -56,7 +58,9 @@ def main():
     p.add_argument('--reference', type=Path, required=True)
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--quick', action='store_true')
-    p.add_argument('--fpu', action='store_true', help='also compare all x87 slots/status and native FPSCR')
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument('--fpu', action='store_true', help='also compare all x87 slots/status and native FPSCR')
+    mode.add_argument('--replay', action='store_true', help='compare full prefix context/memory/FPSCR after modeled publication')
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     cc = os.environ.get('ARM_CC', '/home/birchwoodgod/vitasdk/bin/arm-vita-eabi-gcc')
@@ -66,12 +70,16 @@ def main():
              '-I' + str(ROOT / 'recomp'), '-I' + str(a.reference.parent)]
     if a.fpu:
         flags.append('-DCLUSTER_FPU')
+    if a.replay:
+        flags.append('-DCLUSTER_REPLAY')
     commands, objects = [], []
     sources = [a.reference, ROOT / 'tools/tests/cluster_query.c',
             ROOT / 'tools/tests/cluster_query_arm_stubs.c',
             ROOT / 'recomp/kernel/xk_cluster_query.c', ROOT / 'recomp/xv_x86rt.c']
     if a.fpu:
         sources.append(ROOT / 'recomp/kernel/xk_cluster_query_fpu.c')
+    if a.replay:
+        sources.append(ROOT / 'recomp/kernel/xk_cluster_query_replay.c')
     for i, source in enumerate(sources):
         obj = a.out / f'unit-{i}.o'
         command = [cc, *flags, '-c', str(source), '-o', str(obj)]
@@ -83,6 +91,7 @@ def main():
         '--undefined=arm_prepare,--undefined=arm_tweak,--undefined=arm_original,'
         '--undefined=arm_candidate,--undefined=layout,--undefined=result_layout',
         *(['-Wl,--undefined=arm_fpu,--undefined=fpu_layout'] if a.fpu else []),
+        *(['-Wl,--undefined=arm_replay,--undefined=replay_layout'] if a.replay else []),
         '-lm', '-lgcc', '-o', str(elf)]
     subprocess.run(command, check=True); commands.append(command)
     (a.out / 'commands.json').write_text(json.dumps(commands, indent=2) + '\n')
@@ -110,6 +119,7 @@ def main():
                 m.uc.mem_write(m.symbols['arm_context'], context)
                 original = m.call('arm_original', fpscr=fpscr)
                 ctx = bytes(m.uc.mem_read(m.symbols['arm_context'], m.layout['size']))
+                expected_memory = bytes(m.uc.mem_read(RAM, SIZE)) if a.replay else None
                 count = struct.unpack_from('<H', ctx, m.layout['r'])[0]
                 expected_order = m.guest(SP - 128, min(count, 64) * 2)
                 expected_epoch = struct.unpack('<I', m.uc.mem_read(RAM + (4 << 20) + 0x2d2fac, 4))[0]
@@ -153,18 +163,45 @@ def main():
                         if not all(checks.values()):
                             (a.out / 'failure-context.bin').write_bytes(ctx)
                             (a.out / 'failure-fpu.bin').write_bytes(state)
+                    if a.replay:
+                        size, co, so, dirty = struct.unpack('<4I', m.uc.mem_read(m.symbols['replay_layout'],16))
+                        state = bytes(m.uc.mem_read(m.symbols['arm_replay'], size))
+                        checks['context'] = state[co:co+m.layout['size']] == ctx
+                        checks['fpscr'] = candidate['fpscr'] == original['fpscr']
+                        published = bytearray(before)
+                        def publish(address, data):
+                            for k, byte in enumerate(data):
+                                v = address+k
+                                published[m.pages[v>>12]+(v&4095)] = byte
+                        dirty_bytes = 0
+                        for i in range(8192):
+                            word = struct.unpack_from('<I', state, dirty+(i>>5)*4)[0]
+                            if word & (1<<(i&31)):
+                                publish(SP-16384+i*2, state[so+i*2:so+i*2+2]);dirty_bytes+=2
+                        entry_epoch = struct.unpack_from('<I', before, (4<<20)+0x2d2fac)[0]
+                        if actual_epoch != entry_epoch:
+                            struct.pack_into('<I', published, (4<<20)+0x2d2fac, actual_epoch)
+                            published[(4<<20)+0x2d2fa9]=0
+                            publish(0x2d2fb0,actual_visited)
+                        checks['memory'] = published == expected_memory
+                        record['dirty_stack_bytes'] = dirty_bytes
+                        if not all(checks.values()):
+                            (a.out/'failure-context.bin').write_bytes(ctx)
+                            (a.out/'failure-replay.bin').write_bytes(state)
+                            (a.out/'failure-memory.bin').write_bytes(published)
+                            (a.out/'failure-expected-memory.bin').write_bytes(expected_memory)
                     if not all(checks.values()):
                         (a.out / 'failure.json').write_text(json.dumps(dict(record,checks=checks),indent=2))
                         raise AssertionError((record, checks, count, actual_count, backedges, actual_edges))
                 # Candidate must not publish any byte into the guest arena.
                 assert bytes(m.uc.mem_read(RAM, SIZE)) == before
                 rows.append(record)
-        print('PASS ARM', 'numerical/x87/FPSCR' if a.fpu else 'numerical', n, style, tweak, flush=True)
+        print('PASS ARM', 'context/memory/FPSCR' if a.replay else 'numerical/x87/FPSCR' if a.fpu else 'numerical', n, style, tweak, flush=True)
         (a.out / 'result.json').write_text(json.dumps(rows, indent=2) + '\n')
     accepted = sum(r['admitted'] for r in rows)
     assert accepted > len(rows) // 2
     print('PASS', accepted, 'accepted /', len(rows), 'ARM',
-          'numerical/x87/FPSCR' if a.fpu else 'numerical', 'cases; no live publication proof')
+          'context/memory/FPSCR' if a.replay else 'numerical/x87/FPSCR' if a.fpu else 'numerical', 'cases; no live publication proof')
 
 
 if __name__ == '__main__':

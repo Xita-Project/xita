@@ -67,6 +67,12 @@ static XvClusterSnapshot *build(size_t limit)
 {reader.calls=0;return xv_cluster_snapshot_build(read_bytes,&reader,&source,limit);}
 static void query(const XvClusterSnapshot *snapshot)
 {
+    XvClusterReplayLayout layout;
+    assert(xv_cluster_snapshot_replay_layout(snapshot,0x4567,0x89ab,&layout));
+    assert(layout.bsp==BASE&&layout.clusters==BASE+CLUSTERS&&layout.portals==BASE+PORTALS);
+    assert(layout.center_address==0x4567&&layout.head_address==0x89ab);
+    assert(layout.original_plane_indices[0]==3&&layout.original_plane_indices[1]==1);
+    for(unsigned i=0;i<3;i++)assert(layout.adjacency_addresses[i]==BASE+ADJ+i*8);
     uint32_t visited[256]={0};XvClusterResult result;
     XvClusterInput input={.radius=10,.start=0,.epoch=100,.budget=10000,.visited=visited};
     assert(xv_cluster_query_direct(xv_cluster_snapshot_geometry(snapshot),&input,&result));

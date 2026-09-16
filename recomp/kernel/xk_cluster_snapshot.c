@@ -10,10 +10,12 @@
 
 struct XvClusterSnapshot {
     XvClusterGeometry geometry;
+    XvClusterReplayLayout replay;
     unsigned references, published;
     size_t bytes;
     void *arrays;
-    /* Metadata follows: clusters, portals, original plane indices. */
+    /* Metadata follows: clusters, portals, sorted plane indices, original
+     * per-portal plane indices and original adjacency addresses. */
 };
 
 static int read_span(XvClusterRead read,void *context,uint32_t base,
@@ -58,21 +60,24 @@ XvClusterSnapshot *xv_cluster_snapshot_build(XvClusterRead read,void *context,
        !read_span(read,context,source->zero,0,&zero,4)||zero||
        !clusters[0]||clusters[0]>256||portals[0]>32768)return NULL;
     size_t bytes=sizeof(XvClusterSnapshot);
-    if(!add_bytes(&bytes,clusters[0],sizeof(XvCluster),max_bytes)||
-       !add_bytes(&bytes,portals[0],sizeof(XvPortal)+sizeof(uint32_t),max_bytes))return NULL;
+    if(!add_bytes(&bytes,clusters[0],sizeof(XvCluster)+sizeof(uint32_t),max_bytes)||
+       !add_bytes(&bytes,portals[0],sizeof(XvPortal)+2*sizeof(uint32_t),max_bytes))return NULL;
     XvClusterSnapshot *s=calloc(1,bytes);
     if(!s)return NULL;
     s->references=1;s->bytes=bytes;
     XvCluster *c=(XvCluster *)(s+1);
     XvPortal *p=(XvPortal *)(c+clusters[0]);
     uint32_t *indices=(uint32_t *)(p+portals[0]);
+    uint32_t *original_indices=indices+portals[0],*adjacency_addresses=original_indices+portals[0];
+    s->replay=(XvClusterReplayLayout){source->bsp,clusters[1],portals[1],projection[1],
+        adjacency_addresses,original_indices,0,0};
     unsigned adjacency_count=0,vertex_count=0;
     for(unsigned i=0;i<clusters[0];i++){
         uint32_t block[2];
         if(!read_span(read,context,clusters[1],i*104+0x5c,block,8)||
            block[0]>32767||!add_bytes(&bytes,block[0],2,max_bytes))goto fail;
         /* Keep the source pointer until the owned arrays have been allocated. */
-        c[i]=(XvCluster){block[1],block[0]};adjacency_count+=block[0];
+        c[i]=(XvCluster){block[1],block[0]};adjacency_addresses[i]=block[1];adjacency_count+=block[0];
     }
     /* Align the following vertex/plane arrays to four bytes. */
     if(!add_bytes(&bytes,adjacency_count&1u,2,max_bytes))goto fail;
@@ -84,7 +89,7 @@ XvClusterSnapshot *xv_cluster_snapshot_build(XvClusterRead read,void *context,
         memcpy(p[i].sides,fields,4);memcpy(&p[i].plane,fields+4,4);
         memcpy(p[i].center,fields+8,12);memcpy(&p[i].radius,fields+20,4);
         if(p[i].plane>=distance[0]||p[i].plane>=projection[0])goto fail;
-        indices[i]=p[i].plane;p[i].first_vertex=block[1];p[i].vertices=block[0];
+        indices[i]=original_indices[i]=p[i].plane;p[i].first_vertex=block[1];p[i].vertices=block[0];
         vertex_count+=block[0];
     }
     qsort(indices,portals[0],sizeof *indices,compare_index);
@@ -134,6 +139,12 @@ const XvClusterGeometry *xv_cluster_snapshot_geometry(const XvClusterSnapshot *s
 {return s?&s->geometry:NULL;}
 size_t xv_cluster_snapshot_bytes(const XvClusterSnapshot *s)
 {return s?s->bytes:0;}
+int xv_cluster_snapshot_replay_layout(const XvClusterSnapshot *s,uint32_t center,
+    uint32_t head,XvClusterReplayLayout *out)
+{
+    if(!s||!out)return 0;
+    *out=s->replay;out->center_address=center;out->head_address=head;return 1;
+}
 void xv_cluster_snapshot_release(XvClusterSnapshot *s)
 {
     if(s&&!--s->references){free(s->arrays);free(s);}

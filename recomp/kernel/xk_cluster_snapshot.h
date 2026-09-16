@@ -1,11 +1,13 @@
 #pragma once
 #include "xk_cluster_query.h"
+#include "xk_cluster_query_replay.h"
 #include <stddef.h>
 
 typedef struct XvClusterSnapshot XvClusterSnapshot;
 /* read must either copy the entire span or return zero. The caller must own a
  * stable source generation for the WHOLE build: bounds checks and copied bytes
- * cannot synchronize an uncooperative live writer. No guest pointers survive. */
+ * cannot synchronize an uncooperative live writer. No source storage survives;
+ * numeric address metadata is retained only for original-state reconstruction. */
 typedef int (*XvClusterRead)(void *,uint32_t,void *,size_t);
 typedef struct {
     uint32_t bsp, projection, axes, zero;
@@ -16,6 +18,11 @@ XvClusterSnapshot *xv_cluster_snapshot_build(XvClusterRead,void *,
     const XvClusterSource *,size_t max_bytes);
 const XvClusterGeometry *xv_cluster_snapshot_geometry(const XvClusterSnapshot *);
 size_t xv_cluster_snapshot_bytes(const XvClusterSnapshot *);
+/* The returned layout borrows immutable arrays from this snapshot, just like
+ * geometry(). Hold the same lease throughout computation. Numeric addresses
+ * are not permission to read retired source data or publish into a live guest. */
+int xv_cluster_snapshot_replay_layout(const XvClusterSnapshot *,uint32_t center,
+    uint32_t head,XvClusterReplayLayout *);
 
 /* Zero-initialize the store. All store operations AND shared-snapshot release
  * share one caller-owned mutex. An unpublished snapshot is caller-exclusive.

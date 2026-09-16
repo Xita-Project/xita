@@ -14,6 +14,11 @@ uint32_t *g_xpt;
 static unsigned yields;
 static uint32_t bsp_address,bsp_bytes;
 static XvClusterSnapshot *owned_snapshot;
+#ifdef CLUSTER_REPLAY
+static unsigned char *initial_memory,*expected_memory;
+static size_t arena_bytes;
+static XvClusterReplay replay;
+#endif
 const size_t xv_test_map_layout[]={sizeof(XvCluster),sizeof(XvPortal),sizeof(XvPoint),
     sizeof(XvPlane),sizeof(XvClusterGeometry),sizeof(XvClusterInput),sizeof(XvClusterResult)};
 void f_00056670(xctx *);
@@ -21,6 +26,9 @@ void __wrap_xv_preempt(xctx *c) { yields++; c->preempt=1000000; }
 
 void xv_test_map_free(void)
 {
+#ifdef CLUSTER_REPLAY
+    free(initial_memory);free(expected_memory);initial_memory=expected_memory=NULL;
+#endif
     xv_cluster_snapshot_release(owned_snapshot);owned_snapshot=NULL;
     free(g_xram);free(g_xpt);
     g_xram=g_img_base=NULL;g_xpt=NULL;
@@ -37,6 +45,11 @@ int xv_test_map_load(const uint8_t *data,uint32_t size,uint32_t address,
     xv_test_map_free();
     g_xram=calloc(1,2*LOW_BYTES+mapped);g_xpt=calloc(1<<20,4);
     if(!g_xram||!g_xpt){xv_test_map_free();return 0;}
+#ifdef CLUSTER_REPLAY
+    arena_bytes=2*LOW_BYTES+mapped;
+    initial_memory=malloc(arena_bytes);expected_memory=malloc(arena_bytes);
+    if(!initial_memory||!expected_memory){xv_test_map_free();return 0;}
+#endif
     g_img_base=g_xram+LOW_BYTES+mapped;
     for(unsigned i=0;i<LOW_BYTES/4096;i++)g_xpt[i]=(i^1u)*4096;
     for(unsigned i=0;i<mapped/4096;i++)g_xpt[(address>>12)+i]=LOW_BYTES+i*4096;
@@ -82,17 +95,26 @@ int xv_test_map_query(const XvClusterGeometry *geometry,const XvClusterInput *in
     x_guest_write(SP+80,in->center,12);x_guest_write(SP+16,&in->radius,4);
     X_M32(SP+8)=0;X_IMG32(0x2d2fac)=in->epoch;X_IMG8(0x2d2fa9)=0;
     x_guest_write(0x2d2fb0,in->visited,1024);yields=0;
+#ifdef CLUSTER_REPLAY
+    xctx entry=c;
+    memcpy(initial_memory,g_xram,arena_bytes);
+#endif
 #ifdef CLUSTER_FPU
     XvClusterFpu fp={.entry_fsp=c.fsp,.fsw=c.fsw};
     for(unsigned i=0;i<8;i++)memcpy(&fp.slots[i],&c.st[(c.fsp+i)&7],8);
 #endif
     f_00056670(&c);
-#ifdef CLUSTER_FPU
+#if defined(CLUSTER_FPU)||defined(CLUSTER_REPLAY)
     int expected_flags=fetestexcept(FE_ALL_EXCEPT);
 #endif
     stats[0]=(uint16_t)c.r[0];stats[1]=in->budget-(unsigned)c.preempt;stats[2]=yields;
     feclearexcept(FE_ALL_EXCEPT);
-#ifdef CLUSTER_FPU
+#if defined(CLUSTER_REPLAY)
+    XvClusterReplayLayout layout;
+    if(!xv_cluster_snapshot_replay_layout(owned_snapshot,SP+80,0,&layout))return -10;
+    memcpy(expected_memory,g_xram,arena_bytes);
+    int admitted=xv_cluster_query_replay(geometry,in,&layout,&entry,out,&replay),result=0;
+#elif defined(CLUSTER_FPU)
     int admitted=xv_cluster_query_fpu(geometry,in,out,&fp),result=0;
 #else
     int admitted=xv_cluster_query_direct(geometry,in,out),result=0;
@@ -115,5 +137,22 @@ int xv_test_map_query(const XvClusterGeometry *geometry,const XvClusterInput *in
         if(!result&&expected_flags!=fetestexcept(FE_ALL_EXCEPT))result=-9;
 #endif
     }
+#ifdef CLUSTER_REPLAY
+    if(!result&&memcmp(&c,&replay.context,sizeof c))result=-11;
+    if(!result&&expected_flags!=fetestexcept(FE_ALL_EXCEPT))result=-12;
+    if(!result&&memcmp(expected_memory,g_xram,arena_bytes))result=-13;
+    if(!result){
+        memcpy(g_xram,initial_memory,arena_bytes);
+        for(unsigned i=0;i<XV_CLUSTER_SCRATCH/2;i++)
+            if(replay.dirty[i/32]&(1u<<(i%32)))
+                x_guest_write(SP-XV_CLUSTER_SCRATCH+i*2,replay.scratch+i*2,2);
+        if(out->epoch!=in->epoch){
+            X_IMG32(0x2d2fac)=out->epoch;X_IMG8(0x2d2fa9)=0;
+            for(unsigned i=0;i<256;i++)
+                if(out->changed[i>>5]&(1u<<(i&31)))X_M32(0x2d2fb0+i*4)=out->epoch;
+        }
+        if(memcmp(expected_memory,g_xram,arena_bytes))result=-14;
+    }
+#endif
     fesetenv(&initial);return result;
 }

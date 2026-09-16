@@ -22,18 +22,19 @@ IMAGE = '4094e994243ddeae3f1b478bde6a7ee81498218ccd7c9d7bc2327db547d95aae'
 PCS = (0x56670, 0x52240, 0x51E90, 0x11840, 0xB77C0)
 
 
-def generate(xbe, manifest, out):
+def generate(xbe, manifest, out, *, full=False):
     img = r.Image(str(xbe), str(manifest))
     assert hashlib.sha256(img.data).hexdigest() == IMAGE, 'unsupported image'
     disc = r.Discovery(img, {}, img.kernel_imports(), lambda *args: None)
-    for pc in PCS:
+    pcs = PCS + ((0xA9330,) if full else ())
+    for pc in pcs:
         disc.add_root(pc)
         disc.lift_function(disc.functions[pc])
     # Small isolated discovery can retain overlapping tails when a newly found
     # block already begins inside an earlier one. Split at every known entry;
     # verify the original instruction bytes and unique PC coverage are retained.
     proof = {}
-    for pc in PCS:
+    for pc in pcs:
         fn = disc.functions[pc]
         before = {i.ip: img.bytes_at(i.ip, i.len) for b in fn.blocks.values() for i in b.insns}
         for b in fn.blocks.values():
@@ -49,12 +50,16 @@ def generate(xbe, manifest, out):
         proof[hex(pc)] = dict(instructions=len(after),
             sha256=hashlib.sha256(b''.join(after[k] for k in sorted(after))).hexdigest())
     emit = r.Emitter(img, disc, {}, img.kernel_imports(), 'unused', 1, hooks=NoGameHooks())
-    bodies = {pc: emit.emit_function(disc.functions[pc]) for pc in PCS}
+    bodies = {pc: emit.emit_function(disc.functions[pc]) for pc in pcs}
     body = bodies[0x56670]
     bodies[0x56670] = body[:body.index('L_000566DE:')] + 'L_000566DE:\n    return;\n}\n'
     text = '#include "xv_x86rt.h"\n'
-    text += ''.join(f'void f_{pc:08X}(xctx *);\n' for pc in PCS)
+    text += ''.join(f'void f_{pc:08X}(xctx *);\n' for pc in pcs)
     text += ''.join(bodies.values())
+    if full:
+        tail = body[:body.index('L_00056670:')] + body[body.index('L_000566DE:'):]
+        text += body.replace('f_00056670', 'f_query_whole')
+        text += tail.replace('f_00056670', 'f_query_tail')
     assert not re.search(r'xv_call|xv_unimpl|xv_trap', text)
     for body in bodies.values():
         labels = re.findall(r'^L_([0-9A-F]{8}):', body, re.M)

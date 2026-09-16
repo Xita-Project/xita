@@ -2,6 +2,9 @@
  * and exact backedge count. This is NOT full guest-state publication validation. */
 #include "xv_x86rt.h"
 #include "kernel/xk_cluster_query.h"
+#ifdef CLUSTER_REPLAY
+#include "kernel/xk_cluster_query_replay.h"
+#endif
 #include "cluster_axes.h"
 #include <assert.h>
 #include <fenv.h>
@@ -213,8 +216,21 @@ XvClusterResult arm_result;
 int arm_admitted;
 const unsigned layout[]={sizeof(xctx),offsetof(xctx,r),offsetof(xctx,st),offsetof(xctx,fsp),offsetof(xctx,fsw),offsetof(xctx,fcw),offsetof(xctx,preempt),offsetof(xctx,f_kind),offsetof(xctx,f_bits),offsetof(xctx,xmm)};
 const unsigned result_layout[]={sizeof(XvClusterResult),offsetof(XvClusterResult,count),offsetof(XvClusterResult,epoch),offsetof(XvClusterResult,changed),offsetof(XvClusterResult,backedges)};
+#ifdef CLUSTER_REPLAY
+static uint32_t arm_adj[256],arm_planes[MAX_PORTALS];
+static XvClusterReplayLayout arm_sources;
+XvClusterReplay arm_replay;
+const unsigned replay_layout[]={sizeof(XvClusterReplay),offsetof(XvClusterReplay,context),offsetof(XvClusterReplay,scratch),offsetof(XvClusterReplay,dirty)};
+#endif
 void arm_prepare(unsigned k,unsigned n,unsigned style)
-{prepare(k,n,style,&arm_input,&arm_context);}
+{
+    prepare(k,n,style,&arm_input,&arm_context);
+#ifdef CLUSTER_REPLAY
+    for(unsigned i=0;i<geometry.cluster_count;i++)arm_adj[i]=X_M32(CLUSTERS+i*104+0x60);
+    for(unsigned i=0;i<geometry.portal_count;i++)arm_planes[i]=X_M32(PORTALS+i*64+4);
+    arm_sources=(XvClusterReplayLayout){BSP,CLUSTERS,PORTALS,PLANES2,arm_adj,arm_planes,SP+80,0};
+#endif
+}
 void arm_tweak(unsigned kind)
 {
     static const uint32_t radii[]={0x42c80000,0,0xbf800000,0x7f800000,
@@ -229,7 +245,10 @@ void arm_tweak(unsigned kind)
     }
 }
 void arm_original(void) {f_00056670(&arm_context);}
-#ifdef CLUSTER_FPU
+#if defined(CLUSTER_REPLAY)
+void arm_candidate(void)
+{arm_admitted=xv_cluster_query_replay(&geometry,&arm_input,&arm_sources,&arm_context,&arm_result,&arm_replay);}
+#elif defined(CLUSTER_FPU)
 XvClusterFpu arm_fpu;
 const unsigned fpu_layout[]={sizeof(XvClusterFpu),offsetof(XvClusterFpu,slots),offsetof(XvClusterFpu,entry_fsp),offsetof(XvClusterFpu,fsw)};
 void arm_candidate(void)

@@ -126,10 +126,12 @@ Validation now includes:
   of text, no static data/BSS, and 232 bytes of reported constructor stack,
   excluding allocator/sort callees. This is a compile check, not a device run.
 
-The host C snapshots retain 12,088 bytes for Blood Gulch, 8,732 for Battle Creek,
-and at most 16,460 across the same campaign sample. These include the descriptor
-and original-index workspace but exclude allocator overhead. ARM pointer sizes
-differ. No per-query allocation is required once a snapshot has been published.
+Before replay metadata, the host C snapshots retained 12,088 bytes for Blood
+Gulch, 8,732 for Battle Creek and at most 16,460 in the campaign sample. With
+the numeric source-address metadata described below, these are now **12,528**,
+**9,148** and **17,000** bytes respectively. These include the descriptor and
+index workspace, excluding allocator overhead. ARM pointer sizes differ. No
+per-query allocation is required once a snapshot has been published.
 
 ## Floating-point state and epoch rebasing
 
@@ -188,6 +190,58 @@ and native-exception comparisons: 740 epoch advances, 284 no-epoch paths, 212
 wraps and 740 deliberately conflicting active sets. This proves the tested epoch
 transformation, not typed general-register/scratch reconstruction or live races.
 
+## Complete private prefix reconstruction
+
+`xk_cluster_query_replay.c` now uses the shared typed traversal to reconstruct the
+entire context and the original scratch writes at `566DE`. It records changed
+halfwords in a private 16 KiB scratch area, leaving unmarked bytes unspecified.
+It does not copy the old guest stack or read from live guest memory. The small
+recursive-frame records are private; only initialized saved-register values are
+read back from private scratch. Nonpositive-radius and no-cluster paths retain
+their original register/flag behavior and do not publish an epoch or marker.
+
+The snapshot also owns original per-portal plane indices and per-cluster adjacency
+addresses. These numeric addresses reproduce register and scratch values; they
+are never dereferenced by the query. They come from the same construction as the
+owned geometry and share its lease lifetime. Per-query center/head addresses are
+supplied in a copied layout descriptor. This metadata adds no source-memory
+dependency to a computation after construction.
+
+Validation now includes:
+
+| Check | Result |
+| --- | --- |
+| Host ASan/UBSan, full prefix context, 8 MiB arena and native exceptions | 3,728 exact accepted comparisons; 368 conservative declines |
+| VitaSDK ARM full prefix context, arena and complete FPSCR | 350 accepted matches across 440 cases; 90 conservative declines |
+| C snapshots from all 13 owned-map BSPs, full prefix context/memory and exceptions | 3,328 exact comparisons; zero declines |
+| Original whole query versus private replay followed by original allocation/list tail, ASan/UBSan | 928 exact comparisons; 96 conservative declines |
+| Snapshot metadata, allocation/read failures and retirement | ASan/UBSan and TSan pass, including two readers and 2,000 publications |
+
+The tail oracle uses the original allocator, with capacities 0, 1, 8 and 1,024
+in both pools, and checks the whole final context/arena and `ret 16` stack
+convention. It does not replace allocation failures with successful test stubs.
+The shared numerical/FPU-only variant retains its previous quick ARM results
+and instruction count after extraction into `xk_cluster_query_impl.h`.
+
+The first replay used a generic tiny-write helper, which erased most savings.
+Replacing it with inlined constant-size stores and one dirty-mask update per
+word retains the same exact-state results. Final ordinary prefix counts are:
+
+| Clusters | Original ARM instructions | Typed replay | Reduction factor | Dirty scratch bytes |
+| ---: | ---: | ---: | ---: | ---: |
+| 7 | 27,275 | 14,513 | 1.88x | 636 |
+| 31 | 134,147 | 68,849 | 1.95x | 2,442 |
+| 65 | 285,507 | 145,804 | 1.96x | 4,004 |
+| 256 | 1,131,637 | 574,217 | 1.97x | 12,408 |
+
+These include private context and scratch bookkeeping but exclude modeled libc
+copy/clear work (1,668 bytes per positive query), mapping/alias validation,
+snapshot construction, actual publication and the unchanged allocator/list tail.
+The ARM object has 6,288 text bytes, no static data/BSS and a reported 6,464-byte
+stack, excluding callees. The ARM replay output occupies 17,768 caller-owned
+bytes, separate from numerical output and snapshot storage. This remains an
+uninstalled prototype, not a measured frame-time improvement.
+
 ## Integration work still required
 
 1. **Connect lifetime to the game.** The owned snapshot/store API above is ready
@@ -200,12 +254,12 @@ transformation, not typed general-register/scratch reconstruction or live races.
    still need proof. Pointer equality and the existing large-read
    texture-purge heuristic do not establish that lifetime. Generated overlapping
    entries also need coverage; an entry at `58D8A` contains the later root store.
-2. **Preserve observable state.** The stateful prototype now matches the tested
-   x87/native FP state, but general registers and guest scratch at `566DE` remain
-   unfinished. The original allocation and
-   list tail needs the correct ordered output and entry state. Prove which other
-   state is dead, or reproduce it exactly, before connecting this result. The
-   current caller's immediate register restores are not a whole-call-chain proof.
+2. **Connect state reconstruction to real admission.** The private replay now
+   passes full-prefix and original-tail oracles. The live adapter still needs
+   validated scalar input capture, source/layout consistency, private-stack
+   mapping and alias checks, correct native FP rollback, and a captured geometry
+   generation. Keep the current guard held for the first integrated candidate;
+   a numerically valid private descriptor is not permission to publish.
 3. **Publish in one guarded transaction.** Capture mutable inputs, compute on
    owned arrays, validate the generation and shared visited/epoch state, and
    publish with the original allocation/list tail. Any failure must preserve
@@ -240,6 +294,15 @@ python tools/test_arm_cluster_query.py --reference "$RESULTS/fpu-host/reference.
 python tools/test_owned_cluster_query.py --xbe "$XBE" --manifest "$MANIFEST" \
     --out "$RESULTS/fpu-maps" --native-snapshot --fpu --maps "$MAPS/bloodgulch.map" \
     "$MAPS/beavercreek.map" "$MAPS/a10.map" "$MAPS/a30.map"
+python tools/test_cluster_query_replay.py --xbe "$XBE" --manifest "$MANIFEST" \
+    --out "$RESULTS/replay-host"
+python tools/test_cluster_query_replay.py --xbe "$XBE" --manifest "$MANIFEST" \
+    --out "$RESULTS/replay-tail" --tail --cases 256
+python tools/test_arm_cluster_query.py --reference "$RESULTS/replay-host/reference.c" \
+    --replay --out "$RESULTS/replay-arm"
+python tools/test_owned_cluster_query.py --xbe "$XBE" --manifest "$MANIFEST" \
+    --out "$RESULTS/replay-maps" --native-snapshot --replay --cases-per-bsp 64 \
+    --maps "$MAPS/bloodgulch.map" "$MAPS/beavercreek.map" "$MAPS/a10.map" "$MAPS/a30.map"
 ```
 
 The ARM tool requires VitaSDK, Unicorn and pyelftools; `ARM_CC` can override the
