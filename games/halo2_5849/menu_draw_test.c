@@ -133,8 +133,8 @@ static void test_active_invariants(void)
     state.bound[1] = 1;                         /* a second Kelvin subchannel is bound */
     assert(h2_menu_method(&menu, &state, &clear, 1, 0x1A00, 0) == 0); /* wrong subchannel */
     assert(method(0x17FC, 7) == 0);            /* nested BEGIN */
-    assert(method(0x0300, 0) == 0);            /* state method mid-draw is invalid */
-    assert(menu.active);
+    assert(method(0x0300, 0) == -1);           /* interleaved state: not ours, dispatcher forwards it */
+    assert(menu.active);                        /* the draw stays open */
 }
 
 static void test_overflow_rejects(void)

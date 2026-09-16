@@ -140,5 +140,8 @@ int h2_menu_method(h2_menu_draw *q, h2_command_state *s, h2_kelvin_clear *c,
         return 1;
     }
     if (emission(q, method, value)) return 1;
-    return 0; /* no state change is valid between BEGIN and END */
+    /* A non-vertex, non-emission method inside the draw is interleaved state
+     * (e.g. a per-batch clip rectangle). Return "not mine" so the dispatcher
+     * routes it to command-state capture; the draw stays open. */
+    return -1;
 }

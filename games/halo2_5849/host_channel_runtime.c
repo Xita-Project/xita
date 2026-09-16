@@ -189,6 +189,10 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
                         !sprite_active && !result)) {
         uint64_t menu_done = menu_quad.completed, menu_rej = menu_quad.rejected;
         int menu_result = h2_menu_method(&menu_quad, &channel.commands, &channel.clear, sub, method, value);
+        if (menu_result == -1)
+            /* Interleaved state inside an active menu draw: apply it to command
+             * state and keep the draw open (the draw reads it at END). */
+            menu_result = h2_command_method(&channel.commands, &channel.clear, sub, method, value, source) ? 1 : 0;
         if (menu_result != -1) result = menu_result;
         if (menu_done != menu_quad.completed)
             xv_logf("[h2/menu] completed=%u primitive=%u vertices=%u indices=%u arrays=%u source=%08X color=%08X committed; not yet presented\n",
