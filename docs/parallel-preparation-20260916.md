@@ -36,6 +36,38 @@ physical comparison must include joined batch time and overlapping worker waits.
 The integration build retains ordinary graphics and all previously enabled
 optimizations. Guest phase timing and native hierarchy stay disabled for this test.
 
+### Physical result
+
+Runtime `5bed4a6040baffd8733a455ae7050dd21a6c259114f81af38e7db3f79c2c6931`
+was installed and boot-confirmed through the Wi-Fi updater. All 1,588 package
+members and the existing asset contract are preserved; only the executable and
+boot record change. The preserved A slot remains available.
+
+Three fixed-view Blood Gulch trials use native 960×544, unchanged saved graphics,
+60 settling and 120 measured frames per arm. All camera checks pass:
+
+| Trial | Off before FPS | On FPS | Off after FPS |
+| --- | ---: | ---: | ---: |
+| 1 | 10.732 | 10.759 | 10.762 |
+| 2 | 10.722 | 10.695 | 10.652 |
+| 3 | 10.661 | 10.609 | 10.671 |
+
+The experiment executes about 250 pose scopes per frame and retires every scope,
+with no rejected jobs. Across 180 complete counter frames per arm, outer lock
+acquisitions are 3,122.68 / 1,287.74 / 3,153.78 per frame: approximately 59% fewer
+when enabled. Joined batch time is 32.380 / 31.769 / 32.666 ms/frame. The workers
+still each spend roughly 13–14 ms/frame waiting, with overlapping waits.
+Counter windows exclude the first report after measurement starts to avoid
+mixing settling frames; they cover half of the full FPS measurement.
+
+**There is no meaningful whole-frame improvement. The override is restored OFF.**
+Fewer acquisitions do not establish independent work or remove the time spent
+inside shared transactions. These stationary tests do not validate driving,
+campaign combat, or the outstanding crash reports. The next larger candidate
+separates immutable spatial queries and private visited/result buffers from
+ordered list removal, allocation and publication; that ownership split is still
+being prototyped and is not in this build.
+
 ## Candidates kept separate
 
 - A five-island native material-state prototype passes host and ARM differential

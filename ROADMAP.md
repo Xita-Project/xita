@@ -14,8 +14,9 @@ work into efficient native routines and independent worker jobs until sustained
 30 FPS is verified on the physical Vita in representative campaign, combat and
 vehicle gameplay. Keep rendering and gameplay correct, document fixed comparison
 settings and retain private checkpoints. Stable 20 FPS is an intermediate
-milestone; neither target is complete. The separate Halo 2 agent is pursuing the
-original main menu in Vita3K. See the [implementation order](docs/performance-next-steps-20260914.md).
+milestone; neither target is complete. Halo 2's original main menu remains a
+separate objective; Claude currently owns its Vita3K work. The current parallel
+agents investigate CE performance. See the [implementation order](docs/performance-next-steps-20260914.md).
 
 [~] [Experimental concurrent object updates](docs/parallel-object-experiment-20260914.md):
 the next task now runs whole second-pass object callbacks on workers requesting
@@ -73,6 +74,13 @@ The finer 48-scope selection separates their material, transform and spatial-lis
 children; measurements use serial callbacks in every diagnostic arm and restore
 the configured workers afterward. Periodic diagnostic writes also show a 137 ms
 outlier, warranting a separate hitch investigation. Neither is an FPS gain yet.
+
+The [pose-loop comparison](docs/parallel-preparation-20260916.md) reduces physical
+outer lock acquisitions by about 59%, but three native-resolution trials remain
+near 10.7 FPS with no meaningful gain. It is restored off. A small material-state
+prototype also remains separate after weak ARM sizing results. Current larger
+work targets private spatial queries with ordered publication, native polygon
+math, and asynchronous periodic reports; these are prototypes, not measured gains.
 
 September 15: [lightweight mutex comparisons](docs/object-light-lock-20260915.md)
 repeatedly improve one physical Blood Gulch view from approximately 11.8–12.0
