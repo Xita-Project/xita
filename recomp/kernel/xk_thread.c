@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "xk.h"
+#include "xk_light_census.h"
 
 void xv_phase_suspend(void *context) __attribute__((weak));
 void xv_phase_resume(void *context) __attribute__((weak));
@@ -180,6 +181,7 @@ xk_thread *xk_thread_create(uint32_t stack_size, uint32_t tls_size, uint32_t sta
 void xk_thread_exit(uint32_t status)
 {
     xk_thread *t = xk_cur;
+    XV_LIGHT_CENSUS_CANCEL(&t->ctx,XV_LC_STOP);
     if (xv_phase_forget) xv_phase_forget(&t->ctx);
     XK_LOG("thread %d exited (%08X)\n", t->id, status);
     t->state = 3; t->exit_status = status; X_M32(t->kthread + KTHREAD_EXITSTATUS) = status; X_M8(t->kthread + KTHREAD_SIGNALSTATE) = 1;   /* GetExitCodeThread: SignalState ? ExitStatus : STILL_ACTIVE */
@@ -307,6 +309,7 @@ int xk_object_io_step(void)
 void xd3d_ds_check(const char *where, uint32_t eip) __attribute__((weak));
 void xk_yield(void)
 {
+    XV_LIGHT_CENSUS_CANCEL(NULL,XV_LC_HANDOFF);
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
     if(xk_cur==g_object_io_thread&&g_object_io_return) {
         xk_thread *io=xk_cur;

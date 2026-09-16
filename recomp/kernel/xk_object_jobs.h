@@ -57,7 +57,21 @@ void xv_object_pose_cleanup(int *token);
 #define XV_OBJECT_JOB_SCOPE(c) \
     xctx *xv_object_owner_ __attribute__((cleanup(xv_object_jobs_end))) = \
         xv_object_jobs_begin(c) ? (c) : NULL
+#ifdef XV_LIGHT_QUERY_CENSUS
+#include "xk_light_census.h"
+/* Logical scope tracking includes the idle fast path. It does not acquire a
+ * mutex or change lock tokens, recursion, owner services or the allowlist. */
+int xv_object_census_scope_begin(void);
+void xv_object_census_scope_end(int *);
+static inline void xv_object_census_scope_cleanup(int *token)
+{if(*token)xv_object_census_scope_end(token);}
+#define XV_OBJECT_CENSUS_SCOPE() \
+    int xv_object_census_scoped_ __attribute__((cleanup(xv_object_census_scope_cleanup))) = (XV_LIGHT_CENSUS_ON() ? xv_object_census_scope_begin() : 0)
+#else
+#define XV_OBJECT_CENSUS_SCOPE() ((void)0)
+#endif
 #define XV_OBJECT_MATH_GUARD() \
+    XV_OBJECT_CENSUS_SCOPE(); \
     int xv_object_math_locked_ __attribute__((cleanup(xv_object_math_unlock))) = xv_object_math_lock()
 #define XV_OBJECT_MATH_PRIVATE(c,kind,out,bytes,scratch,scratch_bytes) \
     ((void)xv_object_math_release_private(c,&xv_object_math_locked_,kind,out,bytes,scratch,scratch_bytes))
