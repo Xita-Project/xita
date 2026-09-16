@@ -69,7 +69,7 @@ def fragment_programs(log, outdir, vs_outputs):
 
 def vertex_programs(vpdir, outdir, vs_outputs):
     args = argparse.Namespace(mode="function", rhw=False, light=False, const_count=192, keep_viewport_epilogue=False,
-                              binding_json=None, stdout=False, output=None, json=None)
+                              binding_json=None, stdout=False, output=None, json=None, c_base=0)
     n_ok = 0
     for f in sorted(glob.glob(os.path.join(vpdir, "menu-vp-*.bin"))):
         d = open(f, "rb").read(); start, n = struct.unpack("<2I", d[:8]); n = min(n, 136)
