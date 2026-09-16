@@ -5,7 +5,9 @@
 #include "xk.h"
 #include "xk_light_census.h"
 #include <limits.h>
-unsigned xv_light_census_enabled;
+unsigned xv_light_census_enabled, xv_light_census_present_requested;
+static xctx *present_context;
+static unsigned present_serial, present_next;
 static xv_light_census_stats totals;
 static uint32_t declines[XV_LC_REASONS],admissions[3][XV_LC_GUARD+1];
 static unsigned serial;
@@ -18,6 +20,26 @@ static struct {
     uint8_t status[8];
     uint64_t start_reads, start_bytes;
 } group;
+unsigned xv_light_census_present_begin(xctx *c)
+{
+    if(!xv_object_census_is_owner())return 0;
+    unsigned nested=present_serial!=0;
+    if(!++present_next)++present_next;
+    present_serial=present_next;
+    present_context=!nested&&!group.token&&!xv_object_census_boundary(c)?c:NULL;
+    return present_serial;
+}
+void xv_light_census_present_end(unsigned *token)
+{
+    if(!*token||!xv_object_census_is_owner())return;
+    if(present_serial==*token){present_context=NULL;present_serial=0;}
+    *token=0;
+}
+xctx *xv_light_census_present_current(void)
+{
+    if(!xv_object_census_is_owner())return NULL;
+    return present_serial&&present_context&&!group.token&&!xv_object_census_boundary(present_context)?present_context:NULL;
+}
 static void decline(unsigned reason)
 {if(reason&&reason<XV_LC_REASONS)__atomic_fetch_add(&declines[reason],1,__ATOMIC_RELAXED);}
 static int admit(xctx *c,unsigned site)
@@ -214,8 +236,11 @@ void xv_light_census_suffix(xctx *c)
 {if(XV_LIGHT_CENSUS_ON()&&admit(c,0)){decline(XV_LC_SUFFIX);if(group.token)close_cancel(XV_LC_NESTED);}}
 void xv_light_census_cancel(xctx *c,unsigned reason)
 {
-    if(!XV_LIGHT_CENSUS_ON()||!xv_object_census_is_owner())return;
+    if(!xv_object_census_is_owner())return;
     if(group.token&&(!c||group.context==c))close_cancel(reason);
+    if((reason==XV_LC_HANDOFF||reason==XV_LC_STOP)&&(!c||c==present_context)) {
+        present_context=NULL;present_serial=0;
+    }
 }
 void xv_light_census_cleanup(unsigned *token)
 {

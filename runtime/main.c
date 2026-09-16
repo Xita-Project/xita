@@ -1250,8 +1250,8 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
-    /* Benchmark owns checked logger transitions after this pump drain. */
-    if (xv_benchmark_compare_log_writer())return;
+    /* Diagnostic controllers change only their observer/report mode here. */
+    if (xv_benchmark_compare_log_writer()||xv_benchmark_compare_light_census())return;
     if (xv_benchmark_compare_polygon_edge()) {
         extern void xv_native_polygon_edge_override(int) __attribute__((weak));
         if(xv_native_polygon_edge_override)xv_native_polygon_edge_override(enabled);
@@ -1427,8 +1427,19 @@ void xv_benchmark_optimizations(int enabled)
     if (xv_flare_barrier) xv_flare_barrier(0); /* XV_FLARE_NEXT */
     if (xv_flare_defer_override) xv_flare_defer_override(enabled);
 }
+#ifdef XV_LIGHT_QUERY_CENSUS
+uint64_t xv_benchmark_boundary_time(void) {return sceKernelGetProcessTimeWide();}
+#endif
 void xv_benchmark_present(void)
 {
+#ifdef XV_LIGHT_QUERY_CENSUS
+    /* Foreign native callers must not inspect the owner state machine while
+     * this diagnostic is armed. OFF adds only this atomic flag branch. */
+    extern unsigned xv_light_census_present_requested;
+    if(__atomic_load_n(&xv_light_census_present_requested,__ATOMIC_RELAXED)&&!xv_benchmark_light_census_boundary_ok()) {
+        xv_benchmark_light_census_boundary_lost(sceKernelGetProcessTimeWide());return;
+    }
+#endif
     if(!xv_benchmark_active())return;
     extern int xd3d_benchmark_view(float view[6]);
     float view[6]={0};int valid=xd3d_benchmark_view(view);

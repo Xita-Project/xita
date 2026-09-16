@@ -6,7 +6,7 @@ The result is a **structural candidate census**, not a parallel-execution admiss
 
 ## Integration and controls
 
-Build explicitly with `XV_LIGHT_QUERY_CENSUS=1 XV_EXPERIMENTAL_OBJECT_JOBS=1`. The Makefile tracks both flag transitions for generated/runtime objects. Ordinary builds compile out the observer. There is no environment enable, benchmark enum, graphics setting or default change.
+Build explicitly with `XV_LIGHT_QUERY_CENSUS=1 XV_EXPERIMENTAL_OBJECT_JOBS=1`. The Makefile tracks both flag transitions for generated/runtime objects. Ordinary builds compile out the observer. There is no environment enable, graphics setting or default change. Reserved benchmark37 (`light-census`) is an explicit count-only OFF/ON/OFF diagnostic.
 
 `recomp/kernel/xk_light_census.h` exposes:
 
@@ -18,7 +18,7 @@ const char *xv_light_census_reason_name(unsigned reason);
 
 Both control functions return zero without changing counters/configuration when the backend is uninitialized, the caller is not the registered native owner/current live guest fiber, an object pass/queue/service is outstanding, a currently tracked math scope is open, or a group is open. They never initialize, dispatch or join work themselves. Initialize the existing object backend through its existing guest-owner path before enabling the census; the existing zero-worker diagnostic mode is supported.
 
-The controller must toggle only at an audited **drained frame boundary with no open generated/math scopes**. This is an explicit integration precondition. To keep runtime OFF cheap, pre-enable scopes are not tracked and cannot be reconstructed by `control`. While ON, enclosing logical math scopes, including idle mutex bypasses, reject observation and control. Do not enable from a network/native service thread or from an arbitrary guest helper. Reset/take/report after a successful owner-side boundary check; format or queue the copied host result outside hot query paths. No selector is added by this patch; root may use its reserved selector37 later.
+The controller must toggle only at an audited **drained frame boundary with no open generated/math scopes**. This is an explicit integration precondition. To keep runtime OFF cheap, pre-enable scopes are not tracked and cannot be reconstructed by `control`. While ON, enclosing logical math scopes, including idle mutex bypasses, reject observation and control. Do not enable from a network/native service thread or from an arbitrary guest helper. Reset/take/report after a successful owner-side boundary check; format or queue the copied host result outside hot query paths. Benchmark37 supplies this boundary through the original Present/Swap HLE context; see the protocol below.
 
 A runtime-OFF hook performs a flag load/branch. Runtime-OFF existing math scopes also retain flag/token bookkeeping and a cleanup branch, but perform no observer native-thread-ID check, counter update or cleanup call. ARM `scope.s` records this cost. Compiling the feature out removes every observer reference. The lightweight mutex and its tokens, private-release policy, recursive worker depth and owner-service protocol are unchanged.
 
@@ -69,3 +69,36 @@ The current physical stationary sample reported by root is about10.2FPS, game95.
 Collect these counters in the same owner-side frame windows as existing game/frame-time, object-batch, lock and logger-cadence evidence, with camera, worker configuration and report policy held constant. Compare census OFF/ON/OFF to bound instrumentation cost. Then examine whether long-frame windows coincide with more group queries/traversals, a changed source distribution, more worker/ambient-guard declines, or unchanged query counts. A drop with stable counts needs other evidence (query size, scheduling, streaming, reporting or GPU interaction); this count-only probe cannot name its cause.
 
 High owner candidate multi-traversal counts justify the next pinned-geometry/bounded-arena adapter gate. High worker/guard declines mean work exists under the current worker/transaction boundary; an owner-only gather will miss it and the boundary needs restructuring. High owner orphan-query counts suggest a wider light-update pass is the more relevant boundary. Low eligible counts do not prove low total query work. Only a later controlled frame-time comparison can establish a performance benefit.
+
+## Benchmark37 measurement protocol
+
+`tools/vita_remote.py benchmark --kind light-census` requests reserved selector37. The network publishes only the request word. Compile-OFF builds reject it without linking observer APIs; the alias does not enable the feature. The existing owner consumes the request and arms a Present capability only for this diagnostic. The exact `xctx *` passed to the original Present or Swap HLE is scoped around `xd3d_r_present`; the renderer never invents a context from an ambient pointer. The capability checks registered native owner, currently executing live context/fiber, no marked context, drained object pass/queue/services, no tracked logical math scope and no open light group. It rechecks before the camera probe and before each reset/take/control. Nested Present invalidates the capability. Handoff/STOP invalidates it even during an OFF arm, and stale cleanup cannot clear a newer capability.
+
+The existing audited Present boundary is the no-open-generated/math-scope precondition for first enable; runtime-OFF scopes remain intentionally untracked. GPU draining does not join or otherwise make an inadmissible object context eligible. Rejected initial admission changes no mode. Losing admission after activation retains a busy failed benchmark and retries restoration only at a later admitted owner Present. No foreign caller may mutate the state machine.
+
+Each arm holds the original resolution, camera, graphics settings, workers, math policy and report policy, with60 settling frames then120 measured frames. The controller resets counters after settling and after the phase marker/GPU drain, then refreshes its start timestamp. It takes the end timestamp before drain/copy/format/report. Setup and all18 copied-counter rows per arm are outside the measured elapsed time. It does not force standard graphics; select the normal standard configuration before requesting the trial. No query gathering, replacement or new worker is enabled.
+
+Successful completion, cancellation or view loss restores the original census **enabled state**. Measurement counters are deliberately reset telemetry; pretrial counter contents are not restored. Failed restoration keeps status/request busy, records a boundary failure and retries after250ms at an eligible Present. The controller never claims a successful restoration after a failed control call. The client rejects any fresh boundary failure, missing/duplicate/malformed counters, inconsistent OFF/ON/OFF modes, impossible group accounting or moved-camera result. Historical failures are outside the trial slice.
+
+The schema is `[light-census-count] phase N KEY v0/v1/...`. Required rows are:
+
+| Key | Ordered values |
+| --- | --- |
+| window |120 measured frames, observer0/1/0 |
+| groups | entries, opened, completed, cancelled, candidates |
+| work | queries, traversals, removals, multi groups, multi traversals, candidate multi groups, candidate multi traversals |
+| orphans | queries, removals |
+| reads | total reads, total bytes, entry reads, entry bytes, maximum entry bytes, maximum group bytes |
+| storage | group bytes, counter bytes |
+| budget | nonpositive entry budget count |
+| tags / queries / traversals / candidate-traversals | bins0..8 and overflow9 |
+| mode | remove/update low-byte modes0..3 |
+| entry-admission / query-admission / removal-admission | OK, uninitialized, actual worker, wrong native owner, wrong live context, marked context, queue/service, ambient logical guard |
+| declines | reason enum0..27 in `xk_light_census.h` |
+| source-pcs / source-groups |16 bounded guest return-PC slots plus overflow slot |
+
+The separately callable8D7A6 suffix increments OK entry admission and the suffix decline, but is not an8D760 `entries` count. Worker entry/query declines do not include guest reads, input gathering or inferred group membership. OFF rows are zero except window/storage metadata. Reports use one static host counter copy (sizeof `xv_light_census_stats`; observer total accounting remains1,216 bytes), a bounded formatting buffer and no guest snapshots. Even maximum representable counters fit each512-byte production log record.
+
+While compiled in and idle, the additional Present scope and main-controller preflight each cost one flag load/branch (plus a zero-token cleanup branch in the scope); scheduler cancellation now also checks the armed-capability flag. It does not read native thread IDs when both flags are OFF. All three active diagnostic arms additionally check exact Present ownership and invalidate on scheduler handoffs. Those common admission costs are therefore not isolated by the ON-minus-OFF comparison. Existing ON metadata, atomic decline counts and logical math tracking are observer cost, and must be assessed with the actual FPS results. Compile-OFF removes the observer references entirely. Counts describe whole windows, not individual frame latency or traversal size: they cannot prove the cause of recurring frame drops or a parallel-query speedup.
+
+Validation additions: `tools/test_light_census_benchmark.py` compiles the actual benchmark state machine and unmodified `main.c` Present controller with ASan/UBSan, exercises both initial modes, exact120-frame count/timestamp boundaries, camera movement, native/context admission, cancellation, reset/take/mode/restore failures and busy retry. It verifies actual report parsing, suffix accounting, malformed/missing/duplicate/OFF-data rejection and maximum log lengths. `tools/test_remote.py` covers authenticated HTTP selection, fresh versus historical failure rejection and incomplete receipts. `tools/test_frame_acquisition.py` verifies this diagnostic changes none of the other overrides. The private original-oracle suite additionally exercises real Present capabilities with the actual object pool at zero/one/two workers and both owner-service directions, with ASan/UBSan and TSan. ARM ON/OFF builds include Present/Swap, benchmark, main and HTTP objects in addition to the original census closure. No device, emulator, final game link or live result is claimed.
