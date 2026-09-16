@@ -7,21 +7,52 @@
 #include "kelvin_clear.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 extern void xv_logf(const char *, ...);
 
+/* The game's own zeta surface (Z24S8, pitch layout as the clear path requires)
+ * mapped for depth testing; NULL when unbound or not that layout. */
+static uint32_t *map_zeta(const h2_kelvin_clear *c, uint32_t W, uint32_t H, uint32_t *pitch_out)
+{
+    if (!c->has_zeta_dma || (c->format & 0xFFFFu) != 0x128u) return NULL;
+    uint32_t pitch = c->pitch >> 16;
+    if (!pitch || (pitch & 3) || (c->zeta_offset & 3) || (uint64_t)W * 4 > pitch) return NULL;
+    uint64_t bytes = (uint64_t)(H - 1) * pitch + (uint64_t)W * 4;
+    h2_dma_object dma;
+    uint32_t phys;
+    if (bytes > UINT32_MAX || !h2_dma_load(c->read_instance, c->opaque, c->dma_zeta, &dma) ||
+        !h2_dma_resolve(&dma, c->zeta_offset, (uint32_t)bytes, 1, c->physical_bytes, &phys)) return NULL;
+    *pitch_out = pitch;
+    return c->map_physical(c->opaque, phys, (uint32_t)bytes);
+}
+
+/* Diagnostic knobs from env.txt (delivered by boot.c): XV_MENU_DEPTH=0 disables
+ * the depth test, XV_MENU_DETAIL=N logs the first N draws in full. */
+static int knob(const char *name, int dflt)
+{
+    const char *v = getenv(name);
+    return v && *v ? atoi(v) : dflt;
+}
+
 /* Private diagnostic: dump the composited back buffer so the rendered menu can
  * be inspected offline even when the frame never reaches the display flip. */
-static void dump_backbuffer(const uint8_t *target, uint32_t W, uint32_t H, uint64_t drawn)
+static void dump_backbuffer(const uint8_t *target, uint32_t W, uint32_t H, uint64_t drawn,
+                            uint32_t color_offset)
 {
-    FILE *fp = fopen("ux0:data/xita-halo2/menu-frame.bin", "wb");
+    /* One file per render target: the menu draws the backdrop and the UI layer
+     * into different colour buffers, so a single file would only ever hold the
+     * target of the most recent draw. */
+    char path[96];
+    snprintf(path, sizeof path, "ux0:data/xita-halo2/menu-frame-%08X.bin", color_offset);
+    FILE *fp = fopen(path, "wb");
     if (!fp) return;
     uint32_t hdr[4] = {W, H, W * 4, (uint32_t)drawn};
     int ok = fwrite(hdr, 1, sizeof hdr, fp) == sizeof hdr &&
              fwrite(target, 1, (size_t)W * H * 4, fp) == (size_t)W * H * 4;
     if (fclose(fp) == 0 && ok)
-        xv_logf("[h2/menu-render] private back-buffer dump W=%u H=%u after draw=%llu\n",
-                W, H, (unsigned long long)drawn);
+        xv_logf("[h2/menu-render] private back-buffer dump %s W=%u H=%u after draw=%llu\n",
+                path, W, H, (unsigned long long)drawn);
 }
 
 #define MAX_VERTS 65536u   /* menu item geometry uses large indexed draws (16-bit indices) */
@@ -152,17 +183,56 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     menu_raster_state rs;
     memset(&rs, 0, sizeof rs);
     rs.target.pixels = target; rs.target.width = W; rs.target.height = H; rs.target.pitch = W * 4;
-    rs.blend = MENU_BLEND_ALPHA;
     rs.clip_x0 = 0; rs.clip_y0 = 0; rs.clip_x1 = (int32_t)W - 1; rs.clip_y1 = (int32_t)H - 1;
 
-    static uint32_t g_tex[4][256 * 256];
+    /* Decoded texture scratch: the menu binds up to 640x480 linear images
+     * (screen-space passes) and 512x512 materials, so allow 1024x1024 per unit. */
+    enum { TEX_CAP = 1024 * 1024 };
+    static uint32_t *g_tex[4];
+    static int tex_alloc_failed;
     int textured = 0;
     for (unsigned u = 0; u < 4; ++u) {
+        if (!g_tex[u]) g_tex[u] = malloc((size_t)TEX_CAP * 4);
+        if (!g_tex[u]) {
+            if (!tex_alloc_failed++) xv_logf("[h2/menu-render] texture scratch allocation failed\n");
+            continue;
+        }
         uint32_t tw = 0, th = 0;
-        if (menu_texture_load(s, c, u, g_tex[u], 256 * 256, &tw, &th)) {
+        int linear = 0;
+        if (menu_texture_load(s, c, u, g_tex[u], TEX_CAP, &tw, &th, &linear)) {
             rs.tex[u].texels = g_tex[u]; rs.tex[u].width = tw; rs.tex[u].height = th;
+            rs.tex[u].texel_coords = linear;
             textured = 1;
         }
+    }
+
+    /* Captured NV2A fragment/ROP state: blend, alpha test, depth test. */
+    static int unsupported_blend_logged;
+    if (s->setup[0x304 / 4]) {
+        rs.sfactor = s->setup[0x344 / 4]; rs.dfactor = s->setup[0x348 / 4];
+        rs.equation = s->setup[0x350 / 4]; rs.blend_color = s->setup[0x34C / 4];
+        if (menu_raster_blend_supported(rs.sfactor, rs.dfactor, rs.equation)) {
+            rs.blend = MENU_BLEND_FUNC;
+        } else {
+            rs.blend = MENU_BLEND_ALPHA;
+            if (!unsupported_blend_logged++)
+                xv_logf("[h2/menu-render] unsupported blend sfactor=%04X dfactor=%04X equation=%04X; using src-alpha\n",
+                        rs.sfactor, rs.dfactor, rs.equation);
+        }
+    } else {
+        rs.blend = MENU_BLEND_OPAQUE;
+    }
+    rs.alpha_test = s->setup[0x300 / 4] & 1;
+    rs.alpha_func = s->setup[0x33C / 4];
+    rs.alpha_ref = (float)(s->setup[0x340 / 4] & 0xFF) / 255.0f;
+    static int depth_knob = -1;
+    if (depth_knob < 0) depth_knob = knob("XV_MENU_DEPTH", 1);
+    if (depth_knob && s->setup[0x30C / 4]) {
+        uint32_t zpitch = 0;
+        rs.depth.pixels = map_zeta(c, W, H, &zpitch);
+        rs.depth.width = W; rs.depth.height = H; rs.depth.pitch = zpitch;
+        rs.depth.func = s->setup[0x354 / 4];
+        rs.depth.write = s->setup[0x35C / 4] & 1;
     }
     static menu_combiner cb;
     menu_combiner_decode(s, &cb);
@@ -208,12 +278,40 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     }
 
     static uint64_t drawn;
-    if (drawn < 40 || !(drawn % 200))
-        xv_logf("[h2/menu-render] draw=%llu prim=%u verts=%u W=%u H=%u textured=%d color=%08X into back buffer\n",
-                (unsigned long long)drawn, r->primitive, n, W, H, textured, c->color_offset);
+    static int detail = -1;
+    if (detail < 0) detail = knob("XV_MENU_DETAIL", 40);
+    if (drawn < (uint64_t)detail || !(drawn % 200)) {
+        float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+        for (uint32_t i = 0; i < n; ++i) {
+            const menu_vertex_out *v = &g_verts[i];
+            if (v->x < x0) x0 = v->x;
+            if (v->x > x1) x1 = v->x;
+            if (v->y < y0) y0 = v->y;
+            if (v->y > y1) y1 = v->y;
+        }
+        char tex[96] = ""; size_t used = 0;
+        for (unsigned u = 0; u < 4; ++u) {
+            uint32_t code = 0, tw = 0, th = 0;
+            int en = menu_texture_describe(s, u, &code, &tw, &th);
+            if (en) used += (size_t)snprintf(tex + used, sizeof tex - used, " t%u=%02X/%ux%u%s", u, code, tw, th,
+                                              rs.tex[u].texels ? "" : "!");
+        }
+        const menu_vertex_out *v0 = &g_verts[0];
+        xv_logf("[h2/menu-render] draw=%llu prim=%u verts=%u W=%u H=%u textured=%d color=%08X bbox=%.0f,%.0f-%.0f,%.0f "
+                "v0=rgba(%.2f,%.2f,%.2f,%.2f)uv(%.2f,%.2f)z=%.3f blend=%d/%04X/%04X/%04X atest=%d/%03X/%.2f depth=%s/%03X/%d%s\n",
+                (unsigned long long)drawn, r->primitive, n, W, H, textured, c->color_offset, x0, y0, x1, y1,
+                v0->color[0], v0->color[1], v0->color[2], v0->color[3], v0->uv[0][0], v0->uv[0][1], v0->z,
+                rs.blend, rs.sfactor, rs.dfactor, rs.equation, rs.alpha_test, rs.alpha_func, rs.alpha_ref,
+                rs.depth.pixels ? "on" : (s->setup[0x30C / 4] ? "unmapped" : "off"), rs.depth.func, rs.depth.write, tex);
+    }
     ++drawn;
+    if (!(drawn % 500)) {
+        char stats[512];
+        menu_texture_stats(stats, sizeof stats);
+        xv_logf("[h2/menu-render] texture formats ok/unsupported/toolarge/nomap: %s\n", stats);
+    }
     /* Re-dump every 20 non-empty draws (overwrites): the last dump before a stall
      * holds the fully composited menu frame for offline inspection. */
-    if (drawn >= 20 && drawn % 20 == 0) dump_backbuffer(target, W, H, drawn);
+    if (drawn >= 20 && drawn % 20 == 0) dump_backbuffer(target, W, H, drawn, c->color_offset);
     return 1;
 }

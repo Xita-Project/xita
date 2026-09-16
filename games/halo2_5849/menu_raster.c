@@ -5,13 +5,19 @@
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static int32_t imin(int32_t a, int32_t b) { return a < b ? a : b; }
 static int32_t imax(int32_t a, int32_t b) { return a > b ? a : b; }
+static uint8_t to8(float v) { return (uint8_t)(clampf(v, 0.0f, 1.0f) * 255.0f + 0.5f); }
 
 static void sample_tex(const menu_texture *t, float u, float v, float out[4])
 {
     if (!t->texels || !t->width || !t->height) { out[0] = out[1] = out[2] = 0.0f; out[3] = 1.0f; return; }
-    u -= floorf(u); v -= floorf(v);                      /* wrap/repeat (NV2A default) */
-    int32_t x = (int32_t)(u * (float)t->width);
-    int32_t y = (int32_t)(v * (float)t->height);
+    int32_t x, y;
+    if (t->texel_coords) {                               /* linear image: texel units */
+        x = (int32_t)floorf(u); y = (int32_t)floorf(v);
+    } else {
+        u -= floorf(u); v -= floorf(v);                  /* wrap/repeat (NV2A default) */
+        x = (int32_t)(u * (float)t->width);
+        y = (int32_t)(v * (float)t->height);
+    }
     if (x < 0) x = 0;
     if (x >= (int32_t)t->width) x = (int32_t)t->width - 1;
     if (y < 0) y = 0;
@@ -21,6 +27,108 @@ static void sample_tex(const menu_texture *t, float u, float v, float out[4])
     out[1] = ((p >> 8) & 0xFF) / 255.0f;
     out[2] = (p & 0xFF) / 255.0f;
     out[3] = ((p >> 24) & 0xFF) / 255.0f;
+}
+
+/* GL compare enums shared by the alpha and depth tests: a OP b. */
+static int compare(uint32_t func, double a, double b)
+{
+    switch (func) {
+    case 0x200: return 0;
+    case 0x201: return a < b;
+    case 0x202: return a == b;
+    case 0x203: return a <= b;
+    case 0x204: return a > b;
+    case 0x205: return a != b;
+    case 0x206: return a >= b;
+    default:    return 1;                                /* 0x207 ALWAYS */
+    }
+}
+
+static int depth_pass(uint32_t func, uint32_t z, uint32_t stored)
+{
+    const int64_t eps = 16;                              /* 24-bit units; float z jitter between passes */
+    int64_t d = (int64_t)z - (int64_t)stored;
+    switch (func) {
+    case 0x200: return 0;
+    case 0x201: return d < 0;
+    case 0x202: return d >= -eps && d <= eps;
+    case 0x203: return d <= eps;
+    case 0x204: return d > 0;
+    case 0x205: return d < -eps || d > eps;
+    case 0x206: return d >= -eps;
+    default:    return 1;
+    }
+}
+
+static int factor_supported(uint32_t f)
+{
+    return f <= 1 || (f >= 0x300 && f <= 0x308) || (f >= 0x8001 && f <= 0x8004);
+}
+
+int menu_raster_blend_supported(uint32_t sfactor, uint32_t dfactor, uint32_t equation)
+{
+    if (!factor_supported(sfactor) || !factor_supported(dfactor)) return 0;
+    switch (equation) {
+    case 0x8006: case 0x8007: case 0x8008: case 0x800A: case 0x800B: case 0xF005: case 0xF006: return 1;
+    default: return 0;
+    }
+}
+
+static void blend_factor(uint32_t f, const float s[4], const float d[4], const float cc[4], float out[4])
+{
+    for (unsigned k = 0; k < 4; ++k) {
+        float v;
+        switch (f) {
+        case 0:      v = 0.0f; break;
+        case 0x300:  v = s[k]; break;
+        case 0x301:  v = 1.0f - s[k]; break;
+        case 0x302:  v = s[3]; break;
+        case 0x303:  v = 1.0f - s[3]; break;
+        case 0x304:  v = d[3]; break;
+        case 0x305:  v = 1.0f - d[3]; break;
+        case 0x306:  v = d[k]; break;
+        case 0x307:  v = 1.0f - d[k]; break;
+        case 0x308:  v = k == 3 ? 1.0f : fminf(s[3], 1.0f - d[3]); break; /* SRC_ALPHA_SATURATE */
+        case 0x8001: v = cc[k]; break;
+        case 0x8002: v = 1.0f - cc[k]; break;
+        case 0x8003: v = cc[3]; break;
+        case 0x8004: v = 1.0f - cc[3]; break;
+        default:     v = 1.0f; break;                     /* 1 = ONE */
+        }
+        out[k] = v;
+    }
+}
+
+static void blend_pixel(const menu_raster_state *st, const float src[4], uint8_t *p)
+{
+    float dst[4] = {p[2] / 255.0f, p[1] / 255.0f, p[0] / 255.0f, p[3] / 255.0f};
+    float out[4];
+    if (st->blend == MENU_BLEND_OPAQUE) {
+        memcpy(out, src, sizeof out);
+    } else {
+        uint32_t sf = 0x302, df = 0x303, eq = 0x8006;    /* MENU_BLEND_ALPHA */
+        float cc[4] = {0, 0, 0, 0}, fs[4], fd[4];
+        if (st->blend == MENU_BLEND_FUNC) {
+            sf = st->sfactor; df = st->dfactor; eq = st->equation;
+            cc[0] = ((st->blend_color >> 16) & 0xFF) / 255.0f;
+            cc[1] = ((st->blend_color >> 8) & 0xFF) / 255.0f;
+            cc[2] = (st->blend_color & 0xFF) / 255.0f;
+            cc[3] = (st->blend_color >> 24) / 255.0f;
+        }
+        blend_factor(sf, src, dst, cc, fs);
+        blend_factor(df, src, dst, cc, fd);
+        for (unsigned k = 0; k < 4; ++k) {
+            float s = clampf(src[k], 0.0f, 1.0f) * fs[k], d = dst[k] * fd[k];
+            switch (eq) {
+            case 0x8007: out[k] = fminf(clampf(src[k], 0.0f, 1.0f), dst[k]); break; /* MIN */
+            case 0x8008: out[k] = fmaxf(clampf(src[k], 0.0f, 1.0f), dst[k]); break; /* MAX */
+            case 0x800A: out[k] = s - d; break;                                      /* SUBTRACT */
+            case 0x800B: case 0xF005: out[k] = d - s; break;                         /* REVERSE_SUBTRACT */
+            default:     out[k] = s + d; break;                                      /* ADD (0x8006/0xF006) */
+            }
+        }
+    }
+    p[0] = to8(out[2]); p[1] = to8(out[1]); p[2] = to8(out[0]); p[3] = to8(out[3]);
 }
 
 void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
@@ -42,6 +150,9 @@ void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
     int32_t cx1 = imin((int32_t)tg->width - 1, imin(maxx, st->clip_x1));
     int32_t cy1 = imin((int32_t)tg->height - 1, imin(maxy, st->clip_y1));
 
+    const menu_depth *dp = st->depth.pixels ? &st->depth : NULL;
+    if (dp && (dp->width < tg->width || dp->height < tg->height)) dp = NULL;
+
     float iwa = a->w > 0.0f ? 1.0f / a->w : 1.0f;
     float iwb = b->w > 0.0f ? 1.0f / b->w : 1.0f;
     float iwc = c->w > 0.0f ? 1.0f / c->w : 1.0f;
@@ -50,12 +161,22 @@ void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
     for (int32_t py = cy0; py <= cy1; ++py) {
         float fy = (float)py + 0.5f;
         uint8_t *row = tg->pixels + (uint32_t)py * tg->pitch;
+        uint32_t *zrow = dp ? (uint32_t *)(void *)((uint8_t *)dp->pixels + (uint32_t)py * dp->pitch) : NULL;
         for (int32_t px = cx0; px <= cx1; ++px) {
             float fx = (float)px + 0.5f;
             float w0 = ((b->x - fx) * (c->y - fy) - (b->y - fy) * (c->x - fx)) * inv_area;
             float w1 = ((c->x - fx) * (a->y - fy) - (c->y - fy) * (a->x - fx)) * inv_area;
             float w2 = 1.0f - w0 - w1;
             if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) continue;
+
+            /* Window z interpolates linearly in screen space (NV2A fixed 24-bit). */
+            uint32_t z24 = 0;
+            if (zrow) {
+                double z = (double)w0 * a->z + (double)w1 * b->z + (double)w2 * c->z;
+                z = z < 0.0 ? 0.0 : z > 1.0 ? 1.0 : z;
+                z24 = (uint32_t)(z * 16777215.0 + 0.5);
+                if (!depth_pass(dp->func, z24, zrow[px] >> 8)) continue;
+            }
 
             float iw = w0 * iwa + w1 * iwb + w2 * iwc;
             if (iw <= 0.0f) continue;
@@ -77,17 +198,11 @@ void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
             else
                 for (unsigned k = 0; k < 4; ++k) frag[k] = clampf(diffuse[k], 0.0f, 1.0f);
 
-            uint8_t *p = row + (uint32_t)px * 4;
-            if (st->blend == MENU_BLEND_ALPHA) {
-                float ca = clampf(frag[3], 0.0f, 1.0f), ia = 1.0f - ca;
-                p[0] = (uint8_t)(clampf(frag[2], 0, 1) * 255.0f * ca + p[0] * ia);
-                p[1] = (uint8_t)(clampf(frag[1], 0, 1) * 255.0f * ca + p[1] * ia);
-                p[2] = (uint8_t)(clampf(frag[0], 0, 1) * 255.0f * ca + p[2] * ia);
-            } else {
-                p[0] = (uint8_t)(clampf(frag[2], 0, 1) * 255.0f);
-                p[1] = (uint8_t)(clampf(frag[1], 0, 1) * 255.0f);
-                p[2] = (uint8_t)(clampf(frag[0], 0, 1) * 255.0f);
-            }
+            if (st->alpha_test && !compare(st->alpha_func, (double)clampf(frag[3], 0.0f, 1.0f), (double)st->alpha_ref))
+                continue;
+            if (zrow && dp->write) zrow[px] = (z24 << 8) | (zrow[px] & 0xFF);
+
+            blend_pixel(st, frag, row + (uint32_t)px * 4);
         }
     }
 }

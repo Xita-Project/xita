@@ -33,11 +33,39 @@ static void test_dxt3_alpha(void)
     assert(A(out[0])==255 && R(out[0])==255);   /* texel0 opaque white */
     assert(A(out[1])==0);                        /* texel1 transparent */
 }
+static void test_dxt5_alpha(void)
+{
+    /* a0=255 > a1=0: 8-entry ramp; index bits: texel0 -> 0 (255), texel1 -> 1 (0), texel2 -> 2 (219) */
+    uint8_t blk[16] = {0};
+    blk[0] = 255; blk[1] = 0;
+    blk[2] = (uint8_t)((1u << 3) | (2u << 6)); /* texel1 idx1, texel2 idx2 (low 2 bits of idx2) */
+    blk[3] = 0;                                 /* idx2 high bit 0 */
+    blk[8] = 0xFF; blk[9] = 0xFF;               /* white colour, indices 0 */
+    uint32_t out[16];
+    menu_dxt5_block(blk, out, 4);
+    assert(A(out[0]) == 255 && R(out[0]) == 255);
+    assert(A(out[1]) == 0);
+    assert(A(out[2]) == (6 * 255 + 1 * 0) / 7);   /* ramp entry 2 */
+}
+static void test_a8_and_a4r4g4b4_layouts(void)
+{
+    /* A8 texel is alpha-only with black colour; A4R4G4B4 expands nibbles to 0..255. */
+    fmt_desc d;
+    assert(describe_format(0x19, &d) && d.kind == PF_A8 && d.bytes == 1 && !d.linear);
+    uint8_t a8 = 0x7F;
+    assert(convert(PF_A8, &a8) == 0x7F000000u);
+    uint8_t px[2] = {0x2F, 0xA1};               /* 0xA12F: A=0xA R=1 G=2 B=0xF */
+    assert(convert(PF_A4R4G4B4, px) == 0xAA1122FFu);
+    assert(describe_format(0x1F, &d) && d.linear && d.kind == PF_A8);
+    assert(describe_format(0x0B, &d) && d.kind == PF_P8 && d.bytes == 1 && !d.linear);
+}
 int main(void)
 {
     test_dxt1_solid();
     test_dxt1_indices();
     test_dxt3_alpha();
+    test_dxt5_alpha();
+    test_a8_and_a4r4g4b4_layouts();
     printf("menu_texture_test: all assertions passed\n");
     return 0;
 }
