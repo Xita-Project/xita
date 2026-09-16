@@ -13,6 +13,7 @@
 #include "quad_gxm.h"
 #endif
 #include <string.h>
+#include <stdlib.h>
 
 #define DEVICE 0x404FE0u
 #define MINIPORT (DEVICE + 0x1C28u)
@@ -601,6 +602,33 @@ void __wrap_xk_AvSetDisplayMode(xctx *c)
 
 static int channel_idle(void)
 { return channel_ready && !channel.bootstrap && !channel.stream.remaining && channel.put == channel.stream.get; }
+
+/* Halo CE implements xd3d_vblank_kick in xd3d.c to advance the frame-pacing vblank when the game yields
+ * its wait loop; xd3d.c is not linked into the host-channel (H2) build, so the weak hook in
+ * xk_NtYieldExecution / xk_wait was inert here. Post-intro the game advances its 64-bit frame counter
+ * (0x485AB0 - the engine clock the menu build and its resource pacing read all over 0x12Bxxx) ONLY
+ * through the flip-completion vblank. At the menu the game submits no flip, so the counter freezes and
+ * the frame-paced loop (and the streaming/task handshake it drives) deadlocks. A real display's vblank
+ * fires regardless of flips; mirror that with a real-time-paced free-running vblank - but only once the
+ * counter has actually stalled with the channel idle and no flip in flight, so the intro (which flips
+ * every frame and advances the counter that way) is untouched. Opt-in (XV_MENU_VBLANK=1) while under
+ * test so default builds are byte-identical. */
+int xd3d_vblank_kick(xctx *c, uint32_t eip)
+{
+    extern uint64_t xk_os_monotonic_us(void);
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("XV_MENU_VBLANK"); on = e ? atoi(e) : 0; }
+    if (!on || !c || !initialization_flip_done || active_flip_queued || software_active || !channel_idle())
+        return 0;
+    static uint64_t frozen_us; static uint32_t seen_count, freerun_swaps;
+    uint64_t now = xk_os_monotonic_us();
+    uint32_t count = X_M32(0x485AB0);
+    if (count != seen_count) { seen_count = count; frozen_us = now; return 0; } /* counter still advancing */
+    if (!frozen_us || now - frozen_us < 33000u) return 0;                       /* only once stalled ~2 frames */
+    frozen_us = now;
+    signal_game_vblank(c, count + 1u, ++freerun_swaps, 1u, eip);
+    return 1;
+}
 void h2_host_miniport_shutdown(xctx *c)
 {
     const uint32_t ip = 0x3FE4CBu, mini = c->r[0];
