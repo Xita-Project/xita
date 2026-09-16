@@ -1463,7 +1463,7 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
             const char *e=getenv("XV_PROFILE_BATCH");
             report_batch=!e || atoi(e)!=0;
         }
-        int grouped=report_batch && xv_log_report_begin();
+        int grouped=report_batch && xv_log_report_begin_frame(frame);
         { extern void xv_native_math_report(unsigned); extern void xd3d_prepare_report(unsigned);
           xv_native_math_report(g_t_frames); xd3d_prepare_report(g_t_frames); }
         { extern void xv_hle_dispatch_report(unsigned) __attribute__((weak));
@@ -1488,7 +1488,18 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
                g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), xv_pump_us_acc / 60000.0, g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1), g_t_frames, xv_n_kicks / (g_t_frames ? g_t_frames : 1), xv_n_fires / (g_t_frames ? g_t_frames : 1), xv_t_vbcb_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_draw_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_present_us / 1000.0 / (g_t_frames ? g_t_frames : 1)); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; xv_n_kicks = xv_n_fires = 0; xv_t_vbcb_us = xv_t_draw_us = xv_t_present_us = 0; } g_dec_n = 0; g_dec_us = 0; xv_texture_worker_report(); xv_geometry_worker_report();
         g_t_frames = 0; g_t_game_acc = g_t_render_acc = 0; xv_pump_us_acc = 0;
         if (grouped) xv_log_report_end();
-        UI_LOG("[profile-cost] frame %u batch %d report-us %llu; includes formatting and synchronous log writes, excludes this line\n",
-            frame,grouped,(unsigned long long)(t_us()-report_start));
+        uint64_t report_us=t_us()-report_start;
+        xv_log_status logs; xv_log_get_status(&logs);
+        if(logs.state==XV_LOG_RUNNING || logs.state==XV_LOG_ERROR) {
+            int cost_group=xv_log_report_begin_frame(frame);
+            UI_LOG("[profile-cost] frame %u batch %d producer-us %llu; formatting/enqueue/backpressure, excludes worker output and this line\n",
+                frame,grouped,(unsigned long long)report_us);
+            UI_LOG("[log-worker] cumulative accepted/written/synced %llu/%llu/%llu queued %u high %u error %d; waits %llu %.3f ms console %.3f file-wait %.3f file %.3f sync %.3f ms\n",
+                (unsigned long long)logs.accepted,(unsigned long long)logs.written,(unsigned long long)logs.synced,
+                logs.queued,logs.high_water,logs.error,(unsigned long long)logs.backpressure_count,
+                logs.backpressure_us/1000.0,logs.console_us/1000.0,logs.file_wait_us/1000.0,logs.file_us/1000.0,logs.sync_us/1000.0);
+            if(cost_group) xv_log_report_end();
+        } else UI_LOG("[profile-cost] frame %u batch %d report-us %llu; includes formatting and synchronous log writes, excludes this line\n",
+            frame,grouped,(unsigned long long)report_us);
     }
 }

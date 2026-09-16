@@ -444,7 +444,11 @@ void xv_hle_D3DDevice_Present(xctx *c)
     { extern void xv_phase_frame(unsigned) __attribute__((weak)); if (xv_phase_frame) xv_phase_frame(g_dev.frame); }
     hist_level_track();
     xd3d_r_present(g_dev.frame, g_dev.draws);
-    if (g_dev.frame % 60 == 0) { if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
+    if (g_dev.frame % 60 == 0) {
+        extern int xv_log_report_begin_async_frame(unsigned) __attribute__((weak));
+        extern void xv_log_report_end(void) __attribute__((weak));
+        int grouped=xv_log_report_begin_async_frame && xv_log_report_end && xv_log_report_begin_async_frame(g_dev.frame);
+        if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */
             const float (*m)[4] = g_vp_rows;
             for (int i = 0; i < 3; ++i) { camfwd[i] = m[2][i];
@@ -468,7 +472,9 @@ void xv_hle_D3DDevice_Present(xctx *c)
                 case 2: case 3: case 4: w = X_M32(0x271154 + 4 * (i - 2)); break; case 5: w = X_M32(0x271150 + 0x60); break;
                 case 6: case 7: case 8: w = X_M32(0x2714DC + 0x54 + 4 * (i - 6)); break; case 9: case 10: case 11: w = X_M32(0x2714DC + 0x60 + 4 * (i - 9)); break; } memcpy(&f[i], &w, 4); }
             D3DLOG("  director2: dt %.4f trans %.3f | cmd flags %08X pos %.2f %.2f %.2f +60 %.3f +64 %08X | obs cmdp %08X +54 %.2f %.2f %.2f +60 %.2f %.2f %.2f +70 %02X %02X\n",
-                   f[0], f[1], X_M32(0x271150), f[2], f[3], f[4], f[5], X_M32(0x271150 + 0x64), X_M32(0x2714DC + 4), f[6], f[7], f[8], f[9], f[10], f[11], X_M8(0x2714DC + 0x70), X_M8(0x2714DC + 0x71)); } }
+                   f[0], f[1], X_M32(0x271150), f[2], f[3], f[4], f[5], X_M32(0x271150 + 0x64), X_M32(0x2714DC + 4), f[6], f[7], f[8], f[9], f[10], f[11], X_M8(0x2714DC + 0x70), X_M8(0x2714DC + 0x71)); }
+        if(grouped) xv_log_report_end();
+    }
     {   /* --trace-funcs: count only during the requested frame, dump at its Present */
         extern int xv_trace_funcs; extern int xv_trace_func_frame(void); extern void xv_trace_func_reset(void); extern void xv_trace_func_dump(const char *);
         int ff = xv_trace_func_frame();

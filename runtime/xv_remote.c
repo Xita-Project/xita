@@ -169,10 +169,22 @@ static void serve(int s)
         if(!strncmp(target,"/update",7)) {
             if(xv_benchmark_status()||xv_benchmark_remote_busy()) {reply(s,409,"Updates disabled during benchmark\n");return;}
             if(!strcmp(method,"GET")&&!strcmp(target,"/update")) {
-                char body[384];xv_update_json(body,sizeof body);
+                char body[768];xv_update_json(body,sizeof body);
                 size_t n=strlen(body);
                 if(n && body[n-1]=='}')snprintf(body+n-1,sizeof body-n+1,",\"handoff\":%u}",
                     xv_update_requested()?LOAD(&handoff):XV_UPDATE_IDLE);
+                /* Read-only queue telemetry remains available throughout the
+                 * logger drain. Existing handoff enum values are unchanged. */
+                extern void xv_log_get_status(xv_log_status *) __attribute__((weak));
+                if(xv_log_get_status) {
+                    xv_log_status log; xv_log_get_status(&log); n=strlen(body);
+                    if(n && body[n-1]=='}')snprintf(body+n-1,sizeof body-n+1,
+                        ",\"log\":{\"state\":%u,\"error\":%d,\"startup_error\":%d,\"open\":%u,\"queued\":%u,\"accepted\":%llu,\"written\":%llu,\"synced\":%llu,\"failed\":%llu,\"offset\":%u,\"report\":%llu,\"frame\":%u,\"chunk\":%u,\"bytes\":[%llu,%llu,%llu]}}",
+                        log.state,log.error,log.startup_error,log.open_report,log.queued,(unsigned long long)log.accepted,(unsigned long long)log.written,
+                        (unsigned long long)log.synced,(unsigned long long)log.failed_sequence,log.failed_file_offset,
+                        (unsigned long long)log.pending_report,log.pending_frame,log.pending_chunk,
+                        (unsigned long long)log.accepted_bytes,(unsigned long long)log.written_bytes,(unsigned long long)log.synced_bytes);
+                }
                 if(!header(s,200,"application/json",strlen(body),NULL))send_all(s,body,strlen(body),remote_now()+2000000);
             } else if(!strcmp(method,"POST")&&!strncmp(target,"/update/begin?size=",19)) {
                 char *sha=strstr(target+19,"&sha256="),*abi=sha?strstr(sha+8,"&contract="):NULL;unsigned size;

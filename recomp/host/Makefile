@@ -9,7 +9,7 @@ PYTHON ?= python3
 test-log-batch: build/log_batch_test
 	./build/log_batch_test
 
-build/log_batch_test: log_batch_test.c ../../runtime/xv_log.c ../../runtime/xv_log.h
+build/log_batch_test: log_batch_test.c ../../runtime/xv_log.c ../../runtime/xv_log.h ../../runtime/xv_log_async.inc
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK)/arm-vita-eabi/include log_batch_test.c -o $@
 
