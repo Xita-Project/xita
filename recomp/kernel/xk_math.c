@@ -90,6 +90,10 @@ void xv_native_math_report(unsigned frames)
 #endif
     extern unsigned xv_math_bounds_calls(void) __attribute__((weak));
     if (xv_math_bounds_calls) XK_LOG("[native-bounds] %u frames: %u calls\n", frames, xv_math_bounds_calls());
+    extern int xv_native_polygon_edge_available(void) __attribute__((weak));
+    extern unsigned xv_math_polygon_edge_calls(void) __attribute__((weak));
+    if(xv_native_polygon_edge_available && xv_native_polygon_edge_available() && xv_math_polygon_edge_calls)
+        XK_LOG("[polygon-edge] %u frames: %u native calls\n",frames,xv_math_polygon_edge_calls());
     extern unsigned xv_math_clip_calls(void) __attribute__((weak));
     extern unsigned xv_math_clip_register_calls(void) __attribute__((weak));
     if (xv_math_clip_calls) XK_LOG("[native-clip] %u frames: %u calls\n", frames, xv_math_clip_calls());

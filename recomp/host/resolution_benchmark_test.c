@@ -3,6 +3,13 @@
 #include "../../runtime/xv_benchmark.c"
 void xv_logf(const char *fmt,...) { (void)fmt; }
 static int optimization=-1;
+#ifndef TEST_NO_POLYGON_EDGE
+static unsigned polygon_edge_inits;
+static int polygon_edge_ready;
+void xv_native_polygon_edge_init(void) { assert(!polygon_edge_inits++);polygon_edge_ready=1; }
+int xv_native_polygon_edge_available(void) { return polygon_edge_ready; }
+void xv_native_polygon_edge_override(int enabled) { (void)enabled;assert(polygon_edge_ready); }
+#endif
 #ifndef TEST_NO_OBJECT_POSE
 static int object_pose_ready=1;
 int xv_object_pose_available(void) { return object_pose_ready; }
@@ -189,7 +196,7 @@ int main(void)
     xv_benchmark_remote_poll(0);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==-1);
     xv_benchmark_remote_poll(1);
-    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_MATERIAL_PACKET+1)==-1);
+    assert(xv_benchmark_remote_request(0)==-1 && xv_benchmark_remote_request(XV_BENCH_POLYGON_EDGE+1)==-1);
     assert(xv_benchmark_remote_request(XV_BENCH_RESOLUTION)==0 && !b.request && !b.active);
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_remote_poll(0);assert(!xv_benchmark_remote_busy());
@@ -200,9 +207,20 @@ int main(void)
     assert(xv_benchmark_remote_request(XV_BENCH_FLARE)==-1);
     xv_benchmark_toggle();assert(xv_benchmark_step(now,544,1,view)==360);
     xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
-    unsigned kinds[]={XV_BENCH_OBJECT_POSE,XV_BENCH_MATERIAL_PACKET,XV_BENCH_INDEX_REUSE,XV_BENCH_BLEND_REPLACE,XV_BENCH_OBJECT_QUAT,XV_BENCH_MODEL_HIERARCHY,XV_BENCH_OBJECT_POINT,XV_BENCH_OBJECT_WAIT,XV_BENCH_OBJECT_LOCK,XV_BENCH_OBJECT_MATH,XV_BENCH_DEPTH_PREPARE,XV_BENCH_VERTEX_PREPARE,XV_BENCH_OBJECT_JOBS,XV_BENCH_PREP_BUNDLE,XV_BENCH_GUEST_PHASES,XV_BENCH_SNAPSHOT_WORKER,XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
+#ifndef TEST_NO_POLYGON_EDGE
+    assert(!polygon_edge_inits);
+    assert(!xv_benchmark_remote_request(XV_BENCH_POLYGON_EDGE));
+    assert(!polygon_edge_inits); /* Network admission cannot bind native ownership. */
+    xv_benchmark_remote_poll(1);
+    assert(!xv_benchmark_step(now,544,0,view));
+    assert(!polygon_edge_inits && !xv_benchmark_remote_busy());
+#endif
+    unsigned kinds[]={XV_BENCH_POLYGON_EDGE,XV_BENCH_OBJECT_POSE,XV_BENCH_MATERIAL_PACKET,XV_BENCH_INDEX_REUSE,XV_BENCH_BLEND_REPLACE,XV_BENCH_OBJECT_QUAT,XV_BENCH_MODEL_HIERARCHY,XV_BENCH_OBJECT_POINT,XV_BENCH_OBJECT_WAIT,XV_BENCH_OBJECT_LOCK,XV_BENCH_OBJECT_MATH,XV_BENCH_DEPTH_PREPARE,XV_BENCH_VERTEX_PREPARE,XV_BENCH_OBJECT_JOBS,XV_BENCH_PREP_BUNDLE,XV_BENCH_GUEST_PHASES,XV_BENCH_SNAPSHOT_WORKER,XV_BENCH_GUEST_AFFINITY,XV_BENCH_FLARE_QUERY_OVERLAP,XV_BENCH_HLE_DISPATCH,XV_BENCH_OBJECT_SCAN,XV_BENCH_MATRIX_NEON,XV_BENCH_TEXTURE_STATE,XV_BENCH_POINT_MATH,XV_BENCH_EARLY_VISIBILITY,XV_BENCH_VERTEX_WORKER,XV_BENCH_FLARE,XV_BENCH_MODEL_PALETTE,XV_BENCH_OBJECT_BASIS};
     for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++) {
         int compiled=1;
+#ifdef TEST_NO_POLYGON_EDGE
+        if(kinds[i]==XV_BENCH_POLYGON_EDGE)compiled=0;
+#endif
 #ifdef TEST_NO_OBJECT_POSE
         if(kinds[i]==XV_BENCH_OBJECT_POSE)compiled=0;
 #endif
@@ -280,6 +298,7 @@ int main(void)
         assert(xv_benchmark_compare_index_reuse()==(kinds[i]==XV_BENCH_INDEX_REUSE));
         assert(xv_benchmark_compare_object_pose()==(kinds[i]==XV_BENCH_OBJECT_POSE));
         assert(xv_benchmark_compare_material_packet()==(kinds[i]==XV_BENCH_MATERIAL_PACKET));
+        assert(xv_benchmark_compare_polygon_edge()==(kinds[i]==XV_BENCH_POLYGON_EDGE));
         assert(xv_benchmark_compare_object_quat()==(kinds[i]==XV_BENCH_OBJECT_QUAT));
         assert(xv_benchmark_compare_model_hierarchy()==(kinds[i]==XV_BENCH_MODEL_HIERARCHY));
         assert(xv_benchmark_compare_object_lock()==(kinds[i]==XV_BENCH_OBJECT_LOCK));
@@ -303,6 +322,29 @@ int main(void)
         xv_benchmark_compare_toggle();assert(xv_benchmark_step(now,360,1,view)==360 && optimization==-1);
         xv_benchmark_applied(now,360);assert(!xv_benchmark_remote_busy() && !remote_kind);
     }
+#ifndef TEST_NO_POLYGON_EDGE
+    assert(polygon_edge_inits==1);
+    for(unsigned stop=0;stop<3;stop++) {
+        unsigned initial_switches=switches;
+        assert(!xv_benchmark_remote_request(XV_BENCH_POLYGON_EDGE));
+        xv_benchmark_remote_poll(1);
+        assert(xv_benchmark_step(now,544,1,view)==544 && optimization==0);
+        assert(!strcmp(tag(),"polygon-edge-compare"));
+        xv_benchmark_applied(now,544);
+        for(unsigned i=0;i<(stop?181u:540u);i++) {
+            now+=100000;unsigned next=xv_benchmark_step(now,544,1,view);
+            if(next)xv_benchmark_applied(now,next);
+        }
+        if(stop) {
+            assert(optimization==1);
+            if(stop==1)xv_benchmark_toggle();
+            assert(xv_benchmark_step(now,544,stop==1,view)==544);
+            xv_benchmark_applied(now,544);
+        }
+        assert(optimization==-1 && !xv_benchmark_active() && !remote_kind);
+        assert(switches-initial_switches==(stop?3u:4u));
+    }
+#endif
 #ifndef TEST_NO_OBJECT_POSE
     object_pose_ready=0;
     unsigned before_object_pose=switches;
