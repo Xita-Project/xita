@@ -351,8 +351,9 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     /* Post-process diagnostic: the first few full-screen quads (screen-space passes
      * that sample the 640x480 scene image) get their complete combiner state logged,
      * since they decide the presented frame's tone. */
-    static int fullscreen_dumps;
-    if (fullscreen_dumps < 3 && n >= 4 && n <= 6 && (r->primitive == 6 || r->primitive == 7 || r->primitive == 8)) {
+    static int fullscreen_dumps, fullscreen_seen;
+    if (n >= 4 && n <= 6 && (r->primitive == 6 || r->primitive == 7 || r->primitive == 8) &&
+        (fullscreen_dumps < 3 || !(++fullscreen_seen % 60))) {   /* first three, then every 60th (fade level over time) */
         float fx0 = 1e9f, fy0 = 1e9f, fx1 = -1e9f, fy1 = -1e9f;
         for (uint32_t i = 0; i < n; ++i) {
             if (g_verts[i].x < fx0) fx0 = g_verts[i].x;
@@ -389,9 +390,11 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
         menu_texture_cache_stats(&hits, &misses, &bytes);
         xv_logf("[h2/menu-render] texture formats ok/unsupported/toolarge/nomap: %s; cache hits=%llu misses=%llu bytes=%lu\n",
                 stats, (unsigned long long)hits, (unsigned long long)misses, (unsigned long)bytes);
-        xv_logf("[h2/menu-render] profile draws=%llu acquire=%llums transform=%llums raster=%llums now=%llums\n",
+        extern uint64_t h2_menu_yield_us, h2_menu_yields;
+        xv_logf("[h2/menu-render] profile draws=%llu acquire=%llums transform=%llums raster=%llums yielded=%llums/%llu now=%llums\n",
                 (unsigned long long)prof_draws, (unsigned long long)(prof_acquire_us / 1000),
                 (unsigned long long)(prof_transform_us / 1000), (unsigned long long)(prof_raster_us / 1000),
+                (unsigned long long)(h2_menu_yield_us / 1000), (unsigned long long)h2_menu_yields,
                 (unsigned long long)(h2_graphics_time_us() / 1000));
     }
     /* Re-dump every 20 non-empty draws (overwrites): the last dump before a stall

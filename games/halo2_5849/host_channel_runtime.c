@@ -644,6 +644,7 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip)
  * callback at real-time ~30 Hz from between draws as well, as the hardware
  * interrupt would mid-frame. Same gate (XV_MENU_VBLANK), same callback and record. */
 #if H2_MENU_RENDER
+uint64_t h2_menu_yield_us, h2_menu_yields;   /* time handed to other guest fibers from the render tick */
 static void vblank_pace_in_render(void)
 {
     extern uint64_t xk_os_monotonic_us(void);
@@ -661,6 +662,24 @@ static void vblank_pace_in_render(void)
      * so no swap is fabricated while a real flip is queued. */
     uint32_t count = X_M32(0x485AB0);
     signal_game_vblank(active_context, count + 1u, X_M32(0x55E6B8), 0u, 0x3FAC58u);
+    /* Guest threads are cooperative fibers: nothing else runs while this fiber
+     * is inside the rasterizer, and the next menu screen streams its resources
+     * on the loader thread. Hand the scheduler a turn once per vblank. */
+    static int yield_every = -1, yield_burst = -1;
+    static unsigned ticks;
+    if (yield_every < 0) { const char *e = getenv("XV_MENU_YIELD"); yield_every = e ? atoi(e) : 1; }
+    if (yield_burst < 0) { const char *e = getenv("XV_MENU_YIELD_BURST"); yield_burst = e ? atoi(e) : 8; }
+    if (yield_every > 0 && !(++ticks % (unsigned)yield_every)) {
+        /* One yield = one scheduler round = one step of each other fiber. The
+         * menu's map-cache copy task reads 0x800 bytes per step, so a single
+         * round per vblank capped it at ~30 reads/s; give it a burst of rounds. */
+        extern void xk_yield(void);
+        xctx *saved = active_context;
+        uint64_t t0 = xk_os_monotonic_us();
+        for (int i = 0; i < (yield_burst > 0 ? yield_burst : 1); ++i) xk_yield();
+        h2_menu_yield_us += xk_os_monotonic_us() - t0; ++h2_menu_yields;
+        active_context = saved;
+    }
     busy = 0;
 }
 /* Rasterizer row hook (calling thread only): big triangles and full-screen
@@ -1045,27 +1064,39 @@ int h2_host_channel_bus(xctx *c, uint32_t ip, uint32_t address, unsigned width,
         address != BAR + 0x3240 && address != BAR + 0x3244 && address != BAR + 0x400700) return 0;
     if (!channel_ready || width != 4 || (write && address != BAR + 0x800040))
         reject(c, ip, address, *value);
+    /* The consumer may yield to other guest fibers mid-frame (menu pacing); a PUT
+     * written by another fiber meanwhile is recorded and consumed by the active
+     * submit once it finishes, never by re-entering the consumer. */
+    static int consuming, pending;
+    static uint32_t pending_put;
+    if (write && consuming) { pending_put = *value; pending = 1; return 1; }
     active_context = c;
     if (write) {
-        h2_push_fault fault;
-        enum h2_push_result result = h2_host_channel_submit(&channel, *value, 1000000, &fault);
-        if (result == H2_PUSH_METHOD_REJECTED && fault.method == 0x130 && !fault.word &&
-            fault.subchannel < 8 && channel.commands.bound[fault.subchannel] == 1 &&
-            (active_flip_queued ? complete_active_flip(c, fault.address) :
-                                  complete_initialization_vblank(c, fault.address)))
-            result = h2_host_channel_submit(&channel, *value, 1000000, &fault);
-        xv_logf("[h2/channel] PUT=%08X GET=%08X result=%d source=%08X word=%08X sub=%u method=%04X clears=%llu pixels=%llu\n",
-                *value, h2_host_channel_get(&channel), result, fault.address, fault.word,
-                fault.subchannel, fault.method, (unsigned long long)channel.clear.completed_clears,
-                (unsigned long long)channel.clear.written_pixels);
-        xv_logf("[h2/channel] semaphore releases=%llu last=%08X value=%08X\n",
-                (unsigned long long)channel.commands.semaphore_releases,
-                channel.commands.last_semaphore_address, channel.commands.last_semaphore_value);
-        xv_logf("[h2/channel] software updates=%llu valid=%X dxt1_noise=%u zcull=%08X rop=%08X\n",
-                (unsigned long long)channel.commands.software_updates, channel.commands.software_valid,
-                channel.commands.dxt1_noise, channel.commands.zcull_debug5, channel.commands.rop_control);
-        if (result != H2_PUSH_COMPLETE && result != H2_PUSH_NEED_DATA)
-            reject(c, ip, address, *value);
+        uint32_t put = *value;
+        consuming = 1;
+        do {
+            pending = 0;
+            h2_push_fault fault;
+            enum h2_push_result result = h2_host_channel_submit(&channel, put, 1000000, &fault);
+            if (result == H2_PUSH_METHOD_REJECTED && fault.method == 0x130 && !fault.word &&
+                fault.subchannel < 8 && channel.commands.bound[fault.subchannel] == 1 &&
+                (active_flip_queued ? complete_active_flip(c, fault.address) :
+                                      complete_initialization_vblank(c, fault.address)))
+                result = h2_host_channel_submit(&channel, put, 1000000, &fault);
+            xv_logf("[h2/channel] PUT=%08X GET=%08X result=%d source=%08X word=%08X sub=%u method=%04X clears=%llu pixels=%llu\n",
+                    put, h2_host_channel_get(&channel), result, fault.address, fault.word,
+                    fault.subchannel, fault.method, (unsigned long long)channel.clear.completed_clears,
+                    (unsigned long long)channel.clear.written_pixels);
+            xv_logf("[h2/channel] semaphore releases=%llu last=%08X value=%08X\n",
+                    (unsigned long long)channel.commands.semaphore_releases,
+                    channel.commands.last_semaphore_address, channel.commands.last_semaphore_value);
+            xv_logf("[h2/channel] software updates=%llu valid=%X dxt1_noise=%u zcull=%08X rop=%08X\n",
+                    (unsigned long long)channel.commands.software_updates, channel.commands.software_valid,
+                    channel.commands.dxt1_noise, channel.commands.zcull_debug5, channel.commands.rop_control);
+            if (result != H2_PUSH_COMPLETE && result != H2_PUSH_NEED_DATA) { consuming = 0; reject(c, ip, address, put); }
+            if (pending) put = pending_put;
+        } while (pending);
+        consuming = 0;
     } else if (address == BAR + 0x800040 || address == BAR + 0x3240) *value = channel.put;
     else if (address == BAR + 0x800044 || address == BAR + 0x3244) *value = h2_host_channel_get(&channel);
     else *value = channel.stream.remaining != 0 || channel.put != h2_host_channel_get(&channel);
