@@ -53,6 +53,19 @@ $(BUILD)/async-report.config: force-async-report-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_log.o: $(BUILD)/async-report.config
+# Pump-only diagnostic. Track both transitions so an incremental ordinary
+# build cannot accidentally retain its additional notification clock reads.
+ifeq ($(XV_GPU_PACKET_TIMING),1)
+$(BUILD)/runtime/main.o: CFLAGS += -DXV_GPU_PACKET_TIMING=1
+endif
+.PHONY: force-gpu-packet-config
+force-gpu-packet-config:
+$(BUILD)/gpu-packet.config: force-gpu-packet-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_GPU_PACKET_TIMING)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/main.o: $(BUILD)/gpu-packet.config
 # Reserve room for vita-elf-create's module/import metadata before the next
 # load segment. Traced builds can otherwise end too close to its boundary.
 LDFLAGS   := -Wl,-q,--defsym=__sce_headroom=0x1000

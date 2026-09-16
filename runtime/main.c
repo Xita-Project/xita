@@ -1134,6 +1134,7 @@ void xk_run(void)
 static volatile uint32_t g_frame_requested = 0;    /* written by guest fiber            */
 static volatile uint32_t g_frame_completed = 0;    /* written by pump thread            */
 #include "xv_frame_events.h"
+#include "xv_packet_timing.h"
 #include "xv_benchmark.h"
 static xv_frame_events g_frame_events = { -1 };
 static uint32_t g_resolution_request,g_resolution_result;
@@ -1144,6 +1145,9 @@ static struct {
     SceGxmNotification fence, visibility_fence;
     uint64_t started_us, visibility_us;
     int failed, visibility_completed;
+#if XV_GPU_PACKET_TIMING
+    xv_packet_timing timing;
+#endif
 } g_packets[XV_FRAME_TICKETS];
 static xv_slot_owner g_mesh_owners[XV_FRAME_SLOTS], g_ui_owners[XV_FRAME_SLOTS];
 static uint32_t g_frame_submitted; /* pump-owned, distinct from GPU completion */
@@ -1499,6 +1503,39 @@ static unsigned g_retired_count, g_max_pending;
 static uint64_t g_completion_us;
 static unsigned g_early_visibility_count;
 static uint64_t g_early_visibility_us, g_visibility_tail_us;
+#if XV_GPU_PACKET_TIMING
+static xv_packet_timing_totals g_packet_timing;
+static int xv_pump_observe(unsigned q)
+{
+    xv_packet_timing *p=&g_packets[q].timing;
+    if(p->ticket!=g_packets[q].fence.value || !p->submitted)p->invalid=1;
+    /* A prior observation may belong to a younger packet. Never move its
+     * first-ready timestamp forward to ordered retirement. Keep the original
+     * readiness load even then, so diagnostics cannot change fence policy. */
+    if (p->ready || p->invalid) {
+        int ready=__atomic_load_n(g_packets[q].fence.address,__ATOMIC_ACQUIRE)==g_packets[q].fence.value;
+        if(p->ready && !ready)p->invalid=1;
+        return ready;
+    }
+    uint64_t before=sceKernelGetProcessTimeWide();
+    int ready=__atomic_load_n(g_packets[q].fence.address,__ATOMIC_ACQUIRE)==g_packets[q].fence.value;
+    uint64_t after=sceKernelGetProcessTimeWide();
+    xv_packet_timing_observe(p,before,after,ready);
+    return ready;
+}
+static void xv_pump_observe_younger(void)
+{
+    uint32_t done=__atomic_load_n(&g_frame_completed,__ATOMIC_RELAXED);
+    unsigned pending=g_frame_submitted-done;
+    /* Tickets may wrap; queue capacity bounds this iteration independently of
+     * unsigned ordering. The oldest is sampled by the normal retirement path. */
+    if(pending>=XV_FRAME_TICKETS)return;
+    for(unsigned i=2;i<=pending;i++) {
+        unsigned q=(done+i)&(XV_FRAME_TICKETS-1u);
+        if(!g_packets[q].failed && !g_packets[q].timing.ready)xv_pump_observe(q);
+    }
+}
+#endif
 static int xv_pump_retire(void)
 {
     uint32_t done = __atomic_load_n(&g_frame_completed, __ATOMIC_RELAXED);
@@ -1514,7 +1551,11 @@ static int xv_pump_retire(void)
          * may still read the frame's geometry, textures and UI snapshots. */
     }
     if (!g_packets[q].failed &&
+#if XV_GPU_PACKET_TIMING
+        !xv_pump_observe(q)) return 0;
+#else
         __atomic_load_n(g_packets[q].fence.address, __ATOMIC_ACQUIRE) != g_packets[q].fence.value) return 0;
+#endif
     uint64_t now = sceKernelGetProcessTimeWide();
     uint64_t elapsed = now - g_packets[q].started_us;
     if (g_gfx.hle_ready && g_packets[q].mesh != UINT32_MAX) {
@@ -1527,11 +1568,18 @@ static int xv_pump_retire(void)
         g_visibility_tail_us += now - g_packets[q].visibility_us;
     }
     g_completion_us += elapsed;
+#if XV_GPU_PACKET_TIMING
+    /* The guest may reuse this packet as soon as completed is published. */
+    xv_packet_timing_fold(&g_packet_timing,&g_packets[q].timing);
+#endif
     __atomic_store_n(&g_frame_completed,ticket,__ATOMIC_RELEASE);
     xv_frame_events_signal(&g_frame_events,XV_FRAME_COMPLETED);
     if (++g_retired_count == 60) {
         XV_LOG("[frame-retire] 60 frames: completion latency %.3f ms/frame; max pending %u; GPU notification retirement (overlaps guest/submission)\n",
             g_completion_us / 60000.0, g_max_pending);
+#if XV_GPU_PACKET_TIMING
+        xv_packet_timing_report(&g_packet_timing);
+#endif
         if (g_early_visibility_count) XV_LOG("[frame-query] %u world fragment fences: query latency %.3f ms/frame; remaining final-fence tail %.3f ms/frame; scheduled polling times, overlaps CPU/GPU\n",
             g_early_visibility_count, g_early_visibility_us / (1000.0 * g_early_visibility_count),
             g_visibility_tail_us / (1000.0 * g_early_visibility_count));
@@ -1547,6 +1595,9 @@ static int xv_pump_thread(SceSize args, void *argp)
     (void)args; (void)argp;
     XV_LOG("pump: triple slots, fragment notification retirement; configured queue mode; requested core 1\n");
     xv_cpu_log_thread("render-pump");
+#if XV_GPU_PACKET_TIMING
+    XV_LOG("[gpu-packet] enabled: pump-owned submission and bracketed notification polling; pipeline/wait policy unchanged\n");
+#endif
     for (unsigned i=0;i<XV_DISPLAY_BUFFER_COUNT;i++)
         __atomic_store_n(&g_display_free[i],i!=g_gfx.front_index,__ATOMIC_RELEASE);
     xv_cpu_poll(sceKernelGetProcessTimeWide());
@@ -1557,6 +1608,9 @@ static int xv_pump_thread(SceSize args, void *argp)
     while (g_running) {
         uint32_t updated=__atomic_load_n(&g_settings_frame_period,__ATOMIC_ACQUIRE);
         if(updated!=period) {period=updated;next_frame=0;}
+#if XV_GPU_PACKET_TIMING
+        xv_pump_observe_younger();
+#endif
         while (xv_pump_retire()) {}
         uint32_t requested=__atomic_load_n(&g_frame_requested,__ATOMIC_ACQUIRE);
         uint32_t done=__atomic_load_n(&g_frame_completed,__ATOMIC_ACQUIRE);
@@ -1581,11 +1635,18 @@ static int xv_pump_thread(SceSize args, void *argp)
                 __atomic_store_n(g_packets[q].visibility_fence.address, ~ticket, __ATOMIC_RELEASE);
             }
             g_packets[q].started_us=now;
+#if XV_GPU_PACKET_TIMING
+            xv_packet_timing_begin(&g_packets[q].timing,ticket,now,
+                __atomic_load_n(g_packets[q].fence.address,__ATOMIC_ACQUIRE)==ticket);
+#endif
             xv_cpu_poll(now);
             xv_render_profile_begin(g_packets[q].mesh);
             xv_gpu_write_barrier();
             int err=xv_gfx_render_frame(g_packets[q].mesh,g_packets[q].ui,&g_packets[q].fence,
                 g_packets[q].visibility_fence.address ? &g_packets[q].visibility_fence : NULL);
+#if XV_GPU_PACKET_TIMING
+            xv_packet_timing_end(&g_packets[q].timing,sceKernelGetProcessTimeWide(),err<0);
+#endif
             g_packets[q].failed=err<0;
             if (err<0) {
                 /* A failed EndScene may never signal. Exceptional cleanup only:
