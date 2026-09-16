@@ -134,34 +134,31 @@ static void blend_pixel(const menu_raster_state *st, const float src[4], uint8_t
     p[0] = to8(out[2]); p[1] = to8(out[1]); p[2] = to8(out[0]); p[3] = to8(out[3]);
 }
 
-void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
-                          const menu_vertex_out *b, const menu_vertex_out *c)
+void (*menu_raster_parallel)(menu_raster_band_fn fn, const void *job, int32_t y0, int32_t y1);
+void (*menu_raster_tick)(void);
+
+typedef struct {
+    const menu_raster_state *st;
+    const menu_vertex_out *a, *b, *c;
+    const menu_depth *dp;
+    float inv_area, iwa, iwb, iwc;
+    int32_t cx0, cx1;
+    unsigned tex_mask;                 /* units the combiner reads; others sample as zero */
+} tri_job;
+
+static void raster_band(const void *vjob, int32_t cy0, int32_t cy1, int on_caller)
 {
+    const tri_job *J = vjob;
+    const menu_raster_state *st = J->st;
     const menu_target *tg = &st->target;
-    if (!tg->pixels || !tg->width || !tg->height) return;
-
-    float area = (b->x - a->x) * (c->y - a->y) - (b->y - a->y) * (c->x - a->x);
-    if (area == 0.0f) return;
-    float inv_area = 1.0f / area;
-
-    int32_t minx = (int32_t)floorf(fminf(a->x, fminf(b->x, c->x)));
-    int32_t maxx = (int32_t)ceilf(fmaxf(a->x, fmaxf(b->x, c->x)));
-    int32_t miny = (int32_t)floorf(fminf(a->y, fminf(b->y, c->y)));
-    int32_t maxy = (int32_t)ceilf(fmaxf(a->y, fmaxf(b->y, c->y)));
-    int32_t cx0 = imax(0, imax(minx, st->clip_x0));
-    int32_t cy0 = imax(0, imax(miny, st->clip_y0));
-    int32_t cx1 = imin((int32_t)tg->width - 1, imin(maxx, st->clip_x1));
-    int32_t cy1 = imin((int32_t)tg->height - 1, imin(maxy, st->clip_y1));
-
-    const menu_depth *dp = st->depth.pixels ? &st->depth : NULL;
-    if (dp && (dp->width < tg->width || dp->height < tg->height)) dp = NULL;
-
-    float iwa = a->w > 0.0f ? 1.0f / a->w : 1.0f;
-    float iwb = b->w > 0.0f ? 1.0f / b->w : 1.0f;
-    float iwc = c->w > 0.0f ? 1.0f / c->w : 1.0f;
+    const menu_vertex_out *a = J->a, *b = J->b, *c = J->c;
+    const menu_depth *dp = J->dp;
+    const float inv_area = J->inv_area, iwa = J->iwa, iwb = J->iwb, iwc = J->iwc;
+    const int32_t cx0 = J->cx0, cx1 = J->cx1;
     const float fog[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
     for (int32_t py = cy0; py <= cy1; ++py) {
+        if (on_caller && menu_raster_tick && !((py - cy0) & 7)) menu_raster_tick();
         float fy = (float)py + 0.5f;
         uint8_t *row = tg->pixels + (uint32_t)py * tg->pitch;
         uint32_t *zrow = dp ? (uint32_t *)(void *)((uint8_t *)dp->pixels + (uint32_t)py * dp->pitch) : NULL;
@@ -192,6 +189,7 @@ void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
                 specular[k] = b0 * a->specular[k] + b1 * b->specular[k] + b2 * c->specular[k];
             }
             for (unsigned u = 0; u < 4; ++u) {
+                if (!(J->tex_mask & (1u << u))) { texf[u][0] = texf[u][1] = texf[u][2] = texf[u][3] = 0.0f; continue; }
                 float uu = b0 * a->uv[u][0] + b1 * b->uv[u][0] + b2 * c->uv[u][0];
                 float vv = b0 * a->uv[u][1] + b1 * b->uv[u][1] + b2 * c->uv[u][1];
                 sample_tex(&st->tex[u], uu, vv, texf[u]);
@@ -208,4 +206,42 @@ void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
             blend_pixel(st, frag, row + (uint32_t)px * 4);
         }
     }
+}
+
+void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
+                          const menu_vertex_out *b, const menu_vertex_out *c)
+{
+    const menu_target *tg = &st->target;
+    if (!tg->pixels || !tg->width || !tg->height) return;
+
+    float area = (b->x - a->x) * (c->y - a->y) - (b->y - a->y) * (c->x - a->x);
+    if (area == 0.0f) return;
+
+    int32_t minx = (int32_t)floorf(fminf(a->x, fminf(b->x, c->x)));
+    int32_t maxx = (int32_t)ceilf(fmaxf(a->x, fmaxf(b->x, c->x)));
+    int32_t miny = (int32_t)floorf(fminf(a->y, fminf(b->y, c->y)));
+    int32_t maxy = (int32_t)ceilf(fmaxf(a->y, fmaxf(b->y, c->y)));
+    int32_t cy0 = imax(0, imax(miny, st->clip_y0));
+    int32_t cy1 = imin((int32_t)tg->height - 1, imin(maxy, st->clip_y1));
+
+    tri_job J;
+    J.st = st; J.a = a; J.b = b; J.c = c;
+    J.dp = st->depth.pixels ? &st->depth : NULL;
+    if (J.dp && (J.dp->width < tg->width || J.dp->height < tg->height)) J.dp = NULL;
+    J.inv_area = 1.0f / area;
+    J.iwa = a->w > 0.0f ? 1.0f / a->w : 1.0f;
+    J.iwb = b->w > 0.0f ? 1.0f / b->w : 1.0f;
+    J.iwc = c->w > 0.0f ? 1.0f / c->w : 1.0f;
+    J.cx0 = imax(0, imax(minx, st->clip_x0));
+    J.cx1 = imin((int32_t)tg->width - 1, imin(maxx, st->clip_x1));
+    /* Without a prepared combiner (diffuse passthrough or raw test programs) sample every bound unit. */
+    J.tex_mask = (st->combiner && st->combiner->prepared) ? st->combiner->tex_used : 0xFu;
+    if (cy0 > cy1 || J.cx0 > J.cx1) return;
+
+    /* Rows are independent (per-pixel colour/depth writes), so large triangles
+     * are split into row bands across the worker pool when one is installed. */
+    if (menu_raster_parallel && cy1 - cy0 >= 48 && (int64_t)(cy1 - cy0) * (J.cx1 - J.cx0) >= 4096)
+        menu_raster_parallel(raster_band, &J, cy0, cy1);
+    else
+        raster_band(&J, cy0, cy1, 1);
 }

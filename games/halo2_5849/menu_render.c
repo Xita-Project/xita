@@ -10,6 +10,10 @@
 #include <stdlib.h>
 
 extern void xv_logf(const char *, ...);
+extern uint64_t h2_graphics_time_us(void);
+
+/* Phase profile since boot (microseconds), logged with the 500-draw stats line. */
+static uint64_t prof_acquire_us, prof_transform_us, prof_raster_us, prof_draws;
 
 /* The game's own zeta surface (Z24S8, pitch layout as the clear path requires)
  * mapped for depth testing; NULL when unbound or not that layout. */
@@ -68,7 +72,8 @@ static uint32_t attr_bytes(uint32_t type, uint32_t count)
     switch (type) {
     case 2: return count * 4;          /* float */
     case 1: case 5: return count * 2;  /* signed short */
-    default: return 4;                 /* UB / packed */
+    case 0: case 4: return count;      /* unsigned bytes */
+    default: return 4;                 /* packed */
     }
 }
 
@@ -81,8 +86,10 @@ static void decode_attr(const vattr *a, const uint8_t *p, float out[4])
     case 2: for (unsigned k = 0; k < n; ++k) out[k] = rd_f32(p + k * 4); break;
     case 1: for (unsigned k = 0; k < n; ++k) out[k] = rd_s16(p + k * 2) / 32767.0f; break;
     case 5: for (unsigned k = 0; k < n; ++k) out[k] = (float)rd_s16(p + k * 2); break;
-    case 0: out[0] = p[2] / 255.0f; out[1] = p[1] / 255.0f; out[2] = p[0] / 255.0f; out[3] = p[3] / 255.0f; break; /* BGRA */
-    case 4: for (unsigned k = 0; k < 4; ++k) out[k] = p[k] / 255.0f; break; /* RGBA */
+    case 0: if (n == 4) { out[0] = p[2] / 255.0f; out[1] = p[1] / 255.0f; out[2] = p[0] / 255.0f; out[3] = p[3] / 255.0f; } /* BGRA */
+            else for (unsigned k = 0; k < n; ++k) out[k] = p[k] / 255.0f;               /* 1-3 unsigned bytes */
+            break;
+    case 4: for (unsigned k = 0; k < n; ++k) out[k] = p[k] / 255.0f; break; /* RGBA / 1-3 unsigned bytes */
     case 6: { uint32_t w = rd_u32(p);                                       /* packed 11/11/10 signed */
               int x = (int)(w << 21) >> 21, y = (int)(w << 10) >> 21, z = (int)w >> 22;
               out[0] = x / 1023.0f; out[1] = y / 1023.0f; out[2] = z / 511.0f; } break;
@@ -191,6 +198,7 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     enum { TEX_CAP = 1024 * 1024 };
     static uint64_t drawn;
     int textured = 0;
+    uint64_t t_start = h2_graphics_time_us();
     for (unsigned u = 0; u < 4; ++u) {
         uint32_t tw = 0, th = 0;
         int linear = 0;
@@ -221,8 +229,13 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     rs.alpha_test = s->setup[0x300 / 4] & 1;
     rs.alpha_func = s->setup[0x33C / 4];
     rs.alpha_ref = (float)(s->setup[0x340 / 4] & 0xFF) / 255.0f;
-    static int depth_knob = -1;
+    static int depth_knob = -1, pool_knob = -1;
     if (depth_knob < 0) depth_knob = knob("XV_MENU_DEPTH", 1);
+    if (pool_knob < 0) {
+        extern void h2_menu_render_tick(void);
+        pool_knob = knob("XV_MENU_THREADS", 2); menu_raster_pool_install(pool_knob);
+        menu_raster_tick = h2_menu_render_tick;
+    }
     if (depth_knob && s->setup[0x30C / 4]) {
         uint32_t zpitch = 0;
         rs.depth.pixels = map_zeta(c, W, H, &zpitch);
@@ -238,6 +251,8 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     rs.combiner = &cb;
 #endif
 
+    uint64_t t_tex = h2_graphics_time_us();
+    prof_acquire_us += t_tex - t_start;
     uint32_t n = 0;
     if (r->vertex_count) {                         /* immediate vertices */
         n = r->vertex_count < MAX_VERTS ? r->vertex_count : MAX_VERTS;
@@ -247,7 +262,9 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
                          r->vertices[i].attribute, (const float (*)[4])s->constants, o);
             transform_out(o, &g_verts[i]);
         }
+        uint64_t t_xf = h2_graphics_time_us(); prof_transform_us += t_xf - t_tex;
         assemble(&rs, r->primitive, n, NULL, n, 0);
+        prof_raster_us += h2_graphics_time_us() - t_xf;
     } else {                                       /* indexed / array vertices */
         uint32_t maxv = 0, lo = 0, count;
         const uint16_t *indices = NULL;
@@ -270,8 +287,11 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
             nv2a_vsh_run(s->program, s->program_start, s->program_load, in, (const float (*)[4])s->constants, o);
             transform_out(o, &g_verts[vi]);
         }
+        uint64_t t_xf = h2_graphics_time_us(); prof_transform_us += t_xf - t_tex;
         assemble(&rs, r->primitive, n, indices, count, lo);
+        prof_raster_us += h2_graphics_time_us() - t_xf;
     }
+    ++prof_draws;
 
     static int detail = -1;
     if (detail < 0) detail = knob("XV_MENU_DETAIL", 40);
@@ -369,6 +389,10 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
         menu_texture_cache_stats(&hits, &misses, &bytes);
         xv_logf("[h2/menu-render] texture formats ok/unsupported/toolarge/nomap: %s; cache hits=%llu misses=%llu bytes=%lu\n",
                 stats, (unsigned long long)hits, (unsigned long long)misses, (unsigned long)bytes);
+        xv_logf("[h2/menu-render] profile draws=%llu acquire=%llums transform=%llums raster=%llums now=%llums\n",
+                (unsigned long long)prof_draws, (unsigned long long)(prof_acquire_us / 1000),
+                (unsigned long long)(prof_transform_us / 1000), (unsigned long long)(prof_raster_us / 1000),
+                (unsigned long long)(h2_graphics_time_us() / 1000));
     }
     /* Re-dump every 20 non-empty draws (overwrites): the last dump before a stall
      * holds the fully composited menu frame for offline inspection. */

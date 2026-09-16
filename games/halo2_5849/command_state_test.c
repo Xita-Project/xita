@@ -165,7 +165,7 @@ int main(void)
     for (unsigned slot = 0; slot < 16; ++slot) for (unsigned count = 0; count < 16; ++count)
     for (unsigned type = 0; type < 16; ++type) {
         if ((type == 2 && count <= 4) || (type == 6 && count == 1) ||
-            (type == 0 && count == 4) || (type == 4 && count == 4) ||
+            (type == 0 && count >= 1 && count <= 4) || (type == 4 && count >= 1 && count <= 4) ||
             (type == 1 && count >= 1 && count <= 4) ||
             (type == 5 && count >= 1 && count <= 4)) continue;
         reject(0, 0x1760 + slot * 4, 0x12340000 | (count << 4) | type);

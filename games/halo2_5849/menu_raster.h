@@ -62,3 +62,16 @@ int menu_raster_blend_supported(uint32_t sfactor, uint32_t dfactor, uint32_t equ
 
 void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
                           const menu_vertex_out *b, const menu_vertex_out *c);
+
+/* Optional parallel band executor installed by the platform (menu_raster_pool):
+ * runs fn(job, y0, y1) over disjoint row bands covering [y0, y1] on worker
+ * threads plus the caller and returns once all bands are done. NULL => the
+ * rasterizer runs every triangle inline on the calling thread. */
+typedef void (*menu_raster_band_fn)(const void *job, int32_t y0, int32_t y1, int on_caller);
+extern void (*menu_raster_parallel)(menu_raster_band_fn fn, const void *job, int32_t y0, int32_t y1);
+
+/* Optional periodic hook run on the CALLING thread only, every few rows of a
+ * large triangle (the runtime paces game time from it; worker threads never
+ * run guest code). NULL => no hook. */
+extern void (*menu_raster_tick)(void);
+int menu_raster_pool_install(int workers);   /* menu_raster_pool.c (Vita); 0 => inline */

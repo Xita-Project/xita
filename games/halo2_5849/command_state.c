@@ -150,8 +150,8 @@ static int setup_method(h2_command_state *s, uint16_t method, uint32_t value)
          * and validates each selected span. UB (0/4) is D3DCOLOR/OGL bytes. */
         if (!((type == 2 && count <= 4) ||               /* float */
               (type == 6 && count == 1) ||               /* packed 11/11/10 */
-              (type == 0 && count == 4) ||               /* UB D3DCOLOR */
-              (type == 4 && count == 4) ||               /* UB OGL */
+              (type == 0 && count >= 1 && count <= 4) ||  /* UB D3DCOLOR (menu screen: 1-byte attrs) */
+              (type == 4 && count >= 1 && count <= 4) ||  /* UB OGL */
               (type == 1 && count >= 1 && count <= 4) ||  /* signed short normalized */
               (type == 5 && count >= 1 && count <= 4)))   /* signed short */
             return 0;

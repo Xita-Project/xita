@@ -148,7 +148,7 @@ ifeq ($(MENU_RENDER),1)
 ifneq ($(SPRITE_RENDER),1)
 $(error MENU_RENDER=1 requires SPRITE_RENDER=1)
 endif
-OBJECTS += $(BUILD)/menu_draw.o $(BUILD)/nv2a_vsh.o $(BUILD)/menu_raster.o $(BUILD)/menu_texture.o $(BUILD)/menu_combiner.o $(BUILD)/menu_render.o
+OBJECTS += $(BUILD)/menu_draw.o $(BUILD)/nv2a_vsh.o $(BUILD)/menu_raster.o $(BUILD)/menu_raster_pool.o $(BUILD)/menu_texture.o $(BUILD)/menu_combiner.o $(BUILD)/menu_render.o
 $(BUILD)/host_channel_runtime.o: CFLAGS += -DH2_MENU_RENDER=1
 ifeq ($(MENU_NOCOMBINER),1)
 $(BUILD)/menu_render.o: CFLAGS += -DH2_MENU_NOCOMBINER=1
@@ -666,7 +666,7 @@ $(BUILD)/nv2a_regs.o: nv2a_regs.c
 $(BUILD)/linear_texture.o $(BUILD)/fp_environment.o $(BUILD)/kernel_timer.o $(BUILD)/kernel_stack.o $(BUILD)/command_snapshot.o $(BUILD)/host_channel_runtime.o $(BUILD)/command_state.o $(BUILD)/host_channel.o $(BUILD)/host_tiles.o $(BUILD)/push_stream.o $(BUILD)/gpu_objects.o $(BUILD)/kelvin_clear.o $(BUILD)/scanout.o $(BUILD)/input.o $(BUILD)/audio_unavailable.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/audio_mixer_bridge.o $(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/screen_draw.o $(BUILD)/bc1_draw.o $(BUILD)/composition_draw.o $(BUILD)/threshold_draw.o $(BUILD)/blur_draw.o $(BUILD)/blend_draw.o $(BUILD)/luma_draw.o $(BUILD)/sprite_draw.o $(BUILD)/menu_draw.o $(BUILD)/nv2a_vsh.o $(BUILD)/menu_raster.o $(BUILD)/menu_texture.o $(BUILD)/menu_combiner.o $(BUILD)/menu_render.o $(BUILD)/dxt23_layout.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/audio_fx.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
+$(BUILD)/audio_mixer_bridge.o $(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/screen_draw.o $(BUILD)/bc1_draw.o $(BUILD)/composition_draw.o $(BUILD)/threshold_draw.o $(BUILD)/blur_draw.o $(BUILD)/blend_draw.o $(BUILD)/luma_draw.o $(BUILD)/sprite_draw.o $(BUILD)/menu_draw.o $(BUILD)/nv2a_vsh.o $(BUILD)/menu_raster.o $(BUILD)/menu_raster_pool.o $(BUILD)/menu_texture.o $(BUILD)/menu_combiner.o $(BUILD)/menu_render.o $(BUILD)/dxt23_layout.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/audio_fx.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/dsp_core.o: dsp/interp/dsp_cpu.c

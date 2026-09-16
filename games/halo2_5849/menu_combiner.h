@@ -17,7 +17,15 @@ typedef struct menu_combiner {
     uint32_t final_abcd, final_efg;
     unsigned stages;
     int mux_msb;
+    /* Filled by menu_combiner_prepare (decode does it): unpacked constants and
+     * the set of texture units the program reads, so the per-fragment path
+     * neither unpacks ARGB words nor needs samples from unused units. */
+    int prepared;
+    float c0f[8][4], c1f[8][4], final_c0f[4], final_c1f[4];
+    unsigned tex_used;                 /* bit i => texture unit i is an input */
 } menu_combiner;
+
+void menu_combiner_prepare(menu_combiner *cb);
 
 /* Decode the combiner configuration from captured command state. */
 void menu_combiner_decode(const h2_command_state *state, menu_combiner *cb);

@@ -21,6 +21,7 @@ void menu_combiner_decode(const h2_command_state *s, menu_combiner *cb)
     cb->final_efg = s->setup[0x28C / 4];
     cb->final_factor0 = s->setup[0x1E20 / 4];
     cb->final_factor1 = s->setup[0x1E24 / 4];
+    menu_combiner_prepare(cb);
     uint32_t control = s->setup[0x1E60 / 4];
     cb->stages = control & 0xF;
     if (cb->stages > 8) cb->stages = 8;
@@ -125,8 +126,8 @@ void menu_combiner_eval(const menu_combiner *cb, const float tex[4][4],
     reg[R_R0][3] = tex[0][3];
 
     for (unsigned i = 0; i < cb->stages; ++i) {
-        unpack_argb(cb->factor0[i], reg[R_C0]);
-        unpack_argb(cb->factor1[i], reg[R_C1]);
+        if (cb->prepared) { memcpy(reg[R_C0], cb->c0f[i], 16); memcpy(reg[R_C1], cb->c1f[i], 16); }
+        else { unpack_argb(cb->factor0[i], reg[R_C0]); unpack_argb(cb->factor1[i], reg[R_C1]); }
         combine(cb->rgb_in[i], cb->rgb_out[i], reg, 0, cb->mux_msb, 0, 3);   /* rgb -> [0..2] */
         combine(cb->alpha_in[i], cb->alpha_out[i], reg, 1, cb->mux_msb, 3, 1); /* alpha -> [3] */
     }
@@ -136,8 +137,8 @@ void menu_combiner_eval(const menu_combiner *cb, const float tex[4][4],
      * menu's desaturation pass dots the scene with the stage-0 luma weights and
      * then tints by the final c0, which must not be those same weights. */
     for (unsigned k = 0; k < 4; ++k) reg[R_V1R0][k] = reg[R_V1][k] + reg[R_R0][k];
-    unpack_argb(cb->final_factor0, reg[R_C0]);
-    unpack_argb(cb->final_factor1, reg[R_C1]);
+    if (cb->prepared) { memcpy(reg[R_C0], cb->final_c0f, 16); memcpy(reg[R_C1], cb->final_c1f, 16); }
+    else { unpack_argb(cb->final_factor0, reg[R_C0]); unpack_argb(cb->final_factor1, reg[R_C1]); }
 
     if (!cb->final_abcd && !cb->final_efg) {           /* no final combiner: pass r0 */
         memcpy(out, reg[R_R0], 16);
@@ -159,4 +160,32 @@ void menu_combiner_eval(const menu_combiner *cb, const float tex[4][4],
     for (unsigned k = 0; k < 3; ++k)
         out[k] = sat(fa[k] * fb[k] + (1.0f - fa[k]) * fc[k] + fd[k]);
     out[3] = sat(fg[0]);
+}
+
+static unsigned input_tex_bits(uint32_t word)
+{
+    unsigned bits = 0;
+    for (unsigned sh = 0; sh < 32; sh += 8) {
+        unsigned r = (word >> sh) & 0xF;
+        if (r >= 8 && r <= 11) bits |= 1u << (r - 8);
+    }
+    return bits;
+}
+
+void menu_combiner_prepare(menu_combiner *cb)
+{
+    unsigned used = 0;
+    for (unsigned i = 0; i < cb->stages && i < 8; ++i) {
+        unpack_argb(cb->factor0[i], cb->c0f[i]);
+        unpack_argb(cb->factor1[i], cb->c1f[i]);
+        used |= input_tex_bits(cb->rgb_in[i]) | input_tex_bits(cb->alpha_in[i]);
+    }
+    unpack_argb(cb->final_factor0, cb->final_c0f);
+    unpack_argb(cb->final_factor1, cb->final_c1f);
+    used |= input_tex_bits(cb->final_abcd) | input_tex_bits(cb->final_efg & 0xFFFFFF00u);
+    /* r0.a is seeded from texture 0 alpha before stage 0 (see eval). */
+    used |= 1u;
+    if (!cb->final_abcd && !cb->final_efg) used |= 1u;
+    cb->tex_used = used;
+    cb->prepared = 1;
 }

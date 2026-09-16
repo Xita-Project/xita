@@ -36,6 +36,9 @@ static int channel_idle(void);
 static int complete_timed_mode_vblank(xctx *c, uint32_t source);
 static int queue_active_flip(uint32_t value, uint32_t source);
 static int complete_active_flip(xctx *c, uint32_t source);
+#if H2_MENU_RENDER
+static void vblank_pace_in_render(void);
+#endif
 extern void xv_logf(const char *, ...);
 extern volatile uint32_t xv_cur_fn;
 extern uint32_t xk_mem_arena_size(void);
@@ -197,6 +200,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
         if (menu_result != -1) result = menu_result;
         /* One line per completed draw was ~740 lines per menu frame; keep the first
          * 200 and then every 100th (the renderer logs its own sampled detail). */
+        if (menu_done != menu_quad.completed) vblank_pace_in_render();
         if (menu_done != menu_quad.completed && (menu_quad.completed <= 200 || !(menu_quad.completed % 100)))
             xv_logf("[h2/menu] completed=%u primitive=%u vertices=%u indices=%u arrays=%u source=%08X color=%08X committed; not yet presented\n",
                     (unsigned)menu_quad.completed, menu_quad.primitive, menu_quad.vertex_count,
@@ -295,9 +299,12 @@ static void signal_game_vblank(xctx *c, uint32_t count, uint32_t swaps, uint32_t
     call_guest(&interrupt, f_0012B2A0, 0x3FEE87);
     uint64_t after = X_M32(0x485AB0) | (uint64_t)X_M32(0x485AB4) << 32;
     if (after != before + 1) reject(c, source, 0x485AB0, (uint32_t)after);
-    xv_logf("[h2/vblank] original callback=0012B2A0 record=%u,%u,%u game_count=%llu->%llu\n",
-            count, swaps, flags, (unsigned long long)before, (unsigned long long)after);
+    /* At real-time pacing this is 30 lines/s: keep the first 200 and every 100th. */
+    if (after <= 200 || !(after % 100))
+        xv_logf("[h2/vblank] original callback=0012B2A0 record=%u,%u,%u game_count=%llu->%llu\n",
+                count, swaps, flags, (unsigned long long)before, (unsigned long long)after);
 }
+static uint32_t freerun_swaps;    /* free-running vblank swap count shared by both pacing paths */
 static void *map_physical_raw(uint32_t address, uint32_t bytes)
 {
     if (!bytes || address >= PHYSICAL_BYTES || bytes > PHYSICAL_BYTES - address) return NULL;
@@ -622,7 +629,7 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip)
     if (on < 0) { const char *e = getenv("XV_MENU_VBLANK"); on = e ? atoi(e) : 0; }
     if (!on || !c || !initialization_flip_done || active_flip_queued || software_active || !channel_idle())
         return 0;
-    static uint64_t frozen_us; static uint32_t seen_count, freerun_swaps;
+    static uint64_t frozen_us; static uint32_t seen_count;
     uint64_t now = xk_os_monotonic_us();
     uint32_t count = X_M32(0x485AB0);
     if (count != seen_count) { seen_count = count; frozen_us = now; return 0; } /* counter still advancing */
@@ -631,6 +638,36 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip)
     signal_game_vblank(c, count + 1u, ++freerun_swaps, 1u, eip);
     return 1;
 }
+/* While the guest thread is inside the software menu renderer nothing yields, so
+ * xd3d_vblank_kick (hooked at yield/wait sites) never fires and game time crawled
+ * at ~1/80 real time (438 vblanks in a 15-minute run). Deliver the original vblank
+ * callback at real-time ~30 Hz from between draws as well, as the hardware
+ * interrupt would mid-frame. Same gate (XV_MENU_VBLANK), same callback and record. */
+#if H2_MENU_RENDER
+static void vblank_pace_in_render(void)
+{
+    extern uint64_t xk_os_monotonic_us(void);
+    static int on = -1, busy;
+    static uint64_t last_us;
+    if (on < 0) { const char *e = getenv("XV_MENU_VBLANK"); on = e ? atoi(e) : 0; }
+    if (!on || busy || !active_context || !initialization_flip_done) return;
+    uint64_t now = xk_os_monotonic_us();
+    if (last_us && now - last_us < 33333u) return;
+    last_us = now;
+    busy = 1;
+    /* The handler (0x14280) always increments the frame counter and treats a
+     * record whose swap count equals its last-seen value (ds:[0x55E6B8]) as a
+     * plain vblank; flags are not read. Pass the game's own last-seen swap count
+     * so no swap is fabricated while a real flip is queued. */
+    uint32_t count = X_M32(0x485AB0);
+    signal_game_vblank(active_context, count + 1u, X_M32(0x55E6B8), 0u, 0x3FAC58u);
+    busy = 0;
+}
+/* Rasterizer row hook (calling thread only): big triangles and full-screen
+ * passes take hundreds of ms each, so pacing only between draws missed most
+ * vblanks (7 Hz); this keeps game time at real rate inside them too. */
+void h2_menu_render_tick(void) { vblank_pace_in_render(); }
+#endif
 void h2_host_miniport_shutdown(xctx *c)
 {
     const uint32_t ip = 0x3FE4CBu, mini = c->r[0];
