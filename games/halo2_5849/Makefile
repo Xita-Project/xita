@@ -150,6 +150,9 @@ $(error MENU_RENDER=1 requires SPRITE_RENDER=1)
 endif
 OBJECTS += $(BUILD)/menu_draw.o $(BUILD)/nv2a_vsh.o $(BUILD)/menu_raster.o $(BUILD)/menu_texture.o $(BUILD)/menu_combiner.o $(BUILD)/menu_render.o
 $(BUILD)/host_channel_runtime.o: CFLAGS += -DH2_MENU_RENDER=1
+ifeq ($(MENU_NOCOMBINER),1)
+$(BUILD)/menu_render.o: CFLAGS += -DH2_MENU_NOCOMBINER=1
+endif
 endif
 comma := ,
 WRAPS := xk_MmCreateKernelStack xk_MmDeleteKernelStack xk_MmClaimGpuInstanceMemory xv_unimpl xk_NtOpenFile xk_NtReadFile xk_NtWriteFile xk_NtDeviceIoControlFile xk_NtFsControlFile xk_NtQueryVolumeInformationFile

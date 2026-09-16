@@ -166,7 +166,11 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     }
     static menu_combiner cb;
     menu_combiner_decode(s, &cb);
+#ifdef H2_MENU_NOCOMBINER
+    rs.combiner = NULL;                 /* fast diffuse-only path for input/progression testing */
+#else
     rs.combiner = &cb;
+#endif
 
     uint32_t n = 0;
     if (r->vertex_count) {                         /* immediate vertices */
