@@ -94,12 +94,15 @@ constant work at each existing RTT end and are not a complete measurement of
 observer-induced frame-time change. Reports have six bounded lines per window;
 no hot-loop logging occurs.
 
-The validated ARM build adds **824 bytes of static observer state**. Preparation
-uses a 224-byte stack frame versus 40 OFF, completion 280 versus 96 OFF; RTT
-replay remains 136 bytes, with a 20-byte `vp_end` callee. These compiler stack
-figures exclude callees and are not whole-thread stack requirements. The host
-ABI reports 832 bytes of static observer state. Ordinary ARM `.text` is
-byte-identical to the `e3c924b` baseline under the checked production flags.
+The integrated ARM build has **832 bytes of static observer state**: 360 bytes
+for per-slot state and 472 bytes for totals. The earlier 824-byte figure was the
+net change in the object’s `.bss` section, which also reflects alignment; it was
+not the sum of the observer symbols. Preparation uses a 224-byte stack frame
+versus 40 OFF, completion 280 versus 96 OFF; RTT replay remains 136 bytes, with
+a 20-byte `vp_end` callee. These compiler stack figures exclude callees and are
+not whole-thread stack requirements. The host ABI also reports 832 bytes of
+observer state. Ordinary ARM `.text` is byte-identical to the `e3c924b` baseline
+under the checked production flags.
 
 ## Validation and physical follow-up
 

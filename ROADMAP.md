@@ -102,6 +102,15 @@ directory. Existing controller reads, screenshots and polling remain unchanged. 
 [MCC reference tags](docs/mcc-mod-tools-reference.md) have been privately
 inventoried for content investigation, without changing the Xbox maps.
 
+The [hardware query-placement capture](docs/hardware-query-placement-20260916.md)
+finds an existing scene boundary after every query writer in the measured
+Blood Gulch view, with about 77 draws still to follow. Native/360p/native timing
+is 11.55/16.96/11.55 FPS, while final notification latency drops from about
+80 ms to 48 ms at 360p. This diagnostic establishes a rendering-sensitive
+bottleneck and a location to test earlier exact query results; it does not
+establish a retained gain. The next comparison removes the diagnostic observers
+and keeps all frame resources protected by their original final completion.
+
 September 15: [lightweight mutex comparisons](docs/object-light-lock-20260915.md)
 repeatedly improve one physical Blood Gulch view from approximately 11.8–12.0
 to 15.1–15.2 FPS, with both workers enabled in every arm. The experimental build
