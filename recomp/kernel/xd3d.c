@@ -733,6 +733,7 @@ void xv_hle_D3DDevice_SetTextureState_BorderColor(xctx *c) { XD3D_COUNT("D3DDevi
 void xv_hle_D3DDevice_SetTextureState_ColorKeyColor(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_ColorKeyColor"); X_RET(2); }
 void xv_hle_D3DDevice_SetTextureState_BumpEnv(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_BumpEnv"); X_RET(3); }
 void xv_hle_D3DDevice_SetTextureState_Deferred(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_Deferred"); if ((c->r[1] & 3) == c->r[1] && c->r[2] < 32) X_M32(D3D_G_TEXTURESTATE + ((c->r[1] << 5) + c->r[2]) * 4) = X_ARG(0); X_RET(1); }
+#include "xk_material_packet.inc"
 /* Deferred render states (fog enable/table mode/start/end/density, lighting, ...) are applied by D3D at
    draw time; we don't consume them yet.  Log distinct (state, value) pairs so the fog setup can be read. */
 void xv_hle_D3DDevice_SetRenderState_Deferred(xctx *c) {
@@ -881,6 +882,7 @@ static uint32_t ps_packed_colors[18];
 static unsigned ps_colors_reused, ps_colors_computed;
 void xd3d_prepare_report(unsigned frames)
 {
+    material_packet_report(frames);
     D3DLOG("[draw-state-cache] %u frames lookups %u adjacent %u reused %u computed %u\n",
         frames,ps_identity_cache.lookups,ps_identity_cache.adjacent_hits,
         ps_identity_cache.table_hits,ps_identity_cache.misses);

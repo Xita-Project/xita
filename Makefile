@@ -369,6 +369,9 @@ endif
 ifeq ($(XV_NATIVE_MODEL_HIERARCHY),1)
 RECOMP_CFLAGS += -DXV_NATIVE_MODEL_HIERARCHY
 endif
+ifeq ($(XV_MATERIAL_PACKET),1)
+RECOMP_CFLAGS += -DXV_MATERIAL_PACKET
+endif
 ifeq ($(XV_NATIVE_OBJECT_BASIS),1)
 RECOMP_CFLAGS += -DXV_NATIVE_OBJECT_BASIS
 CFLAGS += -DXV_NATIVE_OBJECT_BASIS
@@ -450,6 +453,19 @@ $(RECOMP_BUILD)/model-hierarchy.config: force-model-hierarchy-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(HIERARCHY_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_hierarchy.o: $(RECOMP_BUILD)/model-hierarchy.config
+
+# Material packets are an explicit research build: no hook call in the default
+# build. Track both helper and generated callers when switching a reused tree.
+MATERIAL_HOOK_SRCS := $(shell grep -l XV_MATERIAL_PACKET $(XITA_GUEST_SRCS) 2>/dev/null)
+MATERIAL_HOOK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(MATERIAL_HOOK_SRCS))
+.PHONY: force-material-packet-config
+force-material-packet-config:
+$(RECOMP_BUILD)/material-packet.config: force-material-packet-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_MATERIAL_PACKET)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(MATERIAL_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xd3d.o: $(RECOMP_BUILD)/material-packet.config
 
 # Unroll only bounded native math units. Scalar VFP operations retain their
 # established operand order; no global fast-math or guest codegen change.

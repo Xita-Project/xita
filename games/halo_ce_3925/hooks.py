@@ -8,6 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
+from games.halo_ce_3925 import material_packets
 
 
 class HaloHooks(NoGameHooks):
@@ -73,6 +74,7 @@ class HaloHooks(NoGameHooks):
     def __init__(self, image):
         self.image = image
         self.enabled = matches_image(image)
+        self.material_packets = material_packets.verified_spans(image) if self.enabled else {}
         self.flare_enabled = self.enabled
         self.object_basis_enabled = self.enabled and hashlib.sha256(
             image.bytes_at(0x8E166, 301) or b"").hexdigest() == "2dd205a3eef42000a6f5adf73582961a651e1ab9630a6669285a972085f61941"
@@ -110,6 +112,9 @@ class HaloHooks(NoGameHooks):
     object_shared_aliases = {0x115423: 0x114D30, 0x115FDF: 0x114D30}
 
     def before_instruction(self, address):
+        material = material_packets.before_instruction(self.material_packets, address)
+        if material:
+            return material
         if self.hierarchy_enabled and address == 0x8E0F0:
             return ["#ifdef XV_NATIVE_MODEL_HIERARCHY",
                     "    { extern int xv_math_model_hierarchy(xctx *); (void)xv_math_model_hierarchy(c); }",
