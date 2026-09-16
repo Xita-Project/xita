@@ -56,6 +56,19 @@ static uint32_t *texture, *target;
 static int attempted, ready;
 static h2_quad_contract contract;
 
+/* Shared GXM state for the other H2 backends (menu_gxm.c): the one context, patcher
+ * and mapped-memory allocator this file owns. h2_gxm_ensure() runs the same
+ * initialization the movie quad performs and reports whether GXM is usable. */
+static int initialize(void);
+int h2_gxm_ensure(void)
+{
+    if (!attempted) { attempted = 1; ready = initialize(); }
+    return ready;
+}
+SceGxmContext *h2_gxm_context(void) { return ready ? ctx : NULL; }
+SceGxmShaderPatcher *h2_gxm_patcher(void) { return ready ? patcher : NULL; }
+void *h2_gxm_alloc(unsigned size, int kind, unsigned *offset) { return alloc(size, kind, offset); }
+
 const h2_quad_contract *h2_quad_gxm_contract(void)
 {
     static int loaded;

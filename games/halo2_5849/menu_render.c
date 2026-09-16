@@ -41,8 +41,13 @@ static int knob(const char *name, int dflt)
 
 /* Private diagnostic: dump the composited back buffer so the rendered menu can
  * be inspected offline even when the frame never reaches the display flip. */
+void h2_menu_dump_target(const uint8_t *target, uint32_t W, uint32_t H, uint64_t drawn, uint32_t color_offset);
 static void dump_backbuffer(const uint8_t *target, uint32_t W, uint32_t H, uint64_t drawn,
                             uint32_t color_offset)
+{
+    h2_menu_dump_target(target, W, H, drawn, color_offset);
+}
+void h2_menu_dump_target(const uint8_t *target, uint32_t W, uint32_t H, uint64_t drawn, uint32_t color_offset)
 {
     /* One file per render target: the menu draws the backdrop and the UI layer
      * into different colour buffers, so a single file would only ever hold the
@@ -175,6 +180,16 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     const h2_kelvin_clear *c = r->clear;
     if (!s || !c || !c->map_physical || !c->read_instance || !c->has_color_dma) return 0;
     if (!s->program_load) return 0;
+    /* XV_MENU_GXM=1 routes draws to the GXM backend (menu_gxm.c); a draw it cannot take
+     * (no compiled shader pair yet) falls through to this software path after the GXM
+     * backend has flushed its pending scene, so both paths always see coherent buffers. */
+    static int gxm_knob = -1;
+    if (gxm_knob < 0) gxm_knob = knob("XV_MENU_GXM", 0);
+    if (gxm_knob) {
+        extern int h2_menu_gxm_render(void *opaque, const h2_menu_request *r);
+        int result = h2_menu_gxm_render(opaque, r);
+        if (result != -1) return result;                 /* 1 drawn, 0 rejected; -1 = fall back */
+    }
 
     uint32_t W = c->clip_horizontal >> 16, H = c->clip_vertical >> 16;
     if (W < 16 || W > 2048 || H < 16 || H > 2048) return 0;
@@ -202,7 +217,7 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     for (unsigned u = 0; u < 4; ++u) {
         uint32_t tw = 0, th = 0;
         int linear = 0;
-        const uint32_t *px = menu_texture_acquire(s, c, u, drawn + 1, TEX_CAP, &tw, &th, &linear);
+        const uint32_t *px = menu_texture_acquire(s, c, u, drawn + 1, TEX_CAP, &tw, &th, &linear, NULL);
         if (px) {
             rs.tex[u].texels = px; rs.tex[u].width = tw; rs.tex[u].height = th;
             rs.tex[u].texel_coords = linear;
@@ -413,13 +428,20 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
                 if (fp) { fwrite(&s->program_start, 4, 1, fp); fwrite(&s->program_load, 4, 1, fp);
                           fwrite(s->program, 16, s->program_load < 136 ? s->program_load : 136, fp); fclose(fp); }
             }
-            char cw[400]; size_t used = 0;
+            char cw[560]; size_t used = 0;
             for (unsigned k = 0; k < cb.stages && k < 8; ++k)
                 used += (size_t)snprintf(cw + used, sizeof cw - used, " %08X/%08X/%08X/%08X/%08X/%08X", cb.rgb_in[k], cb.rgb_out[k],
                                          cb.alpha_in[k], cb.alpha_out[k], cb.factor0[k], cb.factor1[k]);
-            xv_logf("[h2/menu-shader] pair#%u vp=%016llx ps=%016llx prim=%u vp_len=%u stages=%u final=%08X/%08X/%08X/%08X stagectl=%08X tex=%X%s\n",
-                    n_pair, (unsigned long long)hv, (unsigned long long)hp, r->primitive, s->program_load, cb.stages,
-                    cb.final_abcd, cb.final_efg, cb.final_factor0, cb.final_factor1, s->setup[0x1E70 / 4], cb.tex_used, cw);
+            used += (size_t)snprintf(cw + used, sizeof cw - used, " attrs=");
+            for (unsigned k = 0; k < 16; ++k)          /* vertex array formats: the GXM attribute layout per VP */
+                used += (size_t)snprintf(cw + used, sizeof cw - used, "%s%X", k ? "," : "", s->setup[(0x1760 + k * 4) / 4] & 0xFF);
+            /* ctl = SET_COMBINER_CONTROL (0x1E60), cmp = SET_SHADER_CLIP_PLANE_MODE/compare (0x1E6C),
+             * dot = SET_DOT_RGBMAPPING (0x1E74), inp = SET_SHADER_OTHER_STAGE_INPUT (0x1E78):
+             * with the stage modes (0x1E70) these complete a D3DPIXELSHADERDEF for the generator. */
+            xv_logf("[h2/menu-shader] pair#%u vp=%016llx ps=%016llx prim=%u vp_len=%u vp_start=%u stages=%u final=%08X/%08X/%08X/%08X stagectl=%08X ctl=%08X cmp=%08X dot=%08X inp=%08X tex=%X%s\n",
+                    n_pair, (unsigned long long)hv, (unsigned long long)hp, r->primitive, s->program_load, s->program_start, cb.stages,
+                    cb.final_abcd, cb.final_efg, cb.final_factor0, cb.final_factor1, s->setup[0x1E70 / 4],
+                    s->setup[0x1E60 / 4], s->setup[0x1E6C / 4], s->setup[0x1E74 / 4], s->setup[0x1E78 / 4], cb.tex_used, cw);
         }
     }
     ++drawn;

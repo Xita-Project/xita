@@ -42,10 +42,17 @@ static int map_target(const h2_kelvin_clear *state, uint32_t instance, uint32_t 
     return target->data != NULL && target->bytes <= UINTPTR_MAX - (uintptr_t)target->data;
 }
 
+/* A GPU-side menu backend (menu_gxm.c) may hold un-downloaded draws; the game's clears
+ * write the guest buffers, so it must land its pending scene first and learn about
+ * depth clears. Weak: absent in the default state-only build and the host tests. */
+extern void h2_menu_gxm_flush(void) __attribute__((weak));
+extern void h2_menu_gxm_zeta_cleared(uint32_t clear_value) __attribute__((weak));
 static int clear_surface(h2_kelvin_clear *state, uint32_t flags)
 {
     if (flags & ~0xF3u) return 0;
     if (!flags) return 1;
+    if (h2_menu_gxm_flush) h2_menu_gxm_flush();
+    if ((flags & 3) && h2_menu_gxm_zeta_cleared) h2_menu_gxm_zeta_cleared(state->clear_zstencil);
     /* First supported shape: origin-zero pitch surfaces without multisampling.
      * Restrict the format to ARGB8/Z24S8; other layouts need their own consumer. */
     if ((state->format & 0xFFFFu) != 0x128u ||

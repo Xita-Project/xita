@@ -86,6 +86,8 @@ SAME_C = [False, False]              # set per def by generate()
 CUBE_EXPR = None                     # None = real texCUBE; --cube normal|const|black substitute an expression
 CUBE_2D_MASK = 0                     # bound 2D textures using the NV2A cube addressing mode
 CUBE_MODES = {"CUBEMAP", "DOT_RFLCT_DIFF", "DOT_RFLCT_SPEC", "DOT_STR_CUBE"}
+NONE_STAGE_ZERO = False   # H2 menu pipeline sets True: NONE stages read as zero
+TEXCOORD_SCALE = False    # H2 menu pipeline sets True: PROJECT2D samples scale by xv_texscale[i]
 VARYINGS_AVAILABLE: Optional[Set[str]] = None   # --varyings: what the paired vertex program outputs
 
 
@@ -217,13 +219,23 @@ def emit_textures(d: dict, L: List[str], samplers: Dict[int, str], warnings: Lis
             tc = "float4(0.0, 0.0, 0.0, 1.0)"          # vertex program never writes oT{i}
         if mode == "NONE":
             if i in used:
-                warnings.append(f"t{i} read but stage mode NONE; sampling as PROJECT2D")
-                samplers[i] = "sampler2D"
-                L.append(f"    float4 t{i} = tex2D(tex{i}, {tc}.xy);")
+                if NONE_STAGE_ZERO:
+                    # NV2A: a stage whose shader program is NONE contributes 0 (xemu: vec4(0)).
+                    # The Halo 2 menu text program sums t2*c0 + t0*v0 with stage 2 NONE.
+                    L.append(f"    float4 t{i} = float4(0.0, 0.0, 0.0, 0.0);")
+                else:
+                    warnings.append(f"t{i} read but stage mode NONE; sampling as PROJECT2D")
+                    samplers[i] = "sampler2D"
+                    L.append(f"    float4 t{i} = tex2D(tex{i}, {tc}.xy);")
             continue
         if mode == "PROJECT2D":
             samplers[i] = "sampler2D"
-            L.append(f"    float4 t{i} = tex2D(tex{i}, {tc}.xy);")
+            if TEXCOORD_SCALE:
+                # H2 menu: linear (pitch) images are addressed in texels; the runtime sets
+                # xv_texscale[i] = (1/w, 1/h) for them and (1, 1) for normalized images.
+                L.append(f"    float4 t{i} = tex2D(tex{i}, {tc}.xy * xv_texscale[{i}].xy);")
+            else:
+                L.append(f"    float4 t{i} = tex2D(tex{i}, {tc}.xy);")
         elif mode == "PROJECT3D":
             samplers[i] = "sampler2D"
             L.append(f"    float4 t{i} = tex2Dproj(tex{i}, float3({tc}.xy, {tc}.w));")
@@ -415,7 +427,7 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
     params.append("uniform float4 psc[18]")
     params.append("uniform float4 xv_fogcolor")
     params.append("uniform float4 xv_atest")
-    if any(t['mode'] == 'DOT_ST' for t in d['textures']):
+    if TEXCOORD_SCALE or any(t['mode'] == 'DOT_ST' for t in d['textures']):
         params.append("uniform float4 xv_texscale[4]")
     if any(t["mode"] in ("BUMPENVMAP", "BUMPENVMAP_LUM") for t in d["textures"]):
         params.append("uniform float4 xv_bumpmat[4]")

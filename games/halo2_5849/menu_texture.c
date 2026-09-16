@@ -330,7 +330,8 @@ static size_t g_cache_bytes;
 static uint64_t g_hits, g_misses;
 
 const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit,
-                                     uint64_t serial, uint32_t cap, uint32_t *ow, uint32_t *oh, int *out_linear)
+                                     uint64_t serial, uint32_t cap, uint32_t *ow, uint32_t *oh, int *out_linear,
+                                     uint64_t *out_hash)
 {
     located L;
     if (!locate(s, c, unit, cap, &L)) return NULL;
@@ -370,6 +371,7 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
     e->used = serial;
     *ow = e->w; *oh = e->h;
     if (out_linear) *out_linear = e->linear;
+    if (out_hash) *out_hash = e->hash ^ ((uint64_t)e->key[1] << 32) ^ e->key[0];   /* content + format/offset */
     return e->texels;
 }
 

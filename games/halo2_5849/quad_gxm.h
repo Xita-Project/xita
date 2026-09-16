@@ -32,3 +32,10 @@ const uint32_t *h2_luma_gxm_render(void *opaque, const h2_luma_request *request)
 #include "sprite_draw.h"
 const h2_sprite_contract *h2_sprite_gxm_contract(void);
 const uint32_t *h2_sprite_gxm_render(void *opaque,const h2_sprite_request *request);
+
+/* Shared GXM state (quad_gxm.c) for sibling backends. kind: 0 mapped RW, 1 vertex USSE, 2 fragment USSE. */
+struct SceGxmContext; struct SceGxmShaderPatcher;
+int h2_gxm_ensure(void);
+struct SceGxmContext *h2_gxm_context(void);
+struct SceGxmShaderPatcher *h2_gxm_patcher(void);
+void *h2_gxm_alloc(unsigned size, int kind, unsigned *offset);

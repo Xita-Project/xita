@@ -900,6 +900,10 @@ static int complete_active_flip(xctx *c, uint32_t source)
         channel.commands.flip_read != (active_flip_serial & 1) ||
         channel.commands.flip_write != channel.commands.flip_read) return 0;
     uint32_t saved_fpscr = h2_platform_fpscr_read(), before, after;
+    {   /* land the GXM menu backend's pending scene: the flip presents guest memory */
+        extern void h2_menu_gxm_flush(void) __attribute__((weak));
+        if (h2_menu_gxm_flush) h2_menu_gxm_flush();
+    }
     int status = h2_platform_wait_vblank(&before, &after);
     if (status < 0 || before == after) { h2_platform_fpscr_write(saved_fpscr); return 0; }
     uint32_t timestamp = (uint32_t)x_rdtsc(), saved_fn = xv_cur_fn;
@@ -1010,6 +1014,10 @@ static int complete_timed_mode_vblank(xctx *c, uint32_t source)
         channel.commands.flip_read != 1 || channel.commands.flip_write || channel.commands.flip_modulo != 2)
         return 0;
     uint32_t saved_fpscr = h2_platform_fpscr_read(), before, after;
+    {   /* land the GXM menu backend's pending scene: the flip presents guest memory */
+        extern void h2_menu_gxm_flush(void) __attribute__((weak));
+        if (h2_menu_gxm_flush) h2_menu_gxm_flush();
+    }
     int status = h2_platform_wait_vblank(&before, &after);
     if (status < 0 || before == after) { h2_platform_fpscr_write(saved_fpscr); return 0; }
     uint32_t timestamp = (uint32_t)x_rdtsc(), saved_fn = xv_cur_fn;

@@ -18,7 +18,7 @@ int menu_texture_load(const h2_command_state *state, const h2_kelvin_clear *clea
  * Keyed by the unit registers plus a hash of all source bytes, so never stale. */
 const uint32_t *menu_texture_acquire(const h2_command_state *state, const h2_kelvin_clear *clear,
                                      unsigned unit, uint64_t serial, uint32_t cap_texels,
-                                     uint32_t *out_w, uint32_t *out_h, int *out_linear);
+                                     uint32_t *out_w, uint32_t *out_h, int *out_linear, uint64_t *out_hash);
 void menu_texture_cache_stats(uint64_t *hits, uint64_t *misses, size_t *bytes);
 
 /* Register-only view of a unit (no guest memory access): returns the enable bit
