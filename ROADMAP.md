@@ -120,7 +120,10 @@ passes 4,096 host, 350 admitted ARM and 26,624 owned-map numerical comparisons;
 the original prefix's ARM instructions in ordinary synthetic cases. It remains
 source-only: snapshot lifetime, observable-state preservation and guarded result
 publication must be completed before a hardware comparison. This is not a measured
-FPS gain. The [polygon-edge comparison](docs/native-polygon-edge.md)
+FPS gain. A compact C snapshot constructor and reader-retirement API now pass
+ASan/UBSan, TSan concurrency checks and the same 26,624 owned-map comparisons.
+Live BSP integration and the original allocation/list tail remain unfinished.
+The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)
 now completes three long native-resolution hardware trials: roughly 9.66–9.68

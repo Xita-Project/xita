@@ -62,7 +62,8 @@ The compact map arrays occupy **11,688 bytes for Blood Gulch**, **8,352 for Batt
 Creek**, and at most **15,996 bytes** across this campaign sample. These figures
 exclude the descriptor, allocator overhead and any second live snapshot.
 The two plane roots share storage in this map fixture; synthetic tests cover
-distinct roots. Snapshot creation currently exists only in the offline oracle.
+distinct roots. The C constructor below is now tested against the independent
+offline decoder, but neither is registered with live game loading yet.
 
 Ordinary synthetic traversals with nearest rounding and default native controls:
 
@@ -86,13 +87,60 @@ visited array across permuted guest pages. Memory stubs now use a separate
 translation unit; the reader handles page boundaries and verifies its input
 against the prepared visited array. The completed ARM matrix uses both fixes.
 
+## Owned C snapshots and retirement
+
+`xk_cluster_snapshot.c` constructs compact owned arrays through a caller-supplied
+bounded reader. It copies cluster adjacency, portal data, vertices, axis lookup
+and only referenced planes. Plane indices are compacted without changing portal
+or adjacency order. Distinct distance/projection roots remain distinct; matching
+roots share storage. No source or guest pointer remains in the query descriptor.
+All allocation/read/validation failures discard the incomplete snapshot.
+
+The caller must keep one source generation stable for the entire construction.
+The reader contract is not itself a lock, mapping validator or live guest adapter.
+`max_bytes` limits the two owned allocations; allocator overhead and libc sorting
+scratch are additional. A successful constructor is not permission to capture
+concurrently changing guest structures.
+
+The store transfers one reference on publication. Reader leases pin immutable
+arrays while computations run outside the caller's mutex. Retirement removes the
+current snapshot immediately; outstanding leases remain valid until released.
+Publication checks compare both snapshot identity and generation. Old snapshots
+cannot be republished, and generation exhaustion rejects future publication.
+Every shared-store/refcount operation requires the **same external mutex**.
+This mechanism does not discover map changes or automatically acquire Halo's guard.
+
+Validation now includes:
+
+- ASan/UBSan construction, every one of 23 reader failure points, both owned
+  allocation failures, malformed bounds, separate planes, exact storage limits
+  and empty geometry, with no outstanding allocations.
+- Retirement with two outstanding readers, followed by overwriting source bytes;
+  both readers still produce the expected result while stale publication checks fail.
+- Two concurrent readers through 2,000 publications and repeated retirement;
+  both ASan/UBSan and TSan pass. This exercises the snapshot API under a host
+  mutex, not the production object pool or live BSP transitions.
+- Another 26,624 exact owned-map comparisons using the **C constructor**.
+  Its decoded geometry is also checked against the independent Python decoder.
+- VitaSDK Cortex-A9 compilation with warnings treated as errors: 1,724 bytes
+  of text, no static data/BSS, and 232 bytes of reported constructor stack,
+  excluding allocator/sort callees. This is a compile check, not a device run.
+
+The host C snapshots retain 12,088 bytes for Blood Gulch, 8,732 for Battle Creek,
+and at most 16,460 across the same campaign sample. These include the descriptor
+and original-index workspace but exclude allocator overhead. ARM pointer sizes
+differ. No per-query allocation is required once a snapshot has been published.
+
 ## Integration work still required
 
-1. **Own snapshot lifetime.** The original reset `58440` clears roots at
+1. **Connect lifetime to the game.** The owned snapshot/store API above is ready
+   for integration. The original reset `58440` clears roots at
    `58492/5849E`, after calls that can retire data. BSP switching `58CD0` invokes
    load/unload helpers before publishing roots at `58D87/58D97`. Invalidate before
    retirement, construct after successful loading with workers drained, and
-   publish an owned generation. Pointer equality and the existing large-read
+   publish an owned generation. A snapshot scoped to a fully joined object pass
+   is another possible boundary, but its source consistency and construction cost
+   still need proof. Pointer equality and the existing large-read
    texture-purge heuristic do not establish that lifetime. Generated overlapping
    entries also need coverage; an entry at `58D8A` contains the later root store.
 2. **Preserve observable state.** Numerical success does not reconstruct the
@@ -121,8 +169,10 @@ python tools/test_cluster_query.py --xbe "$XBE" --manifest "$MANIFEST" \
 python tools/test_arm_cluster_query.py --reference "$RESULTS/host/reference.c" \
     --out "$RESULTS/arm"
 python tools/test_owned_cluster_query.py --xbe "$XBE" --manifest "$MANIFEST" \
-    --out "$RESULTS/maps" --maps "$MAPS/bloodgulch.map" \
+    --out "$RESULTS/maps" --native-snapshot --maps "$MAPS/bloodgulch.map" \
     "$MAPS/beavercreek.map" "$MAPS/a10.map" "$MAPS/a30.map"
+python tools/test_cluster_snapshot.py --out "$RESULTS/snapshot-asan"
+python tools/test_cluster_snapshot.py --out "$RESULTS/snapshot-tsan" --sanitize thread
 ```
 
 The ARM tool requires VitaSDK, Unicorn and pyelftools; `ARM_CC` can override the

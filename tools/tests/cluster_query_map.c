@@ -3,6 +3,7 @@
  * No live game hook, snapshot lifetime or guest-state publication is modeled. */
 #include "xv_x86rt.h"
 #include "kernel/xk_cluster_query.h"
+#include "kernel/xk_cluster_snapshot.h"
 #include <fenv.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,8 @@ enum { LOW_BYTES=4<<20, SP=0x2b0000 };
 uint8_t *g_xram, *g_img_base;
 uint32_t *g_xpt;
 static unsigned yields;
+static uint32_t bsp_address,bsp_bytes;
+static XvClusterSnapshot *owned_snapshot;
 const size_t xv_test_map_layout[]={sizeof(XvCluster),sizeof(XvPortal),sizeof(XvPoint),
     sizeof(XvPlane),sizeof(XvClusterGeometry),sizeof(XvClusterInput),sizeof(XvClusterResult)};
 void f_00056670(xctx *);
@@ -18,6 +21,7 @@ void __wrap_xv_preempt(xctx *c) { yields++; c->preempt=1000000; }
 
 void xv_test_map_free(void)
 {
+    xv_cluster_snapshot_release(owned_snapshot);owned_snapshot=NULL;
     free(g_xram);free(g_xpt);
     g_xram=g_img_base=NULL;g_xpt=NULL;
 }
@@ -41,8 +45,27 @@ int xv_test_map_load(const uint8_t *data,uint32_t size,uint32_t address,
     X_IMG32(0x39be50)=X_M32(root+0xb4);
     x_guest_write(0x1eaf30,axes,24);
     uint32_t zero=0;x_guest_write(0x1f0a68,&zero,4);
+    bsp_address=address;bsp_bytes=size;
     return 1;
 }
+
+static int snapshot_read(void *unused,uint32_t address,void *out,size_t bytes)
+{
+    (void)unused;
+    int inside=address>=bsp_address&&address-bsp_address<=bsp_bytes&&
+        bytes<=bsp_bytes-(address-bsp_address);
+    if(!inside&&!(address==0x1eaf30&&bytes==24)&&!(address==0x1f0a68&&bytes==4))return 0;
+    x_guest_read(out,address,bytes);return 1;
+}
+const XvClusterGeometry *xv_test_map_snapshot(void)
+{
+    xv_cluster_snapshot_release(owned_snapshot);
+    XvClusterSource source={X_IMG32(0x39be58),X_IMG32(0x39be50),0x1eaf30,0x1f0a68};
+    owned_snapshot=xv_cluster_snapshot_build(snapshot_read,NULL,&source,1<<20);
+    return xv_cluster_snapshot_geometry(owned_snapshot);
+}
+size_t xv_test_map_snapshot_bytes(void)
+{return xv_cluster_snapshot_bytes(owned_snapshot);}
 
 /* 0 exact numerical result; 1 conservative decline; negative = mismatch.
  * stats: original count, backedges, scheduler yields. */

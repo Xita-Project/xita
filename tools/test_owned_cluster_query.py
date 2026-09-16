@@ -124,6 +124,8 @@ def main():
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--maps', type=Path, nargs='+', required=True)
     parser.add_argument('--cases-per-bsp', type=int, default=512)
+    parser.add_argument('--native-snapshot', action='store_true',
+                        help='construct candidate arrays with the runtime C builder')
     a = parser.parse_args()
     assert a.cases_per_bsp > 0
     a.out.mkdir(parents=True, exist_ok=True)
@@ -140,6 +142,7 @@ def main():
         '-fsanitize=undefined', '-fno-sanitize-recover=all',
         '-I' + str(ROOT / 'recomp'), str(a.out / 'reference.c'),
         str(ROOT / 'tools/tests/cluster_query_map.c'),
+        str(ROOT / 'recomp/kernel/xk_cluster_snapshot.c'),
         str(ROOT / 'recomp/kernel/xk_cluster_query.c'), str(ROOT / 'recomp/xv_x86rt.c'),
         '-Wl,--wrap=xv_preempt,--gc-sections,-z,defs,--version-script=' + str(exports),
         '-lm', '-o', str(library)]
@@ -156,6 +159,8 @@ def main():
                                     C.POINTER(Result), C.POINTER(C.c_uint32)]
     lib.xv_test_map_query.restype = C.c_int
     lib.xv_test_map_free.restype = None
+    lib.xv_test_map_snapshot.restype = C.POINTER(Geometry)
+    lib.xv_test_map_snapshot_bytes.restype = C.c_size_t
     rows = []
     try:
         for path in a.maps:
@@ -169,12 +174,34 @@ def main():
                 snapshot = Snapshot(raw, base, root, axes)
                 assert lib.xv_cluster_geometry_valid(C.byref(snapshot.geometry)), (path, bsp['index'])
                 assert lib.xv_test_map_load(raw, size, base, root, axes)
+                candidate = C.pointer(snapshot.geometry)
+                if a.native_snapshot:
+                    candidate = lib.xv_test_map_snapshot()
+                    assert candidate, (path.name, bsp['index'], 'snapshot creation')
+                    native = candidate.contents
+                    assert native.cluster_count == snapshot.geometry.cluster_count
+                    assert native.portal_count == snapshot.geometry.portal_count
+                    for i, portal in enumerate(snapshot.portals):
+                        other = native.portals[i]
+                        assert list(other.sides) == list(portal.sides)
+                        assert list(other.center) == list(portal.center) and other.radius == portal.radius
+                        assert list(native.distance_planes[other.plane].v) == list(snapshot.planes[portal.plane].v)
+                        assert list(native.projection_planes[other.plane].v) == list(snapshot.planes[portal.plane].v)
+                        assert other.vertices == portal.vertices
+                        for k in range(portal.vertices):
+                            assert list(native.vertices[other.first_vertex+k].v) == list(snapshot.vertices[portal.first_vertex+k].v)
+                    for i, cluster in enumerate(snapshot.clusters):
+                        other = native.clusters[i]
+                        assert other.count == cluster.count
+                        assert list(native.adjacency[other.first:other.first+other.count]) == list(
+                            snapshot.adjacency[cluster.first:cluster.first+cluster.count])
                 stats, result = (C.c_uint32 * 3)(), Result()
                 visited = (C.c_uint32 * 256)()
                 rng = random.Random(0x56670 + bsp['index'])
                 row = dict(map=path.name, bsp=bsp['index'], bsp_sha256=hashlib.sha256(raw).hexdigest(),
                     clusters=snapshot.geometry.cluster_count, portals=snapshot.geometry.portal_count,
                     snapshot_array_bytes=snapshot.array_bytes, cases=0, declines=0,
+                    native_snapshot_bytes=lib.xv_test_map_snapshot_bytes() if a.native_snapshot else None,
                     maximum_result=0, maximum_portal_tests=0)
                 for case in range(a.cases_per_bsp):
                     # Exercise real portal boundaries from each side, nearby
@@ -194,7 +221,7 @@ def main():
                         visited[i] = ((epoch + 1) & 0xffffffff) if case % 17 == 0 and i % 7 == 0 else 0xabcd0000 + i
                     data = Input((C.c_float * 3)(*center), radius, cluster, epoch, 1000000, visited)
                     for rounding in range(4):
-                        code = lib.xv_test_map_query(C.byref(snapshot.geometry), C.byref(data), rounding,
+                        code = lib.xv_test_map_query(candidate, C.byref(data), rounding,
                                                      C.byref(result), stats)
                         assert code >= 0, (path.name, bsp['index'], case, rounding, code,
                                            list(stats), result.count, list(center), radius)
