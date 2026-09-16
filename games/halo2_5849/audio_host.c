@@ -4,6 +4,7 @@
 #include "recomp/kernel/xk.h"
 #include "recomp/kernel/xk_audio.h"
 #include <string.h>
+#include <stdlib.h>
 #if H2_AUDIO_DSP
 #include "dsp_asset.h"
 static h2_dsp_engine *effects;
@@ -1578,6 +1579,31 @@ void h2_audio_guest_entry(xctx *c, uint32_t ip)
     if (original_reverb_entry(c,ip)) return;
 #endif
     if (!device.ever_created) return;
+    /* Menu bring-up (XV_MENU_VBLANK): the menu's audio init calls a large tree of original DSoundBuffer
+     * buffer/config methods (closure from 0x37AD9C) that carry no APU/device I/O of their own - the
+     * backend-touching methods are the separately-replaced host boundaries. Permit these audited
+     * original methods to execute unchanged so the menu build proceeds; the APU boundary still traps. */
+    { static int menu = -1; if (menu < 0) { const char *e = getenv("XV_MENU_VBLANK"); menu = e ? atoi(e) : 0; }
+      if (menu) {
+          uint32_t caller = mapped(c->r[4], 4) ? X_M32(c->r[4]) : 0;
+          /* Menu bring-up: the menu's audio init drives a large set of original DSoundBuffer buffer/
+           * config methods that carry no APU/device I/O of their own (backend-touching methods are the
+           * separately-replaced host boundaries, and the APU MMIO boundary still traps). Permit those to
+           * execute unchanged so the menu build proceeds, EXCEPT the few methods that require their host
+           * handler: work delivery (0x37B844), release (0x379F2A), the config methods (0x379F5B/0x37E126),
+           * and 0x379E9E when reached from its work/config callers. Each distinct pass-through is logged
+           * for later per-method auditing. */
+          int handler_needed =
+              ip == 0x37B844 || ip == 0x379F2A || ip == 0x379F5B || ip == 0x37E126 ||
+              (ip == 0x379E9E && (caller == 0x37B84A || caller == 0x379F61));
+          if (!handler_needed) {
+              static uint32_t seen_pt[512]; static unsigned n_pt; int known = 0;
+              for (unsigned i = 0; i < n_pt; ++i) if (seen_pt[i] == ip) { known = 1; break; }
+              if (!known && n_pt < 512) { seen_pt[n_pt++] = ip;
+                  xv_logf("[h2/audio-menu] passthrough DSOUND %08X from %08X\n", ip, caller); }
+              return;   /* run the original DSOUND method unchanged */
+          }
+      } }
     if (ip==0x37B844 || (ip==0x379E9E && !(c->r[4]&3) && mapped(c->r[4],4) && X_M32(c->r[4])==0x37B84A)) {
         uint32_t fpscr=h2_platform_fpscr_read();
 #if H2_AUDIO_DSP
