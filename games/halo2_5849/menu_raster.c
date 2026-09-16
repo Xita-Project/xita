@@ -7,9 +7,10 @@ static int32_t imax(int32_t a, int32_t b) { return a > b ? a : b; }
 
 static uint32_t sample_tex(const menu_texture *t, float u, float v)
 {
-    /* Nearest, clamp-to-edge. Callers with no texture pass texels == NULL. */
-    int32_t x = (int32_t)floorf(u * (float)t->width);
-    int32_t y = (int32_t)floorf(v * (float)t->height);
+    /* Nearest, wrap/repeat (NV2A default). Callers with no texture pass NULL. */
+    u -= floorf(u); v -= floorf(v);
+    int32_t x = (int32_t)(u * (float)t->width);
+    int32_t y = (int32_t)(v * (float)t->height);
     if (x < 0) x = 0;
     if (x >= (int32_t)t->width) x = (int32_t)t->width - 1;
     if (y < 0) y = 0;

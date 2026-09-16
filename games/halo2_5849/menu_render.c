@@ -1,6 +1,7 @@
 #include "menu_render.h"
 #include "nv2a_vsh.h"
 #include "menu_raster.h"
+#include "menu_texture.h"
 #include "linear_texture.h"
 #include "command_state.h"
 #include "kelvin_clear.h"
@@ -150,12 +151,11 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     rs.blend = MENU_BLEND_ALPHA;
     rs.clip_x0 = 0; rs.clip_y0 = 0; rs.clip_x1 = (int32_t)W - 1; rs.clip_y1 = (int32_t)H - 1;
 
-    h2_linear_texture lt;
+    static uint32_t g_tex0[256 * 256];
     int textured = 0;
-    if (h2_linear_texture_read(s, c, 0, &lt) && lt.pixels && lt.pitch == lt.width * 4 &&
-        lt.width && lt.height) {
-        rs.tex0.texels = (const uint32_t *)(const void *)lt.pixels;
-        rs.tex0.width = lt.width; rs.tex0.height = lt.height; textured = 1;
+    uint32_t tw = 0, th = 0;
+    if (menu_texture_load(s, c, 0, g_tex0, sizeof g_tex0 / sizeof *g_tex0, &tw, &th)) {
+        rs.tex0.texels = g_tex0; rs.tex0.width = tw; rs.tex0.height = th; textured = 1;
     }
 
     uint32_t n = 0;
