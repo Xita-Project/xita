@@ -21,6 +21,7 @@ prefix=r'''
 #include "runtime/xv_quality_settings.h"
 #include "runtime/xv_render_profile.h"
 #include "runtime/xv_frame_events.h"
+#include "runtime/xv_packet_timing.h"
 #define XV_DISPLAY_BUFFER_COUNT 3u
 #define XV_DISPLAY_MAX_PENDING 2u
 #define XV_LOG(...) ((void)0)
@@ -40,7 +41,7 @@ static volatile unsigned *g_notifications=notification_words;
 '''
 fixture=r'''
 static unsigned rendered,finished,queries,checked,peak_live,base,failed_frame;
-static int early,has_queries=1,missing_world;
+static int early,has_queries=1,missing_world,complete_during_submit;
 static int xv_early_visibility_enabled(void) { return early; }
 int xv_d3d_has_visibility(uint32_t frame) { assert(frame>=10 && frame<=12);return has_queries; }
 static uint64_t now=1,retired_at[3],submitted_at[3],queries_at[3];
@@ -78,6 +79,10 @@ static int xv_gfx_render_frame(uint32_t mesh,unsigned ui,const SceGxmNotificatio
     g_display_queued++;
     g_gfx.front_index=g_gfx.back_index;g_gfx.back_index=(g_gfx.back_index+1)%3;
     if(rendered-checked>peak_live)peak_live=rendered-checked;
+    if(complete_during_submit) {
+        now+=2000;gpu[i].done=1;*gpu[i].fence.address=gpu[i].fence.value;
+        gpu[i].due=now;now+=2000; /* notification precedes CPU return */
+    }
     return 0;
 }
 void sceGxmFinish(SceGxmContext *ctx)
@@ -114,6 +119,7 @@ int main(int argc,char **argv)
     early=getenv("TEST_EARLY")!=NULL;
     g_gfx.scaled_target=getenv("TEST_NATIVE")?NULL:(void*)1;
     has_queries=!getenv("TEST_NO_QUERIES");missing_world=getenv("TEST_MISSING_WORLD")!=NULL;
+    complete_during_submit=getenv("TEST_COMPLETE_DURING_SUBMIT")!=NULL;
     g_frame_completed=g_frame_submitted=base;g_frame_requested=base+3u;
     for(unsigned i=0;i<3;i++) {
         uint32_t ticket=base+i+1u;unsigned q=ticket&3u;
@@ -122,8 +128,17 @@ int main(int argc,char **argv)
         notification_words[q]=ticket-4u; /* previous use, including ticket wrap */
     }
     xv_pump_thread(0,NULL);
+#if XV_GPU_PACKET_TIMING
+    assert(g_packet_timing.retired==3 && g_packet_timing.failed==(failed_frame?1u:0u));
+    assert(g_packet_timing.valid==(failed_frame?2u:3u) && !g_packet_timing.invalid);
+    if(complete_during_submit) {
+        assert(g_packet_timing.no_negative==3 && g_packet_timing.sum[XV_PACKET_SUBMIT]==12000);
+        assert(g_packet_timing.sum[XV_PACKET_LOWER]==0 && g_packet_timing.sum[XV_PACKET_UPPER]==12000);
+        assert(g_packet_timing.sum[XV_PACKET_TAIL_LOWER]==0 && g_packet_timing.sum[XV_PACKET_TAIL_UPPER]==0);
+    }
+#endif
     assert(rendered==3 && queries==3 && checked==3 && finished==(failed_frame?1u:0u));
-    if(!failed_frame) {
+    if(!failed_frame && !complete_during_submit) {
         if(capped) {assert(peak_live==1);assert(retired_at[0]<submitted_at[1]);}
         else {assert(peak_live>=2);assert(submitted_at[1]<retired_at[0]);}
         assert(retired_at[0]<=gpu[0].due+100);
@@ -139,9 +154,11 @@ int main(int argc,char **argv)
 with tempfile.TemporaryDirectory(prefix='xita-frame-completion-') as tmp:
     p=pathlib.Path(tmp);(p/'test.c').write_text(prefix+packets+fixture+pump+suffix)
     sdk=pathlib.Path(os.environ.get('VITASDK',str(pathlib.Path.home()/'vitasdk')))
-    subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP','-Wall','-Wextra','-Werror','-Wno-unused-parameter',
+    subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP','-DXV_GPU_PACKET_TIMING='+os.environ.get('TEST_GPU_PACKET_TIMING','0'),'-Wall','-Wextra','-Werror','-Wno-unused-parameter',
       '-I',str(root),'-I',str(root/'runtime'),'-idirafter',str(sdk/'arm-vita-eabi/include'),str(p/'test.c'),str(root/'runtime/xv_render_profile.c'),'-o',str(p/'test')],check=True)
     for mode in [[],['TEST_EARLY'],['TEST_EARLY','TEST_NATIVE'],['TEST_EARLY','TEST_NO_QUERIES'],['TEST_EARLY','TEST_MISSING_WORLD']]:
         env=os.environ.copy();env.update({key:'1' for key in mode})
         for args in [[],['1'],['0','wrap'],['1','wrap'],['0','wrap','error']]:
             subprocess.run([str(p/'test'),*args],check=True,env=env)
+    subprocess.run([str(p/'test'),'0','wrap'],check=True,
+                   env={**os.environ,'TEST_COMPLETE_DURING_SUBMIT':'1'})
