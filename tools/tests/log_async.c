@@ -8,6 +8,7 @@
 #include <stdatomic.h>
 #include <time.h>
 #include <unistd.h>
+#include <psp2/kernel/error.h>
 #include "../../runtime/xv_log.c"
 
 #define CAP (16u*1024u*1024u)
@@ -88,8 +89,10 @@ static void *native_main(void *unused)
 { (void)unused;identity=100;native_entry(0,NULL);return NULL; }
 SceUID sceKernelCreateThread(const char *name,SceKernelThreadEntry entry,int priority,SceSize stack,SceUInt attr,int affinity,const SceKernelThreadOptParam *opt)
 {
-    (void)name;(void)opt;assert(priority==0x10000120 && stack==64*1024 && !attr && affinity==SCE_KERNEL_CPU_MASK_USER_ALL);
-    native_entry=entry;return fail_init==4 ? -34 : 100;
+    /* Verify the requested parameters, not firmware admission. The original
+     * mock accepted 0x10000120, which physical firmware rejected. */
+    (void)name;(void)opt;assert(priority==0x10000110 && stack==64*1024 && !attr && affinity==SCE_KERNEL_CPU_MASK_USER_ALL);
+    native_entry=entry;return fail_init==4 ? (SceUID)SCE_KERNEL_ERROR_ILLEGAL_PRIORITY : 100;
 }
 int sceKernelStartThread(SceUID uid,SceSize args,void *argp)
 { assert(uid==100 && !args && !argp);if(fail_init==5)return -35;native_started=1;return pthread_create(&native_thread,NULL,native_main,NULL); }
@@ -351,6 +354,7 @@ int main(int argc,char **argv)
         assert(atomic_load(&deleted_semas)==(int)sem_count);
         xv_logf("fallback\n");if(fail_init!=6)verify("fallback\n",9);
         assert(status().startup_error);assert(xv_log_flush_wait(1000)==(fail_init==6 ? XV_LOG_IO : XV_LOG_OK));
+        if(fail_init==4)assert(status().startup_error==(int)SCE_KERNEL_ERROR_ILLEGAL_PRIORITY);
     } else if(!strcmp(test,"cold")) {
         pthread_t t[8];for(unsigned i=0;i<8;i++)assert(!pthread_create(&t[i],NULL,cold_log,(void *)(uintptr_t)i));
         for(unsigned i=0;i<8;i++)assert(!pthread_join(t[i],NULL));

@@ -81,8 +81,11 @@ as soon as the write API returns. Oversized inputs split into ordered chunks;
 there is no truncation or allocation in Present.
 
 The writer is a real `sceKernelCreateThread` with a kernel-owned 64 KiB stack,
-priority `0x10000120`, and `SCE_KERNEL_CPU_MASK_USER_ALL`. It never runs a guest
-fiber, game/GXM callback, object job, formatter or report snapshot. It does not
+priority `0x10000110`, and `SCE_KERNEL_CPU_MASK_USER_ALL`. The priority matches
+the native remote service that root observed running on the physical Vita;
+firmware rejected the original `0x10000120` (see the startup finding below).
+It never runs a guest fiber, game/GXM callback, object job, formatter or report
+snapshot. It does not
 touch the guest file/descriptor layer. Its priority/affinity are experimental;
 the user cores are shared with existing work, not assumed free.
 
@@ -277,6 +280,11 @@ TSan (141 successful scenario runs). They cover:
   holds the sink while another thread checks closed transition admission;
   timeout preserves OFF and all handles before a later successful boundary.
 
+These host tests model kernel calls; they do not validate firmware admission of
+thread parameters. The thread-creation failure fixture now returns the observed
+`SCE_KERNEL_ERROR_ILLEGAL_PRIORITY` and checks that startup status preserves it,
+while retaining synchronous fallback and handle cleanup.
+
 The existing synchronous log fixture passes ordinarily and under ASan/UBSan,
 including the three console-success conventions and control API stubs with async
 compiled out. The UI fixture checks RUNNING-but-OFF grouping with batching both
@@ -293,10 +301,25 @@ and `xd3d.c`. The build uses the checked-in shader layout header (`make -o
 shaders/xv_layouts.h`) and performs no asset generation or full package build.
 The default ARM logger object has no `log_queue`/`log_writer` symbols and 32,792
 BSS bytes; the enabled object has 164,312 BSS bytes, in addition to its kernel
-thread stack. Existing unrelated main/header warnings remain. No hardware,
-Vita3K, deployment or authoritative source/stage mutation was performed.
+thread stack. Existing unrelated main/header warnings remain. These isolated
+host/compile checks did not access hardware, Vita3K, deployment or authoritative
+source/stage. Root's later physical startup finding is recorded below.
 
 ## Review and physical acceptance
+
+Root's first physical trial booted and played normally, but refused the
+log-writer comparison request. `GET /update` reported logger `startup_error`
+`-2147319773` (`0x80028023`), identified by the installed VitaSDK header as
+`SCE_KERNEL_ERROR_ILLEGAL_PRIORITY`. The writer requested `0x10000120`; the
+already-running native remote service uses `0x10000110`. The writer now requests
+that known-working service priority. Its stack, affinity and default opt-ins
+remain unchanged. Physical writer admission and performance with this correction
+still require root's follow-up trial.
+
+The previous host fixture asserted and accepted `0x10000120`, so its passing
+tests and successful ARM compilation did not detect this hardware-only failure.
+Updating the mock's expected priority verifies the request made by production
+code; it is not evidence that firmware accepts the corrected writer.
 
 This isolated branch starts at `1ad76da027552d2611dbf1a984564af1a23d71f5`.
 Independent review of the initial prototype `75ef5d6` found three blockers that
