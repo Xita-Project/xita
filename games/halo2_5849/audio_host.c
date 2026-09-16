@@ -628,8 +628,17 @@ static void stream_process(xctx *c)
     const uint32_t ip=0x37AD25;stack(c,ip,3);
     h2_audio_stream *s=stream_live(c,ip,X_ARG(0));uint32_t address=X_ARG(1),packet[6],caller=X_M32(c->r[4]);
     if (!effects || s->flags!=0x40000000 || s->route_count!=1 || (s->route_bin<27 || s->route_bin>30) || s->callback!=0x335D82 || s->headroom ||
-        (caller!=0x33610E && caller!=0x335D7B) || X_ARG(2) || !mapped(address,sizeof packet))
+        (caller!=0x33610E && caller!=0x335D7B) || X_ARG(2) || !mapped(address,sizeof packet)) {
+        /* Menu bring-up: the menu submits its own audio stream via the standard DSound vtable
+         * (caller 0x2AE89A) with a state this GP-routed handler was not built for. The original caller
+         * checks the HRESULT (setge) and takes its failure path (exits the submit loop, continues the
+         * menu build) - so return a real submission FAILURE the game handles, rather than strict-stopping.
+         * Menu audio is silent for now; correct routing of the menu stream is a later audio step. */
+        static int menu=-1; if(menu<0){const char*e=getenv("XV_MENU_VBLANK");menu=e?atoi(e):0;}
+        if (menu) { xv_logf("[h2/audio-menu] stream Process unsupported (caller %08X flags %08X cb %08X route %u) -> DSERR, game handles\n",
+                            caller, s->flags, s->callback, s->route_bin); result(c,0x8007000E,3); return; }
         fail(c,ip,"unsupported stream Process state/caller",caller);
+    }
     x_guest_read(packet,address,sizeof packet);
     if (packet[1]!=320 || packet[2] || packet[3] || packet[4]>1 || packet[5] ||
         (packet[0]&1) || !mapped(packet[0],320) || overlaps_device(packet[0],320))

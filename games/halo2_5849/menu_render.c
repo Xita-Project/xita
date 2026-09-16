@@ -24,7 +24,7 @@ static void dump_backbuffer(const uint8_t *target, uint32_t W, uint32_t H, uint6
                 W, H, (unsigned long long)drawn);
 }
 
-#define MAX_VERTS 20000u
+#define MAX_VERTS 65536u   /* menu item geometry uses large indexed draws (16-bit indices) */
 
 typedef struct { const uint8_t *base; uint32_t stride, type, count; int enabled; } vattr;
 

@@ -13,7 +13,7 @@
 /* Immediate vertices are small (per-glyph/box quads); indexed geometry carries
  * its vertices in guest arrays the backend fetches, so only indices are held. */
 #define H2_MENU_MAX_VERTICES 512u
-#define H2_MENU_MAX_INDICES 8192u
+#define H2_MENU_MAX_INDICES 65536u
 #define H2_MENU_ATTRIBUTES 16u
 
 /* One assembled immediate vertex: every NV2A attribute expanded to float4 with
