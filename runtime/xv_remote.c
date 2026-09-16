@@ -212,7 +212,7 @@ static void serve(int s)
                 reply(s,bad?409:204,bad?"Update not ready\n":"");
             } else reply(s,404,"Unknown update operation\n");
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/benchmark?kind=",16)) {
-            static const char *const kinds[]={"object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer"};
+            static const char *const kinds[]={"object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer","clip-region"};
             unsigned kind=0;
             for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++)if(!strcmp(target+16,kinds[i]))kind=i+1;
             if(!strcmp(target+16,"diagnostic-shot"))kind=XV_BENCH_DIAGNOSTIC_POLL;

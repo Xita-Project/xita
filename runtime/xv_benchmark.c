@@ -26,8 +26,12 @@ int xv_object_pose_available(void) __attribute__((weak));
 void xv_material_packet_override(int) __attribute__((weak));
 int xv_material_packet_available(void) __attribute__((weak));
 void xv_native_polygon_edge_init(void) __attribute__((weak));
+void xv_native_clip_region_init(void) __attribute__((weak));
 void xv_native_polygon_edge_override(int) __attribute__((weak));
+void xv_native_clip_region_override(int) __attribute__((weak));
 int xv_native_polygon_edge_available(void) __attribute__((weak));
+int xv_native_clip_region_available(void) __attribute__((weak));
+int xv_native_clip_region_enabled(void) __attribute__((weak));
 void xv_model_hierarchy_override(int) __attribute__((weak));
 void xv_object_quat_override(int) __attribute__((weak));
 int xv_model_hierarchy_available(void) __attribute__((weak));
@@ -75,7 +79,7 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||(kind>XV_BENCH_LOG_WRITER&&kind!=XV_BENCH_DIAGNOSTIC_POLL&&kind!=XV_BENCH_DIAGNOSTIC_HIST&&kind!=XV_BENCH_LIGHT_CENSUS)||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||(kind>XV_BENCH_CLIP_REGION&&kind!=XV_BENCH_DIAGNOSTIC_POLL&&kind!=XV_BENCH_DIAGNOSTIC_HIST&&kind!=XV_BENCH_LIGHT_CENSUS)||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
     if((kind==XV_BENCH_DIAGNOSTIC_POLL||kind==XV_BENCH_DIAGNOSTIC_HIST)&&
        (!xv_diag_poll_available||!xv_diag_poll_override||!xv_diag_poll_measure||!xv_diag_poll_frame||!xv_diag_poll_report))return -1;
 #ifndef XV_LIGHT_QUERY_CENSUS
@@ -83,6 +87,7 @@ int xv_benchmark_remote_request(unsigned kind)
 #endif
     if(kind==XV_BENCH_LOG_WRITER&&(!xv_log_async_available||!xv_log_async_init||!xv_log_async_enabled||!xv_log_async_set_enabled||!xv_log_async_available()))return -1;
     if(kind==XV_BENCH_POLYGON_EDGE&&(!xv_native_polygon_edge_init||!xv_native_polygon_edge_override||!xv_native_polygon_edge_available))return -1;
+    if(kind==XV_BENCH_CLIP_REGION&&(!xv_native_clip_region_init||!xv_native_clip_region_override||!xv_native_clip_region_available))return -1;
     if(kind==XV_BENCH_OBJECT_POSE&&(!xv_object_pose_override||!xv_object_pose_available))return -1;
     if(kind==XV_BENCH_MATERIAL_PACKET&&(!xv_material_packet_override||!xv_material_packet_available))return -1;
     if(kind==XV_BENCH_BLEND_REPLACE&&!xv_d3d_blend_replace_override)return -1;
@@ -168,6 +173,7 @@ static unsigned diagnostic_path(void) {return remote_kind==XV_BENCH_DIAGNOSTIC_H
 int xv_benchmark_compare_light_census(void) { return remote_kind==XV_BENCH_LIGHT_CENSUS; }
 int xv_benchmark_compare_log_writer(void) { return remote_kind==XV_BENCH_LOG_WRITER; }
 int xv_benchmark_compare_polygon_edge(void) { return remote_kind==XV_BENCH_POLYGON_EDGE; }
+int xv_benchmark_compare_clip_region(void) { return remote_kind==XV_BENCH_CLIP_REGION; }
 int xv_benchmark_compare_object_quat(void) { return remote_kind==XV_BENCH_OBJECT_QUAT; }
 int xv_benchmark_compare_object_math(void) { return remote_kind==XV_BENCH_OBJECT_MATH; }
 int xv_benchmark_compare_depth_prepare(void) { return remote_kind==XV_BENCH_DEPTH_PREPARE; }
@@ -204,6 +210,9 @@ static int candidate_available(void)
     if(xv_benchmark_compare_light_census()) {
 #ifdef XV_LIGHT_QUERY_CENSUS
         if(!xv_benchmark_boundary_time||!xv_light_census_present_current())return 0;
+        /* Enabling this observer must not silently select the region fallback
+         * only in the ON arm. Existing enabled regions require a separate run. */
+        if(xv_native_clip_region_available&&(!xv_native_clip_region_enabled||xv_native_clip_region_enabled()))return 0;
         b.census_original=!!__atomic_load_n(&xv_light_census_enabled,__ATOMIC_RELAXED);return 1;
 #else
         return 0;
@@ -224,6 +233,17 @@ static int candidate_available(void)
          * No helper is admitted until its subsequently drained enable. */
         if(!xv_native_polygon_edge_available())xv_native_polygon_edge_init();
         return xv_native_polygon_edge_available();
+    }
+    if(xv_benchmark_compare_clip_region()) {
+#ifdef XV_LIGHT_QUERY_CENSUS
+        if(XV_LIGHT_CENSUS_ON())return 0;
+#endif
+        if(!xv_native_clip_region_init || !xv_native_clip_region_override || !xv_native_clip_region_available)return 0;
+        /* First valid request runs on the recording owner with object jobs
+         * joined. Bind here, not on the bootstrap/network native thread.
+         * No helper is admitted until its subsequently drained enable. */
+        if(!xv_native_clip_region_available())xv_native_clip_region_init();
+        return xv_native_clip_region_available();
     }
     if(xv_benchmark_compare_object_pose())return xv_object_pose_override && xv_object_pose_available && xv_object_pose_available();
     if(xv_benchmark_compare_material_packet())return xv_material_packet_override && xv_material_packet_available && xv_material_packet_available();
@@ -314,6 +334,7 @@ static const char *tag(void) { return b.compare ?
     (xv_benchmark_compare_diagnostic_poll() ? (diagnostic_path()==1?"diagnostic-shot-compare":"diagnostic-hist-compare") :
      xv_benchmark_compare_light_census() ? "light-census-compare" :
      xv_benchmark_compare_log_writer() ? "log-writer-compare" :
+     xv_benchmark_compare_clip_region() ? "clip-region-compare" :
      xv_benchmark_compare_polygon_edge() ? "polygon-edge-compare" :
      xv_benchmark_compare_object_pose() ? "object-pose-compare" :
      xv_benchmark_compare_material_packet() ? "material-packet-compare" :
@@ -494,6 +515,8 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
                 xv_logf("[log-writer-compare] start off/on/off at %up; synchronous/background/synchronous periodic output, same formatting/graphics/workers, restore initial mode %d; %u settle + %u measured frames each\n",height,b.log_original,SETTLE,LOG_MEASURE);
             else if (xv_benchmark_compare_polygon_edge())
                 xv_logf("[polygon-edge-compare] start off/on/off at %up; original/native/original polygon-edge math, full guest state and scheduler handoffs retained; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_clip_region())
+                xv_logf("[clip-region-compare] start off/on/off at %up; original-wrapper/fused-region/original-wrapper with identical ARM clip correctness fix, full state, per-clip locks and scheduler handoffs; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_object_pose())
                 xv_logf("[object-pose-compare] start off/on/off at %up; one recursive guard around the original pose loop, same workers, math, graphics and owner services; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_material_packet())

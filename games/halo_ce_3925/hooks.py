@@ -8,6 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
+from games.halo_ce_3925 import clip_region
 
 
 class HaloHooks(NoGameHooks):
@@ -74,6 +75,7 @@ class HaloHooks(NoGameHooks):
         self.image = image
         self.enabled = matches_image(image)
         self.flare_enabled = self.enabled
+        self.clip_region_enabled = self.enabled and clip_region.matches_spans(image)
         self.object_basis_enabled = self.enabled and hashlib.sha256(
             image.bytes_at(0x8E166, 301) or b"").hexdigest() == "2dd205a3eef42000a6f5adf73582961a651e1ab9630a6669285a972085f61941"
         self.palette_enabled = self.enabled and all(
@@ -239,6 +241,8 @@ class HaloHooks(NoGameHooks):
 
     def transform_body(self, address, body):
         body = self.light_census_body(address, body)
+        if self.clip_region_enabled and address == 0xB7F10:
+            body = clip_region.hook(body)
         if self.enabled and address == 0x87EA0 and hashlib.sha256(
                 self.image.bytes_at(0x87ECC, 0x1A) or b"").hexdigest() == "68ec0f334940aa871ae2fede180af8adf67f37fd58a0f094857397e9445970b0":
             def sphere_distance(match):

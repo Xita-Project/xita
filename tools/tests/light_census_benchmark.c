@@ -11,6 +11,11 @@ static int native_owner=1,capability=1,fail_control,fail_take,fail_persistent;
 static const float camera[6]={1,2,3,1,0,0};
 #ifdef XV_LIGHT_QUERY_CENSUS
 unsigned xv_light_census_enabled,xv_light_census_present_requested;
+static int region_mode,region_inits;
+void xv_native_clip_region_init(void){region_inits++;}
+int xv_native_clip_region_available(void){return 1;}
+int xv_native_clip_region_enabled(void){return region_mode;}
+void xv_native_clip_region_override(int mode){region_mode=mode>0;}
 static xctx context;
 static xv_light_census_stats counts;
 int xv_object_census_is_owner(void){return native_owner;}
@@ -52,6 +57,7 @@ static void reset(int initial)
  drains=controls=takes=0;native_owner=capability=1;fail_control=fail_take=fail_persistent=0;
  clock_us=1;used=0;output[0]=0;
 #ifdef XV_LIGHT_QUERY_CENSUS
+ region_mode=region_inits=0;
  xv_light_census_enabled=initial;xv_light_census_present_requested=0;memset(&counts,0,sizeof counts);
 #else
  (void)initial;
@@ -111,6 +117,13 @@ int main(int argc,char**argv)
   assert(strstr(output,"result off-before 10.000 on 10.000 off-after 10.000 fps comparable-view 1"));
   if(argc>1&&initial==0){FILE*f=fopen(argv[1],"w");assert(f);assert(fwrite(output,1,used,f)==used);assert(!fclose(f));}
  }
+ // The observer cannot silently force clip fallback in only its ON arm;
+ // likewise a clip comparison cannot label entirely declined work as ON.
+ reset(0);region_mode=1;request();assert(!step(1,1));
+ assert(!b.active&&!xv_benchmark_remote_busy()&&!xv_light_census_present_requested&&region_mode==1&&!controls);
+ reset(1);xv_benchmark_remote_poll(1);assert(!xv_benchmark_remote_request(XV_BENCH_CLIP_REGION));
+ xv_benchmark_remote_poll(1);assert(!step(1,1));
+ assert(!b.active&&!xv_benchmark_remote_busy()&&xv_light_census_enabled==1&&!region_inits&&!controls);
  // Network admission never initializes/reads guest state. Foreign Present
  // cannot consume or restore an owner's active request.
  reset(1);request();native_owner=0;step(1,1);assert(b.request&&xv_benchmark_remote_busy()&&!controls);

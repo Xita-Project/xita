@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 with tempfile.TemporaryDirectory(prefix="xita-pipeline-candidates-") as directory:
     output = Path(directory) / "benchmark"
-    candidates=("OBJECT_POSE", "MATERIAL_PACKET", "POLYGON_EDGE")
+    candidates=("OBJECT_POSE", "MATERIAL_PACKET", "POLYGON_EDGE", "CLIP_REGION")
     for disabled in itertools.product((False, True), repeat=len(candidates)):
         missing=[name for name, absent in zip(candidates,disabled) if absent]
         subprocess.run([
