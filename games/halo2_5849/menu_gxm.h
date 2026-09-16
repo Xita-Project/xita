@@ -1,7 +1,7 @@
 /* GXM backend for the general menu draws (same request contract as the software
  * renderer). Shaders are the offline-compiled per-program pairs selected by the
  * hashes the software path logs ("[h2/menu-shader]"):
- *   app0:h2menu_vs_<vp>.gxp  /  app0:h2menu_ps_<ps>.frag.gxp
+ *   app0:h2menu_vs_<vp>.gxp  /  app0:h2menu_ps_<ps>_<vp>.frag.gxp
  * Returns 1 drawn, 0 rejected, -1 not taken (missing shader: the caller falls back
  * to the software rasterizer after this backend flushed its pending scene). */
 #pragma once

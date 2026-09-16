@@ -26,15 +26,22 @@ INVENTORY = re.compile(r"\[h2/menu-shader\] pair#(\d+) vp=([0-9a-f]+) ps=([0-9a-
                        r"final=([0-9A-F]+)/([0-9A-F]+)/([0-9A-F]+)/([0-9A-F]+) stagectl=([0-9A-F]+)(?: ctl=([0-9A-F]+) cmp=([0-9A-F]+) dot=([0-9A-F]+) inp=([0-9A-F]+))? tex=([0-9A-F]+)((?: [0-9A-F/]+)+)")
 
 
-def fragment_programs(log, outdir):
+VS_VARYING = {"oD0": "color0", "oD1": "color1", "oFog": "fog", "oT0": "texcoord0", "oT1": "texcoord1",
+              "oT2": "texcoord2", "oT3": "texcoord3"}
+
+
+def fragment_programs(log, outdir, vs_outputs):
+    """One fragment shader per (combiner, vertex program) pair: GXM links the fragment program
+    against the vertex program, so the shader may only read varyings that program writes."""
     seen = {}
     gen.NONE_STAGE_ZERO = True      # a NONE stage reads as zero (the menu text program sums t2*c0 + t0*v0)
     gen.TEXCOORD_SCALE = True       # linear images are texel-addressed: runtime sets xv_texscale[i]
     for line in open(log, errors="replace"):
         m = INVENTORY.search(line)
-        if not m or m.group(3) in seen:
+        if not m or (m.group(3), m.group(2)) in seen:
             continue
-        ps = m.group(3)
+        ps, vp = m.group(3), m.group(2)
+        gen.VARYINGS_AVAILABLE = vs_outputs.get(vp)          # None (all) if the VP dump is missing
         stages = int(m.group(7)); fabcd, fefg, fc0, fc1 = (int(m.group(i), 16) for i in (8, 9, 10, 11))
         texmodes = int(m.group(12), 16)
         ctl = int(m.group(13), 16) if m.group(13) else (stages | 0x1000 | 0x10000)   # UNIQUE_C0/C1 until logged
@@ -49,17 +56,18 @@ def fragment_programs(log, outdir):
                            *pad([s[3] for s in st]), *pad([s[0] for s in st]), cmp_, fc0, fc1, *pad([s[1] for s in st]),
                            ctl, texmodes, dot, inp, cmap, cmap, 0x98)
         d = asdict(pp.decode_psdef(blob, 0))
-        name = f"h2menu_ps_{ps}"
+        name = f"h2menu_ps_{ps}_{vp}"
         src, warns, binding = gen.generate(d, name, False)
         open(os.path.join(outdir, name + ".frag.cg"), "w").write(src)
-        json.dump({"name": name, "ps_hash": ps, "stages": stages, "texmodes": texmodes, "binding": binding, "warnings": warns},
+        json.dump({"name": name, "ps_hash": ps, "vp_hash": vp, "stages": stages, "texmodes": texmodes, "binding": binding,
+                   "varyings": sorted(vs_outputs.get(vp) or []), "warnings": warns},
                   open(os.path.join(outdir, name + ".json"), "w"), indent=1, default=str)
-        seen[ps] = name
-        print(f"{name}: stages={stages} texmodes=0x{texmodes:08X} warnings={len(warns)}")
+        seen[(ps, vp)] = name
+        print(f"{name}: stages={stages} texmodes=0x{texmodes:08X} varyings={sorted(vs_outputs.get(vp) or ['*'])} warnings={len(warns)}")
     return len(seen)
 
 
-def vertex_programs(vpdir, outdir):
+def vertex_programs(vpdir, outdir, vs_outputs):
     args = argparse.Namespace(mode="function", rhw=False, light=False, const_count=192, keep_viewport_epilogue=False,
                               binding_json=None, stdout=False, output=None, json=None)
     n_ok = 0
@@ -90,6 +98,7 @@ def vertex_programs(vpdir, outdir):
         decl = {"file_offset": None, "token_count": 0, "byte_size": 0, "tokens": [], "streams": {"0": 256},
                 "attributes": attrs, "warnings": []}
         name = os.path.basename(f)[:-4].replace("menu-vp-", "h2menu_vs_")
+        vs_outputs[name[len("h2menu_vs_"):]] = {VS_VARYING[o] for o in vout if o in VS_VARYING}
         text, plan = s3.generate(decl, asdict(func), args, name)
         # Halo 2's vertex programs keep the Xbox viewport epilogue and output WINDOW coordinates
         # (w = clip w); undo the 640x480 viewport so GXM's (320,320,240,-240, zScale 1) reproduces it.
@@ -109,7 +118,8 @@ def main():
     ap.add_argument("log"); ap.add_argument("vpdir"); ap.add_argument("outdir")
     a = ap.parse_args()
     os.makedirs(a.outdir, exist_ok=True)
-    nf = fragment_programs(a.log, a.outdir); nv = vertex_programs(a.vpdir, a.outdir)
+    vs_outputs = {}
+    nv = vertex_programs(a.vpdir, a.outdir, vs_outputs); nf = fragment_programs(a.log, a.outdir, vs_outputs)
     print(f"{nf} fragment + {nv} vertex programs -> {a.outdir}")
 
 

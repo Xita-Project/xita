@@ -225,10 +225,11 @@ static fs_entry *get_fs(const h2_command_state *s, const menu_combiner *cb, cons
     for (unsigned i = 0; i < g_nfs; ++i) if (g_fs[i].key == key) return g_fs[i].missing ? NULL : &g_fs[i];
     if (g_nfs == MAX_FS) return NULL;
     fs_entry *e = &g_fs[g_nfs++]; memset(e, 0, sizeof *e); e->hash = hp; e->key = key; e->vs = vs;
-    /* the raw program (and its patcher id) is shared between blend/vs variants */
-    for (unsigned i = 0; i + 1 < g_nfs; ++i) if (g_fs[i].hash == hp && g_fs[i].gxp) { e->gxp = g_fs[i].gxp; e->id = g_fs[i].id; break; }
+    /* one compiled program per (combiner, vertex program) pair - it only reads the varyings that
+     * vertex program writes; the raw program is shared between its blend variants */
+    for (unsigned i = 0; i + 1 < g_nfs; ++i) if (g_fs[i].hash == hp && g_fs[i].vs == vs && g_fs[i].gxp) { e->gxp = g_fs[i].gxp; e->id = g_fs[i].id; break; }
     if (!e->gxp) {
-        char path[80]; snprintf(path, sizeof path, "app0:h2menu_ps_%016llx.frag.gxp", (unsigned long long)hp);
+        char path[96]; snprintf(path, sizeof path, "app0:h2menu_ps_%016llx_%016llx.frag.gxp", (unsigned long long)hp, (unsigned long long)vs->hash);
         e->gxp = load_gxp(path);
         if (!e->gxp) { e->missing = 1; note_missing(hp, "fragment program"); return NULL; }
         if (sceGxmShaderPatcherRegisterProgram(g_patcher, e->gxp, &e->id) < 0) { e->missing = 1; return NULL; }
