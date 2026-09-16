@@ -167,9 +167,9 @@ static void serve(int s)
         if(!authorized_request(request,&method,&target,&body_size)) {reply(s,403,"Authentication or framing rejected\n");return;}
         if(initial_body>body_size) {reply(s,400,"Unexpected request body\n");return;}
         if(!strncmp(target,"/update",7)) {
-            if(xv_benchmark_status()||xv_benchmark_remote_busy()) {reply(s,409,"Updates disabled during benchmark\n");return;}
+            if((strcmp(method,"GET")||strcmp(target,"/update"))&&(xv_benchmark_status()||xv_benchmark_remote_busy())) {reply(s,409,"Updates disabled during benchmark\n");return;}
             if(!strcmp(method,"GET")&&!strcmp(target,"/update")) {
-                char body[768];xv_update_json(body,sizeof body);
+                char body[896];xv_update_json(body,sizeof body);
                 size_t n=strlen(body);
                 if(n && body[n-1]=='}')snprintf(body+n-1,sizeof body-n+1,",\"handoff\":%u}",
                     xv_update_requested()?LOAD(&handoff):XV_UPDATE_IDLE);
@@ -179,8 +179,8 @@ static void serve(int s)
                 if(xv_log_get_status) {
                     xv_log_status log; xv_log_get_status(&log); n=strlen(body);
                     if(n && body[n-1]=='}')snprintf(body+n-1,sizeof body-n+1,
-                        ",\"log\":{\"state\":%u,\"error\":%d,\"startup_error\":%d,\"open\":%u,\"queued\":%u,\"accepted\":%llu,\"written\":%llu,\"synced\":%llu,\"failed\":%llu,\"offset\":%u,\"report\":%llu,\"frame\":%u,\"chunk\":%u,\"bytes\":[%llu,%llu,%llu]}}",
-                        log.state,log.error,log.startup_error,log.open_report,log.queued,(unsigned long long)log.accepted,(unsigned long long)log.written,
+                        ",\"log\":{\"state\":%u,\"enabled\":%u,\"transition\":%u,\"error\":%d,\"startup_error\":%d,\"open\":%u,\"queued\":%u,\"accepted\":%llu,\"written\":%llu,\"synced\":%llu,\"failed\":%llu,\"offset\":%u,\"report\":%llu,\"frame\":%u,\"chunk\":%u,\"bytes\":[%llu,%llu,%llu]}}",
+                        log.state,log.enabled,log.transition,log.error,log.startup_error,log.open_report,log.queued,(unsigned long long)log.accepted,(unsigned long long)log.written,
                         (unsigned long long)log.synced,(unsigned long long)log.failed_sequence,log.failed_file_offset,
                         (unsigned long long)log.pending_report,log.pending_frame,log.pending_chunk,
                         (unsigned long long)log.accepted_bytes,(unsigned long long)log.written_bytes,(unsigned long long)log.synced_bytes);
@@ -212,7 +212,7 @@ static void serve(int s)
                 reply(s,bad?409:204,bad?"Update not ready\n":"");
             } else reply(s,404,"Unknown update operation\n");
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/benchmark?kind=",16)) {
-            static const char *const kinds[]={"object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge"};
+            static const char *const kinds[]={"object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer"};
             unsigned kind=0;
             for(unsigned i=0;i<sizeof kinds/sizeof *kinds;i++)if(!strcmp(target+16,kinds[i]))kind=i+1;
             if(!kind)reply(s,400,"Unknown benchmark kind\n");

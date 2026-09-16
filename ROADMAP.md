@@ -82,8 +82,10 @@ prototype also remains separate after weak ARM sizing results. Current larger
 work targets private spatial queries with ordered publication and larger native
 geometry regions. The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
-The asynchronous periodic-report prototype is undergoing independent review
-and is not installed. Neither establishes a stable 20 FPS result. Official
+The [asynchronous periodic-report prototype](docs/async-reports-20260916.md)
+has passed independent host review and native compilation. A longer same-session
+comparison measures frame-time tails as well as FPS; physical results remain
+pending. Neither establishes a stable 20 FPS result. Official
 [MCC reference tags](docs/mcc-mod-tools-reference.md) have been privately
 inventoried for content investigation, without changing the Xbox maps.
 

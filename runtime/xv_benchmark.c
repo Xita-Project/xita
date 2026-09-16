@@ -4,6 +4,10 @@
 #include <stdlib.h>
 
 void xv_logf(const char *fmt,...);
+int xv_log_async_available(void) __attribute__((weak));
+int xv_log_async_init(void) __attribute__((weak));
+int xv_log_async_enabled(void) __attribute__((weak));
+int xv_log_async_set_enabled(int,unsigned) __attribute__((weak));
 void xv_benchmark_optimizations(int enabled) __attribute__((weak));
 void xv_d3d_blend_replace_override(int) __attribute__((weak));
 void xv_d3d_index_reuse_override(int) __attribute__((weak));
@@ -43,12 +47,15 @@ void xv_snapshot_worker_override(int) __attribute__((weak));
 int xv_vertex_worker_enabled(void) __attribute__((weak));
 void xv_phase_capture_override(int) __attribute__((weak));
 int xv_phase_capture_available(void) __attribute__((weak));
-enum { SETTLE=60, MEASURE=120, PHASES=3 };
+enum { SETTLE=60, MEASURE=120, PHASES=3, LOG_MEASURE=1800 };
 static const unsigned heights[PHASES]={544,360,544};
 static struct {
     int active,request,cancel,configuring,restoring,view_ok,compare;
     unsigned original,phase,frames;
-    uint64_t measure_start;
+    uint64_t measure_start, last_sample, restore_retry;
+    int log_original, transition_error, failed;
+    unsigned sample_count;
+    uint64_t intervals[LOG_MEASURE];
     float view[6];
     double fps[PHASES];
 } b;
@@ -58,7 +65,8 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_POLYGON_EDGE||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||kind>XV_BENCH_LOG_WRITER||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind==XV_BENCH_LOG_WRITER&&(!xv_log_async_available||!xv_log_async_init||!xv_log_async_enabled||!xv_log_async_set_enabled||!xv_log_async_available()))return -1;
     if(kind==XV_BENCH_POLYGON_EDGE&&(!xv_native_polygon_edge_init||!xv_native_polygon_edge_override||!xv_native_polygon_edge_available))return -1;
     if(kind==XV_BENCH_OBJECT_POSE&&(!xv_object_pose_override||!xv_object_pose_available))return -1;
     if(kind==XV_BENCH_MATERIAL_PACKET&&(!xv_material_packet_override||!xv_material_packet_available))return -1;
@@ -133,6 +141,7 @@ int xv_benchmark_compare_blend_replace(void) { return remote_kind==XV_BENCH_BLEN
 int xv_benchmark_compare_index_reuse(void) { return remote_kind==XV_BENCH_INDEX_REUSE; }
 int xv_benchmark_compare_object_pose(void) { return remote_kind==XV_BENCH_OBJECT_POSE; }
 int xv_benchmark_compare_material_packet(void) { return remote_kind==XV_BENCH_MATERIAL_PACKET; }
+int xv_benchmark_compare_log_writer(void) { return remote_kind==XV_BENCH_LOG_WRITER; }
 int xv_benchmark_compare_polygon_edge(void) { return remote_kind==XV_BENCH_POLYGON_EDGE; }
 int xv_benchmark_compare_object_quat(void) { return remote_kind==XV_BENCH_OBJECT_QUAT; }
 int xv_benchmark_compare_object_math(void) { return remote_kind==XV_BENCH_OBJECT_MATH; }
@@ -166,6 +175,14 @@ static int native_math_selected(void)
 }
 static int candidate_available(void)
 {
+    if(xv_benchmark_compare_log_writer()) {
+        if(!xv_log_async_available||!xv_log_async_init||!xv_log_async_enabled||!xv_log_async_set_enabled||!xv_log_async_available())return 0;
+        /* Only the joined recording owner may bind controls. Network admission
+         * above is side-effect-free; an existing startup mode is preserved. */
+        if(xv_log_async_init())return 0;
+        b.log_original=xv_log_async_enabled();
+        return 1;
+    }
     if(xv_benchmark_compare_polygon_edge()) {
         if(!xv_native_polygon_edge_init || !xv_native_polygon_edge_override || !xv_native_polygon_edge_available)return 0;
         /* First valid request runs on the recording owner with object jobs
@@ -260,7 +277,8 @@ int xv_benchmark_compare_draw_scan(void)
     return selected && !native_math_selected() && !xv_benchmark_compare_vertex_worker() && !xv_benchmark_compare_vertex_copy() && !xv_benchmark_compare_native_bounds() && !xv_benchmark_compare_vertex_references();
 }
 static const char *tag(void) { return b.compare ?
-    (xv_benchmark_compare_polygon_edge() ? "polygon-edge-compare" :
+    (xv_benchmark_compare_log_writer() ? "log-writer-compare" :
+     xv_benchmark_compare_polygon_edge() ? "polygon-edge-compare" :
      xv_benchmark_compare_object_pose() ? "object-pose-compare" :
      xv_benchmark_compare_material_packet() ? "material-packet-compare" :
      xv_benchmark_compare_index_reuse() ? "index-reuse-compare" :
@@ -292,15 +310,46 @@ static const char *tag(void) { return b.compare ?
      xv_benchmark_compare_native_bounds() ? "native-bounds-compare" :
      xv_benchmark_compare_vertex_copy() ? "vertex-copy-compare" :
      xv_benchmark_compare_draw_scan() ? "draw-scan-compare" : "flare-compare") : "resolution-test"; }
+static unsigned measure_frames(void)
+{ return xv_benchmark_compare_log_writer()?LOG_MEASURE:MEASURE; }
+static int interval_cmp(const void *a,const void *z)
+{ uint64_t x=*(const uint64_t *)a,y=*(const uint64_t *)z;return (x>y)-(x<y); }
+static void report_intervals(void)
+{
+    if(!xv_benchmark_compare_log_writer())return;
+    /* First interval includes the synchronous phase marker; omit it from tail
+     * statistics only. The FPS total still includes all measured intervals. */
+    unsigned n=b.sample_count;
+    if(n!=LOG_MEASURE-1) {b.view_ok=0;return;}
+    uint64_t sum=0;unsigned over50=0,over100=0,over150=0,over200=0;
+    for(unsigned i=0;i<n;i++) {uint64_t v=b.intervals[i];sum+=v;over50+=v>50000;over100+=v>100000;over150+=v>150000;over200+=v>200000;}
+    qsort(b.intervals,n,sizeof b.intervals[0],interval_cmp);
+    xv_logf("[log-writer-pacing] phase %u samples %u sum-us %llu min/p50/p95/p99/p999/max-us %llu/%llu/%llu/%llu/%llu/%llu over50/100/150/200ms %u/%u/%u/%u; first boundary interval excluded, FPS includes it\n",
+        b.phase+1,n,(unsigned long long)sum,(unsigned long long)b.intervals[0],
+        (unsigned long long)b.intervals[(n*500u+999)/1000-1],(unsigned long long)b.intervals[(n*950u+999)/1000-1],
+        (unsigned long long)b.intervals[(n*990u+999)/1000-1],(unsigned long long)b.intervals[(n*999u+999)/1000-1],
+        (unsigned long long)b.intervals[n-1],over50,over100,over150,over200);
+}
+static int apply_comparison(int enabled)
+{
+    xv_benchmark_optimizations(enabled); /* joined GPU/pump boundary */
+    if(!xv_benchmark_compare_log_writer())return 0;
+    int rc=xv_log_async_set_enabled(enabled<0?b.log_original:enabled,5000000);
+    if(rc) {
+        b.failed=1;b.view_ok=0;
+        if(rc!=b.transition_error)xv_logf("[log-writer-compare] boundary failure %d; no successful mode change or restoration claimed\n",rc);
+    }
+    b.transition_error=rc;return rc;
+}
 static void publish(void)
 {
-    unsigned progress=b.frames*100/(SETTLE+MEASURE);
-    __atomic_store_n(&status,b.active&&!b.restoring ? phase_height()|(progress<<10)|((b.phase+1)<<17)|((unsigned)b.compare<<19):0,__ATOMIC_RELEASE);
+    unsigned progress=b.frames*100/(SETTLE+measure_frames());
+    __atomic_store_n(&status,b.active&&(!b.restoring||b.transition_error) ? phase_height()|(progress<<10)|(((b.phase<PHASES?b.phase:PHASES-1)+1)<<17)|((unsigned)b.compare<<19):0,__ATOMIC_RELEASE);
 }
 static unsigned restore(const char *why)
 {
     xv_logf("[%s] %s; restoring %up\n",tag(),why,b.original);
-    if(b.compare)xv_benchmark_optimizations(-1);
+    if(b.compare)apply_comparison(-1);
     b.restoring=b.configuring=1;b.cancel=0;publish();return b.original;
 }
 unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float view[6])
@@ -317,8 +366,10 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         }
         b.active=b.configuring=b.view_ok=1;b.original=height;
         if(compare) {
-            xv_benchmark_optimizations(0);
-            if (xv_benchmark_compare_polygon_edge())
+            if(apply_comparison(0))return restore("initial boundary failed");
+            if (xv_benchmark_compare_log_writer())
+                xv_logf("[log-writer-compare] start off/on/off at %up; synchronous/background/synchronous periodic output, same formatting/graphics/workers, restore initial mode %d; %u settle + %u measured frames each\n",height,b.log_original,SETTLE,LOG_MEASURE);
+            else if (xv_benchmark_compare_polygon_edge())
                 xv_logf("[polygon-edge-compare] start off/on/off at %up; original/native/original polygon-edge math, full guest state and scheduler handoffs retained; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_object_pose())
                 xv_logf("[object-pose-compare] start off/on/off at %up; one recursive guard around the original pose loop, same workers, math, graphics and owner services; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
@@ -381,22 +432,31 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
         publish();return phase_height();
     }
     if(!b.active||b.configuring)return 0;
+    if(b.restoring) {
+        if(now<b.restore_retry)return 0;
+        apply_comparison(-1);b.configuring=1;return b.original;
+    }
     if(xv_benchmark_compare_guest_affinity() && !xv_guest_affinity_valid())return restore("affinity API failure");
     if(b.cancel||!valid)return restore(b.cancel?"cancelled":"view unavailable");
     b.frames++;
     if(b.frames==SETTLE) {
         if(!b.phase)memcpy(b.view,view,sizeof b.view);
-        b.measure_start=now;
+        b.measure_start=b.last_sample=now;b.sample_count=0;
         xv_logf("[%s] phase %u %up measure begin view %.4f %.4f %.4f / %.5f %.5f %.5f\n",
             tag(),b.phase+1,height,view[0],view[1],view[2],view[3],view[4],view[5]);
     }
     if(b.frames>=SETTLE)for(unsigned i=0;i<6;i++)
         if(!isfinite(view[i])||fabsf(view[i]-b.view[i])>(i<3?.05f:.005f))b.view_ok=0;
-    if(b.frames==SETTLE+MEASURE) {
+    if(xv_benchmark_compare_log_writer()&&b.frames>SETTLE) {
+        uint64_t dt=now-b.last_sample;b.last_sample=now;
+        if(b.frames>SETTLE+1&&b.sample_count<LOG_MEASURE)b.intervals[b.sample_count++]=dt;
+    }
+    if(b.frames==SETTLE+measure_frames()) {
         uint64_t elapsed=now-b.measure_start;
-        b.fps[b.phase]=elapsed?MEASURE*1e6/(double)elapsed:0;
+        b.fps[b.phase]=elapsed?measure_frames()*1e6/(double)elapsed:0;
+        report_intervals();
         xv_logf("[%s] phase %u %up %u frames elapsed-us %llu fps %.3f view-ok %d\n",
-            tag(),b.phase+1,height,MEASURE,(unsigned long long)elapsed,b.fps[b.phase],b.view_ok);
+            tag(),b.phase+1,height,measure_frames(),(unsigned long long)elapsed,b.fps[b.phase],b.view_ok);
         if(++b.phase==PHASES) {
             if(b.compare)xv_logf("[%s] result off-before %.3f on %.3f off-after %.3f fps comparable-view %d\n",
                 tag(),b.fps[0],b.fps[1],b.fps[2],b.view_ok);
@@ -404,16 +464,16 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
                 b.fps[0],b.fps[1],b.fps[2],b.view_ok);
             return restore("complete");
         }
-        if(b.compare)xv_benchmark_optimizations(b.phase==1);
+        if(b.compare&&apply_comparison(b.phase==1))return restore("phase boundary failed");
         b.configuring=1;publish();return phase_height();
     }
     publish();return 0;
 }
 void xv_benchmark_applied(uint64_t now,unsigned height)
 {
-    (void)now;
     if(!b.active||!b.configuring)return;
     if(b.restoring) {
+        if(b.transition_error) {b.configuring=0;b.restore_retry=now+250000;publish();return;}
         xv_logf("[%s] restored %up (requested %up)\n",tag(),height,b.original);
         b.active=b.configuring=b.restoring=0;publish();remote_kind=0;
         __atomic_store_n(&request_state,0,__ATOMIC_RELEASE);return;

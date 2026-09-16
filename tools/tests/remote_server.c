@@ -4,7 +4,7 @@ static unsigned benchmark;
 uint32_t xv_benchmark_status(void) {return LOAD(&benchmark);}
 unsigned xv_benchmark_remote_busy(void) {return LOAD(&benchmark)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
-{unsigned expected=0;return kind>=1&&kind<=XV_BENCH_POLYGON_EDGE&&__atomic_compare_exchange_n(&benchmark,&expected,kind,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)?0:-1;}
+{unsigned expected=0;return kind>=1&&kind<=XV_BENCH_LOG_WRITER&&__atomic_compare_exchange_n(&benchmark,&expected,kind,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)?0:-1;}
 void xv_logf(const char *fmt,...) {(void)fmt;}
 void xv_log_get_status(xv_log_status *out)
 {
@@ -12,6 +12,7 @@ void xv_log_get_status(xv_log_status *out)
      * endpoint remains usable during a failed logger drain. */
     memset(out,0,sizeof *out);out->state=XV_LOG_ERROR;out->error=-77;
     out->queued=4;out->open_report=1;out->accepted=UINT64_MAX;
+    out->enabled=out->transition=UINT32_MAX;
     out->written=UINT64_MAX-1;out->synced=UINT64_MAX-2;
     out->failed_sequence=UINT64_MAX;out->failed_file_offset=32767;
     out->pending_report=UINT64_MAX;out->pending_frame=out->pending_chunk=UINT32_MAX;

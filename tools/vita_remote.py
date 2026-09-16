@@ -14,9 +14,26 @@ import zipfile
 
 BUTTONS = dict(select=1, start=8, up=16, right=32, down=64, left=128,
                l=256, r=512, triangle=4096, circle=8192, cross=16384, square=32768)
-BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge")
+BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer")
 RESULT = re.compile(r"\[([a-z-]+-compare|resolution-test)\] result (?:off-before|544-before) ([\d.]+) (?:on|360) ([\d.]+) (?:off-after|544-after) ([\d.]+) fps comparable-view ([01])")
 RESTORED = re.compile(rb"\[(?:[a-z-]+-compare|resolution-test)\] restored [^\n]*\n")
+
+
+PACING = re.compile(r"\[log-writer-pacing\] phase ([123]) samples (\d+) sum-us (\d+) min/p50/p95/p99/p999/max-us (\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+) over50/100/150/200ms (\d+)/(\d+)/(\d+)/(\d+)")
+
+def parse_log_pacing(text):
+    rows=[]
+    for fields in PACING.findall(text):
+        phase,n,total,*values=map(int,fields)
+        timings,counts=values[:6],values[6:]
+        if n!=1799 or timings!=sorted(timings) or counts!=sorted(counts,reverse=True) or not 0<=counts[-1]<=counts[0]<=n or not timings[0]*n<=total<=timings[-1]*n:
+            raise RuntimeError("Invalid logger pacing summary")
+        rows.append(dict(phase=phase,samples=n,sum_us=total,mean_us=total/n,
+                         **dict(zip(('min_us','p50_us','p95_us','p99_us','p999_us','max_us'),timings)),
+                         **dict(zip(('over50ms','over100ms','over150ms','over200ms'),counts))))
+    if sorted(row['phase'] for row in rows)!=[1,2,3]:
+        raise RuntimeError("Expected one complete pacing summary for each logger arm")
+    return sorted(rows,key=lambda row:row['phase'])
 
 
 class Client:
@@ -185,8 +202,9 @@ def upload_update(client, package, apply=False, wait=False):
 
 
 def benchmark(client, out, runs, timeout, kind=None):
-    if not 1 <= runs <= 10 or not 30 <= timeout <= 600:
-        raise ValueError("Use 1–10 trials and a 30–600 second timeout per trial")
+    maximum_timeout=1800 if kind=="log-writer" else 600
+    if not 1 <= runs <= 10 or not 30 <= timeout <= maximum_timeout:
+        raise ValueError(f"Use 1–10 trials and a 30–{maximum_timeout} second timeout per trial")
     if kind is not None and kind not in BENCHMARK_KINDS:
         raise ValueError("Unknown benchmark kind")
     out = Path(out); out.mkdir(parents=True, exist_ok=False)
@@ -202,6 +220,7 @@ def benchmark(client, out, runs, timeout, kind=None):
         log_offset=(out/"before.log").stat().st_size
         prior = len(RESULT.findall((out / "before.log").read_text(errors="replace")))
         for i in range(runs):
+            if kind=="log-writer":client.lease(min(3600,timeout+60))
             if client.status()["benchmark"]:
                 raise RuntimeError("Unexpected active benchmark before trial")
             if kind is None:
@@ -228,6 +247,8 @@ def benchmark(client, out, runs, timeout, kind=None):
             text = logfile.read_text(errors="replace")
             if kind=="guest-affinity" and "[guest-affinity] failure" in logfile.read_bytes()[trial_offset:].decode(errors="replace"):
                 raise RuntimeError("Affinity change or restoration failed; no valid comparison claimed")
+            if kind=="log-writer" and "[log-writer-compare] boundary failure" in logfile.read_bytes()[trial_offset:].decode(errors="replace"):
+                raise RuntimeError("Logger boundary failed; no valid comparison claimed")
             matches = RESULT.findall(text)
             if len(matches) != prior + 1:
                 raise RuntimeError("Expected one fresh benchmark result; cancelled/incomplete run or restarted application")
@@ -239,6 +260,9 @@ def benchmark(client, out, runs, timeout, kind=None):
                 raise RuntimeError("Camera consistency check failed; trial is not comparable")
             trial = dict(candidate=tag, off_before_fps=float(before), on_fps=float(on), off_after_fps=float(after),
                          log=str(logfile), comparable=True)
+            if kind=="log-writer":
+                trial["pacing"]=parse_log_pacing(logfile.read_bytes()[trial_offset:].decode(errors="replace"))
+                trial["note"]="1800 FPS intervals per arm include 30 periodic reports; 1799 pacing intervals omit the phase-marker interval and contain 29 or 30 reports, with matching alignment across arms. Nearest-rank quantiles. Not a proof against rare stalls."
             if kind=="guest-phases":
                 trial["diagnostic"]=True
                 trial["note"]="Timing is enabled only in the middle arm. This measures profiling overhead, not an optimization gain; already-open parent scopes are absent."
@@ -290,7 +314,7 @@ def main():
         pad.add_argument("--" + axis, type=int, default=128)
     bench = commands.add_parser("benchmark")
     bench.add_argument("output", type=Path); bench.add_argument("--runs", type=int, default=3)
-    bench.add_argument("--timeout", type=int, default=180)
+    bench.add_argument("--timeout", type=int, help="seconds per trial; default 1200 for log-writer, 180 otherwise")
     bench.add_argument("--kind", choices=BENCHMARK_KINDS, help="select a test for this run without changing saved settings")
     args = parser.parse_args()
     if args.command == "pair":
@@ -329,7 +353,7 @@ def main():
         client.hold(sum(BUTTONS[b] for b in set(args.buttons)), args.duration,
                     **{a: getattr(args, a) for a in ("lx", "ly", "rx", "ry")})
     elif args.command == "benchmark":
-        benchmark(client, args.output, args.runs, args.timeout,args.kind)
+        benchmark(client, args.output, args.runs, args.timeout if args.timeout is not None else (1200 if args.kind=="log-writer" else 180),args.kind)
 
 
 if __name__ == "__main__":

@@ -38,6 +38,10 @@ def benchmark_cases(tmp):
             assert not self.active
         def hold(self, buttons, duration):
             self.active = True
+            if self.kind=="log-writer":
+                if self.mode=="logger-failure":self.records+="[log-writer-compare] boundary failure -2\n"
+                if self.mode!="missing-pacing":
+                    for phase in (1,2,3):self.records+=f"[log-writer-pacing] phase {phase} samples 1799 sum-us 89950000 min/p50/p95/p99/p999/max-us 50000/50000/50000/50000/50000/50000 over50/100/150/200ms 0/0/0/0\n"
             if self.mode == "affinity-failure": self.records += "[guest-affinity] failure restoring mask\n"
             if self.mode != "missing-result":
                 self.records += "[" + self.kind + "-compare] result off-before 10.000 on 12.000 off-after 10.000 fps comparable-view " + ("0" if self.mode == "camera" else "1") + "\n"
@@ -61,7 +65,7 @@ def benchmark_cases(tmp):
         if mode != "success":
             assert result["error"]
     with patch("vita_remote.time.sleep",lambda _:None):
-        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge'):
+        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer'):
             benchmark(Fake('success', kind),tmp/('selected-'+kind),1,30,kind)
             record=json.loads((tmp/('selected-'+kind)/'result.json').read_text())['trials'][0]
             assert record.get('diagnostic',False)==(kind=='guest-phases')
@@ -70,6 +74,14 @@ def benchmark_cases(tmp):
         except RuntimeError as error: assert 'Affinity' in str(error)
         else: raise AssertionError('Failed affinity change accepted as valid measurement')
         assert failed.released
+        for mode in ('logger-failure','missing-pacing'):
+            failed=Fake(mode,'log-writer')
+            try:benchmark(failed,tmp/mode,1,1200,'log-writer')
+            except RuntimeError:pass
+            else:raise AssertionError('Invalid logger comparison accepted')
+            assert failed.released and not json.loads((tmp/mode/'result.json').read_text())['complete']
+        historical_log=Fake('success','log-writer');historical_log.records='[log-writer-compare] boundary failure -2 from previous run\n'
+        benchmark(historical_log,tmp/'historical-log-failure',1,1800,'log-writer')
         historical=Fake('success','guest-affinity')
         historical.records='[guest-affinity] failure from an earlier test\n'
         benchmark(historical,tmp/'historical-affinity-failure',1,30,'guest-affinity')
@@ -195,15 +207,18 @@ def main():
             assert request("/screen")[0] == request("/log?offset=0")[0] == request('/launcher-log?offset=0')[0] == 409
             assert request('/log/1?offset=0')[0]==409
             assert json.loads(request("/status")[2])["benchmark"] == 1
-            assert request("/update")[0] == 409
+            assert request("/update")[0] == 200
+            assert request("/update/apply","POST")[0] == 409
             assert command("n") == "ACK"
             assert request('/benchmark?kind=unknown','POST')[0]==400
             assert request('/benchmark?kind=model-palette&kind=flare','POST')[0]==400
             assert request('/benchmark?kind=model-palette','POST',token='f'*32)[0]==403
-            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge'):
+            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer'):
                 assert request('/benchmark?kind='+kind,'POST')[0]==204
                 assert request('/benchmark?kind='+kind,'POST')[0]==409
-                assert request('/screen')[0]==request('/update')[0]==409
+                assert request('/screen')[0]==409
+                assert request('/update')[0]==200
+                assert request('/update/apply','POST')[0]==409
                 assert command('n')=='ACK'
             code, headers, body = request("/log?offset=0")
             assert code == 200 and body == log[:65536] and int(headers["X-Log-Size"]) == len(log)
@@ -270,6 +285,7 @@ def main():
             assert state['log']['state']==5 and state['log']['error']==-77 and state['log']['queued']==4
             assert state['log']['accepted']==2**64-1 and state['log']['bytes']==[2**64-1,2**64-2,2**64-3]
             assert state['log']['frame']==2**32-1 and state['log']['chunk']==2**32-1
+            assert state['log']['enabled']==state['log']['transition']==2**32-1
             manifest=f'/update/begin?size={len(new)}&sha256={hashlib.sha256(new).hexdigest()}&contract={abi}'
             assert request(manifest,'POST',token='f'*32)[0]==403
             assert request(manifest+'x','POST')[0]==409

@@ -10,9 +10,10 @@ It is **disabled by default** and has no hardware performance result. Build with
 `XV_PROFILE_ASYNC_REPORT=1` to opt in. The exact value `1` is required. The normal
 build omits the queue and writer. An explicit recording-owner API can also
 initialize an idle writer and select admission for a same-session comparison;
-it does not require enabling the startup environment option. No benchmark enum,
-remote control or graphics setting is added here. The environment-start path
-starts the worker after loading configuration, before game/report producers.
+it does not require enabling the startup environment option. The remote
+`log-writer` benchmark uses this API for a temporary comparison; there is no
+new graphics setting. The environment-start path starts the worker after
+loading configuration, before game/report producers.
 
 ## Why this target
 
@@ -23,6 +24,51 @@ formatting and console/file output, not frame-time percentiles or isolated SD
 latency. The capture mixes loading and gameplay. This prototype targets visible
 periodic stalls; it does not establish a route from roughly 11 FPS to 20 FPS.
 Formatting remains on the producer, and the writer still consumes CPU and I/O.
+
+## Physical comparison protocol
+
+With the opt-in build installed and a stationary gameplay view, run:
+
+```sh
+python3 tools/vita_remote.py --config /path/to/remote-client.json benchmark \
+  /path/to/new-results --kind log-writer --runs 3
+```
+
+Each trial uses synchronous/background/synchronous periodic output at the same
+saved resolution, graphics settings, worker configuration and camera. The
+recording owner drains pending render work before each checked logger boundary.
+Each arm settles for 60 frames and measures 1,800 frame intervals; at 10 FPS,
+one complete trial takes roughly nine minutes. The default timeout is 1,200
+seconds per trial. The controller renews the remote lease between trials.
+
+FPS includes all 1,800 intervals. Frame-time summaries exclude the first interval
+because it contains the synchronous phase marker, leaving 1,799 samples. They
+report nearest-rank p50/p95/p99/p99.9, minimum, maximum, total time and counts
+above 50/100/150/200 ms. The full FPS window contains 30 periodic reports; the
+trimmed pacing window contains 29 or 30, with matching alignment across arms.
+Sort/report work happens after the final measurement timestamp. These small
+samples cannot prove the absence of rare stalls or represent moving combat.
+
+Initialization and changes run only on the joined recording owner. Network
+admission checks compile capability without starting the writer. The initial
+mode is saved and restored, including when it was already ON. Failed boundaries
+invalidate the trial. A failed restoration keeps the benchmark busy and retries;
+it never reports success merely because the timeout elapsed. Read-only
+`GET /update` remains available for queue/error telemetry during a benchmark;
+updates, screenshots and bulk log reads remain excluded.
+
+Logger transition waits are bounded, but the entire failure path is not:
+synchronous phase/failure diagnostics can wait behind a blocked writer's sink
+lock before restoration runs. The remote server remains available. The mocked
+benchmark fixtures do not model this combined blocked-sink failure; do not
+describe the benchmark as guaranteeing recovery from indefinitely stuck I/O.
+
+Production benchmark fixtures cover initial OFF and ON, exact interval counts,
+phase-marker exclusion, cancellation, unavailable initialization, failed mode
+changes and failed restoration followed by retry. Remote tests check fresh
+results, complete pacing summaries, diagnostic reads, update exclusion and
+maximum-width queue status. Host memory/race tests and a native package build
+pass; hardware results are still pending.
 
 ## Ownership, ordering and memory
 
