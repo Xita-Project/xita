@@ -237,6 +237,17 @@ linked body is 17,568 bytes. These costs include bookkeeping and do not establis
 a hardware win. Confirm actual stack headroom and representative scenes before
 considering any default change.
 
+The combined stage's real phase-scoped wrapper retains 64 bytes rather than
+the fixture's 48: wrapper, admission and region total 944 bytes before callees.
+Production owner fibers and both object workers each use a registered 512 KiB
+native thread stack. Their guest stacks and unchanged clip scratch are separate.
+The known recursive visibility caller returns from clipping before recursing;
+it does not retain another region frame at each recursion. These facts show no
+immediate stack-allocation problem, but do not establish a whole-program bound.
+Existing reported stack peaks measure guest ESP, not native ARM SP. Measure
+native headroom on the owner and workers through parking/preemption before
+enabling the region by default; enlarging stacks is not supported by this audit.
+
 The earlier 16.40% instruction survey above used a build **without**
 `XV_LIGHT_QUERY_CENSUS`. It is not a measurement of this merged build: compiled-in
 runtime-OFF census math bookkeeping and the explicit region-decline flag branch
