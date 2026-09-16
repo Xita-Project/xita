@@ -67,6 +67,13 @@ off. Exact same-frame index reuse also shows no gain in three physical trials
 and remains disabled. Next, isolate expensive world and effect passes and the
 remaining translated CPU work, preserving the existing crash and scheduling fixes.
 
+The [physical world-preparation capture](docs/world-preparation-20260916.md)
+narrows the next native boundaries to model setup, visibility and light updates.
+The finer 48-scope selection separates their material, transform and spatial-list
+children; measurements use serial callbacks in every diagnostic arm and restore
+the configured workers afterward. Periodic diagnostic writes also show a 137 ms
+outlier, warranting a separate hitch investigation. Neither is an FPS gain yet.
+
 September 15: [lightweight mutex comparisons](docs/object-light-lock-20260915.md)
 repeatedly improve one physical Blood Gulch view from approximately 11.8–12.0
 to 15.1–15.2 FPS, with both workers enabled in every arm. The experimental build
