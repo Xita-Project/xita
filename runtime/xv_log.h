@@ -11,8 +11,9 @@ void xv_log_write(const char *text, unsigned length);
 int xv_log_report_begin(void);
 void xv_log_report_end(void);
 void xv_log_flush(void);
-/* Explicit opt-in build + startup environment XV_PROFILE_ASYNC_REPORT=1.
- * Call once after configuration, before starting report producers. */
+/* Requires the opt-in writer build. Startup uses the separately selected build
+ * default when the environment omits XV_PROFILE_ASYNC_REPORT; otherwise only
+ * exact "1" enables it. Call after configuration, before report producers. */
 int xv_log_async_start(void);
 /* Compile capability only; safe to query without initializing a writer. */
 int xv_log_async_available(void);
