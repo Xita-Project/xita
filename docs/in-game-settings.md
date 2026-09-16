@@ -2,7 +2,7 @@
 
 Press **Select + Circle** together to open Xita's graphics panel over Halo.
 Use **Up/Down** or the left stick to select an option, **Left/Right** to change
-it, and **Circle** to close. All fourteen dashboard graphics options are available
+it, and **Circle** to close. All eighteen dashboard graphics options are available
 in the source candidate; older releases may have fewer options.
 
 The panel consumes controller input while open. It does not pause the game;
@@ -19,6 +19,13 @@ returns control after the menu buttons are released.
 | | More compressed textures |
 | | Model detail (source candidate) |
 | | Indexed vertex checks (source candidate) |
+| | Temporary decals and cosmetic effects |
+| | Material reflections and object shadows |
+
+The four [independent visual switches](visual-switches-20260916.md) default On.
+Off removes selected visual work after relaunch; projectile cues, map markings
+and baked lighting are preserved. Cosmetic effects does not disable every
+particle system, and object shadows does not remove baked shadows.
 
 The selected option explains when it takes effect. Values save to `xita.cfg`,
 preserving unrelated settings and comments. A failed save leaves the previous

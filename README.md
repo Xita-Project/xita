@@ -132,6 +132,9 @@ Graphics includes textures, filtering, mip smoothing, resolution, materials,
 glow, particles, decals, a frame limit, compressed textures and experimental
 **triple buffering**. Triple buffering defaults off.
 It may increase input delay and is not a guaranteed FPS boost.
+Separate switches for **temporary decals**, **cosmetic effects**, **material
+reflections** and **object shadows** are available in the current source/private
+test build. They default On and require relaunch; see [what each switch changes](docs/visual-switches-20260916.md).
 
 Use **Up/Down** to navigate, **Cross** to select, **Left/Right** to change a
 setting, and **Circle** to go back. Changes save automatically. **About / License**

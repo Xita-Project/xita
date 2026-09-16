@@ -20,8 +20,10 @@ unmeasured FPS gains remain unknown.
 decals, selected cosmetic emitters, environment/model reflections and object
 shadows now have separate On/Off controls. Defaults preserve current visuals;
 changes require relaunch. Host and owned-map sanitizer checks pass; physical
-appearance, gameplay and FPS testing are next. Full-screen bloom remains a
-separate pass-isolation task.
+dashboard/overlay navigation, Blood Gulch and plasma-fire smoke checks pass.
+The 360p valley sample remains around 9 FPS with all four Off, without a matched
+On comparison, so no performance gain is established. Full-screen bloom remains
+a separate pass-isolation task; broader gameplay and shadow appearance checks remain.
 
 **Active objective (September 15):** restructure costly Halo CE engine and rendering
 work into efficient native routines and independent worker jobs until sustained

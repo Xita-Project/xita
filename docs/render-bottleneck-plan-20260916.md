@@ -49,7 +49,10 @@ Do not assume a twofold reduction in pixels must produce twice the FPS.
    Existing extended compression stays opt-in; unsupported formats retain their
    correct fallback. Smaller textures alone do not establish bandwidth savings.
 4. **Framebuffer configuration:** verify actual sample count and formats before
-   proposing an MSAA switch. Likewise identify whether Xbox flicker/interlace
+   proposing an MSAA switch. The current backbuffer, scaled scene target and
+   offscreen pool already select `SCE_GXM_MULTISAMPLE_NONE` in `runtime/main.c`
+   and `runtime/xv_d3d.c`, so disabling MSAA is not a pending gain. Likewise
+   identify whether Xbox flicker/interlace
    settings create real Vita passes. No benefit can come from disabling a feature
    that is already absent. Pixel format changes require HUD/alpha/depth checks.
 5. **Geometry/binning:** use existing model LOD and separately count triangles,
