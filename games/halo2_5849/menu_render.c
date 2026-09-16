@@ -5,8 +5,23 @@
 #include "command_state.h"
 #include "kelvin_clear.h"
 #include <string.h>
+#include <stdio.h>
 
 extern void xv_logf(const char *, ...);
+
+/* Private diagnostic: dump the composited back buffer so the rendered menu can
+ * be inspected offline even when the frame never reaches the display flip. */
+static void dump_backbuffer(const uint8_t *target, uint32_t W, uint32_t H, uint64_t drawn)
+{
+    FILE *fp = fopen("ux0:data/xita-halo2/menu-frame.bin", "wb");
+    if (!fp) return;
+    uint32_t hdr[4] = {W, H, W * 4, (uint32_t)drawn};
+    int ok = fwrite(hdr, 1, sizeof hdr, fp) == sizeof hdr &&
+             fwrite(target, 1, (size_t)W * H * 4, fp) == (size_t)W * H * 4;
+    if (fclose(fp) == 0 && ok)
+        xv_logf("[h2/menu-render] private back-buffer dump W=%u H=%u after draw=%llu\n",
+                W, H, (unsigned long long)drawn);
+}
 
 #define MAX_VERTS 20000u
 
@@ -183,5 +198,8 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
         xv_logf("[h2/menu-render] draw=%llu prim=%u verts=%u W=%u H=%u textured=%d color=%08X into back buffer\n",
                 (unsigned long long)drawn, r->primitive, n, W, H, textured, c->color_offset);
     ++drawn;
+    /* Re-dump every 20 non-empty draws (overwrites): the last dump before a stall
+     * holds the fully composited menu frame for offline inspection. */
+    if (drawn >= 20 && drawn % 20 == 0) dump_backbuffer(target, W, H, drawn);
     return 1;
 }
