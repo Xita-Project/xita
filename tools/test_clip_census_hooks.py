@@ -9,9 +9,11 @@ from games.halo_ce_3925.hooks import HaloHooks
 from games.halo_ce_3925.clip_region import hook
 from recompiler.core.profile import load_profile
 p=argparse.ArgumentParser();p.add_argument('--out',type=Path)
+p.add_argument('--xbe',type=Path,default=ROOT/'haloce/default.xbe')
+p.add_argument('--manifest',type=Path,default=ROOT/'local/halo_ce_3925/game_manifest.json')
 p.add_argument('--symbols',type=Path);p.add_argument('--stage',type=Path);args=p.parse_args()
 if args.stage and not args.symbols:p.error('--stage identity requires the exact --symbols input')
-img=r.Image(str(ROOT/'haloce/default.xbe'),str(ROOT/'local/halo_ce_3925/game_manifest.json'))
+img=r.Image(str(args.xbe),str(args.manifest))
 hle={};variables={}
 if args.symbols:
  profile=load_profile('halo_ce_3925');data=args.symbols.read_bytes()
@@ -25,7 +27,7 @@ phases=h.phase_targets();assert sorted(phases).index(0x92330)==35 and sorted(pha
 assert 0x117B0 not in phases and 0xB71C0 not in phases
 assert h.function_entry(0x117B0)==[]
 assert h.function_entry(0xB71C0)==['    { extern int xv_math_polygon_clip(xctx *); if (xv_math_polygon_clip(c)) return; }']
-pcs=(0x58440,0x58CD0,0x8D760,0x8D7A6,0x91D10,0x92230,0x92330,0xB7F10,0xB7F50,0xB8000)
+pcs=(0x56670,0x58440,0x58CD0,0x8D760,0x8D7A6,0x91D10,0x92230,0x92330,0xB7F10,0xB7F50,0xB8000)
 d=r.Discovery(img,hle,img.kernel_imports(),lambda *args:None)
 # Existing root boundaries matter: e.g.92230 tail-calls A92C0, whose
 # shared transaction must not be inlined by a tiny isolated discovery.
@@ -48,6 +50,11 @@ for markers in (False,True):
   if pc==0x92330:
    assert actual.count('XV_PHASE_SCOPE(c, 35u);')==1
    assert 'X_PUSH32(0x925B0u);\n#ifdef XV_LIGHT_QUERY_CENSUS\n    XV_LIGHT_CENSUS_QUERY(c);\n#endif\n    f_00056670(c);' in actual
+  if pc==0x56670:
+   assert actual.count('XV_QUERY_WORK_BEGIN(c, xv_object_math_locked_);')==1
+   assert actual.count('XV_QUERY_WORK_END(c, xv_object_math_locked_);')==1
+   assert actual.index('XV_OBJECT_MATH_GUARD')<actual.index('XV_QUERY_WORK_BEGIN')<actual.index('if (xv_worker_query')
+   assert 'L_000566DE:\n#ifdef XV_LIGHT_QUERY_CENSUS\n    XV_QUERY_WORK_END(c, xv_object_math_locked_);\n#endif\n' in actual
   if pc==0xB7F10:
    assert actual.count('XV_PHASE_SCOPE(c, 44u);')==1 and actual.count('xv_math_clip_region(c,')==1
   if not markers:bodies[pc]=actual;previous_bodies[pc]=previous
@@ -85,4 +92,4 @@ if args.stage:
 if args.out:
  args.out.mkdir(parents=True,exist_ok=True)
  for pc,body in bodies.items():(args.out/f'f_{pc:08X}.c').write_text(body.rstrip()+'\n')
-print('PASS merged original-entry census, all5 exits/2 removes/query and lifetime hooks, real phase35/44, both marker modes and unchanged interior clip entries')
+print('PASS merged census, guarded query prefix before clamp, all5 exits/2 removes/query and lifetime hooks, real phases, both marker modes and unchanged interior clip entries')

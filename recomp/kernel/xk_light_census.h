@@ -19,6 +19,20 @@ enum xv_light_census_reason {
     XV_LC_REASONS
 };
 enum { XV_LC_MAX_LIGHTS=8, XV_LC_SOURCES=16 };
+/* Original query prefix only: count at 566DE, before the 64-result clamp and
+ * allocator tail. Native-thread-owned rows are read/reset only after joining. */
+enum { XV_QW_LANES=3, XV_QW_COUNTS=10, XV_QW_COSTS=12 };
+typedef struct xv_query_work_stats {
+    uint64_t entered, finished, invalid, depth_one, nested, unknown_depth;
+    uint64_t counts[XV_QW_COUNTS], cost[XV_QW_COUNTS], max_cost[XV_QW_COUNTS];
+    uint64_t single_counts[XV_QW_COUNTS], single_cost[XV_QW_COUNTS];
+    uint64_t budgets[XV_QW_COSTS];
+} xv_query_work_stats;
+typedef struct xv_query_work_token {
+    unsigned lane, depth;
+    uint32_t sp;
+    int budget;
+} xv_query_work_token;
 typedef struct xv_light_census_stats {
     uint64_t entries, opened, completed, cancelled, candidates;
     uint64_t queries, traversals, removals, multi_groups, multi_traversals;
@@ -34,6 +48,7 @@ typedef struct xv_light_census_stats {
      * they must never be mixed when interpreting absent owner workload. */
     uint32_t admission[3][XV_LC_GUARD+1]; /* entry, query, removal */
     uint32_t declined[XV_LC_REASONS]; /* all gates + first structural failure */
+    xv_query_work_stats query_work[XV_QW_LANES];
 } xv_light_census_stats;
 extern unsigned xv_light_census_enabled;
 /* Armed only by owner-side benchmark37 request consumption, not by the network.
@@ -52,6 +67,16 @@ static inline void xv_light_census_present_cleanup(unsigned *token)
 unsigned xv_object_census_admit(const xctx *);
 int xv_object_census_is_owner(void);
 unsigned xv_object_census_boundary(const xctx *);
+/* Returns owner=1 or actual worker=2/3, after native/context verification.
+ * Reads no guest memory. Depth zero means unavailable, not unlocked work. */
+unsigned xv_object_query_work_lane(const xctx *,int guard,unsigned *depth);
+xv_query_work_token xv_query_work_begin(xctx *,int guard);
+void xv_query_work_end(xctx *,xv_query_work_token *,int guard);
+#define XV_QUERY_WORK_BEGIN(c,guard) \
+    xv_query_work_token xv_query_work_ = {0}; \
+    do {if(XV_LIGHT_CENSUS_ON())xv_query_work_=xv_query_work_begin(c,guard);}while(0)
+#define XV_QUERY_WORK_END(c,guard) \
+    do {if(xv_query_work_.lane)xv_query_work_end(c,&xv_query_work_,guard);}while(0)
 /* Current native owner/live fiber, no queued/running service or logical guard.
  * Controller contract: toggle only at a drained frame boundary with no open
  * generated/math scopes. OFF scopes intentionally do not inspect native IDs.

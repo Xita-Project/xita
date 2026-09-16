@@ -53,6 +53,16 @@ def benchmark_cases(tmp):
                         self.records+=f"[diagnostic-poll] phase {phase} frames 1800 event-overflow 0 valid 1\n"
             if self.kind=="light-census":
                 from vita_remote import CENSUS_FIELDS
+                if self.mode in ('query-work','missing-query-work'):
+                    self.records+='[light-census-compare] start query-work-schema 1\n'
+                if self.mode=='query-work':
+                    from vita_remote import QUERY_WORK_FIELDS
+                    for phase in (1,2,3):
+                        for lane in range(3):
+                            for key,n in QUERY_WORK_FIELDS.items():
+                                values=[0]*n
+                                if key=='summary':values[0]=1
+                                self.records+=f'[query-work-count] phase {phase} lane {lane} {key} '+ '/'.join(map(str,values))+'\n'
                 if self.mode=="census-failure":self.records+="[light-census-compare] boundary failure -1\n"
                 if self.mode!="missing-counts":
                     for phase in (1,2,3):
@@ -104,12 +114,15 @@ def benchmark_cases(tmp):
             try:benchmark(failed,tmp/mode,1,1200,"diagnostic-shot")
             except RuntimeError:pass
             else:raise AssertionError("Invalid diagnostic poll comparison accepted")
-        for mode in ('census-failure','missing-counts'):
+        for mode in ('census-failure','missing-counts','missing-query-work'):
             failed=Fake(mode,'light-census')
             try:benchmark(failed,tmp/mode,1,180,'light-census')
             except RuntimeError:pass
             else:raise AssertionError('Invalid census comparison accepted')
             assert failed.released and not json.loads((tmp/mode/'result.json').read_text())['complete']
+        new_census=Fake('query-work','light-census')
+        benchmark(new_census,tmp/'query-work',1,180,'light-census')
+        assert len(json.loads((tmp/'query-work/result.json').read_text())['trials'][0]['query_work'])==9
         historical_census=Fake('success','light-census');historical_census.records='[light-census-compare] boundary failure -1 from previous run\n'
         benchmark(historical_census,tmp/'historical-census-failure',1,180,'light-census')
         historical_log=Fake('success','log-writer');historical_log.records='[log-writer-compare] boundary failure -2 from previous run\n'

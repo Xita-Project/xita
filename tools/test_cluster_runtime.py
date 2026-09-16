@@ -26,8 +26,14 @@ def generate_worker_reference(xbe, manifest, out):
     text = '#include "kernel/xk_object_jobs.h"\n'
     text += ''.join(f'void f_{pc:08X}(xctx *);\nvoid ref_{pc:08X}(xctx *);\n' for pc in raw)
     for pc, body in raw.items():
-        text += re.sub(r'\bf_([0-9A-F]{8})', r'ref_\1', body)
-        text += body.replace('{\n', '{\n' + '\n'.join(hooks.function_entry(pc)) + '\n', 1)
+        reference = re.sub(r'\bf_([0-9A-F]{8})', r'ref_\1', body)
+        if pc == 0x56670:
+            reference = reference.replace('{\n', '{\n#ifdef XV_QUERY_WORK_TEST\n'
+                '    extern void query_work_reference_begin(xctx *); query_work_reference_begin(c);\n#endif\n', 1)
+            reference = reference.replace('L_000566DE:\n', 'L_000566DE:\n#ifdef XV_QUERY_WORK_TEST\n'
+                '    { extern void query_work_reference_end(xctx *); query_work_reference_end(c); }\n#endif\n')
+        text += reference
+        text += hooks.transform_body(pc, body.replace('{\n', '{\n' + '\n'.join(hooks.function_entry(pc)) + '\n', 1))
     (out / 'worker-reference.c').write_text(text)
     (out / 'worker_query_axes.h').write_text((out / 'cluster_axes.h').read_text())
 
@@ -38,6 +44,7 @@ def main():
         p.add_argument('--' + name, type=Path, required=True)
     p.add_argument('--sanitize', choices=('address', 'thread'))
     p.add_argument('--arm', action='store_true')
+    p.add_argument('--census', action='store_true', help='verify original-prefix workload counters through the actual pool')
     p.add_argument('--mode', action='append')
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
@@ -48,6 +55,9 @@ def main():
              '-I' + str(ROOT / 'recomp'), '-I' + str(ROOT / 'recomp/kernel'), '-I' + str(a.out)]
     runtime = [ROOT / 'recomp/kernel' / (name + '.c') for name in
                ('xk_cluster_runtime', 'xk_cluster_snapshot', 'xk_cluster_query', 'xk_cluster_query_replay')]
+    if a.census:
+        flags += ['-DXV_LIGHT_QUERY_CENSUS', '-DXV_QUERY_WORK_TEST']
+        runtime.append(ROOT / 'recomp/kernel/xk_light_census.c')
     if a.arm:
         cc = os.environ.get('ARM_CC', '/home/birchwoodgod/vitasdk/bin/arm-vita-eabi-gcc')
         for path in runtime + [ROOT / 'recomp/kernel/xk_object_jobs.c']:

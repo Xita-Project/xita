@@ -253,6 +253,27 @@ static int worker_lane(void)
 #endif
     return -1;
 }
+#ifdef XV_LIGHT_QUERY_CENSUS
+unsigned xv_object_query_work_lane(const xctx *c,int guard,unsigned *depth)
+{
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
+    int lane=worker_lane();
+    if(lane>=0){
+        if(!__atomic_load_n(&running,__ATOMIC_ACQUIRE)||c!=&contexts[lane]||!xv_is_object_job(c))return 0;
+        if(math_fast_path){
+            if(guard!=lane+2||!math_depth[lane])return 0;
+            *depth=math_depth[lane];
+        }else{if(guard!=1)return 0;*depth=0;}
+        return (unsigned)lane+2;
+    }
+    /* Reject borrowed worker contexts and foreign/native service callers before
+     * reading owner fiber state. Logical scopes include the idle lock bypass. */
+    if(!census_is_owner()||!xk_cur||c!=&xk_cur->ctx||xv_is_object_job(c)||
+       !xk_cur->fiber||xk_os_fiber_current()!=xk_cur->fiber||xk_cur->state!=0||
+       !census_owner_scopes)return 0;
+    *depth=census_owner_scopes;return 1;
+}
+#endif
 int xv_object_is_worker_thread(void)
 {
     if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;

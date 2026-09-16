@@ -466,6 +466,13 @@ static void census_row(const char *key,const uint64_t *v,unsigned n)
         "%s%llu",i?"/":"",(unsigned long long)v[i]);
     xv_logf("[light-census-count] phase %u %s %s\n",b.phase+1,key,values);
 }
+static void query_work_row(unsigned lane,const char *key,const uint64_t *v,unsigned n)
+{
+    char values[384];size_t used=0;
+    for(unsigned i=0;i<n;i++)used+=(size_t)snprintf(values+used,sizeof values-used,
+        "%s%llu",i?"/":"",(unsigned long long)v[i]);
+    xv_logf("[query-work-count] phase %u lane %u %s %s\n",b.phase+1,lane,key,values);
+}
 static int census_boundary(int reset)
 {
     static xv_light_census_stats snapshot;
@@ -499,6 +506,17 @@ static int census_boundary(int reset)
     census_row("source-pcs",v,XV_LC_SOURCES+1);
     for(unsigned i=0;i<=XV_LC_SOURCES;i++)v[i]=s->sources[i].groups;
     census_row("source-groups",v,XV_LC_SOURCES+1);
+    for(unsigned lane=0;lane<XV_QW_LANES;lane++){
+        const xv_query_work_stats *w=&s->query_work[lane];
+        const uint64_t summary[]={1,w->entered,w->finished,w->invalid,w->depth_one,w->nested,w->unknown_depth};
+        query_work_row(lane,"summary",summary,7);
+        query_work_row(lane,"counts",w->counts,XV_QW_COUNTS);
+        query_work_row(lane,"cost",w->cost,XV_QW_COUNTS);
+        query_work_row(lane,"max-cost",w->max_cost,XV_QW_COUNTS);
+        query_work_row(lane,"single-counts",w->single_counts,XV_QW_COUNTS);
+        query_work_row(lane,"single-cost",w->single_cost,XV_QW_COUNTS);
+        query_work_row(lane,"budgets",w->budgets,XV_QW_COSTS);
+    }
     return 0;
 }
 #endif
@@ -533,7 +551,7 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
             if (xv_benchmark_compare_diagnostic_poll())
                 xv_logf("[%s] start baseline/suppressed/baseline at %up; selected %s poll only, configured watcher never forced on; 60 settle + 1800 measured frames, input/screenshots and other diagnostic triggers retained\n",tag(),height,diagnostic_path()==1?"screenshot-directory":"hist.now");
             else if (xv_benchmark_compare_light_census())
-                xv_logf("[light-census-compare] start off/on/off diagnostic at %up; count-only original queries, same camera/graphics/workers, restore initial observer %d; %u settle + %u measured frames each; no query parallelism\n",height,b.census_original,SETTLE,MEASURE);
+                xv_logf("[light-census-compare] start off/on/off diagnostic at %up; count-only original queries, same camera/graphics/workers, restore initial observer %d; %u settle + %u measured frames each; no query parallelism; query-work-schema 1\n",height,b.census_original,SETTLE,MEASURE);
             else if (xv_benchmark_compare_log_writer())
                 xv_logf("[log-writer-compare] start off/on/off at %up; synchronous/background/synchronous periodic output, same formatting/graphics/workers, restore initial mode %d; %u settle + %u measured frames each\n",height,b.log_original,SETTLE,LOG_MEASURE);
             else if (xv_benchmark_compare_polygon_edge())

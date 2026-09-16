@@ -90,6 +90,41 @@ def parse_light_census(text):
     return [dict(phase=p,**arms[p]) for p in (1,2,3)]
 
 
+QUERY_WORK_FIELDS={'summary':7,'counts':10,'cost':10,'max-cost':10,
+                   'single-counts':10,'single-cost':10,'budgets':12}
+
+def parse_query_work(text):
+    """Original-prefix cluster counts and backedges; neither clocks nor FPS."""
+    rows={(p,l):{} for p in (1,2,3) for l in range(3)}
+    for line in text.splitlines():
+        if '[query-work-count]' not in line:continue
+        m=re.fullmatch(r'.*\[query-work-count\] phase ([123]) lane ([012]) ([a-z-]+) ([0-9/]+)',line)
+        if not m:raise RuntimeError('Malformed query work row')
+        phase,lane,key,raw=m.groups();target=rows[int(phase),int(lane)]
+        try:values=list(map(int,raw.split('/')))
+        except ValueError:raise RuntimeError('Malformed query work values') from None
+        if key not in QUERY_WORK_FIELDS or key in target or len(values)!=QUERY_WORK_FIELDS[key] or any(v>2**64-1 for v in values):
+            raise RuntimeError('Invalid or duplicate query work row')
+        target[key]=values
+    for (phase,lane),r in rows.items():
+        if set(r)!=set(QUERY_WORK_FIELDS):raise RuntimeError('Incomplete query work window')
+        version,entered,finished,invalid,single,nested,unknown=r['summary']
+        valid=finished-invalid
+        if version!=1 or not invalid<=finished<=entered or single+nested+unknown!=valid or sum(r['counts'])!=valid or sum(r['budgets'])!=valid or sum(r['single-counts'])!=single:
+            raise RuntimeError('Inconsistent query work totals')
+        if entered!=finished or invalid:raise RuntimeError('Incomplete or invalid query work sample')
+        if phase!=2 and (any(r['summary'][1:]) or any(any(v) for k,v in r.items() if k!='summary')):
+            raise RuntimeError('OFF query work window contains counts')
+        for count,total,maximum,one,one_total in zip(r['counts'],r['cost'],r['max-cost'],r['single-counts'],r['single-cost']):
+            if not one<=count or not one_total<=total or maximum>total or total>count*maximum or one_total>one*maximum or (not count and (total or maximum)):
+                raise RuntimeError('Inconsistent query work bucket')
+        # Backedge bins are 0, 1, 2..3, 4..7, ..., 512..1023, >=1024.
+        lower=sum(n*(0 if i==0 else 1<<(i-1)) for i,n in enumerate(r['budgets']))
+        upper=sum(n*(0 if i==0 else (2**31-1 if i==11 else (1<<i)-1)) for i,n in enumerate(r['budgets']))
+        if not lower<=sum(r['cost'])<=upper:raise RuntimeError('Inconsistent query work backedges')
+    return [dict(phase=p,lane=l,**rows[p,l]) for p,l in sorted(rows)]
+
+
 class Client:
     def __init__(self, path):
         self.config = json.loads(Path(path).read_text())
@@ -329,7 +364,12 @@ def benchmark(client, out, runs, timeout, kind=None):
                 trial["baseline_after_fps"]=trial.pop("off_after_fps")
                 trial["note"]="Baseline/suppressed/baseline for one diagnostic poll; input and screenshot capture unchanged. Poll elapsed includes scheduling. Invalid scans/trace triggers invalidate the comparison."
             if kind=="light-census":
-                trial["census"]=parse_light_census(logfile.read_bytes()[trial_offset:].decode(errors="replace"))
+                census_text=logfile.read_bytes()[trial_offset:].decode(errors="replace")
+                trial["census"]=parse_light_census(census_text)
+                # Older builds provide only owner-group counts. Never invent
+                # worker sizes from those receipts or require new rows from them.
+                if '[query-work-count]' in census_text or 'query-work-schema 1' in census_text:
+                    trial["query_work"]=parse_query_work(census_text)
                 trial["diagnostic"]=True
                 trial["note"]="Count-only observer overhead, no query parallelism. Owner candidates and worker declines are distinct; absent owner groups do not imply absent worker workload. Setup/counter reports lie outside 120-frame timing windows."
             if kind=="guest-phases":

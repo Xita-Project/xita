@@ -42,6 +42,14 @@ static void frame_counts(void)
  counts.orphan_queries+=2;counts.admission[0][XV_LC_OK]+=3;counts.admission[1][XV_LC_OK]+=8;counts.admission[2][XV_LC_OK]++;
  counts.admission[0][XV_LC_WORKER]+=7;counts.admission[1][XV_LC_WORKER]+=14;counts.declined[XV_LC_WORKER]+=21;
  counts.guest_reads+=100;counts.guest_bytes+=400;
+ for(unsigned lane=0;lane<3;lane++){
+  xv_query_work_stats *q=&counts.query_work[lane];
+  q->entered+=2;q->finished+=2;q->depth_one++;q->nested++;
+  q->counts[1]++;q->cost[1]+=3;q->max_cost[1]=3;
+  q->counts[9]++;q->cost[9]+=2000;q->max_cost[9]=2000;
+  q->single_counts[9]++;q->single_cost[9]+=2000;
+  q->budgets[2]++;q->budgets[11]++;
+ }
 }
 #endif
 void xv_logf(const char *fmt,...)

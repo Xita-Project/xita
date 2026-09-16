@@ -365,8 +365,10 @@ proof; conservative invalidation remains in place.
    pass the actual-pool tests above. Keep the guard held, add an owner-side
    OFF/ON/OFF selector at drained boundaries, and validate the complete private
    game build before considering an update. The current hardware remains unchanged.
-3. **Measure real query work and frame time.** Obtain worker count/portal/budget
-   distributions before choosing an eligibility rule or restructuring the whole
+3. **Measure real query work and frame time.** The new
+   [original-query census](query-work-census-20260916.md) records per-worker
+   result counts and budget deltas; its physical run remains pending. Obtain
+   those distributions before choosing an eligibility rule or restructuring the whole
    call boundary. Compare end-to-end guard occupancy and hardware frame time,
    then exercise combat, driving and campaign BSP transitions. Even the complete
    synthetic instruction reduction is insufficient to retain a runtime change

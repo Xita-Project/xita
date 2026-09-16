@@ -9,6 +9,9 @@ unsigned xv_light_census_enabled, xv_light_census_present_requested;
 static xctx *present_context;
 static unsigned present_serial, present_next;
 static xv_light_census_stats totals;
+/* Separate cache lines: native owner and each worker update only their row.
+ * Boundary admission requires joined workers before any reset or snapshot. */
+static struct __attribute__((aligned(64))) {xv_query_work_stats stats;} query_work[XV_QW_LANES];
 static uint32_t declines[XV_LC_REASONS],admissions[3][XV_LC_GUARD+1];
 static unsigned serial;
 static struct {
@@ -52,6 +55,35 @@ static int admit(xctx *c,unsigned site)
 static void bad(unsigned reason)
 {if(!group.bad){group.bad=reason;decline(reason);}}
 static unsigned bucket(unsigned n){return n<9?n:9;}
+static unsigned work_bucket(unsigned n,unsigned limit)
+{unsigned b=n<2?n:32u-(unsigned)__builtin_clz(n);return b<limit?b:limit-1;}
+xv_query_work_token xv_query_work_begin(xctx *c,int guard)
+{
+    xv_query_work_token t={0};
+    if(!XV_LIGHT_CENSUS_ON())return t;
+    t.lane=xv_object_query_work_lane(c,guard,&t.depth);
+    if(!t.lane)return t;
+    t.sp=c->r[4];t.budget=c->preempt;query_work[t.lane-1].stats.entered++;
+    return t;
+}
+void xv_query_work_end(xctx *c,xv_query_work_token *t,int guard)
+{
+    if(!t->lane||t->lane>XV_QW_LANES)return;
+    unsigned depth=0,lane=xv_object_query_work_lane(c,guard,&depth);
+    /* A mismatched context/thread cannot touch another lane's native counters.
+     * Its unmatched entry stays visible as entered minus finished. */
+    if(lane!=t->lane)return;
+    xv_query_work_stats *s=&query_work[lane-1].stats;s->finished++;t->lane=0;
+    unsigned count=c->r[0]&65535u;
+    if(depth!=t->depth||t->sp<136||c->r[4]!=t->sp-136||
+       t->budget<=0||c->preempt<=0||c->preempt>t->budget||count>256){s->invalid++;return;}
+    unsigned cost=(unsigned)t->budget-(unsigned)c->preempt;
+    unsigned b=work_bucket(count,XV_QW_COUNTS);
+    s->counts[b]++;s->cost[b]+=cost;if(cost>s->max_cost[b])s->max_cost[b]=cost;
+    s->budgets[work_bucket(cost,XV_QW_COSTS)]++;
+    if(depth==1){s->depth_one++;s->single_counts[b]++;s->single_cost[b]+=cost;}
+    else if(depth)s->nested++;else s->unknown_depth++;
+}
 /* Reject trash/out-of-arena pages and wrapping spans before the first read.
  * These are bounds, not an immutable lifetime or alias proof. */
 static int read_guest(uint32_t a,void *out,unsigned n)
@@ -111,7 +143,7 @@ static void close_cancel(unsigned reason)
 int xv_light_census_control(xctx *c,int enabled,int reset)
 {
     if(xv_object_census_boundary(c)||group.token)return 0;
-    if(reset){memset(&totals,0,sizeof totals);
+    if(reset){memset(&totals,0,sizeof totals);memset(query_work,0,sizeof query_work);
         for(unsigned i=0;i<XV_LC_REASONS;i++)__atomic_store_n(&declines[i],0,__ATOMIC_RELAXED);
         for(unsigned site=0;site<3;site++)for(unsigned i=0;i<=XV_LC_GUARD;i++)__atomic_store_n(&admissions[site][i],0,__ATOMIC_RELAXED);
     }
@@ -120,12 +152,13 @@ int xv_light_census_control(xctx *c,int enabled,int reset)
 int xv_light_census_take(xctx *c,xv_light_census_stats *out,int reset)
 {
     if(!out||xv_object_census_boundary(c)||group.token)return 0;
-    *out=totals;out->group_storage_bytes=sizeof group;out->stats_storage_bytes=sizeof totals+sizeof declines+sizeof admissions;
+    *out=totals;out->group_storage_bytes=sizeof group;out->stats_storage_bytes=sizeof totals+sizeof declines+sizeof admissions+sizeof query_work;
+    for(unsigned i=0;i<XV_QW_LANES;i++)out->query_work[i]=query_work[i].stats;
     for(unsigned i=0;i<XV_LC_REASONS;i++)out->declined[i]=reset?
         __atomic_exchange_n(&declines[i],0,__ATOMIC_ACQ_REL):__atomic_load_n(&declines[i],__ATOMIC_RELAXED);
     for(unsigned site=0;site<3;site++)for(unsigned i=0;i<=XV_LC_GUARD;i++)out->admission[site][i]=reset?
         __atomic_exchange_n(&admissions[site][i],0,__ATOMIC_ACQ_REL):__atomic_load_n(&admissions[site][i],__ATOMIC_RELAXED);
-    if(reset)memset(&totals,0,sizeof totals);
+    if(reset){memset(&totals,0,sizeof totals);memset(query_work,0,sizeof query_work);}
     return 1;
 }
 unsigned xv_light_census_begin(xctx *c)

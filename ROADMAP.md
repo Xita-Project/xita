@@ -147,6 +147,11 @@ of 7–256 clusters, excluding per-batch construction and firmware/kernel costs.
 Queries that visit only one cluster can still regress. Measure actual worker
 query sizes before choosing an eligibility rule; this remains disabled and is
 not a physical FPS improvement.
+The [original query workload census](docs/query-work-census-20260916.md) now
+extends diagnostic 37 with per-worker prefix result sizes, backedges and guard
+depth. Full-state, exact counter, concurrency and report/controller checks pass.
+It preserves the original query and is Off outside diagnostics. Physical workload
+distribution and observer overhead still require a connected Vita.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)

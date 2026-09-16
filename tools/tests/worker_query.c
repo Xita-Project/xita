@@ -27,6 +27,59 @@ static unsigned query_held,query_tried;
 static void wait_flag(unsigned *flag);
 static pthread_barrier_t rendezvous;
 static int mode;
+#ifdef XV_QUERY_WORK_TEST
+static xk_thread census_test_owner;
+xk_thread *xk_cur=&census_test_owner;
+xk_fiber *xk_os_fiber_current(void){return census_test_owner.fiber;}
+static xv_query_work_stats expected_work[2];
+static _Thread_local int reference_budget;
+void query_work_reference_begin(xctx *c){reference_budget=c->preempt;}
+void query_work_reference_end(xctx *c)
+{
+    if(mode!=0&&mode!=1)return;
+    int lane=worker_lane();assert(lane>=0&&lane<2);
+    unsigned n=c->r[0]&65535u,b=0;
+    assert(n<=256&&reference_budget>0&&c->preempt>0&&reference_budget>=c->preempt);
+    for(unsigned value=n;value;value>>=1)b++;
+    unsigned cost=(unsigned)(reference_budget-c->preempt);
+    expected_work[lane].counts[b]++;expected_work[lane].cost[b]+=cost;
+}
+static void *query_work_foreign(void *unused)
+{
+    (void)unused;unsigned depth=123;
+    assert(!xv_object_query_work_lane((const xctx *)(uintptr_t)1,1,&depth)&&depth==123);
+    assert(!xv_query_work_begin((xctx *)(uintptr_t)1,1).lane);
+    return NULL;
+}
+static void query_work_owner_sample(unsigned count,unsigned cost,unsigned invalid)
+{
+    xctx *c=&census_test_owner.ctx;XV_OBJECT_MATH_GUARD();
+    c->r[4]=0xc0000;c->preempt=10000;
+    xv_query_work_token token=xv_query_work_begin(c,xv_object_math_locked_);
+    assert(token.lane==1);
+    c->r[0]=count;c->r[4]-=136;c->preempt-=cost;
+    if(invalid==1)c->r[4]++;
+    if(invalid==2)c->preempt=10001;
+    if(invalid==3)c->preempt=0;
+    xv_query_work_end(c,&token,xv_object_math_locked_);assert(!token.lane);
+    xv_light_census_stats snapshot;
+    assert(!xv_light_census_control(c,0,1)&&!xv_light_census_take(c,&snapshot,0));
+}
+static void query_work_owner_test(void)
+{
+    query_work_owner_sample(0,0,0);query_work_owner_sample(1,1,0);
+    {XV_OBJECT_MATH_GUARD();query_work_owner_sample(256,2000,0);}
+    query_work_owner_sample(7,3,1);query_work_owner_sample(7,3,2);
+    query_work_owner_sample(7,3,3);query_work_owner_sample(65535,3,0);
+    xv_light_census_stats snapshot;assert(xv_light_census_take(&census_test_owner.ctx,&snapshot,0));
+    xv_query_work_stats *s=&snapshot.query_work[0];
+    assert(s->entered==7&&s->finished==7&&s->invalid==4&&s->depth_one==2&&s->nested==1&&!s->unknown_depth);
+    assert(s->counts[0]==1&&s->counts[1]==1&&s->counts[9]==1&&s->cost[9]==2000&&s->max_cost[9]==2000);
+    assert(s->single_counts[0]==1&&s->single_counts[1]==1&&!s->single_counts[9]);
+    assert(s->budgets[0]==1&&s->budgets[1]==1&&s->budgets[11]==1);
+    assert(xv_light_census_control(&census_test_owner.ctx,1,1));
+}
+#endif
 static _Thread_local unsigned mutation;
 static pthread_mutex_t oracle=PTHREAD_MUTEX_INITIALIZER;
 static unsigned char *before,*expected;
@@ -250,6 +303,15 @@ int main(int argc,char **argv)
     for(unsigned i=0;i<RAM/4096;i++)g_xpt[i]=(i^1u)*4096;
     assert(!pthread_barrier_init(&rendezvous,NULL,2));graph(7,1024);
     xctx owner_ctx={0};xv_object_jobs_override(1);
+#ifdef XV_QUERY_WORK_TEST
+    census_test_owner.fiber=(xk_fiber*)&census_test_owner;
+    assert(initialize());
+    assert(!xv_query_work_begin((xctx *)(uintptr_t)1,0).lane); /* OFF reads no context. */
+    assert(xv_light_census_control(&census_test_owner.ctx,1,1));
+    assert(!xv_query_work_begin(&contexts[0],2).lane); /* Borrowed worker on owner. */
+    pthread_t foreign;assert(!pthread_create(&foreign,NULL,query_work_foreign,NULL));assert(!pthread_join(foreign,NULL));
+    query_work_owner_test();
+#endif
 #ifdef XV_TYPED_CLUSTER_QUERY
     unsigned cases=mode==0?168:mode==1?12:mode==2||mode==3?8:mode==7?6:1;
     for(batch_case=0;batch_case<cases;batch_case++){
@@ -299,6 +361,27 @@ int main(int argc,char **argv)
             assert(seen==3);
         }
     }
+#ifdef XV_QUERY_WORK_TEST
+    xv_light_census_stats measured;assert(xv_light_census_take(&census_test_owner.ctx,&measured,0));
+    if(mode==0||mode==1||mode==6){
+        unsigned total=0;
+        for(unsigned i=1;i<3;i++){
+            const xv_query_work_stats *s=&measured.query_work[i];
+            assert(s->entered==s->finished&&!s->invalid&&s->depth_one==s->finished&&!s->nested&&!s->unknown_depth);
+            if(mode==0||mode==1){
+                equal(s->counts,expected_work[i-1].counts,sizeof s->counts,"query count buckets",i);
+                equal(s->cost,expected_work[i-1].cost,sizeof s->cost,"query backedges by count",i);
+            }
+            total+=s->finished;
+        }
+        assert(!measured.query_work[0].entered&&total==(mode==6?128:comparisons));
+        if(mode==0)assert(measured.query_work[1].counts[9]+measured.query_work[2].counts[9]>0); /* Before 64-result clamp. */
+        printf("query-work exact prefix counts/backedges: %u completed, no invalid/unmatched samples\n",total);
+    }
+    assert(xv_light_census_control(&census_test_owner.ctx,0,1));
+    assert(xv_light_census_take(&census_test_owner.ctx,&measured,0));
+    for(unsigned i=0;i<3;i++)assert(!measured.query_work[i].entered);
+#endif
     xv_object_jobs_report(1);xv_object_jobs_shutdown();
     printf("%u exact comparisons; %u private-ready visits; lanes %u/%u; mutations %u; guard retained\n",comparisons,ready_count,lane_seen[0],lane_seen[1],mutation_count);
     free(before);free(expected);free(g_xram);free(g_xpt);return 0;

@@ -218,6 +218,9 @@ class HaloHooks(NoGameHooks):
                 out.extend(["#ifdef XV_EXPERIMENTAL_OBJECT_JOBS",
                             "    XV_OBJECT_MATH_GUARD(); /* shared guest transaction */", "#endif"])
                 if address == 0x56670:
+                    if self.light_census_enabled:
+                        out.extend(["#ifdef XV_LIGHT_QUERY_CENSUS",
+                                    "    XV_QUERY_WORK_BEGIN(c, xv_object_math_locked_);", "#endif"])
                     out.extend(["#ifdef XV_WORKER_QUERY",
                                 "    { extern int xv_worker_query(xctx *, int);",
                                 "      if (xv_worker_query(c, xv_object_math_locked_)) goto L_000566DE; }",
@@ -246,6 +249,13 @@ class HaloHooks(NoGameHooks):
 
     def transform_body(self, address, body):
         body = self.light_census_body(address, body)
+        if address == 0x56670 and self.light_census_enabled:
+            size, digest = self.object_shared[address]
+            if hashlib.sha256(self.image.bytes_at(address, size) or b"").hexdigest() == digest:
+                needle = "L_000566DE:\n"
+                assert body.count(needle) == 1, "query work boundary drift"
+                body = body.replace(needle, needle + "#ifdef XV_LIGHT_QUERY_CENSUS\n"
+                                    "    XV_QUERY_WORK_END(c, xv_object_math_locked_);\n#endif\n")
         if self.clip_region_enabled and address == 0xB7F10:
             body = clip_region.hook(body)
         if self.enabled and address == 0x87EA0 and hashlib.sha256(
