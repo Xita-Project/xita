@@ -75,8 +75,49 @@ boot digest differ. Object hashes confirm that only the query translation unit,
 worker admission, census and benchmark objects changed; all other objects match
 the previous stage. Candidate runtime SHA256 is
 `b3ace3af9da6b78654d2bc0fda026b6549bbf61338b6764f6fef11bf07a86fa5`.
-The prepared package still needs updater verification and a physical census;
-host checks do not establish its hardware cost or a frame-rate improvement.
+The authenticated updater verified the package and confirmed this digest booted
+in slot 0. The previous `c999c012…` runtime remains in slot 1. The executable's
+unchanged main object still reports the earlier build timestamp; the boot digest
+identifies this update.
+
+## First physical result
+
+A fixed Blood Gulch valley view completed all three arms on the physical Vita.
+The launch log confirms native 960×544, Standard textures, original material,
+glow, particle and model quality, and temporary decals, cosmetic effects,
+reflections and object shadows enabled. Triple buffering, extended compressed
+textures and the existing worker settings were retained. Effective clocks were
+CPU 444 / bus 222 / GPU 222 / crossbar 166 MHz; the requested 500 MHz was unavailable.
+The previous session used 360p, Low textures and three disabled visual switches,
+so its FPS is not a standard-settings comparison.
+
+| Observer Off before | Observer On | Observer Off after |
+| ---: | ---: | ---: |
+| 9.345 FPS | 9.084 FPS | 9.350 FPS |
+
+The camera check passed. The observer added about **2.9% frame time** relative to
+the mean Off FPS in this one trial; it was restored Off after measurement. This
+is diagnostic overhead, not an optimization gain or a before/after build test.
+
+Both workers supplied **15,483 complete queries over 120 frames** (129/frame),
+with no invalid or unmatched samples. The owner row was empty. Of these, 15,086
+were at guard depth one and 397 were nested.
+
+| Returned clusters | Worker queries | Summed loop backedges |
+| --- | ---: | ---: |
+| 1 | 6,352 | 33,348 |
+| 2–3 | 5,955 | 194,927 |
+| 4–7 | 1,588 | 65,108 |
+| 8–15 | 1,588 | 393,030 |
+| Other buckets | 0 | 0 |
+
+Queries returning 1–3 clusters account for **79.5% of calls**. The 8–15 bucket
+accounts for **10.3% of calls and 57.3% of counted loop backedges**. This supports
+investigating selective acceleration and reducing adapter overhead. It does not
+establish CPU-time shares: backedges are not cycles, and output size is known
+only after traversal. An inexpensive eligibility rule still needs evidence.
+The typed adapter remains absent from the installed executable. Other views,
+campaign, driving and combat remain unmeasured with this census.
 
 ## Hardware comparison
 

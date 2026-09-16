@@ -3,7 +3,9 @@
 The new `xk_cluster_query.c` replaces the numerical part of Halo 3925's
 `56670..566DE` spatial query with a typed traversal. An experimental guarded
 runtime now connects it to the existing guest hook and worker pool. It is
-**disabled by default and uninstalled**; there is no live unlock or hardware update.
+**disabled by default and uninstalled**; there is no live unlock. A separate
+[original-query diagnostic](query-work-census-20260916.md) is now installed and
+measured on hardware; that executable does not contain this adapter.
 The [earlier guarded adapter](worker-query-adapter-20260916.md) remains off.
 This is a candidate for reducing measured world/light preparation, not a
 demonstrated frame-rate improvement.
@@ -364,12 +366,16 @@ proof; conservative invalidation remains in place.
 2. **Add controlled measurement and deployment.** Admission and publication now
    pass the actual-pool tests above. Keep the guard held, add an owner-side
    OFF/ON/OFF selector at drained boundaries, and validate the complete private
-   game build before considering an update. The current hardware remains unchanged.
+   game build before considering an update. The current hardware contains only
+   the original-query diagnostic, not the typed adapter.
 3. **Measure real query work and frame time.** The new
    [original-query census](query-work-census-20260916.md) records per-worker
-   result counts and budget deltas; its physical run remains pending. Obtain
-   those distributions before choosing an eligibility rule or restructuring the whole
-   call boundary. Compare end-to-end guard occupancy and hardware frame time,
+   result counts and budget deltas. Its first native-resolution valley run
+   finds 79.5% of calls return 1–3 clusters; the 8–15 cluster bucket holds 10.3%
+   of calls and 57.3% of counted backedges. Repeat in other views and establish
+   an inexpensive eligibility rule before enabling the adapter. Output size
+   alone is not an entry-time predicate or a CPU-time measurement. Compare
+   end-to-end guard occupancy and hardware frame time,
    then exercise combat, driving and campaign BSP transitions. Even the complete
    synthetic instruction reduction is insufficient to retain a runtime change
    or claim stable 20 FPS.

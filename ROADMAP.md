@@ -150,8 +150,14 @@ not a physical FPS improvement.
 The [original query workload census](docs/query-work-census-20260916.md) now
 extends diagnostic 37 with per-worker prefix result sizes, backedges and guard
 depth. Full-state, exact counter, concurrency and report/controller checks pass.
-It preserves the original query and is Off outside diagnostics. Physical workload
-distribution and observer overhead still require a connected Vita.
+It preserves the original query and is Off outside diagnostics. The diagnostic
+is now installed and boot-confirmed. One native-resolution Blood Gulch valley
+trial records 15,483 worker queries in 120 frames: 79.5% return 1–3 clusters,
+while 10.3% return 8–15 and account for 57.3% of loop backedges. Observer
+Off/On/Off is 9.345/9.084/9.350 FPS, about 2.9% added frame time while counting.
+This guides selective acceleration; backedges are not CPU-time shares. The
+typed adapter remains uninstalled and needs a cheap eligibility rule plus the
+source-lifetime audit before hardware deployment.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)
