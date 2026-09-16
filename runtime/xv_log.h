@@ -26,6 +26,8 @@ typedef struct {
     int error, startup_error;
     uint64_t accepted, written, synced, accepted_bytes, written_bytes, synced_bytes;
     uint64_t completed_report, failed_sequence;
+    /* Console offset ends at a wholly accepted call; a negative result gives
+     * no count within that failed call. File offset includes partial writes. */
     unsigned failed_console_offset, failed_file_offset;
     uint64_t pending_report, pending_captured_us;
     unsigned pending_frame, pending_chunk, pending_length;
@@ -38,8 +40,9 @@ void xv_log_get_status(xv_log_status *out);
  * alive for diagnosis/retry. Repeated successful shutdown is harmless. */
 int xv_log_flush_wait(unsigned timeout_us);
 int xv_log_shutdown(unsigned timeout_us);
-/* Explicit retry resumes a failed periodic chunk at its exact saved offsets;
- * it cannot recover ordinary immediate bytes already rejected by the sink. */
+/* Explicit retry resumes at the saved file byte and console chunk boundaries;
+ * it cannot recover ordinary immediate bytes already rejected by the sink or
+ * prove how much of a failed console call was displayed. */
 int xv_log_retry(void);
 /* Always bypass report buffering; console evidence precedes any file wait. */
 void xv_log_criticalf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

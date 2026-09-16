@@ -16,6 +16,10 @@ static unsigned reports_started,reports_ended;
 static int report_active;
 int xv_log_report_begin(void)
 { assert(!report_active);report_active=1;reports_started++;return 1; }
+int xv_log_report_begin_frame(unsigned frame)
+{ (void)frame;return xv_log_report_begin(); }
+void xv_log_get_status(xv_log_status *out)
+{ memset(out,0,sizeof *out); }
 void xv_log_report_end(void)
 { assert(report_active);report_active=0;reports_ended++; }
 void xv_settings_snapshot(xv_dash_graphics_view *view)

@@ -7,7 +7,7 @@
 
 static char console_text[131072], file_text[131072];
 static unsigned console_n, file_n, writes, locks, unlocks, short_limit;
-static int held, fail_write, zero_write;
+static int held, fail_write, zero_write, console_status=-1;
 static SceUID caller=100;
 static unsigned syncs;
 
@@ -19,7 +19,8 @@ int sceClibPrintf(const char *fmt, ...)
     va_list ap; va_start(ap, fmt);
     int n = vsnprintf(console_text + console_n, sizeof console_text - console_n, fmt, ap);
     va_end(ap);
-    assert(n >= 0 && n <= 511); console_n += (unsigned)n; return n;
+    assert(n >= 0 && n <= 511); console_n += (unsigned)n;
+    return console_status>=0 ? console_status : n;
 }
 SceSSize sceIoWrite(SceUID fd, const void *text, SceSize size)
 {
@@ -48,6 +49,7 @@ static void reset(void)
 {
     console_n = file_n = writes = locks = unlocks = short_limit = 0;
     held = fail_write = zero_write = 0; g_fd = 10; g_mtx = 20; g_init=0; g_immediate_error=0;
+    console_status=-1;
     assert(!g_report_owner && !g_report_used); caller=100; syncs=0;
     memset(console_text, 0, sizeof console_text); memset(file_text, 0, sizeof file_text);
 }
@@ -59,6 +61,17 @@ int main(void)
     assert(writes == 1 && locks == 1 && unlocks == 1 && !held);
     assert(console_n == sizeof report && file_n == sizeof report);
     assert(!memcmp(report, file_text, sizeof report) && !memcmp(report, console_text, sizeof report));
+    /* Successful console statuses are not partial-byte counts, even with
+     * the async implementation compiled out. Check below/above chunk size. */
+    const int statuses[]={0,1,2048};
+    for(unsigned i=0;i<sizeof statuses/sizeof statuses[0];i++) {
+        reset();console_status=statuses[i];
+        assert(xv_log_report_begin_frame(1));xv_log_write(report,1024);xv_log_report_end();
+        assert(xv_log_shutdown(1000)==XV_LOG_OK);
+        xv_log_status s;xv_log_get_status(&s);assert(!s.error && !s.accepted);
+        assert(console_n==1024 && file_n==1024);
+        assert(!memcmp(report,file_text,1024) && !memcmp(report,console_text,1024));
+    }
     reset(); short_limit = 37; xv_log_write(report, sizeof report);
     assert(writes == (sizeof report + 36) / 37 && locks == 1 && unlocks == 1);
     assert(file_n == sizeof report && !memcmp(report, file_text, sizeof report));
