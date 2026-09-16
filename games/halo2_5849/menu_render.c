@@ -370,9 +370,9 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
                     used += (size_t)snprintf(tex + used, sizeof tex - used, " t%u=%02X/%ux%u@%08X%s", u, code, tw, th,
                                               s->setup[(0x1B00 + u * 64) / 4], rs.tex[u].texels ? "" : "!");
             }
-            xv_logf("[h2/menu-render] fullscreen draw=%llu prim=%u color=%08X blend=%d/%04X/%04X/%04X stages=%u final_abcd=%08X final_efg=%08X%s\n",
+            xv_logf("[h2/menu-render] fullscreen draw=%llu prim=%u color=%08X blend=%d/%04X/%04X/%04X stages=%u final_abcd=%08X final_efg=%08X final_c0=%08X final_c1=%08X%s\n",
                     (unsigned long long)drawn, r->primitive, c->color_offset, rs.blend, rs.sfactor, rs.dfactor, rs.equation,
-                    cb.stages, cb.final_abcd, cb.final_efg, tex);
+                    cb.stages, cb.final_abcd, cb.final_efg, cb.final_factor0, cb.final_factor1, tex);
             for (unsigned i = 0; i < cb.stages && i < 8; ++i)
                 xv_logf("[h2/menu-render]   stage%u rgb_in=%08X rgb_out=%08X alpha_in=%08X alpha_out=%08X c0=%08X c1=%08X\n",
                         i, cb.rgb_in[i], cb.rgb_out[i], cb.alpha_in[i], cb.alpha_out[i], cb.factor0[i], cb.factor1[i]);
@@ -381,6 +381,45 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
                     g_verts[0].uv[0][0], g_verts[0].uv[0][1], g_verts[0].uv[1][0], g_verts[0].uv[1][1],
                     g_verts[0].uv[2][0], g_verts[0].uv[2][1], g_verts[0].uv[3][0], g_verts[0].uv[3][1]);
             ++fullscreen_dumps;
+        }
+    }
+    /* Shader inventory for the GXM backend: every distinct (vertex program, combiner)
+     * pair the menu draws with is logged once and its microcode dumped privately, so
+     * the offline pipeline (tools/ps_pipeline.py + shadercomp) can produce the .gxp set. */
+    {
+        static uint64_t seen_vp[256], seen_pair[512];
+        static unsigned n_vp, n_pair;
+        uint64_t hv = 0xCBF29CE484222325ull ^ s->program_start, hp = 0x84222325CBF29CE4ull ^ cb.stages;
+        for (uint32_t i = 0; i < s->program_load && i < 136; ++i)
+            for (unsigned k = 0; k < 4; ++k) { hv ^= s->program[i][k]; hv *= 0x100000001B3ull; }
+        for (unsigned i = 0; i < cb.stages && i < 8; ++i) {
+            uint32_t w[4] = {cb.rgb_in[i], cb.rgb_out[i], cb.alpha_in[i], cb.alpha_out[i]};
+            for (unsigned k = 0; k < 4; ++k) { hp ^= w[k]; hp *= 0x100000001B3ull; }
+        }
+        hp ^= cb.final_abcd; hp *= 0x100000001B3ull; hp ^= cb.final_efg; hp *= 0x100000001B3ull;
+        hp ^= s->setup[0x1E70 / 4]; hp *= 0x100000001B3ull;          /* shader stage programs */
+        uint64_t pair = hv * 0x9E3779B97F4A7C15ull ^ hp;
+        unsigned i;
+        for (i = 0; i < n_pair && seen_pair[i] != pair; ++i) {}
+        if (i == n_pair && n_pair < 512) {
+            seen_pair[n_pair++] = pair;
+            unsigned j;
+            for (j = 0; j < n_vp && seen_vp[j] != hv; ++j) {}
+            if (j == n_vp && n_vp < 256) {
+                seen_vp[n_vp++] = hv;
+                char path[96];
+                snprintf(path, sizeof path, "ux0:data/xita-halo2/menu-vp-%016llx.bin", (unsigned long long)hv);
+                FILE *fp = fopen(path, "wb");
+                if (fp) { fwrite(&s->program_start, 4, 1, fp); fwrite(&s->program_load, 4, 1, fp);
+                          fwrite(s->program, 16, s->program_load < 136 ? s->program_load : 136, fp); fclose(fp); }
+            }
+            char cw[400]; size_t used = 0;
+            for (unsigned k = 0; k < cb.stages && k < 8; ++k)
+                used += (size_t)snprintf(cw + used, sizeof cw - used, " %08X/%08X/%08X/%08X/%08X/%08X", cb.rgb_in[k], cb.rgb_out[k],
+                                         cb.alpha_in[k], cb.alpha_out[k], cb.factor0[k], cb.factor1[k]);
+            xv_logf("[h2/menu-shader] pair#%u vp=%016llx ps=%016llx prim=%u vp_len=%u stages=%u final=%08X/%08X/%08X/%08X stagectl=%08X tex=%X%s\n",
+                    n_pair, (unsigned long long)hv, (unsigned long long)hp, r->primitive, s->program_load, cb.stages,
+                    cb.final_abcd, cb.final_efg, cb.final_factor0, cb.final_factor1, s->setup[0x1E70 / 4], cb.tex_used, cw);
         }
     }
     ++drawn;
