@@ -11,6 +11,7 @@ static unsigned sampled[2], peeked[2], front_contact;
 static unsigned settings_buttons;
 static int settings_capture;
 static uint32_t remote_buttons;
+static unsigned controller_peeks, directory_opens;
 void xv_remote_pad(uint32_t *buttons,uint8_t *lx,uint8_t *ly,uint8_t *rx,uint8_t *ry)
 {(void)lx;(void)ly;(void)rx;(void)ry;if(remote_buttons)*buttons=remote_buttons;}
 SceUInt64 sceKernelGetProcessTimeWide(void) {return 1000000;}
@@ -22,7 +23,7 @@ void xv_benchmark_optimizations(int enabled) { optimization=enabled; }
 uint32_t xv_guest_r16(uint32_t a) { return X_M16(a); }
 unsigned xd3d_pad_frame(void) { return 1; }
 int sceCtrlSetSamplingMode(SceCtrlPadInputMode m) { return 0; }
-int sceCtrlPeekBufferPositive(int port, SceCtrlData *d, int n) { *d=controller;return 1; }
+int sceCtrlPeekBufferPositive(int port, SceCtrlData *d, int n) { controller_peeks++;*d=controller;return 1; }
 int sceTouchSetSamplingState(SceUInt32 port, SceTouchSamplingState state) { sampled[port]++;return 0; }
 int sceTouchPeek(SceUInt32 port, SceTouchData *d, SceUInt32 n) {
     peeked[port]++;memset(d,0,sizeof *d);
@@ -36,13 +37,15 @@ int sceIoRead(SceUID fd, void *p, SceSize n) { abort(); }
 int sceIoWrite(SceUID fd, const void *p, SceSize n) { abort(); }
 int sceIoClose(SceUID fd) { abort(); }
 SceOff sceIoLseek(SceUID fd, SceOff offset, int whence) { abort(); }
-SceUID sceIoDopen(const char *p) { return -1; }
+SceUID sceIoDopen(const char *p) { directory_opens++;return -1; }
 int sceIoDread(SceUID fd, SceIoDirent *e) { abort(); }
 int sceIoDclose(SceUID fd) { abort(); }
 
 int main(int argc, char **argv)
 {
-    int rear=argc>1;
+    int rear=argc>1&&!strcmp(argv[1],"rear");
+    int shot=argc>1&&!strcmp(argv[1],"shot");
+    if(shot)setenv("XV_SHOT_DUMP","1",1);else unsetenv("XV_SHOT_DUMP");
     if(rear)setenv("XV_REAR_TOUCH","1",1);else unsetenv("XV_REAR_TOUCH");
     g_xram=calloc(1,4*1024*1024);g_xpt=calloc(1<<20,4);
     for(unsigned i=0;i<1024;i++)g_xpt[i]=i*4096;
@@ -93,6 +96,17 @@ int main(int argc, char **argv)
     remote_buttons=SCE_CTRL_LTRIGGER|SCE_CTRL_RTRIGGER|SCE_CTRL_SQUARE;
     xk_os_pad_poll(&p);assert(xv_benchmark_step(7,480,1,view)==480);
     xv_benchmark_applied(7,480);assert(!xv_benchmark_active()&&optimization==-1);
+    if(shot) {
+        assert(xv_diag_poll_available(XV_DIAG_SHOT));
+        remote_buttons=0;controller.buttons=SCE_CTRL_CROSS;
+        unsigned peeks=controller_peeks,dirs=directory_opens;
+        xv_diag_poll_override(XV_DIAG_SHOT,1);
+        for(unsigned i=0;i<180;i++) {xk_os_pad_poll(&p);assert(p.analog[0]==255&&p.connected);}
+        assert(controller_peeks==peeks+180&&directory_opens==dirs);
+        xv_diag_poll_override(XV_DIAG_SHOT,-1);
+        for(unsigned i=0;i<180;i++) {xk_os_pad_poll(&p);assert(p.analog[0]==255);}
+        assert(controller_peeks==peeks+360&&directory_opens==dirs+1);
+    }
     free(g_xpt);free(g_xram);
     puts("PASS: actual Vita input, unpaused multiplayer menus, paused campaign, main menu, gameplay shortcuts and independent rear/front touch");
     return 0;

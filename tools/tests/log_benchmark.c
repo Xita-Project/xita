@@ -30,7 +30,7 @@ static void advance_to_on(void)
 int main(void)
 {
 #ifdef TEST_NO_LOG_API
- reset(0);xv_benchmark_remote_poll(1);assert(xv_benchmark_remote_request(XV_BENCH_LOG_WRITER)<0);assert(!inits&&!sets&&!b.active);puts("PASS: absent logger APIs reject without initialization");
+ reset(0);xv_benchmark_remote_poll(1);assert(xv_benchmark_remote_request(XV_BENCH_DIAGNOSTIC_POLL)<0);assert(xv_benchmark_remote_request(XV_BENCH_DIAGNOSTIC_HIST)<0);assert(xv_benchmark_remote_request(XV_BENCH_LOG_WRITER)<0);assert(!inits&&!sets&&!b.active);puts("PASS: absent logger APIs reject without initialization");
 #else
  for(int initial=0;initial<=1;initial++) {
   reset(initial);begin();assert(inits==1&&mode==0);

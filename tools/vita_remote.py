@@ -14,14 +14,15 @@ import zipfile
 
 BUTTONS = dict(select=1, start=8, up=16, right=32, down=64, left=128,
                l=256, r=512, triangle=4096, circle=8192, cross=16384, square=32768)
-BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer")
+BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer","diagnostic-shot","diagnostic-hist")
 RESULT = re.compile(r"\[([a-z-]+-compare|resolution-test)\] result (?:off-before|544-before) ([\d.]+) (?:on|360) ([\d.]+) (?:off-after|544-after) ([\d.]+) fps comparable-view ([01])")
 RESTORED = re.compile(rb"\[(?:[a-z-]+-compare|resolution-test)\] restored [^\n]*\n")
 
 
 PACING = re.compile(r"\[log-writer-pacing\] phase ([123]) samples (\d+) sum-us (\d+) min/p50/p95/p99/p999/max-us (\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+) over50/100/150/200ms (\d+)/(\d+)/(\d+)/(\d+)")
 
-def parse_log_pacing(text):
+def parse_log_pacing(text, diagnostic=False):
+    if diagnostic:text=text.replace("[diagnostic-poll-pacing]","[log-writer-pacing]")
     rows=[]
     for fields in PACING.findall(text):
         phase,n,total,*values=map(int,fields)
@@ -34,6 +35,27 @@ def parse_log_pacing(text):
     if sorted(row['phase'] for row in rows)!=[1,2,3]:
         raise RuntimeError("Expected one complete pacing summary for each logger arm")
     return sorted(rows,key=lambda row:row['phase'])
+
+
+def parse_diagnostic_polls(text,kind):
+    pattern=re.compile(r"\[diagnostic-poll\] phase ([123]) path (shot|hist) polls (\d+) due (\d+) skipped (\d+) runs (\d+) us (\d+) max-us (\d+) max-frame (\d+) entries (\d+) errors (\d+) triggers (\d+)")
+    rows=[]
+    for phase,path,*values in pattern.findall(text):
+        row=dict(zip(("polls","due","skipped","runs","us","max_us","max_frame","entries","errors","triggers"),map(int,values)))
+        row.update(phase=int(phase),path=path)
+        if row['errors'] or row['triggers'] or row['due']!=row['skipped']+row['runs'] or row['max_us']>row['us']:
+            raise RuntimeError("Invalid diagnostic polling attribution")
+        selected=path==kind.removeprefix('diagnostic-')
+        if selected and (not row['due'] or (int(phase)==2 and row['runs']) or (int(phase)!=2 and row['skipped'])):
+            raise RuntimeError("Selected diagnostic poll did not follow baseline/suppressed/baseline")
+        if not selected and row['skipped']:raise RuntimeError("Unselected diagnostic poll was suppressed")
+        rows.append(row)
+    if sorted((r['phase'],r['path']) for r in rows)!=[(p,s) for p in (1,2,3) for s in ('hist','shot')]:
+        raise RuntimeError("Missing diagnostic polling counters")
+    summaries=re.findall(r"\[diagnostic-poll\] phase ([123]) frames (\d+) event-overflow (\d+) valid ([01])",text)
+    if sorted(summaries)!=[(str(p),'1800','0','1') for p in (1,2,3)]:
+        raise RuntimeError("Incomplete diagnostic polling frame attribution")
+    return rows
 
 
 class Client:
@@ -202,7 +224,8 @@ def upload_update(client, package, apply=False, wait=False):
 
 
 def benchmark(client, out, runs, timeout, kind=None):
-    maximum_timeout=1800 if kind=="log-writer" else 600
+    long_test=kind in ("log-writer","diagnostic-shot","diagnostic-hist")
+    maximum_timeout=1800 if long_test else 600
     if not 1 <= runs <= 10 or not 30 <= timeout <= maximum_timeout:
         raise ValueError(f"Use 1–10 trials and a 30–{maximum_timeout} second timeout per trial")
     if kind is not None and kind not in BENCHMARK_KINDS:
@@ -220,7 +243,7 @@ def benchmark(client, out, runs, timeout, kind=None):
         log_offset=(out/"before.log").stat().st_size
         prior = len(RESULT.findall((out / "before.log").read_text(errors="replace")))
         for i in range(runs):
-            if kind=="log-writer":client.lease(min(3600,timeout+60))
+            if long_test:client.lease(min(3600,timeout+60))
             if client.status()["benchmark"]:
                 raise RuntimeError("Unexpected active benchmark before trial")
             if kind is None:
@@ -263,6 +286,14 @@ def benchmark(client, out, runs, timeout, kind=None):
             if kind=="log-writer":
                 trial["pacing"]=parse_log_pacing(logfile.read_bytes()[trial_offset:].decode(errors="replace"))
                 trial["note"]="1800 FPS intervals per arm include 30 periodic reports; 1799 pacing intervals omit the phase-marker interval and contain 29 or 30 reports, with matching alignment across arms. Nearest-rank quantiles. Not a proof against rare stalls."
+            if kind in ("diagnostic-shot","diagnostic-hist"):
+                fresh=logfile.read_bytes()[trial_offset:].decode(errors="replace")
+                trial["pacing"]=parse_log_pacing(fresh,diagnostic=True)
+                trial["polls"]=parse_diagnostic_polls(fresh,kind)
+                trial["baseline_before_fps"]=trial.pop("off_before_fps")
+                trial["suppressed_fps"]=trial.pop("on_fps")
+                trial["baseline_after_fps"]=trial.pop("off_after_fps")
+                trial["note"]="Baseline/suppressed/baseline for one diagnostic poll; input and screenshot capture unchanged. Poll elapsed includes scheduling. Invalid scans/trace triggers invalidate the comparison."
             if kind=="guest-phases":
                 trial["diagnostic"]=True
                 trial["note"]="Timing is enabled only in the middle arm. This measures profiling overhead, not an optimization gain; already-open parent scopes are absent."
@@ -314,7 +345,7 @@ def main():
         pad.add_argument("--" + axis, type=int, default=128)
     bench = commands.add_parser("benchmark")
     bench.add_argument("output", type=Path); bench.add_argument("--runs", type=int, default=3)
-    bench.add_argument("--timeout", type=int, help="seconds per trial; default 1200 for log-writer, 180 otherwise")
+    bench.add_argument("--timeout", type=int, help="seconds per trial; default 1200 for logger/diagnostic polls, 180 otherwise")
     bench.add_argument("--kind", choices=BENCHMARK_KINDS, help="select a test for this run without changing saved settings")
     args = parser.parse_args()
     if args.command == "pair":
@@ -353,7 +384,7 @@ def main():
         client.hold(sum(BUTTONS[b] for b in set(args.buttons)), args.duration,
                     **{a: getattr(args, a) for a in ("lx", "ly", "rx", "ry")})
     elif args.command == "benchmark":
-        benchmark(client, args.output, args.runs, args.timeout if args.timeout is not None else (1200 if args.kind=="log-writer" else 180),args.kind)
+        benchmark(client, args.output, args.runs, args.timeout if args.timeout is not None else (1200 if args.kind in ("log-writer","diagnostic-shot","diagnostic-hist") else 180),args.kind)
 
 
 if __name__ == "__main__":

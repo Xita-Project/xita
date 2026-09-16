@@ -1250,8 +1250,8 @@ void xv_benchmark_optimizations(int enabled)
     extern void xv_flare_barrier(unsigned) __attribute__((weak));
     extern void xv_flare_defer_override(int) __attribute__((weak));
     xv_present_drain();
-    /* Benchmark owns checked logger transitions after this pump drain. */
-    if (xv_benchmark_compare_log_writer())return;
+    /* Benchmark owns logger/poll controls after this pump drain. */
+    if (xv_benchmark_compare_log_writer()||xv_benchmark_compare_diagnostic_poll())return;
     if (xv_benchmark_compare_polygon_edge()) {
         extern void xv_native_polygon_edge_override(int) __attribute__((weak));
         if(xv_native_polygon_edge_override)xv_native_polygon_edge_override(enabled);

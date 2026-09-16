@@ -10,7 +10,9 @@ enum {
     XV_BENCH_GUEST_PHASES, XV_BENCH_PREP_BUNDLE, XV_BENCH_OBJECT_JOBS, XV_BENCH_VERTEX_PREPARE,
     XV_BENCH_DEPTH_PREPARE, XV_BENCH_OBJECT_MATH, XV_BENCH_OBJECT_LOCK, XV_BENCH_OBJECT_WAIT, XV_BENCH_OBJECT_POINT,
     XV_BENCH_MODEL_HIERARCHY, XV_BENCH_OBJECT_QUAT, XV_BENCH_BLEND_REPLACE, XV_BENCH_INDEX_REUSE,
-    XV_BENCH_OBJECT_POSE, XV_BENCH_MATERIAL_PACKET, XV_BENCH_POLYGON_EDGE, XV_BENCH_LOG_WRITER
+    XV_BENCH_OBJECT_POSE, XV_BENCH_MATERIAL_PACKET, XV_BENCH_POLYGON_EDGE, XV_BENCH_LOG_WRITER,
+    /* 36/37 reserved for independent clip/census work. One family, two paths. */
+    XV_BENCH_DIAGNOSTIC_POLL=38, XV_BENCH_DIAGNOSTIC_HIST=38|256
 };
 /* Network admission only publishes a request. The ordinary guest input owner
  * validates first-person control and consumes it before the present boundary. */
@@ -50,6 +52,7 @@ int xv_benchmark_compare_object_pose(void);
 int xv_benchmark_compare_material_packet(void);
 int xv_benchmark_compare_polygon_edge(void);
 int xv_benchmark_compare_log_writer(void);
+int xv_benchmark_compare_diagnostic_poll(void);
 int xv_benchmark_compare_texture_state(void);
 int xv_benchmark_compare_model_palette(void);
 int xv_benchmark_compare_vertex_worker(void);

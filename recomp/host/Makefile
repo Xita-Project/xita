@@ -66,10 +66,11 @@ build/vertex_shader_test: Makefile vertex_shader_test.c ../xv_x86rt.c ../kernel/
 test-input: build/vita_input_test
 	./build/vita_input_test
 	./build/vita_input_test rear
+	./build/vita_input_test shot
 
-build/vita_input_test: vita_input_test.c ../kernel/xk_os_vita.c ../kernel/xk.h ../../runtime/xv_benchmark.c ../../runtime/xv_remote.h
+build/vita_input_test: Makefile ../kernel/xk_diag_poll.c ../kernel/xk_diag_poll.h vita_input_test.c ../kernel/xk_os_vita.c ../kernel/xk.h ../../runtime/xv_benchmark.c ../../runtime/xv_remote.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include vita_input_test.c ../../runtime/xv_benchmark.c -Wl,--gc-sections -lm -o $@
+	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include -D__vita__ vita_input_test.c ../kernel/xk_diag_poll.c ../../runtime/xv_benchmark.c -Wl,--gc-sections -lm -o $@
 
 .PHONY: test-remote
 test-remote:
@@ -580,3 +581,7 @@ test-index-reuse-benchmark: build/resolution_benchmark_test build/no_index_reuse
 build/no_index_reuse_benchmark_test: resolution_benchmark_test.c ../../runtime/xv_benchmark.c ../../runtime/xv_benchmark.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -DTEST_NO_INDEX_REUSE resolution_benchmark_test.c -lm -o $@
+
+.PHONY: test-diagnostic-poll
+test-diagnostic-poll:
+	$(PYTHON) ../../tools/test_diagnostic_poll.py

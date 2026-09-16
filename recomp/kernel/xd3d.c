@@ -1,3 +1,4 @@
+#include "xk_diag_poll.h"
 /*
  * xd3d.c - Xbox D3D8 (XDK 3925) object model + default "null" renderer, and a minimal DirectSound.
  *
@@ -144,8 +145,9 @@ static struct { uint32_t m; unsigned n; uint32_t last; } g_hm[128]; static unsig
 static int hist_level_rel = -1, hist_level_base = -1;
 static void hist_level_track(void)
 {
-    {   /* touch ux0:data/xita/hist.now (or the host data dir equivalent) to trace the next frame on demand */
-        static unsigned tick; if ((++tick & 15) == 0) { FILE *f = fopen("ux0:data/xita/hist.now", "rb"); if (f) { fclose(f); remove("ux0:data/xita/hist.now"); g_hist_frame = (int)g_dev.frame + 1; D3DLOG("hist: on-demand trace of frame %d\n", g_hist_frame); } }
+    if(xv_diag_poll_hist()) {
+        g_hist_frame=(int)g_dev.frame+1;
+        D3DLOG("hist: on-demand trace of frame %d\n",g_hist_frame);
     }
     {   /* XV_POKE_F32=<va>:<float>[,<va>:<float>]: write guest floats every frame (experiments on loaded tags) */
         static int pinit; static uint32_t pva[8]; static float pval[8]; static int pn;
