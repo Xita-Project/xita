@@ -125,9 +125,21 @@ or proof that the outstanding GPU/gameplay crashes are resolved.
 
 Retain the measured report policy in the next private candidate using both
 `XV_PROFILE_ASYNC_REPORT=1 XV_PROFILE_ASYNC_REPORT_DEFAULT=1` build options.
-Startup-ON boot and updater shutdown still need physical verification: this
-comparison created the idle writer after entering gameplay, whereas startup
+The comparison created the idle writer after entering gameplay, whereas startup
 creates it before GXM/dashboard initialization. Ordinary builds remain unchanged.
+
+The follow-up runtime `575ecdbca2b516cf34c47f299637ce81d0c69a8e78ed7737bc47ca121b2a643c`
+is installed and boot-confirmed in physical slot B with this startup selection.
+The preserved A slot remains intact. All 1,588 package members retain the
+existing contract; only the game executable and boot digest change. Startup
+reports RUNNING/ON without an error, the normal Split Screen menus load Blood
+Gulch, and a charged plasma shot lowers energy from 100 to 89 without a STOP.
+At that capture, all 306 accepted chunks and 552,803 bytes are written, with
+an empty queue and no logged error. They have not been explicitly synced by a
+boundary yet; ordinary successful writes are not a durability claim. Physical
+updater shutdown from this startup-ON mode remains to be tested on the next
+update. The independent screenshot-poll comparison holds reporting ON in all
+arms; it does not change this startup policy.
 
 Private receipts, complete logs, screenshots and analysis are in
 `engine-restructure-20260914T2300Z/physical-async-priority/`. The logger revision

@@ -88,9 +88,10 @@ FPS synchronously versus 9.83–9.84 FPS with background reports, saving about
 1.77 ms/frame. P99 falls from roughly 189–194 ms to 122–124 ms and the incidence
 of frames over 150 ms falls about 85%. Median frames remain near 99.5 ms;
 this is a periodic-hitch improvement, not stable 20 FPS. The logger fully drains
-without errors and restores its original mode. The next private build will
-retain this policy while ordinary builds remain opt-in; startup and updater
-shutdown still need physical verification. Independent comparisons of
+without errors and restores its original mode. The installed private follow-up
+retains this policy and loads Blood Gulch with a successful charged plasma shot;
+ordinary builds remain opt-in. Updater shutdown from startup-ON reporting still
+needs physical verification. Independent comparisons of
 [diagnostic filesystem polling](docs/diagnostic-poll-20260916.md) are ready,
 without changing controller reads, screenshots or default polling behavior. Official
 [MCC reference tags](docs/mcc-mod-tools-reference.md) have been privately
