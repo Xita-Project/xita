@@ -19,6 +19,14 @@ earlier visibility-query completion signal worked there, but the original query
 wait was already zero and FPS did not improve. Different views have different
 limits; do not label the entire game exclusively CPU-bound or GPU-bound.
 
+The [guarded depth-store experiment](backbuffer-depth-store-20260916.md#final-tail-hardware-comparison)
+now admits one final backbuffer continuation per frame. Two native red-base
+comparisons show small 1.2–1.4 ms paired savings; a different native view along
+the valley is flat at 13.19/13.13/13.21 FPS. It remains Off. This narrows the
+evidence for that particular store change; it does not rule out other attachment
+traffic, fragment work or CPU preparation. Compatible fragment simplification
+is the next rendering diagnostic.
+
 | Order | Cheap diagnostic | What a positive result supports | Limits / risk |
 |---|---|---|---|
 | 1 | Repeat fixed-camera native/480p/360p/native, with identical draws and clocks | Lower pixel workload is on the critical path | Pixel count falls faster than FPS rises when CPU, vertex or fixed costs remain. No change alone does not prove simulation is the bottleneck. |

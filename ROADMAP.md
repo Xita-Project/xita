@@ -35,7 +35,11 @@ and built for Vita. The first 360p blue-base trial is flat at 19.52/19.47/19.71
 FPS: only first/final backbuffer scenes occur, with zero intermediate stores
 eligible. The follow-up proves the final overlay/settings tail as well, while
 preserving loads, writable passes, first scenes and query lifetime. It remains
-disabled pending a positive physical comparison.
+disabled: hardware counters confirm one eligible final continuation/frame,
+but two native red-base trials show only small 1.2–1.4 ms paired savings and the
+native valley comparison is flat at 13.19/13.13/13.21 FPS. This does not establish
+a general gain. Next isolate fragment work while retaining depth/alpha coverage;
+visual, combat and driving acceptance is still pending.
 
 **Active objective (September 15):** restructure costly Halo CE engine and rendering
 work into efficient native routines and independent worker jobs until sustained

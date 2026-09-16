@@ -85,8 +85,46 @@ passed the mesh depth/stencil/shader checks. The unproved external UI tail was
 the remaining exclusion. This result supplies the reason for the bounded final
 tail extension above; it establishes neither bandwidth savings nor an FPS gain.
 
-Physical acceptance still requires eligible-scene counters, matched-camera
-native-resolution comparisons, world/HUD/effect images and combat/driving checks.
-Leave the candidate Off unless that evidence supports enabling it. Private
-validation receipts are in `validation/engine-restructure-20260914T2300Z/depth-store-validation/`
+## Final-tail hardware comparison
+
+The follow-up runtime `c999c0120bf47608a2cadcacb6a9872bfece819e3eed3bba691f1c24ab670095`
+was installed and its running hash verified. It now admits one final backbuffer
+scene per frame: complete 60-frame On reports show 60 first scenes retained and
+60 final continuations accepted, with no intermediate continuations. This
+confirms that the experiment changes the descriptor; it does not prove that the
+driver avoids a physical store.
+
+| Fixed view | Resolution | Off before | On | Off after |
+| --- | --- | ---: | ---: | ---: |
+| Red-base entrance | 640×360 | 20.481 | 20.700 | 20.412 |
+| Same entrance, trial 1 | 960×544 | 15.416 | 15.930 | 15.862 |
+| Same entrance, trial 2 | 960×544 | 15.718 | 15.900 | 15.409 |
+| Looking along the valley from red base | 960×544 | 13.193 | 13.126 | 13.209 |
+
+Values are FPS, with 60 settling and 120 measured frames per arm. All camera
+checks passed. Relative to the mean of the two baseline frame times, the entrance
+trials save 0.600 ms at 360p and 1.180/1.367 ms at native resolution. The valley
+trial instead costs 0.430 ms. Baseline variation limits the small entrance result;
+there is no demonstrated valley improvement or general performance gain.
+
+The entrance camera is `(85.2646, -157.7749, 0.6005)`, direction
+`(0.93712, -0.34907, 0)`, with 97 HLE draws and eight BSP draws/frame. The valley
+camera is `(85.2245, -157.7518, 0.6005)`, direction
+`(-0.77306, 0.63437, 0)`, with 128 HLE draws and 13 BSP draws/frame. Texture detail
+remains Low, material quality Original, temporary decals On, and
+cosmetics/reflections/object shadows Off. These are native-resolution trials,
+not a fully Original-graphics baseline or the user's exact earlier valley view.
+
+No capture or bulk log reads occur inside the timed arms; network status polling
+is the same in every arm. The remote interface prohibits benchmark screenshots,
+so the saved before/after images are Off-state checks, not visual validation of
+the On state. No new GPU-fault or worker-stop report was found in the comparison
+intervals; this does not establish combat/driving stability.
+
+The candidate remains **Off**. All comparisons restored its original mode, and
+the temporary native-resolution setting was returned to the user's 360p setting.
+The next rendering experiment is compatible fragment simplification while
+retaining geometry, depth/alpha coverage and query behavior. Broader visual and
+combat/driving acceptance remains required before enabling this depth change.
+Private validation receipts are in `validation/engine-restructure-20260914T2300Z/depth-store-validation/`
 and `depth-store-tail-validation/` under the worker-sizing backup directory.
