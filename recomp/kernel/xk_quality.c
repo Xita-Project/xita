@@ -136,15 +136,83 @@ static int cosmetic_particle(const quality_tags *t, uint32_t entry, uint32_t p)
     return strstr(text,"smoke") || strstr(text,"spark") || strstr(text,"dust") || strstr(text,"steam");
 }
 
+static int temporary_decal(const quality_tags *t, uint32_t id)
+{
+    uint32_t p=tag_data(t,id,TAG_GROUP('d','e','c','a'),268);
+    if (!p || X_M16(p+2)==3 || (X_M16(p)&16)) return 0;
+    float life=get_float(p+0x78), upper=get_float(p+0x7c);
+    return isfinite(life) && life>0 && isfinite(upper) && upper>=life && upper<=86400;
+}
+
+/* Remove only optional emitters from freshly loaded effect tags. Retain events,
+ * their timing/locations, and the order of all remaining parts (including
+ * damage, sounds, lights and projectiles). Zero particle lifetimes are NOT an
+ * off switch. Each selected emitter is removed before it allocates anything. */
+static void effect_quality(const quality_tags *t, int decals, int cosmetics)
+{
+    unsigned removed_parts=0, removed_particles=0;
+    for (unsigned i=0;i<t->count;++i) {
+        uint32_t e=t->array+i*32u;
+        uint32_t p=tag_data(t,X_M32(e+12),TAG_GROUP('e','f','f','e'),64);
+        if (!p) continue;
+        unsigned count=X_M32(p+0x34); uint32_t events=X_M32(p+0x38);
+        if (count>32 || !span(t,events,count*68u)) continue;
+        int valid=1;
+        for (unsigned j=0;j<count;++j) {
+            uint32_t event=events+j*68u;
+            unsigned np=X_M32(event+0x2c), nq=X_M32(event+0x38);
+            if (np>32 || nq>32 || (np && !span(t,X_M32(event+0x30),np*104u)) ||
+                (nq && !span(t,X_M32(event+0x3c),nq*232u))) valid=0;
+        }
+        if (!valid) continue; /* no partial mutation of a malformed effect */
+        for (unsigned j=0;j<count;++j) {
+            uint32_t event=events+j*68u;
+            for (unsigned kind=0;kind<2;++kind) {
+                if (kind ? cosmetics : decals) continue;
+                uint32_t header=event+(kind ? 0x38u : 0x2cu);
+                unsigned n=X_M32(header), dst=0, stride=kind ? 232u : 104u;
+                uint32_t list=X_M32(header+4);
+                for (unsigned k=0;k<n;++k) {
+                    uint32_t record=list+k*stride, ref=record+(kind ? 0x54u : 0x18u);
+                    uint32_t id=X_M32(ref+12); int remove=0;
+                    if (kind && X_M32(ref)==TAG_GROUP('p','a','r','t')) {
+                        uint32_t particle=tag_data(t,id,TAG_GROUP('p','a','r','t'),356);
+                        if (particle) remove=cosmetic_particle(t,t->array+(id&0xffffu)*32u,particle);
+                    } else if (!kind && X_M32(ref)==TAG_GROUP('d','e','c','a')) {
+                        remove=temporary_decal(t,id);
+                    }
+                    if (remove) {
+                        if (kind) ++removed_particles; else ++removed_parts;
+                        continue;
+                    }
+                    if (dst!=k) {
+                        uint8_t copy[232]; x_guest_read(copy,record,stride);
+                        x_guest_write(list+dst*stride,copy,stride);
+                    }
+                    ++dst;
+                }
+                X_M32(header)=dst;
+            }
+        }
+    }
+    XK_LOG("[quality] effect emitters removed: %u temporary decals, %u cosmetic particles\n",
+        removed_parts,removed_particles);
+}
+
 void xk_quality_map_read(uint32_t address, uint32_t bytes)
 {
     static int configured, material, glow, particles, decal_seconds, model_detail;
+    static int decals_on, cosmetics_on, reflections_on, shadows_on;
     if (!configured) {
         material = xv_quality_int("XV_MATERIAL_QUALITY",2,0,2);
         glow = xv_quality_int("XV_GLOW_QUALITY",2,0,2);
         particles = xv_quality_int("XV_PARTICLE_QUALITY",2,0,2);
         decal_seconds = xv_quality_int("XV_DECAL_SECONDS",0,0,300);
         model_detail = xv_quality_int("XV_MODEL_DETAIL",2,0,2);
+        decals_on = xv_quality_int("XV_TEMP_DECALS",1,0,1);
+        cosmetics_on = xv_quality_int("XV_COSMETIC_EFFECTS",1,0,1);
+        reflections_on = xv_quality_int("XV_REFLECTIONS",1,0,1);
+        shadows_on = xv_quality_int("XV_OBJECT_SHADOWS",1,0,1);
         configured = 1;
     }
     if (address != TAG_BASE || bytes < 0x28 || bytes > 32u*1024*1024) return;
@@ -156,27 +224,37 @@ void xk_quality_map_read(uint32_t address, uint32_t bytes)
     for (unsigned i = 0; i < t.count; ++i)
         if ((X_M32(t.array+i*32+12)&0xffffu) != i) return;
     model_lod_quality(&t,model_detail);
-    unsigned materials=0,flares=0,shortened=0,decals=0;
+    if (!decals_on || !cosmetics_on) effect_quality(&t,decals_on,cosmetics_on);
+    unsigned materials=0,flares=0,shortened=0,decals=0,shadows=0;
     for (unsigned i = 0; i < t.count; ++i) {
         uint32_t entry=t.array+i*32u, group=X_M32(entry), id=X_M32(entry+12), p;
-        if (material < 2 && group == TAG_GROUP('s','e','n','v') &&
+        if (!shadows_on && (group==TAG_GROUP('o','b','j','e') ||
+            X_M32(entry+4)==TAG_GROUP('o','b','j','e') || X_M32(entry+8)==TAG_GROUP('o','b','j','e')) &&
+            (p=tag_data(&t,id,group,380))) {
+            /* ObjectFlags.does_not_cast_shadow; no bounds/collision changes. */
+            if (!(X_M16(p+2)&1)) { X_M16(p+2)|=1; ++shadows; }
+        }
+        if ((material < 2 || !reflections_on) && group == TAG_GROUP('s','e','n','v') &&
             (p=tag_data(&t,id,group,836))) {
             /* Keep base color, lightmaps, cutout flags, self illumination and
              * diffuse dynamic lighting. These optional maps have valid null
              * paths in the original material builder. */
-            null_bitmap(p+0xb8); null_bitmap(p+0xcc); null_bitmap(p+0xfc);
-            if (!material) {
+            if (material<2) { null_bitmap(p+0xb8); null_bitmap(p+0xcc); null_bitmap(p+0xfc); }
+            if (!material || !reflections_on) {
                 null_bitmap(p+0x324);
-                put_float(p+0x290,0); put_float(p+0x2f4,0); put_float(p+0x2f8,0);
+                put_float(p+0x2f4,0); put_float(p+0x2f8,0);
+            }
+            if (!material) {
+                put_float(p+0x290,0);
                 /* Bump alpha can be a specular mask; keep that interpretation
                  * intact when enabled, otherwise use the engine's flat path. */
                 if (!(X_M16(p+0x28)&2)) null_bitmap(p+0x128);
             }
             ++materials;
-        } else if (material < 2 && group == TAG_GROUP('s','o','s','o') &&
+        } else if ((material < 2 || !reflections_on) && group == TAG_GROUP('s','o','s','o') &&
                    (p=tag_data(&t,id,group,440))) {
-            null_bitmap(p+0xdc);
-            if (!material) {
+            if (material<2) null_bitmap(p+0xdc);
+            if (!material || !reflections_on) {
                 null_bitmap(p+0x164); put_float(p+0x144,0); put_float(p+0x154,0);
             }
             ++materials;
@@ -221,6 +299,8 @@ void xk_quality_map_read(uint32_t address, uint32_t bytes)
     }
     XK_LOG("[quality] loaded tags: materials %u (level %d), flares %u (level %d), cosmetic particles %u (level %d), decal lifetimes %u (cap %d s)\n",
         materials,material,flares,glow,shortened,particles,decals,decal_seconds);
+    XK_LOG("[quality] switches: temporary decals %d, cosmetic effects %d, material reflections %d, object shadows %d (%u tags disabled)\n",
+        decals_on,cosmetics_on,reflections_on,shadows_on,shadows);
 }
 
 typedef struct { uint32_t record, age; } quality_decal;

@@ -9,6 +9,20 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+[~] September 16 [rendering bottleneck experiments](docs/render-bottleneck-plan-20260916.md):
+incorporate the tester/Claude checklist in order: resolution attribution, independent
+visual controls, compatible fragment simplification, then guarded submission
+suppression. Prioritize blended overdraw and attachment traffic alongside measured
+CPU preparation. Record actual pass/draw counts and serial work before large changes;
+unmeasured FPS gains remain unknown.
+
+[~] [Independent visual switches](docs/visual-switches-20260916.md): temporary
+decals, selected cosmetic emitters, environment/model reflections and object
+shadows now have separate On/Off controls. Defaults preserve current visuals;
+changes require relaunch. Host and owned-map sanitizer checks pass; physical
+appearance, gameplay and FPS testing are next. Full-screen bloom remains a
+separate pass-isolation task.
+
 **Active objective (September 15):** restructure costly Halo CE engine and rendering
 work into efficient native routines and independent worker jobs until sustained
 30 FPS is verified on the physical Vita in representative campaign, combat and

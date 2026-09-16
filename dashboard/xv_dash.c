@@ -33,14 +33,16 @@ static const map_info multiplayer[] = {
 };
 enum { FPS, BC_MIPS, PROF, VBLANK, TEX_DETAIL, VOLUME, SENSITIVITY, DEADZONE,
        INVERT_Y, LOOK_CURVE, TOUCH, CPU, TEX_FILTER, MIP_SMOOTH, RESOLUTION,
-       MATERIAL, GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, CPU_CLOCK, EXTENDED_BC, TRIPLE_BUFFER, MODEL_DETAIL, VERTEX_WORKER, VERTEX_REFERENCES, SETTINGS_COUNT };
+       MATERIAL, GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, CPU_CLOCK, EXTENDED_BC, TRIPLE_BUFFER, MODEL_DETAIL, VERTEX_WORKER, VERTEX_REFERENCES,
+       TEMP_DECALS, COSMETIC_EFFECTS, REFLECTIONS, OBJECT_SHADOWS, SETTINGS_COUNT };
 static const char *const keys[] = {"XV_FPS", "XV_BC_MIPS", "XV_PROF", "XV_VBLANK_HZ",
     "XV_TEX_MAXDIM", "XV_VOLUME", "XV_LOOK_SENS", "XV_DEADZONE", "XV_INVERT_Y",
     "XV_LOOK_CURVE", "XV_TOUCH", "XV_CPU", "XV_TEX_FILTER", "XV_MIP_SMOOTH", "XV_RENDER_HEIGHT",
     "XV_MATERIAL_QUALITY", "XV_GLOW_QUALITY", "XV_PARTICLE_QUALITY", "XV_DECAL_SECONDS",
-    "XV_DECAL_LIMIT", "XV_FRAME_CAP", "XV_CPU_MHZ", "XV_EXTENDED_BC", "XV_TRIPLE_BUFFER", "XV_MODEL_DETAIL", "XV_VERTEX_WORKER", "XV_VERTEX_REFERENCES"};
+    "XV_DECAL_LIMIT", "XV_FRAME_CAP", "XV_CPU_MHZ", "XV_EXTENDED_BC", "XV_TRIPLE_BUFFER", "XV_MODEL_DETAIL", "XV_VERTEX_WORKER", "XV_VERTEX_REFERENCES",
+    "XV_TEMP_DECALS", "XV_COSMETIC_EFFECTS", "XV_REFLECTIONS", "XV_OBJECT_SHADOWS"};
 static const int defaults[] = {0, 0, 0, 60, 256, 50, 100, 0, 0, 0, 1, 1, 0, 1, 544,
-    2, 2, 2, 0, 0, 0, 444, 0, 0, 2, 0, 0};
+    2, 2, 2, 0, 0, 0, 444, 0, 0, 2, 0, 0, 1, 1, 1, 1};
 static const int rates[] = {60, 120, 250, 500, 1000};
 static const int texture_caps[] = {64, 128, 256, 512};
 static const int resolutions[] = {360, 400, 480, 544};
@@ -296,18 +298,20 @@ static int content_count(const dash *s)
 
 enum { LAUNCH_VISIBLE_ROWS = 5, LICENSE_PAGE = 6, UPDATE_PAGE = 7, LICENSE_VISIBLE_LINES = 18 };
 static const char *const launch_pages[] = {"LAUNCH GAME", "GRAPHICS", "AUDIO", "CONTROLS", "DISPLAY", "PERFORMANCE", "ABOUT / LICENSE", "UPDATE"};
-static const int launch_keys[][14] = {
+static const int launch_keys[][18] = {
     {-1}, {TEX_DETAIL, TEX_FILTER, MIP_SMOOTH, RESOLUTION, MATERIAL,
-           GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, EXTENDED_BC, TRIPLE_BUFFER, MODEL_DETAIL, VERTEX_REFERENCES}, {VOLUME, -1},
+           GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, EXTENDED_BC, TRIPLE_BUFFER, MODEL_DETAIL, VERTEX_REFERENCES,
+           TEMP_DECALS, COSMETIC_EFFECTS, REFLECTIONS, OBJECT_SHADOWS}, {VOLUME, -1},
     {SENSITIVITY, DEADZONE, INVERT_Y, LOOK_CURVE, TOUCH}, {FPS, CPU, -1},
     {CPU_CLOCK, VERTEX_WORKER, -1}, {-1}, {-1}
 };
-static const int launch_counts[] = {0, 14, 1, 5, 2, 2, 0, 2};
+static const int launch_counts[] = {0, 18, 1, 5, 2, 2, 0, 2};
 static const char *const setting_names[] = {
     "Performance overlay", "", "", "", "Texture detail", "Master volume",
     "Look sensitivity", "Stick deadzone", "Invert look", "Look response", "Touch controls", "CPU meter",
     "Texture filtering", "Mip smoothing", "Render resolution", "Material quality",
-    "Glow / lens flares", "Particle detail", "Decal lifetime", "Decal limit", "Frame limit", "CPU clock", "More compressed textures", "Triple buffering", "Model detail", "Parallel vertex uploads", "Indexed vertex checks"
+    "Glow / lens flares", "Particle detail", "Decal lifetime", "Decal limit", "Frame limit", "CPU clock", "More compressed textures", "Triple buffering", "Model detail", "Parallel vertex uploads", "Indexed vertex checks",
+    "Temporary decals", "Cosmetic effects", "Material reflections", "Object shadows"
 };
 static const char *const setting_help[] = {
     "Show FPS and frame timing during play.", "", "", "",
@@ -333,7 +337,11 @@ static const char *const setting_help[] = {
     "Experimental: prepare frames ahead. May add input delay. Default off.",
     "Simpler distant characters/scenery where available. Relaunch to apply.",
     "Experimental: core 0 copies vertex snapshots. Relaunch to apply.",
-    "Experimental: reduce geometry checks. Relaunch to apply; default off."
+    "Experimental: reduce geometry checks. Relaunch to apply; default off.",
+    "Off removes temporary impact emitters; keeps map markings. Relaunch.",
+    "Off removes safe smoke/spark/dust emitters; keeps projectiles. Relaunch.",
+    "Off removes model/environment reflections; keeps detail maps. Relaunch.",
+    "Off stops objects casting dynamic shadows; keeps baked lighting. Relaunch."
 };
 static void render_license(dash *s)
 {

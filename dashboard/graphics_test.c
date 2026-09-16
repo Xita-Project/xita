@@ -56,7 +56,7 @@ int main(void)
     press(XV_SETTINGS_TOGGLE);
     for (unsigned i=3;i<12;++i) press(XV_DASH_DOWN);
     xv_settings_snapshot(&view);
-    assert(view.count==14 && !view.live && !strcmp(view.names[view.selected-view.first],"Model detail"));
+    assert(view.count==18 && !view.live && !strcmp(view.names[view.selected-view.first],"Model detail"));
     assert(!strcmp(view.values[view.selected-view.first],"ORIGINAL"));
     press(XV_DASH_LEFT);xv_settings_frame();xv_settings_snapshot(&view);
     assert(applied==old_applied && !strcmp(view.values[view.selected-view.first],"BALANCED"));
@@ -69,6 +69,14 @@ int main(void)
     press(XV_DASH_RIGHT);xv_settings_frame();xv_settings_snapshot(&view);
     assert(applied==old_applied && !strcmp(view.values[view.selected-view.first],"ON"));
     assert(strstr(config(),"XV_VERTEX_REFERENCES=1") && strstr(view.status,"Relaunch"));
+    const char *new_keys[]={"XV_TEMP_DECALS=0","XV_COSMETIC_EFFECTS=0","XV_REFLECTIONS=0","XV_OBJECT_SHADOWS=0"};
+    for (unsigned i=0;i<4;++i) {
+        press(XV_DASH_DOWN);xv_settings_snapshot(&view);
+        assert(!view.live && !strcmp(view.values[view.selected-view.first],"ON"));
+        press(XV_DASH_LEFT);xv_settings_frame();xv_settings_snapshot(&view);
+        assert(applied==old_applied && !strcmp(view.values[view.selected-view.first],"OFF"));
+        assert(strstr(config(),new_keys[i]) && strstr(view.status,"Relaunch"));
+    }
     press(XV_DASH_DOWN);xv_settings_snapshot(&view);assert(view.selected==0);
     press(XV_DASH_CIRCLE);
     assert(!unlink("ux0:data/xita/xita.cfg"));
