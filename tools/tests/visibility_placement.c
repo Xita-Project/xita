@@ -15,6 +15,7 @@
 #include "../../runtime/xv_render_profile.h"
 #define SCE_GXM_DEPTH_STENCIL_FORCE_STORE_ENABLED 1
 #define SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_ENABLED 1
+typedef struct { volatile unsigned *address;unsigned value; } SceGxmNotification;
 typedef int SceGxmContext;
 typedef int SceGxmSyncObject;
 typedef int SceGxmRenderTarget;
@@ -41,6 +42,7 @@ static void logf_test(const char *fmt,...)
 }
 #define XV_LOG(...) logf_test(__VA_ARGS__)
 #include "../../runtime/xv_visibility_placement.h"
+#include "../../runtime/xv_query_boundary.h"
 uint64_t xk_os_monotonic_us(void) {return ++clock_us;}
 static uint64_t trace=1469598103934665603ull;
 static unsigned opened,ends,begins,draws,uis,finishes,fail_begin,fail_end;
@@ -53,8 +55,17 @@ static int sceGxmBeginScene(SceGxmContext *c,unsigned flags,const SceGxmRenderTa
     assert(!opened);begins++;event(1,(unsigned)(rt-targets));
     if(begins==fail_begin)return -1;opened=1;return 0;
 }
-static int sceGxmEndScene(SceGxmContext *c,void *v,void *f)
-{(void)c;(void)v;assert(!f && opened);opened=0;ends++;event(2,ends);return ends==fail_end?-1:0;}
+#ifdef XV_QUERY_BOUNDARY
+void test_query_notification(const SceGxmNotification *f);
+#endif
+static int sceGxmEndScene(SceGxmContext *c,void *v,const SceGxmNotification *f)
+{(void)c;(void)v;assert(opened);opened=0;ends++;event(2,ends);
+#ifdef XV_QUERY_BOUNDARY
+ if(f && ends!=fail_end)test_query_notification(f);
+#else
+ assert(!f);
+#endif
+ return ends==fail_end?-1:0;}
 static void sceGxmFinish(SceGxmContext *c) {(void)c;finishes++;event(3,finishes);}
 static void sceGxmSetViewport(SceGxmContext *c,float x,float xs,float y,float ys,float z,float zs)
 {(void)c;(void)x;(void)xs;(void)y;(void)ys;(void)z;(void)zs;assert(opened);}

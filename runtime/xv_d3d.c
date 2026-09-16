@@ -673,6 +673,7 @@ typedef struct {
     SceGxmTexture tex;
 } rt_alias_t;
 static rt_alias_t g_rt[XV_RT_SLOTS];
+#include "xv_query_boundary.h"
 static unsigned g_rt_bytes;
 extern void xv_render_target_drain(void); /* wait for pump AND GPU, outside a scene */
 
@@ -2594,7 +2595,8 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
         }
         if (target != current) {
             if (open) {
-                int err = XV_RENDER_END(current, sceGxmEndScene(ctx, NULL, NULL));
+                int err = XV_RENDER_END(current, sceGxmEndScene(ctx, NULL, XV_QB_NOTIFICATION(frame,i,u)));
+                XV_QB_SUBMITTED(frame,i,u,err);
                 XV_VP_END(frame,i,u,err);
                 /* Successive scenes on this context preserve fragment order:
                  * later passes may sample earlier color/depth stores without

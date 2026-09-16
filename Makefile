@@ -66,6 +66,21 @@ $(BUILD)/gpu-packet.config: force-gpu-packet-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o: $(BUILD)/gpu-packet.config
+# Existing-scene exact query completion candidate; compiled and runtime OFF by default.
+ifeq ($(XV_QUERY_BOUNDARY),1)
+ifneq ($(RECOMP),1)
+$(error XV_QUERY_BOUNDARY requires RECOMP=1)
+endif
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_QUERY_BOUNDARY
+endif
+.PHONY: force-query-boundary-config
+force-query-boundary-config:
+$(BUILD)/query-boundary.config: force-query-boundary-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_QUERY_BOUNDARY)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: $(BUILD)/query-boundary.config
 # Pump-side sealed-list census; no fences or scheduling changes. Default OFF.
 ifeq ($(XV_VISIBILITY_PLACEMENT),1)
 $(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_VISIBILITY_PLACEMENT

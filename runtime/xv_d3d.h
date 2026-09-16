@@ -130,6 +130,12 @@ void xv_d3d_SetSceneBackbufferTexture(const SceGxmTexture *texture);
 void xv_d3d_check_geometry(uint32_t frame); /* trace-only lifetime diagnostics, after GPU completion */
 void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, unsigned h); /* before the first scene */
 int xv_d3d_has_visibility(uint32_t frame);
+#ifdef XV_QUERY_BOUNDARY
+/* Pump-only; sealed packet, no storage release or GPU finish. */
+int xv_d3d_query_boundary_prepare(uint32_t frame,int enabled);
+void xv_d3d_query_boundary_arm(uint32_t frame,const SceGxmNotification *fence);
+void xv_d3d_query_boundary_report(void);
+#endif
 void xv_d3d_visibility_complete(uint32_t frame); /* after query fragments complete; storage stays owned until final completion */
 
 /* Legacy replay runs inside the caller's scene. RTT replay starts outside a

@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix='xita-rt-test-') as tmp:
     (tmp / 'render_targets_under_test.inc').write_text(implementation)
     exe = tmp / 'test'
     subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Wno-unused-parameter',
-                    '-Werror', '-I', str(tmp), str(root / 'tools/tests/render_targets_host.c'),
+                    '-Werror', '-I', str(root / 'runtime'), '-I', str(tmp), str(root / 'tools/tests/render_targets_host.c'),
                     str(root / 'runtime/xv_render_profile.c'),
                     '-o', str(exe)], check=True)
     for queue in ('0', '1'):

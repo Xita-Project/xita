@@ -1145,6 +1145,9 @@ static struct {
     SceGxmNotification fence, visibility_fence;
     uint64_t started_us, visibility_us;
     int failed, visibility_completed;
+#ifdef XV_QUERY_BOUNDARY
+    int query_boundary;
+#endif
 #if XV_GPU_PACKET_TIMING
     xv_packet_timing timing;
 #endif
@@ -1160,6 +1163,12 @@ static int xv_early_visibility_enabled(void)
     /* Experimental until matched physical comparisons establish its value. */
     return override < 0 ? 0 : override;
 }
+#ifdef XV_QUERY_BOUNDARY
+static int g_query_boundary_override; /* Explicit default OFF. Changed only drained. */
+int xv_query_boundary_available(void) { return 1; }
+int xv_query_boundary_enabled(void)
+{ return __atomic_load_n(&g_query_boundary_override,__ATOMIC_ACQUIRE); }
+#endif
 static unsigned g_slot_waits;
 static uint64_t g_slot_wait_us;
 static int xv_pipeline_enabled(void)
@@ -1256,6 +1265,12 @@ void xv_benchmark_optimizations(int enabled)
     xv_present_drain();
     /* Diagnostic controllers change only their observer/report mode here. */
     if (xv_benchmark_compare_log_writer()||xv_benchmark_compare_diagnostic_poll()||xv_benchmark_compare_light_census())return;
+    if (xv_benchmark_compare_query_boundary()) {
+#ifdef XV_QUERY_BOUNDARY
+        __atomic_store_n(&g_query_boundary_override,enabled>0,__ATOMIC_RELEASE);
+#endif
+        return;
+    }
     if (xv_benchmark_compare_polygon_edge()) {
         extern void xv_native_polygon_edge_override(int) __attribute__((weak));
         if(xv_native_polygon_edge_override)xv_native_polygon_edge_override(enabled);
@@ -1503,6 +1518,10 @@ static unsigned g_retired_count, g_max_pending;
 static uint64_t g_completion_us;
 static unsigned g_early_visibility_count;
 static uint64_t g_early_visibility_us, g_visibility_tail_us;
+#ifdef XV_QUERY_BOUNDARY
+static unsigned g_boundary_queries,g_boundary_fallbacks,g_boundary_before_final;
+static uint64_t g_boundary_query_us,g_boundary_tail_us;
+#endif
 #if XV_GPU_PACKET_TIMING
 static xv_packet_timing_totals g_packet_timing;
 static int xv_pump_observe(unsigned q)
@@ -1545,6 +1564,12 @@ static int xv_pump_retire(void)
     if (!g_packets[q].visibility_completed && g_packets[q].visibility_fence.address &&
         __atomic_load_n(g_packets[q].visibility_fence.address, __ATOMIC_ACQUIRE) == g_packets[q].visibility_fence.value) {
         g_packets[q].visibility_us = sceKernelGetProcessTimeWide();
+#ifdef XV_QUERY_BOUNDARY
+        /* A positive CPU interval alone does not prove a pending GPU tail. */
+        if(g_packets[q].query_boundary && !g_packets[q].failed &&
+           __atomic_load_n(g_packets[q].fence.address,__ATOMIC_ACQUIRE)!=g_packets[q].fence.value)
+            g_boundary_before_final++;
+#endif
         xv_d3d_visibility_complete(g_packets[q].mesh);
         g_packets[q].visibility_completed = 1;
         /* No ownership release here: upscale, settings and final fragments
@@ -1559,13 +1584,27 @@ static int xv_pump_retire(void)
     uint64_t now = sceKernelGetProcessTimeWide();
     uint64_t elapsed = now - g_packets[q].started_us;
     if (g_gfx.hle_ready && g_packets[q].mesh != UINT32_MAX) {
-        if (!g_packets[q].visibility_completed) xv_d3d_visibility_complete(g_packets[q].mesh);
+        if (!g_packets[q].visibility_completed) {
+#ifdef XV_QUERY_BOUNDARY
+            g_boundary_fallbacks+=g_packets[q].query_boundary;
+#endif
+            xv_d3d_visibility_complete(g_packets[q].mesh);
+        }
         xv_d3d_check_geometry(g_packets[q].mesh);
     }
     if (g_packets[q].visibility_completed) {
+#ifdef XV_QUERY_BOUNDARY
+        if(g_packets[q].query_boundary) {
+            g_boundary_queries++;
+            g_boundary_query_us+=g_packets[q].visibility_us-g_packets[q].started_us;
+            g_boundary_tail_us+=now-g_packets[q].visibility_us;
+        } else
+#endif
+        {
         g_early_visibility_count++;
         g_early_visibility_us += g_packets[q].visibility_us - g_packets[q].started_us;
         g_visibility_tail_us += now - g_packets[q].visibility_us;
+        }
     }
     g_completion_us += elapsed;
 #if XV_GPU_PACKET_TIMING
@@ -1583,6 +1622,13 @@ static int xv_pump_retire(void)
         if (g_early_visibility_count) XV_LOG("[frame-query] %u world fragment fences: query latency %.3f ms/frame; remaining final-fence tail %.3f ms/frame; scheduled polling times, overlaps CPU/GPU\n",
             g_early_visibility_count, g_early_visibility_us / (1000.0 * g_early_visibility_count),
             g_visibility_tail_us / (1000.0 * g_early_visibility_count));
+#ifdef XV_QUERY_BOUNDARY
+        xv_d3d_query_boundary_report();
+        XV_LOG("[frame-query-boundary] %u prefix notifications observed (%u before final) / %u final fallbacks; query latency %.3f ms/query packet; remaining final tail %.3f ms/query packet; scheduled observations, storage still retained\n",
+            g_boundary_queries,g_boundary_before_final,g_boundary_fallbacks,g_boundary_queries?g_boundary_query_us/(1000.0*g_boundary_queries):0.0,
+            g_boundary_queries?g_boundary_tail_us/(1000.0*g_boundary_queries):0.0);
+        g_boundary_queries=g_boundary_fallbacks=g_boundary_before_final=0;g_boundary_query_us=g_boundary_tail_us=0;
+#endif
         g_early_visibility_count=0; g_early_visibility_us=0; g_visibility_tail_us=0;
         g_retired_count=0; g_completion_us=0; g_max_pending=0;
     }
@@ -1627,13 +1673,24 @@ static int xv_pump_thread(SceSize args, void *argp)
             g_packets[q].fence=(SceGxmNotification){g_notifications+q,ticket};
             g_packets[q].visibility_fence=(SceGxmNotification){NULL,0};
             g_packets[q].visibility_completed=0;
-            if (xv_early_visibility_enabled() && g_gfx.scaled_target && g_gfx.hle_ready &&
-                g_packets[q].mesh != UINT32_MAX && xv_d3d_has_visibility(g_packets[q].mesh)) {
+#ifdef XV_QUERY_BOUNDARY
+            g_packets[q].query_boundary=g_gfx.hle_ready && g_packets[q].mesh!=UINT32_MAX &&
+                xv_d3d_query_boundary_prepare(g_packets[q].mesh,xv_query_boundary_enabled());
+#endif
+            if (
+#ifdef XV_QUERY_BOUNDARY
+                g_packets[q].query_boundary ||
+#endif
+                (xv_early_visibility_enabled() && g_gfx.scaled_target && g_gfx.hle_ready &&
+                g_packets[q].mesh != UINT32_MAX && xv_d3d_has_visibility(g_packets[q].mesh))) {
                 g_packets[q].visibility_fence=(SceGxmNotification){g_notifications+XV_FRAME_TICKETS+q,ticket};
                 /* This ticket slot's prior owner has retired. Initialize its
                  * separate query word, including the uint32_t ticket wrap. */
                 __atomic_store_n(g_packets[q].visibility_fence.address, ~ticket, __ATOMIC_RELEASE);
             }
+#ifdef XV_QUERY_BOUNDARY
+            if(g_packets[q].query_boundary)xv_d3d_query_boundary_arm(g_packets[q].mesh,&g_packets[q].visibility_fence);
+#endif
             g_packets[q].started_us=now;
 #if XV_GPU_PACKET_TIMING
             xv_packet_timing_begin(&g_packets[q].timing,ticket,now,
@@ -1643,6 +1700,9 @@ static int xv_pump_thread(SceSize args, void *argp)
             xv_render_profile_begin(g_packets[q].mesh);
             xv_gpu_write_barrier();
             int err=xv_gfx_render_frame(g_packets[q].mesh,g_packets[q].ui,&g_packets[q].fence,
+#ifdef XV_QUERY_BOUNDARY
+                g_packets[q].query_boundary ? NULL :
+#endif
                 g_packets[q].visibility_fence.address ? &g_packets[q].visibility_fence : NULL);
 #if XV_GPU_PACKET_TIMING
             xv_packet_timing_end(&g_packets[q].timing,sceKernelGetProcessTimeWide(),err<0);
