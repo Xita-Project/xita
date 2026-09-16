@@ -49,8 +49,9 @@ work into efficient native routines and independent worker jobs until sustained
 vehicle gameplay. Keep rendering and gameplay correct, document fixed comparison
 settings and retain private checkpoints. Stable 20 FPS is an intermediate
 milestone; neither target is complete. Halo 2's original main menu remains a
-separate objective; Claude currently owns its Vita3K work. The current parallel
-agents investigate CE performance. See the [implementation order](docs/performance-next-steps-20260914.md).
+separate objective; Claude currently owns its Vita3K work. CE performance work
+continues locally; the earlier parallel agents are no longer running. See the
+[implementation order](docs/performance-next-steps-20260914.md).
 
 [~] [Experimental concurrent object updates](docs/parallel-object-experiment-20260914.md):
 the next task now runs whole second-pass object callbacks on workers requesting
@@ -169,6 +170,13 @@ passes full-state host/ARM comparisons, but its short-input regressions keep it
 uninstalled. A fresh native valley trace and live campaign log continue to
 point to ordered scene work and vertex preparation; the scan's actual share
 within its parent routine has not yet been measured.
+The [grouped vertex-load experiment](docs/vertex-block-loads-20260916.md) passes
+21,997 ARM correctness/bounds cases and actual uploader/worker host checks.
+It is installed as a disabled comparison option. Two physical 360p campaign
+trials produce mixed results (12.045/13.799/13.665 and
+13.872/13.217/13.517 FPS, original/grouped/original) with varying draw workloads.
+It remains Off: fewer ARM instructions have not established a hardware gain.
+These reduced-settings trials do not qualify the standard-settings FPS goal.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)

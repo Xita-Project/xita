@@ -108,7 +108,12 @@ int main(void)
     xv_vertex_references_override(1); assert(xv_vertex_references_enabled());
     xv_vertex_references_override(0); assert(!xv_vertex_references_enabled());
     xv_vertex_references_override(-1); assert(!xv_vertex_references_enabled());
+    int initial_blocks=xv_vertex_blocks_enabled();
+    xv_vertex_blocks_override(1);assert(xv_vertex_blocks_enabled());
+    xv_vertex_blocks_override(0);assert(!xv_vertex_blocks_enabled());
+    xv_vertex_blocks_override(-1);assert(xv_vertex_blocks_enabled()==initial_blocks);
     copy_checks(); mutation_checks(); slot_checks();
+    assert((block_checks!=0)==(initial_blocks!=0));
     puts("PASS: exact retained indices/coverage, all 65536 indices, referenced and unreferenced mutations, aliases, 4000 draws across 500 slot generations, immutable GPU snapshots and overrides");
     return 0;
 }

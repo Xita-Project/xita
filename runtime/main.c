@@ -1279,6 +1279,10 @@ void xv_benchmark_optimizations(int enabled)
 #endif
         return;
     }
+    if (xv_benchmark_compare_vertex_blocks()) {
+        xv_vertex_blocks_override(enabled);
+        return;
+    }
     if (xv_benchmark_compare_query_boundary()) {
 #ifdef XV_QUERY_BOUNDARY
         __atomic_store_n(&g_query_boundary_override,enabled>0,__ATOMIC_RELEASE);

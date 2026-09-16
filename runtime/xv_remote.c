@@ -218,6 +218,7 @@ static void serve(int s)
             if(!strcmp(target+16,"diagnostic-shot"))kind=XV_BENCH_DIAGNOSTIC_POLL;
             if(!strcmp(target+16,"diagnostic-hist"))kind=XV_BENCH_DIAGNOSTIC_HIST;
             if(!strcmp(target+16,"depth-store"))kind=XV_BENCH_DEPTH_STORE;
+            if(!strcmp(target+16,"vertex-blocks"))kind=XV_BENCH_VERTEX_BLOCKS;
             if(!strcmp(target+16,"query-boundary"))kind=XV_BENCH_QUERY_BOUNDARY;
             if(!strcmp(target+16,"light-census"))kind=XV_BENCH_LIGHT_CENSUS;
             if(!kind)reply(s,400,"Unknown benchmark kind\n");

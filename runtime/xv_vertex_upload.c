@@ -49,6 +49,9 @@ static unsigned resident_checks, resident_hits;
 static uint64_t resident_compared, resident_bytes;
 static int resident_override = -1;
 static int compare_override = -1;
+static int blocks_override = -1;
+static unsigned block_checks;
+static uint64_t block_bytes;
 static int copy_override = -1;
 static unsigned fused_copies;
 static uint64_t fused_bytes;
@@ -143,11 +146,33 @@ static int compare_enabled(void)
     }
     return compare_override < 0 ? enabled : compare_override;
 }
+void xv_vertex_blocks_override(int enabled)
+{ blocks_override = enabled < 0 ? -1 : !!enabled; }
+int xv_vertex_blocks_enabled(void)
+{
+    static int configured = -1;
+    if (configured < 0) configured = xv_quality_int("XV_VERTEX_BLOCK_LOADS",0,0,1);
+    return blocks_override < 0 ? configured : blocks_override;
+}
+int xv_vertex_blocks_available(void)
+{
+#if defined(__ARM_NEON)
+    return compare_enabled();
+#else
+    return 0;
+#endif
+}
 static int vertex_equal(const void *a, const void *b, unsigned bytes)
 {
     /* Small or frequently changed spans retain libc's short comparison path. */
     uint64_t profile = xv_vertex_work_begin();
-    int equal = bytes >= 64 && compare_enabled() ? xv_bytes_equal(a,b,bytes) : !memcmp(a,b,bytes);
+    int equal;
+    if (bytes >= 64 && compare_enabled()) {
+        if (xv_vertex_blocks_enabled()) {
+            block_checks++; block_bytes += bytes;
+            equal = xv_bytes_equal_blocks(a,b,bytes);
+        } else equal = xv_bytes_equal(a,b,bytes);
+    } else equal = !memcmp(a,b,bytes);
     xv_vertex_work_end(equal ? XV_VERTEX_EQUAL : XV_VERTEX_DIFFERENT,bytes,profile);
     return equal;
 }
@@ -301,6 +326,9 @@ void xv_vertex_upload_report(unsigned frames)
 {
     xv_vertex_work_report(frames);
     if (xv_upload_worker_report) xv_upload_worker_report(frames);
+    xv_logf("[vertex-block-loads] %u frames: enabled %d checks %u requested-KiB %llu; exact 64-byte groups and original tails\n",
+        frames,xv_vertex_blocks_enabled(),block_checks,(unsigned long long)(block_bytes>>10));
+    block_checks=0;block_bytes=0;
     xv_logf("[vertex-references] %u frames: enabled %d; %u checks / %u hits / %u runs; requested %llu KiB compared %llu KiB; indexed records checked, owned uploads retained\n",
         frames, xv_vertex_references_enabled(), reference_checks, reference_hits, reference_runs,
         (unsigned long long)(reference_requested >> 10), (unsigned long long)(reference_compared >> 10));

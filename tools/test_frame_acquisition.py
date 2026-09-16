@@ -24,7 +24,10 @@ void xv_vertex_upload_override(int enabled) { upload_override=enabled; }
 static int compare_override=-99;
 void xv_vertex_compare_override(int enabled) { compare_override=enabled; }
 static int candidate, scan_override=-99, copy_override=-99, bounds_override=-99, references_override=-99;
-static int region_override=-99, edge_override=-99;
+static int region_override=-99, edge_override=-99, blocks_override=-99;
+int xv_benchmark_compare_depth_store(void) { return candidate==38; }
+int xv_benchmark_compare_vertex_blocks(void) { return candidate==39; }
+void xv_vertex_blocks_override(int value) { blocks_override=value; }
 int xv_benchmark_compare_diagnostic_poll(void) {return candidate==34;}
 int xv_benchmark_compare_light_census(void) { return candidate==35; }
 int xv_benchmark_compare_log_writer(void) { return candidate==33; }
@@ -163,7 +166,7 @@ int main(int argc,char **argv)
 #ifdef XV_QUERY_BOUNDARY
         g_query_boundary_override=0;
 #endif
-        region_override=edge_override=pose_override=material_override=index_override=replace_override=quat_override=hierarchy_override=object_point_override=object_wait_override=object_lock_override=object_math_override=point_override=texture_override=snapshot_override=phase_override=object_jobs_override=prepare_override=depth_override=-99;
+        blocks_override=region_override=edge_override=pose_override=material_override=index_override=replace_override=quat_override=hierarchy_override=object_point_override=object_wait_override=object_lock_override=object_math_override=point_override=texture_override=snapshot_override=phase_override=object_jobs_override=prepare_override=depth_override=-99;
         neon_override=object_scan_override=hle_override=overlap_override=affinity_override=-99;
         flare_override=scan_override=copy_override=bounds_override=references_override=worker_override=basis_override=palette_override=-99;flare_barriers=0;
         xv_benchmark_optimizations(mode);
@@ -204,6 +207,7 @@ int main(int argc,char **argv)
         assert(g_query_boundary_override==(candidate==37 && mode>0));
 #endif
         assert(xv_early_visibility_enabled()==(candidate==8 && mode==1));
+        assert(blocks_override==(candidate==39?mode:-99));
         assert(compare_override==-99 && upload_override==-99 && xv_pipeline_enabled()==!single);
     }
     xv_pipeline_override(-1);
@@ -212,7 +216,7 @@ int main(int argc,char **argv)
 }
 '''
 with tempfile.TemporaryDirectory(prefix='xita-frame-acquire-') as tmp:
-    count=38
+    count=40
     p=pathlib.Path(tmp);(p/'test.c').write_text(f'#define CANDIDATE_COUNT {count}\n'+prefix+globals_+fixture+code+suffix)
     sdk=pathlib.Path(os.environ.get('VITASDK',str(pathlib.Path.home()/'vitasdk')))
     subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP',*(['-DXV_QUERY_BOUNDARY'] if os.environ.get('TEST_QUERY_BOUNDARY') else []),'-DXV_NATIVE_OBJECT_BASIS','-DXV_NATIVE_MODEL_PALETTE','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-unused-variable',

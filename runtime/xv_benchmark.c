@@ -11,6 +11,9 @@ uint64_t xv_benchmark_boundary_time(void) __attribute__((weak));
 void xv_logf(const char *fmt,...);
 int xv_depth_store_available(void) __attribute__((weak));
 int xv_depth_store_enabled(void) __attribute__((weak));
+int xv_vertex_blocks_available(void) __attribute__((weak));
+int xv_vertex_blocks_enabled(void) __attribute__((weak));
+void xv_vertex_blocks_override(int) __attribute__((weak));
 int xv_query_boundary_available(void) __attribute__((weak));
 int xv_query_boundary_enabled(void) __attribute__((weak));
 int xv_diag_poll_available(unsigned) __attribute__((weak));
@@ -71,7 +74,7 @@ static struct {
     int active,request,cancel,configuring,restoring,view_ok,compare;
     unsigned original,phase,frames;
     uint64_t measure_start, last_sample, restore_retry;
-    int log_original, census_original, query_boundary_original, depth_store_original, transition_error, failed;
+    int log_original, census_original, query_boundary_original, depth_store_original, blocks_original, transition_error, failed;
     unsigned sample_count;
     uint64_t intervals[LOG_MEASURE];
     float view[6];
@@ -83,7 +86,8 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
-    if(kind<XV_BENCH_OBJECT_BASIS||(kind>XV_BENCH_CLIP_REGION&&kind!=XV_BENCH_DIAGNOSTIC_POLL&&kind!=XV_BENCH_DIAGNOSTIC_HIST&&kind!=XV_BENCH_LIGHT_CENSUS&&kind!=XV_BENCH_QUERY_BOUNDARY&&kind!=XV_BENCH_DEPTH_STORE)||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind<XV_BENCH_OBJECT_BASIS||(kind>XV_BENCH_CLIP_REGION&&kind!=XV_BENCH_DIAGNOSTIC_POLL&&kind!=XV_BENCH_DIAGNOSTIC_HIST&&kind!=XV_BENCH_LIGHT_CENSUS&&kind!=XV_BENCH_QUERY_BOUNDARY&&kind!=XV_BENCH_DEPTH_STORE&&kind!=XV_BENCH_VERTEX_BLOCKS)||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
+    if(kind==XV_BENCH_VERTEX_BLOCKS&&(!xv_vertex_blocks_available||!xv_vertex_blocks_enabled||!xv_vertex_blocks_override))return -1;
     if((kind==XV_BENCH_DIAGNOSTIC_POLL||kind==XV_BENCH_DIAGNOSTIC_HIST)&&
        (!xv_diag_poll_available||!xv_diag_poll_override||!xv_diag_poll_measure||!xv_diag_poll_frame||!xv_diag_poll_report))return -1;
 #ifndef XV_LIGHT_QUERY_CENSUS
@@ -188,6 +192,7 @@ int xv_benchmark_compare_prep_bundle(void) { return remote_kind==XV_BENCH_PREP_B
 int xv_benchmark_compare_guest_affinity(void) { return remote_kind==XV_BENCH_GUEST_AFFINITY; }
 int xv_benchmark_compare_hle_dispatch(void) { return remote_kind==XV_BENCH_HLE_DISPATCH; }
 int xv_benchmark_compare_depth_store(void) { return remote_kind==XV_BENCH_DEPTH_STORE; }
+int xv_benchmark_compare_vertex_blocks(void) { return remote_kind==XV_BENCH_VERTEX_BLOCKS; }
 int xv_benchmark_compare_query_boundary(void) { return remote_kind==XV_BENCH_QUERY_BOUNDARY; }
 int xv_benchmark_compare_early_visibility(void) { return remote_kind==XV_BENCH_EARLY_VISIBILITY; }
 int xv_benchmark_compare_object_basis(void)
@@ -214,6 +219,10 @@ static int native_math_selected(void)
 }
 static int candidate_available(void)
 {
+    if(xv_benchmark_compare_vertex_blocks()) {
+        if(!xv_vertex_blocks_available||!xv_vertex_blocks_enabled||!xv_vertex_blocks_override||!xv_vertex_blocks_available())return 0;
+        b.blocks_original=!!xv_vertex_blocks_enabled();return 1;
+    }
     if(xv_benchmark_compare_depth_store()) {
         if(!xv_depth_store_available||!xv_depth_store_enabled||!xv_depth_store_available())return 0;
         b.depth_store_original=!!xv_depth_store_enabled();return 1;
@@ -353,6 +362,7 @@ static const char *tag(void) { return b.compare ?
      xv_benchmark_compare_light_census() ? "light-census-compare" :
      xv_benchmark_compare_log_writer() ? "log-writer-compare" :
      xv_benchmark_compare_depth_store() ? "depth-store-compare" :
+     xv_benchmark_compare_vertex_blocks() ? "vertex-blocks-compare" :
      xv_benchmark_compare_query_boundary() ? "query-boundary-compare" :
      xv_benchmark_compare_clip_region() ? "clip-region-compare" :
      xv_benchmark_compare_polygon_edge() ? "polygon-edge-compare" :
@@ -420,6 +430,7 @@ static int apply_comparison(int enabled)
     int effective=enabled;
     if(enabled<0 && xv_benchmark_compare_query_boundary())effective=b.query_boundary_original;
     if(enabled<0 && xv_benchmark_compare_depth_store())effective=b.depth_store_original;
+    if(enabled<0 && xv_benchmark_compare_vertex_blocks())effective=b.blocks_original;
     xv_benchmark_optimizations(effective); /* joined GPU/pump boundary */
     if(xv_benchmark_compare_diagnostic_poll()) {xv_diag_poll_override(diagnostic_path(),enabled);return 0;}
     if(xv_benchmark_compare_log_writer())return boundary_result(xv_log_async_set_enabled(enabled<0?b.log_original:enabled,5000000));
@@ -602,6 +613,8 @@ unsigned xv_benchmark_step(uint64_t now,unsigned height,int valid,const float vi
                 xv_logf("[texture-state-compare] start off/on/off at %up; only identical resolved mesh texture bindings are cached within uninterrupted ranges; draw order, shaders, geometry, workers and settings unchanged; %u settle + %u measured frames each\n",height,SETTLE,MEASURE);
             else if (xv_benchmark_compare_depth_store())
                 xv_logf("[depth-store-compare] start off/on/off at %up; proved read-only backbuffer scenes with explicit final UI-tail contract; loads, first/offscreen stores and query policy retained; restore initial mode %d; %u settle + %u measured frames each\n",height,b.depth_store_original,SETTLE,MEASURE);
+            else if (xv_benchmark_compare_vertex_blocks())
+                xv_logf("[vertex-blocks-compare] start off/on/off at %up; original/grouped-load/original exact vertex comparison, identical 64-byte checks and tails; snapshots, indices, workers and graphics retained; restore initial mode %d; %u settle + %u measured frames each\n",height,b.blocks_original,SETTLE,MEASURE);
             else if (xv_benchmark_compare_query_boundary())
                 xv_logf("[query-boundary-compare] start off/on/off at %up; exact results at existing RTT fragment boundary, final storage ownership retained; existing world-fence setting/graphics/workers unchanged, restore initial mode %d; %u settle + %u measured frames each\n",height,b.query_boundary_original,SETTLE,MEASURE);
             else if (xv_benchmark_compare_early_visibility())

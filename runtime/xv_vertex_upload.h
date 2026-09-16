@@ -11,6 +11,10 @@ void xv_vertex_references_override(int enabled);
 /* Serialized recording thread only; -1 restores the configured default. */
 void xv_vertex_upload_override(int enabled);
 void xv_vertex_compare_override(int enabled);
+/* Exact multi-vector load experiment; controls require a drained recorder. */
+int xv_vertex_blocks_available(void);
+int xv_vertex_blocks_enabled(void);
+void xv_vertex_blocks_override(int enabled);
 void xv_snapshot_worker_override(int enabled);
 void xv_vertex_copy_override(int enabled);
 int xv_vertex_worker_enabled(void);
