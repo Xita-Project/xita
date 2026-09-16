@@ -119,6 +119,7 @@ void xv_ui_gxm_replay_overlay(SceGxmContext *c, unsigned f) { assert(open_scene)
 static void visibility_draw_state(SceGxmContext *ctx, cmdlist_t *l, const cmd_t *c)
 { (void)ctx; (void)l; assert(!c); }
 #include "../../runtime/xv_render_target.h"
+#include "../../runtime/xv_visibility_placement.h"
 #include "render_targets_under_test.inc"
 static void capacity_tests(void)
 {

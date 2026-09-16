@@ -66,6 +66,18 @@ $(BUILD)/gpu-packet.config: force-gpu-packet-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o: $(BUILD)/gpu-packet.config
+# Pump-side sealed-list census; no fences or scheduling changes. Default OFF.
+ifeq ($(XV_VISIBILITY_PLACEMENT),1)
+$(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_VISIBILITY_PLACEMENT
+endif
+.PHONY: force-visibility-placement-config
+force-visibility-placement-config:
+$(BUILD)/visibility-placement.config: force-visibility-placement-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_VISIBILITY_PLACEMENT)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_d3d.o: $(BUILD)/visibility-placement.config
 # Reserve room for vita-elf-create's module/import metadata before the next
 # load segment. Traced builds can otherwise end too close to its boundary.
 LDFLAGS   := -Wl,-q,--defsym=__sce_headroom=0x1000

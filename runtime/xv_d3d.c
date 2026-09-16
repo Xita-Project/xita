@@ -284,6 +284,7 @@ static xv_visibility_result g_visibility_results[XV_VISIBILITY_IDS];
 #define XV_VISIBILITY_WORDS (XV_VISIBILITY_PER_FRAME * XV_VISIBILITY_GPU_CORES)
 static uint32_t *g_visibility_memory;
 static SceUID g_visibility_uid = -1;
+#include "xv_visibility_placement.h"
 
 static const SceGxmDepthFunc DEPTH_FUNCS[] = {
     SCE_GXM_DEPTH_FUNC_NEVER, SCE_GXM_DEPTH_FUNC_LESS, SCE_GXM_DEPTH_FUNC_EQUAL, SCE_GXM_DEPTH_FUNC_LESS_EQUAL,
@@ -2064,6 +2065,7 @@ static void visibility_draw_state(SceGxmContext *ctx, cmdlist_t *l, const cmd_t 
 void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, unsigned h)
 {
     cmdlist_t *l=g_lists[frame % XV_NUM_LISTS];
+    XV_VP_BEGIN(l,frame);
     l->visibility_gpu_ready=0;
     l->visibility_back_area=w*h;
     l->visibility_draw_slot=UINT32_MAX;
@@ -2121,6 +2123,7 @@ void xv_d3d_visibility_complete(uint32_t frame)
                 g_visibility_results[l->visibility[i].result_slot].id,pixels,(unsigned long long)total,l->visibility[i].guest_area,l->visibility[i].render_area,l->visibility_gpu_ready);
     }
     if (l->nvisibility && xk_os_scheduler_notify) xk_os_scheduler_notify();
+    XV_VP_COMPLETE(l,frame);
 }
 
 static SceGxmBlendFactor alpha_blend_factor(SceGxmBlendFactor f)
@@ -2541,6 +2544,7 @@ void xv_d3d_render(SceGxmContext *ctx, uint32_t frame)
     unsigned clear_slot = 0;
     render_range(ctx, l, 0, l->ncmds, &clear_slot, frame, XV_LEGACY_CLEAR_SLOTS);
     visibility_draw_state(ctx,l,NULL);
+    XV_VP_REPLAYED(frame,0);
 }
 int xv_d3d_has_render_targets(uint32_t frame)
 {
@@ -2577,8 +2581,11 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
         unsigned target = ui ? l->ui[u].target : done ? 0 : l->cmds[i].pass;
         if (target > XV_RT_SLOTS || (target && !g_rt[target - 1].rt)) {
             XV_LOG("RT invalid target %u at frame %u command %u UI %u\n", target, frame, i, u);
+            XV_VP_ERROR(frame,VP_ERR_TARGET);
             if (open) {
-                XV_RENDER_END(current, sceGxmEndScene(ctx, NULL, NULL));
+                int end_result=XV_RENDER_END(current, sceGxmEndScene(ctx, NULL, NULL));
+                XV_VP_END(frame,i,u,end_result);
+                (void)end_result;
                 xv_render_profile_stage(XV_RENDER_TARGET_FINISH);
                 sceGxmFinish(ctx);
                 xv_render_profile_stage(XV_RENDER_SUBMIT);
@@ -2588,6 +2595,7 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
         if (target != current) {
             if (open) {
                 int err = XV_RENDER_END(current, sceGxmEndScene(ctx, NULL, NULL));
+                XV_VP_END(frame,i,u,err);
                 /* Successive scenes on this context preserve fragment order:
                  * later passes may sample earlier color/depth stores without
                  * blocking the CPU here. Clear slots, UI batches and geometry
@@ -2609,6 +2617,7 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
                 sceGxmFinish(ctx);
                 xv_render_profile_stage(XV_RENDER_SUBMIT);
                 XV_LOG("RT BeginScene target %u failed %08X\n", target, err);
+                XV_VP_ERROR(frame,VP_ERR_BEGIN);
                 return -1;
             }
             if (!target) {
@@ -2637,6 +2646,7 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
     extern void xv_ui_gxm_replay_overlay(SceGxmContext *, unsigned);
     visibility_draw_state(ctx,l,NULL);
     xv_ui_gxm_replay_overlay(ctx, l->ui_frame);
+    XV_VP_REPLAYED(frame,1);
     return 0;
 }
 
