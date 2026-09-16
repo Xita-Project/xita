@@ -229,8 +229,20 @@ void arm_tweak(unsigned kind)
     }
 }
 void arm_original(void) {f_00056670(&arm_context);}
+#ifdef CLUSTER_FPU
+XvClusterFpu arm_fpu;
+const unsigned fpu_layout[]={sizeof(XvClusterFpu),offsetof(XvClusterFpu,slots),offsetof(XvClusterFpu,entry_fsp),offsetof(XvClusterFpu,fsw)};
+void arm_candidate(void)
+{
+    arm_fpu.entry_fsp=arm_context.fsp;arm_fpu.fsw=arm_context.fsw;
+    for(unsigned i=0;i<8;i++)
+        memcpy(&arm_fpu.slots[i],&arm_context.st[(arm_context.fsp+i)&7],8);
+    arm_admitted=xv_cluster_query_fpu(&geometry,&arm_input,&arm_result,&arm_fpu);
+}
+#else
 void arm_candidate(void)
 {arm_admitted=xv_cluster_query_direct(&geometry,&arm_input,&arm_result);}
+#endif
 void test_boot(void) {}
 void xk_os_log(const char *fmt,...) {(void)fmt;}
 void __assert_func(const char *file,int line,const char *function,const char *text)

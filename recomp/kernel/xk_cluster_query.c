@@ -131,3 +131,19 @@ int xv_cluster_query_direct(const XvClusterGeometry *g,const XvClusterInput *in,
         }else if(!--depth)return 1;
     }
 }
+
+int xv_cluster_query_rebase(const XvClusterInput *in,XvClusterResult *r,unsigned clusters,
+    uint32_t current_epoch,const uint32_t current_visited[256])
+{
+    if(!in||!r||!in->visited||!current_visited||!clusters||clusters>256)
+        return XV_CLUSTER_REBASE_CONFLICT;
+    /* The accepted start==-1 / nonpositive-radius paths never use an epoch.
+     * Derive this from the numerical result without another FP operation. */
+    if(r->epoch==in->epoch){r->epoch=current_epoch;return XV_CLUSTER_REBASE_NO_EPOCH;}
+    uint32_t captured_next=in->epoch+1u,current_next=current_epoch+1u;
+    if(r->epoch!=captured_next)return XV_CLUSTER_REBASE_CONFLICT;
+    for(unsigned i=0;i<clusters;i++)
+        if((in->visited[i]==captured_next)!=(current_visited[i]==current_next))
+            return XV_CLUSTER_REBASE_CONFLICT;
+    r->epoch=current_next;return XV_CLUSTER_REBASE_EPOCH;
+}

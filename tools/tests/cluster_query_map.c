@@ -82,10 +82,21 @@ int xv_test_map_query(const XvClusterGeometry *geometry,const XvClusterInput *in
     x_guest_write(SP+80,in->center,12);x_guest_write(SP+16,&in->radius,4);
     X_M32(SP+8)=0;X_IMG32(0x2d2fac)=in->epoch;X_IMG8(0x2d2fa9)=0;
     x_guest_write(0x2d2fb0,in->visited,1024);yields=0;
+#ifdef CLUSTER_FPU
+    XvClusterFpu fp={.entry_fsp=c.fsp,.fsw=c.fsw};
+    for(unsigned i=0;i<8;i++)memcpy(&fp.slots[i],&c.st[(c.fsp+i)&7],8);
+#endif
     f_00056670(&c);
+#ifdef CLUSTER_FPU
+    int expected_flags=fetestexcept(FE_ALL_EXCEPT);
+#endif
     stats[0]=(uint16_t)c.r[0];stats[1]=in->budget-(unsigned)c.preempt;stats[2]=yields;
     feclearexcept(FE_ALL_EXCEPT);
+#ifdef CLUSTER_FPU
+    int admitted=xv_cluster_query_fpu(geometry,in,out,&fp),result=0;
+#else
     int admitted=xv_cluster_query_direct(geometry,in,out),result=0;
+#endif
     if(!admitted)result=1;
     else if(yields||out->backedges!=stats[1])result=-2;
     else if(out->count!=stats[0])result=-3;
@@ -97,6 +108,12 @@ int xv_test_map_query(const XvClusterGeometry *geometry,const XvClusterInput *in
             uint32_t expected=out->changed[i>>5]&(1u<<(i&31))?out->epoch:in->visited[i];
             if(expected!=X_M32(0x2d2fb0+i*4))result=-6;
         }
+#ifdef CLUSTER_FPU
+        if(!result&&(fp.entry_fsp!=c.fsp||fp.fsw!=c.fsw))result=-7;
+        for(unsigned i=0;i<8&&!result;i++)
+            if(memcmp(&fp.slots[i],&c.st[(c.fsp+i)&7],8))result=-8;
+        if(!result&&expected_flags!=fetestexcept(FE_ALL_EXCEPT))result=-9;
+#endif
     }
     fesetenv(&initial);return result;
 }

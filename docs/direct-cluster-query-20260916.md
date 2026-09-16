@@ -131,6 +131,63 @@ and at most 16,460 across the same campaign sample. These include the descriptor
 and original-index workspace but exclude allocator overhead. ARM pointer sizes
 differ. No per-query allocation is required once a snapshot has been published.
 
+## Floating-point state and epoch rebasing
+
+The stateful `xk_cluster_query_fpu.c` prototype now reconstructs all eight x87
+slots, the balanced stack position and the full software status word. It uses
+the same quiet ARM comparison as the existing runtime and retains the original
+double arithmetic and float spill points. State is reconstructed from the typed
+math's intermediates rather than replaying each virtual x86 instruction. The
+ordinary numerical-only prototype remains available for comparison.
+
+The original status-word update also retains earlier TOP bits. Reconstructing
+only the final comparison would miss this behavior; the stateful helper applies
+each original comparison's status update. All input slots must be supplied,
+including inactive slots. Failed attempts discard both outputs and require
+restoring the entry native floating-point environment before the original path.
+
+Validation of the stateful helper:
+
+| Check | Result |
+| --- | --- |
+| Host ASan/UBSan, four rounding modes, varied entry stack/status and NaN payloads | 3,728 exact accepted comparisons; 368 conservative declines |
+| VitaSDK ARM numerical results, all x87 slots/status and complete native FPSCR | 350 accepted matches across 440 cases; 90 conservative declines |
+| C-constructed Blood Gulch, Battle Creek, a10 and a30 snapshots, host UBSan | 26,624 exact numerical/x87/exception comparisons; zero declines |
+| ARM compile with warnings as errors | 2,320 bytes of text, no data/BSS; 2,176-byte query stack excluding callees |
+
+Including state reconstruction and the fixture's entry-state copy, the ordinary
+ARM instruction counts are:
+
+| Clusters | Original prefix | Stateful typed query | Reduction factor |
+| ---: | ---: | ---: | ---: |
+| 7 | 27,275 | 5,762 | 4.73x |
+| 31 | 134,147 | 27,818 | 4.82x |
+| 65 | 285,507 | 59,063 | 4.83x |
+| 256 | 1,131,637 | 234,401 | 4.83x |
+
+The same limitations apply: these exclude the modeled 212-byte libc clear/copy,
+snapshot construction, locking, guest general-register/scratch reconstruction,
+publication and allocation/list work. They do not predict frame rate. A simpler
+experiment that inlined the original helpers and compiled them at `-O3` preserved
+full state but saved only about 1.5% of ordinary ARM instructions and regressed
+short paths. It was not integrated or sent to hardware.
+
+`xv_cluster_query_rebase` handles another requirement for future unlocked work:
+another query may advance the shared epoch while a private result is computed.
+It checks that the captured and current visited tables identify the same active
+clusters, then rebases only the private result's epoch. A changed active set
+declines without modifying the result. Paths which do not advance the epoch
+explicitly return `NO_EPOCH`; publication must write neither epoch nor visited
+words on those paths. Geometry and other mutable inputs still need independent
+validation, and publication must remain one guarded transaction with the original
+list tail. The helper itself performs no shared writes or floating-point work.
+
+The rebase oracle executes the complete original numerical prefix before and
+after compatible epoch changes. ASan/UBSan passes 1,024 full-context, full-memory
+and native-exception comparisons: 740 epoch advances, 284 no-epoch paths, 212
+wraps and 740 deliberately conflicting active sets. This proves the tested epoch
+transformation, not typed general-register/scratch reconstruction or live races.
+
 ## Integration work still required
 
 1. **Connect lifetime to the game.** The owned snapshot/store API above is ready
@@ -143,8 +200,9 @@ differ. No per-query allocation is required once a snapshot has been published.
    still need proof. Pointer equality and the existing large-read
    texture-purge heuristic do not establish that lifetime. Generated overlapping
    entries also need coverage; an entry at `58D8A` contains the later root store.
-2. **Preserve observable state.** Numerical success does not reconstruct the
-   guest context, scratch or native FPSCR at `566DE`. The original allocation and
+2. **Preserve observable state.** The stateful prototype now matches the tested
+   x87/native FP state, but general registers and guest scratch at `566DE` remain
+   unfinished. The original allocation and
    list tail needs the correct ordered output and entry state. Prove which other
    state is dead, or reproduce it exactly, before connecting this result. The
    current caller's immediate register restores are not a whole-call-chain proof.
@@ -173,6 +231,15 @@ python tools/test_owned_cluster_query.py --xbe "$XBE" --manifest "$MANIFEST" \
     "$MAPS/beavercreek.map" "$MAPS/a10.map" "$MAPS/a30.map"
 python tools/test_cluster_snapshot.py --out "$RESULTS/snapshot-asan"
 python tools/test_cluster_snapshot.py --out "$RESULTS/snapshot-tsan" --sanitize thread
+python tools/test_cluster_query_rebase.py --xbe "$XBE" --manifest "$MANIFEST" \
+    --out "$RESULTS/epoch-rebase"
+python tools/test_cluster_query_fpu.py --xbe "$XBE" --manifest "$MANIFEST" \
+    --out "$RESULTS/fpu-host"
+python tools/test_arm_cluster_query.py --reference "$RESULTS/fpu-host/reference.c" \
+    --fpu --out "$RESULTS/fpu-arm"
+python tools/test_owned_cluster_query.py --xbe "$XBE" --manifest "$MANIFEST" \
+    --out "$RESULTS/fpu-maps" --native-snapshot --fpu --maps "$MAPS/bloodgulch.map" \
+    "$MAPS/beavercreek.map" "$MAPS/a10.map" "$MAPS/a30.map"
 ```
 
 The ARM tool requires VitaSDK, Unicorn and pyelftools; `ARM_CC` can override the

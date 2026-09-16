@@ -126,6 +126,8 @@ def main():
     parser.add_argument('--cases-per-bsp', type=int, default=512)
     parser.add_argument('--native-snapshot', action='store_true',
                         help='construct candidate arrays with the runtime C builder')
+    parser.add_argument('--fpu', action='store_true',
+                        help='also compare reconstructed x87 state and native exception flags')
     a = parser.parse_args()
     assert a.cases_per_bsp > 0
     a.out.mkdir(parents=True, exist_ok=True)
@@ -140,10 +142,12 @@ def main():
         '-fno-strict-aliasing', '-ffp-contract=off', '-frounding-math',
         '-ffunction-sections', '-fdata-sections',
         '-fsanitize=undefined', '-fno-sanitize-recover=all',
+        *(['-DCLUSTER_FPU'] if a.fpu else []),
         '-I' + str(ROOT / 'recomp'), str(a.out / 'reference.c'),
         str(ROOT / 'tools/tests/cluster_query_map.c'),
         str(ROOT / 'recomp/kernel/xk_cluster_snapshot.c'),
         str(ROOT / 'recomp/kernel/xk_cluster_query.c'), str(ROOT / 'recomp/xv_x86rt.c'),
+        *([str(ROOT / 'recomp/kernel/xk_cluster_query_fpu.c')] if a.fpu else []),
         '-Wl,--wrap=xv_preempt,--gc-sections,-z,defs,--version-script=' + str(exports),
         '-lm', '-o', str(library)]
     subprocess.run(command, check=True)
@@ -202,6 +206,7 @@ def main():
                     clusters=snapshot.geometry.cluster_count, portals=snapshot.geometry.portal_count,
                     snapshot_array_bytes=snapshot.array_bytes, cases=0, declines=0,
                     native_snapshot_bytes=lib.xv_test_map_snapshot_bytes() if a.native_snapshot else None,
+                    fpu_checked=a.fpu,
                     maximum_result=0, maximum_portal_tests=0)
                 for case in range(a.cases_per_bsp):
                     # Exercise real portal boundaries from each side, nearby
@@ -237,7 +242,8 @@ def main():
                       row['snapshot_array_bytes'], 'snapshot array bytes', flush=True)
     finally:
         lib.xv_test_map_free()
-    print('PASS', sum(r['cases'] for r in rows), 'owned-map numerical comparisons;',
+    print('PASS', sum(r['cases'] for r in rows),
+          'owned-map numerical/x87/exception comparisons;' if a.fpu else 'owned-map numerical comparisons;',
           'no live ownership/publication proof')
 
 

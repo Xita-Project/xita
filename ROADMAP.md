@@ -123,6 +123,12 @@ publication must be completed before a hardware comparison. This is not a measur
 FPS gain. A compact C snapshot constructor and reader-retirement API now pass
 ASan/UBSan, TSan concurrency checks and the same 26,624 owned-map comparisons.
 Live BSP integration and the original allocation/list tail remain unfinished.
+The stateful query now matches x87 state and native FP status in 350 accepted
+ARM cases, 3,728 host cases and 26,624 owned-map cases. Its ordinary synthetic
+ARM instruction reduction is about 4.8x after FP reconstruction, rather than
+the numerical-only prototype's 7x. Compatible epoch rebasing also passes 1,024
+full original-state comparisons. General registers/scratch and live guarded
+publication are still pending; none of these prototypes is installed on Vita.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)

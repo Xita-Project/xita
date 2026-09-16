@@ -39,7 +39,7 @@ class QueryMachine(Machine):
         u.emu_start(self.symbols[name] | 1, END, count=20000000)
         assert u.reg_read(UC_ARM_REG_PC) == END, (name, hex(u.reg_read(UC_ARM_REG_PC)))
         return dict(instructions=self.instructions, imported_copy_bytes=self.copy_bytes,
-                    yields=self.yields)
+                    yields=self.yields, fpscr=u.reg_read(UC_ARM_REG_FPSCR))
 
     def guest(self, address, size):
         parts = []
@@ -56,6 +56,7 @@ def main():
     p.add_argument('--reference', type=Path, required=True)
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--quick', action='store_true')
+    p.add_argument('--fpu', action='store_true', help='also compare all x87 slots/status and native FPSCR')
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     cc = os.environ.get('ARM_CC', '/home/birchwoodgod/vitasdk/bin/arm-vita-eabi-gcc')
@@ -63,10 +64,15 @@ def main():
              '-fno-strict-aliasing', '-ffp-contract=off', '-frounding-math',
              '-ffunction-sections', '-fdata-sections', '-DCLUSTER_ARM',
              '-I' + str(ROOT / 'recomp'), '-I' + str(a.reference.parent)]
+    if a.fpu:
+        flags.append('-DCLUSTER_FPU')
     commands, objects = [], []
-    for i, source in enumerate((a.reference, ROOT / 'tools/tests/cluster_query.c',
+    sources = [a.reference, ROOT / 'tools/tests/cluster_query.c',
             ROOT / 'tools/tests/cluster_query_arm_stubs.c',
-            ROOT / 'recomp/kernel/xk_cluster_query.c', ROOT / 'recomp/xv_x86rt.c')):
+            ROOT / 'recomp/kernel/xk_cluster_query.c', ROOT / 'recomp/xv_x86rt.c']
+    if a.fpu:
+        sources.append(ROOT / 'recomp/kernel/xk_cluster_query_fpu.c')
+    for i, source in enumerate(sources):
         obj = a.out / f'unit-{i}.o'
         command = [cc, *flags, '-c', str(source), '-o', str(obj)]
         subprocess.run(command, check=True)
@@ -76,6 +82,7 @@ def main():
         '-Wl,-Ttext=0x10000,-e,test_boot,--gc-sections,--wrap=xv_preempt,'
         '--undefined=arm_prepare,--undefined=arm_tweak,--undefined=arm_original,'
         '--undefined=arm_candidate,--undefined=layout,--undefined=result_layout',
+        *(['-Wl,--undefined=arm_fpu,--undefined=fpu_layout'] if a.fpu else []),
         '-lm', '-lgcc', '-o', str(elf)]
     subprocess.run(command, check=True); commands.append(command)
     (a.out / 'commands.json').write_text(json.dumps(commands, indent=2) + '\n')
@@ -109,6 +116,7 @@ def main():
                 expected_visited = m.guest(0x2d2fb0, 1024)
                 backedges = budget - struct.unpack_from('<I', ctx, m.layout['preempt'])[0]
                 m.uc.mem_write(RAM, before)
+                m.uc.mem_write(m.symbols['arm_context'], context)
                 candidate = m.call('arm_candidate', fpscr=fpscr)
                 admitted = struct.unpack('<I', m.uc.mem_read(m.symbols['arm_admitted'], 4))[0]
                 record = dict(n=n, style=style, tweak=tweak, rounding=rounding,
@@ -132,17 +140,31 @@ def main():
                         epoch=actual_epoch == expected_epoch,
                         visited=actual_visited == expected_visited,
                         budget=actual_edges == backedges and original['yields'] == 0)
+                    if a.fpu:
+                        fs, slots, fsp, fsw = struct.unpack('<4I', m.uc.mem_read(m.symbols['fpu_layout'],16))
+                        state = bytes(m.uc.mem_read(m.symbols['arm_fpu'], fs))
+                        expected_fsp = struct.unpack_from('<I', ctx, m.layout['fsp'])[0]
+                        checks['fsp'] = struct.unpack_from('<I', state, fsp)[0] == expected_fsp
+                        checks['fsw'] = state[fsw:fsw+2] == ctx[m.layout['fsw']:m.layout['fsw']+2]
+                        checks['fpscr'] = candidate['fpscr'] == original['fpscr']
+                        for i in range(8):
+                            expected_at = m.layout['st'] + ((expected_fsp+i)&7)*8
+                            checks[f'slot{i}'] = state[slots+i*8:slots+(i+1)*8] == ctx[expected_at:expected_at+8]
+                        if not all(checks.values()):
+                            (a.out / 'failure-context.bin').write_bytes(ctx)
+                            (a.out / 'failure-fpu.bin').write_bytes(state)
                     if not all(checks.values()):
                         (a.out / 'failure.json').write_text(json.dumps(dict(record,checks=checks),indent=2))
                         raise AssertionError((record, checks, count, actual_count, backedges, actual_edges))
                 # Candidate must not publish any byte into the guest arena.
                 assert bytes(m.uc.mem_read(RAM, SIZE)) == before
                 rows.append(record)
-        print('PASS ARM numerical', n, style, tweak, flush=True)
+        print('PASS ARM', 'numerical/x87/FPSCR' if a.fpu else 'numerical', n, style, tweak, flush=True)
         (a.out / 'result.json').write_text(json.dumps(rows, indent=2) + '\n')
     accepted = sum(r['admitted'] for r in rows)
     assert accepted > len(rows) // 2
-    print('PASS', accepted, 'accepted /', len(rows), 'ARM numerical cases; no live publication proof')
+    print('PASS', accepted, 'accepted /', len(rows), 'ARM',
+          'numerical/x87/FPSCR' if a.fpu else 'numerical', 'cases; no live publication proof')
 
 
 if __name__ == '__main__':
