@@ -83,7 +83,7 @@ explain the next dependency investigation; core utilization is not a speedup.
 ## Storage and periodic hitches
 
 The preceding runtime's 132 periodic reports have a median formatting/write cost
-of 10.733 ms and a maximum of 137.126 ms. The latter can produce a visible pause;
+of 10.730 ms and a maximum of 137.126 ms. The latter can produce a visible pause;
 these are report costs, not isolated SD write latency or proof that logging
 explains all gameplay hitches. Screenshot-directory polling is enabled, and
 `hist.now` is checked every 16 presented frames. Their costs remain unmeasured.

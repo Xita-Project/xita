@@ -438,6 +438,23 @@ $(RECOMP_BUILD)/object-quat.config: force-object-quat-config
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-quat.config
 
+# The pose experiment changes only the pool and units containing its exact
+# loop hooks. Remember both flag transitions in a reused build directory.
+XV_OBJECT_POSE_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_POSE_EXPERIMENT))),1,0)
+POSE_HOOK_SRCS := $(shell grep -l XV_OBJECT_POSE_SCOPE $(XITA_GUEST_SRCS) 2>/dev/null)
+POSE_HOOK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(POSE_HOOK_SRCS))
+ifeq ($(XV_OBJECT_POSE_BUILD),1)
+$(POSE_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_POSE_EXPERIMENT
+endif
+.PHONY: force-object-pose-config
+force-object-pose-config:
+$(RECOMP_BUILD)/object-pose.config: force-object-pose-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_POSE_BUILD)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(POSE_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-pose.config
+
 # Only generated units containing this optional hook depend on its build mode.
 # This also handles changed shard numbering after regeneration.
 HIERARCHY_HOOK_SRCS := $(shell grep -l XV_NATIVE_MODEL_HIERARCHY $(XITA_GUEST_SRCS) 2>/dev/null)
