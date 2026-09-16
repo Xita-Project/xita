@@ -123,8 +123,16 @@ intervals; this does not establish combat/driving stability.
 
 The candidate remains **Off**. All comparisons restored its original mode, and
 the temporary native-resolution setting was returned to the user's 360p setting.
-The next rendering experiment is compatible fragment simplification while
-retaining geometry, depth/alpha coverage and query behavior. Broader visual and
-combat/driving acceptance remains required before enabling this depth change.
+An immediate fixed-camera native/360p/native check in the same valley view,
+with the depth-store experiment Off, measured **13.108 / 13.224 / 13.068 FPS**
+(76.287 / 75.619 / 76.520 ms/frame). Complete nearby reports show completion
+latency falling from roughly 62–65 ms to 38–39 ms and returning to about 63 ms,
+while draw HLE stays near 8.5–8.6 ms/frame. These overlapping intervals are not
+an additive CPU/GPU budget. The pixel-work reduction does not materially change
+the frame rate here, unlike the older resolution-sensitive view. CPU preparation
+and other resolution-independent work therefore take priority for this view;
+compatible fragment simplification remains a diagnostic for the rendering path.
+The resolution controller restored 360p after the comparison. Broader visual and
+combat/driving acceptance remains required before enabling the depth change.
 Private validation receipts are in `validation/engine-restructure-20260914T2300Z/depth-store-validation/`
 and `depth-store-tail-validation/` under the worker-sizing backup directory.

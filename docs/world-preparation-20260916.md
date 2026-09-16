@@ -142,3 +142,42 @@ successful notification observations plus maximum polling gap per packet.
 Completion cadence and queue growth then distinguish a GPU throughput limit
 from latency hidden behind the current slower CPU feed. Do not sum overlapping
 CPU/GPU scopes or infer stable 20 FPS from either number alone.
+
+## Later red-base valley capture
+
+Runtime `c999c0120bf47608a2cadcacb6a9872bfece819e3eed3bba691f1c24ab670095`
+provides another bounded trace after the [depth-store and resolution comparisons](backbuffer-depth-store-20260916.md#final-tail-hardware-comparison).
+In this particular valley view, native/360p/native is 13.108/13.224/13.068 FPS:
+GPU completion is observed substantially earlier at 360p without a material
+frame-rate change. The view/settings differ from the earlier native captures;
+this does not invalidate their resolution-sensitive results.
+
+The following 360p phase capture uses serial object callbacks in all three arms,
+then restores the configured worker policy. Timing Off/On/Off is
+**13.621 / 10.613 / 13.690 FPS**, with matching camera checks. Three complete
+60-frame windows contain no dropped or invalid scopes. The traced arm adds
+about **21 ms/frame** relative to the surrounding serial arms; observer overhead
+and the simulation's tick count per rendered frame limit absolute attribution.
+These measurements rank investigation targets, not removable costs in ordinary
+parallel gameplay. Long-lived already-open parents are still absent.
+
+| Selected routine | Calls/frame | Selected self, ms/frame |
+| --- | ---: | ---: |
+| Object update `900E0` | 2.83 | 12.635 |
+| Object pose `8DDF0` | 280.33 | 10.320 |
+| Ordered scene callbacks `54010` | 10 | 7.119 |
+| Material/draw helper `70110` | 38 | 6.979 |
+| Polygon clipping wrapper `B7F10` | 80 | 6.578 |
+| Spatial polygon test `51E90` | 1,292.79 | 6.015 |
+
+The trace supports the existing object-pose, native spatial-query and world
+preparation priorities. It does not make the previous slow guarded query adapter
+or flat clip-region experiment worth enabling. A direct implementation must
+reduce the actual traversal/math work and shared-guard occupancy, then pass the
+existing original-code oracle before another hardware comparison. Material/draw
+cost still includes native submission and cannot be added to draw-HLE time.
+The final Off arm emits no phase windows. Subsequent ordinary reports again
+show jobs on both worker lanes, with zero rejected jobs and 360p retained.
+Private receipts are in
+`depth-store-tail-validation/valley-serial-phases/` under the existing validation
+directory; `analysis.json` retains all ranked rows and diagnostic limits.

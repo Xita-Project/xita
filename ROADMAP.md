@@ -38,8 +38,10 @@ preserving loads, writable passes, first scenes and query lifetime. It remains
 disabled: hardware counters confirm one eligible final continuation/frame,
 but two native red-base trials show only small 1.2–1.4 ms paired savings and the
 native valley comparison is flat at 13.19/13.13/13.21 FPS. This does not establish
-a general gain. Next isolate fragment work while retaining depth/alpha coverage;
-visual, combat and driving acceptance is still pending.
+a general gain. The same valley's native/360p/native check is nearly flat at
+13.11/13.22/13.07 FPS despite earlier GPU completion. Continue native object and
+world preparation there, and fragment diagnostics in pixel-sensitive views.
+Visual, combat and driving acceptance is still pending.
 
 **Active objective (September 15):** restructure costly Halo CE engine and rendering
 work into efficient native routines and independent worker jobs until sustained

@@ -27,6 +27,21 @@ evidence for that particular store change; it does not rule out other attachment
 traffic, fragment work or CPU preparation. Compatible fragment simplification
 is the next rendering diagnostic.
 
+In that newer valley view, the immediate native/360p/native comparison is
+**13.108 / 13.224 / 13.068 FPS**, with identical camera checks passing and the
+depth-store candidate Off. Completion latency falls from about 62–65 ms to
+38–39 ms at 360p, then returns to about 63 ms, while frame time remains around
+76 ms. This points toward CPU-side or other resolution-independent work limiting
+this particular view; it does not negate the older resolution-sensitive result.
+Draw HLE is about 8.5–8.6 ms/frame. Object-batch elapsed time is about 28 ms/frame,
+including shared-lock waits, and overlaps other reports; it is not an exclusive
+CPU budget or a guaranteed saving. The subsequent [bounded phase capture](world-preparation-20260916.md#later-red-base-valley-capture)
+again identifies object pose, spatial queries and ordered world preparation;
+its substantial instrumentation cost requires treating it as a serial reference.
+Prioritize native preparation here, while retaining fragment diagnostics for
+pixel-heavy views. The physical receipt is `depth-store-tail-validation/valley-resolution-compare/`
+under the existing private engine-restructure validation directory.
+
 | Order | Cheap diagnostic | What a positive result supports | Limits / risk |
 |---|---|---|---|
 | 1 | Repeat fixed-camera native/480p/360p/native, with identical draws and clocks | Lower pixel workload is on the critical path | Pixel count falls faster than FPS rises when CPU, vertex or fixed costs remain. No change alone does not prove simulation is the bottleneck. |
