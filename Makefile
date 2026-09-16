@@ -509,6 +509,28 @@ $(RECOMP_BUILD)/kernel/xk_polygon_edge.o: RECOMP_CFLAGS += -ffp-contract=off
 recomp/kernel/xk_polygon_edge.c: tools/gen_native_polygon_edge.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_polygon_edge.py --xbe $(XBE) --manifest $(XBE_JSON)
 
+# Optional clip region: generated units, helper and bridge share a tracked mode.
+REGION_HOOK_SRCS := $(shell rg -l XV_NATIVE_CLIP_REGION $(XITA_GUEST_SRCS) 2>/dev/null)
+REGION_HOOK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(REGION_HOOK_SRCS))
+REGION_NATIVE_OBJS := $(RECOMP_BUILD)/kernel/xk_clip_region.o $(RECOMP_BUILD)/kernel/xk_clip_region_control.o
+ifeq ($(XV_NATIVE_CLIP_REGION),1)
+$(REGION_HOOK_OBJS): RECOMP_CFLAGS += -DXV_NATIVE_CLIP_REGION
+endif
+.PHONY: force-clip-region-config
+force-clip-region-config:
+$(RECOMP_BUILD)/clip-region.config: force-clip-region-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_NATIVE_CLIP_REGION)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(REGION_HOOK_OBJS) $(REGION_NATIVE_OBJS): $(RECOMP_BUILD)/clip-region.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/clip-region.config
+$(RECOMP_BUILD)/kernel/xk_clip_region.o: RECOMP_CFLAGS += -ffp-contract=off
+recomp/kernel/xk_clip_region.c: tools/gen_native_clip_region.py tools/gen_native_clip.py games/halo_ce_3925/clip_region.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
+	$(PYTHON) tools/gen_native_clip_region.py --xbe $(XBE) --manifest $(XBE_JSON)
+recomp/kernel/xk_clip.c: tools/gen_native_clip.py games/halo_ce_3925/hooks.py games/halo_ce_3925/clip_region.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
+	$(PYTHON) tools/gen_native_clip.py
+
 # Only generated units containing this optional hook depend on its build mode.
 # This also handles changed shard numbering after regeneration.
 HIERARCHY_HOOK_SRCS := $(shell grep -l XV_NATIVE_MODEL_HIERARCHY $(XITA_GUEST_SRCS) 2>/dev/null)

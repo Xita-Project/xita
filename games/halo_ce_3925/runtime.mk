@@ -33,3 +33,7 @@ endif
 ifeq ($(XV_LIGHT_QUERY_CENSUS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_light_census.c
 endif
+
+ifeq ($(XV_NATIVE_CLIP_REGION),1)
+XITA_GAME_SRCS += recomp/kernel/xk_clip_region.c recomp/kernel/xk_clip_region_control.c
+endif

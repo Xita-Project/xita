@@ -102,3 +102,15 @@ The separately callable8D7A6 suffix increments OK entry admission and the suffix
 While compiled in and idle, the additional Present scope and main-controller preflight each cost one flag load/branch (plus a zero-token cleanup branch in the scope); scheduler cancellation now also checks the armed-capability flag. It does not read native thread IDs when both flags are OFF. All three active diagnostic arms additionally check exact Present ownership and invalidate on scheduler handoffs. Those common admission costs are therefore not isolated by the ON-minus-OFF comparison. Existing ON metadata, atomic decline counts and logical math tracking are observer cost, and must be assessed with the actual FPS results. Compile-OFF removes the observer references entirely. Counts describe whole windows, not individual frame latency or traversal size: they cannot prove the cause of recurring frame drops or a parallel-query speedup.
 
 Validation additions: `tools/test_light_census_benchmark.py` compiles the actual benchmark state machine and unmodified `main.c` Present controller with ASan/UBSan, exercises both initial modes, exact120-frame count/timestamp boundaries, camera movement, native/context admission, cancellation, reset/take/mode/restore failures and busy retry. It verifies actual report parsing, suffix accounting, malformed/missing/duplicate/OFF-data rejection and maximum log lengths. `tools/test_remote.py` covers authenticated HTTP selection, fresh versus historical failure rejection and incomplete receipts. `tools/test_frame_acquisition.py` verifies this diagnostic changes none of the other overrides. The private original-oracle suite additionally exercises real Present capabilities with the actual object pool at zero/one/two workers and both owner-service directions, with ASan/UBSan and TSan. ARM ON/OFF builds include Present/Swap, benchmark, main and HTTP objects in addition to the original census closure. No device, emulator, final game link or live result is claimed.
+
+
+## Clip-region coexistence
+
+The optional clip36 region currently declines when census observation is active,
+so original clip calls retain this observer's logical math scopes. Benchmark37
+rejects an already-enabled region (or a linked controller without a readable
+mode); benchmark36 rejects an already-active census. Neither rejection changes
+modes or initializes the other controller. This prevents describing the middle
+arm as pure observer overhead when it would also disable another candidate.
+See [the clip integration instructions](native-clip-region.md#generation-and-selective-build)
+for the four selective guest units and exact phase/HLE/root preservation checks.
