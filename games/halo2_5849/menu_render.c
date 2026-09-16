@@ -352,8 +352,7 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
      * that sample the 640x480 scene image) get their complete combiner state logged,
      * since they decide the presented frame's tone. */
     static int fullscreen_dumps, fullscreen_seen;
-    if (n >= 4 && n <= 6 && (r->primitive == 6 || r->primitive == 7 || r->primitive == 8) &&
-        (fullscreen_dumps < 3 || !(++fullscreen_seen % 60))) {   /* first three, then every 60th (fade level over time) */
+    if (n >= 4 && n <= 6 && (r->primitive == 6 || r->primitive == 7 || r->primitive == 8)) {
         float fx0 = 1e9f, fy0 = 1e9f, fx1 = -1e9f, fy1 = -1e9f;
         for (uint32_t i = 0; i < n; ++i) {
             if (g_verts[i].x < fx0) fx0 = g_verts[i].x;
@@ -361,7 +360,9 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
             if (g_verts[i].y < fy0) fy0 = g_verts[i].y;
             if (g_verts[i].y > fy1) fy1 = g_verts[i].y;
         }
-        if (fx0 <= 1.0f && fy0 <= 1.0f && fx1 >= (float)W - 1.0f && fy1 >= (float)H - 1.0f) {
+        /* Log the first three full-screen passes, then every 60th (fade level over time). */
+        if (fx0 <= 1.0f && fy0 <= 1.0f && fx1 >= (float)W - 1.0f && fy1 >= (float)H - 1.0f &&
+            (fullscreen_dumps < 3 || !(++fullscreen_seen % 60))) {
             char tex[128] = ""; size_t used = 0;
             for (unsigned u = 0; u < 4; ++u) {
                 uint32_t code = 0, tw = 0, th = 0;

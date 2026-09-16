@@ -150,8 +150,10 @@ static void set_timer(xctx *c, int extended)
     X_M32(address + 16) = (uint32_t)t->deadline; X_M32(address + 20) = (uint32_t)(t->deadline >> 32);
     X_M32(address + 32) = dpc; X_M32(address + 36) = period;
     if (!delta) { expire(t, now, wall); xk_signal_check(); }
-    xv_logf("[h2/timer] arm timer=%08X due=%08X%08X remaining_us=%llu dpc=%08X period=%u inserted=%u\n",
-            address, (uint32_t)(due >> 32), (uint32_t)due, (unsigned long long)(delta / 10), dpc, period, inserted);
+    static unsigned arms;                              /* heartbeat re-arms ~100/s: log first 400, then every 1000th */
+    if (++arms <= 400 || !(arms % 1000))
+        xv_logf("[h2/timer] arm timer=%08X due=%08X%08X remaining_us=%llu dpc=%08X period=%u inserted=%u\n",
+                address, (uint32_t)(due >> 32), (uint32_t)due, (unsigned long long)(delta / 10), dpc, period, inserted);
     if (!dispatching) xk_thread_kick(worker);
     c->r[0] = inserted; X_RET(words);
 }

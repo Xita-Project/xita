@@ -240,7 +240,7 @@ void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
 
     /* Rows are independent (per-pixel colour/depth writes), so large triangles
      * are split into row bands across the worker pool when one is installed. */
-    if (menu_raster_parallel && cy1 - cy0 >= 48 && (int64_t)(cy1 - cy0) * (J.cx1 - J.cx0) >= 4096)
+    if (menu_raster_parallel && cy1 - cy0 >= 24 && (int64_t)(cy1 - cy0) * (J.cx1 - J.cx0) >= 2048)
         menu_raster_parallel(raster_band, &J, cy0, cy1);
     else
         raster_band(&J, cy0, cy1, 1);

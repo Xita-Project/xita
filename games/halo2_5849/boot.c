@@ -609,6 +609,14 @@ void xv_trace_call(xctx *c, const char *name, unsigned count)
     for (unsigned i = 0; i < count && i < 8; ++i)
         used += snprintf(args + used, sizeof args - used, " %08X", X_ARG(i));
     if (!count) args[0] = 0;
+    /* The timer heartbeat (thread 12) issues KeRaiseIrqlToDpcLevel/KfLowerIrql/KeSetTimer
+     * thousands of times per second: ~1M log lines per long run. Keep the first 400 of
+     * each of those three and then every 1000th; everything else logs every call. */
+    static unsigned hot_raise, hot_lower, hot_timer;
+    unsigned *hot = !strcmp(name, "KeRaiseIrqlToDpcLevel") ? &hot_raise :
+                    !strcmp(name, "KfLowerIrql") ? &hot_lower :
+                    !strcmp(name, "KeSetTimer") ? &hot_timer : NULL;
+    if (hot && ++*hot > 400 && *hot % 1000) return;
     xv_logf("[h2/kernel] thread=%d return=%08X %s%s\n",
             xk_cur ? xk_cur->id : 0, X_M32(c->r[4]), name, args);
 }
