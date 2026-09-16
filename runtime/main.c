@@ -1265,6 +1265,12 @@ void xv_benchmark_optimizations(int enabled)
     xv_present_drain();
     /* Diagnostic controllers change only their observer/report mode here. */
     if (xv_benchmark_compare_log_writer()||xv_benchmark_compare_diagnostic_poll()||xv_benchmark_compare_light_census())return;
+    if (xv_benchmark_compare_depth_store()) {
+#ifdef XV_DEPTH_STORE
+        xv_depth_store_override(enabled);
+#endif
+        return;
+    }
     if (xv_benchmark_compare_query_boundary()) {
 #ifdef XV_QUERY_BOUNDARY
         __atomic_store_n(&g_query_boundary_override,enabled>0,__ATOMIC_RELEASE);
@@ -1628,6 +1634,9 @@ static int xv_pump_retire(void)
             g_boundary_queries,g_boundary_before_final,g_boundary_fallbacks,g_boundary_queries?g_boundary_query_us/(1000.0*g_boundary_queries):0.0,
             g_boundary_queries?g_boundary_tail_us/(1000.0*g_boundary_queries):0.0);
         g_boundary_queries=g_boundary_fallbacks=g_boundary_before_final=0;g_boundary_query_us=g_boundary_tail_us=0;
+#endif
+#ifdef XV_DEPTH_STORE
+        xv_d3d_depth_store_report();
 #endif
         g_early_visibility_count=0; g_early_visibility_us=0; g_visibility_tail_us=0;
         g_retired_count=0; g_completion_us=0; g_max_pending=0;

@@ -12,6 +12,14 @@
  * pointing at the game's texels (NV2A swizzle == PowerVR twiddle).
  */
 #pragma once
+#ifdef XV_DEPTH_STORE
+/* Mode changes only at the drained recording-owner/pump boundary; default OFF.
+ * Reporting is pump-owned. No first/final/offscreen scene stores are changed. */
+int xv_depth_store_available(void);
+int xv_depth_store_enabled(void);
+void xv_depth_store_override(int enabled);
+void xv_d3d_depth_store_report(void);
+#endif
 
 #include <stdint.h>
 #include <psp2/gxm.h>

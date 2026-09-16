@@ -151,6 +151,29 @@ unsigned xv_fshader_embedded_texture_mask(const char *path)
     return 15;
 }
 
+#ifdef XV_DEPTH_STORE
+int xv_fshader_embedded_no_depth(const char *path)
+{
+    if(!path)return 0;
+    const char *override=getenv("XV_SHADER_OVERRIDE");
+    if(override && atoi(override))return 0;
+    unsigned lo=0,hi=sizeof xv_ps_embedded/sizeof xv_ps_embedded[0];
+    while(lo<hi) {
+        unsigned mid=lo+(hi-lo)/2;
+        int cmp=strcmp(path,xv_ps_embedded[mid].path);
+        if(cmp<0)hi=mid;
+        else if(cmp>0)lo=mid+1;
+        else {
+            const SceGxmProgram *p=(const SceGxmProgram *)xv_ps_embedded[mid].data;
+            return sceGxmProgramCheck(p)==SCE_OK &&
+                sceGxmProgramGetType(p)==SCE_GXM_FRAGMENT_PROGRAM &&
+                !sceGxmProgramIsDepthReplaceUsed(p);
+        }
+    }
+    return 0;
+}
+#endif
+
 static SceGxmProgram *load_gxp(const char *path)
 {
     /* Optimization correctness relies on this exact constant program, even

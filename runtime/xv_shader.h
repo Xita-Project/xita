@@ -84,6 +84,11 @@ void xv_fshader_unload(xv_fshader_t *fs);
  * Unknown programs and development overrides conservatively return all four.
  * Call on the guest recording thread; configuration is fixed before launch. */
 unsigned xv_fshader_embedded_texture_mask(const char *path);
+#ifdef XV_DEPTH_STORE
+/* Pump-only read of trusted embedded GXP metadata, never a file or shader link.
+ * Unknown, invalid, non-fragment and depth-exporting programs decline. */
+int xv_fshader_embedded_no_depth(const char *path);
+#endif
 
 /* Per-draw helpers. */
 void xv_shader_bind(SceGxmContext *ctx, const xv_vshader_t *vs, const xv_fshader_t *fs);

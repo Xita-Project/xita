@@ -43,6 +43,7 @@ static void logf_test(const char *fmt,...)
 #define XV_LOG(...) logf_test(__VA_ARGS__)
 #include "../../runtime/xv_visibility_placement.h"
 #include "../../runtime/xv_query_boundary.h"
+#include "../../runtime/xv_depth_store.h"
 uint64_t xk_os_monotonic_us(void) {return ++clock_us;}
 static uint64_t trace=1469598103934665603ull;
 static unsigned opened,ends,begins,draws,uis,finishes,fail_begin,fail_end;
