@@ -73,13 +73,68 @@ phase-marker exclusion, cancellation, unavailable initialization, failed mode
 changes and failed restoration followed by retry. Remote tests check fresh
 results, complete pacing summaries, diagnostic reads, update exclusion and
 maximum-width queue status. Host memory/race tests and a native package build
-pass; hardware results are still pending.
+pass. The physical result below measures the complete reporting policy, including
+grouping the later D3D report as well as moving its output to the writer.
 
 The startup-default selection is separately exercised with missing, explicit ON,
 explicit OFF and invalid environment values in both build modes. These use the
 production writer and checked shutdown, under normal execution, ASan/UBSan and
 TSan. The build tracks changes to both feature and startup-default flags so an
 incremental build cannot silently retain the previous logger policy.
+
+## Physical result: three long Blood Gulch trials
+
+Runtime `7ba416881c30dba053e77d1cd48df34f096600708c1bdc88691891461db29f6d`
+completed three consecutive same-view OFF/ON/OFF trials at native 960×544 with
+the saved standard graphics, both object workers and prior optimizations held
+constant. Effective clocks were CPU 444, bus/GPU 222 and xbar 166 MHz; the saved
+500 MHz CPU request was unavailable. All camera checks passed. Each measured
+arm contains exactly 30 UI report scopes; screenshot and `hist.now` polling
+remain unchanged throughout.
+
+| Trial | OFF before FPS | ON FPS | OFF after FPS | Saved ms/frame vs bracket |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 9.679 | 9.844 | 9.684 | 1.705 |
+| 2 | 9.643 | 9.831 | 9.678 | 1.796 |
+| 3 | 9.661 | 9.833 | 9.663 | 1.800 |
+
+Mean saving is 1.767 ms/frame, about 1.7% throughput improvement. The median
+frame remains near 99.5 ms, so this does not remove the steady workload that
+keeps the scene near 10 FPS. The larger effect is fewer periodic hitches:
+
+| Trial | OFF before p99, ms | ON p99, ms | OFF after p99, ms | Frames >150 ms, OFF/ON/OFF |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 193.037 | 121.825 | 190.544 | 30 / 4 / 31 |
+| 2 | 193.720 | 123.665 | 188.945 | 33 / 3 / 30 |
+| 3 | 191.374 | 123.953 | 190.615 | 32 / 7 / 31 |
+
+Across the pacing samples, OFF has 187 frames over 150 ms out of 10,794;
+ON has 14 out of 5,397, an approximately 85% lower incidence. OFF has 32 frames
+over 200 ms; ON has none in these samples. Per-arm quantiles are not pooled,
+and absence in a small stationary sample does not rule out rare stalls.
+
+The UI report's producer median falls from about 11.1 ms to 1.002 ms. Its timer
+excludes later flare/camera/director output: OFF retains those separate writes,
+whereas ON groups and queues them. Consequently, the complete frame saving
+cannot be attributed solely to the UI timer or solely to thread offload.
+No logger backpressure or errors were reported. After restoration, accepted,
+written and synced sequences all equal 279, byte counts all equal 804,486,
+queue depth is zero and the original OFF mode is restored. The final screen
+still shows the original Blood Gulch view. This is not a moving combat test
+or proof that the outstanding GPU/gameplay crashes are resolved.
+
+Retain the measured report policy in the next private candidate using both
+`XV_PROFILE_ASYNC_REPORT=1 XV_PROFILE_ASYNC_REPORT_DEFAULT=1` build options.
+Startup-ON boot and updater shutdown still need physical verification: this
+comparison created the idle writer after entering gameplay, whereas startup
+creates it before GXM/dashboard initialization. Ordinary builds remain unchanged.
+
+Private receipts, complete logs, screenshots and analysis are in
+`engine-restructure-20260914T2300Z/physical-async-priority/`. The logger revision
+is source commit `2728a00`; the separate startup selection is `13231e9`.
+Stable 20 FPS, representative campaign/driving performance and broader crash
+stability remain unverified. Next reduce steady geometry/scene preparation and
+measure the two remaining diagnostic filesystem polls independently.
 
 ## Ownership, ordering and memory
 

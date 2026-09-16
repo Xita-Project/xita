@@ -82,10 +82,17 @@ prototype also remains separate after weak ARM sizing results. Current larger
 work targets private spatial queries with ordered publication and larger native
 geometry regions. The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
-The [asynchronous periodic-report prototype](docs/async-reports-20260916.md)
-has passed independent host review and native compilation. A longer same-session
-comparison measures frame-time tails as well as FPS; physical results remain
-pending. Neither establishes a stable 20 FPS result. Official
+The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)
+now completes three long native-resolution hardware trials: roughly 9.66–9.68
+FPS synchronously versus 9.83–9.84 FPS with background reports, saving about
+1.77 ms/frame. P99 falls from roughly 189–194 ms to 122–124 ms and the incidence
+of frames over 150 ms falls about 85%. Median frames remain near 99.5 ms;
+this is a periodic-hitch improvement, not stable 20 FPS. The logger fully drains
+without errors and restores its original mode. The next private build will
+retain this policy while ordinary builds remain opt-in; startup and updater
+shutdown still need physical verification. Independent comparisons of
+[diagnostic filesystem polling](docs/diagnostic-poll-20260916.md) are ready,
+without changing controller reads, screenshots or default polling behavior. Official
 [MCC reference tags](docs/mcc-mod-tools-reference.md) have been privately
 inventoried for content investigation, without changing the Xbox maps.
 
