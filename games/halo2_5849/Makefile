@@ -148,7 +148,7 @@ ifeq ($(MENU_RENDER),1)
 ifneq ($(SPRITE_RENDER),1)
 $(error MENU_RENDER=1 requires SPRITE_RENDER=1)
 endif
-OBJECTS += $(BUILD)/menu_draw.o $(BUILD)/nv2a_vsh.o $(BUILD)/menu_raster.o $(BUILD)/menu_texture.o $(BUILD)/menu_render.o
+OBJECTS += $(BUILD)/menu_draw.o $(BUILD)/nv2a_vsh.o $(BUILD)/menu_raster.o $(BUILD)/menu_texture.o $(BUILD)/menu_combiner.o $(BUILD)/menu_render.o
 $(BUILD)/host_channel_runtime.o: CFLAGS += -DH2_MENU_RENDER=1
 endif
 comma := ,
@@ -417,7 +417,7 @@ $(BUILD)/blur-probe-param.sfo: Makefile
 $(BUILD)/blur%.vpk: $(BUILD)/blur%-eboot.bin $(BUILD)/blur-probe-param.sfo $(addprefix $(BLUR_SHADERS)/,$(BLUR_PROBE_FILES))
 	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/blur-probe-param.sfo -b $(BUILD)/blur$*-eboot.bin $(foreach f,$(BLUR_PROBE_FILES),-a $(BLUR_SHADERS)/$(f)=$(f)) $@
 test-host: $(BUILD)/dxt23_layout_test
-test-host: $(BUILD)/luma_draw_test $(BUILD)/sprite_draw_test $(BUILD)/menu_draw_test $(BUILD)/nv2a_vsh_test $(BUILD)/menu_raster_test $(BUILD)/menu_texture_test
+test-host: $(BUILD)/luma_draw_test $(BUILD)/sprite_draw_test $(BUILD)/menu_draw_test $(BUILD)/nv2a_vsh_test $(BUILD)/menu_raster_test $(BUILD)/menu_texture_test $(BUILD)/menu_combiner_test
 test-host: $(BUILD)/blend_draw_test
 test-host: $(BUILD)/geometry_dispatch_test $(BUILD)/screen_draw_test $(BUILD)/bc1_draw_test $(BUILD)/composition_draw_test $(BUILD)/threshold_draw_test $(BUILD)/blur_draw_test
 test-host: $(BUILD)/eflags_id_test $(BUILD)/eflags_id_default_test $(BUILD)/file_lifetime_test $(BUILD)/kernel_timer_test $(BUILD)/fp_environment_test $(BUILD)/linear_texture_test
@@ -449,6 +449,7 @@ test-host: $(BUILD)/kernel_stack_test $(BUILD)/audio_unavailable_test $(BUILD)/i
 	$(BUILD)/nv2a_vsh_test
 	$(BUILD)/menu_raster_test
 	$(BUILD)/menu_texture_test
+	$(BUILD)/menu_combiner_test
 	$(BUILD)/geometry_dispatch_test
 	$(BUILD)/quad_draw_test
 	$(BUILD)/blit_copy_test
@@ -559,12 +560,15 @@ $(BUILD)/menu_draw_test: menu_draw_test.c menu_draw.c menu_draw.h command_state.
 $(BUILD)/nv2a_vsh_test: nv2a_vsh_test.c nv2a_vsh.c nv2a_vsh.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror nv2a_vsh_test.c -lm -o $@
-$(BUILD)/menu_raster_test: menu_raster_test.c menu_raster.c menu_raster.h
+$(BUILD)/menu_raster_test: menu_raster_test.c menu_raster.c menu_raster.h menu_combiner.c menu_combiner.h
 	@mkdir -p $(dir $@)
-	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror menu_raster_test.c -lm -o $@
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror menu_raster_test.c menu_combiner.c -lm -o $@
 $(BUILD)/menu_texture_test: menu_texture_test.c menu_texture.c menu_texture.h command_state.h kelvin_clear.h gpu_objects.c gpu_objects.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror menu_texture_test.c gpu_objects.c -o $@
+$(BUILD)/menu_combiner_test: menu_combiner_test.c menu_combiner.c menu_combiner.h command_state.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror menu_combiner_test.c -lm -o $@
 $(BUILD)/blit_copy_test: blit_copy_test.c command_state.c command_state.h kelvin_clear.c kelvin_clear.h gpu_objects.c gpu_objects.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror blit_copy_test.c command_state.c kelvin_clear.c gpu_objects.c -o $@
@@ -659,7 +663,7 @@ $(BUILD)/nv2a_regs.o: nv2a_regs.c
 $(BUILD)/linear_texture.o $(BUILD)/fp_environment.o $(BUILD)/kernel_timer.o $(BUILD)/kernel_stack.o $(BUILD)/command_snapshot.o $(BUILD)/host_channel_runtime.o $(BUILD)/command_state.o $(BUILD)/host_channel.o $(BUILD)/host_tiles.o $(BUILD)/push_stream.o $(BUILD)/gpu_objects.o $(BUILD)/kelvin_clear.o $(BUILD)/scanout.o $(BUILD)/input.o $(BUILD)/audio_unavailable.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/audio_mixer_bridge.o $(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/screen_draw.o $(BUILD)/bc1_draw.o $(BUILD)/composition_draw.o $(BUILD)/threshold_draw.o $(BUILD)/blur_draw.o $(BUILD)/blend_draw.o $(BUILD)/luma_draw.o $(BUILD)/sprite_draw.o $(BUILD)/menu_draw.o $(BUILD)/nv2a_vsh.o $(BUILD)/menu_raster.o $(BUILD)/menu_texture.o $(BUILD)/menu_render.o $(BUILD)/dxt23_layout.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/audio_fx.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
+$(BUILD)/audio_mixer_bridge.o $(BUILD)/quad_draw.o $(BUILD)/quad_gxm.o $(BUILD)/screen_draw.o $(BUILD)/bc1_draw.o $(BUILD)/composition_draw.o $(BUILD)/threshold_draw.o $(BUILD)/blur_draw.o $(BUILD)/blend_draw.o $(BUILD)/luma_draw.o $(BUILD)/sprite_draw.o $(BUILD)/menu_draw.o $(BUILD)/nv2a_vsh.o $(BUILD)/menu_raster.o $(BUILD)/menu_texture.o $(BUILD)/menu_combiner.o $(BUILD)/menu_render.o $(BUILD)/dxt23_layout.o $(BUILD)/audio_host.o $(BUILD)/audio_vita.o $(BUILD)/audio_bins.o $(BUILD)/audio_progress.o $(BUILD)/audio_fx.o $(BUILD)/dsp_engine.o $(BUILD)/dsp_asset.o: $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/dsp_core.o: dsp/interp/dsp_cpu.c

@@ -2,7 +2,7 @@
 #include "nv2a_vsh.h"
 #include "menu_raster.h"
 #include "menu_texture.h"
-#include "linear_texture.h"
+#include "menu_combiner.h"
 #include "command_state.h"
 #include "kelvin_clear.h"
 #include <string.h>
@@ -91,7 +91,11 @@ static void transform_out(const float o[NV2A_VSH_OUTPUTS][4], menu_vertex_out *v
     v->z = o[NV2A_O_POS][2] / 16777215.0f;
     v->w = o[NV2A_O_POS][3];
     for (unsigned k = 0; k < 4; ++k) v->color[k] = o[NV2A_O_D0][k];
-    v->uv[0] = o[NV2A_O_T0][0]; v->uv[1] = o[NV2A_O_T0][1];
+    for (unsigned k = 0; k < 4; ++k) v->specular[k] = o[NV2A_O_D1][k];
+    for (unsigned t = 0; t < 4; ++t) {
+        v->uv[t][0] = o[NV2A_O_T0 + t][0];
+        v->uv[t][1] = o[NV2A_O_T0 + t][1];
+    }
 }
 
 static menu_vertex_out g_verts[MAX_VERTS];
@@ -151,12 +155,18 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     rs.blend = MENU_BLEND_ALPHA;
     rs.clip_x0 = 0; rs.clip_y0 = 0; rs.clip_x1 = (int32_t)W - 1; rs.clip_y1 = (int32_t)H - 1;
 
-    static uint32_t g_tex0[256 * 256];
+    static uint32_t g_tex[4][256 * 256];
     int textured = 0;
-    uint32_t tw = 0, th = 0;
-    if (menu_texture_load(s, c, 0, g_tex0, sizeof g_tex0 / sizeof *g_tex0, &tw, &th)) {
-        rs.tex0.texels = g_tex0; rs.tex0.width = tw; rs.tex0.height = th; textured = 1;
+    for (unsigned u = 0; u < 4; ++u) {
+        uint32_t tw = 0, th = 0;
+        if (menu_texture_load(s, c, u, g_tex[u], 256 * 256, &tw, &th)) {
+            rs.tex[u].texels = g_tex[u]; rs.tex[u].width = tw; rs.tex[u].height = th;
+            textured = 1;
+        }
     }
+    static menu_combiner cb;
+    menu_combiner_decode(s, &cb);
+    rs.combiner = &cb;
 
     uint32_t n = 0;
     if (r->vertex_count) {                         /* immediate vertices */

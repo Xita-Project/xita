@@ -1,0 +1,74 @@
+#include "menu_combiner.c"
+#include <assert.h>
+#include <stdio.h>
+#include <math.h>
+
+static int feq(float a, float b){ float d=a-b; return d<2e-3f && d>-2e-3f; }
+static const float FOG[4]={0,0,0,1};
+
+static void test_passthrough_tex0(void)
+{
+    /* stage0: AB = t0 * (invert(zero)=1) -> r0 ; final D = r0 -> out = t0 */
+    menu_combiner cb; memset(&cb,0,sizeof cb);
+    cb.stages = 1;
+    cb.rgb_in[0]  = (0x08u<<24) | (0x20u<<16) | 0; /* A=t0(id), B=zero(invert=1), C=D=zero */
+    cb.rgb_out[0] = (0xCu<<4);                      /* ab -> r0(0xC), identity */
+    cb.final_abcd = 0x0000000C;                     /* D = r0 */
+    float tex[4][4]={{0.5f,0.6f,0.7f,1.0f},{0,0,0,1},{0,0,0,1},{0,0,0,1}};
+    float diff[4]={1,1,1,1}, spec[4]={0,0,0,0}, out[4];
+    menu_combiner_eval(&cb, tex, diff, spec, FOG, out);
+    assert(feq(out[0],0.5f)&&feq(out[1],0.6f)&&feq(out[2],0.7f));
+}
+
+static void test_diffuse_times_tex(void)
+{
+    /* stage0: AB = t0 * v0 -> r0 ; final D=r0 -> out = t0*diffuse */
+    menu_combiner cb; memset(&cb,0,sizeof cb);
+    cb.stages = 1;
+    cb.rgb_in[0]  = (0x08u<<24) | (0x04u<<16) | 0; /* A=t0, B=v0(diffuse) */
+    cb.rgb_out[0] = (0xCu<<4);
+    cb.final_abcd = 0x0000000C;
+    float tex[4][4]={{1.0f,1.0f,1.0f,1.0f},{0,0,0,1},{0,0,0,1},{0,0,0,1}};
+    float diff[4]={0.25f,0.5f,1.0f,1.0f}, spec[4]={0,0,0,0}, out[4];
+    menu_combiner_eval(&cb, tex, diff, spec, FOG, out);
+    assert(feq(out[0],0.25f)&&feq(out[1],0.5f)&&feq(out[2],1.0f));
+}
+
+static void test_dot_product(void)
+{
+    /* stage0: AB = dot(t0.expand, t1.expand) -> r0 ; final D=r0.
+     * t0=t1=(1,0.5,0.5) expand -> (1,0,0); dot=1. Broadcast. */
+    menu_combiner cb; memset(&cb,0,sizeof cb);
+    cb.stages = 1;
+    cb.rgb_in[0]  = ((0x40u|0x08u)<<24) | ((0x40u|0x09u)<<16); /* A=t0 expand_normal, B=t1 expand_normal */
+    cb.rgb_out[0] = (0xCu<<4) | (0x02u<<12);        /* ab->r0, AB_DOT flag */
+    cb.final_abcd = 0x0000000C;
+    float tex[4][4]={{1.0f,0.5f,0.5f,1.0f},{1.0f,0.5f,0.5f,1.0f},{0,0,0,1},{0,0,0,1}};
+    float diff[4]={1,1,1,1}, spec[4]={0,0,0,0}, out[4];
+    menu_combiner_eval(&cb, tex, diff, spec, FOG, out);
+    assert(feq(out[0],1.0f)&&feq(out[1],1.0f)&&feq(out[2],1.0f)); /* dot broadcast */
+}
+
+static void test_final_lerp(void)
+{
+    /* No stages. final rgb = A*B + (1-A)*C + D with A=zero(->0), C=v0, D=zero:
+     * out = (1-0)*v0 = v0. */
+    menu_combiner cb; memset(&cb,0,sizeof cb);
+    cb.stages = 0;
+    cb.final_abcd = (0x00u<<24)|(0x00u<<16)|(0x04u<<8)|0x00; /* A=zero B=zero C=v0 D=zero */
+    cb.final_efg = 0x00000004;                                /* G=v0 -> alpha */
+    float tex[4][4]={{0,0,0,1},{0,0,0,1},{0,0,0,1},{0,0,0,1}};
+    float diff[4]={0.2f,0.4f,0.8f,0.9f}, spec[4]={0,0,0,0}, out[4];
+    menu_combiner_eval(&cb, tex, diff, spec, FOG, out);
+    assert(feq(out[0],0.2f)&&feq(out[1],0.4f)&&feq(out[2],0.8f));
+}
+
+int main(void)
+{
+    test_passthrough_tex0();
+    test_diffuse_times_tex();
+    test_dot_product();
+    test_final_lerp();
+    printf("menu_combiner_test: all assertions passed\n");
+    return 0;
+}
