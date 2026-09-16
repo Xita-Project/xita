@@ -98,3 +98,47 @@ avoid speculative read-ahead until file lifetime and access patterns are known.
 Private evidence: `engine-restructure-20260914T2300Z/world-cost-20260916T005601Z`,
 `world-children-20260916` and `physical-world-children`. Game bytes, generated code, logs and packages remain
 outside Git. No new FPS improvement is established by this diagnostic.
+
+## Follow-up: steady draw work and notification timing
+
+The second long physical logger trial on runtime `7ba41688…` provides 29
+complete 60-frame counter windows per arm after excluding each straddling
+window. Native draw-HLE time is 13.421 / 13.428 / 13.424 ms/frame. Within it,
+stream preparation is about 4.58 ms, indices 2.65 ms, textures 2.07 ms,
+state 1.40 ms, programs 1.04 ms and constants 0.49 ms. These costs are included
+in draw HLE, not additional frame costs. The earlier serial, instrumented
+`70110` selected-self figure includes its draw calls and comes from a different
+workload; it is not another independent 11 ms opportunity.
+
+The enabled arm copies about 581 KiB and compares about 405 KiB of vertex data
+per frame, with 112 copies and 91 exact-byte reuses. Pointer identity cannot
+replace those comparisons: current-frame versions can change and generated
+draw loops retain scheduler handoffs between chunks. Likewise, live texture
+resolution must retain streaming, palette and render-target validation.
+Native state/program preparation has a 2.43 ms total budget in this capture,
+so even perfect reuse there cannot provide the roughly 50 ms reduction needed.
+
+Observed fragment-notification retirement averages 60.936 / 61.042 / 61.127 ms
+per packet in these same windows. Its start is the pump's timestamp before
+CPU accounting, upload joins and GXM submission; completion is the timestamp
+when the pump first sees the expected fragment-notification value. Display-slot
+and frame-cap waits precede the start. The pump checks independently of guest
+Present and requests 100 µs sleeps while work remains pending. Actual polling
+gaps are not measured.
+
+Thus this is **submission-to-observed-completion latency**, including CPU
+submission, GPU/driver dependencies and observation delay, rather than pure
+GPU execution time. Pump submission averages about 4.2 ms and overlaps guest
+work. Every window has maximum pending one, no busy-slot waits and no submission
+fence failures. Substantial GPU residence is plausible; the measurement is
+not an artifact of waiting until the next guest Present, but neither is it
+a proven 61 ms throughput floor. Cross-frame pipeline capacity at a 50 ms feed
+interval remains untested.
+
+Ordinary frame medians remain near 99.5 ms. Larger translated geometry and
+object-update ownership remain the immediate CPU targets. If preparation gets
+close to the 50 ms target, capture submission-end, last unsuccessful and first
+successful notification observations plus maximum polling gap per packet.
+Completion cadence and queue growth then distinguish a GPU throughput limit
+from latency hidden behind the current slower CPU feed. Do not sum overlapping
+CPU/GPU scopes or infer stable 20 FPS from either number alone.
