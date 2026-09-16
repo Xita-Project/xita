@@ -171,6 +171,11 @@ class HaloHooks(NoGameHooks):
                             "    XV_OBJECT_MATH_GUARD(); /* shared guest transaction */", "#endif"])
         if self.flare_enabled and address == ENTRY:
             out.append(ENTRY_HOOK)
+        if address == 0xB77C0 and hashlib.sha256(
+                self.image.bytes_at(address, 195) or b"").hexdigest() == "5ceeee6fc591265ef9a0e51d3cd0a0cac96b0a100d27b3e29a1e9a10be4aba73":
+            out.extend(["#ifdef XV_NATIVE_POLYGON_EDGE",
+                        "    { extern int xv_math_polygon_edge(xctx *); if (xv_math_polygon_edge(c)) return; }",
+                        "#endif"])
         native_math = {
             0xB5EA0: (105, "da339a7eda273186b22d469e8d3fa75d0ec291bee26bc91c8534de058e01e0e1", "xv_math_point_transform"),
             0x5C300: (733, "5e463d77ea6ed255323f310d40cf3f7e847c08e7a6a71841b12545b1f937e1ab", "xv_math_bounds"),

@@ -455,6 +455,26 @@ $(RECOMP_BUILD)/object-pose.config: force-object-pose-config
 	@rm -f $@.tmp
 $(POSE_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-pose.config
 
+# Explicit polygon-edge build mode; runtime controls remain separate.
+EDGE_HOOK_SRCS := $(shell rg -l XV_NATIVE_POLYGON_EDGE $(XITA_GUEST_SRCS) 2>/dev/null)
+EDGE_HOOK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(EDGE_HOOK_SRCS))
+EDGE_NATIVE_OBJS := $(RECOMP_BUILD)/kernel/xk_polygon_edge.o $(RECOMP_BUILD)/kernel/xk_polygon_edge_control.o
+ifeq ($(XV_NATIVE_POLYGON_EDGE),1)
+$(EDGE_HOOK_OBJS): RECOMP_CFLAGS += -DXV_NATIVE_POLYGON_EDGE
+endif
+.PHONY: force-polygon-edge-config
+force-polygon-edge-config:
+$(RECOMP_BUILD)/polygon-edge.config: force-polygon-edge-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_NATIVE_POLYGON_EDGE)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(EDGE_HOOK_OBJS) $(EDGE_NATIVE_OBJS): $(RECOMP_BUILD)/polygon-edge.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/polygon-edge.config
+$(RECOMP_BUILD)/kernel/xk_polygon_edge.o: RECOMP_CFLAGS += -ffp-contract=off
+recomp/kernel/xk_polygon_edge.c: tools/gen_native_polygon_edge.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
+	$(PYTHON) tools/gen_native_polygon_edge.py --xbe $(XBE) --manifest $(XBE_JSON)
+
 # Only generated units containing this optional hook depend on its build mode.
 # This also handles changed shard numbering after regeneration.
 HIERARCHY_HOOK_SRCS := $(shell grep -l XV_NATIVE_MODEL_HIERARCHY $(XITA_GUEST_SRCS) 2>/dev/null)
