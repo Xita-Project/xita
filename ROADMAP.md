@@ -24,6 +24,16 @@ dashboard/overlay navigation, Blood Gulch and plasma-fire smoke checks pass.
 The 360p valley sample remains around 9 FPS with all four Off, without a matched
 On comparison, so no performance gain is established. Full-screen bloom remains
 a separate pass-isolation task; broader gameplay and shadow appearance checks remain.
+Later user play reports 20 FPS in Blood Gulch caves/bases and Battle Creek,
+versus about 10 FPS across the valley. Logs confirm several 20–22 FPS stretches;
+these are not matched-camera gains or a sustained 20 FPS result. The longer
+capture also identifies a missing model shader variant for follow-up.
+
+[~] [Read-only backbuffer depth stores](docs/backbuffer-depth-store-20260916.md):
+the guarded candidate and Off/On/Off comparison are implemented, host-tested
+and built for Vita. It preserves loads, writable passes, first/final scenes and
+query lifetime. It remains disabled and awaits physical eligibility, correctness
+and performance measurements; the user's active build is unchanged.
 
 **Active objective (September 15):** restructure costly Halo CE engine and rendering
 work into efficient native routines and independent worker jobs until sustained

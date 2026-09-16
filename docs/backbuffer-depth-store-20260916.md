@@ -45,6 +45,14 @@ exports/buffer stores. The authenticated remote-interface tests passed under
 Address/UndefinedBehaviorSanitizer. These host checks do not establish GXM driver
 behavior, physical correctness or a performance improvement.
 
+The native Vita build also passes, with the existing worker and visual-switch
+configuration retained. Package comparison finds the same 1,588 members and
+only `game-a.self` and `boot-game.txt` changed. The prepared runtime hash is
+`daeac492ee59d6d03476eea85a81f973d931a1526de967d33dd828bac13c4f52`.
+It has not replaced the user's active gameplay build. Visibility-placement and
+query-boundary regression tests pass; no generated guest translation unit was
+rebuilt for this candidate.
+
 Physical acceptance still requires eligible-scene counters, matched-camera
 native-resolution comparisons, world/HUD/effect images and combat/driving checks.
 Leave the candidate Off unless that evidence supports enabling it. Private
