@@ -37,6 +37,18 @@ LAYOUTS_H := shaders/xv_layouts.h
 LAYOUTS_SRC := shaders/halo_shaders.json
 
 CFLAGS    := -O2 -mthumb -Wall -Wextra -Wno-unused-parameter -MMD -MP -I. -Iruntime -Ishaders
+# Explicit research build; runtime XV_PROFILE_ASYNC_REPORT still defaults OFF.
+ifeq ($(XV_PROFILE_ASYNC_REPORT),1)
+CFLAGS += -DXV_PROFILE_ASYNC_REPORT
+endif
+.PHONY: force-async-report-config
+force-async-report-config:
+$(BUILD)/async-report.config: force-async-report-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_PROFILE_ASYNC_REPORT)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_log.o: $(BUILD)/async-report.config
 # Reserve room for vita-elf-create's module/import metadata before the next
 # load segment. Traced builds can otherwise end too close to its boundary.
 LDFLAGS   := -Wl,-q,--defsym=__sce_headroom=0x1000

@@ -13,13 +13,21 @@ prefix=r'''
 #include <stdint.h>
 #include <stdio.h>
 #include "runtime/xv_update.h"
+#include "runtime/xv_log.h"
 #define SCE_KERNEL_POWER_TICK_DEFAULT 0
 #define SCE_DISPLAY_SETBUF_NEXTFRAME 1
 typedef struct { void *ctx; } xv_gfx_t;
 static xv_gfx_t g_gfx;
-static unsigned updating,remote_live,step,stage,wakes,ticks;
+static unsigned updating,remote_live,step,stage,wakes,ticks,log_calls,log_failures;
 static void log_event(const char *format,...) { (void)format; }
 #define XV_LOG log_event
+int sceClibPrintf(const char *format,...) { (void)format; return 0; }
+int sceKernelDelayThread(unsigned us) { assert(us==100000 && remote_live && step==5);return 0; }
+int xv_log_shutdown(unsigned timeout) {
+    assert(timeout==5000000 && remote_live && step==5);log_calls++;
+    if(log_failures) { log_failures--;return XV_LOG_TIMEOUT; }
+    return XV_LOG_OK;
+}
 unsigned xv_update_requested(void) { return updating; }
 void xv_update_progress(unsigned next) {
     if(!updating)return;
@@ -53,11 +61,12 @@ void xv_net_shutdown(void) { assert(!remote_live && step++==6); }
 suffix=r'''
 int main(void) {
     for(updating=0;updating<2;updating++) {
-        remote_live=1;step=stage=wakes=ticks=0;g_gfx.ctx=(void*)1;
+        remote_live=1;step=stage=wakes=ticks=log_calls=0;log_failures=updating;g_gfx.ctx=(void*)1;
         xv_finish_for_exit();
         assert(step==7 && !remote_live && wakes==updating && ticks==updating);
+        assert(log_calls==1+updating);
     }
-    puts("PASS: update wakes display before drains; GPU/display waits retain remote diagnostics; network stops before process handoff");
+    puts("PASS: GPU/display/log drains retain remote diagnostics; failed timed logger drain retries before network stop");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='xita-update-handoff-') as directory:

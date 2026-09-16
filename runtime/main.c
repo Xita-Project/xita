@@ -768,8 +768,21 @@ static void xv_finish_for_exit(void)
     sceDisplayWaitVblankStart();
     sceDisplayWaitVblankStart();
 #ifdef XV_RUN_RECOMP
+    if(xv_update_requested())XV_LOG("update: display detached; draining periodic log writer before network stop\n");
+#endif
+    /* Producers and pump are quiesced. Keep remote status/log retrieval alive
+     * through a blocked or failed drain. No queue/sink lock is held here. */
+    for(;;) {
+        int drained=xv_log_shutdown(5000000);
+        if(drained==XV_LOG_OK) break;
+#ifdef XV_RUN_RECOMP
+        if(xv_update_requested()) { sceKernelDelayThread(100000); continue; }
+#endif
+        sceClibPrintf("[xv] exit log drain failed %d; pending output not claimed durable\n",drained);
+        break;
+    }
+#ifdef XV_RUN_RECOMP
     xv_update_progress(XV_UPDATE_NETWORK_STOP);
-    if(xv_update_requested())XV_LOG("update: display detached; stopping network service\n");
     xv_remote_stop();
     xv_net_shutdown();
 #endif
@@ -1876,6 +1889,7 @@ int main(int argc, char *argv[])
     XV_LOG("clocks: cpu %d bus %d gpu %d xbar %d MHz\n", scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(), scePowerGetGpuXbarClockFrequency());
     xv_log_memory_budget("boot");
     xv_load_settings();
+    (void)xv_log_async_start(); /* explicit opt-in, after environment/config */
 
     uint64_t gfx_started = sceKernelGetProcessTimeWide();
     if (xv_gfx_init() != 0) {           /* GXM first: sceGxmMapMemory needs it live */
@@ -1981,15 +1995,20 @@ shutdown:
 #endif
 #ifdef XV_RUN_RECOMP
     if(xv_update_requested()) {
-        xv_update_progress(XV_UPDATE_LAUNCHER_HANDOFF);
         XV_LOG("update: handing off to boot helper\n");
-        xv_log_flush();
+        if(xv_log_flush_wait(5000000)!=XV_LOG_OK) {
+            sceClibPrintf("[xv] update: final log sync failed; refusing launcher handoff\n");
+            sceKernelExitProcess(1); return 1;
+        }
+        xv_update_progress(XV_UPDATE_LAUNCHER_HANDOFF);
         int rc=sceAppMgrLoadExec("app0:eboot.bin",NULL,NULL);
         if(rc>=0)for(;;)sceKernelDelayThread(100000);
         XV_LOG("update: launcher handoff failed %08X; exiting without replacing active slot\n",rc);
     }
 #endif
     XV_LOG("Xita runtime exiting\n");
+    if(xv_log_flush_wait(5000000)!=XV_LOG_OK)
+        sceClibPrintf("[xv] exit: final log sync failed\n");
     sceKernelExitProcess(0);
     return 0;
 }

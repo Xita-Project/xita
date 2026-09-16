@@ -12,6 +12,7 @@ static SceUID caller=100;
 static unsigned syncs;
 
 SceUID sceKernelGetThreadId(void) { return caller; }
+int sceKernelDelayThread(SceUInt us) { (void)us; assert(!"unexpected wait in serial fixture"); return 0; }
 
 int sceClibPrintf(const char *fmt, ...)
 {
@@ -46,7 +47,7 @@ int sceIoSyncByFd(SceUID fd, int flag) { assert(fd == 10 && !flag); syncs++; ret
 static void reset(void)
 {
     console_n = file_n = writes = locks = unlocks = short_limit = 0;
-    held = fail_write = zero_write = 0; g_fd = 10; g_mtx = 20;
+    held = fail_write = zero_write = 0; g_fd = 10; g_mtx = 20; g_init=0; g_immediate_error=0;
     assert(!g_report_owner && !g_report_used); caller=100; syncs=0;
     memset(console_text, 0, sizeof console_text); memset(file_text, 0, sizeof file_text);
 }

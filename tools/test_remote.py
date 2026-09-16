@@ -267,6 +267,9 @@ def main():
             assert command("p") == "PAD 0 128 128 128 128"
             assert command('h')=='ACK'  # ignored when no update is requested
             state=json.loads(request('/update')[2]);assert state['contract']==abi and state['state']==0 and state['handoff']==0
+            assert state['log']['state']==5 and state['log']['error']==-77 and state['log']['queued']==4
+            assert state['log']['accepted']==2**64-1 and state['log']['bytes']==[2**64-1,2**64-2,2**64-3]
+            assert state['log']['frame']==2**32-1 and state['log']['chunk']==2**32-1
             manifest=f'/update/begin?size={len(new)}&sha256={hashlib.sha256(new).hexdigest()}&contract={abi}'
             assert request(manifest,'POST',token='f'*32)[0]==403
             assert request(manifest+'x','POST')[0]==409
