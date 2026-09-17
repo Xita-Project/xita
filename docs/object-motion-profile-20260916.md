@@ -61,5 +61,28 @@ The native build passes. Package verification confirms unchanged assets and
 launcher, with only the executable and boot marker differing. Only the two
 instrumented translation units and worker bridge change in the linked objects.
 Runtime SHA-256: `3e49cf6f1462c6352403f2787025448dc7a5b952125a947ad5f9f81ca13c8782`.
-Physical attribution is pending. No performance improvement is claimed for this
-measurement change.
+Physical installation and two same-view campaign trials pass at the standard
+960×544 settings. Off/on/off FPS is 11.566/11.562/11.446 and
+11.509/11.399/11.494; both restore the diagnostic to off. No performance
+improvement is claimed for this measurement change.
+
+| Sampled interval, inclusive µs | Trial 1 | Trial 2 |
+| --- | ---: | ---: |
+| Movement `4B9D0` | 25,838 | 20,528 |
+| Movement/contact processing `49600` | 23,844 | 18,805 |
+| Collection/solver wrapper `172BF0` | 23,046 | 18,059 |
+| Collision collection `171F10` | 18,644 | 15,062 |
+| Captured solver `170C10` | 4,196 | 2,791 |
+
+There are 25 and 26 sampled wrapper calls respectively. Collection accounts for
+80.9% and 83.4% of that wrapper's sampled elapsed time; solving accounts for
+18.2% and 15.5%. These are nested elapsed intervals, not CPU self time or shares
+of the complete frame. Periodic report windows can overlap settling in the same
+enabled arm. Scheduling and owner-service parks are still included.
+
+The next target is collection: inspect its cluster search `88110`, static shape
+collection `868F0` and dynamic shape collection `1716F0`, and qualify a reduction
+in their work while retaining the actor transaction. An independent Claude Code
+audit is running in a separate worktree. A separate reviewer examines ownership
+constraints. Codex retains hardware testing and integration. This evidence does
+not qualify releasing the solver lock or establish stable 20 FPS.
