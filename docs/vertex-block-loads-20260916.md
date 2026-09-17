@@ -1,7 +1,7 @@
 # Exact vertex comparisons with grouped NEON loads
 
 The earlier hardware trials below were inconclusive. A September 17 cumulative
-fresh-launch retest is now prepared with a process-start build default; see the
+fresh-launch build is now installed with a process-start build default; see the
 follow-up at the end. The comparator itself is unchanged.
 
 The experiment changes how the CPU loads bytes while validating a retained
@@ -72,7 +72,7 @@ python tools/test_arm_bytes_equal.py --blocks \
 The ARM tool needs the existing Python ARM-test dependencies and Vita SDK GCC
 on PATH. The baseline ELF supplies Vita libc for the independent result check.
 
-## Hardware status
+## Earlier hardware trials
 
 Runtime `c55b191b04025461fe1504c0f2e1780ff863c9c0b14fd034291efec9c0e97a6e`
 has been uploaded, verified, boot-confirmed in slot 1 and launched through Halo's
@@ -138,6 +138,25 @@ The full Vita build passes; its package changes only the runtime and boot record
 This candidate adds grouped comparisons to the five retained startup paths and
 the preceding worker/rendering changes. Standard graphics remain the baseline.
 It does not claim that the earlier benchmark arithmetic was broken or that the
-combination improves FPS. Hardware boot, admission and gameplay results remain
-to be recorded. Private build/review receipts are under
+combination improves FPS. Private build/review receipts are under
 `direct-cluster-query/vertex-block-startup/`.
+
+The runtime from source `ca0f3b0` is transfer-verified and boot-confirmed in
+updater slot 0:
+`a4e35d47a6d5db8d11e4915708ce93b9e900a8bc1893baf62a2cb61f98859eda`.
+The preceding five-path `31af4cf…` remains in slot 1. Startup logs confirm the
+prior paths and grouped comparisons enabled together, with native 960 × 544
+rendering, Original graphics and effective CPU/GPU clocks of 444/222 MHz.
+Ordinary cryo-tutorial gameplay reports nonzero grouped checks (84,240 in one
+60-frame window); the new path is executing without a benchmark mode switch.
+
+This launch loaded save directory `122A17771B9F`, whereas the preceding pistol
+checkpoint loaded `122A17771B9E`. The profile display name was not captured and
+must not be inferred from the menu sequence. The current cryo view reports
+roughly 496–506 draws/frame and 5.8–5.9 FPS; the earlier pistol checkpoint had
+about 150 draws/frame. Those different workloads cannot establish a gain or
+regression from grouped comparisons. The candidate remains enabled for
+cumulative gameplay evaluation. A brief right-stick camera and pause-menu
+check also completes, with input released and no logger error. This does not
+qualify combat or driving. No five-FPS gain or long-session crash fix is
+established by these startup and admission checks.

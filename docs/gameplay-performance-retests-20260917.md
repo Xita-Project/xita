@@ -75,7 +75,7 @@ CPU work completed earlier may merely spend longer waiting on an unchanged GPU
 dependency. Keep qualified changes and evaluate their combination; do not claim a
 five-FPS benefit until ordinary gameplay supports it.
 
-The current cumulative runtime is `31af4cf390bd5f58d58429d3902f6107174de6803777d09dd1ada3d8ffc84812`
+The preceding five-path runtime is `31af4cf390bd5f58d58429d3902f6107174de6803777d09dd1ada3d8ffc84812`
 from source `1823407`. It retains those three helpers, earlier exact query
 publication and conditional read-only depth-store omission together, on top
 of the preceding worker/rendering changes. All five startup modes are enabled;
@@ -83,6 +83,17 @@ the newest stencil refinement admits a final continuation per campaign frame.
 The latest same-checkpoint observation is 12.769 FPS versus 12.660 FPS for its
 parent: inconclusive, with all five changes still enabled. See the
 [stencil follow-up](depth-store-stencil-20260917.md) for evidence and limitations.
+
+The current cumulative runtime is
+`a4e35d47a6d5db8d11e4915708ce93b9e900a8bc1893baf62a2cb61f98859eda`
+from source `ca0f3b0`, installed in slot 0. It adds the existing grouped exact
+vertex comparisons as a sixth startup path, retaining the preceding five and
+the worker/rendering improvements. Fresh-launch logs confirm the mode and
+nonzero comparisons. Normal graphics and effective clocks remain unchanged.
+Its first campaign launch loaded a different profile's cryo-tutorial save;
+that result is excluded from comparisons with the previous pistol checkpoint.
+See the [grouped-comparison follow-up](vertex-block-loads-20260916.md) for the
+validation and admission evidence. The combination remains under evaluation.
 
 ## Visibility dependency follow-up
 
