@@ -150,9 +150,10 @@ rendering, Original graphics and effective CPU/GPU clocks of 444/222 MHz.
 Ordinary cryo-tutorial gameplay reports nonzero grouped checks (84,240 in one
 60-frame window); the new path is executing without a benchmark mode switch.
 
-This launch loaded save directory `122A17771B9F`, whereas the preceding pistol
-checkpoint loaded `122A17771B9E`. The profile display name was not captured and
-must not be inferred from the menu sequence. The current cryo view reports
+The first launch loaded save directory `122A17771B9F`, whereas the preceding
+pistol checkpoint loaded `122A17771B9E`. Subsequent screenshots identify the
+first selection as New002 and the pistol profile as New001; the original
+assumed New001 label in the private receipt was corrected. The cryo view reports
 roughly 496–506 draws/frame and 5.8–5.9 FPS; the earlier pistol checkpoint had
 about 150 draws/frame. Those different workloads cannot establish a gain or
 regression from grouped comparisons. The candidate remains enabled for
@@ -160,3 +161,14 @@ cumulative gameplay evaluation. A brief right-stick camera and pause-menu
 check also completes, with input released and no logger error. This does not
 qualify combat or driving. No five-FPS gain or long-session crash fix is
 established by these startup and admission checks.
+
+Selecting New001 explicitly through the normal campaign menus restores the
+pistol checkpoint at `(-28.66, 32.52, 0.62)`, facing `(0.56, 0.82, -0.15)`.
+An ordinary displayed-frame observation then records 767 frames over 60.051 s,
+or **12.7725 FPS**, versus the preceding five-path observation's 12.7689 FPS.
+The grouped comparisons execute and the other paths remain active. This is
+inconclusive, with no meaningful improvement or regression established in that
+view. Live AI, draw counts and loading histories remain uncontrolled; request
+latency bounds do not quantify that workload variation. All six paths stay
+enabled. Receipts are `pistol-passive/result.json`, `pistol-analysis.json`,
+`new001-gameplay.log` and the explicit profile/checkpoint screenshots.

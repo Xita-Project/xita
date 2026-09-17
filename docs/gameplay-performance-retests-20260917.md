@@ -92,6 +92,9 @@ the worker/rendering improvements. Fresh-launch logs confirm the mode and
 nonzero comparisons. Normal graphics and effective clocks remain unchanged.
 Its first campaign launch loaded a different profile's cryo-tutorial save;
 that result is excluded from comparisons with the previous pistol checkpoint.
+Explicitly selecting New001 restores the earlier checkpoint and camera. Its
+ordinary displayed-frame observation is 12.7725 FPS versus 12.7689 FPS for the
+five-path build: inconclusive, with all six paths retained.
 See the [grouped-comparison follow-up](vertex-block-loads-20260916.md) for the
 validation and admission evidence. The combination remains under evaluation.
 

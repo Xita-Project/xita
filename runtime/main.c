@@ -2148,6 +2148,9 @@ int main(int argc, char *argv[])
     { extern int xv_segment_sphere_enabled(void);
       XV_LOG("[segment-sphere] process-start mode %d; gameplay selection fixed for this launch\n",xv_segment_sphere_enabled()); }
 #endif
+    { extern int xv_collision_traversal_enabled(void) __attribute__((weak));
+      if (xv_collision_traversal_enabled)
+          XV_LOG("[collision-traversal] process-start mode %d; typed decisions with original continuations; no admission counter\n",xv_collision_traversal_enabled()); }
 
     uint64_t gfx_started = sceKernelGetProcessTimeWide();
     if (xv_gfx_init() != 0) {           /* GXM first: sceGxmMapMemory needs it live */

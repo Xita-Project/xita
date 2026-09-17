@@ -26,6 +26,9 @@ endif
 ifeq ($(XV_NATIVE_SEGMENT_SPHERE),1)
 XITA_GAME_SRCS += recomp/kernel/xk_segment_sphere_control.c
 endif
+ifeq ($(XV_NATIVE_COLLISION_TRAVERSAL),1)
+XITA_GAME_SRCS += recomp/kernel/xk_collision_traversal_control.c
+endif
 ifeq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_jobs.c
 endif
