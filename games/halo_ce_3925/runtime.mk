@@ -33,6 +33,9 @@ endif
 ifeq ($(XV_NATIVE_QUERY_FUSION),1)
 XITA_GAME_SRCS += recomp/query_fusion.c
 endif
+ifeq ($(XV_NATIVE_SOLVER_FUSION),1)
+XITA_GAME_SRCS += recomp/solver_fusion.c
+endif
 ifeq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_jobs.c
 endif
