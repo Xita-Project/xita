@@ -95,6 +95,10 @@ admission counts, standard graphics, and movement/combat correctness checks.
 The first physical comparison must show that useful solver work actually leaves
 the guard; a zero-admission or stationary-only result cannot qualify the goal.
 
+The [movement follow-up](object-motion-profile-20260916.md) identifies concrete
+pre-solver actor writes and adds sampled collection/solver attribution before
+selecting the next implementation boundary.
+
 The physical campaign view measured with diagnostic `c8f54f0f873c5b0c` remained
 about 11.5–12 FPS. The subsequent [audio startup fix](object-stream-start-20260916.md)
 is installed as `847524f8…`; the solver experiment remains compiled out. Stable

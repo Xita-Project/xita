@@ -215,13 +215,14 @@ static sem_t owner_wake, replies[WORKERS];
 #endif
 
 static xv_object_mutex math_mutex;
+static int worker_lane(void);
 
 #ifdef XV_OBJECT_HOLD_PROFILE
 /* Research-only sampled OUTER worker scopes. A lane owns its records until
  * join. Sampling is decorrelated from periodic call order; no guest memory is
  * read. Reported elapsed time includes preemption and any owner-service park.
  * Table accounting happens after release, not while retaining the mutex. */
-enum { HOLD_SITES=32, HOLD_SAMPLE_MASK=63 };
+enum { HOLD_SITES=32, HOLD_SAMPLE_MASK=63, MOTION_SITES=6 };
 static unsigned hold_enabled;
 /* Read only during a joined batch; the drained owner changes this together
  * with hold_enabled. Generated call sites skip both helper calls when OFF. */
@@ -235,6 +236,9 @@ static struct __attribute__((aligned(64))) {
     unsigned child_active;
     uint64_t child_start;
     struct { unsigned samples; uint64_t us,max_us; } children[23];
+    unsigned motion_active;
+    uint64_t motion_start[MOTION_SITES];
+    struct { unsigned samples; uint64_t us,max_us; } motion[MOTION_SITES];
 } hold_lanes[WORKERS];
 /* Stable IDs of the direct children of the signature-checked 4C980 callback.
  * No nested attribution: a child includes all its descendants and owner parks.
@@ -244,6 +248,38 @@ static const uint32_t hold_children[23]={
     0x48090,0x48E10,0x49280,0x493E0,0x4A9F0,0x4B000,0x4B170,0x4B3A0,
     0x4B410,0x4B580,0x4B9D0,0xBDF10,0xBE050,0xBF870,0xD8B70
 };
+static const uint32_t motion_sites[MOTION_SITES]={
+    0x478D0,0x49600,0x172BF0,0x171F10,0x170C10,0x1721B0
+};
+/* Nested inclusive timing only inside an already sampled direct child.
+ * It retains the lock and never reads/modifies guest state. Recursion stays
+ * included in its outer instance. Owner services borrowing c are excluded. */
+unsigned xv_object_motion_begin(xctx *c,unsigned site)
+{
+    if(!hold_enabled||site>=MOTION_SITES)return 0;
+    int lane=worker_lane();
+    if(lane<0||c!=&contexts[lane]||!math_depth[lane]||
+       !hold_lanes[lane].active||!hold_lanes[lane].child_active||
+       (hold_lanes[lane].motion_active&(1u<<site)))return 0;
+    hold_lanes[lane].motion_active|=1u<<site;
+    hold_lanes[lane].motion_start[site]=xk_os_monotonic_us();
+    return ((site+1)<<8)|(lane+1);
+}
+void xv_object_motion_end(unsigned *token)
+{
+    if(!*token)return;
+    unsigned lane=(*token&255)-1,site=(*token>>8)-1;
+    if(lane>=WORKERS||site>=MOTION_SITES||worker_lane()!=(int)lane||
+       !math_depth[lane]||!hold_lanes[lane].active||!hold_lanes[lane].child_active||
+       !(hold_lanes[lane].motion_active&(1u<<site)))abort();
+    uint64_t elapsed=xk_os_monotonic_us()-hold_lanes[lane].motion_start[site];
+    hold_lanes[lane].motion_active&=~(1u<<site);
+    hold_lanes[lane].motion[site].samples++;
+    hold_lanes[lane].motion[site].us+=elapsed;
+    if(elapsed>hold_lanes[lane].motion[site].max_us)
+        hold_lanes[lane].motion[site].max_us=elapsed;
+    *token=0;
+}
 unsigned xv_object_hold_child_begin(int guard)
 {
     if(!hold_enabled||guard<2||guard>=WORKERS+2)return 0;
@@ -257,7 +293,7 @@ void xv_object_hold_child_end(unsigned token,unsigned child)
 {
     if(!token)return;
     unsigned lane=token-1;
-    if(lane>=WORKERS||child>=23||!hold_lanes[lane].child_active||
+    if(lane>=WORKERS||child>=23||hold_lanes[lane].motion_active||!hold_lanes[lane].child_active||
        !hold_lanes[lane].active||math_depth[lane]!=1)abort();
     uint64_t elapsed=xk_os_monotonic_us()-hold_lanes[lane].child_start;
     hold_lanes[lane].child_active=0;
@@ -280,7 +316,7 @@ static void hold_begin(unsigned lane,uintptr_t pc)
 }
 static void hold_release(unsigned lane)
 {
-    if(hold_lanes[lane].child_active)abort();
+    if(hold_lanes[lane].child_active||hold_lanes[lane].motion_active)abort();
     if(!hold_lanes[lane].active) {xv_object_mutex_release(&math_mutex);return;}
     uint64_t elapsed=xk_os_monotonic_us()-hold_lanes[lane].start;
     uintptr_t pc=hold_lanes[lane].pc;hold_lanes[lane].active=0;
@@ -296,7 +332,7 @@ static void hold_release(unsigned lane)
 static void hold_report(unsigned frames)
 {
     for(unsigned lane=0;lane<WORKERS;lane++) {
-        if(hold_lanes[lane].active||hold_lanes[lane].child_active)abort();
+        if(hold_lanes[lane].active||hold_lanes[lane].child_active||hold_lanes[lane].motion_active)abort();
         XK_LOG("[object-holds] %u frames lane %u enabled %u outer %u samples %u denominator 64; sampled elapsed includes scheduling/parks, not total hold time\n",
             frames,lane,hold_enabled,hold_lanes[lane].observed,hold_lanes[lane].samples);
         for(unsigned site=0;site<=HOLD_SITES;site++)if(hold_lanes[lane].sites[site].samples)
@@ -309,6 +345,11 @@ static void hold_report(unsigned frames)
                 lane,hold_children[child],hold_lanes[lane].children[child].samples,
                 (unsigned long long)hold_lanes[lane].children[child].us,
                 (unsigned long long)hold_lanes[lane].children[child].max_us);
+        for(unsigned site=0;site<MOTION_SITES;site++)if(hold_lanes[lane].motion[site].samples)
+            XK_LOG("[object-motion] lane %u function %08X samples %u elapsed-us %llu max-us %llu; nested inclusive within sampled child, do not sum\n",
+                lane,motion_sites[site],hold_lanes[lane].motion[site].samples,
+                (unsigned long long)hold_lanes[lane].motion[site].us,
+                (unsigned long long)hold_lanes[lane].motion[site].max_us);
         uint32_t random=hold_lanes[lane].random;
         memset(&hold_lanes[lane],0,sizeof hold_lanes[lane]);hold_lanes[lane].random=random;
     }

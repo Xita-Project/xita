@@ -122,6 +122,10 @@ static void prepare_refill(void)
 }
 void object_test_stream_status(xctx *c)
 {
+#ifdef XV_OBJECT_HOLD_PROFILE
+    extern unsigned xv_object_motion_begin(xctx *,unsigned);
+    assert(!xv_object_motion_begin(c,5)); /* owner borrowing a marked context */
+#endif
     unsigned sp=c->r[4],obj=X_M32(sp+4),before=callbacks;
     prepare_refill();xv_hle_CDirectSoundStream_GetStatus(c);
     assert(c->r[0]==0&&c->r[4]==sp+12&&callbacks==before+(obj==1));

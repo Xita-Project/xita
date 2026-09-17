@@ -9,6 +9,12 @@ is independent of the multiplayer transport.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
+[~] [Movement/collision attribution](docs/object-motion-profile-20260916.md):
+the dominant sampled movement callback writes actor state before entering its
+private solver. Preserve that transaction while measuring collision collection
+versus solving. Six nested timing scopes pass host memory/race checks and native
+compilation; physical attribution is pending. The parallel solver remains off.
+
 [~] September 16 [rendering bottleneck experiments](docs/render-bottleneck-plan-20260916.md):
 incorporate the tester/Claude checklist in order: resolution attribution, independent
 visual controls, compatible fragment simplification, then guarded submission

@@ -251,6 +251,11 @@ void f_0008FB70(xctx *c)
     /* Simulate substantial work while exercising nested native-helper locks. */
     struct timespec delay={0,1000000};nanosleep(&delay,NULL);
     unsigned id=c->r[1];
+#ifdef XV_OBJECT_HOLD_PROFILE
+    extern unsigned xv_object_motion_begin(xctx *,unsigned);
+    extern void xv_object_motion_end(unsigned *);
+    assert(!xv_object_motion_begin(c,1)); /* no held sampled child */
+#endif
 #ifdef XV_OBJECT_SOLVER_EXPERIMENT
     solver_fixture_scope(c);
 #endif
@@ -264,13 +269,25 @@ void f_0008FB70(xctx *c)
         extern void xv_object_hold_child_end(unsigned,unsigned);
         unsigned child_sample=xv_object_hold_child_begin(xv_object_math_locked_);
         if(child_sample)assert(!xv_object_hold_child_begin(xv_object_math_locked_));
+        xctx snapshot=*c;
+        unsigned motion0=xv_object_motion_begin(c,0);
+        assert(!!motion0==!!child_sample);
+        assert(!xv_object_motion_begin(c,0)); /* same-function recursion */
+        assert(!xv_object_motion_begin(&snapshot,1)); /* not the live context */
+        assert(!xv_object_motion_begin(c,6)); /* invalid site */
+        assert(!memcmp(c,&snapshot,sizeof snapshot));
 #endif
         unsigned before=shared_guarded_value;
         nested_guard_return();
 #ifdef XV_OBJECT_HOLD_PROFILE
+        xv_object_motion_end(&motion0);assert(!motion0);
         xv_object_hold_child_end(child_sample,8);
         unsigned service_sample=xv_object_hold_child_begin(xv_object_math_locked_);
         assert(child_sample==service_sample);
+        unsigned motion1=xv_object_motion_begin(c,1);
+        unsigned motion2=xv_object_motion_begin(c,2);
+        unsigned motion3=xv_object_motion_begin(c,3);
+        assert(!!motion1==!!service_sample&&!!motion2==!!motion1&&!!motion3==!!motion1);
 #endif
         c->r[0]=0x60000+id*16;c->r[1]=0x30000;c->r[2]=0x50000+id*12;
         X_PUSH32(0x123456u);
@@ -279,6 +296,10 @@ void f_0008FB70(xctx *c)
         assert(X_MF32(0x60004+id*16)==1.0f);
         assert(X_MF32(0x60008+id*16)==2.0f);
         { XV_OBJECT_MATH_GUARD(); writes[id]++; }
+#ifdef XV_OBJECT_HOLD_PROFILE
+        xv_object_motion_end(&motion3);
+        unsigned motion4=xv_object_motion_begin(c,4);
+#endif
         /* Hold the shared callback lock while parking for a real owner service.
          * The owner must not run a job that blocks on this same mutex. */
         submit_event(c,0x70000+id*8);
@@ -293,6 +314,11 @@ void f_0008FB70(xctx *c)
         if(id%2==0)submit_parameters(c,id);
         assert(shared_guarded_value==before+1);
 #ifdef XV_OBJECT_HOLD_PROFILE
+        xv_object_motion_end(&motion4);
+        xv_object_motion_end(&motion2);
+        unsigned motion5=xv_object_motion_begin(c,5);
+        xv_object_motion_end(&motion5);
+        xv_object_motion_end(&motion1);
         xv_object_hold_child_end(service_sample,18);
 #endif
     }

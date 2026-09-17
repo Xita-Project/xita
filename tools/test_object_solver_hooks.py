@@ -13,7 +13,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from games.halo_ce_3925 import collision_solver
+from games.halo_ce_3925 import collision_solver, object_motion_profile
 from games.halo_ce_3925.hooks import HaloHooks
 from recompiler import xita_recomp as r
 from recompiler.core.profile import load_profile
@@ -53,6 +53,13 @@ for pc in sorted(closure):
     fn = d.functions[pc]; d.lift_function(fn); d.split_blocks(fn)
     emitter = r.Emitter(img, d, hle, img.kernel_imports(), 'unused', 1, hooks=hooks)
     source = emitter.emit_function(fn)
+    # The separate sampled timing hook does not belong to this solver-scope
+    # arithmetic comparison; it has its own production worker tests.
+    motion_entry = object_motion_profile.entry(img, pc)
+    if motion_entry:
+        diagnostic = '\n'.join(motion_entry)+'\n'
+        source = source.replace(diagnostic, '')
+        staged[pc] = staged[pc].replace(diagnostic, '')
     if pc == 0x170C10:
         assert source.count(entry) == 1
         instrumented = source

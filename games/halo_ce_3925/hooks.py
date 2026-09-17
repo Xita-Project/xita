@@ -8,7 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
-from games.halo_ce_3925 import clip_region, collision_solver
+from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile
 
 
 class HaloHooks(NoGameHooks):
@@ -200,6 +200,7 @@ class HaloHooks(NoGameHooks):
         if not self.enabled:
             return out
         out.extend(self.light_census_entry(address))
+        out.extend(object_motion_profile.entry(self.image, address))
         if address == 0x170C10 and collision_solver.matches(self.image):
             out.extend(collision_solver.ENTRY)
         if self.pose_coalesce_enabled and address in (0x8DDF0, 0x8E087):
