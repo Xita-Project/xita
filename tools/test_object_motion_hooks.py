@@ -58,8 +58,9 @@ for pc, size, digest in motion.SPANS:
     if staged.startswith(header+old_guard):
         before = before.replace(guard, '').replace(header, header+old_guard, 1)
         after = after.replace(guard, '').replace(header, header+old_guard, 1)
-    assert before.rstrip() == staged.rstrip(), ('staged body drift', hex(pc))
-    assert after.replace(entry, '').rstrip() == staged.rstrip()
+    original = staged.replace(entry, '')
+    assert before.rstrip() == original.rstrip(), ('staged body drift', hex(pc))
+    assert after.replace(entry, '').rstrip() == original.rstrip()
     units[unit.name] = source.replace(staged, after.rstrip()+'\n', 1)
     read = img.bytes_at
     def changed(address, length):
@@ -81,4 +82,4 @@ for name, source in units.items(): (args.out/name).write_text(source)
     functions=results, units=sorted(units), unchanged_without_diagnostic=True,
     unsupported_image_declines=True, modified_signature_declines=True,
     solver_experiment_included=False), indent=2)+'\n')
-print('PASS: six unchanged staged bodies, timing IDs, modified-image rejection; solver experiment excluded')
+print(f'PASS: {len(motion.SPANS)} unchanged staged bodies, timing IDs, modified-image rejection; solver experiment excluded')

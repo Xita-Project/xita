@@ -222,7 +222,7 @@ static int worker_lane(void);
  * join. Sampling is decorrelated from periodic call order; no guest memory is
  * read. Reported elapsed time includes preemption and any owner-service park.
  * Table accounting happens after release, not while retaining the mutex. */
-enum { HOLD_SITES=32, HOLD_SAMPLE_MASK=63, MOTION_SITES=6 };
+enum { HOLD_SITES=32, HOLD_SAMPLE_MASK=63, MOTION_SITES=9 };
 static unsigned hold_enabled;
 /* Read only during a joined batch; the drained owner changes this together
  * with hold_enabled. Generated call sites skip both helper calls when OFF. */
@@ -249,7 +249,8 @@ static const uint32_t hold_children[23]={
     0x4B410,0x4B580,0x4B9D0,0xBDF10,0xBE050,0xBF870,0xD8B70
 };
 static const uint32_t motion_sites[MOTION_SITES]={
-    0x478D0,0x49600,0x172BF0,0x171F10,0x170C10,0x1721B0
+    0x478D0,0x49600,0x172BF0,0x171F10,0x170C10,0x1721B0,
+    0x88110,0x868F0,0x1716F0
 };
 /* Nested inclusive timing only inside an already sampled direct child.
  * It retains the lock and never reads/modifies guest state. Recursion stays

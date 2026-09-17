@@ -10,6 +10,10 @@ SPANS = (
     (0x171F10, 672, "39eb1cabc77888d1f879bc5980471d399fbec45bf5727078deaebd44d10d144e"),
     (0x170C10, 2088, "d1f9921df56c0d3ea92aec7d4a11442f4c786b5fecb6091f2c9a2aa45721d0ce"),
     (0x1721B0, 2624, "0fe1f1b9913c1865701b9a103beeee2584678d46d8794c9f3fe8cb93f108e437"),
+    (0x88110, 122, "04539a46b497608427862944a0e3369648e9e6f8d4d9f5de9fd5bc974286119f"),
+    (0x868F0, 273, "c09a6bd0479334c5b029bbcdb021322e4200dde15ce3eb53ce65385251fd4dc1"),
+    # Includes the switch table and padding through the next function boundary.
+    (0x1716F0, 1024, "fb7cc5aadaff2af622d2a8e9a6039faa45004e2a4f62d4e7dc6aa321271ebcbb"),
 )
 
 

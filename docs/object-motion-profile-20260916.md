@@ -86,3 +86,9 @@ in their work while retaining the actor transaction. An independent Claude Code
 audit is running in a separate worktree. A separate reviewer examines ownership
 constraints. Codex retains hardware testing and integration. This evidence does
 not qualify releasing the solver lock or establish stable 20 FPS.
+
+The next diagnostic adds three nested scopes for `88110`, `868F0` and `1716F0`.
+Original-image checks cover the complete functions, including the dynamic
+collector's switch table. Worker tests and ASan/UBSan pass; the two affected
+translation units preprocess identically to the previous build with timing
+compiled out. The Vita build passes; physical child attribution is pending.

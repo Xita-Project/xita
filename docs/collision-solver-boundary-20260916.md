@@ -88,12 +88,23 @@ object callback observe that intermediate update. Private solver memory alone
 does not establish actor lifetime, read/write ordering or safe publication of
 the resulting movement. This is why the new scope remains disabled on the Vita.
 
-Next audit the retained actor references and pre/post-solver writes in
-`4B9D0`/`49600`. Establish a capture/compute/commit contract or retain conflicting
-actors in a serialized group. Then run a controlled hardware comparison with
-admission counts, standard graphics, and movement/combat correctness checks.
-The first physical comparison must show that useful solver work actually leaves
-the guard; a zero-admission or stationary-only result cannot qualify the goal.
+The independent retained-state audit supplies a concrete counterexample. Actor A
+writes `+18/+1C` at `4C2F7/4C2FA`, then publishes the complete vector at
+`4C5D9/4C5E2/4C5EC` after solving. Actor B's contact selector reads another
+actor's `+18/+1C/+20` at `4A6D0/4A6DA/4A6E4` and publishes the selected handle
+at `4A73D`. A private test of those original instruction blocks selects handle 2
+with A's intermediate vector and handle 1 with A's committed vector. It passes
+ASan/UBSan. This is a synthetic local dependency witness, not evidence that this
+contact pair occurred on hardware or a complete callback replay. Revalidating
+only A or its solver packet cannot undo B's observation.
+
+Retain the actor transaction. Prioritize cheaper collection within that guard.
+Any future overlap should operate on private inputs/results or pinned immutable
+geometry, without actor/list/epoch dereferences, and join before ordered
+publication. A waiting worker helping with such pure inner computation needs
+separate task storage and must retain owner-service parking responsiveness.
+Serializing a conflicting actor's entire callback restores the dependency but
+does not itself provide useful parallel collection.
 
 The [movement follow-up](object-motion-profile-20260916.md) identifies concrete
 pre-solver actor writes and adds sampled collection/solver attribution before

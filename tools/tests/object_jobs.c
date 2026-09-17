@@ -9,6 +9,8 @@
 #include <pthread.h>
 
 uint8_t *g_xram,*g_img_base; uint32_t *g_xpt;
+/* Clang's sanitizer keeps the runtime's optional trace reference linked. */
+volatile uint32_t xv_cur_fn;
 int xv_phase_enabled;
 static int gameplay_ready=1;
 int xd3d_object_jobs_ready(void) {return gameplay_ready;}
@@ -274,7 +276,7 @@ void f_0008FB70(xctx *c)
         assert(!!motion0==!!child_sample);
         assert(!xv_object_motion_begin(c,0)); /* same-function recursion */
         assert(!xv_object_motion_begin(&snapshot,1)); /* not the live context */
-        assert(!xv_object_motion_begin(c,6)); /* invalid site */
+        assert(!xv_object_motion_begin(c,9)); /* invalid site */
         assert(!memcmp(c,&snapshot,sizeof snapshot));
 #endif
         unsigned before=shared_guarded_value;
@@ -288,6 +290,15 @@ void f_0008FB70(xctx *c)
         unsigned motion2=xv_object_motion_begin(c,2);
         unsigned motion3=xv_object_motion_begin(c,3);
         assert(!!motion1==!!service_sample&&!!motion2==!!motion1&&!!motion3==!!motion1);
+        for(unsigned site=6;site<9;site++) {
+            unsigned collection=xv_object_motion_begin(c,site);
+            assert(!!collection==!!motion3);
+            assert(!xv_object_motion_begin(c,site));
+            { XV_OBJECT_MATH_GUARD(); assert(shared_guarded_value==before+1); }
+            struct timespec collection_delay={0,50000};
+            nanosleep(&collection_delay,NULL);
+            xv_object_motion_end(&collection);assert(!collection);
+        }
 #endif
         c->r[0]=0x60000+id*16;c->r[1]=0x30000;c->r[2]=0x50000+id*12;
         X_PUSH32(0x123456u);

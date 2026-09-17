@@ -115,12 +115,13 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                         rows={int(pc,16):tuple(map(int,(n,total,maximum))) for ln,pc,n,total,maximum in motion if int(ln)==lane}
                         child_rows={int(pc,16):tuple(map(int,(n,total,maximum))) for ln,pc,n,total,maximum in children if int(ln)==lane}
                         if not child_rows:assert not rows;continue
-                        assert set(rows)=={0x478D0,0x49600,0x172BF0,0x171F10,0x170C10,0x1721B0}
+                        assert set(rows)=={0x478D0,0x49600,0x172BF0,0x171F10,0x170C10,0x1721B0,0x88110,0x868F0,0x1716F0}
                         assert all(n==child_rows[0x4B9D0][0] and maximum<=total for n,total,maximum in rows.values())
                         assert rows[0x478D0][1]<=child_rows[0x48090][1]
                         assert rows[0x171F10][1]+rows[0x170C10][1]<=rows[0x172BF0][1]
+                        assert sum(rows[pc][1] for pc in (0x88110,0x868F0,0x1716F0))<=rows[0x171F10][1]
                         assert rows[0x172BF0][1]+rows[0x1721B0][1]<=rows[0x49600][1]<=child_rows[0x4B9D0][1]
-                    assert len(motion)==6*len({ln for ln,*_ in children}), 'motion report reset/duplicate'
+                    assert len(motion)==9*len({ln for ln,*_ in children}), 'motion report reset/duplicate'
                 else:
                     assert '[object-motion]' not in result.stderr
                 print(f'PASS: {workers} workers, profile {profile}, bounded wait {timed}: two object passes in three render frames; retired/reset totals and wait-site accounting')
