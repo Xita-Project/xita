@@ -603,6 +603,56 @@ $(COLLISION_TRAVERSAL_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_collision_traversal_c
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/collision-traversal.config
 $(RECOMP_BUILD)/kernel/xk_collision_traversal_control.o: $(RECOMP_BUILD)/collision-traversal-startup.config
 $(RECOMP_BUILD)/kernel/xk_collision_traversal_control.o: RECOMP_CFLAGS += -DXV_NATIVE_COLLISION_TRAVERSAL_DEFAULT=$(XV_NATIVE_COLLISION_TRAVERSAL_DEFAULT)
+# Qualified caller-specific collision query fusion. No runtime controls, and no
+# flag on generic code_013/code_016: their compiler layout must stay unchanged.
+XV_NATIVE_QUERY_FUSION ?= 0
+ifneq ($(words $(XV_NATIVE_QUERY_FUSION)),1)
+$(error XV_NATIVE_QUERY_FUSION must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_QUERY_FUSION),0 1),$(XV_NATIVE_QUERY_FUSION))
+$(error XV_NATIVE_QUERY_FUSION must be 0 or 1)
+endif
+QUERY_FUSION_OBJECTS := $(RECOMP_BUILD)/code_028.o $(RECOMP_BUILD)/query_fusion.o
+QUERY_FUSION_INPUTS := tools/gen_native_query_fusion.py tools/prototype_collision_query.py \
+    tools/tests/collision_query_fusion.c $(wildcard recompiler/*.py recompiler/core/*.py games/halo_ce_3925/*.py) \
+    recomp/kernel/xk_collision_vertices.h recomp/kernel/xk_segment_sphere.h \
+    recomp/kernel/xk_collision_traversal.h recomp/kernel/xk_geometry.c \
+    $(RECOMP_DIR)/code_013.c $(RECOMP_DIR)/code_016.c $(RECOMP_DIR)/code_028.c $(XBE) $(XBE_JSON)
+.PHONY: force-query-fusion-config force-query-fusion-missing query-fusion-generate
+force-query-fusion-config:
+force-query-fusion-missing:
+$(RECOMP_BUILD)/query-fusion.config: force-query-fusion-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_NATIVE_QUERY_FUSION)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(QUERY_FUSION_OBJECTS) $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/query-fusion.config
+ifeq ($(XV_NATIVE_QUERY_FUSION),1)
+ifneq ($(RECOMP),1)
+$(error XV_NATIVE_QUERY_FUSION requires RECOMP=1)
+endif
+ifneq ($(GAME_PROFILE),halo_ce_3925)
+$(error XV_NATIVE_QUERY_FUSION requires GAME_PROFILE=halo_ce_3925)
+endif
+ifneq ($(XV_NATIVE_BSP_SPHERE) $(XV_NATIVE_COLLISION_VERTICES) $(XV_NATIVE_SEGMENT_SPHERE) $(XV_NATIVE_COLLISION_TRAVERSAL),1 1 1 1)
+$(error XV_NATIVE_QUERY_FUSION requires XV_NATIVE_BSP_SPHERE=1 XV_NATIVE_COLLISION_VERTICES=1 XV_NATIVE_SEGMENT_SPHERE=1 XV_NATIVE_COLLISION_TRAVERSAL=1)
+endif
+$(QUERY_FUSION_OBJECTS): RECOMP_CFLAGS += -DXV_NATIVE_QUERY_FUSION=1
+$(QUERY_FUSION_OBJECTS): $(RECOMP_BUILD)/query-fusion.generated.json
+# The stamp, published last, owns generation. A missing query source forces
+# regeneration too. Keeping the source's stamp dependency order-only permits
+# content-only updates without repeatedly regenerating unchanged output bytes.
+# Both affected objects wait for the stamp before parallel compilation.
+$(RECOMP_BUILD)/query-fusion.generated.json: $(QUERY_FUSION_INPUTS) $(if $(wildcard $(RECOMP_DIR)/query_fusion.c),,force-query-fusion-missing)
+	$(PYTHON) tools/gen_native_query_fusion.py --xbe $(XBE) --manifest $(XBE_JSON) --recomp-dir $(RECOMP_DIR) --receipt $(RECOMP_BUILD)/query-fusion.generated.json
+$(RECOMP_DIR)/query_fusion.c: | $(RECOMP_BUILD)/query-fusion.generated.json
+	@test -f $@
+query-fusion-generate: $(RECOMP_BUILD)/query-fusion.generated.json $(RECOMP_DIR)/query_fusion.c
+else
+query-fusion-generate:
+	@echo 'Set XV_NATIVE_QUERY_FUSION=1 and its compiled prerequisites to generate the owned fusion unit.' >&2
+	@false
+endif
 ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_MODEL_PALETTE
 CFLAGS += -DXV_NATIVE_MODEL_PALETTE
