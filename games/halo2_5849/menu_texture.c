@@ -327,7 +327,7 @@ typedef struct { uint32_t key[6]; uint64_t hash; uint32_t *texels; uint32_t w, h
 enum { TEX_CACHE_ENTRIES = 64, TEX_CACHE_BUDGET = 40u << 20 };
 static tex_entry g_entries[TEX_CACHE_ENTRIES];
 static size_t g_cache_bytes;
-static uint64_t g_hits, g_misses;
+static uint64_t g_hits, g_misses, g_hash_bytes;
 
 const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit,
                                      uint64_t serial, uint32_t cap, uint32_t *ow, uint32_t *oh, int *out_linear,
@@ -336,6 +336,7 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
     located L;
     if (!locate(s, c, unit, cap, &L)) return NULL;
     uint64_t hash = content_hash(L.src, L.src_bytes, 0x243F6A8885A308D3ull ^ L.src_bytes);
+    g_hash_bytes += L.src_bytes;
     if (L.d.kind == PF_P8) hash = content_hash((const uint8_t *)L.palette, (L.pal_mask + 1) * 4, hash);
     tex_entry *e = NULL, *victim = NULL;
     for (unsigned i = 0; i < TEX_CACHE_ENTRIES; ++i) {
@@ -377,3 +378,4 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
 
 void menu_texture_cache_stats(uint64_t *hits, uint64_t *misses, size_t *bytes)
 { *hits = g_hits; *misses = g_misses; *bytes = g_cache_bytes; }
+uint64_t menu_texture_hashed_bytes(void) { return g_hash_bytes; }

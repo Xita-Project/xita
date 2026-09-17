@@ -24,6 +24,7 @@ typedef struct h2_command_state {
     uint32_t dxt1_noise, zcull_debug5, rop_control, software_valid;
     uint64_t software_updates;
     uint64_t semaphore_releases;
+    uint64_t methods;                 /* every method the consumer executed (diagnostic) */
     uint32_t last_semaphore_address, last_semaphore_value;
     uint32_t surfaces_format, surfaces_pitch, surfaces_offset[2], surfaces_valid;
     uint32_t blit_point[2], blit_point_valid;

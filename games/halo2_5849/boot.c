@@ -120,8 +120,9 @@ int h2_platform_wait_vblank(uint32_t *before, uint32_t *after)
     return result;
 }
 uint64_t h2_platform_time_us(void) { return sceKernelGetProcessTimeWide(); }
-int h2_platform_present(const uint8_t *pixels, size_t bytes,
-                          const uint8_t *rgb_gamma, uint32_t *vcount)
+/* Convert the finished 640x480 frame and queue it for the display's next vblank
+ * without waiting; the caller decides which vblank it observes. */
+int h2_platform_present_queue(const uint8_t *pixels, size_t bytes, const uint8_t *rgb_gamma)
 {
     static SceUID blocks[2] = {-1, -1};
     static uint8_t *buffers[2];
@@ -145,9 +146,6 @@ int h2_platform_present(const uint8_t *pixels, size_t bytes,
     frame.pixelformat = SCE_DISPLAY_PIXELFORMAT_A8B8G8R8;
     int status = sceDisplaySetFrameBuf(&frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
     if (status < 0) return status;
-    status = sceDisplayWaitVblankStart();
-    if (status < 0) return status;
-    *vcount = (uint32_t)sceDisplayGetVcount();
     active_display = frame;
     ++presented_frames;
     FILE *snapshot = presented_frames == 1 ? fopen("ux0:data/xita-halo2/scanout-last.bin", "wb") : NULL;
@@ -159,6 +157,16 @@ int h2_platform_present(const uint8_t *pixels, size_t bytes,
         xv_logf("[h2/display] private scanout snapshot frame=%u complete=%d\n", presented_frames, complete && !closed);
     }
     back ^= 1;
+    return 0;
+}
+int h2_platform_present(const uint8_t *pixels, size_t bytes,
+                          const uint8_t *rgb_gamma, uint32_t *vcount)
+{
+    int status = h2_platform_present_queue(pixels, bytes, rgb_gamma);
+    if (status < 0) return status;
+    status = sceDisplayWaitVblankStart();
+    if (status < 0) return status;
+    *vcount = (uint32_t)sceDisplayGetVcount();
     return 0;
 }
 int h2_platform_blank(int blank)

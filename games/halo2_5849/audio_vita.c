@@ -69,8 +69,11 @@ static void lock_progress_at(unsigned line)
 /* The worker renders a GP grain in 32-frame steps and yields progress_mutex between
  * them (the original GP runs asynchronously; the CPU never waits a whole grain for
  * it). Calls that change what a grain contains - the FX source set, the filter
- * configuration the PCM lane is validated against, the GP PCM lanes - take effect at
- * a grain boundary exactly as before: they wait for the step loop to finish. */
+ * configuration the PCM lane is validated against, the GP PCM lanes - and the source
+ * parameters and effect state the GP reads (routes, mutes, attenuation, effect words)
+ * take effect at a grain boundary exactly as before: they wait for the step loop to
+ * finish, so every submitted grain is computed from one parameter set. Reads, packet
+ * queueing/completion and the movie voice controls run between GP frames. */
 static volatile unsigned grain_active;
 static void lock_progress_boundary_at(unsigned line)
 {
@@ -289,14 +292,14 @@ int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *engine, unsigned bin, const 
 int h2_audio_backend_fx_route(unsigned bin, unsigned routes)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    lock_progress();
+    lock_progress_boundary();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_route(&fx, bin, routes);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_route_mask(unsigned bin, unsigned output_mask)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    lock_progress();
+    lock_progress_boundary();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_route_mask(&fx, bin, output_mask);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
@@ -310,14 +313,14 @@ int h2_audio_backend_fx_filter(unsigned key)
 int h2_audio_backend_fx_mute(unsigned key)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    lock_progress();
+    lock_progress_boundary();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_mute(&fx, key);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_attenuate(unsigned key, unsigned attenuation)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    lock_progress();
+    lock_progress_boundary();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_attenuate(&fx, key, attenuation);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
@@ -483,7 +486,7 @@ int h2_audio_backend_effect_write_pair(h2_dsp_engine *engine, unsigned index,
                                        unsigned offset, uint32_t first, uint32_t second)
 {
     if (h2_audio_backend_health() < 0 || progress_mutex < 0) return 0;
-    lock_progress();
+    lock_progress_boundary();
     int ok = h2_audio_backend_health() == 0 && (!fx.engine || fx.engine == engine) &&
              h2_dsp_write_effect_pair(engine, index, offset, first, second);
     sceKernelUnlockMutex(progress_mutex, 1); return ok;

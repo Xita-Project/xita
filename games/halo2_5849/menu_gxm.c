@@ -533,7 +533,10 @@ static int render_body(void *opaque, const h2_menu_request *r)
                 (unsigned long long)g_drawn, r->primitive, n, ni, c->color_offset, (unsigned long long)vs->hash,
                 (unsigned long long)fs->hash, g_open_draws, (unsigned long long)g_fallbacks);
     static int dump_every = -1;
-    if (dump_every < 0) { const char *e = getenv("XV_MENU_GXM_DUMP"); dump_every = e ? atoi(e) : 200; }
+    /* Diagnostic back-buffer dumps (a scene flush plus a 1.2 MB file per N draws) are opt-in:
+     * at ~600 draws per loading-screen frame the old default of 200 cost a sync and a write
+     * every few frames. XV_MENU_GXM_DUMP=200 restores them. */
+    if (dump_every < 0) { const char *e = getenv("XV_MENU_GXM_DUMP"); dump_every = e ? atoi(e) : 0; }
     if (dump_every > 0 && !(g_drawn % (uint64_t)dump_every)) { flush_scene(); h2_menu_dump_target(t->guest, W, H, g_drawn, c->color_offset); }
     return 1;
 }
@@ -547,8 +550,12 @@ int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
 }
 
 /* Cumulative diagnostic counters for the channel's per-60-flip [h2/perf] line. */
-void h2_menu_gxm_perf(uint64_t out[8])
+void h2_menu_gxm_perf(uint64_t out[12])
 {
+    extern uint64_t menu_texture_hashed_bytes(void);
+    uint64_t hits = 0, misses = 0; size_t cache_bytes = 0;
+    menu_texture_cache_stats(&hits, &misses, &cache_bytes);
     out[0] = g_drawn; out[1] = g_perf_render_us; out[2] = g_perf_flushes; out[3] = g_perf_flush_us;
     out[4] = g_perf_open_us; out[5] = g_perf_tex_us; out[6] = g_perf_gxmdraw_us; out[7] = g_fallbacks;
+    out[8] = menu_texture_hashed_bytes(); out[9] = hits; out[10] = misses; out[11] = cache_bytes;
 }

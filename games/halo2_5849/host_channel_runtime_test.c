@@ -25,11 +25,16 @@ static int blank_result, blank_value;
 static unsigned blank_calls;
 int h2_platform_blank(int blank)
 { ++blank_calls; blank_value = blank; return blank_result; }
-int h2_platform_present(const uint8_t *pixels, size_t bytes, const uint8_t *rgb_gamma, uint32_t *vcount)
+int h2_platform_present_queue(const uint8_t *pixels, size_t bytes, const uint8_t *rgb_gamma)
 {
     assert(pixels == g_xram + 0x300000 && bytes == H2_SCANOUT_BYTES);
     for (unsigned i = 0; i < 768; ++i) assert(rgb_gamma[i] == i / 3);
-    ++present_calls; *vcount = 102; return present_result;
+    ++present_calls; return present_result;
+}
+int h2_platform_present(const uint8_t *pixels, size_t bytes, const uint8_t *rgb_gamma, uint32_t *vcount)
+{
+    int status = h2_platform_present_queue(pixels, bytes, rgb_gamma);
+    *vcount = 102; return status;
 }
 int h2_platform_wait_vblank(uint32_t *before, uint32_t *after)
 { ++vblank_calls; *before = 100; *after = 100 + vblank_delta; native_fpscr = 0xDEADBEEF; return vblank_result; }
@@ -156,7 +161,7 @@ void f_0012B2A0(xctx *c)
         assert(X_M32(record) == event_calls + 1 && X_M32(record + 4) == event_calls - 1 &&
                X_M32(record + 8) == 1);
         assert(X_M32(0x406C08 + 0x1BC) == event_calls - 1);
-        assert(present_calls == event_calls - 2); /* retirement and event precede presentation */
+        assert(present_calls == event_calls - 1); /* the frame is queued for the vblank that retires it; retirement and event follow */
     } else {
         assert((event_calls == 1 || event_calls == 2) && X_M32(record) == event_calls &&
                X_M32(record + 4) == 1 && X_M32(record + 8) == event_calls);

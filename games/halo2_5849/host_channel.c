@@ -12,6 +12,7 @@ static int execute_method(void *opaque, uint8_t subchannel, uint16_t method,
                            uint32_t value, uint32_t source)
 {
     h2_host_channel *c = opaque;
+    ++c->commands.methods;
     if (c->geometry_method) {
         int result = c->geometry_method(c->opaque, subchannel, method, value, source);
         if (result != -1) return result == 1;

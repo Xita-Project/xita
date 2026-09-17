@@ -15,4 +15,7 @@ int h2_scanout_convert(uint8_t *output, size_t output_bytes,
                          const uint8_t *rgb_gamma, size_t gamma_bytes);
 int h2_platform_present(const uint8_t *pixels, size_t bytes,
                           const uint8_t *rgb_gamma, uint32_t *vcount);
+/* Queue the frame for the display's next vblank without waiting (the flip path waits once). */
+int h2_platform_present_queue(const uint8_t *pixels, size_t bytes, const uint8_t *rgb_gamma);
+
 int h2_platform_blank(int blank);
