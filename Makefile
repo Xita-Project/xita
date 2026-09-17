@@ -360,6 +360,21 @@ LIBS      += -lSceLibKernel_stub -lSceTouch_stub -lm
 # (recomp/, linked as librecomp.a) and the GXM UI bridge; see runtime/xv_boot.c / runtime/xv_ui_gxm.c.
 RECOMP    ?= 0
 GAME_PROFILE ?= halo_ce_3925
+XV_OBJECT_PASS_TIMING ?= 0
+ifneq ($(words $(XV_OBJECT_PASS_TIMING)),1)
+$(error XV_OBJECT_PASS_TIMING must be 0 or 1)
+endif
+ifneq ($(filter $(XV_OBJECT_PASS_TIMING),0 1),$(XV_OBJECT_PASS_TIMING))
+$(error XV_OBJECT_PASS_TIMING must be 0 or 1)
+endif
+ifeq ($(XV_OBJECT_PASS_TIMING),1)
+ifneq ($(RECOMP),1)
+$(error XV_OBJECT_PASS_TIMING requires RECOMP=1)
+endif
+ifneq ($(XV_EXPERIMENTAL_OBJECT_JOBS) $(XV_OWNER_PHASE),1 1)
+$(error XV_OBJECT_PASS_TIMING requires XV_EXPERIMENTAL_OBJECT_JOBS=1 XV_OWNER_PHASE=1)
+endif
+endif
 # Explicit private startup trial, not a persisted/user-facing graphics default.
 XV_MODEL_BATCHES_TRIAL ?= 0
 ifneq ($(words $(XV_MODEL_BATCHES_TRIAL)),1)
@@ -1058,6 +1073,20 @@ ifeq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
 RECOMP_CFLAGS += -DXV_EXPERIMENTAL_OBJECT_JOBS
 CFLAGS += -DXV_EXPERIMENTAL_OBJECT_JOBS
 endif
+
+# Passive accepted-pass timing and raw quiescent worker-clock snapshots.
+# Explicit diagnostic startup build only; no runtime selector or changed jobs.
+ifeq ($(XV_OBJECT_PASS_TIMING),1)
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_PASS_TIMING=1
+endif
+.PHONY: force-object-pass-timing-config
+force-object-pass-timing-config:
+$(RECOMP_BUILD)/object-pass-timing.config: force-object-pass-timing-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_PASS_TIMING)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-pass-timing.config
 
 # Guard-retained C query adapter. Ordinary builds contain no adapter/state.
 ifeq ($(XV_WORKER_QUERY),1)
