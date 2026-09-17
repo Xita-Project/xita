@@ -284,6 +284,24 @@ $(BUILD)/vertex-resident-startup.config: force-vertex-resident-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_upload.o: $(BUILD)/vertex-resident-startup.config
+
+# Exact indexed groups for retired RAW snapshots; no guest-pointer lifetime cache.
+XV_VERTEX_RESIDENT_REFERENCES_DEFAULT ?= 0
+ifneq ($(words $(XV_VERTEX_RESIDENT_REFERENCES_DEFAULT)),1)
+$(error XV_VERTEX_RESIDENT_REFERENCES_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_RESIDENT_REFERENCES_DEFAULT),0 1),$(XV_VERTEX_RESIDENT_REFERENCES_DEFAULT))
+$(error XV_VERTEX_RESIDENT_REFERENCES_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_vertex_upload.o: CFLAGS += -DXV_VERTEX_RESIDENT_REFERENCES_DEFAULT=$(XV_VERTEX_RESIDENT_REFERENCES_DEFAULT)
+.PHONY: force-vertex-resident-references-startup-config
+force-vertex-resident-references-startup-config:
+$(BUILD)/vertex-resident-references-startup.config: force-vertex-resident-references-startup-config
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(XV_VERTEX_RESIDENT_REFERENCES_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_upload.o: $(BUILD)/vertex-resident-references-startup.config
 # Decoded RGBA layout candidate: select at process start, preserving texture
 # quality and explicit XV_RGBA_SWIZZLED environment selection. OFF by default.
 XV_RGBA_SWIZZLED_DEFAULT ?= 0

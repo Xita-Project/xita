@@ -10,6 +10,10 @@ const void *xv_vertex_upload_packed(unsigned slot,const void *source,unsigned ve
 #endif
 
 const void *xv_vertex_upload(unsigned slot, const void *source, unsigned bytes);
+/* refs must be built from the exact retained index list, with a validated
+ * fetch-within-stride layout. Metadata bounds cannot verify an invented mask
+ * against indices that this API does not receive. Unfetched records may retain
+ * old bytes; every subsequent draw must validate its own references/full span. */
 const void *xv_vertex_upload_referenced(unsigned slot, const void *source, unsigned bytes,
                                        unsigned stride, const xv_vertex_refs *refs);
 int xv_vertex_references_enabled(void);

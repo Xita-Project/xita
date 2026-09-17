@@ -26,6 +26,13 @@
 #error XV_VERTEX_RESIDENT_DEFAULT must be 0 or 1
 #endif
 
+#ifndef XV_VERTEX_RESIDENT_REFERENCES_DEFAULT
+#define XV_VERTEX_RESIDENT_REFERENCES_DEFAULT 0
+#endif
+#if XV_VERTEX_RESIDENT_REFERENCES_DEFAULT != 0 && XV_VERTEX_RESIDENT_REFERENCES_DEFAULT != 1
+#error XV_VERTEX_RESIDENT_REFERENCES_DEFAULT must be 0 or 1
+#endif
+
 /* Each slot owns an uncached GPU snapshot plus a cached comparison mirror.
  * Repeated passes reuse byte-identical data; a same-frame rewrite appends a new
  * version. The source address alone is never an immutability proof. Allocated
@@ -64,6 +71,17 @@ static unsigned copies, reused, failures, high_water;
 static uint64_t copied_bytes, compared_bytes;
 static unsigned resident_checks, resident_hits;
 static uint64_t resident_compared, resident_bytes;
+static unsigned resident_reference_checks, resident_reference_hits, resident_reference_runs;
+static uint64_t resident_reference_requested, resident_reference_compared;
+static int resident_references_enabled(void)
+{
+    static int configured = -1;
+    if (configured < 0) {
+        const char *e = getenv("XV_VERTEX_RESIDENT_REFERENCES");
+        configured = e ? atoi(e) != 0 : XV_VERTEX_RESIDENT_REFERENCES_DEFAULT;
+    }
+    return configured;
+}
 #if XV_PACKED_VERTEX_LAYOUT
 static unsigned packed_calls;
 static uint64_t packed_vertices;
@@ -314,12 +332,25 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
      * Current-frame versions still append and can never overwrite one another. */
     int resident = 0;
     if (resident_enabled() && off + bytes <= pools[slot].valid_bytes) {
-        resident_checks++; resident_compared += bytes; compared_bytes += bytes;
-        resident =
+        resident_checks++;
+        uint64_t checked = bytes;
 #if XV_PACKED_VERTEX_LAYOUT
-            layout ? packed_equal(source,pools[slot].cpu+off,bytes/16) :
+        if (layout) resident = packed_equal(source,pools[slot].cpu+off,bytes/16);
+        else
 #endif
-            vertex_equal(source, pools[slot].cpu + off, bytes);
+        if (resident_references_enabled() && xv_vertex_refs_sparse(refs, bytes, stride)) {
+            /* The mask belongs to this draw's retained indices. Unfetched
+             * records may remain old in BOTH copies; every later draw still
+             * validates its own mask/full span. Never update only the mirror.
+             * Slot retirement, initialized extent and append order are unchanged. */
+            checked = 0;
+            resident_reference_checks++; resident_reference_requested += bytes;
+            resident = xv_vertex_refs_equal(refs, stride, source, pools[slot].cpu + off,
+                vertex_equal, &checked, &resident_reference_runs);
+            resident_reference_hits += !!resident;
+            resident_reference_compared += checked;
+        } else resident = vertex_equal(source, pools[slot].cpu + off, bytes);
+        resident_compared += checked; compared_bytes += checked;
     }
     if (resident) {
         resident_hits++; resident_bytes += bytes;
@@ -454,9 +485,15 @@ void xv_vertex_upload_report(unsigned frames)
     xv_logf("[vertex-upload] %u frames: %u copies %u reused %u failures; copied %llu KiB compared %llu KiB; max slot %u/%u KiB\n",
         frames, copies, reused, failures, (unsigned long long)(copied_bytes >> 10),
         (unsigned long long)(compared_bytes >> 10), high_water >> 10, XV_VERTEX_UPLOAD_BYTES >> 10);
-    xv_logf("[vertex-resident] %u frames: enabled %d; %u checks %u hits; compared %llu KiB avoided-snapshot %llu KiB; exact retired-slot bytes\n",
+    xv_logf("[vertex-resident] %u frames: enabled %d; %u checks %u hits; compared %llu KiB avoided-snapshot %llu KiB; validated retired snapshot data\n",
         frames, resident_enabled(), resident_checks, resident_hits,
         (unsigned long long)(resident_compared >> 10), (unsigned long long)(resident_bytes >> 10));
+    xv_logf("[vertex-resident-references] %u frames: enabled %d; %u checks / %u hits / %u runs; requested %llu KiB compared %llu KiB; raw fetched groups, later draws revalidate\n",
+        frames,resident_references_enabled(),resident_reference_checks,resident_reference_hits,
+        resident_reference_runs,(unsigned long long)(resident_reference_requested>>10),
+        (unsigned long long)(resident_reference_compared>>10));
+    resident_reference_checks=resident_reference_hits=resident_reference_runs=0;
+    resident_reference_requested=resident_reference_compared=0;
     xv_logf("[vertex-transfer] %u frames: GPU queued %u batches %llu KiB / caller %llu KiB (%u async fallbacks/tails); clean %u batches %llu KiB omitted / internal-gap-padding %llu KiB recopied; producer ranges, completion totals overlap\n",
         frames,gpu_queued_batches,(unsigned long long)(gpu_queued_bytes>>10),
         (unsigned long long)(gpu_caller_bytes>>10),gpu_caller_batches,gpu_clean_batches,
