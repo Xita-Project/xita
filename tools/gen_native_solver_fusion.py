@@ -84,6 +84,6 @@ def generate_units(xbe, manifest, units, directory):
         caller='0x172cb8', actor_transaction_unchanged=True,
         generic_closure_retained=True, bounded_frames=FRAMES,
         profile='original pointer, site 4, original cleanup scope',
-        native_stack='owner fibers 32 KiB; workers 512 KiB; full owner high-water unmeasured',
+        native_stack='CE guest and object worker threads 512 KiB; bootstrap 2 MiB; full native high-water unmeasured',
         deployment_admitted=False)
     return outputs, contract

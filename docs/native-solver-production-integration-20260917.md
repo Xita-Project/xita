@@ -65,12 +65,16 @@ plus bounded fallback. Independent review adds real REP observation and moving
 aliases. These are authored synthetic packets, not captured gameplay. None of
 these instruction counts establishes a frame-rate improvement.
 
-Production owner fibers have **32 KiB native stacks**; object workers have
-512 KiB. The untraced solver frame is 1,928 bytes plus a 32-byte adapter. The
+Production CE guest threads and object workers have **512 KiB native stacks**;
+the CE bootstrap has 2 MiB. `RECOMP=1` defines `XV_RUN_RECOMP` (Makefile:238),
+selecting the actual CE bootstrap in `runtime/main.c:2163`; its `#else` alone
+launches the mock scheduler with 32 KiB fibers. Actual guest creation passes
+`512 * 1024` in `xk_thread.c:175` to the SCE thread's `host_stack` parameter in
+`xk_os_vita.c:339`. The untraced solver frame is 1,928 bytes plus a 32-byte adapter. The
 independent fixture measured an isolated peak of 2,424 bytes through actual
 preempt/stop routines, versus 664 bytes for the original. Formatting/firmware
 stack and complete ancestors are outside that measurement. The query and solver
-frames are sequential under the same caller, not additive. Full owner native
+frames are sequential under the same caller, not additive. Full native
 high-water remains unmeasured.
 
 Private evidence is under `native-solver-production-integration` beside
