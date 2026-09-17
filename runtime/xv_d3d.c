@@ -184,6 +184,9 @@ typedef struct {
     uint8_t   pass;                 /* 0 = back buffer, n = offscreen pass n           */
     uint8_t   previous_frame;       /* stages sampling the last completed backbuffer */
     uint8_t   opaque_alpha;         /* pinned tex0 upload proves the captured test always passes */
+#if XV_PACKED_VERTEX_LAYOUT
+    uint8_t   packed_vertex;        /* captured immutable representation; never consult live stream state */
+#endif
     uint8_t   depth_prepared;       /* published proof selects the retained constant fragment */
     float     psc[18][4];           /* combiner constants: per-stage c0[8], c1[8], final c0, c1 */
     uint32_t  clear_color;          /* clear only                                     */
@@ -1126,6 +1129,13 @@ static int prim_to_gxm(uint32_t prim, uint32_t *count, const void **indices, uin
 
 int xd3d_hist_active(void) __attribute__((weak));
 static int trace_frame(void) { return xd3d_hist_active && xd3d_hist_active(); }
+/* A later diagnostic request must never read a captured packed span with the
+ * original declaration stride. Ordinary trace capture already declines it. */
+#if XV_PACKED_VERTEX_LAYOUT
+#define geometry_trace(c) (trace_frame() && !(c)->packed_vertex)
+#else
+#define geometry_trace(c) trace_frame()
+#endif
 
 /* The generated table is ordered by (vertex, canonical program, 2D cube mask).
  * Inactive combiner state cannot force a material onto a heuristic fragment. */
@@ -1632,6 +1642,15 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         prep_stream[prep.count]=s;
         prep.streams[prep.count++]=(xv_vertex_prepare_stream){
             .source=p,.bytes=nverts*stride,.stride=stride,.refs=refs};
+#if XV_PACKED_VERTEX_LAYOUT
+        /* Keep the already-qualified sparse comparison when it can avoid
+         * scanning most records; this prototype compares the whole prefix. */
+        if(s==0 && !immediate && !trace_frame() && stride==32 && v->vs.packed_vprog &&
+           !xv_vertex_refs_sparse(refs,nverts*stride,stride)) {
+            prep.streams[prep.count-1].packed=XV_PACKED_PREFIX16;
+            c->packed_vertex=XV_PACKED_PREFIX16;
+        }
+#endif
         if (trace_frame()) XV_LOG("[hist] stream %u vb %08X common %08X data %08X vertices %u stride %u\n",
             s, S.stream_guest[s], vb->Common, vb->Data, nverts, stride);
         /* Only the owned upload is published; the cached source stays on CPU. */
@@ -1668,7 +1687,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     /* This stage now measures owner setup plus its remaining join, not worker
      * execution. The worker reports its overlapping duration separately. */
     xv_draw_profile_step(XV_DRAW_STREAMS, &profile);
-    if (trace_frame()) {
+    if (geometry_trace(c)) {
         /* Opt-in capture for offline skin/mesh diagnosis. Defaults to the first
          * requested histogram frame; allow up to four for lighting A/B captures. */
         const char *dump_vs = getenv("XV_MESH_DUMP");
@@ -1732,7 +1751,11 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
          * (+30) and the scale constant c[7] the program multiplies them by (vehicle wheels/weapons mangled) */
         static int dump = -1; if (dump < 0) { const char *e = getenv("XV_SKIN_DUMP"); dump = e ? atoi(e) : 0; }
         static unsigned shown;
-        if (dump && c->streams[0] && shown < 160) {
+        if (dump && c->streams[0] && shown < 160
+#if XV_PACKED_VERTEX_LAYOUT
+            && !c->packed_vertex
+#endif
+            ) {
             int skinned = 0;
             for (unsigned a = 0; a < d->nattrs; ++a) if (d->attrs[a].offset == 28 && d->attrs[a].format == SCE_GXM_ATTRIBUTE_FORMAT_U8N) skinned = 1;
             const uint8_t *vb0 = (const uint8_t *)xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[0]);
@@ -1780,7 +1803,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     }
 
     xv_draw_profile_step(XV_DRAW_DIAGNOSTICS, &profile);
-    if (trace_frame()) {
+    if (geometry_trace(c)) {
         XV_LOG("[stencil] cmd %u vs %s enable %u func %u ref %u mask %02X/%02X ops %u/%u/%u\n",
             cur_list()->ncmds-1, d->gxp, c->stencil.enabled, c->stencil.func,
             c->stencil.ref, c->stencil.read_mask, c->stencil.write_mask,
@@ -1823,27 +1846,27 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             XV_LOG("[hist]   tex%u fmt %02X %ux%u raw:%s\n", t, fmt, w, h, rb);
         }
     }
-    if (trace_frame() && getenv("XV_HIST_CONSTS")) {      /* XV_HIST_CONSTS="12,13,14,24,26": D3D vertex constant registers to print per draw */
+    if (geometry_trace(c) && getenv("XV_HIST_CONSTS")) {      /* XV_HIST_CONSTS="12,13,14,24,26": D3D vertex constant registers to print per draw */
         char cb[512]; int n = 0; const char *e = getenv("XV_HIST_CONSTS");
         while (*e && n < 440) { int reg = atoi(e); const float *m = S.vsc[96 + (reg < -96 ? -96 : reg > 95 ? 95 : reg)];
             n += snprintf(cb + n, sizeof cb - n, " c[%d]=%.3f,%.3f,%.3f,%.3f", reg, m[0], m[1], m[2], m[3]);
             while (*e && *e != ',') e++; if (*e == ',') e++; }
         XV_LOG("[hist]   consts:%s\n", cb);
     }
-    if (trace_frame() && getenv("XV_DUMP_VS") && strstr(d->gxp, getenv("XV_DUMP_VS")) && d->nstreams > 1 && c->streams[1]) {
+    if (geometry_trace(c) && getenv("XV_DUMP_VS") && strstr(d->gxp, getenv("XV_DUMP_VS")) && d->nstreams > 1 && c->streams[1]) {
         /* raw stream-1 bytes of the first vertices (lightmap uv / normal packing checks) */
         unsigned st = S.stream_stride[1] ? S.stream_stride[1] : d->stride[1]; char b[200]; int n = 0;
         for (unsigned k = 0; k < 4 && n < 180; ++k) { const uint8_t *p = (const uint8_t *)xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[1]) + k * st; n += snprintf(b + n, sizeof b - n, " |"); for (unsigned j = 0; j < st && j < 16; ++j) n += snprintf(b + n, sizeof b - n, " %02X", p[j]); }
         XV_LOG("[hist]   stream1 stride %u (decl %u) guest %08X:%s\n", st, d->stride[1], S.stream_guest[1], b);
     }
-    if (trace_frame() && getenv("XV_DUMP_VS") && strstr(d->gxp, getenv("XV_DUMP_VS")) && c->streams[0]) {
+    if (geometry_trace(c) && getenv("XV_DUMP_VS") && strstr(d->gxp, getenv("XV_DUMP_VS")) && c->streams[0]) {
         unsigned st = S.stream_stride[0] ? S.stream_stride[0] : d->stride[0]; char b[300]; int n = 0;
         for (unsigned k = 0; k < 3 && n < 280; ++k) { const uint8_t *p = (const uint8_t *)xv_vertex_upload_readback(g_build_frame % XV_NUM_LISTS, c->streams[0]) + k * st; const float *f = (const float *)p;
             n += snprintf(b + n, sizeof b - n, " | pos %.2f %.2f %.2f uv@24 %.3f %.3f raw", f[0], f[1], f[2], f[6], f[7]);
             for (unsigned j = 12; j < st && j < 32; ++j) n += snprintf(b + n, sizeof b - n, " %02X", p[j]); }
         XV_LOG("[hist]   stream0 stride %u (decl %u):%s\n", st, d->stride[0], b);
     }
-    if (trace_frame() && strstr(d->gxp, getenv("XV_DUMP_VS") ? getenv("XV_DUMP_VS") : "\001") && c->streams[0]) {
+    if (geometry_trace(c) && strstr(d->gxp, getenv("XV_DUMP_VS") ? getenv("XV_DUMP_VS") : "\001") && c->streams[0]) {
         /* first three vertices through the c[0..3] rows the microcode uses for oPos (dph) */
         for (unsigned k = 0; k < 3; ++k) {
             const uint16_t *ix = (const uint16_t *)indices; unsigned vi = ix ? ix[k] : k;
@@ -1856,7 +1879,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
           for (unsigned k = 0; ix && k < 24 && k < count && n < 180; ++k) n += snprintf(b + n, sizeof b - n, " %u", ix[k]);
           XV_LOG("[hist]   indices @%p (guest ib %08X base %u):%s\n", indices, S.indices_dbg, base_vertex, b); }
     }
-    if (trace_frame())
+    if (geometry_trace(c))
         XV_LOG("[hist] cmd %u: draw %s ps %08X prim %u n %u base %u tex %08X/%08X/%08X/%08X ntex %u blend %u/%u%s z %u/%u cull %u c[%d..%d] c0 %.2f %.2f %.2f %.2f query %u color-mask %X\n",
                l->ncmds - 1, d->gxp, S.ps_hash, prim, count, base_vertex, S.tex_guest[0], S.tex_guest[1], S.tex_guest[2], S.tex_guest[3], c->ntex, S.src_blend, S.dst_blend, S.blend_enable ? "" : "(off)",
                S.z_enable, S.z_write, S.cull, d->c_base, d->c_base + (int)d->c_count, S.vsc[96 + d->c_base][0], S.vsc[96 + d->c_base][1], S.vsc[96 + d->c_base][2], S.vsc[96 + d->c_base][3], (unsigned)c->visibility, S.color_mask);
@@ -2550,7 +2573,11 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             c->depth_write ? SCE_GXM_DEPTH_WRITE_ENABLED : SCE_GXM_DEPTH_WRITE_DISABLED,
             c->cull == X_D3DCULL_NONE ? SCE_GXM_CULL_NONE
                 : c->cull == X_D3DCULL_CW ? SCE_GXM_CULL_CW : SCE_GXM_CULL_CCW,
+#if XV_PACKED_VERTEX_LAYOUT
+            c->packed_vertex ? v->vs.packed_vprog : v->vs.vprog, fp);
+#else
             v->vs.vprog, fp);
+#endif
 
         if (!XV_RENDER_CALL(XV_RENDER_VERTEX_UNIFORM, bind_vertex_constants(ctx, l, c, &v->vs, frame)))
             continue;

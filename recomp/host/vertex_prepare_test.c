@@ -118,6 +118,8 @@ static void reset(void)
     for(unsigned i=10;i<hid;i++)assert(!handles[i].type);
     memset(handles,0,sizeof handles);hid=10;next_id=1;create_calls=fail_create=0;
 }
+
+#ifndef XV_VERTEX_PREPARE_TEST_NO_MAIN
 int main(int argc,char **argv)
 {
     setenv("XV_VERTEX_PREPARE",argc>1?"0":"1",1);
@@ -201,3 +203,5 @@ int main(int argc,char **argv)
     puts("PASS: real preparation/upload workers, 600 slot generations, source rewrites, independent material work, allocation/start/dispatch failures, lost completion notification and joins");
     return 0;
 }
+
+#endif

@@ -131,6 +131,24 @@ $(BUILD)/query-boundary-startup.config: force-query-boundary-startup-config
 $(BUILD)/runtime/main.o: $(BUILD)/query-boundary-startup.config
 # Grouped exact vertex comparisons: opt-in at process start, independent of
 # graphics quality. Only the uploader consumes this build default.
+XV_PACKED_VERTEX_LAYOUT ?= 0
+ifneq ($(words $(XV_PACKED_VERTEX_LAYOUT)),1)
+$(error XV_PACKED_VERTEX_LAYOUT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_PACKED_VERTEX_LAYOUT),0 1),$(XV_PACKED_VERTEX_LAYOUT))
+$(error XV_PACKED_VERTEX_LAYOUT must be 0 or 1)
+endif
+# All runtime owners of shader/prepare ABI, never generated guest units.
+PACKED_VERTEX_OBJECTS := $(addprefix $(BUILD)/runtime/,$(addsuffix .o,main xv_d3d xv_shader xv_ui_gxm xv_vertex_upload xv_vertex_prepare))
+$(PACKED_VERTEX_OBJECTS): CFLAGS += -DXV_PACKED_VERTEX_LAYOUT=$(XV_PACKED_VERTEX_LAYOUT)
+.PHONY: force-packed-vertex-config
+force-packed-vertex-config:
+$(BUILD)/packed-vertex.config: force-packed-vertex-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_PACKED_VERTEX_LAYOUT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(PACKED_VERTEX_OBJECTS): $(BUILD)/packed-vertex.config runtime/xv_packed_vertex.h
 XV_VERTEX_BLOCK_LOADS_DEFAULT ?= 0
 ifneq ($(words $(XV_VERTEX_BLOCK_LOADS_DEFAULT)),1)
 $(error XV_VERTEX_BLOCK_LOADS_DEFAULT must be 0 or 1)

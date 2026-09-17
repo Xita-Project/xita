@@ -248,6 +248,51 @@ static SceGxmProgram *load_gxp(const char *path)
     return prog;
 }
 
+#if XV_PACKED_VERTEX_LAYOUT
+/* Only these three declarations and their actual embedded linked programs.
+ * Compare fields, not padded structs; bindings must be exactly the qualified
+ * live inputs. File overrides differing by even one byte decline. */
+static int packed_layout(const xv_vshader_t *vs,const SceGxmVertexAttribute *a,unsigned n)
+{
+    const xv_vs_desc_t *d=vs->desc;
+    static const char *const names[]={"position","blendweight","normal","color0","color1","backcolor0","backcolor1"};
+    static const unsigned formats[]={SCE_GXM_ATTRIBUTE_FORMAT_F32,SCE_GXM_ATTRIBUTE_FORMAT_U8,
+        SCE_GXM_ATTRIBUTE_FORMAT_U8,SCE_GXM_ATTRIBUTE_FORMAT_U8,SCE_GXM_ATTRIBUTE_FORMAT_F32,
+        SCE_GXM_ATTRIBUTE_FORMAT_U8,SCE_GXM_ATTRIBUTE_FORMAT_S16N};
+    static const unsigned offsets[]={0,12,16,20,24,0,4},components[]={3,4,4,4,2,4,2};
+    unsigned kind;
+    if(d->func_hash==0x3068A44Bu && d->func_size==148 && d->c_count==11 &&
+        !strcmp(d->gxp,"app0:shaders/halo_vs_06.gxp"))kind=0;
+    else if(d->func_hash==0xF0F51170u && d->func_size==180 && d->c_count==20 &&
+        !strcmp(d->gxp,"app0:shaders/halo_vs_29.gxp"))kind=1;
+    else if(d->func_hash==0x53C00F6Cu && d->func_size==116 && d->c_count==4 &&
+        !strcmp(d->gxp,"app0:shaders/halo_vs_58.gxp"))kind=2;
+    else return 0;
+    if(d->c_base!=-96 || d->nstreams!=(kind==2?2:1) || d->nattrs!=(kind==2?7:5) ||
+       d->stride[0]!=32 || d->stride[1]!=(kind==2?8:0) || d->stride[2] || d->stride[3])return 0;
+    for(unsigned i=0;i<d->nattrs;i++) {
+        const xv_attr_desc_t *v=&d->attrs[i];
+        if(strcmp(v->name,names[i]) || v->stream!=(i>=5) || v->offset!=offsets[i] ||
+           v->format!=formats[i] || v->components!=components[i] || v->vreg!=(i<5?i:i+2))return 0;
+    }
+    if(n!=(kind?2:1))return 0;
+    for(unsigned i=0;i<n;i++) {
+        unsigned k=i?(kind==1?1:6):0;
+        if(a[i].streamIndex!=(k>=5) || a[i].offset!=offsets[k] ||
+           a[i].format!=formats[k] || a[i].componentCount!=components[k])return 0;
+    }
+    for(unsigned i=0;i<sizeof xv_vs_embedded/sizeof *xv_vs_embedded;i++)
+        if(!strcmp(d->gxp,xv_vs_embedded[i].path)) {
+            unsigned bytes=sceGxmProgramGetSize(vs->prog);
+            /* GXP files may have 0..3 trailing alignment bytes outside the
+             * program. Compare the complete validated program, not padding. */
+            return bytes>=0x30 && bytes<=xv_vs_embedded[i].size &&
+                bytes==sceGxmProgramGetSize((const SceGxmProgram *)xv_vs_embedded[i].data) &&
+                !memcmp(vs->prog,xv_vs_embedded[i].data,bytes);
+        }
+    return 0;
+}
+#endif
 int xv_vshader_load(xv_vshader_t *vs, const xv_vs_desc_t *desc)
 {
     memset(vs, 0, sizeof(*vs));
@@ -307,6 +352,15 @@ int xv_vshader_load(xv_vshader_t *vs, const xv_vs_desc_t *desc)
         return err;
     }
     vs->nbound = (uint8_t)nattr;
+#if XV_PACKED_VERTEX_LAYOUT
+    if(packed_layout(vs,attrs,nattr)) {
+        streams[0].stride=16;
+        SceGxmVertexProgram *packed=NULL;
+        int result=sceGxmShaderPatcherCreateVertexProgram(g_patcher,vs->id,attrs,nattr,streams,nstreams,&packed);
+        if(result>=0)vs->packed_vprog=packed;
+        XV_LOG("%s: packed-prefix16 %s (original retained)\n",desc->gxp,vs->packed_vprog?"ready":"unavailable");
+    }
+#endif
     vs->p_c = sceGxmProgramFindParameterByName(vs->prog, "c");
     XV_LOG("%s: %u/%u attrs bound, %u stream(s)%s, c[%d..%d] uniform %s\n", desc->gxp, nattr, desc->nattrs,
            desc->nstreams, need_const ? " + const" : "", desc->c_base, desc->c_base + desc->c_count - 1,
@@ -316,6 +370,10 @@ int xv_vshader_load(xv_vshader_t *vs, const xv_vs_desc_t *desc)
 
 void xv_vshader_unload(xv_vshader_t *vs)
 {
+#if XV_PACKED_VERTEX_LAYOUT
+    if(vs->packed_vprog)
+        sceGxmShaderPatcherReleaseVertexProgram(g_patcher,vs->packed_vprog);
+#endif
     if (vs->vprog)
         sceGxmShaderPatcherReleaseVertexProgram(g_patcher, vs->vprog);
     if (vs->prog) {

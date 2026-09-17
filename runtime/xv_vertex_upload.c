@@ -47,6 +47,9 @@ int xv_upload_worker_snapshot(void *,const void *,unsigned) __attribute__((weak)
 typedef struct {
     const void *source;
     unsigned bytes, offset, next;
+#if XV_PACKED_VERTEX_LAYOUT
+    unsigned layout;
+#endif
 } upload_entry;
 static struct {
     SceUID gpu_uid, cpu_uid;
@@ -61,6 +64,17 @@ static unsigned copies, reused, failures, high_water;
 static uint64_t copied_bytes, compared_bytes;
 static unsigned resident_checks, resident_hits;
 static uint64_t resident_compared, resident_bytes;
+#if XV_PACKED_VERTEX_LAYOUT
+static unsigned packed_calls;
+static uint64_t packed_vertices;
+static int packed_equal(const void *a,const void *b,unsigned vertices)
+{
+    uint64_t profile=xv_vertex_work_begin();
+    int equal=xv_packed_equal(a,b,vertices);
+    xv_vertex_work_end(equal?XV_VERTEX_EQUAL:XV_VERTEX_DIFFERENT,vertices*16,profile);
+    return equal;
+}
+#endif
 /* Producer-side traffic, independent of asynchronously sampled worker totals.
  * Dirty envelopes include unchanged internal gaps to bound dispatch count. */
 static uint64_t gpu_queued_bytes, gpu_caller_bytes, gpu_clean_bytes, gpu_overcopy_bytes;
@@ -247,7 +261,11 @@ static int allocate(unsigned slot)
     return 1;
 }
 static const void *upload(unsigned slot, const void *source, unsigned bytes,
-                           unsigned stride, const xv_vertex_refs *refs)
+                           unsigned stride, const xv_vertex_refs *refs
+#if XV_PACKED_VERTEX_LAYOUT
+                           ,unsigned layout
+#endif
+                           )
 {
     if (slot >= XV_FRAME_SLOTS || !source || !bytes || bytes > XV_VERTEX_UPLOAD_BYTES) goto fail;
     if (!pools[slot].started) {
@@ -259,7 +277,16 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
     for (unsigned n = pools[slot].bucket[hash]; n; n = pools[slot].entries[n-1].next) {
         upload_entry *e = &pools[slot].entries[n-1];
         if (e->source != source || e->bytes < bytes) continue;
+#if XV_PACKED_VERTEX_LAYOUT
+        if(e->layout!=layout)continue;
+#endif
         int match;
+#if XV_PACKED_VERTEX_LAYOUT
+        if(layout) {
+            compared_bytes+=bytes;
+            match=packed_equal(source,pools[slot].cpu+e->offset,bytes/16);
+        } else
+#endif
         if (xv_vertex_refs_sparse(refs, bytes, stride)) {
             uint64_t checked = 0;
             reference_checks++; reference_requested += bytes;
@@ -288,12 +315,23 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
     int resident = 0;
     if (resident_enabled() && off + bytes <= pools[slot].valid_bytes) {
         resident_checks++; resident_compared += bytes; compared_bytes += bytes;
-        resident = vertex_equal(source, pools[slot].cpu + off, bytes);
+        resident =
+#if XV_PACKED_VERTEX_LAYOUT
+            layout ? packed_equal(source,pools[slot].cpu+off,bytes/16) :
+#endif
+            vertex_equal(source, pools[slot].cpu + off, bytes);
     }
     if (resident) {
         resident_hits++; resident_bytes += bytes;
     } else {
         uint64_t profile = xv_vertex_work_begin();
+#if XV_PACKED_VERTEX_LAYOUT
+        if(layout) {
+            xv_packed_copy(pools[slot].cpu+off,source,bytes/16);
+            if(!pools[slot].asynchronous)
+                memcpy(pools[slot].gpu+off,pools[slot].cpu+off,bytes);
+        } else
+#endif
         if (pools[slot].asynchronous) {
             /* Guest memory can change immediately after this call. A shared
              * initial copy joins its source loan here; later asynchronous GPU
@@ -330,7 +368,10 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
         } else pools[slot].dirty_bytes+=aligned-bytes;
         pools[slot].valid_bytes = off + aligned;
     }
-    pools[slot].entries[n] = (upload_entry){source, bytes, off, pools[slot].bucket[hash]};
+    pools[slot].entries[n] = (upload_entry){.source=source,.bytes=bytes,.offset=off,.next=pools[slot].bucket[hash]};
+#if XV_PACKED_VERTEX_LAYOUT
+    pools[slot].entries[n].layout=layout;
+#endif
     pools[slot].bucket[hash] = n + 1;
     pools[slot].used += aligned;
     dispatch(slot,0);
@@ -340,10 +381,28 @@ fail:
     failures++; return NULL;
 }
 const void *xv_vertex_upload(unsigned slot, const void *source, unsigned bytes)
-{ return upload(slot, source, bytes, 0, NULL); }
+{ return upload(slot, source, bytes, 0, NULL
+#if XV_PACKED_VERTEX_LAYOUT
+    ,0
+#endif
+    ); }
 const void *xv_vertex_upload_referenced(unsigned slot, const void *source, unsigned bytes,
                                        unsigned stride, const xv_vertex_refs *refs)
-{ return upload(slot, source, bytes, stride, refs); }
+{ return upload(slot, source, bytes, stride, refs
+#if XV_PACKED_VERTEX_LAYOUT
+    ,0
+#endif
+    ); }
+#if XV_PACKED_VERTEX_LAYOUT
+const void *xv_vertex_upload_packed(unsigned slot,const void *source,unsigned vertices)
+{
+    if(!vertices || vertices>XV_VERTEX_UPLOAD_BYTES/16 || vertices>UINT32_MAX/32) {
+        failures++;return NULL;
+    }
+    packed_calls++;packed_vertices+=vertices;
+    return upload(slot,source,vertices*16,0,NULL,XV_PACKED_PREFIX16);
+}
+#endif
 void xv_vertex_upload_reset(unsigned slot)
 {
     if (slot >= XV_FRAME_SLOTS) return;
@@ -374,6 +433,11 @@ void xv_vertex_upload_shutdown(void)
 }
 void xv_vertex_upload_report(unsigned frames)
 {
+#if XV_PACKED_VERTEX_LAYOUT
+    xv_logf("[vertex-packed] %u frames: %u requests source %llu KiB / payload %llu KiB; exact prefix16, requested spans not GPU writes\n",
+        frames,packed_calls,(unsigned long long)(packed_vertices*32>>10),(unsigned long long)(packed_vertices*16>>10));
+    packed_calls=0;packed_vertices=0;
+#endif
     xv_vertex_work_report(frames);
     if (xv_upload_worker_report) xv_upload_worker_report(frames);
     xv_logf("[vertex-block-loads] %u frames: enabled %d checks %u requested-KiB %llu; exact 64-byte groups and original tails\n",

@@ -1,6 +1,7 @@
 #ifndef XV_VERTEX_PREPARE_H
 #define XV_VERTEX_PREPARE_H
 #include "xv_vertex_refs.h"
+#include "xv_packed_vertex.h"
 
 /* One recording owner. Inputs and references are borrowed until finish; the
  * owner may prepare independent material state but must not resume the guest,
@@ -11,6 +12,9 @@ typedef struct {
     const void *source, *result;
     unsigned bytes, stride;
     const xv_vertex_refs *refs;
+#if XV_PACKED_VERTEX_LAYOUT
+    unsigned packed;
+#endif
 } xv_vertex_prepare_stream;
 typedef struct {
     unsigned slot, count;
