@@ -40,6 +40,15 @@ static unsigned warmup, foreign, invalid, rebinds, abandoned, stale;
 #if XV_SCENE_PARTITION && !defined(XV_OWNER_PHASE)
 #error XV_SCENE_PARTITION requires XV_OWNER_PHASE
 #endif
+#ifndef XV_SCENE_BUCKET0_DETAIL
+#define XV_SCENE_BUCKET0_DETAIL 0
+#endif
+#if XV_SCENE_BUCKET0_DETAIL != 0 && XV_SCENE_BUCKET0_DETAIL != 1
+#error XV_SCENE_BUCKET0_DETAIL must be 0 or 1
+#endif
+#if XV_SCENE_BUCKET0_DETAIL && !XV_SCENE_PARTITION
+#error XV_SCENE_BUCKET0_DETAIL requires XV_SCENE_PARTITION
+#endif
 #if XV_SCENE_PARTITION
 /* One outer primary 5D410 invocation on the presenting owner. Nested primary
  * entries are explicitly declined: their elapsed stays in the outer bucket.
@@ -48,10 +57,19 @@ static struct {
     uint64_t token, start, elapsed[6], entries[6], completed;
     unsigned bucket, serial, exhausted, recursive, invalid, abandoned, stale;
 } scene;
+#if XV_SCENE_BUCKET0_DETAIL
+/* Shares the enclosing scene token and timestamp; no independent lifetime. */
+static struct { uint64_t elapsed[6], entries[6], completed; unsigned bucket; } detail;
+#endif
 static void scene_account(uint64_t end)
 {
     if(end<scene.start)scene.invalid++;
-    else scene.elapsed[scene.bucket]+=end-scene.start;
+    else {
+        scene.elapsed[scene.bucket]+=end-scene.start;
+#if XV_SCENE_BUCKET0_DETAIL
+        if(scene.bucket==0)detail.elapsed[detail.bucket]+=end-scene.start;
+#endif
+    }
     scene.start=end;
 }
 #endif
@@ -103,6 +121,9 @@ void xv_owner_phase_configure(void)
     XK_LOG("[owner-phase] process-start %d; FA920/BCB30 outer elapsed only; first Present binds owner, no phase/worker control\n",xv_owner_phase_enabled);
 #if XV_SCENE_PARTITION
     XK_LOG("[scene-partition] process-start %d; primary 5D410 six ordered elapsed buckets; workers unchanged\n",xv_owner_phase_enabled);
+#endif
+#if XV_SCENE_BUCKET0_DETAIL
+    XK_LOG("[scene-bucket0-detail] process-start %d; five additional shared-clock boundaries, no worker-policy change\n",xv_owner_phase_enabled);
 #endif
 }
 void xv_owner_phase_present(void *context)
@@ -161,6 +182,9 @@ void xv_scene_partition_begin(uint64_t *scope,void *context)
     if(scene.serial==UINT32_MAX) { scene.exhausted=1;return; }
     *scope=scene.token=((uint64_t)generation<<32)|++scene.serial;
     scene.bucket=0;scene.entries[0]++;scene.start=now();
+#if XV_SCENE_BUCKET0_DETAIL
+    detail.bucket=0;detail.entries[0]++;
+#endif
 }
 void xv_scene_partition_step(uint64_t *scope,void *context,unsigned bucket)
 {
@@ -169,8 +193,22 @@ void xv_scene_partition_step(uint64_t *scope,void *context,unsigned bucket)
     if(*scope!=scene.token || (unsigned)(*scope>>32)!=generation) { scene.stale++;return; }
     if(bucket>=6 || bucket<=scene.bucket) { scene.invalid++;return; }
     /* Exactly one clock accounts the old interval and starts the next. */
-    scene_account(now());scene.bucket=bucket;scene.entries[bucket]++;
+    scene_account(now());
+#if XV_SCENE_BUCKET0_DETAIL
+    if(scene.bucket==0)detail.completed++;
+#endif
+    scene.bucket=bucket;scene.entries[bucket]++;
 }
+#if XV_SCENE_BUCKET0_DETAIL
+void xv_scene_bucket0_step(uint64_t *scope,void *context,unsigned bucket)
+{
+    if(!*scope)return;
+    if(!scene_live(context)) { __atomic_fetch_add(&foreign,1,__ATOMIC_RELAXED);return; }
+    if(*scope!=scene.token || (unsigned)(*scope>>32)!=generation) { scene.stale++;return; }
+    if(scene.bucket!=0 || bucket>=6 || bucket<=detail.bucket) { scene.invalid++;return; }
+    scene_account(now());detail.bucket=bucket;detail.entries[bucket]++;
+}
+#endif
 void xv_scene_partition_end(uint64_t *scope)
 {
     uint64_t token=*scope;
@@ -181,7 +219,11 @@ void xv_scene_partition_end(uint64_t *scope)
     if(!scene_live((void *)__atomic_load_n(&owner_context,__ATOMIC_ACQUIRE))) {
         scene.invalid++;scene.abandoned++;scene.token=0;return;
     }
-    scene_account(now());scene.completed++;scene.token=0;
+    scene_account(now());
+#if XV_SCENE_BUCKET0_DETAIL
+    if(scene.bucket==0)detail.completed++;
+#endif
+    scene.completed++;scene.token=0;
 }
 #endif
 void xv_owner_phase_begin(xv_owner_phase_scope *scope,void *context,unsigned phase)
@@ -235,6 +277,18 @@ void xv_owner_phase_report(unsigned frames)
         phases[i].entries=phases[i].completed=phases[i].recursive=phases[i].elapsed=0;
     }
 #if XV_SCENE_PARTITION
+#if XV_SCENE_BUCKET0_DETAIL
+    XK_LOG("[scene-bucket0-detail] %u frames 5D410: entries %llu/%llu/%llu/%llu/%llu/%llu elapsed-us %llu/%llu/%llu/%llu/%llu/%llu; completed %llu open %u bucket %u; disjoint within main bucket0, shared timestamps\n",
+        frames,(unsigned long long)detail.entries[0],(unsigned long long)detail.entries[1],
+        (unsigned long long)detail.entries[2],(unsigned long long)detail.entries[3],
+        (unsigned long long)detail.entries[4],(unsigned long long)detail.entries[5],
+        (unsigned long long)detail.elapsed[0],(unsigned long long)detail.elapsed[1],
+        (unsigned long long)detail.elapsed[2],(unsigned long long)detail.elapsed[3],
+        (unsigned long long)detail.elapsed[4],(unsigned long long)detail.elapsed[5],
+        (unsigned long long)detail.completed,!!scene.token && scene.bucket==0,detail.bucket);
+    memset(detail.entries,0,sizeof detail.entries);memset(detail.elapsed,0,sizeof detail.elapsed);
+    detail.completed=0;
+#endif
     XK_LOG("[scene-partition] %u frames 5D410: entries %llu/%llu/%llu/%llu/%llu/%llu elapsed-us %llu/%llu/%llu/%llu/%llu/%llu; completed %llu open %u bucket %u recursive-declined %u invalid %u abandoned %u stale %u exhausted %u; disjoint outer buckets, nested/waits included\n",
         frames,(unsigned long long)scene.entries[0],(unsigned long long)scene.entries[1],
         (unsigned long long)scene.entries[2],(unsigned long long)scene.entries[3],

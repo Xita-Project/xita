@@ -76,6 +76,7 @@ class HaloHooks(NoGameHooks):
         self.enabled = matches_image(image)
         self.owner_phase_enabled = self.enabled
         self.scene_partition_enabled = self.enabled
+        self.scene_bucket0_detail_enabled = self.enabled
         self.flare_enabled = self.enabled
         self.clip_region_enabled = self.enabled and clip_region.matches_spans(image)
         self.object_basis_enabled = self.enabled and hashlib.sha256(
@@ -279,6 +280,8 @@ class HaloHooks(NoGameHooks):
     def transform_body(self, address, body):
         if self.scene_partition_enabled and address == 0x5D410:
             body = scene_partition.hook(body)
+            if self.scene_bucket0_detail_enabled:
+                body = scene_partition.detail_hook(body)
         body = self.light_census_body(address, body)
         if self.enabled and address == 0x86F50 and collision_vertices.matches(self.image):
             body = collision_vertices.hook(body)
