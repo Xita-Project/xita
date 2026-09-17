@@ -50,7 +50,7 @@ static int fake_voice = -1;
 static uint32_t fake_decoded;
 static int fake_playing;
 static pthread_t native_thread;
-static pthread_mutex_t native_mutex[2];
+static pthread_mutex_t native_mutex[3];
 static sem_t native_ready;
 static int launched, joined;
 #if H2_AUDIO_DSP
@@ -108,20 +108,20 @@ uint32_t xk_audio_free_voices(void) { return 42; }
 #endif
 static int sceKernelCreateMutex(const char *name, int a, int b, void *p)
 {
-    unsigned index = !strcmp(name, "h2_audio_progress"), bit = index ? 16 : 1;
+    unsigned index = !strcmp(name, "h2_audio_progress") ? 1 : !strcmp(name, "h2_audio_engine") ? 2 : 0, bit = index == 2 ? 32 : index ? 16 : 1;
     assert(!a && !b && !p && !(resources & bit));
-    if (failing(index ? F_PROGRESS : F_MUTEX)) return -10;
+    if (failing(index == 1 ? F_PROGRESS : F_MUTEX) && index != 2) return -10;
     assert(!pthread_mutex_init(&native_mutex[index], NULL)); resources |= bit; return 10 + index;
 }
 static int sceKernelDeleteMutex(int id)
 {
-    unsigned index = id - 10, bit = index ? 16 : 1; assert(index < 2 && (resources & bit) && !atomic_load(&active));
+    unsigned index = id - 10, bit = index == 2 ? 32 : index ? 16 : 1; assert(index < 3 && (resources & bit) && !atomic_load(&active));
     assert(!pthread_mutex_destroy(&native_mutex[index])); resources &= ~bit; return 0;
 }
 static int sceKernelLockMutex(int id, int n, void *p)
-{ assert(id >= 10 && id <= 11 && n == 1 && !p); return pthread_mutex_lock(&native_mutex[id - 10]); }
+{ assert(id >= 10 && id <= 12 && n == 1 && !p); return pthread_mutex_lock(&native_mutex[id - 10]); }
 static int sceKernelUnlockMutex(int id, int n)
-{ assert(id >= 10 && id <= 11 && n == 1); return pthread_mutex_unlock(&native_mutex[id - 10]); }
+{ assert(id >= 10 && id <= 12 && n == 1); return pthread_mutex_unlock(&native_mutex[id - 10]); }
 static int sceAudioOutOpenPort(int type, int grain, int rate, int mode)
 {
     assert(type == 0 && grain == XA_GRAIN && rate == XA_OUT_RATE && mode == 1 && !(resources & 2));
@@ -240,8 +240,8 @@ int main(void)
     atomic_store(&faults, 0);
     for (unsigned cycle = 0; cycle < 3; ++cycle) {
         unsigned old_outputs = atomic_load(&outputs), old_drains = atomic_load(&drains);
-        assert(h2_audio_backend_open() == 0 && resources == 31);
-        assert(h2_audio_backend_open() == -2 && resources == 31); /* never resets a live device */
+        assert(h2_audio_backend_open() == 0 && resources == 63);
+        assert(h2_audio_backend_open() == -2 && resources == 63); /* never resets a live device */
         assert(h2_audio_backend_health() == 0 && h2_audio_backend_free_voices() == 42);
         h2_audio_backend_status state; h2_audio_backend_snapshot(&state);
         assert(state.grains >= 1 && state.nonzero_grains >= 1 && state.peak == 4321 && !state.error);
@@ -284,7 +284,7 @@ int main(void)
     /* A join failure must retain everything that a running worker could use. */
     assert(h2_audio_backend_open() == 0);
     atomic_store(&faults, 1u << F_JOIN);
-    assert(h2_audio_backend_close() == -1 && resources == 31);
+    assert(h2_audio_backend_close() == -1 && resources == 63);
     atomic_store(&faults, 0); assert(h2_audio_backend_close() == 0 && !resources);
     /* A failed, invalid or stalled observation cannot invent a cursor or
      * free an unverified outstanding grain. Retain resources until real
@@ -300,7 +300,7 @@ int main(void)
         uint32_t play = 123, write = 456;
         assert(h2_audio_backend_stop(0) < 0);
         assert(h2_audio_backend_cursor(0, &play, &write) < 0 && play == 123 && write == 456);
-        assert(h2_audio_backend_close() < 0 && resources == 31 && !atomic_load(&active));
+        assert(h2_audio_backend_close() < 0 && resources == 63 && !atomic_load(&active));
         atomic_store(&faults, 0);
         int rc = -1; for (unsigned tries = 0; tries < 10 && rc; ++tries) rc = h2_audio_backend_close();
         assert(!rc && !resources && !atomic_load(&queued));
