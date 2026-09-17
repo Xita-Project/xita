@@ -299,6 +299,10 @@ int main(void)
     assert(!xv_object_math_available());
     xv_object_jobs_override(1);
     assert(xv_object_math_available()==(workers!=0&&fast_path));
+#ifdef XV_OBJECT_HOLD_PROFILE
+    assert(xv_object_holds_available()==(workers!=0&&fast_path));
+    if(getenv("OBJECT_HOLD_TEST"))xv_object_holds_override(1);
+#endif
 #ifdef XV_OBJECT_POINT_EXPERIMENT
     assert(xv_object_point_available()==(workers!=0&&fast_path));
 #else

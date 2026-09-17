@@ -204,6 +204,90 @@ static sem_t owner_wake, replies[WORKERS];
 
 static xv_object_mutex math_mutex;
 
+#ifdef XV_OBJECT_HOLD_PROFILE
+/* Research-only sampled OUTER worker scopes. A lane owns its records until
+ * join. Sampling is decorrelated from periodic call order; no guest memory is
+ * read. Reported elapsed time includes preemption and any owner-service park.
+ * Table accounting happens after release, not while retaining the mutex. */
+enum { HOLD_SITES=32, HOLD_SAMPLE_MASK=63 };
+static unsigned hold_enabled;
+static struct __attribute__((aligned(64))) {
+    uint32_t random;
+    unsigned observed, samples, active;
+    uintptr_t pc;
+    uint64_t start;
+    struct { uintptr_t pc; unsigned samples; uint64_t us,max_us; } sites[HOLD_SITES+1];
+} hold_lanes[WORKERS];
+static void hold_begin(unsigned lane,uintptr_t pc)
+{
+    if(!hold_enabled)return;
+    if(hold_lanes[lane].active)abort();
+    hold_lanes[lane].observed++;
+    uint32_t r=hold_lanes[lane].random;
+    if(!r)r=0x9e3779b9u^(lane*0x85ebca6bu);
+    r^=r<<13;r^=r>>17;r^=r<<5;hold_lanes[lane].random=r;
+    if(r&HOLD_SAMPLE_MASK)return;
+    hold_lanes[lane].pc=pc;hold_lanes[lane].active=1;
+    hold_lanes[lane].start=xk_os_monotonic_us();
+}
+static void hold_release(unsigned lane)
+{
+    if(!hold_lanes[lane].active) {xv_object_mutex_release(&math_mutex);return;}
+    uint64_t elapsed=xk_os_monotonic_us()-hold_lanes[lane].start;
+    uintptr_t pc=hold_lanes[lane].pc;hold_lanes[lane].active=0;
+    xv_object_mutex_release(&math_mutex);
+    unsigned site;
+    for(site=0;site<HOLD_SITES;site++)
+        if(!hold_lanes[lane].sites[site].samples||hold_lanes[lane].sites[site].pc==pc)break;
+    if(site<HOLD_SITES)hold_lanes[lane].sites[site].pc=pc;
+    hold_lanes[lane].sites[site].samples++;hold_lanes[lane].samples++;
+    hold_lanes[lane].sites[site].us+=elapsed;
+    if(elapsed>hold_lanes[lane].sites[site].max_us)hold_lanes[lane].sites[site].max_us=elapsed;
+}
+static void hold_report(unsigned frames)
+{
+    for(unsigned lane=0;lane<WORKERS;lane++) {
+        if(hold_lanes[lane].active)abort();
+        XK_LOG("[object-holds] %u frames lane %u enabled %u outer %u samples %u denominator 64; sampled elapsed includes scheduling/parks, not total hold time\n",
+            frames,lane,hold_enabled,hold_lanes[lane].observed,hold_lanes[lane].samples);
+        for(unsigned site=0;site<=HOLD_SITES;site++)if(hold_lanes[lane].sites[site].samples)
+            XK_LOG("[object-hold-site] lane %u pc %llX samples %u elapsed-us %llu max-us %llu overflow %u\n",
+                lane,(unsigned long long)hold_lanes[lane].sites[site].pc,
+                hold_lanes[lane].sites[site].samples,(unsigned long long)hold_lanes[lane].sites[site].us,
+                (unsigned long long)hold_lanes[lane].sites[site].max_us,site==HOLD_SITES);
+        uint32_t random=hold_lanes[lane].random;
+        memset(&hold_lanes[lane],0,sizeof hold_lanes[lane]);hold_lanes[lane].random=random;
+    }
+}
+#endif
+int xv_object_holds_enabled(void)
+{
+#ifdef XV_OBJECT_HOLD_PROFILE
+    return hold_enabled;
+#else
+    return 0;
+#endif
+}
+int xv_object_holds_available(void)
+{
+#ifdef XV_OBJECT_HOLD_PROFILE
+    return initialized==1&&active_workers&&math_fast_path&&!xv_phase_enabled&&
+        (override<0?configured:override)>0;
+#else
+    return 0;
+#endif
+}
+void xv_object_holds_override(int value)
+{
+    if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
+#ifdef XV_OBJECT_HOLD_PROFILE
+    for(unsigned lane=0;lane<WORKERS;lane++)if(math_depth[lane]||hold_lanes[lane].active)abort();
+    hold_enabled=value>0;
+#else
+    (void)value;
+#endif
+}
+
 #ifndef __vita__
 static void wait_sem(sem_t *s) { while(sem_wait(s))if(errno!=EINTR)abort(); }
 #endif
@@ -432,7 +516,13 @@ __attribute__((noinline)) int xv_object_math_lock(void)
         if(acquired) {
             math_stats[lane].acquired++;
             if(waiting)record_math_wait((unsigned)lane,(uintptr_t)__builtin_return_address(0),xk_os_monotonic_us()-waiting);
-            if(math_fast_path) { math_depth[lane]=1;return lane+2; }
+            if(math_fast_path) {
+                math_depth[lane]=1;
+#ifdef XV_OBJECT_HOLD_PROFILE
+                hold_begin((unsigned)lane,(uintptr_t)__builtin_return_address(0));
+#endif
+                return lane+2;
+            }
             return 1;
         }
         /* A timed-out lock already waited. Return directly to the park check;
@@ -456,6 +546,9 @@ void xv_object_math_unlock(int *locked)
         unsigned lane=(unsigned)*locked-2;
         if(lane>=WORKERS||!math_depth[lane])abort();
         if(--math_depth[lane])return;
+#ifdef XV_OBJECT_HOLD_PROFILE
+        hold_release(lane);return;
+#endif
     }
     xv_object_mutex_release(&math_mutex);
 }
@@ -996,6 +1089,9 @@ void xv_object_jobs_report(unsigned frames)
     /* Called with the renderer's frame window, not every 60 simulation passes.
      * Reporting must never dispatch callbacks or reset live worker counters. */
     if(initialized!=1||owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))return;
+#ifdef XV_OBJECT_HOLD_PROFILE
+    hold_report(frames);
+#endif
 #ifdef XV_WORKER_QUERY
     for(unsigned lane=0;lane<WORKERS;lane++)
         XK_LOG("[worker-query] lane %u admission-checks accepted/disabled/nested/stack %u/%u/%u/%u\n",lane,

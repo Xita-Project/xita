@@ -22,6 +22,10 @@ void xv_object_job_stop(xctx *c, unsigned address, const char *reason) __attribu
 int xv_object_is_worker_thread(void);
 int xv_object_math_lock(void);
 void xv_object_math_unlock(int *locked);
+/* Drained-owner diagnostic only; ordinary builds have no hold instrumentation. */
+int xv_object_holds_available(void);
+int xv_object_holds_enabled(void);
+void xv_object_holds_override(int enabled);
 /* Inputs and shared bookkeeping must be captured before this call. Only the
  * current lane's unchanged private stack mappings may be written afterwards. */
 int xv_object_math_release_private(xctx *c,int *locked,unsigned kind,

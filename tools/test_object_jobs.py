@@ -85,6 +85,19 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                         assert len(rows)<=33
                         assert all(row[4]<=row[3] and (row[1]!=0 or row[5]) for row in rows)
                     if workers=='2': assert sites,'two contending worker callbacks must be attributed'
+                if os.environ.get('OBJECT_HOLD_TEST'):
+                    holds=re.findall(r'\[object-holds\] (\d+) frames lane (\d+) enabled (\d+) outer (\d+) samples (\d+) denominator 64;',result.stderr)
+                    assert len(holds)==4 and all(row[0]=='3' and row[2]=='1' for row in holds),holds
+                    assert all(row[3:] == ('0','0') for row in holds[2:]),holds
+                    acquisitions=re.search(r'acquired (\d+)/(\d+)/(\d+) nested',result.stderr)
+                    sites=re.findall(r'\[object-hold-site\] lane (\d+) pc ([0-9A-F]+) samples (\d+) elapsed-us (\d+) max-us (\d+) overflow (\d+)',result.stderr)
+                    for lane in range(2):
+                        rows=[tuple(int(v,16 if j==1 else 10) for j,v in enumerate(row)) for row in sites if int(row[0])==lane]
+                        assert int(holds[lane][3])==int(acquisitions[lane+1]),(holds,acquisitions.groups())
+                        assert sum(row[2] for row in rows)==int(holds[lane][4])
+                        assert len(rows)<=33 and all(row[4]<=row[3] and (row[1] or row[5]) for row in rows)
+                    if workers!='0':assert sum(int(row[4]) for row in holds)>0
+                    else:assert not sites
                 print(f'PASS: {workers} workers, profile {profile}, bounded wait {timed}: two object passes in three render frames; retired/reset totals and wait-site accounting')
     subprocess.run([str(binary),"default-on"],check=True,timeout=10)
     def no_core(): resource.setrlimit(resource.RLIMIT_CORE,(0,0))

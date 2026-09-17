@@ -94,10 +94,10 @@ def benchmark_cases(tmp):
         if mode != "success":
             assert result["error"]
     with patch("vita_remote.time.sleep",lambda _:None):
-        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer','clip-region','light-census','diagnostic-shot','diagnostic-hist','query-boundary','depth-store','vertex-blocks'):
+        for kind in ('object-basis', 'matrix-neon', 'object-scan', 'hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer','clip-region','light-census','diagnostic-shot','diagnostic-hist','query-boundary','depth-store','vertex-blocks','object-holds'):
             benchmark(Fake('success', kind),tmp/('selected-'+kind),1,30,kind)
             record=json.loads((tmp/('selected-'+kind)/'result.json').read_text())['trials'][0]
-            assert record.get('diagnostic',False)==(kind in ('guest-phases','light-census'))
+            assert record.get('diagnostic',False)==(kind in ('guest-phases','light-census','object-holds'))
         failed=Fake('affinity-failure','guest-affinity')
         try: benchmark(failed,tmp/'failed-affinity',1,30,'guest-affinity')
         except RuntimeError as error: assert 'Affinity' in str(error)
@@ -258,8 +258,10 @@ def main():
             assert request('/benchmark?kind=unknown','POST')[0]==400
             assert request('/benchmark?kind=model-palette&kind=flare','POST')[0]==400
             assert request('/benchmark?kind=model-palette','POST',token='f'*32)[0]==403
-            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer','clip-region','light-census','diagnostic-shot','diagnostic-hist','query-boundary','depth-store','vertex-blocks'):
+            for kind in ('object-basis','model-palette','vertex-worker','vertex-references','native-bounds','vertex-copy','draw-scan','flare','resolution','early-visibility','point-math','texture-state','matrix-neon','object-scan','hle-dispatch','flare-query-overlap','guest-affinity','snapshot-worker','guest-phases','prep-bundle','object-jobs','vertex-prepare','depth-prepare','object-math','object-lock','object-wait','object-point','model-hierarchy','object-quat','blend-replace','index-reuse','object-pose','material-packet','polygon-edge','log-writer','clip-region','light-census','diagnostic-shot','diagnostic-hist','query-boundary','depth-store','vertex-blocks','object-holds'):
                 assert request('/benchmark?kind='+kind,'POST')[0]==204
+                if kind=='object-holds':
+                    assert json.loads(request('/status')[2])['benchmark']==42
                 if kind=='vertex-blocks':
                     assert json.loads(request('/status')[2])['benchmark']==41
                 if kind=='depth-store':

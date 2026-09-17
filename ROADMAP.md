@@ -177,6 +177,12 @@ trials produce mixed results (12.045/13.799/13.665 and
 13.872/13.217/13.517 FPS, original/grouped/original) with varying draw workloads.
 It remains Off: fewer ARM instructions have not established a hardware gain.
 These reduced-settings trials do not qualify the standard-settings FPS goal.
+The [lock-holder diagnostic](docs/object-hold-sampling-20260916.md) now samples
+outer worker scopes, distinguishing the function retaining the shared guard
+from a waiting caller. Production worker/private-math sanitizer checks and
+controller restoration pass; ordinary builds omit the instrumentation. The
+diagnostic build is boot-confirmed on hardware with standard graphics restored.
+Capture and interpretation are next; sampling remains Off outside its test.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)

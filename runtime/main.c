@@ -1333,6 +1333,11 @@ void xv_benchmark_optimizations(int enabled)
         if(xv_object_point_override)xv_object_point_override(enabled);
         return;
     }
+    if (xv_benchmark_compare_object_holds()) {
+        extern void xv_object_holds_override(int) __attribute__((weak));
+        if(xv_object_holds_override)xv_object_holds_override(enabled);
+        return;
+    }
     if (xv_benchmark_compare_object_wait()) {
         extern void xv_object_wait_override(int) __attribute__((weak));
         if(xv_object_wait_override)xv_object_wait_override(enabled);

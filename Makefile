@@ -514,6 +514,20 @@ $(RECOMP_BUILD)/light-census.config: force-light-census-config
 	@rm -f $@.tmp
 $(OBJS) $(XITA_GUEST_OBJS) $(XITA_SYS_OBJS) $(XITA_GAME_OBJS): $(RECOMP_BUILD)/light-census.config
 
+# Sampled lock-holder diagnostic is absent from ordinary acquisition/release.
+XV_OBJECT_HOLD_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_HOLD_PROFILE))),1,0)
+ifeq ($(XV_OBJECT_HOLD_BUILD),1)
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_HOLD_PROFILE
+endif
+.PHONY: force-object-hold-config
+force-object-hold-config:
+$(RECOMP_BUILD)/object-hold.config: force-object-hold-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_HOLD_BUILD)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-hold.config
+
 # Explicit research build only. Track this flag for the two affected objects so
 # switching a reused build directory cannot silently retain the previous mode.
 XV_OBJECT_POINT_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_POINT_EXPERIMENT))),1,0)

@@ -48,6 +48,14 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
                         if workers!='0' and private==fast=='1' and not (quat_cache and kind=='quaternion'):
                             assert releases>0,(kind,rows)
                         else: assert releases==0,(kind,rows)
+                    if os.environ.get('OBJECT_HOLD_TEST'):
+                        holds=re.findall(r'\[object-holds\] (\d+) frames lane (\d+) enabled (\d+) outer (\d+) samples (\d+) denominator 64;',result.stderr)
+                        assert len(holds)==4 and all(row[2]=='1' for row in holds),holds
+                        assert all(row[3:]==('0','0') for row in holds[2:]),holds
+                        acquisitions=re.search(r'acquired (\d+)/(\d+)/(\d+) nested',result.stderr)
+                        for lane in range(2):
+                            assert int(holds[lane][3])==(int(acquisitions[lane+1]) if fast=='1' else 0)
+                        assert (sum(int(row[4]) for row in holds)>0)==(workers!='0' and fast=='1')
                     native_rows=re.findall(r'\[native-point\] \d+ frames fast (\d+); fallback disabled (\d+) fp (\d+) layout (\d+) numeric (\d+)',result.stderr)
                     assert len(native_rows)==2 and list(map(int,native_rows[-1]))==[0]*5
                     point_rows=re.findall(r'\[object-point\] lane (\d) checks (\d+) private (\d+) nested (\d+) shared-input (\d+) shared-output (\d+)',result.stderr)

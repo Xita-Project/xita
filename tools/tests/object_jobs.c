@@ -290,6 +290,11 @@ int main(int argc,char **argv)
     assert(idle_lock==((!fast||atoi(fast))?0:1));
     xv_object_math_unlock(&idle_lock);
     xv_object_jobs_override(1);
+#ifdef XV_OBJECT_HOLD_PROFILE
+    assert(!xv_object_holds_enabled());
+    if(getenv("OBJECT_HOLD_TEST"))xv_object_holds_override(1);
+    assert(xv_object_holds_enabled()==!!getenv("OBJECT_HOLD_TEST"));
+#endif
     gameplay_ready=0;assert(!xv_object_jobs_begin(&c));gameplay_ready=1;
     xv_phase_enabled=1;assert(!xv_object_jobs_begin(&c));xv_phase_enabled=0;
     assert(xv_object_jobs_begin(&c));assert(!xv_object_jobs_begin(&c));

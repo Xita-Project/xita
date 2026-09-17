@@ -14,7 +14,7 @@ import zipfile
 
 BUTTONS = dict(select=1, start=8, up=16, right=32, down=64, left=128,
                l=256, r=512, triangle=4096, circle=8192, cross=16384, square=32768)
-BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer","clip-region","light-census","diagnostic-shot","diagnostic-hist","query-boundary","depth-store","vertex-blocks")
+BENCHMARK_KINDS=("object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer","clip-region","light-census","diagnostic-shot","diagnostic-hist","query-boundary","depth-store","vertex-blocks","object-holds")
 RESULT = re.compile(r"\[([a-z-]+-compare|resolution-test)\] result (?:off-before|544-before) ([\d.]+) (?:on|360) ([\d.]+) (?:off-after|544-after) ([\d.]+) fps comparable-view ([01])")
 RESTORED = re.compile(rb"\[(?:[a-z-]+-compare|resolution-test)\] restored [^\n]*\n")
 
@@ -372,6 +372,9 @@ def benchmark(client, out, runs, timeout, kind=None):
                     trial["query_work"]=parse_query_work(census_text)
                 trial["diagnostic"]=True
                 trial["note"]="Count-only observer overhead, no query parallelism. Owner candidates and worker declines are distinct; absent owner groups do not imply absent worker workload. Setup/counter reports lie outside 120-frame timing windows."
+            if kind=="object-holds":
+                trial["diagnostic"]=True
+                trial["note"]="Only the middle arm samples outer worker lock holders. Elapsed samples include scheduling/parks and exclude owner-held scopes; not total hold time or an optimization gain."
             if kind=="guest-phases":
                 trial["diagnostic"]=True
                 trial["note"]="Timing is enabled only in the middle arm. This measures profiling overhead, not an optimization gain; already-open parent scopes are absent."
