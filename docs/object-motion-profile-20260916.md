@@ -91,4 +91,31 @@ The next diagnostic adds three nested scopes for `88110`, `868F0` and `1716F0`.
 Original-image checks cover the complete functions, including the dynamic
 collector's switch table. Worker tests and ASan/UBSan pass; the two affected
 translation units preprocess identically to the previous build with timing
-compiled out. The Vita build passes; physical child attribution is pending.
+compiled out. The Vita build passes. Runtime
+`6360caae9eb1fe168206725984a866004044932b40a06a0356bfbef561be7f8a`
+is installed and boot-confirmed. Two further same-view campaign trials complete
+at standard settings: 11.526/11.619/11.501 and 11.546/11.606/11.538 FPS
+(off/on/off). Both restore timing to off; their logs contain no STOP/FATAL.
+
+| Sampled function, inclusive µs (calls) | Trial 1 | Trial 2 |
+| --- | ---: | ---: |
+| Collection `171F10` | 17,690 (22) | 12,393 (17) |
+| Geometry sphere query `88110` | 13,545 (90) | 9,353 (64) |
+| Shape packet writer `868F0` | 2,708 (30) | 1,928 (23) |
+| Object shape collector `1716F0` | 3,379 (193) | 3,365 (134) |
+
+These functions are timed wherever reached inside a sampled direct child, not
+only immediately under `171F10`. Object collection can call `172F40`, which
+calls `88110` and `868F0` again in object space. Thus these rows overlap; do not
+sum them or subtract them as independent self-time buckets. The query/collection
+elapsed ratios are 76.6% and 75.5%, not a strict partition of collection or a
+fraction of the frame. The query also has other callers. This identifies
+`88110 -> 87EA0 -> 87E10 -> 86F50` as the next substantial native-code target,
+alongside the object-reference walk. The existing native BSP helper covers a
+plane-distance block, not this whole traversal/surface test.
+
+Claude has supplied an off-by-default object-walk prototype in its isolated
+worktree. Its initial 12,000 host comparisons pass, but independent tests expose
+stack-alias and preemption-resumption contract gaps. It remains unintegrated
+while those are addressed. A separate geometry-query task can proceed without
+changing that helper or the actor transaction. No FPS gain is claimed yet.
