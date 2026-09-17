@@ -106,3 +106,28 @@ actor/physics callbacks, firmware copy implementation cost, cache effects and
 physical FPS remain outside the bounded oracle. The earlier instruction
 reductions are not a hardware gain claim. Root owns final package review,
 fresh-launch validation and any optional passive startup identification.
+
+## Cumulative package integration
+
+The full Vita package built from `47c7e7c` retains all seven preceding startup
+selections and adds `XV_NATIVE_QUERY_FUSION=1`. The only changed existing object
+is `code_028.o`; `query_fusion.o` is the only added object. Both generic query
+source files and objects remain byte-identical to the installed seven-path
+parent. The new unit's complete `.text` also matches the qualified separate
+unit byte-for-byte. Actual stack records remain 2152 bytes plus the 24-byte
+adapter; the specialized enclosing caller uses 96 bytes and generic 171F10
+remains 80 bytes. The caller object contains the expected single adapter-call
+relocation and literal caller identity.
+
+Package verification finds only the runtime and boot record changed; all 1588
+members and the installed launcher/assets contract are otherwise preserved.
+Linked symbols retain both the generic entries and selected fused adapter, and
+typed traversal's linked startup mode remains one. The candidate runtime is
+`98393693e68be0032c5381cc172611a4db1361cf16d7dfeb7917136b9041fa99`.
+These checks establish the compiled composition, not actual call counts or
+physical performance. No getter was added to the qualified query unit; the
+verified runtime hash identifies this startup-only selection.
+
+Private build, object/code identity, caller relocation and package receipts
+are under `direct-cluster-query/query-fusion-startup/`. Hardware acceptance is
+separate from these completed integration checks.
