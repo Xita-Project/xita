@@ -1,8 +1,18 @@
 /* Real mixer voices behind the bounded stream allocation/ownership adapter.
  * Direct synthetic mixer feeds below test codec/gain; guest Process stays strict. */
 #define main original_pcm_test_main
+#include <stdint.h>
+#define xv_call test_game_callback
+static unsigned game_callbacks; static uint32_t game_cb_args[3];
 #include "audio_buffer_test.c"
 #undef main
+#undef xv_call
+void test_game_callback(xctx *c, uint32_t routine)
+{
+    assert(routine==0x220730 && X_M32(c->r[4])==0xdead0003 && X_M8(c->fs_base+0x24)==2);
+    game_cb_args[0]=X_M32(c->r[4]+4); game_cb_args[1]=X_M32(c->r[4]+8); game_cb_args[2]=X_M32(c->r[4]+12);
+    c->r[4]+=16; ++game_callbacks;
+}
 
 static xctx stream_description(uint32_t dev, unsigned kind)
 {
@@ -199,11 +209,11 @@ int main(void)
             c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE857;reject_stream(&c,0x37ACD4);
             c=context(handle,0,0,0);X_M32(c.r[4])=0x2AE856;reject_stream(&c,0x37ACD4);
             uint32_t status=0xcccccccc;x_guest_write(0x9FE0,&status,4);
-            c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(!read32(0x9FE0));
+            c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9FE0)==1); /* accepts input, nothing queued */
             static const uint32_t status_callers[4]={0x2AE4C4,0x21EC6B,0x21F2C6,0x21F303};
-            for(unsigned i=0;i<4;++i){x_guest_write(0x9FE0,&status,4);c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=status_callers[i];call(&c,0x37ACD4,0,2);assert(!read32(0x9FE0));}
-            c=context(handle,3,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);
-            c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9FE0)==0x80000);
+            for(unsigned i=0;i<4;++i){x_guest_write(0x9FE0,&status,4);c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=status_callers[i];call(&c,0x37ACD4,0,2);assert(read32(0x9FE0)==1);}
+            c=context(handle,3,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);assert(s->pause==0x20);
+            c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9FE0)==1);
             c=context(handle,0,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);
             c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x21FB3E;reject_stream(&c,0x37B83F);
             c=context(handle,0,0,0);X_M32(c.r[4])=0x21FB3D;reject_stream(&c,0x37B83F);
@@ -221,6 +231,56 @@ int main(void)
             c=context(handle,0,0,0);X_M32(c.r[4])=0x21F928;call(&c,0x37C705,0,2);
             assert(!s->output&&s->route_count==2&&!s->route_bins[0]&&s->route_bins[1]==1);
             c=context(bus,0,0,0);call(&c,0x379F45,0,1);assert(!find_buffer(bus-0x1c));
+        }
+        {
+            /* Process on the game's streams: XMEDIAPACKETs queue on the real mixer voice
+             * (read from the game's buffer), *pdwStatus goes pending, GetStatus reports
+             * accept-input until dwMaxAttachedPackets (2) are queued and playing, and
+             * DoWork completes consumed packets in order with S_OK, the byte count and
+             * the stream callback (pool index, packet context, status). */
+            uint32_t align=kind==2?4u:36u*(kind+1), size=align*4;
+            uint32_t pkt[6]={0xB000,size,0x9EC0,0x9EC4,0,0x1234};x_guest_write(0x9E80,pkt,sizeof pkt);
+            uint8_t fill[512];for(unsigned i=0;i<sizeof fill;++i)fill[i]=(uint8_t)i;x_guest_write(0xB000,fill,sizeof fill);
+            c=context(handle,0x9E80,0,0);X_M32(c.r[4])=0x2AE89B;reject_stream(&c,0x37AD25);
+            c=context(handle,0x9E80,1,0);X_M32(c.r[4])=0x2AE89A;reject_stream(&c,0x37AD25);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x2AE89A;reject_stream(&c,0x37AD25);
+            static const uint32_t bad_field[6]={0,0,0x1ff8,0x1ff8,1,0};
+            for(unsigned f=0;f<6;++f){if(f==5)continue;uint32_t w[6];memcpy(w,pkt,sizeof w);w[f]=f==1?size-1:bad_field[f];
+                x_guest_write(0x9E80,w,sizeof w);c=context(handle,0x9E80,0,0);X_M32(c.r[4])=0x2AE89A;reject_stream(&c,0x37AD25);}
+            x_guest_write(0x9E80,pkt,sizeof pkt);
+            uint32_t st=0xcccccccc;x_guest_write(0x9EE0,&st,4);x_guest_write(0x9EC0,&st,4);x_guest_write(0x9EC4,&st,4);
+            c=context(handle,0x9EE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9EE0)==1);
+            c=context(handle,0x9E80,0,0);X_M32(c.r[4])=0x2AE89A;call(&c,0x37AD25,0,3);
+            assert(s->game_packets==1&&s->game_submitted==1&&v->nq==1&&v->playing&&v->q[v->qhead].guest==0xB000&&v->q[v->qhead].size==size);
+            assert(read32(0x9EC4)==0x8000000A&&read32(0x9EC0)==0xcccccccc);
+            c=context(handle,0x9EE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9EE0)==0x10001);
+            pkt[5]=0x5678;x_guest_write(0x9E80,pkt,sizeof pkt);
+            c=context(handle,0x9E80,0,0);X_M32(c.r[4])=0x2AE89A;call(&c,0x37AD25,0,3);assert(s->game_packets==2&&v->nq==2);
+            c=context(handle,0x9EE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9EE0)==0x10000);
+            c=context(handle,0x9E80,0,0);X_M32(c.r[4])=0x2AE89A;reject_stream(&c,0x37AD25); /* queue full */
+            c=context(handle,1,0,0);X_M32(c.r[4])=0x21F63D;call(&c,0x37B822,0,2);assert(!v->playing&&s->pause==4);
+            c=context(handle,0x9EE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9EE0)==0x20000);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);assert(v->playing&&!s->pause);
+            /* release while packets are queued stays strict */
+            c=context(handle,0,0,0);reject_stream(&c,0x37AB87);
+            /* the mixer consumed the first packet: DoWork completes it and calls back */
+            v->q[v->qhead].consumed=1;
+            g_xpt[0x387]=0x1e0000;X_M32(0x387198)=0;
+            c=context(0,0,0,0);c.fs_base=0x7000;X_M8(c.fs_base+0x24)=0;X_M32(c.r[4])=0x21EC3C;
+            unsigned before_cb=game_callbacks;xctx saved=c;
+            h2_audio_guest_entry(&c,0x37B844);
+            assert(game_callbacks==before_cb+1&&game_cb_args[0]==123&&game_cb_args[1]==0x1234&&!game_cb_args[2]);
+            assert(!memcmp(&c,&saved,sizeof c)&&X_M8(0x7024)==0);
+            assert(s->game_packets==1&&s->game_completed==1&&v->nq==1&&read32(0x9EC0)==size&&!read32(0x9EC4));
+            c=context(handle,0x9EE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9EE0)==0x10001);
+            /* Flush cancels the remaining packet with E_ABORT and stops the voice */
+            st=0xcccccccc;x_guest_write(0x9EC4,&st,4);
+            c=context(handle,0,0,0);c.fs_base=0x7000;X_M8(c.fs_base+0x24)=0;X_M32(c.r[4])=0x21F2CF;call(&c,0x37AC89,0,1);
+            assert(game_callbacks==before_cb+2&&game_cb_args[0]==123&&game_cb_args[1]==0x5678&&game_cb_args[2]==0x80004004);
+            assert(!s->game_packets&&s->game_completed==2&&!v->nq&&!v->playing&&read32(0x9EC4)==0x80004004&&!read32(0x9EC0));
+            c=context(handle,0x9EE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9EE0)==1);
+            c=context(handle,(uint32_t)-4096,0,0);X_M32(c.r[4])=0x2201C9;call(&c,0x37B804,0,2);assert(v->freq_override==22050);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x2201C9;call(&c,0x37B804,0,2);assert(!v->freq_override);
         }
         c=context(handle+4,0,0,0);reject_stream(&c,0x37AB40);
         c=context(handle,0,0,0);call(&c,0x37AB40,2,1);assert(s->references==2&&device.references==2);

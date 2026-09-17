@@ -1,6 +1,12 @@
 /* Synthetic guest ABI plus the actual shared PCM mixer. No owned game bytes.
  * A scripted sink supplies actual consumption observations for the Play ABI;
  * the worker/sink protocol has a separate concurrent platform test. */
+/* Guest calls (stream packet callbacks) reach the harness through xv_call; tests that
+ * exercise them rename it to their own stub before including this file. */
+#ifndef xv_call
+#define xv_call test_no_guest_call
+#define TEST_DEFAULT_XV_CALL 1
+#endif
 #include "audio_host.c"
 #include "recomp/kernel/xk_audio.c"
 #include "audio_progress.c"
@@ -8,6 +14,9 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
+#if TEST_DEFAULT_XV_CALL
+void test_no_guest_call(xctx *c, uint32_t routine) { (void)c; (void)routine; assert(!"guest call outside a stream test"); }
+#endif
 
 uint8_t *g_xram, *g_img_base;
 uint32_t *g_xpt;

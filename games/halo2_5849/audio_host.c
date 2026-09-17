@@ -48,8 +48,15 @@ typedef struct {
     uint32_t lfo[2][6], eg[2][10], filter[6];
     uint32_t output;                        /* SetOutputBuffer: bus record base, 0 = none */
     int32_t bin_gain[32];                   /* mix-bin attenuations by bin (settings +0x30) */
+    uint32_t kind, rate;                    /* stream_create format: 0/1 mono/stereo XBADPCM, 2 PCM16 stereo, 3 mono16 8 kHz */
+    /* Game stream packets (flags 0x20000000) on the real mixer voice: the FIFO of
+     * XMEDIAPACKETs the game submitted, completed from DirectSoundDoWork. */
+    struct { uint32_t buffer, size, completed_ptr, status_ptr, context; } game[2];
+    uint32_t game_head, game_packets, game_submitted, game_completed;
     int voice;
 } h2_audio_stream;
+#define XMEDIAPACKET_STATUS_PENDING 0x8000000Au /* E_PENDING while queued */
+#define XMEDIAPACKET_STATUS_FLUSHED 0x80004004u /* E_ABORT: the value 0x37FBFE hands cancelled packets */
 static h2_audio_stream streams[XA_MAX_VOICES];
 #if H2_AUDIO_DSP
 static xk_thread *stream_worker;
@@ -558,6 +565,7 @@ static void stream_create(xctx *c, uint32_t ip)
     streams[index] = (h2_audio_stream){.base=base,.references=1,.callback=fields[3],.context=fields[4],
         .packet_limit=fields[1],.headroom=600,.flags=fields[0],.route_bin=global && routes[0]==1 ? pair[0] : UINT32_MAX,.voice=voice};
     streams[index].route_count=routes[0];
+    streams[index].kind=kind; streams[index].rate=(uint32_t)format[4]|(uint32_t)format[5]<<8|(uint32_t)format[6]<<16|(uint32_t)format[7]<<24;
     for(unsigned i=0;i<routes[0];++i){streams[index].route_bins[i]=pair[i*2];streams[index].route_gains[i]=(int32_t)pair[i*2+1];}
     /* Original default mix bins for a mono/stereo voice (0x37BC89 table 0x3858BC): front bins 0,1 at unity. */
     if (!global) { streams[index].route_count=2; streams[index].route_bins[0]=0; streams[index].route_bins[1]=1; }
@@ -570,6 +578,68 @@ static void stream_create(xctx *c, uint32_t ip)
     if (routes[0]==5) xv_logf("[h2/audio-stream] five exact muted routes retained, real inactive voice gain zero; Process unsupported\n");
     if (fields[3]==0x335D99) xv_logf("[h2/audio-stream] alternate original callback retained for empty ownership; Process unsupported\n");
     result(c, 0, args);
+}
+/* Completion of the oldest queued game packet through the stream callback
+ * (pStreamContext = the game's pool index, pPacketContext, status), on the
+ * calling thread exactly as the original delivers it. */
+static void game_stream_complete(xctx *c, uint32_t ip, h2_audio_stream *s, uint32_t status_value, const char *how)
+{
+    unsigned slot = s->game_head % 2;
+    uint32_t buffer = s->game[slot].buffer, size = s->game[slot].size, completed = s->game[slot].completed_ptr,
+             status = s->game[slot].status_ptr, context = s->game[slot].context;
+    if (c->r[4] < 16 || !mapped(c->r[4] - 16, 16) || c->fs_base > UINT32_MAX - 0x24 || !mapped(c->fs_base + 0x24, 1))
+        fail(c, ip, "stream callback stack", s->base);
+    output(c, ip, c->r[4] - 16, 16); output(c, ip, c->fs_base + 0x24, 1);
+    if (X_M8(c->fs_base + 0x24) > 1 || aliases(c->r[4] - 16, 16, c->fs_base + 0x24, 1)) fail(c, ip, "stream callback control alias/IRQL", c->fs_base);
+    if (completed) { if (!mapped(completed, 4)) fail(c, ip, "stream packet completed-size output", completed); uint32_t bytes = status_value ? 0 : size; x_guest_write(completed, &bytes, 4); }
+    if (status) { if (!mapped(status, 4)) fail(c, ip, "stream packet status output", status); x_guest_write(status, &status_value, 4); }
+    s->game_head = (s->game_head + 1) % 2; --s->game_packets; ++s->game_completed;
+    xctx saved = *c; uint32_t fpscr = h2_platform_fpscr_read(); uint8_t irql = X_M8(c->fs_base + 0x24);
+    X_M8(c->fs_base + 0x24) = 2; c->preempt = 0x7fffffff;
+    X_PUSH32(status_value); X_PUSH32(context); X_PUSH32(s->context); X_PUSH32(0xDEAD0003u);
+    xv_logf("[h2/audio-packet] game stream %s object=%08X buffer=%08X bytes=%u context=%08X status=%08X queued=%u; callback %08X\n",
+            how, s->base, buffer, size, context, status_value, s->game_packets, s->callback);
+    xv_call(c, s->callback);
+    if (c->r[4] != saved.r[4]) fail(c, ip, "stream callback stack imbalance", c->r[4]);
+    X_M8(saved.fs_base + 0x24) = irql; *c = saved; h2_platform_fpscr_write(fpscr);
+}
+static void game_stream_deliver(xctx *c, uint32_t ip, h2_audio_stream *s)
+{
+    /* The mixer consumed the packet in FIFO order; the original completes it
+     * with S_OK and the byte count from DirectSoundDoWork. */
+    while (s->game_packets && xk_audio_stream_pop_consumed(s->voice)) game_stream_complete(c, ip, s, 0, "completed");
+}
+static void game_stream_process(xctx *c, h2_audio_stream *s, uint32_t address, uint32_t caller)
+{
+    const uint32_t ip = 0x37AD25; uint32_t packet[6];
+    /* IDirectSoundStream::Process on the game's own streams (refill 0x2AE866, return
+     * 0x2AE89A): XMEDIAPACKET {pvBuffer, dwMaxSize, pdwCompletedSize, pdwStatus,
+     * hCompletionEvent, pContext}, no output packet. The original queues it on the
+     * voice (accepted while the free list, sized by dwMaxAttachedPackets = 2, is not
+     * empty), marks *pdwStatus pending, and completes it from DoWork with S_OK and
+     * the byte count through the stream callback. The real mixer voice reads the
+     * bytes straight from the game's buffer, which the game keeps until then. */
+    if (caller != 0x2AE89A || X_ARG(2) || s->callback != 0x220730 || s->kind > 2 || !mapped(address, sizeof packet))
+        fail(c, ip, "unsupported game stream Process caller/state/input", caller);
+    x_guest_read(packet, address, sizeof packet);
+    uint32_t buffer = packet[0], size = packet[1], completed = packet[2], status = packet[3], event = packet[4], context = packet[5];
+    uint32_t align = s->kind == 2 ? 4u : 36u * (s->kind + 1);
+    if (!size || size > 0x100000 || size % align || !mapped(buffer, size) || overlaps_device(buffer, size) || event ||
+        (completed && (!mapped(completed, 4) || aliases(completed, 4, buffer, size) || aliases(completed, 4, c->r[4], 16) || aliases(completed, 4, address, 24))) ||
+        (status && (!mapped(status, 4) || aliases(status, 4, buffer, size) || aliases(status, 4, c->r[4], 16) || aliases(status, 4, address, 24) ||
+                    (completed && aliases(status, 4, completed, 4)))))
+        fail(c, ip, "unsupported game stream packet", buffer);
+    if (s->game_packets >= s->packet_limit) fail(c, ip, "game stream packet queue full", s->game_packets);
+    if (xk_audio_stream_push(s->voice, buffer, size) < 0) fail(c, ip, "real mixer packet queue rejected", (uint32_t)s->voice);
+    if (s->pause & 0x44u) xk_audio_voice_stop(s->voice);  /* a paused voice keeps the packet queued */
+    unsigned slot = (s->game_head + s->game_packets) % 2;
+    s->game[slot].buffer = buffer; s->game[slot].size = size; s->game[slot].completed_ptr = completed;
+    s->game[slot].status_ptr = status; s->game[slot].context = context;
+    ++s->game_packets; ++s->game_submitted;
+    if (status) { uint32_t pending = XMEDIAPACKET_STATUS_PENDING; x_guest_write(status, &pending, 4); }
+    xv_logf("[h2/audio-stream] Process caller=002AE89A object=%08X buffer=%08X bytes=%u context=%08X status_ptr=%08X queued=%u; real mixer voice %s\n",
+            s->base, buffer, size, context, status, s->game_packets, (s->pause & 0x44u) ? "paused" : "playing");
+    result(c, 0, 3);
 }
 #if H2_AUDIO_DSP
 /* Xbox DirectSound invokes stream packet-completion callbacks from
@@ -600,6 +670,7 @@ static void stream_deliver(xctx *c, uint32_t ip)
 {
     for (unsigned i=0;i<XA_MAX_VOICES;++i) {
         h2_audio_stream *s=&streams[i];if (!s->base) continue;
+        if (s->flags==0x20000000u) { game_stream_deliver(c,ip,s); continue; }
         for (unsigned n=0;n<2;++n) {
             /* Deliver in ticket order. */
             unsigned p=2;
@@ -638,6 +709,7 @@ static void stream_process(xctx *c)
 {
     const uint32_t ip=0x37AD25;stack(c,ip,3);
     h2_audio_stream *s=stream_live(c,ip,X_ARG(0));uint32_t address=X_ARG(1),packet[6],caller=X_M32(c->r[4]);
+    if (s->flags==0x20000000u) { game_stream_process(c,s,address,caller); return; }
     if (!effects || s->flags!=0x40000000 || s->route_count!=1 || (s->route_bin<27 || s->route_bin>30) || s->callback!=0x335D82 || s->headroom ||
         (caller!=0x33610E && caller!=0x335D7B) || X_ARG(2) || !mapped(address,sizeof packet)) {
         /* Menu bring-up: the menu submits its own audio stream via the standard DSound vtable
@@ -687,6 +759,15 @@ static void stream_process(xctx *c)
     result(c,0,3);
 }
 #endif
+#if !H2_AUDIO_DSP
+static void stream_process(xctx *c)
+{
+    const uint32_t ip=0x37AD25;stack(c,ip,3);
+    h2_audio_stream *s=stream_live(c,ip,X_ARG(0));uint32_t caller=X_M32(c->r[4]);
+    if (s->flags!=0x20000000u) fail(c,ip,"unsupported stream Process without the DSP model",caller);
+    game_stream_process(c,s,X_ARG(1),caller);
+}
+#endif
 static void stream_reference(xctx *c, uint32_t ip)
 {
     stack(c, ip, 1); h2_audio_stream *s = stream_live(c, ip, X_ARG(0));
@@ -698,6 +779,7 @@ static void stream_reference(xctx *c, uint32_t ip)
         X_M32(s->base + 8) = s->references = --count;
     } else {
         if (s->submitted) fail(c,ip,"stream release after Process needs audited flush",s->base);
+        if (s->game_packets) fail(c,ip,"stream release with queued game packets",s->base);
         /* Other supported streams are empty.
          * Free takes the mixer lock before releasing their guest storage. */
         xk_audio_lock(); int playing = xk_audio_voice_playing(s->voice); xk_audio_unlock();
@@ -758,7 +840,10 @@ static void stream_pitch(xctx *c)
      * Recorded only: the empty voice keeps its native rate. */
     if (pitch < -4096 || pitch > 4095) fail(c, ip, "unsupported stream pitch", (uint32_t)pitch);
     s->pitch = pitch;
-    xv_logf("[h2/audio-stream] pitch caller=002201C9 object=%08X pitch=%d; recorded, empty real voice\n", s->base, pitch);
+    /* DSBPITCH units are 1/4096 octave: the real voice resamples at rate * 2^(pitch/4096). */
+    uint32_t hz = pitch ? (uint32_t)lrintf((float)s->rate * exp2f((float)pitch / 4096.0f)) : 0;
+    xk_audio_lock(); xk_audio_voice_set_frequency(s->voice, hz); xk_audio_unlock();
+    xv_logf("[h2/audio-stream] pitch caller=002201C9 object=%08X pitch=%d rate=%u; real voice %u Hz\n", s->base, pitch, s->rate, hz ? hz : s->rate);
     result(c, 0, 2);
 }
 static void stream_lfo(xctx *c)
@@ -892,11 +977,15 @@ static void stream_flush(xctx *c)
 {
     const uint32_t ip = 0x37AC89, callers[3] = {0x21EC85, 0x21F2CF, 0x21F30C};
     stack(c, ip, 1); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 3);
-    /* Flush (vtable 6): 0x37FBFE(voice, 0) returns at once for a voice that
-     * never started (state bit 0 clear); no packet ever existed here. The
-     * sound-source release paths (0x21EC5D, 0x21F2B8, 0x21F2F8) call it after
-     * GetStatus reports no completion bit. */
-    xv_logf("[h2/audio-stream] flush caller=%08X object=%08X; never started, no packets, no change\n", X_M32(c->r[4]), s->base);
+    /* Flush (vtable 6): 0x37FBFE(voice, 0) returns at once for a voice that never
+     * started (state bit 0 clear); with packets queued it drops the voice's data
+     * and completes every queued packet with E_ABORT through the stream callback
+     * before returning. The sound-source release paths (0x21EC5D, 0x21F2B8,
+     * 0x21F2F8) call it after GetStatus. */
+    unsigned queued = s->game_packets;
+    if (queued) { xk_audio_stream_flush(s->voice); xk_audio_voice_stop(s->voice); }
+    while (s->game_packets) game_stream_complete(c, ip, s, XMEDIAPACKET_STATUS_FLUSHED, "flushed");
+    xv_logf("[h2/audio-stream] flush caller=%08X object=%08X cancelled=%u; real voice stopped\n", X_M32(c->r[4]), s->base, queued);
     result(c, 0, 1);
 }
 static void stream_status(xctx *c)
@@ -906,12 +995,15 @@ static void stream_status(xctx *c)
     uint32_t out = X_ARG(1);
     output(c, ip, out, 4);
     if (aliases(out, 4, c->r[4], 12)) fail(c, ip, "stream status output alias", out);
-    /* GetStatus (vtable 3) -> 0x37F591: bit 0 = packets queued (list head +0xB0
-     * not empty), 0x80000 = deferred pause pending (state bit 0x20); the
-     * playing/starved bits need a started voice. */
-    uint32_t status = (s->pause & 0x20) ? 0x80000u : 0u;
+    /* GetStatus (vtable 3) -> 0x37F591: bit 0 = XMO accept-input (the voice's free
+     * packet list at +0xB0 is not empty: fewer than dwMaxAttachedPackets queued),
+     * 0x10000 = playing (running and not paused, or state 0x8001 pending),
+     * 0x20000 = paused while running (state 0x444, +0x40000 for 0x400),
+     * 0x80000 = state 0x2000. The game refills whenever bit 0 is set. */
+    uint32_t status = s->game_packets < s->packet_limit ? 1u : 0u;
+    if (s->game_packets) status |= (s->pause & 0x44u) ? 0x20000u : 0x10000u;
     x_guest_write(out, &status, 4);
-    xv_logf("[h2/audio-stream] status caller=%08X object=%08X status=%08X; empty, never started\n", X_M32(c->r[4]), s->base, status);
+    xv_logf("[h2/audio-stream] status caller=%08X object=%08X status=%08X queued=%u\n", X_M32(c->r[4]), s->base, status, s->game_packets);
     result(c, 0, 2);
 }
 static void stream_voice_properties(xctx *c)
@@ -964,14 +1056,15 @@ static void stream_pause(xctx *c)
     if (mode > 3 || s->submitted || s->flags != 0x20000000u ||
         (caller != 0x21F461 && caller != 0x21F63D && caller != 0x21F8E3 && caller != 0x2AE4D8))
         fail(c, ip, "unsupported stream pause mode/state/caller", mode);
+    int playing = xk_audio_voice_playing(s->voice);
     switch (mode) {
-    case 0: s->pause &= ~0x64u; break;
-    case 1: s->pause = (s->pause & ~0x40u) | 4u; break;
-    case 2: s->pause = (s->pause & ~4u) | 0x40u; break;
-    default: s->pause |= 0x20u; break;
+    case 0: s->pause &= ~0x64u; if (s->game_packets && !playing) xk_audio_voice_play(s->voice, 0); break;
+    case 1: s->pause = (s->pause & ~0x40u) | 4u; xk_audio_voice_stop(s->voice); break;
+    case 2: s->pause = (s->pause & ~4u) | 0x40u; xk_audio_voice_stop(s->voice); break;
+    default: if (playing && s->game_packets) s->pause &= ~0x44u; else s->pause |= 0x20u; break;
     }
-    xv_logf("[h2/audio-stream] pause caller=%08X object=%08X mode=%u bits=%02X->%02X; empty real voice retained silent\n",
-            caller, s->base, mode, before, s->pause);
+    xv_logf("[h2/audio-stream] pause caller=%08X object=%08X mode=%u bits=%02X->%02X queued=%u; real voice %s\n",
+            caller, s->base, mode, before, s->pause, s->game_packets, xk_audio_voice_playing(s->voice) ? "playing" : "stopped");
     result(c, 0, 2);
 }
 static void buffer_data(xctx *c)
@@ -1853,9 +1946,9 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37B75B: buffer_status(c); break;
     case 0x37B797: buffer_rewind(c); break;
     case 0x37B777: buffer_cursor(c); break;
+    case 0x37AD25: stream_process(c); break;
 #if H2_AUDIO_DSP
     case 0x37BA6F: effects_description(c); break;
-    case 0x37AD25: stream_process(c); break;
     case 0x37B86D: effects_download(c); break;
     case 0x37B5E6: effects_query(c); break;
     case 0x37B60D: effects_write(c); break;
@@ -1923,7 +2016,8 @@ static void original_empty_work(xctx *c, uint32_t ip)
         if (pending!=s->submitted-s->completed ||
             (s->flags==0x20000000 && (s->callback!=0x220730 || s->submitted || s->completed || pending)))
             fail(c,ip,"ordinary stream requires low-priority work",s->base);
-        if (!s->submitted) {
+        if (s->game_packets>s->packet_limit || s->game_completed>s->game_submitted) fail(c,ip,"original work game packet accounting",s->base);
+        if (!s->submitted && !s->game_packets) {
             xk_audio_lock();int playing=xk_audio_voice_playing(s->voice);xk_audio_unlock();
             if (playing) fail(c,ip,"untracked active stream needs work",s->base);
         }
@@ -1973,6 +2067,8 @@ void h2_audio_guest_entry(xctx *c, uint32_t ip)
         uint32_t fpscr=h2_platform_fpscr_read();
 #if H2_AUDIO_DSP
         if (ip==0x37B844) stream_deliver(c,ip);
+#else
+        if (ip==0x37B844) for (unsigned i=0;i<XA_MAX_VOICES;++i) if (streams[i].base && streams[i].flags==0x20000000u) game_stream_deliver(c,ip,&streams[i]);
 #endif
         original_empty_work(c,ip);
         if (ip==0x37B844) xv_logf("[h2/audio-work] original void wrapper executes with no ordinary pending work; completed stream packets delivered here, listener dirty=%08X retained\n",device.dirty);

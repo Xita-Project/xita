@@ -1,4 +1,5 @@
 /* Actual adapter with synthetic guest pages and injected backend failures. */
+#define xv_call test_no_guest_call
 #include "audio_host.c"
 #include <assert.h>
 #include <setjmp.h>
@@ -52,6 +53,12 @@ int xk_audio_voice_playing(int v) { (void)v; assert(0); return 0; }
 void xk_audio_voice_set_data(int v, uint32_t data, uint32_t bytes) { (void)v; (void)data; (void)bytes; assert(0); }
 void xk_audio_voice_set_volume_db100(int v, int32_t db) { (void)v; (void)db; assert(0); }
 void xk_audio_voice_set_frequency(int v, uint32_t hz) { (void)v; (void)hz; assert(0); }
+void xk_audio_voice_stop(int v) { (void)v; assert(0); }
+void xk_audio_voice_play(int v, int looping) { (void)v; (void)looping; assert(0); }
+int xk_audio_stream_push(int v, uint32_t guest, uint32_t size) { (void)v; (void)guest; (void)size; assert(0); return -1; }
+int xk_audio_stream_pop_consumed(int v) { (void)v; assert(0); return 0; }
+void xk_audio_stream_flush(int v) { (void)v; assert(0); }
+void test_no_guest_call(xctx *c, uint32_t routine) { (void)c; (void)routine; assert(0); }
 void xk_audio_lock(void) { assert(0); }
 void xk_audio_unlock(void) { assert(0); }
 
