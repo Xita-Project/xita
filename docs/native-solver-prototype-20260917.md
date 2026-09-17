@@ -72,11 +72,13 @@ firmware copy execution time is **not included** in the instruction totals.
 The fused function has a 1,928-byte compiler-reported native frame; the adapter
 has 32 bytes. Observed whole-call peak stack is 1,984–2,264 bytes versus
 376–440 for the moving reference cases. This excludes unmodeled firmware and
-real scheduler/profiler stack use. Production owner fibers have 32 KiB native
-stacks; object workers have 512 KiB. The query and solver frames are sequential,
-not additive, under the outer caller. Complete owner high-water and production
-headroom have not been established. The later production-boundary review measured
-an isolated solver peak of 2,424 bytes through the actual terminal worker stop.
+real scheduler/profiler stack use. Actual CE guest threads and object workers
+have 512 KiB native stacks; the CE bootstrap has 2 MiB. The 32 KiB fibers in
+`runtime/main.c` are used by the mock scheduler, not the `XV_RUN_RECOMP` path.
+The query and solver frames are sequential, not additive, under the outer caller.
+Complete native high-water and production headroom have not been established.
+The later production-boundary review measured an isolated solver peak of
+2,424 bytes through the actual terminal worker stop.
 
 The fused body is 73,530 bytes plus a 110-byte adapter. Although smaller than the
 77,930-byte sum of the generic closure, both versions remain present: integration
