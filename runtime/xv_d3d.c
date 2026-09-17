@@ -97,6 +97,12 @@ static int replace_blend_eligible(unsigned blend)
 static uint8_t g_ps_texture_masks[XV_PS_TABLE_COUNT]; /* bit 4 marks initialized */
 static unsigned texture_stages_prepared, texture_stages_skipped;
 static unsigned opaque_candidates, opaque_proven;
+#ifndef XV_DEPTH_PREPARE_DEFAULT
+#define XV_DEPTH_PREPARE_DEFAULT 0
+#endif
+#if XV_DEPTH_PREPARE_DEFAULT != 0 && XV_DEPTH_PREPARE_DEFAULT != 1
+#error XV_DEPTH_PREPARE_DEFAULT must be 0 or 1
+#endif
 static xv_depth_proofs g_depth_proofs;
 static unsigned depth_prepare_hits;
 static int depth_prepare_override = -1;
@@ -116,7 +122,8 @@ static int depth_prepare_enabled(void)
      * a proof was published, so overrides always retain ordinary preparation. */
     static int configured = -1, compatible;
     if (configured < 0) {
-        const char *e = getenv("XV_DEPTH_PREPARE"); configured = e && atoi(e) != 0;
+        const char *e = getenv("XV_DEPTH_PREPARE");
+        configured = e ? atoi(e) != 0 : XV_DEPTH_PREPARE_DEFAULT;
         compatible = xv_depth_prepare_available();
     }
     int override = __atomic_load_n(&depth_prepare_override, __ATOMIC_ACQUIRE);
@@ -2445,6 +2452,12 @@ static int bind_draw_textures(xv_texture_state *state, SceGxmContext *ctx, const
     }
     return 1;
 }
+#ifndef XV_TEXTURE_STATE_CACHE_DEFAULT
+#define XV_TEXTURE_STATE_CACHE_DEFAULT 0
+#endif
+#if XV_TEXTURE_STATE_CACHE_DEFAULT != 0 && XV_TEXTURE_STATE_CACHE_DEFAULT != 1
+#error XV_TEXTURE_STATE_CACHE_DEFAULT must be 0 or 1
+#endif
 static int texture_state_override = -1;
 void xv_d3d_texture_state_override(int enabled)
 {
@@ -2455,11 +2468,18 @@ static int texture_state_enabled(void)
     static int enabled = -1;
     if (enabled < 0) {
         const char *e = getenv("XV_TEXTURE_STATE_CACHE");
-        enabled = e && atoi(e) != 0; /* Await hardware comparison before changing the default. */
+        enabled = e ? atoi(e) != 0 : XV_TEXTURE_STATE_CACHE_DEFAULT;
         XV_LOG("texture binding cache: %d (XV_TEXTURE_STATE_CACHE)\n", enabled);
     }
     int override = __atomic_load_n(&texture_state_override, __ATOMIC_ACQUIRE);
     return override < 0 ? enabled : override;
+}
+/* Dashboard/environment handoff is complete; neither recorder nor pump has
+ * started. Initialize both retained lazy policies before their owning threads. */
+void xv_d3d_configure_render_preparation(void)
+{
+    XV_LOG("[render-preparation] process-start texture-cache %d depth-prepare %d available %d; explicit environment overrides startup defaults\n",
+        texture_state_enabled(), depth_prepare_enabled(), xv_depth_prepare_available());
 }
 /* A failed reservation leaves no constants for this draw. Never submit using
  * a previous draw's buffer; a partial write is equally unusable. */

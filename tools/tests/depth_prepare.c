@@ -43,7 +43,9 @@ static SceGxmFragmentProgram *fragment_for(vs_slot_t *v,unsigned kind,unsigned b
     return v->fs[kind][blend].fprog;
 }
 static void xv_render_profile_depth_only(unsigned count) { assert(count==6);depth_draws++; }
+#ifndef XV_LOG
 #define XV_LOG(...) do { if (0) printf(__VA_ARGS__); } while (0)
+#endif
 #define XV_RENDER_CALL(stage, expression) (expression)
 #define record_textures(c,d,immediate) (++texture_calls, (void)(c), (void)(d), (void)(immediate), 7u)
 #include "depth_prepare.inc"
@@ -92,7 +94,8 @@ int main(int argc, char **argv)
         return 0;
     }
     int compatible=!getenv("XV_SHADER_OVERRIDE") || !atoi(getenv("XV_SHADER_OVERRIDE"));
-    int configured=getenv("XV_DEPTH_PREPARE") && atoi(getenv("XV_DEPTH_PREPARE"));
+    const char *setting=getenv("XV_DEPTH_PREPARE");
+    int configured=setting ? atoi(setting)!=0 : XV_DEPTH_PREPARE_DEFAULT;
     assert(depth_prepare_enabled()==(compatible && configured));
     xv_depth_prepare_override(1);assert(depth_prepare_enabled()==compatible);
     for (unsigned v=0;v<XV_MAX_VS;v++) for (unsigned b=0;b<BLEND_MODES;b++) {
@@ -167,4 +170,5 @@ int main(int argc, char **argv)
     assert(!pthread_join(thread,NULL) && __atomic_load_n(&writer_done,__ATOMIC_ACQUIRE));
     xv_depth_prepare_override(-1);assert(depth_prepare_enabled()==(compatible && configured));
     puts("PASS: production depth recording/replay, delayed publication, collisions, exact variant guards, in-flight policy retention and restored config");
+    return 0;
 }

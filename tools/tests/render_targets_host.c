@@ -94,7 +94,8 @@ static int sceGxmBeginScene(SceGxmContext *c, int f, SceGxmRenderTarget *r, void
     assert(begun < 128); submitted_depth[begun++] = *ds;
     return 0;
 }
-static int sceGxmEndScene(SceGxmContext *c, void *v, void *f)
+typedef struct { uint32_t *address; uint32_t value; } SceGxmNotification;
+static int sceGxmEndScene(SceGxmContext *c, const SceGxmNotification *v, const SceGxmNotification *f)
 { assert(open_scene); open_scene = 0; pending++; if ((unsigned)pending > max_pending) max_pending = pending; ended++; return fail_end ? -1 : 0; }
 static float viewport_width, viewport_height;
 static unsigned range_calls, max_range;

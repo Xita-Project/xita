@@ -11,7 +11,7 @@ def section(start, end):
     a = source.index(start)
     return source[a:source.index(end, a)]
 
-code = section('static xv_depth_proofs g_depth_proofs;', 'static int opaque_material_override')
+code = section('#ifndef XV_DEPTH_PREPARE_DEFAULT', 'static int opaque_material_override')
 a = source.index('    uint8_t   kind;')
 a = source.rindex('typedef struct {', 0, a)
 b = source.index('/* Commands retain', a)
@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix='xita-depth-prepare-') as temp:
     (temp/'depth_replay.inc').write_text(replay)
     exe = temp/'test'
     subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',
-                    '-fsanitize=address,undefined','-pthread','-I',str(temp),
+                    '-fsanitize=address,undefined','-no-pie','-pthread','-I',str(temp),
                     '-I',str(root),str(root/'tools/tests/depth_prepare.c'),'-o',str(exe)],check=True)
     for configured, override in [(None,None),('0',None),('1',None),('1','1')]:
         env = dict(os.environ)
