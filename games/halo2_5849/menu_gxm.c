@@ -179,7 +179,9 @@ static vs_entry *get_vs(const h2_command_state *s)
     SceGxmVertexAttribute attr[16]; SceGxmVertexStream stream;
     e->nattr = 0;
     for (unsigned v = 0; v < 16; ++v) {
-        const SceGxmProgramParameter *p = sceGxmProgramFindParameterByName(e->gxp, VREG_NAMES[v]);
+        char qualified[32];                                 /* Cg names the inputs after the AppIn struct: "IN.position" */
+        snprintf(qualified, sizeof qualified, "IN.%s", VREG_NAMES[v]);
+        const SceGxmProgramParameter *p = sceGxmProgramFindParameterByName(e->gxp, qualified);
         if (!p) continue;
         attr[e->nattr].streamIndex = 0; attr[e->nattr].offset = (uint16_t)(e->nattr * 16);
         attr[e->nattr].format = SCE_GXM_ATTRIBUTE_FORMAT_F32; attr[e->nattr].componentCount = 4;
