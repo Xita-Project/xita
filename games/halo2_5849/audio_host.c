@@ -668,6 +668,14 @@ static void game_stream_process(xctx *c, h2_audio_stream *s, uint32_t address, u
  * on hardware only because no callback can run until it services DirectSound. */
 static void stream_poll(xctx *c)
 {
+    /* The sink counts every change a completion query could observe; an unchanged
+     * count means each query below would answer as before, so the sink's ownership
+     * lock (held by its worker for whole GP frames) is not taken for nothing. */
+    extern uint32_t h2_audio_backend_stream_generation(void);
+    static uint32_t seen = 0xFFFFFFFFu;
+    uint32_t generation = h2_audio_backend_stream_generation();
+    if (generation == seen) return;
+    seen = generation;
     for (unsigned i=0;i<XA_MAX_VOICES;++i) {
         h2_audio_stream *s=&streams[i];if (!s->base || !s->submitted) continue;
         for (unsigned n=0;n<2;++n) {

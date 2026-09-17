@@ -38,14 +38,14 @@ static void perf_report(uint32_t serial)
                 " | gxm draws=%llu render_ms=%llu flushes=%llu flush_ms=%llu open_ms=%llu tex_ms=%llu gxmdraw_ms=%llu fallbacks=%llu"
                 " | audio grains=%llu nonzero=%llu compute_ms=%llu max_us=%llu misses=%llu hold_ms=%llu hold_max_us=%llu"
                 " compute_iters=%llu idle_iters=%llu guest_locks=%llu guest_wait_ms=%llu error=%08llX"
-                " | fx frames=%llu sources_ms=%llu dsp_ms=%llu | lock sites L%llu=%llu L%llu=%llu L%llu=%llu L%llu=%llu\n",
+                " | fx frames=%llu sources_ms=%llu dsp_ms=%llu dsp_instr=%llu | lock sites L%llu=%llu L%llu=%llu L%llu=%llu L%llu=%llu\n",
                 serial, (unsigned long long)((now - last_wall) / 1000), PDMS(cur, last, 0), PD(cur, last, 1), PDMS(cur, last, 2), PD(cur, last, 3),
                 PD(gxm, last_gxm, 0), PDMS(gxm, last_gxm, 1), PD(gxm, last_gxm, 2), PDMS(gxm, last_gxm, 3), PDMS(gxm, last_gxm, 4),
                 PDMS(gxm, last_gxm, 5), PDMS(gxm, last_gxm, 6), PD(gxm, last_gxm, 7),
                 PD(audio, last_audio, 0), PD(audio, last_audio, 1), PDMS(audio, last_audio, 2), (unsigned long long)audio[3], PD(audio, last_audio, 4),
                 PDMS(audio, last_audio, 5), (unsigned long long)audio[6], PD(audio, last_audio, 7), PD(audio, last_audio, 8),
-                PD(audio, last_audio, 9), PDMS(audio, last_audio, 10), (unsigned long long)audio[11],
-                PD(audio, last_audio, 12), PDMS(audio, last_audio, 13), PDMS(audio, last_audio, 14),
+                PD(audio, last_audio, 10), PDMS(audio, last_audio, 9), (unsigned long long)audio[11],
+                PD(audio, last_audio, 12), PDMS(audio, last_audio, 13), PDMS(audio, last_audio, 14), PD(audio, last_audio, 15),
                 (unsigned long long)audio[16], (unsigned long long)audio[17], (unsigned long long)audio[18], (unsigned long long)audio[19],
                 (unsigned long long)audio[20], (unsigned long long)audio[21], (unsigned long long)audio[22], (unsigned long long)audio[23]);
         if (xk_wait_stats_request) xk_wait_stats_request();   /* the kernel dumps [wait] at the next guest yield */

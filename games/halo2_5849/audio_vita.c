@@ -16,6 +16,8 @@ typedef struct {
 } gp_stream_state;
 static gp_stream_state gp_streams[4];
 static unsigned gp_stream_decoded,gp_stream_completed;
+/* Bumped under progress_mutex on every change a stream completion query could observe. */
+static uint32_t stream_generation;
 static uint64_t gp_stream_serial;
 /* Serialized retained GP grain ownership; separate from submitted progress. */
 static int movie_prepared=-1,movie_draining;
@@ -51,18 +53,36 @@ static uint64_t perf_guest_wait_us, perf_guest_locks, perf_worker_hold_us, perf_
 #else
 #define perf_clock() sceKernelGetProcessTimeWide()
 #endif
-static uint32_t perf_site_line[8], perf_site_n[8];   /* which callers lock, by source line */
+static uint32_t perf_site_line[32], perf_site_n[32];   /* which callers lock, by source line */
 static void lock_progress_at(unsigned line)
 {
     uint64_t t0 = perf_clock();
     sceKernelLockMutex(progress_mutex, 1, NULL);
     perf_guest_wait_us += perf_clock() - t0; ++perf_guest_locks;   /* under the mutex */
-    for (unsigned i = 0; i < 8; ++i) {
+    for (unsigned i = 0; i < 32; ++i) {
         if (perf_site_line[i] == line) { ++perf_site_n[i]; break; }
         if (!perf_site_line[i]) { perf_site_line[i] = line; perf_site_n[i] = 1; break; }
     }
 }
 #define lock_progress() lock_progress_at(__LINE__)
+#if H2_AUDIO_DSP
+/* The worker renders a GP grain in 32-frame steps and yields progress_mutex between
+ * them (the original GP runs asynchronously; the CPU never waits a whole grain for
+ * it). Calls that change what a grain contains - the FX source set, the filter
+ * configuration the PCM lane is validated against, the GP PCM lanes - take effect at
+ * a grain boundary exactly as before: they wait for the step loop to finish. */
+static volatile unsigned grain_active;
+static void lock_progress_boundary_at(unsigned line)
+{
+    for (;;) {
+        lock_progress_at(line);
+        if (!grain_active) return;
+        sceKernelUnlockMutex(progress_mutex, 1);
+        sceKernelDelayThread(1000);
+    }
+}
+#define lock_progress_boundary() lock_progress_boundary_at(__LINE__)
+#endif
 static uint64_t submitted_at;
 static int started, running;
 static uint32_t grains, nonzero_grains, peak, error;
@@ -102,6 +122,7 @@ static int observe_rest(void)
 #if H2_AUDIO_DSP
     if (fx_queued) {
         fx_consumed += previous - (uint32_t)remaining;
+        if (previous != (uint32_t)remaining) __atomic_add_fetch(&stream_generation, 1, __ATOMIC_RELEASE);
         for (unsigned v = 0; v < H2_FX_SOURCES; ++v)
             if (fx_queued & (1u << v)) fx_source_consumed[v] += previous - (uint32_t)remaining;
         if (!remaining) fx_queued = 0;
@@ -251,14 +272,14 @@ static int fx_inputs_ready(void)
 int h2_audio_backend_fx_bind(h2_dsp_engine *engine, unsigned bin)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    lock_progress();
+    lock_progress_boundary();
     int ok = h2_audio_backend_health() == 0 && fx_inputs_ready() && h2_audio_fx_bind(&fx, engine, bin);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *engine, unsigned bin, const int8_t taps[31])
 {
     if (h2_audio_backend_health() < 0) return -1;
-    lock_progress();
+    lock_progress_boundary();
     uint8_t bins[32]; h2_audio_bins_snapshot(bins); int zero = 1;
     for (unsigned i = 0; i <= 10; ++i) if (bins[i]) zero = 0;
     int ok = h2_audio_backend_health() == 0 && zero && fx_inputs_ready() &&
@@ -282,7 +303,7 @@ int h2_audio_backend_fx_route_mask(unsigned bin, unsigned output_mask)
 int h2_audio_backend_fx_filter(unsigned key)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    lock_progress();
+    lock_progress_boundary();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_filter(&fx, key);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
@@ -303,14 +324,14 @@ int h2_audio_backend_fx_attenuate(unsigned key, unsigned attenuation)
 int h2_audio_backend_fx_forget(unsigned bin)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    lock_progress();
+    lock_progress_boundary();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_forget(&fx, bin);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_play(unsigned bin)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    lock_progress();
+    lock_progress_boundary();
     unsigned mask = h2_audio_fx_mask(bin), index = mask ? (unsigned)__builtin_ctz(mask) : 0;
     uint64_t before = fx_source_submitted[index];
     int ok = h2_audio_backend_health() == 0 && fx_inputs_ready() && h2_audio_fx_play(&fx, bin);
@@ -334,7 +355,7 @@ int h2_audio_backend_fx_play(unsigned bin)
 int h2_audio_backend_gp_pcm_play(int voice)
 {
     if (voice<0 || voice>=XA_MAX_VOICES || h2_audio_backend_health()<0) return -1;
-    lock_progress();
+    lock_progress_boundary();
     unsigned index=gp_pcm_voice[0]<0 ? 0 : 1;
     int ok=h2_audio_backend_health()==0 && fx.playing==0x7fff && fx.bound==0x7fff &&
         progress.voice<0 && gp_pcm_voice[index]<0 && gp_pcm_voice[0]!=voice &&
@@ -383,6 +404,7 @@ int h2_audio_backend_stream_submit(int voice,uint32_t mirror,uint64_t *ticket)
         s->packets[s->count].ticket=++gp_stream_serial;
         s->packets[s->count].end_source=s->end;
         s->packets[s->count++].fence=0;*ticket=gp_stream_serial;
+        __atomic_add_fetch(&stream_generation, 1, __ATOMIC_RELEASE);
     }
     sceKernelUnlockMutex(progress_mutex,1);return ok ? 0 : -1;
 }
@@ -396,6 +418,7 @@ int h2_audio_backend_stream_complete(int voice,uint64_t *ticket)
     if (s && s->count && s->packets[0].fence && fx_consumed>=s->packets[0].fence) {
         *ticket=s->packets[0].ticket;s->packets[0]=s->packets[1];memset(&s->packets[1],0,sizeof s->packets[1]);
         --s->count;++gp_stream_completed;result=1;
+        __atomic_add_fetch(&stream_generation, 1, __ATOMIC_RELEASE);
     }
     sceKernelUnlockMutex(progress_mutex,1);return result;
 }
@@ -413,6 +436,7 @@ static int stream_decoded(uint64_t fence)
             if(!(source>=end && (source-end>=2 || cursor.drained)))break;
             if(!xk_audio_stream_pop_consumed(s->voice))return 0;
             s->removed+=160;s->packets[i].fence=fence;++gp_stream_decoded;
+            __atomic_add_fetch(&stream_generation, 1, __ATOMIC_RELEASE);
         }
     }
     return 1;
@@ -469,6 +493,14 @@ static int backend_queue_reverb(h2_dsp_engine *engine, unsigned index, uint32_t 
 {
     if ((index != 8 && index != 9) || h2_audio_backend_health() < 0 || progress_mutex < 0) return 0;
     lock_progress();
+    /* The previous monitor command is consumed by the GP within its next frames. The
+     * whole-grain lock used to make a following queue wait for that implicitly; with
+     * per-frame yields the wait is explicit and bounded, never a fabricated success. */
+    uint64_t began = sceKernelGetProcessTimeWide();
+    while (reverb_pending && fx.engine == engine && fx.playing && h2_audio_backend_health() == 0 &&
+           sceKernelGetProcessTimeWide() - began < 200000) {
+        sceKernelUnlockMutex(progress_mutex, 1); sceKernelDelayThread(1000); lock_progress();
+    }
     int ok = h2_audio_backend_health() == 0 && fx.engine == engine && fx.playing && !reverb_pending &&
              (index==8 ? h2_dsp_queue_reverb8(engine,flags,parameters) : h2_dsp_queue_reverb9(engine,flags,parameters));
     if(ok){reverb_pending=1;reverb_index=index;reverb_queued_frame=fx.frames;}
@@ -524,25 +556,50 @@ static int mix_worker(SceSize bytes, void *arg)
              * the shared mixer at unity into FL/FR) joins the GP output once the fixed
              * FX configuration is complete. */
             int lane = (movie_prepared>=0 || game_voices) && fx.playing==0x7fff && fx.filtered==3;
-            if (!stream_decoded(fx.frames*32+XA_GRAIN) ||
-                !(lane ? h2_audio_fx_render_pcm(&fx,output[slot],XA_GRAIN,gp_pcm_output) :
-                  h2_audio_fx_render(&fx, output[slot], XA_GRAIN))) {
+            int rendered = stream_decoded(fx.frames*32+XA_GRAIN), aborted = 0, reverb_fault = 0;
+            uint64_t yielded = 0;
+            if (rendered) {
+                grain_active = 1;
+                for (unsigned at = 0; at < XA_GRAIN; at += 32) {
+                    if (at) {   /* GP frame boundary: let the game's calls in */
+                        uint64_t y0 = perf_clock(), held = y0 - hold_t0;
+                        perf_worker_hold_us += held; if (held > perf_worker_hold_max) perf_worker_hold_max = held;
+                        sceKernelUnlockMutex(progress_mutex, 1);
+                        sceKernelLockMutex(progress_mutex, 1, NULL);
+                        hold_t0 = perf_clock(); yielded += hold_t0 - y0;
+                        if (__atomic_load_n(&error, __ATOMIC_ACQUIRE)) { aborted = 1; break; }
+                    }
+                    if (!(lane ? h2_audio_fx_render_pcm(&fx, output[slot] + at * 2, 32, gp_pcm_output + at * 2) :
+                          h2_audio_fx_render(&fx, output[slot] + at * 2, 32))) { rendered = 0; break; }
+                    /* A queued monitor command2 is consumed by the GP program within the
+                     * following frames; the queue reopens as soon as the real effect state
+                     * shows it consumed, and a command still pending 32 frames later is a
+                     * fault, exactly the bound the whole-grain check enforced. */
+                    if (reverb_pending && fx.frames > reverb_queued_frame) {
+                        h2_dsp_status state; uint32_t flags = 0;
+                        h2_dsp_snapshot(fx.engine, &state);
+                        int consumed = !state.fault && !state.command &&
+                                       h2_dsp_read_effect(fx.engine, reverb_index, 16, &flags, 4) && !(flags & 4);
+                        if (state.fault || (!consumed && fx.frames >= reverb_queued_frame + 32)) { reverb_fault = 1; break; }
+                        if (consumed) {
+                            xv_logf("[h2/reverb-worker] original monitor command2 consumed effect%u flags=%08X real_GP_frames=%llu->%llu; grain not yet submitted\n",
+                                    reverb_index, flags, (unsigned long long)reverb_queued_frame, (unsigned long long)fx.frames);
+                            reverb_pending = 0;
+                        }
+                    }
+                }
+                grain_active = 0;
+            }
+            if (aborted) { sceKernelUnlockMutex(progress_mutex, 1); break; }
+            if (reverb_fault) {
+                __atomic_store_n(&error, (uint32_t)-1010, __ATOMIC_RELEASE);
+                sceKernelUnlockMutex(progress_mutex, 1); break;
+            }
+            if (!rendered) {
                 __atomic_store_n(&error, (uint32_t)-1004, __ATOMIC_RELEASE);
                 sceKernelUnlockMutex(progress_mutex, 1); break;
             }
-            uint64_t duration = sceKernelGetProcessTimeWide() - begin;
-            if(reverb_pending){
-                h2_dsp_status state;uint32_t flags;
-                h2_dsp_snapshot(fx.engine,&state);
-                if(state.fault || state.command || fx.frames<=reverb_queued_frame ||
-                   !h2_dsp_read_effect(fx.engine,reverb_index,16,&flags,4) || (flags&4)){
-                    __atomic_store_n(&error,(uint32_t)-1010,__ATOMIC_RELEASE);
-                    sceKernelUnlockMutex(progress_mutex,1);break;
-                }
-                xv_logf("[h2/reverb-worker] original monitor command2 consumed effect%u flags=%08X real_GP_frames=%llu->%llu; grain not yet submitted\n",
-                        reverb_index,flags,(unsigned long long)reverb_queued_frame,(unsigned long long)fx.frames);
-                reverb_pending=0;
-            }
+            uint64_t duration = sceKernelGetProcessTimeWide() - begin - yielded;
             fx_compute_us += duration;
             if (duration > fx_max_compute_us) fx_max_compute_us = duration;
             if (duration * XA_OUT_RATE > (uint64_t)XA_GRAIN * 1000000) ++fx_deadline_misses;
@@ -767,14 +824,26 @@ void h2_audio_backend_perf(uint64_t out[24])
 #if H2_AUDIO_DSP
     out[2] = fx_compute_us; out[3] = fx_max_compute_us; out[4] = fx_deadline_misses;
     { extern void h2_audio_fx_perf(uint64_t out[4]); h2_audio_fx_perf(out + 12); }
+    if (fx.engine) { h2_dsp_status st; h2_dsp_snapshot(fx.engine, &st); out[15] = st.instructions; }
 #else
     out[2] = out[3] = out[4] = 0; out[12] = out[13] = out[14] = out[15] = 0;
 #endif
     out[5] = perf_worker_hold_us; out[6] = perf_worker_hold_max; out[7] = perf_worker_compute_iters;
     out[8] = perf_worker_idle_iters; out[9] = perf_guest_wait_us; out[10] = perf_guest_locks; out[11] = error;
     /* The four busiest lock sites (source line, count), highest first. */
-    unsigned order[8]; for (unsigned i = 0; i < 8; ++i) order[i] = i;
-    for (unsigned i = 0; i < 8; ++i) for (unsigned j = i + 1; j < 8; ++j)
+    unsigned order[32]; for (unsigned i = 0; i < 32; ++i) order[i] = i;
+    for (unsigned i = 0; i < 32; ++i) for (unsigned j = i + 1; j < 32; ++j)
         if (perf_site_n[order[j]] > perf_site_n[order[i]]) { unsigned t = order[i]; order[i] = order[j]; order[j] = t; }
     for (unsigned i = 0; i < 4; ++i) { out[16 + i * 2] = perf_site_line[order[i]]; out[17 + i * 2] = perf_site_n[order[i]]; }
 }
+
+#if H2_AUDIO_DSP
+/* Lock-free change counter for the adapter's completion poll: equal values mean
+ * every stream completion query would answer exactly as it did last time (an
+ * error also changes the value so a failed sink is still observed promptly). */
+uint32_t h2_audio_backend_stream_generation(void)
+{
+    return __atomic_load_n(&stream_generation, __ATOMIC_ACQUIRE) +
+           (__atomic_load_n(&error, __ATOMIC_ACQUIRE) ? 0x80000000u : 0u);
+}
+#endif

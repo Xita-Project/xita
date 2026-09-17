@@ -123,6 +123,7 @@ int h2_audio_backend_stream_submit(int voice,uint32_t mirror,uint64_t *ticket)
     if(test_stream_submit_failure)return -1;
     assert(xk_audio_stream_push(voice,mirror,320)==0);*ticket=++test_stream_serial;return 0;
 }
+uint32_t h2_audio_backend_stream_generation(void) { static uint32_t g; return ++g; }   /* always poll */
 int h2_audio_backend_stream_complete(int voice,uint64_t *ticket)
 {
     assert(voice>=0);
