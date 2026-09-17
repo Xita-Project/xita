@@ -861,6 +861,12 @@ class Emitter:
         if mn in MMX_SHIFT and is_mm0:
             cnt = self.operand(ins, 1, 1) if ins.op1_kind == OpKind.IMMEDIATE8 else self.operand(ins, 1, 8)
             out.append(f"    {self.operand(ins,0,8)} = x_mmx_{mn}({self.operand(ins,0,8)}, (uint64_t){cnt});"); return
+        if mn == "bswap":
+            a = self.operand(ins, 0, 4)
+            out.append(f"    {a} = __builtin_bswap32({a});"); return
+        if mn == "pmovmskb" and ins.op_count == 2 and ins.op0_kind == OpKind.REGISTER and REGNAME[ins.op0_register].startswith("mm") is False and REGNAME[ins.op1_register].startswith("mm"):
+            # MMX pmovmskb r32, mm: the sign bit of each of the eight bytes.
+            out.append(f"    {{ uint64_t s_ = {self.operand(ins,1,8)}; uint32_t m_ = 0; for (unsigned i_ = 0; i_ < 8; ++i_) m_ |= (uint32_t)((s_ >> (i_ * 8 + 7)) & 1u) << i_; {self.operand(ins,0,4)} = m_; }}"); return
         if mn == "pshufw" and is_mm0:
             imm = ins.immediate8
             parts = " | ".join(f"(((s_ >> {((imm >> (i * 2)) & 3) * 16}) & 0xFFFFu) << {i * 16})" for i in range(4))
@@ -870,7 +876,7 @@ class Emitter:
         if mn in ("movss", "movaps", "movups", "movlps", "movhps", "movhlps", "movlhps", "addss", "subss", "mulss", "divss", "sqrtss", "minss", "maxss",
                   "cvtsi2ss", "cvttss2si", "cvtss2si", "comiss", "ucomiss", "xorps", "andps", "orps", "addps", "subps", "mulps",
                   "shufps", "unpcklps", "unpckhps", "movd", "rsqrtss", "rcpss", "cvtpi2ps", "cvtps2pi", "cvttps2pi",
-                  "rsqrtps", "minps", "maxps", "cmpss", "movmskps", "divps", "andnps"):
+                  "rsqrtps", "minps", "maxps", "cmpss", "cmpps", "movmskps", "divps", "andnps"):
             self.lower_sse(ins, mn, out, U); return
         U()
 
@@ -1063,6 +1069,15 @@ class Emitter:
         if mn in ("minps", "maxps"):
             maximum = int(mn == "maxps")
             check = f'if (!x_minmaxps({xmm(0)}, SOURCE, {maximum})) {{ xv_unimpl(c, 0x{ins.ip:X}u, "{mn} FP control"); return; }}'
+            if is_xmm(1):
+                out.append("    " + check.replace("SOURCE", xmm(1)))
+            else:
+                out.append(f"    {{ float source_[4]; x_load128(c, source_, {self.addr(ins)}); " + check.replace("SOURCE", "source_") + " }")
+            return
+        if mn == "cmpps":
+            if ins.immediate8 > 7:
+                U(); out.append("    return;"); return
+            check = f'if (!x_cmpps({xmm(0)}, SOURCE, {ins.immediate8})) {{ xv_unimpl(c, 0x{ins.ip:X}u, "cmpps FP control"); return; }}'
             if is_xmm(1):
                 out.append("    " + check.replace("SOURCE", xmm(1)))
             else:

@@ -364,6 +364,42 @@ static inline int x_cmpss(float *destination, uint32_t source, unsigned predicat
     return 0;
 #endif
 }
+/* CMPPS: the scalar compare above applied to all four lanes (same predicate set, same
+ * legacy exception rules per lane, same supported FP controls on ARM). Halo 2's level
+ * loader uses cmpltps + movmskps for bounding tests (0x2FD2F9). */
+static inline int x_cmpps(float *destination, const float *source, unsigned predicate)
+{
+    if (predicate > 7) return 0;
+#if defined(__arm__) && defined(__VFP_FP__)
+    uint32_t fpscr, left[4], right[4], result[4], status = 0;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr) :: "memory");
+    if (fpscr & 0x03379F00u) return 0;
+    memcpy(left, destination, 16); memcpy(right, source, 16);
+    for (unsigned i = 0; i < 4; ++i) result[i] = x_cmpss_bits(left[i], right[i], predicate, &status);
+    fpscr |= status;
+    __asm__ volatile("vmsr fpscr, %0" :: "r"(fpscr) : "memory");
+    memcpy(destination, result, 16);
+    return 1;
+#elif defined(__SSE__)
+    typedef float vector4 __attribute__((vector_size(16)));
+    vector4 a, b;
+    memcpy(&a, destination, 16); memcpy(&b, source, 16);
+#define X_CMPPS_CASE(N) case N: __asm__ volatile("cmpps $" #N ",%1,%0" : "+x"(a) : "x"(b) : "memory"); break
+    switch (predicate) {
+        X_CMPPS_CASE(0); X_CMPPS_CASE(1); X_CMPPS_CASE(2); X_CMPPS_CASE(3);
+        X_CMPPS_CASE(4); X_CMPPS_CASE(5); X_CMPPS_CASE(6); X_CMPPS_CASE(7);
+    }
+#undef X_CMPPS_CASE
+    memcpy(destination, &a, 16);
+    return 1;
+#else
+    uint32_t left[4], right[4], result[4], status = 0;
+    memcpy(left, destination, 16); memcpy(right, source, 16);
+    for (unsigned i = 0; i < 4; ++i) result[i] = x_cmpss_bits(left[i], right[i], predicate, &status);
+    memcpy(destination, result, 16);
+    return 1;
+#endif
+}
 static inline uint32_t x_movmskps(const float *source)
 {
     uint32_t bits[4]; memcpy(bits, source, 16);
