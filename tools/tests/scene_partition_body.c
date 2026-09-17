@@ -58,8 +58,19 @@ int main(void)
         event_count=0;lane=0;f_scene_original(c);xctx result=*c;
         unsigned original_events=event_count;memcpy(expected,arena,sizeof arena);
         memcpy(arena,initial,sizeof arena);*c=input;lane=1;event_count=0;
-        uint64_t prior=reads;memset(&scene,0,sizeof scene);f_scene_observed(c);
+        uint64_t prior=reads;memset(&scene,0,sizeof scene);
+#if XV_SCENE_BUCKET0_DETAIL
+        memset(&detail,0,sizeof detail);
+#endif
+        f_scene_observed(c);
+#if XV_SCENE_BUCKET0_DETAIL
+        assert(reads-prior==(skip?4:12) && scene.completed==1 && !scene.token);
+        uint64_t total=0;
+        for(unsigned j=0;j<6;j++) {total+=detail.elapsed[j];assert(detail.entries[j]==(j<2 || !skip));}
+        assert(total==scene.elapsed[0] && detail.completed==1);
+#else
         assert(reads-prior==(skip?3:7) && scene.completed==1 && !scene.token);
+#endif
         assert(scene.entries[0]==1 && scene.entries[5]==1 && scene.entries[1]==!skip);
         assert(!scene.invalid && !scene.stale && !scene.recursive);
         assert(event_count==original_events && !memcmp(c,&result,sizeof result) && !memcmp(arena,expected,sizeof arena));

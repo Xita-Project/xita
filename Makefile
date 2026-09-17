@@ -156,6 +156,13 @@ $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: $(BUILD)/query-prefix.config
 XV_OWNER_PHASE ?= 0
 XV_OWNER_PHASE_DEFAULT ?= 0
 XV_SCENE_PARTITION ?= 0
+XV_SCENE_BUCKET0_DETAIL ?= 0
+ifneq ($(words $(XV_SCENE_BUCKET0_DETAIL)),1)
+$(error XV_SCENE_BUCKET0_DETAIL must be 0 or 1)
+endif
+ifneq ($(filter $(XV_SCENE_BUCKET0_DETAIL),0 1),$(XV_SCENE_BUCKET0_DETAIL))
+$(error XV_SCENE_BUCKET0_DETAIL must be 0 or 1)
+endif
 ifneq ($(words $(XV_SCENE_PARTITION)),1)
 $(error XV_SCENE_PARTITION must be 0 or 1)
 endif
@@ -196,6 +203,13 @@ $(BUILD)/owner-phase-startup.config: force-owner-phase-startup-config
 $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_ui_gxm.o: $(BUILD)/owner-phase.config
 .PHONY: force-scene-partition-config
 force-scene-partition-config:
+.PHONY: force-scene-bucket0-detail-config
+force-scene-bucket0-detail-config:
+$(BUILD)/scene-bucket0-detail.config: force-scene-bucket0-detail-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_SCENE_BUCKET0_DETAIL)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
 $(BUILD)/scene-partition.config: force-scene-partition-config
 	@mkdir -p $(BUILD)
 	@printf '%s\n' '$(XV_SCENE_PARTITION)' > $@.tmp
@@ -374,6 +388,11 @@ LIBS      += -lSceLibKernel_stub -lSceTouch_stub -lm
 # (recomp/, linked as librecomp.a) and the GXM UI bridge; see runtime/xv_boot.c / runtime/xv_ui_gxm.c.
 RECOMP    ?= 0
 GAME_PROFILE ?= halo_ce_3925
+ifeq ($(XV_SCENE_BUCKET0_DETAIL),1)
+ifneq ($(RECOMP):$(XV_OWNER_PHASE):$(XV_SCENE_PARTITION):$(GAME_PROFILE),1:1:1:halo_ce_3925)
+$(error XV_SCENE_BUCKET0_DETAIL requires RECOMP=1 XV_OWNER_PHASE=1 XV_SCENE_PARTITION=1 GAME_PROFILE=halo_ce_3925)
+endif
+endif
 XV_OBJECT_PASS_TIMING ?= 0
 ifneq ($(words $(XV_OBJECT_PASS_TIMING)),1)
 $(error XV_OBJECT_PASS_TIMING must be 0 or 1)
@@ -758,6 +777,14 @@ $(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o: RECOMP_CFLAGS +
 endif
 $(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(BUILD)/scene-partition.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(BUILD)/scene-partition.config
+ifeq ($(XV_SCENE_BUCKET0_DETAIL),1)
+ifneq ($(words $(shell rg -o 'XV_SCENE_BUCKET0_DETAIL_SCOPE:' $(SCENE_PARTITION_SRCS) 2>/dev/null)),1)
+$(error XV_SCENE_BUCKET0_DETAIL requires the selectively regenerated five bucket0 cuts)
+endif
+$(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o: RECOMP_CFLAGS += -DXV_SCENE_BUCKET0_DETAIL=1
+endif
+$(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(BUILD)/scene-bucket0-detail.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(BUILD)/scene-bucket0-detail.config
 ifeq ($(XV_NATIVE_BSP_SPHERE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_BSP_SPHERE
 endif

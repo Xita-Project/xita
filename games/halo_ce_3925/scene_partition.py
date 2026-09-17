@@ -46,3 +46,34 @@ def hook(body):
     if strip(body) != original:
         raise ValueError('scene observer changes original instructions')
     return body
+
+
+# Existing six-bucket emitted body, with only phase-index placement normalized.
+DETAIL_BASE_SHA256 = '60f91933239e90b63285239167060ab19f4cf6c86f5c2caec3fb8ecc58177036'
+DETAIL_CUTS = {0x5D4B0: 1, 0x5D4E7: 2, 0x5D4EC: 3, 0x5D4F1: 4, 0x5D4FB: 5}
+
+
+def strip_detail(body):
+    return re.sub(r'^#if defined\(XV_SCENE_BUCKET0_DETAIL\) && XV_SCENE_BUCKET0_DETAIL\n.*?^#endif\n', '', body, flags=re.M | re.S)
+
+
+def detail_hook(body):
+    if not __debug__:
+        raise RuntimeError('Run without Python -O')
+    canonical = re.sub(r'^    XV_PHASE_SCOPE\(c, \d+u\);\n', '', body, flags=re.M).rstrip()
+    if hashlib.sha256(canonical.encode()).hexdigest() != DETAIL_BASE_SHA256:
+        raise ValueError('primary 5D410 main-partition body drift')
+    original = body
+    for pc, bucket in DETAIL_CUTS.items():
+        needle = '    /* ' + f'{pc:08X}' + '  '
+        if body.count(needle) != 1:
+            raise ValueError('primary 5D410 detail frontier drift')
+        marker = '    /* XV_SCENE_BUCKET0_DETAIL_SCOPE: shared original scene token */\n' if bucket == 1 else ''
+        step = ('#if defined(XV_SCENE_BUCKET0_DETAIL) && XV_SCENE_BUCKET0_DETAIL\n' + marker +
+                '    { extern void xv_scene_bucket0_step(uint64_t *, void *, unsigned);\n' +
+                f'      xv_scene_bucket0_step(&xv_scene_partition_scope_, c, {bucket}u); ' + '}\n' +
+                '#endif\n')
+        body = body.replace(needle, step + needle)
+    if strip_detail(body) != original:
+        raise ValueError('scene detail changes original body or main scopes')
+    return body
