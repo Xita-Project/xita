@@ -20,6 +20,9 @@ endif
 ifeq ($(XV_NATIVE_OBJECT_COLLECT),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_collect.c
 endif
+ifeq ($(XV_NATIVE_COLLISION_VERTICES),1)
+XITA_GAME_SRCS += recomp/kernel/xk_collision_vertices_control.c
+endif
 ifeq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_jobs.c
 endif

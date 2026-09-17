@@ -8,7 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
-from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile
+from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices
 
 
 class HaloHooks(NoGameHooks):
@@ -264,6 +264,8 @@ class HaloHooks(NoGameHooks):
 
     def transform_body(self, address, body):
         body = self.light_census_body(address, body)
+        if self.enabled and address == 0x86F50 and collision_vertices.matches(self.image):
+            body = collision_vertices.hook(body)
         if self.enabled and address == 0x4C980:
             size, digest = self.object_shared[address]
             if hashlib.sha256(self.image.bytes_at(address, size) or b"").hexdigest() == digest:
