@@ -68,20 +68,35 @@ $(BUILD)/gpu-packet.config: force-gpu-packet-config
 $(BUILD)/runtime/main.o: $(BUILD)/gpu-packet.config
 # Optional read-only continuation proof. Default OFF; both compile transitions
 # rebuild every owner of the guarded interface.
+XV_DEPTH_STORE_DEFAULT ?= 0
+ifneq ($(words $(XV_DEPTH_STORE_DEFAULT)),1)
+$(error XV_DEPTH_STORE_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_DEPTH_STORE_DEFAULT),0 1),$(XV_DEPTH_STORE_DEFAULT))
+$(error XV_DEPTH_STORE_DEFAULT must be 0 or 1)
+endif
 ifeq ($(XV_DEPTH_STORE),1)
 ifneq ($(RECOMP),1)
 $(error XV_DEPTH_STORE requires RECOMP=1)
 endif
 $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o $(BUILD)/runtime/xv_shader.o $(BUILD)/runtime/xv_ui_gxm.o: CFLAGS += -DXV_DEPTH_STORE
+$(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_DEPTH_STORE_DEFAULT=$(XV_DEPTH_STORE_DEFAULT)
 endif
-.PHONY: force-depth-store-config
+.PHONY: force-depth-store-config force-depth-store-startup-config
 force-depth-store-config:
+force-depth-store-startup-config:
 $(BUILD)/depth-store.config: force-depth-store-config
 	@mkdir -p $(BUILD)
 	@printf '%s\n' '$(if $(filter 1,$(XV_DEPTH_STORE)),1,0)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o $(BUILD)/runtime/xv_shader.o $(BUILD)/runtime/xv_ui_gxm.o: $(BUILD)/depth-store.config
+$(BUILD)/depth-store-startup.config: force-depth-store-startup-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_DEPTH_STORE)),$(XV_DEPTH_STORE_DEFAULT),0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_d3d.o: $(BUILD)/depth-store-startup.config
 # Existing-scene exact query completion candidate; compiled and runtime OFF by default.
 XV_QUERY_BOUNDARY_DEFAULT ?= 0
 ifneq ($(words $(XV_QUERY_BOUNDARY_DEFAULT)),1)

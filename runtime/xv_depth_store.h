@@ -4,10 +4,17 @@
  * and the linked program proof for the replay-owned performance overlay. */
 #pragma once
 #ifdef XV_DEPTH_STORE
+#ifndef XV_DEPTH_STORE_DEFAULT
+#define XV_DEPTH_STORE_DEFAULT 0
+#endif
+#if XV_DEPTH_STORE_DEFAULT != 0 && XV_DEPTH_STORE_DEFAULT != 1
+#error XV_DEPTH_STORE_DEFAULT must be 0 or 1
+#endif
 enum { DS_OFF, DS_READY, DS_FIRST, DS_FINAL, DS_BOUNDS, DS_UI, DS_CLEAR,
        DS_WRITE, DS_STENCIL, DS_SHADER, DS_EMPTY, DS_READY_FINAL, DS_REASONS };
 int xv_ui_gxm_depth_tail_readonly(unsigned frame);
-static unsigned g_depth_store_mode;
+/* Set before any rendering worker exists; live changes still require a drain. */
+static unsigned g_depth_store_mode = XV_DEPTH_STORE_DEFAULT;
 static uint32_t g_depth_store_reasons[DS_REASONS];
 static uint64_t g_depth_store_pixels;
 int xv_depth_store_available(void)

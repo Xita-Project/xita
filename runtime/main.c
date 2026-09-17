@@ -2174,6 +2174,9 @@ int main(int argc, char *argv[])
     if (net_result < 0) goto shutdown;
     xv_gfx_configure_resolution();
     xv_pipeline_configure(); /* Dashboard edits loaded; workers have not started. */
+#ifdef XV_DEPTH_STORE
+    XV_LOG("[depth-store] process-start mode %d available %d; read-only continuation proof; loads and final ownership retained\n",xv_depth_store_enabled(),xv_depth_store_available());
+#endif
 #ifdef XV_QUERY_BOUNDARY
     XV_LOG("[query-boundary] process-start mode %d; exact prefix publication at existing scene ends; final ownership retained\n",xv_query_boundary_enabled());
 #endif

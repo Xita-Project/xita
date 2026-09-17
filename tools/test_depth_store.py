@@ -2,7 +2,9 @@
 """Production RTT/control/interface differential tests; no game/GPU required."""
 import argparse, json, os, pathlib, re, struct, subprocess, tempfile
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-ap=argparse.ArgumentParser();ap.add_argument('--stage',type=pathlib.Path);args=ap.parse_args()
+ap=argparse.ArgumentParser();ap.add_argument('--stage',type=pathlib.Path)
+ap.add_argument('--startup-only',action='store_true',help='Run only focused first-replay startup checks, plus optional packaged metadata')
+args=ap.parse_args()
 src=(ROOT/'runtime/xv_d3d.c').read_text();shader=(ROOT/'runtime/xv_shader.c').read_text()
 ui=(ROOT/'runtime/xv_ui_gxm.c').read_text()
 ua=ui.index('int xv_ui_gxm_depth_tail_readonly(');ub=ui.index('\n#endif',ua)
@@ -25,7 +27,14 @@ with tempfile.TemporaryDirectory(prefix='xita-depth-store-') as tmp:
  # Adapt only mock storage representation, not the tested lookup/proof body.
  text=(p/'shader.inc').read_text().replace('(const SceGxmProgram *)xv_ps_embedded[mid].data','&xv_ps_embedded[mid].data')
  (p/'shader.inc').write_text(text)
- for qb in (False,True):
+ for initial in (0,1):
+  exe=p/f'startup-{initial}'
+  subprocess.run(['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-parameter',
+    '-DXV_DEPTH_STORE','-DXV_QUERY_BOUNDARY','-DTEST_DEPTH_STORE_STARTUP',f'-DXV_DEPTH_STORE_DEFAULT={initial}',
+    '-fsanitize=address,undefined','-fno-omit-frame-pointer','-no-pie','-I'+str(p),str(ROOT/'tools/tests/depth_store.c'),
+    str(ROOT/'runtime/xv_render_profile.c'),'-o',str(exe)],check=True)
+  subprocess.run([str(exe)],check=True,env={**os.environ,'XV_RT_QUEUE':'1','ASAN_OPTIONS':'detect_leaks=1'})
+ for qb in (() if args.startup_only else (False,True)):
   for sanitizer in (False,True):
    exe=p/f'test-{int(qb)}-{int(sanitizer)}'
    cmd=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-parameter',
@@ -34,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix='xita-depth-store-') as tmp:
      '-I'+str(p),str(ROOT/'tools/tests/depth_store.c'),str(ROOT/'runtime/xv_render_profile.c'),'-o',str(exe)]
    subprocess.run(cmd,check=True)
    for queue in ('0','1'):subprocess.run([str(exe)],check=True,env={**os.environ,'XV_RT_QUEUE':queue,'ASAN_OPTIONS':'detect_leaks=1'})
- for absent in (False,True):
+ for absent in (() if args.startup_only else (False,True)):
   exe=p/f'controller-{int(absent)}'
   subprocess.run(['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-function',
     '-fsanitize=address,undefined','-fno-omit-frame-pointer','-no-pie',*(['-DTEST_NO_DEPTH_STORE'] if absent else []),

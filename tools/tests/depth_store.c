@@ -176,10 +176,17 @@ static receipt run(unsigned mode,unsigned variant,unsigned frame,unsigned scaled
  if(variant==46)g.clear_fs.fprog=NULL;
  if(variant==47)l->cmds[5].stencil.enabled=1;
  cmdlist_t before=*l;
- xv_depth_store_override(mode);
+ /* mode2 deliberately exercises the production static startup initializer. */
+ if(mode<2)xv_depth_store_override(mode);
 #ifdef XV_QUERY_BOUNDARY
- /* For a positive prefix plan, only the first scene owns a query. */
- l->cmds[2].visibility=l->cmds[5].visibility=0;l->nvisibility=1;before=*l;
+ if(variant==48) {
+   /* Last writer is in the admitted intermediate continuation (commands2/3),
+    * not the first scene whose store is mandatory. */
+   l->cmds[5].visibility=0;l->nvisibility=2;
+ } else {
+   l->cmds[2].visibility=l->cmds[5].visibility=0;l->nvisibility=1;
+ }
+ before=*l;
  if(xv_d3d_query_boundary_prepare(frame,1)){SceGxmNotification f={&notice,999};xv_d3d_query_boundary_arm(frame,&f);}
 #endif
  SceGxmDepthStencilSurface depth={0,0,0,0x11223344},original=depth;SceGxmColorSurface color={0};
@@ -188,6 +195,16 @@ static receipt run(unsigned mode,unsigned variant,unsigned frame,unsigned scaled
               must keep stores even when the caller requests final admission. */
    event(4,123);events[nevents-1].command.export_depth=g.settings_fs.replaces_depth;sceGxmEndScene(NULL,NULL,NULL);}
  sceGxmFinish(NULL);assert(!memcmp(&depth,&original,sizeof depth)&&!memcmp(l,&before,sizeof before));
+#ifdef XV_QUERY_BOUNDARY
+ if(variant==48) {
+   unsigned query_ends=0;
+   assert(g_query_boundary_plans[frame%3].command==4 && notice==999);
+   for(unsigned j=0;j<nevents;j++)if(events[j].kind==2 && events[j].fence.address) {
+     query_ends++;assert(events[j].depth.store==!xv_depth_store_enabled());
+   }
+   assert(query_ends==1);
+ }
+#endif
  receipt r={.notice=notice,.events=nevents,.finishes=finishes,.failed=failed,.accepted=no_store,.trace=1469598103934665603ull};
  memcpy(r.depth,mem_depth,sizeof mem_depth);memcpy(r.stencil,mem_stencil,sizeof mem_stencil);
  memcpy(r.color,colors,sizeof colors);memcpy(r.query,queries,sizeof queries);
@@ -197,17 +214,32 @@ static receipt run(unsigned mode,unsigned variant,unsigned frame,unsigned scaled
 }
 int main(void)
 {
+#ifdef TEST_DEPTH_STORE_STARTUP
+ /* No control call or shader metadata warmup precedes this real replay. */
+ assert(xv_depth_store_enabled()==XV_DEPTH_STORE_DEFAULT);
+ receipt initial=run(2,35,0,0);
+ assert(initial.accepted==(XV_DEPTH_STORE_DEFAULT?2u:0u) && !initial.failed);
+ for(unsigned variant=24;variant<=25;variant++) {
+   receipt declined=run(2,variant,0,0);assert(!declined.accepted && !declined.failed);
+   assert(xv_depth_store_enabled()==XV_DEPTH_STORE_DEFAULT);
+ }
+ receipt original=run(0,35,0,0);initial.accepted=0;assert(!memcmp(&initial,&original,sizeof initial));
+ receipt a=run(0,48,UINT32_MAX,0),b=run(1,48,UINT32_MAX,0);
+ assert(!a.accepted && b.accepted==2);b.accepted=0;assert(!memcmp(&a,&b,sizeof a));
+ printf("PASS actual startup default%d without setter, unavailable configurations, original replay equality, query fence on omitted continuation\n",XV_DEPTH_STORE_DEFAULT);
+ return 0;
+#endif
  assert(!xv_depth_store_enabled());xv_depth_store_override(1);xv_depth_store_override(-1);assert(!xv_depth_store_enabled());
  assert(!xv_fshader_embedded_no_depth(NULL)&&!xv_fshader_embedded_no_depth("missing"));
  unsigned frames[]={0,2,3,UINT32_MAX,0};unsigned checked=0;
- for(unsigned k=0;k<sizeof frames/sizeof frames[0];k++)for(unsigned scaled=0;scaled<2;scaled++)for(unsigned variant=0;variant<48;variant++) {
+ for(unsigned k=0;k<sizeof frames/sizeof frames[0];k++)for(unsigned scaled=0;scaled<2;scaled++)for(unsigned variant=0;variant<49;variant++) {
    receipt a=run(0,variant,frames[k],scaled),b=run(1,variant,frames[k],scaled);
    assert(!a.accepted);unsigned accepted=b.accepted;b.accepted=0;
    if(memcmp(&a,&b,sizeof a)){fprintf(stderr,"mismatch variant %u frame %u scaled %u\n",variant,frames[k],scaled);abort();}
    if(variant==0||variant==20||variant==21||variant==23)assert(accepted==1);
    if(variant==1||variant==2||variant==3||variant==4||variant==5||(variant>=6&&variant<=16)||variant==19||variant==22||(variant>=24&&variant<30))assert(!accepted);
    if(variant>=30 && variant<35)assert(accepted==((variant==31 || variant==33)?2:3));
-   if(variant>=35)assert(accepted==((variant==35 || variant==45)?2:1));
+   if(variant>=35)assert(accepted==((variant==35 || variant==45 || variant==48)?2:1));
    checked++;
  }
  /* Bounds failure is declined before any command access by the proof. The

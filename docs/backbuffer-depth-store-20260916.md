@@ -1,6 +1,10 @@
 # Read-only backbuffer depth-store candidate
 
-`XV_DEPTH_STORE=1` compiles a private experiment; its runtime mode starts Off.
+`XV_DEPTH_STORE=1` compiles a private experiment; its runtime mode starts Off
+unless built with `XV_DEPTH_STORE_DEFAULT=1`. The latter selects the existing
+policy before workers start for a fresh-launch gameplay retest; it does not
+relax the per-scene proof. The repository default remains zero. See the
+[startup retest](depth-store-startup-20260917.md) for the current procedure.
 The `depth-store` remote comparison (selector 40) runs Off/On/Off at the current
 resolution and restores the initial mode after completion, cancellation or loss
 of player control. This is not a dashboard setting or an established FPS gain.
