@@ -13,8 +13,9 @@ installed and boot-confirmed in slot 1. It keeps the twelve paths below and
 adds packed layouts for three compatible vertex programs, one exact-state
 query arithmetic reconstruction, and ordered publication of completed query
 prefixes with retained-history protection. Standard graphics remain unchanged.
-The twelve-path parent stays in slot 0. Short ordinary campaign firing, movement and pause checks complete without
-a searched fault or logger error. Initial active reports remain 12.7–12.8 FPS;
+The twelve-path parent stays in slot 0. Short ordinary campaign firing/movement and Blood Gulch plasma/vehicle checks
+complete without a searched fault or logger error. Initial campaign reports
+remain 12.7–12.8 FPS; a driving capture reaches 6 FPS on an unmatched route;
 no combined FPS gain is established. See the
 [cumulative update](cumulative-render-update-20260917.md) for qualification,
 package identity and hardware evidence.

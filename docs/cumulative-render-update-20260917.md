@@ -82,3 +82,27 @@ fault marker and the logger reports zero errors/failed writes. This is a short
 smoke check; it does not settle long-session crashes, rocket death or performance
 across the campaign. The captured tail includes paused reports, which are
 excluded from active gameplay comparisons.
+
+## Blood Gulch follow-up
+
+The same process returned through normal menus to a solo New002/New003 Slayer
+match. Camera/walking, plasma charge/release with both a Ghost and Warthog in
+view, driver entry, steering, forward/reverse driving, exit and pause completed.
+The charged screenshot retains both vehicles. The driving capture shows 6 FPS;
+later settled reports show 11 FPS. The initial different spawn reports
+12.8–13 FPS. These are unmatched views/routes, not a gain or regression verdict.
+The target remains unmet. A look-down/L input did not capture an explosion or
+death, so it does not qualify rocket or death/respawn behavior.
+
+At the final receipt, frame 37,357, benchmark mode is OFF. The saved log is
+6,070,808 bytes, with no searched fault marker and zero logger errors/failed
+writes. The Vita is paused on foot near the Warthog; input is neutral. This is
+functional smoke coverage, not prolonged combat/crash qualification.
+
+Across all 601 publication reports in the saved process log (including menus,
+loading, campaign, Blood Gulch and pause), younger publications, older-final
+opportunities and history declines are all zero. This is no demonstrated
+scheduling benefit in these workloads. It is not a GPU-active-time measure or
+proof about every scene. Packed requests remain nonzero. All selected paths
+remain cumulative; the next performance work targets CPU query cost rather
+than assuming another synchronization win.
