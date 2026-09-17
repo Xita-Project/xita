@@ -262,7 +262,23 @@ The final receipt is frame 10,420 with a 1,567,564-byte log, no searched fault
 marker and zero logger errors/failed writes. The Vita is paused with neutral
 input. Paused reports are excluded from active comparisons. This is bounded
 campaign smoke, not matched performance proof or long-session crash clearance.
-Blood Gulch combat/driving qualification remains outstanding for this new
-combination. No five-FPS gain or stable 20 FPS is established. The next work
-uses the coarse tick/scene split to target larger costs while keeping the
-compatible optimizations together.
+The subsequent ordinary New002/New003 Blood Gulch session completed rocket
+pickup/fire, a rocket self-hit with death and respawn, charged plasma fire,
+Warthog gunner fire and driver movement/turn/reverse/exit. Both the Ghost and
+Warthog remained visible in the plasma charge/release captures. The final
+frame-50,527 capture contains 9,647,069 log bytes, no searched fault marker and
+zero logger errors. These are bounded functional checks; much of the session
+was stationary or paused, so historical intermittent crashes remain unresolved.
+
+Driving remains slow: selected moving windows report 5.3 and 6.5 FPS. The former
+contains 340 accepted object passes in 60 displayed frames, about 14.3 ms of
+joined work per pass. The large per-frame simulation total includes repeated
+ticks, scheduling and waits. These routes and camera views differ from earlier
+builds and cannot establish a regression or gain. No five-FPS gain or stable
+20 FPS is established.
+
+The next cumulative diagnostic retains every selection and adds the
+[scene partitions](scene-partition-observer-20260917.md) and
+[accepted-pass accounting](object-pass-timing-20260917.md). These identify
+larger remaining costs without enabling the old phase profiler or changing
+worker policy. Counters are not counted as another optimization.
