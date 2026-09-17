@@ -110,8 +110,25 @@ vehicle captures showed 8–9 FPS, with a later stationary wall view at 10.5.
 These views and workloads do not support an optimization gain/regression
 comparison. No five-FPS gain or stable 20 FPS has been demonstrated.
 
-This run did not repeat campaign, rocket/death or prolonged combat checks.
+This Blood Gulch run did not repeat campaign, rocket/death or prolonged combat checks.
 All eleven paths remain cumulative, and no built-in benchmark or CE emulator
 was used. Evidence: `solver-fusion-startup/installation.json`,
 `bloodgulch-smoke-receipt.json`, `bloodgulch-smoke.log`, and captured PNGs
 under the private validation directory.
+
+The same eleven-path process subsequently loaded New001's Normal campaign
+pistol checkpoint through the ordinary menus. Two fire inputs, camera/strafe,
+corridor movement, wall contact, reverse and pause completed. The full log has
+no searched fault markers; logger error and failed-write counters are zero.
+This is a short transition/gameplay check, not prolonged combat qualification.
+
+A separate passive counter check observed 372 completed display callbacks
+over a host-timed interval bounded by 30.000–30.239 seconds: 12.302–12.400 FPS.
+Benchmark mode remained zero, with no screenshots, inputs or setting changes
+during the interval. The active campaign screenshot showed 12 FPS. The counter
+comes from the completed display callback and counts presentations, not unique
+simulation ticks. This cross-check supports the current reading; it neither
+validates every historical benchmark comparison nor establishes a speedup.
+The preceding map/load history and live simulation are unmatched.
+Evidence: `campaign-smoke-receipt.json`, `campaign-smoke.log`,
+`passive-counter.json` and the campaign captures in `solver-fusion-startup/`.

@@ -6,6 +6,27 @@ the strength of those comparisons need another look. Keep normal graphics
 settings fixed and record the installed executable and effective startup modes.
 Restarting means a new Xita process; it does not require rebooting the Vita.
 
+## Current cumulative build
+
+The eleven-path runtime `ece322ea…` has completed short ordinary campaign and
+Blood Gulch vehicle checks. It retains the earlier CPU/rendering work and adds
+exact retired-slot upload omission and collision-solver fusion to the nine-path
+build described below. No clear five-FPS gain or stable representative 20 FPS
+has been established. All eleven compatible paths remain enabled.
+
+The next package, from source `e29a962`, adds query-only f32 helper inlining.
+Its final query object exactly matches the qualified prototype; all other
+runtime, caller, solver and generic objects are unchanged. The package retains
+all assets and the existing updater contract. The hardware rollout receipt
+will be recorded in the [query-inline follow-up](query-f32-inline-20260917.md).
+This is a cumulative change, not a replacement of the preceding optimizations.
+
+The eleven-path active campaign reading has an independent cross-check: 372
+completed display callbacks in 30.000–30.239 host seconds, or 12.302–12.400 FPS,
+with benchmark mode off. The visible counter showed 12 FPS. This supports the
+current reading without proving that earlier workload comparisons were valid.
+No setting, input or screenshot request ran during that timing interval.
+
 ## Acceptance decisions
 
 Correctness and performance are separate. Local comparisons must preserve the
@@ -148,13 +169,13 @@ and the logger reports no error. `campaign-smoke-receipt.json` preserves the
 evidence. A load-level menu capture still has clipped/overlapping text; no new
 build attribution or blanket visual-correctness claim follows from this smoke.
 
-The next bounded CPU prototype targets the complete collision-response solver
+The subsequently qualified CPU prototype targets the complete collision-response solver
 (`172CB8 → 170C10` and ten direct helpers), keeping the actor transaction held.
 It handles different work from the retained query paths. Historical sampled
 solver elapsed time was about 17% of its movement wrapper, including nested
 work and scheduling; its current frame share and possible gain are unknown.
-The prototype must preserve full-call state, arithmetic and scheduling before
-it can join the cumulative build. The earlier experiment that unlocked this
+The prototype preserves full-call state, arithmetic and scheduling and joined
+the eleven-path build. The earlier experiment that unlocked this
 solver remains excluded. In parallel, the 27.86 ms/frame visibility wait in
 one valley window remains a rendering dependency to investigate; it overlaps
 the other measured intervals.
@@ -214,7 +235,7 @@ None of these retests is complete merely because a package was built or booted.
 Keep known unsafe actor/solver publication experiments out of this queue, and
 distinguish never-deployed prototypes from previously tested candidates.
 
-The current nine-path runtime is
+The preceding nine-path runtime is
 `d817f077ef551ae1da2888f895497be711d03a51c60d7921048486869d68c668`,
 from source `1061b17`, installed and boot-confirmed in slot 1. It retains all
 eight paths and selects decoded RGBA swizzling at process startup. Exact pixel,
