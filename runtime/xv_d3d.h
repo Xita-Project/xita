@@ -26,6 +26,9 @@ void xv_d3d_depth_store_report(void);
 #include "xv_shader.h"
 #include "xv_stencil.h"
 
+/* Call once after configuration handoff, before recorder/pump threads start. */
+void xv_d3d_configure_render_preparation(void);
+
 /* Internal comparison control: -1 restores the configured default. */
 void xv_depth_prepare_override(int enabled);
 int xv_depth_prepare_available(void);

@@ -224,6 +224,42 @@ $(BUILD)/rgba-layout-startup.config: force-rgba-layout-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_ui_gxm.o: $(BUILD)/rgba-layout-startup.config
+# Existing XV_TEXTURE_STATE_CACHE policy: absent environment uses this process-start default.
+# Only replay/recording configuration in xv_d3d consumes it; guest units unchanged.
+XV_TEXTURE_STATE_CACHE_DEFAULT ?= 0
+ifneq ($(words $(XV_TEXTURE_STATE_CACHE_DEFAULT)),1)
+$(error XV_TEXTURE_STATE_CACHE_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_TEXTURE_STATE_CACHE_DEFAULT),0 1),$(XV_TEXTURE_STATE_CACHE_DEFAULT))
+$(error XV_TEXTURE_STATE_CACHE_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_TEXTURE_STATE_CACHE_DEFAULT=$(XV_TEXTURE_STATE_CACHE_DEFAULT)
+.PHONY: force-texture-state-startup-config
+force-texture-state-startup-config:
+$(BUILD)/texture-state-startup.config: force-texture-state-startup-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_TEXTURE_STATE_CACHE_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_d3d.o: $(BUILD)/texture-state-startup.config
+# Existing XV_DEPTH_PREPARE policy: absent environment uses this process-start default.
+# Only replay/recording configuration in xv_d3d consumes it; guest units unchanged.
+XV_DEPTH_PREPARE_DEFAULT ?= 0
+ifneq ($(words $(XV_DEPTH_PREPARE_DEFAULT)),1)
+$(error XV_DEPTH_PREPARE_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_DEPTH_PREPARE_DEFAULT),0 1),$(XV_DEPTH_PREPARE_DEFAULT))
+$(error XV_DEPTH_PREPARE_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_DEPTH_PREPARE_DEFAULT=$(XV_DEPTH_PREPARE_DEFAULT)
+.PHONY: force-depth-prepare-startup-config
+force-depth-prepare-startup-config:
+$(BUILD)/depth-prepare-startup.config: force-depth-prepare-startup-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_DEPTH_PREPARE_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_d3d.o: $(BUILD)/depth-prepare-startup.config
 # Diagnostic existing-scene completion census. OFF unless explicitly compiled.
 # Capacity is an independently verified SDK/runtime contract, not an allocation
 # request. Zero (the default) records structural declines without adding fences.

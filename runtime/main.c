@@ -2193,6 +2193,7 @@ int main(int argc, char *argv[])
     if (net_result < 0) goto shutdown;
     xv_gfx_configure_resolution();
     xv_pipeline_configure(); /* Dashboard edits loaded; workers have not started. */
+    xv_d3d_configure_render_preparation();
 #ifdef XV_DEPTH_STORE
     XV_LOG("[depth-store] process-start mode %d available %d; read-only continuation proof; loads and final ownership retained\n",xv_depth_store_enabled(),xv_depth_store_available());
 #endif

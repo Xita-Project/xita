@@ -38,7 +38,7 @@ int main(int argc, char **argv)
     (void)argv;
     if (argc > 1) {
         const char *e = getenv("XV_TEXTURE_STATE_CACHE");
-        int configured = e && atoi(e) != 0;
+        int configured = e ? atoi(e) != 0 : XV_TEXTURE_STATE_CACHE_DEFAULT;
         assert(texture_state_enabled() == configured);
         for (int mode = -2; mode <= 2; mode++) {
             xv_d3d_texture_state_override(mode);
