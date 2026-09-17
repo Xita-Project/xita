@@ -119,6 +119,7 @@ int h2_platform_wait_vblank(uint32_t *before, uint32_t *after)
     *after = (uint32_t)sceDisplayGetVcount();
     return result;
 }
+uint64_t h2_platform_time_us(void) { return sceKernelGetProcessTimeWide(); }
 int h2_platform_present(const uint8_t *pixels, size_t bytes,
                           const uint8_t *rgb_gamma, uint32_t *vcount)
 {

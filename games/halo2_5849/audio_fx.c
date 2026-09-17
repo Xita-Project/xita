@@ -187,6 +187,13 @@ static int mix_full_loop(h2_audio_fx *fx, int32_t bins[32][32], const int16_t *p
         for (unsigned i = 0; i < 32; ++i) bins[bin][i] = h2_hrtf_quantize(mixed[bin][i]);
     h2_hrtf_leave(fp); return 1;
 }
+/* Diagnostic wall-clock split of a grain: source mixing vs the GP frame. The
+ * clock is injected by the Vita sink; the host tests inject none (no timing). */
+static uint64_t (*g_clock)(void);
+static uint64_t g_perf_frames, g_perf_sources_us, g_perf_dsp_us;
+void h2_audio_fx_set_clock(uint64_t (*clock)(void)) { g_clock = clock; }
+void h2_audio_fx_perf(uint64_t out[4])
+{ out[0] = g_perf_frames; out[1] = g_perf_sources_us; out[2] = g_perf_dsp_us; out[3] = 0; }
 static int render(h2_audio_fx *fx, int16_t *stereo, unsigned frames, const int16_t *pcm)
 {
     if (!fx || !fx->engine || !fx->playing || (fx->playing & ~fx->bound) || !stereo ||
@@ -196,6 +203,7 @@ static int render(h2_audio_fx *fx, int16_t *stereo, unsigned frames, const int16
     for (unsigned at = 0; at < frames; at += 32) {
         int32_t source[32], bins[32][32] = {{0}};
         uint8_t monitor[256];
+        uint64_t perf_t0 = g_clock ? g_clock() : 0;
         if (fx->playing & ~7u) {
             if (!mix_full_loop(fx, bins, pcm ? pcm+at*2 : NULL)) return 0;
         } else {
@@ -221,8 +229,10 @@ static int render(h2_audio_fx *fx, int16_t *stereo, unsigned frames, const int16
             memcpy(bins[10], filtered, sizeof filtered);
         }
         }
+        uint64_t perf_t1 = g_clock ? g_clock() : 0;
         if (!h2_dsp_mix_frame(fx->engine, bins) ||
             !h2_dsp_copy_space(fx->engine, 0, 0x3000, monitor, sizeof monitor)) return 0;
+        if (g_clock) { uint64_t t2 = g_clock(); g_perf_sources_us += perf_t1 - perf_t0; g_perf_dsp_us += t2 - perf_t1; ++g_perf_frames; }
         for (unsigned i = 0; i < 32; ++i) for (unsigned channel = 0; channel < 2; ++channel) {
             const uint8_t *p = monitor + (channel * 32 + i) * 4;
             /* Discard the low eight Q23 bits, retaining signed two's-complement

@@ -3,6 +3,7 @@
 #include "menu_combiner.h"
 #include "quad_gxm.h"
 #include <psp2/gxm.h>
+#include <psp2/kernel/processmgr.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +39,9 @@ static uint8_t *g_vring; static unsigned g_vring_used; static uint16_t *g_iring;
 static SceGxmContext *g_ctx; static SceGxmShaderPatcher *g_patcher;
 static int g_ready = -1;
 static uint64_t g_serial, g_drawn, g_fallbacks;
+/* Diagnostic wall-clock accounting only (read by the channel's [h2/perf] line). */
+static uint64_t g_perf_render_us, g_perf_flush_us, g_perf_flushes, g_perf_open_us, g_perf_tex_us, g_perf_gxmdraw_us;
+static uint64_t perf_now(void) { return sceKernelGetProcessTimeWide(); }
 
 static const char *const VREG_NAMES[16] = {"position", "blendweight", "normal", "color0", "color1", "fog", "psize", "backcolor0",
                                             "backcolor1", "texcoord0", "texcoord1", "texcoord2", "texcoord3", "attr13", "attr14", "attr15"};
@@ -130,11 +134,13 @@ static target *find_target(const h2_kelvin_clear *c, uint32_t color_offset, uint
 static void flush_scene(void)
 {
     if (!g_open) return;
+    uint64_t t0 = perf_now();
     sceGxmEndScene(g_ctx, NULL, NULL);
     sceGxmFinish(g_ctx);
     memcpy(g_open->guest, g_open->mem, W * H * 4);
     sceGxmDepthStencilSurfaceSetForceLoadMode(&g_depth, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_ENABLED);
     g_open = NULL; g_open_draws = 0; g_vring_used = g_iring_used = 0;
+    g_perf_flush_us += perf_now() - t0; ++g_perf_flushes;
 }
 
 void h2_menu_gxm_flush(void) { if (g_ready == 1) flush_scene(); }
@@ -150,6 +156,7 @@ static int open_scene(target *t)
 {
     if (g_open == t) return 1;
     flush_scene();
+    uint64_t t0 = perf_now();
     memcpy(t->mem, t->guest, W * H * 4);                  /* the game's clears/CPU writes since the last scene */
     if (g_depth_clear_pending) {
         sceGxmDepthStencilSurfaceSetBackgroundDepth(&g_depth, g_depth_clear);
@@ -165,6 +172,7 @@ static int open_scene(target *t)
     sceGxmSetFrontStencilFunc(g_ctx, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0xFF, 0);
     sceGxmSetBackStencilFunc(g_ctx, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0xFF, 0);
     g_open = t; g_open_draws = 0; g_vring_used = g_iring_used = 0;
+    g_perf_open_us += perf_now() - t0;
     return 1;
 }
 
@@ -363,7 +371,7 @@ static void resolve_arrays(const h2_command_state *s, const h2_kelvin_clear *c, 
 }
 
 /* ---- the draw ---------------------------------------------------------------- */
-int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
+static int render_body(void *opaque, const h2_menu_request *r)
 {
     (void)opaque;
     const h2_command_state *s = r->state;
@@ -426,7 +434,7 @@ int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
         if (!(cb.tex_used & (1u << u)) || fs->sampler[u] < 0) continue;
         uint32_t toff = s->setup[(0x1B00 + u * 64) / 4];
         if (g_open && toff >= g_open->color_offset && toff < g_open->color_offset + W * H * 4) flush_scene();
-        tex[u] = get_texture(s, c, u);
+        { uint64_t t0 = perf_now(); tex[u] = get_texture(s, c, u); g_perf_tex_us += perf_now() - t0; }
     }
 
     /* vertices: packed F32x4 per attribute the program declares, in vreg order */
@@ -517,7 +525,7 @@ int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
     for (unsigned u = 0; u < 4; ++u)
         if (fs->sampler[u] >= 0 && tex[u]) GCHECK(sceGxmSetFragmentTexture(g_ctx, fs->sampler[u], &tex[u]->tex));
     GCHECK(sceGxmSetVertexStream(g_ctx, 0, vb));
-    GCHECK(sceGxmDraw(g_ctx, prim, SCE_GXM_INDEX_FORMAT_U16, ib, ni));
+    { uint64_t t0 = perf_now(); GCHECK(sceGxmDraw(g_ctx, prim, SCE_GXM_INDEX_FORMAT_U16, ib, ni)); g_perf_gxmdraw_us += perf_now() - t0; }
     g_vring_used += n * vs->stride; g_iring_used += (ni * 2 + 3) & ~3u;
     ++g_open_draws; ++g_drawn;
     if (g_drawn <= 40 || !(g_drawn % 500))
@@ -528,4 +536,19 @@ int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
     if (dump_every < 0) { const char *e = getenv("XV_MENU_GXM_DUMP"); dump_every = e ? atoi(e) : 200; }
     if (dump_every > 0 && !(g_drawn % (uint64_t)dump_every)) { flush_scene(); h2_menu_dump_target(t->guest, W, H, g_drawn, c->color_offset); }
     return 1;
+}
+
+int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
+{
+    uint64_t t0 = perf_now();
+    int result = render_body(opaque, r);
+    g_perf_render_us += perf_now() - t0;
+    return result;
+}
+
+/* Cumulative diagnostic counters for the channel's per-60-flip [h2/perf] line. */
+void h2_menu_gxm_perf(uint64_t out[8])
+{
+    out[0] = g_drawn; out[1] = g_perf_render_us; out[2] = g_perf_flushes; out[3] = g_perf_flush_us;
+    out[4] = g_perf_open_us; out[5] = g_perf_tex_us; out[6] = g_perf_gxmdraw_us; out[7] = g_fallbacks;
 }

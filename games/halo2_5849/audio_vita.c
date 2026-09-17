@@ -42,6 +42,27 @@ static uint64_t reverb_queued_frame;
 static SceUID port = -1, mutex = -1, worker = -1, ready = -1;
 static SceUID progress_mutex = -1;
 static h2_audio_progress progress;
+/* Diagnostic wall-clock accounting only (no behavioural effect): how long the game's
+ * threads wait for progress_mutex and how long the worker holds it per iteration. */
+static uint64_t perf_guest_wait_us, perf_guest_locks, perf_worker_hold_us, perf_worker_hold_max,
+                perf_worker_compute_iters, perf_worker_idle_iters;
+#ifdef H2_AUDIO_PLATFORM_TEST
+#define perf_clock() ((uint64_t)0)   /* the host tests' fake clock advances per call: never perturb it */
+#else
+#define perf_clock() sceKernelGetProcessTimeWide()
+#endif
+static uint32_t perf_site_line[8], perf_site_n[8];   /* which callers lock, by source line */
+static void lock_progress_at(unsigned line)
+{
+    uint64_t t0 = perf_clock();
+    sceKernelLockMutex(progress_mutex, 1, NULL);
+    perf_guest_wait_us += perf_clock() - t0; ++perf_guest_locks;   /* under the mutex */
+    for (unsigned i = 0; i < 8; ++i) {
+        if (perf_site_line[i] == line) { ++perf_site_n[i]; break; }
+        if (!perf_site_line[i]) { perf_site_line[i] = line; perf_site_n[i] = 1; break; }
+    }
+}
+#define lock_progress() lock_progress_at(__LINE__)
 static uint64_t submitted_at;
 static int started, running;
 static uint32_t grains, nonzero_grains, peak, error;
@@ -54,6 +75,9 @@ int h2_audio_sink_open(int rate, int grain)
     if (port >= 0 || mutex >= 0 || rate != XA_OUT_RATE || grain != XA_GRAIN) return -1;
     mutex = sceKernelCreateMutex("h2_audio_mix", 0, 0, NULL);
     if (mutex < 0) return -1;
+#if H2_AUDIO_DSP && !defined(H2_AUDIO_PLATFORM_TEST)
+    { extern void h2_audio_fx_set_clock(uint64_t (*clock)(void)); h2_audio_fx_set_clock(sceKernelGetProcessTimeWide); }
+#endif
     port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, grain, rate, SCE_AUDIO_OUT_MODE_STEREO);
     if (port < 0) return -1;
     int volume[2] = {SCE_AUDIO_VOLUME_0DB, SCE_AUDIO_VOLUME_0DB};
@@ -96,7 +120,7 @@ static int observe_rest(void)
 int h2_audio_backend_play(int voice, uint32_t bytes, uint32_t rate)
 {
     if (h2_audio_backend_health() < 0 || progress_mutex < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     h2_audio_progress next = progress;
     int ok = h2_audio_backend_health() == 0 && h2_audio_progress_play(&next, voice, bytes, rate);
 #if H2_AUDIO_DSP
@@ -115,7 +139,7 @@ int h2_audio_backend_play(int voice, uint32_t bytes, uint32_t rate)
 int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write)
 {
     if (h2_audio_backend_health() < 0 || progress_mutex < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     if (voice < 0 || progress.voice != voice) {
         sceKernelUnlockMutex(progress_mutex, 1); return -1;
     }
@@ -129,7 +153,7 @@ int h2_audio_backend_cursor(int voice, uint32_t *play, uint32_t *write)
 int h2_audio_backend_repeat_play(int voice,uint32_t bytes,uint32_t rate)
 {
     if(h2_audio_backend_health()<0 || progress_mutex<0)return -1;
-    sceKernelLockMutex(progress_mutex,1,NULL);
+    lock_progress();
     int ok=voice>=0 && voice==progress.voice && !progress.stopped && !progress.rewound &&
            bytes==progress.bytes && rate==44100 && progress.step==((44100u<<16)/XA_OUT_RATE);
     xk_audio_lock();if(ok && !xk_audio_voice_playing(voice))ok=0;xk_audio_unlock();
@@ -145,7 +169,7 @@ int h2_audio_backend_repeat_play(int voice,uint32_t bytes,uint32_t rate)
 int h2_audio_backend_stop(int voice)
 {
     if (h2_audio_backend_health() < 0 || voice < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
 #if H2_AUDIO_DSP
     if(fx.engine){
         if(progress.voice!=voice || movie_draining){sceKernelUnlockMutex(progress_mutex,1);return -1;}
@@ -155,7 +179,7 @@ int h2_audio_backend_stop(int voice)
         /* The worker must submit its already-computed movie grain. Let it
          * run while waiting; new computations exclude the stopped voice. */
         for(;;){
-            sceKernelLockMutex(progress_mutex,1,NULL);
+            lock_progress();
             int rc=observe_rest();
             if(rc>=0 && sceKernelGetProcessTimeWide()-began>2000000)rc=-1008;
             if(rc<0)__atomic_store_n(&error,(uint32_t)rc,__ATOMIC_RELEASE);
@@ -184,7 +208,7 @@ int h2_audio_backend_stop(int voice)
 int h2_audio_backend_status_voice(int voice, uint32_t *status)
 {
     if (h2_audio_backend_health() < 0 || voice < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = progress.voice == voice && h2_audio_backend_health() == 0;
     if (ok) {
         xk_audio_lock(); int playing = xk_audio_voice_playing(voice); xk_audio_unlock();
@@ -196,7 +220,7 @@ int h2_audio_backend_status_voice(int voice, uint32_t *status)
 int h2_audio_backend_rewind(int voice)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     h2_audio_progress next = progress;
     int ok = h2_audio_backend_health() == 0 && h2_audio_progress_rewind(&next, voice);
     if (ok) { xk_audio_voice_set_pos(voice, 0); progress = next; }
@@ -205,7 +229,7 @@ int h2_audio_backend_rewind(int voice)
 int h2_audio_backend_forget(int voice)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     h2_audio_progress next = progress;
     int ok = h2_audio_backend_health() == 0 && h2_audio_progress_forget(&next, voice);
     if (ok) {
@@ -227,14 +251,14 @@ static int fx_inputs_ready(void)
 int h2_audio_backend_fx_bind(h2_dsp_engine *engine, unsigned bin)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = h2_audio_backend_health() == 0 && fx_inputs_ready() && h2_audio_fx_bind(&fx, engine, bin);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *engine, unsigned bin, const int8_t taps[31])
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     uint8_t bins[32]; h2_audio_bins_snapshot(bins); int zero = 1;
     for (unsigned i = 0; i <= 10; ++i) if (bins[i]) zero = 0;
     int ok = h2_audio_backend_health() == 0 && zero && fx_inputs_ready() &&
@@ -244,49 +268,49 @@ int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *engine, unsigned bin, const 
 int h2_audio_backend_fx_route(unsigned bin, unsigned routes)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_route(&fx, bin, routes);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_route_mask(unsigned bin, unsigned output_mask)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_route_mask(&fx, bin, output_mask);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_filter(unsigned key)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_filter(&fx, key);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_mute(unsigned key)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_mute(&fx, key);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_attenuate(unsigned key, unsigned attenuation)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_attenuate(&fx, key, attenuation);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_forget(unsigned bin)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_forget(&fx, bin);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
 int h2_audio_backend_fx_play(unsigned bin)
 {
     if (h2_audio_backend_health() < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     unsigned mask = h2_audio_fx_mask(bin), index = mask ? (unsigned)__builtin_ctz(mask) : 0;
     uint64_t before = fx_source_submitted[index];
     int ok = h2_audio_backend_health() == 0 && fx_inputs_ready() && h2_audio_fx_play(&fx, bin);
@@ -294,7 +318,7 @@ int h2_audio_backend_fx_play(unsigned bin)
     if (!ok) return -1;
     uint64_t start = sceKernelGetProcessTimeWide();
     for (;;) {
-        sceKernelLockMutex(progress_mutex, 1, NULL);
+        lock_progress();
         /* An older already-computed grain may omit this newly started source.
          * Only a submission tagged with this source can complete its Play. */
         int accepted = fx_source_submitted[index] > before, healthy = h2_audio_backend_health() == 0;
@@ -310,7 +334,7 @@ int h2_audio_backend_fx_play(unsigned bin)
 int h2_audio_backend_gp_pcm_play(int voice)
 {
     if (voice<0 || voice>=XA_MAX_VOICES || h2_audio_backend_health()<0) return -1;
-    sceKernelLockMutex(progress_mutex,1,NULL);
+    lock_progress();
     unsigned index=gp_pcm_voice[0]<0 ? 0 : 1;
     int ok=h2_audio_backend_health()==0 && fx.playing==0x7fff && fx.bound==0x7fff &&
         progress.voice<0 && gp_pcm_voice[index]<0 && gp_pcm_voice[0]!=voice &&
@@ -329,7 +353,7 @@ int h2_audio_backend_gp_pcm_play(int voice)
     if (!ok) return -1;
     uint64_t start=sceKernelGetProcessTimeWide();
     for (;;) {
-        sceKernelLockMutex(progress_mutex,1,NULL);
+        lock_progress();
         int accepted=gp_pcm_submitted[index]>before, healthy=h2_audio_backend_health()==0;
         sceKernelUnlockMutex(progress_mutex,1);
         if (!healthy) return -1;
@@ -345,7 +369,7 @@ int h2_audio_backend_gp_pcm_play(int voice)
 int h2_audio_backend_stream_submit(int voice,uint32_t mirror,uint64_t *ticket)
 {
     if (voice<0 || voice>=XA_MAX_VOICES || !mirror || !ticket || h2_audio_backend_health()<0) return -1;
-    sceKernelLockMutex(progress_mutex,1,NULL);
+    lock_progress();
     gp_stream_state *s=NULL;
     for(unsigned i=0;i<4;++i) if(gp_streams[i].voice==voice)s=&gp_streams[i];
     if(!s) for(unsigned i=0;i<4;++i) if(gp_streams[i].voice<0){s=&gp_streams[i];break;}
@@ -365,7 +389,7 @@ int h2_audio_backend_stream_submit(int voice,uint32_t mirror,uint64_t *ticket)
 int h2_audio_backend_stream_complete(int voice,uint64_t *ticket)
 {
     if (!ticket || h2_audio_backend_health()<0) return -1;
-    sceKernelLockMutex(progress_mutex,1,NULL);
+    lock_progress();
     gp_stream_state *s=NULL;
     for(unsigned i=0;i<4;++i)if(gp_streams[i].voice==voice)s=&gp_streams[i];
     int result=s?0:-1;
@@ -426,7 +450,7 @@ int h2_audio_backend_effect_read(h2_dsp_engine *engine, unsigned index,
                                  unsigned offset, void *out, unsigned bytes)
 {
     if (h2_audio_backend_health() < 0) return 0;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = h2_audio_backend_health() == 0 && (!fx.engine || fx.engine == engine) &&
              h2_dsp_read_effect(engine, index, offset, out, bytes);
     sceKernelUnlockMutex(progress_mutex, 1); return ok;
@@ -435,7 +459,7 @@ int h2_audio_backend_effect_write_pair(h2_dsp_engine *engine, unsigned index,
                                        unsigned offset, uint32_t first, uint32_t second)
 {
     if (h2_audio_backend_health() < 0 || progress_mutex < 0) return 0;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = h2_audio_backend_health() == 0 && (!fx.engine || fx.engine == engine) &&
              h2_dsp_write_effect_pair(engine, index, offset, first, second);
     sceKernelUnlockMutex(progress_mutex, 1); return ok;
@@ -444,7 +468,7 @@ static int backend_queue_reverb(h2_dsp_engine *engine, unsigned index, uint32_t 
                                    const uint32_t parameters[66])
 {
     if ((index != 8 && index != 9) || h2_audio_backend_health() < 0 || progress_mutex < 0) return 0;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     int ok = h2_audio_backend_health() == 0 && fx.engine == engine && fx.playing && !reverb_pending &&
              (index==8 ? h2_dsp_queue_reverb8(engine,flags,parameters) : h2_dsp_queue_reverb9(engine,flags,parameters));
     if(ok){reverb_pending=1;reverb_index=index;reverb_queued_frame=fx.frames;}
@@ -453,14 +477,14 @@ static int backend_queue_reverb(h2_dsp_engine *engine, unsigned index, uint32_t 
 int h2_audio_backend_stream_voice_active(int voice, int active)
 {
     if (voice < 0 || voice >= XA_MAX_VOICES || progress_mutex < 0) return -1;
-    sceKernelLockMutex(progress_mutex, 1, NULL);
+    lock_progress();
     if (!!game_voice[voice] != !!active) { game_voice[voice] = !!active; if (active) ++game_voices; else --game_voices; }
     sceKernelUnlockMutex(progress_mutex, 1); return 0;
 }
 int h2_audio_backend_fixed_commit_ready(h2_dsp_engine *engine)
 {
     if (h2_audio_backend_health()<0 || progress_mutex<0) return 0;
-    sceKernelLockMutex(progress_mutex,1,NULL);
+    lock_progress();
     int ok=h2_audio_backend_health()==0 && engine && fx.engine==engine && h2_audio_fx_fixed_commit_ready(&fx);
     if(ok){h2_dsp_status state;h2_dsp_snapshot(engine,&state);ok=!state.fault;}
     sceKernelUnlockMutex(progress_mutex,1);return ok;
@@ -481,6 +505,7 @@ static int mix_worker(SceSize bytes, void *arg)
 #endif
     while (__atomic_load_n(&running, __ATOMIC_ACQUIRE)) {
         sceKernelLockMutex(progress_mutex, 1, NULL);
+        uint64_t hold_t0 = perf_clock();
         if (__atomic_load_n(&error, __ATOMIC_ACQUIRE)) {
             sceKernelUnlockMutex(progress_mutex, 1); break;
         }
@@ -539,6 +564,7 @@ static int mix_worker(SceSize bytes, void *arg)
             sceKernelUnlockMutex(progress_mutex, 1); break;
         }
         if (progress.pending) {
+            perf_worker_hold_us += perf_clock() - hold_t0; ++perf_worker_idle_iters;
             sceKernelUnlockMutex(progress_mutex, 1);
             sceKernelDelayThread(1000); continue;
         }
@@ -589,6 +615,9 @@ static int mix_worker(SceSize bytes, void *arg)
 #if H2_AUDIO_DSP
         unsigned has_fx = fx.playing; /* snapshot under the ownership lock */
 #endif
+        {   uint64_t held = perf_clock() - hold_t0;
+            perf_worker_hold_us += held; if (held > perf_worker_hold_max) perf_worker_hold_max = held;
+            ++perf_worker_compute_iters; }
         sceKernelUnlockMutex(progress_mutex, 1);
         if (first) { first = 0; sceKernelSignalSema(ready, 1); }
         if (rc < 0) break;
@@ -728,4 +757,24 @@ void h2_audio_backend_snapshot(h2_audio_backend_status *out)
     memcpy(out->gp_pcm_consumed,gp_pcm_consumed,sizeof gp_pcm_consumed);
     if (progress_mutex >= 0) sceKernelUnlockMutex(progress_mutex, 1);
 #endif
+}
+
+/* Cumulative diagnostic counters for the channel's per-60-flip [h2/perf] line. Read
+ * without the mutex: approximate by design, never used for any decision. */
+void h2_audio_backend_perf(uint64_t out[24])
+{
+    out[0] = grains; out[1] = nonzero_grains;
+#if H2_AUDIO_DSP
+    out[2] = fx_compute_us; out[3] = fx_max_compute_us; out[4] = fx_deadline_misses;
+    { extern void h2_audio_fx_perf(uint64_t out[4]); h2_audio_fx_perf(out + 12); }
+#else
+    out[2] = out[3] = out[4] = 0; out[12] = out[13] = out[14] = out[15] = 0;
+#endif
+    out[5] = perf_worker_hold_us; out[6] = perf_worker_hold_max; out[7] = perf_worker_compute_iters;
+    out[8] = perf_worker_idle_iters; out[9] = perf_guest_wait_us; out[10] = perf_guest_locks; out[11] = error;
+    /* The four busiest lock sites (source line, count), highest first. */
+    unsigned order[8]; for (unsigned i = 0; i < 8; ++i) order[i] = i;
+    for (unsigned i = 0; i < 8; ++i) for (unsigned j = i + 1; j < 8; ++j)
+        if (perf_site_n[order[j]] > perf_site_n[order[i]]) { unsigned t = order[i]; order[i] = order[j]; order[j] = t; }
+    for (unsigned i = 0; i < 4; ++i) { out[16 + i * 2] = perf_site_line[order[i]]; out[17 + i * 2] = perf_site_n[order[i]]; }
 }

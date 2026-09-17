@@ -16,6 +16,45 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* Diagnostic wall-clock accounting for the per-60-flip [h2/perf] line. The time
+ * source is weak: absent in the host tests, where nothing is ever reported. */
+extern void xv_logf(const char *, ...);
+extern uint64_t h2_platform_time_us(void) __attribute__((weak));
+static uint64_t perf_now(void) { return h2_platform_time_us ? h2_platform_time_us() : 0; }
+static uint64_t perf_submit_us, perf_submits, perf_flip_us, perf_flips_completed;
+static void perf_report(uint32_t serial)
+{
+    extern void h2_menu_gxm_perf(uint64_t out[8]) __attribute__((weak));
+    extern void h2_audio_backend_perf(uint64_t out[24]) __attribute__((weak));
+    extern void xk_wait_stats_request(void) __attribute__((weak));
+    static uint64_t last_wall, last[4], last_gxm[8], last_audio[24];
+    uint64_t now = perf_now(), cur[4] = {perf_submit_us, perf_submits, perf_flip_us, perf_flips_completed}, gxm[8] = {0}, audio[24] = {0};
+    if (h2_menu_gxm_perf) h2_menu_gxm_perf(gxm);
+    if (h2_audio_backend_perf) h2_audio_backend_perf(audio);
+    if (now && last_wall) {
+#define PD(cur, last, i) ((unsigned long long)((cur)[i] - (last)[i]))
+#define PDMS(cur, last, i) ((unsigned long long)(((cur)[i] - (last)[i]) / 1000))
+        xv_logf("[h2/perf] serial=%u flips=60 wall_ms=%llu submit_ms=%llu submits=%llu flipwait_ms=%llu completed=%llu"
+                " | gxm draws=%llu render_ms=%llu flushes=%llu flush_ms=%llu open_ms=%llu tex_ms=%llu gxmdraw_ms=%llu fallbacks=%llu"
+                " | audio grains=%llu nonzero=%llu compute_ms=%llu max_us=%llu misses=%llu hold_ms=%llu hold_max_us=%llu"
+                " compute_iters=%llu idle_iters=%llu guest_locks=%llu guest_wait_ms=%llu error=%08llX"
+                " | fx frames=%llu sources_ms=%llu dsp_ms=%llu | lock sites L%llu=%llu L%llu=%llu L%llu=%llu L%llu=%llu\n",
+                serial, (unsigned long long)((now - last_wall) / 1000), PDMS(cur, last, 0), PD(cur, last, 1), PDMS(cur, last, 2), PD(cur, last, 3),
+                PD(gxm, last_gxm, 0), PDMS(gxm, last_gxm, 1), PD(gxm, last_gxm, 2), PDMS(gxm, last_gxm, 3), PDMS(gxm, last_gxm, 4),
+                PDMS(gxm, last_gxm, 5), PDMS(gxm, last_gxm, 6), PD(gxm, last_gxm, 7),
+                PD(audio, last_audio, 0), PD(audio, last_audio, 1), PDMS(audio, last_audio, 2), (unsigned long long)audio[3], PD(audio, last_audio, 4),
+                PDMS(audio, last_audio, 5), (unsigned long long)audio[6], PD(audio, last_audio, 7), PD(audio, last_audio, 8),
+                PD(audio, last_audio, 9), PDMS(audio, last_audio, 10), (unsigned long long)audio[11],
+                PD(audio, last_audio, 12), PDMS(audio, last_audio, 13), PDMS(audio, last_audio, 14),
+                (unsigned long long)audio[16], (unsigned long long)audio[17], (unsigned long long)audio[18], (unsigned long long)audio[19],
+                (unsigned long long)audio[20], (unsigned long long)audio[21], (unsigned long long)audio[22], (unsigned long long)audio[23]);
+        if (xk_wait_stats_request) xk_wait_stats_request();   /* the kernel dumps [wait] at the next guest yield */
+#undef PD
+#undef PDMS
+    }
+    last_wall = now; memcpy(last, cur, sizeof last); memcpy(last_gxm, gxm, sizeof last_gxm); memcpy(last_audio, audio, sizeof last_audio);
+}
+
 #define DEVICE 0x404FE0u
 #define MINIPORT (DEVICE + 0x1C28u)
 #define PHYSICAL_BYTES 0x4000000u
@@ -72,6 +111,7 @@ static h2_sprite_draw sprite_quad;
 #if H2_MENU_RENDER
 #include "menu_draw.h"
 #include "menu_render.h"
+
 static h2_menu_draw menu_quad;
 #endif
 static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
@@ -902,6 +942,7 @@ static int queue_active_flip(uint32_t value, uint32_t source)
     if (serial < 4 || !((serial + 1) % 60))
         xv_logf("[h2/flip] original active-display interval-one queued address=%08X due=%u serial=%u; pending\n",
                 address, active_flip_due, serial + 1);
+    if (!((serial + 1) % 60)) perf_report(serial + 1);
     h2_platform_fpscr_write(saved_fpscr);
     return 1;
 }
@@ -1107,12 +1148,21 @@ int h2_host_channel_bus(xctx *c, uint32_t ip, uint32_t address, unsigned width,
         do {
             pending = 0;
             h2_push_fault fault;
+            uint64_t perf_t0 = perf_now();
             enum h2_push_result result = h2_host_channel_submit(&channel, put, 1000000, &fault);
+            perf_submit_us += perf_now() - perf_t0; ++perf_submits;
             if (result == H2_PUSH_METHOD_REJECTED && fault.method == 0x130 && !fault.word &&
-                fault.subchannel < 8 && channel.commands.bound[fault.subchannel] == 1 &&
-                (active_flip_queued ? complete_active_flip(c, fault.address) :
-                                      complete_initialization_vblank(c, fault.address)))
-                result = h2_host_channel_submit(&channel, put, 1000000, &fault);
+                fault.subchannel < 8 && channel.commands.bound[fault.subchannel] == 1) {
+                perf_t0 = perf_now();
+                int completed = active_flip_queued ? complete_active_flip(c, fault.address) :
+                                                     complete_initialization_vblank(c, fault.address);
+                perf_flip_us += perf_now() - perf_t0;
+                if (completed) {
+                    ++perf_flips_completed; perf_t0 = perf_now();
+                    result = h2_host_channel_submit(&channel, put, 1000000, &fault);
+                    perf_submit_us += perf_now() - perf_t0; ++perf_submits;
+                }
+            }
             static uint32_t put_logs;
             if (result != 0 || h2_log_budget(&put_logs, 2000, 5000))
             xv_logf("[h2/channel] PUT=%08X GET=%08X result=%d source=%08X word=%08X sub=%u method=%04X clears=%llu pixels=%llu\n",
