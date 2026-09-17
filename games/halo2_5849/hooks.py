@@ -26,12 +26,20 @@ WIDGET_FIELD_JUMP_GUARDS = (
     (0x216A50, 56, "e59cb4e3aba68854c97772c9fbd695217fb19d4e4caa305730d804b5d7c7b835"),
     (0x216A88, 36, "3a12572e353c32577d20ce9d33cf70adfc65dd9b8f3227b14b40c0209baf7005"),
 )
-INLINE_QUEUE_STATUS_GUARD = (
-    0x12D0CF, 26, "76248680a6285ea26e18db9d8eddf97bdf349746e8281507c8876dfd43090850")
+INLINE_QUEUE_STATUS_GUARDS = (
+    (0x12D0CF, 26, "76248680a6285ea26e18db9d8eddf97bdf349746e8281507c8876dfd43090850"),
+    # Second copy of the same PUT/GET/busy probe, reached when a multiplayer map finishes
+    # loading (run flags276: strict stop at 0xFD003240 from 0x12E150): mov edx,[407488];
+    # call 3FAC30; mov eax,[edx+934]; mov ecx,[eax+3240]; cmp ecx,[eax+3244]; jne; mov eax,[eax+400700]
+    (0x12E150, 37, "6ce3ba4ad0278cbefc0565adace8ed8d82f249edfdaa445f6897e5c15aecfdf4"),
+)
 INLINE_QUEUE_STATUS = {
     0x12D0D5: (Mnemonic.MOV, Register.ECX, 0x3240),
     0x12D0DB: (Mnemonic.CMP, Register.ECX, 0x3244),
     0x12D0E3: (Mnemonic.MOV, Register.EAX, 0x400700),
+    0x12E161: (Mnemonic.MOV, Register.ECX, 0x3240),
+    0x12E167: (Mnemonic.CMP, Register.ECX, 0x3244),
+    0x12E16F: (Mnemonic.MOV, Register.EAX, 0x400700),
 }
 
 
@@ -232,9 +240,9 @@ class Halo2HostChannelHooks(Halo2GraphicsHooks):
         reviewed_sparse_jump_roots(image)
         reviewed_widget_kind_roots(image)
         reviewed_widget_field_roots(image)
-        address, length, digest = INLINE_QUEUE_STATUS_GUARD
-        if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
-            raise ValueError("Halo 2 inline queue-status fingerprint mismatch")
+        for address, length, digest in INLINE_QUEUE_STATUS_GUARDS:
+            if hashlib.sha256(image.bytes_at(address, length)).hexdigest() != digest:
+                raise ValueError(f"Halo 2 inline queue-status fingerprint mismatch at {address:#x}")
 
     def lower_instruction(self, emitter, instruction, output):
         return (lower_sparse_jump(emitter, instruction, output) or
