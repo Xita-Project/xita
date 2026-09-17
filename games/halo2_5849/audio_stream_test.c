@@ -105,6 +105,20 @@ int main(void)
         c=context(handle,0,0,0);call(&c,0x37B818,0,2);assert(s->headroom==0&&v->volume==1.0f);
         direct_codec_fixture(s,kind,1000);
         c=context(handle,1,0,0);reject_stream(&c,0x37B818);
+        /* IDirectSoundStream::Pause (0x37B822 -> voice Pause 0x380074) on the
+         * empty voice: only the pause/synch/deferred bits change, exactly as
+         * the original rewrites them; nothing is queued or started. */
+        for(unsigned mode=0;mode<4;++mode){c=context(handle,mode,0,0);X_M32(c.r[4])=0x21F8E4;reject_stream(&c,0x37B822);}
+        c=context(handle,4,0,0);X_M32(c.r[4])=0x21F8E3;reject_stream(&c,0x37B822);
+        s->submitted=1;c=context(handle,0,0,0);X_M32(c.r[4])=0x21F8E3;reject_stream(&c,0x37B822);s->submitted=0;
+        c=context(handle,1,0,0);X_M32(c.r[4])=0x21F63D;call(&c,0x37B822,0,2);assert(s->pause==4);
+        c=context(handle,2,0,0);X_M32(c.r[4])=0x21F461;call(&c,0x37B822,0,2);assert(s->pause==0x40);
+        c=context(handle,3,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);assert(s->pause==0x60);
+        c=context(handle,0,0,0);X_M32(c.r[4])=0x2AE4D8;call(&c,0x37B822,0,2);assert(!s->pause);
+        c=context(handle,3,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);assert(s->pause==0x20);
+        c=context(handle,1,0,0);X_M32(c.r[4])=0x21F63D;call(&c,0x37B822,0,2);assert(s->pause==0x24);
+        c=context(handle,0,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);
+        assert(!s->pause&&!v->playing&&!v->nq&&!s->headroom&&v->volume==1.0f);
         c=context(handle+4,0,0,0);reject_stream(&c,0x37AB40);
         c=context(handle,0,0,0);call(&c,0x37AB40,2,1);assert(s->references==2&&device.references==2);
         c=context(handle,0,0,0);call(&c,0x37AB87,1,1);assert(s->references==1);
@@ -142,6 +156,7 @@ int main(void)
     for(unsigned f=12;f<48;++f)assert(decoded[f*2]==500 && decoded[f*2+1]==500);
     xk_audio_voice_stop(gs->voice);xk_audio_stream_flush(gs->voice);
     c=context(global_handle,0,0,0);call(&c,0x37B818,0,2);assert(gs->headroom==0 && gv->volume==1.0f);
+    c=context(global_handle,0,0,0);X_M32(c.r[4])=0x21F8E3;reject_stream(&c,0x37B822); /* global voices carry data */
     c=context(global_handle,0,0,0);call(&c,0x37AB40,2,1);assert(device.references==2);
     c=context(global_handle,0,0,0);call(&c,0x37AB87,1,1);
     c=context(global_handle,0,0,0);call(&c,0x37AB87,0,1);assert(device.references==1 && !device.children);
@@ -160,6 +175,7 @@ int main(void)
     assert(ms->route_count==5 && ms->route_bin==UINT32_MAX && !mv->volume && !mv->playing && !mv->nq);
     for(unsigned i=0;i<5;++i)assert(ms->route_bins[i]==(i<4?27+i:2) && ms->route_gains[i]==-10000);
     c=context(muted,0,0,0);call(&c,0x37B818,0,2);assert(!ms->headroom && !mv->volume);
+    c=context(muted,0,0,0);X_M32(c.r[4])=0x21F8E3;reject_stream(&c,0x37B822);
     /* Direct fixture feed verifies genuine gain zero, not silent output data. */
     x_guest_write(0xc000,samples,sizeof samples);assert(!xk_audio_stream_push(ms->voice,0xc000,sizeof samples));
     xk_audio_mix(decoded,48);for(unsigned i=0;i<96;++i)assert(!decoded[i]);

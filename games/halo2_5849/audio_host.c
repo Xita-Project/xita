@@ -39,6 +39,7 @@ typedef struct {
     int32_t route_gains[5];
     struct { uint32_t mirror, source, context, ready; uint64_t ticket; } packets[2];
     uint32_t submitted, completed;
+    uint32_t pause; /* original voice state bits 4 (pause), 0x40 (synch), 0x20 (deferred) */
     int voice;
 } h2_audio_stream;
 static h2_audio_stream streams[XA_MAX_VOICES];
@@ -707,6 +708,37 @@ static void stream_headroom(xctx *c)
     xk_audio_lock(); xk_audio_voice_set_volume_db100(s->voice, s->route_count==5 ? -10000 : 0); xk_audio_unlock();
     s->headroom = 0;
     xv_logf("[h2/audio-stream] headroom object=%08X caller=%08X headroom=0 retained_route_mute=%u\n", s->base, X_M32(c->r[4]),s->route_count==5);
+    result(c, 0, 2);
+}
+static void stream_pause(xctx *c)
+{
+    const uint32_t ip = 0x37B822;
+    stack(c, ip, 2); h2_audio_stream *s = stream_live(c, ip, X_ARG(0));
+    uint32_t mode = X_ARG(1), caller = X_M32(c->r[4]), before = s->pause;
+    /* IDirectSoundStream::Pause: 0x37B822 jumps to 0x37AD9C, which calls the
+     * voice's Pause (0x380074) on the state word at voice+0x12:
+     *   0 RESUME         clear bit 0x20 (0x37FCEE restarts the voice when it
+     *                    was set), then SetState(bits & ~0x44)
+     *   1 PAUSE          SetState(bits & ~0x40 | 4)
+     *   2 SYNCHPLAYBACK  SetState(bits & ~4 | 0x40)
+     *   3 deferred       SetState(bits & ~0x44) only when the voice runs
+     *                    (bits & 3 == 3), otherwise just set bit 0x20
+     * The supported game streams own empty real voices (no Process succeeds),
+     * so the voice never runs: only those bits change and the real mixer voice
+     * stays silent and unqueued. Game callers: 0x21F461 (2), 0x21F63D (1),
+     * 0x21F8E3 (0) and 0x2AE4D8 (0). Running that original code on the host's
+     * opaque stream record divided by its empty format block (0x37F42E). */
+    if (mode > 3 || s->submitted || s->flags != 0x20000000u || s->route_count ||
+        (caller != 0x21F461 && caller != 0x21F63D && caller != 0x21F8E3 && caller != 0x2AE4D8))
+        fail(c, ip, "unsupported stream pause mode/state/caller", mode);
+    switch (mode) {
+    case 0: s->pause &= ~0x64u; break;
+    case 1: s->pause = (s->pause & ~0x40u) | 4u; break;
+    case 2: s->pause = (s->pause & ~4u) | 0x40u; break;
+    default: s->pause |= 0x20u; break;
+    }
+    xv_logf("[h2/audio-stream] pause caller=%08X object=%08X mode=%u bits=%02X->%02X; empty real voice retained silent\n",
+            caller, s->base, mode, before, s->pause);
     result(c, 0, 2);
 }
 static void buffer_data(xctx *c)
@@ -1553,6 +1585,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37D4E2: case 0x37D835: stream_create(c, ip); break;
     case 0x37AB40: case 0x37AB87: stream_reference(c, ip); break;
     case 0x37B818: stream_headroom(c); break;
+    case 0x37B822: stream_pause(c); break;
     case 0x37D598: case 0x37D54E: listener_vector(c, ip); break;
     case 0x37D141: deferred_commit(c); break;
     case 0x37D797: create(c); break;
