@@ -127,7 +127,9 @@ without changing graphics or worker settings. Controller tests cover rejection
 when absent, owner admission, cancellation, lost first-person control and exact
 initial-mode restoration. Actual HTTP tests cover authenticated selection and
 benchmark exclusion. The integrated helper also passes 544 strict Cortex-A9 comparisons, including
-FPSCR state. The physical comparison remains required; these checks are not an
-FPS gain. A second agent independently replaces
+FPSCR state. Two physical collection comparisons now complete: 7.347/7.999/7.667 and
+8.331/8.389/8.366 FPS (off/on/off). The steadier second trial does not establish a
+practical gain, so collection remains off. Its current view differs from the
+earlier diagnostic capture; these absolute values are not a cross-build comparison. A second agent independently replaces
 the vertex pass inside `86F50`; it retains later edge/surface tests and the actor
 transaction, and will have a separate comparison before combining changes.

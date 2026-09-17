@@ -5,7 +5,8 @@ and selector 43, default off. The review fixes pass host ASan/UBSan comparisons.
 [ARM qualification](claude-object-collect-arm-qualification-20260916.md) found a
 condition-flag difference; the integrated correction passes 544 strict ARM
 comparisons. The remaining sections record the audit and its original handoff.
-Physical comparison remains pending. No FPS change is claimed.
+Two physical comparisons are complete (see §7). The steadier trial shows no
+practical FPS improvement, so the helper remains off by default.
 
 ## Measured context
 
@@ -387,3 +388,35 @@ Reference and candidate always see identical bytes within one build.
 The reviewer's own witness (`test-alias.py`) was not re-run. It calls the old
 `reject_object` signature and asserts that the mismatches are still present, so
 it is not a regression runner for the fixed helper.
+
+## 7. Physical comparison after integration
+
+Runtime `006ef92fbd37dd93a67ce897bdfff6414901f2c2a655006fcbb831d05e04db6b`
+is installed and boot-confirmed through the updater. Only the runtime and its
+boot marker changed; the launcher, assets and graphics configuration are retained.
+Selector 43 completed two same-session comparisons in a loaded campaign room at
+544p, with existing workers enabled. Both restored the original disabled mode;
+neither comparison logged STOP/FATAL or a boundary failure.
+
+| Trial | OFF before | Native ON | OFF after |
+| --- | ---: | ---: | ---: |
+| 1 | 7.347 FPS | 7.999 FPS | 7.667 FPS |
+| 2 | 8.331 FPS | 8.389 FPS | 8.366 FPS |
+
+Trial 1 has a drifting baseline. The steadier second trial improves only 0.49%
+relative to the mean of its two OFF arms, which does not establish a practical
+performance benefit. No gain is promoted and this helper stays disabled.
+
+The periodic counters confirm real admissions: 34,883/39,551 objects skipped
+(88.2%) in trial 1 and 36,471/38,641 (94.4%) in trial 2. Those totals include
+report windows crossing settling and measurement; they are not exact timed-arm
+counts. The camera was held within each trial, while live NPC simulation continued.
+The restored checkpoint position/view differs from the earlier approximately
+11.5 FPS diagnostic capture, so the absolute results are not a controlled
+cross-build regression comparison.
+
+Next compare the separate native vertex pass inside `86F50` with this object
+walk disabled. Claude's next independent task examines `B0CB0` segment/sphere
+math in the later edge pass, without changing vertex work or actor ordering.
+Evidence: `object-collect-candidate/physical-campaign-native/{result,analysis}.json`.
+Stable 20 FPS and the reported gameplay crash remain unqualified.
