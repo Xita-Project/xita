@@ -51,7 +51,7 @@ typedef struct {
  unsigned kind,pass,visibility,index_count,depth_write,clear_flags,value,fs_kind,vs;
  int ps_entry;xv_stencil stencil;
  /* Oracle-only actual fragment behavior, independent of the admission check. */
- unsigned export_depth;
+ unsigned export_depth,stencil_outcome;
 } cmd_t;
 typedef struct {
  cmd_t cmds[XV_MAX_CMDS];unsigned ncmds;
@@ -74,6 +74,24 @@ static event_t events[256];static unsigned nevents,executed,opened,begins,ends,f
 static unsigned active,mem_depth[9],mem_stencil[9],colors[9],tile_depth,tile_stencil,queries[512],notice;
 static unsigned no_store;
 static void event(unsigned kind,unsigned target){assert(nevents<256);events[nevents++]=(event_t){.kind=kind,.target=target};}
+/* Independent 8-bit stencil operation/mask model. The outcome is supplied by
+ * the simulated tests, independently of the production admission predicate. */
+static unsigned stencil_result(unsigned old,unsigned ref,unsigned op,unsigned mask)
+{
+ unsigned changed=old;
+ switch(op) {
+ case 0: break;
+ case 1: changed=0;break;
+ case 2: changed=ref;break;
+ case 3: changed=old==255?255:old+1;break;
+ case 4: changed=old?old-1:0;break;
+ case 5: changed=old^255;break;
+ case 6: changed=(old+1)&255;break;
+ case 7: changed=(old-1)&255;break;
+ default: abort();
+ }
+ return (old & (255^mask)) | (changed & mask);
+}
 static void gpu(void)
 {
  for(;executed<nevents;executed++) {
@@ -84,7 +102,11 @@ static void gpu(void)
    if(e->fence.address)*e->fence.address=e->fence.value;
   } else if(e->kind==3) {
    if(c->kind){if(c->clear_flags&2)tile_depth=c->value;if(c->clear_flags&4)tile_stencil=c->value;}
-   else {if(c->depth_write || c->export_depth)tile_depth=c->value;if(c->stencil.enabled)tile_stencil=c->value;
+   else {if(c->depth_write || c->export_depth)tile_depth=c->value;
+     if(c->stencil.enabled) {
+       unsigned op=c->stencil_outcome==0?c->stencil.fail:c->stencil_outcome==1?c->stencil.depth_fail:c->stencil.pass;
+       tile_stencil=stencil_result(tile_stencil,c->stencil.ref,op,c->stencil.write_mask);
+     }
      if(c->visibility)queries[c->visibility-1]=tile_depth*257+tile_stencil;}
    colors[active]=colors[active]*33+c->value;
   } else if(e->kind==4) {
@@ -130,7 +152,7 @@ static receipt run(unsigned mode,unsigned variant,unsigned frame,unsigned scaled
  /* Queries in later packets can read the depth left by earlier scenes. */
  l->cmds[2].visibility=2;l->cmds[5].visibility=3;l->nvisibility=3;l->visibility[1].serial=18;l->visibility[2].serial=19;
  if(variant==1)l->cmds[3].depth_write=1;
- if(variant==2)l->cmds[3].stencil.enabled=1;
+ if(variant==2)l->cmds[3].stencil=(xv_stencil){1,7,2,2,2,17,255,255};
  if(variant==3)l->cmds[3].kind=1,l->cmds[3].clear_flags=2;
  if(variant==4)l->cmds[3].kind=1,l->cmds[3].clear_flags=4;
  if(variant==5)l->cmds[3].kind=1,l->cmds[3].clear_flags=1;
@@ -174,7 +196,28 @@ static receipt run(unsigned mode,unsigned variant,unsigned frame,unsigned scaled
  if(variant==44)g.ready=0;
  if(variant==45)l->ncmds=5; /* final span contains only the proved tail */
  if(variant==46)g.clear_fs.fprog=NULL;
- if(variant==47)l->cmds[5].stencil.enabled=1;
+ if(variant==47)l->cmds[5].stencil=(xv_stencil){1,7,2,2,2,17,255,255};
+ if(variant>=49) {
+   /* Enabled stencil on both intermediate draws and the final continuation.
+    * Query reads after returning to the backbuffer expose any lost store. */
+   xv_stencil s={1,2,2,5,7,29,0x5a,0};
+   if(variant==50 || variant==51)s=(xv_stencil){1,5,0,0,0,29,0xa5,variant==50?255:0x55};
+   for(unsigned j=2;j<=5;j++)if(!l->cmds[j].pass) {
+     l->cmds[j].stencil=s;l->cmds[j].stencil_outcome=(j+frame)%3;
+   }
+   if(variant==52)l->cmds[3].stencil=(xv_stencil){1,7,0,0,0,13,255,255};
+   if(variant>=53 && variant<=55) {
+     l->cmds[3].stencil=(xv_stencil){1,7,0,0,0,13,255,0x55};
+     l->cmds[3].stencil_outcome=variant-53;
+     if(variant==53)l->cmds[3].stencil.fail=2;
+     if(variant==54)l->cmds[3].stencil.depth_fail=2;
+     if(variant==55)l->cmds[3].stencil.pass=2;
+   }
+   if(variant==56)l->cmds[5].stencil=(xv_stencil){1,7,5,6,7,13,255,255};
+   if(variant==57)l->cmds[3].kind=1,l->cmds[3].clear_flags=4;
+   if(variant==58)l->cmds[3].depth_write=1;
+   if(variant==59)l->cmds[3].export_depth=1,l->cmds[3].ps_entry=1;
+ }
  cmdlist_t before=*l;
  /* mode2 deliberately exercises the production static startup initializer. */
  if(mode<2)xv_depth_store_override(mode);
@@ -212,6 +255,39 @@ static receipt run(unsigned mode,unsigned variant,unsigned frame,unsigned scaled
    const unsigned char *p=(const void *)&e;for(unsigned j=0;j<sizeof e;j++)r.trace=(r.trace^p[j])*1099511628211ull;}
  unsetenv("XV_SHADER_OVERRIDE");unsetenv("XV_FS_FORCE");return r;
 }
+static void test_stencil_identity(void)
+{
+ unsigned checked=0;
+ for(unsigned old=0;old<256;old++) {
+   for(unsigned mask=0;mask<256;mask++) {
+     xv_stencil s={1,2,0,0,0,13,0xa5,mask};
+     assert(ds_stencil_readonly(&s));
+     assert(stencil_result(old,s.ref,0,mask)==old);checked++;
+   }
+   for(unsigned ref=0;ref<256;ref++)for(unsigned op=0;op<8;op++) {
+     xv_stencil s={1,5,op,op,op,ref,255,0};
+     assert(ds_stencil_readonly(&s));
+     assert(stencil_result(old,ref,op,0)==old);checked++;
+   }
+ }
+ for(unsigned func=0;func<8;func++)for(unsigned a=0;a<8;a++)
+ for(unsigned b=0;b<8;b++)for(unsigned c=0;c<8;c++) {
+   xv_stencil s={1,func,a,b,c,13,255,255};
+   assert(ds_stencil_readonly(&s)==(!a&&!b&&!c));
+   s.write_mask=0x55;assert(ds_stencil_readonly(&s)==(!a&&!b&&!c));
+   s.write_mask=0;assert(ds_stencil_readonly(&s));checked+=3;
+ }
+ for(unsigned bad=8;bad<256;bad++)for(unsigned field=0;field<4;field++) {
+   xv_stencil s={1,7,0,0,0,13,255,0};
+   if(field==0)s.func=bad;
+   if(field==1)s.fail=bad;
+   if(field==2)s.depth_fail=bad;
+   if(field==3)s.pass=bad;
+   assert(!ds_stencil_readonly(&s));s.write_mask=255;assert(!ds_stencil_readonly(&s));
+   s.enabled=0;assert(ds_stencil_readonly(&s));checked+=3;
+ }
+ printf("PASS %u stencil identity/admission checks: all old values, refs, masks, ops/outcomes, funcs, invalid indices\n",checked);
+}
 int main(void)
 {
 #ifdef TEST_DEPTH_STORE_STARTUP
@@ -230,16 +306,18 @@ int main(void)
  return 0;
 #endif
  assert(!xv_depth_store_enabled());xv_depth_store_override(1);xv_depth_store_override(-1);assert(!xv_depth_store_enabled());
+ test_stencil_identity();
  assert(!xv_fshader_embedded_no_depth(NULL)&&!xv_fshader_embedded_no_depth("missing"));
  unsigned frames[]={0,2,3,UINT32_MAX,0};unsigned checked=0;
- for(unsigned k=0;k<sizeof frames/sizeof frames[0];k++)for(unsigned scaled=0;scaled<2;scaled++)for(unsigned variant=0;variant<49;variant++) {
+ for(unsigned k=0;k<sizeof frames/sizeof frames[0];k++)for(unsigned scaled=0;scaled<2;scaled++)for(unsigned variant=0;variant<60;variant++) {
    receipt a=run(0,variant,frames[k],scaled),b=run(1,variant,frames[k],scaled);
    assert(!a.accepted);unsigned accepted=b.accepted;b.accepted=0;
    if(memcmp(&a,&b,sizeof a)){fprintf(stderr,"mismatch variant %u frame %u scaled %u\n",variant,frames[k],scaled);abort();}
    if(variant==0||variant==20||variant==21||variant==23)assert(accepted==1);
    if(variant==1||variant==2||variant==3||variant==4||variant==5||(variant>=6&&variant<=16)||variant==19||variant==22||(variant>=24&&variant<30))assert(!accepted);
    if(variant>=30 && variant<35)assert(accepted==((variant==31 || variant==33)?2:3));
-   if(variant>=35)assert(accepted==((variant==35 || variant==45 || variant==48)?2:1));
+   if(variant>=35 && variant<49)assert(accepted==((variant==35 || variant==45 || variant==48)?2:1));
+   if(variant>=49)assert(accepted==(variant<=52?2:1));
    checked++;
  }
  /* Bounds failure is declined before any command access by the proof. The

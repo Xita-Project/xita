@@ -28,6 +28,16 @@ int xv_depth_store_enabled(void)
 void xv_depth_store_override(int enabled)
 { __atomic_store_n(&g_depth_store_mode,enabled>0,__ATOMIC_RELEASE); }
 
+static int ds_stencil_readonly(const xv_stencil *s)
+{
+    /* The replay binds this captured state to both faces. Disabled stencil
+     * binds KEEP/zero write mask; enabled tests may still be read-only. Check
+     * every outcome, not just depth-pass, and decline invalid table indices. */
+    if(!s->enabled)return 1;
+    if(s->func>=8 || s->fail>=8 || s->depth_fail>=8 || s->pass>=8)return 0;
+    return !s->write_mask || (!s->fail && !s->depth_fail && !s->pass);
+}
+
 static int ds_draw_shader(const cmd_t *c)
 {
     /* All possible fragment fallbacks are checked, without linking or I/O.
@@ -87,7 +97,7 @@ static unsigned ds_scene(const cmdlist_t *l,unsigned i,unsigned u,int stored,int
         const cmd_t *c=&l->cmds[i++];
         if(c->kind)return DS_CLEAR;
         if(c->depth_write)return DS_WRITE;
-        if(c->stencil.enabled)return DS_STENCIL;
+        if(!ds_stencil_readonly(&c->stencil))return DS_STENCIL;
         if(!ds_draw_shader(c))return DS_SHADER;
         draws++;
     }

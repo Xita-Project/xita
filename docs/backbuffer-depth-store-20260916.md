@@ -19,10 +19,17 @@ not measured memory traffic.
 The pump inspects the retained mesh and UI event order before each backbuffer
 scene begins. It requires a successfully ended prior backbuffer scene. An
 intermediate span ends at a known subsequent target transition; a final span
-also requires the caller's explicit read-only tail contract. Any clear, depth write, enabled stencil,
+also requires the caller's explicit read-only tail contract. Any clear, depth write, potential stencil write,
 UI event within the scene, invalid command/target, unknown shader or development
 shader override keeps the original store. The first backbuffer scene and every
 offscreen descriptor retain their original stores.
+
+Enabled stencil is read-only when its write mask is zero or all three outcomes
+(stencil failure, depth failure and pass) keep the stored value. Enabled function
+and operation indices must be valid before admission. This preserves stencil
+tests and loads on both faces; it does not disable them. See the
+[stencil refinement](depth-store-stencil-20260917.md) for validation and hardware
+results.
 
 For the final scene, `main.c` proves its remaining work is viewport setup,
 the owned settings panel and EndScene. Scaled settings use a separate depthless
