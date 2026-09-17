@@ -17,6 +17,9 @@ endif
 ifeq ($(XV_NATIVE_OBJECT_SCAN),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_scan.c
 endif
+ifeq ($(XV_NATIVE_COLLISION_VERTICES),1)
+XITA_GAME_SRCS += recomp/kernel/xk_collision_vertices_control.c
+endif
 ifeq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_jobs.c
 endif
