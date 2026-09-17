@@ -3,7 +3,8 @@
 `XV_NATIVE_SOLVER_FUSION` is an explicit build option, default **0**. It selects
 the qualified whole solver only at the matched `172CB8 → 170C10` call beneath
 `172BF0`. It does not change the generic entry, game speed, actor transaction,
-precision, or production defaults. No hardware result is claimed here.
+precision, or production defaults. Hardware checks are recorded below; no
+confirmed frame-rate gain is claimed.
 
 ## Build and ownership
 

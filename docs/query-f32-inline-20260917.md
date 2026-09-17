@@ -90,3 +90,32 @@ location and never accesses a device. No owned source or binary is committed.
 The independent prototype review counted 160 normal-object and 117 forced
 capacity-one observations; these are not a new claim of all 12 yield-site
 coverage or a repeated whole `172BF0` caller test.
+
+## Cumulative hardware package
+
+Root source `e29a962` builds with this option and all eleven preceding paths
+enabled. Only `query_fusion.o` changes; its full SHA-256 is
+`c1717b6fdd4e5953cc6e1823caf8a9407e645ee06334e566f95e38f95e93cd2d`,
+identical to the qualified object. Existing caller, solver, generic and runtime
+objects are unchanged. All 1,588 package entries remain present, with only
+`game-a.self` and its boot hash changing; assets and updater contract match.
+
+Runtime `2393a044a7757a732855f2ca99d6c325c502528635714942ed79921d3d7e7cf2`
+was uploaded, hash-verified, restarted and boot-confirmed in slot 0. The
+eleven-path `ece322ea…` runtime remains in slot 1 for rollback. The fresh process
+reaches the normal Halo main menu and New001's Normal campaign pistol
+checkpoint, confirmed by save-directory reads and the original camera.
+
+Two fire inputs, camera/strafe, forward/backward corridor movement and pause
+completed. Initial settled reports were 12.7 FPS with 143–153 draws/frame;
+the screenshot showed 12 FPS and visible NPCs. The captured log has no searched
+fault marker, and logger error/failed-write counts are zero. This short smoke
+does not qualify prolonged combat, rocket/death or historical crashes.
+The parent loaded this checkpoint after Blood Gulch; its load history and live
+AI/draw state differ. No gain or regression is established. All twelve paths
+remain enabled at native resolution and standard graphics.
+
+Private evidence is in `query-f32-startup/`: `build-command.json`,
+`object-diff.json`, `package.json`, `installation.json`,
+`campaign-smoke-receipt.json`, `campaign-smoke.log` and the captured images.
+No built-in benchmark or CE Vita3K validation was used.

@@ -8,17 +8,21 @@ Restarting means a new Xita process; it does not require rebooting the Vita.
 
 ## Current cumulative build
 
-The eleven-path runtime `ece322ea…` has completed short ordinary campaign and
+The preceding eleven-path runtime `ece322ea…` completed short ordinary campaign and
 Blood Gulch vehicle checks. It retains the earlier CPU/rendering work and adds
 exact retired-slot upload omission and collision-solver fusion to the nine-path
 build described below. No clear five-FPS gain or stable representative 20 FPS
 has been established. All eleven compatible paths remain enabled.
 
-The next package, from source `e29a962`, adds query-only f32 helper inlining.
+The current twelve-path package, from source `e29a962`, adds query-only f32 helper inlining.
 Its final query object exactly matches the qualified prototype; all other
 runtime, caller, solver and generic objects are unchanged. The package retains
-all assets and the existing updater contract. The hardware rollout receipt
-will be recorded in the [query-inline follow-up](query-f32-inline-20260917.md).
+all assets and the existing updater contract. Runtime `2393a044…` is installed
+and boot-confirmed in slot 0; the eleven-path parent remains in slot 1.
+Ordinary campaign fire inputs, camera/strafe, movement and pause completed
+without a searched fault marker or logger error. Initial settled reports are
+12.7 FPS. No matched gain/regression or stable 20 FPS is established. The
+[query-inline follow-up](query-f32-inline-20260917.md) records the evidence.
 This is a cumulative change, not a replacement of the preceding optimizations.
 
 The eleven-path active campaign reading has an independent cross-check: 372
