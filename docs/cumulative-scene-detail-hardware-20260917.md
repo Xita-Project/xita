@@ -76,3 +76,26 @@ cumulative trial. Correctness qualification, compatibility with the stack and
 demonstrated performance improvement are separate findings. FPS gains are not
 added arithmetically; the combined executable must be judged after restart in
 representative gameplay. Stable 20 FPS and another 5 FPS remain unverified.
+
+## Campaign follow-up on the same executable
+
+New001 Normal campaign loaded through the ordinary menus after rebuilding its
+map cache. Read/write counters continued advancing during the loading screen.
+The capture after two fire inputs, camera/strafe/forward movement and pause is
+frame 34,548, with 6,195,466 log bytes and no searched fault marker or logger
+error. It contains the preceding Blood Gulch log; overlapping records are not
+an independent run or counted again as campaign evidence.
+
+Campaign selection excludes all frames preceding the saved Blood Gulch capture
+and requires the observed campaign director state, in addition to the same
+complete scope/pass and neighboring-window checks. At the settled checkpoint
+`-28.66,32.52,0.62`, direction `0.56,0.82,-0.15`, 37 qualified windows have
+median 79.0 ms per frame (12.7 FPS). The visibility interval is 1.67 ms and the
+model interval 14.72 ms; the whole scene is 40.76 ms. The model path is the
+larger target here. The valley's much larger visibility cost does not apply
+uniformly to this checkpoint.
+
+The moved view has 18 qualified windows, median 80.75 ms per frame (12.4 FPS),
+visibility 1.36 ms, model 12.14 ms and whole scene 46.95 ms. These are inclusive
+scene partitions under ordinary gameplay, not a new before/after performance
+result or evidence that the combined stack adds five FPS.
