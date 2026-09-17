@@ -220,6 +220,7 @@ static void serve(int s)
             if(!strcmp(target+16,"depth-store"))kind=XV_BENCH_DEPTH_STORE;
             if(!strcmp(target+16,"vertex-blocks"))kind=XV_BENCH_VERTEX_BLOCKS;
             if(!strcmp(target+16,"object-holds"))kind=XV_BENCH_OBJECT_HOLDS;
+            if(!strcmp(target+16,"object-collect"))kind=XV_BENCH_OBJECT_COLLECT;
             if(!strcmp(target+16,"query-boundary"))kind=XV_BENCH_QUERY_BOUNDARY;
             if(!strcmp(target+16,"light-census"))kind=XV_BENCH_LIGHT_CENSUS;
             if(!kind)reply(s,400,"Unknown benchmark kind\n");

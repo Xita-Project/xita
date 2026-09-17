@@ -1483,6 +1483,9 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
 #ifdef XV_NATIVE_OBJECT_SCAN
         { extern void xv_object_scan_report(unsigned); xv_object_scan_report(g_t_frames); }
 #endif
+#ifdef XV_NATIVE_OBJECT_COLLECT
+        { extern void xv_object_collect_report(unsigned); xv_object_collect_report(g_t_frames); }
+#endif
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
         { extern void xv_object_jobs_report(unsigned); xv_object_jobs_report(g_t_frames); }
 #endif

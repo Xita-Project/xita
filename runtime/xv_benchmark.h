@@ -13,7 +13,7 @@ enum {
     XV_BENCH_OBJECT_POSE, XV_BENCH_MATERIAL_PACKET, XV_BENCH_POLYGON_EDGE, XV_BENCH_LOG_WRITER,
     XV_BENCH_CLIP_REGION=36, XV_BENCH_LIGHT_CENSUS=37,
     XV_BENCH_DIAGNOSTIC_POLL=38, XV_BENCH_DIAGNOSTIC_HIST=38|256, XV_BENCH_QUERY_BOUNDARY=39, XV_BENCH_DEPTH_STORE=40,
-    XV_BENCH_VERTEX_BLOCKS=41, XV_BENCH_OBJECT_HOLDS=42
+    XV_BENCH_VERTEX_BLOCKS=41, XV_BENCH_OBJECT_HOLDS=42, XV_BENCH_OBJECT_COLLECT=43
 };
 /* Network admission only publishes a request. The ordinary guest input owner
  * validates first-person control and consumes it before the present boundary. */
@@ -32,6 +32,7 @@ int xv_benchmark_compare_query_boundary(void);
 int xv_benchmark_compare_depth_store(void);
 int xv_benchmark_compare_vertex_blocks(void);
 int xv_benchmark_compare_object_holds(void);
+int xv_benchmark_compare_object_collect(void);
 int xv_benchmark_compare_point_math(void);
 int xv_benchmark_compare_matrix_neon(void);
 int xv_benchmark_compare_object_scan(void);

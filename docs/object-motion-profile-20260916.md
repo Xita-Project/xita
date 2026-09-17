@@ -114,8 +114,20 @@ fraction of the frame. The query also has other callers. This identifies
 alongside the object-reference walk. The existing native BSP helper covers a
 plane-distance block, not this whole traversal/surface test.
 
-Claude has supplied an off-by-default object-walk prototype in its isolated
-worktree. Its initial 12,000 host comparisons pass, but independent tests expose
-stack-alias and preemption-resumption contract gaps. It remains unintegrated
-while those are addressed. A separate geometry-query task can proceed without
-changing that helper or the actor transaction. No FPS gain is claimed yet.
+Claude's [object-walk prototype](claude-collision-collection-20260916.md) now
+preserves all original call-frame writes and resumes taken back edges correctly
+after preemption. Atomic configuration and per-walk counters avoid adding native
+data races. Independent regression witnesses caught the original two gaps;
+negative controls confirm the expanded tests detect both. The integrated helper
+passes 12,000 host comparisons with ASan/UBSan across on/off/default/environment
+modes, comparing all guest memory without a dead-frame mask.
+
+Selector 43 (`object-collect`) compares original/native/original collection
+without changing graphics or worker settings. Controller tests cover rejection
+when absent, owner admission, cancellation, lost first-person control and exact
+initial-mode restoration. Actual HTTP tests cover authenticated selection and
+benchmark exclusion. The integrated helper also passes 544 strict Cortex-A9 comparisons, including
+FPSCR state. The physical comparison remains required; these checks are not an
+FPS gain. A second agent independently replaces
+the vertex pass inside `86F50`; it retains later edge/surface tests and the actor
+transaction, and will have a separate comparison before combining changes.
