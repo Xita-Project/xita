@@ -6,6 +6,24 @@ the strength of those comparisons need another look. Keep normal graphics
 settings fixed and record the installed executable and effective startup modes.
 Restarting means a new Xita process; it does not require rebooting the Vita.
 
+## Acceptance decisions
+
+Correctness and performance are separate. Local comparisons must preserve the
+replaced code's observable results, memory, scheduling and floating-point
+behavior. Hardware gameplay must then check rendering, controls, crashes and
+the workloads the local fixtures cannot represent. Passing local tests does
+not establish complete gameplay correctness.
+
+For performance, confirm the candidate is actually active, then compare FPS
+and visible stutters across comparable scenes and repeated fresh launches.
+Keep a reproducible benefit that exceeds ordinary run variation without a
+material regression elsewhere. A small consistent benefit still counts; there
+is no requirement for a whole-FPS increase from each change. Roll back a
+reproduced correctness or performance regression. Label an inconsistent or
+unresolved result **inconclusive** and retain the implementation for further
+scene and combination tests. Instruction counts or core utilization alone do
+not determine the gameplay verdict.
+
 ## What the benchmark audit found
 
 Claude independently audited the controller, client and saved physical logs.
