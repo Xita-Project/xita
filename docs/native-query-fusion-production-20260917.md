@@ -99,12 +99,13 @@ actual production generator/build graph rather than repeating those suites:
   small graph fixture; the first test exercises the real generator.
 
 The qualified separate typed unit uses a 2152-byte frame plus a 24-byte
-adapter. Object workers have 512 KiB native SCE stacks, but owner fibers use
-32 KiB native slices carved from the 2 MiB guest thread stack. The enclosing
-thread allocation is not the fiber's available headroom; guest x86 stack
-counters do not measure native high-water. This wiring adds no stack-headroom
-admission and claims no universal recursion
-bound. Overflow retains the fused frame while calling a generic child. Full
+adapter. Actual CE guest fibers and object workers have 512 KiB native SCE
+stacks. `RECOMP=1` selects `XV_RUN_RECOMP`: the 2 MiB `xv_recomp` bootstrap
+starts the CE scheduler, whose `xk_thread_create` requests a separate 512 KiB
+kernel thread through `xk_os_fiber_create`. The 32 KiB slices in the mock
+scheduler belong to the other compile-time branch and do not constrain CE.
+Guest x86 stack counters do not measure native high-water. This wiring adds
+no stack-headroom admission and claims no universal recursion bound. Overflow retains the fused frame while calling a generic child. Full
 actor/physics callbacks, firmware copy implementation cost, cache effects and
 physical FPS remain outside the bounded oracle. The earlier instruction
 reductions are not a hardware gain claim. Root owns final package review,
