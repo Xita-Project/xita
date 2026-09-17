@@ -98,8 +98,9 @@ A longer campaign run then exposed a different sound-stream startup STOP.
 The [startup/refill handoff](docs/object-stream-start-20260916.md) covers the
 observed deferred commit and its following status/packet calls on the parked
 audio owner, including nested completion callbacks. Host memory/race tests and
-the Vita build pass; hardware installation and that exact startup path remain
-to be verified. This is a stability fix, not a measured FPS gain.
+the Vita build pass, and the physical updater confirms the new runtime boots.
+That exact startup path remains to be exercised on hardware. This is a
+stability fix, not a measured FPS gain.
 
 [World and effect rendering](docs/world-rendering-20260915.md) is the next focus:
 physical views range from 55 to 131 draws/frame with much higher completion

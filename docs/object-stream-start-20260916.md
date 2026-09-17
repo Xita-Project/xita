@@ -45,6 +45,9 @@ members and updater asset contract as the installed build; only the runtime and
 boot marker may differ. The only changed object is the worker bridge, and the
 collision-solver experiment remains compiled out.
 
-Physical installation and execution of the newly admitted startup path are
-pending. This is a targeted stability fix; no FPS improvement or general combat
-stability is claimed.
+The physical updater verifies runtime
+`847524f8e69175ba0db88c1c89fd71afe19819a4d2536200392b1946ca528e09`
+in slot A0, with a confirmed dashboard boot and no pending update. Previous
+runtime `c8f54f0f…` remains in slot B1. Execution of the newly admitted startup
+path is still pending. This is a targeted stability fix; no FPS improvement or
+general combat stability is claimed.

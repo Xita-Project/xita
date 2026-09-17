@@ -95,6 +95,8 @@ admission counts, standard graphics, and movement/combat correctness checks.
 The first physical comparison must show that useful solver work actually leaves
 the guard; a zero-admission or stationary-only result cannot qualify the goal.
 
-The physical Vita still runs diagnostic `c8f54f0f873c5b0c`. Its current campaign
-view remains about 11.5–12 FPS. Stable 20 FPS in representative campaign and
-Blood Gulch driving, and resolution of the reported GPU crash, remain unproven.
+The physical campaign view measured with diagnostic `c8f54f0f873c5b0c` remained
+about 11.5–12 FPS. The subsequent [audio startup fix](object-stream-start-20260916.md)
+is installed as `847524f8…`; the solver experiment remains compiled out. Stable
+20 FPS in representative campaign and Blood Gulch driving, and resolution of
+the reported GPU crash, remain unproven.
