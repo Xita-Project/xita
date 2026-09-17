@@ -434,6 +434,28 @@ $(error XV_SCENE_PARTITION requires RECOMP=1 XV_OWNER_PHASE=1 GAME_PROFILE=halo_
 endif
 endif
 # Explicit private startup trial, not a persisted/user-facing graphics default.
+XV_CLIP_REGION_TRIAL ?= 0
+ifneq ($(words $(XV_CLIP_REGION_TRIAL)),1)
+$(error XV_CLIP_REGION_TRIAL must be 0 or 1)
+endif
+ifneq ($(filter $(XV_CLIP_REGION_TRIAL),0 1),$(XV_CLIP_REGION_TRIAL))
+$(error XV_CLIP_REGION_TRIAL must be 0 or 1)
+endif
+ifeq ($(XV_CLIP_REGION_TRIAL),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_NATIVE_CLIP_REGION):$(XV_LIGHT_QUERY_CENSUS):$(XV_EXPERIMENTAL_OBJECT_JOBS),1:halo_ce_3925:1:1:1)
+$(error XV_CLIP_REGION_TRIAL requires RECOMP=1 GAME_PROFILE=halo_ce_3925 XV_NATIVE_CLIP_REGION=1 XV_LIGHT_QUERY_CENSUS=1 XV_EXPERIMENTAL_OBJECT_JOBS=1)
+endif
+$(BUILD)/runtime/xv_benchmark.o: CFLAGS += -DXV_CLIP_REGION_TRIAL=1
+endif
+.PHONY: force-clip-region-trial-config
+force-clip-region-trial-config:
+$(BUILD)/clip-region-trial.config: force-clip-region-trial-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_CLIP_REGION_TRIAL)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_benchmark.o: $(BUILD)/clip-region-trial.config
+
 XV_MODEL_BATCHES_TRIAL ?= 0
 ifneq ($(words $(XV_MODEL_BATCHES_TRIAL)),1)
 $(error XV_MODEL_BATCHES_TRIAL must be 0 or 1)
@@ -1335,6 +1357,10 @@ recomp/kernel/xk_polygon_edge.c: tools/gen_native_polygon_edge.py games/halo_ce_
 	$(PYTHON) tools/gen_native_polygon_edge.py --xbe $(XBE) --manifest $(XBE_JSON)
 
 # Optional clip region: generated units, helper and bridge share a tracked mode.
+ifeq ($(XV_CLIP_REGION_TRIAL),1)
+$(RECOMP_BUILD)/kernel/xd3d.o: RECOMP_CFLAGS += -DXV_CLIP_REGION_TRIAL=1
+endif
+$(RECOMP_BUILD)/kernel/xd3d.o: $(BUILD)/clip-region-trial.config
 REGION_HOOK_SRCS := $(shell rg -l XV_NATIVE_CLIP_REGION $(XITA_GUEST_SRCS) 2>/dev/null)
 REGION_HOOK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(REGION_HOOK_SRCS))
 REGION_NATIVE_OBJS := $(RECOMP_BUILD)/kernel/xk_clip_region.o $(RECOMP_BUILD)/kernel/xk_clip_region_control.o

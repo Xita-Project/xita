@@ -92,6 +92,11 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
+#if XV_CLIP_REGION_TRIAL
+    /* This private cumulative trial keeps its startup selection for the
+     * process. Legacy clip36 completion/cancellation restores OFF. */
+    if (kind == XV_BENCH_CLIP_REGION) return -1;
+#endif
     if(kind<XV_BENCH_OBJECT_BASIS||(kind>XV_BENCH_CLIP_REGION&&kind!=XV_BENCH_DIAGNOSTIC_POLL&&kind!=XV_BENCH_DIAGNOSTIC_HIST&&kind!=XV_BENCH_LIGHT_CENSUS&&kind!=XV_BENCH_QUERY_BOUNDARY&&kind!=XV_BENCH_DEPTH_STORE&&kind!=XV_BENCH_VERTEX_BLOCKS&&kind!=XV_BENCH_OBJECT_HOLDS&&kind!=XV_BENCH_OBJECT_COLLECT)||!__atomic_load_n(&remote_ready,__ATOMIC_ACQUIRE))return -1;
     if(kind==XV_BENCH_OBJECT_COLLECT&&(!xv_object_collect_available||!xv_object_collect_enabled||!xv_object_collect_override))return -1;
     if(kind==XV_BENCH_OBJECT_HOLDS&&(!xv_object_holds_available||!xv_object_holds_enabled||!xv_object_holds_override))return -1;
