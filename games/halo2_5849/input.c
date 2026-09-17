@@ -71,6 +71,7 @@ void h2_input_close(xctx *c)
     if (!initialized || !handle || X_ARG(0) != handle) fail(c, ip, X_ARG(0), handle);
     handle = 0; X_RET(1);
 }
+uint32_t h2_newfn_window;   /* polls left in the first-entry function trace window (boot.c) */
 void h2_input_state(xctx *c)
 {
     const uint32_t ip = 0x409B6C; stack(c, ip, 2);
@@ -80,11 +81,21 @@ void h2_input_state(xctx *c)
     int result = h2_platform_pad(&current, 0);
     if (result < 0) fail(c, ip, destination, (uint32_t)result);
     uint8_t bytes[22], old[18]; sample_bytes(bytes + 4, &current); sample_bytes(old, &previous);
+    static unsigned polls;                       /* poll cadence + button evidence for the menu */
+    if ((current.buttons & 0x0010u) && !(previous.buttons & 0x0010u) && !h2_newfn_window) {
+        h2_newfn_window = 300;                   /* START edge: trace first-entry functions for ~300 polls */
+        xv_logf("[h2/newfn] window opened at poll #%u gtime=%u\n", polls + 1, X_M32(0x54D5B8u));
+    } else if (h2_newfn_window && !--h2_newfn_window) {
+        xv_logf("[h2/newfn] window closed at poll #%u gtime=%u\n", polls + 1, X_M32(0x54D5B8u));
+    }
     if (memcmp(bytes + 4, old, sizeof old)) { ++packet; previous = current; }
     put32(bytes, packet); x_guest_write(destination, bytes, sizeof bytes);
-    static unsigned polls;                       /* poll cadence + button evidence for the menu */
+    /* gtime = the game's millisecond clock 0x54D5B8 (the attract/idle logic at 0x2239C0 measures idle
+     * time against threshold 0x4701BC with it); against the emulator log's wall clock this shows how
+     * fast game time advances per rendered frame. Read-only. */
     if (!(++polls % 64) || (current.buttons && !(polls % 4)))
-        xv_logf("[h2/input] poll #%u buttons=%04X packet=%u\n", polls, current.buttons, packet);
+        xv_logf("[h2/input] poll #%u buttons=%04X packet=%u gtime=%u idle_flag=%u idle_threshold=%u\n",
+                polls, current.buttons, packet, X_M32(0x54D5B8u), X_M8(0x4701B8u), X_M32(0x4701BCu));
     c->r[0] = 0; X_RET(2);
 }
 void h2_input_capabilities(xctx *c)

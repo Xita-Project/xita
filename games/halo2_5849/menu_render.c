@@ -512,11 +512,13 @@ static int software_body(void *opaque, const h2_menu_request *r, uint8_t *ab_bef
             if (menu_texture_describe(s, u, &code, &tw, &th))
                 used += (size_t)snprintf(tex + used, sizeof tex - used, " t%u=%02X/%ux%u", u, code, tw, th);
         }
-        /* sceClibPrintf has no floating-point support: report the mean as integer hundredths. */
+        /* sceClibPrintf: no floating point, and 64-bit arguments after the first misalign the rest of
+         * the list - keep every argument 32-bit (mean as integer hundredths). */
         unsigned mean_c = n ? (unsigned)((sum * 100ull) / (n * 3ull)) : 0;
-        xv_logf("[h2/menu-ab] draw=%llu prim=%u verts=%u touched=%llu mean|diff|=%u.%02u worst=%llu blend=%d/%04X/%04X depth=%s stages=%u vp_len=%u%s\n",
-                (unsigned long long)drawn, r->primitive, n_for_ab, (unsigned long long)n, mean_c / 100, mean_c % 100,
-                (unsigned long long)worst, rs.blend, rs.sfactor, rs.dfactor, rs.depth.pixels ? "on" : "off", cb.stages, s->program_load, tex);
+        xv_logf("[h2/menu-ab] draw=%u prim=%u verts=%u touched=%u mean|diff|=%u.%02u worst=%u blend=%d/%04X/%04X depth=%s stages=%u vp_len=%u%s\n",
+                (unsigned)drawn, (unsigned)r->primitive, (unsigned)n_for_ab, (unsigned)n, mean_c / 100, mean_c % 100,
+                (unsigned)worst, (int)rs.blend, (unsigned)rs.sfactor, (unsigned)rs.dfactor, rs.depth.pixels ? "on" : "off",
+                (unsigned)cb.stages, (unsigned)s->program_load, tex);
         memcpy(target, ab_gpu, 640 * 480 * 4);           /* the GXM result is the state going forward */
         free(ab_before); free(ab_gpu); ab_before = ab_gpu = NULL;
     }

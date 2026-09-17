@@ -421,6 +421,26 @@ static void trace_mapped_word(uint32_t address)
 void xv_trace_func(uint32_t address)
 {
     static unsigned count;
+    /* First-entry function tracer (read-only): input.c opens a window of polls when START is seen.
+     * Every guest function entered for the first time since boot while the window is open is logged
+     * once, so the title screen's reaction to Start (or where it stalls) is visible without knowing
+     * the addresses in advance. Functions first entered before the window are never logged. */
+    {
+        extern uint32_t h2_newfn_window;
+        static uint8_t *seen_fn; static unsigned newfn_logged;
+        if (!seen_fn) seen_fn = calloc(1, (0x420000u - 0x10000u) / 8 + 1);
+        if (seen_fn && address >= 0x10000u && address < 0x420000u) {
+            uint32_t bit = address - 0x10000u;
+            if (!(seen_fn[bit >> 3] & (uint8_t)(1u << (bit & 7)))) {
+                seen_fn[bit >> 3] |= (uint8_t)(1u << (bit & 7));
+                if (h2_newfn_window && newfn_logged < 6000 && xk_cur) {
+                    const xctx *c = &xk_cur->ctx; ++newfn_logged;
+                    xv_logf("[h2/newfn] eip=%08X return=%08X eax=%08X ecx=%08X thread=%u\n",
+                            address, X_M32(c->r[4]), c->r[0], c->r[1], xk_cur->id);
+                }
+            }
+        }
+    }
     /* The original movie checks skip input only after initial frame setup.
      * Observe that ordering and its flags without calling input early or
      * changing a return value, a flag, or an audio/video operation. */
