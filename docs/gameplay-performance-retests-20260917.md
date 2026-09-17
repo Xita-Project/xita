@@ -111,7 +111,7 @@ for that route. Long-session crash qualification is outstanding. See the
 [typed-traversal follow-up](native-collision-traversal-20260917.md) for production
 stack checks, startup evidence and the unmeasured admission distribution.
 
-The current cumulative runtime is
+The preceding eight-path runtime is
 `98393693e68be0032c5381cc172611a4db1361cf16d7dfeb7917136b9041fa99`
 from source `47c7e7c`, installed and boot-confirmed in slot 0. It retains all
 seven paths and adds caller-specific collision-query fusion in a separate
@@ -213,3 +213,21 @@ difference a gain or regression. Then evaluate compatible changes together.
 None of these retests is complete merely because a package was built or booted.
 Keep known unsafe actor/solver publication experiments out of this queue, and
 distinguish never-deployed prototypes from previously tested candidates.
+
+The current nine-path runtime is
+`d817f077ef551ae1da2888f895497be711d03a51c60d7921048486869d68c668`,
+from source `1061b17`, installed and boot-confirmed in slot 1. It retains all
+eight paths and selects decoded RGBA swizzling at process startup. Exact pixel,
+mip, cache and startup tests pass; only the uploader object changes. Actual
+swizzled descriptors are confirmed in the bounded physical upload log, alongside
+the expected unsupported-dimension linear upload. See the
+[layout startup follow-up](rgba-swizzle-startup-20260917.md).
+
+The fresh process loads New001's same Normal pistol checkpoint, confirmed by
+save-directory reads and the original camera. Initial settled ordinary reports
+remain around 12.8 FPS. Two fire inputs, a camera turn, strafe and pause complete;
+captured checkpoint/NPC views render, no searched fault marker is found, and
+the logger reports no error. This short smoke is not extended combat or crash
+qualification, and no repeatable performance gain or regression is established.
+All nine remain enabled at native resolution and standard graphics. The eight-path
+runtime remains in slot 0 for rollback. Blood Gulch follow-up is in progress.

@@ -39,7 +39,17 @@ VPK SHA-256:
 Private build, test and package evidence is in
 `direct-cluster-query/rgba-swizzle-startup/`.
 
-Physical startup admission, gameplay and performance are pending. Earlier
+The updater has installed and boot-confirmed this runtime in slot 1. The
+eight-path `98393693…` parent remains in slot 0 for rollback. Physical startup
+logs confirm the selected mode and actual decoded RGBA swizzled descriptors,
+with the expected non-power-of-two linear upload. The main menu renders.
+New001's same Normal campaign checkpoint loads in this fresh process and reports
+about 12.8 FPS after initial texture loading. Two fire inputs, camera/strafe and
+pause complete with no searched fault marker. Captured checkpoint and NPC views
+render correctly; this is limited smoke evidence, not a claim that all rendering
+or long-session crashes are resolved. No repeatable gain or regression is
+established; all nine paths remain enabled. Blood Gulch follow-up is in progress.
+Earlier
 [layout validation](rgba-swizzle-20260907.md) did not establish a physical Vita
 performance result. No FPS gain is claimed from host correctness or instruction
 counts. Retain compatible changes together unless a regression is established;
