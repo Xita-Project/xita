@@ -76,7 +76,7 @@ Those intervals overlap; they are not additive CPU and GPU execution times. The
 observations suggest that this dependency can hide CPU savings in this view.
 Other Blood Gulch views have shown a different limit.
 
-The next retest moves existing query-boundary publication earlier in the queue:
+The current retest moves existing query-boundary publication earlier in the queue:
 its first hardware view had no flare waits, so it did not exercise the expected
 benefit. The candidate publishes exact results after the last query writer at an
 existing scene end. All geometry, textures, UI and packet storage remain owned
@@ -84,9 +84,19 @@ until the original final completion. No extra scene or stale query result is
 introduced. Fresh startup selection allows this to run alongside the CPU stack
 without an in-game benchmark toggle.
 
-Campaign admission and speedup remain unproven. If no suitable scene boundary
-exists, the original final notification is retained. Even if flare waits disappear,
-sustained GPU throughput or other CPU work can still limit the frame rate.
+The combined build with all three CPU helpers and earlier query publication has
+now reached physical campaign gameplay. The passive displayed-frame observation
+was 12.728 FPS, compared with 11.495 FPS for the earlier two-helper build at the
+same checkpoint view. This is encouraging, not a confirmed 1.2-FPS gain: live AI
+can vary, the loading histories differed, and the newer build adds both the
+segment/sphere helper and query publication. It does not isolate either change.
+
+Startup and admission logs confirm all four paths execute. Query notifications
+were observed before final completion, while storage remained retained until
+the final notification. If no suitable scene boundary exists, the original
+final notification is retained. Remaining waits and GPU throughput can still
+hide CPU savings. These short gameplay checks do not resolve the older GPU
+crashes or establish stable 20 FPS.
 
 ## Retest queue
 

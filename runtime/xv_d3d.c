@@ -24,6 +24,7 @@
 #include "xv_bytes_equal.h"
 #include "xv_visibility.h"
 #include "xv_frame_slots.h"
+#include "xv_scene_census.h"
 #include "xv_vertex_upload.h"
 #include "xv_vertex_prepare.h"
 #include "xv_gpu_upload.h"
@@ -673,6 +674,7 @@ typedef struct {
     SceGxmTexture tex;
 } rt_alias_t;
 static rt_alias_t g_rt[XV_RT_SLOTS];
+#include "xv_scene_census_plan.h"
 #include "xv_query_boundary.h"
 #include "xv_depth_store.h"
 static unsigned g_rt_bytes;
@@ -2333,7 +2335,11 @@ int xv_d3d_uses_previous_frame(uint32_t frame)
  * previous-frame substitution, and cube/2D fallback. Unused bound stages do
  * not sample anything and cannot create feedback. */
 static int bind_draw_textures(xv_texture_state *state, SceGxmContext *ctx, const cmd_t *c,
-    const xv_fshader_t *fs, unsigned cube_mask)
+    const xv_fshader_t *fs, unsigned cube_mask
+#ifdef XV_SCENE_CENSUS
+    ,uint32_t *census_reads
+#endif
+    )
 {
     const void *target=c->pass && c->pass<=XV_RT_SLOTS ? g_rt[c->pass-1].mem : NULL;
     for (unsigned t = 0; t < 4; ++t) {
@@ -2363,7 +2369,19 @@ static int bind_draw_textures(xv_texture_state *state, SceGxmContext *ctx, const
             XV_ONCE(warn_feedback, "RT feedback draw skipped (active sampler reads its color target)\n");
             return 0;
         }
+#ifdef XV_SCENE_CENSUS
+        if(census_reads) {
+            const void *data=sceGxmTextureGetData(tx);unsigned mask=0;
+            for(unsigned j=0;j<XV_RT_SLOTS;j++)if(data && data==g_rt[j].mem)mask|=1u<<j;
+            if(data && data==sceGxmTextureGetData(&g_scene_backbuffer_texture))mask|=1u<<8;
+            if(data && data==sceGxmTextureGetData(&g_previous_frame_texture))mask|=1u<<9;
+            *census_reads|=mask?mask:1u<<10; /* Other/alias-unknown, never a no-dependency proof. */
+        }
+#endif
         unsigned result = xv_texture_state_bind(state, ctx, (unsigned)fs->tex_index[t], tx);
+#ifdef XV_SCENE_CENSUS
+        if(census_reads && result==XV_TEXTURE_BIND_ERROR)*census_reads|=1u<<11;
+#endif
         xv_render_profile_texture(result == XV_TEXTURE_UNCHANGED, result == XV_TEXTURE_BIND_ERROR);
     }
     return 1;
@@ -2517,7 +2535,14 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             fs = depth_fs; fp = fs->fprog; cube_mask = 0;
         }
         if (depth_only) xv_render_profile_depth_only(c->index_count);
-        if (!bind_draw_textures(texture_state,ctx,c,fs,cube_mask)) continue;
+#ifdef XV_SCENE_CENSUS
+        int census_sample=xv_sc_sampled(i);uint32_t census_reads=0;
+#endif
+        if (!bind_draw_textures(texture_state,ctx,c,fs,cube_mask
+#ifdef XV_SCENE_CENSUS
+            ,census_sample?&census_reads:NULL
+#endif
+            )) continue;
         xv_render_profile_work(c->ps_entry >= 0 && (unsigned)c->ps_entry < XV_PS_TABLE_COUNT ? xv_ps_table[c->ps_entry].ps_key : 0,
             c->index_count, no_alpha && !fs->p_atest);
         xv_stencil_bind_cached(&stencil_state, ctx, &c->stencil);
@@ -2535,7 +2560,17 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
         if (!bind_fragment_constants(ctx, c, fs, frame, i))
             continue;
         if (fs->alpha_test_mode == 2) xv_render_profile_cutout(c->index_count);
-        XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, (SceGxmPrimitiveType)c->prim, SCE_GXM_INDEX_FORMAT_U16, c->indices, c->index_count));
+        int draw_result=XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, (SceGxmPrimitiveType)c->prim, SCE_GXM_INDEX_FORMAT_U16, c->indices, c->index_count));
+#ifdef XV_SCENE_CENSUS
+        if(census_sample && draw_result>=0) {
+            xv_sc_sample sample={i,c->ps_entry>=0 && (unsigned)c->ps_entry<XV_PS_TABLE_COUNT?xv_ps_table[c->ps_entry].ps_key:0,
+                v->vs.desc?v->vs.desc->func_hash:0,(uint32_t)(uintptr_t)fp,(uint32_t)(uintptr_t)fs->id,(uint32_t)(int32_t)c->ps_entry,
+                (depth_only?2u:linked?1u:0u)|((unsigned)fs->alpha_test_mode<<8)|((unsigned)c->blend<<16)|((unsigned)c->fs_kind<<24),census_reads,1};
+            xv_sc_sample_draw(&sample);
+        }
+#else
+        (void)draw_result;
+#endif
     }
     *clear_slot_io = clear_slot;
 }
@@ -2597,7 +2632,14 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
         }
         if (target != current) {
             if (open) {
-                int err = XV_RENDER_END(current, sceGxmEndScene(ctx, NULL, XV_QB_NOTIFICATION(frame,i,u)));
+                const SceGxmNotification *end_fence=XV_QB_NOTIFICATION(frame,i,u);
+#ifdef XV_SCENE_CENSUS
+                end_fence=xv_sc_end(current,i,u,end_fence,SC_QUERY);
+#endif
+                int err = XV_RENDER_END(current, sceGxmEndScene(ctx, NULL, end_fence));
+#ifdef XV_SCENE_CENSUS
+                xv_sc_ended(err);
+#endif
                 XV_QB_SUBMITTED(frame,i,u,err);
                 XV_VP_END(frame,i,u,err);
                 /* Successive scenes on this context preserve fragment order:
@@ -2626,6 +2668,10 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
                 XV_VP_ERROR(frame,VP_ERR_BEGIN);
                 return -1;
             }
+#ifdef XV_SCENE_CENSUS
+            const SceGxmDepthStencilSurface *sc_depth=r?&r->depth:&bd;
+            xv_sc_open(target,sceGxmDepthStencilSurfaceGetForceLoadMode(sc_depth),sceGxmDepthStencilSurfaceGetForceStoreMode(sc_depth));
+#endif
             if (!target) {
                 sceGxmDepthStencilSurfaceSetForceLoadMode(&bd, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_ENABLED);
             }

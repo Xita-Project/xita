@@ -114,6 +114,40 @@ $(BUILD)/query-boundary-startup.config: force-query-boundary-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o: $(BUILD)/query-boundary-startup.config
+# Diagnostic existing-scene completion census. OFF unless explicitly compiled.
+# Capacity is an independently verified SDK/runtime contract, not an allocation
+# request. Zero (the default) records structural declines without adding fences.
+XV_SCENE_CENSUS ?= 0
+XV_SCENE_CENSUS_NOTIFICATION_WORDS ?= 0
+ifneq ($(words $(XV_SCENE_CENSUS)),1)
+$(error XV_SCENE_CENSUS must be 0 or 1)
+endif
+ifneq ($(filter $(XV_SCENE_CENSUS),0 1),$(XV_SCENE_CENSUS))
+$(error XV_SCENE_CENSUS must be 0 or 1)
+endif
+ifeq ($(XV_SCENE_CENSUS),1)
+ifneq ($(RECOMP),1)
+$(error XV_SCENE_CENSUS requires RECOMP=1)
+endif
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_SCENE_CENSUS
+$(BUILD)/runtime/main.o: CFLAGS += -DXV_SCENE_CENSUS_NOTIFICATION_WORDS=$(XV_SCENE_CENSUS_NOTIFICATION_WORDS)
+endif
+.PHONY: force-scene-census-config force-scene-census-words-config
+force-scene-census-config:
+force-scene-census-words-config:
+$(BUILD)/scene-census.config: force-scene-census-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_SCENE_CENSUS)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/scene-census-words.config: force-scene-census-words-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_SCENE_CENSUS)),$(XV_SCENE_CENSUS_NOTIFICATION_WORDS),0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: $(BUILD)/scene-census.config
+$(BUILD)/runtime/main.o: $(BUILD)/scene-census-words.config
+# Runtime compilation uses -MMD: header edits rebuild their actual includers.
 # Pump-side sealed-list census; no fences or scheduling changes. Default OFF.
 ifeq ($(XV_VISIBILITY_PLACEMENT),1)
 $(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_VISIBILITY_PLACEMENT

@@ -85,6 +85,8 @@ static unsigned g_update_quiesced, g_recomp_finished;
 static int g_update_slot=-1;
 #endif
 #define XV_LOG(...)                 xv_logf("[xv] " __VA_ARGS__)
+#define XV_SCENE_CENSUS_IMPLEMENTATION
+#include "xv_scene_census.h"
 
 #define XV_XRAM_SIZE                (64u * 1024u * 1024u)     /* Xbox physical RAM     */
 #define XV_GUEST_MASK               0x03FFFFFFu               /* 26 bits = 64 MB       */
@@ -356,6 +358,14 @@ static int xv_gfx_init(void)
 
     g_notifications = sceGxmGetNotificationRegion();
     if (!g_notifications) { XV_LOG("GXM notification region unavailable\n"); return -1; }
+#ifdef XV_SCENE_CENSUS
+    SceKernelMemBlockInfo notification_info={0};notification_info.size=sizeof notification_info;
+    int notification_info_result=sceKernelGetMemBlockInfoByAddr((void *)g_notifications,&notification_info);
+    XV_LOG("[scene-census-region] result %08X region %p mappedBase %p mappedSize %u memoryType %X type %X access %X; mapping metadata only, notification capacity not inferred\n",
+        (unsigned)notification_info_result,(void *)g_notifications,notification_info.mappedBase,(unsigned)notification_info.mappedSize,
+        (unsigned)notification_info.memoryType,(unsigned)notification_info.type,(unsigned)notification_info.access);
+    xv_sc_init(g_notifications,XV_SCENE_CENSUS_NOTIFICATION_WORDS);
+#endif
 
     /* --- 2. ring buffers (blueprint §0 budget: 1 MB + 1 MB + 512 KB + 16 KB) ------- */
     if (!xv_gpu_alloc(SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, SCE_GXM_DEFAULT_VDM_RING_BUFFER_SIZE,
@@ -570,6 +580,9 @@ static int xv_gfx_upscale(xv_gfx_t *g, unsigned ui_frame, const SceGxmNotificati
     int err = XV_RENDER_CALL(XV_RENDER_SCENE_BEGIN, sceGxmBeginScene(g->ctx, 0, g->render_target, NULL, NULL,
                         g->display_sync[g->back_index], &g->display_surface[g->back_index], NULL));
     if (err != SCE_OK) return err;
+#ifdef XV_SCENE_CENSUS
+    xv_sc_open(9,0,0);
+#endif
     sceGxmSetViewport(g->ctx, 480, 480, 272, -272, 0.5f, 0.5f);
     sceGxmSetFrontDepthFunc(g->ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
     sceGxmSetFrontDepthWriteEnable(g->ctx, SCE_GXM_DEPTH_WRITE_DISABLED);
@@ -589,7 +602,14 @@ static int xv_gfx_upscale(xv_gfx_t *g, unsigned ui_frame, const SceGxmNotificati
     XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(g->ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16,
                (const uint8_t *)g->scale_quad.base + 4 * 24, 6));
     xv_ui_gxm_replay_settings(g->ctx, ui_frame);
-    return XV_RENDER_END(9, sceGxmEndScene(g->ctx, NULL, fence));
+#ifdef XV_SCENE_CENSUS
+    fence=xv_sc_end(9,UINT32_MAX,UINT32_MAX,fence,SC_FINAL);
+#endif
+    int ended=XV_RENDER_END(9, sceGxmEndScene(g->ctx, NULL, fence));
+#ifdef XV_SCENE_CENSUS
+    xv_sc_ended(ended);
+#endif
+    return ended;
 }
 
 #ifdef XV_RUN_RECOMP
@@ -604,7 +624,15 @@ static int xv_gfx_end_scenes(xv_gfx_t *g, unsigned ui_frame,
     const SceGxmNotification *fence, const SceGxmNotification *visibility_fence)
 {
     int scaled = g->scaled_target != NULL;
-    if (XV_RENDER_END(0, sceGxmEndScene(g->ctx, NULL, scaled ? visibility_fence : fence)) != SCE_OK) return -1;
+    const SceGxmNotification *world_fence=scaled?visibility_fence:fence;
+#ifdef XV_SCENE_CENSUS
+    world_fence=xv_sc_end(0,UINT32_MAX,UINT32_MAX,world_fence,scaled?SC_SCALED:SC_FINAL);
+#endif
+    int ended=XV_RENDER_END(0, sceGxmEndScene(g->ctx, NULL, world_fence));
+#ifdef XV_SCENE_CENSUS
+    xv_sc_ended(ended);
+#endif
+    if (ended != SCE_OK) return -1;
     if (scaled && xv_gfx_upscale(g, ui_frame, fence) != SCE_OK) { XV_LOG("upscale failed\n"); return -1; }
     return 0;
 }
@@ -676,6 +704,9 @@ static int xv_gfx_render_frame(uint32_t mesh_frame, unsigned ui_frame,
             XV_LOG("sceGxmBeginScene failed: 0x%08X\n", err);
             return -1;
         }
+#ifdef XV_SCENE_CENSUS
+        xv_sc_open(0,sceGxmDepthStencilSurfaceGetForceLoadMode(&g->depth_surface),sceGxmDepthStencilSurfaceGetForceStoreMode(&g->depth_surface));
+#endif
     }
 
     /* Replay this frame's recorded commands and owned GPU-visible uploads. */
@@ -1618,6 +1649,10 @@ static int xv_pump_retire(void)
 #endif
     uint64_t now = sceKernelGetProcessTimeWide();
     uint64_t elapsed = now - g_packets[q].started_us;
+#ifdef XV_SCENE_CENSUS
+    xv_sc_observe(done,g_frame_submitted);
+    xv_sc_fold(ticket,g_packets[q].failed);
+#endif
     if (g_gfx.hle_ready && g_packets[q].mesh != UINT32_MAX) {
         if (!g_packets[q].visibility_completed) {
 #ifdef XV_QUERY_BOUNDARY
@@ -1649,6 +1684,9 @@ static int xv_pump_retire(void)
     __atomic_store_n(&g_frame_completed,ticket,__ATOMIC_RELEASE);
     xv_frame_events_signal(&g_frame_events,XV_FRAME_COMPLETED);
     if (++g_retired_count == 60) {
+#ifdef XV_SCENE_CENSUS
+        xv_sc_report();
+#endif
 #ifdef XV_NATIVE_COLLISION_VERTICES
         /* Passive observations only: no reset, mode change or guest drain. */
         extern unsigned xv_collision_vertices_count;
@@ -1714,6 +1752,9 @@ static int xv_pump_thread(SceSize args, void *argp)
 #if XV_GPU_PACKET_TIMING
         xv_pump_observe_younger();
 #endif
+#ifdef XV_SCENE_CENSUS
+        xv_sc_observe(__atomic_load_n(&g_frame_completed,__ATOMIC_RELAXED),g_frame_submitted);
+#endif
         while (xv_pump_retire()) {}
         uint32_t requested=__atomic_load_n(&g_frame_requested,__ATOMIC_ACQUIRE);
         uint32_t done=__atomic_load_n(&g_frame_completed,__ATOMIC_ACQUIRE);
@@ -1749,6 +1790,11 @@ static int xv_pump_thread(SceSize args, void *argp)
             if(g_packets[q].query_boundary)xv_d3d_query_boundary_arm(g_packets[q].mesh,&g_packets[q].visibility_fence);
 #endif
             g_packets[q].started_us=now;
+#ifdef XV_SCENE_CENSUS
+            int sc_tracked=g_gfx.hle_ready && g_packets[q].mesh!=UINT32_MAX && !g_net_dialog;
+            xv_sc_begin(ticket,g_packets[q].mesh,now,g_frame_submitted-done,sc_tracked);
+            if(sc_tracked)xv_d3d_scene_census_plan(g_packets[q].mesh,g_gfx.render_width,g_gfx.render_height,g_gfx.scaled_target!=NULL);
+#endif
 #if XV_GPU_PACKET_TIMING
             xv_packet_timing_begin(&g_packets[q].timing,ticket,now,
                 __atomic_load_n(g_packets[q].fence.address,__ATOMIC_ACQUIRE)==ticket);
@@ -1765,6 +1811,9 @@ static int xv_pump_thread(SceSize args, void *argp)
             xv_packet_timing_end(&g_packets[q].timing,sceKernelGetProcessTimeWide(),err<0);
 #endif
             g_packets[q].failed=err<0;
+#ifdef XV_SCENE_CENSUS
+            xv_sc_submitted(err<0);
+#endif
             if (err<0) {
                 /* A failed EndScene may never signal. Exceptional cleanup only:
                  * finish any accepted work before releasing its storage. */
