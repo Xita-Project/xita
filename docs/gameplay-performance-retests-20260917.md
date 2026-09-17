@@ -104,8 +104,10 @@ from source `c5a198a`, installed and boot-confirmed in slot 1. It adds typed
 collision traversal to the preceding six paths. Fresh normal-menu launch into
 the same New001 pistol checkpoint measured 12.7518 FPS versus 12.7725 FPS for
 the six-path parent. This is inconclusive, and all seven remain enabled. Short
-pistol firing, movement and pause checks complete; broader combat, vehicle and
-crash qualification is outstanding. See the
+campaign firing/movement checks and Blood Gulch plasma, rocket explosion,
+self-hit/death/respawn and Warthog driving checks complete without reproducing
+a crash. Driving remains below target; there is no matched performance baseline
+for that route. Long-session crash qualification is outstanding. See the
 [typed-traversal follow-up](native-collision-traversal-20260917.md) for production
 stack checks, startup evidence and the unmeasured admission distribution.
 

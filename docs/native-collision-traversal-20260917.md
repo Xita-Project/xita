@@ -227,3 +227,19 @@ without a detected stop or GPU fault. Screenshots show the weapon and world
 still rendering. This short check does not establish long-session stability or
 resolve the historical rocket/plasma/vehicle crashes. Installation, observation
 and smoke receipts are retained in the private evidence directory above.
+
+The same seven-path process subsequently entered Blood Gulch through the normal
+solo split-screen menus (New002 profile, New003 game type). Charged plasma fire
+kept the Ghost visible. Rocket pickup, an explosion ahead, a close self-hit,
+death rendering and respawn all completed. Warthog gunner entry/fire input,
+driver entry, forward/reverse steering, a drive across valley terrain, exit and
+pause also completed. The final receipt confirms the same runtime/slot, advancing
+frames, neutral input and no logger error; the saved log contains no searched
+stop/GPU/draw-failure markers. Screenshots document the rocket and vehicle cases.
+
+This exercises several previously reported crash triggers without reproducing
+a crash in this session. It does not establish a general crash fix or a speedup.
+Driving remains below the 20 FPS target; a valley-driving screenshot shows
+7 FPS. There is no matched route/timing baseline for this run. All seven paths
+remain enabled for cumulative evaluation. Private evidence is
+`bloodgulch-smoke.log`, `bloodgulch-smoke-receipt.json` and `rocket-route.json`.
