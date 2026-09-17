@@ -182,7 +182,11 @@ outer worker scopes, distinguishing the function retaining the shared guard
 from a waiting caller. Production worker/private-math sanitizer checks and
 controller restoration pass; ordinary builds omit the instrumentation. The
 diagnostic build is boot-confirmed on hardware with standard graphics restored.
-Capture and interpretation are next; sampling remains Off outside its test.
+Two native campaign captures rank the guarded `4C980` callback first, accounting
+for 62.6–78.0% of sampled held elapsed time; waiting math helpers have much
+shorter sampled holds. Next audit that callback's child dependencies before
+narrowing its protected sections. Sampling restores Off; the roughly 11.5–11.6
+FPS comparisons measure diagnostic overhead and do not establish a speedup.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)
