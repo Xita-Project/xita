@@ -173,6 +173,12 @@ static void assemble(const menu_raster_state *rs, uint16_t prim, uint32_t n,
     }
 }
 
+static int software_body(void *opaque, const h2_menu_request *r, uint8_t *ab_before, uint8_t *ab_gpu);
+
+/* A/B helper: the software draw over the restored buffer, then the comparison against the GXM result. */
+int h2_menu_software_draw_ab(void *opaque, const h2_menu_request *r, uint8_t *before, uint8_t *gpu)
+{ return software_body(opaque, r, before, gpu); }
+
 int h2_menu_software_render(void *opaque, const h2_menu_request *r)
 {
     (void)opaque;
@@ -183,24 +189,68 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     /* XV_MENU_GXM=1 routes draws to the GXM backend (menu_gxm.c); a draw it cannot take
      * (no compiled shader pair yet) falls through to this software path after the GXM
      * backend has flushed its pending scene, so both paths always see coherent buffers. */
-    static int gxm_knob = -1;
-    if (gxm_knob < 0) gxm_knob = knob("XV_MENU_GXM", 0);
+    static int gxm_knob = -1, ab_every = -1;
+    if (gxm_knob < 0) { gxm_knob = knob("XV_MENU_GXM", 0); ab_every = knob("XV_MENU_GXM_AB", 0); }
     if (gxm_knob) {
         extern int h2_menu_gxm_render(void *opaque, const h2_menu_request *r);
-        int result = h2_menu_gxm_render(opaque, r);
-        if (result != -1) return result;                 /* 1 drawn, 0 rejected; -1 = fall back */
+        extern void h2_menu_gxm_flush(void);
+        static uint64_t ab_serial;
+        int ab = ab_every > 0 && !(++ab_serial % (uint64_t)ab_every) && r->primitive != 0;
+        uint8_t *ab_before = NULL, *ab_gpu = NULL;
+        uint32_t abW = c->clip_horizontal >> 16, abH = c->clip_vertical >> 16;
+        if (ab && abW == 640 && abH == 480) {
+            /* A/B fidelity probe: keep a copy of the target, draw with GXM (flushed so the guest
+             * buffer holds its result), keep that, restore the copy, draw with the software
+             * rasterizer, compare, then put the GXM result back as the state going forward. */
+            h2_dma_object dmab; uint32_t bphys;
+            if (h2_dma_load(c->read_instance, c->opaque, c->dma_color, &dmab) &&
+                h2_dma_resolve(&dmab, c->color_offset, 640 * 480 * 4, 1, c->physical_bytes, &bphys)) {
+                uint8_t *guest = c->map_physical(c->opaque, bphys, 640 * 480 * 4);
+                if (guest) {
+                    h2_menu_gxm_flush();
+                    ab_before = malloc(640 * 480 * 4); ab_gpu = malloc(640 * 480 * 4);
+                    if (ab_before && ab_gpu) memcpy(ab_before, guest, 640 * 480 * 4);
+                    else { free(ab_before); free(ab_gpu); ab_before = ab_gpu = NULL; }
+                    if (ab_before) {
+                        int result = h2_menu_gxm_render(opaque, r);
+                        h2_menu_gxm_flush();
+                        if (result == 1) {
+                            memcpy(ab_gpu, guest, 640 * 480 * 4);
+                            memcpy(guest, ab_before, 640 * 480 * 4);
+                            /* fall through: software draw into the restored buffer, compared below */
+                        } else { free(ab_before); free(ab_gpu); ab_before = ab_gpu = NULL; if (result != -1) return result; }
+                    }
+                }
+            }
+        }
+        if (!ab_before) {
+            int result = h2_menu_gxm_render(opaque, r);
+            if (result != -1) return result;                 /* 1 drawn, 0 rejected; -1 = fall back */
+        }
+        if (ab_before) {
+            extern int h2_menu_software_draw_ab(void *opaque, const h2_menu_request *r, uint8_t *before, uint8_t *gpu);
+            return h2_menu_software_draw_ab(opaque, r, ab_before, ab_gpu);
+        }
     }
 
+    return software_body(opaque, r, NULL, NULL);
+}
+
+static int software_body(void *opaque, const h2_menu_request *r, uint8_t *ab_before, uint8_t *ab_gpu)
+{
+    (void)opaque;
+    const h2_command_state *s = r->state;
+    const h2_kelvin_clear *c = r->clear;
     uint32_t W = c->clip_horizontal >> 16, H = c->clip_vertical >> 16;
-    if (W < 16 || W > 2048 || H < 16 || H > 2048) return 0;
+    if (W < 16 || W > 2048 || H < 16 || H > 2048) { free(ab_before); free(ab_gpu); return 0; }
     const uint32_t bytes = W * H * 4;
 
     h2_dma_object dmac;
     uint32_t cphys;
     if (!h2_dma_load(c->read_instance, c->opaque, c->dma_color, &dmac) ||
-        !h2_dma_resolve(&dmac, c->color_offset, bytes, 1, c->physical_bytes, &cphys)) return 0;
+        !h2_dma_resolve(&dmac, c->color_offset, bytes, 1, c->physical_bytes, &cphys)) { free(ab_before); free(ab_gpu); return 0; }
     uint8_t *target = c->map_physical(c->opaque, cphys, bytes);
-    if (!target) return 0;
+    if (!target) { free(ab_before); free(ab_gpu); return 0; }
 
     menu_raster_state rs;
     memset(&rs, 0, sizeof rs);
@@ -269,6 +319,7 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
     uint64_t t_tex = h2_graphics_time_us();
     prof_acquire_us += t_tex - t_start;
     uint32_t n = 0;
+#define n_for_ab n
     if (r->vertex_count) {                         /* immediate vertices */
         n = r->vertex_count < MAX_VERTS ? r->vertex_count : MAX_VERTS;
         for (uint32_t i = 0; i < n; ++i) {
@@ -289,9 +340,9 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
         } else if (r->array_count) {
             maxv = r->array_start + r->array_count - 1; lo = r->array_start; count = r->array_count;
         } else {
-            return 1; /* BEGIN/END with no emission draws nothing; still a valid draw */
+            free(ab_before); free(ab_gpu); return 1; /* BEGIN/END with no emission draws nothing; still a valid draw */
         }
-        if (maxv + 1 > MAX_VERTS) return 0;
+        if (maxv + 1 > MAX_VERTS) { free(ab_before); free(ab_gpu); return 0; }
         vattr attrs[16];
         resolve_arrays(s, c, attrs, maxv);
         n = maxv + 1;
@@ -443,6 +494,29 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
                     cb.final_abcd, cb.final_efg, cb.final_factor0, cb.final_factor1, s->setup[0x1E70 / 4],
                     s->setup[0x1E60 / 4], s->setup[0x1E6C / 4], s->setup[0x1E74 / 4], s->setup[0x1E78 / 4], cb.tex_used, cw);
         }
+    }
+    if (ab_before && ab_gpu && bytes == 640 * 480 * 4) {
+        /* compare the software result (target) with the GXM result (ab_gpu) over the pixels either path touched */
+        uint64_t sum = 0, n = 0, worst = 0;
+        for (uint32_t i = 0; i < 640 * 480; ++i) {
+            const uint8_t *p = target + i * 4, *g = ab_gpu + i * 4, *b = ab_before + i * 4;
+            int touched = memcmp(p, b, 3) || memcmp(g, b, 3);
+            if (!touched) continue;
+            unsigned d = 0;
+            for (unsigned k = 0; k < 3; ++k) { int e = (int)p[k] - (int)g[k]; d += (unsigned)(e < 0 ? -e : e); }
+            sum += d; ++n; if (d > worst) worst = d;
+        }
+        char tex[96] = ""; size_t used = 0;
+        for (unsigned u = 0; u < 4; ++u) {
+            uint32_t code = 0, tw = 0, th = 0;
+            if (menu_texture_describe(s, u, &code, &tw, &th))
+                used += (size_t)snprintf(tex + used, sizeof tex - used, " t%u=%02X/%ux%u", u, code, tw, th);
+        }
+        xv_logf("[h2/menu-ab] draw=%llu prim=%u verts=%u touched=%llu mean|diff|=%.2f worst=%llu blend=%d/%04X/%04X depth=%s stages=%u vp_len=%u%s\n",
+                (unsigned long long)drawn, r->primitive, n_for_ab, (unsigned long long)n, n ? (double)sum / (double)n / 3.0 : 0.0,
+                (unsigned long long)worst, rs.blend, rs.sfactor, rs.dfactor, rs.depth.pixels ? "on" : "off", cb.stages, s->program_load, tex);
+        memcpy(target, ab_gpu, 640 * 480 * 4);           /* the GXM result is the state going forward */
+        free(ab_before); free(ab_gpu); ab_before = ab_gpu = NULL;
     }
     ++drawn;
     if (!(drawn % 500)) {
