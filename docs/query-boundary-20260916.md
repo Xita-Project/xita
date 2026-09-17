@@ -125,6 +125,13 @@ OFF stamps and rejection without `RECOMP=1` pass.
 
 ## Integration and physical comparison
 
+The September 17 fresh-launch follow-up is documented in
+[Query-boundary startup selection](query-boundary-startup-20260917.md).
+It adds `XV_QUERY_BOUNDARY_DEFAULT=1` so ordinary gameplay can exercise the path
+without selector 39. The procedure below records the earlier in-process
+comparison; current hardware validation uses fresh launches and passive logs.
+
+
 Cherry-pick the experiment, stage the changed runtime/header/Makefile and client
 files, and rebuild with the existing retained flags plus `XV_QUERY_BOUNDARY=1`.
 No owned generated guest unit changes. For the proposed package leave
