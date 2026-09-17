@@ -286,7 +286,7 @@ int H2_AUDIO_FX_TEST_MAIN(void)
     assert(!h2_audio_fx_mute(&fx,15)&&!memcmp(&fx,&invalid,sizeof fx));fx=before;
     for(unsigned bin=15;bin<=22;++bin){
         before=fx;assert(h2_audio_fx_mute(&fx,bin));
-        h2_audio_fx expected=before;expected.muted_extra|=1u<<(bin-15);expected.sources[7+bin-15].output_mask=0;
+        h2_audio_fx expected=before;expected.muted_extra|=1u<<(bin-15);expected.sources[7+bin-15].attenuation=0xFFF;
         assert(!memcmp(&fx,&expected,sizeof fx)&&h2_audio_fx_mute(&fx,bin)&&!memcmp(&fx,&expected,sizeof fx));
         assert(h2_audio_fx_render(&fx,out,32));
         for(unsigned route=8;route<=9;++route){
@@ -295,6 +295,30 @@ int H2_AUDIO_FX_TEST_MAIN(void)
         }
         for(unsigned v=0;v<H2_FX_SOURCES;++v)assert(fx.sources[v].frames==before.sources[v].frames+1);
         assert(fx.playing==before.playing&&fx.bound==before.bound&&fx.engine==before.engine);
+    }
+    /* Original zone-loop volumes: any 12-bit VP attenuation on an active
+     * FX15..22 source scales only its routed samples by 10^(-a/1280); FFF
+     * remains the mute and 0 restores unity. Every source still advances. */
+    before=fx;invalid=fx;
+    assert(!h2_audio_fx_attenuate(&fx,14,0)&&!h2_audio_fx_attenuate(&fx,23,0)&&!h2_audio_fx_attenuate(&fx,13,0)&&
+           !h2_audio_fx_attenuate(&fx,17,0x1000)&&!h2_audio_fx_attenuate(NULL,17,0)&&!memcmp(&fx,&invalid,sizeof fx));
+    fx.muted_extra=256;invalid=fx;assert(!h2_audio_fx_attenuate(&fx,17,0)&&!memcmp(&fx,&invalid,sizeof fx));fx=before;
+    fx.sources[9].attenuation=0;invalid=fx;assert(!h2_audio_fx_attenuate(&fx,17,0)&&!memcmp(&fx,&invalid,sizeof fx));fx=before;
+    static const unsigned levels[]={828,0,0xFFE,0xFFF};
+    for(unsigned l=0;l<4;++l){
+        before=fx;assert(h2_audio_fx_attenuate(&fx,17,levels[l]));
+        h2_audio_fx expected=before;expected.sources[9].attenuation=levels[l];
+        if(levels[l]==0xFFF)expected.muted_extra|=4;else expected.muted_extra&=~4u;
+        assert(!memcmp(&fx,&expected,sizeof fx)&&h2_audio_fx_fixed_commit_ready(&fx)&&!memcmp(&fx,&expected,sizeof fx));
+        before=fx;assert(h2_audio_fx_render(&fx,out,32));
+        long expected_route=levels[l]==0xFFF?0:lrint(0x200000*pow(10.0,-(double)levels[l]/1280.0));
+        for(unsigned i=0;i<32;++i){
+            long got=(long)s->core.mixbuffer[8*32+i];
+            assert(got>=expected_route-1&&got<=expected_route+1);
+            assert(s->core.mixbuffer[9*32+i]==0);
+        }
+        for(unsigned v=0;v<H2_FX_SOURCES;++v)assert(fx.sources[v].frames==before.sources[v].frames+1);
+        assert(fx.playing==before.playing&&fx.bound==before.bound&&fx.engine==before.engine&&fx.muted_extra==before.muted_extra);
     }
     before=fx;h2_dsp_engine engine_before=*s;uint8_t scratch_before[0x10000];memcpy(scratch_before,s->scratch,sizeof scratch_before);
     assert(h2_audio_fx_fixed_commit_ready(&fx)&&!memcmp(&fx,&before,sizeof fx));

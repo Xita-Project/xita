@@ -160,10 +160,13 @@ int main(void)
     assert(status.fx_playing_mask == 0x7fff && status.fx_bound_mask == 0x7fff);
     atomic_store(&faults,1u<<F_HOLD);
     for(;;){h2_audio_backend_snapshot(&status);if(status.fx_computed_frames>status.fx_submitted_frames)break;usleep(1000);}
-    assert(!h2_audio_backend_fixed_commit_ready(s)); /* active extra routes not muted yet */
+    assert(h2_audio_backend_fixed_commit_ready(s)); /* FX15..22 volumes are not part of the commit */
     uint64_t mute_computed=status.fx_computed_frames,prior_sources[H2_FX_SOURCES];
     memcpy(prior_sources,status.fx_source_consumed,sizeof prior_sources);
     for(unsigned bin=15;bin<=22;++bin)assert(h2_audio_backend_fx_mute(bin)==0);
+    assert(h2_audio_backend_fx_attenuate(17,828)==0&&h2_audio_backend_fx_attenuate(17,0x1000)<0&&
+           h2_audio_backend_fx_attenuate(23,0)<0&&fx.sources[9].attenuation==828&&!(fx.muted_extra&4));
+    assert(h2_audio_backend_fx_mute(17)==0&&fx.sources[9].attenuation==0xFFF&&fx.muted_extra==255);
     assert(!h2_audio_backend_fixed_commit_ready(NULL)&&!h2_audio_backend_fixed_commit_ready((h2_dsp_engine*)(uintptr_t)1));
     h2_audio_fx commit_before=fx;h2_dsp_status dsp_before,dsp_after;h2_dsp_snapshot(s,&dsp_before);
     assert(h2_audio_backend_fixed_commit_ready(s));h2_dsp_snapshot(s,&dsp_after);

@@ -1,5 +1,6 @@
 /* Actual adapter/mixer with synthetic DSP provider for ABI/lifetime tests.
  * The real interpreter and owned-program execution are separately tested. */
+#include <math.h>
 #define H2_AUDIO_DSP 1
 #define xv_call test_stream_invoke
 #define main original_pcm_test_main
@@ -45,6 +46,14 @@ int h2_audio_backend_fx_route_mask(unsigned key, unsigned output_mask)
     else if (key == 24) { assert(output_mask == 128 && test_fx23_muted); test_fx24_output_mask = output_mask; }
     else { assert(key == H2_FX_SPATIAL25 && output_mask == 1024 && test_fx24_muted); test_fx25_routed = 1; }
     return 0;
+}
+static unsigned test_extra_attenuation[8];
+static int test_extra_attenuate_failure;
+int h2_audio_backend_fx_attenuate(unsigned key, unsigned attenuation)
+{
+    assert(key>=15&&key<=22&&attenuation<0xFFF&&test_fx_bound==0x7fff&&test_fx_playing==0x7fff);
+    if(test_extra_attenuate_failure)return -1;
+    test_extra_attenuation[key-15]=attenuation;test_extra_muted&=~(1u<<(key-15));return 0;
 }
 int h2_audio_backend_fx_mute(unsigned key)
 {
@@ -208,6 +217,7 @@ static void reverb_expect_stop(xctx *c, uint32_t ip, int original)
         assert(0);
     }
 }
+static uint32_t f32(float v){uint32_t u;memcpy(&u,&v,4);return u;}
 static void reverb_adapter_tests(void)
 {
     description_probe_enabled=1;
@@ -222,11 +232,27 @@ static void reverb_adapter_tests(void)
         for(unsigned i=0;i<66;++i)assert(test_reverb_parameters[i]==(i%2?0xff800001u+i:0x123456u+i));
         x_guest_read(after,0x6ffe,52);assert(!memcmp(input,after,52));
     }
+    /* Any in-range I3DL2 description is admitted (the level presets differ
+     * from the startup default); each field is refused just outside its
+     * documented DSI3DL2LISTENER range and the count must be 12. */
+    const uint32_t below[13]={11,(uint32_t)-10001,(uint32_t)-10001,f32(-1.0f),f32(nextafterf(0.1f,0.0f)),f32(nextafterf(0.1f,0.0f)),
+        (uint32_t)-10001,f32(-1.0f),(uint32_t)-10001,f32(-1.0f),f32(-1.0f),f32(-1.0f),f32(19.0f)};
+    const uint32_t above[13]={13,1,1,f32(nextafterf(10.0f,11.0f)),f32(nextafterf(20.0f,21.0f)),f32(nextafterf(2.0f,3.0f)),
+        1001,f32(nextafterf(0.3f,1.0f)),2001,f32(nextafterf(0.1f,1.0f)),f32(nextafterf(100.0f,101.0f)),f32(nextafterf(100.0f,101.0f)),f32(nextafterf(20000.0f,20001.0f))};
+    const uint32_t inside[13]={12,(uint32_t)-1300,(uint32_t)-100,f32(0.5f),f32(5.0f),f32(0.83f),(uint32_t)-2602,f32(0.007f),200,f32(0.011f),f32(50.0f),f32(90.0f),f32(5000.0f)};
     for(unsigned field=0;field<13;++field){
-        xctx c=reverb_context();uint32_t words[13];x_guest_read(words,0x6ffe,sizeof words);words[field]^=1;x_guest_write(0x6ffe,words,sizeof words);
-        dsp_reject(&c,0x37ba6f);
+        for(unsigned edge=0;edge<2;++edge){
+            xctx c=reverb_context();uint32_t words[13];x_guest_read(words,0x6ffe,sizeof words);
+            words[field]=edge?above[field]:below[field];x_guest_write(0x6ffe,words,sizeof words);
+            dsp_reject(&c,0x37ba6f);
+        }
+        xctx c=reverb_context();uint32_t words[13];x_guest_read(words,0x6ffe,sizeof words);
+        words[field]=inside[field];x_guest_write(0x6ffe,words,sizeof words);
+        unsigned a=allocs,f=frees,q=test_reverb_queues;uint32_t input[13];x_guest_read(input,0x6ffe,sizeof input);
+        call(&c,0x37ba6f,0,3);assert(allocs==a+1&&frees==f+1&&test_reverb_queues==q+1);
+        uint32_t after[13];x_guest_read(after,0x6ffe,sizeof after);assert(!memcmp(input,after,sizeof after));
     }
-    for(unsigned bad=0;bad<10;++bad){
+    for(unsigned bad=0;bad<9;++bad){
         xctx c=reverb_context();
         switch(bad){
         case 0:X_M32(c.r[4])^=4;break;
@@ -236,14 +262,19 @@ static void reverb_adapter_tests(void)
         case 4:X_M32(c.r[4]+8)=effects_guest;break;
         case 5:X_M32(c.r[4]+8)=c.r[4];break;
         case 6:c.df=1;break;
-        case 7:c.fsp=1;break;
-        case 8:c.fcw=0x7f;break;
-        case 9:native_fp|=0x1000000;break;
+        case 7:c.fcw=0x37e;break; /* unmasked x87 invalid-operation exception */
+        case 8:c.fcw=0x300;break; /* no x87 exception masks at all */
         }
         dsp_reject(&c,0x37ba6f);
     }
-    for(unsigned bit=0;bit<32;++bit)if(0x03f79f00u&(1u<<bit)){
-        xctx c=reverb_context();native_fp|=1u<<bit;dsp_reject(&c,0x37ba6f);
+    /* The caller's live x87 stack, precision control and FPSCR are its own
+     * state on hardware too (the level's sound code computes the environment
+     * in float registers): admitted, and each of them is left intact. */
+    for(unsigned mode=0;mode<34;++mode){
+        xctx c=reverb_context();
+        if(mode==32)c.fsp=1;else if(mode==33)c.fcw=0x7f;
+        else{if(!(0x03f79f00u&(1u<<mode)))continue;native_fp|=1u<<mode;}
+        unsigned q=test_reverb_queues;call(&c,0x37ba6f,0,3);assert(test_reverb_queues==q+1);
     }
     xctx c=reverb_context();allocation_failure=1;unsigned a=allocs,f=frees,q=test_reverb_queues;
     call(&c,0x37ba6f,0x8007000e,3);assert(allocs==a+1&&frees==f&&test_reverb_queues==q);allocation_failure=0;

@@ -1,4 +1,5 @@
 #include "audio_fx.h"
+#include <math.h>
 #include <string.h>
 
 unsigned h2_audio_fx_mask(unsigned key)
@@ -54,15 +55,18 @@ static int completed_configuration(const h2_audio_fx *fx)
     for(unsigned i=0;i<7;++i)
         if(fx->sources[i].routes!=counts[i] || fx->sources[i].output_mask!=outputs[i])return 0;
     for(unsigned i=7;i<H2_FX_SOURCES;++i)
-        if(fx->sources[i].routes!=1 || fx->sources[i].output_mask!=
-           ((fx->muted_extra&(1u<<(i-7))) ? 0u : (1u<<(6+(i-7)%4))))return 0;
+        if(fx->sources[i].routes!=1 || fx->sources[i].output_mask!=(1u<<(6+(i-7)%4)) ||
+           fx->sources[i].attenuation>0xFFF ||
+           !!(fx->muted_extra&(1u<<(i-7)))!=(fx->sources[i].attenuation==0xFFF))return 0;
     return 1;
 }
 int h2_audio_fx_fixed_commit_ready(const h2_audio_fx *fx)
 {
     /* Original commit leaves this already-active fixed geometry/routing
-     * unchanged. Readiness never clears filters, grains, histories or time. */
-    return completed_configuration(fx) && fx->muted_extra==255 && fx->frames;
+     * unchanged; the FX15..22 volumes were already written by SetVolume
+     * (0x381CE4) and are not part of it. Readiness never clears filters,
+     * grains, histories or time. */
+    return completed_configuration(fx) && fx->frames;
 }
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned key, unsigned output_mask)
 {
@@ -86,13 +90,22 @@ int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned key, unsigned output_mask)
     if (fx->sources[index].routes != count && fx->sources[index].routes != 2) return 0;
     fx->sources[index].routes = count; fx->sources[index].output_mask = output_mask; return 1;
 }
+int h2_audio_fx_attenuate(h2_audio_fx *fx, unsigned key, unsigned attenuation)
+{
+    if(key<15 || key>22 || attenuation>0xFFF || !completed_configuration(fx))return 0;
+    /* Original SetVolume rewrites the routed slot's 12-bit attenuation at
+     * once (0x380B97: -(volume)*64/100 saturated at FFF). The route, source
+     * ownership, filters and all processing time are retained. */
+    fx->sources[7+key-15].attenuation=attenuation;
+    if(attenuation==0xFFF)fx->muted_extra|=1u<<(key-15);else fx->muted_extra&=~(1u<<(key-15));
+    return 1;
+}
 int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key)
 {
     if (key>=15 && key<=22) {
-        if(!completed_configuration(fx))return 0;
         /* Original active SetVolume(-6400) emits FFF attenuation in every
          * slot. Retain the route, source ownership and all processing time. */
-        fx->sources[7+key-15].output_mask=0;fx->muted_extra|=1u<<(key-15);return 1;
+        return h2_audio_fx_attenuate(fx,key,0xFFF);
     }
     if(completed_configuration(fx))return key==H2_FX_SPATIAL23 || key==H2_FX_SPATIAL24 || key==25;
     if (!fx || fx->bound != 127 || fx->playing != 127) return 0;
@@ -132,6 +145,9 @@ int h2_audio_fx_forget(h2_audio_fx *fx, unsigned bin)
     if (!fx->bound) *fx = (h2_audio_fx){0};
     return 1;
 }
+/* Voice-processor mix-bin volume: 1/64 dB attenuation, FFF is silence. */
+static float source_gain(unsigned attenuation)
+{ return attenuation>=0xFFF ? 0.0f : attenuation ? powf(10.0f,-(float)attenuation/1280.0f) : 1.0f; }
 static int mix_full_loop(h2_audio_fx *fx, int32_t bins[32][32], const int16_t *pcm)
 {
     int32_t sources[H2_FX_SOURCES][32];
@@ -160,8 +176,11 @@ static int mix_full_loop(h2_audio_fx *fx, int32_t bins[32][32], const int16_t *p
                 if ((v == 1 || v == 3) && (fx->filtered & (1u << ((v - 1) / 2))))
                     samples[i] = h2_audio_filter_sample(&fx->lowpass[(v - 1) / 2], samples[i]);
             }
+            /* Mix-bin volume after the filter, as the VP applies it: a muted
+             * (FFF) source still reads, filters and advances, contributing zero. */
+            float gain = source_gain(fx->sources[v].attenuation);
             for (unsigned bin = 0; bin < 11; ++bin) if (fx->sources[v].output_mask & (1u << bin))
-                for (unsigned i = 0; i < 32; ++i) mixed[bin][i] += samples[i];
+                for (unsigned i = 0; i < 32; ++i) mixed[bin][i] += samples[i] * gain;
         }
     }
     for (unsigned bin = 0; bin < 11; ++bin)

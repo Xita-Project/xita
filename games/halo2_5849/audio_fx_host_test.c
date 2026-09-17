@@ -280,14 +280,15 @@ int main(int argc, char **argv)
                     uint32_t handle=extra_sources[bin-15];h2_audio_buffer *target=find_buffer(handle-0x1c);
                     h2_audio_buffer before=*target;unsigned mask=test_extra_muted;
                     c=fx_context(handle,(uint32_t)-6400,0x21F1A1);reject(&c,0x37B66F);
-                    c=fx_context(handle,(uint32_t)-6399,0x21F1A0);reject(&c,0x37B66F);
+                    c=fx_context(handle,(uint32_t)-6401,0x21F1A0);reject(&c,0x37B66F);
+                    c=fx_context(handle,1,0x21F1A0);reject(&c,0x37B66F);
                     c=fx_context(handle,(uint32_t)-6400,0x21F1A0);reject(&c,0x37B6A7);
-                    for(unsigned bad=0;bad<7;++bad){
+                    for(unsigned bad=0;bad<8;++bad){
                         *target=before;
                         switch(bad){case 0:target->started=0;break;case 1:target->stopped=1;break;
                         case 2:target->headroom=1;break;case 3:target->route_count=2;break;
                         case 4:target->route_bins[0]^=1;break;case 5:target->route_gains[0]=1;break;
-                        case 6:target->volume=-1;break;}
+                        case 6:target->volume=1;break;case 7:target->volume=-6401;break;}
                         h2_audio_buffer invalid=*target;c=fx_context(handle,(uint32_t)-6400,0x21F1A0);reject(&c,0x37B66F);
                         assert(!memcmp(target,&invalid,sizeof invalid)&&test_extra_muted==mask);
                     }
@@ -298,7 +299,22 @@ int main(int argc, char **argv)
                     before.volume=-6400;assert(!memcmp(target,&before,sizeof before));
                     assert(test_extra_muted==(1u<<(bin-14))-1);
                     c=fx_context(handle,(uint32_t)-6400,0x21F1A0);call(&c,0x37B66F,0,2);
-                    c=fx_context(handle,0,0x21F1A0);reject(&c,0x37B66F); /* unmute remains unsupported */
+                    /* Original zone gains: -1295 -> 1295*64/100 = 828 (1/64 dB);
+                     * -6399 still saturates at FFF (mute); 0 restores unity. */
+                    test_extra_attenuate_failure=1;
+                    c=fx_context(handle,(uint32_t)-1295,0x21F1A0);reject(&c,0x37B66F);
+                    assert(!memcmp(target,&before,sizeof before)&&test_extra_muted==(1u<<(bin-14))-1);
+                    test_extra_attenuate_failure=0;
+                    c=fx_context(handle,(uint32_t)-1295,0x21F1A0);call(&c,0x37B66F,0,2);
+                    before.volume=-1295;assert(!memcmp(target,&before,sizeof before));
+                    assert(test_extra_attenuation[bin-15]==828&&test_extra_muted==(1u<<(bin-15))-1);
+                    c=fx_context(handle,(uint32_t)-6399,0x21F1A0);call(&c,0x37B66F,0,2);
+                    before.volume=-6399;assert(!memcmp(target,&before,sizeof before)&&test_extra_muted==(1u<<(bin-14))-1);
+                    c=fx_context(handle,0,0x21F1A0);call(&c,0x37B66F,0,2);
+                    before.volume=0;assert(!memcmp(target,&before,sizeof before));
+                    assert(!test_extra_attenuation[bin-15]&&test_extra_muted==(1u<<(bin-15))-1);
+                    c=fx_context(handle,(uint32_t)-6400,0x21F1A0);call(&c,0x37B66F,0,2);
+                    before.volume=-6400;assert(!memcmp(target,&before,sizeof before)&&test_extra_muted==(1u<<(bin-14))-1);
                 }
                 fixed_commit_tests(dev);
                 for (unsigned field=0;field<6;++field) {

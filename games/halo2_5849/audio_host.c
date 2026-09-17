@@ -748,12 +748,22 @@ static void buffer_control(xctx *c, uint32_t ip)
 #if H2_AUDIO_DSP
         uint32_t caller = X_M32(c->r[4]);
         if (ip==0x37B66F && caller==0x21F1A0 && b->fx_bin>=15 && b->fx_bin<=22) {
-            if(value!=(uint32_t)-6400 || !b->started || b->stopped || b->headroom ||
+            /* Original zone loop 0x21F069: 2000*log10(zone gain) clamped to
+             * [-6400,0] per buffer. SetVolume (0x37A5D4) stores volume-headroom
+             * and 0x381CE4/0x380B97 write each routed bin's attenuation
+             * -(bin gain+volume)*64/100 saturated at FFF (1/64 dB; FFF mutes). */
+            int32_t volume=(int32_t)value;
+            if(volume>0 || volume<-6400 || !b->started || b->stopped || b->headroom ||
                b->route_count!=1 || b->route_bins[0]!=6+(b->fx_bin-15)%4 || b->route_gains[0] ||
-               (b->volume && b->volume!=-6400))fail(c,ip,"unsupported FX15..22 mute state/value",value);
-            if(h2_audio_backend_fx_mute(b->fx_bin)<0)fail(c,ip,"FX15..22 mixer mute rejected",b->fx_bin);
-            b->volume=-6400;
-            xv_logf("[h2/fxin2] caller=0021F1A0 interface=%08X bin=%u volume=-6400 original attenuationFFF; route/source/GP time retained\n",b->base+0x1c,b->fx_bin);
+               b->volume>0 || b->volume<-6400)fail(c,ip,"unsupported FX15..22 volume state/value",value);
+            unsigned attenuation=(unsigned)(-volume)*64u/100u;
+            if(attenuation>0xFFF)attenuation=0xFFF;
+            if((attenuation==0xFFF ? h2_audio_backend_fx_mute(b->fx_bin)
+                                   : h2_audio_backend_fx_attenuate(b->fx_bin,attenuation))<0)
+                fail(c,ip,"FX15..22 mixer volume rejected",b->fx_bin);
+            b->volume=volume;
+            xv_logf("[h2/fxin2] caller=0021F1A0 interface=%08X bin=%u volume=%d original attenuation%03X; route/source/GP time retained\n",
+                    b->base+0x1c,b->fx_bin,volume,attenuation);
             result(c,0,2);return;
         }
         uint32_t muted_key = caller == 0x2AECA6 ? H2_FX_SPATIAL23 : caller == 0x2AEDF8 ? H2_FX_SPATIAL24 : caller == 0x2AEF43 ? 25 : 0;
@@ -1411,10 +1421,12 @@ static void effects_description(xctx *c)
         reverb_conversion.context || !mapped(effects_guest,effects_guest_bytes) ||
         !mapped(source,sizeof words) || overlaps_device(source,sizeof words) ||
         aliases(source,sizeof words,c->r[4],16) || c->df || (c->fcw&0x3f)!=0x3f) {
+        uint32_t fp=h2_platform_fpscr_read(); /* the diagnostic leaves the caller's FP state intact */
         xv_logf("[h2/reverb] refused caller=%08X index=%u arg2=%08X effects=%d nested=%d effects_mapped=%d source_mapped=%d device_overlap=%d alias=%d df=%u fsp=%u fcw=%04X\n",
                 X_M32(c->r[4]), index, X_ARG(2), effects!=NULL, reverb_conversion.context!=NULL,
                 mapped(effects_guest,effects_guest_bytes), mapped(source,sizeof words), overlaps_device(source,sizeof words),
                 aliases(source,sizeof words,c->r[4],16), (unsigned)c->df, (unsigned)c->fsp, (unsigned)c->fcw);
+        h2_platform_fpscr_write(fp);
         fail(c,ip,"unreviewed reverb description/caller/control",source);
     }
     /* A live x87 stack at the call (the level's sound code computes the environment
@@ -1434,10 +1446,12 @@ static void effects_description(xctx *c)
             f[10]>=0.0f && f[10]<=100.0f && f[11]>=0.0f && f[11]<=100.0f &&
             f[12]>=20.0f && f[12]<=20000.0f;
         if (!ranges) fail(c,ip,"I3DL2 description out of range",words[0]);
+        uint32_t fp=h2_platform_fpscr_read(); /* the diagnostic leaves the caller's FP state intact */
         xv_logf("[h2/reverb] description effect=%u room=%d roomHF=%d rolloff=%u.%02u decay=%u.%02us hfratio=%u.%02u reflections=%d@%ums reverb=%d@%ums diffusion=%u density=%u hfref=%u fcw=%04X fpscr=%08X\n",
                 index, room, room_hf, (unsigned)f[3], (unsigned)(f[3]*100)%100, (unsigned)f[4], (unsigned)(f[4]*100)%100,
                 (unsigned)f[5], (unsigned)(f[5]*100)%100, reflections, (unsigned)(f[7]*1000), reverb, (unsigned)(f[9]*1000),
-                (unsigned)f[10], (unsigned)f[11], (unsigned)f[12], c->fcw, h2_platform_fpscr_read());
+                (unsigned)f[10], (unsigned)f[11], (unsigned)f[12], c->fcw, fp);
+        h2_platform_fpscr_write(fp);
     }
     if (!h2_audio_backend_effect_read(effects,index,0,prefix,sizeof prefix))
         fail(c,ip,"reverb current-state read",index);

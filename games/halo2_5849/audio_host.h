@@ -73,6 +73,8 @@ int h2_audio_backend_fx_bind_spatial(h2_dsp_engine *engine, unsigned bin, const 
 int h2_audio_backend_fx_route(unsigned bin, unsigned routes);
 int h2_audio_backend_fx_route_mask(unsigned bin, unsigned output_mask);
 int h2_audio_backend_fx_mute(unsigned key);
+/* Active FX15..22 mix-bin attenuation (1/64 dB units below the FFF mute). */
+int h2_audio_backend_fx_attenuate(unsigned key, unsigned attenuation);
 int h2_audio_backend_fx_filter(unsigned key);
 /* Validate the actual fixed FX configuration under its mixer mutex. No
  * processing, history reset, pending DSP update or grain mutation. */

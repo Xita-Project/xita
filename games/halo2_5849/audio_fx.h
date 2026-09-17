@@ -13,14 +13,17 @@
  * this state, and every read of that engine. */
 /* Internal source keys, distinct from nonspatial voices using the same bins. */
 #include "audio_fx_limits.h"
-typedef struct { unsigned routes, output_mask; uint64_t frames; } h2_audio_fx_source;
+/* attenuation: the original VP mix-bin volume that SetVolume writes at once
+ * (0x381CE4/0x380B97): -(volume+bin gain)*64/100 in 1/64 dB saturated at FFF,
+ * which the voice processor treats as silence (gain 10^(-a/1280) otherwise). */
+typedef struct { unsigned routes, output_mask, attenuation; uint64_t frames; } h2_audio_fx_source;
 typedef struct {
     h2_dsp_engine *engine;
     unsigned bound, playing;
     uint64_t frames;
     h2_audio_fx_source sources[H2_FX_SOURCES];
     h2_hrtf_model spatial[3];
-    unsigned filtered, muted_extra; /* bits 0..7: audited active FX15..22 mute */
+    unsigned filtered, muted_extra; /* bits 0..7 mirror FX15..22 attenuation FFF */
     h2_audio_filter lowpass[2]; /* independent nonspatial23/24 histories */
 } h2_audio_fx;
 /* Stable source bits are defined in audio_fx_limits.h. Zero is unsupported. */
@@ -33,6 +36,10 @@ int h2_audio_fx_route(h2_audio_fx *fx, unsigned bin, unsigned routes);
  * configuration. The creation/Play sequence remains enforced. */
 int h2_audio_fx_route_mask(h2_audio_fx *fx, unsigned bin, unsigned output_mask);
 int h2_audio_fx_mute(h2_audio_fx *fx, unsigned key);
+/* Active FX15..22 SetVolume from the original zone loop (0x21F069): any
+ * 12-bit VP attenuation; FFF is the audited mute, 0 unity. Routes, source
+ * ownership, filters and all processing time are retained. */
+int h2_audio_fx_attenuate(h2_audio_fx *fx, unsigned key, unsigned attenuation);
 int h2_audio_fx_filter(h2_audio_fx *fx, unsigned key);
 /* Read-only admission for the observed unchanged fixed-geometry commit. */
 int h2_audio_fx_fixed_commit_ready(const h2_audio_fx *fx);

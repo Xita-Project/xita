@@ -267,6 +267,13 @@ int h2_audio_backend_fx_mute(unsigned key)
     int ok = h2_audio_backend_health() == 0 && h2_audio_fx_mute(&fx, key);
     sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
 }
+int h2_audio_backend_fx_attenuate(unsigned key, unsigned attenuation)
+{
+    if (h2_audio_backend_health() < 0) return -1;
+    sceKernelLockMutex(progress_mutex, 1, NULL);
+    int ok = h2_audio_backend_health() == 0 && h2_audio_fx_attenuate(&fx, key, attenuation);
+    sceKernelUnlockMutex(progress_mutex, 1); return ok ? 0 : -1;
+}
 int h2_audio_backend_fx_forget(unsigned bin)
 {
     if (h2_audio_backend_health() < 0) return -1;
