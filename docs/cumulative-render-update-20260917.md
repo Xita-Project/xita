@@ -212,3 +212,57 @@ scene boundary. These are nested elapsed scopes, not additive removable time.
 The next diagnostic adds coarse owner tick/scene timing without enabling the
 old phase facility that disables object workers. Compatible retained changes
 stay cumulative while this larger performance gap is investigated.
+
+## Combined model-processing trial
+
+Source `adfccac` retains the eighteen selections above and adds the qualified
+ordered ancestor query scan plus the existing model hierarchy and palette
+batches. These batches are selected together by an explicit private startup
+trial after dashboard/configuration loading and before guest threads. The log
+reports configured and effective choices separately; saved settings are not
+changed. Matrix NEON and graphics remain as configured. The native-math disable
+still takes precedence.
+
+The [ancestor integration](engineering/QUERY_ANCESTOR_SCALAR_INTEGRATION.md),
+[combined model fixtures](model-batch-composition-20260917.md), and
+[startup trial](model-batches-trial-20260917.md) record the bounded correctness
+checks. The additional [owner timing](owner-phase-20260917.md) counts actual
+outer tick/scene calls without enabling the older profiler that disables object
+workers. These are inclusive elapsed scopes, not additive CPU/GPU self times.
+
+The complete package preserves all eighteen preceding build selections and
+87 objects byte-for-byte. Six objects change and one observer object is added.
+The final query object exactly matches the qualified production object; the
+collision solver remains identical. Removing the two guarded scope insertions
+restores both complete generated units exactly. All 1,588 members and the update
+contract remain; only the executable and boot selection differ. Candidate
+runtime SHA-256 is
+`bc7c988467e4c33ed3202a180afd03adb50fb3e30a5bb558ce18d42f3938ba88`.
+
+This is a cumulative gameplay trial, not a claim of 21 independent speedups or
+another five FPS. The remote updater has installed and boot-confirmed this
+runtime in slot 0; the preceding eighteen-path runtime remains in slot 1.
+Fresh startup confirms both model overrides are effective, owner observation is
+ON, both retained rendering options remain ON, and native resolution remains
+selected. The menu loads normally and shows actual palette batches. A screen
+request during initial loading returned no completed display frame; subsequent
+menu capture succeeded. The original New001 Normal campaign checkpoint loaded.
+
+Settled checkpoint reports are about 12.2–12.4 FPS with 153–158 draws/frame.
+Both model paths execute: one 60-frame window reports 684 palette batches
+(8,329 matrices) and 3,059 hierarchy batches (16,758 child nodes), alongside
+the original guarded fallbacks. Both object-worker lanes remain active. The
+same owner observation window has 60 entries/completions for each scope, about
+36.0 ms/frame tick-driver elapsed and 42.6 ms/frame scene-dispatch elapsed,
+with no invalid, abandoned or stale observation. These include nested work and
+waits; they are not independent removable CPU costs.
+
+Two fire inputs, camera/strafe, forward/reverse movement and pause completed.
+The final receipt is frame 10,420 with a 1,567,564-byte log, no searched fault
+marker and zero logger errors/failed writes. The Vita is paused with neutral
+input. Paused reports are excluded from active comparisons. This is bounded
+campaign smoke, not matched performance proof or long-session crash clearance.
+Blood Gulch combat/driving qualification remains outstanding for this new
+combination. No five-FPS gain or stable 20 FPS is established. The next work
+uses the coarse tick/scene split to target larger costs while keeping the
+compatible optimizations together.
