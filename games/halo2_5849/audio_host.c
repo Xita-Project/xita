@@ -194,7 +194,7 @@ static h2_audio_buffer *buffer_live(xctx *c, uint32_t ip, uint32_t object, int i
         fail(c, ip, "unsupported routed low-rate PCM method", b->base);
     if (b->submix == 1 && ip != 0x37D4BE && ip != 0x37A14F && ip != 0x379F45 &&
         ip != 0x37A795 && ip != 0x37C5E4 && ip != 0x37C620 && ip != 0x37C644 &&
-        ip != 0x37C6C1 && ip != 0x37C69D && ip != 0x37C600)
+        ip != 0x37C6C1 && ip != 0x37C69D && ip != 0x37C600 && ip != 0x37C6E5 && ip != 0x37B68B)
         fail(c, ip, "submix activation/data/spatial processing is unsupported", b->base);
     if (b->submix == 2 && ip != 0x37A14F && ip != 0x379F45 && ip != 0x37A795 &&
         ip != 0x37B66F && ip != 0x37C5E4 && ip != 0x37B6DF &&
@@ -964,6 +964,21 @@ static void fx_filter(xctx *c)
     const uint32_t ip = 0x37B68B;
     stack(c, ip, 2); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
     uint32_t address = X_ARG(1), words[6], caller = X_M32(c->r[4]);
+    if (b->submix == 1) {
+        /* Level start (0x2213xx, return 0x22147C) sets each inactive 3D bus's
+         * low-pass filter: mode 1, cutoff 0x21E270(8000 Hz)=0, resonance
+         * 0x21E2D0(0)=0x8000, the descriptor already audited for FX23/24.
+         * Original 0x381710 packs it into the registered voice image; the bus
+         * is inactive, so there is no processing to update. */
+        if (caller != 0x22147C || b->started || b->stopped || !mapped(address, sizeof words))
+            fail(c, ip, "unsupported submix filter caller/state/input", address);
+        x_guest_read(words, address, sizeof words);
+        const uint32_t fixed[6] = {1,0,0,0x8000,0,0};
+        if (memcmp(words, fixed, sizeof words)) fail(c, ip, "unsupported submix filter coefficients", address);
+        memcpy(b->filter, words, sizeof words);
+        xv_logf("[h2/submix] filter caller=0022147C interface=%08X mode=1 cutoff=0 resonance=8000; inactive voice image only\n", b->base + 0x1C);
+        result(c, 0, 2); return;
+    }
 #if H2_AUDIO_FILTER_MODEL
     unsigned key = caller == 0x2AEFBC ? 23 : caller == 0x2AEFCD ? 24 : 0;
     if (!key || b->submix != 2 || b->fx_bin != key || !b->started || b->stopped ||
@@ -989,6 +1004,32 @@ static void fx_deferred_parameters(xctx *c)
     const uint32_t ip = 0x37C6E5;
     stack(c, ip, 3); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
     uint32_t address = X_ARG(1), words[9];
+    if (b->submix == 1) {
+        /* Level start (0x2213xx, return 0x221427): SetI3DL2Source(DEFERRED) on
+         * each inactive 3D bus with the environment's send levels. Original
+         * 0x37C0E9 copies the nine DSI3DL2BUFFER words and ORs the seven dirty
+         * bits; the deferred flag returns before 0x37A669, and the commit
+         * (0x37D141) skips registered inactive voices, so they stay pending. */
+        if (X_M32(c->r[4]) != 0x221427 || X_ARG(2) != 1 || !mapped(address, sizeof words) ||
+            b->started || b->stopped)
+            fail(c, ip, "unsupported submix I3DL2 source caller/state/input", address);
+        x_guest_read(words, address, sizeof words);
+        float f[9]; memcpy(f, words, sizeof f);
+        int32_t direct=(int32_t)words[0], direct_hf=(int32_t)words[1], room=(int32_t)words[2], room_hf=(int32_t)words[3],
+                obstruction=(int32_t)words[5], occlusion=(int32_t)words[7];
+        if (direct<-10000 || direct>0 || direct_hf<-10000 || direct_hf>0 || room<-10000 || room>0 ||
+            room_hf<-10000 || room_hf>0 || !(f[4]>=0.0f && f[4]<=10.0f) ||
+            obstruction<-10000 || obstruction>0 || !(f[6]>=0.0f && f[6]<=1.0f) ||
+            occlusion<-10000 || occlusion>0 || !(f[8]>=0.0f && f[8]<=1.0f))
+            fail(c, ip, "I3DL2 source out of range", address);
+        memcpy(&b->spatial[0x80 / 4], words, sizeof words);
+        b->spatial[0x7C / 4] |= 0x007F0000;
+        xv_logf("[h2/submix] I3DL2 source caller=00221427 interface=%08X direct=%d/%d room=%d/%d rolloff=%u.%02u obstruction=%d@%u.%02u occlusion=%d@%u.%02u dirty=%08X; deferred storage, inactive\n",
+                b->base + 0x1C, direct, direct_hf, room, room_hf, (unsigned)f[4], (unsigned)(f[4]*100)%100,
+                obstruction, (unsigned)f[6], (unsigned)(f[6]*100)%100, occlusion, (unsigned)f[8], (unsigned)(f[8]*100)%100,
+                b->spatial[0x7C / 4]);
+        result(c, 0, 3); return;
+    }
     if (X_M32(c->r[4]) != 0x2AEF6A || X_ARG(2) != 1 || !mapped(address, sizeof words) ||
         b->submix != 2 || b->fx_bin != H2_FX_SPATIAL25 || !b->started || b->stopped || b->volume || b->headroom ||
         b->route_count != 5 || b->route_bins[4] != 10 || b->route_gains[0] != -6400 || b->route_gains[4])

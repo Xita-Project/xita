@@ -72,6 +72,43 @@ int main(void)
         pairs[i] ^= 1; x_guest_write(list[1], pairs, sizeof pairs);
         c = context(handle, 0x4FFC, 0, 0); X_M32(c.r[4]) = 0x220B29; reject(&c, 0x37C5E4); pairs[i] ^= 1;
     }
+    /* Level start on an inactive bus: SetI3DL2Source(deferred) stores the nine
+     * DSI3DL2BUFFER words (each refused just outside its documented range) and
+     * SetFilter stores the fixed low-pass descriptor; nothing else changes. */
+    {
+        const uint32_t source[9] = {0,0,(uint32_t)-6400,(uint32_t)-6400,0,0,0,0,0x3e800000};
+        const uint32_t below[9] = {(uint32_t)-10001,(uint32_t)-10001,(uint32_t)-10001,(uint32_t)-10001,0xbf800000u,
+                                   (uint32_t)-10001,0xbf800000u,(uint32_t)-10001,0xbf800000u};
+        const uint32_t above[9] = {1,1,1,1,0x41200001u,1,0x3f800001u,1,0x3f800001u};
+        uint32_t before[41]; memcpy(before, b->spatial, sizeof before);
+        x_guest_write(0x5FFB, source, sizeof source);
+        c = context(handle, 0x5FFB, 1, 0); X_M32(c.r[4]) = 0x221428; reject(&c, 0x37C6E5);
+        c = context(handle, 0x5FFB, 0, 0); X_M32(c.r[4]) = 0x221427; reject(&c, 0x37C6E5);
+        c = context(handle, 0, 1, 0); X_M32(c.r[4]) = 0x221427; reject(&c, 0x37C6E5);
+        b->started = 1; c = context(handle, 0x5FFB, 1, 0); X_M32(c.r[4]) = 0x221427; reject(&c, 0x37C6E5); b->started = 0;
+        for (unsigned field = 0; field < 9; ++field) for (unsigned edge = 0; edge < 2; ++edge) {
+            uint32_t words[9]; memcpy(words, source, sizeof words); words[field] = edge ? above[field] : below[field];
+            x_guest_write(0x5FFB, words, sizeof words);
+            c = context(handle, 0x5FFB, 1, 0); X_M32(c.r[4]) = 0x221427; reject(&c, 0x37C6E5);
+        }
+        assert(!memcmp(before, b->spatial, sizeof before));
+        x_guest_write(0x5FFB, source, sizeof source);
+        c = context(handle, 0x5FFB, 1, 0); X_M32(c.r[4]) = 0x221427; call(&c, 0x37C6E5, 0, 3);
+        memcpy(before + 0x80 / 4, source, sizeof source); before[0x7C / 4] |= 0x007F0000;
+        assert(!memcmp(before, b->spatial, sizeof before) && !b->started && !b->stopped && b->voice == -1);
+        uint32_t desc[6] = {1,0,0,0x8000,0,0};
+        for (unsigned field = 0; field < 6; ++field) {
+            desc[field] ^= 1; x_guest_write(0x5FFB, desc, sizeof desc);
+            c = context(handle, 0x5FFB, 0, 0); X_M32(c.r[4]) = 0x22147C; reject(&c, 0x37B68B); desc[field] ^= 1;
+        }
+        x_guest_write(0x5FFB, desc, sizeof desc);
+        c = context(handle, 0x5FFB, 0, 0); X_M32(c.r[4]) = 0x22147D; reject(&c, 0x37B68B);
+        c = context(handle, 0, 0, 0); X_M32(c.r[4]) = 0x22147C; reject(&c, 0x37B68B);
+        b->started = 1; c = context(handle, 0x5FFB, 0, 0); X_M32(c.r[4]) = 0x22147C; reject(&c, 0x37B68B); b->started = 0;
+        c = context(handle, 0x5FFB, 0, 0); X_M32(c.r[4]) = 0x22147C; call(&c, 0x37B68B, 0, 2);
+        assert(!memcmp(b->filter, desc, sizeof desc) && !memcmp(before, b->spatial, sizeof before) && b->voice == -1);
+        x_guest_read(bus, b->mirror, sizeof bus); assert(!memcmp(samples, bus, sizeof bus));
+    }
     const uint32_t unsupported[] = {0x37CC4A,0x37B7B3,0x379F40,0x37C5C8,0x37B66F,0x37B6A7,
         0x37B6C3,0x37B6DF,0x37B703,0x37B75B,0x37B797,0x37B777};
     for (unsigned i = 0; i < sizeof unsupported / sizeof *unsupported; ++i) {
