@@ -53,7 +53,7 @@ qualified integration exactly. Current B77C0 is the original translated body plu
 only the existing guarded native entry hook. The current ARM native body and
 relocations exactly match the qualified object; the public wrapper differs only
 by a resolved local BL instead of the fixture's function-section relocation.
-Its native frame remains 360 bytes plus the8-byte wrapper, excluding descendants.
+Its native frame remains 360 bytes plus the 8-byte wrapper, excluding descendants.
 This is not a measurement of physical stack headroom.
 
 The new startup fixture links both actual controllers, the actual object pool
@@ -80,3 +80,26 @@ generated `xk_clip.c`; the last requires an independent disposable copy of the
 current retained stage and its exact build command. Private evidence is under
 `direct-cluster-query/polygon-edge-startup`. Ordinary gameplay after a confirmed
 fresh launch must still establish actual coverage, stability and frame behavior.
+
+## Cumulative package and physical admission
+
+The full cumulative package retained 92 unchanged objects
+and changed only the two startup/request objects. Its runtime is
+`0f517e78cbcda2040792f163d6867a98ee52594efbb5ea0a01ce8a428def94cc`,
+31,975,826 bytes. The updater confirmed slot 1 at 20:45:48 UTC on September 17;
+the asset contract and all preceding selections remain unchanged.
+
+Ordinary campaign reached a first-person pistol checkpoint. The log contains
+one enable for each of clip-region and polygon-edge startup; a gameplay report
+records 6,087 native polygon calls and 240 regions/1,260 inner clips over 60
+frames, with zero region capacity failures. Movement, two fire inputs and pause
+were exercised. Sampled active reports are about 10.7–12.7 FPS in different views,
+not a paired performance comparison. Paused reports must be excluded.
+
+The 11,256,410-byte capture has SHA-256
+`84b568971f8bb47d4caf6d9a9f16a96f21396096e557486d18ae620ba8dc33a3`.
+Its fault-marker search found no match. Much of the session was unattended;
+elapsed runtime is not continuous combat coverage. This establishes actual
+combined admissions and limited gameplay survival, not a gain, stable 20 FPS
+or clearance of the historical crash. Native resolution and graphics settings
+were preserved; no built-in comparison was run.

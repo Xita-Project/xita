@@ -1,5 +1,34 @@
 # Testing optimizations together
 
+## Current validation policy (September 17)
+
+The comparison described below is historical. Current cumulative trials use
+ordinary gameplay after an executable-hash-verified process restart, with native
+resolution and standard graphics. They do not run the built-in comparison for
+each change. A compiled flag, an installed executable and a helper actually
+accepting gameplay work are three separate checks.
+
+Keep compatible changes together. An inconclusive individual timing result does
+not establish a regression and is eligible for a combined trial after its
+correctness and ownership checks pass. A demonstrated correctness failure,
+resource-lifetime violation or repeatable material slowdown needs correction
+before inclusion. Unsupported or unexercised paths remain unverified, rather
+than being counted as performance successes or failures.
+
+Assess the combined build using complete frame times, pauses and worst scenes,
+including effects, campaign actors and driving. Compare like scenes and settings;
+do not add FPS differences from unrelated routes or count startup/loading windows.
+Five additional FPS is a plausible objective, not a promised sum: 10 to 15 FPS
+requires saving about 33.3 ms per frame; 15 to 20 requires about 16.7 ms. Work
+removed from an overlapping, non-limiting phase may leave frame time unchanged.
+
+The clipping-region and polygon-edge startup trials preserve the preceding
+cumulative selections. Their documents distinguish host qualification, actual
+hardware admissions and performance evidence. The remaining renderer ownership
+and sparse vertex-residency prototypes are private until their contracts pass.
+
+## Historical September 14 comparison
+
 The September 14 hardware baseline retains indexed vertex validation, the
 existing GPU upload worker, native object-basis math and deferred lens flares.
 These improvements are already combined. Individual measurements from different

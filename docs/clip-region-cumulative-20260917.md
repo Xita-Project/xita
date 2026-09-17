@@ -52,7 +52,29 @@ new arithmetic qualification or crash-free gameplay.
 
 Private evidence is under `clip-region-cumulative-startup` and
 `clip-region-startup-audit`. Boot confirmation, effective selection and actual
-region admissions must be checked in ordinary physical gameplay. No FPS gain,
+region admissions are recorded below from ordinary physical gameplay. No FPS gain,
 stable 20 FPS or resolution of historic intermittent crashes is established
 by this package qualification. Native resolution and standard graphics remain
 the baseline; the built-in comparison is not used for this cumulative trial.
+
+## Physical admission and short gameplay check
+
+The updater confirmed this exact runtime in slot 0 at 20:24:49 UTC on September
+17. Its log records one joined-owner startup enable and nonzero clipping work.
+An initial Blood Gulch report contains 1,440 regions and 10,620 inner clips over
+60 frames; a later valley report contains 4,617 regions and 33,543 clips. Both
+report zero capacity failures. This establishes actual execution in gameplay.
+
+Ordinary inputs exercised movement, camera turns, plasma charging/release,
+Warthog driver entry, forward movement, steering, reverse, exit and pause.
+The short drive contacted a canyon wall; it is not a representative full valley
+driving comparison. The screenshots show the vehicle and environment, but cannot
+exclude transient rendering defects between captures. No crash was observed or
+matched by the saved fault-marker search. This does not clear historic crashes.
+
+Native 960 by 544 resolution and standard graphics were preserved. Different
+views still fall below 20 FPS and cannot establish a before/after gain. Exclude
+loading, menu, pause and input-boundary timing windows. The full capture is
+2,827,956 bytes with SHA-256
+`2772194236e38be31508a35c523ad5fc2491ca9764d4413aa4f2ff853d6fd3b9`;
+the input journal, screenshots and receipt remain in the private evidence folder.
