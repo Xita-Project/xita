@@ -119,6 +119,104 @@ int main(void)
         c=context(handle,1,0,0);X_M32(c.r[4])=0x21F63D;call(&c,0x37B822,0,2);assert(s->pause==0x24);
         c=context(handle,0,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);
         assert(!s->pause&&!v->playing&&!v->nq&&!s->headroom&&v->volume==1.0f);
+        /* Level-start setters on the empty voice: each records what the original
+         * packs into the voice image (0x37A5D4/0x37A5BB/0x38144F/0x38157E/0x381710/
+         * 0x37A4DB/0x37BC89/0x37BD54); nothing runs and nothing is queued. */
+        c=context(handle,(uint32_t)-1300,0,0);X_M32(c.r[4])=0x21FC0F;reject_stream(&c,0x37B7FF);
+        c=context(handle,1,0,0);X_M32(c.r[4])=0x21FC0E;reject_stream(&c,0x37B7FF);
+        c=context(handle,(uint32_t)-10001,0,0);X_M32(c.r[4])=0x21FC0E;reject_stream(&c,0x37B7FF);
+        c=context(handle,(uint32_t)-1300,0,0);X_M32(c.r[4])=0x21FC0E;call(&c,0x37B7FF,0,2);
+        assert(s->volume==-1300&&v->volume>0.2f&&v->volume<0.25f&&!v->playing);
+        c=context(handle,0,0,0);X_M32(c.r[4])=0x21FC0E;call(&c,0x37B7FF,0,2);assert(!s->volume&&v->volume==1.0f);
+        c=context(handle,22050,0,0);X_M32(c.r[4])=0x2201CA;reject_stream(&c,0x37B804);
+        c=context(handle,99,0,0);X_M32(c.r[4])=0x2201C9;reject_stream(&c,0x37B804);
+        c=context(handle,48001,0,0);X_M32(c.r[4])=0x2201C9;reject_stream(&c,0x37B804);
+        c=context(handle,22050,0,0);X_M32(c.r[4])=0x2201C9;call(&c,0x37B804,0,2);assert(s->frequency==22050&&v->rate==44100);
+        c=context(handle,0,0,0);X_M32(c.r[4])=0x2201C9;call(&c,0x37B804,0,2);assert(!s->frequency);
+        {
+            uint32_t lfo[6]={1,100,50,(uint32_t)-5,7,(uint32_t)-128};x_guest_write(0x9F00,lfo,sizeof lfo);
+            c=context(handle,0x9F00,0,0);X_M32(c.r[4])=0x22050E;reject_stream(&c,0x37B809);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x22050D;reject_stream(&c,0x37B809);
+            static const uint32_t lfo_bad[6]={2,0x8000,0x400,128,(uint32_t)-129,0x80};
+            for(unsigned f=0;f<6;++f){uint32_t w[6];memcpy(w,lfo,sizeof w);w[f]=lfo_bad[f];x_guest_write(0x9F00,w,sizeof w);
+                c=context(handle,0x9F00,0,0);X_M32(c.r[4])=0x22050D;reject_stream(&c,0x37B809);}
+            x_guest_write(0x9F00,lfo,sizeof lfo);
+            static const uint32_t lfo_callers[4]={0x22050D,0x220664,0x2206D5,0x220709};
+            for(unsigned i=0;i<4;++i){c=context(handle,0x9F00,0,0);X_M32(c.r[4])=lfo_callers[i];call(&c,0x37B809,0,2);}
+            assert(!memcmp(s->lfo[1],lfo,sizeof lfo)&&!s->lfo[0][0]&&!s->lfo[0][1]);
+            uint32_t eg[10]={1,2,0,441,0,0,940,0xFF,0,0};x_guest_write(0x9F40,eg,sizeof eg);
+            c=context(handle,0x9F40,0,0);X_M32(c.r[4])=0x2AE818;reject_stream(&c,0x37B80E);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x2AE817;reject_stream(&c,0x37B80E);
+            static const uint32_t eg_bad[10]={2,16,0x1000,0x1000,0x1000,0x1000,0x1000,0x100,128,(uint32_t)-129};
+            for(unsigned f=0;f<10;++f){uint32_t w[10];memcpy(w,eg,sizeof w);w[f]=eg_bad[f];x_guest_write(0x9F40,w,sizeof w);
+                c=context(handle,0x9F40,0,0);X_M32(c.r[4])=0x2AE817;reject_stream(&c,0x37B80E);}
+            x_guest_write(0x9F40,eg,sizeof eg);
+            c=context(handle,0x9F40,0,0);X_M32(c.r[4])=0x2AE817;call(&c,0x37B80E,0,2);
+            assert(!memcmp(s->eg[1],eg,sizeof eg)&&!s->eg[0][0]);
+            uint32_t filter[6]={1,0,0,0x8000,0,0};x_guest_write(0x9F80,filter,sizeof filter);
+            c=context(handle,0x9F80,0,0);X_M32(c.r[4])=0x2203EF;reject_stream(&c,0x37B813);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x22069D;reject_stream(&c,0x37B813);
+            static const uint32_t filter_bad[6]={4,0x10000,0x10000,0x10000,0x10000,0x10000};
+            for(unsigned f=0;f<6;++f){uint32_t w[6];memcpy(w,filter,sizeof w);w[f]=filter_bad[f];x_guest_write(0x9F80,w,sizeof w);
+                c=context(handle,0x9F80,0,0);X_M32(c.r[4])=0x22069D;reject_stream(&c,0x37B813);}
+            x_guest_write(0x9F80,filter,sizeof filter);
+            c=context(handle,0x9F80,0,0);X_M32(c.r[4])=0x2203EE;call(&c,0x37B813,0,2);
+            c=context(handle,0x9F80,0,0);X_M32(c.r[4])=0x22069D;call(&c,0x37B813,0,2);
+            assert(!memcmp(s->filter,filter,sizeof filter));
+            /* Mix bins: SetMixBinVolumes rewrites only the listed gains; SetMixBins
+             * replaces the route list, a NULL list restoring the format default. */
+            uint32_t list[2]={3,0x9FC0},pairs[6]={6,(uint32_t)-1200,8,0,7,(uint32_t)-10000};
+            x_guest_write(0x9FA0,list,sizeof list);x_guest_write(0x9FC0,pairs,sizeof pairs);
+            assert(s->route_count==2&&!s->route_bins[0]&&s->route_bins[1]==1);
+            c=context(handle,0x9FA0,0,0);X_M32(c.r[4])=0x2216B8;reject_stream(&c,0x37B81D);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x2216B7;reject_stream(&c,0x37B81D);
+            c=context(handle,0x9FA0,0,0);X_M32(c.r[4])=0x2216B7;call(&c,0x37B81D,0,2);
+            assert(s->bin_gain[6]==-1200&&!s->bin_gain[8]&&s->bin_gain[7]==-10000&&s->route_count==2);
+            c=context(handle,0x9FA0,0,0);X_M32(c.r[4])=0x22013C;reject_stream(&c,0x37C70A);
+            c=context(handle,0x9FA0,0,0);X_M32(c.r[4])=0x22013B;call(&c,0x37C70A,0,2);
+            assert(s->route_count==3&&s->route_bins[0]==6&&s->route_bins[1]==8&&s->route_bins[2]==7&&s->route_gains[0]==-1200&&s->route_gains[2]==-10000);
+            static const uint32_t bad_pairs[3][2]={{32,0},{6,1},{6,(uint32_t)-10001}};
+            for(unsigned i=0;i<3;++i){uint32_t w[6];memcpy(w,pairs,sizeof w);w[0]=bad_pairs[i][0];w[1]=bad_pairs[i][1];x_guest_write(0x9FC0,w,sizeof w);
+                c=context(handle,0x9FA0,0,0);X_M32(c.r[4])=0x22013B;reject_stream(&c,0x37C70A);
+                c=context(handle,0x9FA0,0,0);X_M32(c.r[4])=0x2216B7;reject_stream(&c,0x37B81D);}
+            x_guest_write(0x9FC0,pairs,sizeof pairs);
+            list[0]=9;x_guest_write(0x9FA0,list,sizeof list);
+            c=context(handle,0x9FA0,0,0);X_M32(c.r[4])=0x22013B;reject_stream(&c,0x37C70A);
+            list[0]=0;x_guest_write(0x9FA0,list,sizeof list);
+            c=context(handle,0x9FA0,0,0);X_M32(c.r[4])=0x22013B;reject_stream(&c,0x37C70A);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x2216DC;call(&c,0x37C70A,0,2);
+            assert(s->route_count==2&&!s->route_bins[0]&&s->route_bins[1]==1&&!s->route_gains[0]&&!s->route_gains[1]);
+            /* PauseEx(0,0,3), Flush and GetStatus act only on a started voice. */
+            c=context(handle,0,0,3);X_M32(c.r[4])=0x2AE4E8;reject_stream(&c,0x37B827);
+            c=context(handle,1,0,3);X_M32(c.r[4])=0x2AE4E7;reject_stream(&c,0x37B827);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x2AE4E7;reject_stream(&c,0x37B827);
+            c=context(handle,0,0,3);X_M32(c.r[4])=0x2AE4E7;call(&c,0x37B827,0,4);assert(!s->pause);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x21EC86;reject_stream(&c,0x37AC89);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x21EC85;call(&c,0x37AC89,0,1);
+            c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE857;reject_stream(&c,0x37ACD4);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x2AE856;reject_stream(&c,0x37ACD4);
+            uint32_t status=0xcccccccc;x_guest_write(0x9FE0,&status,4);
+            c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(!read32(0x9FE0));
+            c=context(handle,3,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);
+            c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9FE0)==0x80000);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);
+            c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x21FB3E;reject_stream(&c,0x37B83F);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x21FB3D;reject_stream(&c,0x37B83F);
+            status=0x12345678;x_guest_write(0x9FE0,&status,4);
+            c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x21FB3D;call(&c,0x37B83F,0x88780032,2);assert(read32(0x9FE0)==0x12345678);
+            /* SetOutputBuffer routes the voice into an inactive 3D bus's input;
+             * NULL detaches back to the default bins. */
+            uint32_t bus_desc[6]={24,0x2010,0,0,0,0};x_guest_write(0x9E00,bus_desc,sizeof bus_desc);
+            c=context(dev,0x9E00,0x9E40,0);X_M32(c.r[4])=0x220AC8;call(&c,0x37D4BE,0,4);uint32_t bus=read32(0x9E40);
+            c=context(handle,bus,0,0);X_M32(c.r[4])=0x21F917;reject_stream(&c,0x37C705);
+            c=context(handle,bus+4,0,0);X_M32(c.r[4])=0x21F916;reject_stream(&c,0x37C705);
+            c=context(handle,handle,0,0);X_M32(c.r[4])=0x21F916;reject_stream(&c,0x37C705);
+            c=context(handle,bus,0,0);X_M32(c.r[4])=0x21F916;call(&c,0x37C705,0,2);
+            assert(s->output==bus-0x1c&&s->route_count==1&&s->route_bins[0]==31&&!s->route_gains[0]);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x21F928;call(&c,0x37C705,0,2);
+            assert(!s->output&&s->route_count==2&&!s->route_bins[0]&&s->route_bins[1]==1);
+            c=context(bus,0,0,0);call(&c,0x379F45,0,1);assert(!find_buffer(bus-0x1c));
+        }
         c=context(handle+4,0,0,0);reject_stream(&c,0x37AB40);
         c=context(handle,0,0,0);call(&c,0x37AB40,2,1);assert(s->references==2&&device.references==2);
         c=context(handle,0,0,0);call(&c,0x37AB87,1,1);assert(s->references==1);
@@ -157,6 +255,10 @@ int main(void)
     xk_audio_voice_stop(gs->voice);xk_audio_stream_flush(gs->voice);
     c=context(global_handle,0,0,0);call(&c,0x37B818,0,2);assert(gs->headroom==0 && gv->volume==1.0f);
     c=context(global_handle,0,0,0);X_M32(c.r[4])=0x21F8E3;reject_stream(&c,0x37B822); /* global voices carry data */
+    {
+        static const uint32_t game_only[11]={0x37B7FF,0x37B804,0x37B809,0x37B80E,0x37B813,0x37B81D,0x37C70A,0x37C705,0x37B827,0x37AC89,0x37ACD4};
+        for(unsigned i=0;i<11;++i){c=context(global_handle,0x9F00,0,3);X_M32(c.r[4])=0x21F8E3;reject_stream(&c,game_only[i]);}
+    }
     c=context(global_handle,0,0,0);call(&c,0x37AB40,2,1);assert(device.references==2);
     c=context(global_handle,0,0,0);call(&c,0x37AB87,1,1);
     c=context(global_handle,0,0,0);call(&c,0x37AB87,0,1);assert(device.references==1 && !device.children);

@@ -109,6 +109,21 @@ int main(void)
         assert(!memcmp(b->filter, desc, sizeof desc) && !memcmp(before, b->spatial, sizeof before) && b->voice == -1);
         x_guest_read(bus, b->mirror, sizeof bus); assert(!memcmp(samples, bus, sizeof bus));
     }
+    /* SetPosition (0x37C668, DS3D_DEFERRED) from the level's 3D update stores
+     * the position words and the dirty bit on the inactive bus. */
+    {
+        uint32_t before[41]; memcpy(before, b->spatial, sizeof before);
+        c = context(handle, 0x3f800000, 0x40000000, 0x40400000); X_M32(c.r[4] + 20) = 1; X_M32(c.r[4]) = 0x220EA7; reject(&c, 0x37C668);
+        c = context(handle, 0x3f800000, 0x40000000, 0x40400000); X_M32(c.r[4] + 20) = 0; X_M32(c.r[4]) = 0x220EA6; reject(&c, 0x37C668);
+        c = context(handle, 0x7fc00000, 0x40000000, 0x40400000); X_M32(c.r[4] + 20) = 1; X_M32(c.r[4]) = 0x220EA6; reject(&c, 0x37C668);
+        c = context(handle, 0x3f800000, 0x7f800000, 0x40400000); X_M32(c.r[4] + 20) = 1; X_M32(c.r[4]) = 0x220EA6; reject(&c, 0x37C668);
+        b->started = 1; c = context(handle, 0x3f800000, 0x40000000, 0x40400000); X_M32(c.r[4] + 20) = 1; X_M32(c.r[4]) = 0x220EA6; reject(&c, 0x37C668); b->started = 0;
+        assert(!memcmp(before, b->spatial, sizeof before));
+        c = context(handle, 0x3f800000, 0x40000000, 0x40400000); X_M32(c.r[4] + 20) = 1; X_M32(c.r[4]) = 0x220EA6; call(&c, 0x37C668, 0, 5);
+        before[2] = 0x3f800000; before[3] = 0x40000000; before[4] = 0x40400000; before[0] |= 0x00010000;
+        assert(!memcmp(before, b->spatial, sizeof before));
+        x_guest_read(bus, b->mirror, sizeof bus); assert(!memcmp(samples, bus, sizeof bus));
+    }
     const uint32_t unsupported[] = {0x37CC4A,0x37B7B3,0x379F40,0x37C5C8,0x37B66F,0x37B6A7,
         0x37B6C3,0x37B6DF,0x37B703,0x37B75B,0x37B797,0x37B777};
     for (unsigned i = 0; i < sizeof unsupported / sizeof *unsupported; ++i) {

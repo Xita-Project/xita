@@ -3,6 +3,7 @@
 #include "audio_host.h"
 #include "recomp/kernel/xk.h"
 #include "recomp/kernel/xk_audio.h"
+#include <math.h>
 #include <string.h>
 #include <stdlib.h>
 #if H2_AUDIO_DSP
@@ -35,11 +36,18 @@ static h2_audio_buffer buffers[XA_MAX_VOICES];
 typedef struct {
     uint32_t base, references, callback, context, packet_limit, headroom;
     uint32_t flags, route_bin;
-    uint32_t route_count, route_bins[5];
-    int32_t route_gains[5];
+    uint32_t route_count, route_bins[8];
+    int32_t route_gains[8];
     struct { uint32_t mirror, source, context, ready; uint64_t ticket; } packets[2];
     uint32_t submitted, completed;
     uint32_t pause; /* original voice state bits 4 (pause), 0x40 (synch), 0x20 (deferred) */
+    /* The game's stream voices never start (their Process fails), so these
+     * setters only record what the original packs into the voice image. */
+    int32_t volume;                         /* SetVolume, hundredths of dB */
+    uint32_t frequency;                     /* SetFrequency, 0 = original */
+    uint32_t lfo[2][6], eg[2][10], filter[6];
+    uint32_t output;                        /* SetOutputBuffer: bus record base, 0 = none */
+    int32_t bin_gain[32];                   /* mix-bin attenuations by bin (settings +0x30) */
     int voice;
 } h2_audio_stream;
 static h2_audio_stream streams[XA_MAX_VOICES];
@@ -195,7 +203,7 @@ static h2_audio_buffer *buffer_live(xctx *c, uint32_t ip, uint32_t object, int i
         fail(c, ip, "unsupported routed low-rate PCM method", b->base);
     if (b->submix == 1 && ip != 0x37D4BE && ip != 0x37A14F && ip != 0x379F45 &&
         ip != 0x37A795 && ip != 0x37C5E4 && ip != 0x37C620 && ip != 0x37C644 &&
-        ip != 0x37C6C1 && ip != 0x37C69D && ip != 0x37C600 && ip != 0x37C6E5 && ip != 0x37B68B)
+        ip != 0x37C6C1 && ip != 0x37C69D && ip != 0x37C600 && ip != 0x37C6E5 && ip != 0x37B68B && ip != 0x37C668)
         fail(c, ip, "submix activation/data/spatial processing is unsupported", b->base);
     if (b->submix == 2 && ip != 0x37A14F && ip != 0x379F45 && ip != 0x37A795 &&
         ip != 0x37B66F && ip != 0x37C5E4 && ip != 0x37B6DF &&
@@ -551,6 +559,8 @@ static void stream_create(xctx *c, uint32_t ip)
         .packet_limit=fields[1],.headroom=600,.flags=fields[0],.route_bin=global && routes[0]==1 ? pair[0] : UINT32_MAX,.voice=voice};
     streams[index].route_count=routes[0];
     for(unsigned i=0;i<routes[0];++i){streams[index].route_bins[i]=pair[i*2];streams[index].route_gains[i]=(int32_t)pair[i*2+1];}
+    /* Original default mix bins for a mono/stereo voice (0x37BC89 table 0x3858BC): front bins 0,1 at unity. */
+    if (!global) { streams[index].route_count=2; streams[index].route_bins[0]=0; streams[index].route_bins[1]=1; }
     X_M32(base) = 0x417170; X_M32(base + 4) = 0x417160; X_M32(base + 8) = 1;
     ++device.children; X_M32(device.base + 4) = ++device.references;
     x_guest_write(out, &base, 4);
@@ -705,10 +715,230 @@ static void stream_headroom(xctx *c)
     if (X_ARG(1)) fail(c, ip, "unsupported stream headroom", X_ARG(1));
     /* Original 37A629 replaces the stored attenuation and adjusts total gain.
      * The observed zero request removes the default 600 hundredths of dB. */
-    xk_audio_lock(); xk_audio_voice_set_volume_db100(s->voice, s->route_count==5 ? -10000 : 0); xk_audio_unlock();
+    xk_audio_lock(); xk_audio_voice_set_volume_db100(s->voice, s->route_count==5 ? -10000 : s->volume); xk_audio_unlock();
     s->headroom = 0;
     xv_logf("[h2/audio-stream] headroom object=%08X caller=%08X headroom=0 retained_route_mute=%u\n", s->base, X_M32(c->r[4]),s->route_count==5);
     result(c, 0, 2);
+}
+/* The game's own streams (0x21E410 formats, callback 0x220730, flags
+ * 0x20000000): their Process never succeeds, so the real voice is empty and
+ * never started. Every setter below records exactly what the original packs
+ * into the voice image; the VP reprogramming (and its APU frame-counter wait,
+ * which stopped mp291 from 0x38157E) has nothing to act on. */
+static h2_audio_stream *stream_game_empty(xctx *c, uint32_t ip, uint32_t object, const uint32_t *callers, unsigned count)
+{
+    h2_audio_stream *s = stream_live(c, ip, object);
+    uint32_t caller = X_M32(c->r[4]); int known = 0;
+    for (unsigned i = 0; i < count; ++i) if (callers[i] == caller) known = 1;
+    if (!known || s->submitted || s->flags != 0x20000000u) fail(c, ip, "unsupported stream method caller/state", caller);
+    return s;
+}
+static int signed8(uint32_t word) { int32_t v = (int32_t)word; return v >= -128 && v <= 127; }
+static void stream_volume(xctx *c)
+{
+    const uint32_t ip = 0x37B7FF, callers[1] = {0x21FC0E};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
+    int32_t volume = (int32_t)X_ARG(1);
+    /* SetVolume: 0x37B370 -> 0x37A5D4 stores volume-headroom (settings+0x1C);
+     * 0x381CE4 then rewrites the VP mix-bin attenuations. DSBVOLUME range. */
+    if (volume > 0 || volume < -10000) fail(c, ip, "unsupported stream volume", (uint32_t)volume);
+    s->volume = volume;
+    xk_audio_lock(); xk_audio_voice_set_volume_db100(s->voice, volume - (int32_t)s->headroom); xk_audio_unlock();
+    xv_logf("[h2/audio-stream] volume caller=0021FC0E object=%08X volume=%d headroom=%u; empty real voice mirrors it\n", s->base, volume, s->headroom);
+    result(c, 0, 2);
+}
+static void stream_frequency(xctx *c)
+{
+    const uint32_t ip = 0x37B804, callers[1] = {0x2201C9};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
+    uint32_t frequency = X_ARG(1);
+    /* SetFrequency: 0x37B31E -> 0x37A5BB stores it (settings+0x18); 0x381D7C
+     * reprograms the VP pitch. DSBFREQUENCY_ORIGINAL (0) or 100..48000 Hz.
+     * Recorded only: the empty voice keeps its native rate. */
+    if (frequency && (frequency < 100 || frequency > 48000)) fail(c, ip, "unsupported stream frequency", frequency);
+    s->frequency = frequency;
+    xv_logf("[h2/audio-stream] frequency caller=002201C9 object=%08X frequency=%u; recorded, empty real voice\n", s->base, frequency);
+    result(c, 0, 2);
+}
+static void stream_lfo(xctx *c)
+{
+    const uint32_t ip = 0x37B809, callers[4] = {0x22050D, 0x220664, 0x2206D5, 0x220709};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 4);
+    uint32_t address = X_ARG(1), words[6];
+    if (!mapped(address, sizeof words)) fail(c, ip, "unsupported stream LFO input", address);
+    x_guest_read(words, address, sizeof words);
+    /* DSLFODESC: dwLFO (0 pitch, 1 multi), dwDelay (15 bits), dwDelta (10 bits),
+     * lPitchModulation, lFilterCutOffRange, lAmplitudeModulation (signed 8-bit):
+     * the widths 0x38144F packs into the voice image (+0x18 bit 14, +0x2C, +0x30, +0x34..0x36). */
+    if (words[0] > 1 || words[1] > 0x7FFF || words[2] > 0x3FF || !signed8(words[3]) || !signed8(words[4]) || !signed8(words[5]))
+        fail(c, ip, "unsupported stream LFO descriptor", address);
+    memcpy(s->lfo[words[0]], words, sizeof words);
+    xv_logf("[h2/audio-stream] LFO caller=%08X object=%08X lfo=%u delay=%u delta=%u pitch=%d filter=%d amplitude=%d; recorded, empty real voice\n",
+            X_M32(c->r[4]), s->base, words[0], words[1], words[2], (int32_t)words[3], (int32_t)words[4], (int32_t)words[5]);
+    result(c, 0, 2);
+}
+static void stream_envelope(xctx *c)
+{
+    const uint32_t ip = 0x37B80E, callers[1] = {0x2AE817};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
+    uint32_t address = X_ARG(1), words[10];
+    if (!mapped(address, sizeof words)) fail(c, ip, "unsupported stream envelope input", address);
+    x_guest_read(words, address, sizeof words);
+    /* DSENVELOPEDESC: dwEG (0 amplitude, 1 multi), dwMode (4 bits), dwDelay,
+     * dwAttack, dwHold, dwDecay, dwRelease (12 bits each), dwSustain (8 bits),
+     * lPitchScale, lFilterCutOff (signed 8-bit): the widths 0x38157E packs into
+     * the voice image before reprogramming the VP. The game's sound-source
+     * start (0x2AE7A0) sends eg 1, mode 2, attack/release from its fade times. */
+    if (words[0] > 1 || words[1] > 15 || words[2] > 0xFFF || words[3] > 0xFFF || words[4] > 0xFFF ||
+        words[5] > 0xFFF || words[6] > 0xFFF || words[7] > 0xFF || !signed8(words[8]) || !signed8(words[9]))
+        fail(c, ip, "unsupported stream envelope descriptor", address);
+    memcpy(s->eg[words[0]], words, sizeof words);
+    xv_logf("[h2/audio-stream] envelope caller=002AE817 object=%08X eg=%u mode=%u delay=%u attack=%u hold=%u decay=%u release=%u sustain=%u; recorded, empty real voice\n",
+            s->base, words[0], words[1], words[2], words[3], words[4], words[5], words[6], words[7]);
+    result(c, 0, 2);
+}
+static void stream_filter(xctx *c)
+{
+    const uint32_t ip = 0x37B813, callers[2] = {0x2203EE, 0x22069D};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 2);
+    uint32_t address = X_ARG(1), words[6];
+    if (!mapped(address, sizeof words)) fail(c, ip, "unsupported stream filter input", address);
+    x_guest_read(words, address, sizeof words);
+    /* DSFILTERDESC: dwMode (0 bypass, 1 DLS2, 2 parametric EQ, 3 both),
+     * dwQCoefficient and four 16-bit coefficients; 0x381710 packs them. */
+    if (words[0] > 3 || words[1] > 0xFFFF || words[2] > 0xFFFF || words[3] > 0xFFFF || words[4] > 0xFFFF || words[5] > 0xFFFF)
+        fail(c, ip, "unsupported stream filter descriptor", address);
+    memcpy(s->filter, words, sizeof words);
+    xv_logf("[h2/audio-stream] filter caller=%08X object=%08X mode=%u q=%u coefficients=%04X,%04X,%04X,%04X; recorded, empty real voice\n",
+            X_M32(c->r[4]), s->base, words[0], words[1], words[2], words[3], words[4], words[5]);
+    result(c, 0, 2);
+}
+static unsigned stream_bin_list(xctx *c, uint32_t ip, uint32_t list_address, uint32_t pairs[16])
+{
+    uint32_t list[2];
+    if (!mapped(list_address, 8)) fail(c, ip, "unsupported stream mix-bin list", list_address);
+    x_guest_read(list, list_address, 8);
+    if (!list[0] || list[0] > 8 || !mapped(list[1], list[0] * 8)) fail(c, ip, "unsupported stream mix-bin count/pairs", list[0]);
+    x_guest_read(pairs, list[1], list[0] * 8);
+    for (unsigned i = 0; i < list[0]; ++i)
+        if (pairs[i * 2] >= 32 || (int32_t)pairs[i * 2 + 1] > 0 || (int32_t)pairs[i * 2 + 1] < -10000)
+            fail(c, ip, "unsupported stream mix bin/gain", pairs[i * 2]);
+    return list[0];
+}
+static void stream_bin_volumes(xctx *c)
+{
+    const uint32_t ip = 0x37B81D, callers[1] = {0x2216B7};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
+    uint32_t pairs[16]; unsigned count = stream_bin_list(c, ip, X_ARG(1), pairs);
+    /* SetMixBinVolumes: 0x37A64C -> 0x37A4DB writes each listed bin's attenuation
+     * into the settings table (+0x30, by bin); 0x381CE4 reprograms the VP. */
+    for (unsigned i = 0; i < count; ++i) s->bin_gain[pairs[i * 2]] = (int32_t)pairs[i * 2 + 1];
+    xv_logf("[h2/audio-stream] mix-bin volumes caller=002216B7 object=%08X count=%u first=%u:%d; recorded, empty real voice\n",
+            s->base, count, pairs[0], (int32_t)pairs[1]);
+    result(c, 0, 2);
+}
+static void stream_mix_bins(xctx *c)
+{
+    const uint32_t ip = 0x37C70A, callers[2] = {0x22013B, 0x2216DC};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 2);
+    uint32_t list_address = X_ARG(1), pairs[16]; unsigned count;
+    /* SetMixBins: 0x37C576 -> 0x37BF7B -> 0x37BC89 copies the count, bin list and
+     * gains (+0x24/+0x28/+0x30), a NULL list restoring the format's default
+     * table (0x3858BC: bins 0,1 at unity); 0x381C23 reprograms the VP routing. */
+    if (list_address) count = stream_bin_list(c, ip, list_address, pairs);
+    else { count = 2; pairs[0] = 0; pairs[1] = 0; pairs[2] = 1; pairs[3] = 0; }
+    s->route_count = count;
+    for (unsigned i = 0; i < count; ++i) {
+        s->route_bins[i] = pairs[i * 2]; s->route_gains[i] = (int32_t)pairs[i * 2 + 1];
+        s->bin_gain[pairs[i * 2]] = (int32_t)pairs[i * 2 + 1];
+    }
+    xv_logf("[h2/audio-stream] mix bins caller=%08X object=%08X count=%u first=%u:%d default=%u; recorded, empty real voice\n",
+            X_M32(c->r[4]), s->base, count, pairs[0], (int32_t)pairs[1], !list_address);
+    result(c, 0, 2);
+}
+static void stream_output_buffer(xctx *c)
+{
+    const uint32_t ip = 0x37C705, callers[2] = {0x21F916, 0x21F928};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 2);
+    uint32_t interface = X_ARG(1); h2_audio_buffer *bus = NULL;
+    if (interface) {
+        bus = find_buffer(interface - 0x1C);
+        if (!bus || bus->submix != 1 || bus->started || bus->stopped) fail(c, ip, "unsupported stream output buffer", interface);
+    }
+    /* SetOutputBuffer: 0x37C524 -> 0x37BF27 returns on an unchanged output,
+     * otherwise releases the old MIXIN input (0x3821C4) and 0x37BD54 routes the
+     * voice into the new bus's input bin at unity (the inactive bus model's
+     * input bin), or back to the format's default bins when detached. */
+    s->output = bus ? bus->base : 0;
+    if (bus) { s->route_count = 1; s->route_bins[0] = 31; s->route_gains[0] = 0; }
+    else { s->route_count = 2; s->route_bins[0] = 0; s->route_bins[1] = 1; s->route_gains[0] = s->route_gains[1] = 0; }
+    xv_logf("[h2/audio-stream] output buffer caller=%08X object=%08X bus=%08X; %s, empty real voice\n",
+            X_M32(c->r[4]), s->base, interface, bus ? "routed into the inactive 3D bus input" : "default front bins restored");
+    result(c, 0, 2);
+}
+static void stream_pause_ex(xctx *c)
+{
+    const uint32_t ip = 0x37B827, callers[1] = {0x2AE4E7};
+    stack(c, ip, 4); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
+    /* PauseEx(timestamp 0, mode 3): 0x37ADED -> 0x37F9D0 takes the immediate
+     * path 0x37F51F for a zero timestamp, which acts only on a running voice
+     * (state & 3 == 3). The empty voice never runs: nothing changes. */
+    if (X_ARG(1) || X_ARG(2) || X_ARG(3) != 3) fail(c, ip, "unsupported stream PauseEx timestamp/mode", X_ARG(3));
+    xv_logf("[h2/audio-stream] PauseEx caller=002AE4E7 object=%08X timestamp=0 mode=3; voice not running, no change\n", s->base);
+    result(c, 0, 4);
+}
+static void stream_flush(xctx *c)
+{
+    const uint32_t ip = 0x37AC89, callers[1] = {0x21EC85};
+    stack(c, ip, 1); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
+    /* Flush (vtable 6): 0x37FBFE(voice, 0) returns at once for a voice that
+     * never started (state bit 0 clear); no packet ever existed here. */
+    xv_logf("[h2/audio-stream] flush caller=0021EC85 object=%08X; never started, no packets, no change\n", s->base);
+    result(c, 0, 1);
+}
+static void stream_status(xctx *c)
+{
+    const uint32_t ip = 0x37ACD4, callers[1] = {0x2AE856};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
+    uint32_t out = X_ARG(1);
+    output(c, ip, out, 4);
+    if (aliases(out, 4, c->r[4], 12)) fail(c, ip, "stream status output alias", out);
+    /* GetStatus (vtable 3) -> 0x37F591: bit 0 = packets queued (list head +0xB0
+     * not empty), 0x80000 = deferred pause pending (state bit 0x20); the
+     * playing/starved bits need a started voice. */
+    uint32_t status = (s->pause & 0x20) ? 0x80000u : 0u;
+    x_guest_write(out, &status, 4);
+    xv_logf("[h2/audio-stream] status caller=002AE856 object=%08X status=%08X; empty, never started\n", s->base, status);
+    result(c, 0, 2);
+}
+static void stream_voice_properties(xctx *c)
+{
+    const uint32_t ip = 0x37B83F, callers[1] = {0x21FB3D};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
+    uint32_t out = X_ARG(1);
+    output(c, ip, out, 4);
+    /* GetVoiceProperties: 0x37B55C -> 0x37A67A -> 0x3818E5 reads the VP register
+     * image only for a started voice (state bit 0); otherwise it returns
+     * DSERR 0x88780032 without touching the output. The empty voice never starts. */
+    xv_logf("[h2/audio-stream] voice properties caller=0021FB3D object=%08X output=%08X; never started, original DSERR 88780032, output untouched\n", s->base, out);
+    result(c, 0x88780032u, 2);
+}
+static void submix_position(xctx *c)
+{
+    const uint32_t ip = 0x37C668;
+    stack(c, ip, 5); h2_audio_buffer *b = buffer_live(c, ip, X_ARG(0), 0);
+    uint32_t words[3] = {X_ARG(1), X_ARG(2), X_ARG(3)}, apply = X_ARG(4); float f[3]; memcpy(f, words, sizeof f);
+    /* IDirectSoundBuffer::SetPosition (0x37C3BF -> 0x37C031): stores x,y,z at the
+     * 3D block +8..+0x10 and sets dirty bit 16; DS3D_DEFERRED (1) returns before
+     * the apply (0x37A669). The level's 3D update (0x220EA6) sends it to the
+     * inactive 3D buses; the commit (0x37D141) skips inactive voices. */
+    if (b->submix != 1 || X_M32(c->r[4]) != 0x220EA6 || apply != 1 || b->started || b->stopped ||
+        !isfinite(f[0]) || !isfinite(f[1]) || !isfinite(f[2]))
+        fail(c, ip, "unsupported 3D position caller/state/value", apply);
+    b->spatial[2] = words[0]; b->spatial[3] = words[1]; b->spatial[4] = words[2]; b->spatial[0] |= 0x00010000u;
+    xv_logf("[h2/submix] position caller=00220EA6 interface=%08X x=%08X y=%08X z=%08X deferred dirty=%08X; inactive\n",
+            b->base + 0x1C, words[0], words[1], words[2], b->spatial[0]);
+    result(c, 0, 5);
 }
 static void stream_pause(xctx *c)
 {
@@ -728,7 +958,7 @@ static void stream_pause(xctx *c)
      * stays silent and unqueued. Game callers: 0x21F461 (2), 0x21F63D (1),
      * 0x21F8E3 (0) and 0x2AE4D8 (0). Running that original code on the host's
      * opaque stream record divided by its empty format block (0x37F42E). */
-    if (mode > 3 || s->submitted || s->flags != 0x20000000u || s->route_count ||
+    if (mode > 3 || s->submitted || s->flags != 0x20000000u ||
         (caller != 0x21F461 && caller != 0x21F63D && caller != 0x21F8E3 && caller != 0x2AE4D8))
         fail(c, ip, "unsupported stream pause mode/state/caller", mode);
     switch (mode) {
@@ -1586,6 +1816,19 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37AB40: case 0x37AB87: stream_reference(c, ip); break;
     case 0x37B818: stream_headroom(c); break;
     case 0x37B822: stream_pause(c); break;
+    case 0x37B7FF: stream_volume(c); break;
+    case 0x37B804: stream_frequency(c); break;
+    case 0x37B809: stream_lfo(c); break;
+    case 0x37B80E: stream_envelope(c); break;
+    case 0x37B813: stream_filter(c); break;
+    case 0x37B81D: stream_bin_volumes(c); break;
+    case 0x37C70A: stream_mix_bins(c); break;
+    case 0x37C705: stream_output_buffer(c); break;
+    case 0x37B827: stream_pause_ex(c); break;
+    case 0x37AC89: stream_flush(c); break;
+    case 0x37ACD4: stream_status(c); break;
+    case 0x37C668: submix_position(c); break;
+    case 0x37B83F: stream_voice_properties(c); break;
     case 0x37D598: case 0x37D54E: listener_vector(c, ip); break;
     case 0x37D141: deferred_commit(c); break;
     case 0x37D797: create(c); break;
@@ -1675,7 +1918,7 @@ static void original_empty_work(xctx *c, uint32_t ip)
             pending+=s->packets[n].mirror!=0;
         }
         if (pending!=s->submitted-s->completed ||
-            (s->flags==0x20000000 && (s->callback!=0x220730 || s->route_count || s->submitted || s->completed || pending)))
+            (s->flags==0x20000000 && (s->callback!=0x220730 || s->submitted || s->completed || pending)))
             fail(c,ip,"ordinary stream requires low-priority work",s->base);
         if (!s->submitted) {
             xk_audio_lock();int playing=xk_audio_voice_playing(s->voice);xk_audio_unlock();
