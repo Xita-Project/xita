@@ -51,3 +51,21 @@ in slot A0, with a confirmed dashboard boot and no pending update. Previous
 runtime `c8f54f0f…` remains in slot B1. Execution of the newly admitted startup
 path is still pending. This is a targeted stability fix; no FPS improvement or
 general combat stability is claimed.
+
+## Physical smoke check
+
+The installed runtime loads the saved Pillar of Autumn campaign. Two pistol
+shots into the wall consume two rounds, and completed frames continue afterward.
+Both object workers process jobs. The saved log contains no worker STOP or
+reported fragment-setup failure. It reports about 11–12 FPS in the stationary
+room, with a 10.1 FPS window during new texture decoding; this is not a matched
+performance comparison.
+
+Startup-commit and owner stream-request counters remain zero. The smoke check
+therefore verifies installation and ordinary gameplay, but does not reproduce
+the previously failing stream-start path. Longer gameplay must exercise that
+path before its physical crash reproduction can be closed.
+
+Private evidence: `audio-refill-crash/gameplay-receipt.json`, screenshots and
+`gameplay.log` (961,305 bytes), SHA-256
+`a4d7fa4df01e1301d18984ee3ca42746eb0c6eb78282e4a64b3889958b66dd3e`.
