@@ -28,4 +28,38 @@ owned shader metadata check also pass.
 Independent source review found no additional stencil writer: the same captured
 state is bound on both faces, and clear/UI paths remain excluded or separately
 proved. These checks establish the bounded read-only policy, not driver memory
-traffic or performance. Hardware admission, visuals and benefit remain pending.
+traffic or performance.
+
+## Physical campaign follow-up
+
+The cumulative package from `1823407` is installed in updater slot 1; runtime
+SHA-256 is `31af4cf390bd5f58d58429d3902f6107174de6803777d09dd1ada3d8ffc84812`.
+Only the runtime and boot record differ from its parent package; all four guest
+archives are byte-identical. The parent remains in slot 0 for rollback. All
+five startup selections remain enabled, with scene census compiled OFF.
+
+After a full process restart, the same Pillar of Autumn checkpoint now admits
+60 final continuations per 60-frame report, retaining the 60 first stores.
+There are no stencil declines in these settled windows. This confirms that the
+previous exclusion was overly broad for this view. The reported 31,334,400
+logical samples equal one 960×544 continuation per frame; they are not measured
+memory traffic. All 60 query prefixes are still observed before final completion,
+with no fallback in the recent windows.
+
+Ordinary gameplay observation counted 767 displayed frames in 60.068 seconds:
+**12.769 FPS**, versus **12.660 FPS** for the parent and **12.748 FPS** for the
+earlier four-change package. The logged view and settings match; effective CPU
+and GPU clocks remain 444 and 222 MHz at native 960×544. Live AI varies, so the
+roughly 0.11 FPS difference from the parent does not establish a practical gain.
+The built-in benchmark was not invoked, and no input or capture occurred within
+the observation window.
+
+Checkpoint images, short movement, left/right camera input, pistol fire and the
+pause menu remain intact. No fault marker appears in the captured campaign
+log. This is limited gameplay validation, not proof of combat/driving stability
+or resolution of the historical rocket/plasma GPU crash. The refinement stays
+in the cumulative candidate; stable representative 20 FPS remains unmet.
+
+Evidence is private under the engine-restructure validation directory's
+`direct-cluster-query/depth-store-stencil/`: `installation.json`,
+`campaign-passive/result.json`, `campaign-analysis.json`, logs and screenshots.
