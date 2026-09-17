@@ -140,3 +140,25 @@ capture must establish actual attachment coverage, scene counts/declines,
 bracket widths and observer cost before interpreting completion differences.
 Maximum pending one does not establish GPU idle time; different camera views
 do not establish equal GPU service time.
+
+## Physical startup probe
+
+The full retained gameplay package built successfully and the remote updater
+confirmed runtime `8070d0493d23ee31832df3f90c2912bc1cdb213a1a7d1834fe92620865b727ec`
+in slot 0. The four prior optimization startup flags remain enabled. Only the
+runtime executable and its boot record changed in the package; retained guest
+and system archive member payloads, UI object and shader assets are unchanged.
+
+The dashboard rendered normally. The metadata query succeeded: the returned
+notification pointer is **inside**, rather than at the base of, a one-MiB mapped
+block (offset `0x26420`). This does not establish the notification suballocation's
+size or exclusivity. Capacity stays zero and no additional notification word is
+accessed. This is a startup check, not full diagnostic qualification or an FPS
+improvement. Package and physical receipts are in the private
+`scene-census-integration/` evidence directory.
+
+The main menu also rendered, with all four startup modes confirmed ON. Reports
+showed zero added notifications and zero diagnostic polling loads, as required
+at capacity zero. After the probe, use the prior cumulative gameplay build to
+avoid retaining diagnostic planning/report overhead during performance play;
+the diagnostic code remains available for qualification.
