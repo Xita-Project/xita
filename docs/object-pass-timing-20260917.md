@@ -70,9 +70,18 @@ passes, not exclusive CPU work. Other object passes and unaccepted serial work
 remain outside these counters. Nested function calls do not open an additional
 pass: the original `owner` admission gate prevents it.
 
+The UI resets its frame window even if the original object report gate skips
+an open or running pass. Object counters then carry into the next report.
+Compare consecutive matching valid reports; after a skipped report, the printed
+`60 frames` alone does not establish the span of the accumulated object totals.
+Do not subtract those carried totals from a single owner window. Raw worker
+samples separately report their actual wall interval.
+
 These functions retain the existing guest-owner caller contract. They are not
 new arbitrary-thread registration/control APIs. Workers never update the new
 records, and no new checks are inserted into their loops or math locks.
+Shutdown is the existing exception: the main coordinator clears the observer
+after joining and quiescing workers; it does not perform owner-ancestry admission.
 
 ## Worker clock observations
 
