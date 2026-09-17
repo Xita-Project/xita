@@ -2033,6 +2033,36 @@ static void xv_load_settings(void)
     }
 }
 
+#ifndef XV_MODEL_BATCHES_TRIAL
+#define XV_MODEL_BATCHES_TRIAL 0
+#endif
+#if XV_MODEL_BATCHES_TRIAL != 0 && XV_MODEL_BATCHES_TRIAL != 1
+#error "XV_MODEL_BATCHES_TRIAL must be 0 or 1"
+#endif
+#if XV_MODEL_BATCHES_TRIAL
+#if !defined(XV_RUN_RECOMP) || !defined(XV_NATIVE_MODEL_PALETTE) || !defined(XV_NATIVE_MODEL_HIERARCHY)
+#error "XV_MODEL_BATCHES_TRIAL requires the recompiled Halo model helpers"
+#endif
+/* Called once after the final dashboard/config load, before guest/worker
+ * creation. This private trial deliberately overrides the configured batch
+ * choices for this process; the existing native-math availability gate remains. */
+static void xv_model_batches_trial_startup(void)
+{
+    extern void xv_model_palette_override(int);
+    extern void xv_model_hierarchy_override(int);
+    const char *palette=getenv("XV_NATIVE_MODEL_PALETTE");
+    const char *hierarchy=getenv("XV_NATIVE_MODEL_HIERARCHY");
+    const char *math=getenv("XV_NATIVE_MATH");
+    const char *neon=getenv("XV_NATIVE_MATRIX_NEON");
+    int effective=!math||atoi(math)!=0;
+    xv_model_palette_override(1);
+    xv_model_hierarchy_override(1);
+    XV_LOG("[model-batches-trial] private startup selector 1; configured palette=%.96s hierarchy=%.96s native-math=%.96s matrix-neon=%.96s; trial overrides palette=1 hierarchy=1; effective palette=%d hierarchy=%d (native-math gate); no settings saved\n",
+        palette?palette:"<unset:off>",hierarchy?hierarchy:"<unset:off>",
+        math?math:"<unset:on>",neon?neon:"<unset:off>",effective,effective);
+}
+#endif
+
 #ifdef XV_RUN_RECOMP
 typedef struct {
     xv_gfx_t *gfx;
@@ -2194,6 +2224,9 @@ int main(int argc, char *argv[])
     xv_gfx_configure_resolution();
     xv_pipeline_configure(); /* Dashboard edits loaded; workers have not started. */
     xv_d3d_configure_render_preparation();
+#if XV_MODEL_BATCHES_TRIAL
+    xv_model_batches_trial_startup();
+#endif
 #ifdef XV_DEPTH_STORE
     XV_LOG("[depth-store] process-start mode %d available %d; read-only continuation proof; loads and final ownership retained\n",xv_depth_store_enabled(),xv_depth_store_available());
 #endif
