@@ -106,6 +106,17 @@ int main(void)
     f.misalign_map = 1; reject(0, 0x1D70, 9); f.misalign_map = 0;
     f.failed_instance = 0x130A8; reject(0, 0x1D70, 9); f.failed_instance = 0;
     dma(10, 3, 0xFFF, 7); reject(0, 0x1D70, 9); /* physical end/alignment */
+    /* Z-pass pixel-count query: clear (type 1 only), enable (0/1), GET_REPORT into DMA_REPORT (0x1A8) */
+    reject(0, 0x17C8, 0); reject(0, 0x17C8, 2); assert(emit(0, 0x17C8, 1));
+    reject(0, 0x17CC, 2); assert(emit(0, 0x17CC, 1) && s.zpass_enable == 1 && emit(0, 0x17CC, 0) && s.zpass_enable == 0);
+    reject(0, 0x17D0, 0x01000010); /* no report DMA bound yet */
+    dma(10, 3, 0x800, 0x3F); assert(emit(0, 0x1A8, 10));   /* 64-byte writable report window */
+    f.ram[0x810 / 4] = 0xDEADBEEF; f.ram[0x81C / 4] = 0xDEADBEEF;
+    assert(emit(0, 0x17D0, 0x01000010));
+    assert(s.zpass_reports == 1 && s.last_report_address == 0x810 && s.last_report_value == 0);
+    assert(f.ram[0x810 / 4] == 1 && f.ram[0x814 / 4] == 0 && f.ram[0x818 / 4] == 0 && f.ram[0x81C / 4] == 0);
+    reject(0, 0x17D0, 0x02000010); reject(0, 0x17D0, 0x01000014); /* type, 16-byte alignment */
+    assert(emit(0, 0x1A8, 11)); reject(0, 0x17D0, 0x01000010); assert(emit(0, 0x1A8, 10)); /* read-only DMA */
     reject(0, 0x1800, 3); reject(0, 0x1810, 0); /* draws stay fatal */
     assert(emit(0, 0x1E9C, 134));
     for (unsigned i = 0; i < 8; ++i) assert(emit(0, 0xB00 + i * 4, 0xAABB0000 + i));

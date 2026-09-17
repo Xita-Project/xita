@@ -60,6 +60,28 @@ static const SceGxmProgram *load_gxp(const char *name)
     return (const SceGxmProgram *)data;
 }
 
+#define VIS_STRIDE 4096u
+static void *g_vis_raw; static uint32_t *g_vis; static uint64_t g_vis_base;
+static uint64_t vis_sum(void)
+{
+    uint64_t sum = 0;
+    for (unsigned core = 0; core < 4; ++core) sum += *(volatile uint32_t *)((uint8_t *)g_vis + core * VIS_STRIDE);
+    return sum;
+}
+/* Both are called by the command consumer (CLEAR_REPORT_VALUE / GET_REPORT): the open scene is
+ * finished first so the counts cover every draw submitted so far. */
+uint64_t h2_menu_gxm_zpass_read(void)
+{
+    if (g_ready != 1) return 0;
+    if (g_open) h2_menu_gxm_flush();
+    return vis_sum() - g_vis_base;
+}
+void h2_menu_gxm_zpass_clear(void)
+{
+    if (g_ready != 1) return;
+    if (g_open) h2_menu_gxm_flush();
+    g_vis_base = vis_sum();
+}
 static int initialize(void)
 {
     if (!h2_gxm_ensure()) return 0;
@@ -71,6 +93,13 @@ static int initialize(void)
     unsigned aligned_w = (W + 31) & ~31u, aligned_h = (H + 31) & ~31u;
     g_depth_mem = h2_gxm_alloc(aligned_w * aligned_h * 4, 0, &off);
     if (!g_vring || !g_iring || !g_texpool || !g_depth_mem) return 0;
+    /* Z-pass pixel-count query: one visibility slot per GPU core (INCREMENT op accumulates
+     * the fragments that pass the depth/stencil test); 4 KB per core, base 4 KB aligned. */
+    g_vis_raw = h2_gxm_alloc(VIS_STRIDE * 4 + 4096, 0, &off);
+    if (!g_vis_raw) return 0;
+    g_vis = (uint32_t *)(((uintptr_t)g_vis_raw + 4095) & ~(uintptr_t)4095);
+    memset(g_vis, 0, VIS_STRIDE * 4);
+    if (sceGxmSetVisibilityBuffer(g_ctx, g_vis, VIS_STRIDE) < 0) { xv_logf("[h2/menu-gxm] visibility buffer rejected\n"); return 0; }
     GCHECK(sceGxmDepthStencilSurfaceInit(&g_depth, SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24, SCE_GXM_DEPTH_STENCIL_SURFACE_TILED,
                                          aligned_w, g_depth_mem, NULL));
     sceGxmDepthStencilSurfaceSetForceStoreMode(&g_depth, SCE_GXM_DEPTH_STENCIL_FORCE_STORE_ENABLED);
@@ -455,6 +484,12 @@ int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
     sceGxmSetFrontDepthFunc(g_ctx, dfn); sceGxmSetBackDepthFunc(g_ctx, dfn);
     sceGxmSetFrontDepthWriteEnable(g_ctx, dw); sceGxmSetBackDepthWriteEnable(g_ctx, dw);
     sceGxmSetRegionClip(g_ctx, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, W - 1, H - 1);
+    {   /* Z-pass pixel count: slot 0 accumulates while NV097_SET_ZPASS_PIXEL_COUNT_ENABLE is set */
+        SceGxmVisibilityTestMode vm = s->zpass_enable ? SCE_GXM_VISIBILITY_TEST_ENABLED : SCE_GXM_VISIBILITY_TEST_DISABLED;
+        sceGxmSetFrontVisibilityTestIndex(g_ctx, 0); sceGxmSetBackVisibilityTestIndex(g_ctx, 0);
+        sceGxmSetFrontVisibilityTestOp(g_ctx, SCE_GXM_VISIBILITY_TEST_OP_INCREMENT); sceGxmSetBackVisibilityTestOp(g_ctx, SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
+        sceGxmSetFrontVisibilityTestEnable(g_ctx, vm); sceGxmSetBackVisibilityTestEnable(g_ctx, vm);
+    }
 
     /* uniforms */
     void *vu = NULL, *fu = NULL;

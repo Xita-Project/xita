@@ -173,6 +173,14 @@ static void assemble(const menu_raster_state *rs, uint16_t prim, uint32_t n,
     }
 }
 
+/* Z-pass pixel-count query counters for the command consumer: the software rasterizer's
+ * count plus the GXM backend's hardware visibility count (both since the last clear). */
+uint64_t h2_menu_gxm_zpass_read(void) __attribute__((weak));
+void h2_menu_gxm_zpass_clear(void) __attribute__((weak));
+uint64_t h2_menu_zpass_read(void)
+{ return menu_raster_zpass + (h2_menu_gxm_zpass_read ? h2_menu_gxm_zpass_read() : 0); }
+void h2_menu_zpass_clear(void)
+{ menu_raster_zpass = 0; if (h2_menu_gxm_zpass_clear) h2_menu_gxm_zpass_clear(); }
 static int software_body(void *opaque, const h2_menu_request *r, uint8_t *ab_before, uint8_t *ab_gpu);
 
 /* A/B helper: the software draw over the restored buffer, then the comparison against the GXM result. */
@@ -292,6 +300,7 @@ static int software_body(void *opaque, const h2_menu_request *r, uint8_t *ab_bef
         rs.blend = MENU_BLEND_OPAQUE;
     }
     rs.alpha_test = s->setup[0x300 / 4] & 1;
+    rs.zpass_count = s->zpass_enable != 0;
     rs.alpha_func = s->setup[0x33C / 4];
     rs.alpha_ref = (float)(s->setup[0x340 / 4] & 0xFF) / 255.0f;
     static int depth_knob = -1, pool_knob = -1;

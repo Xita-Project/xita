@@ -29,7 +29,15 @@ typedef struct h2_command_state {
     uint32_t blit_point[2], blit_point_valid;
     uint64_t completed_blits, copied_bytes;
     uint32_t last_blit_source, last_blit_dest;
+    /* Z-pass pixel-count query (NV097_SET_ZPASS_PIXEL_COUNT_ENABLE / CLEAR_REPORT_VALUE /
+     * GET_REPORT). The renderers count fragments that pass the depth test while enabled
+     * (h2_menu_zpass_*); GET_REPORT writes the 16-byte report into the report DMA. */
+    uint32_t zpass_enable, zpass_reports, last_report_address, last_report_value;
+    uint64_t report_serial;
 } h2_command_state;
+/* Fragment counters owned by the render backends (weak: absent in the host test => 0). */
+uint64_t h2_menu_zpass_read(void);
+void h2_menu_zpass_clear(void);
 /* Rejection preserves command/clear state and guest bytes. */
 int h2_command_method(h2_command_state *state, h2_kelvin_clear *clear,
                        uint8_t sub, uint16_t method, uint32_t value, uint32_t source);

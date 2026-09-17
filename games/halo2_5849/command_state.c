@@ -63,6 +63,29 @@ static int release_semaphore(h2_command_state *s, h2_kelvin_clear *c, uint32_t v
     s->last_semaphore_address = physical; s->last_semaphore_value = value;
     return 1;
 }
+/* NV097_GET_REPORT: type 1 (ZPASS_PIXEL_CNT) writes {timestamp lo, hi, value, status 0} at
+ * DMA_REPORT (context slot 10, method 0x1A8) + offset, as the GPU does when the query
+ * completes. Accepted work is synchronous, so the report is complete when written. */
+uint64_t h2_menu_zpass_read(void) __attribute__((weak));
+void h2_menu_zpass_clear(void) __attribute__((weak));
+static int get_report(h2_command_state *s, h2_kelvin_clear *c, uint32_t value)
+{
+    uint32_t type = value >> 24, offset = value & 0x00FFFFFFu;
+    h2_dma_object dma; uint32_t physical;
+    if (type != 1 || (offset & 15) || !(s->dma_valid & (1u << 10)) ||
+        !h2_dma_load(c->read_instance, c->opaque, s->dma[10], &dma) ||
+        !h2_dma_resolve(&dma, offset, 16, 1, c->physical_bytes, &physical) || (physical & 15)) return 0;
+    void *pointer = c->map_physical(c->opaque, physical, 16);
+    if (!pointer || ((uintptr_t)pointer & 3) || (uintptr_t)pointer > UINTPTR_MAX - 16) return 0;
+    uint64_t count = h2_menu_zpass_read ? h2_menu_zpass_read() : 0, stamp = ++s->report_serial;
+    uint32_t words[4] = { (uint32_t)stamp, (uint32_t)(stamp >> 32), count > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)count, 0 };
+    uint8_t bytes[16];
+    for (unsigned i = 0; i < 4; ++i) for (unsigned k = 0; k < 4; ++k) bytes[i * 4 + k] = (uint8_t)(words[i] >> (8 * k));
+    memcpy(pointer, bytes, 16);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    ++s->zpass_reports; s->last_report_address = physical; s->last_report_value = words[2];
+    return 1;
+}
 static int simple_graph_context(h2_kelvin_clear *c, uint32_t instance, uint32_t klass)
 {
     if (!instance || (instance & 15) || instance > 0xFFFF0) return 0;
@@ -395,6 +418,12 @@ static int kelvin(h2_command_state *s, h2_kelvin_clear *c, unsigned sub,
         if (value) return 0;
         return 1;
     case 0x16BC: if (value > 1) return 0; s->edge_flag = value; return 1;
+    case 0x17C8: /* CLEAR_REPORT_VALUE: only the Z-pass pixel counter exists */
+        if (value != 1) return 0;
+        if (h2_menu_zpass_clear) h2_menu_zpass_clear();
+        return 1;
+    case 0x17CC: if (value > 1) return 0; s->zpass_enable = value; return 1;
+    case 0x17D0: return get_report(s, c, value);
     case 0x1D6C: if (value & 3) return 0; s->semaphore_offset = value; return 1;
     case 0x1D70: return release_semaphore(s, c, value);
     /* Compression is metadata in this canonical logical-depth backend. */

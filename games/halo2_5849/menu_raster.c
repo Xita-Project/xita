@@ -146,6 +146,7 @@ typedef struct {
     unsigned tex_mask;                 /* units the combiner reads; others sample as zero */
 } tri_job;
 
+uint64_t menu_raster_zpass;
 static void raster_band(const void *vjob, int32_t cy0, int32_t cy1, int on_caller)
 {
     const tri_job *J = vjob;
@@ -201,6 +202,7 @@ static void raster_band(const void *vjob, int32_t cy0, int32_t cy1, int on_calle
 
             if (st->alpha_test && !compare(st->alpha_func, (double)clampf(frag[3], 0.0f, 1.0f), (double)st->alpha_ref))
                 continue;
+            if (st->zpass_count) __atomic_fetch_add(&menu_raster_zpass, 1u, __ATOMIC_RELAXED);
             if (zrow && dp->write) zrow[px] = (z24 << 8) | (zrow[px] & 0xFF);
 
             blend_pixel(st, frag, row + (uint32_t)px * 4);
