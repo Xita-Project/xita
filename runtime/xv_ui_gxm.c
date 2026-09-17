@@ -1486,6 +1486,9 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
             report_batch=!e || atoi(e)!=0;
         }
         int grouped=report_batch && xv_log_report_begin_frame(frame);
+#ifdef XV_OWNER_PHASE
+        { extern void xv_owner_phase_report(unsigned); xv_owner_phase_report(g_t_frames); }
+#endif
         { extern void xv_native_math_report(unsigned); extern void xd3d_prepare_report(unsigned);
           xv_native_math_report(g_t_frames); xd3d_prepare_report(g_t_frames); }
         { extern void xv_hle_dispatch_report(unsigned) __attribute__((weak));

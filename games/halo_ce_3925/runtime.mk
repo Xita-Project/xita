@@ -64,3 +64,8 @@ endif
 ifeq ($(XV_NATIVE_CLIP_REGION),1)
 XITA_GAME_SRCS += recomp/kernel/xk_clip_region.c recomp/kernel/xk_clip_region_control.c
 endif
+
+# Optional two-scope owner elapsed census; no general phase/worker controls.
+ifeq ($(XV_OWNER_PHASE),1)
+XITA_GAME_SRCS += recomp/kernel/xk_owner_phase.c
+endif
