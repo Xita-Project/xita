@@ -46,6 +46,64 @@ feature dependencies without rebuilding guest code. Invalid values are rejected.
 The full Vita package built. Its ELF contains both depth-store and query-boundary
 startup values of one, with the three CPU helpers retained. Scene-census code is
 compiled OFF. Package members differ from the four-feature gameplay build only
-in the runtime executable and boot record. Physical gameplay and measured
-benefit remain to be established; these local checks do not establish general
-hardware correctness or a speedup.
+in the runtime executable and boot record. These local checks do not establish
+general hardware correctness or a speedup.
+
+## Fresh-launch hardware result
+
+The cumulative candidate from `afe7e75` is installed in updater slot 0, with
+confirmed runtime SHA-256
+`3381599eb9c0f0605a53b1eb41226f9d74f95d4be0b7ee1848f5c5524f1e33b4`.
+The four-change parent remains in slot 1. Both launches entered the same
+Pillar of Autumn checkpoint directly from the dashboard, using New001 and
+Normal difficulty. No built-in benchmark or live mode switch was requested.
+The five startup selections report enabled; scene-census code remains absent.
+
+| Ordinary gameplay observation | Displayed FPS | Frames / elapsed time |
+| --- | ---: | ---: |
+| Four retained changes, fresh launch | 12.748 | 765 / 60.012 s |
+| Same changes plus depth-store policy, fresh launch | 12.660 | 760 / 60.030 s |
+
+These are display-counter observations over host monotonic time. The logged
+settings match, and the camera remains at approximately `(-28.66, 32.52, 0.62)`
+facing `(0.56, 0.82, -0.15)`. Screenshots show the same column and pistol view.
+Live AI and draw counts vary, so the roughly 0.09 FPS difference does not
+establish a regression or a benefit. Endpoint latency bounds in the private
+receipts describe timing uncertainty, not workload variation.
+
+Crucially, the new policy reports **zero admissions** here: steady windows retain
+60 first backbuffer stores and decline 60 continuations because stencil is
+enabled. This is a conservative exclusion, not proof that every such draw writes
+stencil. No store was omitted in the sampled view. Classify the new candidate as
+**not applicable to this sample**, rather than concluding that omitted stores
+do or do not help. Earlier exact query publication remains active: the recent
+windows observe all 60 prefixes before final completion with zero fallbacks.
+
+After the observation, short movement, pistol fire and the pause menu remain
+responsive, with visible impact effects and intact scene/UI screenshots. No
+fault marker appears in the captured observation log. This does not qualify
+rocket explosions, driving, longer stability, or scenes that actually admit
+the new policy. The current package retains all five startup selections; the
+repository default remains OFF pending broader evidence.
+
+Private receipts are under `direct-cluster-query/depth-store-startup/` in the
+engine-restructure validation directory: `installation.json`, both
+`*-campaign-passive/result.json` files, `*-analysis.json`, logs and screenshots.
+
+## Keeping improvements together
+
+The package retains the existing worker/rendering changes and these recent
+additions together: collision-vertex conversion, object collection,
+segment/sphere math, earlier exact query publication, and the conditional
+depth-store policy. A new candidate does not replace the preceding compatible
+changes. Correctness, actual admission and performance are separate questions:
+
+- A correctness failure or reproducible regression requires a fix or rollback.
+- An eligible change with an unclear timing result remains inconclusive.
+- An enabled change with no eligible work is not tested by that view.
+- A repeatable improvement in the combined build supports keeping the change
+  enabled; scene-specific gains are not a general FPS guarantee.
+
+Evaluate cumulative frame time after fresh launches. Savings in independent
+work can add up, while overlapping work and a different limiting subsystem can
+hide them. Do not add isolated FPS differences or promise a 5 FPS combined gain.
