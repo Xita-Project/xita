@@ -4,8 +4,8 @@ This default-OFF residency experiment now avoids real GPU writes for clean
 leading/trailing ranges and completely clean batches. Previously a resident hit
 skipped the guest-to-mirror snapshot, but the asynchronous worker still copied
 the entire batch to GPU storage. Residency remains opt-in through the environment
-or a process-start build default; this change has not been integrated, deployed
-or measured on hardware.
+or a process-start build default. A cumulative candidate has now been installed
+and its actual copy omission verified on hardware; no FPS gain is established.
 
 The dispatcher retains one dirty envelope per slot between its existing 64 KiB
 batch triggers and final seal. Nonresident snapshots extend that envelope;
@@ -126,3 +126,29 @@ The fixture uses the existing production uploader/worker with host Vita stubs.
 It does not repeat the already-qualified envelope/worker concurrency suite or
 claim fresh hardware validation. Startup receipts are under the private evidence
 directory's `startup/` subdirectory.
+
+## Cumulative hardware check
+
+Source `43dfa7a` was built with `XV_VERTEX_RESIDENT_DEFAULT=1` alongside the
+preceding nine experimental paths. Runtime `4c025a02…` booted in updater slot 0
+with the prior `d817f077…` retained in slot 1. Package inspection found only the
+uploader object changed; generic/query objects and all asset payloads matched
+the parent. Repository defaults remain OFF.
+
+An ordinary fresh launch at native 960×544 and unchanged standard graphics
+reached the original New001 campaign pistol checkpoint. Passive 60-frame
+windows recorded 21,643–22,208 KiB of clean GPU upload ranges omitted, with
+1,044–2,774 KiB still copied. These are producer traffic counters, not GPU
+timing. Windows reported 12.4–12.6 FPS; this does not establish a speedup over
+the earlier approximately 12.8 FPS observation. No built-in benchmark ran.
+
+Two fire inputs, a camera turn, a strafe and pause completed without searched
+fault markers or logger errors. This is a short smoke test, not a long-session
+crash qualification. A partially drawn load-level menu capture became intact
+after settling; an additional ownership audit found no concrete mirror/GPU
+divergence. The cause of that transient was not established.
+
+Private evidence: `vertex-residency-startup/installation.json`,
+`campaign-smoke-receipt.json`, `campaign-steady-tail.log`, and
+`ownership-audit.md` under the same validation directory. The cumulative build
+retains the change; memory-traffic savings alone do not prove frame-time savings.
