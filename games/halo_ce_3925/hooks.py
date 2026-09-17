@@ -249,6 +249,28 @@ class HaloHooks(NoGameHooks):
 
     def transform_body(self, address, body):
         body = self.light_census_body(address, body)
+        if self.enabled and address == 0x4C980:
+            size, digest = self.object_shared[address]
+            if hashlib.sha256(self.image.bytes_at(address, size) or b"").hexdigest() == digest:
+                children = (0x11120,0x3A8B0,0x3D190,0x41B40,0x425D0,0x428F0,
+                            0x43AF0,0x478D0,0x48090,0x48E10,0x49280,0x493E0,
+                            0x4A9F0,0x4B000,0x4B170,0x4B3A0,0x4B410,0x4B580,
+                            0x4B9D0,0xBDF10,0xBE050,0xBF870,0xD8B70)
+                # Keep direct calls and every original stack/register effect.
+                # Only an already sampled outer worker hold can time a child.
+                def child_call(match):
+                    child = int(match[1], 16)
+                    assert child in children, "object callback child drift"
+                    return ("#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_HOLD_PROFILE)\n"
+                            "    { extern unsigned xv_object_hold_children_enabled;\n"
+                            "      extern unsigned xv_object_hold_child_begin(int);\n"
+                            "      extern void xv_object_hold_child_end(unsigned,unsigned);\n"
+                            "      unsigned hold_child_ = xv_object_hold_children_enabled ?\n"
+                            "          xv_object_hold_child_begin(xv_object_math_locked_) : 0;\n" +
+                            match[0] + "\n"
+                            f"      if (hold_child_) xv_object_hold_child_end(hold_child_,{children.index(child)});\n"
+                            "    }\n#else\n" + match[0] + "\n#endif")
+                body = re.sub(r"    f_([0-9A-F]{8})\(c\);", child_call, body)
         if address == 0x56670 and self.light_census_enabled:
             size, digest = self.object_shared[address]
             if hashlib.sha256(self.image.bytes_at(address, size) or b"").hexdigest() == digest:

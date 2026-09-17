@@ -98,6 +98,15 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                         assert len(rows)<=33 and all(row[4]<=row[3] and (row[1] or row[5]) for row in rows)
                     if workers!='0':assert sum(int(row[4]) for row in holds)>0
                     else:assert not sites
+                    children=re.findall(r'\[object-hold-child\] lane (\d+) parent 0004C980 child ([0-9A-F]+) samples (\d+) elapsed-us (\d+) max-us (\d+);',result.stderr)
+                    for lane in range(2):
+                        rows=[tuple(int(v,16 if j==1 else 10) for j,v in enumerate(row)) for row in children if int(row[0])==lane]
+                        assert all(row[1] in (0x48090,0x4B9D0) and row[4]<=row[3] for row in rows)
+                        if rows:assert len(rows)==2 and rows[0][2]==rows[1][2]
+                        held_us=sum(int(row[3]) for row in sites if int(row[0])==lane)
+                        assert sum(row[3] for row in rows)<=held_us
+                    if workers!='0':assert children,'sampled child/owner-service attribution missing'
+                    else:assert not children
                 print(f'PASS: {workers} workers, profile {profile}, bounded wait {timed}: two object passes in three render frames; retired/reset totals and wait-site accounting')
     subprocess.run([str(binary),"default-on"],check=True,timeout=10)
     def no_core(): resource.setrlimit(resource.RLIMIT_CORE,(0,0))

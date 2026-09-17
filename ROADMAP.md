@@ -184,9 +184,12 @@ controller restoration pass; ordinary builds omit the instrumentation. The
 diagnostic build is boot-confirmed on hardware with standard graphics restored.
 Two native campaign captures rank the guarded `4C980` callback first, accounting
 for 62.6–78.0% of sampled held elapsed time; waiting math helpers have much
-shorter sampled holds. Next audit that callback's child dependencies before
-narrowing its protected sections. Sampling restores Off; the roughly 11.5–11.6
-FPS comparisons measure diagnostic overhead and do not establish a speedup.
+shorter sampled holds. The [child audit and hardware capture](docs/object-callback-audit-20260916.md)
+now attribute 90.7–94.8% of the sampled parent's held elapsed time to `4B9D0`.
+Next separate that movement/collision path's solver work from its shared updates;
+its `49600` solver and collision children are the next targets. Sampling restores
+Off; the roughly 11.5–11.6 FPS comparisons measure diagnostic overhead and do not
+establish a speedup.
 The [polygon-edge comparison](docs/native-polygon-edge.md)
 is slightly positive in one physical view but mixed in another; it remains off.
 The [asynchronous periodic-report comparison](docs/async-reports-20260916.md)

@@ -211,13 +211,49 @@ static xv_object_mutex math_mutex;
  * Table accounting happens after release, not while retaining the mutex. */
 enum { HOLD_SITES=32, HOLD_SAMPLE_MASK=63 };
 static unsigned hold_enabled;
+/* Read only during a joined batch; the drained owner changes this together
+ * with hold_enabled. Generated call sites skip both helper calls when OFF. */
+unsigned xv_object_hold_children_enabled;
 static struct __attribute__((aligned(64))) {
     uint32_t random;
     unsigned observed, samples, active;
     uintptr_t pc;
     uint64_t start;
     struct { uintptr_t pc; unsigned samples; uint64_t us,max_us; } sites[HOLD_SITES+1];
+    unsigned child_active;
+    uint64_t child_start;
+    struct { unsigned samples; uint64_t us,max_us; } children[23];
 } hold_lanes[WORKERS];
+/* Stable IDs of the direct children of the signature-checked 4C980 callback.
+ * No nested attribution: a child includes all its descendants and owner parks.
+ * These calls never release the existing callback guard. */
+static const uint32_t hold_children[23]={
+    0x11120,0x3A8B0,0x3D190,0x41B40,0x425D0,0x428F0,0x43AF0,0x478D0,
+    0x48090,0x48E10,0x49280,0x493E0,0x4A9F0,0x4B000,0x4B170,0x4B3A0,
+    0x4B410,0x4B580,0x4B9D0,0xBDF10,0xBE050,0xBF870,0xD8B70
+};
+unsigned xv_object_hold_child_begin(int guard)
+{
+    if(!hold_enabled||guard<2||guard>=WORKERS+2)return 0;
+    unsigned lane=(unsigned)guard-2;
+    if(!hold_lanes[lane].active||math_depth[lane]!=1||hold_lanes[lane].child_active)return 0;
+    hold_lanes[lane].child_active=1;
+    hold_lanes[lane].child_start=xk_os_monotonic_us();
+    return lane+1;
+}
+void xv_object_hold_child_end(unsigned token,unsigned child)
+{
+    if(!token)return;
+    unsigned lane=token-1;
+    if(lane>=WORKERS||child>=23||!hold_lanes[lane].child_active||
+       !hold_lanes[lane].active||math_depth[lane]!=1)abort();
+    uint64_t elapsed=xk_os_monotonic_us()-hold_lanes[lane].child_start;
+    hold_lanes[lane].child_active=0;
+    hold_lanes[lane].children[child].samples++;
+    hold_lanes[lane].children[child].us+=elapsed;
+    if(elapsed>hold_lanes[lane].children[child].max_us)
+        hold_lanes[lane].children[child].max_us=elapsed;
+}
 static void hold_begin(unsigned lane,uintptr_t pc)
 {
     if(!hold_enabled)return;
@@ -232,6 +268,7 @@ static void hold_begin(unsigned lane,uintptr_t pc)
 }
 static void hold_release(unsigned lane)
 {
+    if(hold_lanes[lane].child_active)abort();
     if(!hold_lanes[lane].active) {xv_object_mutex_release(&math_mutex);return;}
     uint64_t elapsed=xk_os_monotonic_us()-hold_lanes[lane].start;
     uintptr_t pc=hold_lanes[lane].pc;hold_lanes[lane].active=0;
@@ -247,7 +284,7 @@ static void hold_release(unsigned lane)
 static void hold_report(unsigned frames)
 {
     for(unsigned lane=0;lane<WORKERS;lane++) {
-        if(hold_lanes[lane].active)abort();
+        if(hold_lanes[lane].active||hold_lanes[lane].child_active)abort();
         XK_LOG("[object-holds] %u frames lane %u enabled %u outer %u samples %u denominator 64; sampled elapsed includes scheduling/parks, not total hold time\n",
             frames,lane,hold_enabled,hold_lanes[lane].observed,hold_lanes[lane].samples);
         for(unsigned site=0;site<=HOLD_SITES;site++)if(hold_lanes[lane].sites[site].samples)
@@ -255,6 +292,11 @@ static void hold_report(unsigned frames)
                 lane,(unsigned long long)hold_lanes[lane].sites[site].pc,
                 hold_lanes[lane].sites[site].samples,(unsigned long long)hold_lanes[lane].sites[site].us,
                 (unsigned long long)hold_lanes[lane].sites[site].max_us,site==HOLD_SITES);
+        for(unsigned child=0;child<23;child++)if(hold_lanes[lane].children[child].samples)
+            XK_LOG("[object-hold-child] lane %u parent 0004C980 child %08X samples %u elapsed-us %llu max-us %llu; inclusive within sampled outer hold\n",
+                lane,hold_children[child],hold_lanes[lane].children[child].samples,
+                (unsigned long long)hold_lanes[lane].children[child].us,
+                (unsigned long long)hold_lanes[lane].children[child].max_us);
         uint32_t random=hold_lanes[lane].random;
         memset(&hold_lanes[lane],0,sizeof hold_lanes[lane]);hold_lanes[lane].random=random;
     }
@@ -283,6 +325,7 @@ void xv_object_holds_override(int value)
 #ifdef XV_OBJECT_HOLD_PROFILE
     for(unsigned lane=0;lane<WORKERS;lane++)if(math_depth[lane]||hold_lanes[lane].active)abort();
     hold_enabled=value>0;
+    xv_object_hold_children_enabled=hold_enabled;
 #else
     (void)value;
 #endif

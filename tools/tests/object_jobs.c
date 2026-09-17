@@ -51,6 +51,11 @@ static void hierarchy_job(xctx *c,unsigned id)
 static void nested_guard_return(void)
 {
     XV_OBJECT_MATH_GUARD();
+#ifdef XV_OBJECT_HOLD_PROFILE
+    extern unsigned xv_object_hold_child_begin(int);
+    /* A nested callback must not double count the parent's active sample. */
+    assert(!xv_object_hold_child_begin(xv_object_math_locked_));
+#endif
     unsigned before=shared_guarded_value;
     { XV_OBJECT_MATH_GUARD(); shared_guarded_value=before+1; }
     /* Returning from nested cleanup must leave the caller's lock held. */
@@ -228,8 +233,19 @@ void f_0008FB70(xctx *c)
 #endif
     {
         XV_OBJECT_MATH_GUARD();
+#ifdef XV_OBJECT_HOLD_PROFILE
+        extern unsigned xv_object_hold_child_begin(int);
+        extern void xv_object_hold_child_end(unsigned,unsigned);
+        unsigned child_sample=xv_object_hold_child_begin(xv_object_math_locked_);
+        if(child_sample)assert(!xv_object_hold_child_begin(xv_object_math_locked_));
+#endif
         unsigned before=shared_guarded_value;
         nested_guard_return();
+#ifdef XV_OBJECT_HOLD_PROFILE
+        xv_object_hold_child_end(child_sample,8);
+        unsigned service_sample=xv_object_hold_child_begin(xv_object_math_locked_);
+        assert(child_sample==service_sample);
+#endif
         c->r[0]=0x60000+id*16;c->r[1]=0x30000;c->r[2]=0x50000+id*12;
         X_PUSH32(0x123456u);
         assert(xv_math_point_transform(c));
@@ -249,6 +265,9 @@ void f_0008FB70(xctx *c)
         if(id%2==0)submit_stop(c,id);
         if(id%2==0)submit_parameters(c,id);
         assert(shared_guarded_value==before+1);
+#ifdef XV_OBJECT_HOLD_PROFILE
+        xv_object_hold_child_end(service_sample,18);
+#endif
     }
     /* Requests can also arrive simultaneously, outside the shared lock. */
     submit_event(c,0x70004+id*8);
