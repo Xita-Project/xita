@@ -13,6 +13,7 @@
 #include "xk_worker_query.h"
 #include "xk_cluster_runtime.h"
 #include "xk_object_mutex.h"
+#include "xk_object_solver.h"
 #include "../xv_phase.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -59,6 +60,16 @@ static uint64_t work_us[LANES], batch_us;
 /* A worker's recursive scopes stay on its native thread, including while it
  * parks for an owner service. Only the outer scope needs the OS mutex. */
 static unsigned math_depth[WORKERS], math_fast_path=1, math_idle_calls;
+#ifdef XV_OBJECT_SOLVER_EXPERIMENT
+/* No environment/default enable. Only the drained owner may select this
+ * research boundary. It changes inter-object ordering, not solver arithmetic. */
+static unsigned solver_enabled, solver_active[WORKERS];
+#ifdef __vita__
+static SceUID solver_owner_thread;
+#else
+static pthread_t solver_owner_thread;
+#endif
+#endif
 #ifdef XV_WORKER_QUERY
 static unsigned query_enabled;
 static unsigned query_admission[WORKERS][4]; /* accepted, disabled, nested, stack */
@@ -682,6 +693,99 @@ static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes)
         if(g_xpt[(base>>12)+i]!=stack_pages[lane][i])return 0;
     return 1;
 }
+#ifdef XV_OBJECT_SOLVER_EXPERIMENT
+static int solver_is_owner(void)
+{
+#ifdef __vita__
+    return sceKernelGetThreadId()==solver_owner_thread;
+#else
+    return pthread_equal(pthread_self(),solver_owner_thread);
+#endif
+}
+void xv_object_solver_override(int enabled)
+{
+    xv_object_math_report_check();
+    if(initialized!=1||!solver_is_owner())abort();
+    for(unsigned lane=0;lane<WORKERS;lane++)
+        if(solver_active[lane]||math_depth[lane])abort();
+    solver_enabled=enabled>0;
+}
+static int solver_constants(void)
+{
+    /* Original non-writable image constants plus its canonical vector pointer.
+     * Map/image replacement is owner-only with object jobs drained. */
+    static const struct {uint32_t address,value;} words[]={
+        {0x1f0a68,0},{0x1f0a78,0x3f800000},
+        {0x1f0af8,0xe0000000},{0x1f0afc,0x3f1a36e2},
+        {0x1f0c24,0xb8d1b717},{0x206f9c,0x1eaebc},
+        {0x1eaebc,0},{0x1eaec0,0},{0x1eaec4,0x3f800000},
+        {0x1eaf30,0x00010002},{0x1eaf34,0x00020001},
+        {0x1eaf38,0x00020000},{0x1eaf3c,0x00000002},
+        {0x1eaf40,0x00000001},{0x1eaf44,0x00010000}
+    };
+    for(unsigned i=0;i<sizeof words/sizeof *words;i++) {
+        uint32_t a=words[i].address;
+        if((uintptr_t)X_G(a)!=(uintptr_t)g_img_base+a||X_M32(a)!=words[i].value)return 0;
+    }
+    return 1;
+}
+int xv_object_solver_begin(xctx *c)
+{
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1||!solver_enabled||
+       !math_fast_path||!__atomic_load_n(&running,__ATOMIC_ACQUIRE))return 0;
+    int lane=worker_lane();
+    if(lane<0||c!=&contexts[lane]||!xv_is_object_job(c)||
+       math_depth[lane]!=1||solver_active[lane]||c->df||c->preempt<65536)return 0;
+#ifdef XV_OBJECT_HOLD_PROFILE
+    /* Child samples span the outer scope and cannot survive its suspension. */
+    if(hold_enabled)return 0;
+#endif
+    uint32_t sp=c->r[4];
+    /* 170C10 plus its deepest math descendant uses less than 1 KiB below ESP.
+     * Verify the six stack arguments before reading any pointer from them. */
+    if(sp<1024||!private_stack_span(lane,sp-1024,1052)||
+       X_M32(sp)!=0x172cbdu||X_M32(sp+20)!=16)return 0;
+    struct {uint32_t address,bytes;} spans[]={
+        {sp-1024,1052}, {c->r[0],12}, {X_M32(sp+4),12},
+        {X_M32(sp+8),0xac08}, {X_M32(sp+12),12},
+        {X_M32(sp+16),12}, {X_M32(sp+24),16*44}
+    };
+    for(unsigned i=1;i<sizeof spans/sizeof *spans;i++) {
+        if((spans[i].address&3)||!private_stack_span(lane,spans[i].address,spans[i].bytes))return 0;
+        /* Reject aliases into input counts, polygon headers, call arguments,
+         * scratch or another output. Original in-place cases retain the lock. */
+        for(unsigned j=0;j<i;j++)
+            if(spans[i].address<spans[j].address+spans[j].bytes&&
+               spans[j].address<spans[i].address+spans[i].bytes)return 0;
+    }
+    uint32_t packet=spans[3].address;
+    for(unsigned kind=0;kind<3;kind++)if(X_M16(packet+2*kind)>256)return 0;
+    unsigned polygons=X_M16(packet+4);
+    for(unsigned i=0;i<polygons;i++) {
+        uint32_t polygon=packet+0x4408+104*i;
+        /* +24 is an inline vertex COUNT, not a borrowed world pointer. The
+         * polygon's at most eight 2D vertices follow at +28. */
+        if(X_M16(polygon+0x20)>2||X_M8(polygon+0x22)>1||
+           X_M32(polygon+0x24)>8)return 0;
+    }
+    if(!solver_constants())return 0;
+    solver_active[lane]=1;
+    int enclosing=lane+2;
+    xv_object_math_unlock(&enclosing);
+    return lane+1;
+}
+void xv_object_solver_end(int *token)
+{
+    if(!*token)return;
+    int lane=worker_lane();
+    if(lane<0||*token!=lane+1||!solver_active[lane]||math_depth[lane])abort();
+    /* Re-enter through the park-aware path. The outer caller still owns its
+     * original cleanup token; restore its depth before returning to it. */
+    int enclosing=xv_object_math_lock();
+    if(enclosing!=lane+2||math_depth[lane]!=1)abort();
+    solver_active[lane]=0;*token=0;
+}
+#endif
 #ifdef XV_OBJECT_QUAT_PROFILE
 /* Called under the existing guard after private output/scratch admission.
  * This is an ownership census, not permission to read shared inputs unlocked. */
@@ -905,6 +1009,10 @@ static void execute(unsigned lane)
         f_0008FB70(c);
         if(lane<WORKERS&&math_depth[lane])
             xv_object_job_stop(c,0x8FB70u,"unbalanced shared transaction lock");
+#ifdef XV_OBJECT_SOLVER_EXPERIMENT
+        if(lane<WORKERS&&solver_active[lane])
+            xv_object_job_stop(c,0x8FB70u,"unbalanced private solver scope");
+#endif
         work_us[lane]+=xk_os_monotonic_us()-started;
         executed[lane]++;
         if(c->r[4]!=stacks[lane]+STACK_BYTES-252 || X_M32(stacks[lane])!=0x584a4f42u)
@@ -942,6 +1050,13 @@ static int initialize(void)
 {
     if(initialized)return initialized>0;
     initialized=-1;
+#ifdef XV_OBJECT_SOLVER_EXPERIMENT
+#ifdef __vita__
+    solver_owner_thread=sceKernelGetThreadId();
+#else
+    solver_owner_thread=pthread_self();
+#endif
+#endif
 #ifdef XV_LIGHT_QUERY_CENSUS
 #ifdef __vita__
     census_owner_thread=sceKernelGetThreadId();

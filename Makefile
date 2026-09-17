@@ -514,6 +514,22 @@ $(RECOMP_BUILD)/light-census.config: force-light-census-config
 	@rm -f $@.tmp
 $(OBJS) $(XITA_GUEST_OBJS) $(XITA_SYS_OBJS) $(XITA_GAME_OBJS): $(RECOMP_BUILD)/light-census.config
 
+# Opt-in research boundary, runtime default OFF even in this build. Memory
+# ownership admission is implemented; enclosing object ordering is unqualified.
+XV_OBJECT_SOLVER_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_SOLVER_EXPERIMENT))),1,0)
+ifeq ($(XV_OBJECT_SOLVER_BUILD),1)
+RECOMP_CFLAGS += -DXV_OBJECT_SOLVER_EXPERIMENT
+endif
+.PHONY: force-object-solver-config
+force-object-solver-config:
+$(RECOMP_BUILD)/object-solver.config: force-object-solver-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_SOLVER_BUILD)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-solver.config recomp/kernel/xk_object_solver.h
+$(filter $(RECOMP_BUILD)/code_%.o,$(RECOMP_OBJS)): $(RECOMP_BUILD)/object-solver.config
+
 # Sampled lock-holder diagnostic is absent from ordinary acquisition/release.
 XV_OBJECT_HOLD_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_HOLD_PROFILE))),1,0)
 ifeq ($(XV_OBJECT_HOLD_BUILD),1)

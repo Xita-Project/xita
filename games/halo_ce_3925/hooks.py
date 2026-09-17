@@ -8,7 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
-from games.halo_ce_3925 import clip_region
+from games.halo_ce_3925 import clip_region, collision_solver
 
 
 class HaloHooks(NoGameHooks):
@@ -200,6 +200,8 @@ class HaloHooks(NoGameHooks):
         if not self.enabled:
             return out
         out.extend(self.light_census_entry(address))
+        if address == 0x170C10 and collision_solver.matches(self.image):
+            out.extend(collision_solver.ENTRY)
         if self.pose_coalesce_enabled and address in (0x8DDF0, 0x8E087):
             out.extend(["#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POSE_EXPERIMENT)",
                         "    XV_OBJECT_POSE_SCOPE();", "#endif"])

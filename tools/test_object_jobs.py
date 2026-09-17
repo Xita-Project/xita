@@ -51,6 +51,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
         str(root/'tools/tests/object_jobs.c'),str(d3d),str(audio),str(root/'recomp/kernel/xk_object_jobs.c'),
         str(root/'recomp/kernel/xk_math.c'),str(root/'recomp/xv_x86rt.c'),
         str(root/'recomp/kernel/xk_hierarchy.c'),
+        *([os.environ['OBJECT_SOLVER_BODY']] if os.environ.get('OBJECT_SOLVER_BODY') else []),
         '-pthread','-Wl,--gc-sections','-lm','-o',str(binary)],check=True)
     for timed in ("0", "1"):
         for profile in ("0", "1"):
@@ -109,6 +110,12 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                     else:assert not children
                 print(f'PASS: {workers} workers, profile {profile}, bounded wait {timed}: two object passes in three render frames; retired/reset totals and wait-site accounting')
     subprocess.run([str(binary),"default-on"],check=True,timeout=10)
+    if '-DXV_OBJECT_SOLVER_EXPERIMENT' in os.environ.get('OBJECT_JOB_TEST_FLAGS',''):
+        for reason in ('OBJECT_SOLVER_TEST_OFF','OBJECT_SOLVER_TEST_BAD_CONSTANT'):
+            result=subprocess.run([str(binary)],check=True,timeout=30,capture_output=True,text=True,
+                env=dict(os.environ,**{reason:'1'},XV_OBJECT_JOB_WORKERS='2'))
+            assert 'solver boundary entered 0 scopes' in result.stdout
+            print('PASS: solver retains transaction:',reason)
     def no_core(): resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     failure=subprocess.run([str(binary),'unsupported-hle'],capture_output=True,
                            timeout=10,preexec_fn=no_core)

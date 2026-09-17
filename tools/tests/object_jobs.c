@@ -14,6 +14,9 @@ static int gameplay_ready=1;
 int xd3d_object_jobs_ready(void) {return gameplay_ready;}
 static unsigned writes[300],active,peak,allocations;
 static unsigned shared_guarded_value;
+#ifdef XV_OBJECT_SOLVER_EXPERIMENT
+#include "object_solver_scope.inc"
+#endif
 #ifdef XV_NATIVE_MODEL_HIERARCHY
 int xv_math_model_hierarchy(xctx *);
 void xv_model_hierarchy_override(int);
@@ -228,6 +231,9 @@ void f_0008FB70(xctx *c)
     /* Simulate substantial work while exercising nested native-helper locks. */
     struct timespec delay={0,1000000};nanosleep(&delay,NULL);
     unsigned id=c->r[1];
+#ifdef XV_OBJECT_SOLVER_EXPERIMENT
+    solver_fixture_scope(c);
+#endif
 #ifdef XV_NATIVE_MODEL_HIERARCHY
     hierarchy_job(c,id);
 #endif
@@ -286,8 +292,11 @@ int main(int argc,char **argv)
 {
     (void)argv;
     guest_owner=pthread_self();
-    g_xram=calloc(1,2<<20);g_img_base=g_xram;g_xpt=calloc(1<<20,4);
-    for(unsigned i=0;i<512;i++)g_xpt[i]=i*4096;
+    g_xram=calloc(1,4<<20);g_img_base=g_xram;g_xpt=calloc(1<<20,4);
+    for(unsigned i=0;i<1024;i++)g_xpt[i]=i*4096;
+#ifdef XV_OBJECT_SOLVER_EXPERIMENT
+    solver_fixture_constants();
+#endif
 #ifdef XV_NATIVE_MODEL_HIERARCHY
     X_M32(0x1f0a68)=0;X_M32(0x1f0a78)=0x3f800000;X_M32(0x1f0b04)=0x40000000;
     xv_model_hierarchy_override(1);
@@ -309,6 +318,10 @@ int main(int argc,char **argv)
     assert(idle_lock==((!fast||atoi(fast))?0:1));
     xv_object_math_unlock(&idle_lock);
     xv_object_jobs_override(1);
+#ifdef XV_OBJECT_SOLVER_EXPERIMENT
+    assert(!xv_object_solver_begin(&c));
+    if(!getenv("OBJECT_SOLVER_TEST_OFF"))xv_object_solver_override(1);
+#endif
 #ifdef XV_OBJECT_HOLD_PROFILE
     assert(!xv_object_holds_enabled());
     if(getenv("OBJECT_HOLD_TEST"))xv_object_holds_override(1);
@@ -373,6 +386,14 @@ int main(int argc,char **argv)
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
+#ifdef XV_OBJECT_SOLVER_EXPERIMENT
+    int solver_expected=(!workers||atoi(workers)!=0)&&(!fast||atoi(fast))&&!getenv("OBJECT_HOLD_TEST")&&
+        !getenv("OBJECT_SOLVER_TEST_OFF")&&!getenv("OBJECT_SOLVER_TEST_BAD_CONSTANT");
+    assert(!solver_running&&solver_entered==(solver_expected?600u:0u));
+    if(solver_expected)assert(solver_peak==expected);
+    xv_object_solver_override(-1);
+    printf("PASS: solver boundary entered %u scopes; peak %u private solves; admission, cleanup, owner parking\n",solver_entered,solver_peak);
+#endif
     assert(vertex_lock_calls==600);assert(register_calls==200);assert(query_calls==600);assert(event_calls==1200&&event_value==1200);assert(io_calls>=300&&io_calls<=600);
     assert(audio_calls==600&&volume_calls==600&&commit_calls==600&&stop_calls==600);
     assert(frequency_calls==600&&parameter_calls==3000);
