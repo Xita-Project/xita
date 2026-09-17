@@ -76,3 +76,8 @@ That excludes this particular wait as the explanation for these samples, not
 all GPU costs. The first scene section remains the largest attribution target.
 The next optional [five-cut refinement](scene-bucket0-detail-20260917.md)
 separates its visibility, model, lighting, ordered callback and flare work.
+
+The refinement has since been installed and observed on hardware; see the
+[cumulative scene-detail follow-up](cumulative-scene-detail-hardware-20260917.md).
+That follow-up records the current slots and supersedes the rollback location
+stated above for this earlier deployment.
