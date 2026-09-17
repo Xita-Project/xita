@@ -8,17 +8,28 @@ Restarting means a new Xita process; it does not require rebooting the Vita.
 
 ## Current cumulative build
 
+The current fifteen-path runtime `f037ddb3…`, from source `79b067c`, is
+installed and boot-confirmed in slot 1. It keeps the twelve paths below and
+adds packed layouts for three compatible vertex programs, one exact-state
+query arithmetic reconstruction, and ordered publication of completed query
+prefixes with retained-history protection. Standard graphics remain unchanged.
+The twelve-path parent stays in slot 0. Short ordinary campaign firing, movement and pause checks complete without
+a searched fault or logger error. Initial active reports remain 12.7–12.8 FPS;
+no combined FPS gain is established. See the
+[cumulative update](cumulative-render-update-20260917.md) for qualification,
+package identity and hardware evidence.
+
 The preceding eleven-path runtime `ece322ea…` completed short ordinary campaign and
 Blood Gulch vehicle checks. It retains the earlier CPU/rendering work and adds
 exact retired-slot upload omission and collision-solver fusion to the nine-path
 build described below. No clear five-FPS gain or stable representative 20 FPS
 has been established. All eleven compatible paths remain enabled.
 
-The current twelve-path package, from source `e29a962`, adds query-only f32 helper inlining.
+The preceding twelve-path package, from source `e29a962`, adds query-only f32 helper inlining.
 Its final query object exactly matches the qualified prototype; all other
 runtime, caller, solver and generic objects are unchanged. The package retains
-all assets and the existing updater contract. Runtime `2393a044…` is installed
-and boot-confirmed in slot 0; the eleven-path parent remains in slot 1.
+all assets and the existing updater contract. Runtime `2393a044…` was installed
+and boot-confirmed in slot 0; it now serves as the retained rollback.
 Ordinary campaign fire inputs, camera/strafe, movement and pause completed
 without a searched fault marker or logger error. Initial settled reports are
 12.7 FPS. No matched gain/regression or stable 20 FPS is established. The
