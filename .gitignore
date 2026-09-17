@@ -85,6 +85,8 @@ recomp/kernel/xk_worker_query_generated.inc
 recomp/query_fusion.c
 recomp/query_fusion.c.tmp
 recomp/query_f32_primitives/
+recomp/query_semantic_leaf.h
+recomp/query_semantic_leaf.h.tmp
 recomp/solver_fusion.c
 recomp/solver_fusion.c.tmp
 recomp/solver_primitives.h
