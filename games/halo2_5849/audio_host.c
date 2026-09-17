@@ -54,6 +54,7 @@ typedef struct {
      * XMEDIAPACKETs the game submitted, completed from DirectSoundDoWork. */
     struct { uint32_t buffer, size, completed_ptr, status_ptr, context; } game[2];
     uint32_t game_head, game_packets, game_submitted, game_completed;
+    uint32_t game_active;                   /* voice registered with the backend: first packet until Flush/Release */
     int voice;
 } h2_audio_stream;
 #define XMEDIAPACKET_STATUS_PENDING 0x8000000Au /* E_PENDING while queued */
@@ -637,6 +638,7 @@ static void game_stream_process(xctx *c, h2_audio_stream *s, uint32_t address, u
 #if H2_AUDIO_DSP
     if (h2_audio_backend_stream_voice_active(s->voice, 1) < 0) fail(c, ip, "real mixer voice registration rejected", (uint32_t)s->voice);
 #endif
+    s->game_active = 1;
     if (s->pause & 0x44u) xk_audio_voice_stop(s->voice);  /* a paused voice keeps the packet queued */
     unsigned slot = (s->game_head + s->game_packets) % 2;
     s->game[slot].buffer = buffer; s->game[slot].size = size; s->game[slot].completed_ptr = completed;
@@ -997,6 +999,7 @@ static void stream_flush(xctx *c)
 #if H2_AUDIO_DSP
     h2_audio_backend_stream_voice_active(s->voice, 0);
 #endif
+    s->game_active = 0;
     while (s->game_packets) game_stream_complete(c, ip, s, XMEDIAPACKET_STATUS_FLUSHED, "flushed");
     xv_logf("[h2/audio-stream] flush caller=%08X object=%08X cancelled=%u; real voice stopped\n", X_M32(c->r[4]), s->base, queued);
     result(c, 0, 1);
@@ -2030,7 +2033,8 @@ static void original_empty_work(xctx *c, uint32_t ip)
             (s->flags==0x20000000 && (s->callback!=0x220730 || s->submitted || s->completed || pending)))
             fail(c,ip,"ordinary stream requires low-priority work",s->base);
         if (s->game_packets>s->packet_limit || s->game_completed>s->game_submitted) fail(c,ip,"original work game packet accounting",s->base);
-        if (!s->submitted && !s->game_packets) {
+        if (!s->submitted && !s->game_packets && !s->game_active) {
+            /* A drained game voice stays registered (and starved-playing) until Flush/Release. */
             xk_audio_lock();int playing=xk_audio_voice_playing(s->voice);xk_audio_unlock();
             if (playing) fail(c,ip,"untracked active stream needs work",s->base);
         }
