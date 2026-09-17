@@ -10,7 +10,7 @@ int h2_audio_stream_cursor_read(int voice, h2_stream_cursor *out)
     xk_audio_lock();int valid=h2_stream_cursor_from_voice(&g_v[voice],out);xk_audio_unlock();
     return valid;
 }
-int h2_audio_movie_contract(int movie,const int muted[2],const int zero[4],int movie_playing)
+int h2_audio_movie_contract(int movie,const int muted[2],const int zero[4],int movie_playing,const uint8_t *allowed)
 {
     if(movie<0 || movie>=XA_MAX_VOICES || !muted || !zero)return 0;
     /* Preserve the shared decoder's established50% master headroom. This
@@ -30,6 +30,6 @@ int h2_audio_movie_contract(int movie,const int muted[2],const int zero[4],int m
                v->freq_override!=1000 || v->volume!=0.0f || v->size!=1000 || !v->playing)ok=0;
         }else {h2_stream_cursor cursor;if(!h2_stream_cursor_from_voice(v,&cursor))ok=0;}
     }
-    for(unsigned i=0;i<XA_MAX_VOICES && ok;++i)if(g_v[i].playing && !seen[i])ok=0;
+    for(unsigned i=0;i<XA_MAX_VOICES && ok;++i)if(g_v[i].playing && !seen[i] && !(allowed && allowed[i]))ok=0;
     xk_audio_unlock();return ok;
 }

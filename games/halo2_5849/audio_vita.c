@@ -20,6 +20,8 @@ static uint64_t gp_stream_serial;
 /* Serialized retained GP grain ownership; separate from submitted progress. */
 static int movie_prepared=-1,movie_draining;
 static int gp_pcm_voice[2] = {-1,-1};
+/* Game stream voices with packets queued: their real samples ride the PCM lane. */
+static uint8_t game_voice[XA_MAX_VOICES]; static unsigned game_voices;
 static unsigned gp_pcm_active, gp_pcm_queued;
 static uint64_t gp_pcm_submitted[2], gp_pcm_consumed[2];
 static _Alignas(64) int16_t gp_pcm_output[1024 * 2];
@@ -103,7 +105,7 @@ int h2_audio_backend_play(int voice, uint32_t bytes, uint32_t rate)
         uint8_t bins[32];h2_audio_bins_snapshot(bins);int unity=1;
         for(unsigned i=0;i<11;++i)if(bins[i])unity=0;
         ok=ok && bytes==106496 && rate==44100 && fx.playing==0x7fff && fx.filtered==3 && gp_pcm_active==3 &&
-           unity && h2_audio_movie_contract(voice,gp_pcm_voice,zero,0);
+           unity && h2_audio_movie_contract(voice,gp_pcm_voice,zero,0,game_voice);
     }
 #endif
     if (ok) { xk_audio_voice_play(voice, 1); progress = next; }
@@ -401,10 +403,20 @@ static int mix_muted_gp_pcm(void)
     if (!gp_pcm_active) return 1;
     if(progress.voice>=0){
         int zero[4];for(unsigned i=0;i<4;++i)zero[i]=gp_streams[i].voice;
-        if(!h2_audio_movie_contract(progress.voice,gp_pcm_voice,zero,!progress.stopped && !movie_draining))return 0;
+        if(!h2_audio_movie_contract(progress.voice,gp_pcm_voice,zero,!progress.stopped && !movie_draining,game_voice))return 0;
+    } else {
+        /* No movie: only the muted GP PCM voices, the GP stream voices and the
+         * registered game stream voices may be playing. */
+        for (unsigned i=0;i<XA_MAX_VOICES;++i) if (xk_audio_voice_playing((int)i) && !game_voice[i]) {
+            int known=0;
+            for (unsigned k=0;k<2;++k) if (gp_pcm_voice[k]==(int)i) known=1;
+            for (unsigned k=0;k<4;++k) if (gp_streams[k].voice==(int)i) known=1;
+            if (!known) return 0;
+        }
     }
     xk_audio_mix(gp_pcm_output,XA_GRAIN);
-    if(progress.voice<0 || progress.stopped || movie_draining)
+    /* Without a movie or a registered game voice the lane must stay silent. */
+    if((progress.voice<0 || progress.stopped || movie_draining) && !game_voices)
         for (unsigned i=0;i<XA_GRAIN*2;++i) if (gp_pcm_output[i]) return 0;
     int ok=1; xk_audio_lock();
     for (unsigned i=0;i<2;++i) if ((gp_pcm_active & (1u<<i)) && !xk_audio_voice_playing(gp_pcm_voice[i])) ok=0;
@@ -437,6 +449,13 @@ static int backend_queue_reverb(h2_dsp_engine *engine, unsigned index, uint32_t 
              (index==8 ? h2_dsp_queue_reverb8(engine,flags,parameters) : h2_dsp_queue_reverb9(engine,flags,parameters));
     if(ok){reverb_pending=1;reverb_index=index;reverb_queued_frame=fx.frames;}
     sceKernelUnlockMutex(progress_mutex, 1); return ok;
+}
+int h2_audio_backend_stream_voice_active(int voice, int active)
+{
+    if (voice < 0 || voice >= XA_MAX_VOICES || progress_mutex < 0) return -1;
+    sceKernelLockMutex(progress_mutex, 1, NULL);
+    if (!!game_voice[voice] != !!active) { game_voice[voice] = !!active; if (active) ++game_voices; else --game_voices; }
+    sceKernelUnlockMutex(progress_mutex, 1); return 0;
 }
 int h2_audio_backend_fixed_commit_ready(h2_dsp_engine *engine)
 {
@@ -476,8 +495,12 @@ static int mix_worker(SceSize bytes, void *arg)
             }
             movie_prepared=(progress.stopped || movie_draining)?-1:progress.voice;
             if(movie_prepared>=0){xk_audio_lock();movie_frontier=xk_audio_voice_pos(movie_prepared);xk_audio_unlock();}
+            /* The PCM lane (movie voice and registered game stream voices, mixed by
+             * the shared mixer at unity into FL/FR) joins the GP output once the fixed
+             * FX configuration is complete. */
+            int lane = (movie_prepared>=0 || game_voices) && fx.playing==0x7fff && fx.filtered==3;
             if (!stream_decoded(fx.frames*32+XA_GRAIN) ||
-                !(movie_prepared>=0 ? h2_audio_fx_render_pcm(&fx,output[slot],XA_GRAIN,gp_pcm_output) :
+                !(lane ? h2_audio_fx_render_pcm(&fx,output[slot],XA_GRAIN,gp_pcm_output) :
                   h2_audio_fx_render(&fx, output[slot], XA_GRAIN))) {
                 __atomic_store_n(&error, (uint32_t)-1004, __ATOMIC_RELEASE);
                 sceKernelUnlockMutex(progress_mutex, 1); break;

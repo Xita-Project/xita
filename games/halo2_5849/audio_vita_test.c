@@ -24,6 +24,8 @@ static int sceKernelUnlockMutex(int, int);
 static int sceAudioOutOpenPort(int, int, int, int);
 static int sceAudioOutSetVolume(int, int, const int *);
 static int sceAudioOutReleasePort(int);
+/* While set, a registered game stream voice rides the PCM lane: the GP output is no longer the fixed synthetic value. */
+static atomic_uint sink_lane_open __attribute__((unused));
 static int sceAudioOutOutput(int, const void *);
 static int sceAudioOutGetRestSample(int);
 static int sceKernelDelayThread(unsigned);
@@ -72,8 +74,8 @@ uint64_t xk_os_monotonic_us(void) { return sceKernelGetProcessTimeWide(); }
 #else
 #if H2_AUDIO_DSP
 int h2_audio_stream_cursor_read(int voice,h2_stream_cursor *out) { (void)voice;(void)out;return 0; }
-int h2_audio_movie_contract(int movie,const int muted[2],const int zero[4],int playing)
-{(void)movie;(void)muted;(void)zero;(void)playing;return 0;}
+int h2_audio_movie_contract(int movie,const int muted[2],const int zero[4],int playing,const uint8_t *allowed)
+{(void)movie;(void)muted;(void)zero;(void)playing;(void)allowed;return 0;}
 int xk_audio_stream_push(int voice,uint32_t guest,uint32_t size) { (void)voice;(void)guest;(void)size;return -1; }
 int xk_audio_stream_pop_consumed(int voice) { (void)voice;return 0; }
 #endif
@@ -148,7 +150,7 @@ static int sceAudioOutOutput(int id, const void *data)
             for(unsigned i=0;i<XA_GRAIN;++i){assert(samples[i*2]>=1953 && samples[i*2]<=2453);assert(samples[i*2+1]>=953 && samples[i*2+1]<=1953);}
         }else
 #endif
-        {
+        if (!atomic_load(&sink_lane_open)) {
         /* A retained old grain may precede the new source's first grain. */
         assert(samples[0] == 1953 || samples[0] == 3906 || samples[0] == 5859 || samples[0] == 7812);
         for (unsigned i = 0; i < XA_GRAIN * 2; ++i) assert(samples[i] == samples[0]);

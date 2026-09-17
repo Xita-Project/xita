@@ -20,7 +20,7 @@ int main(void)
     int movie=xk_audio_voice_new(1,0x1180);assert(movie==6);int16_t samples[106496/2];
     for(unsigned i=0;i<106496/4;++i){samples[i*2]=1000;samples[i*2+1]=-2000;}x_guest_write(0x10000,samples,sizeof samples);
     xk_audio_voice_set_data(movie,0x10000,sizeof samples);xk_audio_lock();xk_audio_voice_set_volume_db100(movie,0);xk_audio_unlock();
-    int muted[2]={0,1};assert(h2_audio_movie_contract(movie,muted,zero,0));
+    int muted[2]={0,1};assert(h2_audio_movie_contract(movie,muted,zero,0,NULL));
     xk_audio_lock();g_v[movie].channels=1;xk_audio_unlock();assert(h2_audio_backend_play(movie,106496,44100)<0);
     xk_audio_lock();g_v[movie].channels=2;xk_audio_unlock();
     atomic_store(&faults,1u<<F_HOLD);h2_audio_backend_status status;

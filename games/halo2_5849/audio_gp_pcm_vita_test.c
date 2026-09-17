@@ -102,6 +102,18 @@ int H2_GP_PCM_TEST_MAIN(void)
     for(unsigned i=0;i<32;++i)assert(!routed[i]);
     xk_audio_lock();for(unsigned v=0;v<4;++v)assert(g_v[stream_ids[v]].frames_out>=1926 && !g_v[stream_ids[v]].nq);xk_audio_unlock();
     sceKernelUnlockMutex(progress_mutex,1);
+    /* A registered game stream voice may carry real samples on the PCM lane;
+     * the lane then joins the GP output instead of being required silent. */
+    atomic_store(&sink_lane_open,1);
+    assert(h2_audio_backend_stream_voice_active(0,1)==0);
+    xk_audio_lock();xk_audio_voice_set_volume_db100(0,0);xk_audio_unlock();
+    {uint64_t f0=status.fx_computed_frames;for(;;){h2_audio_backend_snapshot(&status);if(status.error||status.fx_computed_frames>f0)break;usleep(1000);}}
+    usleep(60000);h2_audio_backend_snapshot(&status);assert(!status.error);
+    xk_audio_lock();xk_audio_voice_set_volume_db100(0,-10000);xk_audio_unlock();
+    {uint64_t f0=status.fx_computed_frames;for(;;){h2_audio_backend_snapshot(&status);if(status.error||status.fx_computed_frames>f0+2)break;usleep(1000);}}
+    assert(!status.error && h2_audio_backend_stream_voice_active(0,0)==0 && h2_audio_backend_stream_voice_active(-1,0)<0);
+    {uint64_t f0=status.fx_computed_frames;for(;;){h2_audio_backend_snapshot(&status);if(status.error||status.fx_computed_frames>f0+3)break;usleep(1000);}}
+    assert(!status.error);atomic_store(&sink_lane_open,0);
     /* Deliberately violate the host adapter's mute contract. Nonzero PCM
      * must stop before it can be discarded or submitted as another route. */
     xk_audio_lock();xk_audio_voice_set_volume_db100(0,0);xk_audio_unlock();

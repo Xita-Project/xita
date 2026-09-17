@@ -595,6 +595,9 @@ static void game_stream_complete(xctx *c, uint32_t ip, h2_audio_stream *s, uint3
     if (completed) { if (!mapped(completed, 4)) fail(c, ip, "stream packet completed-size output", completed); uint32_t bytes = status_value ? 0 : size; x_guest_write(completed, &bytes, 4); }
     if (status) { if (!mapped(status, 4)) fail(c, ip, "stream packet status output", status); x_guest_write(status, &status_value, 4); }
     s->game_head = (s->game_head + 1) % 2; --s->game_packets; ++s->game_completed;
+#if H2_AUDIO_DSP
+    if (!s->game_packets) h2_audio_backend_stream_voice_active(s->voice, 0);
+#endif
     xctx saved = *c; uint32_t fpscr = h2_platform_fpscr_read(); uint8_t irql = X_M8(c->fs_base + 0x24);
     X_M8(c->fs_base + 0x24) = 2; c->preempt = 0x7fffffff;
     X_PUSH32(status_value); X_PUSH32(context); X_PUSH32(s->context); X_PUSH32(0xDEAD0003u);
@@ -632,6 +635,9 @@ static void game_stream_process(xctx *c, h2_audio_stream *s, uint32_t address, u
         fail(c, ip, "unsupported game stream packet", buffer);
     if (s->game_packets >= s->packet_limit) fail(c, ip, "game stream packet queue full", s->game_packets);
     if (xk_audio_stream_push(s->voice, buffer, size) < 0) fail(c, ip, "real mixer packet queue rejected", (uint32_t)s->voice);
+#if H2_AUDIO_DSP
+    if (h2_audio_backend_stream_voice_active(s->voice, 1) < 0) fail(c, ip, "real mixer voice registration rejected", (uint32_t)s->voice);
+#endif
     if (s->pause & 0x44u) xk_audio_voice_stop(s->voice);  /* a paused voice keeps the packet queued */
     unsigned slot = (s->game_head + s->game_packets) % 2;
     s->game[slot].buffer = buffer; s->game[slot].size = size; s->game[slot].completed_ptr = completed;
@@ -785,6 +791,9 @@ static void stream_reference(xctx *c, uint32_t ip)
          * Free takes the mixer lock before releasing their guest storage. */
         xk_audio_lock(); int playing = xk_audio_voice_playing(s->voice); xk_audio_unlock();
         if (playing) fail(c, ip, "stream release requires completed packet ownership", s->base);
+#if H2_AUDIO_DSP
+        h2_audio_backend_stream_voice_active(s->voice, 0);
+#endif
         xk_audio_voice_free(s->voice);
         if (xk_mem_free(s->base) < 0) fail(c, ip, "free stream", s->base);
         *s = (h2_audio_stream){0}; --device.children; drop_device(c, ip); count = 0;

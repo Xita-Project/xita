@@ -79,6 +79,8 @@ int h2_audio_backend_fx_filter(unsigned key);
 /* Validate the actual fixed FX configuration under its mixer mutex. No
  * processing, history reset, pending DSP update or grain mutation. */
 int h2_audio_backend_fixed_commit_ready(h2_dsp_engine *engine);
+/* A game stream voice with packets queued: its samples ride the shared mixer's PCM lane. */
+int h2_audio_backend_stream_voice_active(int voice, int active);
 /* Only the validated looping, fully muted mono8/1000Hz voices into GP14. */
 int h2_audio_backend_gp_pcm_play(int voice);
 int h2_audio_backend_stream_submit(int voice, uint32_t mirror, uint64_t *ticket);
