@@ -50,8 +50,13 @@ lookup cases retain original fallback, with a measurable admission cost.
 ## Native stack contract
 
 The rejected all-inline typed version enlarged recursive frames from 72 to
-256 bytes (`87EA0`) and 40 to 168 (`87E10`). Ordinary guest fibers have 32 KiB
-native stacks; worker native stacks being larger does not make that safe.
+256 bytes (`87EA0`) and 40 to 168 (`87E10`). A follow-up corrected the original
+stack-capacity premise: the 32 KiB stacks belong to the mock scheduler.
+Recompiled CE guest threads request 512 KiB in `xk_thread.c`, passed unchanged
+to native SCE thread creation by `xk_os_vita.c`; object workers also request
+512 KiB. The larger frames are not a demonstrated capacity failure on that
+basis. Keeping recursive frames small remains useful, and requested capacity
+alone does not bound the complete live caller/recursive chain.
 
 Current temporary storage is in nonrecursive blocks, released before every
 recursive child or preempt. The 2D recursive shell contains no FP operation
