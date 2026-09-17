@@ -1172,7 +1172,14 @@ static int xv_early_visibility_enabled(void)
     return override < 0 ? 0 : override;
 }
 #ifdef XV_QUERY_BOUNDARY
-static int g_query_boundary_override; /* Explicit default OFF. Changed only drained. */
+#ifndef XV_QUERY_BOUNDARY_DEFAULT
+#define XV_QUERY_BOUNDARY_DEFAULT 0
+#endif
+#if XV_QUERY_BOUNDARY_DEFAULT != 0 && XV_QUERY_BOUNDARY_DEFAULT != 1
+#error XV_QUERY_BOUNDARY_DEFAULT must be 0 or 1
+#endif
+/* Initialized before threads; subsequent comparison changes remain drained. */
+static int g_query_boundary_override = XV_QUERY_BOUNDARY_DEFAULT;
 int xv_query_boundary_available(void) { return 1; }
 int xv_query_boundary_enabled(void)
 { return __atomic_load_n(&g_query_boundary_override,__ATOMIC_ACQUIRE); }
@@ -2118,6 +2125,9 @@ int main(int argc, char *argv[])
     if (net_result < 0) goto shutdown;
     xv_gfx_configure_resolution();
     xv_pipeline_configure(); /* Dashboard edits loaded; workers have not started. */
+#ifdef XV_QUERY_BOUNDARY
+    XV_LOG("[query-boundary] process-start mode %d; exact prefix publication at existing scene ends; final ownership retained\n",xv_query_boundary_enabled());
+#endif
 #ifdef XV_NATIVE_OBJECT_COLLECT
     { extern int xv_object_collect_enabled(void);
       XV_LOG("[object-collect] process-start mode %d; startup default with explicit environment override\n",xv_object_collect_enabled()); }

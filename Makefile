@@ -83,20 +83,37 @@ $(BUILD)/depth-store.config: force-depth-store-config
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o $(BUILD)/runtime/xv_shader.o $(BUILD)/runtime/xv_ui_gxm.o: $(BUILD)/depth-store.config
 # Existing-scene exact query completion candidate; compiled and runtime OFF by default.
+XV_QUERY_BOUNDARY_DEFAULT ?= 0
+ifneq ($(words $(XV_QUERY_BOUNDARY_DEFAULT)),1)
+$(error XV_QUERY_BOUNDARY_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_QUERY_BOUNDARY_DEFAULT),0 1),$(XV_QUERY_BOUNDARY_DEFAULT))
+$(error XV_QUERY_BOUNDARY_DEFAULT must be 0 or 1)
+endif
 ifeq ($(XV_QUERY_BOUNDARY),1)
 ifneq ($(RECOMP),1)
 $(error XV_QUERY_BOUNDARY requires RECOMP=1)
 endif
 $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_QUERY_BOUNDARY
+$(BUILD)/runtime/main.o: CFLAGS += -DXV_QUERY_BOUNDARY_DEFAULT=$(XV_QUERY_BOUNDARY_DEFAULT)
 endif
-.PHONY: force-query-boundary-config
+.PHONY: force-query-boundary-config force-query-boundary-startup-config
 force-query-boundary-config:
+force-query-boundary-startup-config:
 $(BUILD)/query-boundary.config: force-query-boundary-config
 	@mkdir -p $(BUILD)
 	@printf '%s\n' '$(if $(filter 1,$(XV_QUERY_BOUNDARY)),1,0)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: $(BUILD)/query-boundary.config
+# Startup selection belongs only to main; no guest or replay unit changes.
+# An absent feature ignores the default and keeps incremental OFF builds idle.
+$(BUILD)/query-boundary-startup.config: force-query-boundary-startup-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_QUERY_BOUNDARY)),$(XV_QUERY_BOUNDARY_DEFAULT),0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/main.o: $(BUILD)/query-boundary-startup.config
 # Pump-side sealed-list census; no fences or scheduling changes. Default OFF.
 ifeq ($(XV_VISIBILITY_PLACEMENT),1)
 $(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_VISIBILITY_PLACEMENT

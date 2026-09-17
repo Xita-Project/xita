@@ -45,15 +45,48 @@ there is no known missing restart requirement for that test. The new collision
 vertex candidate uses a startup mode for this gameplay evaluation; this is not
 evidence that restarting itself improves its performance.
 
-## Current candidate
+## Combined fresh-launch builds
 
-Source `060a3c1` supports the native collision vertex pass enabled from process
-startup. Its gameplay package starts with that mode ON, retains the existing
-working optimizations, and leaves object collection OFF for this first launch.
-No selector-44 live control is shipped. Startup and passive admission logs
-identify the actual mode and execution without switching it during gameplay.
-Local generated-path and concurrent cleanup checks passed; hardware speedup
-remains unestablished until gameplay is compared.
+The collision vertex pass (`060a3c1`), object-reference collection startup mode
+(`97160cb`), and segment/sphere math (`6f44bf4`) are retained together. The latest
+candidate starts all three modes ON; repository defaults remain OFF while these
+fresh-launch gameplay checks are in progress. Passive mode and admission counters
+confirm that the selected implementations actually execute. No selector-44 or
+selector-45 live control is shipped.
+
+The vertex-only and vertex-plus-collection builds both reached about 11.5 FPS in
+the first campaign room. The external displayed-frame checks measured 11.534 and
+11.495 FPS respectively. These are live simulation observations, not a controlled
+small-difference verdict: they establish no clear gain in that room and do not
+settle movement, combat, other maps, or the complete combination.
+
+Small improvements can accumulate when they shorten different work on the frame's
+critical path. Their FPS gains cannot simply be added. For example, going from
+15 to 20 FPS requires the frame to fall from 66.7 to 50 ms, a saving of 16.7 ms.
+CPU work completed earlier may merely spend longer waiting on an unchanged GPU
+dependency. Keep qualified changes and evaluate their combination; do not claim a
+five-FPS benefit until ordinary gameplay supports it.
+
+## Visibility dependency follow-up
+
+A review of the combined campaign capture found approximately 11.7 ms per frame
+waiting for exact flare visibility results. The original final GPU notification
+was observed about 81.7 ms after submission began, versus an 87.1 ms frame period.
+Those intervals overlap; they are not additive CPU and GPU execution times. The
+observations suggest that this dependency can hide CPU savings in this view.
+Other Blood Gulch views have shown a different limit.
+
+The next retest moves existing query-boundary publication earlier in the queue:
+its first hardware view had no flare waits, so it did not exercise the expected
+benefit. The candidate publishes exact results after the last query writer at an
+existing scene end. All geometry, textures, UI and packet storage remain owned
+until the original final completion. No extra scene or stale query result is
+introduced. Fresh startup selection allows this to run alongside the CPU stack
+without an in-game benchmark toggle.
+
+Campaign admission and speedup remain unproven. If no suitable scene boundary
+exists, the original final notification is retained. Even if flare waits disappear,
+sustained GPU throughput or other CPU work can still limit the frame rate.
 
 ## Retest queue
 

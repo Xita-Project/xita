@@ -28,6 +28,8 @@ static int region_override=-99, edge_override=-99, blocks_override=-99, holds_ov
 int xv_benchmark_compare_depth_store(void) { return candidate==38; }
 int xv_benchmark_compare_vertex_blocks(void) { return candidate==39; }
 int xv_benchmark_compare_object_holds(void) { return candidate==40; }
+/* This fixture's candidate range excludes the separately tested collection selector. */
+int xv_benchmark_compare_object_collect(void) { return 0; }
 void xv_vertex_blocks_override(int value) { blocks_override=value; }
 int xv_benchmark_compare_diagnostic_poll(void) {return candidate==34;}
 int xv_benchmark_compare_light_census(void) { return candidate==35; }
