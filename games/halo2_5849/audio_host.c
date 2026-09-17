@@ -1400,23 +1400,37 @@ static void effects_description(xctx *c)
     const uint32_t ip=0x37BA6F;
     stack(c,ip,3);live(c,ip,device.base+8,0);buffer_operational(c,ip);
     uint32_t index=X_ARG(0),source=X_ARG(1),words[13],prefix[70];
-    /* Only the observed startup I3DL2 description is admitted. Other effect
-     * types, raw-output requests, dynamic presets and FP modes remain strict. */
+    /* The I3DL2 listener description from the game's sound system (caller 0x21EE74): the
+     * startup default and, since the first multiplayer level (mp286: room -1300 mB, decay
+     * 1.0 s), any environment preset. The 12 fields are validated against the documented
+     * DSI3DL2LISTENER ranges; the original converter (0x3838A4) then runs unchanged under
+     * the caller's own x87 control word / FPSCR, exactly as the rest of the recompiled
+     * float code does, so only unmasked x87 exceptions remain refused. Other effect
+     * types, raw-output requests and re-entrant conversions stay strict. */
     if (X_M32(c->r[4])!=0x21EE74 || (index!=8&&index!=9) || X_ARG(2) || !effects ||
         reverb_conversion.context || !mapped(effects_guest,effects_guest_bytes) ||
         !mapped(source,sizeof words) || overlaps_device(source,sizeof words) ||
-        aliases(source,sizeof words,c->r[4],16) || c->df || c->fsp ||
-        /* Observed 023F has the same control fields as 027F; bit 6 is reserved.
-         * Preserve the caller's word unchanged, including that bit. */
-        (c->fcw!=0x37f && c->fcw!=0x27f && c->fcw!=0x23f) ||
-        (h2_platform_fpscr_read()&0x03f79f00u))
+        aliases(source,sizeof words,c->r[4],16) || c->df || c->fsp || (c->fcw&0x3f)!=0x3f)
         fail(c,ip,"unreviewed reverb description/caller/control",source);
     x_guest_read(words,source,sizeof words);
-    if (words[0]!=12 || words[1]!=(uint32_t)-6400 || words[2]!=(uint32_t)-6400 ||
-        words[3] || words[4]!=0x3f800000 || words[5]!=0x3f800000 ||
-        words[6]!=(uint32_t)-6400 || words[7] || words[8]!=(uint32_t)-6400 ||
-        words[9] || words[10]!=0x42c80000 || words[11]!=0x42c80000 || words[12]!=0x459c4000)
-        fail(c,ip,"unsupported reverb preset",words[0]);
+    {
+        float f[13]; memcpy(f,words,sizeof f);
+        int32_t room=(int32_t)words[1], room_hf=(int32_t)words[2], reflections=(int32_t)words[6], reverb=(int32_t)words[8];
+        int ranges = words[0]==12 &&
+            room>=-10000 && room<=0 && room_hf>=-10000 && room_hf<=0 &&
+            f[3]>=0.0f && f[3]<=10.0f &&          /* room rolloff factor */
+            f[4]>=0.1f && f[4]<=20.0f &&          /* decay time (s) */
+            f[5]>=0.1f && f[5]<=2.0f &&           /* decay HF ratio */
+            reflections>=-10000 && reflections<=1000 && f[7]>=0.0f && f[7]<=0.3f &&
+            reverb>=-10000 && reverb<=2000 && f[9]>=0.0f && f[9]<=0.1f &&
+            f[10]>=0.0f && f[10]<=100.0f && f[11]>=0.0f && f[11]<=100.0f &&
+            f[12]>=20.0f && f[12]<=20000.0f;
+        if (!ranges) fail(c,ip,"I3DL2 description out of range",words[0]);
+        xv_logf("[h2/reverb] description effect=%u room=%d roomHF=%d rolloff=%u.%02u decay=%u.%02us hfratio=%u.%02u reflections=%d@%ums reverb=%d@%ums diffusion=%u density=%u hfref=%u fcw=%04X fpscr=%08X\n",
+                index, room, room_hf, (unsigned)f[3], (unsigned)(f[3]*100)%100, (unsigned)f[4], (unsigned)(f[4]*100)%100,
+                (unsigned)f[5], (unsigned)(f[5]*100)%100, reflections, (unsigned)(f[7]*1000), reverb, (unsigned)(f[9]*1000),
+                (unsigned)f[10], (unsigned)f[11], (unsigned)f[12], c->fcw, h2_platform_fpscr_read());
+    }
     if (!h2_audio_backend_effect_read(effects,index,0,prefix,sizeof prefix))
         fail(c,ip,"reverb current-state read",index);
     uint32_t base=xk_mem_alloc_high(4096,4096);
