@@ -1410,8 +1410,16 @@ static void effects_description(xctx *c)
     if (X_M32(c->r[4])!=0x21EE74 || (index!=8&&index!=9) || X_ARG(2) || !effects ||
         reverb_conversion.context || !mapped(effects_guest,effects_guest_bytes) ||
         !mapped(source,sizeof words) || overlaps_device(source,sizeof words) ||
-        aliases(source,sizeof words,c->r[4],16) || c->df || c->fsp || (c->fcw&0x3f)!=0x3f)
+        aliases(source,sizeof words,c->r[4],16) || c->df || (c->fcw&0x3f)!=0x3f) {
+        xv_logf("[h2/reverb] refused caller=%08X index=%u arg2=%08X effects=%d nested=%d effects_mapped=%d source_mapped=%d device_overlap=%d alias=%d df=%u fsp=%u fcw=%04X\n",
+                X_M32(c->r[4]), index, X_ARG(2), effects!=NULL, reverb_conversion.context!=NULL,
+                mapped(effects_guest,effects_guest_bytes), mapped(source,sizeof words), overlaps_device(source,sizeof words),
+                aliases(source,sizeof words,c->r[4],16), (unsigned)c->df, (unsigned)c->fsp, (unsigned)c->fcw);
         fail(c,ip,"unreviewed reverb description/caller/control",source);
+    }
+    /* A live x87 stack at the call (the level's sound code computes the environment
+     * parameters in float registers) is the caller's state on hardware too; the
+     * conversion below is required to leave it exactly as found. */
     x_guest_read(words,source,sizeof words);
     {
         float f[13]; memcpy(f,words,sizeof f);
@@ -1449,7 +1457,7 @@ static void effects_description(xctx *c)
     h2_platform_fpscr_write(conversion_fp);
     uint32_t after[13],parameters[66],flags=X_M32(base+16)|4;
     x_guest_read(after,base+0x300,sizeof after);x_guest_read(parameters,base+280,sizeof parameters);
-    int intact=converted.r[4]==base+0xf0c && !converted.df && !converted.fsp && converted.fcw==c->fcw &&
+    int intact=converted.r[4]==base+0xf0c && !converted.df && converted.fsp==c->fsp && converted.fcw==c->fcw &&
         converted.r[3]==c->r[3] && converted.r[5]==c->r[5] && converted.r[6]==c->r[6] && converted.r[7]==c->r[7] &&
         X_M32(base+0x340)==base && !memcmp(after,words,sizeof words);
     for(unsigned a=544;a<0x300;++a)intact&=!X_M8(base+a);
