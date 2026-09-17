@@ -239,13 +239,13 @@ int main(void)
              * DoWork completes consumed packets in order with S_OK, the byte count and
              * the stream callback (pool index, packet context, status). */
             uint32_t align=kind==2?4u:36u*(kind+1), size=align*4;
-            uint32_t pkt[6]={0xB000,size,0x9EC0,0x9EC4,0,0x1234};x_guest_write(0x9E80,pkt,sizeof pkt);
+            uint32_t pkt[6]={0xB000,size,0x9EC0,0x9EC4,0x1234,0};x_guest_write(0x9E80,pkt,sizeof pkt);
             uint8_t fill[512];for(unsigned i=0;i<sizeof fill;++i)fill[i]=(uint8_t)i;x_guest_write(0xB000,fill,sizeof fill);
             c=context(handle,0x9E80,0,0);X_M32(c.r[4])=0x2AE89B;reject_stream(&c,0x37AD25);
             c=context(handle,0x9E80,1,0);X_M32(c.r[4])=0x2AE89A;reject_stream(&c,0x37AD25);
             c=context(handle,0,0,0);X_M32(c.r[4])=0x2AE89A;reject_stream(&c,0x37AD25);
-            static const uint32_t bad_field[6]={0,0,0x1ff8,0x1ff8,1,0};
-            for(unsigned f=0;f<6;++f){if(f==5)continue;uint32_t w[6];memcpy(w,pkt,sizeof w);w[f]=f==1?size-1:bad_field[f];
+            static const uint32_t bad_field[6]={0,0,0x1ff8,0x1ff8,0,0x9F00}; /* index 4 (context) is free; 5 = timestamp pointer */
+            for(unsigned f=0;f<6;++f){if(f==4)continue;uint32_t w[6];memcpy(w,pkt,sizeof w);w[f]=f==1?size-1:bad_field[f];
                 x_guest_write(0x9E80,w,sizeof w);c=context(handle,0x9E80,0,0);X_M32(c.r[4])=0x2AE89A;reject_stream(&c,0x37AD25);}
             x_guest_write(0x9E80,pkt,sizeof pkt);
             uint32_t st=0xcccccccc;x_guest_write(0x9EE0,&st,4);x_guest_write(0x9EC0,&st,4);x_guest_write(0x9EC4,&st,4);
@@ -254,7 +254,7 @@ int main(void)
             assert(s->game_packets==1&&s->game_submitted==1&&v->nq==1&&v->playing&&v->q[v->qhead].guest==0xB000&&v->q[v->qhead].size==size);
             assert(read32(0x9EC4)==0x8000000A&&read32(0x9EC0)==0xcccccccc);
             c=context(handle,0x9EE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9EE0)==0x10001);
-            pkt[5]=0x5678;x_guest_write(0x9E80,pkt,sizeof pkt);
+            pkt[4]=0x5678;x_guest_write(0x9E80,pkt,sizeof pkt);
             c=context(handle,0x9E80,0,0);X_M32(c.r[4])=0x2AE89A;call(&c,0x37AD25,0,3);assert(s->game_packets==2&&v->nq==2);
             c=context(handle,0x9EE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9EE0)==0x10000);
             c=context(handle,0x9E80,0,0);X_M32(c.r[4])=0x2AE89A;reject_stream(&c,0x37AD25); /* queue full */

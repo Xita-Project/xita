@@ -618,7 +618,8 @@ static void game_stream_process(xctx *c, h2_audio_stream *s, uint32_t address, u
     const uint32_t ip = 0x37AD25; uint32_t packet[6];
     /* IDirectSoundStream::Process on the game's own streams (refill 0x2AE866, return
      * 0x2AE89A): XMEDIAPACKET {pvBuffer, dwMaxSize, pdwCompletedSize, pdwStatus,
-     * hCompletionEvent, pContext}, no output packet. The original queues it on the
+     * pContext (the union member the stream callback receives), prtTimestamp}, no
+     * output packet. The original queues it on the
      * voice (accepted while the free list, sized by dwMaxAttachedPackets = 2, is not
      * empty), marks *pdwStatus pending, and completes it from DoWork with S_OK and
      * the byte count through the stream callback. The real mixer voice reads the
@@ -626,9 +627,10 @@ static void game_stream_process(xctx *c, h2_audio_stream *s, uint32_t address, u
     if (caller != 0x2AE89A || X_ARG(2) || s->callback != 0x220730 || s->kind > 2 || !mapped(address, sizeof packet))
         fail(c, ip, "unsupported game stream Process caller/state/input", caller);
     x_guest_read(packet, address, sizeof packet);
-    uint32_t buffer = packet[0], size = packet[1], completed = packet[2], status = packet[3], event = packet[4], context = packet[5];
+    uint32_t buffer = packet[0], size = packet[1], completed = packet[2], status = packet[3], context = packet[4], timestamp = packet[5];
     uint32_t align = s->kind == 2 ? 4u : 36u * (s->kind + 1);
-    if (!size || size > 0x100000 || size % align || !mapped(buffer, size) || overlaps_device(buffer, size) || event ||
+    if (timestamp) fail(c, ip, "unsupported game stream packet timestamp", timestamp);
+    if (!size || size > 0x100000 || size % align || !mapped(buffer, size) || overlaps_device(buffer, size) ||
         (completed && (!mapped(completed, 4) || aliases(completed, 4, buffer, size) || aliases(completed, 4, c->r[4], 16) || aliases(completed, 4, address, 24))) ||
         (status && (!mapped(status, 4) || aliases(status, 4, buffer, size) || aliases(status, 4, c->r[4], 16) || aliases(status, 4, address, 24) ||
                     (completed && aliases(status, 4, completed, 4)))))
