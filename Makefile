@@ -147,6 +147,24 @@ $(BUILD)/vertex-block-startup.config: force-vertex-block-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_upload.o: $(BUILD)/vertex-block-startup.config
+# Exact retired-slot vertex residency: process-start selection, preserving
+# explicit XV_VERTEX_RESIDENT environment parsing. Only the uploader uses it.
+XV_VERTEX_RESIDENT_DEFAULT ?= 0
+ifneq ($(words $(XV_VERTEX_RESIDENT_DEFAULT)),1)
+$(error XV_VERTEX_RESIDENT_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_RESIDENT_DEFAULT),0 1),$(XV_VERTEX_RESIDENT_DEFAULT))
+$(error XV_VERTEX_RESIDENT_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_vertex_upload.o: CFLAGS += -DXV_VERTEX_RESIDENT_DEFAULT=$(XV_VERTEX_RESIDENT_DEFAULT)
+.PHONY: force-vertex-resident-startup-config
+force-vertex-resident-startup-config:
+$(BUILD)/vertex-resident-startup.config: force-vertex-resident-startup-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_VERTEX_RESIDENT_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_upload.o: $(BUILD)/vertex-resident-startup.config
 # Decoded RGBA layout candidate: select at process start, preserving texture
 # quality and explicit XV_RGBA_SWIZZLED environment selection. OFF by default.
 XV_RGBA_SWIZZLED_DEFAULT ?= 0

@@ -19,6 +19,13 @@
 #error XV_VERTEX_BLOCK_LOADS_DEFAULT must be 0 or 1
 #endif
 
+#ifndef XV_VERTEX_RESIDENT_DEFAULT
+#define XV_VERTEX_RESIDENT_DEFAULT 0
+#endif
+#if XV_VERTEX_RESIDENT_DEFAULT != 0 && XV_VERTEX_RESIDENT_DEFAULT != 1
+#error XV_VERTEX_RESIDENT_DEFAULT must be 0 or 1
+#endif
+
 /* Each slot owns an uncached GPU snapshot plus a cached comparison mirror.
  * Repeated passes reuse byte-identical data; a same-frame rewrite appends a new
  * version. The source address alone is never an immutability proof. Allocated
@@ -211,9 +218,13 @@ static int resident_enabled(void)
     static int configured, enabled;
     if (!configured) {
         const char *e = getenv("XV_VERTEX_RESIDENT");
-        /* September 7 hardware: scalar residency raised stream preparation
-         * from about 7.1 to 9.9 ms/frame. Revisit only in a separate comparison. */
-        enabled = e && atoi(e) != 0; configured = 1;
+        /* Preserve explicit-value parsing, including empty, malformed and
+         * negative strings. Only an absent value uses the build default. */
+        enabled = e ? atoi(e) != 0 : XV_VERTEX_RESIDENT_DEFAULT;
+        configured = 1;
+        xv_logf("[vertex-resident] startup mode %d (build default %d); exact retired-slot reuse\n",
+            resident_override < 0 ? enabled : resident_override,
+            XV_VERTEX_RESIDENT_DEFAULT);
     }
     return resident_override < 0 ? enabled : resident_override;
 }

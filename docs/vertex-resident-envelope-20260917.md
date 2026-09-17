@@ -3,8 +3,9 @@
 This default-OFF residency experiment now avoids real GPU writes for clean
 leading/trailing ranges and completely clean batches. Previously a resident hit
 skipped the guest-to-mirror snapshot, but the asynchronous worker still copied
-the entire batch to GPU storage. `XV_VERTEX_RESIDENT` remains opt-in; this change
-has not been integrated, deployed or measured on hardware.
+the entire batch to GPU storage. Residency remains opt-in through the environment
+or a process-start build default; this change has not been integrated, deployed
+or measured on hardware.
 
 The dispatcher retains one dirty envelope per slot between its existing 64 KiB
 batch triggers and final seal. Nonresident snapshots extend that envelope;
@@ -70,8 +71,8 @@ Private receipts and test binaries are under
 `validation/engine-restructure-20260914T2300Z/direct-cluster-query/vertex-residency-dirty-envelope/`.
 Only `runtime/xv_vertex_upload.c` changes production execution. A retained-stage
 integration would rebuild that runtime object and relink; it needs no guest-code
-regeneration, shader rebuild, new selector or startup enable. Review comes before
-any integration or enablement.
+regeneration, shader rebuild or new selector. Review comes before any integration
+or enablement.
 
 The September 7 scalar residency result remains negative. Current grouped
 comparison and upload-worker behavior differ, but byte savings do not prove a
@@ -79,3 +80,49 @@ frame-time improvement. Internal resident holes remain copied deliberately to
 bound job/metadata cost. Fresh-launch cumulative gameplay validation remains a
 separate root-owned gate after code review; graphics and the retained worker
 should stay unchanged.
+
+## Fresh-launch selection
+
+`XV_VERTEX_RESIDENT_DEFAULT=0` is the repository build default. A cumulative
+fresh-launch candidate can append `XV_VERTEX_RESIDENT_DEFAULT=1` to its retained
+Make arguments, leaving the other feature flags and graphics unchanged. The
+uploader uses this default only when `XV_VERTEX_RESIDENT` is absent. Explicit
+environment strings retain the original `atoi` behavior: `0`, empty and invalid
+strings disable residency; `1`, other nonzero numbers and negative numbers enable
+it. Numeric prefixes remain accepted. Configuration is cached once; subsequent
+environment edits do not change it. The existing override still normalizes
+nonnegative values to OFF/ON and restores the cached selection for negative values.
+
+On first use, the existing uploader log path reports
+`[vertex-resident] startup mode N (build default D)`. It reports the effective
+selection, including a prior override, and runs once. The periodic
+`[vertex-resident]` report continues to show the current mode and actual checks/
+hits; a startup ON line alone does not prove residency was applicable or faster.
+No startup setter, runtime selector, new counter or hot-path clock is added.
+
+Both C and Make reject nonboolean numeric defaults. The separate
+`build/vertex-resident-startup.config` stamp changes only when the selected
+default changes; its only object dependency is `runtime/xv_vertex_upload.o`.
+Changing 0→1→0 rebuilds that object and causes a normal final relink, without
+invalidating UI, D3D, shader, main or generated guest objects. Grouped comparison
+and RGBA layout startup flags remain independent.
+
+Run the focused startup checks with:
+
+```sh
+python3 tools/test_vertex_resident_startup.py \
+  --vitasdk /home/birchwoodgod/vitasdk \
+  --output-dir /tmp/vertex-resident-startup-check
+```
+
+The output directory must not already exist. All 66 separate-process cases pass:
+macro absent/0/1, ten absent/explicit environment choices, synchronous and real
+worker uploads, and preexisting override selection. Actual first uploads and
+retained slot reuse prove the mode; exact bytes/padding, queued versus caller
+writes, cached environment selection, override restoration and both mode logs
+are checked. Six real Make builds with small C inputs verify uploader-only flag
+scope and incremental invalidation; invalid C and Make defaults are rejected.
+The fixture uses the existing production uploader/worker with host Vita stubs.
+It does not repeat the already-qualified envelope/worker concurrency suite or
+claim fresh hardware validation. Startup receipts are under the private evidence
+directory's `startup/` subdirectory.
