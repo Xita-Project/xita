@@ -155,6 +155,13 @@ $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: $(BUILD)/query-prefix.config
 # Two coarse owner scopes. Default OFF, with no XV_PHASE or worker-policy change.
 XV_OWNER_PHASE ?= 0
 XV_OWNER_PHASE_DEFAULT ?= 0
+XV_SCENE_PARTITION ?= 0
+ifneq ($(words $(XV_SCENE_PARTITION)),1)
+$(error XV_SCENE_PARTITION must be 0 or 1)
+endif
+ifneq ($(filter $(XV_SCENE_PARTITION),0 1),$(XV_SCENE_PARTITION))
+$(error XV_SCENE_PARTITION must be 0 or 1)
+endif
 ifneq ($(words $(XV_OWNER_PHASE)),1)
 $(error XV_OWNER_PHASE must be 0 or 1)
 endif
@@ -187,6 +194,13 @@ $(BUILD)/owner-phase-startup.config: force-owner-phase-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_ui_gxm.o: $(BUILD)/owner-phase.config
+.PHONY: force-scene-partition-config
+force-scene-partition-config:
+$(BUILD)/scene-partition.config: force-scene-partition-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_SCENE_PARTITION)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
 # Grouped exact vertex comparisons: opt-in at process start, independent of
 # graphics quality. Only the uploader consumes this build default.
 XV_PACKED_VERTEX_LAYOUT ?= 0
@@ -373,6 +387,11 @@ $(error XV_OBJECT_PASS_TIMING requires RECOMP=1)
 endif
 ifneq ($(XV_EXPERIMENTAL_OBJECT_JOBS) $(XV_OWNER_PHASE),1 1)
 $(error XV_OBJECT_PASS_TIMING requires XV_EXPERIMENTAL_OBJECT_JOBS=1 XV_OWNER_PHASE=1)
+endif
+endif
+ifeq ($(XV_SCENE_PARTITION),1)
+ifneq ($(RECOMP):$(XV_OWNER_PHASE):$(GAME_PROFILE),1:1:halo_ce_3925)
+$(error XV_SCENE_PARTITION requires RECOMP=1 XV_OWNER_PHASE=1 GAME_PROFILE=halo_ce_3925)
 endif
 endif
 # Explicit private startup trial, not a persisted/user-facing graphics default.
@@ -728,6 +747,17 @@ endif
 $(OWNER_PHASE_HOOK_OBJS) $(OWNER_PHASE_SYS_OBJS): $(BUILD)/owner-phase.config recomp/kernel/xk_owner_phase.h
 $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(BUILD)/owner-phase-startup.config
 $(RECOMP_BUILD)/libxita_sys.a $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(BUILD)/owner-phase.config
+# Only the selected scene unit and existing observer own this opt-in flag.
+SCENE_PARTITION_SRCS := $(shell rg -l 'XV_SCENE_PARTITION_SCOPE:' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+SCENE_PARTITION_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(SCENE_PARTITION_SRCS))
+ifeq ($(XV_SCENE_PARTITION),1)
+ifneq ($(words $(shell rg -o 'XV_SCENE_PARTITION_SCOPE:' $(SCENE_PARTITION_SRCS) 2>/dev/null)),1)
+$(error XV_SCENE_PARTITION requires the selectively regenerated primary 5D410 scope)
+endif
+$(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o: RECOMP_CFLAGS += -DXV_SCENE_PARTITION=1
+endif
+$(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(BUILD)/scene-partition.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(BUILD)/scene-partition.config
 ifeq ($(XV_NATIVE_BSP_SPHERE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_BSP_SPHERE
 endif

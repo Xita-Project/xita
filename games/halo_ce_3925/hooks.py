@@ -8,7 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
-from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere, collision_traversal
+from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere, collision_traversal, scene_partition
 
 
 class HaloHooks(NoGameHooks):
@@ -75,6 +75,7 @@ class HaloHooks(NoGameHooks):
         self.image = image
         self.enabled = matches_image(image)
         self.owner_phase_enabled = self.enabled
+        self.scene_partition_enabled = self.enabled
         self.flare_enabled = self.enabled
         self.clip_region_enabled = self.enabled and clip_region.matches_spans(image)
         self.object_basis_enabled = self.enabled and hashlib.sha256(
@@ -276,6 +277,8 @@ class HaloHooks(NoGameHooks):
         return out
 
     def transform_body(self, address, body):
+        if self.scene_partition_enabled and address == 0x5D410:
+            body = scene_partition.hook(body)
         body = self.light_census_body(address, body)
         if self.enabled and address == 0x86F50 and collision_vertices.matches(self.image):
             body = collision_vertices.hook(body)

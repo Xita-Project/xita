@@ -31,6 +31,31 @@ static struct { unsigned depth; uint64_t start, entries, completed, recursive, e
 static uint64_t clock_reads;
 static unsigned warmup, foreign, invalid, rebinds, abandoned, stale;
 
+#ifndef XV_SCENE_PARTITION
+#define XV_SCENE_PARTITION 0
+#endif
+#if XV_SCENE_PARTITION != 0 && XV_SCENE_PARTITION != 1
+#error XV_SCENE_PARTITION must be 0 or 1
+#endif
+#if XV_SCENE_PARTITION && !defined(XV_OWNER_PHASE)
+#error XV_SCENE_PARTITION requires XV_OWNER_PHASE
+#endif
+#if XV_SCENE_PARTITION
+/* One outer primary 5D410 invocation on the presenting owner. Nested primary
+ * entries are explicitly declined: their elapsed stays in the outer bucket.
+ * No pointer into a guest/native stack is retained here. */
+static struct {
+    uint64_t token, start, elapsed[6], entries[6], completed;
+    unsigned bucket, serial, exhausted, recursive, invalid, abandoned, stale;
+} scene;
+static void scene_account(uint64_t end)
+{
+    if(end<scene.start)scene.invalid++;
+    else scene.elapsed[scene.bucket]+=end-scene.start;
+    scene.start=end;
+}
+#endif
+
 static int worker(void)
 {
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
@@ -76,6 +101,9 @@ void xv_owner_phase_configure(void)
     xv_owner_phase_enabled=e?atoi(e)!=0:XV_OWNER_PHASE_DEFAULT;
     configured=1;
     XK_LOG("[owner-phase] process-start %d; FA920/BCB30 outer elapsed only; first Present binds owner, no phase/worker control\n",xv_owner_phase_enabled);
+#if XV_SCENE_PARTITION
+    XK_LOG("[scene-partition] process-start %d; primary 5D410 six ordered elapsed buckets; workers unchanged\n",xv_owner_phase_enabled);
+#endif
 }
 void xv_owner_phase_present(void *context)
 {
@@ -89,6 +117,10 @@ void xv_owner_phase_present(void *context)
     /* A different presenting fiber starts a new observation generation. A
      * suspended old scope is explicitly abandoned, never dereferenced/reused. */
     __atomic_store_n(&owner_valid,0,__ATOMIC_RELEASE);
+#if XV_SCENE_PARTITION
+    if(scene.token)scene.abandoned++;
+    scene.token=0;
+#endif
     for(unsigned i=0;i<XV_OWNER_PHASES;i++) {
         if(phases[i].depth)abandoned++;
         phases[i].depth=0;
@@ -105,6 +137,53 @@ void xv_owner_phase_present(void *context)
     __atomic_store_n(&owner_thread,current_thread(),__ATOMIC_RELEASE);
     __atomic_store_n(&owner_valid,1,__ATOMIC_RELEASE);
 }
+int xv_owner_phase_active(void *context,unsigned phase,uint32_t *generation_token)
+{
+    if(!xv_owner_phase_enabled || !generation_token || worker() || !same_thread())return -1;
+    if(__atomic_load_n(&owner_context,__ATOMIC_ACQUIRE)!=(uintptr_t)context ||
+       !live(context) || phase>=XV_OWNER_PHASES || generation_exhausted || !generation ||
+       (*generation_token && *generation_token!=generation))return -1;
+    *generation_token=generation;
+    return !!phases[phase].depth;
+}
+#if XV_SCENE_PARTITION
+static int scene_live(void *context)
+{
+    uint32_t token=0;
+    return xv_owner_phase_active(context,XV_OWNER_SCENE,&token)>=0;
+}
+void xv_scene_partition_begin(uint64_t *scope,void *context)
+{
+    if(!xv_owner_phase_enabled)return;
+    if(!scene_live(context)) { __atomic_fetch_add(&foreign,1,__ATOMIC_RELAXED);return; }
+    if(scene.token) { scene.recursive++;return; }
+    if(scene.exhausted)return;
+    if(scene.serial==UINT32_MAX) { scene.exhausted=1;return; }
+    *scope=scene.token=((uint64_t)generation<<32)|++scene.serial;
+    scene.bucket=0;scene.entries[0]++;scene.start=now();
+}
+void xv_scene_partition_step(uint64_t *scope,void *context,unsigned bucket)
+{
+    if(!*scope)return;
+    if(!scene_live(context)) { __atomic_fetch_add(&foreign,1,__ATOMIC_RELAXED);return; }
+    if(*scope!=scene.token || (unsigned)(*scope>>32)!=generation) { scene.stale++;return; }
+    if(bucket>=6 || bucket<=scene.bucket) { scene.invalid++;return; }
+    /* Exactly one clock accounts the old interval and starts the next. */
+    scene_account(now());scene.bucket=bucket;scene.entries[bucket]++;
+}
+void xv_scene_partition_end(uint64_t *scope)
+{
+    uint64_t token=*scope;
+    if(!token)return;
+    *scope=0;
+    if(worker() || !same_thread()) { __atomic_fetch_add(&foreign,1,__ATOMIC_RELAXED);return; }
+    if(token!=scene.token || (unsigned)(token>>32)!=generation) { scene.stale++;return; }
+    if(!scene_live((void *)__atomic_load_n(&owner_context,__ATOMIC_ACQUIRE))) {
+        scene.invalid++;scene.abandoned++;scene.token=0;return;
+    }
+    scene_account(now());scene.completed++;scene.token=0;
+}
+#endif
 void xv_owner_phase_begin(xv_owner_phase_scope *scope,void *context,unsigned phase)
 {
     if(!xv_owner_phase_enabled)return;
@@ -137,9 +216,16 @@ void xv_owner_phase_report(unsigned frames)
     }
     /* Split a still-open scope at this report boundary. It can contain
      * Present, yielding, or another selected scope; none is called CPU self. */
-    if(phases[0].depth || phases[1].depth) {
+    if(phases[0].depth || phases[1].depth
+#if XV_SCENE_PARTITION
+       || scene.token
+#endif
+    ) {
         uint64_t end=now();
         for(unsigned i=0;i<XV_OWNER_PHASES;i++)if(phases[i].depth)account(i,end);
+#if XV_SCENE_PARTITION
+        if(scene.token)scene_account(end);
+#endif
     }
     for(unsigned i=0;i<XV_OWNER_PHASES;i++) {
         XK_LOG("[owner-phase] %u frames %s: entries %llu completed %llu recursive %llu open %u elapsed-us %llu; nested/waits included, not CPU self\n",
@@ -148,6 +234,19 @@ void xv_owner_phase_report(unsigned frames)
             phases[i].depth,(unsigned long long)phases[i].elapsed);
         phases[i].entries=phases[i].completed=phases[i].recursive=phases[i].elapsed=0;
     }
+#if XV_SCENE_PARTITION
+    XK_LOG("[scene-partition] %u frames 5D410: entries %llu/%llu/%llu/%llu/%llu/%llu elapsed-us %llu/%llu/%llu/%llu/%llu/%llu; completed %llu open %u bucket %u recursive-declined %u invalid %u abandoned %u stale %u exhausted %u; disjoint outer buckets, nested/waits included\n",
+        frames,(unsigned long long)scene.entries[0],(unsigned long long)scene.entries[1],
+        (unsigned long long)scene.entries[2],(unsigned long long)scene.entries[3],
+        (unsigned long long)scene.entries[4],(unsigned long long)scene.entries[5],
+        (unsigned long long)scene.elapsed[0],(unsigned long long)scene.elapsed[1],
+        (unsigned long long)scene.elapsed[2],(unsigned long long)scene.elapsed[3],
+        (unsigned long long)scene.elapsed[4],(unsigned long long)scene.elapsed[5],
+        (unsigned long long)scene.completed,!!scene.token,scene.bucket,
+        scene.recursive,scene.invalid,scene.abandoned,scene.stale,scene.exhausted);
+    memset(scene.entries,0,sizeof scene.entries);memset(scene.elapsed,0,sizeof scene.elapsed);
+    scene.completed=0;scene.recursive=scene.invalid=scene.abandoned=scene.stale=0;
+#endif
     XK_LOG("[owner-phase-status] clocks %llu warmup %u foreign %u invalid %u rebinds %u abandoned %u stale %u; native owner/context only, clock calls exclude report formatting\n",
         (unsigned long long)clock_reads,__atomic_exchange_n(&warmup,0,__ATOMIC_RELAXED),
         __atomic_exchange_n(&foreign,0,__ATOMIC_RELAXED),__atomic_exchange_n(&invalid,0,__ATOMIC_RELAXED),rebinds,abandoned,stale);
