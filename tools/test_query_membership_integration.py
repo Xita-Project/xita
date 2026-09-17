@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Qualify the query-only build wiring against already-qualified ARM objects.
 
-Copies a retained twelve-path build to new private output, preserves its flags,
-and changes only the semantic-leaf selector. No new gameplay/semantic suite.
+Copies a retained fifteen-path build to new private output, preserves its flags,
+and changes only the ordered scalar membership selector. No new gameplay/semantic suite.
 """
 import argparse
 import hashlib
@@ -17,11 +17,10 @@ from elftools.elf.elffile import ELFFile
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from tools import gen_native_query_fusion as generator
-from tools import query_semantic_leaf as semantic
+from tools import query_membership_scalar as membership
 
-FEATURE='XV_QUERY_SEMANTIC_LEAF'
-INPUTS=('Makefile','tools/gen_native_query_fusion.py','tools/query_semantic_leaf.py','tools/query_membership_scalar.py',
-        'tools/query_semantic_leaf.h')
+FEATURE='XV_QUERY_MEMBERSHIP_SCALAR'
+INPUTS=('Makefile','tools/gen_native_query_fusion.py','tools/query_membership_scalar.py')
 def sha(data):return hashlib.sha256(data).hexdigest()
 def identity(path):
     with path.open('rb') as stream:
@@ -64,10 +63,11 @@ def main():
     old_source=(units/'query_fusion.c').read_bytes();old_object=(build/'query_fusion.o').read_bytes()
     qualified=identity(a.qualified_dir/'inline.o');old_identity=identity(build/'query_fusion.o')
     assert old_identity==identity(a.qualified_dir/'baseline.o')
-    assert old_identity['sections']['.text']['sha256']==semantic.RETAINED_TEXT_SHA256
+    assert old_identity['sections']['.text']['sha256']==membership.RETAINED_TEXT_SHA256
     base=json.loads(a.build_command.read_text())['command'][:-1]
-    assert 'XV_QUERY_F32_INLINE=1' in base and 'XV_NATIVE_SOLVER_FUSION=1' in base
-    # Keep every feature flag in the actual twelve-path package command.
+    assert all(x+'=1' in base for x in ('XV_QUERY_F32_INLINE','XV_NATIVE_SOLVER_FUSION',
+        'XV_QUERY_SEMANTIC_LEAF','XV_QUERY_PREFIX_PUBLISH'))
+    # Keep every feature flag in the actual fifteen-path package command.
     base=[x for x in base if not x.startswith(('CC=','PREFIX=','VITASDK=','XBE=','XBE_JSON=','PYTHON=',FEATURE+'='))]
     cc=str(a.arm_cc)
     base+=['CC='+cc+' -fstack-usage','PREFIX='+cc.removesuffix('-gcc'),
@@ -89,6 +89,9 @@ def main():
         actual=identity(build/'query_fusion.o')
         assert actual==(qualified if mode else old_identity),label
         stable()
+        assert (build/'query-membership.config').read_text()==str(int(bool(mode)))+'\n'
+        for line in compiles:
+            assert ('-D'+FEATURE+'=1' in line)==bool(mode)
         row=dict(label=label,command=command,compiles=compiles,
             query_sha256=sha((build/'query_fusion.o').read_bytes()),query=actual)
         rows.append(row);(out/'commands.json').write_text(json.dumps(rows,indent=2)+'\n')
@@ -98,21 +101,17 @@ def main():
     assert (build/'query_fusion.o').read_bytes()==old_object
     assert not run('explicit-off-noop',0)['compiles']
     run('on',1)
-    assert (units/semantic.OUTPUT).read_bytes()==semantic.HEADER.read_bytes()
-    assert 'query_semantic_leaf.h' in (build/'query_fusion.d').read_text()
     assert frames(build/'query_fusion.su')==frames(a.qualified_dir/'inline.su')
-    for name in ('query_fusion.c',semantic.OUTPUT):shutil.copy2(units/name,out/('on-'+name))
+    shutil.copy2(units/'query_fusion.c',out/'on-query_fusion.c')
     for suffix in ('.o','.su','.d'):shutil.copy2(build/('query_fusion'+suffix),out/('on'+suffix))
     assert not run('on-noop',1)['compiles']
-    (units/semantic.OUTPUT).unlink();run('missing-helper',1)
-    assert (units/semantic.OUTPUT).read_bytes()==semantic.HEADER.read_bytes()
+    (units/'query_fusion.c').unlink();run('missing-query',1)
     assert not run('repaired-noop',1)['compiles']
-    header=stage/'tools/query_semantic_leaf.h';saved=header.read_bytes()
-    header.write_bytes(saved+b'\n/* authored input dependency probe */\n')
-    run('authored-helper-change',1)
-    assert (units/semantic.OUTPUT).read_bytes()==header.read_bytes()
+    module=stage/'tools/query_membership_scalar.py';saved=module.read_bytes()
+    module.write_bytes(saved+b'\n# authored input dependency probe\n')
+    run('authored-transform-change',1)
     assert not run('authored-noop',1)['compiles']
-    header.write_bytes(saved);run('authored-helper-restore',1)
+    module.write_bytes(saved);run('authored-transform-restore',1)
     assert not run('restored-noop',1)['compiles']
     run('off',0)
     assert (units/'query_fusion.c').read_bytes()==old_source
@@ -124,19 +123,20 @@ def main():
         proc=subprocess.run(base+[FEATURE+'='+value,*targets],cwd=stage,capture_output=True,text=True)
         assert proc.returncode and FEATURE in proc.stderr,value
         rejected.append('Make-selector-'+repr(value))
-    for settings in ([FEATURE+'=1','XV_QUERY_F32_INLINE=0'],
+    for settings in ([FEATURE+'=1','XV_QUERY_SEMANTIC_LEAF=0'],
+                     [FEATURE+'=1','XV_QUERY_F32_INLINE=0'],
                      [FEATURE+'=1','XV_NATIVE_QUERY_FUSION=0']):
         proc=subprocess.run(base+settings+targets,cwd=stage,capture_output=True,text=True)
         assert proc.returncode and 'requires' in proc.stderr,settings
         rejected.append('Make-prerequisite-'+settings[-1])
     # Reject drift before publication with the actual generator, no synthetic substitute.
-    paths=[units/n for n in ('code_028.c','query_fusion.c','solver_fusion.c','solver_primitives.h',semantic.OUTPUT)]
+    paths=[units/n for n in ('code_028.c','query_fusion.c','solver_fusion.c','solver_primitives.h','query_semantic_leaf.h')]
     paths+=list((units/'query_f32_primitives').rglob('*.h'))
     receipt=build/'query-fusion.generated.json';paths.append(receipt)
     before={n:n.read_bytes() for n in paths}
-    def generate(mode=1,f32=1):
+    def generate(mode=1,semantic=1):
         return generator.generate(retained/'haloce/default.xbe',retained/'local/halo_ce_3925/game_manifest.json',
-                                  units,receipt,1,f32,mode)
+                                  units,receipt,1,1,semantic,mode)
     def reject(label,operation):
         try:operation()
         except (ValueError,AssertionError,RuntimeError,FileNotFoundError):pass
@@ -145,14 +145,23 @@ def main():
         rejected.append(label)
     reject('generator-invalid-selector',lambda:generate(2))
     reject('generator-prerequisite',lambda:generate(1,0))
-    original_header=semantic.HEADER
-    semantic.HEADER=out/'missing-authored-header.h'
-    reject('generator-missing-authored-header',generate)
-    bad_header=out/'bad-authored-header.h';bad_header.write_text('/* invalid helper declaration */\n')
-    semantic.HEADER=bad_header;reject('generator-helper-drift',generate);semantic.HEADER=original_header
-    original_interval=semantic.ORIGINAL
-    semantic.ORIGINAL=original_interval+' /* input drift */'
-    reject('generator-source-interval-drift',generate);semantic.ORIGINAL=original_interval
+    original_hash=membership.ORIGINAL_SHA256
+    membership.ORIGINAL_SHA256='0'*64
+    reject('generator-exact-source-interval-drift',generate)
+    membership.ORIGINAL_SHA256=original_hash
+    # Reject external entry and missing composition markers using actual retained
+    # query source, without installing any output or touching the qualified body.
+    for label,source in (
+            ('external-interior-entry',old_source.decode()+'\ngoto L_00087120;\n'),
+            ('missing-semantic-boundary',old_source.decode().replace('#include "query_semantic_leaf.h"',''))):
+        reject('module-'+label,lambda source=source:membership.generate(source))
+    module.rename(module.with_suffix('.held'))
+    try:
+        proc=subprocess.run(base+[FEATURE+'=1',*targets],cwd=stage,capture_output=True,text=True)
+        assert proc.returncode and 'query_membership_scalar.py' in proc.stderr
+        assert all(n.read_bytes()==value for n,value in before.items())
+        rejected.append('Make-missing-authored-transform')
+    finally:module.with_suffix('.held').rename(module)
     proc=subprocess.run([sys.executable,'-O',str(ROOT/'tools/gen_native_query_fusion.py'),'--help'],capture_output=True,text=True)
     assert proc.returncode and 'Refusing optimized Python' in proc.stderr;rejected.append('python-O')
     # A final ON receipt records the production module and exact authored input.
@@ -162,9 +171,10 @@ def main():
         qualified_allocated_sections_relocations_imports_identical=True,
         off_source_and_full_object_identical=True,unchanged_object_count=len(kept_names)-6,
         caller_solver_generic_source_and_objects_identical=True,kept_sha256=kept,
-        generated_helper_sha256=sha((units/semantic.OUTPUT).read_bytes()),
+        generated_source_sha256=sha((units/'query_fusion.c').read_bytes()),
+        authored_transform_sha256=sha((ROOT/'tools/query_membership_scalar.py').read_bytes()),
         frames=frames(build/'query_fusion.su'),failures_rejected=rejected,
-        semantic_oracle_reused_by_object_identity=True,native_traps_not_executed=True,
+        scalar_oracle_reused_by_object_identity=True,prior_fpscr_scope_unchanged=True,
         no_device_emulator_or_new_semantic_suite=True)
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
     print('PASS query-only production integration; exact qualified object and OFF restoration',flush=True)
