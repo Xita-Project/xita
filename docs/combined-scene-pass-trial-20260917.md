@@ -54,3 +54,25 @@ Private package, installation, screenshots, controller journal, complete logs,
 selected rows and analysis are preserved in `scene-pass-startup`. The preceding
 combined build's Blood Gulch combat/driving check is recorded in
 [the cumulative trial](cumulative-render-update-20260917.md).
+
+## Blood Gulch follow-up
+
+The same process entered New002/New003 Blood Gulch through the normal menus,
+turned toward the valley, walked forward, charged/released the plasma pistol
+and paused. The final frame-31,252 capture contains 5,620,871 bytes with no
+searched fault marker or logger error. The 25 base-facing, 16 valley-facing
+and 33 moved-valley stationary windows have valid consecutive main scene/pass
+reports. Moving, loading and paused windows are excluded from these groups.
+
+| View | Median FPS | First scene section | Whole scene |
+| --- | ---: | ---: | ---: |
+| Near blue base, facing the base | 13.6 | 22.07 ms | 41.88 ms |
+| Near the same location, facing the valley | 8.35 | 51.98 ms | 71.44 ms |
+| After walking toward the valley | 10.3 | 41.99 ms | 57.37 ms |
+
+These are different views of one executable, not before/after performance
+results. The recorded flare-consumer wait has median zero in all three groups.
+That excludes this particular wait as the explanation for these samples, not
+all GPU costs. The first scene section remains the largest attribution target.
+The next optional [five-cut refinement](scene-bucket0-detail-20260917.md)
+separates its visibility, model, lighting, ordered callback and flare work.
