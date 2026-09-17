@@ -30,6 +30,8 @@ static void *foreign_thread(void *unused)
 {
     (void)unused;
     for(unsigned i=0;i<1000;i++) {
+        uint32_t generation_token=0;
+        assert(xv_owner_phase_active(&first.ctx,XV_OWNER_TICK,&generation_token)==-1 && !generation_token);
         XV_OWNER_PHASE_SCOPE(&first.ctx,XV_OWNER_SCENE);
     }
     on_worker=1;
@@ -48,6 +50,9 @@ int main(int argc,char **argv)
     { XV_OWNER_PHASE_SCOPE(&first.ctx,XV_OWNER_TICK); }
     assert(reads==0);
     select_owner(&first);clear_log();
+    uint32_t ancestry=0;
+    assert(xv_owner_phase_active(&first.ctx,XV_OWNER_TICK,&ancestry)==(expected?0:-1));
+    assert(ancestry==(expected?generation:0) && !reads);
     if(!expected) {
         early_return(1);xv_owner_phase_report(60);assert(!reads&&!used);
         assert(!memcmp(&before,&first.ctx,sizeof before));puts("PASS disabled: no clock/state/context changes");return 0;
@@ -60,6 +65,7 @@ int main(int argc,char **argv)
     xv_owner_phase_scope a={0},b={0};
     xv_owner_phase_begin(&a,&first.ctx,XV_OWNER_SCENE);
     clock_value=110;xv_owner_phase_begin(&b,&first.ctx,XV_OWNER_TICK);
+    assert(xv_owner_phase_active(&first.ctx,XV_OWNER_TICK,&ancestry)==1);
     clock_value=120;xv_owner_phase_report(60);
     assert(strstr(output,"FA920: entries 2 completed 1 recursive 1 open 1 elapsed-us 40"));
     assert(strstr(output,"BCB30: entries 1 completed 0 recursive 0 open 1 elapsed-us 20"));
@@ -69,6 +75,7 @@ int main(int argc,char **argv)
     assert(strstr(output,"BCB30: entries 0 completed 1 recursive 0 open 0 elapsed-us 30"));
     /* Reporting must not consume counters from a different current context. */
     clear_log();uint64_t saved_reads=reads;xk_cur=&second;
+    assert(xv_owner_phase_active(&first.ctx,XV_OWNER_TICK,&ancestry)==-1);
     xv_owner_phase_report(60);assert(!used&&reads==saved_reads);xk_cur=&first;
     /* Worker and native-foreign calls never touch guest-owner timing. */
     uint64_t old=reads;pthread_t thread;assert(!pthread_create(&thread,NULL,foreign_thread,NULL));
@@ -86,6 +93,9 @@ int main(int argc,char **argv)
     old=phases[0].elapsed;clock_value=90;xv_owner_phase_end(&a);assert(phases[0].elapsed==old);
     /* Owner handoff abandons open scopes; stale cleanup cannot close new ones. */
     xv_owner_phase_begin(&a,&first.ctx,XV_OWNER_TICK);select_owner(&second);assert(abandoned==1);
+    uint32_t prior=ancestry;
+    assert(xv_owner_phase_active(&second.ctx,XV_OWNER_TICK,&ancestry)==-1 && ancestry==prior);
+    ancestry=0;assert(xv_owner_phase_active(&second.ctx,XV_OWNER_TICK,&ancestry)==0 && ancestry==generation);
     xv_owner_phase_begin(&b,&second.ctx,XV_OWNER_TICK);xv_owner_phase_end(&a);assert(stale==1&&phases[0].depth==1);
     clock_value=110;xv_owner_phase_end(&b);assert(!phases[0].depth);
     xv_owner_phase_report(0);xv_owner_phase_report(60);
