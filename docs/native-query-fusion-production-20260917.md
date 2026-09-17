@@ -131,3 +131,31 @@ verified runtime hash identifies this startup-only selection.
 Private build, object/code identity, caller relocation and package receipts
 are under `direct-cluster-query/query-fusion-startup/`. Hardware acceptance is
 separate from these completed integration checks.
+
+## First physical gameplay check
+
+The updater verified and boot-confirmed this executable in slot 0; the seven-path
+parent remains in slot 1. A fresh normal-menu launch reached Blood Gulch with
+the retained settings and all eight paths selected. Short gameplay completed
+plasma charging/firing, Warthog driving and exit, rocket pickup and explosions,
+self-hit/death/respawn, and pause. The captured log has no searched stop,
+GPU-fault or draw-failure markers, and the logger reports no error. This does
+not resolve historical long-session crashes or measure fusion invocation counts.
+
+The initial view reported 13–14 FPS, but used a different spawn from the parent's
+first view. Driving remained below target. No matched speedup or regression is
+established, so the compatible combination remains enabled for further gameplay.
+The ordinary valley log also contains a 60-frame visibility-result wait total
+of 1,671,721 microseconds (about 27.86 ms per displayed frame). It overlaps other
+pipeline intervals and must not be added to them as independent execution time.
+It is a competing dependency that can hide CPU savings, not proof that all
+rendering is GPU-bound. The cumulative acceptance record is in
+[gameplay performance retests](gameplay-performance-retests-20260917.md).
+
+The same executable also completed a normal-menu transition back to New001's
+saved Pillar of Autumn pistol checkpoint, two fire inputs, camera/movement and
+pause. Save reads and the initial camera identify the expected checkpoint.
+Its ordinary initial reports of 12.7–12.8 FPS do not establish a speedup: this
+followed another map in the same process, and no repeated matched comparison
+was made. `campaign-smoke-receipt.json` records the separate limitations and
+remaining menu-text artifact.

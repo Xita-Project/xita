@@ -98,7 +98,7 @@ five-path build: inconclusive, with all six paths retained.
 See the [grouped-comparison follow-up](vertex-block-loads-20260916.md) for the
 validation and admission evidence. The combination remains under evaluation.
 
-The current cumulative runtime is
+The preceding seven-path runtime is
 `fae0f1808a892ca9caf3e4a3692aaabf2fd307bda4cff72171dc17c504bf9730`
 from source `c5a198a`, installed and boot-confirmed in slot 1. It adds typed
 collision traversal to the preceding six paths. Fresh normal-menu launch into
@@ -111,6 +111,54 @@ for that route. Long-session crash qualification is outstanding. See the
 [typed-traversal follow-up](native-collision-traversal-20260917.md) for production
 stack checks, startup evidence and the unmeasured admission distribution.
 
+The current cumulative runtime is
+`98393693e68be0032c5381cc172611a4db1361cf16d7dfeb7917136b9041fa99`
+from source `47c7e7c`, installed and boot-confirmed in slot 0. It retains all
+seven paths and adds caller-specific collision-query fusion in a separate
+compiled unit. The generic query objects remain byte-identical to the parent;
+the selected fused unit matches the qualified code. See the
+[production integration](native-query-fusion-production-20260917.md).
+
+Ordinary Blood Gulch gameplay has completed plasma charging/firing, Warthog
+entry, reverse/steering and a valley drive, rocket pickup, explosion,
+self-hit/death/respawn and pause without reproducing a crash. The initial view
+reported about 13–14 FPS; the driving capture reached 6 FPS, with nearby
+60-frame log windows reporting 8.1 and 9.8 FPS. These are different views and an
+unmatched route, not an optimization comparison. The valley remains below
+target. All eight changes stay enabled; no five-FPS gain or reproducible
+performance regression has been established. The seven-path executable remains
+in slot 1 for rollback. Short smoke checks do not settle long-session crashes.
+
+Startup logs confirm native 960×544 resolution, Standard (256) texture detail,
+original material/glow/particle/model quality, enabled shadows/reflections/
+effects/decals, and triple buffering. Effective clocks remain CPU 444 / GPU 222
+MHz. Existing mode/counter records confirm the retained selections; fusion
+itself has build-time call routing and boot-hash identification, with no dynamic
+invocation counter. Private evidence is in
+`direct-cluster-query/query-fusion-startup/`, including `startup-modes.json`,
+`gameplay-actions.md` and `bloodgulch-smoke-receipt.json`.
+
+The same process then returned through the main menu to New001's Normal
+Pillar of Autumn pistol checkpoint, confirmed by reads of save directory
+`122A17771B9E` and the original camera position. Two pistol shots, camera input,
+movement and pause completed. Ordinary initial reports were 12.7–12.8 FPS;
+the preceding Blood Gulch load makes this a transition/gameplay check, not a
+fresh-process matched comparison. The campaign log has no searched fault marker
+and the logger reports no error. `campaign-smoke-receipt.json` preserves the
+evidence. A load-level menu capture still has clipped/overlapping text; no new
+build attribution or blanket visual-correctness claim follows from this smoke.
+
+The next bounded CPU prototype targets the complete collision-response solver
+(`172CB8 → 170C10` and ten direct helpers), keeping the actor transaction held.
+It handles different work from the retained query paths. Historical sampled
+solver elapsed time was about 17% of its movement wrapper, including nested
+work and scheduling; its current frame share and possible gain are unknown.
+The prototype must preserve full-call state, arithmetic and scheduling before
+it can join the cumulative build. The earlier experiment that unlocked this
+solver remains excluded. In parallel, the 27.86 ms/frame visibility wait in
+one valley window remains a rendering dependency to investigate; it overlaps
+the other measured intervals.
+
 ## Visibility dependency follow-up
 
 A review of the combined campaign capture found approximately 11.7 ms per frame
@@ -120,7 +168,7 @@ Those intervals overlap; they are not additive CPU and GPU execution times. The
 observations suggest that this dependency can hide CPU savings in this view.
 Other Blood Gulch views have shown a different limit.
 
-The current retest moves existing query-boundary publication earlier in the queue:
+The retained query-boundary change moves publication earlier in the queue:
 its first hardware view had no flare waits, so it did not exercise the expected
 benefit. The candidate publishes exact results after the last query writer at an
 existing scene end. All geometry, textures, UI and packet storage remain owned
