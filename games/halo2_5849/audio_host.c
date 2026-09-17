@@ -890,17 +890,19 @@ static void stream_pause_ex(xctx *c)
 }
 static void stream_flush(xctx *c)
 {
-    const uint32_t ip = 0x37AC89, callers[1] = {0x21EC85};
-    stack(c, ip, 1); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
+    const uint32_t ip = 0x37AC89, callers[3] = {0x21EC85, 0x21F2CF, 0x21F30C};
+    stack(c, ip, 1); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 3);
     /* Flush (vtable 6): 0x37FBFE(voice, 0) returns at once for a voice that
-     * never started (state bit 0 clear); no packet ever existed here. */
-    xv_logf("[h2/audio-stream] flush caller=0021EC85 object=%08X; never started, no packets, no change\n", s->base);
+     * never started (state bit 0 clear); no packet ever existed here. The
+     * sound-source release paths (0x21EC5D, 0x21F2B8, 0x21F2F8) call it after
+     * GetStatus reports no completion bit. */
+    xv_logf("[h2/audio-stream] flush caller=%08X object=%08X; never started, no packets, no change\n", X_M32(c->r[4]), s->base);
     result(c, 0, 1);
 }
 static void stream_status(xctx *c)
 {
-    const uint32_t ip = 0x37ACD4, callers[1] = {0x2AE856};
-    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
+    const uint32_t ip = 0x37ACD4, callers[5] = {0x2AE856, 0x2AE4C4, 0x21EC6B, 0x21F2C6, 0x21F303};
+    stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 5);
     uint32_t out = X_ARG(1);
     output(c, ip, out, 4);
     if (aliases(out, 4, c->r[4], 12)) fail(c, ip, "stream status output alias", out);
@@ -909,7 +911,7 @@ static void stream_status(xctx *c)
      * playing/starved bits need a started voice. */
     uint32_t status = (s->pause & 0x20) ? 0x80000u : 0u;
     x_guest_write(out, &status, 4);
-    xv_logf("[h2/audio-stream] status caller=002AE856 object=%08X status=%08X; empty, never started\n", s->base, status);
+    xv_logf("[h2/audio-stream] status caller=%08X object=%08X status=%08X; empty, never started\n", X_M32(c->r[4]), s->base, status);
     result(c, 0, 2);
 }
 static void stream_voice_properties(xctx *c)

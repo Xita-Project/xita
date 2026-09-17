@@ -194,10 +194,14 @@ int main(void)
             c=context(handle,0,0,3);X_M32(c.r[4])=0x2AE4E7;call(&c,0x37B827,0,4);assert(!s->pause);
             c=context(handle,0,0,0);X_M32(c.r[4])=0x21EC86;reject_stream(&c,0x37AC89);
             c=context(handle,0,0,0);X_M32(c.r[4])=0x21EC85;call(&c,0x37AC89,0,1);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x21F2CF;call(&c,0x37AC89,0,1);
+            c=context(handle,0,0,0);X_M32(c.r[4])=0x21F30C;call(&c,0x37AC89,0,1);
             c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE857;reject_stream(&c,0x37ACD4);
             c=context(handle,0,0,0);X_M32(c.r[4])=0x2AE856;reject_stream(&c,0x37ACD4);
             uint32_t status=0xcccccccc;x_guest_write(0x9FE0,&status,4);
             c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(!read32(0x9FE0));
+            static const uint32_t status_callers[4]={0x2AE4C4,0x21EC6B,0x21F2C6,0x21F303};
+            for(unsigned i=0;i<4;++i){x_guest_write(0x9FE0,&status,4);c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=status_callers[i];call(&c,0x37ACD4,0,2);assert(!read32(0x9FE0));}
             c=context(handle,3,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);
             c=context(handle,0x9FE0,0,0);X_M32(c.r[4])=0x2AE856;call(&c,0x37ACD4,0,2);assert(read32(0x9FE0)==0x80000);
             c=context(handle,0,0,0);X_M32(c.r[4])=0x21F8E3;call(&c,0x37B822,0,2);
