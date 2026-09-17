@@ -641,7 +641,7 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip)
 /* While the guest thread is inside the software menu renderer nothing yields, so
  * xd3d_vblank_kick (hooked at yield/wait sites) never fires and game time crawled
  * at ~1/80 real time (438 vblanks in a 15-minute run). Deliver the original vblank
- * callback at real-time ~30 Hz from between draws as well, as the hardware
+ * callback at real-time 60 Hz from between draws as well, as the hardware
  * interrupt would mid-frame. Same gate (XV_MENU_VBLANK), same callback and record. */
 #if H2_MENU_RENDER
 uint64_t h2_menu_yield_us, h2_menu_yields;   /* time handed to other guest fibers from the render tick */
@@ -653,15 +653,26 @@ static void vblank_pace_in_render(void)
     if (on < 0) { const char *e = getenv("XV_MENU_VBLANK"); on = e ? atoi(e) : 0; }
     if (!on || busy || !active_context || !initialization_flip_done) return;
     uint64_t now = xk_os_monotonic_us();
-    if (last_us && now - last_us < 33333u) return;
-    last_us = now;
+    if (!last_us) last_us = now;
+    /* The vblank interrupt is a real-time 60 Hz event: deliver one callback per elapsed 16.667 ms,
+     * catching up after stretches with no hook (the game's own CPU work between frames, GXM flush).
+     * Measured before this (run sig274): ~9 kicks/s -> the game's UI clock (dt = vblanks/60 at
+     * 0x12B0E0) ran at 0.12-0.15 of wall time and every menu transition was 7-8x too slow.
+     * Capped per hook so a long stall cannot flood the handler; the remainder carries over. */
+    uint64_t elapsed = now - last_us;
+    unsigned pending = (unsigned)(elapsed / 16667u);
+    if (!pending) return;
+    if (pending > 120u) { last_us = now - (elapsed - 120u * 16667u) % 16667u; pending = 120u; }
+    else last_us += (uint64_t)pending * 16667u;
     busy = 1;
     /* The handler (0x14280) always increments the frame counter and treats a
      * record whose swap count equals its last-seen value (ds:[0x55E6B8]) as a
      * plain vblank; flags are not read. Pass the game's own last-seen swap count
      * so no swap is fabricated while a real flip is queued. */
-    uint32_t count = X_M32(0x485AB0);
-    signal_game_vblank(active_context, count + 1u, X_M32(0x55E6B8), 0u, 0x3FAC58u);
+    for (unsigned i = 0; i < pending; ++i) {
+        uint32_t count = X_M32(0x485AB0);
+        signal_game_vblank(active_context, count + 1u, X_M32(0x55E6B8), 0u, 0x3FAC58u);
+    }
     /* Guest threads are cooperative fibers: nothing else runs while this fiber
      * is inside the rasterizer, and the next menu screen streams its resources
      * on the loader thread. Hand the scheduler a turn once per vblank. */

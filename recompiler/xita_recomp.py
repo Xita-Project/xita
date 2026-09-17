@@ -1143,9 +1143,13 @@ class Emitter:
 
     # ---- functions / files ------------------------------------------------------------
     def dead_flag_writes(self, insns) -> set:
-        """Backward liveness over one basic block: which instructions write flags that nothing reads
-        before they are overwritten.  Conservative at the block end (successors may read: all live),
-        except after call/ret, where x86 code never depends on flags."""
+        """Backward liveness over one basic block: which instructions (by IP) write flags that nothing
+        reads before they are overwritten.  Conservative at the block end (successors may read: all
+        live), except after call/ret, where x86 code never depends on flags.
+        Keyed by IP on purpose: iced's Instruction equality ignores the IP, so a set of Instruction
+        objects made every instruction encoded identically to a dead one look dead too (Halo 2's
+        preferences loader: `and al,cl` twice in one block - the first dead, the second feeding `je` -
+        lost the live copy's flag store and the branch read the preceding cmp's flags)."""
         RF_ALL = RflagsBits.OF | RflagsBits.SF | RflagsBits.ZF | RflagsBits.AF | RflagsBits.CF | RflagsBits.PF
         dead = set()
         if not insns:
@@ -1157,7 +1161,7 @@ class Emitter:
             rd = ins.rflags_read
             wr = ins.rflags_modified            # written | cleared | set | undefined
             if wr and not (wr & live) and not rd and ins.mnemonic not in FLAG_KEEP:
-                dead.add(ins)
+                dead.add(ins.ip)
             live = (live & ~wr) | rd
         return dead
 
@@ -1278,7 +1282,7 @@ class Emitter:
                     self.stats["insns"] += 2
                     skip_next = True
                     continue
-                if ins in dead:
+                if ins.ip in dead:
                     # flags this instruction writes are all overwritten before anything reads them:
                     # lower normally, then strip the X_FLAGS(...) store (7 stores per arithmetic op)
                     tmp: List[str] = []
