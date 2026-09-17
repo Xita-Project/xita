@@ -26,7 +26,19 @@ with tempfile.TemporaryDirectory(prefix='xita-vertex-blocks-') as directory:
         command = flags + (['-DTEST_NO_VERTEX_BLOCKS'] if name=='absent' else [])
         subprocess.run(command+[str(ROOT/source), '-lm', '-o', str(binary)], check=True)
         for mode in (['0', '1'] if name=='uploads' else ['0']):
-            subprocess.run([str(binary)], check=True,
+            subprocess.run([str(binary)]+([mode] if name=='uploads' else []), check=True,
                            env=dict(os.environ, XV_VERTEX_BLOCK_LOADS=mode,
                                     ASAN_OPTIONS='detect_leaks=1'))
+    # Execute the actual uploader's startup selection, override and restoration
+    # with no environment setting, plus an explicit OFF in a default-ON build.
+    startup_env = dict(os.environ, ASAN_OPTIONS='detect_leaks=1')
+    startup_env.pop('XV_VERTEX_BLOCK_LOADS', None)
+    for default in (0, 1):
+        binary = out/('startup-'+str(default))
+        subprocess.run(flags+[f'-DXV_VERTEX_BLOCK_LOADS_DEFAULT={default}',
+            str(ROOT/'recomp/host/vertex_references_test.c'), '-lm', '-o', str(binary)], check=True)
+        subprocess.run([str(binary),str(default)], check=True, env=startup_env)
+        if default:
+            subprocess.run([str(binary),'0'], check=True,
+                           env=dict(startup_env,XV_VERTEX_BLOCK_LOADS='0'))
     print('PASS grouped-load source retention, controls and full-state restoration')

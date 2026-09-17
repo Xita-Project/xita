@@ -102,13 +102,14 @@ static void slot_checks(void)
     xv_vertex_upload_shutdown(); assert(!live);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     assert(!xv_vertex_references_enabled());
     xv_vertex_references_override(1); assert(xv_vertex_references_enabled());
     xv_vertex_references_override(0); assert(!xv_vertex_references_enabled());
     xv_vertex_references_override(-1); assert(!xv_vertex_references_enabled());
     int initial_blocks=xv_vertex_blocks_enabled();
+    if (argc > 1) assert(initial_blocks == atoi(argv[1]));
     xv_vertex_blocks_override(1);assert(xv_vertex_blocks_enabled());
     xv_vertex_blocks_override(0);assert(!xv_vertex_blocks_enabled());
     xv_vertex_blocks_override(-1);assert(xv_vertex_blocks_enabled()==initial_blocks);

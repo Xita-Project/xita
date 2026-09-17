@@ -1,5 +1,9 @@
 # Exact vertex comparisons with grouped NEON loads
 
+The earlier hardware trials below were inconclusive. A September 17 cumulative
+fresh-launch retest is now prepared with a process-start build default; see the
+follow-up at the end. The comparator itself is unchanged.
+
 The experiment changes how the CPU loads bytes while validating a retained
 vertex snapshot. It compares the same 64-byte groups, stops on the same group
 with a mismatch, and uses the original 16-byte/scalar tail. It preserves sparse
@@ -106,3 +110,34 @@ Private receipts and the preserved pre-update gameplay log are under
 directory. `package.json`, `upload.json` and `confirmed.json` distinguish a
 verified transfer from a confirmed boot. `physical-campaign-360/result.json`
 and `analysis.json` record the completed comparisons and their limitations.
+
+## September 17 cumulative startup retest
+
+`XV_VERTEX_BLOCK_LOADS_DEFAULT=1` now selects the existing grouped comparator at
+process start. The repository build default remains zero. An explicit
+`XV_VERTEX_BLOCK_LOADS=0` environment/config setting takes precedence, and the
+existing comparison controller restores the original effective mode after its
+run. The hardware retest uses a fresh process and ordinary gameplay instead of
+invoking that controller. Existing periodic reports establish admission through
+`enabled 1` and nonzero block checks.
+
+The build stamp changes only the uploader object when switching the startup
+default; repeating the same mode is a no-op. Invalid defaults are rejected.
+Replacing the Makefile in the private staging copy initially regenerated a
+byte-identical layout header and rebuilt main; the subsequent incremental checks
+start from that settled stage. No generated guest instruction object changed.
+The grouped archives were recreated with the same ordered member bytes.
+
+Actual uploader tests pass with ASan/UBSan for both compiled defaults, explicit
+environment overrides and restoration, including mutations and retained older
+GPU snapshots. The unchanged comparator matches the prior ARM validation source,
+so no new ARM instruction result is claimed. Independent review found no change
+to equality semantics, reference coverage, source snapshots or GPU retirement.
+The full Vita build passes; its package changes only the runtime and boot record.
+
+This candidate adds grouped comparisons to the five retained startup paths and
+the preceding worker/rendering changes. Standard graphics remain the baseline.
+It does not claim that the earlier benchmark arithmetic was broken or that the
+combination improves FPS. Hardware boot, admission and gameplay results remain
+to be recorded. Private build/review receipts are under
+`direct-cluster-query/vertex-block-startup/`.

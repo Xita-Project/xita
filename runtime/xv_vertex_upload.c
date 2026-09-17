@@ -12,6 +12,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef XV_VERTEX_BLOCK_LOADS_DEFAULT
+#define XV_VERTEX_BLOCK_LOADS_DEFAULT 0
+#endif
+#if XV_VERTEX_BLOCK_LOADS_DEFAULT != 0 && XV_VERTEX_BLOCK_LOADS_DEFAULT != 1
+#error XV_VERTEX_BLOCK_LOADS_DEFAULT must be 0 or 1
+#endif
+
 /* Each slot owns an uncached GPU snapshot plus a cached comparison mirror.
  * Repeated passes reuse byte-identical data; a same-frame rewrite appends a new
  * version. The source address alone is never an immutability proof. Allocated
@@ -151,7 +158,8 @@ void xv_vertex_blocks_override(int enabled)
 int xv_vertex_blocks_enabled(void)
 {
     static int configured = -1;
-    if (configured < 0) configured = xv_quality_int("XV_VERTEX_BLOCK_LOADS",0,0,1);
+    if (configured < 0)
+        configured = xv_quality_int("XV_VERTEX_BLOCK_LOADS",XV_VERTEX_BLOCK_LOADS_DEFAULT,0,1);
     return blocks_override < 0 ? configured : blocks_override;
 }
 int xv_vertex_blocks_available(void)

@@ -129,6 +129,24 @@ $(BUILD)/query-boundary-startup.config: force-query-boundary-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o: $(BUILD)/query-boundary-startup.config
+# Grouped exact vertex comparisons: opt-in at process start, independent of
+# graphics quality. Only the uploader consumes this build default.
+XV_VERTEX_BLOCK_LOADS_DEFAULT ?= 0
+ifneq ($(words $(XV_VERTEX_BLOCK_LOADS_DEFAULT)),1)
+$(error XV_VERTEX_BLOCK_LOADS_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_BLOCK_LOADS_DEFAULT),0 1),$(XV_VERTEX_BLOCK_LOADS_DEFAULT))
+$(error XV_VERTEX_BLOCK_LOADS_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_vertex_upload.o: CFLAGS += -DXV_VERTEX_BLOCK_LOADS_DEFAULT=$(XV_VERTEX_BLOCK_LOADS_DEFAULT)
+.PHONY: force-vertex-block-startup-config
+force-vertex-block-startup-config:
+$(BUILD)/vertex-block-startup.config: force-vertex-block-startup-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_VERTEX_BLOCK_LOADS_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_upload.o: $(BUILD)/vertex-block-startup.config
 # Diagnostic existing-scene completion census. OFF unless explicitly compiled.
 # Capacity is an independently verified SDK/runtime contract, not an allocation
 # request. Zero (the default) records structural declines without adding fences.
