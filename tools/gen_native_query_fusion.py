@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools import prototype_collision_query as prototype
 from tools import gen_native_solver_fusion as solver
+from tools import query_f32_primitives as query_f32
 
 FEATURE = 'XV_NATIVE_QUERY_FUSION'
 PREREQUISITES = ('XV_NATIVE_BSP_SPHERE', 'XV_NATIVE_COLLISION_VERTICES',
@@ -67,18 +68,21 @@ def replace_if_changed(path, text):
     data = text.encode()
     if path.exists() and path.read_bytes() == data:
         return False
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + '.tmp')
     temporary.write_bytes(data)
     temporary.replace(path)
     return True
 
 
-def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0):
+def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inline=0):
     if not __debug__:
         raise RuntimeError('Refusing optimized Python: generation safety checks require assertions.')
     recomp_dir = Path(recomp_dir).resolve()
     if solver_fusion not in (0, 1):
         raise ValueError('solver fusion must be 0 or 1')
+    if query_f32_inline not in (0, 1):
+        raise ValueError('query f32 inline must be 0 or 1')
     # Validate even a previously generated caller against current owned-image
     # emission. The audited prototype also checks SHA, closure and shadow sinks.
     units = {i: (recomp_dir / f'code_{i:03d}.c').read_text() for i in (13, 16, 28)}
@@ -127,6 +131,11 @@ def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0):
             generated['code_028.c'] = solver.selected_caller(generated['code_028.c'])
             if generic_caller(solver.generic_caller(generated['code_028.c'])) != original[28]:
                 raise ValueError('combined caller transformation is not exactly reversible')
+    canonical_headers = {}
+    if query_f32_inline:
+        generated['query_fusion.c'], private_headers, canonical_headers = query_f32.generate(
+            recomp_dir, generated['query_fusion.c'])
+        generated.update(private_headers)
     # Publication happens only after every input/output contract check passed.
     changed = [name for name, text in generated.items()
                if replace_if_changed(recomp_dir / name, text)]
@@ -137,7 +146,9 @@ def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0):
         output_sha256={name: digest(text) for name, text in generated.items()},
         generic_units_unchanged=(['code_000.c'] if solver_fusion else []) + ['code_013.c', 'code_016.c'],
         caller_contract=contract, solver_enabled=solver_fusion,
-        solver_contract=solver_contract, changed=changed)
+        solver_contract=solver_contract, query_f32_inline=query_f32_inline,
+        query_f32_header_sha256={name: digest(text) for name, text in canonical_headers.items()},
+        changed=changed)
     # A fresh receipt is also the build stamp. Write it after generated outputs,
     # including when their bytes were unchanged but an input was revalidated.
     receipt = Path(receipt)
@@ -155,8 +166,9 @@ def main():
     parser.add_argument('--recomp-dir', type=Path, default=ROOT / 'recomp')
     parser.add_argument('--receipt', type=Path, required=True)
     parser.add_argument('--solver-fusion', type=int, choices=(0, 1), default=0)
+    parser.add_argument('--query-f32-inline', type=int, choices=(0, 1), default=0)
     args = parser.parse_args()
-    result = generate(args.xbe, args.manifest, args.recomp_dir, args.receipt, args.solver_fusion)
+    result = generate(args.xbe, args.manifest, args.recomp_dir, args.receipt, args.solver_fusion, args.query_f32_inline)
     print('query fusion: fixed 32 continuations; changed ' + (', '.join(result['changed']) or 'no source bytes'))
 
 
