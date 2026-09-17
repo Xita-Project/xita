@@ -94,6 +94,13 @@ the existing owner-side handlers. Host memory/race checks and compilation pass;
 the emulator completes a charged shot and the physical updater confirms the
 new build. Longer gameplay still needs to exercise these property handoffs.
 
+A longer campaign run then exposed a different sound-stream startup STOP.
+The [startup/refill handoff](docs/object-stream-start-20260916.md) covers the
+observed deferred commit and its following status/packet calls on the parked
+audio owner, including nested completion callbacks. Host memory/race tests and
+the Vita build pass; hardware installation and that exact startup path remain
+to be verified. This is a stability fix, not a measured FPS gain.
+
 [World and effect rendering](docs/world-rendering-20260915.md) is the next focus:
 physical views range from 55 to 131 draws/frame with much higher completion
 latency in the heavier view. An opt-in replacement-blend candidate preserves

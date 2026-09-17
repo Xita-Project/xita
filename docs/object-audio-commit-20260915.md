@@ -42,8 +42,10 @@ reset. It compiles the actual existing HLE macro and invocation.
 
 The 600 volume updates now exercise both admitted return sites, inside and
 outside shared transactions, with known/unknown streams and signed volumes.
-An unrelated commit caller (`28BB6`) and an unknown volume caller stop before
-invocation; existing unsupported-service rejection tests also pass.
+A then-unqualified commit caller (`28BB6`) and an unknown volume caller stopped
+before invocation in these tests. The former was subsequently observed in real
+stream startup and is now covered by the
+[stream-start/refill follow-up](object-stream-start-20260916.md).
 
 The native build completes without warnings. All 1,588 package members match the
 updater contract; only the executable and boot marker differ from the baseline.

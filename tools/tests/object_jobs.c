@@ -95,12 +95,32 @@ static void submit_volume(xctx *c,unsigned id)
     __atomic_add_fetch(&volume_calls,1,__ATOMIC_RELAXED);
 }
 void object_test_audio_commit(xctx *c);
-static void submit_commit(xctx *c)
+static void submit_commit(xctx *c,unsigned id)
 {
-    unsigned sp=c->r[4];X_PUSH32(0x03D07280);X_PUSH32(0x291EFu);
+    unsigned sp=c->r[4];X_PUSH32(0x03D07280);X_PUSH32(id%4<2?0x291EFu:0x28BB6u);
     xv_object_job_hle(c,0x193C1Bu,object_test_audio_commit);
     assert(c->r[4]==sp&&c->r[0]==0);
     __atomic_add_fetch(&commit_calls,1,__ATOMIC_RELAXED);
+}
+void object_test_stream_status(xctx *c);
+void object_test_stream_packet(xctx *c);
+static unsigned status_calls,packet_calls;
+static void submit_refill(xctx *c,unsigned id)
+{
+    uint32_t sp=c->r[4],packet=sp-128,done=sp-64,state=sp-60;
+    X_PUSH32(state);X_PUSH32(id%4<2?1:0x7654);X_PUSH32(0x28B35);
+    xv_object_job_hle(c,0x19384Fu,object_test_stream_status);
+    assert(c->r[4]==sp&&c->r[0]==0&&X_M32(state)==1);
+    __atomic_add_fetch(&status_calls,1,__ATOMIC_RELAXED);
+    X_M32(packet)=0xC0000;X_M32(packet+4)=192000;X_M32(packet+8)=done;
+    X_M32(packet+12)=state;X_M32(packet+16)=0xABAB;
+    X_M32(done)=0;X_M32(state)=99;
+    X_PUSH32(0);X_PUSH32(packet);X_PUSH32(id%4<2?1:0x7654);X_PUSH32(0x289FD);
+    xv_object_job_hle(c,0x193884u,object_test_stream_packet);
+    assert(c->r[4]==sp&&c->r[0]==0);
+    assert(X_M32(state)==(id%4<2?1u:0u));
+    assert(X_M32(done)==(id%4<2?0u:192000u));
+    __atomic_add_fetch(&packet_calls,1,__ATOMIC_RELAXED);
 }
 void object_test_voice_stop(xctx *c);
 static void submit_stop(xctx *c,unsigned id)
@@ -266,7 +286,8 @@ void f_0008FB70(xctx *c)
         submit_query(c,id);
         if(id%2==0)submit_vertex_lock(c,id);
         if(id%2==0)submit_audio(c);
-        if(id%2==0)submit_commit(c);
+        if(id%2==0)submit_commit(c,id);
+        if(id%2==0)submit_refill(c,id);
         if(id%2==0)submit_volume(c,id);
         if(id%2==0)submit_stop(c,id);
         if(id%2==0)submit_parameters(c,id);
@@ -282,7 +303,8 @@ void f_0008FB70(xctx *c)
     if(id%3==2)submit_yield(c,0x17A804u);
     if(id%2==1)submit_vertex_lock(c,id);
     if(id%2==1)submit_audio(c);
-    if(id%2==1)submit_commit(c);
+    if(id%2==1)submit_commit(c,id);
+    if(id%2==1)submit_refill(c,id);
     if(id%2==1)submit_volume(c,id);
     if(id%2==1)submit_stop(c,id);
     if(id%2==1)submit_parameters(c,id);
@@ -348,7 +370,7 @@ int main(int argc,char **argv)
         xv_object_job_hle(&c,0x193D4Fu,object_test_stream_volume);assert(0);
     }
     if(argc>1&&!strcmp(argv[1],"unsupported-commit")) {
-        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x28BB6;
+        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0xDEADBEEF;
         xv_object_job_hle(&c,0x193C1Bu,object_test_audio_commit);assert(0);
     }
     if(argc>1&&!strcmp(argv[1],"unsupported-stop")) {
@@ -364,8 +386,12 @@ int main(int argc,char **argv)
         xv_object_job_hle(&c,(unsigned)strtoul(argv[2],NULL,16),object_test_stream_parameter);assert(0);
     }
     if(argc>1&&!strcmp(argv[1],"unsupported-stream")) {
-        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x28B35;
+        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x28B36;
         xv_call(&c,0x19384Fu);assert(0);
+    }
+    if(argc>1&&!strcmp(argv[1],"unsupported-stream-process")) {
+        c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x289FE;
+        xv_call(&c,0x193884u);assert(0);
     }
     if(argc>1&&!strcmp(argv[1],"unsupported-nested-audio")) {
         setenv("OBJECT_AUDIO_NESTED_FAIL","1",1);argc=1;
@@ -396,6 +422,7 @@ int main(int argc,char **argv)
 #endif
     assert(vertex_lock_calls==600);assert(register_calls==200);assert(query_calls==600);assert(event_calls==1200&&event_value==1200);assert(io_calls>=300&&io_calls<=600);
     assert(audio_calls==600&&volume_calls==600&&commit_calls==600&&stop_calls==600);
+    assert(status_calls==600&&packet_calls==600);
     assert(frequency_calls==600&&parameter_calls==3000);
     assert(shared_guarded_value==600);
     for(unsigned i=0;i<1200;i++)assert(event_seen[i]==1);

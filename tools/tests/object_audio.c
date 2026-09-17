@@ -100,11 +100,39 @@ void object_test_audio_commit(xctx *c)
     object_test_audio_owner();
     unsigned sp=c->r[4];
     uint32_t saved[8];memcpy(saved,c->r,sizeof saved);
-    assert(X_M32(sp)==0x291EF&&X_M32(sp+4)==0x03D07280);
+    uint32_t back=X_M32(sp);
+    assert((back==0x291EF||back==0x28BB6)&&X_M32(sp+4)==0x03D07280);
     xv_hle_IDirectSound_CommitDeferredSettings(c);
     assert(c->r[0]==0&&c->r[4]==sp+8);
     for(unsigned i=1;i<8;i++)if(i!=4)assert(c->r[i]==saved[i]);
-    assert(X_M32(sp)==0x291EF&&X_M32(sp+4)==0x03D07280);
+    assert(X_M32(sp)==back&&X_M32(sp+4)==0x03D07280);
+}
+
+/* Initial refill calls can also complete an old packet and reenter both stream
+ * methods through Halo's original completion callback. Prepare the fixture only
+ * on the parked owner, then invoke the actual GetStatus/Process implementations. */
+static void prepare_refill(void)
+{
+    object_test_audio_owner();memset(g_ds_streams,0,sizeof g_ds_streams);
+    ds_stream *s=&g_ds_streams[0];
+    s->obj=1;s->callback=0x29590;s->cb_context=0xABCD;s->max_pkts=4;
+    s->bytes_per_sec=192000;s->nq=1;s->voice=0;
+    s->q[0]=(ds_pkt){.completed_ptr=0xA0000,.status_ptr=0xA0004,.size=4096,.context=0xBEEF};
+    X_M32(0xA0000)=0;X_M32(0xA0004)=1;
+}
+void object_test_stream_status(xctx *c)
+{
+    unsigned sp=c->r[4],obj=X_M32(sp+4),before=callbacks;
+    prepare_refill();xv_hle_CDirectSoundStream_GetStatus(c);
+    assert(c->r[0]==0&&c->r[4]==sp+12&&callbacks==before+(obj==1));
+    if(obj==1)assert(g_ds_streams[0].nq==1);
+}
+void object_test_stream_packet(xctx *c)
+{
+    unsigned sp=c->r[4],obj=X_M32(sp+4),before=callbacks;
+    prepare_refill();xv_hle_CDirectSoundStream_Process(c);
+    assert(c->r[0]==0&&c->r[4]==sp+16&&callbacks==before+(obj==1));
+    if(obj==1)assert(g_ds_streams[0].nq==2&&g_ds_streams[0].q[1].context==0xABAB);
 }
 
 /* Real lookup/stop code, including native wrappers and empty/unknown handles.

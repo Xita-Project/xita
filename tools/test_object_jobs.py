@@ -63,6 +63,8 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                 assert re.findall(r'\[model-hierarchy\] 3 frames batches (\d+) child nodes (\d+)',result.stderr)==[('600','3600'),('0','0')]
                 assert re.findall(r'quiescent owner stream volume updates (\d+)',result.stderr)==['600','0']
                 assert re.findall(r'quiescent owner deferred audio commits (\d+)',result.stderr)==['600','0']
+                assert re.findall(r'quiescent owner stream-start commits (\d+)',result.stderr)==['300','0']
+                assert re.findall(r'quiescent owner stream status (\d+) packets (\d+)',result.stderr)==[('600','600'),('0','0')]
                 assert re.findall(r'quiescent owner voice stops (\d+)',result.stderr)==['600','0']
                 assert re.findall(r'quiescent owner frequency updates (\d+) spatial parameters (\d+)',result.stderr)==[('600','3000'),('0','0')]
                 timed_rows=re.findall(r'\[object-wait\] timed (\d) attempts (\d+)/(\d+) acquired (\d+)/(\d+) timeouts (\d+)/(\d+)',result.stderr)
@@ -134,11 +136,12 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                         ("unsupported-stop-null",b'unsupported HLE'),
                         ("unsupported-commit",b'deferred audio commit outside audited sound update'),
                         ("unsupported-volume",b'stream volume outside audited object sound update'),
-                        ("unsupported-stream",b'stream service outside quiescent audio callback'),
+                        ("unsupported-stream",b'stream service outside audited refill'),
+                        ("unsupported-stream-process",b'stream service outside audited refill'),
                         ("unsupported-nested-audio",b'unsupported nested owner audio service')):
         failure=subprocess.run([str(binary),mode],capture_output=True,timeout=10,preexec_fn=no_core)
         assert failure.returncode<0 and reason in failure.stderr,(mode,failure.stderr)
-    print('PASS: unrelated audio callers, worker stream calls and recursive owner RPCs stop before invocation')
+    print('PASS: unrelated audio/refill callers and recursive owner RPCs stop before invocation')
     for address in ('194470','193D9B','193DB3','193D68','193D96','193E22'):
         failure=subprocess.run([str(binary),'unsupported-parameter',address],capture_output=True,timeout=10,preexec_fn=no_core)
         assert failure.returncode<0 and b'stream parameter outside audited object sound update' in failure.stderr
