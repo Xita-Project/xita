@@ -1,5 +1,7 @@
 #include "kernel_timer.h"
+#include "log_budget.h"
 #include <string.h>
+static uint32_t dispatch_logs;
 
 typedef struct {
     uint32_t address, dpc, period;
@@ -248,7 +250,7 @@ void h2_timer_poll(xctx *c)
         d->order = 0; X_M8(address + 2) = 0; X_M8(c->fs_base + KPCR_IRQL) = 2;
         X_PUSH32(d->arg2); X_PUSH32(d->arg1); X_PUSH32(context); X_PUSH32(address); X_PUSH32(0xDEAD0002u);
         dispatching = 1; c->preempt = 0x7FFFFFFF;
-        xv_logf("[h2/timer] dispatch dpc=%08X routine=%08X args=%08X,%08X\n", address, routine, d->arg1, d->arg2);
+        if (h2_log_budget(&dispatch_logs, 256, 20000)) xv_logf("[h2/timer] dispatch dpc=%08X routine=%08X args=%08X,%08X\n", address, routine, d->arg1, d->arg2);
         xv_call(c, routine);
         dispatching = 0;
         if (c->r[4] != saved.r[4]) { h2_timer_fault(c, "DPC stack imbalance", address, c->r[4]); return; }

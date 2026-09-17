@@ -1,6 +1,7 @@
 /* Checked XDK5849 device and external PCM buffer boundaries. Unknown sound
  * methods stop; every accepted object owns real mixer/output resources. */
 #include "audio_host.h"
+#include "log_budget.h"
 #include "recomp/kernel/xk.h"
 #include "recomp/kernel/xk_audio.h"
 #include <math.h>
@@ -692,7 +693,7 @@ static void stream_deliver(xctx *c, uint32_t ip)
             xctx saved=*c;uint32_t fpscr=h2_platform_fpscr_read();uint8_t irql=X_M8(c->fs_base+0x24);
             X_M8(c->fs_base+0x24)=2;c->preempt=0x7fffffff;
             X_PUSH32(0);X_PUSH32(packet_context);X_PUSH32(s->context);X_PUSH32(0xDEAD0003u);
-            xv_logf("[h2/audio-packet] consumed ticket=%llu stream=%08X callback=%08X context=%u; delivered from DirectSoundDoWork after the real sink fence\n",
+            static uint32_t consumed_logs; if (h2_log_budget(&consumed_logs, 64, 2000)) xv_logf("[h2/audio-packet] consumed ticket=%llu stream=%08X callback=%08X context=%u; delivered from DirectSoundDoWork after the real sink fence\n",
                     (unsigned long long)ticket,s->base,s->callback,packet_context);
             xv_call(c,s->callback);
             if (c->r[4]!=saved.r[4]) fail(c,ip,"stream callback stack imbalance",c->r[4]);
@@ -754,7 +755,7 @@ static void stream_process(xctx *c)
     }
     s->packets[p].mirror=mirror;s->packets[p].source=packet[0];s->packets[p].context=p;s->packets[p].ticket=ticket;s->packets[p].ready=0;
     ++s->submitted;xk_thread_kick(stream_worker);
-    xv_logf("[h2/audio-packet] Process caller=%08X stream=%08X context=%u source=%08X mirror=%08X ticket=%llu;320 verified zero PCM bytes queued to real decoder/GP%u, completion pending\n",
+    static uint32_t process_logs; if (h2_log_budget(&process_logs, 64, 2000)) xv_logf("[h2/audio-packet] Process caller=%08X stream=%08X context=%u source=%08X mirror=%08X ticket=%llu;320 verified zero PCM bytes queued to real decoder/GP%u, completion pending\n",
             caller,s->base,p,packet[0],mirror,(unsigned long long)ticket,s->route_bin);
     result(c,0,3);
 }
@@ -1003,7 +1004,7 @@ static void stream_status(xctx *c)
     uint32_t status = s->game_packets < s->packet_limit ? 1u : 0u;
     if (s->game_packets) status |= (s->pause & 0x44u) ? 0x20000u : 0x10000u;
     x_guest_write(out, &status, 4);
-    xv_logf("[h2/audio-stream] status caller=%08X object=%08X status=%08X queued=%u\n", X_M32(c->r[4]), s->base, status, s->game_packets);
+    static uint32_t status_logs; if (h2_log_budget(&status_logs, 64, 5000)) xv_logf("[h2/audio-stream] status caller=%08X object=%08X status=%08X queued=%u\n", X_M32(c->r[4]), s->base, status, s->game_packets);
     result(c, 0, 2);
 }
 static void stream_voice_properties(xctx *c)
@@ -1667,7 +1668,7 @@ static void deferred_commit(xctx *c)
     active[2]->spatial[0x7c/4]=0;
     device.distance=device.pending_distance;device.rolloff=device.pending_rolloff;
     device.doppler=device.pending_doppler;device.dirty=0;
-    xv_logf("[h2/audio-commit] caller=0021F201 fixed zero-position/+X+Y listener committed, Doppler0; original FX25 dirty cleared, inactive pending records and real filters/sources/GP history/grains retained\n");
+    static uint32_t commit_logs; if (h2_log_budget(&commit_logs, 64, 5000)) xv_logf("[h2/audio-commit] caller=0021F201 fixed zero-position/+X+Y listener committed, Doppler0; original FX25 dirty cleared, inactive pending records and real filters/sources/GP history/grains retained\n");
     result(c,0,1);
 #else
     fail(c,ip,"fixed spatial commit model disabled",ip);
@@ -2071,7 +2072,7 @@ void h2_audio_guest_entry(xctx *c, uint32_t ip)
         if (ip==0x37B844) for (unsigned i=0;i<XA_MAX_VOICES;++i) if (streams[i].base && streams[i].flags==0x20000000u) game_stream_deliver(c,ip,&streams[i]);
 #endif
         original_empty_work(c,ip);
-        if (ip==0x37B844) xv_logf("[h2/audio-work] original void wrapper executes with no ordinary pending work; completed stream packets delivered here, listener dirty=%08X retained\n",device.dirty);
+        static uint32_t work_logs; if (ip==0x37B844 && h2_log_budget(&work_logs, 64, 5000)) xv_logf("[h2/audio-work] original void wrapper executes with no ordinary pending work; completed stream packets delivered here, listener dirty=%08X retained\n",device.dirty);
         h2_platform_fpscr_write(fpscr);return;
     }
     if (ip == 0x379F2A) {

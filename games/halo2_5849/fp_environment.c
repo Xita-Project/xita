@@ -1,5 +1,7 @@
 #include "fp_environment.h"
+#include "log_budget.h"
 #include <stdint.h>
+static uint32_t stmxcsr_logs, ldmxcsr_logs;
 extern uint32_t xk_mem_arena_size(void);
 extern void xv_logf(const char *, ...);
 
@@ -24,7 +26,7 @@ void h2_stmxcsr(xctx *c, uint32_t ip, uint32_t address)
     if (!supported_native(native)) { h2_fp_environment_fault(c, ip, address, native); return; }
     uint32_t value = 0x1F80u | (native & 1) | ((native >> 6) & 2) | ((native & 0x1E) << 1);
     x_guest_write(address, &value, 4);
-    xv_logf("[h2/fp] STMXCSR ip=%08X native=%08X value=%08X\n", ip, native, value);
+    if (h2_log_budget(&stmxcsr_logs, 64, 100000)) xv_logf("[h2/fp] STMXCSR ip=%08X native=%08X value=%08X\n", ip, native, value);
     h2_platform_fpscr_write(native); /* diagnostics must not alter exception history */
 }
 void h2_ldmxcsr(xctx *c, uint32_t ip, uint32_t address)
@@ -39,6 +41,6 @@ void h2_ldmxcsr(xctx *c, uint32_t ip, uint32_t address)
     }
     uint32_t flags = (value & 1) | ((value & 2) << 6) | ((value >> 1) & 0x1E);
     uint32_t result = (native & ~0x9Fu) | flags;
-    xv_logf("[h2/fp] LDMXCSR ip=%08X value=%08X native=%08X\n", ip, value, result);
+    if (h2_log_budget(&ldmxcsr_logs, 64, 100000)) xv_logf("[h2/fp] LDMXCSR ip=%08X value=%08X native=%08X\n", ip, value, result);
     h2_platform_fpscr_write(result);
 }

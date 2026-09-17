@@ -1,6 +1,7 @@
 /* Isolated native startup harness: executes the owned XBE entry and scheduler.
  * No title screen substitute, success-return API fallbacks or CE game adapter.
  */
+#include "log_budget.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -665,6 +666,7 @@ void xv_trace_call(xctx *c, const char *name, unsigned count)
                     !strcmp(name, "KfLowerIrql") ? &hot_lower :
                     !strcmp(name, "KeSetTimer") ? &hot_timer : NULL;
     if (hot && ++*hot > 400 && *hot % 1000) return;
+    static uint32_t kernel_logs; if (!h2_log_budget(&kernel_logs, 4000, 1000)) return;
     xv_logf("[h2/kernel] thread=%d return=%08X %s%s\n",
             xk_cur ? xk_cur->id : 0, X_M32(c->r[4]), name, args);
 }

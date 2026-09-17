@@ -1,6 +1,7 @@
 /* Experimental H2-only replacement of hardware setup by a real synchronous
  * command consumer. Original allocation, DMA objects, RAMHT, state generation
  * and submission remain guest code. Unsupported commands and display work stop. */
+#include "log_budget.h"
 #include "host_channel_runtime.h"
 #include "host_channel.h"
 #include "host_tiles.h"
@@ -1112,6 +1113,8 @@ int h2_host_channel_bus(xctx *c, uint32_t ip, uint32_t address, unsigned width,
                 (active_flip_queued ? complete_active_flip(c, fault.address) :
                                       complete_initialization_vblank(c, fault.address)))
                 result = h2_host_channel_submit(&channel, put, 1000000, &fault);
+            static uint32_t put_logs;
+            if (result != 0 || h2_log_budget(&put_logs, 2000, 5000))
             xv_logf("[h2/channel] PUT=%08X GET=%08X result=%d source=%08X word=%08X sub=%u method=%04X clears=%llu pixels=%llu\n",
                     put, h2_host_channel_get(&channel), result, fault.address, fault.word,
                     fault.subchannel, fault.method, (unsigned long long)channel.clear.completed_clears,
