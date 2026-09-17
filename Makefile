@@ -811,6 +811,27 @@ $(RECOMP_BUILD)/query-membership.config: force-query-membership-config
 	@printf '%s\n' '$(XV_QUERY_MEMBERSHIP_SCALAR)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
+# Ordered ancestor membership, composed after the qualified edge scalar path.
+XV_QUERY_ANCESTOR_SCALAR ?= 0
+ifneq ($(words $(XV_QUERY_ANCESTOR_SCALAR)),1)
+$(error XV_QUERY_ANCESTOR_SCALAR must be 0 or 1)
+endif
+ifneq ($(filter $(XV_QUERY_ANCESTOR_SCALAR),0 1),$(XV_QUERY_ANCESTOR_SCALAR))
+$(error XV_QUERY_ANCESTOR_SCALAR must be 0 or 1)
+endif
+ifeq ($(XV_QUERY_ANCESTOR_SCALAR),1)
+ifneq ($(XV_QUERY_MEMBERSHIP_SCALAR),1)
+$(error XV_QUERY_ANCESTOR_SCALAR requires XV_QUERY_MEMBERSHIP_SCALAR=1)
+endif
+$(RECOMP_BUILD)/query_fusion.o: RECOMP_CFLAGS += -DXV_QUERY_ANCESTOR_SCALAR=1
+endif
+.PHONY: force-query-ancestor-config
+force-query-ancestor-config:
+$(RECOMP_BUILD)/query-ancestor.config: force-query-ancestor-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_QUERY_ANCESTOR_SCALAR)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
 # Keep this exact canonical closure in sync with tools/query_f32_primitives.py.
 # Never glob a generated directory: regeneration must not copy its own output.
 QUERY_F32_HEADERS := xv_recomp_protos.h xv_x86rt.h xv_phase.h \
@@ -824,7 +845,7 @@ $(RECOMP_BUILD)/query-f32.config: force-query-f32-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 QUERY_FUSION_OBJECTS := $(RECOMP_BUILD)/code_028.o $(RECOMP_BUILD)/query_fusion.o
-QUERY_FUSION_INPUTS := tools/query_membership_scalar.py tools/query_semantic_leaf.py tools/query_f32_primitives.py tools/gen_native_query_fusion.py tools/gen_native_solver_fusion.py tools/prototype_collision_query.py \
+QUERY_FUSION_INPUTS := tools/query_ancestor_scalar.py tools/query_membership_scalar.py tools/query_semantic_leaf.py tools/query_f32_primitives.py tools/gen_native_query_fusion.py tools/gen_native_solver_fusion.py tools/prototype_collision_query.py \
     tools/tests/collision_query_fusion.c $(wildcard recompiler/*.py recompiler/core/*.py games/halo_ce_3925/*.py) \
     recomp/kernel/xk_collision_vertices.h recomp/kernel/xk_segment_sphere.h \
     recomp/kernel/xk_collision_traversal.h recomp/kernel/xk_geometry.c \
@@ -871,8 +892,8 @@ $(QUERY_FUSION_OBJECTS): $(RECOMP_BUILD)/query-fusion.generated.json
 # Both affected objects wait for the stamp before parallel compilation.
 # One generator owns both caller edits. The solver config is also a stamp input
 # on the OFF transition, restoring the exact query-only caller before compile.
-$(RECOMP_BUILD)/query-fusion.generated.json: $(QUERY_FUSION_INPUTS) $(RECOMP_BUILD)/solver-fusion.config $(RECOMP_BUILD)/query-f32.config $(RECOMP_BUILD)/query-semantic.config $(RECOMP_BUILD)/query-membership.config $(if $(filter-out $(wildcard $(QUERY_FUSION_OUTPUTS)),$(QUERY_FUSION_OUTPUTS)),force-query-fusion-missing)
-	$(PYTHON) tools/gen_native_query_fusion.py --xbe $(XBE) --manifest $(XBE_JSON) --recomp-dir $(RECOMP_DIR) --receipt $(RECOMP_BUILD)/query-fusion.generated.json $(if $(filter 1,$(XV_NATIVE_SOLVER_FUSION)),--solver-fusion 1,) $(if $(filter 1,$(XV_QUERY_F32_INLINE)),--query-f32-inline 1,) $(if $(filter 1,$(XV_QUERY_SEMANTIC_LEAF)),--query-semantic-leaf 1,) $(if $(filter 1,$(XV_QUERY_MEMBERSHIP_SCALAR)),--query-membership-scalar 1,)
+$(RECOMP_BUILD)/query-fusion.generated.json: $(QUERY_FUSION_INPUTS) $(RECOMP_BUILD)/solver-fusion.config $(RECOMP_BUILD)/query-f32.config $(RECOMP_BUILD)/query-semantic.config $(RECOMP_BUILD)/query-membership.config $(RECOMP_BUILD)/query-ancestor.config $(if $(filter-out $(wildcard $(QUERY_FUSION_OUTPUTS)),$(QUERY_FUSION_OUTPUTS)),force-query-fusion-missing)
+	$(PYTHON) tools/gen_native_query_fusion.py --xbe $(XBE) --manifest $(XBE_JSON) --recomp-dir $(RECOMP_DIR) --receipt $(RECOMP_BUILD)/query-fusion.generated.json $(if $(filter 1,$(XV_NATIVE_SOLVER_FUSION)),--solver-fusion 1,) $(if $(filter 1,$(XV_QUERY_F32_INLINE)),--query-f32-inline 1,) $(if $(filter 1,$(XV_QUERY_SEMANTIC_LEAF)),--query-semantic-leaf 1,) $(if $(filter 1,$(XV_QUERY_MEMBERSHIP_SCALAR)),--query-membership-scalar 1,) $(if $(filter 1,$(XV_QUERY_ANCESTOR_SCALAR)),--query-ancestor-scalar 1,)
 $(QUERY_FUSION_OUTPUTS): | $(RECOMP_BUILD)/query-fusion.generated.json
 	@test -f $@
 query-fusion-generate: $(RECOMP_BUILD)/query-fusion.generated.json $(RECOMP_DIR)/query_fusion.c
