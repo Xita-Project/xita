@@ -10,7 +10,9 @@
 #include XV_VERTEX_UPLOAD_TEST_SOURCE
 static struct { void *p; int mapped; } blocks[16];
 static unsigned next_id=1, live, fail_at, calls, flushes;
+#ifndef XV_VERTEX_UPLOAD_TEST_LOG
 void xv_logf(const char *fmt, ...) {}
+#endif
 SceUID sceKernelAllocMemBlock(const char *name,SceKernelMemBlockType type,SceSize size,SceKernelAllocMemBlockOpt *opt)
 {
     if(++calls==fail_at)return -1;
