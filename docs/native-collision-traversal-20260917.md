@@ -199,3 +199,26 @@ one. All six preceding startup selections remain in the build command, so
 this is a seven-path cumulative candidate. Hardware performance and stability
 are not established by these build checks. Evidence is under
 `direct-cluster-query/collision-traversal-startup/`.
+
+## Fresh-launch hardware follow-up
+
+The seven-path runtime `fae0f1808a892ca9caf3e4a3692aaabf2fd307bda4cff72171dc17c504bf9730`
+from source `c5a198a` is installed and boot-confirmed in updater slot 1. Slot 0
+retains the preceding six-path runtime. Startup confirms traversal mode one;
+there are no per-query counters, so the actual admission/depth distribution
+is not measured. Native resolution, Original settings and effective 444/222 MHz
+CPU/GPU clocks remain the comparison baseline.
+
+Normal campaign menus restored New001's saved pistol checkpoint on Pillar of
+Autumn, Normal difficulty. The profile, save directory and logged camera match
+the preceding six-path observation. The ordinary displayed-frame counter
+advanced 765 frames in 59.9916 seconds, or 12.7518 FPS, compared with 12.7725 FPS
+for the six-path parent. This difference is **inconclusive**: live AI and draw
+work vary, and endpoint timing bounds do not bound workload variation. All
+seven paths remain enabled in the cumulative candidate; no speedup is claimed.
+
+Two pistol fire presses, camera movement, forward movement and pause completed
+without a detected stop or GPU fault. Screenshots show the weapon and world
+still rendering. This short check does not establish long-session stability or
+resolve the historical rocket/plasma/vehicle crashes. Installation, observation
+and smoke receipts are retained in the private evidence directory above.

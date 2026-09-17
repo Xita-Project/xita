@@ -84,7 +84,7 @@ The latest same-checkpoint observation is 12.769 FPS versus 12.660 FPS for its
 parent: inconclusive, with all five changes still enabled. See the
 [stencil follow-up](depth-store-stencil-20260917.md) for evidence and limitations.
 
-The current cumulative runtime is
+The preceding six-path runtime is
 `a4e35d47a6d5db8d11e4915708ce93b9e900a8bc1893baf62a2cb61f98859eda`
 from source `ca0f3b0`, installed in slot 0. It adds the existing grouped exact
 vertex comparisons as a sixth startup path, retaining the preceding five and
@@ -97,6 +97,17 @@ ordinary displayed-frame observation is 12.7725 FPS versus 12.7689 FPS for the
 five-path build: inconclusive, with all six paths retained.
 See the [grouped-comparison follow-up](vertex-block-loads-20260916.md) for the
 validation and admission evidence. The combination remains under evaluation.
+
+The current cumulative runtime is
+`fae0f1808a892ca9caf3e4a3692aaabf2fd307bda4cff72171dc17c504bf9730`
+from source `c5a198a`, installed and boot-confirmed in slot 1. It adds typed
+collision traversal to the preceding six paths. Fresh normal-menu launch into
+the same New001 pistol checkpoint measured 12.7518 FPS versus 12.7725 FPS for
+the six-path parent. This is inconclusive, and all seven remain enabled. Short
+pistol firing, movement and pause checks complete; broader combat, vehicle and
+crash qualification is outstanding. See the
+[typed-traversal follow-up](native-collision-traversal-20260917.md) for production
+stack checks, startup evidence and the unmeasured admission distribution.
 
 ## Visibility dependency follow-up
 
