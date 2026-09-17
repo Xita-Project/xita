@@ -360,6 +360,34 @@ LIBS      += -lSceLibKernel_stub -lSceTouch_stub -lm
 # (recomp/, linked as librecomp.a) and the GXM UI bridge; see runtime/xv_boot.c / runtime/xv_ui_gxm.c.
 RECOMP    ?= 0
 GAME_PROFILE ?= halo_ce_3925
+# Explicit private startup trial, not a persisted/user-facing graphics default.
+XV_MODEL_BATCHES_TRIAL ?= 0
+ifneq ($(words $(XV_MODEL_BATCHES_TRIAL)),1)
+$(error XV_MODEL_BATCHES_TRIAL must be 0 or 1)
+endif
+ifneq ($(filter $(XV_MODEL_BATCHES_TRIAL),0 1),$(XV_MODEL_BATCHES_TRIAL))
+$(error XV_MODEL_BATCHES_TRIAL must be 0 or 1)
+endif
+ifeq ($(XV_MODEL_BATCHES_TRIAL),1)
+ifneq ($(RECOMP),1)
+$(error XV_MODEL_BATCHES_TRIAL requires RECOMP=1)
+endif
+ifneq ($(GAME_PROFILE),halo_ce_3925)
+$(error XV_MODEL_BATCHES_TRIAL requires GAME_PROFILE=halo_ce_3925)
+endif
+ifneq ($(XV_NATIVE_MODEL_PALETTE) $(XV_NATIVE_MODEL_HIERARCHY),1 1)
+$(error XV_MODEL_BATCHES_TRIAL requires XV_NATIVE_MODEL_PALETTE=1 XV_NATIVE_MODEL_HIERARCHY=1)
+endif
+$(BUILD)/runtime/main.o: CFLAGS += -DXV_MODEL_BATCHES_TRIAL=1 -DXV_NATIVE_MODEL_HIERARCHY
+endif
+.PHONY: force-model-batches-trial-config
+force-model-batches-trial-config:
+$(BUILD)/model-batches-trial.config: force-model-batches-trial-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_MODEL_BATCHES_TRIAL)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/main.o: $(BUILD)/model-batches-trial.config
 ifeq ($(XV_QUERY_PREFIX_PUBLISH),1)
 ifneq ($(GAME_PROFILE),halo_ce_3925)
 $(error XV_QUERY_PREFIX_PUBLISH requires the Halo CE retained-generation Present contract)
