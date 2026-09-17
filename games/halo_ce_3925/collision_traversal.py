@@ -1,12 +1,11 @@
-"""Owned-image-qualified native GPR lifetime for the two collision BSP walks.
+"""Typed collision BSP regions with the original traversal continuations.
 
-No guest instructions or game data live here. Generate the candidate from the
-audited emitter body, retaining every FP operation, guest write and branch.
-Only GPR storage between observable calls/yields changes. Unknown calls fail
-generation, rather than silently executing against unpublished context.
+Original guest bodies are derived only from the owned image. The helpers
+decline without side effects; accepted regions return to existing labels.
+Every original child call, recursive call, stack prologue/epilogue and taken
+backedge remains in its original body. No GPR localization wrapper remains.
 """
 import hashlib
-import re
 
 SPANS = {
     0x87E10: (130, 'f68295756aa6cae3b590a9c11c376ec01d9fb68d64e144c8b491b901a36fa620'),
@@ -20,58 +19,65 @@ def matches(image):
 
 
 def hook(address, body):
-    if not __debug__:
-        raise ValueError('Assertions required for native traversal generation')
+    if not __debug__:raise ValueError('Assertions required for traversal generation')
     assert address in SPANS
-    label = f'L_{address:08X}:\n'
-    assert body.count(label) == 1 and body.rstrip().endswith('}')
-    # All callees receiving c are either pure runtime arithmetic or explicit
-    # observation boundaries. Extend this allowlist only after auditing them.
-    calls = set(re.findall(r'\b(\w+)\(c(?:\s*[,)]|\s*\))', body))
-    allowed = {'x87_push', 'x87_pop', 'x87_load_f32', 'x87_store_f32',
-               'x87_compare', 'x_shl32', 'XF_S', 'XF_O', 'XF_Z', 'XF_C', 'XF_P',
-               'f_00087EA0', 'f_00087E10', 'f_00086F50',
-               'xv_bsp_sphere_plane_distance'}
-    assert calls <= allowed, (address, calls - allowed)
-    region = body[body.index(label):body.rfind('}')]
-    assert region.count('X_PREEMPT()') == (1 if address == 0x87E10 else 4)
-    native = re.sub(r'c->r\[(\d)\]', r'ct_r\1', region)
-    for callee in ('f_00087EA0', 'f_00087E10', 'f_00086F50'):
-        native = native.replace(callee + '(c);',
-                                'CT_SAVE(); ' + callee + '(c); CT_LOAD();')
-    # xk_geometry.c's pure distance helper reads only EAX/ECX/EBP and writes
-    # only EAX plus x87 state. It has no scheduler, lock or observer callback.
-    # Guest child calls still receive all eight published GPRs.
-    native = native.replace('xv_bsp_sphere_plane_distance(c)',
-                            '({ c->r[0]=ct_r0; c->r[1]=ct_r1; c->r[5]=ct_r5; '
-                            'int ct_ok = xv_bsp_sphere_plane_distance(c); ct_r0=c->r[0]; ct_ok; })')
-    native = native.replace('return;', 'CT_SAVE(); return;')
-    roots = ('    uint8_t *const xram_ = ct_arena; const uint32_t *const xpt_ = ct_pages;\n'
-             '    uint8_t *const imgb_ = ct_image; (void)imgb_;\n'
-             '    uint32_t '+','.join(f'ct_r{i}' for i in range(8))+'; CT_LOAD();\n')
-    macros = {
-        'X_R16(i)': '(*(uint16_t *)&CT_REG(i))',
-        'X_R8L(i)': '(*(uint8_t *)&CT_REG(i))',
-        'X_R8H(i)': '(*((uint8_t *)&CT_REG(i) + 1))',
-        'X_PUSH32(v)': 'do { uint32_t ct_v = (uint32_t)(v); ct_r4 -= 4; X_M32(ct_r4) = ct_v; } while (0)',
-        # x_pop32 was compiled against global mapping roots in x86rt.h, unlike
-        # the generated X_PUSH32 macro. Preserve that distinction after yields.
-        'X_POP32()': '({ uint32_t ct_v = *(xu32_u *)(g_xram+g_xpt[ct_r4>>12]+(ct_r4&4095u)); ct_r4 += 4; ct_v; })',
-        'X_PREEMPT()': 'do { if (--c->preempt <= 0) { CT_SAVE(); xv_preempt(c); CT_LOAD(); } } while (0)',
+    assert 'xv_ct_node' not in body and 'xv_ct_project' not in body, 'already transformed'
+    if address == 0x87E10:
+        assert body.count('X_PREEMPT()') == 1
+        assert 'L_00087E68:' in body
+        # Both the typed decision and its original fallback live in a bounded
+        # native block that returns before any recursive child or preempt. This
+        # prevents temporary FP/alias storage accumulating in recursive frames.
+        first=body.index('    /* 00087E20 ')
+        second=body.index('L_00087E20:\n',first)
+        end=body.index('L_00087E68:\n',second)
+        initial=body[first:second]; original=body[second:end]
+        assert 'X_PREEMPT' not in original and 'X_PUSH32' not in original
+        assert original.count('goto L_00087E68;')==1
+        fallback=original.replace('goto L_00087E68;','return;')
+        helper='''#ifdef XV_NATIVE_COLLISION_TRAVERSAL
+#include "kernel/xk_collision_traversal.h"
+static __attribute__((noinline)) void xv_ct_node2_block_00087E10(xctx *c, uint8_t *xram_, const uint32_t *xpt_)
+{
+    if (xv_collision_traversal_mode && xv_ct_node2(c, xram_, xpt_)) return;
+'''+fallback+'''    return;
+}
+#endif
+'''
+        call='    xv_ct_node2_block_00087E10(c, xram_, xpt_);\n    goto L_00087E68;\n'
+        body=body[:first]+'#ifdef XV_NATIVE_COLLISION_TRAVERSAL\n'+call+'#else\n'+initial+'#endif\n'+ \
+            'L_00087E20:\n#ifdef XV_NATIVE_COLLISION_TRAVERSAL\n'+call+'#else\n'+ \
+            original[len('L_00087E20:\n'):]+'#endif\n'+body[end:]
+        # No FP operation remains in the recursive shell when ON. Otherwise
+        # GCC hoists integer flag-store constants into saved VFP registers,
+        # growing every recursive frame despite outlining the FP region.
+        signature='void f_00087E10(xctx *restrict c)'
+        assert body.count(signature)==1
+        body=body.replace(signature,'#if defined(XV_NATIVE_COLLISION_TRAVERSAL) && defined(__arm__)\n'
+            '__attribute__((target("general-regs-only"), optimize("Os")))\n#endif\n'+signature,1)
+        return helper+body
+    else:
+        assert body.count('X_PREEMPT()') == 4
+        for label in ('L_00087F94:','L_00087F0F:','L_00087F9B:'):
+            assert label in body
+        start='    /* 00087EE6 '
+        entry=('''#ifdef XV_NATIVE_COLLISION_TRAVERSAL
+    if (xv_collision_traversal_mode) {
+        unsigned ct_next_ = xv_ct_node3(c, xram_, xpt_);
+        if (ct_next_ == 1) goto L_00087F94;
+        if (ct_next_ == 2) goto L_00087F0F;
+        if (ct_next_ == 3) goto L_00087F9B;
     }
-    pre = '#ifdef XV_NATIVE_COLLISION_TRAVERSAL\n#include "kernel/xk_collision_traversal.h"\n'
-    pre += '#define CT_REG(i) ct_r##i\n'
-    pre += '#define CT_SAVE() do { '+''.join(f'c->r[{i}]=ct_r{i};' for i in range(8))+' } while (0)\n'
-    pre += '#define CT_LOAD() do { '+''.join(f'ct_r{i}=c->r[{i}];' for i in range(8))+' } while (0)\n'
-    for macro, value in macros.items():
-        name = macro.split('(')[0]
-        pre += f'#pragma push_macro("{name}")\n#undef {name}\n#define {macro} {value}\n'
-    name = f'xv_collision_traversal_{address:08X}'
-    pre += f'static inline __attribute__((always_inline)) void {name}(xctx *restrict c, uint8_t *ct_arena, const uint32_t *ct_pages, uint8_t *ct_image)\n{{\n' + roots + native + '}\n'
-    for macro in reversed(macros):
-        pre += f'#pragma pop_macro("{macro.split("(")[0]}")\n'
-    pre += '#undef CT_SAVE\n#undef CT_LOAD\n#undef CT_REG\n#endif\n'
-    dispatch = ('#ifdef XV_NATIVE_COLLISION_TRAVERSAL\n'
-                f'    if (xv_collision_traversal_mode) {{ {name}(c, xram_, xpt_, imgb_); return; }}\n'
-                '#endif\n')
-    return pre + body.replace(label, dispatch + label, 1)
+#endif
+''')
+    assert body.count(start)==2, 'first/loop-copy drift'
+    body=body.replace(start,entry+start)
+    if address==0x87EA0:
+        label='L_00087FE7:\n'
+        assert body.count(label)==1 and '    /* 000880E1 ' in body
+        body=body.replace('    /* 000880E1 ', '#ifdef XV_NATIVE_COLLISION_TRAVERSAL\nL_xv_ct_projection_done:\n#endif\n    /* 000880E1 ',1)
+        body=body.replace(label,label+'''#ifdef XV_NATIVE_COLLISION_TRAVERSAL
+    if (xv_collision_traversal_mode && xv_ct_project(c, xram_, xpt_)) goto L_xv_ct_projection_done;
+#endif
+''',1)
+    return '#ifdef XV_NATIVE_COLLISION_TRAVERSAL\n#include "kernel/xk_collision_traversal.h"\n#endif\n'+body

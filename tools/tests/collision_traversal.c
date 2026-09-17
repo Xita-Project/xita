@@ -19,6 +19,7 @@ xctx *const arm_context_ptr=&context;
 const unsigned layout[]={sizeof(xctx),offsetof(xctx,r),offsetof(xctx,st),offsetof(xctx,fsp),
  offsetof(xctx,fsw),offsetof(xctx,fcw),offsetof(xctx,preempt),offsetof(xctx,f_kind),offsetof(xctx,f_bits),offsetof(xctx,xmm)};
 unsigned ct_site,ct_yields,ct_events,ct_mutation,ct_entry,ct_seen;
+unsigned ct_alias,ct_projection_checks,ct_projection_accepted,ct_projection_declined;
 uint32_t ct_original_pages[PAGES],ct_alternate_pages[PAGES];
 #define original_pages ct_original_pages
 #define alternate_pages ct_alternate_pages
@@ -38,6 +39,9 @@ static void hash(const void *p,unsigned n)
 {const uint8_t *b=p;for(unsigned i=0;i<n;i++)ct_events=(ct_events^b[i])*16777619u;}
 void ct_observe_entry(xctx *c,unsigned address)
 {hash(&address,sizeof address);hash(c,sizeof *c);}
+void ct_projection_result(unsigned admitted)
+{if(admitted)ct_projection_accepted++;else ct_projection_declined++;
+ if(ct_alias){ct_projection_checks++;if(admitted)abort();}}
 void __wrap_xv_preempt(xctx *c)
 {
     if(++ct_yields>100000)abort();
@@ -62,6 +66,7 @@ void __wrap_xv_preempt(xctx *c)
             X_M32(c->r[4]+12)^=1;
         }break;
     case 6:if(ct_site==0x87f8d){c->r[0]=0;c->r[2]=0;}break;
+    case 7:if(ct_site==0x87f96)c->r[0]^=1;break;
     }
 }
 void arm_prepare(unsigned depth,unsigned variant,unsigned budget)
@@ -119,7 +124,66 @@ void arm_prepare(unsigned depth,unsigned variant,unsigned budget)
     context.fsp=(variant>>8)&7;context.preempt=budget;
     ct_entry=(variant>>11)&3;if(ct_entry==3)ct_entry=0;
     if(ct_entry){context.r[1]=Q;context.r[2]=0;}
-    ct_mutation=((variant>>14)&7)%7;ct_site=ct_yields=ct_seen=0;ct_events=2166136261u;
+    ct_mutation=(variant>>14)&7;ct_site=ct_yields=ct_seen=0;ct_events=2166136261u;
+    ct_alias=(variant>>26)&3;ct_projection_checks=ct_projection_accepted=ct_projection_declined=0;
+    if(ct_alias){
+        ct_entry=1;ct_mutation=0;context.r[1]=Q;context.r[2]=0x80000000u;context.r[4]=SP;
+        unsigned input=SP-16;
+        if(ct_alias==2){original_pages[C>>12]=original_pages[input>>12];input=C+(input&4095u);}
+        if(ct_alias==3)input=C+0xffe;
+        const float values[3]={.125f,.25f,.5f};x_guest_write_pages(input,values,sizeof values);put(Q+0xc,input);
+        put(SP,0xdeadbeef);
+    }
+    /* Independent exact bit-pattern axis/FP fixtures. Normally enter a real
+     * leaf (and its real visitor); bit24 instead exercises full 88110. */
+    unsigned profile=variant>>28;
+    if(profile){
+        static const unsigned normals[15][3]={
+            {0x3f800000,0x40000000,0x3f000000}, /* Y */
+            {0x3f800000,0x3f000000,0x40000000}, /* Z */
+            {0x40000000,0x40000000,0x40000000}, /* ties Z */
+            {0x40000000,0x40000000,0x3f000000}, /* tie Y */
+            {0xc0000000,0x3f000000,0x3e800000}, /* negative X */
+            {0x3e800000,0xc0000000,0x3f000000}, /* negative Y */
+            {0x3e800000,0x3f000000,0xc0000000}, /* negative Z */
+            {0,0x80000000,0},                  /* signed zeros */
+            {1,0x80000001,0x007fffff},         /* subnormal decline */
+            {0x7f7fffff,0x3f000000,0x3e800000}, /* finite overflow stores */
+            {0x7fc12345,0x3f800000,0},         /* QNaN decline */
+            {0x7f812345,0x3f800000,0},         /* SNaN decline */
+            {0x7f800000,0x3f800000,0},         /* infinity decline */
+            {0x3f123456,0xbf345678,0x3f56789a}, /* rounded fractions */
+            {0x00800000,0x80800000,0x00800001}  /* minimum normals */
+        };
+        ct_alias=0;ct_mutation=0;context.r[4]=SP;
+        for(unsigned i=0;i<depth;i++)for(unsigned j=0;j<3;j++){
+            unsigned word=normals[profile-1][j];
+            /* Exercise opposite-sign magnitude ties and both zero signs
+             * across incoming TOP variants, without changing magnitudes. */
+            if((context.fsp&1u)&&j!=1)word^=0x80000000u;
+            put(P+i*16+j*4,word);
+        }
+        put(C,0x3df12345);put(C+4,0xbe234567);put(C+8,0x3e456789);
+        for(unsigned i=0;i<nodes2;i++){
+            put(T+i*20,normals[profile-1][0]);put(T+i*20+4,normals[profile-1][1]);
+            put(T+i*20+8,0x3dfedcba);
+        }
+        if(!(variant&(1u<<24))){
+            ct_entry=1;context.r[1]=Q;context.r[2]=0x80000000u;
+            /* All three reference encodings match. High index bits disappear
+             * under the original 32-bit <<4, so these are valid same-plane
+             * addresses and expose emitted orientation for both sign bits. */
+            put(Q+0x18,depth*3);
+            for(unsigned i=0;i<depth;i++){
+                put(Q+0x1c+i*12,0x80000000u|i);put(Q+0x20+i*12,i);put(Q+0x24+i*12,0x60000000u|i);
+            }
+        }
+        else ct_entry=0;
+        context.f_cf=(variant>>8)&1;context.f_of=(variant>>9)&1;
+        context.f_cf_override=(variant>>10)&1;context.f_of_override=(variant>>8)&1;
+        put(SP,0xdeadbeef);put(SP+4,C);flt(SP+8,.75f);
+        if(variant&(1u<<22))for(unsigned i=0;i<12;i++)X_M16(0x1eaf30+i*2)=i&1?3:0xffffu;
+    }
 }
 void arm_original(void)
 {if(ct_entry==0)original_00088110(&context);else if(ct_entry==1)original_00087EA0(&context);else original_00087E10(&context);}
@@ -134,6 +198,10 @@ int main(void)
     for(unsigned k=0;k<CT_CASES;k++){
         unsigned depth=(unsigned[]){1,3,8,16}[k%4],variant=k*104729u,budget=(k%3)?1:100000;
         if(k==1){depth=16;variant=(5u<<14)|4;budget=1;}
+        if(k>=2&&k<8){depth=3;variant=(1u+(k-2)%3)<<26;budget=(k&1)?1:100000;}
+        if(k>=8&&k<38){depth=3;variant=((1u+(k-8)%15)<<28)|((k>=23)?1u<<24:0);budget=(k&1)?1:100000;}
+        if(k==38){depth=3;variant=(7u<<14)|8;budget=1;}
+        if(k==39){depth=3;variant=(1u<<28)|(1u<<22);budget=100000;}
         if(getenv("CT_TRACE"))fprintf(stderr,"case%u d%u v%u b%u\n",k,depth,variant,budget);
         arm_prepare(depth,variant,budget);xctx initial=context;memcpy(before,g_xram,ARENA);
         uint32_t pages[PAGES];memcpy(pages,original_pages,sizeof pages);
@@ -144,6 +212,16 @@ int main(void)
         context=initial;memcpy(g_xram,before,ARENA);memcpy(original_pages,pages,sizeof pages);
         memset(alternate_pages,0,sizeof alternate_pages);g_xpt=original_pages;ct_site=ct_yields=ct_seen=0;ct_events=2166136261u;
         feclearexcept(FE_ALL_EXCEPT);arm_candidate();int cfp=fetestexcept(FE_ALL_EXCEPT);
+#ifdef CT_ALIAS_PROBES
+        if(xv_collision_traversal_enabled()){
+            if(ct_alias)assert(ct_projection_checks);
+            if(k>=8&&k<23){
+                unsigned profile=variant>>28;
+                if(profile==9||profile==11||profile==12||profile==13)assert(ct_projection_declined&&!ct_projection_accepted);
+                else assert(ct_projection_accepted);
+            }
+        }
+#endif
         if(memcmp(&context,&expected_context,sizeof context)){
             fprintf(stderr,"context case%u\n",k);for(unsigned i=0;i<sizeof context;i++)if(((uint8_t*)&context)[i]!=((uint8_t*)&expected_context)[i])fprintf(stderr,"byte%u expected%02x got%02x\n",i,((uint8_t*)&expected_context)[i],((uint8_t*)&context)[i]);abort();}
         if(memcmp(g_xram,expected,ARENA)){for(unsigned i=0;i<ARENA;i++)if(g_xram[i]!=expected[i]){fprintf(stderr,"memory case%u at%x expected%02x got%02x\n",k,i,expected[i],g_xram[i]);break;}abort();}
