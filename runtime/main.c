@@ -1642,6 +1642,16 @@ static int xv_pump_retire(void)
     __atomic_store_n(&g_frame_completed,ticket,__ATOMIC_RELEASE);
     xv_frame_events_signal(&g_frame_events,XV_FRAME_COMPLETED);
     if (++g_retired_count == 60) {
+#ifdef XV_NATIVE_COLLISION_VERTICES
+        /* Passive observations only: no reset, mode change or guest drain. */
+        extern unsigned xv_collision_vertices_count;
+        extern int xv_collision_vertices_enabled(void);
+        static unsigned last_collision_vertices;
+        unsigned vertices=__atomic_load_n(&xv_collision_vertices_count,__ATOMIC_RELAXED);
+        XV_LOG("[collision-vertices] enabled %d; %u admissions since last report; cumulative %u (asynchronous snapshot)\n",
+            xv_collision_vertices_enabled(),vertices-last_collision_vertices,vertices);
+        last_collision_vertices=vertices;
+#endif
         XV_LOG("[frame-retire] 60 frames: completion latency %.3f ms/frame; max pending %u; GPU notification retirement (overlaps guest/submission)\n",
             g_completion_us / 60000.0, g_max_pending);
 #if XV_GPU_PACKET_TIMING
@@ -2065,6 +2075,10 @@ int main(int argc, char *argv[])
     xv_log_memory_budget("boot");
     xv_load_settings();
     (void)xv_log_async_start(); /* selected build default, after environment/config */
+#ifdef XV_NATIVE_COLLISION_VERTICES
+    { extern int xv_collision_vertices_enabled(void);
+      XV_LOG("[collision-vertices] process-start mode %d; gameplay selection fixed for this launch\n",xv_collision_vertices_enabled()); }
+#endif
 
     uint64_t gfx_started = sceKernelGetProcessTimeWide();
     if (xv_gfx_init() != 0) {           /* GXM first: sceGxmMapMemory needs it live */

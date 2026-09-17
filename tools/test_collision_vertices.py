@@ -91,11 +91,14 @@ def main():
     for n in ['xbe','manifest','out']:p.add_argument('--'+n,type=Path,required=True)
     p.add_argument('--sanitize',action='store_true');p.add_argument('--arm',action='store_true');p.add_argument('--fp-model',action='store_true',help='Host-only model of unavailable native trap controls; tests exact continuation branches')
     p.add_argument('--emit-only',action='store_true',help='Validate the owned image and emit private full-function fragments without executing fixtures')
+    p.add_argument('--startup',action='store_true',help='Host: run the generated candidate enabled at process start without initializing runtime control')
     a=p.parse_args()
     if a.arm and a.fp_model:p.error('--fp-model is host only')
+    if a.arm and a.startup:p.error('--startup is host only')
     a.out.mkdir(parents=True,exist_ok=False);source=generate(a)
     if a.emit_only:return
     if a.arm:return arm(a,source)
     cmd=[os.environ.get('CC','cc'),'-O1' if a.sanitize else '-O2','-g1','-std=gnu11','-fno-strict-aliasing','-DXV_NATIVE_COLLISION_VERTICES','-I'+str(ROOT/'recomp'),*(['-DCOLLISION_VERTICES_FP_MODEL'] if a.fp_model else []),*(['-fsanitize=address,undefined','-fno-omit-frame-pointer','-no-pie'] if a.sanitize else []),str(source),str(ROOT/'tools/tests/collision_vertices.c'),str(ROOT/'recomp/kernel/xk_collision_vertices_control.c'),'-Wl,--wrap=xv_preempt','-lm','-pthread','-o',str(a.out/'test')]
+    if a.startup:cmd[1:1]=['-DCOLLISION_VERTICES_STARTUP','-DXV_NATIVE_COLLISION_VERTICES_DEFAULT=1']
     (a.out/'command.json').write_text(json.dumps(cmd,indent=2)+'\n');subprocess.run(cmd,check=True);subprocess.run([str(a.out/'test')],check=True,timeout=120)
 if __name__=='__main__':main()

@@ -49,8 +49,20 @@ an executing guest context or make an existing data race safe.
 
 ## Control and integration
 
-Build with `XV_NATIVE_COLLISION_VERTICES=1`. The runtime module starts OFF and
-has these APIs:
+Build with `XV_NATIVE_COLLISION_VERTICES=1`. The runtime module starts OFF unless
+`XV_NATIVE_COLLISION_VERTICES_DEFAULT=1` is also selected. That build option
+initializes the mode before any threads start; admission and cleanup do not
+require runtime control initialization. Only 0 and 1 are valid. The build stamp
+tracks both options so changing either recompiles the affected objects.
+
+The gameplay candidate uses startup ON and a complete application restart.
+Startup logging identifies the mode, and ordinary frame reports observe the
+atomic cumulative admission counter without resetting it, toggling the mode,
+or draining guest work. These asynchronous snapshots prove that gameplay uses
+the helper; they do not measure the time saved by it. No selector-44 benchmark
+is exposed by this candidate.
+
+The module also has these optional control APIs:
 
 | API | Contract |
 | --- | --- |
@@ -64,18 +76,13 @@ has these APIs:
 Control checks call `xv_object_math_report_check()` when linked and reject an
 active helper scope. Joining worker jobs alone is insufficient: the object
 pass must have finished and cleared its owner as well as its count/running
-state. The established drained Present path after the completed pass is the
-intended boundary. The selector-44 integration should drain presentation and
-initialize immediately before `xv_benchmark_step`, which checks availability
-before applying optimizations. Once initialized, defer mode changes and counter
-takes while `control_ready()` is false. Defer control boundaries outside timed
-arms, or mark an interrupted trial noncomparable before deferred restoration;
-continue normal measured-frame accounting. Blindly skipping measured-frame
-steps would bias FPS. Do not yield between readiness and control. A different
-guest fiber may reach Present while one retains a helper scope; finishing an
-object pass does not rule that out. Restore the exact incoming mode on
-completion and failure, deferring restoration too while a scope remains held.
-Controller/main/client files are deliberately outside this patch.
+state. GPU retirement and `control_ready()` do not establish this condition:
+another guest fiber can reach Present while an object pass remains open.
+The proposed selector-44 integration is parked until this boundary is proven.
+Its host fixtures cannot establish production scheduler invariants. Ordinary
+gameplay does not call `init`, `override`, or `calls`; startup selection avoids
+live control changes entirely. `available()` remains false during this mode
+because it reports control initialization, not helper execution.
 
 The control module does not independently stop workers from starting: callers
 must honor the existing drained scheduling boundary. The helper itself may run
@@ -146,6 +153,14 @@ work, nonfatal readiness while the same owner retains a scope (modeling a
 suspended guest fiber), active-scope rejection, cleanup returns, two native callers with 20,000
 exact admissions, take/reset and negative restore. The control stress tests
 scope/counter concurrency; it does not invent shared guest-query ownership.
+
+The startup candidate additionally runs the actual generated region and full
+function without ever initializing control or changing mode. A separate
+two-thread control test exercises 20,001 admissions and cleanup while control
+remains uninitialized, under ASan/UBSan and TSan. These are local correctness
+checks, not FPS benchmarks. Prior runtime-toggle results remain limited to
+their recorded scene and state; normal gameplay after a fresh launch is the
+current hardware validation method requested by the user.
 
 Representative ARM instruction counts, normal FP mode and budget 100,000:
 

@@ -34,6 +34,17 @@ static void cleanup_return(void)
 int main(void)
 {
     struct rlimit r={0,0};setrlimit(RLIMIT_CORE,&r);
+#ifdef COLLISION_VERTICES_STARTUP
+    assert(!xv_collision_vertices_available()&&xv_collision_vertices_enabled());
+    assert(!xv_collision_vertices_control_ready());
+    cleanup_return();
+    pthread_t a,b;assert(!pthread_create(&a,0,helper,0));assert(!pthread_create(&b,0,helper,0));
+    pthread_join(a,0);pthread_join(b,0);
+    assert(__atomic_load_n(&xv_collision_vertices_count,__ATOMIC_RELAXED)==20001);
+    assert(__atomic_load_n(&xv_collision_vertices_state,__ATOMIC_ACQUIRE)==1);
+    assert(!xv_collision_vertices_available()&&!xv_collision_vertices_control_ready());
+    puts("PASS startup ON, cleanup and two native callers without control initialization");
+#else
     assert(!xv_collision_vertices_available()&&!xv_collision_vertices_enabled());
     assert(!xv_collision_vertices_control_ready());
     assert(!xv_collision_vertices_begin());dies(override);
@@ -55,4 +66,5 @@ int main(void)
     xv_collision_vertices_override(-1);assert(!xv_collision_vertices_enabled());
     assert(!xv_collision_vertices_begin()&&!xv_collision_vertices_calls());
     puts("PASS default OFF, drained/bound owner, nonfatal suspended-scope deferral, held-scope rejection, cleanup, two native callers, exact take/reset and negative restore");
+#endif
 }

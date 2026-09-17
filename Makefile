@@ -438,6 +438,27 @@ ifeq ($(XV_NATIVE_COLLISION_VERTICES),1)
 RECOMP_CFLAGS += -DXV_NATIVE_COLLISION_VERTICES
 CFLAGS += -DXV_NATIVE_COLLISION_VERTICES
 endif
+XV_NATIVE_COLLISION_VERTICES_DEFAULT ?= 0
+ifneq ($(words $(XV_NATIVE_COLLISION_VERTICES_DEFAULT)),1)
+$(error XV_NATIVE_COLLISION_VERTICES_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_COLLISION_VERTICES_DEFAULT),0 1),$(XV_NATIVE_COLLISION_VERTICES_DEFAULT))
+$(error XV_NATIVE_COLLISION_VERTICES_DEFAULT must be 0 or 1)
+endif
+$(RECOMP_BUILD)/kernel/xk_collision_vertices_control.o: RECOMP_CFLAGS += -DXV_NATIVE_COLLISION_VERTICES_DEFAULT=$(XV_NATIVE_COLLISION_VERTICES_DEFAULT)
+COLLISION_VERTEX_HOOK_SRCS := $(shell grep -l XV_NATIVE_COLLISION_VERTICES $(XITA_GUEST_SRCS) 2>/dev/null)
+COLLISION_VERTEX_HOOK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(COLLISION_VERTEX_HOOK_SRCS))
+.PHONY: force-collision-vertices-config
+force-collision-vertices-config:
+$(RECOMP_BUILD)/collision-vertices.config: force-collision-vertices-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_NATIVE_COLLISION_VERTICES)),1,0) $(XV_NATIVE_COLLISION_VERTICES_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(COLLISION_VERTEX_HOOK_OBJS): recomp/kernel/xk_collision_vertices.h
+$(COLLISION_VERTEX_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_collision_vertices_control.o: $(RECOMP_BUILD)/collision-vertices.config
+$(BUILD)/runtime/main.o: $(RECOMP_BUILD)/collision-vertices.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/collision-vertices.config
 ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_MODEL_PALETTE
 CFLAGS += -DXV_NATIVE_MODEL_PALETTE

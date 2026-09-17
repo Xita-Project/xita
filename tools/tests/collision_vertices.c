@@ -14,6 +14,19 @@ xctx *const arm_context_ptr=&context;
 const unsigned layout[]={sizeof(xctx),offsetof(xctx,r),offsetof(xctx,st),offsetof(xctx,fsp),
  offsetof(xctx,fsw),offsetof(xctx,fcw),offsetof(xctx,preempt),offsetof(xctx,f_kind),offsetof(xctx,f_bits),offsetof(xctx,xmm)};
 unsigned vertex_yields,vertex_events,vertex_mutation,vertex_fp_block;
+#ifdef COLLISION_VERTICES_STARTUP
+/* Exercise the real generated path without initializing control or toggling
+ * its mode. Observe cumulative admissions without resetting production state. */
+static unsigned last_admissions;
+static unsigned take_admissions(void)
+{
+    assert(!xv_collision_vertices_available()&&!xv_collision_vertices_control_ready());
+    unsigned now=__atomic_load_n(&xv_collision_vertices_count,__ATOMIC_RELAXED);
+    unsigned delta=now-last_admissions;last_admissions=now;return delta;
+}
+#else
+#define take_admissions xv_collision_vertices_calls
+#endif
 void original_collision_vertices(xctx *);
 void candidate_collision_vertices(xctx *);
 void original_full_vertices(xctx *);
@@ -56,7 +69,11 @@ void __wrap_xv_preempt(xctx *c)
 }
 void arm_prepare(unsigned n,unsigned variant,unsigned budget)
 {
+#ifdef COLLISION_VERTICES_STARTUP
+    assert(xv_collision_vertices_enabled()&&!xv_collision_vertices_available());
+#else
     xv_collision_vertices_init();xv_collision_vertices_override(1);(void)xv_collision_vertices_calls();
+#endif
     for(unsigned i=0;i<PAGES;i++)g_xpt[i]=(i^1)*4096;
     memset(g_xram,0x33,ARENA);memset(&context,0xa5,sizeof context);
     uint32_t sp=0x6000+(variant&3),center=0x18000+(variant&3);
@@ -116,9 +133,9 @@ int main(void)
         context=initial;memcpy(g_xram,before,ARENA);memcpy(g_xpt,pages,sizeof pages);vertex_yields=0;vertex_events=2166136261u;vertex_fp_block=initial_fp;
         arm_candidate();
 #ifdef COLLISION_VERTICES_FP_MODEL
-        assert(xv_collision_vertices_calls()==!initial_fp);
+        assert(take_admissions()==!initial_fp);
 #else
-        assert(xv_collision_vertices_calls()==1);
+        assert(take_admissions()==1);
 #endif
         if(memcmp(&context,&expected_context,sizeof context)){
             fprintf(stderr,"context case %u\n",k);for(unsigned i=0;i<sizeof context;i++)if(((uint8_t*)&context)[i]!=((uint8_t*)&expected_context)[i])fprintf(stderr,"byte%u expected%02x got%02x\n",i,((uint8_t*)&expected_context)[i],((uint8_t*)&context)[i]);abort();}
@@ -137,18 +154,29 @@ int main(void)
         unsigned packet=X_M32(QUERY+0x14);
         for(unsigned j=0;j<256;j++){put(packet+4+j*4,0x100+j);put(packet+0x408+j*4,0x200+j);}
         put(packet,k%5?0:256);put(packet+0x404,k%7?0:256);
+#ifndef COLLISION_VERTICES_STARTUP
         if(k&2)xv_collision_vertices_override(0);
+#endif
         xctx initial=context;memcpy(before,g_xram,ARENA);memcpy(pages,g_xpt,sizeof pages);
         original_full_vertices(&context);xctx expected_context=context;
         memcpy(expected,g_xram,ARENA);memcpy(expected_pages,g_xpt,sizeof pages);
         unsigned ey=vertex_yields,eh=vertex_events;
         context=initial;memcpy(g_xram,before,ARENA);memcpy(g_xpt,pages,sizeof pages);vertex_yields=0;vertex_events=2166136261u;
         candidate_full_vertices(&context);
-        assert(xv_collision_vertices_calls()==!(k&2));
+#ifdef COLLISION_VERTICES_STARTUP
+        assert(take_admissions()==1);
+#else
+        assert(take_admissions()==!(k&2));
+#endif
         assert(!memcmp(&context,&expected_context,sizeof context));assert(!memcmp(g_xram,expected,ARENA));
         assert(!memcmp(g_xpt,expected_pages,sizeof pages));assert(vertex_yields==ey&&vertex_events==eh);
     }
+#ifdef COLLISION_VERTICES_STARTUP
+    assert(__atomic_load_n(&xv_collision_vertices_state,__ATOMIC_RELAXED)==1);
+    printf("PASS 128 full86F50 startup ON comparisons without control initialization or mode changes\n");
+#else
     printf("PASS 128 full86F50 ON/OFF integration comparisons, including original later paths and edge-call observations\n");
+#endif
     free(g_xram);free(g_xpt);free(before);free(expected);return 0;
 }
 #endif

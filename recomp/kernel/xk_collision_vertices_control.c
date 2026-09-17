@@ -16,7 +16,16 @@ static void bind_owner(void){owner_thread=pthread_self();}
 static int is_owner(void){return pthread_equal(owner_thread,pthread_self());}
 #endif
 extern void xv_object_math_report_check(void) __attribute__((weak));
-unsigned xv_collision_vertices_state, xv_collision_vertices_count;
+#ifndef XV_NATIVE_COLLISION_VERTICES_DEFAULT
+#define XV_NATIVE_COLLISION_VERTICES_DEFAULT 0
+#endif
+#if XV_NATIVE_COLLISION_VERTICES_DEFAULT != 0 && XV_NATIVE_COLLISION_VERTICES_DEFAULT != 1
+#error XV_NATIVE_COLLISION_VERTICES_DEFAULT must be 0 or 1
+#endif
+/* Process-start selection precedes all guest/worker threads. No live control
+ * binding is needed for ordinary admission and cleanup. */
+unsigned xv_collision_vertices_state=XV_NATIVE_COLLISION_VERTICES_DEFAULT;
+unsigned xv_collision_vertices_count;
 static unsigned ready;
 static void drained(void)
 {
