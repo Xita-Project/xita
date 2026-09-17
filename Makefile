@@ -157,6 +157,14 @@ XV_OWNER_PHASE ?= 0
 XV_OWNER_PHASE_DEFAULT ?= 0
 XV_SCENE_PARTITION ?= 0
 XV_SCENE_BUCKET0_DETAIL ?= 0
+# Ordered portal register/flag caching, selected only in its regenerated unit.
+XV_NATIVE_VISIBILITY_PORTAL_LOOP ?= 0
+ifneq ($(words $(XV_NATIVE_VISIBILITY_PORTAL_LOOP)),1)
+$(error XV_NATIVE_VISIBILITY_PORTAL_LOOP must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_VISIBILITY_PORTAL_LOOP),0 1),$(XV_NATIVE_VISIBILITY_PORTAL_LOOP))
+$(error XV_NATIVE_VISIBILITY_PORTAL_LOOP must be 0 or 1)
+endif
 ifneq ($(words $(XV_SCENE_BUCKET0_DETAIL)),1)
 $(error XV_SCENE_BUCKET0_DETAIL must be 0 or 1)
 endif
@@ -208,6 +216,13 @@ force-scene-bucket0-detail-config:
 $(BUILD)/scene-bucket0-detail.config: force-scene-bucket0-detail-config
 	@mkdir -p $(BUILD)
 	@printf '%s\n' '$(XV_SCENE_BUCKET0_DETAIL)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+.PHONY: force-native-visibility-portal-config
+force-native-visibility-portal-config:
+$(BUILD)/native-visibility-portal.config: force-native-visibility-portal-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_NATIVE_VISIBILITY_PORTAL_LOOP)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/scene-partition.config: force-scene-partition-config
@@ -388,6 +403,11 @@ LIBS      += -lSceLibKernel_stub -lSceTouch_stub -lm
 # (recomp/, linked as librecomp.a) and the GXM UI bridge; see runtime/xv_boot.c / runtime/xv_ui_gxm.c.
 RECOMP    ?= 0
 GAME_PROFILE ?= halo_ce_3925
+ifeq ($(XV_NATIVE_VISIBILITY_PORTAL_LOOP),1)
+ifneq ($(RECOMP):$(GAME_PROFILE),1:halo_ce_3925)
+$(error XV_NATIVE_VISIBILITY_PORTAL_LOOP requires RECOMP=1 GAME_PROFILE=halo_ce_3925)
+endif
+endif
 ifeq ($(XV_SCENE_BUCKET0_DETAIL),1)
 ifneq ($(RECOMP):$(XV_OWNER_PHASE):$(XV_SCENE_PARTITION):$(GAME_PROFILE),1:1:1:halo_ce_3925)
 $(error XV_SCENE_BUCKET0_DETAIL requires RECOMP=1 XV_OWNER_PHASE=1 XV_SCENE_PARTITION=1 GAME_PROFILE=halo_ce_3925)
@@ -785,6 +805,20 @@ $(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o: RECOMP_CFLAGS +
 endif
 $(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(BUILD)/scene-bucket0-detail.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(BUILD)/scene-bucket0-detail.config
+# No guest header or global guest flags change for this optional loop.
+VISIBILITY_PORTAL_SRCS := $(shell rg -l 'XV_NATIVE_VISIBILITY_PORTAL_LOOP_SCOPE:' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+VISIBILITY_PORTAL_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(VISIBILITY_PORTAL_SRCS))
+ifeq ($(XV_NATIVE_VISIBILITY_PORTAL_LOOP),1)
+ifneq ($(words $(VISIBILITY_PORTAL_SRCS)),1)
+$(error XV_NATIVE_VISIBILITY_PORTAL_LOOP requires exactly one selectively regenerated guest unit)
+endif
+ifneq ($(words $(shell rg -o 'XV_NATIVE_VISIBILITY_PORTAL_LOOP_SCOPE:' $(VISIBILITY_PORTAL_SRCS) 2>/dev/null)),1)
+$(error XV_NATIVE_VISIBILITY_PORTAL_LOOP requires the selectively regenerated primary 532E0 loop)
+endif
+$(VISIBILITY_PORTAL_OBJS): RECOMP_CFLAGS += -DXV_NATIVE_VISIBILITY_PORTAL_LOOP=1
+endif
+$(VISIBILITY_PORTAL_OBJS): $(BUILD)/native-visibility-portal.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(BUILD)/native-visibility-portal.config
 ifeq ($(XV_NATIVE_BSP_SPHERE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_BSP_SPHERE
 endif
