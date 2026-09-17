@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 from tools import prototype_collision_query as prototype
 from tools import gen_native_solver_fusion as solver
 from tools import query_f32_primitives as query_f32
+from tools import query_semantic_leaf as query_semantic
 
 FEATURE = 'XV_NATIVE_QUERY_FUSION'
 PREREQUISITES = ('XV_NATIVE_BSP_SPHERE', 'XV_NATIVE_COLLISION_VERTICES',
@@ -75,7 +76,7 @@ def replace_if_changed(path, text):
     return True
 
 
-def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inline=0):
+def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inline=0, query_semantic_leaf=0):
     if not __debug__:
         raise RuntimeError('Refusing optimized Python: generation safety checks require assertions.')
     recomp_dir = Path(recomp_dir).resolve()
@@ -83,6 +84,10 @@ def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inli
         raise ValueError('solver fusion must be 0 or 1')
     if query_f32_inline not in (0, 1):
         raise ValueError('query f32 inline must be 0 or 1')
+    if query_semantic_leaf not in (0, 1):
+        raise ValueError('query semantic leaf must be 0 or 1')
+    if query_semantic_leaf and not query_f32_inline:
+        raise ValueError('query semantic leaf requires query f32 inline')
     # Validate even a previously generated caller against current owned-image
     # emission. The audited prototype also checks SHA, closure and shadow sinks.
     units = {i: (recomp_dir / f'code_{i:03d}.c').read_text() for i in (13, 16, 28)}
@@ -136,6 +141,11 @@ def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inli
         generated['query_fusion.c'], private_headers, canonical_headers = query_f32.generate(
             recomp_dir, generated['query_fusion.c'])
         generated.update(private_headers)
+    semantic_contract = None
+    if query_semantic_leaf:
+        generated['query_fusion.c'], semantic_headers, semantic_contract = query_semantic.generate(
+            generated['query_fusion.c'])
+        generated.update(semantic_headers)
     # Publication happens only after every input/output contract check passed.
     changed = [name for name, text in generated.items()
                if replace_if_changed(recomp_dir / name, text)]
@@ -148,6 +158,7 @@ def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inli
         caller_contract=contract, solver_enabled=solver_fusion,
         solver_contract=solver_contract, query_f32_inline=query_f32_inline,
         query_f32_header_sha256={name: digest(text) for name, text in canonical_headers.items()},
+        query_semantic_leaf=query_semantic_leaf, query_semantic_contract=semantic_contract,
         changed=changed)
     # A fresh receipt is also the build stamp. Write it after generated outputs,
     # including when their bytes were unchanged but an input was revalidated.
@@ -167,8 +178,9 @@ def main():
     parser.add_argument('--receipt', type=Path, required=True)
     parser.add_argument('--solver-fusion', type=int, choices=(0, 1), default=0)
     parser.add_argument('--query-f32-inline', type=int, choices=(0, 1), default=0)
+    parser.add_argument('--query-semantic-leaf', type=int, choices=(0, 1), default=0)
     args = parser.parse_args()
-    result = generate(args.xbe, args.manifest, args.recomp_dir, args.receipt, args.solver_fusion, args.query_f32_inline)
+    result = generate(args.xbe, args.manifest, args.recomp_dir, args.receipt, args.solver_fusion, args.query_f32_inline, args.query_semantic_leaf)
     print('query fusion: fixed 32 continuations; changed ' + (', '.join(result['changed']) or 'no source bytes'))
 
 
