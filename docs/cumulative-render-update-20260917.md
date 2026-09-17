@@ -106,3 +106,41 @@ scheduling benefit in these workloads. It is not a GPU-active-time measure or
 proof about every scene. Packed requests remain nonzero. All selected paths
 remain cumulative; the next performance work targets CPU query cost rather
 than assuming another synchronization win.
+
+## Ordered collision scan follow-up
+
+The next cumulative build adds `XV_QUERY_MEMBERSHIP_SCALAR=1` while retaining
+all fifteen preceding selections. Source `231a1af` produces runtime
+`d5f4f4eb8f142f37d547a10b3bb2eaca57c7962387e0babfdd78484fce252912`, installed
+and boot-confirmed in slot 0. The fifteen-path runtime remains in slot 1.
+Standard graphics are unchanged. The updater restarted Xita before the ordinary
+gameplay check; this is not a hot toggle or built-in benchmark.
+
+The scalar edge-membership loop reduces repeated translated integer/flag work
+while preserving original read order, complete observed state, callbacks and
+the enclosing actor transaction. The qualified whole-query fixtures show
+roughly 1–4.63% fewer instructions in relevant cases, with small regressions
+below 0.3% elsewhere. These are instruction counts, not hardware FPS gains.
+The [integration note](engineering/QUERY_MEMBERSHIP_SCALAR_INTEGRATION.md)
+records its guarded default-OFF wiring and correctness scope.
+
+The complete package build changes only `query_fusion.o`; rebuilt caller and
+solver objects, all other objects, assets and updater contract retain identity.
+The query object is byte-identical to the qualified production object. All
+1,588 package members remain, with only the executable and boot selection
+different. Repository defaults remain separate from this private cumulative
+gameplay build.
+
+Fresh-launch New001/Normal campaign smoke completed two pistol fire inputs,
+camera/strafe, forward/reverse movement and pause. Initial active reports are
+12.7–12.8 FPS at the same rounded checkpoint view, with varying live AI/draw
+counts. The saved log contains 1,716,924 bytes at receipt frame 12,676, no
+searched fault marker and zero logger errors/failed writes. The Vita is paused
+in campaign with neutral input. Paused tail reports are excluded from gameplay
+comparisons. All three packed shader variants initialized successfully.
+
+No combined FPS gain, stable 20 FPS, or resolution of historical long-session
+crashes is established. Blood Gulch driving and rocket/death behavior have not
+been repeated for this scalar follow-up; the preceding fifteen-path smoke is
+documented above. Retained texture-binding reuse and early depth preparation
+are the next cumulative retest, pending narrow startup/fixture checks.

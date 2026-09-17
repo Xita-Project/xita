@@ -8,12 +8,19 @@ Restarting means a new Xita process; it does not require rebooting the Vita.
 
 ## Current cumulative build
 
-The current fifteen-path runtime `f037ddb3…`, from source `79b067c`, is
-installed and boot-confirmed in slot 1. It keeps the twelve paths below and
+The current sixteen-path runtime `d5f4f4eb…`, from source `231a1af`, is
+installed and boot-confirmed in slot 0. It retains the fifteen selections below
+and adds exact ordered collision edge-membership reconstruction. The complete
+package changes only the query object; all other objects and assets retain
+identity. Standard graphics remain unchanged. Fresh-launch ordinary campaign
+firing/movement/pause completed without a searched fault or logger error.
+Initial active reports remain 12.7–12.8 FPS; no combined FPS gain is established.
+
+The preceding fifteen-path runtime `f037ddb3…`, from source `79b067c`, remains
+in slot 1 for rollback. It keeps the twelve paths below and
 adds packed layouts for three compatible vertex programs, one exact-state
 query arithmetic reconstruction, and ordered publication of completed query
-prefixes with retained-history protection. Standard graphics remain unchanged.
-The twelve-path parent stays in slot 0. Short ordinary campaign firing/movement and Blood Gulch plasma/vehicle checks
+prefixes with retained-history protection. Short ordinary campaign firing/movement and Blood Gulch plasma/vehicle checks
 complete without a searched fault or logger error. Initial campaign reports
 remain 12.7–12.8 FPS; a driving capture reaches 6 FPS on an unmatched route;
 no combined FPS gain is established. See the
@@ -30,7 +37,8 @@ The preceding twelve-path package, from source `e29a962`, adds query-only f32 he
 Its final query object exactly matches the qualified prototype; all other
 runtime, caller, solver and generic objects are unchanged. The package retains
 all assets and the existing updater contract. Runtime `2393a044…` was installed
-and boot-confirmed in slot 0; it now serves as the retained rollback.
+and boot-confirmed in slot 0; it is now retained locally, superseded on the
+device by the current build and fifteen-path rollback.
 Ordinary campaign fire inputs, camera/strafe, movement and pause completed
 without a searched fault marker or logger error. Initial settled reports are
 12.7 FPS. No matched gain/regression or stable 20 FPS is established. The
@@ -68,6 +76,16 @@ and no regression is reproduced. Record performance as unproven rather than
 calling it a speedup. This does not promote untested prototypes, known unsafe
 changes or debug instrumentation into the gameplay build. Repository defaults
 and broader release qualification remain separate decisions.
+
+Two retained rendering options are next for a cumulative fresh-launch trial:
+exact texture-binding reuse and early depth-only recording preparation. Older
+texture-cache timing was mixed, including a slower valley result; depth-only
+preparation was inconclusive. Neither has a recorded correctness exclusion.
+They currently require runtime environment selection, so unused Make variables
+would not enable them. Narrow startup selection and a stale texture-test
+extraction need checking before the combined trial. Preserve native/standard
+graphics and the current sixteen paths. This is a retest plan, not a claim that
+these two options are already active on the installed build.
 
 ## What the benchmark audit found
 
