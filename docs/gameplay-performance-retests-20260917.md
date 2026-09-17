@@ -8,16 +8,27 @@ Restarting means a new Xita process; it does not require rebooting the Vita.
 
 ## Current cumulative build
 
-The current sixteen-path runtime `d5f4f4eb…`, from source `231a1af`, is
-installed and boot-confirmed in slot 0. It retains the fifteen selections below
+The current eighteen-path runtime `b9000d48…`, from source `99c93cf`, is
+installed and boot-confirmed in slot 1. It retains the sixteen paths below and
+enables the existing exact texture-binding cache and early depth preparation
+at process start. The fresh launch confirms both modes ON and depth preparation
+available, with native resolution unchanged. Short ordinary campaign firing,
+movement and pause completed without a searched fault or logger error. Sampled
+active readings are 12.2–12.9 FPS with changing draw counts; no gain or regression
+is established. Depth preparation skips 19 texture preparations per frame in
+the sampled checkpoint windows. See the
+[startup integration](retained-render-startup-20260917.md) for the bounded checks.
+
+The preceding sixteen-path runtime `d5f4f4eb…`, from source `231a1af`, remains
+in slot 0 for rollback. It retains the fifteen selections below
 and adds exact ordered collision edge-membership reconstruction. The complete
 package changes only the query object; all other objects and assets retain
 identity. Standard graphics remain unchanged. Fresh-launch ordinary campaign
 firing/movement/pause completed without a searched fault or logger error.
 Initial active reports remain 12.7–12.8 FPS; no combined FPS gain is established.
 
-The preceding fifteen-path runtime `f037ddb3…`, from source `79b067c`, remains
-in slot 1 for rollback. It keeps the twelve paths below and
+The preceding fifteen-path runtime `f037ddb3…`, from source `79b067c`, is retained
+locally. It keeps the twelve paths below and
 adds packed layouts for three compatible vertex programs, one exact-state
 query arithmetic reconstruction, and ordered publication of completed query
 prefixes with retained-history protection. Short ordinary campaign firing/movement and Blood Gulch plasma/vehicle checks
@@ -38,7 +49,7 @@ Its final query object exactly matches the qualified prototype; all other
 runtime, caller, solver and generic objects are unchanged. The package retains
 all assets and the existing updater contract. Runtime `2393a044…` was installed
 and boot-confirmed in slot 0; it is now retained locally, superseded on the
-device by the current build and fifteen-path rollback.
+device by the current build and sixteen-path rollback.
 Ordinary campaign fire inputs, camera/strafe, movement and pause completed
 without a searched fault marker or logger error. Initial settled reports are
 12.7 FPS. No matched gain/regression or stable 20 FPS is established. The
@@ -77,15 +88,18 @@ calling it a speedup. This does not promote untested prototypes, known unsafe
 changes or debug instrumentation into the gameplay build. Repository defaults
 and broader release qualification remain separate decisions.
 
-Two retained rendering options are next for a cumulative fresh-launch trial:
+Two retained rendering options are now selected in the fresh-launch trial:
 exact texture-binding reuse and early depth-only recording preparation. Older
 texture-cache timing was mixed, including a slower valley result; depth-only
 preparation was inconclusive. Neither has a recorded correctness exclusion.
-They currently require runtime environment selection, so unused Make variables
-would not enable them. Narrow startup selection and a stale texture-test
-extraction need checking before the combined trial. Preserve native/standard
-graphics and the current sixteen paths. This is a retest plan, not a claim that
-these two options are already active on the installed build.
+Narrow default-OFF startup wiring preserves their runtime environment/config
+overrides; merely passing the old environment names as unused Make variables
+would not enable them. Startup selection and the repaired stale texture-test
+extraction have passed focused checks. Native/standard graphics and all sixteen
+preceding paths remain selected. The installed build confirms both modes ON
+and nonzero depth-preparation admission. Texture-binding skip counts were not
+enabled separately. Blood Gulch driving/combat and prolonged gameplay remain
+outstanding for this combination; this short campaign check does not settle them.
 
 ## What the benchmark audit found
 

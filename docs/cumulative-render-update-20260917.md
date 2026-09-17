@@ -144,3 +144,37 @@ crashes is established. Blood Gulch driving and rocket/death behavior have not
 been repeated for this scalar follow-up; the preceding fifteen-path smoke is
 documented above. Retained texture-binding reuse and early depth preparation
 are the next cumulative retest, pending narrow startup/fixture checks.
+
+## Retained rendering options combined
+
+Source `99c93cf` adds narrow startup defaults for the existing exact texture
+binding cache and early depth-only preparation. The private package selects
+both while retaining all sixteen previous paths. Repository defaults remain
+OFF, and explicit environment/config overrides retain their previous behavior.
+The [startup note](retained-render-startup-20260917.md) records focused
+configuration, descriptor, resolver, recording/replay and boundary checks.
+
+The complete package changes only `main.o` and `xv_d3d.o`; the other 91 objects,
+all assets and the updater contract retain identity. Runtime
+`b9000d48c5b10f61a83fa0af05138c1edd2cef5781eb05faeb0e2ebc79262829` is installed
+and boot-confirmed in slot 1; the sixteen-path runtime remains in slot 0.
+Fresh startup confirms `texture-cache 1 depth-prepare 1 available 1` and native
+960×544 rendering. Effective clocks remain CPU 444/GPU 222 MHz.
+
+This is the requested retest of compatible options whose prior timing was
+mixed or inconclusive. Neither the old timing deltas nor instruction savings
+are added together as an FPS estimate. The campaign load took longer in this
+observed run, but map/save progress continued and the original checkpoint
+loaded successfully; no loading timeout or crash was established.
+
+Ordinary campaign firing, camera/strafe, forward/reverse movement and pause
+completed. The final receipt is frame 13,417 with a 1,717,181-byte log, no searched
+fault marker and zero logger errors/failed writes. The Vita is paused with
+neutral input. Initial sampled active reports are 12.2–12.9 FPS at the same
+rounded checkpoint camera, with 142–168 draws and changing AI; no matched
+gain/regression or five-FPS improvement is established. Depth preparation
+actually skips 1,140 texture preparations per 60-frame report (19 per frame)
+in these active windows. Texture reuse is selected, but its separate binding-skip
+counter is not enabled. Paused tail reports are excluded from active comparisons.
+Blood Gulch combat/driving, rocket pickup/death and prolonged crash qualification
+remain outstanding for this combination. All eighteen selections remain enabled.
