@@ -19,7 +19,7 @@ enum { W = 640, H = 480, MAX_TARGETS = 4, MAX_VS = 64, MAX_FS = 128, MAX_TEX = 9
 typedef struct { uint64_t hash; const SceGxmProgram *gxp; SceGxmShaderPatcherId id; SceGxmVertexProgram *prog;
                  const SceGxmProgramParameter *c; unsigned c_count; uint8_t vregs[16]; unsigned nattr, stride; int missing; } vs_entry;
 typedef struct { uint64_t hash, key; const SceGxmProgram *gxp; SceGxmShaderPatcherId id; SceGxmFragmentProgram *prog;
-                 const SceGxmProgramParameter *psc, *fog, *atest, *texscale; int sampler[4]; const vs_entry *vs; int missing; } fs_entry;
+                 const SceGxmProgramParameter *psc, *fog, *atest, *texscale, *blendconst; int sampler[4]; const vs_entry *vs; int missing; } fs_entry;
 static vs_entry g_vs[MAX_VS]; static unsigned g_nvs;
 static fs_entry g_fs[MAX_FS]; static unsigned g_nfs;
 static uint64_t g_missing_logged[64]; static unsigned g_nmissing;
@@ -247,6 +247,7 @@ static fs_entry *get_fs(const h2_command_state *s, const menu_combiner *cb, cons
     e->fog = sceGxmProgramFindParameterByName(e->gxp, "xv_fogcolor");
     e->atest = sceGxmProgramFindParameterByName(e->gxp, "xv_atest");
     e->texscale = sceGxmProgramFindParameterByName(e->gxp, "xv_texscale");
+    e->blendconst = sceGxmProgramFindParameterByName(e->gxp, "xv_blendconst");
     for (unsigned u = 0; u < 4; ++u) {
         char name[8]; snprintf(name, sizeof name, "tex%u", u);
         const SceGxmProgramParameter *p = sceGxmProgramFindParameterByName(e->gxp, name);
@@ -362,9 +363,22 @@ int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
     SceGxmBlendInfo blend; memset(&blend, 0, sizeof blend);
     blend.colorMask = SCE_GXM_COLOR_MASK_ALL;
     uint32_t blend_key = 0;
+    float blendconst[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     if (s->setup[0x304 / 4]) {
         SceGxmBlendFactor sf, df; SceGxmBlendFunc eq;
-        if (!gl_factor(s->setup[0x344 / 4], &sf) || !gl_factor(s->setup[0x348 / 4], &df) || !gl_equation(s->setup[0x350 / 4], &eq)) {
+        uint32_t sfv = s->setup[0x344 / 4], dfv = s->setup[0x348 / 4];
+        /* GXM has no CONSTANT_COLOR factors: fold NV097 0x8001/0x8002 into the fragment output
+         * (xv_blendconst) and blend with ONE; a constant destination factor is left to the software path. */
+        if (sfv == 0x8001 || sfv == 0x8002) {
+            uint32_t bc = s->setup[0x34C / 4];
+            for (unsigned k = 0; k < 3; ++k) {
+                float v = ((bc >> (16 - 8 * k)) & 255) / 255.0f;
+                blendconst[k] = sfv == 0x8001 ? v : 1.0f - v;
+            }
+            sfv = 1;
+        }
+        if (dfv >= 0x8001 && dfv <= 0x8004) { flush_scene(); return -1; }
+        if (!gl_factor(sfv, &sf) || !gl_factor(dfv, &df) || !gl_equation(s->setup[0x350 / 4], &eq)) {
             sf = SCE_GXM_BLEND_FACTOR_SRC_ALPHA; df = SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA; eq = SCE_GXM_BLEND_FUNC_ADD;
         }
         blend.colorFunc = blend.alphaFunc = eq; blend.colorSrc = blend.alphaSrc = sf; blend.colorDst = blend.alphaDst = df;
@@ -463,6 +477,7 @@ int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
     if (fs->fog) GCHECK(sceGxmSetUniformDataF(fu, fs->fog, 0, 4, fog));
     if (fs->atest) GCHECK(sceGxmSetUniformDataF(fu, fs->atest, 0, 4, atest));
     if (fs->texscale) GCHECK(sceGxmSetUniformDataF(fu, fs->texscale, 0, 16, &scale[0][0]));
+    if (fs->blendconst) GCHECK(sceGxmSetUniformDataF(fu, fs->blendconst, 0, 4, blendconst));
     for (unsigned u = 0; u < 4; ++u)
         if (fs->sampler[u] >= 0 && tex[u]) GCHECK(sceGxmSetFragmentTexture(g_ctx, fs->sampler[u], &tex[u]->tex));
     GCHECK(sceGxmSetVertexStream(g_ctx, 0, vb));

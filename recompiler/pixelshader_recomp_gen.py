@@ -88,6 +88,7 @@ CUBE_2D_MASK = 0                     # bound 2D textures using the NV2A cube add
 CUBE_MODES = {"CUBEMAP", "DOT_RFLCT_DIFF", "DOT_RFLCT_SPEC", "DOT_STR_CUBE"}
 NONE_STAGE_ZERO = False   # H2 menu pipeline sets True: NONE stages read as zero
 TEXCOORD_SCALE = False    # H2 menu pipeline sets True: PROJECT2D samples scale by xv_texscale[i]
+BLEND_CONST = False       # H2 menu pipeline sets True: output rgb *= xv_blendconst (constant-colour blend factors)
 VARYINGS_AVAILABLE: Optional[Set[str]] = None   # --varyings: what the paired vertex program outputs
 
 
@@ -372,6 +373,10 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
         body.append("    float3 out_rgb = lerp(fog.rgb, r0.rgb, fog.a);")
         body.append("    float  out_a   = r0.a;")
     body.append('    // ---- alpha test (NV097_SET_ALPHA_TEST_ENABLE/FUNC/REF): xv_atest = (ref, func 0..7, enable, 0)\n    //      0 NEVER 1 LESS 2 EQUAL 3 LEQUAL 4 GREATER 5 NOTEQUAL 6 GEQUAL 7 ALWAYS  (NV097 0x200+n)\n    if (xv_atest.z > 0.5) {\n        float a_ = saturate(out_a); float r_ = xv_atest.x; float f_ = xv_atest.y;\n        bool pass_ = (f_ > 6.5) || (f_ > 3.5 && f_ < 4.5 && a_ > r_) || (f_ > 5.5 && f_ < 6.5 && a_ >= r_)\n                  || (f_ > 0.5 && f_ < 1.5 && a_ < r_) || (f_ > 2.5 && f_ < 3.5 && a_ <= r_)\n                  || (f_ > 1.5 && f_ < 2.5 && abs(a_ - r_) < 0.002) || (f_ > 4.5 && f_ < 5.5 && abs(a_ - r_) >= 0.002);\n        if (!pass_) discard;\n    }')
+    if BLEND_CONST:
+        # GXM has no CONSTANT_COLOR blend factors: the runtime folds NV097 factor 0x8001/0x8002 into
+        # this multiply (xv_blendconst = blend colour or 1 - blend colour) and blends with ONE.
+        body.append("    out_rgb *= xv_blendconst.rgb;")
     body.append("    return saturate(float4(out_rgb, out_a));")
     # Experimental combiner lowering. Keep full precision by default: changing
     # out_a and its inputs can alter alpha-test decisions even when the comparison
@@ -427,6 +432,8 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
     params.append("uniform float4 psc[18]")
     params.append("uniform float4 xv_fogcolor")
     params.append("uniform float4 xv_atest")
+    if BLEND_CONST:
+        params.append("uniform float4 xv_blendconst")
     if TEXCOORD_SCALE or any(t['mode'] == 'DOT_ST' for t in d['textures']):
         params.append("uniform float4 xv_texscale[4]")
     if any(t["mode"] in ("BUMPENVMAP", "BUMPENVMAP_LUM") for t in d["textures"]):

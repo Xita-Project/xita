@@ -36,6 +36,7 @@ def fragment_programs(log, outdir, vs_outputs):
     seen = {}
     gen.NONE_STAGE_ZERO = True      # a NONE stage reads as zero (the menu text program sums t2*c0 + t0*v0)
     gen.TEXCOORD_SCALE = True       # linear images are texel-addressed: runtime sets xv_texscale[i]
+    gen.BLEND_CONST = True          # CONSTANT_COLOR blend factors fold into xv_blendconst (GXM has none)
     for line in open(log, errors="replace"):
         m = INVENTORY.search(line)
         if not m or (m.group(3), m.group(2)) in seen:
