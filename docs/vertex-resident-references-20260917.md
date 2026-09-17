@@ -90,3 +90,34 @@ Different views cannot establish a performance comparison. This candidate may
 have little coverage in the expensive valley view; no saved measurement proves
 recoverable milliseconds or a whole-frame gain. The source audit and exact
 selected log windows are preserved in `remaining-stream-preparation-audit/`.
+
+## Cumulative ARM package
+
+The cumulative build retains the preceding 24 selected paths and uses startup
+`XV_VERTEX_RESIDENT_REFERENCES_DEFAULT=1`. Six actual ARM transitions confirm
+repeatable ON/OFF objects and no rebuild for an unchanged value. Only the
+uploader object differs from the preceding full package; 93 others are identical.
+OFF still includes the new mode branch and reporting, as noted above.
+
+Runtime: `b36116e6e002131c73b489a8897528e533715bd3c267bda735c1af226fbd7a07`
+(31,980,214 bytes). VPK:
+`1de3fe4ec17ed441480f4a45ace559089b91473641f5b6e1265c760ef46533ce`.
+The asset contract and 1,588 members are unchanged; only the executable and boot
+identity differ. Physical boot was confirmed in slot 0 at 22:17:58 UTC on
+September 17; the polygon/clip build remains in slot 1. New hardware admissions
+and performance are separate from this build and installation verification.
+
+The first Blood Gulch check confirms actual admission. One complete 60-frame
+report after movement contains 240 checks/hits and 1,080 comparison runs:
+4,910 KiB requested spans versus 822 KiB checked-group spans. Another initial
+view has zero eligible checks. Coverage is view-dependent; these counters are
+not CPU cycles, physical bus traffic or an FPS comparison. The observed 15.4 FPS
+view faces the nearby canyon wall; it must not be presented as a valley gain.
+
+A later open-valley/effects view has zero eligible new-branch checks, 265 draws
+per frame and about 14.3 ms of elapsed stream preparation inside 30.9 ms draw
+HLE. Its mixed movement/fire report is 6.3 FPS. This candidate cannot remove
+that view's dense/packed comparisons; it is not evidence that the earlier
+625 KiB estimate is recoverable. Whole-frame improvement remains unestablished.
+The short test exercised turns, movement and charged plasma release; it did not
+repeat campaign or a sustained drive on this exact build.
