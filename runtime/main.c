@@ -2105,6 +2105,10 @@ int main(int argc, char *argv[])
     if (net_result < 0) goto shutdown;
     xv_gfx_configure_resolution();
     xv_pipeline_configure(); /* Dashboard edits loaded; workers have not started. */
+#ifdef XV_NATIVE_OBJECT_COLLECT
+    { extern int xv_object_collect_enabled(void);
+      XV_LOG("[object-collect] process-start mode %d; startup default with explicit environment override\n",xv_object_collect_enabled()); }
+#endif
     { extern void xv_cutout_override(int); xv_cutout_override(0); }
     xv_frame_events_init(&g_frame_events,xv_quality_int("XV_FRAME_EVENTS",1,0,1));
     XV_LOG("frame handoff: %s\n",g_frame_events.id>=0 ? "event notifications" : "poll fallback");

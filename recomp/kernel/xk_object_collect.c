@@ -22,6 +22,13 @@ void f_001716F0(xctx *);
 
 enum { NONE = 0xFFFFFFFFu };
 
+#ifndef XV_NATIVE_OBJECT_COLLECT_DEFAULT
+#define XV_NATIVE_OBJECT_COLLECT_DEFAULT 0
+#endif
+#if XV_NATIVE_OBJECT_COLLECT_DEFAULT != 0 && XV_NATIVE_OBJECT_COLLECT_DEFAULT != 1
+#error XV_NATIVE_OBJECT_COLLECT_DEFAULT must be 0 or 1
+#endif
+
 /* Callers of 0x171F10 are not all proven to share one guard, so configuration
  * and diagnostic counters use atomic storage. Each walk tallies privately and
  * publishes once; a report is not a consistent snapshot of all four counts. */
@@ -34,7 +41,7 @@ static int collect_enabled(void)
     if (value >= 0) return value;
     const char *setting = getenv("XV_NATIVE_OBJECT_COLLECT");
     int expected = -1;
-    value = setting && atoi(setting) != 0;
+    value = setting ? atoi(setting) != 0 : XV_NATIVE_OBJECT_COLLECT_DEFAULT;
     __atomic_compare_exchange_n(&collect_active, &expected, value, 0,
                                 __ATOMIC_ACQ_REL, __ATOMIC_RELAXED);
     return __atomic_load_n(&collect_active, __ATOMIC_RELAXED) > 0;
