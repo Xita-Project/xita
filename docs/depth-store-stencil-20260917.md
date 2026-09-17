@@ -63,3 +63,33 @@ in the cumulative candidate; stable representative 20 FPS remains unmet.
 Evidence is private under the engine-restructure validation directory's
 `direct-cluster-query/depth-store-stencil/`: `installation.json`,
 `campaign-passive/result.json`, `campaign-analysis.json`, logs and screenshots.
+
+## Blood Gulch gameplay follow-up
+
+The same cumulative runtime subsequently started a solo match through the
+normal split-screen menu (profile `New002`, game type `New003`). The Ghost
+remains visible in both charged and released plasma-pistol screenshots.
+Warthog entry, forward/reverse motion near the wall, steering into the valley,
+driving across terrain, vehicle exit and pause all completed. Input was released;
+the boot receipt still identifies slot 1 and the same runtime, with no logger
+error or captured fault marker. This is a short smoke check; rocket pickup and
+explosion, repeated combat and longer crash qualification remain outstanding.
+
+Settled pre-driving reports admit 120 intermediate and 60 final read-only
+continuations per 60 frames, retaining 60 first stores. All 60 query prefixes
+are observed before final completion. This proves the paths are used in another
+scene; logical sample counts still do not measure physical bandwidth saved.
+
+Driving remains slow: screenshots show roughly 6–10 FPS, and one ordinary
+60-frame report records 160.9 ms game time plus 1.8 ms wait (6.1 FPS), including
+15.4 ms draw-HLE. Its object-job window reports 292 batches and 4,344,715 us batch
+time across 60 frames (about 72.4 ms/frame). These scopes overlap and cannot be
+added as exclusive CPU/GPU costs. The greater simulation batch count also makes
+this a different workload from the stationary campaign observation. There is no
+matching previous-build driving run here, so this establishes neither a gain
+nor a regression. It does show that stacking the current changes has not yet
+met the representative driving target.
+
+Private evidence: `bloodgulch-smoke.log`, `bloodgulch-smoke-receipt.json`,
+`plasma-{charged,fired}-ghost.png`, `warthog-drive-{open,valley}.png` and
+`bloodgulch-end-paused.png` beside the campaign receipts.

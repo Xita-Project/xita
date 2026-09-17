@@ -124,6 +124,11 @@ Use campaign combat and driving after stationary attribution tests.
 
 Expected gains for untested candidates are **unknown**. The measured resolution
 tradeoff above is a reference, not a prediction for another scene. Keep useful
-changes together only after correctness and repeated combined measurements;
-leave regressions and inconclusive experiments disabled. Stable 20 FPS still
-requires frames near or below 50 ms across representative play.
+changes together after correctness checks and evaluate them with repeated
+combined gameplay observations. The updated
+[gameplay retest policy](gameplay-performance-retests-20260917.md) retains
+compatible, admitted changes with inconclusive timing in the experimental
+combination; a small or unresolved individual result is not an automatic
+rollback. Fix or remove reproduced regressions, and leave unsafe or unqualified
+prototypes disabled. Stable 20 FPS still requires frames near or below 50 ms
+across representative play.

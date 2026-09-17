@@ -24,6 +24,14 @@ unresolved result **inconclusive** and retain the implementation for further
 scene and combination tests. Instruction counts or core utilization alone do
 not determine the gameplay verdict.
 
+In the cumulative experimental gameplay build, an inconclusive timing result
+does not by itself disable an already admitted, compatible change. Keep it
+enabled while checking the combination, provided its correctness checks pass
+and no regression is reproduced. Record performance as unproven rather than
+calling it a speedup. This does not promote untested prototypes, known unsafe
+changes or debug instrumentation into the gameplay build. Repository defaults
+and broader release qualification remain separate decisions.
+
 ## What the benchmark audit found
 
 Claude independently audited the controller, client and saved physical logs.
@@ -66,6 +74,15 @@ critical path. Their FPS gains cannot simply be added. For example, going from
 CPU work completed earlier may merely spend longer waiting on an unchanged GPU
 dependency. Keep qualified changes and evaluate their combination; do not claim a
 five-FPS benefit until ordinary gameplay supports it.
+
+The current cumulative runtime is `31af4cf390bd5f58d58429d3902f6107174de6803777d09dd1ada3d8ffc84812`
+from source `1823407`. It retains those three helpers, earlier exact query
+publication and conditional read-only depth-store omission together, on top
+of the preceding worker/rendering changes. All five startup modes are enabled;
+the newest stencil refinement admits a final continuation per campaign frame.
+The latest same-checkpoint observation is 12.769 FPS versus 12.660 FPS for its
+parent: inconclusive, with all five changes still enabled. See the
+[stencil follow-up](depth-store-stencil-20260917.md) for evidence and limitations.
 
 ## Visibility dependency follow-up
 
