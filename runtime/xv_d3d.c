@@ -2153,6 +2153,42 @@ void xv_d3d_visibility_complete(uint32_t frame)
     XV_VP_COMPLETE(l,frame);
 }
 
+#if XV_QUERY_PREFIX_PUBLISH
+#if !defined(XV_QUERY_BOUNDARY) || !defined(XV_FLARE_QUERY_OVERLAP)
+#error XV_QUERY_PREFIX_PUBLISH requires exact query-boundary/history support
+#endif
+/* Earlier publication must not evict an older still-owned packet's retained
+ * generation. Count frames, not serial distance: repeated IDs and wrap can
+ * collide in the four-entry history even with only two frames in flight. */
+int xv_d3d_visibility_publication_safe(uint32_t frame,const uint32_t *prior,unsigned count)
+{
+    uint32_t protected[(XV_VISIBILITY_IDS*XV_VISIBILITY_HISTORY+31u)/32u]={0};
+    if(count>=XV_FRAME_SLOTS)return 0;
+    const cmdlist_t *next=g_lists[frame%XV_NUM_LISTS];
+    if(next->nvisibility>XV_VISIBILITY_PER_FRAME)return 0;
+    for(unsigned p=0;p<count;p++) {
+        if(prior[p]%XV_NUM_LISTS==frame%XV_NUM_LISTS)return 0;
+        const cmdlist_t *old=g_lists[prior[p]%XV_NUM_LISTS];
+        if(old->nvisibility>XV_VISIBILITY_PER_FRAME)return 0;
+        for(unsigned i=0;i<old->nvisibility;i++) {
+            if(!old->visibility[i].serial)continue;
+            unsigned slot=old->visibility[i].result_slot;
+            if(slot>=XV_VISIBILITY_IDS)return 0;
+            unsigned key=slot*XV_VISIBILITY_HISTORY+old->visibility[i].serial%XV_VISIBILITY_HISTORY;
+            protected[key/32u]|=1u<<(key%32u);
+        }
+    }
+    for(unsigned i=0;i<next->nvisibility;i++) {
+        if(!next->visibility[i].serial)continue;
+        unsigned slot=next->visibility[i].result_slot;
+        if(slot>=XV_VISIBILITY_IDS)return 0;
+        unsigned key=slot*XV_VISIBILITY_HISTORY+next->visibility[i].serial%XV_VISIBILITY_HISTORY;
+        if(protected[key/32u]&(1u<<(key%32u)))return 0;
+    }
+    return 1;
+}
+#endif
+
 static SceGxmBlendFactor alpha_blend_factor(SceGxmBlendFactor f)
 {
     switch (f) {
