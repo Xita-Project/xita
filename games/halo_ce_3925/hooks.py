@@ -74,6 +74,7 @@ class HaloHooks(NoGameHooks):
     def __init__(self, image):
         self.image = image
         self.enabled = matches_image(image)
+        self.owner_phase_enabled = self.enabled
         self.flare_enabled = self.enabled
         self.clip_region_enabled = self.enabled and clip_region.matches_spans(image)
         self.object_basis_enabled = self.enabled and hashlib.sha256(
@@ -211,6 +212,16 @@ class HaloHooks(NoGameHooks):
         out = []
         if not self.enabled:
             return out
+        if self.owner_phase_enabled and address in (0xFA920, 0xBCB30):
+            phase = 0 if address == 0xFA920 else 1
+            # Local declarations avoid changing the shared generated prototype
+            # header and recompiling unrelated guest shards for this observer.
+            out.extend(["#ifdef XV_OWNER_PHASE", "    /* XV_OWNER_PHASE_SCOPE: coarse primary entry only */",
+                        "    extern int xv_owner_phase_enabled;",
+                        "    extern void xv_owner_phase_begin(uint64_t *, void *, unsigned);",
+                        "    extern void xv_owner_phase_end(uint64_t *);",
+                        "    uint64_t xv_owner_phase_scope_ __attribute__((cleanup(xv_owner_phase_end))) = 0;",
+                        f"    if (xv_owner_phase_enabled) xv_owner_phase_begin(&xv_owner_phase_scope_, c, {phase}u);", "#endif"])
         out.extend(self.light_census_entry(address))
         out.extend(object_motion_profile.entry(self.image, address))
         if address == 0x170C10 and collision_solver.matches(self.image):

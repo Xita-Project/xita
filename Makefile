@@ -152,6 +152,41 @@ $(BUILD)/query-prefix.config: force-query-prefix-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: $(BUILD)/query-prefix.config
+# Two coarse owner scopes. Default OFF, with no XV_PHASE or worker-policy change.
+XV_OWNER_PHASE ?= 0
+XV_OWNER_PHASE_DEFAULT ?= 0
+ifneq ($(words $(XV_OWNER_PHASE)),1)
+$(error XV_OWNER_PHASE must be 0 or 1)
+endif
+ifneq ($(filter $(XV_OWNER_PHASE),0 1),$(XV_OWNER_PHASE))
+$(error XV_OWNER_PHASE must be 0 or 1)
+endif
+ifneq ($(words $(XV_OWNER_PHASE_DEFAULT)),1)
+$(error XV_OWNER_PHASE_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_OWNER_PHASE_DEFAULT),0 1),$(XV_OWNER_PHASE_DEFAULT))
+$(error XV_OWNER_PHASE_DEFAULT must be 0 or 1)
+endif
+ifeq ($(XV_OWNER_PHASE),1)
+ifneq ($(RECOMP),1)
+$(error XV_OWNER_PHASE requires RECOMP=1)
+endif
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_ui_gxm.o: CFLAGS += -DXV_OWNER_PHASE
+endif
+.PHONY: force-owner-phase-config force-owner-phase-startup-config
+force-owner-phase-config:
+force-owner-phase-startup-config:
+$(BUILD)/owner-phase.config: force-owner-phase-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_OWNER_PHASE)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/owner-phase-startup.config: force-owner-phase-startup-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_OWNER_PHASE)),$(XV_OWNER_PHASE_DEFAULT),0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_ui_gxm.o: $(BUILD)/owner-phase.config
 # Grouped exact vertex comparisons: opt-in at process start, independent of
 # graphics quality. Only the uploader consumes this build default.
 XV_PACKED_VERTEX_LAYOUT ?= 0
@@ -633,6 +668,23 @@ XITA_GUEST_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GUEST
 XITA_SYS_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_SYS_SRCS))
 XITA_GAME_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GAME_SRCS))
 RECOMP_CFLAGS := -O2 -fno-strict-aliasing -mthumb -mcpu=cortex-a9 -mfpu=neon -w -std=gnu11 -I. -Iruntime -I$(RECOMP_DIR) -I$(RECOMP_DIR)/kernel
+# Discover the two selected generated units, not every guest object.
+OWNER_PHASE_HOOK_SRCS := $(shell rg -l 'XV_OWNER_PHASE_SCOPE' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+OWNER_PHASE_HOOK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(OWNER_PHASE_HOOK_SRCS))
+OWNER_PHASE_SYS_OBJS := $(RECOMP_BUILD)/kernel/xd3d.o $(RECOMP_BUILD)/kernel/xk_owner_phase.o
+ifeq ($(XV_OWNER_PHASE),1)
+ifneq ($(GAME_PROFILE),halo_ce_3925)
+$(error XV_OWNER_PHASE requires GAME_PROFILE=halo_ce_3925)
+endif
+ifneq ($(words $(shell rg -o 'XV_OWNER_PHASE_SCOPE:' $(OWNER_PHASE_HOOK_SRCS) 2>/dev/null)),2)
+$(error XV_OWNER_PHASE requires the two regenerated FA920/BCB30 owner scope hooks)
+endif
+$(OWNER_PHASE_HOOK_OBJS) $(OWNER_PHASE_SYS_OBJS): RECOMP_CFLAGS += -DXV_OWNER_PHASE
+$(RECOMP_BUILD)/kernel/xk_owner_phase.o: RECOMP_CFLAGS += -DXV_OWNER_PHASE_DEFAULT=$(XV_OWNER_PHASE_DEFAULT)
+endif
+$(OWNER_PHASE_HOOK_OBJS) $(OWNER_PHASE_SYS_OBJS): $(BUILD)/owner-phase.config recomp/kernel/xk_owner_phase.h
+$(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(BUILD)/owner-phase-startup.config
+$(RECOMP_BUILD)/libxita_sys.a $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(BUILD)/owner-phase.config
 ifeq ($(XV_NATIVE_BSP_SPHERE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_BSP_SPHERE
 endif
