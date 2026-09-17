@@ -12,6 +12,9 @@ guarded call/collection clone in local `recomp/code_028.c`. It never rewrites
 interior entries and overflow targets. Appending fusion to the large generic
 unit was measured slower during qualification and is deliberately unsupported.
 
+The optional [query-only f32 inlining selector](query-f32-inline-20260917.md)
+is independently default OFF and composes through this generator.
+
 ## Build and generation
 
 Keep the existing retained build invocation and add
