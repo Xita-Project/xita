@@ -90,6 +90,11 @@ matching previous-build driving run here, so this establishes neither a gain
 nor a regression. It does show that stacking the current changes has not yet
 met the representative driving target.
 
+The subsequent [simulation audit](simulation-catchup-20260917.md) normalizes this
+to 14.88 ms per accepted object-update pass at about 30 passes/sec. The 72.4 ms
+per displayed frame includes catch-up ticks and must not be treated as an
+unchanging CPU floor for a faster renderer.
+
 Private evidence: `bloodgulch-smoke.log`, `bloodgulch-smoke-receipt.json`,
 `plasma-{charged,fired}-ghost.png`, `warthog-drive-{open,valley}.png` and
 `bloodgulch-end-paused.png` beside the campaign receipts.
