@@ -217,6 +217,146 @@ static sem_t owner_wake, replies[WORKERS];
 static xv_object_mutex math_mutex;
 static int worker_lane(void);
 
+
+#if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING != 0 && XV_OBJECT_PASS_TIMING != 1
+#error XV_OBJECT_PASS_TIMING must be 0 or 1
+#endif
+#if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING
+#include "xk_owner_phase.h"
+/* Passive owner-only accounting. Existing begin/finish/report/shutdown callers
+ * retain their guest-owner precondition. No worker writes these records. The
+ * observer additionally validates native identity, live context and generation;
+ * an unknown ancestry is never silently treated as outside FA920. */
+extern int xv_owner_phase_active(void *,unsigned,uint32_t *) __attribute__((weak));
+static struct {
+    xctx *context;
+    uint32_t generation;
+    unsigned open, tick, begun, completed, interrupted, unknown, invalid, clocks;
+    uint64_t start, batch_start;
+    struct { unsigned count; uint64_t elapsed, joined; } scope[2];
+#ifdef __vita__
+    SceUID thread;
+#else
+    pthread_t thread;
+#endif
+} pass_timing;
+static struct pass_clock_sample {
+    int32_t id;
+    unsigned valid, errors;
+    uint64_t raw, at;
+} pass_clocks[WORKERS];
+static int pass_timing_thread(void)
+{
+    if(!pass_timing.context)return 0;
+#ifdef __vita__
+    return sceKernelGetThreadId()==pass_timing.thread;
+#else
+    return pthread_equal(pthread_self(),pass_timing.thread);
+#endif
+}
+static int pass_timing_active(xctx *c,uint32_t *generation)
+{ return xv_owner_phase_active ? xv_owner_phase_active(c,XV_OWNER_TICK,generation) : -1; }
+static void pass_timing_begin(xctx *c)
+{
+    uint32_t generation=0;
+    int tick=pass_timing_active(c,&generation);
+    if(tick<0) { pass_timing.unknown++;return; }
+    if(pass_timing.open)pass_timing.interrupted++;
+    pass_timing.context=c;pass_timing.generation=generation;
+#ifdef __vita__
+    pass_timing.thread=sceKernelGetThreadId();
+#else
+    pass_timing.thread=pthread_self();
+#endif
+    pass_timing.open=1;pass_timing.tick=(unsigned)tick;
+    pass_timing.batch_start=batch_us;
+    pass_timing.start=xk_os_monotonic_us();pass_timing.clocks++;
+    pass_timing.begun++;
+}
+static void pass_timing_finish(xctx *c)
+{
+    if(!pass_timing_thread()||!pass_timing.open||pass_timing.context!=c)return;
+    uint32_t generation=pass_timing.generation;
+    int tick=pass_timing_active(c,&generation);
+    pass_timing.open=0;
+    if(tick<0||(unsigned)tick!=pass_timing.tick) {
+        pass_timing.interrupted++;pass_timing.invalid++;return;
+    }
+    uint64_t now=xk_os_monotonic_us();pass_timing.clocks++;
+    if(now<pass_timing.start||batch_us<pass_timing.batch_start||
+       batch_us-pass_timing.batch_start>now-pass_timing.start) {
+        pass_timing.interrupted++;pass_timing.invalid++;return;
+    }
+    unsigned i=pass_timing.tick;
+    pass_timing.scope[i].count++;
+    pass_timing.scope[i].elapsed+=now-pass_timing.start;
+    pass_timing.scope[i].joined+=batch_us-pass_timing.batch_start;
+    pass_timing.completed++;
+}
+/* Observation timestamps follow each independent GetThreadInfo call. Deltas
+ * are raw SDK runClocks, NOT cycles, microseconds or a CPU percentage. A failed
+ * read, reused UID, or backwards value starts a new baseline instead of wrapping.
+ * Kept separate from the platform read so these transitions can be tested. */
+static void pass_clock_record(unsigned lane,int32_t id,int rc,int populated,
+                              uint64_t raw,uint64_t at,unsigned frames)
+{
+    struct pass_clock_sample *s=&pass_clocks[lane];
+    unsigned reason=0,valid=0;uint64_t delta=0,wall=0;
+    if(rc<0||!populated||id<0) { reason=1;s->errors++;s->valid=0; }
+    else {
+        if(!s->valid)reason=2;
+        else if(s->id!=id)reason=3;
+        else if(raw<s->raw||at<=s->at)reason=4;
+        else {valid=1;delta=raw-s->raw;wall=at-s->at;}
+        s->id=id;s->raw=raw;s->at=at;s->valid=1;
+    }
+    XK_LOG("[object-worker-clock] %u frames lane %u active %u id %08X rc %08X at-us %llu raw %llu delta %llu wall-us %llu valid %u reason %u errors %u; raw SDK units, sequential CPU observations\n",
+        frames,lane,lane<active_workers,(unsigned)id,(unsigned)rc,
+        (unsigned long long)at,(unsigned long long)raw,(unsigned long long)delta,
+        (unsigned long long)wall,valid,reason,s->errors);
+}
+static void pass_timing_report(unsigned frames)
+{
+    /* The enclosing report already proved no owner/pass, queued or running work.
+     * Do not sample another guest fiber's report using a stale saved context. */
+    uint32_t generation=pass_timing.generation;
+    int admitted=pass_timing_thread()&&pass_timing_active(pass_timing.context,&generation)>=0;
+    if(pass_timing.open) { pass_timing.open=0;pass_timing.interrupted++; }
+    XK_LOG("[object-pass] %u frames begun %u completed %u interrupted %u open %u unknown %u invalid %u clocks %u owner-valid %u; accepted begin-to-finish elapsed includes joins/yields/preemption, excludes 90314 tail\n",
+        frames,pass_timing.begun,pass_timing.completed,pass_timing.interrupted,
+        pass_timing.open,pass_timing.unknown,pass_timing.invalid,pass_timing.clocks,admitted);
+    for(unsigned i=0;i<2;i++)
+        XK_LOG("[object-pass-scope] %u frames FA920 %u completed %u elapsed-us %llu same-pass-batch-us %llu; nested inclusive elapsed, not CPU self\n",
+            frames,i,pass_timing.scope[i].count,(unsigned long long)pass_timing.scope[i].elapsed,
+            (unsigned long long)pass_timing.scope[i].joined);
+#ifdef __vita__
+    if(admitted)for(unsigned lane=0;lane<WORKERS;lane++) {
+        SceKernelThreadInfo info;
+        memset(&info,0,sizeof info);info.size=sizeof info;
+        int rc=sceKernelGetThreadInfo(threads[lane],&info);
+        pass_clock_record(lane,threads[lane],rc,info.name[0]!=0,
+                          info.runClocks,xk_os_monotonic_us(),frames);
+    }
+    else XK_LOG("[object-worker-clock] %u frames skipped: live owner admission unknown\n",frames);
+#else
+    XK_LOG("[object-worker-clock] %u frames unavailable on host; no synthetic CPU units\n",frames);
+#endif
+    pass_timing.begun=pass_timing.completed=pass_timing.interrupted=0;
+    pass_timing.unknown=pass_timing.invalid=pass_timing.clocks=0;
+    memset(pass_timing.scope,0,sizeof pass_timing.scope);
+}
+static void pass_timing_cancel(void)
+{
+    /* Shutdown already joined all work. A shutdown is not an original successful
+     * finish: retain an explicit incomplete count and never manufacture elapsed. */
+    if(pass_timing.open) {pass_timing.open=0;pass_timing.interrupted++;}
+    XK_LOG("[object-pass-stop] completed %u interrupted %u unknown %u open %u; unreported window, shutdown is not finish\n",
+        pass_timing.completed,pass_timing.interrupted,pass_timing.unknown,pass_timing.open);
+    memset(&pass_timing,0,sizeof pass_timing);
+    memset(pass_clocks,0,sizeof pass_clocks);
+}
+#endif
+
 #ifdef XV_OBJECT_HOLD_PROFILE
 /* Research-only sampled OUTER worker scopes. A lane owns its records until
  * join. Sampling is decorrelated from periodic call order; no guest memory is
@@ -1184,6 +1324,9 @@ static int initialize(void)
     }
 #endif
     __atomic_store_n(&initialized,1,__ATOMIC_RELEASE);
+#if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING
+    XK_LOG("[object-pass] compiled 1; timing requires live owner-phase admission; worker snapshots only at quiescent frame reports\n");
+#endif
     XK_LOG("[object-jobs] guest stacks %08X/%08X/%08X, %u bytes each\n",stacks[0],stacks[1],stacks[2],STACK_BYTES);
     XK_LOG("[object-locks] wait-site profiling %s; elapsed waits include scheduling and parked service time\n",math_profile?"on":"off");
     XK_LOG("[object-locks] backend %s; lightweight available %d\n",xv_object_mutex_name(&math_mutex),math_mutex.light_ready);
@@ -1217,7 +1360,11 @@ int xv_object_jobs_begin(xctx *c)
     extern int xd3d_object_jobs_ready(void) __attribute__((weak));
     if(!xd3d_object_jobs_ready || !xd3d_object_jobs_ready())return 0;
     if(!initialize())return 0;
-    owner=c;return 1;
+    owner=c;
+#if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING
+    pass_timing_begin(c);
+#endif
+    return 1;
 }
 /* Guest-owner admission, never called by the network service thread. */
 int xv_object_jobs_available(void)
@@ -1280,8 +1427,11 @@ void xv_object_jobs_end(xctx **c)
 void xv_object_jobs_finish(xctx *c)
 {
     if(c==owner) {
-        xv_object_jobs_join();owner=NULL;
-        passes++;
+        xv_object_jobs_join();
+#if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING
+        pass_timing_finish(c);
+#endif
+        owner=NULL;passes++;
     }
 }
 void xv_object_jobs_override(int enabled)
@@ -1297,6 +1447,9 @@ void xv_object_jobs_report(unsigned frames)
     /* Called with the renderer's frame window, not every 60 simulation passes.
      * Reporting must never dispatch callbacks or reset live worker counters. */
     if(initialized!=1||owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))return;
+#if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING
+    pass_timing_report(frames);
+#endif
 #ifdef XV_OBJECT_HOLD_PROFILE
     hold_report(frames);
 #endif
@@ -1506,7 +1659,11 @@ void xv_object_jobs_shutdown(void)
     xv_light_census_cancel(NULL,XV_LC_STOP);
 #endif
     if(initialized!=1)return;
-    xv_object_jobs_join();owner=NULL;
+    xv_object_jobs_join();
+#if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING
+    pass_timing_cancel();
+#endif
+    owner=NULL;
     __atomic_store_n(&stopping,1,__ATOMIC_RELEASE);
     for(unsigned i=0;i<WORKERS;i++) {
 #ifdef __vita__
