@@ -693,6 +693,16 @@ static void vblank_pace_in_render(void)
     }
     busy = 0;
 }
+/* Preemption hook (xv_preempt calls it on every cooperative slice of any fiber). The vblank
+ * interrupt is real time on hardware; between the menu's draw hooks and the kernel yield hooks
+ * nothing advanced the counter while the game ran pure CPU code, so a multiplayer level load
+ * spun forever in the D3D vblank wait (0x12B2E0: busy-loop on 0x485AB0 until the next count,
+ * run mp283). Deliver the same 60 Hz catch-up here, only on the fiber that owns the game's
+ * D3D context (the callback runs as a nested guest call on that context). */
+void xd3d_lockstep_preempt(xctx *c)
+{
+    if (c && c == active_context) vblank_pace_in_render();
+}
 /* Rasterizer row hook (calling thread only): big triangles and full-screen
  * passes take hundreds of ms each, so pacing only between draws missed most
  * vblanks (7 Hz); this keeps game time at real rate inside them too. */
