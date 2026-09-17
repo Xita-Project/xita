@@ -354,6 +354,7 @@ int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
     if (!guest) return 0;
     target *t = find_target(c, c->color_offset, guest);
     if (!t) { flush_scene(); return -1; }
+    if (!r->vertex_count && !r->index_count && !r->array_count) return 1;   /* BEGIN/END with no emission */
 
     /* programs */
     static menu_combiner cb;
@@ -488,6 +489,8 @@ int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
         xv_logf("[h2/menu-gxm] draw=%llu prim=%u verts=%u indices=%u target=%08X vs=%016llx ps=%016llx scene_draws=%u fallbacks=%llu\n",
                 (unsigned long long)g_drawn, r->primitive, n, ni, c->color_offset, (unsigned long long)vs->hash,
                 (unsigned long long)fs->hash, g_open_draws, (unsigned long long)g_fallbacks);
-    if (!(g_drawn % 20)) { flush_scene(); h2_menu_dump_target(t->guest, W, H, g_drawn, c->color_offset); }
+    static int dump_every = -1;
+    if (dump_every < 0) { const char *e = getenv("XV_MENU_GXM_DUMP"); dump_every = e ? atoi(e) : 200; }
+    if (dump_every > 0 && !(g_drawn % (uint64_t)dump_every)) { flush_scene(); h2_menu_dump_target(t->guest, W, H, g_drawn, c->color_offset); }
     return 1;
 }
