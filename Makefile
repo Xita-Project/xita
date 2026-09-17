@@ -456,6 +456,29 @@ $(BUILD)/clip-region-trial.config: force-clip-region-trial-config
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_benchmark.o: $(BUILD)/clip-region-trial.config
 
+# Exact polygon-edge helper: separate private process-start selection.
+XV_POLYGON_EDGE_TRIAL ?= 0
+ifneq ($(words $(XV_POLYGON_EDGE_TRIAL)),1)
+$(error XV_POLYGON_EDGE_TRIAL must be 0 or 1)
+endif
+ifneq ($(filter $(XV_POLYGON_EDGE_TRIAL),0 1),$(XV_POLYGON_EDGE_TRIAL))
+$(error XV_POLYGON_EDGE_TRIAL must be 0 or 1)
+endif
+ifeq ($(XV_POLYGON_EDGE_TRIAL),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_NATIVE_POLYGON_EDGE):$(XV_LIGHT_QUERY_CENSUS):$(XV_EXPERIMENTAL_OBJECT_JOBS),1:halo_ce_3925:1:1:1)
+$(error XV_POLYGON_EDGE_TRIAL requires RECOMP=1 GAME_PROFILE=halo_ce_3925 XV_NATIVE_POLYGON_EDGE=1 XV_LIGHT_QUERY_CENSUS=1 XV_EXPERIMENTAL_OBJECT_JOBS=1)
+endif
+$(BUILD)/runtime/xv_benchmark.o: CFLAGS += -DXV_POLYGON_EDGE_TRIAL=1
+endif
+.PHONY: force-polygon-edge-trial-config
+force-polygon-edge-trial-config:
+$(BUILD)/polygon-edge-trial.config: force-polygon-edge-trial-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_POLYGON_EDGE_TRIAL)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_benchmark.o: $(BUILD)/polygon-edge-trial.config
+
 XV_MODEL_BATCHES_TRIAL ?= 0
 ifneq ($(words $(XV_MODEL_BATCHES_TRIAL)),1)
 $(error XV_MODEL_BATCHES_TRIAL must be 0 or 1)
@@ -1357,6 +1380,10 @@ recomp/kernel/xk_polygon_edge.c: tools/gen_native_polygon_edge.py games/halo_ce_
 	$(PYTHON) tools/gen_native_polygon_edge.py --xbe $(XBE) --manifest $(XBE_JSON)
 
 # Optional clip region: generated units, helper and bridge share a tracked mode.
+ifeq ($(XV_POLYGON_EDGE_TRIAL),1)
+$(RECOMP_BUILD)/kernel/xd3d.o: RECOMP_CFLAGS += -DXV_POLYGON_EDGE_TRIAL=1
+endif
+$(RECOMP_BUILD)/kernel/xd3d.o: $(BUILD)/polygon-edge-trial.config
 ifeq ($(XV_CLIP_REGION_TRIAL),1)
 $(RECOMP_BUILD)/kernel/xd3d.o: RECOMP_CFLAGS += -DXV_CLIP_REGION_TRIAL=1
 endif

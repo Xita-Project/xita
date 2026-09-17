@@ -92,6 +92,11 @@ static unsigned request_state, remote_ready, remote_kind;
 unsigned xv_benchmark_remote_busy(void) {return __atomic_load_n(&request_state,__ATOMIC_ACQUIRE)!=0;}
 int xv_benchmark_remote_request(unsigned kind)
 {
+#if XV_POLYGON_EDGE_TRIAL
+    /* Legacy polygon34 completion restores OFF. Keep this private startup
+     * selection for the process without changing other benchmark controls. */
+    if (kind == XV_BENCH_POLYGON_EDGE) return -1;
+#endif
 #if XV_CLIP_REGION_TRIAL
     /* This private cumulative trial keeps its startup selection for the
      * process. Legacy clip36 completion/cancellation restores OFF. */
