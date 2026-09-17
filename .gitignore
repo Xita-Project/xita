@@ -83,6 +83,9 @@ remote-client.json
 recomp/kernel/xk_clip_region.c
 recomp/kernel/xk_worker_query_generated.inc
 recomp/query_fusion.c
+recomp/query_fusion.c.tmp
+recomp/code_*.c.tmp
+recomp/.query-fusion-*/
 recomp/kernel/worker_query_original.json
 recomp/kernel/worker_query_axes.h
 
