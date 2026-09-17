@@ -109,7 +109,7 @@ static void assign_port(nsock *s) { do { s->lport = htons16(g_eph++); if (g_eph 
 
 static int readable(nsock *s) { if (g_adhoc) { ah_poll(s); if (s->adhoc.error) return 1; } return s->listening ? s->acc_n > 0 : s->type == 1 ? (s->rx_len > 0 || s->peer_closed) : s->dq_n > 0; }
 static int writable(nsock *s) { if (g_adhoc) { ah_poll(s); if (s->adhoc.error) return 0; } return g_adhoc && s->adhoc.id >= 0 ? ah_writable(s) : s->type == 2 || s->connected; }
-static void put_addr(uint32_t a, uint16_t port, uint32_t ip) { memset(X_G(a), 0, 16); X_M16(a) = 2; X_M16(a + 2) = port; X_M32(a + 4) = ip; }
+static void put_addr(uint32_t a, uint16_t port, uint32_t ip) { memset(X_GWN(a, 16), 0, 16); X_W16(a) = 2; X_W16(a + 2) = port; X_W32(a + 4) = ip; }
 
 /* ---- Winsock ---- */
 void xv_hle_ws_socket(xctx *c)                              /* socket(af, type, protocol) */
@@ -175,7 +175,7 @@ void xv_hle_ws_accept(xctx *c)                              /* accept(s, addr, a
         xk_yield();
     }
     nsock *p = &g_s[s->acc[0]]; memmove(s->acc, s->acc + 1, sizeof(int) * (size_t)(--s->acc_n));
-    if (X_ARG(1)) { put_addr(X_ARG(1), p->pport, p->pip); if (X_ARG(2)) X_M32(X_ARG(2)) = 16; }
+    if (X_ARG(1)) { put_addr(X_ARG(1), p->pport, p->pip); if (X_ARG(2)) X_W32(X_ARG(2)) = 16; }
     c->r[0] = NS_HANDLE + idx(p); NLOG("accept %04X -> %04X from %08X\n", X_ARG(0), c->r[0], X_M32(c->r[4])); X_RET(3);
 }
 static int tcp_push(nsock *dst, const uint8_t *d, uint32_t n)
@@ -277,8 +277,8 @@ void xv_hle_ws_sendto(xctx *c)                            /* THUNK 0x1B157D: rec
     }
     dgram *g = &s->dq[s->dq_head];
     uint32_t r = g->len; int trunc = 0; if (r > n) { r = n; trunc = 1; }
-    memcpy(X_G(X_ARG(1)), g->d, r);
-    if (from) { put_addr(from, g->sport, g->sip); if (X_ARG(5)) X_M32(X_ARG(5)) = 16; }
+    memcpy(X_GWN(X_ARG(1), r), g->d, r);
+    if (from) { put_addr(from, g->sport, g->sip); if (X_ARG(5)) X_W32(X_ARG(5)) = 16; }
     s->dq_head = (s->dq_head + 1) % DG_MAX; s->dq_n--;
     NLOG("recvfrom %04X -> %u bytes from port %u%s\n", X_ARG(0), r, htons16(g->sport), trunc ? " (truncated)" : "");
     if (trunc) { fail(c, WSAEMSGSIZE); X_RET(6); }
@@ -289,7 +289,7 @@ static int set_scan(uint32_t set, int (*pred)(nsock *), int commit)
     if (!set) return 0;
     uint32_t n = X_M32(set); if (n > 64) n = 64; int ready = 0; uint32_t keep[64]; uint32_t kn = 0;
     for (uint32_t i = 0; i < n; ++i) { uint32_t h = X_M32(set + 4 + 4 * i); nsock *s = sk(h); if (s && pred(s)) { ready++; keep[kn++] = h; } }
-    if (commit) { X_M32(set) = kn; for (uint32_t i = 0; i < kn; ++i) X_M32(set + 4 + 4 * i) = keep[i]; }
+    if (commit) { X_W32(set) = kn; for (uint32_t i = 0; i < kn; ++i) X_W32(set + 4 + 4 * i) = keep[i]; }
     return ready;
 }
 static int never(nsock *s) { return g_adhoc && s->adhoc.error; }
@@ -316,7 +316,7 @@ void xv_hle_ws_ioctlsocket(xctx *c)                         /* ioctlsocket(s, cm
     if (!s) { fail(c, WSAENOTSOCK); X_RET(3); }
     if (g_adhoc) ah_poll(s);
     if (cmd == FIONBIO) { s->nonblock = X_M32(arg) != 0; NLOG("ioctlsocket %04X FIONBIO %d\n", X_ARG(0), s->nonblock); }
-    else if (cmd == FIONREAD) X_M32(arg) = s->type == 1 ? s->rx_len : s->dq_n ? s->dq[s->dq_head].len : 0;
+    else if (cmd == FIONREAD) X_W32(arg) = s->type == 1 ? s->rx_len : s->dq_n ? s->dq[s->dq_head].len : 0;
     else NLOG("ioctlsocket %04X cmd %08X ignored\n", X_ARG(0), cmd);
     c->r[0] = 0; X_RET(3);
 }
@@ -335,12 +335,12 @@ void xv_hle_ws_getsockopt(xctx *c)                          /* getsockopt(s, lev
     if (g_adhoc && val && len && X_M32(len) >= 4) {
         nsock *s = sk(X_ARG(0)); ah_poll(s);
         if (opt == 0x1005 || opt == 0x1006 || opt == 0x1007) {
-            X_M32(val) = opt == 0x1005 ? s->adhoc.send_ms : opt == 0x1006 ? s->adhoc.recv_ms : (uint32_t)s->adhoc.error;
+            X_W32(val) = opt == 0x1005 ? s->adhoc.send_ms : opt == 0x1006 ? s->adhoc.recv_ms : (uint32_t)s->adhoc.error;
             if (opt == 0x1007) s->adhoc.error = 0;
-            X_M32(len) = 4; c->r[0] = 0; X_RET(5);
+            X_W32(len) = 4; c->r[0] = 0; X_RET(5);
         }
     }
-    if (val && len && X_M32(len) >= 4) { X_M32(val) = (opt == 0x1001 || opt == 0x1002) ? 0x4000 : 0; X_M32(len) = 4; }   /* SO_SNDBUF / SO_RCVBUF: 16 KB (the game's floor); SO_ERROR etc.: 0 */
+    if (val && len && X_M32(len) >= 4) { X_W32(val) = (opt == 0x1001 || opt == 0x1002) ? 0x4000 : 0; X_W32(len) = 4; }   /* SO_SNDBUF / SO_RCVBUF: 16 KB (the game's floor); SO_ERROR etc.: 0 */
     NLOG("getsockopt %04X level %X opt %X -> %u\n", X_ARG(0), X_ARG(1), opt, val ? (unsigned)X_M32(val) : 0u);
     c->r[0] = 0; X_RET(5);
 }
@@ -348,13 +348,13 @@ void xv_hle_ws_getpeername(xctx *c)   /* THUNK 0x1B03F1 (bound as ws_getpeername
 {
     nsock *s = sk(X_ARG(0)); if (!s) { fail(c, WSAENOTSOCK); X_RET(3); }
     if (!s->bound) assign_port(s);
-    put_addr(X_ARG(1), s->lport, s->lip); if (X_ARG(2)) X_M32(X_ARG(2)) = 16; NLOG("getsockname %04X -> port %u from %08X\n", X_ARG(0), htons16(s->lport), X_M32(c->r[4])); c->r[0] = 0; X_RET(3);
+    put_addr(X_ARG(1), s->lport, s->lip); if (X_ARG(2)) X_W32(X_ARG(2)) = 16; NLOG("getsockname %04X -> port %u from %08X\n", X_ARG(0), htons16(s->lport), X_M32(c->r[4])); c->r[0] = 0; X_RET(3);
 }
 void xv_hle_ws_getsockname(xctx *c)   /* THUNK 0x1B03FC (bound as ws_getsockname): getpeername body - 0x121C80 tries this first, then 0x1B03F1 */
 {
     nsock *s = sk(X_ARG(0)); if (!s) { fail(c, WSAENOTSOCK); X_RET(3); }
     if (!s->connected) { fail(c, WSAENOTCONN); X_RET(3); }
-    put_addr(X_ARG(1), s->pport, s->pip); if (X_ARG(2)) X_M32(X_ARG(2)) = 16; NLOG("getpeername %04X -> port %u from %08X\n", X_ARG(0), htons16(s->pport), X_M32(c->r[4])); c->r[0] = 0; X_RET(3);
+    put_addr(X_ARG(1), s->pport, s->pip); if (X_ARG(2)) X_W32(X_ARG(2)) = 16; NLOG("getpeername %04X -> port %u from %08X\n", X_ARG(0), htons16(s->pport), X_M32(c->r[4])); c->r[0] = 0; X_RET(3);
 }
 void xv_hle_ws_closesocket(xctx *c)
 {
@@ -378,7 +378,7 @@ static void fill_random(uint32_t a, uint32_t n) { uint8_t *d = (uint8_t *)X_G(a)
 void xv_hle_xn_XNetCreateKey(xctx *c)                       /* (XNKID *8, XNKEY *16) */
 {
     fill_random(X_ARG(0), 8); fill_random(X_ARG(1), 16);
-    if (X_M32(X_ARG(0)) == 0) X_M32(X_ARG(0)) = 1;
+    if (X_M32(X_ARG(0)) == 0) X_W32(X_ARG(0)) = 1;
     NLOG("XNetCreateKey\n"); c->r[0] = 0; X_RET(2);
 }
 void xv_hle_xn_XNetRegisterKey(xctx *c) { NLOG("XNetRegisterKey\n"); c->r[0] = 0; X_RET(2); }

@@ -1255,6 +1255,34 @@ class Emitter:
             res[i] = (kind, bits, cc)
         return res
 
+    @staticmethod
+    def rewrite_stores(text: str) -> str:
+        """Memory lvalues become X_W* (stamped stores in checked builds); loads stay X_M*.
+        The lowering emits every store as 'X_M<w>(<addr>) = <value>' with no compound forms."""
+        out = []; i = 0; n = len(text)
+        while True:
+            j = text.find("X_M", i)
+            if j < 0: out.append(text[i:]); break
+            k = j + 3
+            while k < n and (text[k].isalnum()): k += 1
+            width = text[j + 3:k]
+            if width not in ("8", "16", "32", "64", "F32") or k >= n or text[k] != "(":
+                out.append(text[i:k]); i = k; continue
+            depth = 0; m = k
+            while m < n:
+                if text[m] == "(": depth += 1
+                elif text[m] == ")":
+                    depth -= 1
+                    if depth == 0: break
+                m += 1
+            close = m + 1
+            rest = close
+            while rest < n and text[rest] == " ": rest += 1
+            is_store = rest + 1 < n and text[rest] == "=" and text[rest + 1] != "="
+            out.append(text[i:j] + ("X_W" if is_store else "X_M") + text[j + 3:close])
+            i = close
+        return "".join(out)
+
     def emit_function(self, fn: Function) -> str:
         # `restrict`: the context is host memory that no guest pointer can reach, so GCC may keep guest
         # registers in ARM registers across guest memory stores (otherwise every store reloads them).
@@ -1325,7 +1353,7 @@ class Emitter:
                         out.append(f"    goto L_{blk.end:08X};")
         out.append("    return;")
         out.append("}")
-        body = "\n".join(out)
+        body = self.rewrite_stores("\n".join(out))
         return self.hooks.transform_body(fn.entry, body)
 
     def write_all(self):

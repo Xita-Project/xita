@@ -59,9 +59,9 @@ void xk_RtlUpperChar(xctx *c) { c->r[0] = (uint8_t)toupper(X_ARG(0) & 0xFF); X_R
 void xk_RtlLowerChar(xctx *c) { c->r[0] = (uint8_t)tolower(X_ARG(0) & 0xFF); X_RET(1); }
 void xk_RtlUpcaseUnicodeChar(xctx *c) { c->r[0] = (uint16_t)towupper(X_ARG(0) & 0xFFFF); X_RET(1); }
 void xk_RtlDowncaseUnicodeChar(xctx *c) { c->r[0] = (uint16_t)towlower(X_ARG(0) & 0xFFFF); X_RET(1); }
-void xk_RtlZeroMemory(xctx *c) { memset(X_G(X_ARG(0)), 0, X_ARG(1)); X_RET(2); }
-void xk_RtlFillMemory(xctx *c) { memset(X_G(X_ARG(0)), (int)(X_ARG(2) & 0xFF), X_ARG(1)); X_RET(3); }
-void xk_RtlMoveMemory(xctx *c) { memmove(X_G(X_ARG(0)), X_G(X_ARG(1)), X_ARG(2)); X_RET(3); }
+void xk_RtlZeroMemory(xctx *c) { memset(X_GWN(X_ARG(0), X_ARG(1)), 0, X_ARG(1)); X_RET(2); }
+void xk_RtlFillMemory(xctx *c) { memset(X_GWN(X_ARG(0), X_ARG(1)), (int)(X_ARG(2) & 0xFF), X_ARG(1)); X_RET(3); }
+void xk_RtlMoveMemory(xctx *c) { memmove(X_GWN(X_ARG(0), X_ARG(2)), X_G(X_ARG(1)), X_ARG(2)); X_RET(3); }
 void xk_RtlCompareMemory(xctx *c) { const uint8_t *a = X_G(X_ARG(0)), *b = X_G(X_ARG(1)); uint32_t n = X_ARG(2), i = 0; while (i < n && a[i] == b[i]) i++; c->r[0] = i; X_RET(3); }
 void xk_RtlCompareMemoryUlong(xctx *c) { const uint32_t *a = X_G(X_ARG(0)); uint32_t n = X_ARG(1) / 4, p = X_ARG(2), i = 0; while (i < n && a[i] == p) i++; c->r[0] = i * 4; X_RET(3); }
 void xk_RtlUlongByteSwap(xctx *c) { c->r[0] = __builtin_bswap32(X_ARG(0)); X_RET(1); }
@@ -74,8 +74,8 @@ void xk_RtlUnicodeStringToAnsiString(xctx *c)
     unsigned n = AS_LEN(src) / 2;
     if (alloc) { AS_BUF(dst) = xk_kalloc(n + 1); AS_MAX(dst) = n + 1; }
     if (AS_MAX(dst) < n + 1) { c->r[0] = STATUS_BUFFER_OVERFLOW; X_RET(3); }
-    for (unsigned i = 0; i < n; ++i) { uint16_t w = X_M16(AS_BUF(src) + i * 2); X_M8(AS_BUF(dst) + i) = w < 256 ? (uint8_t)w : '?'; }
-    X_M8(AS_BUF(dst) + n) = 0; AS_LEN(dst) = n;
+    for (unsigned i = 0; i < n; ++i) { uint16_t w = X_M16(AS_BUF(src) + i * 2); X_W8(AS_BUF(dst) + i) = w < 256 ? (uint8_t)w : '?'; }
+    X_W8(AS_BUF(dst) + n) = 0; AS_LEN(dst) = n;
     c->r[0] = STATUS_SUCCESS; X_RET(3);
 }
 void xk_RtlAnsiStringToUnicodeString(xctx *c)
@@ -84,8 +84,8 @@ void xk_RtlAnsiStringToUnicodeString(xctx *c)
     unsigned n = AS_LEN(src);
     if (alloc) { AS_BUF(dst) = xk_kalloc(n * 2 + 2); AS_MAX(dst) = n * 2 + 2; }
     if (AS_MAX(dst) < n * 2 + 2) { c->r[0] = STATUS_BUFFER_OVERFLOW; X_RET(3); }
-    for (unsigned i = 0; i < n; ++i) X_M16(AS_BUF(dst) + i * 2) = X_M8(AS_BUF(src) + i);
-    X_M16(AS_BUF(dst) + n * 2) = 0; AS_LEN(dst) = n * 2;
+    for (unsigned i = 0; i < n; ++i) X_W16(AS_BUF(dst) + i * 2) = X_M8(AS_BUF(src) + i);
+    X_W16(AS_BUF(dst) + n * 2) = 0; AS_LEN(dst) = n * 2;
     c->r[0] = STATUS_SUCCESS; X_RET(3);
 }
 void xk_RtlFreeAnsiString(xctx *c) { AS_BUF(X_ARG(0)) = 0; AS_LEN(X_ARG(0)) = 0; X_RET(1); }
@@ -94,16 +94,16 @@ void xk_RtlUnicodeToMultiByteN(xctx *c)
 {
     uint32_t dst = X_ARG(0), max = X_ARG(1), pres = X_ARG(2), src = X_ARG(3), n = X_ARG(4) / 2;
     if (n > max) n = max;
-    for (uint32_t i = 0; i < n; ++i) { uint16_t w = X_M16(src + i * 2); X_M8(dst + i) = w < 256 ? (uint8_t)w : '?'; }
-    if (pres) X_M32(pres) = n;
+    for (uint32_t i = 0; i < n; ++i) { uint16_t w = X_M16(src + i * 2); X_W8(dst + i) = w < 256 ? (uint8_t)w : '?'; }
+    if (pres) X_W32(pres) = n;
     c->r[0] = STATUS_SUCCESS; X_RET(5);
 }
 void xk_RtlMultiByteToUnicodeN(xctx *c)
 {
     uint32_t dst = X_ARG(0), max = X_ARG(1) / 2, pres = X_ARG(2), src = X_ARG(3), n = X_ARG(4);
     if (n > max) n = max;
-    for (uint32_t i = 0; i < n; ++i) X_M16(dst + i * 2) = X_M8(src + i);
-    if (pres) X_M32(pres) = n * 2;
+    for (uint32_t i = 0; i < n; ++i) X_W16(dst + i * 2) = X_M8(src + i);
+    if (pres) X_W32(pres) = n * 2;
     c->r[0] = STATUS_SUCCESS; X_RET(5);
 }
 
@@ -167,9 +167,9 @@ void xk_RtlTimeToTimeFields(xctx *c)
     int64_t z = days + 719468; int64_t era = (z >= 0 ? z : z - 146096) / 146097; unsigned doe = (unsigned)(z - era * 146097);
     unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; int y = (int)yoe + (int)era * 400; unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     unsigned mp = (5 * doy + 2) / 153; unsigned d = doy - (153 * mp + 2) / 5 + 1; unsigned m = mp + (mp < 10 ? 3 : -9); y += m <= 2;
-    X_M16(tf) = (uint16_t)y; X_M16(tf + 2) = (uint16_t)m; X_M16(tf + 4) = (uint16_t)d;
-    X_M16(tf + 6) = rem / 3600000; X_M16(tf + 8) = rem / 60000 % 60; X_M16(tf + 10) = rem / 1000 % 60; X_M16(tf + 12) = rem % 1000;
-    X_M16(tf + 14) = (uint16_t)((days + 134774 + 1) % 7);
+    X_W16(tf) = (uint16_t)y; X_W16(tf + 2) = (uint16_t)m; X_W16(tf + 4) = (uint16_t)d;
+    X_W16(tf + 6) = rem / 3600000; X_W16(tf + 8) = rem / 60000 % 60; X_W16(tf + 10) = rem / 1000 % 60; X_W16(tf + 12) = rem % 1000;
+    X_W16(tf + 14) = (uint16_t)((days + 134774 + 1) % 7);
     X_RET(2);
 }
 
@@ -221,7 +221,7 @@ static int gfmt(char *out, unsigned cap, const char *fmt, uint32_t args)
     *p = 0; return (int)(p - out);
 }
 void xk_RtlSprintf(xctx *c) { char buf[2048]; int n = gfmt(buf, sizeof buf, xk_gstr(X_ARG(1)), c->r[4] + 12); strcpy(X_G(X_ARG(0)), buf); c->r[0] = n; c->r[4] += 4; return; }   /* cdecl */
-void xk_RtlSnprintf(xctx *c) { char buf[2048]; int n = gfmt(buf, sizeof buf, xk_gstr(X_ARG(2)), c->r[4] + 16); uint32_t cap = X_ARG(1); if ((unsigned)n >= cap) n = cap ? (int)cap - 1 : 0; memcpy(X_G(X_ARG(0)), buf, n); if (cap) X_M8(X_ARG(0) + n) = 0; c->r[0] = n; c->r[4] += 4; return; }
+void xk_RtlSnprintf(xctx *c) { char buf[2048]; int n = gfmt(buf, sizeof buf, xk_gstr(X_ARG(2)), c->r[4] + 16); uint32_t cap = X_ARG(1); if ((unsigned)n >= cap) n = cap ? (int)cap - 1 : 0; memcpy(X_GWN(X_ARG(0), n), buf, n); if (cap) X_W8(X_ARG(0) + n) = 0; c->r[0] = n; c->r[4] += 4; return; }
 void xk_RtlVsprintf(xctx *c) { char buf[2048]; int n = gfmt(buf, sizeof buf, xk_gstr(X_ARG(1)), X_ARG(2)); strcpy(X_G(X_ARG(0)), buf); c->r[0] = n; c->r[4] += 4; return; }
-void xk_RtlVsnprintf(xctx *c) { char buf[2048]; int n = gfmt(buf, sizeof buf, xk_gstr(X_ARG(2)), X_ARG(3)); uint32_t cap = X_ARG(1); if ((unsigned)n >= cap) n = cap ? (int)cap - 1 : 0; memcpy(X_G(X_ARG(0)), buf, n); if (cap) X_M8(X_ARG(0) + n) = 0; c->r[0] = n; c->r[4] += 4; return; }
+void xk_RtlVsnprintf(xctx *c) { char buf[2048]; int n = gfmt(buf, sizeof buf, xk_gstr(X_ARG(2)), X_ARG(3)); uint32_t cap = X_ARG(1); if ((unsigned)n >= cap) n = cap ? (int)cap - 1 : 0; memcpy(X_GWN(X_ARG(0), n), buf, n); if (cap) X_W8(X_ARG(0) + n) = 0; c->r[0] = n; c->r[4] += 4; return; }
 void xk_DbgPrint(xctx *c) { char buf[2048]; gfmt(buf, sizeof buf, xk_gstr(X_ARG(0)), c->r[4] + 8); XK_LOG("DbgPrint: %s", buf); if (!strchr(buf, '\n')) fputc('\n', stderr); c->r[0] = 0; c->r[4] += 4; return; }

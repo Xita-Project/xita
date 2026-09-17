@@ -2,6 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* Write-epoch tracking (Vita build only; absent in the host tests): see menu_texture_acquire. */
+extern uint32_t xv_page_epoch[] __attribute__((weak));   /* static table in checked builds; absent in the host tests */
+extern uint32_t xv_page_count __attribute__((weak)), xv_write_epoch __attribute__((weak));
+extern uint8_t *g_xram __attribute__((weak));
+extern void *h2_map_physical_read(uint32_t address, uint32_t bytes) __attribute__((weak));
+extern void h2_texture_tracking_fault(uint32_t address, uint32_t bytes) __attribute__((weak));
+extern uint32_t xk_mem_image_arena_offset(void) __attribute__((weak));
+extern void xv_logf(const char *, ...) __attribute__((weak));
 
 static uint32_t argb(uint8_t a, uint8_t r, uint8_t g, uint8_t b)
 { return ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b; }
@@ -236,7 +244,7 @@ static int locate(const h2_command_state *s, const h2_kelvin_clear *c, unsigned 
     uint32_t phys;
     if (!h2_dma_load(c->read_instance, c->opaque, s->dma[selector], &dma) ||
         !h2_dma_resolve(&dma, s->setup[base / 4], L->src_bytes, 0, c->physical_bytes, &phys)) { note(code, O_NOMAP); return 0; }
-    L->src = c->map_physical(c->opaque, phys, L->src_bytes);
+    L->src = h2_map_physical_read ? h2_map_physical_read(phys, L->src_bytes) : c->map_physical(c->opaque, phys, L->src_bytes);
     if (!L->src) { note(code, O_NOMAP); return 0; }
 
     /* P8 texels index the unit's palette (SET_TEXTURE_PALETTE: DMA bit 0 A/B,
@@ -323,11 +331,13 @@ static uint64_t content_hash(const uint8_t *p, size_t n, uint64_t h)
     return h;
 }
 
-typedef struct { uint32_t key[6]; uint64_t hash; uint32_t *texels; uint32_t w, h, bytes; int linear; uint64_t used; } tex_entry;
+typedef struct { uint32_t key[6]; uint64_t hash; uint32_t *texels; uint32_t w, h, bytes; int linear; uint64_t used;
+                 int tracked; uint32_t page_lo, page_hi, verified; unsigned clean_hits;
+                 uint8_t *snapshot; uint32_t snapshot_bytes; } tex_entry;   /* snapshot: diagnostic copy of the source */
 enum { TEX_CACHE_ENTRIES = 64, TEX_CACHE_BUDGET = 40u << 20 };
 static tex_entry g_entries[TEX_CACHE_ENTRIES];
 static size_t g_cache_bytes;
-static uint64_t g_hits, g_misses, g_hash_bytes;
+static uint64_t g_hits, g_misses, g_hash_bytes, g_hash_skipped;
 
 const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit,
                                      uint64_t serial, uint32_t cap, uint32_t *ow, uint32_t *oh, int *out_linear,
@@ -335,19 +345,56 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
 {
     located L;
     if (!locate(s, c, unit, cap, &L)) return NULL;
-    uint64_t hash = content_hash(L.src, L.src_bytes, 0x243F6A8885A308D3ull ^ L.src_bytes);
-    g_hash_bytes += L.src_bytes;
-    if (L.d.kind == PF_P8) hash = content_hash((const uint8_t *)L.palette, (L.pal_mask + 1) * 4, hash);
-    tex_entry *e = NULL, *victim = NULL;
+    /* The source is normally re-hashed on every draw (level textures reach ~130 KB
+     * each). With the arena's per-page write epochs available, an entry with the same
+     * key whose source pages carry no stamp at or after its last full read is proven
+     * unchanged and reuses its hash; every 64th such use still reads the source in
+     * full, and a mismatch there is a strict stop: a writer the stamps did not see. */
+    int tracked = xv_page_epoch != NULL && &g_xram && g_xram && L.d.kind != PF_P8 &&
+                  (uintptr_t)L.src >= (uintptr_t)g_xram;
+    uint32_t page_lo = 0, page_hi = 0;
+    if (tracked) {
+        uintptr_t off = (uintptr_t)L.src - (uintptr_t)g_xram;
+        page_lo = (uint32_t)(off >> 12); page_hi = (uint32_t)((off + L.src_bytes - 1) >> 12);
+        if (page_hi >= xv_page_count) tracked = 0;
+        /* The XBE image's own data pages are written by unstamped image-relative stores
+         * (X_IMG*): sources there keep the full re-hash. Level textures live in RAM. */
+        if (xk_mem_image_arena_offset && page_hi >= xk_mem_image_arena_offset() >> 12) tracked = 0;
+    }
+    tex_entry *keyed = NULL, *victim = NULL;
     for (unsigned i = 0; i < TEX_CACHE_ENTRIES; ++i) {
         tex_entry *t = &g_entries[i];
-        if (t->texels && t->hash == hash && !memcmp(t->key, L.key, sizeof L.key)) { e = t; break; }
+        if (t->texels && !memcmp(t->key, L.key, sizeof L.key)) { keyed = t; continue; }
         if (!t->texels) { if (!victim || victim->texels) victim = t; }
         else if (t->used != serial && (!victim || (victim->texels && t->used < victim->used))) victim = t;
     }
+    int clean = 0;
+    if (keyed && tracked && keyed->tracked && keyed->page_lo == page_lo && keyed->page_hi == page_hi) {
+        clean = 1;
+        for (uint32_t p = page_lo; p <= page_hi; ++p) if (xv_page_epoch[p] >= keyed->verified) { clean = 0; break; }
+    }
+    uint64_t hash;
+    if (clean && (++keyed->clean_hits & 63)) { hash = keyed->hash; ++g_hash_skipped; }
+    else {
+        hash = content_hash(L.src, L.src_bytes, 0x243F6A8885A308D3ull ^ L.src_bytes);
+        g_hash_bytes += L.src_bytes;
+        if (L.d.kind == PF_P8) hash = content_hash((const uint8_t *)L.palette, (L.pal_mask + 1) * 4, hash);
+        if (clean && hash != keyed->hash && h2_texture_tracking_fault) {
+            uint32_t emin = 0xFFFFFFFFu, emax = 0;
+            for (uint32_t p = page_lo; p <= page_hi; ++p) { if (xv_page_epoch[p] < emin) emin = xv_page_epoch[p]; if (xv_page_epoch[p] > emax) emax = xv_page_epoch[p]; }
+            uint32_t first = 0xFFFFFFFFu, last = 0, ndiff = 0;
+            if (keyed->snapshot && keyed->snapshot_bytes == L.src_bytes)
+                for (uint32_t i = 0; i < L.src_bytes; ++i) if (keyed->snapshot[i] != L.src[i]) { if (first == 0xFFFFFFFFu) first = i; last = i; ++ndiff; }
+            if (xv_logf) xv_logf("[h2/texture-fault] key=%08X bytes=%u pages=%u..%u stamps=%u..%u verified=%u now=%u diff=%u first=%u last=%u\n",
+                    L.key[0], L.src_bytes, page_lo, page_hi, emin, emax, keyed->verified, xv_write_epoch, ndiff, first, last);
+            h2_texture_tracking_fault(L.key[0], L.src_bytes);
+        }
+    }
+    tex_entry *e = (keyed && keyed->hash == hash) ? keyed : NULL;
     if (e) { ++g_hits; }
     else {
         ++g_misses;
+        if (keyed) victim = keyed;                          /* same key, changed content: replace in place */
         uint32_t bytes = L.w * L.h * 4;
         /* Evict least-recently-used entries (never this draw's) until the budget fits. */
         while (g_cache_bytes + bytes > TEX_CACHE_BUDGET) {
@@ -367,7 +414,17 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
         memcpy(victim->key, L.key, sizeof L.key);
         victim->hash = hash; victim->texels = px; victim->w = L.w; victim->h = L.h; victim->bytes = bytes;
         victim->linear = L.d.linear; g_cache_bytes += bytes;
+        victim->clean_hits = 0;
         e = victim;
+    }
+    if (!clean || !(e->clean_hits & 63)) {     /* hashed this time: the stamps from here on are what matter */
+        e->tracked = tracked; e->page_lo = page_lo; e->page_hi = page_hi; e->verified = tracked ? xv_write_epoch : 0;
+        static int keep_snapshots = -1;         /* XV_TEXTURE_SNAPSHOT=1: retain sources (<=256 KB) so a mismatch is described */
+        if (keep_snapshots < 0) { const char *k = getenv("XV_TEXTURE_SNAPSHOT"); keep_snapshots = k ? atoi(k) : 0; }
+        if (keep_snapshots && tracked && L.src_bytes <= 262144) {
+            if (e->snapshot_bytes != L.src_bytes) { free(e->snapshot); e->snapshot = malloc(L.src_bytes); e->snapshot_bytes = e->snapshot ? L.src_bytes : 0; }
+            if (e->snapshot) memcpy(e->snapshot, L.src, L.src_bytes);
+        }
     }
     e->used = serial;
     *ow = e->w; *oh = e->h;
@@ -379,3 +436,4 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
 void menu_texture_cache_stats(uint64_t *hits, uint64_t *misses, size_t *bytes)
 { *hits = g_hits; *misses = g_misses; *bytes = g_cache_bytes; }
 uint64_t menu_texture_hashed_bytes(void) { return g_hash_bytes; }
+uint64_t menu_texture_hash_skipped(void) { return g_hash_skipped; }

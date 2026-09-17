@@ -13,6 +13,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include "xk.h"
+#ifdef XV_CHECK_GUEST_ADDRESS
+/* Zeroing through a raw arena pointer is a host write too: stamp the pages so a
+ * consumer caching derived data (the texture cache) sees a re-allocated buffer change. */
+#define ARENA_WRITTEN(off, n) xv_mark_written(g_xram + (off), (n))
+#else
+#define ARENA_WRITTEN(off, n) ((void)0)
+#endif
 
 #define XRAM_SIZE      (64u << 20)
 #define NPAGES         (XRAM_SIZE / XK_PAGE)          /* physical pages */
@@ -72,7 +79,35 @@ extern uint8_t *g_xram;
 /* Call after g_xram is allocated: fixes the flat base for constant image-address access (X_IMG*).
  * g_img_base + a == X_G(a) for every a in [g_image_lo, g_image_hi) (the image is mapped at arena
  * offset XRAM_SIZE and never remapped). */
-void xk_mem_bind_arena(void) { g_img_base = g_xram + XRAM_SIZE - g_image_lo; }
+#ifdef XV_CHECK_GUEST_ADDRESS
+uint32_t xv_page_epoch[XV_PAGE_EPOCH_ENTRIES], xv_page_count, xv_write_epoch = 1;
+uint32_t xv_watch_off, xv_watch_len;
+extern volatile uint32_t xv_cur_fn __attribute__((weak));
+void xv_watch_store(uint32_t address, uint32_t off)
+{
+    static unsigned logs; if (logs++ < 48)
+        XK_LOG("[watch-store] guest=%08X arena=%08X fn=%08X epoch=%u\n", address, off, &xv_cur_fn ? xv_cur_fn : 0, xv_write_epoch);
+}
+void xv_mark_written(const void *host, uint32_t bytes)
+{
+    if (!bytes || (uintptr_t)host < (uintptr_t)g_xram) return;
+    uintptr_t off = (uintptr_t)host - (uintptr_t)g_xram;
+    if (xv_watch_len && off < xv_watch_off + xv_watch_len && off + bytes > xv_watch_off) {
+        static unsigned logs; if (logs++ < 48)
+            XK_LOG("[watch-host] arena=%08X bytes=%u caller=%p fn=%08X epoch=%u\n", (unsigned)off, bytes, __builtin_return_address(0), &xv_cur_fn ? xv_cur_fn : 0, xv_write_epoch);
+    }
+    for (uint32_t p = (uint32_t)(off >> 12), e = (uint32_t)((off + bytes - 1) >> 12); p <= e && p < xv_page_count; ++p)
+        xv_page_epoch[p] = xv_write_epoch;
+}
+#endif
+void xk_mem_bind_arena(void)
+{
+    g_img_base = g_xram + XRAM_SIZE - g_image_lo;
+#ifdef XV_CHECK_GUEST_ADDRESS
+    xv_page_count = xk_mem_arena_size() / XK_PAGE + 1;
+    if (xv_page_count > XV_PAGE_EPOCH_ENTRIES) { XK_LOG("arena %u pages exceeds the write-epoch table\n", xv_page_count); abort(); }
+#endif
+}
 uint32_t xk_mem_image_lo(void) { return g_image_lo; }
 uint32_t xk_mem_image_hi(void) { return g_image_hi; }
 uint32_t xk_mem_arena_size(void) { return g_trash_off + XK_PAGE; }
@@ -92,8 +127,8 @@ uint32_t xk_phys_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t 
     if (highest + 1 < size) return 0;
     uint32_t last = ((highest + 1 - size) & ~(align - 1));
     if (first > last) return 0;
-    if (top_down) { for (uint32_t a = last; ; a -= align) { if (phys_range_free(a, size)) { phys_mark(a, size, 1); memset(g_xram + a, 0, size); if (g_npr < MAX_RANGES) g_pr[g_npr++] = (prange_t){ a, size }; return a; } if (a < first + align) break; } }
-    else { for (uint32_t a = first; a <= last; a += align) if (phys_range_free(a, size)) { phys_mark(a, size, 1); memset(g_xram + a, 0, size); if (g_npr < MAX_RANGES) g_pr[g_npr++] = (prange_t){ a, size }; return a; } }
+    if (top_down) { for (uint32_t a = last; ; a -= align) { if (phys_range_free(a, size)) { phys_mark(a, size, 1); memset(g_xram + a, 0, size); ARENA_WRITTEN(a, size); if (g_npr < MAX_RANGES) g_pr[g_npr++] = (prange_t){ a, size }; return a; } if (a < first + align) break; } }
+    else { for (uint32_t a = first; a <= last; a += align) if (phys_range_free(a, size)) { phys_mark(a, size, 1); memset(g_xram + a, 0, size); ARENA_WRITTEN(a, size); if (g_npr < MAX_RANGES) g_pr[g_npr++] = (prange_t){ a, size }; return a; } }
     return 0;
 }
 int xk_phys_free(uint32_t pa)
@@ -155,7 +190,7 @@ static int virt_commit(uint32_t va, uint32_t size)
                 for (uint32_t p = va; p < va + size; p += XK_PAGE) {
                     if (g_virt_committed[p / XK_PAGE]) continue;
                     g_phys_used[q / XK_PAGE] = 1; g_virt_committed[p / XK_PAGE] = 1;
-                    memset(g_xram + q, 0, XK_PAGE); map_page(p, q); q += XK_PAGE;
+                    memset(g_xram + q, 0, XK_PAGE); ARENA_WRITTEN(q, XK_PAGE); map_page(p, q); q += XK_PAGE;
                 }
                 return 0;
             }
@@ -169,7 +204,7 @@ static int virt_commit(uint32_t va, uint32_t size)
         if (!pa) { for (uint32_t q = KERNEL_VA / XK_PAGE; q-- > 0; ) if (!g_phys_used[q]) { pa = q * XK_PAGE; break; } }
         if (!pa) return -1;
         g_phys_used[pa / XK_PAGE] = 1; g_virt_committed[p / XK_PAGE] = 1;
-        memset(g_xram + pa, 0, XK_PAGE); map_page(p, pa);
+        memset(g_xram + pa, 0, XK_PAGE); ARENA_WRITTEN(pa, XK_PAGE); map_page(p, pa);
     }
     return 0;
 }
@@ -227,7 +262,7 @@ uint32_t xk_kalloc(uint32_t size)
         /* Preserve earlier holes that were too small for this request. */
         if (start == g_khint) g_khint = i;
         uint32_t a = KERNEL_VA + start * KPOOL_UNIT;
-        memset(X_G(a), 0, need * KPOOL_UNIT);
+        memset(X_GWN(a, need * KPOOL_UNIT), 0, need * KPOOL_UNIT);
         return a;
     }
     XK_LOG("kalloc: out of kernel memory\n"); return 0;
@@ -298,8 +333,8 @@ void xk_MmQueryStatistics(xctx *c)
 {
     uint32_t s = X_ARG(0);
     if (X_M32(s) >= 36) {
-        X_M32(s + 4) = NPAGES; X_M32(s + 8) = phys_free_pages(); X_M32(s + 12) = (NPAGES - phys_free_pages()) * XK_PAGE;
-        X_M32(s + 16) = 0; X_M32(s + 20) = 0; X_M32(s + 24) = 0; X_M32(s + 28) = 0; X_M32(s + 32) = (g_image_hi - g_image_lo) / XK_PAGE;
+        X_W32(s + 4) = NPAGES; X_W32(s + 8) = phys_free_pages(); X_W32(s + 12) = (NPAGES - phys_free_pages()) * XK_PAGE;
+        X_W32(s + 16) = 0; X_W32(s + 20) = 0; X_W32(s + 24) = 0; X_W32(s + 28) = 0; X_W32(s + 32) = (g_image_hi - g_image_lo) / XK_PAGE;
         c->r[0] = STATUS_SUCCESS;
     } else c->r[0] = STATUS_INVALID_PARAMETER;
     X_RET(1);
@@ -317,13 +352,13 @@ void xk_NtAllocateVirtualMemory(xctx *c)
         else { va = virt_reserve(hi - lo, lo, 0); if (!va) { XK_LOG("NtAllocateVirtualMemory: hint %08X busy\n", base); va = virt_reserve(hi - lo, 0, 0); } }
         if (!va) { c->r[0] = STATUS_NO_MEMORY; X_RET(5); }
         if ((type & 0x1000) && virt_commit(va, hi - lo) != 0) { c->r[0] = STATUS_NO_MEMORY; X_RET(5); }
-        X_M32(pbase) = va; X_M32(psize) = hi - lo;
+        X_W32(pbase) = va; X_W32(psize) = hi - lo;
     } else {
         va = virt_reserve(size, 0, 0);
         if (!va) { XK_LOG("NtAllocateVirtualMemory: out of address space (%u KB)\n", size >> 10); c->r[0] = STATUS_NO_MEMORY; X_RET(5); }
         size = (size + XK_PAGE - 1) & ~(XK_PAGE - 1);
         if ((type & 0x1000) && virt_commit(va, size) != 0) { c->r[0] = STATUS_NO_MEMORY; X_RET(5); }
-        X_M32(pbase) = va; X_M32(psize) = size;
+        X_W32(pbase) = va; X_W32(psize) = size;
     }
     XK_LOG("NtAllocateVirtualMemory(base %08X, %u KB, type %X) -> %08X\n", base, size >> 10, type, va);
     c->r[0] = STATUS_SUCCESS; X_RET(5);
@@ -339,11 +374,11 @@ void xk_NtQueryVirtualMemory(xctx *c)
 {
     uint32_t va = X_ARG(0), info = X_ARG(1); int i = vr_find(va);
     /* MEMORY_BASIC_INFORMATION { BaseAddress, AllocationBase, AllocationProtect, RegionSize, State, Protect, Type } */
-    X_M32(info) = va & ~(XK_PAGE - 1); X_M32(info + 4) = i >= 0 ? g_vr[i].va : 0; X_M32(info + 8) = 4;
-    X_M32(info + 12) = i >= 0 ? g_vr[i].size : XK_PAGE; X_M32(info + 16) = i >= 0 ? 0x1000 : 0x10000; X_M32(info + 20) = 4; X_M32(info + 24) = 0x20000;
+    X_W32(info) = va & ~(XK_PAGE - 1); X_W32(info + 4) = i >= 0 ? g_vr[i].va : 0; X_W32(info + 8) = 4;
+    X_W32(info + 12) = i >= 0 ? g_vr[i].size : XK_PAGE; X_W32(info + 16) = i >= 0 ? 0x1000 : 0x10000; X_W32(info + 20) = 4; X_W32(info + 24) = 0x20000;
     c->r[0] = STATUS_SUCCESS; X_RET(3);
 }
-void xk_NtProtectVirtualMemory(xctx *c) { if (X_ARG(3)) X_M32(X_ARG(3)) = 4; c->r[0] = STATUS_SUCCESS; X_RET(4); }
+void xk_NtProtectVirtualMemory(xctx *c) { if (X_ARG(3)) X_W32(X_ARG(3)) = 4; c->r[0] = STATUS_SUCCESS; X_RET(4); }
 void xk_ExAllocatePoolWithTag(xctx *c) { uint32_t n = X_ARG(0); c->r[0] = n >= XK_PAGE ? xk_mem_alloc(n, 0, 0, 0, 0) : xk_kalloc(n); X_RET(2); }
 void xk_ExAllocatePool(xctx *c) { uint32_t n = X_ARG(0); c->r[0] = n >= XK_PAGE ? xk_mem_alloc(n, 0, 0, 0, 0) : xk_kalloc(n); X_RET(1); }
 void xk_ExFreePool(xctx *c) { if (X_ARG(0) < KERNEL_VA) xk_mem_free(X_ARG(0)); else xk_kfree(X_ARG(0)); X_RET(1); }

@@ -57,19 +57,19 @@ static void queue_dpc(dpc_record *d, uint32_t a1, uint32_t a2)
 {
     if (d->order) return;
     d->arg1 = a1; d->arg2 = a2; d->order = ++queue_order;
-    X_M8(d->address + 2) = 1;
-    X_M32(d->address + 20) = a1; X_M32(d->address + 24) = a2;
+    X_W8(d->address + 2) = 1;
+    X_W32(d->address + 20) = a1; X_W32(d->address + 24) = a2;
 }
 static void expire(timer_record *t, uint64_t now, uint64_t wall)
 {
     t->active = t->period != 0;
     if (t->active) t->deadline = now + (uint64_t)t->period * 10000;
-    X_M8(t->address + 3) = t->active;
+    X_W8(t->address + 3) = t->active;
     if (t->active) {
-        X_M32(t->address + 16) = (uint32_t)t->deadline;
-        X_M32(t->address + 20) = (uint32_t)(t->deadline >> 32);
+        X_W32(t->address + 16) = (uint32_t)t->deadline;
+        X_W32(t->address + 20) = (uint32_t)(t->deadline >> 32);
     }
-    t->object->u.timer.signaled = 1; X_M32(t->address + 4) = 1;
+    t->object->u.timer.signaled = 1; X_W32(t->address + 4) = 1;
     if (t->dpc) queue_dpc(find_dpc(t->dpc), (uint32_t)wall, (uint32_t)(wall >> 32));
 }
 static void worker_entry(xctx *c, void *opaque)
@@ -111,10 +111,10 @@ void __wrap_xk_KeInitializeTimerEx(xctx *c)
     if (!object || object->type != XO_TIMER) { h2_timer_fault(c, "timer registration failed", address, 0); return; }
     *t = (timer_record){.address=address, .object=object, .synchronization=type};
     memset(&object->u.timer, 0, sizeof object->u.timer);
-    X_M8(address + 2) = 10; X_M8(address + 3) = 0;
-    X_M32(address + 8) = address + 8; X_M32(address + 12) = address + 8;
-    X_M32(address + 16) = 0; X_M32(address + 20) = 0;
-    X_M32(address + 24) = 0; X_M32(address + 28) = 0; X_M32(address + 36) = 0;
+    X_W8(address + 2) = 10; X_W8(address + 3) = 0;
+    X_W32(address + 8) = address + 8; X_W32(address + 12) = address + 8;
+    X_W32(address + 16) = 0; X_W32(address + 20) = 0;
+    X_W32(address + 24) = 0; X_W32(address + 28) = 0; X_W32(address + 36) = 0;
 }
 void __wrap_xk_KeInitializeDpc(xctx *c)
 {
@@ -126,8 +126,8 @@ void __wrap_xk_KeInitializeDpc(xctx *c)
         h2_timer_fault(c, "invalid DPC initialization", address, routine); return;
     }
     *d = (dpc_record){.address=address};
-    X_M16(address) = 0x13; X_M8(address + 2) = 0;
-    X_M32(address + 12) = routine; X_M32(address + 16) = context;
+    X_W16(address) = 0x13; X_W8(address + 2) = 0;
+    X_W32(address + 12) = routine; X_W32(address + 16) = context;
     X_RET(3);
 }
 static void set_timer(xctx *c, int extended)
@@ -148,9 +148,9 @@ static void set_timer(xctx *c, int extended)
     unsigned inserted = t->active;
     t->deadline = now + delta; t->active = 1; t->dpc = dpc; t->period = period;
     t->object->u.timer.signaled = 0; /* expiry belongs to this queue, not shared due polling */
-    X_M8(address + 1) = !(due >> 63); X_M8(address + 3) = 1; X_M32(address + 4) = 0;
-    X_M32(address + 16) = (uint32_t)t->deadline; X_M32(address + 20) = (uint32_t)(t->deadline >> 32);
-    X_M32(address + 32) = dpc; X_M32(address + 36) = period;
+    X_W8(address + 1) = !(due >> 63); X_W8(address + 3) = 1; X_W32(address + 4) = 0;
+    X_W32(address + 16) = (uint32_t)t->deadline; X_W32(address + 20) = (uint32_t)(t->deadline >> 32);
+    X_W32(address + 32) = dpc; X_W32(address + 36) = period;
     if (!delta) { expire(t, now, wall); xk_signal_check(); }
     static unsigned arms;                              /* heartbeat re-arms ~100/s: log first 400, then every 1000th */
     if (++arms <= 400 || !(arms % 1000))
@@ -166,7 +166,7 @@ void __wrap_xk_KeCancelTimer(xctx *c)
     if (!arguments(c, 1)) return;
     timer_record *t = find_timer(X_ARG(0));
     if (!t || !mapped(t->address, 40)) { h2_timer_fault(c, "unknown timer cancellation", X_ARG(0), 0); return; }
-    c->r[0] = t->active; t->active = 0; X_M8(t->address + 3) = 0;
+    c->r[0] = t->active; t->active = 0; X_W8(t->address + 3) = 0;
     if (worker && !dispatching) xk_thread_kick(worker);
     X_RET(1); /* cancellation does not remove an already queued DPC */
 }
@@ -187,7 +187,7 @@ void __wrap_xk_KeRemoveQueueDpc(xctx *c)
     uint32_t address = X_ARG(0);
     if (!valid_dpc(address)) { h2_timer_fault(c, "unknown DPC removal", address, 0); return; }
     dpc_record *d = find_dpc(address); c->r[0] = d->order != 0;
-    d->order = 0; X_M8(address + 2) = 0; X_RET(1);
+    d->order = 0; X_W8(address + 2) = 0; X_RET(1);
 }
 /* Optional shared-kernel hooks; absent for Halo CE and all ordinary targets. */
 int xk_game_timer_consume(xk_obj *object)
@@ -215,7 +215,7 @@ static void change_irql(xctx *c, unsigned level, int raise)
     if (old > 2 || level > 2 || (raise ? level < old : level > old)) {
         h2_timer_fault(c, "unsupported IRQL transition", old, level); return;
     }
-    X_M8(address) = level;
+    X_W8(address) = level;
     if (raise) c->r[0] = old;
     X_RET(0);
 }
@@ -247,14 +247,14 @@ void h2_timer_poll(xctx *c)
         }
         uint32_t address = d->address, routine = X_M32(address + 12), context = X_M32(address + 16);
         xctx saved = *c; uint8_t irql = X_M8(c->fs_base + KPCR_IRQL);
-        d->order = 0; X_M8(address + 2) = 0; X_M8(c->fs_base + KPCR_IRQL) = 2;
+        d->order = 0; X_W8(address + 2) = 0; X_W8(c->fs_base + KPCR_IRQL) = 2;
         X_PUSH32(d->arg2); X_PUSH32(d->arg1); X_PUSH32(context); X_PUSH32(address); X_PUSH32(0xDEAD0002u);
         dispatching = 1; c->preempt = 0x7FFFFFFF;
         if (h2_log_budget(&dispatch_logs, 256, 20000)) xv_logf("[h2/timer] dispatch dpc=%08X routine=%08X args=%08X,%08X\n", address, routine, d->arg1, d->arg2);
         xv_call(c, routine);
         dispatching = 0;
         if (c->r[4] != saved.r[4]) { h2_timer_fault(c, "DPC stack imbalance", address, c->r[4]); return; }
-        X_M8(saved.fs_base + KPCR_IRQL) = irql; *c = saved;
+        X_W8(saved.fs_base + KPCR_IRQL) = irql; *c = saved;
     }
     /* 64 is a cooperative service budget, not a limit on callback lifetime.
      * Do not remove, reinsert, rewrite or execute the next queued callback. */

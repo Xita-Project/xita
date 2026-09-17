@@ -1,5 +1,6 @@
 #include "sprite_draw.h"
 #include <string.h>
+extern void xv_mark_written(const void *host, uint32_t bytes) __attribute__((weak));
 #define BYTES (640u * 480u * 4u)
 static int overlaps(uintptr_t a, uint32_t an, uintptr_t b, uint32_t bn)
 { return a < b + bn && b < a + an; }
@@ -113,6 +114,7 @@ static int finish(h2_sprite_draw *q,h2_command_state *s,h2_kelvin_clear *c)
     /* NV097_COLOR_MASK selects RGB only. Preserve guest A independently of
      * staging contents, including pixels outside the original rectangle. */
     for(unsigned i=0;i<BYTES;i+=4) memcpy(destination+i,(const uint8_t *)rgba+i,3);
+    if (xv_mark_written) xv_mark_written(destination, BYTES);
     q->active=0; ++q->completed; return 1;
 }
 int h2_sprite_method(h2_sprite_draw *q,h2_command_state *s,h2_kelvin_clear *c,

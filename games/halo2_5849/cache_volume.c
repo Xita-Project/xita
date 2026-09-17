@@ -125,12 +125,12 @@ void __wrap_xk_NtOpenFile(xctx *c)
     if (!scratch) scratch = xk_kalloc(128);
     if (!scratch) { finish(c, X_ARG(3), STATUS_NO_MEMORY, 0, 6); return; }
     char raw[64]; snprintf(raw, sizeof raw, "\\Device\\H2Raw%u", index + 3);
-    for (unsigned i = 0; i <= strlen(raw); ++i) X_M8(scratch + 32 + i) = raw[i];
+    for (unsigned i = 0; i <= strlen(raw); ++i) X_W8(scratch + 32 + i) = raw[i];
     OA_ROOT(scratch) = 0; OA_NAME(scratch) = scratch + 16; OA_ATTR(scratch) = OA_ATTR(oa);
     AS_LEN(scratch + 16) = strlen(raw); AS_MAX(scratch + 16) = strlen(raw) + 1; AS_BUF(scratch + 16) = scratch + 32;
-    X_M32(esp + 12) = scratch;
+    X_W32(esp + 12) = scratch;
     __real_xk_NtOpenFile(c);
-    X_M32(esp + 12) = oa;
+    X_W32(esp + 12) = oa;
 }
 
 void __real_xk_NtDeviceIoControlFile(xctx *c);
@@ -145,14 +145,14 @@ void __wrap_xk_NtDeviceIoControlFile(xctx *c)
     else if (code != 0x70000 && code != 0x74004) status = STATUS_INVALID_DEVICE_REQUEST;
     else if (!out || length < (code == 0x70000 ? 24u : 32u)) status = STATUS_BUFFER_TOO_SMALL;
     else if (code == 0x70000) { /* DISK_GEOMETRY: virtual CHS product = configured capacity. */
-        X_M64(out) = H2_CACHE_CAPACITY / (32u * 64u * 512u);
-        X_M32(out + 8) = 12; X_M32(out + 12) = 32; X_M32(out + 16) = 64; X_M32(out + 20) = 512;
+        X_W64(out) = H2_CACHE_CAPACITY / (32u * 64u * 512u);
+        X_W32(out + 8) = 12; X_W32(out + 12) = 32; X_W32(out + 16) = 64; X_W32(out + 20) = 512;
         written = 24;
     } else { /* PARTITION_INFORMATION */
-        for (unsigned i = 0; i < 32; ++i) X_M8(out + i) = 0;
-        X_M64(out + 8) = H2_CACHE_CAPACITY;
-        X_M32(out + 20) = index + 3;
-        X_M8(out + 26) = 1; /* RecognizedPartition */
+        for (unsigned i = 0; i < 32; ++i) X_W8(out + i) = 0;
+        X_W64(out + 8) = H2_CACHE_CAPACITY;
+        X_W32(out + 20) = index + 3;
+        X_W8(out + 26) = 1; /* RecognizedPartition */
         written = 32;
     }
     finish(c, X_ARG(4), status, written, 10);
@@ -222,7 +222,7 @@ void __wrap_xk_NtQueryVolumeInformationFile(xctx *c)
     else {
         uint64_t available = used < units ? units - used : 0;
         if (available > free_bytes / cluster) available = free_bytes / cluster;
-        X_M64(out) = units; X_M64(out + 8) = available; X_M32(out + 16) = cluster / 512; X_M32(out + 20) = 512;
+        X_W64(out) = units; X_W64(out + 8) = available; X_W32(out + 16) = cluster / 512; X_W32(out + 20) = 512;
         written = 24;
         XK_LOG("[h2/volume] cache%u allocation unit=%u bytes total=%u free=%llu\n", index + 3, cluster, units, (unsigned long long)available);
     }

@@ -9,6 +9,7 @@
 #include <string.h>
 
 extern void xv_logf(const char *, ...);
+extern void xv_mark_written(const void *host, uint32_t bytes) __attribute__((weak));
 extern void h2_menu_dump_target(const uint8_t *target, uint32_t W, uint32_t H, uint64_t drawn, uint32_t color_offset);
 
 #define GCHECK(x) do { int err_ = (x); if (err_ < 0) { xv_logf("[h2/menu-gxm] FAIL %s = %08X\n", #x, err_); return 0; } } while (0)
@@ -138,6 +139,7 @@ static void flush_scene(void)
     sceGxmEndScene(g_ctx, NULL, NULL);
     sceGxmFinish(g_ctx);
     memcpy(g_open->guest, g_open->mem, W * H * 4);
+    if (xv_mark_written) xv_mark_written(g_open->guest, W * H * 4);
     sceGxmDepthStencilSurfaceSetForceLoadMode(&g_depth, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_ENABLED);
     g_open = NULL; g_open_draws = 0; g_vring_used = g_iring_used = 0;
     g_perf_flush_us += perf_now() - t0; ++g_perf_flushes;
@@ -552,10 +554,10 @@ int h2_menu_gxm_render(void *opaque, const h2_menu_request *r)
 /* Cumulative diagnostic counters for the channel's per-60-flip [h2/perf] line. */
 void h2_menu_gxm_perf(uint64_t out[12])
 {
-    extern uint64_t menu_texture_hashed_bytes(void);
+    extern uint64_t menu_texture_hashed_bytes(void), menu_texture_hash_skipped(void);
     uint64_t hits = 0, misses = 0; size_t cache_bytes = 0;
     menu_texture_cache_stats(&hits, &misses, &cache_bytes);
     out[0] = g_drawn; out[1] = g_perf_render_us; out[2] = g_perf_flushes; out[3] = g_perf_flush_us;
     out[4] = g_perf_open_us; out[5] = g_perf_tex_us; out[6] = g_perf_gxmdraw_us; out[7] = g_fallbacks;
-    out[8] = menu_texture_hashed_bytes(); out[9] = hits; out[10] = misses; out[11] = cache_bytes;
+    out[8] = menu_texture_hashed_bytes(); out[9] = hits; out[10] = misses; out[11] = menu_texture_hash_skipped(); (void)cache_bytes;
 }

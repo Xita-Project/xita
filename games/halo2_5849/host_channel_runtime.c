@@ -22,10 +22,6 @@ extern void xv_logf(const char *, ...);
 extern uint64_t h2_platform_time_us(void) __attribute__((weak));
 static uint64_t perf_now(void) { return h2_platform_time_us ? h2_platform_time_us() : 0; }
 static uint64_t perf_submit_us, perf_submits, perf_flip_us, perf_flips_completed, perf_present_us, perf_pass_us;
-enum { PP_QUAD, PP_SCREEN, PP_BC1, PP_COMPOSITION, PP_THRESHOLD, PP_BLUR, PP_BLEND, PP_LUMA, PP_SPRITE, PP_MENU, PP_COMMAND, PP_COUNT };
-static const char *const perf_pass_name[PP_COUNT] = {"quad", "screen", "bc1", "composition", "threshold", "blur", "blend", "luma", "sprite", "menu", "command"};
-static uint64_t perf_pass_by[PP_COUNT];
-#define PASS_TIMED(idx, lvalue, call) do { uint64_t pt_ = perf_now(); lvalue = (call); perf_pass_by[idx] += perf_now() - pt_; } while (0)
 static h2_host_channel channel;   /* tentative; defined with the runtime state below */
 static void perf_report(uint32_t serial)
 {
@@ -41,28 +37,20 @@ static void perf_report(uint32_t serial)
 #define PD(cur, last, i) ((unsigned long long)((cur)[i] - (last)[i]))
 #define PDMS(cur, last, i) ((unsigned long long)(((cur)[i] - (last)[i]) / 1000))
         xv_logf("[h2/perf] serial=%u flips=60 wall_ms=%llu submit_ms=%llu submits=%llu flipwait_ms=%llu completed=%llu present_ms=%llu methods=%llu clears=%llu pass_ms=%llu"
-                " | gxm draws=%llu render_ms=%llu flushes=%llu flush_ms=%llu open_ms=%llu tex_ms=%llu gxmdraw_ms=%llu fallbacks=%llu hash_kb=%llu hits=%llu misses=%llu"
+                " | gxm draws=%llu render_ms=%llu flushes=%llu flush_ms=%llu open_ms=%llu tex_ms=%llu gxmdraw_ms=%llu fallbacks=%llu hash_kb=%llu hits=%llu misses=%llu unhashed=%llu"
                 " | audio grains=%llu nonzero=%llu compute_ms=%llu max_us=%llu misses=%llu hold_ms=%llu hold_max_us=%llu"
                 " compute_iters=%llu idle_iters=%llu guest_locks=%llu guest_wait_ms=%llu error=%08llX"
                 " | fx frames=%llu sources_ms=%llu dsp_ms=%llu dsp_instr=%llu | lock sites L%llu=%llu L%llu=%llu L%llu=%llu L%llu=%llu\n",
                 serial, (unsigned long long)((now - last_wall) / 1000), PDMS(cur, last, 0), PD(cur, last, 1), PDMS(cur, last, 2), PD(cur, last, 3),
                 PDMS(cur, last, 4), PD(cur, last, 5), PD(cur, last, 6), PDMS(cur, last, 7),
                 PD(gxm, last_gxm, 0), PDMS(gxm, last_gxm, 1), PD(gxm, last_gxm, 2), PDMS(gxm, last_gxm, 3), PDMS(gxm, last_gxm, 4),
-                PDMS(gxm, last_gxm, 5), PDMS(gxm, last_gxm, 6), PD(gxm, last_gxm, 7), (unsigned long long)((gxm[8] - last_gxm[8]) / 1024), PD(gxm, last_gxm, 9), PD(gxm, last_gxm, 10),
+                PDMS(gxm, last_gxm, 5), PDMS(gxm, last_gxm, 6), PD(gxm, last_gxm, 7), (unsigned long long)((gxm[8] - last_gxm[8]) / 1024), PD(gxm, last_gxm, 9), PD(gxm, last_gxm, 10), PD(gxm, last_gxm, 11),
                 PD(audio, last_audio, 0), PD(audio, last_audio, 1), PDMS(audio, last_audio, 2), (unsigned long long)audio[3], PD(audio, last_audio, 4),
                 PDMS(audio, last_audio, 5), (unsigned long long)audio[6], PD(audio, last_audio, 7), PD(audio, last_audio, 8),
                 PD(audio, last_audio, 10), PDMS(audio, last_audio, 9), (unsigned long long)audio[11],
                 PD(audio, last_audio, 12), PDMS(audio, last_audio, 13), PDMS(audio, last_audio, 14), PD(audio, last_audio, 15),
                 (unsigned long long)audio[16], (unsigned long long)audio[17], (unsigned long long)audio[18], (unsigned long long)audio[19],
                 (unsigned long long)audio[20], (unsigned long long)audio[21], (unsigned long long)audio[22], (unsigned long long)audio[23]);
-        {   /* the three pass consumers that took the most time in this window */
-            static uint64_t last_pass[PP_COUNT]; uint64_t d[PP_COUNT]; unsigned order[PP_COUNT];
-            for (unsigned i = 0; i < PP_COUNT; ++i) { d[i] = perf_pass_by[i] - last_pass[i]; last_pass[i] = perf_pass_by[i]; order[i] = i; }
-            for (unsigned i = 0; i < 3; ++i) for (unsigned j = i + 1; j < PP_COUNT; ++j) if (d[order[j]] > d[order[i]]) { unsigned t = order[i]; order[i] = order[j]; order[j] = t; }
-            xv_logf("[h2/perf-pass] serial=%u %s=%llums %s=%llums %s=%llums\n", serial,
-                    perf_pass_name[order[0]], (unsigned long long)(d[order[0]] / 1000), perf_pass_name[order[1]], (unsigned long long)(d[order[1]] / 1000),
-                    perf_pass_name[order[2]], (unsigned long long)(d[order[2]] / 1000));
-        }
         if (xk_wait_stats_request) xk_wait_stats_request();   /* the kernel dumps [wait] at the next guest yield */
 #undef PD
 #undef PDMS
@@ -163,15 +151,16 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
 #endif
     if (!sprite_active && !movie_quad.active && !screen_active && !bc1_active && !composition_active && !threshold_active && !luma_active && !blend_active && !blur_active && !menu_active && method != 0x17FC) return -1;
     uint32_t fpscr = h2_platform_fpscr_read();
-    uint64_t perf_t0 = perf_now();
+    /* Pass time is sampled on every 64th method: per-method clock reads (an HLE
+     * call each) cost more than most methods, so the sample is scaled instead. */
+    static unsigned perf_sample; uint64_t perf_t0 = (++perf_sample & 63) ? 0 : perf_now();
     uint64_t before = movie_quad.completed;
     int movie_active = movie_quad.active;
-    int result = 0;
-    if (!(screen_active || bc1_active || composition_active || threshold_active || blur_active || blend_active || luma_active || sprite_active)) PASS_TIMED(PP_QUAD, result, h2_quad_method(&movie_quad, &channel.commands, &channel.clear, sub, method, value));
+    int result = (screen_active || bc1_active || composition_active || threshold_active || blur_active || blend_active || luma_active || sprite_active) ? 0 : h2_quad_method(&movie_quad, &channel.commands, &channel.clear, sub, method, value);
 #if H2_SCREEN_RENDER
     if (!sprite_active && !luma_active && !blend_active && !blur_active && !threshold_active && !composition_active && !bc1_active && (screen_active || (!movie_active && !result))) {
         uint64_t screen_before = screen_quad.completed;
-        PASS_TIMED(PP_SCREEN, result, h2_screen_method(&screen_quad, &channel.commands, &channel.clear, sub, method, value));
+        result = h2_screen_method(&screen_quad, &channel.commands, &channel.clear, sub, method, value);
         if (screen_before != screen_quad.completed)
             xv_logf("[h2/screen] completed=%u original_vertices=4 source=%08X color=%08X RGBA committed; not yet presented\n",
                     (unsigned)screen_quad.completed, source, channel.clear.color_offset);
@@ -182,7 +171,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
 #if H2_BC1_RENDER
     if (!sprite_active && !luma_active && !blend_active && !blur_active && !threshold_active && !composition_active && (bc1_active || (!movie_active && !screen_active && !result))) {
         uint64_t bc1_before = bc1_quad.completed;
-        PASS_TIMED(PP_BC1, result, h2_bc1_method(&bc1_quad, &channel.commands, &channel.clear, sub, method, value));
+        result = h2_bc1_method(&bc1_quad, &channel.commands, &channel.clear, sub, method, value);
         if (bc1_before != bc1_quad.completed)
             xv_logf("[h2/bc1] completed=%u original_vertices=4 source=%08X color=%08X RGBA committed; not yet presented\n",
                     (unsigned)bc1_quad.completed, source, channel.clear.color_offset);
@@ -191,7 +180,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
 #if H2_COMPOSITION_RENDER
     if (!sprite_active && !luma_active && !blend_active && !blur_active && !threshold_active && (composition_active || (!movie_active && !screen_active && !bc1_active && !result))) {
         uint64_t composition_before = composition_quad.completed;
-        PASS_TIMED(PP_COMPOSITION, result, h2_composition_method(&composition_quad, &channel.commands, &channel.clear, sub, method, value));
+        result = h2_composition_method(&composition_quad, &channel.commands, &channel.clear, sub, method, value);
         if (composition_before != composition_quad.completed)
             xv_logf("[h2/composition] completed=%u original_vertices=4 source=%08X color=%08X RGBA committed; not yet presented\n",
                     (unsigned)composition_quad.completed, source, channel.clear.color_offset);
@@ -200,7 +189,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
 #if H2_THRESHOLD_RENDER
     if (!sprite_active && !luma_active && !blend_active && !blur_active && (threshold_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !result))) {
         uint64_t threshold_before = threshold_quad.completed;
-        PASS_TIMED(PP_THRESHOLD, result, h2_threshold_method(&threshold_quad, &channel.commands, &channel.clear, sub, method, value));
+        result = h2_threshold_method(&threshold_quad, &channel.commands, &channel.clear, sub, method, value);
         if (threshold_before != threshold_quad.completed)
             xv_logf("[h2/threshold] completed=%u original_vertices=4 source=%08X color=%08X RGBA committed; not yet presented\n",
                     (unsigned)threshold_quad.completed, source, channel.clear.color_offset);
@@ -209,7 +198,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
 #if H2_BLUR_RENDER
     if (!sprite_active && !luma_active && !blend_active && (blur_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !result))) {
         uint64_t blur_before = blur_quad.completed;
-        PASS_TIMED(PP_BLUR, result, h2_blur_method(&blur_quad, &channel.commands, &channel.clear, sub, method, value));
+        result = h2_blur_method(&blur_quad, &channel.commands, &channel.clear, sub, method, value);
         if (blur_before != blur_quad.completed)
             xv_logf("[h2/blur] completed=%u original_vertices=4 source=%08X color=%08X RGBA committed; not yet presented\n",
                     (unsigned)blur_quad.completed, source, channel.clear.color_offset);
@@ -218,7 +207,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
 #if H2_BLEND_RENDER
     if (!sprite_active && !luma_active && (blend_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !blur_active && !result))) {
         uint64_t blend_before = blend_quad.completed;
-        PASS_TIMED(PP_BLEND, result, h2_blend_method(&blend_quad, &channel.commands, &channel.clear, sub, method, value));
+        result = h2_blend_method(&blend_quad, &channel.commands, &channel.clear, sub, method, value);
         if (blend_before != blend_quad.completed)
             xv_logf("[h2/blend] completed=%u original_vertices=4 source=%08X color=%08X RGBA committed; not yet presented\n",
                     (unsigned)blend_quad.completed, source, channel.clear.color_offset);
@@ -227,7 +216,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
 #if H2_LUMA_RENDER
     if (!sprite_active && (luma_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !blur_active && !blend_active && !result))) {
         uint64_t luma_before = luma_quad.completed;
-        PASS_TIMED(PP_LUMA, result, h2_luma_method(&luma_quad, &channel.commands, &channel.clear, sub, method, value));
+        result = h2_luma_method(&luma_quad, &channel.commands, &channel.clear, sub, method, value);
         if (luma_before != luma_quad.completed)
             xv_logf("[h2/luma] completed=%u original_vertices=4 source=%08X color=%08X RGBA committed; not yet presented\n",
                     (unsigned)luma_quad.completed, source, channel.clear.color_offset);
@@ -236,7 +225,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
 #if H2_SPRITE_RENDER
     if (sprite_active || (!movie_active && !screen_active && !bc1_active && !composition_active && !threshold_active && !blur_active && !blend_active && !luma_active && !result)) {
         uint64_t sprite_before=sprite_quad.completed;
-        PASS_TIMED(PP_SPRITE, result, h2_sprite_method(&sprite_quad,&channel.commands,&channel.clear,sub,method,value));
+        result = h2_sprite_method(&sprite_quad,&channel.commands,&channel.clear,sub,method,value);
         if(sprite_before!=sprite_quad.completed)
             xv_logf("[h2/sprite] completed=%u original_inline_vertices=4 source=%08X color=%08X RGB committed; not yet presented\n",
                     (unsigned)sprite_quad.completed,source,channel.clear.color_offset);
@@ -250,11 +239,11 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
                         !threshold_active && !blur_active && !blend_active && !luma_active &&
                         !sprite_active && !result)) {
         uint64_t menu_done = menu_quad.completed, menu_rej = menu_quad.rejected;
-        int menu_result; PASS_TIMED(PP_MENU, menu_result, h2_menu_method(&menu_quad, &channel.commands, &channel.clear, sub, method, value));
+        int menu_result = h2_menu_method(&menu_quad, &channel.commands, &channel.clear, sub, method, value);
         if (menu_result == -1)
             /* Interleaved state inside an active menu draw: apply it to command
              * state and keep the draw open (the draw reads it at END). */
-            PASS_TIMED(PP_COMMAND, menu_result, h2_command_method(&channel.commands, &channel.clear, sub, method, value, source) ? 1 : 0);
+            menu_result = h2_command_method(&channel.commands, &channel.clear, sub, method, value, source) ? 1 : 0;
         if (menu_result != -1) result = menu_result;
         /* One line per completed draw was ~740 lines per menu frame; keep the first
          * 200 and then every 100th (the renderer logs its own sampled detail). */
@@ -295,7 +284,7 @@ static int geometry_method(void *opaque, uint8_t sub, uint16_t method,
         xv_logf("[h2/quad] completed=%u original_vertices=4 source=%08X color=%08X texture=%08X RGB committed; not yet presented\n",
                 (unsigned)movie_quad.completed, source, channel.clear.color_offset,
                 channel.commands.setup[0x1B00 / 4]);
-    perf_pass_us += perf_now() - perf_t0;
+    if (perf_t0) perf_pass_us += (perf_now() - perf_t0) * 64;
     h2_platform_fpscr_write(fpscr);
     return result;
 }
@@ -346,15 +335,15 @@ static void signal_game_vblank(xctx *c, uint32_t count, uint32_t swaps, uint32_t
      * before waiting or mutating anything. KeSetEvent precedes the callback. */
     uint64_t before = X_M32(0x485AB0) | (uint64_t)X_M32(0x485AB4) << 32;
     xctx interrupt = *c; interrupt.r[4] -= 16;
-    X_M32(interrupt.r[4]) = 0x3FEE5E;
-    X_M32(interrupt.r[4] + 4) = MINIPORT + 0x194;
-    X_M32(interrupt.r[4] + 8) = 1; X_M32(interrupt.r[4] + 12) = 0;
+    X_W32(interrupt.r[4]) = 0x3FEE5E;
+    X_W32(interrupt.r[4] + 4) = MINIPORT + 0x194;
+    X_W32(interrupt.r[4] + 8) = 1; X_W32(interrupt.r[4] + 12) = 0;
     xk_KeSetEvent(&interrupt);
     if (interrupt.r[4] != c->r[4]) reject(c, source, interrupt.r[4], c->r[4]);
     interrupt = *c; interrupt.preempt = 100000; interrupt.r[4] -= 12;
     uint32_t record = interrupt.r[4];
-    X_M32(record) = count; X_M32(record + 4) = swaps; X_M32(record + 8) = flags;
-    interrupt.r[4] -= 4; X_M32(interrupt.r[4]) = record;
+    X_W32(record) = count; X_W32(record + 4) = swaps; X_W32(record + 8) = flags;
+    interrupt.r[4] -= 4; X_W32(interrupt.r[4]) = record;
     call_guest(&interrupt, f_0012B2A0, 0x3FEE87);
     uint64_t after = X_M32(0x485AB0) | (uint64_t)X_M32(0x485AB4) << 32;
     if (after != before + 1) reject(c, source, 0x485AB0, (uint32_t)after);
@@ -374,9 +363,21 @@ static void *map_physical_raw(uint32_t address, uint32_t bytes)
         if (g_xpt[0x80000u + page] != page * 4096u) return NULL;
     return g_xram + address;
 }
+extern void xv_mark_written(const void *host, uint32_t bytes) __attribute__((weak));
+extern uint32_t xv_write_epoch __attribute__((weak));
 static void *map_physical(void *opaque, uint32_t address, uint32_t bytes)
 {
     (void)opaque;
+    if (!h2_host_tiles_span(&tiles, address, bytes)) return NULL;
+    void *pointer = map_physical_raw(address, bytes);
+    /* Consumers may write through this mapping: stamp the span now (the
+     * multi-method consumers stamp again when they actually store). */
+    if (pointer && xv_mark_written) xv_mark_written(pointer, bytes);
+    return pointer;
+}
+/* The texture reader's mapping: a read that must not stamp its own source. */
+void *h2_map_physical_read(uint32_t address, uint32_t bytes)
+{
     if (!h2_host_tiles_span(&tiles, address, bytes)) return NULL;
     return map_physical_raw(address, bytes);
 }
@@ -415,23 +416,23 @@ void h2_host_miniport_init(xctx *c)
         reject(c, 0x3FE005u, mini, miniport_ready);
     /* Keep the driver's software DPC/list/gamma state. This backend executes
      * commands synchronously; it does not register physical NV2A interrupts. */
-    X_M32(mini + 0x88) = 0x3FEBE0u;
-    X_M32(mini + 0x8C) = mini;
-    X_M32(mini + 0x1AC) = X_M32(mini + 0x1B0) = mini + 0x1AC;
-    X_M32(mini + 0x19C) = X_M32(mini + 0x1A0) = mini + 0x19C;
-    X_M8(mini + 0x1A4) = X_M8(mini + 0x194) = 0;
-    X_M8(mini + 0x1A6) = X_M8(mini + 0x196) = 4;
-    X_M32(mini + 0x1A8) = X_M32(mini + 0x198) = 1;
+    X_W32(mini + 0x88) = 0x3FEBE0u;
+    X_W32(mini + 0x8C) = mini;
+    X_W32(mini + 0x1AC) = X_W32(mini + 0x1B0) = mini + 0x1AC;
+    X_W32(mini + 0x19C) = X_W32(mini + 0x1A0) = mini + 0x19C;
+    X_W8(mini + 0x1A4) = X_W8(mini + 0x194) = 0;
+    X_W8(mini + 0x1A6) = X_W8(mini + 0x196) = 4;
+    X_W32(mini + 0x1A8) = X_W32(mini + 0x198) = 1;
     c->r[0] = mini; call_guest(c, f_003FE165, 0x3FE070u);
     if (!c->r[0]) reject(c, 0x3FE005u, mini, 0);
     c->r[0] = mini; call_guest(c, f_003FE190, 0x3FE082u);
     if (!c->r[0]) reject(c, 0x3FE005u, mini, 0);
-    X_M32(mini + 0x164) = 0x3FF490u;
-    X_M32(mini + 0x168) = 0;
+    X_W32(mini + 0x164) = 0x3FF490u;
+    X_W32(mini + 0x168) = 0;
     h2_bus_write32(c, 0x3FE1D9u, BAR + 0x1830, 0);
     h2_bus_write32(c, 0x3FE1E3u, BAR + 0x180C, 0xF800);
     c->r[6] = mini; call_guest(c, f_00401C33, 0x3FE1F2u);
-    X_M32(mini + 0xB4) = 1;
+    X_W32(mini + 0xB4) = 1;
     h2_bus_write32(c, 0x3FE1FCu, BAR + 0x9200, 0xDE86);
     h2_bus_write32(c, 0x3FE206u, BAR + 0x9210, 0x1DCD);
     h2_bus_write32(c, 0x3FE210u, BAR + 0x9420, UINT32_MAX);
@@ -439,17 +440,17 @@ void h2_host_miniport_init(xctx *c)
     if (h2_instance_bytes() != 0x5000 || X_M32(mini + 0x130) != 0x710000 ||
         X_M32(mini + 0x128) != 0x711000 || X_M32(mini + 0x140) != 0x110A)
         reject(c, 0x3FE005u, mini, h2_instance_bytes());
-    X_M32(mini + 0x134) = 2;
+    X_W32(mini + 0x134) = 2;
     instance_write(c, X_M32(mini + 0x140) * 16, 0);
     instance_write(c, X_M32(mini + 0x140) * 16 + 4, 0);
-    X_M32(mini + 0x120) = 0xFF;
-    X_M32(mini + 0x124) = 0x800000;
-    X_M32(mini + 0x11C) = 0x1111111;
+    X_W32(mini + 0x120) = 0xFF;
+    X_W32(mini + 0x124) = 0x800000;
+    X_W32(mini + 0x11C) = 0x1111111;
     for (unsigned table = 0; table < 6; ++table)
         for (unsigned i = 0; i < 256; ++i)
-            X_M8(mini + 0x1DC + table * 256 + i) = (uint8_t)i;
+            X_W8(mini + 0x1DC + table * 256 + i) = (uint8_t)i;
     /* The virtual device has a command consumer but no active display/IRQ. */
-    X_M32(mini + 0xA0) = 1;
+    X_W32(mini + 0xA0) = 1;
     miniport_ready = 1;
     xv_logf("[h2/channel] virtual miniport initialized, instance=%08X; display/IRQ unsupported\n",
             h2_instance_bytes());
@@ -482,7 +483,7 @@ void h2_host_channel_configure(xctx *c)
         reject(c, 0x4026CEu, descriptor, dma_instance);
     for (uint32_t i = 0; i < 0x37F0; i += 4) instance_write(c, context * 16 + i, 0);
     instance_write(c, X_M32(mini + 0x140) * 16, context);
-    X_M32(mini + 0x138) = context;
+    X_W32(mini + 0x138) = context;
     uint32_t ramfc = X_M32(mini + 0x128) - 0x700000u;
     for (unsigned i = 0; i < 64; i += 4) instance_write(c, ramfc + i, 0);
     instance_write(c, ramfc + 12, dma_instance);
@@ -596,12 +597,12 @@ void __wrap_xk_KeWaitForSingleObject(xctx *c)
     if (status < 0 || before == after) reject(c, ip, event, (uint32_t)status);
     /* The driver's empty-queue progressive vblank path increments its count,
      * records the same RDTSC timebase and signals this notification event. */
-    X_M32(MINIPORT + 0x1C0) = 1;
-    X_M32(MINIPORT + 0x1D8) = (uint32_t)x_rdtsc();
-    X_M32(MINIPORT + 0x1D0) = 0;
+    X_W32(MINIPORT + 0x1C0) = 1;
+    X_W32(MINIPORT + 0x1D8) = (uint32_t)x_rdtsc();
+    X_W32(MINIPORT + 0x1D0) = 0;
     xctx signal = *c; signal.r[4] -= 16;
-    X_M32(signal.r[4]) = 0x3FEE5E;
-    X_M32(signal.r[4] + 4) = event; X_M32(signal.r[4] + 8) = 1; X_M32(signal.r[4] + 12) = 0;
+    X_W32(signal.r[4]) = 0x3FEE5E;
+    X_W32(signal.r[4] + 4) = event; X_W32(signal.r[4] + 8) = 1; X_W32(signal.r[4] + 12) = 0;
     xk_KeSetEvent(&signal);
     if (signal.r[4] != c->r[4]) reject(c, ip, signal.r[4], c->r[4]);
     ++mode_vblanks;
@@ -617,7 +618,7 @@ void __wrap_xk_AvSendTVEncoderOption(xctx *c)
         reject(c, X_M32(c->r[4]), base, option);
     if (option == 6 && !param && output && !(output & 3) && guest_span_valid(output, 4)) {
         /* Virtual NTSC-M, 60 Hz, normal aspect, HDTV 480p capabilities. */
-        X_M32(output) = 0x00480104u;
+        X_W32(output) = 0x00480104u;
         xv_logf("[h2/av] virtual AV capabilities=00480104 output=%08X; no display mode applied\n", output);
     } else if (option == 11 && !output && (param == 5 || (display_mode_set && param <= 5))) {
         av_config.flicker_filter = param; av_config.has_flicker = 1;
@@ -633,7 +634,7 @@ void __wrap_xk_AvSendTVEncoderOption(xctx *c)
                output && !(output & 3) && guest_span_valid(output, 4)) {
         /* The only implemented scanout is progressive: a single field, index
          * zero. This is not an analog encoder/interlaced-field approximation. */
-        X_M32(output) = 0;
+        X_W32(output) = 0;
         xv_logf("[h2/av] progressive field index=0 output=%08X\n", output);
     } else if (option == 9 && display_mode_set && base == BAR && param <= 1 && !output) {
         if (screen_blanked != (int)param) {
@@ -1002,8 +1003,8 @@ static int complete_active_flip(xctx *c, uint32_t source)
     status = h2_platform_wait_vblank(&before, &after);
     if (status < 0 || before == after) { h2_platform_fpscr_write(saved_fpscr); return 0; }
     uint32_t timestamp = (uint32_t)x_rdtsc(), saved_fn = xv_cur_fn;
-    X_M32(MINIPORT + 0x1D4) = timestamp - X_M32(MINIPORT + 0x1D8);
-    X_M32(MINIPORT + 0x1D8) = timestamp; X_M32(MINIPORT + 0x1C0) = active_flip_due;
+    X_W32(MINIPORT + 0x1D4) = timestamp - X_M32(MINIPORT + 0x1D8);
+    X_W32(MINIPORT + 0x1D8) = timestamp; X_W32(MINIPORT + 0x1C0) = active_flip_due;
     xctx interrupt = *c; interrupt.r[6] = MINIPORT; interrupt.preempt = 100000;
     software_active = active_flip_retiring = 1;
     active_crtc_writes = active_read_increments = 0;
@@ -1018,6 +1019,7 @@ static int complete_active_flip(xctx *c, uint32_t source)
     active_context = c; xv_cur_fn = saved_fn; software_active = active_flip_retiring = 0;
     uint32_t presented = after;
     active_flip_queued = 0;
+    if (&xv_write_epoch) ++xv_write_epoch;   /* a new frame: later writes stamp a newer epoch */
     if (active_flip_serial < 4 || !((active_flip_serial + 1) % 60))
         xv_logf("[h2/display] original recurring flip address=%08X guest_vblank=%u swaps=%u real_wait=%u->%u present_vcount=%u\n",
                 active_flip_address, active_flip_due, active_flip_serial + 1, before, after, presented);
@@ -1066,8 +1068,8 @@ static int complete_initialization_vblank(xctx *c, uint32_t source)
     software_active = 1; gamma_cursor = 0;
     /* Original 3FED90's first progressive-vblank count/time update. The queue
      * consumer below performs the original retirement and gamma writes. */
-    X_M32(MINIPORT + 0x1D8) = (uint32_t)x_rdtsc();
-    X_M32(MINIPORT + 0x1C0) = 1;
+    X_W32(MINIPORT + 0x1D8) = (uint32_t)x_rdtsc();
+    X_W32(MINIPORT + 0x1C0) = 1;
     interrupt.r[6] = MINIPORT;
     call_guest(&interrupt, f_003FECC0, source);
     if (interrupt.r[0] != 1 || gamma_cursor != 768 || channel.commands.flip_read != 1 ||
@@ -1077,7 +1079,7 @@ static int complete_initialization_vblank(xctx *c, uint32_t source)
     /* Progressive field zero; no analog field/interrupt register is invented.
      * Signal the actual event before the original cdecl callback, as 3FED90
      * does. Its 12-byte record is {vblank count, retired swap count, flags}. */
-    X_M32(MINIPORT + 0x1D0) = 0;
+    X_W32(MINIPORT + 0x1D0) = 0;
     signal_game_vblank(c, 1, 1, 1, source);
     active_context = c; xv_cur_fn = saved_fn; software_active = 0;
     initialization_flip_queued = 0; initialization_flip_done = 1; mode_vblanks = 1;
@@ -1112,15 +1114,15 @@ static int complete_timed_mode_vblank(xctx *c, uint32_t source)
     int status = h2_platform_wait_vblank(&before, &after);
     if (status < 0 || before == after) { h2_platform_fpscr_write(saved_fpscr); return 0; }
     uint32_t timestamp = (uint32_t)x_rdtsc(), saved_fn = xv_cur_fn;
-    X_M32(MINIPORT + 0x1D4) = timestamp - X_M32(MINIPORT + 0x1D8);
-    X_M32(MINIPORT + 0x1D8) = timestamp; X_M32(MINIPORT + 0x1C0) = 2;
+    X_W32(MINIPORT + 0x1D4) = timestamp - X_M32(MINIPORT + 0x1D8);
+    X_W32(MINIPORT + 0x1D8) = timestamp; X_W32(MINIPORT + 0x1C0) = 2;
     xctx interrupt = *c; interrupt.preempt = 100000; interrupt.r[6] = MINIPORT;
     software_active = 1;
     call_guest(&interrupt, f_003FECC0, source);
     if (interrupt.r[0]) reject(c, source, MINIPORT, interrupt.r[0]);
     /* Original 3FEDE3: no retirement and counter==deadline advances the next
      * requested count and delivers flags=2 to the original game callback. */
-    X_M32(MINIPORT + 0x1C4) = 3;
+    X_W32(MINIPORT + 0x1C4) = 3;
     signal_game_vblank(c, 2, 1, 2, source);
     active_context = c; xv_cur_fn = saved_fn; software_active = 0; mode_vblanks = 2;
     xv_logf("[h2/vblank] real Vita vcount=%u->%u delivered second mode-transition vblank; queue empty, scanout disabled\n", before, after);

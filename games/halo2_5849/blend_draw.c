@@ -1,5 +1,6 @@
 #include "blend_draw.h"
 #include <string.h>
+extern void xv_mark_written(const void *host, uint32_t bytes) __attribute__((weak));
 #define BYTES (640u * 480u * 4u)
 #define IMAGE_BYTES (160u * 120u * 4u)
 
@@ -93,6 +94,7 @@ static int finish(h2_blend_draw *q, h2_command_state *s, h2_kelvin_clear *c)
         overlaps((uintptr_t)rgba, BYTES, (uintptr_t)destination, BYTES) ||
         overlaps((uintptr_t)rgba, BYTES, (uintptr_t)request.texture0.pixels, IMAGE_BYTES)) return 0;
     memcpy(destination, rgba, BYTES);
+    if (xv_mark_written) xv_mark_written(destination, BYTES);   /* the store happens now, maybe frames after the mapping */
     q->active = 0; ++q->completed;
     return 1;
 }

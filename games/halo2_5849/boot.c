@@ -338,6 +338,16 @@ void xv_check_guest_address(uint32_t address)
         for (;;) sceKernelDelayThread(1000);
     }
 }
+/* The texture cache's periodic full re-read found a source changed while no guest
+ * access or host mapping had stamped its pages: a writer the tracking misses. */
+void h2_texture_tracking_fault(uint32_t address, uint32_t bytes)
+{
+    graphics_snapshot();
+    xv_logf("[h2/blocked] texture source changed without a tracked write address=%08X bytes=%u fn=%08X\n", address, bytes, xv_cur_fn);
+    xv_log_flush();
+    sceKernelExitProcess(27);
+    for (;;) sceKernelDelayThread(1000);
+}
 void h2_kernel_stack_fault(xctx *c, const char *reason, uint32_t first, uint32_t second)
 {
     graphics_snapshot();
@@ -788,6 +798,14 @@ static void h2_load_env(void)
     fclose(f);
 }
 
+extern uint32_t xv_watch_off, xv_watch_len;
+static void h2_arm_watch(void)
+{
+    const char *w = getenv("XV_WATCH_PHYS");
+    if (!w) return;
+    unsigned off = 0, len = 0;
+    if (sscanf(w, "%x:%x", &off, &len) == 2) { xv_watch_off = off; xv_watch_len = len; xv_logf("[h2/cfg] write watch arena=%08X len=%08X\n", off, len); }
+}
 int main(void)
 {
     sceIoMkdir("ux0:data", 0777);
@@ -796,6 +814,7 @@ int main(void)
     log_fd = sceIoOpen("ux0:data/xita-halo2/boot.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
     xv_logf("[h2/boot] native XBE startup harness, title XH2B00001\n");
     h2_load_env();
+    h2_arm_watch();
     FILE *input = fopen("app0:halo2_image.bin", "rb");
     uint32_t base, size;
     if (!input || fread(&base, 4, 1, input) != 1 || fread(&size, 4, 1, input) != 1) {

@@ -1,5 +1,6 @@
 #include "bc1_draw.h"
 #include <string.h>
+extern void xv_mark_written(const void *host, uint32_t bytes) __attribute__((weak));
 #define BYTES (320u * 240u * 4u)
 
 static int overlaps(uintptr_t a, uint32_t an, uintptr_t b, uint32_t bn)
@@ -107,6 +108,7 @@ static int finish(h2_bc1_draw *q, h2_command_state *s, h2_kelvin_clear *c)
     for (unsigned u = 0; u < 4; ++u)
         if (overlaps((uintptr_t)rgba, BYTES, (uintptr_t)request.textures[u].blocks, 32)) return 0;
     memcpy(destination, rgba, BYTES);
+    if (xv_mark_written) xv_mark_written(destination, BYTES);   /* the store happens now, maybe frames after the mapping */
     q->active = 0; ++q->completed;
     return 1;
 }

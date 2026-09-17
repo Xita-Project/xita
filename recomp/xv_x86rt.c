@@ -181,7 +181,7 @@ void x_guest_write_pages(uint32_t a, const void *src, size_t size)
     while (size) {
         size_t n = 4096u - (a & 0xFFFu);
         if (n > size) n = size;
-        memcpy(X_G(a), p, n);
+        memcpy(X_GW(a), p, n);
         p += n; a += (uint32_t)n; size -= n;
     }
 }
@@ -228,7 +228,7 @@ static inline uint32_t ld(xctx *c, uint32_t a, unsigned sz)
 static inline void st(xctx *c, uint32_t a, unsigned sz, uint32_t v)
 {
     (void)c;
-    if (sz == 1) X_M8(a) = (uint8_t)v;
+    if (sz == 1) X_W8(a) = (uint8_t)v;
     else if (sz == 2) { uint16_t w = (uint16_t)v; x_guest_write(a, &w, 2); }
     else x_guest_write(a, &v, 4);
 }
@@ -253,7 +253,7 @@ void x_str_movs(xctx *c, unsigned sz, int mode)
         unsigned count = n / sz;
         if (count > c->r[1]) count = c->r[1];
         n = count * sz;
-        uint8_t *src = X_G(c->r[6]), *dst = X_G(c->r[7]);
+        uint8_t *src = X_G(c->r[6]), *dst = X_GW(c->r[7]);
         /* Forward overlapping REP MOVS propagates earlier writes; memmove would snapshot them. */
         if (!count || ((uintptr_t)dst > (uintptr_t)src && (uintptr_t)dst - (uintptr_t)src < n)) {
             st(c, c->r[7], sz, ld(c, c->r[6], sz)); count = 1; n = sz;
@@ -271,7 +271,7 @@ void x_str_stos(xctx *c, unsigned sz, int mode)
     while (!c->df && sz == 1 && c->r[1]) {
         unsigned n = 4096u - (c->r[7] & 0xFFFu);
         if (n > c->r[1]) n = c->r[1];
-        memset(X_G(c->r[7]), (int)(v & 0xFF), n); c->r[7] += n; c->r[1] -= n;
+        memset(X_GW(c->r[7]), (int)(v & 0xFF), n); c->r[7] += n; c->r[1] -= n;
     }
     while (c->r[1]) { st(c, c->r[7], sz, v); c->r[7] += STEP(sz); c->r[1]--; }
 }

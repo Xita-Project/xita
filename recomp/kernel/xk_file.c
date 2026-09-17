@@ -165,7 +165,7 @@ static uint32_t open_common(xctx *c, uint32_t phandle, uint32_t access, uint32_t
         if (iosb) { IOSB_STATUS(iosb) = STATUS_TOO_MANY_OPENED_FILES; IOSB_INFO(iosb) = 0; }
         return STATUS_TOO_MANY_OPENED_FILES;
     }
-    X_M32(phandle) = h;
+    X_W32(phandle) = h;
     if (iosb) { IOSB_STATUS(iosb) = status; IOSB_INFO(iosb) = info; }
     XK_LOG("%s \"%s\" -> %s (h=%X)%s\n", is_create ? "NtCreateFile" : "NtOpenFile", name, host, h, is_dir ? " [dir]" : "");
     /* The handle owns its own reference. Release the creator reference so
@@ -206,7 +206,7 @@ static int64_t file_guest_io(xk_file *f, uint64_t pos, uint32_t buf, uint32_t le
             n += more < 4096u ? more : 4096u;
         }
         int64_t got = writing ? xk_os_write(f, pos + done, X_G(a), n)
-                              : xk_os_read(f, pos + done, X_G(a), n);
+                              : xk_os_read(f, pos + done, X_GWN(a, n), n);   /* file data lands in guest memory */
         if (got < 0) return done ? (int64_t)done : got;
         done += (uint32_t)got;
         if ((uint64_t)got < n) break; /* EOF or short I/O: leave the remainder untouched */
@@ -345,8 +345,8 @@ enum { FileDirectoryInformation = 1, FileBasicInformation = 4, FileStandardInfor
        FileAlignmentInformation = 17, FileAllInformation = 18, FileAllocationInformation = 19, FileEndOfFileInformation = 20,
        FileAlternateNameInformation = 21, FileStreamInformation = 22, FileNetworkOpenInformation = 34, FileAttributeTagInformation = 35 };
 
-static void fill_basic(uint32_t p, uint64_t mtime, int is_dir) { LI64(p) = mtime; LI64(p + 8) = mtime; LI64(p + 16) = mtime; LI64(p + 24) = mtime; X_M32(p + 32) = is_dir ? 0x10 : 0x80; }
-static void fill_standard(uint32_t p, uint64_t size, int is_dir) { LI64(p) = (size + 4095) & ~4095ull; LI64(p + 8) = size; X_M32(p + 16) = 1; X_M8(p + 20) = 0; X_M8(p + 21) = (uint8_t)is_dir; }
+static void fill_basic(uint32_t p, uint64_t mtime, int is_dir) { LI64(p) = mtime; LI64(p + 8) = mtime; LI64(p + 16) = mtime; LI64(p + 24) = mtime; X_W32(p + 32) = is_dir ? 0x10 : 0x80; }
+static void fill_standard(uint32_t p, uint64_t size, int is_dir) { LI64(p) = (size + 4095) & ~4095ull; LI64(p + 8) = size; X_W32(p + 16) = 1; X_W8(p + 20) = 0; X_W8(p + 21) = (uint8_t)is_dir; }
 
 /* NTSTATUS NtQueryInformationFile(HANDLE, PIO_STATUS_BLOCK, PVOID Info, ULONG Length, FILE_INFORMATION_CLASS) */
 void xk_NtQueryInformationFile(xctx *c)
@@ -360,15 +360,15 @@ void xk_NtQueryInformationFile(xctx *c)
     case FileBasicInformation: if (len < 40) st = STATUS_INFO_LENGTH_MISMATCH; else { fill_basic(info, mtime, is_dir); written = 40; } break;
     case FileStandardInformation: if (len < 24) st = STATUS_INFO_LENGTH_MISMATCH; else { fill_standard(info, size, is_dir); written = 24; } break;
     case FileInternalInformation: LI64(info) = (uint64_t)(uintptr_t)o; written = 8; break;
-    case FileEaInformation: X_M32(info) = 0; written = 4; break;
-    case FileAccessInformation: X_M32(info) = 0x1F01FF; written = 4; break;
+    case FileEaInformation: X_W32(info) = 0; written = 4; break;
+    case FileAccessInformation: X_W32(info) = 0x1F01FF; written = 4; break;
     case FileNameInformation: { const char *base = strrchr(o->u.file.path, '/'); base = base ? base + 1 : o->u.file.path; uint32_t n = (uint32_t)strlen(base);
-        X_M32(info) = n; if (len < 4 + n) { st = STATUS_BUFFER_OVERFLOW; n = len > 4 ? len - 4 : 0; } memcpy(X_G(info + 4), base, n); written = 4 + n; break; }
+        X_W32(info) = n; if (len < 4 + n) { st = STATUS_BUFFER_OVERFLOW; n = len > 4 ? len - 4 : 0; } memcpy(X_GWN(info + 4, n), base, n); written = 4 + n; break; }
     case FilePositionInformation: LI64(info) = o->u.file.pos; written = 8; break;
-    case FileModeInformation: X_M32(info) = 0x20; written = 4; break;         /* FILE_SYNCHRONOUS_IO_NONALERT */
-    case FileAlignmentInformation: X_M32(info) = 0; written = 4; break;
-    case FileNetworkOpenInformation: if (len < 56) st = STATUS_INFO_LENGTH_MISMATCH; else { fill_basic(info, mtime, is_dir); LI64(info + 32) = (size + 4095) & ~4095ull; LI64(info + 40) = size; X_M32(info + 48) = is_dir ? 0x10 : 0x80; written = 56; } break;
-    case FileAllInformation: if (len < 96) st = STATUS_INFO_LENGTH_MISMATCH; else { fill_basic(info, mtime, is_dir); fill_standard(info + 40, size, is_dir); LI64(info + 64) = 0; X_M32(info + 72) = 0; X_M32(info + 76) = 0x1F01FF; LI64(info + 80) = o->u.file.pos; X_M32(info + 88) = 0x20; X_M32(info + 92) = 0; written = 96; } break;
+    case FileModeInformation: X_W32(info) = 0x20; written = 4; break;         /* FILE_SYNCHRONOUS_IO_NONALERT */
+    case FileAlignmentInformation: X_W32(info) = 0; written = 4; break;
+    case FileNetworkOpenInformation: if (len < 56) st = STATUS_INFO_LENGTH_MISMATCH; else { fill_basic(info, mtime, is_dir); LI64(info + 32) = (size + 4095) & ~4095ull; LI64(info + 40) = size; X_W32(info + 48) = is_dir ? 0x10 : 0x80; written = 56; } break;
+    case FileAllInformation: if (len < 96) st = STATUS_INFO_LENGTH_MISMATCH; else { fill_basic(info, mtime, is_dir); fill_standard(info + 40, size, is_dir); LI64(info + 64) = 0; X_W32(info + 72) = 0; X_W32(info + 76) = 0x1F01FF; LI64(info + 80) = o->u.file.pos; X_W32(info + 88) = 0x20; X_W32(info + 92) = 0; written = 96; } break;
     default: XK_LOG("NtQueryInformationFile: class %u unsupported\n", cls); st = STATUS_INVALID_INFO_CLASS; break;
     }
     if (iosb) { IOSB_STATUS(iosb) = st; IOSB_INFO(iosb) = written; }
@@ -410,7 +410,7 @@ void xk_NtQueryFullAttributesFile(xctx *c)
     int is_dir = 0; uint64_t size = 0, mtime = 0;
     if (!host || stat_ci(host, &is_dir, &size, &mtime) != 0) { free(host); c->r[0] = STATUS_OBJECT_NAME_NOT_FOUND; X_RET(2); }
     free(host);
-    fill_basic(info, mtime, is_dir); LI64(info + 32) = (size + 4095) & ~4095ull; LI64(info + 40) = size; X_M32(info + 48) = is_dir ? 0x10 : 0x80;
+    fill_basic(info, mtime, is_dir); LI64(info + 32) = (size + 4095) & ~4095ull; LI64(info + 40) = size; X_W32(info + 48) = is_dir ? 0x10 : 0x80;
     c->r[0] = STATUS_SUCCESS; X_RET(2);
 }
 /* NTSTATUS NtQueryVolumeInformationFile(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FS_INFORMATION_CLASS) */
@@ -422,11 +422,11 @@ void xk_NtQueryVolumeInformationFile(xctx *c)
     uint64_t freeb = 1ull << 30, total = 8ull << 30;
     xk_os_freespace(o->u.file.path, &freeb, &total);
     switch (cls) {
-    case 1: /* FileFsVolumeInformation */ LI64(info) = 0; X_M32(info + 8) = 0x12345678; X_M32(info + 12) = 0; X_M8(info + 16) = 0; written = 18; break;
+    case 1: /* FileFsVolumeInformation */ LI64(info) = 0; X_W32(info + 8) = 0x12345678; X_W32(info + 12) = 0; X_W8(info + 16) = 0; written = 18; break;
     case 3: /* FileFsSizeInformation: TotalAllocationUnits, AvailableAllocationUnits, SectorsPerAllocationUnit, BytesPerSector */
-        LI64(info) = total / 16384; LI64(info + 8) = freeb / 16384; X_M32(info + 16) = 32; X_M32(info + 20) = 512; written = 24; break;
-    case 4: /* FileFsDeviceInformation */ X_M32(info) = strstr(o->u.file.path, "haloce") ? 2 /* CD_ROM */ : 7 /* DISK */; X_M32(info + 4) = 0; written = 8; break;
-    case 5: /* FileFsAttributeInformation */ X_M32(info) = 0x00000002 | 0x00000008; X_M32(info + 4) = 42; X_M32(info + 8) = 4; memcpy(X_G(info + 12), "FATX", 4); written = 16; break;
+        LI64(info) = total / 16384; LI64(info + 8) = freeb / 16384; X_W32(info + 16) = 32; X_W32(info + 20) = 512; written = 24; break;
+    case 4: /* FileFsDeviceInformation */ X_W32(info) = strstr(o->u.file.path, "haloce") ? 2 /* CD_ROM */ : 7 /* DISK */; X_W32(info + 4) = 0; written = 8; break;
+    case 5: /* FileFsAttributeInformation */ X_W32(info) = 0x00000002 | 0x00000008; X_W32(info + 4) = 42; X_W32(info + 8) = 4; memcpy(X_GWN(info + 12, 4), "FATX", 4); written = 16; break;
     default: st = STATUS_INVALID_INFO_CLASS; break;
     }
     if (iosb) { IOSB_STATUS(iosb) = st; IOSB_INFO(iosb) = written; }
@@ -454,12 +454,12 @@ void xk_NtQueryDirectoryFile(xctx *c)
         uint32_t n = (uint32_t)strlen(name);
         if (cls == FileDirectoryInformation) {          /* { NextEntryOffset, FileIndex, Create/Access/Write/Change, EndOfFile, Allocation, Attributes, FileNameLength, FileName[] } */
             if (len < 64 + n) { st = STATUS_BUFFER_OVERFLOW; break; }
-            memset(X_G(info), 0, 64); uint64_t mt = 0; char full[1024]; snprintf(full, sizeof full, "%s/%s", o->u.file.path, name); xk_os_stat(full, NULL, NULL, &mt);
+            memset(X_GWN(info, 64), 0, 64); uint64_t mt = 0; char full[1024]; snprintf(full, sizeof full, "%s/%s", o->u.file.path, name); xk_os_stat(full, NULL, NULL, &mt);
             LI64(info + 8) = mt; LI64(info + 16) = mt; LI64(info + 24) = mt; LI64(info + 32) = mt; LI64(info + 40) = size; LI64(info + 48) = (size + 4095) & ~4095ull;
-            X_M32(info + 56) = is_dir ? 0x10 : 0x80; X_M32(info + 60) = n; memcpy(X_G(info + 64), name, n); written = 64 + n;
+            X_W32(info + 56) = is_dir ? 0x10 : 0x80; X_W32(info + 60) = n; memcpy(X_GWN(info + 64, n), name, n); written = 64 + n;
         } else if (cls == FileNamesInformation) {       /* { NextEntryOffset, FileIndex, FileNameLength, FileName[] } */
             if (len < 12 + n) { st = STATUS_BUFFER_OVERFLOW; break; }
-            X_M32(info) = 0; X_M32(info + 4) = 0; X_M32(info + 8) = n; memcpy(X_G(info + 12), name, n); written = 12 + n;
+            X_W32(info) = 0; X_W32(info + 4) = 0; X_W32(info + 8) = n; memcpy(X_GWN(info + 12, n), name, n); written = 12 + n;
         } else { st = STATUS_INVALID_INFO_CLASS; break; }
         st = STATUS_SUCCESS; break;
     }
@@ -491,7 +491,7 @@ void xk_NtOpenSymbolicLinkObject(xctx *c)
     const char *t = link_lookup(n);
     if (!t) { c->r[0] = STATUS_OBJECT_NAME_NOT_FOUND; X_RET(2); }
     xk_obj *o = xk_obj_new(XO_SYMLINK); o->u.symlink.target = strdup(t);
-    X_M32(X_ARG(0)) = xk_handle_create(o); c->r[0] = STATUS_SUCCESS; X_RET(2);
+    X_W32(X_ARG(0)) = xk_handle_create(o); c->r[0] = STATUS_SUCCESS; X_RET(2);
 }
 /* NTSTATUS NtQuerySymbolicLinkObject(HANDLE, PANSI_STRING Target, PULONG ReturnedLength) */
 void xk_NtQuerySymbolicLinkObject(xctx *c)
@@ -499,9 +499,9 @@ void xk_NtQuerySymbolicLinkObject(xctx *c)
     xk_obj *o = xk_handle_get_type(X_ARG(0), XO_SYMLINK); uint32_t s = X_ARG(1);
     if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(3); }
     uint32_t n = (uint32_t)strlen(o->u.symlink.target);
-    if (X_ARG(2)) X_M32(X_ARG(2)) = n;
+    if (X_ARG(2)) X_W32(X_ARG(2)) = n;
     if (AS_MAX(s) < n) { c->r[0] = STATUS_BUFFER_TOO_SMALL; X_RET(3); }
-    memcpy(X_G(AS_BUF(s)), o->u.symlink.target, n); AS_LEN(s) = n; if (AS_MAX(s) > n) X_M8(AS_BUF(s) + n) = 0;
+    memcpy(X_GWN(AS_BUF(s), n), o->u.symlink.target, n); AS_LEN(s) = n; if (AS_MAX(s) > n) X_W8(AS_BUF(s) + n) = 0;
     c->r[0] = STATUS_SUCCESS; X_RET(3);
 }
 void xk_IoDismountVolume(xctx *c) { c->r[0] = STATUS_SUCCESS; X_RET(1); }

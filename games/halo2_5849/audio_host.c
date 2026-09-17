@@ -138,7 +138,7 @@ static void create(xctx *c)
         live(c, ip, device.base + 8, 0);
         if (device.references == UINT32_MAX) fail(c, ip, "reference overflow", device.references);
         ++device.references;
-        X_M32(device.base + 4) = device.references;
+        X_W32(device.base + 4) = device.references;
     } else {
         int opened = h2_audio_backend_open();
         if (opened < -1) fail(c, ip, "output rollback", (uint32_t)opened);
@@ -159,7 +159,7 @@ static void create(xctx *c)
         /* Match only the independently audited common vtable/refcount header.
          * Public wrappers expose base+8. All remaining original DSOUND object
          * methods are guarded; no fake DSP/listener/voice pointers are stored. */
-        X_M32(base) = 0x417120; X_M32(base + 4) = 1;
+        X_W32(base) = 0x417120; X_W32(base + 4) = 1;
     }
     uint32_t handle = device.base + 8;
     x_guest_write(out, &handle, 4);
@@ -170,7 +170,7 @@ static void create(xctx *c)
 static void drop_device(xctx *c, uint32_t ip)
 {
     if (device.references > 1) {
-        --device.references; X_M32(device.base + 4) = device.references;
+        --device.references; X_W32(device.base + 4) = device.references;
     } else {
         uint32_t released = device.base;
         if (device.children) fail(c, ip, "live device children", device.children);
@@ -233,10 +233,10 @@ static void reference(xctx *c, uint32_t ip)
             fail(c, ip, "release active PCM voice requires completed Stop", b->base);
         if (ip == 0x37A14F) {
             if (count == UINT32_MAX) fail(c, ip, "buffer reference overflow", count);
-            X_M32(b->base + 4) = ++b->references;
+            X_W32(b->base + 4) = ++b->references;
             count = b->references;
         } else if (--count) {
-            X_M32(b->base + 4) = b->references = count;
+            X_W32(b->base + 4) = b->references = count;
         } else {
             /* free() takes the mixer lock, so no worker can still read the
              * mirror when its allocation is released. Caller owns source. */
@@ -257,7 +257,7 @@ static void reference(xctx *c, uint32_t ip)
     live(c, ip, X_ARG(0), 1);
     if (ip == 0x37A14F) {
         if (device.references == UINT32_MAX) fail(c, ip, "reference overflow", device.references);
-        ++device.references; X_M32(device.base + 4) = device.references;
+        ++device.references; X_W32(device.base + 4) = device.references;
     } else {
         if (device.references <= device.children) fail(c, ip, "release child-owned device", device.references);
         drop_device(c, ip);
@@ -302,8 +302,8 @@ static void submix_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t f
     spatial_defaults(candidate.spatial);
     uint32_t silence[32] = {0}; x_guest_write(candidate.mirror, silence, sizeof silence);
     buffers[index] = candidate;
-    X_M32(base) = 0x417150; X_M32(base + 4) = 1;
-    ++device.children; X_M32(device.base + 4) = ++device.references;
+    X_W32(base) = 0x417150; X_W32(base + 4) = 1;
+    ++device.children; X_W32(device.base + 4) = ++device.references;
     uint32_t handle = base + 0x1C; x_guest_write(out, &handle, 4);
     xv_logf("[h2/submix] create caller=%08X interface=%08X bus=%08X signed24 mono48000 samples=32 input_bin=31 routes=6,8,7,9,10 headroom=0 parent_refs=%u; inactive, DSP/HRTF activation unsupported\n",
             X_M32(c->r[4]), handle, candidate.mirror, device.references);
@@ -364,8 +364,8 @@ static void fx_create(xctx *c, uint32_t desc, uint32_t out, const uint32_t field
         spatial_defaults(buffers[index].spatial); buffers[index].route_count = 5;
         const uint8_t routes[5] = {6,8,7,9,10}; memcpy(buffers[index].route_bins, routes, 5);
     }
-    X_M32(base) = 0x417150; X_M32(base + 4) = 1;
-    ++device.children; X_M32(device.base + 4) = ++device.references;
+    X_W32(base) = 0x417150; X_W32(base + 4) = 1;
+    ++device.children; X_W32(device.base + 4) = ++device.references;
     uint32_t handle = base + 0x1C; x_guest_write(out, &handle, 4);
     xv_logf("[h2/fxin2] create caller=%08X interface=%08X real GP scratch=%04X bin=%u signed24 mono48000 samples=32 default routes=%s headroom=0 parent_refs=%u inactive\n",
             caller, handle, 0xB000 + (bin - 11) * 128, bin, spatial ? "6,8,7,9,10; symmetric HRTF model" : "0,1", device.references);
@@ -412,8 +412,8 @@ static void buffer_create(xctx *c)
     buffers[index] = (h2_audio_buffer){.base = base, .references = 1, .voice = voice,
                                      .frequency = 44100, .headroom = 600};
     xk_audio_lock(); xk_audio_voice_set_volume_db100(voice, -600); xk_audio_unlock();
-    X_M32(base) = 0x417150; X_M32(base + 4) = 1;
-    ++device.children; X_M32(device.base + 4) = ++device.references;
+    X_W32(base) = 0x417150; X_W32(base + 4) = 1;
+    ++device.children; X_W32(device.base + 4) = ++device.references;
     uint32_t handle = base + 0x1C; x_guest_write(out, &handle, 4);
     xv_logf("[h2/audio-buffer] create caller=%08X interface=%08X voice=%u PCM16 stereo44100 parent_refs=%u\n",
             X_M32(c->r[4]), handle, voice, device.references);
@@ -469,8 +469,8 @@ static void global_buffer_create(xctx *c)
     xk_audio_lock(); xk_audio_voice_set_frequency(voice,1000); xk_audio_voice_set_volume_db100(voice,-600); xk_audio_unlock();
     buffers[index]=(h2_audio_buffer){.base=base,.references=1,.voice=voice,.frequency=1000,
         .headroom=600,.route_count=1,.route_bins={14},.gp_pcm=1};
-    X_M32(base)=0x417150; X_M32(base+4)=1;
-    ++device.children; X_M32(device.base+4)=++device.references;
+    X_W32(base)=0x417150; X_W32(base+4)=1;
+    ++device.children; X_W32(device.base+4)=++device.references;
     uint32_t handle=base+0x1C; x_guest_write(out,&handle,4);
     /* The original global wrapper takes/releases a temporary device ref.
      * On return only the real child's reference survives, including failure. */
@@ -571,8 +571,8 @@ static void stream_create(xctx *c, uint32_t ip)
     for(unsigned i=0;i<routes[0];++i){streams[index].route_bins[i]=pair[i*2];streams[index].route_gains[i]=(int32_t)pair[i*2+1];}
     /* Original default mix bins for a mono/stereo voice (0x37BC89 table 0x3858BC): front bins 0,1 at unity. */
     if (!global) { streams[index].route_count=2; streams[index].route_bins[0]=0; streams[index].route_bins[1]=1; }
-    X_M32(base) = 0x417170; X_M32(base + 4) = 0x417160; X_M32(base + 8) = 1;
-    ++device.children; X_M32(device.base + 4) = ++device.references;
+    X_W32(base) = 0x417170; X_W32(base + 4) = 0x417160; X_W32(base + 8) = 1;
+    ++device.children; X_W32(device.base + 4) = ++device.references;
     x_guest_write(out, &base, 4);
     xv_logf("[h2/audio-stream] create caller=%08X object=%08X voice=%u format=%u channels=%u packet_limit=2 callback=%08X context=%u parent_refs=%u; empty real mixer voice, packet/DSP routing unsupported\n",
             X_M32(c->r[4]), base, voice, kind, format[2], fields[3], fields[4], device.references);
@@ -599,13 +599,13 @@ static void game_stream_complete(xctx *c, uint32_t ip, h2_audio_stream *s, uint3
     /* The drained voice stays registered: the mixer keeps a starved stream voice
      * playing (silence) until Flush or Release stops it. */
     xctx saved = *c; uint32_t fpscr = h2_platform_fpscr_read(); uint8_t irql = X_M8(c->fs_base + 0x24);
-    X_M8(c->fs_base + 0x24) = 2; c->preempt = 0x7fffffff;
+    X_W8(c->fs_base + 0x24) = 2; c->preempt = 0x7fffffff;
     X_PUSH32(status_value); X_PUSH32(context); X_PUSH32(s->context); X_PUSH32(0xDEAD0003u);
     xv_logf("[h2/audio-packet] game stream %s object=%08X buffer=%08X bytes=%u context=%08X status=%08X queued=%u; callback %08X\n",
             how, s->base, buffer, size, context, status_value, s->game_packets, s->callback);
     xv_call(c, s->callback);
     if (c->r[4] != saved.r[4]) fail(c, ip, "stream callback stack imbalance", c->r[4]);
-    X_M8(saved.fs_base + 0x24) = irql; *c = saved; h2_platform_fpscr_write(fpscr);
+    X_W8(saved.fs_base + 0x24) = irql; *c = saved; h2_platform_fpscr_write(fpscr);
 }
 static void game_stream_deliver(xctx *c, uint32_t ip, h2_audio_stream *s)
 {
@@ -715,13 +715,13 @@ static void stream_deliver(xctx *c, uint32_t ip)
             if (xk_mem_free(mirror)<0) fail(c,ip,"stream mirror retirement",mirror);
             s->packets[p].mirror=0;s->packets[p].ticket=0;s->packets[p].ready=0;++s->completed;
             xctx saved=*c;uint32_t fpscr=h2_platform_fpscr_read();uint8_t irql=X_M8(c->fs_base+0x24);
-            X_M8(c->fs_base+0x24)=2;c->preempt=0x7fffffff;
+            X_W8(c->fs_base+0x24)=2;c->preempt=0x7fffffff;
             X_PUSH32(0);X_PUSH32(packet_context);X_PUSH32(s->context);X_PUSH32(0xDEAD0003u);
             static uint32_t consumed_logs; if (h2_log_budget(&consumed_logs, 64, 2000)) xv_logf("[h2/audio-packet] consumed ticket=%llu stream=%08X callback=%08X context=%u; delivered from DirectSoundDoWork after the real sink fence\n",
                     (unsigned long long)ticket,s->base,s->callback,packet_context);
             xv_call(c,s->callback);
             if (c->r[4]!=saved.r[4]) fail(c,ip,"stream callback stack imbalance",c->r[4]);
-            X_M8(saved.fs_base+0x24)=irql;*c=saved;h2_platform_fpscr_write(fpscr);
+            X_W8(saved.fs_base+0x24)=irql;*c=saved;h2_platform_fpscr_write(fpscr);
         }
     }
 }
@@ -799,9 +799,9 @@ static void stream_reference(xctx *c, uint32_t ip)
     uint32_t count = s->references;
     if (ip == 0x37AB40) {
         if (count == UINT32_MAX) fail(c, ip, "stream reference overflow", count);
-        X_M32(s->base + 8) = s->references = ++count;
+        X_W32(s->base + 8) = s->references = ++count;
     } else if (count > 1) {
-        X_M32(s->base + 8) = s->references = --count;
+        X_W32(s->base + 8) = s->references = --count;
     } else {
         if (s->submitted) fail(c,ip,"stream release after Process needs audited flush",s->base);
         if (s->game_packets) fail(c,ip,"stream release with queued game packets",s->base);
