@@ -84,6 +84,10 @@ recomp/kernel/xk_clip_region.c
 recomp/kernel/xk_worker_query_generated.inc
 recomp/query_fusion.c
 recomp/query_fusion.c.tmp
+recomp/solver_fusion.c
+recomp/solver_fusion.c.tmp
+recomp/solver_primitives.h
+recomp/solver_primitives.h.tmp
 recomp/code_*.c.tmp
 recomp/.query-fusion-*/
 recomp/kernel/worker_query_original.json

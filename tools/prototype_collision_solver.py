@@ -120,11 +120,12 @@ def generate(a):
     for name, text in (('reference-private.c', original), ('candidate-private.c', candidate), ('caller-private.c', callers)):
         paths[name] = a.out/name
         paths[name].write_text(text+'\n')
-    runtime = (a.retained/'recomp/xv_x86rt.c').read_text()
-    movs = runtime[runtime.index('#define STEP(sz)'):runtime.index('\nvoid x_str_stos(')]
-    paths['runtime-private.c'] = a.out/'runtime-private.c'
-    paths['runtime-private.c'].write_text('#include "xv_x86rt.h"\n#include <stdio.h>\n#include <stdlib.h>\n'
-        '#include <psp2/kernel/clib.h>\n#define XV_RT_LOG(...) sceClibPrintf(__VA_ARGS__)\n'+movs+'\n')
+    if getattr(a, 'fixture_runtime', True):
+        runtime = (a.retained/'recomp/xv_x86rt.c').read_text()
+        movs = runtime[runtime.index('#define STEP(sz)'):runtime.index('\nvoid x_str_stos(')]
+        paths['runtime-private.c'] = a.out/'runtime-private.c'
+        paths['runtime-private.c'].write_text('#include "xv_x86rt.h"\n#include <stdio.h>\n#include <stdlib.h>\n'
+            '#include <psp2/kernel/clib.h>\n#define XV_RT_LOG(...) sceClibPrintf(__VA_ARGS__)\n'+movs+'\n')
     (a.out/'generation.json').write_text(json.dumps(dict(image=IMAGE,closure=inventory,
         frames=a.frames,trace=a.trace,retained=str(a.retained),actor_guard_unchanged=True,
         generic_files_unchanged=True,precision_unchanged=True,default_off=True),indent=2)+'\n')

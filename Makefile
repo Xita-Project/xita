@@ -641,6 +641,33 @@ $(RECOMP_BUILD)/kernel/xk_collision_traversal_control.o: $(RECOMP_BUILD)/collisi
 $(RECOMP_BUILD)/kernel/xk_collision_traversal_control.o: RECOMP_CFLAGS += -DXV_NATIVE_COLLISION_TRAVERSAL_DEFAULT=$(XV_NATIVE_COLLISION_TRAVERSAL_DEFAULT)
 # Qualified caller-specific collision query fusion. No runtime controls, and no
 # flag on generic code_013/code_016: their compiler layout must stay unchanged.
+XV_NATIVE_SOLVER_FUSION ?= 0
+ifneq ($(words $(XV_NATIVE_SOLVER_FUSION)),1)
+$(error XV_NATIVE_SOLVER_FUSION must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_SOLVER_FUSION),0 1),$(XV_NATIVE_SOLVER_FUSION))
+$(error XV_NATIVE_SOLVER_FUSION must be 0 or 1)
+endif
+SOLVER_FUSION_OBJECTS := $(RECOMP_BUILD)/code_028.o $(RECOMP_BUILD)/solver_fusion.o
+.PHONY: force-solver-fusion-config solver-fusion-generate
+force-solver-fusion-config:
+$(RECOMP_BUILD)/solver-fusion.config: force-solver-fusion-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_NATIVE_SOLVER_FUSION)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(SOLVER_FUSION_OBJECTS) $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/solver-fusion.config
+ifeq ($(XV_NATIVE_SOLVER_FUSION),1)
+ifneq ($(XV_NATIVE_QUERY_FUSION),1)
+$(error XV_NATIVE_SOLVER_FUSION requires XV_NATIVE_QUERY_FUSION=1)
+endif
+ifeq ($(XV_OBJECT_SOLVER_EXPERIMENT),1)
+$(error XV_NATIVE_SOLVER_FUSION must retain the actor transaction; disable XV_OBJECT_SOLVER_EXPERIMENT)
+endif
+$(SOLVER_FUSION_OBJECTS): RECOMP_CFLAGS += -DXV_NATIVE_SOLVER_FUSION=1
+$(RECOMP_BUILD)/solver_fusion.o: RECOMP_CFLAGS += -ffunction-sections -fdata-sections -fstack-usage
+$(SOLVER_FUSION_OBJECTS): $(RECOMP_BUILD)/query-fusion.generated.json
+endif
 XV_NATIVE_QUERY_FUSION ?= 0
 ifneq ($(words $(XV_NATIVE_QUERY_FUSION)),1)
 $(error XV_NATIVE_QUERY_FUSION must be 0 or 1)
@@ -649,11 +676,18 @@ ifneq ($(filter $(XV_NATIVE_QUERY_FUSION),0 1),$(XV_NATIVE_QUERY_FUSION))
 $(error XV_NATIVE_QUERY_FUSION must be 0 or 1)
 endif
 QUERY_FUSION_OBJECTS := $(RECOMP_BUILD)/code_028.o $(RECOMP_BUILD)/query_fusion.o
-QUERY_FUSION_INPUTS := tools/gen_native_query_fusion.py tools/prototype_collision_query.py \
+QUERY_FUSION_INPUTS := tools/gen_native_query_fusion.py tools/gen_native_solver_fusion.py tools/prototype_collision_query.py \
     tools/tests/collision_query_fusion.c $(wildcard recompiler/*.py recompiler/core/*.py games/halo_ce_3925/*.py) \
     recomp/kernel/xk_collision_vertices.h recomp/kernel/xk_segment_sphere.h \
     recomp/kernel/xk_collision_traversal.h recomp/kernel/xk_geometry.c \
     $(RECOMP_DIR)/code_013.c $(RECOMP_DIR)/code_016.c $(RECOMP_DIR)/code_028.c $(XBE) $(XBE_JSON)
+ifeq ($(XV_NATIVE_SOLVER_FUSION),1)
+QUERY_FUSION_INPUTS += tools/prototype_collision_solver.py recomp/xv_x86rt.h $(RECOMP_DIR)/code_000.c
+endif
+QUERY_FUSION_OUTPUTS := $(RECOMP_DIR)/query_fusion.c
+ifeq ($(XV_NATIVE_SOLVER_FUSION),1)
+QUERY_FUSION_OUTPUTS += $(RECOMP_DIR)/solver_fusion.c $(RECOMP_DIR)/solver_primitives.h
+endif
 .PHONY: force-query-fusion-config force-query-fusion-missing query-fusion-generate
 force-query-fusion-config:
 force-query-fusion-missing:
@@ -679,14 +713,23 @@ $(QUERY_FUSION_OBJECTS): $(RECOMP_BUILD)/query-fusion.generated.json
 # regeneration too. Keeping the source's stamp dependency order-only permits
 # content-only updates without repeatedly regenerating unchanged output bytes.
 # Both affected objects wait for the stamp before parallel compilation.
-$(RECOMP_BUILD)/query-fusion.generated.json: $(QUERY_FUSION_INPUTS) $(if $(wildcard $(RECOMP_DIR)/query_fusion.c),,force-query-fusion-missing)
-	$(PYTHON) tools/gen_native_query_fusion.py --xbe $(XBE) --manifest $(XBE_JSON) --recomp-dir $(RECOMP_DIR) --receipt $(RECOMP_BUILD)/query-fusion.generated.json
-$(RECOMP_DIR)/query_fusion.c: | $(RECOMP_BUILD)/query-fusion.generated.json
+# One generator owns both caller edits. The solver config is also a stamp input
+# on the OFF transition, restoring the exact query-only caller before compile.
+$(RECOMP_BUILD)/query-fusion.generated.json: $(QUERY_FUSION_INPUTS) $(RECOMP_BUILD)/solver-fusion.config $(if $(filter-out $(wildcard $(QUERY_FUSION_OUTPUTS)),$(QUERY_FUSION_OUTPUTS)),force-query-fusion-missing)
+	$(PYTHON) tools/gen_native_query_fusion.py --xbe $(XBE) --manifest $(XBE_JSON) --recomp-dir $(RECOMP_DIR) --receipt $(RECOMP_BUILD)/query-fusion.generated.json $(if $(filter 1,$(XV_NATIVE_SOLVER_FUSION)),--solver-fusion 1,)
+$(QUERY_FUSION_OUTPUTS): | $(RECOMP_BUILD)/query-fusion.generated.json
 	@test -f $@
 query-fusion-generate: $(RECOMP_BUILD)/query-fusion.generated.json $(RECOMP_DIR)/query_fusion.c
 else
 query-fusion-generate:
 	@echo 'Set XV_NATIVE_QUERY_FUSION=1 and its compiled prerequisites to generate the owned fusion unit.' >&2
+	@false
+endif
+ifeq ($(XV_NATIVE_SOLVER_FUSION),1)
+solver-fusion-generate: $(RECOMP_BUILD)/query-fusion.generated.json $(RECOMP_DIR)/solver_fusion.c $(RECOMP_DIR)/solver_primitives.h
+else
+solver-fusion-generate:
+	@echo 'Set XV_NATIVE_SOLVER_FUSION=1 with XV_NATIVE_QUERY_FUSION=1 to generate the owned solver unit.' >&2
 	@false
 endif
 ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
@@ -834,6 +877,7 @@ $(RECOMP_BUILD)/object-hold.config: force-object-hold-config
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-hold.config
 $(filter $(RECOMP_BUILD)/code_%.o,$(RECOMP_OBJS)): $(RECOMP_BUILD)/object-hold.config
+$(RECOMP_BUILD)/query_fusion.o $(RECOMP_BUILD)/solver_fusion.o: $(RECOMP_BUILD)/object-hold.config
 
 # Explicit research build only. Track this flag for the two affected objects so
 # switching a reused build directory cannot silently retain the previous mode.

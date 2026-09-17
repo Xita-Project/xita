@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Install the qualified separate-TU query transformation into owned outputs.
 
-No game bytes are embedded here. Only code_028.c and query_fusion.c are written;
-the five generic query bodies, including their interior entries, stay in their
+No game bytes are embedded here. code_028.c and query_fusion.c are written,
+plus an optional separate solver unit/header. Generic bodies and entries stay in their
 existing units. Repeating generation validates and removes our exact previous
 wrapper before applying the same transformation. Unexpected source drift fails
 before any output is installed.
@@ -19,6 +19,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools import prototype_collision_query as prototype
+from tools import gen_native_solver_fusion as solver
 
 FEATURE = 'XV_NATIVE_QUERY_FUSION'
 PREREQUISITES = ('XV_NATIVE_BSP_SPHERE', 'XV_NATIVE_COLLISION_VERTICES',
@@ -72,14 +73,18 @@ def replace_if_changed(path, text):
     return True
 
 
-def generate(xbe, manifest, recomp_dir, receipt):
+def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0):
     if not __debug__:
         raise RuntimeError('Refusing optimized Python: generation safety checks require assertions.')
     recomp_dir = Path(recomp_dir).resolve()
+    if solver_fusion not in (0, 1):
+        raise ValueError('solver fusion must be 0 or 1')
     # Validate even a previously generated caller against current owned-image
     # emission. The audited prototype also checks SHA, closure and shadow sinks.
     units = {i: (recomp_dir / f'code_{i:03d}.c').read_text() for i in (13, 16, 28)}
-    original = {**units, 28: generic_caller(units[28])}
+    original = {**units, 28: generic_caller(solver.generic_caller(units[28]))}
+    if solver_fusion:
+        original[0] = (recomp_dir / 'code_000.c').read_text()
     with tempfile.TemporaryDirectory(prefix='.query-fusion-', dir=recomp_dir) as temporary:
         temp = Path(temporary)
         retained = temp / 'retained'
@@ -115,6 +120,13 @@ def generate(xbe, manifest, recomp_dir, receipt):
             raise ValueError('caller transformation is not exactly reversible')
         oracle = json.loads((out / 'oracle.json').read_text())
         contract = json.loads((out / 'integration/contract.json').read_text())
+        solver_contract = None
+        if solver_fusion:
+            extra, solver_contract = solver.generate_units(xbe, manifest, original, temp / 'solver')
+            generated.update(extra)
+            generated['code_028.c'] = solver.selected_caller(generated['code_028.c'])
+            if generic_caller(solver.generic_caller(generated['code_028.c'])) != original[28]:
+                raise ValueError('combined caller transformation is not exactly reversible')
     # Publication happens only after every input/output contract check passed.
     changed = [name for name, text in generated.items()
                if replace_if_changed(recomp_dir / name, text)]
@@ -123,8 +135,9 @@ def generate(xbe, manifest, recomp_dir, receipt):
         source_body_sha256=oracle['body_sha256'], scope_inventory=oracle['scope_inventory'],
         input_sha256={f'code_{i:03d}.c': digest(t) for i, t in original.items()},
         output_sha256={name: digest(text) for name, text in generated.items()},
-        generic_units_unchanged=['code_013.c', 'code_016.c'],
-        caller_contract=contract, changed=changed)
+        generic_units_unchanged=(['code_000.c'] if solver_fusion else []) + ['code_013.c', 'code_016.c'],
+        caller_contract=contract, solver_enabled=solver_fusion,
+        solver_contract=solver_contract, changed=changed)
     # A fresh receipt is also the build stamp. Write it after generated outputs,
     # including when their bytes were unchanged but an input was revalidated.
     receipt = Path(receipt)
@@ -141,8 +154,9 @@ def main():
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--recomp-dir', type=Path, default=ROOT / 'recomp')
     parser.add_argument('--receipt', type=Path, required=True)
+    parser.add_argument('--solver-fusion', type=int, choices=(0, 1), default=0)
     args = parser.parse_args()
-    result = generate(args.xbe, args.manifest, args.recomp_dir, args.receipt)
+    result = generate(args.xbe, args.manifest, args.recomp_dir, args.receipt, args.solver_fusion)
     print('query fusion: fixed 32 continuations; changed ' + (', '.join(result['changed']) or 'no source bytes'))
 
 
