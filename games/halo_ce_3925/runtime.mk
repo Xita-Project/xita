@@ -29,6 +29,10 @@ endif
 ifeq ($(XV_NATIVE_COLLISION_TRAVERSAL),1)
 XITA_GAME_SRCS += recomp/kernel/xk_collision_traversal_control.c
 endif
+# Owned separate translation unit: do not append fusion to a large guest unit.
+ifeq ($(XV_NATIVE_QUERY_FUSION),1)
+XITA_GAME_SRCS += recomp/query_fusion.c
+endif
 ifeq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_jobs.c
 endif
