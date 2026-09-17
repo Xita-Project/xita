@@ -83,3 +83,35 @@ Private evidence is under `native-solver-production-integration` beside
 remain outside the repository. Integration must retain the exact qualified
 candidate code and verify final built stack reports. Hardware enablement and
 deployment are separate decisions owned by the main worktree.
+
+## Cumulative package integration
+
+Root source `7301a1b` builds with `XV_NATIVE_SOLVER_FUSION=1` and all ten
+preceding candidate selections retained. The generated caller, query, solver
+and primitive header match the qualified production outputs. The solver object
+retains the qualified 73,532-byte section and 1,928-byte local frame.
+
+Compared with the ten-path package, only `code_028.o` changes and
+`solver_fusion.o` is added. Existing query, generic and runtime objects match
+the parent. The selected caller has one relocation to `ns_solver_at_172cb8`
+and retains the earlier query wrapper. The original solver remains linked.
+The package preserves all asset payloads and the updater contract.
+
+Runtime `ece322ea…` was installed and boot-confirmed in updater slot 1;
+`4c025a02…` remains in slot 0. Ordinary solo Blood Gulch gameplay at native
+960×544 and standard graphics completed walking, camera turns, a charged
+plasma shot, Warthog driver entry, forward/reverse movement, steering, canyon
+wall contacts and exit. The device remains paused on foot beside the vehicle.
+The captured log has no searched fault markers and zero logger errors.
+
+The initial spawn (41.10, −90.26, 0.74), direction (−0.16, 0.99, 0), differs
+from the previous build. Initial passive windows reported 11.0–11.4 FPS;
+vehicle captures showed 8–9 FPS, with a later stationary wall view at 10.5.
+These views and workloads do not support an optimization gain/regression
+comparison. No five-FPS gain or stable 20 FPS has been demonstrated.
+
+This run did not repeat campaign, rocket/death or prolonged combat checks.
+All eleven paths remain cumulative, and no built-in benchmark or CE emulator
+was used. Evidence: `solver-fusion-startup/installation.json`,
+`bloodgulch-smoke-receipt.json`, `bloodgulch-smoke.log`, and captured PNGs
+under the private validation directory.
