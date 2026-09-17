@@ -46,6 +46,8 @@ def main():
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--cases', type=int, default=3000)
     parser.add_argument('--sanitize', action='store_true', help='build with ASan and UBSan')
+    parser.add_argument('--startup-default', type=int, choices=(0, 1),
+                        help='compile a startup default; use startup modes to test without runtime overrides')
     parser.add_argument('--helper', type=Path, default=ROOT / 'recomp/kernel/xk_object_collect.c',
                         help='helper source; another revision serves as a negative control')
     parser.add_argument('--modes', nargs='+', default=['on', 'off', 'default', 'environment'])
@@ -96,11 +98,12 @@ def main():
                 '-fno-omit-frame-pointer'] if args.sanitize else []
     subprocess.run([cc, '-O2', '-std=gnu11', '-fno-strict-aliasing', '-ffp-contract=off',
         '-DXV_NATIVE_OBJECT_COLLECT', '-ffunction-sections', '-fdata-sections', *sanitize,
+        *([f'-DXV_NATIVE_OBJECT_COLLECT_DEFAULT={args.startup_default}'] if args.startup_default is not None else []),
         '-I' + str(ROOT / 'recomp'), '-I' + str(ROOT / 'recomp/kernel'),
         *shlex.split(os.environ.get('TEST_CFLAGS', '')),
         str(ROOT / 'tools/tests/object_collect.c'), str(reference),
         str(args.helper), str(ROOT / 'recomp/xv_x86rt.c'),
-        '-Wl,--gc-sections,--wrap=xv_preempt,--wrap=xv_trap', '-lm', '-o', str(binary)],
+        '-Wl,--gc-sections,--wrap=xv_preempt,--wrap=xv_trap,--wrap=xv_object_collect_override', '-lm', '-o', str(binary)],
         check=True)
     environment = dict(os.environ)
     environment.pop('OBJECT_COLLECT_REGRESSION', None)
@@ -109,6 +112,7 @@ def main():
     sources = [args.helper, ROOT / 'tools/tests/object_collect.c', Path(__file__).resolve(),
                ROOT / 'games/halo_ce_3925/hooks.py', ROOT / 'recomp/xv_x86rt.c', ROOT / 'recomp/xv_x86rt.h']
     receipt = dict(argv=sys.argv, sanitize=args.sanitize, regression=args.regression,
+                   startup_default=args.startup_default,
                    sources={str(p): hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in sources},
                    modes={})
     try:

@@ -478,6 +478,13 @@ ifeq ($(XV_NATIVE_OBJECT_COLLECT),1)
 RECOMP_CFLAGS += -DXV_NATIVE_OBJECT_COLLECT
 CFLAGS += -DXV_NATIVE_OBJECT_COLLECT
 endif
+XV_NATIVE_OBJECT_COLLECT_DEFAULT ?= 0
+ifneq ($(words $(XV_NATIVE_OBJECT_COLLECT_DEFAULT)),1)
+$(error XV_NATIVE_OBJECT_COLLECT_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_OBJECT_COLLECT_DEFAULT),0 1),$(XV_NATIVE_OBJECT_COLLECT_DEFAULT))
+$(error XV_NATIVE_OBJECT_COLLECT_DEFAULT must be 0 or 1)
+endif
 # Track this optional mode even during incremental builds. Archive membership
 # and the generated hook must change together when the feature is toggled.
 COLLECT_HOOK_SRCS := $(shell grep -l XV_NATIVE_OBJECT_COLLECT $(XITA_GUEST_SRCS) 2>/dev/null)
@@ -489,9 +496,19 @@ $(RECOMP_BUILD)/object-collect.config: force-object-collect-config
 	@printf '%s\n' '$(if $(filter 1,$(XV_NATIVE_OBJECT_COLLECT)),1,0)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
-$(COLLECT_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_object_collect.o $(BUILD)/runtime/xv_ui_gxm.o: $(RECOMP_BUILD)/object-collect.config
+$(COLLECT_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_object_collect.o $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_ui_gxm.o: $(RECOMP_BUILD)/object-collect.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/object-collect.config
-$(RECOMP_BUILD)/kernel/xk_object_collect.o: RECOMP_CFLAGS += -ffp-contract=off
+# Startup selection is consumed only by this helper. Changing it must not
+# rebuild the large generated units or change their qualified compile flags.
+.PHONY: force-object-collect-startup-config
+force-object-collect-startup-config:
+$(RECOMP_BUILD)/object-collect-startup.config: force-object-collect-startup-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_NATIVE_OBJECT_COLLECT_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_collect.o: $(RECOMP_BUILD)/object-collect-startup.config
+$(RECOMP_BUILD)/kernel/xk_object_collect.o: RECOMP_CFLAGS += -ffp-contract=off -DXV_NATIVE_OBJECT_COLLECT_DEFAULT=$(XV_NATIVE_OBJECT_COLLECT_DEFAULT)
 ifeq ($(XV_QUAT_CACHE),1)
 RECOMP_CFLAGS += -DXV_QUAT_CACHE
 endif

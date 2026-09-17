@@ -14,7 +14,19 @@ uint8_t *g_xram, *g_img_base;
 uint32_t *g_xpt;
 void reference_00171F10(xctx *), candidate_00171F10(xctx *);
 void xv_object_collect_override(int);
+int xv_object_collect_enabled(void);
 void xv_object_collect_report(unsigned);
+#ifndef XV_NATIVE_OBJECT_COLLECT_DEFAULT
+#define XV_NATIVE_OBJECT_COLLECT_DEFAULT 0
+#endif
+static unsigned startup_mode, override_calls;
+void __real_xv_object_collect_override(int);
+void __wrap_xv_object_collect_override(int value)
+{
+    assert(!startup_mode); /* A startup fixture must never change a live mode. */
+    override_calls++;
+    __real_xv_object_collect_override(value);
+}
 
 static char log_line[256];
 void xk_os_log(const char *fmt, ...)
@@ -353,10 +365,28 @@ int main(int argc, char **argv)
     assert(cases >= 64);
     /* Negative controls may select one regression kind for every case. */
     const char *only = getenv("OBJECT_COLLECT_REGRESSION");
-    int enabled = !strcmp(mode, "on") || !strcmp(mode, "environment");
-    if (!strcmp(mode, "environment")) setenv("XV_NATIVE_OBJECT_COLLECT", "1", 1);
-    else unsetenv("XV_NATIVE_OBJECT_COLLECT");
-    xv_object_collect_override(!strcmp(mode, "on") ? 1 : !strcmp(mode, "off") ? 0 : -1);
+    int enabled;
+    startup_mode = !strncmp(mode, "startup", 7);
+    if (startup_mode) {
+        if (!strcmp(mode, "startup")) {
+            unsetenv("XV_NATIVE_OBJECT_COLLECT");enabled=XV_NATIVE_OBJECT_COLLECT_DEFAULT;
+        } else {
+            const char *setting = !strcmp(mode, "startup-env-0") ? "0" :
+                !strcmp(mode, "startup-env-1") ? "1" :
+                !strcmp(mode, "startup-env-empty") ? "" : NULL;
+            assert(setting);assert(!setenv("XV_NATIVE_OBJECT_COLLECT",setting,1));
+            enabled=atoi(setting)!=0;
+        }
+        /* Same passive resolution used by the post-dashboard startup log. */
+        assert(xv_object_collect_enabled()==enabled);
+    } else {
+        assert(!strcmp(mode,"on")||!strcmp(mode,"off")||!strcmp(mode,"default")||!strcmp(mode,"environment"));
+        enabled = !strcmp(mode, "on") || !strcmp(mode, "environment") ||
+            (!strcmp(mode,"default") && XV_NATIVE_OBJECT_COLLECT_DEFAULT);
+        if (!strcmp(mode, "environment")) setenv("XV_NATIVE_OBJECT_COLLECT", "1", 1);
+        else unsetenv("XV_NATIVE_OBJECT_COLLECT");
+        xv_object_collect_override(!strcmp(mode, "on") ? 1 : !strcmp(mode, "off") ? 0 : -1);
+    }
     /* Unguarded 4-byte guest accesses may run past the last physical page. */
     g_xram = malloc(ARENA + 8u);
     g_img_base = g_xram;
@@ -425,6 +455,7 @@ int main(int argc, char **argv)
            "%u frame-alias regression skips, yields -1/datum/leaf %u/%u/%u\n",
            mode, cases, (unsigned long long)events_total, objects_total, skipped_total,
            alias_skips, yields_inner_none[0], yields_inner_datum[0], yields_outer[0]);
+    assert(override_calls==(startup_mode?0u:1u));
     free(expected); free(initial); free(g_xpt); free(g_xram);
     return 0;
 }
