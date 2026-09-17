@@ -535,6 +535,34 @@ void xv_trace_func(uint32_t address)
         trace_mapped_word(0x466D6C); trace_mapped_word(0x5637DC);
         trace_mapped_word(0x484B00); trace_mapped_word(0x484B10); trace_mapped_word(0x484B28);
     }
+    /* Preferences/signature path evidence (read-only). A memory snapshot showed the game's stored
+     * XCalculateSignatureBegin handle 0x470024 = FFFFFFFF at boot: the signed preferences file is
+     * then treated as invalid every boot, reset to defaults (cache version 0), and the shared map
+     * caches are deleted and rebuilt on every start. Trace the entries along that path with the
+     * first three stack arguments so the failing step can be identified from one boot. */
+    static unsigned sig_path_count;
+    if (xk_cur && sig_path_count < 48 &&
+        (address == 0x2D6765u || address == 0x2D6724u || address == 0x2D65A7u || address == 0x2D6459u ||
+         address == 0x2D6779u || address == 0x2D09C0u || address == 0x2D1D66u || address == 0x213380u ||
+         address == 0x121220u || address == 0x121280u || address == 0x12280u || address == 0x2D152Fu)) {
+        const xctx *c = &xk_cur->ctx;
+        ++sig_path_count;
+        uint32_t sp = c->r[4];
+        xv_logf("[h2/sig-path] fn=%08X return=%08X eax=%08X ecx=%08X args=%08X,%08X,%08X\n",
+                address, X_M32(sp), c->r[0], c->r[1], X_M32(sp + 4), X_M32(sp + 8), X_M32(sp + 12));
+        /* 0x121220 (reset to defaults) / 0x121280 (accepted) are called from the preferences
+         * loader with its frame just above the return address: computed signature at +0x0C,
+         * file image at +0x38, bytes read at +0x34, request state at +0x4C (frame-relative). */
+        if (address == 0x121220u || address == 0x121280u) {
+            uint32_t frame = sp + 4; char a[48], b[48];
+            for (unsigned i = 0; i < 20; ++i) {
+                snprintf(a + i * 2, 3, "%02X", X_M8(frame + 0x0C + i));
+                snprintf(b + i * 2, 3, "%02X", X_M8(frame + 0x38 + i));
+            }
+            xv_logf("[h2/sig-path] loader computed=%s stored=%s bytes=%u state=%08X\n",
+                    a, b, X_M32(frame + 0x34), X_M32(frame + 0x4C));
+        }
+    }
     static unsigned error_path_count;
     if (xk_cur && error_path_count < 64 &&
         (address == 0x13F10 || address == 0x163820 || address == 0x163890 ||
