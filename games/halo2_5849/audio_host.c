@@ -595,9 +595,8 @@ static void game_stream_complete(xctx *c, uint32_t ip, h2_audio_stream *s, uint3
     if (completed) { if (!mapped(completed, 4)) fail(c, ip, "stream packet completed-size output", completed); uint32_t bytes = status_value ? 0 : size; x_guest_write(completed, &bytes, 4); }
     if (status) { if (!mapped(status, 4)) fail(c, ip, "stream packet status output", status); x_guest_write(status, &status_value, 4); }
     s->game_head = (s->game_head + 1) % 2; --s->game_packets; ++s->game_completed;
-#if H2_AUDIO_DSP
-    if (!s->game_packets) h2_audio_backend_stream_voice_active(s->voice, 0);
-#endif
+    /* The drained voice stays registered: the mixer keeps a starved stream voice
+     * playing (silence) until Flush or Release stops it. */
     xctx saved = *c; uint32_t fpscr = h2_platform_fpscr_read(); uint8_t irql = X_M8(c->fs_base + 0x24);
     X_M8(c->fs_base + 0x24) = 2; c->preempt = 0x7fffffff;
     X_PUSH32(status_value); X_PUSH32(context); X_PUSH32(s->context); X_PUSH32(0xDEAD0003u);
@@ -993,7 +992,11 @@ static void stream_flush(xctx *c)
      * before returning. The sound-source release paths (0x21EC5D, 0x21F2B8,
      * 0x21F2F8) call it after GetStatus. */
     unsigned queued = s->game_packets;
-    if (queued) { xk_audio_stream_flush(s->voice); xk_audio_voice_stop(s->voice); }
+    if (queued) xk_audio_stream_flush(s->voice);
+    xk_audio_voice_stop(s->voice);
+#if H2_AUDIO_DSP
+    h2_audio_backend_stream_voice_active(s->voice, 0);
+#endif
     while (s->game_packets) game_stream_complete(c, ip, s, XMEDIAPACKET_STATUS_FLUSHED, "flushed");
     xv_logf("[h2/audio-stream] flush caller=%08X object=%08X cancelled=%u; real voice stopped\n", X_M32(c->r[4]), s->base, queued);
     result(c, 0, 1);
