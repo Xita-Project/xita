@@ -78,6 +78,7 @@ int main(void)
     reject(0, 0x9FC, 2); reject(0, 0x16BC, 2); reject(0, 0x1D80, 2);
     assert(emit(0, 0x9FC, 1) && emit(0, 0x16BC, 1) && emit(0, 0x1D80, 1));
     assert(s.provoking_vertex == 1 && s.edge_flag == 1 && s.compress_depth == 1);
+    reject(0, 0x1710, 1); assert(emit(0, 0x1710, 0));   /* INVALIDATE_VERTEX_CACHE_FILE: zero only */
     assert(emit(0, 0x120, 6) && emit(0, 0x124, 7) && emit(0, 0x128, 0));
     reject(0, 0x120, 8); reject(0, 0x124, 8); reject(0, 0x128, 8);
     reject(0, 0x12C, 0); reject(0, 0x130, 0); /* no fake flip or vblank */

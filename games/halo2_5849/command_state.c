@@ -389,6 +389,11 @@ static int kelvin(h2_command_state *s, h2_kelvin_clear *c, unsigned sub,
         return !value && s->flip_modulo >= 2 && s->flip_write < s->flip_modulo &&
                s->flip_read < s->flip_modulo && s->flip_read != s->flip_write;
     case 0x9FC: if (value > 1) return 0; s->provoking_vertex = value; return 1;
+    case 0x1710: /* INVALIDATE_VERTEX_CACHE_FILE: Halo 2 pushes it (value 0) from 0x439D0 after
+                  * updating a vertex-buffer entry. No vertex cache exists on this path - every
+                  * draw fetches its arrays from guest memory - so the write is a no-op. */
+        if (value) return 0;
+        return 1;
     case 0x16BC: if (value > 1) return 0; s->edge_flag = value; return 1;
     case 0x1D6C: if (value & 3) return 0; s->semaphore_offset = value; return 1;
     case 0x1D70: return release_semaphore(s, c, value);
