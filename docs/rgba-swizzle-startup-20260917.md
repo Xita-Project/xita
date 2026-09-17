@@ -48,7 +48,15 @@ about 12.8 FPS after initial texture loading. Two fire inputs, camera/strafe and
 pause complete with no searched fault marker. Captured checkpoint and NPC views
 render correctly; this is limited smoke evidence, not a claim that all rendering
 or long-session crashes are resolved. No repeatable gain or regression is
-established; all nine paths remain enabled. Blood Gulch follow-up is in progress.
+established; all nine paths remain enabled.
+
+Normal-menu Blood Gulch also loads. Plasma charging/firing retains both visible
+vehicles, followed by Warthog driver entry, forward/reverse/steering, wall contact
+and vehicle exit without reproducing a crash. The different initial spawn reports
+14.6–14.7 FPS; driving captures reach 6–8 FPS. A later stationary wall view reports
+10.3 FPS. These are different workloads and do not establish a gain or regression
+against the parent. The valley/driving target remains unmet. This run does not
+repeat the parent's rocket/death/respawn checks or settle long-session stability.
 Earlier
 [layout validation](rgba-swizzle-20260907.md) did not establish a physical Vita
 performance result. No FPS gain is claimed from host correctness or instruction

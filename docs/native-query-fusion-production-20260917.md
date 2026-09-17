@@ -99,8 +99,11 @@ actual production generator/build graph rather than repeating those suites:
   small graph fixture; the first test exercises the real generator.
 
 The qualified separate typed unit uses a 2152-byte frame plus a 24-byte
-adapter; actual CE guest threads/workers request 512 KiB native SCE stacks.
-This wiring adds no stack-headroom admission and claims no universal recursion
+adapter. Object workers have 512 KiB native SCE stacks, but owner fibers use
+32 KiB native slices carved from the 2 MiB guest thread stack. The enclosing
+thread allocation is not the fiber's available headroom; guest x86 stack
+counters do not measure native high-water. This wiring adds no stack-headroom
+admission and claims no universal recursion
 bound. Overflow retains the fused frame while calling a generic child. Full
 actor/physics callbacks, firmware copy implementation cost, cache effects and
 physical FPS remain outside the bounded oracle. The earlier instruction

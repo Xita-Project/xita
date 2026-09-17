@@ -230,4 +230,12 @@ captured checkpoint/NPC views render, no searched fault marker is found, and
 the logger reports no error. This short smoke is not extended combat or crash
 qualification, and no repeatable performance gain or regression is established.
 All nine remain enabled at native resolution and standard graphics. The eight-path
-runtime remains in slot 0 for rollback. Blood Gulch follow-up is in progress.
+runtime remains in slot 0 for rollback.
+
+Normal-menu Blood Gulch startup, plasma charge/fire with vehicles visible, Warthog
+driver entry, forward/reverse/steering and exit also complete. Initial reports are
+14.6–14.7 FPS at a different spawn; driving captures show 6–8 FPS and a later
+stationary wall view reports 10.3 FPS. No matched route comparison or speedup is
+claimed. The ninth path remains enabled; short smoke does not settle longer
+sessions or the historical crashes. Private receipts and exact actions are under
+`rgba-swizzle-startup/`.
