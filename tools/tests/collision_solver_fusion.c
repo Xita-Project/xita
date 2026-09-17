@@ -13,6 +13,7 @@ xctx *const arm_context_ptr=&context;
 const unsigned layout[]={sizeof(xctx),offsetof(xctx,r),offsetof(xctx,st),offsetof(xctx,fsp),
     offsetof(xctx,fsw),offsetof(xctx,fcw),offsetof(xctx,preempt),offsetof(xctx,f_kind),offsetof(xctx,f_bits),offsetof(xctx,xmm)};
 unsigned ns_site,ns_yields,ns_events,ns_seen,ns_fallbacks,ns_traps,ns_scope_depth;
+unsigned ns_mutation_site,ns_mutations;
 uint32_t ns_original_pages[PAGES],ns_alternate_pages[PAGES];
 static unsigned variant;
 unsigned xv_object_hold_children_enabled;
@@ -55,8 +56,9 @@ void xv_preempt(xctx *c)
         0x85c63,0x85c76,0x8660a,0x8661d,0x1710b6,0x17124d,0x1713c9};
     for(unsigned i=0;i<sizeof sites/sizeof *sites;i++)if(ns_site==sites[i])ns_seen|=1u<<i;
     for(unsigned i=0;i<128;i++){unsigned char v=X_M8(c->r[4]+i);hash(&v,1);}
-    c->preempt=3;
-    if(ns_yields!=1)return;
+    c->preempt=variant&8?1:3; /* Observe every taken preempt site when requested. */
+    if(ns_mutation_site ? ns_site!=ns_mutation_site||ns_mutations : ns_yields!=1)return;
+    ns_mutations++;
     switch((variant>>4)&7){
     case 1:c->f_cf^=1;c->f_of^=1;c->fsw^=0x4100;break;
     case 2:c->fsp=(c->fsp+3)&7;c->st[c->fsp]=.75;break;
@@ -132,6 +134,7 @@ void arm_prepare(unsigned count,unsigned packed,unsigned budget)
     context.df=0;context.f_kind=XK_SUB;context.f_bits=32;context.f_op1=2;context.f_op2=1;
     context.f_res=1;context.f_cf_override=0;context.f_of_override=0;context.preempt=budget;
     ns_current_context=&context;ns_site=ns_yields=ns_events=ns_seen=ns_fallbacks=ns_traps=ns_scope_depth=0;
+    ns_mutation_site=ns_mutations=0;
     xv_object_hold_children_enabled=!!(variant&4);
 }
 void arm_original(void){ns_original_call(&context);}
