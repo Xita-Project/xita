@@ -8,7 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
-from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices
+from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere
 
 
 class HaloHooks(NoGameHooks):
@@ -215,6 +215,8 @@ class HaloHooks(NoGameHooks):
         out.extend(object_motion_profile.entry(self.image, address))
         if address == 0x170C10 and collision_solver.matches(self.image):
             out.extend(collision_solver.ENTRY)
+        if address == segment_sphere.SPAN[0] and segment_sphere.matches(self.image):
+            out.extend(segment_sphere.ENTRY)
         if self.pose_coalesce_enabled and address in (0x8DDF0, 0x8E087):
             out.extend(["#if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POSE_EXPERIMENT)",
                         "    XV_OBJECT_POSE_SCOPE();", "#endif"])
@@ -266,6 +268,8 @@ class HaloHooks(NoGameHooks):
         body = self.light_census_body(address, body)
         if self.enabled and address == 0x86F50 and collision_vertices.matches(self.image):
             body = collision_vertices.hook(body)
+        if self.enabled and address == segment_sphere.SPAN[0] and segment_sphere.matches(self.image):
+            body = segment_sphere.hook(body)
         if self.enabled and address == 0x4C980:
             size, digest = self.object_shared[address]
             if hashlib.sha256(self.image.bytes_at(address, size) or b"").hexdigest() == digest:

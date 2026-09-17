@@ -1652,6 +1652,15 @@ static int xv_pump_retire(void)
             xv_collision_vertices_enabled(),vertices-last_collision_vertices,vertices);
         last_collision_vertices=vertices;
 #endif
+#ifdef XV_NATIVE_SEGMENT_SPHERE
+        extern unsigned xv_segment_sphere_count;
+        extern int xv_segment_sphere_enabled(void);
+        static unsigned last_segment_sphere;
+        unsigned spheres=__atomic_load_n(&xv_segment_sphere_count,__ATOMIC_RELAXED);
+        XV_LOG("[segment-sphere] enabled %d; %u admissions since last report; cumulative %u (asynchronous snapshot)\n",
+            xv_segment_sphere_enabled(),spheres-last_segment_sphere,spheres);
+        last_segment_sphere=spheres;
+#endif
         XV_LOG("[frame-retire] 60 frames: completion latency %.3f ms/frame; max pending %u; GPU notification retirement (overlaps guest/submission)\n",
             g_completion_us / 60000.0, g_max_pending);
 #if XV_GPU_PACKET_TIMING
@@ -2078,6 +2087,10 @@ int main(int argc, char *argv[])
 #ifdef XV_NATIVE_COLLISION_VERTICES
     { extern int xv_collision_vertices_enabled(void);
       XV_LOG("[collision-vertices] process-start mode %d; gameplay selection fixed for this launch\n",xv_collision_vertices_enabled()); }
+#endif
+#ifdef XV_NATIVE_SEGMENT_SPHERE
+    { extern int xv_segment_sphere_enabled(void);
+      XV_LOG("[segment-sphere] process-start mode %d; gameplay selection fixed for this launch\n",xv_segment_sphere_enabled()); }
 #endif
 
     uint64_t gfx_started = sceKernelGetProcessTimeWide();

@@ -459,6 +459,37 @@ $(COLLISION_VERTEX_HOOK_OBJS): recomp/kernel/xk_collision_vertices.h
 $(COLLISION_VERTEX_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_collision_vertices_control.o: $(RECOMP_BUILD)/collision-vertices.config
 $(BUILD)/runtime/main.o: $(RECOMP_BUILD)/collision-vertices.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/collision-vertices.config
+ifeq ($(XV_NATIVE_SEGMENT_SPHERE),1)
+RECOMP_CFLAGS += -DXV_NATIVE_SEGMENT_SPHERE
+CFLAGS += -DXV_NATIVE_SEGMENT_SPHERE
+endif
+XV_NATIVE_SEGMENT_SPHERE_DEFAULT ?= 0
+ifneq ($(words $(XV_NATIVE_SEGMENT_SPHERE_DEFAULT)),1)
+$(error XV_NATIVE_SEGMENT_SPHERE_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_SEGMENT_SPHERE_DEFAULT),0 1),$(XV_NATIVE_SEGMENT_SPHERE_DEFAULT))
+$(error XV_NATIVE_SEGMENT_SPHERE_DEFAULT must be 0 or 1)
+endif
+SEGMENT_SPHERE_HOOK_SRCS := $(shell grep -l XV_NATIVE_SEGMENT_SPHERE $(XITA_GUEST_SRCS) 2>/dev/null)
+SEGMENT_SPHERE_HOOK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(SEGMENT_SPHERE_HOOK_SRCS))
+.PHONY: force-segment-sphere-config force-segment-sphere-startup-config
+force-segment-sphere-config:
+force-segment-sphere-startup-config:
+$(RECOMP_BUILD)/segment-sphere.config: force-segment-sphere-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(if $(filter 1,$(XV_NATIVE_SEGMENT_SPHERE)),1,0)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/segment-sphere-startup.config: force-segment-sphere-startup-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_NATIVE_SEGMENT_SPHERE_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(SEGMENT_SPHERE_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_segment_sphere_control.o: recomp/kernel/xk_segment_sphere.h
+$(SEGMENT_SPHERE_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_segment_sphere_control.o $(BUILD)/runtime/main.o: $(RECOMP_BUILD)/segment-sphere.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/segment-sphere.config
+$(RECOMP_BUILD)/kernel/xk_segment_sphere_control.o: $(RECOMP_BUILD)/segment-sphere-startup.config
+$(RECOMP_BUILD)/kernel/xk_segment_sphere_control.o: RECOMP_CFLAGS += -DXV_NATIVE_SEGMENT_SPHERE_DEFAULT=$(XV_NATIVE_SEGMENT_SPHERE_DEFAULT)
 ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_MODEL_PALETTE
 CFLAGS += -DXV_NATIVE_MODEL_PALETTE
