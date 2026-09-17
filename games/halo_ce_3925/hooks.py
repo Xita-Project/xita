@@ -8,7 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
-from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere
+from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere, collision_traversal
 
 
 class HaloHooks(NoGameHooks):
@@ -318,6 +318,8 @@ class HaloHooks(NoGameHooks):
             body = re.sub(r"    /\* 00088BA5 .*?(?=    /\* 00088BF9 )",
                 "    /* 00088BA5..00088BF8: native interval arithmetic; original spill precision. */\n    { extern void xv_bsp_plane_interval(xctx *); xv_bsp_plane_interval(c); }\n",
                 body, count=1, flags=re.S)
+        if self.enabled and address in collision_traversal.SPANS and collision_traversal.matches(self.image):
+            body = collision_traversal.hook(address, body)
         return body
 
     def postprocess(self, directory):
