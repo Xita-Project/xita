@@ -45,7 +45,7 @@ static struct {
     SceUID gpu_uid, cpu_uid;
     uint8_t *gpu, *cpu;
     unsigned used, count, valid_bytes, bucket[UPLOAD_BUCKETS];
-    unsigned dispatched;
+    unsigned dispatched, dirty_first, dirty_end, dirty_bytes;
     uint32_t ticket;
     int started, asynchronous, has_ticket;
     upload_entry entries[UPLOAD_ENTRIES];
@@ -54,6 +54,10 @@ static unsigned copies, reused, failures, high_water;
 static uint64_t copied_bytes, compared_bytes;
 static unsigned resident_checks, resident_hits;
 static uint64_t resident_compared, resident_bytes;
+/* Producer-side traffic, independent of asynchronously sampled worker totals.
+ * Dirty envelopes include unchanged internal gaps to bound dispatch count. */
+static uint64_t gpu_queued_bytes, gpu_caller_bytes, gpu_clean_bytes, gpu_overcopy_bytes;
+static unsigned gpu_queued_batches, gpu_caller_batches, gpu_clean_batches;
 static int resident_override = -1;
 static int compare_override = -1;
 static int blocks_override = -1;
@@ -88,17 +92,32 @@ static void dispatch(unsigned slot, int final)
 {
     unsigned first=pools[slot].dispatched, bytes=pools[slot].used-first;
     if (!pools[slot].asynchronous || !bytes || (!final && bytes<XV_VERTEX_WORKER_BATCH)) return;
+    unsigned dirty=pools[slot].dirty_end-pools[slot].dirty_first;
+    gpu_clean_bytes+=bytes-dirty;
+    if (!dirty) {
+        /* A clean tail must not erase an earlier still-pending copy ticket.
+         * Retired storage already matches; no new GPU stores need a barrier. */
+        gpu_clean_batches++;
+        pools[slot].dispatched=pools[slot].used;
+        return;
+    }
+    first=pools[slot].dirty_first;
+    bytes=dirty;
+    gpu_overcopy_bytes+=bytes-pools[slot].dirty_bytes;
     uint64_t profile = xv_vertex_work_begin();
     uint8_t *dst=pools[slot].gpu+first;
     const uint8_t *src=pools[slot].cpu+first;
     uint32_t ticket;
     if (bytes>=4096 && xv_upload_worker_submit(dst,src,bytes,&ticket)) {
         pools[slot].ticket=ticket; pools[slot].has_ticket=1;
+        gpu_queued_batches++; gpu_queued_bytes+=bytes;
     } else {
         memcpy(dst,src,bytes);
         xv_gpu_flush(dst,bytes);
+        gpu_caller_batches++; gpu_caller_bytes+=bytes;
     }
     pools[slot].dispatched=pools[slot].used;
+    pools[slot].dirty_first=pools[slot].dirty_end=pools[slot].dirty_bytes=0;
     xv_vertex_work_end(XV_VERTEX_DISPATCH,bytes,profile);
 }
 
@@ -279,6 +298,14 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
             memcpy(pools[slot].gpu + off, pools[slot].cpu + off, bytes);
         }
         copies++; copied_bytes += bytes;
+        if (pools[slot].asynchronous) {
+            /* Appends are disjoint. One envelope preserves the old batching
+             * cadence and never submits more jobs than the full-prefix path.
+             * Include alignment so residency OFF keeps its original ranges. */
+            if (!pools[slot].dirty_end) pools[slot].dirty_first=off;
+            pools[slot].dirty_end=off+aligned;
+            pools[slot].dirty_bytes+=bytes;
+        } else gpu_caller_bytes+=bytes;
         xv_gpu_flush(pools[slot].gpu + off, bytes);
         xv_vertex_work_end(XV_VERTEX_SNAPSHOT,bytes,profile);
     }
@@ -286,7 +313,10 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
         /* Initialize newly exposed padding in both copies. Later frames may
          * consume it as vertex bytes after changing stream sizes or order. */
         memset(pools[slot].cpu + off + bytes, 0, aligned - bytes);
-        if (!pools[slot].asynchronous) memset(pools[slot].gpu + off + bytes, 0, aligned - bytes);
+        if (!pools[slot].asynchronous) {
+            memset(pools[slot].gpu + off + bytes, 0, aligned - bytes);
+            gpu_caller_bytes+=aligned-bytes;
+        } else pools[slot].dirty_bytes+=aligned-bytes;
         pools[slot].valid_bytes = off + aligned;
     }
     pools[slot].entries[n] = (upload_entry){source, bytes, off, pools[slot].bucket[hash]};
@@ -311,6 +341,7 @@ void xv_vertex_upload_reset(unsigned slot)
     xv_vertex_upload_seal(slot);
     xv_vertex_upload_wait(slot);
     pools[slot].dispatched=0; pools[slot].has_ticket=0;
+    pools[slot].dirty_first=pools[slot].dirty_end=pools[slot].dirty_bytes=0;
     pools[slot].started=pools[slot].asynchronous=0;
     /* Keep initialized matching bytes, but discard all current-frame source
      * identities. Reuse is always proved again by a full byte comparison. */
@@ -348,9 +379,15 @@ void xv_vertex_upload_report(unsigned frames)
     xv_logf("[vertex-upload] %u frames: %u copies %u reused %u failures; copied %llu KiB compared %llu KiB; max slot %u/%u KiB\n",
         frames, copies, reused, failures, (unsigned long long)(copied_bytes >> 10),
         (unsigned long long)(compared_bytes >> 10), high_water >> 10, XV_VERTEX_UPLOAD_BYTES >> 10);
-    xv_logf("[vertex-resident] %u frames: enabled %d; %u checks %u hits; compared %llu KiB skipped-upload %llu KiB; exact retired-slot bytes\n",
+    xv_logf("[vertex-resident] %u frames: enabled %d; %u checks %u hits; compared %llu KiB avoided-snapshot %llu KiB; exact retired-slot bytes\n",
         frames, resident_enabled(), resident_checks, resident_hits,
         (unsigned long long)(resident_compared >> 10), (unsigned long long)(resident_bytes >> 10));
+    xv_logf("[vertex-transfer] %u frames: GPU queued %u batches %llu KiB / caller %llu KiB (%u async fallbacks/tails); clean %u batches %llu KiB omitted / internal-gap-padding %llu KiB recopied; producer ranges, completion totals overlap\n",
+        frames,gpu_queued_batches,(unsigned long long)(gpu_queued_bytes>>10),
+        (unsigned long long)(gpu_caller_bytes>>10),gpu_caller_batches,gpu_clean_batches,
+        (unsigned long long)(gpu_clean_bytes>>10),(unsigned long long)(gpu_overcopy_bytes>>10));
+    gpu_queued_batches=gpu_caller_batches=gpu_clean_batches=0;
+    gpu_queued_bytes=gpu_caller_bytes=gpu_clean_bytes=gpu_overcopy_bytes=0;
     xv_logf("[vertex-compare] %u frames: enabled %d; exact vector equality for cached spans >=64 bytes; upload residency unchanged\n",
         frames, compare_enabled());
     copies = reused = failures = high_water = 0; copied_bytes = compared_bytes = 0;

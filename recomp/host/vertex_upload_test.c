@@ -4,7 +4,10 @@
 #ifndef XV_VERTEX_UPLOAD_BYTES
 #define XV_VERTEX_UPLOAD_BYTES 256u
 #endif
-#include "../../runtime/xv_vertex_upload.c"
+#ifndef XV_VERTEX_UPLOAD_TEST_SOURCE
+#define XV_VERTEX_UPLOAD_TEST_SOURCE "../../runtime/xv_vertex_upload.c"
+#endif
+#include XV_VERTEX_UPLOAD_TEST_SOURCE
 static struct { void *p; int mapped; } blocks[16];
 static unsigned next_id=1, live, fail_at, calls, flushes;
 void xv_logf(const char *fmt, ...) {}

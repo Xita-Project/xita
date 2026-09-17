@@ -264,9 +264,11 @@ static void snapshot_loans(void)
     assert(snapshot_jobs>0);xv_snapshot_worker_override(-1);reset_worker();free(a);free(b);
     puts("PASS: synchronous snapshot loans, event creation/signal/wait faults, busy/start/signal fallback, delayed join, 64 alignments, bounds and 81 retained slot generations");
 }
+#ifndef XV_UPLOAD_WORKER_TEST_NO_MAIN
 int main(void)
 {
     assert(!xv_vertex_worker_enabled());queue_guards();delayed_slots();generations();snapshot_loans();
     puts("PASS: real upload worker, 3 startup failures, failed dispatch, full queue, delayed consumer, ticket wrap, source mutation, 300 mixed slot generations, reset and shutdown");
     return 0;
 }
+#endif

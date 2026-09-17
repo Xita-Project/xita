@@ -585,3 +585,11 @@ build/no_index_reuse_benchmark_test: resolution_benchmark_test.c ../../runtime/x
 .PHONY: test-diagnostic-poll
 test-diagnostic-poll:
 	$(PYTHON) ../../tools/test_diagnostic_poll.py
+
+.PHONY: test-vertex-resident-worker
+test-vertex-resident-worker: build/vertex_resident_worker_test
+	./build/vertex_resident_worker_test
+
+build/vertex_resident_worker_test: vertex_resident_worker_test.c upload_worker_test.c vertex_upload_test.c ../../runtime/xv_vertex_upload.c ../../runtime/xv_vertex_upload.h ../../runtime/xv_upload_worker.c ../../runtime/xv_upload_worker.h ../../runtime/xv_bytes_equal.h ../../runtime/xv_snapshot_copy.h ../../runtime/xv_vertex_profile.h ../../runtime/xv_vertex_refs.h ../../runtime/xv_frame_slots.h ../../runtime/xv_gpu_upload.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -Wno-unused-function -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include $< -pthread -Wl,--gc-sections -o $@
