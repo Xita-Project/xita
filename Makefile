@@ -147,6 +147,24 @@ $(BUILD)/vertex-block-startup.config: force-vertex-block-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_upload.o: $(BUILD)/vertex-block-startup.config
+# Decoded RGBA layout candidate: select at process start, preserving texture
+# quality and explicit XV_RGBA_SWIZZLED environment selection. OFF by default.
+XV_RGBA_SWIZZLED_DEFAULT ?= 0
+ifneq ($(words $(XV_RGBA_SWIZZLED_DEFAULT)),1)
+$(error XV_RGBA_SWIZZLED_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_RGBA_SWIZZLED_DEFAULT),0 1),$(XV_RGBA_SWIZZLED_DEFAULT))
+$(error XV_RGBA_SWIZZLED_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_ui_gxm.o: CFLAGS += -DXV_RGBA_SWIZZLED_DEFAULT=$(XV_RGBA_SWIZZLED_DEFAULT)
+.PHONY: force-rgba-layout-startup-config
+force-rgba-layout-startup-config:
+$(BUILD)/rgba-layout-startup.config: force-rgba-layout-startup-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_RGBA_SWIZZLED_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_ui_gxm.o: $(BUILD)/rgba-layout-startup.config
 # Diagnostic existing-scene completion census. OFF unless explicitly compiled.
 # Capacity is an independently verified SDK/runtime contract, not an allocation
 # request. Zero (the default) records structural declines without adding fences.

@@ -172,11 +172,21 @@ static int ui_decode(const uint8_t *src, unsigned fmt, unsigned w, unsigned h, u
 }
 /* Comparison override is changed only after the render queue drains. Cache
  * variants keep both layouts immutable until the normal texture-pool purge. */
+#ifndef XV_RGBA_SWIZZLED_DEFAULT
+#define XV_RGBA_SWIZZLED_DEFAULT 0
+#endif
+#if XV_RGBA_SWIZZLED_DEFAULT != 0 && XV_RGBA_SWIZZLED_DEFAULT != 1
+#error "XV_RGBA_SWIZZLED_DEFAULT must be 0 or 1"
+#endif
 static int g_rgba_swizzled_override=-1;
 static int ui_rgba_swizzled(void)
 {
     static int configured=-1;
-    if (configured<0) configured=xv_quality_int("XV_RGBA_SWIZZLED",0,0,1);
+    if (configured<0) {
+        configured=xv_quality_int("XV_RGBA_SWIZZLED",XV_RGBA_SWIZZLED_DEFAULT,0,1);
+        UI_LOG("[rgba-layout] startup %s (build default %d); eligible decoded textures only\n",
+               configured ? "swizzled" : "linear", XV_RGBA_SWIZZLED_DEFAULT);
+    }
     return g_rgba_swizzled_override<0 ? configured : g_rgba_swizzled_override;
 }
 void xv_ui_gxm_rgba_layout_override(int enabled)
@@ -572,7 +582,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         if (e->bytes > 512 * 1024) e->bytes = 512 * 1024;
         e->sum = ui_tex_hash(src, e->bytes);
     }
-    { static unsigned n; if (n++ < 24) UI_LOG("tex fmt %02X %ux%u -> %s (%u KB used)\n", fmt, w, h, as_bc ? "BC" : "RGBA", g.dec_off >> 10); }
+    { static unsigned n; if (n++ < 24) UI_LOG("tex fmt %02X %ux%u -> %s %s (%u KB used)\n", fmt, w, h, as_bc ? "BC" : "RGBA", sceGxmTextureGetType(&e->tex)==SCE_GXM_TEXTURE_SWIZZLED ? "swizzled" : "linear", g.dec_off >> 10); }
     sceGxmTextureSetMinFilter(&e->tex, as_bc == 1 ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_MIPMAP_LINEAR);
     sceGxmTextureSetMagFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
     {   /* diagnostic: XV_TEX_POINT=<xbox fmt hex> point-samples every texture of that format (lightmap atlas checks) */
