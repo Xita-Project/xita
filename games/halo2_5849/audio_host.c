@@ -44,7 +44,7 @@ typedef struct {
     /* The game's stream voices never start (their Process fails), so these
      * setters only record what the original packs into the voice image. */
     int32_t volume;                         /* SetVolume, hundredths of dB */
-    uint32_t frequency;                     /* SetFrequency, 0 = original */
+    int32_t pitch;                          /* SetPitch, DSBPITCH -4096..4095 */
     uint32_t lfo[2][6], eg[2][10], filter[6];
     uint32_t output;                        /* SetOutputBuffer: bus record base, 0 = none */
     int32_t bin_gain[32];                   /* mix-bin attenuations by bin (settings +0x30) */
@@ -747,17 +747,18 @@ static void stream_volume(xctx *c)
     xv_logf("[h2/audio-stream] volume caller=0021FC0E object=%08X volume=%d headroom=%u; empty real voice mirrors it\n", s->base, volume, s->headroom);
     result(c, 0, 2);
 }
-static void stream_frequency(xctx *c)
+static void stream_pitch(xctx *c)
 {
     const uint32_t ip = 0x37B804, callers[1] = {0x2201C9};
     stack(c, ip, 2); h2_audio_stream *s = stream_game_empty(c, ip, X_ARG(0), callers, 1);
-    uint32_t frequency = X_ARG(1);
-    /* SetFrequency: 0x37B31E -> 0x37A5BB stores it (settings+0x18); 0x381D7C
-     * reprograms the VP pitch. DSBFREQUENCY_ORIGINAL (0) or 100..48000 Hz.
+    int32_t pitch = (int32_t)X_ARG(1);
+    /* SetPitch: 0x37B31E -> 0x37A5BB stores lPitch (settings+0x18); 0x381D7C
+     * recomputes the VP pitch (0x380DEB) only for a started voice. DSBPITCH
+     * range -4096..4095 (the sound update sends values such as -501).
      * Recorded only: the empty voice keeps its native rate. */
-    if (frequency && (frequency < 100 || frequency > 48000)) fail(c, ip, "unsupported stream frequency", frequency);
-    s->frequency = frequency;
-    xv_logf("[h2/audio-stream] frequency caller=002201C9 object=%08X frequency=%u; recorded, empty real voice\n", s->base, frequency);
+    if (pitch < -4096 || pitch > 4095) fail(c, ip, "unsupported stream pitch", (uint32_t)pitch);
+    s->pitch = pitch;
+    xv_logf("[h2/audio-stream] pitch caller=002201C9 object=%08X pitch=%d; recorded, empty real voice\n", s->base, pitch);
     result(c, 0, 2);
 }
 static void stream_lfo(xctx *c)
@@ -1817,7 +1818,7 @@ void h2_audio_host_call(xctx *c, uint32_t ip)
     case 0x37B818: stream_headroom(c); break;
     case 0x37B822: stream_pause(c); break;
     case 0x37B7FF: stream_volume(c); break;
-    case 0x37B804: stream_frequency(c); break;
+    case 0x37B804: stream_pitch(c); break;
     case 0x37B809: stream_lfo(c); break;
     case 0x37B80E: stream_envelope(c); break;
     case 0x37B813: stream_filter(c); break;

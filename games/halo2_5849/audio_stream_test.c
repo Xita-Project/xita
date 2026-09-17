@@ -128,11 +128,12 @@ int main(void)
         c=context(handle,(uint32_t)-1300,0,0);X_M32(c.r[4])=0x21FC0E;call(&c,0x37B7FF,0,2);
         assert(s->volume==-1300&&v->volume>0.2f&&v->volume<0.25f&&!v->playing);
         c=context(handle,0,0,0);X_M32(c.r[4])=0x21FC0E;call(&c,0x37B7FF,0,2);assert(!s->volume&&v->volume==1.0f);
-        c=context(handle,22050,0,0);X_M32(c.r[4])=0x2201CA;reject_stream(&c,0x37B804);
-        c=context(handle,99,0,0);X_M32(c.r[4])=0x2201C9;reject_stream(&c,0x37B804);
-        c=context(handle,48001,0,0);X_M32(c.r[4])=0x2201C9;reject_stream(&c,0x37B804);
-        c=context(handle,22050,0,0);X_M32(c.r[4])=0x2201C9;call(&c,0x37B804,0,2);assert(s->frequency==22050&&v->rate==44100);
-        c=context(handle,0,0,0);X_M32(c.r[4])=0x2201C9;call(&c,0x37B804,0,2);assert(!s->frequency);
+        c=context(handle,(uint32_t)-501,0,0);X_M32(c.r[4])=0x2201CA;reject_stream(&c,0x37B804);
+        c=context(handle,(uint32_t)-4097,0,0);X_M32(c.r[4])=0x2201C9;reject_stream(&c,0x37B804);
+        c=context(handle,4096,0,0);X_M32(c.r[4])=0x2201C9;reject_stream(&c,0x37B804);
+        c=context(handle,(uint32_t)-501,0,0);X_M32(c.r[4])=0x2201C9;call(&c,0x37B804,0,2);assert(s->pitch==-501&&v->rate==44100);
+        c=context(handle,4095,0,0);X_M32(c.r[4])=0x2201C9;call(&c,0x37B804,0,2);assert(s->pitch==4095);
+        c=context(handle,0,0,0);X_M32(c.r[4])=0x2201C9;call(&c,0x37B804,0,2);assert(!s->pitch);
         {
             uint32_t lfo[6]={1,100,50,(uint32_t)-5,7,(uint32_t)-128};x_guest_write(0x9F00,lfo,sizeof lfo);
             c=context(handle,0x9F00,0,0);X_M32(c.r[4])=0x22050E;reject_stream(&c,0x37B809);
