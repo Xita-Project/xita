@@ -178,3 +178,37 @@ in these active windows. Texture reuse is selected, but its separate binding-ski
 counter is not enabled. Paused tail reports are excluded from active comparisons.
 Blood Gulch combat/driving, rocket pickup/death and prolonged crash qualification
 remain outstanding for this combination. All eighteen selections remain enabled.
+
+## Eighteen-path Blood Gulch follow-up
+
+The same boot-confirmed `b9000d48…` process subsequently completed ordinary
+Split Screen/New002/Blood Gulch/New003 Slayer, walking and camera movement,
+rocket pickup, an explosion ahead, self-hit/death and normal respawn. Screenshots
+confirm the equipped rocket, explosion smoke, death/rejoin screen and respawn.
+A charged plasma shot consumes 100→89 energy while the Ghost remains visible
+before, during and after the charge. This particular view does not contain the
+Warthog, so it does not establish both vehicles' visibility during the charge.
+
+Warthog gunner entry/fire/exit and driver entry, steering, forward/reverse,
+cliff contact, movement across the open valley and exit/pause also complete.
+The open-valley drive changes camera from 90.38,-129.08 to 70.55,-129.35;
+this is actual vehicle movement. Different driving/contact windows report
+roughly 6–10 FPS; a later stationary view reaches 12.3 FPS. Initial on-foot
+views report about 12–13 FPS, with one simpler view near 16. These are different
+live workloads, not matched before/after gains or regressions. The combination
+has not demonstrated another five FPS or stable 20 FPS.
+
+At the final receipt, frame 46,778, benchmark mode is OFF. The 7,781,736-byte log
+contains no searched fault marker and the logger reports zero errors/failed
+writes. The Vita is paused on foot with neutral input. All 749 query-prefix
+reports in this process remain zero. Short functional success does not settle
+the historical intermittent GPU crashes; the session also contains substantial
+stationary/menu/paused time and is not a sustained-driving measurement.
+
+Current logs expose different dependencies across views. The campaign
+checkpoint's joined object work is about 27.5 ms/frame, while a moved campaign
+view waits about 20 ms for exact visibility results without an eligible existing
+scene boundary. These are nested elapsed scopes, not additive removable time.
+The next diagnostic adds coarse owner tick/scene timing without enabling the
+old phase facility that disables object workers. Compatible retained changes
+stay cumulative while this larger performance gap is investigated.
