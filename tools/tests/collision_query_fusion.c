@@ -8,7 +8,7 @@
 #endif
 /* Synthetic fixture geometry only. Full arena/context comparisons include all
  * original stack writes. No saved guest body or map data is present here. */
-enum { ARENA=8<<20, PAGES=512, Q=0x10000,W=0x11000,N=0x12000,P=0x13000,
+enum { ARENA=8<<20, PAGES=1024, Q=0x10000,W=0x11000,N=0x12000,P=0x13000,
        L=0x14000,R=0x15000,T=0x16000,S=0x17000,E=0x18000,V=0x1a000,
        C=0x1d000,O=0x20000,SP=0x90000 };
 uint8_t *g_xram,*g_img_base;
@@ -19,7 +19,9 @@ xctx *const arm_context_ptr=&context;
 const unsigned layout[]={sizeof(xctx),offsetof(xctx,r),offsetof(xctx,st),offsetof(xctx,fsp),
  offsetof(xctx,fsw),offsetof(xctx,fcw),offsetof(xctx,preempt),offsetof(xctx,f_kind),offsetof(xctx,f_bits),offsetof(xctx,xmm)};
 unsigned ct_site,ct_yields,ct_events,ct_mutation,ct_entry,ct_seen;
-unsigned ct_boundary,ct_caller_mode;
+unsigned ct_boundary,ct_caller_mode,ct_collect_calls;
+static unsigned ct_depth;
+static unsigned ct_scope[9];
 unsigned nq_fallbacks;
 unsigned ct_alias,ct_projection_checks,ct_projection_accepted,ct_projection_declined;
 uint32_t ct_original_pages[PAGES],ct_alternate_pages[PAGES];
@@ -30,6 +32,13 @@ void original_00087EA0(xctx *);void candidate_00087EA0(xctx *);void raw_00087EA0
 void original_00087E10(xctx *);void candidate_00087E10(xctx *);void raw_00087E10(xctx *);
 #ifdef TEST_ARM
 void abort(void){__builtin_trap();}
+/* The ARM fixture selects compiled startup defaults, without environment
+ * overrides. Unexpected parsing or a negative SQRT is a hard failure. */
+char *getenv(const char *name){(void)name;return NULL;}
+int atoi(const char *text){(void)text;abort();}
+double sqrt(double value)
+{if(!(value>=0))abort();double result;
+ __asm__ volatile("vsqrt.f64 %P0, %P1":"=w"(result):"w"(value));return result;}
 #endif
 void x_guest_read_pages(void *dst,uint32_t a,size_t n)
 {uint8_t *d=dst;while(n){size_t k=4096-(a&4095);if(k>n)k=n;memcpy(d,X_G(a),k);d+=k;a+=(uint32_t)k;n-=k;}}
@@ -48,10 +57,25 @@ void ct_observe_entry(xctx *c,unsigned address)
  * explicit enable; production source performs additional lane/scope checks. */
 unsigned xv_object_hold_children_enabled=CT_HOLD_ENABLED;
 unsigned xv_object_motion_begin(xctx *c,unsigned site)
-{if(site!=6||c!=ct_current_context)abort();ct_observe_entry(c,0xfeed0000u|site);return 7;}
+{if((site!=2&&site!=3&&site!=6)||c!=ct_current_context||ct_depth==9)abort();
+ ct_scope[ct_depth++]=site+1;ct_observe_entry(c,0xfeed0000u|site);return site+1;}
 void xv_object_motion_end(unsigned *token)
-{if(*token){if(*token!=7)abort();ct_observe_entry(ct_current_context,0xfeedffffu);*token=0;}}
+{if(*token){if(!ct_depth||ct_scope[--ct_depth]!=*token)abort();ct_observe_entry(ct_current_context,0xfeedffffu);*token=0;}}
 #endif
+#ifdef XV_NATIVE_OBJECT_COLLECT
+int __real_xv_object_collect_refs(xctx *);
+int __wrap_xv_object_collect_refs(xctx *c)
+{if(c!=ct_current_context)abort();ct_collect_calls++;ct_observe_entry(c,0x172034u);
+ int result=__real_xv_object_collect_refs(c);ct_observe_entry(c,0x172163u);return result;}
+/* Fixtures use empty object lists. Reaching an unmodelled object callback is
+ * a hard failure, never a successful stub. */
+void f_001716F0(xctx *c){(void)c;abort();}
+#endif
+void xv_object_job_stack_probe(xctx *c)
+{/* Model the original-pointer observation and safe synthetic guest bounds;
+   * real worker admission and stop behaviour remain outside this fixture. */
+ if(c!=ct_current_context||c->r[4]<256||c->r[0]>c->r[4]-256)abort();
+ ct_observe_entry(c,0x1d130u);}
 void ct_projection_result(unsigned admitted)
 {if(admitted)ct_projection_accepted++;else ct_projection_declined++;
  if(ct_alias){ct_projection_checks++;if(admitted)abort();}}
@@ -89,7 +113,7 @@ void __wrap_xv_preempt(xctx *c)
 }
 void arm_prepare(unsigned depth,unsigned variant,unsigned budget)
 {
-    ct_boundary=nq_fallbacks=0;ct_caller_mode=(variant>>20)&3;
+    ct_boundary=nq_fallbacks=ct_collect_calls=ct_depth=0;ct_caller_mode=(variant>>20)&3;
     for(unsigned i=0;i<PAGES;i++)original_pages[i]=(i^1)*4096;
     memset(alternate_pages,0,sizeof alternate_pages);g_xpt=original_pages;
     memset(g_xram,0x33,ARENA);g_img_base=g_xram+(4<<20);
@@ -209,6 +233,7 @@ void arm_prepare(unsigned depth,unsigned variant,unsigned budget)
 }
 #ifdef CT_CALLERS
 void caller_original_00172C95(xctx *);void caller_candidate_00172C95(xctx *);
+void caller_original_00172BF0(xctx *);void caller_candidate_00172BF0(xctx *);
 static void caller_prepare(void)
 {
     /* At actual CALL 172C95, the seven 171F10 arguments are already pushed. */
@@ -220,18 +245,38 @@ static void caller_prepare(void)
     }
     /* 0x40 takes the BSP query with the object visitor disabled; 0x20 also
      * takes real 868F0 after a hit, where this bounded fixture stops. */
-    put(sp,ct_caller_mode==2?0x20:0x40);put(sp+4,C);flt(sp+8,.75f);
+    put(sp,ct_caller_mode==2?0x20:ct_caller_mode==3?0x80:0x40);put(sp+4,C);flt(sp+8,.75f);
     put(sp+12,0xaaaabbbb);put(sp+16,0xccccdddd);put(sp+20,0);
     put(sp+24,ct_caller_mode==1?sp-0x1014:O);
     X_IMG16(0x1f845c)=0;X_IMG32(0x39be54)=W;X_IMG32(0x27824c)=0x1b000;
     memset(X_G(0x1b001),0,32);flt(0x1f0f38,0);
+    /* Real native object collection after the BSP query. Cluster heads are
+     * empty, so no external object callback is fabricated. */
+    X_IMG32(0x39be58)=0x28000;put(0x280e4,0x29000);
+    X_IMG32(0x2fc6a0)=0x2a000;X_IMG32(0x2fc6a4)=0x2b000;put(0x2b034,0x2c000);
+    X_IMG32(0x278248)=0x1b000;X_IMG32(0x2d2fac)=0;X_IMG32(0x2fc684)=0;
+    for(unsigned i=0;i<128;i++){X_M16(0x29008+i*16)=i;put(0x2a000+i*4,0xffffffffu);put(0x2d2fb0+i*4,0);}
     put(sp+28,0x12345678);put(sp+28+0xac2c,0x11112222);put(sp+28+0xac30,0x33334444);
+#ifdef CT_FULL_CALLER
+    /* Full 172BF0 entry: motion vector ESI, center EDI, output EBX and six
+     * stack arguments. Its original prefix constructs 171F10's arguments. */
+    context.r[1]=0;
+    for(unsigned i=0;i<3;i++){flt(C+0x40+i*4,0);put(C+0x20+i*4,X_M32(C+i*4));}
+    put(sp,0x12345678);put(sp+4,ct_caller_mode==2?0x20:ct_caller_mode==3?0x80:0x40);
+    flt(sp+8,.75f);flt(sp+12,.25f);put(sp+16,C+0x60);put(sp+20,0x11112222);put(sp+24,0x33334444);
+    flt(0x1f0aa0,.5f);
+#endif
 }
 #endif
 void arm_original(void)
 {
 #ifdef CT_CALLERS
-caller_prepare();caller_original_00172C95(&context);
+caller_prepare();
+#ifdef CT_FULL_CALLER
+caller_original_00172BF0(&context);
+#else
+caller_original_00172C95(&context);
+#endif
 #else
 if(ct_entry==0)original_00088110(&context);else if(ct_entry==1)original_00087EA0(&context);else original_00087E10(&context);
 #endif
@@ -239,7 +284,12 @@ if(ct_entry==0)original_00088110(&context);else if(ct_entry==1)original_00087EA0
 void arm_candidate(void)
 {
 #ifdef CT_CALLERS
-caller_prepare();caller_candidate_00172C95(&context);
+caller_prepare();
+#ifdef CT_FULL_CALLER
+caller_candidate_00172BF0(&context);
+#else
+caller_candidate_00172C95(&context);
+#endif
 #else
 if(ct_entry==0)candidate_00088110(&context);else if(ct_entry==1)candidate_00087EA0(&context);else candidate_00087E10(&context);
 #endif
@@ -260,17 +310,17 @@ int main(void)
         if(k==40){depth=3;variant=(1u<<23)|12;budget=1;}
         if(k==41){depth=3;variant=(1u<<22)|12;budget=1;}
 #ifdef CT_CALLERS
-        variant|=(k%3)<<20;
+        variant|=(k%4)<<20;
 #endif
         if(getenv("CT_TRACE"))fprintf(stderr,"case%u d%u v%u b%u\n",k,depth,variant,budget);
         arm_prepare(depth,variant,budget);xctx initial=context;memcpy(before,g_xram,ARENA);
         uint32_t pages[PAGES];memcpy(pages,original_pages,sizeof pages);
         feclearexcept(FE_ALL_EXCEPT);arm_original();int fp=fetestexcept(FE_ALL_EXCEPT);
         xctx expected_context=context;memcpy(expected,g_xram,ARENA);
-        unsigned ey=ct_yields,eh=ct_events,es=ct_seen,eb=ct_boundary,which=g_xpt==alternate_pages;
+        unsigned ey=ct_yields,eh=ct_events,es=ct_seen,eb=ct_boundary,ec=ct_collect_calls,which=g_xpt==alternate_pages;
         uint32_t after[2][PAGES];memcpy(after[0],original_pages,sizeof pages);memcpy(after[1],alternate_pages,sizeof pages);
         context=initial;memcpy(g_xram,before,ARENA);memcpy(original_pages,pages,sizeof pages);
-        memset(alternate_pages,0,sizeof alternate_pages);g_xpt=original_pages;ct_site=ct_yields=ct_seen=ct_boundary=0;ct_events=2166136261u;
+        memset(alternate_pages,0,sizeof alternate_pages);g_xpt=original_pages;ct_site=ct_yields=ct_seen=ct_boundary=ct_collect_calls=0;ct_events=2166136261u;
         feclearexcept(FE_ALL_EXCEPT);arm_candidate();int cfp=fetestexcept(FE_ALL_EXCEPT);
 #ifdef CT_ALIAS_PROBES
         if(1){
@@ -286,7 +336,7 @@ int main(void)
             fprintf(stderr,"context case%u\n",k);for(unsigned i=0;i<sizeof context;i++)if(((uint8_t*)&context)[i]!=((uint8_t*)&expected_context)[i])fprintf(stderr,"byte%u expected%02x got%02x\n",i,((uint8_t*)&expected_context)[i],((uint8_t*)&context)[i]);abort();}
         if(memcmp(g_xram,expected,ARENA)){for(unsigned i=0;i<ARENA;i++)if(g_xram[i]!=expected[i]){fprintf(stderr,"memory case%u at%x expected%02x got%02x\n",k,i,expected[i],g_xram[i]);break;}abort();}
         assert(!memcmp(original_pages,after[0],sizeof pages)&&!memcmp(alternate_pages,after[1],sizeof pages));
-        assert((g_xpt==alternate_pages)==which);assert(ct_yields==ey&&ct_events==eh&&ct_seen==es&&ct_boundary==eb);assert(fp==cfp);
+        assert((g_xpt==alternate_pages)==which);assert(ct_yields==ey&&ct_events==eh&&ct_seen==es&&ct_boundary==eb);assert(fp==cfp);assert(ct_collect_calls==ec&&!ct_depth);
         seen|=es;total_yields+=ey;
     }
     printf("PASS %u complete query/traversal comparisons; yields=%u sites=%x startup=%d\n",CT_CASES,total_yields,seen,1);
