@@ -636,10 +636,17 @@ static void game_stream_process(xctx *c, h2_audio_stream *s, uint32_t address, u
                     (completed && aliases(status, 4, completed, 4)))))
         fail(c, ip, "unsupported game stream packet", buffer);
     if (s->game_packets >= s->packet_limit) fail(c, ip, "game stream packet queue full", s->game_packets);
-    if (xk_audio_stream_push(s->voice, buffer, size) < 0) fail(c, ip, "real mixer packet queue rejected", (uint32_t)s->voice);
+    /* Register before the push: the push marks the voice playing, and the output
+     * worker checks that every playing voice is known on its own thread. */
 #if H2_AUDIO_DSP
     if (h2_audio_backend_stream_voice_active(s->voice, 1) < 0) fail(c, ip, "real mixer voice registration rejected", (uint32_t)s->voice);
 #endif
+    if (xk_audio_stream_push(s->voice, buffer, size) < 0) {
+#if H2_AUDIO_DSP
+        if (!s->game_active) h2_audio_backend_stream_voice_active(s->voice, 0);
+#endif
+        fail(c, ip, "real mixer packet queue rejected", (uint32_t)s->voice);
+    }
     s->game_active = 1;
     if (s->pause & 0x44u) xk_audio_voice_stop(s->voice);  /* a paused voice keeps the packet queued */
     unsigned slot = (s->game_head + s->game_packets) % 2;
