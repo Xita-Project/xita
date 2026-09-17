@@ -52,6 +52,12 @@ void xv_d3d_query_boundary_arm(uint32_t frame,const SceGxmNotification *fence)
 {assert(*fence->address!=fence->value);boundary_fence[frame-10]=*fence;}
 void xv_d3d_query_boundary_report(void) {}
 #endif
+#if XV_QUERY_PREFIX_PUBLISH
+/* This fixture's three frames use distinct retained generations. The actual
+ * history-collision guard is exercised in test_query_publication.py. */
+int xv_d3d_visibility_publication_safe(uint32_t frame,const uint32_t *prior,unsigned count)
+{ assert(frame>=10 && frame<=12 && count<XV_FRAME_SLOTS);return 1; }
+#endif
 static int xv_early_visibility_enabled(void) { return early; }
 int xv_d3d_has_visibility(uint32_t frame) { assert(frame>=10 && frame<=12);return has_queries; }
 static uint64_t now=1,retired_at[3],submitted_at[3],queries_at[3];
@@ -65,7 +71,11 @@ uint64_t xk_os_monotonic_us(void) { return now; }
 void xv_d3d_visibility_complete(uint32_t frame)
 {
     assert(frame==10+queries && (gpu[queries].world_done || gpu[queries].done));
+#if XV_QUERY_PREFIX_PUBLISH
+    assert(!xv_ticket_complete(g_frame_completed,base+queries+1u));
+#else
     assert(g_frame_completed==base+queries);
+#endif
     assert(!gpu[queries].shown);
     /* Early publication cannot advance the completion ticket or permit this
      * packet's frame storage/notification word to be reused. */
@@ -188,6 +198,7 @@ with tempfile.TemporaryDirectory(prefix='xita-frame-completion-') as tmp:
     p=pathlib.Path(tmp);(p/'test.c').write_text(prefix+packets+fixture+pump+suffix)
     sdk=pathlib.Path(os.environ.get('VITASDK',str(pathlib.Path.home()/'vitasdk')))
     subprocess.run(['cc','-std=gnu11','-DXV_RUN_RECOMP','-DXV_GPU_PACKET_TIMING='+os.environ.get('TEST_GPU_PACKET_TIMING','0'),*(['-DXV_QUERY_BOUNDARY'] if os.environ.get('TEST_QUERY_BOUNDARY') else []),'-Wall','-Wextra','-Werror','-Wno-unused-parameter',
+      *(['-DXV_QUERY_PREFIX_PUBLISH=1','-DXV_FLARE_QUERY_OVERLAP'] if os.environ.get('TEST_QUERY_PREFIX_PUBLISH')=='1' else []),
       '-I',str(root),'-I',str(root/'runtime'),'-idirafter',str(sdk/'arm-vita-eabi/include'),str(p/'test.c'),str(root/'runtime/xv_render_profile.c'),'-o',str(p/'test')],check=True)
     for mode in [[],['TEST_EARLY'],['TEST_EARLY','TEST_NATIVE'],['TEST_EARLY','TEST_NO_QUERIES'],['TEST_EARLY','TEST_MISSING_WORLD'],['TEST_BOUNDARY','TEST_NATIVE'],['TEST_BOUNDARY','TEST_EARLY'],['TEST_BOUNDARY','TEST_UNSUPPORTED','TEST_EARLY'],['TEST_BOUNDARY','TEST_NO_QUERIES'],['TEST_BOUNDARY','TEST_MISSING_WORLD']]:
         env=os.environ.copy();env.update({key:'1' for key in mode})

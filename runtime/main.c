@@ -1184,6 +1184,10 @@ static struct {
     SceGxmNotification fence, visibility_fence;
     uint64_t started_us, visibility_us;
     int failed, visibility_completed;
+#if XV_QUERY_PREFIX_PUBLISH
+    unsigned prefix_history_blocked;
+    uint32_t prefix_history_done;
+#endif
 #ifdef XV_QUERY_BOUNDARY
     int query_boundary;
 #endif
@@ -1588,6 +1592,7 @@ static uint64_t g_early_visibility_us, g_visibility_tail_us;
 static unsigned g_boundary_queries,g_boundary_fallbacks,g_boundary_before_final;
 static uint64_t g_boundary_query_us,g_boundary_tail_us;
 #endif
+#include "xv_query_publication.h"
 #if XV_GPU_PACKET_TIMING
 static xv_packet_timing_totals g_packet_timing;
 static int xv_pump_observe(unsigned q)
@@ -1716,6 +1721,11 @@ static int xv_pump_retire(void)
             g_visibility_tail_us / (1000.0 * g_early_visibility_count));
 #ifdef XV_QUERY_BOUNDARY
         xv_d3d_query_boundary_report();
+#if XV_QUERY_PREFIX_PUBLISH
+        XV_LOG("[query-prefix-publish] %u younger prefixes published, %u with older final pending, %u history-blocked packets; final ownership retained\n",
+            g_query_prefix_published,g_query_prefix_pending_tail,g_query_prefix_history_blocked);
+        g_query_prefix_published=g_query_prefix_pending_tail=g_query_prefix_history_blocked=0;
+#endif
         XV_LOG("[frame-query-boundary] %u prefix notifications observed (%u before final) / %u final fallbacks; query latency %.3f ms/query packet; remaining final tail %.3f ms/query packet; scheduled observations, storage still retained\n",
             g_boundary_queries,g_boundary_before_final,g_boundary_fallbacks,g_boundary_queries?g_boundary_query_us/(1000.0*g_boundary_queries):0.0,
             g_boundary_queries?g_boundary_tail_us/(1000.0*g_boundary_queries):0.0);
@@ -1756,6 +1766,9 @@ static int xv_pump_thread(SceSize args, void *argp)
         xv_sc_observe(__atomic_load_n(&g_frame_completed,__ATOMIC_RELAXED),g_frame_submitted);
 #endif
         while (xv_pump_retire()) {}
+#if XV_QUERY_PREFIX_PUBLISH
+        xv_pump_query_prefixes();
+#endif
         uint32_t requested=__atomic_load_n(&g_frame_requested,__ATOMIC_ACQUIRE);
         uint32_t done=__atomic_load_n(&g_frame_completed,__ATOMIC_ACQUIRE);
         if (g_frame_submitted != requested) {
@@ -1771,6 +1784,9 @@ static int xv_pump_thread(SceSize args, void *argp)
             g_packets[q].fence=(SceGxmNotification){g_notifications+q,ticket};
             g_packets[q].visibility_fence=(SceGxmNotification){NULL,0};
             g_packets[q].visibility_completed=0;
+#if XV_QUERY_PREFIX_PUBLISH
+            g_packets[q].prefix_history_blocked=0;
+#endif
 #ifdef XV_QUERY_BOUNDARY
             g_packets[q].query_boundary=g_gfx.hle_ready && g_packets[q].mesh!=UINT32_MAX &&
                 xv_d3d_query_boundary_prepare(g_packets[q].mesh,xv_query_boundary_enabled());

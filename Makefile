@@ -129,6 +129,29 @@ $(BUILD)/query-boundary-startup.config: force-query-boundary-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/main.o: $(BUILD)/query-boundary-startup.config
+# Ordered exact query publication may precede older full-frame retirement.
+# Experimental compile selector, OFF by default; only the pump and reader own it.
+XV_QUERY_PREFIX_PUBLISH ?= 0
+ifneq ($(words $(XV_QUERY_PREFIX_PUBLISH)),1)
+$(error XV_QUERY_PREFIX_PUBLISH must be 0 or 1)
+endif
+ifneq ($(filter $(XV_QUERY_PREFIX_PUBLISH),0 1),$(XV_QUERY_PREFIX_PUBLISH))
+$(error XV_QUERY_PREFIX_PUBLISH must be 0 or 1)
+endif
+ifeq ($(XV_QUERY_PREFIX_PUBLISH),1)
+ifneq ($(RECOMP):$(XV_QUERY_BOUNDARY):$(XV_FLARE_QUERY_OVERLAP),1:1:1)
+$(error XV_QUERY_PREFIX_PUBLISH requires RECOMP=1 XV_QUERY_BOUNDARY=1 XV_FLARE_QUERY_OVERLAP=1)
+endif
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_QUERY_PREFIX_PUBLISH=1
+endif
+.PHONY: force-query-prefix-config
+force-query-prefix-config:
+$(BUILD)/query-prefix.config: force-query-prefix-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_QUERY_PREFIX_PUBLISH)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: $(BUILD)/query-prefix.config
 # Grouped exact vertex comparisons: opt-in at process start, independent of
 # graphics quality. Only the uploader consumes this build default.
 XV_VERTEX_BLOCK_LOADS_DEFAULT ?= 0
@@ -248,6 +271,11 @@ LIBS      += -lSceLibKernel_stub -lSceTouch_stub -lm
 # (recomp/, linked as librecomp.a) and the GXM UI bridge; see runtime/xv_boot.c / runtime/xv_ui_gxm.c.
 RECOMP    ?= 0
 GAME_PROFILE ?= halo_ce_3925
+ifeq ($(XV_QUERY_PREFIX_PUBLISH),1)
+ifneq ($(GAME_PROFILE),halo_ce_3925)
+$(error XV_QUERY_PREFIX_PUBLISH requires the Halo CE retained-generation Present contract)
+endif
+endif
 ifeq ($(wildcard games/$(GAME_PROFILE)/runtime.mk),)
 $(error No native runtime adapter for GAME_PROFILE=$(GAME_PROFILE))
 endif
