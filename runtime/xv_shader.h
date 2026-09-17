@@ -11,6 +11,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "xv_packed_vertex.h"
 #include <psp2/gxm.h>
 
 /* Stream index used in xv_attr_desc_t for attributes no vertex stream supplies.
@@ -48,6 +49,9 @@ typedef struct {
     const SceGxmProgram         *prog;            /* file image, host memory      */
     SceGxmShaderPatcherId        id;
     SceGxmVertexProgram         *vprog;
+#if XV_PACKED_VERTEX_LAYOUT
+    SceGxmVertexProgram         *packed_vprog;   /* same GXP and attributes; stream 0 stride 16 */
+#endif
     const SceGxmProgramParameter *p_c;            /* uniform float4 c[]           */
     uint8_t                      const_stream;    /* index of the const stream or 0xFF */
     uint8_t                      nbound;          /* attributes actually linked   */

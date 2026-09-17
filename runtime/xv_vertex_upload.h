@@ -2,6 +2,12 @@
 #define XV_VERTEX_UPLOAD_H
 #include <stdint.h>
 #include "xv_vertex_refs.h"
+#include "xv_packed_vertex.h"
+#if XV_PACKED_VERTEX_LAYOUT
+/* Source is vertices*32 bytes; result owns vertices*16 bytes. Full-prefix
+ * equality deliberately declines sparse reuse in this bounded prototype. */
+const void *xv_vertex_upload_packed(unsigned slot,const void *source,unsigned vertices);
+#endif
 
 const void *xv_vertex_upload(unsigned slot, const void *source, unsigned bytes);
 const void *xv_vertex_upload_referenced(unsigned slot, const void *source, unsigned bytes,

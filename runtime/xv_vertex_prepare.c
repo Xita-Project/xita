@@ -23,6 +23,12 @@ static void execute(xv_vertex_prepare_batch *b)
     if (b->count>XV_VERTEX_PREPARE_STREAMS) return;
     for (unsigned i=0;i<b->count;i++) {
         xv_vertex_prepare_stream *s=&b->streams[i];
+#if XV_PACKED_VERTEX_LAYOUT
+        if(s->packed) {
+            if(s->packed!=XV_PACKED_PREFIX16 || s->stride!=32 || s->bytes%32)return;
+            s->result=xv_vertex_upload_packed(b->slot,s->source,s->bytes/32);
+        } else
+#endif
         s->result=s->refs ? xv_vertex_upload_referenced(b->slot,s->source,
             s->bytes,s->stride,s->refs) : xv_vertex_upload(b->slot,s->source,s->bytes);
         if (!s->result) return;
