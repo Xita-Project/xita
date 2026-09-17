@@ -1,9 +1,10 @@
 # Cumulative build: visibility and model preparation
 
-The physical Vita now runs source `fd993a0`, runtime
+The scene-detail trial ran source `fd993a0`, runtime
 `01a03548f8bd071393752b6763fdb7c184aeed2e302bcb3adf5a860e18bd077a`,
 in remote-update slot 0. Installation and the new boot hash were confirmed.
-The preceding scene/pass build `4d099fac` remains in slot 1 for rollback.
+At that installation, preceding scene/pass build `4d099fac` occupied slot 1
+for rollback. These are historical slot locations for this trial.
 All twenty-one selected optimization paths remain enabled together. This
 update adds the [five scene boundaries](scene-bucket0-detail-20260917.md);
 the counters are not another optimization or an FPS gain.
@@ -59,7 +60,7 @@ measurements of exactly these same display-frame windows.
 ## Next implementation work
 
 Both visibility and model preparation are substantial in the retained stack.
-Two isolated prototypes are being qualified:
+Two isolated prototypes were investigated:
 
 - An ordered native portal loop within `532E0`, preserving recursive traversal,
   clipping/math children, shared publication and exact budget/callback state.
@@ -67,9 +68,12 @@ Two isolated prototypes are being qualified:
   selection, constant uploads, combiner publication and draw order. Existing
   palette/hierarchy batches and stream/query optimizations stay intact.
 
-These candidates are not installed and have no demonstrated savings. Their
-inclusive parent timings are not estimates of removable work. Qualification
-must cover actual retained children and complete observable guest state.
+The portal loop subsequently passed bounded qualification and was integrated
+into the [next cumulative package](ordered-visibility-loop-20260917.md).
+Material-builder variants remain private: their modeled cost is worse or
+mixed and real publication-path coverage is incomplete. Neither candidate
+has a demonstrated hardware FPS gain. Inclusive parent timings are not
+estimates of removable work.
 
 Compatible changes with inconclusive individual FPS results remain in the
 cumulative trial. Correctness qualification, compatibility with the stack and
