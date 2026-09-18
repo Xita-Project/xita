@@ -8,11 +8,11 @@ import hashlib
 
 FLAG = 'XV_CLIP_DISTANCE_SPANS'
 INTERVALS = (
-    ('000B7227', '000B723F', 1, 'r0', 'r6', 1,
+    ('000B7227', '000B723F', 2, 'r0', 'r6', 1,
      'eda3f24ab168982031b8e6c237b904b5ab9ebf67706c7001ee9928cf992a447d'),
     ('000B7280', '000B728F', 1, 'r7', 'r6', 1,
      'a35a7ba2919c2e226144cb3e3571cce19206b66a9e42301aaa8a3763f577dcf0'),
-    ('000B72FC', '000B731A', 1, 'r7', 'r0', 2,
+    ('000B72FC', '000B731A', 2, 'r7', 'r0', 2,
      'bc339f8aa109949e734cefaeb06dc904fabfa6177ca1a4a0780194a26486b450'),
 )
 

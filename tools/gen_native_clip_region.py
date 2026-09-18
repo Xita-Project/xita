@@ -16,7 +16,7 @@ sys.path.insert(0,str(ROOT))
 from recompiler import xita_recomp as r
 from recompiler.core.hooks import NoGameHooks
 from games.halo_ce_3925.clip_region import IMAGE_SHA256, SPANS, hook
-from tools.gen_native_clip import ARM_OPERAND_ORDER, ordered_arm_fp_body
+from tools.gen_native_clip import ARM_OPERAND_ORDER, ordered_arm_fp_body, AuditedClipDiscovery
 from tools.clip_distance_spans import transform as distance_spans
 FIELDS=('f_kind','f_op1','f_op2','f_res','f_bits','f_cf_override','f_cf','f_of_override','f_of','fsw')
 
@@ -49,7 +49,7 @@ def generate(xbe=None,manifest=None):
                 if i.flow_control==r.FlowControl.CALL: assert d==0 and i.near_branch_target in SPANS
                 todo.append((i.next_ip,d))
     assert set(instructions)-set(depths)=={0xB7F4D,0xB7269}
-    disc=r.Discovery(img,{},img.kernel_imports(),lambda *args:None)
+    disc=AuditedClipDiscovery(img,{},img.kernel_imports(),lambda *args:None)
     for a in SPANS:
         disc.add_root(a);disc.lift_function(disc.functions[a]);disc.split_blocks(disc.functions[a])
     emit=r.Emitter(img,disc,{},img.kernel_imports(),'unused',1,hooks=NoGameHooks())
@@ -105,7 +105,7 @@ def generate(xbe=None,manifest=None):
             if pc in sites and line.startswith('    r1 = '):
                 sites[pc]+=1
                 body.append('    if ((int16_t)r1>0) work->input_vertices+=(uint16_t)r1;')
-    assert sites=={0xB71F1:1,0xB7213:1}  # deduplicated instruction blocks
+    assert sites=={0xB71F1:1,0xB7213:2}
     body=ordered_arm_fp_body(body)
     text='\n'.join(body)
     for pc in (0x117CC,0x1181D):
