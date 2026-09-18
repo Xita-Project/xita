@@ -15,7 +15,7 @@ extern void h2_menu_dump_target(const uint8_t *target, uint32_t W, uint32_t H, u
 #define GCHECK(x) do { int err_ = (x); if (err_ < 0) { xv_logf("[h2/menu-gxm] FAIL %s = %08X\n", #x, err_); return 0; } } while (0)
 
 enum { W = 640, H = 480, MAX_TARGETS = 4, MAX_VS = 64, MAX_FS = 128, MAX_TEX = 96,
-       VERTEX_RING = 6u << 20, INDEX_RING = 1u << 20, TEX_POOL = 48u << 20, TEX_CAP = 1024 * 1024 };
+       VERTEX_RING = 12u << 20, INDEX_RING = 2u << 20, TEX_POOL = 48u << 20, TEX_CAP = 1408 * 1024 };   /* 1024^2 + its mip chain */
 
 /* ---- programs ---------------------------------------------------------------- */
 typedef struct { uint64_t hash; const SceGxmProgram *gxp; SceGxmShaderPatcherId id; SceGxmVertexProgram *prog;
@@ -27,21 +27,36 @@ static fs_entry g_fs[MAX_FS]; static unsigned g_nfs;
 static uint64_t g_missing_logged[64]; static unsigned g_nmissing;
 
 /* ---- textures ---------------------------------------------------------------- */
-typedef struct { uint64_t hash; uint32_t *mem; uint32_t w, h, bytes; SceGxmTexture tex; uint64_t used; int linear; } tex_entry;
+typedef struct { uint64_t hash; uint32_t *mem; uint32_t w, h, bytes, levels; SceGxmTexture tex; uint64_t used; int linear, cube; } tex_entry;
 static tex_entry g_tex[MAX_TEX]; static uint8_t *g_texpool; static size_t g_texpool_used;
 
 /* ---- render targets: one GXM colour surface per game colour buffer ---------- */
-typedef struct { uint32_t color_offset; uint8_t *guest; uint32_t *mem; SceGxmColorSurface surface; SceGxmRenderTarget *rt; uint64_t used; } target;
+/* A colour buffer lives in two places: the game's guest buffer and the GXM surface.
+ * gpu_newer: the surface holds pixels the guest buffer does not (scene ended, not
+ * landed); the buffer's pages are then guarded so any guest access lands it first.
+ * guest_newer: a host consumer announced a write to the guest buffer. synced_epoch:
+ * the write epoch at which both copies were last identical; guest stores after it
+ * are visible through the page stamps. */
+typedef struct { uint32_t color_offset, physical; uint8_t *guest; uint32_t *mem; SceGxmColorSurface surface; SceGxmRenderTarget *rt; uint64_t used;
+                 int gpu_newer, guest_newer, guarded; uint32_t synced_epoch; } target;
+extern uint32_t xv_page_epoch[] __attribute__((weak));
+extern uint32_t xv_write_epoch __attribute__((weak));
+extern uint8_t *g_xram __attribute__((weak));
+extern void xv_guard_physical(uint32_t physical, uint32_t bytes, int guard) __attribute__((weak));
+extern uint32_t xv_guarded_physical(uint32_t address) __attribute__((weak));
+extern void *h2_map_physical_target(uint32_t address, uint32_t bytes) __attribute__((weak));
+extern void h2_render_target_fault(uint32_t physical) __attribute__((weak));
 static target g_targets[MAX_TARGETS]; static unsigned g_ntargets;
 static SceGxmDepthStencilSurface g_depth; static void *g_depth_mem; static int g_depth_clear_pending = 1; static float g_depth_clear = 1.0f;
 static target *g_open;                 /* target with an open scene */
 static unsigned g_open_draws;
 static uint8_t *g_vring; static unsigned g_vring_used; static uint16_t *g_iring; static unsigned g_iring_used;
+static uint64_t g_perf_ring_waits;
 static SceGxmContext *g_ctx; static SceGxmShaderPatcher *g_patcher;
 static int g_ready = -1;
 static uint64_t g_serial, g_drawn, g_fallbacks;
 /* Diagnostic wall-clock accounting only (read by the channel's [h2/perf] line). */
-static uint64_t g_perf_render_us, g_perf_flush_us, g_perf_flushes, g_perf_open_us, g_perf_tex_us, g_perf_gxmdraw_us;
+static uint64_t g_perf_render_us, g_perf_flush_us, g_perf_flushes, g_perf_open_us, g_perf_tex_us, g_perf_gxmdraw_us, g_perf_uploads, g_perf_ends, g_perf_guest_touches;
 static uint64_t perf_now(void) { return sceKernelGetProcessTimeWide(); }
 
 static const char *const VREG_NAMES[16] = {"position", "blendweight", "normal", "color0", "color1", "fog", "psize", "backcolor0",
@@ -112,9 +127,9 @@ static int initialize(void)
     return 1;
 }
 
-static target *find_target(const h2_kelvin_clear *c, uint32_t color_offset, uint8_t *guest)
+static target *find_target(const h2_kelvin_clear *c, uint32_t color_offset, uint32_t physical, uint8_t *guest)
 {
-    for (unsigned i = 0; i < g_ntargets; ++i) if (g_targets[i].color_offset == color_offset) { g_targets[i].guest = guest; return &g_targets[i]; }
+    for (unsigned i = 0; i < g_ntargets; ++i) if (g_targets[i].color_offset == color_offset) { g_targets[i].guest = guest; g_targets[i].physical = physical; return &g_targets[i]; }
     if (g_ntargets == MAX_TARGETS) return NULL;
     (void)c;
     target *t = &g_targets[g_ntargets];
@@ -126,30 +141,132 @@ static target *find_target(const h2_kelvin_clear *c, uint32_t color_offset, uint
     if (sceGxmCreateRenderTarget(&rp, &t->rt) < 0) return NULL;
     if (sceGxmColorSurfaceInit(&t->surface, SCE_GXM_COLOR_FORMAT_A8R8G8B8, SCE_GXM_COLOR_SURFACE_LINEAR, SCE_GXM_COLOR_SURFACE_SCALE_NONE,
                                SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, W, H, W, t->mem) < 0) return NULL;
-    t->color_offset = color_offset; t->guest = guest; ++g_ntargets;
+    t->color_offset = color_offset; t->physical = physical; t->guest = guest; ++g_ntargets;
+    t->gpu_newer = 0; t->guest_newer = 1; t->guarded = 0; t->synced_epoch = 0;   /* the guest buffer is the truth until first uploaded */
     xv_logf("[h2/menu-gxm] target %u for colour buffer %08X\n", g_ntargets - 1, color_offset);
     return t;
 }
 
-/* End the open scene, wait, and download the GXM colour surface into the guest buffer. */
-static void flush_scene(void)
+static void guard_target(target *t, int on)
+{
+    if (t->guarded == on || !xv_guard_physical) return;
+    xv_guard_physical(t->physical, W * H * 4, on); t->guarded = on;
+}
+/* End the open scene: the surface now holds the newest pixels; nothing is waited for
+ * or copied. The guest buffer's pages are guarded until the surface is landed. */
+static void end_scene(void)
 {
     if (!g_open) return;
-    uint64_t t0 = perf_now();
     sceGxmEndScene(g_ctx, NULL, NULL);
-    sceGxmFinish(g_ctx);
-    memcpy(g_open->guest, g_open->mem, W * H * 4);
-    if (xv_mark_written) xv_mark_written(g_open->guest, W * H * 4);
     sceGxmDepthStencilSurfaceSetForceLoadMode(&g_depth, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_ENABLED);
-    g_open = NULL; g_open_draws = 0; g_vring_used = g_iring_used = 0;
+    g_open->gpu_newer = 1; guard_target(g_open, 1);
+    g_open = NULL; g_open_draws = 0; ++g_perf_ends;
+}
+/* The vertex/index rings are only recycled once the GPU has consumed everything queued
+ * (after a sceGxmFinish): scenes no longer wait at their end, so an earlier reset let
+ * the next scene overwrite geometry still being drawn (stretched shards in the level). */
+static void rings_recycle_after_finish(void) { g_vring_used = g_iring_used = 0; }
+/* Land the surface into the guest buffer (wait for the GPU, download, unguard). */
+static void sync_target(target *t)
+{
+    if (!t->gpu_newer && g_open != t) return;
+    if (g_open) end_scene();                               /* no scene may be open across sceGxmFinish */
+    if (!t->gpu_newer) return;
+    uint64_t t0 = perf_now();
+    sceGxmFinish(g_ctx); rings_recycle_after_finish();
+    memcpy(t->guest, t->mem, W * H * 4);
+    {   /* XV_GXM_TRACE=1: what each landing carries (mean ARGB of every 61st pixel) */
+        static int gxm_trace = -1;
+        if (gxm_trace < 0) { const char *e = getenv("XV_GXM_TRACE"); gxm_trace = e ? atoi(e) : 0; }
+        if (gxm_trace) {
+            uint64_t a = 0, r = 0, g = 0, b = 0, n = 0;
+            for (uint32_t i = 0; i < W * H; i += 61, ++n) { uint32_t p = t->mem[i]; a += p >> 24; r += (p >> 16) & 255; g += (p >> 8) & 255; b += p & 255; }
+            xv_logf("[h2/menu-gxm] land target=%08X serial=%llu mean=%08X\n", t->physical, (unsigned long long)g_serial,
+                    (unsigned)((a / n) << 24 | (r / n) << 16 | (g / n) << 8 | (b / n)));
+        }
+    }
+    if (xv_mark_written) xv_mark_written(t->guest, W * H * 4);
+    /* Our own download stamps the buffer's pages with the current epoch; open a new epoch
+     * so those stamps read as older than the sync and only later writers count (otherwise
+     * every scene switch looked like a guest write, and the texture cache re-hashed the
+     * buffer whenever it was sampled). */
+    if (&xv_write_epoch) { ++xv_write_epoch; t->synced_epoch = xv_write_epoch; } else t->synced_epoch = 0;
+    t->gpu_newer = 0;
+    guard_target(t, 0);
     g_perf_flush_us += perf_now() - t0; ++g_perf_flushes;
+}
+/* Every surface landed in guest memory (the historical contract of this call). */
+static void flush_scene(void)
+{
+    end_scene();
+    for (unsigned i = 0; i < g_ntargets; ++i) sync_target(&g_targets[i]);
+}
+static target *target_for(uint32_t physical, uint32_t bytes)
+{
+    for (unsigned i = 0; i < g_ntargets; ++i) {
+        target *t = &g_targets[i];
+        if (physical < t->physical + W * H * 4 && t->physical < physical + bytes) return t;
+    }
+    return NULL;
+}
+/* Guest pages of a landed-or-not buffer changed since both copies were identical? */
+static int guest_changed(const target *t)
+{
+    if (t->guest_newer) return 1;
+    if (!xv_page_epoch || !g_xram) return 1;              /* no tracking: assume yes, as before */
+    uint32_t page = (uint32_t)(((uintptr_t)t->guest - (uintptr_t)g_xram) >> 12), last = page + (W * H * 4 - 1) / 4096;
+    for (; page <= last; ++page) if (xv_page_epoch[page] >= t->synced_epoch) return 1;
+    return 0;
 }
 
 void h2_menu_gxm_flush(void) { if (g_ready == 1) flush_scene(); }
 
+/* A host consumer is about to read (and, if may_write, write) this physical span. */
+void h2_menu_gxm_host_access(uint32_t physical, uint32_t bytes, int may_write)
+{
+    if (g_ready != 1) return;
+    for (unsigned i = 0; i < g_ntargets; ++i) {
+        target *t = &g_targets[i];
+        if (!(physical < t->physical + W * H * 4 && t->physical < physical + bytes)) continue;
+        sync_target(t);
+        if (may_write) t->guest_newer = 1;
+    }
+}
+/* A whole-surface CPU clear is coming: the surface's pixels are all replaced, so the
+ * pending GPU copy is dropped instead of landed; partial clears land first. */
+void h2_menu_gxm_before_cpu_write(uint32_t physical, uint32_t bytes, int whole_surface)
+{
+    if (g_ready != 1) return;
+    target *t = target_for(physical, bytes);
+    if (!t) return;
+    if (whole_surface && physical == t->physical && bytes == W * H * 4) {
+        if (g_open == t) end_scene();
+        t->gpu_newer = 0; guard_target(t, 0);
+    } else sync_target(t);
+    t->guest_newer = 1;
+}
+/* The strict address policy's slow path: a guest access to a guarded page. Returns 1
+ * after landing the surface so the access sees the newest pixels. */
+int h2_menu_gxm_guest_touch(uint32_t address)
+{
+    if (g_ready != 1 || !xv_guarded_physical) return 0;
+    uint32_t physical = xv_guarded_physical(address);   /* the kernel knows which page the alias guards */
+    if (physical == 0xFFFFFFFFu) return 0;
+    target *t = target_for(physical, 1);
+    if (!t || !t->guarded) return 0;
+    sync_target(t); ++g_perf_guest_touches;
+    return 1;
+}
+int h2_menu_gxm_page_guarded(uint32_t page)
+{
+    if (g_ready != 1) return 0;
+    target *t = target_for(page << 12, 4096);
+    return t && t->guarded;
+}
+
 void h2_menu_gxm_zeta_cleared(uint32_t clear_value)
 {
-    if (g_ready == 1) flush_scene();
+    if (g_ready == 1) end_scene();
     g_depth_clear_pending = 1;
     g_depth_clear = (float)(clear_value >> 8) / 16777215.0f;
 }
@@ -157,9 +274,17 @@ void h2_menu_gxm_zeta_cleared(uint32_t clear_value)
 static int open_scene(target *t)
 {
     if (g_open == t) return 1;
-    flush_scene();
+    end_scene();
     uint64_t t0 = perf_now();
-    memcpy(t->mem, t->guest, W * H * 4);                  /* the game's clears/CPU writes since the last scene */
+    if (guest_changed(t)) {
+        if (t->gpu_newer && h2_render_target_fault) h2_render_target_fault(t->physical);   /* both copies changed: a writer the guard missed */
+        memcpy(t->mem, t->guest, W * H * 4);              /* the game's clears/CPU writes since the last scene */
+        /* Everything stamped so far is in the surface now: open a new epoch so only later
+         * writers count (a clear's stamps must not look like a change at the next open). */
+        if (&xv_write_epoch) { ++xv_write_epoch; t->synced_epoch = xv_write_epoch; } else t->synced_epoch = 0;
+        t->guest_newer = 0; t->gpu_newer = 0; ++g_perf_uploads;
+    }
+    guard_target(t, 1);                                    /* the scene will make the surface newer */
     if (g_depth_clear_pending) {
         sceGxmDepthStencilSurfaceSetBackgroundDepth(&g_depth, g_depth_clear);
         sceGxmDepthStencilSurfaceSetForceLoadMode(&g_depth, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_DISABLED);
@@ -173,7 +298,7 @@ static int open_scene(target *t)
     sceGxmSetBackFragmentProgramEnable(g_ctx, SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
     sceGxmSetFrontStencilFunc(g_ctx, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0xFF, 0);
     sceGxmSetBackStencilFunc(g_ctx, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0xFF, 0);
-    g_open = t; g_open_draws = 0; g_vring_used = g_iring_used = 0;
+    g_open = t; g_open_draws = 0;
     g_perf_open_us += perf_now() - t0;
     return 1;
 }
@@ -296,10 +421,19 @@ static fs_entry *get_fs(const h2_command_state *s, const menu_combiner *cb, cons
 }
 
 /* ---- textures ---------------------------------------------------------------- */
+static SceGxmTextureAddrMode addr_mode(unsigned nv)
+{
+    switch (nv) {
+    case 2: return SCE_GXM_TEXTURE_ADDR_MIRROR;
+    case 3: case 4: case 5: return SCE_GXM_TEXTURE_ADDR_CLAMP;   /* border colour is not modelled: clamp */
+    default: return SCE_GXM_TEXTURE_ADDR_REPEAT;
+    }
+}
+
 static tex_entry *get_texture(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit)
 {
-    uint32_t tw = 0, th = 0; int linear = 0; uint64_t hash = 0;
-    const uint32_t *px = menu_texture_acquire(s, c, unit, g_serial, TEX_CAP, &tw, &th, &linear, &hash);
+    uint32_t tw = 0, th = 0, levels = 1, texels = 0; int linear = 0, cube = 0; uint64_t hash = 0;
+    const uint32_t *px = menu_texture_acquire(s, c, unit, g_serial, TEX_CAP, 1, &tw, &th, &linear, &hash, &levels, &texels, &cube);
     if (!px) return NULL;
     tex_entry *e = NULL, *victim = NULL;
     for (unsigned i = 0; i < MAX_TEX; ++i) {
@@ -307,19 +441,47 @@ static tex_entry *get_texture(const h2_command_state *s, const h2_kelvin_clear *
         if (!victim || (!g_tex[i].mem && victim->mem) || (g_tex[i].mem && victim->mem && g_tex[i].used < victim->used)) victim = &g_tex[i];
     }
     if (!e) {
-        uint32_t bytes = tw * th * 4;
+        uint32_t bytes = texels * 4;
         if (bytes > TEX_POOL) return NULL;
         if (g_texpool_used + bytes > TEX_POOL) {            /* simple pool reset: everything re-uploads */
-            flush_scene(); for (unsigned i = 0; i < MAX_TEX; ++i) g_tex[i].mem = NULL; g_texpool_used = 0;
+            end_scene(); sceGxmFinish(g_ctx); rings_recycle_after_finish(); for (unsigned i = 0; i < MAX_TEX; ++i) g_tex[i].mem = NULL; g_texpool_used = 0;
         }
         e = victim; if (!e) return NULL;
         e->mem = (uint32_t *)(g_texpool + g_texpool_used); g_texpool_used += (bytes + 255) & ~255u;
         memcpy(e->mem, px, bytes);
-        e->hash = hash; e->w = tw; e->h = th; e->bytes = bytes; e->linear = linear;
-        if (sceGxmTextureInitLinear(&e->tex, e->mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, tw, th, 1) < 0) { e->mem = NULL; return NULL; }
-        sceGxmTextureSetMinFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_POINT); sceGxmTextureSetMagFilter(&e->tex, SCE_GXM_TEXTURE_FILTER_POINT);
-        sceGxmTextureSetUAddrMode(&e->tex, linear ? SCE_GXM_TEXTURE_ADDR_CLAMP : SCE_GXM_TEXTURE_ADDR_REPEAT);
-        sceGxmTextureSetVAddrMode(&e->tex, linear ? SCE_GXM_TEXTURE_ADDR_CLAMP : SCE_GXM_TEXTURE_ADDR_REPEAT);
+        e->hash = hash; e->w = tw; e->h = th; e->bytes = bytes; e->linear = linear; e->levels = levels; e->cube = cube;
+        /* Linear layout with the mip levels back to back (each level's implicit stride is its
+         * width, which the decoder keeps a multiple of 8 for every level after the first).
+         * Cube maps: six swizzled faces back to back, level 0 only. */
+        int rc = cube ? sceGxmTextureInitCube(&e->tex, e->mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, tw, th, 1)
+                      : sceGxmTextureInitLinear(&e->tex, e->mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, tw, th, levels);
+        if (rc < 0) {
+            static unsigned reported;
+            if (reported++ < 8) xv_logf("[h2/menu-gxm] texture init failed rc=%08X %s %ux%u levels=%u\n", (unsigned)rc, cube ? "cube" : "linear", tw, th, levels);
+            e->mem = NULL; return NULL;
+        }
+    }
+    /* Sampler state follows the unit's registers on every draw (the control words are copied
+     * into the command stream when the texture is bound, so changing them between draws is safe).
+     * SET_TEXTURE_FILTER: min bits 16-23 (1 box, 2 tent, 3/4 box/tent nearest-mip, 5/6 box/tent
+     * linear-mip), mag bits 24-27 (1 box, 2 tent). SET_TEXTURE_ADDRESS: U bits 0-3, V bits 8-11
+     * (1 wrap, 2 mirror, 3 clamp-to-edge, 4 border, 5 clamp). Linear (pitch) images are addressed
+     * in texels and stay clamped, as before. */
+    {
+        unsigned base = 0x1B00 + unit * 64;
+        uint32_t filter = s->setup[(base + 0x14) / 4], addr = s->setup[(base + 0x08) / 4];
+        unsigned minf = (filter >> 16) & 0xFF, magf = (filter >> 24) & 0xF;
+        int min_linear = minf == 2 || minf == 4 || minf == 6, mag_linear = magf == 2;
+        if (e->levels > 1 && minf >= 3 && minf <= 6) {
+            sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
+            sceGxmTextureSetMinFilter(&e->tex, min_linear ? SCE_GXM_TEXTURE_FILTER_MIPMAP_LINEAR : SCE_GXM_TEXTURE_FILTER_MIPMAP_POINT);
+        } else {
+            sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_DISABLED);
+            sceGxmTextureSetMinFilter(&e->tex, min_linear ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_POINT);
+        }
+        sceGxmTextureSetMagFilter(&e->tex, mag_linear ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_POINT);
+        sceGxmTextureSetUAddrMode(&e->tex, e->linear || e->cube ? SCE_GXM_TEXTURE_ADDR_CLAMP : addr_mode(addr & 15));
+        sceGxmTextureSetVAddrMode(&e->tex, e->linear || e->cube ? SCE_GXM_TEXTURE_ADDR_CLAMP : addr_mode((addr >> 8) & 15));
     }
     e->used = g_serial;
     return e;
@@ -389,9 +551,11 @@ static int render_body(void *opaque, const h2_menu_request *r)
     h2_dma_object dmac; uint32_t cphys;
     if (!h2_dma_load(c->read_instance, c->opaque, c->dma_color, &dmac) ||
         !h2_dma_resolve(&dmac, c->color_offset, W * H * 4, 1, c->physical_bytes, &cphys)) return 0;
-    uint8_t *guest = c->map_physical(c->opaque, cphys, W * H * 4);
+    /* The backend's own mapping of its target: the consumer mapper would land the open
+     * scene (a GPU wait and a download) on every draw. */
+    uint8_t *guest = h2_map_physical_target ? h2_map_physical_target(cphys, W * H * 4) : c->map_physical(c->opaque, cphys, W * H * 4);
     if (!guest) return 0;
-    target *t = find_target(c, c->color_offset, guest);
+    target *t = find_target(c, c->color_offset, cphys, guest);
     if (!t) { flush_scene(); return -1; }
     if (!r->vertex_count && !r->index_count && !r->array_count) return 1;   /* BEGIN/END with no emission */
 
@@ -435,7 +599,7 @@ static int render_body(void *opaque, const h2_menu_request *r)
     for (unsigned u = 0; u < 4; ++u) {
         if (!(cb.tex_used & (1u << u)) || fs->sampler[u] < 0) continue;
         uint32_t toff = s->setup[(0x1B00 + u * 64) / 4];
-        if (g_open && toff >= g_open->color_offset && toff < g_open->color_offset + W * H * 4) flush_scene();
+        if (g_open && toff >= g_open->color_offset && toff < g_open->color_offset + W * H * 4) sync_target(g_open);   /* sampling the open target: land it */
         { uint64_t t0 = perf_now(); tex[u] = get_texture(s, c, u); g_perf_tex_us += perf_now() - t0; }
     }
 
@@ -447,7 +611,10 @@ static int render_body(void *opaque, const h2_menu_request *r)
     else return 1;
     if (n > 65535 || count > 65535 * 3 || n * vs->stride > VERTEX_RING) return 0;
     if (!open_scene(t)) return 0;
-    if (g_vring_used + n * vs->stride > VERTEX_RING || g_iring_used + (count * 2 + 8) * 2 > INDEX_RING) { flush_scene(); if (!open_scene(t)) return 0; }
+    if (g_vring_used + n * vs->stride > VERTEX_RING || g_iring_used + (count * 2 + 8) * 2 > INDEX_RING) {
+        end_scene(); sceGxmFinish(g_ctx); rings_recycle_after_finish(); ++g_perf_ring_waits;   /* rings full: drain the GPU */
+        if (!open_scene(t)) return 0;
+    }
     float *vb = (float *)(g_vring + g_vring_used);
     if (r->vertex_count) {
         for (uint32_t i = 0; i < n; ++i)
@@ -539,7 +706,7 @@ static int render_body(void *opaque, const h2_menu_request *r)
      * at ~600 draws per loading-screen frame the old default of 200 cost a sync and a write
      * every few frames. XV_MENU_GXM_DUMP=200 restores them. */
     if (dump_every < 0) { const char *e = getenv("XV_MENU_GXM_DUMP"); dump_every = e ? atoi(e) : 0; }
-    if (dump_every > 0 && !(g_drawn % (uint64_t)dump_every)) { flush_scene(); h2_menu_dump_target(t->guest, W, H, g_drawn, c->color_offset); }
+    if (dump_every > 0 && !(g_drawn % (uint64_t)dump_every)) { sync_target(t); h2_menu_dump_target(t->guest, W, H, g_drawn, c->color_offset); }
     return 1;
 }
 
@@ -558,6 +725,6 @@ void h2_menu_gxm_perf(uint64_t out[12])
     uint64_t hits = 0, misses = 0; size_t cache_bytes = 0;
     menu_texture_cache_stats(&hits, &misses, &cache_bytes);
     out[0] = g_drawn; out[1] = g_perf_render_us; out[2] = g_perf_flushes; out[3] = g_perf_flush_us;
-    out[4] = g_perf_open_us; out[5] = g_perf_tex_us; out[6] = g_perf_gxmdraw_us; out[7] = g_fallbacks;
+    out[4] = g_perf_open_us; out[5] = g_perf_tex_us; out[6] = g_perf_ends * 1000 + g_perf_uploads * 1000000 + g_perf_guest_touches * 1000000000ull + g_perf_ring_waits * 1000000000000ull; out[7] = g_fallbacks;
     out[8] = menu_texture_hashed_bytes(); out[9] = hits; out[10] = misses; out[11] = menu_texture_hash_skipped(); (void)cache_bytes;
 }

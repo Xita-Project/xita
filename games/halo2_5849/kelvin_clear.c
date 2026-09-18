@@ -26,6 +26,10 @@ typedef struct target {
     uint32_t physical, bytes, pitch, mask, value;
 } target;
 
+/* Colour targets about to be written by the CPU: a GPU-resident menu backend (menu_gxm.c)
+ * lands or discards its pending contents first. Weak: absent in the state-only build and tests. */
+extern void h2_menu_gxm_before_cpu_write(uint32_t physical, uint32_t bytes, int whole_surface) __attribute__((weak));
+static int g_whole_surface_clear;   /* set by clear_surface before mapping its targets */
 static int map_target(const h2_kelvin_clear *state, uint32_t instance, uint32_t offset,
                        uint32_t pitch, uint32_t width, uint32_t height, int zeta, target *target)
 {
@@ -38,6 +42,7 @@ static int map_target(const h2_kelvin_clear *state, uint32_t instance, uint32_t 
     target->bytes = bytes; target->pitch = pitch;
     if (state->check_attachment && !state->check_attachment(state->opaque, target->physical,
                                     target->bytes, pitch, zeta, state->format)) return 0;
+    if (!zeta && h2_menu_gxm_before_cpu_write) h2_menu_gxm_before_cpu_write(target->physical, (uint32_t)bytes, g_whole_surface_clear);
     target->data = state->map_physical(state->opaque, target->physical, target->bytes);
     return target->data != NULL && target->bytes <= UINTPTR_MAX - (uintptr_t)target->data;
 }
@@ -51,7 +56,6 @@ static int clear_surface(h2_kelvin_clear *state, uint32_t flags)
 {
     if (flags & ~0xF3u) return 0;
     if (!flags) return 1;
-    if (h2_menu_gxm_flush) h2_menu_gxm_flush();
     if ((flags & 3) && h2_menu_gxm_zeta_cleared) h2_menu_gxm_zeta_cleared(state->clear_zstencil);
     /* First supported shape: origin-zero pitch surfaces without multisampling.
      * Restrict the format to ARGB8/Z24S8; other layouts need their own consumer. */
@@ -63,6 +67,7 @@ static int clear_surface(h2_kelvin_clear *state, uint32_t flags)
     uint32_t ymin = state->clear_vertical & 0xFFF, ymax = (state->clear_vertical >> 16) & 0xFFF;
     if (!width || !height || width > 4096 || height > 4096 ||
         xmin > xmax || ymin > ymax || xmax >= width || ymax >= height) return 0;
+    g_whole_surface_clear = !xmin && !ymin && xmax == width - 1 && ymax == height - 1 && (flags & 0xF0) == 0xF0;
     target targets[2] = {{0}}; unsigned count = 0;
     if (flags & 0xF0) {
         if (!state->has_color_dma || !map_target(state, state->dma_color, state->color_offset,

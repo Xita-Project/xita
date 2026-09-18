@@ -69,14 +69,19 @@ extern void xv_logf(const char *, ...);
 
 static void fail(xctx *c, uint32_t ip, const char *reason, uint32_t value)
 { h2_audio_stop(c, ip, reason, value); }
+extern int h2_menu_gxm_guest_touch(uint32_t address) __attribute__((weak));
 static int mapped(uint32_t address, uint32_t bytes)
 {
     uint32_t arena = xk_mem_arena_size();
     if (!address || !bytes || arena < 4096 ||
         (uint64_t)address + bytes > UINT32_MAX + 1ull) return 0;
     uint32_t last = (address + bytes - 1) >> 12;
-    for (uint32_t p = address >> 12; p <= last; ++p)
+    for (uint32_t p = address >> 12; p <= last; ++p) {
+        /* A page guarded by the GXM backend (a colour buffer still on the GPU) reads as
+         * the trash page until the backend lands it and restores the mapping. */
+        if (h2_menu_gxm_guest_touch && (uint64_t)g_xpt[p] + 4096 > arena - 4096) h2_menu_gxm_guest_touch(p << 12);
         if ((g_xpt[p] & 4095) || (uint64_t)g_xpt[p] + 4096 > arena - 4096) return 0;
+    }
     return 1;
 }
 static void stack(xctx *c, uint32_t ip, unsigned args)

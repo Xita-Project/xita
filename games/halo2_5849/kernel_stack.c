@@ -55,7 +55,7 @@ void __wrap_xk_MmCreateKernelStack(xctx *c)
             /* Each page is copied independently: physical contiguity is not
              * required. The guard owns no physical page. */
             for (uint32_t off = 0; off < rounded; off += XK_PAGE)
-                g_xpt[(guard + XK_PAGE + off) >> 12] = g_xpt[(backing + off) >> 12];
+                xk_mem_map_alias(guard + XK_PAGE + off, g_xpt[(backing + off) >> 12]);
             stacks[slot] = (stack_record){backing, guard, bytes, rounded};
             top = guard + XK_PAGE + bytes;
         }
@@ -81,7 +81,7 @@ void __wrap_xk_MmDeleteKernelStack(xctx *c)
             h2_kernel_stack_fault(c, "backing deletion failed", top, limit); return;
         }
         for (uint32_t off = 0; off < record.mapped; off += XK_PAGE)
-            g_xpt[(limit + off) >> 12] = unmapped_offset();
+            xk_mem_map_alias(limit + off, unmapped_offset());
         memset(&stacks[i], 0, sizeof stacks[i]);
         xv_logf("[h2/stack] delete top=%08X limit=%08X\n", top, limit);
         X_RET(2);

@@ -44,23 +44,28 @@ void xv_watch_store(uint32_t address, uint32_t off);
 static inline void *x_guest_checked_pointer(uint32_t address)
 {
     uint32_t off = g_xpt[address >> 12];
-    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) xv_check_guest_address(address);
+    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) { xv_check_guest_address(address); off = g_xpt[address >> 12]; }
     return g_xram + off + (address & 0xFFFu);
 }
 /* Stores only: the recompiler emits X_W* for memory lvalues, X_M* for loads. */
 static inline void *x_guest_checked_pointer_write(uint32_t address)
 {
     uint32_t off = g_xpt[address >> 12];
-    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) xv_check_guest_address(address);
+    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) { xv_check_guest_address(address); off = g_xpt[address >> 12]; }
     xv_page_epoch[off >> 12] = xv_write_epoch;
     if ((off + (address & 0xFFFu)) - xv_watch_off < xv_watch_len) xv_watch_store(address, off + (address & 0xFFFu));
     return g_xram + off + (address & 0xFFFu);
 }
 /* Host writes of n bytes through one translated pointer (the callers rely on
- * contiguous mapping of that span): stamp every page of the span. */
+ * contiguous mapping of that span): every page of the span goes through the address
+ * policy (a guarded colour-buffer page must be landed before it is overwritten, even
+ * when the span starts outside it) and is stamped. */
 static inline void *x_guest_checked_span_write(uint32_t address, uint32_t bytes)
 {
     void *pointer = x_guest_checked_pointer_write(address);
+    if (bytes > 1)
+        for (uint32_t page = (address | 0xFFFu) + 1u; page - address < bytes - 1u && page > address; page += 0x1000u)
+            (void)x_guest_checked_pointer_write(page);
     xv_mark_written(pointer, bytes);
     return pointer;
 }

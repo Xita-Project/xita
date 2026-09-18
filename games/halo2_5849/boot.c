@@ -320,8 +320,11 @@ void h2_graphics_stop(xctx *context, uint32_t instruction, uint32_t address,
     sceKernelExitProcess(25);
     for (;;) sceKernelDelayThread(1000);
 }
+extern int h2_menu_gxm_guest_touch(uint32_t address) __attribute__((weak));
 void xv_check_guest_address(uint32_t address)
 {
+    /* A guarded colour buffer page: land the GXM surface, restore the mapping, continue. */
+    if (h2_menu_gxm_guest_touch && h2_menu_gxm_guest_touch(address)) return;
     if (h2_kernel_stack_unmapped(address))
         h2_kernel_stack_fault(xk_cur ? &xk_cur->ctx : NULL, "unmapped stack window", address, 0);
     /* Accesses that bypass the explicit bus adapter must not alias the
@@ -340,6 +343,14 @@ void xv_check_guest_address(uint32_t address)
 }
 /* The texture cache's periodic full re-read found a source changed while no guest
  * access or host mapping had stamped its pages: a writer the tracking misses. */
+void h2_render_target_fault(uint32_t physical)
+{
+    graphics_snapshot();
+    xv_logf("[h2/blocked] colour buffer changed in guest memory while its GXM surface held newer pixels physical=%08X fn=%08X\n", physical, xv_cur_fn);
+    xv_log_flush();
+    sceKernelExitProcess(28);
+    for (;;) sceKernelDelayThread(1000);
+}
 void h2_texture_tracking_fault(uint32_t address, uint32_t bytes)
 {
     graphics_snapshot();

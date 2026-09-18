@@ -15,10 +15,15 @@ int menu_texture_load(const h2_command_state *state, const h2_kelvin_clear *clea
 
 /* Cached variant: returns a cache-owned decoded image (valid until a later
  * acquire with a different serial evicts it; entries used by `serial` are kept).
- * Keyed by the unit registers plus a hash of all source bytes, so never stale. */
+ * Keyed by the unit registers plus a hash of all source bytes, so never stale.
+ * With want_mips the image carries the unit's mip chain (levels back to back, each
+ * level's rows packed at its width; out_levels/out_texels describe it); otherwise
+ * level 0 only. cap_texels bounds the decoded texel count over all levels. A cube map
+ * (out_cube) comes back as six w*h faces, each in GXM swizzled order, level 0 only. */
 const uint32_t *menu_texture_acquire(const h2_command_state *state, const h2_kelvin_clear *clear,
-                                     unsigned unit, uint64_t serial, uint32_t cap_texels,
-                                     uint32_t *out_w, uint32_t *out_h, int *out_linear, uint64_t *out_hash);
+                                     unsigned unit, uint64_t serial, uint32_t cap_texels, unsigned want_mips,
+                                     uint32_t *out_w, uint32_t *out_h, int *out_linear, uint64_t *out_hash,
+                                     uint32_t *out_levels, uint32_t *out_texels, int *out_cube);
 void menu_texture_cache_stats(uint64_t *hits, uint64_t *misses, size_t *bytes);
 
 /* Register-only view of a unit (no guest memory access): returns the enable bit

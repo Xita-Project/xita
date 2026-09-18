@@ -44,7 +44,47 @@ static vrange_t g_vr[MAX_RANGES]; static int g_nvr;
 typedef struct { uint32_t pa, size; } prange_t;                       /* physical allocations (for size queries/free) */
 static prange_t g_pr[MAX_RANGES]; static int g_npr;
 
-static inline void map_page(uint32_t va, uint32_t arena_off) { g_xpt[va >> 12] = arena_off; }
+/* Page guards (xv_guard_physical): every virtual alias of a guarded physical page is
+ * translated to the trash page so guest accesses take the strict policy's slow path,
+ * where the GXM backend lands its surface and asks for the mapping back. The aliases
+ * are found through a reverse map of the live page table: up to two virtual pages
+ * (below 0x80000000) per physical page - the default identity page and one allocation -
+ * plus the fixed 0x80000000/0xF0000000 aliases; a page with more is resolved by a scan. */
+typedef struct { uint32_t vpage, off; } guard_entry;
+static guard_entry g_guards[8192]; static unsigned g_nguards;
+#define NO_VPAGE 0xFFFFFFFFu
+static uint32_t g_vpage_of[NPAGES][2];
+static uint8_t g_vpage_multi[NPAGES];
+static void reverse_unmap(uint32_t vp, uint32_t off)
+{
+    if (off >= XRAM_SIZE) return;
+    for (int k = 0; k < 2; ++k) if (g_vpage_of[off >> 12][k] == vp) g_vpage_of[off >> 12][k] = NO_VPAGE;
+}
+static void reverse_map(uint32_t vp, uint32_t off)
+{
+    if (off >= XRAM_SIZE) return;
+    uint32_t *slots = g_vpage_of[off >> 12];
+    for (int k = 0; k < 2; ++k) if (slots[k] == vp) return;
+    for (int k = 0; k < 2; ++k) if (slots[k] == NO_VPAGE) { slots[k] = vp; return; }
+    g_vpage_multi[off >> 12] = 1;
+}
+static uint32_t guard_drop(uint32_t vp)   /* forget a guarded page's entry; returns its real offset */
+{
+    for (unsigned i = 0; i < g_nguards; ++i)
+        if (g_guards[i].vpage == vp) { uint32_t off = g_guards[i].off; g_guards[i] = g_guards[--g_nguards]; return off; }
+    return g_trash_off;
+}
+static inline void map_page(uint32_t va, uint32_t arena_off)
+{
+    uint32_t vp = va >> 12, old = g_xpt[vp];
+    if (g_nguards && old == g_trash_off) old = guard_drop(vp);   /* remapping a guarded page: the new mapping wins */
+    if (vp < 0x80000u) { reverse_unmap(vp, old); reverse_map(vp, arena_off); }
+    g_xpt[vp] = arena_off;
+}
+/* Map one virtual page onto an arena offset (a mirror of another page, or the trash page
+ * to unmap it). Kernel helpers must use this rather than writing the table, so the guard
+ * reverse map stays exact. */
+void xk_mem_map_alias(uint32_t va, uint32_t arena_off) { map_page(va, arena_off); }
 
 void xk_mem_init(uint32_t image_end)
 {
@@ -59,6 +99,7 @@ void xk_mem_setup(uint32_t image_base, uint32_t image_size)
     g_trash_off = XRAM_SIZE + (g_image_hi - g_image_lo);
     g_xpt = malloc((1u << 20) * sizeof(uint32_t));
     for (uint32_t p = 0; p < (1u << 20); ++p) g_xpt[p] = g_trash_off;
+    memset(g_vpage_of, 0xFF, sizeof g_vpage_of); memset(g_vpage_multi, 0, sizeof g_vpage_multi); g_nguards = 0;
     for (uint32_t va = 0; va < XRAM_SIZE; va += XK_PAGE) {
         map_page(va, va);                                         /* identity by default */
         map_page(0x80000000u + va, va);                           /* MmGetPhysicalAddress|0x80000000 alias */
@@ -101,6 +142,46 @@ void xv_mark_written(const void *host, uint32_t bytes)
         xv_page_epoch[p] = xv_write_epoch;
 }
 #endif
+static void guard_alias(uint32_t vp, uint32_t off)
+{
+    if (vp >= (1u << 20) || g_xpt[vp] != off) return;            /* not (or no longer) mapped there */
+    if (g_nguards >= sizeof g_guards / sizeof g_guards[0]) { XK_LOG("page guard table full\n"); abort(); }
+    g_guards[g_nguards].vpage = vp; g_guards[g_nguards].off = off; ++g_nguards;
+    g_xpt[vp] = g_trash_off;
+}
+/* Guard or restore every virtual alias of a range of physical RAM pages (see the reverse
+ * map above). Guarded aliases translate to the trash page; restoring puts each alias
+ * back exactly where it was. */
+void xv_guard_physical(uint32_t physical, uint32_t bytes, int guard)
+{
+    if (!bytes || physical >= XRAM_SIZE) return;
+    uint32_t first = physical >> 12, last = (physical + bytes - 1) >> 12;
+    if (last >= NPAGES) last = NPAGES - 1;
+    if (guard) {
+        int multi = 0;
+        for (uint32_t page = first; page <= last; ++page) if (g_vpage_multi[page]) multi = 1;
+        if (multi)                                                /* rare: one scan covers every page of the range */
+            for (uint32_t vp = 0; vp < 0x80000u; ++vp) { uint32_t o = g_xpt[vp]; if (o < XRAM_SIZE && (o >> 12) >= first && (o >> 12) <= last) guard_alias(vp, o); }
+        for (uint32_t page = first; page <= last; ++page) {
+            uint32_t off = page << 12;
+            guard_alias(0x80000u + page, off); guard_alias(0xF0000u + page, off);
+            if (!multi) for (int k = 0; k < 2; ++k) if (g_vpage_of[page][k] != NO_VPAGE) guard_alias(g_vpage_of[page][k], off);
+        }
+    } else {
+        for (unsigned i = 0; i < g_nguards;) {
+            uint32_t page = g_guards[i].off >> 12;
+            if (page >= first && page <= last) { g_xpt[g_guards[i].vpage] = g_guards[i].off; g_guards[i] = g_guards[--g_nguards]; }
+            else ++i;
+        }
+    }
+}
+/* The physical address behind a guarded virtual address, or 0xFFFFFFFF if it is not guarded. */
+uint32_t xv_guarded_physical(uint32_t address)
+{
+    uint32_t vp = address >> 12;
+    for (unsigned i = 0; i < g_nguards; ++i) if (g_guards[i].vpage == vp) return g_guards[i].off | (address & 4095);
+    return 0xFFFFFFFFu;
+}
 void xk_mem_bind_arena(void)
 {
     g_img_base = g_xram + XRAM_SIZE - g_image_lo;

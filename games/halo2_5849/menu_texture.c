@@ -208,13 +208,50 @@ typedef struct {
     fmt_desc d;
     unsigned code, lw, lh;
     uint32_t w, h, pitch, src_bytes, blocks_x, blocks_y;
+    unsigned levels;                                     /* mip levels located (>= 1) */
+    int cube;                                            /* six faces (GPU path): decoded swizzled, level 0 */
+    uint32_t face_stride;                                /* source bytes per cube face (full chain, 128-aligned) */
+    uint32_t face_texels;                                /* decoded texels per cube face (GXM face alignment) */
+    uint32_t texels;                                     /* decoded texels over all levels (or faces) */
+    uint32_t lvl_src[16], lvl_dst[16];                   /* per level: source byte offset, output texel offset */
     const uint8_t *src;
     uint32_t palette[256], pal_mask;
     uint32_t key[6];                                     /* offset, fmt, ctrl1, rect, palette, dma */
 } located;
 
-static int locate(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit, uint32_t cap, located *L)
+/* First few loads and failures per (format, outcome): the unit's registers, so an
+ * unsupported or misdescribed texture can be identified from the log. */
+static void trace(const h2_command_state *s, unsigned unit, uint32_t code, unsigned outcome, const located *L,
+                  uint64_t serial, const uint32_t *px)
 {
+    static struct { uint32_t code; unsigned outcome, n; } seen[64];
+    static unsigned nseen;
+    static int limit = -1;                      /* XV_TEX_TRACE=<n>: loads logged per (format, outcome); default 8 ok / 3 failures */
+    static const char *const names[O_COUNT] = {"ok", "unsupported", "toolarge", "nomap"};
+    if (!xv_logf) return;
+    if (limit < 0) { const char *e = getenv("XV_TEX_TRACE"); limit = e ? atoi(e) : 0; }
+    unsigned i;
+    for (i = 0; i < nseen; ++i) if (seen[i].code == code && seen[i].outcome == outcome) break;
+    if (i == nseen) { if (nseen >= sizeof seen / sizeof seen[0]) return; seen[i].code = code; seen[i].outcome = outcome; seen[i].n = 0; ++nseen; }
+    if (seen[i].n++ >= (limit > 0 ? (unsigned)limit : outcome == O_OK ? 8u : 3u)) return;
+    unsigned base = 0x1B00 + unit * 64;
+    uint32_t mean = 0;
+    if (px && L && L->texels) {                 /* mean ARGB of the decoded level 0 (every 7th texel) */
+        uint64_t a = 0, r = 0, g = 0, b = 0, n = 0;
+        uint32_t lvl0 = L->cube ? L->w * L->h : (L->levels ? L->lvl_dst[0] + L->w * L->h : L->texels);
+        for (uint32_t t = 0; t < lvl0; t += 7, ++n) { uint32_t p = px[t]; a += p >> 24; r += (p >> 16) & 255; g += (p >> 8) & 255; b += p & 255; }
+        if (n) mean = (uint32_t)((a / n) << 24 | (r / n) << 16 | (g / n) << 8 | (b / n));
+    }
+    xv_logf("[h2/tex] unit=%u code=%02X %s offset=%08X fmt=%08X addr=%08X ctrl=%08X ctrl1=%08X filter=%08X rect=%08X pal=%08X dims=%ux%u levels=%u cube=%d bytes=%u serial=%llu mean=%08X\n",
+            unit, (unsigned)code, names[outcome], s->setup[base / 4], s->setup[(base + 4) / 4], s->setup[(base + 8) / 4],
+            s->setup[(base + 0xC) / 4], s->setup[(base + 0x10) / 4], s->setup[(base + 0x14) / 4], s->setup[(base + 0x1C) / 4],
+            s->setup[(base + 0x20) / 4], L ? L->w : 0, L ? L->h : 0, L ? L->levels : 0, L ? L->cube : 0, L ? L->src_bytes : 0,
+            (unsigned long long)serial, mean);
+}
+
+static int locate(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit, uint32_t cap, unsigned want_mips, located *L)
+{
+#define FAIL(outcome) do { note(code, outcome); trace(s, unit, code, outcome, L, 0, NULL); return 0; } while (0)
     if (!s || !c || !c->read_instance || !c->map_physical || unit >= 4) return 0;
     unsigned base = 0x1B00 + unit * 64;
     uint32_t fmt = s->setup[(base + 4) / 4], ctrl = s->setup[(base + 0xC) / 4];
@@ -223,29 +260,62 @@ static int locate(const h2_command_state *s, const h2_kelvin_clear *c, unsigned 
     L->code = (fmt >> 8) & 0xFF; L->lw = (fmt >> 20) & 15; L->lh = (fmt >> 24) & 15;
     unsigned selector = fmt & 3, code = L->code;
     fmt_desc d;
-    if (!describe_format(code, &d)) { note(code, O_UNSUPPORTED); return 0; }
+    L->levels = 1;
+    if (!describe_format(code, &d)) FAIL(O_UNSUPPORTED);
     L->d = d;
-    if ((selector != 1 && selector != 2) || !(s->dma_valid & (1u << selector))) { note(code, O_NOMAP); return 0; }
+    if ((selector != 1 && selector != 2) || !(s->dma_valid & (1u << selector))) FAIL(O_NOMAP);
 
     if (d.linear) {
         uint32_t rect = s->setup[(base + 0x1C) / 4];
         L->w = rect >> 16; L->h = rect & 0xFFFF; L->pitch = s->setup[(base + 0x10) / 4] >> 16;
-        if (!L->w || !L->h || L->w > 4096 || L->h > 4096 || (uint64_t)L->w * d.bytes > L->pitch) { note(code, O_NOMAP); return 0; }
+        if (!L->w || !L->h || L->w > 4096 || L->h > 4096 || (uint64_t)L->w * d.bytes > L->pitch) FAIL(O_NOMAP);
         L->src_bytes = (uint32_t)((uint64_t)(L->h - 1) * L->pitch + (uint64_t)L->w * d.bytes);
     } else {
-        if (L->lw > 12 || L->lh > 12) { note(code, O_TOOLARGE); return 0; }
+        if (L->lw > 12 || L->lh > 12) FAIL(O_TOOLARGE);
         L->w = 1u << L->lw; L->h = 1u << L->lh;
-        if (d.dxt) { L->blocks_x = (L->w + 3) / 4; L->blocks_y = (L->h + 3) / 4; L->src_bytes = L->blocks_x * L->blocks_y * d.bytes; }
-        else L->src_bytes = L->w * L->h * d.bytes;
+        /* Mip chain: SET_TEXTURE_FORMAT bits 16-19 count the levels (level 0 included). The
+         * levels are stored back to back, each halving both dimensions (minimum one texel, or
+         * one 4x4 block for DXT). Only the GXM path asks for them, and only down to 8-texel-wide
+         * levels: a GXM linear texture's implicit row stride is its width rounded up to 8
+         * texels, so stopping there keeps every level's stride equal to its width. */
+        unsigned levels = want_mips ? (fmt >> 16) & 15 : 1;
+        if (levels < 1) levels = 1;
+        L->src_bytes = 0;
+        for (unsigned i = 0; i < levels; ++i) {
+            uint32_t w = L->w >> i, h = (L->h >> i) ? L->h >> i : 1;
+            if (i && w < 8) { levels = i; break; }
+            L->lvl_src[i] = L->src_bytes;
+            if (d.dxt) { uint32_t bx = (w + 3) / 4, by = (h + 3) / 4; if (!i) { L->blocks_x = bx; L->blocks_y = by; } L->src_bytes += bx * by * d.bytes; }
+            else L->src_bytes += w * h * d.bytes;
+        }
+        L->levels = levels;
+        /* Cube map (SET_TEXTURE_FORMAT bit 2): six square faces stored back to back, each
+         * holding the unit's whole mip chain padded to 128 bytes. The GPU path decodes level
+         * 0 of every face; the software path keeps seeing face 0 as a plain image. */
+        if (want_mips && ((fmt >> 2) & 1)) {
+            if (L->lw != L->lh) FAIL(O_UNSUPPORTED);
+            unsigned all = (fmt >> 16) & 15; if (all < 1) all = 1;
+            uint32_t face = 0;
+            for (unsigned i = 0; i < all; ++i) {
+                uint32_t w = (L->w >> i) ? L->w >> i : 1, h = (L->h >> i) ? L->h >> i : 1;
+                face += d.dxt ? ((w + 3) / 4) * ((h + 3) / 4) * d.bytes : w * h * d.bytes;
+            }
+            L->face_stride = (face + 127u) & ~127u;
+            L->src_bytes = L->face_stride * 6; L->levels = 1; L->cube = 1;
+        }
     }
-    if ((uint64_t)L->w * L->h > cap) { note(code, O_TOOLARGE); return 0; }
+    L->texels = 0;
+    for (unsigned i = 0; i < L->levels; ++i) { uint32_t w = L->w >> i, h = (L->h >> i) ? L->h >> i : 1; L->lvl_dst[i] = L->texels; L->texels += w * h; }
+    /* GXM cube faces of 16x16 or more (32-bit texels) start on 2048-byte boundaries. */
+    if (L->cube) { uint32_t face = L->w * L->h; if (L->w >= 16) face = (face + 511u) & ~511u; L->face_texels = face; L->texels = 6 * face; }
+    if (L->texels > cap) FAIL(O_TOOLARGE);
 
     h2_dma_object dma;
     uint32_t phys;
     if (!h2_dma_load(c->read_instance, c->opaque, s->dma[selector], &dma) ||
-        !h2_dma_resolve(&dma, s->setup[base / 4], L->src_bytes, 0, c->physical_bytes, &phys)) { note(code, O_NOMAP); return 0; }
+        !h2_dma_resolve(&dma, s->setup[base / 4], L->src_bytes, 0, c->physical_bytes, &phys)) FAIL(O_NOMAP);
     L->src = h2_map_physical_read ? h2_map_physical_read(phys, L->src_bytes) : c->map_physical(c->opaque, phys, L->src_bytes);
-    if (!L->src) { note(code, O_NOMAP); return 0; }
+    if (!L->src) FAIL(O_NOMAP);
 
     /* P8 texels index the unit's palette (SET_TEXTURE_PALETTE: DMA bit 0 A/B,
      * length bits 2-3 = 256>>n entries, offset bits 6-31), A8R8G8B8 entries. */
@@ -258,26 +328,32 @@ static int locate(const h2_command_state *s, const h2_kelvin_clear *c, unsigned 
         if (!(s->dma_valid & (1u << pal_sel)) ||
             !h2_dma_load(c->read_instance, c->opaque, s->dma[pal_sel], &pdma) ||
             !h2_dma_resolve(&pdma, pal & ~0x3Fu, pal_len * 4, 0, c->physical_bytes, &pphys) ||
-            !(psrc = c->map_physical(c->opaque, pphys, pal_len * 4))) { note(code, O_NOMAP); return 0; }
+            !(psrc = c->map_physical(c->opaque, pphys, pal_len * 4))) FAIL(O_NOMAP);
         memcpy(L->palette, psrc, pal_len * 4);
         L->pal_mask = pal_len - 1;
     }
     L->key[0] = s->setup[base / 4]; L->key[1] = fmt; L->key[2] = s->setup[(base + 0x10) / 4];
     L->key[3] = s->setup[(base + 0x1C) / 4]; L->key[4] = s->setup[(base + 0x20) / 4]; L->key[5] = s->dma[selector];
     return 1;
+#undef FAIL
 }
 
-static void decode(const located *L, uint32_t *rgba)
+static void decode_level(const located *L, unsigned level, const uint8_t *base, uint32_t *rgba)
 {
     const fmt_desc d = L->d;
-    const uint8_t *src = L->src;
-    uint32_t w = L->w, h = L->h, pitch = L->pitch;
-    unsigned lw = L->lw, lh = L->lh;
+    const uint8_t *src = base + L->lvl_src[level];
+    uint32_t w = L->w >> level, h = (L->h >> level) ? L->h >> level : 1, pitch = L->pitch;
+    unsigned lw = L->lw > level ? L->lw - level : 0, lh = L->lh > level ? L->lh - level : 0;
     if (d.dxt) {
-        unsigned lbw = lw > 2 ? lw - 2 : 0, lbh = lh > 2 ? lh - 2 : 0;
-        for (uint32_t by = 0; by < L->blocks_y; ++by)
-            for (uint32_t bx = 0; bx < L->blocks_x; ++bx) {
-                uint32_t bi = morton(bx, by, lbw, lbh), tile[16];
+        /* Compressed images are not swizzled: the 4x4 blocks are stored row by row (the
+         * hardware consumes S3TC data as laid out by the encoder; xemu uploads it untouched).
+         * Only 8x8 menu images (2x2 blocks, where Morton and row order agree) were ever seen
+         * before the level's 256x256 maps came out scrambled. */
+        (void)lw; (void)lh;
+        uint32_t blocks_x = (w + 3) / 4, blocks_y = (h + 3) / 4;
+        for (uint32_t by = 0; by < blocks_y; ++by)
+            for (uint32_t bx = 0; bx < blocks_x; ++bx) {
+                uint32_t bi = by * blocks_x + bx, tile[16];
                 const uint8_t *blk = src + (size_t)bi * d.bytes;
                 if (d.dxt == 1) menu_dxt1_block(blk, tile, 4);
                 else if (d.dxt == 3) menu_dxt3_block(blk, tile, 4);
@@ -301,14 +377,33 @@ static void decode(const located *L, uint32_t *rgba)
     }
 }
 
+/* Every level of the chain, back to back; each level's rows are packed at its width.
+ * A cube map instead yields its six faces (level 0) in the GXM swizzled order a square
+ * SCE_GXM_TEXTURE_CUBE face uses: Morton with y in the even bits and x in the odd bits
+ * (Vita3K decode_morton2_y(code) = compact(code >> 0)), the transpose of the NV2A order. */
+static void decode(const located *L, uint32_t *rgba)
+{
+    if (!L->cube) { for (unsigned i = 0; i < L->levels; ++i) decode_level(L, i, L->src, rgba + L->lvl_dst[i]); return; }
+    uint32_t w = L->w, h = L->h;
+    uint32_t *linear = malloc((size_t)w * h * 4);
+    if (!linear) return;
+    for (unsigned f = 0; f < 6; ++f) {
+        decode_level(L, 0, L->src + (size_t)f * L->face_stride, linear);
+        uint32_t *out = rgba + (size_t)f * L->face_texels;
+        for (uint32_t y = 0; y < h; ++y)
+            for (uint32_t x = 0; x < w; ++x) out[morton(y, x, L->lh, L->lw)] = linear[(size_t)y * w + x];
+    }
+    free(linear);
+}
+
 int menu_texture_load(const h2_command_state *s, const h2_kelvin_clear *c,
                       unsigned unit, uint32_t *rgba, uint32_t cap, uint32_t *ow, uint32_t *oh,
                       int *out_linear)
 {
     located L;
-    if (!locate(s, c, unit, cap, &L)) return 0;
+    if (!locate(s, c, unit, cap, 0, &L)) return 0;
     decode(&L, rgba);
-    note(L.code, O_OK);
+    note(L.code, O_OK); trace(s, unit, L.code, O_OK, &L, 0, rgba);
     *ow = L.w; *oh = L.h;
     if (out_linear) *out_linear = L.d.linear;   /* linear images are addressed in texels, not [0,1] */
     return 1;
@@ -331,7 +426,7 @@ static uint64_t content_hash(const uint8_t *p, size_t n, uint64_t h)
     return h;
 }
 
-typedef struct { uint32_t key[6]; uint64_t hash; uint32_t *texels; uint32_t w, h, bytes; int linear; uint64_t used;
+typedef struct { uint32_t key[6]; uint64_t hash; uint32_t *texels; uint32_t w, h, bytes, levels, ntexels; int linear, cube; uint64_t used;
                  int tracked; uint32_t page_lo, page_hi, verified; unsigned clean_hits;
                  uint8_t *snapshot; uint32_t snapshot_bytes; } tex_entry;   /* snapshot: diagnostic copy of the source */
 enum { TEX_CACHE_ENTRIES = 64, TEX_CACHE_BUDGET = 40u << 20 };
@@ -340,11 +435,12 @@ static size_t g_cache_bytes;
 static uint64_t g_hits, g_misses, g_hash_bytes, g_hash_skipped;
 
 const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit,
-                                     uint64_t serial, uint32_t cap, uint32_t *ow, uint32_t *oh, int *out_linear,
-                                     uint64_t *out_hash)
+                                     uint64_t serial, uint32_t cap, unsigned want_mips, uint32_t *ow, uint32_t *oh,
+                                     int *out_linear, uint64_t *out_hash, uint32_t *out_levels, uint32_t *out_texels,
+                                     int *out_cube)
 {
     located L;
-    if (!locate(s, c, unit, cap, &L)) return NULL;
+    if (!locate(s, c, unit, cap, want_mips, &L)) return NULL;
     /* The source is normally re-hashed on every draw (level textures reach ~130 KB
      * each). With the arena's per-page write epochs available, an entry with the same
      * key whose source pages carry no stamp at or after its last full read is proven
@@ -390,12 +486,12 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
             h2_texture_tracking_fault(L.key[0], L.src_bytes);
         }
     }
-    tex_entry *e = (keyed && keyed->hash == hash) ? keyed : NULL;
+    tex_entry *e = (keyed && keyed->hash == hash && keyed->levels == L.levels && keyed->cube == L.cube) ? keyed : NULL;
     if (e) { ++g_hits; }
     else {
         ++g_misses;
         if (keyed) victim = keyed;                          /* same key, changed content: replace in place */
-        uint32_t bytes = L.w * L.h * 4;
+        uint32_t bytes = L.texels * 4;
         /* Evict least-recently-used entries (never this draw's) until the budget fits. */
         while (g_cache_bytes + bytes > TEX_CACHE_BUDGET) {
             tex_entry *old = NULL;
@@ -410,9 +506,10 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
         uint32_t *px = malloc(bytes);
         if (!px) return NULL;
         decode(&L, px);
-        note(L.code, O_OK);
+        note(L.code, O_OK); trace(s, unit, L.code, O_OK, &L, serial, px);
         memcpy(victim->key, L.key, sizeof L.key);
         victim->hash = hash; victim->texels = px; victim->w = L.w; victim->h = L.h; victim->bytes = bytes;
+        victim->levels = L.levels; victim->ntexels = L.texels; victim->cube = L.cube;
         victim->linear = L.d.linear; g_cache_bytes += bytes;
         victim->clean_hits = 0;
         e = victim;
@@ -430,6 +527,9 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
     *ow = e->w; *oh = e->h;
     if (out_linear) *out_linear = e->linear;
     if (out_hash) *out_hash = e->hash ^ ((uint64_t)e->key[1] << 32) ^ e->key[0];   /* content + format/offset */
+    if (out_levels) *out_levels = e->levels;
+    if (out_texels) *out_texels = e->ntexels;
+    if (out_cube) *out_cube = e->cube;
     return e->texels;
 }
 

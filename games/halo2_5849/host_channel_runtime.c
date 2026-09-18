@@ -28,7 +28,10 @@ static void perf_report(uint32_t serial)
     extern void h2_menu_gxm_perf(uint64_t out[12]) __attribute__((weak));
     extern void h2_audio_backend_perf(uint64_t out[24]) __attribute__((weak));
     extern void xk_wait_stats_request(void) __attribute__((weak));
+    extern size_t menu_texture_stats(char *buf, size_t cap) __attribute__((weak));
     static uint64_t last_wall, last[8], last_gxm[12], last_audio[24];
+    char texstats[400] = "";
+    if (menu_texture_stats) menu_texture_stats(texstats, sizeof texstats);
     uint64_t now = perf_now(), cur[8] = {perf_submit_us, perf_submits, perf_flip_us, perf_flips_completed, perf_present_us,
                                          channel.commands.methods, channel.clear.completed_clears, perf_pass_us}, gxm[12] = {0}, audio[24] = {0};
     if (h2_menu_gxm_perf) h2_menu_gxm_perf(gxm);
@@ -37,20 +40,20 @@ static void perf_report(uint32_t serial)
 #define PD(cur, last, i) ((unsigned long long)((cur)[i] - (last)[i]))
 #define PDMS(cur, last, i) ((unsigned long long)(((cur)[i] - (last)[i]) / 1000))
         xv_logf("[h2/perf] serial=%u flips=60 wall_ms=%llu submit_ms=%llu submits=%llu flipwait_ms=%llu completed=%llu present_ms=%llu methods=%llu clears=%llu pass_ms=%llu"
-                " | gxm draws=%llu render_ms=%llu flushes=%llu flush_ms=%llu open_ms=%llu tex_ms=%llu gxmdraw_ms=%llu fallbacks=%llu hash_kb=%llu hits=%llu misses=%llu unhashed=%llu"
+                " | gxm draws=%llu render_ms=%llu flushes=%llu flush_ms=%llu open_ms=%llu tex_ms=%llu ends=%llu uploads=%llu touches=%llu ringwaits=%llu fallbacks=%llu hash_kb=%llu hits=%llu misses=%llu unhashed=%llu"
                 " | audio grains=%llu nonzero=%llu compute_ms=%llu max_us=%llu misses=%llu hold_ms=%llu hold_max_us=%llu"
                 " compute_iters=%llu idle_iters=%llu guest_locks=%llu guest_wait_ms=%llu error=%08llX"
-                " | fx frames=%llu sources_ms=%llu dsp_ms=%llu dsp_instr=%llu | lock sites L%llu=%llu L%llu=%llu L%llu=%llu L%llu=%llu\n",
+                " | fx frames=%llu sources_ms=%llu dsp_ms=%llu dsp_instr=%llu | lock sites L%llu=%llu L%llu=%llu L%llu=%llu L%llu=%llu | tex %s\n",
                 serial, (unsigned long long)((now - last_wall) / 1000), PDMS(cur, last, 0), PD(cur, last, 1), PDMS(cur, last, 2), PD(cur, last, 3),
                 PDMS(cur, last, 4), PD(cur, last, 5), PD(cur, last, 6), PDMS(cur, last, 7),
                 PD(gxm, last_gxm, 0), PDMS(gxm, last_gxm, 1), PD(gxm, last_gxm, 2), PDMS(gxm, last_gxm, 3), PDMS(gxm, last_gxm, 4),
-                PDMS(gxm, last_gxm, 5), PDMS(gxm, last_gxm, 6), PD(gxm, last_gxm, 7), (unsigned long long)((gxm[8] - last_gxm[8]) / 1024), PD(gxm, last_gxm, 9), PD(gxm, last_gxm, 10), PD(gxm, last_gxm, 11),
+                PDMS(gxm, last_gxm, 5), (unsigned long long)(((gxm[6] - last_gxm[6]) / 1000) % 1000), (unsigned long long)(((gxm[6] - last_gxm[6]) / 1000000) % 1000), (unsigned long long)(((gxm[6] - last_gxm[6]) / 1000000000ull) % 1000), (unsigned long long)((gxm[6] - last_gxm[6]) / 1000000000000ull), PD(gxm, last_gxm, 7), (unsigned long long)((gxm[8] - last_gxm[8]) / 1024), PD(gxm, last_gxm, 9), PD(gxm, last_gxm, 10), PD(gxm, last_gxm, 11),
                 PD(audio, last_audio, 0), PD(audio, last_audio, 1), PDMS(audio, last_audio, 2), (unsigned long long)audio[3], PD(audio, last_audio, 4),
                 PDMS(audio, last_audio, 5), (unsigned long long)audio[6], PD(audio, last_audio, 7), PD(audio, last_audio, 8),
                 PD(audio, last_audio, 10), PDMS(audio, last_audio, 9), (unsigned long long)audio[11],
                 PD(audio, last_audio, 12), PDMS(audio, last_audio, 13), PDMS(audio, last_audio, 14), PD(audio, last_audio, 15),
                 (unsigned long long)audio[16], (unsigned long long)audio[17], (unsigned long long)audio[18], (unsigned long long)audio[19],
-                (unsigned long long)audio[20], (unsigned long long)audio[21], (unsigned long long)audio[22], (unsigned long long)audio[23]);
+                (unsigned long long)audio[20], (unsigned long long)audio[21], (unsigned long long)audio[22], (unsigned long long)audio[23], texstats);
         if (xk_wait_stats_request) xk_wait_stats_request();   /* the kernel dumps [wait] at the next guest yield */
 #undef PD
 #undef PDMS
@@ -353,14 +356,17 @@ static void signal_game_vblank(xctx *c, uint32_t count, uint32_t swaps, uint32_t
                 count, swaps, flags, (unsigned long long)before, (unsigned long long)after);
 }
 static uint32_t freerun_swaps;    /* free-running vblank swap count shared by both pacing paths */
+extern int h2_menu_gxm_page_guarded(uint32_t page) __attribute__((weak));
+extern void h2_menu_gxm_host_access(uint32_t physical, uint32_t bytes, int may_write) __attribute__((weak));
 static void *map_physical_raw(uint32_t address, uint32_t bytes)
 {
     if (!bytes || address >= PHYSICAL_BYTES || bytes > PHYSICAL_BYTES - address) return NULL;
     /* Verify the entire cached physical alias and its host contiguity. This
-     * excludes the separately mapped XBE image and the unmapped trash page. */
+     * excludes the separately mapped XBE image and the unmapped trash page; a
+     * colour buffer page guarded by the GXM backend is mapped and merely pending. */
     uint32_t last = (address + bytes - 1) >> 12;
     for (uint32_t page = address >> 12; page <= last; ++page)
-        if (g_xpt[0x80000u + page] != page * 4096u) return NULL;
+        if (g_xpt[0x80000u + page] != page * 4096u && !(h2_menu_gxm_page_guarded && h2_menu_gxm_page_guarded(page))) return NULL;
     return g_xram + address;
 }
 extern void xv_mark_written(const void *host, uint32_t bytes) __attribute__((weak));
@@ -369,21 +375,31 @@ static void *map_physical(void *opaque, uint32_t address, uint32_t bytes)
 {
     (void)opaque;
     if (!h2_host_tiles_span(&tiles, address, bytes)) return NULL;
+    if (h2_menu_gxm_host_access) h2_menu_gxm_host_access(address, bytes, 1);   /* land a pending surface; the consumer may write */
     void *pointer = map_physical_raw(address, bytes);
     /* Consumers may write through this mapping: stamp the span now (the
      * multi-method consumers stamp again when they actually store). */
     if (pointer && xv_mark_written) xv_mark_written(pointer, bytes);
     return pointer;
 }
-/* The texture reader's mapping: a read that must not stamp its own source. */
-void *h2_map_physical_read(uint32_t address, uint32_t bytes)
+/* The GXM backend's own view of a colour buffer it renders: raw - it lands the surface
+ * and stamps the guest copy itself, so this neither lands nor stamps. */
+void *h2_map_physical_target(uint32_t address, uint32_t bytes)
 {
     if (!h2_host_tiles_span(&tiles, address, bytes)) return NULL;
     return map_physical_raw(address, bytes);
 }
+/* The texture reader's mapping: a read that must not stamp its own source. */
+void *h2_map_physical_read(uint32_t address, uint32_t bytes)
+{
+    if (!h2_host_tiles_span(&tiles, address, bytes)) return NULL;
+    if (h2_menu_gxm_host_access) h2_menu_gxm_host_access(address, bytes, 0);
+    return map_physical_raw(address, bytes);
+}
 static int read_physical(void *opaque, uint32_t address, uint32_t *word)
 {
-    void *pointer = map_physical(opaque, address, 4);
+    (void)opaque;
+    void *pointer = map_physical_raw(address, 4);   /* push buffer / instance words: never a colour buffer */
     if (!pointer) return 0;
     memcpy(word, pointer, 4);
     return 1;
@@ -982,9 +998,8 @@ static int complete_active_flip(xctx *c, uint32_t source)
         channel.commands.flip_read != (active_flip_serial & 1) ||
         channel.commands.flip_write != channel.commands.flip_read) return 0;
     uint32_t saved_fpscr = h2_platform_fpscr_read(), before, after;
-    {   /* land the GXM menu backend's pending scene: the flip presents guest memory */
-        extern void h2_menu_gxm_flush(void) __attribute__((weak));
-        if (h2_menu_gxm_flush) h2_menu_gxm_flush();
+    {   /* land the flipped colour buffer: the flip presents guest memory */
+        if (h2_menu_gxm_host_access) h2_menu_gxm_host_access(active_flip_address, H2_SCANOUT_BYTES, 0);
     }
     /* The original flip retires at a vblank, when the CRTC starts scanning the new
      * buffer. Queue the finished frame for the display's next vblank first and wait
