@@ -57,6 +57,7 @@ int main(void)
             if(command=='q')break;
             if(command=='t') {printf("BOOT %d\n",xv_update_boot());fflush(stdout);continue;}
             if(command=='c') {printf("CONFIRM %d\n",xv_update_confirm(1));fflush(stdout);continue;}
+            if(command=='d') {printf("TRACE %d\n",xv_remote_take_draw_trace());fflush(stdout);continue;}
             if(command=='h') {
                 xv_update_progress(XV_UPDATE_GPU_DRAIN);
                 xv_update_progress(XV_UPDATE_REQUESTED);

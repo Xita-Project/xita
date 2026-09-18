@@ -407,6 +407,7 @@ def main():
     pair.add_argument("--host", required=True)
     pair.add_argument("--port", type=int, default=8080)
     commands.add_parser("status")
+    commands.add_parser("trace-draw", help="Queue one draw-trace frame; inspect the log for completion, not FPS")
     commands.add_parser("release")
     upload = commands.add_parser("update", help="stage a compatible VPK executable and verify on device")
     upload.add_argument("package", type=Path)
@@ -451,6 +452,9 @@ def main():
         client.request("/update/rollback","POST")
     elif args.command == "status":
         print(json.dumps(client.status(), indent=2))
+    elif args.command == "trace-draw":
+        client.request("/trace/draw", "POST")
+        print("Queued one draw-trace frame. Verify its start/completion markers in the game log; traced frame timing is diagnostic only.")
     elif args.command == "screen":
         print(json.dumps(client.screen(args.output)))
     elif args.command == "log":

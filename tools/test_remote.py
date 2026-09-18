@@ -223,6 +223,23 @@ def main():
         try:
             assert proc.stdout.readline() == b"READY\n"
             code, _, body = request("/status"); assert code == 200 and json.loads(body)["protocol"] == 1
+            assert request("/trace/draw", "POST", token="0"*32)[0] == 403
+            assert command('d') == 'TRACE 0'
+            assert request("/trace/draw")[0] == 404
+            assert request("/trace/draw", "POST")[0] == 204
+            # Display callbacks do not consume the request or touch Xbox state.
+            assert request("/trace/draw", "POST")[0] == 409
+            assert request("/benchmark?kind=object-basis", "POST")[0] == 409
+            assert command('d') == 'TRACE 1'
+            assert command('d') == 'TRACE 0'
+            command('b')
+            assert request("/trace/draw", "POST")[0] == 409
+            command('n')
+            assert request("/trace/draw", "POST")[0] == 204
+            command('b')
+            assert command('d') == 'TRACE 0'
+            command('n')
+            assert command('d') == 'TRACE 0'
             assert request("/status", token="f" * 32)[0] == 403
             assert raw(b"GET /status HTTP/1.1\r\nHost: localhost\r\n\r\n") == b"403"
             auth = f"Authorization: Bearer {key}\r\n".encode()

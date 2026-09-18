@@ -142,13 +142,29 @@ static float f32arg(xctx *c, unsigned i) { float f; uint32_t v = X_ARG(i); memcp
 static struct { uint32_t vblank_cb, swap_cb; unsigned frame, draws, draws_total, clears; uint32_t backbuffer, depth; unsigned width, height; } g_dev;
 uint32_t xd3d_backbuffer_data(void) { return g_dev.backbuffer ? RES_DATA(g_dev.backbuffer) : 0; }
 static int g_hist_frame = -2;
+static unsigned g_remote_hist_frame;
+static int g_remote_hist_on;
+int xv_remote_take_draw_trace(void) __attribute__((weak));
 static float g_vp_rows[4][4]; static unsigned g_vp_frame = 0xFFFFFFFFu;   /* view-projection of the frame's first world draw */
 static struct { uint32_t m; unsigned n; uint32_t last; } g_hm[128]; static unsigned g_nhm;   /* NV2A methods poked in the hist frame */
 /* XV_D3D_HIST=<frame> traces an absolute frame; XV_D3D_HIST_LEVEL=<n> traces the n-th frame after a
  * non-UI map started streaming (level loads take a variable number of frames, this does not drift) */
 static int hist_level_rel = -1, hist_level_base = -1;
+static void hist_remote_track(void)
+{
+    if(g_remote_hist_on && g_remote_hist_frame==g_dev.frame) {
+        D3DLOG("hist: remote frame %u completed; diagnostic timing excluded\n",g_remote_hist_frame);
+        g_remote_hist_on=0;
+    }
+    if(xv_remote_take_draw_trace && xv_remote_take_draw_trace()) {
+        g_remote_hist_frame=g_dev.frame+1;
+        g_remote_hist_on=1;
+        D3DLOG("hist: remote one-frame request -> tracing frame %u; diagnostic timing excluded\n",g_remote_hist_frame);
+    }
+}
 static void hist_level_track(void)
 {
+    hist_remote_track();
     if(xv_diag_poll_hist()) {
         g_hist_frame=(int)g_dev.frame+1;
         D3DLOG("hist: on-demand trace of frame %d\n",g_hist_frame);
@@ -165,6 +181,7 @@ static void hist_level_track(void)
 void xd3d_hist_arm(void) { g_hist_frame = (int)g_dev.frame + 1; D3DLOG("hist: armed by screenshot -> tracing frame %d\n", g_hist_frame); }
 int xd3d_hist_active(void)
 {
+    if(g_remote_hist_on && g_dev.frame+1==g_remote_hist_frame)return 1;
     if (g_hist_frame == -2) { const char *e = getenv("XV_D3D_HIST"); g_hist_frame = e ? atoi(e) : -1; }
     static unsigned count;
     if (!count) { const char *e = getenv("XV_D3D_HIST_COUNT"); int n = e ? atoi(e) : 1; count = n > 0 && n <= 120 ? (unsigned)n : 1; }
@@ -507,6 +524,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
     c->r[0] = 0; X_RET(4);
 }
 void xv_hle_D3DDevice_Swap(xctx *c) { XD3D_COUNT("D3DDevice_Swap"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_PRESENT); g_dev.frame++;
+    hist_remote_track();
 #ifdef XV_OWNER_PHASE
     xv_owner_phase_present(c);
 #endif

@@ -20,6 +20,7 @@ static unsigned running, enabled, frame_count, capture, pad_seq, pad_buttons, pa
 static uint32_t *screen;
 static char key[33];
 static unsigned captured_frame;
+static unsigned draw_trace_pending;
 static int listener=-1;
 static int upload_in_progress;
 static uint64_t awake_until;
@@ -68,6 +69,13 @@ void xv_remote_frame(const void *pixels,unsigned width,unsigned height,unsigned 
     for(unsigned y=0;y<HEIGHT;y++)memcpy(screen+y*WIDTH,(const uint32_t *)pixels+y*pitch,WIDTH*4);
     captured_frame=frame;
     STORE(&capture,3); /* Own this immutable copy until the HTTP response ends. */
+}
+
+int xv_remote_take_draw_trace(void)
+{
+    if(!LOAD(&enabled))return 0;
+    unsigned requested=__atomic_exchange_n(&draw_trace_pending,0,__ATOMIC_ACQ_REL);
+    return requested && !xv_benchmark_status() && !xv_benchmark_remote_busy() && !xv_update_requested();
 }
 
 static void keep_awake(void)
@@ -211,6 +219,14 @@ static void serve(int s)
                 if(!bad)xv_update_progress(XV_UPDATE_REQUESTED);
                 reply(s,bad?409:204,bad?"Update not ready\n":"");
             } else reply(s,404,"Unknown update operation\n");
+        } else if(!strcmp(method,"POST")&&!strcmp(target,"/trace/draw")) {
+            if(upload_in_progress||xv_update_requested()||xv_benchmark_status()||xv_benchmark_remote_busy()) {
+                reply(s,409,"Draw trace unavailable during update or benchmark\n");return;
+            }
+            unsigned expected=0;
+            if(!__atomic_compare_exchange_n(&draw_trace_pending,&expected,1,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED))
+                reply(s,409,"Draw trace already pending\n");
+            else reply(s,204,""); /* Queued, not proof that a frame was recorded. */
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/benchmark?kind=",16)) {
             static const char *const kinds[]={"object-basis","model-palette","vertex-worker","vertex-references","native-bounds","vertex-copy","draw-scan","flare","resolution","early-visibility","point-math","texture-state","matrix-neon","object-scan","hle-dispatch","flare-query-overlap","guest-affinity","snapshot-worker","guest-phases","prep-bundle","object-jobs","vertex-prepare","depth-prepare","object-math","object-lock","object-wait","object-point","model-hierarchy","object-quat","blend-replace","index-reuse","object-pose","material-packet","polygon-edge","log-writer","clip-region"};
             unsigned kind=0;
@@ -224,7 +240,7 @@ static void serve(int s)
             if(!strcmp(target+16,"query-boundary"))kind=XV_BENCH_QUERY_BOUNDARY;
             if(!strcmp(target+16,"light-census"))kind=XV_BENCH_LIGHT_CENSUS;
             if(!kind)reply(s,400,"Unknown benchmark kind\n");
-            else if(upload_in_progress||xv_update_requested()||xv_benchmark_remote_request(kind))reply(s,409,"Benchmark unavailable: enter first-person gameplay and finish any active operation\n");
+            else if(upload_in_progress||xv_update_requested()||LOAD(&draw_trace_pending)||xv_benchmark_remote_request(kind))reply(s,409,"Benchmark unavailable: enter first-person gameplay and finish any active operation\n");
             else reply(s,204,"");
         } else if(!strcmp(method,"GET")&&!strcmp(target,"/status")) {
             uint64_t now=remote_now();
@@ -328,7 +344,7 @@ void xv_remote_stop(void)
     while(LOAD(&capture)==2)remote_sleep(1000);
     xv_update_close();
     upload_in_progress=0;
-    free(screen);screen=NULL;STORE(&capture,0);memset(key,0,sizeof key);
+    free(screen);screen=NULL;STORE(&capture,0);STORE(&draw_trace_pending,0);memset(key,0,sizeof key);
 #ifdef __vita__
     if(ctl_initialized) {sceNetCtlTerm();ctl_initialized=0;}
     if(net_initialized) {sceNetTerm();net_initialized=0;}

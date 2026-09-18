@@ -232,3 +232,19 @@ build. It can break gameplay or stop at an unsupported worker service; see the
 object callbacks on two workers plus the guest owner, retaining an off/on/off
 comparison and the same worker reservations/native-helper locking in all arms.
 It is not included in ordinary release builds.
+
+## One-frame geometry traces
+
+On a paired development build, `vita_remote.py --config PRIVATE_CONFIG trace-draw`
+queues one frame of the existing detailed draw trace. The authenticated network
+thread only sets a request; the recording owner consumes it at Present/Swap.
+The log records `remote one-frame request` and `remote frame ... completed`.
+An HTTP acknowledgement means queued, not completed. The trace is unavailable
+during an update or benchmark, and a second pending request is rejected.
+
+This request does not start a benchmark, alter saved graphics settings or read
+arbitrary guest memory. It selects one frame independently of
+`XV_D3D_HIST_COUNT`; any separately configured manual trace keeps its own range.
+Trace logging/hashing and the existing diagnostic exclusion of packed vertices
+perturb that frame. Use its source/index records to identify work, not to compare
+FPS or claim ordinary-gameplay timing. Pull the log after the completion marker.
