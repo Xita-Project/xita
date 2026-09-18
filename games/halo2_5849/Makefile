@@ -15,6 +15,7 @@ BLEND_RENDER ?= 0
 LUMA_RENDER ?= 0
 SPRITE_RENDER ?= 0
 MENU_RENDER ?= 0
+MENU_GXM_DEFAULT ?= 0
 AUDIO_HOST ?= 0
 AUDIO_DSP ?= 0
 AUDIO_SPATIAL_MODEL ?= 0
@@ -726,3 +727,5 @@ $(BUILD)/xv_build.h: version-force $(ROOT)/version.json $(ROOT)/tools/gen_build_
 $(BUILD)/boot.o: $(BUILD)/xv_build.h
 $(BUILD)/boot.o: CFLAGS += -include $(BUILD)/xv_build.h
 $(BUILD)/param.sfo: $(ROOT)/version.json
+
+$(BUILD)/menu_render.o: CFLAGS += -DH2_MENU_GXM_DEFAULT=$(MENU_GXM_DEFAULT)

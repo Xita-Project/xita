@@ -1,3 +1,17 @@
+# Halo 2 experimental profile
+
+**September 18, 2026:** this profile is integrated with the current Xita source.
+For the one-time physical Vita setup and selector behavior, see
+[experimental hardware setup](../../docs/halo2-hardware.md). Hardware gameplay
+remains unverified. The detailed milestones below are historical diagnostic
+results, not the status of every later build.
+
+Prepared hardware builds use `MENU_RENDER=1 MENU_GXM_DEFAULT=1` and
+`MENU_SHADERS=/path/to/prepared-menu-shaders` to package locally compiled
+`h2menu*.gxp` programs and select the GXM backend by default. The software
+fallback remains available; `XV_MENU_GXM=0` overrides the build default for
+investigation. Version/revision is written at the beginning of `boot.log`.
+
 # Halo 2 executable identity and native startup
 
 This is an **identity and discovery profile**, not a working game port. It

@@ -187,6 +187,9 @@ static int software_body(void *opaque, const h2_menu_request *r, uint8_t *ab_bef
 int h2_menu_software_draw_ab(void *opaque, const h2_menu_request *r, uint8_t *before, uint8_t *gpu)
 { return software_body(opaque, r, before, gpu); }
 
+#ifndef H2_MENU_GXM_DEFAULT
+#define H2_MENU_GXM_DEFAULT 0
+#endif
 int h2_menu_software_render(void *opaque, const h2_menu_request *r)
 {
     (void)opaque;
@@ -198,7 +201,7 @@ int h2_menu_software_render(void *opaque, const h2_menu_request *r)
      * (no compiled shader pair yet) falls through to this software path after the GXM
      * backend has flushed its pending scene, so both paths always see coherent buffers. */
     static int gxm_knob = -1, ab_every = -1;
-    if (gxm_knob < 0) { gxm_knob = knob("XV_MENU_GXM", 0); ab_every = knob("XV_MENU_GXM_AB", 0); }
+    if (gxm_knob < 0) { gxm_knob = knob("XV_MENU_GXM", H2_MENU_GXM_DEFAULT); ab_every = knob("XV_MENU_GXM_AB", 0); }
     if (gxm_knob) {
         extern int h2_menu_gxm_render(void *opaque, const h2_menu_request *r);
         extern void h2_menu_gxm_flush(void);
