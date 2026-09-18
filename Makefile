@@ -162,6 +162,13 @@ XV_NATIVE_VISIBILITY_PORTAL_LOOP ?= 0
 XV_CLIP_DISTANCE_SPANS ?= 0
 XV_TYPED_PORTAL_POLYGON ?= 0
 XV_TYPED_SUBCLUSTER ?= 0
+XV_NATIVE_VISIBILITY_JOBS ?= 0
+ifneq ($(words $(XV_NATIVE_VISIBILITY_JOBS)),1)
+$(error XV_NATIVE_VISIBILITY_JOBS must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_VISIBILITY_JOBS),0 1),$(XV_NATIVE_VISIBILITY_JOBS))
+$(error XV_NATIVE_VISIBILITY_JOBS must be 0 or 1)
+endif
 ifneq ($(words $(XV_TYPED_SUBCLUSTER)),1)
 $(error XV_TYPED_SUBCLUSTER must be 0 or 1)
 endif
@@ -472,6 +479,11 @@ endif
 ifeq ($(XV_TYPED_SUBCLUSTER),1)
 ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_NATIVE_CLIP_REGION):$(XV_LIGHT_QUERY_CENSUS):$(XV_EXPERIMENTAL_OBJECT_JOBS),1:halo_ce_3925:1:1:1)
 $(error XV_TYPED_SUBCLUSTER requires Halo CE, native clipping and the owner/census backend)
+endif
+endif
+ifeq ($(XV_NATIVE_VISIBILITY_JOBS),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_EXPERIMENTAL_OBJECT_JOBS):$(XV_LIGHT_QUERY_CENSUS):$(XV_TYPED_SUBCLUSTER),1:halo_ce_3925:1:1:1)
+$(error XV_NATIVE_VISIBILITY_JOBS requires the Halo CE native subcluster and owner/worker backend)
 endif
 endif
 ifeq ($(XV_NATIVE_VISIBILITY_PORTAL_LOOP),1)
@@ -979,6 +991,16 @@ $(SUBCLUSTER_OBJS) $(RECOMP_BUILD)/kernel/xk_clip_region_control.o: RECOMP_CFLAG
 $(SUBCLUSTER_OBJS) $(RECOMP_BUILD)/kernel/xk_clip_region_control.o $(RECOMP_BUILD)/kernel/xk_subcluster.o $(RECOMP_BUILD)/kernel/xk_subcluster_math.o: $(RECOMP_BUILD)/subcluster.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/subcluster.config
 $(RECOMP_BUILD)/kernel/xk_subcluster_math.o: RECOMP_CFLAGS += -ffp-contract=off -frounding-math
+.PHONY: force-visibility-jobs-config
+force-visibility-jobs-config:
+$(RECOMP_BUILD)/visibility-jobs.config: force-visibility-jobs-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_NATIVE_VISIBILITY_JOBS)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_NATIVE_VISIBILITY_JOBS=$(XV_NATIVE_VISIBILITY_JOBS)
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/visibility-jobs.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/visibility-jobs.config
 ifeq ($(XV_NATIVE_BSP_SPHERE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_BSP_SPHERE
 endif

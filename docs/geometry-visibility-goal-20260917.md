@@ -88,3 +88,10 @@ owner admission, original scheduler callbacks and the enclosing `539C0`
 visibility consumer. A cumulative build includes this and native portal
 clipping. It awaits a device connection and ordinary gameplay verification;
 actual subcluster worker scheduling remains separate work.
+
+The [native visibility queue](native-visibility-jobs-20260918.md) now runs copied
+classification packets through the existing workers and owner. Memory/race,
+FP-state and legacy-job handoff checks pass, with the disabled Vita object
+unchanged. It is not yet called by the game. The next integration should capture
+multiple visible clusters per bounded packet; Blood Gulch's individual clusters
+are too small to assume per-cluster dispatch will pay for itself.

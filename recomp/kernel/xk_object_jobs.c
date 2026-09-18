@@ -15,6 +15,16 @@
 #include "xk_object_mutex.h"
 #include "xk_object_solver.h"
 #include "../xv_phase.h"
+#if XV_NATIVE_VISIBILITY_JOBS
+#ifndef XV_LIGHT_QUERY_CENSUS
+#error Native visibility jobs require registered owner admission
+#endif
+#include "xk_visibility_jobs.h"
+#include <fenv.h>
+#if defined(__GLIBC__) && !defined(__vita__)
+extern int fegetexcept(void);
+#endif
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #ifdef __vita__
@@ -1181,6 +1191,107 @@ void xv_object_math_override(int enabled)
     if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
     math_private_override=enabled<0?-1:!!enabled;
 }
+#if XV_NATIVE_VISIBILITY_JOBS
+/* The owner copies these bounded packets while the existing workers sleep.
+ * Native batches never enter execute(), request an owner service, or touch
+ * the guest arena. running excludes nested/foreign owner operations until
+ * every done semaphore has been consumed. No new native threads are created. */
+static struct {
+    xv_visibility_input input[XV_VISIBILITY_JOB_CAPACITY];
+    xs_bounds_result output[XV_VISIBILITY_JOB_CAPACITY] __attribute__((aligned(64)));
+    fenv_t environment;
+    unsigned n,lanes;
+} visibility_packet __attribute__((aligned(64)));
+static unsigned visibility_running;
+static struct __attribute__((aligned(64))) { unsigned calls,items; } visibility_lane[LANES];
+
+static int visibility_environment(fenv_t *out)
+{
+#if defined(__arm__)
+    unsigned fpscr;__asm__ volatile("vmrs %0, fpscr":"=r"(fpscr)::"memory");
+    if(fpscr&0x00009f00u)return 0; /* No speculative FP traps. */
+#elif defined(__GLIBC__)
+    if(fegetexcept())return 0;
+#else
+    return 0; /* Unqualified host trap-mask interface. */
+#endif
+    return fegetenv(out)==0;
+}
+static unsigned visibility_key(unsigned v)
+{
+    if(!(v&0x7fffffffu))v=0;
+    return v&0x80000000u ? ~v : v^0x80000000u;
+}
+static int visibility_input_valid(const xv_visibility_input *p)
+{
+    _Static_assert(sizeof(*p)==28*4,"visibility packet layout");
+    const unsigned char *bytes=(const unsigned char *)p;
+    for(unsigned i=0;i<28;++i) {
+        unsigned v;memcpy(&v,bytes+4*i,4);
+        if((v&0x7fffffffu)>=0x7f800000u)return 0;
+    }
+    const xs_box *boxes[]={&p->frustum.enclosing,&p->box};
+    for(unsigned j=0;j<2;++j)for(unsigned i=0;i<3;++i) {
+        unsigned lo,hi;memcpy(&lo,&boxes[j]->axis[i][0],4);memcpy(&hi,&boxes[j]->axis[i][1],4);
+        if(visibility_key(lo)>visibility_key(hi))return 0;
+    }
+    return 1;
+}
+static void visibility_execute(unsigned lane,unsigned partition)
+{
+    fenv_t saved;if(fegetenv(&saved)||fesetenv(&visibility_packet.environment))abort();
+    /* Eight results occupy a cache line; adjacent lanes do not share output
+     * lines. The final partition takes any remaining elements. */
+    unsigned chunks=(visibility_packet.n+7)/8;
+    unsigned lo=8*(chunks*partition/visibility_packet.lanes);
+    unsigned hi=8*(chunks*(partition+1)/visibility_packet.lanes);
+    if(hi>visibility_packet.n)hi=visibility_packet.n;
+    for(unsigned i=lo;i<hi;++i) {
+        const xv_visibility_input *p=&visibility_packet.input[i];
+        visibility_packet.output[i]=xs_bounds(&p->frustum,&p->box);
+    }
+    visibility_lane[lane].calls++;visibility_lane[lane].items+=hi-lo;
+    if(fesetenv(&saved))abort();
+}
+int xv_visibility_classify_jobs(xctx *c,const xv_visibility_input *input,unsigned n,
+                                xs_bounds_result *output)
+{
+    /* Ownership is checked before even dereferencing the supplied pointers. */
+    if(xv_object_census_boundary(c)!=XV_LC_OK || xv_phase_enabled ||
+       (override<0?configured:override)==0 || XV_LIGHT_CENSUS_ON())return 0;
+    if(__atomic_load_n(&stopping,__ATOMIC_ACQUIRE)||
+       __atomic_load_n(&visibility_running,__ATOMIC_ACQUIRE))return 0;
+    extern int xv_watch_n __attribute__((weak)),xv_trace_funcs __attribute__((weak));
+    if((&xv_watch_n&&xv_watch_n)||(&xv_trace_funcs&&xv_trace_funcs)||
+       !input||!output||!n||n>XV_VISIBILITY_JOB_CAPACITY)return 0;
+    fenv_t environment;if(!visibility_environment(&environment))return 0;
+    memcpy(visibility_packet.input,input,n*sizeof(*input));
+    for(unsigned i=0;i<n;++i)if(!visibility_input_valid(&visibility_packet.input[i]))return 0;
+    visibility_packet.environment=environment;visibility_packet.n=n;
+    visibility_packet.lanes=active_workers+1;
+    __atomic_store_n(&visibility_running,1,__ATOMIC_RELEASE);
+    __atomic_store_n(&running,1,__ATOMIC_RELEASE);
+    for(unsigned i=0;i<active_workers;++i) {
+#ifdef __vita__
+        if(sceKernelSignalSema(wakes[i],1)<0)abort();
+#else
+        if(sem_post(&wakes[i]))abort();
+#endif
+    }
+    visibility_execute(2,active_workers);
+    for(unsigned i=0;i<active_workers;++i) {
+#ifdef __vita__
+        if(sceKernelWaitSema(dones[i],1,NULL)<0)abort();
+#else
+        wait_sem(&dones[i]);
+#endif
+    }
+    __atomic_store_n(&visibility_running,0,__ATOMIC_RELEASE);
+    __atomic_store_n(&running,0,__ATOMIC_RELEASE);
+    memcpy(output,visibility_packet.output,n*sizeof(*output));return 1;
+}
+#endif
+
 static void execute(unsigned lane)
 {
     extern void f_0008FB70(xctx *);
@@ -1218,6 +1329,13 @@ static int worker(SceSize size,void *arg)
     for(;;) {
         if(sceKernelWaitSema(wakes[lane],1,NULL)<0)abort();
         if(__atomic_load_n(&stopping,__ATOMIC_ACQUIRE))return 0;
+#if XV_NATIVE_VISIBILITY_JOBS
+        if(__atomic_load_n(&visibility_running,__ATOMIC_ACQUIRE)) {
+            visibility_execute(lane,lane);
+            if(sceKernelSignalSema(dones[lane],1)<0)abort();
+            continue;
+        }
+#endif
         execute(lane);
         __atomic_store_n(&service_state[lane],2,__ATOMIC_RELEASE);notify_owner();
         if(sceKernelSignalSema(dones[lane],1)<0)abort();
@@ -1230,6 +1348,12 @@ static void *worker(void *arg)
     for(;;) {
         wait_sem(&wakes[lane]);
         if(__atomic_load_n(&stopping,__ATOMIC_ACQUIRE))return NULL;
+#if XV_NATIVE_VISIBILITY_JOBS
+        if(__atomic_load_n(&visibility_running,__ATOMIC_ACQUIRE)) {
+            visibility_execute(lane,lane);if(sem_post(&dones[lane]))abort();
+            continue;
+        }
+#endif
         execute(lane);
         __atomic_store_n(&service_state[lane],2,__ATOMIC_RELEASE);notify_owner();
         sem_post(&dones[lane]);
@@ -1447,6 +1571,13 @@ void xv_object_jobs_report(unsigned frames)
     /* Called with the renderer's frame window, not every 60 simulation passes.
      * Reporting must never dispatch callbacks or reset live worker counters. */
     if(initialized!=1||owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))return;
+#if XV_NATIVE_VISIBILITY_JOBS
+    if(census_is_owner()) {
+        XK_LOG("[visibility-jobs] %u frames batches %u lanes %u/%u/%u items; copied native data, joined before publication\n",
+            frames,visibility_lane[2].calls,visibility_lane[0].items,visibility_lane[1].items,visibility_lane[2].items);
+        memset(visibility_lane,0,sizeof visibility_lane);
+    }
+#endif
 #if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING
     pass_timing_report(frames);
 #endif

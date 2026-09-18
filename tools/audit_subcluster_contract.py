@@ -18,6 +18,10 @@ def audit(path):
         ins=list(Decoder(32,raw,ip=pc));assert not any(i.is_invalid for i in ins) and ins[-1].next_ip==pc+size
         decoded[pc]=ins
     caller={i.ip:i for i in decoded[0x52e10]}
+    caller_backwards=[[hex(i.ip),hex(i.near_branch_target)] for i in decoded[0x52e10]
+                      if i.op0_kind==OpKind.NEAR_BRANCH32 and i.near_branch_target<i.ip]
+    assert caller_backwards==[['0x52f17','0x52ed7'],['0x52f2a','0x52ea0'],['0x52f40','0x52e30']]
+    assert [i.near_branch_target for i in decoded[0x52e10] if i.mnemonic==Mnemonic.CALL]==[0x5c300]
     assert caller[0x52ebf].mnemonic==Mnemonic.PUSH and caller[0x52ebf].immediate8==0
     call=caller[0x52ec1];assert call.mnemonic==Mnemonic.CALL and call.near_branch_target==0x5c300
     test=caller[0x52ec6];assert test.mnemonic==Mnemonic.TEST and test.op0_register==Register.AX and test.op1_register==Register.AX
@@ -34,6 +38,8 @@ def audit(path):
     assert backwards==[['0x5c4ea','0x5c3f2'],['0x5c5c1','0x5c530'],['0x5c5ca','0x5c507']]
     proof.update(leaf='0x5c300',caller='0x52e10',call='0x52ec1',stack_only_write_sites=writes,
                  backward_branches=backwards,extra_reverse_corner_argument=0,
+                 caller_backward_branches=caller_backwards,
+                 conservative_whole_pass_budget='8 * captured_subclusters + captured_surface_references + visible_clusters',
                  inputs=dict(side_planes_offset='0x78',side_plane_count=4,enclosing_bounds_offset='0x128',box_bytes=24),
                  observations=['Leaf writes only to its stack in the decoded original; aliases must still be excluded.',
                    'Broad AABB rejection deducts zero loop backedges; otherwise the selected path deducts seven.',
