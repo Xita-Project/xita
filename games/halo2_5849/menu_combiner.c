@@ -21,11 +21,16 @@ void menu_combiner_decode(const h2_command_state *s, menu_combiner *cb)
     cb->final_efg = s->setup[0x28C / 4];
     cb->final_factor0 = s->setup[0x1E20 / 4];
     cb->final_factor1 = s->setup[0x1E24 / 4];
-    menu_combiner_prepare(cb);
+    /* The stage count must be known before prepare() scans the stages: it used to be set
+     * afterwards, so tex_used and the unpacked constants covered no stage at all - only unit
+     * 0 and the final combiner's inputs. Menu programs referenced their texture in the final
+     * combiner and never showed it; the level's bump maps, lightmaps and cube maps are stage
+     * inputs, and those units were never bound. */
     uint32_t control = s->setup[0x1E60 / 4];
     cb->stages = control & 0xF;
     if (cb->stages > 8) cb->stages = 8;
     cb->mux_msb = (control & 0x100) != 0;
+    menu_combiner_prepare(cb);
 }
 
 static float sat(float x) { return x < 0.0f ? 0.0f : x > 1.0f ? 1.0f : x; }

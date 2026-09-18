@@ -83,6 +83,30 @@ static void test_final_combiner_uses_final_factors(void)
     assert(feq(out[0],1.0f) && feq(out[1],0.5f) && feq(out[2],0.25f));
 }
 
+
+static void test_decode_scans_every_stage(void)
+{
+    /* decode() must know the stage count before prepare() scans the stages: two stages,
+     * stage 0 reading t3 and stage 1 reading t2 (rgb) / t1 (alpha), final combiner on r0
+     * only -> tex_used covers units 0 (always), 1, 2 and 3, and stage 1's constant is
+     * unpacked. With the count set after the scan, only unit 0 was ever bound. */
+    h2_command_state s; memset(&s, 0, sizeof s);
+    s.setup[0x1E60 / 4] = 2;                                  /* SET_COMBINER_CONTROL: 2 stages */
+    s.setup[(0xAC0 + 0) / 4] = (0x0Bu << 24) | (0x20u << 16); /* stage 0 rgb: A=t3, B=1 */
+    s.setup[(0xAC0 + 4) / 4] = (0x0Au << 24) | (0x0Cu << 16); /* stage 1 rgb: A=t2, B=r0 */
+    s.setup[(0x260 + 4) / 4] = (0x09u << 24) | (0x20u << 16); /* stage 1 alpha: A=t1 */
+    s.setup[(0xA60 + 4) / 4] = 0x80402010u;                    /* stage 1 factor0 */
+    s.setup[0x288 / 4] = 0x0000000C;                          /* final D = r0 */
+    menu_combiner cb;
+    menu_combiner_decode(&s, &cb);
+    assert(cb.stages == 2 && cb.prepared);
+    assert(cb.tex_used == 0xF);
+    assert(feq(cb.c0f[1][0], 0x40 / 255.0f) && feq(cb.c0f[1][1], 0x20 / 255.0f) && feq(cb.c0f[1][2], 0x10 / 255.0f) && feq(cb.c0f[1][3], 0x80 / 255.0f));
+    /* One stage that reads nothing but v0: only unit 0 (r0.a seed). */
+    s.setup[0x1E60 / 4] = 1; s.setup[(0xAC0 + 0) / 4] = (0x04u << 24) | (0x20u << 16);
+    menu_combiner_decode(&s, &cb);
+    assert(cb.stages == 1 && cb.tex_used == 0x1);
+}
 int main(void)
 {
     test_final_combiner_uses_final_factors();
@@ -90,6 +114,7 @@ int main(void)
     test_diffuse_times_tex();
     test_dot_product();
     test_final_lerp();
+    test_decode_scans_every_stage();
     printf("menu_combiner_test: all assertions passed\n");
     return 0;
 }

@@ -333,7 +333,8 @@ static int locate(const h2_command_state *s, const h2_kelvin_clear *c, unsigned 
         L->pal_mask = pal_len - 1;
     }
     L->key[0] = s->setup[base / 4]; L->key[1] = fmt; L->key[2] = s->setup[(base + 0x10) / 4];
-    L->key[3] = s->setup[(base + 0x1C) / 4]; L->key[4] = s->setup[(base + 0x20) / 4]; L->key[5] = s->dma[selector];
+    L->key[3] = s->setup[(base + 0x1C) / 4]; L->key[5] = s->dma[selector];
+    L->key[4] = d.kind == PF_P8 ? s->setup[(base + 0x20) / 4] : 0;   /* the palette register only matters to P8 (the game rotates it) */
     return 1;
 #undef FAIL
 }
@@ -429,7 +430,9 @@ static uint64_t content_hash(const uint8_t *p, size_t n, uint64_t h)
 typedef struct { uint32_t key[6]; uint64_t hash; uint32_t *texels; uint32_t w, h, bytes, levels, ntexels; int linear, cube; uint64_t used;
                  int tracked; uint32_t page_lo, page_hi, verified; unsigned clean_hits;
                  uint8_t *snapshot; uint32_t snapshot_bytes; } tex_entry;   /* snapshot: diagnostic copy of the source */
-enum { TEX_CACHE_ENTRIES = 64, TEX_CACHE_BUDGET = 40u << 20 };
+/* A Halo 2 level binds hundreds of distinct textures (base, bump, lightmap, cube per
+ * draw); 64 entries thrashed (6780 misses per 60 flips, 10 s of decoding). */
+enum { TEX_CACHE_ENTRIES = 512, TEX_CACHE_BUDGET = 64u << 20 };   /* within the 128 MB newlib heap */
 static tex_entry g_entries[TEX_CACHE_ENTRIES];
 static size_t g_cache_bytes;
 static uint64_t g_hits, g_misses, g_hash_bytes, g_hash_skipped;
@@ -504,7 +507,11 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
         if (!victim) return NULL;
         if (victim->texels) { g_cache_bytes -= victim->bytes; free(victim->texels); victim->texels = NULL; }
         uint32_t *px = malloc(bytes);
-        if (!px) return NULL;
+        if (!px) {                                   /* heap exhausted: the draw goes out with the unit unbound */
+            static unsigned oom_logged;
+            if (xv_logf && oom_logged++ < 8) xv_logf("[h2/tex] out of memory for %u bytes (cache %zu bytes, %u entries)\n", bytes, g_cache_bytes, TEX_CACHE_ENTRIES);
+            return NULL;
+        }
         decode(&L, px);
         note(L.code, O_OK); trace(s, unit, L.code, O_OK, &L, serial, px);
         memcpy(victim->key, L.key, sizeof L.key);

@@ -14,8 +14,8 @@ extern void h2_menu_dump_target(const uint8_t *target, uint32_t W, uint32_t H, u
 
 #define GCHECK(x) do { int err_ = (x); if (err_ < 0) { xv_logf("[h2/menu-gxm] FAIL %s = %08X\n", #x, err_); return 0; } } while (0)
 
-enum { W = 640, H = 480, MAX_TARGETS = 4, MAX_VS = 64, MAX_FS = 128, MAX_TEX = 96,
-       VERTEX_RING = 12u << 20, INDEX_RING = 2u << 20, TEX_POOL = 48u << 20, TEX_CAP = 1408 * 1024 };   /* 1024^2 + its mip chain */
+enum { W = 640, H = 480, MAX_TARGETS = 4, MAX_VS = 64, MAX_FS = 128, MAX_TEX = 512,   /* a level binds hundreds of textures */
+       VERTEX_RING = 12u << 20, INDEX_RING = 2u << 20, TEX_POOL = 96u << 20, TEX_CAP = 1408 * 1024 };   /* 1024^2 + its mip chain */
 
 /* ---- programs ---------------------------------------------------------------- */
 typedef struct { uint64_t hash; const SceGxmProgram *gxp; SceGxmShaderPatcherId id; SceGxmVertexProgram *prog;
@@ -687,6 +687,27 @@ static int render_body(void *opaque, const h2_menu_request *r)
     for (unsigned u = 0; u < 4; ++u) { scale[u][0] = scale[u][1] = 1.0f; scale[u][2] = scale[u][3] = 0.0f;
         if (tex[u] && tex[u]->linear) { scale[u][0] = 1.0f / (float)tex[u]->w; scale[u][1] = 1.0f / (float)tex[u]->h; } }
     if (fs->psc) GCHECK(sceGxmSetUniformDataF(fu, fs->psc, 0, 18 * 4, &psc[0][0]));
+    {   /* XV_DRAW_TRACE=<fragment hash prefix>: the inputs of the first 8 matching draws */
+        static int want = -1; static char prefix[24]; static unsigned traced;
+        if (want < 0) { const char *e = getenv("XV_DRAW_TRACE"); want = e && *e; if (want) strncpy(prefix, e, sizeof prefix - 1); }
+        if (want && traced < 8) {
+            char hs[24]; snprintf(hs, sizeof hs, "%016llx", (unsigned long long)fs->hash);
+            if (!strncmp(hs, prefix, strlen(prefix))) {
+                ++traced;
+                xv_logf("[h2/draw-trace] serial=%llu vs=%016llx ps=%s verts=%u target=%08X\n", (unsigned long long)g_serial, (unsigned long long)vs->hash, hs, n, t->color_offset);
+                for (unsigned u = 0; u < 4; ++u) {
+                    unsigned base = 0x1B00 + u * 64;
+                    if (!tex[u]) { xv_logf("[h2/draw-trace]  unit%u: none used=%d sampler=%d fmt=%08X ctrl=%08X\n", u, !!(cb.tex_used & (1u << u)), fs->sampler[u], s->setup[(base + 4) / 4], s->setup[(base + 0xC) / 4]); continue; }
+                    uint64_t a = 0, r = 0, g = 0, b = 0, cnt = 0; uint32_t lvl0 = tex[u]->w * tex[u]->h;
+                    for (uint32_t i = 0; i < lvl0; i += 7, ++cnt) { uint32_t p = tex[u]->mem[i]; a += p >> 24; r += (p >> 16) & 255; g += (p >> 8) & 255; b += p & 255; }
+                    xv_logf("[h2/draw-trace]  unit%u: offset=%08X fmt=%08X %ux%u levels=%u cube=%d linear=%d mean=%02llX%02llX%02llX%02llX\n", u, s->setup[base / 4], s->setup[(base + 4) / 4],
+                            tex[u]->w, tex[u]->h, tex[u]->levels, tex[u]->cube, tex[u]->linear, a / cnt, r / cnt, g / cnt, b / cnt);
+                }
+                for (unsigned i = 0; i < 8; ++i) xv_logf("[h2/draw-trace]  stage%u c0=%08X c1=%08X\n", i, cb.factor0[i], cb.factor1[i]);
+                xv_logf("[h2/draw-trace]  final c0=%08X c1=%08X\n", cb.final_factor0, cb.final_factor1);
+            }
+        }
+    }
     if (fs->fog) GCHECK(sceGxmSetUniformDataF(fu, fs->fog, 0, 4, fog));
     if (fs->atest) GCHECK(sceGxmSetUniformDataF(fu, fs->atest, 0, 4, atest));
     if (fs->texscale) GCHECK(sceGxmSetUniformDataF(fu, fs->texscale, 0, 16, &scale[0][0]));

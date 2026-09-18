@@ -34,7 +34,7 @@ extern int h2_dxt23_texture_snapshot_read(const h2_command_state *, const h2_kel
 extern int h2_dxt1_texture_read(const h2_command_state *, const h2_kelvin_clear *,
                                  unsigned, h2_block_texture *) __attribute__((weak));
 
-unsigned int _newlib_heap_size_user = 48 * 1024 * 1024;
+unsigned int _newlib_heap_size_user = 128 * 1024 * 1024;   /* the decoded texture cache (64 MB) lives here */
 uint8_t *g_xram;
 volatile uint32_t xv_cur_fn;
 int xv_trace_enabled = 1, xv_trace_funcs = 1, xv_watch_n = -1;
