@@ -83,6 +83,14 @@ int xk_audio_init(void)
 int  xk_audio_available(void) { return g_available; }
 void xk_audio_lock(void)   { xk_os_audio_mutex_lock(); }
 void xk_audio_unlock(void) { xk_os_audio_mutex_unlock(); }
+uint32_t xk_audio_free_voices(void)
+{
+    uint32_t free_count = 0;
+    xk_audio_lock();
+    for (unsigned i = 0; i < XA_MAX_VOICES; ++i) free_count += !g_v[i].used;
+    xk_audio_unlock();
+    return free_count;
+}
 
 int xk_audio_voice_new(int kind, uint32_t wfx_guest)
 {
@@ -226,6 +234,12 @@ void xk_audio_mix(int16_t *out, int frames)
             break;                                   /* starved (stream) or finished (buffer): rest of this grain silent */
         }
     }
+    /* Optional title-specific gain stage on unsaturated sums, under the mixer
+     * lock. The default build has no additional call or altered sample path. */
+#ifdef XK_AUDIO_OUTPUT_FILTER
+    extern void XK_AUDIO_OUTPUT_FILTER(int32_t *, int);
+    XK_AUDIO_OUTPUT_FILTER(acc, frames);
+#endif
     xk_audio_unlock();
     g_last_mix_us = xk_os_monotonic_us();
     for (int k = 0; k < frames * 2; ++k) { int32_t s = acc[k]; out[k] = (int16_t)(s > 32767 ? 32767 : s < -32768 ? -32768 : s); }

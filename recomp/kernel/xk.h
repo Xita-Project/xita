@@ -164,11 +164,16 @@ uint32_t xk_mem_arena_size(void);                  /* bytes to allocate for g_xr
 uint32_t xk_phys_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t highest, int top_down);
 int      xk_phys_free(uint32_t pa);
 uint32_t xk_mem_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t highest, int top_down);  /* 0 on failure */
+void xk_mem_map_alias(uint32_t va, uint32_t arena_off);   /* map a virtual page onto an arena offset (mirror/unmap) */
+uint32_t xk_mem_alloc_high(uint32_t size, uint32_t align);   /* kernel-owned guest object, placed above the game heap */
 int      xk_mem_free(uint32_t addr);
 uint32_t xk_mem_size(uint32_t addr);
 uint32_t xk_mem_available(void);
 uint32_t xk_kalloc(uint32_t size);        /* kernel-side small objects living in guest RAM (KTHREAD, KPCR, ...) */
 void     xk_kfree(uint32_t addr);
+/* Optional fixed kernel-arena reservations, 64-byte aligned; 0 success. */
+int      xk_kreserve_fixed(uint32_t addr, uint32_t size);
+int      xk_krelease_fixed(uint32_t addr, uint32_t size);
 
 /* ---- time ----------------------------------------------------------------------------- */
 uint64_t xk_time_100ns(void);             /* system time (since 1601) */
@@ -176,6 +181,8 @@ uint64_t xk_uptime_100ns(void);           /* interrupt time (since boot) */
 uint32_t xk_tick_count(void);             /* ms since boot */
 
 /* ---- files / paths ----------------------------------------------------------------------- */
+void     xk_file_set_ce_adapter_enabled(int enabled); /* Legacy CE read recovery is enabled by default. */
+void     xk_file_set_balanced_lifetime(int enabled); /* Default off; set before opening title files. */
 char    *xk_path_translate(const char *xbox_path, uint32_t root_handle);   /* -> malloc'd host path or NULL */
 void     xk_path_add_link(const char *name, const char *target);           /* \??\D: -> \Device\Cdrom0 */
 void     xk_path_mount(const char *device, const char *host_dir);          /* \Device\Cdrom0 -> ./haloce */

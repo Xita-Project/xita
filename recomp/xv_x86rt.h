@@ -16,7 +16,67 @@ extern "C" {
  * its own pages because Halo places physical allocations at the same numbers (see kernel/xk_mem.c). */
 extern uint8_t  *g_xram;
 extern uint32_t *g_xpt;
+#ifdef XV_CHECK_GUEST_ADDRESS
+/* Optional diagnostic target policy, invoked before translating a guest
+ * pointer. This is not a memory-range validator: callers retain their normal
+ * width/page handling, and image-constant accesses use the pinned image path.
+ * Ordinary builds retain the original macro with no callback overhead. */
+void xv_check_guest_address(uint32_t address);
+/* The strict policy only ever acts on two address classes: the MMIO apertures at
+ * 0xFD000000 and above, and pages that translate to the arena's trash page (the
+ * unmapped-stack window). Both are decided here from values already in hand, so the
+ * common access costs two compares; the policy function itself is unchanged and
+ * still makes every decision on the slow path. */
+extern uint32_t xv_trash_off;
+#define XV_ADDRESS_NEEDS_POLICY(address, off) ((off) == xv_trash_off || (address) >= 0xFD000000u)
+/* Write-epoch tracking (checked builds): every guest access stamps its arena page
+ * with the current epoch (loads too - conservative), host writers stamp through
+ * xv_mark_written, and the epoch advances once per presented frame. A consumer
+ * that caches derived data (the texture cache) can prove "no write since my last
+ * full read" from the stamps instead of re-reading megabytes every draw. */
+#define XV_PAGE_EPOCH_ENTRIES 65536u          /* arena pages covered (256 MB); checked at bind */
+extern uint32_t xv_page_epoch[XV_PAGE_EPOCH_ENTRIES];
+extern uint32_t xv_page_count, xv_write_epoch;
+void xv_mark_written(const void *host, uint32_t bytes);
+/* Diagnostic write watch on an arena-offset range (XV_WATCH_PHYS=hex:hexlen). */
+extern uint32_t xv_watch_off, xv_watch_len;
+void xv_watch_store(uint32_t address, uint32_t off);
+static inline void *x_guest_checked_pointer(uint32_t address)
+{
+    uint32_t off = g_xpt[address >> 12];
+    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) { xv_check_guest_address(address); off = g_xpt[address >> 12]; }
+    return g_xram + off + (address & 0xFFFu);
+}
+/* Stores only: the recompiler emits X_W* for memory lvalues, X_M* for loads. */
+static inline void *x_guest_checked_pointer_write(uint32_t address)
+{
+    uint32_t off = g_xpt[address >> 12];
+    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) { xv_check_guest_address(address); off = g_xpt[address >> 12]; }
+    xv_page_epoch[off >> 12] = xv_write_epoch;
+    if ((off + (address & 0xFFFu)) - xv_watch_off < xv_watch_len) xv_watch_store(address, off + (address & 0xFFFu));
+    return g_xram + off + (address & 0xFFFu);
+}
+/* Host writes of n bytes through one translated pointer (the callers rely on
+ * contiguous mapping of that span): every page of the span goes through the address
+ * policy (a guarded colour-buffer page must be landed before it is overwritten, even
+ * when the span starts outside it) and is stamped. */
+static inline void *x_guest_checked_span_write(uint32_t address, uint32_t bytes)
+{
+    void *pointer = x_guest_checked_pointer_write(address);
+    if (bytes > 1)
+        for (uint32_t page = (address | 0xFFFu) + 1u; page - address < bytes - 1u && page > address; page += 0x1000u)
+            (void)x_guest_checked_pointer_write(page);
+    xv_mark_written(pointer, bytes);
+    return pointer;
+}
+#define X_G(a)      x_guest_checked_pointer((uint32_t)(a))
+#define X_GW(a)     x_guest_checked_pointer_write((uint32_t)(a))
+#define X_GWN(a, n) x_guest_checked_span_write((uint32_t)(a), (uint32_t)(n))
+#else
 #define X_G(a)      ((void *)(g_xram + g_xpt[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))
+#define X_GW(a)     X_G(a)
+#define X_GWN(a, n) X_G(a)
+#endif
 /* Host copies must translate every guest page, including separately committed pages. */
 void x_guest_read_pages(void *dst, uint32_t a, size_t size);
 void x_guest_write_pages(uint32_t a, const void *src, size_t size);
@@ -29,7 +89,7 @@ static inline __attribute__((always_inline)) void x_guest_read(void *dst, uint32
 }
 static inline __attribute__((always_inline)) void x_guest_write(uint32_t a, const void *src, size_t size)
 {
-    if (size <= 4096u - (a & 0xFFFu)) { memcpy(X_G(a), src, size); return; }
+    if (size <= 4096u - (a & 0xFFFu)) { memcpy(X_GW(a), src, size); return; }
     x_guest_write_pages(a, src, size);
 }
 /* x86 code reads and writes at any alignment.  On the Vita's Cortex-A9 plain ldr/str tolerate that, but
@@ -44,6 +104,12 @@ typedef float    __attribute__((aligned(1), may_alias)) xf32_u;
 #define X_M32(a)    (*(xu32_u   *)X_G(a))
 #define X_M64(a)    (*(xu64_u   *)X_G(a))
 #define X_MF32(a)   (*(xf32_u   *)X_G(a))
+/* Memory lvalues (stores): identical access, plus the page write stamp in checked builds. */
+#define X_W8(a)     (*(uint8_t  *)X_GW(a))
+#define X_W16(a)    (*(xu16_u   *)X_GW(a))
+#define X_W32(a)    (*(xu32_u   *)X_GW(a))
+#define X_W64(a)    (*(xu64_u   *)X_GW(a))
+#define X_WF32(a)   (*(xf32_u   *)X_GW(a))
 /* Fast path for constant addresses in the XBE image: the image is copied once into the arena at a fixed
  * offset (arena base XRAM_SIZE, virtual base g_image_lo) and is never remapped, so its host pointer is a
  * compile-time-constant-plus-base with no page-table load.  g_img_base = g_xram + XRAM_SIZE - g_image_lo,
@@ -74,13 +140,16 @@ typedef struct xctx {
     int32_t  preempt;              /* back-edge budget; xv_preempt() refills and yields (spin-loop starvation fix) */
     uint32_t eip_hint;
     void    *fiber;                /* owning xk fiber */
+#if defined(XV_EFLAGS_ID) && XV_EFLAGS_ID
+    uint32_t id_flag;              /* EFLAGS.ID, independent of lazy arithmetic flags */
+#endif
 } xctx;
 
 #define X_R16(i)    (*(uint16_t *)&c->r[i])
 #define X_R8L(i)    (*(uint8_t  *)&c->r[i])
 #define X_R8H(i)    (*((uint8_t *)&c->r[i] + 1))
 
-#define X_PUSH32(v) do { uint32_t v__ = (uint32_t)(v); c->r[4] -= 4; X_M32(c->r[4]) = v__; } while (0)
+#define X_PUSH32(v) do { uint32_t v__ = (uint32_t)(v); c->r[4] -= 4; X_W32(c->r[4]) = v__; } while (0)
 static inline uint32_t x_pop32(xctx *c) { uint32_t v = X_M32(c->r[4]); c->r[4] += 4; return v; }
 #define X_POP32()   x_pop32(c)
 /* HLE/kernel implementations: stack argument n (0-based) and stdcall return */
@@ -139,10 +208,17 @@ static inline uint32_t XF_O(const xctx *c) {
     }
 }
 static inline uint32_t xf_eflags(xctx *c) {
-    return 0x202u | XF_C(c) | (XF_P(c) << 2) | (XF_Z(c) << 6) | (XF_S(c) << 7) | (XF_O(c) << 11) | (c->df << 10);
+    uint32_t value = 0x202u | XF_C(c) | (XF_P(c) << 2) | (XF_Z(c) << 6) | (XF_S(c) << 7) | (XF_O(c) << 11) | (c->df << 10);
+#if defined(XV_EFLAGS_ID) && XV_EFLAGS_ID
+    value |= c->id_flag & 0x200000u;
+#endif
+    return value;
 }
 static inline void xf_set_eflags(xctx *c, uint32_t v) {
     c->f_kind = XK_EXPLICIT; c->f_res = v; c->f_bits = 32; c->f_cf_override = 0; c->f_of_override = 0; c->df = (v >> 10) & 1u;
+#if defined(XV_EFLAGS_ID) && XV_EFLAGS_ID
+    c->id_flag = v & 0x200000u;
+#endif
 }
 
 /* ---- shifts / rotates ------------------------------------------------------------- */
@@ -313,11 +389,203 @@ static inline void x_comiss(xctx *c, float a, float b) {
 }
 static inline void x_bitops128(xctx *c, float *d, const float *s, char op) { (void)c;
     uint32_t a[4], b[4]; memcpy(a, d, 16); memcpy(b, s, 16);
-    for (int i = 0; i < 4; ++i) a[i] = op == '^' ? a[i] ^ b[i] : op == '&' ? a[i] & b[i] : a[i] | b[i];
+    for (int i = 0; i < 4; ++i) a[i] = op == '^' ? a[i] ^ b[i] : op == '&' ? a[i] & b[i] : op == 'n' ? (~a[i]) & b[i] : a[i] | b[i];
     memcpy(d, a, 16); }
 static inline void x_shufps(xctx *c, float *d, const float *s, unsigned imm) { (void)c;
     float t[4] = { d[imm & 3], d[(imm >> 2) & 3], s[(imm >> 4) & 3], s[(imm >> 6) & 3] }; memcpy(d, t, 16); }
 static inline void x_unpcklps(xctx *c, float *d, const float *s) { (void)c; float t[4] = { d[0], s[0], d[1], s[1] }; memcpy(d, t, 16); }
+static inline void x_unpckhps(xctx *c, float *d, const float *s) { (void)c; float t[4] = { d[2], s[2], d[3], s[3] }; memcpy(d, t, 16); }
+
+/* Legacy CMPSS: only the low scalar participates, including in exceptions.
+ * Any NaN takes priority over a denormal in the other operand. Predicates
+ * 1/2/5/6 signal for QNaNs; every predicate signals for SNaNs. */
+static inline uint32_t x_cmpss_bits(uint32_t a, uint32_t b, unsigned predicate,
+                                   uint32_t *status)
+{
+    uint32_t aa = a & 0x7FFFFFFFu, bb = b & 0x7FFFFFFFu;
+    int unordered = aa > 0x7F800000u || bb > 0x7F800000u;
+    int equal = 0, less = 0;
+    if (unordered) {
+        if ((aa > 0x7F800000u && !(a & 0x00400000u)) ||
+            (bb > 0x7F800000u && !(b & 0x00400000u)) ||
+            predicate == 1 || predicate == 2 || predicate == 5 || predicate == 6)
+            *status |= 1u;
+    } else {
+        if ((aa && aa < 0x00800000u) || (bb && bb < 0x00800000u)) *status |= 0x80u;
+        equal = a == b || !(aa | bb);
+        less = !equal && (((a ^ b) >> 31) ? (int)(a >> 31) : (a >> 31) ? a > b : a < b);
+    }
+    int result;
+    switch (predicate) {
+    case 0: result = equal; break;
+    case 1: result = less; break;
+    case 2: result = less || equal; break;
+    case 3: result = unordered; break;
+    case 4: result = !equal; break;
+    case 5: result = !less; break;
+    case 6: result = !(less || equal); break;
+    case 7: result = !unordered; break;
+    default: return 0; /* Reserved predicate: rejected by the public helper. */
+    }
+    return 0u - (uint32_t)result;
+}
+static inline int x_cmpss(float *destination, uint32_t source, unsigned predicate)
+{
+    if (predicate > 7) return 0; /* Reserved legacy encodings remain unsupported. */
+#if defined(__arm__) && defined(__VFP_FP__)
+    uint32_t fpscr, left, status = 0;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr) :: "memory");
+    if (fpscr & 0x03379F00u) return 0; /* Same supported controls as MINPS/MAXPS. */
+    memcpy(&left, destination, 4);
+    uint32_t result = x_cmpss_bits(left, source, predicate, &status);
+    fpscr |= status;
+    __asm__ volatile("vmsr fpscr, %0" :: "r"(fpscr) : "memory");
+    memcpy(destination, &result, 4);
+    return 1;
+#elif defined(__SSE__)
+    typedef float vector4 __attribute__((vector_size(16)));
+    vector4 a, b = {0, 0, 0, 0};
+    memcpy(&a, destination, 16); memcpy(&b, &source, 4);
+#define X_CMPSS_CASE(N) case N: __asm__ volatile("cmpss $" #N ",%1,%0" : "+x"(a) : "x"(b) : "memory"); break
+    switch (predicate) {
+        X_CMPSS_CASE(0); X_CMPSS_CASE(1); X_CMPSS_CASE(2); X_CMPSS_CASE(3);
+        X_CMPSS_CASE(4); X_CMPSS_CASE(5); X_CMPSS_CASE(6); X_CMPSS_CASE(7);
+    }
+#undef X_CMPSS_CASE
+    memcpy(destination, &a, 4);
+    return 1;
+#else
+    (void)destination; (void)source;
+    return 0;
+#endif
+}
+/* CMPPS: the scalar compare above applied to all four lanes (same predicate set, same
+ * legacy exception rules per lane, same supported FP controls on ARM). Halo 2's level
+ * loader uses cmpltps + movmskps for bounding tests (0x2FD2F9). */
+static inline int x_cmpps(float *destination, const float *source, unsigned predicate)
+{
+    if (predicate > 7) return 0;
+#if defined(__arm__) && defined(__VFP_FP__)
+    uint32_t fpscr, left[4], right[4], result[4], status = 0;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr) :: "memory");
+    if (fpscr & 0x03379F00u) return 0;
+    memcpy(left, destination, 16); memcpy(right, source, 16);
+    for (unsigned i = 0; i < 4; ++i) result[i] = x_cmpss_bits(left[i], right[i], predicate, &status);
+    fpscr |= status;
+    __asm__ volatile("vmsr fpscr, %0" :: "r"(fpscr) : "memory");
+    memcpy(destination, result, 16);
+    return 1;
+#elif defined(__SSE__)
+    typedef float vector4 __attribute__((vector_size(16)));
+    vector4 a, b;
+    memcpy(&a, destination, 16); memcpy(&b, source, 16);
+#define X_CMPPS_CASE(N) case N: __asm__ volatile("cmpps $" #N ",%1,%0" : "+x"(a) : "x"(b) : "memory"); break
+    switch (predicate) {
+        X_CMPPS_CASE(0); X_CMPPS_CASE(1); X_CMPPS_CASE(2); X_CMPPS_CASE(3);
+        X_CMPPS_CASE(4); X_CMPPS_CASE(5); X_CMPPS_CASE(6); X_CMPPS_CASE(7);
+    }
+#undef X_CMPPS_CASE
+    memcpy(destination, &a, 16);
+    return 1;
+#else
+    uint32_t left[4], right[4], result[4], status = 0;
+    memcpy(left, destination, 16); memcpy(right, source, 16);
+    for (unsigned i = 0; i < 4; ++i) result[i] = x_cmpss_bits(left[i], right[i], predicate, &status);
+    memcpy(destination, result, 16);
+    return 1;
+#endif
+}
+static inline uint32_t x_movmskps(const float *source)
+{
+    uint32_t bits[4]; memcpy(bits, source, 16);
+    return (bits[0] >> 31) | ((bits[1] >> 30) & 2u) |
+           ((bits[2] >> 29) & 4u) | ((bits[3] >> 28) & 8u);
+}
+
+/* Legacy MINPS/MAXPS select source two for NaNs and equal signed zeros.
+ * Return its bits unchanged, including an SNaN payload. For a lane containing
+ * a NaN, invalid has priority over denormal; other lanes still accumulate
+ * their own status. Status uses ARM FPSCR IOC/IDC bits (0/7). */
+static inline uint32_t x_minmax_bits(uint32_t a, uint32_t b, int maximum,
+                                    uint32_t *status)
+{
+    uint32_t aa = a & 0x7FFFFFFFu, bb = b & 0x7FFFFFFFu;
+    if (aa > 0x7F800000u || bb > 0x7F800000u) {
+        *status |= 1u;
+        return b;
+    }
+    if ((aa && aa < 0x00800000u) || (bb && bb < 0x00800000u)) *status |= 0x80u;
+    if (!(aa | bb) || a == b) return b;
+    int less = ((a ^ b) >> 31) ? (int)(a >> 31) : (a >> 31) ? a > b : a < b;
+    return (maximum ? !less : less) ? a : b;
+}
+static inline int x_minmaxps(float *destination, const float *source, int maximum)
+{
+#if defined(__arm__) && defined(__VFP_FP__)
+    uint32_t fpscr;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr) :: "memory");
+    /* No emulation of DN/FZ, vector Len/Stride or unmasked exceptions.
+     * All rounding modes are valid: this instruction only selects bits.
+     * H2's existing LDMXCSR adapter already enforces supported controls. */
+    if (fpscr & 0x03379F00u) return 0;
+    uint32_t a[4], b[4], status = 0;
+    memcpy(a, destination, 16); memcpy(b, source, 16);
+    for (unsigned lane = 0; lane < 4; ++lane)
+        a[lane] = x_minmax_bits(a[lane], b[lane], maximum, &status);
+    fpscr |= status;
+    __asm__ volatile("vmsr fpscr, %0" :: "r"(fpscr) : "memory");
+    memcpy(destination, a, 16);
+    return 1;
+#elif defined(__SSE__)
+    typedef float vector4 __attribute__((vector_size(16)));
+    vector4 a, b; memcpy(&a, destination, 16); memcpy(&b, source, 16);
+    if (maximum) __asm__ volatile("maxps %1,%0" : "+x"(a) : "x"(b) : "memory");
+    else __asm__ volatile("minps %1,%0" : "+x"(a) : "x"(b) : "memory");
+    memcpy(destination, &a, 16);
+    return 1;
+#else
+    (void)destination; (void)source; (void)maximum;
+    return 0;
+#endif
+}
+
+/* Legacy RSQRTPS: no FP exceptions and independent of the host rounding mode.
+ * Integer Q30 Newton steps avoid modifying FPSCR/MXCSR even for signaling NaNs.
+ * This meets Intel's relative-error bound, not a particular CPU's estimate bits.
+ * Seeds are round(2^30 / sqrt(1 + (index + 0.5)/16)), not game data. */
+static inline uint32_t x_rsqrt_bits(uint32_t bits)
+{
+    uint32_t exponent = (bits >> 23) & 255u, fraction = bits & 0x7FFFFFu;
+    if (!exponent) return (bits & 0x80000000u) | 0x7F800000u;
+    if (exponent == 255u && fraction) return bits | 0x00400000u;
+    if (bits & 0x80000000u) return 0xFFC00000u;
+    if (exponent == 255u) return 0;
+    static const uint32_t seeds[16] = {
+        1057347856u, 1026693558u, 998559613u, 972618566u,
+        948599586u, 926276469u, 905458609u, 885984104u,
+        867714429u, 850530263u, 834328203u, 819018128u,
+        804521086u, 790767575u, 777696137u, 765252196u
+    };
+    uint64_t m = (uint64_t)(fraction | 0x800000u) << 7;
+    uint64_t y = seeds[fraction >> 19];
+    for (unsigned step = 0; step < 2; ++step) {
+        uint64_t yy = (y * y) >> 30;
+        y = (y * ((3ull << 30) - ((m * yy) >> 30))) >> 31;
+    }
+    int e = (int)exponent - 127;
+    unsigned odd = (unsigned)(e + 126) & 1u;
+    if (odd) y = (y * 759250125u) >> 30; /* round(2^30 / sqrt(2)) */
+    unsigned output_exponent = (unsigned)(126 - (e - (int)odd) / 2);
+    uint32_t significand = (uint32_t)((y + 32u) >> 6);
+    if (significand == 0x1000000u) { significand >>= 1; ++output_exponent; }
+    return (output_exponent << 23) | (significand & 0x7FFFFFu);
+}
+static inline void x_rsqrtps(float *destination, const float *source)
+{
+    uint32_t bits[4]; memcpy(bits, source, sizeof bits);
+    for (unsigned lane = 0; lane < 4; ++lane) bits[lane] = x_rsqrt_bits(bits[lane]);
+    memcpy(destination, bits, sizeof bits);
+}
 
 
 /* ---- MMX ------------------------------------------------------------------------------ */

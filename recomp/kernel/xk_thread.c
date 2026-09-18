@@ -61,10 +61,10 @@ static xk_obj *guest_obj(uint32_t g, xk_objtype t)
 static void sync_guest(xk_obj *o)   /* mirror SignalState into the guest header for code that peeks at it */
 {
     if (!o->guest) return;
-    if (o->type == XO_EVENT) X_M32(o->guest + 4) = o->u.event.signaled;
-    else if (o->type == XO_SEMAPHORE) X_M32(o->guest + 4) = o->u.sem.count;
-    else if (o->type == XO_MUTANT) X_M32(o->guest + 4) = o->u.mutant.owner ? 0 : 1;
-    else if (o->type == XO_TIMER) X_M32(o->guest + 4) = o->u.timer.signaled;
+    if (o->type == XO_EVENT) X_W32(o->guest + 4) = o->u.event.signaled;
+    else if (o->type == XO_SEMAPHORE) X_W32(o->guest + 4) = o->u.sem.count;
+    else if (o->type == XO_MUTANT) X_W32(o->guest + 4) = o->u.mutant.owner ? 0 : 1;
+    else if (o->type == XO_TIMER) X_W32(o->guest + 4) = o->u.timer.signaled;
 }
 
 /* ---- time ------------------------------------------------------------------------------------ */
@@ -153,19 +153,19 @@ xk_thread *xk_thread_create(uint32_t stack_size, uint32_t tls_size, uint32_t sta
     if (!t->stack_alloc) { XK_LOG("thread: no memory for stack\n"); free(t); return NULL; }
     uint32_t top = t->stack_alloc + total;
     t->tls = top - tls_size;                              /* KTHREAD.TlsData: pointer slot, block follows */
-    X_M32(t->tls) = t->tls + 4;                           /* XAPI rewrites this; harmless for kernel-only threads */
+    X_W32(t->tls) = t->tls + 4;                           /* XAPI rewrites this; harmless for kernel-only threads */
     uint32_t slot = t->tls;
     t->stack_base = top; t->stack_limit = t->stack_alloc;
     /* KTHREAD + KPCR */
     t->kthread = xk_kalloc(XK_KTHREAD_SIZE); t->kpcr = xk_kalloc(XK_KPCR_SIZE);
-    X_M8(t->kthread) = 6; X_M8(t->kthread + 2) = XK_KTHREAD_SIZE / 4;   /* dispatcher header: ThreadObject */
-    X_M32(t->kthread + KTHREAD_TLSDATA) = t->tls;
-    X_M8(t->kthread + KTHREAD_PRIORITY) = 8; X_M8(t->kthread + KTHREAD_BASEPRIORITY) = 8;
-    X_M32(t->kthread + KTHREAD_UNIQUE_ID) = (uint32_t)t->id;
-    X_M32(t->kpcr + KPCR_TIB_EXCEPTIONLIST) = 0xFFFFFFFFu;
-    X_M32(t->kpcr + KPCR_TIB_STACKBASE) = t->stack_base; X_M32(t->kpcr + KPCR_TIB_STACKLIMIT) = t->stack_limit;
-    X_M32(t->kpcr + KPCR_TIB_SELF) = t->kpcr; X_M32(t->kpcr + KPCR_SELFPCR) = t->kpcr; X_M32(t->kpcr + KPCR_PRCB) = t->kpcr + KPCR_PRCBDATA;
-    X_M32(t->kpcr + KPCR_PRCBDATA) = t->kthread;
+    X_W8(t->kthread) = 6; X_W8(t->kthread + 2) = XK_KTHREAD_SIZE / 4;   /* dispatcher header: ThreadObject */
+    X_W32(t->kthread + KTHREAD_TLSDATA) = t->tls;
+    X_W8(t->kthread + KTHREAD_PRIORITY) = 8; X_W8(t->kthread + KTHREAD_BASEPRIORITY) = 8;
+    X_W32(t->kthread + KTHREAD_UNIQUE_ID) = (uint32_t)t->id;
+    X_W32(t->kpcr + KPCR_TIB_EXCEPTIONLIST) = 0xFFFFFFFFu;
+    X_W32(t->kpcr + KPCR_TIB_STACKBASE) = t->stack_base; X_W32(t->kpcr + KPCR_TIB_STACKLIMIT) = t->stack_limit;
+    X_W32(t->kpcr + KPCR_TIB_SELF) = t->kpcr; X_W32(t->kpcr + KPCR_SELFPCR) = t->kpcr; X_W32(t->kpcr + KPCR_PRCB) = t->kpcr + KPCR_PRCBDATA;
+    X_W32(t->kpcr + KPCR_PRCBDATA) = t->kthread;
     /* context */
     x87_init(&t->ctx); t->ctx.fs_base = t->kpcr; t->ctx.r[4] = (slot - 32) & ~15u;   /* initial esp: below the TLS reservation */ t->ctx.fiber = NULL;
     t->start_routine = start_routine; t->start_context = start_context; t->system_routine = system_routine;
@@ -184,7 +184,7 @@ void xk_thread_exit(uint32_t status)
     XV_LIGHT_CENSUS_CANCEL(&t->ctx,XV_LC_STOP);
     if (xv_phase_forget) xv_phase_forget(&t->ctx);
     XK_LOG("thread %d exited (%08X)\n", t->id, status);
-    t->state = 3; t->exit_status = status; X_M32(t->kthread + KTHREAD_EXITSTATUS) = status; X_M8(t->kthread + KTHREAD_SIGNALSTATE) = 1;   /* GetExitCodeThread: SignalState ? ExitStatus : STILL_ACTIVE */
+    t->state = 3; t->exit_status = status; X_W32(t->kthread + KTHREAD_EXITSTATUS) = status; X_W8(t->kthread + KTHREAD_SIGNALSTATE) = 1;   /* GetExitCodeThread: SignalState ? ExitStatus : STILL_ACTIVE */
     xk_signal_check();
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
     if(t==g_object_io_thread)xk_os_fiber_switch(g_object_io_return);
@@ -213,7 +213,11 @@ void xk_obj_consume(xk_obj *o, xk_thread *t)
     case XO_EVENT: if (!o->u.event.manual) o->u.event.signaled = 0; break;
     case XO_MUTANT: o->u.mutant.owner = t; o->u.mutant.count++; break;
     case XO_SEMAPHORE: o->u.sem.count--; break;
-    case XO_TIMER: if (o->u.timer.period == 0) o->u.timer.signaled = 0; else o->u.timer.signaled = 0; break;
+    case XO_TIMER: {
+        extern int xk_game_timer_consume(xk_obj *) __attribute__((weak));
+        if (!xk_game_timer_consume || !xk_game_timer_consume(o)) o->u.timer.signaled = 0;
+        break;
+    }
     default: break;
     }
     sync_guest(o);
@@ -324,6 +328,8 @@ void xk_yield(void)
     xv_object_jobs_join(); /* No outstanding object jobs when another fiber resumes. */
 #endif
     xk_thread *me = xk_cur;
+    extern void xk_game_yield_check(xk_thread *) __attribute__((weak));
+    if (xk_game_yield_check) xk_game_yield_check(me);
     if (__atomic_load_n(&g_wait_dump_requested,__ATOMIC_RELAXED) &&
         __atomic_exchange_n(&g_wait_dump_requested,0,__ATOMIC_ACQ_REL))
         xk_wait_stats_dump(); /* Guest-owned counters are never read/reset by the profiler thread. */
@@ -331,7 +337,7 @@ void xk_yield(void)
     if (xd3d_ds_check) xd3d_ds_check("yield", me->ctx.eip_hint);
     { static uint64_t last; static unsigned n; n++; uint64_t t = xk_os_monotonic_us();
       if (t - last > 3000000) { if (last && n > 2000) { XK_LOG("yield storm: %u yields in 3 s\n", n); xk_dump_threads(); } last = t; n = 0; } }
-    X_M32(xk_var_KeTickCount) = xk_tick_count();
+    X_W32(xk_var_KeTickCount) = xk_tick_count();
     g_yield_calls++;
     static int fast = -1;
     if (fast < 0) { const char *e=getenv("XV_FAST_YIELD"); fast=!e||atoi(e)!=0; }
@@ -373,7 +379,7 @@ void xk_run_until_idle(void)
 {
     xk_thread *last = NULL; int idle_spins = 0;
     for (;;) {
-        X_M32(xk_var_KeTickCount) = xk_tick_count();
+        X_W32(xk_var_KeTickCount) = xk_tick_count();
         xk_thread *t = g_yield_next;
         g_yield_next = NULL;
         if (!t) t = pick_next(last);
@@ -478,15 +484,15 @@ void xk_PsCreateSystemThreadEx(xctx *c)
     xk_thread *t = xk_thread_create(X_ARG(2), X_ARG(3), X_ARG(5), X_ARG(6), X_ARG(9), X_ARG(7) & 0xFF);
     if (!t) { c->r[0] = STATUS_NO_MEMORY; X_RET(10); }
     XK_LOG("  (suspended=%u debugger=%u)\n", X_ARG(7) & 0xFF, X_ARG(8) & 0xFF);
-    X_M32(X_ARG(0)) = xk_handle_create(t->obj);
-    if (X_ARG(4)) X_M32(X_ARG(4)) = (uint32_t)t->id;
+    X_W32(X_ARG(0)) = xk_handle_create(t->obj);
+    if (X_ARG(4)) X_W32(X_ARG(4)) = (uint32_t)t->id;
     c->r[0] = STATUS_SUCCESS; X_RET(10);
 }
 void xk_PsCreateSystemThread(xctx *c)
 {
     xk_thread *t = xk_thread_create(X_ARG(2), 0, X_ARG(4), X_ARG(5), 0, X_ARG(6) & 0xFF);
     if (!t) { c->r[0] = STATUS_NO_MEMORY; X_RET(7); }
-    X_M32(X_ARG(0)) = xk_handle_create(t->obj); if (X_ARG(3)) X_M32(X_ARG(3)) = (uint32_t)t->id;
+    X_W32(X_ARG(0)) = xk_handle_create(t->obj); if (X_ARG(3)) X_W32(X_ARG(3)) = (uint32_t)t->id;
     c->r[0] = STATUS_SUCCESS; X_RET(7);
 }
 void xk_PsTerminateSystemThread(xctx *c) { xk_thread_exit(X_ARG(0)); }
@@ -495,7 +501,7 @@ void xk_NtResumeThread(xctx *c)
 {
     xk_obj *o = xk_handle_get_type(X_ARG(0), XO_THREAD);
     if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(2); }
-    xk_thread *t = o->u.thread; if (X_ARG(1)) X_M32(X_ARG(1)) = (uint32_t)t->suspend_count;
+    xk_thread *t = o->u.thread; if (X_ARG(1)) X_W32(X_ARG(1)) = (uint32_t)t->suspend_count;
     XK_LOG("NtResumeThread(thread %d, count %d)\n", t->id, t->suspend_count);
     if (t->suspend_count > 0 && --t->suspend_count == 0 && t->state == 2) t->state = 0;
     c->r[0] = STATUS_SUCCESS; X_RET(2);
@@ -504,7 +510,7 @@ void xk_NtSuspendThread(xctx *c)
 {
     xk_obj *o = xk_handle_get_type(X_ARG(0), XO_THREAD);
     if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(2); }
-    xk_thread *t = o->u.thread; if (X_ARG(1)) X_M32(X_ARG(1)) = (uint32_t)t->suspend_count;
+    xk_thread *t = o->u.thread; if (X_ARG(1)) X_W32(X_ARG(1)) = (uint32_t)t->suspend_count;
     XK_LOG("NtSuspendThread(thread %d)\n", t->id);
     t->suspend_count++; if (t->state == 0) t->state = 2;
     c->r[0] = STATUS_SUCCESS;
@@ -517,8 +523,8 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip) __attribute__((weak));
 void xk_NtYieldExecution(xctx *c) { { static unsigned n; if (n++ < 30) XK_LOG("[wait] t%d NtYieldExecution\n", xk_cur ? xk_cur->id : -1); }
     if (xd3d_vblank_kick) xd3d_vblank_kick(c, X_M32(c->r[4]));      /* advance the vblank if this is the frame-pacing loop, then still yield */
     xk_yield(); c->r[0] = STATUS_SUCCESS; X_RET(0); }
-void xk_KeSetBasePriorityThread(xctx *c) { int old = (int8_t)X_M8(X_ARG(0) + KTHREAD_BASEPRIORITY); X_M8(X_ARG(0) + KTHREAD_BASEPRIORITY) = (uint8_t)(8 + (int32_t)X_ARG(1)); c->r[0] = (uint32_t)(old - 8); X_RET(2); }
-void xk_KeSetPriorityThread(xctx *c) { int old = X_M8(X_ARG(0) + KTHREAD_PRIORITY); X_M8(X_ARG(0) + KTHREAD_PRIORITY) = (uint8_t)X_ARG(1); c->r[0] = (uint32_t)old; X_RET(2); }
+void xk_KeSetBasePriorityThread(xctx *c) { int old = (int8_t)X_M8(X_ARG(0) + KTHREAD_BASEPRIORITY); X_W8(X_ARG(0) + KTHREAD_BASEPRIORITY) = (uint8_t)(8 + (int32_t)X_ARG(1)); c->r[0] = (uint32_t)(old - 8); X_RET(2); }
+void xk_KeSetPriorityThread(xctx *c) { int old = X_M8(X_ARG(0) + KTHREAD_PRIORITY); X_W8(X_ARG(0) + KTHREAD_PRIORITY) = (uint8_t)X_ARG(1); c->r[0] = (uint32_t)old; X_RET(2); }
 void xk_KeQueryBasePriorityThread(xctx *c) { c->r[0] = (uint32_t)((int8_t)X_M8(X_ARG(0) + KTHREAD_BASEPRIORITY) - 8); X_RET(1); }
 void xk_KeSetDisableBoostThread(xctx *c) { c->r[0] = 0; X_RET(2); }
 void xk_KeBoostPriorityThread(xctx *c) { X_RET(2); }
@@ -568,17 +574,17 @@ void xk_NtSetSystemTime(xctx *c) { c->r[0] = STATUS_SUCCESS; X_RET(2); }
 void xk_NtCreateEvent(xctx *c)
 {
     xk_obj *o = xk_obj_new(XO_EVENT); o->u.event.manual = X_ARG(2) == 0; o->u.event.signaled = X_ARG(3) & 0xFF;
-    X_M32(X_ARG(0)) = xk_handle_create(o); xk_obj_deref(o);
+    X_W32(X_ARG(0)) = xk_handle_create(o); xk_obj_deref(o);
     c->r[0] = STATUS_SUCCESS; X_RET(4);
 }
-void xk_NtSetEvent(xctx *c) { xk_obj *o = xk_handle_get_type(X_ARG(0), XO_EVENT); if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(2); } if (X_ARG(1)) X_M32(X_ARG(1)) = o->u.event.signaled; o->u.event.signaled = 1; xk_signal_check(); c->r[0] = STATUS_SUCCESS; X_RET(2); }
+void xk_NtSetEvent(xctx *c) { xk_obj *o = xk_handle_get_type(X_ARG(0), XO_EVENT); if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(2); } if (X_ARG(1)) X_W32(X_ARG(1)) = o->u.event.signaled; o->u.event.signaled = 1; xk_signal_check(); c->r[0] = STATUS_SUCCESS; X_RET(2); }
 void xk_NtClearEvent(xctx *c) { xk_obj *o = xk_handle_get_type(X_ARG(0), XO_EVENT); if (o) o->u.event.signaled = 0; c->r[0] = o ? STATUS_SUCCESS : STATUS_INVALID_HANDLE; X_RET(1); }
 void xk_NtPulseEvent(xctx *c) { xk_obj *o = xk_handle_get_type(X_ARG(0), XO_EVENT); if (o) { o->u.event.signaled = 1; xk_signal_check(); o->u.event.signaled = 0; } c->r[0] = o ? STATUS_SUCCESS : STATUS_INVALID_HANDLE; X_RET(2); }
-void xk_NtQueryEvent(xctx *c) { xk_obj *o = xk_handle_get_type(X_ARG(0), XO_EVENT); if (o) { X_M32(X_ARG(1)) = o->u.event.manual ? 0 : 1; X_M32(X_ARG(1) + 4) = o->u.event.signaled; } c->r[0] = o ? STATUS_SUCCESS : STATUS_INVALID_HANDLE; X_RET(2); }
+void xk_NtQueryEvent(xctx *c) { xk_obj *o = xk_handle_get_type(X_ARG(0), XO_EVENT); if (o) { X_W32(X_ARG(1)) = o->u.event.manual ? 0 : 1; X_W32(X_ARG(1) + 4) = o->u.event.signaled; } c->r[0] = o ? STATUS_SUCCESS : STATUS_INVALID_HANDLE; X_RET(2); }
 /* KEVENT in guest memory: KeInitializeEvent(PKEVENT, EVENT_TYPE, BOOLEAN State) */
 void xk_KeInitializeEvent(xctx *c)
 {
-    uint32_t e = X_ARG(0); X_M8(e) = (uint8_t)X_ARG(1); X_M8(e + 2) = 4; X_M32(e + 4) = X_ARG(2) & 0xFF;
+    uint32_t e = X_ARG(0); X_W8(e) = (uint8_t)X_ARG(1); X_W8(e + 2) = 4; X_W32(e + 4) = X_ARG(2) & 0xFF;
     xk_obj *o = xk_obj_from_guest(e); if (o) { o->u.event.manual = X_ARG(1) == 0; o->u.event.signaled = X_ARG(2) & 0xFF; } else guest_obj(e, XO_EVENT);
     X_RET(3);
 }
@@ -588,24 +594,24 @@ void xk_KePulseEvent(xctx *c) { xk_obj *o = guest_obj(X_ARG(0), XO_EVENT); c->r[
 void xk_KeSetEventBoostPriority(xctx *c) { xk_obj *o = guest_obj(X_ARG(0), XO_EVENT); o->u.event.signaled = 1; sync_guest(o); xk_signal_check(); X_RET(2); }
 
 /* ---- mutants / semaphores ---------------------------------------------------------------------- */
-void xk_NtCreateMutant(xctx *c) { xk_obj *o = xk_obj_new(XO_MUTANT); if (X_ARG(2) & 0xFF) { o->u.mutant.owner = xk_cur; o->u.mutant.count = 1; } X_M32(X_ARG(0)) = xk_handle_create(o); xk_obj_deref(o); c->r[0] = STATUS_SUCCESS; X_RET(3); }
+void xk_NtCreateMutant(xctx *c) { xk_obj *o = xk_obj_new(XO_MUTANT); if (X_ARG(2) & 0xFF) { o->u.mutant.owner = xk_cur; o->u.mutant.count = 1; } X_W32(X_ARG(0)) = xk_handle_create(o); xk_obj_deref(o); c->r[0] = STATUS_SUCCESS; X_RET(3); }
 void xk_NtReleaseMutant(xctx *c)
 {
     xk_obj *o = xk_handle_get_type(X_ARG(0), XO_MUTANT); if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(2); }
     { static unsigned n; if (n++ < 60) XK_LOG("[wait] t%d NtReleaseMutant h=%X (owner t%d cnt %d)\n", xk_cur->id, X_ARG(0), o->u.mutant.owner ? o->u.mutant.owner->id : -1, o->u.mutant.count); }
-    if (X_ARG(1)) X_M32(X_ARG(1)) = (uint32_t)(1 - o->u.mutant.count);
+    if (X_ARG(1)) X_W32(X_ARG(1)) = (uint32_t)(1 - o->u.mutant.count);
     if (o->u.mutant.owner == xk_cur && --o->u.mutant.count == 0) { o->u.mutant.owner = NULL; xk_signal_check(); }
     c->r[0] = STATUS_SUCCESS; X_RET(2);
 }
-void xk_KeInitializeMutant(xctx *c) { uint32_t m = X_ARG(0); X_M8(m) = 2; X_M32(m + 4) = X_ARG(1) & 0xFF ? 0 : 1; xk_obj *o = guest_obj(m, XO_MUTANT); if (X_ARG(1) & 0xFF) { o->u.mutant.owner = xk_cur; o->u.mutant.count = 1; } X_RET(2); }
+void xk_KeInitializeMutant(xctx *c) { uint32_t m = X_ARG(0); X_W8(m) = 2; X_W32(m + 4) = X_ARG(1) & 0xFF ? 0 : 1; xk_obj *o = guest_obj(m, XO_MUTANT); if (X_ARG(1) & 0xFF) { o->u.mutant.owner = xk_cur; o->u.mutant.count = 1; } X_RET(2); }
 void xk_KeReleaseMutant(xctx *c) { xk_obj *o = guest_obj(X_ARG(0), XO_MUTANT); c->r[0] = (uint32_t)(1 - o->u.mutant.count); if (o->u.mutant.owner == xk_cur && --o->u.mutant.count == 0) { o->u.mutant.owner = NULL; xk_signal_check(); } sync_guest(o); X_RET(4); }
-void xk_NtCreateSemaphore(xctx *c) { xk_obj *o = xk_obj_new(XO_SEMAPHORE); o->u.sem.count = (int)X_ARG(2); o->u.sem.limit = (int)X_ARG(3); X_M32(X_ARG(0)) = xk_handle_create(o); xk_obj_deref(o); c->r[0] = STATUS_SUCCESS; X_RET(4); }
-void xk_NtReleaseSemaphore(xctx *c) { xk_obj *o = xk_handle_get_type(X_ARG(0), XO_SEMAPHORE); if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(3); } if (X_ARG(2)) X_M32(X_ARG(2)) = (uint32_t)o->u.sem.count; o->u.sem.count += (int)X_ARG(1); xk_signal_check(); c->r[0] = STATUS_SUCCESS; X_RET(3); }
-void xk_KeInitializeSemaphore(xctx *c) { uint32_t s = X_ARG(0); X_M8(s) = 5; X_M32(s + 4) = X_ARG(1); xk_obj *o = guest_obj(s, XO_SEMAPHORE); o->u.sem.count = (int)X_ARG(1); o->u.sem.limit = (int)X_ARG(2); X_RET(3); }
+void xk_NtCreateSemaphore(xctx *c) { xk_obj *o = xk_obj_new(XO_SEMAPHORE); o->u.sem.count = (int)X_ARG(2); o->u.sem.limit = (int)X_ARG(3); X_W32(X_ARG(0)) = xk_handle_create(o); xk_obj_deref(o); c->r[0] = STATUS_SUCCESS; X_RET(4); }
+void xk_NtReleaseSemaphore(xctx *c) { xk_obj *o = xk_handle_get_type(X_ARG(0), XO_SEMAPHORE); if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(3); } if (X_ARG(2)) X_W32(X_ARG(2)) = (uint32_t)o->u.sem.count; o->u.sem.count += (int)X_ARG(1); xk_signal_check(); c->r[0] = STATUS_SUCCESS; X_RET(3); }
+void xk_KeInitializeSemaphore(xctx *c) { uint32_t s = X_ARG(0); X_W8(s) = 5; X_W32(s + 4) = X_ARG(1); xk_obj *o = guest_obj(s, XO_SEMAPHORE); o->u.sem.count = (int)X_ARG(1); o->u.sem.limit = (int)X_ARG(2); X_RET(3); }
 void xk_KeReleaseSemaphore(xctx *c) { xk_obj *o = guest_obj(X_ARG(0), XO_SEMAPHORE); c->r[0] = (uint32_t)o->u.sem.count; o->u.sem.count += (int)X_ARG(2); sync_guest(o); xk_signal_check(); X_RET(4); }
 
 /* ---- timers / DPCs (minimal) ------------------------------------------------------------------ */
-void xk_KeInitializeTimerEx(xctx *c) { uint32_t t = X_ARG(0); X_M8(t) = 8 + (X_ARG(1) & 1); X_M32(t + 4) = 0; guest_obj(t, XO_TIMER); X_RET(2); }
+void xk_KeInitializeTimerEx(xctx *c) { uint32_t t = X_ARG(0); X_W8(t) = 8 + (X_ARG(1) & 1); X_W32(t + 4) = 0; guest_obj(t, XO_TIMER); X_RET(2); }
 void xk_KeSetTimerEx(xctx *c)
 {
     xk_obj *o = guest_obj(X_ARG(0), XO_TIMER); int64_t due = (int64_t)LI64(X_ARG(1)); int32_t period_ms = (int32_t)X_ARG(3);
@@ -617,7 +623,7 @@ void xk_KeSetTimerEx(xctx *c)
 }
 void xk_KeSetTimer(xctx *c) { xk_obj *o = guest_obj(X_ARG(0), XO_TIMER); int64_t due = (int64_t)LI64(X_ARG(1)); c->r[0] = o->u.timer.due != 0; o->u.timer.due = due < 0 ? now100() + (uint64_t)(-due) : now100(); o->u.timer.period = 0; o->u.timer.signaled = 0; X_RET(3); }
 void xk_KeCancelTimer(xctx *c) { xk_obj *o = guest_obj(X_ARG(0), XO_TIMER); c->r[0] = o->u.timer.due != 0; o->u.timer.due = 0; X_RET(1); }
-void xk_KeInitializeDpc(xctx *c) { X_M32(X_ARG(0) + 4) = X_ARG(1); X_M32(X_ARG(0) + 8) = X_ARG(2); X_RET(3); }
+void xk_KeInitializeDpc(xctx *c) { X_W32(X_ARG(0) + 4) = X_ARG(1); X_W32(X_ARG(0) + 8) = X_ARG(2); X_RET(3); }
 void xk_KeInsertQueueDpc(xctx *c) { XK_LOG("KeInsertQueueDpc: running DPC %08X inline\n", X_M32(X_ARG(0) + 4)); uint32_t dpc = X_ARG(0); X_PUSH32(X_ARG(2)); X_PUSH32(X_ARG(1)); X_PUSH32(X_M32(dpc + 8)); X_PUSH32(dpc); X_PUSH32(0xDEAD0002u); xv_call(c, X_M32(dpc + 4)); c->r[0] = 1; X_RET(3); }
 void xk_KeRemoveQueueDpc(xctx *c) { c->r[0] = 0; X_RET(1); }
 void xk_KeConnectInterrupt(xctx *c) { c->r[0] = 1; X_RET(1); }
@@ -676,15 +682,15 @@ static uint32_t obj_guest_body(xk_obj *o)
     /* materialise a real dispatcher header so Ke* calls on the returned pointer reach this object */
     o->guest = xk_kalloc(16);
     uint8_t type = o->type == XO_EVENT ? (o->u.event.manual ? 0 : 1) : o->type == XO_MUTANT ? 2 : o->type == XO_SEMAPHORE ? 5 : o->type == XO_TIMER ? 8 : 6;
-    X_M8(o->guest) = type; X_M8(o->guest + 2) = 4;
-    X_M32(o->guest + 4) = o->type == XO_EVENT ? (uint32_t)o->u.event.signaled : o->type == XO_SEMAPHORE ? (uint32_t)o->u.sem.count : 0;
+    X_W8(o->guest) = type; X_W8(o->guest + 2) = 4;
+    X_W32(o->guest + 4) = o->type == XO_EVENT ? (uint32_t)o->u.event.signaled : o->type == XO_SEMAPHORE ? (uint32_t)o->u.sem.count : 0;
     if (g_ngmap < 1024) g_gmap[g_ngmap++] = (gmap_t){ o->guest, o };
     return o->guest;
 }
-void xk_ObReferenceObjectByHandle(xctx *c) { xk_obj *o = xk_handle_get(X_ARG(0)); if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(3); } xk_obj_ref(o); X_M32(X_ARG(2)) = obj_guest_body(o); c->r[0] = STATUS_SUCCESS; X_RET(3); }
+void xk_ObReferenceObjectByHandle(xctx *c) { xk_obj *o = xk_handle_get(X_ARG(0)); if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(3); } xk_obj_ref(o); X_W32(X_ARG(2)) = obj_guest_body(o); c->r[0] = STATUS_SUCCESS; X_RET(3); }
 void xk_ObfDereferenceObject(xctx *c) { xk_obj *o = xk_obj_from_guest(c->r[1]); if (o) xk_obj_deref(o); X_RET(0); }
 void xk_ObfReferenceObject(xctx *c) { xk_obj *o = xk_obj_from_guest(c->r[1]); if (o) xk_obj_ref(o); X_RET(0); }
-void xk_NtDuplicateObject(xctx *c) { xk_obj *o = xk_handle_get(X_ARG(0)); if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(3); } X_M32(X_ARG(1)) = xk_handle_create(o); c->r[0] = STATUS_SUCCESS; X_RET(3); }
+void xk_NtDuplicateObject(xctx *c) { xk_obj *o = xk_handle_get(X_ARG(0)); if (!o) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(3); } X_W32(X_ARG(1)) = xk_handle_create(o); c->r[0] = STATUS_SUCCESS; X_RET(3); }
 
 void xk_NtQueueApcThread(xctx *c)
 {

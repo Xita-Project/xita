@@ -372,7 +372,11 @@ def plan_function(decl: Optional[dict], func: dict, args, src: str) -> Plan:
         lo, hi = min(lo, 0), max(hi, 95)
         warnings.append("a0.x-relative constant addressing present: full 96-entry array emitted; "
                         "dynamic uniform indexing costs extra USSE cycles")
-    c_base = lo if d3d or relative else 0
+    # An explicit args.c_base pins the uniform array origin (the H2 menu pipeline uses 0 so the
+    # runtime uploads the hardware constant file c[0..191] verbatim for every program).
+    c_base = getattr(args, "c_base", None)
+    if c_base is None:
+        c_base = lo if d3d or relative else 0
     c_count = (hi - c_base + 1) if hi >= c_base else 1
     if args.const_count:
         if args.const_count < c_count:

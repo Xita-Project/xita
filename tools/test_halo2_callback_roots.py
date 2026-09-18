@@ -1,0 +1,1782 @@
+"""Synthetic bounds and revision guards for the observed D3D callback walk."""
+import hashlib
+import struct
+import unittest
+from unittest.mock import patch
+from games.halo2_5849 import prepare_boot
+
+
+class SyntheticImage:
+    def __init__(self):
+        self.code = b"synthetic caller"
+        self.targets = {slot: 0x1000 + index * 16
+                        for index, slot in enumerate(range(0x403AF8, 0x403B70, 4))}
+        self.targets[0x403B40] = None  # skipped slot is never inspected as a root
+        self.bad_code = None
+        self.section_name = "D3D"
+
+    def bytes_at(self, address, length):
+        assert address == 0x200 and length == len(self.code)
+        return self.code
+
+    def u32(self, slot):
+        return self.targets[slot]
+
+    def is_code(self, target):
+        return target != self.bad_code
+
+    def section_of(self, target):
+        return (0, 0, 0, 0, self.section_name)
+
+
+class CallbackRoots(unittest.TestCase):
+    def test_associated_release_bounds_revision_and_code_targets(self):
+        image = SyntheticImage()
+        image.section_name = ".text"
+        image.targets = {slot: 0x1000 + (index % 9) * 16
+                         for index, slot in enumerate(range(0x455950, 0x455978, 4))}
+        expected = set(image.targets.values())
+        image.targets[0x455978] = 0
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_ASSOCIATED_RELEASE_BINDINGS)
+        with patch.object(prepare_boot, "GAME_ASSOCIATED_RELEASE_BINDINGS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_associated_release_roots(image), expected)
+            self.assertEqual(image.targets, before)
+            for bad in (None, 1, 0x1000):
+                image.targets[0x455978] = bad
+                with self.assertRaisesRegex(ValueError, "boundary"):
+                    prepare_boot.game_associated_release_roots(image)
+            image.targets[0x455978] = 0
+            for slot in range(0x455950, 0x455978, 4):
+                for bad in (None, 0, 0xDEAD):
+                    image.targets[slot] = bad
+                    image.bad_code = 0xDEAD
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_associated_release_roots(image)
+                image.targets[slot] = before[slot]
+            image.bad_code = None
+            for section in (None, (0, 0, 0, 0, ".data"), (0, 0, 0, 0, "DSOUND")):
+                with patch.object(image, "section_of", return_value=section):
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_associated_release_roots(image)
+            for index in range(count):
+                guards = [spec] * count
+                guards[index] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_ASSOCIATED_RELEASE_BINDINGS", guards):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_associated_release_roots(image)
+
+    def test_motion_release_only_proven_slots_and_each_binding(self):
+        image = SyntheticImage()
+        image.section_name = ".text"
+        image.targets = {}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        constructors = [(*spec, row[3]) for row in prepare_boot.GAME_MEMBER_QUERY_CTORS]
+        for index, (_, _, _, table) in enumerate(constructors):
+            image.targets[table] = 0x1000 + (index % 2) * 16
+            image.targets[table + 0x18] = 0x1100 + index * 16
+        count = len(prepare_boot.GAME_MOTION_RELEASE_BINDINGS)
+        with patch.object(prepare_boot, "GAME_MOTION_RELEASE_BINDINGS", (spec,) * count), \
+             patch.object(prepare_boot, "GAME_MEMBER_QUERY_CTORS", constructors):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_motion_release_roots(image), set(before.values()))
+            self.assertEqual(image.targets, before)
+            # Other vtable slots and neighboring tables are not readable.
+            for slot in before:
+                for bad in (None, 0, 0xDEAD):
+                    image.targets[slot] = bad
+                    image.bad_code = 0xDEAD
+                    with self.assertRaisesRegex(ValueError, "not title code"):
+                        prepare_boot.game_motion_release_roots(image)
+                image.targets[slot] = before[slot]
+            image.bad_code = None
+            for section in (None, (0, 0, 0, 0, ".data"), (0, 0, 0, 0, "DSOUND")):
+                with patch.object(image, "section_of", return_value=section):
+                    with self.assertRaisesRegex(ValueError, "not title code"):
+                        prepare_boot.game_motion_release_roots(image)
+            for index in range(count):
+                guards = [spec] * count
+                guards[index] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_MOTION_RELEASE_BINDINGS", guards):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_motion_release_roots(image)
+            for index, row in enumerate(constructors):
+                guards = list(constructors)
+                guards[index] = (*row[:2], "0" * 64, row[3])
+                with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CTORS", guards):
+                    with self.assertRaisesRegex(ValueError, "constructor fingerprint"):
+                        prepare_boot.game_motion_release_roots(image)
+
+    def test_object_release_interface_revision_slots_and_boundary(self):
+        image = SyntheticImage()
+        image.section_name = ".text"
+        image.targets = {slot: 0x1000 + (index % 4) * 16
+                         for index, slot in enumerate(range(0x414310, 0x414324, 4))}
+        expected = set(image.targets.values())
+        image.targets[0x414324] = 0
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_OBJECT_RELEASE_BINDINGS)
+        with patch.object(prepare_boot, "GAME_OBJECT_RELEASE_BINDINGS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_object_release_roots(image), expected)
+            self.assertEqual(image.targets, before)
+            for bad in (None, 1, 0x1000):
+                image.targets[0x414324] = bad
+                with self.assertRaisesRegex(ValueError, "boundary"):
+                    prepare_boot.game_object_release_roots(image)
+            image.targets[0x414324] = 0
+            for slot in range(0x414310, 0x414324, 4):
+                for bad in (None, 0, 0xDEAD):
+                    image.targets[slot] = bad
+                    image.bad_code = 0xDEAD
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_object_release_roots(image)
+                image.targets[slot] = before[slot]
+            image.bad_code = None
+            for section in (None, (0, 0, 0, 0, ".data"), (0, 0, 0, 0, "DSOUND")):
+                with patch.object(image, "section_of", return_value=section):
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_object_release_roots(image)
+            for index in range(count):
+                guards = [spec] * count
+                guards[index] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_OBJECT_RELEASE_BINDINGS", guards):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_object_release_roots(image)
+
+    def test_object_query_constructor_and_exact_interface_extent(self):
+        image = SyntheticImage()
+        image.section_name = ".text"
+        image.targets = {slot: 0x1000 + (index % 15) * 16
+                         for index, slot in enumerate(range(0x412600, 0x412640, 4))}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_OBJECT_QUERY_BINDINGS)
+        with patch.object(prepare_boot, "GAME_OBJECT_QUERY_BINDINGS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_object_query_roots(image), set(before.values()))
+            self.assertEqual(image.targets, before)
+            # Neighboring constants/strings are deliberately absent.
+            for slot in before:
+                for bad in (None, 0, 0xDEAD):
+                    image.targets[slot] = bad
+                    image.bad_code = 0xDEAD
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_object_query_roots(image)
+                image.targets[slot] = before[slot]
+            image.bad_code = None
+            for section in (None, (0, 0, 0, 0, ".data"), (0, 0, 0, 0, "DSOUND")):
+                with patch.object(image, "section_of", return_value=section):
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_object_query_roots(image)
+            for index in range(count):
+                guards = [spec] * count
+                guards[index] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_OBJECT_QUERY_BINDINGS", guards):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_object_query_roots(image)
+
+    def test_typed_script_descriptor_chain_extents_and_only_callback_field(self):
+        image=SyntheticImage();image.section_name=".text";image.targets={};headers={}
+        table=0x8000;start=cursor=0x80000;count=10;records=[]
+        for index in range(count):
+            parameters=index%9;target=0 if index==3 else 0x1000+(index%4)*16
+            image.targets[table+index*4]=cursor;records.append(cursor)
+            # Other fields look executable but must not become code roots.
+            headers[cursor]=struct.pack("<HHIIHH",0xE000,0xE010,target,0xE020,parameters,0xE030)
+            cursor+=(16+2*parameters+3)&~3
+        end=cursor;spec=(0x200,len(image.code),hashlib.sha256(image.code).hexdigest())
+        def read(address,length):
+            if address==0x200:
+                self.assertEqual(length,len(image.code));return image.code
+            self.assertEqual(length,16);return headers[address]
+        with patch.object(image,"bytes_at",side_effect=read), \
+             patch.object(prepare_boot,"GAME_SCRIPT_TYPED_PREFIX",(table,count,start,end)), \
+             patch.object(prepare_boot,"GAME_SCRIPT_TYPED_BINDINGS",(spec,)*4):
+            before=dict(headers);bindings=dict(image.targets)
+            self.assertEqual(prepare_boot.game_script_typed_roots(image),{0x1000,0x1010,0x1020,0x1030})
+            self.assertEqual(headers,before);self.assertEqual(image.targets,bindings)
+            for index,record in enumerate(records):
+                slot=table+index*4
+                for bad in (None,0,record+4):
+                    image.targets[slot]=bad
+                    with self.assertRaisesRegex(ValueError,"binding"):prepare_boot.game_script_typed_roots(image)
+                image.targets[slot]=record
+                headers[record]=before[record][:15]
+                with self.assertRaisesRegex(ValueError,"incomplete"):prepare_boot.game_script_typed_roots(image)
+                for arity in (9,0x8000,0xFFFF):
+                    headers[record]=before[record][:12]+struct.pack('<H',arity)+before[record][14:]
+                    with self.assertRaisesRegex(ValueError,"parameter"):prepare_boot.game_script_typed_roots(image)
+                headers[record]=before[record][:4]+struct.pack('<I',0xDEAD)+before[record][8:];image.bad_code=0xDEAD
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_typed_roots(image)
+                headers[record]=before[record];image.bad_code=None
+            for limit in (start+15,end-1,end+4):
+                with patch.object(prepare_boot,"GAME_SCRIPT_TYPED_PREFIX",(table,count,start,limit)):
+                    with self.assertRaisesRegex(ValueError,"extent"):prepare_boot.game_script_typed_roots(image)
+            headers[start]=before[start][:12]+struct.pack('<H',1)+before[start][14:]
+            with self.assertRaisesRegex(ValueError,"binding"):prepare_boot.game_script_typed_roots(image)
+            headers[start]=before[start]
+            for section in (None,(0,0,0,0,".data"),(0,0,0,0,"DSOUND")):
+                with patch.object(image,"section_of",return_value=section):
+                    with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_typed_roots(image)
+            for index in range(4):
+                guards=[spec]*4;guards[index]=(*spec[:2],"0"*64)
+                with patch.object(prepare_boot,"GAME_SCRIPT_TYPED_BINDINGS",guards):
+                    with self.assertRaisesRegex(ValueError,"fingerprint"):prepare_boot.game_script_typed_roots(image)
+
+    def test_noarg_command_descriptor_bounds_and_required_callbacks(self):
+        image=SyntheticImage();image.section_name=".text";image.targets={}
+        for index in range(4):
+            record=0x44DB50+index*16
+            image.targets[0x474D88+index*4]=record
+            image.targets[record+4]=0x1000+index*16
+        spec=(0x200,len(image.code),hashlib.sha256(image.code).hexdigest())
+        count=len(prepare_boot.GAME_SCRIPT_NOARG_COMMAND_BINDINGS)
+        with patch.object(prepare_boot,"GAME_SCRIPT_NOARG_COMMAND_BINDINGS",(spec,)*count):
+            before=dict(image.targets)
+            self.assertEqual(prepare_boot.game_script_noarg_command_roots(image),{0x1000,0x1010,0x1020,0x1030})
+            self.assertEqual(image.targets,before)
+            for index in range(4):
+                slot=0x474D88+index*4
+                for bad in (None,0,0x44DB50+(index+1)*16):
+                    image.targets[slot]=bad
+                    with self.assertRaisesRegex(ValueError,"binding"):prepare_boot.game_script_noarg_command_roots(image)
+                image.targets[slot]=before[slot]
+                slot=0x44DB54+index*16
+                for bad in (None,0,0xDEAD):
+                    image.targets[slot]=image.bad_code=bad
+                    with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_noarg_command_roots(image)
+                image.targets[slot]=before[slot];image.bad_code=None
+            with patch.object(image,"section_of",return_value=None):
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_noarg_command_roots(image)
+            for section in (".data","DSOUND","D3D"):
+                image.section_name=section
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_noarg_command_roots(image)
+            image.section_name=".text"
+            for index in range(count):
+                guards=[spec]*count;guards[index]=(*spec[:2],"0"*64)
+                with patch.object(prepare_boot,"GAME_SCRIPT_NOARG_COMMAND_BINDINGS",guards):
+                    with self.assertRaisesRegex(ValueError,"fingerprint"):prepare_boot.game_script_noarg_command_roots(image)
+
+    def test_expression_descriptor_prefix_does_not_scan_metadata_or_next_record(self):
+        image=SyntheticImage();image.section_name=".text";image.targets={}
+        for index in range(25):
+            record=0x44B098+index*16
+            image.targets[0x4744E0+index*4]=record
+            image.targets[record+4]=0 if index==3 else 0x1000+(index%14)*16
+        # No metadata, following table index or following descriptor exists.
+        spec=(0x200,len(image.code),hashlib.sha256(image.code).hexdigest())
+        count=len(prepare_boot.GAME_SCRIPT_PRIMITIVE_BINDINGS)
+        with patch.object(prepare_boot,"GAME_SCRIPT_PRIMITIVE_BINDINGS",(spec,)*count):
+            before=dict(image.targets)
+            expected={image.targets[0x44B09C+i*16] for i in range(25)}-{0}
+            self.assertEqual(prepare_boot.game_script_primitive_roots(image),expected)
+            self.assertEqual(image.targets,before)
+            for index in range(25):
+                slot=0x4744E0+index*4
+                for bad in (None,0,0x44B098+(index+1)*16):
+                    image.targets[slot]=bad
+                    with self.assertRaisesRegex(ValueError,"binding"):prepare_boot.game_script_primitive_roots(image)
+                image.targets[slot]=before[slot]
+                slot=0x44B09C+index*16
+                for bad in (None,0xDEAD):
+                    image.targets[slot]=image.bad_code=bad
+                    with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_primitive_roots(image)
+                image.targets[slot]=before[slot];image.bad_code=None
+            with patch.object(image,"section_of",return_value=None):
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_primitive_roots(image)
+            for section in (".data","DSOUND","D3D"):
+                image.section_name=section
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_script_primitive_roots(image)
+            image.section_name=".text"
+            for index in range(count):
+                guards=[spec]*count;guards[index]=(*spec[:2],"0"*64)
+                with patch.object(prepare_boot,"GAME_SCRIPT_PRIMITIVE_BINDINGS",guards):
+                    with self.assertRaisesRegex(ValueError,"fingerprint"):prepare_boot.game_script_primitive_roots(image)
+
+    def test_sound_record_predicate_reads_only_observed_first_slot(self):
+        image=SyntheticImage();image.section_name=".text";image.targets={0x44A110:0x1000}
+        spec=(0x200,len(image.code),hashlib.sha256(image.code).hexdigest())
+        count=len(prepare_boot.GAME_SOUND_RECORD_PREDICATE_WALKS)
+        with patch.object(prepare_boot,"GAME_SOUND_RECORD_PREDICATE_WALKS",(spec,)*count):
+            self.assertEqual(prepare_boot.game_sound_record_predicate_roots(image),{0x1000})
+            self.assertEqual(image.targets,{0x44A110:0x1000})
+            for bad in (None,0,0xDEAD):
+                image.targets[0x44A110]=image.bad_code=bad
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_sound_record_predicate_roots(image)
+            image.targets[0x44A110]=0x1000;image.bad_code=None
+            with patch.object(image,"section_of",return_value=None):
+                with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_sound_record_predicate_roots(image)
+            image.section_name=".data"
+            with self.assertRaisesRegex(ValueError,"invalid"):prepare_boot.game_sound_record_predicate_roots(image)
+            image.section_name=".text"
+            for i in range(count):
+                guards=[spec]*count;guards[i]=(*spec[:2],"0"*64)
+                with patch.object(prepare_boot,"GAME_SOUND_RECORD_PREDICATE_WALKS",guards):
+                    with self.assertRaisesRegex(ValueError,"fingerprint"):prepare_boot.game_sound_record_predicate_roots(image)
+
+    def test_copy_alignment_tables_exclude_instruction_bytes(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = [base + i*4 for base in (0x3208F0, 0x320A7C) for i in (1, 2, 3)]
+        image.targets = {slot: 0x1000 + n*16 for n, slot in enumerate(slots)}
+        # Index0 and adjacent words deliberately do not exist in this fixture.
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_MOVE_ALIGNMENT_WALKS)
+        with patch.object(prepare_boot, "GAME_MOVE_ALIGNMENT_WALKS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_move_alignment_roots(image), set(before.values()))
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid"):
+                        prepare_boot.game_move_alignment_roots(image)
+                image.targets[slot] = before[slot]; image.bad_code = None
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "invalid"):
+                    prepare_boot.game_move_alignment_roots(image)
+            image.section_name = ".data"
+            with self.assertRaisesRegex(ValueError, "invalid"):
+                prepare_boot.game_move_alignment_roots(image)
+            image.section_name = ".text"
+            for which in range(count):
+                specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_MOVE_ALIGNMENT_WALKS", specs):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_move_alignment_roots(image)
+
+    def test_text_token_table_bounds_fields_and_nulls(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        records = tuple(range(0x470200, 0x470824, 12))
+        self.assertEqual(len(records), 131)
+        image.targets = {}
+        for n, record in enumerate(records):
+            image.targets[record + 4] = 0xE000 + n
+            image.targets[record + 8] = 0 if n % 3 == 0 else 0x1000 + (n % 17) * 16
+        # Field0 and surrounding bytes intentionally do not exist: they must
+        # never be inspected as callbacks. Out-of-range input tokens cannot
+        # select a callback, even when its unrelated value looks executable.
+        image.targets[records[0] + 4] = 0x26
+        image.targets[records[1] + 4] = 0xF900
+        del image.targets[records[0] + 8], image.targets[records[1] + 8]
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_TEXT_TOKEN_WALKS", (spec, spec)):
+            before = dict(image.targets)
+            expected = {before[r + 8] for r in records[2:] if before[r + 8]}
+            self.assertEqual(prepare_boot.game_text_token_roots(image), expected)
+            self.assertEqual(image.targets, before)
+            # Both ends of the original input range are selectable.
+            for value in (0xE000, 0xF8FF):
+                image.targets[records[-1] + 4] = value
+                image.targets[records[-1] + 8] = 0xDEAD
+                self.assertIn(0xDEAD, prepare_boot.game_text_token_roots(image))
+            image.targets = dict(before)
+            for record in records[2:]:
+                saved = image.targets[record + 8]
+                for invalid in (None, 0xDEAD):
+                    image.targets[record + 8] = image.bad_code = invalid
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_text_token_roots(image)
+                image.targets[record + 8] = saved; image.bad_code = None
+            for name in (".data", "DSOUND", "D3D"):
+                image.section_name = name
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_text_token_roots(image)
+            image.section_name = ".text"
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_text_token_roots(image)
+            image.targets[records[-1] + 4] = None
+            with self.assertRaisesRegex(ValueError, "incomplete"):
+                prepare_boot.game_text_token_roots(image)
+            image.targets = dict(before)
+            for which in range(2):
+                specs = [spec, spec]; specs[which] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_TEXT_TOKEN_WALKS", specs):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_text_token_roots(image)
+
+    def test_incoming_widget_member_exact_interface(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = tuple(range(0x45A628, 0x45A670, 4))
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        image.targets.update({0x45A624: None, 0x45A670: None})
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_WIDGET_MEMBER_CALLS)
+        with patch.object(prepare_boot, "GAME_WIDGET_MEMBER_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_widget_member_roots(image),
+                             {before[slot] for slot in slots})
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_widget_member_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_widget_member_roots(image)
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_widget_member_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_WIDGET_MEMBER_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_widget_member_roots(image)
+
+    def test_incoming_widget_setup_and_bound_event_dispatch(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = tuple(range(0x4587D0, 0x458840, 4)) + (0x45BDB0,)
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        image.targets.update({0x4587CC: None, 0x458840: None, 0x45BDAC: None,
+                              0x45BDB4: 0, 0x45BDB8: None})
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_WIDGET_SETUP_CALLS)
+        with patch.object(prepare_boot, "GAME_WIDGET_SETUP_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_widget_setup_roots(image),
+                             {before[slot] for slot in slots})
+            self.assertEqual(image.targets, before)
+            image.targets[0x45BDB4] = 0x1000
+            with self.assertRaisesRegex(ValueError, "boundary"):
+                prepare_boot.game_widget_setup_roots(image)
+            image.targets[0x45BDB4] = 0
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_widget_setup_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_widget_setup_roots(image)
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_widget_setup_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_WIDGET_SETUP_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_widget_setup_roots(image)
+
+    def test_animated_widget_interfaces_preserve_null_boundaries(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = tuple(range(0x45AD60, 0x45ADA4, 4)) + tuple(range(0x45ADA8, 0x45ADEC, 4))
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        image.targets.update({0x45ADA4: 0, 0x45ADEC: 0, 0x45AD5C: None, 0x45ADF0: None})
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_ANIMATED_WIDGET_CALLS)
+        with patch.object(prepare_boot, "GAME_ANIMATED_WIDGET_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_animated_widget_roots(image),
+                             {before[slot] for slot in slots})
+            self.assertEqual(image.targets, before)
+            for end in (0x45ADA4, 0x45ADEC):
+                image.targets[end] = 0x1000
+                with self.assertRaisesRegex(ValueError, "boundary"):
+                    prepare_boot.game_animated_widget_roots(image)
+                image.targets[end] = 0
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_animated_widget_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_animated_widget_roots(image)
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_animated_widget_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_ANIMATED_WIDGET_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_animated_widget_roots(image)
+
+    def test_map_bound_two_point_query_exact_slot(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x455518: 0x1000, 0x455514: None, 0x45551C: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_TWO_POINT_BOUNDS_CALLS)
+        with patch.object(prepare_boot, "GAME_TWO_POINT_BOUNDS_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_two_point_bounds_roots(image), {0x1000})
+            self.assertEqual(image.targets, before)
+            for bad in (0, None, 0xDEAD):
+                image.targets[0x455518] = image.bad_code = bad
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_two_point_bounds_roots(image)
+            image.targets[0x455518] = 0x1000; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_two_point_bounds_roots(image)
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_two_point_bounds_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_TWO_POINT_BOUNDS_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_two_point_bounds_roots(image)
+
+    def test_observed_shared_type_entry_without_inferred_vtable(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {}  # No class table is inferred or read.
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_OBSERVED_TYPE_QUERY_CALLS)
+        with patch.object(prepare_boot, "GAME_OBSERVED_TYPE_QUERY_CALLS", (spec,) * count):
+            self.assertEqual(prepare_boot.game_observed_type_query_roots(image), {0x9B910})
+            self.assertEqual(image.targets, {})
+            image.bad_code = 0x9B910
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_observed_type_query_roots(image)
+            image.bad_code = None; image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_observed_type_query_roots(image)
+            with patch.object(image, "section_of", return_value=None):
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_observed_type_query_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_OBSERVED_TYPE_QUERY_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_observed_type_query_roots(image)
+
+    def test_bounds_delegate_chains_and_temporary_pair_listeners(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x455558: 0x1000, 0x456178: 0x1000, 0x455F70: 0x1000,
+                         0x456110: 0x1010, 0x4561AC: 0x1010,
+                         0x4138F4: 0x1020, 0x4138F8: 0x1030}
+        slots = tuple(image.targets)
+        for neighbor in (0x455554, 0x45555C, 0x45617C, 0x455F74,
+                         0x456114, 0x4561B0, 0x4138F0, 0x4138FC):
+            image.targets[neighbor] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_BOUNDS_DELEGATE_CALLS)
+        with patch.object(prepare_boot, "GAME_BOUNDS_DELEGATE_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_bounds_delegate_roots(image),
+                             {0x1000, 0x1010, 0x1020, 0x1030})
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_bounds_delegate_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_bounds_delegate_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_BOUNDS_DELEGATE_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_bounds_delegate_roots(image)
+
+    def test_original_pool_allocation_and_free_targets(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = (0x457630, 0x457634, 0x461DDC)
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        for neighbor in (0x45762C, 0x457638, 0x461DD8, 0x461DE0):
+            image.targets[neighbor] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_POOL_ALLOCATION_CALLS)
+        with patch.object(prepare_boot, "GAME_POOL_ALLOCATION_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_pool_allocation_roots(image), {0x1000, 0x1010, 0x1020})
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_pool_allocation_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_pool_allocation_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_POOL_ALLOCATION_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_pool_allocation_roots(image)
+
+    def test_original_predicate_replacement_and_lifetime(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x4138DC: 0x1000, 0x4555E8: 0x1010,
+                         0x4138D8: None, 0x4138E0: None, 0x4555E4: None, 0x4555EC: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_PREDICATE_REPLACEMENT_CALLS)
+        with patch.object(prepare_boot, "GAME_PREDICATE_REPLACEMENT_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_predicate_replacement_roots(image), {0x1000, 0x1010})
+            self.assertEqual(image.targets, before)
+            for slot in (0x4138DC, 0x4555E8):
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_predicate_replacement_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_predicate_replacement_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_PREDICATE_REPLACEMENT_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_predicate_replacement_roots(image)
+
+    def test_constructor_owned_field_release_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x4138C0: 0x1000, 0x4138BC: None, 0x4138C4: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_OWNER_FIELD_RELEASE_CALLS)
+        with patch.object(prepare_boot, "GAME_OWNER_FIELD_RELEASE_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_owner_field_release_roots(image), {0x1000})
+            self.assertEqual(image.targets, before)
+            for bad in (0, None, 0xDEAD):
+                image.targets[0x4138C0] = image.bad_code = bad
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_owner_field_release_roots(image)
+            image.targets[0x4138C0] = 0x1000; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_owner_field_release_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_OWNER_FIELD_RELEASE_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_owner_field_release_roots(image)
+
+    def test_registered_body_notifications_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x45A768: 0x1000, 0x45A76C: 0x1010,
+                         0x45A764: None, 0x45A770: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_BODY_NOTIFICATION_CALLS)
+        with patch.object(prepare_boot, "GAME_BODY_NOTIFICATION_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_body_notification_roots(image), {0x1000, 0x1010})
+            self.assertEqual(image.targets, before)
+            for slot in (0x45A768, 0x45A76C):
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_body_notification_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_body_notification_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_BODY_NOTIFICATION_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_body_notification_roots(image)
+
+    def test_original_pair_predicate_and_constructor_bound_listeners(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = (0x4138C8, 0x41388C, 0x413890, 0x4137E8, 0x4137EC,
+                 0x43E538, 0x43E53C)
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        image.targets[0x43E53C] = image.targets[0x43E538]
+        for neighbor in (0x4138CC, 0x413888, 0x413894, 0x4137E4, 0x4137F0,
+                         0x43E534, 0x43E540):
+            image.targets[neighbor] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_PAIR_LISTENER_CALLS)
+        with patch.object(prepare_boot, "GAME_PAIR_LISTENER_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_pair_listener_roots(image),
+                             set(range(0x1000, 0x1060, 16)))
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_pair_listener_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_pair_listener_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_PAIR_LISTENER_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_pair_listener_roots(image)
+
+    def test_bounds_getter_and_index_insert_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x4137E4: 0x1000, 0x412604: 0x1010,
+                         0x4137E0: None, 0x4137E8: None, 0x412600: None, 0x412608: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_BOUNDS_INSERT_CALLS)
+        with patch.object(prepare_boot, "GAME_BOUNDS_INSERT_CALLS", (spec,) * count):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_bounds_insert_roots(image), {0x1000, 0x1010})
+            self.assertEqual(image.targets, before)
+            for slot in (0x4137E4, 0x412604):
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_bounds_insert_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_bounds_insert_roots(image)
+        for which in range(count):
+            specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_BOUNDS_INSERT_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_bounds_insert_roots(image)
+
+    def test_member_query_constructor_slots_and_original_counter(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        ctors = [(*spec, vtable) for *_, vtable in prepare_boot.GAME_MEMBER_QUERY_CTORS]
+        calls = [spec] * len(prepare_boot.GAME_MEMBER_QUERY_CALLS)
+        image.targets = {0x414FE0: 0x1010}
+        for n, (*_, vtable) in enumerate(ctors):
+            image.targets.update({vtable + 4: 0x1020 + n * 16,
+                                  vtable + 8: 0x1080 + n * 16, vtable + 0x14: 0x1000})
+            for neighbor in (0, 0xC, 0x10, 0x18): image.targets[vtable + neighbor] = None
+        image.targets[0x414FE4] = None
+        expected = set(v for v in image.targets.values() if v)
+        with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CALLS", calls):
+            with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CTORS", ctors):
+                before = dict(image.targets)
+                self.assertEqual(prepare_boot.game_member_query_roots(image), expected)
+                self.assertEqual(image.targets, before)
+                for slot, saved in before.items():
+                    if saved is None: continue
+                    for bad in (0, None, 0xDEAD):
+                        image.targets[slot] = image.bad_code = bad
+                        with self.assertRaisesRegex(ValueError, "title code"):
+                            prepare_boot.game_member_query_roots(image)
+                    image.targets[slot] = saved; image.bad_code = None
+                image.section_name = "DSOUND"
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_member_query_roots(image)
+            for which in range(len(ctors)):
+                bad = list(ctors); bad[which] = (*spec[:2], "0" * 64, ctors[which][3])
+                with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CTORS", bad):
+                    with self.assertRaisesRegex(ValueError, "constructor fingerprint"):
+                        prepare_boot.game_member_query_roots(image)
+        with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CTORS", ctors):
+            for which in range(len(calls)):
+                bad = list(calls); bad[which] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_MEMBER_QUERY_CALLS", bad):
+                    with self.assertRaisesRegex(ValueError, "caller fingerprint"):
+                        prepare_boot.game_member_query_roots(image)
+
+    def test_boot_factory_and_deletion_slots_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = (0x411D20, 0x411D2C, 0x411D30, 0x411D3C, 0x411DA4,
+                 0x4537A0, 0x4576B0, 0x4576B8)
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        for neighbor in (0x411D24, 0x411D28, 0x411D34, 0x411D38, 0x411D40,
+                         0x411DA8, 0x4537A4, 0x4576BC):
+            image.targets[neighbor] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        count = len(prepare_boot.GAME_BOOT_FACTORY_CALLS)
+        with patch.object(prepare_boot, "GAME_ARENA_BOOT_CALLS", (spec,) * 3):
+            with patch.object(prepare_boot, "GAME_BOOT_FACTORY_CALLS", (spec,) * count):
+                before = dict(image.targets)
+                self.assertEqual(prepare_boot.game_boot_factory_roots(image), set(range(0x1000, 0x1080, 16)))
+                self.assertEqual(image.targets, before)
+                for slot in slots:
+                    saved = image.targets[slot]
+                    for bad in (0, None, 0xDEAD):
+                        image.targets[slot] = image.bad_code = bad
+                        with self.assertRaisesRegex(ValueError, "title code"):
+                            prepare_boot.game_boot_factory_roots(image)
+                    image.targets[slot] = saved; image.bad_code = None
+                image.section_name = "DSOUND"
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_boot_factory_roots(image)
+            for which in range(count):
+                specs = [spec] * count; specs[which] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_BOOT_FACTORY_CALLS", specs):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_boot_factory_roots(image)
+        with patch.object(prepare_boot, "GAME_BOOT_FACTORY_CALLS", (spec,) * count):
+            for which in range(3):
+                specs = [spec] * 3; specs[which] = (*spec[:2], "0" * 64)
+                with patch.object(prepare_boot, "GAME_ARENA_BOOT_CALLS", specs):
+                    with self.assertRaisesRegex(ValueError, "fingerprint"):
+                        prepare_boot.game_boot_factory_roots(image)
+
+    def test_arena_boot_forwarding_slots_and_guards(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x4576AC: 0x1000, 0x4576B4: 0x1010,
+                         0x4576A8: None, 0x4576B0: None, 0x4576B8: None}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_ARENA_BOOT_CALLS", (spec,) * 3):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_arena_boot_roots(image), {0x1000, 0x1010})
+            self.assertEqual(image.targets, before)
+            for slot in (0x4576AC, 0x4576B4):
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_arena_boot_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_arena_boot_roots(image)
+        for which in range(3):
+            specs = [spec] * 3; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_ARENA_BOOT_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_arena_boot_roots(image)
+
+    def test_fixed_startup_pair_and_allocator_slots_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        slots = (0x461DF0, 0x461DF4, 0x45379C, 0x4537AC)
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(slots)}
+        image.targets[0x4798B0] = 0x45378C
+        for neighbor in (0x461DEC, 0x461DF8, 0x45378C, 0x453798, 0x4537A0, 0x4537A8, 0x4537B0):
+            image.targets[neighbor] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_FIXED_STARTUP_CALLS", (spec,) * 5):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_fixed_startup_roots(image), set(range(0x1000, 0x1040, 16)))
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                saved = image.targets[slot]
+                for bad in (0, None, 0xDEAD):
+                    image.targets[slot] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "title code"):
+                        prepare_boot.game_fixed_startup_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_fixed_startup_roots(image)
+            image.section_name = ".text"
+            for bad in (0, None, 0x453790):
+                image.targets[0x4798B0] = bad
+                with self.assertRaisesRegex(ValueError, "binding mismatch"):
+                    prepare_boot.game_fixed_startup_roots(image)
+        for which in range(5):
+            specs = [spec] * 5; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_FIXED_STARTUP_CALLS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_fixed_startup_roots(image)
+
+    def test_packed_vector_observed_rows_both_triplets_only(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        bases = (0x47FB4C, 0x47FBC4, 0x47FC14)
+        slots = [base + n * 4 for base in bases for n in range(6)]
+        image.targets = {slot: 0x1000 + (n % 6) * 16 for n, slot in enumerate(slots)}
+        for base in bases:
+            image.targets[base - 4] = None; image.targets[base + 24] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_PACKED_VECTOR_BINDINGS", (spec, spec)):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_packed_vector_roots(image), set(range(0x1000, 0x1060, 16)))
+            self.assertEqual(image.targets, before)
+            for slot in slots:
+                saved = image.targets[slot]
+                for invalid in (0, None):
+                    image.targets[slot] = invalid
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_packed_vector_roots(image)
+                image.targets[slot] = saved
+            image.bad_code = 0x1020
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_packed_vector_roots(image)
+            image.bad_code = None; image.section_name = "D3D"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_packed_vector_roots(image)
+        for which in range(2):
+            guards = [spec, spec]; guards[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_PACKED_VECTOR_BINDINGS", guards):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_packed_vector_roots(image)
+
+    def test_animation_codec_all_nine_rows_bounded_by_shared_callback(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        base = prepare_boot.GAME_ANIMATION_CODEC_TABLE
+        slots = [base + row * 40 + off for row in range(9) for off in range(0, 0x1C, 4)]
+        image.targets = {slot: 0x1000 + (n % 7) * 16 for n, slot in enumerate(slots)}
+        image.targets[base + 9 * 40 + 0x18] = 0            # no shared callback past row 8
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_ANIMATION_CODEC_BINDINGS", (spec,) * 4):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_animation_codec_roots(image),
+                             set(range(0x1000, 0x1070, 16)))
+            self.assertEqual(image.targets, before)
+            # A null transform callback (row 0's absent fields) is skipped, not rooted.
+            image.targets[base + 0x00] = 0
+            self.assertEqual(len(prepare_boot.game_animation_codec_roots(image)), 7)
+            image.targets[base + 0x00] = before[base + 0x00]
+            # A non-code callback in any row is rejected.
+            for slot in (base + 0x00, base + 8 * 40 + 0x14):
+                saved = image.targets[slot]; image.targets[slot] = 0xDEAD; image.bad_code = 0xDEAD
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_animation_codec_roots(image)
+                image.targets[slot] = saved; image.bad_code = None
+            # Too few rows (an earlier terminator) is rejected.
+            image.targets[base + 8 * 40 + 0x18] = 0
+            with self.assertRaisesRegex(ValueError, "rows, expected 9"):
+                prepare_boot.game_animation_codec_roots(image)
+            image.targets[base + 8 * 40 + 0x18] = before[base + 8 * 40 + 0x18]
+            # Too many rows (a tenth codec-shaped row) is rejected.
+            for off in range(0, 0x1C, 4):
+                image.targets[base + 9 * 40 + off] = 0x1000 + (off // 4) * 16
+            image.targets[base + 10 * 40 + 0x18] = 0
+            with self.assertRaisesRegex(ValueError, "rows, expected 9"):
+                prepare_boot.game_animation_codec_roots(image)
+            image.targets[base + 9 * 40 + 0x18] = 0
+        for which in range(4):
+            guards = [spec] * 4; guards[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_ANIMATION_CODEC_BINDINGS", guards):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_animation_codec_roots(image)
+
+    def test_widget_property_dispatch_bounds_nulls_and_revision(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x470828, 0x4709E8, 4))}
+        image.targets[0x470830] = 0
+        expected = set(image.targets.values()) - {0}
+        image.targets[0x470824] = None; image.targets[0x4709E8] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_WIDGET_PROPERTY_DISPATCH", spec):
+            self.assertEqual(prepare_boot.game_widget_property_roots(image), expected)
+            for slot in (0x470828, 0x470888, 0x4709E4):
+                saved = image.targets[slot]; image.targets[slot] = None
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_widget_property_roots(image)
+                image.targets[slot] = saved
+            image.bad_code = image.targets[0x4709E4]
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_widget_property_roots(image)
+            image.bad_code = None; image.section_name = "D3D"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_widget_property_roots(image)
+            image.section_name = ".text"; image.code = b"x" * len(image.code)
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.game_widget_property_roots(image)
+
+    def test_text_widget_and_embedded_member_prefixes(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        spans = ((0x458940, 0x458984), (0x4588B0, 0x4588BC), (0x458930, 0x45893C))
+        image.targets = {slot: 0x1000 + slot for start, end in spans for slot in range(start, end, 4)}
+        expected = set(image.targets.values())
+        for _, end in spans:
+            image.targets[end] = 0
+            if end + 4 not in image.targets:
+                image.targets[end + 4] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_TEXT_WIDGET_CONSTRUCTORS", (spec,) * 4):
+            self.assertEqual(prepare_boot.game_text_widget_vtable_roots(image), expected)
+            for start, end in spans:
+                saved = image.targets[start]; image.targets[start] = None
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_text_widget_vtable_roots(image)
+                image.targets[start] = saved; image.targets[end] = 0x123456
+                with self.assertRaisesRegex(ValueError, "boundary"):
+                    prepare_boot.game_text_widget_vtable_roots(image)
+                image.targets[end] = 0
+            image.code = b"x" * len(image.code)
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.game_text_widget_vtable_roots(image)
+
+    def test_startup_widget_constructor_and_exact_vtable_bounds(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x45BC60, 0x45BCD0, 4))}
+        expected = set(image.targets.values())
+        image.targets[0x45BC5C] = None; image.targets[0x45BCD0] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_STARTUP_WIDGET_CONSTRUCTORS", (spec, spec)):
+            self.assertEqual(prepare_boot.game_startup_widget_vtable_roots(image), expected)
+            for slot in (0x45BC60, 0x45BCA8, 0x45BCCC):
+                saved = image.targets[slot]
+                for invalid in (0, None):
+                    image.targets[slot] = invalid
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_startup_widget_vtable_roots(image)
+                image.targets[slot] = saved
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_startup_widget_vtable_roots(image)
+            image.section_name = ".text"; image.code = b"x" * len(image.code)
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.game_startup_widget_vtable_roots(image)
+
+    def test_game_sound_owner_bindings_and_bounded_tables(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x200, 0x224, 4))}
+        expected = set(image.targets.values()); image.targets[0x100] = 0x200
+        image.code = bytes(36)
+        guard = ((0x100, 0x200, 36, hashlib.sha256(image.code).hexdigest()),)
+        with patch.object(prepare_boot, "GAME_SOUND_VTABLES", guard):
+            self.assertEqual(prepare_boot.game_sound_owner_roots(image), expected)
+            image.targets[0x100] = 0x204
+            with self.assertRaisesRegex(ValueError, "binding"):
+                prepare_boot.game_sound_owner_roots(image)
+            image.targets[0x100] = 0x200; image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_sound_owner_roots(image)
+            image.section_name = ".text"; image.bad_code = 0x1020
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_sound_owner_roots(image)
+            image.bad_code = None; image.targets[0x220] = 0
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_sound_owner_roots(image)
+            image.code = bytes([1]) * 36
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.game_sound_owner_roots(image)
+
+    def test_stream_interface_bounds_and_revision(self):
+        image = SyntheticImage(); image.section_name = "DSOUND"
+        image.targets = {slot: 0x1000 + n * 16 for n, slot in enumerate(range(0x200, 0x21C, 4))}
+        image.code = bytes(28)
+        guard = (0x200, 28, hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "STREAM_VTABLE", guard):
+            self.assertEqual(prepare_boot.audio_stream_roots(image), set(image.targets.values()))
+            image.section_name = ".text"
+            with self.assertRaisesRegex(ValueError, "DSOUND code"):
+                prepare_boot.audio_stream_roots(image)
+            image.section_name = "DSOUND"; image.bad_code = 0x1030
+            with self.assertRaisesRegex(ValueError, "DSOUND code"):
+                prepare_boot.audio_stream_roots(image)
+            image.bad_code = None; image.targets[0x204] = 0
+            with self.assertRaisesRegex(ValueError, "DSOUND code"):
+                prepare_boot.audio_stream_roots(image)
+            image.code = bytes([1]) * 28
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.audio_stream_roots(image)
+
+    def test_resource_lifecycle_three_record_walks(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        bases = (0x4674A4, 0x4674A8, 0x4674B8)
+        image.targets = {base + n * 0x38: 0x1000 + (n * 3 + phase) * 16
+                         for phase, base in enumerate(bases) for n in range(3)}
+        expected = set(image.targets.values())
+        for base in bases:
+            image.targets[base + 3 * 0x38] = None
+        for n in range(3):
+            image.targets[0x467498 + n * 0x38] = None  # metadata, never code
+            image.targets[0x4674AC + n * 0x38] = None  # unreviewed field
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_RESOURCE_WALKS", (spec,) * 3):
+            self.assertEqual(prepare_boot.game_resource_callback_roots(image), expected)
+            for base in bases:
+                last = base + 2 * 0x38; saved = image.targets[last]
+                image.targets[last] = 0
+                self.assertEqual(prepare_boot.game_resource_callback_roots(image), expected - {saved})
+                for bad in (None, 0xDEAD):
+                    image.targets[last] = image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_resource_callback_roots(image)
+                image.targets[last] = saved; image.bad_code = None
+            image.section_name = "DATA"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_resource_callback_roots(image)
+        for which in range(3):
+            specs = [spec] * 3; specs[which] = (0x200, len(image.code), "0" * 64)
+            with patch.object(prepare_boot, "GAME_RESOURCE_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_resource_callback_roots(image)
+
+    def test_map_lifecycle_fields_bounds_nulls_and_revision(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        bases = (0x440DE0, 0x440DE4, 0x440DE8, 0x440DEC)
+        image.targets = {base + n * 0x24: 0x1000 + ((n + phase) % 47) * 16
+                         for phase, base in enumerate(bases) for n in range(68)}
+        for base in bases:
+            image.targets[base] = 0
+        # Adjacent descriptor fields and the next record are never inspected.
+        for n in range(69):
+            for field in (0x440DD8, 0x440DDC, 0x440DF0):
+                image.targets[field + n * 0x24] = None
+        for base in bases:
+            image.targets[base + 68 * 0x24] = None
+        expected = {t for t in image.targets.values() if t}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_MAP_WALKS", (spec,) * 4):
+            self.assertEqual(prepare_boot.game_map_callback_roots(image), expected)
+            for base in bases:
+                last = base + 67 * 0x24; saved = image.targets[last]
+                for bad in (None, 0xDEAD):
+                    image.targets[last] = bad; image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_map_callback_roots(image)
+                image.targets[last] = saved; image.bad_code = None
+            image.section_name = "DATA"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_map_callback_roots(image)
+        for which in range(4):
+            specs = [spec] * 4; specs[which] = (0x200, len(image.code), "0" * 64)
+            with patch.object(prepare_boot, "GAME_MAP_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_map_callback_roots(image)
+
+    def test_remaining_lifecycle_fields_required_disposal_and_guards(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        bases = (0x440DDC, 0x440DF0, 0x440DF4, 0x440DF8)
+        image.targets = {base + n * 0x24: 0x1000 + ((n + phase) % 47) * 16
+                         for phase, base in enumerate(bases) for n in range(68)}
+        expected = set(image.targets.values())
+        # Every unselected field and record69 is poisoned, never scanned.
+        for n in range(69):
+            for field in (0x440DD8, 0x440DE0, 0x440DE4, 0x440DE8, 0x440DEC):
+                image.targets[field + n * 0x24] = None
+        for base in bases: image.targets[base + 68 * 0x24] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_REMAINING_LIFECYCLE_WALKS", (spec,) * 3):
+            before = dict(image.targets)
+            self.assertEqual(prepare_boot.game_remaining_lifecycle_roots(image), expected)
+            self.assertEqual(image.targets, before)
+            for base in bases:
+                for n in range(68):
+                    slot = base + n * 0x24; saved = image.targets[slot]
+                    image.targets[slot] = 0
+                    if base == 0x440DDC:
+                        with self.assertRaisesRegex(ValueError, "invalid target"):
+                            prepare_boot.game_remaining_lifecycle_roots(image)
+                    else:
+                        prepare_boot.game_remaining_lifecycle_roots(image)
+                    image.targets[slot] = saved
+                last = base + 67 * 0x24; saved = image.targets[last]
+                for bad in (None, 0xDEAD):
+                    image.targets[last] = bad; image.bad_code = bad
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_remaining_lifecycle_roots(image)
+                image.targets[last] = saved; image.bad_code = None
+            image.section_name = "DSOUND"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_remaining_lifecycle_roots(image)
+        for which in range(3):
+            specs = [spec] * 3; specs[which] = (*spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_REMAINING_LIFECYCLE_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_remaining_lifecycle_roots(image)
+
+    def test_mixed_bink_pixel_descriptor(self):
+        image = SyntheticImage(); image.section_name = "BINK32"
+        offsets = (*range(8, 0x34, 8), *range(0x74, 0xB4, 4))
+        image.targets = {0x57A080 + off: 0x1000 + n * 16 for n, off in enumerate(offsets)}
+        expected = set(image.targets.values()); self.assertEqual(len(expected), 22)
+        for off, value in ((0, 4), (4, 2), (12, 2), (20, 3), (28, 2), (36, 2), (44, 3)):
+            image.targets[0x57A080 + off] = value
+        # Neither mutable counters nor following descriptor data are inspected.
+        image.targets[0x57A0B4] = image.targets[0x57A0F0] = image.targets[0x57A134] = None
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "BINK_PIXEL_DISPATCH", (spec, spec)):
+            self.assertEqual(prepare_boot.bink_pixel_callback_roots(image), expected)
+            image.targets[0x57A130] = 0
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.bink_pixel_callback_roots(image)
+            image.targets[0x57A130] = 0x1000 + 21 * 16
+            image.section_name = "BINKDATA"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.bink_pixel_callback_roots(image)
+            image.section_name = "BINK32"; image.bad_code = image.targets[0x57A088]
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.bink_pixel_callback_roots(image)
+            image.bad_code = None; image.targets[0x57A084] = 4
+            with self.assertRaisesRegex(ValueError, "shape"):
+                prepare_boot.bink_pixel_callback_roots(image)
+        with patch.object(prepare_boot, "BINK_PIXEL_DISPATCH", ((0x200, len(image.code), "0" * 64),)):
+            with self.assertRaisesRegex(ValueError, "fingerprint"):
+                prepare_boot.bink_pixel_callback_roots(image)
+
+    def test_two_static_online_interfaces(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16
+                         for n, slot in enumerate(range(0x450B44, 0x450B88, 4))}
+        expected = set(image.targets.values())
+        image.targets.update({0x47708C: 0x450B68, 0x47712C: 0x450B44})
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_ONLINE_INTERFACE_DISPATCH", spec):
+            self.assertEqual(prepare_boot.game_online_interface_roots(image), expected)
+            self.assertEqual(len(expected), 17)
+            image.targets[0x47712C] = 0x450B48
+            with self.assertRaisesRegex(ValueError, "binding .* mismatch"):
+                prepare_boot.game_online_interface_roots(image)
+            image.targets[0x47712C] = 0x450B44
+            image.targets[0x450B84] = None
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_online_interface_roots(image)
+        with patch.object(prepare_boot, "GAME_ONLINE_INTERFACE_DISPATCH", (0x200, len(image.code), "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_online_interface_roots(image)
+
+    def test_eleven_state_interfaces_bounded_by_constructor(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16
+                         for n, slot in enumerate(range(0x450990, 0x450A40, 4))}
+        spec = ((0x200, len(image.code), hashlib.sha256(image.code).hexdigest()),)
+        with patch.object(prepare_boot, "GAME_STATE_CONSTRUCTORS", spec):
+            self.assertEqual(prepare_boot.game_state_vtable_roots(image), set(image.targets.values()))
+            self.assertEqual(len(image.targets), 44)
+            image.targets[0x450A3C] = None
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_state_vtable_roots(image)
+        with patch.object(prepare_boot, "GAME_STATE_CONSTRUCTORS", ((0x200, len(image.code), "0" * 64),)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_state_vtable_roots(image)
+
+    def test_four_registered_interfaces_exact_bounds_and_bindings(self):
+        image = SyntheticImage(); image.section_name = ".text"; image.targets = {}
+        bindings = ((0x417370, 0x462E00, 0x417378), (0x4173E4, 0x462E10, 0x4173E8),
+                    (0x41745C, 0x462E28, 0x417460), (0x4174D0, 0x462F30, 0x4174D8))
+        expected = set()
+        for number, (slot, instance, table) in enumerate(bindings):
+            image.targets[slot] = instance; image.targets[instance] = table
+            for index in range(27):
+                target = 0x1000 + (number * 27 + index) * 16
+                image.targets[table + 4 * index] = target; expected.add(target)
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_INTERFACE_REGISTRATION", spec):
+            self.assertEqual(prepare_boot.game_registered_interface_roots(image), expected)
+            image.targets[0x462F30] += 4
+            with self.assertRaisesRegex(ValueError, "binding"):
+                prepare_boot.game_registered_interface_roots(image)
+            image.targets[0x462F30] -= 4; image.targets[0x417540] = None
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_registered_interface_roots(image)
+        with patch.object(prepare_boot, "GAME_INTERFACE_REGISTRATION", (0x200, len(image.code), "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_registered_interface_roots(image)
+
+    def test_allocator_vtable_bounds_and_revision(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16
+                         for n, slot in enumerate(range(0x454970, 0x454980, 4))}
+        spec = ((0x200, len(image.code), hashlib.sha256(image.code).hexdigest()),)
+        with patch.object(prepare_boot, "GAME_ALLOCATOR_CONSTRUCTORS", spec):
+            self.assertEqual(prepare_boot.game_allocator_vtable_roots(image), set(image.targets.values()))
+            image.targets[0x45497C] = None
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_allocator_vtable_roots(image)
+        with patch.object(prepare_boot, "GAME_ALLOCATOR_CONSTRUCTORS", ((0x200, len(image.code), "0" * 64),)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_allocator_vtable_roots(image)
+
+    def test_paired_mode_callbacks_and_null_skip(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16
+                         for n, slot in enumerate(range(0x453C00, 0x453C40, 4))}
+        image.targets[0x453C08] = 0
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_MODE_WALK", spec):
+            self.assertEqual(prepare_boot.game_mode_callback_roots(image), set(image.targets.values()) - {0})
+            for invalid in (None, 0xDEAD):
+                image.targets[0x453C3C] = invalid; image.bad_code = invalid
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_mode_callback_roots(image)
+        with patch.object(prepare_boot, "GAME_MODE_WALK", (0x200, len(image.code), "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_mode_callback_roots(image)
+
+    def test_constructor_bounded_dispatch_vtable(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {slot: 0x1000 + n * 16
+                         for n, slot in enumerate(range(0x4599A8, 0x4599DC, 4))}
+        spec = ((0x200, len(image.code), hashlib.sha256(image.code).hexdigest()),)
+        with patch.object(prepare_boot, "GAME_DISPATCH_CONSTRUCTORS", spec):
+            self.assertEqual(prepare_boot.game_dispatch_vtable_roots(image), set(image.targets.values()))
+            image.targets[0x4599D8] = None
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_dispatch_vtable_roots(image)
+        with patch.object(prepare_boot, "GAME_DISPATCH_CONSTRUCTORS", ((0x200, len(image.code), "0" * 64),)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_dispatch_vtable_roots(image)
+
+    def test_game_record_stride_and_bounds(self):
+        image = SyntheticImage(); image.section_name = ".text"
+        image.targets = {0x440DD8 + n * 0x24: 0x5000 + (n % 49) * 16 for n in range(68)}
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "GAME_INIT_WALK", spec):
+            self.assertEqual(len(prepare_boot.game_initialization_roots(image)), 49)
+            last = 0x440DD8 + 67 * 0x24
+            for bad in (None, 0):
+                image.targets[last] = bad
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.game_initialization_roots(image)
+            image.targets[last] = image.bad_code = 0xDEAD
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_initialization_roots(image)
+            image.bad_code = None; image.section_name = "DATA"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.game_initialization_roots(image)
+        with patch.object(prepare_boot, "GAME_INIT_WALK", (0x200, len(image.code), "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.game_initialization_roots(image)
+
+    def test_xpp_two_level_walk(self):
+        image = SyntheticImage()
+        image.section_name = "XPP"
+        image.targets = {slot: 0x2000 + n * 24
+                         for n, slot in enumerate(range(0x4086D4, 0x4086EC, 4))}
+        image.targets.update({0x2004 + n * 24: 0x5000 + (n % 3) * 16 for n in range(6)})
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "XPP_CALLBACK_WALK", spec):
+            self.assertEqual(prepare_boot.host_device_callback_roots(image), {0x5000, 0x5010, 0x5020})
+            image.targets[0x4086E8] = 0  # original walk skips null descriptors
+            self.assertEqual(len(prepare_boot.host_device_callback_roots(image)), 3)
+            image.targets[0x4086D4] = 0x2001
+            with self.assertRaisesRegex(ValueError, "descriptor"):
+                prepare_boot.host_device_callback_roots(image)
+            image.targets[0x4086D4] = 0x2000
+            image.targets[0x2004] = None
+            with self.assertRaisesRegex(ValueError, "callback"):
+                prepare_boot.host_device_callback_roots(image)
+            image.targets[0x2004] = 0x5000; image.bad_code = 0x5000
+            with self.assertRaisesRegex(ValueError, "callback"):
+                prepare_boot.host_device_callback_roots(image)
+        with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+            with patch.object(prepare_boot, "XPP_CALLBACK_WALK", (0x200, len(image.code), "0" * 64)):
+                prepare_boot.host_device_callback_roots(image)
+
+    def test_exact_walk_and_invalid_targets(self):
+        image = SyntheticImage()
+        spec = (0x200, len(image.code), hashlib.sha256(image.code).hexdigest())
+        with patch.object(prepare_boot, "HOST_CALLBACK_WALK", spec):
+            roots = prepare_boot.host_channel_callback_roots(image)
+            self.assertEqual(len(roots), 29)
+            self.assertIn(image.targets[0x403AF8], roots)
+            self.assertIn(image.targets[0x403B6C], roots)
+            for target in (None, 0):
+                image.targets[0x403B6C] = target
+                with self.assertRaisesRegex(ValueError, "invalid target"):
+                    prepare_boot.host_channel_callback_roots(image)
+            image.targets[0x403B6C] = 0xDEAD
+            image.bad_code = 0xDEAD
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.host_channel_callback_roots(image)
+            image.bad_code = None
+            image.section_name = "DATA"
+            with self.assertRaisesRegex(ValueError, "invalid target"):
+                prepare_boot.host_channel_callback_roots(image)
+
+    def test_reject_changed_caller(self):
+        image = SyntheticImage()
+        with patch.object(prepare_boot, "HOST_CALLBACK_WALK", (0x200, len(image.code), "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                prepare_boot.host_channel_callback_roots(image)
+
+
+class SingletonImage:
+    def __init__(self):
+        self.code = b"synthetic complete registration and resolver"
+        self.spec = (0x200, len(self.code), hashlib.sha256(self.code).hexdigest())
+        self.registrations = [(*self.spec, node, storage, crt)
+                              for _, _, _, node, storage, crt in prepare_boot.GAME_SINGLETON_REGISTRATIONS]
+        self.words = {0x461E10: None}  # adjacent non-node metadata
+        for n, (_, _, _, node, storage, crt) in enumerate(self.registrations):
+            self.words.update({crt: 0x200, node: 0x1000 + n * 16, node + 4: 0, node + 8: storage})
+        self.data_end = 0x467000; self.storage_end = 0x485000
+        self.data_name = ".data"; self.storage_name = ".bss"; self.code_name = ".text"
+        self.short_node = None; self.bad_code = None
+
+    def bytes_at(self, address, size):
+        if address == 0x200:
+            assert size == len(self.code)
+            return self.code
+        assert size == 12
+        return bytes(11 if address == self.short_node else 12)
+
+    def u32(self, address): return self.words[address]
+    def is_code(self, address): return 0x1000 <= address < 0x1080 and address != self.bad_code
+    def section_of(self, address):
+        if 0x461000 <= address < 0x467000:
+            return (0x461000, 0, self.data_end - 0x461000, 0, self.data_name)
+        if 0x480000 <= address < 0x485000:
+            return (0x480000, 0, 0, self.storage_end - 0x480000, self.storage_name)
+        return (0x1000, 0, 0x80, 0, self.code_name)
+
+
+class SingletonRoots(unittest.TestCase):
+    def setUp(self):
+        self.image = SingletonImage()
+        for name, value in (("GAME_SINGLETON_WALK", self.image.spec),
+                            ("GAME_SINGLETON_REGISTRATIONS", self.image.registrations)):
+            guard = patch.object(prepare_boot, name, value); guard.start(); self.addCleanup(guard.stop)
+
+    def test_eight_creators_bindings_targets_and_no_mutation(self):
+        im = self.image; before = dict(im.words)
+        self.assertEqual(prepare_boot.game_singleton_creator_roots(im), set(range(0x1000, 0x1080, 16)))
+        self.assertEqual(im.words, before)
+        for _, _, _, node, storage, crt in im.registrations:
+            for field in (crt, node + 4, node + 8):
+                saved = im.words[field]; im.words[field] = 0xDEAD
+                with self.assertRaisesRegex(ValueError, "binding mismatch"):
+                    prepare_boot.game_singleton_creator_roots(im)
+                im.words[field] = saved
+            saved = im.words[node]
+            for bad in (None, 0, 0x3000):
+                im.words[node] = bad
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_singleton_creator_roots(im)
+            im.words[node] = saved; im.bad_code = saved
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_singleton_creator_roots(im)
+            im.bad_code = None
+        im.code_name = "DSOUND"
+        with self.assertRaisesRegex(ValueError, "title code"):
+            prepare_boot.game_singleton_creator_roots(im)
+
+    def test_node_and_zero_fill_storage_spans(self):
+        im = self.image
+        im.data_name = ".text"
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_singleton_creator_roots(im)
+        im.data_name = ".data"; im.data_end = max(r[3] for r in im.registrations) + 11
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_singleton_creator_roots(im)
+        im.data_end = 0x467000; im.short_node = im.registrations[0][3]
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_singleton_creator_roots(im)
+        im.short_node = None; im.storage_end = max(r[4] for r in im.registrations) + 3
+        with self.assertRaisesRegex(ValueError, "image span"):
+            prepare_boot.game_singleton_creator_roots(im)
+        im.storage_end = 0x485000; im.storage_name = ".text"
+        with self.assertRaisesRegex(ValueError, "image span"):
+            prepare_boot.game_singleton_creator_roots(im)
+
+    def test_resolver_and_all_registration_guards(self):
+        im = self.image
+        with patch.object(prepare_boot, "GAME_SINGLETON_WALK", (*im.spec[:2], "0" * 64)):
+            with self.assertRaisesRegex(ValueError, "resolver fingerprint"):
+                prepare_boot.game_singleton_creator_roots(im)
+        for which in range(8):
+            specs = list(im.registrations)
+            specs[which] = (*specs[which][:2], "0" * 64, *specs[which][3:])
+            with patch.object(prepare_boot, "GAME_SINGLETON_REGISTRATIONS", specs):
+                with self.assertRaisesRegex(ValueError, "registration fingerprint"):
+                    prepare_boot.game_singleton_creator_roots(im)
+
+
+class ActionImage:
+    def __init__(self):
+        self.code = b"synthetic action callers"
+        self.words = {slot: 0x467564 + (n % 38) * 16
+                      for n, slot in enumerate(range(0x4677C8, 0x4678B8, 4))}
+        for n in range(38):
+            for field in range(4):
+                self.words[0x467564 + n * 16 + field * 4] = 0x1000 + n * 64 + field * 16
+        self.bad_code = None
+        self.data_name = ".data"
+        self.code_name = ".text"
+        self.data_end = 0x4677C4
+        self.short_record = None
+
+    def u32(self, address):
+        return self.words[address]
+
+    def bytes_at(self, address, size):
+        if address == 0x200:
+            assert size == len(self.code)
+            return self.code
+        assert size == 16
+        data = struct.pack("<4I", *(self.words[address + n * 4] or 0 for n in range(4)))
+        return data[:-1] if address == self.short_record else data
+
+    def section_of(self, address):
+        if 0x467564 <= address < 0x4677C4:
+            return (0x467564, 0, self.data_end - 0x467564, 0, self.data_name)
+        return (0x1000, 0, 0x1000, 0, self.code_name)
+
+    def is_code(self, address):
+        return 0x1000 <= address < 0x2000 and address != self.bad_code
+
+
+class ActionRoots(unittest.TestCase):
+    def setUp(self):
+        self.image = ActionImage()
+        self.spec = (0x200, len(self.image.code), hashlib.sha256(self.image.code).hexdigest())
+        self.guards = patch.object(prepare_boot, "GAME_ACTION_WALKS", (self.spec,) * 4)
+        self.guards.start()
+        self.addCleanup(self.guards.stop)
+
+    def test_all_slots_four_fields_duplicates_and_no_mutation(self):
+        before = dict(self.image.words)
+        expected = set(range(0x1000, 0x1980, 16))
+        self.assertEqual(prepare_boot.game_action_callback_roots(self.image), expected)
+        self.assertEqual(self.image.words, before)
+        # Non-callback neighbors are deliberately invalid and never read.
+        self.image.words[0x4677C4] = None
+        self.image.words[0x4678B8] = None
+        self.assertEqual(prepare_boot.game_action_callback_roots(self.image), expected)
+        for slot in range(0x4677C8, 0x4678B8, 4):
+            saved = self.image.words[slot]
+            self.image.words[slot] = 0
+            with self.assertRaisesRegex(ValueError, "data span"):
+                prepare_boot.game_action_callback_roots(self.image)
+            self.image.words[slot] = saved
+
+    def test_record_arena_alignment_section_and_readable_span(self):
+        slot = 0x4677C8
+        for bad in (None, 0, 0x467560, 0x467565, 0x467568, 0x4677C4, 0x4677C8, 0xFFFFfff0):
+            self.image.words[slot] = bad
+            with self.assertRaisesRegex(ValueError, "data span"):
+                prepare_boot.game_action_callback_roots(self.image)
+        self.image.words[slot] = 0x467564
+        self.image.data_name = ".text"
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_action_callback_roots(self.image)
+        self.image.data_name = ".data"
+        self.image.data_end -= 1
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_action_callback_roots(self.image)
+        self.image.data_end += 1
+        self.image.short_record = 0x467564
+        with self.assertRaisesRegex(ValueError, "data span"):
+            prepare_boot.game_action_callback_roots(self.image)
+
+    def test_required_entry_optional_callbacks_and_code_sections(self):
+        for field in (4, 8, 12):
+            self.image.words[0x467564 + field] = 0
+        roots = prepare_boot.game_action_callback_roots(self.image)
+        self.assertIn(0x1000, roots)
+        for missing in (0x1010, 0x1020, 0x1030): self.assertNotIn(missing, roots)
+        for field in (0, 4, 8, 12):
+            slot = 0x467574 + field
+            saved = self.image.words[slot]
+            for bad in (None, 0x3000):
+                self.image.words[slot] = bad
+                with self.assertRaisesRegex(ValueError, "title code"):
+                    prepare_boot.game_action_callback_roots(self.image)
+            self.image.words[slot] = saved
+            self.image.bad_code = saved
+            with self.assertRaisesRegex(ValueError, "title code"):
+                prepare_boot.game_action_callback_roots(self.image)
+            self.image.bad_code = None
+        self.image.code_name = "D3D"
+        with self.assertRaisesRegex(ValueError, "title code"):
+            prepare_boot.game_action_callback_roots(self.image)
+        self.image.code_name = ".text"
+        self.image.words[0x467564] = 0
+        with self.assertRaisesRegex(ValueError, "title code"):
+            prepare_boot.game_action_callback_roots(self.image)
+
+    def test_all_four_original_walk_guards(self):
+        for which in range(4):
+            specs = [self.spec] * 4
+            specs[which] = (*self.spec[:2], "0" * 64)
+            with patch.object(prepare_boot, "GAME_ACTION_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_action_callback_roots(self.image)
+
+
+class DescriptorImage:
+    def __init__(self):
+        self.code = b"synthetic descriptor caller"
+        self.data = bytearray(0x10000)
+        self.parents = [0x461000 + n * 0xC8 for n in range(13)]
+        for index, parent in enumerate(self.parents):
+            self.write(0x468630 + 4 * index, parent)
+
+    def write(self, address, value):
+        struct.pack_into("<I", self.data, address - 0x460000, value)
+
+    def bytes_at(self, address, length):
+        if address == 0x200:
+            assert length == len(self.code)
+            return self.code
+        return bytes(self.data[address - 0x460000:address - 0x460000 + length])
+
+    def u32(self, address):
+        return struct.unpack_from("<I", self.data, address - 0x460000)[0]
+
+    def section_of(self, address):
+        if 0x460000 <= address < 0x470000:
+            return (0x460000, 0, 0x10000, 0x10000, ".data", ())
+        if 0x1000 <= address < 0x2000:
+            return (0x1000, 0, 0x1000, 0x1000, ".text", ("EXECUTABLE",))
+        return None
+
+    def is_code(self, address):
+        return 0x1000 <= address < 0x2000
+
+
+class DescriptorRoots(unittest.TestCase):
+    def setUp(self):
+        self.image = DescriptorImage()
+        code = self.image.code
+        self.guard = patch.object(prepare_boot, "GAME_DESCRIPTOR_WALK",
+                                  (0x200, len(code), hashlib.sha256(code).hexdigest()))
+        self.guard.start()
+        self.addCleanup(self.guard.stop)
+
+    def chain(self):
+        return prepare_boot.game_descriptor_initialization_chain(self.image)
+
+    def test_direct_child_fields_bounds_holes_and_no_recursion(self):
+        a, b = self.image.parents[:2]; shared = 0x464000; last = self.image.parents[-1]
+        for parent in (a, b, last):
+            self.image.write(parent + 0x84, shared)
+            self.image.write(parent + 0x8C, 0xDEAD)  # ignored after null at88h
+            self.image.write(parent + 0x20, 0xDEAD)  # parent itself not selected
+        self.image.write(shared + 0x84, 0xDEAD)  # no recursive child traversal
+        self.image.write(shared + 0x20, 0x1100)
+        self.image.write(shared + 0x24, 0x1200)
+        self.image.write(shared + 0x28, 0x1300)
+        self.image.write(shared + 0x2C, 0x1100)  # duplicate
+        self.image.write(shared + 0x30, 0xDEAD)  # adjacent field is not code
+        spec = (0x200, len(self.image.code), hashlib.sha256(self.image.code).hexdigest())
+        before = bytes(self.image.data)
+        with patch.object(prepare_boot, "GAME_DESCRIPTOR_CHILD_WALKS", (spec,) * 5):
+            self.assertEqual(prepare_boot.game_descriptor_child_roots(self.image), {0x1100, 0x1200, 0x1300})
+            self.assertEqual(bytes(self.image.data), before)
+            for offset in (0x20, 0x24, 0x28, 0x2C):
+                saved = self.image.u32(shared + offset)
+                for bad in (0xDEAD, 0x464000):
+                    self.image.write(shared + offset, bad)
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_descriptor_child_roots(self.image)
+                self.image.write(shared + offset, 0)
+                prepare_boot.game_descriptor_child_roots(self.image)  # original null skip
+                self.image.write(shared + offset, saved)
+            for i in range(16):
+                self.image.write(a + 0x84 + i * 4, shared)
+            with self.assertRaisesRegex(ValueError, "not terminated"):
+                prepare_boot.game_descriptor_child_roots(self.image)
+        for which in range(5):
+            specs = [spec] * 5; specs[which] = (0x200, len(self.image.code), "0" * 64)
+            with patch.object(prepare_boot, "GAME_DESCRIPTOR_CHILD_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_descriptor_child_roots(self.image)
+
+    def test_object_child_fields_bounds_and_all_walk_guards(self):
+        shared = 0x464000; parent = self.image.parents[-1]
+        self.image.write(parent + 0x84, shared)
+        self.image.write(parent + 0x8C, 0xDEAD)  # after the null terminator
+        self.image.write(shared + 0x84, 0xDEAD)  # no recursive walk
+        self.image.write(shared + 0x34, 0xDEAD)
+        self.image.write(shared + 0x60, 0xDEAD)
+        self.image.write(shared + 0x78, 0xDEAD)
+        fields = (0x30, 0x38, 0x3C, 0x40, 0x44, 0x48, 0x4C, 0x50, 0x54, 0x58, 0x5C,
+                  0x64, 0x68, 0x6C, 0x70, 0x74)
+        for i, offset in enumerate(fields):
+            self.image.write(shared + offset, 0x1100 + i * 16)
+            self.image.write(parent + offset, 0xDEAD)  # only children are called
+        spec = (0x200, len(self.image.code), hashlib.sha256(self.image.code).hexdigest())
+        before = bytes(self.image.data)
+        with patch.object(prepare_boot, "GAME_DESCRIPTOR_OBJECT_WALKS", [(*spec, field) for field in fields]):
+            expected = set(range(0x1100, 0x1200, 16))
+            self.assertEqual(prepare_boot.game_descriptor_object_roots(self.image), expected)
+            self.assertEqual(bytes(self.image.data), before)
+            for offset in fields:
+                saved = self.image.u32(shared + offset)
+                self.image.write(shared + offset, 0)
+                self.assertEqual(prepare_boot.game_descriptor_object_roots(self.image), expected - {saved})
+                for bad in (0xDEAD, shared):
+                    self.image.write(shared + offset, bad)
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_descriptor_object_roots(self.image)
+                self.image.write(shared + offset, saved)
+            for i in range(16): self.image.write(parent + 0x84 + i * 4, shared)
+            with self.assertRaisesRegex(ValueError, "not terminated"):
+                prepare_boot.game_descriptor_object_roots(self.image)
+        for which in range(len(fields)):
+            specs = [(*spec, field) for field in fields]
+            specs[which] = (*spec[:2], "0" * 64, fields[which])
+            with patch.object(prepare_boot, "GAME_DESCRIPTOR_OBJECT_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_descriptor_object_roots(self.image)
+
+    def test_map_fields_reuse_linking_and_skip_unvisited_data(self):
+        a, b = self.image.parents[:2]; shared = 0x464000
+        for parent in (a, b):
+            self.image.write(parent + 0x84, shared)
+            self.image.write(parent + 0x88, parent)
+            self.image.write(parent + 0x14, 0xDEAD)
+            self.image.write(parent + 0x20, 0xDEAD)
+        self.image.write(shared + 0x84, 0xDEAD)  # no recursive child walk
+        self.image.write(a + 0x18, 0x1100)
+        self.image.write(b + 0x1C, 0x1100)  # duplicate
+        self.image.write(shared + 0x18, 0x1200)
+        last = self.image.parents[-1]
+        self.image.write(last + 0x1C, 0x1300)
+        spec = (0x200, len(self.image.code), hashlib.sha256(self.image.code).hexdigest())
+        before = bytes(self.image.data)
+        with patch.object(prepare_boot, "GAME_DESCRIPTOR_MAP_WALKS", (spec, spec)):
+            self.assertEqual(prepare_boot.game_descriptor_map_roots(self.image), {0x1100, 0x1200, 0x1300})
+            self.assertEqual(bytes(self.image.data), before)
+            for node, offset in ((a, 0x18), (last, 0x1C)):
+                saved = self.image.u32(node + offset)
+                for invalid in (0xDEAD, 0x464000):
+                    self.image.write(node + offset, invalid)
+                    with self.assertRaisesRegex(ValueError, "invalid target"):
+                        prepare_boot.game_descriptor_map_roots(self.image)
+                self.image.write(node + offset, saved)
+            self.image.write(last + 0xC4, a)
+            with self.assertRaisesRegex(ValueError, "initial link"):
+                prepare_boot.game_descriptor_map_roots(self.image)
+            self.image.write(last + 0xC4, 0)
+        for which in range(2):
+            specs = [spec, spec]; specs[which] = (0x200, len(self.image.code), "0" * 64)
+            with patch.object(prepare_boot, "GAME_DESCRIPTOR_MAP_WALKS", specs):
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    prepare_boot.game_descriptor_map_roots(self.image)
+
+    def test_shared_self_children_and_repeated_callbacks_keep_original_order(self):
+        a, b = self.image.parents[:2]
+        shared = 0x464000
+        for parent in (a, b):
+            self.image.write(parent + 0x84, shared)
+            self.image.write(parent + 0x88, parent)
+            self.image.write(parent + 0x90, 0xDEAD)  # ignored after first null
+            self.image.write(parent + 0x10, 0x1000)
+        self.image.write(shared + 0x10, 0x1500)
+        # Child descriptors are not themselves traversed as parents.
+        self.image.write(shared + 0x84, 0xDEAD)
+        expected = [(a, 0x1000), (shared, 0x1500), (b, 0x1000)]
+        expected += [(parent, 0) for parent in self.image.parents[2:]]
+        before = bytes(self.image.data)
+        self.assertEqual(self.chain(), expected)
+        self.assertEqual(bytes(self.image.data), before)
+
+    def test_full_sixteen_child_bound(self):
+        parent = self.image.parents[0]
+        children = [0x464000 + n * 0xC8 for n in range(16)]
+        for index, child in enumerate(children):
+            self.image.write(parent + 0x84 + 4 * index, child)
+        self.assertEqual([node for node, _ in self.chain()],
+                         [parent] + children + self.image.parents[1:])
+
+    def test_bad_descriptor_spans_and_callback(self):
+        for invalid in (0, 0x461001, 0x46FFFC, 0x500000):
+            self.image.write(0x468630, invalid)
+            with self.assertRaisesRegex(ValueError, "data span"):
+                self.chain()
+        parent = self.image.parents[0]
+        self.image.write(0x468630, parent)
+        self.image.write(parent + 0x84, parent + 4)
+        with self.assertRaisesRegex(ValueError, "overlap"):
+            self.chain()
+        self.image.write(parent + 0x84, 0)
+        self.image.write(parent + 0x10, 0x464000)
+        with self.assertRaisesRegex(ValueError, "invalid initializer"):
+            self.chain()
+
+    def test_reject_initial_links_and_changed_caller(self):
+        parent = self.image.parents[0]
+        self.image.write(parent + 0xC4, parent)
+        with self.assertRaisesRegex(ValueError, "initial link"):
+            self.chain()
+        self.image.write(parent + 0xC4, 0)
+        self.image.code = bytes([self.image.code[0] ^ 1]) + self.image.code[1:]
+        with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+            self.chain()
+
+
+if __name__ == "__main__":
+    unittest.main()

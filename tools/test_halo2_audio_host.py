@@ -1,0 +1,119 @@
+"""Synthetic revision/selection tests; no game bytes are embedded."""
+import hashlib
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from games.halo2_5849.hooks import (
+    AUDIO_CALLBACK_BOUNDARIES, AUDIO_HOST_BOUNDARIES, AUDIO_ORIGINAL_BOUNDARIES, AUDIO_REVERB_ORIGINAL_BOUNDARIES, HOST_BOUNDARIES, Halo2AudioHostHooks, Halo2AudioUnavailableHooks,
+    Halo2HostChannelHooks,
+)
+
+
+class Image:
+    def __init__(self):
+        self.parts = {address: str(address).encode() for address in AUDIO_HOST_BOUNDARIES | AUDIO_ORIGINAL_BOUNDARIES | AUDIO_CALLBACK_BOUNDARIES | AUDIO_REVERB_ORIGINAL_BOUNDARIES}
+        self.words = {0x417124: 0x37A14F, 0x417128: 0x37C70F, 0x417154: 0x37A14F, 0x417158: 0x37A795}
+
+    def bytes_at(self, address, length):
+        return self.parts[address][:length]
+
+    def u32(self, address):
+        return self.words[address]
+
+    def section_of(self, address):
+        return (0, 0, 0, 0, "DSOUND" if address in AUDIO_ORIGINAL_BOUNDARIES or address in AUDIO_REVERB_ORIGINAL_BOUNDARIES or address == 0x37E5D8 else ".text", ())
+
+
+class AudioHooks(unittest.TestCase):
+    def setUp(self):
+        self.image = Image()
+        self.expected = {a: (len(b), hashlib.sha256(b).hexdigest()) for a, b in self.image.parts.items()}
+
+    def construct(self):
+        with patch.object(Halo2HostChannelHooks, "__init__", return_value=None), \
+                patch.dict(AUDIO_HOST_BOUNDARIES, {a: self.expected[a] for a in AUDIO_HOST_BOUNDARIES}, clear=True), \
+                patch.dict(AUDIO_ORIGINAL_BOUNDARIES, {a: self.expected[a] for a in AUDIO_ORIGINAL_BOUNDARIES}, clear=True), \
+                patch.dict(AUDIO_CALLBACK_BOUNDARIES, {a: self.expected[a] for a in AUDIO_CALLBACK_BOUNDARIES}, clear=True), \
+                patch.dict(AUDIO_REVERB_ORIGINAL_BOUNDARIES, {a: self.expected[a] for a in AUDIO_REVERB_ORIGINAL_BOUNDARIES}, clear=True):
+            return Halo2AudioHostHooks(self.image)
+
+    def test_exact_boundaries_and_unknown_method_guard(self):
+        hook = self.construct()
+        for address in AUDIO_HOST_BOUNDARIES:
+            self.assertIn("h2_audio_host_call", "".join(hook.function_entry(address)))
+        for address in [*AUDIO_ORIGINAL_BOUNDARIES, *AUDIO_REVERB_ORIGINAL_BOUNDARIES, 0x37E5D8]:
+            guard = "".join(hook.function_entry(address))
+            self.assertIn("h2_audio_guest_entry", guard)
+            self.assertNotIn("return;", guard)
+        self.assertEqual(hook.function_entry(0x123456), [])
+        normal = object.__new__(Halo2HostChannelHooks)
+        for address in HOST_BOUNDARIES:
+            self.assertEqual(hook.function_entry(address), normal.function_entry(address))
+        diagnostic = object.__new__(Halo2AudioUnavailableHooks)
+        self.assertEqual(normal.function_entry(0x37D797), [])
+        self.assertIn("h2_audio_unavailable", "".join(diagnostic.function_entry(0x37D797)))
+
+    def test_every_fingerprint(self):
+        for address in self.image.parts:
+            original = self.image.parts[address]
+            self.image.parts[address] = bytes(len(original))
+            with self.assertRaisesRegex(ValueError, "audio host boundary"):
+                self.construct()
+            self.image.parts[address] = original
+
+    def test_vtable_rejection(self):
+        for slot in self.image.words:
+            original = self.image.words[slot]
+            self.image.words[slot] = 0
+            with self.assertRaisesRegex(ValueError, "reference vtable"):
+                self.construct()
+            self.image.words[slot] = original
+
+    def test_multibin_failure_requires_real_audio_host(self):
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(["make", "-C", str(root / "games/halo2_5849"), "-n",
+                                 "AUDIO_HOST=0", "AUDIO_MULTIBIN_UNAVAILABLE=1"],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AUDIO_MULTIBIN_UNAVAILABLE=1 requires AUDIO_HOST=1", result.stderr)
+
+    def test_dsp_requires_real_host_and_excludes_failure_probe(self):
+        root = Path(__file__).resolve().parents[1]
+        for flags, message in ((["AUDIO_HOST=0", "AUDIO_DSP=1"], "AUDIO_DSP=1 requires AUDIO_HOST=1"),
+                               (["HOST_CHANNEL=1", "AUDIO_HOST=1", "AUDIO_DSP=1", "AUDIO_EFFECTS_UNAVAILABLE=1"],
+                                "AUDIO_DSP=1 conflicts with AUDIO_EFFECTS_UNAVAILABLE=1")):
+            result = subprocess.run(["make", "-C", str(root / "games/halo2_5849"), "-n", *flags],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, result.stderr)
+
+    def test_spatial_model_requires_real_dsp(self):
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(["make", "-C", str(root / "games/halo2_5849"), "-n",
+                                 "AUDIO_DSP=0", "AUDIO_SPATIAL_MODEL=1"],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AUDIO_SPATIAL_MODEL=1 requires AUDIO_DSP=1", result.stderr)
+
+    def test_filter_model_requires_real_dsp(self):
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(["make", "-C", str(root / "games/halo2_5849"), "-n",
+                                 "AUDIO_DSP=0", "AUDIO_FILTER_MODEL=1"],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AUDIO_FILTER_MODEL=1 requires AUDIO_DSP=1", result.stderr)
+
+    def test_cli_is_explicit_and_mutually_exclusive(self):
+        command = [sys.executable, str(Path(__file__).resolve().parents[1] / "games/halo2_5849/prepare_boot.py"), "missing.xbe"]
+        for flags, message in ((["--audio-host"], "requires --host-channel"),
+                               (["--host-channel", "--audio-host", "--audio-unavailable"], "not allowed")):
+            result = subprocess.run(command + flags, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(message, result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

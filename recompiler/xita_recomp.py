@@ -185,6 +185,10 @@ class Discovery:
         self.queue: deque = deque()
         self.stats = Counter()
         self.candidates: Set[int] = set()          # code addresses seen as immediates (function pointers)
+        self.referenced_tables = False              # --referenced-tables: walk pointer tables named by lifted code
+        self.table_refs: Set[int] = set()           # (table address, single-slot) pending walks
+        self.single_slots: Set[int] = set()
+        self.tables: Dict[int, int] = {}            # walked table -> number of code words admitted
 
     def decode_at(self, va: int) -> Optional[Instruction]:
         b = self.img.bytes_at(va, 16)
@@ -226,6 +230,45 @@ class Discovery:
             ip = ins.next_ip
         return True
 
+    TABLE_SECTIONS = {".rdata", ".data", ".data1", "XON_RD"}
+
+    def table_address(self, va: int) -> bool:
+        """An aligned address with raw bytes in an initialized data section that can hold pointer tables."""
+        if va & 3:
+            return False
+        s = self.img.section_of(va)
+        return bool(s) and s[4] in self.TABLE_SECTIONS and self.img.u32(va) is not None
+
+    def note_table_refs(self, ins: Instruction):
+        """Record data addresses this instruction names: vtable installs, table immediates, indexed
+        pointer arrays and absolute call/jmp slots. Nothing is walked until the reference is seen."""
+        mn = MN[ins.mnemonic]
+        for oi in range(ins.op_count):
+            k = ins.op_kind(oi)
+            if k == OpKind.IMMEDIATE32 and mn in ("mov", "push"):
+                imm = ins.immediate(oi) & 0xFFFFFFFF
+                if self.table_address(imm):
+                    self.table_refs.add(imm)
+            elif k == OpKind.MEMORY and ins.memory_base == Register.NONE:
+                disp = ins.memory_displacement & 0xFFFFFFFF
+                if ins.memory_index != Register.NONE and ins.memory_index_scale == 4:
+                    if self.table_address(disp):
+                        self.table_refs.add(disp)
+                elif (ins.memory_index == Register.NONE and mn in ("call", "jmp") and
+                      disp not in self.kthunks and self.table_address(disp)):
+                    self.single_slots.add(disp)
+
+    def walk_table(self, table: int, limit: int = 4096) -> int:
+        """Admit consecutive words that point at executable code; stop at the first that does not."""
+        count = 0
+        for i in range(limit):
+            v = self.img.u32(table + i * 4)
+            if v is None or not self.img.is_code(v):
+                break
+            self.candidates.add(v)
+            count += 1
+        return count
+
     def in_lifted_block(self, va: int) -> bool:
         for fn in self.functions.values():
             for b in fn.blocks.values():
@@ -238,6 +281,19 @@ class Discovery:
         while True:
             while self.queue:
                 self.lift_function(self.functions[self.queue.popleft()])
+            if self.referenced_tables:
+                for table in sorted(self.table_refs):
+                    if table not in self.tables:
+                        self.stats["table_refs"] += 1
+                        self.tables[table] = self.walk_table(table)
+                        self.stats["table_roots"] += self.tables[table]
+                for slot in sorted(self.single_slots):
+                    if slot not in self.tables:
+                        self.stats["table_refs"] += 1
+                        self.tables[slot] = self.walk_table(slot, limit=1)
+                        self.stats["table_roots"] += self.tables[slot]
+                self.table_refs.clear()
+                self.single_slots.clear()
             new = [va for va in self.candidates if va not in self.functions and va not in self.hle and self.plausible_entry(va)]
             self.candidates.clear()
             if not new:
@@ -277,6 +333,8 @@ class Discovery:
                         imm = ins.immediate(oi) & 0xFFFFFFFF
                         if self.img.is_code(imm):
                             self.candidates.add(imm)
+                if self.referenced_tables:
+                    self.note_table_refs(ins)
                 if fc == FlowControl.NEXT or fc == FlowControl.CALL or fc == FlowControl.INDIRECT_CALL:
                     if fc == FlowControl.CALL:
                         tgt = ins.near_branch_target
@@ -332,22 +390,41 @@ class Discovery:
         self.split_blocks(fn)
 
     def split_blocks(self, fn: Function):
-        starts = sorted(fn.blocks)
-        targets = set()
-        for b in fn.blocks.values():
-            targets.update(b.succ)
-        for s in starts:
-            b = fn.blocks[s]
-            for i, ins in enumerate(b.insns):
-                if i and ins.ip in targets and ins.ip not in fn.blocks:
-                    nb = Block(ins.ip)
-                    nb.insns = b.insns[i:]
-                    nb.end = b.end
-                    nb.succ = b.succ
-                    b.insns = b.insns[:i]
-                    b.end = ins.ip
-                    b.succ = [ins.ip]
-                    fn.blocks[ins.ip] = nb
+        # No instruction may belong to two blocks. A straight-line lift can run
+        # through what a later back-edge turns into its own block; the earlier
+        # block must be truncated at that start, not left overlapping it, or the
+        # duplicated tail is emitted twice with inconsistent flag/liveness
+        # analysis (a loop's dec;jne lost its zero-flag store in one copy).
+        # Iterate to a fixpoint: truncating or splitting can expose a further one.
+        changed = True
+        while changed:
+            changed = False
+            targets = set()
+            for b in fn.blocks.values():
+                targets.update(b.succ)
+            for s in sorted(fn.blocks):
+                b = fn.blocks[s]
+                for i, ins in enumerate(b.insns):
+                    if not i:
+                        continue
+                    if ins.ip in fn.blocks:                     # overlaps an existing block: drop the tail
+                        b.insns = b.insns[:i]
+                        b.end = ins.ip
+                        b.succ = [ins.ip]
+                        changed = True
+                        break
+                    if ins.ip in targets:                       # a branch target mid-block: split off a new block
+                        nb = Block(ins.ip)
+                        nb.insns = b.insns[i:]
+                        nb.end = b.end
+                        nb.succ = b.succ
+                        b.insns = b.insns[:i]
+                        b.end = ins.ip
+                        b.succ = [ins.ip]
+                        fn.blocks[ins.ip] = nb
+                        changed = True
+                        break
+                if changed:
                     break
 
     def switch_targets(self, fn: Function, ins: Instruction) -> List[int]:
@@ -360,8 +437,12 @@ class Discovery:
         out = []
         for i in range(512):
             v = self.img.u32(table + i * 4)
-            if v is None or not self.img.is_code(v):
-                break
+            if v is None:
+                break                  # unmapped: past the end of the section
+            if v == 0:
+                continue               # sparse switch table: a null hole is an unused case (falls to default)
+            if not self.img.is_code(v):
+                break                  # the first real, non-pointer word ends the table
             out.append((i, v))
         # Tables indexed from the top down: the CRT's memcpy/memmove tails do `neg ecx; jmp [ecx*4+T]`
         # with ecx <= 0, so the live entries sit BELOW the displacement.  Walk downward as well and keep
@@ -509,6 +590,8 @@ class Emitter:
         ip = ins.ip
         nxt = ins.next_ip
         out.append(f"    /* {ip:08X}  {str(ins)} */")
+        if self.hooks.lower_instruction(self, ins, out):
+            return
 
         def U():
             self.unimpl[mn] += 1
@@ -741,7 +824,13 @@ class Emitter:
         if mn in ("loop", "loope", "loopne"):
             tgt = ins.near_branch_target
             extra = {"loop": "", "loope": " && XF_Z(c)", "loopne": " && !XF_Z(c)"}[mn]
-            out.append(f"    if (--c->r[1] != 0{extra}) {{ X_PREEMPT(); goto L_{tgt:08X}; }}"); return
+            if tgt in fn.blocks:
+                out.append(f"    if (--c->r[1] != 0{extra}) {{ X_PREEMPT(); goto L_{tgt:08X}; }}")
+            else:
+                # Match JMP/Jcc: an external target has no local label and
+                # must use tail dispatch without pushing a return address.
+                out.append(f"    if (--c->r[1] != 0{extra}) {{ {self.call_expr(tgt)}; return; }}")
+            return
 
         # ---- x87 --------------------------------------------------------------------
         if mn.startswith("f") and mn not in ("fs",):
@@ -757,7 +846,8 @@ class Emitter:
         is_mm1 = ins.op_count > 1 and ins.op1_kind == OpKind.REGISTER and REGNAME[ins.op1_register].startswith("mm")
         if mn == "emms":
             return
-        if mn == "movq" and (is_mm0 or is_mm1):
+        if mn in ("movq", "movntq") and (is_mm0 or is_mm1):
+            # movntq is a non-temporal MMX store; the cache hint has no semantic effect here.
             out.append(f"    {self.operand(ins,0,8)} = {self.operand(ins,1,8)};"); return
         if mn == "movd" and (is_mm0 or is_mm1):
             if is_mm0:
@@ -772,11 +862,22 @@ class Emitter:
         if mn in MMX_SHIFT and is_mm0:
             cnt = self.operand(ins, 1, 1) if ins.op1_kind == OpKind.IMMEDIATE8 else self.operand(ins, 1, 8)
             out.append(f"    {self.operand(ins,0,8)} = x_mmx_{mn}({self.operand(ins,0,8)}, (uint64_t){cnt});"); return
+        if mn == "bswap":
+            a = self.operand(ins, 0, 4)
+            out.append(f"    {a} = __builtin_bswap32({a});"); return
+        if mn == "pmovmskb" and ins.op_count == 2 and ins.op0_kind == OpKind.REGISTER and REGNAME[ins.op0_register].startswith("mm") is False and REGNAME[ins.op1_register].startswith("mm"):
+            # MMX pmovmskb r32, mm: the sign bit of each of the eight bytes.
+            out.append(f"    {{ uint64_t s_ = {self.operand(ins,1,8)}; uint32_t m_ = 0; for (unsigned i_ = 0; i_ < 8; ++i_) m_ |= (uint32_t)((s_ >> (i_ * 8 + 7)) & 1u) << i_; {self.operand(ins,0,4)} = m_; }}"); return
+        if mn == "pshufw" and is_mm0:
+            imm = ins.immediate8
+            parts = " | ".join(f"(((s_ >> {((imm >> (i * 2)) & 3) * 16}) & 0xFFFFu) << {i * 16})" for i in range(4))
+            out.append(f"    {{ uint64_t s_ = {self.operand(ins,1,8)}; {self.operand(ins,0,8)} = {parts}; }}"); return
 
         # ---- SSE scalar subset --------------------------------------------------------
-        if mn in ("movss", "movaps", "movups", "movlps", "movhps", "addss", "subss", "mulss", "divss", "sqrtss", "minss", "maxss",
+        if mn in ("movss", "movaps", "movups", "movlps", "movhps", "movhlps", "movlhps", "addss", "subss", "mulss", "divss", "sqrtss", "minss", "maxss",
                   "cvtsi2ss", "cvttss2si", "cvtss2si", "comiss", "ucomiss", "xorps", "andps", "orps", "addps", "subps", "mulps",
-                  "shufps", "unpcklps", "movd", "rsqrtss", "rcpss"):
+                  "shufps", "unpcklps", "unpckhps", "movd", "rsqrtss", "rcpss", "cvtpi2ps", "cvtps2pi", "cvttps2pi",
+                  "rsqrtps", "minps", "maxps", "cmpss", "cmpps", "movmskps", "divps", "andnps"):
             self.lower_sse(ins, mn, out, U); return
         U()
 
@@ -933,6 +1034,66 @@ class Emitter:
             else:
                 out.append(f"    x_store128(c, {self.addr(ins)}, {xmm(1)});")
             return
+        if mn in ("movhlps", "movlhps"):
+            dst, src = (0, 2) if mn == "movhlps" else (2, 0)
+            # Legacy SSE half-register moves preserve all bits, including NaN
+            # payloads. The two eight-byte ranges are disjoint even for src=dst.
+            out.append(f"    memcpy(&{xmm(0)}[{dst}], &{xmm(1)}[{src}], 8);")
+            return
+        if mn == "cvtpi2ps":
+            # Same native FP model as CVTSI2SS; retain the high quadword's bits.
+            if ins.op1_kind == OpKind.REGISTER:
+                source = f"uint64_t bits_ = {self.operand(ins, 1, 8)};"
+            else:
+                source = f"uint64_t bits_; x_guest_read(&bits_, {self.addr(ins)}, 8);"
+            out.append(f"    {{ {source} float pair_[2] = {{ (float)(int32_t)(uint32_t)bits_, (float)(int32_t)(uint32_t)(bits_ >> 32) }}; memcpy({xmm(0)}, pair_, 8); }}")
+            return
+        if mn in ("cvtps2pi", "cvttps2pi"):
+            # Two low packed floats -> two signed dwords in an MMX register.
+            # cvtps2pi uses the current rounding mode (round-to-nearest here, as
+            # the guarded MXCSR permits); cvttps2pi truncates. Same native FP
+            # model as cvtss2si/cvttss2si.
+            conv = "truncf" if mn == "cvttps2pi" else "rintf"
+            if is_xmm(1):
+                source = f"float pair_[2] = {{ {xmm(1)}[0], {xmm(1)}[1] }};"
+            else:
+                source = f"float pair_[2]; x_guest_read(pair_, {self.addr(ins)}, 8);"
+            out.append(f"    {{ {source} uint32_t lo_ = (uint32_t)(int32_t){conv}(pair_[0]), hi_ = (uint32_t)(int32_t){conv}(pair_[1]); "
+                       f"{self.operand(ins,0,8)} = ((uint64_t)hi_ << 32) | lo_; }}")
+            return
+        if mn == "rsqrtps":
+            if is_xmm(1):
+                out.append(f"    x_rsqrtps({xmm(0)}, {xmm(1)});")
+            else:
+                out.append(f"    {{ float source_[4]; x_load128(c, source_, {self.addr(ins)}); x_rsqrtps({xmm(0)}, source_); }}")
+            return
+        if mn in ("minps", "maxps"):
+            maximum = int(mn == "maxps")
+            check = f'if (!x_minmaxps({xmm(0)}, SOURCE, {maximum})) {{ xv_unimpl(c, 0x{ins.ip:X}u, "{mn} FP control"); return; }}'
+            if is_xmm(1):
+                out.append("    " + check.replace("SOURCE", xmm(1)))
+            else:
+                out.append(f"    {{ float source_[4]; x_load128(c, source_, {self.addr(ins)}); " + check.replace("SOURCE", "source_") + " }")
+            return
+        if mn == "cmpps":
+            if ins.immediate8 > 7:
+                U(); out.append("    return;"); return
+            check = f'if (!x_cmpps({xmm(0)}, SOURCE, {ins.immediate8})) {{ xv_unimpl(c, 0x{ins.ip:X}u, "cmpps FP control"); return; }}'
+            if is_xmm(1):
+                out.append("    " + check.replace("SOURCE", xmm(1)))
+            else:
+                out.append(f"    {{ float source_[4]; x_load128(c, source_, {self.addr(ins)}); " + check.replace("SOURCE", "source_") + " }")
+            return
+        if mn == "cmpss":
+            if ins.immediate8 > 7:
+                U(); out.append("    return;"); return
+            source = (f"memcpy(&source_, {xmm(1)}, 4);" if is_xmm(1) else
+                      f"x_guest_read(&source_, {self.addr(ins)}, 4);")
+            out.append(f'    {{ uint32_t source_; {source} if (!x_cmpss({xmm(0)}, source_, {ins.immediate8})) {{ xv_unimpl(c, 0x{ins.ip:X}u, "cmpss FP control"); return; }} }}')
+            return
+        if mn == "movmskps":
+            out.append(f"    {self.operand(ins, 0, 4)} = x_movmskps({xmm(1)});")
+            return
         if mn in ("movlps", "movhps"):
             lo = 0 if mn == "movlps" else 2
             if is_xmm(0):
@@ -944,7 +1105,7 @@ class Emitter:
         if mn in SS:
             src = f"{xmm(1)}[0]" if is_xmm(1) else f"X_MF32({self.addr(ins)})"
             out.append(f"    {xmm(0)}[0] = {xmm(0)}[0] {SS[mn]} {src};"); return
-        PS = {"addps": "+", "subps": "-", "mulps": "*"}
+        PS = {"addps": "+", "subps": "-", "mulps": "*", "divps": "/"}
         if mn in PS:
             if is_xmm(1):
                 out.append(f"    for (int i_ = 0; i_ < 4; ++i_) {xmm(0)}[i_] = {xmm(0)}[i_] {PS[mn]} {xmm(1)}[i_];")
@@ -965,13 +1126,14 @@ class Emitter:
         if mn in ("comiss", "ucomiss"):
             src = f"{xmm(1)}[0]" if is_xmm(1) else f"X_MF32({self.addr(ins)})"
             out.append(f"    x_comiss(c, {xmm(0)}[0], {src});"); return
-        if mn in ("xorps", "andps", "orps"):
+        if mn in ("xorps", "andps", "orps", "andnps"):
+            opc = {'xorps': '^', 'andps': '&', 'orps': '|', 'andnps': 'n'}[mn]
             if is_xmm(1):
                 if mn == "xorps" and ins.op0_register == ins.op1_register:
                     out.append(f"    memset({xmm(0)}, 0, 16);"); return
-                out.append(f"    x_bitops128(c, {xmm(0)}, {xmm(1)}, '{ {'xorps':'^','andps':'&','orps':'|'}[mn] }');")
+                out.append(f"    x_bitops128(c, {xmm(0)}, {xmm(1)}, '{opc}');")
             else:
-                out.append(f"    {{ float t_[4]; x_load128(c, t_, {self.addr(ins)}); x_bitops128(c, {xmm(0)}, t_, '{ {'xorps':'^','andps':'&','orps':'|'}[mn] }'); }}")
+                out.append(f"    {{ float t_[4]; x_load128(c, t_, {self.addr(ins)}); x_bitops128(c, {xmm(0)}, t_, '{opc}'); }}")
             return
         if mn == "shufps":
             imm = ins.immediate(2)
@@ -980,10 +1142,13 @@ class Emitter:
             else:
                 out.append(f"    {{ float t_[4]; x_load128(c, t_, {self.addr(ins)}); x_shufps(c, {xmm(0)}, t_, {imm}); }}")
             return
-        if mn == "unpcklps":
-            src = xmm(1) if is_xmm(1) else None
-            if src:
-                out.append(f"    x_unpcklps(c, {xmm(0)}, {src});"); return
+        if mn in ("unpcklps", "unpckhps"):
+            helper = "x_unpcklps" if mn == "unpcklps" else "x_unpckhps"
+            if is_xmm(1):
+                out.append(f"    {helper}(c, {xmm(0)}, {xmm(1)});")
+            else:
+                out.append(f"    {{ float t_[4]; x_load128(c, t_, {self.addr(ins)}); {helper}(c, {xmm(0)}, t_); }}")
+            return
         if mn == "movd":
             if is_xmm(0):
                 out.append(f"    {{ uint32_t v_ = {self.operand(ins,1,4)}; memcpy(&{xmm(0)}[0], &v_, 4); {xmm(0)}[1] = {xmm(0)}[2] = {xmm(0)}[3] = 0.0f; }}")
@@ -994,9 +1159,13 @@ class Emitter:
 
     # ---- functions / files ------------------------------------------------------------
     def dead_flag_writes(self, insns) -> set:
-        """Backward liveness over one basic block: which instructions write flags that nothing reads
-        before they are overwritten.  Conservative at the block end (successors may read: all live),
-        except after call/ret, where x86 code never depends on flags."""
+        """Backward liveness over one basic block: which instructions (by IP) write flags that nothing
+        reads before they are overwritten.  Conservative at the block end (successors may read: all
+        live), except after call/ret, where x86 code never depends on flags.
+        Keyed by IP on purpose: iced's Instruction equality ignores the IP, so a set of Instruction
+        objects made every instruction encoded identically to a dead one look dead too (Halo 2's
+        preferences loader: `and al,cl` twice in one block - the first dead, the second feeding `je` -
+        lost the live copy's flag store and the branch read the preceding cmp's flags)."""
         RF_ALL = RflagsBits.OF | RflagsBits.SF | RflagsBits.ZF | RflagsBits.AF | RflagsBits.CF | RflagsBits.PF
         dead = set()
         if not insns:
@@ -1008,7 +1177,7 @@ class Emitter:
             rd = ins.rflags_read
             wr = ins.rflags_modified            # written | cleared | set | undefined
             if wr and not (wr & live) and not rd and ins.mnemonic not in FLAG_KEEP:
-                dead.add(ins)
+                dead.add(ins.ip)
             live = (live & ~wr) | rd
         return dead
 
@@ -1087,6 +1256,34 @@ class Emitter:
             res[i] = (kind, bits, cc)
         return res
 
+    @staticmethod
+    def rewrite_stores(text: str) -> str:
+        """Memory lvalues become X_W* (stamped stores in checked builds); loads stay X_M*.
+        The lowering emits every store as 'X_M<w>(<addr>) = <value>' with no compound forms."""
+        out = []; i = 0; n = len(text)
+        while True:
+            j = text.find("X_M", i)
+            if j < 0: out.append(text[i:]); break
+            k = j + 3
+            while k < n and (text[k].isalnum()): k += 1
+            width = text[j + 3:k]
+            if width not in ("8", "16", "32", "64", "F32") or k >= n or text[k] != "(":
+                out.append(text[i:k]); i = k; continue
+            depth = 0; m = k
+            while m < n:
+                if text[m] == "(": depth += 1
+                elif text[m] == ")":
+                    depth -= 1
+                    if depth == 0: break
+                m += 1
+            close = m + 1
+            rest = close
+            while rest < n and text[rest] == " ": rest += 1
+            is_store = rest + 1 < n and text[rest] == "=" and text[rest + 1] != "="
+            out.append(text[i:j] + ("X_W" if is_store else "X_M") + text[j + 3:close])
+            i = close
+        return "".join(out)
+
     def emit_function(self, fn: Function) -> str:
         # `restrict`: the context is host memory that no guest pointer can reach, so GCC may keep guest
         # registers in ARM registers across guest memory stores (otherwise every store reloads them).
@@ -1132,7 +1329,7 @@ class Emitter:
                     self.stats["insns"] += 2
                     skip_next = True
                     continue
-                if ins in dead:
+                if ins.ip in dead:
                     # flags this instruction writes are all overwritten before anything reads them:
                     # lower normally, then strip the X_FLAGS(...) store (7 stores per arithmetic op)
                     tmp: List[str] = []
@@ -1160,7 +1357,7 @@ class Emitter:
                         out.append(f"    goto L_{blk.end:08X};")
         out.append("    return;")
         out.append("}")
-        body = "\n".join(out)
+        body = self.rewrite_stores("\n".join(out))
         return self.hooks.transform_body(fn.entry, body)
 
     def write_all(self):
@@ -1180,8 +1377,10 @@ class Emitter:
         for i in range(0, len(fns), per):
             chunk = fns[i:i + per]
             body = ['#include "xv_recomp_protos.h"',
+                    "#ifndef XV_CHECK_GUEST_ADDRESS",
                     "#undef X_G",
                     "#define X_G(a) ((void *)(xram_ + xpt_[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))",
+                    "#endif",
                     "#undef X_IMG8\n#undef X_IMG16\n#undef X_IMG32",
                     "#define X_IMG8(a)  (*(uint8_t *)(imgb_ + (uint32_t)(a)))",
                     "#define X_IMG16(a) (*(xu16_u  *)(imgb_ + (uint32_t)(a)))",
@@ -1312,6 +1511,9 @@ def main() -> int:
     ap.add_argument("--files", type=int, default=32, help="number of .c files to split into")
     ap.add_argument("--roots", nargs="*", default=[], help="extra root addresses (hex); first one is treated as main()")
     ap.add_argument("--no-data-roots", action="store_true", help="do not treat code pointers in data sections as roots")
+    ap.add_argument("--referenced-tables", action="store_true",
+                    help="walk function-pointer tables whose addresses lifted code installs, loads, pushes, indexes or calls through "
+                         "(bounded alternative to data-section root scanning)")
     ap.add_argument("--lift", nargs="*", default=[], help="symbol names to recompile instead of HLE (XAPI internals)")
     ap.add_argument("--trace-calls", action="store_true", help="instrument kernel/HLE call sites (runtime flag xv_trace_enabled)")
     ap.add_argument("--trace-funcs", action="store_true", help="count every recompiled function entry (runtime: XV_FUNC_HIST=<frame> dumps that frame's histogram)")
@@ -1388,7 +1590,13 @@ def main() -> int:
         ptrs = img.data_code_pointers()
         disc.candidates.update(ptrs)
         print(f"{len(ptrs)} code pointers in data sections queued as candidate roots")
+    disc.referenced_tables = args.referenced_tables
     disc.run()
+    if args.referenced_tables:
+        os.makedirs(args.outdir, exist_ok=True)
+        with open(os.path.join(args.outdir, "referenced-tables.json"), "w") as fh:
+            json.dump({f"0x{table:08X}": count for table, count in sorted(disc.tables.items())}, fh, indent=1)
+        print(f"referenced tables: {len(disc.tables)} walked, {sum(disc.tables.values())} code words")
     nblocks = sum(len(f.blocks) for f in disc.functions.values())
     ninsn = sum(len(b.insns) for f in disc.functions.values() for b in f.blocks.values())
     print(f"discovered {len(disc.functions)} functions, {nblocks} blocks, {ninsn:,} instructions "

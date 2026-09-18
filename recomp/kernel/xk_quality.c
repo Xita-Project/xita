@@ -30,9 +30,9 @@ static float get_float(uint32_t p)
 }
 static void put_float(uint32_t p, float f)
 {
-    uint32_t u; memcpy(&u,&f,4); X_M32(p) = u;
+    uint32_t u; memcpy(&u,&f,4); X_W32(p) = u;
 }
-static void null_bitmap(uint32_t p) { X_M32(p+12) = UINT32_MAX; }
+static void null_bitmap(uint32_t p) { X_W32(p+12) = UINT32_MAX; }
 
 static int name_prefix(const quality_tags *t, uint32_t entry, const char *prefix)
 {
@@ -273,7 +273,7 @@ void xk_quality_map_read(uint32_t address, uint32_t bytes)
                 }
                 ++dst;
             }
-            X_M32(p+0xc4)=dst; ++flares;
+            X_W32(p+0xc4)=dst; ++flares;
         } else if (particles < 2 && group == TAG_GROUP('p','a','r','t') &&
                    (p=tag_data(&t,id,group,356)) && cosmetic_particle(&t,entry,p)) {
             float v[4], scale=particles ? .75f : .5f; int valid=1;
@@ -340,7 +340,7 @@ void xk_quality_decal_budget(void)
     for (unsigned i=0;i<count-(unsigned)limit;++i) {
         uint32_t p=records[i].record;
         put_float(p+0x1c,0.000001f); put_float(p+0x20,0);
-        X_M32(p+0x14)=now-1u;
+        X_W32(p+0x14)=now-1u;
     }
     static unsigned reports;
     if (reports++<8) XK_LOG("[quality] decal budget %d: expiring %u old impact records\n",limit,count-(unsigned)limit);

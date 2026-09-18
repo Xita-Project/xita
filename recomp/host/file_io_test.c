@@ -19,8 +19,11 @@ static unsigned apcs, signals;
 static unsigned variant_reads;
 static unsigned builtin_reads, builtin_preset;
 /* Tag mutation has its own real-map integration test in tools/test_quality.py. */
+#ifndef XV_TEST_NO_GAME_ADAPTER
+static unsigned quality_reads;
 void xk_quality_map_read(uint32_t address,uint32_t bytes)
-{ assert(address==0x803A6000u && bytes); }
+{ assert(address==0x803A6000u && bytes); ++quality_reads; }
+#endif
 int xk_variant_recover_unsigned(uint32_t data) { assert(data == 0x1103); variant_reads++; return 0; }
 int xk_builtin_profile_recover(uint32_t data, unsigned preset)
 { assert(data == 0x1103 && preset < 2); builtin_reads++; builtin_preset = preset; return 0; }
@@ -157,6 +160,28 @@ int main(void)
     check_reservation(0x1103, UINT64_C(0x123456789abcdef0), 19, 0);
     check_reservation(0x2ffc, UINT64_C(0x123456789abcdef0), 20, 0);
     check_reservation(0x1103, 0x380000, 20, 1);
+    /* Reads also work when no game's optional map transformer is linked. */
+    g_xpt[0x803A6] = 8192;
+    file.u.file.path = "maps/test.map";
+    assert(run(0, 0x803A6000u, 32, 0) == STATUS_SUCCESS);
+    for (unsigned i = 0; i < 32; ++i) assert(X_M8(0x803A6000u + i) == disk.data[i]);
+#ifndef XV_TEST_NO_GAME_ADAPTER
+    assert(quality_reads == 1);
+#endif
+    xk_file_set_ce_adapter_enabled(0);
+    assert(run(0, 0x803A6000u, 32, 0) == STATUS_SUCCESS);
+#ifndef XV_TEST_NO_GAME_ADAPTER
+    assert(quality_reads == 1);
+#endif
+    unsigned old_variants = variant_reads, old_builtins = builtin_reads;
+    file.u.file.path = "/save/custom/blam.lst";
+    assert(run(0, 0x1103, 512, 0) == STATUS_SUCCESS && variant_reads == old_variants);
+    file.u.file.path = "/save/cache/saved/player_profiles/default_profile/00.sav";
+    assert(run(0, 0x1103, 512, 0) == STATUS_SUCCESS && builtin_reads == old_builtins);
+    file.u.file.path = "/save/cache/saved/hdmu.map";
+    memset(disk.data, 0, 518); disk.data[512] = 1;
+    assert(run(0, 0x2dfb, 518, 0) == STATUS_SUCCESS);
+    for (unsigned i = 0; i < 518; ++i) assert(X_M8(0x2dfb + i) == disk.data[i]);
     free(g_xpt); free(g_xram);
     puts("PASS: fragmented/contiguous file I/O, guards, short I/O, errors, EOF, IOSB, completion and 64-bit file reservations");
 }

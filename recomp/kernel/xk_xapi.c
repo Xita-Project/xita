@@ -45,7 +45,7 @@ static void xk_level_select(void)
     char to[16];
     if (strlen(lvl) == 3) snprintf(to, sizeof to, "levels\\%s\\%s", lvl, lvl); else { if (strlen(lvl) > 15) { XK_LOG("level select: '%s' too long (max 15)\n", lvl); return; } snprintf(to, sizeof to, "%s", lvl); }
     int n = 0;
-    for (unsigned i = 0; i < 3; ++i) if (memcmp(X_G(sites[i]), "levels\\a10\\a10", 14) == 0) { memset(X_G(sites[i]), 0, 16); memcpy(X_G(sites[i]), to, strlen(to)); n++; }
+    for (unsigned i = 0; i < 3; ++i) if (memcmp(X_G(sites[i]), "levels\\a10\\a10", 14) == 0) { memset(X_GWN(sites[i], 16), 0, 16); memcpy(X_GWN(sites[i], strlen(to)), to, strlen(to)); n++; }
     XK_LOG("level select: %s patched into %d table(s) - campaign mission 1 now loads it\n", to, n);
 }
 
@@ -54,18 +54,18 @@ void xk_thunks_init(void)
     xk_level_select();
     xk_var_KeTickCount = xk_kalloc(4);
     xk_var_XboxHardwareInfo = xk_kalloc(16);        /* { Flags, GpuRevision, McpRevision, reserved } */
-    X_M32(xk_var_XboxHardwareInfo) = 0x00000002u;   /* XBOX_HW_FLAG_INTERNAL_USB_HUB? keep retail bits: 0 */
-    X_M32(xk_var_XboxHardwareInfo) = 0;
-    X_M8(xk_var_XboxHardwareInfo + 4) = 0xA2; X_M8(xk_var_XboxHardwareInfo + 5) = 0xD3;
-    xk_var_LaunchDataPage = xk_kalloc(4); X_M32(xk_var_LaunchDataPage) = 0;   /* PLAUNCH_DATA_PAGE = NULL: cold boot */
-    xk_var_XboxKrnlVersion = xk_kalloc(8); X_M16(xk_var_XboxKrnlVersion) = 1; X_M16(xk_var_XboxKrnlVersion + 2) = 0; X_M16(xk_var_XboxKrnlVersion + 4) = 3944; X_M16(xk_var_XboxKrnlVersion + 6) = 1;
-    xk_var_HalDiskCachePartitionCount = xk_kalloc(4); X_M32(xk_var_HalDiskCachePartitionCount) = 3;
+    X_W32(xk_var_XboxHardwareInfo) = 0x00000002u;   /* XBOX_HW_FLAG_INTERNAL_USB_HUB? keep retail bits: 0 */
+    X_W32(xk_var_XboxHardwareInfo) = 0;
+    X_W8(xk_var_XboxHardwareInfo + 4) = 0xA2; X_W8(xk_var_XboxHardwareInfo + 5) = 0xD3;
+    xk_var_LaunchDataPage = xk_kalloc(4); X_W32(xk_var_LaunchDataPage) = 0;   /* PLAUNCH_DATA_PAGE = NULL: cold boot */
+    xk_var_XboxKrnlVersion = xk_kalloc(8); X_W16(xk_var_XboxKrnlVersion) = 1; X_W16(xk_var_XboxKrnlVersion + 2) = 0; X_W16(xk_var_XboxKrnlVersion + 4) = 3944; X_W16(xk_var_XboxKrnlVersion + 6) = 1;
+    xk_var_HalDiskCachePartitionCount = xk_kalloc(4); X_W32(xk_var_HalDiskCachePartitionCount) = 3;
     unsigned data = 0, funcs = 0;
     for (unsigned i = 0; i < xv_kernel_imports_count; ++i) {
         uint32_t slot = xv_kernel_imports[i].slot; unsigned ord = xv_kernel_imports[i].ordinal;
         uint32_t var = data_export_var(ord);
-        if (var) { X_M32(slot) = var; data++; }
-        else { X_M32(slot) = 0xFE000000u | ord; funcs++; }      /* magic target -> xv_call dispatches to xk_<name> */
+        if (var) { X_W32(slot) = var; data++; }
+        else { X_W32(slot) = 0xFE000000u | ord; funcs++; }      /* magic target -> xv_call dispatches to xk_<name> */
     }
     XK_LOG("thunks: %u function imports, %u data imports\n", funcs, data);
 }
@@ -108,13 +108,13 @@ int xk_dispatch_magic(xctx *c, uint32_t target)
 }
 
 /* ---- Hal / Phy / Xe / Av ---------------------------------------------------------------------- */
-void xk_HalGetInterruptVector(xctx *c) { if (X_ARG(1)) X_M8(X_ARG(1)) = 5; c->r[0] = 0x30 + X_ARG(0); X_RET(2); }
+void xk_HalGetInterruptVector(xctx *c) { if (X_ARG(1)) X_W8(X_ARG(1)) = 5; c->r[0] = 0x30 + X_ARG(0); X_RET(2); }
 void xk_HalRegisterShutdownNotification(xctx *c) { X_RET(2); }
 void xk_HalReturnToFirmware(xctx *c) { XK_LOG("HalReturnToFirmware(%u) - game requested exit\n", X_ARG(0)); exit(0); }
 void xk_HalInitiateShutdown(xctx *c) { XK_LOG("HalInitiateShutdown\n"); exit(0); }
-void xk_HalReadSMBusValue(xctx *c) { if (X_ARG(3)) X_M32(X_ARG(3)) = 0; c->r[0] = STATUS_SUCCESS; X_RET(4); }
+void xk_HalReadSMBusValue(xctx *c) { if (X_ARG(3)) X_W32(X_ARG(3)) = 0; c->r[0] = STATUS_SUCCESS; X_RET(4); }
 void xk_HalWriteSMBusValue(xctx *c) { c->r[0] = STATUS_SUCCESS; X_RET(4); }
-void xk_HalReadSMCTrayState(xctx *c) { if (X_ARG(0)) X_M32(X_ARG(0)) = 0x40; if (X_ARG(1)) X_M32(X_ARG(1)) = 0; c->r[0] = STATUS_SUCCESS; X_RET(2); }   /* tray closed, media detected */
+void xk_HalReadSMCTrayState(xctx *c) { if (X_ARG(0)) X_W32(X_ARG(0)) = 0x40; if (X_ARG(1)) X_W32(X_ARG(1)) = 0; c->r[0] = STATUS_SUCCESS; X_RET(2); }   /* tray closed, media detected */
 void xk_HalIsResetOrShutdownPending(xctx *c) { c->r[0] = 0; X_RET(0); }
 void xk_HalEnableSecureTrayEject(xctx *c) { X_RET(0); }
 void xk_HalWriteSMCScratchRegister(xctx *c) { X_RET(1); }
@@ -128,7 +128,7 @@ void xk_XeUnloadSection(xctx *c) { if (X_M16(X_ARG(0) + 0x10)) X_M16(X_ARG(0) + 
 void xk_AvSetDisplayMode(xctx *c) { c->r[0] = STATUS_SUCCESS; X_RET(6); }
 void xk_AvGetSavedDataAddress(xctx *c) { c->r[0] = 0; X_RET(0); }
 void xk_AvSetSavedDataAddress(xctx *c) { X_RET(1); }
-void xk_AvSendTVEncoderOption(xctx *c) { if (X_ARG(3)) X_M32(X_ARG(3)) = 0; X_RET(4); }
+void xk_AvSendTVEncoderOption(xctx *c) { if (X_ARG(3)) X_W32(X_ARG(3)) = 0; X_RET(4); }
 void xk_ExQueryNonVolatileSetting(xctx *c)
 {
     uint32_t index = X_ARG(0), ptype = X_ARG(1), val = X_ARG(2), len = X_ARG(3), plen = X_ARG(4);
@@ -144,9 +144,9 @@ void xk_ExQueryNonVolatileSetting(xctx *c)
     default: v = 0; break;
     }
     if (index == 0x101) v = 1;
-    if (ptype) X_M32(ptype) = 4;
-    if (val && len >= 4) X_M32(val) = v;
-    if (plen) X_M32(plen) = n;
+    if (ptype) X_W32(ptype) = 4;
+    if (val && len >= 4) X_W32(val) = v;
+    if (plen) X_W32(plen) = n;
     c->r[0] = STATUS_SUCCESS; X_RET(5);
 }
 void xk_ExSaveNonVolatileSetting(xctx *c) { c->r[0] = STATUS_SUCCESS; X_RET(4); }
@@ -157,17 +157,17 @@ void xk_KeInsertQueueApc(xctx *c) { c->r[0] = 0; X_RET(4); }
 /* fastcall Interlocked*: ecx = destination (guest address), edx = value */
 void xk_InterlockedIncrement(xctx *c) { c->r[0] = ++X_M32(c->r[1]); X_RET(0); }
 void xk_InterlockedDecrement(xctx *c) { c->r[0] = --X_M32(c->r[1]); X_RET(0); }
-void xk_InterlockedExchange(xctx *c) { uint32_t o = X_M32(c->r[1]); X_M32(c->r[1]) = c->r[2]; c->r[0] = o; X_RET(0); }
-void xk_InterlockedExchangeAdd(xctx *c) { uint32_t o = X_M32(c->r[1]); X_M32(c->r[1]) = o + c->r[2]; c->r[0] = o; X_RET(0); }
-void xk_InterlockedCompareExchange(xctx *c) { uint32_t o = X_M32(c->r[1]); uint32_t comperand = X_ARG(0); if (o == comperand) X_M32(c->r[1]) = c->r[2]; c->r[0] = o; X_RET(1); }
-void xk_InterlockedPushEntrySList(xctx *c) { uint32_t head = c->r[1], e = c->r[2]; uint32_t first = X_M32(head); X_M32(e) = first; X_M32(head) = e; X_M16(head + 4)++; c->r[0] = first; X_RET(0); }
-void xk_InterlockedPopEntrySList(xctx *c) { uint32_t head = c->r[1]; uint32_t first = X_M32(head); if (first) { X_M32(head) = X_M32(first); X_M16(head + 4)--; } c->r[0] = first; X_RET(0); }
-void xk_InterlockedFlushSList(xctx *c) { uint32_t head = c->r[1]; c->r[0] = X_M32(head); X_M32(head) = 0; X_M16(head + 4) = 0; X_RET(0); }
-void xk_ExfInterlockedInsertHeadList(xctx *c) { uint32_t h = c->r[1], e = c->r[2]; uint32_t f = X_M32(h); X_M32(e) = f; X_M32(e + 4) = h; X_M32(f + 4) = e; X_M32(h) = e; c->r[0] = f == h ? 0 : f; X_RET(0); }
-void xk_ExfInterlockedInsertTailList(xctx *c) { uint32_t h = c->r[1], e = c->r[2]; uint32_t b = X_M32(h + 4); X_M32(e) = h; X_M32(e + 4) = b; X_M32(b) = e; X_M32(h + 4) = e; c->r[0] = b == h ? 0 : b; X_RET(0); }
-void xk_ExfInterlockedRemoveHeadList(xctx *c) { uint32_t h = c->r[1]; uint32_t f = X_M32(h); if (f == h) { c->r[0] = 0; X_RET(0); } uint32_t n = X_M32(f); X_M32(h) = n; X_M32(n + 4) = h; c->r[0] = f; X_RET(0); }
+void xk_InterlockedExchange(xctx *c) { uint32_t o = X_M32(c->r[1]); X_W32(c->r[1]) = c->r[2]; c->r[0] = o; X_RET(0); }
+void xk_InterlockedExchangeAdd(xctx *c) { uint32_t o = X_M32(c->r[1]); X_W32(c->r[1]) = o + c->r[2]; c->r[0] = o; X_RET(0); }
+void xk_InterlockedCompareExchange(xctx *c) { uint32_t o = X_M32(c->r[1]); uint32_t comperand = X_ARG(0); if (o == comperand) X_W32(c->r[1]) = c->r[2]; c->r[0] = o; X_RET(1); }
+void xk_InterlockedPushEntrySList(xctx *c) { uint32_t head = c->r[1], e = c->r[2]; uint32_t first = X_M32(head); X_W32(e) = first; X_W32(head) = e; X_M16(head + 4)++; c->r[0] = first; X_RET(0); }
+void xk_InterlockedPopEntrySList(xctx *c) { uint32_t head = c->r[1]; uint32_t first = X_M32(head); if (first) { X_W32(head) = X_M32(first); X_M16(head + 4)--; } c->r[0] = first; X_RET(0); }
+void xk_InterlockedFlushSList(xctx *c) { uint32_t head = c->r[1]; c->r[0] = X_M32(head); X_W32(head) = 0; X_W16(head + 4) = 0; X_RET(0); }
+void xk_ExfInterlockedInsertHeadList(xctx *c) { uint32_t h = c->r[1], e = c->r[2]; uint32_t f = X_M32(h); X_W32(e) = f; X_W32(e + 4) = h; X_W32(f + 4) = e; X_W32(h) = e; c->r[0] = f == h ? 0 : f; X_RET(0); }
+void xk_ExfInterlockedInsertTailList(xctx *c) { uint32_t h = c->r[1], e = c->r[2]; uint32_t b = X_M32(h + 4); X_W32(e) = h; X_W32(e + 4) = b; X_W32(b) = e; X_W32(h + 4) = e; c->r[0] = b == h ? 0 : b; X_RET(0); }
+void xk_ExfInterlockedRemoveHeadList(xctx *c) { uint32_t h = c->r[1]; uint32_t f = X_M32(h); if (f == h) { c->r[0] = 0; X_RET(0); } uint32_t n = X_M32(f); X_W32(h) = n; X_W32(n + 4) = h; c->r[0] = f; X_RET(0); }
 void xk_ExInterlockedAddLargeStatistic(xctx *c) { X_M64(c->r[1]) += c->r[2]; X_RET(0); }
-void xk_ExInterlockedCompareExchange64(xctx *c) { uint64_t o = X_M64(c->r[1]); uint64_t ex = X_M64(c->r[2]); uint64_t cmp = X_M64(X_ARG(0)); if (o == cmp) X_M64(c->r[1]) = ex; c->r[0] = (uint32_t)o; c->r[2] = (uint32_t)(o >> 32); X_RET(1); }
+void xk_ExInterlockedCompareExchange64(xctx *c) { uint64_t o = X_M64(c->r[1]); uint64_t ex = X_M64(c->r[2]); uint64_t cmp = X_M64(X_ARG(0)); if (o == cmp) X_W64(c->r[1]) = ex; c->r[0] = (uint32_t)o; c->r[2] = (uint32_t)(o >> 32); X_RET(1); }
 void xk_KiUnlockDispatcherDatabase(xctx *c) { X_RET(0); }
 
 /* ---- XAPI HLE ----------------------------------------------------------------------------------- */
@@ -187,7 +187,7 @@ void xv_hle_XGetDeviceChanges(xctx *c)
     static int pad2 = -1; if (pad2 < 0) { const char *e = getenv("XV_PAD2"); pad2 = e ? atoi(e) : 0; }
     if (!g_pad_reported) { ins = pad2 ? 3 : 1; g_pad_reported = 1; XK_LOG("[pad] XGetDeviceChanges: insertions %u\n", ins); }                    /* gamepad in port 1 (+ a virtual one in port 2: XV_PAD2=1) */
     (void)is_gamepad;
-    X_M32(X_ARG(1)) = ins; X_M32(X_ARG(2)) = 0;
+    X_W32(X_ARG(1)) = ins; X_W32(X_ARG(2)) = 0;
     c->r[0] = ins != 0; X_RET(3);
 }
 /* HANDLE XInputOpen(PXPP_DEVICE_TYPE, DWORD dwPort, DWORD dwSlot, PXINPUT_POLLING_PARAMETERS) */
@@ -238,12 +238,12 @@ void xv_hle_XInputGetState(xctx *c)
           if (pressed) xv_force_mp_start(c); } }
     if (X_ARG(0) == 0x00777702u) {                   /* virtual player 2: idle except what the pad layer injects (script p2* tokens / chord) */
         { static unsigned n; if (p.p2_buttons || p.p2_analog[0] || (n++ % 240) == 0) XK_LOG("[pad] P2 poll #%u buttons %04X A %u from %08X\n", n, p.p2_buttons, p.p2_analog[0], X_M32(c->r[4])); }
-        X_M32(st) = ++packet; X_M16(st + 4) = p.p2_buttons; memcpy(X_G(st + 6), p.p2_analog, 8);
-        X_M16(st + 14) = 0; X_M16(st + 16) = 0; X_M16(st + 18) = 0; X_M16(st + 20) = 0;
+        X_W32(st) = ++packet; X_W16(st + 4) = p.p2_buttons; memcpy(X_GWN(st + 6, 8), p.p2_analog, 8);
+        X_W16(st + 14) = 0; X_W16(st + 16) = 0; X_W16(st + 18) = 0; X_W16(st + 20) = 0;
         c->r[0] = 0; X_RET(2);
     }
-    X_M32(st) = ++packet; X_M16(st + 4) = p.buttons; memcpy(X_G(st + 6), p.analog, 8);
-    X_M16(st + 14) = (uint16_t)p.lx; X_M16(st + 16) = (uint16_t)p.ly; X_M16(st + 18) = (uint16_t)p.rx; X_M16(st + 20) = (uint16_t)p.ry;
+    X_W32(st) = ++packet; X_W16(st + 4) = p.buttons; memcpy(X_GWN(st + 6, 8), p.analog, 8);
+    X_W16(st + 14) = (uint16_t)p.lx; X_W16(st + 16) = (uint16_t)p.ly; X_W16(st + 18) = (uint16_t)p.rx; X_W16(st + 20) = (uint16_t)p.ry;
     c->r[0] = X_ARG(0) == 0x00777701u ? 0 : 1167;   /* ERROR_DEVICE_NOT_CONNECTED */
     X_RET(2);
 }

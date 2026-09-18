@@ -87,9 +87,9 @@ void xv_hle_HaloBuildVisibleIndices(xctx *c)
         uint32_t triangle = X_M32(input + (unsigned)i * 4);
         c->r[2] = X_M32(world + 0xFC);
         c->r[0] = c->r[2] + triangle * 6u;
-        X_R16(2) = X_M16(c->r[0]); X_M16(output) = X_R16(2);
-        X_R16(2) = X_M16(c->r[0] + 2); X_M16(output + 2) = X_R16(2);
-        X_R16(0) = X_M16(c->r[0] + 4); X_M16(output + 4) = X_R16(0);
+        X_R16(2) = X_M16(c->r[0]); X_W16(output) = X_R16(2);
+        X_R16(2) = X_M16(c->r[0] + 2); X_W16(output + 2) = X_R16(2);
+        X_R16(0) = X_M16(c->r[0] + 4); X_W16(output + 4) = X_R16(0);
         output += 6;
     }
     if (count > 0) {

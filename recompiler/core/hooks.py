@@ -9,6 +9,10 @@ class NoGameHooks:
     def phase_targets(self):
         raise ValueError("This game adapter has no reviewed phase timing targets")
 
+    def lower_instruction(self, emitter, instruction, output):
+        """Return True only when a reviewed adapter emitted this instruction."""
+        return False
+
     def before_instruction(self, address):
         return []
 
