@@ -2,7 +2,7 @@
 #define XV_VERTEX_CAPTURE_H
 #include "xv_vertex_prepare.h"
 
-/* Single recording owner. Accepted jobs own copies of all source bytes and
+/* Single recording owner. Accepted jobs own copies of all consumed bytes and
  * reference masks before returning. Targets/context are frame-owned command
  * storage; they must survive until drain. Completion callbacks run only on the
  * recording owner, before command publication. Failed jobs publish no streams.

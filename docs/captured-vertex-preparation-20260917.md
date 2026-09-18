@@ -66,3 +66,9 @@ observed at a different camera position with a different weapon. The user's
 Next: prove loaded BSP/model data lifetimes and writers before avoiding copies
 of unchanged inputs. The private staging copy is now a measurable cost; simply
 passing mutable guest pointers to the worker would undo the lifetime guarantee.
+
+The subsequent [compact capture candidate](compact-vertex-capture-20260918.md)
+avoids copying the unused half of records already admitted by packed shaders.
+It retains a private per-draw snapshot and the same GPU representation. This
+reduces staging payload without assuming that loaded geometry is immutable;
+hardware frame-time benefit remains unverified.

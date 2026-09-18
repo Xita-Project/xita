@@ -3,6 +3,21 @@
 #include <stdint.h>
 #include "xv_vertex_refs.h"
 #include "xv_packed_vertex.h"
+#ifndef XV_VERTEX_CAPTURE_PACKED
+#define XV_VERTEX_CAPTURE_PACKED 0
+#endif
+#if XV_VERTEX_CAPTURE_PACKED != 0 && XV_VERTEX_CAPTURE_PACKED != 1
+#error XV_VERTEX_CAPTURE_PACKED must be 0 or 1
+#endif
+#if XV_VERTEX_CAPTURE_PACKED && !XV_PACKED_VERTEX_LAYOUT
+#error Compact capture requires the qualified packed vertex layout
+#endif
+#if XV_VERTEX_CAPTURE_PACKED
+/* Already compacted private bytes, vertices*16 long. Cache identity remains
+ * the original source; the GPU representation matches upload_packed exactly. */
+const void *xv_vertex_upload_compact_snapshot(unsigned slot,const void *identity,
+    const void *snapshot,unsigned bytes);
+#endif
 #if XV_PACKED_VERTEX_LAYOUT
 /* Source is vertices*32 bytes; result owns vertices*16 bytes. Full-prefix
  * equality deliberately declines sparse reuse in this bounded prototype. */

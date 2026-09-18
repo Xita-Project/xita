@@ -22,7 +22,7 @@ void *sceClibMemcpy(void *d,const void *s,unsigned n) {(void)s;(void)n;return d;
 void *sceClibMemset(void *d,int c,unsigned n) {(void)c;(void)n;return d;}
 void test_setup(const void *s,void *cpu,void *gpu,unsigned config)
 {
-    unsigned n=config>>8,packed=(config>>4)&1,cached=config&1,bytes=n*(packed?16:32);
+    unsigned n=config>>8,packed=(config>>4)&3,cached=config&1,bytes=n*(packed?16:32);
     memset(&pools[0],0,sizeof pools[0]);
     pools[0].cpu=cpu;pools[0].gpu=gpu;pools[0].valid_bytes=bytes;
     pools[0].started=pools[0].asynchronous=1;
@@ -33,13 +33,16 @@ void test_setup(const void *s,void *cpu,void *gpu,unsigned config)
         pools[0].bucket[hash]=1;pools[0].count=1;pools[0].used=bytes;
         pools[0].entries[0]=(upload_entry){.source=s,.bytes=bytes};
 #if XV_PACKED_VERTEX_LAYOUT
-        pools[0].entries[0].layout=packed;
+        pools[0].entries[0].layout=packed?XV_PACKED_PREFIX16:0;
 #endif
     }
     source_arg=s;vertices_arg=n;packed_arg=packed;
 }
 const void *test_call(void)
 {
+#if XV_VERTEX_CAPTURE_PACKED
+    if(packed_arg==2)return xv_vertex_upload_compact_snapshot(0,source_arg,source_arg,vertices_arg*16);
+#endif
 #if XV_PACKED_VERTEX_LAYOUT
     if(packed_arg)return xv_vertex_upload_packed(0,source_arg,vertices_arg);
 #endif

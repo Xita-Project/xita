@@ -302,6 +302,28 @@ $(BUILD)/vertex-capture.config: force-vertex-capture-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/vertex-capture.config
+XV_VERTEX_CAPTURE_PACKED ?= 0
+ifneq ($(words $(XV_VERTEX_CAPTURE_PACKED)),1)
+$(error XV_VERTEX_CAPTURE_PACKED must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_CAPTURE_PACKED),0 1),$(XV_VERTEX_CAPTURE_PACKED))
+$(error XV_VERTEX_CAPTURE_PACKED must be 0 or 1)
+endif
+ifeq ($(XV_VERTEX_CAPTURE_PACKED),1)
+ifneq ($(XV_PACKED_VERTEX_LAYOUT),1)
+$(error XV_VERTEX_CAPTURE_PACKED requires XV_PACKED_VERTEX_LAYOUT=1)
+endif
+endif
+CAPTURE_PACKED_OBJECTS := $(BUILD)/runtime/xv_vertex_capture.o $(BUILD)/runtime/xv_vertex_upload.o
+$(CAPTURE_PACKED_OBJECTS): CFLAGS += -DXV_VERTEX_CAPTURE_PACKED=$(XV_VERTEX_CAPTURE_PACKED)
+.PHONY: force-capture-packed-config
+force-capture-packed-config:
+$(BUILD)/capture-packed.config: force-capture-packed-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_VERTEX_CAPTURE_PACKED)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(CAPTURE_PACKED_OBJECTS): $(BUILD)/capture-packed.config runtime/xv_vertex_upload.h
 XV_VERTEX_BLOCK_LOADS_DEFAULT ?= 0
 ifneq ($(words $(XV_VERTEX_BLOCK_LOADS_DEFAULT)),1)
 $(error XV_VERTEX_BLOCK_LOADS_DEFAULT must be 0 or 1)

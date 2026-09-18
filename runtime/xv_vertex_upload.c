@@ -283,6 +283,9 @@ static const void *upload(unsigned slot, const void *identity, const void *sourc
 #if XV_PACKED_VERTEX_LAYOUT
                            ,unsigned layout
 #endif
+#if XV_VERTEX_CAPTURE_PACKED
+                           ,int compact_input
+#endif
                            )
 {
     if (slot >= XV_FRAME_SLOTS || !identity || !source || !bytes || bytes > XV_VERTEX_UPLOAD_BYTES) goto fail;
@@ -300,7 +303,11 @@ static const void *upload(unsigned slot, const void *identity, const void *sourc
 #endif
         int match;
 #if XV_PACKED_VERTEX_LAYOUT
-        if(layout) {
+        if(layout
+#if XV_VERTEX_CAPTURE_PACKED
+           && !compact_input
+#endif
+          ) {
             compared_bytes+=bytes;
             match=packed_equal(source,pools[slot].cpu+e->offset,bytes/16);
         } else
@@ -335,7 +342,11 @@ static const void *upload(unsigned slot, const void *identity, const void *sourc
         resident_checks++;
         uint64_t checked = bytes;
 #if XV_PACKED_VERTEX_LAYOUT
-        if (layout) resident = packed_equal(source,pools[slot].cpu+off,bytes/16);
+        if (layout
+#if XV_VERTEX_CAPTURE_PACKED
+            && !compact_input
+#endif
+           ) resident = packed_equal(source,pools[slot].cpu+off,bytes/16);
         else
 #endif
         if (resident_references_enabled() && xv_vertex_refs_sparse(refs, bytes, stride)) {
@@ -357,7 +368,11 @@ static const void *upload(unsigned slot, const void *identity, const void *sourc
     } else {
         uint64_t profile = xv_vertex_work_begin();
 #if XV_PACKED_VERTEX_LAYOUT
-        if(layout) {
+        if(layout
+#if XV_VERTEX_CAPTURE_PACKED
+           && !compact_input
+#endif
+          ) {
             xv_packed_copy(pools[slot].cpu+off,source,bytes/16);
             if(!pools[slot].asynchronous)
                 memcpy(pools[slot].gpu+off,pools[slot].cpu+off,bytes);
@@ -416,11 +431,17 @@ const void *xv_vertex_upload(unsigned slot, const void *source, unsigned bytes)
 #if XV_PACKED_VERTEX_LAYOUT
     ,0
 #endif
+#if XV_VERTEX_CAPTURE_PACKED
+    ,0
+#endif
     ); }
 const void *xv_vertex_upload_referenced(unsigned slot, const void *source, unsigned bytes,
                                        unsigned stride, const xv_vertex_refs *refs)
 { return upload(slot, source, source, bytes, stride, refs
 #if XV_PACKED_VERTEX_LAYOUT
+    ,0
+#endif
+#if XV_VERTEX_CAPTURE_PACKED
     ,0
 #endif
     ); }
@@ -431,7 +452,11 @@ const void *xv_vertex_upload_packed(unsigned slot,const void *source,unsigned ve
         failures++;return NULL;
     }
     packed_calls++;packed_vertices+=vertices;
-    return upload(slot,source,source,vertices*16,0,NULL,XV_PACKED_PREFIX16);
+    return upload(slot,source,source,vertices*16,0,NULL,XV_PACKED_PREFIX16
+#if XV_VERTEX_CAPTURE_PACKED
+        ,0
+#endif
+        );
 }
 #endif
 const void *xv_vertex_upload_snapshot(unsigned slot,const void *identity,
@@ -442,7 +467,11 @@ const void *xv_vertex_upload_snapshot(unsigned slot,const void *identity,
         if(packed!=XV_PACKED_PREFIX16 || stride!=32 || !bytes || bytes%32 ||
            bytes/2>XV_VERTEX_UPLOAD_BYTES) { failures++;return NULL; }
         packed_calls++;packed_vertices+=bytes/32;
-        return upload(slot,identity,snapshot,bytes/2,0,NULL,packed);
+        return upload(slot,identity,snapshot,bytes/2,0,NULL,packed
+#if XV_VERTEX_CAPTURE_PACKED
+            ,0
+#endif
+            );
     }
 #else
     if(packed) { failures++;return NULL; }
@@ -451,8 +480,20 @@ const void *xv_vertex_upload_snapshot(unsigned slot,const void *identity,
 #if XV_PACKED_VERTEX_LAYOUT
         ,0
 #endif
+#if XV_VERTEX_CAPTURE_PACKED
+        ,0
+#endif
     );
 }
+#if XV_VERTEX_CAPTURE_PACKED
+const void *xv_vertex_upload_compact_snapshot(unsigned slot,const void *identity,
+    const void *snapshot,unsigned bytes)
+{
+    if(!bytes || bytes%16 || bytes>XV_VERTEX_UPLOAD_BYTES) { failures++;return NULL; }
+    packed_calls++;packed_vertices+=bytes/16;
+    return upload(slot,identity,snapshot,bytes,0,NULL,XV_PACKED_PREFIX16,1);
+}
+#endif
 void xv_vertex_upload_reset(unsigned slot)
 {
     if (slot >= XV_FRAME_SLOTS) return;

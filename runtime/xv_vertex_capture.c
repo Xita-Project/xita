@@ -26,6 +26,9 @@ typedef struct {
     const void *identity[XV_VERTEX_PREPARE_STREAMS];
     const void **targets[XV_VERTEX_PREPARE_STREAMS];
     xv_vertex_refs refs[XV_VERTEX_PREPARE_STREAMS];
+#if XV_VERTEX_CAPTURE_PACKED
+    unsigned compact[XV_VERTEX_PREPARE_STREAMS];
+#endif
     void (*complete)(void *,int);
     void *context;
 } capture_job;
@@ -37,6 +40,16 @@ static unsigned cap_submitted,cap_completed; /* atomic publication counters */
 static int cap_stopping,cap_unavailable,cap_enabled=-1;
 static unsigned cap_jobs_total,cap_drains,cap_pressure,cap_failures,cap_max_pending;
 static uint64_t cap_bytes,cap_capture_us,cap_worker_us,cap_join_us;
+#if XV_VERTEX_CAPTURE_PACKED
+static int cap_compact_enabled=-1;
+static unsigned cap_compact_streams;
+static uint64_t cap_compact_saved;
+static int cap_compact(const xv_vertex_prepare_stream *s)
+{
+    if(cap_compact_enabled<0)cap_compact_enabled=xv_quality_int("XV_VERTEX_CAPTURE_PACKED",1,0,1);
+    return cap_compact_enabled && s->packed==XV_PACKED_PREFIX16 && s->stride==32 && !(s->bytes%32);
+}
+#endif
 
 static void cap_execute(capture_job *job)
 {
@@ -45,6 +58,11 @@ static void cap_execute(capture_job *job)
         xv_vertex_prepare_stream *s=&b->streams[i];unsigned packed=0;
 #if XV_PACKED_VERTEX_LAYOUT
         packed=s->packed;
+#endif
+#if XV_VERTEX_CAPTURE_PACKED
+        if(job->compact[i])s->result=xv_vertex_upload_compact_snapshot(b->slot,
+            job->identity[i],s->source,s->bytes/2);
+        else
 #endif
         s->result=xv_vertex_upload_snapshot(b->slot,job->identity[i],s->source,
             s->bytes,s->stride,s->refs,packed);
@@ -135,8 +153,12 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     for(unsigned i=0;i<batch->count;i++) {
         const xv_vertex_prepare_stream *s=&batch->streams[i];
         if(!s->source || !s->bytes || !targets[i] ||
-           s->bytes>XV_VERTEX_CAPTURE_BYTES-required)goto fallback;
-        unsigned aligned=(s->bytes+15u)&~15u;
+           s->bytes>XV_VERTEX_CAPTURE_BYTES)goto fallback;
+        unsigned captured=s->bytes;
+#if XV_VERTEX_CAPTURE_PACKED
+        if(cap_compact(s))captured/=2;
+#endif
+        unsigned aligned=(captured+15u)&~15u;
         if(aligned>XV_VERTEX_CAPTURE_BYTES-required)goto fallback;
         required+=aligned;
     }
@@ -152,9 +174,17 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     for(unsigned i=0;i<batch->count;i++) {
         xv_vertex_prepare_stream *s=&j->batch.streams[i];
         j->identity[i]=s->source;j->targets[i]=targets[i];
-        memcpy(cap_arena+cap_used,s->source,s->bytes);
+        unsigned captured=s->bytes;
+#if XV_VERTEX_CAPTURE_PACKED
+        j->compact[i]=cap_compact(s);
+        if(j->compact[i]) {
+            captured/=2;xv_packed_copy(cap_arena+cap_used,s->source,s->bytes/32);
+            cap_compact_streams++;cap_compact_saved+=captured;
+        } else
+#endif
+        memcpy(cap_arena+cap_used,s->source,captured);
         s->source=cap_arena+cap_used;s->result=NULL;
-        cap_used+=(s->bytes+15u)&~15u;
+        cap_used+=(captured+15u)&~15u;
         if(s->refs) { j->refs[i]=*s->refs;s->refs=&j->refs[i]; }
     }
     j->batch.ok=0;cap_jobs_total++;cap_bytes+=required;
@@ -175,6 +205,9 @@ void xv_vertex_capture_shutdown(void)
     }
     cap_release();cap_unavailable=cap_stopping=0;cap_enabled=-1;
     cap_submitted=cap_completed=cap_retired=cap_used=0;
+#if XV_VERTEX_CAPTURE_PACKED
+    cap_compact_enabled=-1;
+#endif
 }
 void xv_vertex_capture_report(unsigned frames)
 {
@@ -185,4 +218,9 @@ void xv_vertex_capture_report(unsigned frames)
         cap_drains,cap_pressure,cap_max_pending,cap_failures);
     cap_jobs_total=cap_drains=cap_pressure=cap_max_pending=cap_failures=0;
     cap_bytes=cap_capture_us=cap_worker_us=cap_join_us=0;
+#if XV_VERTEX_CAPTURE_PACKED
+    if(cap_compact_streams)xv_logf("[vertex-capture-packed] %u frames: %u streams, %llu KiB staging writes avoided; exact 16-byte shader inputs\n",
+        frames,cap_compact_streams,(unsigned long long)(cap_compact_saved>>10));
+    cap_compact_streams=0;cap_compact_saved=0;
+#endif
 }

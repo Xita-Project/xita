@@ -266,12 +266,80 @@ static void gpu_copy_lifetime(void)
     }
     cleanup();
 }
+#if XV_VERTEX_CAPTURE_PACKED
+static void compact_versions(void)
+{
+    enum { N=129, RAW=N*32, COMPACT=N*16 };
+    unsigned char *mapping=mmap(NULL,8192,PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0);
+    assert(mapping!=MAP_FAILED);unsigned char *guest=mapping+1;
+    unsigned char expected[COMPACT],changed[COMPACT];
+    for(unsigned i=0;i<RAW;i++)guest[i]=(unsigned char)(i*7+i/32);
+    for(unsigned v=0;v<N;v++)memcpy(expected+v*16,guest+v*32,16);
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);output a={0},b={0},c={0},shorter={0};
+    unsigned used=cap_used;uint64_t saved=cap_compact_saved;
+    assert(capture(0,guest,RAW,32,NULL,XV_PACKED_PREFIX16,&a));wait_parked(&parked_capture);
+    assert(cap_used-used==COMPACT && cap_compact_saved-saved==COMPACT);
+    assert(!memcmp(cap_arena+used,expected,COMPACT));
+    for(unsigned v=0;v<N;v++)memset(guest+v*32+16,0xda,16);
+    assert(capture(0,guest,RAW,32,NULL,XV_PACKED_PREFIX16,&b));
+    guest[(N-1)*32+15]^=1;memcpy(changed,expected,COMPACT);changed[COMPACT-1]^=1;
+    assert(capture(0,guest,RAW,32,NULL,XV_PACKED_PREFIX16,&c));
+    assert(capture(0,guest,32*7,32,NULL,XV_PACKED_PREFIX16,&shorter));
+    assert(!mprotect(mapping,8192,PROT_NONE));
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
+    assert(a.ok&&b.ok&&c.ok&&shorter.ok&&a.result[0]==b.result[0]&&a.result[0]!=c.result[0]);
+    assert(shorter.result[0]==c.result[0]);
+    assert(!memcmp(a.result[0],expected,COMPACT)&&!memcmp(c.result[0],changed,COMPACT));
+    assert(!mprotect(mapping,8192,PROT_READ|PROT_WRITE));
+    /* Both capture encodings must share the same GPU cache representation. */
+    const void *legacy=xv_vertex_upload_packed(0,guest,N);assert(legacy==c.result[0]);
+    const void *raw=xv_vertex_upload(0,guest,RAW);assert(raw&&raw!=legacy&&!memcmp(raw,guest,RAW));
+    assert(!xv_vertex_upload_compact_snapshot(0,guest,changed,0));
+    assert(!xv_vertex_upload_compact_snapshot(0,guest,changed,17));
+    assert(!xv_vertex_upload_compact_snapshot(3,guest,changed,COMPACT));
+    assert(!xv_vertex_upload_compact_snapshot(0,guest,NULL,COMPACT));
+    assert(!munmap(mapping,8192));cleanup();
+}
+static void compact_pressure_and_retirement(void)
+{
+    unsigned char *guest=malloc(XV_VERTEX_CAPTURE_BYTES);assert(guest);
+    memset(guest,0x53,XV_VERTEX_CAPTURE_BYTES);output a={0},b={0};
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);unsigned pressure=cap_pressure;
+    assert(capture(0,guest,XV_VERTEX_CAPTURE_BYTES,32,NULL,XV_PACKED_PREFIX16,&a));wait_parked(&parked_capture);
+    assert(capture(0,guest,XV_VERTEX_CAPTURE_BYTES,32,NULL,XV_PACKED_PREFIX16,&b));
+    assert(cap_used==XV_VERTEX_CAPTURE_BYTES && cap_pressure==pressure);
+    memset(guest,0xa9,XV_VERTEX_CAPTURE_BYTES);
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
+    assert(a.ok&&b.ok&&a.result[0]==b.result[0]);
+    for(unsigned i=0;i<XV_VERTEX_CAPTURE_BYTES/2;i++)assert(a.result[0][i]==0x53);
+    cleanup();free(guest);
+    unsigned char source[8192],wanted[4096];output slots[3]={0};
+    xv_vertex_worker_override(1);
+    for(unsigned generation=0;generation<9;generation++) {
+        unsigned slot=generation%3;xv_vertex_upload_reset(slot);
+        for(unsigned i=0;i<sizeof(source);i++)source[i]=(unsigned char)(i+generation);
+        for(unsigned v=0;v<256;v++)memcpy(wanted+v*16,source+v*32,16);
+        slots[slot]=(output){0};assert(capture(slot,source,sizeof(source),32,NULL,XV_PACKED_PREFIX16,&slots[slot]));
+        memset(source,0,sizeof(source));join(slot);
+        assert(slots[slot].ok&&!memcmp(slots[slot].result[0],wanted,sizeof(wanted)));
+    }
+    cleanup();
+    setenv("XV_VERTEX_CAPTURE_PACKED","0",1);output off={0};
+    assert(capture(0,source,sizeof(source),32,NULL,XV_PACKED_PREFIX16,&off));
+    assert(cap_used==sizeof(source));join(0);assert(off.ok);cleanup();
+    unsetenv("XV_VERTEX_CAPTURE_PACKED");
+}
+#endif
 int main(void)
 {
     owner=pthread_self();setenv("XV_VERTEX_CAPTURE","1",1);
     xv_vertex_worker_override(0);xv_vertex_upload_override(1);
     private_inputs();sparse_and_packed();pressure_and_wrap();failure_cases();
     queue_capacity();partial_failure_and_fallback();gpu_copy_lifetime();
+#if XV_VERTEX_CAPTURE_PACKED
+    compact_versions();compact_pressure_and_retirement();
+    puts("PASS: compact staging halves payload; tail/prefix mutations, unmapped input, shorter reuse, raw/packed cache interoperation, nine retired generations, invalid requests and startup disable");
+#endif
     puts("PASS: private inputs, rewritten aliases, mask ownership, packed/raw identity, arena/queue pressure, ticket wrap, partial/allocation/thread/notification failures, fallback drains, disable and three GPU-copy slots");
     return 0;
 }

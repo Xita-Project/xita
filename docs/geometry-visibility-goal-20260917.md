@@ -102,3 +102,9 @@ ARM comparisons and real-worker memory/race checks pass. Small packets avoid
 worker wakes, and unsupported or yielding passes retain the original path.
 The cumulative candidate awaits ordinary hardware validation; no FPS gain is
 attributed to these local correctness results.
+
+The [compact vertex capture candidate](compact-vertex-capture-20260918.md)
+also removes unused tail bytes from private staging for existing packed shader
+layouts. Production memory/race and ARM checks pass. Its expected traffic saving
+is modest in the retained gameplay sample, so it complements visibility work
+while the larger BSP/model write-lifetime audit remains open.
