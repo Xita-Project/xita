@@ -108,3 +108,10 @@ also removes unused tail bytes from private staging for existing packed shader
 layouts. Production memory/race and ARM checks pass. Its expected traffic saving
 is modest in the retained gameplay sample, so it complements visibility work
 while the larger BSP/model write-lifetime audit remains open.
+
+The [write-lifetime audit](geometry-write-lifetimes-20260918.md) now distinguishes
+BSP/model registration from temporary pools, with independently decoded
+boundaries and 58 original x86 pool cases. Retained vertex pointers and direct
+index Data access rule out lock-only invalidation. Continue tracing the separate
+map-loaded payload writers before removing repeated checks; the existing
+qualified cumulative package is unchanged.

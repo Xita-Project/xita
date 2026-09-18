@@ -167,3 +167,9 @@ generation-owned native geometry cache must account for map/BSP replacement,
 retained writable pointers and GPU retirement before it can bypass validation.
 Keep the current owned snapshots for unproved sources. Stable 20 FPS remains the
 goal; these diagnostic changes do not establish it.
+
+The [write-lifetime follow-up](geometry-write-lifetimes-20260918.md) now pins
+the BSP/model registration and drain routines and demonstrates retained
+temporary pointers by executing the original pool helpers. Lock-only tracking
+cannot establish resource immutability. The next cache admission work remains
+specific to BSP/model payload writers and their load generations.
