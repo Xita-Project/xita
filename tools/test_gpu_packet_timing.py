@@ -27,7 +27,7 @@ def run(out, modes):
         exe = out / ('packet-' + mode)
         subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-O1', '-g',
                         '-Wall', '-Wextra', '-Werror', '-DXV_GPU_PACKET_TIMING=1',
-                        '-I' + str(ROOT), '-I' + str(out), '-idirafter', str(sdk / 'arm-vita-eabi/include'),
+                        '-I' + str(ROOT), '-I' + str(ROOT / 'runtime'), '-I' + str(out), '-idirafter', str(sdk / 'arm-vita-eabi/include'),
                         str(ROOT / 'tools/tests/gpu_packet_timing.c'), '-pthread', *flags, '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True, timeout=20,
                        env={**os.environ, 'ASAN_OPTIONS': 'abort_on_error=1:detect_leaks=1',

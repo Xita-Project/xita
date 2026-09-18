@@ -28,7 +28,7 @@ completion where applicable. No title currently meets that release gate.
 | Vehicles and variants | User confirms Warthog, Ghost and Scorpion operation. Driving performance and long-run stability need further testing. |
 | Rendering | User confirms major improvements to sky, decals, baked lighting and active camouflage. Whole-game rendering correctness is not established. |
 | External tester follow-up | September 9: flashlight bug, one stretched shadow, and a jump when leaving stick center. Exact build/settings unknown; [reproduction and performance review](docs/tester-feedback-20260909.md). |
-| Campaign | The Pillar of Autumn has been played through the Keyes section in prior builds. AI, cinematic camera recovery and later missions need further hardware validation. |
+| Campaign | The Pillar of Autumn has been played through the Keyes section in prior builds. **September 18: user reports AI not working; unresolved.** Cinematic camera recovery and later missions also need hardware validation. |
 | Checkpoints and resume | In-game Revert to Last Save is user-confirmed. A later menu-resume correction passes emulator restart testing; hardware menu-resume remains unverified. |
 | GPU stability | Recent user sessions report crashes resolved. Long sessions, weapon effects, rocket self-death and vehicles remain part of tester coverage; stability is not guaranteed. |
 | Audio | In-game sounds work for the user; crackly main-menu music is reported. Page-read and output-buffer fixes pass host tests and were installed September 8; audible improvement on Vita is unverified. |
@@ -86,3 +86,9 @@ reported before launch. [Halo 2 setup and limits](docs/halo2-hardware.md).
 Report the version and revision shown on the dashboard/performance overlay,
 map, graphics settings and reproduction steps. The dated reports below document
 older builds; they do not supersede this release's [test status](docs/combined-games-20260918.md).
+
+September 18 rendering follow-up: a current Vita3K capture shows oversized,
+repeated character-shaped shadows across the campaign floor. Its locally built
+emulator runtime has not been matched to the hardware tester package. The
+shadow defect remains unresolved; emulator FPS with incorrect rendering or
+inactive AI is not evidence of the heavy-gameplay performance target.
