@@ -90,6 +90,11 @@ NONE_STAGE_ZERO = False   # H2 menu pipeline sets True: NONE stages read as zero
 TEXCOORD_SCALE = False    # H2 menu pipeline sets True: PROJECT2D samples scale by xv_texscale[i]
 BLEND_CONST = False       # H2 menu pipeline sets True: output rgb *= xv_blendconst (constant-colour blend factors)
 VARYINGS_AVAILABLE: Optional[Set[str]] = None   # --varyings: what the paired vertex program outputs
+# Combiner arithmetic precision: "float" (default) or "half". tools/ps_pipeline.py sets this per program
+# from XV_PS_PRECISION and keeps programs whose exact bytes are pinned at full precision.
+PRECISION = os.environ.get("XV_PS_PRECISION", "float")
+if PRECISION not in ("float", "half"):
+    raise SystemExit(f"XV_PS_PRECISION must be float or half, not {PRECISION!r}")
 
 
 def src_expr(inp: dict, stage: Optional[dict], alpha: bool, final_c: Tuple[int, int] = (0, 0)) -> str:
@@ -378,15 +383,23 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
         # this multiply (xv_blendconst = blend colour or 1 - blend colour) and blends with ONE.
         body.append("    out_rgb *= xv_blendconst.rgb;")
     body.append("    return saturate(float4(out_rgb, out_a));")
-    # Experimental combiner lowering. Keep full precision by default: changing
-    # out_a and its inputs can alter alpha-test decisions even when the comparison
-    # itself remains float. Hardware gains and visual equivalence are unverified.
-    if os.environ.get("XV_PS_PRECISION", "float") == "half":
+    # Combiner lowering to half precision (PRECISION == "half"). Full precision
+    # remains the default. NV2A combiner arithmetic is 9-bit signed fixed point,
+    # so half (11-bit significand) covers its value range; hardware gains and
+    # visual equivalence still require device verification.
+    if PRECISION == "half":
         # Only the combiner body: the alpha-test block (and everything after its marker) stays float so
         # tools/specialize_ps_alpha.py still recognises it by exact text, and so does the final return.
+        # Types and literals are lowered together: Cg promotes half-with-float-literal expressions back
+        # to float, which would leave most of the arithmetic at full precision. The mux parity test
+        # (fmod(floor(a * 255 + 0.5), 2)) keeps float literals, so its integer rounding stays exact.
         cut = next((i for i, ln in enumerate(body) if "---- alpha test" in ln), len(body))
-        body = [_re.sub(r"\bfloat(4|3|2)?\b", lambda m: "half" + (m.group(1) or ""), ln)
-                if (i < cut and not ln.lstrip().startswith("//")) else ln for i, ln in enumerate(body)]
+        def lower(ln: str) -> str:
+            ln = _re.sub(r"\bfloat(4|3|2)?\b", lambda m: "half" + (m.group(1) or ""), ln)
+            if "fmod(floor(" not in ln:
+                ln = _re.sub(r"(?<![\w.])(\d+\.\d+)(?![\w.])", r"\1h", ln)
+            return ln
+        body = [lower(ln) if (i < cut and not ln.lstrip().startswith("//")) else ln for i, ln in enumerate(body)]
 
     # header + signature
     used_var = {"color0", "color1", "fog"} | {f"texcoord{i}" for i in range(4)
