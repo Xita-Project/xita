@@ -55,8 +55,16 @@ Fallback adds some admission overhead. These are instruction-model results,
 not Vita cycle measurements or an FPS prediction. The native workspace is about
 10 KiB, released before child traversal recurses.
 
+The complete cumulative VPK builds successfully: 1,588 package members, with
+only the runtime and its boot manifest changed. The update contract is
+unchanged. Two existing objects change, two native polygon objects are added,
+and the other 93 objects match the preceding build. Candidate runtime SHA-256
+is `639b47fd4098dff13fef838ae7e5598858fa9de813b84d4e446347d3aa1d06ec`.
+
 Private qualification and package receipts live in
-`direct-cluster-query/typed-portal-integration-20260918`. Hardware deployment and
-ordinary gameplay verification are the next step. Stable 20 FPS is not yet
-established. This change adds no visibility worker; parallel traversal still
-needs a separate ownership plan.
+`direct-cluster-query/typed-portal-integration-20260918`. Two authenticated
+read-only device requests timed out after packaging; no update or restart was
+sent. The last verified installed runtime remains `175f18da`. Hardware
+deployment and ordinary gameplay verification are next. Stable 20 FPS is not
+yet established. This change adds no visibility worker; parallel traversal
+still needs a separate ownership plan.

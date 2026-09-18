@@ -74,6 +74,7 @@ replaces the internal emulated scratch/register machinery with a native data
 interface in local tests. Geometry and whole-traversal output comparisons pass,
 with a substantial modeled instruction reduction. The
 [guarded integration](typed-portal-integration-20260918.md) now passes owner,
-worker, scheduler, deeper traversal and enclosing-consumer checks. Build and
-ordinary hardware gameplay verification remain; instruction counts alone do
-not establish a frame-rate gain.
+worker, scheduler, deeper traversal and enclosing-consumer checks. The cumulative
+VPK is built; deployment and ordinary hardware gameplay verification remain
+because device requests timed out. Instruction counts alone do not establish a
+frame-rate gain.
