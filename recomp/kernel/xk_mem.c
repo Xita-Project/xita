@@ -81,6 +81,7 @@ extern uint8_t *g_xram;
  * offset XRAM_SIZE and never remapped). */
 #ifdef XV_CHECK_GUEST_ADDRESS
 uint32_t xv_page_epoch[XV_PAGE_EPOCH_ENTRIES], xv_page_count, xv_write_epoch = 1;
+uint32_t xv_trash_off = 0xFFFFFFFFu;   /* arena offset of the trash page; set when the arena is bound */
 uint32_t xv_watch_off, xv_watch_len;
 extern volatile uint32_t xv_cur_fn __attribute__((weak));
 void xv_watch_store(uint32_t address, uint32_t off)
@@ -106,6 +107,7 @@ void xk_mem_bind_arena(void)
 #ifdef XV_CHECK_GUEST_ADDRESS
     xv_page_count = xk_mem_arena_size() / XK_PAGE + 1;
     if (xv_page_count > XV_PAGE_EPOCH_ENTRIES) { XK_LOG("arena %u pages exceeds the write-epoch table\n", xv_page_count); abort(); }
+    xv_trash_off = g_trash_off;
 #endif
 }
 uint32_t xk_mem_image_lo(void) { return g_image_lo; }

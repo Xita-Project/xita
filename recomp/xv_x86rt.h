@@ -22,6 +22,13 @@ extern uint32_t *g_xpt;
  * width/page handling, and image-constant accesses use the pinned image path.
  * Ordinary builds retain the original macro with no callback overhead. */
 void xv_check_guest_address(uint32_t address);
+/* The strict policy only ever acts on two address classes: the MMIO apertures at
+ * 0xFD000000 and above, and pages that translate to the arena's trash page (the
+ * unmapped-stack window). Both are decided here from values already in hand, so the
+ * common access costs two compares; the policy function itself is unchanged and
+ * still makes every decision on the slow path. */
+extern uint32_t xv_trash_off;
+#define XV_ADDRESS_NEEDS_POLICY(address, off) ((off) == xv_trash_off || (address) >= 0xFD000000u)
 /* Write-epoch tracking (checked builds): every guest access stamps its arena page
  * with the current epoch (loads too - conservative), host writers stamp through
  * xv_mark_written, and the epoch advances once per presented frame. A consumer
@@ -36,14 +43,15 @@ extern uint32_t xv_watch_off, xv_watch_len;
 void xv_watch_store(uint32_t address, uint32_t off);
 static inline void *x_guest_checked_pointer(uint32_t address)
 {
-    xv_check_guest_address(address);
-    return g_xram + g_xpt[address >> 12] + (address & 0xFFFu);
+    uint32_t off = g_xpt[address >> 12];
+    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) xv_check_guest_address(address);
+    return g_xram + off + (address & 0xFFFu);
 }
 /* Stores only: the recompiler emits X_W* for memory lvalues, X_M* for loads. */
 static inline void *x_guest_checked_pointer_write(uint32_t address)
 {
-    xv_check_guest_address(address);
     uint32_t off = g_xpt[address >> 12];
+    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) xv_check_guest_address(address);
     xv_page_epoch[off >> 12] = xv_write_epoch;
     if ((off + (address & 0xFFFu)) - xv_watch_off < xv_watch_len) xv_watch_store(address, off + (address & 0xFFFu));
     return g_xram + off + (address & 0xFFFu);
