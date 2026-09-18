@@ -44,8 +44,10 @@ def ordered_arm_fp_body(body):
     Match exact instruction sites/counts after the image/CFG checks, before the
     integer-register lowering duplicates this body into both native modes.
     """
-    sites = {0xB723A: ('+', 'add', 2), 0xB728A: ('+', 'add', 1),
-             0xB7306: ('+', 'add', 2), 0xB7314: ('+', 'add', 2),
+    # Discovery.split_blocks now removes overlapping tails, so each audited
+    # instruction is emitted once rather than in two overlapping C blocks.
+    sites = {0xB723A: ('+', 'add', 1), 0xB728A: ('+', 'add', 1),
+             0xB7306: ('+', 'add', 1), 0xB7314: ('+', 'add', 1),
              0xB735D: ('*', 'mul', 1)}
     seen = dict.fromkeys(sites, 0)
     result, pc = [], None
