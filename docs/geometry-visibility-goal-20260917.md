@@ -52,3 +52,9 @@ also insufficient: guest code can retain writable pointers.
 The automated goal tracker now has this objective active. The initial replacement
 attempt was refused while the earlier goal remained unfinished; the user then
 established the new goal. See the [first ownership findings](geometry-ownership-20260917.md).
+
+The [captured vertex-preparation trial](captured-vertex-preparation-20260917.md)
+now overlaps preparation across draws on hardware while retaining private input
+copies and GPU retirement. Its initial gameplay smoke passed; an FPS gain has
+not been established. Next investigate which loaded resources can safely avoid
+those copies, and validate representative gameplay before claiming the target.

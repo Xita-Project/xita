@@ -1,6 +1,7 @@
 # Captured vertex preparation
 
-Status: opt-in hardware trial. No measured frame-rate improvement is claimed.
+Status: opt-in trial installed and smoke-tested on physical Vita. No measured
+frame-rate improvement is claimed.
 
 The range audit mapped more than 99.8% of requested source bytes in two
 Blood Gulch views to loaded BSP/model resources. That does not prove those
@@ -40,3 +41,28 @@ unchanged settings and checks for failed jobs, rendering corruption and frame
 time. Capture, worker and join log values are overlapping window totals, not
 additive frame phases. Extra copies and synchronization can outweigh overlap;
 retain the previous build for comparison and rollback.
+
+## First hardware run
+
+Runtime `f4fc1cd90db565ebd447f4a9acfe604b96f0e6bf7ab9162027da880eae697ae0`
+booted in slot 1; the preceding range-capture build remains in slot 0. Package
+comparison found only the game runtime and boot record changed. Native
+960×544, triple buffering, decals, cosmetic effects, reflections and shadows
+remained enabled. The built-in benchmark stayed off.
+
+The main menu and ordinary solo Blood Gulch run completed 411,968 reported
+preparation jobs across 113 reporting windows, with zero failed jobs. Camera
+movement, walking and assault-rifle firing were exercised; sampled screenshots
+showed the expected world, weapon and HUD. This is a short smoke test, not
+campaign or long-session qualification.
+
+One stationary gameplay window recorded 8,640 jobs over 60 frames: capture
+287,073 µs, worker 397,554 µs, join 2,535 µs. That is about 4.8 ms of recording
+copy work, 6.6 ms of overlapping preparation and 0.04 ms of joining per frame.
+It proves queued work is active, not a frame-time saving: the earlier build was
+observed at a different camera position with a different weapon. The user's
+12 FPS valley report preceded installation of this trial.
+
+Next: prove loaded BSP/model data lifetimes and writers before avoiding copies
+of unchanged inputs. The private staging copy is now a measurable cost; simply
+passing mutable guest pointers to the worker would undo the lifetime guarantee.
