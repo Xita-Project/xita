@@ -236,7 +236,9 @@ It is not included in ordinary release builds.
 ## One-frame geometry traces
 
 On a paired development build, `vita_remote.py --config PRIVATE_CONFIG trace-draw`
-queues one frame of the existing detailed draw trace. The authenticated network
+queues one frame of vertex/index range records. It leaves the expensive full
+histogram (vertex hashing, transformed positions and packed-layout bypass) off.
+The authenticated network
 thread only sets a request; the recording owner consumes it at Present/Swap.
 The log records `remote one-frame request` and `remote frame ... completed`.
 An HTTP acknowledgement means queued, not completed. The trace is unavailable

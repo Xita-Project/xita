@@ -3,8 +3,8 @@
 
 Matches establish source-range provenance only. Requested spans are not copied
 bytes, compared bytes, CPU/GPU time or a proof that the source is immutable.
-Detailed tracing excludes packed vertex admission, so do not time these frames
-as ordinary gameplay. Unmatched streams remain unclassified, not 'dynamic'.
+Trace instrumentation makes these frames unsuitable for gameplay timing.
+Unmatched streams remain unclassified, not 'dynamic'.
 """
 import argparse
 from collections import Counter

@@ -185,13 +185,21 @@ static void hist_level_track(void)
 void xd3d_hist_arm(void) { g_hist_frame = (int)g_dev.frame + 1; D3DLOG("hist: armed by screenshot -> tracing frame %d\n", g_hist_frame); }
 int xd3d_hist_active(void)
 {
-    if(__atomic_load_n(&g_remote_hist_on,__ATOMIC_RELAXED) &&
-       g_dev.frame+1==__atomic_load_n(&g_remote_hist_frame,__ATOMIC_RELAXED))return 1;
     if (g_hist_frame == -2) { const char *e = getenv("XV_D3D_HIST"); g_hist_frame = e ? atoi(e) : -1; }
     static unsigned count;
     if (!count) { const char *e = getenv("XV_D3D_HIST_COUNT"); int n = e ? atoi(e) : 1; count = n > 0 && n <= 120 ? (unsigned)n : 1; }
     return g_hist_frame >= 0 && g_dev.frame + 1 >= (unsigned)g_hist_frame &&
            g_dev.frame + 1 - (unsigned)g_hist_frame < count;
+}
+
+int xd3d_vertex_trace_active(void)
+{
+    /* Remote range capture must not enable the full histogram's per-vertex
+     * hashing, transformed-position dump or packed-layout bypass. On hardware
+     * that diagnostic work can stall a solo match long enough to time out. */
+    if(__atomic_load_n(&g_remote_hist_on,__ATOMIC_RELAXED) &&
+       g_dev.frame+1==__atomic_load_n(&g_remote_hist_frame,__ATOMIC_RELAXED))return 1;
+    return xd3d_hist_active();
 }
 
 void xd3d_r_present(unsigned frame, unsigned draws) __attribute__((weak));

@@ -1136,6 +1136,10 @@ static int prim_to_gxm(uint32_t prim, uint32_t *count, const void **indices, uin
 
 int xd3d_hist_active(void) __attribute__((weak));
 static int trace_frame(void) { return xd3d_hist_active && xd3d_hist_active(); }
+int xd3d_vertex_trace_active(void) __attribute__((weak));
+static int vertex_trace_frame(void) {
+    return xd3d_vertex_trace_active ? xd3d_vertex_trace_active() : trace_frame();
+}
 /* A later diagnostic request must never read a captured packed span with the
  * original declaration stride. Ordinary trace capture already declines it. */
 #if XV_PACKED_VERTEX_LAYOUT
@@ -1550,8 +1554,9 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_indices++;
         return;
     }
-    /* Observation only, restricted to an explicitly requested histogram frame. */
-    if (trace_frame()) {
+    /* Range-only remote capture also uses this record, without the much more
+     * expensive full histogram or changing packed vertex admission. */
+    if (vertex_trace_frame()) {
         unsigned lo=65535,hi=0;
         const uint8_t *ix=indices;
         for(unsigned i=0;i<count;i++) {
@@ -1658,7 +1663,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             c->packed_vertex=XV_PACKED_PREFIX16;
         }
 #endif
-        if (trace_frame()) XV_LOG("[hist] stream %u vb %08X common %08X data %08X vertices %u stride %u\n",
+        if (vertex_trace_frame()) XV_LOG("[hist] stream %u vb %08X common %08X data %08X vertices %u stride %u\n",
             s, S.stream_guest[s], vb->Common, vb->Data, nverts, stride);
         /* Only the owned upload is published; the cached source stays on CPU. */
     }
