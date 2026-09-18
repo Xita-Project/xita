@@ -140,15 +140,33 @@ class HaloMap:
 
 def bsp_header(m: HaloMap, bsp: dict):
     """
-    BSP block header (32 bytes at the BSP's file offset):
-      +0x00 sbsp tag struct address   +0x04 lightmap material count?   +0x08 lightmap materials addr
-      +0x0C rendered vertices?        +0x10 ...                        +0x1C 'sbsp'
+    Xbox v5 BSP header (24 bytes at the BSP's file offset):
+      +0x00 sbsp tag struct address
+      +0x04 render vertex resource count   +0x08 resource array address
+      +0x0C lightmap vertex resource count +0x10 resource array address
+      +0x14 'sbsp' (stored as 'psbs')
+    Each resource is a 12-byte Xbox D3D resource header. The arrays are
+    registered by Halo 3925's 0x33860, called from the BSP loader at 0x3555F.
     Pointers inside the block are absolute addresses relative to load_address.
     """
+    if m.version != 5:
+        raise ValueError('Xbox BSP headers require cache version 5')
     o = bsp["file_offset"]
-    f = struct.unpack_from("<7I4s", m.data, o)
-    return {"sbsp_struct_addr": f[0], "f1": f[1], "f2": f[2], "f3": f[3], "f4": f[4], "f5": f[5], "f6": f[6],
-            "magic": f[7][::-1].decode("ascii", "replace")}
+    size = bsp["size"]
+    base = bsp["load_address"]
+    if o < HEADER_SIZE or size < 24 or o + size > len(m.data) or base + size > 1 << 32:
+        raise ValueError('BSP block outside inflated cache/address space')
+    root, rc, rp, lc, lp, magic = struct.unpack_from("<5I4s", m.data, o)
+    if magic != b"psbs":
+        raise ValueError(f'Xbox BSP magic {magic!r} != psbs')
+    if not base <= root < base + size:
+        raise ValueError('BSP root outside its block')
+    for count, addr in ((rc, rp), (lc, lp)):
+        if count and not base <= addr <= addr + count * 12 <= base + size:
+            raise ValueError('BSP vertex resource array outside its block')
+    return {"sbsp_struct_addr": root, "render_vertex_buffer_count": rc,
+            "render_vertex_buffer_address": rp, "lightmap_vertex_buffer_count": lc,
+            "lightmap_vertex_buffer_address": lp, "magic": "sbsp"}
 
 
 def main() -> int:
@@ -182,7 +200,8 @@ def main() -> int:
         if args.bsp:
             h = bsp_header(m, b)
             print(f"       header: sbsp struct 0x{h['sbsp_struct_addr']:08X} magic '{h['magic']}' "
-                  f"f1..f6 = {h['f1']:#x} {h['f2']:#x} {h['f3']:#x} {h['f4']:#x} {h['f5']:#x} {h['f6']:#x}")
+                  f"render buffers {h['render_vertex_buffer_count']} @0x{h['render_vertex_buffer_address']:08X}; "
+                  f"lightmap buffers {h['lightmap_vertex_buffer_count']} @0x{h['lightmap_vertex_buffer_address']:08X}")
     return 0
 
 
