@@ -105,7 +105,7 @@ def generate(xbe=None,manifest=None):
             if pc in sites and line.startswith('    r1 = '):
                 sites[pc]+=1
                 body.append('    if ((int16_t)r1>0) work->input_vertices+=(uint16_t)r1;')
-    assert sites=={0xB71F1:1,0xB7213:2}
+    assert sites=={0xB71F1:1,0xB7213:1}  # deduplicated instruction blocks
     body=ordered_arm_fp_body(body)
     text='\n'.join(body)
     for pc in (0x117CC,0x1181D):
