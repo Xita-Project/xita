@@ -17,6 +17,7 @@ from recompiler import xita_recomp as r
 from recompiler.core.hooks import NoGameHooks
 from games.halo_ce_3925.clip_region import IMAGE_SHA256, SPANS, hook
 from tools.gen_native_clip import ARM_OPERAND_ORDER, ordered_arm_fp_body
+from tools.clip_distance_spans import transform as distance_spans
 FIELDS=('f_kind','f_op1','f_op2','f_res','f_bits','f_cf_override','f_cf','f_of_override','f_of','fsw')
 
 
@@ -166,7 +167,7 @@ int xv_math_clip_region(xctx *c,int markers) {
     return 1;
 }
 '''
-    return ARM_OPERAND_ORDER+header+text+footer,raw,traced
+    return distance_spans(ARM_OPERAND_ORDER+header+text+footer),raw,traced
 
 
 def main():

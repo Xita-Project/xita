@@ -64,3 +64,7 @@ the two original world-culling paths across all 82 owned BSPs. Blood Gulch uses
 subcluster bounds; the qualified triangle-outcode prototype remains uninstalled
 because it does not target that path. Continue with portal clipping/subcluster
 work and the remaining retained-pointer lifetime questions.
+
+The next [clipping input-span candidate](clip-distance-spans-20260917.md)
+reduces repeated guest address translation within the active portal clipper.
+It preserves the original math and fallback, and keeps earlier optimizations.

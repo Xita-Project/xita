@@ -159,6 +159,13 @@ XV_SCENE_PARTITION ?= 0
 XV_SCENE_BUCKET0_DETAIL ?= 0
 # Ordered portal register/flag caching, selected only in its regenerated unit.
 XV_NATIVE_VISIBILITY_PORTAL_LOOP ?= 0
+XV_CLIP_DISTANCE_SPANS ?= 0
+ifneq ($(words $(XV_CLIP_DISTANCE_SPANS)),1)
+$(error XV_CLIP_DISTANCE_SPANS must be 0 or 1)
+endif
+ifneq ($(filter $(XV_CLIP_DISTANCE_SPANS),0 1),$(XV_CLIP_DISTANCE_SPANS))
+$(error XV_CLIP_DISTANCE_SPANS must be 0 or 1)
+endif
 ifneq ($(words $(XV_NATIVE_VISIBILITY_PORTAL_LOOP)),1)
 $(error XV_NATIVE_VISIBILITY_PORTAL_LOOP must be 0 or 1)
 endif
@@ -438,6 +445,11 @@ LIBS      += -lSceLibKernel_stub -lSceTouch_stub -lm
 # (recomp/, linked as librecomp.a) and the GXM UI bridge; see runtime/xv_boot.c / runtime/xv_ui_gxm.c.
 RECOMP    ?= 0
 GAME_PROFILE ?= halo_ce_3925
+ifeq ($(XV_CLIP_DISTANCE_SPANS),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_NATIVE_CLIP_REGION),1:halo_ce_3925:1)
+$(error XV_CLIP_DISTANCE_SPANS requires RECOMP=1 GAME_PROFILE=halo_ce_3925 XV_NATIVE_CLIP_REGION=1)
+endif
+endif
 ifeq ($(XV_NATIVE_VISIBILITY_PORTAL_LOOP),1)
 ifneq ($(RECOMP):$(GAME_PROFILE),1:halo_ce_3925)
 $(error XV_NATIVE_VISIBILITY_PORTAL_LOOP requires RECOMP=1 GAME_PROFILE=halo_ce_3925)
@@ -1439,7 +1451,18 @@ $(RECOMP_BUILD)/clip-region.config: force-clip-region-config
 $(REGION_HOOK_OBJS) $(REGION_NATIVE_OBJS): $(RECOMP_BUILD)/clip-region.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/clip-region.config
 $(RECOMP_BUILD)/kernel/xk_clip_region.o: RECOMP_CFLAGS += -ffp-contract=off
-recomp/kernel/xk_clip_region.c: tools/gen_native_clip_region.py tools/gen_native_clip.py games/halo_ce_3925/clip_region.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
+# Only the fused clipping unit consumes this option. Rebuild on either change
+# of value, retaining all other cumulative guest/native objects.
+.PHONY: force-clip-distance-config
+force-clip-distance-config:
+$(RECOMP_BUILD)/clip-distance.config: force-clip-distance-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_CLIP_DISTANCE_SPANS)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_clip_region.o: $(RECOMP_BUILD)/clip-distance.config
+$(RECOMP_BUILD)/kernel/xk_clip_region.o: RECOMP_CFLAGS += -DXV_CLIP_DISTANCE_SPANS=$(XV_CLIP_DISTANCE_SPANS)
+recomp/kernel/xk_clip_region.c: tools/gen_native_clip_region.py tools/gen_native_clip.py tools/clip_distance_spans.py games/halo_ce_3925/clip_region.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_clip_region.py --xbe $(XBE) --manifest $(XBE_JSON)
 recomp/kernel/xk_clip.c: tools/gen_native_clip.py games/halo_ce_3925/hooks.py games/halo_ce_3925/clip_region.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_clip.py

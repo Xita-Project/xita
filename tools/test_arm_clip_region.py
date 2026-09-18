@@ -1,7 +1,7 @@
 from pathlib import Path
 import sys,subprocess,struct,math,json,hashlib,os
 import argparse
-p=argparse.ArgumentParser();p.add_argument('--out',type=Path,required=True);p.add_argument('--reuse',action='store_true');p.add_argument('--off',action='store_true');p.add_argument('--park',action='store_true');p.add_argument('--no-markers',action='store_true');p.add_argument('--mode',type=int);p.add_argument('--case',type=int);args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--out',type=Path,required=True);p.add_argument('--reuse',action='store_true');p.add_argument('--off',action='store_true');p.add_argument('--park',action='store_true');p.add_argument('--no-markers',action='store_true');p.add_argument('--mode',type=int);p.add_argument('--case',type=int);p.add_argument('--distance-spans',action='store_true');args=p.parse_args()
 S=Path(__file__).resolve().parents[1];O=args.out.resolve();O.mkdir(parents=True,exist_ok=True)
 sys.path.insert(0,str(S/'tools'))
 from test_native_clip_region import prepare
@@ -35,6 +35,7 @@ cc=os.environ.get('ARM_CC',str(Path(os.environ.get('VITASDK',str(Path.home()/'vi
 common=[cc,'-O2','-g','-std=gnu11','-fno-strict-aliasing','-ffp-contract=off','-mthumb','-mcpu=cortex-a9','-mfpu=neon','-ffunction-sections','-fdata-sections','-fstack-usage','-DXV_EXPERIMENTAL_OBJECT_JOBS','-DXV_NATIVE_CLIP_REGION','-I'+str(S/'tools/tests'),'-I'+str(S/'recomp'),'-I'+str(S/'runtime')]
 if args.park: common+=['-DPARK_MUTATION']
 if args.no_markers: common+=['-DCLIP_TEST_NO_MARKERS']
+if args.distance_spans: common+=['-DXV_CLIP_DISTANCE_SPANS=1']
 files=[O/'reference.c',S/'recomp/kernel/xk_clip_region.c',O/'probe.c',S/'recomp/kernel/xk_clip_region_control.c',S/'tools/tests/clip_region_arm.c',S/'recomp/kernel/xk_clip.c',S/'recomp/xv_x86rt.c',S/'recomp/kernel/xk_object_jobs.c']
 commands=[];elf=O/'arm-test.elf'
 if '--reuse' not in sys.argv:
