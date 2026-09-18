@@ -14,6 +14,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from recompiler import xita_recomp as r
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 
 
 def region(body,address,name):
@@ -42,7 +43,7 @@ def main():
         for entry in (0x8DDF0,0x8E087):assert 'POSE' not in '\n'.join(altered.function_entry(entry))
         for pc in (0x8E0F0,0x8E5D0):assert 'POSE' not in '\n'.join(altered.before_instruction(pc))
         image.bytes_at=read
-    d=r.Discovery(image,{},image.kernel_imports(),lambda *args:None)
+    d=HaloDiscovery(image,{},image.kernel_imports(),lambda *args:None)
     for address in (0x8DDF0,0x8E087,0xB5B40,0xB5F60):
         d.add_root(address);d.lift_function(d.functions[address]);d.split_blocks(d.functions[address])
     old=r.Emitter(image,d,{},image.kernel_imports(),'unused',1,hooks=baseline)

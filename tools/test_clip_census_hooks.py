@@ -6,6 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from recompiler import xita_recomp as r
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 from games.halo_ce_3925.clip_region import hook
 from recompiler.core.profile import load_profile
 p=argparse.ArgumentParser();p.add_argument('--out',type=Path)
@@ -28,7 +29,7 @@ assert 0x117B0 not in phases and 0xB71C0 not in phases
 assert h.function_entry(0x117B0)==[]
 assert h.function_entry(0xB71C0)==['    { extern int xv_math_polygon_clip(xctx *); if (xv_math_polygon_clip(c)) return; }']
 pcs=(0x56670,0x58440,0x58CD0,0x8D760,0x8D7A6,0x91D10,0x92230,0x92330,0xB7F10,0xB7F50,0xB8000)
-d=r.Discovery(img,hle,img.kernel_imports(),lambda *args:None)
+d=HaloDiscovery(img,hle,img.kernel_imports(),lambda *args:None)
 # Existing root boundaries matter: e.g.92230 tail-calls A92C0, whose
 # shared transaction must not be inlined by a tiny isolated discovery.
 if args.stage:

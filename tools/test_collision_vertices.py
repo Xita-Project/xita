@@ -6,6 +6,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from recompiler import xita_recomp as r
 from recompiler.core.hooks import NoGameHooks
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 from games.halo_ce_3925 import collision_vertices
 
 def generate(a):
@@ -13,7 +14,7 @@ def generate(a):
     image=r.Image(str(a.xbe),str(a.manifest))
     assert hashlib.sha256(image.data).hexdigest()=='4094e994243ddeae3f1b478bde6a7ee81498218ccd7c9d7bc2327db547d95aae'
     assert hashlib.sha256(image.bytes_at(0x86f50,884)).hexdigest()=='dac5ac8da738ab412fd265fb824a2a6abe9cde4f6fef19fb1a873ba5aba73d34'
-    d=r.Discovery(image,{},image.kernel_imports(),lambda *args:None);d.add_root(0x86f50)
+    d=HaloDiscovery(image,{},image.kernel_imports(),lambda *args:None);d.add_root(0x86f50)
     f=d.functions[0x86f50];d.lift_function(f);d.split_blocks(f)
     body=r.Emitter(image,d,{},image.kernel_imports(),'unused',1,hooks=NoGameHooks()).emit_function(f)
     region=body[body.index('L_00086F9B:'):body.index('L_0008709A:')]

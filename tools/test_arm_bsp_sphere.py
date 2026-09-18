@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from recompiler import xita_recomp as r
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 from recompiler.core.hooks import NoGameHooks
 
 
@@ -108,7 +109,7 @@ def main():
     assert HaloHooks(img).enabled, 'Unsupported executable'
     digest = hashlib.sha256(img.bytes_at(0x87ecc, 0x1a)).hexdigest()
     assert digest == '68ec0f334940aa871ae2fede180af8adf67f37fd58a0f094857397e9445970b0'
-    disc = r.Discovery(img, {}, img.kernel_imports(), lambda *args: None)
+    disc = HaloDiscovery(img, {}, img.kernel_imports(), lambda *args: None)
     disc.add_root(0x87ea0)
     disc.lift_function(disc.functions[0x87ea0])
     disc.split_blocks(disc.functions[0x87ea0])

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from games.halo_ce_3925 import collision_solver, object_motion_profile
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 from recompiler import xita_recomp as r
 from recompiler.core.profile import load_profile
 
@@ -30,7 +31,7 @@ lift = r.DEFAULT_LIFT | set(profile.lift)
 hle = {s['address']: s for s in symbols if s['kind'] == 'FUN' and s['name'] not in lift and
        (s['lib'] in r.HLE_LIBS or s['name'] in r.HLE_KEEP)}
 hle.update(profile.overrides)
-d = r.Discovery(img, hle, img.kernel_imports(), lambda *args: None)
+d = HaloDiscovery(img, hle, img.kernel_imports(), lambda *args: None)
 for address in re.findall(r'^void f_([0-9A-F]{8})\(',
                          (args.stage/'recomp/xv_recomp_protos.h').read_text(), re.M):
     d.add_root(int(address, 16))

@@ -17,6 +17,7 @@ sys.path.insert(0, str(root))
 from recompiler import xita_recomp as r
 from recompiler.core.hooks import NoGameHooks
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 
 
 def region(body, name):
@@ -48,7 +49,7 @@ def main():
             assert not HaloHooks(img).before_instruction(0xA2781)
         finally:
             img.bytes_at = read
-    discovery = r.Discovery(img, {}, img.kernel_imports(), lambda *args: None)
+    discovery = HaloDiscovery(img, {}, img.kernel_imports(), lambda *args: None)
     for address in (0xA26B0, 0xB5B40):
         discovery.add_root(address)
         discovery.lift_function(discovery.functions[address])

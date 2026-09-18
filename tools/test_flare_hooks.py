@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from recompiler import xita_recomp as r
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 from recompiler.halo_flare_hooks import ENTRY, ENTRY_HOOK, BARRIERS, barrier_line, matches_image
 from apply_flare_hooks import add_hooks
 from iced_x86 import InstructionInfoFactory, Register, OpAccess, FlowControl, RflagsBits
@@ -90,7 +91,7 @@ def liveness(img, source):
 
 def hooks(img):
     assert matches_image(img)
-    disc = r.Discovery(img, {}, img.kernel_imports(), lambda *args: None)
+    disc = HaloDiscovery(img, {}, img.kernel_imports(), lambda *args: None)
     for addr in (ENTRY, *BARRIERS):
         disc.add_root(addr)
         disc.lift_function(disc.functions[addr])

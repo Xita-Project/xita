@@ -13,6 +13,7 @@ sys.path.insert(0,str(ROOT))
 from recompiler import xita_recomp as r
 from recompiler.core.hooks import NoGameHooks
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 
 
 def region(body,name):
@@ -37,7 +38,7 @@ def main():
         image.bytes_at=changed
         try:assert not HaloHooks(image).before_instruction(0x8E0F0)
         finally:image.bytes_at=read
-    d=r.Discovery(image,{},image.kernel_imports(),lambda *args:None)
+    d=HaloDiscovery(image,{},image.kernel_imports(),lambda *args:None)
     for address in (0x8DDF0,0xB5B40,0xB5F60):
         d.add_root(address);d.lift_function(d.functions[address]);d.split_blocks(d.functions[address])
     original=r.Emitter(image,d,{},image.kernel_imports(),'unused',1,hooks=NoGameHooks())

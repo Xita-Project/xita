@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT))
 from recompiler import xita_recomp as r
 from recompiler.core.hooks import NoGameHooks
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 
 SPANS = ((0x171F10, 672), (0x1716F0, 605))
 LIFTED = (0x171F10, 0x1716F0, 0x1D130)
@@ -30,7 +31,7 @@ STUBS = (0x88110, 0x868F0, 0x487E0, 0x855F0, 0x81900, 0x81770, 0x172DE0, 0x172F4
 
 
 def lift(img, entry, hooks):
-    discovery = r.Discovery(img, {}, img.kernel_imports(), lambda *args: None)
+    discovery = HaloDiscovery(img, {}, img.kernel_imports(), lambda *args: None)
     discovery.add_root(entry)
     function = discovery.functions[entry]
     discovery.lift_function(function)

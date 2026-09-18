@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 from recompiler import xita_recomp as recomp
 from recompiler.core.hooks import NoGameHooks
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 import test_model_hierarchy as hierarchy_source
 import test_model_palette as palette_source
 import test_arm_model_hierarchy as hierarchy
@@ -30,7 +31,7 @@ def generate(xbe, manifest, directory):
     hooks = HaloHooks(image)
     if not (hooks.hierarchy_enabled and hooks.palette_enabled):
         raise RuntimeError('Owned image does not match both audited regions')
-    discovery = recomp.Discovery(image, {}, image.kernel_imports(), lambda *a: None)
+    discovery = HaloDiscovery(image, {}, image.kernel_imports(), lambda *a: None)
     for address in (0x8DDF0, 0xA26B0, 0xB5B40, 0xB5F60):
         discovery.add_root(address)
         discovery.lift_function(discovery.functions[address])

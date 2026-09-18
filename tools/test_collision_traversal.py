@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from recompiler import xita_recomp as r
 from recompiler.core.hooks import NoGameHooks
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 from games.halo_ce_3925 import collision_traversal as ct
 
 ENTRIES = (0x88110, 0x87EA0, 0x87E10, 0x86F50, 0xB0CB0)
@@ -47,7 +48,7 @@ def generate(a):
     if not __debug__:raise ValueError('Assertions required')
     image = r.Image(str(a.xbe), str(a.manifest))
     assert hashlib.sha256(image.data).hexdigest() == IMAGE and ct.matches(image)
-    discovery = r.Discovery(image, {}, image.kernel_imports(), lambda *args: None)
+    discovery = HaloDiscovery(image, {}, image.kernel_imports(), lambda *args: None)
     for address in ENTRIES: discovery.add_root(address)
     for address in ENTRIES:
         f = discovery.functions[address]; discovery.lift_function(f); discovery.split_blocks(f)

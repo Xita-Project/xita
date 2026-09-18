@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from games.halo_ce_3925 import collision_solver, object_motion_profile as motion
 from games.halo_ce_3925.hooks import HaloHooks
+from games.halo_ce_3925.discovery import HaloDiscovery
 from recompiler import xita_recomp as r
 from recompiler.core.profile import load_profile
 
@@ -27,7 +28,7 @@ hle = {s['address']: s for s in symbols if s['kind'] == 'FUN' and s['name'] not 
 hle.update(profile.overrides)
 variables = {s['name']: s['address'] for s in symbols if s['kind'] == 'VAR'}
 variables.update(profile.variables)
-d = r.Discovery(img, hle, img.kernel_imports(), lambda *args: None)
+d = HaloDiscovery(img, hle, img.kernel_imports(), lambda *args: None)
 for pc in re.findall(r'^void f_([0-9A-F]{8})\(', (args.stage/'recomp/xv_recomp_protos.h').read_text(), re.M):
     d.add_root(int(pc, 16))
 hooks = HaloHooks(img); assert hooks.enabled
