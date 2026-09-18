@@ -87,3 +87,33 @@ This is the prerequisite for removing repeated work safely; it is not a claim
 that the world vertex buffers account for all current stream-preparation time.
 The active objective remains stable 20 FPS on physical Vita with rendering and
 gameplay correctness preserved.
+
+## Runtime trace matching
+
+The paired `trace-draw` command now queues one recording frame without invoking
+the benchmark. It is consumed by the recording owner at a Present/Swap boundary;
+the network thread does not touch guest state. Normal and sanitizer checks cover
+the production HTTP service and actual frame-selection functions, including
+manual-trace overlap, counter wrap and an absent networking hook.
+
+After verifying the request/completion markers in a captured game log, match it
+against the known map and active BSP:
+
+```sh
+python3 tools/match_halo_bsp_draws.py /path/to/haloce/maps/bloodgulch.map \
+    /private/path/draw-trace.log --output /private/path/bsp-draws.json
+```
+
+For a map with several BSPs, specify the known active `--bsp N`; the tool refuses
+to guess. A match requires the resource address, physical Data address, stride
+and the complete requested extent to agree. The report separates repeated
+requested spans from their union and leaves every unmatched source unclassified.
+Matching provenance alone is not evidence of unchanged bytes. Trace timing is
+excluded because diagnostic logging/hashing and packed-layout admission differ
+from ordinary frames.
+
+The cumulative diagnostic package preserves the preceding build flags and all
+1,586 non-runtime/boot-record package members. Only the D3D HLE and remote-service
+objects changed; 92 other objects are byte-identical. Hardware installation was
+not attempted when the Vita stopped responding, so remote trace operation on
+hardware and its resulting inventory matches remain pending.
