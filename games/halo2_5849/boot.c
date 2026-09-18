@@ -1,3 +1,4 @@
+#include "xv_version.h"
 /* Isolated native startup harness: executes the owned XBE entry and scheduler.
  * No title screen substitute, success-return API fallbacks or CE game adapter.
  */
@@ -823,7 +824,7 @@ int main(void)
     sceIoMkdir("ux0:data/xita-halo2", 0777);
     sceIoMkdir("ux0:data/xita-halo2/save", 0777);
     log_fd = sceIoOpen("ux0:data/xita-halo2/boot.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
-    xv_logf("[h2/boot] native XBE startup harness, title XH2B00001\n");
+    xv_logf("[h2/boot] Xita " XV_BUILD_LABEL "; native XBE startup harness, title XH2B00001\n");
     h2_load_env();
     h2_arm_watch();
     FILE *input = fopen("app0:halo2_image.bin", "rb");

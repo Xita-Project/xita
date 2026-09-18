@@ -26,6 +26,9 @@ GENERATED ?= $(ROOT)/local/halo2_5849/boot/generated
 BUILD ?= $(ROOT)/local/halo2_5849/boot/build
 IMAGE ?= $(ROOT)/local/halo2_5849/boot/halo2_image.bin
 QUAD_SHADERS ?= $(ROOT)/local/halo2_5849/quad-shaders
+MENU_SHADERS ?= $(ROOT)/local/halo2_5849/menu-shaders
+MENU_FILES = $(wildcard $(MENU_SHADERS)/h2menu*.gxp)
+MENU_PACK = $(foreach f,$(MENU_FILES),-a $(f)=$(notdir $(f)))
 SCREEN_SHADERS ?= $(ROOT)/local/halo2_5849/screen-shaders
 CFLAGS := -O2 -mthumb -mcpu=cortex-a9 -mfpu=neon -std=gnu11 -fno-strict-aliasing -ffunction-sections -fdata-sections -DXV_CHECK_GUEST_ADDRESS=1 -MMD -MP -I$(ROOT) -I$(ROOT)/runtime -I$(ROOT)/recomp -I$(ROOT)/recomp/kernel
 CFLAGS += -DXV_EFLAGS_ID=1
@@ -694,9 +697,9 @@ $(BUILD)/eboot.bin: $(BUILD)/halo2-boot.velf
 	$(VITASDK)/bin/vita-make-fself -s $< $@
 $(BUILD)/param.sfo: Makefile
 	@mkdir -p $(dir $@)
-	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2B00001 -d ATTRIBUTE2=12 "Xita Halo 2 Boot" $@
-$(BUILD)/halo2-boot.vpk: $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(BC1_FILES) $(COMPOSITION_FILES) $(THRESHOLD_FILES) $(BLUR_FILES) $(BLEND_FILES) $(LUMA_FILES) $(SPRITE_FILES) $(DSP_FILES)
-	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(BC1_PACK) $(COMPOSITION_PACK) $(THRESHOLD_PACK) $(BLUR_PACK) $(BLEND_PACK) $(LUMA_PACK) $(SPRITE_PACK) $(DSP_PACK) $@
+	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2B00001 -s APP_VER=$$(python3 $(ROOT)/tools/gen_build_version.py --sfo) -d ATTRIBUTE2=12 "Xita Halo 2 Boot" $@
+$(BUILD)/halo2-boot.vpk: $(MENU_FILES) $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(BC1_FILES) $(COMPOSITION_FILES) $(THRESHOLD_FILES) $(BLUR_FILES) $(BLEND_FILES) $(LUMA_FILES) $(SPRITE_FILES) $(DSP_FILES)
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(BC1_PACK) $(COMPOSITION_PACK) $(THRESHOLD_PACK) $(BLUR_PACK) $(BLEND_PACK) $(LUMA_PACK) $(SPRITE_PACK) $(DSP_PACK) $(MENU_PACK) $@
 -include $(OBJECTS:.o=.d)
 
 $(BUILD)/audio_hrtf_model_test: audio_hrtf_model_test.c audio_hrtf_model.h
@@ -716,3 +719,10 @@ $(BUILD)/audio_movie_gp_vita_test: audio_movie_gp_vita_test.c audio_mixer_bridge
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -fno-strict-aliasing -frounding-math -ffp-contract=off -ffunction-sections -fdata-sections -I$(ROOT) -I$(ROOT)/recomp $(DSP_INCLUDES) audio_movie_gp_vita_test.c audio_fx_fixture.c audio_progress.c $(ROOT)/recomp/xv_x86rt.c -Wl,--gc-sections -pthread -lm -o $@
 test-host: $(BUILD)/audio_movie_gp_vita_test
+
+.PHONY: version-force
+$(BUILD)/xv_build.h: version-force $(ROOT)/version.json $(ROOT)/tools/gen_build_version.py
+	python3 $(ROOT)/tools/gen_build_version.py --output $@ $(if $(BUILD_REVISION),--revision $(BUILD_REVISION),)
+$(BUILD)/boot.o: $(BUILD)/xv_build.h
+$(BUILD)/boot.o: CFLAGS += -include $(BUILD)/xv_build.h
+$(BUILD)/param.sfo: $(ROOT)/version.json
