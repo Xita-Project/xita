@@ -68,3 +68,9 @@ work and the remaining retained-pointer lifetime questions.
 The next [clipping input-span candidate](clip-distance-spans-20260917.md)
 reduces repeated guest address translation within the active portal clipper.
 It preserves the original math and fallback, and keeps earlier optimizations.
+
+The [typed portal-polygon experiment](typed-portal-polygon-20260918.md) now
+replaces the internal emulated scratch/register machinery with a native data
+interface in local tests. Geometry and whole-traversal output comparisons pass,
+with a substantial modeled instruction reduction. Production admission,
+worker/scheduler qualification and hardware timing remain before deployment.
