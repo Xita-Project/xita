@@ -24,15 +24,15 @@ def build(stage, out, negative=None):
     flags = ['-O2', '-std=gnu11', '-fno-strict-aliasing', '-ffp-contract=off',
              '-mthumb', '-mcpu=cortex-a9', '-mfpu=neon', '-ffunction-sections',
              '-fdata-sections', '-fstack-usage', '-I'+str(stage/'recomp'),
-             '-I'+str(ROOT/'tools/experiments')]
+             '-I'+str(ROOT/'recomp/kernel')]
     cc = str(Path.home()/'vitasdk/bin/arm-vita-eabi-gcc')
     commands = []; objects = []
     for source in ('tools/tests/visibility_portal_arm.c', 'tools/tests/portal_polygon_arm.c',
-                   'tools/experiments/portal_polygon.c'):
+                   'recomp/kernel/xk_portal_polygon_math.c'):
         path = ROOT/source; obj = out/(path.stem+'.o')
         cmd = [cc, *flags, '-DXP_WHOLE_VISIBILITY']
         if negative: cmd += ['-DXP_TEST_'+negative.upper().replace('-','_')]
-        if path.name == 'portal_polygon.c': cmd += ['-frounding-math']
+        if path.name == 'xk_portal_polygon_math.c': cmd += ['-frounding-math']
         cmd += ['-c', str(path), '-o', str(obj)]
         subprocess.run(cmd, check=True); commands.append(cmd); objects.append(str(obj))
     retained = [stage/'build/recomp'/n for n in ('code_000.o', 'code_002.o', 'code_009.o',

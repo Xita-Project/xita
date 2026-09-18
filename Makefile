@@ -160,6 +160,13 @@ XV_SCENE_BUCKET0_DETAIL ?= 0
 # Ordered portal register/flag caching, selected only in its regenerated unit.
 XV_NATIVE_VISIBILITY_PORTAL_LOOP ?= 0
 XV_CLIP_DISTANCE_SPANS ?= 0
+XV_TYPED_PORTAL_POLYGON ?= 0
+ifneq ($(words $(XV_TYPED_PORTAL_POLYGON)),1)
+$(error XV_TYPED_PORTAL_POLYGON must be 0 or 1)
+endif
+ifneq ($(filter $(XV_TYPED_PORTAL_POLYGON),0 1),$(XV_TYPED_PORTAL_POLYGON))
+$(error XV_TYPED_PORTAL_POLYGON must be 0 or 1)
+endif
 ifneq ($(words $(XV_CLIP_DISTANCE_SPANS)),1)
 $(error XV_CLIP_DISTANCE_SPANS must be 0 or 1)
 endif
@@ -448,6 +455,11 @@ GAME_PROFILE ?= halo_ce_3925
 ifeq ($(XV_CLIP_DISTANCE_SPANS),1)
 ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_NATIVE_CLIP_REGION),1:halo_ce_3925:1)
 $(error XV_CLIP_DISTANCE_SPANS requires RECOMP=1 GAME_PROFILE=halo_ce_3925 XV_NATIVE_CLIP_REGION=1)
+endif
+endif
+ifeq ($(XV_TYPED_PORTAL_POLYGON),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_NATIVE_CLIP_REGION):$(XV_LIGHT_QUERY_CENSUS):$(XV_EXPERIMENTAL_OBJECT_JOBS):$(XV_NATIVE_VISIBILITY_PORTAL_LOOP),1:halo_ce_3925:1:1:1:1)
+$(error XV_TYPED_PORTAL_POLYGON requires the Halo CE native clip, portal loop and owner/census backend)
 endif
 endif
 ifeq ($(XV_NATIVE_VISIBILITY_PORTAL_LOOP),1)
@@ -911,6 +923,28 @@ $(VISIBILITY_PORTAL_OBJS): RECOMP_CFLAGS += -DXV_NATIVE_VISIBILITY_PORTAL_LOOP=1
 endif
 $(VISIBILITY_PORTAL_OBJS): $(BUILD)/native-visibility-portal.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(BUILD)/native-visibility-portal.config
+# Typed clipping replaces one pinned call, leaving interior and other callers.
+TYPED_PORTAL_SRCS := $(shell rg -l 'XV_TYPED_PORTAL_POLYGON_SCOPE:' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+TYPED_PORTAL_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(TYPED_PORTAL_SRCS))
+ifeq ($(XV_TYPED_PORTAL_POLYGON),1)
+ifneq ($(words $(TYPED_PORTAL_SRCS)),1)
+$(error XV_TYPED_PORTAL_POLYGON requires one selectively prepared portal unit)
+endif
+ifneq ($(words $(shell rg -o 'XV_TYPED_PORTAL_POLYGON_SCOPE:' $(TYPED_PORTAL_SRCS) 2>/dev/null)),1)
+$(error XV_TYPED_PORTAL_POLYGON requires exactly one callsite marker)
+endif
+endif
+.PHONY: force-typed-portal-config
+force-typed-portal-config:
+$(RECOMP_BUILD)/typed-portal.config: force-typed-portal-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_TYPED_PORTAL_POLYGON)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(TYPED_PORTAL_OBJS) $(RECOMP_BUILD)/kernel/xk_clip_region_control.o: RECOMP_CFLAGS += -DXV_TYPED_PORTAL_POLYGON=$(XV_TYPED_PORTAL_POLYGON)
+$(TYPED_PORTAL_OBJS) $(RECOMP_BUILD)/kernel/xk_clip_region_control.o $(RECOMP_BUILD)/kernel/xk_portal_polygon.o $(RECOMP_BUILD)/kernel/xk_portal_polygon_math.o: $(RECOMP_BUILD)/typed-portal.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/typed-portal.config
+$(RECOMP_BUILD)/kernel/xk_portal_polygon_math.o: RECOMP_CFLAGS += -ffp-contract=off -frounding-math
 ifeq ($(XV_NATIVE_BSP_SPHERE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_BSP_SPHERE
 endif

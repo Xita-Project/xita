@@ -1,4 +1,4 @@
-/* Experimental typed visibility kernel. Not connected to the game runtime. */
+/* Pure typed visibility kernel; guest admission lives in xk_portal_polygon.c. */
 #ifndef XITA_PORTAL_POLYGON_H
 #define XITA_PORTAL_POLYGON_H
 
@@ -10,7 +10,8 @@ typedef struct { unsigned backedges, planes, clips, vertices; } xp_work;
  * Inputs must be finite, with finite intermediate arithmetic. No guest state,
  * scheduler, allocation, or rendering operations occur inside this interface.
  * scratch holds two arrays of 256 points. The returned count is authoritative:
- * output is unspecified when count <= 0. -1 means clipping exceeded capacity.
+ * output is unspecified when count <= 0. -1 means clipping exceeded capacity;
+ * -2 requires fallback because intersection arithmetic became nonfinite.
  * The caller is responsible for validating the admitted geometry and lifetime.
  */
 int xp_portal_polygon(const xp_point *input, int count,

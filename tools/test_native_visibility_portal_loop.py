@@ -246,10 +246,11 @@ def fixture(layout,spec):
         fp(0x1f0a68,0);fp(0x1f0abc,1);fp(0x1f0a78,1)
         raw(0x1f0af8,struct.pack('<d',9.999999747378752e-5))
         vertices=spec.get('portal_points',[(-.5,-.5,1),(.5,-.5,1),(.5,.5,1),(-.5,.5,1)])
+        vertices_base=spec.get('portal_vertex_base',0x407000)
         for i in range(len(edges)):
-            p=0x403000+0x40*i;half(p+0x34,len(vertices));word(p+0x38,0x407000+0x100*i)
+            p=0x403000+0x40*i;half(p+0x34,len(vertices));word(p+0x38,vertices_base+0x100*i)
             for j,v in enumerate(vertices):
-                for k,x in enumerate(v):fp(0x407000+0x100*i+12*j+4*k,x)
+                for k,x in enumerate(v):fp(vertices_base+0x100*i+12*j+4*k,x)
         raw(0x2fedc9,bytes([spec.get('skip_distance',1)]));fp(0x2febd0,spec.get('distance_threshold',0))
     poly_count=spec.get('poly_count',4);half(0x410000,poly_count)
     points=[(-1,-1),(1,-1),(1,1),(-1,1)] if poly_count==4 else [

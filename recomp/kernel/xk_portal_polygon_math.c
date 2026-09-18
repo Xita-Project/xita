@@ -1,10 +1,10 @@
 /* A typed polygon/half-plane algorithm for the audited Halo 3925 visibility
- * boundary. Handwritten research implementation, deliberately not a runtime
- * replacement yet. Float stores between planes and double intermediates are
+ * boundary. The owner adapter validates this data interface before admission.
+ * Float stores between planes and double intermediates are
  * part of the geometry contract; build with -ffp-contract=off,
  * -frounding-math and no fast-math.
  */
-#include "portal_polygon.h"
+#include "xk_portal_polygon_math.h"
 #include <math.h>
 
 static int plane_from_edge(xp_point a, xp_point b, xp_plane *p)
@@ -59,6 +59,7 @@ static int half_plane(const xp_point *in, int n, xp_plane plane, int capacity,
             double dx = (double)previous.x - current.x;
             double dy = (double)previous.y - current.y;
             double t = -(d / (dx * plane.x + dy * plane.y));
+            if (!isfinite(t)) return -2; /* Caller restores FP state and falls back. */
             if (t < 0.0) t = 0.0;
             else if (t > 1.0) t = 1.0;
             out[used].x = (float)(t * dx + current.x);

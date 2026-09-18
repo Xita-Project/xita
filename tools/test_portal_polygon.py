@@ -45,14 +45,14 @@ def build(stage, xbe, out):
     flags = ['-O2', '-std=gnu11', '-fno-strict-aliasing', '-ffp-contract=off',
              '-mthumb', '-mcpu=cortex-a9', '-mfpu=neon', '-ffunction-sections',
              '-fdata-sections', '-fstack-usage', '-I'+str(stage/'recomp'),
-             '-I'+str(ROOT/'tools/experiments')]
+             '-I'+str(ROOT/'recomp/kernel')]
     files = [out/'original.c', ROOT/'tools/tests/visibility_portal_arm.c',
-             ROOT/'tools/tests/portal_polygon_arm.c', ROOT/'tools/experiments/portal_polygon.c',
+             ROOT/'tools/tests/portal_polygon_arm.c', ROOT/'recomp/kernel/xk_portal_polygon_math.c',
              stage/'recomp/xv_x86rt.c']
     commands = []; objects = []
     for i, path in enumerate(files):
         obj = out/f'unit-{i}.o'
-        extra = ['-frounding-math'] if path.name == 'portal_polygon.c' else []
+        extra = ['-frounding-math'] if path.name == 'xk_portal_polygon_math.c' else []
         cmd = [cc, *flags, *extra, '-c', str(path), '-o', str(obj)]
         subprocess.run(cmd, check=True); commands.append(cmd); objects.append(str(obj))
     elf = out/'test.elf'

@@ -1,6 +1,6 @@
 /* Geometry-only oracle adapter. This intentionally is NOT a game ABI hook. */
 #include "xv_x86rt.h"
-#include "portal_polygon.h"
+#include "xk_portal_polygon_math.h"
 
 int *__errno(void) { static int e; return &e; }
 int snprintf(char *d, size_t n, const char *f, ...)

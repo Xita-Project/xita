@@ -1,10 +1,14 @@
 # Typed portal polygon experiment
 
+This records the initial prototype. The kernel has since moved to
+`recomp/kernel/xk_portal_polygon_math.c`; see the
+[guarded runtime integration](typed-portal-integration-20260918.md) for the
+subsequent owner checks, deeper traversal tests and deployment status.
+
 The next visibility optimization replaces emulated registers, guest stack
 scratch and repeated address translation with a small native polygon operation.
-The experiment is in `tools/experiments/portal_polygon.c`; it is **not linked
-into the game or installed on Vita**. Current hardware continues to run the
-cumulative `175f18da` clipping-span build.
+At this prototype milestone it was **not linked into the game or installed on
+Vita**. Hardware was running the cumulative `175f18da` clipping-span build.
 
 ## Boundary found in the owned executable
 

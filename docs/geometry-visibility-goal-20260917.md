@@ -72,5 +72,8 @@ It preserves the original math and fallback, and keeps earlier optimizations.
 The [typed portal-polygon experiment](typed-portal-polygon-20260918.md) now
 replaces the internal emulated scratch/register machinery with a native data
 interface in local tests. Geometry and whole-traversal output comparisons pass,
-with a substantial modeled instruction reduction. Production admission,
-worker/scheduler qualification and hardware timing remain before deployment.
+with a substantial modeled instruction reduction. The
+[guarded integration](typed-portal-integration-20260918.md) now passes owner,
+worker, scheduler, deeper traversal and enclosing-consumer checks. Build and
+ordinary hardware gameplay verification remain; instruction counts alone do
+not establish a frame-rate gain.
