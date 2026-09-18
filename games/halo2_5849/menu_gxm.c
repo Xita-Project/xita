@@ -52,6 +52,7 @@ static target *g_open;                 /* target with an open scene */
 static unsigned g_open_draws;
 static uint8_t *g_vring; static unsigned g_vring_used; static uint16_t *g_iring; static unsigned g_iring_used;
 static uint64_t g_perf_ring_waits;
+static int g_dtrace_now;                          /* XV_DRAW_TRACE matched the draw being built */
 static SceGxmContext *g_ctx; static SceGxmShaderPatcher *g_patcher;
 static int g_ready = -1;
 static uint64_t g_serial, g_drawn, g_fallbacks;
@@ -292,7 +293,11 @@ static int open_scene(target *t)
     }
     GCHECK(sceGxmBeginScene(g_ctx, 0, t->rt, NULL, NULL, NULL, &t->surface, &g_depth));
     sceGxmSetViewportEnable(g_ctx, SCE_GXM_VIEWPORT_ENABLED);
-    sceGxmSetViewport(g_ctx, 320.0f, 320.0f, 240.0f, -240.0f, 0.0f, 1.0f);
+    {   /* XV_GXM_HALFPIXEL=<pixels>: shift the viewport (an experiment for the NV2A/GXM pixel-centre convention) */
+        static float half = -1000.0f;
+        if (half < -999.0f) { const char *e = getenv("XV_GXM_HALFPIXEL"); half = e ? (float)atof(e) : 0.0f; }
+        sceGxmSetViewport(g_ctx, 320.0f + half, 320.0f, 240.0f + half, -240.0f, 0.0f, 1.0f);
+    }
     sceGxmSetCullMode(g_ctx, SCE_GXM_CULL_NONE);
     sceGxmSetFrontFragmentProgramEnable(g_ctx, SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
     sceGxmSetBackFragmentProgramEnable(g_ctx, SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
@@ -691,13 +696,19 @@ static int render_body(void *opaque, const h2_menu_request *r)
     for (unsigned u = 0; u < 4; ++u) { scale[u][0] = scale[u][1] = 1.0f; scale[u][2] = scale[u][3] = 0.0f;
         if (tex[u] && tex[u]->linear) { scale[u][0] = 1.0f / (float)tex[u]->w; scale[u][1] = 1.0f / (float)tex[u]->h; } }
     if (fs->psc) GCHECK(sceGxmSetUniformDataF(fu, fs->psc, 0, 18 * 4, &psc[0][0]));
+    g_dtrace_now = 0;
     {   /* XV_DRAW_TRACE=<fragment hash prefix>: the inputs of the first 8 matching draws */
         static int want = -1; static char prefix[24]; static unsigned traced;
         if (want < 0) { const char *e = getenv("XV_DRAW_TRACE"); want = e && *e; if (want) strncpy(prefix, e, sizeof prefix - 1); }
         if (want && traced < 8) {
             char hs[24]; snprintf(hs, sizeof hs, "%016llx", (unsigned long long)fs->hash);
             if (!strncmp(hs, prefix, strlen(prefix))) {
-                ++traced;
+                ++traced; g_dtrace_now = 1;
+                {   /* vertex attribute formats (SET_VERTEX_DATA_ARRAY_FORMAT: type bits 0-3, count 4-7, stride 8-31) */
+                    char fa[200]; size_t u2 = 0;
+                    for (unsigned a = 0; a < 16; ++a) { uint32_t f = s->setup[(0x1760 + a * 4) / 4]; if ((f >> 4) & 0xF) u2 += (size_t)snprintf(fa + u2, sizeof fa - u2, " v%u=t%u,n%u,s%u", a, f & 0xF, (f >> 4) & 0xF, f >> 8); }
+                    xv_logf("[h2/draw-trace]  attrs:%s\n", fa);
+                }
                 xv_logf("[h2/draw-trace] serial=%llu vs=%016llx ps=%s verts=%u target=%08X\n", (unsigned long long)g_serial, (unsigned long long)vs->hash, hs, n, t->color_offset);
                 for (unsigned u = 0; u < 4; ++u) {
                     unsigned base = 0x1B00 + u * 64;
@@ -721,6 +732,11 @@ static int render_body(void *opaque, const h2_menu_request *r)
         if (fs->sampler[u] >= 0 && tex[u]) GCHECK(sceGxmSetFragmentTexture(g_ctx, fs->sampler[u], &tex[u]->tex));
     GCHECK(sceGxmSetVertexStream(g_ctx, 0, vb));
     { uint64_t t0 = perf_now(); GCHECK(sceGxmDraw(g_ctx, prim, SCE_GXM_INDEX_FORMAT_U16, ib, ni)); g_perf_gxmdraw_us += perf_now() - t0; }
+    if (g_dtrace_now) {                        /* the first packed vertex as the program sees it */
+        char fv[240]; size_t u2 = 0; unsigned nf = vs->stride / 4; if (nf > 16) nf = 16;
+        for (unsigned k = 0; k < nf; ++k) u2 += (size_t)snprintf(fv + u2, sizeof fv - u2, " %.4g", vb[k]);
+        xv_logf("[h2/draw-trace]  vertex0 (%u floats of stride %u):%s\n", nf, vs->stride, fv);
+    }
     g_vring_used += n * vs->stride; g_iring_used += (ni * 2 + 3) & ~3u;
     ++g_open_draws; ++g_drawn;
     if (g_drawn <= 40 || !(g_drawn % 500))
