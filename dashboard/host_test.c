@@ -59,6 +59,13 @@ static int run(xv_dash_config *cfg, harness *h, const uint32_t *script, unsigned
     h->script = script; h->length = len; h->step = h->frames = 0;
     return xv_dash_run(cfg,result);
 }
+static int h2_installed;
+static int game_status(const char *id,char *text,unsigned size)
+{
+    assert(!strcmp(id,"halo2"));
+    snprintf(text,size,h2_installed ? "Installed / experimental test" : "Install Halo 2 first.");
+    return h2_installed;
+}
 static unsigned update_calls,update_rows;
 static int update_action(int rollback) {update_calls++;update_rows|=1u<<rollback;return -1;}
 static void update_status(char *text,unsigned size) {snprintf(text,size,"Synthetic update status");}
@@ -74,7 +81,7 @@ int main(void)
     uint32_t *pixels = malloc(976*544*sizeof(*pixels)); assert(pixels);
     for (int i = 0; i < 976*544; i++) pixels[i] = 0x12345678u;
     harness h = {0};
-    xv_dash_config cfg = {{pixels,960,544,976},root,&h,poll_input,present,0,NULL,NULL};
+    xv_dash_config cfg = {{pixels,960,544,976},root,&h,poll_input,present,0,NULL,NULL,NULL};
     xv_dash_result result;
     const uint32_t preview[] = {0,XV_DASH_DOWN,XV_DASH_CROSS};
     h.previews = 1;
@@ -117,11 +124,11 @@ int main(void)
     put(root,"xita.cfg","# user settings\nXV_THREADS=1\nXV_PROF=1\nXV_VBLANK_HZ=60\n XV_TEX_MAXDIM = 256 # detail\nXV_TEX_MAXDIM=256\nXV_VOLUME=50\nUNKNOWN=keep\n");
     cfg.simple_launcher = 1;
     cfg.update_status=update_status;cfg.update_action=update_action;
-    const uint32_t update_menu[]={XV_DASH_UP,0,XV_DASH_CROSS,0,XV_DASH_CROSS,0,XV_DASH_DOWN,0,XV_DASH_CROSS};
-    assert(run(&cfg,&h,update_menu,9,&result)==1 && update_calls==2 && update_rows==3);
+    const uint32_t update_menu[]={XV_DASH_UP,0,XV_DASH_UP,0,XV_DASH_CROSS,0,XV_DASH_CROSS,0,XV_DASH_DOWN,0,XV_DASH_CROSS};
+    assert(run(&cfg,&h,update_menu,sizeof update_menu/sizeof update_menu[0],&result)==1 && update_calls==2 && update_rows==3);
     assert(!result.game_id[0]);
     cfg.update_status=NULL;cfg.update_action=NULL;
-    assert(run(&cfg,&h,update_menu,9,&result)==1);
+    assert(run(&cfg,&h,update_menu,sizeof update_menu/sizeof update_menu[0],&result)==1);
     const uint32_t launch[] = {0,XV_DASH_CROSS};
     assert(run(&cfg,&h,launch,2,&result) == 0 && !strcmp(result.game_id,"haloce") && !result.map[0] && !result.is_save);
     const uint32_t texture[] = {XV_DASH_DOWN,XV_DASH_CROSS,XV_DASH_LEFT,0,XV_DASH_CIRCLE,XV_DASH_UP,XV_DASH_CROSS};
@@ -199,9 +206,28 @@ int main(void)
     snprintf(path,sizeof(path),"%s/haloce/maps/ui.map",root); assert(!unlink(path));
     assert(run(&cfg,&h,launch,2,&result) == 1 && !result.game_id[0]);
     assert(run(&cfg,&h,license,sizeof license/sizeof license[0],&result)==1 && !result.game_id[0]);
+    /* Selection persists independently of CE settings and saves. Uninstalled
+     * profiles remain visible, but cannot return a launch request. */
+    cfg.game_status=game_status;
+    const uint32_t choose_h2[]={XV_DASH_UP,0,XV_DASH_CROSS,0,XV_DASH_DOWN,0,XV_DASH_CROSS};
+    assert(run(&cfg,&h,choose_h2,sizeof choose_h2/sizeof choose_h2[0],&result)==1);
+    assert(run(&cfg,&h,launch,2,&result)==1 && !result.game_id[0]);
+    h2_installed=1;
+    assert(run(&cfg,&h,launch,2,&result)==0 && !strcmp(result.game_id,"halo2"));
+    put(root,"selected-game.txt","../../unexpected.self\n");
+    assert(run(&cfg,&h,launch,2,&result)==1 && !result.game_id[0]); /* CE UI absent */
+    put(root,"haloce/maps/ui.map","");
+    assert(run(&cfg,&h,launch,2,&result)==0 && !strcmp(result.game_id,"haloce"));
+    const uint32_t choose_ce[]={XV_DASH_UP,0,XV_DASH_CROSS,0,XV_DASH_CROSS};
+    put(root,"selected-game.txt","halo2\n");
+    assert(run(&cfg,&h,choose_ce,sizeof choose_ce/sizeof choose_ce[0],&result)==1);
+    assert(run(&cfg,&h,launch,2,&result)==0 && !strcmp(result.game_id,"haloce"));
+    h.previews=1;
+    const uint32_t preview_games[]={XV_DASH_UP,0,XV_DASH_CROSS};
+    assert(run(&cfg,&h,preview_games,3,&result)==1); h.previews=0;
     assert(xv_dash_run(NULL,&result) == -1);
     free(pixels);
-    const char *files[] = {"halo_image.bin","haloce/maps/a10.map","haloce/maps/bloodgulch.map","save/checkpoint.sav","xita.cfg"};
+    const char *files[] = {"halo_image.bin","haloce/maps/a10.map","haloce/maps/bloodgulch.map","save/checkpoint.sav","xita.cfg","selected-game.txt","haloce/maps/ui.map"};
     for (unsigned i = 0; i < sizeof(files)/sizeof(files[0]); i++) {
         snprintf(path,sizeof(path),"%s/%s",root,files[i]); assert(!unlink(path));
     }

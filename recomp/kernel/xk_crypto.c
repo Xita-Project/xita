@@ -213,8 +213,13 @@ void xk_crypto_init(uint32_t image_base, uint32_t image_size)
     signature_key = xk_kalloc(16); hd_key = xk_kalloc(16);
     if (!signature_key || !hd_key) { XK_LOG("crypto: cannot allocate signing keys\n"); abort(); }
     x_guest_write(signature_key, digest, 16);
+#ifdef XV_NONZERO_HD_KEY
     static const uint8_t virtual_hd_key[16] = {
         0x78,0x69,0x74,0x61,0x2d,0x76,0x69,0x72,0x74,0x75,0x61,0x6c,0x2d,0x68,0x64,0x6b   /* "xita-virtual-hdk" */
     };
     x_guest_write(hd_key, virtual_hd_key, sizeof virtual_hd_key);
+#else
+    /* Preserve the key used by existing Halo CE profiles/checkpoints. */
+    memset(key, 0, sizeof key); x_guest_write(hd_key, key, sizeof key);
+#endif
 }

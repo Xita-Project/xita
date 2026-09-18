@@ -29,7 +29,7 @@ typedef enum {
     XV_DASH_CAMPAIGN, XV_DASH_MULTIPLAYER, XV_DASH_SETTINGS
 } xv_dash_mode;
 typedef struct {
-    char game_id[32]; /* "haloce"; empty on cancel/error */
+    char game_id[32]; /* "haloce" or "halo2"; empty on cancel/error */
     xv_dash_mode mode;
     char map[256]; /* map stem or save filename; empty for settings */
     int is_save; /* distinguishes a save from a campaign map */
@@ -48,6 +48,9 @@ typedef struct {
     int simple_launcher;
     void (*update_status)(char *text, unsigned size);
     int (*update_action)(int rollback);
+    /* Optional external profile availability. Positive = launchable; otherwise
+     * explain the missing installation in text. Does not launch or modify data. */
+    int (*game_status)(const char *game_id, char *text, unsigned size);
 } xv_dash_config;
 
 /* 0 = selected, 1 = caller cancelled, -1 = invalid config / allocation / I/O

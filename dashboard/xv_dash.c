@@ -1,3 +1,4 @@
+#include "../runtime/xv_version.h"
 #include "xv_dash.h"
 #include <ctype.h>
 #include <dirent.h>
@@ -63,6 +64,8 @@ typedef struct {
     uint32_t previous;
     int touching;
     char status[96];
+    int halo2_ready;
+    char halo2_status[96];
     segment mesh[1800];
     int mesh_count;
 } dash;
@@ -86,7 +89,16 @@ static int discover(dash *s)
     char p[1024], leaf[512];
     s->image = exists(s, "halo_image.bin");
     s->ui = exists(s, "haloce/maps/ui.map");
-    if (s->simple) return 0;
+    if (s->simple) {
+        strcpy(s->halo2_status,"Install the experimental Halo 2 package first.");
+        if (s->config->game_status)
+            s->halo2_ready = s->config->game_status("halo2",s->halo2_status,sizeof s->halo2_status) > 0;
+        if (path(p,sizeof p,s,"selected-game.txt")) {
+            FILE *f=fopen(p,"r"); char selected[16]={0};
+            if(f) { if(fgets(selected,sizeof selected,f)) s->game=!strcmp(selected,"halo2\n") || !strcmp(selected,"halo2"); fclose(f); }
+        }
+        return 0;
+    }
     for (int i = 0; i < COUNT(campaign); i++) {
         snprintf(leaf, sizeof(leaf), "haloce/maps/%s.map", campaign[i].id);
         if (exists(s, leaf)) s->camp[s->nc++] = i;
@@ -296,16 +308,16 @@ static int content_count(const dash *s)
     return s->mode == 0 ? s->nc : s->mode == 1 ? s->nm : s->ns;
 }
 
-enum { LAUNCH_VISIBLE_ROWS = 5, LICENSE_PAGE = 6, UPDATE_PAGE = 7, LICENSE_VISIBLE_LINES = 18 };
-static const char *const launch_pages[] = {"LAUNCH GAME", "GRAPHICS", "AUDIO", "CONTROLS", "DISPLAY", "PERFORMANCE", "ABOUT / LICENSE", "UPDATE"};
+enum { LAUNCH_VISIBLE_ROWS = 5, LICENSE_PAGE = 6, UPDATE_PAGE = 7, GAMES_PAGE = 8, LICENSE_VISIBLE_LINES = 18 };
+static const char *const launch_pages[] = {"LAUNCH GAME", "GRAPHICS", "AUDIO", "CONTROLS", "DISPLAY", "PERFORMANCE", "ABOUT / LICENSE", "UPDATE", "SELECT GAME"};
 static const int launch_keys[][18] = {
     {-1}, {TEX_DETAIL, TEX_FILTER, MIP_SMOOTH, RESOLUTION, MATERIAL,
            GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, EXTENDED_BC, TRIPLE_BUFFER, MODEL_DETAIL, VERTEX_REFERENCES,
            TEMP_DECALS, COSMETIC_EFFECTS, REFLECTIONS, OBJECT_SHADOWS}, {VOLUME, -1},
     {SENSITIVITY, DEADZONE, INVERT_Y, LOOK_CURVE, TOUCH}, {FPS, CPU, -1},
-    {CPU_CLOCK, VERTEX_WORKER, -1}, {-1}, {-1}
+    {CPU_CLOCK, VERTEX_WORKER, -1}, {-1}, {-1}, {-1}
 };
-static const int launch_counts[] = {0, 18, 1, 5, 2, 2, 0, 2};
+static const int launch_counts[] = {0, 18, 1, 5, 2, 2, 0, 2, 2};
 static const char *const setting_names[] = {
     "Performance overlay", "", "", "", "Texture detail", "Master volume",
     "Look sensitivity", "Stick deadzone", "Invert look", "Look response", "Touch controls", "CPU meter",
@@ -389,13 +401,22 @@ static void setting_value(const dash *s, int k, char *value, size_t size)
 static void render_launcher(dash *s)
 {
     for (int i = 0; i < COUNT(launch_pages); i++) {
-        int y = 177 + i*38, active = s->page == i;
-        pill(s,40,y,286,34,active ? GREEN : DIM,active ? 190 : 60);
-        pill(s,43,y+3,280,28,0xff092510u,active ? 80 : 255);
-        text(s,64,y+11,launch_pages[i],2,1,active ? WHITE : DIM);
+        int y = 177 + i*34, active = s->page == i;
+        pill(s,40,y,286,30,active ? GREEN : DIM,active ? 190 : 60);
+        pill(s,43,y+3,280,24,0xff092510u,active ? 80 : 255);
+        text(s,64,y+9,launch_pages[i],2,1,active ? WHITE : DIM);
     }
     rect(s,350,177,576,305,0xff040b05u,235);
-    if (!s->page) {
+    if (!s->page && s->game == 1) {
+        text(s,378,205,"HALO 2",5,4,WHITE);
+        text(s,378,260,"EXPERIMENTAL",2,2,GREEN);
+        line(s,378,304,894,304,DIM);
+        text(s,378,326,s->halo2_status,1,0,WHITE);
+        text(s,378,366,"Early hardware testing. Rendering is incomplete.",1,0,DIM);
+        text(s,378,390,"Opens the separate Halo 2 test application.",1,0,DIM);
+        text(s,378,414,"Close Halo 2 and reopen Xita to switch games.",1,0,DIM);
+        text(s,378,439,s->halo2_ready ? "CROSS  LAUNCH HALO 2" : "SELECT GAME  TO RETURN TO HALO CE",1,1,GREEN);
+    } else if (!s->page) {
         text(s,378,205,"HALO",5,4,WHITE);
         text(s,378,260,"COMBAT EVOLVED",2,2,GREEN);
         line(s,378,304,894,304,DIM);
@@ -405,6 +426,15 @@ static void render_launcher(dash *s)
         text(s,378,414,"In-game graphics: SELECT + CIRCLE.",1,0,GREEN);
         if (s->image && s->ui) text(s,378,439,"CROSS  LAUNCH GAME",2,1,GREEN);
         else text(s,378,439,"Game files are missing. Check your installation.",1,0,GREEN);
+    } else if (s->page == GAMES_PAGE) {
+        text(s,378,206,"SELECT GAME",3,1,WHITE);
+        text(s,378,268,"HALO: COMBAT EVOLVED",2,0,s->depth && s->row==0 ? WHITE : GREEN);
+        text(s,378,295,s->image && s->ui ? "Installed / gameplay testing" : "Game data missing",1,0,DIM);
+        text(s,378,344,"HALO 2 / EXPERIMENTAL",2,0,s->depth && s->row==1 ? WHITE : GREEN);
+        text(s,378,371,s->halo2_status,1,0,DIM);
+        if(s->depth) rect(s,365,s->row ? 344 : 268,3,15,GREEN,255);
+        text(s,378,416,"Halo CE settings and saves stay separate.",1,0,DIM);
+        text(s,378,450,"CROSS  SELECT     CIRCLE  BACK",1,1,GREEN);
     } else if (s->page == UPDATE_PAGE) {
         char state[96]="Updater not available in this build";
         if(s->config && s->config->update_status)s->config->update_status(state,sizeof state);
@@ -458,7 +488,7 @@ static void render_launcher(dash *s)
     text(s,48,519,s->depth && s->page == LICENSE_PAGE ? "UP / DOWN  SCROLL     LEFT / RIGHT  PAGE     CIRCLE  BACK" :
          s->depth ? "LEFT / RIGHT  CHANGE     CIRCLE  BACK     UP / DOWN  SELECT" :
          "CROSS  SELECT     UP / DOWN  NAVIGATE",1,1,DIM);
-    text(s,775,519,"PS VITA",1,2,GREEN);
+    text(s,920-(int)strlen(XV_BUILD_LABEL)*6,519,XV_BUILD_LABEL,1,0,GREEN);
 }
 static int edit_setting(dash *s, int direction)
 {
@@ -559,6 +589,18 @@ void xv_dash_graphics_snapshot(const xv_dash_graphics *panel, xv_dash_graphics_v
 static int launcher_input(dash *s, uint32_t edge, xv_dash_result *out)
 {
     if (edge & XV_DASH_CIRCLE) { s->depth = 0; s->row = 0; s->scroll = 0; s->status[0] = 0; }
+    else if (s->depth && s->page == GAMES_PAGE) {
+        if(edge & (XV_DASH_UP|XV_DASH_DOWN)) s->row=1-s->row;
+        if(edge & XV_DASH_CROSS) {
+            char target[1024],temp[1024];
+            if(!path(target,sizeof target,s,"selected-game.txt") || !path(temp,sizeof temp,s,"selected-game.txt.tmp")) return 0;
+            FILE *f=fopen(temp,"w"); int failed=!f;
+            if(f) { failed=fputs(s->row ? "halo2\n" : "haloce\n",f)<0; if(fclose(f)) failed=1; }
+            if(!failed && rename(temp,target)) failed=1;
+            if(failed) { remove(temp); strcpy(s->status,"Could not save game selection. Check storage."); }
+            else { s->game=s->row; s->page=s->depth=s->row=s->scroll=0; s->status[0]=0; }
+        }
+    }
     else if(s->depth && s->page == UPDATE_PAGE) {
         if(edge & (XV_DASH_UP|XV_DASH_DOWN))s->row=1-s->row;
         if(edge & XV_DASH_CROSS) {
@@ -587,6 +629,10 @@ static int launcher_input(dash *s, uint32_t edge, xv_dash_result *out)
         edit_setting(s,edge & XV_DASH_LEFT ? -1 : 1);
     } else if (edge & (XV_DASH_CROSS | XV_DASH_RIGHT)) {
         if (s->page) { s->depth = 1; s->row = 0; s->scroll = 0; }
+        else if(s->game==1) {
+            if(!s->halo2_ready) snprintf(s->status,sizeof s->status,"%s",s->halo2_status);
+            else { strcpy(out->game_id,"halo2"); out->mode=XV_DASH_CAMPAIGN; return 1; }
+        }
         else if (!s->image || !s->ui) strcpy(s->status,"Game files are missing. Check your installation.");
         else { strcpy(out->game_id,"haloce"); out->mode = XV_DASH_CAMPAIGN; return 1; }
     }

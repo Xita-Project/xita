@@ -705,6 +705,13 @@ VPK       := $(PROJECT).vpk
 
 all: $(VPK)
 
+.PHONY: version-force
+$(BUILD)/xv_build.h: version-force version.json tools/gen_build_version.py
+	$(PYTHON) tools/gen_build_version.py --output $@ $(if $(BUILD_REVISION),--revision $(BUILD_REVISION),)
+VERSION_OBJS = $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_ui_gxm.o $(BUILD)/runtime/xv_remote.o $(BUILD)/dashboard/xv_dash.o
+$(VERSION_OBJS): $(BUILD)/xv_build.h
+$(VERSION_OBJS): CFLAGS += -include $(abspath $(BUILD)/xv_build.h)
+
 dashboard/license_text.h: LICENSE NOTICE tools/embed_license.py
 	$(PYTHON) tools/embed_license.py
 $(BUILD)/dashboard/xv_dash.o: dashboard/license_text.h
@@ -754,8 +761,8 @@ $(VELF): $(ELF)
 $(EBOOT): $(VELF)
 	vita-make-fself -s $< $@
 
-$(SFO): Makefile | $(BUILD)
-	vita-mksfoex -s TITLE_ID=$(TITLE_ID) $(SFO_EXTRA) "$(TITLE)" $@
+$(SFO): Makefile version.json | $(BUILD)
+	vita-mksfoex -s TITLE_ID=$(TITLE_ID) -s APP_VER=$$($(PYTHON) tools/gen_build_version.py --sfo) $(SFO_EXTRA) "$(TITLE)" $@
 
 # Stable updater boot helper; generated game code is never linked into it.
 $(BUILD)/update-launcher.elf: runtime/xv_update_launcher.c runtime/xv_update.c runtime/xv_sha256.c runtime/xv_update.h runtime/xv_sha256.h Makefile

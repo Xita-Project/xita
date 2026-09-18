@@ -1,3 +1,4 @@
+#include "xv_version.h"
 /*
  * xv_ui_gxm.c - hardware (GXM) renderer for the recompiled engine's immediate-mode UI path.
  * See xv_ui_gxm.h for the design; see recomp/kernel/xd3d.c for the caller (xd3d_r_* hooks).
@@ -48,7 +49,7 @@ extern volatile uint64_t xv_pump_us_acc;              /* main.c: render time spe
 #define UI_TEX_BAD       1024u
 #define UI_MAX_PROGS     4u                /* vertex programs sharing the UI declaration (vs_03/04/38) */
 #define UI_MAX_STAGES    4u                /* NV2A texture stages */
-#define OVL_MAX_QUADS    320u              /* debug overlay: 7-segment digits drawn with the clear program */
+#define OVL_MAX_QUADS    768u              /* debug overlay: 7-segment digits drawn with the clear program */
 
 /* read a guest dword through the runtime's guest->host mapping */
 /* X_G (page-table guest->host) comes from recomp/kernel/xd3d.h -> ../xv_x86rt.h */
@@ -906,7 +907,7 @@ static unsigned panel_rect(clr_vtx *v, unsigned n, unsigned limit, float x, floa
 }
 static unsigned ovl_rect(clr_vtx *v, unsigned n, float x, float y, float w, float h, uint32_t col)
 { return panel_rect(v,n,OVL_MAX_QUADS,x,y,w,h,col); }
-static unsigned panel_text(clr_vtx *v,unsigned n,const char *text,float x,float y,float scale,uint32_t color)
+static unsigned panel_text_limit(clr_vtx *v,unsigned n,unsigned limit,const char *text,float x,float y,float scale,uint32_t color)
 {
     for(;*text;text++,x+=6*scale) {
         unsigned ch=(unsigned char)*text;if(ch<32 || ch>127)ch='?';
@@ -914,11 +915,13 @@ static unsigned panel_text(clr_vtx *v,unsigned n,const char *text,float x,float 
             if(!(font[ch-32][row]&(1u<<(6-col)))) {col++;continue;}
             unsigned start=col++;
             while(col<5 && (font[ch-32][row]&(1u<<(6-col))))col++;
-            n=panel_rect(v,n,UI_MAX_QUADS,x+start*scale,y+row*scale,(col-start)*scale,scale,color);
+            n=panel_rect(v,n,limit,x+start*scale,y+row*scale,(col-start)*scale,scale,color);
         }
     }
     return n;
 }
+static unsigned panel_text(clr_vtx *v,unsigned n,const char *text,float x,float y,float scale,uint32_t color)
+{ return panel_text_limit(v,n,UI_MAX_QUADS,text,x,y,scale,color); }
 void xv_ui_gxm_replay_settings(SceGxmContext *ctx,unsigned frame)
 {
     if(!g.ready || frame>=UI_FRAMES || !g.frame[frame].settings.active)return;
@@ -1011,24 +1014,25 @@ static void xv_ui_gxm_overlay(SceGxmContext *ctx, int32_t idx)
     clr_vtx *v = &g.clrbuf[idx * (4 + OVL_MAX_QUADS * 4) + 4]; unsigned n = 0;
     const uint32_t bg = 0xA0000000u, fps_col = 0xFF40FF40u, game_col = 0xFFFFD040u, rend_col = 0xFF40C0FFu;
     /* panel top-right: fps | game ms | render ms  (colours: green / amber / blue) */
-    n = ovl_rect(v, n, 960 - 190, 6, 184, 96, bg);
+    n = ovl_rect(v, n, 960 - 190, 6, 184, 108, bg);
     n = ovl_number(v, n, (unsigned)(g_xv_ovl_fps + 0.5f), 960 - 136, 11, 10, fps_col, 1);
     n = ovl_number(v, n, (unsigned)(g_xv_ovl_game_ms + 0.5f), 960 - 74, 11, 10, game_col, 1);
     n = ovl_number(v, n, (unsigned)(g_xv_ovl_render_ms + 0.5f), 960 - 12, 11, 10, rend_col, 1);
     uint32_t cpu = xv_cpu_usage();
     for (unsigned i = 0; i < 3; ++i) n = ovl_cpu_row(v, n, i, (cpu >> (8 * i)) & 255u, 42 + 19 * i);
+    n=panel_text_limit(v,n,OVL_MAX_QUADS,XV_BUILD_LABEL,778,101,1,0xFFE0E0E0u);
     if(test) {
-        n=ovl_rect(v,n,770,105,184,35,bg);
+        n=ovl_rect(v,n,770,119,184,35,bg);
         /* Tiny 3x5 TEST label, followed by resolution and phase progress. */
         static const unsigned glyphs[]={072222u,074747u,074717u,072222u};
         static const unsigned material_glyphs[]={074557u,075744u,055557u,0};
         const unsigned *label=(test&(1u<<19))?material_glyphs:glyphs;
         for(unsigned c=0;c<4;c++)for(unsigned y=0;y<5;y++)for(unsigned x=0;x<3;x++)
-            if(label[c]&(1u<<((4-y)*3+2-x)))n=ovl_rect(v,n,779+c*9+x*2,111+y*2,2,2,0xFFFFFFFFu);
-        n=ovl_number(v,n,test&1023u,882,108,8,game_col,3);
-        n=ovl_number(v,n,(test>>17)&3u,941,108,8,fps_col,1);
-        n=ovl_rect(v,n,779,130,164,4,0xFF303030u);
-        n=ovl_rect(v,n,779,130,164*((test>>10)&127u)/100.0f,4,fps_col);
+            if(label[c]&(1u<<((4-y)*3+2-x)))n=ovl_rect(v,n,779+c*9+x*2,125+y*2,2,2,0xFFFFFFFFu);
+        n=ovl_number(v,n,test&1023u,882,122,8,game_col,3);
+        n=ovl_number(v,n,(test>>17)&3u,941,122,8,fps_col,1);
+        n=ovl_rect(v,n,779,144,164,4,0xFF303030u);
+        n=ovl_rect(v,n,779,144,164*((test>>10)&127u)/100.0f,4,fps_col);
     }
     if (!n) return;
     xv_gpu_flush_pump(v, n * sizeof(clr_vtx));

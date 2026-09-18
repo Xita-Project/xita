@@ -59,7 +59,11 @@ int main(void)
     for (unsigned i = 0; i < 16; ++i) X_M8(0x12c0 + i) = i;
     xk_crypto_init(0x1000, 0x1000);
     check_hex(xk_crypto_export(325), 16, "c9d2566d9f87751e7260d19ec62b8026");
+#ifdef XV_NONZERO_HD_KEY
+    check_hex(xk_crypto_export(323), 16, "786974612d7669727475616c2d68646b");
+#else
     check_hex(xk_crypto_export(323), 16, "00000000000000000000000000000000");
+#endif
     assert(!xk_crypto_export(999));
     free(p); free(g_xpt); free(g_xram);
     puts("PASS: SHA-1 vectors, incremental/padding boundaries, fragmented context/input/output, signing-key derivation and ABI");

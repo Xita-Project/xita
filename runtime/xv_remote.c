@@ -1,3 +1,4 @@
+#include "xv_version.h"
 /* Private-LAN development control. The network thread never touches Xbox RAM,
  * GXM, settings or saves. It publishes expiring pad input and requests a copy
  * from the existing completed-frame callback. No listener exists by default. */
@@ -244,8 +245,8 @@ static void serve(int s)
             else reply(s,204,"");
         } else if(!strcmp(method,"GET")&&!strcmp(target,"/status")) {
             uint64_t now=remote_now();
-            char body[320];snprintf(body,sizeof body,"{\"protocol\":1,\"build\":\"%s %s\",\"frames\":%u,\"benchmark\":%u,\"awake_seconds\":%llu}\n",
-                __DATE__,__TIME__,LOAD(&frame_count),xv_benchmark_status(),
+            char body[320];snprintf(body,sizeof body,"{\"protocol\":1,\"build\":\"%s\",\"version\":\"%s\",\"revision\":\"%s\",\"frames\":%u,\"benchmark\":%u,\"awake_seconds\":%llu}\n",
+                XV_BUILD_LABEL,XV_BUILD_VERSION,XV_BUILD_REVISION,LOAD(&frame_count),xv_benchmark_status(),
                 (unsigned long long)(awake_until>now?(awake_until-now)/1000000:0));
             if(!header(s,200,"application/json",strlen(body),NULL))send_all(s,body,strlen(body),remote_now()+2000000);
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/pad?",5)) {

@@ -1,3 +1,4 @@
+#include "xv_version.h"
 /*
  * main.c — Xita runtime skeleton for the PlayStation Vita (vitasdk, bare libgxm)
  *
@@ -2130,6 +2131,19 @@ static int xv_dashboard_present(void *userdata, xv_dash_framebuffer *fb)
     }
     return 0;
 }
+static int g_launch_halo2;
+static int xv_dashboard_game_status(const char *id,char *text,unsigned size)
+{
+    if(strcmp(id,"halo2")) return 0;
+    SceIoStat info;
+    if(sceIoGetstat("ux0:app/XH2B00001/eboot.bin",&info)<0) {
+        snprintf(text,size,"Install the experimental Halo 2 VPK first."); return 0;
+    }
+    if(sceIoGetstat("ux0:data/xita-halo2/game/maps/mainmenu.map",&info)<0) {
+        snprintf(text,size,"Copy Halo 2 maps to data/xita-halo2/game/maps."); return 0;
+    }
+    snprintf(text,size,"Installed / experimental hardware test"); return 1;
+}
 static void xv_dashboard_update_status(char *text,unsigned size) {xv_update_status(text,size);}
 static int xv_dashboard_start(void)
 {
@@ -2146,7 +2160,8 @@ static int xv_dashboard_start(void)
     xv_dash_config cfg = {
         .framebuffer = {canvas, XV_DISPLAY_WIDTH, XV_DISPLAY_HEIGHT, XV_DISPLAY_STRIDE},
         .userdata = &platform, .poll = xv_dashboard_poll, .present = xv_dashboard_present, .simple_launcher = 1,
-        .update_status=xv_dashboard_update_status, .update_action=xv_update_request
+        .update_status=xv_dashboard_update_status, .update_action=xv_update_request,
+        .game_status=xv_dashboard_game_status
     };
     xv_dash_result choice;
     XV_LOG("dashboard: ready; cached canvas %u KB; waiting for Launch Game\n", bytes / 1024);
@@ -2154,6 +2169,7 @@ static int xv_dashboard_start(void)
     sceKernelFreeMemBlock(canvas_uid); /* No dashboard memory survives into Halo. */
     if(xv_update_requested())return 1;
     if (rc != 0) return -1;
+    if(!strcmp(choice.game_id,"halo2")) { g_launch_halo2=1; return 2; }
     xv_load_settings(); /* All game consumers initialize after this hand-off. */
     XV_LOG("dashboard: Launch Game; settings applied\n");
     return 0;
@@ -2178,7 +2194,7 @@ static void xv_configure_cpu_clock(void)
 int main(int argc, char *argv[])
 {
     (void)argc; (void)argv;
-    XV_LOG("Xita runtime starting\n");
+    XV_LOG("Xita " XV_BUILD_LABEL " runtime starting\n");
     /* Homebrew boots at 333/111 MHz; ask for the full clocks (CPU 444, bus 222, GPU 222, GPU xbar 166). */
     scePowerSetArmClockFrequency(444); scePowerSetBusClockFrequency(222);
     scePowerSetGpuClockFrequency(222); scePowerSetGpuXbarClockFrequency(166);
@@ -2318,6 +2334,12 @@ shutdown:
     xv_gfx_shutdown();
 #endif
 #ifdef XV_RUN_RECOMP
+    if(g_launch_halo2) {
+        XV_LOG("game selector: launching Halo 2 (XH2B00001)\n");
+        (void)xv_log_flush_wait(5000000);
+        int rc=sceAppMgrLaunchAppByUri(0x20000,"psgm:play?titleid=XH2B00001");
+        if(rc<0) XV_LOG("game selector: Halo 2 launch failed %08X; reopen Xita\n",rc);
+    }
     if(xv_update_requested()) {
         XV_LOG("update: handing off to boot helper\n");
         if(xv_log_flush_wait(5000000)!=XV_LOG_OK) {

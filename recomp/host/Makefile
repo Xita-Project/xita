@@ -77,13 +77,14 @@ test-remote:
 	python3 ../../tools/test_remote.py
 
 .PHONY: test
-test: build/runtime_test build/immediate_test build/file_io_test build/file_open_test build/crypto_test build/profiler_test build/profiler_traced_test build/dispatch_profile_test build/div32_test build/file_io_no_adapter_test build/trap_handler_test
+test: build/crypto_halo2_test build/runtime_test build/immediate_test build/file_io_test build/file_open_test build/crypto_test build/profiler_test build/profiler_traced_test build/dispatch_profile_test build/div32_test build/file_io_no_adapter_test build/trap_handler_test
 	./build/runtime_test
 	./build/immediate_test
 	./build/file_io_test
 	./build/file_io_no_adapter_test
 	./build/file_open_test
 	./build/crypto_test
+	./build/crypto_halo2_test
 	./build/profiler_test
 	./build/profiler_traced_test
 	./build/dispatch_profile_test
@@ -603,3 +604,7 @@ test-vertex-resident-worker: build/vertex_resident_worker_test
 build/vertex_resident_worker_test: vertex_resident_worker_test.c upload_worker_test.c vertex_upload_test.c ../../runtime/xv_vertex_upload.c ../../runtime/xv_vertex_upload.h ../../runtime/xv_upload_worker.c ../../runtime/xv_upload_worker.h ../../runtime/xv_bytes_equal.h ../../runtime/xv_snapshot_copy.h ../../runtime/xv_vertex_profile.h ../../runtime/xv_vertex_refs.h ../../runtime/xv_frame_slots.h ../../runtime/xv_gpu_upload.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -Wno-unused-function -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include $< -pthread -Wl,--gc-sections -o $@
+
+build/crypto_halo2_test: Makefile crypto_test.c ../kernel/xk_crypto.c ../xv_x86rt.c ../xv_x86rt.h ../kernel/xk.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -DXV_NONZERO_HD_KEY=1 -std=gnu11 -ffunction-sections -fdata-sections crypto_test.c ../kernel/xk_crypto.c ../xv_x86rt.c -Wl,--gc-sections -lm -o $@
