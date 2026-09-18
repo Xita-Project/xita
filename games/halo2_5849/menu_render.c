@@ -275,7 +275,7 @@ static int software_body(void *opaque, const h2_menu_request *r, uint8_t *ab_bef
     for (unsigned u = 0; u < 4; ++u) {
         uint32_t tw = 0, th = 0;
         int linear = 0;
-        const uint32_t *px = menu_texture_acquire(s, c, u, drawn + 1, TEX_CAP, 0, &tw, &th, &linear, NULL, NULL, NULL, NULL);
+        const uint32_t *px = menu_texture_acquire(s, c, u, drawn + 1, TEX_CAP, 0, &tw, &th, &linear, NULL, NULL, NULL, NULL, NULL);
         if (px) {
             rs.tex[u].texels = px; rs.tex[u].width = tw; rs.tex[u].height = th;
             rs.tex[u].texel_coords = linear;

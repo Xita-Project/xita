@@ -10,6 +10,8 @@ extern void *h2_map_physical_read(uint32_t address, uint32_t bytes) __attribute_
 extern void h2_texture_tracking_fault(uint32_t address, uint32_t bytes) __attribute__((weak));
 extern uint32_t xk_mem_image_arena_offset(void) __attribute__((weak));
 extern void xv_logf(const char *, ...) __attribute__((weak));
+static int g_decode_instead;                     /* locate(): decode a DXT3/5 image the GPU would misdecode (see rewrite_mode3_block) */
+static uint32_t g_mode3_decoded;                 /* images decoded for that reason */
 
 static uint32_t argb(uint8_t a, uint8_t r, uint8_t g, uint8_t b)
 { return ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b; }
@@ -32,6 +34,9 @@ static void dxt1_colors(const uint8_t *block, uint32_t out[16], int keep_alpha)
     uint8_t r[4], g[4], b[4], a[4];
     rgb565(c0, &r[0], &g[0], &b[0]); rgb565(c1, &r[1], &g[1], &b[1]);
     a[0] = a[1] = a[2] = a[3] = 255;
+    /* The endpoint order picks the mode for DXT3/5 colour blocks too: NVIDIA-era hardware
+     * (the Xbox's NV2A) decodes them like DXT1, and Halo 2's HUD glyphs rely on it - the
+     * four-colour rule the D3D spec describes turned every digit into a white block. */
     if (c0 > c1) {
         r[2] = (uint8_t)((2 * r[0] + r[1]) / 3); g[2] = (uint8_t)((2 * g[0] + g[1]) / 3); b[2] = (uint8_t)((2 * b[0] + b[1]) / 3);
         r[3] = (uint8_t)((r[0] + 2 * r[1]) / 3); g[3] = (uint8_t)((g[0] + 2 * g[1]) / 3); b[3] = (uint8_t)((b[0] + 2 * b[1]) / 3);
@@ -175,6 +180,7 @@ size_t menu_texture_stats(char *buf, size_t cap)
     size_t used = 0;
     if (!buf || !cap) return 0;
     buf[0] = 0;
+    { int n = snprintf(buf, cap, "mode3dec=%u", (unsigned)g_mode3_decoded); if (n > 0) used = (size_t)n < cap ? (size_t)n : cap - 1; }
     for (unsigned i = 0; i < g_nstats && used + 1 < cap; ++i) {
         int n = snprintf(buf + used, cap - used, "%s%02X:%u/%u/%u/%u", i ? " " : "",
                          (unsigned)g_stats[i].code, (unsigned)g_stats[i].n[O_OK],
@@ -212,6 +218,9 @@ typedef struct {
     int cube;                                            /* six faces (GPU path): decoded swizzled, level 0 */
     uint32_t face_stride;                                /* source bytes per cube face (full chain, 128-aligned) */
     uint32_t face_texels;                                /* decoded texels per cube face (GXM face alignment) */
+    int native;                                          /* GPU path, DXT: output is the compressed blocks in GXM order */
+    uint32_t out_bytes;                                  /* output size (native) */
+    uint32_t lvl_out[16];                                /* native: per level output byte offset */
     uint32_t texels;                                     /* decoded texels over all levels (or faces) */
     uint32_t lvl_src[16], lvl_dst[16];                   /* per level: source byte offset, output texel offset */
     const uint8_t *src;
@@ -221,6 +230,26 @@ typedef struct {
 
 /* First few loads and failures per (format, outcome): the unit's registers, so an
  * unsupported or misdescribed texture can be identified from the log. */
+/* XV_UBC_NATIVE=<mask> (default 7): which DXT kinds go to the GPU as compressed blocks
+ * (bit 0 DXT1, bit 1 DXT3, bit 2 DXT5); the rest are decoded to texels as before. */
+static unsigned ubc_native_mask(void)
+{
+    static int mask = -1;
+    if (mask < 0) { const char *e = getenv("XV_UBC_NATIVE"); mask = e ? atoi(e) & 7 : 7; }
+    return (unsigned)mask;
+}
+/* Mean ARGB of a native (compressed) image's level 0 by decoding its blocks; diagnostics only. */
+uint32_t menu_texture_native_mean(const uint32_t *blocks, uint32_t w, uint32_t h, unsigned dxt)
+{
+    uint32_t nb = ((w + 3) / 4) * ((h + 3) / 4), bytes = dxt == 1 ? 8 : 16;
+    uint64_t a = 0, r = 0, g = 0, b = 0, n = 0;
+    for (uint32_t i = 0; i < nb; ++i) {
+        uint32_t tile[16]; const uint8_t *blk = (const uint8_t *)blocks + (size_t)i * bytes;
+        if (dxt == 1) menu_dxt1_block(blk, tile, 4); else if (dxt == 3) menu_dxt3_block(blk, tile, 4); else menu_dxt5_block(blk, tile, 4);
+        for (unsigned t = 0; t < 16; ++t, ++n) { a += tile[t] >> 24; r += (tile[t] >> 16) & 255; g += (tile[t] >> 8) & 255; b += tile[t] & 255; }
+    }
+    return n ? (uint32_t)((a / n) << 24 | (r / n) << 16 | (g / n) << 8 | (b / n)) : 0;
+}
 static void trace(const h2_command_state *s, unsigned unit, uint32_t code, unsigned outcome, const located *L,
                   uint64_t serial, const uint32_t *px)
 {
@@ -236,17 +265,30 @@ static void trace(const h2_command_state *s, unsigned unit, uint32_t code, unsig
     if (seen[i].n++ >= (limit > 0 ? (unsigned)limit : outcome == O_OK ? 8u : 3u)) return;
     unsigned base = 0x1B00 + unit * 64;
     uint32_t mean = 0;
-    if (px && L && L->texels) {                 /* mean ARGB of the decoded level 0 (every 7th texel) */
+    if (px && L && L->native) mean = menu_texture_native_mean(px, L->w, L->h, L->d.dxt);
+    else if (px && L && L->texels) {            /* mean ARGB of the decoded level 0 (every 7th texel) */
         uint64_t a = 0, r = 0, g = 0, b = 0, n = 0;
         uint32_t lvl0 = L->cube ? L->w * L->h : (L->levels ? L->lvl_dst[0] + L->w * L->h : L->texels);
         for (uint32_t t = 0; t < lvl0; t += 7, ++n) { uint32_t p = px[t]; a += p >> 24; r += (p >> 16) & 255; g += (p >> 8) & 255; b += p & 255; }
         if (n) mean = (uint32_t)((a / n) << 24 | (r / n) << 16 | (g / n) << 8 | (b / n));
     }
-    xv_logf("[h2/tex] unit=%u code=%02X %s offset=%08X fmt=%08X addr=%08X ctrl=%08X ctrl1=%08X filter=%08X rect=%08X pal=%08X dims=%ux%u levels=%u cube=%d bytes=%u serial=%llu mean=%08X\n",
+    unsigned mode3 = 0, idx3 = 0;                /* DXT3/5 blocks in DXT1's three-colour mode, and those using index 3 */
+    if (px && L && L->native && L->d.dxt != 1) {
+        uint32_t nb = ((L->w + 3) / 4) * ((L->h + 3) / 4);
+        for (uint32_t i = 0; i < nb; ++i) {
+            const uint8_t *cb = (const uint8_t *)px + (size_t)i * 16 + 8;
+            uint16_t c0 = (uint16_t)(cb[0] | cb[1] << 8), c1 = (uint16_t)(cb[2] | cb[3] << 8);
+            if (c0 > c1) continue;
+            ++mode3;
+            uint32_t idx = (uint32_t)(cb[4] | cb[5] << 8 | cb[6] << 16 | (uint32_t)cb[7] << 24);
+            if ((idx & (idx >> 1) & 0x55555555u)) ++idx3;
+        }
+    }
+    xv_logf("[h2/tex] unit=%u code=%02X %s offset=%08X fmt=%08X addr=%08X ctrl=%08X ctrl1=%08X filter=%08X rect=%08X pal=%08X dims=%ux%u levels=%u cube=%d bytes=%u serial=%llu mean=%08X mode3=%u idx3=%u\n",
             unit, (unsigned)code, names[outcome], s->setup[base / 4], s->setup[(base + 4) / 4], s->setup[(base + 8) / 4],
             s->setup[(base + 0xC) / 4], s->setup[(base + 0x10) / 4], s->setup[(base + 0x14) / 4], s->setup[(base + 0x1C) / 4],
             s->setup[(base + 0x20) / 4], L ? L->w : 0, L ? L->h : 0, L ? L->levels : 0, L ? L->cube : 0, L ? L->src_bytes : 0,
-            (unsigned long long)serial, mean);
+            (unsigned long long)serial, mean, mode3, idx3);
 }
 
 static int locate(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit, uint32_t cap, unsigned want_mips, located *L)
@@ -308,6 +350,22 @@ static int locate(const h2_command_state *s, const h2_kelvin_clear *c, unsigned 
     for (unsigned i = 0; i < L->levels; ++i) { uint32_t w = L->w >> i, h = (L->h >> i) ? L->h >> i : 1; L->lvl_dst[i] = L->texels; L->texels += w * h; }
     /* GXM cube faces of 16x16 or more (32-bit texels) start on 2048-byte boundaries. */
     if (L->cube) { uint32_t face = L->w * L->h; if (L->w >= 16) face = (face + 511u) & ~511u; L->face_texels = face; L->texels = 6 * face; }
+    /* DXT for the GPU: the blocks go up as UBC1/2/3 in GXM's swizzled layout (no decode, 4-8x
+     * smaller). Levels are back to back; compressed cube faces of 32x32 or more start on
+     * 2048-byte boundaries. The cap counts output bytes as texels here. */
+    if (want_mips && d.dxt && !g_decode_instead && (ubc_native_mask() & (1u << (d.dxt >> 1)))) {   /* XV_UBC_NATIVE bits: DXT1, DXT3, DXT5 */
+        L->native = 1; L->out_bytes = 0;
+        if (L->cube) {
+            uint32_t face = L->blocks_x * L->blocks_y * d.bytes;
+            if (L->w >= 32) face = (face + 2047u) & ~2047u;
+            L->out_bytes = 6 * face; L->face_texels = face / 4;
+        } else
+            for (unsigned i = 0; i < L->levels; ++i) {
+                uint32_t w = L->w >> i, h = (L->h >> i) ? L->h >> i : 1;
+                L->lvl_out[i] = L->out_bytes; L->out_bytes += ((w + 3) / 4) * ((h + 3) / 4) * d.bytes;
+            }
+        L->texels = (L->out_bytes + 3) / 4;
+    }
     if (L->texels > cap) FAIL(O_TOOLARGE);
 
     h2_dma_object dma;
@@ -382,8 +440,95 @@ static void decode_level(const located *L, unsigned level, const uint8_t *base, 
  * A cube map instead yields its six faces (level 0) in the GXM swizzled order a square
  * SCE_GXM_TEXTURE_CUBE face uses: Morton with y in the even bits and x in the odd bits
  * (Vita3K decode_morton2_y(code) = compact(code >> 0)), the transpose of the NV2A order. */
+/* One level's DXT blocks (row-major in the source) into GXM's swizzled block order:
+ * Morton with the block row in the even bits and the column in the odd bits, the larger
+ * dimension's remaining bits on top - the same transposition the cube faces use. */
+/* XV_UBC_SWAP=<mask> (bit 0 DXT1, bit 1 DXT3, bit 2 DXT5): exchange the red and blue fields
+ * of those blocks' RGB565 endpoints. Vita3K presents UBC3 (DXT5) texels with red and blue
+ * exchanged while UBC1 is right (its BC3 path, not the GPU's); hardware is expected to take
+ * the standard order for all three, so this is off by default. A DXT1
+ * block's mode is chosen by comparing its endpoints, so when the exchange would reverse
+ * their order the endpoints are swapped back and the indices remapped (0<->1, and 2<->3 in
+ * four-colour mode). DXT3/5 colour blocks always decode in four-colour mode. */
+static uint16_t swap_rb565(uint16_t c) { return (uint16_t)((c & 0x07E0u) | ((c >> 11) & 0x1Fu) | ((c & 0x1Fu) << 11)); }
+void menu_dxt_swap_rb(uint8_t *blk, unsigned dxt)
+{
+    uint8_t *cb = dxt == 1 ? blk : blk + 8;
+    uint16_t c0 = (uint16_t)(cb[0] | cb[1] << 8), c1 = (uint16_t)(cb[2] | cb[3] << 8);
+    uint16_t s0 = swap_rb565(c0), s1 = swap_rb565(c1);
+    if (dxt == 1 && (c0 > c1) != (s0 > s1)) {
+        uint32_t idx = (uint32_t)(cb[4] | cb[5] << 8 | cb[6] << 16 | (uint32_t)cb[7] << 24);
+        uint32_t flip = c0 > c1 ? 0x55555555u : (~(idx >> 1) & 0x55555555u);   /* 4-colour: all pairs; 3-colour: only 0/1 */
+        idx ^= flip;
+        cb[4] = (uint8_t)idx; cb[5] = (uint8_t)(idx >> 8); cb[6] = (uint8_t)(idx >> 16); cb[7] = (uint8_t)(idx >> 24);
+        uint16_t t = s0; s0 = s1; s1 = t;
+    }
+    cb[0] = (uint8_t)s0; cb[1] = (uint8_t)(s0 >> 8); cb[2] = (uint8_t)s1; cb[3] = (uint8_t)(s1 >> 8);
+}
+static unsigned ubc_swap_mask(void)
+{
+    static int mask = -1;
+    if (mask < 0) { const char *e = getenv("XV_UBC_SWAP"); mask = e ? atoi(e) & 7 : 0; }
+    return (unsigned)mask;
+}
+/* DXT3/5 colour blocks: the NV2A applies DXT1's rule (c0 <= c1 -> three colours, index 3
+ * black) and Halo 2's assets rely on it, while GXM and Mesa decode them four-colour
+ * regardless. A three-colour block that only uses indices 0 and 1 is rewritten exactly
+ * (endpoints swapped, index bit flipped); one that uses index 2 or 3 cannot be, so the whole
+ * image is decoded on the CPU instead (decode_instead). */
+static int block_needs_decode(const uint8_t *blk, unsigned dxt)
+{
+    const uint8_t *cb = dxt == 1 ? blk : blk + 8;
+    uint16_t c0 = (uint16_t)(cb[0] | cb[1] << 8), c1 = (uint16_t)(cb[2] | cb[3] << 8);
+    if (dxt == 1 || c0 > c1) return 0;
+    uint32_t idx = (uint32_t)(cb[4] | cb[5] << 8 | cb[6] << 16 | (uint32_t)cb[7] << 24);
+    return (idx & 0xAAAAAAAAu) != 0;             /* an index 2 or 3 somewhere */
+}
+static void rewrite_mode3_block(uint8_t *blk, unsigned dxt)
+{
+    if (dxt == 1) return;
+    uint8_t *cb = blk + 8;
+    uint16_t c0 = (uint16_t)(cb[0] | cb[1] << 8), c1 = (uint16_t)(cb[2] | cb[3] << 8);
+    if (c0 >= c1) return;                        /* four-colour already, or equal endpoints (either order decodes the same) */
+    cb[0] = (uint8_t)c1; cb[1] = (uint8_t)(c1 >> 8); cb[2] = (uint8_t)c0; cb[3] = (uint8_t)(c0 >> 8);
+    for (unsigned i = 4; i < 8; ++i) cb[i] ^= 0x55;   /* indices 0 <-> 1 (only those are present) */
+}
+static int image_needs_decode(const located *L)
+{
+    if (!L->native || L->d.dxt == 1) return 0;
+    if (L->cube) {
+        uint32_t nb = L->blocks_x * L->blocks_y;
+        for (unsigned f = 0; f < 6; ++f)
+            for (uint32_t i = 0; i < nb; ++i) if (block_needs_decode(L->src + (size_t)f * L->face_stride + (size_t)i * 16, L->d.dxt)) return 1;
+        return 0;
+    }
+    for (uint32_t off = 0; off + 16 <= L->src_bytes; off += 16) if (block_needs_decode(L->src + off, L->d.dxt)) return 1;
+    return 0;
+}
+uint32_t menu_texture_mode3_decoded(void) { return g_mode3_decoded; }
+static void native_level(const located *L, const uint8_t *src, uint32_t w, uint32_t h, uint8_t *out)
+{
+    uint32_t bx_count = (w + 3) / 4, by_count = (h + 3) / 4;
+    unsigned lbw = 0, lbh = 0;
+    int swap = (ubc_swap_mask() >> (L->d.dxt >> 1)) & 1;
+    while ((1u << lbw) < bx_count) ++lbw;
+    while ((1u << lbh) < by_count) ++lbh;
+    for (uint32_t by = 0; by < by_count; ++by)
+        for (uint32_t bx = 0; bx < bx_count; ++bx) {
+            uint8_t *dst = out + (size_t)morton(by, bx, lbh, lbw) * L->d.bytes;
+            memcpy(dst, src + ((size_t)by * bx_count + bx) * L->d.bytes, L->d.bytes);
+            rewrite_mode3_block(dst, L->d.dxt);
+            if (swap) menu_dxt_swap_rb(dst, L->d.dxt);
+        }
+}
 static void decode(const located *L, uint32_t *rgba)
 {
+    if (L->native) {
+        uint8_t *out = (uint8_t *)rgba;
+        if (L->cube) { for (unsigned f = 0; f < 6; ++f) native_level(L, L->src + (size_t)f * L->face_stride, L->w, L->h, out + (size_t)f * L->face_texels * 4); }
+        else for (unsigned i = 0; i < L->levels; ++i) native_level(L, L->src + L->lvl_src[i], L->w >> i, (L->h >> i) ? L->h >> i : 1, out + L->lvl_out[i]);
+        return;
+    }
     if (!L->cube) { for (unsigned i = 0; i < L->levels; ++i) decode_level(L, i, L->src, rgba + L->lvl_dst[i]); return; }
     uint32_t w = L->w, h = L->h;
     uint32_t *linear = malloc((size_t)w * h * 4);
@@ -427,7 +572,7 @@ static uint64_t content_hash(const uint8_t *p, size_t n, uint64_t h)
     return h;
 }
 
-typedef struct { uint32_t key[6]; uint64_t hash; uint32_t *texels; uint32_t w, h, bytes, levels, ntexels; int linear, cube; uint64_t used;
+typedef struct { uint32_t key[6]; uint64_t hash; uint32_t *texels; uint32_t w, h, bytes, levels, ntexels; int linear, cube, native; uint64_t used;
                  int tracked; uint32_t page_lo, page_hi, verified; unsigned clean_hits;
                  uint8_t *snapshot; uint32_t snapshot_bytes; } tex_entry;   /* snapshot: diagnostic copy of the source */
 /* A Halo 2 level binds hundreds of distinct textures (base, bump, lightmap, cube per
@@ -440,10 +585,17 @@ static uint64_t g_hits, g_misses, g_hash_bytes, g_hash_skipped;
 const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit,
                                      uint64_t serial, uint32_t cap, unsigned want_mips, uint32_t *ow, uint32_t *oh,
                                      int *out_linear, uint64_t *out_hash, uint32_t *out_levels, uint32_t *out_texels,
-                                     int *out_cube)
+                                     int *out_cube, int *out_native)
 {
     located L;
     if (!locate(s, c, unit, cap, want_mips, &L)) return NULL;
+    if (image_needs_decode(&L)) {                /* three-colour DXT3/5 blocks the GPU would decode differently */
+        g_decode_instead = 1;
+        int ok = locate(s, c, unit, cap, want_mips, &L);
+        g_decode_instead = 0;
+        if (!ok) return NULL;
+        ++g_mode3_decoded;
+    }
     /* The source is normally re-hashed on every draw (level textures reach ~130 KB
      * each). With the arena's per-page write epochs available, an entry with the same
      * key whose source pages carry no stamp at or after its last full read is proven
@@ -489,7 +641,7 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
             h2_texture_tracking_fault(L.key[0], L.src_bytes);
         }
     }
-    tex_entry *e = (keyed && keyed->hash == hash && keyed->levels == L.levels && keyed->cube == L.cube) ? keyed : NULL;
+    tex_entry *e = (keyed && keyed->hash == hash && keyed->levels == L.levels && keyed->cube == L.cube && keyed->native == (L.native ? (int)L.d.dxt : 0)) ? keyed : NULL;
     if (e) { ++g_hits; }
     else {
         ++g_misses;
@@ -516,7 +668,7 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
         note(L.code, O_OK); trace(s, unit, L.code, O_OK, &L, serial, px);
         memcpy(victim->key, L.key, sizeof L.key);
         victim->hash = hash; victim->texels = px; victim->w = L.w; victim->h = L.h; victim->bytes = bytes;
-        victim->levels = L.levels; victim->ntexels = L.texels; victim->cube = L.cube;
+        victim->levels = L.levels; victim->ntexels = L.texels; victim->cube = L.cube; victim->native = L.native ? (int)L.d.dxt : 0;
         victim->linear = L.d.linear; g_cache_bytes += bytes;
         victim->clean_hits = 0;
         e = victim;
@@ -537,6 +689,7 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
     if (out_levels) *out_levels = e->levels;
     if (out_texels) *out_texels = e->ntexels;
     if (out_cube) *out_cube = e->cube;
+    if (out_native) *out_native = e->native;
     return e->texels;
 }
 

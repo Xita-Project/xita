@@ -19,11 +19,13 @@ int menu_texture_load(const h2_command_state *state, const h2_kelvin_clear *clea
  * With want_mips the image carries the unit's mip chain (levels back to back, each
  * level's rows packed at its width; out_levels/out_texels describe it); otherwise
  * level 0 only. cap_texels bounds the decoded texel count over all levels. A cube map
- * (out_cube) comes back as six w*h faces, each in GXM swizzled order, level 0 only. */
+ * (out_cube) comes back as six w*h faces, each in GXM swizzled order, level 0 only. A DXT
+ * image comes back native (out_native = 1/3/5 for DXT1/3/5): the compressed blocks in GXM
+ * swizzled order, levels back to back, out_texels*4 bytes. */
 const uint32_t *menu_texture_acquire(const h2_command_state *state, const h2_kelvin_clear *clear,
                                      unsigned unit, uint64_t serial, uint32_t cap_texels, unsigned want_mips,
                                      uint32_t *out_w, uint32_t *out_h, int *out_linear, uint64_t *out_hash,
-                                     uint32_t *out_levels, uint32_t *out_texels, int *out_cube);
+                                     uint32_t *out_levels, uint32_t *out_texels, int *out_cube, int *out_native);
 void menu_texture_cache_stats(uint64_t *hits, uint64_t *misses, size_t *bytes);
 
 /* Register-only view of a unit (no guest memory access): returns the enable bit
@@ -33,6 +35,13 @@ int menu_texture_describe(const h2_command_state *state, unsigned unit,
 
 /* Per-format load outcomes since boot, formatted "CC:ok/unsupported/toolarge/nomap ...". */
 size_t menu_texture_stats(char *buf, size_t cap);
+
+/* Images decoded on the CPU because a DXT3/5 block in three-colour mode could not be rewritten. */
+uint32_t menu_texture_mode3_decoded(void);
+/* Mean ARGB of a native image's level 0 (decodes its blocks; diagnostics). */
+uint32_t menu_texture_native_mean(const uint32_t *blocks, uint32_t w, uint32_t h, unsigned dxt);
+/* Exchange red and blue in a DXT block's colour endpoints (see XV_UBC_SWAP). */
+void menu_dxt_swap_rb(uint8_t *block, unsigned dxt);
 
 /* Exposed for unit testing: decode one DXT1 (8-byte), DXT3 or DXT5 (16-byte)
  * block to a 4x4 RGBA tile written row-major into out with the given stride. */

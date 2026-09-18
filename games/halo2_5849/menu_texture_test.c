@@ -117,7 +117,8 @@ static void test_mip_chain_layout(void)
     set(0, 4, 1 | (0x0C << 8) | (4 << 16) | (5 << 20) | (3 << 24));
     assert(locate(&s, &c, 0, 4096, 1, &L) && L.levels == 3);
     assert(L.src_bytes == 128 + 32 + 16 && L.lvl_src[1] == 128 && L.lvl_src[2] == 160);
-    assert(L.texels == 256 + 64 + 16 && L.lvl_dst[2] == 320 && L.blocks_x == 8 && L.blocks_y == 2);
+    assert(L.native && L.out_bytes == 128 + 32 + 16 && L.texels == 44 && L.blocks_x == 8 && L.blocks_y == 2);   /* GPU path: native blocks */
+    assert(locate(&s, &c, 0, 4096, 0, &L) && !L.native && L.levels == 1 && L.texels == 256);                    /* software path: texels */
     /* Cube map: A8R8G8B8 8x8, 2 levels, format bit 2. Each face holds the whole chain
      * (256 + 64 bytes) padded to 128 -> 384; six faces; the GPU path decodes level 0 of
      * each face into GXM swizzled (Morton) order. */
@@ -137,16 +138,68 @@ static void test_mip_chain_layout(void)
     /* DXT1 cube 16x16 with 3 levels: 128 + 32 + 8 = 168 -> 256 per face. */
     set(0, 4, 1 | 4 | (0x0C << 8) | (3 << 16) | (4 << 20) | (4 << 24));
     assert(locate(&s, &c, 0, 4096, 1, &L) && L.cube && L.face_stride == 256 && L.src_bytes == 1536);
-    assert(L.face_texels == 512 && L.texels == 6 * 512);   /* 16x16 faces start on 2048-byte boundaries */
+    assert(L.native && L.face_texels == 32 && L.out_bytes == 6 * 128 && L.texels == 6 * 32);   /* native faces: 16 blocks each, no 2048 padding below 32x32 */
     /* DXT blocks are row-major: in a 16x8 DXT1 image (4x2 blocks) the block at (3,1) is the
      * eighth (index 7), not Morton index 11; every texel of it decodes from that block. */
     set(0, 4, 1 | (0x0C << 8) | (1 << 16) | (4 << 20) | (3 << 24));
-    assert(locate(&s, &c, 0, 4096, 1, &L) && !L.cube && L.levels == 1 && L.blocks_x == 4 && L.blocks_y == 2);
+    assert(locate(&s, &c, 0, 4096, 0, &L) && !L.cube && !L.native && L.levels == 1 && L.blocks_x == 4 && L.blocks_y == 2);
     decode(&L, px);
     { uint32_t tile[16]; menu_dxt1_block(L.src + 7 * 8, tile, 4);
       for (unsigned ty = 0; ty < 4; ++ty) for (unsigned tx = 0; tx < 4; ++tx) assert(px[(4 + ty) * 16 + 12 + tx] == tile[ty * 4 + tx]);
       menu_dxt1_block(L.src + 1 * 8, tile, 4);
       for (unsigned ty = 0; ty < 4; ++ty) for (unsigned tx = 0; tx < 4; ++tx) assert(px[ty * 16 + 4 + tx] == tile[ty * 4 + tx]); }
+    /* Native DXT for the GPU: 16x8 DXT1 (4x2 blocks) keeps its blocks, reordered into GXM's
+     * swizzled block order (row in the even Morton bits, column in the odd bits, the wider
+     * dimension's extra bit on top): block (2,1) -> index 5, block (1,0) -> 2, (3,1) -> 7. */
+    set(0, 4, 1 | (0x0C << 8) | (1 << 16) | (4 << 20) | (3 << 24));
+    assert(locate(&s, &c, 0, 4096, 1, &L) && L.native && L.out_bytes == 64 && L.texels == 16 && L.levels == 1);
+    decode(&L, px);
+    assert(!memcmp((uint8_t *)px + 5 * 8, L.src + (1 * 4 + 2) * 8, 8));
+    assert(!memcmp((uint8_t *)px + 2 * 8, L.src + (0 * 4 + 1) * 8, 8));
+    assert(!memcmp((uint8_t *)px + 7 * 8, L.src + (1 * 4 + 3) * 8, 8));
+    /* Red/blue exchange keeps every texel's colours (swapped) for both DXT1 modes and DXT5. */
+    for (unsigned t = 0; t < 3; ++t) {
+        uint8_t blk[16], orig[16]; uint32_t a[16], b[16];
+        for (unsigned i = 0; i < 16; ++i) blk[i] = (uint8_t)(0x3D * (i + 1) + 7 * t);
+        if (t == 0) { blk[0] = 0x1F; blk[1] = 0x00; blk[2] = 0x00; blk[3] = 0xF8; }   /* c0 = pure blue < c1 = pure red: 3-colour, reverses on swap */
+        if (t == 1) { blk[0] = 0x00; blk[1] = 0xF8; blk[2] = 0x1F; blk[3] = 0x00; }   /* c0 = red > c1 = blue: 4-colour, reverses on swap */
+        if (t == 2) { blk[8] = 0xE0; blk[9] = 0xFF; blk[10] = 0x00; blk[11] = 0x00; } /* DXT5 colour: c0 = yellow > c1 = black stays ordered */
+        memcpy(orig, blk, 16);
+        if (t < 2) { menu_dxt1_block(orig, a, 4); menu_dxt_swap_rb(blk, 1); menu_dxt1_block(blk, b, 4); }
+        else { menu_dxt5_block(orig, a, 4); menu_dxt_swap_rb(blk, 5); menu_dxt5_block(blk, b, 4); }
+        for (unsigned i = 0; i < 16; ++i)
+            assert(A(b[i]) == A(a[i]) && R(b[i]) == B(a[i]) && G(b[i]) == G(a[i]) && B(b[i]) == R(a[i]));
+    }
+    /* DXT5 three-colour-mode blocks: 8x8 DXT5 (4 blocks). Blocks using only indices 0/1 are
+     * rewritten exactly for four-colour decoders; a block using index 3 forces CPU decoding. */
+    {
+        set(0, 4, 1 | (0x0F << 8) | (1 << 16) | (3 << 20) | (3 << 24));
+        assert(locate(&s, &c, 0, 4096, 1, &L) && L.native && L.src_bytes == 64);
+        uint8_t *src = (uint8_t *)L.src;
+        for (unsigned b = 0; b < 4; ++b) {                       /* alpha a0=255 index 0; colour c0=0x001F < c1=0xF800 */
+            uint8_t *blk = src + b * 16; memset(blk, 0, 16); blk[0] = 0xFF;
+            blk[8] = 0x1F; blk[9] = 0x00; blk[10] = 0x00; blk[11] = 0xF8;
+            blk[12] = 0x44; blk[13] = 0x11; blk[14] = 0x00; blk[15] = 0x55;   /* indices 0 and 1 only */
+        }
+        assert(!image_needs_decode(&L));
+        uint32_t want[16], got[16]; menu_dxt5_block(src, want, 4);
+        uint8_t copy[16]; memcpy(copy, src, 16); rewrite_mode3_block(copy, 5); menu_dxt5_block(copy, got, 4);
+        assert(!memcmp(want, got, sizeof want));
+        assert((copy[8] | copy[9] << 8) == 0xF800 && (copy[10] | copy[11] << 8) == 0x001F);   /* endpoints swapped: four-colour order */
+        src[3 * 16 + 12] = 0xC0;                                  /* block 3 texel 3 uses index 3 (black on the NV2A) */
+        assert(image_needs_decode(&L));
+        uint32_t tw2, th2; int lin2; uint64_t h2v; uint32_t lv2, tx2; int cu2, na2;
+        const uint32_t *px2 = menu_texture_acquire(&s, &c, 0, 77, 4096, 1, &tw2, &th2, &lin2, &h2v, &lv2, &tx2, &cu2, &na2);
+        assert(px2 && !na2 && tw2 == 8 && th2 == 8 && tx2 == 64 && menu_texture_mode3_decoded() == 1);
+        assert(px2[4 * 8 + 7] == 0xFF000000u);                    /* block (1,1) texel (3,0) = image (7,4): index 3 -> opaque black, as the NV2A */
+    }
+    /* With a chain: 32x8 DXT1, 3 levels -> 128 + 32 + 16 native bytes, levels back to back. */
+    set(0, 4, 1 | (0x0C << 8) | (4 << 16) | (5 << 20) | (3 << 24));
+    assert(locate(&s, &c, 0, 4096, 1, &L) && L.native && L.levels == 3 && L.out_bytes == 176 && L.lvl_out[1] == 128 && L.lvl_out[2] == 160);
+    decode(&L, px);
+    assert(!memcmp((uint8_t *)px + 128, L.src + 128, 8));            /* level 1 block (0,0) */
+    /* The software path still decodes DXT to texels. */
+    assert(locate(&s, &c, 0, 4096, 0, &L) && !L.native && L.texels == 256);
     /* Linear (pitch) images never carry a chain. */
     set(0, 4, 1 | (0x12 << 8) | (3 << 16)); set(0, 0x10, 64 << 16); set(0, 0x1C, (16 << 16) | 4);
     assert(locate(&s, &c, 0, 4096, 1, &L) && L.levels == 1 && L.texels == 64 && L.src_bytes == 3 * 64 + 64);

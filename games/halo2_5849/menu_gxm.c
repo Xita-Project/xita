@@ -27,7 +27,7 @@ static fs_entry g_fs[MAX_FS]; static unsigned g_nfs;
 static uint64_t g_missing_logged[64]; static unsigned g_nmissing;
 
 /* ---- textures ---------------------------------------------------------------- */
-typedef struct { uint64_t hash; uint32_t *mem; uint32_t w, h, bytes, levels; SceGxmTexture tex; uint64_t used; int linear, cube; } tex_entry;
+typedef struct { uint64_t hash; uint32_t *mem; uint32_t w, h, bytes, levels; SceGxmTexture tex; uint64_t used; int linear, cube, native; } tex_entry;
 static tex_entry g_tex[MAX_TEX]; static uint8_t *g_texpool; static size_t g_texpool_used;
 
 /* ---- render targets: one GXM colour surface per game colour buffer ---------- */
@@ -432,8 +432,8 @@ static SceGxmTextureAddrMode addr_mode(unsigned nv)
 
 static tex_entry *get_texture(const h2_command_state *s, const h2_kelvin_clear *c, unsigned unit)
 {
-    uint32_t tw = 0, th = 0, levels = 1, texels = 0; int linear = 0, cube = 0; uint64_t hash = 0;
-    const uint32_t *px = menu_texture_acquire(s, c, unit, g_serial, TEX_CAP, 1, &tw, &th, &linear, &hash, &levels, &texels, &cube);
+    uint32_t tw = 0, th = 0, levels = 1, texels = 0; int linear = 0, cube = 0, native = 0; uint64_t hash = 0;
+    const uint32_t *px = menu_texture_acquire(s, c, unit, g_serial, TEX_CAP, 1, &tw, &th, &linear, &hash, &levels, &texels, &cube, &native);
     if (!px) return NULL;
     tex_entry *e = NULL, *victim = NULL;
     for (unsigned i = 0; i < MAX_TEX; ++i) {
@@ -449,15 +449,19 @@ static tex_entry *get_texture(const h2_command_state *s, const h2_kelvin_clear *
         e = victim; if (!e) return NULL;
         e->mem = (uint32_t *)(g_texpool + g_texpool_used); g_texpool_used += (bytes + 255) & ~255u;
         memcpy(e->mem, px, bytes);
-        e->hash = hash; e->w = tw; e->h = th; e->bytes = bytes; e->linear = linear; e->levels = levels; e->cube = cube;
+        e->hash = hash; e->w = tw; e->h = th; e->bytes = bytes; e->linear = linear; e->levels = levels; e->cube = cube; e->native = native;
         /* Linear layout with the mip levels back to back (each level's implicit stride is its
          * width, which the decoder keeps a multiple of 8 for every level after the first).
-         * Cube maps: six swizzled faces back to back, level 0 only. */
-        int rc = cube ? sceGxmTextureInitCube(&e->tex, e->mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, tw, th, 1)
-                      : sceGxmTextureInitLinear(&e->tex, e->mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, tw, th, levels);
+         * Cube maps: six swizzled faces back to back, level 0 only. DXT images stay compressed:
+         * UBC1/2/3 blocks in GXM's swizzled order. */
+        SceGxmTextureFormat fmt = native == 1 ? SCE_GXM_TEXTURE_FORMAT_UBC1_ABGR : native == 3 ? SCE_GXM_TEXTURE_FORMAT_UBC2_ABGR
+                                : native == 5 ? SCE_GXM_TEXTURE_FORMAT_UBC3_ABGR : SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB;
+        int rc = cube ? sceGxmTextureInitCube(&e->tex, e->mem, fmt, tw, th, 1)
+                : native ? sceGxmTextureInitSwizzled(&e->tex, e->mem, fmt, tw, th, levels)
+                         : sceGxmTextureInitLinear(&e->tex, e->mem, fmt, tw, th, levels);
         if (rc < 0) {
             static unsigned reported;
-            if (reported++ < 8) xv_logf("[h2/menu-gxm] texture init failed rc=%08X %s %ux%u levels=%u\n", (unsigned)rc, cube ? "cube" : "linear", tw, th, levels);
+            if (reported++ < 8) xv_logf("[h2/menu-gxm] texture init failed rc=%08X %s native=%d %ux%u levels=%u\n", (unsigned)rc, cube ? "cube" : "linear", native, tw, th, levels);
             e->mem = NULL; return NULL;
         }
     }
@@ -698,6 +702,7 @@ static int render_body(void *opaque, const h2_menu_request *r)
                 for (unsigned u = 0; u < 4; ++u) {
                     unsigned base = 0x1B00 + u * 64;
                     if (!tex[u]) { xv_logf("[h2/draw-trace]  unit%u: none used=%d sampler=%d fmt=%08X ctrl=%08X\n", u, !!(cb.tex_used & (1u << u)), fs->sampler[u], s->setup[(base + 4) / 4], s->setup[(base + 0xC) / 4]); continue; }
+                    if (tex[u]->native) { xv_logf("[h2/draw-trace]  unit%u: offset=%08X fmt=%08X %ux%u levels=%u cube=%d native=DXT%d mean=%08X\n", u, s->setup[base / 4], s->setup[(base + 4) / 4], tex[u]->w, tex[u]->h, tex[u]->levels, tex[u]->cube, tex[u]->native, menu_texture_native_mean(tex[u]->mem, tex[u]->w, tex[u]->h, (unsigned)tex[u]->native)); continue; }
                     uint64_t a = 0, r = 0, g = 0, b = 0, cnt = 0; uint32_t lvl0 = tex[u]->w * tex[u]->h;
                     for (uint32_t i = 0; i < lvl0; i += 7, ++cnt) { uint32_t p = tex[u]->mem[i]; a += p >> 24; r += (p >> 16) & 255; g += (p >> 8) & 255; b += p & 255; }
                     xv_logf("[h2/draw-trace]  unit%u: offset=%08X fmt=%08X %ux%u levels=%u cube=%d linear=%d mean=%02llX%02llX%02llX%02llX\n", u, s->setup[base / 4], s->setup[(base + 4) / 4],
