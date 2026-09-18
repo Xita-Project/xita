@@ -1444,6 +1444,45 @@ static int opaque_material_candidate(const cmd_t *c)
     return 1;
 }
 
+/* One-frame remote diagnostics use captured descriptors, never guest texture
+ * bytes or vertex readback. Keep packed/resident geometry and submission intact.
+ * Constants are limited to projection rows used by CE's shadow producer and
+ * receiver, and emitted only for draws that write/read an offscreen target. */
+static void trace_draw_state(const cmd_t *c, const xv_vs_desc_t *d, unsigned texok)
+{
+    if (!vertex_trace_frame()) return;
+    unsigned command = cur_list()->ncmds - 1, rt_mask = 0;
+    XV_LOG("[draw-state] frame %u cmd %u pass %u vs %s ps %08X key %08X tex-mask %X previous %X blend %u/%u/%u z %u/%u/%u mask %X atest %08X\n",
+        g_build_frame, command, c->pass, d->gxp, S.ps_hash, S.ps_key, texok,
+        c->previous_frame, S.blend_enable, S.src_blend, S.dst_blend,
+        S.z_enable, S.z_write, S.z_func, S.color_mask, c->atest);
+    for (unsigned t = 0; t < 4; ++t) {
+        if (!S.tex_guest[t] && !(texok & (1u << t))) continue;
+        XV_LOG("[draw-sampler] frame %u cmd %u stage %u guest %08X captured %u address %u/%u filter %u/%u scale %.9g/%.9g\n",
+            g_build_frame, command, t, S.tex_guest[t], (texok >> t) & 1u,
+            S.tex_addr_u[t], S.tex_addr_v[t], S.tex_min[t], S.tex_mag[t],
+            c->texscale[t][0], c->texscale[t][1]);
+        if (!(texok & (1u << t))) continue; /* Uncaptured slots are not descriptors. */
+        const SceGxmTexture *tx = &c->tex[t];
+        const void *data = sceGxmTextureGetData(tx);
+        for (unsigned r = 0; r < XV_RT_SLOTS; ++r)
+            if (data && data == g_rt[r].mem) rt_mask |= 1u << r;
+        XV_LOG("[draw-texture] frame %u cmd %u stage %u data %08X size %u/%u type %08X address %u/%u\n",
+            g_build_frame, command, t, (unsigned)(uintptr_t)data,
+            (unsigned)sceGxmTextureGetWidth(tx), (unsigned)sceGxmTextureGetHeight(tx),
+            (unsigned)sceGxmTextureGetType(tx), (unsigned)sceGxmTextureGetUAddrMode(tx),
+            (unsigned)sceGxmTextureGetVAddrMode(tx));
+    }
+    if (c->pass || rt_mask) {
+        static const unsigned rows[] = {0,1,2,3,15,16,17,18,19,28,29,30,31};
+        for (unsigned i = 0; i < sizeof rows / sizeof rows[0]; ++i) {
+            unsigned row = rows[i]; const float *v = S.vsc[96 + row];
+            XV_LOG("[draw-projection] frame %u cmd %u read-rt %X c[%u] %.9g %.9g %.9g %.9g\n",
+                g_build_frame, command, rt_mask, row, v[0], v[1], v[2], v[3]);
+        }
+    }
+}
+
 static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
 {
     /* textures */
@@ -1844,6 +1883,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     }
 
     xv_draw_profile_step(XV_DRAW_DIAGNOSTICS, &profile);
+    trace_draw_state(c, d, texok);
     if (geometry_trace(c)) {
         XV_LOG("[stencil] cmd %u vs %s enable %u func %u ref %u mask %02X/%02X ops %u/%u/%u\n",
             cur_list()->ncmds-1, d->gxp, c->stencil.enabled, c->stencil.func,

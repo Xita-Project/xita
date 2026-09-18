@@ -426,7 +426,7 @@ void xv_hle_D3DDevice_SetViewport(xctx *c)
     uint32_t v = X_ARG(0);
     xd3d_state.vp_x = X_M32(v); xd3d_state.vp_y = X_M32(v + 4); xd3d_state.vp_w = X_M32(v + 8); xd3d_state.vp_h = X_M32(v + 12);
     memcpy(&xd3d_state.vp_minz, X_G(v + 16), 4); memcpy(&xd3d_state.vp_maxz, X_G(v + 20), 4);
-    if (xd3d_hist_active()) D3DLOG("[hist] viewport XY %u %u WH %u %u depth %.6f %.6f\n",
+    if (xd3d_vertex_trace_active()) D3DLOG("[hist] viewport XY %u %u WH %u %u depth %.6f %.6f\n",
         xd3d_state.vp_x,xd3d_state.vp_y,xd3d_state.vp_w,xd3d_state.vp_h,xd3d_state.vp_minz,xd3d_state.vp_maxz);
     X_RET(1);
 }
