@@ -58,3 +58,9 @@ now overlaps preparation across draws on hardware while retaining private input
 copies and GPU retirement. Its initial gameplay smoke passed; an FPS gain has
 not been established. Next investigate which loaded resources can safely avoid
 those copies, and validate representative gameplay before claiming the target.
+
+The [visibility dispatch audit](visibility-dispatch-20260917.md) now separates
+the two original world-culling paths across all 82 owned BSPs. Blood Gulch uses
+subcluster bounds; the qualified triangle-outcode prototype remains uninstalled
+because it does not target that path. Continue with portal clipping/subcluster
+work and the remaining retained-pointer lifetime questions.
