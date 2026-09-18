@@ -12,6 +12,12 @@ from games.halo_ce_3925 import clip_region, collision_solver, object_motion_prof
 
 
 class HaloHooks(NoGameHooks):
+    def discovery(self, *args):
+        if not self.enabled:
+            raise ValueError("CE discovery requires the audited executable")
+        from .discovery import HaloDiscovery
+        return HaloDiscovery(*args)
+
     def phase_targets(self):
         if not self.enabled:
             raise ValueError("Halo phase timing requires the audited executable")

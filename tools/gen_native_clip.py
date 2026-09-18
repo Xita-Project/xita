@@ -16,25 +16,8 @@ from recompiler import xita_recomp as r
 from games.halo_ce_3925.hooks import HaloHooks
 
 
-class AuditedClipDiscovery(r.Discovery):
-    """Keep the block shape used to qualify ARM clipping operand order.
+from games.halo_ce_3925.discovery import HaloDiscovery
 
-    The general lifter deduplicates overlapping tails for Halo 2. Changing this
-    helper's graph changes compiler scheduling of NaN operands, so retain its
-    independently audited graph until that replacement passes ARM equivalence.
-    This affects only the bounded CE clip generators, not ordinary discovery.
-    """
-    def split_blocks(self, fn):
-        targets = {target for block in fn.blocks.values() for target in block.succ}
-        for start in sorted(fn.blocks):
-            block = fn.blocks[start]
-            for index, ins in enumerate(block.insns):
-                if index and ins.ip in targets and ins.ip not in fn.blocks:
-                    tail = r.Block(ins.ip)
-                    tail.insns, tail.end, tail.succ = block.insns[index:], block.end, block.succ
-                    block.insns, block.end, block.succ = block.insns[:index], ins.ip, [ins.ip]
-                    fn.blocks[ins.ip] = tail
-                    break
 
 ENTRY, SIZE = 0xB71C0, 874
 DIGEST = '34bf76203325f8157fcc9595b80b4be8851d829baabc556d45941533aa6c22e3'
@@ -150,7 +133,7 @@ def generate():
     # One unreachable alignment instruction sits between the initial loop
     # branch and its body. All executable bytes are covered by the proof.
     assert {pc: str(i) for pc, i in instructions.items() if pc not in depths} == {0xB7269: 'lea esp,[esp]'}
-    disc = AuditedClipDiscovery(img, {}, img.kernel_imports(), lambda *args: None)
+    disc = HaloDiscovery(img, {}, img.kernel_imports(), lambda *args: None)
     for address in (ENTRY, 0x1D130):
         disc.add_root(address)
         disc.lift_function(disc.functions[address])

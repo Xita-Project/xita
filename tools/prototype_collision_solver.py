@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 from games.halo_ce_3925 import collision_solver
 from games.halo_ce_3925.hooks import HaloHooks
 from recompiler import xita_recomp as r
+from games.halo_ce_3925.discovery import HaloDiscovery
 
 IMAGE = '4094e994243ddeae3f1b478bde6a7ee81498218ccd7c9d7bc2327db547d95aae'
 ENTRIES = tuple(a for a, _, _ in collision_solver.SPANS if a != 0x172BF0)
@@ -64,7 +65,7 @@ def generate(a):
     image = r.Image(str(a.xbe), str(a.manifest))
     if hashlib.sha256(image.data).hexdigest() != IMAGE or not collision_solver.matches(image):
         raise ValueError('unsupported image or complete solver/caller signature')
-    discovery = r.Discovery(image, {}, image.kernel_imports(), lambda *args: None)
+    discovery = HaloDiscovery(image, {}, image.kernel_imports(), lambda *args: None)
     for address in (*ENTRIES, 0x172CB8):
         discovery.add_root(address)
     bodies = {}

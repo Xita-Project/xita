@@ -52,3 +52,7 @@ settings and saves. [Installation instructions](installing.md).
 Halo 2 has a [separate experimental setup](halo2-hardware.md); it is not a
 supported playable title yet. Ad hoc multiplayer and complete campaign playthroughs
 remain unverified. The software is GPL-3.0-only; game content has separate rights.
+
+## Compiler compatibility
+
+The CE profile retains the block layout, write syntax and flag-elision layout used to qualify its existing generated helpers. Halo 2 keeps the general lifter fixes, including deduplicated blocks and instruction-address-based flag liveness. Moving CE to that newer layout requires regenerating and validating its full image and native helpers together; this release does not treat that migration as a performance improvement.

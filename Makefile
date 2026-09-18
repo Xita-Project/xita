@@ -1291,7 +1291,7 @@ $(RECOMP_BUILD)/query-f32.config: force-query-f32-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 QUERY_FUSION_OBJECTS := $(RECOMP_BUILD)/code_028.o $(RECOMP_BUILD)/query_fusion.o
-QUERY_FUSION_INPUTS := tools/query_ancestor_scalar.py tools/query_membership_scalar.py tools/query_semantic_leaf.py tools/query_f32_primitives.py tools/gen_native_query_fusion.py tools/gen_native_solver_fusion.py tools/prototype_collision_query.py \
+QUERY_FUSION_INPUTS := games/halo_ce_3925/discovery.py tools/query_ancestor_scalar.py tools/query_membership_scalar.py tools/query_semantic_leaf.py tools/query_f32_primitives.py tools/gen_native_query_fusion.py tools/gen_native_solver_fusion.py tools/prototype_collision_query.py \
     tools/tests/collision_query_fusion.c $(wildcard recompiler/*.py recompiler/core/*.py games/halo_ce_3925/*.py) \
     recomp/kernel/xk_collision_vertices.h recomp/kernel/xk_segment_sphere.h \
     recomp/kernel/xk_collision_traversal.h recomp/kernel/xk_geometry.c \
@@ -1591,7 +1591,7 @@ $(RECOMP_BUILD)/polygon-edge.config: force-polygon-edge-config
 $(EDGE_HOOK_OBJS) $(EDGE_NATIVE_OBJS): $(RECOMP_BUILD)/polygon-edge.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/polygon-edge.config
 $(RECOMP_BUILD)/kernel/xk_polygon_edge.o: RECOMP_CFLAGS += -ffp-contract=off
-recomp/kernel/xk_polygon_edge.c: tools/gen_native_polygon_edge.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
+recomp/kernel/xk_polygon_edge.c: tools/gen_native_polygon_edge.py games/halo_ce_3925/hooks.py games/halo_ce_3925/discovery.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_polygon_edge.py --xbe $(XBE) --manifest $(XBE_JSON)
 
 # Optional clip region: generated units, helper and bridge share a tracked mode.
@@ -1630,7 +1630,7 @@ $(RECOMP_BUILD)/clip-distance.config: force-clip-distance-config
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_clip_region.o: $(RECOMP_BUILD)/clip-distance.config
 $(RECOMP_BUILD)/kernel/xk_clip_region.o: RECOMP_CFLAGS += -DXV_CLIP_DISTANCE_SPANS=$(XV_CLIP_DISTANCE_SPANS)
-recomp/kernel/xk_clip_region.c: tools/gen_native_clip_region.py tools/gen_native_clip.py tools/clip_distance_spans.py games/halo_ce_3925/clip_region.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
+recomp/kernel/xk_clip_region.c: tools/gen_native_clip_region.py tools/gen_native_clip.py tools/clip_distance_spans.py games/halo_ce_3925/clip_region.py games/halo_ce_3925/hooks.py games/halo_ce_3925/discovery.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_clip_region.py --xbe $(XBE) --manifest $(XBE_JSON)
 recomp/kernel/xk_clip.c: tools/gen_native_clip.py games/halo_ce_3925/hooks.py games/halo_ce_3925/clip_region.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_clip.py
@@ -1667,7 +1667,7 @@ $(RECOMP_BUILD)/kernel/xk_bounds.o: RECOMP_CFLAGS += -ffp-contract=off
 ifeq ($(XV_HLE_DISPATCH_CACHE),1)
 $(RECOMP_BUILD)/xv_x86rt.o: RECOMP_CFLAGS += -DXV_HLE_DISPATCH_CACHE
 endif
-recomp/kernel/xk_bounds.c: tools/gen_native_bounds.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
+recomp/kernel/xk_bounds.c: tools/gen_native_bounds.py games/halo_ce_3925/hooks.py games/halo_ce_3925/discovery.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_bounds.py
 
 # Lifted code includes xv_recomp_protos.h -> xv_x86rt.h and, for diagnostic

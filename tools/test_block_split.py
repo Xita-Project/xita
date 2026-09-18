@@ -108,5 +108,18 @@ class SwitchTables(unittest.TestCase):
         self.assertNotIn(9, idx)     # 0xDEADBEEF is not code: table ends there
 
 
+
+
+class RetainedCeLayout(unittest.TestCase):
+    def test_ce_profile_keeps_qualified_shape_only(self):
+        from games.halo_ce_3925.discovery import HaloDiscovery
+        d = HaloDiscovery(CodeImage(b"\x40\x49\x75\xFD\xC3"), {}, {}, lambda *a: None)
+        d.add_root(0x1000)
+        d.run()
+        ips = block_ips(d.functions[0x1000])
+        self.assertGreater(len(ips), len(set(ips)))
+        self.assertFalse(d.rewrite_memory_stores)
+        self.assertEqual(len(block_ips(discover(b"\x40\x49\x75\xFD\xC3"))), 4)
+
 if __name__ == "__main__":
     unittest.main()

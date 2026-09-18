@@ -5,6 +5,7 @@ import argparse, hashlib, json, re, sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from recompiler import xita_recomp as r
+from games.halo_ce_3925.discovery import HaloDiscovery
 from recompiler.core.hooks import NoGameHooks
 IMAGE='4094e994243ddeae3f1b478bde6a7ee81498218ccd7c9d7bc2327db547d95aae'
 PCS=(0x56670,0x52240,0x51E90,0x11840,0xB77C0)
@@ -27,7 +28,7 @@ def rewrite_stores(text):
 def generate(xbe,manifest,out):
     img=r.Image(str(xbe),str(manifest))
     assert hashlib.sha256(img.data).hexdigest()==IMAGE,'unsupported image'
-    disc=r.Discovery(img,{},img.kernel_imports(),lambda *args:None)
+    disc=HaloDiscovery(img,{},img.kernel_imports(),lambda *args:None)
     for pc in (*PCS,0x565E0,0xA92C0,0xA9330):
         disc.add_root(pc);disc.lift_function(disc.functions[pc]);disc.split_blocks(disc.functions[pc])
     emit=r.Emitter(img,disc,{},img.kernel_imports(),'unused',1,hooks=NoGameHooks())

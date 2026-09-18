@@ -1179,7 +1179,8 @@ class Emitter:
             if wr and not (wr & live) and not rd and ins.mnemonic not in FLAG_KEEP:
                 dead.add(ins.ip)
             live = (live & ~wr) | rd
-        return dead
+        retained = getattr(self.disc, "retained_dead_flags", None)
+        return retained(insns, dead) if retained else dead
 
     def block_flag_use(self, insns) -> int:
         """Flags a block reads before writing them (plus whatever it leaves unwritten: conservative)."""
@@ -1357,7 +1358,9 @@ class Emitter:
                         out.append(f"    goto L_{blk.end:08X};")
         out.append("    return;")
         out.append("}")
-        body = self.rewrite_stores("\n".join(out))
+        body = "\n".join(out)
+        if getattr(self.disc, "rewrite_memory_stores", True):
+            body = self.rewrite_stores(body)
         return self.hooks.transform_body(fn.entry, body)
 
     def write_all(self):
@@ -1574,7 +1577,7 @@ def main() -> int:
     print(f"entry 0x{img.entry:08X}; kernel thunk 0x{img.kernel_thunk:08X} with {len(kthunks)} imports; {len(hle)} HLE functions")
 
     log = print
-    disc = Discovery(img, hle, kthunks, log)
+    disc = hooks.discovery(img, hle, kthunks, log)
     disc.add_root(img.entry)
     game_main = None
     roots = [int(r, 16) for r in args.roots] or list(profile.roots if profile else ())

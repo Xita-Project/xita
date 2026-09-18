@@ -1,5 +1,7 @@
 # Xita Roadmap
 
+September 18 tester build: the dashboard now selects Halo CE or the separately installed experimental Halo 2 application. Version and source revision appear on the dashboard and performance overlay. Halo 2 hardware startup and sustained CE performance remain validation work.
+
 Xita runs Halo: Combat Evolved's original Xbox executable on the PlayStation Vita. The
 offline recompiler (`python -m recompiler`) lifts the x86 code to C; the runtime
 (`xita`, `xita.vpk`) supplies the Xbox kernel, Direct3D and DirectSound surface on top of

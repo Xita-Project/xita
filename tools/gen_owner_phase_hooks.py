@@ -19,6 +19,7 @@ sys.path.insert(0,str(ROOT))
 def generate(xbe,manifest,symbols,stage,out):
     if not __debug__: raise RuntimeError('Run without Python -O: identity checks require assertions')
     from recompiler import xita_recomp as r
+from games.halo_ce_3925.discovery import HaloDiscovery
     from recompiler.core.profile import load_profile
     from games.halo_ce_3925.hooks import HaloHooks
     img=r.Image(str(xbe),str(manifest));profile=load_profile('halo_ce_3925')
@@ -29,7 +30,7 @@ def generate(xbe,manifest,symbols,stage,out):
     variables={s['name']:s['address'] for s in parsed if s['kind']=='VAR'};variables.update(profile.variables)
     hooks=HaloHooks(img);baseline=HaloHooks(img);baseline.owner_phase_enabled=False
     assert hooks.enabled and hooks.owner_phase_enabled
-    d=r.Discovery(img,hle,img.kernel_imports(),lambda *args:None)
+    d=HaloDiscovery(img,hle,img.kernel_imports(),lambda *args:None)
     for address in re.findall(r'^void f_([0-9A-F]{8})\(', (stage/'recomp/xv_recomp_protos.h').read_text(),re.M):d.add_root(int(address,16))
     pcs=(0xBCB30,0xFA920)
     for pc in pcs:d.add_root(pc);d.lift_function(d.functions[pc]);d.split_blocks(d.functions[pc])

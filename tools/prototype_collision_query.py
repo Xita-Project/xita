@@ -10,6 +10,7 @@ import argparse, hashlib, json, os, re, subprocess, sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from recompiler import xita_recomp as r
+from games.halo_ce_3925.discovery import HaloDiscovery
 from games.halo_ce_3925.hooks import HaloHooks
 from games.halo_ce_3925 import collision_traversal as ct
 
@@ -278,7 +279,7 @@ def generate(a):
         raise RuntimeError("Refusing optimized Python: generation safety checks require assertions.")
     image=r.Image(str(a.xbe),str(a.manifest))
     assert hashlib.sha256(image.data).hexdigest()==IMAGE
-    d=r.Discovery(image,{},image.kernel_imports(),lambda *args:None)
+    d=HaloDiscovery(image,{},image.kernel_imports(),lambda *args:None)
     for x in ENTRIES:d.add_root(x)
     for x in ENTRIES:d.lift_function(d.functions[x]);d.split_blocks(d.functions[x])
     bodies={x:r.Emitter(image,d,{},image.kernel_imports(),'unused',1,hooks=HaloHooks(image)).emit_function(d.functions[x]) for x in ENTRIES}

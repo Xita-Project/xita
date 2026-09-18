@@ -14,6 +14,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from recompiler import xita_recomp as r
+from games.halo_ce_3925.discovery import HaloDiscovery
 from games.halo_ce_3925.hooks import HaloHooks
 
 ENTRY, SIZE = 0xB77C0, 0xC3
@@ -122,7 +123,7 @@ def generate(xbe=None, manifest=None):
             assert fc == r.FlowControl.NEXT, 'leaf must not call other functions'
             todo.append((ins.next_ip, depth))
     assert not set(instructions) - depths.keys()
-    disc = r.Discovery(img, {}, img.kernel_imports(), lambda *args: None)
+    disc = HaloDiscovery(img, {}, img.kernel_imports(), lambda *args: None)
     disc.add_root(ENTRY)
     disc.lift_function(disc.functions[ENTRY])
     disc.split_blocks(disc.functions[ENTRY])
