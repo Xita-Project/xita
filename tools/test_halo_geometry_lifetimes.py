@@ -54,7 +54,8 @@ def run(img):
     def machine():
         u = Uc(UC_ARCH_X86, UC_MODE_32)
         u.mem_map(0x10000, 0x400000)
-        for lo, hi in [(0x7a6d0, 0x7a73a), (0x7a740, 0x7a7ad), (0x7a9d0, 0x7aa05)]:
+        for lo, hi in [(0x7a6d0, 0x7a73a), (0x7a740, 0x7a7ad),
+                       (0x7a9d0, 0x7aa05), (0x623f0, 0x62425)]:
             u.mem_write(lo, img.bytes_at(lo, hi - lo))
         return u
 
@@ -123,15 +124,20 @@ def run(img):
                 put(u, record, first); put(u, record + 8, 0xdead5678)
                 u.mem_write(0x27fbb4, b'\x01')
                 u.reg_write(UC_X86_REG_ECX, handle)
-                result = execute(u, 0x7a9d0)
-                assert result == get(u, record + 8) == data + first * 6
-                assert u.mem_read(0x27fbb4, 1) == b'\x00'
-                pointers += 1
-    u = machine(); u.reg_write(UC_X86_REG_ECX, 0xffffffff)
-    assert execute(u, 0x7a9d0) == 0
+                for entry in (0x7a9d0, 0x623f0):
+                    put(u, record + 8, 0xdead5678); u.mem_write(0x27fbb4, b'\x01')
+                    u.reg_write(UC_X86_REG_ECX, handle)
+                    result = execute(u, entry)
+                    assert result == get(u, record + 8) == data + first * 6
+                    assert u.mem_read(0x27fbb4, 1) == b'\x00'
+                    pointers += 1
+    for entry in (0x7a9d0, 0x623f0):
+        u = machine(); u.reg_write(UC_X86_REG_ECX, 0xffffffff)
+        assert execute(u, entry) == 0
+        pointers += 1
     return dict(result='PASS', rejected_inputs=negative, deduplicated_call_case=1,
                 original_vertex_reservations=vertices, original_index_reservations=indices,
-                original_direct_index_pointers=pointers + 1,
+                original_direct_index_pointers=pointers,
                 scope='Original x86 behavior with synthetic pool data; not write coverage or performance')
 
 

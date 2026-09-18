@@ -24,6 +24,7 @@ SPANS = (
     ('bsp_register', 0x33860, 0x338c4),
     ('model_drain', 0x338d0, 0x33921),
     ('model_register', 0x33930, 0x33989),
+    ('index_pool_pointer_used', 0x623f0, 0x62425),
     ('vertex_pool_lock', 0x7a630, 0x7a6b0),
     ('vertex_pool_reserve', 0x7a6d0, 0x7a73a),
     ('index_pool_reserve', 0x7a740, 0x7a7ad),
@@ -45,6 +46,7 @@ CALL_SITES = {
     0x7a69d: 0x1858d0, 0x7a829: 0x185800,
     0x7a89d: 0x185870, 0x7a8f4: 0x185870,
     0x7a7c7: 0x1849d0, 0x7a7e4: 0x1849d0, 0x7a7fd: 0x1849d0,
+    0x5429f: 0x623f0, 0x5447a: 0x623f0, 0x5452e: 0x623f0, 0x547fe: 0x623f0,
 }
 WRITE_ACCESS = {OpAccess.WRITE, OpAccess.COND_WRITE, OpAccess.READ_WRITE,
                 OpAccess.READ_COND_WRITE}
@@ -141,6 +143,10 @@ def audit(img, files):
     operand(0x7a9dd, Mnemonic.MOV, Register.EDX, Register.EDX, 4, 1)
     operand(0x7a9f7, Mnemonic.MOV, Register.ECX, Register.EAX, 8, 0)
     operand(0x7aa01, Mnemonic.MOV, Register.EAX, Register.EAX, 8, 1)
+    # The rendering callers use an earlier duplicate of this leaf. Identical
+    # bytes include its relative branch; neither body has an external call.
+    require(img.bytes_at(0x623f0, 0x35) == img.bytes_at(0x7a9d0, 0x35),
+            'direct index-pointer copies differ')
     strides = struct.unpack('<12H', img.bytes_at(0x1e0ab4, 24))
     require(strides == (56, 32, 20, 8, 68, 32, 24, 36, 20, 16, 16, 8), 'stride table changed')
     files = sorted(files)
@@ -158,6 +164,7 @@ def audit(img, files):
                     'Vertex lock passes record+12 as its output-pointer address and returns that retained pointer.',
                     'Vertex reserve writes format/start/count but does not clear the prior record+12 pointer.',
                     'Index pointer acquisition reads resource Data directly, stores record+8 and makes no lock call.',
+                    'Four visible-index caller sites use the byte-identical leaf at 0x623f0; reachability alone is not runtime frequency.',
                     'BSP and model registration use distinct resource tables; these calls do not prove payload immutability.',
                 ], limits=[
                     'Only the listed original intervals and nominated direct calls are checked.',

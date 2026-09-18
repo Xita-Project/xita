@@ -116,6 +116,14 @@ index Data access rule out lock-only invalidation. Continue tracing the separate
 map-loaded payload writers before removing repeated checks; the existing
 qualified cumulative package is unchanged.
 
+The follow-up identifies the direct index-pointer entry actually used by seven
+call sites, including four rendering callers: `0x623F0`, byte-identical to
+`0x7A9D0`. Both entries now pass original execution checks, bringing the pool
+suite to 86 cases. No sorter shortcut is included: the retained hardware windows
+show only a few small lists per frame and do not establish sorting as a major
+remaining cost. The next decision depends on fresh hardware results from the
+qualified cumulative visibility and capture build.
+
 The [exact capture reuse candidate](vertex-capture-reuse-20260918.md) now avoids
 duplicate staging and preparation inside a drained recording interval, while
 checking current bytes on every reuse. Sparse uploads remain independent.
