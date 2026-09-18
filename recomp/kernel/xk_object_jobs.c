@@ -1268,18 +1268,20 @@ int xv_visibility_classify_jobs(xctx *c,const xv_visibility_input *input,unsigne
     memcpy(visibility_packet.input,input,n*sizeof(*input));
     for(unsigned i=0;i<n;++i)if(!visibility_input_valid(&visibility_packet.input[i]))return 0;
     visibility_packet.environment=environment;visibility_packet.n=n;
-    visibility_packet.lanes=active_workers+1;
+    /* Small packets keep the typed whole-pass path without a kernel wake. */
+    unsigned workers=n<24?0:active_workers;
+    visibility_packet.lanes=workers+1;
     __atomic_store_n(&visibility_running,1,__ATOMIC_RELEASE);
     __atomic_store_n(&running,1,__ATOMIC_RELEASE);
-    for(unsigned i=0;i<active_workers;++i) {
+    for(unsigned i=0;i<workers;++i) {
 #ifdef __vita__
         if(sceKernelSignalSema(wakes[i],1)<0)abort();
 #else
         if(sem_post(&wakes[i]))abort();
 #endif
     }
-    visibility_execute(2,active_workers);
-    for(unsigned i=0;i<active_workers;++i) {
+    visibility_execute(2,workers);
+    for(unsigned i=0;i<workers;++i) {
 #ifdef __vita__
         if(sceKernelWaitSema(dones[i],1,NULL)<0)abort();
 #else

@@ -163,6 +163,13 @@ XV_CLIP_DISTANCE_SPANS ?= 0
 XV_TYPED_PORTAL_POLYGON ?= 0
 XV_TYPED_SUBCLUSTER ?= 0
 XV_NATIVE_VISIBILITY_JOBS ?= 0
+XV_NATIVE_VISIBILITY_PASS ?= 0
+ifneq ($(words $(XV_NATIVE_VISIBILITY_PASS)),1)
+$(error XV_NATIVE_VISIBILITY_PASS must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_VISIBILITY_PASS),0 1),$(XV_NATIVE_VISIBILITY_PASS))
+$(error XV_NATIVE_VISIBILITY_PASS must be 0 or 1)
+endif
 ifneq ($(words $(XV_NATIVE_VISIBILITY_JOBS)),1)
 $(error XV_NATIVE_VISIBILITY_JOBS must be 0 or 1)
 endif
@@ -484,6 +491,11 @@ endif
 ifeq ($(XV_NATIVE_VISIBILITY_JOBS),1)
 ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_EXPERIMENTAL_OBJECT_JOBS):$(XV_LIGHT_QUERY_CENSUS):$(XV_TYPED_SUBCLUSTER),1:halo_ce_3925:1:1:1)
 $(error XV_NATIVE_VISIBILITY_JOBS requires the Halo CE native subcluster and owner/worker backend)
+endif
+endif
+ifeq ($(XV_NATIVE_VISIBILITY_PASS),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_NATIVE_VISIBILITY_JOBS):$(XV_TYPED_SUBCLUSTER),1:halo_ce_3925:1:1)
+$(error XV_NATIVE_VISIBILITY_PASS requires the Halo CE native visibility workers and subclusters)
 endif
 endif
 ifeq ($(XV_NATIVE_VISIBILITY_PORTAL_LOOP),1)
@@ -1001,6 +1013,27 @@ $(RECOMP_BUILD)/visibility-jobs.config: force-visibility-jobs-config
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_NATIVE_VISIBILITY_JOBS=$(XV_NATIVE_VISIBILITY_JOBS)
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/visibility-jobs.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/visibility-jobs.config
+VISIBILITY_PASS_SRCS := $(shell rg -l 'XV_NATIVE_VISIBILITY_PASS_SCOPE:' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+VISIBILITY_PASS_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(VISIBILITY_PASS_SRCS))
+ifeq ($(XV_NATIVE_VISIBILITY_PASS),1)
+ifneq ($(words $(VISIBILITY_PASS_SRCS)),1)
+$(error XV_NATIVE_VISIBILITY_PASS requires one selectively prepared caller unit)
+endif
+ifneq ($(words $(shell rg -o 'XV_NATIVE_VISIBILITY_PASS_SCOPE:' $(VISIBILITY_PASS_SRCS) 2>/dev/null)),1)
+$(error XV_NATIVE_VISIBILITY_PASS requires exactly one scope marker)
+endif
+endif
+.PHONY: force-visibility-pass-config
+force-visibility-pass-config:
+$(RECOMP_BUILD)/visibility-pass.config: force-visibility-pass-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_NATIVE_VISIBILITY_PASS)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(VISIBILITY_PASS_OBJS) $(RECOMP_BUILD)/kernel/xk_clip_region_control.o: RECOMP_CFLAGS += -DXV_NATIVE_VISIBILITY_PASS=$(XV_NATIVE_VISIBILITY_PASS)
+$(VISIBILITY_PASS_OBJS) $(RECOMP_BUILD)/kernel/xk_clip_region_control.o $(RECOMP_BUILD)/kernel/xk_visibility_pass.o: $(RECOMP_BUILD)/visibility-pass.config
+$(RECOMP_BUILD)/kernel/xk_visibility_pass.o: RECOMP_CFLAGS += -DXV_NATIVE_VISIBILITY_JOBS=1
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/visibility-pass.config
 ifeq ($(XV_NATIVE_BSP_SPHERE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_BSP_SPHERE
 endif

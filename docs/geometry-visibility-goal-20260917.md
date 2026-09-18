@@ -95,3 +95,10 @@ FP-state and legacy-job handoff checks pass, with the disabled Vita object
 unchanged. It is not yet called by the game. The next integration should capture
 multiple visible clusters per bounded packet; Blood Gulch's individual clusters
 are too small to assume per-cluster dispatch will pay for itself.
+
+The [captured visibility pass](native-visibility-pass-20260918.md) now connects
+the game caller to those workers across multiple visible clusters. Whole-pass
+ARM comparisons and real-worker memory/race checks pass. Small packets avoid
+worker wakes, and unsupported or yielding passes retain the original path.
+The cumulative candidate awaits ordinary hardware validation; no FPS gain is
+attributed to these local correctness results.

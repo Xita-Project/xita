@@ -7,10 +7,10 @@ their existing core 0/1 affinities. This operation executes only the qualified
 subcluster math; it cannot call guest functions, request owner services, submit
 draws or retain guest pointers.
 
-**The game does not call this interface yet.** This is a qualified queue and
-FP-state handoff for the next visibility-pass integration. Its repository
-default is off. The earlier cumulative runtime `73c30a34` remains the package
-ready for hardware; this work has not replaced or installed it.
+The subsequent [captured visibility pass](native-visibility-pass-20260918.md)
+connects this interface to a selectively prepared game caller. Both flags
+default off. The queue qualification below preceded that integration; see the
+follow-up for capture, publication and hardware status.
 
 ## Why batch across clusters
 

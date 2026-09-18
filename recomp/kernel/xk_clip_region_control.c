@@ -91,6 +91,10 @@ void xv_clip_region_report(unsigned frames)
     extern void xv_subcluster_report(unsigned);
     xv_subcluster_report(frames);
 #endif
+#if XV_NATIVE_VISIBILITY_PASS
+    extern void xv_visibility_pass_report(unsigned);
+    xv_visibility_pass_report(frames);
+#endif
 }
 
 int xv_clip_region_begin(void)
