@@ -1,6 +1,6 @@
 # Installing Xita
 
-[README](../README.md) · [Download VPK](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay) · [Game data](game-data.md) · [Compatibility](../COMPATIBILITY.md)
+[README](../README.md) · [Download VPK](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1) · [Game data](game-data.md) · [Compatibility](../COMPATIBILITY.md)
 
 Install the app from a VPK, then add your own Halo data. You need a
 homebrew-enabled PS Vita, VitaShell and a USB cable. Windows, macOS and Linux
@@ -47,21 +47,16 @@ fingerprint and folder layout.
 
 ## 1. Download a VPK
 
-Open the [current Xita game release](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay),
-expand **Assets**, and download **`xita-gameplay-20260909.vpk`**.
+Open the [current Xita game release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1),
+expand **Assets**, and download **`xita-0.2.0-test.1.vpk`**.
 Each release contains one VPK, `SHA256SUMS.txt` and `BUILD-INFO.json`. Sign in
 with an account that has repository access while releases are private.
 GitHub's automatic **Source code** downloads are not installable apps.
 
-This development package removes function tracing from normal gameplay and
-keeps the built-in **Default** and **Inverted** profile fix. It also revises the
-LiveArea artwork format after a blank-background report. Host and linked-ARM
-checks pass; hardware FPS and LiveArea confirmation are pending.
-[Build and test details](gameplay-build-20260909.md).
-
-It also includes the in-game graphics panel and the previous optional
-[vertex-validation comparison](vertex-references-20260908.md), which remains off
-by default. This release has no measured hardware performance improvement.
+This tester package includes the cumulative CE performance work, **Select Game**,
+and visible build versions. Halo 2 is a separate experimental install; the CE
+VPK does not include Halo 2. Read the [tester notes](tester-build-20260918.md)
+for known limits and [Halo 2 setup](halo2-hardware.md) before testing that profile.
 
 For an older build, use the [release guide](releases.md). Older releases are
 marked **Superseded**. The separate **Xita AdHoc Test** VPK tests networking on two
@@ -85,7 +80,7 @@ and paste your `haloce` folder there once. The result must contain
 ```text
 Vita drive/
 ├── VPK/
-│   └── xita-gameplay-20260909.vpk
+│   └── xita-0.2.0-test.1.vpk
 └── data/
     └── xita/
         ├── halo_image.bin
@@ -149,3 +144,15 @@ register the new bubble and app ID.
 | Low FPS | Performance work is ongoing. 640×360 has helped on hardware; sustained 20 FPS is still the goal. |
 
 See [Compatibility](../COMPATIBILITY.md) for known issues and what to include in a report.
+
+## Identify the installed build
+
+Read the version and source revision in the dashboard footer, or enable
+**Display → Performance overlay** to include them in gameplay screenshots.
+The expected tester version is **0.2.0-test.1**. A runtime update changes these
+labels even if Vita's application information still shows the older VPK version.
+Installing the full VPK updates the application's metadata too.
+
+Use **Select Game → Halo: Combat Evolved** for ordinary CE testing. Existing
+CE data and saves stay in place. Halo 2 requires a separate setup; selecting it
+does not download or convert another Xbox game.

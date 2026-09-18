@@ -205,3 +205,17 @@ Real hardware still needs to verify scanout timing/tearing, software rendering
 cost at 60 Hz, stick repeat and touch calibration on both panels, memory-card
 config replacement/error handling, app-manager hand-off and display cleanup.
 Actual map/save startup additionally needs the runtime consumer described above.
+
+## Game selection and version
+
+The embedded dashboard offers **Select Game**. Select Halo CE or Halo 2, then
+return to **Launch Game**. The choice is saved in `selected-game.txt`; settings
+and game saves are not moved. Halo 2 requires its separate experimental VPK and
+owned data: [setup](../docs/halo2-hardware.md). CE graphics settings currently
+apply to CE only. Close Halo 2 and reopen Xita to switch back.
+
+The footer and CE performance overlay show `V0.2.0-test.1 / <revision>`.
+A `+` after the revision indicates a build from modified tracked source. The
+remote status endpoint reports the same version and revision. Include these
+values with screenshots and logs. Version metadata comes from `version.json`
+and `tools/gen_build_version.py` and is embedded during compilation.

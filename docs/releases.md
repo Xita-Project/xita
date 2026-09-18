@@ -8,13 +8,16 @@ have their own release and bubble.
 
 | Download | Purpose |
 | --- | --- |
-| [Xita — Gameplay build](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay) | Current game package; development tracing removed, LiveArea compatibility update. Hardware results pending. |
+| [Xita 0.2.0-test.1](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1) | Current tester package: cumulative CE performance work, game selection and visible version/revision. See tester notes for validation limits. |
 | [Xita AdHoc Test 01.01](https://github.com/Xita-Project/xita/releases/tag/adhoc-20260908b) | Standalone diagnostic for two Vitas; wireless testing pending. |
 
 Each release has three uploaded files: the VPK, `SHA256SUMS.txt` and
 `BUILD-INFO.json`. GitHub also adds source archives automatically; these cannot
 be installed on a Vita. These remain development prereleases in the private
 repository.
+
+Release identity is defined in `version.json`; source revisions are embedded in
+the dashboard, performance overlay and remote status. [Current tester notes](tester-build-20260918.md).
 
 ## Older builds
 

@@ -1343,10 +1343,10 @@ settings and control remapping, styled after the original Xbox dashboard.
 - **Content discovery.** Scan `ux0:data/xita/` for the game image and maps, validate
   them, and report clearly when the user's own copy is incomplete. No game content ships
   with Xita.
-- **Game selection (requested September 5, reaffirmed September 8).** Add an installed-game selector before
-  Launch Game, remember the last selection, and load that game's settings and engine.
-  Show only runnable installed games; additional Xbox games need their own compatible
-  recompilation and validation. Halo remains the first supported game.
+- **Game selection: first implementation complete September 18.** The dashboard
+  remembers CE or experimental Halo 2, checks required installation files, and
+  launches the selected application. Missing games remain visible with setup guidance.
+  General discovery for additional profiles remains future work.
   Define a versioned manifest with game ID, display name, supported executable
   revision, installed engine/title ID and data location. Keep configuration and
   saves separate per game; remember the selection, validate missing/incompatible

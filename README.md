@@ -6,28 +6,29 @@
 
 **A static recompiler and runtime for bringing original Xbox games to the PlayStation Vita.**
 
-[Download VPK](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay) · [Install](docs/installing.md) · [Compatibility](COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
+[Download VPK](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1) · [Install](docs/installing.md) · [Compatibility](COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
 
 Xita translates an Xbox game's x86 executable into C, builds it as ARM code,
 and supplies Xbox kernel, graphics and audio interfaces through Vita homebrew
-libraries. Each title needs its own port and testing. **Halo: Combat Evolved
-is the only game tested so far.**
+libraries. Each title needs its own port and testing. **Halo: Combat Evolved is in hardware gameplay testing. Halo 2 is an
+experimental second profile; it is not yet validated on a physical Vita.**
 
 ## Getting started
 
-1. **Download the VPK** from the [current Xita release](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay).
+1. **Download the VPK** from the [current Xita release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1).
    Expand **Assets** and choose its single `.vpk` file. The **Source code** ZIP is for developers.
 2. **Copy it over USB.** Open VitaShell's USB mode and copy the VPK to your Vita's
    storage. Windows users can use File Explorer.
 3. **Install and add your game data.** Safely eject the drive, leave USB mode, and
    open the VPK in VitaShell. On first setup, copy your own supported Halo image
    and maps using the [installation guide](docs/installing.md).
-4. **Launch Xita.** Choose your graphics settings and select **Launch Game**.
+4. **Launch Xita.** Choose **Select Game → Halo: Combat Evolved**, set your
+   graphics options, then select **Launch Game**.
    Start a campaign or a solo match through Halo's **Split Screen** menu.
 
 **Already have Xita working?** Keep your existing game files, settings and saves;
 follow [Updating Xita](docs/installing.md#updating-xita). The current
-[game release](https://github.com/Xita-Project/xita/releases/tag/dev-20260909-gameplay)
+[game release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1)
 contains one VPK, a checksum and build information. Older builds have their own
 releases marked **Superseded**; the [ad hoc tester](https://github.com/Xita-Project/xita/releases/tag/adhoc-20260908b)
 is a separate download. [Release guide](docs/releases.md). Releases remain private
@@ -99,32 +100,23 @@ These captures show different development builds. [Image details](docs/images/RE
 
 ## Current status
 
-This is a development project, not a finished Halo port. Rendering has improved
-substantially, but performance and GPU stability still need work. The first
-target is **sustained 20 FPS on real hardware**; it has not been met.
+**Tester build: 0.2.0-test.1 · September 18, 2026.** The dashboard and in-game
+performance overlay show the version and a short source revision. Include both
+in bug reports. [Changes and testing guide](docs/tester-build-20260918.md).
 
 | Area | Current position |
 | --- | --- |
-| Dashboard | Launch Game and settings; triple buffering and About / License installed September 8, hardware testing pending |
-| Blood Gulch | September 7 hardware sample: about **11 FPS at 640×360**, including driving, shooting and looking around |
-| Campaign | The Pillar of Autumn reaches gameplay; camera recovery, AI, resume and completion need further hardware testing |
-| Rendering | Major improvements to loading, lighting, sky, decals, foliage and active camouflage; remaining regressions are tracked |
-| Stability | Earlier driving and rocket/death tests crashed the GPU; one follow-up with the constant-buffer candidate produced no new dump |
-| Multiplayer | Solo matches through Split Screen work; networking between Vitas is unverified |
-| Other games | Future work; installing another XBE does not make it supported |
+| Halo CE | Campaign and solo Split Screen matches run on physical Vita; performance varies substantially by scene |
+| Performance | Users report around 12 FPS across Blood Gulch's valley and 20 FPS in some caves, bases and Battle Creek views; these are observations, not a sustained target or a matched comparison |
+| CPU and rendering | Worker jobs, native visibility routines and reduced vertex copying are integrated; the newest cumulative changes still need representative hardware testing |
+| Stability | Recent user sessions report crashes resolved; long sessions, effects, vehicles and campaign progression still need coverage |
+| Dashboard | Game selection, graphics settings, in-game overlay, version display and offline GPL license |
+| Halo 2 | Separate experimental application; startup and rendering work exist, but physical hardware support and complete gameplay are unverified |
+| Multiplayer networking | Solo play works; communication between two Vitas remains experimental |
 
-See [Compatibility](COMPATIBILITY.md) and the
-[latest hardware report](docs/hardware-20260907-frame-constants.md) for test
-limits. Emulator FPS does not predict Vita performance.
-
-The [September 9 gameplay build](docs/gameplay-build-20260909.md) removes
-development function tracing and keeps the profile/rendering fixes. It also
-revises the LiveArea assets after a blank-background report. Hardware FPS and
-LiveArea confirmation are pending.
-
-The [September 8 USB update](docs/hardware-20260908-weapon-menu.md) installs
-weapon, lobby and audio corrections plus the deferred visibility comparison.
-Installation is verified; gameplay and performance results for this build are pending.
+Stable **20 FPS** is the next milestone, with **30 FPS** the longer-term goal.
+Neither has been established across representative gameplay. Emulator speed does
+not predict Vita performance. See [Compatibility](COMPATIBILITY.md).
 
 ## Dashboard and controls
 
@@ -161,9 +153,8 @@ Rear touch shortcuts default off. Profiling controls are in [Developer notes](do
 ## Roadmap
 
 The full plan is **[ROADMAP.md](ROADMAP.md)**. Near-term work focuses on GPU
-stability, visibility waits and draw preparation. A future **game selector**
-will discover separately recompiled, supported titles and launch each with its
-own settings and saves. Halo 2 is an untested future target, not a promised port.
+stability, visibility waits and draw preparation. **Select Game** chooses CE or the separately installed experimental Halo 2
+application. Additional titles still need their own recompilation and testing.
 
 ## Reporting problems
 
