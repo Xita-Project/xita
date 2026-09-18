@@ -10,6 +10,12 @@ const void *xv_vertex_upload_packed(unsigned slot,const void *source,unsigned ve
 #endif
 
 const void *xv_vertex_upload(unsigned slot, const void *source, unsigned bytes);
+/* Separate comparison input from cache identity for an owned capture. Identity
+ * is never dereferenced; every reuse still compares this draw's captured bytes.
+ * The snapshot must cover bytes (including 32-byte input for packed records),
+ * and remain immutable until this synchronous call returns. */
+const void *xv_vertex_upload_snapshot(unsigned slot,const void *identity,
+    const void *snapshot,unsigned bytes,unsigned stride,const xv_vertex_refs *refs,unsigned packed);
 /* refs must be built from the exact retained index list, with a validated
  * fetch-within-stride layout. Metadata bounds cannot verify an invented mask
  * against indices that this API does not receive. Unfetched records may retain

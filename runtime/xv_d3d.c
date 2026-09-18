@@ -27,6 +27,7 @@
 #include "xv_scene_census.h"
 #include "xv_vertex_upload.h"
 #include "xv_vertex_prepare.h"
+#include "xv_vertex_capture.h"
 #include "xv_gpu_upload.h"
 #include "xv_texture_alpha.h"
 #include "xv_depth_prepare.h"
@@ -170,7 +171,7 @@ typedef struct {
  *  Command list
  * -------------------------------------------------------------------------------- */
 typedef struct {
-    uint8_t   kind;                 /* 0 draw, 1 clear                                */
+    uint8_t   kind;                 /* 0 draw, 1 clear, 2 failed captured draw        */
     uint8_t   fs_kind, blend;
     uint32_t  prim;                 /* SceGxmPrimitiveType (bitfield values, not small ints) */
     uint8_t   depth_func_idx, depth_write, cull;
@@ -475,6 +476,7 @@ int xv_d3d_init(const xv_vs_desc_t *const *table, unsigned count)
 static void rt_shutdown(void);
 void xv_d3d_shutdown(void)
 {
+    xv_vertex_capture_shutdown();
     frame_constants_shutdown();
     xv_vertex_prepare_shutdown();
     xv_vertex_upload_shutdown();
@@ -831,6 +833,15 @@ void xv_d3d_SetRenderTarget(uint32_t surface_hdr, int is_backbuffer)
     }
 }
 static int recording_dropped(void) { return cur_list()->cur_pass == 0xff; }
+static void captured_draw_complete(void *context,int ok)
+{
+    /* Recording owner only, before the command list is published. Preserve
+     * later command/UI/query positions if an asynchronous allocation failed. */
+    if(!ok) {
+        cmd_t *c=context;c->kind=2;
+        cur_list()->dropped++;cur_list()->drop_attributes++;
+    }
+}
 
 int xv_d3d_record_ui(unsigned frame, unsigned batch)
 {
@@ -1628,8 +1639,9 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     }
 
     xv_draw_profile_step(XV_DRAW_PROGRAM, &profile);
-    /* Resolve the complete source loan before handing upload-pool ownership to
-     * core 0. Guest execution cannot resume until finish below. */
+    /* Resolve all sources before handing upload-pool ownership to core 0.
+     * Queued preparation owns copies; the synchronous fallback joins its
+     * borrowed source loan before allowing guest execution to resume. */
     _Static_assert(XV_MAX_STREAMS <= XV_VERTEX_PREPARE_STREAMS, "stream batch capacity");
     xv_vertex_prepare_batch prep = {.slot=g_build_frame % XV_NUM_LISTS};
     unsigned prep_stream[XV_VERTEX_PREPARE_STREAMS];
@@ -1669,7 +1681,17 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     }
     if (indices)
         xv_gpu_flush(indices, count * 2);
-    xv_vertex_prepare_begin(&prep);
+    static int capture_diagnostics=-1;
+    if(capture_diagnostics<0)capture_diagnostics=getenv("XV_SKIN_DUMP") || getenv("XV_FOG_DUMP") ||
+        getenv("XV_MESH_DUMP") || getenv("XV_DUMP_VS");
+    const void **capture_targets[XV_VERTEX_PREPARE_STREAMS];
+    for(unsigned i=0;i<prep.count;i++)capture_targets[i]=&c->streams[prep_stream[i]];
+    int captured=!trace_frame() && !capture_diagnostics &&
+        (!prep.count || xv_vertex_capture_submit(&prep,capture_targets,captured_draw_complete,c));
+    if(!captured) {
+        xv_vertex_capture_drain();
+        xv_vertex_prepare_begin(&prep);
+    }
     xv_draw_profile_step(XV_DRAW_STREAMS, &profile);
     /* constants: snapshot the window this program reads.  Consecutive draws with unchanged c[] share one
      * snapshot (Halo draws hundreds of BSP pieces per frame with full-window programs: 768 floats each) */
@@ -1691,6 +1713,13 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     xv_draw_profile_step(XV_DRAW_CONSTANTS, &profile);
     unsigned texok = record_material(c, d, immediate != NULL);
     xv_draw_profile_step(XV_DRAW_TEXTURES, &profile);
+    if(captured) {
+        /* Worker inputs are private, and the command cannot be submitted until
+         * its streams are resolved by the recording owner's frame drain. */
+        xv_draw_profile_step(XV_DRAW_STREAMS,&profile);
+        xv_draw_profile_step(XV_DRAW_DIAGNOSTICS,&profile);
+        return;
+    }
     if (!xv_vertex_prepare_finish(&prep)) {
         cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_attributes++;
         return;
@@ -2000,6 +2029,7 @@ static void report_draw_drops(cmdlist_t *l)
 
 uint32_t xv_d3d_EndFrame(void)
 {
+    xv_vertex_capture_drain();
     cmdlist_t *l = cur_list();
     report_draw_drops(l);
     if (l->const_dropped) XV_LOG("frame %u: %u draw(s) without constants (pool full: %u floats)\n", g_build_frame, l->const_dropped, l->nconsts);
@@ -2014,6 +2044,7 @@ uint32_t xv_d3d_EndFrame(void)
 unsigned xv_d3d_record_slot(void) { return g_build_frame % XV_NUM_LISTS; }
 void xv_d3d_BeginFrame(void)
 {
+    xv_vertex_capture_drain();
     xv_index_cache_reset(g_index_cache);
     xv_vertex_upload_reset(g_build_frame % XV_NUM_LISTS);
     g_frame_constants[g_build_frame % XV_NUM_LISTS].ready = 0;
@@ -2062,6 +2093,7 @@ void xv_d3d_Clear(uint32_t flags, uint32_t color_argb, float z, uint32_t stencil
 
 void xv_d3d_Swap(void)
 {
+    xv_vertex_capture_drain();
     cmdlist_t *l = cur_list();
     report_draw_drops(l);
     xv_vertex_upload_seal(g_build_frame % XV_NUM_LISTS);
@@ -2543,6 +2575,7 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
     xv_texture_state *texture_state = texture_state_enabled() ? &textures : NULL;
     for (unsigned i = first; i < end; ++i) {
         cmd_t *c = &l->cmds[i];
+        if(c->kind==2)continue;
         visibility_draw_state(ctx,l,c);
         if (c->kind == 1) {
             state.valid = 0;

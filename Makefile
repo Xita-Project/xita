@@ -27,7 +27,7 @@ STRIP     := $(PREFIX)-strip
 SIZE      := $(PREFIX)-size
 
 # --- 3. sources + flags ------------------------------------------------------
-SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_scene.c runtime/xv_ui_gxm.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_vertex_prepare.c runtime/xv_upload_worker.c runtime/xv_draw_profile.c runtime/xv_render_profile.c
+SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_scene.c runtime/xv_ui_gxm.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_vertex_prepare.c runtime/xv_vertex_capture.c runtime/xv_upload_worker.c runtime/xv_draw_profile.c runtime/xv_render_profile.c
 BUILD     := build
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
@@ -240,7 +240,7 @@ ifneq ($(filter $(XV_PACKED_VERTEX_LAYOUT),0 1),$(XV_PACKED_VERTEX_LAYOUT))
 $(error XV_PACKED_VERTEX_LAYOUT must be 0 or 1)
 endif
 # All runtime owners of shader/prepare ABI, never generated guest units.
-PACKED_VERTEX_OBJECTS := $(addprefix $(BUILD)/runtime/,$(addsuffix .o,main xv_d3d xv_shader xv_ui_gxm xv_vertex_upload xv_vertex_prepare))
+PACKED_VERTEX_OBJECTS := $(addprefix $(BUILD)/runtime/,$(addsuffix .o,main xv_d3d xv_shader xv_ui_gxm xv_vertex_upload xv_vertex_prepare xv_vertex_capture))
 $(PACKED_VERTEX_OBJECTS): CFLAGS += -DXV_PACKED_VERTEX_LAYOUT=$(XV_PACKED_VERTEX_LAYOUT)
 .PHONY: force-packed-vertex-config
 force-packed-vertex-config:
@@ -250,6 +250,23 @@ $(BUILD)/packed-vertex.config: force-packed-vertex-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(PACKED_VERTEX_OBJECTS): $(BUILD)/packed-vertex.config runtime/xv_packed_vertex.h
+# Captured vertex preparation: startup-only trial, no benchmark mode.
+XV_VERTEX_CAPTURE_DEFAULT ?= 0
+ifneq ($(words $(XV_VERTEX_CAPTURE_DEFAULT)),1)
+$(error XV_VERTEX_CAPTURE_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_CAPTURE_DEFAULT),0 1),$(XV_VERTEX_CAPTURE_DEFAULT))
+$(error XV_VERTEX_CAPTURE_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_vertex_capture.o: CFLAGS += -DXV_VERTEX_CAPTURE_DEFAULT=$(XV_VERTEX_CAPTURE_DEFAULT)
+.PHONY: force-vertex-capture-config
+force-vertex-capture-config:
+$(BUILD)/vertex-capture.config: force-vertex-capture-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_VERTEX_CAPTURE_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/vertex-capture.config
 XV_VERTEX_BLOCK_LOADS_DEFAULT ?= 0
 ifneq ($(words $(XV_VERTEX_BLOCK_LOADS_DEFAULT)),1)
 $(error XV_VERTEX_BLOCK_LOADS_DEFAULT must be 0 or 1)
@@ -535,7 +552,7 @@ endif
 include games/$(GAME_PROFILE)/runtime.mk
 ifeq ($(RECOMP),1)
 CFLAGS    += -DXV_RUN_RECOMP -Irecomp -Irecomp/kernel
-SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_ui_gxm.c runtime/xv_boot.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_vertex_prepare.c runtime/xv_upload_worker.c runtime/xv_draw_profile.c runtime/xv_render_profile.c runtime/xv_settings.c dashboard/xv_dash.c
+SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_ui_gxm.c runtime/xv_boot.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_vertex_prepare.c runtime/xv_vertex_capture.c runtime/xv_upload_worker.c runtime/xv_draw_profile.c runtime/xv_render_profile.c runtime/xv_settings.c dashboard/xv_dash.c
 SRCS      += runtime/xv_remote.c runtime/xv_update.c runtime/xv_sha256.c
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)

@@ -21,6 +21,7 @@
 #include "xv_frame_slots.h"
 #include "xv_gpu_upload.h"
 #include "xv_vertex_upload.h"
+#include "xv_vertex_capture.h"
 #include "xv_render_profile.h"
 #include "xv_cpu.h"
 #include "xv_d3d.h"
@@ -1458,6 +1459,10 @@ void xd3d_r_present(unsigned frame, unsigned draws)
 }
 static void xd3d_r_present_inner(unsigned frame, unsigned draws)
 {
+    /* Settings/benchmark transitions may touch upload policy or attachments.
+     * Complete captured preparation before either transition, not just before
+     * the eventual EndFrame publication. No full-GPU wait is added. */
+    xv_vertex_capture_drain();
     xd3d_hist_small_check(frame, draws);
     (void)draws;
     extern void xv_present(void);
@@ -1504,6 +1509,7 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
 #endif
         xv_draw_profile_report(g_t_frames);
         xv_vertex_upload_report(g_t_frames);
+        xv_vertex_capture_report(g_t_frames);
         UI_LOG("[palette-cache] %u frames: %u reused / %u hashed (all 1024 bytes checked)\n",
             g_t_frames,g_palette_reused,g_palette_hashed);
         g_palette_reused=g_palette_hashed=0;

@@ -278,23 +278,23 @@ static int allocate(unsigned slot)
     pools[slot].gpu = g; pools[slot].cpu = c;
     return 1;
 }
-static const void *upload(unsigned slot, const void *source, unsigned bytes,
+static const void *upload(unsigned slot, const void *identity, const void *source, unsigned bytes,
                            unsigned stride, const xv_vertex_refs *refs
 #if XV_PACKED_VERTEX_LAYOUT
                            ,unsigned layout
 #endif
                            )
 {
-    if (slot >= XV_FRAME_SLOTS || !source || !bytes || bytes > XV_VERTEX_UPLOAD_BYTES) goto fail;
+    if (slot >= XV_FRAME_SLOTS || !identity || !source || !bytes || bytes > XV_VERTEX_UPLOAD_BYTES) goto fail;
     if (!pools[slot].started) {
         pools[slot].asynchronous=xv_vertex_worker_enabled() && xv_upload_worker_submit &&
             xv_upload_worker_wait && xv_upload_worker_shutdown;
         pools[slot].started=1; /* latch for this slot generation, including benchmark transitions */
     }
-    unsigned hash = ((uintptr_t)source >> 4) & (UPLOAD_BUCKETS - 1);
+    unsigned hash = ((uintptr_t)identity >> 4) & (UPLOAD_BUCKETS - 1);
     for (unsigned n = pools[slot].bucket[hash]; n; n = pools[slot].entries[n-1].next) {
         upload_entry *e = &pools[slot].entries[n-1];
-        if (e->source != source || e->bytes < bytes) continue;
+        if (e->source != identity || e->bytes < bytes) continue;
 #if XV_PACKED_VERTEX_LAYOUT
         if(e->layout!=layout)continue;
 #endif
@@ -399,7 +399,7 @@ static const void *upload(unsigned slot, const void *source, unsigned bytes,
         } else pools[slot].dirty_bytes+=aligned-bytes;
         pools[slot].valid_bytes = off + aligned;
     }
-    pools[slot].entries[n] = (upload_entry){.source=source,.bytes=bytes,.offset=off,.next=pools[slot].bucket[hash]};
+    pools[slot].entries[n] = (upload_entry){.source=identity,.bytes=bytes,.offset=off,.next=pools[slot].bucket[hash]};
 #if XV_PACKED_VERTEX_LAYOUT
     pools[slot].entries[n].layout=layout;
 #endif
@@ -412,14 +412,14 @@ fail:
     failures++; return NULL;
 }
 const void *xv_vertex_upload(unsigned slot, const void *source, unsigned bytes)
-{ return upload(slot, source, bytes, 0, NULL
+{ return upload(slot, source, source, bytes, 0, NULL
 #if XV_PACKED_VERTEX_LAYOUT
     ,0
 #endif
     ); }
 const void *xv_vertex_upload_referenced(unsigned slot, const void *source, unsigned bytes,
                                        unsigned stride, const xv_vertex_refs *refs)
-{ return upload(slot, source, bytes, stride, refs
+{ return upload(slot, source, source, bytes, stride, refs
 #if XV_PACKED_VERTEX_LAYOUT
     ,0
 #endif
@@ -431,9 +431,28 @@ const void *xv_vertex_upload_packed(unsigned slot,const void *source,unsigned ve
         failures++;return NULL;
     }
     packed_calls++;packed_vertices+=vertices;
-    return upload(slot,source,vertices*16,0,NULL,XV_PACKED_PREFIX16);
+    return upload(slot,source,source,vertices*16,0,NULL,XV_PACKED_PREFIX16);
 }
 #endif
+const void *xv_vertex_upload_snapshot(unsigned slot,const void *identity,
+    const void *snapshot,unsigned bytes,unsigned stride,const xv_vertex_refs *refs,unsigned packed)
+{
+#if XV_PACKED_VERTEX_LAYOUT
+    if(packed) {
+        if(packed!=XV_PACKED_PREFIX16 || stride!=32 || !bytes || bytes%32 ||
+           bytes/2>XV_VERTEX_UPLOAD_BYTES) { failures++;return NULL; }
+        packed_calls++;packed_vertices+=bytes/32;
+        return upload(slot,identity,snapshot,bytes/2,0,NULL,packed);
+    }
+#else
+    if(packed) { failures++;return NULL; }
+#endif
+    return upload(slot,identity,snapshot,bytes,stride,refs
+#if XV_PACKED_VERTEX_LAYOUT
+        ,0
+#endif
+    );
+}
 void xv_vertex_upload_reset(unsigned slot)
 {
     if (slot >= XV_FRAME_SLOTS) return;
