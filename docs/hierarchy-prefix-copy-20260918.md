@@ -43,3 +43,14 @@ copies are inlined). This is not a cycle estimate or proof of an FPS gain.
 Private original lift, baseline source, ARM build/comparison script and results
 are in `2026-09-18-unified-games/hierarchy-prefix/` under the local backup root.
 Hardware performance and heavy-gameplay acceptance remain unverified.
+
+## Candidate deployment
+
+`0.2.0-perf.2 / 13cb275` is built and boot-confirmed on the physical Vita in
+slot 0. Executable SHA-256:
+`becb62d1c95a05adcf3ea5fbfc6e21943517ce9a170e4f9e9cf594c91685871f`.
+Only `game-a.self` and `boot-game.txt` differ from perf.1's package. The shared
+asset contract, shaders and Halo 2 executable match. Packet timing remains
+enabled for attribution. Status, updater receipt and a dashboard screenshot
+agree on the new build; this is boot validation, not a gameplay or FPS result.
+The preceding perf.1 executable remains in slot 1 for rollback.
