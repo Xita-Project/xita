@@ -202,8 +202,16 @@ int xv_math_model_hierarchy(xctx *c)
     for(unsigned i=0;i<3;i++)if(overlap(output,matrix_bytes,constants[i],4)||
         overlap(stack,0x1f8u,constants[i],4)||overlap(scratch,32,constants[i],4))return decline(H_LAYOUT);
     float local_poses[MAX_NODES][8],matrices[MAX_NODES][13];
-    memcpy(local_poses,poses,pose_bytes);memcpy(matrices,output,matrix_bytes);
-    for(unsigned i=0;i<first;i++)if(!numeric(matrices[order[i]],13))return decline(H_NUMERIC);
+    memcpy(local_poses,poses,pose_bytes);
+    /* Only the completed prefix supplies old parent matrices. The validated
+     * worklist above requires every later parent to precede its child, so the
+     * remaining matrices are produced below before their first read. Avoid
+     * copying outputs that this batch will overwrite, under the same guard. */
+    for(unsigned i=0;i<first;i++) {
+        unsigned n=(unsigned)order[i];
+        memcpy(matrices[n],output[n],sizeof matrices[n]);
+        if(!numeric(matrices[n],13))return decline(H_NUMERIC);
+    }
     for(unsigned i=first;i<queued;i++)if(!numeric(local_poses[order[i]],8))return decline(H_NUMERIC);
     unsigned saved_fp=fp_read();if(!fp_allowed(saved_fp))return decline(H_FP);
     for(unsigned i=first;i<queued-1u;i++) {

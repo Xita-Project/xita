@@ -107,6 +107,17 @@ int main(int argc,char **argv)
         if(took) {assert(on);accepted++;assert(probe.r[0]==n-1&&probe.preempt==c.preempt-(int32_t)(n-first-1));}
         compare(c,k,1);
     }
+    /* Uncomputed matrices are deliberately unusable as inputs. Every parent
+     * must come from the completed prefix or an earlier freshly computed node,
+     * including shuffled IDs and invocations with a consumed prefix. */
+    for(unsigned shape=0;shape<3;shape++)for(unsigned first=1;first<=3;first++) {
+        xctx c=fixture(32,first,shape);
+        uint64_t prefix=0;
+        for(unsigned i=0;i<first;i++)prefix|=1ull<<X_M16(SP+0x178+2*i);
+        for(unsigned n=0;n<32;n++)if(!(prefix&(1ull<<n)))
+            for(unsigned j=0;j<13;j++)word(MATRICES+n*52+j*4,0x7f800123u);
+        compare(c,192+shape*3+first-1,1);
+    }
     for(unsigned k=0;k<12;k++) {
         xctx c=fixture(8,1,0);
         switch(k) {
