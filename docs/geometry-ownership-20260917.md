@@ -90,8 +90,8 @@ gameplay correctness preserved.
 
 ## Runtime trace matching
 
-The paired `trace-draw` command now queues one recording frame without invoking
-the benchmark. It is consumed by the recording owner at a Present/Swap boundary;
+The paired `trace-draw` command now queues one frame of vertex/index range
+records without invoking the benchmark. It is consumed by the recording owner at a Present/Swap boundary;
 the network thread does not touch guest state. Normal and sanitizer checks cover
 the production HTTP service and actual frame-selection functions, including
 manual-trace overlap, counter wrap and an absent networking hook.
@@ -109,11 +109,61 @@ to guess. A match requires the resource address, physical Data address, stride
 and the complete requested extent to agree. The report separates repeated
 requested spans from their union and leaves every unmatched source unclassified.
 Matching provenance alone is not evidence of unchanged bytes. Trace timing is
-excluded because diagnostic logging/hashing and packed-layout admission differ
-from ordinary frames.
+excluded because recording the observations adds work.
 
-The cumulative diagnostic package preserves the preceding build flags and all
-1,586 non-runtime/boot-record package members. Only the D3D HLE and remote-service
-objects changed; 92 other objects are byte-identical. Hardware installation was
-not attempted when the Vita stopped responding, so remote trace operation on
-hardware and its resulting inventory matches remain pending.
+The first hardware capture used the full histogram and was followed by a match
+networking error. Full diagnostics include vertex hashing, transformed-position
+dumps and a packed-layout bypass, which are unnecessary for source matching.
+The remote request now selects only range records; manual full histograms retain
+their original behavior. Tests verify that remote capture never enables the full
+histogram, including repeated requests and frame-counter wrap.
+
+The replacement was installed and its running executable hash verified on the
+Vita. Two range captures completed, followed by camera movement and assault-rifle
+fire in the same match. Both capture windows and their mixed reporting windows
+are excluded from performance comparisons. The package retains all 25 cumulative
+build selections and all 1,586 non-runtime/boot-record members. Three objects
+changed for tracing; 91 other objects are byte-identical to the preceding
+cumulative gameplay build.
+
+## Model resource mapping
+
+`tools/audit_halo_model_geometry.py` checks the separate model resource table
+against model geometry parts, including the complete vertex payload extent.
+All 24 owned maps passed: 10,862 resource/part pairs and 76,364,000 vertex bytes
+across the collection. Each resource has one part; every observed layout is
+type 5, stride 32, with zero vertex offset. Seven corrupted pointer/count/layout
+cases were rejected. These are loaded-model inventories, not proof that the
+payload cannot change after loading.
+
+The draw matcher now classifies both these model resources and the selected
+BSP. Unknown sources remain unclassified. Resource, Data, stride and complete
+extent must match; four deliberate mismatches were rejected. Halo's compressed
+model vertices can be transformed/skinned using shader constants without
+changing these source records; the inventory alone does not establish which
+runtime writers exist.
+
+## First hardware range results
+
+These are two Blood Gulch views in one freshly launched solo match at native
+resolution with existing graphics settings. Counts include repeated requests
+before cache reuse; they are not transferred bytes, saved time or GPU draw counts.
+Immediate draws without a source stream are excluded from the byte totals.
+
+| View | Traced draw records | BSP requested bytes | Model requested bytes | Unclassified bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Facing the base | 237 | 659,664 | 415,328 | 2,016 |
+| Looking along the valley | 224 | 525,440 | 427,104 | 1,312 |
+
+For the base view, the union of requested BSP ranges is 179,936 bytes; repeated
+passes request 659,664 bytes from those resources. The valley union is 154,200
+bytes versus 525,440 requested. The model unions are 313,536 and 294,464 bytes.
+Over 99.8% of requested bytes matched map-loaded resources in these two samples.
+Existing exact validation already reuses many uploads, so this finding identifies
+repeated validation as a candidate, not new copy savings or an FPS gain.
+
+Next, audit runtime writers and lifetime boundaries for both families. A
+generation-owned native geometry cache must account for map/BSP replacement,
+retained writable pointers and GPU retirement before it can bypass validation.
+Keep the current owned snapshots for unproved sources. Stable 20 FPS remains the
+goal; these diagnostic changes do not establish it.

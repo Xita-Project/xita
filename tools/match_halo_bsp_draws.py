@@ -13,9 +13,11 @@ from pathlib import Path
 
 from analyze_index_ranges import analyze
 from audit_halo_bsp_geometry import audit
+from audit_halo_model_geometry import audit_models
+from recompiler.halo_map import HaloMap
 
 
-def match_frame(bsp, frame):
+def match_frame(bsp, frame, model_streams=()):
     by_resource = {}
     for material in bsp['materials']:
         for stream in material['streams']:
@@ -23,10 +25,16 @@ def match_frame(bsp, frame):
             if resource in by_resource:
                 raise ValueError('Ambiguous BSP resource inventory')
             by_resource[resource] = stream
+    for stream in model_streams:
+        if stream['resource'] in by_resource:
+            raise ValueError('Ambiguous model/BSP resource inventory')
+        by_resource[stream['resource']] = stream
     counts = Counter()
     spans = {}
     unmatched = {}
     matched_draws = set()
+    model_draws = set()
+    model_spans = {}
     for draw in frame['observations']:
         for stream in draw['streams']:
             size = stream['vertices'] * stream['stride']
@@ -48,17 +56,22 @@ def match_frame(bsp, frame):
             kind = expected['kind']
             counts[kind + '_streams'] += 1
             counts[kind + '_requested_bytes'] += size
-            matched_draws.add(draw['cmd'])
-            spans.setdefault(stream['vb'], []).append((start, start + size))
-    unique_bytes = 0
-    for ranges in spans.values():
-        end = 0
-        for lo, hi in sorted(ranges):
-            unique_bytes += max(0, hi - max(lo, end))
-            end = max(end, hi)
+            (model_draws if kind == 'model' else matched_draws).add(draw['cmd'])
+            target = model_spans if kind == 'model' else spans
+            target.setdefault(stream['vb'], []).append((start, start + size))
+    def union_bytes(source):
+        total = 0
+        for ranges in source.values():
+            end = 0
+            for lo, hi in sorted(ranges):
+                total += max(0, hi - max(lo, end))
+                end = max(end, hi)
+        return total
     return dict(frame=frame['frame'], traced_draws=frame['draws'],
         bsp_matched_draws=len(matched_draws), bsp_matched_resources=len(spans),
-        bsp_unique_requested_span_bytes=unique_bytes, counts=dict(counts),
+        bsp_unique_requested_span_bytes=union_bytes(spans),
+        model_matched_draws=len(model_draws), model_matched_resources=len(model_spans),
+        model_unique_requested_span_bytes=union_bytes(model_spans), counts=dict(counts),
         unmatched=sorted(unmatched.values(), key=lambda row: -row['requested_bytes']))
 
 
@@ -76,7 +89,8 @@ def main():
     candidates = [b for b in inventory['bsps'] if b['index'] == index]
     if len(candidates) != 1:
         parser.error('BSP index not present in this map')
-    frames = [match_frame(candidates[0], frame)
+    models = audit_models(HaloMap(str(args.map)))
+    frames = [match_frame(candidates[0], frame, models['streams'])
               for frame in analyze(args.log.read_text(errors='replace'))['frames']]
     result = dict(scope=__doc__.strip(), map=inventory['map'], map_sha256=inventory['sha256'],
                   bsp=index, frames=frames)
