@@ -252,16 +252,18 @@ static void partial_failure_and_fallback(void)
 }
 static void gpu_copy_lifetime(void)
 {
-    static unsigned char src[65536];output slots[3]={0};
+    static unsigned char src[65536];output slots[3]={0},duplicates[3]={0};
     xv_vertex_worker_override(1);__atomic_store_n(&pause_copy,1,__ATOMIC_RELEASE);
     for(unsigned slot=0;slot<3;slot++) {
         memset(src,slot+9,sizeof src);assert(capture(slot,src,sizeof src,32,NULL,0,&slots[slot]));
+        assert(capture(slot,src,sizeof src,32,NULL,0,&duplicates[slot]));
         xv_vertex_capture_drain();xv_vertex_upload_seal(slot);
     }
     wait_parked(&parked_copy);memset(src,0,sizeof src);
     __atomic_store_n(&pause_copy,0,__ATOMIC_RELEASE);
     for(unsigned slot=0;slot<3;slot++) {
         xv_vertex_upload_wait(slot);assert(slots[slot].ok);
+        assert(duplicates[slot].ok && duplicates[slot].result[0]==slots[slot].result[0]);
         for(unsigned i=0;i<sizeof src;i++)assert(slots[slot].result[0][i]==slot+9);
     }
     cleanup();
@@ -307,7 +309,7 @@ static void compact_pressure_and_retirement(void)
     __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);unsigned pressure=cap_pressure;
     assert(capture(0,guest,XV_VERTEX_CAPTURE_BYTES,32,NULL,XV_PACKED_PREFIX16,&a));wait_parked(&parked_capture);
     assert(capture(0,guest,XV_VERTEX_CAPTURE_BYTES,32,NULL,XV_PACKED_PREFIX16,&b));
-    assert(cap_used==XV_VERTEX_CAPTURE_BYTES && cap_pressure==pressure);
+    assert(cap_used==XV_VERTEX_CAPTURE_BYTES/(XV_VERTEX_CAPTURE_REUSE?2:1) && cap_pressure==pressure);
     memset(guest,0xa9,XV_VERTEX_CAPTURE_BYTES);
     __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
     assert(a.ok&&b.ok&&a.result[0]==b.result[0]);
@@ -330,6 +332,90 @@ static void compact_pressure_and_retirement(void)
     unsetenv("XV_VERTEX_CAPTURE_PACKED");
 }
 #endif
+#if XV_VERTEX_CAPTURE_REUSE
+static void capture_reuse_versions(void)
+{
+    unsigned char *guest=mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0);
+    assert(guest!=MAP_FAILED);memset(guest,0x13,4096);
+    output a={0},b={0},changed={0},restored={0},other_slot={0},other_stride={0};
+    unsigned hits=cap_reuse_hits,prepared=cap_reuse_prepared;
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    assert(capture(0,guest,512,16,NULL,0,&a));wait_parked(&parked_capture);
+    assert(capture(0,guest,512,16,NULL,0,&b));assert(cap_used==512);
+    guest[511]^=1;assert(capture(0,guest,512,16,NULL,0,&changed));
+    guest[511]^=1;assert(capture(0,guest,512,16,NULL,0,&restored));
+    /* A returned source version is deliberately not searched beyond newest. */
+    assert(cap_used==1536 && cap_reuse_hits==hits+1);
+    assert(capture(1,guest,512,16,NULL,0,&other_slot));
+    assert(capture(0,guest,512,8,NULL,0,&other_stride));assert(cap_used==2560);
+    assert(!mprotect(guest,4096,PROT_NONE));
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);join(1);
+    assert(a.ok&&b.ok&&changed.ok&&restored.ok&&other_slot.ok&&other_stride.ok);
+    assert(a.result[0]==b.result[0] && a.result[0]!=changed.result[0] && a.result[0]==restored.result[0]);
+    assert(a.result[0]!=other_slot.result[0] && other_slot.result[0][511]==0x13);
+    assert(a.result[0][511]==0x13 && changed.result[0][511]==0x12);
+    assert(cap_reuse_prepared==prepared+1 && cap_entry_count==0);
+    assert(!munmap(guest,4096));cleanup();
+}
+static void capture_reuse_sparse(void)
+{
+    unsigned char guest[32768];memset(guest,0x33,sizeof guest);
+    xv_vertex_refs refs;xv_vertex_refs_clear(&refs);xv_vertex_refs_add(&refs,0);xv_vertex_refs_add(&refs,1023);
+    output a={0},b={0},c={0},d={0};
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    assert(capture(0,guest,sizeof guest,32,&refs,0,&a));wait_parked(&parked_capture);
+    assert(capture(0,guest,sizeof guest,32,&refs,0,&b));assert(cap_used==65536 && !cap_entry_count);
+    memset(guest+512*32,0x91,32);xv_vertex_refs_add(&refs,512);
+    assert(capture(0,guest,sizeof guest,32,&refs,0,&c));
+    /* Full validation after sparse reuse must not reuse a stale hole. */
+    assert(capture(0,guest,sizeof guest,32,NULL,0,&d));
+    memset(guest,0xef,sizeof guest);memset(&refs,0,sizeof refs);
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
+    assert(a.ok&&b.ok&&c.ok&&d.ok && a.result[0]==b.result[0]);
+    assert(a.result[0][512*32]==0x33 && c.result[0][512*32]==0x91 && d.result[0][512*32]==0x91);
+    cleanup();
+}
+static void wait_prepared(void)
+{
+    uint64_t end=sceKernelGetProcessTimeWide()+2000000;
+    unsigned target=__atomic_load_n(&cap_submitted,__ATOMIC_RELAXED);
+    while(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)!=target && sceKernelGetProcessTimeWide()<end)usleep(100);
+    assert(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)==target);
+}
+static void capture_reuse_capacity(void)
+{
+    unsigned char guest[CAPTURE_ENTRIES+2][32];output outputs[CAPTURE_ENTRIES+3]={0};
+    for(unsigned i=0;i<CAPTURE_ENTRIES+2;i++) {
+        memset(guest[i],i,sizeof guest[i]);assert(capture(0,guest[i],32,4,NULL,0,&outputs[i]));
+        wait_prepared(); /* Complete without resetting the private arena. */
+    }
+    assert(cap_entry_count==CAPTURE_ENTRIES);
+    unsigned used=cap_used,prepared=cap_reuse_prepared;
+    assert(capture(0,guest[0],32,4,NULL,0,&outputs[CAPTURE_ENTRIES+2]));
+    assert(cap_used==used);join(0);
+    assert(cap_reuse_prepared==prepared+1);
+    for(unsigned i=0;i<CAPTURE_ENTRIES+2;i++) {
+        assert(outputs[i].ok&&outputs[i].callbacks==1);
+        for(unsigned j=0;j<32;j++)assert(outputs[i].result[0][j]==(unsigned char)i);
+    }
+    assert(outputs[0].result[0]==outputs[CAPTURE_ENTRIES+2].result[0]);cleanup();
+    setenv("XV_VERTEX_CAPTURE_REUSE","0",1);
+    output a={0},b={0};assert(capture(0,guest[0],32,4,NULL,0,&a));
+    assert(capture(0,guest[0],32,4,NULL,0,&b));assert(cap_used==64 && !cap_entry_count);
+    join(0);assert(a.ok&&b.ok);cleanup();unsetenv("XV_VERTEX_CAPTURE_REUSE");
+}
+static void capture_reuse_failure(void)
+{
+    unsigned char guest[32]={0};output a={0},b={0};
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    __atomic_store_n(&fail_gpu_alloc,1,__ATOMIC_RELAXED);
+    assert(capture(0,guest,32,4,NULL,0,&a));wait_parked(&parked_capture);
+    assert(capture(0,guest,32,4,NULL,0,&b));assert(cap_used==32);
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
+    assert(!a.ok&&!a.result[0]&&a.callbacks==1&&b.ok&&b.result[0]&&b.callbacks==1);
+    cleanup();
+}
+#endif
 int main(void)
 {
     owner=pthread_self();setenv("XV_VERTEX_CAPTURE","1",1);
@@ -339,6 +425,10 @@ int main(void)
 #if XV_VERTEX_CAPTURE_PACKED
     compact_versions();compact_pressure_and_retirement();
     puts("PASS: compact staging halves payload; tail/prefix mutations, unmapped input, shorter reuse, raw/packed cache interoperation, nine retired generations, invalid requests and startup disable");
+#endif
+#if XV_VERTEX_CAPTURE_REUSE
+    capture_reuse_versions();capture_reuse_sparse();capture_reuse_capacity();capture_reuse_failure();
+    puts("PASS: exact snapshot/result reuse, mutations and return-to-old-version, unmapping, slot/stride separation, sparse-to-full validation, job wrap and full metadata cache, startup disable and allocation retry");
 #endif
     puts("PASS: private inputs, rewritten aliases, mask ownership, packed/raw identity, arena/queue pressure, ticket wrap, partial/allocation/thread/notification failures, fallback drains, disable and three GPU-copy slots");
     return 0;

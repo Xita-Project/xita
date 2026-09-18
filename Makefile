@@ -302,6 +302,22 @@ $(BUILD)/vertex-capture.config: force-vertex-capture-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/vertex-capture.config
+XV_VERTEX_CAPTURE_REUSE ?= 0
+ifneq ($(words $(XV_VERTEX_CAPTURE_REUSE)),1)
+$(error XV_VERTEX_CAPTURE_REUSE must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_CAPTURE_REUSE),0 1),$(XV_VERTEX_CAPTURE_REUSE))
+$(error XV_VERTEX_CAPTURE_REUSE must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_vertex_capture.o: CFLAGS += -DXV_VERTEX_CAPTURE_REUSE=$(XV_VERTEX_CAPTURE_REUSE)
+.PHONY: force-capture-reuse-config
+force-capture-reuse-config:
+$(BUILD)/capture-reuse.config: force-capture-reuse-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_VERTEX_CAPTURE_REUSE)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/capture-reuse.config
 XV_VERTEX_CAPTURE_PACKED ?= 0
 ifneq ($(words $(XV_VERTEX_CAPTURE_PACKED)),1)
 $(error XV_VERTEX_CAPTURE_PACKED must be 0 or 1)

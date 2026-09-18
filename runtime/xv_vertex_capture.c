@@ -21,6 +21,12 @@
 #define XV_VERTEX_CAPTURE_BYTES (2u*1024u*1024u)
 #endif
 #define CAPTURE_JOBS 32u
+#ifndef XV_VERTEX_CAPTURE_REUSE
+#define XV_VERTEX_CAPTURE_REUSE 0
+#endif
+#if XV_VERTEX_CAPTURE_REUSE != 0 && XV_VERTEX_CAPTURE_REUSE != 1
+#error XV_VERTEX_CAPTURE_REUSE must be 0 or 1
+#endif
 typedef struct {
     xv_vertex_prepare_batch batch;
     const void *identity[XV_VERTEX_PREPARE_STREAMS];
@@ -28,6 +34,9 @@ typedef struct {
     xv_vertex_refs refs[XV_VERTEX_PREPARE_STREAMS];
 #if XV_VERTEX_CAPTURE_PACKED
     unsigned compact[XV_VERTEX_PREPARE_STREAMS];
+#endif
+#if XV_VERTEX_CAPTURE_REUSE
+    unsigned reuse[XV_VERTEX_PREPARE_STREAMS];
 #endif
     void (*complete)(void *,int);
     void *context;
@@ -51,11 +60,78 @@ static int cap_compact(const xv_vertex_prepare_stream *s)
 }
 #endif
 
+#if XV_VERTEX_CAPTURE_REUSE
+#define CAPTURE_ENTRIES 512u
+#define CAPTURE_BUCKETS 256u
+/* Owner-only keys, append-only until drain. The worker owns result[]; it
+ * neither reads guest memory nor depends on a reusable queue-job address. */
+typedef struct {
+    const void *identity;
+    unsigned offset,bytes,stride,packed,compact,slot,next;
+} capture_entry;
+static capture_entry cap_entries[CAPTURE_ENTRIES];
+static const void *cap_results[CAPTURE_ENTRIES];
+static unsigned cap_buckets[CAPTURE_BUCKETS],cap_entry_count;
+static int cap_reuse_enabled=-1;
+static unsigned cap_reuse_checks,cap_reuse_hits,cap_reuse_prepared;
+static uint64_t cap_reuse_bytes;
+static void cap_reuse_reset(void)
+{ cap_entry_count=0;memset(cap_buckets,0,sizeof cap_buckets); }
+static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,unsigned packed,unsigned compact)
+{
+    if(cap_reuse_enabled<0)cap_reuse_enabled=xv_quality_int("XV_VERTEX_CAPTURE_REUSE",1,0,1);
+    /* Sparse uploads may intentionally retain stale unfetched records. Do not
+     * reuse their result for another mask, even when the captured bytes match. */
+    if(!cap_reuse_enabled || xv_vertex_refs_sparse(s->refs,s->bytes,s->stride))return 0;
+#if XV_PACKED_VERTEX_LAYOUT
+    if(packed && packed!=XV_PACKED_PREFIX16)return 0;
+#endif
+    unsigned bucket=((uintptr_t)s->source>>4)&(CAPTURE_BUCKETS-1);
+    for(unsigned id=cap_buckets[bucket];id;id=cap_entries[id-1].next) {
+        const capture_entry *e=&cap_entries[id-1];
+        if(e->identity!=s->source || e->bytes!=s->bytes || e->stride!=s->stride ||
+           e->packed!=packed || e->compact!=compact || e->slot!=slot)continue;
+        cap_reuse_checks++;
+        int equal;
+#if XV_VERTEX_CAPTURE_PACKED
+        if(compact)equal=xv_packed_equal(s->source,cap_arena+e->offset,s->bytes/32);
+        else
+#endif
+        equal=!memcmp(s->source,cap_arena+e->offset,s->bytes);
+        if(equal) {
+            cap_reuse_hits++;cap_reuse_bytes+=compact?s->bytes/2:s->bytes;
+            return id;
+        }
+        /* Only compare the newest version of this exact key. Repeatedly
+         * rewritten effects cannot scan every earlier version in the arena. */
+        break;
+    }
+    return 0;
+}
+static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned slot,unsigned packed,unsigned compact)
+{
+    if(!cap_reuse_enabled || xv_vertex_refs_sparse(s->refs,s->bytes,s->stride) ||
+       cap_entry_count==CAPTURE_ENTRIES)return 0;
+#if XV_PACKED_VERTEX_LAYOUT
+    if(packed && packed!=XV_PACKED_PREFIX16)return 0;
+#endif
+    unsigned bucket=((uintptr_t)s->source>>4)&(CAPTURE_BUCKETS-1),id=++cap_entry_count;
+    cap_entries[id-1]=(capture_entry){s->source,cap_used,s->bytes,s->stride,packed,compact,slot,cap_buckets[bucket]};
+    cap_results[id-1]=NULL;cap_buckets[bucket]=id;return id;
+}
+#endif
+
 static void cap_execute(capture_job *job)
 {
     xv_vertex_prepare_batch *b=&job->batch;b->ok=0;
     for(unsigned i=0;i<b->count;i++) {
         xv_vertex_prepare_stream *s=&b->streams[i];unsigned packed=0;
+#if XV_VERTEX_CAPTURE_REUSE
+        unsigned id=job->reuse[i];
+        if(id && cap_results[id-1]) {
+            s->result=cap_results[id-1];cap_reuse_prepared++;continue;
+        }
+#endif
 #if XV_PACKED_VERTEX_LAYOUT
         packed=s->packed;
 #endif
@@ -67,6 +143,9 @@ static void cap_execute(capture_job *job)
         s->result=xv_vertex_upload_snapshot(b->slot,job->identity[i],s->source,
             s->bytes,s->stride,s->refs,packed);
         if(!s->result)return;
+#if XV_VERTEX_CAPTURE_REUSE
+        if(id)cap_results[id-1]=s->result;
+#endif
     }
     b->ok=1;
 }
@@ -134,7 +213,13 @@ static void cap_collect(void)
 void xv_vertex_capture_drain(void)
 {
     unsigned submitted=__atomic_load_n(&cap_submitted,__ATOMIC_RELAXED);
-    if(cap_retired==submitted) { cap_used=0;return; }
+    if(cap_retired==submitted) {
+        cap_used=0;
+#if XV_VERTEX_CAPTURE_REUSE
+        cap_reuse_reset();
+#endif
+        return;
+    }
     uint64_t start=sceKernelGetProcessTimeWide();cap_drains++;
     while(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)!=submitted) {
         unsigned bits;SceUInt timeout=1000;
@@ -142,6 +227,9 @@ void xv_vertex_capture_drain(void)
             sceKernelDelayThread(100);
     }
     cap_collect();cap_used=0;cap_join_us+=sceKernelGetProcessTimeWide()-start;
+#if XV_VERTEX_CAPTURE_REUSE
+    cap_reuse_reset();
+#endif
 }
 int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     const void ***targets,void (*complete)(void *,int),void *context)
@@ -171,10 +259,28 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     uint64_t start=sceKernelGetProcessTimeWide();
     capture_job *j=&cap_jobs[submitted&(CAPTURE_JOBS-1)];j->batch=*batch;
     j->complete=complete;j->context=context;
+    unsigned written=0;
     for(unsigned i=0;i<batch->count;i++) {
         xv_vertex_prepare_stream *s=&j->batch.streams[i];
         j->identity[i]=s->source;j->targets[i]=targets[i];
         unsigned captured=s->bytes;
+#if XV_VERTEX_CAPTURE_REUSE
+        unsigned packed=0,compact=0;
+#if XV_PACKED_VERTEX_LAYOUT
+        packed=s->packed;
+#endif
+#if XV_VERTEX_CAPTURE_PACKED
+        compact=cap_compact(s);j->compact[i]=compact;
+#endif
+        unsigned id=cap_reuse_find(s,batch->slot,packed,compact);
+        if(id) {
+            j->reuse[i]=id;s->source=cap_arena+cap_entries[id-1].offset;s->result=NULL;
+            /* Non-sparse references are semantically unused by upload(). */
+            s->refs=NULL;
+            continue;
+        }
+        j->reuse[i]=cap_reuse_add(s,batch->slot,packed,compact);
+#endif
 #if XV_VERTEX_CAPTURE_PACKED
         j->compact[i]=cap_compact(s);
         if(j->compact[i]) {
@@ -185,9 +291,10 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         memcpy(cap_arena+cap_used,s->source,captured);
         s->source=cap_arena+cap_used;s->result=NULL;
         cap_used+=(captured+15u)&~15u;
+        written+=(captured+15u)&~15u;
         if(s->refs) { j->refs[i]=*s->refs;s->refs=&j->refs[i]; }
     }
-    j->batch.ok=0;cap_jobs_total++;cap_bytes+=required;
+    j->batch.ok=0;cap_jobs_total++;cap_bytes+=written;
     unsigned pending=submitted+1-cap_retired;if(pending>cap_max_pending)cap_max_pending=pending;
     __atomic_store_n(&cap_submitted,submitted+1,__ATOMIC_RELEASE);
     sceKernelSetEventFlag(cap_wake,1);
@@ -208,6 +315,9 @@ void xv_vertex_capture_shutdown(void)
 #if XV_VERTEX_CAPTURE_PACKED
     cap_compact_enabled=-1;
 #endif
+#if XV_VERTEX_CAPTURE_REUSE
+    cap_reuse_enabled=-1;
+#endif
 }
 void xv_vertex_capture_report(unsigned frames)
 {
@@ -218,6 +328,11 @@ void xv_vertex_capture_report(unsigned frames)
         cap_drains,cap_pressure,cap_max_pending,cap_failures);
     cap_jobs_total=cap_drains=cap_pressure=cap_max_pending=cap_failures=0;
     cap_bytes=cap_capture_us=cap_worker_us=cap_join_us=0;
+#if XV_VERTEX_CAPTURE_REUSE
+    if(cap_reuse_checks)xv_logf("[vertex-capture-reuse] %u frames: %u checks %u exact hits; %llu KiB staging writes avoided; %u worker preparations reused\n",
+        frames,cap_reuse_checks,cap_reuse_hits,(unsigned long long)(cap_reuse_bytes>>10),cap_reuse_prepared);
+    cap_reuse_checks=cap_reuse_hits=cap_reuse_prepared=0;cap_reuse_bytes=0;
+#endif
 #if XV_VERTEX_CAPTURE_PACKED
     if(cap_compact_streams)xv_logf("[vertex-capture-packed] %u frames: %u streams, %llu KiB staging writes avoided; exact 16-byte shader inputs\n",
         frames,cap_compact_streams,(unsigned long long)(cap_compact_saved>>10));

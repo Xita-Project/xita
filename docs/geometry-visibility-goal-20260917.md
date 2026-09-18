@@ -115,3 +115,10 @@ boundaries and 58 original x86 pool cases. Retained vertex pointers and direct
 index Data access rule out lock-only invalidation. Continue tracing the separate
 map-loaded payload writers before removing repeated checks; the existing
 qualified cumulative package is unchanged.
+
+The [exact capture reuse candidate](vertex-capture-reuse-20260918.md) now avoids
+duplicate staging and preparation inside a drained recording interval, while
+checking current bytes on every reuse. Sparse uploads remain independent.
+Production memory/race and VitaSDK build checks pass. This is a cumulative
+candidate alongside visibility work; it does not authorize cross-frame caching
+or establish the hardware target.
