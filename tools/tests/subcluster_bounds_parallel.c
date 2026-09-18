@@ -1,5 +1,5 @@
 /* Pure copied-input experiment; not the Vita production queue or admission. */
-#include "../experiments/subcluster_bounds.h"
+#include "../../recomp/kernel/xk_subcluster_math.h"
 #include <assert.h>
 #include <fenv.h>
 #include <pthread.h>

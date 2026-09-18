@@ -161,6 +161,13 @@ XV_SCENE_BUCKET0_DETAIL ?= 0
 XV_NATIVE_VISIBILITY_PORTAL_LOOP ?= 0
 XV_CLIP_DISTANCE_SPANS ?= 0
 XV_TYPED_PORTAL_POLYGON ?= 0
+XV_TYPED_SUBCLUSTER ?= 0
+ifneq ($(words $(XV_TYPED_SUBCLUSTER)),1)
+$(error XV_TYPED_SUBCLUSTER must be 0 or 1)
+endif
+ifneq ($(filter $(XV_TYPED_SUBCLUSTER),0 1),$(XV_TYPED_SUBCLUSTER))
+$(error XV_TYPED_SUBCLUSTER must be 0 or 1)
+endif
 ifneq ($(words $(XV_TYPED_PORTAL_POLYGON)),1)
 $(error XV_TYPED_PORTAL_POLYGON must be 0 or 1)
 endif
@@ -460,6 +467,11 @@ endif
 ifeq ($(XV_TYPED_PORTAL_POLYGON),1)
 ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_NATIVE_CLIP_REGION):$(XV_LIGHT_QUERY_CENSUS):$(XV_EXPERIMENTAL_OBJECT_JOBS):$(XV_NATIVE_VISIBILITY_PORTAL_LOOP),1:halo_ce_3925:1:1:1:1)
 $(error XV_TYPED_PORTAL_POLYGON requires the Halo CE native clip, portal loop and owner/census backend)
+endif
+endif
+ifeq ($(XV_TYPED_SUBCLUSTER),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_NATIVE_CLIP_REGION):$(XV_LIGHT_QUERY_CENSUS):$(XV_EXPERIMENTAL_OBJECT_JOBS),1:halo_ce_3925:1:1:1)
+$(error XV_TYPED_SUBCLUSTER requires Halo CE, native clipping and the owner/census backend)
 endif
 endif
 ifeq ($(XV_NATIVE_VISIBILITY_PORTAL_LOOP),1)
@@ -945,6 +957,28 @@ $(TYPED_PORTAL_OBJS) $(RECOMP_BUILD)/kernel/xk_clip_region_control.o: RECOMP_CFL
 $(TYPED_PORTAL_OBJS) $(RECOMP_BUILD)/kernel/xk_clip_region_control.o $(RECOMP_BUILD)/kernel/xk_portal_polygon.o $(RECOMP_BUILD)/kernel/xk_portal_polygon_math.o: $(RECOMP_BUILD)/typed-portal.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/typed-portal.config
 $(RECOMP_BUILD)/kernel/xk_portal_polygon_math.o: RECOMP_CFLAGS += -ffp-contract=off -frounding-math
+# Subcluster classification and ordered publication use one pinned caller.
+SUBCLUSTER_SRCS := $(shell rg -l 'XV_TYPED_SUBCLUSTER_SCOPE:' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+SUBCLUSTER_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(SUBCLUSTER_SRCS))
+ifeq ($(XV_TYPED_SUBCLUSTER),1)
+ifneq ($(words $(SUBCLUSTER_SRCS)),1)
+$(error XV_TYPED_SUBCLUSTER requires one selectively prepared caller unit)
+endif
+ifneq ($(words $(shell rg -o 'XV_TYPED_SUBCLUSTER_SCOPE:' $(SUBCLUSTER_SRCS) 2>/dev/null)),1)
+$(error XV_TYPED_SUBCLUSTER requires exactly one scope marker)
+endif
+endif
+.PHONY: force-subcluster-config
+force-subcluster-config:
+$(RECOMP_BUILD)/subcluster.config: force-subcluster-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_TYPED_SUBCLUSTER)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(SUBCLUSTER_OBJS) $(RECOMP_BUILD)/kernel/xk_clip_region_control.o: RECOMP_CFLAGS += -DXV_TYPED_SUBCLUSTER=$(XV_TYPED_SUBCLUSTER)
+$(SUBCLUSTER_OBJS) $(RECOMP_BUILD)/kernel/xk_clip_region_control.o $(RECOMP_BUILD)/kernel/xk_subcluster.o $(RECOMP_BUILD)/kernel/xk_subcluster_math.o: $(RECOMP_BUILD)/subcluster.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/subcluster.config
+$(RECOMP_BUILD)/kernel/xk_subcluster_math.o: RECOMP_CFLAGS += -ffp-contract=off -frounding-math
 ifeq ($(XV_NATIVE_BSP_SPHERE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_BSP_SPHERE
 endif

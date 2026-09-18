@@ -2,10 +2,12 @@
 
 Blood Gulch and most campaign BSPs use `52E10` to test subcluster bounds and
 publish visible triangle bits. The new experiment in
-`tools/experiments/subcluster_bounds.c` replaces the expensive emulated
-bounding-box calculation with a data-only operation. It is **not linked into
-the game**. The preceding guarded portal-clipping runtime `639b47fd` remains
-packaged and awaiting hardware connection; this experiment has not changed it.
+`recomp/kernel/xk_subcluster_math.c` replaces the expensive emulated
+bounding-box calculation with a data-only operation. This document records the
+prototype qualification before runtime integration. The source has since moved
+from `tools/experiments/subcluster_bounds.c`; the
+[guarded runtime integration](subcluster-integration-20260918.md) describes the
+newer cumulative build and its outstanding hardware verification.
 
 ## Algorithm and boundary
 
@@ -70,7 +72,7 @@ These are instruction counts, not Vita cycles, frame times or FPS gains. The
 older native-bounds experiment retained much more emulated state and showed no
 established hardware benefit; its result does not validate this new algorithm.
 
-## Runtime integration still required
+## Requirements identified by the prototype
 
 1. Admit only the pinned caller on the registered owner, with diagnostics,
    mapping validity, finite/ordered inputs, constants and physical aliases
@@ -89,6 +91,10 @@ established hardware benefit; its result does not validate this new algorithm.
 4. Qualify the actual queue, failure paths and runtime guards, then integrate
    with the cumulative build. Verify a fresh runtime hash and ordinary hardware
    valley/campaign gameplay at standard settings before attributing any gain.
+
+The later integration qualifies owner admission and the enclosing visibility
+consumer. Actual worker scheduling remains a separate next step; the prototype
+parallel test does not establish safe concurrent engine execution.
 
 Private receipts: `direct-cluster-query/subcluster-bounds-20260918`, including
 `contract.json`, `arm-with-union/result.json`, `owned/result.json`,

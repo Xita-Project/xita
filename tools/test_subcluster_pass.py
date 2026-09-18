@@ -41,6 +41,8 @@ def build(stage,qualified,out,xbe):
     (out/'build.json').write_text(json.dumps(proof,indent=2)+'\n')
 
 class Machine(bounds.Machine):
+    def prepare(self,memory,context,spec):
+        pass
     def run_pass(self,spec,name):
         memory=bytearray(SIZE);u=self.uc
         def put(a,fmt,*v):struct.pack_into('<'+fmt,memory,a,*v)
@@ -67,8 +69,9 @@ class Machine(bounds.Machine):
             struct.pack_into('<I',c,i*4,0x15150000+i)
             struct.pack_into('<d',c,self.layout['st']+i*8,i+.375)
         struct.pack_into('<I',c,16,sp)
-        for key,v in [('fsp',3),('preempt',100000),('f_kind',3),('f_bits',32)]:struct.pack_into('<I',c,self.layout[key],v)
+        for key,v in [('fsp',3),('preempt',spec.get('budget',100000)),('f_kind',3),('f_bits',32)]:struct.pack_into('<I',c,self.layout[key],v)
         struct.pack_into('<H',c,self.layout['fcw'],0x37f)
+        self.prepare(memory,c,spec)
         u.mem_write(RAM,bytes(memory));u.mem_write(CTX,bytes(c));u.mem_write(PT,struct.pack('<'+'I'*(SIZE//4096),*range(0,SIZE,4096)))
         u.reg_write(UC_ARM_REG_R0,CTX);u.reg_write(UC_ARM_REG_SP,STACK+65024);u.reg_write(UC_ARM_REG_LR,END|1)
         u.reg_write(UC_ARM_REG_FPSCR,spec.get('mode',0));self.instructions=self.copies=self.copy_bytes=self.yields=0
@@ -79,7 +82,8 @@ class Machine(bounds.Machine):
         preserved={f'r{i}':struct.unpack_from('<I',context,i*4)[0] for i in (3,4,5,6,7)}
         preserved.update({k:struct.unpack_from('<I',context,self.layout[k])[0] for k in ('fsp','preempt')})
         return dict(external=hashlib.sha256(external).hexdigest(),preserved=preserved,
-                    selected=struct.unpack_from('<H',result,0x38be10)[0],instructions=self.instructions)
+                    selected=struct.unpack_from('<H',result,0x38be10)[0],instructions=self.instructions,
+                    context=context.hex(),fpscr=u.reg_read(UC_ARM_REG_FPSCR))
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)

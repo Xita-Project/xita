@@ -33,7 +33,7 @@ def build(stage,out,xbe):
            '-I'+str(stage/'recomp')]
     commands=[];objects=[]
     sources=['tools/tests/visibility_portal_arm.c','tools/tests/subcluster_bounds_arm.c',
-             'tools/experiments/subcluster_bounds.c']
+             'recomp/kernel/xk_subcluster_math.c']
     for i,name in enumerate(sources):
         p=out/f'fixture-{i}.o';cmd=[cc,*flags,'-c',str(ROOT/name),'-o',str(p)]
         subprocess.run(cmd,check=True);commands.append(cmd);objects.append(p)

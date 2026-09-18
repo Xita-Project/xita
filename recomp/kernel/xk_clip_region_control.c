@@ -87,6 +87,10 @@ void xv_clip_region_report(unsigned frames)
     extern void xv_portal_polygon_report(unsigned);
     xv_portal_polygon_report(frames);
 #endif
+#if XV_TYPED_SUBCLUSTER
+    extern void xv_subcluster_report(unsigned);
+    xv_subcluster_report(frames);
+#endif
 }
 
 int xv_clip_region_begin(void)

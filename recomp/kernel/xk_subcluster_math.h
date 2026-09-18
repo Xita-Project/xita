@@ -1,4 +1,4 @@
-/* Experimental data-only visibility kernel. Not linked into the game.
+/* Data-only visibility kernel; production callers must validate the contract.
  * Inputs must be finite, ordered float bounds and finite plane coefficients.
  * Four side planes and enclosing AABB correspond to Halo 3925's 5C300 with
  * its extra reverse-corner check disabled (the 52EC1 subcluster caller).

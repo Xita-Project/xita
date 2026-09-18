@@ -67,6 +67,9 @@ endif
 ifeq ($(XV_TYPED_PORTAL_POLYGON),1)
 XITA_GAME_SRCS += recomp/kernel/xk_portal_polygon.c recomp/kernel/xk_portal_polygon_math.c
 endif
+ifeq ($(XV_TYPED_SUBCLUSTER),1)
+XITA_GAME_SRCS += recomp/kernel/xk_subcluster.c recomp/kernel/xk_subcluster_math.c
+endif
 
 # Optional two-scope owner elapsed census; no general phase/worker controls.
 ifeq ($(XV_OWNER_PHASE),1)

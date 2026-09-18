@@ -82,6 +82,9 @@ frame-rate gain.
 The [subcluster bounds prototype](subcluster-bounds-20260918.md) now replaces
 eight-corner emulated tests with a small native data operation and simplifies
 ordered surface-bit publication. Owned-map and enclosing-pass comparisons pass;
-independent copied-input batches also pass a two-worker host test. It is not
-linked into the game. Production admission, enclosing-consumer state and actual
-worker scheduling still need qualification before a cumulative hardware build.
+independent copied-input batches also pass a two-worker host test. The
+[guarded runtime integration](subcluster-integration-20260918.md) now qualifies
+owner admission, original scheduler callbacks and the enclosing `539C0`
+visibility consumer. A cumulative build includes this and native portal
+clipping. It awaits a device connection and ordinary gameplay verification;
+actual subcluster worker scheduling remains separate work.

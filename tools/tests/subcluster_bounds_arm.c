@@ -1,7 +1,7 @@
 /* Data adapter for the private ARM oracle only. This is not production
  * admission: it does not prove owner identity, alias exclusion or lifetimes. */
 #include "xv_x86rt.h"
-#include "../experiments/subcluster_bounds.h"
+#include "../../recomp/kernel/xk_subcluster_math.h"
 void xs_test_bounds(xctx *c)
 {
     xs_frustum f;xs_box b;
