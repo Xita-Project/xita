@@ -40,14 +40,14 @@ static void perf_report(uint32_t serial)
 #define PD(cur, last, i) ((unsigned long long)((cur)[i] - (last)[i]))
 #define PDMS(cur, last, i) ((unsigned long long)(((cur)[i] - (last)[i]) / 1000))
         xv_logf("[h2/perf] serial=%u flips=60 wall_ms=%llu submit_ms=%llu submits=%llu flipwait_ms=%llu completed=%llu present_ms=%llu methods=%llu clears=%llu pass_ms=%llu"
-                " | gxm draws=%llu render_ms=%llu flushes=%llu flush_ms=%llu open_ms=%llu tex_ms=%llu ends=%llu uploads=%llu touches=%llu ringwaits=%llu fallbacks=%llu hash_kb=%llu hits=%llu misses=%llu unhashed=%llu"
+                " | gxm draws=%llu render_ms=%llu flushes=%llu flush_ms=%llu open_ms=%llu tex_ms=%llu ends=%llu uploads=%llu touches=%llu ringwaits=%llu fallbacks=%llu rtt=%llu hash_kb=%llu hits=%llu misses=%llu unhashed=%llu"
                 " | audio grains=%llu nonzero=%llu compute_ms=%llu max_us=%llu misses=%llu hold_ms=%llu hold_max_us=%llu"
                 " compute_iters=%llu idle_iters=%llu guest_locks=%llu guest_wait_ms=%llu error=%08llX"
                 " | fx frames=%llu sources_ms=%llu dsp_ms=%llu dsp_instr=%llu | lock sites L%llu=%llu L%llu=%llu L%llu=%llu L%llu=%llu | tex %s\n",
                 serial, (unsigned long long)((now - last_wall) / 1000), PDMS(cur, last, 0), PD(cur, last, 1), PDMS(cur, last, 2), PD(cur, last, 3),
                 PDMS(cur, last, 4), PD(cur, last, 5), PD(cur, last, 6), PDMS(cur, last, 7),
                 PD(gxm, last_gxm, 0), PDMS(gxm, last_gxm, 1), PD(gxm, last_gxm, 2), PDMS(gxm, last_gxm, 3), PDMS(gxm, last_gxm, 4),
-                PDMS(gxm, last_gxm, 5), (unsigned long long)(((gxm[6] - last_gxm[6]) / 1000) % 1000), (unsigned long long)(((gxm[6] - last_gxm[6]) / 1000000) % 1000), (unsigned long long)(((gxm[6] - last_gxm[6]) / 1000000000ull) % 1000), (unsigned long long)((gxm[6] - last_gxm[6]) / 1000000000000ull), PD(gxm, last_gxm, 7), (unsigned long long)((gxm[8] - last_gxm[8]) / 1024), PD(gxm, last_gxm, 9), PD(gxm, last_gxm, 10), PD(gxm, last_gxm, 11),
+                PDMS(gxm, last_gxm, 5), (unsigned long long)(((gxm[6] - last_gxm[6]) / 1000) % 1000), (unsigned long long)(((gxm[6] - last_gxm[6]) / 1000000) % 1000), (unsigned long long)(((gxm[6] - last_gxm[6]) / 1000000000ull) % 1000), (unsigned long long)((gxm[6] - last_gxm[6]) / 1000000000000ull), (unsigned long long)((gxm[7] - last_gxm[7]) % 1000), (unsigned long long)((gxm[7] - last_gxm[7]) / 1000), (unsigned long long)((gxm[8] - last_gxm[8]) / 1024), PD(gxm, last_gxm, 9), PD(gxm, last_gxm, 10), PD(gxm, last_gxm, 11),
                 PD(audio, last_audio, 0), PD(audio, last_audio, 1), PDMS(audio, last_audio, 2), (unsigned long long)audio[3], PD(audio, last_audio, 4),
                 PDMS(audio, last_audio, 5), (unsigned long long)audio[6], PD(audio, last_audio, 7), PD(audio, last_audio, 8),
                 PD(audio, last_audio, 10), PDMS(audio, last_audio, 9), (unsigned long long)audio[11],

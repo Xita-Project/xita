@@ -166,6 +166,19 @@ typedef struct { uint32_t code, n[O_COUNT]; } stat_entry;
 static stat_entry g_stats[48];
 static unsigned g_nstats;
 
+/* Hashed bytes per source offset (diagnostic: which images pay for re-hashing). */
+static struct { uint32_t offset, code; unsigned unit; uint64_t bytes; } g_hash_top[24];
+static void hash_account(uint32_t offset, uint32_t bytes, unsigned unit, uint32_t code)
+{
+    unsigned free = 24, least = 0;
+    for (unsigned i = 0; i < 24; ++i) {
+        if (g_hash_top[i].offset == offset && g_hash_top[i].bytes) { g_hash_top[i].bytes += bytes; return; }
+        if (!g_hash_top[i].bytes && free == 24) free = i;
+        if (g_hash_top[i].bytes < g_hash_top[least].bytes) least = i;
+    }
+    unsigned slot = free < 24 ? free : least;
+    g_hash_top[slot].offset = offset; g_hash_top[slot].code = code; g_hash_top[slot].unit = unit; g_hash_top[slot].bytes = bytes;
+}
 static void note(uint32_t code, unsigned outcome)
 {
     for (unsigned i = 0; i < g_nstats; ++i)
@@ -181,6 +194,14 @@ size_t menu_texture_stats(char *buf, size_t cap)
     if (!buf || !cap) return 0;
     buf[0] = 0;
     { int n = snprintf(buf, cap, "mode3dec=%u", (unsigned)g_mode3_decoded); if (n > 0) used = (size_t)n < cap ? (size_t)n : cap - 1; }
+    for (unsigned k = 0; k < 3 && used + 1 < cap; ++k) {          /* the three most re-hashed sources since boot */
+        unsigned best = 24;
+        for (unsigned i = 0; i < 24; ++i) if (g_hash_top[i].bytes && (best == 24 || g_hash_top[i].bytes > g_hash_top[best].bytes)) best = i;
+        if (best == 24) break;
+        int n = snprintf(buf + used, cap - used, " hash@%08X(u%u,%02X)=%lluMB", g_hash_top[best].offset, g_hash_top[best].unit, g_hash_top[best].code, (unsigned long long)(g_hash_top[best].bytes >> 20));
+        if (n < 0) break;
+        used += (size_t)n; g_hash_top[best].bytes = 0;            /* reported: reset so the next line shows the new interval */
+    }
     for (unsigned i = 0; i < g_nstats && used + 1 < cap; ++i) {
         int n = snprintf(buf + used, cap - used, "%s%02X:%u/%u/%u/%u", i ? " " : "",
                          (unsigned)g_stats[i].code, (unsigned)g_stats[i].n[O_OK],
@@ -572,7 +593,7 @@ static uint64_t content_hash(const uint8_t *p, size_t n, uint64_t h)
     return h;
 }
 
-typedef struct { uint32_t key[6]; uint64_t hash; uint32_t *texels; uint32_t w, h, bytes, levels, ntexels; int linear, cube, native; uint64_t used;
+typedef struct { uint32_t key[6]; uint64_t hash, pal_hash; uint32_t *texels; uint32_t w, h, bytes, levels, ntexels; int linear, cube, native; uint64_t used;
                  int tracked; uint32_t page_lo, page_hi, verified; unsigned clean_hits;
                  uint8_t *snapshot; uint32_t snapshot_bytes; } tex_entry;   /* snapshot: diagnostic copy of the source */
 /* A Halo 2 level binds hundreds of distinct textures (base, bump, lightmap, cube per
@@ -601,8 +622,11 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
      * key whose source pages carry no stamp at or after its last full read is proven
      * unchanged and reuses its hash; every 64th such use still reads the source in
      * full, and a mismatch there is a strict stop: a writer the stamps did not see. */
-    int tracked = xv_page_epoch != NULL && &g_xram && g_xram && L.d.kind != PF_P8 &&
-                  (uintptr_t)L.src >= (uintptr_t)g_xram;
+    /* P8 images are tracked like the rest; their palette (<= 1 KB, mapped separately) is
+     * hashed on every use and compared, so a palette change still forces a full re-hash.
+     * (Excluding them re-hashed every 512x512 bump map on every draw: ~1.2 GB per 60 flips.) */
+    int tracked = xv_page_epoch != NULL && &g_xram && g_xram && (uintptr_t)L.src >= (uintptr_t)g_xram;
+    uint64_t pal_hash = L.d.kind == PF_P8 ? content_hash((const uint8_t *)L.palette, (L.pal_mask + 1) * 4, 0x9E3779B97F4A7C15ull) : 0;
     uint32_t page_lo = 0, page_hi = 0;
     if (tracked) {
         uintptr_t off = (uintptr_t)L.src - (uintptr_t)g_xram;
@@ -625,10 +649,12 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
         for (uint32_t p = page_lo; p <= page_hi; ++p) if (xv_page_epoch[p] >= keyed->verified) { clean = 0; break; }
     }
     uint64_t hash;
+    if (clean && pal_hash != keyed->pal_hash) clean = 0;   /* same pixels, different palette */
     if (clean && (++keyed->clean_hits & 63)) { hash = keyed->hash; ++g_hash_skipped; }
     else {
         hash = content_hash(L.src, L.src_bytes, 0x243F6A8885A308D3ull ^ L.src_bytes);
         g_hash_bytes += L.src_bytes;
+        hash_account(L.key[0], L.src_bytes, unit, L.code);
         if (L.d.kind == PF_P8) hash = content_hash((const uint8_t *)L.palette, (L.pal_mask + 1) * 4, hash);
         if (clean && hash != keyed->hash && h2_texture_tracking_fault) {
             uint32_t emin = 0xFFFFFFFFu, emax = 0;
@@ -669,11 +695,16 @@ const uint32_t *menu_texture_acquire(const h2_command_state *s, const h2_kelvin_
         memcpy(victim->key, L.key, sizeof L.key);
         victim->hash = hash; victim->texels = px; victim->w = L.w; victim->h = L.h; victim->bytes = bytes;
         victim->levels = L.levels; victim->ntexels = L.texels; victim->cube = L.cube; victim->native = L.native ? (int)L.d.dxt : 0;
+        victim->pal_hash = pal_hash;
         victim->linear = L.d.linear; g_cache_bytes += bytes;
         victim->clean_hits = 0;
         e = victim;
     }
     if (!clean || !(e->clean_hits & 63)) {     /* hashed this time: the stamps from here on are what matter */
+        /* Open a new epoch after reading: a buffer written and then bound several times in one
+         * frame (the bloom buffers, ~15 binds each) was re-hashed on every bind because its
+         * stamps equalled the verification epoch. Only writers after this point count now. */
+        if (tracked && &xv_write_epoch) ++xv_write_epoch;
         e->tracked = tracked; e->page_lo = page_lo; e->page_hi = page_hi; e->verified = tracked ? xv_write_epoch : 0;
         static int keep_snapshots = -1;         /* XV_TEXTURE_SNAPSHOT=1: retain sources (<=256 KB) so a mismatch is described */
         if (keep_snapshots < 0) { const char *k = getenv("XV_TEXTURE_SNAPSHOT"); keep_snapshots = k ? atoi(k) : 0; }

@@ -37,7 +37,8 @@ static tex_entry g_tex[MAX_TEX]; static uint8_t *g_texpool; static size_t g_texp
  * guest_newer: a host consumer announced a write to the guest buffer. synced_epoch:
  * the write epoch at which both copies were last identical; guest stores after it
  * are visible through the page stamps. */
-typedef struct { uint32_t color_offset, physical; uint8_t *guest; uint32_t *mem; SceGxmColorSurface surface; SceGxmRenderTarget *rt; uint64_t used;
+typedef struct { SceGxmTexture as_tex; int as_tex_ok;   /* the surface as a 640x480 linear texture (render-to-texture, no landing) */
+                 uint32_t color_offset, physical; uint8_t *guest; uint32_t *mem; SceGxmColorSurface surface; SceGxmRenderTarget *rt; uint64_t used;
                  int gpu_newer, guest_newer, guarded; uint32_t synced_epoch; } target;
 extern uint32_t xv_page_epoch[] __attribute__((weak));
 extern uint32_t xv_write_epoch __attribute__((weak));
@@ -51,7 +52,7 @@ static SceGxmDepthStencilSurface g_depth; static void *g_depth_mem; static int g
 static target *g_open;                 /* target with an open scene */
 static unsigned g_open_draws;
 static uint8_t *g_vring; static unsigned g_vring_used; static uint16_t *g_iring; static unsigned g_iring_used;
-static uint64_t g_perf_ring_waits;
+static uint64_t g_perf_ring_waits, g_perf_rtt;    /* units bound to a colour surface directly */
 static int g_dtrace_now;                          /* XV_DRAW_TRACE matched the draw being built */
 static SceGxmContext *g_ctx; static SceGxmShaderPatcher *g_patcher;
 static int g_ready = -1;
@@ -143,6 +144,7 @@ static target *find_target(const h2_kelvin_clear *c, uint32_t color_offset, uint
     if (sceGxmColorSurfaceInit(&t->surface, SCE_GXM_COLOR_FORMAT_A8R8G8B8, SCE_GXM_COLOR_SURFACE_LINEAR, SCE_GXM_COLOR_SURFACE_SCALE_NONE,
                                SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, W, H, W, t->mem) < 0) return NULL;
     t->color_offset = color_offset; t->physical = physical; t->guest = guest; ++g_ntargets;
+    t->as_tex_ok = sceGxmTextureInitLinear(&t->as_tex, t->mem, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, W, H, 1) >= 0;
     t->gpu_newer = 0; t->guest_newer = 1; t->guarded = 0; t->synced_epoch = 0;   /* the guest buffer is the truth until first uploaded */
     xv_logf("[h2/menu-gxm] target %u for colour buffer %08X\n", g_ntargets - 1, color_offset);
     return t;
@@ -426,6 +428,30 @@ static fs_entry *get_fs(const h2_command_state *s, const menu_combiner *cb, cons
 }
 
 /* ---- textures ---------------------------------------------------------------- */
+static SceGxmTextureAddrMode addr_mode(unsigned nv);
+/* Sampler state follows the unit's registers on every draw (the control words are copied
+ * into the command stream when the texture is bound, so changing them between draws is safe).
+ * SET_TEXTURE_FILTER: min bits 16-23 (1 box, 2 tent, 3/4 box/tent nearest-mip, 5/6 box/tent
+ * linear-mip), mag bits 24-27 (1 box, 2 tent). SET_TEXTURE_ADDRESS: U bits 0-3, V bits 8-11
+ * (1 wrap, 2 mirror, 3 clamp-to-edge, 4 border, 5 clamp). Linear (pitch) images are addressed
+ * in texels and stay clamped; cube maps clamp. */
+static void set_sampler_state(SceGxmTexture *tx, const h2_command_state *s, unsigned unit, uint32_t levels, int clamp)
+{
+    unsigned base = 0x1B00 + unit * 64;
+    uint32_t filter = s->setup[(base + 0x14) / 4], addr = s->setup[(base + 0x08) / 4];
+    unsigned minf = (filter >> 16) & 0xFF, magf = (filter >> 24) & 0xF;
+    int min_linear = minf == 2 || minf == 4 || minf == 6, mag_linear = magf == 2;
+    if (levels > 1 && minf >= 3 && minf <= 6) {
+        sceGxmTextureSetMipFilter(tx, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
+        sceGxmTextureSetMinFilter(tx, min_linear ? SCE_GXM_TEXTURE_FILTER_MIPMAP_LINEAR : SCE_GXM_TEXTURE_FILTER_MIPMAP_POINT);
+    } else {
+        sceGxmTextureSetMipFilter(tx, SCE_GXM_TEXTURE_MIP_FILTER_DISABLED);
+        sceGxmTextureSetMinFilter(tx, min_linear ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_POINT);
+    }
+    sceGxmTextureSetMagFilter(tx, mag_linear ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_POINT);
+    sceGxmTextureSetUAddrMode(tx, clamp ? SCE_GXM_TEXTURE_ADDR_CLAMP : addr_mode(addr & 15));
+    sceGxmTextureSetVAddrMode(tx, clamp ? SCE_GXM_TEXTURE_ADDR_CLAMP : addr_mode((addr >> 8) & 15));
+}
 static SceGxmTextureAddrMode addr_mode(unsigned nv)
 {
     switch (nv) {
@@ -470,30 +496,18 @@ static tex_entry *get_texture(const h2_command_state *s, const h2_kelvin_clear *
             e->mem = NULL; return NULL;
         }
     }
-    /* Sampler state follows the unit's registers on every draw (the control words are copied
-     * into the command stream when the texture is bound, so changing them between draws is safe).
-     * SET_TEXTURE_FILTER: min bits 16-23 (1 box, 2 tent, 3/4 box/tent nearest-mip, 5/6 box/tent
-     * linear-mip), mag bits 24-27 (1 box, 2 tent). SET_TEXTURE_ADDRESS: U bits 0-3, V bits 8-11
-     * (1 wrap, 2 mirror, 3 clamp-to-edge, 4 border, 5 clamp). Linear (pitch) images are addressed
-     * in texels and stay clamped, as before. */
-    {
-        unsigned base = 0x1B00 + unit * 64;
-        uint32_t filter = s->setup[(base + 0x14) / 4], addr = s->setup[(base + 0x08) / 4];
-        unsigned minf = (filter >> 16) & 0xFF, magf = (filter >> 24) & 0xF;
-        int min_linear = minf == 2 || minf == 4 || minf == 6, mag_linear = magf == 2;
-        if (e->levels > 1 && minf >= 3 && minf <= 6) {
-            sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
-            sceGxmTextureSetMinFilter(&e->tex, min_linear ? SCE_GXM_TEXTURE_FILTER_MIPMAP_LINEAR : SCE_GXM_TEXTURE_FILTER_MIPMAP_POINT);
-        } else {
-            sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_DISABLED);
-            sceGxmTextureSetMinFilter(&e->tex, min_linear ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_POINT);
-        }
-        sceGxmTextureSetMagFilter(&e->tex, mag_linear ? SCE_GXM_TEXTURE_FILTER_LINEAR : SCE_GXM_TEXTURE_FILTER_POINT);
-        sceGxmTextureSetUAddrMode(&e->tex, e->linear || e->cube ? SCE_GXM_TEXTURE_ADDR_CLAMP : addr_mode(addr & 15));
-        sceGxmTextureSetVAddrMode(&e->tex, e->linear || e->cube ? SCE_GXM_TEXTURE_ADDR_CLAMP : addr_mode((addr >> 8) & 15));
-    }
+    set_sampler_state(&e->tex, s, unit, e->levels, e->linear || e->cube);
     e->used = g_serial;
     return e;
+}
+/* A unit reading a GPU-resident colour buffer as a 640x480 linear ARGB8 screen image (the
+ * game's own back/offscreen buffers: format 0x12, pitch 2560, rect 640x480 at the buffer's
+ * offset) can sample the GXM surface itself: no landing, copy or hash. */
+static target *sampled_target(uint32_t offset, uint32_t fmt, uint32_t ctrl1, uint32_t rect)
+{
+    if (((fmt >> 8) & 0xFF) != 0x12 || (ctrl1 >> 16) != W * 4 || rect != ((uint32_t)W << 16 | H)) return NULL;
+    for (unsigned i = 0; i < g_ntargets; ++i) if (g_targets[i].color_offset == offset && g_targets[i].as_tex_ok) return &g_targets[i];
+    return NULL;
 }
 
 /* ---- vertex fetch (same decoding as the software path) ------------------------ */
@@ -604,12 +618,28 @@ static int render_body(void *opaque, const h2_menu_request *r)
     if (!fs) { flush_scene(); return -1; }
 
     /* textures: a unit sampling the open target's buffer needs the scene flushed first */
-    tex_entry *tex[4] = {0};
+    tex_entry *tex[4] = {0}; const SceGxmTexture *bound[4] = {0};
     for (unsigned u = 0; u < 4; ++u) {
         if (!(cb.tex_used & (1u << u)) || fs->sampler[u] < 0) continue;
-        uint32_t toff = s->setup[(0x1B00 + u * 64) / 4];
+        unsigned tbase = 0x1B00 + u * 64;
+        uint32_t toff = s->setup[tbase / 4];
+        target *src = sampled_target(toff, s->setup[(tbase + 4) / 4], s->setup[(tbase + 0x10) / 4], s->setup[(tbase + 0x1C) / 4]);
+        if (src && src != t) {                     /* render-to-texture: sample the surface, never the guest copy */
+            if (g_open == src) end_scene();        /* a surface cannot be sampled while it is the render target */
+            if (guest_changed(src)) {              /* CPU wrote the buffer since the surface last matched it */
+                if (src->gpu_newer && h2_render_target_fault) h2_render_target_fault(src->physical);
+                sceGxmFinish(g_ctx); rings_recycle_after_finish();
+                memcpy(src->mem, src->guest, W * H * 4);
+                if (&xv_write_epoch) { ++xv_write_epoch; src->synced_epoch = xv_write_epoch; } else src->synced_epoch = 0;
+                src->guest_newer = 0; src->gpu_newer = 0; ++g_perf_uploads;
+            }
+            set_sampler_state(&src->as_tex, s, u, 1, 1);
+            bound[u] = &src->as_tex; ++g_perf_rtt;
+            continue;
+        }
         if (g_open && toff >= g_open->color_offset && toff < g_open->color_offset + W * H * 4) sync_target(g_open);   /* sampling the open target: land it */
         { uint64_t t0 = perf_now(); tex[u] = get_texture(s, c, u); g_perf_tex_us += perf_now() - t0; }
+        if (tex[u]) bound[u] = &tex[u]->tex;
     }
 
     /* vertices: packed F32x4 per attribute the program declares, in vreg order */
@@ -712,6 +742,7 @@ static int render_body(void *opaque, const h2_menu_request *r)
                 xv_logf("[h2/draw-trace] serial=%llu vs=%016llx ps=%s verts=%u target=%08X\n", (unsigned long long)g_serial, (unsigned long long)vs->hash, hs, n, t->color_offset);
                 for (unsigned u = 0; u < 4; ++u) {
                     unsigned base = 0x1B00 + u * 64;
+                    if (!tex[u] && bound[u]) { xv_logf("[h2/draw-trace]  unit%u: render target surface offset=%08X\n", u, s->setup[base / 4]); continue; }
                     if (!tex[u]) { xv_logf("[h2/draw-trace]  unit%u: none used=%d sampler=%d fmt=%08X ctrl=%08X\n", u, !!(cb.tex_used & (1u << u)), fs->sampler[u], s->setup[(base + 4) / 4], s->setup[(base + 0xC) / 4]); continue; }
                     if (tex[u]->native) { xv_logf("[h2/draw-trace]  unit%u: offset=%08X fmt=%08X %ux%u levels=%u cube=%d native=DXT%d mean=%08X\n", u, s->setup[base / 4], s->setup[(base + 4) / 4], tex[u]->w, tex[u]->h, tex[u]->levels, tex[u]->cube, tex[u]->native, menu_texture_native_mean(tex[u]->mem, tex[u]->w, tex[u]->h, (unsigned)tex[u]->native)); continue; }
                     uint64_t a = 0, r = 0, g = 0, b = 0, cnt = 0; uint32_t lvl0 = tex[u]->w * tex[u]->h;
@@ -729,7 +760,7 @@ static int render_body(void *opaque, const h2_menu_request *r)
     if (fs->texscale) GCHECK(sceGxmSetUniformDataF(fu, fs->texscale, 0, 16, &scale[0][0]));
     if (fs->blendconst) GCHECK(sceGxmSetUniformDataF(fu, fs->blendconst, 0, 4, blendconst));
     for (unsigned u = 0; u < 4; ++u)
-        if (fs->sampler[u] >= 0 && tex[u]) GCHECK(sceGxmSetFragmentTexture(g_ctx, fs->sampler[u], &tex[u]->tex));
+        if (fs->sampler[u] >= 0 && bound[u]) GCHECK(sceGxmSetFragmentTexture(g_ctx, fs->sampler[u], bound[u]));
     GCHECK(sceGxmSetVertexStream(g_ctx, 0, vb));
     { uint64_t t0 = perf_now(); GCHECK(sceGxmDraw(g_ctx, prim, SCE_GXM_INDEX_FORMAT_U16, ib, ni)); g_perf_gxmdraw_us += perf_now() - t0; }
     if (g_dtrace_now) {                        /* the first packed vertex as the program sees it */
@@ -767,6 +798,6 @@ void h2_menu_gxm_perf(uint64_t out[12])
     uint64_t hits = 0, misses = 0; size_t cache_bytes = 0;
     menu_texture_cache_stats(&hits, &misses, &cache_bytes);
     out[0] = g_drawn; out[1] = g_perf_render_us; out[2] = g_perf_flushes; out[3] = g_perf_flush_us;
-    out[4] = g_perf_open_us; out[5] = g_perf_tex_us; out[6] = g_perf_ends * 1000 + g_perf_uploads * 1000000 + g_perf_guest_touches * 1000000000ull + g_perf_ring_waits * 1000000000000ull; out[7] = g_fallbacks;
+    out[4] = g_perf_open_us; out[5] = g_perf_tex_us; out[6] = g_perf_ends * 1000 + g_perf_uploads * 1000000 + g_perf_guest_touches * 1000000000ull + g_perf_ring_waits * 1000000000000ull; out[7] = g_fallbacks + g_perf_rtt * 1000;
     out[8] = menu_texture_hashed_bytes(); out[9] = hits; out[10] = misses; out[11] = menu_texture_hash_skipped(); (void)cache_bytes;
 }
