@@ -23,7 +23,7 @@ def generate(xbe, manifest, symbols, stage, out):
         if destination == protected or protected in destination.parents:
             raise ValueError("Generated output must be outside the source repository and retained stage")
     from recompiler import xita_recomp as r
-from games.halo_ce_3925.discovery import HaloDiscovery
+    from games.halo_ce_3925.discovery import HaloDiscovery
     from recompiler.core.profile import load_profile
     from games.halo_ce_3925.hooks import HaloHooks
     from tools.visibility_portal_loop import FLAG, transform
