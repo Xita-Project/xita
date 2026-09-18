@@ -16,6 +16,9 @@ LUMA_RENDER ?= 0
 SPRITE_RENDER ?= 0
 MENU_RENDER ?= 0
 MENU_GXM_DEFAULT ?= 0
+ifneq ($(filter $(MENU_GXM_DEFAULT),0 1),$(MENU_GXM_DEFAULT))
+$(error MENU_GXM_DEFAULT must be 0 or 1)
+endif
 AUDIO_HOST ?= 0
 AUDIO_DSP ?= 0
 AUDIO_SPATIAL_MODEL ?= 0
@@ -729,3 +732,11 @@ $(BUILD)/boot.o: CFLAGS += -include $(BUILD)/xv_build.h
 $(BUILD)/param.sfo: $(ROOT)/version.json
 
 $(BUILD)/menu_render.o: CFLAGS += -DH2_MENU_GXM_DEFAULT=$(MENU_GXM_DEFAULT)
+
+.PHONY: menu-gxm-force
+$(BUILD)/menu-gxm.config: menu-gxm-force
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(MENU_GXM_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/menu_render.o: $(BUILD)/menu-gxm.config
