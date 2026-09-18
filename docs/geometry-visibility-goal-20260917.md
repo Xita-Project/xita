@@ -78,3 +78,10 @@ worker, scheduler, deeper traversal and enclosing-consumer checks. The cumulativ
 VPK is built; deployment and ordinary hardware gameplay verification remain
 because device requests timed out. Instruction counts alone do not establish a
 frame-rate gain.
+
+The [subcluster bounds prototype](subcluster-bounds-20260918.md) now replaces
+eight-corner emulated tests with a small native data operation and simplifies
+ordered surface-bit publication. Owned-map and enclosing-pass comparisons pass;
+independent copied-input batches also pass a two-worker host test. It is not
+linked into the game. Production admission, enclosing-consumer state and actual
+worker scheduling still need qualification before a cumulative hardware build.
