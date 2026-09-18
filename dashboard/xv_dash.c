@@ -90,7 +90,7 @@ static int discover(dash *s)
     s->image = exists(s, "halo_image.bin");
     s->ui = exists(s, "haloce/maps/ui.map");
     if (s->simple) {
-        strcpy(s->halo2_status,"Install the experimental Halo 2 package first.");
+        strcpy(s->halo2_status,"Install Xita with bundled Halo 2 first.");
         if (s->config->game_status)
             s->halo2_ready = s->config->game_status("halo2",s->halo2_status,sizeof s->halo2_status) > 0;
         if (path(p,sizeof p,s,"selected-game.txt")) {
@@ -413,8 +413,8 @@ static void render_launcher(dash *s)
         line(s,378,304,894,304,DIM);
         text(s,378,326,s->halo2_status,1,0,WHITE);
         text(s,378,366,"Early hardware testing. Rendering is incomplete.",1,0,DIM);
-        text(s,378,390,"Opens the separate Halo 2 test application.",1,0,DIM);
-        text(s,378,414,"Close Halo 2 and reopen Xita to switch games.",1,0,DIM);
+        text(s,378,390,"Launches the bundled Halo 2 experimental build.",1,0,DIM);
+        text(s,378,414,"Hold Start + Select in Halo 2 to return here.",1,0,DIM);
         text(s,378,439,s->halo2_ready ? "CROSS  LAUNCH HALO 2" : "SELECT GAME  TO RETURN TO HALO CE",1,1,GREEN);
     } else if (!s->page) {
         text(s,378,205,"HALO",5,4,WHITE);

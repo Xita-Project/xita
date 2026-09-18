@@ -6,7 +6,7 @@
 
 **A static recompiler and runtime for bringing original Xbox games to the PlayStation Vita.**
 
-[Download VPK](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1) · [Install](docs/installing.md) · [Compatibility](COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
+[Download VPK](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.2) · [Install](docs/installing.md) · [Compatibility](COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
 
 Xita translates an Xbox game's x86 executable into C, builds it as ARM code,
 and supplies Xbox kernel, graphics and audio interfaces through Vita homebrew
@@ -15,7 +15,7 @@ experimental second profile; it is not yet validated on a physical Vita.**
 
 ## Getting started
 
-1. **Download the VPK** from the [current Xita release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1).
+1. **Download the VPK** from the [current Xita release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.2).
    Expand **Assets** and choose its single `.vpk` file. The **Source code** ZIP is for developers.
 2. **Copy it over USB.** Open VitaShell's USB mode and copy the VPK to your Vita's
    storage. Windows users can use File Explorer.
@@ -28,7 +28,7 @@ experimental second profile; it is not yet validated on a physical Vita.**
 
 **Already have Xita working?** Keep your existing game files, settings and saves;
 follow [Updating Xita](docs/installing.md#updating-xita). The current
-[game release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1)
+[game release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.2)
 contains one VPK, a checksum and build information. Older builds have their own
 releases marked **Superseded**; the [ad hoc tester](https://github.com/Xita-Project/xita/releases/tag/adhoc-20260908b)
 is a separate download. [Release guide](docs/releases.md). Releases remain private
@@ -100,9 +100,9 @@ These captures show different development builds. [Image details](docs/images/RE
 
 ## Current status
 
-**Tester build: 0.2.0-test.1 · September 18, 2026.** The dashboard and in-game
+**Tester build: 0.2.0-test.2 · September 18, 2026.** The dashboard and in-game
 performance overlay show the version and a short source revision. Include both
-in bug reports. [Changes and testing guide](docs/tester-build-20260918.md).
+in bug reports. [Changes and testing guide](docs/combined-games-20260918.md).
 
 | Area | Current position |
 | --- | --- |
@@ -111,7 +111,7 @@ in bug reports. [Changes and testing guide](docs/tester-build-20260918.md).
 | CPU and rendering | Worker jobs, native visibility routines and reduced vertex copying are integrated; the newest cumulative changes still need representative hardware testing |
 | Stability | Recent user sessions report crashes resolved; long sessions, effects, vehicles and campaign progression still need coverage |
 | Dashboard | Game selection, graphics settings, in-game overlay, version display and offline GPL license |
-| Halo 2 | Separate experimental application; startup and rendering work exist, but physical hardware support and complete gameplay are unverified |
+| Halo 2 | Bundled experimental runtime; startup and rendering work exist, but physical hardware support and complete gameplay are unverified |
 | Multiplayer networking | Solo play works; communication between two Vitas remains experimental |
 
 Stable **20 FPS** is the next milestone, with **30 FPS** the longer-term goal.
@@ -153,7 +153,7 @@ Rear touch shortcuts default off. Profiling controls are in [Developer notes](do
 ## Roadmap
 
 The full plan is **[ROADMAP.md](ROADMAP.md)**. Near-term work focuses on GPU
-stability, visibility waits and draw preparation. **Select Game** chooses CE or the separately installed experimental Halo 2
+stability, visibility waits and draw preparation. **Select Game** chooses CE or the bundled experimental Halo 2
 application. Additional titles still need their own recompilation and testing.
 
 ## Reporting problems

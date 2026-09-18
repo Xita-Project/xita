@@ -2,7 +2,7 @@
 
 [README](README.md) · [Roadmap](ROADMAP.md) · [Halo level details](docs/halo-ce.md)
 
-Updated **September 18, 2026** for **0.2.0-test.1**. Halo CE is the only title
+Updated **September 18, 2026** for **0.2.0-test.2**. Halo CE is the only title
 with physical Vita gameplay confirmed.
 Each game needs a separate port; Xita does not run arbitrary Xbox executables.
 
@@ -11,7 +11,7 @@ Each game needs a separate port; Xita does not run arbitrary Xbox executables.
 | Game | Tested executable | Real Vita | Vita3K |
 | --- | --- | --- | --- |
 | Halo: Combat Evolved (Xbox) | Tested 3925-era executable; alternate versions unvalidated | **Ingame** — performance and GPU stability remain open | **Ingame** — useful for rendering and behavior checks |
-| Halo 2 (Xbox) | Experimental 5849 profile | **Hardware testing pending** — separate application selectable from Xita | **Experimental startup/rendering** — intro and rendering milestones; not general gameplay validation |
+| Halo 2 (Xbox) | Experimental 5849 profile | **Hardware testing pending** — bundled runtime selectable from Xita | **Experimental startup/rendering** — intro and rendering milestones; not general gameplay validation |
 | Other original Xbox titles | None | **Untested** | **Untested** |
 
 **Ingame** means gameplay is reachable with known problems. **Playable** is
@@ -79,11 +79,10 @@ dumps to a public report.
 ## Game selection and build identity
 
 The dashboard's **Select Game** page offers Halo CE and **Halo 2 / Experimental**.
-Halo CE runs in Xita. Halo 2 launches the separately installed `XH2B00001` test
-application and uses `ux0:data/xita-halo2/`, preserving CE's data and saves.
+Both games launch from the same Xita installation. Halo 2 uses `ux0:data/xita-halo2/`, preserving CE's data and saves.
 The selector does not convert or install a game. Missing installations are
 reported before launch. [Halo 2 setup and limits](docs/halo2-hardware.md).
 
 Report the version and revision shown on the dashboard/performance overlay,
 map, graphics settings and reproduction steps. The dated reports below document
-older builds; they do not supersede this release's [test status](docs/tester-build-20260918.md).
+older builds; they do not supersede this release's [test status](docs/combined-games-20260918.md).

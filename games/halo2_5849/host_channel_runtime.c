@@ -775,8 +775,10 @@ static void vblank_pace_in_render(void)
  * spun forever in the D3D vblank wait (0x12B2E0: busy-loop on 0x485AB0 until the next count,
  * run mp283). Deliver the same 60 Hz catch-up here, only on the fiber that owns the game's
  * D3D context (the callback runs as a nested guest call on that context). */
+extern void h2_frontend_poll(void) __attribute__((weak));
 void xd3d_lockstep_preempt(xctx *c)
 {
+    if(h2_frontend_poll)h2_frontend_poll();
     if (c && c == active_context) vblank_pace_in_render();
 }
 /* Rasterizer row hook (calling thread only): big triangles and full-screen

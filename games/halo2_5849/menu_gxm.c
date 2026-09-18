@@ -1,3 +1,4 @@
+#include "bundle.h"
 #include "menu_gxm.h"
 #include "menu_texture.h"
 #include "menu_combiner.h"
@@ -69,9 +70,9 @@ static const char *const VREG_NAMES[16] = {"position", "blendweight", "normal", 
 static const SceGxmProgram *load_gxp(const char *name)
 {
     char path[128];
-    snprintf(path, sizeof path, "ux0:data/xita/shaders/%s", name);
+    snprintf(path, sizeof path, H2_SHADERS "%s", name);
     FILE *f = fopen(path, "rb");
-    if (!f) { snprintf(path, sizeof path, "app0:%s", name); f = fopen(path, "rb"); }
+    if (!f) { snprintf(path, sizeof path, H2_APP "%s", name); f = fopen(path, "rb"); }
     if (!f) return NULL;
     long size = fseek(f, 0, SEEK_END) ? -1 : ftell(f);
     void *data = NULL;

@@ -28,7 +28,7 @@ int xv_log_shutdown(unsigned timeout) {
     if(log_failures) { log_failures--;return XV_LOG_TIMEOUT; }
     return XV_LOG_OK;
 }
-unsigned xv_update_requested(void) { return updating; }
+unsigned xv_updates_requested(void) { return updating; }
 void xv_update_progress(unsigned next) {
     if(!updating)return;
     assert(remote_live);
@@ -108,3 +108,23 @@ with tempfile.TemporaryDirectory(prefix='xita-update-lease-') as directory:
     subprocess.run(['cc','-std=gnu11','-D__vita__','-Wall','-Wextra','-Werror',
                     str(p/'test.c'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)
+
+# LoadExec arguments can start at argv[0] on Vita; conventional host argv[1]
+# must work as well. Unknown game/slot flags cannot select an executable path.
+with tempfile.TemporaryDirectory(prefix="xita-launch-args-") as temp:
+    test=Path(temp)/"args.c";exe=Path(temp)/"args"
+    test.write_text(r'''#include <assert.h>
+#include "runtime/xv_launch_args.h"
+int main(void) {
+    char *direct[]={"--xita-game=halo2","--xita-slot=1","--xita-dashboard"};
+    char *prefixed[]={"app0:eboot.bin","--xita-game=halo2","--xita-slot=0"};
+    char *unknown[]={"--xita-game=../halo2","--xita-slot=2"};
+    assert(!xv_launch_has(0,0,"--xita-game=halo2") && xv_launch_slot(0,0)==-1);
+    assert(xv_launch_has(3,direct,"--xita-game=halo2") && xv_launch_slot(3,direct)==1);
+    assert(xv_launch_has(3,direct,"--xita-dashboard"));
+    assert(xv_launch_has(3,prefixed,"--xita-game=halo2") && xv_launch_slot(3,prefixed)==0);
+    assert(!xv_launch_has(2,unknown,"--xita-game=halo2") && xv_launch_slot(2,unknown)==-1);
+}''')
+    subprocess.run(["cc","-std=c11","-Wall","-Wextra","-Werror","-I",str(root),str(test),"-o",str(exe)],check=True)
+    subprocess.run([str(exe)],check=True)
+print("PASS: direct and prefixed LoadExec arguments; unknown game/slot rejection")

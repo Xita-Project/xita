@@ -1,3 +1,4 @@
+#include "bundle.h"
 #include "xv_version.h"
 /* Isolated native startup harness: executes the owned XBE entry and scheduler.
  * No title screen substitute, success-return API fallbacks or CE game adapter.
@@ -43,6 +44,38 @@ extern const uint32_t xv_game_tls_dir;
 static SceUID log_fd = -1;
 static const char disk_header_path[] = "ux0:data/xita-halo2/save/disk-header.bin";
 static unsigned presented_frames;
+#ifdef H2_BUNDLED
+#include "xv_update_halo2.h"
+#include "xv_launch_args.h"
+#include "xv_log.h"
+#include <psp2/appmgr.h>
+static int bundle_slot=-1;
+extern void h2_menu_gxm_flush(void) __attribute__((weak));
+/* Called only from guest cooperative boundaries, never a render worker or
+ * midway through a native GXM call. The chord is deliberately held for 1s. */
+void h2_frontend_poll(void)
+{
+    static uint64_t next,held;
+    uint64_t now=sceKernelGetSystemTimeWide();
+    if(now<next)return;
+    next=now+50000;
+    SceCtrlData pad={0};
+    if(sceCtrlPeekBufferPositive(0,&pad,1)<1 ||
+       (pad.buttons&(SCE_CTRL_START|SCE_CTRL_SELECT))!=(SCE_CTRL_START|SCE_CTRL_SELECT)) {held=0;return;}
+    if(!held) {held=now;return;}
+    if(now-held<1000000)return;
+    xv_logf("[h2/frontend] returning to Xita dashboard\n");
+    if(h2_menu_gxm_flush)h2_menu_gxm_flush();
+    sceDisplaySetFrameBuf(NULL,SCE_DISPLAY_SETBUF_NEXTFRAME);
+    sceDisplayWaitVblankStart();sceDisplayWaitVblankStart();
+    xv_log_flush();
+    char *args[]={"--xita-dashboard",NULL};
+    int rc=sceAppMgrLoadExec("app0:eboot.bin",args,NULL);
+    if(rc>=0)for(;;)sceKernelDelayThread(100000);
+    xv_logf("[h2/frontend] LoadExec failed %08X\n",rc);
+    xv_log_flush();sceKernelExitProcess(1);
+}
+#endif
 static SceDisplayFrameBuf active_display;
 
 static int prepare_disk_header(void)
@@ -149,6 +182,12 @@ int h2_platform_present_queue(const uint8_t *pixels, size_t bytes, const uint8_t
     if (status < 0) return status;
     active_display = frame;
     ++presented_frames;
+#ifdef H2_BUNDLED
+    if(presented_frames==3 && bundle_slot>=0) {
+        int rc=xv_halo2_update_confirm((unsigned)bundle_slot);
+        xv_logf("[h2/frontend] rendered boot slot %d confirmation %d\n",bundle_slot,rc);
+    }
+#endif
     FILE *snapshot = presented_frames == 1 ? fopen("ux0:data/xita-halo2/scanout-last.bin", "wb") : NULL;
     if (snapshot) {
         uint32_t header[4] = {H2_DISPLAY_WIDTH, H2_DISPLAY_HEIGHT, H2_DISPLAY_WIDTH * 4, presented_frames};
@@ -792,7 +831,7 @@ _Noreturn void h2_audio_stop(xctx *c, uint32_t entry, const char *reason, uint32
  * the other diagnostic toggles.  Absent on a normal run (fopen fails silently) -> zero behaviour change. */
 static void h2_load_env(void)
 {
-    FILE *f = fopen("ux0:data/xita/env.txt", "r");
+    FILE *f = fopen(H2_ENV, "r");
     if (!f) return;
     char line[512];
     while (fgets(line, sizeof line, f)) {
@@ -818,16 +857,23 @@ static void h2_arm_watch(void)
     unsigned off = 0, len = 0;
     if (sscanf(w, "%x:%x", &off, &len) == 2) { xv_watch_off = off; xv_watch_len = len; xv_logf("[h2/cfg] write watch arena=%08X len=%08X\n", off, len); }
 }
-int main(void)
+int main(int argc,char **argv)
 {
     sceIoMkdir("ux0:data", 0777);
     sceIoMkdir("ux0:data/xita-halo2", 0777);
     sceIoMkdir("ux0:data/xita-halo2/save", 0777);
     log_fd = sceIoOpen("ux0:data/xita-halo2/boot.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
     xv_logf("[h2/boot] Xita " XV_BUILD_LABEL "; native XBE startup harness, title XH2B00001\n");
+#ifdef H2_BUNDLED
+    xv_halo2_update_init();
+    bundle_slot=xv_launch_slot(argc,argv);
+    xv_logf("[h2/frontend] bundled XITA00001; hold Start + Select to return\n");
+#else
+    (void)argc;(void)argv;
+#endif
     h2_load_env();
     h2_arm_watch();
-    FILE *input = fopen("app0:halo2_image.bin", "rb");
+    FILE *input = fopen(H2_APP "halo2_image.bin", "rb");
     uint32_t base, size;
     if (!input || fread(&base, 4, 1, input) != 1 || fread(&size, 4, 1, input) != 1) {
         xv_logf("[h2/blocked] unable to read image header\n"); return 1;

@@ -247,11 +247,14 @@ def wait_for_update(client, sha, previous_slot, timeout=180):
     raise RuntimeError("No confirmed boot within the timeout; installation was not verified."+detail+" Reconnect to inspect update status.")
 
 
-def upload_update(client, package, apply=False, wait=False):
-    from package_vpk import update_contract
+def upload_update(client, package, apply=False, wait=False, game="haloce"):
+    if game not in ("haloce", "halo2"):
+        raise ValueError("Unknown update game")
+    endpoint="/update/halo2" if game=="halo2" else "/update"
+    from package_vpk import update_contract, halo2_contract
     with zipfile.ZipFile(package) as z:
         names=z.namelist()
-        if len(set(names)) != len(names) or any(i.file_size > 64*1024*1024 for i in z.infolist()) or sum(i.file_size for i in z.infolist()) > 256*1024*1024:
+        if len(set(names)) != len(names) or any(i.file_size > 128*1024*1024 for i in z.infolist()) or sum(i.file_size for i in z.infolist()) > 256*1024*1024:
             raise ValueError("Invalid or oversized update package")
         files={name:z.read(name) for name in names}
     required={"eboot.bin", "game-a.self", "update-contract.txt", "boot-game.txt"}
@@ -260,30 +263,36 @@ def upload_update(client, package, apply=False, wait=False):
     abi=update_contract(files)
     if files["update-contract.txt"] != (abi+"\n").encode():
         raise ValueError("Package asset contract failed")
-    data=files["game-a.self"]
-    if not 4096 <= len(data) <= 64*1024*1024 or data[:4] != b"SCE\0":
+    if game=="halo2":
+        abi=halo2_contract(abi)
+        if not {"halo2-a.self", "boot-halo2.txt", "halo2-update-contract.txt"}.issubset(files) or files["halo2-update-contract.txt"]!=(abi+"\n").encode():
+            raise ValueError("This VPK has no valid bundled Halo 2 update")
+    data=files["halo2-a.self" if game=="halo2" else "game-a.self"]
+    if not 4096 <= len(data) <= (128 if game=="halo2" else 64)*1024*1024 or data[:4] != b"SCE\0":
         raise ValueError("Invalid Vita executable")
-    current=json.loads(client.request("/update")[1])
+    current=json.loads(client.request(endpoint)[1])
     if current["contract"] != abi:
         raise ValueError("Launcher or packaged assets differ; install this VPK once through VitaShell")
-    if apply and current.get("boot_slot",-1) not in (0,1):
+    if apply and game=="haloce" and current.get("boot_slot",-1) not in (0,1):
         raise ValueError("Wait for a confirmed dashboard boot before applying an update")
     sha=hashlib.sha256(data).hexdigest()
     client.lease(1800)
-    client.request(f"/update/begin?size={len(data)}&sha256={sha}&contract={abi}", "POST")
+    client.request(f"{endpoint}/begin?size={len(data)}&sha256={sha}&contract={abi}", "POST")
     for offset in range(0,len(data),65536):
-        client.request(f"/update/chunk?offset={offset}","POST",data[offset:offset+65536])
+        client.request(f"{endpoint}/chunk?offset={offset}","POST",data[offset:offset+65536])
         if offset % (1024*1024) == 0:
             print(f"Uploaded {min(offset+65536,len(data))}/{len(data)} bytes",flush=True)
-    client.request("/update/finish","POST",timeout=120)
-    state=json.loads(client.request("/update")[1])
+    client.request(endpoint+"/finish","POST",timeout=120)
+    state=json.loads(client.request(endpoint)[1])
     if state["state"] != 2 or state["received"] != len(data):
         raise RuntimeError("Device did not confirm verified update")
     result={"bytes":len(data),"sha256":sha,"verified":True,"restart_requested":False}
     if apply:
-        client.request("/update/apply","POST")
+        client.request(endpoint+"/apply","POST")
         result["restart_requested"]=True
-        if wait:
+        if game=="halo2":
+            result["confirmation"]="Return to Xita after Halo 2 renders, then check update-status --game halo2"
+        if wait and game=="haloce":
             result["slot"]=wait_for_update(client,sha,current["boot_slot"])
             result["boot_confirmed"]=True
     print(json.dumps(result),flush=True)
@@ -412,8 +421,11 @@ def main():
     upload = commands.add_parser("update", help="stage a compatible VPK executable and verify on device")
     upload.add_argument("package", type=Path)
     upload.add_argument("--apply", action="store_true", help="restart into the verified candidate")
-    commands.add_parser("update-status")
-    commands.add_parser("rollback", help="restart into the previous confirmed executable")
+    upload.add_argument("--game", choices=("haloce","halo2"), default="haloce")
+    status_update=commands.add_parser("update-status")
+    status_update.add_argument("--game", choices=("haloce","halo2"), default="haloce")
+    rollback=commands.add_parser("rollback", help="restart into the previous confirmed executable")
+    rollback.add_argument("--game", choices=("haloce","halo2"), default="haloce")
     shot = commands.add_parser("screen"); shot.add_argument("output", type=Path)
     log = commands.add_parser("log"); log.add_argument("output", type=Path)
     log.add_argument("--previous", type=int, choices=range(4), default=0,
@@ -445,11 +457,11 @@ def main():
         parser.error("--config is required")
     client = Client(args.config)
     if args.command == "update":
-        upload_update(client,args.package,args.apply,wait=args.apply)
+        upload_update(client,args.package,args.apply,wait=args.apply,game=args.game)
     elif args.command == "update-status":
-        print(client.request("/update")[1].decode())
+        print(client.request("/update/halo2" if args.game=="halo2" else "/update")[1].decode())
     elif args.command == "rollback":
-        client.request("/update/rollback","POST")
+        client.request("/update/halo2/rollback" if args.game=="halo2" else "/update/rollback","POST")
     elif args.command == "status":
         print(json.dumps(client.status(), indent=2))
     elif args.command == "trace-draw":

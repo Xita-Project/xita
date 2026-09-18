@@ -80,7 +80,8 @@
 #include <psp2/ctrl.h>
 #include "dashboard/xv_dash.h"
 #include "xv_remote.h"
-#include "xv_update.h"
+#include "xv_update_halo2.h"
+#include "xv_launch_args.h"
 #include <psp2/appmgr.h>
 static unsigned g_update_quiesced, g_recomp_finished;
 static int g_update_slot=-1;
@@ -792,7 +793,7 @@ static void xv_gfx_finish(void)
 static void xv_finish_for_exit(void)
 {
 #ifdef XV_RUN_RECOMP
-    if(xv_update_requested()) {
+    if(xv_updates_requested()) {
         int display=scePowerRequestDisplayOn();
         sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
         XV_LOG("update: wake display rc %08X; GPU drain begins\n",display);
@@ -802,13 +803,13 @@ static void xv_finish_for_exit(void)
     xv_gfx_finish();
 #ifdef XV_RUN_RECOMP
     xv_update_progress(XV_UPDATE_DISPLAY_DRAIN);
-    if(xv_update_requested())XV_LOG("update: GPU drain complete; detaching display\n");
+    if(xv_updates_requested())XV_LOG("update: GPU drain complete; detaching display\n");
 #endif
     sceDisplaySetFrameBuf(NULL,SCE_DISPLAY_SETBUF_NEXTFRAME);
     sceDisplayWaitVblankStart();
     sceDisplayWaitVblankStart();
 #ifdef XV_RUN_RECOMP
-    if(xv_update_requested())XV_LOG("update: display detached; draining periodic log writer before network stop\n");
+    if(xv_updates_requested())XV_LOG("update: display detached; draining periodic log writer before network stop\n");
 #endif
     /* Producers and pump are quiesced. Keep remote status/log retrieval alive
      * through a blocked or failed drain. No queue/sink lock is held here. */
@@ -816,7 +817,7 @@ static void xv_finish_for_exit(void)
         int drained=xv_log_shutdown(5000000);
         if(drained==XV_LOG_OK) break;
 #ifdef XV_RUN_RECOMP
-        if(xv_update_requested()) { sceKernelDelayThread(100000); continue; }
+        if(xv_updates_requested()) { sceKernelDelayThread(100000); continue; }
 #endif
         sceClibPrintf("[xv] exit log drain failed %d; pending output not claimed durable\n",drained);
         break;
@@ -1283,7 +1284,7 @@ void xv_present(void)
             g_slot_waits,(unsigned long long)g_slot_wait_us,xv_pipeline_enabled());
         g_slot_waits=0; g_slot_wait_us=0;
     }
-    if(xv_update_requested()) {
+    if(xv_updates_requested()) {
         /* End of the serialized recording call: all published uploads have
          * owners. Drain them, then park without yielding the guest token.
          * The main thread stops the pump before replacing this process. */
@@ -2074,7 +2075,7 @@ typedef struct {
 static int xv_dashboard_poll(void *userdata, xv_dash_input *input)
 {
     xv_dashboard_platform *p = userdata;
-    if(xv_update_requested())return 1;
+    if(xv_updates_requested())return 1;
     p->frame_started = sceKernelGetProcessTimeWide();
     if (!p->sample_started) p->sample_started = p->frame_started;
     SceCtrlData pad = {0};
@@ -2136,8 +2137,8 @@ static int xv_dashboard_game_status(const char *id,char *text,unsigned size)
 {
     if(strcmp(id,"halo2")) return 0;
     SceIoStat info;
-    if(sceIoGetstat("ux0:app/XH2B00001/eboot.bin",&info)<0) {
-        snprintf(text,size,"Install the experimental Halo 2 VPK first."); return 0;
+    if(sceIoGetstat("app0:halo2-a.self",&info)<0) {
+        snprintf(text,size,"Install a combined Xita VPK with Halo 2."); return 0;
     }
     if(sceIoGetstat("ux0:data/xita-halo2/game/maps/mainmenu.map",&info)<0) {
         snprintf(text,size,"Copy Halo 2 maps to data/xita-halo2/game/maps."); return 0;
@@ -2167,7 +2168,7 @@ static int xv_dashboard_start(void)
     XV_LOG("dashboard: ready; cached canvas %u KB; waiting for Launch Game\n", bytes / 1024);
     int rc = xv_dash_run(&cfg, &choice);
     sceKernelFreeMemBlock(canvas_uid); /* No dashboard memory survives into Halo. */
-    if(xv_update_requested())return 1;
+    if(xv_updates_requested())return 1;
     if (rc != 0) return -1;
     if(!strcmp(choice.game_id,"halo2")) { g_launch_halo2=1; return 2; }
     xv_load_settings(); /* All game consumers initialize after this hand-off. */
@@ -2223,8 +2224,9 @@ int main(int argc, char *argv[])
     XV_LOG("graphics startup: %u ms\n", (unsigned)((sceKernelGetProcessTimeWide() - gfx_started) / 1000));
 
 #ifdef XV_RUN_RECOMP
-    xv_update_init();
+    xv_update_init();xv_halo2_update_init();
     for(int i=0;i<argc;i++)if(!strcmp(argv[i],"--xita-slot=0")||!strcmp(argv[i],"--xita-slot=1"))g_update_slot=argv[i][12]-'0';
+    if(xv_launch_has(argc,argv,"--xita-dashboard"))setenv("XV_DASHBOARD","1",1);
     xv_remote_start();
     int dashboard_result=xv_dashboard_start();
     if(dashboard_result>0)goto shutdown;
@@ -2335,19 +2337,22 @@ shutdown:
 #endif
 #ifdef XV_RUN_RECOMP
     if(g_launch_halo2) {
-        XV_LOG("game selector: launching Halo 2 (XH2B00001)\n");
+        XV_LOG("game selector: launching bundled Halo 2\n");
         (void)xv_log_flush_wait(5000000);
-        int rc=sceAppMgrLaunchAppByUri(0x20000,"psgm:play?titleid=XH2B00001");
+        char *args[]={"--xita-game=halo2",NULL};
+        int rc=sceAppMgrLoadExec("app0:eboot.bin",args,NULL);
+        if(rc>=0)for(;;)sceKernelDelayThread(100000);
         if(rc<0) XV_LOG("game selector: Halo 2 launch failed %08X; reopen Xita\n",rc);
     }
-    if(xv_update_requested()) {
+    if(xv_updates_requested()) {
         XV_LOG("update: handing off to boot helper\n");
         if(xv_log_flush_wait(5000000)!=XV_LOG_OK) {
             sceClibPrintf("[xv] update: final log sync failed; refusing launcher handoff\n");
             sceKernelExitProcess(1); return 1;
         }
         xv_update_progress(XV_UPDATE_LAUNCHER_HANDOFF);
-        int rc=sceAppMgrLoadExec("app0:eboot.bin",NULL,NULL);
+        char *args[]={"--xita-game=halo2",NULL};
+        int rc=sceAppMgrLoadExec("app0:eboot.bin",xv_halo2_update_requested()?args:NULL,NULL);
         if(rc>=0)for(;;)sceKernelDelayThread(100000);
         XV_LOG("update: launcher handoff failed %08X; exiting without replacing active slot\n",rc);
     }

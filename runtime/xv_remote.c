@@ -5,7 +5,7 @@
 #include "xv_remote.h"
 #include "xv_benchmark.h"
 #include "xv_log.h"
-#include "xv_update.h"
+#include "xv_update_halo2.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,11 +24,23 @@ static unsigned captured_frame;
 static unsigned draw_trace_pending;
 static int listener=-1;
 static int upload_in_progress;
+static int upload_game = -1;
+typedef struct {
+    int (*begin)(unsigned,const char *,const char *);
+    int (*chunk)(unsigned,const void *,unsigned);
+    int (*finish)(void);
+    int (*request)(int);
+    void (*json)(char *,size_t);
+} update_ops;
+static const update_ops updates[] = {
+    {xv_update_begin,xv_update_chunk,xv_update_finish,xv_update_request,xv_update_json},
+    {xv_halo2_update_begin,xv_halo2_update_chunk,xv_halo2_update_finish,xv_halo2_update_request,xv_halo2_update_json}
+};
 static uint64_t awake_until;
 static unsigned handoff;
 void xv_update_progress(unsigned stage)
 {
-    if(!xv_update_requested() || stage<=XV_UPDATE_IDLE || stage>=XV_UPDATE_HANDOFF_COUNT)return;
+    if(!xv_updates_requested() || stage<=XV_UPDATE_IDLE || stage>=XV_UPDATE_HANDOFF_COUNT)return;
     unsigned previous=LOAD(&handoff);
     while(previous<stage && !__atomic_compare_exchange_n(&handoff,&previous,stage,0,
           __ATOMIC_RELEASE,__ATOMIC_RELAXED)) {}
@@ -76,7 +88,7 @@ int xv_remote_take_draw_trace(void)
 {
     if(!LOAD(&enabled))return 0;
     unsigned requested=__atomic_exchange_n(&draw_trace_pending,0,__ATOMIC_ACQ_REL);
-    return requested && !xv_benchmark_status() && !xv_benchmark_remote_busy() && !xv_update_requested();
+    return requested && !xv_benchmark_status() && !xv_benchmark_remote_busy() && !xv_updates_requested();
 }
 
 static void keep_awake(void)
@@ -156,7 +168,7 @@ static int authorized_request(char *request,char **method,char **target,unsigned
         else if(!strcasecmp(p,"Transfer-Encoding"))return 0;
         p=end+2;
     }
-    return auth==1 && (!*body_size || (!strcmp(*method,"POST") && !strncmp(*target,"/update/chunk?offset=",21)));
+    return auth==1 && (!*body_size || (!strcmp(*method,"POST") && (!strncmp(*target,"/update/chunk?offset=",21) || !strncmp(*target,"/update/halo2/chunk?offset=",27))));
 }
 static void serve(int s)
 {
@@ -175,13 +187,22 @@ static void serve(int s)
         char *method=NULL,*target=NULL;unsigned body_size=0;
         if(!authorized_request(request,&method,&target,&body_size)) {reply(s,403,"Authentication or framing rejected\n");return;}
         if(initial_body>body_size) {reply(s,400,"Unexpected request body\n");return;}
+        unsigned game=0;
+        char normalized[REQUEST_MAX];
+        if(!strncmp(target,"/update/halo2",13) && (!target[13] || target[13]=='/')) {
+            game=1; snprintf(normalized,sizeof normalized,"/update%s",target+13);target=normalized;
+        }
+        const update_ops *update=&updates[game];
         if(!strncmp(target,"/update",7)) {
+            if(strcmp(method,"GET") && ((upload_in_progress && upload_game!=(int)game) || xv_updates_requested())) {
+                reply(s,409,"Another update operation is active\n");return;
+            }
             if((strcmp(method,"GET")||strcmp(target,"/update"))&&(xv_benchmark_status()||xv_benchmark_remote_busy())) {reply(s,409,"Updates disabled during benchmark\n");return;}
             if(!strcmp(method,"GET")&&!strcmp(target,"/update")) {
-                char body[896];xv_update_json(body,sizeof body);
+                char body[1280];update->json(body,sizeof body);
                 size_t n=strlen(body);
                 if(n && body[n-1]=='}')snprintf(body+n-1,sizeof body-n+1,",\"handoff\":%u}",
-                    xv_update_requested()?LOAD(&handoff):XV_UPDATE_IDLE);
+                    xv_updates_requested()?LOAD(&handoff):XV_UPDATE_IDLE);
                 /* Read-only queue telemetry remains available throughout the
                  * logger drain. Existing handoff enum values are unchanged. */
                 extern void xv_log_get_status(xv_log_status *) __attribute__((weak));
@@ -199,10 +220,10 @@ static void serve(int s)
                 char *sha=strstr(target+19,"&sha256="),*abi=sha?strstr(sha+8,"&contract="):NULL;unsigned size;
                 if(!sha||!abi) {reply(s,400,"Invalid update manifest\n");return;}
                 *sha=0;*abi=0;
-                if(!uint_value(target+19,XV_UPDATE_LIMIT,&size)||xv_update_begin(size,sha+8,abi+10))reply(s,409,"Incompatible package or update unavailable\n");
-                else {upload_in_progress=1;reply(s,204,"");}
+                if(!uint_value(target+19,game?XV_HALO2_UPDATE_LIMIT:XV_UPDATE_LIMIT,&size)||update->begin(size,sha+8,abi+10))reply(s,409,"Incompatible package or update unavailable\n");
+                else {upload_in_progress=1;upload_game=(int)game;reply(s,204,"");}
             } else if(!strcmp(method,"POST")&&!strncmp(target,"/update/chunk?offset=",21)) {
-                unsigned offset;if(!body_size||!uint_value(target+21,XV_UPDATE_LIMIT,&offset)) {reply(s,400,"Invalid update chunk\n");return;}
+                unsigned offset;if(!body_size||!uint_value(target+21,game?XV_HALO2_UPDATE_LIMIT:XV_UPDATE_LIMIT,&offset)) {reply(s,400,"Invalid update chunk\n");return;}
                 char *chunk=malloc(body_size);if(!chunk) {reply(s,503,"No upload buffer\n");return;}
                 memcpy(chunk,request+head,initial_body);size_t have=initial_body;deadline=remote_now()+15000000;
                 while(have<body_size&&LOAD(&running)&&remote_now()<deadline) {
@@ -211,17 +232,17 @@ static void serve(int s)
                     if(got<0) {remote_sleep(10000);keep_awake();continue;}
                     have+=(unsigned)got;
                 }
-                int bad=have!=body_size||xv_update_chunk(offset,chunk,body_size);free(chunk);
+                int bad=have!=body_size||update->chunk(offset,chunk,body_size);free(chunk);
                 reply(s,bad?409:204,bad?"Incomplete chunk or wrong offset\n":"");
             } else if(!strcmp(method,"POST")&&!strcmp(target,"/update/finish")) {
-                int bad=xv_update_finish();if(!bad)upload_in_progress=0;reply(s,bad?409:204,bad?"Update verification failed\n":"");
+                int bad=update->finish();if(!bad)upload_in_progress=0;reply(s,bad?409:204,bad?"Update verification failed\n":"");
             } else if(!strcmp(method,"POST")&&(!strcmp(target,"/update/apply")||!strcmp(target,"/update/rollback"))) {
-                int bad=xv_update_request(!strcmp(target,"/update/rollback"));
+                int bad=update->request(!strcmp(target,"/update/rollback"));
                 if(!bad)xv_update_progress(XV_UPDATE_REQUESTED);
                 reply(s,bad?409:204,bad?"Update not ready\n":"");
             } else reply(s,404,"Unknown update operation\n");
         } else if(!strcmp(method,"POST")&&!strcmp(target,"/trace/draw")) {
-            if(upload_in_progress||xv_update_requested()||xv_benchmark_status()||xv_benchmark_remote_busy()) {
+            if(upload_in_progress||xv_updates_requested()||xv_benchmark_status()||xv_benchmark_remote_busy()) {
                 reply(s,409,"Draw trace unavailable during update or benchmark\n");return;
             }
             unsigned expected=0;
@@ -241,7 +262,7 @@ static void serve(int s)
             if(!strcmp(target+16,"query-boundary"))kind=XV_BENCH_QUERY_BOUNDARY;
             if(!strcmp(target+16,"light-census"))kind=XV_BENCH_LIGHT_CENSUS;
             if(!kind)reply(s,400,"Unknown benchmark kind\n");
-            else if(upload_in_progress||xv_update_requested()||LOAD(&draw_trace_pending)||xv_benchmark_remote_request(kind))reply(s,409,"Benchmark unavailable: enter first-person gameplay and finish any active operation\n");
+            else if(upload_in_progress||xv_updates_requested()||LOAD(&draw_trace_pending)||xv_benchmark_remote_request(kind))reply(s,409,"Benchmark unavailable: enter first-person gameplay and finish any active operation\n");
             else reply(s,204,"");
         } else if(!strcmp(method,"GET")&&!strcmp(target,"/status")) {
             uint64_t now=remote_now();
@@ -343,7 +364,7 @@ void xv_remote_stop(void)
     if(listener>=0) {remote_close(listener);listener=-1;}
     /* A callback that claimed the request owns screen until it publishes. */
     while(LOAD(&capture)==2)remote_sleep(1000);
-    xv_update_close();
+    xv_update_close();xv_halo2_update_close();
     upload_in_progress=0;
     free(screen);screen=NULL;STORE(&capture,0);STORE(&draw_trace_pending,0);memset(key,0,sizeof key);
 #ifdef __vita__

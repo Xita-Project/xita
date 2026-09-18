@@ -651,7 +651,7 @@ include games/$(GAME_PROFILE)/runtime.mk
 ifeq ($(RECOMP),1)
 CFLAGS    += -DXV_RUN_RECOMP -Irecomp -Irecomp/kernel
 SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_ui_gxm.c runtime/xv_boot.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_vertex_prepare.c runtime/xv_vertex_capture.c runtime/xv_upload_worker.c runtime/xv_draw_profile.c runtime/xv_render_profile.c runtime/xv_settings.c dashboard/xv_dash.c
-SRCS      += runtime/xv_remote.c runtime/xv_update.c runtime/xv_sha256.c
+SRCS      += runtime/xv_remote.c runtime/xv_update.c runtime/xv_update_halo2.c runtime/xv_sha256.c
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
 # Select the reviewed native adapter independently of generated game objects.
@@ -765,9 +765,9 @@ $(SFO): Makefile version.json | $(BUILD)
 	vita-mksfoex -s TITLE_ID=$(TITLE_ID) -s APP_VER=$$($(PYTHON) tools/gen_build_version.py --sfo) $(SFO_EXTRA) "$(TITLE)" $@
 
 # Stable updater boot helper; generated game code is never linked into it.
-$(BUILD)/update-launcher.elf: runtime/xv_update_launcher.c runtime/xv_update.c runtime/xv_sha256.c runtime/xv_update.h runtime/xv_sha256.h Makefile
+$(BUILD)/update-launcher.elf: runtime/xv_update_launcher.c runtime/xv_update.c runtime/xv_update_halo2.c runtime/xv_sha256.c runtime/xv_update.h runtime/xv_update_halo2.h runtime/xv_launch_args.h runtime/xv_sha256.h Makefile
 	@mkdir -p $(BUILD)
-	$(CC) -O2 -mthumb -Wall -Wextra -Iruntime $(LDFLAGS) -o $@ runtime/xv_update_launcher.c runtime/xv_update.c runtime/xv_sha256.c -lSceAppMgr_stub -lSceIofilemgr_stub -lScePower_stub -lSceProcessmgr_stub -lSceKernelThreadMgr_stub -lSceLibKernel_stub
+	$(CC) -O2 -mthumb -Wall -Wextra -Iruntime $(LDFLAGS) -o $@ runtime/xv_update_launcher.c runtime/xv_update.c runtime/xv_update_halo2.c runtime/xv_sha256.c -lSceAppMgr_stub -lSceIofilemgr_stub -lScePower_stub -lSceProcessmgr_stub -lSceKernelThreadMgr_stub -lSceLibKernel_stub
 $(BUILD)/update-launcher.velf: $(BUILD)/update-launcher.elf
 	vita-elf-create $< $@
 $(BUILD)/update-launcher.self: $(BUILD)/update-launcher.velf
@@ -778,13 +778,13 @@ UPDATE_LAUNCHER := $(BUILD)/update-launcher.self
 endif
 
 # VPK: eboot + param.sfo + shaders/*.gxp (+ sce_sys assets when present) ------
-$(VPK): $(EBOOT) $(SFO) $(SHADER_PRESENT) $(SCE_SYS_FILES) $(SCENE_FILES) $(LICENSE_FILES) $(UPDATE_LAUNCHER) tools/package_vpk.py
+$(VPK): $(EBOOT) $(SFO) $(SHADER_PRESENT) $(SCE_SYS_FILES) $(SCENE_FILES) $(LICENSE_FILES) $(UPDATE_LAUNCHER) $(HALO2_PACKAGE) tools/package_vpk.py
 ifneq ($(SHADER_MISSING),)
 	@echo "warning: shader(s) not found, VPK built without them: $(SHADER_MISSING)"
 	@echo "         (run 'make shaders' with psp2cgc on PATH, or drop prebuilt .gxp files in $(SHADER_DIR)/)"
 endif
 ifeq ($(RECOMP),1)
-	$(PYTHON) tools/package_vpk.py --root . --eboot $(EBOOT) --sfo $(SFO) --launcher $(UPDATE_LAUNCHER) --output $@
+	$(PYTHON) tools/package_vpk.py --root . --eboot $(EBOOT) --sfo $(SFO) --launcher $(UPDATE_LAUNCHER) $(if $(HALO2_PACKAGE),--halo2-package $(HALO2_PACKAGE),) --output $@
 else
 	vita-pack-vpk -s $(SFO) -b $(EBOOT) $(VPK_SHADER_ARGS) $(VPK_ASSET_ARGS) $@
 endif

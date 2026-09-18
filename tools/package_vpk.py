@@ -6,6 +6,7 @@ installation or upload. Halo-linked packages are private development artifacts.
 """
 import argparse
 import hashlib
+import re
 from pathlib import Path
 import tempfile
 import zipfile
@@ -16,7 +17,8 @@ def update_contract(files):
     # A changed launcher/shader/asset requires a complete VPK installation.
     h = hashlib.sha256()
     for name in sorted(files):
-        if name in {"game-a.self", "boot-game.txt", "update-contract.txt"}:
+        if name in {"game-a.self", "boot-game.txt", "update-contract.txt",
+                    "halo2-a.self", "boot-halo2.txt", "halo2-update-contract.txt"}:
             continue
         h.update(name.encode() + b"\0" + hashlib.sha256(files[name]).hexdigest().encode() + b"\n")
     return h.hexdigest()
@@ -27,7 +29,39 @@ def update_record(size, sha, contract):
     return (prefix + " " + hashlib.sha256(prefix.encode()).hexdigest() + "\n").encode()
 
 
-def package(root, eboot, sfo, output, include_scenes=False, launcher=None):
+def halo2_contract(asset_contract):
+    # A valid CE transfer must never be accepted as an H2 executable update.
+    return hashlib.sha256(("halo2\0" + asset_contract).encode()).hexdigest()
+
+
+def halo2_payload(package_path):
+    """Import only a bundling-aware H2 build, never arbitrary ZIP paths."""
+    with zipfile.ZipFile(package_path) as archive:
+        entries = archive.infolist()
+        names = [entry.filename for entry in entries]
+        if (len(set(names)) != len(names) or
+                any(entry.file_size > 128*1024*1024 or
+                    (entry.external_attr >> 16) & 0o170000 == 0o120000 for entry in entries) or
+                sum(entry.file_size for entry in entries) > 256*1024*1024):
+            raise ValueError("Invalid or oversized Halo 2 package")
+        if not {"eboot.bin", "halo2_image.bin", "bundled-mode.txt"}.issubset(names):
+            raise ValueError("Halo 2 input must be built with BUNDLED=1")
+        if archive.read("bundled-mode.txt") != b"xita-halo2-bundle-v1\n":
+            raise ValueError("Unsupported Halo 2 bundle format")
+        runtime = archive.read("eboot.bin")
+        if runtime[:4] != b"SCE\0" or not 4096 <= len(runtime) <= 128*1024*1024:
+            raise ValueError("Invalid Halo 2 executable")
+        result = {"halo2-a.self": runtime}
+        for name in names:
+            if name in {"eboot.bin", "sce_sys/param.sfo", "bundled-mode.txt"}:
+                continue
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:gxp|contract\.bin)", name) and name not in {"halo2_image.bin", "halo2-dsp.bin"}:
+                raise ValueError(f"Unexpected Halo 2 package asset: {name}")
+            result["halo2/" + name] = archive.read(name)
+        return result
+
+
+def package(root, eboot, sfo, output, include_scenes=False, launcher=None, halo2_package=None):
     root, eboot, sfo, output = map(Path, (root, eboot, sfo, output))
     files = {"sce_sys/param.sfo": sfo, "eboot.bin": eboot}
     for name in ("LICENSE", "NOTICE", "THIRD_PARTY.md"):
@@ -51,13 +85,20 @@ def package(root, eboot, sfo, output, include_scenes=False, launcher=None):
             raise ValueError("Output must not replace a package input")
     if eboot.read_bytes()[:4] != b"SCE\0" or sfo.read_bytes()[:4] != b"\0PSF":
         raise ValueError("Expected a signed Vita SELF and param.sfo")
-    generated = {}
+    if halo2_package and not launcher:
+        raise ValueError("A combined package requires the shared launcher")
+    generated = halo2_payload(halo2_package) if halo2_package else {}
     if launcher:
         if Path(launcher).read_bytes()[:4] != b"SCE\0" or not 4096 <= eboot.stat().st_size <= 64*1024*1024:
             raise ValueError("Invalid updater launcher or game executable size")
-        abi = update_contract({name: source.read_bytes() for name, source in files.items()})
+        abi = update_contract({**{name: source.read_bytes() for name, source in files.items()}, **generated})
         generated["update-contract.txt"] = (abi + "\n").encode()
         generated["boot-game.txt"] = update_record(eboot.stat().st_size, hashlib.sha256(eboot.read_bytes()).hexdigest(), abi)
+        if halo2_package:
+            h2abi = halo2_contract(abi)
+            runtime = generated["halo2-a.self"]
+            generated["halo2-update-contract.txt"] = (h2abi + "\n").encode()
+            generated["boot-halo2.txt"] = update_record(len(runtime), hashlib.sha256(runtime).hexdigest(), h2abi)
     output.parent.mkdir(parents=True, exist_ok=True)
     # Finish and validate the complete ZIP before replacing a prior VPK.
     with tempfile.TemporaryDirectory(prefix=".xita-vpk-", dir=output.parent) as temp:
@@ -81,12 +122,13 @@ def main():
     parser.add_argument("--eboot", type=Path)
     parser.add_argument("--sfo", type=Path)
     parser.add_argument("--launcher", type=Path, help="stable updater SELF; game runtime becomes game-a.self")
+    parser.add_argument("--halo2-package", type=Path, help="private Halo 2 VPK built with BUNDLED=1; adds the second game to this install")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--include-scenes", action="store_true", help="include assets/*.bin for the mock build only")
     args = parser.parse_args()
     try:
         result = package(args.root, args.eboot or args.root / "build/eboot.bin",
-                         args.sfo or args.root / "build/param.sfo", args.output, args.include_scenes, args.launcher)
+                         args.sfo or args.root / "build/param.sfo", args.output, args.include_scenes, args.launcher, args.halo2_package)
     except (OSError, ValueError) as error:
         parser.error(str(error))
     print(f"{args.output}: {result['files']} files, {result['bytes']} bytes")

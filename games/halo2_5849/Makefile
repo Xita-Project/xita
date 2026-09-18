@@ -5,6 +5,10 @@ CC := $(VITASDK)/bin/arm-vita-eabi-gcc
 HOST_CC ?= cc
 GUEST_OPT ?= -O1
 HOST_CHANNEL ?= 0
+BUNDLED ?= 0
+ifneq ($(filter $(BUNDLED),0 1),$(BUNDLED))
+$(error BUNDLED must be 0 or 1)
+endif
 QUAD_RENDER ?= 0
 SCREEN_RENDER ?= 0
 BC1_RENDER ?= 0
@@ -36,6 +40,13 @@ CFLAGS += -DXV_EFLAGS_ID=1
 $(BUILD)/recomp/kernel/xk_crypto.o: CFLAGS += -DXV_NONZERO_HD_KEY=1
 SYS := recomp/xv_x86rt.c recomp/kernel/xk_mem.c recomp/kernel/xk_rtl.c recomp/kernel/xk_file.c recomp/kernel/xk_thread.c recomp/kernel/xk_xapi.c recomp/kernel/xk_crypto.c recomp/kernel/xk_os_vita.c runtime/xv_cpu.c
 OBJECTS := $(addprefix $(BUILD)/,$(SYS:.c=.o)) $(BUILD)/boot.o $(BUILD)/kernel_stack.o $(BUILD)/command_snapshot.o $(BUILD)/cache_volume.o $(BUILD)/instance_memory.o $(BUILD)/gpu_bus.o $(BUILD)/nv2a_regs.o $(BUILD)/strict-kernel.o $(BUILD)/xv_fn_table.o $(patsubst $(GENERATED)/%.c,$(BUILD)/%.o,$(wildcard $(GENERATED)/code_*.c))
+ifeq ($(BUNDLED),1)
+SYS += runtime/xv_update_halo2.c runtime/xv_sha256.c
+OBJECTS += $(BUILD)/runtime/xv_update_halo2.o $(BUILD)/runtime/xv_sha256.o
+$(BUILD)/boot.o $(BUILD)/menu_gxm.o $(BUILD)/quad_gxm.o $(BUILD)/audio_host.o: CFLAGS += -DH2_BUNDLED=1
+BUNDLE_FILE = $(BUILD)/bundled-mode.txt
+BUNDLE_PACK = -a $(BUNDLE_FILE)=bundled-mode.txt
+endif
 ifeq ($(HOST_CHANNEL),1)
 OBJECTS += $(addprefix $(BUILD)/,host_channel_runtime.o command_state.o host_channel.o host_tiles.o push_stream.o gpu_objects.o kelvin_clear.o scanout.o input.o audio_unavailable.o)
 OBJECTS += $(BUILD)/kernel_timer.o $(BUILD)/fp_environment.o $(BUILD)/linear_texture.o
@@ -166,7 +177,7 @@ WRAPS += xk_AvSendTVEncoderOption xk_AvSetDisplayMode xk_KeWaitForSingleObject
 WRAPS += xk_KeInitializeTimerEx xk_KeInitializeDpc xk_KeSetTimer xk_KeSetTimerEx xk_KeCancelTimer xk_KeInsertQueueDpc xk_KeRemoveQueueDpc
 WRAPS += xk_KfRaiseIrql xk_KfLowerIrql xk_KeRaiseIrqlToDpcLevel
 endif
-LIBS := -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceSysmem_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lSceRtc_stub -lSceCtrl_stub -lSceTouch_stub -lSceAudio_stub -lSceDisplay_stub -lm
+LIBS := -lSceAppMgr_stub -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceSysmem_stub -lSceProcessmgr_stub -lSceIofilemgr_stub -lSceRtc_stub -lSceCtrl_stub -lSceTouch_stub -lSceAudio_stub -lSceDisplay_stub -lm
 ifeq ($(QUAD_RENDER),1)
 ifneq ($(HOST_CHANNEL),1)
 $(error QUAD_RENDER=1 requires HOST_CHANNEL=1)
@@ -699,8 +710,12 @@ $(BUILD)/eboot.bin: $(BUILD)/halo2-boot.velf
 $(BUILD)/param.sfo: Makefile
 	@mkdir -p $(dir $@)
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=XH2B00001 -s APP_VER=$$(python3 $(ROOT)/tools/gen_build_version.py --sfo) -d ATTRIBUTE2=12 "Xita Halo 2 Boot" $@
-$(BUILD)/halo2-boot.vpk: $(MENU_GXP) $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(BC1_FILES) $(COMPOSITION_FILES) $(THRESHOLD_FILES) $(BLUR_FILES) $(BLEND_FILES) $(LUMA_FILES) $(SPRITE_FILES) $(DSP_FILES)
-	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(BC1_PACK) $(COMPOSITION_PACK) $(THRESHOLD_PACK) $(BLUR_PACK) $(BLEND_PACK) $(LUMA_PACK) $(SPRITE_PACK) $(DSP_PACK) $@
+$(BUILD)/bundled-mode.txt: Makefile
+	@mkdir -p $(dir $@)
+	@echo xita-halo2-bundle-v1 > $@
+
+$(BUILD)/halo2-boot.vpk: $(BUNDLE_FILE) $(MENU_GXP) $(BUILD)/eboot.bin $(BUILD)/param.sfo $(IMAGE) $(QUAD_FILES) $(BC1_FILES) $(COMPOSITION_FILES) $(THRESHOLD_FILES) $(BLUR_FILES) $(BLEND_FILES) $(LUMA_FILES) $(SPRITE_FILES) $(DSP_FILES)
+	$(VITASDK)/bin/vita-pack-vpk -s $(BUILD)/param.sfo -b $(BUILD)/eboot.bin -a $(IMAGE)=halo2_image.bin $(QUAD_PACK) $(BC1_PACK) $(COMPOSITION_PACK) $(THRESHOLD_PACK) $(BLUR_PACK) $(BLEND_PACK) $(LUMA_PACK) $(SPRITE_PACK) $(DSP_PACK) $(BUNDLE_PACK) $@
 -include $(OBJECTS:.o=.d)
 
 $(BUILD)/audio_hrtf_model_test: audio_hrtf_model_test.c audio_hrtf_model.h
@@ -737,3 +752,11 @@ $(BUILD)/menu-gxm.config: menu-gxm-force
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/menu_render.o: $(BUILD)/menu-gxm.config
+
+# Changing packaging mode must rebuild resource paths and the frontend even
+# when a developer reuses a build directory.
+$(BUILD)/bundle-mode-$(BUNDLED):
+	@mkdir -p $(BUILD)
+	@rm -f $(BUILD)/bundle-mode-0 $(BUILD)/bundle-mode-1
+	@touch $@
+$(BUILD)/boot.o $(BUILD)/menu_gxm.o $(BUILD)/quad_gxm.o $(BUILD)/audio_host.o: $(BUILD)/bundle-mode-$(BUNDLED)

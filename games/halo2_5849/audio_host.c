@@ -1,3 +1,4 @@
+#include "bundle.h"
 /* Checked XDK5849 device and external PCM buffer boundaries. Unknown sound
  * methods stop; every accepted object owns real mixer/output resources. */
 #include "audio_host.h"
@@ -1742,7 +1743,7 @@ static void effects_download(xctx *c)
     /* Real initialized interpreter; no descriptor is published before the
      * owned monitor's completed command acknowledgement and frame halt. */
     h2_dsp_status state;
-    h2_dsp_engine *candidate = h2_dsp_asset_open("app0:halo2-dsp.bin", &state);
+    h2_dsp_engine *candidate = h2_dsp_asset_open(H2_APP "halo2-dsp.bin", &state);
     if (!candidate) {
         xv_logf("[h2/dsp] initialization failed reason=%s pc=%04X address=%08X value=%08X\n",
                 state.fault ? state.fault : "allocation", state.pc, state.fault_address, state.fault_value);

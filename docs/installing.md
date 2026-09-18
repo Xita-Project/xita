@@ -1,6 +1,6 @@
 # Installing Xita
 
-[README](../README.md) · [Download VPK](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1) · [Game data](game-data.md) · [Compatibility](../COMPATIBILITY.md)
+[README](../README.md) · [Download VPK](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.2) · [Game data](game-data.md) · [Compatibility](../COMPATIBILITY.md)
 
 Install the app from a VPK, then add your own Halo data. You need a
 homebrew-enabled PS Vita, VitaShell and a USB cable. Windows, macOS and Linux
@@ -47,15 +47,15 @@ fingerprint and folder layout.
 
 ## 1. Download a VPK
 
-Open the [current Xita game release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1),
-expand **Assets**, and download **`xita-0.2.0-test.1.vpk`**.
+Open the [current Xita game release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.2),
+expand **Assets**, and download **`xita-0.2.0-test.2.vpk`**.
 Each release contains one VPK, `SHA256SUMS.txt` and `BUILD-INFO.json`. Sign in
 with an account that has repository access while releases are private.
 GitHub's automatic **Source code** downloads are not installable apps.
 
 This tester package includes the cumulative CE performance work, **Select Game**,
-and visible build versions. Halo 2 is a separate experimental install; the CE
-VPK does not include Halo 2. Read the [tester notes](tester-build-20260918.md)
+and visible build versions. It bundles the experimental Halo 2 runtime in the
+same installation; each game still needs its own original game data. Read the [tester notes](combined-games-20260918.md)
 for known limits and [Halo 2 setup](halo2-hardware.md) before testing that profile.
 
 For an older build, use the [release guide](releases.md). Older releases are
@@ -80,7 +80,7 @@ and paste your `haloce` folder there once. The result must contain
 ```text
 Vita drive/
 ├── VPK/
-│   └── xita-0.2.0-test.1.vpk
+│   └── xita-0.2.0-test.2.vpk
 └── data/
     └── xita/
         ├── halo_image.bin
@@ -149,10 +149,10 @@ See [Compatibility](../COMPATIBILITY.md) for known issues and what to include in
 
 Read the version and source revision in the dashboard footer, or enable
 **Display → Performance overlay** to include them in gameplay screenshots.
-The expected tester version is **0.2.0-test.1**. A runtime update changes these
+The expected tester version is **0.2.0-test.2**. A runtime update changes these
 labels even if Vita's application information still shows the older VPK version.
 Installing the full VPK updates the application's metadata too.
 
 Use **Select Game → Halo: Combat Evolved** for ordinary CE testing. Existing
-CE data and saves stay in place. Halo 2 requires a separate setup; selecting it
+CE data and saves stay in place. Halo 2 requires its own game data; selecting it
 does not download or convert another Xbox game.

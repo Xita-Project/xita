@@ -8,7 +8,8 @@ have their own release and bubble.
 
 | Download | Purpose |
 | --- | --- |
-| [Xita 0.2.0-test.1](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1) | Current tester package: cumulative CE performance work, game selection and visible version/revision. See tester notes for validation limits. |
+| [Xita 0.2.0-test.2](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.2) | Combined CE/Halo 2 installation, per-game updates and return to dashboard. [Test limits](combined-games-20260918.md). |
+| [Xita 0.2.0-test.1](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.1) | Previous tester package: cumulative CE performance work, game selection and visible version/revision. See tester notes for validation limits. |
 | [Xita AdHoc Test 01.01](https://github.com/Xita-Project/xita/releases/tag/adhoc-20260908b) | Standalone diagnostic for two Vitas; wireless testing pending. |
 
 Each release has three uploaded files: the VPK, `SHA256SUMS.txt` and

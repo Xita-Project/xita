@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import time
 from vita_remote import Client, benchmark, upload_update, wait_for_update
-from package_vpk import update_contract, update_record
+from package_vpk import update_contract, update_record, halo2_contract
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -168,7 +168,7 @@ def main():
         exe = tmp / "server"
         flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if os.getenv("SANITIZE") else []
         subprocess.run(["cc", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", *flags,
-                        str(ROOT / "tools/tests/remote_server.c"), str(ROOT / "runtime/xv_update.c"), str(ROOT / "runtime/xv_sha256.c"), "-pthread", "-o", str(exe)], check=True)
+                        str(ROOT / "tools/tests/remote_server.c"), str(ROOT / "runtime/xv_update.c"), str(ROOT / "runtime/xv_update_halo2.c"), str(ROOT / "runtime/xv_sha256.c"), "-pthread", "-o", str(exe)], check=True)
         data = tmp / "ux0:data/xita"
         data.mkdir(parents=True)
         key = "0123456789abcdef" * 2
@@ -184,13 +184,19 @@ def main():
         (tmp/'app0:').symlink_to(app,target_is_directory=True)
         old=b'SCE\0'+bytes(4092)
         new=b'SCE\0'+bytes(range(256))*700
-        files={'eboot.bin':b'SCE\0stable launcher', 'game-a.self':new, 'sce_sys/param.sfo':b'\0PSFtest'}
+        files={'eboot.bin':b'SCE\0stable launcher', 'game-a.self':new, 'halo2-a.self':new, 'sce_sys/param.sfo':b'\0PSFtest'}
         abi=update_contract(files)
         files['update-contract.txt']=(abi+'\n').encode()
         files['boot-game.txt']=update_record(len(new),hashlib.sha256(new).hexdigest(),abi)
         (app/'update-contract.txt').write_text(abi+'\n')
         (app/'boot-game.txt').write_bytes(update_record(len(old),hashlib.sha256(old).hexdigest(),abi))
         (app/'game-a.self').write_bytes(old)
+        h2abi=halo2_contract(abi)
+        files['halo2-update-contract.txt']=(h2abi+'\n').encode()
+        files['boot-halo2.txt']=update_record(len(new),hashlib.sha256(new).hexdigest(),h2abi)
+        (app/'halo2-update-contract.txt').write_text(h2abi+'\n')
+        (app/'boot-halo2.txt').write_bytes(update_record(len(old),hashlib.sha256(old).hexdigest(),h2abi))
+        (app/'halo2-a.self').write_bytes(old)
         candidate=tmp/'candidate.vpk'
         with zipfile.ZipFile(candidate,'w') as z:
             for name,value in files.items():z.writestr(name,value)
@@ -360,6 +366,20 @@ def main():
             assert state['log']['accepted']==2**64-1 and state['log']['bytes']==[2**64-1,2**64-2,2**64-3]
             assert state['log']['frame']==2**32-1 and state['log']['chunk']==2**32-1
             assert state['log']['enabled']==state['log']['transition']==2**32-1
+            h2state=json.loads(request('/update/halo2')[2])
+            assert h2state['contract']==h2abi and h2state['installed_slot']==0
+            assert h2state['boot_slot']==-1 and h2state['log']['accepted']==2**64-1
+            h2manifest=f'/update/halo2/begin?size={len(new)}&sha256={hashlib.sha256(new).hexdigest()}&contract={h2abi}'
+            assert request(h2manifest.replace(h2abi,abi),'POST')[0]==409
+            assert request(h2manifest.replace(str(len(new)),str(70*1024*1024)),'POST')[0]==204
+            assert request(h2manifest,'POST')[0]==204
+            assert request(f'/update/begin?size={len(new)}&sha256={hashlib.sha256(new).hexdigest()}&contract={abi}','POST')[0]==409
+            assert request('/update/chunk?offset=0','POST',data=b'wrong game')[0]==409
+            assert request('/update/halo2/chunk?offset=0','POST',data=bytes(65537))[0]==403
+            result=upload_update(client,candidate,game='halo2')
+            assert result['verified'] and not result['restart_requested']
+            assert json.loads(request('/update/halo2')[2])['state']==2
+            assert json.loads(request('/update')[2])['state']==0
             manifest=f'/update/begin?size={len(new)}&sha256={hashlib.sha256(new).hexdigest()}&contract={abi}'
             assert request(manifest,'POST',token='f'*32)[0]==403
             assert request(manifest+'x','POST')[0]==409
@@ -377,6 +397,7 @@ def main():
             result=upload_update(client,candidate,True)
             assert result['verified'] and result['restart_requested']
             assert json.loads(request('/update')[2])['handoff']==1
+            assert request('/update/halo2/apply','POST')[0]==409
             assert command('h')=='ACK'
             state=json.loads(request('/update')[2]);assert state['handoff']==4 and state['requested']==1
             assert (app/'game-a.self').read_bytes()==old

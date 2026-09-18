@@ -1,3 +1,4 @@
+#include "bundle.h"
 /* H2-only private RGB staging backend for the pinned movie-quad contract. */
 #include "quad_gxm.h"
 #include "dxt23_layout.h"
@@ -73,7 +74,7 @@ const h2_quad_contract *h2_quad_gxm_contract(void)
 {
     static int loaded;
     if (loaded) return &contract;
-    FILE *f=fopen("app0:quad.contract.bin","rb");
+    FILE *f=fopen(H2_APP "quad.contract.bin","rb");
     if (!f) { xv_logf("[h2/quad] missing private draw contract\n"); return NULL; }
     uint32_t header[2];
     int ok=fread(header,1,8,f)==8 && header[0]==0x43513248 && header[1]==1 &&
@@ -99,7 +100,7 @@ static int initialize(void)
     pp.fragmentUsseMemSize=256*1024;pp.fragmentUsseMem=alloc(pp.fragmentUsseMemSize,2,&pp.fragmentUsseOffset);
     REQUIRE(pp.bufferMem && pp.vertexUsseMem && pp.fragmentUsseMem);
     patcher=NULL;CHECK(sceGxmShaderPatcherCreate(&pp,&patcher));
-    const SceGxmProgram *vp=load("app0:quad.vert.gxp",1112),*fp=load("app0:quad.frag.gxp",400);
+    const SceGxmProgram *vp=load(H2_APP "quad.vert.gxp",1112),*fp=load(H2_APP "quad.frag.gxp",400);
     REQUIRE(vp && fp);
     SceGxmShaderPatcherId vid,fid;CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
     const char *names[]={"IN.position","IN.color0","IN.texcoord0"};SceGxmVertexAttribute attr[3]={{0}};
@@ -214,7 +215,7 @@ const h2_screen_contract *h2_screen_gxm_contract(void)
 {
     static int loaded;
     if(loaded)return &screen_contract;
-    FILE *file=fopen("app0:screen.contract.bin","rb");if(!file)return NULL;
+    FILE *file=fopen(H2_APP "screen.contract.bin","rb");if(!file)return NULL;
     uint32_t header[2];
     int ok=fread(header,1,8,file)==8&&header[0]==0x43533248&&header[1]==2&&
         fread(&screen_contract,1,sizeof screen_contract,file)==sizeof screen_contract&&
@@ -225,8 +226,8 @@ const h2_screen_contract *h2_screen_gxm_contract(void)
 }
 static int screen_initialize(void)
 {
-    const SceGxmProgram *vp=load("app0:screen.vert.gxp",596),*fp=load("app0:screen.frag.gxp",1316),
-        *copy=load("app0:screen.copy.frag.gxp",344);
+    const SceGxmProgram *vp=load(H2_APP "screen.vert.gxp",596),*fp=load(H2_APP "screen.frag.gxp",1316),
+        *copy=load(H2_APP "screen.copy.frag.gxp",344);
     REQUIRE(vp&&fp&&copy);
     SceGxmShaderPatcherId vid,fid,cid;
     CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));
@@ -324,7 +325,7 @@ static int bc1_attempted,bc1_ready;
 const h2_bc1_contract *h2_bc1_gxm_contract(void)
 {
     static int loaded;if(loaded)return &bc1_contract;
-    FILE *file=fopen("app0:bc1.contract.bin","rb");if(!file)return NULL;
+    FILE *file=fopen(H2_APP "bc1.contract.bin","rb");if(!file)return NULL;
     uint32_t header[2];
     int ok=fread(header,1,8,file)==8&&header[0]==0x43423148&&header[1]==1&&
         fread(&bc1_contract,1,sizeof bc1_contract,file)==sizeof bc1_contract&&fgetc(file)==EOF&&!ferror(file);
@@ -334,7 +335,7 @@ const h2_bc1_contract *h2_bc1_gxm_contract(void)
 }
 static int bc1_initialize(void)
 {
-    const SceGxmProgram *vp=load("app0:bc1.vert.gxp",596),*fp=load("app0:bc1.frag.gxp",892);
+    const SceGxmProgram *vp=load(H2_APP "bc1.vert.gxp",596),*fp=load(H2_APP "bc1.frag.gxp",892);
     REQUIRE(vp&&fp);SceGxmShaderPatcherId vid,fid;
     CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
     const char *names[]={"IN.position","IN.blendweight","IN.normal","IN.color0","IN.color1","IN.fog","IN.psize"};
@@ -407,7 +408,7 @@ const h2_composition_contract *h2_composition_gxm_contract(void)
 {
     static int loaded;
     if(loaded)return &composition_contract;
-    FILE *file=fopen("app0:composition.contract.bin","rb");if(!file){xv_logf("[h2/composition] private contract open failed\n");return NULL;}
+    FILE *file=fopen(H2_APP "composition.contract.bin","rb");if(!file){xv_logf("[h2/composition] private contract open failed\n");return NULL;}
     uint32_t header[2];
     int ok=fread(header,1,8,file)==8&&header[0]==0x43433248&&header[1]==1&&
         fread(&composition_contract,1,sizeof composition_contract,file)==sizeof composition_contract&&
@@ -418,8 +419,8 @@ const h2_composition_contract *h2_composition_gxm_contract(void)
 }
 static int composition_initialize(void)
 {
-    const SceGxmProgram *vp=load("app0:composition.vert.gxp",596),*fp=load("app0:composition.frag.gxp",1528),
-        *copy=load("app0:composition.copy.frag.gxp",344);
+    const SceGxmProgram *vp=load(H2_APP "composition.vert.gxp",596),*fp=load(H2_APP "composition.frag.gxp",1528),
+        *copy=load(H2_APP "composition.copy.frag.gxp",344);
     REQUIRE(vp&&fp&&copy);
     SceGxmShaderPatcherId vid,fid,cid;
     CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));
@@ -522,7 +523,7 @@ static int threshold_attempted,threshold_ready;
 const h2_threshold_contract *h2_threshold_gxm_contract(void)
 {
     static int loaded;if(loaded)return &threshold_contract;
-    FILE *file=fopen("app0:threshold.contract.bin","rb");if(!file)return NULL;
+    FILE *file=fopen(H2_APP "threshold.contract.bin","rb");if(!file)return NULL;
     uint32_t header[2];
     int ok=fread(header,1,8,file)==8&&header[0]==0x43543248&&header[1]==1&&
         fread(&threshold_contract,1,sizeof threshold_contract,file)==sizeof threshold_contract&&fgetc(file)==EOF&&!ferror(file);
@@ -532,7 +533,7 @@ const h2_threshold_contract *h2_threshold_gxm_contract(void)
 }
 static int threshold_initialize(void)
 {
-    const SceGxmProgram *vp=load("app0:threshold.vert.gxp",596),*fp=load("app0:threshold.frag.gxp",1012);
+    const SceGxmProgram *vp=load(H2_APP "threshold.vert.gxp",596),*fp=load(H2_APP "threshold.frag.gxp",1012);
     REQUIRE(vp&&fp);SceGxmShaderPatcherId vid,fid;
     CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
     const char *names[]={"IN.position","IN.blendweight","IN.normal","IN.color0","IN.color1","IN.fog","IN.psize"};
@@ -606,7 +607,7 @@ static int blur_attempted,blur_ready;
 const h2_blur_contract *h2_blur_gxm_contract(void)
 {
     static int loaded;if(loaded)return &blur_contract;
-    FILE *file=fopen("app0:blur.contract.bin","rb");if(!file)return NULL;
+    FILE *file=fopen(H2_APP "blur.contract.bin","rb");if(!file)return NULL;
     uint32_t header[2];
     int ok=fread(header,1,8,file)==8&&header[0]==0x434C3248&&header[1]==2&&
         fread(&blur_contract,1,sizeof blur_contract,file)==sizeof blur_contract&&fgetc(file)==EOF&&!ferror(file);
@@ -616,7 +617,7 @@ const h2_blur_contract *h2_blur_gxm_contract(void)
 }
 static int blur_initialize(void)
 {
-    const SceGxmProgram *vp=load("app0:blur.vert.gxp",596),*fp=load("app0:blur.frag.gxp",1092);
+    const SceGxmProgram *vp=load(H2_APP "blur.vert.gxp",596),*fp=load(H2_APP "blur.frag.gxp",1092);
     REQUIRE(vp&&fp);SceGxmShaderPatcherId vid,fid;
     CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));CHECK(sceGxmShaderPatcherRegisterProgram(patcher,fp,&fid));
     const char *names[]={"IN.position","IN.blendweight","IN.normal","IN.color0","IN.color1","IN.fog","IN.psize"};
@@ -688,7 +689,7 @@ const h2_blend_contract *h2_blend_gxm_contract(void)
 {
     static int loaded;
     if(loaded)return &blend_contract;
-    FILE *file=fopen("app0:blend.contract.bin","rb");if(!file){xv_logf("[h2/blend] private contract open failed\n");return NULL;}
+    FILE *file=fopen(H2_APP "blend.contract.bin","rb");if(!file){xv_logf("[h2/blend] private contract open failed\n");return NULL;}
     uint32_t header[2];
     int ok=fread(header,1,8,file)==8&&header[0]==0x43473248&&header[1]==1&&
         fread(&blend_contract,1,sizeof blend_contract,file)==sizeof blend_contract&&
@@ -699,8 +700,8 @@ const h2_blend_contract *h2_blend_gxm_contract(void)
 }
 static int blend_initialize(void)
 {
-    const SceGxmProgram *vp=load("app0:blend.vert.gxp",596),*fp=load("app0:blend.frag.gxp",496),
-        *copy=load("app0:blend.copy.frag.gxp",344);
+    const SceGxmProgram *vp=load(H2_APP "blend.vert.gxp",596),*fp=load(H2_APP "blend.frag.gxp",496),
+        *copy=load(H2_APP "blend.copy.frag.gxp",344);
     REQUIRE(vp&&fp&&copy);
     SceGxmShaderPatcherId vid,fid,cid;
     CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));
@@ -800,7 +801,7 @@ const h2_luma_contract *h2_luma_gxm_contract(void)
 {
     static int loaded;
     if(loaded)return &luma_contract;
-    FILE *file=fopen("app0:luma.contract.bin","rb");if(!file){xv_logf("[h2/luma] private contract open failed\n");return NULL;}
+    FILE *file=fopen(H2_APP "luma.contract.bin","rb");if(!file){xv_logf("[h2/luma] private contract open failed\n");return NULL;}
     uint32_t header[2];
     int ok=fread(header,1,8,file)==8&&header[0]==0x43553248&&header[1]==1&&
         fread(&luma_contract,1,sizeof luma_contract,file)==sizeof luma_contract&&
@@ -811,7 +812,7 @@ const h2_luma_contract *h2_luma_gxm_contract(void)
 }
 static int luma_initialize(void)
 {
-    const SceGxmProgram *vp=load("app0:luma.vert.gxp",868),*fp=load("app0:luma.frag.gxp",528);
+    const SceGxmProgram *vp=load(H2_APP "luma.vert.gxp",868),*fp=load(H2_APP "luma.frag.gxp",528);
     REQUIRE(vp&&fp);
     SceGxmShaderPatcherId vid,fid;
     CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));
@@ -891,7 +892,7 @@ const h2_sprite_contract *h2_sprite_gxm_contract(void)
 {
     static int loaded;
     if(loaded)return &sprite_contract;
-    FILE *file=fopen("app0:sprite.contract.bin","rb");if(!file){xv_logf("[h2/sprite] private contract open failed\n");return NULL;}
+    FILE *file=fopen(H2_APP "sprite.contract.bin","rb");if(!file){xv_logf("[h2/sprite] private contract open failed\n");return NULL;}
     uint32_t header[2];
     int ok=fread(header,1,8,file)==8&&header[0]==0x43533248&&header[1]==1&&
         fread(&sprite_contract,1,sizeof sprite_contract,file)==sizeof sprite_contract&&
@@ -902,8 +903,8 @@ const h2_sprite_contract *h2_sprite_gxm_contract(void)
 }
 static int sprite_initialize(void)
 {
-    const SceGxmProgram *vp=load("app0:sprite.vert.gxp",1048),*fp=load("app0:sprite.frag.gxp",392),
-        *copy=load("app0:sprite.copy.frag.gxp",344);
+    const SceGxmProgram *vp=load(H2_APP "sprite.vert.gxp",1048),*fp=load(H2_APP "sprite.frag.gxp",392),
+        *copy=load(H2_APP "sprite.copy.frag.gxp",344);
     REQUIRE(vp&&fp&&copy);
     SceGxmShaderPatcherId vid,fid,cid;
     CHECK(sceGxmShaderPatcherRegisterProgram(patcher,vp,&vid));

@@ -14,7 +14,17 @@
 #include <psp2/appmgr.h>
 #include <psp2/io/fcntl.h>
 #endif
+#ifdef XV_UPDATE_HALO2
+#define DATA "ux0:data/xita/update/halo2/"
+#define CONTRACT "halo2-update-contract.txt"
+#define BOOT_RECORD "boot-halo2.txt"
+#define SLOT_PREFIX "halo2-"
+#else
 #define DATA "ux0:data/xita/update/"
+#define CONTRACT "update-contract.txt"
+#define BOOT_RECORD "boot-game.txt"
+#define SLOT_PREFIX "game-"
+#endif
 #define APP "app0:/"
 #define WRITE_APP "ux0:app/XITA00001/"
 #define GET(p) __atomic_load_n(p,__ATOMIC_ACQUIRE)
@@ -69,7 +79,7 @@ static int write_text(const char *path,const char *text)
 }
 static int contract(char out[65])
 {
-    char path[128];app_path(path,"update-contract.txt");
+    char path[128];app_path(path,CONTRACT);
     FILE *f=fopen(path,"rb");if(!f)return -1;
     char b[67]={0};size_t n=fread(b,1,sizeof b-1,f);int bad=ferror(f);fclose(f);
     if(n==65&&b[64]=='\n')b[64]=0;
@@ -111,14 +121,14 @@ static int verify(const char *path,const record *r)
     return bad||strcmp(sum,r->sha)?-1:0;
 }
 static void slot_path(char out[128],unsigned slot,int writable)
-{snprintf(out,128,"%sgame-%c.self",writable||app_unmounted?WRITE_APP:APP,'a'+slot);}
+{snprintf(out,128,"%s" SLOT_PREFIX "%c.self",writable||app_unmounted?WRITE_APP:APP,'a'+slot);}
 static void meta_path(char out[128],unsigned slot)
 {snprintf(out,128,DATA "slot-%u.meta",slot);}
 static int read_slot(unsigned slot,record *r,int check_file)
 {
     char path[128];meta_path(path,slot);
     if(record_read(path,r)) {
-        app_path(path,"boot-game.txt");
+        app_path(path,BOOT_RECORD);
         if(slot||record_read(path,r))return -1;
     }
     slot_path(path,slot,0);return check_file?verify(path,r):0;
@@ -127,7 +137,7 @@ void xv_update_init(void)
 {
     char installed[65];SET(&boot_slot,0);SET(&state,0);SET(&requested,0);SET(&received,0);SET(&total,0);
     if(contract(installed))return; /* Older/foreign VPK has no update contract. */
-    mkdir("ux0:data",0777);mkdir("ux0:data/xita",0777);mkdir(DATA,0777);
+    mkdir("ux0:data",0777);mkdir("ux0:data/xita",0777);mkdir("ux0:data/xita/update",0777);mkdir(DATA,0777);
     if(!record_read(DATA "incoming.meta",&incoming)) {SET(&received,incoming.size);SET(&total,incoming.size);SET(&state,2);}
 }
 int xv_update_begin(unsigned size,const char *sha,const char *expected)
@@ -167,6 +177,15 @@ void xv_update_json(char *out,size_t size)
     char installed[65]={0};contract(installed);
     unsigned boot=GET(&boot_slot);
     snprintf(out,size,"{\"state\":%u,\"received\":%u,\"size\":%u,\"contract\":\"%s\",\"requested\":%u,\"boot_slot\":%d,\"boot_sha256\":\"%s\"}",GET(&state),GET(&received),GET(&total),installed,GET(&requested),(int)boot-1,boot?boot_sha:"");
+#ifdef XV_UPDATE_HALO2
+    /* The dashboard runs CE. Report H2's persisted confirmation separately;
+     * never describe an installed H2 file as the currently running process. */
+    record r,best={0};int slot=-1;
+    for(unsigned i=0;i<2;i++)if(!read_slot(i,&r,0)&&r.state==CONFIRMED&&
+        (slot<0||r.generation>best.generation)) {best=r;slot=(int)i;}
+    size_t n=strlen(out);
+    if(n&&out[n-1]=='}')snprintf(out+n-1,size-n+1,",\"installed_slot\":%d,\"installed_sha256\":\"%s\"}",slot,slot<0?"":best.sha);
+#endif
 }
 static int copy_candidate(unsigned slot,const record *r)
 {
@@ -203,7 +222,7 @@ static int copy_candidate(unsigned slot,const record *r)
 }
 int xv_update_boot(void)
 {
-    mkdir("ux0:data",0777);mkdir("ux0:data/xita",0777);mkdir(DATA,0777);
+    mkdir("ux0:data",0777);mkdir("ux0:data/xita",0777);mkdir("ux0:data/xita/update",0777);mkdir(DATA,0777);
     record slots[2]={{0}},candidate;int valid[2];unsigned generation=0;int active=-1;
     for(unsigned i=0;i<2;i++) {
         valid[i]=!read_slot(i,&slots[i],1);

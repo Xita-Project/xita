@@ -41,7 +41,7 @@ int main(void)
     STORE(&pad_deadline,(uint32_t)(remote_now()+2000000));STORE(&pad_seq,1);
     xv_remote_pad(&buttons,&lx,&ly,&rx,&ry);assert(!buttons&&lx==128);
     STORE(&enabled,0);STORE(&pad_seq,0);STORE(&pad_deadline,0);
-    xv_update_init();
+    xv_update_init();xv_halo2_update_init();
     xv_update_confirm(0);
     xv_remote_start();
     if(!LOAD(&enabled)) {puts("DISABLED");return 0;}

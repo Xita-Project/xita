@@ -1,6 +1,11 @@
 #pragma once
 #include <stddef.h>
+/* H2 currently has a larger translated executable. Transfers remain chunked. */
+#ifdef XV_UPDATE_HALO2
+enum { XV_UPDATE_LIMIT=128*1024*1024, XV_UPDATE_CHUNK=65536 };
+#else
 enum { XV_UPDATE_LIMIT=64*1024*1024, XV_UPDATE_CHUNK=65536 };
+#endif
 enum {
     XV_UPDATE_IDLE, XV_UPDATE_REQUESTED, XV_UPDATE_RECORDING_DRAINED,
     XV_UPDATE_PUMP_STOPPED, XV_UPDATE_GPU_DRAIN, XV_UPDATE_DISPLAY_DRAIN,
