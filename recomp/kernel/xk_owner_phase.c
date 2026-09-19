@@ -78,9 +78,27 @@ static struct { uint64_t elapsed[6], entries[6], completed; unsigned bucket; } d
 #endif
 #if XV_SCENE_BUCKET1_DETAIL
 static struct { uint64_t elapsed[12], entries[12], completed; unsigned bucket; } detail1;
+extern uint64_t xv_scene_draw_completed_us __attribute__((weak));
+static struct { uint64_t start, elapsed[12]; unsigned invalid; } draw_detail1;
+static uint64_t draw_completed(void)
+{
+    return &xv_scene_draw_completed_us ? xv_scene_draw_completed_us : 0;
+}
+
 #endif
 static void scene_account(uint64_t end)
 {
+#if XV_SCENE_BUCKET1_DETAIL
+    uint64_t draw_end=draw_completed();
+    if(scene.bucket==1) {
+        /* Counter regressions and impossible deltas are reported, not silently
+         * clamped into a claim about CPU self time or removable waits. */
+        if(end<scene.start || draw_end<draw_detail1.start ||
+           draw_end-draw_detail1.start>end-scene.start)draw_detail1.invalid++;
+        else draw_detail1.elapsed[detail1.bucket]+=draw_end-draw_detail1.start;
+    }
+    draw_detail1.start=draw_end;
+#endif
     if(end<scene.start)scene.invalid++;
     else {
         scene.elapsed[scene.bucket]+=end-scene.start;
@@ -204,6 +222,9 @@ void xv_scene_partition_begin(uint64_t *scope,void *context)
     if(scene.serial==UINT32_MAX) { scene.exhausted=1;return; }
     *scope=scene.token=((uint64_t)generation<<32)|++scene.serial;
     scene.bucket=0;scene.entries[0]++;scene.start=now();
+#if XV_SCENE_BUCKET1_DETAIL
+    draw_detail1.start=draw_completed();
+#endif
 #if XV_SCENE_BUCKET0_DETAIL
     detail.bucket=0;detail.entries[0]++;
 #endif
@@ -336,6 +357,10 @@ void xv_owner_phase_report(unsigned frames)
         frames,(unsigned long long)detail1.entries[0],(unsigned long long)detail1.entries[1],(unsigned long long)detail1.entries[2],(unsigned long long)detail1.entries[3],(unsigned long long)detail1.entries[4],(unsigned long long)detail1.entries[5],(unsigned long long)detail1.entries[6],(unsigned long long)detail1.entries[7],(unsigned long long)detail1.entries[8],(unsigned long long)detail1.entries[9],(unsigned long long)detail1.entries[10],(unsigned long long)detail1.entries[11],
         (unsigned long long)detail1.elapsed[0],(unsigned long long)detail1.elapsed[1],(unsigned long long)detail1.elapsed[2],(unsigned long long)detail1.elapsed[3],(unsigned long long)detail1.elapsed[4],(unsigned long long)detail1.elapsed[5],(unsigned long long)detail1.elapsed[6],(unsigned long long)detail1.elapsed[7],(unsigned long long)detail1.elapsed[8],(unsigned long long)detail1.elapsed[9],(unsigned long long)detail1.elapsed[10],(unsigned long long)detail1.elapsed[11],
         (unsigned long long)detail1.completed,!!scene.token && scene.bucket==1,detail1.bucket);
+    XK_LOG("[scene-bucket1-draw] %u frames completed-draw-us %llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu; available %u invalid %u; subset elapsed, includes draw recording/waits, not GPU service or CPU self\n",
+        frames,(unsigned long long)draw_detail1.elapsed[0],(unsigned long long)draw_detail1.elapsed[1],(unsigned long long)draw_detail1.elapsed[2],(unsigned long long)draw_detail1.elapsed[3],(unsigned long long)draw_detail1.elapsed[4],(unsigned long long)draw_detail1.elapsed[5],(unsigned long long)draw_detail1.elapsed[6],(unsigned long long)draw_detail1.elapsed[7],(unsigned long long)draw_detail1.elapsed[8],(unsigned long long)draw_detail1.elapsed[9],(unsigned long long)draw_detail1.elapsed[10],(unsigned long long)draw_detail1.elapsed[11],
+        !!&xv_scene_draw_completed_us,draw_detail1.invalid);
+    memset(draw_detail1.elapsed,0,sizeof draw_detail1.elapsed);draw_detail1.invalid=0;
     memset(detail1.entries,0,sizeof detail1.entries);memset(detail1.elapsed,0,sizeof detail1.elapsed);
     detail1.completed=0;
 #endif

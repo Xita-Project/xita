@@ -69,7 +69,7 @@ def main():
     (out/'scene_bodies.inc').write_text('\n'.join(inc))
     exe=out/'body';run(cc+['-ffunction-sections','-fdata-sections','-I'+str(out),ROOT/'tools/tests/scene_partition_body.c',ROOT/'recomp/xv_x86rt.c','-Wl,--gc-sections','-lm','-o',exe]);body=run([exe],env=clean)
     stage=out/'build';run(['cp','-a','--reflink=auto',a.retained_build,stage])
-    for name in ('Makefile','recomp/kernel/xk_owner_phase.c','recomp/kernel/xk_owner_phase.h'):
+    for name in ('Makefile','recomp/kernel/xk_owner_phase.c','recomp/kernel/xk_owner_phase.h','recomp/kernel/xd3d.c'):
         shutil.copy2(ROOT/name,stage/name)
     (stage/'recomp/code_010.c').write_text(units['code_010.c'].replace(original,candidate,1))
     assert (stage/'recomp/code_010.c').read_text().replace(candidate,original,1)==units['code_010.c']
@@ -80,13 +80,15 @@ def main():
              'build/recomp/code_017.o','build/recomp/code_022.o','build/recomp/kernel/xd3d.o',
              'build/recomp/query_fusion.o','build/recomp/solver_fusion.o','build/runtime/main.o',
              'build/runtime/xv_ui_gxm.o','build/runtime/xv_d3d.o','build/runtime/xv_vertex_upload.o']
-    kept={str(p.relative_to(stage)):sha(p) for p in (stage/'build').rglob('*.o') if p.name not in ('code_010.o','xk_owner_phase.o')}
-    builds=[];off={};owner_objects=('build/recomp/code_010.o','build/recomp/kernel/xk_owner_phase.o')
+    owner_objects=('build/recomp/code_010.o','build/recomp/kernel/xk_owner_phase.o')+ (('build/recomp/kernel/xd3d.o',) if a.bucket1_detail else ())
+    owned_sources=tuple(n.replace('build/','',1)[:-2]+'.c' for n in owner_objects)
+    kept={str(p.relative_to(stage)):sha(p) for p in (stage/'build').rglob('*.o') if str(p.relative_to(stage)) not in owner_objects}
+    builds=[];off={}
     for label,value in (('default',None),('off-noop',0),('on',1),('on-noop',1),('off',0),('off-repeat',0)):
         r=run(base+([] if value is None else [feature+'='+str(value)])+targets,cwd=stage)
         compiled=[x for x in r.stdout.splitlines() if ' -c ' in x]
         if label in ('off-noop','on-noop','off-repeat'):assert not compiled,(label,compiled)
-        elif label!='default':assert len(compiled)==2 and all(any(' -c '+p+' ' in c for p in ('recomp/code_010.c','recomp/kernel/xk_owner_phase.c'))for c in compiled),(label,compiled)
+        elif label!='default':assert len(compiled)==len(owner_objects) and all(any(' -c '+p+' ' in c for p in owned_sources)for c in compiled),(label,compiled)
         for name,digest in kept.items():assert sha(stage/name)==digest,(label,name)
         hashes={n:sha(stage/n) for n in owner_objects}
         if not value:
@@ -112,7 +114,7 @@ def main():
     (stage/'recomp/code_010.c').write_text(units['code_010.c'].replace(original,candidate,1))
     result=dict(result='PASS',feature=feature,body=body.stdout,builds=builds,preserved_objects=kept,
         scope='Actual primary generated CFG with deterministic child/HLE stand-ins; original REP runtime; complete host context/8MiB/table hashes at callbacks. ARM production compiles, no device or game-speed result.',
-        sources={str(p.relative_to(ROOT)):sha(p) for p in [ROOT/'Makefile',ROOT/'recomp/kernel/xk_owner_phase.c',ROOT/'recomp/kernel/xk_owner_phase.h',ROOT/'games/halo_ce_3925/scene_partition.py',ROOT/'tools/tests/scene_partition.c',ROOT/'tools/tests/scene_partition_body.c',fixture,ROOT/'tools/gen_scene_partition_hooks.py',Path(__file__)]})
-    (out/'receipt.json').write_text(json.dumps(result,indent=2)+'\n');print('PASS scene observer accounting, generated CFG callbacks, six retained ARM transitions; only selected scene/observer objects change')
+        sources={str(p.relative_to(ROOT)):sha(p) for p in [ROOT/'Makefile',ROOT/'recomp/kernel/xd3d.c',ROOT/'recomp/kernel/xk_owner_phase.c',ROOT/'recomp/kernel/xk_owner_phase.h',ROOT/'games/halo_ce_3925/scene_partition.py',ROOT/'tools/tests/scene_partition.c',ROOT/'tools/tests/scene_partition_body.c',fixture,ROOT/'tools/gen_scene_partition_hooks.py',Path(__file__)]})
+    (out/'receipt.json').write_text(json.dumps(result,indent=2)+'\n');print('PASS scene observer accounting, generated CFG callbacks, six retained ARM transitions; only selected observer-owned objects change')
 
 if __name__=='__main__':main()

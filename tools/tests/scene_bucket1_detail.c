@@ -2,6 +2,7 @@
 #define main main_partition_fixture
 #include "scene_partition.c"
 #undef main
+uint64_t xv_scene_draw_completed_us;
 static void reconcile1(void)
 {
     uint64_t sum=0;for(unsigned i=0;i<12;i++)sum+=detail1.elapsed[i];
@@ -47,6 +48,35 @@ int main(int argc,char **argv)
     xv_scene_bucket1_step(&stale_token,&first.ctx,1);assert(reads==old && scene.token==token);
     clock_value--;xv_scene_bucket1_step(&token,&first.ctx,1);reconcile1();
     xv_scene_partition_end(&token);reconcile1();
+    /* Existing draw clocks, cumulative counter, report split and reset guards. */
+    memset(&scene,0,sizeof scene);memset(&detail1,0,sizeof detail1);
+    memset(&draw_detail1,0,sizeof draw_detail1);clear_log();
+    xv_scene_draw_completed_us=1000;clock_value=2000;
+    xv_scene_partition_begin(&token,&first.ctx);
+    xv_scene_partition_step(&token,&first.ctx,1);
+    for(unsigned i=1;i<12;i++) {
+        clock_value+=10;xv_scene_draw_completed_us+=3;
+        xv_scene_bucket1_step(&token,&first.ctx,i);
+    }
+    clock_value+=10;xv_scene_draw_completed_us+=3;
+    xv_scene_partition_end(&token);
+    for(unsigned i=0;i<12;i++)assert(draw_detail1.elapsed[i]==3);
+    assert(!draw_detail1.invalid);
+    old=reads;xv_owner_phase_report(60);assert(reads==old);
+    assert(strstr(output,"completed-draw-us 3/3/3/3/3/3/3/3/3/3/3/3; available 1 invalid 0"));
+    clear_log();xv_scene_partition_begin(&token,&first.ctx);
+    xv_scene_partition_step(&token,&first.ctx,1);
+    clock_value+=10;xv_scene_draw_completed_us+=4;xv_owner_phase_report(60);
+    assert(strstr(output,"completed-draw-us 4/0/0/0/0/0/0/0/0/0/0/0; available 1 invalid 0"));
+    clock_value+=10;xv_scene_draw_completed_us+=2;
+    xv_scene_bucket1_step(&token,&first.ctx,5);
+    assert(draw_detail1.elapsed[0]==2);
+    clock_value+=10;xv_scene_draw_completed_us=0;
+    xv_scene_bucket1_step(&token,&first.ctx,6);assert(draw_detail1.invalid==1);
+    clock_value+=10;xv_scene_draw_completed_us=11;
+    xv_scene_bucket1_step(&token,&first.ctx,7);assert(draw_detail1.invalid==2);
+    clock_value+=10;xv_scene_draw_completed_us+=1;
+    xv_scene_partition_end(&token);assert(draw_detail1.elapsed[7]==1);
     assert(!memcmp(&before,&first.ctx,sizeof before));
     puts("PASS bucket1 detail: ordered/skipped cuts, main-ledger reconciliation, split reports, early cleanup, foreign worker, invalid/live state, stale generation, backwards clock");
 }

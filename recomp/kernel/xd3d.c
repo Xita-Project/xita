@@ -320,6 +320,14 @@ void xd3d_lockstep_preempt(xctx *c)
 }
 static void lockstep_init(void) { if (xd3d_lockstep < 0) { const char *e = getenv("XV_LOCKSTEP"); xd3d_lockstep = e ? atoi(e) : 0; } }
 static xk_thread *g_vb_thread;                 /* the 60 Hz vblank guest thread (kicked on demand) */
+#if defined(XV_SCENE_BUCKET1_DETAIL) && XV_SCENE_BUCKET1_DETAIL
+/* Owner-written, never reset by frame reporting. The scene observer samples
+ * completed draw-HLE elapsed without adding any per-draw clock reads. */
+uint64_t xv_scene_draw_completed_us;
+#define XV_SCENE_DRAW_ELAPSED(us) (xv_scene_draw_completed_us += (us))
+#else
+#define XV_SCENE_DRAW_ELAPSED(us) ((void)0)
+#endif
 uint64_t xv_t_vbcb_us, xv_t_draw_us; unsigned xv_n_kicks, xv_n_fires;   /* per-frame timing (frame-time log) */
 extern uint64_t xk_os_monotonic_us(void);
 static void vblank_fire(xctx *c)
@@ -649,7 +657,7 @@ void xv_hle_D3DDevice_GetVisibilityTestResult(xctx *c)
 }
 
 /* ---- draws & state ---------------------------------------------------------------------------- */
-void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_drop_rt()) xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
+void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_drop_rt()) xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); uint64_t elapsed = xk_os_monotonic_us() - t0; xv_t_draw_us += elapsed; XV_SCENE_DRAW_ELAPSED(elapsed); } c->r[0] = 0; X_RET(3); }
 char xd3d_last_stack[400];
 void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawIndexedVertices");
     if (g_vp_frame != g_dev.frame && xd3d_state.z_enable) { g_vp_frame = g_dev.frame; memcpy(g_vp_rows, xd3d_state.vsc, sizeof g_vp_rows); }
@@ -659,7 +667,7 @@ void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawI
         D3DLOG("[hist] drawcall prim %u n %u vs %08X program %08X stack:%s\n", X_ARG(0), X_ARG(1), xd3d_state.vs_handle, xd3d_state.vs_program, sb);
         strncpy(xd3d_last_stack, sb, sizeof xd3d_last_stack - 1);
     }
-    g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_drop_rt()) xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
+    g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_drop_rt()) xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); uint64_t elapsed = xk_os_monotonic_us() - t0; xv_t_draw_us += elapsed; XV_SCENE_DRAW_ELAPSED(elapsed); } c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_Begin(xctx *c)
 { XD3D_COUNT("D3DDevice_Begin");
     { static int done; if (!done && xd3d_frame() > 1 && X_ARG(0) == 7 && getenv("XV_STACKDUMP")) {

@@ -1205,9 +1205,9 @@ ifeq ($(XV_SCENE_BUCKET1_DETAIL),1)
 ifneq ($(words $(shell rg -o 'XV_SCENE_BUCKET1_DETAIL_SCOPE:' $(SCENE_PARTITION_SRCS) 2>/dev/null)),1)
 $(error XV_SCENE_BUCKET1_DETAIL requires the selectively regenerated eleven bucket1 cuts)
 endif
-$(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o: RECOMP_CFLAGS += -DXV_SCENE_BUCKET1_DETAIL=1
+$(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o $(RECOMP_BUILD)/kernel/xd3d.o: RECOMP_CFLAGS += -DXV_SCENE_BUCKET1_DETAIL=1
 endif
-$(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(BUILD)/scene-bucket1-detail.config
+$(SCENE_PARTITION_OBJS) $(RECOMP_BUILD)/kernel/xk_owner_phase.o $(RECOMP_BUILD)/kernel/xd3d.o: $(BUILD)/scene-bucket1-detail.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(BUILD)/scene-bucket1-detail.config
 # No guest header or global guest flags change for this optional loop.
 VISIBILITY_PORTAL_SRCS := $(shell rg -l 'XV_NATIVE_VISIBILITY_PORTAL_LOOP_SCOPE:' $(RECOMP_DIR)/code_*.c 2>/dev/null)
