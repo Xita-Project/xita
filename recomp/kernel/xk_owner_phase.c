@@ -75,6 +75,10 @@ static struct {
 #if XV_SCENE_BUCKET0_DETAIL
 /* Shares the enclosing scene token and timestamp; no independent lifetime. */
 static struct { uint64_t elapsed[6], entries[6], completed; unsigned bucket; } detail;
+/* Primary 5B760 only, nested in bucket0/detail3. Shared timestamps avoid
+ * counting the same elapsed interval twice when reports split a live scope. */
+static struct { uint64_t token, elapsed[4], completed; unsigned bucket, invalid; } model_detail;
+
 #endif
 #if XV_SCENE_BUCKET1_DETAIL
 static struct { uint64_t elapsed[12], entries[12], completed; unsigned bucket; } detail1;
@@ -103,7 +107,10 @@ static void scene_account(uint64_t end)
     else {
         scene.elapsed[scene.bucket]+=end-scene.start;
 #if XV_SCENE_BUCKET0_DETAIL
-        if(scene.bucket==0)detail.elapsed[detail.bucket]+=end-scene.start;
+        if(scene.bucket==0) {
+            detail.elapsed[detail.bucket]+=end-scene.start;
+            if(model_detail.token)model_detail.elapsed[model_detail.bucket]+=end-scene.start;
+        }
 #endif
 #if XV_SCENE_BUCKET1_DETAIL
         if(scene.bucket==1)detail1.elapsed[detail1.bucket]+=end-scene.start;
@@ -179,6 +186,10 @@ void xv_owner_phase_present(void *context)
     __atomic_store_n(&owner_valid,0,__ATOMIC_RELEASE);
 #if XV_SCENE_PARTITION
     if(scene.token)scene.abandoned++;
+#if XV_SCENE_BUCKET0_DETAIL
+    if(model_detail.token)model_detail.invalid++;
+    model_detail.token=0;
+#endif
     scene.token=0;
 #endif
     for(unsigned i=0;i<XV_OWNER_PHASES;i++) {
@@ -249,6 +260,32 @@ void xv_scene_partition_step(uint64_t *scope,void *context,unsigned bucket)
 #endif
 }
 #if XV_SCENE_BUCKET0_DETAIL
+void xv_scene_model_begin(uint64_t *scope,void *context)
+{
+    if(!xv_owner_phase_enabled || !scene_live(context))return;
+    if(!scene.token || scene.bucket!=0 || detail.bucket!=3 || model_detail.token)return;
+    scene_account(now());
+    model_detail.bucket=0;model_detail.token=scene.token;*scope=scene.token;
+}
+void xv_scene_model_step(uint64_t *scope,void *context,unsigned bucket)
+{
+    if(!*scope || !scene_live(context))return;
+    if(*scope!=scene.token || *scope!=model_detail.token ||
+       scene.bucket!=0 || detail.bucket!=3 || bucket>=4 || bucket<=model_detail.bucket) {
+        model_detail.invalid++;return;
+    }
+    scene_account(now());model_detail.bucket=bucket;
+}
+void xv_scene_model_end(uint64_t *scope)
+{
+    uint64_t token=*scope;*scope=0;
+    if(!token || worker() || !same_thread())return;
+    if(token!=scene.token || token!=model_detail.token) { model_detail.invalid++;return; }
+    if(!scene_live((void *)owner_context) || scene.bucket!=0 || detail.bucket!=3) {
+        model_detail.invalid++;model_detail.token=0;return;
+    }
+    scene_account(now());model_detail.completed++;model_detail.token=0;
+}
 void xv_scene_bucket0_step(uint64_t *scope,void *context,unsigned bucket)
 {
     if(!*scope)return;
@@ -348,6 +385,11 @@ void xv_owner_phase_report(unsigned frames)
         (unsigned long long)detail.elapsed[2],(unsigned long long)detail.elapsed[3],
         (unsigned long long)detail.elapsed[4],(unsigned long long)detail.elapsed[5],
         (unsigned long long)detail.completed,!!scene.token && scene.bucket==0,detail.bucket);
+    XK_LOG("[model-route-detail] %u frames 5B760 elapsed-us %llu/%llu/%llu/%llu completed %llu open %u invalid %u; list-build/secondary/list-loop/tail, inclusive elapsed\n",
+        frames,(unsigned long long)model_detail.elapsed[0],(unsigned long long)model_detail.elapsed[1],
+        (unsigned long long)model_detail.elapsed[2],(unsigned long long)model_detail.elapsed[3],
+        (unsigned long long)model_detail.completed,!!model_detail.token,model_detail.invalid);
+    memset(model_detail.elapsed,0,sizeof model_detail.elapsed);model_detail.completed=0;model_detail.invalid=0;
     memset(detail.entries,0,sizeof detail.entries);memset(detail.elapsed,0,sizeof detail.elapsed);
     detail.completed=0;
 #endif

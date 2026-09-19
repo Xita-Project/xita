@@ -8,7 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
-from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere, collision_traversal, scene_partition, model_fog, model_uv
+from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere, collision_traversal, scene_partition, model_route_profile, model_fog, model_uv
 
 
 class HaloHooks(NoGameHooks):
@@ -290,6 +290,8 @@ class HaloHooks(NoGameHooks):
             body = scene_partition.hook(body)
             if self.scene_bucket0_detail_enabled:
                 body = scene_partition.detail_hook(body)
+        if self.scene_bucket0_detail_enabled and address == 0x5B760:
+            body = model_route_profile.hook(body)
         body = self.light_census_body(address, body)
         if self.enabled and address == 0x86F50 and collision_vertices.matches(self.image):
             body = collision_vertices.hook(body)
