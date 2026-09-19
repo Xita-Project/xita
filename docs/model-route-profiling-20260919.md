@@ -158,3 +158,23 @@ cache refresh based only on unchanged world position, or assume every repeated
 child call is duplicated work. The next child attribution must preserve normal
 parallel object scheduling; historical serial phase traces are not matched
 measurements for this runtime. Original extracted functions remain private.
+
+## Per-model child refinement
+
+The follow-up wraps only the primary `5B4A0` calls to `5AE10` (cache lookup/
+refresh), `5B190` (model traversal and packet descendants), and `5A430` (the
+object/view-dependent scalar calculation). Timers admit only the presenting
+owner inside the active early-model list loop. Other callers, later passes,
+and recursive selected children are not separately timed. Their elapsed remains
+in the admitted outer child. The fourth category is the remaining loop elapsed.
+
+`[model-route-children]` reports four disjoint categories and admitted call
+counts. They reconcile with the per-model loop total; parent and child time
+must not be added. Each admitted child adds two clock observations. No clocks
+are read at sites outside the admitted scope or when the owner observer is off.
+This overhead must be considered when comparing whole-frame time to perf.27.
+
+The generated hook rejects body drift and strips back to the exact original
+instructions. ASan/UBSan fixtures additionally cover child recursion rejection,
+report splits inside a child, remainder reconciliation, and out-of-loop rejection.
+No native replacement, material sorting or worker-policy change is included.

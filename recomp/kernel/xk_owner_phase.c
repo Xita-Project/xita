@@ -77,7 +77,7 @@ static struct {
 static struct { uint64_t elapsed[6], entries[6], completed; unsigned bucket; } detail;
 /* Primary 5B760 only, nested in bucket0/detail3. Shared timestamps avoid
  * counting the same elapsed interval twice when reports split a live scope. */
-static struct { uint64_t token, elapsed[4], completed; unsigned bucket, invalid; } model_detail;
+static struct { uint64_t token, elapsed[4], completed; unsigned bucket, invalid, child; uint64_t child_elapsed[4], child_calls[4]; } model_detail;
 
 #endif
 #if XV_SCENE_BUCKET1_DETAIL
@@ -109,7 +109,10 @@ static void scene_account(uint64_t end)
 #if XV_SCENE_BUCKET0_DETAIL
         if(scene.bucket==0) {
             detail.elapsed[detail.bucket]+=end-scene.start;
-            if(model_detail.token)model_detail.elapsed[model_detail.bucket]+=end-scene.start;
+            if(model_detail.token) {
+                model_detail.elapsed[model_detail.bucket]+=end-scene.start;
+                if(model_detail.bucket==2)model_detail.child_elapsed[model_detail.child]+=end-scene.start;
+            }
         }
 #endif
 #if XV_SCENE_BUCKET1_DETAIL
@@ -265,7 +268,27 @@ void xv_scene_model_begin(uint64_t *scope,void *context)
     if(!xv_owner_phase_enabled || !scene_live(context))return;
     if(!scene.token || scene.bucket!=0 || detail.bucket!=3 || model_detail.token)return;
     scene_account(now());
-    model_detail.bucket=0;model_detail.token=scene.token;*scope=scene.token;
+    model_detail.bucket=0;model_detail.child=0;model_detail.token=scene.token;*scope=scene.token;
+}
+void xv_scene_model_child_begin(uint64_t *scope,void *context,unsigned child)
+{
+    if(!xv_owner_phase_enabled || !scene_live(context))return;
+    if(!model_detail.token || model_detail.token!=scene.token || scene.bucket!=0 ||
+       detail.bucket!=3 || model_detail.bucket!=2 || model_detail.child || !child || child>=4)return;
+    scene_account(now());model_detail.child=child;model_detail.child_calls[child]++;
+    *scope=model_detail.token;
+}
+void xv_scene_model_child_end(uint64_t *scope)
+{
+    uint64_t token=*scope;*scope=0;
+    if(!token || worker() || !same_thread())return;
+    if(token!=scene.token || token!=model_detail.token || !model_detail.child) {
+        model_detail.invalid++;return;
+    }
+    if(!scene_live((void *)owner_context) || scene.bucket!=0 || detail.bucket!=3 || model_detail.bucket!=2) {
+        model_detail.invalid++;model_detail.child=0;return;
+    }
+    scene_account(now());model_detail.child=0;
 }
 void xv_scene_model_step(uint64_t *scope,void *context,unsigned bucket)
 {
@@ -389,6 +412,13 @@ void xv_owner_phase_report(unsigned frames)
         frames,(unsigned long long)model_detail.elapsed[0],(unsigned long long)model_detail.elapsed[1],
         (unsigned long long)model_detail.elapsed[2],(unsigned long long)model_detail.elapsed[3],
         (unsigned long long)model_detail.completed,!!model_detail.token,model_detail.invalid);
+    XK_LOG("[model-route-children] %u frames elapsed-us %llu/%llu/%llu/%llu calls %llu/%llu/%llu child-open %u; remainder/cache-refresh/model-packets/distance, nested inclusive elapsed\n",
+        frames,(unsigned long long)model_detail.child_elapsed[0],(unsigned long long)model_detail.child_elapsed[1],
+        (unsigned long long)model_detail.child_elapsed[2],(unsigned long long)model_detail.child_elapsed[3],
+        (unsigned long long)model_detail.child_calls[1],(unsigned long long)model_detail.child_calls[2],
+        (unsigned long long)model_detail.child_calls[3],!!model_detail.token && !!model_detail.child);
+    memset(model_detail.child_elapsed,0,sizeof model_detail.child_elapsed);
+    memset(model_detail.child_calls,0,sizeof model_detail.child_calls);
     memset(model_detail.elapsed,0,sizeof model_detail.elapsed);model_detail.completed=0;model_detail.invalid=0;
     memset(detail.entries,0,sizeof detail.entries);memset(detail.elapsed,0,sizeof detail.elapsed);
     detail.completed=0;

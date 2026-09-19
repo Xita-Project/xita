@@ -35,3 +35,26 @@ def hook(body):
     if strip(body) != original:
         raise ValueError("model observer changes instructions")
     return body
+
+
+CHILD_BODY_SHA256 = "42166a2b3d33a3684df9b07c0b55a3ae61cfb7e3c23d4639e75e6834825f287f"
+
+
+def child_hook(body):
+    canonical = re.sub(r"^    XV_PHASE_SCOPE\(c, \d+u\);\n", "", body, flags=re.M).rstrip()
+    if hashlib.sha256(canonical.encode()).hexdigest() != CHILD_BODY_SHA256:
+        raise ValueError("primary 5B4A0 instruction/callback drift")
+    original = body
+    for pc, child, count in ((0x5AE10, 1, 2), (0x5B190, 2, 2), (0x5A430, 3, 3)):
+        needle = f"    f_{pc:08X}(c);\n"
+        if body.count(needle) != count:
+            raise ValueError("primary 5B4A0 child frontier drift")
+        begin = GUARD + """    {
+    extern void xv_scene_model_child_begin(uint64_t *, void *, unsigned);
+    extern void xv_scene_model_child_end(uint64_t *);
+    uint64_t xv_model_child_ __attribute__((cleanup(xv_scene_model_child_end))) = 0;
+""" + f"    xv_scene_model_child_begin(&xv_model_child_, c, {child}u);\n#endif\n"
+        body = body.replace(needle, begin + needle + GUARD + "    }\n#endif\n")
+    if strip(body) != original:
+        raise ValueError("model child observer changes instructions")
+    return body

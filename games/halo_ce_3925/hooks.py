@@ -292,6 +292,8 @@ class HaloHooks(NoGameHooks):
                 body = scene_partition.detail_hook(body)
         if self.scene_bucket0_detail_enabled and address == 0x5B760:
             body = model_route_profile.hook(body)
+        if self.scene_bucket0_detail_enabled and address == 0x5B4A0:
+            body = model_route_profile.child_hook(body)
         body = self.light_census_body(address, body)
         if self.enabled and address == 0x86F50 and collision_vertices.matches(self.image):
             body = collision_vertices.hook(body)
