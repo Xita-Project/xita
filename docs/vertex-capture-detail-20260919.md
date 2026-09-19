@@ -49,3 +49,27 @@ slot 0. A dashboard screenshot confirms Halo CE selected and Launch Game ready.
 The ordinary campaign launch sequence has been started. Installation proves
 neither gameplay success nor performance. Captures remain under the private
 `capture-detail-hardware/` directory in the unified workspace.
+
+## First campaign checkpoint capture
+
+The first collector mistakenly accepted main-menu `loaded/active` flags; that
+capture is excluded from campaign results. The replacement required the known
+checkpoint camera plus worker-query activity. Its screenshot shows the saved
+campaign scene, marine, weapon and HUD. After a further 150 seconds without
+input, the final six 60-frame windows average 78.10 ms (about 12.80 FPS), versus
+perf.32's 78.30 ms. This does not establish a performance gain from diagnostics.
+
+Across those 360 frames, 658 sampled submissions produced:
+
+| Scope | Sampled calls | Logical bytes | Elapsed µs | µs/call |
+| --- | ---: | ---: | ---: | ---: |
+| Exact comparison | 337 | 1,937,848 | 10,609 | 31.48 |
+| Staging copy | 424 | 3,125,464 | 12,092 | 28.52 |
+| Queue publication | 371 | — | 4,759 | 12.83 |
+
+Both comparison and copying contribute; these totals alone do not explain the
+previous heavy-scene capture cost. They are periodic elapsed samples, not cycle
+measurements or bandwidth counters. Explicit joins remain outside these scopes.
+The ordinary corridor movement sequence subsequently completed and its settled
+capture is running. Private evidence: `capture-detail-hardware/checkpoint-settled`
+`.log`, `.summary.json`, and `.detail.json`; `checkpoint-first.png`.
