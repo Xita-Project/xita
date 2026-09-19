@@ -31,8 +31,10 @@ diagnostic failed during startup; reopening Xita restored confirmed perf.35.
 
 [Render-state snapshots](docs/render-state-snapshots-20260919.md) now include an
 opt-in Core 1 palette worker with double-buffered owned inputs/results. Perf.37
-is boot-confirmed and menu logs verify prior-frame palette reuse; campaign
-qualification is in progress. This selected model-preparation path is integrated;
+is boot-confirmed; campaign logs verify Core 1 execution and 11,272 palette
+reuses over 360 frames with no busy skips. The crowded smoke capture is about
+5.6 FPS at a different camera, with no established performance gain. Moving-model
+visual qualification remains in progress. This selected model-preparation path is integrated;
 the full simulation/render split remains unfinished, and simulation joins remain.
 The following dated observations retain their original experimental context.
 

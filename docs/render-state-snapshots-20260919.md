@@ -1,7 +1,7 @@
 # Render-state snapshot implementation
 
 Status: the owned pose payload and an opt-in render-palette worker are implemented.
-**Perf.37 is boot-confirmed on hardware; campaign qualification is in progress.**
+**Perf.37 is boot-confirmed and campaign logs verify palette reuse on hardware.**
 This is not a complete simulation/render split. No FPS gain is claimed.
 
 ## Implemented ownership and payload
@@ -133,3 +133,27 @@ receipts are under `../pose-pipeline-hardware/`.
 The first menu windows report 60 reused palettes per 60 frames with zero busy
 skips. This proves execution on hardware, not a campaign performance improvement.
 The ordinary saved-campaign sequence is running to qualify NPC poses and timing.
+
+## First campaign smoke result
+
+The preserved startup log reports `pose-worker` on core 1, affinity `00020000`,
+priority 65. The campaign runs on perf.37 and the final six 60-frame windows
+report 11,272 palette reuses, 533 reported fallback attempts, 8,929 captured jobs,
+zero busy skips and zero capacity rejects. Repeated passes can reuse one captured
+object, so these are not distinct object counts. A gameplay screenshot confirms
+world, weapon and HUD rendering; longer moving-model correctness remains a user
+playtest item. No STOP or fatal marker occurs in the retained smoke log.
+
+The automatic collector expected the older saved camera and did not accept the
+new position. It was explicitly stopped (its orchestration exits on that
+termination); no subsequent settle/route script ran. The independent full log
+confirms campaign gameplay at camera (-29.00,37.05,0.62), forward
+(-0.98,0.21,-0.06). Its last six frame windows average 178.78 ms, about 5.59 FPS,
+with 25.87 selected model calls per frame. This is a different view/workload from
+the preceding baseline captures, so it establishes neither a gain nor a regression.
+The implementation is active, but sustained 20 FPS is not achieved.
+
+Receipts: `../pose-pipeline-hardware/gameplay-smoke.log`, `pose-summary.json`,
+`gameplay-smoke.summary.json`, `gameplay-status.json`, and `load-check.png`.
+All remote navigation has ended; the user can test perf.37. The next observation
+should focus on moving NPC poses, camera turns and transitions, alongside FPS.
