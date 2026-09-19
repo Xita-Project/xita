@@ -51,3 +51,11 @@ The next combined research candidate reduces vertex-worker event calls and
 turns off the detailed draw clocks, retaining the perf18 optimization stack.
 Measure actual event suppression, frame intervals and gameplay after restart.
 No predicted FPS gain is assigned to either mechanism before hardware evidence.
+
+
+Perf.19 hardware confirms this policy: zero `[draw-prep]` rows, with joined
+cache counters retained. The combined notification/timer candidate measured
+78.2 ms / 12.8 FPS against perf.18's 78.5 ms / 12.7 FPS, not a clear gain.
+See [notification hardware results](vertex-capture-notifications.md#physical-vita-perf19)
+for the evidence and limits. Per-draw clock overhead is not established as a
+major campaign bottleneck by this observation.

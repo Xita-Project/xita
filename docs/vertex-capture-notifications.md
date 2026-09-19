@@ -40,3 +40,54 @@ The host sanitizers pass; TSan warns that the existing GPU-device fences are not
 The Make gate passes default/OFF/ON/no-op/OFF transitions and malformed values. OFF preprocessing matches the original production body after canonicalizing assertion `__FILE__`/`__LINE__` diagnostics. A standalone Vita ARM compile passes and introduces no atomic-library imports. Two private negative controls are rejected: sleeping after the pending CAS fails, and suppressing an armed completion's event. Artifacts are in `../capture-notify-qualification`; no generated game assets are tracked.
 
 No hardware performance result is claimed here. Physical validation should compare the new signal/skip/failure counts alongside the retained frame, capture, worker and join measurements, particularly checking whether failed notifications move work onto timeout recovery.
+
+## Physical Vita: perf.19
+
+`0.2.0-perf.19 / 78b5c55+` was uploaded, hash-verified and boot-confirmed in
+slot 1; slot 0 retains perf.18. Runtime SHA256:
+`f5e286547446928ce4fac6b225840e3ae7873a1e01f570049b410588e5b66b4d`.
+The complete Vita build and package checks passed. Only `game-a.self` and
+`boot-game.txt` differ from perf.18. This candidate retains its optimization
+stack and also sets `XV_DRAW_PROFILE_DEFAULT=0`; this combined observation
+cannot isolate the FPS contribution of either change.
+
+Normal Pillar of Autumn loaded at the same checkpoint and camera
+(-28.66, 32.52, 0.62; forward 0.56, 0.82, -0.15). Native 544-line rendering
+and existing settings remain unchanged. These settings include earlier reduced
+effects and disabled decals; they are not the all-Original preset. No diagnostic
+benchmark or Vita3K validation was used.
+
+Across the last twelve complete, settled 60-frame windows, notifications report
+33,573 signal attempts and 55,615 skips: **62.36% avoided**, or 46.63 actual
+attempts/frame instead of about 124 potential attempts/frame in those windows.
+There were no failed notifications or capture jobs. Detailed `[draw-prep]`
+rows are absent while index/cache, capture and owner reports remain available.
+
+| Nearby window medians | perf.18 | perf.19 |
+| --- | ---: | ---: |
+| Frame time / FPS | 78.50 ms / 12.7 | 78.20 ms / 12.8 |
+| Draws/frame | 154 | 150.5 |
+| Capture elapsed/frame | 5.409 ms | 5.219 ms |
+| Capture worker elapsed/frame | 4.679 ms | 4.762 ms |
+| Capture join elapsed/frame | 0.051 ms | 0.050 ms |
+| Tick-owner elapsed/frame | 36.033 ms | 36.177 ms |
+| Scene-owner elapsed/frame | 40.198 ms | 39.965 ms |
+
+These are overlapping observers with separate windows and live NPC variation.
+The 0.3 ms whole-frame difference does **not** establish an FPS gain. The change
+removes real event traffic but has not moved this scene toward 20 FPS noticeably.
+Keep it in the cumulative research build, with the project default still Off.
+
+A camera turn and three pistol shots completed; the magazine display decreased.
+The post-input screenshot showed 9 FPS around effects, so firing-related frame
+drops remain. The 1,869,872-byte post-input log contains no searched STOP, FATAL,
+GPU-crash or trap markers, and all notification failure counters are zero.
+This brief check does not establish long-session/combat stability. Controls
+were returned to neutral. Evidence: `../ce-perf19/gameplay/`.
+
+Further tiny notification changes are unlikely to close the remaining gap.
+The next structural investigation is serialized actor/collision work. Collection
+writes shared visit epochs and object stamps and reads mutable object chains;
+merely dropping its outer guard would invalidate the transaction. Existing
+native query loops remain enabled. Any wider parallel path needs explicit
+ownership/publication boundaries rather than another unsafe lock removal.
