@@ -814,6 +814,12 @@ static void service_owner(void)
 }
 
 /* Keep the captured return address at the guarded caller, including LTO builds. */
+int xv_object_jobs_native_idle(void)
+{
+    return __atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1 ||
+        !__atomic_load_n(&running,__ATOMIC_ACQUIRE);
+}
+
 __attribute__((noinline)) int xv_object_math_lock(void)
 {
     if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;

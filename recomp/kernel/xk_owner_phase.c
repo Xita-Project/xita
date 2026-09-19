@@ -385,6 +385,12 @@ void xv_owner_phase_report(unsigned frames)
     if(!live((void *)__atomic_load_n(&owner_context,__ATOMIC_ACQUIRE))) {
         __atomic_fetch_add(&invalid,1,__ATOMIC_RELAXED);return;
     }
+#ifdef XV_NATIVE_CONSTANT_PACK
+    { extern void xv_constant_pack_stats(unsigned *);
+      unsigned p[7]; xv_constant_pack_stats(p);
+      XK_LOG("[constant-pack] %u frames accepted %u prefix-matrices %u declined-size %u budget %u mapping %u alias %u watch %u\n",
+          frames,p[0],p[1],p[2],p[3],p[4],p[5],p[6]); }
+#endif
     /* Split a still-open scope at this report boundary. It can contain
      * Present, yielding, or another selected scope; none is called CPU self. */
     if(phases[0].depth || phases[1].depth

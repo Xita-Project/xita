@@ -99,3 +99,7 @@ XITA_GAME_SRCS += recomp/query_capture.c recomp/kernel/xk_query_reuse.c \
                  recomp/kernel/xk_query_memory.c recomp/kernel/xk_query_capture.c \
                  recomp/kernel/xk_query_cpu.c
 endif
+
+ifeq ($(XV_NATIVE_CONSTANT_PACK),1)
+XITA_GAME_SRCS += recomp/kernel/xk_constant_pack.c
+endif

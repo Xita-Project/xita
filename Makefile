@@ -681,6 +681,11 @@ ifneq ($(RECOMP):$(GAME_PROFILE),1:halo_ce_3925)
 $(error XV_NATIVE_VISIBILITY_PORTAL_LOOP requires RECOMP=1 GAME_PROFILE=halo_ce_3925)
 endif
 endif
+ifeq ($(XV_NATIVE_CONSTANT_PACK),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_OWNER_PHASE):$(XV_EXPERIMENTAL_OBJECT_JOBS),1:halo_ce_3925:1:1)
+$(error XV_NATIVE_CONSTANT_PACK requires CE, owner phase tracking and object jobs)
+endif
+endif
 ifeq ($(XV_PALETTE_PREFIX_REUSE),1)
 ifneq ($(RECOMP):$(XV_NATIVE_MODEL_PALETTE):$(GAME_PROFILE),1:1:halo_ce_3925)
 $(error XV_PALETTE_PREFIX_REUSE requires RECOMP=1 XV_NATIVE_MODEL_PALETTE=1 GAME_PROFILE=halo_ce_3925)
@@ -1715,6 +1720,15 @@ solver-fusion-generate:
 	@echo 'Set XV_NATIVE_SOLVER_FUSION=1 with XV_NATIVE_QUERY_FUSION=1 to generate the owned solver unit.' >&2
 	@false
 endif
+ifeq ($(XV_NATIVE_CONSTANT_PACK),1)
+CONSTANT_PACK_SRCS := $(shell rg -l 'xv_constant_pack_prefix' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+ifeq ($(strip $(CONSTANT_PACK_SRCS)),)
+$(error XV_NATIVE_CONSTANT_PACK requires regenerated 7E530 hook)
+endif
+CONSTANT_PACK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(CONSTANT_PACK_SRCS))
+$(CONSTANT_PACK_OBJS) $(RECOMP_BUILD)/kernel/xk_constant_pack.o $(RECOMP_BUILD)/kernel/xk_owner_phase.o: RECOMP_CFLAGS += -DXV_NATIVE_CONSTANT_PACK
+$(RECOMP_BUILD)/kernel/xk_constant_pack.o: RECOMP_CFLAGS += -DXV_OWNER_PHASE
+endif
 ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_MODEL_PALETTE
 CFLAGS += -DXV_NATIVE_MODEL_PALETTE
@@ -2063,6 +2077,7 @@ $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -DXV_NATIVE_MATRIX_NEON
 endif
 # The optional batch validates layouts, scheduling and numeric inputs before
 # using bounded products. Keep reassociation/FMA disabled while unrolling it.
+$(RECOMP_BUILD)/kernel/xk_constant_pack.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_hierarchy.o: RECOMP_CFLAGS += -O3 -ffp-contract=off
 ifeq ($(XV_PALETTE_PREFIX_REUSE),1)
