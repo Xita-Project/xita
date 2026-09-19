@@ -46,3 +46,17 @@ runs in the dashboard/CE process; return from Halo 2 before fetching update stat
 or applying another update. Halo 2 confirmation means three frames were presented,
 not that gameplay has been validated. Bundled Halo 2 reads optional development
 settings from `ux0:data/xita-halo2/env.txt`, not CE's `env.txt`.
+
+The updated dashboard remote service can retrieve Halo 2's saved boot log after
+returning to Xita:
+
+```sh
+python3 tools/vita_remote.py --config /path/to/remote-client.json log halo2-boot.log --game halo2
+```
+
+This requires a dashboard runtime that includes the Halo 2 log endpoint; older
+builds return an unknown-operation error. The endpoint reads only the fixed
+`ux0:data/xita-halo2/boot.log` file through the existing authenticated service.
+It does not provide a listener while Halo 2 is running. Collect the log before
+relaunching Halo 2, which currently truncates it on startup. The remote client
+creates a new local output file and never overwrites earlier evidence.

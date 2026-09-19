@@ -39,4 +39,30 @@ readback, allocation, shader regeneration, or synchronization.
 The old native106/native213 startup notes describe earlier milestones. The
 mp328 lineage used for the combined package reaches extensive GXM submission;
 visible main-menu and physical hardware behavior still need direct validation.
-This fix has not yet been visually validated or deployed to the Vita.
+The VitaSDK candidate built successfully, changing only the executable in the
+Halo 2 package. A combined updater candidate preserves CE, the launcher, and
+every packaged shader/asset; its only differences are `halo2-a.self` and the
+corresponding boot record. It has not been deployed to the Vita.
+
+## Subsequent visual comparison
+
+Both the installed-lineage baseline (`711d40d1…`) and corrected candidate
+(`34dcd68e…`) reached the original profile-selection and main-menu screens in
+isolated Vita3K sessions. Normal Start skipped the intro and Cross selected the
+existing Default profile. Text is readable and menu input responds in both.
+Both still show substantial corruption in the animated background. These
+different-time screenshots cannot establish a visual improvement from the
+coordinate fix; main-menu startup already worked before this change.
+
+Private evidence is under `halo2-rtt-scale/visual-{baseline,fixed}` beside the
+prepared build, with screenshots, executable/log hashes, input event receipts,
+and terminal run records. The runs used the same game data, original profile
+files, fresh cache4 namespaces, software OpenGL configuration, and packaged
+shaders. Only the runtime and its revision differ. Each emulator was stopped
+after capture; neither is a hardware performance measurement.
+
+The user's first physical Halo 2 launch remained black. Its log has not yet
+been collected. Before guest startup, `h2_cache_mounts` extends three backing
+files to 750 MiB each. Desktop sparse-file behavior may conceal a significant
+first-launch storage cost on the Vita, but this is a hypothesis until the device
+log/cache state identifies the stopping point.

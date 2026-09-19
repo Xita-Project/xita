@@ -306,11 +306,12 @@ static void serve(int s)
                 while(LOAD(&capture)==2)remote_sleep(1000);
                 STORE(&capture,0);reply(s,504,"No completed display frame\n");
             }
-        } else if(!strcmp(method,"GET")&&(!strncmp(target,"/log?offset=",12)||!strncmp(target,"/launcher-log?offset=",21)||!strncmp(target,"/log/",5))) {
+        } else if(!strcmp(method,"GET")&&(!strncmp(target,"/log?offset=",12)||!strncmp(target,"/launcher-log?offset=",21)||!strncmp(target,"/halo2-log?offset=",18)||!strncmp(target,"/log/",5))) {
             if(xv_benchmark_status()||xv_benchmark_remote_busy()) {reply(s,409,"Bulk log reads disabled during benchmark\n");return;}
             int launcher=!strncmp(target,"/launcher-log?offset=",21);
+            int halo2=!strncmp(target,"/halo2-log?offset=",18);
             unsigned run=0;
-            const char *digits=target+(launcher?21:12);
+            const char *digits=target+(halo2?18:launcher?21:12);
             if(!strncmp(target,"/log/",5)) {
                 if(target[5]<'1'||target[5]>'3'||strncmp(target+6,"?offset=",8)) {
                     reply(s,400,"Invalid previous log\n");return;
@@ -321,7 +322,7 @@ static void serve(int s)
             /* Match xv_log.c's fixed rotation slots. No client-supplied path
              * enters fopen, and reading evidence never rotates or removes it. */
             static const char *const logs[]={ROOT "xita.log",ROOT "xita.1.log",ROOT "xita.2.log",ROOT "xita.3.log"};
-            FILE *f=fopen(launcher?ROOT "update/launcher.log":logs[run],"rb");if(!f) {reply(s,404,"Log unavailable\n");return;}
+            FILE *f=fopen(halo2?"ux0:data/xita-halo2/boot.log":launcher?ROOT "update/launcher.log":logs[run],"rb");if(!f) {reply(s,404,"Log unavailable\n");return;}
             if(fseek(f,0,SEEK_END)) {fclose(f);reply(s,500,"Log seek failed\n");return;}
             long size=ftell(f);
             if(size<0 || offset>(unsigned long)size || fseek(f,offset,SEEK_SET)) {fclose(f);reply(s,416,"Log offset unavailable\n");return;}

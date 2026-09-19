@@ -175,6 +175,9 @@ def main():
         (data / "remote.key").write_text(key + "\n")
         log = b"frame evidence\n" * 10000
         (data / "xita.log").write_bytes(log)
+        h2data=tmp/'ux0:data/xita-halo2';h2data.mkdir()
+        h2log=b'Halo 2 startup evidence\n'*8000
+        (h2data/'boot.log').write_bytes(h2log)
         old_logs={i:(f"previous run {i}: crash evidence\n".encode()*5000) for i in (1,2,3)}
         for i,contents in old_logs.items():(data/f"xita.{i}.log").write_bytes(contents)
         (data / "update").mkdir()
@@ -274,6 +277,7 @@ def main():
             assert command("b") == "ACK"
             assert request("/screen")[0] == request("/log?offset=0")[0] == request('/launcher-log?offset=0')[0] == 409
             assert request('/log/1?offset=0')[0]==409
+            assert request('/halo2-log?offset=0')[0]==409
             assert json.loads(request("/status")[2])["benchmark"] == 1
             assert request("/update")[0] == 200
             assert request("/update/apply","POST")[0] == 409
@@ -324,6 +328,19 @@ def main():
             assert request('/launcher-log?offset=7')[2]==launcher_log[7:]
             assert request('/launcher-log?offset=0&path=remote.key')[0]==400
             assert request('/launcher-log?offset=0&offset=1')[0]==400
+            assert request('/halo2-log?offset=0',token='f'*32)[0]==403
+            code,headers,body=request('/halo2-log?offset=65536')
+            assert code==200 and body==h2log[65536:131072]
+            assert int(headers['X-Log-Size'])==len(h2log)
+            for target in ('/halo2-log?offset=-1','/halo2-log?offset=2147483648',
+                           '/halo2-log?offset=0&path=../xita/remote.key',
+                           '/halo2-log?offset=0&offset=1'):
+                assert request(target)[0]==400
+            assert request('/halo2-log?offset=0','POST')[0]==404
+            assert request(f'/halo2-log?offset={len(h2log)+1}')[0]==416
+            (h2data/'boot.log').unlink()
+            assert request('/halo2-log?offset=0')[0]==404
+            (h2data/'boot.log').write_bytes(h2log)
             assert command("f") == "ACK"
             assert request("/screen")[0] == 504
             assert command("f") == "ACK"
@@ -335,6 +352,13 @@ def main():
             content = json.loads(conf.read_text()); content["key"] = key; conf.write_text(json.dumps(content))
             assert conf.stat().st_mode & 0o777 == 0o600
             client = Client(conf)
+            assert client.log(tmp/'halo2-capture.log',game='halo2')==len(h2log)
+            assert (tmp/'halo2-capture.log').read_bytes()==h2log
+            assert (h2data/'boot.log').read_bytes()==h2log
+            for kwargs in ({'game':'halo2','previous':1},{'game':'halo2','launcher':True},{'game':'../save'}):
+                try:client.log(tmp/'invalid-game.log',**kwargs)
+                except ValueError:pass
+                else:raise AssertionError('Invalid game log selection accepted')
             assert client.status()["protocol"] == 1
             assert client.log(tmp / "client.log") == len(log)
             assert (tmp / "client.log").read_bytes() == log
