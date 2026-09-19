@@ -97,13 +97,20 @@ static int source_read(void *unused,uint32_t address,void *out,size_t bytes)
     }
     return 1;
 }
+static int same_words(const void *,const void *,unsigned);
 static int source_current(void)
 {
     source_checks++;
     for(SourceRead *r=source_reads;r;r=r->next){
         unsigned char *p=pointer(r->address,r->bytes,0);
         source_compared+=r->bytes;
-        if(p!=r->pointer||memcmp(p,r->data,r->bytes)){
+        int equal=p==r->pointer;
+        if(equal){
+            if(!(((uintptr_t)p|(uintptr_t)r->data|r->bytes)&3u))
+                equal=same_words(p,r->data,r->bytes);
+            else equal=!memcmp(p,r->data,r->bytes);
+        }
+        if(!equal){
             source_changes++;xv_cluster_runtime_invalidate(0x535243u);return 0;
         }
     }

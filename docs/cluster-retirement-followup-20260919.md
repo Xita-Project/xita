@@ -131,3 +131,32 @@ Mutation, remapping and concurrent guard checks retain their previous coverage.
 Private results: `cluster-admission-arm/` and `cluster-admission-host/`.
 The prototype remains disabled on hardware; batch construction/amortization and
 real query distribution must be accounted for before claiming useful savings.
+
+### Real-map cost gate: not ready for hardware
+
+The 24 default-FPSCR inputs per owned map all pass full context/arena/FPSCR
+comparison, but all 48 are admitted: the starting-sphere heuristic does not
+exclude these expensive validation/short-result cases. Before further changes,
+total candidate instructions exceed original by 27% on Blood Gulch and 16% on
+Battle Creek, excluding per-batch construction (125,755 and 123,710 instructions).
+These synthetic distributions are not hardware workload weights, but contradict
+using the long synthetic traversals as evidence of a generally faster adapter.
+
+A two-input Blood Gulch function profile attributes 36,998 instructions to memcmp
+and 10,337 to pointer translation per candidate query. The current follow-up uses
+the existing grouped-word equality helper for aligned whole-word source spans;
+unaligned/tail spans retain memcmp, and every captured byte/mapping is still
+validated. This passes 14 synthetic ARM cases, snapshot input reuse, nine
+ASan/UBSan worker modes and all 48 owned-map comparisons. It saves about four
+thousand instructions on the shown Battle Creek cases, insufficient to resolve
+the short-query regression. Keep the adapter disabled.
+
+The owned-map runner now supports per-function profiling, permits deliberate
+fallback admission while requiring actual candidate coverage on each map, and
+asserts that queries allocate no snapshot storage. Private receipts are
+`cluster-admission-owned/`, `cluster-admission-owned-profile/`,
+`cluster-wordwise-owned/` and `cluster-wordwise-host/`.
+
+Next architectural requirement: avoid scanning unrelated geometry on every
+query, using a proved write/lifetime boundary or a validated per-query dependency
+set. Merely accelerating numerical traversal does not pay for whole-map validation.

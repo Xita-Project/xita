@@ -28,6 +28,7 @@ def main():
     p.add_argument('--maps', type=Path, nargs='+', required=True)
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--cases-per-bsp', type=int, default=24)
+    p.add_argument('--profile', action='store_true', help='count ARM instructions by function')
     p.add_argument('--fp-controls', action='store_true',
                    help='repeat each input with four roundings and five FPSCR controls')
     a = p.parse_args()
@@ -61,7 +62,7 @@ def main():
                 mapped = (size + (address & 4095) + 4095) & ~4095
                 arena = (8 << 20) + mapped + 4096  # unmapped sentinel page
                 arm.base.SIZE = arena
-                machine = arm.RuntimeMachine(a.elf)
+                machine = arm.RuntimeMachine(a.elf, a.profile)
                 u = machine.uc
                 u.mem_write(machine.symbols['arm_arena_bytes'], struct.pack('<I', arena))
                 page = address >> 12
@@ -121,12 +122,14 @@ def main():
                             snapshot = machine.call('arm_snapshot', fpscr=fpscr)
                             assert bytes(u.mem_read(arm.RAM, arena)) == before
                             assert snapshot['fpscr'] == fpscr
+                            allocations = bytes(u.mem_read(machine.symbols['arm_allocations'], 4))
                             candidate = machine.call('arm_candidate', fpscr=fpscr)
                             admitted = struct.unpack('<I', u.mem_read(machine.symbols['arm_admitted'], 4))[0]
                             checks = {'context': bytes(u.mem_read(machine.context, machine.layout['size'])) == expected_context,
                                       'memory': bytes(u.mem_read(arm.RAM, arena)) == expected_memory,
                                       'fpscr': candidate['fpscr'] == original['fpscr'],
-                                      'admitted': admitted == (n > 1)}
+                                      'admitted': admitted in (0, 1) and (n > 1 or not admitted),
+                                      'no_query_allocations': bytes(u.mem_read(machine.symbols['arm_allocations'], 4)) == allocations}
                             row = {'map': path.name, 'bsp': bsp['index'], 'case': case,
                                    'bsp_sha256': hashlib.sha256(raw).hexdigest(),
                                    'map_clusters': n, 'start': cluster, 'center': center,
@@ -141,6 +144,10 @@ def main():
                           allocated, 'instructions original/typed/snapshot', original['instructions'],
                           candidate['instructions'], snapshot['instructions'], flush=True)
                 machine.call('arm_finish')
+        # Admission may deliberately reject cheap inputs, but a fallback-only
+        # run cannot establish candidate coverage on these portal samples.
+        for name in {row['map'] for row in rows}:
+            assert any(row['admitted'] for row in rows if row['map'] == name), name
         receipt['complete'] = True
     finally:
         (a.out / 'result.json').write_text(json.dumps(receipt, indent=2) + '\n')
