@@ -40,7 +40,7 @@ def main():
         'recomp/xv_fn_table.c', 'recomp/xv_stubs_default.c', 'runtime/main.c', 'runtime/xv_packed_vertex.h',
         'shaders/halo_shaders.json', 'recompiler/gen_layouts.py', 'recompiler/shader_recomp_gen.py',
         'haloce/default.xbe', 'local/halo_ce_3925/game_manifest.json',
-        'tools/gen_native_bounds.py', 'tools/gen_native_clip.py', 'tools/prototype_collision_query.py', 'tools/query_f32_primitives.py', 'tools/query_semantic_leaf.py','tools/query_membership_scalar.py','tools/query_ancestor_scalar.py','tools/query_object_space.py',
+        'tools/gen_native_bounds.py', 'tools/gen_native_clip.py', 'tools/prototype_collision_query.py', 'tools/query_f32_primitives.py', 'tools/query_semantic_leaf.py','tools/query_membership_scalar.py','tools/query_ancestor_scalar.py','tools/query_object_space.py','tools/query_world_run.py','tools/query_world_run.h',
         'tools/prototype_collision_solver.py', 'tools/gen_native_solver_fusion.py',
         'tools/tests/collision_query_fusion.c', 'games/halo_ce_3925/clip_region.py',
         'games/halo_ce_3925/hooks.py','games/halo_ce_3925/discovery.py',

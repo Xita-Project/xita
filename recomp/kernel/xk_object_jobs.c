@@ -653,6 +653,15 @@ static int worker_lane(void)
 #endif
     return -1;
 }
+#if XV_QUERY_WORLD_RUN
+unsigned xv_object_world_run_admit(xctx *c)
+{
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1||!math_fast_path||
+       !__atomic_load_n(&running,__ATOMIC_ACQUIRE))return 0;
+    int lane=worker_lane();
+    return lane>=0&&c==&contexts[lane]&&xv_is_object_job(c)&&math_depth[lane]>0;
+}
+#endif
 #ifdef XV_LIGHT_QUERY_CENSUS
 unsigned xv_object_query_work_lane(const xctx *c,int guard,unsigned *depth)
 {
@@ -1642,6 +1651,9 @@ void xv_object_jobs_report(unsigned frames)
     /* Called with the renderer's frame window, not every 60 simulation passes.
      * Reporting must never dispatch callbacks or reset live worker counters. */
     if(initialized!=1||owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))return;
+#if XV_QUERY_WORLD_RUN
+    xv_query_world_run_report(frames);
+#endif
 #if XV_NATIVE_VISIBILITY_JOBS
     if(census_is_owner()) {
         XK_LOG("[visibility-jobs] %u frames batches %u lanes %u/%u/%u items; copied native data, joined before publication\n",
