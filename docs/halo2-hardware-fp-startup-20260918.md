@@ -35,3 +35,18 @@ required to determine whether there are additional startup blockers.
 Private hardware evidence: `halo2-hardware-startup/20260919T014901Z` beneath the
 September 18 unified-games experiment directory. The boot log was copied before
 relaunching Halo 2. No game binary, memory snapshot, or private log is committed.
+
+## Deployment
+
+The candidate built at `373616a` and was transferred through the dashboard's
+Halo 2 updater. The device verified 121,751,734 bytes with runtime SHA-256
+`b08f123964e631259d673372469d0eb95d6aa4a7ac3a3418c022a0d80d771787`, then
+accepted the launch request. The dashboard connection closed afterward, as
+expected when leaving for Halo 2; that alone does not prove successful startup.
+A main-menu result and the next hardware log remain pending. The existing
+working Halo 2 executable is retained by the updater's alternate-slot mechanism.
+
+Additional checks exercised guest entry with the hook present and absent,
+system/start-routine dispatch, and host-only-thread bypass. Existing scheduler
+yield-handoff (both modes) and sleep-wait regressions passed. These establish
+host behavior, not a successful physical startup.
