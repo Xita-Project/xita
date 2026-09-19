@@ -16,7 +16,8 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 
 
-def generate(xbe,manifest,symbols,stage,out,bucket0_detail=False):
+def generate(xbe,manifest,symbols,stage,out,bucket0_detail=False,bucket1_detail=False):
+    if bucket0_detail and bucket1_detail: raise ValueError("Select one refinement")
     if not __debug__: raise RuntimeError('Run without Python -O: identity checks require assertions')
     from recompiler import xita_recomp as r
     from games.halo_ce_3925.discovery import HaloDiscovery
@@ -29,9 +30,9 @@ def generate(xbe,manifest,symbols,stage,out,bucket0_detail=False):
     hle.update(profile.overrides)
     variables={s['name']:s['address'] for s in parsed if s['kind']=='VAR'};variables.update(profile.variables)
     hooks=HaloHooks(img);baseline=HaloHooks(img)
-    baseline.scene_partition_enabled=bucket0_detail
-    baseline.scene_bucket0_detail_enabled=False
-    hooks.scene_bucket0_detail_enabled=bucket0_detail
+    baseline.scene_partition_enabled=bucket0_detail or bucket1_detail
+    baseline.scene_bucket0_detail_enabled=bucket1_detail
+    hooks.scene_bucket0_detail_enabled=bucket0_detail or bucket1_detail
     assert hooks.enabled and hooks.scene_partition_enabled
     d=HaloDiscovery(img,hle,img.kernel_imports(),lambda *args:None)
     for address in re.findall(r'^void f_([0-9A-F]{8})\(', (stage/'recomp/xv_recomp_protos.h').read_text(),re.M):d.add_root(int(address,16))
@@ -49,8 +50,9 @@ def generate(xbe,manifest,symbols,stage,out,bucket0_detail=False):
             if m:found.append((path,m.group()))
         assert len(found)==1,(hex(pc),'ambiguous stage root')
         path,body=found[0];previous,actual=[em.emit_function(d.functions[pc]) for em in emitters]
-        from games.halo_ce_3925.scene_partition import strip,strip_detail
-        stripped=(strip_detail if bucket0_detail else strip)(actual)
+        from games.halo_ce_3925.scene_partition import strip,strip_detail,strip_bucket1,bucket1_hook
+        if bucket1_detail: actual=bucket1_hook(actual)
+        stripped=(strip_bucket1 if bucket1_detail else strip_detail if bucket0_detail else strip)(actual)
         assert stripped==previous,(hex(pc),'observer alters instructions')
         assert actual.count('xv_scene_partition_begin(&xv_scene_partition_scope_, c)')==1
         # Retained production units put their existing phase statement first.
@@ -66,7 +68,7 @@ def generate(xbe,manifest,symbols,stage,out,bucket0_detail=False):
     # Publish only after the exact reference body has validated.
     out.mkdir(parents=True,exist_ok=False)
     for name,body in saved.items():(out/name).write_text(body)
-    receipt=dict(result='PASS',bucket0_detail=bucket0_detail,xbe_sha256=hashlib.sha256(img.data).hexdigest(),symbols_sha256=hashlib.sha256(data).hexdigest(),functions=records,scope='Primary 5D410 only; no original instruction, phase, HLE, interior root or shared prototype modification.')
+    receipt=dict(result='PASS',bucket0_detail=bucket0_detail,bucket1_detail=bucket1_detail,xbe_sha256=hashlib.sha256(img.data).hexdigest(),symbols_sha256=hashlib.sha256(data).hexdigest(),functions=records,scope='Primary 5D410 only; no original instruction, phase, HLE, interior root or shared prototype modification.')
     (out/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
     return receipt
 
@@ -76,4 +78,5 @@ if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for name in ('xbe','manifest','symbols','stage','output-dir'):p.add_argument('--'+name,type=Path,required=True)
     p.add_argument('--bucket0-detail',action='store_true',help='Refine an existing six-bucket body with five additional cuts')
-    a=p.parse_args();print(json.dumps(generate(a.xbe,a.manifest,a.symbols,a.stage,a.output_dir,a.bucket0_detail),indent=2))
+    p.add_argument('--bucket1-detail',action='store_true',help='Refine a retained bucket0-detail scene with ordered pass boundaries')
+    a=p.parse_args();print(json.dumps(generate(a.xbe,a.manifest,a.symbols,a.stage,a.output_dir,a.bucket0_detail,a.bucket1_detail),indent=2))

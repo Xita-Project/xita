@@ -18,6 +18,9 @@ int xv_owner_phase_active(void *context, unsigned phase, uint32_t *generation_to
 void xv_scene_partition_begin(uint64_t *scope, void *context);
 void xv_scene_partition_step(uint64_t *scope, void *context, unsigned bucket);
 void xv_scene_partition_end(uint64_t *scope);
+#if defined(XV_SCENE_BUCKET1_DETAIL) && XV_SCENE_BUCKET1_DETAIL
+void xv_scene_bucket1_step(uint64_t *scope, void *context, unsigned bucket);
+#endif
 #if defined(XV_SCENE_BUCKET0_DETAIL) && XV_SCENE_BUCKET0_DETAIL
 void xv_scene_bucket0_step(uint64_t *scope, void *context, unsigned bucket);
 #endif

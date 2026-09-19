@@ -21,10 +21,11 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     for n in ('output-dir','retained-build','build-command','generated-body'):ap.add_argument('--'+n,type=Path,required=True)
     ap.add_argument('--bucket0-detail',action='store_true')
+    ap.add_argument('--bucket1-detail',action='store_true')
     a=ap.parse_args();out=a.output_dir.resolve();out.mkdir(parents=True,exist_ok=False);commands=[]
-    feature='XV_SCENE_BUCKET0_DETAIL' if a.bucket0_detail else 'XV_SCENE_PARTITION'
-    hook=scene_partition.detail_hook if a.bucket0_detail else scene_partition.hook
-    strip=scene_partition.strip_detail if a.bucket0_detail else scene_partition.strip
+    feature='XV_SCENE_BUCKET1_DETAIL' if a.bucket1_detail else 'XV_SCENE_BUCKET0_DETAIL' if a.bucket0_detail else 'XV_SCENE_PARTITION'
+    hook=scene_partition.bucket1_hook if a.bucket1_detail else scene_partition.detail_hook if a.bucket0_detail else scene_partition.hook
+    strip=scene_partition.strip_bucket1 if a.bucket1_detail else scene_partition.strip_detail if a.bucket0_detail else scene_partition.strip
     def run(args,*,cwd=None,env=None,ok=True):
         args=list(map(str,args));p=subprocess.run(args,cwd=cwd,env=env,text=True,capture_output=True)
         commands.append(dict(command=args,cwd=str(cwd) if cwd else None,returncode=p.returncode,stdout=p.stdout,stderr=p.stderr))
@@ -34,8 +35,9 @@ def main():
     cc=['cc','-std=gnu11','-O1','-g','-fno-strict-aliasing','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-label',
         '-DXV_OWNER_PHASE','-DXV_SCENE_PARTITION=1','-DXV_OWNER_PHASE_DEFAULT=1','-DXV_EXPERIMENTAL_OBJECT_JOBS',
         '-pthread','-fno-omit-frame-pointer','-no-pie','-fsanitize=address,undefined']
-    if a.bucket0_detail:cc+=['-DXV_SCENE_BUCKET0_DETAIL=1']
-    fixture=ROOT/('tools/tests/scene_bucket0_detail.c' if a.bucket0_detail else 'tools/tests/scene_partition.c')
+    if a.bucket0_detail or a.bucket1_detail:cc+=['-DXV_SCENE_BUCKET0_DETAIL=1']
+    if a.bucket1_detail:cc+=['-DXV_SCENE_BUCKET1_DETAIL=1']
+    fixture=ROOT/('tools/tests/scene_bucket1_detail.c' if a.bucket1_detail else 'tools/tests/scene_bucket0_detail.c' if a.bucket0_detail else 'tools/tests/scene_partition.c')
     exe=out/'boundary';run(cc+[fixture,'-o',exe])
     clean={k:v for k,v in os.environ.items() if not k.startswith('XV_')}
     run([exe,1],env=clean);run([exe,0],env={**clean,'XV_OWNER_PHASE':'0'})
@@ -91,24 +93,26 @@ def main():
             if not off:off=hashes
             else:assert hashes==off
             assert hashes[owner_objects[0]]==sha(a.retained_build/owner_objects[0])
-            if a.bucket0_detail:assert hashes[owner_objects[1]]==sha(a.retained_build/owner_objects[1])
+            if a.bucket0_detail or a.bucket1_detail:assert hashes[owner_objects[1]]==sha(a.retained_build/owner_objects[1])
         for n in owner_objects:shutil.copy2(stage/n,out/(label+'-'+Path(n).name))
         builds.append(dict(label=label,selector=value,compiled=compiled,objects=hashes))
     for bad in ('','2','-1','0 1','invalid'):
         r=run(base+[feature+'='+bad,targets[0]],cwd=stage,ok=False)
         assert feature+' must be 0 or 1' in r.stderr
-    for setting in ('XV_OWNER_PHASE=0','GAME_PROFILE=unsupported')+(('XV_SCENE_PARTITION=0',) if a.bucket0_detail else ()):
+    for setting in ('XV_OWNER_PHASE=0','GAME_PROFILE=unsupported')+(('XV_SCENE_PARTITION=0',) if a.bucket0_detail or a.bucket1_detail else ()):
         prefix=setting.split('=')[0]+'='
-        r=run([x for x in base if not x.startswith(prefix)]+[setting,feature+'=1',targets[0]],cwd=stage,ok=False)
+        prerequisite_base=([base[0],'RECOMP=1','GAME_PROFILE=halo_ce_3925','XV_OWNER_PHASE=1','XV_SCENE_PARTITION=1'] if a.bucket1_detail else base)
+        prerequisite_base=[x for x in prerequisite_base if not x.startswith(prefix)]
+        r=run(prerequisite_base+[setting,feature+'=1',targets[0]],cwd=stage,ok=False)
         assert feature+' requires' in r.stderr
     # A missing body must fail before any compilation or output change.
     (stage/'recomp/code_010.c').write_text(units['code_010.c'])
     r=run(base+[feature+'=1',targets[0]],cwd=stage,ok=False)
-    assert ('selectively regenerated five bucket0 cuts' if a.bucket0_detail else 'selectively regenerated primary 5D410 scope')in r.stderr
+    assert ('selectively regenerated eleven bucket1 cuts' if a.bucket1_detail else 'selectively regenerated five bucket0 cuts' if a.bucket0_detail else 'selectively regenerated primary 5D410 scope')in r.stderr
     (stage/'recomp/code_010.c').write_text(units['code_010.c'].replace(original,candidate,1))
     result=dict(result='PASS',feature=feature,body=body.stdout,builds=builds,preserved_objects=kept,
         scope='Actual primary generated CFG with deterministic child/HLE stand-ins; original REP runtime; complete host context/8MiB/table hashes at callbacks. ARM production compiles, no device or game-speed result.',
-        sources={str(p.relative_to(ROOT)):sha(p) for p in [ROOT/'Makefile',ROOT/'recomp/kernel/xk_owner_phase.c',ROOT/'recomp/kernel/xk_owner_phase.h',ROOT/'games/halo_ce_3925/scene_partition.py',ROOT/'tools/tests/scene_partition.c',ROOT/'tools/tests/scene_partition_body.c',Path(__file__)]})
+        sources={str(p.relative_to(ROOT)):sha(p) for p in [ROOT/'Makefile',ROOT/'recomp/kernel/xk_owner_phase.c',ROOT/'recomp/kernel/xk_owner_phase.h',ROOT/'games/halo_ce_3925/scene_partition.py',ROOT/'tools/tests/scene_partition.c',ROOT/'tools/tests/scene_partition_body.c',fixture,ROOT/'tools/gen_scene_partition_hooks.py',Path(__file__)]})
     (out/'receipt.json').write_text(json.dumps(result,indent=2)+'\n');print('PASS scene observer accounting, generated CFG callbacks, six retained ARM transitions; only selected scene/observer objects change')
 
 if __name__=='__main__':main()

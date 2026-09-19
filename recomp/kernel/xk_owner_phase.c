@@ -55,6 +55,15 @@ static unsigned warmup, foreign, invalid, rebinds, abandoned, stale;
 #if XV_SCENE_BUCKET0_DETAIL && !XV_SCENE_PARTITION
 #error XV_SCENE_BUCKET0_DETAIL requires XV_SCENE_PARTITION
 #endif
+#ifndef XV_SCENE_BUCKET1_DETAIL
+#define XV_SCENE_BUCKET1_DETAIL 0
+#endif
+#if XV_SCENE_BUCKET1_DETAIL != 0 && XV_SCENE_BUCKET1_DETAIL != 1
+#error XV_SCENE_BUCKET1_DETAIL must be 0 or 1
+#endif
+#if XV_SCENE_BUCKET1_DETAIL && !XV_SCENE_PARTITION
+#error XV_SCENE_BUCKET1_DETAIL requires XV_SCENE_PARTITION
+#endif
 #if XV_SCENE_PARTITION
 /* One outer primary 5D410 invocation on the presenting owner. Nested primary
  * entries are explicitly declined: their elapsed stays in the outer bucket.
@@ -67,6 +76,9 @@ static struct {
 /* Shares the enclosing scene token and timestamp; no independent lifetime. */
 static struct { uint64_t elapsed[6], entries[6], completed; unsigned bucket; } detail;
 #endif
+#if XV_SCENE_BUCKET1_DETAIL
+static struct { uint64_t elapsed[12], entries[12], completed; unsigned bucket; } detail1;
+#endif
 static void scene_account(uint64_t end)
 {
     if(end<scene.start)scene.invalid++;
@@ -74,6 +86,9 @@ static void scene_account(uint64_t end)
         scene.elapsed[scene.bucket]+=end-scene.start;
 #if XV_SCENE_BUCKET0_DETAIL
         if(scene.bucket==0)detail.elapsed[detail.bucket]+=end-scene.start;
+#endif
+#if XV_SCENE_BUCKET1_DETAIL
+        if(scene.bucket==1)detail1.elapsed[detail1.bucket]+=end-scene.start;
 #endif
     }
     scene.start=end;
@@ -204,7 +219,13 @@ void xv_scene_partition_step(uint64_t *scope,void *context,unsigned bucket)
 #if XV_SCENE_BUCKET0_DETAIL
     if(scene.bucket==0)detail.completed++;
 #endif
+#if XV_SCENE_BUCKET1_DETAIL
+    if(scene.bucket==1)detail1.completed++;
+#endif
     scene.bucket=bucket;scene.entries[bucket]++;
+#if XV_SCENE_BUCKET1_DETAIL
+    if(bucket==1) { detail1.bucket=0;detail1.entries[0]++; }
+#endif
 }
 #if XV_SCENE_BUCKET0_DETAIL
 void xv_scene_bucket0_step(uint64_t *scope,void *context,unsigned bucket)
@@ -214,6 +235,16 @@ void xv_scene_bucket0_step(uint64_t *scope,void *context,unsigned bucket)
     if(*scope!=scene.token || (unsigned)(*scope>>32)!=generation) { scene.stale++;return; }
     if(scene.bucket!=0 || bucket>=6 || bucket<=detail.bucket) { scene.invalid++;return; }
     scene_account(now());detail.bucket=bucket;detail.entries[bucket]++;
+}
+#endif
+#if XV_SCENE_BUCKET1_DETAIL
+void xv_scene_bucket1_step(uint64_t *scope,void *context,unsigned bucket)
+{
+    if(!*scope)return;
+    if(!scene_live(context)) { __atomic_fetch_add(&foreign,1,__ATOMIC_RELAXED);return; }
+    if(*scope!=scene.token || (unsigned)(*scope>>32)!=generation) { scene.stale++;return; }
+    if(scene.bucket!=1 || bucket>=12 || bucket<=detail1.bucket) { scene.invalid++;return; }
+    scene_account(now());detail1.bucket=bucket;detail1.entries[bucket]++;
 }
 #endif
 void xv_scene_partition_end(uint64_t *scope)
@@ -229,6 +260,9 @@ void xv_scene_partition_end(uint64_t *scope)
     scene_account(now());
 #if XV_SCENE_BUCKET0_DETAIL
     if(scene.bucket==0)detail.completed++;
+#endif
+#if XV_SCENE_BUCKET1_DETAIL
+    if(scene.bucket==1)detail1.completed++;
 #endif
     scene.completed++;scene.token=0;
 }
@@ -295,6 +329,15 @@ void xv_owner_phase_report(unsigned frames)
         (unsigned long long)detail.completed,!!scene.token && scene.bucket==0,detail.bucket);
     memset(detail.entries,0,sizeof detail.entries);memset(detail.elapsed,0,sizeof detail.elapsed);
     detail.completed=0;
+#endif
+#if XV_SCENE_BUCKET1_DETAIL
+    /* One joined row; no per-draw clocks or formatting. */
+    XK_LOG("[scene-bucket1-detail] %u frames entries %llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu elapsed-us %llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu; completed %llu open %u bucket %u; ordered pass intervals, nested/waits included\n",
+        frames,(unsigned long long)detail1.entries[0],(unsigned long long)detail1.entries[1],(unsigned long long)detail1.entries[2],(unsigned long long)detail1.entries[3],(unsigned long long)detail1.entries[4],(unsigned long long)detail1.entries[5],(unsigned long long)detail1.entries[6],(unsigned long long)detail1.entries[7],(unsigned long long)detail1.entries[8],(unsigned long long)detail1.entries[9],(unsigned long long)detail1.entries[10],(unsigned long long)detail1.entries[11],
+        (unsigned long long)detail1.elapsed[0],(unsigned long long)detail1.elapsed[1],(unsigned long long)detail1.elapsed[2],(unsigned long long)detail1.elapsed[3],(unsigned long long)detail1.elapsed[4],(unsigned long long)detail1.elapsed[5],(unsigned long long)detail1.elapsed[6],(unsigned long long)detail1.elapsed[7],(unsigned long long)detail1.elapsed[8],(unsigned long long)detail1.elapsed[9],(unsigned long long)detail1.elapsed[10],(unsigned long long)detail1.elapsed[11],
+        (unsigned long long)detail1.completed,!!scene.token && scene.bucket==1,detail1.bucket);
+    memset(detail1.entries,0,sizeof detail1.entries);memset(detail1.elapsed,0,sizeof detail1.elapsed);
+    detail1.completed=0;
 #endif
     XK_LOG("[scene-partition] %u frames 5D410: entries %llu/%llu/%llu/%llu/%llu/%llu elapsed-us %llu/%llu/%llu/%llu/%llu/%llu; completed %llu open %u bucket %u recursive-declined %u invalid %u abandoned %u stale %u exhausted %u; disjoint outer buckets, nested/waits included\n",
         frames,(unsigned long long)scene.entries[0],(unsigned long long)scene.entries[1],

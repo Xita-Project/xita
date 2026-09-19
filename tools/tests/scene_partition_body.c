@@ -62,9 +62,22 @@ int main(void)
 #if XV_SCENE_BUCKET0_DETAIL
         memset(&detail,0,sizeof detail);
 #endif
+#if XV_SCENE_BUCKET1_DETAIL
+        memset(&detail1,0,sizeof detail1);
+#endif
         f_scene_observed(c);
 #if XV_SCENE_BUCKET0_DETAIL
+        #if XV_SCENE_BUCKET1_DETAIL
+        assert(reads-prior==(skip?4:12+(extra?11:6)) && scene.completed==1 && !scene.token);
+        uint64_t total1=0;
+        for(unsigned j=0;j<12;j++) {
+            total1+=detail1.elapsed[j];
+            assert(detail1.entries[j]==(!skip && (j<6 || j==11 || extra)));
+        }
+        assert(total1==scene.elapsed[1] && detail1.completed==!skip);
+#else
         assert(reads-prior==(skip?4:12) && scene.completed==1 && !scene.token);
+#endif
         uint64_t total=0;
         for(unsigned j=0;j<6;j++) {total+=detail.elapsed[j];assert(detail.entries[j]==(j<2 || !skip));}
         assert(total==scene.elapsed[0] && detail.completed==1);

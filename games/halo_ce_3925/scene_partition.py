@@ -77,3 +77,39 @@ def detail_hook(body):
     if strip_detail(body) != original:
         raise ValueError('scene detail changes original body or main scopes')
     return body
+
+
+# Second scene section: boundaries between ordered model/callback passes.
+BUCKET1_CUTS = {0x5D517: 2, 0x5D5C3: 2, 0x5D5FC: 2, 0x5D693: 2,
+                0x5D698: 2, 0x5D6F2: 2, 0x5D72F: 1, 0x5D759: 1,
+                0x5D77F: 1, 0x5D7B0: 1, 0x5D7DB: 2}
+
+
+def strip_bucket1(body):
+    return re.sub(r'^#if defined\(XV_SCENE_BUCKET1_DETAIL\) && XV_SCENE_BUCKET1_DETAIL\n.*?^#endif\n', '', body, flags=re.M | re.S)
+
+
+def bucket1_hook(body):
+    if not __debug__:
+        raise RuntimeError('Run without Python -O')
+    if strip_bucket1(body) != body:
+        raise ValueError('bucket1 observer already installed')
+    canonical = re.sub(r'^    XV_PHASE_SCOPE\(c, \d+u\);\n', '', strip(strip_detail(body)), flags=re.M).rstrip()
+    if hashlib.sha256(canonical.encode()).hexdigest() != BODY_SHA256:
+        raise ValueError('primary 5D410 instruction/callback body drift')
+    if body.count('xv_scene_partition_begin(&xv_scene_partition_scope_, c)') != 1:
+        raise ValueError('bucket1 requires main scene observer')
+    original = body
+    for bucket, (pc, count) in enumerate(BUCKET1_CUTS.items(), 1):
+        needle = '    /* ' + f'{pc:08X}' + '  '
+        if body.count(needle) != count:
+            raise ValueError(f'bucket1 frontier {pc:08X} drift')
+        marker = '    /* XV_SCENE_BUCKET1_DETAIL_SCOPE: ordered callback passes */\n' if bucket == 7 else ''
+        step = ('#if defined(XV_SCENE_BUCKET1_DETAIL) && XV_SCENE_BUCKET1_DETAIL\n' + marker +
+                '    { extern void xv_scene_bucket1_step(uint64_t *, void *, unsigned);\n' +
+                f'      xv_scene_bucket1_step(&xv_scene_partition_scope_, c, {bucket}u); ' + '}\n' +
+                '#endif\n')
+        body = body.replace(needle, step + needle)
+    if strip_bucket1(body) != original:
+        raise ValueError('bucket1 observer changes retained body')
+    return body
