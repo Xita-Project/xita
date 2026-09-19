@@ -814,6 +814,7 @@ static void service_owner(void)
 }
 
 /* Keep the captured return address at the guarded caller, including LTO builds. */
+/* Owner identity is checked by the native caller before this idle query. */
 int xv_object_jobs_native_idle(void)
 {
     return __atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1 ||

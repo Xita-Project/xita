@@ -21,8 +21,6 @@ void xv_object_job_stop(xctx *c, unsigned address, const char *reason) __attribu
 /* Actual native-thread identity only; false is not proof of guest ownership. */
 int xv_object_is_worker_thread(void);
 int xv_object_math_lock(void);
-/* Requires separately verified guest-owner identity. No jobs may be in flight. */
-int xv_object_jobs_native_idle(void);
 #if XV_QUERY_WORLD_RUN
 /* Read-only admission: exact worker guest under the retained math transaction. */
 unsigned xv_object_world_run_admit(xctx *c);

@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include "xk_owner_phase.h"
 #include "xk_object_jobs.h"
+#include "xk_constant_pack.h"
 
 /* Owner-thread counters; rejected non-owner calls never touch them. */
 static unsigned pack_stats[7];
