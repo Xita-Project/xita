@@ -99,3 +99,32 @@ larger pool just to inflate the synthetic hit rate. Original-lift composition,
 production-build transitions, live resource use and hardware whole-frame benefit
 remain unverified for this candidate. The previous single-entry and rejected
 byte-comparison sources/results are retained separately in the private directory.
+
+## Opt-in runtime integration
+
+`XV_PALETTE_PREFIX_REUSE=1` now enables this path in `xk_palette.c`. It defaults
+to Off and requires the Halo CE 3925 profile, recompilation and the existing
+native model-palette feature. Non-ARM compilation with this feature enabled is
+rejected. Only the palette object owns the option; a content-sensitive stamp
+handles repeated On/Off builds. No guest code regeneration is needed.
+
+The existing math ownership guard covers cache lookup, comparison, arithmetic
+and publication. `[palette-prefix]` reports hit/miss/eviction counts, hit/miss
+prefix matrix counts and pool storage. Reporting resets counts but retains cached
+inputs. Reuse remains exact-content-based even if addresses or maps are recycled.
+The final matrix and guest context/scratch publication remain on the old path.
+
+All 142 paired comparisons pass against the integrated source (test-only symbol
+renaming and reset access). Six production ARM build transitions pass, and 107
+unrelated objects remain identical. Off restores the preceding complete palette
+object byte for byte. Malformed selectors and missing native-palette/profile/
+recompilation prerequisites fail before compilation. The first harness expected
+no unrelated initial compilation; the copied build also refreshed its version
+consumer with identical output. The corrected harness permits that initial
+refresh only while still asserting every unrelated object hash; subsequent
+feature transitions compile only the palette object.
+
+Receipts are `../palette-prefix-cache/results.json` and
+`build-gate-2/receipt.json`. Hardware cache reuse, memory headroom, whole-frame
+performance and original-lift composition beyond the prior native-batch proof
+remain to be established. This is an opt-in trial, not a release-default change.

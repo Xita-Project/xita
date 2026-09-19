@@ -1,6 +1,18 @@
 /* Experimental Halo 3925 model-palette batch, 0xA2781..0xA27C5.
  * The original loop remains the fallback. No worker ownership is introduced.
  * Keep this out of ordinary builds until hardware comparisons justify it. */
+#ifndef XV_PALETTE_PREFIX_REUSE
+#define XV_PALETTE_PREFIX_REUSE 0
+#endif
+#if XV_PALETTE_PREFIX_REUSE != 0 && XV_PALETTE_PREFIX_REUSE != 1
+#error XV_PALETTE_PREFIX_REUSE must be 0 or 1
+#endif
+#if XV_PALETTE_PREFIX_REUSE && !defined(XV_NATIVE_MODEL_PALETTE)
+#error XV_PALETTE_PREFIX_REUSE requires XV_NATIVE_MODEL_PALETTE
+#endif
+#if XV_PALETTE_PREFIX_REUSE && !defined(__arm__)
+#error XV_PALETTE_PREFIX_REUSE requires the ARM NEON runtime
+#endif
 #ifdef XV_NATIVE_MODEL_PALETTE
 #include "xk.h"
 #include "xk_object_jobs.h"
@@ -138,6 +150,41 @@ static int palette_numeric(const float *left, const uint8_t *right, unsigned cou
     return 1;
 }
 
+#if XV_PALETTE_PREFIX_REUSE
+/* Exact arithmetic reuse only. Addresses locate candidates; live contents and
+ * FP control prove every hit. The enclosing math guard owns this bounded pool. */
+typedef struct { unsigned count, control, raised, model, pose, nodes; float left[64*13], right[64*13], output[64*13]; } prefix_entry;
+static prefix_entry entries[32];
+static unsigned next_way[8];
+static unsigned prefix_evictions;
+static const unsigned prefix_storage_bytes=sizeof entries+sizeof next_way;
+static unsigned prefix_set(unsigned model,unsigned pose,unsigned nodes) {
+    unsigned h=model^(pose*0x9e3779b1u)^(nodes*0x85ebca6bu);
+    h^=h>>16;h*=0x7feb352du;h^=h>>15;return h&7u;
+}
+static prefix_entry *find_prefix(unsigned model,unsigned pose,unsigned nodes) {
+    unsigned set=prefix_set(model,pose,nodes),base=set*4u;
+    for(unsigned i=0;i<4;i++) {
+        prefix_entry *p=&entries[base+i];
+        if(p->count && p->model==model && p->pose==pose && p->nodes==nodes)return p;
+    }
+    for(unsigned i=0;i<4;i++)if(!entries[base+i].count)return &entries[base+i];
+    prefix_evictions++;unsigned way=next_way[set];next_way[set]=(way+1u)&3u;
+    entries[base+way].count=0;return &entries[base+way];
+}
+static unsigned prefix_hits, prefix_misses, prefix_hit_matrices, prefix_miss_matrices;
+static int equal_words(const void *av,const void *bv,unsigned words)
+{
+    const uint32_t *a=av,*b=bv;uint32x4_t diff=vdupq_n_u32(0);
+    unsigned i=0;for(;i+4<=words;i+=4)diff=vorrq_u32(diff,veorq_u32(vld1q_u32(a+i),vld1q_u32(b+i)));
+    uint32x2_t halves=vorr_u32(vget_low_u32(diff),vget_high_u32(diff));
+    unsigned d=vget_lane_u32(halves,0)|vget_lane_u32(halves,1);
+    for(;i<words;i++)d|=a[i]^b[i];return d==0;
+}
+static unsigned read_fp(void) { unsigned v; __asm__ volatile("vmrs %0, fpscr":"=r"(v)::"memory");return v; }
+static void write_fp(unsigned v) { __asm__ volatile("vmsr fpscr, %0"::"r"(v):"memory"); }
+#endif
+
 int xv_math_model_palette(xctx *c)
 {
     XV_OBJECT_MATH_GUARD();
@@ -169,8 +216,33 @@ int xv_math_model_palette(xctx *c)
      * Keep all matrix outputs, then reproduce the final call's context once. */
     if (!palette_numeric(left,right,count)) return decline(4);
     uint32_t last = count - 1u;
+#if XV_PALETTE_PREFIX_REUSE
+    if(last) {
+        prefix_entry *prefix=find_prefix(model,pose,nodes);
+        unsigned fp=read_fp(), control=fp&~0x9fu;
+        int hit=prefix->count==last && prefix->control==control &&
+            equal_words(prefix->left,left,last*13u);
+        if(hit)for(unsigned i=0;i<last;i++)
+            if(!equal_words(prefix->right+i*13u,right+i*156u,13u)){hit=0;break;}
+        if(hit) {
+            memcpy(output,prefix->output,last*52u);
+            write_fp(fp|prefix->raised);prefix_hits++;prefix_hit_matrices+=last;
+        } else {
+            /* Clear only sticky flags while computing this private prefix so
+             * saved arithmetic status is independent of incoming sticky bits. */
+            write_fp(fp&~0x9fu);
+            for(unsigned i=0;i<last;i++)product(NULL,left+i*13u,(const float *)(right+i*156u),output+i*13u);
+            unsigned after=read_fp();prefix->raised=after&0x9fu;
+            write_fp(after|(fp&0x9fu));prefix->control=control;
+            memcpy(prefix->left,left,last*52u);
+            for(unsigned i=0;i<last;i++)memcpy(prefix->right+i*13u,right+i*156u,52u);
+            memcpy(prefix->output,output,last*52u);prefix->model=model;prefix->pose=pose;prefix->nodes=nodes;prefix->count=last;prefix_misses++;prefix_miss_matrices+=last;
+        }
+    }
+#else
     for (unsigned i = 0; i < last; i++)
         product(NULL, left + i * 13u, (const float *)(right + i * 156u), output + i * 13u);
+#endif
     product(c, left + last * 13u, (const float *)(right + last * 156u), output + last * 13u);
     uint32_t a = pose + last * 52u;
     uint32_t b = nodes + 0x68u + last * 156u, out = sp + 0xe4u + last * 52u;
@@ -209,6 +281,11 @@ void xv_model_palette_report(unsigned frames)
     }
     XK_LOG("%s\n", line);
     memset(palette_sizes, 0, sizeof palette_sizes);
+#endif
+#if XV_PALETTE_PREFIX_REUSE
+    XK_LOG("[palette-prefix] %u frames hits %u misses %u evictions %u hit/miss matrices %u/%u storage %u; exact contents and FP control, final matrix retained\n",
+        frames,prefix_hits,prefix_misses,prefix_evictions,prefix_hit_matrices,prefix_miss_matrices,prefix_storage_bytes);
+    prefix_hits=prefix_misses=prefix_evictions=prefix_hit_matrices=prefix_miss_matrices=0;
 #endif
     palette_batches=palette_matrices=0;
     memset(palette_declined,0,sizeof palette_declined);

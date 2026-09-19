@@ -204,6 +204,13 @@ endif
 ifneq ($(filter $(XV_NATIVE_VISIBILITY_PORTAL_LOOP),0 1),$(XV_NATIVE_VISIBILITY_PORTAL_LOOP))
 $(error XV_NATIVE_VISIBILITY_PORTAL_LOOP must be 0 or 1)
 endif
+XV_PALETTE_PREFIX_REUSE ?= 0
+ifneq ($(words $(XV_PALETTE_PREFIX_REUSE)),1)
+$(error XV_PALETTE_PREFIX_REUSE must be 0 or 1)
+endif
+ifneq ($(filter $(XV_PALETTE_PREFIX_REUSE),0 1),$(XV_PALETTE_PREFIX_REUSE))
+$(error XV_PALETTE_PREFIX_REUSE must be 0 or 1)
+endif
 ifneq ($(words $(XV_SCENE_BUCKET0_DETAIL)),1)
 $(error XV_SCENE_BUCKET0_DETAIL must be 0 or 1)
 endif
@@ -261,6 +268,13 @@ force-scene-bucket0-detail-config:
 $(BUILD)/scene-bucket0-detail.config: force-scene-bucket0-detail-config
 	@mkdir -p $(BUILD)
 	@printf '%s\n' '$(XV_SCENE_BUCKET0_DETAIL)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+.PHONY: force-palette-prefix-config
+force-palette-prefix-config:
+$(BUILD)/palette-prefix.config: force-palette-prefix-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_PALETTE_PREFIX_REUSE)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 .PHONY: force-scene-bucket1-detail-config
@@ -665,6 +679,11 @@ endif
 ifeq ($(XV_NATIVE_VISIBILITY_PORTAL_LOOP),1)
 ifneq ($(RECOMP):$(GAME_PROFILE),1:halo_ce_3925)
 $(error XV_NATIVE_VISIBILITY_PORTAL_LOOP requires RECOMP=1 GAME_PROFILE=halo_ce_3925)
+endif
+endif
+ifeq ($(XV_PALETTE_PREFIX_REUSE),1)
+ifneq ($(RECOMP):$(XV_NATIVE_MODEL_PALETTE):$(GAME_PROFILE),1:1:halo_ce_3925)
+$(error XV_PALETTE_PREFIX_REUSE requires RECOMP=1 XV_NATIVE_MODEL_PALETTE=1 GAME_PROFILE=halo_ce_3925)
 endif
 endif
 ifeq ($(XV_SCENE_BUCKET0_DETAIL),1)
@@ -2046,6 +2065,10 @@ endif
 # using bounded products. Keep reassociation/FMA disabled while unrolling it.
 $(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off
 $(RECOMP_BUILD)/kernel/xk_hierarchy.o: RECOMP_CFLAGS += -O3 -ffp-contract=off
+ifeq ($(XV_PALETTE_PREFIX_REUSE),1)
+$(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -DXV_PALETTE_PREFIX_REUSE=1
+endif
+$(RECOMP_BUILD)/kernel/xk_palette.o: $(BUILD)/palette-prefix.config
 ifeq ($(XV_PALETTE_JOB_PROFILE),1)
 $(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -DXV_PALETTE_JOB_PROFILE=1
 endif
