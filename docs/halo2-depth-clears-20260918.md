@@ -31,3 +31,14 @@ The menu shader generator and software rasterizer were also inspected: both
 undo the Xbox Z24 viewport range, while the GXM generator applies an additional
 0.9999 factor for far-plane clipping. No shader conversion change was made in
 this patch. The hardware black startup still requires its saved boot log.
+
+## Visual check
+
+The `516c163` Vita build succeeded; only the runtime executable changed relative
+to the culling candidate. An isolated Vita3K run reached the profile screen and
+main menu using Start and Cross input. No guest guard stop was logged before
+the operator ended the run. Background artifacts remain; this correction alone
+does not explain them. No hardware update or FPS measurement was performed.
+Private evidence is in `halo2-depth-audit/visual` under the September 18
+unified-games experiment directory. Next, compare depth-enabled and depth-free
+rendering of the same workload before changing shader or texture translation.
