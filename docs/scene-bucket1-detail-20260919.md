@@ -69,4 +69,68 @@ remaining negative checks were run separately after the completed compile rows.
 The selective generator also passes against the owned XBE, symbols and retained
 stage. Its output equals the directly qualified body. Private receipts, build
 rows and generated CFG fixtures are in `../scene-bucket1-detail/`.
-Hardware pass timings and any optimization benefit remain unverified.
+Hardware observations follow; no optimization benefit is claimed for the observer.
+
+
+Perf.24 (`af88b93+`) builds successfully. The updater hash-verifies runtime
+`e5624e540cb748e0a4fb54494444012d7854e8e2eedac64cfff7416429fecd71` and
+confirms boot in slot 0; perf.23 remains in slot 1. Of 1,744 package entries,
+only `game-a.self` and `boot-game.txt` differ. The timed campaign launch sequence
+reached the Normal checkpoint and the new observer reports on hardware.
+
+
+## Hardware: model-list work grows most in the crowded view
+
+The original checkpoint view remains at 78.058 ms / 12.81 FPS and 152.17 draws
+per frame across twelve settled windows, essentially unchanged from perf.23.
+The new twelve intervals reconcile exactly with main bucket 1 in every selected
+window, with no invalid, abandoned, stale or exhausted main scene reports.
+
+After movement, six stationary corridor windows show camera
+`(-28.81, 36.54, 0.62)`, forward `(-0.99, 0.06, -0.15)`. The screenshot shows
+multiple marines, elites and grunts. These windows average 153.33 ms / 6.52 FPS
+and 466.5 draws/frame. They are a different workload from the initial checkpoint,
+not a regression measurement. Intermediate side-room and wall-facing captures
+are excluded from this table.
+
+| Interval | Original view ms/frame | Crowded corridor ms/frame |
+| --- | ---: | ---: |
+| 5B710 model list | 1.860 | 22.196 |
+| 93C00 / first two 7BFE0 passes | 0.101 | 0.378 |
+| 62870 callback interval | 1.859 | 4.739 |
+| Next two 7BFE0 passes | 0.037 | 4.348 |
+| 93DD0 | 0.032 | 0.052 |
+| 62810 callback interval | 0.295 | 0.479 |
+| 622A0 callback interval | 1.274 | 3.341 |
+| 627F0 callback interval | 0.215 | 0.391 |
+| 627E0 callback interval | 1.682 | 4.240 |
+| 62980 callback interval | 0.213 | 0.353 |
+| 62270 callback interval | 0.861 | 2.002 |
+| Cleanup / indirect tail | 0.002 | 0.003 |
+
+All six crowded-view detail ledgers also reconcile with their enclosing bucket,
+with no invalid/stale/abandoned/exhausted reports. The captured log has no
+searched fatal/stop/GPU-fault/data-abort marker. This short observation does not
+establish long-session or combat-input stability. Native resolution remains
+selected and remote controls are neutral.
+
+The model-list interval accounts for over half this second section in the
+crowded view and grows by about 20 ms relative to the easier view. The whole
+scene dispatcher averages 101.42 ms and the tick driver 48.54 ms here; they
+remain inclusive elapsed scopes. The model-list interval includes descendants,
+draw recording and waits, so 22.20 ms is not promised removable CPU time.
+
+Static inspection confirms `5B710 -> 5B4A0 -> 5B190 -> A26B0`, with recursive
+attachment traversal in `5B190`. The same `5B4A0` path is also used by the first
+model interval. Its preparation/cache helpers and ordered material publication
+share state; the entire list cannot simply be dispatched as concurrent guest
+calls. The next candidate should target repeated model state/packet preparation
+across these passes with explicit input ownership and ordered publication,
+checking downstream draw commands and game state against the retained path.
+Do not revisit tiny query-cache capacity changes as the primary frame-time fix.
+
+Private hardware evidence is in `../ce-perf24/`, particularly `corridor/` for
+the selected crowded view. `heavy/` is an intermediate side-room view, and
+`combat/` is the wall-facing approach; their directory names are not evidence
+of a matched heavy workload. `scene-bucket1-detail/model-children.json` and
+owned function extracts preserve the static call-chain audit outside Git.
