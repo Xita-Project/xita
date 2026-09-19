@@ -9,6 +9,25 @@ the Vita's GXM, sceCtrl, sceAudio and sceIo. This document is the planning refer
 the remaining work. Gameplay performance and stability gate later work; the dashboard
 is independent of the multiplayer transport.
 
+**September 19 development status:** the immediate target is sustained **20 FPS in
+heavy Halo CE gameplay**, with rendering and gameplay correctness preserved.
+Halo 2 rendering remains part of the project goal, but hardware startup work is
+parked while Halo CE performance is prioritized.
+
+The [typed spatial-query adapter](docs/cluster-retirement-followup-20260919.md)
+is now installed and executing private calculations on both worker lanes. This
+supersedes the earlier source-only status recorded below. Campaign captures have
+not demonstrated an FPS gain from that overlap. The saved checkpoint is around
+12.8 FPS; the deliberately crowded corridor is around 5.8 FPS. These are
+specific views, not a claim about every campaign area.
+
+[Capture profiling and the worker-validation comparison](docs/vertex-capture-detail-20260919.md)
+show that removing owner-side reuse increases worker/copy workload without an
+established frame-time benefit. Perf.33's reuse path was restored. The next
+[packed-comparison candidate](docs/packed-compare-groups-20260919.md) retains
+exact reuse and reduces ARM instruction count; hardware qualification is pending.
+The following dated observations retain their original experimental context.
+
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
 [~] [Movement/collision attribution](docs/object-motion-profile-20260916.md):
@@ -54,9 +73,9 @@ a general gain. The same valley's native/360p/native check is nearly flat at
 world preparation there, and fragment diagnostics in pixel-sensitive views.
 Visual, combat and driving acceptance is still pending.
 
-**Active objective (September 15):** restructure costly Halo CE engine and rendering
+**Performance objective:** restructure costly Halo CE engine and rendering
 work into efficient native routines and independent worker jobs until sustained
-30 FPS is verified on the physical Vita in representative campaign, combat and
+20 FPS is verified on the physical Vita in representative campaign, combat and
 vehicle gameplay. Keep rendering and gameplay correct, document fixed comparison
 settings and retain private checkpoints. Stable 20 FPS is an intermediate
 milestone; neither target is complete. Halo 2's original main menu remains a
