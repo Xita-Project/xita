@@ -69,3 +69,31 @@ intended test scope without changing production code or suppressing warnings.
 All six queued/synchronous scene-capacity configurations and the drop-target
 configuration pass. These mocked checks verify ordering and ownership, not
 hardware shadow pixels.
+
+The same last perf.2 combat window attributes draw preparation to streams
+17.312 ms/frame, textures 7.122, indices 6.914, state 3.501, program 3.022,
+setup 1.592, constants 0.796 and diagnostics 0.274. These are caller elapsed
+measurements. Vertex capture reports 937,666 microseconds on the recording
+side and only 508 microseconds joining over 60 frames; its 296,086 worker
+microseconds overlap other work. Existing reuse already avoided 45,114 KiB
+of staging writes over that window (6,645 exact hits). The next CPU candidate
+should target remaining stream capture/validation work, retaining those
+working reuse paths, rather than assuming another worker removes the cost.
+
+## First hardware capture and asynchronous-path correction
+
+The first remote trace on diag.1 starts and completes exactly one frame
+(10894), but emits no new draw-state records. The existing range/viewport
+records establish that the request itself worked. Hardware draws use the
+asynchronous vertex-capture branch, which returned before the new logger.
+The initial host fixture exercised the logger directly and did not catch
+that integration mistake.
+
+Commit `cb1e0c6` moves the logger immediately after material/descriptor capture
+and before the asynchronous return. It still does not join workers or read
+unresolved vertex streams. The test now checks this ordering; normal and
+sanitized logger tests pass. `0.2.0-diag.2 / cb1e0c6` is boot-confirmed in slot
+0, executable SHA-256
+`5fc8c5f2cb93a40cbc30634241a10a05e6c9295051f605b57e2c500c3abea33f`.
+Diag.1 is the previous slot; the perf.2 package remains archived locally.
+Only the executable and its boot hash differ from perf.2's package.
