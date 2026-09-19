@@ -14,4 +14,6 @@ def entry(image, address):
     return ['#ifdef XV_TYPED_CLUSTER_QUERY',
             '    /* Cancel query publication before any original retirement call. */',
             '    { extern void xv_cluster_runtime_invalidate(unsigned);',
-            f'      xv_cluster_runtime_invalidate(0x{address:X}u); }}', '#endif']
+            f'      xv_cluster_runtime_invalidate(0x{address:X}u); }}', '#endif',
+            '#if XV_POSE_PIPELINE', '    /* XV_POSE_RETIRE: invalidate prior visual poses before retirement */',
+            '    { extern void xv_pose_pipeline_invalidate(void); xv_pose_pipeline_invalidate(); }', '#endif']

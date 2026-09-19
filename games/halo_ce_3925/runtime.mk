@@ -103,3 +103,7 @@ endif
 ifeq ($(XV_NATIVE_CONSTANT_PACK),1)
 XITA_GAME_SRCS += recomp/kernel/xk_constant_pack.c
 endif
+
+ifeq ($(XV_POSE_PIPELINE),1)
+XITA_GAME_SRCS += recomp/kernel/xk_pose_pipeline.c recomp/kernel/xk_frame_snapshot.c
+endif

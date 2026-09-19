@@ -230,6 +230,13 @@ class HaloHooks(NoGameHooks):
                         "    extern void xv_owner_phase_end(uint64_t *);",
                         "    uint64_t xv_owner_phase_scope_ __attribute__((cleanup(xv_owner_phase_end))) = 0;",
                         f"    if (xv_owner_phase_enabled) xv_owner_phase_begin(&xv_owner_phase_scope_, c, {phase}u);", "#endif"])
+        if address == 0x5B4A0 and self.scene_bucket0_detail_enabled and hashlib.sha256(
+                self.image.bytes_at(address, 16) or b"").hexdigest() == "84e04c50371d0908bde1caf2ddc2c71a88d7d9f38fa3d66b1b12aad47785164b":
+            out.extend(["#if XV_POSE_PIPELINE", "    /* XV_POSE_SCOPE: full salted model owner */",
+                        "    extern unsigned xv_pose_scope_begin(void *);",
+                        "    extern void xv_pose_scope_end(unsigned *);",
+                        "    unsigned xv_pose_scope_ __attribute__((cleanup(xv_pose_scope_end))) = xv_pose_scope_begin(c);",
+                        "#endif"])
         out.extend(cluster_lifetime.entry(self.image, address))
         out.extend(self.light_census_entry(address))
         out.extend(object_motion_profile.entry(self.image, address))

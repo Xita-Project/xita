@@ -1,3 +1,6 @@
+#if XV_POSE_PIPELINE
+#include "../recomp/kernel/xk_pose_pipeline.h"
+#endif
 /*
  * xv_d3d.c - Direct3D 8 (Xbox) HLE: record on the guest fiber, replay on the pump.
  * See xv_d3d.h for the contract and the blueprint sections it implements.
@@ -476,6 +479,9 @@ int xv_d3d_init(const xv_vs_desc_t *const *table, unsigned count)
 static void rt_shutdown(void);
 void xv_d3d_shutdown(void)
 {
+#if XV_POSE_PIPELINE
+    xv_pose_pipeline_shutdown();
+#endif
     xv_vertex_capture_shutdown();
     frame_constants_shutdown();
     xv_vertex_prepare_shutdown();
@@ -2111,6 +2117,9 @@ static void report_draw_drops(cmdlist_t *l)
 
 uint32_t xv_d3d_EndFrame(void)
 {
+#if XV_POSE_PIPELINE
+    xv_pose_pipeline_end();
+#endif
     xv_vertex_capture_drain();
     cmdlist_t *l = cur_list();
     report_draw_drops(l);
@@ -2126,6 +2135,9 @@ uint32_t xv_d3d_EndFrame(void)
 unsigned xv_d3d_record_slot(void) { return g_build_frame % XV_NUM_LISTS; }
 void xv_d3d_BeginFrame(void)
 {
+#if XV_POSE_PIPELINE
+    xv_pose_pipeline_begin(g_build_frame);
+#endif
     xv_vertex_capture_begin_slot(g_build_frame % XV_NUM_LISTS);
     index_reuse_begin_frame();
     xv_vertex_upload_reset(g_build_frame % XV_NUM_LISTS);

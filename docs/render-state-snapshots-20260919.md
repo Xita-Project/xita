@@ -76,3 +76,46 @@ The next integration must:
    compare ordinary checkpoint and crowded-campaign gameplay on physical Vita.
    Record missed publications, snapshot age, memory use, frame time and visual
    correctness. No predicted FPS increase substitutes for that test.
+
+## Opt-in render-palette worker candidate
+
+`XV_POSE_PIPELINE=1` now connects a bounded experiment to the presenting owner's
+primary 5B4A0 model scope, the admitted A26B0 palette helper, D3D frame boundaries
+and both audited map/BSP retirement entries. This is **render-palette overlap**,
+not a complete double-buffered simulation and not asynchronous AI/physics.
+
+The owner copies admitted pose and bind matrices into one of two input banks.
+At frame end a Core 1 worker receives that bank and computes complete palettes
+without guest pointers, game callbacks, shared object updates or GXM calls.
+A separate two-slot result exchange lets the next render use a complete previous
+frame's palette. Results require the same full object handle, model, pose-source
+identity, bind-source identity, matrix count, FP control and exact bind matrices.
+The previous pose is intentionally allowed to differ: this experiment introduces
+one frame of visual pose latency. New identities, changed bindings, unavailable
+results, exceptional inputs, over-capacity sets and results older than one frame
+retain current-frame computation. The owner never waits for palette completion.
+
+All bones, including the final matrix, come from the same completed palette.
+The last current matrix call still reproduces the guest register continuation
+into a temporary result, rather than mixing that matrix into the old visual pose.
+The skipped prefix's FP exception accumulation is not an exact current-frame
+replay; the admitted domain masks exceptions, but this remains an experimental
+rendering change rather than an original-execution-equivalent optimization.
+Original cache refresh, visibility, lighting, simulation joins and GPU retirement
+remain in place. Different model variants for the same object fall back.
+
+The feature requires the CE profile, native palettes, object jobs, owner-phase
+tracking and the model-detail hooks. Ordinary builds leave it off. The emitted
+scope and retirement entries check owned-image signatures. The retained-shard
+updater `tools/apply_pose_hooks.py` uses the same profile hook output, preflights
+all three sites and accepts only its exact prior blocks. Build configuration
+changes rebuild the affected guest shards, palette helper and recording path.
+
+The actual worker state machine passes ASan/UBSan and TSan tests with input
+mutation, object/model/bind changes, deliberately delayed work, stale results,
+world invalidation, stress, shutdown and restart. A production-palette fixture
+covers 1/4/16/64 matrices and verifies whole prior palettes plus current register
+continuation. VitaSDK compiles both the worker and integrated palette source.
+These checks are prerequisites, not hardware acceptance. The hardware test must
+show nonzero `[pose-pipeline] reused` counts and acceptable moving-model visuals
+before any FPS result is attributed to this path.

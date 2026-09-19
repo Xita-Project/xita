@@ -1,3 +1,4 @@
+XV_POSE_PIPELINE ?= 0
 PYTHON ?= python3
 # ---------------------------------------------------------------------------
 #  Xita — vitasdk Makefile
@@ -2205,3 +2206,37 @@ recomp-lib: $(RECOMP_BUILD)/libxita_sys.a $(RECOMP_BUILD)/libxita_game.a $(RECOM
 	@$(PREFIX)-size -t $^ | tail -1
 
 .PHONY: recomp-lib
+
+# Experimental complete previous-frame model palettes, never simulation state.
+ifneq ($(words $(XV_POSE_PIPELINE)),1)
+$(error XV_POSE_PIPELINE must be 0 or 1)
+endif
+ifneq ($(filter $(XV_POSE_PIPELINE),0 1),$(XV_POSE_PIPELINE))
+$(error XV_POSE_PIPELINE must be 0 or 1)
+endif
+ifeq ($(XV_POSE_PIPELINE),1)
+ifneq ($(RECOMP):$(XV_NATIVE_MODEL_PALETTE):$(XV_OWNER_PHASE):$(XV_EXPERIMENTAL_OBJECT_JOBS):$(XV_SCENE_BUCKET0_DETAIL):$(GAME_PROFILE),1:1:1:1:1:halo_ce_3925)
+$(error XV_POSE_PIPELINE requires Halo CE native palette, owner phase, object jobs and model detail hooks)
+endif
+RECOMP_CFLAGS += -DXV_POSE_PIPELINE=1
+$(RECOMP_BUILD)/kernel/xk_palette.o: RECOMP_CFLAGS += -DXV_OWNER_PHASE
+$(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_POSE_PIPELINE=1
+endif
+.PHONY: force-pose-pipeline-config
+force-pose-pipeline-config:
+$(BUILD)/pose-pipeline.config: force-pose-pipeline-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_POSE_PIPELINE)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_palette.o $(BUILD)/runtime/xv_d3d.o: $(BUILD)/pose-pipeline.config
+
+POSE_PIPELINE_HOOK_SRCS := $(shell rg -l 'XV_POSE_SCOPE:|XV_POSE_RETIRE:' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+POSE_PIPELINE_HOOK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(POSE_PIPELINE_HOOK_SRCS))
+ifeq ($(XV_POSE_PIPELINE),1)
+ifneq ($(words $(shell rg -o 'XV_POSE_SCOPE:|XV_POSE_RETIRE:' $(POSE_PIPELINE_HOOK_SRCS) 2>/dev/null)),3)
+$(error XV_POSE_PIPELINE requires regenerated model owner and both retirement hooks)
+endif
+endif
+$(POSE_PIPELINE_HOOK_OBJS): $(BUILD)/pose-pipeline.config
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a: $(BUILD)/pose-pipeline.config

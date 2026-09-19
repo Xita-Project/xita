@@ -61,6 +61,39 @@ static void *palette_span(uint32_t address, unsigned size)
     }
     return (void *)first;
 }
+#if XV_POSE_PIPELINE
+#include "xk_pose_pipeline.h"
+#include "xk_owner_phase.h"
+#include "xk_constant_pack.h"
+static unsigned pose_scope_depth, pose_scope_datum;
+static xctx *pose_scope_context;
+unsigned xv_pose_scope_begin(void *context)
+{
+    xctx *c=context;uint32_t generation=0;
+    if(xv_owner_phase_active(c,XV_OWNER_SCENE,&generation)!=1||
+       !xv_object_jobs_native_idle())return 0;
+    if(pose_scope_depth) {pose_scope_depth++;return 1;}
+    const uint32_t *entry=palette_span(c->r[7],12);
+    if(!entry||entry[0]==UINT32_MAX)return 0;
+    pose_scope_datum=entry[0];pose_scope_context=c;pose_scope_depth=1;return 1;
+}
+void xv_pose_scope_end(unsigned *token)
+{
+    if(*token&&pose_scope_depth) {
+        if(!--pose_scope_depth)pose_scope_context=NULL;
+    }
+}
+static int pose_scope_active(xctx *c)
+{
+    static int math_allowed=-1;
+    if(math_allowed<0) {const char *m=getenv("XV_NATIVE_MATH");math_allowed=!m||atoi(m)!=0;}
+    if(!math_allowed)return 0;
+    uint32_t generation=0;
+    return pose_scope_depth==1&&pose_scope_context==c&&
+        xv_owner_phase_active(c,XV_OWNER_SCENE,&generation)==1&&xv_object_jobs_native_idle();
+}
+#endif
+
 static int overlaps(const void *a, unsigned an, const void *b, unsigned bn)
 {
     uintptr_t x = (uintptr_t)a, y = (uintptr_t)b;
@@ -105,6 +138,11 @@ static void product(xctx *c, const float *ap, const float *bp, float *op)
         c->st[(c->fsp - 1u) & 7u] = scale;
     }
 }
+
+#if XV_POSE_PIPELINE
+static void pose_product(const float *a,const float *b,float *out)
+{product(NULL,a,b,out);}
+#endif
 
 /* The batch can omit intermediate register-only arithmetic. Bound each input
  * to signed zero or magnitude [2^-30, 2^30] before writing anything: useful
@@ -188,7 +226,12 @@ static void write_fp(unsigned v) { __asm__ volatile("vmsr fpscr, %0"::"r"(v):"me
 int xv_math_model_palette(xctx *c)
 {
     XV_OBJECT_MATH_GUARD();
+#if XV_POSE_PIPELINE
+    int pose_trial=pose_scope_active(c);
+    if (!palette_enabled() && !pose_trial) return decline(0);
+#else
     if (!palette_enabled()) return decline(0);
+#endif
     uint32_t sp = c->r[4], model = c->r[5], pose = c->r[7];
     if (!pose || sp < 32 || model > UINT32_MAX - 0xc0u) return decline(1);
     const uint32_t *header = palette_span(model + 0xb8u, 8);
@@ -216,6 +259,11 @@ int xv_math_model_palette(xctx *c)
      * Keep all matrix outputs, then reproduce the final call's context once. */
     if (!palette_numeric(left,right,count)) return decline(4);
     uint32_t last = count - 1u;
+#if XV_POSE_PIPELINE
+    int previous_pose=pose_trial&&xv_pose_pipeline_try(pose_scope_datum,model,pose,nodes,
+        count,left,right,156,pose_product,output);
+    if(!previous_pose) {
+#endif
 #if XV_PALETTE_PREFIX_REUSE
     if(last) {
         prefix_entry *prefix=find_prefix(model,pose,nodes);
@@ -244,6 +292,14 @@ int xv_math_model_palette(xctx *c)
         product(NULL, left + i * 13u, (const float *)(right + i * 156u), output + i * 13u);
 #endif
     product(c, left + last * 13u, (const float *)(right + last * 156u), output + last * 13u);
+#if XV_POSE_PIPELINE
+    } else {
+        /* Preserve the current call's register/scratch continuation without
+         * mixing its final bone into a previous-frame complete visual pose. */
+        float register_only[13];
+        product(c,left+last*13u,(const float *)(right+last*156u),register_only);
+    }
+#endif
     uint32_t a = pose + last * 52u;
     uint32_t b = nodes + 0x68u + last * 156u, out = sp + 0xe4u + last * 52u;
     scratch[0]=a; scratch[1]=out+4; scratch[2]=b+4; scratch[3]=a+4;
