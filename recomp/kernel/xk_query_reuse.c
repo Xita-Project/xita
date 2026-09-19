@@ -78,6 +78,51 @@ static uint32_t fp_get(void) { return 0; }
 static void fp_set(uint32_t value) { (void)value; }
 #endif
 
+/* Optional whole-adapter elapsed attribution. One writer owns busy, including
+ * across callback guard releases. Reporting requires joined workers. No clocks
+ * occur at individual guest accesses. Native FP state survives clock calls. */
+enum { PROFILE_ORIGINAL, PROFILE_CAPTURE, PROFILE_REPLAY, PROFILE_KINDS };
+#if XV_QUERY_REUSE_PROFILE
+typedef struct { uint64_t us, maximum; unsigned calls, invalid; } ReuseTime;
+static ReuseTime profile_times[PROFILE_KINDS];
+static uint64_t profile_started;
+static unsigned profile_kind;
+static uint64_t profile_clock(void)
+{
+    uint32_t fp = fp_get();
+    uint64_t now = xk_os_monotonic_us();
+    fp_set(fp); return now;
+}
+static void profile_begin(void)
+{ profile_kind = PROFILE_ORIGINAL; profile_started = profile_clock(); }
+static void profile_select(unsigned kind) { profile_kind = kind; }
+static void profile_finish(void)
+{
+    uint64_t now = profile_clock();
+    ReuseTime *t = &profile_times[profile_kind]; ++t->calls;
+    if (now < profile_started) { ++t->invalid; return; }
+    uint64_t elapsed = now - profile_started;
+    t->us += elapsed;
+    if (elapsed > t->maximum) t->maximum = elapsed;
+}
+static void profile_report(unsigned frames)
+{
+    static const char *const names[PROFILE_KINDS] = {"original", "capture", "replay"};
+    for (unsigned i = 0; i < PROFILE_KINDS; ++i) {
+        ReuseTime *t = &profile_times[i];
+        XK_LOG("[query-reuse-cost] %u frames path %s calls %u elapsed-us %llu max-us %llu invalid %u; whole-adapter elapsed includes scheduling/callbacks, original includes declined records, capture includes failures\n",
+            frames, names[i], t->calls, (unsigned long long)t->us,
+            (unsigned long long)t->maximum, t->invalid);
+    }
+    memset(profile_times, 0, sizeof profile_times);
+}
+#else
+#define profile_begin() ((void)0)
+#define profile_select(kind) ((void)0)
+#define profile_finish() ((void)0)
+#define profile_report(frames) ((void)0)
+#endif
+
 static void config_get(uint32_t out[3])
 {
     out[0] = __atomic_load_n(&xv_collision_vertices_state, __ATOMIC_ACQUIRE) & 1u;
@@ -184,7 +229,7 @@ static ReuseRecord *new_record(ReuseEntry *e)
     return r;
 }
 static void release_busy(void)
-{ __atomic_store_n(&busy, 0u, __ATOMIC_RELEASE); }
+{ profile_finish(); __atomic_store_n(&busy, 0u, __ATOMIC_RELEASE); }
 static int resume(xctx *c)
 {
     if (xv_object_world_run_admit(c)) return 1;
@@ -217,6 +262,7 @@ void xv_query_reuse_run(xctx *c)
     if (__atomic_exchange_n(&busy, 1u, __ATOMIC_ACQ_REL)) {
         COUNT(busy); query_fused_172c95_171f94(c); return;
     }
+    profile_begin();
     if (__atomic_exchange_n(&reset_pending, 0u, __ATOMIC_ACQ_REL)) reset_entries();
     ReuseRoots current = roots_get();
     if (!roots_equal(&current, &roots)) {
@@ -262,6 +308,7 @@ void xv_query_reuse_run(xctx *c)
         /* Both validates precede any replay writes. Under the existing actor
          * guard there is no callback or root mutation between these calls.
          * Replay functions repeat validation but cannot newly fail here. */
+        profile_select(PROFILE_REPLAY);
         xv_query_memory_replay(&r->memory, &view);
         xv_query_cpu_replay(&r->cpu, c, &fp);
         fp_set(fp); COUNT(hits);
@@ -275,6 +322,7 @@ void xv_query_reuse_run(xctx *c)
         COUNT(promotable);
         if (!attempted || epoch - last_attempt >= REUSE_CAPTURE_INTERVAL) {
             attempted = 1; last_attempt = epoch; COUNT(captures);
+            profile_select(PROFILE_CAPTURE);
             ReuseRecord *r = new_record(e);
             int cpu_ok = xv_query_cpu_begin(&r->cpu, c, fp);
             int memory_ok = xv_query_memory_begin(&r->memory, &view);
@@ -322,6 +370,7 @@ void xv_query_reuse_report(unsigned frames)
 {
     xv_object_math_report_check();
     if (!frames || __atomic_load_n(&busy, __ATOMIC_ACQUIRE)) return;
+    profile_report(frames);
     ReuseCounts n;
 #define TAKE(name) n.name = __atomic_exchange_n(&counts.name, 0u, __ATOMIC_RELAXED);
     REUSE_COUNTS(TAKE)

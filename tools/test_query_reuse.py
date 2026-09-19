@@ -11,11 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     with tempfile.TemporaryDirectory(prefix='xita-query-reuse-') as directory:
-        for sanitizer in (False, True):
+        for sanitizer, profile in ((False,False),(True,False),(False,True),(True,True)):
             binary = Path(directory) / ('sanitize' if sanitizer else 'normal')
             command = shlex.split(os.environ.get('CC', 'cc'))
             command += ['-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror',
-                        '-fno-strict-aliasing', str(ROOT / 'tools/tests/query_reuse.c'),
+                        '-fno-strict-aliasing', '-DXV_QUERY_REUSE_PROFILE='+str(int(profile)), str(ROOT / 'tools/tests/query_reuse.c'),
                         str(ROOT / 'recomp/kernel/xk_query_cpu.c'),
                         str(ROOT / 'recomp/kernel/xk_query_memory.c'), '-o', str(binary)]
             if sanitizer:

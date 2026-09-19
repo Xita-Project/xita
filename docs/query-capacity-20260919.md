@@ -63,3 +63,7 @@ remaining scene work before choosing further cache tuning versus a native hot
 routine or independent-job change. The experimental option remains default-off.
 Private receipts, captures, log, summary and scope comparison are in
 `../ce-perf22/`.
+
+The follow-up [elapsed attribution](query-cost-attribution-20260919.md) measures
+the full selected adapter at 3.89 ms/frame; further capacity tuning is no longer
+the priority for closing the campaign frame-time gap.

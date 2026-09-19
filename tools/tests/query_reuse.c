@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #define XV_QUERY_REUSE_TEST 1
+#ifndef XV_QUERY_REUSE_PROFILE
+#define XV_QUERY_REUSE_PROFILE 0
+#endif
 #include "../../recomp/kernel/xk_query_reuse.c"
 
 uint8_t *g_xram, *g_img_base;
@@ -12,6 +15,8 @@ unsigned xv_collision_vertices_state = 1, xv_segment_sphere_mode = 1;
 const unsigned xv_collision_traversal_mode = 1;
 static unsigned admitted = 1, checks, logs, originals, captured, work = 40;
 static unsigned arena_bytes = 0x41000, mode, fake_fp = 0x63000090;
+static uint64_t fake_clock;
+uint64_t xk_os_monotonic_us(void) { fake_fp ^= 0x12345678; fake_clock += 20; return fake_clock; }
 static unsigned expect_original_state;
 static uint32_t expected_output;
 static uint8_t *arena_a, *arena_b;
@@ -23,7 +28,7 @@ void xv_object_math_report_check(void) { ++checks; }
 uint32_t xk_mem_arena_size(void) { return arena_bytes; }
 uint32_t xv_query_reuse_test_fpscr_get(void) { return fake_fp; }
 void xv_query_reuse_test_fpscr_set(uint32_t value) { fake_fp = value; }
-void xk_os_log(const char *format, ...) { assert((strstr(format, "[query-reuse]") || strstr(format, "[query-reuse-detail]"))); ++logs; }
+void xk_os_log(const char *format, ...) { assert((strstr(format, "[query-reuse]") || strstr(format, "[query-reuse-detail]") || strstr(format, "[query-reuse-cost]"))); ++logs; }
 static uint32_t get32(unsigned off) { uint32_t v; memcpy(&v, g_xram + off, 4); return v; }
 static void put32(unsigned off, uint32_t v) { memcpy(g_xram + off, &v, 4); }
 static void execute(XvQueryCpu *cpu, XvQueryMemory *mem, xctx *c)
@@ -66,6 +71,10 @@ void query_captured_172c95_171f94(XvQueryCpu *cpu, XvQueryMemory *mem, xctx *c)
 { ++captured; execute(cpu, mem, c); }
 static void reset(void)
 {
+#if XV_QUERY_REUSE_PROFILE
+    memset(profile_times, 0, sizeof profile_times);
+#endif
+    fake_clock = 0;
     reset_entries(); memset(&roots, 0, sizeof roots); memset(&counts, 0, sizeof counts);
     busy = reset_pending = attempted = last_attempt = 0; epoch = 1;
     admitted = 1; mode = originals = captured = logs = checks = expect_original_state = 0;
@@ -196,7 +205,7 @@ static void throttle_eviction_epoch(void)
     reset(); promote(); epoch = UINT_MAX; xv_query_reuse_epoch();
     assert(epoch == 1 && !entries[0].used && !attempted); call(); assert(!counts.hits);
     xv_query_reuse_report(0); assert(!logs);
-    xv_query_reuse_report(60); assert(logs == 2 && !counts.calls && entries[0].used);
+    xv_query_reuse_report(60); assert(logs == (XV_QUERY_REUSE_PROFILE ? 5u : 2u) && !counts.calls && entries[0].used);
     assert(checks > 0);
 }
 static ReuseEntry *history_for(unsigned key)
@@ -223,6 +232,21 @@ static void check_record_owners(void)
         ++owners;
     }
     assert(n == owners);
+}
+static void timing_paths(void)
+{
+#if XV_QUERY_REUSE_PROFILE
+    reset(); promote(); call();
+    assert(profile_times[PROFILE_ORIGINAL].calls == 7);
+    assert(profile_times[PROFILE_CAPTURE].calls == 1);
+    assert(profile_times[PROFILE_REPLAY].calls == 1);
+    assert(profile_times[PROFILE_ORIGINAL].us == 140);
+    assert(profile_times[PROFILE_CAPTURE].us == 20 && profile_times[PROFILE_REPLAY].us == 20);
+    assert(fake_fp == 0xa3000095); /* Even an FP-clobbering clock is contained. */
+    reset(); mode = LOST; call(); assert(profile_times[PROFILE_ORIGINAL].calls == 1 && !busy);
+    reset(); mode = NESTED; call(); assert(profile_times[PROFILE_ORIGINAL].calls == 1);
+    assert(fake_clock == 40); /* Nested fallback is included once, not timed twice. */
+#endif
 }
 static void retained_records(void)
 {
@@ -265,7 +289,7 @@ int main(void)
     arena_a = malloc(0x41000); arena_b = malloc(0x41000);
     pages_a = malloc((1u << 20) * 4); pages_b = malloc((1u << 20) * 4);
     assert(arena_a && arena_b && pages_a && pages_b);
-    promotion_replay(); rejection_cooldown(); admission_roots_keys(); capture_failures(); throttle_eviction_epoch(); retained_records();
+    promotion_replay(); rejection_cooldown(); admission_roots_keys(); capture_failures(); throttle_eviction_epoch(); retained_records(); timing_paths();
     free(arena_a); free(arena_b); free(pages_a); free(pages_b);
     printf("PASS query reuse: promotion/replay, atomic reject, cooldown/throttle, root/config/alias guards, callback reentry, abandonment, epoch wrap, joined report (%zu-byte entries)\n", sizeof entries + sizeof records);
     return 0;

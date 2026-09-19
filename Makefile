@@ -1562,6 +1562,27 @@ $(RECOMP_BUILD)/query-reuse.config: force-query-reuse-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/query-reuse.config
+XV_QUERY_REUSE_PROFILE ?= 0
+ifneq ($(words $(XV_QUERY_REUSE_PROFILE)),1)
+$(error XV_QUERY_REUSE_PROFILE must be 0 or 1)
+endif
+ifneq ($(filter $(XV_QUERY_REUSE_PROFILE),0 1),$(XV_QUERY_REUSE_PROFILE))
+$(error XV_QUERY_REUSE_PROFILE must be 0 or 1)
+endif
+ifeq ($(XV_QUERY_REUSE_PROFILE),1)
+ifneq ($(XV_QUERY_REUSE),1)
+$(error XV_QUERY_REUSE_PROFILE requires XV_QUERY_REUSE=1)
+endif
+endif
+$(RECOMP_BUILD)/kernel/xk_query_reuse.o: RECOMP_CFLAGS += -DXV_QUERY_REUSE_PROFILE=$(XV_QUERY_REUSE_PROFILE)
+.PHONY: force-query-reuse-profile-config
+force-query-reuse-profile-config:
+$(RECOMP_BUILD)/query-reuse-profile.config: force-query-reuse-profile-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_QUERY_REUSE_PROFILE)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_query_reuse.o: $(RECOMP_BUILD)/query-reuse-profile.config
 # Keep this exact canonical closure in sync with tools/query_f32_primitives.py.
 # Never glob a generated directory: regeneration must not copy its own output.
 QUERY_F32_HEADERS := xv_recomp_protos.h xv_x86rt.h xv_phase.h \
