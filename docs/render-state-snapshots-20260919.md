@@ -1,8 +1,8 @@
 # Render-state snapshot implementation
 
-Status: owned model-pose payload implemented and concurrency-tested. **Not wired
-into gameplay, not deployed, and not a completed simulation/render split.**
-Hardware remains perf.35. No FPS gain is claimed.
+Status: the owned pose payload and an opt-in render-palette worker are implemented.
+**Perf.37 is boot-confirmed on hardware; campaign qualification is in progress.**
+This is not a complete simulation/render split. No FPS gain is claimed.
 
 ## Implemented ownership and payload
 
@@ -119,3 +119,17 @@ continuation. VitaSDK compiles both the worker and integrated palette source.
 These checks are prerequisites, not hardware acceptance. The hardware test must
 show nonzero `[pose-pipeline] reused` counts and acceptable moving-model visuals
 before any FPS result is attributed to this path.
+
+## Perf.37 deployment
+
+The updater verified source `efb502b`, runtime SHA-256
+`c9ec52fd2bec2034d592b234ca4c7adb900f18408fb6e3d96137b6a1f6b63c6f`,
+and confirmed slot 1. `/status` reports `0.2.0-perf.37 / efb502b` and a dashboard
+capture shows that version. Perf.35 remains the confirmed fallback in slot 0.
+Only `game-a.self` and `boot-game.txt` differ from the perf.35 package; the update
+contract and packaged graphics assets are unchanged. Build and deployment
+receipts are under `../pose-pipeline-hardware/`.
+
+The first menu windows report 60 reused palettes per 60 frames with zero busy
+skips. This proves execution on hardware, not a campaign performance improvement.
+The ordinary saved-campaign sequence is running to qualify NPC poses and timing.

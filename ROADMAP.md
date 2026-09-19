@@ -29,10 +29,11 @@ show no established whole-frame gain. The native/360p/native crowded-view test
 reduces GPU completion latency without improving FPS. Perf.36's CPU-counter
 diagnostic failed during startup; reopening Xita restored confirmed perf.35.
 
-[Render-state snapshots](docs/render-state-snapshots-20260919.md) now have an
-owned model-pose payload with two-buffer publication, world/object identity and
-concurrency tests. Gameplay integration and the full simulation/render split
-remain unfinished; no object-job joins have been removed for this work.
+[Render-state snapshots](docs/render-state-snapshots-20260919.md) now include an
+opt-in Core 1 palette worker with double-buffered owned inputs/results. Perf.37
+is boot-confirmed and menu logs verify prior-frame palette reuse; campaign
+qualification is in progress. This selected model-preparation path is integrated;
+the full simulation/render split remains unfinished, and simulation joins remain.
 The following dated observations retain their original experimental context.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
