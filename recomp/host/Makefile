@@ -1,5 +1,13 @@
 CC ?= cc
 .DEFAULT_GOAL := test
+
+.PHONY: test-ps-capture
+test-ps-capture: build/ps_capture_test
+	./build/ps_capture_test
+
+build/ps_capture_test: ps_capture_test.c ../../runtime/xv_ps_capture.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=c11 ps_capture_test.c -o $@
 CFLAGS ?= -O2 -g -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing
 CFLAGS += -I../.. -I../../runtime
 VITASDK ?= $(HOME)/vitasdk
@@ -377,7 +385,7 @@ build/sleep_wait_test: sleep_wait_test.c ../kernel/xk_thread.c ../kernel/xk.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections sleep_wait_test.c -Wl,--gc-sections -o $@
 
-build/ps_identity_test: ps_identity_test.c ../../runtime/xv_ps_identity.h ../../runtime/xv_ps_key.h ../kernel/xd3d.c ../kernel/xd3d.h ../kernel/xk_mem.c ../xv_x86rt.c
+build/ps_identity_test: ps_identity_test.c ../../runtime/xv_ps_capture.h ../../runtime/xv_ps_identity.h ../../runtime/xv_ps_key.h ../kernel/xd3d.c ../kernel/xd3d.h ../kernel/xk_mem.c ../xv_x86rt.c
 	mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections ps_identity_test.c ../xv_x86rt.c ../kernel/xk_mem.c -Wl,--gc-sections -lm -o $@
 

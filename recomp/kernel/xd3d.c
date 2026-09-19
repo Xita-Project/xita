@@ -940,6 +940,7 @@ static uint32_t psdef_hash(const uint8_t *d)
 }
 #include "../../runtime/xv_ps_key.h"
 #include "../../runtime/xv_ps_identity.h"
+#include "../../runtime/xv_ps_capture.h"
 static xv_ps_identity_cache ps_identity_cache;
 static uint32_t ps_packed_colors[18];
 static unsigned ps_colors_reused, ps_colors_computed;
@@ -1016,13 +1017,11 @@ void xd3d_ps_sync(void)
     PSC_SET(17, xd3d_state.ps_shadow[0xB0 / 4]);
     #undef PSC_SET
     ps_synced=1;
-    static uint32_t seen[512]; static unsigned nseen;
+    static xv_ps_capture seen;
     /* This is a bounded diagnostic capture, not a shader cache. Once full,
      * stop before scanning/formatting: uncached hashes otherwise log on every
      * draw. Shader identity and constants above must still update normally. */
-    if (nseen == 512) return;
-    for (unsigned i = 0; i < nseen; ++i) if (seen[i] == xd3d_state.ps_hash) return;
-    seen[nseen++] = xd3d_state.ps_hash;
+    if (!xv_ps_capture_insert(&seen, xd3d_state.ps_hash)) return;
     static const char digits[] = "0123456789ABCDEF";
     char hex[0xF0 * 2 + 1];
     for (unsigned i = 0; i < 0xF0; ++i) {
@@ -1031,7 +1030,7 @@ void xd3d_ps_sync(void)
     }
     hex[sizeof hex - 1] = 0;
     D3DLOG("[psdef] %08X %s\n", xd3d_state.ps_hash, hex);
-    if (nseen == 512)
+    if (seen.count == 512)
         D3DLOG("shader definition capture limit reached (512); further dumps suppressed, shader updates remain active\n");
 }
 void xv_hle_D3DDevice_SetPixelShaderProgram(xctx *c) { XD3D_COUNT("D3DDevice_SetPixelShaderProgram"); xd3d_state.ps_def = X_ARG(0); if (X_ARG(0)) psdef_load(X_ARG(0)); else { memset(xd3d_state.ps_shadow, 0, sizeof xd3d_state.ps_shadow); xd3d_state.ps_dirty = 1; } c->r[0] = 0; X_RET(1); }
