@@ -50,3 +50,20 @@ Additional checks exercised guest entry with the hook present and absent,
 system/start-routine dispatch, and host-only-thread bypass. Existing scheduler
 yield-handoff (both modes) and sleep-wait regressions passed. These establish
 host behavior, not a successful physical startup.
+
+### Retest result and parking
+
+After the user reported another black screen and reopened the dashboard, the
+new saved boot log still identified **5206ca9**, not candidate **373616a**.
+The updater reported the new runtime verified/staged (state 2), but the installed
+slot remained 0 with the previous runtime hash. Therefore the FP initialization
+fix has **not** been shown to execute on hardware. The launch request/closed
+connection must not be treated as evidence of candidate execution. A future H2
+session must inspect candidate launch/rollback behavior before interpreting
+another startup test. The later log also records populated cache4 raw-access
+rejection and the same FP guard stop. It is archived separately under
+`halo2-hardware-startup/20260919T020624Z`.
+
+The user explicitly parked Halo 2 and prioritized 20 FPS in Halo CE campaign,
+using the existing checkpoint with marines. H2 investigation is deferred;
+verified upload is not a successful hardware deployment or rendering result.
