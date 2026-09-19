@@ -50,3 +50,8 @@ response and repeated stop failure. The fixture checks that no such case reports
 qualification. Vita SDK compilation passes with `-Wall -Wextra -Werror`.
 These mocked failures test control flow, not physical PMU availability. Device
 qualification remains pending. Fixture: `tools/tests/pmon_probe.c`.
+
+The same fixture also passes startup lifecycle cases: requested dedicated-thread
+priority/affinity/stack, bounded join, creation failure, start failure cleanup,
+API failure followed by joined deletion, and no deletion after a failed wait.
+These tests mock thread services and do not prove firmware scheduling behavior.
