@@ -96,3 +96,47 @@ commands, source/ELF hashes and per-case results. `tools/test_model_uv_build.py
 The existing `tools/test_model_uv_key.py --elf PRIVATE_OUTPUT/uv.elf
 --output-dir PRIVATE_KEY_OUTPUT` checks unchanged normalized-key semantics.
 Local integration evidence is in `../model-uv-cross-model-production/`.
+
+
+## perf18 physical campaign result
+
+`0.2.0-perf.18 / c5c93f2+` was uploaded, hash-verified and boot-confirmed in
+slot 0. Slot 1 retains perf17. It adds `XV_MODEL_UV_CROSS_MODEL=1` to the complete
+perf17 stack, including index metadata. The package changes only `game-a.self`
+and `boot-game.txt`. Runtime SHA-256:
+`9dbc1be49118d1fc599e69c69b9bef3eec1be8d9e6e80aec474150a933dbee5a`.
+
+Normal campaign loaded at the saved marine checkpoint with unchanged settings
+and camera. The first capture includes two loading/settling windows and is not
+the final comparison. A later stationary capture supplies twelve complete
+60-frame windows after settling:
+
+| Measurement | perf17 | perf18 settled |
+| --- | ---: | ---: |
+| Median frame interval | 78.30 ms | 78.50 ms |
+| Median FPS | 12.8 | 12.7 |
+| Median draws/frame | 150.5 | 154 |
+| Eligible UV reuse, summed windows | 62.11% | 69.00% |
+| All-call UV reuse, summed windows | 58.02% | 64.77% |
+| Median index preparation | 1.7195 ms | 1.7525 ms |
+
+Perf18 totals are 14,667 UV hits, 6,588 cold calls and 22,644 total calls.
+The new row reports median 120 first cross-scope hits per 60 frames (two per
+frame), 646 retained exits and 180 boundaries. Live argument mismatches now
+appear; no FP-key mismatches appeared in these selected rows. Retaining values
+therefore has real but limited cross-model coverage. The index-metadata option
+remains enabled with no reported capacity failures in the selected windows.
+
+These nearby ordinary-play captures vary in NPC activity/draw counts. The
+0.1-FPS difference does not establish a regression or gain. The cache changes
+remain cumulative research options, with project defaults unchanged. No
+20-FPS claim follows from the improved reuse fraction or isolated instruction
+savings. Further UV lifetime tuning has a modest observed ceiling in this view;
+next investigate larger model-preparation costs while retaining the prior
+negative material-builder cost results as constraints.
+
+A camera turn and three pistol trigger presses completed; screenshots show the
+magazine icons decrease and the scene continues rendering. All three captured
+logs contain no searched STOP/FATAL/GPU-crash/trap marker. This bounded check
+does not establish extended combat stability. Controls were returned to neutral.
+Private artifacts and reproducible build settings are under `ce-perf18/`.
