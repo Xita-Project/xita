@@ -7,11 +7,11 @@ from unicorn import Uc,UC_ARCH_ARM,UC_MODE_ARM,UC_HOOK_CODE,UC_HOOK_MEM_READ,UC_
 from unicorn.arm_const import *
 ROOT=Path(__file__).resolve().parents[1]
 def main():
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output-dir',type=Path,required=True);p.add_argument('--sdk',type=Path,default=Path.home()/'vitasdk');a=p.parse_args();out=a.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output-dir',type=Path,required=True);p.add_argument('--wide-compare',action='store_true');p.add_argument('--sdk',type=Path,default=Path.home()/'vitasdk');a=p.parse_args();out=a.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
  rows=[];elf_hashes={}
  for compiled,compact in ((0,0),(1,0),(1,1)):
   elfpath=out/f'upload-{compiled}-{compact}.elf'
-  subprocess.run([str(a.sdk/'bin/arm-vita-eabi-gcc'),'-O2','-mthumb','-mcpu=cortex-a9','-mfpu=neon','-fno-strict-aliasing','-ffunction-sections','-fdata-sections',f'-DXV_PACKED_VERTEX_LAYOUT={compiled}',f'-DXV_VERTEX_CAPTURE_PACKED={compact}','-I'+str(ROOT),'-I'+str(ROOT/'runtime'),'-nostdlib',str(ROOT/'tools/tests/packed_vertex_arm.c'),'-Wl,--gc-sections,-Ttext=0x10000,-e,test_call,-u,test_setup','-lc','-lgcc','-o',str(elfpath)],check=True)
+  subprocess.run([str(a.sdk/'bin/arm-vita-eabi-gcc'),'-O2','-mthumb','-mcpu=cortex-a9','-mfpu=neon','-fno-strict-aliasing','-ffunction-sections','-fdata-sections',f'-DXV_PACKED_VERTEX_LAYOUT={compiled}',f'-DXV_VERTEX_WIDE_COMPARE={int(a.wide_compare)}',f'-DXV_VERTEX_CAPTURE_PACKED={compact}','-I'+str(ROOT),'-I'+str(ROOT/'runtime'),'-nostdlib',str(ROOT/'tools/tests/packed_vertex_arm.c'),'-Wl,--gc-sections,-Ttext=0x10000,-e,test_call,-u,test_setup','-lc','-lgcc','-o',str(elfpath)],check=True)
   elf_hashes[f'{compiled}-{compact}']=hashlib.sha256(elfpath.read_bytes()).hexdigest()
   u=Uc(UC_ARCH_ARM,UC_MODE_ARM);u.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_A9);u.reg_write(UC_ARM_REG_C1_C0_2,15<<20);u.reg_write(UC_ARM_REG_FPEXC,1<<30)
   images=[];writable=[]
@@ -72,7 +72,7 @@ def main():
        assert result==G,(nv,scenario,packed,hex(result))
        assert bytes(u.mem_read(B,len(want)))==want,(compiled,packed,nv,scenario)
       rows.append(dict(compiled=compiled,compact_compiled=compact,packed=packed,vertices=nv,source_bytes=len(source),scenario=scenario,alignment=offset,**{k:v for k,v in state.items() if k!='measure'}))
- report=dict(result='PASS',rows=rows,elf_sha256=elf_hashes,scope='Complete production uploader entry, warm config, residency and grouped comparisons ON. Queued GPU-copy execution excluded; modeled firmware bytes separate from instruction counts. Bounds and exact CPU snapshot checked. Not cycles/cache misses/FPS.')
+ report=dict(result='PASS',wide_compare=a.wide_compare,rows=rows,elf_sha256=elf_hashes,scope='Complete production uploader entry, warm config, residency and grouped comparisons ON. Queued GPU-copy execution excluded; modeled firmware bytes separate from instruction counts. Bounds and exact CPU snapshot checked. Not cycles/cache misses/FPS.')
  (out/'receipt.json').write_text(json.dumps(report,indent=2)+'\n')
  print('PASS',len(rows),'actual ARM uploader cases; complete counts and firmware bytes saved')
 if __name__=='__main__':

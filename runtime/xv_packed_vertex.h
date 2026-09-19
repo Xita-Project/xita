@@ -6,6 +6,9 @@
 #if XV_PACKED_VERTEX_LAYOUT != 0 && XV_PACKED_VERTEX_LAYOUT != 1
 #error XV_PACKED_VERTEX_LAYOUT must be 0 or 1
 #endif
+#ifndef XV_VERTEX_WIDE_COMPARE
+#define XV_VERTEX_WIDE_COMPARE 0
+#endif
 #if XV_PACKED_VERTEX_LAYOUT
 #include <stdint.h>
 #include <string.h>
@@ -20,6 +23,36 @@ static inline int xv_packed_equal(const void *source, const void *packed, unsign
 {
     const uint8_t *a=source,*b=packed;
 #if defined(__ARM_NEON)
+#if XV_VERTEX_WIDE_COMPARE
+    /* Keep the first four-record early-out for changed inputs. Equal long
+     * spans then reduce to an ARM condition only once per sixteen records.
+     * Load only shader-visible prefixes; padding/tails remain unobserved. */
+    if(vertices>=20) {
+        uint8x16x4_t bv=vld1q_u8_x4(b);
+        uint8x16_t d=vdupq_n_u8(0);
+        #pragma GCC unroll 4
+        for(unsigned j=0;j<4;j++)d=vorrq_u8(d,veorq_u8(vld1q_u8(a+j*32),bv.val[j]));
+        uint32x2_t r=vreinterpret_u32_u8(vorr_u8(vget_low_u8(d),vget_high_u8(d)));
+        if(vget_lane_u32(vpmax_u32(r,r),0))return 0;
+        a+=128;b+=64;vertices-=4;
+        while(vertices>=16) {
+            uint8x16_t d0=vdupq_n_u8(0),d1=d0,d2=d0,d3=d0;
+            #pragma GCC unroll 4
+            for(unsigned i=0;i<4;i++) {
+                uint8x16x4_t v=vld1q_u8_x4(b);
+                d0=vorrq_u8(d0,veorq_u8(vld1q_u8(a),v.val[0]));
+                d1=vorrq_u8(d1,veorq_u8(vld1q_u8(a+32),v.val[1]));
+                d2=vorrq_u8(d2,veorq_u8(vld1q_u8(a+64),v.val[2]));
+                d3=vorrq_u8(d3,veorq_u8(vld1q_u8(a+96),v.val[3]));
+                a+=128;b+=64;
+            }
+            uint8x16_t delta=vorrq_u8(vorrq_u8(d0,d1),vorrq_u8(d2,d3));
+            uint32x2_t reduced=vreinterpret_u32_u8(vorr_u8(vget_low_u8(delta),vget_high_u8(delta)));
+            if(vget_lane_u32(vpmax_u32(reduced,reduced),0))return 0;
+            vertices-=16;
+        }
+    }
+#endif
     while(vertices>=4) {
         uint8x16x4_t bv=vld1q_u8_x4(b);
         uint8x16_t d0=veorq_u8(vld1q_u8(a),bv.val[0]);

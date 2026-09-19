@@ -135,3 +135,20 @@ The packet completion bounds span more than one frame at this checkpoint
 pipeline/queue latency and must not be interpreted as exclusive per-frame GPU
 service time or added to CPU phases. This observation does not establish which
 stage sets steady-state throughput.
+
+## perf.34 corridor outcome and rollback
+
+The full ordinary-play sequence completed. The final corridor windows average
+178.18 ms versus perf.33's 171.53 ms, but camera/model work differs substantially
+(31.22 versus 22.57 selected model calls/frame). This is not a matched causal
+regression measurement. It does not establish a benefit either. Owner capture
+elapsed is 15.91 versus 18.41 ms/frame; worker preparation rises from 8.72 to
+20.28 ms/frame, staged data from 1,217.67 to 2,882.62 KiB/frame, and pressure
+joins from 0.028 to 1.019/frame. Upload failures remain zero in these windows.
+
+The simpler checkpoint was flat, while both scenes show the expected increased
+copy/worker cost. Keep exact owner reuse in the main candidate; retain perf.34 as
+an experiment rather than promoting it. Remote rollback was requested and
+status confirms `0.2.0-perf.33 / 2396277` again. No new VPK installation was
+needed. Private evidence is `capture-copy-hardware/corridor/settled.log`, its
+summaries, `corridor-comparison.json`, and `rollback-status.json`.
