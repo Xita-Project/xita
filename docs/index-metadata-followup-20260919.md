@@ -132,3 +132,45 @@ rebuilds the owning object; repeating a value preserves its modification time;
 returning to each value restores the same object hash. Empty, `2` and multi-value
 Make selections are rejected. The project default remains Off pending hardware
 results. No GPU allocation or retirement behavior changes with this selector.
+
+
+## perf17 physical campaign follow-up
+
+The remote updater installed and hash-verified `0.2.0-perf.17 / 338c39a+` in
+slot 1, then restarted and confirmed that runtime. Slot 0 retains perf15. This
+candidate selects `XV_INDEX_METADATA_DEFAULT=1` and retains the perf15 cumulative
+flags, including within-model UV reuse. Production's default remains Off.
+Only `game-a.self` and `boot-game.txt` changed from perf16. Runtime SHA-256:
+`dbb22f5e32916a3eaa55418fd136550733f143d33fb199a9374f809b71e571d3`.
+
+The existing Normal marine checkpoint loaded at the same camera position and
+forward direction. Settings remain 544-pixel render height and 256 maximum
+texture dimension; this is not an all-Original preset. Twelve complete ordinary
+60-frame windows give these medians:
+
+| Measurement | perf15 | perf17 |
+| --- | ---: | ---: |
+| Frame interval | 78.35 ms | 78.30 ms |
+| FPS | 12.75 | 12.80 |
+| Draws/frame | 153 | 150.5 |
+| Index preparation | 2.182 ms | 1.7195 ms |
+| Vertex streams | 6.2515 ms | 6.207 ms |
+
+The new path reports enabled in every selected window. Per 60-frame window,
+median fresh metadata uploads are 1,261, same-frame GPU-copy reuses 2,415.5,
+rebuilds 1,040.5 and size-ineligible requests 2,176. Fresh uploads copy 1,407.5
+KiB; the separate same-frame reuse avoids 2,873 KiB. No metadata-capacity failure
+occurred. These independent medians must not be combined into a precise hit rate.
+
+Index preparation is about 0.46 ms lower in this nearby comparison, while whole
+frame performance remains effectively unchanged. NPC activity and draw counts
+vary; this is ordinary restarted gameplay, not a controlled repeated experiment.
+Keep the option in the cumulative research build for further play, without
+promoting it to a proven FPS gain or changing the project default.
+
+A camera turn remained responsive. Three right-trigger presses reduced the
+visible magazine icons; rendering continued. The initial log contains no searched
+STOP, FATAL, GPU-crash or trap marker. This is a short check, not extended combat
+stability. Private package, deployment receipt, screenshots and raw logs are in
+`ce-perf17/`. The next prepared UV lifetime experiment targets repeated cold
+construction across models; it is not part of perf17.
