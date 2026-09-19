@@ -10,6 +10,12 @@
 #if XV_HIERARCHY_FINAL_NORMAL != 0 && XV_HIERARCHY_FINAL_NORMAL != 1
 #error "XV_HIERARCHY_FINAL_NORMAL must be 0 or 1"
 #endif
+#ifndef XV_HIERARCHY_MATRIX_NORMAL
+#define XV_HIERARCHY_MATRIX_NORMAL 0
+#endif
+#if XV_HIERARCHY_MATRIX_NORMAL != 0 && XV_HIERARCHY_MATRIX_NORMAL != 1
+#error "XV_HIERARCHY_MATRIX_NORMAL must be 0 or 1"
+#endif
 #if defined(__x86_64__)
 #include <xmmintrin.h>
 #endif
@@ -83,6 +89,22 @@ static int numeric(const void *p,unsigned words)
         if(word&&word-0x30800000u>0x4e800000u-0x30800000u)return 0;
     }
     return 1;
+}
+/* Parent and produced matrices may contain tiny normal cancellation terms.
+ * Keep subnormals/exceptional values excluded and the pose domain unchanged.
+ * A failed output check still restores all speculative FP status. */
+static int numeric_matrix(const void *p,unsigned words)
+{
+#if XV_HIERARCHY_MATRIX_NORMAL
+    const uint8_t *data=p;
+    for(unsigned i=0;i<words;i++) {
+        uint32_t word;memcpy(&word,data+4*i,4);word&=0x7fffffffu;
+        if(word&&word-0x00800000u>0x4e800000u-0x00800000u)return 0;
+    }
+    return 1;
+#else
+    return numeric(p,words);
+#endif
 }
 static unsigned fp_read(void)
 {
@@ -228,7 +250,7 @@ int xv_math_model_hierarchy(xctx *c)
     for(unsigned i=0;i<first;i++) {
         unsigned n=(unsigned)order[i];
         memcpy(matrices[n],output[n],sizeof matrices[n]);
-        if(!numeric(matrices[n],13))return numeric_decline(1,0);
+        if(!numeric_matrix(matrices[n],13))return numeric_decline(1,0);
     }
     unsigned final_normal=0;
     for(unsigned i=first;i<queued;i++) {
@@ -250,7 +272,7 @@ int xv_math_model_hierarchy(xctx *c)
         unsigned n=(unsigned)order[i];float local[13];
         local_matrix(local_poses[n],local);
         compose(matrices[parent[n]],local,matrices[n]);
-        if(!numeric(matrices[n],13)) { fp_restore(saved_fp);return numeric_decline(3,i-first+1u); }
+        if(!numeric_matrix(matrices[n],13)) { fp_restore(saved_fp);return numeric_decline(3,i-first+1u); }
     }
     /* No callback or guest handoff occurs between these writes. The synchronous
      * extraction retains the existing shared guard; no ownership bypass. */
@@ -275,6 +297,8 @@ void xv_model_hierarchy_report(unsigned frames)
         output_computed,output_discarded,output_salvageable);
     XK_LOG("[model-hierarchy-final] %u frames enabled %u recovered-batches %u; final node still original\n",
         frames,XV_HIERARCHY_FINAL_NORMAL,final_normal_batches);
+    XK_LOG("[model-hierarchy-matrix] %u frames normal-range enabled %u; pose domain unchanged\n",
+        frames,XV_HIERARCHY_MATRIX_NORMAL);
     batches=prepared=0;memset(declined,0,sizeof declined);
     memset(numeric_stages,0,sizeof numeric_stages);
     output_computed=output_discarded=output_salvageable=final_normal_batches=0;

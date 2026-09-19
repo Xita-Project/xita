@@ -10,7 +10,7 @@ enum { ARENA=4<<20,MODEL=0x12000,POSE=0x22000,NODES=0x32000,MATRICES=0x52000,SP=
 uint8_t *g_xram,*g_img_base;
 uint32_t *g_xpt;
 static uint8_t *saved,*expected;
-static unsigned yields,accepted,comparisons;
+static unsigned yields,accepted,comparisons,rejections;
 static uint32_t random_state=0x35476u;
 void xk_os_log(const char *fmt,...) { (void)fmt; }
 void original_hierarchy(xctx *),current_hierarchy(xctx *),candidate_hierarchy(xctx *);
@@ -91,6 +91,7 @@ static void reject(xctx c,unsigned k)
     if(result||memcmp(&c,&before,sizeof c)||memcmp(saved,g_xram,ARENA)||fp!=_mm_getcsr()) {
         fprintf(stderr,"decline case %u changed guest/FP state or accepted (%d)\n",k,result);abort();
     }
+    rejections++;
 }
 int main(int argc,char **argv)
 {
@@ -142,6 +143,32 @@ int main(int argc,char **argv)
         memcpy(g_xram,saved,ARENA);
         word(POSE+32+field*4,0x2b800000u);reject(c,320+field);
     }
+    /* Each existing parent-matrix word can contain a small finite normal.
+     * Identity child rotations preserve the value through real compositions. */
+    for(unsigned field=0;field<13;field++) {
+        xctx c=fixture(8,1,0);
+        for(unsigned n=0;n<8;n++) {
+            float *p=X_G(POSE+n*32),*m=X_G(MATRICES+n*52);
+            memset(p,0,32);p[3]=p[7]=1.f;
+            memset(m,0,52);m[0]=m[1]=m[5]=m[9]=1.f;
+        }
+        word(MATRICES+field*4,0x2b800000u);
+        memcpy(saved,g_xram,ARENA);xctx probe=c;unsigned fp=_mm_getcsr();
+        int took=xv_math_model_hierarchy(&probe);
+#if XV_HIERARCHY_MATRIX_NORMAL
+        assert(took==on);
+#else
+        assert(!took);
+#endif
+        _mm_setcsr(fp);memcpy(g_xram,saved,ARENA);
+        compare(c,340+field,1);
+        /* The new matrix domain still excludes subnormals and exceptions. */
+        const uint32_t rejected[]={1u,0x007fffffu,0x7f800000u,0x7fc12345u,0x4e800001u};
+        for(unsigned j=0;j<sizeof rejected/sizeof *rejected;j++) {
+            memcpy(g_xram,saved,ARENA);
+            word(MATRICES+field*4,rejected[j]);reject(c,400+field*5+j);
+        }
+    }
     for(unsigned k=0;k<12;k++) {
         xctx c=fixture(8,1,0);
         switch(k) {
@@ -161,6 +188,6 @@ int main(int argc,char **argv)
         reject(c,k);
     }
     if(on)assert(accepted>50);else assert(!accepted);
-    printf("PASS %s: %u full hierarchy comparisons, %u admitted probes, 12 unchanged declines\n",argv[1],comparisons,accepted);
+    printf("PASS %s: %u full hierarchy comparisons, %u admitted random probes, %u unchanged declines\n",argv[1],comparisons,accepted,rejections);
     free(expected);free(saved);free(g_xpt);free(g_xram);return 0;
 }

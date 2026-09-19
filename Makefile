@@ -1722,6 +1722,30 @@ $(RECOMP_BUILD)/hierarchy-final.config: force-hierarchy-final-config
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_hierarchy.o: $(RECOMP_BUILD)/hierarchy-final.config
 
+# Matrix-only admission of finite normal terms; actual batched poses keep the
+# preceding domain. Scope the option and its rebuild dependency to this unit.
+XV_HIERARCHY_MATRIX_NORMAL ?= 0
+ifneq ($(words $(XV_HIERARCHY_MATRIX_NORMAL)),1)
+$(error XV_HIERARCHY_MATRIX_NORMAL must be 0 or 1)
+endif
+ifneq ($(filter $(XV_HIERARCHY_MATRIX_NORMAL),0 1),$(XV_HIERARCHY_MATRIX_NORMAL))
+$(error XV_HIERARCHY_MATRIX_NORMAL must be 0 or 1)
+endif
+ifeq ($(XV_HIERARCHY_MATRIX_NORMAL),1)
+ifneq ($(XV_NATIVE_MODEL_HIERARCHY),1)
+$(error XV_HIERARCHY_MATRIX_NORMAL requires XV_NATIVE_MODEL_HIERARCHY=1)
+endif
+$(RECOMP_BUILD)/kernel/xk_hierarchy.o: RECOMP_CFLAGS += -DXV_HIERARCHY_MATRIX_NORMAL=1
+endif
+.PHONY: force-hierarchy-matrix-config
+force-hierarchy-matrix-config:
+$(RECOMP_BUILD)/hierarchy-matrix.config: force-hierarchy-matrix-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_HIERARCHY_MATRIX_NORMAL)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_hierarchy.o: $(RECOMP_BUILD)/hierarchy-matrix.config
+
 # Unroll only bounded native math units. Scalar VFP operations retain their
 # established operand order; no global fast-math or guest codegen change.
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off
