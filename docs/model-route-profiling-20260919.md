@@ -79,3 +79,34 @@ candidate is reducing the shared region around these existing worker tasks,
 after checking private inputs, outputs and callback ownership. Whole AI or
 particle ticks are not proven independent by these observations. No thread or
 lock policy changes are made in this profiling patch.
+
+## Requested double-buffered worker follow-up
+
+The installed VitaSDK `psp2/kernel/threadmgr/thread.h` uses priority `0x10000100`
+and native stack size `0x10000` in its `sceKernelCreateThread` example. The
+priority is therefore not an invented value; suitability still depends on the
+existing scheduler priorities and the tasks admitted. Use the named Core 1 mask
+rather than an unexplained numeric affinity literal.
+
+The current mixer already alternates two aligned output buffers, preserving a
+submitted grain while preparing the next, and calls the blocking audio sink from
+its own thread. `xk_os_audio_thread_start` currently uses priority 64, a 64 KB
+native stack, and all user cores. That helper is also used by the profiler, so
+changing it globally would affect more than sound. A dedicated mixer affinity
+option should not silently pin the profiler or move guest DirectSound callbacks.
+
+Object workers use a 512 KB native thread stack and a separate guest stack.
+The logged approximately 99 KB peak is a **guest** stack probe against a 256 KB
+guest allocation. It does not measure native stack consumption and does not by
+itself prove that a 64 KB native stack overflows. A new native stack bound needs
+its own evidence. Existing game ownership also places the main guest work on
+Core 2, not the Core 0 owner assumed in the proposed queue API.
+
+After the model timing result, the requested queue work must distinguish task
+buffer reuse from world-state reuse. The producer may fill one task buffer while
+the worker consumes the other, but the pointed-to inputs and outputs need owned
+lifetimes through completion. `wait_idle` must join before dependent state is
+published. AI perception, particles and script evaluation remain requested
+routing targets, not demonstrated independent callbacks. First inspect their
+writes and dependencies against the existing object-job boundary. Preserve
+render submission ownership rather than relocating it based on a core number.
