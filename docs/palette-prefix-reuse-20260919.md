@@ -128,3 +128,18 @@ Receipts are `../palette-prefix-cache/results.json` and
 `build-gate-2/receipt.json`. Hardware cache reuse, memory headroom, whole-frame
 performance and original-lift composition beyond the prior native-batch proof
 remain to be established. This is an opt-in trial, not a release-default change.
+
+## Perf.26 hardware trial deployment
+
+Perf.26 (`472e1dd`) builds with `XV_PALETTE_PREFIX_REUSE=1` on top of the
+cumulative perf.25 configuration. Only `game-a.self` and `boot-game.txt` change
+among 1,744 VPK entries. Linked text grows by 1,450 bytes and BSS by 320,320
+bytes; these section sizes do not establish live memory headroom.
+
+The updater verifies and boots runtime
+`b2f13e17481219cbabb842149a3b8393ed6715c08e5be73dc50f9a12cda3355d`
+(32,164,206 bytes) in slot 0. Perf.25 remains in slot 1. VPK SHA-256 is
+`5a9d3f350b08d5d4ab5806f8831ebe4246bab26fe726fd9cf4d20ee76c233238`.
+The saved campaign navigation sequence is running. Deployment is confirmed;
+live reuse, rendering correctness and whole-frame performance are not yet
+qualified. Private build/package/update receipts are under `../ce-perf26/`.
