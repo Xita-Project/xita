@@ -43,3 +43,39 @@ Reproduce the owned-image boundary check with:
 python tools/test_cluster_lifetime_hooks.py --xbe /path/to/default.xbe \
     --manifest /path/to/game_manifest.json
 ```
+
+## Construction read-set validation follow-up
+
+The guarded prototype now owns the exact bytes read to construct its geometry
+snapshot. Before numerical work and before publication it checks both their
+current guest mappings and contents. In-place geometry changes and page remaps
+therefore invalidate the candidate without requiring a cooperative callback.
+Source captures are bounded to 8,192 distinct spans and 1 MiB; allocation failure
+or inconsistent repeated reads declines construction. Batch teardown frees them.
+The existing query lock is still retained, and this is not an unlocked-worker proof.
+
+A 1,024-bucket index replaces a linear scan when deduplicating construction reads.
+Collisions compare the complete address and length. The ARM fixture now models
+bounded malloc separately from zero-clearing calloc, counting both allocations.
+
+The quick full-call ARM comparison passes 14 context, guest-memory and FPSCR
+comparisons. Instruction counts (not hardware timings) are:
+
+| Synthetic clusters | Original query | Guarded typed query | Indexed construction |
+| --- | ---: | ---: | ---: |
+| 7 | 37,927 | 40,986 | 14,938 |
+| 30 | 174,455 | 158,745 | 57,926 |
+| 65 | 380,666 | 333,486 | 123,400 |
+| 256 | 1,222,594 | 1,003,773 | 482,192 |
+
+The earlier linear read-set lookup needed 4,585,940 construction instructions for
+256 clusters; indexing removes that quadratic lookup in these fixtures. It does
+not establish a gameplay gain. The seven-cluster candidate still regresses and
+a first-reject query uses 17,678 versus 3,128 instructions. Rechecking all source
+bytes per query is conservative but expensive. Query admission and a proven
+source lifetime/write boundary remain prerequisites for useful hardware trials.
+Firmware bulk-copy bytes, real allocation cost, contention and cache behavior
+must be considered separately. No new runtime was installed for these tests.
+
+Private reproducible outputs: `cluster-source-arm/` (linear index),
+`cluster-source-arm-indexed/` (indexed), alongside the unified source checkout.

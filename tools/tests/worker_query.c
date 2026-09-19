@@ -161,9 +161,9 @@ void xv_worker_query_test_ready(xctx *c,unsigned lane)
     ready_count++;lane_seen[lane]++;
     if(mutation){
 #ifdef XV_TYPED_CLUSTER_QUERY
-        /* Geometry replacement is an explicit invalidation boundary. Scalar
-         * conflicts below exercise the per-query validation independently. */
-        if(mutation==2||mutation==4||mutation==6)xv_cluster_runtime_invalidate(0xfeed);
+        /* Root retirement is explicit. In-place vertex writes and remapping
+         * must be detected without a cooperative invalidation callback. */
+        if(mutation==6)xv_cluster_runtime_invalidate(0xfeed);
 #endif
         mutate(c,mutation);mutation_count++;
     }

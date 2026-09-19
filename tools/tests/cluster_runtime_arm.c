@@ -95,12 +95,19 @@ void __assert_func(const char*f,int line,const char*fn,const char*text)
  * bookkeeping and fragmentation are excluded and need hardware measurement. */
 static unsigned char heap[1<<20] __attribute__((aligned(64)));
 static unsigned heap_used;
+void *malloc(size_t bytes)
+{
+    if(bytes>sizeof heap-heap_used)return NULL;
+    size_t rounded=(bytes+63)&~(size_t)63;
+    if(rounded>sizeof heap-heap_used)return NULL;
+    void *p=heap+heap_used;heap_used+=rounded;
+    arm_allocations++;arm_allocated_bytes+=bytes;return p;
+}
 void *calloc(size_t count,size_t size)
 {
-    if(size&&count>(sizeof heap-heap_used)/size)return NULL;
-    size_t bytes=count*size;void *p=heap+heap_used;
-    heap_used=(heap_used+bytes+63)&~63u;if(heap_used>sizeof heap)__builtin_trap();
-    arm_allocations++;arm_allocated_bytes+=bytes;memset(p,0,bytes);return p;
+    if(size&&count>SIZE_MAX/size)return NULL;
+    size_t bytes=count*size;void *p=malloc(bytes);
+    if(p)memset(p,0,bytes);return p;
 }
 void free(void *p){(void)p;}
 void arm_snapshot(void)

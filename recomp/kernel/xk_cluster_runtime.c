@@ -7,6 +7,7 @@
 #include "xk_cluster_snapshot.h"
 #include <fenv.h>
 #include <limits.h>
+#include <stdlib.h>
 
 enum { T_LANES=2,T_MAPS=12 };
 enum { T_LAYOUT,T_INPUT,T_NUMERIC,T_CHANGED,T_REASONS };
@@ -24,6 +25,25 @@ typedef struct __attribute__((aligned(64))) {
     uint64_t attempts,applied,bypassed,declines[T_REASONS],dirty_bytes,backedges;
 } Lane;
 static Lane lanes[T_LANES];
+/* Exact construction read-set: guards against in-place geometry writes even
+ * when roots and allocator addresses are unchanged. This deliberately bounded
+ * prototype measures its validation traffic before any hardware default. */
+typedef struct SourceRead {
+    struct SourceRead *next, *hash_next;
+    uint32_t address, bytes;
+    unsigned char *pointer;
+    unsigned char data[];
+} SourceRead;
+enum { SOURCE_BUCKETS=1024 };
+static SourceRead *source_reads, *source_index[SOURCE_BUCKETS];
+static unsigned source_bytes, source_count;
+static uint64_t source_checks, source_compared, source_changes;
+static void clear_source_reads(void)
+{
+    while(source_reads){SourceRead *next=source_reads->next;free(source_reads);source_reads=next;}
+    memset(source_index,0,sizeof source_index);
+    source_bytes=source_count=0;
+}
 static struct {
     XvClusterSnapshot *snapshot;
     unsigned valid,invalidations;
@@ -59,7 +79,33 @@ static int source_read(void *unused,uint32_t address,void *out,size_t bytes)
            overlaps(p,n,batch.epoch.pointer,4)||overlaps(p,n,batch.marker.pointer,1))return 0;
         for(unsigned i=0;i<batch.visited_spans;i++)
             if(overlaps(p,n,batch.visited[i].pointer,batch.visited[i].bytes))return 0;
-        memcpy((unsigned char*)out+done,p,n);done+=n;
+        unsigned bucket=((a*2654435761u)^(n*2246822519u))>>(32-10);
+        SourceRead *entry;
+        for(entry=source_index[bucket];entry;entry=entry->hash_next)
+            if(entry->address==a&&entry->bytes==n)break;
+        if(entry){
+            if(entry->pointer!=p||memcmp(entry->data,p,n))return 0;
+        }else{
+            if(source_count==8192||n>(1u<<20)-source_bytes)return 0;
+            entry=malloc(sizeof *entry+n);if(!entry)return 0;
+            entry->address=a;entry->bytes=n;entry->pointer=p;
+            memcpy(entry->data,p,n);entry->next=source_reads;source_reads=entry;
+            entry->hash_next=source_index[bucket];source_index[bucket]=entry;
+            source_count++;source_bytes+=n;
+        }
+        memcpy((unsigned char*)out+done,entry->data,n);done+=n;
+    }
+    return 1;
+}
+static int source_current(void)
+{
+    source_checks++;
+    for(SourceRead *r=source_reads;r;r=r->next){
+        unsigned char *p=pointer(r->address,r->bytes,0);
+        source_compared+=r->bytes;
+        if(p!=r->pointer||memcmp(p,r->data,r->bytes)){
+            source_changes++;xv_cluster_runtime_invalidate(0x535243u);return 0;
+        }
     }
     return 1;
 }
@@ -78,6 +124,7 @@ void xv_cluster_runtime_end(void)
 {
     __atomic_store_n(&batch.valid,0,__ATOMIC_RELEASE);
     xv_cluster_snapshot_release(batch.snapshot);batch.snapshot=NULL;
+    clear_source_reads();
 }
 void xv_cluster_runtime_invalidate(unsigned service)
 {
@@ -117,6 +164,7 @@ void xv_cluster_runtime_begin(void)
     fesetenv(&owner_fp);
     __atomic_store_n(&batch.valid,1,__ATOMIC_RELEASE);return;
 failed:
+    xv_cluster_runtime_end();
     batch.failed++;batch.build_us+=xk_os_monotonic_us()-begin;
     fesetenv(&owner_fp);
 }
@@ -137,7 +185,21 @@ static int read_input(Lane *v,uint32_t address,void *out,unsigned bytes)
         uint32_t a=address+done;unsigned n=4096-(a&4095);if(n>bytes-done)n=bytes-done;
         unsigned char *p=pointer(a,n,0);if(!p)return 0;
         for(unsigned i=0;i<v->maps_count;i++)if(overlaps(p,n,v->maps[i].pointer,v->maps[i].bytes))return 0;
-        memcpy((unsigned char*)out+done,p,n);done+=n;
+        unsigned bucket=((a*2654435761u)^(n*2246822519u))>>(32-10);
+        SourceRead *entry;
+        for(entry=source_index[bucket];entry;entry=entry->hash_next)
+            if(entry->address==a&&entry->bytes==n)break;
+        if(entry){
+            if(entry->pointer!=p||memcmp(entry->data,p,n))return 0;
+        }else{
+            if(source_count==8192||n>(1u<<20)-source_bytes)return 0;
+            entry=malloc(sizeof *entry+n);if(!entry)return 0;
+            entry->address=a;entry->bytes=n;entry->pointer=p;
+            memcpy(entry->data,p,n);entry->next=source_reads;source_reads=entry;
+            entry->hash_next=source_index[bucket];source_index[bucket]=entry;
+            source_count++;source_bytes+=n;
+        }
+        memcpy((unsigned char*)out+done,entry->data,n);done+=n;
     }
     return 1;
 }
@@ -228,6 +290,7 @@ int xv_worker_query(xctx *c,int guard)
     }
     uint16_t start_cluster;x_guest_read(&start_cluster,c->r[0]+4,2);
     if(start_cluster==65535){v->bypassed++;return 0;}
+    if(!source_current())return 0;
     v->entry=*c;unsigned reason=T_LAYOUT;fegetenv(&v->entry_fp);
     if(!add_span(v,c->r[4]-XV_CLUSTER_SCRATCH,XV_CLUSTER_SCRATCH+20,0)||
        !add_span(v,0x2d2fb0,1024,0)||!add_span(v,0x2d2fac,4,1)||!add_span(v,0x2d2fa9,1,1))goto decline;
@@ -250,7 +313,7 @@ int xv_worker_query(xctx *c,int guard)
     xv_worker_query_test_ready(c,(unsigned)lane);
 #endif
     reason=T_CHANGED;
-    if(!globals_current()||!same_words(c,&v->entry,sizeof *c)||
+    if(!globals_current()||!source_current()||!same_words(c,&v->entry,sizeof *c)||
        xv_object_query_lane(c,guard,c->r[4]-XV_CLUSTER_SCRATCH,XV_CLUSTER_SCRATCH+20)!=lane+1)goto decline;
     for(unsigned i=0;i<v->maps_count;i++){
         Span *s=&v->maps[i];if(pointer(s->address,s->bytes,s->image)!=s->pointer)goto decline;
@@ -267,6 +330,10 @@ decline:
 }
 void xv_worker_query_report(void)
 {
+    XK_LOG("[typed-query-source] checks %llu compared-bytes %llu changes %llu retained-bytes %u reads %u\n",
+        (unsigned long long)source_checks,(unsigned long long)source_compared,
+        (unsigned long long)source_changes,source_bytes,source_count);
+    source_checks=source_compared=source_changes=0;
     for(unsigned i=0;i<T_LANES;i++){
         Lane *v=&lanes[i];
         XK_LOG("[typed-query] lane %u attempts %llu applied %llu bypassed %llu dirty-bytes %llu backedges %llu declines layout/input/numeric/changed %llu/%llu/%llu/%llu\n",i,
