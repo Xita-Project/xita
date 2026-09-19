@@ -1,5 +1,5 @@
 /* Experimental guarded typed query. No worker unlock, asynchronous publication
- * or persistent map cache. The ordinary build does not compile this unit. */
+ * or unchecked persistent map cache. The ordinary build does not compile this unit. */
 #if defined(XV_TYPED_CLUSTER_QUERY) && defined(XV_WORKER_QUERY)
 #include "xk.h"
 #include "xk_worker_query.h"
@@ -48,11 +48,11 @@ static void clear_source_reads(void)
 }
 static struct {
     XvClusterSnapshot *snapshot;
-    unsigned valid,invalidations;
+    unsigned valid,invalidations,reusable;
     uint32_t bsp,projection,arena,image_lo,image_hi;
     unsigned char *ram,*image;uint32_t *pages;
     Span visited[2],epoch,marker;unsigned visited_spans,visited_bytes;
-    uint64_t builds,failed,build_us,owned_bytes;
+    uint64_t builds,failed,build_us,owned_bytes,reuses;
     unsigned last_invalidation;
 } batch;
 
@@ -157,14 +157,14 @@ static int source_current(const XvClusterResult *result,unsigned start)
     source_checks++;
     unsigned words=(xv_cluster_snapshot_geometry(batch.snapshot)->cluster_count+31)/32;
     for(SourceRead *r=source_reads;r;r=r->next){
-        if(r->dependency_kind==1){
+        if(result&&r->dependency_kind==1){
             unsigned relevant=r->dependencies[start>>5]&(1u<<(start&31));
             for(unsigned i=0;!relevant&&i<words;i++)relevant=r->dependencies[i]&result->changed[i];
             if(!relevant)continue;
         }
         unsigned char *p=pointer(r->address,r->bytes,0);
         source_compared+=r->bytes;
-        int equal=p==r->pointer;
+        int equal=p==r->pointer&&(result||xv_object_query_source_allowed((uintptr_t)p,r->bytes));
         if(equal){
             if(!(((uintptr_t)p|(uintptr_t)r->data|r->bytes)&3u))
                 equal=same_words(p,r->data,r->bytes);
@@ -178,23 +178,42 @@ static int source_current(const XvClusterResult *result,unsigned start)
 }
 static int image_word(uint32_t address,uint32_t *out)
 {unsigned char *p=pointer(address,4,1);if(!p)return 0;memcpy(out,p,4);return 1;}
-static int globals_current(void)
+static int globals_match(void)
 {
     uint32_t bsp,projection;
-    return __atomic_load_n(&batch.valid,__ATOMIC_ACQUIRE)&&batch.snapshot&&
+    return batch.snapshot&&
         g_xram==batch.ram&&g_img_base==batch.image&&g_xpt==batch.pages&&
         xk_mem_arena_size()==batch.arena&&xk_mem_image_lo()==batch.image_lo&&xk_mem_image_hi()==batch.image_hi&&
         image_word(0x39be58,&bsp)&&image_word(0x39be50,&projection)&&
         bsp==batch.bsp&&projection==batch.projection;
 }
+static int globals_current(void)
+{return __atomic_load_n(&batch.valid,__ATOMIC_ACQUIRE)&&globals_match();}
+void xv_cluster_runtime_pause(void)
+{
+    /* Owner only, after join: no new query may use the retained allocation. */
+    unsigned valid=__atomic_exchange_n(&batch.valid,0,__ATOMIC_ACQ_REL);
+    __atomic_store_n(&batch.reusable,valid,__ATOMIC_RELEASE);
+}
+static int batch_mappings_current(void)
+{
+    for(unsigned i=0;i<batch.visited_spans;i++){
+        Span *s=&batch.visited[i];
+        if(pointer(s->address,s->bytes,s->image)!=s->pointer)return 0;
+    }
+    return pointer(batch.epoch.address,4,1)==batch.epoch.pointer&&
+           pointer(batch.marker.address,1,1)==batch.marker.pointer;
+}
 void xv_cluster_runtime_end(void)
 {
     __atomic_store_n(&batch.valid,0,__ATOMIC_RELEASE);
+    __atomic_store_n(&batch.reusable,0,__ATOMIC_RELEASE);
     xv_cluster_snapshot_release(batch.snapshot);batch.snapshot=NULL;
     clear_source_reads();
 }
 void xv_cluster_runtime_invalidate(unsigned service)
 {
+    __atomic_store_n(&batch.reusable,0,__ATOMIC_RELEASE);
     if(__atomic_exchange_n(&batch.valid,0,__ATOMIC_ACQ_REL)){
         __atomic_add_fetch(&batch.invalidations,1,__ATOMIC_RELAXED);
         __atomic_store_n(&batch.last_invalidation,service,__ATOMIC_RELAXED);
@@ -202,6 +221,12 @@ void xv_cluster_runtime_invalidate(unsigned service)
 }
 void xv_cluster_runtime_begin(void)
 {
+    /* Owner has drained the previous batch. Reuse requires every source byte
+     * and mapping, roots, arena and publication mappings to still match. */
+    if(__atomic_load_n(&batch.reusable,__ATOMIC_ACQUIRE)&&globals_match()&&
+       batch_mappings_current()&&source_current(NULL,0)){
+        batch.reuses++;__atomic_store_n(&batch.valid,1,__ATOMIC_RELEASE);return;
+    }
     xv_cluster_runtime_end();batch.builds++;
     /* Geometry validation can inspect exceptional floats. Snapshot preparation
      * must not change the guest owner's native floating-point environment. */
@@ -410,6 +435,8 @@ decline:
 }
 void xv_worker_query_report(void)
 {
+    XK_LOG("[typed-query-cache] reused-batches %llu\n",(unsigned long long)batch.reuses);
+    batch.reuses=0;
     XK_LOG("[typed-query-source] checks %llu compared-bytes %llu changes %llu retained-bytes %u reads %u\n",
         (unsigned long long)source_checks,(unsigned long long)source_compared,
         (unsigned long long)source_changes,source_bytes,source_count);
@@ -422,7 +449,7 @@ void xv_worker_query_report(void)
             (unsigned long long)v->declines[T_NUMERIC],(unsigned long long)v->declines[T_CHANGED]);
         v->attempts=v->applied=v->bypassed=v->dirty_bytes=v->backedges=0;memset(v->declines,0,sizeof v->declines);
     }
-    XK_LOG("[typed-query] snapshots %llu failed %llu build-us %llu owned-bytes-sum %llu invalidations %u last-service %08X; guard retained, batch lifetime only\n",
+    XK_LOG("[typed-query] snapshots %llu failed %llu build-us %llu owned-bytes-sum %llu invalidations %u last-service %08X; guard retained, validated cache reuse\n",
         (unsigned long long)batch.builds,(unsigned long long)batch.failed,(unsigned long long)batch.build_us,(unsigned long long)batch.owned_bytes,
         batch.invalidations,batch.last_invalidation);
     batch.builds=batch.failed=batch.build_us=batch.owned_bytes=0;batch.invalidations=batch.last_invalidation=0;

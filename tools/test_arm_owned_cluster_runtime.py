@@ -123,6 +123,9 @@ def main():
                             assert bytes(u.mem_read(arm.RAM, arena)) == before
                             assert snapshot['fpscr'] == fpscr
                             allocations = bytes(u.mem_read(machine.symbols['arm_allocations'], 4))
+                            reuse = machine.call('arm_reuse', (0,), fpscr=fpscr)
+                            assert bytes(u.mem_read(machine.symbols['arm_allocations'], 4)) == allocations
+                            assert bytes(u.mem_read(arm.RAM, arena)) == before and reuse['fpscr'] == fpscr
                             candidate = machine.call('arm_candidate', fpscr=fpscr)
                             admitted = struct.unpack('<I', u.mem_read(machine.symbols['arm_admitted'], 4))[0]
                             checks = {'context': bytes(u.mem_read(machine.context, machine.layout['size'])) == expected_context,
@@ -135,7 +138,7 @@ def main():
                                    'map_clusters': n, 'start': cluster, 'center': center,
                                    'radius': radius, 'rounding': rounding, 'control': control,
                                    'allocated_clusters': allocated, 'admitted': admitted,
-                                   'original': original, 'snapshot': snapshot, 'candidate': candidate}
+                                   'original': original, 'snapshot': snapshot, 'reuse': reuse, 'candidate': candidate}
                             if not all(checks.values()):
                                 (a.out / 'failure.json').write_text(json.dumps(dict(row, checks=checks), indent=2))
                                 raise AssertionError((path.name, bsp['index'], case, checks))

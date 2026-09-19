@@ -195,3 +195,29 @@ The dependency table makes construction more expensive. Do not enable by default
 snapshot reuse/lifetime and cheaper dependency lookup are now the cost targets.
 Private receipts: `cluster-dependencies-mutations/`, `cluster-dependencies-host/`
 and `cluster-dependencies-owned/`.
+
+### Validated reuse across drained batches
+
+The object owner now pauses query admission after joining workers while retaining
+owned geometry and dependency storage. At the next batch it may reuse that storage
+only if runtime roots/arena/image identity, publication mappings, every captured
+source mapping and byte, and source-stack exclusion still match. Otherwise it
+frees and rebuilds. Explicit invalidation clears reuse eligibility even between
+batches. Shutdown frees the cache after joining, before guest stacks are freed.
+Per-query dependency validation and the shared transaction guard remain unchanged.
+This does not permit queries between batches or unguarded simulation overlap.
+
+The full scan on reuse costs 62,769 ARM instructions on Blood Gulch and 57,884
+on Battle Creek, versus construction of 183,658 and 177,544. A hypothetical batch
+containing the 24 sampled queries plus one successful reuse is approximately 2%
+below original query instructions on Blood Gulch and effectively flat on Battle
+Creek. This is not a gameplay-weighted batch or hardware prediction. A batch with
+invalidation must pay construction again; real reuse rate is a key unknown.
+
+Tests pass: nine ASan/UBSan pool modes; 14 synthetic full-state ARM cases;
+three-query reuse; eight relevant/unrelated geometry mutations; and five batch
+cases (unchanged, private input change, geometry change, page remap and explicit
+invalidation). The latter verify reuse versus new allocations, guest memory and
+FPSCR preservation. All 48 owned-map comparisons also exercise a no-allocation
+batch reuse before querying. Receipts: `cluster-cache-arm/`, `cluster-cache-host/`,
+`cluster-cache-owned/`. No hardware installation or FPS result yet.

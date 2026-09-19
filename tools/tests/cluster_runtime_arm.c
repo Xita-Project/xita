@@ -76,6 +76,8 @@ void arm_original(void){query_enabled=0;f_00056670(&contexts[0]);}
 void arm_candidate(void){query_enabled=1;f_00056670(&contexts[0]);}
 void arm_attempt(void)
 {XV_OBJECT_MATH_GUARD();arm_applied=xv_worker_query(&contexts[0],xv_object_math_locked_);}
+void arm_reuse(unsigned invalidate)
+{xv_cluster_runtime_pause();if(invalidate)xv_cluster_runtime_invalidate(0xbeef);xv_cluster_runtime_begin();}
 void arm_snapshot(void);
 void arm_finish(void){xv_cluster_runtime_end();}
 void xv_worker_query_test_ready(xctx *c,unsigned lane){(void)c;(void)lane;arm_admitted++;}

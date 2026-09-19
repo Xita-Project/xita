@@ -106,7 +106,7 @@ def main():
     elf = a.out / 'runtime.elf'
     names = ('arm_prepare', 'arm_original', 'arm_candidate', 'arm_snapshot', 'arm_finish',
              'layout', 'arm_context_ptr', 'arm_admitted', 'arm_allocations', 'arm_allocated_bytes',
-             'arm_attempt', 'arm_applied')
+             'arm_attempt', 'arm_applied', 'arm_reuse')
     command = [cc, *flags, *objects, '-nostdlib',
                '-Wl,-Ttext=0x10000,-e,test_boot,--gc-sections,--wrap=xv_preempt,' + ','.join('--undefined=' + n for n in names),
                '-lm', '-lc', '-lgcc', '-o', str(elf)]
@@ -201,6 +201,26 @@ def main():
                 assert bytes(m.uc.mem_read(m.context, m.layout['size'])) == context
                 assert result['fpscr'] == 0
     print('PASS eight relevant/unrelated geometry mutations including already-stamped starts')
+    reuse_rows = []
+    for change in ('unchanged', 'private-input', 'geometry', 'mapping', 'invalidate'):
+        m.call('arm_finish'); m.call('arm_prepare', (7, 1024, 0)); m.call('arm_snapshot')
+        old = struct.unpack('<I', m.uc.mem_read(m.symbols['arm_allocations'], 4))[0]
+        if change == 'private-input':
+            sp = struct.unpack('<I', m.uc.mem_read(m.context + m.layout['r'] + 16, 4))[0]
+            guest_write(sp+80, struct.pack('<3f', 0, 0, 150))
+        if change == 'geometry': guest_write(0x70000, struct.pack('<f', 77))
+        old_page = bytes(m.uc.mem_read(PT+(0x70000>>12)*4, 4))
+        if change == 'mapping':
+            m.uc.mem_write(PT+(0x70000>>12)*4, struct.pack('<I', struct.unpack('<I', old_page)[0]^4096))
+        before = bytes(m.uc.mem_read(RAM, SIZE))
+        result = m.call('arm_reuse', (int(change == 'invalidate'),), fpscr=0x10)
+        new = struct.unpack('<I', m.uc.mem_read(m.symbols['arm_allocations'], 4))[0]
+        assert (new == old) == (change in ('unchanged', 'private-input')), change
+        assert bytes(m.uc.mem_read(RAM, SIZE)) == before and result['fpscr'] == 0x10
+        reuse_rows.append(dict(change=change, allocations=new-old, cost=result))
+        m.call('arm_finish'); m.uc.mem_write(PT+(0x70000>>12)*4, old_page)
+    (a.out / 'reuse.json').write_text(json.dumps(reuse_rows, indent=2)+'\n')
+    print('PASS five batch-reuse/rebuild cases preserve guest memory and FPSCR')
     print('PASS', len(rows), 'full context/memory/FPSCR comparisons; kernel calls and real allocation overhead excluded')
 
 

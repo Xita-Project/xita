@@ -5,6 +5,8 @@
  * Invalidation never frees storage; it can cancel in-flight private results. */
 void xv_cluster_runtime_begin(void);
 void xv_cluster_runtime_end(void);
+/* Drained batch boundary: retain owned storage, disable query admission. */
+void xv_cluster_runtime_pause(void);
 void xv_cluster_runtime_invalidate(unsigned service);
 /* Actual pool ownership checks, not context-marker-only admission. */
 int xv_object_query_source_allowed(uintptr_t pointer,unsigned bytes);

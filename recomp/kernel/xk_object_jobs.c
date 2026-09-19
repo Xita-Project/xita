@@ -1629,7 +1629,7 @@ void xv_object_jobs_join(void)
     __atomic_store_n(&owner_notice,0,__ATOMIC_RELEASE);
     __atomic_store_n(&running,0,__ATOMIC_RELEASE);
 #ifdef XV_TYPED_CLUSTER_QUERY
-    xv_cluster_runtime_end();
+    xv_cluster_runtime_pause();
 #endif
     batch_us+=xk_os_monotonic_us()-started;batches++;count=0;
 }
@@ -1897,6 +1897,9 @@ void xv_object_jobs_shutdown(void)
 #endif
     if(initialized!=1)return;
     xv_object_jobs_join();
+#ifdef XV_TYPED_CLUSTER_QUERY
+    xv_cluster_runtime_end();
+#endif
 #if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING
     pass_timing_cancel();
 #endif
