@@ -4,6 +4,10 @@ This is preparation for query reuse, **not an enabled game optimization**.
 The Vita remains on `0.2.0-perf.19`; there is no new hardware FPS result.
 Halo2 remains parked while Halo CE campaign performance is the priority.
 
+Follow-up: [actual query capture qualification](query-capture-qualification-20260919.md)
+now covers the instrumented ARM closure, including full context/memory/FP
+comparisons and measured capture overhead. It remains outside production.
+
 The [hardware input census](query-repeat-census-20260919.md) found matching
 inputs for 54.5% of selected world collision searches. That establishes an
 opportunity to investigate, not permission to reuse their results. A repeated
