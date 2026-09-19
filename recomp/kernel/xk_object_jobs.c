@@ -373,6 +373,7 @@ static void pass_timing_cancel(void)
  * read. Reported elapsed time includes preemption and any owner-service park.
  * Table accounting happens after release, not while retaining the mutex. */
 enum { HOLD_SITES=32, HOLD_SAMPLE_MASK=63, MOTION_SITES=9 };
+static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes);
 static unsigned hold_enabled;
 /* Read only during a joined batch; the drained owner changes this together
  * with hold_enabled. Generated call sites skip both helper calls when OFF. */
@@ -389,6 +390,8 @@ static struct __attribute__((aligned(64))) {
     unsigned motion_active;
     uint64_t motion_start[MOTION_SITES];
     struct { unsigned samples; uint64_t us,max_us; } motion[MOTION_SITES];
+    unsigned query_origin;
+    struct { unsigned samples; uint64_t us,max_us; } queries[4];
 } hold_lanes[WORKERS];
 /* Stable IDs of the direct children of the signature-checked 4C980 callback.
  * No nested attribution: a child includes all its descendants and owner parks.
@@ -414,6 +417,16 @@ unsigned xv_object_motion_begin(xctx *c,unsigned site)
        (hold_lanes[lane].motion_active&(1u<<site)))return 0;
     hold_lanes[lane].motion_active|=1u<<site;
     hold_lanes[lane].motion_start[site]=xk_os_monotonic_us();
+    if(site==6) {
+        /* Observe only the live worker's validated private return word. This
+         * classifies sampled work; it never selects an optimized call path. */
+        unsigned origin=3;
+        if(private_stack_span((unsigned)lane,c->r[4],4)) {
+            uint32_t pc=X_M32(c->r[4]);
+            origin=pc==0x171f99u?0:pc==0x173020u?1:2;
+        }
+        hold_lanes[lane].query_origin=origin;
+    }
     return ((site+1)<<8)|(lane+1);
 }
 void xv_object_motion_end(unsigned *token)
@@ -429,6 +442,13 @@ void xv_object_motion_end(unsigned *token)
     hold_lanes[lane].motion[site].us+=elapsed;
     if(elapsed>hold_lanes[lane].motion[site].max_us)
         hold_lanes[lane].motion[site].max_us=elapsed;
+    if(site==6) {
+        unsigned origin=hold_lanes[lane].query_origin;
+        hold_lanes[lane].queries[origin].samples++;
+        hold_lanes[lane].queries[origin].us+=elapsed;
+        if(elapsed>hold_lanes[lane].queries[origin].max_us)
+            hold_lanes[lane].queries[origin].max_us=elapsed;
+    }
     *token=0;
 }
 unsigned xv_object_hold_child_begin(int guard)
@@ -501,6 +521,12 @@ static void hold_report(unsigned frames)
                 lane,motion_sites[site],hold_lanes[lane].motion[site].samples,
                 (unsigned long long)hold_lanes[lane].motion[site].us,
                 (unsigned long long)hold_lanes[lane].motion[site].max_us);
+        for(unsigned origin=0;origin<4;origin++)if(hold_lanes[lane].queries[origin].samples)
+            XK_LOG("[object-query-origin] lane %u route %s samples %u elapsed-us %llu max-us %llu; partitions sampled 88110, not total query time\n",
+                lane,(const char *const[]){"world-171f94","object-17301b","other","unreadable"}[origin],
+                hold_lanes[lane].queries[origin].samples,
+                (unsigned long long)hold_lanes[lane].queries[origin].us,
+                (unsigned long long)hold_lanes[lane].queries[origin].max_us);
         uint32_t random=hold_lanes[lane].random;
         memset(&hold_lanes[lane],0,sizeof hold_lanes[lane]);hold_lanes[lane].random=random;
     }

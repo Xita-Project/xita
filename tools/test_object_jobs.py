@@ -122,6 +122,18 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                         assert sum(rows[pc][1] for pc in (0x88110,0x868F0,0x1716F0))<=rows[0x171F10][1]
                         assert rows[0x172BF0][1]+rows[0x1721B0][1]<=rows[0x49600][1]<=child_rows[0x4B9D0][1]
                     assert len(motion)==9*len({ln for ln,*_ in children}), 'motion report reset/duplicate'
+                    origins=re.findall(r'\[object-query-origin\] lane (\d+) route ([\w-]+) samples (\d+) elapsed-us (\d+) max-us (\d+);',result.stderr)
+                    for lane in range(2):
+                        parts=[(route,int(n),int(total),int(maximum)) for ln,route,n,total,maximum in origins if int(ln)==lane]
+                        queries=[tuple(map(int,(n,total,maximum))) for ln,pc,n,total,maximum in motion if int(ln)==lane and int(pc,16)==0x88110]
+                        assert all(route in ('world-171f94','object-17301b','other') and maximum<=total for route,n,total,maximum in parts)
+                        assert len({route for route,*_ in parts})==len(parts), 'origin reset/duplicate'
+                        if queries:
+                            assert len(queries)==1
+                            assert sum(n for _,n,_,_ in parts)==queries[0][0]
+                            assert sum(total for _,_,total,_ in parts)==queries[0][1]
+                            assert max(maximum for *_,maximum in parts)==queries[0][2]
+                        else: assert not parts
                 else:
                     assert '[object-motion]' not in result.stderr
                 print(f'PASS: {workers} workers, profile {profile}, bounded wait {timed}: two object passes in three render frames; retired/reset totals and wait-site accounting')

@@ -291,6 +291,8 @@ void f_0008FB70(xctx *c)
         unsigned motion3=xv_object_motion_begin(c,3);
         assert(!!motion1==!!service_sample&&!!motion2==!!motion1&&!!motion3==!!motion1);
         for(unsigned site=6;site<9;site++) {
+            uint32_t return_word=X_M32(c->r[4]);
+            if(site==6)X_M32(c->r[4])=(uint32_t[]){0x171f99u,0x173020u,0xabcdefu}[id%3];
             unsigned collection=xv_object_motion_begin(c,site);
             assert(!!collection==!!motion3);
             assert(!xv_object_motion_begin(c,site));
@@ -298,6 +300,7 @@ void f_0008FB70(xctx *c)
             struct timespec collection_delay={0,50000};
             nanosleep(&collection_delay,NULL);
             xv_object_motion_end(&collection);assert(!collection);
+            X_M32(c->r[4])=return_word;
         }
 #endif
         c->r[0]=0x60000+id*16;c->r[1]=0x30000;c->r[2]=0x50000+id*12;
