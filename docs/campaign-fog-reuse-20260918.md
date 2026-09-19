@@ -66,6 +66,29 @@ retained combiner and draw-state paths, but uses synthetic asset selectors and
 stops before GPU command recording. It does not establish rendered correctness
 on hardware. Both test tools are safe to import without starting their CLI.
 
-Hardware admission counts, complete-frame timing and rendering still need
-verification in the cumulative candidate. The larger concurrent target is
-[retained CPU vertex snapshots](retained-vertex-capture-20260918.md).
+The physical perf.6 run admitted the observed FP modes: the selected campaign
+windows show median 1,402 hits and 512 misses per 60 frames, with zero declines
+or disabled entries. The scene renders with the restored weapon, HUD, room and
+marines; a short camera-turn/fire check shows no visible new fault. This is
+bounded smoke coverage, not a long stability qualification.
+
+The combined build does not demonstrate a frame-rate gain. Its concurrent
+[retained CPU vertex snapshots](retained-vertex-capture-20260918.md) increased
+recording-side capture cost enough to outweigh avoided writes. Perf.7 keeps
+the fog reuse and prior stack while returning retention to explicit opt-in.
+The same-checkpoint perf.7 follow-up is boot-verified as
+`0.2.0-perf.7 / 02998dd+`, runtime SHA-256
+`a453c217e35afaf8de50c3d270554d7812efcfce13c40ce78a7ca1500c8148a1`.
+Its last twelve full-tick 60-frame windows have median 78.20 ms total frame
+time / 12.8 displayed FPS, compared with perf.5's 78.30 ms / 12.8 FPS.
+Draws are 151.5 versus 148.5 per frame, and NPC activity varies. This does
+not demonstrate an FPS gain from fog reuse. Its median 1,374 hits / 504 misses,
+with zero declined or disabled entries, establish that reuse actually runs.
+
+Recording-side capture returns to 5.98 ms/frame, versus 9.95 with retention
+and 5.92 on perf.5. Stream preparation is 6.86 ms/frame; inclusive owner
+tick/render intervals are 36.49 / 39.47 ms. These nested intervals must not
+be added. All preceding build flags and graphics settings remain stacked.
+The private `ce-perf7/` directory holds boot/package receipts, source flags,
+screenshots and the selected timing rows. The build is left installed for
+continued hardware work.

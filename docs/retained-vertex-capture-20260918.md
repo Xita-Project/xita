@@ -76,3 +76,9 @@ Keep the implementation and lifetime checks for further work, but require an
 explicit opt-in. Preserve all earlier optimizations and test the model fog
 change separately in the next cumulative build. Private captures and the
 selection summary are in `ce-perf6/`.
+
+The follow-up perf.7 hardware run confirms the default change: capture returns
+to 5.98 ms/frame and total frame time to 78.20 ms (median of twelve settled
+windows). The updated six-configuration fixture passes with explicit retention
+coverage plus a no-environment default-off check. No queue/lifetime algorithm
+changed in that follow-up.
