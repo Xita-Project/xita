@@ -42,7 +42,8 @@ typedef struct {
 #define REUSE_COUNTS(F) F(calls) F(lookup) F(cheap) F(repeats) F(promotable) \
     F(captures) F(finished) F(abandoned) F(cpu_reject) F(memory_reject) F(hits) \
     F(evictions) F(root_resets) F(busy) F(saved_consumed) F(short_budget) F(declines) \
-    F(record_evictions) F(observed_ready) F(cost_ready) F(cpu_reasons) F(memory_reasons)
+    F(record_evictions) F(observed_ready) F(cost_ready) F(cpu_reasons) F(memory_reasons) \
+    F(max_blocks) F(max_mappings) F(total_blocks) F(total_mappings)
 typedef struct {
 #define FIELD(n) uint32_t n;
     REUSE_COUNTS(FIELD)
@@ -281,6 +282,12 @@ void xv_query_reuse_run(xctx *c)
             else query_fused_172c95_171f94(c);
             uint32_t exit_fp = fp_get();
             if (!resume(c)) { COUNT(abandoned); return; }
+            /* Capture may already be invalid; occupancy still identifies the
+             * exhausted limit. The actor guard serializes these updates. */
+            if (r->memory.block_count > counts.max_blocks) counts.max_blocks = r->memory.block_count;
+            if (r->memory.mapping_count > counts.max_mappings) counts.max_mappings = r->memory.mapping_count;
+            counts.total_blocks += r->memory.block_count;
+            counts.total_mappings += r->memory.mapping_count;
             ReuseRoots after = roots_get(); uint32_t config[3]; config_get(config);
             if (!roots_equal(&after, &roots)) {
                 COUNT(abandoned); reset_entries(); roots = after; COUNT(root_resets);
@@ -321,9 +328,10 @@ void xv_query_reuse_report(unsigned frames)
 #undef TAKE
     unsigned retained = 0;
     for (unsigned i = 0; i < REUSE_RECORDS; ++i) retained += records[i].owner != 0;
-    XK_LOG("[query-reuse-detail] history/record capacity %u/%u retained %u; observed/cost ready %u/%u record-evict %u; CPU/memory reason-mask %02x/%02x\n",
+    XK_LOG("[query-reuse-detail] history/record capacity %u/%u retained %u; observed/cost ready %u/%u record-evict %u; CPU/memory reason-mask %02x/%02x; blocks/mappings max %u/%u total %u/%u capacity %u/%u\n",
         REUSE_ENTRIES, REUSE_RECORDS, retained, n.observed_ready, n.cost_ready,
-        n.record_evictions, n.cpu_reasons, n.memory_reasons);
+        n.record_evictions, n.cpu_reasons, n.memory_reasons, n.max_blocks, n.max_mappings,
+        n.total_blocks, n.total_mappings, XV_QUERY_MEMORY_BLOCKS, XV_QUERY_MEMORY_MAPPINGS);
     /* 32-bit per-window counts; no timing claims. */
     XK_LOG("[query-reuse] %u frames calls/lookup/cheap/repeat/promotable %u/%u/%u/%u/%u; capture/finished/abandoned %u/%u/%u; CPU/memory reject %u/%u hits %u saved-budget %u; evict/root/busy/short/decline %u/%u/%u/%u/%u\n",
         frames, n.calls, n.lookup, n.cheap, n.repeats, n.promotable,

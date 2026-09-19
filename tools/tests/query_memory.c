@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { SIZE = 32768, PAGES = 256 };
+enum { SIZE = (XV_QUERY_MEMORY_BLOCKS + 64) * 64, PAGES = 256 };
 static unsigned char arena[SIZE], initial[SIZE], warm[SIZE], expected[SIZE], saved[SIZE];
 static uint32_t pages[PAGES], other_pages[PAGES];
 static XvQueryMemory record, saved_record;
@@ -150,6 +150,21 @@ static void capacity(void)
     assert(xv_query_memory_finish(&record, &view));
     memset(arena, 0xff, SIZE); assert(xv_query_memory_replay(&record, &view));
     for (i = 0; i < XV_QUERY_MEMORY_BLOCKS; ++i) assert(arena[i * 64] == (unsigned char)i);
+    /* Dependencies and writes in the upper part of the enlarged table must
+     * remain exact; a full-table rejection must publish no earlier writes. */
+    setup(); memcpy(initial, arena, SIZE);
+    for (i = 0; i < XV_QUERY_MEMORY_BLOCKS; ++i) {
+        assert(xv_query_memory_read(&record, i * 64, 1));
+        assert(xv_query_memory_write(&record, i * 64 + 1, 1));
+        arena[i * 64 + 1] ^= 0x81;
+    }
+    assert(xv_query_memory_finish(&record, &view));
+    memcpy(expected, arena, SIZE); memcpy(arena, initial, SIZE);
+    arena[(XV_QUERY_MEMORY_BLOCKS - 1) * 64] ^= 1;
+    rejects_without_writes(&view);
+    arena[(XV_QUERY_MEMORY_BLOCKS - 1) * 64] ^= 1;
+    assert(xv_query_memory_replay(&record, &view));
+    assert(!memcmp(arena, expected, SIZE));
     setup();
     assert(!xv_query_memory_write(&record, 0, XV_QUERY_MEMORY_BLOCKS * 64 + 1));
     assert(record.status == XV_QM_INVALID && (record.reason & XV_QM_OVERFLOW));

@@ -10,9 +10,10 @@
  * is an additional caller admission condition; record its physical accesses.
  */
 #define XV_QUERY_MEMORY_BLOCK_SIZE 64u
-#define XV_QUERY_MEMORY_BLOCKS 128u
+#define XV_QUERY_MEMORY_BLOCKS 512u
 #define XV_QUERY_MEMORY_MAPPINGS 128u
-#define XV_QUERY_MEMORY_HASH_SIZE 256u
+#define XV_QUERY_MEMORY_HASH_SIZE 1024u
+#define XV_QUERY_MEMORY_HASH_SHIFT 22u
 
 typedef struct {
     unsigned char *arena;

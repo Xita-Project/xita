@@ -1,5 +1,7 @@
 # Keep completed world-query records across ordinary misses
 
+Follow-up: [perf.22 recorder capacity trial](query-capacity-20260919.md).
+
 The [perf.20 trial](query-selective-reuse-20260919.md) produced only three
 replay hits in 15,294 calls. Its single 16-entry ring discarded completed
 transactions alongside ordinary repeat history. Perf.21 separates those roles.

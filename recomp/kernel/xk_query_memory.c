@@ -2,6 +2,12 @@
 #include <stddef.h>
 #include <string.h>
 
+_Static_assert((1u << (32u - XV_QUERY_MEMORY_HASH_SHIFT)) == XV_QUERY_MEMORY_HASH_SIZE,
+               "query hash shift and capacity must agree");
+_Static_assert(XV_QUERY_MEMORY_BLOCKS < UINT16_MAX &&
+               XV_QUERY_MEMORY_HASH_SIZE >= 2u * XV_QUERY_MEMORY_BLOCKS,
+               "query hash needs bounded indices and spare slots");
+
 static int host_span(uintptr_t p, size_t n)
 { return n == 0 || (p != 0 && n - 1 <= UINTPTR_MAX - p); }
 
@@ -48,7 +54,7 @@ int xv_query_memory_begin(XvQueryMemory *s, const XvQueryMemoryView *v)
     }
     copy = *v;
     s->view = copy;
-    /* Entries are initialized lazily; do not clear ~20KiB on every cold query. */
+    /* Entries are initialized lazily; do not clear the payload on every cold query. */
     memset(s->hash, 0, sizeof(s->hash));
     s->reason = s->block_count = s->mapping_count = 0;
     s->status = XV_QM_RECORDING;
@@ -78,7 +84,7 @@ int xv_query_memory_mapping(XvQueryMemory *s, uint32_t guest, uint32_t physical)
 static XvQueryMemoryBlock *block(XvQueryMemory *s, uint32_t offset)
 {
     /* Use high product bits: low bits would collide at every16KiB stride. */
-    unsigned h = ((offset >> 6) * UINT32_C(2654435761)) >> 24;
+    unsigned h = ((offset >> 6) * UINT32_C(2654435761)) >> XV_QUERY_MEMORY_HASH_SHIFT;
     unsigned n;
     for (n = 0; n < XV_QUERY_MEMORY_HASH_SIZE; ++n) {
         unsigned i = s->hash[h];

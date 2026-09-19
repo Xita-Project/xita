@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { USABLE = 12288, SIZE = USABLE + 4096, PAGES = 8 };
+enum { USABLE = (XV_QUERY_MEMORY_BLOCKS / 64 + 1) * 4096, SIZE = USABLE + 4096, PAGES = 8 };
 static unsigned char arena[SIZE], other_arena[SIZE], before[SIZE], expected[SIZE];
 static uint32_t pages[PAGES + 1], other_pages[PAGES + 1];
 static XvQueryMemory cap;

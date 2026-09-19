@@ -256,6 +256,8 @@ static void retained_records(void)
     reset(); mode = OVERFLOW;
     for (unsigned j = 0; j < REUSE_OBSERVATIONS; ++j) { call(); xv_query_reuse_epoch(); }
     assert(counts.abandoned == 1 && (counts.memory_reasons & XV_QM_OVERFLOW));
+    assert(counts.max_blocks == XV_QUERY_MEMORY_BLOCKS && counts.max_mappings == 1);
+    assert(counts.total_blocks == XV_QUERY_MEMORY_BLOCKS && counts.total_mappings == 1);
     check_record_owners();
 }
 int main(void)
