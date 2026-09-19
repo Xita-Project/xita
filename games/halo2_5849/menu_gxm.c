@@ -725,7 +725,11 @@ static int render_body(void *opaque, const h2_menu_request *r)
     }
     atest[0] = (float)(s->setup[0x340 / 4] & 255) / 255.0f; atest[1] = (float)(s->setup[0x33C / 4] & 7); atest[2] = (float)(s->setup[0x300 / 4] & 1); atest[3] = 0;
     for (unsigned u = 0; u < 4; ++u) { scale[u][0] = scale[u][1] = 1.0f; scale[u][2] = scale[u][3] = 0.0f;
-        if (tex[u] && tex[u]->linear) { scale[u][0] = 1.0f / (float)tex[u]->w; scale[u][1] = 1.0f / (float)tex[u]->h; } }
+        if (tex[u] && tex[u]->linear) { scale[u][0] = 1.0f / (float)tex[u]->w; scale[u][1] = 1.0f / (float)tex[u]->h; }
+        /* A binding without a cache entry is sampled_target's 640x480 linear
+         * surface. It uses the same texel-addressed Xbox coordinates as the
+         * copied path; bypassing the copy must not bypass normalisation. */
+        else if (!tex[u] && bound[u]) { scale[u][0] = 1.0f / W; scale[u][1] = 1.0f / H; } }
     if (fs->psc) GCHECK(sceGxmSetUniformDataF(fu, fs->psc, 0, 18 * 4, &psc[0][0]));
     g_dtrace_now = 0;
     {   /* XV_DRAW_TRACE=<fragment hash prefix>: the inputs of the first 8 matching draws */
