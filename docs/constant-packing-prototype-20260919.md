@@ -190,3 +190,33 @@ repeat that switch as a new optimization or treat the wait ranking alone as
 proof that quaternion arithmetic is slow. Existing private-output release
 already moves some matrix/quaternion calculations outside the guard; remaining
 shared outputs and enclosing collision/cache transactions need ownership work.
+
+## Current lock-holder capture
+
+The perf.30 `object-holds` diagnostic completed and restored its initial mode.
+Its middle arm samples outer holds (approximately one in 64), so the following
+sums are **sampled elapsed**, not complete frame costs or savings estimates.
+Runtime PCs were normalized by the established `0x3f000` relocation.
+
+Largest sampled holders:
+
+| Function | Samples | Elapsed µs |
+| --- | ---: | ---: |
+| `4C980` | 102 | 23,609 |
+| `56670` | 292 | 14,997 |
+| `565E0` | 270 | 3,323 |
+| Native matrix multiply | 1,399 | 2,983 |
+| Native model hierarchy | 171 | 2,356 |
+| Native quaternion conversion | 797 | 1,492 |
+
+Within the sampled `4C980` child, `4B9D0` accounts for 19,933 µs. The nested
+collection/solver wrapper `172BF0` has 15,379 µs across 47 samples; collection
+`171F10` has 12,560 µs and solver `170C10` has 2,463 µs. Thus collection still
+accounts for approximately 82% of that sampled wrapper. These nested scopes
+must not be added together. Query `88110` and object collector `1716F0` remain
+leads within collection; inspect `56670` alongside it as a substantial second
+holder. Quaternion arithmetic is a small holder despite its large waiter sum.
+
+The diagnostic reports off/on/off 8.171/8.255/8.375 FPS. This is observer overhead
+in a live scene, not an optimization comparison against the earlier 5.85 FPS
+capture. Capture artifacts are in `../constant-pack-hardware/holder-capture/`.
