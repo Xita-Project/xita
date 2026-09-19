@@ -26,8 +26,17 @@ The expanded `menu_raster_test.c` renders both triangle windings and verifies
 color, depth, stencil preservation, and visibility counts for each combination.
 Both tests pass normally and with ASan/UBSan.
 
-Visual and physical hardware validation remain necessary. This change is not
-evidence that the menu background corruption or hardware black startup is fixed.
+The Vita build at revision `d212da0` succeeded; only `eboot.bin` differs from
+the preceding color-mask package. An isolated Vita3K run reached the real main
+menu through normal controller input, with no guest guard stop before the
+operator ended the run. Background artifacts remain visible. Different camera
+phases prevent a pixel-for-pixel visual comparison with the earlier run.
+
+Physical hardware validation remains necessary. This does not establish an FPS
+improvement, fix the complete menu background, or diagnose the hardware black
+startup. The physical Vita was unreachable; no update was deployed. Private
+receipts and screenshots are under `halo2-culling/visual` in the September 18
+unified-games experiment directory.
 
 ## References
 
