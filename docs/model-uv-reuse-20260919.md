@@ -106,7 +106,40 @@ that the optimization helps.
 perf14 cumulative options retained. All 1,744 VPK entries verify; only
 `game-a.self` and `boot-game.txt` differ from perf14. Runtime SHA-256 is
 `f62a19727f18c88d3dda2135ede657113226c91a8ef513745453ae9ed6d5372d`.
-The candidate has not been installed: remote status requests timed out. The last
-remotely confirmed runtime is perf14. Its connection loss does not establish a
-game crash. The user's faster campaign-loading observation has no measured
-loading comparison and predates this uninstalled candidate.
+After the remote service became reachable, the updater verified this runtime and
+boot-confirmed it in physical slot 0. The dashboard and gameplay overlay both
+show `0.2.0-perf.15 / 3b5d14a+`. Perf14 remains in the other slot for rollback.
+The user's earlier faster campaign-loading observation has no measured loading
+comparison and predates this candidate's installation.
+
+## First physical campaign result
+
+The Normal/New001 marine checkpoint loads and renders on perf15. The stationary
+camera matches the earlier checkpoint (`-28.66, 32.52, 0.62`, forward
+`0.56, 0.82, -0.15`). No benchmark mode was used and the saved graphics settings
+were retained. The last twelve complete initial windows have medians of
+78.35 ms/frame, 12.75 FPS and 153 draws/frame. Perf14's earlier initial capture
+was about 78.3 ms, 12.75 FPS and 149 draws/frame. These are ordinary runs with
+varying NPC activity, not a controlled paired comparison. No clear overall FPS
+gain is established.
+
+Those twelve UV rows contain 13,021 hits, 7,991 cold calls and 22,397 total
+calls: 61.97% hits among eligible calls, 58.14% of all calls. Normal steady rows
+show no argument/FP misses; repeated scope initialization and unsupported
+programs still cause cold work. Typical rows contain 540–650 completed scopes
+per 60 frames, 60 root declines and 60–115 program declines. Scope checks remain
+part of the cost; this observed hit ratio is close to the isolated instruction
+break-even estimate, so repeated-computation savings are not automatically net
+savings.
+
+Remote camera inputs subsequently changed the recorded forward vector and the
+scene continued rendering. Trigger input was also submitted; this limited smoke
+test does not establish extended combat stability. Captured initial and
+after-input logs contain no searched STOP/FATAL/GPU-crash/trap marker. Their
+private evidence and summaries are in `ce-perf15/gameplay/`.
+
+Before deployment, the saved perf14 history was recovered: one complete log
+contains 1,226 sixty-frame reports and runs to approximately 5,591 seconds. No
+searched fatal/GPU-crash marker appears there either. Its final, different view
+has about 201 draws/frame and 12 FPS; do not use it as the UV checkpoint baseline
+or infer that an abrupt log ending proves a clean exit.
