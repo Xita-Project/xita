@@ -42,3 +42,14 @@ does not explain them. No hardware update or FPS measurement was performed.
 Private evidence is in `halo2-depth-audit/visual` under the September 18
 unified-games experiment directory. Next, compare depth-enabled and depth-free
 rendering of the same workload before changing shader or texture translation.
+
+### Depth-off isolation result
+
+A private diagnostic export of `4af2b86` forced GXM depth comparisons to ALWAYS
+and disabled depth writes. Its boot log confirms that override was active.
+The profile UI appeared, but the visible world was covered by a later background
+pass. This experiment is inconclusive for the striped-world bug: removal of the
+stripes together with the entire world is not a rendering fix or proof that
+textures are correct. The diagnostic executable was never deployed to hardware
+and its override is not in production source. Private results are under
+`halo2-depth-off/visual`. A narrower comparison must preserve ordinary occlusion.
