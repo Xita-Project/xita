@@ -107,3 +107,31 @@ serially under `capture-copy-hardware/run-gameplay.py`; any failed stage stops
 the sequence. Performance and rendering qualification of this configuration
 remain pending those captures. This is a comparison candidate, not a demonstrated
 optimization or a change to the ordinary build defaults.
+
+## perf.34 settled checkpoint result
+
+The ordinary saved checkpoint loaded and rendered. Its final six 60-frame
+windows average 78.30 ms versus perf.33's 78.10 ms, with the same logged camera
+and slightly different selected-model counts (7.55 versus 7.80/frame). No FPS
+benefit is established. Removing owner comparisons changes the measured work:
+
+| Per frame, nested/overlapping scopes | perf.33 | perf.34 |
+| --- | ---: | ---: |
+| Owner capture elapsed | 5.274 ms | 4.225 ms |
+| Worker preparation elapsed | 4.778 ms | 6.942 ms |
+| Explicit capture join elapsed | 0.079 ms | 0.046 ms |
+| FIFO jobs | 62.94 | 113.21 |
+| Captured staging data | 446.96 KiB | 845.75 KiB |
+
+The owner reduction is accompanied by increased worker work and copying. This
+supports the expected tradeoff, not a net win. Upload failures are zero in both
+sets of six windows. The heavy corridor capture is still running; default
+selection should not change based on this checkpoint alone. Evidence lives in
+`capture-copy-hardware/checkpoint-settled.log`, its summaries, and
+`checkpoint-comparison.json`.
+
+The packet completion bounds span more than one frame at this checkpoint
+(roughly 118–125 ms from submission versus 78 ms between frames). They include
+pipeline/queue latency and must not be interpreted as exclusive per-frame GPU
+service time or added to CPU phases. This observation does not establish which
+stage sets steady-state throughput.
