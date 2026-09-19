@@ -92,16 +92,16 @@ def stores(text):
     return text, len(edits)
 
 
-def parameters(text):
+def parameters(text, names=DEPENDENT, declaration='XvQueryMemory *nq_capture, ', argument='nq_capture, '):
     code = masked(text)
     edits = []
     definitions = []
-    for m in re.finditer(r'\b(' + '|'.join(sorted(DEPENDENT)) + r')\s*\(', code):
+    for m in re.finditer(r'\b(' + '|'.join(sorted(names)) + r')\s*\(', code):
         start = code.index('(', m.start())
         end = close_paren(code, start)
         tail = code[end + 1:].lstrip()
         definition = tail.startswith('{')
-        prefix = 'XvQueryMemory *nq_capture, ' if definition else 'nq_capture, '
+        prefix = declaration if definition else argument
         if definition:
             definitions.append(m[1])
         edits.append((start + 1, prefix))
@@ -183,7 +183,79 @@ def runtime(text):
     return text
 
 
-def generate(recomp_dir):
+def cpu_stores(text):
+    """Rewrite pinned x87 lvalues; every setter evaluates its RHS first."""
+    text = re.sub(r'c->st\[([^\]]+)\]', r'NQ_ST_ABS(\1)', text)
+    code = masked(text)
+    edits = []
+    for m in re.finditer(r'\b(X_ST|NQ_ST_ABS)\s*\(', code):
+        start = code.index('(', m.start())
+        end = close_paren(code, start)
+        match = re.match(r'\s*(=|\+=|-=|\*=|/=|\+\+|--)', code[end + 1:])
+        if not match:
+            continue
+        eq = end + 1 + match.end() - len(match[1])
+        if code[eq:eq + 2] == '==':
+            continue
+        if match[1] != '=':
+            raise ValueError('unreviewed compound ST store')
+        depth = 0
+        finish = None
+        for pos in range(eq + 1, len(code)):
+            if code[pos] in '([{': depth += 1
+            elif code[pos] in ')]}': depth -= 1
+            elif code[pos] == ';' and depth == 0:
+                finish = pos
+                break
+        if finish is None or depth:
+            raise ValueError('unreviewed ST store expression')
+        index = text[start + 1:end]
+        if m[1] == 'X_ST': index = f'((c->fsp+({index}))&7u)'
+        value = text[eq + 1:finish].strip()
+        edits.append((m.start(), finish, f'NQ_ST_SET({index}, ({value}))'))
+    for start, end, replacement in reversed(edits):
+        text = text[:start] + replacement + text[end:]
+    return text, len(edits)
+
+
+CPU_ACCESS = r'''
+/* Track physical slots, including same-value writes and the RHS of RMW. */
+static inline double nq_cpu_st_load(XvQueryCpu *capture, const xctx *c, unsigned index)
+{ xv_query_cpu_st_read(capture,index); return c->st[index]; }
+static inline void nq_cpu_st_store(XvQueryCpu *capture, xctx *c, unsigned index, double value)
+{ xv_query_cpu_st_write(capture,index); c->st[index]=value; }
+#define NQ_ST_ABS(i) nq_cpu_st_load(nq_cpu,c,(i))
+#define NQ_ST_SET(i,v) nq_cpu_st_store(nq_cpu,c,(i),(v))
+'''
+
+
+def cpu_variant(outputs):
+    result, inventory = {}, {}
+    names = (DEPENDENT - {'query_fused_172c95_171f94'}) | {
+        'query_captured_172c95_171f94', 'x87_push', 'x87_fxam'}
+    for name, text in outputs.items():
+        text, st_count = cpu_stores(text)
+        # Each selected straight-line vertex interval writes all9lanes after
+        # loading its operands from guest memory; there are no callbacks/traps
+        # admitted inside it. Other lanes are preserved, never diff-inferred.
+        xmm_count = 0
+        if name in ('query_capture.c', PRIVATE + 'kernel/xk_collision_vertices.h'):
+            text, xmm_count = re.subn(r'(c->xmm\[0\]\[0\]\s*=\s*X_MF32)',
+                r'xv_query_cpu_xmm_write(nq_cpu,0x1ffu); \1', text)
+            if xmm_count != (2 if name == 'query_capture.c' else 1):
+                raise ValueError('vertex CPU write interval changed')
+        text, definitions = parameters(text, names, 'XvQueryCpu *nq_cpu, ', 'nq_cpu, ')
+        if name == PRIVATE + 'xv_x86rt.h':
+            text = replace_once(text, '#include <kernel/xk_query_capture.h>',
+                '#include <kernel/xk_query_capture.h>\n#include <kernel/xk_query_cpu.h>')
+            text = replace_once(text, '} xctx;', '} xctx;\n' + CPU_ACCESS)
+        result[name] = text
+        inventory[name] = dict(st_stores=st_count,vertex_intervals=xmm_count,
+                               definitions=definitions)
+    return result, inventory
+
+
+def generate(recomp_dir, cpu_state=False):
     root = Path(recomp_dir)
     contents = {name: (root / name).read_text() for name in PINS}
     actual = {name: hashlib.sha256(text.encode()).hexdigest() for name, text in contents.items()}
@@ -239,7 +311,10 @@ def generate(recomp_dir):
         outputs[out] = text
         inventories[name] = dict(stores=store_count,definitions=definitions,
                                  callback_sites=callbacks,fallback_sites=fallbacks)
-    contract = dict(input_sha256=actual,inventory=inventories,
+    cpu_inventory = None
+    if cpu_state:
+        outputs, cpu_inventory = cpu_variant(outputs)
+    contract = dict(input_sha256=actual,inventory=inventories,cpu_inventory=cpu_inventory,
                     output_sha256={n: hashlib.sha256(t.encode()).hexdigest() for n,t in outputs.items()},
                     production_wired=False,checked_address_supported=False)
     return outputs, contract
@@ -249,11 +324,12 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--recomp-dir',type=Path,required=True)
     p.add_argument('--out',type=Path,required=True)
+    p.add_argument('--cpu-state',action='store_true',help='Also record CPU effects in the private variant')
     a=p.parse_args()
     source, output = a.recomp_dir.resolve(), a.out.resolve()
     if source == output or source in output.parents or output in source.parents:
         raise ValueError('use a disjoint capture output directory')
-    outputs,contract=generate(a.recomp_dir)
+    outputs,contract=generate(a.recomp_dir,a.cpu_state)
     a.out.mkdir(parents=True,exist_ok=True)
     for name,text in outputs.items():
         path=a.out/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text)

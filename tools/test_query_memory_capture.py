@@ -70,6 +70,17 @@ class CaptureRewrite(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'reviewed source inventory'):
                 capture.generate(root)
 
+    def test_physical_x87_slot_writes(self):
+        text, count = capture.cpu_stores(
+            'X_ST(1) = X_ST(1) + X_ST(0); c->st[(top-2)&7] = value;')
+        self.assertEqual(count, 2)
+        self.assertIn('NQ_ST_SET(((c->fsp+(1))&7u), (X_ST(1) + X_ST(0)))', text)
+        self.assertIn('NQ_ST_SET((top-2)&7, (value))', text)
+        self.assertEqual(capture.cpu_stores('v = c->st[c->fsp];')[0],
+                         'v = NQ_ST_ABS(c->fsp);')
+        with self.assertRaises(ValueError):
+            capture.cpu_stores('X_ST(0) += 1;')
+
 
 if __name__ == '__main__':
     unittest.main()

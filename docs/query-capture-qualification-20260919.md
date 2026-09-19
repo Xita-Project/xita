@@ -5,6 +5,10 @@ explicit memory recording throughout its private helper closure. It is not
 linked into the game and does not skip any query on hardware. The Vita remains
 on perf19. Halo 2 remains parked.
 
+Follow-up: [complete CPU and memory replay qualification](query-cpu-replay-20260919.md)
+now includes actual floating-point write masks, current-budget consumption and
+changed-caller replay. It remains outside the game pending selective admission.
+
 This extends the [memory recorder qualification](query-reuse-contract-20260919.md).
 `tools/query_memory_capture.py` accepts only the reviewed source hashes and
 writes a separate query variant. Original query/runtime headers remain intact.
