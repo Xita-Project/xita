@@ -57,28 +57,35 @@ def main():
             'XITA_SYS_SRCS=recomp/kernel/xd3d.c']
     targets = ['build/recomp/libxita_game.a','build/recomp/libxita_guest.a']
     rows=[]
-    for mode in (0,1,1,0,0,1):
+    for mode,cross in ((0,0),(1,0),(1,0),(1,1),(1,1),(1,0),(0,0),(0,0),(1,1)):
         (out/'commands.jsonl').write_text('')
-        result=subprocess.run(base+[f'XV_MODEL_UV={mode}',*targets],cwd=out,text=True,capture_output=True)
+        result=subprocess.run(base+[f'XV_MODEL_UV={mode}',*([f'XV_MODEL_UV_CROSS_MODEL={cross}']if rows else []),*targets],cwd=out,text=True,capture_output=True)
         if result.returncode:raise RuntimeError(result.stdout+result.stderr)
         commands=[json.loads(s) for s in (out/'commands.jsonl').read_text().splitlines()]
         compiles={c[c.index('-c')+1]:c for c in commands if '-c' in c}
         if rows:
-            if rows[-1]['mode']==mode:assert not commands,commands
+            if (rows[-1]['mode'],rows[-1]['cross'])==(mode,cross):assert not commands,commands
             else:
-                want={'recomp/code_011.c','recomp/code_015.c','recomp/kernel/xk_owner_phase.c'}
+                want={'recomp/kernel/xk_owner_phase.c'}
+                if rows[-1]['mode']!=mode:want|={'recomp/code_011.c','recomp/code_015.c'}
                 if mode:want.add('recomp/kernel/xk_model_uv.c')
                 assert set(compiles)==want,compiles
         for name,cmd in compiles.items():
             assert ('-DXV_MODEL_UV=1' in cmd)==bool(mode and name in {'recomp/code_011.c','recomp/code_015.c','recomp/kernel/xk_model_uv.c','recomp/kernel/xk_owner_phase.c'}),(name,cmd)
+            assert ('-DXV_MODEL_UV_CROSS_MODEL=1'in cmd)==bool(cross and name in {'recomp/kernel/xk_model_uv.c','recomp/kernel/xk_owner_phase.c'}),(name,cmd)
         if mode and 'recomp/kernel/xk_model_uv.c' in compiles:
             assert '-DXV_OWNER_PHASE' in compiles['recomp/kernel/xk_model_uv.c']
         members=subprocess.check_output(['ar','t',targets[0]],cwd=out,text=True).splitlines()
         assert ('xk_model_uv.o' in members)==bool(mode),members
-        rows.append({'mode':mode,'commands':commands,'members':members})
+        rows.append({'mode':mode,'cross':cross,'commands':commands,'members':members})
     for bad in ('','2','-1','0 1'):
         result=subprocess.run(base+['XV_MODEL_UV='+bad,*targets],cwd=out,text=True,capture_output=True)
         assert result.returncode and 'XV_MODEL_UV must be 0 or 1' in result.stderr
+    for bad in ('','2','-1','0 1'):
+        result=subprocess.run(base+['XV_MODEL_UV=1','XV_MODEL_UV_CROSS_MODEL='+bad,*targets],cwd=out,text=True,capture_output=True)
+        assert result.returncode and 'XV_MODEL_UV_CROSS_MODEL must be 0 or 1'in result.stderr
+    result=subprocess.run(base+['XV_MODEL_UV=0','XV_MODEL_UV_CROSS_MODEL=1',*targets],cwd=out,text=True,capture_output=True)
+    assert result.returncode and 'XV_MODEL_UV_CROSS_MODEL requires XV_MODEL_UV=1'in result.stderr
     for extra in ('XV_OWNER_PHASE=0','RECOMP=0','GAME_PROFILE=halo2_5849'):
         result=subprocess.run(base+['XV_MODEL_UV=1',extra,*targets],cwd=out,text=True,capture_output=True)
         assert result.returncode
@@ -86,7 +93,7 @@ def main():
     result=subprocess.run(base+['XV_MODEL_UV=1',*targets],cwd=out,text=True,capture_output=True)
     assert result.returncode and 'regenerated primary A26B0 and 70110 UV hooks' in result.stderr
     (out/'receipt.json').write_text(json.dumps({'result':'PASS','builds':rows},indent=2)+'\n')
-    print('PASS six real Make/archive transitions, scoped rebuilds, prerequisites and invalid configuration')
+    print('PASS nine real Make/archive transitions, scoped rebuilds, prerequisites and invalid configuration')
 
 
 if __name__ == "__main__":

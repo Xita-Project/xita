@@ -1,3 +1,4 @@
+void arm_scope_end(void);void arm_scope_begin(void);void arm_present(void);void arm_scene_end(void);void arm_scene_begin(void);void arm_nested_begin(void);void arm_nested_end(void);
 #include "xv_recomp_protos.h"
 #include "kernel/xd3d.h"
 extern xctx *const arm_context_ptr;
@@ -10,6 +11,12 @@ const unsigned publication_size=sizeof(xd3d_state);
 __attribute__((noinline)) void uv_frontier(xctx*c){(void)c;__asm__ volatile("":::"memory");}
 __attribute__((noinline)) void uv_callback(xctx*c){
  callback_calls++;
+ if(callback_mode==4)arm_scope_end();
+ if(callback_mode==5)arm_present();
+ if(callback_mode==6){arm_scene_end();arm_scene_begin();}
+ if(callback_mode==7){arm_nested_begin();arm_nested_end();}
+ if(callback_mode==8){X_IMG32(0x2e3520)=0x112000;arm_scope_end();}
+
  if(callback_mode==1){X_M32(c->r[5]+0x9c)=0x3f400000;X_IMG32(0x2fc918)=0x41900000;}
  if(callback_mode==2){X_M32(c->r[5]+0xfc+44)=0;}
  if(callback_mode==3){c->st[(c->fsp+3)&7]=17.25;c->r[2]=0xdead1234;c->f_cf=123;}

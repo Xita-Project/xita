@@ -22,6 +22,7 @@ def main():
  from games.halo_ce_3925 import model_uv
  image=Image(str(a.xbe),str(a.manifest))
  text=(R/'recomp/code_011.c').read_text();start=text.index('void f_00070110(');src=text[start:text.index('\nvoid ',start+1)]
+ src=model_uv.strip(src)
  candidate=model_uv.hook(image,0x70110,src)
  header=(R/'recomp/code_010.c').read_text().split('void f_00055555')[0]
  prologue=src[src.index('{')+1:src.index('L_00070110:')]
@@ -37,11 +38,12 @@ def main():
    code+='void caller_'+name+'_'+lane+'(xctx*c){'+decl+b+'\nuv_callback(c);}\n'
  (O/'caller.c').write_text(code)
  cc='/home/birchwoodgod/vitasdk/bin/arm-vita-eabi-gcc';flags=['-O2','-g1','-std=gnu11','-mthumb','-mcpu=cortex-a9','-mfpu=neon','-fno-strict-aliasing','-ffp-contract=off','-ffunction-sections','-fdata-sections','-fstack-usage','-DXV_MODEL_UV=1','-DXV_OWNER_PHASE','-DXV_EXPERIMENTAL_OBJECT_JOBS','-D__vita__','-I'+str(O),'-I'+str(S/'recomp'),'-I'+str(R/'recomp')]
+ if receipt.get('cross_model'):flags+=['-DXV_MODEL_UV_CROSS_MODEL=1']
  commands=[]
  for n,path in [('caller',O/'caller.c'),('caller-fixture',S/'tools/tests/model_uv_caller_arm.c')]:
   cmd=[cc,*flags,'-c',str(path),'-o',str(O/(n+'.o'))];commands.append(cmd);subprocess.run(cmd,check=True)
  cmd=[cc,*flags,'-c',str(R/'recomp/kernel/xd3d.c'),'-o',str(O/'xd3d-sections.o')];commands.append(cmd);subprocess.run(cmd,check=True)
- names=['arm_caller_prepare','arm_front_original','arm_front_candidate','arm_back_original','arm_back_candidate','arm_reset','layout','arm_context_ptr','publication_size']
+ names=['arm_caller_prepare','arm_front_original','arm_front_candidate','arm_back_original','arm_back_candidate','arm_reset','layout','arm_context_ptr','publication_size','arm_scope_end','arm_scope_begin','arm_scene_end','arm_scene_begin','arm_present']
  cmd=[cc,*flags,*[str(O/(n+'.o'))for n in ['original','xk_model_uv','xk_owner_phase','model_uv_arm','cluster_runtime_arm_imports','caller','caller-fixture']],str(O/'xd3d-sections.o'),'-nostdlib','-Wl,-Ttext=0x10000,-e,test_boot,--gc-sections,--wrap=sceKernelGetThreadId,'+','.join('--undefined='+n for n in names),'-lm','-lc','-lgcc','-o',str(O/'caller.elf')];commands.append(cmd);subprocess.run(cmd,check=True)
  m=RuntimeMachine(O/'caller.elf',True)
  def rd(a,n):return bytes(m.uc.mem_read(a,n))

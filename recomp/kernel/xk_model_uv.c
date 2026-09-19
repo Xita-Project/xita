@@ -19,6 +19,10 @@ static struct {
 } last;
 static struct {UVKey key;uint32_t sp,u,v;uintptr_t stack,row0,row1;unsigned token;} pending;
 static unsigned serial,exhausted;
+#if XV_MODEL_UV_CROSS_MODEL
+static unsigned last_serial;
+static struct { unsigned retained_exits,cross_hits,boundary_resets; } cross_counts;
+#endif
 static struct {
     unsigned scopes,calls[2],hits[2],cold,arguments,fp,both;
     unsigned top,fsw,fcw,fpscr,scope_declines,diagnostics,roots,spans,program,numeric;
@@ -71,17 +75,47 @@ unsigned xk_model_uv_scope_begin(xctx*c,const uint8_t *ram,const uint32_t *pt,co
     if(ram!=g_xram || pt!=g_xpt || image!=g_img_base || !ram || !pt || !image || arena<8192 ||
        lo>0x2e3520 || hi<0x2e3524 || at<base || at-base>arena-4100u){counts.roots++;invalidate();return 0;}
     if(exhausted || serial==UINT32_MAX){exhausted=1;counts.scope_declines++;return 0;}
-    invalidate();scope.owner=c;scope.ram=ram;scope.pt=pt;scope.image=image;scope.arena=arena;scope.lo=lo;scope.hi=hi;
+#if XV_MODEL_UV_CROSS_MODEL
+    if(pending.token || scope.ram!=ram || scope.pt!=pt || scope.image!=image ||
+       scope.arena!=arena || scope.lo!=lo || scope.hi!=hi)invalidate();
+#else
+    invalidate();
+#endif
+    scope.owner=c;scope.ram=ram;scope.pt=pt;scope.image=image;scope.arena=arena;scope.lo=lo;scope.hi=hi;
     scope.generation=generation;scope.packet=*(const xu32_u *)at;
-    if(!scope.packet || !span(scope.packet,4)){counts.roots++;return 0;}
+    if(!scope.packet || !span(scope.packet,4)){counts.roots++;
+#if XV_MODEL_UV_CROSS_MODEL
+        invalidate();
+#endif
+        return 0;}
     scope.serial=++serial;scope.depth=1;scope.blocked=0;counts.scopes++;return scope.serial;
 }
 void xk_model_uv_scope_end(xctx*c,unsigned token){
     if(!token)return;uint32_t generation=0;
+#if XV_MODEL_UV_CROSS_MODEL
+    int active=owner(c,&generation);if(active<0)return;
+#else
     if(owner(c,&generation)<0)return;
+#endif
     if(c!=scope.owner || generation!=scope.generation || token!=scope.serial || !scope.depth)return;
-    invalidate();if(!--scope.depth){scope.blocked=0;counts.completed++;}
+#if XV_MODEL_UV_CROSS_MODEL
+    if(active!=1 || scope.depth!=1 || scope.blocked || pending.token || diagnostic() ||
+       !memory_context(scope.ram,scope.pt,scope.image))invalidate();
+    else if(last.valid)cross_counts.retained_exits++;
+    pending.token=0;
+#else
+    invalidate();
+#endif
+    if(!--scope.depth){scope.blocked=0;counts.completed++;}
 }
+#if XV_MODEL_UV_CROSS_MODEL
+/* Scene/Present boundary: admitted owner only, including outside the scene.
+ * Pending guest pointers never cross this boundary. An open model stays blocked. */
+void xk_model_uv_owner_boundary(void *context){
+    uint32_t generation=0;if(owner(context,&generation)<0)return;
+    invalidate();if(scope.depth)scope.blocked=1;cross_counts.boundary_resets++;
+}
+#endif
 int xk_model_uv_begin(xctx*c,const uint8_t *ram,const uint32_t *pt,const uint8_t *image,unsigned site,unsigned *token){
     uint32_t fp=fp_get(),generation=0;*token=0;int active=owner(c,&generation);
     if(active<0)return 0;
@@ -114,7 +148,13 @@ int xk_model_uv_begin(xctx*c,const uint8_t *ram,const uint32_t *pt,const uint8_t
             for(unsigned i=0;i<8;i++)s[i]=last.scratch[i];s[14]=last.time;
             for(unsigned i=0;i<4;i++){u[i]=last.rows[i];v[i]=last.rows[i+4];c->st[(c->fsp-1-i)&7]=last.st[i];}
             c->r[0]=last.fsw;c->r[1]=c->r[2]=0;c->r[4]=e+28;c->fsw=last.fsw;
-            X_FLAGS(XK_LOGIC,0,0,(last.fsw>>8)&0x44,8);counts.hits[site]++;fp_set(last.fpscr);return 1;
+            X_FLAGS(XK_LOGIC,0,0,(last.fsw>>8)&0x44,8);counts.hits[site]++;
+#if XV_MODEL_UV_CROSS_MODEL
+            /* Count only the first reuse in this model: subsequent same-model
+             * hits were already possible with the original scope lifetime. */
+            if(last_serial!=scope.serial){cross_counts.cross_hits++;last_serial=scope.serial;}
+#endif
+            fp_set(last.fpscr);return 1;
         }
         counts.arguments+=args&&!state;counts.fp+=state&&!args;counts.both+=args&&state;
         counts.top+=top;counts.fsw+=fsw;counts.fcw+=fcw;counts.fpscr+=fpscr;
@@ -137,10 +177,17 @@ void xk_model_uv_end(xctx*c,unsigned token){
     for(unsigned i=0;i<8;i++)last.scratch[i]=s[i];last.time=s[14];
     for(unsigned i=0;i<4;i++){last.rows[i]=u[i];last.rows[i+4]=v[i];last.st[i]=c->st[(c->fsp-1-i)&7];}
     pending.token=0;last.valid=1;
+#if XV_MODEL_UV_CROSS_MODEL
+    last_serial=scope.serial;
+#endif
 }
 void xk_model_uv_report(unsigned frames){
     /* Joined presenting-owner reporter only; never a per-material timer. */
     XK_LOG("[model-uv] %u frames scopes %u completed %u calls %u/%u hits %u/%u cold %u miss-args/fp/both %u/%u/%u fp-top/swx/cwx/fpscr %u/%u/%u/%u decline-scope/diag/root/span/program/numeric %u/%u/%u/%u/%u/%u nested %u invalidations %u; condition-bits-normalized\n",frames,counts.scopes,counts.completed,counts.calls[0],counts.calls[1],counts.hits[0],counts.hits[1],counts.cold,counts.arguments,counts.fp,counts.both,counts.top,counts.fsw,counts.fcw,counts.fpscr,counts.scope_declines,counts.diagnostics,counts.roots,counts.spans,counts.program,counts.numeric,counts.nesting,counts.invalidations);
+#if XV_MODEL_UV_CROSS_MODEL
+    XK_LOG("[model-uv-cross] %u frames retained-exits %u cross-scope-hits %u boundaries %u; scene/Present bounded\n",frames,cross_counts.retained_exits,cross_counts.cross_hits,cross_counts.boundary_resets);
+    memset(&cross_counts,0,sizeof cross_counts);
+#endif
     memset(&counts,0,sizeof counts);
 }
 #endif

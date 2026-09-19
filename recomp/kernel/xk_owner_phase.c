@@ -4,6 +4,12 @@
 #include "xk.h"
 #include "xk_owner_phase.h"
 #include "xk_object_jobs.h"
+#include "xk_model_uv.h"
+#if XV_MODEL_UV_CROSS_MODEL
+#define MODEL_UV_BOUNDARY(context) xk_model_uv_owner_boundary(context)
+#else
+#define MODEL_UV_BOUNDARY(context) ((void)0)
+#endif
 #include <stdlib.h>
 #include <string.h>
 #ifdef __vita__
@@ -134,7 +140,7 @@ void xv_owner_phase_present(void *context)
     if(worker()) { __atomic_fetch_add(&foreign,1,__ATOMIC_RELAXED);return; }
     if(!live(context)) { __atomic_fetch_add(&invalid,1,__ATOMIC_RELAXED);return; }
     if(generation_exhausted)return;
-    if(same_thread() && __atomic_load_n(&owner_context,__ATOMIC_ACQUIRE)==(uintptr_t)context)return;
+    if(same_thread() && __atomic_load_n(&owner_context,__ATOMIC_ACQUIRE)==(uintptr_t)context){MODEL_UV_BOUNDARY(context);return;}
     /* A different presenting fiber starts a new observation generation. A
      * suspended old scope is explicitly abandoned, never dereferenced/reused. */
     __atomic_store_n(&owner_valid,0,__ATOMIC_RELEASE);
@@ -157,6 +163,7 @@ void xv_owner_phase_present(void *context)
     __atomic_store_n(&owner_context,(uintptr_t)context,__ATOMIC_RELEASE);
     __atomic_store_n(&owner_thread,current_thread(),__ATOMIC_RELEASE);
     __atomic_store_n(&owner_valid,1,__ATOMIC_RELEASE);
+    MODEL_UV_BOUNDARY(context);
 }
 int xv_owner_phase_active(void *context,unsigned phase,uint32_t *generation_token)
 {
@@ -237,7 +244,7 @@ void xv_owner_phase_begin(xv_owner_phase_scope *scope,void *context,unsigned pha
     if(phase>=XV_OWNER_PHASES || !live(context) || phases[phase].depth==UINT32_MAX) { __atomic_fetch_add(&invalid,1,__ATOMIC_RELAXED);return; }
     *scope=((uint64_t)generation<<32)|(phase+1u);
     if(phases[phase].depth++)phases[phase].recursive++;
-    else { phases[phase].entries++;phases[phase].start=now(); }
+    else { if(phase==XV_OWNER_SCENE)MODEL_UV_BOUNDARY(context);phases[phase].entries++;phases[phase].start=now(); }
 }
 void xv_owner_phase_end(xv_owner_phase_scope *scope)
 {
@@ -248,7 +255,7 @@ void xv_owner_phase_end(xv_owner_phase_scope *scope)
     if((unsigned)(token>>32)!=generation) { stale++;return; }
     unsigned phase=(unsigned)token-1;
     if(phase>=XV_OWNER_PHASES || !phases[phase].depth) { __atomic_fetch_add(&invalid,1,__ATOMIC_RELAXED);return; }
-    if(!--phases[phase].depth) { account(phase,now());phases[phase].completed++; }
+    if(!--phases[phase].depth) { if(phase==XV_OWNER_SCENE)MODEL_UV_BOUNDARY((void *)__atomic_load_n(&owner_context,__ATOMIC_ACQUIRE));account(phase,now());phases[phase].completed++; }
 }
 void xv_owner_phase_report(unsigned frames)
 {

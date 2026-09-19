@@ -71,3 +71,12 @@ void arm_owner_case(unsigned which){
  if(which==7){xk_cur=&second;second.state=0;second.fiber=(xk_fiber*)&second;current_fiber=second.fiber;xv_owner_phase_present(&second.ctx);}
 }
 void test_boot(void){}
+
+void arm_scope_begin(void){model_token=xk_model_uv_scope_begin(&context,g_xram,g_xpt,g_img_base);}
+void arm_scene_end(void){xv_owner_phase_end(&scene_token);}
+void arm_scene_begin(void){xv_owner_phase_begin(&scene_token,&context,XV_OWNER_SCENE);}
+void arm_present(void){xv_owner_phase_present(&context);}
+void arm_pending_begin(void){xk_model_uv_begin(&context,g_xram,g_xpt,g_img_base,0,&model_token);}
+void arm_pending_finish(void){f_00056F20(&context);xk_model_uv_end(&context,model_token);}
+void arm_model_original(void){arm_original();arm_scope_end();arm_scope_begin();}
+void arm_model_candidate(void){arm_candidate();arm_scope_end();arm_scope_begin();}

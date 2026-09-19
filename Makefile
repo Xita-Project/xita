@@ -156,6 +156,7 @@ $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: $(BUILD)/query-prefix.config
 XV_OWNER_PHASE ?= 0
 XV_MODEL_FOG ?= 0
 XV_MODEL_UV ?= 0
+XV_MODEL_UV_CROSS_MODEL ?= 0
 XV_OWNER_PHASE_DEFAULT ?= 0
 XV_SCENE_PARTITION ?= 0
 XV_SCENE_BUCKET0_DETAIL ?= 0
@@ -1105,6 +1106,28 @@ $(RECOMP_BUILD)/model-uv.config: force-model-uv-config
 $(MODEL_UV_OBJS) $(RECOMP_BUILD)/kernel/xk_model_uv.o $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(RECOMP_BUILD)/model-uv.config
 $(RECOMP_BUILD)/kernel/xk_model_uv.o: recomp/kernel/xk_model_uv.h
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/model-uv.config
+# Cross-model value retention changes only helper/owner code, never guest hooks.
+ifneq ($(words $(XV_MODEL_UV_CROSS_MODEL)),1)
+$(error XV_MODEL_UV_CROSS_MODEL must be 0 or 1)
+endif
+ifneq ($(filter $(XV_MODEL_UV_CROSS_MODEL),0 1),$(XV_MODEL_UV_CROSS_MODEL))
+$(error XV_MODEL_UV_CROSS_MODEL must be 0 or 1)
+endif
+ifeq ($(XV_MODEL_UV_CROSS_MODEL),1)
+ifneq ($(XV_MODEL_UV),1)
+$(error XV_MODEL_UV_CROSS_MODEL requires XV_MODEL_UV=1)
+endif
+$(RECOMP_BUILD)/kernel/xk_model_uv.o $(RECOMP_BUILD)/kernel/xk_owner_phase.o: RECOMP_CFLAGS += -DXV_MODEL_UV_CROSS_MODEL=1
+endif
+.PHONY: force-model-uv-cross-config
+force-model-uv-cross-config:
+$(RECOMP_BUILD)/model-uv-cross.config: force-model-uv-cross-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_MODEL_UV_CROSS_MODEL)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_model_uv.o $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(RECOMP_BUILD)/model-uv-cross.config recomp/kernel/xk_model_uv.h
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/model-uv-cross.config
 # Only the selected scene unit and existing observer own this opt-in flag.
 SCENE_PARTITION_SRCS := $(shell rg -l 'XV_SCENE_PARTITION_SCOPE:' $(RECOMP_DIR)/code_*.c 2>/dev/null)
 SCENE_PARTITION_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(SCENE_PARTITION_SRCS))

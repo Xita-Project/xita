@@ -10,7 +10,7 @@ sys.path[:0]=[str(S/'tools'),str(S)]
 from test_arm_cluster_runtime import RuntimeMachine,RAM,SIZE
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('--quick',action='store_true')
+ p=argparse.ArgumentParser();p.add_argument('--quick',action='store_true');p.add_argument('--cross-model',action='store_true')
  for name in ['xbe','manifest','retained-build','out']:p.add_argument('--'+name,type=Path,required=True)
  a=p.parse_args();O=a.out.resolve();O.mkdir(parents=True,exist_ok=True);R=a.retained_build.resolve()
  from recompiler.xita_recomp import Image
@@ -20,7 +20,7 @@ def main():
   text=path.read_text();start=text.index('void f_'+name+'(');end=text.find('\nvoid ',start+1);return text[start:end if end>=0 else None].rstrip()+'\n\n'
  hooked_bodies=[]
  for addr,unit in [(0x70110,'011'),(0xa26b0,'015')]:
-  body=extract(R/('recomp/code_'+unit+'.c'),f'{addr:08X}');hooked=model_uv.hook(image,addr,body);assert model_uv.strip(hooked)==body
+  body=model_uv.strip(extract(R/('recomp/code_'+unit+'.c'),f'{addr:08X}'));hooked=model_uv.hook(image,addr,body);assert model_uv.strip(hooked)==body
   hooked_bodies.append((addr,body,hooked))
   assert model_uv.hook(image,0x56f20,body)==body
   try:model_uv.hook(image,addr,body.replace('c->r[4]', 'c->r[5]',1))
@@ -33,6 +33,7 @@ def main():
  (O/'xv_recomp_protos.h').write_text((R/'recomp/xv_recomp_protos.h').read_text())
  cc='/home/birchwoodgod/vitasdk/bin/arm-vita-eabi-gcc'
  flags=['-O2','-g1','-std=gnu11','-mthumb','-mcpu=cortex-a9','-mfpu=neon','-fno-strict-aliasing','-ffp-contract=off','-ffunction-sections','-fdata-sections','-fstack-usage','-DXV_MODEL_UV=1','-DXV_OWNER_PHASE','-DXV_EXPERIMENTAL_OBJECT_JOBS','-D__vita__','-I'+str(O),'-I'+str(S/'recomp'),'-I'+str(R/'recomp')]
+ if a.cross_model:flags+=['-DXV_MODEL_UV_CROSS_MODEL=1']
  commands=[];objects=[]
  # Compile the full actual primary bodies, proving OFF preserves text/relocations
  # and ON imports exactly the two scoped APIs for that primary.
@@ -40,7 +41,7 @@ def main():
   section='.text.f_'+format(addr,'08X');dump=[]
   for mode,text in [('original',body),('off',hooked),('on',hooked)]:
    path=O/(f'primary-{addr:x}-{mode}.c');obj=path.with_suffix('.o');path.write_text(pre+text)
-   defs=flags if mode=='on'else [v for v in flags if v!='-DXV_MODEL_UV=1']
+   defs=[v for v in flags if v!='-DXV_MODEL_UV_CROSS_MODEL=1'and (mode=='on'or v!='-DXV_MODEL_UV=1')]
    cmd=[cc,*defs,'-c',str(path),'-o',str(obj)];commands.append(cmd);subprocess.run(cmd,check=True)
    from elftools.elf.elffile import ELFFile
    with obj.open('rb')as f:
@@ -55,7 +56,7 @@ def main():
   assert dump[0]==dump[1],hex(addr)
  for src in [O/'original.c',S/'recomp/kernel/xk_model_uv.c',S/'recomp/kernel/xk_owner_phase.c',S/'tools/tests/model_uv_arm.c',S/'tools/tests/cluster_runtime_arm_imports.c']:
   obj=O/(src.stem+'.o');cmd=[cc,*flags,'-c',str(src),'-o',str(obj)];commands.append(cmd);subprocess.run(cmd,check=True);objects.append(str(obj))
- names=['arm_prepare','arm_original','arm_candidate','arm_reset','layout','arm_context_ptr','arm_scope_end','arm_nested_begin','arm_nested_end','arm_owner_case']
+ names=['arm_prepare','arm_original','arm_candidate','arm_reset','layout','arm_context_ptr','arm_scope_end','arm_nested_begin','arm_nested_end','arm_owner_case','arm_scope_begin','arm_scene_end','arm_scene_begin','arm_present','arm_pending_begin','arm_pending_finish','arm_model_original','arm_model_candidate','xk_model_uv_report']
  cmd=[cc,*flags,*objects,'-nostdlib','-Wl,-Ttext=0x10000,-e,test_boot,--gc-sections,--wrap=sceKernelGetThreadId,'+','.join('--undefined='+n for n in names),'-lm','-lc','-lgcc','-o',str(O/'uv.elf')];commands.append(cmd);subprocess.run(cmd,check=True)
  m=RuntimeMachine(O/'uv.elf',True)
  def rd(a,n):return bytes(m.uc.mem_read(a,n))
@@ -131,6 +132,10 @@ def main():
   m.call('arm_prepare',(0,0,0));m.call('arm_reset');base=snap();compare('nested-seed',base,expected='miss');restore(base);m.call('arm_nested_begin');compare('nested-blocked',expected='decline');restore(base);m.call('arm_nested_end');compare('outer-stays-blocked',expected='decline');restore(base);m.call('arm_scope_end');compare('after-scope-exit',expected='decline');m.call('arm_reset');compare('new-scope-cold',base,expected='miss')
   for mode in [1,2,3]:
    m.call('arm_prepare',(0,0,0));m.call('arm_reset');put(m.symbols['root_mode'],mode);compare('captured-root-'+str(mode),expected='decline')
- result={'comparisons':len(rows),'commands':commands,'hashes':{str(x):hashlib.sha256(x.read_bytes()).hexdigest()for x in [O/'original.c',S/'recomp/kernel/xk_model_uv.c',S/'tools/tests/model_uv_arm.c',S/'recomp/kernel/xk_owner_phase.c',S/'recomp/xv_x86rt.h']},'rows':rows}
+ # A clean model transition distinguishes the default lifetime from the opt-in.
+ if not a.quick:
+  m.call('arm_prepare',(0,0,0));m.call('arm_reset');base=snap();compare('clean-transition-seed',base,expected='miss');restore(base)
+  m.call('arm_scope_end');m.call('arm_scope_begin');compare('clean-transition-next',base,expected='hit'if a.cross_model else'miss')
+ result={'cross_model':a.cross_model,'comparisons':len(rows),'commands':commands,'hashes':{str(x):hashlib.sha256(x.read_bytes()).hexdigest()for x in [O/'original.c',S/'recomp/kernel/xk_model_uv.c',S/'tools/tests/model_uv_arm.c',S/'recomp/kernel/xk_owner_phase.c',S/'recomp/xv_x86rt.h']},'rows':rows}
  (O/'results.json').write_text(json.dumps(result,indent=2)+'\n');print('PASS',len(rows))
 if __name__=='__main__':main()
