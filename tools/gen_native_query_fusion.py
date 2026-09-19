@@ -80,7 +80,7 @@ def replace_if_changed(path, text):
     return True
 
 
-def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inline=0, query_semantic_leaf=0, query_membership_scalar=0, query_ancestor_scalar=0, query_object_space_enabled=0, query_world_run_enabled=0):
+def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inline=0, query_semantic_leaf=0, query_membership_scalar=0, query_ancestor_scalar=0, query_object_space_enabled=0, query_world_run_enabled=0, query_repeat_census=0):
     if not __debug__:
         raise RuntimeError('Refusing optimized Python: generation safety checks require assertions.')
     recomp_dir = Path(recomp_dir).resolve()
@@ -106,6 +106,10 @@ def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inli
         raise ValueError('query world run must be 0 or 1')
     if query_world_run_enabled and not (query_object_space_enabled and query_ancestor_scalar):
         raise ValueError('query world run requires object-space and ancestor-scalar paths')
+    if query_repeat_census not in (0, 1):
+        raise ValueError('query repeat census must be 0 or 1')
+    if query_repeat_census and not query_world_run_enabled:
+        raise ValueError('query repeat census requires world-run admission')
     # Validate even a previously generated caller against current owned-image
     # emission. The audited prototype also checks SHA, closure and shadow sinks.
     units = {i: (recomp_dir / f'code_{i:03d}.c').read_text() for i in (13, 16, 28)}
@@ -181,6 +185,13 @@ def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inli
         generated['query_fusion.c'], world_headers, world_contract = query_world_run.generate(
             generated['query_fusion.c'])
         generated.update(world_headers)
+    if query_repeat_census:
+        marker = '        query_fused_172c95_171f94(c);'
+        if generated['query_fusion.c'].count(marker) != 1:
+            raise ValueError('query repeat census world-wrapper drift')
+        generated['query_fusion.c'] = generated['query_fusion.c'].replace(marker,
+            '        { extern void xv_query_repeat_probe_observe(xctx *);\n'
+            '          xv_query_repeat_probe_observe(c); }\n' + marker)
     # Publication happens only after every input/output contract check passed.
     changed = [name for name, text in generated.items()
                if replace_if_changed(recomp_dir / name, text)]
@@ -197,6 +208,7 @@ def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inli
         query_membership_scalar=query_membership_scalar, query_membership_contract=membership_contract,
         query_ancestor_scalar=query_ancestor_scalar, query_ancestor_contract=ancestor_contract,
         query_object_space=query_object_space_enabled, query_object_space_contract=object_contract,
+        query_repeat_census=query_repeat_census,
         query_world_run=query_world_run_enabled, query_world_run_contract=world_contract,
         changed=changed)
     # A fresh receipt is also the build stamp. Write it after generated outputs,
@@ -222,8 +234,9 @@ def main():
     parser.add_argument('--query-ancestor-scalar', type=int, choices=(0, 1), default=0)
     parser.add_argument('--query-object-space', type=int, choices=(0, 1), default=0)
     parser.add_argument('--query-world-run', type=int, choices=(0, 1), default=0)
+    parser.add_argument('--query-repeat-census', type=int, choices=(0, 1), default=0)
     args = parser.parse_args()
-    result = generate(args.xbe, args.manifest, args.recomp_dir, args.receipt, args.solver_fusion, args.query_f32_inline, args.query_semantic_leaf, args.query_membership_scalar, args.query_ancestor_scalar, args.query_object_space, args.query_world_run)
+    result = generate(args.xbe, args.manifest, args.recomp_dir, args.receipt, args.solver_fusion, args.query_f32_inline, args.query_semantic_leaf, args.query_membership_scalar, args.query_ancestor_scalar, args.query_object_space, args.query_world_run, args.query_repeat_census)
     print('query fusion: fixed 32 continuations; changed ' + (', '.join(result['changed']) or 'no source bytes'))
 
 

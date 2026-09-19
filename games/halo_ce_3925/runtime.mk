@@ -88,3 +88,8 @@ endif
 ifeq ($(XV_MODEL_UV),1)
 XITA_GAME_SRCS += recomp/kernel/xk_model_uv.c
 endif
+
+# Probe only: bounded owned input history, never a result cache.
+ifeq ($(XV_QUERY_REPEAT_CENSUS),1)
+XITA_GAME_SRCS += recomp/kernel/xk_query_repeat.c recomp/kernel/xk_query_repeat_probe.c
+endif
