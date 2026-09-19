@@ -23,9 +23,16 @@ specific views, not a claim about every campaign area.
 
 [Capture profiling and the worker-validation comparison](docs/vertex-capture-detail-20260919.md)
 show that removing owner-side reuse increases worker/copy workload without an
-established frame-time benefit. Perf.33's reuse path was restored. The next
-[packed-comparison candidate](docs/packed-compare-groups-20260919.md) retains
-exact reuse and reduces ARM instruction count; hardware qualification is pending.
+established frame-time benefit. The [packed-comparison candidate](docs/packed-compare-groups-20260919.md)
+retains exact reuse and reduces ARM instruction count. Perf.35 hardware tests
+show no established whole-frame gain. The native/360p/native crowded-view test
+reduces GPU completion latency without improving FPS. Perf.36's CPU-counter
+diagnostic failed during startup; reopening Xita restored confirmed perf.35.
+
+[Render-state snapshots](docs/render-state-snapshots-20260919.md) now have an
+owned model-pose payload with two-buffer publication, world/object identity and
+concurrency tests. Gameplay integration and the full simulation/render split
+remain unfinished; no object-job joins have been removed for this work.
 The following dated observations retain their original experimental context.
 
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
