@@ -22,7 +22,7 @@ enum { W = 640, H = 480, MAX_TARGETS = 4, MAX_VS = 64, MAX_FS = 128, MAX_TEX = 5
 typedef struct { uint64_t hash; const SceGxmProgram *gxp; SceGxmShaderPatcherId id; SceGxmVertexProgram *prog;
                  const SceGxmProgramParameter *c; unsigned c_count; uint8_t vregs[16]; unsigned nattr, stride; int missing; } vs_entry;
 typedef struct { uint64_t hash, key; const SceGxmProgram *gxp; SceGxmShaderPatcherId id; SceGxmFragmentProgram *prog;
-                 const SceGxmProgramParameter *psc, *fog, *atest, *texscale, *blendconst; int sampler[4]; const vs_entry *vs; int missing; } fs_entry;
+                 const SceGxmProgramParameter *psc, *fog, *atest, *texscale, *blendconst; int sampler[4]; const vs_entry *vs; uint32_t color_mask; int missing; } fs_entry;
 static vs_entry g_vs[MAX_VS]; static unsigned g_nvs;
 static fs_entry g_fs[MAX_FS]; static unsigned g_nfs;
 static uint64_t g_missing_logged[64]; static unsigned g_nmissing;
@@ -401,9 +401,12 @@ static int gl_equation(uint32_t e, SceGxmBlendFunc *out)
 static fs_entry *get_fs(const h2_command_state *s, const menu_combiner *cb, const vs_entry *vs, const SceGxmBlendInfo *blend, uint32_t blend_key)
 {
     uint64_t hp = hash_ps(s, cb), key = hp ^ ((uint64_t)blend_key << 40) ^ (vs->hash << 8);
-    for (unsigned i = 0; i < g_nfs; ++i) if (g_fs[i].key == key) return g_fs[i].missing ? NULL : &g_fs[i];
+    for (unsigned i = 0; i < g_nfs; ++i)
+        if (g_fs[i].key == key && g_fs[i].hash == hp && g_fs[i].vs == vs && g_fs[i].color_mask == blend->colorMask)
+            return g_fs[i].missing ? NULL : &g_fs[i];
     if (g_nfs == MAX_FS) return NULL;
     fs_entry *e = &g_fs[g_nfs++]; memset(e, 0, sizeof *e); e->hash = hp; e->key = key; e->vs = vs;
+    e->color_mask = blend->colorMask;
     /* one compiled program per (combiner, vertex program) pair - it only reads the varyings that
      * vertex program writes; the raw program is shared between its blend variants */
     for (unsigned i = 0; i + 1 < g_nfs; ++i) if (g_fs[i].hash == hp && g_fs[i].vs == vs && g_fs[i].gxp) { e->gxp = g_fs[i].gxp; e->id = g_fs[i].id; break; }
@@ -589,7 +592,15 @@ static int render_body(void *opaque, const h2_menu_request *r)
     vs_entry *vs = get_vs(s);
     if (!vs) { flush_scene(); return -1; }
     SceGxmBlendInfo blend; memset(&blend, 0, sizeof blend);
-    blend.colorMask = SCE_GXM_COLOR_MASK_ALL;
+    /* NV097_SET_COLOR_MASK has B/G/R/A enables in successive bytes. A
+     * depth-only or alpha-only pass must preserve the other target channels.
+     * GXM patches the mask into the fragment program, so cache variants above
+     * include it even when blending is disabled. Keep submitting depth work. */
+    uint32_t mask = s->setup[0x358 / 4];
+    blend.colorMask = ((mask & 0x00000001u) ? SCE_GXM_COLOR_MASK_B : 0)
+                    | ((mask & 0x00000100u) ? SCE_GXM_COLOR_MASK_G : 0)
+                    | ((mask & 0x00010000u) ? SCE_GXM_COLOR_MASK_R : 0)
+                    | ((mask & 0x01000000u) ? SCE_GXM_COLOR_MASK_A : 0);
     uint32_t blend_key = 0;
     float blendconst[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     if (s->setup[0x304 / 4]) {
