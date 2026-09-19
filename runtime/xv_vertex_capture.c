@@ -95,6 +95,13 @@ static int cap_stopping,cap_unavailable,cap_enabled=-1;
 static unsigned cap_jobs_total,cap_drains,cap_pressure,cap_failures,cap_max_pending;
 static unsigned cap_masks_copied,cap_masks_omitted;
 static uint64_t cap_bytes,cap_capture_us,cap_worker_us,cap_join_us;
+/* Owner-only, opt-in samples. Elapsed time includes scheduling/preemption;
+ * these nested scopes are not additional frame time or CPU-cycle counters. */
+static int cap_detail_enabled=-1;
+static unsigned cap_detail_serial,cap_detail_samples;
+static unsigned cap_detail_compares,cap_detail_copies,cap_detail_publishes;
+static uint64_t cap_detail_compare_us,cap_detail_copy_us,cap_detail_publish_us;
+static uint64_t cap_detail_compare_bytes,cap_detail_copy_bytes;
 #if XV_VERTEX_CAPTURE_PACKED
 static int cap_compact_enabled=-1;
 static unsigned cap_compact_streams;
@@ -142,7 +149,7 @@ static void cap_reuse_retire(void)
         cap_results[i]=NULL;cap_entries[i].current=0;
     }
 }
-static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,unsigned packed,unsigned compact)
+static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,unsigned packed,unsigned compact,int sample)
 {
     if(cap_reuse_enabled<0)cap_reuse_enabled=xv_quality_int("XV_VERTEX_CAPTURE_REUSE",1,0,1);
     /* Sparse uploads may intentionally retain stale unfetched records. Do not
@@ -157,6 +164,7 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
         if(e->identity!=s->source || e->bytes!=s->bytes || e->stride!=s->stride ||
            e->packed!=packed || e->compact!=compact || e->slot!=slot)continue;
         cap_reuse_checks++;
+        uint64_t detail_start=sample?sceKernelGetProcessTimeWide():0;
         int equal;
 #if XV_VERTEX_CAPTURE_PACKED
         if(compact)equal=xv_packed_equal(s->source,cap_arena+e->offset,s->bytes/32);
@@ -165,6 +173,12 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
         /* We need equality, not ordering. Use the same bounded NEON block
          * loads as resident uploads, including unaligned inputs and tails. */
         equal=xv_bytes_equal_blocks(s->source,cap_arena+e->offset,s->bytes);
+        if(sample) {
+            cap_detail_compare_us+=sceKernelGetProcessTimeWide()-detail_start;
+            cap_detail_compares++;
+            /* Logical input bytes, not measured memory-bus traffic. */
+            cap_detail_compare_bytes+=compact?s->bytes/2:s->bytes;
+        }
         if(equal) {
             cap_reuse_hits++;cap_reuse_bytes+=compact?s->bytes/2:s->bytes;
             if(!e->current) {
@@ -394,6 +408,10 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     }
     if(!cap_start())goto fallback;
     cap_collect();
+    if(cap_detail_enabled<0)
+        cap_detail_enabled=xv_quality_int("XV_VERTEX_CAPTURE_DETAIL",0,0,1);
+    int sample=cap_detail_enabled && !(cap_detail_serial++&63u);
+    if(sample)cap_detail_samples++;
     unsigned submitted=__atomic_load_n(&cap_submitted,__ATOMIC_RELAXED);
 #if XV_VERTEX_CAPTURE_READY
     uint64_t start=sceKernelGetProcessTimeWide();
@@ -414,7 +432,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
 #if XV_VERTEX_CAPTURE_PACKED
             compact=cap_compact(s);
 #endif
-            unsigned id=cap_reuse_find(s,batch->slot,packed,compact);
+            unsigned id=cap_reuse_find(s,batch->slot,packed,compact,sample);
             ready_ids[i]=id;ready_results[i]=id?cap_results[id-1]:NULL;
             if(!ready_results[i])ready=0;
         }
@@ -479,7 +497,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         if(probed)id=ready_ids[i];
         else
 #endif
-        id=cap_reuse_find(s,batch->slot,packed,compact);
+        id=cap_reuse_find(s,batch->slot,packed,compact,sample);
         if(id) {
             j->reuse[i]=id;s->source=cap_arena+cap_entries[id-1].offset;s->result=NULL;
             /* Non-sparse references are semantically unused by upload(). */
@@ -488,6 +506,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         }
         j->reuse[i]=cap_reuse_add(s,batch->slot,packed,compact);
 #endif
+        uint64_t copy_start=sample?sceKernelGetProcessTimeWide():0;
 #if XV_VERTEX_CAPTURE_PACKED
         j->compact[i]=cap_compact(s);
         if(j->compact[i]) {
@@ -496,6 +515,10 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         } else
 #endif
         memcpy(cap_arena+cap_used,s->source,captured);
+        if(sample) {
+            cap_detail_copy_us+=sceKernelGetProcessTimeWide()-copy_start;
+            cap_detail_copies++;cap_detail_copy_bytes+=captured;
+        }
         s->source=cap_arena+cap_used;s->result=NULL;
         cap_used+=(captured+15u)&~15u;
         written+=(captured+15u)&~15u;
@@ -512,6 +535,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     }
     j->batch.ok=0;cap_jobs_total++;cap_bytes+=written;
     unsigned pending=submitted+1-cap_retired;if(pending>cap_max_pending)cap_max_pending=pending;
+    uint64_t publish_start=sample?sceKernelGetProcessTimeWide():0;
     __atomic_store_n(&cap_submitted,submitted+1,__ATOMIC_RELEASE);
 #if XV_VERTEX_CAPTURE_NOTIFY
     if(__atomic_exchange_n(&cap_wake_state,CAP_PENDING,__ATOMIC_ACQ_REL)==CAP_SLEEPING) {
@@ -522,6 +546,10 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
 #else
     sceKernelSetEventFlag(cap_wake,1);
 #endif
+    if(sample) {
+        cap_detail_publish_us+=sceKernelGetProcessTimeWide()-publish_start;
+        cap_detail_publishes++;
+    }
     cap_capture_us+=sceKernelGetProcessTimeWide()-start;
     return 1;
 fallback:
@@ -545,6 +573,7 @@ void xv_vertex_capture_shutdown(void)
         while(sceKernelWaitThreadEnd(cap_thread,NULL,NULL)<0)sceKernelDelayThread(100);
     }
     cap_release();cap_unavailable=cap_stopping=0;cap_enabled=-1;
+    cap_detail_enabled=-1;cap_detail_serial=0;
 #if XV_VERTEX_PERSISTENT
     vp_shutdown();
 #endif
@@ -559,6 +588,15 @@ void xv_vertex_capture_shutdown(void)
 void xv_vertex_capture_report(unsigned frames)
 {
     assert(cap_retired==__atomic_load_n(&cap_submitted,__ATOMIC_ACQUIRE));
+    if(cap_detail_samples)xv_logf("[vertex-capture-detail] %u frames: %u sampled submissions (1/64); compare %u calls %llu bytes %llu us; copy %u calls %llu bytes %llu us; publish %u calls %llu us; nested elapsed samples, not frame totals\n",
+        frames,cap_detail_samples,cap_detail_compares,
+        (unsigned long long)cap_detail_compare_bytes,(unsigned long long)cap_detail_compare_us,
+        cap_detail_copies,(unsigned long long)cap_detail_copy_bytes,
+        (unsigned long long)cap_detail_copy_us,cap_detail_publishes,
+        (unsigned long long)cap_detail_publish_us);
+    cap_detail_samples=cap_detail_compares=cap_detail_copies=cap_detail_publishes=0;
+    cap_detail_compare_us=cap_detail_copy_us=cap_detail_publish_us=0;
+    cap_detail_compare_bytes=cap_detail_copy_bytes=0;
 #if XV_VERTEX_CAPTURE_NOTIFY
     /* Worker notification bookkeeping follows completed publication. Even a
      * joined report must exchange these atomically; boundary jobs can land in

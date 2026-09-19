@@ -330,3 +330,25 @@ verified SHA256
 Private receipts are under `query-overlap-hardware/`. Campaign startup was
 requested; gameplay, overlap activity and performance require the subsequent
 capture and are not established by the installation receipt.
+
+### perf.32 gameplay results
+
+Ordinary campaign gameplay now confirms private-query execution on both worker
+lanes. The settled checkpoint's final six 60-frame windows average 78.30 ms
+(about 12.77 FPS), versus perf.31's 78.20 ms at the same logged camera. The latest
+query report has 2,520 private calculations, 2,417 applied results and 103
+changed-state declines. The overlap is active; no whole-frame gain is established.
+
+The completed corridor capture averages 170.15 ms over its final 360 frames
+(about 5.88 FPS), versus perf.31's 168.97 ms. Camera and workload are not identical:
+perf.32 ends at (-27.01, 37.22, 0.62), direction (-0.96, -0.25, -0.15), with
+27.53 selected model calls/frame versus 23.36 previously. This is not evidence
+of a causal regression or improvement. Both lanes again report private work
+(2,088 and 1,961 calculations); publication retains changed-state fallback.
+Evidence: `query-overlap-hardware/checkpoint-settled.log` and
+`query-overlap-hardware/corridor/settled.log` plus generated summary JSONs.
+
+The next investigation separates vertex-capture costs. Existing capture timing
+excludes explicit pressure-driven joins and includes source comparison, staging,
+job publication and inline-ready publication. Its elapsed duration can include
+preemption; it cannot be described as pure memcpy or CPU execution cost.

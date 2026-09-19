@@ -201,6 +201,28 @@ static void wait_parked(int *flag)
     while(!__atomic_load_n(flag,__ATOMIC_ACQUIRE) && sceKernelGetProcessTimeWide()<end)usleep(100);
     assert(__atomic_load_n(flag,__ATOMIC_ACQUIRE));
 }
+static void detail_sampling(void)
+{
+    unsigned char guest[256];
+    setenv("XV_VERTEX_CAPTURE_DETAIL","1",1);
+    for(unsigned i=0;i<65;i++) {
+        output o={0};memset(guest,i,sizeof guest);
+        assert(capture(0,guest,sizeof guest,16,NULL,0,&o));join(0);
+        assert(o.ok && o.callbacks==1 && !memcmp(o.result[0],guest,sizeof guest));
+    }
+    assert(cap_detail_samples==2 && cap_detail_copies==2 && cap_detail_publishes==2);
+    assert(cap_detail_copy_bytes==2*sizeof guest);
+    xv_vertex_capture_report(65);
+    assert(!cap_detail_samples && !cap_detail_copies && !cap_detail_publishes &&
+        !cap_detail_compares && !cap_detail_compare_bytes && !cap_detail_copy_bytes &&
+        !cap_detail_compare_us && !cap_detail_copy_us && !cap_detail_publish_us);
+    cleanup();
+    setenv("XV_VERTEX_CAPTURE_DETAIL","0",1);
+    output o={0};assert(capture(0,guest,sizeof guest,16,NULL,0,&o));join(0);
+    assert(o.ok && !cap_detail_samples);cleanup();
+    unsetenv("XV_VERTEX_CAPTURE_DETAIL");
+    puts("PASS: sampled capture detail counts 1/64 submissions, resets reports, startup disable; outputs unchanged");
+}
 static void private_inputs(void)
 {
     unsigned char *guest=mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0);assert(guest!=MAP_FAILED);
@@ -939,6 +961,7 @@ int main(void)
     setenv("XV_VERTEX_PERSISTENT","0",1);
     setenv("XV_VERTEX_CAPTURE_RETAIN","1",1); /* Exercise optional lifetime path. */
     xv_vertex_worker_override(0);xv_vertex_upload_override(1);
+    detail_sampling();
 #if XV_VERTEX_CAPTURE_NOTIFY
     notification_races();
 #endif
