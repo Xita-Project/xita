@@ -56,7 +56,6 @@ static int clear_surface(h2_kelvin_clear *state, uint32_t flags)
 {
     if (flags & ~0xF3u) return 0;
     if (!flags) return 1;
-    if ((flags & 3) && h2_menu_gxm_zeta_cleared) h2_menu_gxm_zeta_cleared(state->clear_zstencil);
     /* First supported shape: origin-zero pitch surfaces without multisampling.
      * Restrict the format to ARGB8/Z24S8; other layouts need their own consumer. */
     if ((state->format & 0xFFFFu) != 0x128u ||
@@ -87,6 +86,10 @@ static int clear_surface(h2_kelvin_clear *state, uint32_t flags)
         (uint64_t)targets[1].physical < (uint64_t)targets[0].physical + targets[0].bytes) return 0;
     if (count == 2 && (uintptr_t)targets[0].data < (uintptr_t)targets[1].data + targets[1].bytes &&
         (uintptr_t)targets[1].data < (uintptr_t)targets[0].data + targets[0].bytes) return 0;
+    /* The GXM hook resets depth, not stencil. Notify only after every target
+     * and rectangle check succeeds: a rejected or stencil-only clear must not
+     * discard the GPU's depth history. Bit 0 selects the Z24 lanes. */
+    if ((flags & 1) && h2_menu_gxm_zeta_cleared) h2_menu_gxm_zeta_cleared(state->clear_zstencil);
     for (unsigned i = 0; i < count; ++i) {
         target *t = &targets[i];
         for (uint32_t y = ymin; y <= ymax; ++y) {

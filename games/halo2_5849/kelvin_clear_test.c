@@ -4,6 +4,13 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Model the GPU depth-clear notification as observable state. Rejected and
+ * stencil-only commands must leave it alone, just as they preserve depth RAM. */
+static unsigned depth_clear_notifications;
+static uint32_t last_depth_clear;
+void h2_menu_gxm_zeta_cleared(uint32_t value)
+{ ++depth_clear_notifications; last_depth_clear = value; }
+
 typedef struct fixture {
     uint32_t instance[0x5000 / 4], push[64], fail_map;
     unsigned push_count;
@@ -65,9 +72,11 @@ static void state_packets(fixture *f)
 }
 static void rejected(fixture *f, uint16_t method, uint32_t value)
 {
+    unsigned before_notifications = depth_clear_notifications;
     h2_kelvin_clear before = f->consumer; uint8_t ram[sizeof f->ram]; memcpy(ram, f->ram, sizeof ram);
     assert(!consume(f, 0, method, value, 0));
     assert(memcmp(&before, &f->consumer, sizeof before) == 0 && memcmp(ram, f->ram, sizeof ram) == 0);
+    assert(depth_clear_notifications == before_notifications);
 }
 int main(void)
 {
@@ -77,6 +86,7 @@ int main(void)
     assert(h2_push_init(&parser, 0x20000, sizeof f.push));
     assert(h2_push_run(&parser, 0x20000 + f.push_count * 4, 64, push_read, consume, &f, &fault) == H2_PUSH_COMPLETE);
     assert(f.consumer.completed_clears == 1 && f.consumer.written_pixels == 8);
+    assert(depth_clear_notifications == 1 && last_depth_clear == 0x87654321);
     for (unsigned a = 0; a < sizeof f.ram; a += 4) {
         uint32_t expected = 0xA5A5A5A5;
         for (unsigned y = 1; y <= 2; ++y) for (unsigned x = 1; x <= 2; ++x) {
@@ -89,8 +99,13 @@ int main(void)
     assert(consume(&f, 0, 0x1D90, 0xEEDDCCBB, 0));
     assert(consume(&f, 0, 0x1D8C, 0x11223344, 0));
     assert(consume(&f, 0, 0x1D94, 0x52, 0));
+    assert(depth_clear_notifications == 1); /* stencil plus partial color, no depth */
     assert(pixel(&f, 0x11C) == 0x12DD56BB && pixel(&f, 0x31C) == 0x87654344);
     assert(consume(&f, 0, 0x1D94, 1, 0));
+    assert(depth_clear_notifications == 2 && last_depth_clear == 0x11223344);
+    assert(consume(&f, 0, 0x1D94, 0, 0));
+    assert(consume(&f, 0, 0x1D94, 2, 0));
+    assert(depth_clear_notifications == 2); /* no-op and stencil-only */
     assert(pixel(&f, 0x31C) == 0x11223344 && pixel(&f, 0x11C) == 0x12DD56BB);
     /* Validate both targets before writing either, even when the second mapping fails. */
     f.fail_map = 0x300; rejected(&f, 0x1D94, 0xF3); f.fail_map = 0;
