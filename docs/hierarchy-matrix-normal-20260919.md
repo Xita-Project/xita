@@ -41,3 +41,36 @@ The host regression exercises tiny normals in each of the 13 parent-matrix
 words and checks five excluded values per word. Both default Off and selected
 On pass 222 full hierarchy comparisons per enabled/unset/disabled/math-disabled
 mode; selected On also passes ASan/UBSan.
+
+## Physical Vita result
+
+`0.2.0-perf.10 / ae13c9d+` was installed and boot-confirmed in slot 0. Runtime
+SHA256 is `4a4185483c78f092d70a59b7f32922a5391af9d6d7ad4edade9a27422d881ff3`.
+The package preserves the preceding assets, update helpers and Halo 2 bundle;
+only `game-a.self` and `boot-game.txt` differ from perf9. Incremental default,
+explicit Off, On and On-noop configuration checks passed, as did rejection of
+invalid values and the missing prerequisite.
+
+The same Normal Pillar of Autumn save loaded with the marines visible, native
+resolution and graphics settings unchanged. In the last twelve complete
+60-frame ordinary-play windows, all completed-prefix matrix declines disappeared
+(29,778 in perf9, zero in perf10). Median natively prepared nodes rose from
+14,817.5 to 17,748 per window, about 19.8%, while pose declines remained small
+(632 total). There were no constant or produced-output declines. These are work
+counters, not a 19.8% frame-rate gain.
+
+Median total frame time was 78.2 ms / 12.8 FPS versus perf9's 78.4 ms / 12.8 FPS.
+That difference is too small to call a clear overall gain. Tick-owner elapsed
+fell from 36.444 to 35.746 ms, while render-owner elapsed rose from 40.089 to
+40.505 ms; both include nested work/waits and scene variation. Draw count stayed
+at a median 152/frame. Capture was 5.978 ms, streams 6.824 ms and join 0.042 ms.
+The option remains in the cumulative research build because it measurably reduces
+fallback work without an observed frame-time regression in this capture.
+
+With this gate no longer rejecting the bulk of candidate work, further hierarchy
+numeric relaxation is not the next priority for this checkpoint. Remaining tick
+and render work needs a larger reduction. Evidence is under
+`ce-perf10/gameplay/` (`checkpoint.log`, `.png`, `checkpoint-summary.json`,
+`checkpoint-hierarchy.json`) in the private unified-games workspace. No diagnostic
+benchmark was used, and this short checkpoint capture does not establish long
+session or combat stability.
