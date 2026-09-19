@@ -350,6 +350,23 @@ $(BUILD)/capture-notify.config: force-capture-notify-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/capture-notify.config
+# Opt-in sampled timing; ordinary builds keep it disabled.
+XV_VERTEX_CAPTURE_DETAIL_DEFAULT ?= 0
+ifneq ($(words $(XV_VERTEX_CAPTURE_DETAIL_DEFAULT)),1)
+$(error XV_VERTEX_CAPTURE_DETAIL_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_CAPTURE_DETAIL_DEFAULT),0 1),$(XV_VERTEX_CAPTURE_DETAIL_DEFAULT))
+$(error XV_VERTEX_CAPTURE_DETAIL_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_vertex_capture.o: CFLAGS += -DXV_VERTEX_CAPTURE_DETAIL_DEFAULT=$(XV_VERTEX_CAPTURE_DETAIL_DEFAULT)
+.PHONY: force-capture-detail-config
+force-capture-detail-config:
+$(BUILD)/capture-detail.config: force-capture-detail-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_VERTEX_CAPTURE_DETAIL_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/capture-detail.config
 XV_VERTEX_CAPTURE_REUSE ?= 0
 ifneq ($(words $(XV_VERTEX_CAPTURE_REUSE)),1)
 $(error XV_VERTEX_CAPTURE_REUSE must be 0 or 1)

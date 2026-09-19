@@ -95,6 +95,12 @@ static int cap_stopping,cap_unavailable,cap_enabled=-1;
 static unsigned cap_jobs_total,cap_drains,cap_pressure,cap_failures,cap_max_pending;
 static unsigned cap_masks_copied,cap_masks_omitted;
 static uint64_t cap_bytes,cap_capture_us,cap_worker_us,cap_join_us;
+#ifndef XV_VERTEX_CAPTURE_DETAIL_DEFAULT
+#define XV_VERTEX_CAPTURE_DETAIL_DEFAULT 0
+#endif
+#if XV_VERTEX_CAPTURE_DETAIL_DEFAULT != 0 && XV_VERTEX_CAPTURE_DETAIL_DEFAULT != 1
+#error XV_VERTEX_CAPTURE_DETAIL_DEFAULT must be 0 or 1
+#endif
 /* Owner-only, opt-in samples. Elapsed time includes scheduling/preemption;
  * these nested scopes are not additional frame time or CPU-cycle counters. */
 static int cap_detail_enabled=-1;
@@ -409,7 +415,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     if(!cap_start())goto fallback;
     cap_collect();
     if(cap_detail_enabled<0)
-        cap_detail_enabled=xv_quality_int("XV_VERTEX_CAPTURE_DETAIL",0,0,1);
+        cap_detail_enabled=xv_quality_int("XV_VERTEX_CAPTURE_DETAIL",XV_VERTEX_CAPTURE_DETAIL_DEFAULT,0,1);
     int sample=cap_detail_enabled && !(cap_detail_serial++&63u);
     if(sample)cap_detail_samples++;
     unsigned submitted=__atomic_load_n(&cap_submitted,__ATOMIC_RELAXED);

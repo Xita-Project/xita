@@ -31,3 +31,7 @@ the Vita SDK compiler also compiled the production file with compact capture,
 exact reuse, completed-result bypass and notification suppression enabled under
 `-Wall -Wextra -Werror`. Private receipts are
 `/tmp/xita-capture-detail-asan.log` and `/tmp/xita-capture-detail.o`.
+
+Diagnostic builds may set `XV_VERTEX_CAPTURE_DETAIL_DEFAULT=1`. The Makefile
+validates 0/1 and tracks this capture-object-only define with a config stamp.
+An explicit startup environment value still overrides the build default.
