@@ -311,3 +311,22 @@ the tested ownership/synchronization mechanics, not real performance or broad
 gameplay safety. Perf.31 on the Vita still holds the guard during calculation.
 Private receipts: `cluster-overlap-host/`, `cluster-overlap-pairs/`,
 `cluster-overlap-tsan/` and `cluster-overlap-compile/`.
+
+### perf.32 physical overlap candidate
+
+The hardware build adds explicit `XV_QUERY_OVERLAP_DEFAULT=1`; ordinary defaults
+remain zero and the Makefile rejects enabling it without the typed adapter.
+Only the object-pool object consumes this default, with its own config stamp.
+Per-lane `[typed-query-overlap]` counters report private calculations, while
+existing changed-state declines expose publication conflicts. An environment
+value can still override the build default.
+
+Build and package checks pass. Only the runtime and boot digest differ from
+perf.31; launcher/assets/update contract are identical. The remote updater
+verified SHA256
+`c230e29a504a52749d25ba3a954df146283817d601aba064a3616afbfcaa7618`
+(32,198,522 bytes) and booted slot 0. Status confirms
+`0.2.0-perf.32 / ded5df8`; perf.31 remains in slot 1 for rollback.
+Private receipts are under `query-overlap-hardware/`. Campaign startup was
+requested; gameplay, overlap activity and performance require the subsequent
+capture and are not established by the installation receipt.
