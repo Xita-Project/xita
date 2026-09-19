@@ -48,6 +48,35 @@ inputs; resulting GPU bytes must match the independent snapshot, while a
 sparse raw mask must remain privately owned. Existing mutation, sparse-to-full,
 slot-wrap, capacity, failure and delayed-copy lifetime cases still pass.
 
-The candidate adds to the cumulative stack. Native build and ordinary hardware
-verification are required before claiming deployment or benefit. Private
-captures and test outputs are in `2026-09-18-unified-games/ce-perf4/`.
+## Hardware follow-up
+
+`0.2.0-perf.5 / be69685+` is boot-confirmed in physical slot 1, runtime
+SHA-256 `8431cfb669e360a9e36d798539456d5696e7013f8836572393cc2c6b23b831cf`.
+The package changes only `game-a.self` and its boot record versus perf.4;
+assets, shaders and update contract match. The incremental build changes the
+capture object and four objects embedding the updated version. Earlier
+optimizations remain enabled with the same graphics configuration.
+
+The ordinary campaign menus restore New001's existing checkpoint. Marines
+are visible moving through the scene. The last twelve full-tick, active
+60-frame windows at the same rounded camera endpoints give:
+
+| Observation | perf.4 | perf.5 |
+| --- | ---: | ---: |
+| Median displayed FPS | 12.8 | 12.8 |
+| Median total frame time | 78.45 ms | 78.30 ms |
+| Median draws/frame | 150 | 148.5 |
+| Median stream preparation | 6.887 ms | 6.720 ms |
+| Median recording-side capture | 6.054 ms | 5.919 ms |
+
+Active NPCs vary, and these are not deterministic replays. The small timing
+differences do **not** establish an FPS improvement. The new counters do confirm
+3,990–4,510 KiB of unused mask writes avoided per 60 frames; no sparse masks
+were needed in these selected windows. The change stays in the cumulative
+build because it removes unused work and passes the ownership checks.
+
+Reaching 20 FPS still requires a larger reduction: owner tick and render
+intervals remain roughly 36 and 40 ms. Prioritize shared object/collision work
+and model preparation within `5B760`, preserving the existing native helpers
+and worker protections. Private captures, package receipts and the checkpoint
+summary are in `2026-09-18-unified-games/ce-perf4/` and `ce-perf5/`.
