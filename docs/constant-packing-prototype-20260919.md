@@ -139,3 +139,29 @@ Whole-frame time is 78.767 ms versus 78.283 ms previously, approximately 12.7 FP
 in either capture. This does **not** establish a whole-frame speedup or a
 reliable regression; it proves the native path is exercised in gameplay.
 The candidate remains stacked while the higher-model-count corridor is tested.
+
+## Crowded-corridor result and next target
+
+The six settled 60-frame perf.30 corridor windows average 170.867 ms/frame
+(5.85 FPS), model-packet elapsed 26.147 ms, timed draw subset 12.188 ms and
+outside-draw remainder 13.959 ms. Packing accepts 58.531 batches and 576.008
+prefix matrices per frame, with no mapping/alias/watch rejection. The scene
+image shows multiple rendered marines/enemies, world geometry and the weapon;
+no crash occurred during this capture.
+
+Camera `(-27.52,37.09,0.62)`, forward `(-0.93,-0.34,-0.15)` differs from perf.29.
+Selected model calls are 26.067/frame versus 30.969, so the prior 175.05 ms frame
+time is not a matched performance baseline. No causal FPS gain is established.
+Retain the bounded candidate while addressing larger costs; further packing-only
+changes are unlikely to close the whole-frame gap by themselves.
+
+The final 60-frame window has object-worker batch elapsed 2,572,768 us
+(42.88 ms/frame), with both lane work sums overlapping. Owner tick elapsed is
+3,888,283 us (64.80 ms/frame), rendering phase 6,161,964 us (102.70 ms/frame).
+These are inclusive elapsed times, not disjoint CPU costs. Next: examine worker
+shared-state transactions and waits before integrating immutable snapshots.
+Exact perf.30 ELF address lookup maps some contended return sites to
+`nq_run_impl`, `f_00090157`, `f_0005A860`, and `f_0005A7B0`; absent debug line
+information, these are function-level leads rather than proven source lines.
+Private capture: `../constant-pack-hardware/corridor/settled.log` and
+`summary.json`. The Vita remains on perf.30 in the corridor, controls neutral.
