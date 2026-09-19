@@ -122,3 +122,46 @@ larger callbacks are still included in the live 22.2 ms scope but replaced by
 stand-ins in this experiment. The experiment cannot rank their actual cost.
 Private results are `local-register-budget3.json` and
 `local-register-budget20000.json`, with matching fixture variants and logs.
+
+## Perf.26 crowded capture and shared early model route
+
+The final six 60-frame windows in `../ce-perf26/current-corridor/settled.log`
+have a fixed logged camera `(-27.41,35.96,0.62)`, forward
+`(-0.91,0.39,-0.11)`, and loaded/active gameplay. They average 159.47 ms/frame
+and 465.5 draws/frame. This is not the perf.25 camera, so it is not a matched
+speed comparison. Palette-prefix reuse is 54.22% of eligible batches and
+51.85% of prefix matrices; these counters do not establish time saved.
+
+The early `5B760` interval averages 24.96 ms, while the later `5B710` interval
+averages 21.58 ms. The latter contains 5.16 ms inside the two instrumented draw
+APIs and 16.42 ms outside them. There is no equivalent draw subtraction yet
+for `5B760`; its whole 24.96 ms must not be called preparation self-time.
+
+Inspection of the exact retained perf.26 generated bodies establishes:
+
+- `5A7B0`, called by `5B760`, builds the list rooted at `2D1FDC` using two
+  `52D50` calls and records its count at `2D1FD8`. It also updates shared state.
+- `5B760` calls `D8C40`, then iterates that list through `5B4A0` using a
+  stack-owned descriptor. Its outer loop and list backedge retain preemption.
+- `5B710` later reads the same list root/count and also calls `5B4A0`, using
+  its incoming descriptor. Same list storage does not prove unchanged contents
+  or equivalent descriptor/render state between passes.
+- `D8C40` additionally reaches `A26B0` directly, alongside `D6F70` and
+  `5AE10`. Thus model-packet preparation is shared across more than just the
+  later list-processing interval.
+
+This changes the next measurement boundary: separate `5A7B0` list generation,
+`D8C40`, and the early `5B4A0` loop before replacing another outer wrapper.
+Then attribute shared `5B4A0 -> 5B190 -> A26B0` preparation and material
+publication. Do not skip either pass or cache whole stack packets. The two
+outer intervals total 46.54 ms, but that is an inclusive target envelope, not
+proven duplicated work or available savings. Existing whole-register and small
+prefix negative results above still apply.
+
+The full captured scene buckets average 43.99/45.53/0.08/2.39/3.75/0.005 ms.
+The broader render phase averages 99.27 ms and game-update phase 57.52 ms.
+Nested scope times and asynchronous worker sums must not be added to these.
+The raw CPU-observed GPU completion latency is not GPU service time.
+
+Private extracted bodies and paired analysis JSON remain outside the repository.
+This audit makes no runtime change; the installed build remains perf.26.
