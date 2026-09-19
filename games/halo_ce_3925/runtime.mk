@@ -78,3 +78,8 @@ endif
 ifeq ($(XV_OWNER_PHASE),1)
 XITA_GAME_SRCS += recomp/kernel/xk_owner_phase.c
 endif
+
+# Primary model fog arithmetic reuse; owner observer supplies live ownership.
+ifeq ($(XV_MODEL_FOG),1)
+XITA_GAME_SRCS += recomp/kernel/xk_model_fog.c
+endif

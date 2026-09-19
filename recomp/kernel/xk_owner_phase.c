@@ -301,6 +301,9 @@ void xv_owner_phase_report(unsigned frames)
     memset(scene.entries,0,sizeof scene.entries);memset(scene.elapsed,0,sizeof scene.elapsed);
     scene.completed=0;scene.recursive=scene.invalid=scene.abandoned=scene.stale=0;
 #endif
+#if defined(XV_MODEL_FOG) && XV_MODEL_FOG
+    { extern void xk_model_fog_report(unsigned); xk_model_fog_report(frames); }
+#endif
     XK_LOG("[owner-phase-status] clocks %llu warmup %u foreign %u invalid %u rebinds %u abandoned %u stale %u; native owner/context only, clock calls exclude report formatting\n",
         (unsigned long long)clock_reads,__atomic_exchange_n(&warmup,0,__ATOMIC_RELAXED),
         __atomic_exchange_n(&foreign,0,__ATOMIC_RELAXED),__atomic_exchange_n(&invalid,0,__ATOMIC_RELAXED),rebinds,abandoned,stale);
