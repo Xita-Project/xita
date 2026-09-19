@@ -246,3 +246,39 @@ Private build, package/deployment receipts and screenshots are under
 sequence completed and a loading screen is visible. Active gameplay, actual
 query admission/reuse and performance have not yet been established by this
 installation receipt; record them separately after loading completes.
+
+### perf.31 normal-play hardware results
+
+Campaign loaded the retained checkpoint and completed the existing movement /
+combat input sequence to the crowded corridor. Captures show world geometry,
+NPCs, weapon and HUD. No crash was observed during these captures; this is not a
+complete combat/rendering regression pass.
+
+Six 60-frame windows per view:
+
+| View | perf.30 frame ms | perf.31 frame ms | perf.31 model packets / draw subset ms |
+| --- | ---: | ---: | ---: |
+| Checkpoint | 78.77 | 78.20 | 9.112 / 4.273 |
+| Crowded corridor | 170.87 | 168.97 | 23.857 / 11.009 |
+
+Checkpoint camera matches (-28.66,32.52,.62), direction (.56,.82,-.15), but model
+calls differ (7.50 versus 7.70/frame). Corridor camera differs slightly:
+perf.30 (-27.52,37.09,.62), direction (-.93,-.34,-.15); perf.31
+(-27.56,37.07,.62), direction (-.89,-.43,-.15). Model calls decrease from
+26.07 to 23.36/frame. Neither comparison establishes a causal performance gain.
+The heavy scene remains about 5.9 FPS, far below the 20 FPS objective.
+
+The latest checkpoint query report contains 2,380 applied queries, 123 reused
+batches and no rebuilds or declines. The latest corridor report contains 4,341
+applied queries, 1,728 bypasses, one changed-state decline, 116 reused batches,
+seven successful builds taking 3,380 us total and seven owner-service
+invalidations (last 0x1D665C). Source changes and build failures are zero. These
+are report-window totals, not per-frame values or independent whole-frame costs.
+This confirms runtime activation and successful cache reuse on hardware.
+
+Private captures: `typed-query-hardware/checkpoint-settled.log`, its summary,
+`campaign-first.png`, and `corridor/settled.log`, summary and screenshot.
+The next concurrency boundary to investigate is only private query calculation
+between guarded capture and guarded validation/publication. The original list
+allocation tail and outer actor/collision transactions must remain protected.
+Current perf.31 still retains the guard throughout; it does not test overlap.
