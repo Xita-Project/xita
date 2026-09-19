@@ -1476,7 +1476,11 @@ static int initialize(void)
     math_fast_path=!fast||atoi(fast)!=0;
 #ifdef XV_WORKER_QUERY
     const char *query=getenv("XV_WORKER_QUERY");
-    query_enabled=query&&!strcmp(query,"1");
+#ifndef XV_WORKER_QUERY_DEFAULT
+#define XV_WORKER_QUERY_DEFAULT 0
+#endif
+    query_enabled=query?!strcmp(query,"1"):XV_WORKER_QUERY_DEFAULT;
+    XK_LOG("[typed-query-config] enabled %u; guarded experimental adapter\n",query_enabled);
 #endif
     const char *profile=getenv("XV_OBJECT_LOCK_PROFILE");
     /* Dedicated experimental builds collect contention by default. Set zero

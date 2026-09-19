@@ -1823,11 +1823,20 @@ $(RECOMP_BUILD)/object-pass-timing.config: force-object-pass-timing-config
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-pass-timing.config
 
 # Guard-retained C query adapter. Ordinary builds contain no adapter/state.
+XV_WORKER_QUERY_DEFAULT ?= 0
+ifneq ($(filter $(XV_WORKER_QUERY_DEFAULT),0 1),$(XV_WORKER_QUERY_DEFAULT))
+$(error XV_WORKER_QUERY_DEFAULT must be 0 or 1)
+endif
+ifeq ($(XV_WORKER_QUERY_DEFAULT),1)
+ifneq ($(XV_WORKER_QUERY),1)
+$(error XV_WORKER_QUERY_DEFAULT=1 requires XV_WORKER_QUERY=1)
+endif
+endif
 ifeq ($(XV_WORKER_QUERY),1)
 ifneq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
 $(error XV_WORKER_QUERY requires XV_EXPERIMENTAL_OBJECT_JOBS=1)
 endif
-RECOMP_CFLAGS += -DXV_WORKER_QUERY
+RECOMP_CFLAGS += -DXV_WORKER_QUERY -DXV_WORKER_QUERY_DEFAULT=$(XV_WORKER_QUERY_DEFAULT)
 endif
 ifeq ($(XV_TYPED_CLUSTER_QUERY),1)
 ifneq ($(XV_WORKER_QUERY),1)
@@ -1839,7 +1848,7 @@ endif
 force-worker-query-config:
 $(RECOMP_BUILD)/worker-query.config: force-worker-query-config
 	@mkdir -p $(RECOMP_BUILD)
-	@printf '%s\n' '$(if $(filter 1,$(XV_WORKER_QUERY)),1,0)/$(if $(filter 1,$(XV_TYPED_CLUSTER_QUERY)),1,0)' > $@.tmp
+	@printf '%s\n' '$(if $(filter 1,$(XV_WORKER_QUERY)),1,0)/$(if $(filter 1,$(XV_TYPED_CLUSTER_QUERY)),1,0)/$(XV_WORKER_QUERY_DEFAULT)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(XITA_GUEST_OBJS) $(XITA_GAME_OBJS) $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/worker-query.config
