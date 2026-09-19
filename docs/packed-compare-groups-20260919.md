@@ -50,3 +50,14 @@ The guarded ordinary campaign/checkpoint/corridor sequence is running under
 `packed-compare-hardware/run-gameplay.py`. No hardware timing improvement is
 established by the installation. Build, package and deployment receipts remain
 in that private directory.
+
+## First settled checkpoint
+
+The ordinary saved campaign checkpoint completed at the expected camera. Final
+six 60-frame windows average 78.25 ms (about 12.78 FPS), compared with perf.33's
+78.10 ms. Owner capture is 5.096 versus 5.274 ms/frame and worker preparation
+4.739 versus 4.778 ms/frame, with slightly less captured data/model work. No
+whole-frame improvement is established. The packed-comparison candidate remains
+under investigation while its heavy-corridor capture completes. Private evidence:
+`packed-compare-hardware/checkpoint-settled.log`, generated summaries and
+`checkpoint-comparison.json`.
