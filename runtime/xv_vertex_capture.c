@@ -49,6 +49,7 @@ static unsigned cap_used,cap_retired;
 static unsigned cap_submitted,cap_completed; /* atomic publication counters */
 static int cap_stopping,cap_unavailable,cap_enabled=-1;
 static unsigned cap_jobs_total,cap_drains,cap_pressure,cap_failures,cap_max_pending;
+static unsigned cap_masks_copied,cap_masks_omitted;
 static uint64_t cap_bytes,cap_capture_us,cap_worker_us,cap_join_us;
 #if XV_VERTEX_CAPTURE_PACKED
 static int cap_compact_enabled=-1;
@@ -295,7 +296,16 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         s->source=cap_arena+cap_used;s->result=NULL;
         cap_used+=(captured+15u)&~15u;
         written+=(captured+15u)&~15u;
-        if(s->refs) { j->refs[i]=*s->refs;s->refs=&j->refs[i]; }
+        /* upload_snapshot only consults coverage for sparse raw inputs. Dense
+         * streams take full-span validation, and packed streams discard refs.
+         * Do not copy their 1 KiB masks into every queued job. Never retain the
+         * producer's scratch pointer, even when the worker will ignore it. */
+        int need_refs=xv_vertex_refs_sparse(s->refs,s->bytes,s->stride);
+#if XV_PACKED_VERTEX_LAYOUT
+        if(s->packed)need_refs=0;
+#endif
+        if(need_refs) { j->refs[i]=*s->refs;s->refs=&j->refs[i];cap_masks_copied++; }
+        else { cap_masks_omitted+=s->refs!=NULL;s->refs=NULL; }
     }
     j->batch.ok=0;cap_jobs_total++;cap_bytes+=written;
     unsigned pending=submitted+1-cap_retired;if(pending>cap_max_pending)cap_max_pending=pending;
@@ -331,6 +341,11 @@ void xv_vertex_capture_report(unsigned frames)
         cap_drains,cap_pressure,cap_max_pending,cap_failures);
     cap_jobs_total=cap_drains=cap_pressure=cap_max_pending=cap_failures=0;
     cap_bytes=cap_capture_us=cap_worker_us=cap_join_us=0;
+    if(cap_masks_copied || cap_masks_omitted)
+        xv_logf("[vertex-capture-masks] %u frames: %u sparse masks copied / %u unused masks omitted; %llu KiB metadata writes avoided\n",
+            frames,cap_masks_copied,cap_masks_omitted,
+            (unsigned long long)cap_masks_omitted*sizeof(xv_vertex_refs)>>10);
+    cap_masks_copied=cap_masks_omitted=0;
 #if XV_VERTEX_CAPTURE_REUSE
     if(cap_reuse_checks)xv_logf("[vertex-capture-reuse] %u frames: %u checks %u exact hits; %llu KiB staging writes avoided; %u worker preparations reused\n",
         frames,cap_reuse_checks,cap_reuse_hits,(unsigned long long)(cap_reuse_bytes>>10),cap_reuse_prepared);

@@ -183,6 +183,42 @@ static void sparse_and_packed(void)
 #endif
     cleanup();
 }
+static void unused_mask_lifetime(void)
+{
+    unsigned char guest[32768],expected[32768];
+    xv_vertex_refs *refs=mmap(NULL,4096,PROT_READ|PROT_WRITE,
+        MAP_ANONYMOUS|MAP_PRIVATE,-1,0);assert(refs!=MAP_FAILED);
+    /* Dense coverage, short input, and mismatched-span metadata all require
+     * full-span validation. Packed inputs also ignore a sparse mask. The
+     * producer unmaps its mask and overwrites its vertices before execution. */
+    for(unsigned mode=0;mode<5;mode++) {
+#if !XV_PACKED_VERTEX_LAYOUT
+        if(mode==4)continue;
+#endif
+        assert(!mprotect(refs,4096,PROT_READ|PROT_WRITE));
+        xv_vertex_refs_clear(refs);
+        if(mode==0)for(unsigned i=0;i<1024;i+=8)xv_vertex_refs_add(refs,i);
+        xv_vertex_refs_add(refs,0);xv_vertex_refs_add(refs,mode==1?127:1023);
+        unsigned bytes=mode==1?4096:mode==2?16384:32768;
+        unsigned packed=mode==4?1:0;
+        /* mode 3 is truly sparse: it must still receive a private mask. */
+        for(unsigned i=0;i<sizeof guest;i++)guest[i]=(unsigned char)(i*13+mode);
+        memcpy(expected,guest,bytes);output a={0};
+        __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+        assert(capture(0,guest,bytes,32,refs,packed,&a));wait_parked(&parked_capture);
+        const xv_vertex_refs *owned=cap_jobs[0].batch.streams[0].refs;
+        if(mode==3)assert(owned && owned!=refs && !memcmp(owned,refs,sizeof *refs));
+        else assert(!owned);
+        assert(!mprotect(refs,4096,PROT_NONE));memset(guest,0xef,bytes);
+        __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
+        assert(a.ok && a.callbacks==1);
+        if(packed)for(unsigned i=0;i<bytes/32;i++)
+            assert(!memcmp(a.result[0]+i*16,expected+i*32,16));
+        else assert(!memcmp(a.result[0],expected,bytes));
+        cleanup();
+    }
+    assert(!munmap(refs,4096));
+}
 static void pressure_and_wrap(void)
 {
     unsigned char guest[8192];output outputs[300]={0};
@@ -420,7 +456,7 @@ int main(void)
 {
     owner=pthread_self();setenv("XV_VERTEX_CAPTURE","1",1);
     xv_vertex_worker_override(0);xv_vertex_upload_override(1);
-    private_inputs();sparse_and_packed();pressure_and_wrap();failure_cases();
+    private_inputs();sparse_and_packed();unused_mask_lifetime();pressure_and_wrap();failure_cases();
     queue_capacity();partial_failure_and_fallback();gpu_copy_lifetime();
 #if XV_VERTEX_CAPTURE_PACKED
     compact_versions();compact_pressure_and_retirement();
