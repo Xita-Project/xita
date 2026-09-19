@@ -1858,6 +1858,26 @@ $(addprefix $(RECOMP_BUILD)/kernel/,xk_cluster_runtime.o xk_cluster_snapshot.o x
 recomp/kernel/xk_worker_query_generated.inc: tools/gen_worker_query.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_worker_query.py --xbe $(XBE) --manifest $(XBE_JSON)
 
+# Private numerical overlap only; default off even in typed-query builds.
+XV_QUERY_OVERLAP_DEFAULT ?= 0
+ifneq ($(filter $(XV_QUERY_OVERLAP_DEFAULT),0 1),$(XV_QUERY_OVERLAP_DEFAULT))
+$(error XV_QUERY_OVERLAP_DEFAULT must be 0 or 1)
+endif
+ifeq ($(XV_QUERY_OVERLAP_DEFAULT),1)
+ifneq ($(XV_TYPED_CLUSTER_QUERY),1)
+$(error XV_QUERY_OVERLAP_DEFAULT=1 requires XV_TYPED_CLUSTER_QUERY=1)
+endif
+endif
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_QUERY_OVERLAP_DEFAULT=$(XV_QUERY_OVERLAP_DEFAULT)
+.PHONY: force-query-overlap-config
+force-query-overlap-config:
+$(RECOMP_BUILD)/query-overlap.config: force-query-overlap-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_QUERY_OVERLAP_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/query-overlap.config
+
 # Count-only diagnostic build; disabled unless explicitly requested. All guard
 # users share the same scope instrumentation, including unchanged idle guards.
 ifeq ($(XV_LIGHT_QUERY_CENSUS),1)

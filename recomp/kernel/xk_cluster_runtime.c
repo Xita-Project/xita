@@ -22,7 +22,7 @@ typedef struct __attribute__((aligned(64))) {
     float center[3];
     Span maps[T_MAPS];unsigned maps_count;
     fenv_t entry_fp,result_fp;
-    uint64_t attempts,applied,bypassed,declines[T_REASONS],dirty_bytes,backedges;
+    uint64_t attempts,applied,bypassed,declines[T_REASONS],dirty_bytes,backedges,overlaps;
 } Lane;
 static Lane lanes[T_LANES];
 /* Exact construction read-set: guards against in-place geometry writes even
@@ -413,6 +413,7 @@ int xv_worker_query(xctx *c,int guard)
     reason=T_NUMERIC;
     const XvClusterGeometry *geometry=xv_cluster_snapshot_geometry(batch.snapshot);
     int suspended=xv_object_query_suspend(c,guard);
+    if(suspended)v->overlaps++;
 #ifdef XV_QUERY_OVERLAP_TEST
     if(suspended){extern void xv_worker_query_test_private(xctx *);xv_worker_query_test_private(c);}
 #endif
@@ -452,6 +453,8 @@ void xv_worker_query_report(void)
     source_checks=source_compared=source_changes=0;
     for(unsigned i=0;i<T_LANES;i++){
         Lane *v=&lanes[i];
+        XK_LOG("[typed-query-overlap] lane %u private-calculations %llu\n",i,(unsigned long long)v->overlaps);
+        v->overlaps=0;
         XK_LOG("[typed-query] lane %u attempts %llu applied %llu bypassed %llu dirty-bytes %llu backedges %llu declines layout/input/numeric/changed %llu/%llu/%llu/%llu\n",i,
             (unsigned long long)v->attempts,(unsigned long long)v->applied,(unsigned long long)v->bypassed,(unsigned long long)v->dirty_bytes,(unsigned long long)v->backedges,
             (unsigned long long)v->declines[T_LAYOUT],(unsigned long long)v->declines[T_INPUT],
