@@ -5,6 +5,10 @@ recent campaign builds remain near 12.8 FPS. A different potential optimization
 is to avoid repeating a complete world sphere query when its meaningful inputs
 and world geometry are unchanged. This is not implemented yet.
 
+The follow-up [reuse contract and memory recorder](query-reuse-contract-20260919.md)
+documents the implementation and ARM checks completed after this census. It
+remains separate from the live query path; no hardware query is skipped yet.
+
 The selected `172C95 -> 171F94 -> 88110` boundary returns AL and four ordered
 lists of IDs. Static packet construction and dynamic-object collection follow
 that query and must still run. The query consumes collision geometry, a sphere
