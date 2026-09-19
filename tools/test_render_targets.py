@@ -12,7 +12,12 @@ root = pathlib.Path(__file__).resolve().parents[1]
 src = (root / 'runtime/xv_d3d.c').read_text()
 start = src.index('static cmdlist_t *cur_list(void);')
 end = src.index('static int draw_scan_override', start)
-implementation = src[start:end]
+# The vertex-capture completion callback now sits between the RTT helpers and
+# UI recorder. It is not part of target lifetime/replay; do not pull it into
+# this harness's deliberately smaller command model.
+capture = src.index('static void captured_draw_complete(', start)
+ui = src.index('int xv_d3d_record_ui(', capture)
+implementation = src[start:capture] + src[ui:end]
 start = src.index('int xv_d3d_has_render_targets(')
 end = src.index('/* The clear quad', start)
 implementation += src[start:end]
