@@ -23,7 +23,7 @@ void xv_object_math_report_check(void) { ++checks; }
 uint32_t xk_mem_arena_size(void) { return arena_bytes; }
 uint32_t xv_query_reuse_test_fpscr_get(void) { return fake_fp; }
 void xv_query_reuse_test_fpscr_set(uint32_t value) { fake_fp = value; }
-void xk_os_log(const char *format, ...) { assert(strstr(format, "[query-reuse]")); ++logs; }
+void xk_os_log(const char *format, ...) { assert((strstr(format, "[query-reuse]") || strstr(format, "[query-reuse-detail]"))); ++logs; }
 static uint32_t get32(unsigned off) { uint32_t v; memcpy(&v, g_xram + off, 4); return v; }
 static void put32(unsigned off, uint32_t v) { memcpy(g_xram + off, &v, 4); }
 static void execute(XvQueryCpu *cpu, XvQueryMemory *mem, xctx *c)
@@ -191,21 +191,80 @@ static void throttle_eviction_epoch(void)
     assert(captured == 1 && counts.promotable == 2);
     entry.r[7] = 1; next_epochs(31); call(); assert(captured == 1);
     xv_query_reuse_epoch(); call(); assert(captured == 2);
-    reset(); for (unsigned i = 0; i < 17; ++i) { entry.r[7] = i; call(); }
-    assert(counts.evictions == 1 && entries[0].key.r[7] == 16);
+    reset(); for (unsigned i = 0; i < REUSE_ENTRIES + 1; ++i) { entry.r[7] = i; call(); }
+    assert(counts.evictions == 1 && entries[0].key.r[7] == REUSE_ENTRIES);
     reset(); promote(); epoch = UINT_MAX; xv_query_reuse_epoch();
     assert(epoch == 1 && !entries[0].used && !attempted); call(); assert(!counts.hits);
     xv_query_reuse_report(0); assert(!logs);
-    xv_query_reuse_report(60); assert(logs == 1 && !counts.calls && entries[0].used);
+    xv_query_reuse_report(60); assert(logs == 2 && !counts.calls && entries[0].used);
     assert(checks > 0);
+}
+static ReuseEntry *history_for(unsigned key)
+{
+    for (unsigned i = 0; i < REUSE_ENTRIES; ++i)
+        if (entries[i].used && entries[i].key.r[7] == key) return &entries[i];
+    return NULL;
+}
+static void check_record_owners(void)
+{
+    unsigned n = 0;
+    for (unsigned i = 0; i < REUSE_ENTRIES; ++i) {
+        ReuseEntry *e = &entries[i];
+        if (e->used && e->finished) {
+            assert(e->record < REUSE_RECORDS);
+            assert(records[e->record].owner == i + 1);
+            ++n;
+        }
+    }
+    unsigned owners = 0;
+    for (unsigned i = 0; i < REUSE_RECORDS; ++i) if (records[i].owner) {
+        ReuseEntry *e = &entries[records[i].owner - 1];
+        assert(e->used && e->finished && e->record == i);
+        ++owners;
+    }
+    assert(n == owners);
+}
+static void retained_records(void)
+{
+    reset(); promote();
+    for (unsigned i = 1; i <= REUSE_ENTRIES * 3; ++i) {
+        entry.r[7] = i; call();
+    }
+    assert(history_for(0) && history_for(0)->finished);
+    entry.r[7] = 0; call(); assert(counts.hits == 1 && !counts.record_evictions);
+    check_record_owners();
+
+    reset(); promote();
+    for (unsigned key = 1; key < REUSE_RECORDS; ++key) {
+        next_epochs(REUSE_CAPTURE_INTERVAL); entry.r[7] = key;
+        for (unsigned j = 0; j < REUSE_OBSERVATIONS; ++j) { call(); xv_query_reuse_epoch(); }
+        assert(history_for(key)->finished); check_record_owners();
+    }
+    /* Refresh record zero; record one is now the least recently used. */
+    entry.r[7] = 0; call(); assert(counts.hits == 1);
+    next_epochs(REUSE_CAPTURE_INTERVAL); entry.r[7] = REUSE_RECORDS;
+    for (unsigned j = 0; j < REUSE_OBSERVATIONS; ++j) { call(); xv_query_reuse_epoch(); }
+    assert(counts.record_evictions == 1 && history_for(0)->finished);
+    assert(!history_for(1)->finished && history_for(1)->cooling);
+    assert(history_for(REUSE_RECORDS)->finished); check_record_owners();
+    entry.r[7] = 1; unsigned before = originals; call(); assert(originals == before + 1);
+    entry.r[7] = 0; call(); assert(counts.hits == 2);
+    /* Invalidating a retained transaction releases its slot immediately. */
+    put32(0x2000, get32(0x2000) ^ 1); call();
+    assert(counts.memory_reject == 1 && !history_for(0)->finished);
+    check_record_owners();
+    reset(); mode = OVERFLOW;
+    for (unsigned j = 0; j < REUSE_OBSERVATIONS; ++j) { call(); xv_query_reuse_epoch(); }
+    assert(counts.abandoned == 1 && (counts.memory_reasons & XV_QM_OVERFLOW));
+    check_record_owners();
 }
 int main(void)
 {
     arena_a = malloc(0x41000); arena_b = malloc(0x41000);
     pages_a = malloc((1u << 20) * 4); pages_b = malloc((1u << 20) * 4);
     assert(arena_a && arena_b && pages_a && pages_b);
-    promotion_replay(); rejection_cooldown(); admission_roots_keys(); capture_failures(); throttle_eviction_epoch();
+    promotion_replay(); rejection_cooldown(); admission_roots_keys(); capture_failures(); throttle_eviction_epoch(); retained_records();
     free(arena_a); free(arena_b); free(pages_a); free(pages_b);
-    printf("PASS query reuse: promotion/replay, atomic reject, cooldown/throttle, root/config/alias guards, callback reentry, abandonment, epoch wrap, joined report (%zu-byte entries)\n", sizeof entries);
+    printf("PASS query reuse: promotion/replay, atomic reject, cooldown/throttle, root/config/alias guards, callback reentry, abandonment, epoch wrap, joined report (%zu-byte entries)\n", sizeof entries + sizeof records);
     return 0;
 }

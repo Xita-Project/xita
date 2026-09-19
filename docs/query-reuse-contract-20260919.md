@@ -1,5 +1,9 @@
 # Collision query reuse: memory recorder and ARM qualification
 
+Historical qualification note. Subsequent work added [selective hardware
+reuse](query-selective-reuse-20260919.md) and [separate record retention](query-retention-20260919.md).
+The status below describes the original recorder-only stage.
+
 This is preparation for query reuse, **not an enabled game optimization**.
 The Vita remains on `0.2.0-perf.19`; there is no new hardware FPS result.
 Halo2 remains parked while Halo CE campaign performance is the priority.

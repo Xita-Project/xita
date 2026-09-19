@@ -1,5 +1,8 @@
 # Selective world-query reuse
 
+Follow-up: [perf.21 retention changes](query-retention-20260919.md) separate
+candidate history from completed transactions after the trial documented here.
+
 `XV_QUERY_REUSE=1` connects the qualified CPU/memory recorder to the selected
 `172C95 -> 171F94` world query. It is an experimental, default-off build option.
 The dynamic-object continuation and ordinary query implementation remain intact.

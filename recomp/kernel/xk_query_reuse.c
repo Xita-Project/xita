@@ -13,7 +13,8 @@ extern const unsigned xv_collision_traversal_mode;
 extern void query_fused_172c95_171f94(xctx *);
 extern void query_captured_172c95_171f94(XvQueryCpu *, XvQueryMemory *, xctx *);
 
-#define REUSE_ENTRIES 16u
+#define REUSE_ENTRIES 64u
+#define REUSE_RECORDS 16u
 #define REUSE_OBSERVATIONS 8u
 #define REUSE_COST 32u
 #define REUSE_CAPTURE_INTERVAL 32u
@@ -27,22 +28,28 @@ typedef struct {
     ReuseKey key;
     unsigned used, finished, observations, last_observation, cost;
     unsigned cooling, cooldown_epoch;
+    unsigned record; /* UINT_MAX when this history has no captured transaction. */
+} ReuseEntry;
+typedef struct {
+    unsigned owner; /* History index plus one; zero is available. */
     XvQueryCpu cpu;
     XvQueryMemory memory;
-} ReuseEntry;
+} ReuseRecord;
 typedef struct {
     uintptr_t arena, pages, image;
     uint32_t size;
 } ReuseRoots;
 #define REUSE_COUNTS(F) F(calls) F(lookup) F(cheap) F(repeats) F(promotable) \
     F(captures) F(finished) F(abandoned) F(cpu_reject) F(memory_reject) F(hits) \
-    F(evictions) F(root_resets) F(busy) F(saved_consumed) F(short_budget) F(declines)
+    F(evictions) F(root_resets) F(busy) F(saved_consumed) F(short_budget) F(declines) \
+    F(record_evictions) F(observed_ready) F(cost_ready) F(cpu_reasons) F(memory_reasons)
 typedef struct {
 #define FIELD(n) uint32_t n;
     REUSE_COUNTS(FIELD)
 #undef FIELD
 } ReuseCounts;
 static ReuseEntry entries[REUSE_ENTRIES];
+static ReuseRecord records[REUSE_RECORDS];
 static ReuseRoots roots;
 static ReuseCounts counts;
 static unsigned next_entry, epoch = 1, attempted, last_attempt;
@@ -96,8 +103,9 @@ static int roots_equal(const ReuseRoots *a, const ReuseRoots *b)
 }
 static void reset_entries(void)
 {
-    /* No bulk clear of the ~350KiB recorder storage. */
+    /* Clear ownership only, not the large transaction payloads. */
     for (unsigned i = 0; i < REUSE_ENTRIES; ++i) entries[i].used = entries[i].finished = 0;
+    for (unsigned i = 0; i < REUSE_RECORDS; ++i) records[i].owner = 0;
     next_entry = attempted = last_attempt = 0;
 }
 static XvQueryMemoryView view_get(const ReuseRoots *r)
@@ -133,10 +141,46 @@ static int key_get(ReuseKey *key, const xctx *c, uint32_t fp, const XvQueryMemor
     return key_copy(view, c->r[4], key->stack, sizeof key->stack) &&
            key_copy(view, key->stack[1], key->center, sizeof key->center);
 }
+static void release_record(ReuseEntry *e)
+{
+    if (e->record < REUSE_RECORDS && records[e->record].owner == (unsigned)(e - entries) + 1u)
+        records[e->record].owner = 0;
+    e->record = UINT_MAX;
+}
 static void cool(ReuseEntry *e)
 {
+    release_record(e);
     e->finished = 0; e->observations = e->cost = 0;
     e->cooling = 1; e->cooldown_epoch = epoch; e->last_observation = epoch;
+}
+/* Ordinary misses can replace only lightweight history. A completed record's
+ * history remains pinned until full dependency rejection or record pressure. */
+static ReuseEntry *new_history(void)
+{
+    for (unsigned n = 0; n < REUSE_ENTRIES; ++n) {
+        ReuseEntry *e = &entries[next_entry];
+        next_entry = (next_entry + 1u) % REUSE_ENTRIES;
+        if (!e->used || !e->finished) return e;
+    }
+    return NULL; /* Fail closed if an ownership invariant is ever violated. */
+}
+static ReuseRecord *new_record(ReuseEntry *e)
+{
+    unsigned selected = 0, oldest = 0;
+    for (unsigned i = 0; i < REUSE_RECORDS; ++i) {
+        if (!records[i].owner) { selected = i; break; }
+        ReuseEntry *owner = &entries[records[i].owner - 1u];
+        unsigned age = epoch - owner->last_observation;
+        if (i == 0 || age > oldest) { selected = i; oldest = age; }
+    }
+    ReuseRecord *r = &records[selected];
+    if (r->owner) {
+        cool(&entries[r->owner - 1u]);
+        COUNT(record_evictions);
+    }
+    r->owner = (unsigned)(e - entries) + 1u;
+    e->record = selected;
+    return r;
 }
 static void release_busy(void)
 { __atomic_store_n(&busy, 0u, __ATOMIC_RELEASE); }
@@ -191,43 +235,49 @@ void xv_query_reuse_run(xctx *c)
             e = &entries[i]; COUNT(repeats); break;
         }
     if (!e) {
-        e = &entries[next_entry]; next_entry = (next_entry + 1u) % REUSE_ENTRIES;
+        e = new_history();
+        if (!e) { COUNT(cheap); original(c, NULL); return; }
         if (e->used) COUNT(evictions);
         e->key = key; e->used = 1; e->finished = e->cooling = e->cost = 0;
+        e->record = UINT_MAX;
         e->observations = 1; e->last_observation = epoch;
     } else if (e->last_observation != epoch) {
         e->last_observation = epoch;
         if (e->observations < REUSE_OBSERVATIONS) ++e->observations;
     }
     if (e->finished) {
+        ReuseRecord *r = &records[e->record];
         /* A temporarily short budget should not discard an otherwise valid
          * record. Original budget/callback behavior is retained. */
-        if ((uint32_t)c->preempt <= e->cpu.consumed) {
+        if ((uint32_t)c->preempt <= r->cpu.consumed) {
             COUNT(short_budget); original(c, NULL); return;
         }
-        if (!xv_query_cpu_validate(&e->cpu, c, fp)) {
+        if (!xv_query_cpu_validate(&r->cpu, c, fp)) {
             COUNT(cpu_reject); cool(e); original(c, e); return;
         }
-        if (!xv_query_memory_validate(&e->memory, &view)) {
+        if (!xv_query_memory_validate(&r->memory, &view)) {
             COUNT(memory_reject); cool(e); original(c, e); return;
         }
         /* Both validates precede any replay writes. Under the existing actor
          * guard there is no callback or root mutation between these calls.
          * Replay functions repeat validation but cannot newly fail here. */
-        xv_query_memory_replay(&e->memory, &view);
-        xv_query_cpu_replay(&e->cpu, c, &fp);
+        xv_query_memory_replay(&r->memory, &view);
+        xv_query_cpu_replay(&r->cpu, c, &fp);
         fp_set(fp); COUNT(hits);
-        __atomic_fetch_add(&counts.saved_consumed, e->cpu.consumed, __ATOMIC_RELAXED);
+        __atomic_fetch_add(&counts.saved_consumed, r->cpu.consumed, __ATOMIC_RELAXED);
         release_busy(); return;
     }
     if (e->cooling && epoch - e->cooldown_epoch >= REUSE_COOLDOWN) e->cooling = 0;
+    if (!e->cooling && e->observations >= REUSE_OBSERVATIONS) COUNT(observed_ready);
+    if (!e->cooling && e->cost >= REUSE_COST) COUNT(cost_ready);
     if (!e->cooling && e->observations >= REUSE_OBSERVATIONS && e->cost >= REUSE_COST) {
         COUNT(promotable);
         if (!attempted || epoch - last_attempt >= REUSE_CAPTURE_INTERVAL) {
             attempted = 1; last_attempt = epoch; COUNT(captures);
-            int cpu_ok = xv_query_cpu_begin(&e->cpu, c, fp);
-            int memory_ok = xv_query_memory_begin(&e->memory, &view);
-            if (cpu_ok && memory_ok) query_captured_172c95_171f94(&e->cpu, &e->memory, c);
+            ReuseRecord *r = new_record(e);
+            int cpu_ok = xv_query_cpu_begin(&r->cpu, c, fp);
+            int memory_ok = xv_query_memory_begin(&r->memory, &view);
+            if (cpu_ok && memory_ok) query_captured_172c95_171f94(&r->cpu, &r->memory, c);
             else query_fused_172c95_171f94(c);
             uint32_t exit_fp = fp_get();
             if (!resume(c)) { COUNT(abandoned); return; }
@@ -238,11 +288,15 @@ void xv_query_reuse_run(xctx *c)
             }
             if (cpu_ok && memory_ok && !xv_watch_n && !xv_trace_funcs &&
                 !memcmp(config, key.config, sizeof config)) {
-                cpu_ok = xv_query_cpu_finish(&e->cpu, c, exit_fp);
-                memory_ok = xv_query_memory_finish(&e->memory, &view);
+                cpu_ok = xv_query_cpu_finish(&r->cpu, c, exit_fp);
+                memory_ok = xv_query_memory_finish(&r->memory, &view);
             } else cpu_ok = memory_ok = 0;
             if (cpu_ok && memory_ok) { e->finished = 1; COUNT(finished); }
-            else { cool(e); COUNT(abandoned); }
+            else {
+                __atomic_fetch_or(&counts.cpu_reasons, r->cpu.reason, __ATOMIC_RELAXED);
+                __atomic_fetch_or(&counts.memory_reasons, r->memory.reason, __ATOMIC_RELAXED);
+                cool(e); COUNT(abandoned);
+            }
             release_busy(); return;
         }
     }
@@ -265,6 +319,11 @@ void xv_query_reuse_report(unsigned frames)
 #define TAKE(name) n.name = __atomic_exchange_n(&counts.name, 0u, __ATOMIC_RELAXED);
     REUSE_COUNTS(TAKE)
 #undef TAKE
+    unsigned retained = 0;
+    for (unsigned i = 0; i < REUSE_RECORDS; ++i) retained += records[i].owner != 0;
+    XK_LOG("[query-reuse-detail] history/record capacity %u/%u retained %u; observed/cost ready %u/%u record-evict %u; CPU/memory reason-mask %02x/%02x\n",
+        REUSE_ENTRIES, REUSE_RECORDS, retained, n.observed_ready, n.cost_ready,
+        n.record_evictions, n.cpu_reasons, n.memory_reasons);
     /* 32-bit per-window counts; no timing claims. */
     XK_LOG("[query-reuse] %u frames calls/lookup/cheap/repeat/promotable %u/%u/%u/%u/%u; capture/finished/abandoned %u/%u/%u; CPU/memory reject %u/%u hits %u saved-budget %u; evict/root/busy/short/decline %u/%u/%u/%u/%u\n",
         frames, n.calls, n.lookup, n.cheap, n.repeats, n.promotable,
