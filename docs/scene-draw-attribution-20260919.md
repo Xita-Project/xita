@@ -53,3 +53,13 @@ attempt used the wrong build revision label and correctly rejected unrelated
 version-object changes; the successful `qualification-2/receipt.json` uses the
 matching retained-build revision. Perf.25 builds successfully; its package changes
 only `game-a.self` and `boot-game.txt` from perf.24.
+
+Perf.25 (`bfec7b2+`) is now updater-verified on hardware in slot 1, with
+perf.24 retained in slot 0. Runtime SHA-256:
+`37c2c5205f9790ba470123e497c2a6cd5ffd7e620c3589af0b7143c06c4dbe4c`
+(32,163,638 bytes). VPK SHA-256:
+`0af0422ea6c05b9d85bfe5dad8c5d141ab5419f7e109ed061c9d5a45f3a7a6ac`.
+The updater confirms both verification and boot. Campaign navigation uses the
+saved timed sequence; deployment alone is not gameplay/performance validation.
+The earlier statement about perf.24 being the last verified installed build
+applies to the pre-deployment qualification stage.
