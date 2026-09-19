@@ -1636,6 +1636,10 @@ void xv_object_jobs_finish(xctx *c)
         pass_timing_finish(c);
 #endif
         owner=NULL;passes++;
+#if XV_QUERY_REUSE
+        extern void xv_query_reuse_epoch(void);
+        xv_query_reuse_epoch();
+#endif
 #if XV_QUERY_REPEAT_CENSUS
         extern void xv_query_repeat_probe_epoch(void);
         xv_query_repeat_probe_epoch();
@@ -1655,6 +1659,10 @@ void xv_object_jobs_report(unsigned frames)
     /* Called with the renderer's frame window, not every 60 simulation passes.
      * Reporting must never dispatch callbacks or reset live worker counters. */
     if(initialized!=1||owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))return;
+#if XV_QUERY_REUSE
+    extern void xv_query_reuse_report(unsigned);
+    xv_query_reuse_report(frames);
+#endif
 #if XV_QUERY_REPEAT_CENSUS
     extern void xv_query_repeat_probe_report(unsigned);
     xv_query_repeat_probe_report(frames);

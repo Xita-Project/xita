@@ -258,6 +258,12 @@ def cpu_variant(outputs):
 def generate(recomp_dir, cpu_state=False):
     root = Path(recomp_dir)
     contents = {name: (root / name).read_text() for name in PINS}
+    return generate_contents(contents, cpu_state)
+
+
+def generate_contents(contents, cpu_state=False):
+    """Compose with the game generator before any generated file is published."""
+    contents = {name: contents[name] for name in PINS}
     actual = {name: hashlib.sha256(text.encode()).hexdigest() for name, text in contents.items()}
     if actual != PINS:
         raise ValueError('capture requires the reviewed source inventory: ' +

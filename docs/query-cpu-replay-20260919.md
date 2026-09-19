@@ -96,5 +96,6 @@ python3 tools/query_memory_capture.py --cpu-state \
 Private compiled-query evidence is in `../collision-query-cpu/qualification/`:
 build commands/fixture, retained ELF, `check.py`, `check_variants.py`,
 `check_warm.py`, result files and SHA256 receipt. Generated game bodies remain
-outside the repository. Production wiring, lifetime admission and sustained
-campaign validation are still pending.
+outside the repository. The subsequent [selective adapter](query-selective-reuse-20260919.md)
+adds production wiring and lifetime admission behind a default-off build option;
+sustained campaign validation remains separate from these replay proofs.

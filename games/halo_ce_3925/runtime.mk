@@ -93,3 +93,9 @@ endif
 ifeq ($(XV_QUERY_REPEAT_CENSUS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_query_repeat.c recomp/kernel/xk_query_repeat_probe.c
 endif
+
+ifeq ($(XV_QUERY_REUSE),1)
+XITA_GAME_SRCS += recomp/query_capture.c recomp/kernel/xk_query_reuse.c \
+                 recomp/kernel/xk_query_memory.c recomp/kernel/xk_query_capture.c \
+                 recomp/kernel/xk_query_cpu.c
+endif
