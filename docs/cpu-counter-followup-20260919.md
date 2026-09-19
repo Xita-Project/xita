@@ -4,8 +4,7 @@ Elapsed vertex-capture samples cannot distinguish cache misses, instruction cost
 and preemption. The installed VitaSDK's `psp2/perf.h` and public
 [VitaSDK reference](https://docs.vitasdk.org/perf_8h.html) expose thread-ID-based
 PMON reset/select/start/stop/read APIs, with events for data-cache accesses/misses,
-data-cache stalls and cycles. `libScePerf_stub.a` exists in the local SDK. No
-current runtime/tool implementation uses these functions.
+data-cache stalls and cycles. `libScePerf_stub.a` exists in the local SDK. Before this opt-in probe, no runtime/tool implementation used these functions.
 
 This establishes an API surface, not hardware availability or validated counter
 semantics on the user's firmware. Do not claim measured cache pressure yet.
@@ -24,9 +23,10 @@ Before adding frame instrumentation:
    reserved for that diagnostic. Retain elapsed timing and matched gameplay
    captures; events alone are not FPS, GPU utilization or exclusive stall time.
 
-The current hardware sequence stays unchanged. Complete perf.35 and the planned
-same-camera native/360p/native comparison first; those results determine whether
-CPU cache work is the next priority. No PMU code is installed or exercised yet.
+The perf.35 native/360p/native comparison is complete. GPU completion latency
+fell at 360p, but total frame time did not improve in the crowded campaign view.
+This supports investigating resolution-independent work; it does not establish
+cache pressure. See `packed-compare-groups-20260919.md`.
 
 ## Opt-in response probe implemented
 
@@ -55,3 +55,32 @@ The same fixture also passes startup lifecycle cases: requested dedicated-thread
 priority/affinity/stack, bounded join, creation failure, start failure cleanup,
 API failure followed by joined deletion, and no deletion after a failed wait.
 These tests mock thread services and do not prove firmware scheduling behavior.
+
+## Perf.36 deployment did not confirm boot
+
+The opt-in diagnostic package (source `eaf3173`) built and passed package checks,
+but the updater terminated with `No confirmed boot within the timeout`.
+Subsequent status requests returned `ConnectionRefusedError`. This is not a
+successful installation receipt and provides no PMU response measurements.
+The last confirmed runtime remains perf.35 (`fbcb29d`); the currently running
+process and on-device slot metadata have not been recovered yet.
+
+The probe is called after graphics initialization but before `xv_remote_start`
+and dashboard confirmation. A loader/import failure or a failure within that
+startup path can therefore prevent remote access; no cause has been established.
+Do not redeploy this diagnostic until device logs are recovered. Moving the call
+later would not address a loader failure and is not an evidence-based fix yet.
+
+Recovery inspection confirms that `xv_update_boot` marks a pending candidate
+ATTEMPTED before selecting it. A later launch skips an unconfirmed ATTEMPTED
+candidate and selects the verified CONFIRMED slot. Both `tools/test_update.py`
+and its `MOUNT_TEST=1` variant pass against the current production updater,
+including failed-boot fallback. These synthetic storage tests establish control
+flow, not the actual device's storage state. Close/reopen the Xita bubble once,
+then inspect status and startup/launcher logs before any further deployment.
+
+Preserved local artifact: `../cpu-counter-hardware/build/xita.vpk`.
+Runtime SHA-256:
+`6b20f65d5db31b53e00a9e825b21c8b697c17c7bf8f5bf33ea2ac9acc117d2e9`.
+The package changed only `game-a.self` and `boot-game.txt`; launcher and assets
+were unchanged. Deployment output is in `../cpu-counter-hardware/deploy.log`.
