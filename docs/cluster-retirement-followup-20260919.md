@@ -221,3 +221,28 @@ invalidation). The latter verify reuse versus new allocations, guest memory and
 FPSCR preservation. All 48 owned-map comparisons also exercise a no-allocation
 batch reuse before querying. Receipts: `cluster-cache-arm/`, `cluster-cache-host/`,
 `cluster-cache-owned/`. No hardware installation or FPS result yet.
+
+### First physical candidate: perf.31
+
+Built from the retained perf.30 stage with `XV_WORKER_QUERY=1`,
+`XV_TYPED_CLUSTER_QUERY=1` and the explicit experimental
+`XV_WORKER_QUERY_DEFAULT=1`. Ordinary builds still default this path off;
+an explicit runtime environment value overrides the build default. The config
+stamp includes the default so changing it rebuilds affected objects.
+Existing native matrix packing and earlier cumulative settings are retained.
+
+The isolated stage inserts the query call after generated local declarations
+and before the original `56670` entry, retaining the original `566DE` tail and
+shared guard. Checked map/BSP retirement hooks precede original retirement
+instructions. The Vita build completed successfully. Package comparison verifies
+only `game-a.self` and `boot-game.txt` changed; the asset/update contract matches.
+
+The authenticated updater verified and booted slot 1. Remote status and dashboard
+capture confirm `0.2.0-perf.31 / a1198f4`; perf.30 remains in slot 0. Runtime is
+32,197,634 bytes, SHA256
+`cd5cba3709e47f382f193c86e74cea0a3a94f497dc5e5b03c7a1872edf43026c`.
+Private build, package/deployment receipts and screenshots are under
+`typed-query-hardware/` beside the source checkout. The campaign navigation
+sequence completed and a loading screen is visible. Active gameplay, actual
+query admission/reuse and performance have not yet been established by this
+installation receipt; record them separately after loading completes.
