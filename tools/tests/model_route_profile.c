@@ -2,6 +2,9 @@
 #define main main_partition_fixture
 #include "scene_partition.c"
 #undef main
+#if XV_SCENE_BUCKET1_DETAIL
+uint64_t xv_scene_draw_completed_us;
+#endif
 static void open_model(uint64_t *scene_scope,uint64_t *model_scope)
 {
     xv_scene_partition_begin(scene_scope,&first.ctx);
@@ -44,9 +47,20 @@ int main(int argc,char **argv)
     xv_scene_model_child_begin(&child,&first.ctx,1);assert(child);
     uint64_t ignored=0;r=reads;
     xv_scene_model_child_begin(&ignored,&first.ctx,2);assert(!ignored && reads==r);
-    clock_value+=10;xv_owner_phase_report(60);
+    clock_value+=10;
+#if XV_SCENE_BUCKET1_DETAIL
+    xv_scene_draw_completed_us+=4;
+#endif
+    xv_owner_phase_report(60);
     assert(strstr(output,"elapsed-us 5/10/0/0 calls 1/0/0 child-open 1"));clear_log();
-    clock_value+=7;xv_scene_model_child_end(&child);
+    clock_value+=7;
+#if XV_SCENE_BUCKET1_DETAIL
+    xv_scene_draw_completed_us+=3;
+#endif
+    xv_scene_model_child_end(&child);
+#if XV_SCENE_BUCKET1_DETAIL
+    assert(model_detail.child_draw[1]==3 && !model_detail.draw_invalid);
+#endif
     assert(model_detail.child_elapsed[1]==7 && !model_detail.child);
     for(unsigned k=2;k<4;k++) {
         xv_scene_model_child_begin(&child,&first.ctx,k);clock_value+=k;
@@ -57,6 +71,14 @@ int main(int argc,char **argv)
     assert(sum==model_detail.elapsed[2]);
     r=reads;xv_scene_model_child_begin(&child,&first.ctx,1);assert(!child && reads==r);
     xv_scene_model_end(&m);xv_scene_partition_end(&s);
+#if XV_SCENE_BUCKET1_DETAIL
+    xv_owner_phase_report(60);clear_log();open_model(&s,&m);
+    xv_scene_model_step(&m,&first.ctx,1);xv_scene_model_step(&m,&first.ctx,2);
+    xv_scene_model_child_begin(&child,&first.ctx,2);
+    clock_value+=10;xv_scene_draw_completed_us--;
+    xv_scene_model_child_end(&child);assert(model_detail.draw_invalid==1);
+    xv_scene_model_end(&m);xv_scene_partition_end(&s);
+#endif
     assert(!memcmp(&before,&first.ctx,sizeof before));
     puts("PASS model timer boundaries, splits, invalid clocks, owner rebind, worker rejection");
     return 0;

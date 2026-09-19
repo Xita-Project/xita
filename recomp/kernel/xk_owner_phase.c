@@ -77,7 +77,7 @@ static struct {
 static struct { uint64_t elapsed[6], entries[6], completed; unsigned bucket; } detail;
 /* Primary 5B760 only, nested in bucket0/detail3. Shared timestamps avoid
  * counting the same elapsed interval twice when reports split a live scope. */
-static struct { uint64_t token, elapsed[4], completed; unsigned bucket, invalid, child; uint64_t child_elapsed[4], child_calls[4]; } model_detail;
+static struct { uint64_t token, elapsed[4], completed; unsigned bucket, invalid, child; uint64_t child_elapsed[4], child_calls[4], child_draw[4]; unsigned draw_invalid; } model_detail;
 
 #endif
 #if XV_SCENE_BUCKET1_DETAIL
@@ -101,6 +101,13 @@ static void scene_account(uint64_t end)
            draw_end-draw_detail1.start>end-scene.start)draw_detail1.invalid++;
         else draw_detail1.elapsed[detail1.bucket]+=draw_end-draw_detail1.start;
     }
+#if XV_SCENE_BUCKET0_DETAIL
+    if(model_detail.token && model_detail.bucket==2) {
+        if(end<scene.start || draw_end<draw_detail1.start || draw_end-draw_detail1.start>end-scene.start)
+            model_detail.draw_invalid++;
+        else model_detail.child_draw[model_detail.child]+=draw_end-draw_detail1.start;
+    }
+#endif
     draw_detail1.start=draw_end;
 #endif
     if(end<scene.start)scene.invalid++;
@@ -417,6 +424,13 @@ void xv_owner_phase_report(unsigned frames)
         (unsigned long long)model_detail.child_elapsed[2],(unsigned long long)model_detail.child_elapsed[3],
         (unsigned long long)model_detail.child_calls[1],(unsigned long long)model_detail.child_calls[2],
         (unsigned long long)model_detail.child_calls[3],!!model_detail.token && !!model_detail.child);
+#if XV_SCENE_BUCKET1_DETAIL
+    XK_LOG("[model-route-draw] %u frames completed-draw-us %llu/%llu/%llu/%llu available %u invalid %u; subset of model children, includes recording/waits, not GPU service\n",
+        frames,(unsigned long long)model_detail.child_draw[0],(unsigned long long)model_detail.child_draw[1],
+        (unsigned long long)model_detail.child_draw[2],(unsigned long long)model_detail.child_draw[3],
+        !!&xv_scene_draw_completed_us,model_detail.draw_invalid);
+#endif
+    memset(model_detail.child_draw,0,sizeof model_detail.child_draw);model_detail.draw_invalid=0;
     memset(model_detail.child_elapsed,0,sizeof model_detail.child_elapsed);
     memset(model_detail.child_calls,0,sizeof model_detail.child_calls);
     memset(model_detail.elapsed,0,sizeof model_detail.elapsed);model_detail.completed=0;model_detail.invalid=0;

@@ -178,3 +178,42 @@ The generated hook rejects body drift and strips back to the exact original
 instructions. ASan/UBSan fixtures additionally cover child recursion rejection,
 report splits inside a child, remainder reconciliation, and out-of-loop rejection.
 No native replacement, material sorting or worker-policy change is included.
+
+## Perf.28 child result and remaining draw attribution
+
+Perf.28 (`9c296aa`) was verified and boot-confirmed on hardware. Its runtime
+hash is `ef26a769662584a15d4c3e59e17cc2fd7e5cb1943f827720aee15a81400f5cfe`.
+
+| Early loop child | Checkpoint ms/frame | Crowded corridor ms/frame |
+| --- | ---: | ---: |
+| Remainder | 0.063 | 0.245 |
+| Cache lookup/refresh | 0.167 | 1.372 |
+| Model traversal/packet descendants | 8.585 | 30.617 |
+| Object/view scalar | 0.028 | 0.104 |
+| Calls per category per frame | 7.49 | 30.91 |
+| Entire frame | 78.15 | 194.97 |
+
+Both captures contain six valid closed 60-frame windows with exact child/loop
+reconciliation. The checkpoint retains the preceding documented pose. The
+crowded pose is `(-27.36,37.08,0.62)`, forward `(-0.97,-0.19,-0.15)` throughout
+those six windows. It differs from the perf.27 crowded pose; no FPS regression
+or improvement is inferred from that comparison. The screenshot shows the
+crowded corridor and the logs confirm active gameplay. These are inclusive
+child times, not measured native arithmetic costs.
+
+The initial collector accepted a loaded log entry before campaign loading
+finished. That process was explicitly stopped; its output is not used. The
+replacement requires two advancing-log observations of the expected checkpoint
+camera, active gameplay and nonzero child timing, then settles before capture.
+Final per-window camera and timer accounting are checked separately. Corrected
+captures are `../model-child-profile/checkpoint-confirmed/` and `corridor/`.
+
+Traversal/packet descendants account for about 94.7% of the crowded early loop.
+A whole-object lookup cache is not the first target. The next refinement uses
+the existing cumulative completed draw-API counter at the already present child
+boundaries. `[model-route-draw]` reports its four corresponding subsets, counter
+availability and invalid deltas. It adds no clocks or changes to draw execution.
+Counter regression or delta greater than enclosing wall time is rejected. The
+existing completed-call attribution limitations apply; draw elapsed includes
+recording and waits and is not GPU service time. ASan/UBSan tests cover report
+splits and counter regression in addition to existing observer accounting.
