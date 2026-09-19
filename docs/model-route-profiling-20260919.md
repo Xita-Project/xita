@@ -110,3 +110,51 @@ published. AI perception, particles and script evaluation remain requested
 routing targets, not demonstrated independent callbacks. First inspect their
 writes and dependencies against the existing object-job boundary. Preserve
 render submission ownership rather than relocating it based on a core number.
+
+## Perf.27 hardware result
+
+The updater verified runtime SHA-256
+`6f6f93fcb224fdd60a7ec53d9c2d32f73a013cd125ca77a1c64d201ab3283385`
+and booted `0.2.0-perf.27 / 852c695`. Only `game-a.self` and boot metadata
+changed in the package. Compilation changed the two observer-owned objects plus
+four existing version-bearing objects. No scheduling or rendering policy changed.
+
+| Primary 5B760 interval | Initial checkpoint ms/frame | Crowded corridor ms/frame |
+| --- | ---: | ---: |
+| List generation | 0.079 | 0.297 |
+| Secondary path | 2.088 | 2.141 |
+| Per-model loop | 8.756 | 28.418 |
+| Return tail | 0.003 | 0.003 |
+| Enclosing early-model interval | 10.930 | 30.864 |
+| Entire frame | 78.217 | 179.767 |
+
+Each column uses six closed, valid 60-frame windows, with one primary call per
+frame. These are different views, not an optimization A/B. The checkpoint camera
+is `(-28.66,32.52,0.62)`, forward `(0.56,0.82,-0.15)`. The crowded camera is
+`(-28.94,37.14,0.62)`, forward `(-1.00,0.01,-0.02)`; one reported z rounds to
+0.61. The crowded screenshot shows multiple marines and enemies. The device was
+already in that position when observed; no movement sequence was sent for this
+capture. It also differs from the earlier perf.26 crowded position.
+
+The loop accounts for approximately 92% of the crowded early-model interval.
+Optimizing list construction or replacing 5B760 with a generic visibility test
+would miss that expense. The first targeted candidate boundary remains the
+shared per-model preparation under 5B4A0, not the outer loop itself.
+
+## Existing cache inside that loop
+
+Further inspection finds `5B4A0 -> 5AE10 -> 5ACB0 -> 5AA10` alongside the
+`5B190 -> A26B0` packet route. `5ACB0` checks the object's field at offset 0x120,
+validates an entry's object identity, and searches/selects an entry when needed.
+Both the reuse and selected-entry paths invoke `5AA10` with different flags.
+`5AA10` compares shared counters at 2FEB80/2FEB84 with entry fields and checks
+object flags. Its branches conditionally invoke 93420 and 92120 and update
+entry metadata. Thus calling 5AA10 does not prove a full rebuild took place.
+Exact semantic names for every entry field and helper are not established.
+
+Before adding a whole-object cache, distinguish time in this existing lookup/
+refresh path from traversal and material packet construction. Do not bypass
+cache refresh based only on unchanged world position, or assume every repeated
+child call is duplicated work. The next child attribution must preserve normal
+parallel object scheduling; historical serial phase traces are not matched
+measurements for this runtime. Original extracted functions remain private.
