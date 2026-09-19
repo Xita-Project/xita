@@ -35,3 +35,17 @@ exact reuse, completed-result bypass and notification suppression enabled under
 Diagnostic builds may set `XV_VERTEX_CAPTURE_DETAIL_DEFAULT=1`. The Makefile
 validates 0/1 and tracks this capture-object-only define with a config stamp.
 An explicit startup environment value still overrides the build default.
+
+## perf.33 hardware installation
+
+The diagnostic build retains perf.32's cumulative options and enables only the
+new sampling default. Package verification found only `game-a.self` and
+`boot-game.txt` changed; launcher, shaders and update contract are identical.
+Runtime SHA256:
+`c4a5d8bb78beb5e64a3dd2975dddc56683d6efcfaf8b244d12d7cde72c1df2e3`
+(32,199,670 bytes). The remote updater verified the digest, restarted into slot 1,
+and confirmed boot. Status reports `0.2.0-perf.33 / 2396277`; perf.32 remains in
+slot 0. A dashboard screenshot confirms Halo CE selected and Launch Game ready.
+The ordinary campaign launch sequence has been started. Installation proves
+neither gameplay success nor performance. Captures remain under the private
+`capture-detail-hardware/` directory in the unified workspace.
