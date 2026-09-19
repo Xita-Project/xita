@@ -83,3 +83,8 @@ endif
 ifeq ($(XV_MODEL_FOG),1)
 XITA_GAME_SRCS += recomp/kernel/xk_model_fog.c
 endif
+
+# Scoped common-UV computation reuse; compile default OFF.
+ifeq ($(XV_MODEL_UV),1)
+XITA_GAME_SRCS += recomp/kernel/xk_model_uv.c
+endif

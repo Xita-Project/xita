@@ -155,6 +155,7 @@ $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_d3d.o: $(BUILD)/query-prefix.config
 # Two coarse owner scopes. Default OFF, with no XV_PHASE or worker-policy change.
 XV_OWNER_PHASE ?= 0
 XV_MODEL_FOG ?= 0
+XV_MODEL_UV ?= 0
 XV_OWNER_PHASE_DEFAULT ?= 0
 XV_SCENE_PARTITION ?= 0
 XV_SCENE_BUCKET0_DETAIL ?= 0
@@ -1058,6 +1059,35 @@ $(RECOMP_BUILD)/model-fog.config: force-model-fog-config
 $(MODEL_FOG_OBJS) $(RECOMP_BUILD)/kernel/xk_model_fog.o $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(RECOMP_BUILD)/model-fog.config
 $(RECOMP_BUILD)/kernel/xk_model_fog.o: recomp/kernel/xk_model_fog.h
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/model-fog.config
+# Selected-model common-UV reuse, with compile-mode transitions scoped to its users.
+ifneq ($(words $(XV_MODEL_UV)),1)
+$(error XV_MODEL_UV must be 0 or 1)
+endif
+ifneq ($(filter $(XV_MODEL_UV),0 1),$(XV_MODEL_UV))
+$(error XV_MODEL_UV must be 0 or 1)
+endif
+MODEL_UV_SRCS := $(shell rg -l 'XV_MODEL_UV_(SCOPE|CALLS):' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+MODEL_UV_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(MODEL_UV_SRCS))
+ifeq ($(XV_MODEL_UV),1)
+ifneq ($(RECOMP):$(XV_OWNER_PHASE):$(GAME_PROFILE),1:1:halo_ce_3925)
+$(error XV_MODEL_UV requires RECOMP=1 XV_OWNER_PHASE=1 GAME_PROFILE=halo_ce_3925)
+endif
+ifneq ($(words $(shell rg -o 'XV_MODEL_UV_(SCOPE|CALLS):' $(MODEL_UV_SRCS) 2>/dev/null)),2)
+$(error XV_MODEL_UV requires the regenerated primary A26B0 and 70110 UV hooks)
+endif
+$(MODEL_UV_OBJS) $(RECOMP_BUILD)/kernel/xk_model_uv.o $(RECOMP_BUILD)/kernel/xk_owner_phase.o: RECOMP_CFLAGS += -DXV_MODEL_UV=1
+$(RECOMP_BUILD)/kernel/xk_model_uv.o: RECOMP_CFLAGS += -DXV_OWNER_PHASE
+endif
+.PHONY: force-model-uv-config
+force-model-uv-config:
+$(RECOMP_BUILD)/model-uv.config: force-model-uv-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_MODEL_UV)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(MODEL_UV_OBJS) $(RECOMP_BUILD)/kernel/xk_model_uv.o $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(RECOMP_BUILD)/model-uv.config
+$(RECOMP_BUILD)/kernel/xk_model_uv.o: recomp/kernel/xk_model_uv.h
+$(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/model-uv.config
 # Only the selected scene unit and existing observer own this opt-in flag.
 SCENE_PARTITION_SRCS := $(shell rg -l 'XV_SCENE_PARTITION_SCOPE:' $(RECOMP_DIR)/code_*.c 2>/dev/null)
 SCENE_PARTITION_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(SCENE_PARTITION_SRCS))
