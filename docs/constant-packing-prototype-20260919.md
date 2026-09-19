@@ -160,8 +160,33 @@ The final 60-frame window has object-worker batch elapsed 2,572,768 us
 3,888,283 us (64.80 ms/frame), rendering phase 6,161,964 us (102.70 ms/frame).
 These are inclusive elapsed times, not disjoint CPU costs. Next: examine worker
 shared-state transactions and waits before integrating immutable snapshots.
-Exact perf.30 ELF address lookup maps some contended return sites to
-`nq_run_impl`, `f_00090157`, `f_0005A860`, and `f_0005A7B0`; absent debug line
-information, these are function-level leads rather than proven source lines.
+The initial direct ELF lookup was invalid because runtime relocation was not
+accounted for. See the corrected relocation-aware audit below; do not use the
+earlier `nq_run_impl`/`f_00090157`/`f_0005A860`/`f_0005A7B0` attribution.
 Private capture: `../constant-pack-hardware/corridor/settled.log` and
 `summary.json`. The Vita remains on perf.30 in the corridor, controls neutral.
+
+
+## Corrected worker attribution
+
+The physical perf.30 lock PCs have a `+0x3f000` offset from link-time ELF PCs.
+All 12 distinct sites, with Thumb bits removed, match actual return addresses
+immediately following calls to `xv_object_math_lock` or its veneer after this
+correction. Raw `addr2line` lookup without relocation gave incorrect names.
+`tools/symbolize_vita_lock_sites.py` now performs this consistency check and
+rejects weak/ambiguous relocation evidence.
+
+In the six-window crowded sample, summed waits across both workers per frame
+are 16.378 ms at quaternion conversion, 7.459 ms at `4C980`, 4.138 ms at matrix
+multiplication, and 3.733 ms at `96430`. These overlap; they are **not** a savings
+forecast. A waiter identifies where a thread stopped, not which operation held
+the lock. Holder duration is the next evidence needed before splitting shared
+transactions.
+
+The existing private-quaternion bypass is compiled but disabled. Its earlier
+hardware trial shifted contention from quaternion to object basis without
+shortening total batches (see `private-quaternion-workers-20260915.md`). Do not
+repeat that switch as a new optimization or treat the wait ranking alone as
+proof that quaternion arithmetic is slow. Existing private-output release
+already moves some matrix/quaternion calculations outside the guard; remaining
+shared outputs and enclosing collision/cache transactions need ownership work.
