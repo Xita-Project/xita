@@ -48,3 +48,54 @@ host FP-state preservation. Normal and ASan/UBSan runs pass. Generation tests
 verify retained default source identity, exactly one additional world-wrapper
 call, no-op generation and exact OFF restoration. Native build/hardware results
 will be recorded after completion. No result reuse is enabled in this change.
+
+
+## Hardware observation: repeated work is present
+
+`0.2.0-probe.2 / ba6bac2+` was built, hash-verified, installed in slot0 and
+boot-confirmed. Runtime SHA256:
+`a907fbef0a47ed1652b92b723102eca14cfc695ff559a7d777b40851e882c34f`.
+The package retains1744entries; only `game-a.self` and `boot-game.txt` differ
+from perf.19. The owning object/query OFF ARM text matches perf.19 exactly;
+ON compilation/linking, no-op rebuild and malformed-option checks pass. The
+adapter has no dependency on the optional checked-address trash symbol: the
+allocation's trailing trash page is derived from the arena-size contract.
+
+The same Normal Pillar of Autumn save loaded on physical Vita at native544-line
+rendering, unchanged settings and camera (-28.66,32.52,0.62; forward
+0.56,0.82,-0.15). This was ordinary stationary gameplay with active NPCs, not
+a benchmark or emulator. The initial sample found52.66%matching inputs; the
+settled last twelve60-frame windows give:
+
+| Counter | Settled total |
+| --- | ---: |
+| World queries / valid inputs | 8,622 / 8,622 |
+| Valid32-byte filters / unavailable | 8,622 / 0 |
+| Same-pass repeats | 0 |
+| Prior-pass-only repeats, both tiers | 4,699 (54.50%) |
+| Misses, both tiers | 3,923 |
+| Completed object passes | 1,437 |
+| Populated history-slot overwrites | 8,622 |
+| Root invalidations during settled sample | 0 |
+
+The stricter filter tier equals the input tier in this sample. Approximately
+6.53queries/frame match previously observed inputs, but that is not a measured
+saving or an approved replay count. All matches cross a completed object-pass
+boundary; clearing a cache after each pass would forfeit this observed coverage.
+The64-observation history is finite and is not a prediction for a differently
+sized or keyed cache.
+
+Median FPS remained12.8 with151draws/frame (77.2ms game,0.9ms wait, independent
+component medians). The settled1,774,123-byte log contains no searched STOP,
+FATAL, GPU-crash or trap markers. This short input-only observation does not
+qualify a collision replacement or extended combat stability. Raw logs,
+screenshots and reconciled counter summaries are in `../ce-probe2/gameplay/`.
+
+This evidence promotes complete world-query result reuse to a concrete research
+candidate. Before enabling it, prove geometry contents and mappings remain
+valid, exclude output/scratch aliases, preserve the four ordered lists and live
+caller state, preserve callback/backedge budget behavior, and qualify FP exit
+effects. Original packet generation and dynamic-object collection must rerun.
+Copying an old full CPU context is not a valid substitute for those boundaries.
+The project option remains Off and the diagnostic is removed from active play
+by restoring perf.19 after this capture.
