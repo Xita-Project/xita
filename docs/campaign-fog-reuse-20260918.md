@@ -59,6 +59,13 @@ break-even is about 51% hits, before real ownership-query and firmware-copy
 costs. These numbers replace the earlier, cheaper prototype's estimates; they
 are not Vita cycles or an FPS prediction.
 
+Validation passed 289 full-context/guest-memory/FPSCR arithmetic comparisons,
+64 whole-call state-publication comparisons with the helper compiled separately,
+and six real Make/archive mode transitions. The publication fixture executes
+retained combiner and draw-state paths, but uses synthetic asset selectors and
+stops before GPU command recording. It does not establish rendered correctness
+on hardware. Both test tools are safe to import without starting their CLI.
+
 Hardware admission counts, complete-frame timing and rendering still need
 verification in the cumulative candidate. The larger concurrent target is
 [retained CPU vertex snapshots](retained-vertex-capture-20260918.md).
