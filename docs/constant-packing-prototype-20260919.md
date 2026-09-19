@@ -110,3 +110,13 @@ watch callbacks are fixture implementations, not the production memory subsystem
 Added owner-only per-report counters for accepted batches, packed prefix matrices,
 and rejection reasons. Linked CE builds opt in explicitly; the new compile flag
 is restricted to the hooked guest unit, packing helper and reporting unit.
+
+## Perf.30 package
+
+The cumulative build at `bc6f29c` completed with the native constant-packing flag.
+The linked ELF contains the helper, counters and idle-query implementation.
+Compared with perf.29, only `game-a.self` and `boot-game.txt` differ in the VPK.
+Runtime SHA-256: `0589702fb6ed83c1dddabd3585deb18655fe0dfacd48144327b7a1afd97a57ad`.
+VPK SHA-256: `5b09f4d341825f05a53cf3e99d2686ccf39fc2264461c98644b1ea53ed3695b1`.
+Package reproduction and deployment artifacts: `../constant-pack-hardware/`.
+Hardware verification is pending; no performance claim follows from compilation.

@@ -217,3 +217,18 @@ Counter regression or delta greater than enclosing wall time is rejected. The
 existing completed-call attribution limitations apply; draw elapsed includes
 recording and waits and is not GPU service time. ASan/UBSan tests cover report
 splits and counter regression in addition to existing observer accounting.
+
+## Perf.29 draw-subset capture
+
+Six closed 60-frame crowded-corridor windows (360 frames) have a stable logged
+camera `(-26.74, 37.12, 0.62)`, forward `(-0.99, -0.01, -0.15)`, and active loaded
+gameplay. Model-packet child work averages 27.266 ms, comprising 12.339 ms inside
+the selected timed draw wrappers and 14.927 ms outside them. Cache refresh is
+1.334 ms, distance work 0.107 ms and unclassified loop remainder 0.245 ms.
+There are 30.969 selected model calls/frame; total frame time averages 175.05 ms.
+
+The draw subset includes wrapper work and waits, not GPU service time alone.
+The outside-draw portion is not all matrix packing. The camera differs from
+perf.28's crowded capture, so this does not establish a before/after speedup.
+Private source capture and analysis: `../model-child-draw/corridor/settled.log`
+and `summary.json`.
