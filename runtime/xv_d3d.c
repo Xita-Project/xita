@@ -2086,7 +2086,7 @@ uint32_t xv_d3d_EndFrame(void)
 unsigned xv_d3d_record_slot(void) { return g_build_frame % XV_NUM_LISTS; }
 void xv_d3d_BeginFrame(void)
 {
-    xv_vertex_capture_drain();
+    xv_vertex_capture_begin_slot(g_build_frame % XV_NUM_LISTS);
     xv_index_cache_reset(g_index_cache);
     xv_vertex_upload_reset(g_build_frame % XV_NUM_LISTS);
     g_frame_constants[g_build_frame % XV_NUM_LISTS].ready = 0;

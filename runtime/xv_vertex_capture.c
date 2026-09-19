@@ -28,11 +28,23 @@
 #if XV_VERTEX_CAPTURE_REUSE != 0 && XV_VERTEX_CAPTURE_REUSE != 1
 #error XV_VERTEX_CAPTURE_REUSE must be 0 or 1
 #endif
+#ifndef XV_VERTEX_PERSISTENT
+#define XV_VERTEX_PERSISTENT 0
+#endif
+#if XV_VERTEX_PERSISTENT != 0 && XV_VERTEX_PERSISTENT != 1
+#error XV_VERTEX_PERSISTENT must be 0 or 1
+#endif
+#if XV_VERTEX_PERSISTENT
+#include "xv_vertex_persistent.h"
+#endif
 typedef struct {
     xv_vertex_prepare_batch batch;
     const void *identity[XV_VERTEX_PREPARE_STREAMS];
     const void **targets[XV_VERTEX_PREPARE_STREAMS];
     xv_vertex_refs refs[XV_VERTEX_PREPARE_STREAMS];
+#if XV_VERTEX_PERSISTENT
+    unsigned persistent[XV_VERTEX_PREPARE_STREAMS],persistent_copy[XV_VERTEX_PREPARE_STREAMS];
+#endif
 #if XV_VERTEX_CAPTURE_PACKED
     unsigned compact[XV_VERTEX_PREPARE_STREAMS];
 #endif
@@ -151,8 +163,16 @@ static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned slot,un
 static void cap_execute(capture_job *job)
 {
     xv_vertex_prepare_batch *b=&job->batch;b->ok=0;
+#if XV_VERTEX_PERSISTENT
+    /* Finish every promised cache upload, including jobs whose ordinary
+     * streams subsequently fail. Later FIFO hits may already refer to it. */
+    for(unsigned i=0;i<b->count;i++)if(job->persistent_copy[i])vp_upload(job->persistent[i]);
+#endif
     for(unsigned i=0;i<b->count;i++) {
         xv_vertex_prepare_stream *s=&b->streams[i];unsigned packed=0;
+#if XV_VERTEX_PERSISTENT
+        if(job->persistent[i]) { s->result=vp_result(job->persistent[i]);continue; }
+#endif
 #if XV_VERTEX_CAPTURE_REUSE
         unsigned id=job->reuse[i];
         if(id && cap_results[id-1]) {
@@ -302,6 +322,15 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         xv_vertex_prepare_stream *s=&j->batch.streams[i];
         j->identity[i]=s->source;j->targets[i]=targets[i];
         unsigned captured=s->bytes;
+#if XV_VERTEX_PERSISTENT
+        j->persistent[i]=vp_capture(batch->slot,s,&j->persistent_copy[i]);
+        if(j->persistent[i]) {
+            /* The FIFO owns an immutable cached mirror, including pending
+             * hits. The worker must never dereference this live source. */
+            s->source=NULL;s->refs=NULL;s->result=NULL;
+            continue;
+        }
+#endif
 #if XV_VERTEX_CAPTURE_REUSE
         unsigned packed=0,compact=0;
 #if XV_PACKED_VERTEX_LAYOUT
@@ -350,6 +379,16 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
 fallback:
     xv_vertex_capture_drain();return 0;
 }
+void xv_vertex_capture_begin_slot(unsigned slot)
+{
+    /* Caller acquired the GPU slot first; drain alone is not GPU retirement. */
+    xv_vertex_capture_drain();
+#if XV_VERTEX_PERSISTENT
+    vp_retire_slot(slot);
+#else
+    (void)slot;
+#endif
+}
 void xv_vertex_capture_shutdown(void)
 {
     xv_vertex_capture_drain();
@@ -358,6 +397,9 @@ void xv_vertex_capture_shutdown(void)
         while(sceKernelWaitThreadEnd(cap_thread,NULL,NULL)<0)sceKernelDelayThread(100);
     }
     cap_release();cap_unavailable=cap_stopping=0;cap_enabled=-1;
+#if XV_VERTEX_PERSISTENT
+    vp_shutdown();
+#endif
     cap_submitted=cap_completed=cap_retired=cap_used=0;
 #if XV_VERTEX_CAPTURE_PACKED
     cap_compact_enabled=-1;
@@ -369,6 +411,9 @@ void xv_vertex_capture_shutdown(void)
 void xv_vertex_capture_report(unsigned frames)
 {
     assert(cap_retired==__atomic_load_n(&cap_submitted,__ATOMIC_ACQUIRE));
+#if XV_VERTEX_PERSISTENT
+    vp_report(frames);
+#endif
     if(cap_jobs_total)xv_logf("[vertex-capture] %u frames: %u jobs %llu KiB; capture %llu us worker %llu us join %llu us; %u drains %u pressure max-pending %u failed %u (overlapping window totals)\n",
         frames,cap_jobs_total,(unsigned long long)(cap_bytes>>10),(unsigned long long)cap_capture_us,
         (unsigned long long)cap_worker_us,(unsigned long long)cap_join_us,

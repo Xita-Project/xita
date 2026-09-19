@@ -11,6 +11,8 @@
 #include <assert.h>
 #define XV_VERTEX_UPLOAD_BYTES (512u*1024u)
 #define XV_VERTEX_CAPTURE_BYTES (128u*1024u)
+#define XV_VERTEX_PERSISTENT_BYTES (128u*1024u)
+#define VP_ENTRIES 16u
 #include "../../runtime/xv_vertex_upload.c"
 #include "../../runtime/xv_vertex_capture.c"
 #include "../../runtime/xv_upload_worker.c"
@@ -22,6 +24,7 @@ static struct { pthread_t id;SceKernelThreadEntry entry;int live,started,joined;
 static sem_t semaphore;
 static int sem_live,pause_capture,pause_copy,parked_capture,parked_copy,fail_wake,fail_done;
 static int fail_capture_alloc,fail_gpu_alloc,fail_create_at,create_calls;
+static int fail_persistent;
 static pthread_t owner;
 
 void xv_logf(const char *fmt,...) { (void)fmt; }
@@ -37,6 +40,8 @@ SceUID sceKernelAllocMemBlock(const char *name,SceKernelMemBlockType type,SceSiz
     (void)opt;
     if(!strcmp(name,"xv_vertex_capture") && fail_capture_alloc) { fail_capture_alloc=0;return -1; }
     if(!strcmp(name,"xv_vertices_gpu") && __atomic_exchange_n(&fail_gpu_alloc,0,__ATOMIC_RELAXED))return -1;
+    if((!strcmp(name,"xv_persistent_cpu") && fail_persistent==1) ||
+       (!strcmp(name,"xv_persistent_gpu") && fail_persistent==2))return -1;
     assert(type==SCE_KERNEL_MEMBLOCK_TYPE_USER_RW || type==SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE);
     pthread_mutex_lock(&mem_lock);unsigned i;
     for(i=1;i<32 && mem[i].base;i++);assert(i<32);
@@ -48,7 +53,8 @@ int sceKernelFreeMemBlock(SceUID id)
 { pthread_mutex_lock(&mem_lock);assert(mem[id].base && !mem[id].mapped);free(mem[id].base);mem[id].base=NULL;pthread_mutex_unlock(&mem_lock);return 0; }
 int sceGxmMapMemory(void *p,SceSize n,SceGxmMemoryAttribFlags flags)
 {
-    assert(n==XV_VERTEX_UPLOAD_BYTES && flags==SCE_GXM_MEMORY_ATTRIB_READ);
+    assert((n==XV_VERTEX_UPLOAD_BYTES || n==XV_VERTEX_PERSISTENT_BYTES) && flags==SCE_GXM_MEMORY_ATTRIB_READ);
+    if(n==XV_VERTEX_PERSISTENT_BYTES && fail_persistent==3)return -1;
     pthread_mutex_lock(&mem_lock);unsigned i;for(i=1;i<32 && mem[i].base!=p;i++);
     assert(i<32);mem[i].mapped=1;pthread_mutex_unlock(&mem_lock);return 0;
 }
@@ -496,9 +502,175 @@ static void capture_retained_generations(void)
     assert(default_off.ok && !cap_used && !cap_entry_count);cleanup();
 }
 #endif
+#if XV_VERTEX_PERSISTENT
+static void persistent_slots(void)
+{
+    setenv("XV_VERTEX_PERSISTENT","1",1);
+    unsigned char *src=mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0);
+    assert(src!=MAP_FAILED);memset(src,0x51,4096);
+    output a={0},pending={0},b={0},changed={0};
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    assert(capture(0,src,4096,16,NULL,0,&a));wait_parked(&parked_capture);
+    assert(capture(1,src,4096,16,NULL,0,&pending));
+    assert(!cap_used && vp_created==1 && vp_hits==1);
+    assert(!mprotect(src,4096,PROT_NONE));
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);join(1);
+    assert(a.ok&&pending.ok&&a.result[0]==pending.result[0]);
+    for(unsigned i=0;i<4096;i++)assert(a.result[0][i]==0x51);
+    assert(!mprotect(src,4096,PROT_READ|PROT_WRITE));
+    /* Exact cross-slot hit writes neither the immutable mirror nor GPU bytes. */
+    assert(!mprotect(vp_cpu,XV_VERTEX_PERSISTENT_BYTES,PROT_READ));
+    assert(!mprotect(vp_gpu,XV_VERTEX_PERSISTENT_BYTES,PROT_READ));
+    assert(capture(2,src,4096,16,NULL,0,&b));join(2);
+    assert(b.ok&&b.result[0]==a.result[0]&&vp_copied==4096);
+    assert(!mprotect(vp_cpu,XV_VERTEX_PERSISTENT_BYTES,PROT_READ|PROT_WRITE));
+    assert(!mprotect(vp_gpu,XV_VERTEX_PERSISTENT_BYTES,PROT_READ|PROT_WRITE));
+    xv_vertex_capture_begin_slot(0);xv_vertex_upload_reset(0);
+    memset(src,0x92,4096);assert(capture(0,src,4096,16,NULL,0,&changed));join(0);
+    assert(changed.ok&&changed.result[0]!=a.result[0]);
+    for(unsigned i=0;i<4096;i++)assert(a.result[0][i]==0x51&&changed.result[0][i]==0x92);
+    xv_vertex_capture_begin_slot(2);assert(vp_entries[0].pins==2);
+    xv_vertex_capture_drain();assert(vp_entries[0].pins==2); /* CPU join is not retirement. */
+    xv_vertex_capture_begin_slot(1);assert(!vp_entries[0].pins);
+    assert(!munmap(src,4096));cleanup();
+}
+static void persistent_pressure(void)
+{
+    enum { BYTES=4*VP_PAGE, CACHED=VP_PAGES/4, ITEMS=CACHED+8 };
+    _Static_assert(CACHED<VP_ENTRIES,"page pressure precedes metadata pressure");
+    unsigned char *src=malloc(ITEMS*BYTES);assert(src);
+    output items[ITEMS];memset(items,0,sizeof items);
+    for(unsigned i=0;i<ITEMS;i++) {
+        memset(src+i*BYTES,i+1,BYTES);assert(capture(i%3,src+i*BYTES,BYTES,16,NULL,0,&items[i]));
+    }
+    join(0);join(1);join(2);assert(vp_created==CACHED&&vp_full>=8);
+    for(unsigned i=0;i<ITEMS;i++)for(unsigned j=0;j<BYTES;j++)assert(items[i].ok&&items[i].result[0][j]==i+1);
+    /* Retiring just slot 0 may reclaim its ranges, never another slot's. */
+    xv_vertex_capture_begin_slot(0);xv_vertex_upload_reset(0);
+    output replacement={0};memset(src,0xad,BYTES);
+    assert(capture(0,src,BYTES,16,NULL,0,&replacement));join(0);
+    assert(replacement.ok&&replacement.result[0][0]==0xad);
+    for(unsigned i=0;i<ITEMS;i++)if(i%3)for(unsigned j=0;j<BYTES;j++)assert(items[i].result[0][j]==i+1);
+    free(src);cleanup();
+}
+static void persistent_metadata_pressure(void)
+{
+    _Static_assert(VP_ENTRIES<VP_PAGES,"metadata pressure precedes page pressure");
+    unsigned char src[VP_ENTRIES+1][VP_PAGE];output items[VP_ENTRIES+1]={0};
+    for(unsigned i=0;i<=VP_ENTRIES;i++) {
+        memset(src[i],i+1,VP_PAGE);
+        assert(capture(i%3,src[i],VP_PAGE,16,NULL,0,&items[i]));
+    }
+    join(0);join(1);join(2);assert(vp_created==VP_ENTRIES&&vp_full==1);
+    unsigned free_pages=0;for(unsigned i=0;i<VP_PAGES;i++)free_pages+=!vp_pages[i];
+    assert(free_pages==VP_PAGES-VP_ENTRIES);
+    for(unsigned i=0;i<=VP_ENTRIES;i++)
+        assert(items[i].ok&&!memcmp(items[i].result[0],src[i],VP_PAGE));
+    xv_vertex_capture_begin_slot(0);xv_vertex_upload_reset(0);
+    output replacement={0};memset(src[0],0xad,VP_PAGE);
+    assert(capture(0,src[0],VP_PAGE,16,NULL,0,&replacement));join(0);
+    assert(vp_created==VP_ENTRIES+1&&replacement.ok&&!memcmp(replacement.result[0],src[0],VP_PAGE));
+    for(unsigned i=0;i<=VP_ENTRIES;i++)if(i%3)
+        assert(!memcmp(items[i].result[0],src[i],VP_PAGE));
+    cleanup();
+}
+static void persistent_fragmentation(void)
+{
+    enum { BYTES=4*VP_PAGE, ITEMS=VP_PAGES/4 };
+    unsigned char src[ITEMS][BYTES],large[5*VP_PAGE];output items[ITEMS]={0};
+    for(unsigned i=0;i<ITEMS;i++) {
+        memset(src[i],i+1,BYTES);
+        assert(capture(i%2,src[i],BYTES,16,NULL,0,&items[i]));
+    }
+    join(0);join(1);assert(vp_created==ITEMS&&!vp_full);
+    xv_vertex_capture_begin_slot(0);xv_vertex_upload_reset(0);
+    unsigned free_pages=0;for(unsigned i=0;i<VP_PAGES;i++)free_pages+=!vp_pages[i];
+    assert(free_pages>=5); /* Four-page holes cannot fit this five-page span. */
+    memset(large,0xc7,sizeof large);output fallback={0},fit={0};
+    assert(capture(0,large,sizeof large,16,NULL,0,&fallback));join(0);
+    assert(vp_created==ITEMS&&vp_full==1&&fallback.ok&&!memcmp(fallback.result[0],large,sizeof large));
+    assert(capture(0,large,3*VP_PAGE,16,NULL,0,&fit));join(0);
+    assert(vp_created==ITEMS+1&&fit.ok&&fit.result[0]==vp_gpu);
+    assert(!memcmp(fit.result[0],large,3*VP_PAGE));
+    assert(!memcmp(fallback.result[0],large,sizeof large));
+    for(unsigned i=1;i<ITEMS;i+=2)assert(items[i].ok&&!memcmp(items[i].result[0],src[i],BYTES));
+    cleanup();
+}
+static void persistent_bypass(void)
+{
+    unsigned char src[32768],expected[32768];memset(src,0x63,sizeof src);memcpy(expected,src,sizeof src);
+    xv_vertex_refs refs;xv_vertex_refs_clear(&refs);xv_vertex_refs_add(&refs,0);xv_vertex_refs_add(&refs,1023);
+    output sparse={0};__atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    assert(capture(0,src,sizeof src,32,&refs,0,&sparse));wait_parked(&parked_capture);
+    assert(!vp_created&&!vp_hits&&!vp_gpu&&cap_used);
+    memset(src,0x91,sizeof src);memset(&refs,0,sizeof refs);
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
+    assert(sparse.ok&&!memcmp(sparse.result[0],expected,sizeof expected));cleanup();
+#if XV_PACKED_VERTEX_LAYOUT
+    output packed={0};memcpy(src,expected,sizeof src);
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    assert(capture(0,src,sizeof src,32,NULL,XV_PACKED_PREFIX16,&packed));wait_parked(&parked_capture);
+    assert(!vp_created&&!vp_hits&&!vp_gpu&&cap_used);
+    memset(src,0x92,sizeof src);__atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
+    assert(packed.ok);for(unsigned i=0;i<sizeof src/32;i++)
+        assert(!memcmp(packed.result[0]+i*16,expected+i*32,16));
+    cleanup();
+#endif
+}
+static void persistent_failures(void)
+{
+    unsigned char src[4096];memset(src,0x63,sizeof src);
+    for(unsigned failure=1;failure<=3;failure++) {
+        fail_persistent=failure;output o={0};
+        assert(capture(0,src,sizeof src,16,NULL,0,&o));join(0);
+        assert(o.ok&&!memcmp(o.result[0],src,sizeof src)&&vp_unavailable);
+        cleanup();
+    }
+    fail_persistent=0;
+    /* A failed earlier ordinary stream cannot leave a later promised cache
+     * entry uninitialized for an already queued duplicate. */
+    xv_vertex_prepare_batch batch={.slot=0,.count=2};output failed={0},next={0};
+    batch.streams[0]=(xv_vertex_prepare_stream){.source=src,.bytes=32,.stride=4};
+#if XV_PACKED_VERTEX_LAYOUT
+    batch.streams[0].packed=99;
+#else
+    __atomic_store_n(&fail_gpu_alloc,1,__ATOMIC_RELAXED);
+#endif
+    batch.streams[1]=(xv_vertex_prepare_stream){.source=src,.bytes=4096,.stride=16};
+    const void **targets[]={(const void **)&failed.result[0],(const void **)&failed.result[1]};
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    assert(xv_vertex_capture_submit(&batch,targets,collected,&failed));wait_parked(&parked_capture);
+    assert(capture(0,src,sizeof src,16,NULL,0,&next));
+    memset(src,0x7a,sizeof src);__atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
+    assert(!failed.ok&&!failed.result[0]&&!failed.result[1]&&failed.callbacks==1);
+    assert(next.ok&&next.callbacks==1);for(unsigned i=0;i<4096;i++)assert(next.result[0][i]==0x63);
+    cleanup();
+}
+static void persistent_generations(void)
+{
+    unsigned char src[3][1024];output live[3][3]={0};unsigned char expected[3][3][1024];
+    unsigned state=78213;
+    for(unsigned generation=0;generation<240;generation++) {
+        unsigned slot=generation%3;xv_vertex_capture_begin_slot(slot);xv_vertex_upload_reset(slot);
+        memset(live[slot],0,sizeof live[slot]);
+        for(unsigned item=0;item<3;item++) {
+            if(generation<3 || generation%4==0)for(unsigned b=0;b<1024;b++) {
+                state=state*1664525u+1013904223u;src[item][b]=state>>24;
+            }
+            memcpy(expected[slot][item],src[item],1024);
+            assert(capture(slot,src[item],1024,16,NULL,0,&live[slot][item]));
+        }
+        join(slot);
+        for(unsigned s=0;s<3;s++)for(unsigned i=0;i<3;i++)if(live[s][i].callbacks)
+            assert(live[s][i].ok&&!memcmp(live[s][i].result[0],expected[s][i],1024));
+    }
+    assert(vp_hits>100);cleanup();setenv("XV_VERTEX_PERSISTENT","0",1);
+}
+#endif
 int main(void)
 {
     owner=pthread_self();setenv("XV_VERTEX_CAPTURE","1",1);
+    setenv("XV_VERTEX_PERSISTENT","0",1);
     setenv("XV_VERTEX_CAPTURE_RETAIN","1",1); /* Exercise optional lifetime path. */
     xv_vertex_worker_override(0);xv_vertex_upload_override(1);
     private_inputs();sparse_and_packed();unused_mask_lifetime();pressure_and_wrap();failure_cases();
@@ -514,5 +686,10 @@ int main(void)
     puts("PASS: exact snapshot/result reuse, mutations and return-to-old-version, unmapping, slot/stride separation, sparse-to-full validation, job wrap and full metadata cache, startup disable and allocation retry");
 #endif
     puts("PASS: private inputs, rewritten aliases, mask ownership, packed/raw identity, arena/queue pressure, ticket wrap, partial/allocation/thread/notification failures, fallback drains, disable and three GPU-copy slots");
+#if XV_VERTEX_PERSISTENT
+    persistent_slots();persistent_bypass();persistent_pressure();persistent_metadata_pressure();
+    persistent_fragmentation();persistent_failures();persistent_generations();
+    puts("PASS: immutable persistent GPU versions, pending FIFO hits, read-only reuse, sparse/packed bypass, exact mutations, all-slot retirement, page/metadata/fragmentation pressure, allocation/map/partial failures and 240 mixed generations");
+#endif
     return 0;
 }

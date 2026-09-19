@@ -319,6 +319,23 @@ $(BUILD)/capture-reuse.config: force-capture-reuse-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/capture-reuse.config
+# Exact immutable uploads retained across GPU frame slots. Off by default.
+XV_VERTEX_PERSISTENT ?= 0
+ifneq ($(words $(XV_VERTEX_PERSISTENT)),1)
+$(error XV_VERTEX_PERSISTENT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_PERSISTENT),0 1),$(XV_VERTEX_PERSISTENT))
+$(error XV_VERTEX_PERSISTENT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_vertex_capture.o: CFLAGS += -DXV_VERTEX_PERSISTENT=$(XV_VERTEX_PERSISTENT)
+.PHONY: force-vertex-persistent-config
+force-vertex-persistent-config:
+$(BUILD)/vertex-persistent.config: force-vertex-persistent-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_VERTEX_PERSISTENT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/vertex-persistent.config runtime/xv_vertex_persistent.h
 XV_VERTEX_CAPTURE_PACKED ?= 0
 ifneq ($(words $(XV_VERTEX_CAPTURE_PACKED)),1)
 $(error XV_VERTEX_CAPTURE_PACKED must be 0 or 1)

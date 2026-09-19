@@ -11,14 +11,16 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     sdk = Path(os.environ.get('VITASDK', Path.home() / 'vitasdk'))
     with tempfile.TemporaryDirectory(prefix='xita-vertex-capture-') as directory:
-        for packed, compact, reuse in ((0, 0, 0), (1, 0, 0), (1, 1, 0),
-                                       (0, 0, 1), (1, 0, 1), (1, 1, 1)):
-            binary = Path(directory) / f'capture-{packed}-{compact}-{reuse}'
+        for packed, compact, reuse, persistent in ((0, 0, 0, 0), (1, 0, 0, 0), (1, 1, 0, 0),
+                                       (0, 0, 1, 0), (1, 0, 1, 0), (1, 1, 1, 0),
+                                       (0, 0, 0, 1), (1, 1, 1, 1)):
+            binary = Path(directory) / f'capture-{packed}-{compact}-{reuse}-{persistent}'
             command = ['cc', '-std=gnu11', '-O2', '-g', '-Wall', '-Wextra', '-Werror',
                        '-Wno-unused-parameter', '-Wno-misleading-indentation',
                        '-DXV_VERTEX_RESIDENT_REFERENCES_DEFAULT=1',
                        f'-DXV_PACKED_VERTEX_LAYOUT={packed}', f'-DXV_VERTEX_CAPTURE_PACKED={compact}',
                        f'-DXV_VERTEX_CAPTURE_REUSE={reuse}',
+                       f'-DXV_VERTEX_PERSISTENT={persistent}',
                        '-I' + str(ROOT / 'runtime'),
                        '-idirafter', str(sdk / 'arm-vita-eabi/include')]
             if os.environ.get('SANITIZE'):
