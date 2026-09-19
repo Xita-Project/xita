@@ -73,3 +73,49 @@ are shape-dependent and are not hardware FPS results. Evidence is retained in
 `model-structural-audit-perf7/query-route/` and `query-object-space/generation/`.
 This extension has a modest ceiling; world-geometry queries remain the larger
 measured opportunity. Hardware enablement and outcome are recorded separately.
+
+## Next structural target
+
+The existing vertex, edge and surface result lists still check duplicates with
+linear searches from the beginning. The scalar helpers reduce each iteration's
+cost, but do not remove that repeated work. A query-local index could preserve
+the guest arrays and encounter order while avoiding many searches on larger
+lists. It is not implemented or assumed to help yet.
+
+First measure result counts during the existing sampled queries. If lists are
+small, avoid adding indexing overhead. If they are substantial, qualify earliest
+match, exact register/flag/budget reconstruction, physical scratch/output alias
+checks, original append timing, and invalidation across callbacks and generic
+fallback. Preserve `868F0` publication order. The bounded design review is
+retained privately in `world-query-structure-audit/audit.md`.
+
+## Cumulative perf.8 hardware check
+
+`0.2.0-perf.8 / 8908ce3+` enables the object-space route while retaining the
+perf.7 stack and keeping cross-drain vertex retention Off. The new fused-query
+core and existing world adapter have identical ARM machine code to the probe.
+The primary parent's machine code is also identical, with exactly one relocation
+changed from `f_00088110` to `nq_query_at_17301b`. The added adapter passes the
+original context to scope 6 and retains cleanup after the query.
+
+The runtime was uploaded, hash-verified, restarted and boot-confirmed in slot 1.
+The saved New001 Normal campaign checkpoint loaded and rendered; a short camera
+turn remained responsive with no observed fault. An R-button input was sent,
+but the screenshots did not establish that a shot occurred, so firing stability
+is not claimed. This is a short check, not a prolonged crash test.
+
+Twelve ordinary 60-frame checkpoint windows have a median 78.35 ms / 12.8 FPS,
+compared with 78.6 ms / 12.7 FPS on the preceding probe. Both have a median
+151.5 draws/frame and the same saved camera position. This small difference does
+not establish a frame-rate gain. Keep the cumulative route for further play;
+world-result search structure is the next target. Rendering/tick intervals
+remain inclusive and overlapping, not additive independent costs.
+
+Only `game-a.self` and `boot-game.txt` differ in the package. Runtime SHA-256:
+`214dfa6faa84bd3a1842d90a583f19cf36d614cb4ebe71de96a6c74f3a47e5aa`.
+Private build commands, generated receipt, machine-code checks, update receipt,
+screenshots and gameplay summaries are under `ce-perf8/`.
+
+The user also reports faster campaign loading. No controlled load-time comparison
+has been made, so that observation is not assigned a measured percentage or
+attributed specifically to this collision-route change.
