@@ -67,3 +67,35 @@ Private sources, rejected byte-comparison results, compiler commands and all
 71 comparison results are under `../palette-prefix-cache/`. Perf.25 remains the
 last hardware build; no optimization or FPS improvement is claimed for this
 prototype. Halo 2 remains parked while the CE campaign work proceeds.
+
+## Bounded interleaving follow-up
+
+The private candidate now has 32 entries arranged as eight sets of four ways.
+Model/pose/node addresses select and identify a candidate; exact input contents,
+count and FP control still prove reuse. Address identity alone never accepts a
+hit. Full sets evict round-robin; empty ways are used first. The retained math
+ownership guard remains unchanged. Storage is 320,288 bytes including replacement
+indices, approximately 312.8 KiB, excluding a few scalar counters. This is a
+static host-side pool in the prototype, not an allocation in the current game.
+
+All 142 paired ARM executions pass. In addition to the previous 71 cases, the
+fixture fills four inputs in each of eight sets, revisits all 32 in reverse
+order, and then exercises five colliding identities in a single four-way set.
+All 32 balanced revisits hit; the fifth collision evicts one entry, an un-evicted
+identity still hits, and the evicted identity recomputes correctly. Every pair
+compares full context, the 8 MiB guest arena, admission result and native FPSCR.
+The synthetic identities carry distinct pose data. These are constructed model
+orders, not a captured gameplay trace or a measured hardware hit rate.
+
+The 16-matrix collision-survivor hit costs 3,104 modeled instructions versus
+5,130 for the existing batch (39.5% fewer); the collision miss costs 5,774.
+Firmware copy bytes remain separately counted and not cycle-modeled. This keeps
+the isolated cost result positive despite bounded lookup overhead, but cache
+set distribution, changing poses and memory traffic may change the live result.
+
+Proceed to explicit opt-in runtime integration with joined hit/miss/eviction
+counters and a retained off path, then test actual gameplay. Do not allocate a
+larger pool just to inflate the synthetic hit rate. Original-lift composition,
+production-build transitions, live resource use and hardware whole-frame benefit
+remain unverified for this candidate. The previous single-entry and rejected
+byte-comparison sources/results are retained separately in the private directory.
