@@ -9,7 +9,12 @@ from test_remote_draw_trace import function
 ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / 'runtime/xv_d3d.c').read_text()
 actual = function(source, 'static void trace_draw_state(')
-assert 'trace_draw_state(c, d, texok);' in function(source, 'static void record_draw(')
+recorder = function(source, 'static void record_draw(')
+# Hardware uses the asynchronous capture return. Descriptors must be resolved
+# first, but the logger cannot sit below that return or force a worker join.
+call = recorder.index('trace_draw_state(c, d, texok);')
+assert recorder.index('unsigned texok = record_material(') < call
+assert call < recorder.index('if(captured) {') < recorder.index('xv_vertex_prepare_finish(')
 fixture = r'''
 #include <assert.h>
 #include <stdint.h>

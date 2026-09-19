@@ -1752,6 +1752,9 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     xv_draw_profile_step(XV_DRAW_CONSTANTS, &profile);
     unsigned texok = record_material(c, d, immediate != NULL);
     xv_draw_profile_step(XV_DRAW_TEXTURES, &profile);
+    /* Descriptor/constant state is already captured even when vertex streams
+     * are still worker-owned. Trace both preparation paths without joining. */
+    trace_draw_state(c, d, texok);
     if(captured) {
         /* Worker inputs are private, and the command cannot be submitted until
          * its streams are resolved by the recording owner's frame drain. */
@@ -1883,7 +1886,6 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     }
 
     xv_draw_profile_step(XV_DRAW_DIAGNOSTICS, &profile);
-    trace_draw_state(c, d, texok);
     if (geometry_trace(c)) {
         XV_LOG("[stencil] cmd %u vs %s enable %u func %u ref %u mask %02X/%02X ops %u/%u/%u\n",
             cur_list()->ncmds-1, d->gxp, c->stencil.enabled, c->stencil.func,
