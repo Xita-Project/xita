@@ -46,10 +46,17 @@ Replay does not normalize, erase or guess outgoing status bits.
 - Full primary `A26B0` and `70110` compile Off with original text/relocation
   identity. Six real Make/archive transitions verify selective rebuilding and
   removal of the helper when disabled. Invalid selections and missing hooks fail.
+- 864 sequential caller comparisons carry every prior x87 slot, status/control
+  field and raw native FPSCR into the next invocation. They cover front-only,
+  back-only and alternating sequences, every TOP and six initial FPSCR states.
+  Full context, arena, production constant state and publication-entry snapshots
+  remain equal. Next-call GPR/argument setup is synthetic; intervening full
+  material/model code is not executed.
 
 The fixtures do not execute a complete model walk, real concurrent scheduler or
-GPU draw. Successive hit fixtures reseed FP entry state, so they do not measure
-naturally occurring campaign hits. Private evidence is under
+GPU draw. Isolated hit fixtures reseed FP entry state; the sequential fixture
+carries it forward, but neither measures naturally occurring campaign hits.
+Private evidence is under
 `model-uv-reuse-prototype/production/` and
 `model-uv-normalized-key/production-final/` in the unified-games workspace.
 
@@ -62,6 +69,8 @@ python tools/test_model_uv_caller.py --xbe "$XBE" --manifest "$MANIFEST" \
   --retained-build "$RETAINED_BUILD" --out "$PRIVATE_EVIDENCE"
 python tools/test_model_uv_key.py --elf "$PRIVATE_EVIDENCE/uv.elf" \
   --output-dir "$PRIVATE_KEY_EVIDENCE"
+python tools/test_model_uv_sequence.py --elf "$PRIVATE_EVIDENCE/caller.elf" \
+  --output-dir "$PRIVATE_SEQUENCE_EVIDENCE"
 python tools/test_model_uv_build.py --out "$NEW_PRIVATE_BUILD_EVIDENCE"
 ```
 
@@ -75,9 +84,29 @@ eligible hits to break even in this model, before model-scope setup and real
 OS/worker identity lookup costs. Instruction counts are not hardware cycles or
 an FPS prediction. No physical speed improvement has been established.
 
+Sequential callers with initially clear cumulative status execute two cold UV
+calculations before reuse: the first original call sets native inexact status,
+which correctly changes the next key. With inexact already set, only the first
+call is cold. For six repeated front callers, the instruction model gives
+14,822 original versus 14,029 candidate with clear flags (14,866 original for
+the zero-FPSCR case), or 14,822 versus 11,679 with inexact already set. A short
+scope may cost more than it saves; these totals exclude model-scope setup and
+real identity lookup costs. Do not interpret six-call savings as an FPS gain.
+
 Joined `[model-uv]` counters distinguish scope and first/second-side volumes,
 hits, cold calls, argument-only/FP-only/mixed misses, changed FP fields and
 admission declines. There are no per-call timers. The next hardware check must
 confirm useful live reuse and frame behavior after a fresh launch with the
 existing cumulative options retained. Descriptor similarity alone is not proof
 that the optimization helps.
+
+## Candidate package
+
+`0.2.0-perf.15` / `3b5d14a+` builds successfully with UV reuse enabled and the
+perf14 cumulative options retained. All 1,744 VPK entries verify; only
+`game-a.self` and `boot-game.txt` differ from perf14. Runtime SHA-256 is
+`f62a19727f18c88d3dda2135ede657113226c91a8ef513745453ae9ed6d5372d`.
+The candidate has not been installed: remote status requests timed out. The last
+remotely confirmed runtime is perf14. Its connection loss does not establish a
+game crash. The user's faster campaign-loading observation has no measured
+loading comparison and predates this uninstalled candidate.
