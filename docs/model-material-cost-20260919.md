@@ -74,3 +74,28 @@ caller-publication and lifetime checks against the retained original routine.
 These compare guest memory, context and FP status with synthetic caller inputs;
 they do not establish full-game performance or hardware stability. Receipts:
 `../uv-victim-pointer/cross-production-receipt.json` and its referenced results.
+
+## Perf.38 deployment
+
+Perf.38 (`f723e12`) was rebuilt with the preceding cumulative configuration and
+the two-value UV cache. Only `game-a.self` and `boot-game.txt` changed from the
+perf.37 package. The updater verified the runtime and confirmed boot in slot 0
+after restart; the dashboard shows `0.2.0-perf.38 / f723e12`. Runtime SHA-256:
+`6037e0548dcad2b564f0dc043789180328017e9ec3ba7c2a927fddf082fec336`.
+
+The ordinary campaign launch sequence completed with no screenshots between
+button presses. Loading and gameplay qualification are separate from that
+navigation receipt. No automated FPS comparison was run for this update.
+Build, package and deployment evidence is under `../uv-victim-hardware/`.
+
+The saved campaign subsequently reached loaded/active gameplay at the original
+checkpoint camera (-28.66,32.52,0.62), forward (0.56,0.82,-0.15). A screenshot
+shows the world, first-person model and HUD, with an instantaneous 13 FPS reading.
+That reading is not an average or a demonstrated gain. The final three captured
+60-frame windows report 66, 85 and 87 second-entry hits, confirming execution on
+hardware. No fatal/GPU-fault/data-abort marker was found in the short capture;
+longer gameplay and visual validation remain open. Controls were released.
+
+Receipts: `gameplay-status.json`, `gameplay.log`, and `gameplay.png` in that
+private deployment directory. The new implementation is installed; 20 FPS heavy
+gameplay remains unachieved.

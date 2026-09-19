@@ -44,6 +44,11 @@ material setup and `54010` ordered callbacks as larger targets than the outer
 model traversal itself. That diagnostic serializes object callbacks; its FPS
 is not a parallel-gameplay comparison. Palette buffering remains experimental.
 
+Perf.38 adds a second exact UV value for alternating materials and is installed
+after a full restart. Campaign logs confirm cache use; no FPS gain is established.
+Further performance testing uses actual gameplay after restart, per the user's
+request, rather than automated off/on/off FPS comparisons.
+
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
 [~] [Movement/collision attribution](docs/object-motion-profile-20260916.md):
