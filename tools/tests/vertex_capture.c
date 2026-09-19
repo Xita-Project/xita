@@ -14,6 +14,10 @@
 #define XV_VERTEX_PERSISTENT_BYTES (128u*1024u)
 #define VP_ENTRIES 16u
 #include "../../runtime/xv_vertex_upload.c"
+#if XV_VERTEX_CAPTURE_NOTIFY
+static void capture_notify_point(unsigned point);
+#define XV_CAPTURE_NOTIFY_POINT(point) capture_notify_point(point)
+#endif
 #include "../../runtime/xv_vertex_capture.c"
 #include "../../runtime/xv_upload_worker.c"
 
@@ -26,6 +30,31 @@ static int sem_live,pause_capture,pause_copy,parked_capture,parked_copy,fail_wak
 static int fail_capture_alloc,fail_gpu_alloc,fail_create_at,create_calls;
 static int fail_persistent;
 static pthread_t owner;
+#if XV_VERTEX_CAPTURE_NOTIFY
+static unsigned notify_pause[8],notify_reached[8];
+static unsigned wake_wait_calls,wake_timeouts,done_wait_calls,done_timeouts;
+static void capture_notify_point(unsigned point)
+{
+    if(point==CAP_BEFORE_EXECUTE && __atomic_load_n(&pause_capture,__ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&parked_capture,1,__ATOMIC_RELEASE);
+        while(__atomic_load_n(&pause_capture,__ATOMIC_ACQUIRE))usleep(100);
+        __atomic_store_n(&parked_capture,0,__ATOMIC_RELEASE);
+    }
+    __atomic_fetch_add(&notify_reached[point],1,__ATOMIC_RELEASE);
+    while(__atomic_load_n(&notify_pause[point],__ATOMIC_ACQUIRE))usleep(100);
+}
+static void gate(unsigned point) {
+    __atomic_store_n(&notify_reached[point],0,__ATOMIC_RELAXED);
+    __atomic_store_n(&notify_pause[point],1,__ATOMIC_RELEASE);
+}
+static void ungate(unsigned point) { __atomic_store_n(&notify_pause[point],0,__ATOMIC_RELEASE); }
+static void reached(unsigned point) {
+    uint64_t end=sceKernelGetProcessTimeWide()+2000000;
+    while(!__atomic_load_n(&notify_reached[point],__ATOMIC_ACQUIRE) && sceKernelGetProcessTimeWide()<end)usleep(100);
+    assert(__atomic_load_n(&notify_reached[point],__ATOMIC_ACQUIRE));
+}
+#define READ_NOTIFY(v) __atomic_load_n(&(v),__ATOMIC_ACQUIRE)
+#endif
 
 void xv_logf(const char *fmt,...) { (void)fmt; }
 void xv_cpu_log_thread(const char *name) { assert(!strcmp(name,"vertex-capture") || !strcmp(name,"vertex-upload")); }
@@ -80,6 +109,10 @@ int sceKernelSetEventFlag(SceUID id,unsigned bits)
 }
 int sceKernelWaitEventFlag(SceUID id,unsigned bits,unsigned mode,unsigned *out,SceUInt *timeout)
 {
+#if XV_VERTEX_CAPTURE_NOTIFY
+    if(id==cap_wake)__atomic_fetch_add(&wake_wait_calls,1,__ATOMIC_RELAXED);
+    if(id==cap_done)__atomic_fetch_add(&done_wait_calls,1,__ATOMIC_RELAXED);
+#endif
     unsigned i=id-100;assert(i<8 && events[i].live && timeout);
     assert(mode==(SCE_EVENT_WAITOR|SCE_EVENT_WAITCLEAR_PAT));
     struct timespec t;clock_gettime(CLOCK_REALTIME,&t);t.tv_nsec+=(long)*timeout*1000;
@@ -93,6 +126,10 @@ int sceKernelWaitEventFlag(SceUID id,unsigned bits,unsigned mode,unsigned *out,S
         while(__atomic_load_n(&pause_capture,__ATOMIC_ACQUIRE))usleep(100);
         __atomic_store_n(&parked_capture,0,__ATOMIC_RELEASE);
     }
+#if XV_VERTEX_CAPTURE_NOTIFY
+    if(rc && id==cap_wake)__atomic_fetch_add(&wake_timeouts,1,__ATOMIC_RELAXED);
+    if(rc && id==cap_done)__atomic_fetch_add(&done_timeouts,1,__ATOMIC_RELAXED);
+#endif
     return rc?-1:0;
 }
 SceUID sceKernelCreateThread(const char *name,SceKernelThreadEntry fn,int priority,SceSize stack,SceUInt attrs,int mask,const SceKernelThreadOptParam *opts)
@@ -126,8 +163,18 @@ int sceKernelWaitSema(SceUID id,int n,SceUInt *timeout)
 }
 
 typedef struct { const unsigned char *result[2];unsigned callbacks;int ok; } output;
+#if XV_VERTEX_CAPTURE_NOTIFY
+static output *ordered_outputs;
+static unsigned ordered_at;
+#endif
 static void collected(void *context,int ok)
-{ assert(pthread_equal(owner,pthread_self()));output *o=context;o->callbacks++;o->ok=ok; }
+{
+    assert(pthread_equal(owner,pthread_self()));output *o=context;
+#if XV_VERTEX_CAPTURE_NOTIFY
+    if(ordered_outputs)assert(o==&ordered_outputs[ordered_at++]);
+#endif
+    o->callbacks++;o->ok=ok;
+}
 static int capture(unsigned slot,unsigned char *source,unsigned bytes,unsigned stride,const xv_vertex_refs *refs,unsigned packed,output *out)
 {
     xv_vertex_prepare_batch b={.slot=slot,.count=1};
@@ -780,12 +827,121 @@ static void persistent_generations(void)
     assert(vp_hits>100);cleanup();setenv("XV_VERTEX_PERSISTENT","0",1);
 }
 #endif
+#if XV_VERTEX_CAPTURE_NOTIFY
+static void *complete_at_frontier(void *arg)
+{
+    unsigned point=(uintptr_t)arg;
+    reached(point);ungate(CAP_BEFORE_COMPLETE);reached(CAP_AFTER_NOTIFY);ungate(point);
+    return NULL;
+}
+static void *complete_rearmed(void *unused)
+{
+    reached(CAP_DRAIN_WAIT);ungate(CAP_BEFORE_COMPLETE);reached(CAP_AFTER_NOTIFY);
+    ungate(CAP_DRAIN_WAIT);
+    uint64_t end=sceKernelGetProcessTimeWide()+2000000;
+    while(READ_NOTIFY(notify_reached[CAP_DRAIN_ARMED])<2 && sceKernelGetProcessTimeWide()<end)usleep(100);
+    assert(READ_NOTIFY(notify_reached[CAP_DRAIN_ARMED])>=2);
+    assert(READ_NOTIFY(cap_waiting));ungate(CAP_AFTER_NOTIFY);return NULL;
+}
+static void notification_races(void)
+{
+    unsigned char guest[64];memset(guest,0x47,sizeof guest);
+    /* Arrive after empty observation, on both sides of the sleep CAS. */
+    for(unsigned asleep=0;asleep<2;asleep++) {
+        unsigned point=asleep?CAP_AFTER_SLEEP:CAP_BEFORE_SLEEP;
+        output o={0};gate(point);gate(CAP_AFTER_COMPLETE);assert(cap_start());reached(point);
+        unsigned waits=READ_NOTIFY(wake_wait_calls),timeouts=READ_NOTIFY(wake_timeouts);
+        unsigned signals=READ_NOTIFY(cap_wake_signals),skips=READ_NOTIFY(cap_wake_skips);
+        assert(capture(0,guest,sizeof guest,16,NULL,0,&o));ungate(point);reached(CAP_AFTER_COMPLETE);
+        assert(READ_NOTIFY(wake_wait_calls)==waits+asleep);
+        assert(READ_NOTIFY(wake_timeouts)==timeouts);
+        assert(READ_NOTIFY(cap_wake_signals)==signals+asleep);
+        assert(READ_NOTIFY(cap_wake_skips)==skips+!asleep);
+        ungate(CAP_AFTER_COMPLETE);join(0);assert(o.ok && o.callbacks==1);
+        assert(!memcmp(o.result[0],guest,sizeof guest));cleanup();
+    }
+    /* Completion published before owner arms: no wait and safe report reset
+     * while the worker still owns post-publication notification bookkeeping. */
+    {
+        output o={0};gate(CAP_AFTER_COMPLETE);gate(CAP_AFTER_NOTIFY);
+        assert(capture(0,guest,sizeof guest,16,NULL,0,&o));reached(CAP_AFTER_COMPLETE);
+        unsigned waits=READ_NOTIFY(done_wait_calls);join(0);
+        assert(READ_NOTIFY(done_wait_calls)==waits && !READ_NOTIFY(cap_waiting));
+        xv_vertex_capture_report(1);assert(!READ_NOTIFY(cap_done_skips));
+        ungate(CAP_AFTER_COMPLETE);reached(CAP_AFTER_NOTIFY);
+        assert(READ_NOTIFY(cap_done_skips)==1);ungate(CAP_AFTER_NOTIFY);cleanup();
+    }
+    /* Owner arms first; also force completion between incomplete reread and
+     * actual wait, with successful and failed notification. */
+    for(unsigned scenario=0;scenario<3;scenario++) {
+        unsigned point=scenario?CAP_DRAIN_WAIT:CAP_DRAIN_ARMED;
+        output o={0};gate(CAP_BEFORE_COMPLETE);gate(CAP_AFTER_NOTIFY);gate(point);
+        assert(capture(0,guest,sizeof guest,16,NULL,0,&o));reached(CAP_BEFORE_COMPLETE);
+        unsigned signals=READ_NOTIFY(cap_done_signals),failures=READ_NOTIFY(cap_done_notify_failures);
+        unsigned timeouts=READ_NOTIFY(done_timeouts);
+        if(scenario==2)__atomic_store_n(&fail_done,1,__ATOMIC_RELEASE);
+        pthread_t coordinator;assert(!pthread_create(&coordinator,NULL,complete_at_frontier,(void *)(uintptr_t)point));
+        join(0);assert(!pthread_join(coordinator,NULL));
+        assert(o.ok && o.callbacks==1 && !READ_NOTIFY(cap_waiting));
+        assert(READ_NOTIFY(cap_done_signals)==signals+1);
+        assert(READ_NOTIFY(cap_done_notify_failures)==failures+(scenario==2));
+        assert(READ_NOTIFY(done_timeouts)==timeouts+(scenario==2));
+        ungate(CAP_AFTER_NOTIFY);cleanup();
+    }
+    /* A whole burst needs one producer signal and no completion signals when
+     * the owner is busy elsewhere. Publication/callbacks remain FIFO. */
+    {
+        output o[8]={0};ordered_outputs=o;ordered_at=0;
+        __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);gate(CAP_AFTER_SLEEP);
+        unsigned wake=READ_NOTIFY(cap_wake_signals),skip=READ_NOTIFY(cap_wake_skips);
+        unsigned done=READ_NOTIFY(cap_done_signals),dskip=READ_NOTIFY(cap_done_skips);
+        for(unsigned i=0;i<8;i++){guest[0]=i;assert(capture(0,guest,sizeof guest,16,NULL,0,&o[i]));}
+        wait_parked(&parked_capture);__atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);
+        reached(CAP_AFTER_SLEEP);
+        assert(READ_NOTIFY(cap_wake_signals)==wake+1 && READ_NOTIFY(cap_wake_skips)==skip+7);
+        assert(READ_NOTIFY(cap_done_signals)==done && READ_NOTIFY(cap_done_skips)==dskip+8);
+        join(0);assert(ordered_at==8);
+        for(unsigned i=0;i<8;i++)assert(o[i].callbacks==1 && o[i].ok && o[i].result[0][0]==i);
+        ordered_outputs=NULL;ungate(CAP_AFTER_SLEEP);cleanup();
+    }
+    /* First completion clears waiting. The next owner loop must arm it again
+     * before the second job completes; a completed reread can also avoid a wait. */
+    {
+        output o[2]={0};ordered_outputs=o;ordered_at=0;
+        gate(CAP_BEFORE_COMPLETE);gate(CAP_AFTER_NOTIFY);gate(CAP_DRAIN_WAIT);
+        __atomic_store_n(&notify_reached[CAP_DRAIN_ARMED],0,__ATOMIC_RELAXED);
+        assert(capture(0,guest,sizeof guest,16,NULL,0,&o[0]));reached(CAP_BEFORE_COMPLETE);
+        guest[0]++;assert(capture(0,guest,sizeof guest,16,NULL,0,&o[1]));
+        unsigned signals=READ_NOTIFY(cap_done_signals);
+        pthread_t coordinator;assert(!pthread_create(&coordinator,NULL,complete_rearmed,NULL));
+        join(0);assert(!pthread_join(coordinator,NULL));
+        /* Worker increments after completed; join alone cannot assert its
+         * post-publication counter yet. Shutdown joins the worker itself. */
+        cleanup();assert(READ_NOTIFY(cap_done_signals)>=signals+1 &&
+            READ_NOTIFY(cap_done_signals)<=signals+2 && ordered_at==2);
+        assert(o[0].ok && o[1].ok);ordered_outputs=NULL;
+    }
+    /* Failed sparse wake still progresses through the finite idle wait. */
+    {
+        output o={0};unsigned failures=READ_NOTIFY(cap_wake_failures);
+        __atomic_store_n(&fail_wake,1,__ATOMIC_RELEASE);
+        assert(capture(0,guest,sizeof guest,16,NULL,0,&o));join(0);
+        assert(o.ok && READ_NOTIFY(cap_wake_failures)==failures+1);cleanup();
+        assert(cap_start());__atomic_store_n(&fail_wake,1,__ATOMIC_RELEASE);cleanup();
+        assert(READ_NOTIFY(cap_wake_state)==CAP_SLEEPING && !READ_NOTIFY(cap_waiting));
+    }
+    puts("PASS: forced empty/sleep races, sparse wake, owner/completion RMW races, sticky events, failed wake/done recovery, post-publication report reset and failed shutdown wake");
+}
+#endif
 int main(void)
 {
     owner=pthread_self();setenv("XV_VERTEX_CAPTURE","1",1);
     setenv("XV_VERTEX_PERSISTENT","0",1);
     setenv("XV_VERTEX_CAPTURE_RETAIN","1",1); /* Exercise optional lifetime path. */
     xv_vertex_worker_override(0);xv_vertex_upload_override(1);
+#if XV_VERTEX_CAPTURE_NOTIFY
+    notification_races();
+#endif
     private_inputs();sparse_and_packed();unused_mask_lifetime();pressure_and_wrap();failure_cases();
     queue_capacity();partial_failure_and_fallback();gpu_copy_lifetime();
 #if XV_VERTEX_CAPTURE_PACKED

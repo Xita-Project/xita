@@ -22,6 +22,26 @@
 #define XV_VERTEX_CAPTURE_BYTES (2u*1024u*1024u)
 #endif
 #define CAPTURE_JOBS 32u
+#ifndef XV_VERTEX_CAPTURE_NOTIFY
+#define XV_VERTEX_CAPTURE_NOTIFY 0
+#endif
+#if XV_VERTEX_CAPTURE_NOTIFY != 0 && XV_VERTEX_CAPTURE_NOTIFY != 1
+#error XV_VERTEX_CAPTURE_NOTIFY must be 0 or 1
+#endif
+#if XV_VERTEX_CAPTURE_NOTIFY
+/* Queue counters own jobs. This handshake only suppresses redundant events. */
+enum { CAP_SLEEPING, CAP_RUNNING, CAP_PENDING };
+static unsigned cap_wake_state,cap_waiting;
+static unsigned cap_wake_signals,cap_wake_skips,cap_done_signals,cap_done_skips;
+static unsigned cap_wake_failures,cap_done_notify_failures;
+/* Compile-time fixture frontiers; ordinary builds contain no calls here. */
+enum { CAP_BEFORE_SLEEP, CAP_AFTER_SLEEP, CAP_BEFORE_COMPLETE,
+       CAP_AFTER_COMPLETE, CAP_AFTER_NOTIFY, CAP_DRAIN_ARMED, CAP_DRAIN_WAIT,
+    CAP_BEFORE_EXECUTE };
+#ifndef XV_CAPTURE_NOTIFY_POINT
+#define XV_CAPTURE_NOTIFY_POINT(point) ((void)0)
+#endif
+#endif
 #ifndef XV_VERTEX_CAPTURE_REUSE
 #define XV_VERTEX_CAPTURE_REUSE 0
 #endif
@@ -216,16 +236,51 @@ static int cap_run(SceSize bytes,void *arg)
          * notification. Queue counters, rather than event bits, own the work. */
         unsigned bits;SceUInt timeout=20000;
         sceKernelWaitEventFlag(cap_wake,1,SCE_EVENT_WAITOR|SCE_EVENT_WAITCLEAR_PAT,&bits,&timeout);
+#if XV_VERTEX_CAPTURE_NOTIFY
+        for(;;) {
+            /* Read a producer's PENDING publication before examining its jobs. */
+            __atomic_exchange_n(&cap_wake_state,CAP_RUNNING,__ATOMIC_ACQ_REL);
+#endif
         if(__atomic_load_n(&cap_stopping,__ATOMIC_ACQUIRE))return 0;
         unsigned next=__atomic_load_n(&cap_completed,__ATOMIC_RELAXED);
         while(next!=__atomic_load_n(&cap_submitted,__ATOMIC_ACQUIRE)) {
+#if XV_VERTEX_CAPTURE_NOTIFY
+            XV_CAPTURE_NOTIFY_POINT(CAP_BEFORE_EXECUTE);
+#endif
             uint64_t start=sceKernelGetProcessTimeWide();
             cap_execute(&cap_jobs[next&(CAPTURE_JOBS-1)]);
             xv_gpu_write_barrier();
             cap_worker_us+=sceKernelGetProcessTimeWide()-start;
+#if XV_VERTEX_CAPTURE_NOTIFY
+            XV_CAPTURE_NOTIFY_POINT(CAP_BEFORE_COMPLETE);
+#endif
             __atomic_store_n(&cap_completed,++next,__ATOMIC_RELEASE);
+#if XV_VERTEX_CAPTURE_NOTIFY
+            XV_CAPTURE_NOTIFY_POINT(CAP_AFTER_COMPLETE);
+            /* RMW pairs with the owner's RMW before its completed reread:
+             * either it sees this completion or we observe its wait and signal. */
+            if(__atomic_exchange_n(&cap_waiting,0,__ATOMIC_ACQ_REL)) {
+                __atomic_fetch_add(&cap_done_signals,1,__ATOMIC_RELAXED);
+                if(sceKernelSetEventFlag(cap_done,1)<0)
+                    __atomic_fetch_add(&cap_done_notify_failures,1,__ATOMIC_RELAXED);
+            } else __atomic_fetch_add(&cap_done_skips,1,__ATOMIC_RELAXED);
+            XV_CAPTURE_NOTIFY_POINT(CAP_AFTER_NOTIFY);
+#else
             sceKernelSetEventFlag(cap_done,1);
+#endif
         }
+#if XV_VERTEX_CAPTURE_NOTIFY
+            unsigned expected=CAP_RUNNING;
+            XV_CAPTURE_NOTIFY_POINT(CAP_BEFORE_SLEEP);
+            if(__atomic_compare_exchange_n(&cap_wake_state,&expected,CAP_SLEEPING,
+                    0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) {
+                XV_CAPTURE_NOTIFY_POINT(CAP_AFTER_SLEEP);
+                break;
+            }
+            /* A producer set PENDING after our empty check. Drain again;
+             * do not rely on a second submission or the idle timeout. */
+        }
+#endif
     }
 }
 static void cap_release(void)
@@ -235,6 +290,11 @@ static void cap_release(void)
     if(cap_done>=0)sceKernelDeleteEventFlag(cap_done);
     if(cap_memory>=0)sceKernelFreeMemBlock(cap_memory);
     cap_thread=cap_wake=cap_done=cap_memory=-1;cap_arena=NULL;cap_jobs=NULL;
+#if XV_VERTEX_CAPTURE_NOTIFY
+    /* Only after worker join, or a start failure with no running worker. */
+    __atomic_store_n(&cap_wake_state,CAP_SLEEPING,__ATOMIC_RELAXED);
+    __atomic_store_n(&cap_waiting,0,__ATOMIC_RELAXED);
+#endif
 }
 static int cap_start(void)
 {
@@ -247,11 +307,18 @@ static int cap_start(void)
     cap_wake=sceKernelCreateEventFlag("xv_capture_wake",0,0,NULL);
     cap_done=sceKernelCreateEventFlag("xv_capture_done",0,0,NULL);
     if(cap_wake<0 || cap_done<0)goto fail;
+#if XV_VERTEX_CAPTURE_NOTIFY
+    __atomic_store_n(&cap_wake_state,CAP_SLEEPING,__ATOMIC_RELAXED);
+    __atomic_store_n(&cap_waiting,0,__ATOMIC_RELAXED);
+#endif
     cap_thread=sceKernelCreateThread("xv_vertex_capture",cap_run,
         sceKernelGetThreadCurrentPriority()+1,32*1024,0,SCE_KERNEL_CPU_MASK_USER_0,NULL);
     if(cap_thread<0 || sceKernelStartThread(cap_thread,0,NULL)<0)goto fail;
     xv_logf("[vertex-capture] core 0; %u KiB private inputs, %u ordered jobs; exact snapshots, drain before publication\n",
         XV_VERTEX_CAPTURE_BYTES>>10,CAPTURE_JOBS);
+#if XV_VERTEX_CAPTURE_NOTIFY
+    xv_logf("[vertex-capture-notify] enabled; coalesced events, ordered FIFO and finite timeout recovery retained\n");
+#endif
     return 1;
 fail:
     cap_release();cap_unavailable=1;
@@ -281,11 +348,24 @@ void xv_vertex_capture_drain(void)
         return;
     }
     uint64_t start=sceKernelGetProcessTimeWide();cap_drains++;
+#if XV_VERTEX_CAPTURE_NOTIFY
+    for(;;) {
+        /* A plain store is insufficient on weakly ordered CPUs. The RMW
+         * reads the worker's release RMW when completion wins this race. */
+        __atomic_exchange_n(&cap_waiting,1,__ATOMIC_ACQ_REL);
+        XV_CAPTURE_NOTIFY_POINT(CAP_DRAIN_ARMED);
+        if(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)==submitted)break;
+        XV_CAPTURE_NOTIFY_POINT(CAP_DRAIN_WAIT);
+#else
     while(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)!=submitted) {
+#endif
         unsigned bits;SceUInt timeout=1000;
         if(sceKernelWaitEventFlag(cap_done,1,SCE_EVENT_WAITOR|SCE_EVENT_WAITCLEAR_PAT,&bits,&timeout)<0)
             sceKernelDelayThread(100);
     }
+#if XV_VERTEX_CAPTURE_NOTIFY
+    __atomic_exchange_n(&cap_waiting,0,__ATOMIC_ACQ_REL);
+#endif
     cap_collect();cap_join_us+=sceKernelGetProcessTimeWide()-start;
 #if XV_VERTEX_CAPTURE_REUSE
     cap_reuse_retire();
@@ -433,7 +513,15 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     j->batch.ok=0;cap_jobs_total++;cap_bytes+=written;
     unsigned pending=submitted+1-cap_retired;if(pending>cap_max_pending)cap_max_pending=pending;
     __atomic_store_n(&cap_submitted,submitted+1,__ATOMIC_RELEASE);
+#if XV_VERTEX_CAPTURE_NOTIFY
+    if(__atomic_exchange_n(&cap_wake_state,CAP_PENDING,__ATOMIC_ACQ_REL)==CAP_SLEEPING) {
+        __atomic_fetch_add(&cap_wake_signals,1,__ATOMIC_RELAXED);
+        if(sceKernelSetEventFlag(cap_wake,1)<0)
+            __atomic_fetch_add(&cap_wake_failures,1,__ATOMIC_RELAXED);
+    } else __atomic_fetch_add(&cap_wake_skips,1,__ATOMIC_RELAXED);
+#else
     sceKernelSetEventFlag(cap_wake,1);
+#endif
     cap_capture_us+=sceKernelGetProcessTimeWide()-start;
     return 1;
 fallback:
@@ -471,6 +559,19 @@ void xv_vertex_capture_shutdown(void)
 void xv_vertex_capture_report(unsigned frames)
 {
     assert(cap_retired==__atomic_load_n(&cap_submitted,__ATOMIC_ACQUIRE));
+#if XV_VERTEX_CAPTURE_NOTIFY
+    /* Worker notification bookkeeping follows completed publication. Even a
+     * joined report must exchange these atomically; boundary jobs can land in
+     * either adjacent report. Shutdown's unconditional wake is not counted. */
+    unsigned wake=__atomic_exchange_n(&cap_wake_signals,0,__ATOMIC_RELAXED);
+    unsigned wake_skip=__atomic_exchange_n(&cap_wake_skips,0,__ATOMIC_RELAXED);
+    unsigned done=__atomic_exchange_n(&cap_done_signals,0,__ATOMIC_RELAXED);
+    unsigned done_skip=__atomic_exchange_n(&cap_done_skips,0,__ATOMIC_RELAXED);
+    unsigned wake_fail=__atomic_exchange_n(&cap_wake_failures,0,__ATOMIC_RELAXED);
+    unsigned done_fail=__atomic_exchange_n(&cap_done_notify_failures,0,__ATOMIC_RELAXED);
+    xv_logf("[vertex-capture-notify] %u frames: wake signal/skip %u/%u done signal/skip %u/%u failed wake/done %u/%u; event attempts, ordered jobs unchanged\n",
+        frames,wake,wake_skip,done,done_skip,wake_fail,done_fail);
+#endif
 #if XV_VERTEX_PERSISTENT
     vp_report(frames);
 #endif

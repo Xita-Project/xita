@@ -305,6 +305,23 @@ $(BUILD)/vertex-capture.config: force-vertex-capture-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/vertex-capture.config
+# Notification coalescing belongs only to the capture FIFO implementation.
+XV_VERTEX_CAPTURE_NOTIFY ?= 0
+ifneq ($(words $(XV_VERTEX_CAPTURE_NOTIFY)),1)
+$(error XV_VERTEX_CAPTURE_NOTIFY must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_CAPTURE_NOTIFY),0 1),$(XV_VERTEX_CAPTURE_NOTIFY))
+$(error XV_VERTEX_CAPTURE_NOTIFY must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_vertex_capture.o: CFLAGS += -DXV_VERTEX_CAPTURE_NOTIFY=$(XV_VERTEX_CAPTURE_NOTIFY)
+.PHONY: force-capture-notify-config
+force-capture-notify-config:
+$(BUILD)/capture-notify.config: force-capture-notify-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_VERTEX_CAPTURE_NOTIFY)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/capture-notify.config
 XV_VERTEX_CAPTURE_REUSE ?= 0
 ifneq ($(words $(XV_VERTEX_CAPTURE_REUSE)),1)
 $(error XV_VERTEX_CAPTURE_REUSE must be 0 or 1)
@@ -488,6 +505,24 @@ $(BUILD)/texture-state-startup.config: force-texture-state-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_d3d.o: $(BUILD)/texture-state-startup.config
+# Detailed draw timers may be disabled while retaining joined cache counters.
+XV_DRAW_PROFILE_DEFAULT ?= 1
+ifneq ($(words $(XV_DRAW_PROFILE_DEFAULT)),1)
+$(error XV_DRAW_PROFILE_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_DRAW_PROFILE_DEFAULT),0 1),$(XV_DRAW_PROFILE_DEFAULT))
+$(error XV_DRAW_PROFILE_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_draw_profile.o: CFLAGS += -DXV_DRAW_PROFILE_DEFAULT=$(XV_DRAW_PROFILE_DEFAULT)
+.PHONY: force-draw-profile-startup-config
+force-draw-profile-startup-config:
+$(BUILD)/draw-profile-startup.config: force-draw-profile-startup-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_DRAW_PROFILE_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_draw_profile.o: $(BUILD)/draw-profile-startup.config
+
 # Experimental CPU index metadata. Explicit startup environment takes precedence.
 XV_INDEX_METADATA_DEFAULT ?= 0
 ifneq ($(words $(XV_INDEX_METADATA_DEFAULT)),1)
