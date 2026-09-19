@@ -218,6 +218,13 @@ void menu_raster_triangle(const menu_raster_state *st, const menu_vertex_out *a,
 
     float area = (b->x - a->x) * (c->y - a->y) - (b->y - a->y) * (c->x - a->x);
     if (area == 0.0f) return;
+    if (st->cull_enable) {
+        /* Window Y grows down: positive signed area is clockwise. */
+        int front = (area > 0.0f) == (st->front_face == 0x900);
+        if (st->cull_face == 0x408 ||
+            (st->cull_face == 0x404 && front) ||
+            (st->cull_face == 0x405 && !front)) return;
+    }
 
     int32_t minx = (int32_t)floorf(fminf(a->x, fminf(b->x, c->x)));
     int32_t maxx = (int32_t)ceilf(fmaxf(a->x, fmaxf(b->x, c->x)));

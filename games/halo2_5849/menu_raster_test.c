@@ -168,8 +168,38 @@ static void test_depth_tolerance(void)
     assert(depth_pass(0x201, 999, 1000) && !depth_pass(0x201, 1000, 1000));
 }
 
+static void test_face_culling(void)
+{
+    menu_vertex_out a = V(0, 0, 1, 0, 0, 1, 0, 0);
+    menu_vertex_out b = V(8, 0, 1, 0, 0, 1, 0, 0);
+    menu_vertex_out c = V(0, 8, 1, 0, 0, 1, 0, 0);
+    const unsigned faces[] = {0x404, 0x405, 0x408};
+    for (unsigned enable = 0; enable < 2; ++enable)
+    for (unsigned ccw_front = 0; ccw_front < 2; ++ccw_front)
+    for (unsigned f = 0; f < 3; ++f)
+    for (unsigned reverse = 0; reverse < 2; ++reverse) {
+        setup(MENU_BLEND_OPAQUE);
+        st.cull_enable = enable; st.cull_face = faces[f];
+        st.front_face = 0x900 + ccw_front;
+        st.zpass_count = 1; menu_raster_zpass = 0;
+        uint32_t depth[64]; for (unsigned i = 0; i < 64; ++i) depth[i] = 0xffffff5a;
+        st.depth = (menu_depth){depth, 8, 8, 32, 0x201, 1};
+        int front = reverse == ccw_front;
+        int discarded = enable && (f == 2 || (f == 0 ? front : !front));
+        menu_raster_triangle(&st, &a, reverse ? &c : &b, reverse ? &b : &c);
+        assert(R(1, 1) == (discarded ? 0 : 255));
+        assert(depth[9] == (discarded ? 0xffffff5a : 0x5a));
+        assert((menu_raster_zpass == 0) == discarded);
+        if (discarded) {
+            for (unsigned i = 0; i < sizeof buf; ++i) assert(buf[i] == 0);
+            for (unsigned i = 0; i < 64; ++i) assert(depth[i] == 0xffffff5a);
+        }
+    }
+}
+
 int main(void)
 {
+    test_face_culling();
     test_texel_coords();
     test_unused_unit_is_zero();
     test_depth_tolerance();

@@ -16,7 +16,10 @@ color mask still submits the draw, preserving depth and visibility work.
 fragment lookup/creation function. The old setup fails the channel-mask oracle;
 the corrected version passes all 16 combinations, repeated bindings, revisiting
 earlier variants, and shader-registration sharing. Normal and ASan/UBSan runs
-pass. GXM calls are host doubles: actual pixels still need visual validation.
+pass. GXM calls in these tests are host doubles. A subsequent isolated Vita3K
+run reached the profile screen and main menu with normal Start/Cross input,
+without a guest guard stop. Background striping and overlapping geometry
+remained visible: the mask correction alone does not fix that corruption.
 The software fallback's separate channel-write behavior is not changed here.
 
 ## Investigation evidence

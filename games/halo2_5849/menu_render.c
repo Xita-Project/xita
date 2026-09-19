@@ -304,6 +304,9 @@ static int software_body(void *opaque, const h2_menu_request *r, uint8_t *ab_bef
     }
     rs.alpha_test = s->setup[0x300 / 4] & 1;
     rs.zpass_count = s->zpass_enable != 0;
+    rs.cull_enable = s->setup[0x308 / 4] != 0;
+    rs.cull_face = s->setup[0x39C / 4];
+    rs.front_face = s->setup[0x3A0 / 4];
     rs.alpha_func = s->setup[0x33C / 4];
     rs.alpha_ref = (float)(s->setup[0x340 / 4] & 0xFF) / 255.0f;
     static int depth_knob = -1, pool_knob = -1;

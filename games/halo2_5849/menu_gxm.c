@@ -698,6 +698,22 @@ static int render_body(void *opaque, const h2_menu_request *r)
     if (ni < 3) return 1;
 
     /* state */
+    /* Vertex programs produce Xbox window coordinates. The shader's Y flip
+     * and the negative GXM viewport scale cancel, preserving screen winding.
+     * NV097 selects front/back relative to SET_FRONT_FACE; GXM selects the
+     * winding to discard directly. Reset this on every draw (including UI). */
+    SceGxmCullMode cull = SCE_GXM_CULL_NONE;
+    int cull_all = 0;
+    if (s->setup[0x308 / 4]) {
+        uint32_t face = s->setup[0x39C / 4];
+        int front_cw = s->setup[0x3A0 / 4] == 0x900;
+        if (face == 0x408) cull_all = 1;
+        else if (face == 0x404 || face == 0x405) {
+            int discard_cw = face == 0x404 ? front_cw : !front_cw;
+            cull = discard_cw ? SCE_GXM_CULL_CW : SCE_GXM_CULL_CCW;
+        }
+    }
+    sceGxmSetCullMode(g_ctx, cull);
     sceGxmSetVertexProgram(g_ctx, vs->prog); sceGxmSetFragmentProgram(g_ctx, fs->prog);
     SceGxmDepthFunc dfn = SCE_GXM_DEPTH_FUNC_ALWAYS;
     if (s->setup[0x30C / 4]) {
@@ -711,7 +727,7 @@ static int render_body(void *opaque, const h2_menu_request *r)
     SceGxmDepthWriteMode dw = (s->setup[0x30C / 4] && (s->setup[0x35C / 4] & 1)) ? SCE_GXM_DEPTH_WRITE_ENABLED : SCE_GXM_DEPTH_WRITE_DISABLED;
     sceGxmSetFrontDepthFunc(g_ctx, dfn); sceGxmSetBackDepthFunc(g_ctx, dfn);
     sceGxmSetFrontDepthWriteEnable(g_ctx, dw); sceGxmSetBackDepthWriteEnable(g_ctx, dw);
-    sceGxmSetRegionClip(g_ctx, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, W - 1, H - 1);
+    sceGxmSetRegionClip(g_ctx, cull_all ? SCE_GXM_REGION_CLIP_ALL : SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, W - 1, H - 1);
     {   /* Z-pass pixel count: slot 0 accumulates while NV097_SET_ZPASS_PIXEL_COUNT_ENABLE is set */
         SceGxmVisibilityTestMode vm = s->zpass_enable ? SCE_GXM_VISIBILITY_TEST_ENABLED : SCE_GXM_VISIBILITY_TEST_DISABLED;
         sceGxmSetFrontVisibilityTestIndex(g_ctx, 0); sceGxmSetBackVisibilityTestIndex(g_ctx, 0);

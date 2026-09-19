@@ -55,6 +55,8 @@ typedef struct menu_raster_state {
     menu_depth depth;
     int32_t clip_x0, clip_y0, clip_x1, clip_y1; /* inclusive scissor in pixels */
     int zpass_count;               /* NV097_SET_ZPASS_PIXEL_COUNT_ENABLE: count written fragments */
+    int cull_enable;
+    uint32_t cull_face, front_face; /* NV097 GL FRONT/BACK/BOTH and CW/CCW */
 } menu_raster_state;
 /* Fragments that passed every test while zpass_count was set (Z-pass pixel count query). */
 extern uint64_t menu_raster_zpass;
