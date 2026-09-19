@@ -3,6 +3,12 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#ifndef XV_VERTEX_WIDE_COMPARE
+#define XV_VERTEX_WIDE_COMPARE 0
+#endif
+#if XV_VERTEX_WIDE_COMPARE != 0 && XV_VERTEX_WIDE_COMPARE != 1
+#error XV_VERTEX_WIDE_COMPARE must be 0 or 1
+#endif
 #if defined(__ARM_NEON)
 #include <arm_neon.h>
 #endif
@@ -46,6 +52,39 @@ static inline int xv_bytes_equal_blocks(const void *left, const void *right, siz
 #if defined(__ARM_NEON)
     const uint8_t *a = left, *b = right;
     if (a == b) return 1;
+#if XV_VERTEX_WIDE_COMPARE
+    /* Keep the first block's early-out for frequently changed inputs. Equal
+     * long spans fold four bounded groups before NEON-to-ARM reduction. */
+    if(bytes>=320) {
+        {
+            uint8x16x4_t av = vld1q_u8_x4(a), bv = vld1q_u8_x4(b);
+            uint8x16_t d0 = veorq_u8(av.val[0], bv.val[0]);
+            uint8x16_t d1 = veorq_u8(av.val[1], bv.val[1]);
+            uint8x16_t d2 = veorq_u8(av.val[2], bv.val[2]);
+            uint8x16_t d3 = veorq_u8(av.val[3], bv.val[3]);
+            uint8x16_t d = vorrq_u8(vorrq_u8(d0,d1), vorrq_u8(d2,d3));
+            uint32x2_t reduced = vreinterpret_u32_u8(vorr_u8(vget_low_u8(d), vget_high_u8(d)));
+            if (vget_lane_u32(vpmax_u32(reduced,reduced),0)) return 0;
+            a += 64; b += 64; bytes -= 64;
+    }
+        while(bytes>=256) {
+            uint8x16_t d0=vdupq_n_u8(0),d1=d0,d2=d0,d3=d0;
+            #pragma GCC unroll 4
+            for(unsigned i=0;i<4;i++) {
+                uint8x16x4_t av=vld1q_u8_x4(a),bv=vld1q_u8_x4(b);
+                d0=vorrq_u8(d0,veorq_u8(av.val[0],bv.val[0]));
+                d1=vorrq_u8(d1,veorq_u8(av.val[1],bv.val[1]));
+                d2=vorrq_u8(d2,veorq_u8(av.val[2],bv.val[2]));
+                d3=vorrq_u8(d3,veorq_u8(av.val[3],bv.val[3]));
+                a+=64;b+=64;
+            }
+            uint8x16_t d=vorrq_u8(vorrq_u8(d0,d1),vorrq_u8(d2,d3));
+            uint32x2_t reduced=vreinterpret_u32_u8(vorr_u8(vget_low_u8(d),vget_high_u8(d)));
+            if(vget_lane_u32(vpmax_u32(reduced,reduced),0))return 0;
+            bytes-=256;
+        }
+    }
+#endif
     while (bytes >= 64) {
         uint8x16x4_t av = vld1q_u8_x4(a), bv = vld1q_u8_x4(b);
         uint8x16_t d0 = veorq_u8(av.val[0], bv.val[0]);

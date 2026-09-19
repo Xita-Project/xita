@@ -336,6 +336,24 @@ $(BUILD)/vertex-persistent.config: force-vertex-persistent-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/vertex-persistent.config runtime/xv_vertex_persistent.h
+# Exact wide comparison, limited to the two vertex preparation owners.
+XV_VERTEX_WIDE_COMPARE ?= 0
+ifneq ($(words $(XV_VERTEX_WIDE_COMPARE)),1)
+$(error XV_VERTEX_WIDE_COMPARE must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_WIDE_COMPARE),0 1),$(XV_VERTEX_WIDE_COMPARE))
+$(error XV_VERTEX_WIDE_COMPARE must be 0 or 1)
+endif
+VERTEX_WIDE_OBJECTS := $(BUILD)/runtime/xv_vertex_capture.o $(BUILD)/runtime/xv_vertex_upload.o
+$(VERTEX_WIDE_OBJECTS): CFLAGS += -DXV_VERTEX_WIDE_COMPARE=$(XV_VERTEX_WIDE_COMPARE)
+.PHONY: force-vertex-wide-config
+force-vertex-wide-config:
+$(BUILD)/vertex-wide.config: force-vertex-wide-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_VERTEX_WIDE_COMPARE)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(VERTEX_WIDE_OBJECTS): $(BUILD)/vertex-wide.config
 XV_VERTEX_CAPTURE_PACKED ?= 0
 ifneq ($(words $(XV_VERTEX_CAPTURE_PACKED)),1)
 $(error XV_VERTEX_CAPTURE_PACKED must be 0 or 1)

@@ -10,13 +10,16 @@ from unicorn.arm_const import *
 root=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--blocks',action='store_true',help='Also check the experimental multi-vector loads against the original comparator')
+parser.add_argument('--wide',action='store_true',help='Enable the optional 256-byte equality reduction')
 parser.add_argument('--baseline-elf',required=True,type=Path)
 parser.add_argument('--output-dir',required=True,type=Path)
-args=parser.parse_args();out=args.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
+args=parser.parse_args()
+if args.wide and not args.blocks:parser.error('--wide requires --blocks to exercise the wide comparator')
+out=args.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
 wrapper=out/'wrapper.c';binary=out/'bytes-equal-arm.elf'
 wrapper.write_text('#include "runtime/xv_bytes_equal.h"\nint test_equal(const void *a,const void *b,unsigned n,unsigned blocks) { '+
                   ('return blocks ? xv_bytes_equal_blocks(a,b,n) : xv_bytes_equal(a,b,n);' if args.blocks else 'return xv_bytes_equal(a,b,n);')+' }\n')
-subprocess.run(['arm-vita-eabi-gcc','-O2','-mthumb','-mcpu=cortex-a9','-mfpu=neon','-ffreestanding','-fno-builtin','-nostdlib','-I',str(root),str(wrapper),'-Wl,-Ttext=0x10000,-e,test_equal','-o',str(binary)],check=True)
+subprocess.run(['arm-vita-eabi-gcc','-O2','-mthumb','-mcpu=cortex-a9','-mfpu=neon','-ffreestanding','-fno-builtin','-nostdlib','-I',str(root),f'-DXV_VERTEX_WIDE_COMPARE={int(args.wide)}',str(wrapper),'-Wl,-Ttext=0x10000,-e,test_equal','-o',str(binary)],check=True)
 uc=Uc(UC_ARCH_ARM,UC_MODE_ARM);uc.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_A9)
 uc.reg_write(UC_ARM_REG_C1_C0_2,15<<20);uc.reg_write(UC_ARM_REG_FPEXC,1<<30)
 functions={}
@@ -68,13 +71,21 @@ for n in [0,1,2,3,4,7,15,16,17,31,32,33,47,48,49,63,64,65,79,80,81,127,128,129,2
    if n:case(n,oa,ob,rng.randrange(n))
 for n in range(1,130):
  for position in range(n):case(n,n%16,(n*7)%16,position)
+if args.wide:
+ for n in [319,320,321,575,576,577]:
+  for oa in range(16):
+   for ob in range(16):
+    case(n,oa,ob,None)
+    case(n,oa,ob,rng.randrange(n))
+ for n in [320,321,512,513,576,1024]:
+  for position in range(n):case(n,n%16,(n*7)%16,position)
 for n in [511,512,513,1023,1024,1025,4095,4096,4097,65535,65536]:
  for pos in [None,0,n//2,n-1]:case(n,rng.randrange(16),rng.randrange(16),pos)
 for name in ('test_equal','block_equal') if args.blocks else ('test_equal',):
  assert invoke(name,0,0,0)
  assert invoke(name,A,A,4096)
 # Pages immediately after input are unmapped. Neither routine may overread.
-for n in [1,15,16,17,63,64,65,255,256,257,4096]:
+for n in [1,15,16,17,63,64,65,255,256,257,319,320,321,575,576,577,4096]:
  a=A+CAP-n;b=B+CAP-n;data=rng.randbytes(n);uc.mem_write(a,data);uc.mem_write(b,data)
  for name in functions:assert invoke(name,a,b,n)
 # Dynamic instruction counts only: these are not CPU cycles or hardware time.
@@ -86,5 +97,5 @@ for n in [16,64,256,4096,65536]:
   instructions=0;assert invoke(name,A,B,n);assert instructions>0;row[name+'_instructions']=instructions
  rows.append(row)
 uc.hook_del(hook)
-report={'cases':cases,'native_calls':native_calls,'bounds_faults':faults,'seconds':time.monotonic()-started,'instruction_counts_not_cycles':rows,'functions':functions,'header_sha256':hashlib.sha256((root/'runtime/xv_bytes_equal.h').read_bytes()).hexdigest(),'baseline_elf_sha256':hashlib.sha256(args.baseline_elf.read_bytes()).hexdigest()}
+report={'wide':args.wide,'cases':cases,'native_calls':native_calls,'bounds_faults':faults,'seconds':time.monotonic()-started,'instruction_counts_not_cycles':rows,'functions':functions,'header_sha256':hashlib.sha256((root/'runtime/xv_bytes_equal.h').read_bytes()).hexdigest(),'baseline_elf_sha256':hashlib.sha256(args.baseline_elf.read_bytes()).hexdigest()}
 (out/'results.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))
