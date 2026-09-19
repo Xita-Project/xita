@@ -146,7 +146,7 @@ def main():
                 checks = dict(context=bytes(m.uc.mem_read(m.context, m.layout['size'])) == expected_context,
                               memory=bytes(m.uc.mem_read(RAM, SIZE)) == expected_memory,
                               fpscr=candidate['fpscr'] == original['fpscr'],
-                              admission=row['admitted'] == (0 if n == 1 or tweak in (1, 2, 3, 5) else 1))
+                              admission=row['admitted'] == (0 if n == 1 or tweak in (1, 2, 3, 5, 6) else 1))
                 if not all(checks.values()):
                     (a.out / 'failure.json').write_text(json.dumps(dict(row, checks=checks), indent=2))
                     raise AssertionError((row, checks))
@@ -172,7 +172,7 @@ def main():
         assert bytes(m.uc.mem_read(m.context, m.layout['size'])) == expected_context
         assert bytes(m.uc.mem_read(RAM, SIZE)) == expected_memory
         assert candidate['fpscr'] == original['fpscr']
-        assert struct.unpack('<I', m.uc.mem_read(m.symbols['arm_admitted'], 4))[0] == 1
+        assert struct.unpack('<I', m.uc.mem_read(m.symbols['arm_admitted'], 4))[0] == (0 if tweak == 6 else 1)
         assert bytes(m.uc.mem_read(m.symbols['arm_allocations'], 4)) == allocations
     print('PASS three changed-input queries reuse one geometry snapshot without allocations')
     print('PASS', len(rows), 'full context/memory/FPSCR comparisons; kernel calls and real allocation overhead excluded')

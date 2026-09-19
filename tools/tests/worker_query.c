@@ -338,13 +338,20 @@ int main(int argc,char **argv)
     assert(fegetround()==FE_DOWNWARD&&fetestexcept(FE_ALL_EXCEPT)==owner_flags);
     }
 #endif
-    if(mode==0){assert(ready_count>
+    if(mode==0){
 #ifdef XV_TYPED_CLUSTER_QUERY
-        64 /* Nonpositive/nonfinite and invalid-start inputs use the original. */
+        /* Both lanes traverse eligible fixture inputs. Three formerly admitted
+         * batches have distant centers and now deliberately use the original. */
+        unsigned expected_ready=0;
+        for(unsigned k=0;k<168;k++)
+            if((k/7)%4 && (k%7==0||k%7==3) && k%13 && k%11)
+                expected_ready+=2;
+        assert(ready_count==expected_ready);
 #else
-        100
+        assert(ready_count>100);
 #endif
-        &&lane_seen[0]&&lane_seen[1]);}
+        assert(lane_seen[0]&&lane_seen[1]);
+    }
     if(mode==1)assert(!ready_count);
     if(mode==3)assert(mutation_count==
 #ifdef XV_TYPED_CLUSTER_QUERY

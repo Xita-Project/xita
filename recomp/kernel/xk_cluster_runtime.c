@@ -256,6 +256,24 @@ static void publish(Lane *v,xctx *c,uint32_t entry_epoch)
     }
     *c=v->replay.context;fesetenv(&v->result_fp);
 }
+/* Admission only: declining always runs the untouched original. Bound work
+ * for high-degree clusters and use owned geometry, never live guest pointers. */
+static int worthwhile_start(const XvClusterGeometry *g,unsigned start,
+                            const float center[3],float radius)
+{
+    if(start>=g->cluster_count)return 0;
+    const XvCluster *c=&g->clusters[start];
+    if(c->count>4)return 1;
+    for(unsigned i=0;i<c->count;i++){
+        const XvPortal *p=&g->portals[g->adjacency[c->first+i]];
+        double x=(double)p->center[0]-center[0];
+        double y=(double)p->center[1]-center[1];
+        double z=(double)p->center[2]-center[2];
+        double reach=(double)radius+p->radius;
+        if(reach*reach>(z*z+x*x)+y*y)return 1;
+    }
+    return 0;
+}
 int xv_worker_query(xctx *c,int guard)
 {
     extern int xv_watch_n __attribute__((weak)),xv_trace_funcs __attribute__((weak));
@@ -286,6 +304,11 @@ int xv_worker_query(xctx *c,int guard)
        !add_span(v,0x2d2fb0,1024,0)||!add_span(v,0x2d2fac,4,1)||!add_span(v,0x2d2fa9,1,1))goto decline;
     reason=T_INPUT;
     if(!read_input(v,c->r[0],v->start,6)||!read_input(v,v->args[3],v->center,12))goto decline;
+    float admission_radius;memcpy(&admission_radius,&v->args[4],4);
+    int worthwhile=worthwhile_start(xv_cluster_snapshot_geometry(batch.snapshot),
+                                   start_cluster,v->center,admission_radius);
+    fesetenv(&v->entry_fp);
+    if(!worthwhile){v->bypassed++;return 0;}
     for(unsigned i=0;i<batch.visited_spans;i++)
         if(pointer(batch.visited[i].address,batch.visited[i].bytes,0)!=batch.visited[i].pointer)goto decline;
     copy_visited(v->visited);

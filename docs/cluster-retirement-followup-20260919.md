@@ -105,3 +105,29 @@ counts are 36,080 versus 37,927 original (7 clusters), 140,542 versus 174,455
 Construction is unchanged. The tiny first-reject case still regresses at 12,772
 versus 3,128, so useful admission is still needed. No hardware FPS gain is claimed.
 Outputs: `cluster-source-single-validation/` and `cluster-source-single-host/`.
+
+### Bounded query admission
+
+The adapter now checks up to four starting-portal bounding spheres before doing
+visited capture and replay. If none intersects the query sphere it declines to
+the untouched original function. Higher-degree starts are admitted immediately,
+bounding this heuristic's overhead. The check reads owned geometry only and
+restores the incoming floating-point environment on both admission and rejection.
+Stale geometry can affect path selection, but successful publication still requires
+complete source validation; rejection never changes the guest result.
+
+The synthetic first-reject path now costs 5,134 ARM instructions including the
+original fallback, down from 12,772 without admission. Original alone costs
+3,128, so overhead is reduced, not eliminated. The traversing seven-cluster case
+is 36,194 versus 37,927 original; thirty clusters is 140,688 versus 174,455.
+Construction remains 14,938 and 57,926 instructions respectively, per batch.
+These figures cannot be translated directly into FPS.
+
+All 14 quick ARM equivalence cases and the three-query snapshot reuse sequence
+pass. Nine ASan/UBSan worker modes pass. The normal fixture now verifies exactly
+62 admitted queries (31 per lane) across 336 full context/memory comparisons;
+six formerly admitted distant-center queries intentionally use the original.
+Mutation, remapping and concurrent guard checks retain their previous coverage.
+Private results: `cluster-admission-arm/` and `cluster-admission-host/`.
+The prototype remains disabled on hardware; batch construction/amortization and
+real query distribution must be accounted for before claiming useful savings.
