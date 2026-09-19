@@ -1,5 +1,5 @@
-/* Experimental guarded typed query. No worker unlock, asynchronous publication
- * or unchecked persistent map cache. The ordinary build does not compile this unit. */
+/* Experimental typed query with optional private-calculation overlap. Shared
+ * publication remains guarded. Ordinary builds do not compile this unit. */
 #if defined(XV_TYPED_CLUSTER_QUERY) && defined(XV_WORKER_QUERY)
 #include "xk.h"
 #include "xk_worker_query.h"
@@ -411,8 +411,17 @@ int xv_worker_query(xctx *c,int guard)
     XvClusterReplayLayout layout;
     if(!xv_cluster_snapshot_replay_layout(batch.snapshot,v->args[3],v->args[2],&layout))goto decline;
     reason=T_NUMERIC;
-    if(!xv_cluster_query_replay(xv_cluster_snapshot_geometry(batch.snapshot),&in,&layout,c,&v->result,&v->replay))goto decline;
+    const XvClusterGeometry *geometry=xv_cluster_snapshot_geometry(batch.snapshot);
+    int suspended=xv_object_query_suspend(c,guard);
+#ifdef XV_QUERY_OVERLAP_TEST
+    if(suspended){extern void xv_worker_query_test_private(xctx *);xv_worker_query_test_private(c);}
+#endif
+    /* Only owned geometry and lane-private captures may be read while unlocked. */
+    int computed=xv_cluster_query_replay(geometry,&in,&layout,&v->entry,&v->result,&v->replay);
     fegetenv(&v->result_fp);fesetenv(&v->entry_fp);
+    xv_object_query_resume(suspended);
+    fesetenv(&v->entry_fp);
+    if(!computed)goto decline;
 #ifdef XV_WORKER_QUERY_TEST
     extern void xv_worker_query_test_ready(xctx *,unsigned);
     xv_worker_query_test_ready(c,(unsigned)lane);

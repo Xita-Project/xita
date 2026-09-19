@@ -43,6 +43,7 @@ def main():
     for name in ('xbe', 'manifest', 'out'):
         p.add_argument('--' + name, type=Path, required=True)
     p.add_argument('--sanitize', choices=('address', 'thread'))
+    p.add_argument('--overlap', action='store_true')
     p.add_argument('--arm', action='store_true')
     p.add_argument('--census', action='store_true', help='verify original-prefix workload counters through the actual pool')
     p.add_argument('--mode', action='append')
@@ -55,6 +56,8 @@ def main():
              '-I' + str(ROOT / 'recomp'), '-I' + str(ROOT / 'recomp/kernel'), '-I' + str(a.out)]
     runtime = [ROOT / 'recomp/kernel' / (name + '.c') for name in
                ('xk_cluster_runtime', 'xk_cluster_snapshot', 'xk_cluster_query', 'xk_cluster_query_replay')]
+    if a.overlap:
+        flags += ['-DXV_QUERY_OVERLAP_DEFAULT=1', '-DXV_QUERY_OVERLAP_TEST']
     if a.census:
         flags += ['-DXV_LIGHT_QUERY_CENSUS', '-DXV_QUERY_WORK_TEST']
         runtime.append(ROOT / 'recomp/kernel/xk_light_census.c')
@@ -75,7 +78,7 @@ def main():
                str(ROOT / 'recomp/xv_x86rt.c'), '-pthread', '-Wl,--gc-sections', '-lm', '-o', str(binary)]
     (a.out / 'command.json').write_text(json.dumps(command, indent=2) + '\n')
     subprocess.run(command, check=True)
-    for mode in a.mode or ('normal', 'disabled', 'alias', 'mutation', 'parking', 'concurrent', 'source', 'inflight', 'budget'):
+    for mode in a.mode or ('normal', 'disabled', 'alias', 'mutation', 'parking', 'concurrent', 'source', 'inflight', 'budget') + (('overlap',) if a.overlap else ()):
         run = subprocess.run([str(binary), mode], capture_output=True, text=True, timeout=120,
                              env=dict(os.environ, ASAN_OPTIONS='detect_leaks=0'))
         (a.out / (mode + '.log')).write_text(run.stdout + run.stderr)

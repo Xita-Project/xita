@@ -155,6 +155,21 @@ static void mutate(xctx *c,unsigned kind)
     case 10:w32(0x2d2fb0+4*30,101);break; /* last live stamp, second page */
     }
 }
+#ifdef XV_QUERY_OVERLAP_TEST
+static unsigned private_visits,private_pairs;
+void xv_worker_query_test_private(xctx *c)
+{
+    int lane=worker_lane();assert(lane>=0&&c==&contexts[lane]&&!math_depth[lane]);
+    assert(query_private_active[lane]);
+    __atomic_add_fetch(&private_visits,1,__ATOMIC_RELAXED);
+    if(mode==9){
+        int b=pthread_barrier_wait(&rendezvous);assert(!b||b==PTHREAD_BARRIER_SERIAL_THREAD);
+        /* Both lanes reached the unlocked private phase before either resumes. */
+        if(!lane)__atomic_add_fetch(&private_pairs,1,__ATOMIC_RELAXED);
+        b=pthread_barrier_wait(&rendezvous);assert(!b||b==PTHREAD_BARRIER_SERIAL_THREAD);
+    }
+}
+#endif
 void xv_worker_query_test_ready(xctx *c,unsigned lane)
 {
     assert(lane<2&&worker_lane()==(int)lane&&c==&contexts[lane]&&math_depth[lane]==1);
@@ -238,8 +253,8 @@ void f_0008FB70(xctx *c)
             assert(xv_worker_query(c,xv_object_math_locked_));ref_commit(c);
 #endif
         }
-    }else if(mode==6){
-        if(id){wait_flag(&query_held);assert(xv_object_mutex_try(&math_mutex)!=0);__atomic_store_n(&query_tried,1,__ATOMIC_RELEASE);}
+    }else if(mode==6||mode==9){
+        if(mode==6&&id){wait_flag(&query_held);assert(xv_object_mutex_try(&math_mutex)!=0);__atomic_store_n(&query_tried,1,__ATOMIC_RELEASE);}
         for(unsigned k=0;k<64;k++){
             c->r[4]=sp;c->r[3]=LISTS;X_PUSH32(LIGHTS+id*4);X_PUSH32(0x80000000u+id);X_PUSH32(0x8d7ff);f_000565E0(c);assert(c->r[4]==sp);
             prepare(c,sp,7);c->df=0;w32(sp+4,0x80000000u+id);w32(sp+8,LIGHTS+id*4);f_00056670(c);assert(c->r[4]==sp+20);
@@ -299,7 +314,7 @@ void f_0008FB70(xctx *c)
 }
 int main(int argc,char **argv)
 {
-    assert(argc==2);char *names[]={"normal","disabled","alias","mutation","parking","budget","concurrent","source","inflight"};for(mode=0;mode<9&&strcmp(argv[1],names[mode]);mode++){}assert(mode<9);
+    assert(argc==2);char *names[]={"normal","disabled","alias","mutation","parking","budget","concurrent","source","inflight","overlap"};for(mode=0;mode<10&&strcmp(argv[1],names[mode]);mode++){}assert(mode<10);
     setenv("XV_WORKER_QUERY",mode==1?"invalid":"1",1);
     g_xram=calloc(1,ARENA);g_img_base=g_xram+RAM;g_xpt=calloc(1<<20,4);before=malloc(ARENA);expected=malloc(ARENA);
     for(unsigned i=0;i<RAM/4096;i++)g_xpt[i]=(i^1u)*4096;
@@ -362,8 +377,8 @@ int main(int argc,char **argv)
     );
     if(mode==4)assert(service_done);
     if(mode==8)assert(service_done&&ready_count==1&&query_held);
-    if(mode==6){
-        assert(query_tried&&ready_count==128&&X_IMG32(0x2d2fac)==228);
+    if(mode==6||mode==9){
+        assert((mode==9||query_tried)&&ready_count==128&&X_IMG32(0x2d2fac)==228);
         assert(X_M16(POOL0+0x30)==14&&X_M16(POOL1+0x30)==14);
         for(unsigned k=0;k<7;k++){
             unsigned node=X_M32(HEADS+4*k),seen=0;
@@ -392,7 +407,11 @@ int main(int argc,char **argv)
     assert(xv_light_census_take(&census_test_owner.ctx,&measured,0));
     for(unsigned i=0;i<3;i++)assert(!measured.query_work[i].entered);
 #endif
+#ifdef XV_QUERY_OVERLAP_TEST
+    if(mode==0||mode==6||mode==9)assert(private_visits);
+    if(mode==9)assert(private_pairs==64&&private_visits==128);
+#endif
     xv_object_jobs_report(1);xv_object_jobs_shutdown();
-    printf("%u exact comparisons; %u private-ready visits; lanes %u/%u; mutations %u; guard retained\n",comparisons,ready_count,lane_seen[0],lane_seen[1],mutation_count);
+    printf("%u exact comparisons; %u private-ready visits; lanes %u/%u; mutations %u; guard restored at publication\n",comparisons,ready_count,lane_seen[0],lane_seen[1],mutation_count);
     free(before);free(expected);free(g_xram);free(g_xpt);return 0;
 }

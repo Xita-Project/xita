@@ -282,3 +282,32 @@ The next concurrency boundary to investigate is only private query calculation
 between guarded capture and guarded validation/publication. The original list
 allocation tail and outer actor/collision transactions must remain protected.
 Current perf.31 still retains the guard throughout; it does not test overlap.
+
+### Private query overlap prototype (not installed)
+
+`XV_QUERY_OVERLAP=1` in the runtime environment enables an additional typed-only
+experiment; it defaults off. The adapter captures entry/input/visited state
+under the original depth-one guard, borrows the immutable snapshot retained
+through worker join, releases the guard for private replay, then reacquires via
+the existing park-aware lock path. Replay now explicitly reads the captured
+entry context, not the live worker context. No live geometry, list allocator,
+owner callback or publication occurs in the unlocked section.
+
+Both successful and declined numerical calculations reacquire before returning.
+The result FP environment is captured before reacquisition, and the entry FP
+environment is restored afterward. Existing source/epoch/visited/input/context
+validation decides publication; a competing query can cause fallback to original
+execution under the guard. No epoch rebasing is attempted. Nested scopes and
+active hold sampling cannot suspend. The caller retains its original cleanup
+token and restored lock depth through the unchanged allocation/list tail.
+
+All nine existing ASan/UBSan worker modes pass with overlap enabled. A new mode
+uses a barrier to require both workers to reach the unlocked phase before either
+resumes, across 64 pairs / 128 queries. It verifies final epoch and both lights'
+list membership, not complete whole-world equivalence. The normal modes retain
+full context/arena/FP comparisons. The overlap, owner-parking and in-flight
+invalidation modes also pass TSan; Vita ARM compilation passes. This establishes
+the tested ownership/synchronization mechanics, not real performance or broad
+gameplay safety. Perf.31 on the Vita still holds the guard during calculation.
+Private receipts: `cluster-overlap-host/`, `cluster-overlap-pairs/`,
+`cluster-overlap-tsan/` and `cluster-overlap-compile/`.

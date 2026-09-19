@@ -1224,6 +1224,28 @@ int xv_object_query_lane(xctx *c,int guard,uint32_t base,unsigned bytes)
 }
 #endif
 #ifdef XV_TYPED_CLUSTER_QUERY
+static unsigned query_overlap_enabled,query_private_active[WORKERS];
+int xv_object_query_suspend(xctx *c,int guard)
+{
+    if(!query_overlap_enabled)return 0;
+    int lane=worker_lane();
+    if(lane<0||c!=&contexts[lane]||guard!=lane+2||math_depth[lane]!=1||
+       !xv_is_object_job(c)||query_private_active[lane])return 0;
+#ifdef XV_OBJECT_HOLD_PROFILE
+    if(hold_enabled)return 0;
+#endif
+    query_private_active[lane]=1;
+    int enclosing=guard;xv_object_math_unlock(&enclosing);return lane+1;
+}
+void xv_object_query_resume(int token)
+{
+    if(!token)return;
+    int lane=worker_lane();
+    if(lane<0||token!=lane+1||!query_private_active[lane]||math_depth[lane])abort();
+    int enclosing=xv_object_math_lock();
+    if(enclosing!=lane+2||math_depth[lane]!=1)abort();
+    query_private_active[lane]=0;
+}
 int xv_object_query_private(xctx *c,int guard,uint32_t address,unsigned bytes)
 {
     int lane=worker_lane();
@@ -1481,6 +1503,14 @@ static int initialize(void)
 #endif
     query_enabled=query?!strcmp(query,"1"):XV_WORKER_QUERY_DEFAULT;
     XK_LOG("[typed-query-config] enabled %u; guarded experimental adapter\n",query_enabled);
+#ifdef XV_TYPED_CLUSTER_QUERY
+#ifndef XV_QUERY_OVERLAP_DEFAULT
+#define XV_QUERY_OVERLAP_DEFAULT 0
+#endif
+    const char *overlap=getenv("XV_QUERY_OVERLAP");
+    query_overlap_enabled=overlap?!strcmp(overlap,"1"):XV_QUERY_OVERLAP_DEFAULT;
+    XK_LOG("[typed-query-config] private overlap %u\n",query_overlap_enabled);
+#endif
 #endif
     const char *profile=getenv("XV_OBJECT_LOCK_PROFILE");
     /* Dedicated experimental builds collect contention by default. Set zero
