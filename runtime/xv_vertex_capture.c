@@ -86,7 +86,7 @@ static void cap_reuse_reset(void)
 static void cap_reuse_retire(void)
 {
     if(cap_retain_enabled<0)
-        cap_retain_enabled=xv_quality_int("XV_VERTEX_CAPTURE_RETAIN",1,0,1);
+        cap_retain_enabled=xv_quality_int("XV_VERTEX_CAPTURE_RETAIN",0,0,1);
     if(cap_reuse_enabled!=1 || !cap_retain_enabled || !cap_entry_count) {
         cap_used=0;cap_reuse_reset();return;
     }

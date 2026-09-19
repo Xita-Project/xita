@@ -3,8 +3,8 @@
 This source candidate retains the capture arena's immutable CPU snapshots across
 joined drains. Every reuse still compares the current guest inputs exactly.
 It does not assume map/model memory is immutable, retain old GPU addresses,
-or bypass upload preparation and slot retirement. Hardware performance is
-unverified.
+or bypass upload preparation and slot retirement. The first hardware run
+showed higher recording-side cost, so retention is now disabled by default.
 
 The preceding campaign captures spend about 6 ms per frame on recording-side
 vertex capture. Representative 60-frame windows stage roughly 25–27 MiB even
@@ -30,8 +30,9 @@ packing follows the original path. Shutdown clears all identities. Pending GPU
 copies use the separate uploader mirror; its copy tickets and GPU retirement
 remain unchanged.
 
-Retention is enabled inside the existing opt-in `XV_VERTEX_CAPTURE_REUSE=1`
-build. `XV_VERTEX_CAPTURE_RETAIN=0` at process startup restores discard-on-drain.
+Retention requires the existing opt-in `XV_VERTEX_CAPTURE_REUSE=1`
+build and explicit process-start `XV_VERTEX_CAPTURE_RETAIN=1`. By default,
+drains discard CPU snapshots as before.
 Builds without capture reuse retain the original behavior. The periodic
 `[vertex-capture-retain]` report counts first exact hits after drains, avoided
 staging writes, and arena reclaims. These counts are not GPU time or FPS.
@@ -54,7 +55,24 @@ retains GPU results across drain fails the observable returned-geometry test.
 
 Private receipts are `retain-{normal,asan,tsan}.log` and
 `retained-capture-negative/result.json` under the unified-games workspace.
-Next: build the cumulative executable, verify actual boot identity, and measure
-retained-hit traffic, arena pressure and complete campaign frame times. Added
-comparisons and longer hash chains can offset avoided copies; no FPS gain is
-claimed before that run.
+## Hardware result and default
+
+The combined `0.2.0-perf.6 / d8a3b61+` boot was verified on the physical Vita,
+runtime SHA-256 `a074ca30dfb4adbbedfc5b69add9428f0e08ff8f89eaa7b0477167760e2bfcdb`.
+It adds this retention and exact model fog reuse to the cumulative perf.5 stack.
+Ordinary menus restore the same New001 checkpoint; no built-in benchmark runs.
+
+The last twelve full-tick 60-frame windows show median 4,293 retained hits and
+26,610.5 KiB of staging writes avoided per window, with zero arena reclaims.
+However, recording-side capture rises from roughly 5.92 to 9.95 ms/frame;
+stream preparation rises from 6.72 to 10.81 ms/frame. Overall median frame time
+is 80.20 ms (12.45 displayed FPS), versus perf.5's 78.30 ms (12.8 FPS).
+Draw counts differ slightly (152 versus 148.5), and live NPCs are not a
+deterministic replay. These samples nevertheless show that removing copies
+alone is not a win: the extra exact comparisons add substantial owner work.
+Worker preparation remains necessary to validate retired GPU storage.
+
+Keep the implementation and lifetime checks for further work, but require an
+explicit opt-in. Preserve all earlier optimizations and test the model fog
+change separately in the next cumulative build. Private captures and the
+selection summary are in `ce-perf6/`.

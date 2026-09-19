@@ -454,6 +454,7 @@ static void capture_reuse_failure(void)
 }
 static void capture_retained_generations(void)
 {
+    setenv("XV_VERTEX_CAPTURE_RETAIN","1",1);
     unsigned char *guest=mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0);
     assert(guest!=MAP_FAILED);
     unsigned char expected[512],filler[512];
@@ -491,11 +492,14 @@ static void capture_retained_generations(void)
     setenv("XV_VERTEX_CAPTURE_RETAIN","0",1);
     output off={0};assert(capture(0,expected,sizeof expected,16,NULL,0,&off));join(0);
     assert(off.ok && !cap_used && !cap_entry_count);cleanup();unsetenv("XV_VERTEX_CAPTURE_RETAIN");
+    output default_off={0};assert(capture(0,expected,sizeof expected,16,NULL,0,&default_off));join(0);
+    assert(default_off.ok && !cap_used && !cap_entry_count);cleanup();
 }
 #endif
 int main(void)
 {
     owner=pthread_self();setenv("XV_VERTEX_CAPTURE","1",1);
+    setenv("XV_VERTEX_CAPTURE_RETAIN","1",1); /* Exercise optional lifetime path. */
     xv_vertex_worker_override(0);xv_vertex_upload_override(1);
     private_inputs();sparse_and_packed();unused_mask_lifetime();pressure_and_wrap();failure_cases();
     queue_capacity();partial_failure_and_fallback();gpu_copy_lifetime();
