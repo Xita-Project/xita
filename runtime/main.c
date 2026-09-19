@@ -2224,6 +2224,9 @@ int main(int argc, char *argv[])
     XV_LOG("graphics startup: %u ms\n", (unsigned)((sceKernelGetProcessTimeWide() - gfx_started) / 1000));
 
 #ifdef XV_RUN_RECOMP
+#if XV_CPU_PMON_PROBE
+    { extern void xv_pmon_probe_start(void); xv_pmon_probe_start(); }
+#endif
     xv_update_init();xv_halo2_update_init();
     for(int i=0;i<argc;i++)if(!strcmp(argv[i],"--xita-slot=0")||!strcmp(argv[i],"--xita-slot=1"))g_update_slot=argv[i][12]-'0';
     if(xv_launch_has(argc,argv,"--xita-dashboard"))setenv("XV_DASHBOARD","1",1);

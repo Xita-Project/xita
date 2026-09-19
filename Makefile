@@ -838,6 +838,29 @@ SFO_EXTRA := -d ATTRIBUTE2=12      # extended memory mode: +109 MB for the arena
 VPK       := $(PROJECT).vpk
 endif
 
+# Dedicated startup probe only; no ordinary-build PMU imports or frame work.
+XV_CPU_PMON_PROBE ?= 0
+ifneq ($(words $(XV_CPU_PMON_PROBE)),1)
+$(error XV_CPU_PMON_PROBE must be 0 or 1)
+endif
+ifneq ($(filter $(XV_CPU_PMON_PROBE),0 1),$(XV_CPU_PMON_PROBE))
+$(error XV_CPU_PMON_PROBE must be 0 or 1)
+endif
+$(BUILD)/runtime/main.o: CFLAGS += -DXV_CPU_PMON_PROBE=$(XV_CPU_PMON_PROBE)
+.PHONY: force-pmon-probe-config
+force-pmon-probe-config:
+$(BUILD)/pmon-probe.config: force-pmon-probe-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_CPU_PMON_PROBE)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/main.o: $(BUILD)/pmon-probe.config
+ifeq ($(XV_CPU_PMON_PROBE),1)
+OBJS += $(BUILD)/runtime/xv_pmon_probe.o
+DEPS += $(BUILD)/runtime/xv_pmon_probe.d
+LIBS += -lScePerf_stub
+endif
+
 # --- 2. shader ingestion -----------------------------------------------------
 # Stage 3 (recompiler/shader_recomp_gen.py) writes .cg here; psp2cgc turns them into .gxp.
 # The build looks for halo_shader_0.gxp explicitly and ships every .gxp found
