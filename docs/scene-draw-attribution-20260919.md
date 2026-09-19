@@ -63,3 +63,43 @@ The updater confirms both verification and boot. Campaign navigation uses the
 saved timed sequence; deployment alone is not gameplay/performance validation.
 The earlier statement about perf.24 being the last verified installed build
 applies to the pre-deployment qualification stage.
+
+## Hardware result: most model-list elapsed is outside timed draws
+
+The timed launch sequence reached the Normal campaign checkpoint. Six settled
+windows (360 frames) at camera `(-28.66,32.52,0.62)`, forward
+`(0.56,0.82,-0.15)`, average 78.33 ms / 12.77 FPS. The model-list interval is
+1.856 ms, including 0.599 ms inside the two timed draw APIs. This is consistent
+with the previous checkpoint frame time, not a demonstrated speed improvement.
+
+A recorded movement sequence reached a crowded corridor with visible marines,
+elites and grunts. Six stationary windows have camera `(-26.94,35.67,0.62)`,
+forward `(-0.91,0.39,-0.15)`. This differs from the perf.24 crowded camera:
+it is not a before/after performance comparison. The same timed controls do not
+produce an identical route under different frame timing and live NPC state.
+
+| Ordered interval | Total ms/frame | Timed draw ms/frame | Outside timed draws |
+| --- | ---: | ---: | ---: |
+| Model list (`5B710`) | 19.377 | 4.595 | 14.782 |
+| `62870` callback interval | 6.505 | 4.629 | 1.876 |
+| Second pair of `7BFE0` passes | 3.945 | 3.774 | 0.171 |
+| `622A0` callback interval | 4.288 | 3.510 | 0.779 |
+| `627E0` callback interval | 5.604 | 3.660 | 1.944 |
+| `62270` callback interval | 2.583 | 2.041 | 0.542 |
+
+The selected six rows have the source counter available, no invalid draw
+intervals, and closed scene scopes. The remaining interval values and raw logs
+are in `../ce-perf25/corridor/summary.json` and `settled.log`. The screenshot
+confirms crowded gameplay. No searched fatal/stop/GPU-fault/data-abort marker
+appears in the collected log; this is not a long-session stability claim.
+
+The model-list interval spends about 76% of its elapsed outside these timed
+APIs. Therefore optimizing draw recording alone cannot remove most of this
+particular model-list interval. Investigate the shared preparation/material
+publication chain with that distinction intact. Conversely several ordered
+callback intervals are mostly inside timed draws and remain targets for draw
+volume and recording improvements. Do not label the 14.782 ms residual CPU
+self-time, assume it is all removable, or add nested scopes to frame time.
+The tested register-local traversal rewrite remains rejected; this new evidence
+does not reverse its negative instruction-cost result. Hardware controls are
+neutral and no benchmark was used.
