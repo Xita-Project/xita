@@ -52,11 +52,12 @@ cache/memory costs and production ring allocation. They cannot predict FPS or
 an acceptable hardware hit threshold. Retaining only 64 directly mapped entries
 may provide insufficient reuse across a roughly 150-draw frame.
 
-Private evidence is `index-metadata-cost/{probe.c,probe.py,probe.elf,results.json}`
-under the unified-games workspace. No production code or build flags changed.
-Perf15 remains the UV-reuse candidate awaiting its physical test.
+Private sizing evidence is
+`index-metadata-cost/{probe.c,probe.py,probe.elf,results.json}` under the
+unified-games workspace. The subsequent production integration is described
+below. Perf15 remains the UV-reuse candidate awaiting its physical test.
 
-## Integration requirements if pursued
+## Integration requirements
 
 1. Keep CPU mirror lifetime separate from GPU allocation validity. Every frame
    must invalidate GPU pointers while preserving only eligible CPU metadata.
@@ -73,3 +74,44 @@ Perf15 remains the UV-reuse candidate awaiting its physical test.
 5. Count metadata hits separately from within-frame GPU-copy reuse, misses,
    ineligible sizes and copied bytes. Live evidence must establish the hit rate
    and frame behavior after restart before this joins the cumulative default.
+
+## Production integration
+
+`XV_INDEX_METADATA=1` in the startup environment or `xita.cfg` enables CPU
+metadata retention, including the existing within-frame GPU-copy reuse. It
+defaults Off and requires closing and relaunching Xita. There is no new dashboard
+menu row and no change to shader programs, geometry, frame count or GPU fences.
+
+Both `BeginFrame` and standalone `Swap` now call the same index frame-boundary
+helper. With metadata retention Off it resets all identities as before. With
+retention On it clears every cached GPU pointer while retaining CPU mirrors.
+A byte-identical hit with no current GPU pointer must pass the ordinary append
+capacity check and copy its mirror into the current slot. It publishes that
+pointer only after copying. Failed capacity checks preserve the caller's index
+pointer and vertex count and leave reference coverage invalid. A subsequent hit
+in that same frame can reuse the now-current GPU allocation.
+
+The existing `XV_INDEX_REUSE` control retains its prior meaning. Explicit
+benchmark overrides disable cross-frame metadata and reset the entire cache;
+restoring the startup policy also resets it. Thus the existing off/on/off
+diagnostic remains a within-frame comparison, not a hidden mixture of policies.
+
+`[index-metadata]` reports successful fresh uploads from CPU metadata, matching
+entries rejected for ring capacity, and bytes actually copied. The existing
+`[index-reuse]` hits/saved-byte counters still count only within-frame GPU-copy
+reuse. Ordinary index-copy accounting includes metadata reuploads. These
+counters do not establish elapsed savings or FPS.
+
+`tools/test_index_reuse.py` passes ASan/UBSan for both options Off, each option
+alone, both On, invalid metadata selection, and forced cache-allocation failure.
+The production retainer is exercised with 60 delayed-slot generations, source
+rewrites, odd addresses, direct-map collisions, policy transitions, and explicit
+cross-frame full-ring rejection/retry. Two older GPU generations remain checked
+while CPU mirrors are replaced. Separate production vertex-reference tests pass
+4,000 draws across 500 slot generations and all 16 benchmark selector
+combinations. An independent lifetime/capacity review found no blocker.
+
+The modified renderer compiles with the retained Vita flags and generated shader
+assets. The physical hit rate, frame-time benefit, additional-memory impact and
+gameplay stability remain unverified. Production integration is not a claim that
+the prototype instruction ratios survive real allocation, cache or GPU costs.

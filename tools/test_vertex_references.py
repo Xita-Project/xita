@@ -36,6 +36,7 @@ static int draw_scan_neon(void) { return scan; }
 checks = r'''
 int main(void)
 {
+    index_reuse_begin_frame();
     uint16_t source[5]={0,1023,7,500,1023};
     for (unsigned mode=0;mode<4;mode++) {
         enabled=mode&1;scan=mode>>1;source[1]=1023;const void *p=source;unsigned vertices=0;
@@ -86,7 +87,8 @@ with tempfile.TemporaryDirectory(prefix='xita-vertex-references-') as temp:
                        ('benchmark', root / 'recomp/host/resolution_benchmark_test.c')]:
         subprocess.run(flags + [str(path), '-lm', '-o', str(temp / name)], check=True)
         if name != 'benchmark':
-            subprocess.run([str(temp / name)], check=True, env=dict(os.environ,XV_INDEX_REUSE='0'))
+            subprocess.run([str(temp / name)], check=True,
+                           env=dict(os.environ,XV_INDEX_REUSE='0',XV_INDEX_METADATA='0'))
     keys = ['XV_BENCHMARK_VERTEX_REFERENCES', 'XV_BENCHMARK_NATIVE_BOUNDS',
             'XV_BENCHMARK_VERTEX_COPY', 'XV_BENCHMARK_DRAW_SCAN']
     for values in itertools.product(['0', '1'], repeat=4):

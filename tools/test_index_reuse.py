@@ -13,6 +13,9 @@ fixture=next(ast.literal_eval(n.value) for n in tree.body
 fixture=fixture.replace('#define XV_FRAME_INDICES 2048','#define XV_FRAME_INDICES 262144')
 source=(root/'runtime/xv_d3d.c').read_text()
 retain=source[source.index('static unsigned index_bounds('):source.index('static uint32_t geometry_hash(')]
+for name in ('xv_d3d_BeginFrame', 'xv_d3d_Swap'):
+    body=source[source.index('void '+name+'(void)'):].split('\n}\n',1)[0]
+    assert body.count('index_reuse_begin_frame();')==1, name+' must invalidate GPU pointers'
 allocation=r'''
 static unsigned allocation_calls, fail_allocation;
 static void *test_allocate(size_t bytes)
@@ -57,14 +60,15 @@ static void begin_frame(unsigned frame)
     /* Only this slot retires; the preceding two GPU generations remain live. */
     verify_saved();g_build_frame=frame;unsigned slot=frame%3;
     saved_count[slot]=0;g_index_used[slot]=0;g_index_requested[slot]=0;
-    xv_index_cache_reset(g_index_cache);
+    index_reuse_begin_frame();
     memset(indices+slot*XV_FRAME_INDICES,0xa5,XV_FRAME_INDICES*2u);
     verify_saved();
 }
 int main(int argc,char **argv)
 {
     (void)argv;fail_allocation=argc>1;
-    int on=getenv("XV_INDEX_REUSE") && atoi(getenv("XV_INDEX_REUSE"))!=0;
+    int metadata=getenv("XV_INDEX_METADATA") && atoi(getenv("XV_INDEX_METADATA"))==1;
+    int on=(getenv("XV_INDEX_REUSE") && atoi(getenv("XV_INDEX_REUSE"))!=0)||metadata;
     enabled=1;scan=1;
     for(unsigned j=0;j<8;j++)for(unsigned i=0;i<8193;i++)inputs[j][i]=(uint16_t)next_random();
     begin_frame(0);
@@ -107,11 +111,35 @@ int main(int argc,char **argv)
     if(on&&!fail_allocation)assert(index_reuse_hits>0 && index_reuse_misses>0 && index_reuse_ineligible>0);
     else assert(!index_reuse_hits && !index_reuse_misses);
     assert(allocation_calls==(unsigned)on);
+    /* CPU metadata can cross a frame boundary, GPU pointers cannot. Retain
+     * older slot snapshots, exhaust the new ring, then retry with fresh space. */
+    begin_frame(61);enabled=1;xv_index_cache_reset(g_index_cache);
+    const void *prior=capture(inputs[0],256);
+    begin_frame(62);
+    unsigned uploads=index_metadata_reuploads,full=index_metadata_full;
+    g_index_used[62%3]=XV_FRAME_INDICES;p=inputs[0];n=0xdeadbeef;
+    assert(!retain_indices(&p,256,&n));
+    assert(p==inputs[0] && n==0xdeadbeef && !g_draw_vertex_refs_valid);
+    assert(index_metadata_reuploads==uploads);
+    assert(index_metadata_full==full+(unsigned)(metadata&&!fail_allocation));
+    verify_saved();g_index_used[62%3]=0;
+    const void *fresh=capture(inputs[0],256);assert(fresh!=prior);
+    assert(index_metadata_reuploads==uploads+(unsigned)(metadata&&!fail_allocation));
+    assert((capture(inputs[0],256)==fresh)==(on&&!fail_allocation));
+    inputs[0][128]^=0x80u;
+    assert(capture(inputs[0],256)!=fresh);verify_saved();
+    /* Changed coverage policy must rebuild. The next same-policy frame can
+     * reuse bounds alone, without publishing a stale reference bitmap. */
+    begin_frame(63);enabled=0;uploads=index_metadata_reuploads;
+    capture(inputs[0],256);assert(index_metadata_reuploads==uploads);
+    begin_frame(64);capture(inputs[0],256);
+    assert(index_metadata_reuploads==uploads+(unsigned)(metadata&&!fail_allocation));
     /* Each benchmark transition discards CPU identities, but never modifies
      * already published index bytes. Restoring -1 respects the startup value. */
-    begin_frame(61);enabled=1;
+    begin_frame(65);enabled=1;
     for(int policy=0;policy<=1;policy++) {
         xv_d3d_index_reuse_override(policy);
+        assert(!index_metadata_enabled());
         const void *a=capture(inputs[0],256),*b=capture(inputs[0],256);
         assert((a==b)==(policy&&!fail_allocation));
         xv_d3d_index_reuse_override(0);
@@ -127,6 +155,7 @@ int main(int argc,char **argv)
     assert(allocation_calls==1);
     unsigned hits=index_reuse_hits;index_reuse_report(60);
     assert(!index_reuse_hits&&!index_reuse_misses&&!index_reuse_ineligible);
+    assert(!index_metadata_reuploads&&!index_metadata_full&&!index_metadata_bytes);
     index_reuse_shutdown();assert(!g_index_cache);
     printf("PASS: retained indices/coverage, rewrites, collisions, odd sources, full ring, policy changes, 60 delayed-slot generations; hits=%u allocation-failure=%u\n",hits,fail_allocation);
 }
@@ -137,5 +166,8 @@ with tempfile.TemporaryDirectory(prefix='xita-index-reuse-') as directory:
     subprocess.run(['cc','-O2','-g','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-parameter',
         '-fno-strict-aliasing','-fsanitize=address,undefined','-I'+str(root),'-I'+str(root/'runtime'),
         '-idirafter',str(sdk/'arm-vita-eabi/include'),str(src),'-o',str(temp/'test')],check=True)
-    for policy,args in [('0',[]),('1',[]),('1',['allocation-failure'])]:
-        subprocess.run([str(temp/'test'),*args],env=dict(os.environ,XV_INDEX_REUSE=policy),check=True)
+    for policy,metadata,args in [('0','0',[]),('1','0',[]),('0','1',[]),('1','1',[]),
+                                 ('0','2',[]),('1','0',['allocation-failure']),
+                                 ('0','1',['allocation-failure'])]:
+        subprocess.run([str(temp/'test'),*args],
+            env=dict(os.environ,XV_INDEX_REUSE=policy,XV_INDEX_METADATA=metadata),check=True)

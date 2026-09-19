@@ -5,7 +5,8 @@
 
 /* Recording-owner scratch only. GPU commands retain the existing frame-ring
  * address, never this mirror or its metadata. Replacement cannot alter a draw
- * already recorded; reset is required whenever that ring starts a new frame. */
+ * already recorded. A new frame must discard GPU pointers, even when CPU
+ * mirrors and their exact-byte-derived metadata are retained. */
 #define XV_INDEX_CACHE_ENTRIES 64u
 #define XV_INDEX_CACHE_MAX 4096u
 #define XV_INDEX_CACHE_MIN 64u
@@ -19,8 +20,16 @@ typedef struct { xv_index_cache_entry entry[XV_INDEX_CACHE_ENTRIES]; } xv_index_
 
 static inline void xv_index_cache_reset(xv_index_cache *cache)
 {
-    if (cache) for (unsigned i=0;i<XV_INDEX_CACHE_ENTRIES;i++)
+    if (cache) for (unsigned i=0;i<XV_INDEX_CACHE_ENTRIES;i++) {
         cache->entry[i].source=NULL;
+        cache->entry[i].retained=NULL;
+    }
+}
+
+static inline void xv_index_cache_new_frame(xv_index_cache *cache)
+{
+    if (cache) for (unsigned i=0;i<XV_INDEX_CACHE_ENTRIES;i++)
+        cache->entry[i].retained=NULL;
 }
 
 static inline xv_index_cache_entry *xv_index_cache_select(xv_index_cache *cache,

@@ -1221,6 +1221,24 @@ static xv_index_cache *g_index_cache;
 static unsigned index_reuse_hits, index_reuse_misses, index_reuse_ineligible;
 static uint64_t index_reuse_compared, index_reuse_saved;
 static int index_reuse_override = -1;
+static unsigned index_metadata_reuploads, index_metadata_full;
+static uint64_t index_metadata_bytes;
+static int index_metadata_enabled(void)
+{
+    static int configured=-1;
+    if (configured<0) {
+        const char *e=getenv("XV_INDEX_METADATA");
+        configured=e && atoi(e)==1; /* experimental, startup-only, default Off */
+    }
+    /* The existing off/on/off diagnostic continues to compare its original
+     * within-frame policy. Every override transition resets all identities. */
+    return index_reuse_override<0 && configured;
+}
+static void index_reuse_begin_frame(void)
+{
+    if (index_metadata_enabled()) xv_index_cache_new_frame(g_index_cache);
+    else xv_index_cache_reset(g_index_cache);
+}
 /* Recording owner, after the submission drain. Invalidate CPU lookup metadata
  * without changing any indices already owned by a live frame. */
 void xv_d3d_index_reuse_override(int enabled)
@@ -1235,7 +1253,7 @@ static int index_reuse_enabled(void)
         const char *e=getenv("XV_INDEX_REUSE");
         configured=e && atoi(e)!=0; /* hardware comparison required */
     }
-    if (!(index_reuse_override < 0 ? configured : index_reuse_override) || failed) return 0;
+    if (!(index_reuse_override < 0 ? configured || index_metadata_enabled() : index_reuse_override) || failed) return 0;
     if (!g_index_cache) {
         g_index_cache=malloc(sizeof *g_index_cache);
         if (!g_index_cache) { failed=1;return 0; }
@@ -1249,14 +1267,19 @@ static void index_reuse_report(unsigned frames)
     XV_LOG("[index-reuse] %u frames: enabled %d hits %u rebuilt %u ineligible %u; compared %llu KiB avoided %llu KiB GPU copies; exact current-frame indices\n",
         frames,index_reuse_enabled(),index_reuse_hits,index_reuse_misses,index_reuse_ineligible,
         (unsigned long long)(index_reuse_compared/1024),(unsigned long long)(index_reuse_saved/1024));
+    XV_LOG("[index-metadata] %u frames: enabled %d reuploads %u full %u; copied %llu KiB into current GPU slot; CPU metadata retained, prior GPU pointers discarded\n",
+        frames,index_metadata_enabled() && g_index_cache!=NULL,
+        index_metadata_reuploads,index_metadata_full,(unsigned long long)(index_metadata_bytes/1024));
     index_reuse_hits=index_reuse_misses=index_reuse_ineligible=0;
     index_reuse_compared=index_reuse_saved=0;
+    index_metadata_reuploads=index_metadata_full=0;index_metadata_bytes=0;
 }
 static void index_reuse_shutdown(void)
 {
     free(g_index_cache);g_index_cache=NULL;
     index_reuse_hits=index_reuse_misses=index_reuse_ineligible=0;
     index_reuse_compared=index_reuse_saved=0;
+    index_metadata_reuploads=index_metadata_full=0;index_metadata_bytes=0;
 }
 
 static int retain_indices(const void **indices, unsigned count, unsigned *nverts)
@@ -1286,10 +1309,24 @@ static int retain_indices(const void **indices, unsigned count, unsigned *nverts
             if (entry->source==*indices && entry->count==count && entry->references==references)
                 index_reuse_compared+=(uint64_t)count*2u;
             if (xv_index_cache_match(entry,*indices,count,references)) {
+                if (!entry->retained) {
+                    /* CPU equality does not retire a GPU slot. A new frame
+                     * needs a fresh append allocation, including on a hit. */
+                    if (g_index_used[list] > XV_FRAME_INDICES || count > XV_FRAME_INDICES-g_index_used[list]) {
+                        index_metadata_full++;return 0;
+                    }
+                    uint16_t *dst=g_frame_indices+list*XV_FRAME_INDICES+g_index_used[list];
+                    memcpy(dst,entry->mirror,count*sizeof *dst);
+                    g_index_used[list]+=(count+7u)&~7u;
+                    entry->retained=dst;
+                    index_metadata_reuploads++;index_metadata_bytes+=(uint64_t)count*2u;
+                    scan_index_calls++;scan_indices+=count;
+                } else {
+                    index_reuse_hits++;index_reuse_saved+=(uint64_t)count*2u;
+                }
                 *indices=entry->retained;*nverts=entry->vertices;
                 if (references) g_draw_vertex_refs=entry->refs;
                 g_draw_vertex_refs_valid=references;
-                index_reuse_hits++;index_reuse_saved+=(uint64_t)count*2u;
                 return 1;
             }
             index_reuse_misses++;
@@ -2087,7 +2124,7 @@ unsigned xv_d3d_record_slot(void) { return g_build_frame % XV_NUM_LISTS; }
 void xv_d3d_BeginFrame(void)
 {
     xv_vertex_capture_begin_slot(g_build_frame % XV_NUM_LISTS);
-    xv_index_cache_reset(g_index_cache);
+    index_reuse_begin_frame();
     xv_vertex_upload_reset(g_build_frame % XV_NUM_LISTS);
     g_frame_constants[g_build_frame % XV_NUM_LISTS].ready = 0;
     g_lists[g_build_frame % XV_NUM_LISTS]->cur_pass = g_record_pass;
@@ -2140,7 +2177,7 @@ void xv_d3d_Swap(void)
     report_draw_drops(l);
     xv_vertex_upload_seal(g_build_frame % XV_NUM_LISTS);
     g_build_frame++;
-    xv_index_cache_reset(g_index_cache);
+    index_reuse_begin_frame();
     /* reset the list the NEXT frame will use (the pump is done with it: at most one
        frame is in flight beyond the one just submitted) */
     cmdlist_t *next = g_lists[g_build_frame % XV_NUM_LISTS];
