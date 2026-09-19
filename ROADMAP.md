@@ -77,11 +77,11 @@ Visual, combat and driving acceptance is still pending.
 work into efficient native routines and independent worker jobs until sustained
 20 FPS is verified on the physical Vita in representative campaign, combat and
 vehicle gameplay. Keep rendering and gameplay correct, document fixed comparison
-settings and retain private checkpoints. Stable 20 FPS is an intermediate
-milestone; neither target is complete. Halo 2's original main menu remains a
-separate objective; Claude currently owns its Vita3K work. CE performance work
-continues locally; the earlier parallel agents are no longer running. See the
-[implementation order](docs/performance-next-steps-20260914.md).
+settings and retain private checkpoints. Sustained 30 FPS remains a longer-term
+aspiration; the immediate 20 FPS hardware target is not complete. Halo 2's original
+menu and rendering remain unresolved and parked while CE performance is prioritized.
+See the [implementation order](docs/performance-next-steps-20260914.md) for earlier
+planning context and the September 19 status above for current measurements.
 
 [~] [Experimental concurrent object updates](docs/parallel-object-experiment-20260914.md):
 the next task now runs whole second-pass object callbacks on workers requesting
