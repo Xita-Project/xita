@@ -94,3 +94,16 @@ other cumulative options remain enabled. This deliberately trades additional
 staging copies and FIFO jobs for removing exact owner comparisons. Worker time,
 queue-pressure joins and overall gameplay time must determine whether the trade
 helps; no speedup is assumed. Perf.33 is retained as the comparison/rollback.
+
+## perf.34 worker-validation comparison installed
+
+The existing no-owner-reuse configuration compiled and passed package checks;
+only runtime and boot digest changed. The remote updater verified runtime SHA256
+`34562e86d4cfd35f76156be9b2b89eaf4726747a844821d33c4c2f279f90baa0`
+(32,193,318 bytes), restarted into slot 0 and confirmed boot. Runtime status is
+`0.2.0-perf.34 / d797ca8`. Perf.33 remains in slot 1. Ordinary menu navigation,
+checkpoint confirmation, settled capture and guarded corridor replay are running
+serially under `capture-copy-hardware/run-gameplay.py`; any failed stage stops
+the sequence. Performance and rendering qualification of this configuration
+remain pending those captures. This is a comparison candidate, not a demonstrated
+optimization or a change to the ordinary build defaults.
