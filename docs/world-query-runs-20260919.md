@@ -44,6 +44,15 @@ roots and FPSCR. Its admitted long run skips 14 nodes, executes the original
 final split, then reaches the real `0x868F0` continuation and surface, edge and
 vertex writers. Object-route cases bypass the helper.
 
+The final gate repeated those 21 cases using the actual generated production
+query/header and actual runtime admission function. Compiling that same generated
+source with the feature Off matched the reference's allocated object and linked
+sections exactly. The On query contains one shared fused implementation. Its
+text adds 1,272 bytes including the joined reporter; modeled peak stack adds
+136 bytes. The long result-producing parent case used 66,642 versus 64,727
+modeled instructions, including unchanged profile/writer work. These figures
+describe the fixture, not frame-rate or real cycle improvements.
+
 The fixture uses the actual object-job runtime storage and guard operations;
 OS thread/mutex calls are modeled. It covers diagnostic and owner declines,
 root replacement, callback mutations and all four rounding modes. This is not
@@ -60,3 +69,34 @@ and rejection of drift or invalid selectors. The existing query and solver
 Make-graph regressions remain applicable. The joined `[query-world-run]` row
 reports attempts, chunks, skipped nodes, largest chunk and declines without
 adding per-node timers.
+
+## Physical Vita result: active, no clear FPS gain
+
+`0.2.0-perf.12 / 253e407+` was installed and boot-confirmed in slot 1. Runtime
+SHA256 is `a4e2527aa19cd8af3cd093dbde8144f0d72c2b61aade349b578f49bd5fa5e611`.
+Only `game-a.self` and `boot-game.txt` differ from perf10. The preceding
+persistent-vertex experiment remains disabled; earlier cumulative options remain
+enabled. This was normal gameplay, without a diagnostic benchmark or emulator.
+
+The same Normal Pillar of Autumn save loaded successfully. In the last twelve
+complete 60-frame settled windows, the path recorded medians of 4,558 attempts,
+2,556.5 admitted chunks, 7,997.5 skipped nodes and 1,978.5 declines per window.
+The largest chunk was nine nodes. This is substantially shorter than the long
+synthetic cases, and confirms why fixture instruction savings cannot predict
+the scene's FPS.
+
+Median frame time was 78.3 ms / 12.8 FPS, versus perf10's 78.2 ms / 12.8 FPS.
+The earlier perf12 capture was 78.25 ms / 12.8 FPS. There is no clear overall
+gain. Draws were similar (151 versus 152/frame). Tick-owner elapsed was 36.162 ms
+versus 35.746 ms; render-owner elapsed was 40.265 versus 40.505 ms. These include
+nested work/waits and live scene variation. Capture and worker preparation were
+5.990 and 4.826 ms/frame, respectively.
+
+The option remains enabled in this cumulative research build because it removes
+repeated node work without a clear whole-frame regression in these samples. It
+is still default Off in ordinary builds and is not described as a proven FPS
+optimization. The next larger candidate is the complete per-surface collector,
+including repeated vertex/edge ring setup and segment-call state reconstruction.
+The short checkpoint observation does not establish long-session/combat stability.
+Private evidence is in `ce-perf12/gameplay/`, with production ARM qualification
+under `world-query-run-integration/production/` in the unified-games workspace.
