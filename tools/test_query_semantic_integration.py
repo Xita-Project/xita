@@ -20,7 +20,7 @@ from tools import gen_native_query_fusion as generator
 from tools import query_semantic_leaf as semantic
 
 FEATURE='XV_QUERY_SEMANTIC_LEAF'
-INPUTS=('Makefile','tools/gen_native_query_fusion.py','tools/query_semantic_leaf.py','tools/query_membership_scalar.py','tools/query_ancestor_scalar.py',
+INPUTS=('Makefile','tools/gen_native_query_fusion.py','tools/query_semantic_leaf.py','tools/query_membership_scalar.py','tools/query_ancestor_scalar.py','tools/query_object_space.py',
         'tools/query_semantic_leaf.h')
 def sha(data):return hashlib.sha256(data).hexdigest()
 def identity(path):

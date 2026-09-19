@@ -42,7 +42,7 @@ def main():
     out.mkdir(parents=True,exist_ok=a.resume_checks);stage=out/'build'
     if not a.resume_checks:
         subprocess.run(['cp','-a','--reflink=auto',str(a.retained_build),str(stage)],check=True)
-    for name in ('Makefile','tools/gen_native_query_fusion.py','tools/query_f32_primitives.py','tools/query_semantic_leaf.py','tools/query_membership_scalar.py','tools/query_ancestor_scalar.py'):
+    for name in ('Makefile','tools/gen_native_query_fusion.py','tools/query_f32_primitives.py','tools/query_semantic_leaf.py','tools/query_membership_scalar.py','tools/query_ancestor_scalar.py','tools/query_object_space.py'):
         shutil.copy2(ROOT/name,stage/name)
     # The stage contains the actual retained solver, caller and generic units.
     units=stage/'recomp'; build=stage/'build/recomp'

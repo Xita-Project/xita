@@ -20,7 +20,7 @@ from tools import gen_native_query_fusion as generator
 from tools import query_membership_scalar as membership
 
 FEATURE='XV_QUERY_MEMBERSHIP_SCALAR'
-INPUTS=('Makefile','tools/gen_native_query_fusion.py','tools/query_membership_scalar.py','tools/query_ancestor_scalar.py')
+INPUTS=('Makefile','tools/gen_native_query_fusion.py','tools/query_membership_scalar.py','tools/query_ancestor_scalar.py','tools/query_object_space.py')
 def sha(data):return hashlib.sha256(data).hexdigest()
 def identity(path):
     with path.open('rb') as stream:
