@@ -425,6 +425,112 @@ static void wait_prepared(void)
     while(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)!=target && sceKernelGetProcessTimeWide()<end)usleep(100);
     assert(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)==target);
 }
+#if XV_VERTEX_CAPTURE_READY
+static void capture_ready_results(void)
+{
+    unsigned char src[4096],other[4096];memset(src,0x35,sizeof src);memset(other,0x57,sizeof other);
+    output first={0},both={0},mixed={0},pending={0},repeat={0},after_drain={0};
+    assert(capture(0,src,sizeof src,16,NULL,0,&first));wait_prepared();
+    unsigned submitted=cap_submitted,checks=cap_reuse_checks,ready=cap_ready_draws;
+    xv_vertex_prepare_batch b={.slot=0,.count=2};
+    for(unsigned i=0;i<2;i++)b.streams[i]=(xv_vertex_prepare_stream){.source=src,.bytes=sizeof src,.stride=16};
+    const void **targets[]={(const void **)&both.result[0],(const void **)&both.result[1]};
+    assert(xv_vertex_capture_submit(&b,targets,collected,&both));
+    assert(first.callbacks==1 && both.callbacks==1 && both.ok);
+    assert(both.result[0]==first.result[0] && both.result[1]==first.result[0]);
+    assert(cap_submitted==submitted && cap_ready_draws==ready+1 && cap_reuse_checks==checks+2);
+
+    /* One miss queues the whole batch. Preflight hits are not compared twice,
+     * and no target/callback may be published before the full job succeeds. */
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    b.streams[1].source=other;targets[0]=(const void **)&mixed.result[0];targets[1]=(const void **)&mixed.result[1];
+    checks=cap_reuse_checks;
+    assert(xv_vertex_capture_submit(&b,targets,collected,&mixed));wait_parked(&parked_capture);
+    assert(!mixed.callbacks && !mixed.result[0] && !mixed.result[1]);
+    assert(cap_submitted==submitted+1 && cap_reuse_checks==checks+1);
+    /* Even a fully prepared hit must queue behind an outstanding predecessor. */
+    assert(capture(0,src,sizeof src,16,NULL,0,&pending));
+    assert(!pending.callbacks && cap_submitted==submitted+2 && cap_ready_draws==ready+1);
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);wait_prepared();cap_collect();
+    assert(mixed.ok && pending.ok && mixed.callbacks==1 && pending.callbacks==1);
+    assert(mixed.result[0]==first.result[0] && pending.result[0]==first.result[0]);
+    assert(!memcmp(mixed.result[1],other,sizeof other));
+
+    src[4095]^=1;submitted=cap_submitted;
+    assert(capture(0,src,sizeof src,16,NULL,0,&repeat));
+    assert(cap_submitted==submitted+1);wait_prepared();cap_collect();
+    assert(repeat.ok && repeat.result[0]!=first.result[0] && first.result[0][4095]==0x35);
+    xv_vertex_capture_drain();submitted=cap_submitted;
+    assert(capture(0,src,sizeof src,16,NULL,0,&after_drain));
+    assert(cap_submitted==submitted+1);join(0);
+    assert(after_drain.ok && !memcmp(after_drain.result[0],src,sizeof src));cleanup();
+}
+static void capture_ready_copy_and_pressure(void)
+{
+    static unsigned char src[65536],other[65536];memset(src,0x26,sizeof src);memset(other,0x48,sizeof other);
+    output first={0},second={0},again={0};
+    xv_vertex_worker_override(1);__atomic_store_n(&pause_copy,1,__ATOMIC_RELEASE);
+    assert(capture(0,src,sizeof src,32,NULL,0,&first));wait_prepared();wait_parked(&parked_copy);
+    assert(capture(0,other,sizeof other,32,NULL,0,&second));wait_prepared();
+    assert(cap_used==XV_VERTEX_CAPTURE_BYTES);
+    unsigned submitted=cap_submitted,pressure=cap_pressure;
+    assert(capture(0,src,sizeof src,32,NULL,0,&again));
+    assert(again.ok && again.callbacks==1 && cap_submitted==submitted && cap_pressure==pressure);
+    assert(again.result[0]==first.result[0]);
+    /* Preparation completion is not GPU-copy completion. Source changes after
+     * capture cannot affect either result; the original seal/wait still owns it. */
+    memset(src,0xff,sizeof src);memset(other,0xff,sizeof other);
+    __atomic_store_n(&pause_copy,0,__ATOMIC_RELEASE);join(0);
+    for(unsigned i=0;i<sizeof src;i++)assert(again.result[0][i]==0x26 && second.result[0][i]==0x48);
+    cleanup();
+}
+static void capture_ready_pressure_miss(void)
+{
+    static unsigned char src[65536],other[65536];memset(src,0x31,sizeof src);memset(other,0x52,sizeof other);
+    output first={0},second={0},mixed={0};
+    assert(capture(0,src,sizeof src,32,NULL,0,&first));wait_prepared();
+    assert(capture(0,other,sizeof other,32,NULL,0,&second));wait_prepared();
+    assert(cap_used==XV_VERTEX_CAPTURE_BYTES);other[0]^=1;
+    xv_vertex_prepare_batch b={.slot=0,.count=2};
+    b.streams[0]=(xv_vertex_prepare_stream){.source=src,.bytes=sizeof src,.stride=32};
+    b.streams[1]=(xv_vertex_prepare_stream){.source=other,.bytes=sizeof other,.stride=32};
+    const void **targets[]={(const void **)&mixed.result[0],(const void **)&mixed.result[1]};
+    unsigned pressure=cap_pressure,submitted=cap_submitted;
+    assert(xv_vertex_capture_submit(&b,targets,collected,&mixed));
+    assert(cap_pressure==pressure+1 && cap_submitted==submitted+1);join(0);
+    assert(mixed.ok && mixed.callbacks==1 && !memcmp(mixed.result[0],src,sizeof src));
+    assert(!memcmp(mixed.result[1],other,sizeof other) && second.result[0][0]==0x52);cleanup();
+}
+#if XV_PACKED_VERTEX_LAYOUT
+static void capture_ready_packed_and_failure(void)
+{
+    unsigned char src[4096];memset(src,0x19,sizeof src);
+    output first={0},same={0},changed={0},failed={0},recovered={0};
+    assert(capture(0,src,sizeof src,32,NULL,XV_PACKED_PREFIX16,&first));wait_prepared();
+    unsigned submitted=cap_submitted;
+    for(unsigned i=16;i<sizeof src;i+=32)memset(src+i,0xee,16);
+    assert(capture(0,src,sizeof src,32,NULL,XV_PACKED_PREFIX16,&same));
+#if XV_VERTEX_CAPTURE_PACKED
+    assert(same.ok && cap_submitted==submitted && same.result[0]==first.result[0]);
+#else
+    assert(cap_submitted==submitted+1);wait_prepared();cap_collect();
+#endif
+    src[15]^=1;submitted=cap_submitted;
+    assert(capture(0,src,sizeof src,32,NULL,XV_PACKED_PREFIX16,&changed));
+    assert(cap_submitted==submitted+1);wait_prepared();cap_collect();
+    xv_vertex_prepare_batch b={.slot=0,.count=2};
+    b.streams[0]=(xv_vertex_prepare_stream){.source=src,.bytes=sizeof src,.stride=32,.packed=XV_PACKED_PREFIX16};
+    b.streams[1]=(xv_vertex_prepare_stream){.source=src,.bytes=32,.stride=4,.packed=99};
+    const void **targets[]={(const void **)&failed.result[0],(const void **)&failed.result[1]};
+    assert(xv_vertex_capture_submit(&b,targets,collected,&failed));wait_prepared();
+    submitted=cap_submitted;
+    assert(capture(0,src,sizeof src,32,NULL,XV_PACKED_PREFIX16,&recovered));
+    assert(failed.callbacks==1 && !failed.ok && !failed.result[0] && !failed.result[1]);
+    assert(recovered.ok && cap_submitted==submitted && recovered.result[0]==changed.result[0]);
+    join(0);assert(first.result[0][15]==0x19 && recovered.result[0][15]==0x18);cleanup();
+}
+#endif
+#endif
 static void capture_reuse_capacity(void)
 {
     unsigned char guest[CAPTURE_ENTRIES+2][32];output outputs[CAPTURE_ENTRIES+3]={0};
@@ -434,9 +540,16 @@ static void capture_reuse_capacity(void)
     }
     assert(cap_entry_count==CAPTURE_ENTRIES);
     unsigned used=cap_used,prepared=cap_reuse_prepared;
+#if XV_VERTEX_CAPTURE_READY
+    unsigned ready_before=cap_ready_draws;
+#endif
     assert(capture(0,guest[0],32,4,NULL,0,&outputs[CAPTURE_ENTRIES+2]));
     assert(cap_used==used);join(0);
+#if XV_VERTEX_CAPTURE_READY
+    assert(cap_ready_draws==ready_before+1 && cap_reuse_prepared==prepared);
+#else
     assert(cap_reuse_prepared==prepared+1);
+#endif
     for(unsigned i=0;i<CAPTURE_ENTRIES+2;i++) {
         assert(outputs[i].ok&&outputs[i].callbacks==1);
         for(unsigned j=0;j<32;j++)assert(outputs[i].result[0][j]==(unsigned char)i);
@@ -684,6 +797,13 @@ int main(void)
     capture_retained_generations();
     puts("PASS: retained CPU payload is read-only on hits; GPU generations/reordering revalidated, mutated sources and all three slots exact, shutdown and retention disable");
     puts("PASS: exact snapshot/result reuse, mutations and return-to-old-version, unmapping, slot/stride separation, sparse-to-full validation, job wrap and full metadata cache, startup disable and allocation retry");
+#endif
+#if XV_VERTEX_CAPTURE_READY
+    capture_ready_results();capture_ready_copy_and_pressure();capture_ready_pressure_miss();
+#if XV_PACKED_VERTEX_LAYOUT
+    capture_ready_packed_and_failure();
+#endif
+    puts("PASS: completed result reuse skips queue; mixed/pending draws preserve publication, mutation/drain invalidate, full arena hit and pending GPU copy retain ownership");
 #endif
     puts("PASS: private inputs, rewritten aliases, mask ownership, packed/raw identity, arena/queue pressure, ticket wrap, partial/allocation/thread/notification failures, fallback drains, disable and three GPU-copy slots");
 #if XV_VERTEX_PERSISTENT

@@ -28,6 +28,18 @@
 #if XV_VERTEX_CAPTURE_REUSE != 0 && XV_VERTEX_CAPTURE_REUSE != 1
 #error XV_VERTEX_CAPTURE_REUSE must be 0 or 1
 #endif
+#ifndef XV_VERTEX_CAPTURE_READY
+#define XV_VERTEX_CAPTURE_READY 0
+#endif
+#if XV_VERTEX_CAPTURE_READY != 0 && XV_VERTEX_CAPTURE_READY != 1
+#error XV_VERTEX_CAPTURE_READY must be 0 or 1
+#endif
+#if XV_VERTEX_CAPTURE_READY && !XV_VERTEX_CAPTURE_REUSE
+#error XV_VERTEX_CAPTURE_READY requires XV_VERTEX_CAPTURE_REUSE
+#endif
+#if XV_VERTEX_CAPTURE_READY
+static unsigned cap_ready_draws;
+#endif
 #ifndef XV_VERTEX_PERSISTENT
 #define XV_VERTEX_PERSISTENT 0
 #endif
@@ -303,7 +315,44 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     if(!cap_start())goto fallback;
     cap_collect();
     unsigned submitted=__atomic_load_n(&cap_submitted,__ATOMIC_RELAXED);
+#if XV_VERTEX_CAPTURE_READY
+    uint64_t start=sceKernelGetProcessTimeWide();
+    unsigned ready_ids[XV_VERTEX_PREPARE_STREAMS];
+    const void *ready_results[XV_VERTEX_PREPARE_STREAMS];
+    /* collect acquired every completed job. With no predecessor outstanding,
+     * cap_results is immutable until this owner publishes another job. Preserve
+     * callback order and never borrow a worker result still being written. */
+    int probed=cap_retired==submitted;
+    if(probed) {
+        int ready=1;
+        for(unsigned i=0;i<batch->count;i++) {
+            const xv_vertex_prepare_stream *s=&batch->streams[i];
+            unsigned packed=0,compact=0;
+#if XV_PACKED_VERTEX_LAYOUT
+            packed=s->packed;
+#endif
+#if XV_VERTEX_CAPTURE_PACKED
+            compact=cap_compact(s);
+#endif
+            unsigned id=cap_reuse_find(s,batch->slot,packed,compact);
+            ready_ids[i]=id;ready_results[i]=id?cap_results[id-1]:NULL;
+            if(!ready_results[i])ready=0;
+        }
+        if(ready) {
+            /* Publish all-or-nothing, after every exact source comparison.
+             * GPU-copy completion still belongs to the existing seal/wait. */
+            for(unsigned i=0;i<batch->count;i++)*targets[i]=ready_results[i];
+            if(complete)complete(context,1);
+            cap_ready_draws++;
+            cap_capture_us+=sceKernelGetProcessTimeWide()-start;
+            return 1;
+        }
+    }
+#endif
     if(submitted-cap_retired==CAPTURE_JOBS || required>XV_VERTEX_CAPTURE_BYTES-cap_used) {
+#if XV_VERTEX_CAPTURE_READY
+        cap_capture_us+=sceKernelGetProcessTimeWide()-start;
+#endif
         cap_pressure++;xv_vertex_capture_drain();
         if(required>XV_VERTEX_CAPTURE_BYTES-cap_used) {
             /* Only a joined arena-pressure boundary discards retained bytes.
@@ -313,8 +362,14 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
             cap_reuse_reset();cap_reclaims++;
 #endif
         }
+#if XV_VERTEX_CAPTURE_READY
+        /* A drain invalidates GPU results and can discard snapshot identities. */
+        probed=0;start=sceKernelGetProcessTimeWide();
+#endif
     }
+#if !XV_VERTEX_CAPTURE_READY
     uint64_t start=sceKernelGetProcessTimeWide();
+#endif
     capture_job *j=&cap_jobs[submitted&(CAPTURE_JOBS-1)];j->batch=*batch;
     j->complete=complete;j->context=context;
     unsigned written=0;
@@ -339,7 +394,12 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
 #if XV_VERTEX_CAPTURE_PACKED
         compact=cap_compact(s);j->compact[i]=compact;
 #endif
-        unsigned id=cap_reuse_find(s,batch->slot,packed,compact);
+        unsigned id;
+#if XV_VERTEX_CAPTURE_READY
+        if(probed)id=ready_ids[i];
+        else
+#endif
+        id=cap_reuse_find(s,batch->slot,packed,compact);
         if(id) {
             j->reuse[i]=id;s->source=cap_arena+cap_entries[id-1].offset;s->result=NULL;
             /* Non-sparse references are semantically unused by upload(). */
@@ -413,6 +473,11 @@ void xv_vertex_capture_report(unsigned frames)
     assert(cap_retired==__atomic_load_n(&cap_submitted,__ATOMIC_ACQUIRE));
 #if XV_VERTEX_PERSISTENT
     vp_report(frames);
+#endif
+#if XV_VERTEX_CAPTURE_READY
+    xv_logf("[vertex-capture-ready] %u frames: %u completed draws reused inline; exact inputs, ordered callbacks, existing GPU tickets retained\n",
+        frames,cap_ready_draws);
+    cap_ready_draws=0;
 #endif
     if(cap_jobs_total)xv_logf("[vertex-capture] %u frames: %u jobs %llu KiB; capture %llu us worker %llu us join %llu us; %u drains %u pressure max-pending %u failed %u (overlapping window totals)\n",
         frames,cap_jobs_total,(unsigned long long)(cap_bytes>>10),(unsigned long long)cap_capture_us,

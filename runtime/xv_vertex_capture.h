@@ -11,7 +11,9 @@
  * immutable staging/results. CPU snapshots may survive joined drains; ordinary
  * GPU results do not. Optional persistent uploads instead retain immutable GPU
  * versions until all referencing frame slots retire. Sparse masks retain
- * independent preparation; no guest source is assumed immutable. */
+ * independent preparation; no guest source is assumed immutable. An optional
+ * completed-result shortcut invokes success inline only after collecting all
+ * preceding jobs and matching every input; seal/wait still owns GPU copies. */
 int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     const void ***targets,void (*complete)(void *,int),void *context);
 /* Mandatory before any synchronous upload, diagnostics/readback, override,

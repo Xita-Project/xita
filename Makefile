@@ -319,6 +319,28 @@ $(BUILD)/capture-reuse.config: force-capture-reuse-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/capture-reuse.config
+# Reuse already completed results without publishing another worker job.
+XV_VERTEX_CAPTURE_READY ?= 0
+ifneq ($(words $(XV_VERTEX_CAPTURE_READY)),1)
+$(error XV_VERTEX_CAPTURE_READY must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_CAPTURE_READY),0 1),$(XV_VERTEX_CAPTURE_READY))
+$(error XV_VERTEX_CAPTURE_READY must be 0 or 1)
+endif
+ifeq ($(XV_VERTEX_CAPTURE_READY),1)
+ifneq ($(XV_VERTEX_CAPTURE_REUSE),1)
+$(error XV_VERTEX_CAPTURE_READY requires XV_VERTEX_CAPTURE_REUSE=1)
+endif
+endif
+$(BUILD)/runtime/xv_vertex_capture.o: CFLAGS += -DXV_VERTEX_CAPTURE_READY=$(XV_VERTEX_CAPTURE_READY)
+.PHONY: force-capture-ready-config
+force-capture-ready-config:
+$(BUILD)/capture-ready.config: force-capture-ready-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_VERTEX_CAPTURE_READY)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/capture-ready.config
 # Exact immutable uploads retained across GPU frame slots. Off by default.
 XV_VERTEX_PERSISTENT ?= 0
 ifneq ($(words $(XV_VERTEX_PERSISTENT)),1)
