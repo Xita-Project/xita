@@ -38,3 +38,31 @@ for decline classification, and reporting retains the existing shared guard.
 
 Private qualification and source hashes are under `hierarchy-final-pose/`;
 host checks are under `hierarchy-final-production/` in the unified-games workspace.
+
+## Hardware result
+
+`0.2.0-perf.9 / c4a5bee+` was installed and boot-confirmed on physical Vita
+slot 1. The saved Normal Pillar of Autumn checkpoint loaded with marines visible.
+The last twelve complete 60-frame ordinary-play windows measured a median
+78.4 ms / 12.8 FPS, versus perf8's 78.35 ms / 12.8 FPS at the same stationary
+checkpoint. This is neutral within normal scene variation, not a demonstrated
+frame-rate improvement. Median draw count was 152/frame, capture 6.000 ms,
+stream preparation 6.835 ms and worker join 0.053 ms. Tick and render owner
+intervals were 36.444 and 40.089 ms; these inclusive intervals can overlap and
+must not be summed as independent work.
+
+The new allowance recovered 17 published batches across those twelve windows.
+There were 29,778 completed-prefix matrix declines and 607 pose declines, with
+no constant or produced-output declines. These are retry-inclusive attempts.
+Thus 98.0% of numeric declines occurred before arithmetic, while reading an
+existing parent matrix. There was no observed discarded-output work to justify
+partial publication in this scene. The next bounded candidate is matrix-only
+admission of smaller finite normal values, keeping the actually batched pose
+domain unchanged. These counters do not yet identify which matrix values failed
+or prove that a broader matrix domain is safe or faster.
+
+The user also reports faster campaign loading. This is recorded as an observation;
+the captures do not provide a controlled cold-load comparison or isolate its cause.
+Private evidence is in `ce-perf9/gameplay/checkpoint.log`, `checkpoint.png`,
+`checkpoint-summary.json` and `checkpoint-hierarchy.json` in the unified-games
+workspace. No diagnostic benchmark was run for this result.
