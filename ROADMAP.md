@@ -38,6 +38,12 @@ visual qualification remains in progress. This selected model-preparation path i
 the full simulation/render split remains unfinished, and simulation joins remain.
 The following dated observations retain their original experimental context.
 
+The perf.37 user playtest reports no FPS gain. A subsequent
+[material-path trace](docs/model-material-cost-20260919.md) identifies `70110`
+material setup and `54010` ordered callbacks as larger targets than the outer
+model traversal itself. That diagnostic serializes object callbacks; its FPS
+is not a parallel-gameplay comparison. Palette buffering remains experimental.
+
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
 [~] [Movement/collision attribution](docs/object-motion-profile-20260916.md):

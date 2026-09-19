@@ -157,3 +157,25 @@ Receipts: `../pose-pipeline-hardware/gameplay-smoke.log`, `pose-summary.json`,
 `gameplay-smoke.summary.json`, `gameplay-status.json`, and `load-check.png`.
 All remote navigation has ended; the user can test perf.37. The next observation
 should focus on moving NPC poses, camera turns and transitions, alongside FPS.
+
+## User gameplay follow-up: no reported FPS gain
+
+The user reports no FPS gain on perf.37. The subsequent capture confirms that
+the candidate is running: the final six 60-frame windows contain 13,627 palette
+reuses, 229 reported fallback attempts and 10,620 captured jobs, with no busy
+skips or capacity rejects. Those windows average 153.53 ms per frame (6.51 FPS).
+Selected model preparation still spends 24.07 ms per frame in its traversal
+child, including a nested 10.92 ms draw-wrapper measurement. These scopes must
+not be added together. This is not a matched A/B capture and does not establish
+a numerical gain or regression against perf.35.
+
+The experiment therefore remains unqualified and default-off in ordinary
+builds. Successful palette reuse alone is not evidence that work was removed
+from the frame's critical path. This test covers model-palette preparation,
+not a full simulation/render snapshot split. Next work should identify the
+remaining traversal/draw-wrapper cost and update dependencies before extending
+buffering to more state. Perf.37 remains installed for now; no rollback or
+settings change was performed during this log collection.
+
+Receipt: `../pose-pipeline-hardware/user-play-1789859498966021178/`, containing
+the status, gameplay log and summary.
