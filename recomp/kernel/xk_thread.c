@@ -87,11 +87,16 @@ static xk_fiber *g_object_io_return;
 static int g_next_tid = 4;
 static uint32_t g_tls_dir;            /* IMAGE_TLS_DIRECTORY in guest memory (0 = none) */
 extern uint32_t xv_game_tls_dir;      /* from xv_fn_table.c (0 if unknown) */
+/* A profile using native FP for guest instructions may need a different
+ * initial environment from a newly created platform thread. Run once on that
+ * thread, before any translated instructions; never reset it on a yield. */
+void xk_game_thread_enter(xctx *c) __attribute__((weak));
 
 static void thread_entry(void *arg)
 {
     xk_thread *t = arg; xk_cur = t; xctx *c = &t->ctx;
     if (t->host_entry) { t->host_entry(c, t->host_arg); xk_thread_exit(0); }
+    if (xk_game_thread_enter) xk_game_thread_enter(c);
     /* the kernel calls SystemRoutine(StartRoutine, StartContext); if none, StartRoutine(StartContext) */
     if (t->system_routine) { X_PUSH32(t->start_context); X_PUSH32(t->start_routine); X_PUSH32(0xDEAD0001u); xv_call(c, t->system_routine); }
     else { X_PUSH32(t->start_context); X_PUSH32(0xDEAD0001u); xv_call(c, t->start_routine); }

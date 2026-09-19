@@ -6,5 +6,6 @@
 uint32_t h2_platform_fpscr_read(void);
 void h2_platform_fpscr_write(uint32_t value);
 void h2_fp_environment_fault(xctx *, uint32_t ip, uint32_t address, uint32_t value);
+void xk_game_thread_enter(xctx *);
 void h2_stmxcsr(xctx *, uint32_t ip, uint32_t address);
 void h2_ldmxcsr(xctx *, uint32_t ip, uint32_t address);

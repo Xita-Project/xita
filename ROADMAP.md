@@ -1328,6 +1328,11 @@ settings and control remapping, styled after the original Xbox dashboard.
 
 ### 2.1 Technical objectives
 
+- **Dashboard menu cleanup — lower priority (requested September 18).** Reduce
+  the number of menus, group related settings, and make game selection and
+  launching easy to find. Keep advanced diagnostics accessible without crowding
+  everyday navigation. Schedule after current gameplay performance, stability,
+  and Halo 2 startup/rendering work; no dashboard redesign is required now.
 - **Launcher.** A 3D green-matrix, original-Xbox-style front end rendered with GXM: the
   glowing green tubes and animated grid, and a menu of the installed **games** (Halo:
   Combat Evolved first, Halo 2 next, each with its own recompiled engine and data under

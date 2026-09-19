@@ -19,6 +19,19 @@ static int supported_native(uint32_t value)
      * Preserve unrelated NZCV/QC/AHP and reserved bits; no arithmetic occurs here. */
     return !(value & 0x03F79F00u);
 }
+void xk_game_thread_enter(xctx *c)
+{
+    (void)c;
+    /* Real SCE threads may start with DN/FZ set (observed 0x83000010).
+     * Establish the supported initial SSE environment on each guest thread:
+     * masked exceptions, nearest rounding, gradual underflow, clean status.
+     * This is initialization, not a relaxation of STMXCSR/LDMXCSR validation.
+     * Preserve unrelated native bits; the kernel preserves FPSCR on switches. */
+    uint32_t native = h2_platform_fpscr_read();
+    uint32_t initial = native & ~(0x03F79F00u | 0x9Fu);
+    xv_logf("[h2/fp] thread entry native=%08X guest=%08X\n", native, initial);
+    h2_platform_fpscr_write(initial); /* logging must not seed guest exceptions */
+}
 void h2_stmxcsr(xctx *c, uint32_t ip, uint32_t address)
 {
     if (!mapped(address)) { h2_fp_environment_fault(c, ip, address, 0); return; }

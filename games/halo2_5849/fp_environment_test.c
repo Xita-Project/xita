@@ -29,6 +29,19 @@ int main(void)
     memset(g_xram,0xA5,0x20000); memset(&cpu,0xA6,sizeof cpu); xctx before=cpu;
     for(unsigned i=0;i<1u<<20;++i) g_xpt[i]=0x1F000;
     g_xpt[1]=0x5000; g_xpt[2]=0x8000; /* deliberately nonadjacent physical pages */
+    /* Reproduce the hardware stop's inherited DN/FZ modes. Each new guest
+     * thread must begin in the supported environment, despite logging. */
+    const uint32_t inherited[]={0x83000010u,0x03F79F9Fu,0xFC00009Fu,0};
+    for(unsigned i=0;i<sizeof inherited/sizeof inherited[0];++i) {
+        native_state=inherited[i]; unsigned n=writes;
+        xk_game_thread_enter(&cpu);
+        assert(native_state==(inherited[i]&~0x03F79F9Fu) && writes==n+1);
+        assert(!memcmp(&before,&cpu,sizeof cpu));
+        h2_stmxcsr(&cpu,0x535A2,0x1000);
+        assert(X_M32(0x1000)==0x1F80);
+        h2_ldmxcsr(&cpu,0x535B9,0x1000);
+        assert(native_state==(inherited[i]&~0x03F79F9Fu));
+    }
     static const unsigned bit[]={0,7,1,2,3,4};
     for(unsigned status=0;status<64;++status) {
         uint32_t expected=0xFC000000u;
