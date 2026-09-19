@@ -10,14 +10,18 @@ typedef struct { uint32_t args[3], r[8]; unsigned popped; } xctx;
 #define X_RET(n) do { c->popped=(n); return; } while (0)
 #define X_M32(a) ((uint32_t)(a))
 #define XD3D_COUNT(name) ((void)(name))
-static int xd3d_hist_active(void) { return 0; }
+static int hist_mode;
+static int xd3d_hist_active(void) { return hist_mode; }
 static void test_log(const char *format, ...) { (void)format; }
 #define D3DLOG(...) test_log(__VA_ARGS__)
 
 /* Deterministic readable guest mappings, including unsigned address wrap.
  * Record every requested address; the reference independently enumerates
  * valid destination rows instead of reproducing the producer's loop. */
-static uint32_t addresses[192], address_count;
+static uint32_t addresses[512], address_count;
+static int page_mode;
+static unsigned char page_store[4][8192];
+static unsigned page_slot(uint32_t address) { return (address >> 12) == 0xfffffu ? 3u : ((address >> 12) & 1u) * 2u; }
 static void sample(uint32_t address, uint32_t bits[4])
 {
     bits[0] = address * 2654435761u;
@@ -28,10 +32,12 @@ static void sample(uint32_t address, uint32_t bits[4])
 static const void *guest(uint32_t address)
 {
     static uint32_t words[4];
-    assert(address_count < 192); addresses[address_count++] = address;
+    assert(address_count < 512); addresses[address_count++] = address;
+    if (page_mode) return page_store[page_slot(address)] + (address & 4095u);
     sample(address, words); return words;
 }
 #define X_G(a) guest((a))
+#include "constant_read.inc"
 #include "constant_upload.inc"
 
 int main(void)
@@ -72,5 +78,35 @@ int main(void)
                 assert(xd3d_state.vsc_dirty_lo == lo && xd3d_state.vsc_dirty_hi == hi);
                 cases++;
             }
-    printf("PASS: %u production uploads, clipping, dirty unions, non-finite values and address wrap\n", cases);
+    /* Physical pages include poison gaps. A direct 16-byte host copy crossing
+     * a guest boundary must fail this test, including guest address wrap. */
+    page_mode = 1;
+    for (hist_mode = 0; hist_mode <= 1; hist_mode++)
+    for (unsigned offset = 4081; offset <= 4097; offset++) {
+        for (unsigned wrap = 0; wrap < 2; wrap++) {
+            uint32_t source = (wrap ? 0xffffe000u : 0u) + offset;
+            if (wrap) source += 4096u;
+            memset(page_store, 0xa5, sizeof page_store);
+            uint32_t expected[8][4];
+            for (unsigned row = 0; row < 8; row++) {
+                uint32_t words[4] = {0x3f800000u + row, 0x80000000u, 0x7fc12345u, 0xff800000u};
+                for (unsigned b = 0; b < 16; b++) {
+                    uint32_t a = source + row * 16 + b;
+                    page_store[page_slot(a)][a & 4095u] = ((unsigned char *)words)[b];
+                }
+                words[2] = words[3] = 0;
+                memcpy(expected[row], words, sizeof words);
+            }
+            memset(&xd3d_state, 0, sizeof xd3d_state);
+            xd3d_state.vsc_dirty_lo = 192;
+            xctx c = {{(uint32_t)-96, source, 8}, {0}, 0};
+            address_count = 0;
+            xv_hle_D3DDevice_SetVertexShaderConstant(&c);
+            assert(!memcmp(xd3d_state.vsc, expected, sizeof expected));
+            assert(c.popped == 3 && c.r[0] == 0);
+            assert(xd3d_state.vsc_dirty_lo == 0 && xd3d_state.vsc_dirty_hi == 8);
+            cases++;
+        }
+    }
+    printf("PASS: %u production uploads, clipping, dirty unions, non-finite values, split pages and address wrap\n", cases);
 }

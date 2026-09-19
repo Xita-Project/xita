@@ -903,7 +903,7 @@ void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
 { XD3D_COUNT("D3DDevice_SetVertexShaderConstant");
     int64_t reg = (int64_t)(int32_t)X_ARG(0) + 96;
     uint32_t src = X_ARG(1), n = X_ARG(2);
-    if (xd3d_hist_active()) { const float *f = (const float *)X_G(src); D3DLOG("[hist] SetVertexShaderConstant(reg %d, n %u) from %08X: %.3f %.3f %.3f %.3f\n", (int32_t)X_ARG(0), n, X_M32(c->r[4]), f[0], f[1], f[2], f[3]); }
+    if (xd3d_hist_active()) { float f[4]; x_guest_read(f, src, sizeof f); D3DLOG("[hist] SetVertexShaderConstant(reg %d, n %u) from %08X: %.3f %.3f %.3f %.3f\n", (int32_t)X_ARG(0), n, X_M32(c->r[4]), f[0], f[1], f[2], f[3]); }
     /* NV2A's vertex ALU defines 0 * (inf|NaN) = 0, so Halo happily uploads non-finite constants (e.g. the
      * texture-transform row c[17].z = 1/scale^2 with scale 0 for a non-animated stage) and the dph against a
      * texcoord with a 0 component still comes out right.  GXM is IEEE: NaN texcoords sampled the second stage
@@ -916,7 +916,8 @@ void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
          * loop remains 32-bit on Cortex-A9 and visits at most 192 registers. */
         for (uint32_t row = (uint32_t)lo; row < (uint32_t)hi; ++row) {
             uint32_t i = row - (uint32_t)reg;
-            float *d = xd3d_state.vsc[row]; memcpy(d, X_G(src + i * 16u), 16);
+            /* A constant may straddle separately committed guest pages. */
+            float *d = xd3d_state.vsc[row]; x_guest_read(d, src + i * 16u, 16);
             for (int k = 0; k < 4; ++k) if (!isfinite(d[k])) { d[k] = 0.0f; static unsigned nn; if (nn++ < 8) D3DLOG("vs const c[%d].%c non-finite from %08X -> 0\n", (int)row - 96, "xyzw"[k], X_M32(c->r[4])); }
         }
         if ((uint32_t)lo < xd3d_state.vsc_dirty_lo) xd3d_state.vsc_dirty_lo = (uint32_t)lo;
