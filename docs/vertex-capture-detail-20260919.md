@@ -73,3 +73,24 @@ measurements or bandwidth counters. Explicit joins remain outside these scopes.
 The ordinary corridor movement sequence subsequently completed and its settled
 capture is running. Private evidence: `capture-detail-hardware/checkpoint-settled`
 `.log`, `.summary.json`, and `.detail.json`; `checkpoint-first.png`.
+
+## Crowded corridor result and next experiment
+
+The settled final 360 frames average 171.53 ms (about 5.83 FPS), with 22.57
+selected model calls/frame and camera (-27.53, 37.08, 0.62), direction
+(-0.86, -0.48, -0.15). Different model workload/camera from perf.32 prevent a
+causal frame-time comparison. The final six detail windows contain 1,862 sampled
+submissions: comparison 978 calls / 6,758,472 logical bytes / 58,683 us;
+copy 1,097 calls / 6,840,232 bytes / 29,493 us; publication 1,000 calls /
+13,399 us. Compared logical volumes are similar but sampled comparison elapsed
+is roughly twice copying. Preemption and memory access patterns remain possible
+contributors; this does not prove a cache-miss diagnosis.
+
+The next controlled candidate keeps immutable input capture and worker-side
+uploader validation but disables recording-side capture reuse and completed
+result bypass (`XV_VERTEX_CAPTURE_REUSE=0`, `XV_VERTEX_CAPTURE_READY=0`). It uses
+existing qualified fallback paths, not unvalidated guest-pointer sharing. All
+other cumulative options remain enabled. This deliberately trades additional
+staging copies and FIFO jobs for removing exact owner comparisons. Worker time,
+queue-pressure joins and overall gameplay time must determine whether the trade
+helps; no speedup is assumed. Perf.33 is retained as the comparison/rollback.
