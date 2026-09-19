@@ -82,3 +82,36 @@ native in its cleanup path with an application-log check, then collects another
 native log and all subsequent evidence are kept in `packed-compare-hardware/`
 `resolution/`. This uses ordinary gameplay and the live graphics control, not
 the built-in benchmark controller.
+
+## Fixed-camera resolution result
+
+All three ordinary-gameplay captures completed. Native resolution was restored
+and confirmed by both `render resolution: 960x544 (native)` and
+`XV_RENDER_HEIGHT=544 applied`; the final screenshot shows gameplay on perf.35.
+The last six logged camera observations in each capture are identical:
+(-26.89, 37.28, 0.62), direction (-0.96, -0.25, -0.15). Each timing summary uses
+six complete 60-frame windows. Live NPC state is not deterministic.
+
+| Metric | Native before | 360p | Native after |
+| --- | ---: | ---: | ---: |
+| Frame interval | 182.03 ms | 180.15 ms | 172.60 ms |
+| Derived FPS | 5.49 | 5.55 | 5.79 |
+| Selected model calls/frame | 31.54 | 33.13 | 33.73 |
+| Owner capture | 21.81 ms | 22.13 ms | 22.07 ms |
+| Worker preparation | 10.17 ms | 10.79 ms | 11.15 ms |
+| Completion bound after submit | 109.61–112.97 ms | 69.67–71.45 ms | 116.47–119.33 ms |
+
+Reducing pixel resolution substantially reduces outstanding completion latency
+but does not produce a corresponding FPS improvement; the restored native arm
+is faster than the 360p arm. This supports prioritizing CPU preparation and other
+resolution-independent critical-path work for this scene. It does not prove all
+GPU work is irrelevant, identify a cache miss, or negate prior resolution gains
+in other views. Packet bounds include pipeline latency, not exclusive GPU time.
+
+Keep native settings and the cumulative perf.35 candidate while investigating
+the next CPU bottleneck. No whole-frame gain is claimed for packed comparison.
+Next qualify the optional CPU-counter probe described in
+[cpu-counter-followup-20260919.md](cpu-counter-followup-20260919.md) before using
+cache events to choose a larger refactor. Private evidence includes the three
+resolution logs/screenshots, `comparison.json`, `view-check.json`,
+`apply-360.log`, `restore-native.log` and completed `trial.log`.
