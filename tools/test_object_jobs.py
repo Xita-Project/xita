@@ -134,6 +134,21 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                             assert sum(total for _,_,total,_ in parts)==queries[0][1]
                             assert max(maximum for *_,maximum in parts)==queries[0][2]
                         else: assert not parts
+                    results=re.findall(r'\[object-query-results\] lane (\d+) route ([\w-]+) valid (\d+) unreadable (\d+) invalid (\d+);',result.stderr)
+                    lists=re.findall(r'\[object-query-list\] lane (\d+) route ([\w-]+) list (\w+) sum (\d+) max (\d+) bins ([\d/]+);',result.stderr)
+                    assert len(results)==len(origins), 'result reset/duplicate'
+                    for ln,route,n,*_ in origins:
+                        expected={'world-171f94':(int(n),0,0),'object-17301b':(0,0,int(n)),'other':(0,int(n),0)}[route]
+                        rows=[tuple(map(int,(v,u,b))) for lane,tag,v,u,b in results if (lane,tag)==(ln,route)]
+                        assert rows==[expected],(ln,route,rows,expected)
+                        rows=[(name,int(total),int(maximum),list(map(int,bins.split('/'))))
+                              for lane,tag,name,total,maximum,bins in lists if (lane,tag)==(ln,route)]
+                        if route!='world-171f94':assert not rows;continue
+                        assert len(rows)==3
+                        for name,total,maximum,bins in rows:
+                            value,bin_id={'surfaces':(32,2),'edges':(64,3),'vertices':(128,4)}[name]
+                            assert total==int(n)*value and maximum==value
+                            assert bins==[int(n) if i==bin_id else 0 for i in range(6)]
                 else:
                     assert '[object-motion]' not in result.stderr
                 print(f'PASS: {workers} workers, profile {profile}, bounded wait {timed}: two object passes in three render frames; retired/reset totals and wait-site accounting')

@@ -292,14 +292,33 @@ void f_0008FB70(xctx *c)
         assert(!!motion1==!!service_sample&&!!motion2==!!motion1&&!!motion3==!!motion1);
         for(unsigned site=6;site<9;site++) {
             uint32_t return_word=X_M32(c->r[4]);
-            if(site==6)X_M32(c->r[4])=(uint32_t[]){0x171f99u,0x173020u,0xabcdefu}[id%3];
+            uint32_t saved_esi=c->r[6],output=c->r[4]-0x3000u,old_counts[3];
+            if(site==6) {
+                X_M32(c->r[4])=(uint32_t[]){0x171f99u,0x173020u,0xabcdefu}[id%3];
+                for(unsigned i=0;i<3;i++) {
+                    old_counts[i]=X_M32(output+i*0x404u);
+                    X_M32(output+i*0x404u)=(uint32_t[]){32,64,128}[i];
+                }
+                if(id%3==1)X_M32(output+0x404u)=257; /* invalid count */
+                c->r[6]=id%3==2?0:output; /* unreadable output */
+            }
             unsigned collection=xv_object_motion_begin(c,site);
             assert(!!collection==!!motion3);
             assert(!xv_object_motion_begin(c,site));
             { XV_OBJECT_MATH_GUARD(); assert(shared_guarded_value==before+1); }
             struct timespec collection_delay={0,50000};
             nanosleep(&collection_delay,NULL);
+            if(site==6)c->r[6]=0; /* sampler must use captured entry ESI */
+            xctx before_end=*c;
             xv_object_motion_end(&collection);assert(!collection);
+            assert(!memcmp(c,&before_end,sizeof before_end));
+            if(site==6) {
+                for(unsigned i=0;i<3;i++) {
+                    assert(X_M32(output+i*0x404u)==(id%3==1&&i==1?257u:(uint32_t[]){32,64,128}[i]));
+                    X_M32(output+i*0x404u)=old_counts[i];
+                }
+                c->r[6]=saved_esi;
+            }
             X_M32(c->r[4])=return_word;
         }
 #endif

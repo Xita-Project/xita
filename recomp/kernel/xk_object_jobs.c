@@ -369,8 +369,8 @@ static void pass_timing_cancel(void)
 
 #ifdef XV_OBJECT_HOLD_PROFILE
 /* Research-only sampled OUTER worker scopes. A lane owns its records until
- * join. Sampling is decorrelated from periodic call order; no guest memory is
- * read. Reported elapsed time includes preemption and any owner-service park.
+ * join. Sampling is decorrelated from periodic call order. Query samples read
+ * only validated private-stack metadata. Elapsed includes owner-service parks.
  * Table accounting happens after release, not while retaining the mutex. */
 enum { HOLD_SITES=32, HOLD_SAMPLE_MASK=63, MOTION_SITES=9 };
 static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes);
@@ -391,7 +391,14 @@ static struct __attribute__((aligned(64))) {
     uint64_t motion_start[MOTION_SITES];
     struct { unsigned samples; uint64_t us,max_us; } motion[MOTION_SITES];
     unsigned query_origin;
+    uint32_t query_output;
+    uint8_t *query_arena;
+    uint32_t *query_pages;
     struct { unsigned samples; uint64_t us,max_us; } queries[4];
+    struct {
+        unsigned valid,unreadable,invalid;
+        struct { uint64_t sum; unsigned max,bins[6]; } list[3];
+    } results[4];
 } hold_lanes[WORKERS];
 /* Stable IDs of the direct children of the signature-checked 4C980 callback.
  * No nested attribution: a child includes all its descendants and owner parks.
@@ -406,7 +413,7 @@ static const uint32_t motion_sites[MOTION_SITES]={
     0x88110,0x868F0,0x1716F0
 };
 /* Nested inclusive timing only inside an already sampled direct child.
- * It retains the lock and never reads/modifies guest state. Recursion stays
+ * It retains the lock and never modifies guest state. Recursion stays
  * included in its outer instance. Owner services borrowing c are excluded. */
 unsigned xv_object_motion_begin(xctx *c,unsigned site)
 {
@@ -426,6 +433,11 @@ unsigned xv_object_motion_begin(xctx *c,unsigned site)
             origin=pc==0x171f99u?0:pc==0x173020u?1:2;
         }
         hold_lanes[lane].query_origin=origin;
+        /* ESI is the full 88110 result buffer at entry. Capture before the
+         * guest can change registers; revalidate mapping and roots at return. */
+        hold_lanes[lane].query_output=private_stack_span((unsigned)lane,c->r[6],0x1010u)?c->r[6]:0;
+        hold_lanes[lane].query_arena=g_xram;
+        hold_lanes[lane].query_pages=g_xpt;
     }
     return ((site+1)<<8)|(lane+1);
 }
@@ -448,6 +460,26 @@ void xv_object_motion_end(unsigned *token)
         hold_lanes[lane].queries[origin].us+=elapsed;
         if(elapsed>hold_lanes[lane].queries[origin].max_us)
             hold_lanes[lane].queries[origin].max_us=elapsed;
+        typeof(hold_lanes[lane].results[origin]) *r=&hold_lanes[lane].results[origin];
+        uint32_t output=hold_lanes[lane].query_output;
+        if(!output||g_xram!=hold_lanes[lane].query_arena||g_xpt!=hold_lanes[lane].query_pages||
+           !private_stack_span(lane,output,0x1010u))r->unreadable++;
+        else {
+            /* Observed final list lengths, not actual comparison counts.
+             * Read after stopping the existing timer; no per-loop changes. */
+            uint32_t n[3]={X_M32(output),X_M32(output+0x404u),X_M32(output+0x808u)};
+            if(n[0]>256u||n[1]>256u||n[2]>256u)r->invalid++;
+            else {
+                r->valid++;
+                for(unsigned i=0;i<3;i++) {
+                    unsigned b=n[i]==0?0:n[i]<=8?1:n[i]<=32?2:n[i]<=64?3:n[i]<=128?4:5;
+                    r->list[i].sum+=n[i];
+                    if(n[i]>r->list[i].max)r->list[i].max=n[i];
+                    r->list[i].bins[b]++;
+                }
+            }
+        }
+        hold_lanes[lane].query_output=0;
     }
     *token=0;
 }
@@ -521,12 +553,23 @@ static void hold_report(unsigned frames)
                 lane,motion_sites[site],hold_lanes[lane].motion[site].samples,
                 (unsigned long long)hold_lanes[lane].motion[site].us,
                 (unsigned long long)hold_lanes[lane].motion[site].max_us);
-        for(unsigned origin=0;origin<4;origin++)if(hold_lanes[lane].queries[origin].samples)
+        for(unsigned origin=0;origin<4;origin++)if(hold_lanes[lane].queries[origin].samples) {
+            const char *route=(const char *const[]){"world-171f94","object-17301b","other","unreadable"}[origin];
             XK_LOG("[object-query-origin] lane %u route %s samples %u elapsed-us %llu max-us %llu; partitions sampled 88110, not total query time\n",
-                lane,(const char *const[]){"world-171f94","object-17301b","other","unreadable"}[origin],
+                lane,route,
                 hold_lanes[lane].queries[origin].samples,
                 (unsigned long long)hold_lanes[lane].queries[origin].us,
                 (unsigned long long)hold_lanes[lane].queries[origin].max_us);
+            typeof(hold_lanes[lane].results[origin]) *r=&hold_lanes[lane].results[origin];
+            XK_LOG("[object-query-results] lane %u route %s valid %u unreadable %u invalid %u; final counts only\n",
+                lane,route,r->valid,r->unreadable,r->invalid);
+            if(r->valid)for(unsigned i=0;i<3;i++)
+                XK_LOG("[object-query-list] lane %u route %s list %s sum %llu max %u bins %u/%u/%u/%u/%u/%u; 0,1-8,9-32,33-64,65-128,129-256\n",
+                    lane,route,(const char *const[]){"surfaces","edges","vertices"}[i],
+                    (unsigned long long)r->list[i].sum,r->list[i].max,
+                    r->list[i].bins[0],r->list[i].bins[1],r->list[i].bins[2],
+                    r->list[i].bins[3],r->list[i].bins[4],r->list[i].bins[5]);
+        }
         uint32_t random=hold_lanes[lane].random;
         memset(&hold_lanes[lane],0,sizeof hold_lanes[lane]);hold_lanes[lane].random=random;
     }
