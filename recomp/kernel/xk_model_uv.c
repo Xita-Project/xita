@@ -12,15 +12,18 @@ static struct {
     const uint8_t *ram,*image;const uint32_t *pt;
     uint32_t arena,lo,hi,packet,generation,serial,depth,blocked;
 } scope;
-static struct {
+typedef struct {
     UVKey key;
     uint32_t scratch[8],time,rows[8],fpscr;
     double st[4];uint16_t fsw;unsigned valid;
-} last;
+} UVValue;
+static UVValue values[2];
+static UVValue *last=&values[0], *previous=&values[1];
+static unsigned victim_hits;
 static struct {UVKey key;uint32_t sp,u,v;uintptr_t stack,row0,row1;unsigned token;} pending;
 static unsigned serial,exhausted;
 #if XV_MODEL_UV_CROSS_MODEL
-static unsigned last_serial;
+static unsigned last_serial, previous_serial;
 static struct { unsigned retained_exits,cross_hits,boundary_resets; } cross_counts;
 #endif
 static struct {
@@ -42,7 +45,7 @@ static void fp_set(uint32_t v){
     (void)v;
 #endif
 }
-static void invalidate(void){if(last.valid || pending.token)counts.invalidations++;last.valid=0;pending.token=0;}
+static void invalidate(void){if(last->valid || previous->valid || pending.token)counts.invalidations++;last->valid=previous->valid=0;pending.token=0;}
 static int diagnostic(void){return (&xv_watch_n && xv_watch_n) || (&xv_trace_funcs && xv_trace_funcs)
 #ifdef XV_CHECK_GUEST_ADDRESS
     || xv_watch_len
@@ -101,7 +104,7 @@ void xk_model_uv_scope_end(xctx*c,unsigned token){
 #if XV_MODEL_UV_CROSS_MODEL
     if(active!=1 || scope.depth!=1 || scope.blocked || pending.token || diagnostic() ||
        !memory_context(scope.ram,scope.pt,scope.image))invalidate();
-    else if(last.valid)cross_counts.retained_exits++;
+    else if(last->valid)cross_counts.retained_exits++;
     pending.token=0;
 #else
     invalidate();
@@ -140,26 +143,43 @@ int xk_model_uv_begin(xctx*c,const uint8_t *ram,const uint32_t *pt,const uint8_t
     /* Original56F26 overwrites these condition bits before their first read.
      * Sticky status, all other FSW bits, controls and TOP remain exact. */
     key.top=c->fsp;key.fsw=c->fsw&~0x4700u;key.fcw=c->fcw;key.fpscr=fp&~0xf0000000u;
-    if(last.valid){
-        unsigned args=memcmp(key.args,last.key.args,sizeof key.args)!=0;
-        unsigned top=key.top!=last.key.top,fsw=key.fsw!=last.key.fsw,fcw=key.fcw!=last.key.fcw,fpscr=key.fpscr!=last.key.fpscr;
+    /* Keep the previous exact value as a victim entry: alternating material
+     * parameters need not rerun canonical UV arithmetic. All admission and
+     * memory checks above apply equally to both entries. No guest pointer is
+     * retained here, and invalidate() retires both at the existing boundaries. */
+    if(previous->valid && (!last->valid || memcmp(&key,&last->key,sizeof key)) &&
+       !memcmp(&key,&previous->key,sizeof key)) {
+        UVValue *swap=last;last=previous;previous=swap;victim_hits++;
+#if XV_MODEL_UV_CROSS_MODEL
+        unsigned serial_swap=last_serial;last_serial=previous_serial;previous_serial=serial_swap;
+#endif
+    }
+    if(last->valid){
+        unsigned args=memcmp(key.args,last->key.args,sizeof key.args)!=0;
+        unsigned top=key.top!=last->key.top,fsw=key.fsw!=last->key.fsw,fcw=key.fcw!=last->key.fcw,fpscr=key.fpscr!=last->key.fpscr;
         unsigned state=top|fsw|fcw|fpscr;
         if(!args && !state){
-            for(unsigned i=0;i<8;i++)s[i]=last.scratch[i];s[14]=last.time;
-            for(unsigned i=0;i<4;i++){u[i]=last.rows[i];v[i]=last.rows[i+4];c->st[(c->fsp-1-i)&7]=last.st[i];}
-            c->r[0]=last.fsw;c->r[1]=c->r[2]=0;c->r[4]=e+28;c->fsw=last.fsw;
-            X_FLAGS(XK_LOGIC,0,0,(last.fsw>>8)&0x44,8);counts.hits[site]++;
+            for(unsigned i=0;i<8;i++)s[i]=last->scratch[i];s[14]=last->time;
+            for(unsigned i=0;i<4;i++){u[i]=last->rows[i];v[i]=last->rows[i+4];c->st[(c->fsp-1-i)&7]=last->st[i];}
+            c->r[0]=last->fsw;c->r[1]=c->r[2]=0;c->r[4]=e+28;c->fsw=last->fsw;
+            X_FLAGS(XK_LOGIC,0,0,(last->fsw>>8)&0x44,8);counts.hits[site]++;
 #if XV_MODEL_UV_CROSS_MODEL
             /* Count only the first reuse in this model: subsequent same-model
              * hits were already possible with the original scope lifetime. */
             if(last_serial!=scope.serial){cross_counts.cross_hits++;last_serial=scope.serial;}
 #endif
-            fp_set(last.fpscr);return 1;
+            fp_set(last->fpscr);return 1;
         }
         counts.arguments+=args&&!state;counts.fp+=state&&!args;counts.both+=args&&state;
         counts.top+=top;counts.fsw+=fsw;counts.fcw+=fcw;counts.fpscr+=fpscr;
     }
-    last.valid=0;counts.cold++;pending.key=key;pending.sp=e;pending.u=c->r[3];pending.v=c->r[7];
+    if(last->valid) {
+        UVValue *swap=last;last=previous;previous=swap;
+#if XV_MODEL_UV_CROSS_MODEL
+        previous_serial=last_serial;
+#endif
+    }
+    last->valid=0;counts.cold++;pending.key=key;pending.sp=e;pending.u=c->r[3];pending.v=c->r[7];
     pending.stack=(uintptr_t)s;pending.row0=(uintptr_t)u;pending.row1=(uintptr_t)v;pending.token=scope.serial;*token=scope.serial;return 0;
  bad_span:counts.spans++;invalidate();return 0;
  bad_program:counts.program++;invalidate();return 0;
@@ -173,10 +193,10 @@ void xk_model_uv_end(xctx*c,unsigned token){
        c->r[4]!=pending.sp+28 || c->fsp!=pending.key.top || c->fcw!=pending.key.fcw ||
        (uintptr_t)span(pending.sp-32,60)!=pending.stack || (uintptr_t)span(pending.u,16)!=pending.row0 || (uintptr_t)span(pending.v,16)!=pending.row1){invalidate();scope.blocked=1;return;}
     uint32_t *s=(uint32_t *)pending.stack,*u=(uint32_t *)pending.row0,*v=(uint32_t *)pending.row1;
-    last.key=pending.key;last.fpscr=fp;last.fsw=c->fsw;
-    for(unsigned i=0;i<8;i++)last.scratch[i]=s[i];last.time=s[14];
-    for(unsigned i=0;i<4;i++){last.rows[i]=u[i];last.rows[i+4]=v[i];last.st[i]=c->st[(c->fsp-1-i)&7];}
-    pending.token=0;last.valid=1;
+    last->key=pending.key;last->fpscr=fp;last->fsw=c->fsw;
+    for(unsigned i=0;i<8;i++)last->scratch[i]=s[i];last->time=s[14];
+    for(unsigned i=0;i<4;i++){last->rows[i]=u[i];last->rows[i+4]=v[i];last->st[i]=c->st[(c->fsp-1-i)&7];}
+    pending.token=0;last->valid=1;
 #if XV_MODEL_UV_CROSS_MODEL
     last_serial=scope.serial;
 #endif
@@ -188,6 +208,8 @@ void xk_model_uv_report(unsigned frames){
     XK_LOG("[model-uv-cross] %u frames retained-exits %u cross-scope-hits %u boundaries %u; scene/Present bounded\n",frames,cross_counts.retained_exits,cross_counts.cross_hits,cross_counts.boundary_resets);
     memset(&cross_counts,0,sizeof cross_counts);
 #endif
+    XK_LOG("[model-uv-victim] %u frames hits %u; second exact value, same scene/Present lifetime\n",frames,victim_hits);
+    victim_hits=0;
     memset(&counts,0,sizeof counts);
 }
 #endif

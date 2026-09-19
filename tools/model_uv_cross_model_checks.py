@@ -90,6 +90,18 @@ def run(out):
  assert c.rd(c.sym('counts'),88)==bytes(88) and c.rd(c.sym('cross_counts'),12)==bytes(12)
  c.restore(state);c.compare('after-report','hit')
  assert c.word(c.sym('cross_counts')+4)==0
+ # Alternating exact material values should reuse both owned payloads.
+ c=Case('two-material-victim');c.seed()
+ c.put(c.guest(0x90804),0x3fc00000);b=c.compare('seed-B','cold')
+ for i in range(6):
+  c.restore(c.initial if i%2==0 else b);c.compare('alternate-'+str(i),'hit')
+ # A third value evicts the older entry; no approximate-key reuse is allowed.
+ c.restore(c.initial);c.put(c.guest(0x90804),0x40000000);c.compare('seed-C','cold')
+ c.restore(c.initial);c.compare('evicted-A','cold')
+ # Both entries, including the non-current victim, retire at Present.
+ c.restore(b);c.compare('evicted-B','cold')
+ c.restore(c.initial);c.call('arm_scope_end');c.call('arm_present');c.call('arm_scope_begin')
+ c.compare('retired-victim-A','cold')
  # Measure clean exit and next begin separately, not just helper hit. OS stub costs remain unmodeled.
  c=Case('cost');c.seed();cost={}
  for name in ['arm_scope_end','arm_scope_begin','arm_present']:

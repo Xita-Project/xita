@@ -48,3 +48,29 @@ Private evidence: `../pose-pipeline-hardware/model-cost-trace/` contains the
 complete controller receipt, before/after captures, raw log, parsed phase
 summary and retained function extracts. No game code is included in this note.
 No new runtime was installed by this investigation.
+
+## Follow-up and testing workflow
+
+The object-worker off/on/off capture completed at 8.413/8.195/8.351 FPS,
+with matching camera checks and settings restoration. This small difference
+does not justify a core-policy change or explain all of the earlier slow view.
+Its receipts are in `../pose-pipeline-hardware/object-worker-contention/`.
+
+The user reiterated that automated FPS comparisons should stop. Subsequent
+performance qualification must use a deployed build, a full application restart
+and actual gameplay with logs. Do not use the comparison controller as a gate
+for retaining cumulative changes. Local state-equivalence tests remain useful
+for preventing correctness regressions before deployment.
+
+A source candidate retains two exact UV values instead of one, allowing
+alternating materials to reuse results. It swaps owned value-bank pointers,
+retains every existing input/FP/memory admission check, and invalidates both
+banks at the existing scene/Present boundaries. Added tests exercise alternating
+keys, third-key eviction and retirement of the non-current value. This is not
+yet installed or an established FPS improvement.
+
+The final pointer-bank implementation passed 245 ARM state-equivalence,
+caller-publication and lifetime checks against the retained original routine.
+These compare guest memory, context and FP status with synthetic caller inputs;
+they do not establish full-game performance or hardware stability. Receipts:
+`../uv-victim-pointer/cross-production-receipt.json` and its referenced results.
