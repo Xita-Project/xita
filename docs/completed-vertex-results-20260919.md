@@ -51,3 +51,33 @@ synchronization remains instrumented. Vita cross-compilation and default/Off/On,
 no-op and restoration build transitions pass. Invalid selectors and missing
 reuse support fail before compilation. The Off object's instructions match
 perf13 except for the changed source-line literal supplied to its assertion.
+
+## Physical Vita first capture
+
+`0.2.0-perf.14 / b115727+` was hash-verified and boot-confirmed in slot 1.
+Runtime SHA256 is
+`967359ee37a1df9f5413242558012abb0bab4af2cce6d86b862d6c4da2116e9c`.
+Only the runtime and boot manifest differ from perf13. Earlier cumulative
+options and graphics settings remain unchanged; persistent vertex caching is Off.
+The same Normal New001 campaign checkpoint loaded through the ordinary menus.
+
+In twelve complete 60-frame ordinary-play windows, the median shortcut count
+was 3,167.5 draws/window, or about 52.8/frame. Median queued work was 3,640.5
+jobs/window. Capture elapsed fell from perf13's 6.131 ms to 5.242 ms/frame;
+stream preparation was 6.066 ms versus 7.053 ms. Worker preparation was
+4.676 ms versus 4.782 ms. These nested/overlapping timings cannot be summed.
+This confirms substantial queue bypass and lower measured capture overhead.
+
+Total median frame time remained about 78.3 ms (logged FPS median 12.75), versus
+perf13's 78.4 ms / 12.8 FPS. Draw count was 149 versus 149.5/frame. There is no
+clear whole-frame FPS improvement; keep the qualified shortcut in the cumulative
+research build without claiming that the isolated timing saving became an FPS
+gain. This is a first same-checkpoint observation, not a paired restart study.
+
+The initial capture contains no searched crash marker and no reported failed
+capture job. During the later log pull, the host reported network unreachable,
+then no route to the Vita; its neighbor entry was FAILED. The second log is
+empty. No additional controller input, restart or rollback was sent after that
+loss. This does not establish a game crash or its cause. Movement and longer
+stability checks remain pending reconnection. Private evidence is under
+`ce-perf14/gameplay/` in the unified-games workspace.
