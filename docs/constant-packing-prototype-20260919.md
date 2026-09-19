@@ -120,3 +120,22 @@ Runtime SHA-256: `0589702fb6ed83c1dddabd3585deb18655fe0dfacd48144327b7a1afd97a57
 VPK SHA-256: `5b09f4d341825f05a53cf3e99d2686ccf39fc2264461c98644b1ea53ed3695b1`.
 Package reproduction and deployment artifacts: `../constant-pack-hardware/`.
 Hardware verification is pending; no performance claim follows from compilation.
+
+## First physical gameplay result
+
+Perf.30 booted successfully on the Vita with the expected runtime hash. The
+six settled 60-frame checkpoint windows (360 frames) match the prior camera
+`(-28.66,32.52,0.62)`, forward `(0.56,0.82,-0.15)` and show active gameplay.
+A captured image shows the world, weapon and HUD rendered; this is not a full
+rendering regression test.
+
+The helper accepts 16.475 batches/frame and packs 156.733 prefix matrices/frame.
+Size fallback averages 1/frame; preemption-budget fallback 0.0167/frame; mapping,
+alias and diagnostic-watch rejection counters are zero in these windows.
+Model-packet elapsed averages 8.566 ms, split into 4.051 ms timed draw wrappers
+and 4.515 ms outside those wrappers. Perf.29 measured 8.819/4.138/4.681 ms,
+but selected model calls also differ (7.497 versus 7.589 per frame).
+Whole-frame time is 78.767 ms versus 78.283 ms previously, approximately 12.7 FPS
+in either capture. This does **not** establish a whole-frame speedup or a
+reliable regression; it proves the native path is exercised in gameplay.
+The candidate remains stacked while the higher-model-count corridor is tested.
