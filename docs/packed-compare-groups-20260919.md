@@ -61,3 +61,24 @@ whole-frame improvement is established. The packed-comparison candidate remains
 under investigation while its heavy-corridor capture completes. Private evidence:
 `packed-compare-hardware/checkpoint-settled.log`, generated summaries and
 `checkpoint-comparison.json`.
+
+## Corridor capture and resolution attribution
+
+The perf.35 corridor capture completed at 186.13 ms/frame, versus perf.33's
+171.53 ms. Endpoint camera and model workload differ (28.74 versus 22.57 selected
+model calls/frame), so this does not establish a causal regression. Owner capture
+is 20.63 versus 18.41 ms with 1,383 versus 1,218 KiB/frame staged. There is no
+confirmed hardware speedup. Private evidence: `packed-compare-hardware/corridor/`
+and `corridor-comparison.json`.
+
+To avoid another restart/route mismatch for attribution, the same perf.35 view
+is now undergoing an ordinary settings-only native/360p/native comparison.
+The graphics overlay was inspected with Render Resolution selected at Native.
+One right press wrapped it to 360p; the runtime confirmed `640x360` and
+`XV_RENDER_HEIGHT=360 applied` without fallback. No camera/locomotion input was
+sent. `resolution/collect-and-restore.py` collects 90 seconds at 360p, restores
+native in its cleanup path with an application-log check, then collects another
+90 seconds. Timing and restoration remain pending completion; the initial
+native log and all subsequent evidence are kept in `packed-compare-hardware/`
+`resolution/`. This uses ordinary gameplay and the live graphics control, not
+the built-in benchmark controller.
