@@ -1720,15 +1720,24 @@ solver-fusion-generate:
 	@echo 'Set XV_NATIVE_SOLVER_FUSION=1 with XV_NATIVE_QUERY_FUSION=1 to generate the owned solver unit.' >&2
 	@false
 endif
-ifeq ($(XV_NATIVE_CONSTANT_PACK),1)
 CONSTANT_PACK_SRCS := $(shell rg -l 'xv_constant_pack_prefix' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+CONSTANT_PACK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(CONSTANT_PACK_SRCS))
+ifeq ($(XV_NATIVE_CONSTANT_PACK),1)
 ifeq ($(strip $(CONSTANT_PACK_SRCS)),)
 $(error XV_NATIVE_CONSTANT_PACK requires regenerated 7E530 hook)
 endif
-CONSTANT_PACK_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(CONSTANT_PACK_SRCS))
 $(CONSTANT_PACK_OBJS) $(RECOMP_BUILD)/kernel/xk_constant_pack.o $(RECOMP_BUILD)/kernel/xk_owner_phase.o: RECOMP_CFLAGS += -DXV_NATIVE_CONSTANT_PACK
 $(RECOMP_BUILD)/kernel/xk_constant_pack.o: RECOMP_CFLAGS += -DXV_OWNER_PHASE
 endif
+.PHONY: force-constant-pack-config
+force-constant-pack-config:
+$(BUILD)/constant-pack.config: force-constant-pack-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_NATIVE_CONSTANT_PACK)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(CONSTANT_PACK_OBJS) $(RECOMP_BUILD)/kernel/xk_constant_pack.o $(RECOMP_BUILD)/kernel/xk_owner_phase.o: $(BUILD)/constant-pack.config recomp/kernel/xk_constant_pack.h
+$(RECOMP_BUILD)/libxita_guest.a $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(BUILD)/constant-pack.config
 ifeq ($(XV_NATIVE_MODEL_PALETTE),1)
 RECOMP_CFLAGS += -DXV_NATIVE_MODEL_PALETTE
 CFLAGS += -DXV_NATIVE_MODEL_PALETTE
