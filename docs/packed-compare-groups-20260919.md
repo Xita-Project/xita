@@ -35,3 +35,18 @@ Production-entry validation completed: all 840 ARM uploader cases pass with
 `--wide-compare`, including range checks and exact CPU snapshots. Results and ELF
 hashes are preserved in `packed-compare-uploader-arm/receipt.json`. GPU-copy
 execution and real hardware timing remain outside that fixture's scope.
+
+## perf.35 installed for hardware qualification
+
+The candidate builds from perf.33 with the packed comparison header change;
+owner reuse and completed-result bypass remain enabled. All other build options
+are retained, including sampled capture detail. Package checks confirm only
+`game-a.self` and `boot-game.txt` changed and the update contract is identical.
+The remote updater verified runtime SHA256
+`0e147decd401ac688ce8300a55bd6bfff9e94175a3327a8c0497d69357dbe73f`
+(32,199,606 bytes), restarted into slot 0 and confirmed boot. Status reports
+`0.2.0-perf.35 / fbcb29d`; perf.33 remains in slot 1 for rollback.
+The guarded ordinary campaign/checkpoint/corridor sequence is running under
+`packed-compare-hardware/run-gameplay.py`. No hardware timing improvement is
+established by the installation. Build, package and deployment receipts remain
+in that private directory.
