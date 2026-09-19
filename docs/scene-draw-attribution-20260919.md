@@ -44,3 +44,12 @@ This suggests draw volume deserves attention alongside per-draw cost; it does
 not prove either an exact per-draw cost or a removable frame-time budget.
 The private `frame-counters.py` records sources and window counts. These are
 different workloads, not before/after optimization measurements.
+
+Qualification completed: the sanitizer checks and 24 retained primary-CFG cases
+pass at 646 callback/preemption frontiers. Six ARM transitions pass, preserving
+105 unrelated objects. Disabling the feature restores the prior complete
+`xd3d.o` byte for byte as well as the selected scene/observer baseline. The first
+attempt used the wrong build revision label and correctly rejected unrelated
+version-object changes; the successful `qualification-2/receipt.json` uses the
+matching retained-build revision. Perf.25 builds successfully; its package changes
+only `game-a.self` and `boot-game.txt` from perf.24.
