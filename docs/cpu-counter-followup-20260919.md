@@ -84,3 +84,24 @@ Runtime SHA-256:
 `6b20f65d5db31b53e00a9e825b21c8b697c17c7bf8f5bf33ea2ac9acc117d2e9`.
 The package changed only `game-a.self` and `boot-game.txt`; launcher and assets
 were unchanged. Deployment output is in `../cpu-counter-hardware/deploy.log`.
+
+## Recovery confirmed on hardware
+
+After the user reopened Xita, `/status` returned perf.35 / `fbcb29d` and
+`/update` confirmed slot 0 with runtime SHA
+`0e147decd401ac688ce8300a55bd6bfff9e94175a3327a8c0497d69357dbe73f`.
+The current log records successful dashboard confirmation. The launcher log's
+last selections are slot 1 then slot 0, consistent with failed-candidate fallback.
+
+The preserved previous log identifies perf.36 / `eaf3173`, reaches graphics
+initialization completion (1956 ms), then ends before any probe result, remote
+startup or dashboard confirmation. This rules out failure to enter the new
+executable, and narrows the observed stop to the interval between graphics
+completion and remote startup, containing the probe. It does not identify the
+exact failing call; logging loss and faults inside imported calls remain possible.
+Do not characterize this as a gameplay crash or claim PMU qualification.
+
+Receipts: `../cpu-counter-hardware/recovery/1789856245097402289/`
+(`previous-1.log`, `launcher.log`, `update.json`), plus the current startup capture
+in the parent recovery directory. Perf.36 remains excluded from further deployment;
+perf.35 is restored without reinstalling the VPK.
