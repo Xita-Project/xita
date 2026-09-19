@@ -67,7 +67,8 @@ static void begin_frame(unsigned frame)
 int main(int argc,char **argv)
 {
     (void)argv;fail_allocation=argc>1;
-    int metadata=getenv("XV_INDEX_METADATA") && atoi(getenv("XV_INDEX_METADATA"))==1;
+    const char *setting=getenv("XV_INDEX_METADATA");
+    int metadata=setting ? atoi(setting)==1 : XV_INDEX_METADATA_DEFAULT;
     int on=(getenv("XV_INDEX_REUSE") && atoi(getenv("XV_INDEX_REUSE"))!=0)||metadata;
     enabled=1;scan=1;
     for(unsigned j=0;j<8;j++)for(unsigned i=0;i<8193;i++)inputs[j][i]=(uint16_t)next_random();
@@ -163,11 +164,15 @@ int main(int argc,char **argv)
 with tempfile.TemporaryDirectory(prefix='xita-index-reuse-') as directory:
     temp=Path(directory);src=temp/'retainer.c';src.write_text(fixture+allocation+retain+checks)
     sdk=Path(os.environ.get('VITASDK',str(Path.home()/'vitasdk')))
-    subprocess.run(['cc','-O2','-g','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-parameter',
+    flags=['cc','-O2','-g','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-parameter',
         '-fno-strict-aliasing','-fsanitize=address,undefined','-I'+str(root),'-I'+str(root/'runtime'),
-        '-idirafter',str(sdk/'arm-vita-eabi/include'),str(src),'-o',str(temp/'test')],check=True)
-    for policy,metadata,args in [('0','0',[]),('1','0',[]),('0','1',[]),('1','1',[]),
+        '-idirafter',str(sdk/'arm-vita-eabi/include')]
+    for default in ('0','1'):
+        subprocess.run([*flags,'-DXV_INDEX_METADATA_DEFAULT='+default,str(src),'-o',str(temp/'test')],check=True)
+        for policy,metadata,args in [('0',None,[]),('1',None,[]),('0','0',[]),('1','0',[]),('0','1',[]),('1','1',[]),
                                  ('0','2',[]),('1','0',['allocation-failure']),
                                  ('0','1',['allocation-failure'])]:
-        subprocess.run([str(temp/'test'),*args],
-            env=dict(os.environ,XV_INDEX_REUSE=policy,XV_INDEX_METADATA=metadata),check=True)
+            env=dict(os.environ,XV_INDEX_REUSE=policy)
+            if metadata is None:env.pop('XV_INDEX_METADATA',None)
+            else:env['XV_INDEX_METADATA']=metadata
+            subprocess.run([str(temp/'test'),*args],env=env,check=True)

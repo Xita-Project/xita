@@ -79,7 +79,10 @@ below. Perf15 remains the UV-reuse candidate awaiting its physical test.
 
 `XV_INDEX_METADATA=1` in the startup environment or `xita.cfg` enables CPU
 metadata retention, including the existing within-frame GPU-copy reuse. It
-defaults Off and requires closing and relaunching Xita. There is no new dashboard
+defaults Off and requires closing and relaunching Xita. A research build can set
+`XV_INDEX_METADATA_DEFAULT=1`; an explicit startup setting (including `0`)
+still takes precedence. This lets a remote update select the experiment without
+editing device configuration. There is no new dashboard
 menu row and no change to shader programs, geometry, frame count or GPU fences.
 
 Both `BeginFrame` and standalone `Swap` now call the same index frame-boundary
@@ -115,3 +118,17 @@ The modified renderer compiles with the retained Vita flags and generated shader
 assets. The physical hit rate, frame-time benefit, additional-memory impact and
 gameplay stability remain unverified. Production integration is not a claim that
 the prototype instruction ratios survive real allocation, cache or GPU costs.
+
+
+## Startup-default qualification
+
+Both compiled defaults pass the production retainer's ASan/UBSan fixture: 18
+configurations cover absent and explicit settings, within-frame reuse, invalid
+selection and allocation failures. An explicit metadata `0` disables retention
+even in a default-On binary.
+
+The native renderer object was built through defaults 0→1→1→0→0→1. Switching
+rebuilds the owning object; repeating a value preserves its modification time;
+returning to each value restores the same object hash. Empty, `2` and multi-value
+Make selections are rejected. The project default remains Off pending hardware
+results. No GPU allocation or retirement behavior changes with this selector.

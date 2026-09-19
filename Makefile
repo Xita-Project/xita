@@ -487,6 +487,23 @@ $(BUILD)/texture-state-startup.config: force-texture-state-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_d3d.o: $(BUILD)/texture-state-startup.config
+# Experimental CPU index metadata. Explicit startup environment takes precedence.
+XV_INDEX_METADATA_DEFAULT ?= 0
+ifneq ($(words $(XV_INDEX_METADATA_DEFAULT)),1)
+$(error XV_INDEX_METADATA_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_INDEX_METADATA_DEFAULT),0 1),$(XV_INDEX_METADATA_DEFAULT))
+$(error XV_INDEX_METADATA_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_INDEX_METADATA_DEFAULT=$(XV_INDEX_METADATA_DEFAULT)
+.PHONY: force-index-metadata-startup-config
+force-index-metadata-startup-config:
+$(BUILD)/index-metadata-startup.config: force-index-metadata-startup-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_INDEX_METADATA_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_d3d.o: $(BUILD)/index-metadata-startup.config
 # Existing XV_DEPTH_PREPARE policy: absent environment uses this process-start default.
 # Only replay/recording configuration in xv_d3d consumes it; guest units unchanged.
 XV_DEPTH_PREPARE_DEFAULT ?= 0

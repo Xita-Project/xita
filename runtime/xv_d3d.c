@@ -1223,12 +1223,15 @@ static uint64_t index_reuse_compared, index_reuse_saved;
 static int index_reuse_override = -1;
 static unsigned index_metadata_reuploads, index_metadata_full;
 static uint64_t index_metadata_bytes;
+#ifndef XV_INDEX_METADATA_DEFAULT
+#define XV_INDEX_METADATA_DEFAULT 0
+#endif
 static int index_metadata_enabled(void)
 {
     static int configured=-1;
     if (configured<0) {
         const char *e=getenv("XV_INDEX_METADATA");
-        configured=e && atoi(e)==1; /* experimental, startup-only, default Off */
+        configured=e ? atoi(e)==1 : XV_INDEX_METADATA_DEFAULT;
     }
     /* The existing off/on/off diagnostic continues to compare its original
      * within-frame policy. Every override transition resets all identities. */
