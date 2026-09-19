@@ -69,3 +69,7 @@ The next priority is the larger object-update/scene-preparation path and a
 same-checkpoint native/360p graphics comparison. The prior resolution evidence
 was an outdoor view, not this campaign workload. Private captures, build inputs,
 package receipt, summary and deployment log are in `../ce-perf23/`.
+
+The [campaign follow-up](campaign-critical-path-20260919.md) confirms a modest
+resolution benefit and identifies the larger model/callback scene intervals in
+a subsequent heavy combat view. Native resolution is restored.
