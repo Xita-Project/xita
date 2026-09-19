@@ -60,3 +60,34 @@ The joined `[vertex-persistent]` log row records hits, creations, capacity
 fallbacks, compared bytes, avoided capture bytes and uploaded bytes. Compare
 these with capture/worker times and total frame time in ordinary gameplay.
 Reduced copying alone is not an FPS result.
+
+## Physical Vita result: keep disabled
+
+`0.2.0-perf.11 / d76aa4f+` booted successfully on hardware and loaded the same
+Normal Pillar of Autumn checkpoint with unchanged graphics settings. Its runtime
+SHA256 was `dca02f1cb99a864c7c603647b14b3c26291ead7f51e2d8ab76de77e2a28bc77c`.
+Only the game executable and its boot manifest changed from perf10. No emulator
+or diagnostic benchmark was used.
+
+In the last twelve complete 60-frame ordinary-play windows, the cache recorded
+a median 5,874 hits, six creations and zero capacity fallbacks per window. It
+avoided 44,726.5 KiB of capture writes and uploaded just 34 KiB per window.
+Worker preparation fell from 4.781 to 0.678 ms/frame, but recording-owner capture
+rose from 5.978 to 10.716 ms/frame; streams preparation rose from 6.824 to
+11.535 ms/frame. Exact comparisons on the recording owner displaced useful worker
+overlap. Eliminating copies did not eliminate the serial validation cost.
+
+Median total frame time was 79.9 ms / 12.5 FPS versus perf10's 78.2 ms / 12.8 FPS.
+The draw counts were similar (149 versus 152 per frame), but live NPC movement
+means this is not a deterministic scene comparison. The earlier perf11 sample
+was also no clear win (78.95 ms / 12.7 FPS). The consistent preparation-cost
+increase and absence of a total-frame improvement do not justify enabling this
+option in the cumulative build. The hardware was selected for rollback to
+perf10; previous accepted optimizations remain intact. This cache remains
+available behind its default-Off selector for future work on validation cost or
+guest write ownership. No long-session/combat stability claim follows from this
+short test.
+
+Private evidence: `ce-perf11/gameplay/{initial,checkpoint}.log`, corresponding
+summary JSON and screenshots, plus package, configuration and host-test records
+in the unified-games workspace.
