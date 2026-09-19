@@ -43,7 +43,8 @@ The success callback is a no-op and results are published before the containing
 command list is submitted. The worker's completion release, acquired by collect,
 protects the result reads; an empty FIFO prevents subsequent worker writes until
 the owner publishes another job. Host tests do not execute GXM or prove hardware
-performance. Physical campaign validation remains pending.
+performance. The first physical campaign observation is recorded below;
+longer stability and movement checks remain pending.
 
 All twelve harness configurations pass ASan/UBSan and ThreadSanitizer. Device
 fences themselves are not instrumented by GCC; host queue/event/semaphore
