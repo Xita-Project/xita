@@ -1,5 +1,6 @@
 #include "xv_vertex_capture.h"
 #include "xv_vertex_upload.h"
+#include "xv_bytes_equal.h"
 #include "xv_frame_slots.h"
 #include "xv_gpu_upload.h"
 #include "xv_quality_settings.h"
@@ -97,7 +98,9 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
         if(compact)equal=xv_packed_equal(s->source,cap_arena+e->offset,s->bytes/32);
         else
 #endif
-        equal=!memcmp(s->source,cap_arena+e->offset,s->bytes);
+        /* We need equality, not ordering. Use the same bounded NEON block
+         * loads as resident uploads, including unaligned inputs and tails. */
+        equal=xv_bytes_equal_blocks(s->source,cap_arena+e->offset,s->bytes);
         if(equal) {
             cap_reuse_hits++;cap_reuse_bytes+=compact?s->bytes/2:s->bytes;
             return id;
