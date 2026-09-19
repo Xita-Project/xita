@@ -185,21 +185,9 @@ static int read_input(Lane *v,uint32_t address,void *out,unsigned bytes)
         uint32_t a=address+done;unsigned n=4096-(a&4095);if(n>bytes-done)n=bytes-done;
         unsigned char *p=pointer(a,n,0);if(!p)return 0;
         for(unsigned i=0;i<v->maps_count;i++)if(overlaps(p,n,v->maps[i].pointer,v->maps[i].bytes))return 0;
-        unsigned bucket=((a*2654435761u)^(n*2246822519u))>>(32-10);
-        SourceRead *entry;
-        for(entry=source_index[bucket];entry;entry=entry->hash_next)
-            if(entry->address==a&&entry->bytes==n)break;
-        if(entry){
-            if(entry->pointer!=p||memcmp(entry->data,p,n))return 0;
-        }else{
-            if(source_count==8192||n>(1u<<20)-source_bytes)return 0;
-            entry=malloc(sizeof *entry+n);if(!entry)return 0;
-            entry->address=a;entry->bytes=n;entry->pointer=p;
-            memcpy(entry->data,p,n);entry->next=source_reads;source_reads=entry;
-            entry->hash_next=source_index[bucket];source_index[bucket]=entry;
-            source_count++;source_bytes+=n;
-        }
-        memcpy((unsigned char*)out+done,entry->data,n);done+=n;
+        /* Per-query private input is not part of immutable BSP geometry.
+         * Capture fresh bytes; publication validates them independently. */
+        memcpy((unsigned char*)out+done,p,n);done+=n;
     }
     return 1;
 }
@@ -290,7 +278,9 @@ int xv_worker_query(xctx *c,int guard)
     }
     uint16_t start_cluster;x_guest_read(&start_cluster,c->r[0]+4,2);
     if(start_cluster==65535){v->bypassed++;return 0;}
-    if(!source_current())return 0;
+    /* Numerical work uses only the owned, bounded snapshot. Validate live
+     * geometry once at publication; a stale snapshot may waste private work,
+     * but cannot publish results or dereference retired guest geometry. */
     v->entry=*c;unsigned reason=T_LAYOUT;fegetenv(&v->entry_fp);
     if(!add_span(v,c->r[4]-XV_CLUSTER_SCRATCH,XV_CLUSTER_SCRATCH+20,0)||
        !add_span(v,0x2d2fb0,1024,0)||!add_span(v,0x2d2fac,4,1)||!add_span(v,0x2d2fa9,1,1))goto decline;

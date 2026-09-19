@@ -79,3 +79,29 @@ must be considered separately. No new runtime was installed for these tests.
 
 Private reproducible outputs: `cluster-source-arm/` (linear index),
 `cluster-source-arm-indexed/` (indexed), alongside the unified source checkout.
+
+### Private-input correction and single publication check
+
+Follow-up review found that the read-set insertion had also reached `read_input`.
+That was incorrect: private center/start inputs vary per query and are already
+captured and revalidated separately. They no longer enter the BSP source read-set
+or allocate memory. The ARM test now asserts zero query allocations and executes
+three queries with changing centers against one geometry snapshot, checking full
+memory/context/FPSCR equivalence and successful candidate admission each time.
+This corrects the prototype; the earlier table includes the unwanted input work.
+
+The entry source scan is also removed. Numerical execution uses the owned bounded
+snapshot; no live geometry pointers or output writes are used during that work.
+The complete live source mapping/content check remains immediately before
+publication, under the retained guard. A stale snapshot can cause wasted private
+calculation but its result cannot be committed. Root, input, epoch, visited and
+context validation also remain. Exceptional/budget declines publish nothing.
+
+The final quick ARM comparison passes all 14 fixtures and the three-query reuse
+check. All nine ASan/UBSan worker modes pass, including unannounced geometry
+mutation, remapping and in-flight invalidation. Updated complete query instruction
+counts are 36,080 versus 37,927 original (7 clusters), 140,542 versus 174,455
+(30), 295,053 versus 380,666 (65), and 854,872 versus 1,222,594 (256).
+Construction is unchanged. The tiny first-reject case still regresses at 12,772
+versus 3,128, so useful admission is still needed. No hardware FPS gain is claimed.
+Outputs: `cluster-source-single-validation/` and `cluster-source-single-host/`.

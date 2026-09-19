@@ -135,7 +135,9 @@ def main():
                 m.uc.mem_write(m.symbols['arm_admitted'], bytes(4))
                 snapshot = m.call('arm_snapshot', fpscr=fpscr)
                 assert bytes(m.uc.mem_read(RAM, SIZE)) == before and snapshot['fpscr'] == fpscr
+                snapshot_allocations = bytes(m.uc.mem_read(m.symbols['arm_allocations'], 4))
                 candidate = m.call('arm_candidate', fpscr=fpscr)
+                assert bytes(m.uc.mem_read(m.symbols['arm_allocations'], 4)) == snapshot_allocations, 'query allocated snapshot storage'
                 row = dict(n=n, capacity=capacity, tweak=tweak, rounding=rounding, control=control,
                            original=original, snapshot=snapshot, candidate=candidate,
                            admitted=struct.unpack('<I', m.uc.mem_read(m.symbols['arm_admitted'], 4))[0],
@@ -153,6 +155,26 @@ def main():
         sample = rows[-1]
         print('PASS full ARM runtime', n, capacity, tweak, 'original / typed / snapshot instructions',
               sample['original']['instructions'], sample['candidate']['instructions'], sample['snapshot']['instructions'], flush=True)
+    # One geometry snapshot must survive different private query inputs.
+    m.call('arm_finish')
+    m.call('arm_prepare', (7, 1024, 0))
+    m.call('arm_snapshot')
+    for tweak in (0, 6, 0):
+        m.call('arm_prepare', (7, 1024, tweak))
+        before = bytes(m.uc.mem_read(RAM, SIZE))
+        context = bytes(m.uc.mem_read(m.context, m.layout['size']))
+        original = m.call('arm_original')
+        expected_context = bytes(m.uc.mem_read(m.context, m.layout['size']))
+        expected_memory = bytes(m.uc.mem_read(RAM, SIZE))
+        m.uc.mem_write(RAM, before); m.uc.mem_write(m.context, context)
+        allocations = bytes(m.uc.mem_read(m.symbols['arm_allocations'], 4))
+        candidate = m.call('arm_candidate')
+        assert bytes(m.uc.mem_read(m.context, m.layout['size'])) == expected_context
+        assert bytes(m.uc.mem_read(RAM, SIZE)) == expected_memory
+        assert candidate['fpscr'] == original['fpscr']
+        assert struct.unpack('<I', m.uc.mem_read(m.symbols['arm_admitted'], 4))[0] == 1
+        assert bytes(m.uc.mem_read(m.symbols['arm_allocations'], 4)) == allocations
+    print('PASS three changed-input queries reuse one geometry snapshot without allocations')
     print('PASS', len(rows), 'full context/memory/FPSCR comparisons; kernel calls and real allocation overhead excluded')
 
 
