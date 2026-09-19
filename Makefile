@@ -1699,6 +1699,29 @@ $(RECOMP_BUILD)/model-hierarchy.config: force-model-hierarchy-config
 	@rm -f $@.tmp
 $(HIERARCHY_HOOK_OBJS) $(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_hierarchy.o: $(RECOMP_BUILD)/model-hierarchy.config
 
+# Only the retained original final node may contain smaller normal terms.
+XV_HIERARCHY_FINAL_NORMAL ?= 0
+ifneq ($(words $(XV_HIERARCHY_FINAL_NORMAL)),1)
+$(error XV_HIERARCHY_FINAL_NORMAL must be 0 or 1)
+endif
+ifneq ($(filter $(XV_HIERARCHY_FINAL_NORMAL),0 1),$(XV_HIERARCHY_FINAL_NORMAL))
+$(error XV_HIERARCHY_FINAL_NORMAL must be 0 or 1)
+endif
+ifeq ($(XV_HIERARCHY_FINAL_NORMAL),1)
+ifneq ($(XV_NATIVE_MODEL_HIERARCHY),1)
+$(error XV_HIERARCHY_FINAL_NORMAL requires XV_NATIVE_MODEL_HIERARCHY=1)
+endif
+$(RECOMP_BUILD)/kernel/xk_hierarchy.o: RECOMP_CFLAGS += -DXV_HIERARCHY_FINAL_NORMAL=1
+endif
+.PHONY: force-hierarchy-final-config
+force-hierarchy-final-config:
+$(RECOMP_BUILD)/hierarchy-final.config: force-hierarchy-final-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_HIERARCHY_FINAL_NORMAL)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_hierarchy.o: $(RECOMP_BUILD)/hierarchy-final.config
+
 # Unroll only bounded native math units. Scalar VFP operations retain their
 # established operand order; no global fast-math or guest codegen change.
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off

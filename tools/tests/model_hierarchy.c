@@ -118,6 +118,30 @@ int main(int argc,char **argv)
             for(unsigned j=0;j<13;j++)word(MATRICES+n*52+j*4,0x7f800123u);
         compare(c,192+shape*3+first-1,1);
     }
+    /* Only the last original node may use the widened normal-value interval.
+     * Identity inputs keep earlier nodes inside the existing numeric domain,
+     * so an unrelated rejection cannot hide whether the new gate admits. */
+    for(unsigned field=0;field<8;field++) {
+        xctx c=fixture(8,1,0);
+        for(unsigned n=0;n<8;n++) {
+            float *p=X_G(POSE+n*32),*m=X_G(MATRICES+n*52);
+            memset(p,0,32);p[3]=p[7]=1.f;p[4]=1.f;p[5]=2.f;p[6]=3.f;
+            memset(m,0,52);m[0]=m[1]=m[5]=m[9]=1.f;
+        }
+        word(POSE+7*32+field*4,0x2b800000u); /* 2^-40, normal */
+        memcpy(saved,g_xram,ARENA);xctx probe=c;unsigned fp=_mm_getcsr();
+        int took=xv_math_model_hierarchy(&probe);
+#if XV_HIERARCHY_FINAL_NORMAL
+        assert(took==on);
+#else
+        assert(!took);
+#endif
+        _mm_setcsr(fp);memcpy(g_xram,saved,ARENA);
+        compare(c,300+field,1);
+        /* Moving the same small normal into a skipped node still declines. */
+        memcpy(g_xram,saved,ARENA);
+        word(POSE+32+field*4,0x2b800000u);reject(c,320+field);
+    }
     for(unsigned k=0;k<12;k++) {
         xctx c=fixture(8,1,0);
         switch(k) {

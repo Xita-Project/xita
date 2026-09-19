@@ -4,6 +4,12 @@
 #include "xk.h"
 #include "xk_object_jobs.h"
 #include <stdlib.h>
+#ifndef XV_HIERARCHY_FINAL_NORMAL
+#define XV_HIERARCHY_FINAL_NORMAL 0
+#endif
+#if XV_HIERARCHY_FINAL_NORMAL != 0 && XV_HIERARCHY_FINAL_NORMAL != 1
+#error "XV_HIERARCHY_FINAL_NORMAL must be 0 or 1"
+#endif
 #if defined(__x86_64__)
 #include <xmmintrin.h>
 #endif
@@ -11,6 +17,8 @@
 enum { MAX_NODES=64 };
 enum { H_BOUNDS, H_LAYOUT, H_LINKS, H_BUDGET, H_NUMERIC, H_FP, H_REASONS };
 static unsigned batches, prepared, declined[H_REASONS];
+static unsigned numeric_stages[4],output_computed,output_discarded,output_salvageable;
+static unsigned final_normal_batches;
 /* One atomic word publishes the immutable environment choice. A disabled
  * experiment must not add a contended mutex to every original child node. */
 static int configured=-1, policy=-1;
@@ -41,6 +49,16 @@ static int enabled(void)
     return (config&2)&&(selected<0?(config&1):selected);
 }
 static int decline(unsigned reason) { declined[reason]++;return 0; }
+static int numeric_decline(unsigned stage,unsigned computed)
+{
+    numeric_stages[stage]++;
+    if(stage==3) {
+        output_computed+=computed;
+        output_discarded+=computed-1u;
+        output_salvageable+=computed>2u?computed-2u:0;
+    }
+    return decline(H_NUMERIC);
+}
 static void *span(uint32_t address,unsigned bytes)
 {
     if((address&3u)||!bytes||(uint64_t)address+bytes>0x100000000ull)return NULL;
@@ -196,7 +214,7 @@ int xv_math_model_hierarchy(xctx *c)
     if(!work)return decline(H_BOUNDS);
     if(c->preempt<=(int32_t)work)return decline(H_BUDGET);
     const uint32_t *zero=span(0x1f0a68u,4),*one=span(0x1f0a78u,4),*two=span(0x1f0b04u,4);
-    if(!zero||!one||!two||*zero||*one!=0x3f800000u||*two!=0x40000000u)return decline(H_NUMERIC);
+    if(!zero||!one||!two||*zero||*one!=0x3f800000u||*two!=0x40000000u)return numeric_decline(0,0);
     /* Constants must remain unchanged by publication and the final leaf. */
     const void *constants[]={zero,one,two};
     for(unsigned i=0;i<3;i++)if(overlap(output,matrix_bytes,constants[i],4)||
@@ -210,15 +228,29 @@ int xv_math_model_hierarchy(xctx *c)
     for(unsigned i=0;i<first;i++) {
         unsigned n=(unsigned)order[i];
         memcpy(matrices[n],output[n],sizeof matrices[n]);
-        if(!numeric(matrices[n],13))return decline(H_NUMERIC);
+        if(!numeric(matrices[n],13))return numeric_decline(1,0);
     }
-    for(unsigned i=first;i<queued;i++)if(!numeric(local_poses[order[i]],8))return decline(H_NUMERIC);
+    unsigned final_normal=0;
+    for(unsigned i=first;i<queued;i++) {
+#if XV_HIERARCHY_FINAL_NORMAL
+        if(i+1u==queued) {
+            /* This pose is processed only by the retained original iteration.
+             * Do not broaden the arithmetic domain of any skipped node. */
+            for(unsigned j=0;j<8;j++) {
+                uint32_t w;memcpy(&w,&local_poses[order[i]][j],4);w&=0x7fffffffu;
+                if(w&&(w<0x00800000u||w>0x4e800000u))return numeric_decline(2,0);
+                if(w&&w<0x30800000u)final_normal=1;
+            }
+        } else
+#endif
+        if(!numeric(local_poses[order[i]],8))return numeric_decline(2,0);
+    }
     unsigned saved_fp=fp_read();if(!fp_allowed(saved_fp))return decline(H_FP);
     for(unsigned i=first;i<queued-1u;i++) {
         unsigned n=(unsigned)order[i];float local[13];
         local_matrix(local_poses[n],local);
         compose(matrices[parent[n]],local,matrices[n]);
-        if(!numeric(matrices[n],13)) { fp_restore(saved_fp);return decline(H_NUMERIC); }
+        if(!numeric(matrices[n],13)) { fp_restore(saved_fp);return numeric_decline(3,i-first+1u); }
     }
     /* No callback or guest handoff occurs between these writes. The synchronous
      * extraction retains the existing shared guard; no ownership bypass. */
@@ -228,6 +260,7 @@ int xv_math_model_hierarchy(xctx *c)
     memcpy((uint8_t *)stack+0x178u,order,queued*2u);
     stack[0x10/4]=queued;stack[0x20/4]=queued-1u;c->r[0]=queued-1u;
     c->preempt-=(int32_t)work;batches++;prepared+=work;
+    final_normal_batches+=final_normal;
     return 1;
 }
 
@@ -237,6 +270,13 @@ void xv_model_hierarchy_report(unsigned frames)
     XK_LOG("[model-hierarchy] %u frames batches %u child nodes %u; declined bounds %u layout %u links %u budget %u numeric %u fp %u\n",
         frames,batches,prepared,declined[H_BOUNDS],declined[H_LAYOUT],
         declined[H_LINKS],declined[H_BUDGET],declined[H_NUMERIC],declined[H_FP]);
+    XK_LOG("[model-hierarchy-numeric] %u frames constants/prefix/pose/output %u/%u/%u/%u; output computed %u discarded-success %u salvageable-prefix %u; retry-inclusive attempts\n",
+        frames,numeric_stages[0],numeric_stages[1],numeric_stages[2],numeric_stages[3],
+        output_computed,output_discarded,output_salvageable);
+    XK_LOG("[model-hierarchy-final] %u frames enabled %u recovered-batches %u; final node still original\n",
+        frames,XV_HIERARCHY_FINAL_NORMAL,final_normal_batches);
     batches=prepared=0;memset(declined,0,sizeof declined);
+    memset(numeric_stages,0,sizeof numeric_stages);
+    output_computed=output_discarded=output_salvageable=final_normal_batches=0;
 }
 #endif

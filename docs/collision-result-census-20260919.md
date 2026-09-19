@@ -24,3 +24,23 @@ and both wait policies. They exercise valid, over-capacity and unreadable output
 entry ESI capture despite later register changes, exact sums/maxima/buckets,
 per-origin outcome reconciliation, no guest changes and joined report reset.
 The existing private-stack mapping guard remains responsible for validating reads.
+
+## Hardware decision
+
+`0.2.0-probe.2 / 2069f59+` booted in slot 0 with the complete perf.8 stack.
+The saved campaign capture completed and restored sampling Off. All 135 observed
+queries had valid result buffers; none was unreadable or over capacity.
+
+| Route | Queries | Surfaces mean / max | Edges mean / max | Vertices mean / max |
+| --- | ---: | ---: | ---: | ---: |
+| World | 29 | 7.90 / 17 | 7.17 / 16 | 1.07 / 3 |
+| Object | 106 | 0.28 / 3 | 0.19 / 2 | 0 / 0 |
+
+The world samples total 14,144 microseconds; object samples total 2,086. These
+remain inclusive sampled intervals. Final list sizes are small in this workload,
+so adding a persistent result index is not justified by this capture. This does
+not rule out larger lists in other scenes or count repeated encounters directly.
+The proof plan is retained privately, but no index was added. The next candidate
+is avoiding unnecessary model-hierarchy batch declines while preserving the
+original final node's arithmetic. Raw captures and the reconciled summary are
+under `query-result-census/` in the private unified-games workspace.
