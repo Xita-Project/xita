@@ -13,7 +13,7 @@ enum { RAM=4<<20,ARENA=8<<20,BSP=0x10000,COLL=0x11000,PLANES=0x12000,
  NODES0=0x94000,NODES1=0xa4000,LIGHTS=0xb4000 };
 uint8_t *g_xram,*g_img_base;uint32_t *g_xpt;
 int xv_phase_enabled;
-unsigned arm_admitted,arm_allocations,arm_allocated_bytes;
+unsigned arm_admitted,arm_allocations,arm_allocated_bytes,arm_applied;
 unsigned arm_arena_bytes=ARENA;
 xctx *const arm_context_ptr=&contexts[0];
 const unsigned layout[]={sizeof(xctx),offsetof(xctx,r),offsetof(xctx,st),offsetof(xctx,fsp),
@@ -74,6 +74,8 @@ void arm_prepare(unsigned n,unsigned capacity,unsigned tweak)
 }
 void arm_original(void){query_enabled=0;f_00056670(&contexts[0]);}
 void arm_candidate(void){query_enabled=1;f_00056670(&contexts[0]);}
+void arm_attempt(void)
+{XV_OBJECT_MATH_GUARD();arm_applied=xv_worker_query(&contexts[0],xv_object_math_locked_);}
 void arm_snapshot(void);
 void arm_finish(void){xv_cluster_runtime_end();}
 void xv_worker_query_test_ready(xctx *c,unsigned lane){(void)c;(void)lane;arm_admitted++;}

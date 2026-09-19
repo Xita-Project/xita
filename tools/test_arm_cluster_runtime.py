@@ -105,7 +105,8 @@ def main():
         subprocess.run(command, check=True); commands.append(command); objects.append(str(obj))
     elf = a.out / 'runtime.elf'
     names = ('arm_prepare', 'arm_original', 'arm_candidate', 'arm_snapshot', 'arm_finish',
-             'layout', 'arm_context_ptr', 'arm_admitted', 'arm_allocations', 'arm_allocated_bytes')
+             'layout', 'arm_context_ptr', 'arm_admitted', 'arm_allocations', 'arm_allocated_bytes',
+             'arm_attempt', 'arm_applied')
     command = [cc, *flags, *objects, '-nostdlib',
                '-Wl,-Ttext=0x10000,-e,test_boot,--gc-sections,--wrap=xv_preempt,' + ','.join('--undefined=' + n for n in names),
                '-lm', '-lc', '-lgcc', '-o', str(elf)]
@@ -175,6 +176,31 @@ def main():
         assert struct.unpack('<I', m.uc.mem_read(m.symbols['arm_admitted'], 4))[0] == (0 if tweak == 6 else 1)
         assert bytes(m.uc.mem_read(m.symbols['arm_allocations'], 4)) == allocations
     print('PASS three changed-input queries reuse one geometry snapshot without allocations')
+    # A plane-rejected query visits cluster zero only. Its incident portal is
+    # still a dependency; a distant portal's vertices are not. Include a start
+    # already stamped with the next epoch (absent from result.changed).
+    def guest_write(address, data):
+        offset = struct.unpack('<I', m.uc.mem_read(PT + (address >> 12) * 4, 4))[0]
+        m.uc.mem_write(RAM + offset + (address & 4095), data)
+    for stamped in (False, True):
+        for address, data, expected in ((0x70000 + 5*128, struct.pack('<f', 77), 1),
+                                        (0x70000, struct.pack('<f', 77), 0),
+                                        (0x12000, struct.pack('<f', 1), 0),
+                                        (0x20000 + 0x5c, struct.pack('<I', 0), 0)):
+            m.call('arm_finish'); m.call('arm_prepare', (7, 1024, 0))
+            sp = struct.unpack('<I', m.uc.mem_read(m.context + m.layout['r'] + 16, 4))[0]
+            guest_write(sp+80, struct.pack('<3f', 0, 0, 150))
+            if stamped: guest_write(0x2d2fb0, struct.pack('<I', 101))
+            m.call('arm_snapshot'); guest_write(address, data)
+            before = bytes(m.uc.mem_read(RAM, SIZE))
+            context = bytes(m.uc.mem_read(m.context, m.layout['size']))
+            result = m.call('arm_attempt')
+            assert struct.unpack('<I', m.uc.mem_read(m.symbols['arm_applied'], 4))[0] == expected
+            if not expected:
+                assert bytes(m.uc.mem_read(RAM, SIZE)) == before
+                assert bytes(m.uc.mem_read(m.context, m.layout['size'])) == context
+                assert result['fpscr'] == 0
+    print('PASS eight relevant/unrelated geometry mutations including already-stamped starts')
     print('PASS', len(rows), 'full context/memory/FPSCR comparisons; kernel calls and real allocation overhead excluded')
 
 

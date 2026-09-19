@@ -32,6 +32,8 @@ typedef struct SourceRead {
     struct SourceRead *next, *hash_next;
     uint32_t address, bytes;
     unsigned char *pointer;
+    unsigned dependency_kind; /* 0 unknown/global, 1 clustered, 2 explicit global */
+    uint32_t dependencies[8];
     unsigned char data[];
 } SourceRead;
 enum { SOURCE_BUCKETS=1024 };
@@ -89,6 +91,7 @@ static int source_read(void *unused,uint32_t address,void *out,size_t bytes)
             if(source_count==8192||n>(1u<<20)-source_bytes)return 0;
             entry=malloc(sizeof *entry+n);if(!entry)return 0;
             entry->address=a;entry->bytes=n;entry->pointer=p;
+            entry->dependency_kind=0;memset(entry->dependencies,0,sizeof entry->dependencies);
             memcpy(entry->data,p,n);entry->next=source_reads;source_reads=entry;
             entry->hash_next=source_index[bucket];source_index[bucket]=entry;
             source_count++;source_bytes+=n;
@@ -97,11 +100,68 @@ static int source_read(void *unused,uint32_t address,void *out,size_t bytes)
     }
     return 1;
 }
+/* Resolve exact construction reads, including page splits. Unknown reads stay
+ * global. A span shared by multiple clusters accumulates all their dependencies. */
+static int source_dependency(uint32_t address,unsigned bytes,unsigned cluster,void *out)
+{
+    if(address>UINT32_MAX-bytes)return 0;
+    for(unsigned done=0;done<bytes;){
+        uint32_t a=address+done;unsigned n=4096-(a&4095);
+        if(n>bytes-done)n=bytes-done;
+        unsigned bucket=((a*2654435761u)^(n*2246822519u))>>(32-10);
+        SourceRead *r;
+        for(r=source_index[bucket];r;r=r->hash_next)
+            if(r->address==a&&r->bytes==n)break;
+        if(!r)return 0;
+        if(cluster==256)r->dependency_kind=2;
+        else if(r->dependency_kind!=2){
+            r->dependency_kind=1;r->dependencies[cluster>>5]|=1u<<(cluster&31);
+        }
+        if(out)memcpy((unsigned char*)out+done,r->data,n);
+        done+=n;
+    }
+    return 1;
+}
+static int build_source_dependencies(const XvClusterSource *source)
+{
+    const XvClusterGeometry *g=xv_cluster_snapshot_geometry(batch.snapshot);
+    XvClusterReplayLayout layout;
+    uint32_t collision[2],distance[2];
+    if(!xv_cluster_snapshot_replay_layout(batch.snapshot,0,0,&layout)||
+       !source_dependency(source->bsp+0x134,8,256,NULL)||
+       !source_dependency(source->bsp+0x154,8,256,NULL)||
+       !source_dependency(source->bsp+0xb0,8,256,collision)||
+       !source_dependency(collision[1]+0xc,8,256,distance)||
+       !source_dependency(source->projection+0xc,8,256,NULL)||
+       !source_dependency(source->axes,24,256,NULL)||
+       !source_dependency(source->zero,4,256,NULL))return 0;
+    for(unsigned i=0;i<g->cluster_count;i++){
+        const XvCluster *c=&g->clusters[i];
+        if(!source_dependency(layout.clusters+i*104+0x5c,8,i,NULL)||
+           !source_dependency(layout.adjacency_addresses[i],c->count*2,i,NULL))return 0;
+        for(unsigned k=0;k<c->count;k++){
+            unsigned id=g->adjacency[c->first+k];
+            uint32_t block[2],plane=layout.original_plane_indices[id];
+            if(!source_dependency(layout.portals+id*64,24,i,NULL)||
+               !source_dependency(layout.portals+id*64+0x34,8,i,block)||
+               !source_dependency(block[1],block[0]*12,i,NULL)||
+               !source_dependency(distance[1]+plane*16,16,i,NULL)||
+               !source_dependency(layout.projection_planes+plane*16,16,i,NULL))return 0;
+        }
+    }
+    return 1;
+}
 static int same_words(const void *,const void *,unsigned);
-static int source_current(void)
+static int source_current(const XvClusterResult *result,unsigned start)
 {
     source_checks++;
+    unsigned words=(xv_cluster_snapshot_geometry(batch.snapshot)->cluster_count+31)/32;
     for(SourceRead *r=source_reads;r;r=r->next){
+        if(r->dependency_kind==1){
+            unsigned relevant=r->dependencies[start>>5]&(1u<<(start&31));
+            for(unsigned i=0;!relevant&&i<words;i++)relevant=r->dependencies[i]&result->changed[i];
+            if(!relevant)continue;
+        }
         unsigned char *p=pointer(r->address,r->bytes,0);
         source_compared+=r->bytes;
         int equal=p==r->pointer;
@@ -161,7 +221,7 @@ void xv_cluster_runtime_begin(void)
        !image_word(0x39be58,&batch.bsp)||!image_word(0x39be50,&batch.projection))goto failed;
     XvClusterSource source={batch.bsp,batch.projection,0x1eaf30,0x1f0a68};
     batch.snapshot=xv_cluster_snapshot_build(source_read,NULL,&source,1u<<20);
-    if(!batch.snapshot)goto failed;
+    if(!batch.snapshot||!build_source_dependencies(&source))goto failed;
     /* The validated traversal reads stamps only for clusters in this BSP.
      * Keep the full backing spans for alias/page validation, but capture and
      * compare only the live entries. No epoch wrap clears unrelated entries. */
@@ -333,7 +393,7 @@ int xv_worker_query(xctx *c,int guard)
     xv_worker_query_test_ready(c,(unsigned)lane);
 #endif
     reason=T_CHANGED;
-    if(!globals_current()||!source_current()||!same_words(c,&v->entry,sizeof *c)||
+    if(!globals_current()||!source_current(&v->result,start_cluster)||!same_words(c,&v->entry,sizeof *c)||
        xv_object_query_lane(c,guard,c->r[4]-XV_CLUSTER_SCRATCH,XV_CLUSTER_SCRATCH+20)!=lane+1)goto decline;
     for(unsigned i=0;i<v->maps_count;i++){
         Span *s=&v->maps[i];if(pointer(s->address,s->bytes,s->image)!=s->pointer)goto decline;

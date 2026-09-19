@@ -160,3 +160,38 @@ asserts that queries allocate no snapshot storage. Private receipts are
 Next architectural requirement: avoid scanning unrelated geometry on every
 query, using a proved write/lifetime boundary or a validated per-query dependency
 set. Merely accelerating numerical traversal does not pay for whole-map validation.
+
+### Cluster dependency validation
+
+Each captured construction span now records the clusters that depend on it.
+Global root/block descriptors, axes and the zero constant remain unconditional;
+unclassified spans also remain unconditional. Shared portal/plane/vertex spans
+accumulate dependencies from every incident cluster. Marking is based on exact
+construction reads and page splits; failure to resolve a dependency rejects the
+snapshot rather than omitting a check.
+
+Publication validates the start cluster plus every newly visited cluster. The
+start is included even when already stamped with the incoming next epoch. All
+incident portal descriptors, adjacency, planes and vertices are included, even
+when a portal rejected traversal. This is intentionally broader than the exact
+numeric read-set. Mutations outside this set may leave the query valid; a later
+query that uses them checks and rejects the stale snapshot. The lock remains held.
+
+Nine ASan/UBSan modes, 14 quick ARM comparisons, three-query snapshot reuse and
+48 owned-map full-memory/context/FPSCR comparisons pass. Eight added direct
+admission/publication checks cover unrelated distant vertices, incident vertices,
+shared planes and start adjacency with both unstamped and already-stamped starts.
+Relevant mutations decline without changing live memory, context or FPSCR.
+
+| 24-input map sample | Original query sum | Candidate query sum | One snapshot build |
+| --- | ---: | ---: | ---: |
+| Blood Gulch | 2,026,609 | 1,926,257 | 183,652 |
+| Battle Creek | 2,209,926 | 2,152,445 | 177,538 |
+
+These are ARM instructions, not time. Query sums improve about 5% and 3%, but
+charging one build to these 24 queries still gives net regressions of 4.1% and
+5.4%. Real batch query count, allocator cost and cache behavior remain unmodeled.
+The dependency table makes construction more expensive. Do not enable by default;
+snapshot reuse/lifetime and cheaper dependency lookup are now the cost targets.
+Private receipts: `cluster-dependencies-mutations/`, `cluster-dependencies-host/`
+and `cluster-dependencies-owned/`.
