@@ -8,7 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
-from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere, collision_traversal, scene_partition, model_route_profile, constant_pack, model_fog, model_uv
+from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere, collision_traversal, scene_partition, model_route_profile, constant_pack, cluster_lifetime, model_fog, model_uv
 
 
 class HaloHooks(NoGameHooks):
@@ -230,6 +230,7 @@ class HaloHooks(NoGameHooks):
                         "    extern void xv_owner_phase_end(uint64_t *);",
                         "    uint64_t xv_owner_phase_scope_ __attribute__((cleanup(xv_owner_phase_end))) = 0;",
                         f"    if (xv_owner_phase_enabled) xv_owner_phase_begin(&xv_owner_phase_scope_, c, {phase}u);", "#endif"])
+        out.extend(cluster_lifetime.entry(self.image, address))
         out.extend(self.light_census_entry(address))
         out.extend(object_motion_profile.entry(self.image, address))
         if address == 0x170C10 and collision_solver.matches(self.image):
