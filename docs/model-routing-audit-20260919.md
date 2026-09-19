@@ -78,3 +78,47 @@ Private reproducible sources, compiler commands, function-level instruction
 counts and results are under `../model-route-prototype/`. Original generated
 code stays outside the source repository. No device update was made for this
 experiment; perf.24 remains the last verified installed build.
+
+## Full-traversal register-local follow-up
+
+The next prototype keeps all eight guest GPRs local for the complete retained
+`A2380` traversal. It publishes/reloads them at every child call and actual
+expired-budget preemption and publishes them at every return. All memory reads,
+material decisions, callbacks, linking and ordering remain live. This tests a
+larger context-traffic boundary without assuming cross-pass immutability.
+
+It passes another 48 paired complete-routine comparisons: 24 at budget 3 and
+24 at budget 20,000, with 570 total matching child/preemption frontiers. The
+same context/arena/FPSCR comparisons and child-stub limitations apply. These
+are two fixture configurations, not actual scheduler or concurrency tests.
+
+With unchanged materials and budget 20,000:
+
+| Parts | Passes | Original instructions | Local-register instructions | Increase |
+| --- | ---: | ---: | ---: | ---: |
+| 8 | 3 | 9,142 | 9,198 | 0.61% |
+| 8 | 1 | 2,971 | 3,026 | 1.85% |
+| 32 | 3 | 33,062 | 33,390 | 0.99% |
+| 32 | 1 | 10,059 | 10,234 | 1.74% |
+
+At budget 3, the 32-part cases increase by 3.66% and 4.55%. Thus the negative
+result is not just an artifact of frequent forced handoffs. Do not deploy this
+prototype. Register-local conversion at this boundary is not a demonstrated
+shortcut to the campaign target. Preserve it as negative evidence rather than
+repeating the same rewrite with a different wrapper.
+
+Direct child inspection also narrows the ownership boundary. `6EFC0` allocates
+or selects a render packet, writes returned link/output fields and shared render
+state. `70110` can call it, then allocate an additional packet field through
+`5FD40`; its `[ebx+6c]` write is to that returned packet, not evidence that it
+modifies the shader tag itself. Direct writes in `6B060` are stack preparation;
+its descendants and HLE calls still require inspection. Preemption enters
+`xd3d_lockstep_preempt` and can yield guest execution. A direct-write list alone
+therefore does not prove routing inputs immutable.
+
+Before attempting another traversal rewrite, attribute the inclusive model cost
+to preparation, material packet construction, draw recording and waits. The
+larger callbacks are still included in the live 22.2 ms scope but replaced by
+stand-ins in this experiment. The experiment cannot rank their actual cost.
+Private results are `local-register-budget3.json` and
+`local-register-budget20000.json`, with matching fixture variants and logs.
