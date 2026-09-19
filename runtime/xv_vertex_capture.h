@@ -8,8 +8,9 @@
  * recording owner, before command publication. Failed jobs publish no streams.
  * Only this worker may touch the upload pools while jobs remain outstanding. */
 /* Optional capture reuse compares current source bytes exactly before sharing
- * immutable staging/results within the current drain interval. Sparse masks
- * retain independent preparation; no guest source is assumed immutable. */
+ * immutable staging/results. CPU snapshots may survive joined drains; GPU
+ * results never do. Sparse masks retain independent preparation; no guest
+ * source is assumed immutable. */
 int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     const void ***targets,void (*complete)(void *,int),void *context);
 /* Mandatory before any synchronous upload, diagnostics/readback, override,

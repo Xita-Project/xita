@@ -40,7 +40,7 @@ SceUID sceKernelAllocMemBlock(const char *name,SceKernelMemBlockType type,SceSiz
     assert(type==SCE_KERNEL_MEMBLOCK_TYPE_USER_RW || type==SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE);
     pthread_mutex_lock(&mem_lock);unsigned i;
     for(i=1;i<32 && mem[i].base;i++);assert(i<32);
-    mem[i].base=aligned_alloc(64,(size+63u)&~63u);assert(mem[i].base);
+    mem[i].base=aligned_alloc(4096,(size+4095u)&~4095u);assert(mem[i].base);
     memset(mem[i].base,0xa5,size);pthread_mutex_unlock(&mem_lock);return i;
 }
 int sceKernelGetMemBlockBase(SceUID id,void **p) { assert(id>0 && id<32);*p=mem[id].base;return 0; }
@@ -390,7 +390,8 @@ static void capture_reuse_versions(void)
     assert(a.result[0]==b.result[0] && a.result[0]!=changed.result[0] && a.result[0]==restored.result[0]);
     assert(a.result[0]!=other_slot.result[0] && other_slot.result[0][511]==0x13);
     assert(a.result[0][511]==0x13 && changed.result[0][511]==0x12);
-    assert(cap_reuse_prepared==prepared+1 && cap_entry_count==0);
+    assert(cap_reuse_prepared==prepared+1 && cap_entry_count==5);
+    for(unsigned i=0;i<cap_entry_count;i++)assert(!cap_results[i]);
     assert(!munmap(guest,4096));cleanup();
 }
 static void capture_reuse_sparse(void)
@@ -451,6 +452,46 @@ static void capture_reuse_failure(void)
     assert(!a.ok&&!a.result[0]&&a.callbacks==1&&b.ok&&b.result[0]&&b.callbacks==1);
     cleanup();
 }
+static void capture_retained_generations(void)
+{
+    unsigned char *guest=mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0);
+    assert(guest!=MAP_FAILED);
+    unsigned char expected[512],filler[512];
+    for(unsigned i=0;i<sizeof expected;i++)guest[i]=expected[i]=(unsigned char)(i*7);
+    memset(filler,0xbc,sizeof filler);output first={0},again={0};
+    assert(capture(0,guest,sizeof expected,16,NULL,0,&first));join(0);
+    assert(first.ok && cap_entry_count==1 && cap_used==sizeof expected);
+    xv_vertex_capture_drain(); /* The already-collected branch must also retain safely. */
+    assert(!cap_results[0]);
+    unsigned retained=cap_retained_hits,used=cap_used;
+    /* A true retained hit cannot write even one byte into the old CPU payload.
+     * Reserve its former GPU address for DIFFERENT data in the next generation:
+     * retaining a stale GPU result would return that unrelated filler. */
+    assert(!mprotect(cap_arena,4096,PROT_READ));
+    xv_vertex_upload_reset(0);
+    const void *other=xv_vertex_upload(0,filler,sizeof filler);assert(other==first.result[0]);
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    assert(capture(0,guest,sizeof expected,16,NULL,0,&again));wait_parked(&parked_capture);
+    assert(!mprotect(guest,4096,PROT_NONE));
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
+    assert(again.ok && again.result[0]!=other && cap_used==used && cap_retained_hits==retained+1);
+    assert(!memcmp(again.result[0],expected,sizeof expected) && !memcmp(other,filler,sizeof filler));
+    assert(!mprotect(cap_arena,4096,PROT_READ|PROT_WRITE));
+    assert(!mprotect(guest,4096,PROT_READ|PROT_WRITE));
+    /* Source mutation, guest address reuse, all three retired GPU slots, and
+     * both stable and changed payloads must remain exact across joined drains. */
+    for(unsigned generation=0;generation<12;generation++) {
+        unsigned slot=generation%3;output next={0};xv_vertex_upload_reset(slot);
+        if(generation%6==0)guest[511]=expected[511]^=1;
+        assert(capture(slot,guest,sizeof expected,16,NULL,0,&next));join(slot);
+        assert(next.ok && !memcmp(next.result[0],expected,sizeof expected));
+        for(unsigned i=0;i<cap_entry_count;i++)assert(!cap_results[i]);
+    }
+    assert(!munmap(guest,4096));cleanup();assert(!cap_entry_count && !cap_used);
+    setenv("XV_VERTEX_CAPTURE_RETAIN","0",1);
+    output off={0};assert(capture(0,expected,sizeof expected,16,NULL,0,&off));join(0);
+    assert(off.ok && !cap_used && !cap_entry_count);cleanup();unsetenv("XV_VERTEX_CAPTURE_RETAIN");
+}
 #endif
 int main(void)
 {
@@ -464,6 +505,8 @@ int main(void)
 #endif
 #if XV_VERTEX_CAPTURE_REUSE
     capture_reuse_versions();capture_reuse_sparse();capture_reuse_capacity();capture_reuse_failure();
+    capture_retained_generations();
+    puts("PASS: retained CPU payload is read-only on hits; GPU generations/reordering revalidated, mutated sources and all three slots exact, shutdown and retention disable");
     puts("PASS: exact snapshot/result reuse, mutations and return-to-old-version, unmapping, slot/stride separation, sparse-to-full validation, job wrap and full metadata cache, startup disable and allocation retry");
 #endif
     puts("PASS: private inputs, rewritten aliases, mask ownership, packed/raw identity, arena/queue pressure, ticket wrap, partial/allocation/thread/notification failures, fallback drains, disable and three GPU-copy slots");
