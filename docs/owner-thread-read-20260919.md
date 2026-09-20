@@ -29,3 +29,20 @@ Private evidence is under `../owner-thread-read-arm/` and
 `../owner-thread-read-tests/`. This removes a redundant kernel query, not a
 simulation join or data-ownership check. No hardware timing gain is established;
 perf.39 remains installed until a later cumulative update is confirmed.
+
+## Cumulative build
+
+Perf.40 (`28c90b6`) builds successfully. The first attempt correctly rejected
+an added declaration in the collision generator's pinned `xk_object_jobs.h`.
+That unnecessary shared-header declaration was removed; the owner observer
+already declares its optional backend query locally. The header again matches
+the reviewed input byte for byte, and the existing generation checks pass.
+No pin was relaxed or replaced to accept this change.
+
+The linked ELF includes strong definitions of `xv_object_is_worker_id` and
+`xv_owner_phase_active`. Object disassembly confirms the single-read path and
+older-backend fallback. Only the gameplay executable and boot record differ
+from perf.39. Runtime SHA-256:
+`4d35c3bd97dcb2999acec62831ed20959a4a6ef9928fa809ffb2255d47baa1cb`.
+Private receipts are in `../owner-thread-hardware/`. This is a built package,
+not yet a confirmed hardware update or an FPS result.
