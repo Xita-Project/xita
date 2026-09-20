@@ -16,7 +16,7 @@ base.SIZE=4<<20
 RAM,PT,STACK,CTX,END,ENV=base.RAM,base.PT,base.STACK,base.CTX,base.END,base.ENV
 
 
-def build(directory,reference,cc):
+def build(directory,reference,cc,assist=False):
     harness=directory/'arm-fixture.c'
     harness.write_text('''#include "xv_x86rt.h"
 #include <stddef.h>
@@ -35,9 +35,32 @@ int snprintf(char *s,size_t n,const char *fmt,...) { (void)s;(void)n;(void)fmt;r
 unsigned long strtoul(const char *s,char **end,int radix) { (void)s;(void)end;(void)radix;return 0; }
 int sceClibPrintf(const char *fmt,...) { (void)fmt;return 0; }
 ''')
+    if assist:
+        with harness.open('a') as output:
+            output.write(r'''
+/* Simulated helper FP context, not a concurrency or scheduling model. */
+static void (*captured_run)(void *);
+static void *captured_argument;
+unsigned assist_runs;
+int xv_object_hierarchy_offer(xctx *c,int guard,void (*run)(void *),void *argument)
+{ (void)c;(void)guard;captured_run=run;captured_argument=argument;return 1; }
+void xv_object_hierarchy_join(int token)
+{
+    (void)token;unsigned owner,helper=0x0bc0009fu,after;
+    __asm__ volatile("vmrs %0, fpscr":"=r"(owner)::"memory");
+    __asm__ volatile("vmsr fpscr, %0"::"r"(helper):"memory");
+    __asm__ volatile("vmrs %0, fpscr":"=r"(helper)::"memory");
+    captured_run(captured_argument);
+    __asm__ volatile("vmrs %0, fpscr":"=r"(after)::"memory");
+    if(after!=helper)__builtin_trap();
+    __asm__ volatile("vmsr fpscr, %0"::"r"(owner):"memory");
+    assist_runs++;
+}
+void xv_object_hierarchy_assist_report(unsigned frames) { (void)frames; }
+''')
     common=[cc,'-std=gnu11','-fno-strict-aliasing','-ffp-contract=off','-mthumb',
         '-mcpu=cortex-a9','-mfpu=neon','-I'+str(ROOT/'recomp'),'-DXV_NATIVE_MODEL_HIERARCHY','-DXV_NATIVE_MATRIX_NEON',
-        '-ffunction-sections','-fdata-sections']
+        '-ffunction-sections','-fdata-sections',*(['-DXV_HIERARCHY_ASSIST=1'] if assist else [])]
     sources=[reference,harness,ROOT/'recomp/kernel/xk_hierarchy.c',ROOT/'recomp/kernel/xk_math.c',ROOT/'recomp/xv_x86rt.c']
     objects=[];commands=[]
     for i,path in enumerate(sources):
@@ -77,7 +100,7 @@ class Machine(base.Machine):
         u.reg_write(UC_ARM_REG_LR,END|1);u.reg_write(UC_ARM_REG_FPSCR,fpscr)
         actual_control=u.reg_read(UC_ARM_REG_FPSCR)
         self.instructions=self.copies=self.copy_bytes=self.yields=0
-        names=('batches','prepared')
+        names=('batches','prepared')+(('assist_runs',) if 'assist_runs' in self.symbols else ())
         before={n:struct.unpack('<I',u.mem_read(self.symbols[n],4))[0] for n in names}
         u.emu_start(self.symbols[function]|1,END,count=2000000)
         assert u.reg_read(UC_ARM_REG_PC)==END,function+' did not return'
@@ -128,9 +151,10 @@ def fixture(layout,count,shape,first,fpscr,variant=0):
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--reference',type=Path,required=True)
     ap.add_argument('--output-dir',type=Path,required=True);ap.add_argument('--enabled',choices=('on','off','unset'),default='on')
+    ap.add_argument('--assist',action='store_true',help='Exercise callback in a distinct simulated helper FP context')
     ap.add_argument('--suite',choices=('full','extended'),default='full')
     ap.add_argument('--cc',default=os.environ.get('ARM_CC','arm-vita-eabi-gcc'))
-    a=ap.parse_args();a.output_dir.mkdir(parents=True,exist_ok=True);elf,commands=build(a.output_dir,a.reference,a.cc)
+    a=ap.parse_args();a.output_dir.mkdir(parents=True,exist_ok=True);elf,commands=build(a.output_dir,a.reference,a.cc,a.assist)
     m=Machine(elf,a.enabled);rows=[]
     def check(count,shape,first,rounding,control,variant):
         sample=fixture(m.layout,count,shape,first,(rounding<<22)|control,variant)
@@ -167,7 +191,9 @@ def main():
         # Noncontiguous page mappings take the complete original fallback.
         check(8,0,1,rounding,0,6)
     print('PASS ARM root, consumed prefixes, shuffled indices and remapped input pages:',len(rows),flush=True)
-    report=dict(fixtures=len(rows),suite=a.suite,enabled=a.enabled,commands=commands,elf_sha256=hashlib.sha256(elf.read_bytes()).hexdigest(),
+    if a.assist and a.enabled=='on':
+        assert sum(r['runs']['candidate']['assist_runs'] for r in rows)>0
+    report=dict(assist=a.assist,fixtures=len(rows),suite=a.suite,enabled=a.enabled,commands=commands,elf_sha256=hashlib.sha256(elf.read_bytes()).hexdigest(),
         limitation='Cortex-A9 instruction emulator, modeled memory-copy imports; not cycles or hardware FPS',rows=rows)
     (a.output_dir/'result.json').write_text(json.dumps(report,indent=2)+'\n')
     for r in rows:
