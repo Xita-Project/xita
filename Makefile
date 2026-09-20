@@ -360,6 +360,25 @@ ifneq ($(filter $(XV_VERTEX_CAPTURE_DETAIL_DEFAULT),0 1),$(XV_VERTEX_CAPTURE_DET
 $(error XV_VERTEX_CAPTURE_DETAIL_DEFAULT must be 0 or 1)
 endif
 $(BUILD)/runtime/xv_vertex_capture.o: CFLAGS += -DXV_VERTEX_CAPTURE_DETAIL_DEFAULT=$(XV_VERTEX_CAPTURE_DETAIL_DEFAULT)
+# Trusted tag-resident vertex reuse (research trial): skip the byte compare for
+# sources inside the 22 MB tag cache under the same map-read generation.
+XV_CAPTURE_TRUST_TAGS ?= 0
+XV_CAPTURE_TRUST_TAGS_DEFAULT ?= 0
+ifneq ($(filter $(XV_CAPTURE_TRUST_TAGS),0 1),$(XV_CAPTURE_TRUST_TAGS))
+$(error XV_CAPTURE_TRUST_TAGS must be 0 or 1)
+endif
+ifneq ($(filter $(XV_CAPTURE_TRUST_TAGS_DEFAULT),0 1),$(XV_CAPTURE_TRUST_TAGS_DEFAULT))
+$(error XV_CAPTURE_TRUST_TAGS_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_vertex_capture.o: CFLAGS += -DXV_CAPTURE_TRUST_TAGS=$(XV_CAPTURE_TRUST_TAGS) -DXV_CAPTURE_TRUST_TAGS_DEFAULT=$(XV_CAPTURE_TRUST_TAGS_DEFAULT)
+.PHONY: force-capture-trust-config
+force-capture-trust-config:
+$(BUILD)/capture-trust.config: force-capture-trust-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_CAPTURE_TRUST_TAGS):$(XV_CAPTURE_TRUST_TAGS_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/capture-trust.config
 .PHONY: force-capture-detail-config
 force-capture-detail-config:
 $(BUILD)/capture-detail.config: force-capture-detail-config

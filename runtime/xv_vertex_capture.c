@@ -127,7 +127,7 @@ static int cap_compact(const xv_vertex_prepare_stream *s)
  * The worker neither reads guest memory nor owns the source identity keys. */
 typedef struct {
     const void *identity;
-    unsigned offset,bytes,stride,packed,compact,slot,next,current;
+    unsigned offset,bytes,stride,packed,compact,slot,next,current,generation;
 } capture_entry;
 static capture_entry cap_entries[CAPTURE_ENTRIES];
 static const void *cap_results[CAPTURE_ENTRIES];
@@ -140,6 +140,37 @@ static unsigned cap_retained_hits,cap_reclaims;
 static uint64_t cap_retained_bytes;
 static void cap_reuse_reset(void)
 { cap_entry_count=0;memset(cap_buckets,0,sizeof cap_buckets); }
+#ifndef XV_CAPTURE_TRUST_TAGS
+#define XV_CAPTURE_TRUST_TAGS 0
+#endif
+#if XV_CAPTURE_TRUST_TAGS
+/* Halo's 22 MB tag cache (physical 0x3A6000) holds the static BSP and model
+ * vertex buffers. It is rewritten only by file reads (map load, BSP switch),
+ * which the file layer reports here. A reuse source inside that region under
+ * the same read generation is treated as unchanged without the byte compare;
+ * the existing 1/64 sampled submissions still compare and disable trust on
+ * the first mismatch. Dynamic (heap) vertex data keeps the full compare. */
+#ifndef XV_CAPTURE_TRUST_TAGS_DEFAULT
+#define XV_CAPTURE_TRUST_TAGS_DEFAULT 0
+#endif
+extern uint8_t *g_xram __attribute__((weak));
+enum { TAG_PHYS_BASE=0x3A6000u, TAG_PHYS_BYTES=0x1600000u };
+static int trust_enabled=-1;
+static unsigned trust_generation,trust_disabled,trust_hits,trust_verified,trust_mismatches;
+static uint64_t trust_bytes;
+void xv_vertex_capture_tags_written(uint32_t guest,uint32_t bytes)
+{
+    uint32_t phys=guest>=0xF0000000u?guest-0xF0000000u:guest>=0x80000000u?guest-0x80000000u:guest;
+    if(phys<TAG_PHYS_BASE+TAG_PHYS_BYTES && phys+bytes>TAG_PHYS_BASE)
+        __atomic_fetch_add(&trust_generation,1u,__ATOMIC_RELAXED);
+}
+static int trust_source(const void *source,unsigned bytes)
+{
+    if(!&g_xram || !g_xram || (const uint8_t *)source<g_xram)return 0;
+    uintptr_t off=(const uint8_t *)source-g_xram;
+    return off>=TAG_PHYS_BASE && off+bytes<=TAG_PHYS_BASE+TAG_PHYS_BYTES;
+}
+#endif
 static void cap_reuse_retire(void)
 {
     if(cap_retain_enabled<0)
@@ -172,6 +203,16 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
         cap_reuse_checks++;
         uint64_t detail_start=sample?sceKernelGetProcessTimeWide():0;
         int equal;
+#if XV_CAPTURE_TRUST_TAGS
+        if(trust_enabled<0)trust_enabled=xv_quality_int("XV_CAPTURE_TRUST_TAGS",XV_CAPTURE_TRUST_TAGS_DEFAULT,0,1);
+        int trusted=trust_enabled && !trust_disabled &&
+            e->generation==__atomic_load_n(&trust_generation,__ATOMIC_RELAXED) &&
+            trust_source(s->source,s->bytes);
+        if(trusted && !sample) {
+            trust_hits++;trust_bytes+=compact?s->bytes/2:s->bytes;
+            equal=1;
+        } else {
+#endif
 #if XV_VERTEX_CAPTURE_PACKED
         if(compact)equal=xv_packed_equal(s->source,cap_arena+e->offset,s->bytes/32);
         else
@@ -179,6 +220,16 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
         /* We need equality, not ordering. Use the same bounded NEON block
          * loads as resident uploads, including unaligned inputs and tails. */
         equal=xv_bytes_equal_blocks(s->source,cap_arena+e->offset,s->bytes);
+#if XV_CAPTURE_TRUST_TAGS
+        if(trusted) {
+            trust_verified++;
+            if(!equal) {
+                trust_mismatches++;trust_disabled=1;
+                xv_logf("[capture-trust] sampled verification found a changed tag-resident source (%u bytes); trust disabled for this session\n",s->bytes);
+            }
+        }
+        }
+#endif
         if(sample) {
             cap_detail_compare_us+=sceKernelGetProcessTimeWide()-detail_start;
             cap_detail_compares++;
@@ -207,7 +258,10 @@ static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned slot,un
     if(packed && packed!=XV_PACKED_PREFIX16)return 0;
 #endif
     unsigned bucket=((uintptr_t)s->source>>4)&(CAPTURE_BUCKETS-1),id=++cap_entry_count;
-    cap_entries[id-1]=(capture_entry){s->source,cap_used,s->bytes,s->stride,packed,compact,slot,cap_buckets[bucket],1};
+    cap_entries[id-1]=(capture_entry){s->source,cap_used,s->bytes,s->stride,packed,compact,slot,cap_buckets[bucket],1,0};
+#if XV_CAPTURE_TRUST_TAGS
+    cap_entries[id-1].generation=__atomic_load_n(&trust_generation,__ATOMIC_RELAXED);
+#endif
     cap_results[id-1]=NULL;cap_buckets[bucket]=id;return id;
 }
 #endif
@@ -594,6 +648,12 @@ void xv_vertex_capture_shutdown(void)
 void xv_vertex_capture_report(unsigned frames)
 {
     assert(cap_retired==__atomic_load_n(&cap_submitted,__ATOMIC_ACQUIRE));
+#if XV_CAPTURE_TRUST_TAGS
+    xv_logf("[capture-trust] %u frames: enabled %d disabled %u generation %u; trusted %u hits %llu KiB compare skipped; sampled verified %u mismatches %u\n",
+        frames,trust_enabled,trust_disabled,__atomic_load_n(&trust_generation,__ATOMIC_RELAXED),
+        trust_hits,(unsigned long long)(trust_bytes>>10),trust_verified,trust_mismatches);
+    trust_hits=trust_verified=0;trust_bytes=0;
+#endif
     if(cap_detail_samples)xv_logf("[vertex-capture-detail] %u frames: %u sampled submissions (1/64); compare %u calls %llu bytes %llu us; copy %u calls %llu bytes %llu us; publish %u calls %llu us; nested elapsed samples, not frame totals\n",
         frames,cap_detail_samples,cap_detail_compares,
         (unsigned long long)cap_detail_compare_bytes,(unsigned long long)cap_detail_compare_us,

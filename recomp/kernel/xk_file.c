@@ -287,7 +287,8 @@ void xk_NtReadFile(xctx *c)
       if (sl && o->u.file.path) { const char *b = o->u.file.path; size_t hl = strlen(b);
           if ((hl >= 12 && !strcmp(b + hl - 12, "savegame.bin")) || (hl >= 8 && !strcmp(b + hl - 8, "blam.sav")) || (hl >= 12 && !strcmp(b + hl - 12, "SaveMeta.xbx")))
               XK_LOG("[save] READ %s @%llu len %u -> %lld\n", b, (unsigned long long)pos, len, (long long)got); } }
-    if (got > 0) { extern void xv_ui_gxm_invalidate_range(uint32_t, uint32_t) __attribute__((weak)); if (xv_ui_gxm_invalidate_range) xv_ui_gxm_invalidate_range(buf, (uint32_t)got); }   /* streamed bitmap slots reuse memory: re-check overlapping cached textures */
+    if (got > 0) { extern void xv_ui_gxm_invalidate_range(uint32_t, uint32_t) __attribute__((weak)); if (xv_ui_gxm_invalidate_range) xv_ui_gxm_invalidate_range(buf, (uint32_t)got); }
+    if (got > 0) { extern void xv_vertex_capture_tags_written(uint32_t, uint32_t) __attribute__((weak)); if (xv_vertex_capture_tags_written) xv_vertex_capture_tags_written(buf, (uint32_t)got); }   /* tag cache reads retire trusted vertex reuse */   /* streamed bitmap slots reuse memory: re-check overlapping cached textures */
     if (got > 0x100000) {                                  /* any multi-MB read: map tag data (0x803A6000) or a BSP switch - both reuse texture memory wholesale */ extern void xv_ui_gxm_request_texture_purge(void) __attribute__((weak)); if (xv_ui_gxm_request_texture_purge) xv_ui_gxm_request_texture_purge(); XK_LOG("map tag data loaded: texture cache purge requested\n"); }
     {   /* Which kind of cache map is being STREAMED: Halo copies maps to z:\cacheNNN.map, so only the
          * header tells (+0x60: 0 campaign, 1 multiplayer, 2 ui).  Level-select screens peek at headers only;

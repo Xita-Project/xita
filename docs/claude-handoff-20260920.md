@@ -168,3 +168,30 @@ length (≈447 KiB/frame through `xv_bytes_equal_blocks` /
 `XV_VERTEX_CAPTURE_DETAIL` and `XV_VERTEX_PROFILE` to split compare, copy and
 bookkeeping before choosing between a cheaper change check and a different
 reuse policy.
+
+## 9. Perf52 / perf53: capture profiles and `XV_CAPTURE_TRUST_TAGS` (installed, slot 1)
+
+Perf52 (capture detail + vertex-work profiles, draw profile off) attributed
+the streams stage: sampled compares ≈65 µs per 11 KB (≈170 MB/s, far below
+cached NEON throughput; timings include preemption), extrapolating to ≈4.4
+ms/frame, copies ≈2 ms, publish < 1 ms.
+
+Perf53 adds `XV_CAPTURE_TRUST_TAGS` (`runtime/xv_vertex_capture.c`): the
+file layer bumps a generation whenever a read lands in the 22 MB tag cache
+(physical `0x3A6000`, the static BSP/model vertex buffers; hook in
+`xk_file.c` next to the texture-cache invalidation). A reuse source inside
+that region under the same generation skips the byte compare; the existing
+1/64 sampled submissions still compare and disable trust on the first
+mismatch. Heap (dynamic) vertex data keeps the full compare. Host
+`tools/test_vertex_capture.py` passes.
+
+Hardware at 480p, three windows: trusted 3,707–3,742 hits per window skipping
+24 MiB of compares, 65–68 sampled verifications, **0 mismatches**; guest-side
+capture 307 → 181 ms per 60 frames (5.1 → 3.0 ms/frame); draw-HLE 11.7 → 9.1
+ms; frame 74.4 → **70.7 ms median (14.1 FPS)**; tick 35.5, scene 33.
+
+Cumulative tonight at this checkpoint: 77.6 → 70.7 ms (12.9 → 14.1 FPS),
+from 480p (−6), query unlock (−0.6 at native, visible at 480p), job split
+(−0.8 batch) and trusted tag reuse (−3.7). Runtime SHA-256
+`92eeeb67…` (see `../capture-trust-hardware/package-check.json`), source is
+`aede57b` plus the uncommitted trust change at build time (committed next).
