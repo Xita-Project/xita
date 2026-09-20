@@ -1,5 +1,6 @@
 #ifdef XV_NATIVE_COLLISION_VERTICES
 #include "xk_collision_vertices.h"
+int xv_owner_thread_id(void);   /* xk_os_vita.c: owner alias for the scene helper */
 #if defined(__vita__)
 #include <psp2/kernel/threadmgr.h>
 static SceUID owner_thread;
