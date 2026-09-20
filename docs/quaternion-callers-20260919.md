@@ -255,3 +255,46 @@ frame times and long-session stability remain pending; deployment is not a claim
 of a performance improvement. Private receipts are in
 `../marker-capture-hardware/`. Its `inherited-perf43/` folder contains copied
 prior-run receipts, not observations from perf.44.
+
+
+## Perf.44 ordinary campaign activation
+
+The checkpoint loaded and an independent screenshot confirms the world, weapon,
+HUD and reticle on perf.44. The automated load checker kept waiting for its
+sparse `ui_map` log predicate despite visible gameplay; it was intentionally
+terminated after visual qualification. This was not an application crash or a
+restart. Full logs and status were captured independently.
+
+The final checkpoint caller window records 2,364 / 2,277 marker captures on the
+two lanes (77.35 records per displayed frame). Recent frame windows show
+12.7–12.8 FPS. The complete object batch takes 1,655,921 us / 60 frames, or
+27.60 ms/frame. No whole-frame gain is established by this ordinary observation.
+The matched ELF plus runtime anchor were used for wait symbolization; recorded
+native PCs require a 106,496-byte relocation correction in this boot. They
+identify waiting callers, not the routines holding the lock.
+
+A short camera/strafe sequence completed; controls were released. The next image
+shows a nearby Marine with weapon, room geometry and first-person HUD. Later
+windows in this different view report 13.3–13.5 FPS. The last interval records
+4,838 marker captures / 60 frames, 26.08 ms/frame of object batches, a 35.39 ms
+inclusive tick interval and a 37.45 ms inclusive scene interval. These windows
+are not an off/on comparison. No crash was observed during this short run;
+long-session stability and combat remain unproven.
+
+A material next target appears in that view: `[flare-defer]` records 1,225,787 us
+of exact-result waits / 60 frames, or 20.43 ms/frame. The corresponding scene
+bucket 4 is 23.01 ms/frame. Draw wrapper time is 4.4 ms/frame and whole-frame
+elapsed is 74.9 ms. These counters are nested/asynchronously reported and must
+not be summed as independent costs. GPU packet completion observations are not
+GPU service time. Earlier cumulative observations often had much smaller flare
+waits; camera/activity matter.
+
+Next: audit the brightness/result consumption boundary and result lifetime,
+retaining cumulative CPU work. A deferred or temporally reused flare result must
+not be confused with general visibility, reused query IDs or a different flare
+object. Do not simply return stale query counts globally. The existing hold
+profiler also disables several private paths, so enabling it would not describe
+the unchanged cumulative stack without further work.
+
+Private evidence: `loaded-check.png`, `gameplay.log`, `gameplay-status.json`,
+`symbolized-waits.json`, `movement.png`, `movement.log`, `movement-status.json`.
