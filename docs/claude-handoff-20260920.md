@@ -195,3 +195,35 @@ from 480p (−6), query unlock (−0.6 at native, visible at 480p), job split
 (−0.8 batch) and trusted tag reuse (−3.7). Runtime SHA-256
 `92eeeb67…` (see `../capture-trust-hardware/package-check.json`), source is
 `aede57b` plus the uncommitted trust change at build time (committed next).
+
+## 10. Perf54 / 1a9c141: `XV_OBJECT_OWNER_LANE` (owner participates in the batch)
+
+At 480p the frame is CPU-bound and the owner core idles for the whole object
+batch (it only joins and services requests; the overlay showed it at ~60 %
+while the worker cores sat at ~35 %). The owner now also executes jobs on
+lane 2 (`xk_object_jobs.c`):
+
+- `service_owner` is split into a reusable `service_scan(completed,
+  allow_quiescent)`; the blocking loop is unchanged in behaviour.
+- `owner_participate()` runs before `service_owner()` in the join: scan, and
+  if no quiescent park is pending, pop a light-end job (the split's heavy-first
+  order; lane 2 pops the same end as lane 1) and run it; repeat until the
+  queue is empty or a park is pending (`pause-breaks`).
+- The owner's guard acquisition inside a lane-2 job never blocks: it tries
+  the recursive mutex, and while it fails it scans worker requests and sleeps
+  50 µs (`lock-spins`). A parked worker holding the guard while it waits for
+  an owner service therefore cannot deadlock the owner.
+- The owner's own kernel services inside a job run inline as in owner-only
+  mode; quiescent ones first park every worker (servicing non-quiescent
+  requests meanwhile), then run, then a normal scan runs pending worker
+  quiescent services and resumes all (`quiesce`).
+- Owner-lane jobs use the plain owner guard path, so the worker-only private
+  overlaps (query unlock, typed cluster query, hierarchy) decline on lane 2;
+  the light-end choice keeps its guard holds short.
+
+Validation: fixture owner-lane mode (owner-thread-aware admissions,
+cross-lane rendezvous skipped, quiescent audio-commit services raised from
+every lane including the owner): 40 × 600 pass plain and TSan; the standard
+mode passes with the option compiled but off (the refactor touches the
+default service loop). Report `[owner-lane]`. `XV_OBJECT_OWNER_LANE=0`
+disables. Hardware result follows in section 11.
