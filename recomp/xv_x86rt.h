@@ -16,6 +16,16 @@ extern "C" {
  * its own pages because Halo places physical allocations at the same numbers (see kernel/xk_mem.c). */
 extern uint8_t  *g_xram;
 extern uint32_t *g_xpt;
+#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE && defined(__vita__)
+/* Per-thread page table: every thread's TPIDRURW (user read/write thread-ID register, preserved per
+ * thread by the kernel, otherwise unused - handoff 20260920 §25) holds the table it translates through.
+ * runtime/xv_thread_bind.c binds it at thread start (live table today; a render thread gets its own
+ * copy-on-write table later). The asm is not volatile, so GCC hoists it: one mrc per function. */
+static inline uint32_t *xv_thread_page_table(void) { uint32_t v; __asm__("mrc p15, 0, %0, c13, c0, 2" : "=r"(v)); return (uint32_t *)v; }
+#define X_PT (xv_thread_page_table())
+#else
+#define X_PT g_xpt
+#endif
 #ifdef XV_CHECK_GUEST_ADDRESS
 /* Optional diagnostic target policy, invoked before translating a guest
  * pointer. This is not a memory-range validator: callers retain their normal
@@ -43,15 +53,15 @@ extern uint32_t xv_watch_off, xv_watch_len;
 void xv_watch_store(uint32_t address, uint32_t off);
 static inline void *x_guest_checked_pointer(uint32_t address)
 {
-    uint32_t off = g_xpt[address >> 12];
-    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) { xv_check_guest_address(address); off = g_xpt[address >> 12]; }
+    uint32_t off = X_PT[address >> 12];
+    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) { xv_check_guest_address(address); off = X_PT[address >> 12]; }
     return g_xram + off + (address & 0xFFFu);
 }
 /* Stores only: the recompiler emits X_W* for memory lvalues, X_M* for loads. */
 static inline void *x_guest_checked_pointer_write(uint32_t address)
 {
-    uint32_t off = g_xpt[address >> 12];
-    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) { xv_check_guest_address(address); off = g_xpt[address >> 12]; }
+    uint32_t off = X_PT[address >> 12];
+    if (__builtin_expect(XV_ADDRESS_NEEDS_POLICY(address, off), 0)) { xv_check_guest_address(address); off = X_PT[address >> 12]; }
     xv_page_epoch[off >> 12] = xv_write_epoch;
     if ((off + (address & 0xFFFu)) - xv_watch_off < xv_watch_len) xv_watch_store(address, off + (address & 0xFFFu));
     return g_xram + off + (address & 0xFFFu);
@@ -73,7 +83,7 @@ static inline void *x_guest_checked_span_write(uint32_t address, uint32_t bytes)
 #define X_GW(a)     x_guest_checked_pointer_write((uint32_t)(a))
 #define X_GWN(a, n) x_guest_checked_span_write((uint32_t)(a), (uint32_t)(n))
 #else
-#define X_G(a)      ((void *)(g_xram + g_xpt[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))
+#define X_G(a)      ((void *)(g_xram + X_PT[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))
 #define X_GW(a)     X_G(a)
 #define X_GWN(a, n) X_G(a)
 #endif

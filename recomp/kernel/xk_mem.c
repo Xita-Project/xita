@@ -26,7 +26,8 @@
 #define KERNEL_VA      0x03D00000u                    /* [KERNEL_VA, 64 MB): identity-mapped kernel objects */
 #define MAX_RANGES     2048
 
-uint32_t *g_xpt;                                      /* 1M entries: virtual page -> arena byte offset */
+static uint32_t g_xpt_storage[1u << 20];               /* 1M entries: virtual page -> arena byte offset */
+uint32_t *g_xpt = g_xpt_storage;                       /* fixed address: threads bind it before the arena exists (xv_thread_bind.c) */
 static uint8_t  g_phys_used[NPAGES];                  /* physical page bitmap (byte per page) */
 static uint8_t  g_virt_committed[NPAGES];             /* virtual pages below 64 MB that own a private physical page */
 static uint32_t g_image_lo, g_image_hi, g_trash_off;
@@ -97,7 +98,6 @@ void xk_mem_setup(uint32_t image_base, uint32_t image_size)
     g_image_lo = image_base & ~(XK_PAGE - 1);
     g_image_hi = (image_base + image_size + XK_PAGE - 1) & ~(XK_PAGE - 1);
     g_trash_off = XRAM_SIZE + (g_image_hi - g_image_lo);
-    g_xpt = malloc((1u << 20) * sizeof(uint32_t));
     for (uint32_t p = 0; p < (1u << 20); ++p) g_xpt[p] = g_trash_off;
     memset(g_vpage_of, 0xFF, sizeof g_vpage_of); memset(g_vpage_multi, 0, sizeof g_vpage_multi); g_nguards = 0;
     for (uint32_t va = 0; va < XRAM_SIZE; va += XK_PAGE) {

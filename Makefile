@@ -1990,6 +1990,17 @@ endif
 ifeq ($(XV_GUEST_AFFINITY),1)
 CFLAGS += -DXV_GUEST_AFFINITY
 endif
+XV_THREAD_PAGE_TABLE ?= 0
+ifneq ($(filter $(XV_THREAD_PAGE_TABLE),0 1),$(XV_THREAD_PAGE_TABLE))
+$(error XV_THREAD_PAGE_TABLE must be 0 or 1)
+endif
+ifeq ($(XV_THREAD_PAGE_TABLE),1)
+# Guest accesses translate through the thread's TPIDRURW page table (recomp/xv_x86rt.h X_PT); every
+# sceKernelCreateThread in the runtime is routed through the binding trampoline by force-including the header.
+CFLAGS += -DXV_THREAD_PAGE_TABLE=1 -include $(abspath runtime/xv_thread_bind.h)
+RECOMP_CFLAGS += -DXV_THREAD_PAGE_TABLE=1 -include $(abspath runtime/xv_thread_bind.h)
+SRCS += runtime/xv_thread_bind.c
+endif
 ifeq ($(XV_VERTEX_PROFILE),1)
 $(BUILD)/runtime/xv_vertex_upload.o: CFLAGS += -DXV_VERTEX_PROFILE=1
 endif

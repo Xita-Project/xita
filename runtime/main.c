@@ -2194,6 +2194,9 @@ static void xv_configure_cpu_clock(void)
 
 int main(int argc, char *argv[])
 {
+#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
+    xv_thread_bind_current();          /* main thread's page table; every created thread binds in xv_thread_bind.c */
+#endif
     (void)argc; (void)argv;
     XV_LOG("Xita " XV_BUILD_LABEL " runtime starting\n");
     /* Homebrew boots at 333/111 MHz; ask for the full clocks (CPU 444, bus 222, GPU 222, GPU xbar 166). */
