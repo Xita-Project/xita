@@ -41,7 +41,9 @@ CHILD_BODY_SHA256 = "42166a2b3d33a3684df9b07c0b55a3ae61cfb7e3c23d4639e75e6834825
 
 
 def child_hook(body):
-    canonical = re.sub(r"^    XV_PHASE_SCOPE\(c, \d+u\);\n", "", body, flags=re.M).rstrip()
+    # Entry observers (phase scope, pose scope) are not instructions: strip them before the pin check.
+    canonical = re.sub(r"^    XV_PHASE_SCOPE\(c, \d+u\);\n", "", body, flags=re.M)
+    canonical = re.sub(r"^#if XV_POSE_PIPELINE\n.*?^#endif\n", "", canonical, flags=re.M | re.S).rstrip()
     if hashlib.sha256(canonical.encode()).hexdigest() != CHILD_BODY_SHA256:
         raise ValueError("primary 5B4A0 instruction/callback drift")
     original = body
