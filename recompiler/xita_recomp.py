@@ -1290,8 +1290,8 @@ class Emitter:
         # registers in ARM registers across guest memory stores (otherwise every store reloads them).
         # xram_/xpt_: locals shadow the globals for the same reason (X_G is redefined per file to use them).
         out = [f"void f_{fn.entry:08X}(xctx *restrict c)", "{",
-               "    uint8_t *const xram_ = g_xram; const uint32_t *const xpt_ = g_xpt; (void)xram_; (void)xpt_;",
-               "    uint8_t *const imgb_ = g_img_base; (void)imgb_;"]
+               "    uint8_t *const xram_ = g_xram; const uint32_t *const xpt_ = X_PT; (void)xram_; (void)xpt_;",   # X_PT: the thread's page table (xv_x86rt.h)
+               "    uint8_t *const imgb_ = X_IMG_BASE; (void)imgb_;"]
         self.cur_fn = fn.entry
         self._cur_fn_obj = fn
         if self.trace_funcs:
