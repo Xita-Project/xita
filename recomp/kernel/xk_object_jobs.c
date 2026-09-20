@@ -862,6 +862,13 @@ static void service_owner(void)
 #define XV_OBJECT_OWNER_LANE_DEFAULT 0
 #endif
 static unsigned owner_lane_enabled,owner_in_job,owner_lane_jobs,owner_lane_batches,owner_lane_breaks,owner_lane_spins,owner_lane_quiesce;
+#ifdef __vita__
+static SceUID owner_lane_thread;
+static int owner_lane_thread_is_current(void) { return sceKernelGetThreadId()==owner_lane_thread; }
+#else
+static pthread_t owner_lane_thread;
+static int owner_lane_thread_is_current(void) { return pthread_equal(pthread_self(),owner_lane_thread); }
+#endif
 static int owner_lane_active(void)
 { return owner_lane_enabled&&active_workers==WORKERS&&__atomic_load_n(&running,__ATOMIC_ACQUIRE); }
 static void owner_lane_report(unsigned frames)
@@ -950,7 +957,9 @@ __attribute__((noinline)) int xv_object_math_lock(void)
 #endif
     }
 #if XV_OBJECT_OWNER_LANE
-    if(owner_in_job) {
+    /* Only the owner thread itself may serve requests while spinning; other
+     * native threads keep the blocking path. */
+    if(owner_in_job&&owner_lane_thread_is_current()) {
         /* Never block: a worker holding the guard may be parked waiting for
          * an owner service. Serve requests while spinning. */
         while(xv_object_mutex_try(&math_mutex)) {
@@ -1841,6 +1850,13 @@ static void execute(unsigned lane)
 #if XV_OBJECT_OWNER_LANE
 static void owner_participate(void)
 {
+    static unsigned announced;
+#ifdef __vita__
+    owner_lane_thread=sceKernelGetThreadId();
+#else
+    owner_lane_thread=pthread_self();
+#endif
+    if(!announced) { announced=1;XK_LOG("[owner-lane] first participation: %u queued jobs, %u workers\n",count,active_workers); }
     owner_lane_batches++;
     for(;;) {
         service_scan(NULL,1);
@@ -2401,7 +2417,7 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
          X_M32(c->r[4]+4)!=0x17A804u)))
         xv_object_job_stop(c,address,"yield outside audited cache wait");
 #if XV_OBJECT_OWNER_LANE
-    if(c==&contexts[2]&&active_workers&&owner_in_job) {
+    if(c==&contexts[2]&&active_workers&&owner_in_job&&owner_lane_thread_is_current()) {
         int quiesce=needs_quiescence(address);
         unsigned saved=owner_in_job;owner_in_job=0;
         if(quiesce)owner_quiesce_begin();
