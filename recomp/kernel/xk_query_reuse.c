@@ -6,6 +6,10 @@
 #include <limits.h>
 
 extern unsigned xv_object_world_run_admit(xctx *);
+#if XV_QUERY_UNLOCK
+extern int xv_object_world_query_release(xctx *);
+extern void xv_object_world_query_reacquire(int);
+#endif
 extern void xv_object_math_report_check(void);
 extern int xv_watch_n, xv_trace_funcs;
 extern unsigned xv_collision_vertices_state, xv_segment_sphere_mode;
@@ -254,6 +258,14 @@ static void original(xctx *c, ReuseEntry *entry)
 
 void xv_query_reuse_run(xctx *c)
 {
+#if XV_QUERY_UNLOCK
+    {
+        /* Admitted lanes run the fused query without the actor guard and skip
+         * the reuse cache/world-run helpers, which assume a held transaction. */
+        int unlocked=xv_object_world_query_release(c);
+        if(unlocked) { query_fused_172c95_171f94(c);xv_object_world_query_reacquire(unlocked);return; }
+    }
+#endif
     uint32_t fp = fp_get();
     COUNT(calls);
     if (!xv_object_world_run_admit(c)) {

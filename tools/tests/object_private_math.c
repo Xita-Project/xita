@@ -83,6 +83,26 @@ static void check_admission(xctx *c,unsigned id)
     }
     xv_object_hierarchy_resume(snapshot);c->r[4]=entry_sp;
 #endif
+#if XV_QUERY_UNLOCK
+    {
+        extern int xv_object_world_query_release(xctx *);
+        extern void xv_object_world_query_reacquire(int);
+        assert(!xv_object_world_query_release(&copy));
+        { XV_OBJECT_MATH_GUARD(); assert(!xv_object_world_query_release(c)); }
+        uint32_t entry_sp=c->r[4];
+        c->r[4]=base+64;assert(!xv_object_world_query_release(c));c->r[4]=entry_sp;
+        int unlocked=xv_object_world_query_release(c);
+        assert(!!unlocked==(fast_path&&workers!=0));
+        assert(xv_object_math_locked_==token);
+        if(unlocked&&workers==2&&id<2) {
+            /* Both lanes must reach this point without the guard. */
+            int result=pthread_barrier_wait(&concurrent);
+            assert(!result||result==PTHREAD_BARRIER_SERIAL_THREAD);
+        }
+        xv_object_world_query_reacquire(unlocked);
+        assert(!xv_object_world_query_release(&copy));
+    }
+#endif
     int released=xv_object_math_release_private(c,&xv_object_math_locked_,0,out,12,0,0);
     assert(released==(release_enabled&&fast_path&&workers!=0));
     assert(xv_object_math_locked_==(released?0:token));

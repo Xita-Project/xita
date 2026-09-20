@@ -16,6 +16,7 @@ quat_build=os.environ.get('OBJECT_QUAT_TEST_BUILD','1')!='0'
 quat_cache=os.environ.get('OBJECT_QUAT_CACHE_TEST_BUILD','0')=='1'
 constants_original=os.environ.get('OBJECT_QUAT_CONSTANT_MODE','original')=='original'
 quat_profile=os.environ.get('OBJECT_QUAT_PROFILE_TEST_BUILD','0')=='1'
+query_unlock=os.environ.get('OBJECT_QUERY_UNLOCK_TEST_BUILD','0')=='1'
 with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as directory:
     binary=Path(directory)/'test'
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11',
@@ -25,6 +26,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
         *(['-DXV_HIERARCHY_ASSIST=1','-DTEST_HIERARCHY_SHARED'] if hierarchy_shared else []),
         *(['-DXV_OBJECT_POINT_EXPERIMENT'] if point_build else []),
         *(['-DXV_OBJECT_QUAT_PROFILE'] if quat_profile else []),
+        *(['-DXV_QUERY_UNLOCK=1','-DXV_QUERY_UNLOCK_DEFAULT=1'] if query_unlock else []),
         *(['-DXV_OBJECT_QUAT_EXPERIMENT'] if quat_build else []),
         *(['-DXV_QUAT_CACHE'] if quat_cache else []),
         '-I'+str(root/'recomp'),*shlex.split(os.environ.get('OBJECT_JOB_TEST_FLAGS','')),
@@ -45,6 +47,15 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
                         env.pop('XV_OBJECT_PRIVATE_QUATERNION')
                     result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30,env=env)
                     assert result.returncode==0,(result.returncode,result.stdout,result.stderr)
+                    if query_unlock:
+                        qu=re.findall(r'\[query-unlock\] \d+ frames enabled (\d+) idle/caller/nested/state/disabled/profile/pause/stack/ready ([0-9/]+); unlocked (\d+)/(\d+) calls',result.stderr)
+                        assert len(qu)==2,qu
+                        reasons=list(map(int,qu[0][1].split('/')))
+                        ready=reasons[8];calls=int(qu[0][2])+int(qu[0][3])
+                        assert calls==ready,(qu,calls,ready)
+                        assert (ready>0)==(workers!='0' and fast=='1'),(qu,workers,fast)
+                        assert all(row[1]=='0/0/0/0/0/0/0/0/0' for row in qu[1:]),qu
+                        print(f"query unlock: ready={ready} reasons={reasons}",flush=True)
                     if hierarchy_build:
                         hs=re.findall(r'\[hierarchy-ownership\] \d+ frames .*? ([0-9/]+)\n',result.stderr)
                         assert len(hs)==4,hs

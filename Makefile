@@ -1654,6 +1654,30 @@ $(RECOMP_BUILD)/query-reuse.config: force-query-reuse-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/librecomp.a: $(RECOMP_BUILD)/query-reuse.config
+# World-route BSP query released from the actor guard (research trial).
+XV_QUERY_UNLOCK ?= 0
+XV_QUERY_UNLOCK_DEFAULT ?= 0
+ifneq ($(filter $(XV_QUERY_UNLOCK),0 1),$(XV_QUERY_UNLOCK))
+$(error XV_QUERY_UNLOCK must be 0 or 1)
+endif
+ifneq ($(filter $(XV_QUERY_UNLOCK_DEFAULT),0 1),$(XV_QUERY_UNLOCK_DEFAULT))
+$(error XV_QUERY_UNLOCK_DEFAULT must be 0 or 1)
+endif
+ifeq ($(XV_QUERY_UNLOCK),1)
+ifneq ($(XV_EXPERIMENTAL_OBJECT_JOBS) $(XV_QUERY_REUSE) $(XV_NATIVE_QUERY_FUSION),1 1 1)
+$(error XV_QUERY_UNLOCK requires XV_EXPERIMENTAL_OBJECT_JOBS=1 XV_QUERY_REUSE=1 XV_NATIVE_QUERY_FUSION=1)
+endif
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_QUERY_UNLOCK=1 -DXV_QUERY_UNLOCK_DEFAULT=$(XV_QUERY_UNLOCK_DEFAULT)
+$(RECOMP_BUILD)/kernel/xk_query_reuse.o: RECOMP_CFLAGS += -DXV_QUERY_UNLOCK=1
+endif
+.PHONY: force-query-unlock-config
+force-query-unlock-config:
+$(RECOMP_BUILD)/query-unlock.config: force-query-unlock-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_QUERY_UNLOCK):$(XV_QUERY_UNLOCK_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o $(RECOMP_BUILD)/kernel/xk_query_reuse.o: $(RECOMP_BUILD)/query-unlock.config
 XV_QUERY_REUSE_PROFILE ?= 0
 ifneq ($(words $(XV_QUERY_REUSE_PROFILE)),1)
 $(error XV_QUERY_REUSE_PROFILE must be 0 or 1)

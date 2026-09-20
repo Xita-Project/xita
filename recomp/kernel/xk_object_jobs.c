@@ -1258,6 +1258,89 @@ void xv_object_solver_end(int *token)
     solver_active[lane]=0;*token=0;
 }
 #endif
+#if XV_QUERY_UNLOCK
+/* World-route BSP sphere query (0x88110 closure) outside the actor guard.
+ * The closure performs no absolute guest reads or stores: every access goes
+ * through the caller's stack packet into static structure-BSP geometry, and
+ * its four result lists live on the caller's private stack. 171F10 writes the
+ * shared cluster/object visitation stamps only after this call returns, so
+ * nothing in the unlocked window touches shared game state. What the window
+ * does expose is the enclosing actor's pre-solver field writes to another
+ * lane's callback; that ordering relaxation is the trial's subject. */
+#ifndef XV_QUERY_UNLOCK_DEFAULT
+#define XV_QUERY_UNLOCK_DEFAULT 0
+#endif
+#ifdef XV_TYPED_CLUSTER_QUERY
+static unsigned query_private_active[WORKERS];
+#endif
+static unsigned query_unlock_enabled, query_unlock_active[WORKERS];
+static uint64_t query_unlock_start[WORKERS], query_unlock_us[WORKERS];
+static unsigned query_unlock_count[WORKERS];
+enum { QU_IDLE, QU_CALLER, QU_NESTED, QU_STATE, QU_DISABLED, QU_PROFILE, QU_PAUSE, QU_STACK, QU_READY, QU_REASONS };
+/* Admission counters change only under the guard (suspend) or after
+ * reacquisition (resume); the drained report reads them after every join. */
+static unsigned query_unlock_admission[QU_REASONS];
+static int query_unlock_decline(unsigned reason) { query_unlock_admission[reason]++;return 0; }
+int xv_object_world_query_release(xctx *c)
+{
+    if(initialized!=1||!math_fast_path||!__atomic_load_n(&running,__ATOMIC_ACQUIRE))return query_unlock_decline(QU_IDLE);
+    int lane=worker_lane();
+    if(lane<0||c!=&contexts[lane]||!xv_is_object_job(c))return query_unlock_decline(QU_CALLER);
+    if(math_depth[lane]!=1)return query_unlock_decline(QU_NESTED);
+    if(query_unlock_active[lane]||c->df
+#ifdef XV_NATIVE_SOLVER_FUSION
+       ||solver_active[lane]
+#endif
+#if XV_HIERARCHY_SNAPSHOT
+       ||hierarchy_private_active[lane]
+#endif
+#ifdef XV_TYPED_CLUSTER_QUERY
+       ||query_private_active[lane]
+#endif
+      )return query_unlock_decline(QU_STATE);
+    if(!query_unlock_enabled)return query_unlock_decline(QU_DISABLED);
+#ifdef XV_OBJECT_HOLD_PROFILE
+    /* Child/motion samples span the outer scope and cannot survive its release. */
+    if(hold_enabled)return query_unlock_decline(QU_PROFILE);
+#endif
+    /* A pending owner service is acknowledged at the next lock; keep the
+     * guarded path (which parks sooner) when a park is already requested. */
+    if(__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE))return query_unlock_decline(QU_PAUSE);
+    /* The closure's frames (88110 alone reserves 0x228) and the caller's packet
+     * pointers must lie in this lane's unchanged private stack mapping. */
+    uint32_t sp=c->r[4];
+    if(sp<4096||!private_stack_span(lane,sp-4096,4096+64))return query_unlock_decline(QU_STACK);
+    query_unlock_admission[QU_READY]++;
+    query_unlock_active[lane]=1;query_unlock_start[lane]=xk_os_monotonic_us();
+    int held=lane+2;xv_object_math_unlock(&held);
+    return lane+1;
+}
+void xv_object_world_query_reacquire(int token)
+{
+    if(!token)return;
+    int lane=worker_lane();
+    if(lane<0||token!=lane+1||!query_unlock_active[lane]||math_depth[lane])abort();
+    /* Park-aware reacquisition; the outer caller keeps its cleanup token. */
+    int held=xv_object_math_lock();
+    if(held!=lane+2||math_depth[lane]!=1)abort();
+    query_unlock_us[lane]+=xk_os_monotonic_us()-query_unlock_start[lane];
+    query_unlock_count[lane]++;query_unlock_active[lane]=0;
+}
+static void query_unlock_report(unsigned frames)
+{
+    for(unsigned lane=0;lane<WORKERS;lane++)if(query_unlock_active[lane])abort();
+    XK_LOG("[query-unlock] %u frames enabled %u idle/caller/nested/state/disabled/profile/pause/stack/ready %u/%u/%u/%u/%u/%u/%u/%u/%u; unlocked %u/%u calls %llu/%llu us; world BSP query outside actor guard, lane sums overlap\n",
+        frames,query_unlock_enabled,
+        query_unlock_admission[QU_IDLE],query_unlock_admission[QU_CALLER],query_unlock_admission[QU_NESTED],
+        query_unlock_admission[QU_STATE],query_unlock_admission[QU_DISABLED],query_unlock_admission[QU_PROFILE],
+        query_unlock_admission[QU_PAUSE],query_unlock_admission[QU_STACK],query_unlock_admission[QU_READY],
+        query_unlock_count[0],query_unlock_count[1],
+        (unsigned long long)query_unlock_us[0],(unsigned long long)query_unlock_us[1]);
+    memset(query_unlock_admission,0,sizeof query_unlock_admission);
+    memset(query_unlock_count,0,sizeof query_unlock_count);
+    memset(query_unlock_us,0,sizeof query_unlock_us);
+}
+#endif
 #ifdef XV_OBJECT_QUAT_PROFILE
 /* Called under the existing guard after private output/scratch admission.
  * This is an ownership census, not permission to read shared inputs unlocked. */
@@ -1411,7 +1494,10 @@ int xv_object_query_lane(xctx *c,int guard,uint32_t base,unsigned bytes)
 }
 #endif
 #ifdef XV_TYPED_CLUSTER_QUERY
-static unsigned query_overlap_enabled,query_private_active[WORKERS];
+static unsigned query_overlap_enabled;
+#if !XV_QUERY_UNLOCK
+static unsigned query_private_active[WORKERS];
+#endif
 int xv_object_query_suspend(xctx *c,int guard)
 {
     if(!query_overlap_enabled)return 0;
@@ -1724,6 +1810,11 @@ static int initialize(void)
     xv_object_hold_children_enabled=hold_enabled;
     XK_LOG("[object-holds] process-start %u; sampled 1/64 outer holds by lock-site pc, guest phase timing %s\n",hold_enabled,xv_phase_enabled?"on (holds suppressed)":"off");
 #endif
+#if XV_QUERY_UNLOCK
+    const char *unlock=getenv("XV_QUERY_UNLOCK");
+    query_unlock_enabled=unlock?atoi(unlock)!=0:XV_QUERY_UNLOCK_DEFAULT;
+    XK_LOG("[query-unlock] process-start %u; world-route 88110 closure released from the actor guard when admitted\n",query_unlock_enabled);
+#endif
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     if(workers && (!strcmp(workers,"0")||!strcmp(workers,"1")))active_workers=(unsigned)atoi(workers);
     if(active_workers!=WORKERS)XK_LOG("[object-jobs] DIAGNOSTIC: %u active workers; zero selects owner-only execution\n",active_workers);
@@ -1938,6 +2029,9 @@ void xv_object_jobs_report(unsigned frames)
     XK_LOG("[object-jobs] quiescent owner stream status %u packets %u\n",audio_status,audio_packets);audio_status=audio_packets=0;
     XK_LOG("[object-jobs] quiescent owner voice stops %u\n",audio_stops);audio_stops=0;
     XK_LOG("[object-jobs] quiescent owner frequency updates %u spatial parameters %u\n",audio_frequencies,audio_parameters);audio_frequencies=audio_parameters=0;
+#if XV_QUERY_UNLOCK
+    query_unlock_report(frames);
+#endif
     XK_LOG("[object-wait] timed %u attempts %u/%u acquired %u/%u timeouts %u/%u\n",
         math_wait_override<0?math_wait_enabled:(unsigned)math_wait_override,
         math_wait_stats[0].attempts,math_wait_stats[1].attempts,
