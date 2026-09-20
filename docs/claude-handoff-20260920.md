@@ -353,3 +353,17 @@ the log survive a restart (rename `ux0:data/xita/xita.log` to a `.prev` copy
 in `runtime/xv_log.c` before the truncating open, and serve it through the
 remote log endpoint), and poll the load tail faster than 20 s in the
 observer. Without that, a second failure would be as blind as the first.
+
+## 16. 11:00 — perf55 died at the first owner-lane job; switching to a third worker
+
+perf55 (f6987d4 + stall reporter) deployed, verified in slot 1, campaign
+loaded; the rotated log's last line is
+`[owner-lane] first participation: 40 queued jobs, 2 workers` and the process
+died immediately (Xita returned to the dashboard; no STOP, no stall dump). The
+failure is inside the first job run on the owner thread. Most plausible cause:
+native stack. Workers start every job at the top of a fresh 512 KiB stack; the
+owner fiber is already deep inside the tick when it takes a job. Owner-lane
+design abandoned. Replacement: a third worker thread on core 2 (`WORKERS=3`),
+which reuses all worker machinery including parking and the private overlaps
+(query unlock) on every lane, while the owner keeps only servicing. perf53
+redeployed meanwhile so the campaign is safe to launch.

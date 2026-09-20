@@ -44,7 +44,16 @@ extern int fegetexcept(void);
 #include <errno.h>
 #endif
 
-enum { WORKERS=2, LANES=3, CAPACITY=128, STACK_BYTES=XV_OBJECT_JOB_STACK_BYTES };
+/* Worker lanes are a build-time choice: 2 (cores 0/1, owner services on core 2)
+ * or 3 (a third worker shares core 2 with the sleeping owner). Lane WORKERS is
+ * the owner-only execution lane. */
+#ifndef XV_OBJECT_WORKERS
+#define XV_OBJECT_WORKERS 2
+#endif
+#if XV_OBJECT_WORKERS < 1 || XV_OBJECT_WORKERS > 3
+#error XV_OBJECT_WORKERS must be 1..3
+#endif
+enum { WORKERS=XV_OBJECT_WORKERS, LANES=WORKERS+1, CAPACITY=128, STACK_BYTES=XV_OBJECT_JOB_STACK_BYTES };
 const char xv_object_job_marker=0;
 static xctx jobs[CAPACITY], contexts[LANES];
 static unsigned count, next, running, stopping, active_workers=WORKERS;
@@ -993,12 +1002,12 @@ __attribute__((noinline)) int xv_object_math_lock(void)
             owner_lane_stall_check(&since,"guard-spin");
             owner_lane_delay();
         }
-        math_stats[2].acquired++;
+        math_stats[WORKERS].acquired++;
         return 1;
     }
 #endif
     xv_object_mutex_wait(&math_mutex);
-    math_stats[2].acquired++;
+    math_stats[WORKERS].acquired++;
     return 1;
 }
 
@@ -1423,13 +1432,13 @@ void xv_object_world_query_reacquire(int token)
 static void query_unlock_report(unsigned frames)
 {
     for(unsigned lane=0;lane<WORKERS;lane++)if(query_unlock_active[lane])abort();
-    XK_LOG("[query-unlock] %u frames enabled %u idle/caller/nested/state/disabled/profile/pause/stack/ready %u/%u/%u/%u/%u/%u/%u/%u/%u; unlocked %u/%u calls %llu/%llu us; world BSP query outside actor guard, lane sums overlap\n",
+    XK_LOG("[query-unlock] %u frames enabled %u idle/caller/nested/state/disabled/profile/pause/stack/ready %u/%u/%u/%u/%u/%u/%u/%u/%u; unlocked %u/%u/%u calls %llu/%llu/%llu us; world BSP query outside actor guard, lane sums overlap\n",
         frames,query_unlock_enabled,
         query_unlock_admission[QU_IDLE],query_unlock_admission[QU_CALLER],query_unlock_admission[QU_NESTED],
         query_unlock_admission[QU_STATE],query_unlock_admission[QU_DISABLED],query_unlock_admission[QU_PROFILE],
         query_unlock_admission[QU_PAUSE],query_unlock_admission[QU_STACK],query_unlock_admission[QU_READY],
-        query_unlock_count[0],query_unlock_count[1],
-        (unsigned long long)query_unlock_us[0],(unsigned long long)query_unlock_us[1]);
+        query_unlock_count[0],query_unlock_count[1],WORKERS>2?query_unlock_count[2]:0u,
+        (unsigned long long)query_unlock_us[0],(unsigned long long)query_unlock_us[1],(unsigned long long)(WORKERS>2?query_unlock_us[2]:0));
     memset(query_unlock_admission,0,sizeof query_unlock_admission);
     memset(query_unlock_count,0,sizeof query_unlock_count);
     memset(query_unlock_us,0,sizeof query_unlock_us);
@@ -1754,7 +1763,7 @@ int xv_visibility_classify_jobs(xctx *c,const xv_visibility_input *input,unsigne
         if(sem_post(&wakes[i]))abort();
 #endif
     }
-    visibility_execute(2,workers);
+    visibility_execute(WORKERS,workers);
     for(unsigned i=0;i<workers;++i) {
 #ifdef __vita__
         if(sceKernelWaitSema(dones[i],1,NULL)<0)abort();
@@ -1820,8 +1829,8 @@ static void split_learn(const xctx *c,uint64_t elapsed)
 }
 static void split_report(unsigned frames)
 {
-    XK_LOG("[job-split] %u frames enabled %u batches %u taken front %u/%u/%u back %u/%u/%u; heavy-first order, lane 1 pops the light end\n",
-        frames,split_enabled,split_batches,split_front[0],split_front[1],split_front[2],split_back[0],split_back[1],split_back[2]);
+    XK_LOG("[job-split] %u frames enabled %u batches %u taken front %u/%u/%u back %u/%u/%u; heavy-first order, lanes 1+ pop the light end\n",
+        frames,split_enabled,split_batches,split_front[0],split_front[1],WORKERS>2?split_front[2]:split_front[WORKERS],split_back[0],split_back[1],WORKERS>2?split_back[2]:split_back[WORKERS]);
     memset(split_front,0,sizeof split_front);memset(split_back,0,sizeof split_back);split_batches=0;
 }
 #endif
@@ -1888,8 +1897,8 @@ static void owner_participate(void)
         service_scan(NULL,1);
         if(__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE)) { owner_lane_breaks++;return; }
         unsigned i;
-        if(!take_job(2,&i))return;
-        owner_in_job=1;run_job(2,i);owner_in_job=0;owner_lane_jobs++;
+        if(!take_job(WORKERS,&i))return;
+        owner_in_job=1;run_job(WORKERS,i);owner_in_job=0;owner_lane_jobs++;
     }
 }
 /* The owner's own kernel service inside a lane-2 job: park every worker first
@@ -1922,7 +1931,7 @@ static int worker(SceSize size,void *arg)
 {
     (void)size; unsigned lane=*(unsigned *)arg;
     extern void xv_cpu_log_thread(const char *);
-    xv_cpu_log_thread(lane?"object-jobs-core1":"object-jobs-core0");
+    xv_cpu_log_thread((const char *const[]){"object-jobs-core0","object-jobs-core1","object-jobs-core2"}[lane]);
     for(;;) {
         if(sceKernelWaitSema(wakes[lane],1,NULL)<0)abort();
         if(__atomic_load_n(&stopping,__ATOMIC_ACQUIRE))return 0;
@@ -2041,7 +2050,7 @@ static int initialize(void)
     XK_LOG("[job-split] process-start %u; heavy/light lane split by per-object job cost\n",split_enabled);
 #endif
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
-    if(workers && (!strcmp(workers,"0")||!strcmp(workers,"1")))active_workers=(unsigned)atoi(workers);
+    if(workers && workers[0]>='0' && workers[0]<='0'+WORKERS && !workers[1])active_workers=(unsigned)atoi(workers);
     if(active_workers!=WORKERS)XK_LOG("[object-jobs] DIAGNOSTIC: %u active workers; zero selects owner-only execution\n",active_workers);
     for(unsigned i=0;i<LANES;i++) {
         stacks[i]=xk_mem_alloc(STACK_BYTES,4096,0,0,1);
@@ -2066,9 +2075,9 @@ static int initialize(void)
         dones[i]=sceKernelCreateSema("xv_object_done",0,0,1,NULL);
         replies[i]=sceKernelCreateSema("xv_object_reply",0,0,1,NULL);
         if(wakes[i]<0||dones[i]<0||replies[i]<0)goto fail;
-        threads[i]=sceKernelCreateThread(i?"xv_objects_c1":"xv_objects_c0",worker,
+        threads[i]=sceKernelCreateThread((const char *const[]){"xv_objects_c0","xv_objects_c1","xv_objects_c2"}[i],worker,
             sceKernelGetThreadCurrentPriority(),512*1024,0,
-            i?SCE_KERNEL_CPU_MASK_USER_1:SCE_KERNEL_CPU_MASK_USER_0,NULL);
+            (const int[]){SCE_KERNEL_CPU_MASK_USER_0,SCE_KERNEL_CPU_MASK_USER_1,SCE_KERNEL_CPU_MASK_USER_2}[i],NULL);
         if(threads[i]<0)goto fail;
     }
     for(unsigned i=0;i<WORKERS;i++)
@@ -2161,7 +2170,7 @@ void xv_object_jobs_join(void)
 #if XV_OBJECT_OWNER_LANE
     if(owner_lane_active())owner_participate();
 #endif
-    if(active_workers)service_owner();else execute(2);
+    if(active_workers)service_owner();else execute(WORKERS);
     for(unsigned i=0;i<active_workers;i++) {
 #ifdef __vita__
         if(sceKernelWaitSema(dones[i],1,NULL)<0)abort();
@@ -2249,9 +2258,9 @@ void xv_object_jobs_report(unsigned frames)
             query_admission[lane][0],query_admission[lane][1],query_admission[lane][2],query_admission[lane][3]);
     memset(query_admission,0,sizeof query_admission);xv_worker_query_report();
 #endif
-    XK_LOG("[object-jobs] %u frames passes %u batches %u jobs %u lanes %u/%u/%u work-us %llu/%llu/%llu batch-us %llu rejected %u; work sums overlap wall time\n",
-        frames,passes,batches,submitted,executed[0],executed[1],executed[2],
-        (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)work_us[2],
+    XK_LOG("[object-jobs] %u frames passes %u batches %u jobs %u lanes %u/%u/%u/%u work-us %llu/%llu/%llu/%llu batch-us %llu rejected %u; work sums overlap wall time\n",
+        frames,passes,batches,submitted,executed[0],executed[1],WORKERS>2?executed[2]:0u,executed[WORKERS],
+        (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)(WORKERS>2?work_us[2]:0),(unsigned long long)work_us[WORKERS],
         (unsigned long long)batch_us,rejected);
     XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
     XK_LOG("[object-jobs] quiescent owner audio pumps %u\n",audio_pumps);audio_pumps=0;
@@ -2314,11 +2323,12 @@ void xv_object_jobs_report(unsigned frames)
                 quat_sites[lane][site].input,quat_sites[lane][site].output,site==QUAT_SITES);
     memset(quat_sites,0,sizeof quat_sites);
 #endif
-    XK_LOG("[object-jobs] probed stack peak bytes %u/%u/%u of %u; excludes unprobed small frames\n",stack_peak[0],stack_peak[1],stack_peak[2],STACK_BYTES);
-    XK_LOG("[object-locks] fast %u idle-owner %u acquired %u/%u/%u nested %u/%u contended %u/%u wait-us %llu/%llu; worker waits overlap\n",
-        math_fast_path,math_idle_calls,math_stats[0].acquired,math_stats[1].acquired,math_stats[2].acquired,
-        math_stats[0].nested,math_stats[1].nested,math_stats[0].contended,math_stats[1].contended,
-        (unsigned long long)math_stats[0].wait_us,(unsigned long long)math_stats[1].wait_us);
+    XK_LOG("[object-jobs] probed stack peak bytes %u/%u/%u/%u of %u; excludes unprobed small frames\n",stack_peak[0],stack_peak[1],WORKERS>2?stack_peak[2]:0u,stack_peak[WORKERS],STACK_BYTES);
+    XK_LOG("[object-locks] fast %u idle-owner %u acquired %u/%u/%u/%u nested %u/%u/%u contended %u/%u/%u wait-us %llu/%llu/%llu; worker waits overlap\n",
+        math_fast_path,math_idle_calls,math_stats[0].acquired,math_stats[1].acquired,WORKERS>2?math_stats[2].acquired:0u,math_stats[WORKERS].acquired,
+        math_stats[0].nested,math_stats[1].nested,WORKERS>2?math_stats[2].nested:0u,
+        math_stats[0].contended,math_stats[1].contended,WORKERS>2?math_stats[2].contended:0u,
+        (unsigned long long)math_stats[0].wait_us,(unsigned long long)math_stats[1].wait_us,(unsigned long long)(WORKERS>2?math_stats[2].wait_us:0));
     for(unsigned lane=0;lane<WORKERS;lane++)for(unsigned site=0;site<=WAIT_SITES;site++)
         if(wait_sites[lane][site].count) {
             XK_LOG("[object-lock-site] lane %u pc %llX count %u wait-us %llu max-us %llu overflow %u\n",
@@ -2445,7 +2455,7 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
          X_M32(c->r[4]+4)!=0x17A804u)))
         xv_object_job_stop(c,address,"yield outside audited cache wait");
 #if XV_OBJECT_OWNER_LANE
-    if(c==&contexts[2]&&active_workers&&owner_in_job&&owner_lane_thread_is_current()) {
+    if(c==&contexts[WORKERS]&&active_workers&&owner_in_job&&owner_lane_thread_is_current()) {
         int quiesce=needs_quiescence(address);
         unsigned saved=owner_in_job;owner_in_job=0;
         if(quiesce)owner_quiesce_begin();
@@ -2464,7 +2474,7 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
         return;
     }
 #endif
-    if(c==&contexts[2]&&!active_workers) {
+    if(c==&contexts[WORKERS]&&!active_workers) {
         if(address==0x1D6640u) {
             extern int xk_object_io_step(void);
             if(xk_object_io_step()<0)abort();

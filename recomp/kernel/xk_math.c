@@ -15,12 +15,18 @@
 #include "xk_matrix_neon.h"
 #endif
 
+#ifndef XV_OBJECT_WORKERS
+#define XV_OBJECT_WORKERS 2
+#endif
+/* Slot zero is guarded/owner accounting; slots 1..XV_OBJECT_WORKERS are the
+ * admitted private lanes. */
+enum { MATH_LANE_SLOTS=XV_OBJECT_WORKERS+1 };
 static unsigned math_fast[2], math_fallback[2];
 /* Slot zero retains guarded accounting. A bypassed quaternion owns its actual
  * worker's slot; reports aggregate/reset only after every job has retired. */
 static struct __attribute__((aligned(64))) {
     unsigned fast, fallback;
-} quaternion_stats[3];
+} quaternion_stats[MATH_LANE_SLOTS];
 #if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_QUAT_EXPERIMENT) && !defined(XV_QUAT_CACHE)
 static unsigned quaternion_configured;
 #endif
@@ -28,7 +34,7 @@ static unsigned quaternion_configured;
  * Reporting occurs after object batches join. No atomic per-operation update. */
 static struct __attribute__((aligned(64))) point_counts {
     unsigned fast, fallback[4];
-} point_stats[3];
+} point_stats[MATH_LANE_SLOTS];
 #if defined(XV_EXPERIMENTAL_OBJECT_JOBS) && defined(XV_OBJECT_POINT_EXPERIMENT)
 static unsigned point_configured;
 #endif
@@ -68,7 +74,7 @@ void xv_native_math_report(unsigned frames)
     matrix_neon_report(frames);
 #endif
     unsigned point_fast=0,point_fallback[4]={0};
-    for(unsigned lane=0;lane<3;lane++) {
+    for(unsigned lane=0;lane<MATH_LANE_SLOTS;lane++) {
         point_fast+=point_stats[lane].fast;
         for(unsigned i=0;i<4;i++)point_fallback[i]+=point_stats[lane].fallback[i];
     }
@@ -103,7 +109,7 @@ void xv_native_math_report(unsigned frames)
     if (xv_math_clip_calls) XK_LOG("[native-clip] %u frames: %u calls\n", frames, xv_math_clip_calls());
     if (xv_math_clip_register_calls) XK_LOG("[clip-registers] %u frames: %u calls\n", frames, xv_math_clip_register_calls());
     unsigned quaternion_fast=0,quaternion_fallback=0;
-    for(unsigned lane=0;lane<3;lane++) {
+    for(unsigned lane=0;lane<MATH_LANE_SLOTS;lane++) {
         quaternion_fast+=quaternion_stats[lane].fast;
         quaternion_fallback+=quaternion_stats[lane].fallback;
     }

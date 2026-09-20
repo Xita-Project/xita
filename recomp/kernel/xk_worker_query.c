@@ -31,9 +31,13 @@ typedef struct Query {
     fenv_t environment,result_environment;
     int rounding;
 } Query;
-static Query queries[2] __attribute__((aligned(64)));
+#ifndef XV_OBJECT_WORKERS
+#define XV_OBJECT_WORKERS 2
+#endif
+enum { Q_LANES=XV_OBJECT_WORKERS };
+static Query queries[Q_LANES] __attribute__((aligned(64)));
 static struct { uint64_t attempts,applied,declined[Q_REASONS],us,backedges,reads,dirty;
-    unsigned depths[9],max_depth,max_stack; } stats[2];
+    unsigned depths[9],max_depth,max_stack; } stats[Q_LANES];
 
 static void __attribute__((noreturn)) q_fail(Query *v,unsigned reason)
 { v->reason=reason; longjmp(v->abort,1); }
@@ -225,7 +229,7 @@ int xv_worker_query(xctx *c,int guard)
     if((&xv_watch_n&&xv_watch_n)||(&xv_trace_funcs&&xv_trace_funcs))return 0;
     if(c->r[4]<16384||c->r[4]>UINT32_MAX-20||(c->r[4]&3)||c->fsp>7)return 0;
     int lane=xv_object_query_lane(c,guard,c->r[4]-16384,Q_STACK)-1;
-    if(lane<0)return 0;
+    if(lane<0||lane>=Q_LANES)return 0;
     Query *v=&queries[lane];stats[lane].attempts++;
     uint64_t begin=xk_os_monotonic_us();
     /* The frame and FP environment are owned by this one native lane. Longjmp
@@ -254,7 +258,7 @@ int xv_worker_query(xctx *c,int guard)
 void xv_worker_query_report(void)
 {
     /* Caller is the existing drained object report boundary. */
-    for(unsigned lane=0;lane<2;lane++){
+    for(unsigned lane=0;lane<Q_LANES;lane++){
         XK_LOG("[worker-query] lane %u attempts %llu applied %llu adapter-us %llu backedges %llu read-lines %llu dirty-bytes %llu storage %u declines layout/memory/alias/limit/budget/changed/fp %llu/%llu/%llu/%llu/%llu/%llu/%llu\n",
             lane,(unsigned long long)stats[lane].attempts,(unsigned long long)stats[lane].applied,
             (unsigned long long)stats[lane].us,(unsigned long long)stats[lane].backedges,

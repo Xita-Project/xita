@@ -42,7 +42,8 @@ void xk_os_log(const char *fmt,...)
 uint32_t xk_mem_alloc(uint32_t n,uint32_t a,uint32_t l,uint32_t h,int top)
 {
     (void)a;(void)l;(void)h;(void)top;assert(n==XV_OBJECT_JOB_STACK_BYTES);
-    uint32_t base=0x100000+allocations++*n;
+    /* Above the fake .rdata constants (1D6620..1F1250): four lanes fit. */
+    uint32_t base=0x200000+allocations++*n;
     /* Real stacks need not be physically contiguous. Retain that property. */
     for(unsigned i=0;i<n/4096;i++)g_xpt[(base>>12)+i]=base+n-4096-i*4096;
     return base;
@@ -62,7 +63,7 @@ static void check_admission(xctx *c,unsigned id)
     xctx copy=*c;
     assert(!xv_object_math_release_private(&copy,&xv_object_math_locked_,0,out,12,0,0));
     uint32_t base=c->r[4]&~(XV_OBJECT_JOB_STACK_BYTES-1u);
-    uint32_t foreign=base==0x100000?0x140004:0x100004;
+    uint32_t foreign=base==0x200000?0x240004:0x200004;
     assert(!xv_object_math_release_private(c,&xv_object_math_locked_,0,foreign,12,0,0));
     assert(!xv_object_math_release_private(c,&xv_object_math_locked_,0,base,4,0,0));
     assert(!xv_object_math_release_private(c,&xv_object_math_locked_,0,base+XV_OBJECT_JOB_STACK_BYTES-4,8,0,0));
@@ -88,7 +89,7 @@ static void check_admission(xctx *c,unsigned id)
     uint32_t entry_sp=c->r[4];c->r[4]-=2048;
     int snapshot=xv_object_hierarchy_suspend(c,token,out,52);
     assert(!!snapshot==(release_enabled&&fast_path&&workers!=0&&!on_owner()));
-    if(snapshot&&workers==2&&id<2&&!owner_lane_mode) {
+    if(snapshot&&workers>=2&&id<2&&!owner_lane_mode) {
         int result=pthread_barrier_wait(&concurrent);
         assert(!result||result==PTHREAD_BARRIER_SERIAL_THREAD);
     }
@@ -105,7 +106,7 @@ static void check_admission(xctx *c,unsigned id)
         int unlocked=xv_object_world_query_release(c);
         assert(!!unlocked==(fast_path&&workers!=0&&!on_owner()));
         assert(xv_object_math_locked_==token);
-        if(unlocked&&workers==2&&id<2&&!owner_lane_mode) {
+        if(unlocked&&workers>=2&&id<2&&!owner_lane_mode) {
             /* Both lanes must reach this point without the guard. */
             int result=pthread_barrier_wait(&concurrent);
             assert(!result||result==PTHREAD_BARRIER_SERIAL_THREAD);
@@ -119,7 +120,7 @@ static void check_admission(xctx *c,unsigned id)
     assert(xv_object_math_locked_==(released?0:token));
     /* This rendezvous would deadlock with either lane still holding the guard.
      * Limit it to the first pair: tail batches may contain only one callback. */
-    if(released&&workers==2&&id<2&&!owner_lane_mode) {
+    if(released&&workers>=2&&id<2&&!owner_lane_mode) {
         int result=pthread_barrier_wait(&concurrent);
         assert(!result||result==PTHREAD_BARRIER_SERIAL_THREAD);
     }
@@ -211,7 +212,7 @@ static void check_private_point(xctx *c,unsigned id)
         *c=before;
     }
     memcpy(X_G(c->r[1]),X_G(0x30000),52);
-    if(admitted&&workers==2&&id<2&&!owner_lane_mode) {
+    if(admitted&&workers>=2&&id<2&&!owner_lane_mode) {
         /* Both lanes must finish the guarded reference/setup before one holds
          * the guard for the independent-execution proof. */
         int barrier=pthread_barrier_wait(&concurrent);
@@ -283,7 +284,7 @@ static void check_private_quaternion(xctx *c,unsigned id)
     }
     assert(!fesetround(FE_TONEAREST));
     memcpy(X_G(c->r[1]),X_G(0x40000+id*16),16);
-    if(admitted&&workers==2&&id<2&&!owner_lane_mode) {
+    if(admitted&&workers>=2&&id<2&&!owner_lane_mode) {
         int barrier=pthread_barrier_wait(&concurrent);
         assert(!barrier||barrier==PTHREAD_BARRIER_SERIAL_THREAD);
         if(id==0) {
@@ -346,7 +347,7 @@ int main(void)
     release_enabled=atoi(getenv("XV_OBJECT_PRIVATE_MATH"));
     fast_path=atoi(getenv("XV_OBJECT_LOCK_FAST_PATH"));
     assert(!pthread_barrier_init(&concurrent,NULL,2));
-    g_xram=calloc(1,2<<20);g_img_base=g_xram;g_xpt=calloc(1<<20,4);
+    g_xram=calloc(1,4<<20);g_img_base=g_xram;g_xpt=calloc(1<<20,4);   /* stacks live at 0x200000+ */
     for(unsigned i=0;i<512;i++)g_xpt[i]=i*4096;
     for(unsigned i=0;i<13;i++) {X_MF32(0x30000+i*4)=(float)(i+1)/8;X_MF32(0x30100+i*4)=(float)(i+3)/16;}
     for(unsigned id=0;id<300;id++)for(unsigned i=0;i<4;i++)X_MF32(0x40000+id*16+i*4)=(float)(id+i)/32;
@@ -409,6 +410,6 @@ int main(void)
     xv_object_jobs_report(2);xv_object_jobs_report(0);xv_object_jobs_shutdown();
     free(g_xram);free(g_xpt);pthread_barrier_destroy(&concurrent);
     printf("PASS: 600 callbacks, context/spill/ownership checks; private point held-guard and owner-service proofs executed: %d\n",
-           !!(point_enabled&&fast_path&&workers==2));
+           !!(point_enabled&&fast_path&&workers>=2));
     printf("private quaternion held-guard and owner-service proofs executed: %d\n",!!(quat_enabled&&quat_constants_original&&fast_path&&workers==2));
 }

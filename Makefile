@@ -1743,6 +1743,20 @@ $(RECOMP_BUILD)/owner-lane.config: force-owner-lane-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/owner-lane.config
+# Object worker lanes: 2 (cores 0/1) or 3 (third worker shares core 2 with the owner).
+XV_OBJECT_WORKERS ?= 2
+ifneq ($(filter $(XV_OBJECT_WORKERS),1 2 3),$(XV_OBJECT_WORKERS))
+$(error XV_OBJECT_WORKERS must be 1, 2 or 3)
+endif
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o $(RECOMP_BUILD)/kernel/xk_worker_query.o $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -DXV_OBJECT_WORKERS=$(XV_OBJECT_WORKERS)
+.PHONY: force-object-workers-config
+force-object-workers-config:
+$(RECOMP_BUILD)/object-workers.config: force-object-workers-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_WORKERS)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o $(RECOMP_BUILD)/kernel/xk_worker_query.o $(RECOMP_BUILD)/kernel/xk_math.o: $(RECOMP_BUILD)/object-workers.config
 XV_QUERY_REUSE_PROFILE ?= 0
 ifneq ($(words $(XV_QUERY_REUSE_PROFILE)),1)
 $(error XV_QUERY_REUSE_PROFILE must be 0 or 1)
