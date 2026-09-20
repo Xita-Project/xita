@@ -4,12 +4,12 @@ import argparse,re
 from pathlib import Path
 p=argparse.ArgumentParser(description=__doc__);p.add_argument('log',type=Path);p.add_argument('-n',type=int,default=3);p.add_argument('--top',type=int,default=20)
 a=p.parse_args();t=a.log.read_text(errors='replace')
-wins=re.split(r'(?=\[xk\] \[guest-phase\] \d+ frames end-frame)',t)[1:]
+wins=re.split(r'(?=\[guest-phase\] \d+ frames end-frame)',t)[1:]
 wins=wins[-a.n:]
 agg={}
 frames=0
 for w in wins:
-    m=re.match(r'\[xk\] \[guest-phase\] (\d+) frames',w);frames+=int(m.group(1))
+    m=re.match(r'\[guest-phase\] (\d+) frames',w);frames+=int(m.group(1))
     for pc,name,calls,active,self_,parked,pself in re.findall(r'\[guest-phase\] ([0-9A-F]{8}) (\S+) calls (\d+) active-us (\d+) self-us (\d+) parked-us (\d+) parked-self-us (\d+)',w):
         d=agg.setdefault((pc,name),[0,0,0,0]);d[0]+=int(calls);d[1]+=int(active);d[2]+=int(self_);d[3]+=int(parked)
 print(f'windows {len(wins)} frames {frames}')

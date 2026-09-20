@@ -384,3 +384,34 @@ batch. Only shortening or removing guard holds can (remaining candidates in
 section 14), or reducing the per-acquisition cost/handoff latency (about 970
 guard acquisitions per frame across lanes; the sleep/poll 50 µs wait mode is
 the default, the bounded-mutex mode `XV_OBJECT_TIMED_WAIT=1` is env-only).
+
+## 18. Perf57: guest-phase attribution of the scene half (diagnostic, rolled back)
+
+`XV_PHASE_TIMING_DEFAULT=2` (forced over the device config, which pins
+`XV_PHASE_TIMING=0`); phase timing disables object jobs, so tick rows are
+serial and the frame ran ≈ 85 ms. Six windows, 360 frames, self time per
+frame (`tools/summarize_guest_phases.py`, log
+`../phase-timing-hardware/gameplay-forced.log`):
+
+| Scope | calls/frame | inclusive ms | self ms |
+| --- | ---: | ---: | ---: |
+| `scene_5D410` body (outside child scopes) | 1 | 41.7 | 9.05 |
+| `render_54010` ordered callback dispatcher | 11 | 8.1 | 8.13 |
+| `render_70110` | 47 | 7.9 | 7.91 |
+| `render_63C00` | 114 | 3.8 | 3.13 |
+| `render_92890` | 1 | 3.1 | 2.77 |
+| `render_5C300` | 84 | 2.2 | 2.19 |
+| `render_66510` | 16 | 2.5 | 2.03 |
+| `render_51E90` | 238 | 1.8 | 1.75 |
+| `render_B5B40` | 502 | 1.5 | 1.49 |
+| `render_8D650` | 124 | 1.9 | 1.45 |
+| `render_A9330` | 359 | 1.3 | 1.26 |
+| `render_5B4A0` self | 16 | 10.8 | 1.05 |
+| tick side: `object_update` self 15.95, `object_pose` self 6.49, `tick_driver` self 7.50 (serial config) | | | |
+
+The per-model chain `5B760 → 5B4A0 → A26B0 → A2380` is almost entirely
+inclusive (self ≈ 0.5 each); its cost bottoms out in `70110` (47 calls ≈ 170 µs
+each, i.e. the draw submission path: draw-HLE is ≈ 9 ms) and `54010`. The
+scene routine's own 9 ms body has no finer scope yet. Draw-HLE stage costs
+(perf51) remain: streams 3 (post-trust), textures 2.4, indices 1.7, state 1.2,
+program 0.8.
