@@ -91,9 +91,12 @@ static void account(phase_owner *owner, uint64_t now)
 
 void xv_phase_init(void)
 {
+#ifndef XV_PHASE_TIMING_DEFAULT
+#define XV_PHASE_TIMING_DEFAULT 0
+#endif
     const char *e = getenv("XV_PHASE_TIMING");
     target_count = &xv_phase_target_count ? xv_phase_target_count : 0;
-    xv_phase_enabled = e && atoi(e) != 0 && xv_phase_targets &&
+    xv_phase_enabled = (e ? atoi(e) != 0 : XV_PHASE_TIMING_DEFAULT) && xv_phase_targets &&
         target_count && target_count <= XV_PHASE_MAX_TARGETS;
     __atomic_store_n(&capture_available, !xv_phase_enabled && xv_phase_targets &&
         target_count && target_count <= XV_PHASE_MAX_TARGETS, __ATOMIC_RELEASE);
