@@ -555,3 +555,47 @@ census page list as the copy set.
 
 Device after this section: rolled back to perf59 (slot 1 -> 0 as
 `rollback` reports), campaign relaunched to the checkpoint.
+
+## 25. Perf61 / d5f2703: TPIDRURW probe — per-thread page table is viable
+
+Why: every guest access in generated code goes through `g_xpt` (virtual page ->
+arena offset, `X_G` in `recomp/xv_x86rt.h`). A render thread that owns a
+*second* page table whose entries for the mutable pages point at shadow copies
+gets a frozen, copy-on-write view of the world at the cost of copying only the
+dirty pages (§24: ~0.5 MB/frame). The blocker was how a thread finds "its"
+page table cheaply: `__thread` on vitasdk is emutls (a function call per
+access, see `scratchpad tls.c`), unusable in 8,062 generated functions.
+
+Probe (`runtime/xv_tpidr_probe.c`, `XV_TPIDR_PROBE=1`, stage
+`tpidr-probe-hardware`, boot log `boot.log`): the ARM user read/write
+thread-ID register TPIDRURW (CP15 c13,c0,2) starts at 0 on every thread
+(unused by the system), accepts writes from user mode, and the kernel
+preserves it per thread: 4 threads pinned to cores 0/1/2/any, 400 checks each
+across 500 us sleeps, busy spins, preemption and 40 forced core migrations,
+0 mismatches; the main thread's value survived the whole probe. TPIDRURO
+(c13,c0,3) holds a distinct stable per-thread kernel value (0x8299e800,
+0x8299f800, ... the kernel TLS block), also usable read-only as a thread key.
+
+Codegen: a non-volatile `mrc` asm is pure to GCC and gets hoisted, so
+`X_G` reading the table pointer from TPIDRURW costs one `mrc` per function
+(scratchpad `hoist.c`: one `mrc` for a whole load/store loop). Verdict:
+**a per-thread page table is one instruction per function, no generator
+change** (the header macro is enough; generated code's cached `xpt_` local is
+unused by `X_G`).
+
+Plan (build flag `XV_THREAD_PAGE_TABLE`):
+1. perf62: `X_PT` = TPIDRURW under the flag; every thread the runtime creates
+   binds TPIDRURW to the live table through a `sceKernelCreateThread` /
+   `sceKernelStartThread` wrapper (trampoline, no per-site edits); main binds
+   at start. No behavior change; proves cost (frame time vs perf59) and that
+   no thread is missed (a missed thread faults at once, log rotation keeps
+   the crash log).
+2. Shadow region appended to the arena (inside the GXM mapping; 240 MB free
+   main after gfx), a render page table, the §24 dirty list, boundary copy.
+3. Render thread running the scene half (`BCB30`) on its own table while the
+   next tick runs on the owner + workers; merge the 22 scene-written globals
+   back at the boundary. Core budget: 3 user cores (render, owner, one
+   worker) so the object batch loses a lane; expected frame ≈ max(tick ~40,
+   scene ~33) ms ≈ 25 FPS against 70 ms today.
+
+Device after this section: rolled back to perf59, campaign relaunched.
