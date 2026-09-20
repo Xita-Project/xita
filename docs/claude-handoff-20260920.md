@@ -729,3 +729,23 @@ Device state at 16:55: frozen on the third run (frames 5379), awaiting a
 manual restart; slot 0 = perf63 run 2 build, slot 1 = perf63 run 3 build.
 perf62 is no longer in a slot: redeploy `thread-pt-hardware/build/xita.vpk`
 to get back to the known-good baseline.
+
+### 29a. Run 4 (7e119a3, 4 MiB limit + watchdog) and the spin site decoded
+
+Same first-viewed-frame spin at `12AA9` with 75 slots. Decoded: `f_00012AA3`
+is `SwitchToThread` (NtYieldExecution, returns eax != 0x40000024). Callers on
+the stack: `f_00032B00` polls a request-table entry (`[[2E2D24]+34] + i*12 + 2`,
+a status byte) and `f_000325C0` waits on a flag with a 0x84-tick timeout:
+Halo's cache-file request wait. The scene issues a cache/data-file request
+and spins until another guest thread (the streaming thread, `start 33AF0`,
+sleeping/polling) completes it. The watchdog fired after 30 s but only
+restored the mapping without merging, so the request the scene had written
+into its shadow page never reached the live table and the spin continued;
+fixed in d730388 (watchdog merges first). Why the request is not completed
+while both threads share the in-place view is still open: the completion may
+come from host-side file HLE (async read on a host thread) writing through a
+pointer translated before the retarget, or through an alias the reverse map
+does not cover. Next: reproduce in Vita3K (`tools/vita3k.sh`, env.txt
+`XV_LEVEL=a10 XV_RENDER_VIEW=1 XV_RENDER_VIEW_LEARN_NOW=1`) where a hang
+costs nothing, then instrument the request path. Device redeployed to
+perf62 (thread-pt-hardware/build/xita.vpk) so it stops freezing.
