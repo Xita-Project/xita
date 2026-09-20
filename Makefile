@@ -2150,7 +2150,7 @@ $(RECOMP_BUILD)/kernel/xk_hierarchy.o: $(RECOMP_BUILD)/hierarchy-matrix.config
 
 # Unroll only bounded native math units. Scalar VFP operations retain their
 # established operand order; no global fast-math or guest codegen change.
-$(RECOMP_BUILD)/kernel/xk_math.o: recomp/kernel/xk_quaternion_snapshot.h
+$(RECOMP_BUILD)/kernel/xk_math.o: recomp/kernel/xk_quaternion_snapshot.h recomp/kernel/xk_matrix_snapshot.h
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -O3 -funroll-loops -ffp-contract=off
 ifeq ($(XV_NATIVE_MATRIX_NEON),1)
 $(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -DXV_NATIVE_MATRIX_NEON

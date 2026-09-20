@@ -134,3 +134,59 @@ artifact directories. Generated original code stays private. Reproduction:
 python tools/test_quaternion_snapshot.py --xbe OWNED_XBE \
   --manifest OWNED_MANIFEST --out PRIVATE_DIRECTORY
 ```
+
+
+## Combined marker-record prototype
+
+`xk_marker_snapshot.h` now computes the `A1F5F..A1F9A` quaternion-plus-matrix
+segment from one owned packet. It produces the two 52-byte transforms, node
+index, final 32 bytes of guest call-stack spills and exact continuation context.
+The caller retains destination bytes 2..3. Guest addresses retained in the
+packet/context are used only to reproduce register and spill values, never to
+fetch inputs. Filtering, remapping selection and the optional later sign flip
+remain outside this segment.
+
+The shared matrix arithmetic was extracted into `xk_matrix_snapshot.h`. The
+existing matrix wrapper retains its guards, layout checks, capture, NEON
+selection, counters, publication and return handling. Marker computation uses
+the scalar snapshot path. Enabling that prototype alongside NEON requires its
+own admission/behavior qualification; the ARM marker test uses the scalar path.
+
+Validation after this extraction:
+
+- 1,024 marker fixtures under ASan/UBSan: signed node indices, nonzero upper
+  register bits, exceptional floats, all rounding modes and x87 TOPs. Candidate
+  equals the existing native path in complete context, all 4 MiB of guest
+  memory and native FP status. The independently lifted original additionally
+  matches context/output using the existing arithmetic-NaN normalization.
+- Existing leaf fixture: 120,000 original/native comparisons and another
+  120,000 disabled/fallback comparisons, including exact in-place and physical
+  aliases and rejected layouts. Its host microbenchmark is not hardware evidence.
+- 256 VitaSDK-linked ARM current/snapshot cases: complete context, 2 MiB arena
+  and FPSCR controls/sticky exceptions, including FZ/DN and rounding variations.
+  Firmware copies are modeled; this is arithmetic validation, not Vita3K testing.
+
+The first host check caught an unnecessary ADD flag publication. The admitted
+lift leaves that ADD's flags dead and retains the preceding IMUL flag state;
+the prototype now preserves that representation. Any future hook must validate
+its emitted continuation rather than assuming this for another lift variant.
+The first ARM harness also inlined its dummy memory-copy bodies; putting those
+stubs in a separate translation unit restored the modeled copies and the checks
+passed. Neither failure was a hardware rendering result.
+
+Reproduce with `tools/test_marker_snapshot.py --xbe OWNED_XBE --manifest
+OWNED_MANIFEST --out PRIVATE_DIRECTORY`, then
+`tools/test_arm_marker_snapshot.py --reference PRIVATE_DIRECTORY/reference.c
+--output-dir PRIVATE_ARM_DIRECTORY --cc arm-vita-eabi-gcc`.
+Private receipts: `../marker-snapshot-tests.log`, `../marker-snapshot-arm.log`.
+
+Still required before deployment: a guarded capture/admission bridge proving
+private destination and stack mappings, disjoint input/output/scratch, safe
+source capture and publication; exact-image/emission hook gating; production
+worker tests exercising that bridge. The candidate is not enabled, no lock has
+been removed from gameplay, and perf.43 remains installed. This prototype
+combines one marker's two calculations; it is not yet a whole-list batch.
+
+The existing production-worker suite also passes 40 configurations × 600
+callbacks under ASan/UBSan after the matrix extraction. Receipt:
+`../marker-snapshot-workers.log`. The future capture bridge is not covered yet.
