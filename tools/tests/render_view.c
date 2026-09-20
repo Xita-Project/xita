@@ -19,7 +19,7 @@ uint64_t xk_os_monotonic_us(void) { static uint64_t t; return t += 100; }
 int main(void)
 {
     const uint32_t image_base = 0x10000u, image_size = 0x20000u;   /* 32 image pages */
-    setenv("XV_RENDER_VIEW", "1", 1); setenv("XV_RENDER_VIEW_LEARN_INTERVAL", "0", 1); setenv("XV_RENDER_VIEW_LEARN_PASSES", "2", 1);
+    setenv("XV_RENDER_VIEW", "1", 1); setenv("XV_RENDER_VIEW_LEARN_INTERVAL", "0", 1); setenv("XV_RENDER_VIEW_LEARN_PASSES", "2", 1); setenv("XV_RENDER_VIEW_LEARN_NOW", "1", 1);
     setenv("XV_RENDER_VIEW_SHADOW_PAGES", "16", 1);
     xk_mem_setup(image_base, image_size);
     uint32_t arena = xk_mem_arena_size();
