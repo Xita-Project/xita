@@ -49,6 +49,11 @@ after a full restart. Campaign logs confirm cache use; no FPS gain is establishe
 Further performance testing uses actual gameplay after restart, per the user's
 request, rather than automated off/on/off FPS comparisons.
 
+Perf.39 bundles the [shader-constant page fix](docs/constant-upload-pages-20260919.md)
+and [bounded shader diagnostic lookup](docs/shader-capture-lookup-20260919.md).
+It is installed and campaign gameplay was verified after restart. No sustained
+heavy-scene FPS gain is established by that startup/rendering check.
+
 Status legend: `[x]` done, `[~]` in progress or unverified on hardware, `[ ]` not started.
 
 [~] [Movement/collision attribution](docs/object-motion-profile-20260916.md):
