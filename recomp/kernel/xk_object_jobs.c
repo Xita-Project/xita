@@ -166,6 +166,12 @@ static unsigned math_wait_enabled;
 static int math_wait_override=-1;
 static unsigned point_private_enabled;
 static int point_private_override=-1;
+#ifndef XV_OBJECT_QUAT_DEFAULT
+#define XV_OBJECT_QUAT_DEFAULT 0
+#endif
+#if XV_OBJECT_QUAT_DEFAULT != 0 && XV_OBJECT_QUAT_DEFAULT != 1
+#error XV_OBJECT_QUAT_DEFAULT must be 0 or 1
+#endif
 #ifdef XV_OBJECT_QUAT_EXPERIMENT
 static unsigned quat_private_enabled;
 static int quat_private_override=-1;
@@ -1581,7 +1587,7 @@ static int initialize(void)
 #endif
 #ifdef XV_OBJECT_QUAT_EXPERIMENT
     const char *quat=getenv("XV_OBJECT_PRIVATE_QUATERNION");
-    quat_private_enabled=quat&&atoi(quat)!=0;
+    quat_private_enabled=quat?atoi(quat)!=0:XV_OBJECT_QUAT_DEFAULT;
 #endif
     const char *timed=getenv("XV_OBJECT_TIMED_WAIT");
     math_wait_enabled=timed&&atoi(timed)!=0;

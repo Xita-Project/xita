@@ -272,7 +272,11 @@ int main(void)
     const char *point=getenv("XV_OBJECT_PRIVATE_POINT");point_enabled=point&&atoi(point);
 #endif
 #if defined(XV_OBJECT_QUAT_EXPERIMENT) && !defined(XV_QUAT_CACHE)
-    const char *quat=getenv("XV_OBJECT_PRIVATE_QUATERNION");quat_enabled=quat&&atoi(quat);
+    const char *quat=getenv("XV_OBJECT_PRIVATE_QUATERNION");
+#ifndef XV_OBJECT_QUAT_DEFAULT
+#define XV_OBJECT_QUAT_DEFAULT 0
+#endif
+    quat_enabled=quat?atoi(quat)!=0:XV_OBJECT_QUAT_DEFAULT;
 #endif
     workers=(unsigned)atoi(getenv("XV_OBJECT_JOB_WORKERS"));
     release_enabled=atoi(getenv("XV_OBJECT_PRIVATE_MATH"));

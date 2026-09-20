@@ -2263,3 +2263,29 @@ $(BUILD)/clip-private.config: force-clip-private-config
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_clip_region.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_CLIP_PRIVATE=$(XV_CLIP_PRIVATE)
 $(RECOMP_BUILD)/kernel/xk_clip_region.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(BUILD)/clip-private.config
+
+# Explicit cumulative-build selection; ordinary private-quaternion default is off.
+XV_OBJECT_QUAT_DEFAULT ?= 0
+ifneq ($(words $(XV_OBJECT_QUAT_DEFAULT)),1)
+$(error XV_OBJECT_QUAT_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_OBJECT_QUAT_DEFAULT),0 1),$(XV_OBJECT_QUAT_DEFAULT))
+$(error XV_OBJECT_QUAT_DEFAULT must be 0 or 1)
+endif
+ifeq ($(XV_OBJECT_QUAT_DEFAULT),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_OBJECT_QUAT_BUILD),1:halo_ce_3925:1)
+$(error XV_OBJECT_QUAT_DEFAULT requires Halo CE object quaternion workers)
+endif
+ifeq ($(XV_QUAT_CACHE),1)
+$(error XV_OBJECT_QUAT_DEFAULT cannot bypass the shared quaternion cache)
+endif
+endif
+.PHONY: force-object-quat-default-config
+force-object-quat-default-config:
+$(RECOMP_BUILD)/object-quat-default.config: force-object-quat-default-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_QUAT_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_QUAT_DEFAULT=$(XV_OBJECT_QUAT_DEFAULT)
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-quat-default.config

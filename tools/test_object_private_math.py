@@ -31,9 +31,13 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
         for point in ("0", "1"):
             for timed in ("0", "1"):
                 for workers,private,fast in (('2','1','1'),('1','1','1'),('0','1','1'),('2','0','1'),('2','1','0')):
-                    result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30,
-                        env=dict(os.environ,XV_OBJECT_JOB_WORKERS=workers,XV_OBJECT_PRIVATE_MATH=private,
-                                 XV_OBJECT_LOCK_FAST_PATH=fast,XV_OBJECT_TIMED_WAIT=timed,XV_OBJECT_PRIVATE_POINT=point, XV_OBJECT_PRIVATE_QUATERNION=quat))
+                    env=dict(os.environ,XV_OBJECT_JOB_WORKERS=workers,XV_OBJECT_PRIVATE_MATH=private,
+                             XV_OBJECT_LOCK_FAST_PATH=fast,XV_OBJECT_TIMED_WAIT=timed,XV_OBJECT_PRIVATE_POINT=point, XV_OBJECT_PRIVATE_QUATERNION=quat)
+                    # With DEFAULT=1, exercise the real unset-environment startup
+                    # path as well as the explicit runtime disable.
+                    if os.environ.get('OBJECT_QUAT_TEST_ENV_UNSET')=='1' and quat=='1':
+                        env.pop('XV_OBJECT_PRIVATE_QUATERNION')
+                    result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30,env=env)
                     assert result.returncode==0,(result.returncode,result.stdout,result.stderr)
                     quat_rows=re.findall(r'\[object-quat-site\] lane (\d+) pc ([0-9A-F]+) count (\d+) private-input (\d+)',result.stderr)
                     if quat_profile and not quat_cache and workers!='0' and private==fast=='1':
