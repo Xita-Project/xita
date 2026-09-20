@@ -90,3 +90,47 @@ Receipts: `gameplay.log`, `gameplay.png`, `gameplay-status.json`,
 This short observation does not establish long-session stability or 20 FPS in
 heavy gameplay. The diagnostic flag should be omitted from the next actual
 optimization build after its caller evidence has been retained.
+
+
+## Snapshot arithmetic extraction
+
+`xk_quaternion_snapshot.h` now holds the existing arithmetic as an inline
+function over explicit captured inputs, constants, output and scratch. It still
+updates the caller-owned x87/register/flag state exactly as the leaf requires.
+It does not translate guest addresses, acquire a lock, allocate, or update
+shared counters. The existing `xk_math.c` wrapper retains admission, input
+capture, synchronization, cache policy, accounting and guest return handling.
+The Makefile explicitly tracks the new header dependency.
+
+This is the arithmetic prerequisite for the marker batch, not the completed
+batch and not a performance gain. There is no new deployment for this extraction;
+perf.43 remains the installed runtime. The capture/publication bridge still
+needs to establish the source-record/matrix ownership and continuation contract.
+
+Validation:
+
+- 4,096 original guest / native wrapper / snapshot cases under ASan/UBSan cover
+  four rounding modes, random and exceptional floats, changed constants, guest
+  context, 52-byte output and 24-byte spills. Snapshot/wrapper equality is exact,
+  including native FP status. Original/native arithmetic NaNs use the existing
+  payload-normalization contract. Guest mappings are null during the direct
+  snapshot call, proving that path does not read the guest arena or page table.
+- Production worker tests pass all 40 configurations with 600 callbacks each,
+  ASan/UBSan, compile-default quaternion selection, held-guard and owner-service
+  cases. This validates preserved existing ownership behavior; it does not prove
+  a future marker snapshot's ownership.
+- The VitaSDK-linked quaternion/cache suite passes 1,920 ARM cases across
+  rounding and FP controls against the independent original guest lift. These
+  are arithmetic correctness tests under Unicorn, not Vita3K or FPS comparisons.
+- A stale ARM harness initially failed to link because the two math units both
+  exported point-transform symbols. Renaming the baseline's two point symbols
+  fixed the harness. No runtime symbol behavior changed for that repair.
+
+Private receipts: `../quaternion-snapshot-tests.log`,
+`../quaternion-snapshot-workers.log`, `../quaternion-snapshot-arm.log` and their
+artifact directories. Generated original code stays private. Reproduction:
+
+```sh
+python tools/test_quaternion_snapshot.py --xbe OWNED_XBE \
+  --manifest OWNED_MANIFEST --out PRIVATE_DIRECTORY
+```

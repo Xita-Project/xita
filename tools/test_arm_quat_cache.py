@@ -48,6 +48,8 @@ void candidate_wrapper(xctx *c) { if(!xv_math_quaternion_matrix(c))original_quat
     baseline = directory / 'baseline.o'
     command1 = [cc, *flags, '-Dxv_math_quaternion_matrix=current_quaternion',
                 '-Dxv_math_matrix_multiply=current_matrix',
+                '-Dxv_math_point_transform=current_point',
+                '-Dxv_point_math_override=current_point_override',
                 '-Dxv_native_math_report=current_report', '-c',
                 str(ROOT/'recomp/kernel/xk_math.c'), '-o', str(baseline)]
     subprocess.run(command1, check=True)
