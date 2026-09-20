@@ -415,3 +415,21 @@ each, i.e. the draw submission path: draw-HLE is ≈ 9 ms) and `54010`. The
 scene routine's own 9 ms body has no finer scope yet. Draw-HLE stage costs
 (perf51) remain: streams 3 (post-trust), textures 2.4, indices 1.7, state 1.2,
 program 0.8.
+
+## 19. Tick/scene overlap: what a snapshot would have to cover (static inventory)
+
+Over the perf53 generated code (`capture-trust-hardware/build/recomp`):
+scene closure (`BCB30`) 1,738 functions, tick closure (`FA920`) 1,209,
+849 shared. Absolute guest globals the scene reads that the tick writes: 25,
+on nine 4 KiB pages (`0x2E3000`–`0x2E4000` game/object globals, `0x2FA000`
+and `0x2FC000` object table and cluster lists, `0x2D2000` visitation epoch,
+`0x276000`/`0x270000`, `0x2E8000`, `0x39C000` structure BSP word); 22 of them
+are also written by the scene itself. Almost all other shared traffic goes
+through pointers from the object table (`0x2FC6AC`) into object records, so
+an overlap must snapshot the object records (Halo's game-state region, several
+MB) plus effects/particles/decals lists at the tick boundary; the renderer
+then reads the snapshot, and the 22 scene-written globals need private
+copies. Snapshot exchange primitive: `xk_frame_snapshot.c` (prototype, not
+wired). Cost bound: a full game-state copy per frame is several ms on this
+CPU; a dirty-region scheme needs write tracking the recompiler does not emit
+today. This is the multi-week item behind 20+ FPS.
