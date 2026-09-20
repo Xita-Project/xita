@@ -21,6 +21,17 @@ static int quat_constants_original=1;
 static unsigned quat_ready,quat_done,quat_service_ready,quat_service_done;
 static unsigned private_ready,private_done,service_ready,service_done;
 static pthread_t owner_thread;
+/* Owner-lane mode: the owner thread also executes callbacks, so worker-only
+ * admissions decline there and cross-lane rendezvous (which assume a free,
+ * servicing owner) are skipped. Standard mode keeps full coverage. */
+static int owner_lane_mode;
+static int on_owner(void) { return pthread_equal(pthread_self(),owner_thread); }
+static unsigned lane_commits;
+/* Quiescent service raised from any lane, including the owner lane itself:
+ * a worker parks the batch and waits for the owner; the owner lane must park
+ * the workers, run it inline and resume them. */
+static void lane_audio_commit(xctx *c)
+{ assert(on_owner());c->r[4]+=4;__atomic_fetch_add(&lane_commits,1,__ATOMIC_RELAXED); }
 static pthread_barrier_t concurrent;
 int xd3d_object_jobs_ready(void) {return 1;}
 int xk_object_io_step(void) {assert(0);return 0;}
@@ -76,8 +87,8 @@ static void check_admission(xctx *c,unsigned id)
     /* Use a mapped span below the entry SP for the captured worklist. */
     uint32_t entry_sp=c->r[4];c->r[4]-=2048;
     int snapshot=xv_object_hierarchy_suspend(c,token,out,52);
-    assert(!!snapshot==(release_enabled&&fast_path&&workers!=0));
-    if(snapshot&&workers==2&&id<2) {
+    assert(!!snapshot==(release_enabled&&fast_path&&workers!=0&&!on_owner()));
+    if(snapshot&&workers==2&&id<2&&!owner_lane_mode) {
         int result=pthread_barrier_wait(&concurrent);
         assert(!result||result==PTHREAD_BARRIER_SERIAL_THREAD);
     }
@@ -92,9 +103,9 @@ static void check_admission(xctx *c,unsigned id)
         uint32_t entry_sp=c->r[4];
         c->r[4]=base+64;assert(!xv_object_world_query_release(c));c->r[4]=entry_sp;
         int unlocked=xv_object_world_query_release(c);
-        assert(!!unlocked==(fast_path&&workers!=0));
+        assert(!!unlocked==(fast_path&&workers!=0&&!on_owner()));
         assert(xv_object_math_locked_==token);
-        if(unlocked&&workers==2&&id<2) {
+        if(unlocked&&workers==2&&id<2&&!owner_lane_mode) {
             /* Both lanes must reach this point without the guard. */
             int result=pthread_barrier_wait(&concurrent);
             assert(!result||result==PTHREAD_BARRIER_SERIAL_THREAD);
@@ -104,11 +115,11 @@ static void check_admission(xctx *c,unsigned id)
     }
 #endif
     int released=xv_object_math_release_private(c,&xv_object_math_locked_,0,out,12,0,0);
-    assert(released==(release_enabled&&fast_path&&workers!=0));
+    assert(released==(release_enabled&&fast_path&&workers!=0&&!on_owner()));
     assert(xv_object_math_locked_==(released?0:token));
     /* This rendezvous would deadlock with either lane still holding the guard.
      * Limit it to the first pair: tail batches may contain only one callback. */
-    if(released&&workers==2&&id<2) {
+    if(released&&workers==2&&id<2&&!owner_lane_mode) {
         int result=pthread_barrier_wait(&concurrent);
         assert(!result||result==PTHREAD_BARRIER_SERIAL_THREAD);
     }
@@ -172,7 +183,7 @@ static void check_private_point(xctx *c,unsigned id)
     c->r[4]=area+512;c->r[0]=area+256;c->r[1]=area+128;c->r[2]=area+192;
     memcpy(X_G(c->r[1]),X_G(0x30000),52);
     memcpy(X_G(c->r[2]),X_G(0x40000+id*16),12);
-    int admitted=point_enabled&&fast_path&&workers;
+    int admitted=point_enabled&&fast_path&&workers&&!on_owner();
     assert(!!xv_object_private_point(c)==admitted);
     xctx copy=*c;assert(!xv_object_private_point(&copy));
     { XV_OBJECT_MATH_GUARD();assert(!xv_object_private_point(c)); }
@@ -200,7 +211,7 @@ static void check_private_point(xctx *c,unsigned id)
         *c=before;
     }
     memcpy(X_G(c->r[1]),X_G(0x30000),52);
-    if(admitted&&workers==2&&id<2) {
+    if(admitted&&workers==2&&id<2&&!owner_lane_mode) {
         /* Both lanes must finish the guarded reference/setup before one holds
          * the guard for the independent-execution proof. */
         int barrier=pthread_barrier_wait(&concurrent);
@@ -241,7 +252,7 @@ static void check_private_quaternion(xctx *c,unsigned id)
     uint32_t area=(c->r[4]&~4095u)+512;
     c->r[4]=area+512;c->r[1]=area+128;c->r[2]=area+256;
     memcpy(X_G(c->r[1]),X_G(0x40000+id*16),16);
-    int admitted=quat_enabled&&quat_constants_original&&fast_path&&workers;
+    int admitted=quat_enabled&&quat_constants_original&&fast_path&&workers&&!on_owner();
     assert(!!xv_object_private_quaternion(c)==admitted);
     xctx copy=*c;assert(!xv_object_private_quaternion(&copy));
     { XV_OBJECT_MATH_GUARD();assert(!xv_object_private_quaternion(c)); }
@@ -272,7 +283,7 @@ static void check_private_quaternion(xctx *c,unsigned id)
     }
     assert(!fesetround(FE_TONEAREST));
     memcpy(X_G(c->r[1]),X_G(0x40000+id*16),16);
-    if(admitted&&workers==2&&id<2) {
+    if(admitted&&workers==2&&id<2&&!owner_lane_mode) {
         int barrier=pthread_barrier_wait(&concurrent);
         assert(!barrier||barrier==PTHREAD_BARRIER_SERIAL_THREAD);
         if(id==0) {
@@ -304,6 +315,10 @@ void f_0008FB70(xctx *c)
 {
     unsigned id=c->r[1];assert(id<300);
     check_admission(c,id);
+    if(owner_lane_mode && id%23==0) {
+        XV_OBJECT_MATH_GUARD();X_M32(c->r[4])=0x291EF;
+        xv_object_job_hle(c,0x193C1B,lane_audio_commit);c->r[4]-=4;
+    }
     compare_helper(c,0,id); /* Both first lanes exercise cold guarded config. */
     check_private_point(c,id);
     for(unsigned kind=0;kind<4;kind++)compare_helper(c,kind,id);
@@ -316,6 +331,7 @@ void f_0008FB70(xctx *c)
 int main(void)
 {
     owner_thread=pthread_self();
+    { const char *e=getenv("XV_OBJECT_OWNER_LANE");owner_lane_mode=e&&atoi(e)!=0; }
 #ifdef XV_OBJECT_POINT_EXPERIMENT
     const char *point=getenv("XV_OBJECT_PRIVATE_POINT");point_enabled=point&&atoi(point);
 #endif
@@ -383,6 +399,7 @@ int main(void)
         xv_object_jobs_finish(&c);
     }
     for(unsigned id=0;id<300;id++)assert(completed[id]==2);
+    if(owner_lane_mode)assert(lane_commits==2*14);
     xv_object_math_report_check();
 #ifdef TEST_HIERARCHY_INTEGRATION
     xv_object_hierarchy_report(2);xv_object_hierarchy_report(0);

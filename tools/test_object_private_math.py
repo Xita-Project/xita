@@ -17,6 +17,7 @@ quat_cache=os.environ.get('OBJECT_QUAT_CACHE_TEST_BUILD','0')=='1'
 constants_original=os.environ.get('OBJECT_QUAT_CONSTANT_MODE','original')=='original'
 quat_profile=os.environ.get('OBJECT_QUAT_PROFILE_TEST_BUILD','0')=='1'
 query_unlock=os.environ.get('OBJECT_QUERY_UNLOCK_TEST_BUILD','0')=='1'
+owner_lane=os.environ.get('OBJECT_OWNER_LANE_TEST_BUILD','0')=='1'
 with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as directory:
     binary=Path(directory)/'test'
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11',
@@ -27,6 +28,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
         *(['-DXV_OBJECT_POINT_EXPERIMENT'] if point_build else []),
         *(['-DXV_OBJECT_QUAT_PROFILE'] if quat_profile else []),
         *(['-DXV_QUERY_UNLOCK=1','-DXV_QUERY_UNLOCK_DEFAULT=1'] if query_unlock else []),
+        *(['-DXV_OBJECT_OWNER_LANE=1','-DXV_OBJECT_OWNER_LANE_DEFAULT=1','-DXV_OBJECT_JOB_SPLIT=1','-DXV_OBJECT_JOB_SPLIT_DEFAULT=1'] if owner_lane else []),
         *(['-DXV_OBJECT_QUAT_EXPERIMENT'] if quat_build else []),
         *(['-DXV_QUAT_CACHE'] if quat_cache else []),
         '-I'+str(root/'recomp'),*shlex.split(os.environ.get('OBJECT_JOB_TEST_FLAGS','')),
@@ -39,7 +41,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
         for point in ("0", "1"):
             for timed in ("0", "1"):
                 for workers,private,fast in (('2','1','1'),('1','1','1'),('0','1','1'),('2','0','1'),('2','1','0')):
-                    env=dict(os.environ,XV_OBJECT_JOB_WORKERS=workers,XV_OBJECT_PRIVATE_MATH=private,
+                    env=dict(os.environ,XV_OBJECT_JOB_WORKERS=workers,XV_OBJECT_PRIVATE_MATH=private,XV_OBJECT_OWNER_LANE='1' if owner_lane else '0',
                              XV_OBJECT_LOCK_FAST_PATH=fast,XV_OBJECT_TIMED_WAIT=timed,XV_OBJECT_PRIVATE_POINT=point, XV_OBJECT_PRIVATE_QUATERNION=quat)
                     # With DEFAULT=1, exercise the real unset-environment startup
                     # path as well as the explicit runtime disable.
@@ -47,6 +49,12 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
                         env.pop('XV_OBJECT_PRIVATE_QUATERNION')
                     result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30,env=env)
                     assert result.returncode==0,(result.returncode,result.stdout,result.stderr)
+                    if owner_lane:
+                        ol=re.findall(r'\[owner-lane\] \d+ frames enabled (\d+) batches (\d+) jobs (\d+) pause-breaks (\d+) lock-spins (\d+) quiesce (\d+)',result.stderr)
+                        assert len(ol)==2,ol
+                        jobs=int(ol[0][2]);batches=int(ol[0][1])
+                        assert (jobs>0)==(workers=='2'),(ol,workers)
+                        print(f"owner lane: batches={batches} jobs={jobs} breaks={ol[0][3]} spins={ol[0][4]} quiesce={ol[0][5]}",flush=True)
                     if query_unlock:
                         qu=re.findall(r'\[query-unlock\] \d+ frames enabled (\d+) idle/caller/nested/state/disabled/profile/pause/stack/ready ([0-9/]+); unlocked (\d+)/(\d+) calls',result.stderr)
                         assert len(qu)==2,qu

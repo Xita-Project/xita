@@ -1720,6 +1720,29 @@ $(RECOMP_BUILD)/job-split.config: force-job-split-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/job-split.config
+# Owner participation in two-worker object batches (research trial).
+XV_OBJECT_OWNER_LANE ?= 0
+XV_OBJECT_OWNER_LANE_DEFAULT ?= 0
+ifneq ($(filter $(XV_OBJECT_OWNER_LANE),0 1),$(XV_OBJECT_OWNER_LANE))
+$(error XV_OBJECT_OWNER_LANE must be 0 or 1)
+endif
+ifneq ($(filter $(XV_OBJECT_OWNER_LANE_DEFAULT),0 1),$(XV_OBJECT_OWNER_LANE_DEFAULT))
+$(error XV_OBJECT_OWNER_LANE_DEFAULT must be 0 or 1)
+endif
+ifeq ($(XV_OBJECT_OWNER_LANE),1)
+ifneq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
+$(error XV_OBJECT_OWNER_LANE requires XV_EXPERIMENTAL_OBJECT_JOBS=1)
+endif
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_OWNER_LANE=1 -DXV_OBJECT_OWNER_LANE_DEFAULT=$(XV_OBJECT_OWNER_LANE_DEFAULT)
+endif
+.PHONY: force-owner-lane-config
+force-owner-lane-config:
+$(RECOMP_BUILD)/owner-lane.config: force-owner-lane-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_OWNER_LANE):$(XV_OBJECT_OWNER_LANE_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/owner-lane.config
 XV_QUERY_REUSE_PROFILE ?= 0
 ifneq ($(words $(XV_QUERY_REUSE_PROFILE)),1)
 $(error XV_QUERY_REUSE_PROFILE must be 0 or 1)

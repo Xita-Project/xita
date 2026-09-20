@@ -754,6 +754,88 @@ static void service_audio_commit(xctx *c,xv_fn_t fn)
     unsigned startup=X_M32(c->r[4])==0x28BB6u;
     fn(c);audio_commits++;audio_start_commits+=startup;
 }
+/* One owner scan: service requests, run quiescent services when every worker
+ * lane is quiet, and (when completed is non-NULL) consume completions. The
+ * owner lane calls this without blocking between its own jobs and while it
+ * spins for the shared guard; allow_quiescent=0 defers quiescent work while
+ * the owner itself is waiting to quiesce for its own service. */
+static void service_scan(unsigned *completed,int allow_quiescent)
+{
+    /* Consume the coalesced publication before scanning worker predicates.
+     * A release-only store allows the following loads to happen before the
+     * reset is visible. A worker can then publish after its state was read,
+     * see the old notice=1 and omit its signal: all lanes sleep forever.
+     * The exchange acquires even coalesced notifications and orders the
+     * reset before the scan. Notifications after it post a new wake. */
+    (void)__atomic_exchange_n(&owner_notice,0,__ATOMIC_SEQ_CST);
+    unsigned yielding=0,quiescent=0,quiet=1;
+    for(unsigned i=0;i<active_workers;i++) {
+        unsigned state=__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE);
+        if(state==0)quiet=0;
+        else if(state==1) {
+            if(needs_quiescence(service_address[i])) {
+                quiescent++;yielding+=service_address[i]==0x1D6640u;continue;
+            }
+#ifdef XV_TYPED_CLUSTER_QUERY
+            xv_cluster_runtime_invalidate(service_address[i]);
+#endif
+            service_fn[i](&contexts[i]);
+            if(service_address[i]==0x184A20u)resource_queries++;else services++;
+            if(__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE))
+                __atomic_store_n(&service_state[i],4,__ATOMIC_RELEASE);
+            else {reply_worker(i);quiet=0;}
+        } else if(state==2) {
+            if(completed) { __atomic_store_n(&service_state[i],3,__ATOMIC_RELEASE);(*completed)++; }
+        }
+    }
+    if(quiescent&&quiet&&allow_quiescent) {
+#ifdef XV_TYPED_CLUSTER_QUERY
+        xv_cluster_runtime_invalidate(yielding?0x1d6640u:0xffffffffu);
+#endif
+        /* Every lane is parked or completed. Run only the original cache
+         * file fiber, preserving its stack, TLS, real reads and APCs. */
+        extern int xk_object_io_step(void);
+        if(yielding&&xk_object_io_step()<0)abort();
+        for(unsigned i=0;i<active_workers;i++)
+            if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==1) {
+                if(service_address[i]==0x1D6640u) {
+                    contexts[i].r[0]=STATUS_SUCCESS;contexts[i].r[4]+=4;io_yields++;
+                } else if(service_address[i]==0x193E27u||service_address[i]==0x19384Fu||service_address[i]==0x193884u) {
+                    /* Preserve real packet completion and original callback
+                     * execution, with every other object lane parked. */
+                    service_audio(&contexts[i],service_fn[i],service_address[i]);
+                } else if(service_address[i]==0x193D4Fu) {
+                    /* Original stream volume update; no guest callbacks. */
+                    service_fn[i](&contexts[i]);audio_volumes++;
+                } else if(service_address[i]==0x193C1Bu) {
+                    /* Keep the existing deferred-settings handler on its
+                     * owner, including its one-argument return convention. */
+                    service_audio_commit(&contexts[i],service_fn[i]);
+                } else if(service_address[i]==0x19C5FFu) {
+                    /* Retire the voice's reporting state on the audio
+                     * owner; the existing handler dispatches no callbacks. */
+                    service_fn[i](&contexts[i]);audio_stops++;
+                } else if(sound_parameter_return(service_address[i])) {
+                    service_fn[i](&contexts[i]);
+                    if(service_address[i]==0x194470u)audio_frequencies++;
+                    else audio_parameters++;
+                } else {
+                    /* Header fixup or vertex-storage pointer lookup only;
+                     * no allocation, draw submission or scheduler entry.
+                     * The guest impact transaction holds the shared guard
+                     * across its allocation, pointer lookup and writes. */
+                    service_fn[i](&contexts[i]);
+                    if(service_address[i]==0x184AB0u)resource_registers++;
+                    else vertex_locks++;
+                }
+                __atomic_store_n(&service_state[i],4,__ATOMIC_RELEASE);
+            }
+        __atomic_store_n(&pause_workers,0,__ATOMIC_RELEASE);
+        for(unsigned i=0;i<active_workers;i++)
+            if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==4)reply_worker(i);
+    }
+
+}
 static void service_owner(void)
 {
     unsigned completed=0;
@@ -763,82 +845,46 @@ static void service_owner(void)
 #else
         wait_sem(&owner_wake);
 #endif
-        /* Consume the coalesced publication before scanning worker predicates.
-         * A release-only store allows the following loads to happen before the
-         * reset is visible. A worker can then publish after its state was read,
-         * see the old notice=1 and omit its signal: all lanes sleep forever.
-         * The exchange acquires even coalesced notifications and orders the
-         * reset before the scan. Notifications after it post a new wake. */
-        (void)__atomic_exchange_n(&owner_notice,0,__ATOMIC_SEQ_CST);
-        unsigned yielding=0,quiescent=0,quiet=1;
-        for(unsigned i=0;i<active_workers;i++) {
-            unsigned state=__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE);
-            if(state==0)quiet=0;
-            else if(state==1) {
-                if(needs_quiescence(service_address[i])) {
-                    quiescent++;yielding+=service_address[i]==0x1D6640u;continue;
-                }
-#ifdef XV_TYPED_CLUSTER_QUERY
-                xv_cluster_runtime_invalidate(service_address[i]);
-#endif
-                service_fn[i](&contexts[i]);
-                if(service_address[i]==0x184A20u)resource_queries++;else services++;
-                if(__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE))
-                    __atomic_store_n(&service_state[i],4,__ATOMIC_RELEASE);
-                else {reply_worker(i);quiet=0;}
-            } else if(state==2) {
-                __atomic_store_n(&service_state[i],3,__ATOMIC_RELEASE);completed++;
-            }
-        }
-        if(quiescent&&quiet) {
-#ifdef XV_TYPED_CLUSTER_QUERY
-            xv_cluster_runtime_invalidate(yielding?0x1d6640u:0xffffffffu);
-#endif
-            /* Every lane is parked or completed. Run only the original cache
-             * file fiber, preserving its stack, TLS, real reads and APCs. */
-            extern int xk_object_io_step(void);
-            if(yielding&&xk_object_io_step()<0)abort();
-            for(unsigned i=0;i<active_workers;i++)
-                if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==1) {
-                    if(service_address[i]==0x1D6640u) {
-                        contexts[i].r[0]=STATUS_SUCCESS;contexts[i].r[4]+=4;io_yields++;
-                    } else if(service_address[i]==0x193E27u||service_address[i]==0x19384Fu||service_address[i]==0x193884u) {
-                        /* Preserve real packet completion and original callback
-                         * execution, with every other object lane parked. */
-                        service_audio(&contexts[i],service_fn[i],service_address[i]);
-                    } else if(service_address[i]==0x193D4Fu) {
-                        /* Original stream volume update; no guest callbacks. */
-                        service_fn[i](&contexts[i]);audio_volumes++;
-                    } else if(service_address[i]==0x193C1Bu) {
-                        /* Keep the existing deferred-settings handler on its
-                         * owner, including its one-argument return convention. */
-                        service_audio_commit(&contexts[i],service_fn[i]);
-                    } else if(service_address[i]==0x19C5FFu) {
-                        /* Retire the voice's reporting state on the audio
-                         * owner; the existing handler dispatches no callbacks. */
-                        service_fn[i](&contexts[i]);audio_stops++;
-                    } else if(sound_parameter_return(service_address[i])) {
-                        service_fn[i](&contexts[i]);
-                        if(service_address[i]==0x194470u)audio_frequencies++;
-                        else audio_parameters++;
-                    } else {
-                        /* Header fixup or vertex-storage pointer lookup only;
-                         * no allocation, draw submission or scheduler entry.
-                         * The guest impact transaction holds the shared guard
-                         * across its allocation, pointer lookup and writes. */
-                        service_fn[i](&contexts[i]);
-                        if(service_address[i]==0x184AB0u)resource_registers++;
-                        else vertex_locks++;
-                    }
-                    __atomic_store_n(&service_state[i],4,__ATOMIC_RELEASE);
-                }
-            __atomic_store_n(&pause_workers,0,__ATOMIC_RELEASE);
-            for(unsigned i=0;i<active_workers;i++)
-                if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==4)reply_worker(i);
-        }
+        service_scan(&completed,1);
     }
 }
 
+#if XV_OBJECT_OWNER_LANE
+/* Owner participation: during a two-worker batch the guest owner core only
+ * joins and services requests. With this option the owner also executes
+ * light-end jobs on lane 2 between service scans, never blocks on the shared
+ * guard (it scans for requests while spinning, so a parked worker holding
+ * the guard cannot deadlock it), stops taking jobs once a quiescent park is
+ * pending, and quiesces the workers itself before a service of its own.
+ * Owner-lane jobs use the plain owner guard path, so the worker-only private
+ * overlaps (query unlock, typed query, hierarchy) decline on lane 2. */
+#ifndef XV_OBJECT_OWNER_LANE_DEFAULT
+#define XV_OBJECT_OWNER_LANE_DEFAULT 0
+#endif
+static unsigned owner_lane_enabled,owner_in_job,owner_lane_jobs,owner_lane_batches,owner_lane_breaks,owner_lane_spins,owner_lane_quiesce;
+static int owner_lane_active(void)
+{ return owner_lane_enabled&&active_workers==WORKERS&&__atomic_load_n(&running,__ATOMIC_ACQUIRE); }
+static void owner_lane_report(unsigned frames)
+{
+    XK_LOG("[owner-lane] %u frames enabled %u batches %u jobs %u pause-breaks %u lock-spins %u quiesce %u; owner runs light-end jobs between service scans\n",
+        frames,owner_lane_enabled,owner_lane_batches,owner_lane_jobs,owner_lane_breaks,owner_lane_spins,owner_lane_quiesce);
+    owner_lane_batches=owner_lane_jobs=owner_lane_breaks=owner_lane_spins=owner_lane_quiesce=0;
+}
+static void owner_lane_delay(void)
+{
+#ifdef __vita__
+    sceKernelDelayThread(50);
+#else
+    struct timespec delay={0,50000};nanosleep(&delay,NULL);
+#endif
+}
+static int workers_quiet(void)
+{
+    for(unsigned i=0;i<active_workers;i++)
+        if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==0)return 0;
+    return 1;
+}
+#endif
 /* Keep the captured return address at the guarded caller, including LTO builds. */
 /* Owner identity is checked by the native caller before this idle query. */
 int xv_object_jobs_native_idle(void)
@@ -903,6 +949,19 @@ __attribute__((noinline)) int xv_object_math_lock(void)
         struct timespec delay={0,50000};nanosleep(&delay,NULL);
 #endif
     }
+#if XV_OBJECT_OWNER_LANE
+    if(owner_in_job) {
+        /* Never block: a worker holding the guard may be parked waiting for
+         * an owner service. Serve requests while spinning. */
+        while(xv_object_mutex_try(&math_mutex)) {
+            owner_lane_spins++;
+            service_scan(NULL,1);
+            owner_lane_delay();
+        }
+        math_stats[2].acquired++;
+        return 1;
+    }
+#endif
     xv_object_mutex_wait(&math_mutex);
     math_stats[2].acquired++;
     return 1;
@@ -1710,10 +1769,10 @@ static int split_take(unsigned lane,unsigned *index)
     for(;;) {
         unsigned front=v&0xFFFFu,back=v>>16;
         if(front>=back)return 0;
-        unsigned want=lane==1?v-0x10000u:v+1u;
+        unsigned want=lane!=0?v-0x10000u:v+1u;
         if(__atomic_compare_exchange_n(&split_cursor,&v,want,1,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)) {
-            *index=job_order[lane==1?back-1u:front];
-            if(lane==1)split_back[lane]++;else split_front[lane]++;
+            *index=job_order[lane!=0?back-1u:front];
+            if(lane!=0)split_back[lane]++;else split_front[lane]++;
             return 1;
         }
     }
@@ -1741,12 +1800,10 @@ static int take_job(unsigned lane,unsigned *index)
     if(i>=count)return 0;
     *index=i;return 1;
 }
-static void execute(unsigned lane)
+static void run_job(unsigned lane,unsigned i)
 {
     extern void f_0008FB70(xctx *);
-    unsigned i;
-    while(take_job(lane,&i)) {
-        if(lane<active_workers)park_worker(lane);
+    {
         xctx *c=&contexts[lane]; *c=jobs[i];
         active_objects[lane]=c->r[1];
         c->r[4]=stacks[lane]+STACK_BYTES-256;
@@ -1773,6 +1830,49 @@ static void execute(unsigned lane)
             xv_object_job_stop(c,0x8FB70u,"guest stack contract");
     }
 }
+static void execute(unsigned lane)
+{
+    unsigned i;
+    while(take_job(lane,&i)) {
+        if(lane<active_workers)park_worker(lane);
+        run_job(lane,i);
+    }
+}
+#if XV_OBJECT_OWNER_LANE
+static void owner_participate(void)
+{
+    owner_lane_batches++;
+    for(;;) {
+        service_scan(NULL,1);
+        if(__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE)) { owner_lane_breaks++;return; }
+        unsigned i;
+        if(!take_job(2,&i))return;
+        owner_in_job=1;run_job(2,i);owner_in_job=0;owner_lane_jobs++;
+    }
+}
+/* The owner's own kernel service inside a lane-2 job: park every worker first
+ * (servicing their non-quiescent requests meanwhile), run it, then let a
+ * normal scan run any pending worker quiescent services and resume all. */
+static void owner_quiesce_begin(void)
+{
+    owner_lane_quiesce++;
+    __atomic_store_n(&pause_workers,1,__ATOMIC_RELEASE);
+    for(;;) {
+        service_scan(NULL,0);
+        if(workers_quiet())return;
+        owner_lane_delay();
+    }
+}
+static void owner_quiesce_end(void)
+{
+    service_scan(NULL,1);
+    if(__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&pause_workers,0,__ATOMIC_RELEASE);
+        for(unsigned i=0;i<active_workers;i++)
+            if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==4)reply_worker(i);
+    }
+}
+#endif
 #ifdef __vita__
 static int worker(SceSize size,void *arg)
 {
@@ -1885,6 +1985,11 @@ static int initialize(void)
     const char *unlock=getenv("XV_QUERY_UNLOCK");
     query_unlock_enabled=unlock?atoi(unlock)!=0:XV_QUERY_UNLOCK_DEFAULT;
     XK_LOG("[query-unlock] process-start %u; world-route 88110 closure released from the actor guard when admitted\n",query_unlock_enabled);
+#endif
+#if XV_OBJECT_OWNER_LANE
+    const char *owner_lane=getenv("XV_OBJECT_OWNER_LANE");
+    owner_lane_enabled=owner_lane?atoi(owner_lane)!=0:XV_OBJECT_OWNER_LANE_DEFAULT;
+    XK_LOG("[owner-lane] process-start %u; owner executes light-end object jobs during two-worker batches\n",owner_lane_enabled);
 #endif
 #if XV_OBJECT_JOB_SPLIT
     const char *split=getenv("XV_OBJECT_JOB_SPLIT");
@@ -2009,6 +2114,9 @@ void xv_object_jobs_join(void)
     /* The owner must stay available: running a callback here could block on a
      * mutex held by a worker awaiting its kernel service and deadlock the batch.
      * Main-thread work outside this joined object pass remains on core 2. */
+#if XV_OBJECT_OWNER_LANE
+    if(owner_lane_active())owner_participate();
+#endif
     if(active_workers)service_owner();else execute(2);
     for(unsigned i=0;i<active_workers;i++) {
 #ifdef __vita__
@@ -2114,6 +2222,9 @@ void xv_object_jobs_report(unsigned frames)
 #endif
 #if XV_OBJECT_JOB_SPLIT
     split_report(frames);
+#endif
+#if XV_OBJECT_OWNER_LANE
+    owner_lane_report(frames);
 #endif
     XK_LOG("[object-wait] timed %u attempts %u/%u acquired %u/%u timeouts %u/%u\n",
         math_wait_override<0?math_wait_enabled:(unsigned)math_wait_override,
@@ -2289,6 +2400,26 @@ void xv_object_job_hle(xctx *c,unsigned address,xv_fn_t fn)
         (X_M32(c->r[4]+4)!=0x32B60u&&X_M32(c->r[4]+4)!=0x3268Au&&
          X_M32(c->r[4]+4)!=0x17A804u)))
         xv_object_job_stop(c,address,"yield outside audited cache wait");
+#if XV_OBJECT_OWNER_LANE
+    if(c==&contexts[2]&&active_workers&&owner_in_job) {
+        int quiesce=needs_quiescence(address);
+        unsigned saved=owner_in_job;owner_in_job=0;
+        if(quiesce)owner_quiesce_begin();
+        if(address==0x1D6640u) {
+            extern int xk_object_io_step(void);
+            if(xk_object_io_step()<0)abort();
+            c->r[0]=STATUS_SUCCESS;c->r[4]+=4;io_yields++;
+        } else if(address==0x193E27u||address==0x19384Fu||address==0x193884u)service_audio(c,fn,address);
+        else if(address==0x193D4Fu){fn(c);audio_volumes++;}
+        else if(address==0x193C1Bu)service_audio_commit(c,fn);
+        else if(address==0x19C5FFu){fn(c);audio_stops++;}
+        else if(parameter_return){fn(c);if(address==0x194470u)audio_frequencies++;else audio_parameters++;}
+        else {fn(c);if(address==0x184A20u)resource_queries++;else if(address==0x184AB0u)resource_registers++;else if(address==0x1858D0u)vertex_locks++;else services++;}
+        if(quiesce)owner_quiesce_end();
+        owner_in_job=saved;
+        return;
+    }
+#endif
     if(c==&contexts[2]&&!active_workers) {
         if(address==0x1D6640u) {
             extern int xk_object_io_step(void);
