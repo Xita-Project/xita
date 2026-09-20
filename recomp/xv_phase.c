@@ -96,7 +96,8 @@ void xv_phase_init(void)
 #endif
     const char *e = getenv("XV_PHASE_TIMING");
     target_count = &xv_phase_target_count ? xv_phase_target_count : 0;
-    xv_phase_enabled = (e ? atoi(e) != 0 : XV_PHASE_TIMING_DEFAULT) && xv_phase_targets &&
+    /* Default 2 forces the diagnostic on even when the device config pins it off. */
+    xv_phase_enabled = (XV_PHASE_TIMING_DEFAULT == 2 || (e ? atoi(e) != 0 : XV_PHASE_TIMING_DEFAULT)) && xv_phase_targets &&
         target_count && target_count <= XV_PHASE_MAX_TARGETS;
     __atomic_store_n(&capture_available, !xv_phase_enabled && xv_phase_targets &&
         target_count && target_count <= XV_PHASE_MAX_TARGETS, __ATOMIC_RELEASE);

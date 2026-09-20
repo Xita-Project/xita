@@ -1759,8 +1759,8 @@ $(RECOMP_BUILD)/object-workers.config: force-object-workers-config
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o $(RECOMP_BUILD)/kernel/xk_worker_query.o $(RECOMP_BUILD)/kernel/xk_math.o: $(RECOMP_BUILD)/object-workers.config
 # Guest phase timing on from process start (diagnostic; disables object jobs).
 XV_PHASE_TIMING_DEFAULT ?= 0
-ifneq ($(filter $(XV_PHASE_TIMING_DEFAULT),0 1),$(XV_PHASE_TIMING_DEFAULT))
-$(error XV_PHASE_TIMING_DEFAULT must be 0 or 1)
+ifneq ($(filter $(XV_PHASE_TIMING_DEFAULT),0 1 2),$(XV_PHASE_TIMING_DEFAULT))
+$(error XV_PHASE_TIMING_DEFAULT must be 0, 1 or 2 (2 = forced on over device config))
 endif
 $(RECOMP_BUILD)/xv_phase.o: RECOMP_CFLAGS += -DXV_PHASE_TIMING_DEFAULT=$(XV_PHASE_TIMING_DEFAULT)
 .PHONY: force-phase-default-config
