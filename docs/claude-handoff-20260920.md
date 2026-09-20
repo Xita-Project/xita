@@ -323,3 +323,17 @@ package-checked but **not deployed**: do not deploy it blind while nobody can
 power-cycle the device. Sequence for the next attempt: rollback confirmed on
 perf53 → copy `xita.log` → read it → then deploy perf55 with the observer and
 auto-rollback (`deploy.sh` + `wait-gameplay.py`, as in section 11).
+
+## 14. Next guard-release candidates (static purity over the generated code)
+
+Same check as for `88110` (absolute `X_IMG*/X_M*` reads and stores over the
+call closure, perf54 stage):
+
+| Closure | Absolute reads | Absolute stores | Verdict |
+| --- | --- | --- | --- |
+| `868F0` world packet build (13 fns) | none | none | candidate, ≈1.5 ms/frame held; sits between the `88110` return and the stamp stores in `171F10`, so the unlocked window could extend over it (needs the `nq_collection_172c95` hook, not the reuse adapter) |
+| `170C10` solver traversal (11 fns) | `0x206F9C` only | none | candidate, ≈1.8 ms/frame held; the existing `xv_object_solver_begin/end` release exists but is Makefile-exclusive with `XV_NATIVE_SOLVER_FUSION`, so the release must be applied at the native solver call site instead |
+| `1716F0` object walk (29 fns) | `0x2FC6AC` object table, `0x39CE24`; drives object-route queries | none | stays under the guard (reads other objects' data) |
+
+These are held-time reductions of ≈3 ms in total, i.e. a couple of ms of
+batch wall time; they do not change the 20 FPS picture in section 12.
