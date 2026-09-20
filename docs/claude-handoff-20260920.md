@@ -487,3 +487,17 @@ addressing path the shadow fix corrected. The September 5 report ("lit cryo
 pod body vanishes while the flashlight is on") does not reproduce here;
 the pod scene itself was not reachable from this save and stays to be
 re-checked by whoever next passes the cryo bay.
+
+## 23. Overlap project: copy-cost gate
+
+The runtime records no game-state bounds; Halo CE's mutable object storage
+is a fixed pool (≈2 MB) plus datum tables (objects 2,048 entries, effects,
+particles, decals, players; a few hundred KB), so a per-frame snapshot copy
+is ≈2–3 MB, i.e. ≈2–3 ms on this CPU: affordable against the ≈30 ms a
+tick/scene overlap could hide. The hard parts are unchanged: run the scene
+half against the snapshot arena (the recompiled code reads `g_xram` through
+globals, so the render thread needs its own arena pointer or TLS), and merge
+the 22 scene-written globals plus any render-side datum writes back into the
+live state at the frame boundary. First host-testable piece: a fixture that
+runs `BCB30` against a copied arena and diffs the live arena afterwards to
+enumerate exactly what the render half writes.
