@@ -252,7 +252,7 @@ void xv_render_view_watchdog(void)
 {
     if (!bound) return;
     uint64_t since = bound_since_us; if (!since || xk_os_monotonic_us() - since < 3000000u) return;
-    xv_render_view_enabled = 0; restore_in_place(); bound = 0; watchdog_trips++;
+    xv_render_view_enabled = 0; full_frame = 1; unbind_merge(); watchdog_trips++;   /* publish the scene's writes too (a pending request it made) */
     XK_LOG("[render-view] WATCHDOG: scene bound for %llu ms; live mapping restored, view disabled\n", (unsigned long long)((xk_os_monotonic_us() - since) / 1000u));
 }
 /* In-place mode every fiber sees the view, so a switch needs no action; counted for increment C. */
