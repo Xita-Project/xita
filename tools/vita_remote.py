@@ -420,6 +420,7 @@ def main():
     commands.add_parser("status")
     commands.add_parser("trace-draw", help="Queue one draw-trace frame; inspect the log for completion, not FPS")
     commands.add_parser("trace-pages", help="Queue a one-shot per-frame dirty-page census; read [page-census] in the log")
+    env = commands.add_parser("env", help="set environment variables on the device before the game starts (K=V ...)"); env.add_argument("pairs", nargs="+")
     commands.add_parser("release")
     upload = commands.add_parser("update", help="stage a compatible VPK executable and verify on device")
     upload.add_argument("package", type=Path)
@@ -473,6 +474,9 @@ def main():
         client.request("/trace/draw", "POST")
     elif args.command == "trace-pages":
         client.request("/trace/pages", "POST")
+    elif args.command == "env":
+        client.request("/env?" + "&".join(args.pairs), "POST")
+        print("env set:", " ".join(args.pairs))
         print("Queued one page census. Look for [page-census] in the game log.")
         print("Queued one draw-trace frame. Verify its start/completion markers in the game log; traced frame timing is diagnostic only.")
     elif args.command == "screen":

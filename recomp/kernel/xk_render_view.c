@@ -147,6 +147,14 @@ static inline uint8_t *live_of_img(uint32_t ip) { return g_xram + L.image_off + 
 static inline uint8_t *pristine_slot(unsigned s) { return pristine + (size_t)s * XK_PAGE; }
 static inline uint8_t *pristine_img(uint32_t ip) { return pristine + ((size_t)L.shadow_pages + ip) * XK_PAGE; }
 
+/* Halo's cache-file request table (global 2E2D24 -> +34: entries; the spin at 32B00 polls it): is it
+ * shadowed?  Logged once when the view activates and on a watchdog trip (handoff 20260920 §29a). */
+static void log_request_table(const char *when)
+{
+    uint32_t tbl = *(const uint32_t *)(g_img_base + 0x2E2D24u), req = 0, off = 0; unsigned slot = 0xFFFFu;
+    if (tbl) { req = *(const uint32_t *)((const uint8_t *)X_G(tbl + 0x34u)); if (req) { off = X_PT[req >> 12]; if (off < L.image_off) slot = slot_of[off >> 12]; } }
+    XK_LOG("[render-view] %s: request table %08X entries %08X -> arena %08X slot %s%u\n", when, tbl, req, off, slot == 0xFFFFu ? "none " : "#", slot == 0xFFFFu ? 0 : slot);
+}
 static void retarget_in_place(void)
 {
     retargets_n = 0;
@@ -207,6 +215,7 @@ void xv_render_view_enter(unsigned *scope, void *context)
             if (!img_listed[ip]) { memcpy(copy_of_img(ip), live_of_img(ip), XK_PAGE); rolled++; }
         }
     bytes_in += ((uint64_t)slots_used + img_listed_n + rolled) * XK_PAGE;
+    if (active_frames == 1) log_request_table("first viewed frame");
     retarget_in_place(); bound_since_us = t0; bound = 1;
     enter_us += xk_os_monotonic_us() - t0; frames_entered++; full_frames += full_frame;
 }
@@ -252,6 +261,7 @@ void xv_render_view_watchdog(void)
 {
     if (!bound) return;
     uint64_t since = bound_since_us; if (!since || xk_os_monotonic_us() - since < 3000000u) return;
+    log_request_table("watchdog");
     xv_render_view_enabled = 0; full_frame = 1; unbind_merge(); watchdog_trips++;   /* publish the scene's writes too (a pending request it made) */
     XK_LOG("[render-view] WATCHDOG: scene bound for %llu ms; live mapping restored, view disabled\n", (unsigned long long)((xk_os_monotonic_us() - since) / 1000u));
 }

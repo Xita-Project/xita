@@ -749,3 +749,24 @@ does not cover. Next: reproduce in Vita3K (`tools/vita3k.sh`, env.txt
 `XV_LEVEL=a10 XV_RENDER_VIEW=1 XV_RENDER_VIEW_LEARN_NOW=1`) where a hang
 costs nothing, then instrument the request path. Device redeployed to
 perf62 (thread-pt-hardware/build/xita.vpk) so it stops freezing.
+
+### 29b. Vita3K reproduces the wait but resolves it; remote env knob
+
+Vita3K cannot run `XV_THREAD_PAGE_TABLE=1` builds (dynarmic: "Unhandled CP15
+MCR CRn=13 CRm=0 opc2=2"); the in-place render view needs no per-thread
+table, so stage `render-view-vita3k` builds with `XV_THREAD_PAGE_TABLE=0`
+(version 0.2.0-perf.63e). Emulator env.txt `XV_LEVEL=a10 XV_RENDER_VIEW=1
+XV_RENDER_VIEW_LEARN_NOW=1` boots straight into the level; scratchpad
+`v3k-play.sh` presses Launch Game with XTest (Cross = key x).
+Result: the view ran 185+ gameplay frames without hanging: copy-in
+0.2 ms/frame (950 KiB, emulator memory is 8-10 GB/s), merge 0.06 ms, the
+scene wrote only 4 physical pages + 14-16 image pages per frame, and the
+scene yields to other guest fibers ~1x per frame. The same spin as on
+hardware appears (thread 8 at 12AA9 <- 32B60, request-table wait) but ends
+when "APC queued on thread 12: FE0000E8(00032EC0, ...)" — the file HLE's
+I/O-completion APC on the streaming thread. On hardware that completion
+never arrived. New in this revision: `POST /env?K=V&...`
+(`vita_remote.py env K=V ...`) sets env before Launch, so hardware bisects
+(`XV_RENDER_VIEW_IMAGE=0`, `XV_RENDER_VIEW_PHYS_LIMIT_MIB=0`) need no
+rebuild; the render view logs whether the request table page is shadowed
+on the first viewed frame and on a watchdog trip.

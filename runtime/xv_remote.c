@@ -247,6 +247,16 @@ static void serve(int s)
                 if(!bad)xv_update_progress(XV_UPDATE_REQUESTED);
                 reply(s,bad?409:204,bad?"Update not ready\n":"");
             } else reply(s,404,"Unknown update operation\n");
+        } else if(!strcmp(method,"POST")&&!strncmp(target,"/env?",5)) {
+            /* Set process environment variables before the game starts (diagnostic knobs read at
+             * configure time); K=V pairs joined by '&', no decoding. */
+            char vars[512];strncpy(vars,target+5,sizeof vars-1);vars[sizeof vars-1]=0;
+            unsigned n=0;
+            for(char *tok=strtok(vars,"&");tok;tok=strtok(NULL,"&")) {
+                char *eq=strchr(tok,'=');if(!eq||eq==tok)continue;*eq=0;
+                setenv(tok,eq+1,1);n++;XV_LOG("[remote] env %s=%s\n",tok,eq+1);
+            }
+            reply(s,n?204:400,n?"":"No K=V pairs\n");
         } else if(!strcmp(method,"POST")&&!strcmp(target,"/trace/pages")) {
             /* One-shot per-frame dirty-page census (owner hashes the guest arena at
              * two consecutive Presents and logs changed pages). Diagnostic only. */
