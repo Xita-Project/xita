@@ -2203,6 +2203,7 @@ int main(int argc, char *argv[])
     xv_log_memory_budget("boot");
     xv_load_settings();
     (void)xv_log_async_start(); /* selected build default, after environment/config */
+    { extern void xv_tpidr_probe(void); xv_tpidr_probe(); } /* no-op unless XV_TPIDR_PROBE=1 */
 #ifdef XV_NATIVE_COLLISION_VERTICES
     { extern int xv_collision_vertices_enabled(void);
       XV_LOG("[collision-vertices] process-start mode %d; gameplay selection fixed for this launch\n",xv_collision_vertices_enabled()); }
