@@ -84,7 +84,10 @@ def generate(xbe=None,manifest=None):
                              '    if (F_TRACE_ALLOWED(c) && &xv_cur_fn) {',
                              '        if (&xv_watch_n && xv_watch_n && xv_watch_leave) xv_watch_leave(xv_cur_fn,saved_fn,c);',
                              '        xv_cur_fn=saved_fn;', '    }',
-                             f'    fp=(c->fsp-{depth&7})&7; F_LOAD();']);continue
+                             f'    fp=(c->fsp-{depth&7})&7; F_LOAD();',
+                             '#if XV_CLIP_PRIVATE',
+                             '    xv_object_clip_release(c,&lock);',
+                             '#endif']);continue
             if 'x_str_movs(c,' in line:
                 body.extend([f'    F_SAVE({depth&7});',line,f'    fp=(c->fsp-{depth&7})&7; F_LOAD();']);continue
             if 'x87_compare(c,' in line:
@@ -113,17 +116,26 @@ def generate(xbe=None,manifest=None):
         text,n=re.subn(r'(/\* '+f'{pc:08X}'+r'  faddp \*/\n)    (s\d) = (s\d) \+ (s\d);',
                      lambda m:m[1]+f'    {m[2]} = clip_ordered_add({m[3]}, {m[4]});',text)
         assert n==1
-    # New context-taking helpers require a fresh boundary audit.
-    assert set(re.findall(r'\b(\w+)\(c(?:,|\))',text)) <= {'F_TRACE_ALLOWED','f_0001D130','x_str_movs','x87_load_f64','x87_load_f32','x87_store_f32'}, set(re.findall(r'\b(\w+)\(c(?:,|\))',text))
+    # Release admission reads the saved post-probe context without modifying it.
+    # It may release only the local guard token; it cannot call a guest helper.
+    # Other new context-taking helpers require a fresh boundary audit.
+    assert set(re.findall(r'\b(\w+)\(c(?:,|\))',text)) <= {'F_TRACE_ALLOWED','f_0001D130','x_str_movs','x87_load_f64','x87_load_f32','x87_store_f32','xv_object_clip_release'}, set(re.findall(r'\b(\w+)\(c(?:,|\))',text))
     load=' '.join([*(f'r{i}=c->r[{i}];' for i in range(8)),*(f's{i}=c->st[(fp+{i})&7];' for i in range(8)),*(f'flags.{f}=c->{f};' for f in FIELDS)])
     save=' '.join([*(f'c->r[{i}]=r{i};' for i in range(8)),*(f'c->st[(fp+{i})&7]=s{i};' for i in range(8)),*(f'c->{f}=flags.{f};' for f in FIELDS)])
     header=f'''/* Generated from the owned image by tools/gen_native_clip_region.py.
  * Image SHA256 {IMAGE_SHA256}; never distribute generated game code.
- * Full state and mapped aliases; original per-clip guard, stack and preemption.
+ * Full state and mapped aliases; original stack and preemption. Optional
+ * private clipping releases the guard only after probe/accounting admission.
  */
 #include "xv_x86rt.h"
 #include "kernel/xk_object_jobs.h"
 #include "kernel/xk_clip_region.h"
+#ifndef XV_CLIP_PRIVATE
+#define XV_CLIP_PRIVATE 0
+#endif
+#if XV_CLIP_PRIVATE
+extern void xv_object_clip_release(xctx *,int *);
+#endif
 extern void f_0001D130(xctx *);
 extern volatile uint32_t xv_cur_fn __attribute__((weak));
 extern int xv_watch_n __attribute__((weak)), xv_trace_funcs __attribute__((weak));

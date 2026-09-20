@@ -989,6 +989,54 @@ static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes)
         if(g_xpt[(base>>12)+i]!=stack_pages[lane][i])return 0;
     return 1;
 }
+#if XV_CLIP_PRIVATE
+/* Only the fused B71C0 bridge calls this, after its original stack probe and
+ * guarded accounting. No callback or guest memory write occurs in admission. */
+static unsigned clip_private_attempts[WORKERS],clip_private_released[WORKERS];
+void xv_object_clip_release(xctx *c,int *guard)
+{
+    if(*guard<2||*guard>=2+WORKERS)return;
+    unsigned lane=(unsigned)*guard-2;
+    if(c!=&contexts[lane]||!xv_is_object_job(c)||math_depth[lane]!=1||
+       c->df||c->preempt<65536)return;
+#ifdef XV_OBJECT_HOLD_PROFILE
+    if(hold_enabled)return;
+#endif
+    clip_private_attempts[lane]++;
+    if(!(math_private_override<0?math_private_enabled:(unsigned)math_private_override))return;
+    /* After B71CB's stack probe, EBP still names the saved frame and arguments.
+     * Include subsequent pushes and the 4 KiB in-place-copy temporary. */
+    uint32_t sp=c->r[4],bp=c->r[5];
+    if(sp<16||bp<sp||bp-sp>0x1040u||bp>UINT32_MAX-36u||
+       !private_stack_span(lane,sp-16,bp+36-(sp-16)))return;
+    int count=(int16_t)X_M16(bp+8),capacity=(int16_t)X_M16(bp+20);
+    if(count<1||count>64||capacity<count||capacity>64||
+       X_M32(bp+24)||X_M32(bp+28))return;
+    struct {uint32_t address,bytes;} spans[]={
+        {sp-16,bp+36-(sp-16)},
+        {X_M32(bp+12),(unsigned)count*8},
+        {X_M32(bp+16),12},
+        {c->r[2],(unsigned)capacity*8}
+    };
+    for(unsigned i=1;i<4;i++) {
+        if((spans[i].address&3)||!private_stack_span(lane,spans[i].address,spans[i].bytes))return;
+        for(unsigned j=0;j<i;j++) {
+            /* B71C0 explicitly supports identical input/output using its stack
+             * temporary. Other aliases could overwrite loop control/pointers. */
+            if(i==3&&j==1&&spans[i].address==spans[j].address)continue;
+            if(spans[i].address<spans[j].address+spans[j].bytes&&
+               spans[j].address<spans[i].address+spans[i].bytes)return;
+        }
+    }
+    /* The inner clip reads only canonical zero and one outside these spans.
+     * Image replacement is owner-only while jobs are drained. */
+    const uint32_t addresses[]={0x1f0a68,0x1f0a78},values[]={0,0x3f800000};
+    for(unsigned i=0;i<2;i++)if((uintptr_t)X_G(addresses[i])!=
+        (uintptr_t)g_img_base+addresses[i]||X_M32(addresses[i])!=values[i])return;
+    clip_private_released[lane]++;
+    xv_object_math_unlock(guard);*guard=0;
+}
+#endif
 #ifdef XV_OBJECT_SOLVER_EXPERIMENT
 static int solver_is_owner(void)
 {
@@ -1820,6 +1868,13 @@ void xv_object_jobs_report(unsigned frames)
                 private_stats[lane][kind].shared,private_stats[lane][kind].disabled);
         }
     memset(private_stats,0,sizeof private_stats);
+#if XV_CLIP_PRIVATE
+    for(unsigned lane=0;lane<WORKERS;lane++) {
+        XK_LOG("[clip-private] lane %u candidates %u released %u; private stack only\n",
+            lane,clip_private_attempts[lane],clip_private_released[lane]);
+        clip_private_attempts[lane]=clip_private_released[lane]=0;
+    }
+#endif
     math_idle_calls=0;memset(math_stats,0,sizeof math_stats);
     passes=batches=submitted=rejected=0;memset(executed,0,sizeof executed);memset(work_us,0,sizeof work_us);batch_us=0;
 }

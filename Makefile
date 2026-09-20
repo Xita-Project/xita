@@ -2240,3 +2240,26 @@ endif
 endif
 $(POSE_PIPELINE_HOOK_OBJS): $(BUILD)/pose-pipeline.config
 $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a: $(BUILD)/pose-pipeline.config
+
+# Experimental private-stack inner clipping; shared/nested cases keep the guard.
+XV_CLIP_PRIVATE ?= 0
+ifneq ($(words $(XV_CLIP_PRIVATE)),1)
+$(error XV_CLIP_PRIVATE must be 0 or 1)
+endif
+ifneq ($(filter $(XV_CLIP_PRIVATE),0 1),$(XV_CLIP_PRIVATE))
+$(error XV_CLIP_PRIVATE must be 0 or 1)
+endif
+ifeq ($(XV_CLIP_PRIVATE),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_NATIVE_CLIP_REGION):$(XV_EXPERIMENTAL_OBJECT_JOBS),1:halo_ce_3925:1:1)
+$(error XV_CLIP_PRIVATE requires Halo CE, native clip region and object workers)
+endif
+endif
+.PHONY: force-clip-private-config
+force-clip-private-config:
+$(BUILD)/clip-private.config: force-clip-private-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_CLIP_PRIVATE)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_clip_region.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_CLIP_PRIVATE=$(XV_CLIP_PRIVATE)
+$(RECOMP_BUILD)/kernel/xk_clip_region.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(BUILD)/clip-private.config
