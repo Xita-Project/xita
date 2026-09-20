@@ -891,6 +891,30 @@ static int workers_quiet(void)
         if(__atomic_load_n(&service_state[i],__ATOMIC_ACQUIRE)==0)return 0;
     return 1;
 }
+/* One-shot stall dump from the owner side: if a spin/quiesce loop makes no
+ * progress for two seconds, log every lane's service state so a hang on
+ * hardware leaves its shape in the device log. */
+#if XV_OBJECT_JOB_SPLIT
+static unsigned split_cursor;   /* tentative; defined with the split state below */
+#endif
+static unsigned owner_lane_stalls;
+static void owner_lane_stall_check(uint64_t *since,const char *where)
+{
+    uint64_t now=xk_os_monotonic_us();
+    if(!*since) { *since=now;return; }
+    if(now-*since<2000000u||owner_lane_stalls>=8)return;
+    owner_lane_stalls++;*since=now;
+    XK_LOG("[owner-lane] STALL %s: pause %u states %u/%u addresses %08X/%08X cursor %08X next %u count %u depth %u/%u in-job %u\n",
+        where,__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE),
+        __atomic_load_n(&service_state[0],__ATOMIC_ACQUIRE),__atomic_load_n(&service_state[1],__ATOMIC_ACQUIRE),
+        service_address[0],service_address[1],
+#if XV_OBJECT_JOB_SPLIT
+        __atomic_load_n(&split_cursor,__ATOMIC_RELAXED),
+#else
+        0u,
+#endif
+        next,count,math_depth[0],math_depth[1],owner_in_job);
+}
 #endif
 /* Keep the captured return address at the guarded caller, including LTO builds. */
 /* Owner identity is checked by the native caller before this idle query. */
@@ -962,9 +986,11 @@ __attribute__((noinline)) int xv_object_math_lock(void)
     if(owner_in_job&&owner_lane_thread_is_current()) {
         /* Never block: a worker holding the guard may be parked waiting for
          * an owner service. Serve requests while spinning. */
+        uint64_t since=0;
         while(xv_object_mutex_try(&math_mutex)) {
             owner_lane_spins++;
             service_scan(NULL,1);
+            owner_lane_stall_check(&since,"guard-spin");
             owner_lane_delay();
         }
         math_stats[2].acquired++;
@@ -1873,9 +1899,11 @@ static void owner_quiesce_begin(void)
 {
     owner_lane_quiesce++;
     __atomic_store_n(&pause_workers,1,__ATOMIC_RELEASE);
+    uint64_t since=0;
     for(;;) {
         service_scan(NULL,0);
         if(workers_quiet())return;
+        owner_lane_stall_check(&since,"quiesce-wait");
         owner_lane_delay();
     }
 }
