@@ -254,7 +254,7 @@ static void serve(int s)
             unsigned n=0;
             for(char *tok=strtok(vars,"&");tok;tok=strtok(NULL,"&")) {
                 char *eq=strchr(tok,'=');if(!eq||eq==tok)continue;*eq=0;
-                setenv(tok,eq+1,1);n++;XV_LOG("[remote] env %s=%s\n",tok,eq+1);
+                setenv(tok,eq+1,1);n++;xv_logf("[remote] env %s=%s\n",tok,eq+1);
             }
             reply(s,n?204:400,n?"":"No K=V pairs\n");
         } else if(!strcmp(method,"POST")&&!strcmp(target,"/trace/pages")) {
