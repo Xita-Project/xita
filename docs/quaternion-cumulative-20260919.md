@@ -17,7 +17,7 @@ calls with private inputs/outputs and canonical constants can bypass the guard;
 shared data and nested transactions keep their existing path. This is an
 explicit cumulative selection, not a claim of a new measured FPS improvement.
 
-Validation: the production private-math test passes 80 process configurations,
+Validation: the production private-math test passes 40 process configurations,
 600 callbacks each, under ASan/UBSan. Its enabled cases leave the environment
 variable unset to exercise the real compile-default startup, while disabled
 cases explicitly set zero. Worker counts, private-math and fast-lock controls,
