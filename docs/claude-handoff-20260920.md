@@ -625,3 +625,17 @@ mechanics and cost; (B) scene body on a render thread with the owner waiting
 (thread portability of the scene half: D3D state, visibility/worker jobs,
 pose pipeline all assume the owner); (C) real overlap with deferred Present
 and byte-level merge of the 22 scene-written globals.
+
+### 26a. Correction: perf62 did not exercise generated code
+
+The generated shards `#undef X_G` and redefine it over a per-function cache
+`xpt_ = g_xpt` / `imgb_ = g_img_base` emitted by the recompiler prologue
+(`recompiler/xita_recomp.py` ~line 1293), so perf62's generated code still
+translated through the live globals; only hand-written kernel/runtime code
+used TPIDRURW. The "free" result is therefore only the hand-written share.
+Fixed in 704a162: the prologue caches `X_PT` / `X_IMG_BASE`, one `mrc` per
+generated function under the flag, identical code without it. The shards
+are not tracked (game code); a stage must re-run `tools/recomp.sh` (venv
+python with iced-x86) after any recompiler or `games/halo_ce_3925/hooks.py`
+change, then `make`. perf63 (render view) is the first build with the
+per-function `mrc` in generated code, so its frame time includes that cost.
