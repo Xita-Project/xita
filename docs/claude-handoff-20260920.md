@@ -501,3 +501,57 @@ the 22 scene-written globals plus any render-side datum writes back into the
 live state at the frame boundary. First host-testable piece: a fixture that
 runs `BCB30` against a copied arena and diffs the live arena afterwards to
 enumerate exactly what the render half writes.
+
+## 24. Perf60 / 7eee393: per-frame dirty-page census (diagnostic, rolled back)
+
+Build: `page-census-hardware` (perf53 + border fix + census; version
+0.2.0-perf.60, slot 0). The census is one-shot: `POST /trace/pages`
+(`tools/vita_remote.py trace-pages`) makes `xd3d.c:census_track()` FNV-hash
+every 4 KiB arena page at the next Present (baseline), then again at the
+Present after it, and log the pages whose hash differs. Three censuses at the
+Pillar of Autumn checkpoint, 480p, ordinary gameplay (`page-census-hardware/
+census.log`):
+
+| frames | pages changed (of 17318) | KiB | runs |
+|---|---|---|---|
+| 5755..5756 | 156 | 624 | 70 |
+| 5851..5852 | 111 | 444 | 64 |
+| 5949..5950 | 128 | 512 | 69 |
+
+Per-MiB histogram (MiB index: pages), stable across the three samples:
+MiB 0-3 (`0x000000-0x400000`, XBE .data/.bss, guest stacks, object table,
+game globals) 72-75 pages; MiB 29-31 (`0x1D00000-0x2000000`) 19-22 pages;
+MiB 60-61 (`0x3C00000-0x3E00000`) 5-15 pages; MiB 16-17 0-2 pages; MiB 35
+had 34 pages in the first sample only (transient). The tag cache
+(`0x3A6000`.. 22 MB, MiB 3-25) shows no changes, as expected. Ranges common
+to all three samples (the log line truncates the list after ~20 ranges):
+`061000-066000 06B000-06C000 093000-094000 095000-096000 0AC000-0AE000
+0B3000-0B4000 0C0000-0C2000 0DD000-0DF000 0EC000-0ED000 0EF000-0F0000
+113000-115000 141000-142000 149000-14A000 1BF000-1C1000 1C6000-1C7000
+205000-206000`.
+
+Caveats: a hash census sees net content change between two Presents only
+(a write that restores the old value is invisible), and each scan stalls the
+frame ~690 ms (17318 pages), so the game may have run more than one tick
+between baseline and diff: the numbers are an upper bound per tick, one
+scene. It is a checkpoint-room sample; heavier scenes (more objects, effects)
+will change more pool pages but the region set should hold.
+
+What it means for the overlap design (§19, §23): the per-frame mutable set is
+~0.5 MB, four to six times smaller than the ~2-3 MB estimate, and it is
+confined to three regions. A snapshot does not need write tracking: copying
+the whole XBE data+bss span (`0x61000-0x260000`, ~2 MB) plus the MiB 29-31
+pool region (3 MB) plus MiB 60-61 (2 MB) is ~7 MB/frame, ~5-7 ms memcpy on
+this CPU, which is already too much; copying only the pages that ever
+changed in a census (~160 pages after a warm-up census, 0.6 MB) is <1 ms but
+needs a learned page list with a periodic re-census to catch new pages.
+Recommended: learned dirty-page list (union of several censuses, plus every
+page in the object table / game-state pool bounds once those are located),
+refreshed by a background census every N seconds. Per-page hash cost is ~40
+us; a 200-page verification per frame is ~8 ms, so verification must be
+sampled, not per frame. Next concrete step remains the host fixture from
+§23 (run `BCB30` against a copied arena, diff afterwards), now with the
+census page list as the copy set.
+
+Device after this section: rolled back to perf59 (slot 1 -> 0 as
+`rollback` reports), campaign relaunched to the checkpoint.
