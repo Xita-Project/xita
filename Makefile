@@ -2004,6 +2004,18 @@ ifeq ($(XV_THREAD_PAGE_TABLE),1)
 CFLAGS += -DXV_THREAD_PAGE_TABLE=1 -include $(abspath runtime/xv_thread_bind.h)
 RECOMP_CFLAGS += -DXV_THREAD_PAGE_TABLE=1 -include $(abspath runtime/xv_thread_bind.h)
 endif
+XV_RENDER_VIEW ?= 0
+XV_RENDER_VIEW_DEFAULT ?= 0
+ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))
+$(error XV_RENDER_VIEW must be 0 or 1)
+endif
+ifeq ($(XV_RENDER_VIEW),1)
+ifneq ($(XV_THREAD_PAGE_TABLE),1)
+$(error XV_RENDER_VIEW=1 requires XV_THREAD_PAGE_TABLE=1)
+endif
+CFLAGS += -DXV_RENDER_VIEW=1 -DXV_RENDER_VIEW_DEFAULT=$(XV_RENDER_VIEW_DEFAULT)
+RECOMP_CFLAGS += -DXV_RENDER_VIEW=1 -DXV_RENDER_VIEW_DEFAULT=$(XV_RENDER_VIEW_DEFAULT)
+endif
 ifeq ($(XV_VERTEX_PROFILE),1)
 $(BUILD)/runtime/xv_vertex_upload.o: CFLAGS += -DXV_VERTEX_PROFILE=1
 endif

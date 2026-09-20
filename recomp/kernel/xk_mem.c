@@ -26,8 +26,16 @@
 #define KERNEL_VA      0x03D00000u                    /* [KERNEL_VA, 64 MB): identity-mapped kernel objects */
 #define MAX_RANGES     2048
 
-static uint32_t g_xpt_storage[1u << 20];               /* 1M entries: virtual page -> arena byte offset */
-uint32_t *g_xpt = g_xpt_storage;                       /* fixed address: threads bind it before the arena exists (xv_thread_bind.c) */
+/* 1M entries: virtual page -> arena byte offset. The word before the entries is the table's flat image
+ * base (xv_x86rt.h X_IMG_BASE); fixed address so threads bind it before the arena exists (xv_thread_bind.c). */
+static struct { uint8_t *img_base; uint32_t entries[1u << 20]; } g_xpt_block;
+uint32_t *g_xpt = g_xpt_block.entries;
+/* Render view (xk_render_view.c): arena extension past the trash page for shadow pages and an image copy. */
+#ifndef XV_RENDER_VIEW_SHADOW_PAGES
+#define XV_RENDER_VIEW_SHADOW_PAGES 1024u
+#endif
+static uint32_t g_shadow_pages;
+void xv_render_view_mirror(uint32_t vpage, uint32_t arena_off) __attribute__((weak));
 static uint8_t  g_phys_used[NPAGES];                  /* physical page bitmap (byte per page) */
 static uint8_t  g_virt_committed[NPAGES];             /* virtual pages below 64 MB that own a private physical page */
 static uint32_t g_image_lo, g_image_hi, g_trash_off;
@@ -81,6 +89,7 @@ static inline void map_page(uint32_t va, uint32_t arena_off)
     if (g_nguards && old == g_trash_off) old = guard_drop(vp);   /* remapping a guarded page: the new mapping wins */
     if (vp < 0x80000u) { reverse_unmap(vp, old); reverse_map(vp, arena_off); }
     g_xpt[vp] = arena_off;
+    if (xv_render_view_mirror) xv_render_view_mirror(vp, arena_off);
 }
 /* Map one virtual page onto an arena offset (a mirror of another page, or the trash page
  * to unmap it). Kernel helpers must use this rather than writing the table, so the guard
@@ -98,6 +107,11 @@ void xk_mem_setup(uint32_t image_base, uint32_t image_size)
     g_image_lo = image_base & ~(XK_PAGE - 1);
     g_image_hi = (image_base + image_size + XK_PAGE - 1) & ~(XK_PAGE - 1);
     g_trash_off = XRAM_SIZE + (g_image_hi - g_image_lo);
+#if XV_RENDER_VIEW
+    { const char *e = getenv("XV_RENDER_VIEW_SHADOW_PAGES"); g_shadow_pages = e ? (uint32_t)atoi(e) : XV_RENDER_VIEW_SHADOW_PAGES; }
+#else
+    g_shadow_pages = 0;
+#endif
     for (uint32_t p = 0; p < (1u << 20); ++p) g_xpt[p] = g_trash_off;
     memset(g_vpage_of, 0xFF, sizeof g_vpage_of); memset(g_vpage_multi, 0, sizeof g_vpage_multi); g_nguards = 0;
     for (uint32_t va = 0; va < XRAM_SIZE; va += XK_PAGE) {
@@ -148,6 +162,7 @@ static void guard_alias(uint32_t vp, uint32_t off)
     if (g_nguards >= sizeof g_guards / sizeof g_guards[0]) { XK_LOG("page guard table full\n"); abort(); }
     g_guards[g_nguards].vpage = vp; g_guards[g_nguards].off = off; ++g_nguards;
     g_xpt[vp] = g_trash_off;
+    if (xv_render_view_mirror) xv_render_view_mirror(vp, g_trash_off);
 }
 /* Guard or restore every virtual alias of a range of physical RAM pages (see the reverse
  * map above). Guarded aliases translate to the trash page; restoring puts each alias
@@ -170,7 +185,7 @@ void xv_guard_physical(uint32_t physical, uint32_t bytes, int guard)
     } else {
         for (unsigned i = 0; i < g_nguards;) {
             uint32_t page = g_guards[i].off >> 12;
-            if (page >= first && page <= last) { g_xpt[g_guards[i].vpage] = g_guards[i].off; g_guards[i] = g_guards[--g_nguards]; }
+            if (page >= first && page <= last) { g_xpt[g_guards[i].vpage] = g_guards[i].off; if (xv_render_view_mirror) xv_render_view_mirror(g_guards[i].vpage, g_guards[i].off); g_guards[i] = g_guards[--g_nguards]; }
             else ++i;
         }
     }
@@ -185,6 +200,7 @@ uint32_t xv_guarded_physical(uint32_t address)
 void xk_mem_bind_arena(void)
 {
     g_img_base = g_xram + XRAM_SIZE - g_image_lo;
+    g_xpt_block.img_base = g_img_base;
 #ifdef XV_CHECK_GUEST_ADDRESS
     xv_page_count = xk_mem_arena_size() / XK_PAGE + 1;
     if (xv_page_count > XV_PAGE_EPOCH_ENTRIES) { XK_LOG("arena %u pages exceeds the write-epoch table\n", xv_page_count); abort(); }
@@ -193,7 +209,44 @@ void xk_mem_bind_arena(void)
 }
 uint32_t xk_mem_image_lo(void) { return g_image_lo; }
 uint32_t xk_mem_image_hi(void) { return g_image_hi; }
-uint32_t xk_mem_arena_size(void) { return g_trash_off + XK_PAGE; }
+/* Arena: [0, 64 MB) physical, image copy, trash page, then (render view) the image copy for the render
+ * table and the shadow pages. Everything is inside the one GXM mapping. */
+uint32_t xk_mem_arena_size(void) { return g_trash_off + XK_PAGE + (g_shadow_pages ? (g_image_hi - g_image_lo) + g_shadow_pages * XK_PAGE : 0); }
+void xk_mem_render_view_layout(xk_render_view_layout *l)
+{
+    l->phys_pages = NPAGES; l->image_off = XRAM_SIZE; l->image_pages = (g_image_hi - g_image_lo) / XK_PAGE;
+    l->image_vpage = g_image_lo >> 12; l->trash_off = g_trash_off;
+    l->image_copy_off = g_trash_off + XK_PAGE; l->shadow_off = l->image_copy_off + (g_image_hi - g_image_lo);
+    l->shadow_pages = g_shadow_pages;
+}
+/* Every virtual page currently translating to this arena offset (physical: identity + the two fixed
+ * aliases + reverse-mapped allocations; image: its image address). Returns the count written. */
+unsigned xk_mem_page_aliases(uint32_t off, uint32_t *out, unsigned max)
+{
+    unsigned n = 0;
+    if (off >= XRAM_SIZE) {
+        if (off >= g_trash_off) return 0;
+        uint32_t vp = (g_image_lo >> 12) + ((off - XRAM_SIZE) >> 12);
+        if (n < max && g_xpt[vp] == off) out[n++] = vp;
+        return n;
+    }
+    uint32_t page = off >> 12;
+    const uint32_t fixed[3] = { page, 0x80000u + page, 0xF0000u + page };
+    for (int k = 0; k < 3 && n < max; ++k) if (g_xpt[fixed[k]] == off) out[n++] = fixed[k];
+    for (int k = 0; k < 2 && n < max; ++k) {
+        uint32_t vp = g_vpage_of[page][k];
+        if (vp == NO_VPAGE || vp == page || g_xpt[vp] != off) continue;
+        unsigned dup = 0; for (unsigned i = 0; i < n; ++i) dup |= out[i] == vp;
+        if (!dup) out[n++] = vp;
+    }
+    if (g_vpage_multi[page])
+        for (uint32_t vp = 0; vp < 0x80000u && n < max; ++vp) {
+            if (g_xpt[vp] != off) continue;
+            unsigned dup = 0; for (unsigned i = 0; i < n; ++i) dup |= out[i] == vp;
+            if (!dup) out[n++] = vp;
+        }
+    return n;
+}
 
 /* ---- physical --------------------------------------------------------------------------------- */
 static int phys_range_free(uint32_t pa, uint32_t size) { for (uint32_t p = pa / XK_PAGE, n = size / XK_PAGE; n; --n, ++p) if (p >= NPAGES || g_phys_used[p]) return 0; return 1; }

@@ -161,6 +161,9 @@ void     xk_mem_init(uint32_t image_end);          /* no-op (kept for the Vita r
 void     xk_mem_setup(uint32_t image_base, uint32_t image_size);   /* builds the page table; call before loading the image */
 uint32_t xk_mem_image_arena_offset(void);          /* where the runtime must copy the XBE image inside g_xram */
 uint32_t xk_mem_arena_size(void);                  /* bytes to allocate for g_xram */
+typedef struct { uint32_t phys_pages, image_off, image_pages, image_vpage, trash_off, image_copy_off, shadow_off, shadow_pages; } xk_render_view_layout;
+void     xk_mem_render_view_layout(xk_render_view_layout *l);   /* arena regions for xk_render_view.c */
+unsigned xk_mem_page_aliases(uint32_t arena_off, uint32_t *vpages, unsigned max);
 uint32_t xk_phys_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t highest, int top_down);
 int      xk_phys_free(uint32_t pa);
 uint32_t xk_mem_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t highest, int top_down);  /* 0 on failure */

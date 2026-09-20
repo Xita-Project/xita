@@ -125,9 +125,16 @@ typedef float    __attribute__((aligned(1), may_alias)) xf32_u;
  * compile-time-constant-plus-base with no page-table load.  g_img_base = g_xram + XRAM_SIZE - g_image_lo,
  * set in xk_mem_setup; the recompiler emits X_IMG* only for constant displacements inside [image_lo,hi). */
 extern uint8_t *g_img_base;
-#define X_IMG8(a)   (*(uint8_t  *)(g_img_base + (uint32_t)(a)))
-#define X_IMG16(a)  (*(xu16_u   *)(g_img_base + (uint32_t)(a)))
-#define X_IMG32(a)  (*(xu32_u   *)(g_img_base + (uint32_t)(a)))
+#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE && defined(__vita__)
+/* The word before a page table's entries holds that table's flat image base (live table: g_img_base;
+ * a render view: its image copy), so constant image accesses follow the thread's table too. */
+#define X_IMG_BASE  (((uint8_t *const *)X_PT)[-1])
+#else
+#define X_IMG_BASE  g_img_base
+#endif
+#define X_IMG8(a)   (*(uint8_t  *)(X_IMG_BASE + (uint32_t)(a)))
+#define X_IMG16(a)  (*(xu16_u   *)(X_IMG_BASE + (uint32_t)(a)))
+#define X_IMG32(a)  (*(xu32_u   *)(X_IMG_BASE + (uint32_t)(a)))
 
 enum { XK_LOGIC = 0, XK_ADD, XK_ADC, XK_SUB, XK_SBB, XK_EXPLICIT };
 

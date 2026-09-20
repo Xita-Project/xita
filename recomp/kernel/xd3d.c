@@ -15,6 +15,7 @@
 #include <math.h>
 #include "xk.h"
 #include "xk_owner_phase.h"
+#include "xk_render_view.h"
 #include "xk_light_census.h"
 #include "xk_clip_trial.h"
 #include "xk_polygon_edge_trial.h"
@@ -175,12 +176,12 @@ static void census_track(void)
         return;
     }
     if(census_state==1) {
-        uint64_t t0=xk_os_monotonic_us();unsigned changed=0,mib[64]={0},ranges=0,run=0,runs=0;
+        uint64_t t0=xk_os_monotonic_us();unsigned changed=0,mib[128]={0},ranges=0,run=0,runs=0;
         char line[400];unsigned used=0;
         for(unsigned i=0;i<census_pages;i++) {
             uint32_t h=census_page_hash(g_xram+(size_t)i*4096u);
             int diff=h!=census_hash[i];
-            if(diff){changed++;if((i>>8)<64)mib[i>>8]++;}
+            if(diff){changed++;if((i>>8)<128)mib[i>>8]++;}
             if(diff&&!run){run=1;runs++;if(ranges<24)used+=(unsigned)snprintf(line+used,sizeof line-used," %06X",i*4096u);}
             else if(!diff&&run){run=0;if(ranges<24)used+=(unsigned)snprintf(line+used,sizeof line-used,"-%06X",i*4096u);ranges++;}
         }
@@ -188,7 +189,7 @@ static void census_track(void)
         D3DLOG("[page-census] frames %u..%u: %u of %u pages changed (%u KiB) in %u runs; scan %llu us; first ranges:%s\n",
             census_frame,g_dev.frame,changed,census_pages,changed*4u,runs,(unsigned long long)(xk_os_monotonic_us()-t0),line);
         used=0;line[0]=0;
-        for(unsigned m=0;m<64;m++)if(mib[m])used+=(unsigned)snprintf(line+used,sizeof line-used," %u:%u",m,mib[m]);
+        for(unsigned m=0;m<128;m++)if(mib[m])used+=(unsigned)snprintf(line+used,sizeof line-used," %u:%u",m,mib[m]);
         D3DLOG("[page-census] changed pages per MiB (index:count):%s\n",line);
         census_state=0;
     }
@@ -213,6 +214,7 @@ static void hist_level_track(void)
 {
     hist_remote_track();
     census_track();
+    xv_render_view_present(g_dev.frame);
     if(xv_diag_poll_hist()) {
         g_hist_frame=(int)g_dev.frame+1;
         D3DLOG("hist: on-demand trace of frame %d\n",g_hist_frame);
@@ -541,7 +543,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
         extern int xv_log_report_begin_async_frame(unsigned) __attribute__((weak));
         extern void xv_log_report_end(void) __attribute__((weak));
         int grouped=xv_log_report_begin_async_frame && xv_log_report_end && xv_log_report_begin_async_frame(g_dev.frame);
-        if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
+        xv_render_view_report(60);         if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */
             const float (*m)[4] = g_vp_rows;
             for (int i = 0; i < 3; ++i) { camfwd[i] = m[2][i];
