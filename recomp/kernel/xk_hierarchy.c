@@ -3,6 +3,10 @@
 #ifdef XV_NATIVE_MODEL_HIERARCHY
 #include "xk.h"
 #include "xk_object_jobs.h"
+#if XV_HIERARCHY_SNAPSHOT
+#include "xk_hierarchy_runtime.h"
+static unsigned snapshot_batches,snapshot_nodes;
+#endif
 #include <stdlib.h>
 #ifndef XV_HIERARCHY_FINAL_NORMAL
 #define XV_HIERARCHY_FINAL_NORMAL 0
@@ -286,10 +290,17 @@ int xv_math_model_hierarchy(xctx *c)
         if(!numeric(local_poses[order[i]],8))return numeric_decline(2,0);
     }
     unsigned saved_fp=fp_read();if(!fp_allowed(saved_fp))return decline(H_FP);
+#if XV_HIERARCHY_SNAPSHOT
+    int token=xv_object_hierarchy_suspend(c,xv_object_math_locked_,stack[0x24/4],matrix_bytes);
+#endif
     unsigned failed=hierarchy_snapshot(first,queued,order,parent,local_poses,matrices);
+#if XV_HIERARCHY_SNAPSHOT
+    xv_object_hierarchy_resume(token);
+    if(token) {snapshot_batches++;snapshot_nodes+=work;}
+#endif
     if(failed) { fp_restore(saved_fp);return numeric_decline(3,failed); }
     /* No callback or guest handoff occurs between these writes. The synchronous
-     * extraction retains the existing shared guard; no ownership bypass. */
+     * guard is held again here, including all declines and shared counters. */
     for(unsigned i=first;i<queued-1u;i++) {
         unsigned n=(unsigned)order[i];memcpy(output[n],matrices[n],52);
     }
@@ -302,6 +313,10 @@ int xv_math_model_hierarchy(xctx *c)
 
 void xv_model_hierarchy_report(unsigned frames)
 {
+#if XV_HIERARCHY_SNAPSHOT
+    XK_LOG("[hierarchy-snapshot] %u frames private-compute batches %u nodes %u; publication under original guard\n",frames,snapshot_batches,snapshot_nodes);
+    snapshot_batches=snapshot_nodes=0;
+#endif
     XV_OBJECT_MATH_GUARD();
     XK_LOG("[model-hierarchy] %u frames batches %u child nodes %u; declined bounds %u layout %u links %u budget %u numeric %u fp %u\n",
         frames,batches,prepared,declined[H_BOUNDS],declined[H_LAYOUT],

@@ -1,5 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
 #include "kernel/xk_object_jobs.h"
+#if XV_HIERARCHY_SNAPSHOT
+#include "kernel/xk_hierarchy_runtime.h"
+#endif
 #include <assert.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -61,6 +64,25 @@ static void check_admission(xctx *c,unsigned id)
         assert(!xv_object_math_release_private(c,&xv_object_math_locked_,0,out,12,0,0));
     }
     assert(xv_object_math_locked_==token);
+#if XV_HIERARCHY_SNAPSHOT
+    assert(!xv_object_hierarchy_suspend(&copy,token,out,52));
+    assert(!xv_object_hierarchy_suspend(c,token,0x40000,52));
+    assert(!xv_object_hierarchy_suspend(c,token,foreign,52));
+    assert(!xv_object_hierarchy_suspend(c,token,out,0));
+    g_xpt[page]=0x40000;
+    assert(!xv_object_hierarchy_suspend(c,token,out,52));
+    g_xpt[page]=saved;
+    { XV_OBJECT_MATH_GUARD(); assert(!xv_object_hierarchy_suspend(c,xv_object_math_locked_,out,52)); }
+    /* Use a mapped span below the entry SP for the captured worklist. */
+    uint32_t entry_sp=c->r[4];c->r[4]-=2048;
+    int snapshot=xv_object_hierarchy_suspend(c,token,out,52);
+    assert(!!snapshot==(release_enabled&&fast_path&&workers!=0));
+    if(snapshot&&workers==2&&id<2) {
+        int result=pthread_barrier_wait(&concurrent);
+        assert(!result||result==PTHREAD_BARRIER_SERIAL_THREAD);
+    }
+    xv_object_hierarchy_resume(snapshot);c->r[4]=entry_sp;
+#endif
     int released=xv_object_math_release_private(c,&xv_object_math_locked_,0,out,12,0,0);
     assert(released==(release_enabled&&fast_path&&workers!=0));
     assert(xv_object_math_locked_==(released?0:token));

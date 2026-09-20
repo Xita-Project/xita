@@ -2314,3 +2314,24 @@ $(RECOMP_BUILD)/object-quat-default.config: force-object-quat-default-config
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_QUAT_DEFAULT=$(XV_OBJECT_QUAT_DEFAULT)
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-quat-default.config
+
+# Hierarchy captured computation; guest publication retains the original guard.
+XV_HIERARCHY_SNAPSHOT ?= 0
+ifneq ($(filter $(XV_HIERARCHY_SNAPSHOT),0 1),$(XV_HIERARCHY_SNAPSHOT))
+$(error XV_HIERARCHY_SNAPSHOT must be 0 or 1)
+endif
+ifeq ($(XV_HIERARCHY_SNAPSHOT),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_EXPERIMENTAL_OBJECT_JOBS):$(XV_NATIVE_MODEL_HIERARCHY),1:halo_ce_3925:1:1)
+$(error XV_HIERARCHY_SNAPSHOT requires Halo CE object workers and native hierarchy)
+endif
+endif
+HIERARCHY_SNAPSHOT_OBJS := $(RECOMP_BUILD)/kernel/xk_hierarchy.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o
+$(HIERARCHY_SNAPSHOT_OBJS): RECOMP_CFLAGS += -DXV_HIERARCHY_SNAPSHOT=$(XV_HIERARCHY_SNAPSHOT)
+.PHONY: force-hierarchy-snapshot-config
+force-hierarchy-snapshot-config:
+$(RECOMP_BUILD)/hierarchy-snapshot.config: force-hierarchy-snapshot-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_HIERARCHY_SNAPSHOT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(HIERARCHY_SNAPSHOT_OBJS): $(RECOMP_BUILD)/hierarchy-snapshot.config recomp/kernel/xk_hierarchy_runtime.h

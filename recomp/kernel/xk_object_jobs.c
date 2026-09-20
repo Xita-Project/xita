@@ -995,6 +995,35 @@ static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes)
         if(g_xpt[(base>>12)+i]!=stack_pages[lane][i])return 0;
     return 1;
 }
+#if XV_HIERARCHY_SNAPSHOT
+static unsigned hierarchy_private_active[WORKERS];
+int xv_object_hierarchy_suspend(xctx *c,int guard,uint32_t output,unsigned bytes)
+{
+    if(initialized!=1||!math_fast_path||!__atomic_load_n(&running,__ATOMIC_ACQUIRE))return 0;
+    int lane=worker_lane();
+    if(lane<0||guard!=lane+2||c!=&contexts[lane]||!xv_is_object_job(c)||
+       math_depth[lane]!=1||c->df||hierarchy_private_active[lane])return 0;
+    if(!(math_private_override<0?math_private_enabled:(unsigned)math_private_override))return 0;
+#ifdef XV_OBJECT_HOLD_PROFILE
+    if(hold_enabled)return 0;
+#endif
+    /* Caller captured every shared input and validated aliases under guard.
+     * Only private matrices and the original private worklist can be published. */
+    if(!bytes||!private_stack_span(lane,output,bytes)||
+       !private_stack_span(lane,c->r[4],0x1f8u))return 0;
+    hierarchy_private_active[lane]=1;
+    int held=guard;xv_object_math_unlock(&held);return lane+1;
+}
+void xv_object_hierarchy_resume(int token)
+{
+    if(!token)return;
+    int lane=worker_lane();
+    if(lane<0||token!=lane+1||!hierarchy_private_active[lane]||math_depth[lane])abort();
+    int held=xv_object_math_lock();
+    if(held!=lane+2||math_depth[lane]!=1)abort();
+    hierarchy_private_active[lane]=0;
+}
+#endif
 #if XV_NATIVE_MARKER_RECORD
 static unsigned marker_captured[WORKERS];
 void xv_object_marker_captured(int guard)
