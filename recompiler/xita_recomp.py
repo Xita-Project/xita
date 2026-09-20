@@ -1393,6 +1393,13 @@ class Emitter:
                     "#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE",
                     "#define g_xpt X_PT",
                     "#define g_img_base X_IMG_BASE",
+                    "#endif",
+                    "#if defined(XV_RENDER_VIEW) && XV_RENDER_VIEW",
+                    "/* Render view: image globals translate through the page table (only listed image pages shadowed). */",
+                    "#undef X_IMG8\n#undef X_IMG16\n#undef X_IMG32",
+                    "#define X_IMG8(a)  (*(uint8_t *)X_G(a))",
+                    "#define X_IMG16(a) (*(xu16_u  *)X_G(a))",
+                    "#define X_IMG32(a) (*(xu32_u  *)X_G(a))",
                     "#endif", ""]
             for f in chunk:
                 body.append(self.emit_function(f))

@@ -48,8 +48,8 @@ int main(void)
     CHECK((uint8_t *)X_G(0x62000u) == g_xram + 0x62000u);
     uint8_t *img = (uint8_t *)X_G(0x2A000u);
     CHECK(img - g_xram >= L.image_copy_off && *(uint32_t *)img == 8);
-    CHECK((uint8_t *)X_G(image_base) - g_xram == L.image_copy_off);
-    CHECK(g_img_base != live_img && *(uint32_t *)(g_img_base + 0x2A000u) == 8);   /* flat image base swapped */
+    CHECK((uint8_t *)X_G(image_base) - g_xram == 0x4000000u);              /* unlisted image page stays live */
+    CHECK(g_img_base == live_img && X_IMG32(0x2A000u) == 8);                   /* X_IMG goes through the table */
     *(uint32_t *)X_G(0x61000u + 8) = 0x12345678u; *(uint32_t *)img = 9;
     CHECK(*(uint32_t *)(g_xram + 0x61008u) != 0x12345678u);
     *(uint32_t *)(g_xram + 0x61000u + 200) = 0xCAFEu;          /* a helper writing the live page directly */
@@ -59,15 +59,16 @@ int main(void)
     CHECK((uint8_t *)X_G(0x00610000u) == g_xram + 0x61000u);
     xv_render_view_leave(&scope);
     CHECK((uint8_t *)X_G(0x61000u) == g_xram + 0x61000u && (uint8_t *)X_G(0x00500000u) == g_xram + 0x61000u);
-    CHECK(g_img_base == live_img && (uint8_t *)X_G(0x2A000u) == g_xram + 0x4000000u + 0x1A000u);
+    CHECK((uint8_t *)X_G(0x2A000u) == g_xram + 0x4000000u + 0x1A000u);
     CHECK(*(uint32_t *)(g_xram + 0x61008u) == 0x12345678u);    /* merged */
     CHECK(*(uint32_t *)(g_xram + 0x61000u + 200) == 0xCAFEu);  /* not clobbered */
     CHECK(g_xram[0x61000u + 100] == 0x33);
     CHECK(*(uint32_t *)(live_img + 0x2A000u) == 9);
     CHECK((uint8_t *)X_G(0x00600000u) == g_xram + 0x62000u && (uint8_t *)X_G(0x00610000u) == g_xram + 0x61000u);
-    { unsigned a = 0, b = 0; xv_render_view_enter(&a, NULL); xv_render_view_enter(&b, NULL); CHECK(a == 1 && b == 0 && g_img_base != live_img);
-      xv_render_view_leave(&b); CHECK(g_img_base != live_img); xv_render_view_leave(&a); CHECK(g_img_base == live_img); }
-    { unsigned s3 = 0; xv_render_view_enter(&s3, NULL); xv_render_view_fiber_switch(); CHECK(g_img_base != live_img); xv_render_view_leave(&s3); CHECK(g_img_base == live_img); }
+    #define VIEWED ((uint8_t *)X_G(0x2A000u) - g_xram >= L.image_copy_off)
+    { unsigned a = 0, b = 0; xv_render_view_enter(&a, NULL); xv_render_view_enter(&b, NULL); CHECK(a == 1 && b == 0 && VIEWED);
+      xv_render_view_leave(&b); CHECK(VIEWED); xv_render_view_leave(&a); CHECK(!VIEWED); }
+    { unsigned s3 = 0; xv_render_view_enter(&s3, NULL); xv_render_view_fiber_switch(); CHECK(VIEWED); xv_render_view_leave(&s3); CHECK(!VIEWED); }
     xv_render_view_report(4);
     xv_render_view_present(2);
     for (unsigned i = 0; i < 20; i++) g_xram[0x100000u + i * 4096u]++;

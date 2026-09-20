@@ -137,9 +137,18 @@ extern uint8_t *g_img_base;
 #else
 #define X_IMG_BASE  g_img_base
 #endif
+#if defined(XV_RENDER_VIEW) && XV_RENDER_VIEW
+/* Render view: image globals translate through the page table like everything else, so only the
+ * listed image pages are shadowed for the scene and an unlisted page is never retargeted (a write to
+ * it during the scene must not be lost: handoff 20260920 §30). One extra hot load per access. */
+#define X_IMG8(a)   (*(uint8_t  *)X_G(a))
+#define X_IMG16(a)  (*(xu16_u   *)X_G(a))
+#define X_IMG32(a)  (*(xu32_u   *)X_G(a))
+#else
 #define X_IMG8(a)   (*(uint8_t  *)(X_IMG_BASE + (uint32_t)(a)))
 #define X_IMG16(a)  (*(xu16_u   *)(X_IMG_BASE + (uint32_t)(a)))
 #define X_IMG32(a)  (*(xu32_u   *)(X_IMG_BASE + (uint32_t)(a)))
+#endif
 
 enum { XK_LOGIC = 0, XK_ADD, XK_ADC, XK_SUB, XK_SBB, XK_EXPLICIT };
 

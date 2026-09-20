@@ -20,6 +20,15 @@ PREAMBLE = """/* Under XV_THREAD_PAGE_TABLE the per-function caches read the thr
 #define g_xpt X_PT
 #define g_img_base X_IMG_BASE
 #endif
+#if defined(XV_RENDER_VIEW) && XV_RENDER_VIEW
+/* Render view: image globals translate through the page table (only listed image pages shadowed). */
+#undef X_IMG8
+#undef X_IMG16
+#undef X_IMG32
+#define X_IMG8(a)  (*(uint8_t *)X_G(a))
+#define X_IMG16(a) (*(xu16_u  *)X_G(a))
+#define X_IMG32(a) (*(xu32_u  *)X_G(a))
+#endif
 """
 HOOK = """#if XV_RENDER_VIEW
     /* XV_RENDER_VIEW_SCOPE: scene half on the render page table */
@@ -38,8 +47,11 @@ def main():
     preambles = hooks = 0
     for shard in shards:
         text = shard.read_text()
-        if "#define g_xpt X_PT" not in text:
+        if "#define g_xpt X_PT" not in text or "Render view: image globals" not in text:
             if text.count(PREAMBLE_ANCHOR) != 1: raise SystemExit(f"{shard}: preamble anchor drift")
+            old_block = text[text.index(PREAMBLE_ANCHOR) + len(PREAMBLE_ANCHOR):]
+            if old_block.startswith("/* Under XV_THREAD_PAGE_TABLE"):   # replace an older preamble
+                end = old_block.index("#endif\n") + len("#endif\n"); text = text.replace(old_block[:end], "", 1)
             text = text.replace(PREAMBLE_ANCHOR, PREAMBLE_ANCHOR + PREAMBLE, 1); preambles += 1
         entry = "void f_000BCB30(xctx *restrict c)\n{\n"
         if entry in text and "XV_RENDER_VIEW_SCOPE" not in text:
