@@ -10,3 +10,4 @@ void xv_render_view_enter(unsigned *scope, void *context);   /* scene entry (gen
 void xv_render_view_leave(unsigned *scope);        /* scene exit (cleanup attribute) */
 void xv_render_view_report(unsigned frames);       /* periodic log line */
 void xv_render_view_mirror(uint32_t vpage, uint32_t arena_off);  /* live table write -> render table */
+void xv_render_view_fiber_switch(void);            /* guest scheduler leaving the scene's thread: publish + drop to live */

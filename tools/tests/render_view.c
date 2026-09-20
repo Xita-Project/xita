@@ -71,6 +71,12 @@ int main(void)
     /* nesting: inner scopes do nothing */
     { unsigned a = 0, b = 0; xv_render_view_enter(&a, NULL); xv_render_view_enter(&b, NULL); CHECK(a == 1 && b == 0 && xv_host_page_table != live);
       xv_render_view_leave(&b); CHECK(xv_host_page_table != live); xv_render_view_leave(&a); CHECK(xv_host_page_table == live); }
+    /* a fiber switch mid-scene publishes the scene's writes and finishes on the live table */
+    { unsigned s3 = 0; xv_render_view_enter(&s3, NULL); CHECK(s3 == 1 && xv_host_page_table != live);
+      *(uint32_t *)X_G(0x61000u + 16) = 0x77u; xv_render_view_fiber_switch();
+      CHECK(xv_host_page_table == live && *(uint32_t *)(g_xram + 0x61000u + 16) == 0x77u);
+      *(uint32_t *)X_G(0x61000u + 20) = 0x88u; CHECK(*(uint32_t *)(g_xram + 0x61000u + 20) == 0x88u);   /* now live */
+      xv_render_view_leave(&s3); CHECK(xv_host_page_table == live); }
     xv_render_view_report(3);
     /* slot overflow: 20 distinct pages change with 16 slots */
     xv_render_view_present(2);

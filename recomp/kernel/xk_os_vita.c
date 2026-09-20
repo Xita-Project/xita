@@ -346,6 +346,8 @@ void xk_os_fiber_switch(xk_fiber *to)
 {
     xk_fiber *from = g_current;
     if (from == to) return;
+    { extern void xv_render_view_fiber_switch(void) __attribute__((weak));   /* a scene on the render table drops back to live before another guest thread runs */
+      if (xv_render_view_fiber_switch) xv_render_view_fiber_switch(); }
     g_current = to;
     sceKernelSignalSema(to->wake, 1);
     fiber_park(from);

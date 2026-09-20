@@ -48,7 +48,7 @@ static uint32_t *learn_hash;
 static uint64_t learn_us, last_leave_us;
 
 /* per-report counters */
-static unsigned depth, frames_entered, full_frames, mirrors, mirrors_dropped, aliases_max;
+static unsigned depth, frames_entered, full_frames, mirrors, mirrors_dropped, aliases_max, bound, yield_drops;
 static uint64_t enter_us, leave_us, bytes_in, words_merged;
 
 static uint32_t page_hash(const uint8_t *p)
@@ -204,7 +204,7 @@ void xv_render_view_enter(unsigned *scope, void *context)
             if (!img_listed[ip]) { memcpy(copy_of_img(ip), live_of_img(ip), XK_PAGE); rolled++; }
         }
     bytes_in += ((uint64_t)slots_used + img_listed_n + rolled) * XK_PAGE;
-    bind_table(render_pt);
+    bind_table(render_pt); bound = 1;
     enter_us += xk_os_monotonic_us() - t0; frames_entered++; full_frames += full_frame;
 }
 /* Words the scene changed in its copy go to live; returns whether the page had any. */
@@ -215,12 +215,10 @@ static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live)
     if (copyback) for (unsigned i = 0; i < XK_PAGE / 4; ++i) if (c[i] != p[i]) { l[i] = c[i]; words_merged++; }
     return 1;
 }
-void xv_render_view_leave(unsigned *scope)
+/* Merge the scene's writes into live and put the calling thread back on the live table. */
+static void unbind_merge(void)
 {
-    uint64_t t0 = xk_os_monotonic_us();
-    if (!ready || !depth) { last_leave_us = t0; return; }
-    if (--depth || !*scope) { last_leave_us = t0; return; }
-    bind_table(g_xpt);
+    bind_table(g_xpt); bound = 0;
     for (unsigned s = 0; s < slots_used; ++s) {
         if (!full_frame && !sw_slot[s]) continue;
         if (!merge_page(shadow_of(s), pristine_slot(s), live_of_slot(s))) continue;
@@ -232,18 +230,35 @@ void xv_render_view_leave(unsigned *scope)
         if (!merge_page(copy_of_img(ip), pristine_img(ip), live_of_img(ip))) continue;
         if (!sw_img[ip]) { sw_img[ip] = 1; sw_imgs++; if (active_frames > 30) sw_found_late++; }
     }
+}
+void xv_render_view_leave(unsigned *scope)
+{
+    uint64_t t0 = xk_os_monotonic_us();
+    if (!ready || !depth) { last_leave_us = t0; return; }
+    if (--depth || !*scope) { last_leave_us = t0; return; }
+    if (bound) unbind_merge();
     last_leave_us = xk_os_monotonic_us();
     leave_us += last_leave_us - t0;
+}
+/* Guest scheduler switching away mid-scene: another guest thread may spin on a flag the scene wrote
+ * into its shadow copy (seen: level loader vs loading-screen scene, handoff §28), so publish now and
+ * finish this scene on the live table. */
+void xv_render_view_fiber_switch(void)
+{
+    if (!bound) return;
+    uint64_t t0 = xk_os_monotonic_us();
+    unbind_merge(); yield_drops++;
+    leave_us += xk_os_monotonic_us() - t0;
 }
 void xv_render_view_report(unsigned frames)
 {
     if (!ready) return;
-    XK_LOG("[render-view] %u frames: entered %u (full %u); slots %u (overflow %u) image pages %u listed, tail %u; copy-in %.2f ms/frame (%.0f KiB), merge %.2f ms/frame (%llu words); scene-write set %u slots + %u image pages (%u found late); mirrors %u dropped %u; aliases max %u\n",
+    XK_LOG("[render-view] %u frames: entered %u (full %u); slots %u (overflow %u) image pages %u listed, tail %u; copy-in %.2f ms/frame (%.0f KiB), merge %.2f ms/frame (%llu words); scene-write set %u slots + %u image pages (%u found late); yield drops %u; mirrors %u dropped %u; aliases max %u\n",
            frames, frames_entered, full_frames, slots_used, slots_overflow, img_listed_n, img_lo < L.image_pages ? L.image_pages - img_lo : 0,
            frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0,
            frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0, (unsigned long long)words_merged,
-           sw_slots, sw_imgs, sw_found_late, mirrors, mirrors_dropped, aliases_max);
-    frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; mirrors = mirrors_dropped = 0;
+           sw_slots, sw_imgs, sw_found_late, yield_drops, mirrors, mirrors_dropped, aliases_max);
+    frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; mirrors = mirrors_dropped = yield_drops = 0;
 }
 #else
 int xv_render_view_enabled;
@@ -253,4 +268,5 @@ void xv_render_view_enter(unsigned *scope, void *context) { (void)scope; (void)c
 void xv_render_view_leave(unsigned *scope) { (void)scope; }
 void xv_render_view_report(unsigned frames) { (void)frames; }
 void xv_render_view_mirror(uint32_t vpage, uint32_t arena_off) { (void)vpage; (void)arena_off; }
+void xv_render_view_fiber_switch(void) {}
 #endif
