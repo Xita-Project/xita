@@ -281,6 +281,7 @@ static void serve(int s)
             else if(upload_in_progress||xv_updates_requested()||LOAD(&draw_trace_pending)||xv_benchmark_remote_request(kind))reply(s,409,"Benchmark unavailable: enter first-person gameplay and finish any active operation\n");
             else reply(s,204,"");
         } else if(!strcmp(method,"GET")&&!strcmp(target,"/status")) {
+            { extern void xv_render_view_watchdog(void) __attribute__((weak)); if(xv_render_view_watchdog)xv_render_view_watchdog(); }   /* un-freeze a scene stuck on the render view */
             uint64_t now=remote_now();
             char body[320];snprintf(body,sizeof body,"{\"protocol\":1,\"build\":\"%s\",\"version\":\"%s\",\"revision\":\"%s\",\"frames\":%u,\"benchmark\":%u,\"awake_seconds\":%llu}\n",
                 XV_BUILD_LABEL,XV_BUILD_VERSION,XV_BUILD_REVISION,LOAD(&frame_count),xv_benchmark_status(),

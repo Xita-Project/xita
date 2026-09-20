@@ -38,6 +38,9 @@ static uint8_t *sw_slot, *sw_img; static unsigned sw_slots, sw_imgs, sw_found_la
 static uint8_t *pristine;                 /* [shadow_pages + image_pages] pages, host memory */
 static unsigned full_interval = 30, active_frames;
 static uint8_t *live_img_base;
+static uint32_t phys_limit = 4u << 20;      /* shadow only physical pages below this (game state); D3D/audio buffers and guest stacks stay live */
+static int image_view = 1;                  /* shadow the image .data tail too */
+static volatile uint64_t bound_since_us; static unsigned watchdog_trips;
 
 /* entries retargeted for the current scene: (vpage, live offset, view offset) */
 typedef struct { uint32_t vp, live, view; } retarget_t;
@@ -61,12 +64,13 @@ static void learn_page(uint32_t page)
 {
     uint32_t off = page * XK_PAGE;
     if (off >= L.image_off) {
+        if (!image_view) return;
         uint32_t ip = page - (L.image_off >> 12);
         if (ip < img_lo) { img_lo = ip; roll_next = ip; }
         if (!img_listed[ip]) { img_listed[ip] = 1; img_list[img_listed_n++] = ip; }
         return;
     }
-    if (slot_of[page] != 0xFFFFu) return;
+    if (off >= phys_limit || slot_of[page] != 0xFFFFu) return;
     if (slots_used >= L.shadow_pages) { slots_overflow++; return; }
     slot_of[page] = (uint16_t)slots_used; slot_page[slots_used++] = page;
 }
@@ -98,6 +102,8 @@ void xv_render_view_configure(void)
     if ((e = getenv("XV_RENDER_VIEW_LEARN_NOW"))) learn_armed = atoi(e) != 0;
     if ((e = getenv("XV_RENDER_VIEW_ROLL"))) roll_pages = (unsigned)atoi(e);
     if ((e = getenv("XV_RENDER_VIEW_FULL_INTERVAL"))) full_interval = (unsigned)atoi(e);
+    if ((e = getenv("XV_RENDER_VIEW_PHYS_LIMIT_MIB"))) phys_limit = (uint32_t)atoi(e) << 20;
+    if ((e = getenv("XV_RENDER_VIEW_IMAGE"))) image_view = atoi(e) != 0;
     xk_mem_render_view_layout(&L);
     if (!xv_render_view_enabled) { XK_LOG("[render-view] process-start disabled\n"); return; }
     if (!L.shadow_pages || !g_xram) { XK_LOG("[render-view] no shadow region; disabled\n"); xv_render_view_enabled = 0; return; }
@@ -114,8 +120,8 @@ void xv_render_view_configure(void)
     live_img_base = g_img_base;
     ready = 1;
     bench();
-    XK_LOG("[render-view] process-start enabled (in-place); shadow %u pages at %08X, image copy %u pages at %08X; learn %u passes every %u frames after a %u us tick gap%s; roll %u, full every %u, copyback %d\n",
-           L.shadow_pages, L.shadow_off, L.image_pages, L.image_copy_off, learn_passes, learn_interval, learn_gap_us, learn_armed ? " (armed now)" : "", roll_pages, full_interval, copyback);
+    XK_LOG("[render-view] process-start enabled (in-place); shadow %u pages at %08X for physical pages below %u MiB, image copy %u pages at %08X (%s); learn %u passes every %u frames after a %u us tick gap%s; roll %u, full every %u, copyback %d\n",
+           L.shadow_pages, L.shadow_off, phys_limit >> 20, L.image_pages, L.image_copy_off, image_view ? "viewed" : "live", learn_passes, learn_interval, learn_gap_us, learn_armed ? " (armed now)" : "", roll_pages, full_interval, copyback);
 }
 void xv_render_view_present(unsigned frame)
 {
@@ -154,11 +160,11 @@ static void retarget_in_place(void)
         }
     }
     image_entries = 0;
-    for (uint32_t ip = 0; ip < L.image_pages; ++ip) {           /* every image page reads the copy, like X_IMG */
+    if (image_view) for (uint32_t ip = 0; ip < L.image_pages; ++ip) {           /* every image page reads the copy, like X_IMG */
         uint32_t vp = L.image_vpage + ip, live = L.image_off + ip * XK_PAGE;
         if (g_xpt[vp] == live) { g_xpt[vp] = L.image_copy_off + ip * XK_PAGE; image_entries++; }
     }
-    xk_mem_set_image_base(g_xram + L.image_copy_off - (L.image_vpage << 12));
+    if (image_view) xk_mem_set_image_base(g_xram + L.image_copy_off - (L.image_vpage << 12));
 }
 static void restore_in_place(void)
 {
@@ -201,15 +207,19 @@ void xv_render_view_enter(unsigned *scope, void *context)
             if (!img_listed[ip]) { memcpy(copy_of_img(ip), live_of_img(ip), XK_PAGE); rolled++; }
         }
     bytes_in += ((uint64_t)slots_used + img_listed_n + rolled) * XK_PAGE;
-    retarget_in_place(); bound = 1;
+    retarget_in_place(); bound_since_us = t0; bound = 1;
     enter_us += xk_os_monotonic_us() - t0; frames_entered++; full_frames += full_frame;
 }
-static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live)
+static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live)   /* one pass; newlib memcmp is ~86 MB/s here */
 {
-    if (memcmp(copy, pre, XK_PAGE) == 0) return 0;
-    const uint32_t *c = (const uint32_t *)copy, *p = (const uint32_t *)pre; uint32_t *l = (uint32_t *)live;
-    if (copyback) for (unsigned i = 0; i < XK_PAGE / 4; ++i) if (c[i] != p[i]) { l[i] = c[i]; words_merged++; }
-    return 1;
+    const uint32_t *c = (const uint32_t *)copy, *p = (const uint32_t *)pre; uint32_t *l = (uint32_t *)live; unsigned changed = 0;
+    for (unsigned i = 0; i < XK_PAGE / 4; i += 4) {
+        uint32_t d = (c[i] ^ p[i]) | (c[i+1] ^ p[i+1]) | (c[i+2] ^ p[i+2]) | (c[i+3] ^ p[i+3]);
+        if (!d) continue;
+        for (unsigned k = i; k < i + 4; ++k) if (c[k] != p[k]) { changed++; if (copyback) l[k] = c[k]; }
+    }
+    words_merged += changed;
+    return changed != 0;
 }
 static void unbind_merge(void)
 {
@@ -235,6 +245,16 @@ void xv_render_view_leave(unsigned *scope)
     last_leave_us = xk_os_monotonic_us();
     leave_us += last_leave_us - t0;
 }
+/* Remote status poll: a scene bound for over 3 s is stuck (guest polling a word a host writer updates
+ * through a live pointer); restore the live mapping so it can continue, and disable the view. Racy by
+ * design (another thread), last resort instead of a manual app restart. */
+void xv_render_view_watchdog(void)
+{
+    if (!bound) return;
+    uint64_t since = bound_since_us; if (!since || xk_os_monotonic_us() - since < 3000000u) return;
+    xv_render_view_enabled = 0; restore_in_place(); bound = 0; watchdog_trips++;
+    XK_LOG("[render-view] WATCHDOG: scene bound for %llu ms; live mapping restored, view disabled\n", (unsigned long long)((xk_os_monotonic_us() - since) / 1000u));
+}
 /* In-place mode every fiber sees the view, so a switch needs no action; counted for increment C. */
 void xv_render_view_fiber_switch(void) { if (bound) fiber_switches++; }
 void xv_render_view_report(unsigned frames)
@@ -256,4 +276,5 @@ void xv_render_view_leave(unsigned *scope) { (void)scope; }
 void xv_render_view_report(unsigned frames) { (void)frames; }
 void xv_render_view_mirror(uint32_t vpage, uint32_t arena_off) { (void)vpage; (void)arena_off; }
 void xv_render_view_fiber_switch(void) {}
+void xv_render_view_watchdog(void) {}
 #endif
