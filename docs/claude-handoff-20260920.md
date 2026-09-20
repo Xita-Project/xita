@@ -467,3 +467,10 @@ Hardware: perf59 loads and plays; checkpoint views show a clean floor with no
 smeared or repeated silhouettes; the frame numbers match perf53 (69–73 ms;
 one window at 66 ms / 15 FPS). Close-up character-shadow captures are in
 `shadow-*.png`; a user confirmation on the device is the final word.
+
+Close-up captures (`shadow-feet2.png`: Marine centred, feet and floor in
+frame) show a clean floor with no smear or repeat around the character; that
+view runs 17–18 FPS (55–57 ms). Caveat: this room did not visibly reproduce
+the defect on perf50 either, so the evidence is the traced mechanism plus a
+clean result, not a before/after of a reproduced artifact. Ask the tester
+who reported the Sept 9/18 shadows to re-check their scene on perf59.
