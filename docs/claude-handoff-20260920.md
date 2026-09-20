@@ -433,3 +433,17 @@ copies. Snapshot exchange primitive: `xk_frame_snapshot.c` (prototype, not
 wired). Cost bound: a full game-state copy per frame is several ms on this
 CPU; a dirty-region scheme needs write tracking the recompiler does not emit
 today. This is the multi-week item behind 20+ FPS.
+
+## 20. Perf58 / 06e8af4: fused-solver guard release — neutral, rolled back
+
+`XV_SOLVER_UNLOCK=1` wraps `ns_solver_fused` with the existing
+`xv_object_solver_begin/end` admission. Hardware (480p, three settled
+windows): frame 70.6–72.7 ms vs perf53 69–71; batch 26.6–28.4 vs 26.0–26.9;
+lane waits unchanged. No admission counter exists for the release, so whether
+its private-span checks admitted the fused calls is unknown; either way the
+lever's ceiling was ≈1.5 ms. Rolled back to perf53. If anyone revisits it,
+first add admit/decline counters to `xv_object_solver_begin`.
+
+**Installed state at 12:25: perf53 (30ff83e), 480p.** Every trial today is
+documented above; the honest ceiling of the incremental path in this room is
+≈16–17 FPS, and 20+ needs the tick/scene overlap (section 19).
