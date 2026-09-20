@@ -81,7 +81,8 @@ static void learn_page(uint32_t page)               /* arena page index that cha
 }
 void xv_render_view_configure(void)
 {
-    if (configured) return; configured = 1;
+    if (configured) return;
+    configured = 1;
     const char *e = getenv("XV_RENDER_VIEW"); xv_render_view_enabled = e ? atoi(e) != 0 : XV_RENDER_VIEW_DEFAULT;
     if ((e = getenv("XV_RENDER_VIEW_COPYBACK"))) copyback = atoi(e) != 0;
     if ((e = getenv("XV_RENDER_VIEW_LEARN_INTERVAL"))) learn_interval = (unsigned)atoi(e);
@@ -110,8 +111,10 @@ static void bind_table(uint32_t *table)
 {
 #if defined(__vita__) && defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
     extern void xv_thread_bind_table(uint32_t *); xv_thread_bind_table(table);
+#elif defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
+    xv_host_page_table = table;  /* host fixture: the current thread's table */
 #else
-    g_xpt = table;               /* host fixture: X_PT is the global */
+    (void)table;                 /* single table: nothing to bind */
 #endif
 }
 void xv_render_view_present(unsigned frame)

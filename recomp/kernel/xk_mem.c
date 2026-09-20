@@ -30,6 +30,9 @@
  * base (xv_x86rt.h X_IMG_BASE); fixed address so threads bind it before the arena exists (xv_thread_bind.c). */
 static struct { uint8_t *img_base; uint32_t entries[1u << 20]; } g_xpt_block;
 uint32_t *g_xpt = g_xpt_block.entries;
+#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE && !defined(__vita__)
+uint32_t *xv_host_page_table = g_xpt_block.entries;
+#endif
 /* Render view (xk_render_view.c): arena extension past the trash page for shadow pages and an image copy. */
 #ifndef XV_RENDER_VIEW_SHADOW_PAGES
 #define XV_RENDER_VIEW_SHADOW_PAGES 1024u

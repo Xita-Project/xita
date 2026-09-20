@@ -23,6 +23,11 @@ extern uint32_t *g_xpt;
  * copy-on-write table later). The asm is not volatile, so GCC hoists it: one mrc per function. */
 static inline uint32_t *xv_thread_page_table(void) { uint32_t v; __asm__("mrc p15, 0, %0, c13, c0, 2" : "=r"(v)); return (uint32_t *)v; }
 #define X_PT (xv_thread_page_table())
+#elif defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
+/* Host fixtures with the flag: translation goes through a separate pointer (the "current thread's"
+ * table) so binding a render view does not retarget the live table the kernel writes through. */
+extern uint32_t *xv_host_page_table;
+#define X_PT xv_host_page_table
 #else
 #define X_PT g_xpt
 #endif
