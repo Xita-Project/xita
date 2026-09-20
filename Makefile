@@ -858,6 +858,10 @@ CFLAGS    += -DXV_RUN_RECOMP -Irecomp -Irecomp/kernel
 SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_ui_gxm.c runtime/xv_boot.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_vertex_prepare.c runtime/xv_vertex_capture.c runtime/xv_upload_worker.c runtime/xv_draw_profile.c runtime/xv_render_profile.c runtime/xv_settings.c dashboard/xv_dash.c
 SRCS      += runtime/xv_remote.c runtime/xv_update.c runtime/xv_update_halo2.c runtime/xv_sha256.c
 SRCS      += runtime/xv_tpidr_probe.c
+XV_THREAD_PAGE_TABLE ?= 0
+ifeq ($(XV_THREAD_PAGE_TABLE),1)
+SRCS      += runtime/xv_thread_bind.c
+endif
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
 # Select the reviewed native adapter independently of generated game objects.
@@ -1999,7 +2003,6 @@ ifeq ($(XV_THREAD_PAGE_TABLE),1)
 # sceKernelCreateThread in the runtime is routed through the binding trampoline by force-including the header.
 CFLAGS += -DXV_THREAD_PAGE_TABLE=1 -include $(abspath runtime/xv_thread_bind.h)
 RECOMP_CFLAGS += -DXV_THREAD_PAGE_TABLE=1 -include $(abspath runtime/xv_thread_bind.h)
-SRCS += runtime/xv_thread_bind.c
 endif
 ifeq ($(XV_VERTEX_PROFILE),1)
 $(BUILD)/runtime/xv_vertex_upload.o: CFLAGS += -DXV_VERTEX_PROFILE=1
