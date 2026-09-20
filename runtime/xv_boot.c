@@ -98,6 +98,7 @@ int xv_boot_recomp(const char *game_dir, const char *save_dir)
 
     /* Kernel up: drive letters, TLS template, thunk table.  game_dir holds maps/, save_dir is writable. */
     xk_init(base, size, xv_game_tls_dir, game_dir, save_dir);
+    { extern void xv_render_view_configure(void); xv_render_view_configure(); }   /* image in the arena, guest not started */
 
     /* The initial thread runs mainCRTStartup(); the kernel scheduler takes it from there. */
     if (!xk_thread_create(0x10000, 0, xv_entry_point, 0, 0, 0)) { BOOT_LOG("entry thread create failed\n"); return -1; }

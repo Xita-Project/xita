@@ -2001,7 +2001,6 @@ static int xv_recomp_thread(SceSize args, void *argp)
     sceIoMkdir("ux0:data/xita/save", 0777);
     XV_LOG("recomp: game dir %s\n", game_dir);
     xv_boot_recomp(game_dir, "ux0:data/xita/save");
-    { extern void xv_render_view_configure(void); xv_render_view_configure(); }   /* after the image is in the arena */
     __atomic_store_n(&g_recomp_finished,1,__ATOMIC_RELEASE);
     return 0;
 }
