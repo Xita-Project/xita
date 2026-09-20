@@ -831,3 +831,38 @@ then C (overlap, deferred Present, merge against a concurrent tick using the
 pristine copies). Device left on perf62 (fastest known build); perf63
 `render-view-hardware/build/xita.vpk` (9460b36+) is the render-view build,
 off by default at runtime only via `XV_RENDER_VIEW=0` (build default 1).
+
+## 32. Increments B and C: design notes from what A revealed
+
+The guest scheduler is a single-runner cooperative model: one guest fiber
+(a Vita thread each) runs at a time; `xk_os_fiber_switch` signals the
+target's semaphore and parks the caller. The scene (thread 8, BCB30) hands
+control to other fibers 7-12 times per frame (streaming `start 33AF0`,
+sound, the two event waiters). Consequences:
+
+B (scene on a helper Vita thread, owner parked): the fiber identity is the
+semaphore, not the Vita thread, so a helper thread that runs BCB30 with a
+copy of `c` on the same guest stack effectively *is* thread 8 while the
+owner waits on a private semaphore; yields inside the scene keep working
+(the helper parks on thread 8's semaphore and is the one woken). Needs: the
+helper bound to the live table (in-place view needs nothing per thread),
+`xv_object_is_worker_thread`/"presenting owner" checks taught about the
+helper, D3D HLE reentrancy audited (single caller at a time, so fine), and
+the phase/owner-phase observers (they key on thread id). Gain 0; proves
+portability. Estimated 1-2 days including hardware runs.
+
+C (overlap): tick N+1 on the owner while scene N runs on the helper. Two
+guest fibers "running" breaks the single-runner scheduler, so the scene
+must not enter it: `SwitchToThread` inside the scene returns
+NO_YIELD_PERFORMED, event/semaphore waits inside the scene block the helper
+only (the owner-side scheduler still services the streaming/sound threads
+during the tick's own yields), the scene's cache-file requests are
+completed by those threads as today. Present is deferred to scene
+completion (the owner's Present HLE marks the frame and returns), the next
+scene entry waits for the previous scene (backpressure), and the merge at
+scene end applies copy != pristine words onto pages the tick may have
+changed meanwhile (already the merge's semantics). Pages both halves write
+in the same frame need an ownership rule (the 22 scene-written globals of
+§19 first). Expected frame ≈ max(tick ~37, scene ~33 + 5 view) ≈ 40 ms
+(25 FPS) at the checkpoint; 30 FPS needs the tick itself under ~33 ms as
+well. Estimated 1-2 weeks including the debugging the hardware will demand.
