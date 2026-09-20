@@ -639,3 +639,24 @@ are not tracked (game code); a stage must re-run `tools/recomp.sh` (venv
 python with iced-x86) after any recompiler or `games/halo_ce_3925/hooks.py`
 change, then `make`. perf63 (render view) is the first build with the
 per-function `mrc` in generated code, so its frame time includes that cost.
+
+## 27. Generated shards are hand-maintained; install hooks selectively
+
+Whole-game regeneration (`tools/recomp.sh`) is not usable on the stages: the
+Sep 17 `recomp/code_*.c` carry patches installed by Codex's selective tools
+(`tools/gen_owner_phase_hooks.py`, `gen_scene_partition_hooks.py`,
+`gen_visibility_portal_hooks.py`, the "eleven bucket1 cuts"), and Makefile
+gates (e.g. line ~1308, `XV_SCENE_BUCKET1_DETAIL requires the selectively
+regenerated eleven bucket1 cuts`) refuse shards without them. A fresh
+regeneration also tripped `model_route_profile.child_hook`'s body pin because
+the pose-scope observer (efb502b) was added after the pin; fixed in 4ac22b7
+(the gate strips it like the phase scope). Regenerated shards differ from the
+maintained ones only by the missing selective patches (phase scopes etc.).
+
+So generated-code changes are installed as text patches on the maintained
+shards: `tools/patch_render_view_hooks.py <stage>/recomp` (idempotent) adds
+the thread-table preamble to every shard and the `XV_RENDER_VIEW` scope to
+`f_000BCB30`, in the same style as the other observers (before the caches).
+The recompiler/hooks.py changes (9848f30, 7a04751) remain the source of
+truth for a future whole regeneration. Keep a pristine copy of the maintained
+shards (`thread-pt-hardware/build/recomp/code_*.c` == Sep 17 originals).
