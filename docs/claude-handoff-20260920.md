@@ -798,3 +798,36 @@ GXM state/uniform/draw work (`draw-hle` 8 ms at the checkpoint, 24 ms in
 the heavy corridor view) on a core the object workers leave idle during the
 scene. That is host-side overlap: no guest snapshot, no image view, no
 fiber problem. Recommended next increment over the guest snapshot.
+
+## 31. Increment A complete: full render view runs on hardware, cost 4-5 ms/frame
+
+Root cause of every image-view hang (§28-29): in-place mode retargeted all
+933 image pages to the copy but merged only listed pages back, so a write to
+an unlisted image global during the scene (e.g. a pending cache-file request
+marker) was lost. Fix (9460b36): under `XV_RENDER_VIEW`, `X_IMG*` translate
+through the page table (header, recompiler preamble and
+`tools/patch_render_view_hooks.py` preamble, which now replaces an older
+preamble), only listed image pages are retargeted, no flat-base swap, no
+rolling refresh. Physical pages already worked that way (§30).
+
+Bisect 2 (`run-bisect.sh fullview XV_RENDER_VIEW=1`): ~4,400 gameplay frames
+at the checkpoint, no hang, no watchdog, 155 draws/frame like the view-off
+run of the same launch. Steady state: 79 slots + 30 image pages (436 KiB),
+copy-in 1.9 ms/frame, merge 2.3 ms/frame (~60k words per 60 frames),
+scene-write set 27 slots + 20 image pages (3 found late), 7-12 fiber
+switches per frame inside the scene. Same-view cost (view off -> on):
+70.2 -> 75.3 ms median (+5 ms), tick 36-38 both, scene 31-33 -> 32-34.
+
+Caveats: the checkpoint save advances between launches (the earlier
+"physonly" run landed in a post-fight state with 386 draws/frame; compare
+only runs with equal draws/frame, `run-bisect.sh` now screenshots each run).
+Learning stalls ~1.4 s six times per session; a shipped version needs a
+cheaper learner. Fiber switches inside the scene (streaming, sound) mean a
+render-thread scene (increment B) must host those fibers or their waits.
+
+Status: the snapshot substrate for the tick/scene overlap exists and is
+measured. Next: increment B (scene body on its own thread, owner waiting)
+then C (overlap, deferred Present, merge against a concurrent tick using the
+pristine copies). Device left on perf62 (fastest known build); perf63
+`render-view-hardware/build/xita.vpk` (9460b36+) is the render-view build,
+off by default at runtime only via `XV_RENDER_VIEW=0` (build default 1).
