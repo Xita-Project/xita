@@ -20,6 +20,10 @@ void xv_object_job_stack_probe(xctx *c);
 void xv_object_job_stop(xctx *c, unsigned address, const char *reason) __attribute__((noreturn));
 /* Actual native-thread identity only; false is not proof of guest ownership. */
 int xv_object_is_worker_thread(void);
+#ifdef __vita__
+/* Classify a freshly read thread ID; this alone does not admit guest work. */
+int xv_object_is_worker_id(int32_t id);
+#endif
 int xv_object_math_lock(void);
 #if XV_QUERY_WORLD_RUN
 /* Read-only admission: exact worker guest under the retained math transaction. */

@@ -3,6 +3,7 @@ import sys,struct,json
 S=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(S/'tools'))
 from test_arm_cluster_runtime import RuntimeMachine,RAM,SIZE
+from unicorn.arm_const import UC_ARM_REG_R0
 
 def run(out):
  P=Path(out).resolve()
@@ -106,6 +107,15 @@ def run(out):
  c=Case('cost');c.seed();cost={}
  for name in ['arm_scope_end','arm_scope_begin','arm_present']:
   row=c.call(name);row['thread_calls']=c.m.by_address[c.sym('__wrap_sceKernelGetThreadId')&~1];row['fiber_calls']=c.m.by_address[c.sym('xk_os_fiber_current')&~1];cost[name]=row
- result={'comparisons':len(rows),'rows':rows,'lifecycle_cost':cost}
+ # Production Vita admission reads one fresh kernel identity and still
+ # rejects a foreign thread or a worker presenting the owner's context.
+ c=Case('identity-read');identity=[];out_address=RAM+SIZE-16
+ for name,tid,is_worker,want in [('owner',17,0,1),('foreign',23,0,0xffffffff),('worker',17,1,0xffffffff)]:
+  c.put(c.sym('thread_id'),tid);c.put(c.sym('on_worker'),is_worker);c.put(out_address,0)
+  c.call('xv_owner_phase_active',(c.m.context,1,out_address))
+  value=c.m.uc.reg_read(UC_ARM_REG_R0);reads=c.m.by_address[c.sym('__wrap_sceKernelGetThreadId')&~1]
+  assert value==want and reads==1,(name,value,reads)
+  identity.append(dict(case=name,result=value,kernel_identity_reads=reads))
+ result={'comparisons':len(rows),'rows':rows,'lifecycle_cost':cost,'identity_reads':identity}
  (P/'cross-results.json').write_text(json.dumps(result,indent=2)+'\n');print('PASS',len(rows),'cross-model state/lifecycle/counter comparisons')
 

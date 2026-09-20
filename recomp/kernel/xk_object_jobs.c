@@ -683,17 +683,28 @@ unsigned xv_object_query_work_lane(const xctx *c,int guard,unsigned *depth)
     *depth=census_owner_scopes;return 1;
 }
 #endif
+#ifdef __vita__
+static int worker_thread_id_matches(int32_t id)
+{
+    for(unsigned i=0;i<WORKERS;i++)if(id==threads[i])return 1;
+    return 0;
+}
+int xv_object_is_worker_id(int32_t id)
+{
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
+    return worker_thread_id_matches(id);
+}
+#endif
 int xv_object_is_worker_thread(void)
 {
     if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
 #ifdef __vita__
-    SceUID id=sceKernelGetThreadId();
-    for(unsigned i=0;i<WORKERS;i++)if(id==threads[i])return 1;
+    return worker_thread_id_matches(sceKernelGetThreadId());
 #else
     pthread_t id=pthread_self();
     for(unsigned i=0;i<WORKERS;i++)if(pthread_equal(id,threads[i]))return 1;
-#endif
     return 0;
+#endif
 }
 /* Audited stream-property calls in object sound update 297B0 and its 296D0
  * helper. All use existing non-callback handlers on the guest owner. */

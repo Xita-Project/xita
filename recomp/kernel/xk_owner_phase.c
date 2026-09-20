@@ -28,6 +28,9 @@ static phase_thread current_thread(void) { return pthread_self(); }
 #error XV_OWNER_PHASE_DEFAULT must be 0 or 1
 #endif
 extern int xv_object_is_worker_thread(void) __attribute__((weak));
+#ifdef __vita__
+extern int xv_object_is_worker_id(int32_t) __attribute__((weak));
+#endif
 int xv_owner_phase_enabled;
 static int configured;
 static uintptr_t owner_context;
@@ -147,6 +150,21 @@ static int same_thread(void)
     return pthread_equal(current_thread(),expected);
 #endif
 }
+/* Read identity once for hot native-helper admission. Never retain an ID
+ * across calls: thread/fiber/generation changes still fail the original checks. */
+static int admitted_thread(void)
+{
+#ifdef __vita__
+    if(xv_object_is_worker_id) {
+        if(!__atomic_load_n(&owner_valid,__ATOMIC_ACQUIRE))return 0;
+        phase_thread actual=current_thread();
+        return actual==__atomic_load_n(&owner_thread,__ATOMIC_ACQUIRE) &&
+            !xv_object_is_worker_id(actual);
+    }
+#endif
+    /* Older or non-Vita backends retain their original fail-closed check. */
+    return !worker() && same_thread();
+}
 static int marked(const xctx *c)
 {
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
@@ -221,7 +239,7 @@ void xv_owner_phase_present(void *context)
 }
 int xv_owner_phase_active(void *context,unsigned phase,uint32_t *generation_token)
 {
-    if(!xv_owner_phase_enabled || !generation_token || worker() || !same_thread())return -1;
+    if(!xv_owner_phase_enabled || !generation_token || !admitted_thread())return -1;
     if(__atomic_load_n(&owner_context,__ATOMIC_ACQUIRE)!=(uintptr_t)context ||
        !live(context) || phase>=XV_OWNER_PHASES || generation_exhausted || !generation ||
        (*generation_token && *generation_token!=generation))return -1;

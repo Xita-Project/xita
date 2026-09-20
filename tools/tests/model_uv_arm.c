@@ -9,6 +9,7 @@ xk_thread *xk_cur;static xk_fiber *current_fiber;
 const char xv_object_job_marker=0;
 unsigned on_worker,thread_id=17;
 int xv_object_is_worker_thread(void){return on_worker;}
+int xv_object_is_worker_id(int32_t id){if(id!=(int32_t)thread_id)__builtin_trap();return on_worker;}
 int __wrap_sceKernelGetThreadId(void){return thread_id;}
 xk_fiber *xk_os_fiber_current(void){return current_fiber;}
 uint64_t xk_os_monotonic_us(void){return 1;}
