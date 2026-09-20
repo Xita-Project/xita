@@ -16,8 +16,11 @@ parked while Halo CE performance is prioritized.
 
 Perf.42 / `9a1c6bf` is now boot-confirmed after restart, retaining perf.41 and
 [enabling the existing private-quaternion path at startup](docs/quaternion-cumulative-20260919.md).
-Production-worker startup/fallback tests pass; the ordinary campaign check is
-running. No performance gain is claimed from deployment alone.
+Production-worker startup/fallback tests pass. Campaign logs confirm about 40
+private quaternion calls per displayed frame; short movement checks remain
+responsive at roughly 11–13 FPS across the observed views. Shared-input captures
+still dominate admission failures. No established whole-frame gain or sustained
+20 FPS result is claimed.
 
 Perf.41 / `1e249ea` is boot-confirmed on hardware after a full restart. Its
 [private-stack clipping path](docs/private-clipping-20260919.md) releases the
