@@ -7,6 +7,7 @@ parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--reference',type=Path,required=True,help='Private reference.c from test_marker_snapshot.py')
 parser.add_argument('--output-dir',type=Path,required=True)
 parser.add_argument('--cc',default='arm-vita-eabi-gcc')
+parser.add_argument('--neon',action='store_true',help='Qualify against the existing optional NEON matrix wrapper')
 args=parser.parse_args();args.output_dir.mkdir(parents=True,exist_ok=True)
 p=args.output_dir
 command=[args.cc,'-O3','-funroll-loops','-fno-strict-aliasing','-ffp-contract=off',
@@ -16,6 +17,7 @@ command=[args.cc,'-O3','-funroll-loops','-fno-strict-aliasing','-ffp-contract=of
  str(ROOT/'recomp/kernel/xk_math.c'),str(ROOT/'recomp/xv_x86rt.c'),'-nostdlib',
  '-Wl,-Ttext=0x10000,-e,test_boot,--gc-sections,--undefined=original_marker,--undefined=current_marker,--undefined=snapshot_marker,--undefined=layout',
  '-lgcc','-o',str(p/'arm.elf')]
+if args.neon:command.insert(1,'-DXV_NATIVE_MATRIX_NEON')
 subprocess.run(command,check=True)
 import test_arm_model_palette as arm
 arm.SIZE=2<<20
@@ -51,4 +53,9 @@ for k in range(256):
    if before[i]!=after[i]:print('mismatch',k,n, next(((j,x,y) for j,(x,y) in enumerate(zip(before[i],after[i])) if x!=y),None) if i<2 else (before[i],after[i]))
   raise SystemExit(1)
 print('PASS 256 Vita-linked marker current/snapshot full context/memory/FPSCR cases')
-(p/'arm-result.json').write_text(json.dumps({'command':command,'cases':256,'scope':'exact current native vs snapshot; no ownership or FPS proof'})+'\n')
+neon_accepted=0
+if args.neon:
+ neon_accepted=struct.unpack('<I',m.uc.mem_read(m.symbols['matrix_neon_accepted'],4))[0]
+ assert neon_accepted>0,'NEON qualification did not exercise the selected path'
+ print('NEON admissions:',neon_accepted)
+(p/'arm-result.json').write_text(json.dumps({'command':command,'cases':256,'neon_accepted':neon_accepted,'scope':'exact current native vs snapshot; no ownership or FPS proof'})+'\n')

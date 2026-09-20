@@ -2088,6 +2088,30 @@ recomp/kernel/xk_clip_region.c: tools/gen_native_clip_region.py tools/gen_native
 recomp/kernel/xk_clip.c: tools/gen_native_clip.py games/halo_ce_3925/hooks.py games/halo_ce_3925/clip_region.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_clip.py
 
+# Captured marker record: explicit Halo worker build, default off.
+XV_NATIVE_MARKER_RECORD ?= 0
+ifneq ($(filter $(XV_NATIVE_MARKER_RECORD),0 1),$(XV_NATIVE_MARKER_RECORD))
+$(error XV_NATIVE_MARKER_RECORD must be 0 or 1)
+endif
+ifeq ($(XV_NATIVE_MARKER_RECORD),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_EXPERIMENTAL_OBJECT_JOBS),1:halo_ce_3925:1)
+$(error XV_NATIVE_MARKER_RECORD requires RECOMP=1 GAME_PROFILE=halo_ce_3925 XV_EXPERIMENTAL_OBJECT_JOBS=1)
+endif
+endif
+MARKER_HOOK_SRCS := $(shell rg -l XV_NATIVE_MARKER_RECORD $(XITA_GUEST_SRCS) 2>/dev/null)
+MARKER_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(MARKER_HOOK_SRCS)) $(RECOMP_BUILD)/kernel/xk_marker.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o
+$(MARKER_OBJS): RECOMP_CFLAGS += -DXV_NATIVE_MARKER_RECORD=$(XV_NATIVE_MARKER_RECORD)
+.PHONY: force-marker-config
+force-marker-config:
+$(RECOMP_BUILD)/marker.config: force-marker-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_NATIVE_MARKER_RECORD)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(MARKER_OBJS): $(RECOMP_BUILD)/marker.config
+$(RECOMP_BUILD)/kernel/xk_marker.o: recomp/kernel/xk_marker_snapshot.h recomp/kernel/xk_quaternion_snapshot.h recomp/kernel/xk_matrix_snapshot.h
+$(RECOMP_BUILD)/kernel/xk_marker.o: RECOMP_CFLAGS += -O3 -ffp-contract=off
+
 # Only generated units containing this optional hook depend on its build mode.
 # This also handles changed shard numbering after regeneration.
 HIERARCHY_HOOK_SRCS := $(shell grep -l XV_NATIVE_MODEL_HIERARCHY $(XITA_GUEST_SRCS) 2>/dev/null)

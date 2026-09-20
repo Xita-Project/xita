@@ -995,6 +995,30 @@ static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes)
         if(g_xpt[(base>>12)+i]!=stack_pages[lane][i])return 0;
     return 1;
 }
+#if XV_NATIVE_MARKER_RECORD
+static unsigned marker_captured[WORKERS];
+void xv_object_marker_captured(int guard)
+{
+    if(guard<2||guard>=WORKERS+2||math_depth[guard-2]!=1)abort();
+    marker_captured[guard-2]++;
+}
+/* Capture runs under this guard; publication may touch only these unchanged
+ * private stack mappings. Reject copied contexts and owner-service threads. */
+int xv_object_marker_admit(xctx *c,int guard)
+{
+    int lane=worker_lane();
+    if(lane<0||guard!=lane+2||c!=&contexts[lane]||!xv_is_object_job(c)||
+       math_depth[lane]!=1||c->df)return 0;
+    if(!(math_private_override<0?math_private_enabled:(unsigned)math_private_override))return 0;
+#ifdef XV_OBJECT_HOLD_PROFILE
+    if(hold_enabled)return 0;
+#endif
+    uint32_t sp=c->r[4],out=c->r[6];
+    return sp>=32u&&sp<=UINT32_MAX-40u&&out<=UINT32_MAX-108u&&
+        private_stack_span((unsigned)lane,sp-32u,72)&&
+        private_stack_span((unsigned)lane,out,108);
+}
+#endif
 #if XV_CLIP_PRIVATE
 /* Only the fused B71C0 bridge calls this, after its original stack probe and
  * guarded accounting. No callback or guest memory write occurs in admission. */
@@ -1874,6 +1898,12 @@ void xv_object_jobs_report(unsigned frames)
                 private_stats[lane][kind].shared,private_stats[lane][kind].disabled);
         }
     memset(private_stats,0,sizeof private_stats);
+#if XV_NATIVE_MARKER_RECORD
+    for(unsigned lane=0;lane<WORKERS;lane++) {
+        XK_LOG("[marker-snapshot] lane %u captured %u records\n",lane,marker_captured[lane]);
+        marker_captured[lane]=0;
+    }
+#endif
 #if XV_CLIP_PRIVATE
     for(unsigned lane=0;lane<WORKERS;lane++) {
         XK_LOG("[clip-private] lane %u candidates %u released %u; private stack only\n",

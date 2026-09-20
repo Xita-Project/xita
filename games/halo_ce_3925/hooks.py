@@ -8,7 +8,7 @@ import re
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
-from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere, collision_traversal, scene_partition, model_route_profile, constant_pack, cluster_lifetime, model_fog, model_uv
+from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere, collision_traversal, scene_partition, model_route_profile, constant_pack, cluster_lifetime, model_fog, model_uv, marker_region
 
 
 class HaloHooks(NoGameHooks):
@@ -292,6 +292,8 @@ class HaloHooks(NoGameHooks):
         return out
 
     def transform_body(self, address, body):
+        if self.enabled and address == 0xA1EC0 and marker_region.matches(self.image):
+            body = marker_region.hook(body)
         if self.enabled and address == 0x7E530:
             body = constant_pack.hook(body)
         body = model_fog.hook(self.image, address, body)

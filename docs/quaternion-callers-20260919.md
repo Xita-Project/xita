@@ -190,3 +190,46 @@ combines one marker's two calculations; it is not yet a whole-list batch.
 The existing production-worker suite also passes 40 configurations × 600
 callbacks under ASan/UBSan after the matrix extraction. Receipt:
 `../marker-snapshot-workers.log`. The future capture bridge is not covered yet.
+
+
+## Capture bridge and exact guest hook
+
+`xk_marker.c` now captures the source record, selected matrix and constants under
+one existing math transaction, then releases it for private calculation and
+publication. `xv_object_marker_admit` requires the real worker thread, its exact
+live context, depth one, unchanged private stack pages for output and scratch,
+and the existing private-math policy. Hold profiling, nested transactions and
+foreign contexts decline. Bounds, page crossings and physical overlaps retain
+the original path without changing guest state. No shared pointers survive into
+the arithmetic kernel. The original filter, remapping selection, loop order,
+optional sign flip and preemption remain in guest code.
+
+The hook gates the complete `A1EC0` body and both math leaves by owned-image
+signatures, then requires an exact emitted-region hash. The absent build flag
+preprocesses to the original body. Explicit `XV_NATIVE_MARKER_RECORD=1` requires
+a Halo CE recompilation with object workers; config stamps rebuild affected
+objects on changes. The runtime environment can explicitly disable it, and
+`XV_NATIVE_MATH=0` retains the original path. Ordinary builds default off.
+`[marker-snapshot]` reports captured records per worker after retirement.
+
+The production-worker fixture checks 64 direct captures and another 64 through
+the actual emitted hook, across both worker lanes. Full context and private
+memory match the guarded reference. Replacing each lane's source after the
+capture lock is released leaves its results unchanged. The fixture also checks
+owner-thread service admission and declines for copied contexts, nested guards,
+shared/foreign output, changed pages, page crossings, overflow and aliases.
+ASan/UBSan pass. Original-image mutations, emitted-region drift and disabled
+preprocessing gates pass in the same runner. Receipt:
+`../marker-worker-tests.log`; reproduction adds `--workers` to the marker test.
+
+The ARM suite with `--neon` additionally qualifies the existing NEON-enabled
+matrix wrapper against the scalar captured record. It requires nonzero NEON
+admissions rather than merely compiling that option. This is functional/FP
+qualification, not a promise that the scalar packet is faster than NEON math.
+Receipt: `../marker-arm-neon.log`.
+
+This replaces two math acquisitions with one for admitted records. It does not
+batch a complete marker list or change simulation/frame buffering. The next
+cumulative package will retain earlier optimizations, remove the now-completed
+quaternion caller census and enable this candidate. Hardware activation,
+rendering, long-session stability and FPS effects remain unverified.
