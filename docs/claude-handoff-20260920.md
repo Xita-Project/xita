@@ -660,3 +660,36 @@ the thread-table preamble to every shard and the `XV_RENDER_VIEW` scope to
 The recompiler/hooks.py changes (9848f30, 7a04751) remain the source of
 truth for a future whole regeneration. Keep a pristine copy of the maintained
 shards (`thread-pt-hardware/build/recomp/code_*.c` == Sep 17 originals).
+
+## 28. Perf63 / render view on hardware: mechanics work, first cut too slow, level-load deadlock
+
+Stage `render-view-hardware` (patched shards, §27), `XV_RENDER_VIEW=1`.
+First cut (7a04751 + 1ffb7cd configure-in-boot): the scene half ran on the
+render table every frame, the merge landed its writes, no faults. Numbers in
+the main menu (learning had started at frame 2, before gameplay): 195 shadow
+slots, image span 550 pages (2.2 MB, "lowest dirty page to end of image"),
+copy-in 24.8 ms/frame for 2.9 MB (two copies: shadow + pristine), merge
+45.7 ms/frame (memcmp 2.9 MB + word loop), scene wrote 25 physical pages and
+~9 image pages per frame. So: (a) the image span heuristic is far too wide,
+(b) memory throughput is ~120-240 MB/s for this pattern, not ~1 GB/s. A
+throughput bench now runs at configure (`[render-view] ... throughput`).
+
+Deadlock (user: "I think it froze"): confirming the difficulty menu started
+the level load; guest thread 8 (loader, `start 00015C5A`) spun at
+`eip 0005846B` in a yield storm for 7 minutes while the loading-screen scene
+sat inside BCB30 on the render table. The loader waits on a flag the scene
+writes; the write was in the shadow page and would only be merged when
+BCB30 returned, which waits on the loader. Recovery needed a manual app
+close (remote restart cannot run while the game thread is hung); the
+accepted perf62 update applies on the next launch.
+
+Fixes (1201ae1, <yield-drop commit>): learning is armed only after 30 frames
+whose tick gap (scene exit to next scene entry) exceeds 8 ms, i.e. gameplay,
+or `XV_RENDER_VIEW_LEARN_NOW=1`; image dirty pages are a list plus a
+rolling refresh of 32 unlisted .data-tail pages per frame; pristine copies
+and the merge cover only the scene-write set (full frames: first 30 active,
+then every 30th) so per-frame traffic is ~1x the dirty set; and
+`xk_os_fiber_switch` calls `xv_render_view_fiber_switch()`: a guest fiber
+switch while the scene is bound publishes the writes and finishes the scene
+on the live table (`yield drops` in the report). If gameplay scenes yield
+every frame, the view is never effective and that counter says so.
