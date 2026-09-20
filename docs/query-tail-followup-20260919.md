@@ -48,3 +48,12 @@ The initial integration fixture crossed the deliberately noncontiguous physical 
 
 
 Perf46 / e86b8fb builds the cumulative configuration with XV_HIERARCHY_SNAPSHOT=1. Packaging retained member names and changed only game-a.self and boot-game.txt; both hierarchy suspend/resume symbols are linked. Runtime SHA-256: `a0791691c9d32971063778532f0566024a671bfd7c952c7179256189741381f9`. Remote deployment completed: verified, restarted, and boot-confirmed in slot 0; remote status confirms perf46 / e86b8fb. Receipts are in private hierarchy-overlap-hardware. Ordinary gameplay admission counters remain pending. This is not yet a hardware-validated gain.
+
+
+## Perf46 hardware result and caller ownership
+
+The campaign observer completed. The screenshot confirms the room, Marine, pistol animation and HUD on perf46. Recent ordinary windows are 12.2–12.8 FPS; the final window reports 12.8 FPS. Every captured gameplay hierarchy-snapshot report has zero admitted batches/nodes, despite roughly 3,091 hierarchy batches / 60 frames in the native routine. Therefore this private-output candidate is inactive on the observed hot path and has no demonstrated hardware benefit. Final object batch time was 1,686,731 us / 60 = 28.11 ms/frame. This is not a paired performance comparison.
+
+Owned caller inspection explains the ownership mismatch: 8DDF0 loads the object pointer through the object table, reads its signed node-matrix offset at +1A2, adds that offset to the object pointer, and stores the resulting shared destination at [sp+24] at 8DE41. The native hierarchy reads that destination. Its worklist is private but its output matrices are not. Object-pose reports also show the optional enclosing pose scope disabled, so that scope does not explain the zero admissions.
+
+Retain the private-output guard. The next viable shared-object design needs optimistic validation or explicit per-object ownership: capture all required poses, hierarchy links and parent matrices plus object identity; compute without touching guest memory; reacquire the guard; validate identity/generation, mappings and every input dependency before publication. Any mismatch must discard the private result, restore speculative FP status and use the original path. Account for validation cost and distinguish changed snapshots from numerical fallback. Do not simply permit shared output through the existing private-stack admission helper.
