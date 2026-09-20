@@ -1188,6 +1188,7 @@ static void sync_draw_state(void)
          * mesh defaults here forced point sampling even for filtered lightmaps. */
         xv_d3d_SetTextureStageState(i, X_D3DTSS_ADDRESSU, xd3d_texture_state(i, 10));
         xv_d3d_SetTextureStageState(i, X_D3DTSS_ADDRESSV, xd3d_texture_state(i, 11));
+        xv_d3d_SetTextureStageState(i, X_D3DTSS_BORDERCOLOR, xd3d_texture_state(i, 29));
         xv_d3d_SetTextureStageState(i, X_D3DTSS_MAGFILTER, xd3d_texture_state(i, 13));
         xv_d3d_SetTextureStageState(i, X_D3DTSS_MINFILTER, xd3d_texture_state(i, 14));
     }

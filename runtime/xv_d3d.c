@@ -248,6 +248,7 @@ typedef struct {
     uint32_t tex_guest[4];
     uint32_t pal_guest[4];                                    /* SetPalette per stage (P8 textures) */
     uint8_t  tex_min[4], tex_mag[4], tex_addr_u[4], tex_addr_v[4];
+    uint32_t tex_border[4];         /* D3DTSS_BORDERCOLOR (guest state index 29), ARGB */
     uint32_t vs_handle;
     float    vsc[192][4];                    /* c[-96..95] as D3D exposes them          */
     const float (*vsc_source)[4];            /* synchronized owner; partial/UI writes invalidate */
@@ -618,6 +619,7 @@ void xv_d3d_SetTextureStageState(unsigned stage, unsigned type, uint32_t value)
         return;
     switch (type) {
     case X_D3DTSS_ADDRESSU:  S.tex_addr_u[stage] = (uint8_t)value; break;
+    case X_D3DTSS_BORDERCOLOR: S.tex_border[stage] = value; break;
     case X_D3DTSS_ADDRESSV:  S.tex_addr_v[stage] = (uint8_t)value; break;
     case X_D3DTSS_MAGFILTER: S.tex_mag[stage] = (uint8_t)value; break;
     case X_D3DTSS_MINFILTER: S.tex_min[stage] = (uint8_t)value; break;
@@ -667,13 +669,33 @@ static int xbox_format_to_gxm(uint32_t fmt, SceGxmTextureFormat *out, int *linea
     }
 }
 
-static SceGxmTextureAddrMode addr_mode(uint8_t x)
+/* D3D BORDER addressing samples the stage's border color outside [0,1]. GXM's
+ * full-border clamp samples transparent black, which is what the projected
+ * shadow/light textures need (their outside must contribute nothing); plain
+ * CLAMP smeared the map's edge texels across the floor (stretched/repeated
+ * silhouettes). A non-black border color keeps CLAMP and is logged once.
+ * XV_BORDER_ADDR=0 restores the old mapping. */
+static SceGxmTextureAddrMode addr_mode_border(uint32_t border)
+{
+    static int enabled = -1;
+    if (enabled < 0) { const char *e = getenv("XV_BORDER_ADDR"); enabled = !e || atoi(e) != 0;
+        XV_LOG("border addressing: %s\n", enabled ? "GXM full border (transparent black)" : "clamp (legacy)"); }
+    if (!enabled) return SCE_GXM_TEXTURE_ADDR_CLAMP;
+    if (border & 0xFFFFFFu) {
+        static unsigned warned; if (warned++ < 4) XV_LOG("border color %08X is not black: keeping clamp for this stage\n", border);
+        return SCE_GXM_TEXTURE_ADDR_CLAMP;
+    }
+    return SCE_GXM_TEXTURE_ADDR_CLAMP_FULL_BORDER;
+}
+static SceGxmTextureAddrMode addr_mode_with(uint8_t x, uint32_t border);
+static SceGxmTextureAddrMode addr_mode(uint8_t x) { return addr_mode_with(x, 0); }
+static SceGxmTextureAddrMode addr_mode_with(uint8_t x, uint32_t border)
 {
     switch (x) {
     case X_D3DTADDRESS_MIRROR:      return SCE_GXM_TEXTURE_ADDR_MIRROR;
     case X_D3DTADDRESS_CLAMP:
     case X_D3DTADDRESS_CLAMPTOEDGE: return SCE_GXM_TEXTURE_ADDR_CLAMP;
-    case X_D3DTADDRESS_BORDER:      return SCE_GXM_TEXTURE_ADDR_CLAMP;
+    case X_D3DTADDRESS_BORDER:      return addr_mode_border(border);
     default:                        return SCE_GXM_TEXTURE_ADDR_REPEAT;
     }
 }
@@ -927,7 +949,7 @@ static const SceGxmTexture *texture_for(unsigned stage)
     _Static_assert(sizeof *src == 16, "GXM texture control word size");
     memcpy(key, src, sizeof *src);
     key[4] = S.tex_min[stage]; key[5] = S.tex_mag[stage];
-    key[6] = S.tex_addr_u[stage]; key[7] = S.tex_addr_v[stage];
+    key[6] = S.tex_addr_u[stage] | (S.tex_border[stage] << 8); key[7] = S.tex_addr_v[stage];
     if (enabled && valid[stage] && !memcmp(keys[stage], key, sizeof key)) {
         sampler_hits++; return &t[stage];
     }
@@ -936,8 +958,8 @@ static const SceGxmTexture *texture_for(unsigned stage)
     sceGxmTextureSetMinFilter(&t[stage], S.tex_min[stage] == X_D3DTEXF_POINT ? SCE_GXM_TEXTURE_FILTER_POINT : SCE_GXM_TEXTURE_FILTER_LINEAR);
     sceGxmTextureSetMagFilter(&t[stage], S.tex_mag[stage] == X_D3DTEXF_POINT ? SCE_GXM_TEXTURE_FILTER_POINT : SCE_GXM_TEXTURE_FILTER_LINEAR);
     xv_ui_gxm_apply_texture_options(&t[stage]);
-    sceGxmTextureSetUAddrMode(&t[stage], addr_mode(S.tex_addr_u[stage]));
-    sceGxmTextureSetVAddrMode(&t[stage], addr_mode(S.tex_addr_v[stage]));
+    sceGxmTextureSetUAddrMode(&t[stage], addr_mode_with(S.tex_addr_u[stage], S.tex_border[stage]));
+    sceGxmTextureSetVAddrMode(&t[stage], addr_mode_with(S.tex_addr_v[stage], S.tex_border[stage]));
     memcpy(keys[stage], key, sizeof key); valid[stage] = 1;
     return &t[stage];
 }
