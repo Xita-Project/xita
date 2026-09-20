@@ -88,3 +88,17 @@ Manually inspected consumers:
 - 8BA10 derives a parent object's node matrix for point transformation. 8D4A0 passes a selected matrix to matrix multiplication. 8F510 invokes hierarchy construction and subsequently uses a selected matrix in transform helpers.
 
 These observations rule out assuming that the active callback is the only matrix reader. They do not prove all writes are serialized. Shared execution must retain generation/lifetime validation, capture every input dependency, and publish consistently for both native and translated readers; a worker marker alone is insufficient. No new hardware build or unsafe shared-output relaxation was made during this audit. Perf47 remains installed.
+
+## Collision pointer lifetime follow-up
+
+Extended the inventory to group original call-site addresses separately from emitted closure owners. The 35 emitted callers of 172DE0 represent seven unique guest call instructions (438F0, 4ABBC, 4C77D, 84C17, 171690, 1718AB, 171C42). The returned-pointer helper 8B290 has two unique direct sites, C5646 and C58A0. This reduces the manual audit surface without treating duplicated generated closures as independent game paths. Actual generated-code validation retains the earlier 47-function / 57-reference inventory. Indirect calls and downstream aliases still require manual analysis.
+
+The descriptor built by 172DE0 contains object handle at +0, collision-tag pointer at +4, object+130 pointer at +8, and borrowed node-matrix array at +C. Copying its 16 bytes alone does not capture the referenced object data.
+
+Confirmed consumers and minimum live ranges:
+
+- 171690 builds a stack descriptor; 17169E passes it to 172E60. That consumer selects a node, loads the array at 172EE5, and passes the selected matrix to B5D60 at 172EF5.
+- 1718AB builds a descriptor consumed by 172F40 at 1718D9. The matrix pointer is loaded at 172FD4 and inverted through B6210 at 172FE4. The original matrix pointer is retained in EBP and passed again to 868F0 at 173044. Capturing only the inverse does not close this live range.
+- 4C77D builds a descriptor at [sp+20]; 4C7A3 passes it to 1731D0. That routine reads the matrix at 17327B and inverts it at 173282. Crucially, returning from 1731D0 is NOT the last use: the actor caller reloads descriptor +C at 4C7EF, selects the hit node, and calls B6560 at 4C83A. A reader scope ending at the collision query return would be too short.
+
+These are static lifetime findings, not evidence of a reproduced hardware race. A snapshot must keep the same matrix version through query and result transformation, and must also capture or pin descriptor +4/+8 dependencies. The next implementation boundary must cover the enclosing consumer transaction, or redirect all its reads to owned snapshot storage; unlocking just 172DE0 or its immediate callee is insufficient. Existing shared-output rejection remains in place. No new VPK was deployed, and no performance gain is claimed.
