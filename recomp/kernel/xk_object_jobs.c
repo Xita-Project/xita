@@ -2044,6 +2044,16 @@ static int initialize(void)
     owner_lane_enabled=owner_lane?atoi(owner_lane)!=0:XV_OBJECT_OWNER_LANE_DEFAULT;
     XK_LOG("[owner-lane] process-start %u; owner executes light-end object jobs during two-worker batches\n",owner_lane_enabled);
 #endif
+#if defined(XV_OBJECT_SOLVER_EXPERIMENT) && XV_SOLVER_UNLOCK
+    /* Native solver release from process start (research trial); the benchmark
+     * override path remains. Admission still checks every private span. */
+#ifndef XV_SOLVER_UNLOCK_DEFAULT
+#define XV_SOLVER_UNLOCK_DEFAULT 0
+#endif
+    const char *solver_unlock=getenv("XV_SOLVER_UNLOCK");
+    solver_enabled=solver_unlock?atoi(solver_unlock)!=0:XV_SOLVER_UNLOCK_DEFAULT;
+    XK_LOG("[solver-unlock] process-start %u; fused solver released from the actor guard when its packet is private\n",solver_enabled);
+#endif
 #if XV_OBJECT_JOB_SPLIT
     const char *split=getenv("XV_OBJECT_JOB_SPLIT");
     split_enabled=split?atoi(split)!=0:XV_OBJECT_JOB_SPLIT_DEFAULT;

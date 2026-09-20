@@ -1771,6 +1771,30 @@ $(RECOMP_BUILD)/phase-default.config: force-phase-default-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/xv_phase.o: $(RECOMP_BUILD)/phase-default.config
+# Release the actor guard around the fused native solver (research trial).
+XV_SOLVER_UNLOCK ?= 0
+XV_SOLVER_UNLOCK_DEFAULT ?= 0
+ifneq ($(filter $(XV_SOLVER_UNLOCK),0 1),$(XV_SOLVER_UNLOCK))
+$(error XV_SOLVER_UNLOCK must be 0 or 1)
+endif
+ifneq ($(filter $(XV_SOLVER_UNLOCK_DEFAULT),0 1),$(XV_SOLVER_UNLOCK_DEFAULT))
+$(error XV_SOLVER_UNLOCK_DEFAULT must be 0 or 1)
+endif
+ifeq ($(XV_SOLVER_UNLOCK),1)
+ifneq ($(XV_NATIVE_SOLVER_FUSION) $(XV_EXPERIMENTAL_OBJECT_JOBS),1 1)
+$(error XV_SOLVER_UNLOCK requires XV_NATIVE_SOLVER_FUSION=1 and XV_EXPERIMENTAL_OBJECT_JOBS=1)
+endif
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_SOLVER_EXPERIMENT -DXV_SOLVER_UNLOCK=1 -DXV_SOLVER_UNLOCK_DEFAULT=$(XV_SOLVER_UNLOCK_DEFAULT)
+$(RECOMP_BUILD)/solver_fusion.o: RECOMP_CFLAGS += -DXV_SOLVER_UNLOCK=1
+endif
+.PHONY: force-solver-unlock-config
+force-solver-unlock-config:
+$(RECOMP_BUILD)/solver-unlock.config: force-solver-unlock-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_SOLVER_UNLOCK):$(XV_SOLVER_UNLOCK_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o $(RECOMP_BUILD)/solver_fusion.o: $(RECOMP_BUILD)/solver-unlock.config
 XV_QUERY_REUSE_PROFILE ?= 0
 ifneq ($(words $(XV_QUERY_REUSE_PROFILE)),1)
 $(error XV_QUERY_REUSE_PROFILE must be 0 or 1)

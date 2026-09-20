@@ -209,7 +209,15 @@ void ns_solver_at_172cb8(xctx *c,unsigned caller)
     if(caller==0x172cb8u) {
         uint8_t *arena=g_xram,*image=g_img_base;const uint32_t *pages=g_xpt;
 '''+PROFILE+'''
+#if XV_SOLVER_UNLOCK
+        /* Release the actor guard around the fused solver when its packet,
+         * lists and outputs are private to this lane (admission checks every
+         * span and the original image constants); declined calls stay guarded. */
+        { extern int xv_object_solver_begin(xctx *);extern void xv_object_solver_end(int *);
+          int unlock_=xv_object_solver_begin(c);ns_solver_fused(c,arena,pages,image);xv_object_solver_end(&unlock_); }
+#else
         ns_solver_fused(c,arena,pages,image);
+#endif
         return;
     }
 #endif
