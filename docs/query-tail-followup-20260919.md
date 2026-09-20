@@ -102,3 +102,23 @@ Confirmed consumers and minimum live ranges:
 - 4C77D builds a descriptor at [sp+20]; 4C7A3 passes it to 1731D0. That routine reads the matrix at 17327B and inverts it at 173282. Crucially, returning from 1731D0 is NOT the last use: the actor caller reloads descriptor +C at 4C7EF, selects the hit node, and calls B6560 at 4C83A. A reader scope ending at the collision query return would be too short.
 
 These are static lifetime findings, not evidence of a reproduced hardware race. A snapshot must keep the same matrix version through query and result transformation, and must also capture or pin descriptor +4/+8 dependencies. The next implementation boundary must cover the enclosing consumer transaction, or redirect all its reads to owned snapshot storage; unlocking just 172DE0 or its immediate callee is insufficient. Existing shared-output rejection remains in place. No new VPK was deployed, and no performance gain is claimed.
+
+## Retained-guard hierarchy assistance boundary
+
+The current math-lock contention loop in xk_object_jobs.c retries a try-lock, optionally performs a bounded wait, and checks owner-service parking between attempts. This provides a possible assistance point for a waiting worker without releasing the publisher's shared-state guard. The existing worker threads have 512 KiB native stacks; guest stack ownership remains separate.
+
+Separated hierarchy arithmetic into independent `hierarchy_locals(begin,end,...)` and the existing ordered parent composition. Local transforms read only captured poses and write one distinct 52-byte local matrix per validated node. Composition still follows the validated parent-before-child worklist. All guest publication and numeric failure handling remain unchanged. This adds a 64-by-13 float scratch array; the Vita compiler with shipping numeric flags reports 9,104 bytes of static stack for the inlined hierarchy entry. That is a function-frame measurement, not a whole-thread peak. No worker assistance is enabled by this refactor, and it is not a claimed speed improvement.
+
+The assistance protocol should retain the existing shared guard for the whole capture/compute/publish transaction:
+
+1. A live object worker holding the outer math guard offers a bounded, private local-transform range. Publish task arguments before a release-store of availability.
+2. A different worker that failed to acquire the math lock may atomically claim that range, execute only the pure captured kernel, and release-publish completion. It must neither invoke guest code nor acquire another runtime lock.
+3. The publisher computes a disjoint range. If no helper claimed the offer, it claims and finishes it locally; an unavailable helper must never be required for progress. Once claimed by a helper, the publisher joins before accessing results or returning from the stack frame.
+4. Preserve the helper's floating-point control/status and execute with the publisher's admitted mode. Merge the task's exception flags into the publisher on success; the existing saved-status restoration must still cover numerical decline. Do not assume all worker FPSCR modes match.
+5. Bound assistance so an owner-service park request remains responsive. Keep task state independent of guest service request/reply storage. Assert single publication ownership and exact completion before slot reuse.
+
+This approach avoids widening the shared-output privacy gate and preserves the collision reader lifetime identified above. It parallelizes only local transform preparation, not dependent composition or the entire object update. Hardware admission, overlap, overhead and FPS must be established after the protocol is implemented.
+
+Host owned-XBE comparison passed 222 comparisons per mode (enabled/unset/disabled/math-disabled), 117 admitted random probes in enabled mode, and 85 unchanged declines per mode. The production worker integration with ASan/UBSan passed all 40 configurations with 600 callbacks each, including captured-input poisoning and numerical-failure restoration. Private logs: hierarchy-two-stage-host.log and hierarchy-two-stage-workers.log. ARM instruction validation is tracked separately in hierarchy-two-stage-arm.
+
+The full Vita-compiled ARM instruction suite completed successfully: 2,308 fixtures, including all tested rounding modes, prefix/shuffled worklists and remapped input pages (`hierarchy-two-stage-arm/result.json`). These are correctness/instruction checks, not Vita3K or hardware FPS measurements. Perf47 remains the last verified hardware deployment.

@@ -178,6 +178,20 @@ static void compose(const float left[13],const float right[13],float out[13])
     out[0]=(float)((double)left[0]*(double)right[0]);
 }
 
+/* Independent local transforms form the assistance boundary. A worker may
+ * eventually compute a disjoint range from these owned poses. Composition
+ * below remains ordered because children consume previously produced parents.
+ * This function must never read guest memory or publish shared object state. */
+static void hierarchy_locals(unsigned begin,unsigned end,
+    const int16_t order[MAX_NODES],const float poses[MAX_NODES][8],
+    float locals[MAX_NODES][13])
+{
+    for(unsigned i=begin;i<end;i++) {
+        unsigned n=(unsigned)order[i];
+        local_matrix(poses[n],locals[n]);
+    }
+}
+
 /* Private arithmetic boundary: no guest pointers, context, shared counters or
  * lock operations. Inputs and completed parent matrices were captured above;
  * each produced parent precedes its children in the validated worklist.
@@ -187,10 +201,11 @@ static unsigned hierarchy_snapshot(unsigned first,unsigned queued,
     const int16_t order[MAX_NODES],const int16_t parent[MAX_NODES],
     const float poses[MAX_NODES][8],float matrices[MAX_NODES][13])
 {
+    float locals[MAX_NODES][13];
+    hierarchy_locals(first,queued-1u,order,poses,locals);
     for(unsigned i=first;i<queued-1u;i++) {
-        unsigned n=(unsigned)order[i];float local[13];
-        local_matrix(poses[n],local);
-        compose(matrices[parent[n]],local,matrices[n]);
+        unsigned n=(unsigned)order[i];
+        compose(matrices[parent[n]],locals[n],matrices[n]);
         if(!numeric_matrix(matrices[n],13))return i-first+1u;
     }
     return 0;
