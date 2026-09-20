@@ -15,7 +15,7 @@
 #ifdef __vita__
 #include <psp2/kernel/threadmgr.h>
 typedef SceUID phase_thread;
-static phase_thread current_thread(void) { return sceKernelGetThreadId(); }
+static phase_thread current_thread(void) { return xv_owner_thread_id(); }
 #else
 #include <pthread.h>
 typedef pthread_t phase_thread;

@@ -111,7 +111,7 @@ static int census_is_owner(void)
 {
     if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
 #ifdef __vita__
-    return sceKernelGetThreadId()==census_owner_thread;
+    return xv_owner_thread_id()==census_owner_thread;
 #else
     return pthread_equal(pthread_self(),census_owner_thread);
 #endif
@@ -280,7 +280,7 @@ static int pass_timing_thread(void)
 {
     if(!pass_timing.context)return 0;
 #ifdef __vita__
-    return sceKernelGetThreadId()==pass_timing.thread;
+    return xv_owner_thread_id()==pass_timing.thread;
 #else
     return pthread_equal(pthread_self(),pass_timing.thread);
 #endif
@@ -1028,7 +1028,7 @@ void xv_object_math_unlock(int *locked)
 static int pose_is_owner(void)
 {
 #ifdef __vita__
-    return sceKernelGetThreadId()==pose_owner_thread;
+    return xv_owner_thread_id()==pose_owner_thread;
 #else
     return pthread_equal(pthread_self(),pose_owner_thread);
 #endif
@@ -1272,7 +1272,7 @@ void xv_object_clip_release(xctx *c,int *guard)
 static int solver_is_owner(void)
 {
 #ifdef __vita__
-    return sceKernelGetThreadId()==solver_owner_thread;
+    return xv_owner_thread_id()==solver_owner_thread;
 #else
     return pthread_equal(pthread_self(),solver_owner_thread);
 #endif

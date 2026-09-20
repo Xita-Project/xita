@@ -4,7 +4,7 @@
 #include <psp2/kernel/threadmgr.h>
 static SceUID owner_thread;
 static void bind_owner(void){owner_thread=sceKernelGetThreadId();}
-static int is_owner(void){return owner_thread==sceKernelGetThreadId();}
+static int is_owner(void){return owner_thread==xv_owner_thread_id();}
 #elif defined(TEST_ARM)
 /* The instruction fixture is single-threaded. Host tests exercise identity. */
 static void bind_owner(void){}

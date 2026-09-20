@@ -1,12 +1,13 @@
 /* Control/statistics only. The owned-game routine is generated separately. */
 #include "xk_polygon_edge.h"
+int xv_owner_thread_id(void);   /* xk_os_vita.c: owner alias for the scene helper */
 #include <limits.h>
 #include <stdlib.h>
 
 #ifdef __vita__
 #include <psp2/kernel/threadmgr.h>
 static SceUID owner_thread;
-static int is_owner(void) { return sceKernelGetThreadId() == owner_thread; }
+static int is_owner(void) { return xv_owner_thread_id() == owner_thread; }
 static void bind_owner(void) { owner_thread = sceKernelGetThreadId(); }
 #else
 #include <pthread.h>

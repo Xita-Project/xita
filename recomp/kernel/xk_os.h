@@ -30,6 +30,9 @@ int       xk_os_freespace(const char *path, uint64_t *free_bytes, uint64_t *tota
 /* time */
 uint64_t  xk_os_time_100ns(void);            /* wall clock since 1601-01-01 */
 uint64_t  xk_os_monotonic_us(void);
+/* The Vita thread id that host-side owner checks compare against: the caller's id, or the owner's id
+ * while the scene helper (xk_scene_thread.c) runs the owner's scene body on its behalf. */
+int       xv_owner_thread_id(void);
 void      xk_os_sleep_us(uint64_t us);
 
 /* Sticky notification interrupts scheduler idle waits, not guest timers. */

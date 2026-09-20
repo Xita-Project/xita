@@ -30,6 +30,10 @@ PREAMBLE = """/* Under XV_THREAD_PAGE_TABLE the per-function caches read the thr
 #define X_IMG32(a) (*(xu32_u  *)X_G(a))
 #endif
 """
+SCENE_HOOK = """#if XV_SCENE_THREAD
+    { extern int xv_scene_thread_run(void *); if (xv_scene_thread_run(c)) return; }   /* XV_SCENE_THREAD: body ran on the helper */
+#endif
+"""
 HOOK = """#if XV_RENDER_VIEW
     /* XV_RENDER_VIEW_SCOPE: scene half on the render page table */
     extern int xv_render_view_enabled;
@@ -57,6 +61,8 @@ def main():
         if entry in text and "XV_RENDER_VIEW_SCOPE" not in text:
             if text.count(entry) != 1: raise SystemExit("BCB30 entry drift")
             text = text.replace(entry, entry + HOOK, 1); hooks += 1
+        if entry in text and "XV_SCENE_THREAD" not in text:
+            text = text.replace(entry, entry + SCENE_HOOK, 1); hooks += 1
         shard.write_text(text)
     if not any("XV_RENDER_VIEW_SCOPE" in s.read_text() for s in shards): raise SystemExit("f_000BCB30 not found")
     print(f"patched: {preambles} preambles, {hooks} BCB30 hooks ({len(shards)} shards)")

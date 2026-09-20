@@ -40,6 +40,7 @@ ifeq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_object_jobs.c
 endif
 XITA_GAME_SRCS += recomp/kernel/xk_render_view.c
+XITA_GAME_SRCS += recomp/kernel/xk_scene_thread.c
 ifeq ($(XV_WORKER_QUERY),1)
 ifeq ($(XV_TYPED_CLUSTER_QUERY),1)
 XITA_GAME_SRCS += recomp/kernel/xk_cluster_runtime.c recomp/kernel/xk_cluster_snapshot.c \

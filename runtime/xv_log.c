@@ -11,6 +11,7 @@
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/processmgr.h>
 #include "xv_log.h"
+int xv_owner_thread_id(void);   /* recomp/kernel/xk_os_vita.c: owner alias for the scene helper */
 
 static SceUID g_fd=-2, g_mtx=-1;
 static unsigned g_init, g_sink_fallback;
@@ -118,11 +119,11 @@ static void log_write_immediate(const char *buf,unsigned n)
 static int report_is_owner(void)
 {
     SceUID owner=__atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE);
-    return owner>0 && owner==sceKernelGetThreadId();
+    return owner>0 && owner==xv_owner_thread_id();
 }
 static int report_begin(unsigned frame,int async_only)
 {
-    SceUID expected=0,current=sceKernelGetThreadId();
+    SceUID expected=0,current=xv_owner_thread_id();
     if(current<=0 || !__atomic_compare_exchange_n(&g_report_owner,&expected,current,
             0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return 0;
     g_report_async=async_report_begin(frame);
@@ -193,7 +194,7 @@ int xv_log_flush_wait(unsigned timeout_us)
     uint64_t began=sink_now();
     if(async_is_worker()) return XV_LOG_SELF;
     SceUID owner=__atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE);
-    if(owner && owner!=sceKernelGetThreadId()) return XV_LOG_BUSY;
+    if(owner && owner!=xv_owner_thread_id()) return XV_LOG_BUSY;
     if(owner) { int rc=report_flush(0,timeout_us ? timeout_us : 1); if(rc) return rc; }
     uint64_t elapsed=sink_now()-began;
     timeout_us=elapsed>=timeout_us ? 0 : timeout_us-(unsigned)elapsed;

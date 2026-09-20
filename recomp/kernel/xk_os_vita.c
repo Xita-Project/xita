@@ -353,6 +353,13 @@ void xk_os_fiber_switch(xk_fiber *to)
     fiber_park(from);
 }
 xk_fiber *xk_os_fiber_current(void) { return g_current; }
+extern int xv_scene_helper_thread __attribute__((weak)), xv_scene_owner_alias __attribute__((weak));
+int xv_owner_thread_id(void)
+{
+    int id = sceKernelGetThreadId();
+    if (&xv_scene_helper_thread && xv_scene_helper_thread > 0 && id == xv_scene_helper_thread) return xv_scene_owner_alias;
+    return id;
+}
 xk_fiber *xk_os_fiber_main(void) { return &g_main_fiber; }
 void xk_os_fiber_destroy(xk_fiber *f)
 {

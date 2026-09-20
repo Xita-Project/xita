@@ -231,6 +231,9 @@ class HaloHooks(NoGameHooks):
                         "    uint64_t xv_owner_phase_scope_ __attribute__((cleanup(xv_owner_phase_end))) = 0;",
                         f"    if (xv_owner_phase_enabled) xv_owner_phase_begin(&xv_owner_phase_scope_, c, {phase}u);", "#endif"])
         if address == 0xBCB30 and self.owner_phase_enabled:
+            out.extend(["#if XV_SCENE_THREAD",
+                        "    { extern int xv_scene_thread_run(void *); if (xv_scene_thread_run(c)) return; }   /* XV_SCENE_THREAD: body ran on the helper */",
+                        "#endif"])
             out.extend(["#if XV_RENDER_VIEW", "    /* XV_RENDER_VIEW_SCOPE: scene half on the render page table */",
                         "    extern int xv_render_view_enabled;",
                         "    extern void xv_render_view_enter(unsigned *, void *);",

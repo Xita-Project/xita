@@ -543,7 +543,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
         extern int xv_log_report_begin_async_frame(unsigned) __attribute__((weak));
         extern void xv_log_report_end(void) __attribute__((weak));
         int grouped=xv_log_report_begin_async_frame && xv_log_report_end && xv_log_report_begin_async_frame(g_dev.frame);
-        xv_render_view_report(60);         if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
+        xv_render_view_report(60); { extern void xv_scene_thread_report(unsigned); xv_scene_thread_report(60); } if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */
             const float (*m)[4] = g_vp_rows;
             for (int i = 0; i < 3; ++i) { camfwd[i] = m[2][i];
