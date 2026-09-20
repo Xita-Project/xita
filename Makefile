@@ -2010,9 +2010,7 @@ ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))
 $(error XV_RENDER_VIEW must be 0 or 1)
 endif
 ifeq ($(XV_RENDER_VIEW),1)
-ifneq ($(XV_THREAD_PAGE_TABLE),1)
-$(error XV_RENDER_VIEW=1 requires XV_THREAD_PAGE_TABLE=1)
-endif
+# In-place mode needs no per-thread table (Vita3K's JIT lacks the TPIDRURW write, so emulator builds run without it).
 CFLAGS += -DXV_RENDER_VIEW=1 -DXV_RENDER_VIEW_DEFAULT=$(XV_RENDER_VIEW_DEFAULT)
 RECOMP_CFLAGS += -DXV_RENDER_VIEW=1 -DXV_RENDER_VIEW_DEFAULT=$(XV_RENDER_VIEW_DEFAULT)
 endif
