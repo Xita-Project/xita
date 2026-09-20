@@ -474,3 +474,16 @@ view runs 17–18 FPS (55–57 ms). Caveat: this room did not visibly reproduce
 the defect on perf50 either, so the evidence is the traced mechanism plus a
 clean result, not a before/after of a reproduced artifact. Ask the tester
 who reported the Sept 9/18 shadows to re-check their scene on perf59.
+
+## 22. Flashlight check on perf59
+
+D-pad Right is Halo's White button (flashlight), so it is drivable through the
+remote pad. Captures in `../border-fix-hardware/fl-off.png` and `fl-on.png`
+(same view, Marine centred): with the flashlight on, the cone lights the wall
+and floor, the cone edge is clean (no smear), and the Marine's body stays
+fully visible and lit. The traced lit frame (9044, 67 draws) has three
+BORDER-addressed samplers, i.e. the flashlight projection uses the same
+addressing path the shadow fix corrected. The September 5 report ("lit cryo
+pod body vanishes while the flashlight is on") does not reproduce here;
+the pod scene itself was not reachable from this save and stays to be
+re-checked by whoever next passes the cryo bay.
