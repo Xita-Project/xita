@@ -5,9 +5,11 @@
  * widen the copied image span). XV_RENDER_VIEW_LEARN_PASSES passes, XV_RENDER_VIEW_LEARN_INTERVAL
  * frames apart, each stalling two frames by ~0.7 s: experiment-grade, not for shipping.
  * Boundary (scene entry, outermost only): copy each dirty physical page live -> shadow slot, copy the
- * dirty image span live -> render image copy, bind the thread to the render table. Exit: bind back,
- * count the pages the scene wrote (memcmp shadow vs live, live is unchanged single-threaded), copy
- * back (XV_RENDER_VIEW_COPYBACK, default 1). */
+ * dirty image span live -> render image copy (and both -> a pristine host copy), bind the thread to
+ * the render table. Exit: bind back, then merge: every word the scene changed (shadow != pristine) is
+ * written to live; words it left alone keep whatever live holds now, so hand-written helpers that
+ * wrote live directly are not clobbered and (increment C) the next tick's writes survive.
+ * XV_RENDER_VIEW_COPYBACK=0 skips the merge (diagnostic). */
 #include "xk.h"
 #include "xk_render_view.h"
 #include <stdlib.h>
@@ -30,6 +32,8 @@ static uint32_t *slot_page;               /* [shadow_pages] arena page index of 
 static unsigned slots_used, slots_overflow;
 static uint32_t img_dirty_lo = UINT32_MAX, img_dirty_hi;   /* image page indices [lo, hi) */
 static uint8_t *scene_wrote;              /* [phys_pages] union of pages the scene wrote (diagnostic) */
+static uint8_t *pristine;                 /* host copy of every shadow page + the image span as copied in */
+static uint64_t words_merged;
 static unsigned scene_wrote_pages, scene_wrote_img_pages;
 
 /* learning */
@@ -93,7 +97,8 @@ void xv_render_view_configure(void)
     if (!L.shadow_pages || !g_xram) { XK_LOG("[render-view] no shadow region; disabled\n"); xv_render_view_enabled = 0; return; }
     slot_of = malloc(L.phys_pages * sizeof *slot_of); slot_page = malloc(L.shadow_pages * sizeof *slot_page);
     scene_wrote = calloc(L.phys_pages, 1); learn_hash = malloc((L.phys_pages + L.image_pages) * sizeof *learn_hash);
-    if (!slot_of || !slot_page || !scene_wrote || !learn_hash) { XK_LOG("[render-view] no memory; disabled\n"); xv_render_view_enabled = 0; return; }
+    pristine = malloc((size_t)(L.shadow_pages + L.image_pages) * XK_PAGE);
+    if (!slot_of || !slot_page || !scene_wrote || !learn_hash || !pristine) { XK_LOG("[render-view] no memory; disabled\n"); xv_render_view_enabled = 0; return; }
     memset(slot_of, 0xFF, L.phys_pages * sizeof *slot_of);
     /* render table = live table with image pages pointing at the image copy; image copy = image */
     memcpy(render_pt, g_xpt, (1u << 20) * sizeof *render_pt);
@@ -141,14 +146,27 @@ void xv_render_view_enter(unsigned *scope, void *context)
     if (!learn_done) return;                              /* nothing learned yet: keep the live table */
     *scope = 1;
     uint64_t t0 = xk_os_monotonic_us();
-    for (unsigned s = 0; s < slots_used; ++s) memcpy(g_xram + L.shadow_off + (size_t)s * XK_PAGE, g_xram + (size_t)slot_page[s] * XK_PAGE, XK_PAGE);
+    for (unsigned s = 0; s < slots_used; ++s) {
+        uint8_t *shadow = g_xram + L.shadow_off + (size_t)s * XK_PAGE;
+        memcpy(shadow, g_xram + (size_t)slot_page[s] * XK_PAGE, XK_PAGE);
+        memcpy(pristine + (size_t)s * XK_PAGE, shadow, XK_PAGE);
+    }
     if (img_dirty_lo < img_dirty_hi) {
         size_t lo = (size_t)img_dirty_lo * XK_PAGE, n = (size_t)(img_dirty_hi - img_dirty_lo) * XK_PAGE;
-        memcpy(g_xram + L.image_copy_off + lo, g_xram + L.image_off + lo, n); bytes_in += n;
+        memcpy(g_xram + L.image_copy_off + lo, g_xram + L.image_off + lo, n);
+        memcpy(pristine + (size_t)L.shadow_pages * XK_PAGE + lo, g_xram + L.image_copy_off + lo, n); bytes_in += n;
     }
     bytes_in += (uint64_t)slots_used * XK_PAGE;
     bind_table(render_pt);
     enter_us += xk_os_monotonic_us() - t0; frames_entered++;
+}
+/* Words the scene changed in its copy go to live; returns whether the page had any. */
+static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live)
+{
+    if (memcmp(copy, pre, XK_PAGE) == 0) return 0;
+    const uint32_t *c = (const uint32_t *)copy, *p = (const uint32_t *)pre; uint32_t *l = (uint32_t *)live;
+    if (copyback) for (unsigned i = 0; i < XK_PAGE / 4; ++i) if (c[i] != p[i]) { l[i] = c[i]; words_merged++; }
+    return 1;
 }
 void xv_render_view_leave(unsigned *scope)
 {
@@ -158,29 +176,24 @@ void xv_render_view_leave(unsigned *scope)
     bind_table(g_xpt);
     for (unsigned s = 0; s < slots_used; ++s) {
         uint8_t *shadow = g_xram + L.shadow_off + (size_t)s * XK_PAGE, *live = g_xram + (size_t)slot_page[s] * XK_PAGE;
-        if (memcmp(shadow, live, XK_PAGE) == 0) continue;
+        if (!merge_page(shadow, pristine + (size_t)s * XK_PAGE, live)) continue;
         if (!scene_wrote[slot_page[s]]) { scene_wrote[slot_page[s]] = 1; scene_wrote_pages++; }
-        if (copyback) memcpy(live, shadow, XK_PAGE);
     }
-    if (img_dirty_lo < img_dirty_hi) {
-        for (uint32_t ip = img_dirty_lo; ip < img_dirty_hi; ++ip) {
-            uint8_t *copy = g_xram + L.image_copy_off + (size_t)ip * XK_PAGE, *live = g_xram + L.image_off + (size_t)ip * XK_PAGE;
-            if (memcmp(copy, live, XK_PAGE) == 0) continue;
-            scene_wrote_img_pages++;
-            if (copyback) memcpy(live, copy, XK_PAGE);
-        }
-    }
+    if (img_dirty_lo < img_dirty_hi)
+        for (uint32_t ip = img_dirty_lo; ip < img_dirty_hi; ++ip)
+            scene_wrote_img_pages += merge_page(g_xram + L.image_copy_off + (size_t)ip * XK_PAGE,
+                                                pristine + ((size_t)L.shadow_pages + ip) * XK_PAGE, g_xram + L.image_off + (size_t)ip * XK_PAGE);
     leave_us += xk_os_monotonic_us() - t0;
 }
 void xv_render_view_report(unsigned frames)
 {
     if (!ready) return;
-    XK_LOG("[render-view] %u frames: entered %u; slots %u (overflow %u) image span %u pages; copy-in %.2f ms/frame (%.0f KiB), copy-back %.2f ms/frame; scene wrote %u phys pages (union) %u image-page events; mirrors %u dropped %u; aliases max %u\n",
+    XK_LOG("[render-view] %u frames: entered %u; slots %u (overflow %u) image span %u pages; copy-in %.2f ms/frame (%.0f KiB), merge %.2f ms/frame (%llu words); scene wrote %u phys pages (union) %u image-page events; mirrors %u dropped %u; aliases max %u\n",
            frames, frames_entered, slots_used, slots_overflow, img_dirty_lo < img_dirty_hi ? img_dirty_hi - img_dirty_lo : 0,
            frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0,
-           frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0,
+           frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0, (unsigned long long)words_merged,
            scene_wrote_pages, scene_wrote_img_pages, mirrors, mirrors_dropped, aliases_max);
-    frames_entered = 0; enter_us = leave_us = bytes_in = 0; scene_wrote_img_pages = 0; mirrors = mirrors_dropped = 0;
+    frames_entered = 0; enter_us = leave_us = bytes_in = 0; scene_wrote_img_pages = 0; mirrors = mirrors_dropped = 0; words_merged = 0;
 }
 #else
 int xv_render_view_enabled;

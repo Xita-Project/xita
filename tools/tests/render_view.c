@@ -56,12 +56,15 @@ int main(void)
     /* the scene writes through the render table: live is untouched until leave */
     *(uint32_t *)X_G(0x61000u + 8) = 0x12345678u; *(uint32_t *)img = 9;
     CHECK(*(uint32_t *)(g_xram + 0x61008u) != 0x12345678u);
+    *(uint32_t *)(g_xram + 0x61000u + 200) = 0xCAFEu;                 /* a helper writing live directly */
     /* a live-table remap during the scene is not mirrored (dropped), one outside is */
     xk_mem_map_alias(0x00600000u, 0x62000u);
     CHECK((uint8_t *)X_G(0x00600000u) == g_xram + 0x00600000u);      /* render table keeps the identity mapping mid-scene */
     xv_render_view_leave(&scope);
     CHECK(xv_host_page_table == live);
     CHECK(*(uint32_t *)(g_xram + 0x61008u) == 0x12345678u);           /* copied back */
+    CHECK(*(uint32_t *)(g_xram + 0x61000u + 200) == 0xCAFEu);        /* merge, not clobber */
+    CHECK(g_xram[0x61000u + 100] == 0x33);
     CHECK(*(uint32_t *)(g_img_base + 0x2A000u) == 9);
     xk_mem_map_alias(0x00700000u, 0x62000u);
     { unsigned s2 = 0; xv_render_view_enter(&s2, NULL); CHECK((uint8_t *)X_G(0x00700000u) == g_xram + 0x62000u); xv_render_view_leave(&s2); }
