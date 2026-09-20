@@ -367,3 +367,20 @@ design abandoned. Replacement: a third worker thread on core 2 (`WORKERS=3`),
 which reuses all worker machinery including parking and the private overlaps
 (query unlock) on every lane, while the owner keeps only servicing. perf53
 redeployed meanwhile so the campaign is safe to launch.
+
+## 17. Perf56 / efc5d20: three worker lanes — stable, neutral; rolled back to perf53
+
+`XV_OBJECT_WORKERS=3` (third worker on core 2; owner keeps servicing) ran the
+campaign without a hang: lanes took ≈2,330 / 1,200 / 1,150 jobs per window and
+the query unlock was admitted on all three. But the object batch stayed at
+25.9–26.6 ms, every lane's guard wait rose to 12.8–15.3 ms (from 8.2–10.9 on
+two lanes), and the frame was 72.4 ms median vs 70.8 on perf53. **The batch is
+bound by the guard's serialized chain, not by CPU.** Rolled back to perf53.
+Runtime SHA-256 `df81b36b…`; receipts in `../three-workers-hardware/`.
+Host: 3-worker driver 64/64 plain and TSan; 2-worker standard 40/40.
+
+Implication for the roadmap: more lanes or the owner core cannot shorten the
+batch. Only shortening or removing guard holds can (remaining candidates in
+section 14), or reducing the per-acquisition cost/handoff latency (about 970
+guard acquisitions per frame across lanes; the sleep/poll 50 µs wait mode is
+the default, the bounded-mutex mode `XV_OBJECT_TIMED_WAIT=1` is env-only).
