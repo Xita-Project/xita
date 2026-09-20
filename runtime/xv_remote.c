@@ -22,6 +22,7 @@ static uint32_t *screen;
 static char key[33];
 static unsigned captured_frame;
 static unsigned draw_trace_pending;
+static unsigned page_census_pending;
 static int listener=-1;
 static int upload_in_progress;
 static int upload_game = -1;
@@ -84,6 +85,11 @@ void xv_remote_frame(const void *pixels,unsigned width,unsigned height,unsigned 
     STORE(&capture,3); /* Own this immutable copy until the HTTP response ends. */
 }
 
+int xv_remote_take_page_census(void)
+{
+    if(!LOAD(&enabled))return 0;
+    return __atomic_exchange_n(&page_census_pending,0,__ATOMIC_ACQ_REL)&&!xv_benchmark_status()&&!xv_benchmark_remote_busy()&&!xv_updates_requested();
+}
 int xv_remote_take_draw_trace(void)
 {
     if(!LOAD(&enabled))return 0;
@@ -241,6 +247,16 @@ static void serve(int s)
                 if(!bad)xv_update_progress(XV_UPDATE_REQUESTED);
                 reply(s,bad?409:204,bad?"Update not ready\n":"");
             } else reply(s,404,"Unknown update operation\n");
+        } else if(!strcmp(method,"POST")&&!strcmp(target,"/trace/pages")) {
+            /* One-shot per-frame dirty-page census (owner hashes the guest arena at
+             * two consecutive Presents and logs changed pages). Diagnostic only. */
+            if(upload_in_progress||xv_updates_requested()||xv_benchmark_status()||xv_benchmark_remote_busy()) {
+                reply(s,409,"Page census unavailable during update or benchmark\n");return;
+            }
+            unsigned expected=0;
+            if(!__atomic_compare_exchange_n(&page_census_pending,&expected,1,0,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED))
+                reply(s,409,"Page census already pending\n");
+            else reply(s,204,"");
         } else if(!strcmp(method,"POST")&&!strcmp(target,"/trace/draw")) {
             if(upload_in_progress||xv_updates_requested()||xv_benchmark_status()||xv_benchmark_remote_busy()) {
                 reply(s,409,"Draw trace unavailable during update or benchmark\n");return;

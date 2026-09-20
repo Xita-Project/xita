@@ -150,6 +150,49 @@ static struct { uint32_t m; unsigned n; uint32_t last; } g_hm[128]; static unsig
 /* XV_D3D_HIST=<frame> traces an absolute frame; XV_D3D_HIST_LEVEL=<n> traces the n-th frame after a
  * non-UI map started streaming (level loads take a variable number of frames, this does not drift) */
 static int hist_level_rel = -1, hist_level_base = -1;
+/* Per-frame dirty-page census: hash every 4 KiB arena page at this Present and
+ * the next, then log the changed pages as ranges and per-MiB counts. The two
+ * hashing passes each stall the owner for tens of ms; one-shot diagnostic. */
+int xv_remote_take_page_census(void) __attribute__((weak));
+static uint32_t *census_hash;static unsigned census_pages,census_state,census_frame;
+static uint32_t census_page_hash(const uint8_t *p)
+{
+    const uint32_t *w=(const uint32_t *)p;uint32_t h=2166136261u;
+    for(unsigned i=0;i<1024;i++){h^=w[i];h*=16777619u;}
+    return h;
+}
+static void census_track(void)
+{
+    if(census_state==0) {
+        if(!(xv_remote_take_page_census&&xv_remote_take_page_census()))return;
+        census_pages=xk_mem_arena_size()/4096u;
+        if(!census_hash)census_hash=malloc(census_pages*sizeof *census_hash);
+        if(!census_hash){D3DLOG("page-census: no memory\n");return;}
+        uint64_t t0=xk_os_monotonic_us();
+        for(unsigned i=0;i<census_pages;i++)census_hash[i]=census_page_hash(g_xram+(size_t)i*4096u);
+        census_frame=g_dev.frame;census_state=1;
+        D3DLOG("[page-census] baseline at frame %u: %u pages hashed in %llu us\n",g_dev.frame,census_pages,(unsigned long long)(xk_os_monotonic_us()-t0));
+        return;
+    }
+    if(census_state==1) {
+        uint64_t t0=xk_os_monotonic_us();unsigned changed=0,mib[64]={0},ranges=0,run=0,runs=0;
+        char line[400];unsigned used=0;
+        for(unsigned i=0;i<census_pages;i++) {
+            uint32_t h=census_page_hash(g_xram+(size_t)i*4096u);
+            int diff=h!=census_hash[i];
+            if(diff){changed++;if((i>>8)<64)mib[i>>8]++;}
+            if(diff&&!run){run=1;runs++;if(ranges<24)used+=(unsigned)snprintf(line+used,sizeof line-used," %06X",i*4096u);}
+            else if(!diff&&run){run=0;if(ranges<24)used+=(unsigned)snprintf(line+used,sizeof line-used,"-%06X",i*4096u);ranges++;}
+        }
+        if(run&&ranges<24)used+=(unsigned)snprintf(line+used,sizeof line-used,"-%06X",census_pages*4096u);
+        D3DLOG("[page-census] frames %u..%u: %u of %u pages changed (%u KiB) in %u runs; scan %llu us; first ranges:%s\n",
+            census_frame,g_dev.frame,changed,census_pages,changed*4u,runs,(unsigned long long)(xk_os_monotonic_us()-t0),line);
+        used=0;line[0]=0;
+        for(unsigned m=0;m<64;m++)if(mib[m])used+=(unsigned)snprintf(line+used,sizeof line-used," %u:%u",m,mib[m]);
+        D3DLOG("[page-census] changed pages per MiB (index:count):%s\n",line);
+        census_state=0;
+    }
+}
 static void hist_remote_track(void)
 {
     /* Frame selection is owned here; render-side diagnostic readers may also
@@ -169,6 +212,7 @@ static void hist_remote_track(void)
 static void hist_level_track(void)
 {
     hist_remote_track();
+    census_track();
     if(xv_diag_poll_hist()) {
         g_hist_frame=(int)g_dev.frame+1;
         D3DLOG("hist: on-demand trace of frame %d\n",g_hist_frame);
