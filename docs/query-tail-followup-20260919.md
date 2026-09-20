@@ -64,3 +64,12 @@ Retain the private-output guard. The next viable shared-object design needs opti
 The recompiler adds shared transaction guards only to an explicit routine list in HaloHooks.object_shared. 8DDF0 itself does not receive that guard; its pose-coalescing scope is optional and disabled in the observed run. Thus a naive post-compute byte comparison under the math lock alone cannot establish that every possible writer was excluded. Before implementing shared-output publication, identify the writer/reader ownership scope as well as the lifetime/generation checks. Shared output is established by caller inspection, but other earlier admission gates may also reject calls.
 
 Added hierarchy-ownership counters distinguishing idle/fast-path-inactive, foreign caller, nested transaction, invalid state, disabled private math, hold profiling, nonprivate output, nonprivate worklist, and admitted work. Existing restrictions and release/restore behavior are unchanged. Counters use the existing guarded/drained reporting discipline. Full production-worker integration under ASan/UBSan passed all 40 configurations × 600 callbacks, including exact 1,200 expected admissions in eligible configurations and report reset checks. These counters are not hardware evidence until a new build runs.
+
+
+## Perf47 ownership evidence
+
+Perf47 / 72f8cef verified, restarted and boot-confirmed in slot 1. Runtime SHA-256: `5d0e3ff60b4308a18794115ed96a2ab039dff0abb06f3aaf7fe36dd7be92b969`. Campaign observer completed; screenshot confirms world, Marine, pistol animation and HUD. Controls are released. Private receipts: hierarchy-ownership-hardware.
+
+The last three 60-frame ownership reports are respectively `0/0/0/0/0/0/3094/0/0`, `0/0/0/0/0/0/3117/0/0`, and `0/0/0/0/0/0/3091/0/0` in idle/caller/nested/state/disabled/profile/output/stack/ready order. Every attempted batch passed the earlier gates and rejected at shared output. The worklist check comes later and was not reached. This rules out inactive workers, optional pose nesting and disabled settings as explanations for the observed zero admissions. It does not establish that widening output ownership is safe.
+
+Recent ordinary gameplay reports 12.6–12.8 FPS, with final object batch time 1,689,110 us / 60 = 28.15 ms/frame and draw-HLE 11.9 ms/frame. No gain is claimed and no off/on comparison was run. Next work should target the shared object-matrix lifetime/publication boundary, retaining all earlier worker/transaction gates. Hardware remains perf47.
