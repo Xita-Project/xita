@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 
 root=Path(__file__).resolve().parents[1]
+hierarchy_build=os.environ.get('OBJECT_HIERARCHY_TEST_BUILD','0')=='1'
 point_build=os.environ.get('OBJECT_POINT_TEST_BUILD','1')!='0'
 quat_build=os.environ.get('OBJECT_QUAT_TEST_BUILD','1')!='0'
 quat_cache=os.environ.get('OBJECT_QUAT_CACHE_TEST_BUILD','0')=='1'
@@ -18,6 +19,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
     subprocess.run([os.environ.get('CC','cc'),'-O2','-g','-std=gnu11',
         '-fno-strict-aliasing','-ffp-contract=off','-ffunction-sections','-fdata-sections',
         '-DXV_EXPERIMENTAL_OBJECT_JOBS','-DXV_NATIVE_OBJECT_BASIS',
+        *(['-DXV_HIERARCHY_SNAPSHOT=1','-DXV_NATIVE_MODEL_HIERARCHY','-DXV_HIERARCHY_FINAL_NORMAL=1','-DXV_HIERARCHY_MATRIX_NORMAL=1','-DTEST_HIERARCHY_INTEGRATION'] if hierarchy_build else []),
         *(['-DXV_OBJECT_POINT_EXPERIMENT'] if point_build else []),
         *(['-DXV_OBJECT_QUAT_PROFILE'] if quat_profile else []),
         *(['-DXV_OBJECT_QUAT_EXPERIMENT'] if quat_build else []),
@@ -26,6 +28,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
         str(root/'tools/tests/object_private_math.c'),str(root/'recomp/kernel/xk_object_jobs.c'),
         str(root/'recomp/kernel/xk_math.c'),str(root/'recomp/kernel/xk_object_basis.c'),
         *([str(root/'recomp/kernel/xk_quat_cache.c')] if quat_cache else []),
+        *([str(root/'recomp/kernel/xk_hierarchy.c'),'-Wl,--wrap=xv_object_hierarchy_suspend,--wrap=xv_object_hierarchy_resume'] if hierarchy_build else []),
         str(root/'recomp/xv_x86rt.c'),'-pthread','-lm','-Wl,--gc-sections','-o',str(binary)],check=True)
     for quat in ('0','1'):
         for point in ("0", "1"):

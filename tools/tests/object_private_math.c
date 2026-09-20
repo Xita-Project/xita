@@ -277,6 +277,9 @@ static void check_private_quaternion(xctx *c,unsigned id)
     }
     *c=entry;
 }
+#ifdef TEST_HIERARCHY_INTEGRATION
+#include "hierarchy_worker.inc"
+#endif
 void f_0008FB70(xctx *c)
 {
     unsigned id=c->r[1];assert(id<300);
@@ -285,6 +288,9 @@ void f_0008FB70(xctx *c)
     check_private_point(c,id);
     for(unsigned kind=0;kind<4;kind++)compare_helper(c,kind,id);
     check_private_quaternion(c,id);
+#ifdef TEST_HIERARCHY_INTEGRATION
+    compare_hierarchy(c,id);
+#endif
     completed[id]++;c->r[4]+=4;
 }
 int main(void)
@@ -321,6 +327,9 @@ int main(void)
         g_xpt[0x1f0]=0x1e0000;quat_constants_original=0;
     }
     setenv("XV_NATIVE_OBJECT_BASIS","1",1);
+#ifdef TEST_HIERARCHY_INTEGRATION
+    setenv("XV_NATIVE_MODEL_HIERARCHY","1",1);
+#endif
     xctx c={0};c.r[4]=0x20000;c.fcw=0x37f;
     assert(!xv_object_math_available());
     xv_object_jobs_override(1);
