@@ -42,6 +42,12 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
                         env.pop('XV_OBJECT_PRIVATE_QUATERNION')
                     result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30,env=env)
                     assert result.returncode==0,(result.returncode,result.stdout,result.stderr)
+                    if hierarchy_build:
+                        hs=re.findall(r'\[hierarchy-ownership\] \d+ frames .*? ([0-9/]+)\n',result.stderr)
+                        assert len(hs)==4,hs
+                        counts=list(map(int,hs[0].split('/')))
+                        assert len(counts)==9 and all(row=='0/0/0/0/0/0/0/0/0' for row in hs[1:]),hs
+                        assert counts[8]==(1200 if workers!='0' and private==fast=='1' else 0),hs
                     quat_rows=re.findall(r'\[object-quat-site\] lane (\d+) pc ([0-9A-F]+) count (\d+) private-input (\d+)',result.stderr)
                     if quat_profile and not quat_cache and workers!='0' and private==fast=='1':
                         bypass=quat_build and quat=='1' and constants_original

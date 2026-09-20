@@ -364,6 +364,9 @@ int main(void)
     }
     for(unsigned id=0;id<300;id++)assert(completed[id]==2);
     xv_object_math_report_check();
+#ifdef TEST_HIERARCHY_INTEGRATION
+    xv_object_hierarchy_report(2);xv_object_hierarchy_report(0);
+#endif
     extern void xv_native_math_report(unsigned);
     xv_native_math_report(2);xv_native_math_report(0);
     xv_object_jobs_report(2);xv_object_jobs_report(0);xv_object_jobs_shutdown();

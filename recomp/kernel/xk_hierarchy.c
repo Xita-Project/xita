@@ -316,6 +316,7 @@ void xv_model_hierarchy_report(unsigned frames)
 #if XV_HIERARCHY_SNAPSHOT
     XK_LOG("[hierarchy-snapshot] %u frames private-compute batches %u nodes %u; publication under original guard\n",frames,snapshot_batches,snapshot_nodes);
     snapshot_batches=snapshot_nodes=0;
+    xv_object_hierarchy_report(frames);
 #endif
     XV_OBJECT_MATH_GUARD();
     XK_LOG("[model-hierarchy] %u frames batches %u child nodes %u; declined bounds %u layout %u links %u budget %u numeric %u fp %u\n",

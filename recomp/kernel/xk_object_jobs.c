@@ -997,20 +997,36 @@ static int private_stack_span(unsigned lane,uint32_t address,unsigned bytes)
 }
 #if XV_HIERARCHY_SNAPSHOT
 static unsigned hierarchy_private_active[WORKERS];
+enum { HS_IDLE, HS_CALLER, HS_NESTED, HS_STATE, HS_DISABLED, HS_PROFILE,
+       HS_OUTPUT, HS_STACK, HS_READY, HS_REASONS };
+/* Calls occur inside the original math guard (or the sole drained owner).
+ * Reporting runs at the same drained boundary as existing hierarchy counters. */
+static unsigned hierarchy_admission[HS_REASONS];
+static int hierarchy_decline(unsigned reason) { hierarchy_admission[reason]++;return 0; }
+void xv_object_hierarchy_report(unsigned frames)
+{
+    XK_LOG("[hierarchy-ownership] %u frames idle/caller/nested/state/disabled/profile/output/stack/ready %u/%u/%u/%u/%u/%u/%u/%u/%u\n",frames,
+        hierarchy_admission[HS_IDLE],hierarchy_admission[HS_CALLER],hierarchy_admission[HS_NESTED],
+        hierarchy_admission[HS_STATE],hierarchy_admission[HS_DISABLED],hierarchy_admission[HS_PROFILE],
+        hierarchy_admission[HS_OUTPUT],hierarchy_admission[HS_STACK],hierarchy_admission[HS_READY]);
+    memset(hierarchy_admission,0,sizeof hierarchy_admission);
+}
 int xv_object_hierarchy_suspend(xctx *c,int guard,uint32_t output,unsigned bytes)
 {
-    if(initialized!=1||!math_fast_path||!__atomic_load_n(&running,__ATOMIC_ACQUIRE))return 0;
+    if(initialized!=1||!math_fast_path||!__atomic_load_n(&running,__ATOMIC_ACQUIRE))return hierarchy_decline(HS_IDLE);
     int lane=worker_lane();
-    if(lane<0||guard!=lane+2||c!=&contexts[lane]||!xv_is_object_job(c)||
-       math_depth[lane]!=1||c->df||hierarchy_private_active[lane])return 0;
-    if(!(math_private_override<0?math_private_enabled:(unsigned)math_private_override))return 0;
+    if(lane<0||guard!=lane+2||c!=&contexts[lane]||!xv_is_object_job(c))return hierarchy_decline(HS_CALLER);
+    if(math_depth[lane]!=1)return hierarchy_decline(HS_NESTED);
+    if(c->df||hierarchy_private_active[lane])return hierarchy_decline(HS_STATE);
+    if(!(math_private_override<0?math_private_enabled:(unsigned)math_private_override))return hierarchy_decline(HS_DISABLED);
 #ifdef XV_OBJECT_HOLD_PROFILE
-    if(hold_enabled)return 0;
+    if(hold_enabled)return hierarchy_decline(HS_PROFILE);
 #endif
     /* Caller captured every shared input and validated aliases under guard.
      * Only private matrices and the original private worklist can be published. */
-    if(!bytes||!private_stack_span(lane,output,bytes)||
-       !private_stack_span(lane,c->r[4],0x1f8u))return 0;
+    if(!bytes||!private_stack_span(lane,output,bytes))return hierarchy_decline(HS_OUTPUT);
+    if(!private_stack_span(lane,c->r[4],0x1f8u))return hierarchy_decline(HS_STACK);
+    hierarchy_admission[HS_READY]++;
     hierarchy_private_active[lane]=1;
     int held=guard;xv_object_math_unlock(&held);return lane+1;
 }
