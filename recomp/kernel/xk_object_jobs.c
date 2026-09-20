@@ -1674,11 +1674,78 @@ int xv_visibility_classify_jobs(xctx *c,const xv_visibility_input *input,unsigne
 }
 #endif
 
+#if XV_OBJECT_JOB_SPLIT
+/* Heavy/light lane split. Both lanes taking consecutive jobs makes two
+ * lock-heavy actor updates run side by side and serialize on the actor guard.
+ * Jobs are ordered by a per-object running average of measured job time; lane
+ * 0 pops the heavy end and lane 1 the light end of one packed counter, so a
+ * heavy job overlaps mostly with jobs that barely touch the guard. This only
+ * changes inter-object order, which the experiment already relaxes. */
+#ifndef XV_OBJECT_JOB_SPLIT_DEFAULT
+#define XV_OBJECT_JOB_SPLIT_DEFAULT 0
+#endif
+enum { JOB_COST_SLOTS=1024 };
+static unsigned split_enabled;
+static uint16_t job_cost[JOB_COST_SLOTS];
+static unsigned char job_order[CAPACITY];
+static unsigned split_cursor;               /* low 16 bits front, high 16 bits back (exclusive) */
+static unsigned split_front[LANES],split_back[LANES],split_batches;
+static uint64_t split_heavy_us;
+static unsigned job_cost_slot(const xctx *c) { return (c->r[1]&0xFFFFu)%JOB_COST_SLOTS; }
+static void split_order(void)
+{
+    unsigned cost[CAPACITY];
+    for(unsigned i=0;i<count;i++) { job_order[i]=(unsigned char)i;cost[i]=job_cost[job_cost_slot(&jobs[i])]; }
+    for(unsigned i=1;i<count;i++) {                       /* stable insertion sort, descending cost */
+        unsigned char k=job_order[i];unsigned ck=cost[k],j=i;
+        while(j&&cost[job_order[j-1]]<ck) { job_order[j]=job_order[j-1];j--; }
+        job_order[j]=k;
+    }
+    __atomic_store_n(&split_cursor,count<<16,__ATOMIC_RELEASE);
+    split_batches++;
+}
+static int split_take(unsigned lane,unsigned *index)
+{
+    unsigned v=__atomic_load_n(&split_cursor,__ATOMIC_RELAXED);
+    for(;;) {
+        unsigned front=v&0xFFFFu,back=v>>16;
+        if(front>=back)return 0;
+        unsigned want=lane==1?v-0x10000u:v+1u;
+        if(__atomic_compare_exchange_n(&split_cursor,&v,want,1,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED)) {
+            *index=job_order[lane==1?back-1u:front];
+            if(lane==1)split_back[lane]++;else split_front[lane]++;
+            return 1;
+        }
+    }
+}
+static void split_learn(const xctx *c,uint64_t elapsed)
+{
+    unsigned slot=job_cost_slot(c),old=job_cost[slot];
+    unsigned sample=elapsed>65535u?65535u:(unsigned)elapsed;
+    job_cost[slot]=(uint16_t)(old?(old*3u+sample)/4u:sample);
+}
+static void split_report(unsigned frames)
+{
+    XK_LOG("[job-split] %u frames enabled %u batches %u taken front %u/%u/%u back %u/%u/%u; heavy-first order, lane 1 pops the light end\n",
+        frames,split_enabled,split_batches,split_front[0],split_front[1],split_front[2],split_back[0],split_back[1],split_back[2]);
+    memset(split_front,0,sizeof split_front);memset(split_back,0,sizeof split_back);split_batches=0;
+}
+#endif
+static int take_job(unsigned lane,unsigned *index)
+{
+#if XV_OBJECT_JOB_SPLIT
+    if(split_enabled)return split_take(lane,index);
+#endif
+    (void)lane;
+    unsigned i=__atomic_fetch_add(&next,1,__ATOMIC_RELAXED);
+    if(i>=count)return 0;
+    *index=i;return 1;
+}
 static void execute(unsigned lane)
 {
     extern void f_0008FB70(xctx *);
     unsigned i;
-    while((i=__atomic_fetch_add(&next,1,__ATOMIC_RELAXED))<count) {
+    while(take_job(lane,&i)) {
         if(lane<active_workers)park_worker(lane);
         xctx *c=&contexts[lane]; *c=jobs[i];
         active_objects[lane]=c->r[1];
@@ -1696,8 +1763,12 @@ static void execute(unsigned lane)
         if(lane<WORKERS&&solver_active[lane])
             xv_object_job_stop(c,0x8FB70u,"unbalanced private solver scope");
 #endif
-        work_us[lane]+=xk_os_monotonic_us()-started;
+        uint64_t elapsed=xk_os_monotonic_us()-started;
+        work_us[lane]+=elapsed;
         executed[lane]++;
+#if XV_OBJECT_JOB_SPLIT
+        if(split_enabled)split_learn(c,elapsed);
+#endif
         if(c->r[4]!=stacks[lane]+STACK_BYTES-252 || X_M32(stacks[lane])!=0x584a4f42u)
             xv_object_job_stop(c,0x8FB70u,"guest stack contract");
     }
@@ -1815,6 +1886,11 @@ static int initialize(void)
     query_unlock_enabled=unlock?atoi(unlock)!=0:XV_QUERY_UNLOCK_DEFAULT;
     XK_LOG("[query-unlock] process-start %u; world-route 88110 closure released from the actor guard when admitted\n",query_unlock_enabled);
 #endif
+#if XV_OBJECT_JOB_SPLIT
+    const char *split=getenv("XV_OBJECT_JOB_SPLIT");
+    split_enabled=split?atoi(split)!=0:XV_OBJECT_JOB_SPLIT_DEFAULT;
+    XK_LOG("[job-split] process-start %u; heavy/light lane split by per-object job cost\n",split_enabled);
+#endif
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     if(workers && (!strcmp(workers,"0")||!strcmp(workers,"1")))active_workers=(unsigned)atoi(workers);
     if(active_workers!=WORKERS)XK_LOG("[object-jobs] DIAGNOSTIC: %u active workers; zero selects owner-only execution\n",active_workers);
@@ -1917,7 +1993,11 @@ void xv_object_jobs_join(void)
 #ifdef XV_TYPED_CLUSTER_QUERY
     if(active_workers&&query_enabled)xv_cluster_runtime_begin();
 #endif
-    next=0;__atomic_store_n(&running,1,__ATOMIC_RELEASE);
+    next=0;
+#if XV_OBJECT_JOB_SPLIT
+    if(split_enabled)split_order();
+#endif
+    __atomic_store_n(&running,1,__ATOMIC_RELEASE);
     memset(service_state,0,sizeof service_state);
     for(unsigned i=0;i<active_workers;i++) {
 #ifdef __vita__
@@ -2031,6 +2111,9 @@ void xv_object_jobs_report(unsigned frames)
     XK_LOG("[object-jobs] quiescent owner frequency updates %u spatial parameters %u\n",audio_frequencies,audio_parameters);audio_frequencies=audio_parameters=0;
 #if XV_QUERY_UNLOCK
     query_unlock_report(frames);
+#endif
+#if XV_OBJECT_JOB_SPLIT
+    split_report(frames);
 #endif
     XK_LOG("[object-wait] timed %u attempts %u/%u acquired %u/%u timeouts %u/%u\n",
         math_wait_override<0?math_wait_enabled:(unsigned)math_wait_override,

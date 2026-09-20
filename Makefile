@@ -1678,6 +1678,29 @@ $(RECOMP_BUILD)/query-unlock.config: force-query-unlock-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o $(RECOMP_BUILD)/kernel/xk_query_reuse.o: $(RECOMP_BUILD)/query-unlock.config
+# Heavy/light object-job lane split (research trial).
+XV_OBJECT_JOB_SPLIT ?= 0
+XV_OBJECT_JOB_SPLIT_DEFAULT ?= 0
+ifneq ($(filter $(XV_OBJECT_JOB_SPLIT),0 1),$(XV_OBJECT_JOB_SPLIT))
+$(error XV_OBJECT_JOB_SPLIT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_OBJECT_JOB_SPLIT_DEFAULT),0 1),$(XV_OBJECT_JOB_SPLIT_DEFAULT))
+$(error XV_OBJECT_JOB_SPLIT_DEFAULT must be 0 or 1)
+endif
+ifeq ($(XV_OBJECT_JOB_SPLIT),1)
+ifneq ($(XV_EXPERIMENTAL_OBJECT_JOBS),1)
+$(error XV_OBJECT_JOB_SPLIT requires XV_EXPERIMENTAL_OBJECT_JOBS=1)
+endif
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_JOB_SPLIT=1 -DXV_OBJECT_JOB_SPLIT_DEFAULT=$(XV_OBJECT_JOB_SPLIT_DEFAULT)
+endif
+.PHONY: force-job-split-config
+force-job-split-config:
+$(RECOMP_BUILD)/job-split.config: force-job-split-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_OBJECT_JOB_SPLIT):$(XV_OBJECT_JOB_SPLIT_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/job-split.config
 XV_QUERY_REUSE_PROFILE ?= 0
 ifneq ($(words $(XV_QUERY_REUSE_PROFILE)),1)
 $(error XV_QUERY_REUSE_PROFILE must be 0 or 1)
