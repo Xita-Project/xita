@@ -77,15 +77,12 @@ The later complete phase report contains:
   ms/frame. The lanes overlap; do not add them as recoverable frame time.
 - Zero busy display-slot waits. This does not imply zero GPU cost.
 
-Address resolution against this exact build's ELF identifies contended callers
-`81087295` and `8108681B` as `clip_region_native`, `81BCFD49` as guest
-`9013F`, `81642457` as guest `4FDA0`, and `813A523B` as guest `37510`.
-The generated clipping routine locks around each B71C0 polygon clip. Its
-caller-supplied guest input/output may be shared, so deleting that lock is not
-yet justified. The next implementation target is a bounded, owned clipping
-input/result transaction with validation before publication, or an established
-private-stack case that can avoid the guard. Preserve preemption, callbacks,
-FP state and the shared-data fallback.
+The initial address decoding in this investigation was wrong: it omitted the
+Vita module load slide. The reported clipping attribution is withdrawn. See
+[the corrected hardware follow-up](private-clipping-20260919.md#corrected-wait-attribution).
+Use the runtime `xv_object_math_lock` anchor and the matching ELF before resolving
+recorded return PCs; feeding absolute runtime PCs directly to addr2line can
+produce plausible but unrelated function names.
 
 The timing-hook audit also found that `XV_POSE_PIPELINE` explicitly requires
 bucket-0 model hooks. Turning off scene instrumentation wholesale would disable

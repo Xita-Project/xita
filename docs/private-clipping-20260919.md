@@ -1,6 +1,7 @@
 # Private-stack clipping candidate
 
-Perf.40 gameplay identifies contended acquisitions inside `clip_region_native`.
+The initial perf.40 wait attribution to `clip_region_native` was incorrect;
+see the corrected attribution below.
 The optional `XV_CLIP_PRIVATE=1` path shortens the B71C0 guard when all mutable
 inputs, outputs, arguments and scratch storage belong to the calling worker.
 Ordinary builds default to zero. The cumulative perf.41 trial is now installed; gameplay qualification follows.
@@ -85,3 +86,46 @@ Remote status and dashboard both show perf.41 / `1e249ea`. The ordinary campaign
 launch sequence is underway. This confirms installation, not gameplay performance
 or stability. No automated off/on/off FPS test was run. Receipts and subsequent
 campaign captures are under `../clip-private-hardware/`.
+
+
+## Corrected wait attribution
+
+Perf.41 reached the saved campaign, visually confirmed in `loaded-followup.png`.
+Later 60-frame windows report 12.9 and 12.7 FPS. Both private-clipping lanes
+report zero candidates and releases: this run does **not** exercise the new
+release path or demonstrate a benefit. The linked hook and build flag are
+present. Do not infer which admission condition failed from these counters.
+The copied CPU context in the fused query path is one possible restriction,
+not an established cause of rejection in this scene.
+
+The original reason for targeting clipping was a symbolization error. Vita
+loads the executable at a shifted address. Perf.41 logs the math-lock anchor at
+`810D9AB5`; its matching ELF places it at `8107AAB4`. Clearing the Thumb bit gives
+a load slide of `0x5F000`. The earlier perf.40 anchor used a different slide,
+`0x35000`. Direct addr2line on unadjusted runtime PCs returned misleading names.
+
+`tools/symbolize_object_waits.py` now derives the slide from the log anchor,
+subtracts it and resolves the call's final halfword against sized ELF text
+symbols. It retains separate report windows, handles changed anchors between
+runs, refuses missing/unaligned anchors, and leaves addresses outside known
+functions unresolved. Supply the ELF corresponding to the logged executable.
+Its regression fixture covers those cases, including an LR at a symbol boundary.
+
+The last captured perf.41 report resolves the largest waits as:
+
+| Caller | Lane 0 wait | Lane 1 wait |
+| --- | ---: | ---: |
+| `xv_math_quaternion_matrix` | 276,919 us | 303,737 us |
+| guest `4C980` | 111,153 us | 120,339 us |
+| `xv_math_matrix_multiply` | 87,376 us | 112,487 us |
+
+These are per-report, overlapping lane totals, not independently recoverable
+frame time. The corrected receipt is `symbolized-waits.json` beside the captures.
+
+The existing private-quaternion bypass is compiled but runtime-disabled in this
+build. Its earlier isolated test did not demonstrate a whole-frame gain and
+moved some contention to other helpers. The next cumulative experiment should
+consider that already-qualified path together with the current optimizations,
+using normal gameplay after restart, rather than repeat an automated FPS
+comparison. Keep tracking whole batch/frame time and correctness; reducing one
+lock's wait is insufficient evidence of a gain.

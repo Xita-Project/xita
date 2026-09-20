@@ -18,7 +18,9 @@ Perf.41 / `1e249ea` is boot-confirmed on hardware after a full restart. Its
 [private-stack clipping path](docs/private-clipping-20260919.md) releases the
 shared guard only for bounded worker-owned calculations, retaining shared and
 nested fallbacks. Local context/memory, concurrent-worker and ARM/FPSCR checks
-pass; ordinary campaign qualification is underway. No FPS gain is established.
+pass. Campaign loads, but its counters show zero private clipping releases and
+no established gain. Corrected runtime-address decoding points to quaternion
+conversion and matrix multiplication as the prominent math-lock callers.
 
 The [typed spatial-query adapter](docs/cluster-retirement-followup-20260919.md)
 is now installed and executing private calculations on both worker lanes. This
