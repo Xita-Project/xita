@@ -30,7 +30,7 @@ def selective_header(text):
             raise ValueError('primitive change is not reversible: ' + helper)
     if restored != original:
         raise ValueError('private header changed more than the two attributes')
-    if '#define X_G(a)      ((void *)(g_xram + g_xpt[' not in text:
+    if '#define X_G(a)      ((void *)(g_xram + X_PT[' not in text:
         raise ValueError('global mapping definition drift')
     return text
 
