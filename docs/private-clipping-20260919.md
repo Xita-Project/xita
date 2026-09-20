@@ -41,10 +41,32 @@ implementation, not used to assert equivalence of host and ARM FP behavior.
 
 These fixtures are local correctness tests, not hardware FPS comparisons.
 They do not establish actual parallel scheduling correctness or hardware gains.
-Concurrent production-worker/owner-service tests and ARM context/memory/FPSCR
-execution remain required before enabling this in a cumulative hardware build.
+The follow-up execution checks below qualify this candidate for a cumulative
+hardware trial; hardware performance and long-session stability remain unproven.
 Private generated code and receipts are in `../clip-private-execution/`.
 
 The candidate is intentionally bounded rather than removing the shared guard
 from all clipping. On hardware the release counters must show how much work
 qualifies; they cannot by themselves establish a frame-time improvement.
+
+
+## Follow-up execution validation
+
+The `--workers` fixture uses the actual pthread worker pool, semaphore wakeups,
+shared mutex, private stack mappings, owner-service parking and job completion.
+Both workers enter concurrently and each executes 32 polygon regions; one asks
+for owner service during the pass. Complete final guest contexts and memory
+match the locked implementation, both workers retire with balanced guards,
+and each releases 32 inner clips. ASan/UBSan report no failures. This validates
+this exercised schedule, not all interleavings or Vita scheduler behavior.
+
+`tools/test_clip_private_arm.py` executes the Vita-compiled original, locked
+fusion and private fusion in a Cortex-A9 instruction model. All 64 cases match
+complete guest context, memory and FPSCR; 222 clips release. Cases cover four
+rounding modes, private/in-place/shared inputs and outputs, and selected
+exceptional floating-point inputs. Imported memory-copy operations are modeled;
+this is neither a GPU emulator test nor a hardware performance measurement.
+
+Evidence: `../clip-private-workers.log`, `../clip-private-arm.log`, and
+`../clip-private-execution/arm-result.json`. The upcoming cumulative build will
+retain all perf.40 selections and add `XV_CLIP_PRIVATE=1`.
