@@ -227,3 +227,31 @@ every lane including the owner): 40 × 600 pass plain and TSan; the standard
 mode passes with the option compiled but off (the refactor touches the
 default service loop). Report `[owner-lane]`. `XV_OBJECT_OWNER_LANE=0`
 disables. Hardware result follows in section 11.
+
+## 11. Perf54 hardware: HUNG at the load→gameplay transition (rolled back pending)
+
+Deployed 01:26 (verified, boot-confirmed slot 0, runtime SHA-256 `05ac4860…`).
+The campaign sequence ran; the observer saw the level still loading at frame
+≈5,350 (`draws/frame 2`, `loaded 0 active 0`), and the next poll timed out.
+The remote service (a separate thread) stopped answering entirely, i.e. the
+device hung or livelocked around the point where the first object batches
+start (perf53 reached `loaded 1 active 1` at ≈ frame 5,590). The rollback
+request also timed out. **Slot 0 still boots perf54.**
+
+Mitigation left running: `../owner-lane-hardware/rollback-watchdog.sh`
+(detached; log `rollback-watchdog.log`) polls status every 20 s and issues
+`rollback` (previous confirmed executable = perf53, slot 1) as soon as the
+device answers. If the Vita has to be power-cycled by hand, run
+`python3 tools/vita_remote.py --config PRIVATE rollback` from the dashboard
+before launching Halo, or set `XV_OBJECT_OWNER_LANE=0` in env.txt. Do not
+launch the campaign on perf54.
+
+No device log could be fetched; the cause is not established. Candidates
+the code review raised, none verified: a STOP on the owner lane (job-stop
+parking on the owner thread), the owner's quiescent inline services at the
+first batches (cache yields during streaming), or an owner-thread identity
+check in a native helper (`xk_clip_region_control.c`,
+`xk_polygon_edge_control.c`, pose/solver owner checks) taking an owner-only
+path inside a lane-2 job. The option stays compiled out of the next build
+until the device log of the hang is available. perf53 remains the last good
+build; all its receipts are unaffected.
