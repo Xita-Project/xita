@@ -28,7 +28,7 @@ Validation:
 Private evidence is under `../owner-thread-read-arm/` and
 `../owner-thread-read-tests/`. This removes a redundant kernel query, not a
 simulation join or data-ownership check. No hardware timing gain is established;
-perf.39 remains installed until a later cumulative update is confirmed.
+the subsequent hardware receipt is recorded below.
 
 ## Cumulative build
 
@@ -44,5 +44,50 @@ The linked ELF includes strong definitions of `xv_object_is_worker_id` and
 older-backend fallback. Only the gameplay executable and boot record differ
 from perf.39. Runtime SHA-256:
 `4d35c3bd97dcb2999acec62831ed20959a4a6ef9928fa809ffb2255d47baa1cb`.
-Private receipts are in `../owner-thread-hardware/`. This is a built package,
-not yet a confirmed hardware update or an FPS result.
+Private receipts are in `../owner-thread-hardware/`. Hardware deployment and gameplay evidence follow below; the build alone does
+not establish an FPS result.
+
+
+## Hardware receipt and next target
+
+Perf.40 / `28c90b6` was installed through the updater, fully restarted, and
+boot-confirmed in slot 0. Campaign gameplay is visible in the private
+`owner-thread-hardware/followup.png`; the remote status reports the expected
+version. No automated off/on/off comparison was run for this validation.
+
+The first launch checker accepted a loaded-state log entry too early: its
+`gameplay.png` still shows loading, and the pulled full log ends with loaded=0.
+That receipt must not be used as gameplay proof. The later follow-up capture
+shows the pistol, marine, world and HUD, with loaded=1/active=1 in its log.
+Future launch checks must corroborate current state visually instead of treating
+one log match as sufficient.
+
+The first post-load 60-frame window included texture decoding and averaged
+6.2 FPS. Later windows in `steady-tail.log` report 12.6 and 12.7 FPS with no
+texture decoding. These are observations of one ongoing run, not a measured
+improvement over another build. Heavy-gameplay 20 FPS remains unproven.
+
+The later complete phase report contains:
+
+- Game update FA920: 2,236,902 us / 60 entries = 37.28 ms per entry.
+- Scene BCB30: 2,363,781 us / 60 entries = 39.40 ms per entry.
+- Object batch time: 1,677,168 us / 60 frames = 27.95 ms/frame, nested in
+  game update, not additional to it.
+- Worker lock waits: 682,897 / 768,193 us per 60 frames, or 11.38 / 12.80
+  ms/frame. The lanes overlap; do not add them as recoverable frame time.
+- Zero busy display-slot waits. This does not imply zero GPU cost.
+
+Address resolution against this exact build's ELF identifies contended callers
+`81087295` and `8108681B` as `clip_region_native`, `81BCFD49` as guest
+`9013F`, `81642457` as guest `4FDA0`, and `813A523B` as guest `37510`.
+The generated clipping routine locks around each B71C0 polygon clip. Its
+caller-supplied guest input/output may be shared, so deleting that lock is not
+yet justified. The next implementation target is a bounded, owned clipping
+input/result transaction with validation before publication, or an established
+private-stack case that can avoid the guard. Preserve preemption, callbacks,
+FP state and the shared-data fallback.
+
+The timing-hook audit also found that `XV_POSE_PIPELINE` explicitly requires
+bucket-0 model hooks. Turning off scene instrumentation wholesale would disable
+or invalidate an existing optimization. Keep ownership/lifetime hooks intact
+when separating optional timing overhead later.
