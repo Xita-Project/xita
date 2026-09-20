@@ -337,3 +337,19 @@ call closure, perf54 stage):
 
 These are held-time reductions of ≈3 ms in total, i.e. a couple of ms of
 batch wall time; they do not change the 20 FPS picture in section 12.
+
+## 15. 10:37 — rollback done, perf54 log lost
+
+The Vita came back at 10:36 booted into perf54 (dashboard, fresh boot); the
+watchdog issued the rollback at 10:36:20 and the device answered at 10:37:01
+as **perf53, boot slot 1, runtime 92eeeb67…**. Receipts:
+`../owner-lane-hardware/rollback-watchdog.log`, `postrollback-xita.log`
+(79-line perf53 boot), `postrollback-launcher.log` (slot selections only).
+
+The game log is truncated on every start, so the fresh boot destroyed the
+perf54 crash/hang lines before anything could read them; the launcher log
+records nothing about the session. Before any further owner-lane trial, make
+the log survive a restart (rename `ux0:data/xita/xita.log` to a `.prev` copy
+in `runtime/xv_log.c` before the truncating open, and serve it through the
+remote log endpoint), and poll the load tail faster than 20 s in the
+observer. Without that, a second failure would be as blind as the first.
