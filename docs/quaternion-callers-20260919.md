@@ -233,3 +233,25 @@ batch a complete marker list or change simulation/frame buffering. The next
 cumulative package will retain earlier optimizations, remove the now-completed
 quaternion caller census and enable this candidate. Hardware activation,
 rendering, long-session stability and FPS effects remain unverified.
+
+
+## Perf.44 deployment receipt
+
+The cumulative perf.44 / `6e89966` package retains perf.43 optimizations, removes
+`XV_OBJECT_QUAT_PROFILE=1` and adds `XV_NATIVE_MARKER_RECORD=1`. The new guest
+hook is present in the retained shard and the linked ELF contains the capture
+and admission functions. Only `game-a.self` and `boot-game.txt` differ from the
+previous package; package member names remain identical.
+
+Runtime SHA-256:
+`1dd4a22863243c3bdf0667bafe77d0020fa11dd7350ae5c34b6f8e2590d88b1d`.
+VPK SHA-256:
+`7547a6742a3b50a5b7b49d78164146768b50212ecd21dc471caef8ebe030c534`.
+The updater verified 32,213,946 bytes, restarted Xita and boot-confirmed slot 0.
+Remote status and the dashboard image confirm perf.44 / `6e89966`.
+
+The normal campaign sequence has started. Capture activation, gameplay rendering,
+frame times and long-session stability remain pending; deployment is not a claim
+of a performance improvement. Private receipts are in
+`../marker-capture-hardware/`. Its `inherited-perf43/` folder contains copied
+prior-run receipts, not observations from perf.44.
