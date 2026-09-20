@@ -1,17 +1,20 @@
 /* xk_render_view.c - see xk_render_view.h.
  *
- * Learning: armed once gameplay is detected (the gap between a scene exit and the next scene entry,
- * i.e. tick + present, exceeds XV_RENDER_VIEW_LEARN_GAP_US for 30 frames; menus are ~1 ms) or with
- * XV_RENDER_VIEW_LEARN_NOW=1. A pass hashes every physical + image page at one Present and again at
- * the next: changed physical pages get a shadow slot, changed image pages join the image list.
- * XV_RENDER_VIEW_LEARN_PASSES passes, XV_RENDER_VIEW_LEARN_INTERVAL frames apart, ~0.7 s stall each.
- * Boundary (scene entry, outermost only): copy every listed page live -> shadow slot / image copy,
- * refresh XV_RENDER_VIEW_ROLL unlisted image pages of the .data tail per frame (rotating, so a rarely
- * written global is stale for at most span/ROLL frames), keep a pristine copy of the pages the scene
- * is known to write, bind the thread to the render table. Exit: bind back, merge every word the scene
- * changed (copy != pristine) into live. Full frames (first 30 active, then every
- * XV_RENDER_VIEW_FULL_INTERVAL) take pristine copies of and compare every listed page, growing the
- * scene-write set; other frames only handle the set. XV_RENDER_VIEW_COPYBACK=0 skips the merge. */
+ * In-place mode (increment A, single-threaded): for the duration of the scene half the LIVE page
+ * table's entries for the learned dirty pages point at per-frame shadow copies and the flat image base
+ * points at a persistent image copy, so every thread (owner, native helper threads, other guest
+ * fibers) reads and writes the same frozen view; on exit the entries are restored and every word the
+ * scene changed is merged into the live pages. A per-thread table (TPIDRURW) is NOT used here: the
+ * first cut bound only the owner and the scene spun forever on results helper threads had written
+ * through their own table (handoff §28). The overlap (increment C) needs per-job binding instead.
+ *
+ * Learning: armed once gameplay is detected (scene-exit to scene-entry gap > XV_RENDER_VIEW_LEARN_GAP_US
+ * for 30 frames) or XV_RENDER_VIEW_LEARN_NOW=1; a pass hashes every physical + image page at one
+ * Present and the next; changed physical pages get a shadow slot, changed image pages join the list.
+ * Boundary: copy listed pages live -> shadow / image copy, refresh XV_RENDER_VIEW_ROLL unlisted
+ * .data-tail pages per frame (rotating), keep pristine copies of the pages the scene is known to
+ * write (all listed pages on full frames: first 30 active, then every XV_RENDER_VIEW_FULL_INTERVAL),
+ * retarget. Exit: restore, merge (copy != pristine -> live). XV_RENDER_VIEW_COPYBACK=0 skips the merge. */
 #include "xk.h"
 #include "xk_render_view.h"
 #include <stdlib.h>
@@ -25,31 +28,27 @@
 int xv_render_view_enabled;
 static int configured, ready, copyback = 1;
 static xk_render_view_layout L;
-static struct { uint8_t *img_base; uint32_t entries[1u << 20]; } render_block;
-static uint32_t *render_pt = render_block.entries;
 
-/* listed physical pages -> shadow slot (0xFFFF none); listed image pages; scene-write sets */
-static uint16_t *slot_of;                 /* [phys_pages] */
+static uint16_t *slot_of;                 /* [phys_pages] -> shadow slot or 0xFFFF */
 static uint32_t *slot_page;               /* [shadow_pages] arena page index per slot */
 static unsigned slots_used, slots_overflow;
-static uint8_t *img_listed;               /* [image_pages] */
-static uint32_t *img_list; static unsigned img_listed_n;
-static uint32_t img_lo = UINT32_MAX;      /* lowest written image page: start of the .data tail */
-static uint32_t roll_next; static unsigned roll_pages = 32;
-static uint8_t *sw_slot, *sw_img;         /* [shadow_pages], [image_pages]: scene writes these */
-static unsigned sw_slots, sw_imgs, sw_found_late;
+static uint8_t *img_listed; static uint32_t *img_list; static unsigned img_listed_n;
+static uint32_t img_lo = UINT32_MAX, roll_next; static unsigned roll_pages = 32;
+static uint8_t *sw_slot, *sw_img; static unsigned sw_slots, sw_imgs, sw_found_late;
 static uint8_t *pristine;                 /* [shadow_pages + image_pages] pages, host memory */
 static unsigned full_interval = 30, active_frames;
+static uint8_t *live_img_base;
 
-/* learning */
+/* entries retargeted for the current scene: (vpage, live offset, view offset) */
+typedef struct { uint32_t vp, live, view; } retarget_t;
+static retarget_t *retargets; static unsigned retargets_n, retargets_last, retargets_max, retargets_overflow, image_entries;
+
 static unsigned learn_interval = 150, learn_passes = 6, learn_done, learn_state, learn_next_frame, learn_armed, gap_frames;
-static uint32_t learn_gap_us = 8000;
-static uint32_t *learn_hash;
-static uint64_t learn_us, last_leave_us;
+static uint32_t learn_gap_us = 8000; static uint32_t *learn_hash; static uint64_t learn_us, last_leave_us;
 
-/* per-report counters */
-static unsigned depth, frames_entered, full_frames, mirrors, mirrors_dropped, aliases_max, bound, yield_drops;
+static unsigned depth, bound, frames_entered, full_frames, fiber_switches, aliases_max, mirrors_in_scene;
 static uint64_t enter_us, leave_us, bytes_in, words_merged;
+static int full_frame;
 
 static uint32_t page_hash(const uint8_t *p)
 {
@@ -57,24 +56,7 @@ static uint32_t page_hash(const uint8_t *p)
     for (unsigned i = 0; i < 1024; i += 4) { h = (h ^ w[i]) * 16777619u; h = (h ^ w[i+1]) * 16777619u; h = (h ^ w[i+2]) * 16777619u; h = (h ^ w[i+3]) * 16777619u; }
     return h;
 }
-static uint32_t render_off_for(uint32_t off)      /* live arena offset -> render-table offset */
-{
-    if (off >= L.image_off && off < L.trash_off) return L.image_copy_off + (off - L.image_off);
-    if (off < L.image_off && slot_of && slot_of[off >> 12] != 0xFFFFu) return L.shadow_off + (uint32_t)slot_of[off >> 12] * XK_PAGE;
-    return off;
-}
-void xv_render_view_mirror(uint32_t vpage, uint32_t arena_off)
-{
-    if (!ready) return;
-    if (depth) { mirrors_dropped++; return; }         /* never retarget the table the scene is reading */
-    render_pt[vpage] = render_off_for(arena_off); mirrors++;
-}
-static void retarget_page(uint32_t off)
-{
-    uint32_t vps[8]; unsigned n = xk_mem_page_aliases(off, vps, 8);
-    if (n > aliases_max) aliases_max = n;
-    for (unsigned i = 0; i < n; ++i) render_pt[vps[i]] = render_off_for(off);
-}
+void xv_render_view_mirror(uint32_t vpage, uint32_t arena_off) { (void)vpage; (void)arena_off; if (bound) mirrors_in_scene++; }
 static void learn_page(uint32_t page)
 {
     uint32_t off = page * XK_PAGE;
@@ -87,22 +69,21 @@ static void learn_page(uint32_t page)
     if (slot_of[page] != 0xFFFFu) return;
     if (slots_used >= L.shadow_pages) { slots_overflow++; return; }
     slot_of[page] = (uint16_t)slots_used; slot_page[slots_used++] = page;
-    retarget_page(off);
 }
 static void bench(void)
 {
-    unsigned N = 1u << 20;                              /* bounded by the arena regions it borrows */
+    unsigned N = 1u << 20;
     if (L.shadow_pages * XK_PAGE < N) N = L.shadow_pages * XK_PAGE;
     if (L.image_pages * XK_PAGE < N) N = L.image_pages * XK_PAGE;
     if (N < 64u * 1024u) return;
     uint8_t *heap = malloc(2 * N); if (!heap) return;
-    uint8_t *a = g_xram + L.shadow_off, *b = g_xram + L.image_copy_off;   /* arena regions, cold */
-    uint64_t t; double mbps[4];
+    uint8_t *a = g_xram + L.shadow_off, *b = g_xram + L.image_copy_off;
+    uint64_t t; double mbps[4]; volatile int sink;
     t = xk_os_monotonic_us(); memcpy(a, b, N); mbps[0] = N / 1.048576 / (double)(xk_os_monotonic_us() - t + 1);
     t = xk_os_monotonic_us(); memcpy(heap, b, N); mbps[1] = N / 1.048576 / (double)(xk_os_monotonic_us() - t + 1);
     t = xk_os_monotonic_us(); memcpy(heap + N, heap, N); mbps[2] = N / 1.048576 / (double)(xk_os_monotonic_us() - t + 1);
-    t = xk_os_monotonic_us(); (void)memcmp(heap, heap + N, N); mbps[3] = N / 1.048576 / (double)(xk_os_monotonic_us() - t + 1);
-    XK_LOG("[render-view] %u KiB throughput MB/s: arena->arena %.0f, arena->heap %.0f, heap->heap %.0f, memcmp heap %.0f\n", N >> 10, mbps[0], mbps[1], mbps[2], mbps[3]);
+    t = xk_os_monotonic_us(); sink = memcmp(heap, heap + N, N); mbps[3] = N / 1.048576 / (double)(xk_os_monotonic_us() - t + 1);
+    XK_LOG("[render-view] %u KiB throughput MB/s: arena->arena %.0f, arena->heap %.0f, heap->heap %.0f, memcmp heap %.0f (%d)\n", N >> 10, mbps[0], mbps[1], mbps[2], mbps[3], sink);
     free(heap);
 }
 void xv_render_view_configure(void)
@@ -120,34 +101,21 @@ void xv_render_view_configure(void)
     xk_mem_render_view_layout(&L);
     if (!xv_render_view_enabled) { XK_LOG("[render-view] process-start disabled\n"); return; }
     if (!L.shadow_pages || !g_xram) { XK_LOG("[render-view] no shadow region; disabled\n"); xv_render_view_enabled = 0; return; }
+    retargets_max = L.shadow_pages * 8;
     slot_of = malloc(L.phys_pages * sizeof *slot_of); slot_page = malloc(L.shadow_pages * sizeof *slot_page);
     img_listed = calloc(L.image_pages, 1); img_list = malloc(L.image_pages * sizeof *img_list);
     sw_slot = calloc(L.shadow_pages, 1); sw_img = calloc(L.image_pages, 1);
     learn_hash = malloc((L.phys_pages + L.image_pages) * sizeof *learn_hash);
     pristine = malloc((size_t)(L.shadow_pages + L.image_pages) * XK_PAGE);
-    if (!slot_of || !slot_page || !img_listed || !img_list || !sw_slot || !sw_img || !learn_hash || !pristine) { XK_LOG("[render-view] no memory; disabled\n"); xv_render_view_enabled = 0; return; }
+    retargets = malloc(retargets_max * sizeof *retargets);
+    if (!slot_of || !slot_page || !img_listed || !img_list || !sw_slot || !sw_img || !learn_hash || !pristine || !retargets) { XK_LOG("[render-view] no memory; disabled\n"); xv_render_view_enabled = 0; return; }
     memset(slot_of, 0xFF, L.phys_pages * sizeof *slot_of);
-    memcpy(render_pt, g_xpt, (1u << 20) * sizeof *render_pt);
-    for (uint32_t ip = 0; ip < L.image_pages; ++ip) {
-        uint32_t vp = L.image_vpage + ip, off = L.image_off + ip * XK_PAGE;
-        if (g_xpt[vp] == off) render_pt[vp] = L.image_copy_off + ip * XK_PAGE;
-    }
     memcpy(g_xram + L.image_copy_off, g_xram + L.image_off, L.image_pages * XK_PAGE);
-    render_block.img_base = g_xram + L.image_copy_off - (L.image_vpage << 12);
+    live_img_base = g_img_base;
     ready = 1;
     bench();
-    XK_LOG("[render-view] process-start enabled; shadow %u pages at %08X, image copy %u pages at %08X; learn %u passes every %u frames after a %u us tick gap%s; roll %u, full every %u, copyback %d\n",
+    XK_LOG("[render-view] process-start enabled (in-place); shadow %u pages at %08X, image copy %u pages at %08X; learn %u passes every %u frames after a %u us tick gap%s; roll %u, full every %u, copyback %d\n",
            L.shadow_pages, L.shadow_off, L.image_pages, L.image_copy_off, learn_passes, learn_interval, learn_gap_us, learn_armed ? " (armed now)" : "", roll_pages, full_interval, copyback);
-}
-static void bind_table(uint32_t *table)
-{
-#if defined(__vita__) && defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
-    extern void xv_thread_bind_table(uint32_t *); xv_thread_bind_table(table);
-#elif defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
-    xv_host_page_table = table;  /* host fixture: the current thread's table */
-#else
-    (void)table;
-#endif
 }
 void xv_render_view_present(unsigned frame)
 {
@@ -172,13 +140,42 @@ static inline uint8_t *copy_of_img(uint32_t ip) { return g_xram + L.image_copy_o
 static inline uint8_t *live_of_img(uint32_t ip) { return g_xram + L.image_off + (size_t)ip * XK_PAGE; }
 static inline uint8_t *pristine_slot(unsigned s) { return pristine + (size_t)s * XK_PAGE; }
 static inline uint8_t *pristine_img(uint32_t ip) { return pristine + ((size_t)L.shadow_pages + ip) * XK_PAGE; }
-static int full_frame;
 
+static void retarget_in_place(void)
+{
+    retargets_n = 0;
+    for (unsigned s = 0; s < slots_used; ++s) {
+        uint32_t live = slot_page[s] * XK_PAGE, view = L.shadow_off + s * XK_PAGE, vps[8];
+        unsigned n = xk_mem_page_aliases(live, vps, 8);
+        if (n > aliases_max) aliases_max = n;
+        for (unsigned i = 0; i < n; ++i) {
+            if (retargets_n >= retargets_max) { retargets_overflow++; return; }
+            retargets[retargets_n++] = (retarget_t){ vps[i], live, view }; g_xpt[vps[i]] = view;
+        }
+    }
+    image_entries = 0;
+    for (uint32_t ip = 0; ip < L.image_pages; ++ip) {           /* every image page reads the copy, like X_IMG */
+        uint32_t vp = L.image_vpage + ip, live = L.image_off + ip * XK_PAGE;
+        if (g_xpt[vp] == live) { g_xpt[vp] = L.image_copy_off + ip * XK_PAGE; image_entries++; }
+    }
+    xk_mem_set_image_base(g_xram + L.image_copy_off - (L.image_vpage << 12));
+}
+static void restore_in_place(void)
+{
+    xk_mem_set_image_base(live_img_base);
+    for (uint32_t ip = 0; ip < L.image_pages; ++ip) {
+        uint32_t vp = L.image_vpage + ip, view = L.image_copy_off + ip * XK_PAGE;
+        if (g_xpt[vp] == view) g_xpt[vp] = L.image_off + ip * XK_PAGE;
+    }
+    for (unsigned i = 0; i < retargets_n; ++i)
+        if (g_xpt[retargets[i].vp] == retargets[i].view) g_xpt[retargets[i].vp] = retargets[i].live;   /* remapped mid-scene: leave it */
+    retargets_last = retargets_n; retargets_n = 0;
+}
 void xv_render_view_enter(unsigned *scope, void *context)
 {
     (void)context;
     uint64_t t0 = xk_os_monotonic_us();
-    if (!learn_armed && last_leave_us) {              /* gameplay heuristic: tick + present gap */
+    if (!learn_armed && last_leave_us) {
         if (t0 - last_leave_us > learn_gap_us) { if (++gap_frames >= 30) { learn_armed = 1; XK_LOG("[render-view] gameplay detected (tick gap > %u us for 30 frames): learning armed\n", learn_gap_us); } }
         else gap_frames = 0;
     }
@@ -198,16 +195,15 @@ void xv_render_view_enter(unsigned *scope, void *context)
     }
     unsigned rolled = 0;
     if (img_lo < L.image_pages)
-        for (unsigned n = 0; n < roll_pages && rolled < L.image_pages - img_lo; ++n) {   /* unlisted tail pages, rotating */
+        for (unsigned n = 0; n < roll_pages && rolled < L.image_pages - img_lo; ++n) {
             if (roll_next >= L.image_pages) roll_next = img_lo;
             uint32_t ip = roll_next++;
             if (!img_listed[ip]) { memcpy(copy_of_img(ip), live_of_img(ip), XK_PAGE); rolled++; }
         }
     bytes_in += ((uint64_t)slots_used + img_listed_n + rolled) * XK_PAGE;
-    bind_table(render_pt); bound = 1;
+    retarget_in_place(); bound = 1;
     enter_us += xk_os_monotonic_us() - t0; frames_entered++; full_frames += full_frame;
 }
-/* Words the scene changed in its copy go to live; returns whether the page had any. */
 static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live)
 {
     if (memcmp(copy, pre, XK_PAGE) == 0) return 0;
@@ -215,10 +211,9 @@ static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live)
     if (copyback) for (unsigned i = 0; i < XK_PAGE / 4; ++i) if (c[i] != p[i]) { l[i] = c[i]; words_merged++; }
     return 1;
 }
-/* Merge the scene's writes into live and put the calling thread back on the live table. */
 static void unbind_merge(void)
 {
-    bind_table(g_xpt); bound = 0;
+    restore_in_place(); bound = 0;
     for (unsigned s = 0; s < slots_used; ++s) {
         if (!full_frame && !sw_slot[s]) continue;
         if (!merge_page(shadow_of(s), pristine_slot(s), live_of_slot(s))) continue;
@@ -240,25 +235,17 @@ void xv_render_view_leave(unsigned *scope)
     last_leave_us = xk_os_monotonic_us();
     leave_us += last_leave_us - t0;
 }
-/* Guest scheduler switching away mid-scene: another guest thread may spin on a flag the scene wrote
- * into its shadow copy (seen: level loader vs loading-screen scene, handoff §28), so publish now and
- * finish this scene on the live table. */
-void xv_render_view_fiber_switch(void)
-{
-    if (!bound) return;
-    uint64_t t0 = xk_os_monotonic_us();
-    unbind_merge(); yield_drops++;
-    leave_us += xk_os_monotonic_us() - t0;
-}
+/* In-place mode every fiber sees the view, so a switch needs no action; counted for increment C. */
+void xv_render_view_fiber_switch(void) { if (bound) fiber_switches++; }
 void xv_render_view_report(unsigned frames)
 {
     if (!ready) return;
-    XK_LOG("[render-view] %u frames: entered %u (full %u); slots %u (overflow %u) image pages %u listed, tail %u; copy-in %.2f ms/frame (%.0f KiB), merge %.2f ms/frame (%llu words); scene-write set %u slots + %u image pages (%u found late); yield drops %u; mirrors %u dropped %u; aliases max %u\n",
+    XK_LOG("[render-view] %u frames: entered %u (full %u); slots %u (overflow %u) image pages %u listed, tail %u; copy-in %.2f ms/frame (%.0f KiB), merge %.2f ms/frame (%llu words); scene-write set %u slots + %u image pages (%u found late); retargets %u (+%u image, overflow %u), fiber switches in scene %u, remaps in scene %u; aliases max %u\n",
            frames, frames_entered, full_frames, slots_used, slots_overflow, img_listed_n, img_lo < L.image_pages ? L.image_pages - img_lo : 0,
            frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0,
            frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0, (unsigned long long)words_merged,
-           sw_slots, sw_imgs, sw_found_late, yield_drops, mirrors, mirrors_dropped, aliases_max);
-    frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; mirrors = mirrors_dropped = yield_drops = 0;
+           sw_slots, sw_imgs, sw_found_late, retargets_last, image_entries, retargets_overflow, fiber_switches, mirrors_in_scene, aliases_max);
+    frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; fiber_switches = mirrors_in_scene = 0;
 }
 #else
 int xv_render_view_enabled;

@@ -210,6 +210,7 @@ void xk_mem_bind_arena(void)
     xv_trash_off = g_trash_off;
 #endif
 }
+void xk_mem_set_image_base(uint8_t *base) { g_img_base = base; g_xpt_block.img_base = base; }
 uint32_t xk_mem_image_lo(void) { return g_image_lo; }
 uint32_t xk_mem_image_hi(void) { return g_image_hi; }
 /* Arena: [0, 64 MB) physical, image copy, trash page, then (render view) the image copy for the render

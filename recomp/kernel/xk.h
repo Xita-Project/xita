@@ -164,6 +164,7 @@ uint32_t xk_mem_arena_size(void);                  /* bytes to allocate for g_xr
 typedef struct { uint32_t phys_pages, image_off, image_pages, image_vpage, trash_off, image_copy_off, shadow_off, shadow_pages; } xk_render_view_layout;
 void     xk_mem_render_view_layout(xk_render_view_layout *l);   /* arena regions for xk_render_view.c */
 unsigned xk_mem_page_aliases(uint32_t arena_off, uint32_t *vpages, unsigned max);
+void     xk_mem_set_image_base(uint8_t *base);      /* swap the flat image base (render view in-place mode) */
 uint32_t xk_phys_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t highest, int top_down);
 int      xk_phys_free(uint32_t pa);
 uint32_t xk_mem_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t highest, int top_down);  /* 0 on failure */

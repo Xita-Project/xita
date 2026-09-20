@@ -1,5 +1,5 @@
-/* Host fixture for recomp/kernel/xk_render_view.c (increment A): links the real xk_mem.c.
- *   cc -std=gnu11 -O1 -g -fsanitize=address,undefined -DXV_THREAD_PAGE_TABLE=1 -DXV_RENDER_VIEW=1 -DXV_RENDER_VIEW_DEFAULT=1 \
+/* Host fixture for recomp/kernel/xk_render_view.c (in-place mode): links the real xk_mem.c.
+ *   cc -std=gnu11 -O1 -g -fsanitize=address,undefined -DXV_RENDER_VIEW=1 -DXV_RENDER_VIEW_DEFAULT=1 \
  *      -I. -Irecomp -Irecomp/kernel -Iruntime tools/tests/render_view.c recomp/kernel/xk_render_view.c \
  *      recomp/kernel/xk_mem.c -o /tmp/render_view && /tmp/render_view */
 #include <assert.h>
@@ -19,70 +19,60 @@ uint64_t xk_os_monotonic_us(void) { static uint64_t t; return t += 100; }
 int main(void)
 {
     const uint32_t image_base = 0x10000u, image_size = 0x20000u;   /* 32 image pages */
-    setenv("XV_RENDER_VIEW", "1", 1); setenv("XV_RENDER_VIEW_LEARN_INTERVAL", "0", 1); setenv("XV_RENDER_VIEW_LEARN_PASSES", "2", 1); setenv("XV_RENDER_VIEW_LEARN_NOW", "1", 1);
-    setenv("XV_RENDER_VIEW_SHADOW_PAGES", "16", 1);
+    setenv("XV_RENDER_VIEW", "1", 1); setenv("XV_RENDER_VIEW_LEARN_INTERVAL", "0", 1); setenv("XV_RENDER_VIEW_LEARN_PASSES", "2", 1);
+    setenv("XV_RENDER_VIEW_LEARN_NOW", "1", 1); setenv("XV_RENDER_VIEW_SHADOW_PAGES", "16", 1);
     xk_mem_setup(image_base, image_size);
     uint32_t arena = xk_mem_arena_size();
     g_xram = calloc(arena, 1); assert(g_xram);
     xk_mem_bind_arena();
     xk_render_view_layout L; xk_mem_render_view_layout(&L);
     CHECK(L.shadow_pages == 16 && L.image_pages == 32 && L.shadow_off + 16 * 4096u == arena);
-    uint32_t *live = g_xpt; CHECK(xv_host_page_table == live);
-    /* an allocation alias: VA 0x00500000 -> physical page 0x61 (like a guest heap mapping) */
-    xk_mem_map_alias(0x00500000u, 0x61000u);
+    uint8_t *live_img = g_img_base;
+    xk_mem_map_alias(0x00500000u, 0x61000u);                 /* an allocation alias of physical page 0x61 */
     uint32_t vps[8]; unsigned n = xk_mem_page_aliases(0x61000u, vps, 8);
-    CHECK(n == 4);   /* identity, 0x80000000, 0xF0000000, 0x00500000 */
+    CHECK(n == 4);
     memset(g_xram + 0x61000u, 0x11, 4096); memset(g_xram + 0x62000u, 0x22, 4096);
-    *(uint32_t *)(g_img_base + 0x2A000u) = 7;          /* image page 26 */
+    *(uint32_t *)(g_img_base + 0x2A000u) = 7;                  /* image page 26 */
     xv_render_view_configure();
     CHECK(xv_render_view_enabled);
-    /* before any learn pass the scene keeps the live table */
-    { unsigned scope = 0; xv_render_view_enter(&scope, NULL); CHECK(scope == 0 && xv_host_page_table == live); xv_render_view_leave(&scope); }
-    /* learn pass 1: baseline at present 0, mutate, diff at present 1 */
+    { unsigned scope = 0; xv_render_view_enter(&scope, NULL); CHECK(scope == 0 && (uint8_t *)X_G(0x61000u) == g_xram + 0x61000u); xv_render_view_leave(&scope); }
     xv_render_view_present(0);
-    g_xram[0x61000u + 100] = 0x33;                       /* physical page 0x61 changes */
-    *(uint32_t *)(g_img_base + 0x2A000u) = 8;            /* image page 26 changes */
+    g_xram[0x61000u + 100] = 0x33;
+    *(uint32_t *)(g_img_base + 0x2A000u) = 8;
     xv_render_view_present(1);
-    /* enter: page 0x61 and its aliases must translate into the shadow region, others unchanged */
     unsigned scope = 0; xv_render_view_enter(&scope, NULL);
-    CHECK(scope == 1 && xv_host_page_table != live && g_xpt == live);
+    CHECK(scope == 1);
     uint8_t *p = (uint8_t *)X_G(0x61000u), *q = (uint8_t *)X_G(0x80061000u), *r = (uint8_t *)X_G(0x00500000u);
-    CHECK(p - g_xram >= L.shadow_off && p == q && p == r);
-    CHECK(p[100] == 0x33 && p[0] == 0x11);               /* shadow holds the live content */
+    CHECK(p - g_xram >= L.shadow_off && p == q && p == r);     /* every alias retargeted, in the live table */
+    CHECK(p[100] == 0x33 && p[0] == 0x11);
     CHECK((uint8_t *)X_G(0x62000u) == g_xram + 0x62000u);
-    uint8_t *img = (uint8_t *)X_G(0x2A000u);                /* image page 26 (X_IMG address 0x2A000) */
+    uint8_t *img = (uint8_t *)X_G(0x2A000u);
     CHECK(img - g_xram >= L.image_copy_off && *(uint32_t *)img == 8);
-    CHECK((uint8_t *)X_G(image_base) - g_xram == L.image_copy_off);   /* every image page reads the copy */
-    /* the scene writes through the render table: live is untouched until leave */
+    CHECK((uint8_t *)X_G(image_base) - g_xram == L.image_copy_off);
+    CHECK(g_img_base != live_img && *(uint32_t *)(g_img_base + 0x2A000u) == 8);   /* flat image base swapped */
     *(uint32_t *)X_G(0x61000u + 8) = 0x12345678u; *(uint32_t *)img = 9;
     CHECK(*(uint32_t *)(g_xram + 0x61008u) != 0x12345678u);
-    *(uint32_t *)(g_xram + 0x61000u + 200) = 0xCAFEu;                 /* a helper writing live directly */
-    /* a live-table remap during the scene is not mirrored (dropped), one outside is */
-    xk_mem_map_alias(0x00600000u, 0x62000u);
-    CHECK((uint8_t *)X_G(0x00600000u) == g_xram + 0x00600000u);      /* render table keeps the identity mapping mid-scene */
+    *(uint32_t *)(g_xram + 0x61000u + 200) = 0xCAFEu;          /* a helper writing the live page directly */
+    xk_mem_map_alias(0x00600000u, 0x62000u);                   /* a remap mid-scene lands in the live table at once */
+    CHECK((uint8_t *)X_G(0x00600000u) == g_xram + 0x62000u);
+    xk_mem_map_alias(0x00610000u, 0x61000u);                   /* a new alias of a shadowed page maps live; left alone */
+    CHECK((uint8_t *)X_G(0x00610000u) == g_xram + 0x61000u);
     xv_render_view_leave(&scope);
-    CHECK(xv_host_page_table == live);
-    CHECK(*(uint32_t *)(g_xram + 0x61008u) == 0x12345678u);           /* copied back */
-    CHECK(*(uint32_t *)(g_xram + 0x61000u + 200) == 0xCAFEu);        /* merge, not clobber */
+    CHECK((uint8_t *)X_G(0x61000u) == g_xram + 0x61000u && (uint8_t *)X_G(0x00500000u) == g_xram + 0x61000u);
+    CHECK(g_img_base == live_img && (uint8_t *)X_G(0x2A000u) == g_xram + 0x4000000u + 0x1A000u);
+    CHECK(*(uint32_t *)(g_xram + 0x61008u) == 0x12345678u);    /* merged */
+    CHECK(*(uint32_t *)(g_xram + 0x61000u + 200) == 0xCAFEu);  /* not clobbered */
     CHECK(g_xram[0x61000u + 100] == 0x33);
-    CHECK(*(uint32_t *)(g_img_base + 0x2A000u) == 9);
-    xk_mem_map_alias(0x00700000u, 0x62000u);
-    { unsigned s2 = 0; xv_render_view_enter(&s2, NULL); CHECK((uint8_t *)X_G(0x00700000u) == g_xram + 0x62000u); xv_render_view_leave(&s2); }
-    /* nesting: inner scopes do nothing */
-    { unsigned a = 0, b = 0; xv_render_view_enter(&a, NULL); xv_render_view_enter(&b, NULL); CHECK(a == 1 && b == 0 && xv_host_page_table != live);
-      xv_render_view_leave(&b); CHECK(xv_host_page_table != live); xv_render_view_leave(&a); CHECK(xv_host_page_table == live); }
-    /* a fiber switch mid-scene publishes the scene's writes and finishes on the live table */
-    { unsigned s3 = 0; xv_render_view_enter(&s3, NULL); CHECK(s3 == 1 && xv_host_page_table != live);
-      *(uint32_t *)X_G(0x61000u + 16) = 0x77u; xv_render_view_fiber_switch();
-      CHECK(xv_host_page_table == live && *(uint32_t *)(g_xram + 0x61000u + 16) == 0x77u);
-      *(uint32_t *)X_G(0x61000u + 20) = 0x88u; CHECK(*(uint32_t *)(g_xram + 0x61000u + 20) == 0x88u);   /* now live */
-      xv_render_view_leave(&s3); CHECK(xv_host_page_table == live); }
-    xv_render_view_report(3);
-    /* slot overflow: 20 distinct pages change with 16 slots */
+    CHECK(*(uint32_t *)(live_img + 0x2A000u) == 9);
+    CHECK((uint8_t *)X_G(0x00600000u) == g_xram + 0x62000u && (uint8_t *)X_G(0x00610000u) == g_xram + 0x61000u);
+    { unsigned a = 0, b = 0; xv_render_view_enter(&a, NULL); xv_render_view_enter(&b, NULL); CHECK(a == 1 && b == 0 && g_img_base != live_img);
+      xv_render_view_leave(&b); CHECK(g_img_base != live_img); xv_render_view_leave(&a); CHECK(g_img_base == live_img); }
+    { unsigned s3 = 0; xv_render_view_enter(&s3, NULL); xv_render_view_fiber_switch(); CHECK(g_img_base != live_img); xv_render_view_leave(&s3); CHECK(g_img_base == live_img); }
+    xv_render_view_report(4);
     xv_render_view_present(2);
     for (unsigned i = 0; i < 20; i++) g_xram[0x100000u + i * 4096u]++;
     xv_render_view_present(3);
     xv_render_view_report(1);
-    printf("PASS render_view: aliases %u, arena %u KiB\n", n, arena >> 10);
+    printf("PASS render_view (in-place): aliases %u, arena %u KiB\n", n, arena >> 10);
     return 0;
 }
