@@ -379,6 +379,9 @@ static void pass_timing_cancel(void)
 }
 #endif
 
+#ifndef XV_OBJECT_HOLDS_DEFAULT
+#define XV_OBJECT_HOLDS_DEFAULT 0
+#endif
 #ifdef XV_OBJECT_HOLD_PROFILE
 /* Research-only sampled OUTER worker scopes. A lane owns its records until
  * join. Sampling is decorrelated from periodic call order. Query samples read
@@ -1712,6 +1715,15 @@ static int initialize(void)
     math_wait_enabled=timed&&atoi(timed)!=0;
     const char *private_math=getenv("XV_OBJECT_PRIVATE_MATH");
     math_private_enabled=!private_math||atoi(private_math)!=0;
+#ifdef XV_OBJECT_HOLD_PROFILE
+    /* Sampled lock-holder attribution from process start. XV_OBJECT_HOLDS=1
+     * (or the build default) replaces the benchmark compare path; guest phase
+     * timing keeps precedence because the two share the same lock clocks. */
+    const char *holds=getenv("XV_OBJECT_HOLDS");
+    hold_enabled=(holds?atoi(holds):XV_OBJECT_HOLDS_DEFAULT)>0&&!xv_phase_enabled;
+    xv_object_hold_children_enabled=hold_enabled;
+    XK_LOG("[object-holds] process-start %u; sampled 1/64 outer holds by lock-site pc, guest phase timing %s\n",hold_enabled,xv_phase_enabled?"on (holds suppressed)":"off");
+#endif
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
     if(workers && (!strcmp(workers,"0")||!strcmp(workers,"1")))active_workers=(unsigned)atoi(workers);
     if(active_workers!=WORKERS)XK_LOG("[object-jobs] DIAGNOSTIC: %u active workers; zero selects owner-only execution\n",active_workers);

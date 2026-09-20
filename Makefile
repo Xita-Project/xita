@@ -1955,14 +1955,23 @@ $(filter $(RECOMP_BUILD)/code_%.o,$(RECOMP_OBJS)): $(RECOMP_BUILD)/object-solver
 
 # Sampled lock-holder diagnostic is absent from ordinary acquisition/release.
 XV_OBJECT_HOLD_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_HOLD_PROFILE))),1,0)
+# Process-start default for the sampled holder profile (XV_OBJECT_HOLDS overrides).
+XV_OBJECT_HOLDS_DEFAULT ?= 0
+ifneq ($(words $(XV_OBJECT_HOLDS_DEFAULT)),1)
+$(error XV_OBJECT_HOLDS_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_OBJECT_HOLDS_DEFAULT),0 1),$(XV_OBJECT_HOLDS_DEFAULT))
+$(error XV_OBJECT_HOLDS_DEFAULT must be 0 or 1)
+endif
 ifeq ($(XV_OBJECT_HOLD_BUILD),1)
 RECOMP_CFLAGS += -DXV_OBJECT_HOLD_PROFILE
+$(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_OBJECT_HOLDS_DEFAULT=$(XV_OBJECT_HOLDS_DEFAULT)
 endif
 .PHONY: force-object-hold-config
 force-object-hold-config:
 $(RECOMP_BUILD)/object-hold.config: force-object-hold-config
 	@mkdir -p $(RECOMP_BUILD)
-	@printf '%s\n' '$(XV_OBJECT_HOLD_BUILD)' > $@.tmp
+	@printf '%s\n' '$(XV_OBJECT_HOLD_BUILD):$(XV_OBJECT_HOLDS_DEFAULT)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-hold.config
