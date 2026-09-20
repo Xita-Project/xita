@@ -255,3 +255,55 @@ check in a native helper (`xk_clip_region_control.c`,
 path inside a lane-2 job. The option stays compiled out of the next build
 until the device log of the hang is available. perf53 remains the last good
 build; all its receipts are unaffected.
+
+## 12. State at 01:45 and what to do first
+
+**Installed / boot slot:** slot 0 = perf54 (owner lane, hung at load). Slot 1
+= perf53 (`30ff83e`, last good: unlock + split + trusted tag reuse, 480p
+setting persisted in `xita.cfg`). The detached rollback watchdog will issue
+`rollback` the moment the device answers; check
+`../owner-lane-hardware/rollback-watchdog.log`. If it did not fire, from the
+dashboard run `python3 tools/vita_remote.py --config PRIVATE rollback`, then
+confirm `status` reports `0.2.0-perf.53`. Then pull `ux0:data/xita/xita.log`
+(the log file is truncated on each start, so copy it before launching again)
+to see how perf54 died: a `[object-jobs] STOP` line means an abort on the
+owner lane; no such line and a frozen frame counter means a hang.
+
+**Source:** branch `work/2026-09-18-packet-followup`, HEAD after this file's
+commit. Owner lane is opt-in (`XV_OBJECT_OWNER_LANE=1` build flag, default
+off) and must stay out of cumulative builds until the perf54 log is read.
+
+**Kill switches (env.txt / xita.cfg):** `XV_OBJECT_OWNER_LANE=0`,
+`XV_CAPTURE_TRUST_TAGS=0`, `XV_OBJECT_JOB_SPLIT=0`, `XV_QUERY_UNLOCK=0`,
+`XV_RENDER_HEIGHT=544`.
+
+**Measured tonight (same checkpoint, ordinary play, 60-frame windows):**
+
+| Build | Setting | game ms | FPS |
+| --- | --- | ---: | ---: |
+| perf48 (Codex) | native | 77.6 | 12.9 |
+| perf50 unlock | native | 77.0 | 13.0 |
+| perf50 | 480p | 71.4 | 14.0 |
+| perf51 split (+2 ms draw profile) | 480p | 74.3 | 13.5 |
+| perf53 trust | 480p | 70.7 | 14.1 |
+
+Not 20 FPS. The frame is now CPU-bound: tick ≈ 35.5 ms (object batch 26,
+of which the two lanes still wait 8.5/10 ms on the actor guard) plus scene
+≈ 33 ms (draw-HLE 9; capture 3; the 5B760 per-model loop ≈ 12), sequential
+on the owner thread.
+
+**Roadmap to 20 and 30 FPS (honest):**
+
+1. Owner lane, once the hang is understood: −6 to −10 ms (batch 26 → ~18).
+2. Remaining guard holds in `4C980` (walk 1716F0 ≈ 2 ms, packet 172BF0 ≈ 1.8,
+   solver 170C10 ≈ 1.8, object-route queries ≈ 1.2): each needs its own
+   ownership proof like the world query; maybe −4 ms total.
+3. Capture path residual 3 ms (copies of non-tag sources) and draw-HLE
+   textures/indices/state stages (≈ 5 ms): −3 ms plausible.
+4. That lands near 55–58 ms (≈ 17–18 FPS). **20 FPS needs the 5B760 per-model
+   loop or the tick/scene split; 30 FPS needs simulation and rendering on
+   different cores** (frame snapshot exchange exists as a prototype; render
+   must read a consistent copy of object state). That is the multi-week item.
+5. GPU: at 480p it is no longer the wall in this view (completion ≈ 40
+   ms/frame with two in flight); heavy-combat views with 460 draws were not
+   re-measured tonight and remain far worse.
