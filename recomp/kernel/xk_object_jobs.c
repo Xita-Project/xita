@@ -14,6 +14,12 @@
 #include "xk_cluster_runtime.h"
 #include "xk_object_mutex.h"
 #include "xk_object_solver.h"
+#if XV_HIERARCHY_ASSIST
+#include "xk_captured_task.h"
+#include "xk_hierarchy_runtime.h"
+static xv_captured_task hierarchy_task;
+static unsigned hierarchy_offers,hierarchy_helped,hierarchy_local;
+#endif
 #include "../xv_phase.h"
 #if XV_NATIVE_VISIBILITY_JOBS
 #ifndef XV_LIGHT_QUERY_CENSUS
@@ -861,6 +867,10 @@ __attribute__((noinline)) int xv_object_math_lock(void)
         }
         int acquired=!xv_object_mutex_try(&math_mutex);
         if(!acquired) {
+#if XV_HIERARCHY_ASSIST
+            /* Pure captured work only; service parking remains above this loop. */
+            if(xv_captured_try_run(&hierarchy_task))continue;
+#endif
             if(!waiting) { waiting=xk_os_monotonic_us();math_stats[lane].contended++; }
             if(math_wait_override<0?math_wait_enabled:(unsigned)math_wait_override) {
                 math_wait_stats[lane].attempts++;
@@ -1038,6 +1048,46 @@ void xv_object_hierarchy_resume(int token)
     int held=xv_object_math_lock();
     if(held!=lane+2||math_depth[lane]!=1)abort();
     hierarchy_private_active[lane]=0;
+}
+#endif
+#if XV_HIERARCHY_ASSIST
+int xv_object_hierarchy_offer(xctx *c,int guard,void (*run)(void *),void *argument)
+{
+    if(initialized!=1||!math_fast_path||active_workers<2||
+       !__atomic_load_n(&running,__ATOMIC_ACQUIRE))return 0;
+    int lane=worker_lane();
+    if(lane<0||guard!=lane+2||c!=&contexts[lane]||!xv_is_object_job(c)||
+       math_depth[lane]!=1||__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE))return 0;
+#ifdef XV_OBJECT_HOLD_PROFILE
+    if(hold_enabled)return 0;
+#endif
+    /* Caller retains math_mutex. It must join before any release or service. */
+    xv_captured_offer(&hierarchy_task,run,argument);hierarchy_offers++;
+    return lane+1;
+}
+void xv_object_hierarchy_join(int token)
+{
+    int lane=worker_lane();
+    if(lane<0||token!=lane+1||math_depth[lane]!=1)abort();
+    if(xv_captured_try_run(&hierarchy_task))hierarchy_local++;
+    else hierarchy_helped++;
+    /* The claimed callback is bounded, makes no runtime calls and cannot park
+     * or wait on the retained mutex. Unclaimed work always executes locally. */
+    while(!xv_captured_retire(&hierarchy_task)) {
+#ifdef __arm__
+        __asm__ volatile("yield":::"memory");
+#else
+        __asm__ volatile("":::"memory");
+#endif
+    }
+}
+void xv_object_hierarchy_assist_report(unsigned frames)
+{
+    xv_object_math_report_check();
+    if(__atomic_load_n(&hierarchy_task.state,__ATOMIC_ACQUIRE))abort();
+    XK_LOG("[hierarchy-assist] %u frames offers %u helped %u local %u; shared guard retained\n",
+        frames,hierarchy_offers,hierarchy_helped,hierarchy_local);
+    hierarchy_offers=hierarchy_helped=hierarchy_local=0;
 }
 #endif
 #if XV_NATIVE_MARKER_RECORD

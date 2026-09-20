@@ -3,8 +3,10 @@
 #ifdef XV_NATIVE_MODEL_HIERARCHY
 #include "xk.h"
 #include "xk_object_jobs.h"
-#if XV_HIERARCHY_SNAPSHOT
+#if XV_HIERARCHY_SNAPSHOT || XV_HIERARCHY_ASSIST
 #include "xk_hierarchy_runtime.h"
+#endif
+#if XV_HIERARCHY_SNAPSHOT
 static unsigned snapshot_batches,snapshot_nodes;
 #endif
 #include <stdlib.h>
@@ -192,17 +194,55 @@ static void hierarchy_locals(unsigned begin,unsigned end,
     }
 }
 
+#if XV_HIERARCHY_ASSIST
+#if defined(__arm__)
+#define H_FP_STATUS 0x9fu
+#elif defined(__x86_64__)
+#define H_FP_STATUS 0x3fu
+#else
+#error Hierarchy assistance requires explicit native FP state support
+#endif
+struct hierarchy_local_task {
+    unsigned begin,end,mode,status;
+    const int16_t *order;
+    const float (*poses)[8];
+    float (*locals)[13];
+};
+static void hierarchy_local_task_run(void *argument)
+{
+    struct hierarchy_local_task *task=argument;
+    unsigned saved=fp_read();
+    fp_restore(task->mode&~H_FP_STATUS);
+    hierarchy_locals(task->begin,task->end,task->order,task->poses,task->locals);
+    task->status=fp_read()&H_FP_STATUS;
+    fp_restore(saved);
+}
+#endif
+
 /* Private arithmetic boundary: no guest pointers, context, shared counters or
  * lock operations. Inputs and completed parent matrices were captured above;
  * each produced parent precedes its children in the validated worklist.
  * Returns the one-based failed work item, leaving publication to the caller.
  * A failure may alter private matrices/FP status, never guest state. */
-static unsigned hierarchy_snapshot(unsigned first,unsigned queued,
+static unsigned hierarchy_snapshot(xctx *c,int guard,unsigned first,unsigned queued,
     const int16_t order[MAX_NODES],const int16_t parent[MAX_NODES],
     const float poses[MAX_NODES][8],float matrices[MAX_NODES][13])
 {
     float locals[MAX_NODES][13];
+#if XV_HIERARCHY_ASSIST
+    unsigned end=queued-1u,mid=first+(end-first)/2u;
+    struct hierarchy_local_task task={mid,end,fp_read(),0,order,poses,locals};
+    /* Tiny batches cannot amortize a handoff. Failed admission stays serial. */
+    int assist=end-first>=4?xv_object_hierarchy_offer(c,guard,hierarchy_local_task_run,&task):0;
+    if(assist) {
+        hierarchy_locals(first,mid,order,poses,locals);
+        xv_object_hierarchy_join(assist);
+        fp_restore(fp_read()|task.status);
+    } else hierarchy_locals(first,end,order,poses,locals);
+#else
+    (void)c;(void)guard;
     hierarchy_locals(first,queued-1u,order,poses,locals);
+#endif
     for(unsigned i=first;i<queued-1u;i++) {
         unsigned n=(unsigned)order[i];
         compose(matrices[parent[n]],locals[n],matrices[n]);
@@ -308,7 +348,11 @@ int xv_math_model_hierarchy(xctx *c)
 #if XV_HIERARCHY_SNAPSHOT
     int token=xv_object_hierarchy_suspend(c,xv_object_math_locked_,stack[0x24/4],matrix_bytes);
 #endif
-    unsigned failed=hierarchy_snapshot(first,queued,order,parent,local_poses,matrices);
+    int assist_guard=0;
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    assist_guard=xv_object_math_locked_;
+#endif
+    unsigned failed=hierarchy_snapshot(c,assist_guard,first,queued,order,parent,local_poses,matrices);
 #if XV_HIERARCHY_SNAPSHOT
     xv_object_hierarchy_resume(token);
     if(token) {snapshot_batches++;snapshot_nodes+=work;}
@@ -328,6 +372,9 @@ int xv_math_model_hierarchy(xctx *c)
 
 void xv_model_hierarchy_report(unsigned frames)
 {
+#if XV_HIERARCHY_ASSIST
+    xv_object_hierarchy_assist_report(frames);
+#endif
 #if XV_HIERARCHY_SNAPSHOT
     XK_LOG("[hierarchy-snapshot] %u frames private-compute batches %u nodes %u; publication under original guard\n",frames,snapshot_batches,snapshot_nodes);
     snapshot_batches=snapshot_nodes=0;

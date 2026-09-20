@@ -9,6 +9,8 @@ import tempfile
 
 root=Path(__file__).resolve().parents[1]
 hierarchy_build=os.environ.get('OBJECT_HIERARCHY_TEST_BUILD','0')=='1'
+hierarchy_shared=os.environ.get('OBJECT_HIERARCHY_SHARED_TEST','0')=='1'
+assert not hierarchy_shared or hierarchy_build
 point_build=os.environ.get('OBJECT_POINT_TEST_BUILD','1')!='0'
 quat_build=os.environ.get('OBJECT_QUAT_TEST_BUILD','1')!='0'
 quat_cache=os.environ.get('OBJECT_QUAT_CACHE_TEST_BUILD','0')=='1'
@@ -20,6 +22,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
         '-fno-strict-aliasing','-ffp-contract=off','-ffunction-sections','-fdata-sections',
         '-DXV_EXPERIMENTAL_OBJECT_JOBS','-DXV_NATIVE_OBJECT_BASIS',
         *(['-DXV_HIERARCHY_SNAPSHOT=1','-DXV_NATIVE_MODEL_HIERARCHY','-DXV_HIERARCHY_FINAL_NORMAL=1','-DXV_HIERARCHY_MATRIX_NORMAL=1','-DTEST_HIERARCHY_INTEGRATION'] if hierarchy_build else []),
+        *(['-DXV_HIERARCHY_ASSIST=1','-DTEST_HIERARCHY_SHARED'] if hierarchy_shared else []),
         *(['-DXV_OBJECT_POINT_EXPERIMENT'] if point_build else []),
         *(['-DXV_OBJECT_QUAT_PROFILE'] if quat_profile else []),
         *(['-DXV_OBJECT_QUAT_EXPERIMENT'] if quat_build else []),
@@ -47,7 +50,14 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
                         assert len(hs)==4,hs
                         counts=list(map(int,hs[0].split('/')))
                         assert len(counts)==9 and all(row=='0/0/0/0/0/0/0/0/0' for row in hs[1:]),hs
-                        assert counts[8]==(1200 if workers!='0' and private==fast=='1' else 0),hs
+                        assert counts[8]==((600 if hierarchy_shared else 1200) if workers!='0' and private==fast=='1' else 0),hs
+                        if hierarchy_shared:
+                            assists=re.findall(r'\[hierarchy-assist\] \d+ frames offers (\d+) helped (\d+) local (\d+)',result.stderr)
+                            assert len(assists)==2 and assists[1]==('0','0','0'),assists
+                            offered,helped,local=map(int,assists[0])
+                            assert offered==(600 if workers=='2' and fast=='1' else 0),assists
+                            assert helped+local==offered,assists
+                            print(f"hierarchy assistance: offers={offered} helped={helped} local={local}",flush=True)
                     quat_rows=re.findall(r'\[object-quat-site\] lane (\d+) pc ([0-9A-F]+) count (\d+) private-input (\d+)',result.stderr)
                     if quat_profile and not quat_cache and workers!='0' and private==fast=='1':
                         bypass=quat_build and quat=='1' and constants_original

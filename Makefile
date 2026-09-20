@@ -2335,3 +2335,23 @@ $(RECOMP_BUILD)/hierarchy-snapshot.config: force-hierarchy-snapshot-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(HIERARCHY_SNAPSHOT_OBJS): $(RECOMP_BUILD)/hierarchy-snapshot.config recomp/kernel/xk_hierarchy_runtime.h
+
+# Waiting object workers may help pure hierarchy work; publisher keeps guard.
+XV_HIERARCHY_ASSIST ?= 0
+ifneq ($(filter $(XV_HIERARCHY_ASSIST),0 1),$(XV_HIERARCHY_ASSIST))
+$(error XV_HIERARCHY_ASSIST must be 0 or 1)
+endif
+ifeq ($(XV_HIERARCHY_ASSIST),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_EXPERIMENTAL_OBJECT_JOBS):$(XV_NATIVE_MODEL_HIERARCHY),1:halo_ce_3925:1:1)
+$(error XV_HIERARCHY_ASSIST requires Halo CE object workers and native hierarchy)
+endif
+endif
+$(HIERARCHY_SNAPSHOT_OBJS): RECOMP_CFLAGS += -DXV_HIERARCHY_ASSIST=$(XV_HIERARCHY_ASSIST)
+.PHONY: force-hierarchy-assist-config
+force-hierarchy-assist-config:
+$(RECOMP_BUILD)/hierarchy-assist.config: force-hierarchy-assist-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_HIERARCHY_ASSIST)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(HIERARCHY_SNAPSHOT_OBJS): $(RECOMP_BUILD)/hierarchy-assist.config recomp/kernel/xk_captured_task.h
