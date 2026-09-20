@@ -770,3 +770,31 @@ never arrived. New in this revision: `POST /env?K=V&...`
 (`XV_RENDER_VIEW_IMAGE=0`, `XV_RENDER_VIEW_PHYS_LIMIT_MIB=0`) need no
 rebuild; the render view logs whether the request table page is shadowed
 on the first viewed frame and on a watchdog trip.
+
+## 30. Bisect 1: physical-only render view runs on hardware; D2Vita lessons
+
+`run-bisect.sh physonly XV_RENDER_VIEW_IMAGE=0` (312f1be+ build, env set
+through the new endpoint before Launch): the in-place view with only the
+game-state physical pages shadowed (79 slots, image data live) ran ~3,000
+gameplay frames at the checkpoint without a hang or watchdog trip, rendering
+correctly (screen-physonly.png: Marines, corpses, HUD). So the hangs come
+from the image view (swapped flat image base): host-side writers reach image
+globals through live pointers. Cost: copy-in 1.3 ms/frame (316 KiB), merge
+1.4-2.2 ms/frame (~35k words per 60 frames), scene-write set grew 25->40
+slots; the scene switches guest fibers 8-17 times per frame (the streaming
+and sound threads run inside the scene). The frame-time comparison with
+perf62 is invalid (different view: 390 vs 150 draws/frame); a same-launch
+`XV_RENDER_VIEW=0` run is in progress for the cost.
+
+D2Vita (Box86-derived dynarec for Diablo II, github.com/Franckrst/D2Vita,
+docs at franckrst.github.io/D2Vita/gains/): their measured wins were GPU
+async submission +52% (28.8->43.7 fps; overlapping ~11 ms of submission with
+the next frame), fork-join with a single worker +12%, native hooks chosen by
+gain ≈ N × (T_guest − T_native − 69 ns) at high-frequency call sites, CPU
+ring traversal +11.5%; native memcpy and 14 of 15 dynarec micro-opts gave
+nothing. For Xita the analogue is a D3D command queue with a submitter
+thread: the owner records draws cheaply and a render thread does the
+GXM state/uniform/draw work (`draw-hle` 8 ms at the checkpoint, 24 ms in
+the heavy corridor view) on a core the object workers leave idle during the
+scene. That is host-side overlap: no guest snapshot, no image view, no
+fiber problem. Recommended next increment over the guest snapshot.
