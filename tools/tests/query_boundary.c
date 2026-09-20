@@ -142,6 +142,20 @@ int main(void)
     assert(qb_notification(UINT32_MAX,g_query_boundary_plans[0].command,g_query_boundary_plans[0].ui));
     assert(!xv_d3d_query_boundary_prepare(0,0));
     assert(!qb_notification(UINT32_MAX,1,0));
+    /* No existing transition: count only work strictly after the last writer.
+     * UI at the writer cursor precedes it; UI at the next cursor follows it. */
+    begin_case();cmdlist_t *tail=&lists[0];slot(tail,0,5,11);
+    cmd(tail,0,1,6);cmd(tail,0,0,9);cmd(tail,0,1,12);cmd(tail,0,0,15);
+    ui(tail,2,0);ui(tail,3,0);ui(tail,4,0);
+    g_query_tail_packets=g_query_tail_draws=g_query_tail_indices=g_query_tail_ui=0;
+    g_query_tail_max_draws=0;
+    before=*tail;assert(!xv_d3d_query_boundary_prepare(0,1));
+    assert(!memcmp(tail,&before,sizeof *tail));
+    assert(g_query_tail_packets==1 && g_query_tail_draws==1 && g_query_tail_indices==15);
+    assert(g_query_tail_ui==2 && g_query_tail_max_draws==1);
+    xv_d3d_query_boundary_report();
+    assert(strstr(report,"no-boundary packets 1; recorded suffix draws 1 indices 15 UI 2 max-draws 1"));
+    assert(!g_query_tail_packets && !g_query_tail_draws && !g_query_tail_indices && !g_query_tail_ui && !g_query_tail_max_draws);
     exact_results();
     /* Result-ID pressure retains original OUT_OF_MEMORY without mutation. */
     memset(g_visibility_results,0,sizeof g_visibility_results);

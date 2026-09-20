@@ -11,6 +11,20 @@ typedef struct {
 } xv_query_boundary_plan;
 static xv_query_boundary_plan g_query_boundary_plans[XV_NUM_LISTS];
 static uint32_t g_query_boundary_reasons[QB_REASONS],g_query_boundary_attached,g_query_boundary_failed;
+/* Topology only, not GPU time: measure the suffix an intentional boundary
+ * could release without changing scene submission or resource retirement. */
+static uint64_t g_query_tail_packets,g_query_tail_draws,g_query_tail_indices,g_query_tail_ui;
+static uint32_t g_query_tail_max_draws;
+static void qb_tail(const cmdlist_t *l,unsigned last)
+{
+    unsigned draws=0;
+    for(unsigned i=last+1;i<l->ncmds;i++)if(!l->cmds[i].kind) {
+        draws++;g_query_tail_indices+=l->cmds[i].index_count;
+    }
+    for(unsigned u=0;u<l->nui;u++)if(l->ui[u].before>last)g_query_tail_ui++;
+    g_query_tail_packets++;g_query_tail_draws+=draws;
+    if(draws>g_query_tail_max_draws)g_query_tail_max_draws=draws;
+}
 static unsigned qb_plan(const cmdlist_t *l,xv_query_boundary_plan *p)
 {
     if(l->ncmds>XV_MAX_CMDS || l->nui>sizeof l->ui/sizeof l->ui[0] ||
@@ -51,6 +65,7 @@ static unsigned qb_plan(const cmdlist_t *l,xv_query_boundary_plan *p)
         if(done)break;
         if(ui)u++;else i++;
     }
+    qb_tail(l,last);
     return QB_NO_BOUNDARY;
 }
 /* Called for every real mesh packet before submission. Even disabled packets
@@ -87,6 +102,11 @@ void xv_d3d_query_boundary_report(void)
 {
     XV_LOG("[query-boundary] packets off/ready/no-query/no-writer/no-boundary %u/%u/%u/%u/%u; declines bounds/open/slot/kind/target/ui %u/%u/%u/%u/%u/%u; existing-EndScene attached/failed %u/%u; original final ownership retained\n",
         g_query_boundary_reasons[QB_OFF],g_query_boundary_reasons[QB_READY],g_query_boundary_reasons[QB_NO_QUERY],g_query_boundary_reasons[QB_NO_WRITER],g_query_boundary_reasons[QB_NO_BOUNDARY],g_query_boundary_reasons[QB_BOUNDS],g_query_boundary_reasons[QB_OPEN],g_query_boundary_reasons[QB_SLOT],g_query_boundary_reasons[QB_KIND],g_query_boundary_reasons[QB_TARGET],g_query_boundary_reasons[QB_UI],g_query_boundary_attached,g_query_boundary_failed);
+    XV_LOG("[query-tail] no-boundary packets %llu; recorded suffix draws %llu indices %llu UI %llu max-draws %u; topology only, not GPU time\n",
+        (unsigned long long)g_query_tail_packets,(unsigned long long)g_query_tail_draws,
+        (unsigned long long)g_query_tail_indices,(unsigned long long)g_query_tail_ui,g_query_tail_max_draws);
+    g_query_tail_packets=g_query_tail_draws=g_query_tail_indices=g_query_tail_ui=0;
+    g_query_tail_max_draws=0;
     memset(g_query_boundary_reasons,0,sizeof g_query_boundary_reasons);
     g_query_boundary_attached=g_query_boundary_failed=0;
 }
