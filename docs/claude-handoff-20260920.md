@@ -447,3 +447,23 @@ first add admit/decline counters to `xv_object_solver_begin`.
 **Installed state at 12:25: perf53 (30ff83e), 480p.** Every trial today is
 documented above; the honest ceiling of the incremental path in this room is
 ≈16–17 FPS, and 20+ needs the tick/scene overlap (section 19).
+
+## 21. Perf59 / 76324ac: rendering fix — BORDER texture addressing (installed, slot 0)
+
+Cause found in the perf50 draw trace: the campaign shadow receiver draws
+(vs 29 / ps key 18CCED17) sample the 128×128 shadow render target and a
+64×64 projection texture with `D3DTADDRESS_BORDER` (11 samplers in the
+traced frame), and the runtime mapped BORDER to plain CLAMP, smearing the
+map's edge texels wherever projected coordinates leave the map. That is the
+mechanism behind the "stretched shadow" (Sept 9) and "oversized, repeated
+silhouettes" (Sept 18) reports. Fix: BORDER → `SCE_GXM_TEXTURE_ADDR_CLAMP_FULL_BORDER`
+(transparent black outside) when the guest border color (texture-state
+index 29) is black; otherwise CLAMP with a one-time log. `XV_BORDER_ADDR=0`
+restores the old mapping. Runtime SHA-256 in
+`../border-fix-hardware/package-check.json`; log confirms
+`border addressing: GXM full border (transparent black)`.
+
+Hardware: perf59 loads and plays; checkpoint views show a clean floor with no
+smeared or repeated silhouettes; the frame numbers match perf53 (69–73 ms;
+one window at 66 ms / 15 FPS). Close-up character-shadow captures are in
+`shadow-*.png`; a user confirmation on the device is the final word.
