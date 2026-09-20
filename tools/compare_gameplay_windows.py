@@ -12,14 +12,18 @@ def rows(log,n):
     cont=[(int(a),int(b)) for a,b in re.findall(r'contended (\d+)/(\d+)',t)][-n:]
     qu=re.findall(r'\[query-unlock\] 60 frames enabled (\d+) .*?ready ([0-9/]+); unlocked (\d+)/(\d+) calls (\d+)/(\d+) us',t)[-n:]
     draw=[float(x) for x in re.findall(r'draw-hle ([0-9.]+) ms',t)][-n:]
-    return fps,batch,waits,cont,qu,draw
+    prep=re.findall(r'\[draw-prep\] \d+ frames \d+ draws: (setup .*?) ms/frame',t)[-n:]
+    split=re.findall(r'\[job-split\] \d+ frames enabled (\d+) batches (\d+) taken front ([0-9/]+) back ([0-9/]+)',t)[-n:]
+    return fps,batch,waits,cont,qu,draw,prep,split
 p=argparse.ArgumentParser(description=__doc__);p.add_argument('a');p.add_argument('b');p.add_argument('-n',type=int,default=4)
 a=p.parse_args()
 for name,log in (('A',a.a),('B',a.b)):
-    fps,batch,waits,cont,qu,draw=rows(log,a.n)
+    fps,batch,waits,cont,qu,draw,prep,split=rows(log,a.n)
     print(f'== {name} {log}')
     print(f'  game ms   {[round(x,1) for x in fps]}  median {st.median(fps):.1f} ms = {1000/st.median(fps):.1f} fps')
     print(f'  batch ms  {[round(x,1) for x in batch]}')
     print(f'  wait ms/lane {[ (round(x,1),round(y,1)) for x,y in waits]}  contended {cont}')
     print(f'  draw-hle  {draw}')
     for q in qu: print(f'  query-unlock enabled {q[0]} reasons {q[1]} unlocked calls {q[2]}/{q[3]} us {int(q[4])/60000:.2f}/{int(q[5])/60000:.2f} ms/frame')
+    for s in split: print(f'  job-split enabled {s[0]} batches {s[1]} front {s[2]} back {s[3]}')
+    for x in prep: print(f'  draw-prep {x}')

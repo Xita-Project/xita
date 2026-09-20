@@ -138,3 +138,33 @@ At 480p the frame is CPU-bound again (tick + scene ≈ frame), so CPU savings
 now show directly. 360p is not expected to add much beyond Codex's 69 ms
 observation; 480p is retained as the installed setting (revert: panel,
 Render resolution row, `RIGHT` once).
+
+## 8. Perf51 / 058e12c: `XV_OBJECT_JOB_SPLIT` plus draw-prep profile (installed, slot 0)
+
+Heavy/light lane split: jobs ordered by a per-object running average of
+measured job time, lane 0 pops the heavy end and lane 1 the light end of one
+packed CAS counter (`xk_object_jobs.c`, report `[job-split]`). Host fixture
+40 × 600 passes plain and TSan with unlock and hierarchy assist; two-worker
+run took 221 heavy-end / 379 light-end.
+
+Hardware at 480p, four windows: lane 0 took ≈3,070 heavy-end and lane 1
+≈1,650 light-end jobs per window; object batch 27.4–28.1 → 26.6–27.4 ms; lane
+0 wait 9.5–9.9 → 8.1–8.9 ms; lane 1 wait unchanged (light jobs still take the
+guard through 56670/hierarchy/matrix helpers). Small but real; kept.
+
+The build also enabled `XV_DRAW_PROFILE_DEFAULT=1` for the `[draw-prep]`
+stage breakdown. That profile costs about 2 ms/frame (draw-HLE 10.5 → 12.6),
+so the frame went 72.3 → 74.3 ms; it is off again in perf52. Stage breakdown
+(ms/frame, four windows): streams 5.8–6.3, textures 2.2–2.6, indices 1.6–1.8,
+state 1.1–1.3, program 0.8–0.9, constants 0.4, setup 0.4.
+
+**The streams stage is the vertex-capture reuse path.** `[vertex-capture]`
+reports "capture ≈310,000 µs / 60 frames" = 5.2 ms/frame of guest-thread time
+on perf50 and perf51 alike (Codex's corridor number was 16–18 ms). All 3,779
+reuse checks per window were exact hits, so every compare runs its full
+length (≈447 KiB/frame through `xv_bytes_equal_blocks` /
+`xv_packed_equal`), about 82 µs per check. All buffers are cached
+`USER_RW`; clocks are 444/222 MHz. Perf52 turns on
+`XV_VERTEX_CAPTURE_DETAIL` and `XV_VERTEX_PROFILE` to split compare, copy and
+bookkeeping before choosing between a cheaper change check and a different
+reuse policy.
