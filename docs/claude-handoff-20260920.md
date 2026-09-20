@@ -693,3 +693,39 @@ then every 30th) so per-frame traffic is ~1x the dirty set; and
 switch while the scene is bound publishes the writes and finishes the scene
 on the live table (`yield drops` in the report). If gameplay scenes yield
 every frame, the view is never effective and that counter says so.
+
+## 29. Render view: two more hangs, in-place mode, watchdog build ready (undeployed)
+
+Run 2 (per-thread table, gameplay-armed learning): learn pass 1 at frame
+5370 (150 pages, 129 slots, 21 image pages), then the first viewed frame spun
+forever at `eip 000540E3` (thread 8, yield storm 417k/3 s). Cause: native
+helper threads write results into guest memory through their own (live)
+table; a scene bound to a separate table never sees them. Throughput bench:
+memcpy arena->arena 197-239 MB/s, arena->heap 278-314, heap->heap 244-283,
+newlib memcmp ~86 MB/s. Plan for the number: a 0.6 MB dirty set costs ~3 ms
+to copy in, plus the merge.
+
+Run 3 (in-place mode, 774712d: the LIVE table's entries for the dirty pages
+are retargeted to the shadow copies and the flat image base swapped for the
+scene's duration, so every thread sees one view): learn pass 1 at 5357 (154
+pages, 133 slots), then the first viewed frame spun at `eip 00012AA9` (a
+low-level wait helper; stack shows tag-cache alias 803A6024 and 80BAxxxx
+buffers). Class: the guest polls a word that host-side code (D3D fences /
+push buffer / audio) writes through a cached live pointer. Both runs needed a
+manual app restart.
+
+Built, not deployed (7e119a3, stage `render-view-hardware/build/xita.vpk`,
+`run-perf63-fixed.sh` staged with campaign-launch4): shadow only physical
+pages below `XV_RENDER_VIEW_PHYS_LIMIT_MIB` (default 4: the game-state region;
+D3D/audio buffers at MiB 29-31/60-61 and guest stacks stay live),
+`XV_RENDER_VIEW_IMAGE=0` toggle, one-pass word merge, and a watchdog on the
+remote `/status` handler that restores the live mapping and disables the view
+when a scene has been bound over 3 s (my polls hit /status every 5 s), so a
+hang no longer needs a manual restart. If the 4 MiB limit still hangs, the
+next split is `XV_RENDER_VIEW_IMAGE=0` (image .data live) to separate the
+image-global hypothesis from the physical one.
+
+Device state at 16:55: frozen on the third run (frames 5379), awaiting a
+manual restart; slot 0 = perf63 run 2 build, slot 1 = perf63 run 3 build.
+perf62 is no longer in a slot: redeploy `thread-pt-hardware/build/xita.vpk`
+to get back to the known-good baseline.
