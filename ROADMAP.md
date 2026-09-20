@@ -14,6 +14,11 @@ heavy Halo CE gameplay**, with rendering and gameplay correctness preserved.
 Halo 2 rendering remains part of the project goal, but hardware startup work is
 parked while Halo CE performance is prioritized.
 
+Perf.42 / `9a1c6bf` is now boot-confirmed after restart, retaining perf.41 and
+[enabling the existing private-quaternion path at startup](docs/quaternion-cumulative-20260919.md).
+Production-worker startup/fallback tests pass; the ordinary campaign check is
+running. No performance gain is claimed from deployment alone.
+
 Perf.41 / `1e249ea` is boot-confirmed on hardware after a full restart. Its
 [private-stack clipping path](docs/private-clipping-20260919.md) releases the
 shared guard only for bounded worker-owned calculations, retaining shared and

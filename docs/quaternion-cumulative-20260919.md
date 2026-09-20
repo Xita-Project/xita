@@ -37,3 +37,17 @@ python3 tools/test_object_private_math.py
 Receipt: `../quat-default-tests.log`. The cumulative hardware trial will retain
 all perf.41 selections and add `XV_OBJECT_QUAT_DEFAULT=1`, fully restart, and
 use ordinary campaign gameplay/logs. No automated FPS comparison is requested.
+
+
+## Deployment receipt
+
+Perf.42 / `9a1c6bf` built successfully with all perf.41 settings retained and
+`XV_OBJECT_QUAT_DEFAULT=1`. Only `game-a.self` and `boot-game.txt` changed in
+the VPK. Runtime SHA-256:
+`90ee312aa9e2104f4509efe3acee1942d5f7ae2b1c38d6357d16a350a451f4a9`.
+The updater verified 32,208,546 bytes, restarted, and boot-confirmed slot 0.
+Remote status and a dashboard capture confirm perf.42 / `9a1c6bf`.
+
+The campaign launch/check is running. Installation is verified; gameplay
+activation, performance and longer stability are not yet established for this
+build. Private receipts are under `../quat-cumulative-hardware/`.
