@@ -3,7 +3,7 @@
 Perf.40 gameplay identifies contended acquisitions inside `clip_region_native`.
 The optional `XV_CLIP_PRIVATE=1` path shortens the B71C0 guard when all mutable
 inputs, outputs, arguments and scratch storage belong to the calling worker.
-Ordinary builds default to zero. This candidate is not installed on hardware.
+Ordinary builds default to zero. The cumulative perf.41 trial is now installed; gameplay qualification follows.
 
 The original guard is acquired, shared counters are updated, and the original
 stack probe runs first. Admission then checks the exact worker context and
@@ -70,3 +70,18 @@ this is neither a GPU emulator test nor a hardware performance measurement.
 Evidence: `../clip-private-workers.log`, `../clip-private-arm.log`, and
 `../clip-private-execution/arm-result.json`. The upcoming cumulative build will
 retain all perf.40 selections and add `XV_CLIP_PRIVATE=1`.
+
+
+## Cumulative hardware deployment
+
+Perf.41 / `1e249ea` built with all perf.40 selections plus
+`XV_CLIP_PRIVATE=1`. Only `game-a.self` and `boot-game.txt` differ in the VPK.
+The linked executable contains `xv_object_clip_release`. Runtime size is
+32,208,546 bytes; SHA-256:
+`173ddca818a9e9e4b3909c1af10033ef138e3bfb8443294a4b35153d5c4c50eb`.
+
+The updater verified the bytes, requested a restart, and boot-confirmed slot 1.
+Remote status and dashboard both show perf.41 / `1e249ea`. The ordinary campaign
+launch sequence is underway. This confirms installation, not gameplay performance
+or stability. No automated off/on/off FPS test was run. Receipts and subsequent
+campaign captures are under `../clip-private-hardware/`.

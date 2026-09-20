@@ -14,6 +14,12 @@ heavy Halo CE gameplay**, with rendering and gameplay correctness preserved.
 Halo 2 rendering remains part of the project goal, but hardware startup work is
 parked while Halo CE performance is prioritized.
 
+Perf.41 / `1e249ea` is boot-confirmed on hardware after a full restart. Its
+[private-stack clipping path](docs/private-clipping-20260919.md) releases the
+shared guard only for bounded worker-owned calculations, retaining shared and
+nested fallbacks. Local context/memory, concurrent-worker and ARM/FPSCR checks
+pass; ordinary campaign qualification is underway. No FPS gain is established.
+
 The [typed spatial-query adapter](docs/cluster-retirement-followup-20260919.md)
 is now installed and executing private calculations on both worker lanes. This
 supersedes the earlier source-only status recorded below. Campaign captures have
