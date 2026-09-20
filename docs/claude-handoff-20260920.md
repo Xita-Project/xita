@@ -599,3 +599,29 @@ Plan (build flag `XV_THREAD_PAGE_TABLE`):
    scene ~33) ms ≈ 25 FPS against 70 ms today.
 
 Device after this section: rolled back to perf59, campaign relaunched.
+
+## 26. Perf62 / d9a27bb: per-thread page table on hardware — free (installed, slot 0)
+
+`XV_THREAD_PAGE_TABLE=1` (e8f497f + pins/Makefile fixes): `X_PT` in
+`recomp/xv_x86rt.h` reads the thread's TPIDRURW; `runtime/xv_thread_bind.c`
+routes every `sceKernelCreateThread` (force-included header macro) through a
+trampoline that binds the new thread to the live table before its entry runs;
+`main` binds itself; `g_xpt` storage is static (fixed address before the arena
+exists). 92,538 `mrc` sites in the ELF (one per function, hoisted). Generator
+pins updated: `tools/query_f32_primitives.py` X_G text,
+`tools/query_memory_capture.py` private `xv_x86rt.h` hash.
+
+Hardware (stage `thread-pt-hardware`, checkpoint, 480p): boot, dashboard,
+menus, level load and gameplay all run; no `[thread-bind]` misses.
+Frame: 68.0 ms median (windows 66.3/68.8/69.0/67.3), batch 25.7, draw-hle 8.0
+vs perf53 70.8 / 26.5 / 9.2 and perf59 ~73. Cost of the indirection: none
+measurable. perf62 stays installed (slot 0; perf59 in slot 1) as the base for
+the shadow-page snapshot. Observer script now takes `XV_EXPECTED=<version>`.
+
+Next increments (see §25 plan): (A) shadow region + render page table +
+learned dirty-page list + boundary copy, still single-threaded (scene runs on
+the owner bound to the render table, full copy-back after) to prove the
+mechanics and cost; (B) scene body on a render thread with the owner waiting
+(thread portability of the scene half: D3D state, visibility/worker jobs,
+pose pipeline all assume the owner); (C) real overlap with deferred Present
+and byte-level merge of the 22 scene-written globals.
