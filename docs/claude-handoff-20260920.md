@@ -307,3 +307,19 @@ on the owner thread.
 5. GPU: at 480p it is no longer the wall in this view (completion ≈ 40
    ms/frame with two in flight); heavy-combat views with 460 draws were not
    re-measured tonight and remain far worse.
+
+## 13. Owner-lane hardening (f6987d4) and perf55 staged, not deployed
+
+Review after the hang found one real hole: the owner's non-blocking guard
+path was selected by a flag that any non-worker native thread (render pump,
+capture and vertex workers) could also reach, which would run owner service
+scans on the wrong thread. It is now restricted to the owner thread, and the
+first participation is logged (`[owner-lane] first participation`) so the
+device log shows whether the lane engaged before a failure. TSan owner-lane
+driver 40/40. Whether this was the cause is unknown; the perf54 log decides.
+
+`../owner-lane2-hardware/` holds perf55 (perf54 plus this fix) built and
+package-checked but **not deployed**: do not deploy it blind while nobody can
+power-cycle the device. Sequence for the next attempt: rollback confirmed on
+perf53 → copy `xita.log` → read it → then deploy perf55 with the observer and
+auto-rollback (`deploy.sh` + `wait-gameplay.py`, as in section 11).
