@@ -22,3 +22,12 @@ Object batches took 1,673,775 us / 60 = 27.90 ms/frame; inclusive FA920 was 2,24
 The cumulative marker snapshot remained active (2,506 / 2,135 records on the lanes in the last report), and private quaternion admissions were 1,313 / 1,067. Inspecting the current quaternion helper confirms shared input is already copied before the private-compute guard release; reimplementing that same release would add no optimization. The next CPU target is reducing repeated capture/guard transactions in the calling model preparation loops, with object identity and shared read ownership preserved.
 
 A separate single draw-trace frame (6768) was requested after the ordinary capture; its timing is diagnostic only. It contains 171 recorded draw states, including 43 using VS09 / PS154066FD. Shader-family frequency is not GPU cost. Private draw-summary.json contains the full grouping; no asset contents are included here. No global stale visibility results or new render-pass splits were enabled.
+
+
+## Hierarchy arithmetic boundary
+
+Code inspection found the native 8E0F0 hierarchy batch already captures all poses, the parent worklist, and completed prefix matrices into local arrays, but holds its shared guard during the entire child-matrix calculation. Extracted that calculation into `hierarchy_snapshot` in xk_hierarchy.c. It receives only validated local arrays and returns a one-based failed work item; it does not read guest pointers, update shared counters, publish output, or acquire/release a lock. Parent-before-child order, the retained final original iteration, numeric decline accounting, and FP restoration are unchanged.
+
+This is preparation for shortening the critical section, not an enabled threading optimization. A subsequent release must prove output/worklist privacy on the actual worker thread, keep shared counters serialized or move them to lane-owned storage, and preserve every failure path. The current helper still runs under the original guard. No hardware update was made for this refactor.
+
+Host validation with both shipping hierarchy-normal flags enabled passed 222 full hierarchy comparisons per mode (enabled/unset/disabled/math-disabled), 117 admitted random probes in enabled mode, and 85 unchanged declines per mode. Full guest context and arena are checked against independent owned-XBE lifts. Private evidence: hierarchy-snapshot-tests and hierarchy-snapshot-tests.log. Vita-linked instruction correctness suite is running in hierarchy-snapshot-arm; do not treat it as passed until its process completes and result.json is inspected.

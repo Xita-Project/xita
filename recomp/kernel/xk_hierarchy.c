@@ -174,6 +174,24 @@ static void compose(const float left[13],const float right[13],float out[13])
     out[0]=(float)((double)left[0]*(double)right[0]);
 }
 
+/* Private arithmetic boundary: no guest pointers, context, shared counters or
+ * lock operations. Inputs and completed parent matrices were captured above;
+ * each produced parent precedes its children in the validated worklist.
+ * Returns the one-based failed work item, leaving publication to the caller.
+ * A failure may alter private matrices/FP status, never guest state. */
+static unsigned hierarchy_snapshot(unsigned first,unsigned queued,
+    const int16_t order[MAX_NODES],const int16_t parent[MAX_NODES],
+    const float poses[MAX_NODES][8],float matrices[MAX_NODES][13])
+{
+    for(unsigned i=first;i<queued-1u;i++) {
+        unsigned n=(unsigned)order[i];float local[13];
+        local_matrix(poses[n],local);
+        compose(matrices[parent[n]],local,matrices[n]);
+        if(!numeric_matrix(matrices[n],13))return i-first+1u;
+    }
+    return 0;
+}
+
 int xv_math_model_hierarchy(xctx *c)
 {
     /* Root-only models are common. This thread-local register check can return
@@ -268,12 +286,8 @@ int xv_math_model_hierarchy(xctx *c)
         if(!numeric(local_poses[order[i]],8))return numeric_decline(2,0);
     }
     unsigned saved_fp=fp_read();if(!fp_allowed(saved_fp))return decline(H_FP);
-    for(unsigned i=first;i<queued-1u;i++) {
-        unsigned n=(unsigned)order[i];float local[13];
-        local_matrix(local_poses[n],local);
-        compose(matrices[parent[n]],local,matrices[n]);
-        if(!numeric_matrix(matrices[n],13)) { fp_restore(saved_fp);return numeric_decline(3,i-first+1u); }
-    }
+    unsigned failed=hierarchy_snapshot(first,queued,order,parent,local_poses,matrices);
+    if(failed) { fp_restore(saved_fp);return numeric_decline(3,failed); }
     /* No callback or guest handoff occurs between these writes. The synchronous
      * extraction retains the existing shared guard; no ownership bypass. */
     for(unsigned i=first;i<queued-1u;i++) {
