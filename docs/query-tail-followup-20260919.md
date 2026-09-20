@@ -73,3 +73,18 @@ Perf47 / 72f8cef verified, restarted and boot-confirmed in slot 1. Runtime SHA-2
 The last three 60-frame ownership reports are respectively `0/0/0/0/0/0/3094/0/0`, `0/0/0/0/0/0/3117/0/0`, and `0/0/0/0/0/0/3091/0/0` in idle/caller/nested/state/disabled/profile/output/stack/ready order. Every attempted batch passed the earlier gates and rejected at shared output. The worklist check comes later and was not reached. This rules out inactive workers, optional pose nesting and disabled settings as explanations for the observed zero admissions. It does not establish that widening output ownership is safe.
 
 Recent ordinary gameplay reports 12.6–12.8 FPS, with final object batch time 1,689,110 us / 60 = 28.15 ms/frame and draw-HLE 11.9 ms/frame. No gain is claimed and no off/on comparison was run. Next work should target the shared object-matrix lifetime/publication boundary, retaining all earlier worker/transaction gates. Hardware remains perf47.
+
+
+## Shared matrix reference inventory
+
+Added `tools/audit_hierarchy_references.py` for the private generated-code directory. It found 57 lexical references to the node-matrix offset in 47 emitted functions, including alternate entry points. This is an inventory, not proof of complete alias coverage, unique original functions, or reader/writer classification. Private structured evidence: hierarchy-ownership-hardware/matrix-reference-audit.json.
+
+Manually inspected consumers:
+
+- 8B290 returns a matrix pointer; auditing only direct offset users misses its downstream callers.
+- 172DE0 computes the object's matrix-array address and stores it in the caller-provided record at +0C (store instruction 172E48). This is a pointer escape; lifetime must cover later consumers.
+- 8D650 feeds matrices into marker conversion and has a fallback that copies 13 words from another object's matrix array at 8D715.
+- 48F50 obtains two node matrices and directly reads translation components, so matrix access is not confined to the native matrix helper.
+- 8BA10 derives a parent object's node matrix for point transformation. 8D4A0 passes a selected matrix to matrix multiplication. 8F510 invokes hierarchy construction and subsequently uses a selected matrix in transform helpers.
+
+These observations rule out assuming that the active callback is the only matrix reader. They do not prove all writes are serialized. Shared execution must retain generation/lifetime validation, capture every input dependency, and publish consistently for both native and translated readers; a worker marker alone is insufficient. No new hardware build or unsafe shared-output relaxation was made during this audit. Perf47 remains installed.
