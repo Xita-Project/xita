@@ -1290,8 +1290,8 @@ class Emitter:
         # registers in ARM registers across guest memory stores (otherwise every store reloads them).
         # xram_/xpt_: locals shadow the globals for the same reason (X_G is redefined per file to use them).
         out = [f"void f_{fn.entry:08X}(xctx *restrict c)", "{",
-               "    uint8_t *const xram_ = g_xram; const uint32_t *const xpt_ = X_PT; (void)xram_; (void)xpt_;",   # X_PT: the thread's page table (xv_x86rt.h)
-               "    uint8_t *const imgb_ = X_IMG_BASE; (void)imgb_;"]
+               "    uint8_t *const xram_ = g_xram; const uint32_t *const xpt_ = g_xpt; (void)xram_; (void)xpt_;",
+               "    uint8_t *const imgb_ = g_img_base; (void)imgb_;"]
         self.cur_fn = fn.entry
         self._cur_fn_obj = fn
         if self.trace_funcs:
@@ -1387,7 +1387,13 @@ class Emitter:
                     "#undef X_IMG8\n#undef X_IMG16\n#undef X_IMG32",
                     "#define X_IMG8(a)  (*(uint8_t *)(imgb_ + (uint32_t)(a)))",
                     "#define X_IMG16(a) (*(xu16_u  *)(imgb_ + (uint32_t)(a)))",
-                    "#define X_IMG32(a) (*(xu32_u  *)(imgb_ + (uint32_t)(a)))", ""]
+                    "#define X_IMG32(a) (*(xu32_u  *)(imgb_ + (uint32_t)(a)))",
+                    "/* Under XV_THREAD_PAGE_TABLE the per-function caches read the thread's table and image base",
+                    " * (xv_x86rt.h X_PT / X_IMG_BASE); function bodies are unchanged so profile body hashes hold. */",
+                    "#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE",
+                    "#define g_xpt X_PT",
+                    "#define g_img_base X_IMG_BASE",
+                    "#endif", ""]
             for f in chunk:
                 body.append(self.emit_function(f))
                 body.append("")
