@@ -27,11 +27,6 @@ unsigned xv_object_world_run_admit(xctx *c);
 void xv_query_world_run_report(unsigned frames);
 #endif
 void xv_object_math_unlock(int *locked);
-#if XV_QUERY_UNLOCK
-/* Releases the guard around the pure world-route BSP query; zero keeps it. */
-int xv_object_world_query_release(xctx *c);
-void xv_object_world_query_reacquire(int token);
-#endif
 /* Drained-owner diagnostic only; ordinary builds have no hold instrumentation. */
 int xv_object_holds_available(void);
 int xv_object_holds_enabled(void);
