@@ -934,3 +934,38 @@ BCB30 entry hook inserted into the retained shard, Makefile XV_SCENE_THREAD
 block, XV_SCENE_THREAD_DEFAULT=0 so it is env-enabled only). Package differs
 only in game-a.self/boot-game.txt (30,972,474 bytes, SHA-256 5fc1faaf...).
 Bin/rg shim is required by the retained Makefile's `$(shell rg ...)`.
+
+## 35. perf82 on hardware: the scene half runs on a helper thread (increment B proven)
+
+perf82 / 67ce01b+ installed slot 1 (perf81 remains slot 0), boot-confirmed;
+env re-armed with XV_SCENE_THREAD=1 plus the usual five before Launch. The
+campaign sequence loaded normally; over ~7,800 frames (132 report windows,
+menus + loading + gameplay) every BCB30 was dispatched to the helper thread
+(dispatched 60/60 per window), owner wait 59-69 ms/frame in gameplay = the
+scene time, zero nested declines, zero yield storms, zero aborts, no
+watchdog. gameplay.png: corridor, grunts, reticle, pistol, HUD intact;
+overlay shows core 1 at ~75% (the helper) with the owner core idle during
+the scene. Frame time 111.7-121.0 ms at 278-308 draws (perf81 108-116 at
+276-291): no gain, as expected for a no-overlap step, and no measurable
+cost beyond noise. The owner-phase BCB30 observer reports 0 entries under
+the helper (its begin path is keyed to the owner thread before the alias
+applies); the scene-thread wait line replaces it.
+
+Installed state: perf82 with XV_SCENE_THREAD_DEFAULT=0, so ordinary launches
+behave like perf81 unless `vita_remote.py env XV_SCENE_THREAD=1` is sent
+before Launch (process-only, per Codex's note).
+
+Next (increment C, the overlap): owner continues into tick N+1 while the
+helper runs scene N. Required pieces, in order: (1) port the in-place
+render view (§31) onto the retained stage as the scene's frozen inputs;
+(2) scene-side scheduler isolation: SwitchToThread inside the scene returns
+NO_YIELD_PERFORMED and event waits block only the helper, while the owner's
+scheduler services the streaming/sound fibers during the tick (perf82
+showed the scene switching fibers 7-12 times per frame, so this is the
+risky part); (3) deferred Present: the owner's Present marks the frame and
+returns, the helper presents at scene end, and the next scene entry waits
+for the previous scene (backpressure); (4) merge ownership for fields both
+halves write in one frame, starting from the 22 scene-written globals of
+§19. Expected in the heavy corridor: max(tick ~51, scene ~60 + view ~5) ≈
+65 ms (~15 FPS); 20 FPS additionally needs scene work below ~45 ms (model
+passes 19 ms and draw recording 12 ms are the targets). Neither is done.
