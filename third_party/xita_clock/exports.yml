@@ -1,4 +1,4 @@
-XitaClock:
+XitaClock2:
   attributes: 0
   version:
     major: 1
@@ -7,7 +7,7 @@ XitaClock:
     start: module_start
     stop: module_stop
   modules:
-    XitaClock:
+    XitaClock2:
       syscall: true
       functions:
         - xita_clock_bind

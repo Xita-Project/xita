@@ -2,12 +2,12 @@
 version: 2
 firmware: 3.60
 modules:
-  XitaClock:
-    nid: 0xCC6037FC
+  XitaClock2:
+    nid: 0xA1597C67
     libraries:
-      XitaClock:
+      XitaClock2:
         kernel: true
-        nid: 0xCC6037FC
+        nid: 0xA1597C67
         functions:
           xita_clock_bind: 0x6a4efa9
           xita_clock_get_arm: 0xe3c0a795

@@ -695,7 +695,7 @@ LIBS      := -lSceGxm_stub \
              -lSceProcessmgr_stub
 # … plus SceLibKernel (sceClibPrintf for XV_LOG) and libm (scene camera math).
 LIBS      += -lSceLibKernel_stub -lSceTouch_stub -lm
-LIBS      += -Lthird_party/xita_clock -lXitaClock_stub -ltaihen_stub   # 500 MHz module (third_party/xita_clock): load + bind syscall
+LIBS      += -Lthird_party/xita_clock -lXitaClock2_stub -ltaihen_stub   # 500 MHz module (third_party/xita_clock): load + bind syscall
 
 # --- Stage 4: run the recompiled Halo engine instead of the mock game (make RECOMP=1) ---
 # Swaps the runtime D3D HLE (runtime/xv_d3d.c/xv_scene.c) for the recompiled engine + kernel translator

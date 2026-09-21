@@ -5,5 +5,5 @@ $SDK/bin/arm-vita-eabi-gcc -mcpu=cortex-a9 -mthumb-interwork -O2 -Wall -Wno-attr
 $SDK/bin/vita-elf-create -e exports.yml xita_clock.elf xita_clock.velf
 $SDK/bin/vita-make-fself -c xita_clock.velf xita_clock.skprx
 $SDK/bin/vita-elf-create -g gen.yml xita_clock.elf /tmp/xita_clock_gen.velf >/dev/null 2>&1 || true
-rm -rf stubs && mkdir stubs && $SDK/bin/vita-libs-gen stub.yml stubs && (cd stubs && make -s) && cp stubs/libXitaClock_stub.a stubs/libXitaClock_stub_weak.a . && rm -rf stubs xita_clock.elf xita_clock.velf
-ls -la xita_clock.skprx libXitaClock_stub.a libXitaClock_stub_weak.a
+rm -rf stubs && mkdir stubs && $SDK/bin/vita-libs-gen stub.yml stubs && (cd stubs && make -s) && cp stubs/libXitaClock2_stub.a stubs/libXitaClock2_stub_weak.a . && rm -rf stubs xita_clock.elf xita_clock.velf
+ls -la xita_clock.skprx libXitaClock2_stub.a
