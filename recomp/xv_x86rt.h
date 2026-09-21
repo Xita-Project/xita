@@ -214,7 +214,7 @@ static inline uint32_t XF_S(const xctx *c) {
 }
 static inline uint32_t XF_P(const xctx *c) {
     if (c->f_kind == XK_EXPLICIT) return (c->f_res >> 2) & 1u;
-    return (__builtin_popcount(c->f_res & 0xFFu) & 1u) == 0;
+    return __builtin_parity((unsigned)(c->f_res & 0xFFu)) == 0;   /* parity, not popcount: no libgcc __popcountdi2 call (2.5% of the host scene profile; every x87 compare tests PF) */
 }
 static inline uint32_t XF_C(const xctx *c) {
     if (c->f_kind == XK_EXPLICIT) return c->f_res & 1u;

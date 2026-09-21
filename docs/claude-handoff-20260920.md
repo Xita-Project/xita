@@ -1246,3 +1246,43 @@ render table and protected the shadow page twice; that crashed the tick
 in f_00091A80 (object parent-chain recursion) at the same frame in
 every run. With the page resolved through the live table, no crash in
 two runs, and a control watch on an unwritten page also passes.
+
+## 40. Scene cost on the host: profile, oracles, first native helper
+
+Tools (host, all env-gated, committed): `XV_HOST_SAMPLE=<file>` 1 ms
+in-process sampling profiler (no perf on this PC) + `tools/host_profile.py`
+(aggregates by guest function with addr2line); `XV_SOFTGFX_RASTER=0`
+skips pixels so the profile is the guest scene, not the rasterizer (which
+is 89% otherwise); `XV_DRAW_HASH=<file>` per-frame FNV of every D3D HLE
+call (name + first 8 stack words, kernel-object addresses masked), meant
+as the scene-output oracle; `XV_DRAW_HASH_TRACE=<frame>` writes that
+frame's calls to `<hashfile>.trace`.
+
+Profile of the scene helper thread in a10 (frames >= 1500, 92 windows,
+guest only): flat. Top: f_0001EC1F 6.2%, f_00019E7B 5.6%, f_00054010 4.7%
+(ordered-material dispatcher), f_00061270 4.4%, HaloBuildVisibleIndices
+4.2% (native HLE), f_00053E90 3.6%, f_0001EABA 3.3%, xd3d_r_clear 3.0%,
+__popcountdi2 2.6%, x87_load_f32 2.5%, then a long tail of 1-2% per-model
+functions (52xxx-63xxx). No single guest hot spot; the cost is call
+frequency and per-access page-table translation. The three CRT helpers
+are MSVC's float machinery: 1EC1F = _controlfp, 1EABA = _frnd, 19E7B =
+floor-style rounding under the control word at 0x1F2840 (134 call sites,
+up to 17k calls/frame in heavy tick areas).
+
+XV_NATIVE_CRT_FLOAT (recomp/kernel/xk_crt_float.c, hooks installed by
+tools/patch_crt_float_hooks.py, Makefile flag, runtime.mk source list):
+native versions using the emulator's own x87_round, NaN/inf and the
+unmasked-inexact path left to guest code. Exact: tick trace identical to
+the baseline at 5,415 of 5,416 ticks (the spawn tick again). Host scene
+guest samples -11% in the same windows. On the Vita expect a few percent
+of the scene, to be measured. XF_P now uses __builtin_parity instead of
+popcount (every x87 compare tests PF; the libgcc call was 2.5%); this is
+an xv_x86rt.h change, so the generator pin moves again.
+
+Next candidate: f_00061270 (5%, 38 sites) packs a clamped float3 into
+11/11/10-bit integers (floor + fistp per component); exact native needs
+the same double-precision order and x87_round, verified by the draw hash,
+which is NOT yet deterministic: two baseline lockstep runs agree on only
+~55% of frames while their per-call traces of a differing frame are
+identical, so the difference is outside the traced words (under
+investigation: trace-all mode).

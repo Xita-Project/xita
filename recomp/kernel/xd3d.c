@@ -124,7 +124,7 @@ static inline void xd3d_hash_call(const char *name, xctx *c)   /* XV_DRAW_HASH=<
 {
     if (g_draw_hash_on < 0) { const char *e = getenv("XV_DRAW_HASH"); g_draw_hash_on = e != NULL; if (e) g_draw_hash_out = fopen(e, "w"); }
     if (!g_draw_hash_on) return;
-    { static int tf = -2; static FILE *tt; if (tf == -2) { const char *e = getenv("XV_DRAW_HASH_TRACE"); tf = e ? atoi(e) : -1; if (e) tt = fopen("draw-hash-trace.txt", "w"); }
+    { static int tf = -2; static FILE *tt; if (tf == -2) { const char *e = getenv("XV_DRAW_HASH_TRACE"); tf = e ? atoi(e) : -1; if (e) { const char *hf = getenv("XV_DRAW_HASH"); char nm[512]; snprintf(nm, sizeof nm, "%s.trace", hf ? hf : "draw-hash"); tt = fopen(nm, "w"); } }
       if (tt && (int)g_draw_hash_frame + 1 == tf) { fprintf(tt, "%s", name); for (unsigned i = 1; i <= 8; ++i) fprintf(tt, " %08X", X_M32(c->r[4] + 4u * i)); fprintf(tt, "\n"); } }
     uint64_t h = g_draw_hash; for (const char *p = name; *p; ++p) { h ^= (uint8_t)*p; h *= 1099511628211ull; }
     for (unsigned i = 1; i <= 8; ++i) { uint32_t w = X_M32(c->r[4] + 4u * i); if (w >= 0x03D00000u && w < 0x04000000u) w = 0x03D00000u; h ^= w; h *= 1099511628211ull; }   /* kernel-object addresses (KERNEL_VA..64 MB) depend on host I/O timing: masked */
