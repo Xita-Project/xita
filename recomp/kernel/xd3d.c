@@ -788,6 +788,12 @@ void xv_hle_D3DDevice_SetVertexData4f(xctx *c)
         ++reported;
         D3DLOG("[loading-input] frame %u caller %08X color-bits %08X/%08X/%08X/%08X; diagnostic, exclude timing\n",
             xd3d_frame(), X_M32(c->r[4]), X_ARG(1), X_ARG(2), X_ARG(3), X_ARG(4));
+        /* Halo 3925 loading color call: D4420 consumes RGB produced by D4C40.
+         * Read its two persistent inputs only at this identified caller. Raw
+         * bits distinguish negative, non-finite and ordinary progress values. */
+        if (X_M32(c->r[4]) == 0x000D4473u)
+            D3DLOG("[loading-progress] frame %u smoothed-bits %08X phase-bits %08X\n",
+                xd3d_frame(), X_M32(0x002E40C4u), X_M32(0x002E40C8u));
     }
     im_set2("4f", X_ARG(0), rgba[0], rgba[1], rgba[2], rgba[3]);
     c->r[0] = 0; X_RET(5);

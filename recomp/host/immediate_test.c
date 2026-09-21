@@ -67,10 +67,13 @@ int main(void)
      * rather than silently clamp it and hide its origin. */
     uint32_t nan_bits = 0x7fc12345u, captured_bits;
     float nan_color; memcpy(&nan_color, &nan_bits, sizeof nan_color);
+    X_M32(stack) = 0xD4473u;
+    X_M32(0x2E40C4u) = 0xBA000000u; X_M32(0x2E40C8u) = 0x404C28F6u;
     begin(); vertex(3, nan_color, 1, 0, 1);
     vertex(UINT32_MAX, 0, 0, .5f, 1); end();
     memcpy(&captured_bits, &captured[0].a[3][0], sizeof captured_bits);
     assert(count == 1 && passthrough && captured_bits == nan_bits);
+    assert(X_M32(0x2E40C4u) == 0xBA000000u && X_M32(0x2E40C8u) == 0x404C28F6u);
     /* Attribute 15 is an ordinary attribute, not the -1 sentinel. */
     begin(); vertex(15, 7, 8, 9, 10); end();
     assert(count == 0 && !passthrough);
