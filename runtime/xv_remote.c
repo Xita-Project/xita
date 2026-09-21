@@ -255,13 +255,16 @@ static void serve(int s)
             char *data=malloc(body_size);if(!data) {reply(s,503,"No buffer\n");return;}
             memcpy(data,request+head,initial_body);size_t have=initial_body;deadline=remote_now()+15000000;
             while(have<body_size&&LOAD(&running)&&remote_now()<deadline) {
-                int n=recv(s,data+have,body_size-have,0);if(n<=0)break;have+=(size_t)n;
+                int got=remote_recv(s,data+have,body_size-have);
+                if(!got)break;
+                if(got<0) {remote_sleep(10000);keep_awake();continue;}
+                have+=(size_t)got;
             }
             if(have<body_size) {free(data);reply(s,400,"Short body\n");return;}
             char path[128];snprintf(path,sizeof path,"ux0:data/xita/module/%s",name);
-            sceIoMkdir("ux0:data/xita/module",0777);
-            SceUID fd=sceIoOpen(path,SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC,0777);
-            int ok=fd>=0&&sceIoWrite(fd,data,body_size)==(int)body_size;if(fd>=0)sceIoClose(fd);free(data);
+            FILE *f=fopen(path,"wb");
+            if(!f) { extern int xv_remote_mkdir(const char *); xv_remote_mkdir("ux0:data/xita/module"); f=fopen(path,"wb"); }
+            int ok=f&&fwrite(data,1,body_size,f)==body_size;if(f)fclose(f);free(data);
             xv_logf("[remote] put %s %u bytes %s\n",path,body_size,ok?"ok":"FAILED");
             reply(s,ok?204:500,ok?"":"Write failed\n");
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/env?",5)) {

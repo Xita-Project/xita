@@ -13,6 +13,7 @@
 #ifdef __vita__
 #include <psp2/appmgr.h>
 #include <psp2/io/fcntl.h>
+#include <psp2/io/stat.h>
 #endif
 #ifdef XV_UPDATE_HALO2
 #define DATA "ux0:data/xita/update/halo2/"
@@ -271,3 +272,6 @@ int xv_update_confirm(unsigned slot)
     if(!GET(&boot_slot)) {memcpy(boot_sha,r.sha,65);SET(&boot_slot,slot+1);}
     return 0;
 }
+
+/* xv_remote.c (/put): create the module directory. */
+int xv_remote_mkdir(const char *path) { return sceIoMkdir(path, 0777); }
