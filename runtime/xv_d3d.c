@@ -191,6 +191,8 @@ typedef struct {
     uint32_t  atest;                /* alpha test at record time: ref | func<<8 | enable<<16 (xd3d_alpha_test) */
     SceGxmTexture tex[4];
     float     texscale[4][4];
+    uint32_t  loading_border_color;
+    uint8_t   loading_border_axes;
     int16_t   ps_entry;             /* xv_ps_table index, or -1 (heuristic fragment)  */
     uint8_t   pass;                 /* 0 = back buffer, n = offscreen pass n           */
     uint8_t   previous_frame;       /* stages sampling the last completed backbuffer */
@@ -1616,6 +1618,9 @@ static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
 #endif
         }
     }
+    c->loading_border_color = S.tex_border[1];
+    c->loading_border_axes = (S.tex_addr_u[1] == X_D3DTADDRESS_BORDER ? 1 : 0) |
+        (S.tex_addr_v[1] == X_D3DTADDRESS_BORDER ? 2 : 0);
     for (unsigned t = 0; t < 4; t++) {
         c->texscale[t][0] = c->texscale[t][1] = 1.0f;
         if (S.tex_guest[t]) {
@@ -2625,6 +2630,15 @@ static int bind_draw_textures(xv_texture_state *state, SceGxmContext *ctx, const
             *census_reads|=mask?mask:1u<<10; /* Other/alias-unknown, never a no-dependency proof. */
         }
 #endif
+        /* Activate only when the linked binary advertises the matching uniform.
+         * Old installed loading shaders retain their native address modes. */
+        SceGxmTexture border_texture;
+        if (t == 1 && fs->p_border1 && c->loading_border_axes) {
+            border_texture = *tx;
+            if (c->loading_border_axes & 1) sceGxmTextureSetUAddrMode(&border_texture, SCE_GXM_TEXTURE_ADDR_CLAMP);
+            if (c->loading_border_axes & 2) sceGxmTextureSetVAddrMode(&border_texture, SCE_GXM_TEXTURE_ADDR_CLAMP);
+            tx = &border_texture;
+        }
         unsigned result = xv_texture_state_bind(state, ctx, (unsigned)fs->tex_index[t], tx);
 #ifdef XV_SCENE_CENSUS
         if(census_reads && result==XV_TEXTURE_BIND_ERROR)*census_reads|=1u<<11;
@@ -2667,7 +2681,7 @@ void xv_d3d_configure_render_preparation(void)
 static int bind_fragment_constants(SceGxmContext *ctx, const cmd_t *c,
     const xv_fshader_t *fs, uint32_t frame, unsigned command)
 {
-    if (!fs->p_psc && !fs->p_fogcolor && !fs->p_atest && !fs->p_texscale) return 1;
+    if (!fs->p_psc && !fs->p_fogcolor && !fs->p_atest && !fs->p_texscale && !fs->p_border1) return 1;
     void *fub = NULL;
     const char *stage = "reserve";
     int err = XV_RENDER_CALL(XV_RENDER_FRAGMENT_UNIFORM,
@@ -2689,6 +2703,18 @@ static int bind_fragment_constants(SceGxmContext *ctx, const cmd_t *c,
     if (fs->p_texscale) {
         stage = "texscale";
         err = sceGxmSetUniformDataF(fub, fs->p_texscale, 0, 16, &c->texscale[0][0]);
+        if (err != 0) goto fail;
+    }
+    if (fs->p_border1) {
+        uint32_t b = c->loading_border_color;
+        float sign = c->ntex > 1 && sceGxmTextureGetMagFilter(&c->tex[1]) == SCE_GXM_TEXTURE_FILTER_POINT ? -1.0f : 1.0f;
+        float data[8] = { ((b >> 16) & 255) / 255.0f, ((b >> 8) & 255) / 255.0f,
+            (b & 255) / 255.0f, (b >> 24) / 255.0f,
+            sign * (c->ntex > 1 ? sceGxmTextureGetWidth(&c->tex[1]) : 1),
+            sign * (c->ntex > 1 ? sceGxmTextureGetHeight(&c->tex[1]) : 1),
+            !!(c->loading_border_axes & 1), !!(c->loading_border_axes & 2) };
+        stage = "loading-border";
+        err = sceGxmSetUniformDataF(fub, fs->p_border1, 0, 8, data);
         if (err != 0) goto fail;
     }
     if (fs->p_atest) {

@@ -413,6 +413,7 @@ int xv_fshader_load(xv_fshader_t *fs, const char *gxp_path, const xv_vshader_t *
     if (strstr(gxp_path, "_na.frag.gxp"))
         XV_LOG("%s: alpha-disabled, discard-used %u\n", gxp_path, (unsigned)sceGxmProgramIsDiscardUsed(fs->prog));
     fs->p_texscale = sceGxmProgramFindParameterByName(fs->prog, "xv_texscale");
+    fs->p_border1 = sceGxmProgramFindParameterByName(fs->prog, "xv_border1");
     if (fs->p_psc && strstr(gxp_path, "_1D.frag.gxp"))
         XV_LOG("%s: constants %u x %u\n", gxp_path,
                sceGxmProgramParameterGetArraySize(fs->p_psc), sceGxmProgramParameterGetComponentCount(fs->p_psc));

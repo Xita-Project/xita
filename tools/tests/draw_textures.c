@@ -13,9 +13,9 @@
 #define SCE_GXM_TEXTURE_ADDR_REPEAT 2
 #define SCE_GXM_TEXTURE_TYPE_SWIZZLED 3
 typedef int SceGxmContext;
-typedef struct { void *data; unsigned type, format, width, height; } SceGxmTexture;
-typedef struct { unsigned ntex, pass, previous_frame; SceGxmTexture tex[4]; } cmd_t;
-typedef struct { int tex_index[4]; } xv_fshader_t;
+typedef struct { void *data; unsigned type, format, width, height, uaddr, vaddr; } SceGxmTexture;
+typedef struct { unsigned ntex, pass, previous_frame, loading_border_axes; SceGxmTexture tex[4]; } cmd_t;
+typedef struct { int tex_index[4]; const void *p_border1; } xv_fshader_t;
 static struct { void *mem; } g_rt[8];
 static SceGxmTexture g_previous_frame_texture, g_scene_backbuffer_texture;
 static SceGxmTexture cube, flat, bound[16];
@@ -30,8 +30,10 @@ static int sceGxmTextureInitSwizzled(SceGxmTexture *t, void *data, unsigned form
     unsigned width, unsigned height, unsigned mips)
 {
     if (fail_face) return -1;
-    *t=(SceGxmTexture){data,SCE_GXM_TEXTURE_TYPE_SWIZZLED,format,width,height}; return 0;
+    *t=(SceGxmTexture){data,SCE_GXM_TEXTURE_TYPE_SWIZZLED,format,width,height,0,0}; return 0;
 }
+static void sceGxmTextureSetUAddrMode(SceGxmTexture *t,unsigned m) {t->uaddr=m;}
+static void sceGxmTextureSetVAddrMode(SceGxmTexture *t,unsigned m) {t->vaddr=m;}
 static void sceGxmTextureSetMinFilter(SceGxmTexture *t,unsigned f) {}
 static void sceGxmTextureSetMagFilter(SceGxmTexture *t,unsigned f) {}
 static int sceGxmSetFragmentTexture(SceGxmContext *ctx,unsigned i,const SceGxmTexture *t)
@@ -50,7 +52,7 @@ int main(void)
     g_previous_frame_texture=(SceGxmTexture){.data=&last};
     g_scene_backbuffer_texture=(SceGxmTexture){.data=&scene};
     cube=(SceGxmTexture){.data=&cf,.type=SCE_GXM_TEXTURE_CUBE}; flat=(SceGxmTexture){.data=&ff};
-    xv_fshader_t fs={{2,-1,-1,-1}};
+    xv_fshader_t fs={.tex_index={2,-1,-1,-1}};
     cmd_t c={.pass=1,.ntex=4}; c.tex[0].data=&source; c.tex[3].data=&target;
     assert(bind_draw_textures(NULL,NULL,&c,&fs,0) && binds==1 && bound[2].data==&source);
     /* Active color-target sampling is still rejected, including remapped units. */
@@ -76,7 +78,7 @@ int main(void)
     /* Cached bindings still pass through all resolution and feedback checks. */
     fail_fallback=fail_face=0;
     xv_texture_state state; state.valid=0;
-    fs=(xv_fshader_t){{15,-1,-1,-1}};
+    fs=(xv_fshader_t){.tex_index={15,-1,-1,-1}};
     c=(cmd_t){.pass=1,.ntex=1}; c.tex[0].data=&source;
     before=binds;
     assert(bind_draw_textures(&state,NULL,&c,&fs,0));
@@ -104,5 +106,17 @@ int main(void)
     before=binds;
     assert(!bind_draw_textures(&state,NULL,&c,&fs,0) && binds==before);
     assert(profile_requests==binds+profile_skipped && profile_skipped>=3 && !profile_errors);
+    /* Border replacement is enabled by the linked program, uses a descriptor
+     * copy, and does not change old-shader or subsequent frame state. */
+    fs=(xv_fshader_t){.tex_index={-1,1,-1,-1}};
+    c=(cmd_t){.ntex=2,.loading_border_axes=1};
+    c.tex[1]=(SceGxmTexture){.data=&source,.uaddr=7,.vaddr=8};
+    assert(bind_draw_textures(NULL,NULL,&c,&fs,0) && bound[1].uaddr==7);
+    fs.p_border1=&source;
+    assert(bind_draw_textures(NULL,NULL,&c,&fs,0));
+    assert(bound[1].uaddr==SCE_GXM_TEXTURE_ADDR_CLAMP && bound[1].vaddr==8);
+    assert(c.tex[1].uaddr==7 && c.tex[1].vaddr==8);
+    c.loading_border_axes=3;
+    assert(bind_draw_textures(NULL,NULL,&c,&fs,0) && bound[1].vaddr==SCE_GXM_TEXTURE_ADDR_CLAMP);
     puts("PASS: unused bindings, active feedback, previous-frame substitution, sampler remapping, cube faces, and fallback failure");
 }

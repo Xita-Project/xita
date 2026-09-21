@@ -25,6 +25,7 @@ from recompiler.dx8_pixelshader_parse import decode_psdef
 from recompiler import pixelshader_recomp_gen as gen
 from tools.psdef_hash import original_hash, canonicalize, canonical_hash
 from tools.specialize_ps_alpha import specialize
+from tools.specialize_loading_border import specialize as loading_border
 VAR_BITS = [("color0", 1), ("color1", 2), ("texcoord0", 4), ("texcoord1", 8), ("texcoord2", 16), ("texcoord3", 32), ("fog", 64)]
 OUT_MAP = {"oD0": "color0", "oD1": "color1", "oT0": "texcoord0", "oT1": "texcoord1", "oT2": "texcoord2", "oT3": "texcoord3", "oFog": "fog"}
 
@@ -103,6 +104,8 @@ def main():
             out = f"ps_{ps}_{mask:02X}" + (f"_t{c2d:X}" if c2d else "")
             gen.CUBE_2D_MASK = c2d
             cg, warnings, _ = gen.generate(d, out, False)
+            if key == 0xC61481BC and os.environ.get("XV_LOADING_BORDER") == "1":
+                cg = loading_border(cg)
             if out not in generated:
                 generated.add(out)
                 path = Path(SH, out + '.frag.cg')

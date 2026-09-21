@@ -65,6 +65,7 @@ typedef struct {
     const SceGxmProgramParameter *p_fogcolor;     /* uniform float4 xv_fogcolor   */
     const SceGxmProgramParameter *p_atest;        /* uniform float4 xv_atest (alpha test ref,func,enable) */
     const SceGxmProgramParameter *p_texscale;     /* dependent reads of linear textures use pixel coordinates */
+    const SceGxmProgramParameter *p_border1;      /* loading mask border state */
     int                           tex_index[4];   /* resource index of tex0..3 or -1 */
     uint8_t                       uses_discard, replaces_depth;
     uint8_t                       alpha_test_mode; /* link cache: 0 generic, 1 disabled, 2 GREATER */
