@@ -17,7 +17,7 @@ from pathlib import Path
 DROP_PREFIX = ('-mthumb', '-mcpu=', '-mfpu=', '-mfloat-abi', '-MMD', '-MP', '-MF', '-o')
 HOST_FLAGS = ['-O1', '-g0', '-w', '-std=gnu11', '-fno-strict-aliasing', '-pthread']
 HOST_SKIP = {'recomp/kernel/xk_net.c', 'recomp/kernel/xk_os_vita.c', 'recomp/xv_trace_stub.c'}   # Vita network HLE and the Vita OS layer
-HOST_EXTRA = ['recomp/kernel/xk_os_host.c', 'recomp/host/harness.c', 'recomp/host/trace.c', 'recomp/host/softgfx.c', 'recomp/host/runtime_stubs.c', 'recomp/host/host_reports.c', 'recomp/host/write_watch.c']
+HOST_EXTRA = ['recomp/kernel/xk_os_host.c', 'recomp/host/harness.c', 'recomp/host/trace.c', 'recomp/host/softgfx.c', 'recomp/host/runtime_stubs.c', 'recomp/host/host_reports.c', 'recomp/host/write_watch.c', 'recomp/host/sampler.c']
 
 def main():
     ap = argparse.ArgumentParser()

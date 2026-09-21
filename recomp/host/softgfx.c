@@ -180,6 +180,8 @@ typedef struct { float x, y, uv[4][2], c[4]; } svtx;
 /* rasterise one triangle: texture t sampled with texcoord set ts; out = tex * vertex colour (src-alpha blend) */
 static void tri(const texcache_t *t, int ts, const svtx *a, const svtx *b, const svtx *d)
 {
+    static int raster = -1; if (raster < 0) { const char *e = getenv("XV_SOFTGFX_RASTER"); raster = e ? atoi(e) != 0 : 1; }   /* XV_SOFTGFX_RASTER=0: keep the draw stream, skip pixels (profiling the guest scene) */
+    if (!raster) return;
     float minx = fminf(a->x, fminf(b->x, d->x)), maxx = fmaxf(a->x, fmaxf(b->x, d->x));
     float miny = fminf(a->y, fminf(b->y, d->y)), maxy = fmaxf(a->y, fmaxf(b->y, d->y));
     int x0 = (int)floorf(minx), x1 = (int)ceilf(maxx), y0 = (int)floorf(miny), y1 = (int)ceilf(maxy);

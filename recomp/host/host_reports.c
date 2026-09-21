@@ -13,7 +13,8 @@ R(xv_object_scan_report) R(xv_object_hierarchy_report) R(xv_object_hierarchy_ass
 R(xv_subcluster_report) R(xv_portal_polygon_report) R(xv_clip_region_report) R(xv_query_reuse_report)
 R(xv_query_world_run_report) R(xv_native_math_report) R(xv_flare_report)
 #define CALL(name) do { if (name) name(delta); } while (0)
-void xk_wait_stats_request(void) __attribute__((weak));   /* [wait] dump (blocking sites of every guest thread) at the next yield */
+void xk_wait_stats_request(void) __attribute__((weak));
+void xv_host_sample_dump(unsigned) __attribute__((weak)); void xv_host_sample_start(void) __attribute__((weak));   /* [wait] dump (blocking sites of every guest thread) at the next yield */
 #include <stdint.h>
 extern uint8_t *g_img_base; extern unsigned xv_n_kicks, xv_n_fires;
 /* XV_HOST_CLOCK_TRACE=1: every second, Halo's vblank clock (64-bit count at 0x1F8C80) against the frame-end
@@ -37,6 +38,7 @@ static void *reporter(void *arg)
         last = now;
         fprintf(stderr, "[host] report at frame %u (%u frames)\n", now, delta);
         if (xk_wait_stats_request) xk_wait_stats_request();
+        if (xv_host_sample_dump) xv_host_sample_dump(now);
         CALL(xv_owner_phase_report); CALL(xv_object_jobs_report); CALL(xv_quat_shared_report); CALL(xv_quat_cache_report);
         CALL(xv_model_palette_report); CALL(xv_model_hierarchy_report); CALL(xv_object_basis_report); CALL(xv_object_collect_report);
         CALL(xv_object_scan_report); CALL(xv_object_hierarchy_report); CALL(xv_object_hierarchy_assist_report); CALL(xv_visibility_pass_report);
@@ -45,4 +47,4 @@ static void *reporter(void *arg)
     }
     return 0;
 }
-void xv_host_reports_start(void) { pthread_t t; if (!pthread_create(&t, 0, reporter, 0)) pthread_detach(t); }
+void xv_host_reports_start(void) { if (xv_host_sample_start) xv_host_sample_start(); pthread_t t; if (!pthread_create(&t, 0, reporter, 0)) pthread_detach(t); }

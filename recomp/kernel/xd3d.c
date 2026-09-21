@@ -119,7 +119,16 @@ static inline void xd3d_count(const char *name)
     for (unsigned i = 0; i < g_hist_n; ++i) if (g_hist[i].name == name) { g_hist[i].n++; return; }
     if (g_hist_n < XD3D_HIST_MAX) { g_hist[g_hist_n].name = name; g_hist[g_hist_n].n = 1; g_hist_n++; }
 }
-#define XD3D_COUNT(nm) xd3d_count(nm)
+static uint64_t g_draw_hash = 1469598103934665603ull; static int g_draw_hash_on = -1; static FILE *g_draw_hash_out;
+static inline void xd3d_hash_call(const char *name, xctx *c)   /* XV_DRAW_HASH=<file>: per-frame hash of the D3D call stream (scene-output oracle for host comparisons) */
+{
+    if (g_draw_hash_on < 0) { const char *e = getenv("XV_DRAW_HASH"); g_draw_hash_on = e != NULL; if (e) g_draw_hash_out = fopen(e, "w"); }
+    if (!g_draw_hash_on) return;
+    uint64_t h = g_draw_hash; for (const char *p = name; *p; ++p) { h ^= (uint8_t)*p; h *= 1099511628211ull; }
+    for (unsigned i = 1; i <= 8; ++i) { uint32_t w = X_M32(c->r[4] + 4u * i); if (w >= 0x03D00000u && w < 0x04000000u) w = 0x03D00000u; h ^= w; h *= 1099511628211ull; }   /* kernel-object addresses (KERNEL_VA..64 MB) depend on host I/O timing: masked */
+    g_draw_hash = h;
+}
+#define XD3D_COUNT(nm) (xd3d_count(nm), xd3d_hash_call(nm, c))
 int  xd3d_hist_active(void);                                 /* true during the XV_D3D_HIST frame */
 #define XD3D_RET(nm) do { if (xd3d_hist_active()) { D3DLOG("[hist] %s from %08X\n", nm, X_M32(c->r[4])); \
     char sb_[400]; int sn_ = 0; for (unsigned i_ = 0; i_ < 40 && sn_ < 380; ++i_) { uint32_t w_ = X_M32(c->r[4] + 4 * i_); if (w_ >= 0x11000 && w_ < 0x3A0000) sn_ += snprintf(sb_ + sn_, sizeof sb_ - sn_, " %X", w_); } \
@@ -562,6 +571,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
         next = (next && now < next + 100000u) ? next + 33333u : now + 33333u;
     }
     g_dev.frame++;
+    if (g_draw_hash_out) { fprintf(g_draw_hash_out, "%u %016llx\n", g_dev.frame, (unsigned long long)g_draw_hash); g_draw_hash = 1469598103934665603ull; if (g_dev.frame % 60 == 0) fflush(g_draw_hash_out); }
 #ifdef XV_OWNER_PHASE
     xv_owner_phase_present(c);
 #endif
