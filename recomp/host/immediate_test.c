@@ -23,6 +23,7 @@ extern void xv_hle_D3DDevice_End(xctx *);
 extern void xv_hle_D3DDevice_SetVertexData4f(xctx *);
 extern void xv_hle_D3DDevice_SetTextureState_Deferred(xctx *);
 extern void xv_hle_D3DDevice_SetTextureStageStateNotInline(xctx *);
+extern void xv_hle_D3DDevice_SetTextureState_BorderColor(xctx *);
 
 static uint32_t stack;
 static void begin(void)
@@ -80,6 +81,19 @@ int main(void)
     begin();
     for (unsigned i = 0; i < 1030; ++i) vertex(UINT32_MAX, (float)i, 0, 0, 1);
     end(); assert(count == 1024 && captured[1023].a[0][0] == 1023);
+    /* Specialized border writes must reach the shared sampler mirror, including
+     * alpha-only changes, and must not alias an invalid stage onto stage zero. */
+    xctx border = {0}; border.r[4] = stack;
+    X_M32(stack + 4) = 1; X_M32(stack + 8) = 0x05050505u;
+    xv_hle_D3DDevice_SetTextureState_BorderColor(&border);
+    assert(border.r[4] == stack + 12);
+    assert(xd3d_texture_state(1, 29) == 0x05050505u);
+    border.r[4] = stack; X_M32(stack + 8) = 0x80050505u;
+    xv_hle_D3DDevice_SetTextureState_BorderColor(&border);
+    assert(xd3d_texture_state(1, 29) == 0x80050505u);
+    border.r[4] = stack; X_M32(stack + 4) = 5; X_M32(stack + 8) = 0;
+    xv_hle_D3DDevice_SetTextureState_BorderColor(&border);
+    assert(xd3d_texture_state(1, 29) == 0x80050505u);
     /* Deferred fastcall and stack setters must expose the same per-stage state
      * to the renderer, including Xbox 3925's filter indices 13/14. */
     xctx c = {0}; c.r[4] = stack; c.r[1] = 1; c.r[2] = 14;
@@ -94,6 +108,6 @@ int main(void)
     c.r[4] = stack; c.r[1] = 4; c.r[2] = 14; X_M32(stack + 4) = 1;
     xv_hle_D3DDevice_SetTextureState_Deferred(&c);
     assert(xd3d_texture_state(1, 14) == 2);
-    free(g_xram); free(g_xpt);
+    free(g_xram); /* page table is statically owned by xk_mem */
     puts("PASS: immediate vertices, persistent attributes, bounds and sampler state");
 }

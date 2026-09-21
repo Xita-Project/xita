@@ -838,7 +838,15 @@ void xv_hle_D3DDevice_SetTextureStageStateNotInline(xctx *c) { XD3D_COUNT("D3DDe
     c->r[0] = 0; X_RET(3);
 }
 void xv_hle_D3DDevice_SetTextureState_TexCoordIndex(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_TexCoordIndex"); X_RET(2); }
-void xv_hle_D3DDevice_SetTextureState_BorderColor(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_BorderColor"); X_RET(2); }
+void xv_hle_D3DDevice_SetTextureState_BorderColor(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_SetTextureState_BorderColor");
+    /* Xbox texture-state index 29; preserve alpha as well as RGB. The renderer
+     * consumes this same mirror for both specialized and generic setters. */
+    unsigned stage = X_ARG(0);
+    if (stage < 4) X_W32(D3D_G_TEXTURESTATE + (stage * 32 + 29) * 4) = X_ARG(1);
+    X_RET(2);
+}
 void xv_hle_D3DDevice_SetTextureState_ColorKeyColor(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_ColorKeyColor"); X_RET(2); }
 void xv_hle_D3DDevice_SetTextureState_BumpEnv(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_BumpEnv"); X_RET(3); }
 void xv_hle_D3DDevice_SetTextureState_Deferred(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_Deferred"); if ((c->r[1] & 3) == c->r[1] && c->r[2] < 32) X_W32(D3D_G_TEXTURESTATE + ((c->r[1] << 5) + c->r[2]) * 4) = X_ARG(0); X_RET(1); }
