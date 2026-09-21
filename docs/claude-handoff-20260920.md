@@ -1191,3 +1191,21 @@ query_f32_primitives/xv_x86rt.h is the selective header rebuilt from
 xv_x86rt.h, now 4272656c...; query_world_run.h is the on-disk file). The
 gate now prints the actual hashes on mismatch. Re-pinning from disk is
 wrong for query_fusion.c: run the build once, copy the printed values.
+
+### 39b. perf83 built, not deployed
+
+`../overlap-candidate/build/xita.vpk` = 0.2.0-perf.83 / 427df56+
+(sha256 a433fca61bb42f27...), built 2026-09-21 16:04 with
+XV_RENDER_VIEW=1 XV_SCENE_THREAD=1 (defaults 0: an ordinary launch
+behaves like perf82). Env to arm before Launch (vita_remote.py env):
+XV_SCENE_THREAD=1 XV_SCENE_OVERLAP=2 XV_RENDER_VIEW=1
+XV_RENDER_VIEW_THREAD=1 (start with XV_SCENE_OVERLAP=1 and the view off,
+then add pieces; kill switches are the same names =0). Untested on
+hardware: no bench device. The Pi binary of the same stage is
+`../pi-bench/harness-armhf-overlap-be147c0`. Expected hardware issues,
+in order: the runtime's vertex capture/upload workers write live memory
+the scene (bound to the render table) cannot see (A's first cut hung on
+exactly that) - they need per-job binding to the render table; the
+D3DResource_Register/IsBusy calls from the tick during the scene need a
+runtime-side lock; the object-job lanes are shared with the scene's
+visibility jobs (untested concurrently on Vita).
