@@ -1,0 +1,14 @@
+XitaClock:
+  attributes: 0
+  version:
+    major: 1
+    minor: 0
+  main:
+    start: module_start
+    stop: module_stop
+  modules:
+    XitaClock:
+      syscall: true
+      functions:
+        - xita_clock_set_arm
+        - xita_clock_get_arm

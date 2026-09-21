@@ -55,6 +55,7 @@
 #include <psp2/gxm.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/power.h>
+#include <taihen.h>
 #include <psp2/io/dirent.h>
 #include <psp2/io/stat.h>
 
@@ -2184,8 +2185,20 @@ static void xv_configure_cpu_clock(void)
     int rc = scePowerSetArmClockFrequency(requested);
     int actual = scePowerGetArmClockFrequency();
     if (requested == 500 && (rc < 0 || actual < 500)) {
-        scePowerSetArmClockFrequency(444);
-        XV_LOG("CPU clock: 500 MHz unavailable (rc %08X, reported %d); requesting 444 MHz\n", rc, actual);
+        /* The user-side setter caps at 444. Load our kernel module (third_party/xita_clock), whose
+         * module_start applies the clock through the kernel-side setter; needs HENkaku "Unsafe
+         * Homebrew". The module stays loaded so the syscall can re-apply after a suspend. */
+        int mhz = 500; tai_module_args_t targs = { sizeof targs, 0, sizeof mhz, &mhz, 0 };
+        SceUID mod = taiLoadStartKernelModuleForUser("ux0:data/xita/module/xita_clock.skprx", &targs);
+        if (mod >= 0 || (unsigned)mod == 0x8002D013u /* already loaded */) {
+            extern int xita_clock_set_arm(int); extern int xita_clock_get_arm(void);
+            int krc = xita_clock_set_arm(500);
+            XV_LOG("CPU clock: kernel module %s (%08X); set 500 -> %08X, kernel reads %d, user reads %d MHz\n",
+                   mod >= 0 ? "loaded" : "present", (unsigned)mod, (unsigned)krc, xita_clock_get_arm(), scePowerGetArmClockFrequency());
+        } else {
+            scePowerSetArmClockFrequency(444);
+            XV_LOG("CPU clock: 500 MHz unavailable (rc %08X, reported %d); kernel module load %08X (needs ux0:data/xita/module/xita_clock.skprx and Unsafe Homebrew); requesting 444 MHz\n", rc, actual, (unsigned)mod);
+        }
     }
     XV_LOG("game clocks: requested CPU %d, effective cpu %d bus %d gpu %d xbar %d MHz\n",
         requested, scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(),
