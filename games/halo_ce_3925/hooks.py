@@ -5,6 +5,7 @@ Native helpers retain the ordinary translated body as their fallback.
 """
 import hashlib
 import re
+from games.halo_ce_3925 import loading_brightness
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
@@ -171,6 +172,9 @@ class HaloHooks(NoGameHooks):
         return body
 
     def before_instruction(self, address):
+        brightness = loading_brightness.before_instruction(address, self.enabled)
+        if brightness:
+            return brightness
         census = self.light_census_before(address)
         if census:
             return census
