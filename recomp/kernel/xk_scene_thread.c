@@ -4,6 +4,29 @@
 #include "xk_scene_thread.h"
 #include "../xv_x86rt.h"
 #include <stdlib.h>
+#include <stdio.h>
+
+/* Scene-yield census (both ports): every scheduler handoff taken while the scene body runs on the helper is
+ * counted by the guest return address of the kernel call and whether the thread was blocking (state 1) or
+ * merely yielding (SwitchToThread/Sleep(0)); the report lists the top sites. */
+#define SCENE_SITES 24
+static struct { uint32_t eip; unsigned n_block, n_yield; } scene_sites[SCENE_SITES]; static unsigned scene_nsites, scene_site_overflow;
+void xv_scene_thread_yield_census(uint32_t eip, int blocking)
+{
+    for (unsigned i = 0; i < scene_nsites; ++i) if (scene_sites[i].eip == eip) { if (blocking) scene_sites[i].n_block++; else scene_sites[i].n_yield++; return; }
+    if (scene_nsites == SCENE_SITES) { scene_site_overflow++; return; }
+    scene_sites[scene_nsites].eip = eip; scene_sites[scene_nsites].n_block = blocking; scene_sites[scene_nsites].n_yield = !blocking; scene_nsites++;
+}
+static void scene_census_report(void)
+{
+    if (!scene_nsites) return;
+    for (unsigned i = 0; i < scene_nsites; ++i) for (unsigned j = i + 1; j < scene_nsites; ++j)
+        if (scene_sites[j].n_block + scene_sites[j].n_yield > scene_sites[i].n_block + scene_sites[i].n_yield) { typeof(scene_sites[0]) t = scene_sites[i]; scene_sites[i] = scene_sites[j]; scene_sites[j] = t; }
+    char line[300]; int ln = snprintf(line, sizeof line, "[scene-yields] sites (eip block/yield):");
+    for (unsigned i = 0; i < scene_nsites && i < 10; ++i) ln += snprintf(line + ln, sizeof line - ln, " %X %u/%u", scene_sites[i].eip, scene_sites[i].n_block, scene_sites[i].n_yield);
+    if (scene_site_overflow) ln += snprintf(line + ln, sizeof line - ln, " (+%u unlisted)", scene_site_overflow);
+    XK_LOG("%s\n", line); scene_nsites = 0; scene_site_overflow = 0;
+}
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD && defined(__vita__)
 #include <psp2/kernel/threadmgr.h>
 #ifndef XV_SCENE_THREAD_DEFAULT
@@ -16,6 +39,7 @@ static SceUID helper = -1, go = -1, done = -1;
 static xctx ctx;
 static unsigned depth, dispatched, declined_nested;
 static uint64_t wait_us, wait_max_us;
+int xv_scene_thread_active(void) { return depth && sceKernelGetThreadId() == helper; }
 
 static int helper_main(SceSize args, void *argp)
 {
@@ -61,6 +85,7 @@ void xv_scene_thread_report(unsigned frames)
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
+    scene_census_report();
 }
 #elif defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
 /* Host (Linux) version of the same mechanism: a pthread helper and two POSIX semaphores. Host fibers are
@@ -81,6 +106,7 @@ static sem_t go, done;
 static xctx ctx;
 static unsigned depth, dispatched, declined_nested;
 static uint64_t wait_us, wait_max_us;
+int xv_scene_thread_active(void) { return helper_valid && __atomic_load_n(&depth, __ATOMIC_ACQUIRE) && pthread_equal(pthread_self(), helper); }
 
 pthread_t xv_owner_pthread_self(void)
 {
@@ -131,8 +157,10 @@ void xv_scene_thread_report(unsigned frames)
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
+    scene_census_report();
 }
 #else
+int xv_scene_thread_active(void) { return 0; }
 int xv_scene_thread_run(void *context) { (void)context; return 0; }
 void xv_scene_thread_report(unsigned frames) { (void)frames; }
 #if !defined(__vita__)
