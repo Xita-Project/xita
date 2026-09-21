@@ -18,8 +18,14 @@
 #if XV_VERTEX_CAPTURE_DEFAULT != 0 && XV_VERTEX_CAPTURE_DEFAULT != 1
 #error XV_VERTEX_CAPTURE_DEFAULT must be 0 or 1
 #endif
+#ifndef XV_CAPTURE_ARENA_KIB
+#define XV_CAPTURE_ARENA_KIB 2048
+#endif
+#ifndef XV_VERTEX_CAPTURE_RETAIN_DEFAULT
+#define XV_VERTEX_CAPTURE_RETAIN_DEFAULT 0
+#endif
 #ifndef XV_VERTEX_CAPTURE_BYTES
-#define XV_VERTEX_CAPTURE_BYTES (2u*1024u*1024u)
+#define XV_VERTEX_CAPTURE_BYTES (XV_CAPTURE_ARENA_KIB*1024u)
 #endif
 #define CAPTURE_JOBS 32u
 #ifndef XV_VERTEX_CAPTURE_NOTIFY
@@ -126,13 +132,14 @@ static int cap_compact(const xv_vertex_prepare_stream *s)
 #define CAPTURE_BUCKETS 256u
 /* Owner-only keys and immutable payloads, append-only until capacity reclaim.
  * A joined drain invalidates every GPU result, but may retain CPU snapshots.
+ * CPU payload identities are slot-independent; GPU results remain slot-specific.
  * The worker neither reads guest memory nor owns the source identity keys. */
 typedef struct {
     const void *identity;
-    unsigned offset,bytes,stride,packed,compact,slot,next,current,generation;
+    unsigned offset,bytes,stride,packed,compact,next,current,generation;
 } capture_entry;
 static capture_entry cap_entries[CAPTURE_ENTRIES];
-static const void *cap_results[CAPTURE_ENTRIES];
+static const void *cap_results[CAPTURE_ENTRIES][XV_FRAME_SLOTS];
 static unsigned cap_buckets[CAPTURE_BUCKETS],cap_entry_count;
 static int cap_reuse_enabled=-1;
 static int cap_retain_enabled=-1;
@@ -178,7 +185,7 @@ static int trust_source(const void *source,unsigned bytes)
 static void cap_reuse_retire(void)
 {
     if(cap_retain_enabled<0)
-        cap_retain_enabled=xv_quality_int("XV_VERTEX_CAPTURE_RETAIN",0,0,1);
+        cap_retain_enabled=xv_quality_int("XV_VERTEX_CAPTURE_RETAIN",XV_VERTEX_CAPTURE_RETAIN_DEFAULT,0,1);
     if(cap_reuse_enabled!=1 || !cap_retain_enabled || !cap_entry_count) {
         cap_used=0;cap_reuse_reset();return;
     }
@@ -187,10 +194,10 @@ static void cap_reuse_retire(void)
      * reorder draws, or run synchronous fallback preparation immediately after
      * drain. A future exact CPU hit must prepare/validate its GPU storage again. */
     for(unsigned i=0;i<cap_entry_count;i++) {
-        cap_results[i]=NULL;cap_entries[i].current=0;
+        memset(cap_results[i],0,sizeof cap_results[i]);cap_entries[i].current=0;
     }
 }
-static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,unsigned packed,unsigned compact,int sample)
+static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned packed,unsigned compact,int sample)
 {
     if(cap_reuse_enabled<0)cap_reuse_enabled=xv_quality_int("XV_VERTEX_CAPTURE_REUSE",1,0,1);
     /* Sparse uploads may intentionally retain stale unfetched records. Do not
@@ -203,7 +210,7 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
     for(unsigned id=cap_buckets[bucket];id;id=cap_entries[id-1].next) {
         capture_entry *e=&cap_entries[id-1];
         if(e->identity!=s->source || e->bytes!=s->bytes || e->stride!=s->stride ||
-           e->packed!=packed || e->compact!=compact || e->slot!=slot)continue;
+           e->packed!=packed || e->compact!=compact)continue;
         cap_reuse_checks++;
         uint64_t detail_start=sample?sceKernelGetProcessTimeWide():0;
         int equal,compared=1;
@@ -255,7 +262,7 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
     }
     return 0;
 }
-static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned slot,unsigned packed,unsigned compact)
+static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned packed,unsigned compact)
 {
     if(!cap_reuse_enabled || xv_vertex_refs_sparse(s->refs,s->bytes,s->stride))return 0;
     if(cap_entry_count==CAPTURE_ENTRIES) {cap_metadata_full++;return 0;}
@@ -263,11 +270,11 @@ static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned slot,un
     if(packed && packed!=XV_PACKED_PREFIX16)return 0;
 #endif
     unsigned bucket=((uintptr_t)s->source>>4)&(CAPTURE_BUCKETS-1),id=++cap_entry_count;
-    cap_entries[id-1]=(capture_entry){s->source,cap_used,s->bytes,s->stride,packed,compact,slot,cap_buckets[bucket],1,0};
+    cap_entries[id-1]=(capture_entry){s->source,cap_used,s->bytes,s->stride,packed,compact,cap_buckets[bucket],1,0};
 #if XV_CAPTURE_TRUST_TAGS
     cap_entries[id-1].generation=__atomic_load_n(&trust_generation,__ATOMIC_RELAXED);
 #endif
-    cap_results[id-1]=NULL;cap_buckets[bucket]=id;return id;
+    memset(cap_results[id-1],0,sizeof cap_results[id-1]);cap_buckets[bucket]=id;return id;
 }
 #endif
 
@@ -286,8 +293,8 @@ static void cap_execute(capture_job *job)
 #endif
 #if XV_VERTEX_CAPTURE_REUSE
         unsigned id=job->reuse[i];
-        if(id && cap_results[id-1]) {
-            s->result=cap_results[id-1];cap_reuse_prepared++;continue;
+        if(id && cap_results[id-1][b->slot]) {
+            s->result=cap_results[id-1][b->slot];cap_reuse_prepared++;continue;
         }
 #endif
 #if XV_PACKED_VERTEX_LAYOUT
@@ -302,7 +309,7 @@ static void cap_execute(capture_job *job)
             s->bytes,s->stride,s->refs,packed);
         if(!s->result)return;
 #if XV_VERTEX_CAPTURE_REUSE
-        if(id)cap_results[id-1]=s->result;
+        if(id)cap_results[id-1][b->slot]=s->result;
 #endif
     }
     b->ok=1;
@@ -495,7 +502,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
 #if XV_VERTEX_CAPTURE_PACKED
         compact=cap_compact(s);
 #endif
-        reserve_ids[i]=cap_reuse_find(s,batch->slot,packed,compact,sample);
+        reserve_ids[i]=cap_reuse_find(s,packed,compact,sample);
         if(!reserve_ids[i]) {
             unsigned bytes=compact?s->bytes/2:s->bytes;
             required+=(bytes+15u)&~15u;
@@ -509,7 +516,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         const void *ready_results[XV_VERTEX_PREPARE_STREAMS];
         for(unsigned i=0;i<batch->count;i++) {
             unsigned id=reserve_ids[i];
-            ready_results[i]=id?cap_results[id-1]:NULL;
+            ready_results[i]=id?cap_results[id-1][batch->slot]:NULL;
             if(!ready_results[i])ready=0;
         }
         if(ready) {
@@ -572,14 +579,14 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
 #endif
         unsigned id;
         if(probed)id=reserve_ids[i];
-        else id=cap_reuse_find(s,batch->slot,packed,compact,sample);
+        else id=cap_reuse_find(s,packed,compact,sample);
         if(id) {
             j->reuse[i]=id;s->source=cap_arena+cap_entries[id-1].offset;s->result=NULL;
             /* Non-sparse references are semantically unused by upload(). */
             s->refs=NULL;
             continue;
         }
-        j->reuse[i]=cap_reuse_add(s,batch->slot,packed,compact);
+        j->reuse[i]=cap_reuse_add(s,packed,compact);
 #endif
         uint64_t copy_start=sample?sceKernelGetProcessTimeWide():0;
 #if XV_VERTEX_CAPTURE_PACKED

@@ -334,6 +334,30 @@ $(BUILD)/vertex-capture.config: force-vertex-capture-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/vertex-capture.config
+# Bounded CPU-only capture storage; GPU upload slots are unchanged.
+XV_CAPTURE_ARENA_KIB ?= 2048
+XV_VERTEX_CAPTURE_RETAIN_DEFAULT ?= 0
+ifneq ($(words $(XV_CAPTURE_ARENA_KIB)),1)
+$(error XV_CAPTURE_ARENA_KIB must be 2048, 4096 or 8192)
+endif
+ifneq ($(filter $(XV_CAPTURE_ARENA_KIB),2048 4096 8192),$(XV_CAPTURE_ARENA_KIB))
+$(error XV_CAPTURE_ARENA_KIB must be 2048, 4096 or 8192)
+endif
+ifneq ($(words $(XV_VERTEX_CAPTURE_RETAIN_DEFAULT)),1)
+$(error XV_VERTEX_CAPTURE_RETAIN_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_VERTEX_CAPTURE_RETAIN_DEFAULT),0 1),$(XV_VERTEX_CAPTURE_RETAIN_DEFAULT))
+$(error XV_VERTEX_CAPTURE_RETAIN_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_vertex_capture.o: CFLAGS += -DXV_CAPTURE_ARENA_KIB=$(XV_CAPTURE_ARENA_KIB) -DXV_VERTEX_CAPTURE_RETAIN_DEFAULT=$(XV_VERTEX_CAPTURE_RETAIN_DEFAULT)
+.PHONY: force-capture-storage-config
+force-capture-storage-config:
+$(BUILD)/capture-storage.config: force-capture-storage-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_CAPTURE_ARENA_KIB) $(XV_VERTEX_CAPTURE_RETAIN_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_vertex_capture.o: $(BUILD)/capture-storage.config
 # Notification coalescing belongs only to the capture FIFO implementation.
 XV_VERTEX_CAPTURE_NOTIFY ?= 0
 ifneq ($(words $(XV_VERTEX_CAPTURE_NOTIFY)),1)

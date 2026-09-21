@@ -239,26 +239,26 @@ static void trust_verification(void)
         trust_enabled=1;trust_disabled=trust_verify_serial=0;
         trust_hits=trust_verified=trust_mismatches=0;
         memset(source,0x21,256);memcpy(snapshot,source,256);
-        assert(cap_reuse_add(&stream,0,0,0)==1);
+        assert(cap_reuse_add(&stream,0,0)==1);
         for(unsigned i=0;i<128;i++) {
             int sample=mode==1 || (mode==2 && !(i&63));
-            assert(cap_reuse_find(&stream,0,0,0,sample)==1);
+            assert(cap_reuse_find(&stream,0,0,sample)==1);
             assert(trust_verified==1+i/64);
         }
         assert(trust_verified==2 && trust_hits==126);
         assert(cap_detail_compares==(mode?2u:0u));
         assert(cap_detail_compare_bytes==(mode?512u:0u));
         source[17]^=1; /* Lookup 129 independently verifies and disables trust. */
-        assert(!cap_reuse_find(&stream,0,0,0,mode==1));
+        assert(!cap_reuse_find(&stream,0,0,mode==1));
         assert(trust_disabled && trust_mismatches==1 && trust_verified==3);
-        assert(!cap_reuse_find(&stream,0,0,0,0));
+        assert(!cap_reuse_find(&stream,0,0,0));
         memcpy(snapshot,source,256);
-        assert(cap_reuse_find(&stream,0,0,0,0)==1);
+        assert(cap_reuse_find(&stream,0,0,0)==1);
         assert(trust_verified==3); /* Disabled trust always uses exact equality. */
         trust_disabled=0;
         xv_vertex_capture_tags_written(TAG_PHYS_BASE,256);
         source[19]^=1;
-        assert(!cap_reuse_find(&stream,0,0,0,0)); /* Generation invalidation. */
+        assert(!cap_reuse_find(&stream,0,0,0)); /* Generation invalidation. */
         assert(trust_verified==3);
     }
     cap_arena=NULL;cap_reuse_reset();cap_reuse_enabled=-1;
@@ -516,15 +516,15 @@ static void capture_reuse_versions(void)
     /* A returned source version is deliberately not searched beyond newest. */
     assert(cap_used==1536 && cap_reuse_hits==hits+1);
     assert(capture(1,guest,512,16,NULL,0,&other_slot));
-    assert(capture(0,guest,512,8,NULL,0,&other_stride));assert(cap_used==2560);
+    assert(capture(0,guest,512,8,NULL,0,&other_stride));assert(cap_used==2048);
     assert(!mprotect(guest,4096,PROT_NONE));
     __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);join(1);
     assert(a.ok&&b.ok&&changed.ok&&restored.ok&&other_slot.ok&&other_stride.ok);
     assert(a.result[0]==b.result[0] && a.result[0]!=changed.result[0] && a.result[0]==restored.result[0]);
     assert(a.result[0]!=other_slot.result[0] && other_slot.result[0][511]==0x13);
     assert(a.result[0][511]==0x13 && changed.result[0][511]==0x12);
-    assert(cap_reuse_prepared==prepared+1 && cap_entry_count==5);
-    for(unsigned i=0;i<cap_entry_count;i++)assert(!cap_results[i]);
+    assert(cap_reuse_prepared==prepared+1 && cap_entry_count==4);
+    for(unsigned i=0;i<cap_entry_count;i++)for(unsigned slot=0;slot<XV_FRAME_SLOTS;slot++)assert(!cap_results[i][slot]);
     assert(!munmap(guest,4096));cleanup();
 }
 /* Mixed reused/new streams fit by their copied bytes, not their source sizes. */
@@ -737,7 +737,7 @@ static void capture_retained_generations(void)
     assert(capture(0,guest,sizeof expected,16,NULL,0,&first));join(0);
     assert(first.ok && cap_entry_count==1 && cap_used==sizeof expected);
     xv_vertex_capture_drain(); /* The already-collected branch must also retain safely. */
-    assert(!cap_results[0]);
+    for(unsigned slot=0;slot<XV_FRAME_SLOTS;slot++)assert(!cap_results[0][slot]);
     unsigned retained=cap_retained_hits,used=cap_used;
     /* A true retained hit cannot write even one byte into the old CPU payload.
      * Reserve its former GPU address for DIFFERENT data in the next generation:
@@ -758,9 +758,11 @@ static void capture_retained_generations(void)
     for(unsigned generation=0;generation<12;generation++) {
         unsigned slot=generation%3;output next={0};xv_vertex_upload_reset(slot);
         if(generation%6==0)guest[511]=expected[511]^=1;
+        unsigned before_used=cap_used,before_entries=cap_entry_count;
         assert(capture(slot,guest,sizeof expected,16,NULL,0,&next));join(slot);
+        if(generation%6)assert(cap_used==before_used && cap_entry_count==before_entries);
         assert(next.ok && !memcmp(next.result[0],expected,sizeof expected));
-        for(unsigned i=0;i<cap_entry_count;i++)assert(!cap_results[i]);
+        for(unsigned i=0;i<cap_entry_count;i++)for(unsigned slot=0;slot<XV_FRAME_SLOTS;slot++)assert(!cap_results[i][slot]);
     }
     assert(!munmap(guest,4096));cleanup();assert(!cap_entry_count && !cap_used);
     setenv("XV_VERTEX_CAPTURE_RETAIN","0",1);

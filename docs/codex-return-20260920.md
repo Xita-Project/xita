@@ -187,3 +187,14 @@ Further retention work must account for slot-keyed CPU entries: enabling retenti
 Exact reservation final validation: all 24 configurations pass ASan/UBSan and all 24 pass ThreadSanitizer (/tmp/xita-exact-reserve-qualified-{asan,tsan}.log). No measured FPS gain yet.
 
 Perf75 / 6833615 built from retained perf74 with the narrow exact-reservation runtime diff. Package changes only game-a.self and boot-game.txt. Installed 32,155,946 bytes, SHA-256 192dba6088fff1935e7612a94dede6963f9fae638afe99ad9f31aca459be20a8, slot 0, verified/restart_requested/boot_confirmed true. Campaign sequence started with shader override/loading trace/capture detail=0; actual gameplay evidence pending. Source pushed. No retention or capacity settings changed. Next inspect pressure/copy counters and frame time after loading; then consider decoupling immutable CPU identity from slot-specific GPU results with a bounded arena budget.
+
+
+## Shared CPU payload / per-slot GPU results candidate
+
+Perf75 first gameplay window in gameplay-result.log: 135.8 ms game + 1.6 ms wait, 7.3 FPS, 398 draws; arena-only pressure 60, queue-only 1 per 60 frames. This follows a loading/texture-decode transition; no established gain from exact reservation.
+
+Refactored capture reuse identity to exclude GPU slot: immutable CPU snapshot key remains source pointer, byte count, stride, packing/compact format and verified content/generation. GPU result table is now indexed by snapshot ID AND frame slot. Only the serial preparation worker writes results; owner reads completed results only after all predecessors retire. Drains still invalidate every slot result before recycling, and CPU arena reset still requires all jobs joined. Tests check identical CPU payload reuse across queued different slots, distinct GPU addresses, live-source unmapping/mutations, and unchanged arena usage through twelve slot generations with periodic mutation. No guest memory is read by the preparation worker.
+
+Added bounded build settings XV_CAPTURE_ARENA_KIB (2048/4096/8192, default 2048) and XV_VERTEX_CAPTURE_RETAIN_DEFAULT (0/1, default 0), with rebuild stamp affecting only xv_vertex_capture.o. Intended next candidate uses 4096 KiB and retention=1, adding 2 MiB CPU storage plus approximately 2 KiB net ARM metadata (per-slot pointer table grows 4 KiB; removing slot key saves 2 KiB). GPU upload storage unchanged. Sanitizer validation and hardware deployment pending.
+
+Shared CPU payload candidate passes all 24 ASan/UBSan and 24 ThreadSanitizer configurations. Build configuration accepts 4096/retain=1 and rejects unsupported/empty sizes and invalid boolean. Local suites cover correctness and concurrency, not Vita speed.
