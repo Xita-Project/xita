@@ -459,7 +459,7 @@ static void vblank_thread(xctx *c, void *arg)
             if (g_vb_demand) { g_vb_demand = 0; extra++; }
             uint64_t due = (uint64_t)g_dev.frame * 2u + 2u + extra;
             if (g_dev.frame != seen) { seen = g_dev.frame; t_last = now; }
-            else if (now - t_last > 200000u) { extra++; due++; t_last = now; }
+            else if (now - t_last > 200000u && xd3d_lockstep < 2) { extra++; due++; t_last = now; }   /* XV_LOCKSTEP=2: no real-time advance (deterministic loads for run comparisons) */
             if (fired >= due) { xk_yield(); continue; }               /* runs again at the game's next preempt */
             while (fired < due) { vblank_fire(c); fired++; }
         }
@@ -565,6 +565,13 @@ void xv_hle_D3DDevice_Present(xctx *c)
 #ifdef XV_OWNER_PHASE
     xv_owner_phase_present(c);
 #endif
+    {   /* XV_TICK_TRACE=<file>: one line per Present with the game tick and player 0's position (tick-side state), so two
+         * runs can be compared at equal ticks whatever their frame pacing (host determinism checks of the overlap) */
+        static FILE *tt; static int tt_init; if (!tt_init) { tt_init = 1; const char *e = getenv("XV_TICK_TRACE"); if (e) tt = fopen(e, "w"); }
+        if (tt) { uint32_t gg = X_M32(0x2F8CA0), pl = X_M32(0x276794), oh = X_M32(0x2FC6AC), unit = pl ? X_M32(pl + 0x10) : 0xFFFFFFFFu, obj = 0; float up[3] = { 0, 0, 0 };
+            if (unit != 0xFFFFFFFFu && oh) { uint32_t ent = X_M32(oh + 0x34); obj = X_M32(ent + (unit & 0xFFFF) * 12 + 8); if (obj) for (int i = 0; i < 3; ++i) { uint32_t w = X_M32(obj + 0x5C + 4 * i); memcpy(&up[i], &w, 4); } }
+            fprintf(tt, "%u %08X %08X %.4f %.4f %.4f\n", g_dev.frame, gg ? X_M32(gg + 0xC) : 0, obj, up[0], up[1], up[2]); if (g_dev.frame % 60 == 0) fflush(tt); }
+    }
     { extern void xv_phase_frame(unsigned) __attribute__((weak)); if (xv_phase_frame) xv_phase_frame(g_dev.frame); }
     hist_level_track();
     XV_CLIP_TRIAL_PRESENT(c);

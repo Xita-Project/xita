@@ -1167,3 +1167,27 @@ scene (that is what hung increment A's first cut), D3DResource_Register
 from the tick vs the scene's draws needs a runtime-side lock, and the
 merge ownership of the 22 scene-written globals (§19) is still the
 in-place merge semantics.
+
+### 39a. Determinism proof of the overlap (host), and the build gate
+
+`XV_LOCKSTEP=2` = lockstep without the 200 ms real-time advance during
+loads: two baseline runs are then identical window for window (99/99).
+`XV_TICK_TRACE=<file>` (xd3d.c Present) writes one line per Present:
+frame, game tick (gg+C), player 0 object and position, i.e. tick-side
+state. Comparing at equal ticks (the scene thread shifts *when* Presents
+land relative to ticks, because lockstep's on-demand vblank counts the
+owner's yields, so window-by-window comparison is meaningless):
+- mode 1 + thread view: 5,414 common ticks, 5,413 identical;
+- mode 2 (full overlap) + thread view: 3,976 common, 3,975 identical;
+the one difference is tick 468, the spawn tick, where one run's Present
+precedes the unit's appearance. So tick N+1 running against scene N on
+the render view leaves the simulation bit-identical on the host. What
+this does not cover: the scene's own output (draws use frame-old data by
+design), Vita runtime workers, and ARM memory ordering (the Pi's job).
+
+Vita build gate: tools/query_memory_capture.py pins sha256 of the
+generator's *in-memory* inputs (query_fusion.c stays at Codex's pin;
+query_f32_primitives/xv_x86rt.h is the selective header rebuilt from
+xv_x86rt.h, now 4272656c...; query_world_run.h is the on-disk file). The
+gate now prints the actual hashes on mismatch. Re-pinning from disk is
+wrong for query_fusion.c: run the build once, copy the printed values.

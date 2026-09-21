@@ -267,7 +267,7 @@ def generate_contents(contents, cpu_state=False):
     actual = {name: hashlib.sha256(text.encode()).hexdigest() for name, text in contents.items()}
     if actual != PINS:
         raise ValueError('capture requires the reviewed source inventory: ' +
-                         ', '.join(n for n in actual if actual[n] != PINS[n]))
+                         ', '.join(f'{n} (actual {actual[n]})' for n in actual if actual[n] != PINS[n]))
     outputs = {}
     inventories = {}
     query = contents['query_fusion.c']
