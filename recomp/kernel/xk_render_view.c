@@ -45,6 +45,13 @@ static volatile uint64_t bound_since_us; static unsigned watchdog_trips;
 /* entries retargeted for the current scene: (vpage, live offset, view offset) */
 typedef struct { uint32_t vp, live, view; } retarget_t;
 static retarget_t *retargets; static unsigned retargets_n, retargets_last, retargets_max, retargets_overflow, image_entries;
+/* Thread mode (XV_RENDER_VIEW_THREAD=1, increment C): the retargets go into a private render table that only the
+ * thread running the scene binds (host: thread-local pointer, Vita: TPIDRURW); the live table is untouched, so the
+ * owner's tick keeps reading and writing live pages while the scene reads its frozen copies. The render table
+ * mirrors the live table through xv_render_view_mirror (allocated once, 4 MiB, never copied per frame). */
+static int thread_mode; static struct { uint8_t *img_base; uint32_t entries[1u << 20]; } *rt;
+#define VIEW_TABLE (thread_mode ? rt->entries : g_xpt)
+void xk_os_bind_page_table(uint32_t *table);
 
 static unsigned learn_interval = 150, learn_passes = 6, learn_done, learn_state, learn_next_frame, learn_armed, gap_frames;
 static uint32_t learn_gap_us = 8000; static uint32_t *learn_hash; static uint64_t learn_us, last_leave_us;
@@ -59,7 +66,16 @@ static uint32_t page_hash(const uint8_t *p)
     for (unsigned i = 0; i < 1024; i += 4) { h = (h ^ w[i]) * 16777619u; h = (h ^ w[i+1]) * 16777619u; h = (h ^ w[i+2]) * 16777619u; h = (h ^ w[i+3]) * 16777619u; }
     return h;
 }
-void xv_render_view_mirror(uint32_t vpage, uint32_t arena_off) { (void)vpage; (void)arena_off; if (bound) mirrors_in_scene++; }
+void xv_render_view_mirror(uint32_t vpage, uint32_t arena_off)
+{
+    if (bound) mirrors_in_scene++;
+    if (!thread_mode || !rt) return;
+    if (bound) {   /* an entry the scene currently views keeps its copy; restore reads the new live value at leave */
+        for (unsigned i = 0; i < retargets_n; ++i) if (retargets[i].vp == vpage) return;
+        uint32_t cur = rt->entries[vpage]; if (cur >= L.image_copy_off && cur < L.image_copy_off + L.image_pages * XK_PAGE) return;
+    }
+    rt->entries[vpage] = arena_off;
+}
 static void learn_page(uint32_t page)
 {
     uint32_t off = page * XK_PAGE;
@@ -103,6 +119,7 @@ void xv_render_view_configure(void)
     if ((e = getenv("XV_RENDER_VIEW_FULL_INTERVAL"))) full_interval = (unsigned)atoi(e);
     if ((e = getenv("XV_RENDER_VIEW_PHYS_LIMIT_MIB"))) phys_limit = (uint32_t)atoi(e) << 20;
     if ((e = getenv("XV_RENDER_VIEW_IMAGE"))) image_view = atoi(e) != 0;
+    if ((e = getenv("XV_RENDER_VIEW_THREAD"))) thread_mode = atoi(e) != 0;
     xk_mem_render_view_layout(&L);
     if (!xv_render_view_enabled) { XK_LOG("[render-view] process-start disabled\n"); return; }
     if (!L.shadow_pages || !g_xram) { XK_LOG("[render-view] no shadow region; disabled\n"); xv_render_view_enabled = 0; return; }
@@ -115,6 +132,15 @@ void xv_render_view_configure(void)
     retargets = malloc(retargets_max * sizeof *retargets);
     if (!slot_of || !slot_page || !img_listed || !img_list || !sw_slot || !sw_img || !learn_hash || !pristine || !retargets) { XK_LOG("[render-view] no memory; disabled\n"); xv_render_view_enabled = 0; return; }
     memset(slot_of, 0xFF, L.phys_pages * sizeof *slot_of);
+    if (thread_mode) {
+#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
+        rt = malloc(sizeof *rt);
+        if (!rt) { XK_LOG("[render-view] no render table; thread mode off\n"); thread_mode = 0; }
+        else { memcpy(rt->entries, g_xpt, sizeof rt->entries); rt->img_base = ((uint8_t *const *)g_xpt)[-1]; XK_LOG("[render-view] thread mode: private render table, bound by the scene thread only\n"); }
+#else
+        XK_LOG("[render-view] thread mode needs XV_THREAD_PAGE_TABLE; off\n"); thread_mode = 0;
+#endif
+    }
     ready = 1;
     bench();
     XK_LOG("[render-view] process-start enabled (in-place); shadow %u pages at %08X for physical pages below %u MiB, image copy %u pages at %08X (%s); learn %u passes every %u frames after a %u us tick gap%s; full every %u, copyback %d\n",
@@ -161,23 +187,23 @@ static void retarget_in_place(void)
         if (n > aliases_max) aliases_max = n;
         for (unsigned i = 0; i < n; ++i) {
             if (retargets_n >= retargets_max) { retargets_overflow++; return; }
-            retargets[retargets_n++] = (retarget_t){ vps[i], live, view }; g_xpt[vps[i]] = view;
+            retargets[retargets_n++] = (retarget_t){ vps[i], live, view }; VIEW_TABLE[vps[i]] = view;
         }
     }
     image_entries = 0;
     for (unsigned i = 0; i < img_listed_n; ++i) {                 /* listed image pages only (X_IMG goes through the table) */
         uint32_t ip = img_list[i], vp = L.image_vpage + ip, live = L.image_off + ip * XK_PAGE;
-        if (g_xpt[vp] == live) { g_xpt[vp] = L.image_copy_off + ip * XK_PAGE; image_entries++; }
+        if (VIEW_TABLE[vp] == live) { VIEW_TABLE[vp] = L.image_copy_off + ip * XK_PAGE; image_entries++; }
     }
 }
 static void restore_in_place(void)
 {
     for (unsigned i = 0; i < img_listed_n; ++i) {
         uint32_t ip = img_list[i], vp = L.image_vpage + ip, view = L.image_copy_off + ip * XK_PAGE;
-        if (g_xpt[vp] == view) g_xpt[vp] = L.image_off + ip * XK_PAGE;
+        if (VIEW_TABLE[vp] == view) VIEW_TABLE[vp] = thread_mode ? g_xpt[vp] : L.image_off + ip * XK_PAGE;   /* thread mode: whatever live holds now */
     }
     for (unsigned i = 0; i < retargets_n; ++i)
-        if (g_xpt[retargets[i].vp] == retargets[i].view) g_xpt[retargets[i].vp] = retargets[i].live;   /* remapped mid-scene: leave it */
+        if (VIEW_TABLE[retargets[i].vp] == retargets[i].view) VIEW_TABLE[retargets[i].vp] = thread_mode ? g_xpt[retargets[i].vp] : retargets[i].live;   /* remapped mid-scene: leave it */
     retargets_last = retargets_n; retargets_n = 0;
 }
 void xv_render_view_enter(unsigned *scope, void *context)
@@ -205,6 +231,7 @@ void xv_render_view_enter(unsigned *scope, void *context)
     bytes_in += ((uint64_t)slots_used + img_listed_n) * XK_PAGE;
     if (active_frames == 1) log_request_table("first viewed frame");
     retarget_in_place(); bound_since_us = t0; bound = 1;
+    if (thread_mode) xk_os_bind_page_table(rt->entries);       /* this thread (the one running the body) sees the view */
     enter_us += xk_os_monotonic_us() - t0; frames_entered++; full_frames += full_frame;
 }
 static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live)   /* one pass; newlib memcmp is ~86 MB/s here */
@@ -238,7 +265,7 @@ void xv_render_view_leave(unsigned *scope)
     uint64_t t0 = xk_os_monotonic_us();
     if (!ready || !depth) { last_leave_us = t0; return; }
     if (--depth || !*scope) { last_leave_us = t0; return; }
-    if (bound) unbind_merge();
+    if (bound) { if (thread_mode) xk_os_bind_page_table(g_xpt); unbind_merge(); }
     last_leave_us = xk_os_monotonic_us();
     leave_us += last_leave_us - t0;
 }

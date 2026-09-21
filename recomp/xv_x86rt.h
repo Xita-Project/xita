@@ -26,7 +26,7 @@ static inline uint32_t *xv_thread_page_table(void) { uint32_t v; __asm__("mrc p1
 #elif defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
 /* Host fixtures with the flag: translation goes through a separate pointer (the "current thread's"
  * table) so binding a render view does not retarget the live table the kernel writes through. */
-extern uint32_t *xv_host_page_table;
+extern __thread uint32_t *xv_host_page_table;   /* per host thread: the scene helper binds its render table */
 #define X_PT xv_host_page_table
 #else
 #define X_PT g_xpt

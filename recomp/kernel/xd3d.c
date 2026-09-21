@@ -545,10 +545,14 @@ int xd3d_benchmark_view(float view[6])
 }
 
 /* Present / Swap: fire callbacks, count the frame */
+static unsigned g_present_deferred;
+void xd3d_present_flush(void) { if (g_present_deferred) { unsigned f = g_present_deferred; g_present_deferred = 0; xd3d_r_present(f, 0); } }   /* overlap mode 2: at the join */
 void xv_hle_D3DDevice_Present(xctx *c)
 { XD3D_COUNT("D3DDevice_Present");
+    int defer_ = 0;
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
-    { extern void xv_scene_thread_join(void); xv_scene_thread_join(); }   /* overlap: the scene in flight finishes before the frame is presented */
+    { extern int xv_scene_thread_present_policy(void); extern void xv_scene_thread_join(void); int pol_ = xv_scene_thread_present_policy();
+      if (pol_ == 1) xv_scene_thread_join(); else if (pol_ == 2) defer_ = 1; }   /* 1: the scene in flight finishes before the present; 2: device present at the join */
 #endif
     if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_PRESENT);
     lockstep_init();
@@ -565,7 +569,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
     hist_level_track();
     XV_CLIP_TRIAL_PRESENT(c);
     XV_POLYGON_EDGE_TRIAL_PRESENT(c);
-    { XV_LIGHT_CENSUS_PRESENT_SCOPE(c); xd3d_r_present(g_dev.frame, g_dev.draws); }
+    { XV_LIGHT_CENSUS_PRESENT_SCOPE(c); if (defer_) g_present_deferred = g_dev.frame; else xd3d_r_present(g_dev.frame, g_dev.draws); }
     if (g_dev.frame % 60 == 0) {
         extern int xv_log_report_begin_async_frame(unsigned) __attribute__((weak));
         extern void xv_log_report_end(void) __attribute__((weak));

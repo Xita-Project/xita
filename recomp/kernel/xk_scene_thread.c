@@ -81,8 +81,10 @@ static void join(unsigned *counter)
     sceKernelWaitSema(done, 1, NULL);
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; depth = 0; (*counter)++;
+    { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
 }
 void xv_scene_thread_join(void) { if (enabled > 0 && overlap) join(&joins_present); }
+int xv_scene_thread_present_policy(void) { return enabled > 0 && in_flight ? overlap : 0; }
 
 static int helper_main(SceSize args, void *argp)
 {
@@ -97,7 +99,7 @@ static void configure(void)
 {
     configured = 1;
     const char *e = getenv("XV_SCENE_THREAD"); enabled = e ? atoi(e) != 0 : XV_SCENE_THREAD_DEFAULT;
-    { const char *o = getenv("XV_SCENE_OVERLAP"); overlap = o ? atoi(o) != 0 : 0; }
+    { const char *o = getenv("XV_SCENE_OVERLAP"); overlap = o ? atoi(o) : 0; if (overlap < 0 || overlap > 2) overlap = 0; }   /* 1: Present joins; 2: Present deferred to the next dispatch */
     if (overlap) { scene_stack = xk_mem_alloc(SCENE_STACK_BYTES, 4096, 0, 0, 1); if (!scene_stack) { XK_LOG("[scene-thread] no guest stack for the overlap; overlap off\n"); overlap = 0; } }
     if (!enabled) { XK_LOG("[scene-thread] process-start disabled\n"); return; }
     go = sceKernelCreateSema("xv_scene_go", 0, 0, 1, NULL); done = sceKernelCreateSema("xv_scene_done", 0, 0, 1, NULL);
@@ -196,8 +198,10 @@ static void join(unsigned *counter)
     while (sem_wait(&done) < 0 && errno == EINTR) {}
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; __atomic_store_n(&depth, 0, __ATOMIC_RELEASE); (*counter)++;
+    { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
 }
 void xv_scene_thread_join(void) { if (enabled > 0 && overlap) join(&joins_present); }
+int xv_scene_thread_present_policy(void) { return enabled > 0 && in_flight ? overlap : 0; }
 
 pthread_t xv_owner_pthread_self(void)
 {
@@ -219,7 +223,7 @@ static void configure(void)
 {
     configured = 1;
     const char *e = getenv("XV_SCENE_THREAD"); enabled = e ? atoi(e) != 0 : XV_SCENE_THREAD_DEFAULT;
-    { const char *o = getenv("XV_SCENE_OVERLAP"); overlap = o ? atoi(o) != 0 : 0; }
+    { const char *o = getenv("XV_SCENE_OVERLAP"); overlap = o ? atoi(o) : 0; if (overlap < 0 || overlap > 2) overlap = 0; }   /* 1: Present joins; 2: Present deferred to the next dispatch */
     if (overlap) { scene_stack = xk_mem_alloc(SCENE_STACK_BYTES, 4096, 0, 0, 1); if (!scene_stack) { XK_LOG("[scene-thread] no guest stack for the overlap; overlap off\n"); overlap = 0; } }
     if (!enabled) { XK_LOG("[scene-thread] process-start disabled\n"); return; }
     if (sem_init(&go, 0, 0) || sem_init(&done, 0, 0) || pthread_create(&helper, NULL, helper_main, NULL)) { XK_LOG("[scene-thread] helper thread failed; disabled\n"); enabled = 0; return; }
@@ -260,6 +264,7 @@ int xv_scene_thread_active(const void *guest_thread) { (void)guest_thread; retur
 int xv_scene_thread_on_helper(void) { return 0; }
 int xv_scene_thread_no_yield(void) { return 0; }
 void xv_scene_thread_join(void) {}
+int xv_scene_thread_present_policy(void) { return 0; }
 void xv_scene_thread_d3d_call(const char *name) { (void)name; }
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { (void)eip; (void)blocking; }
 int xv_scene_thread_run(void *context) { (void)context; return 0; }

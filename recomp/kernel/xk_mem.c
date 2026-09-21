@@ -31,7 +31,13 @@
 static struct { uint8_t *img_base; uint32_t entries[1u << 20]; } g_xpt_block;
 uint32_t *g_xpt = g_xpt_block.entries;
 #if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE && !defined(__vita__)
-uint32_t *xv_host_page_table = g_xpt_block.entries;
+__thread uint32_t *xv_host_page_table = g_xpt_block.entries;
+void xk_os_bind_page_table(uint32_t *table) { xv_host_page_table = table; }
+#elif defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
+extern void xv_thread_bind_table(uint32_t *);   /* runtime/xv_thread_bind.c: TPIDRURW */
+void xk_os_bind_page_table(uint32_t *table) { xv_thread_bind_table(table); }
+#else
+void xk_os_bind_page_table(uint32_t *table) { (void)table; }   /* one shared table: nothing to bind */
 #endif
 /* Render view (xk_render_view.c): arena extension past the trash page for shadow pages and an image copy. */
 #ifndef XV_RENDER_VIEW_SHADOW_PAGES
