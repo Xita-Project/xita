@@ -11,9 +11,10 @@ static int is_owner(void) { return xv_owner_thread_id() == owner_thread; }
 static void bind_owner(void) { owner_thread = sceKernelGetThreadId(); }
 #else
 #include <pthread.h>
+pthread_t xv_owner_pthread_self(void);   /* xk_scene_thread.c: owner alias for the scene helper (host) */
 static pthread_t owner_thread;
-static int is_owner(void) { return pthread_equal(pthread_self(), owner_thread); }
-static void bind_owner(void) { owner_thread = pthread_self(); }
+static int is_owner(void) { return pthread_equal(xv_owner_pthread_self(), owner_thread); }
+static void bind_owner(void) { owner_thread = xv_owner_pthread_self(); }
 #endif
 
 extern void xv_object_math_report_check(void) __attribute__((weak));

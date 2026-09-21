@@ -18,8 +18,9 @@ typedef SceUID phase_thread;
 static phase_thread current_thread(void) { return xv_owner_thread_id(); }
 #else
 #include <pthread.h>
+pthread_t xv_owner_pthread_self(void);   /* xk_scene_thread.c: owner alias for the scene helper (host) */
 typedef pthread_t phase_thread;
-static phase_thread current_thread(void) { return pthread_self(); }
+static phase_thread current_thread(void) { return xv_owner_pthread_self(); }
 #endif
 #ifndef XV_OWNER_PHASE_DEFAULT
 #define XV_OWNER_PHASE_DEFAULT 0

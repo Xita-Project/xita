@@ -12,9 +12,10 @@ static void bind_owner(void){}
 static int is_owner(void){return 1;}
 #else
 #include <pthread.h>
+pthread_t xv_owner_pthread_self(void);   /* xk_scene_thread.c: owner alias for the scene helper (host) */
 static pthread_t owner_thread;
-static void bind_owner(void){owner_thread=pthread_self();}
-static int is_owner(void){return pthread_equal(owner_thread,pthread_self());}
+static void bind_owner(void){owner_thread=xv_owner_pthread_self();}
+static int is_owner(void){return pthread_equal(owner_thread,xv_owner_pthread_self());}
 #endif
 extern void xv_object_math_report_check(void) __attribute__((weak));
 #ifndef XV_NATIVE_COLLISION_VERTICES_DEFAULT

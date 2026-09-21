@@ -40,6 +40,7 @@ extern int fegetexcept(void);
 #include <psp2/kernel/error.h>
 #else
 #include <pthread.h>
+pthread_t xv_owner_pthread_self(void);   /* xk_scene_thread.c: owner alias for the scene helper (host) */
 #include <semaphore.h>
 #include <errno.h>
 #endif
@@ -113,7 +114,7 @@ static int census_is_owner(void)
 #ifdef __vita__
     return xv_owner_thread_id()==census_owner_thread;
 #else
-    return pthread_equal(pthread_self(),census_owner_thread);
+    return pthread_equal(xv_owner_pthread_self(),census_owner_thread);
 #endif
 }
 /* Register/queue/fiber inspection is legal only after native owner identity.
@@ -289,7 +290,7 @@ static int pass_timing_thread(void)
 #ifdef __vita__
     return xv_owner_thread_id()==pass_timing.thread;
 #else
-    return pthread_equal(pthread_self(),pass_timing.thread);
+    return pthread_equal(xv_owner_pthread_self(),pass_timing.thread);
 #endif
 }
 static int pass_timing_active(xctx *c,uint32_t *generation)
@@ -304,7 +305,7 @@ static void pass_timing_begin(xctx *c)
 #ifdef __vita__
     pass_timing.thread=sceKernelGetThreadId();
 #else
-    pass_timing.thread=pthread_self();
+    pass_timing.thread=xv_owner_pthread_self();
 #endif
     pass_timing.open=1;pass_timing.tick=(unsigned)tick;
     pass_timing.batch_start=batch_us;
@@ -679,7 +680,7 @@ static int worker_lane(void)
     SceUID id=sceKernelGetThreadId();
     for(unsigned i=0;i<active_workers;i++)if(id==threads[i])return (int)i;
 #else
-    pthread_t id=pthread_self();
+    pthread_t id=xv_owner_pthread_self();
     for(unsigned i=0;i<active_workers;i++)if(pthread_equal(id,threads[i]))return (int)i;
 #endif
     return -1;
@@ -732,7 +733,7 @@ int xv_object_is_worker_thread(void)
 #ifdef __vita__
     return worker_thread_id_matches(sceKernelGetThreadId());
 #else
-    pthread_t id=pthread_self();
+    pthread_t id=xv_owner_pthread_self();
     for(unsigned i=0;i<WORKERS;i++)if(pthread_equal(id,threads[i]))return 1;
     return 0;
 #endif
@@ -883,7 +884,7 @@ static SceUID owner_lane_thread;
 static int owner_lane_thread_is_current(void) { return sceKernelGetThreadId()==owner_lane_thread; }
 #else
 static pthread_t owner_lane_thread;
-static int owner_lane_thread_is_current(void) { return pthread_equal(pthread_self(),owner_lane_thread); }
+static int owner_lane_thread_is_current(void) { return pthread_equal(xv_owner_pthread_self(),owner_lane_thread); }
 #endif
 static int owner_lane_active(void)
 { return owner_lane_enabled&&active_workers==WORKERS&&__atomic_load_n(&running,__ATOMIC_ACQUIRE); }
@@ -1037,7 +1038,7 @@ static int pose_is_owner(void)
 #ifdef __vita__
     return xv_owner_thread_id()==pose_owner_thread;
 #else
-    return pthread_equal(pthread_self(),pose_owner_thread);
+    return pthread_equal(xv_owner_pthread_self(),pose_owner_thread);
 #endif
 }
 static int pose_backend_available(void)
@@ -1281,7 +1282,7 @@ static int solver_is_owner(void)
 #ifdef __vita__
     return xv_owner_thread_id()==solver_owner_thread;
 #else
-    return pthread_equal(pthread_self(),solver_owner_thread);
+    return pthread_equal(xv_owner_pthread_self(),solver_owner_thread);
 #endif
 }
 void xv_object_solver_override(int enabled)
@@ -1939,7 +1940,7 @@ static void owner_participate(void)
 #ifdef __vita__
     owner_lane_thread=sceKernelGetThreadId();
 #else
-    owner_lane_thread=pthread_self();
+    owner_lane_thread=xv_owner_pthread_self();
 #endif
     if(!announced) { announced=1;XK_LOG("[owner-lane] first participation: %u queued jobs, %u workers\n",count,active_workers); }
     owner_lane_batches++;
@@ -2024,21 +2025,21 @@ static int initialize(void)
 #ifdef __vita__
     solver_owner_thread=sceKernelGetThreadId();
 #else
-    solver_owner_thread=pthread_self();
+    solver_owner_thread=xv_owner_pthread_self();
 #endif
 #endif
 #ifdef XV_LIGHT_QUERY_CENSUS
 #ifdef __vita__
     census_owner_thread=sceKernelGetThreadId();
 #else
-    census_owner_thread=pthread_self();
+    census_owner_thread=xv_owner_pthread_self();
 #endif
 #endif
 #ifdef XV_OBJECT_POSE_EXPERIMENT
 #ifdef __vita__
     pose_owner_thread=sceKernelGetThreadId();
 #else
-    pose_owner_thread=pthread_self();
+    pose_owner_thread=xv_owner_pthread_self();
 #endif
 #endif
     const char *fast=getenv("XV_OBJECT_LOCK_FAST_PATH");
