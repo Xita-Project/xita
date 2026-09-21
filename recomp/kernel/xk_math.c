@@ -73,6 +73,10 @@ void xv_native_math_report(unsigned frames)
 #ifdef XV_NATIVE_MATRIX_NEON
     matrix_neon_report(frames);
 #endif
+#if XV_QUAT_SHARED_OUTPUT
+    extern void xv_quat_shared_report(unsigned);
+    xv_quat_shared_report(frames);
+#endif
     unsigned point_fast=0,point_fallback[4]={0};
     for(unsigned lane=0;lane<MATH_LANE_SLOTS;lane++) {
         point_fast+=point_stats[lane].fast;
@@ -247,6 +251,9 @@ int xv_math_matrix_multiply(xctx *restrict c)
     return 1;
 }
 
+#if XV_QUAT_SHARED_OUTPUT
+#include "xk_quat_shared.h"
+#endif
 /* 0xB5F60: quaternion to scaled transform. Fixed native temporaries replace
  * x87 stack dispatch; float scratch spills and final x87 slots are retained. */
 int xv_math_quaternion_matrix(xctx *restrict c)
@@ -284,6 +291,19 @@ int xv_math_quaternion_matrix(xctx *restrict c)
     memcpy(input,ip,sizeof input);
     uint32_t zero=X_M32(0x1F0A68u),two=X_M32(0x1F0B04u),one=X_M32(0x1F0A78u);
     quaternion_stats[lane].fast++;
+#if XV_QUAT_SHARED_OUTPUT
+    int transaction=xv_quat_shared_try(c,&xv_object_math_locked_,input,ip,output,scratch_out,constants,zero,two,one);
+    if(transaction==1) {
+        c->r[4]=sp+4;return 1;
+    }
+    /* A failed optimistic attempt may have observed changed input/mappings.
+     * Re-enter the wrapper with the guard retained, rather than use stale
+     * pointers or the old captured input. Nested admission then declines. */
+    if(transaction==2) {
+        quaternion_stats[lane].fast--;
+        return xv_math_quaternion_matrix(c);
+    }
+#endif
 #ifndef XV_QUAT_CACHE
     /* The optional shared cache owns a larger transaction; keep its guard. */
     XV_OBJECT_MATH_PRIVATE(c,2,c->r[2],52,sp-24u,24);

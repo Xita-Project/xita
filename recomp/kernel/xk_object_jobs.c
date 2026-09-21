@@ -1542,6 +1542,25 @@ static void record_quat_admission(unsigned lane,xctx *c)
     r->nested+=math_depth[lane]!=0;
 }
 #endif
+#if XV_QUAT_SHARED_OUTPUT
+/* Only the observed shared-output hierarchy leaf; no enclosing transaction
+ * may be split. The caller captures under the guard and validates on resume. */
+int xv_object_quat_shared_admit(xctx *c,int guard)
+{
+    if(initialized!=1||!math_fast_path||!__atomic_load_n(&running,__ATOMIC_ACQUIRE))return 0;
+    int lane=worker_lane();
+    if(lane<0||guard!=lane+2||c!=&contexts[lane]||!xv_is_object_job(c)||
+       math_depth[lane]!=1||c->df)return 0;
+    if(!(math_private_override<0?math_private_enabled:(unsigned)math_private_override))return 0;
+#ifdef XV_OBJECT_HOLD_PROFILE
+    if(hold_enabled)return 0;
+#endif
+    if(__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE))return 0;
+    uint32_t sp=c->r[4];
+    return sp>=24u&&private_stack_span(lane,sp-24u,28)&&
+        X_M32(sp)==0x8E55Fu&&!private_stack_span(lane,c->r[2],52);
+}
+#endif
 int xv_object_private_quaternion(xctx *c)
 {
 #if !defined(XV_OBJECT_QUAT_EXPERIMENT) || defined(XV_QUAT_CACHE)

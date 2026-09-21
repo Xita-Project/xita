@@ -2211,6 +2211,30 @@ $(RECOMP_BUILD)/object-quat.config: force-object-quat-config
 	@rm -f $@.tmp
 $(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/object-quat.config
 
+# Opt-in shared-output leaf transaction, scoped to Halo hierarchy caller 8E55F.
+XV_QUAT_SHARED_OUTPUT ?= 0
+ifneq ($(filter $(XV_QUAT_SHARED_OUTPUT),0 1),$(XV_QUAT_SHARED_OUTPUT))
+$(error XV_QUAT_SHARED_OUTPUT must be 0 or 1)
+endif
+ifeq ($(XV_QUAT_SHARED_OUTPUT),1)
+ifneq ($(RECOMP):$(GAME_PROFILE):$(XV_EXPERIMENTAL_OBJECT_JOBS),1:halo_ce_3925:1)
+$(error XV_QUAT_SHARED_OUTPUT requires Halo CE object workers)
+endif
+ifeq ($(XV_QUAT_CACHE),1)
+$(error XV_QUAT_SHARED_OUTPUT cannot split the shared quaternion cache)
+endif
+endif
+.PHONY: force-quat-shared-config
+force-quat-shared-config:
+$(RECOMP_BUILD)/quat-shared.config: force-quat-shared-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_QUAT_SHARED_OUTPUT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: $(RECOMP_BUILD)/quat-shared.config
+$(RECOMP_BUILD)/kernel/xk_math.o $(RECOMP_BUILD)/kernel/xk_object_jobs.o: RECOMP_CFLAGS += -DXV_QUAT_SHARED_OUTPUT=$(XV_QUAT_SHARED_OUTPUT)
+$(RECOMP_BUILD)/kernel/xk_math.o: recomp/kernel/xk_quat_shared.h
+
 # The pose experiment changes only the pool and units containing its exact
 # loop hooks. Remember both flag transitions in a reused build directory.
 XV_OBJECT_POSE_BUILD := $(if $(and $(filter 1,$(XV_EXPERIMENTAL_OBJECT_JOBS)),$(filter 1,$(XV_OBJECT_POSE_EXPERIMENT))),1,0)

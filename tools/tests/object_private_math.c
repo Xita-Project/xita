@@ -247,6 +247,67 @@ static void quat_audio_commit(xctx *c)
     assert(!xv_object_private_quaternion(c));
     c->r[4]+=4;__atomic_store_n(&quat_service_done,1,__ATOMIC_RELEASE);
 }
+#if XV_QUAT_SHARED_OUTPUT
+static unsigned shared_hook_calls,shared_hook_mutations;
+static pthread_barrier_t shared_parallel;
+void xv_quat_shared_test_released(xctx *c)
+{
+    __atomic_fetch_add(&shared_hook_calls,1,__ATOMIC_RELAXED);
+    if(workers==2&&c->r[6]<2&&c->r[7]==0&&!owner_lane_mode) {
+        /* Both real workers must enter here with the global guard available.
+         * Retaining it during the speculative phase deadlocks this rendezvous. */
+        int guard=xv_object_math_lock();xv_object_math_unlock(&guard);
+        int r=pthread_barrier_wait(&shared_parallel);assert(!r||r==PTHREAD_BARRIER_SERIAL_THREAD);
+    }
+    /* Controlled competing write between capture and commit. The destination
+     * must still contain the sentinel: speculative output is never published. */
+    for(unsigned i=0;i<52;i++)assert(((uint8_t *)X_G(c->r[2]))[i]==0xa5);
+    if(c->r[7]==1) {
+        int guard=xv_object_math_lock();
+        X_M32(c->r[1])^=0x00100000u;
+        xv_object_math_unlock(&guard);
+        __atomic_fetch_add(&shared_hook_mutations,1,__ATOMIC_RELAXED);
+    }
+}
+static void check_shared_quaternion(xctx *c,unsigned id)
+{
+    xctx entry=*c;
+    uint32_t area=(c->r[4]&~4095u)+512;
+    for(unsigned mutation=0;mutation<2;mutation++) {
+        c->r[4]=area+512;c->r[1]=0x40000+id*16;c->r[2]=0x70000+id*64;
+        c->r[6]=id;c->r[7]=mutation;X_M32(c->r[4])=0x8e55fu;
+        uint32_t old=X_M32(c->r[1]);
+        int admitted=release_enabled&&fast_path&&workers&&!on_owner();
+        {
+            extern int xv_object_quat_shared_admit(xctx *,int);
+            int guard=xv_object_math_lock();
+            assert(!!xv_object_quat_shared_admit(c,guard)==admitted);
+            xctx foreign=*c;assert(!xv_object_quat_shared_admit(&foreign,guard));
+            X_M32(c->r[4])=0x8e130u;assert(!xv_object_quat_shared_admit(c,guard));
+            X_M32(c->r[4])=0x8e55fu;
+            uint32_t dest=c->r[2];c->r[2]=area+256;
+            assert(!xv_object_quat_shared_admit(c,guard));c->r[2]=dest;
+            int nested=xv_object_math_lock();assert(!xv_object_quat_shared_admit(c,nested));
+            xv_object_math_unlock(&nested);xv_object_math_unlock(&guard);
+        }
+        if(mutation&&admitted)X_M32(c->r[1])^=0x00100000u;
+        xctx expected=*c;fenv_t native_before;assert(!fegetenv(&native_before));
+        assert(xv_math_quaternion_matrix(&expected));
+        int expected_flags=fetestexcept(FE_ALL_EXCEPT);
+        uint8_t result[52],spill[24];memcpy(result,X_G(c->r[2]),52);
+        memcpy(spill,X_G(c->r[4]-24u),24);
+        X_M32(c->r[1])=old;memset(X_G(c->r[2]),0xa5,52);
+        assert(!fesetenv(&native_before));
+        assert(xv_math_quaternion_matrix(c));
+        assert(fetestexcept(FE_ALL_EXCEPT)==expected_flags);
+        assert(!memcmp(c,&expected,sizeof expected));
+        assert(!memcmp(result,X_G(c->r[2]),52));
+        assert(!memcmp(spill,X_G(c->r[4]-28u),24));
+        X_M32(c->r[1])=old;
+    }
+    *c=entry;
+}
+#endif
 static void check_private_quaternion(xctx *c,unsigned id)
 {
     xctx entry=*c;
@@ -324,6 +385,9 @@ void f_0008FB70(xctx *c)
     check_private_point(c,id);
     for(unsigned kind=0;kind<4;kind++)compare_helper(c,kind,id);
     check_private_quaternion(c,id);
+#if XV_QUAT_SHARED_OUTPUT
+    check_shared_quaternion(c,id);
+#endif
 #ifdef TEST_HIERARCHY_INTEGRATION
     compare_hierarchy(c,id);
 #endif
@@ -347,6 +411,9 @@ int main(void)
     release_enabled=atoi(getenv("XV_OBJECT_PRIVATE_MATH"));
     fast_path=atoi(getenv("XV_OBJECT_LOCK_FAST_PATH"));
     assert(!pthread_barrier_init(&concurrent,NULL,2));
+#if XV_QUAT_SHARED_OUTPUT
+    assert(!pthread_barrier_init(&shared_parallel,NULL,2));
+#endif
     g_xram=calloc(1,4<<20);g_img_base=g_xram;g_xpt=calloc(1<<20,4);   /* stacks live at 0x200000+ */
     for(unsigned i=0;i<512;i++)g_xpt[i]=i*4096;
     for(unsigned i=0;i<13;i++) {X_MF32(0x30000+i*4)=(float)(i+1)/8;X_MF32(0x30100+i*4)=(float)(i+3)/16;}

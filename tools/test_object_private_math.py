@@ -16,6 +16,7 @@ quat_build=os.environ.get('OBJECT_QUAT_TEST_BUILD','1')!='0'
 quat_cache=os.environ.get('OBJECT_QUAT_CACHE_TEST_BUILD','0')=='1'
 constants_original=os.environ.get('OBJECT_QUAT_CONSTANT_MODE','original')=='original'
 quat_profile=os.environ.get('OBJECT_QUAT_PROFILE_TEST_BUILD','0')=='1'
+shared_build=os.environ.get('OBJECT_QUAT_SHARED_TEST_BUILD','0')=='1'
 query_unlock=os.environ.get('OBJECT_QUERY_UNLOCK_TEST_BUILD','0')=='1'
 owner_lane=os.environ.get('OBJECT_OWNER_LANE_TEST_BUILD','0')=='1'
 three_workers=os.environ.get('OBJECT_THREE_WORKERS_TEST_BUILD','0')=='1'
@@ -29,6 +30,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
         *(['-DXV_HIERARCHY_ASSIST=1','-DTEST_HIERARCHY_SHARED'] if hierarchy_shared else []),
         *(['-DXV_OBJECT_POINT_EXPERIMENT'] if point_build else []),
         *(['-DXV_OBJECT_QUAT_PROFILE'] if quat_profile else []),
+        *(['-DXV_QUAT_SHARED_OUTPUT=1','-DXV_QUAT_SHARED_TEST'] if shared_build else []),
         *(['-DXV_QUERY_UNLOCK=1','-DXV_QUERY_UNLOCK_DEFAULT=1'] if query_unlock else []),
         *(['-DXV_OBJECT_OWNER_LANE=1','-DXV_OBJECT_OWNER_LANE_DEFAULT=1','-DXV_OBJECT_JOB_SPLIT=1','-DXV_OBJECT_JOB_SPLIT_DEFAULT=1'] if owner_lane else []),
         *(['-DXV_OBJECT_WORKERS=3','-DXV_OBJECT_JOB_SPLIT=1','-DXV_OBJECT_JOB_SPLIT_DEFAULT=1'] if three_workers else []),
@@ -52,6 +54,14 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
                         env.pop('XV_OBJECT_PRIVATE_QUATERNION')
                     result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30,env=env)
                     assert result.returncode==0,(result.returncode,result.stdout,result.stderr)
+                    if shared_build:
+                        shared=re.findall(r'\[quat-shared\] \d+ frames attempts (\d+) committed (\d+) retries (\d+)',result.stderr)
+                        assert len(shared)==2 and list(map(int,shared[-1]))==[0,0,0],shared
+                        attempts,commits,retries=map(int,shared[0])
+                        assert attempts==commits+retries
+                        active=workers!='0' and private=='1' and fast=='1'
+                        assert (commits>0)==active and (retries>0)==active,(shared,workers,private,fast)
+
                     if owner_lane:
                         ol=re.findall(r'\[owner-lane\] \d+ frames enabled (\d+) batches (\d+) jobs (\d+) pause-breaks (\d+) lock-spins (\d+) quiesce (\d+)',result.stderr)
                         assert len(ol)==2,ol
