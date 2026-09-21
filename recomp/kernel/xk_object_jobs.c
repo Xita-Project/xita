@@ -208,6 +208,13 @@ static struct {
     unsigned count, private_input;
     uint32_t pc, input, output;
 } quat_sites[WORKERS][QUAT_SITES+1];
+/* Admission census includes rejected calls; the older site table only sees
+ * private-output releases. Read registers and verified lane-stack return PCs,
+ * never shared object contents, before acquiring the object guard. */
+static struct {
+    unsigned count, private_input, private_output, private_scratch, nested, varied;
+    uint32_t pc, input, output;
+} quat_admission[WORKERS][QUAT_SITES+1];
 #endif
 static struct __attribute__((aligned(64))) {
     unsigned attempts, acquired, timeouts;
@@ -1518,6 +1525,23 @@ void xv_object_math_report_check(void)
 {
     if(owner||count||__atomic_load_n(&running,__ATOMIC_ACQUIRE))abort();
 }
+#if defined(XV_OBJECT_QUAT_PROFILE) && defined(XV_OBJECT_QUAT_EXPERIMENT) && !defined(XV_QUAT_CACHE)
+static void record_quat_admission(unsigned lane,xctx *c)
+{
+    uint32_t pc=private_stack_span(lane,c->r[4],4)?X_M32(c->r[4]):0;
+    unsigned site;
+    for(site=0;site<QUAT_SITES;site++)
+        if(!quat_admission[lane][site].count||quat_admission[lane][site].pc==pc)break;
+    __typeof__(quat_admission[0][0]) *r=&quat_admission[lane][site];
+    if(!r->count) {r->pc=site<QUAT_SITES?pc:0;r->input=c->r[1];r->output=c->r[2];}
+    else r->varied+=r->input!=c->r[1]||r->output!=c->r[2];
+    r->count++;
+    r->private_input+=private_stack_span(lane,c->r[1],16);
+    r->private_output+=private_stack_span(lane,c->r[2],52);
+    r->private_scratch+=c->r[4]>=24u&&private_stack_span(lane,c->r[4]-24u,28);
+    r->nested+=math_depth[lane]!=0;
+}
+#endif
 int xv_object_private_quaternion(xctx *c)
 {
 #if !defined(XV_OBJECT_QUAT_EXPERIMENT) || defined(XV_QUAT_CACHE)
@@ -1529,6 +1553,9 @@ int xv_object_private_quaternion(xctx *c)
     int lane=worker_lane();
     if(lane<0||c!=&contexts[lane]||!xv_is_object_job(c))return 0;
     park_worker((unsigned)lane);quat_private_stats[lane].checks++;
+#ifdef XV_OBJECT_QUAT_PROFILE
+    record_quat_admission((unsigned)lane,c);
+#endif
     if(math_depth[lane]) {quat_private_stats[lane].nested++;return 0;}
     if(c->r[4]<24u||!private_stack_span(lane,c->r[2],52)||
        !private_stack_span(lane,c->r[4]-24u,28)) {
@@ -2332,6 +2359,13 @@ void xv_object_jobs_report(unsigned frames)
                 lane,quat_sites[lane][site].pc,quat_sites[lane][site].count,quat_sites[lane][site].private_input,
                 quat_sites[lane][site].input,quat_sites[lane][site].output,site==QUAT_SITES);
     memset(quat_sites,0,sizeof quat_sites);
+    for(unsigned lane=0;lane<WORKERS;lane++)for(unsigned site=0;site<=QUAT_SITES;site++) {
+        __typeof__(quat_admission[0][0]) *r=&quat_admission[lane][site];
+        if(r->count)XK_LOG("[object-quat-admission] lane %u pc %08X count %u private-input %u private-output %u private-scratch %u nested %u varied %u first input %08X output %08X overflow %u\n",
+            lane,r->pc,r->count,r->private_input,r->private_output,r->private_scratch,
+            r->nested,r->varied,r->input,r->output,site==QUAT_SITES);
+    }
+    memset(quat_admission,0,sizeof quat_admission);
 #endif
     XK_LOG("[object-jobs] probed stack peak bytes %u/%u/%u/%u of %u; excludes unprobed small frames\n",stack_peak[0],stack_peak[1],WORKERS>2?stack_peak[2]:0u,stack_peak[WORKERS],STACK_BYTES);
     XK_LOG("[object-locks] fast %u idle-owner %u acquired %u/%u/%u/%u nested %u/%u/%u contended %u/%u/%u wait-us %llu/%llu/%llu; worker waits overlap\n",

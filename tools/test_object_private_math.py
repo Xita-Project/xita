@@ -121,4 +121,12 @@ with tempfile.TemporaryDirectory(prefix='xita-object-private-math-') as director
                         assert (sum(int(r[2]) for r in quat_stats)>0)==(quat=='1' and not quat_cache and constants_original and workers!='0' and fast=='1')
                         assert all(int(r[1])==sum(map(int,r[2:])) for r in quat_stats)
                     else:assert not quat_stats
+                    admission=re.findall(r'\[object-quat-admission\] lane (\d+) pc ([0-9A-F]+) count (\d+) private-input (\d+) private-output (\d+) private-scratch (\d+) nested (\d+) varied (\d+)',result.stderr)
+                    if quat_profile and quat_build:
+                        for lane in range(NL):
+                            assert sum(int(r[2]) for r in admission if int(r[0])==lane)==sum(int(r[1]) for r in quat_stats if int(r[0])==lane)
+                        for r in admission:
+                            assert all(int(v)<=int(r[2]) for v in r[3:7])
+                            assert int(r[7])<int(r[2])
+                    else:assert not admission
                     print(f'quat={quat}, point={point}, timed={timed}, workers={workers}, private={private}, fast={fast}: {result.stdout.strip()}')
