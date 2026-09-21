@@ -1028,3 +1028,27 @@ for structure, counters, correctness and deadlocks (increment C merge
 ownership, scene scheduler isolation, deferred Present), not frame times.
 Vita-only runtime reports (vertex capture, frame time, GPU) do not exist
 here. Object-lock-site PCs are host addresses (addr2line on the harness).
+
+### 37a. Raspberry Pi cross build is ready before the Pi is
+
+Arm's prebuilt Linux toolchain is unpacked under
+`~/toolchains/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-linux-gnueabihf`
+(no root needed). `tools/host_build.py` gained `--static` and, for a
+32-bit ARM compiler, adds `-marm -march=armv7-a -mfpu=neon -mfloat-abi=hard`
+(the Vita's own -mcpu/-mfpu are dropped from make-n, the A72 runs
+A9-class code). The full cross build of the retained perf80 stage takes
+about two minutes on this PC and links a 40 MB static armhf ELF:
+
+    python3 tools/host_build.py --stage ../external-clock-candidate/build \
+        --commands make-n.txt --out <objdir> --static \
+        --cc ~/toolchains/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-linux-gnueabihf/bin/arm-none-linux-gnueabihf-gcc
+
+A copy sits in `../pi-bench/harness-armhf-static-<sha>`. It is UNTESTED
+beyond linking: this PC has no qemu-user, so the first run happens on the
+Pi (32-bit Raspberry Pi OS, scp the binary, halo_image.bin and the 1.8 GB
+haloce directory, then `tools/host_run.sh` with HOST_OBJ pointing at the
+directory holding it). Static linking means the Pi's glibc version does
+not matter. First things to check on the Pi: it boots to the menu, the
+XV_PAD script reaches a10, the NEON/FPSCR `__arm__` paths (xk_palette.c,
+query_world_run.h) behave, and whether TPIDRURW survives context switches
+under Linux (it should; then XV_THREAD_PAGE_TABLE builds can run there).

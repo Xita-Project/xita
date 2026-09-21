@@ -23,6 +23,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--stage', required=True); ap.add_argument('--commands', required=True)
     ap.add_argument('--out', required=True); ap.add_argument('--cc', default='gcc'); ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
+    ap.add_argument('--static', action='store_true', help='link statically (cross builds: no glibc version match needed on the target)')
     a = ap.parse_args()
     stage = Path(a.stage).resolve(); out = Path(a.out).resolve(); out.mkdir(parents=True, exist_ok=True)
     arm = 'arm' in a.cc or 'aarch' in a.cc or (a.cc == 'gcc' and os.uname().machine.startswith(('arm', 'aarch')))
@@ -48,12 +49,15 @@ def main():
     kernel_flags = units.get('recomp/kernel/xk_object_jobs.c') or units.get('recomp/kernel/xk_mem.c') or []
     for h in HOST_EXTRA:
         if (stage / h).exists(): units[h] = [f for f in kernel_flags]
-    print(f'{len(units)} units, arm={arm}, cc={a.cc}', flush=True)
+    # 32-bit ARM Linux (Raspberry Pi OS 32-bit, or a cross build for it): same ISA/FPU class as the Vita build
+    # (-mcpu=cortex-a9 -mfpu=neon-fp16 come from make-n and are dropped by DROP_PREFIX); an A72 runs A9-tuned code.
+    arm_flags = ['-marm', '-march=armv7-a', '-mfpu=neon', '-mfloat-abi=hard'] if arm and 'aarch' not in a.cc and not os.uname().machine.startswith('aarch') else []
+    print(f'{len(units)} units, arm={arm}, cc={a.cc}, static={a.static}', flush=True)
     def compile_one(item):
         src, flags = item
         obj = out / (Path(src).stem + '.o'); s = stage / src
         if obj.exists() and obj.stat().st_mtime > s.stat().st_mtime: return (src, 0, '')
-        cmd = [a.cc] + HOST_FLAGS + flags + ['-c', str(s), '-o', str(obj)]
+        cmd = [a.cc] + HOST_FLAGS + arm_flags + flags + ['-c', str(s), '-o', str(obj)]
         r = subprocess.run(cmd, cwd=stage, capture_output=True, text=True)
         return (src, r.returncode, r.stderr[-1500:])
     failed = 0
@@ -62,7 +66,7 @@ def main():
             if rc: failed += 1; print(f'FAIL {src}\n{err}', flush=True)
     if failed: print(f'{failed} units failed'); return 1
     objs = sorted(str(p) for p in out.glob('*.o'))
-    r = subprocess.run([a.cc, '-pthread'] + objs + ['-o', str(out / 'harness'), '-lm', '-lpthread'], capture_output=True, text=True)
+    r = subprocess.run([a.cc, '-pthread'] + arm_flags + (['-static'] if a.static else []) + objs + ['-o', str(out / 'harness'), '-lm', '-lpthread'], capture_output=True, text=True)
     if r.returncode:
         print(r.stderr[-6000:]); return 1
     print('built', out / 'harness'); return 0
