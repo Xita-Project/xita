@@ -10,20 +10,20 @@
  * counted by the guest return address of the kernel call and whether the thread was blocking (state 1) or
  * merely yielding (SwitchToThread/Sleep(0)); the report lists the top sites. */
 #define SCENE_SITES 24
-static struct { uint32_t eip; unsigned n_block, n_yield; } scene_sites[SCENE_SITES]; static unsigned scene_nsites, scene_site_overflow;
-void xv_scene_thread_yield_census(uint32_t eip, int blocking)
+static struct { uint32_t eip, caller; unsigned n_block, n_yield; } scene_sites[SCENE_SITES]; static unsigned scene_nsites, scene_site_overflow;
+void xv_scene_thread_yield_census(uint32_t eip, uint32_t caller, int blocking)
 {
-    for (unsigned i = 0; i < scene_nsites; ++i) if (scene_sites[i].eip == eip) { if (blocking) scene_sites[i].n_block++; else scene_sites[i].n_yield++; return; }
+    for (unsigned i = 0; i < scene_nsites; ++i) if (scene_sites[i].eip == eip && scene_sites[i].caller == caller) { if (blocking) scene_sites[i].n_block++; else scene_sites[i].n_yield++; return; }
     if (scene_nsites == SCENE_SITES) { scene_site_overflow++; return; }
-    scene_sites[scene_nsites].eip = eip; scene_sites[scene_nsites].n_block = blocking; scene_sites[scene_nsites].n_yield = !blocking; scene_nsites++;
+    scene_sites[scene_nsites].eip = eip; scene_sites[scene_nsites].caller = caller; scene_sites[scene_nsites].n_block = blocking; scene_sites[scene_nsites].n_yield = !blocking; scene_nsites++;
 }
 static void scene_census_report(void)
 {
     if (!scene_nsites) return;
     for (unsigned i = 0; i < scene_nsites; ++i) for (unsigned j = i + 1; j < scene_nsites; ++j)
         if (scene_sites[j].n_block + scene_sites[j].n_yield > scene_sites[i].n_block + scene_sites[i].n_yield) { typeof(scene_sites[0]) t = scene_sites[i]; scene_sites[i] = scene_sites[j]; scene_sites[j] = t; }
-    char line[300]; int ln = snprintf(line, sizeof line, "[scene-yields] sites (eip block/yield):");
-    for (unsigned i = 0; i < scene_nsites && i < 10; ++i) ln += snprintf(line + ln, sizeof line - ln, " %X %u/%u", scene_sites[i].eip, scene_sites[i].n_block, scene_sites[i].n_yield);
+    char line[300]; int ln = snprintf(line, sizeof line, "[scene-yields] sites (wrapper-ret<-caller block/yield):");
+    for (unsigned i = 0; i < scene_nsites && i < 10; ++i) ln += snprintf(line + ln, sizeof line - ln, " %X<-%X %u/%u", scene_sites[i].eip, scene_sites[i].caller, scene_sites[i].n_block, scene_sites[i].n_yield);
     if (scene_site_overflow) ln += snprintf(line + ln, sizeof line - ln, " (+%u unlisted)", scene_site_overflow);
     XK_LOG("%s\n", line); scene_nsites = 0; scene_site_overflow = 0;
 }
@@ -39,7 +39,8 @@ static SceUID helper = -1, go = -1, done = -1;
 static xctx ctx;
 static unsigned depth, dispatched, declined_nested;
 static uint64_t wait_us, wait_max_us;
-int xv_scene_thread_active(void) { return depth && sceKernelGetThreadId() == helper; }
+static xk_thread *scene_guest;
+int xv_scene_thread_active(const void *guest_thread) { return depth && guest_thread == scene_guest && sceKernelGetThreadId() == helper; }
 
 static int helper_main(SceSize args, void *argp)
 {
@@ -69,7 +70,7 @@ int xv_scene_thread_run(void *context)
     if (depth) { declined_nested++; return 0; }                  /* recursive scene entry on the owner */
     depth = 1;
     xctx *c = context;
-    ctx = *c;
+    ctx = *c; scene_guest = xk_cur;
     xv_scene_owner_alias = sceKernelGetThreadId();
     uint64_t t0 = xk_os_monotonic_us();
     sceKernelSignalSema(go, 1);
@@ -106,7 +107,8 @@ static sem_t go, done;
 static xctx ctx;
 static unsigned depth, dispatched, declined_nested;
 static uint64_t wait_us, wait_max_us;
-int xv_scene_thread_active(void) { return helper_valid && __atomic_load_n(&depth, __ATOMIC_ACQUIRE) && pthread_equal(pthread_self(), helper); }
+static xk_thread *scene_guest;
+int xv_scene_thread_active(const void *guest_thread) { return helper_valid && __atomic_load_n(&depth, __ATOMIC_ACQUIRE) && guest_thread == scene_guest && pthread_equal(pthread_self(), helper); }
 
 pthread_t xv_owner_pthread_self(void)
 {
@@ -140,7 +142,7 @@ int xv_scene_thread_run(void *context)
     if (pthread_equal(pthread_self(), helper)) return 0;         /* the helper's own entry: run the body */
     if (depth) { declined_nested++; return 0; }                  /* recursive scene entry on the owner */
     xctx *c = context;
-    ctx = *c;
+    ctx = *c; scene_guest = xk_cur;
     owner_alias = pthread_self();
     __atomic_store_n(&depth, 1, __ATOMIC_RELEASE);
     uint64_t t0 = xk_os_monotonic_us();
@@ -160,7 +162,7 @@ void xv_scene_thread_report(unsigned frames)
     scene_census_report();
 }
 #else
-int xv_scene_thread_active(void) { return 0; }
+int xv_scene_thread_active(const void *guest_thread) { (void)guest_thread; return 0; }
 int xv_scene_thread_run(void *context) { (void)context; return 0; }
 void xv_scene_thread_report(unsigned frames) { (void)frames; }
 #if !defined(__vita__)

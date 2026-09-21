@@ -1052,3 +1052,48 @@ not matter. First things to check on the Pi: it boots to the menu, the
 XV_PAD script reaches a10, the NEON/FPSCR `__arm__` paths (xk_palette.c,
 query_world_run.h) behave, and whether TPIDRURW survives context switches
 under Linux (it should; then XV_THREAD_PAGE_TABLE builds can run there).
+
+## 38. Increments A and B run on the host; the overlap stage and the scene-yield census
+
+Stage `../overlap-candidate/build` = scene-thread-candidate (perf82) plus
+the render-view series (7a04751..9460b36 as one diff: xk_mem.c,
+xv_x86rt.h, xk.h, xd3d.c, xk_os_*.c, Makefile, runtime.mk; xd3d.c's
+Present report hunk hand-applied next to the scene-thread report),
+xk_render_view.c/.h, the shard hooks (tools/patch_render_view_hooks.py:
+32 preambles, 1 BCB30 hook), the host `__arm__` guards from the retained
+stage, and `runtime/main.c` calling xv_render_view_configure() after the
+owner-phase configure (the series never wired it; the harness now does the
+same). Host list: `make -n -B build/xita.elf ${=ARGS} XV_RENDER_VIEW=1
+XV_SCENE_THREAD=1` (zsh: `${=ARGS}` or the list is one argument and make
+says "Nothing to be done"), 97 units.
+
+Host results, a10 from menu to corridors, 6,460 frames per 4-minute run,
+identical camera path in every configuration:
+- XV_RENDER_VIEW=1: every scene under the view, learn 6 passes, 31 slots
+  + 25 image pages listed, merge 1-5k words/frame, 21-22 scene writes
+  "found late" (caught by full frames), 0 overflow, 0 watchdog. Learning
+  arms in the menu on the host (the 8 ms tick-gap heuristic trips at 30
+  fps pacing); harmless, full frames grow the set in gameplay.
+- XV_SCENE_THREAD=1: xk_scene_thread.c gained a host port (pthread +
+  POSIX semaphores). Host fibers are ucontext on one thread, so the helper
+  becomes the single runner while it runs the scene, exactly the Vita
+  semantics ("the helper is thread 8"). Host owner checks were aliased
+  like the Vita ones: pthread_self() -> xv_owner_pthread_self() in
+  xk_object_jobs.c, xk_owner_phase.c and the three control files.
+  60/60 dispatched per window, owner wait 15-45 ms/frame on x86 (the
+  scene's cost here includes the software rasterizer), 0 nested declines,
+  no hang. A+B together: same.
+
+Scene-yield census (`[scene-yields]`, reported with the scene-thread
+line; hook in xk_yield): every scheduler handoff taken by the scene's own
+guest thread while the body runs on the helper, keyed by the XAPI
+wrapper's return site and its caller ([ebp+4]), split blocking/yield.
+First cut counted every fiber that ran on the helper (the vblank fiber's
+sleep showed as "eip 0, 60 blocking per 60 frames"); it is now restricted
+to the scene guest thread. Wrapper sites: 12D9C = WaitForSingleObject
+(NtWaitForSingleObjectEx), 12E6E = Sleep (KeDelayExecutionThread), BD97C
+= preempt yields at BCB30's top level (X_PREEMPT -> xv_preempt ->
+xk_yield; harmless to drop under the overlap). Present is issued by
+f_000BC78B, outside BCB30, so "deferred Present" is an owner-side change
+to the Present HLE, not a scene-body change. host_reports.c also requests
+the kernel's `[wait]` dump each report (blocking sites of all threads).

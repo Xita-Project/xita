@@ -339,8 +339,8 @@ void xk_yield(void)
         __atomic_exchange_n(&g_wait_dump_requested,0,__ATOMIC_ACQ_REL))
         xk_wait_stats_dump(); /* Guest-owned counters are never read/reset by the profiler thread. */
     me->ctx.eip_hint = X_M32(me->ctx.r[4]);          /* return address of the kernel call we are inside */
-    { extern int xv_scene_thread_active(void) __attribute__((weak)); extern void xv_scene_thread_yield_census(uint32_t, int) __attribute__((weak));
-      if (xv_scene_thread_active && xv_scene_thread_yield_census && xv_scene_thread_active()) xv_scene_thread_yield_census(me->ctx.eip_hint, me->state == 1); }
+    { extern int xv_scene_thread_active(const void *) __attribute__((weak)); extern void xv_scene_thread_yield_census(uint32_t, uint32_t, int) __attribute__((weak));
+      if (xv_scene_thread_active && xv_scene_thread_yield_census && xv_scene_thread_active(me)) xv_scene_thread_yield_census(me->ctx.eip_hint, X_M32(me->ctx.r[5] + 4u), me->state == 1); }   /* [ebp+4] = the XAPI wrapper's caller */
     if (xd3d_ds_check) xd3d_ds_check("yield", me->ctx.eip_hint);
     { static uint64_t last; static unsigned n; n++; uint64_t t = xk_os_monotonic_us();
       if (t - last > 3000000) { if (last && n > 2000) { XK_LOG("yield storm: %u yields in 3 s\n", n); xk_dump_threads(); } last = t; n = 0; } }
