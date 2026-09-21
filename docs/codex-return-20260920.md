@@ -271,3 +271,12 @@ Perf79 / bf40eee full game build succeeded. Retained xd3d report-site context di
 
 
 Perf79 update verified/restart-requested/boot-confirmed in slot 0; size/hash match package-check.json. Shader override/loading trace/capture detail=0, retention=1 re-armed and guarded campaign launch started. Startup.log reports BOTH kernel and user clock getters at 444 MHz after bind(500) returns success. This removes a kernel-versus-user getter discrepancy as the explanation in this run; physical cycle measurement is still absent. No clock settings/plugins were changed. Sampler reports zero admissions in initial menu/loading windows, expected until the model-material path executes; gameplay admission/timing remains pending.
+
+
+## Perf79 gameplay / external clock candidate
+
+Gameplay-third.log and gameplay.png confirm loaded campaign, grunts, weapon/HUD and native sampler admissions. Late complete windows: 7.4/7.6/7.0/7.3 FPS at 415/412/422/438 draws, with 1,482/1,378/1,338/2,088 accepted groups per stage per 60-frame window. Last three decode=0. Batching is executing; no whole-frame improvement established. The user reports the external overclocking tool was already set to 500 MHz; do not treat that as a newly applied frequency change or assume startup API readings establish physical clock speed.
+
+Added opt-in XV_CPU_EXTERNAL=1: settings load before the boot CPU policy; both boot and game CPU requests are skipped, with no kernel module load or bind. GPU/bus/crossbar policy unchanged. Existing resident helper is NOT disarmed by this: a full device restart is required once to establish uncontested external ownership. Added read-only reported_cpu_mhz to private remote status (0 for host). Clock policy fixture passes ASan/UBSan, proving no setter/load/bind at 333/444/500 under external mode and preserving default policy. Host remote suite passes; expanded live-field assertion rerun pending. Source candidate not installed yet.
+
+Private inline-stack compile completed in ../render-inline-stack-probe. Adding always_inline redeclarations only for x87_push/pop to perf79 material unit removes their call sites in 70110; object text grows 1,452,216 -> 1,477,764 bytes (~1.76%). It preserves the existing function definitions and does not alter FP arithmetic. This is compile/disassembly evidence only; no source build selector, ARM equivalence check or hardware deployment for this probe yet. Keep it separate from the clock ownership candidate.

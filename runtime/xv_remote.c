@@ -14,10 +14,13 @@
 #include "xv_remote_platform.h"
 #ifdef __vita__
 #include <psp2/io/stat.h>
+#include <psp2/power.h>
 static int xv_remote_mkdir(const char *path) { return sceIoMkdir(path, 0777); }
+static int xv_remote_cpu_mhz(void) { return scePowerGetArmClockFrequency(); }
 #else
 #include <sys/stat.h>
 static int xv_remote_mkdir(const char *path) { return mkdir(path, 0777); }
+static int xv_remote_cpu_mhz(void) { return 0; }
 #endif
 
 #define ROOT "ux0:data/xita/"
@@ -320,9 +323,9 @@ static void serve(int s)
         } else if(!strcmp(method,"GET")&&!strcmp(target,"/status")) {
             { extern void xv_render_view_watchdog(void) __attribute__((weak)); if(xv_render_view_watchdog)xv_render_view_watchdog(); }   /* un-freeze a scene stuck on the render view */
             uint64_t now=remote_now();
-            char body[320];snprintf(body,sizeof body,"{\"protocol\":1,\"build\":\"%s\",\"version\":\"%s\",\"revision\":\"%s\",\"frames\":%u,\"benchmark\":%u,\"awake_seconds\":%llu}\n",
+            char body[320];snprintf(body,sizeof body,"{\"protocol\":1,\"build\":\"%s\",\"version\":\"%s\",\"revision\":\"%s\",\"frames\":%u,\"benchmark\":%u,\"awake_seconds\":%llu,\"reported_cpu_mhz\":%d}\n",
                 XV_BUILD_LABEL,XV_BUILD_VERSION,XV_BUILD_REVISION,LOAD(&frame_count),xv_benchmark_status(),
-                (unsigned long long)(awake_until>now?(awake_until-now)/1000000:0));
+                (unsigned long long)(awake_until>now?(awake_until-now)/1000000:0),xv_remote_cpu_mhz());
             if(!header(s,200,"application/json",strlen(body),NULL))send_all(s,body,strlen(body),remote_now()+2000000);
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/pad?",5)) {
             unsigned v[6];if(!pad_query(target+5,v)) {reply(s,400,"Invalid pad command\n");return;}

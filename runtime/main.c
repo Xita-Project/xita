@@ -2178,8 +2178,25 @@ static int xv_dashboard_start(void)
 }
 #endif
 
+static int xv_external_cpu_clock(void)
+{
+    const char *value = getenv("XV_CPU_EXTERNAL");
+    return value && !strcmp(value, "1");
+}
+
+static void xv_configure_boot_cpu_clock(void)
+{
+    if (!xv_external_cpu_clock() && scePowerGetArmClockFrequency() < 444)
+        scePowerSetArmClockFrequency(444);
+}
+
 static void xv_configure_cpu_clock(void)
 {
+    if (xv_external_cpu_clock()) {
+        XV_LOG("CPU clock: external plugin control; no CPU request or kernel-helper bind; user API reads %d MHz\n",
+               scePowerGetArmClockFrequency());
+        return;
+    }
     int requested = xv_quality_int("XV_CPU_MHZ", 444, 444, 500);
     if (requested != 500) requested = 444;
     if (requested == 500 && scePowerGetArmClockFrequency() >= 500) { XV_LOG("CPU clock: already 500 MHz\n"); return; }
@@ -2221,13 +2238,13 @@ int main(int argc, char *argv[])
 #endif
     (void)argc; (void)argv;
     XV_LOG("Xita " XV_BUILD_LABEL " runtime starting\n");
+    xv_load_settings(); /* clock ownership must be known before any CPU request */
     /* Homebrew boots at 333/111 MHz; ask for the full clocks (CPU 444, bus 222, GPU 222, GPU xbar 166). */
-    if (scePowerGetArmClockFrequency() < 444) scePowerSetArmClockFrequency(444);   /* never lower a 500 MHz clock the kernel module holds */
+    xv_configure_boot_cpu_clock();
     scePowerSetBusClockFrequency(222);
     scePowerSetGpuClockFrequency(222); scePowerSetGpuXbarClockFrequency(166);
     XV_LOG("clocks: cpu %d bus %d gpu %d xbar %d MHz\n", scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(), scePowerGetGpuXbarClockFrequency());
     xv_log_memory_budget("boot");
-    xv_load_settings();
     (void)xv_log_async_start(); /* selected build default, after environment/config */
     { extern void xv_tpidr_probe(void); xv_tpidr_probe(); } /* no-op unless XV_TPIDR_PROBE=1 */
 #ifdef XV_NATIVE_COLLISION_VERTICES

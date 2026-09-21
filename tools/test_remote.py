@@ -359,7 +359,9 @@ def main():
                 try:client.log(tmp/'invalid-game.log',**kwargs)
                 except ValueError:pass
                 else:raise AssertionError('Invalid game log selection accepted')
-            assert client.status()["protocol"] == 1
+            status = client.status()
+            assert status["protocol"] == 1
+            assert status["reported_cpu_mhz"] == 0  # host has no Vita clock API
             assert client.log(tmp / "client.log") == len(log)
             assert (tmp / "client.log").read_bytes() == log
             for i,contents in old_logs.items():
