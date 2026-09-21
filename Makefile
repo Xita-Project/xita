@@ -2032,6 +2032,13 @@ ifeq ($(XV_THREAD_PAGE_TABLE),1)
 CFLAGS += -DXV_THREAD_PAGE_TABLE=1 -include $(abspath runtime/xv_thread_bind.h)
 RECOMP_CFLAGS += -DXV_THREAD_PAGE_TABLE=1 -include $(abspath runtime/xv_thread_bind.h)
 endif
+# Native C-runtime float helpers (_controlfp/_frnd/floor): recomp/kernel/xk_crt_float.c, hooks at f_0001EC1F/1EABA/19E7B
+XV_NATIVE_CRT_FLOAT ?= 0
+XV_NATIVE_CRT_FLOAT_DEFAULT ?= 1
+ifeq ($(XV_NATIVE_CRT_FLOAT),1)
+CFLAGS += -DXV_NATIVE_CRT_FLOAT=1 -DXV_NATIVE_CRT_FLOAT_DEFAULT=$(XV_NATIVE_CRT_FLOAT_DEFAULT)
+RECOMP_CFLAGS += -DXV_NATIVE_CRT_FLOAT=1 -DXV_NATIVE_CRT_FLOAT_DEFAULT=$(XV_NATIVE_CRT_FLOAT_DEFAULT)
+endif
 XV_RENDER_VIEW ?= 0
 XV_RENDER_VIEW_DEFAULT ?= 0
 ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))
