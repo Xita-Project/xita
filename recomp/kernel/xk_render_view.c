@@ -19,6 +19,7 @@
 #include "xk.h"
 #include "xk_render_view.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include "../xv_x86rt.h"
 #if XV_RENDER_VIEW
@@ -58,6 +59,18 @@ static uint32_t learn_gap_us = 8000; static uint32_t *learn_hash; static uint64_
 
 static unsigned depth, bound, frames_entered, full_frames, fiber_switches, aliases_max, mirrors_in_scene;
 static uint64_t enter_us, leave_us, bytes_in, words_merged;
+/* Same-frame write conflicts (increment C): a word the scene changed (copy != pristine) whose live copy the tick also
+ * changed meanwhile (live != pristine) to a different value. XV_RENDER_VIEW_CONFLICT=1 (default) lets the scene's value
+ * win as before, 0 keeps the tick's; either way the sites are counted and the top ones reported. */
+static int conflict_scene_wins = 1; static uint64_t conflicts, conflicts_same_value;
+#define CONFLICT_SITES 16
+static struct { uint32_t page, word; unsigned n; uint32_t live, scene, vaddr; } conflict_sites[CONFLICT_SITES]; static unsigned conflict_nsites, conflict_overflow;
+static void conflict_note(uint32_t page, uint32_t word, uint32_t live, uint32_t scene)
+{
+    conflicts++;
+    for (unsigned i = 0; i < conflict_nsites; ++i) if (conflict_sites[i].page == page && conflict_sites[i].word == word) { conflict_sites[i].n++; conflict_sites[i].live = live; conflict_sites[i].scene = scene; return; }
+    if (conflict_nsites < CONFLICT_SITES) { uint32_t vps[1]; unsigned n = xk_mem_page_aliases(page * XK_PAGE, vps, 1); conflict_sites[conflict_nsites++] = (typeof(conflict_sites[0])){ page, word, 1, live, scene, n ? (vps[0] << 12) + word : 0 }; } else conflict_overflow++;
+}
 static int full_frame;
 
 static uint32_t page_hash(const uint8_t *p)
@@ -120,6 +133,7 @@ void xv_render_view_configure(void)
     if ((e = getenv("XV_RENDER_VIEW_PHYS_LIMIT_MIB"))) phys_limit = (uint32_t)atoi(e) << 20;
     if ((e = getenv("XV_RENDER_VIEW_IMAGE"))) image_view = atoi(e) != 0;
     if ((e = getenv("XV_RENDER_VIEW_THREAD"))) thread_mode = atoi(e) != 0;
+    if ((e = getenv("XV_RENDER_VIEW_CONFLICT"))) conflict_scene_wins = atoi(e) != 0;
     xk_mem_render_view_layout(&L);
     if (!xv_render_view_enabled) { XK_LOG("[render-view] process-start disabled\n"); return; }
     if (!L.shadow_pages || !g_xram) { XK_LOG("[render-view] no shadow region; disabled\n"); xv_render_view_enabled = 0; return; }
@@ -232,15 +246,25 @@ void xv_render_view_enter(unsigned *scope, void *context)
     if (active_frames == 1) log_request_table("first viewed frame");
     retarget_in_place(); bound_since_us = t0; bound = 1;
     if (thread_mode) xk_os_bind_page_table(rt->entries);       /* this thread (the one running the body) sees the view */
+    { extern void xv_write_watch_arm(void) __attribute__((weak)); if (xv_write_watch_arm) xv_write_watch_arm(); }   /* host diagnostic (write_watch.c) */
     enter_us += xk_os_monotonic_us() - t0; frames_entered++; full_frames += full_frame;
 }
-static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live)   /* one pass; newlib memcmp is ~86 MB/s here */
+static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live, uint32_t page_id)   /* one pass; newlib memcmp is ~86 MB/s here */
 {
     const uint32_t *c = (const uint32_t *)copy, *p = (const uint32_t *)pre; uint32_t *l = (uint32_t *)live; unsigned changed = 0;
     for (unsigned i = 0; i < XK_PAGE / 4; i += 4) {
         uint32_t d = (c[i] ^ p[i]) | (c[i+1] ^ p[i+1]) | (c[i+2] ^ p[i+2]) | (c[i+3] ^ p[i+3]);
         if (!d) continue;
-        for (unsigned k = i; k < i + 4; ++k) if (c[k] != p[k]) { changed++; if (copyback) l[k] = c[k]; }
+        for (unsigned k = i; k < i + 4; ++k) if (c[k] != p[k]) {
+            changed++;
+            uint32_t lv = l[k];
+            if (lv != p[k]) {   /* the tick wrote this word during the scene */
+                if (lv == c[k]) { conflicts_same_value++; continue; }
+                conflict_note(page_id, k * 4u, lv, c[k]);
+                if (!conflict_scene_wins) continue;
+            }
+            if (copyback) l[k] = c[k];
+        }
     }
     words_merged += changed;
     return changed != 0;
@@ -250,13 +274,13 @@ static void unbind_merge(void)
     restore_in_place(); bound = 0;
     for (unsigned s = 0; s < slots_used; ++s) {
         if (!full_frame && !sw_slot[s]) continue;
-        if (!merge_page(shadow_of(s), pristine_slot(s), live_of_slot(s))) continue;
+        if (!merge_page(shadow_of(s), pristine_slot(s), live_of_slot(s), slot_page[s])) continue;
         if (!sw_slot[s]) { sw_slot[s] = 1; sw_slots++; if (active_frames > 30) sw_found_late++; }
     }
     for (unsigned i = 0; i < img_listed_n; ++i) {
         uint32_t ip = img_list[i];
         if (!full_frame && !sw_img[ip]) continue;
-        if (!merge_page(copy_of_img(ip), pristine_img(ip), live_of_img(ip))) continue;
+        if (!merge_page(copy_of_img(ip), pristine_img(ip), live_of_img(ip), (L.image_off >> 12) + ip)) continue;
         if (!sw_img[ip]) { sw_img[ip] = 1; sw_imgs++; if (active_frames > 30) sw_found_late++; }
     }
 }
@@ -282,6 +306,7 @@ void xv_render_view_watchdog(void)
 }
 /* In-place mode every fiber sees the view, so a switch needs no action; counted for increment C. */
 void xv_render_view_fiber_switch(void) { if (bound) fiber_switches++; }
+uint8_t *xv_render_view_shadow_of_phys(uint32_t phys_page) { uint32_t s = ready && phys_page < L.phys_pages ? slot_of[phys_page] : 0xFFFFFFFFu; return s == 0xFFFFFFFFu || s >= slots_used ? NULL : shadow_of(s); }
 void xv_render_view_report(unsigned frames)
 {
     if (!ready) return;
@@ -291,6 +316,13 @@ void xv_render_view_report(unsigned frames)
            frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0, (unsigned long long)words_merged,
            sw_slots, sw_imgs, sw_found_late, retargets_last, image_entries, retargets_overflow, fiber_switches, mirrors_in_scene, aliases_max);
     frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; fiber_switches = mirrors_in_scene = 0;
+    if (conflicts || conflicts_same_value) {
+        char line[400]; int ln = snprintf(line, sizeof line, "[render-view-conflicts] %u frames: %llu conflicting words (%llu same-value), policy %s; sites (phys-page:word n live/scene):",
+                                          frames, (unsigned long long)conflicts, (unsigned long long)conflicts_same_value, conflict_scene_wins ? "scene wins" : "tick wins");
+        for (unsigned i = 0; i < conflict_nsites && ln < 360; ++i) ln += snprintf(line + ln, sizeof line - ln, " %X:%X=%08X %u %X/%X", conflict_sites[i].page, conflict_sites[i].word, conflict_sites[i].vaddr, conflict_sites[i].n, conflict_sites[i].live, conflict_sites[i].scene);
+        if (conflict_overflow) ln += snprintf(line + ln, sizeof line - ln, " (+%u)", conflict_overflow);
+        XK_LOG("%s\n", line); conflicts = conflicts_same_value = 0; conflict_nsites = 0; conflict_overflow = 0;
+    }
 }
 #else
 int xv_render_view_enabled;

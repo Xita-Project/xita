@@ -6,6 +6,7 @@
  * and calls main().
  */
 #include <stdio.h>
+#include <sys/mman.h>
 #include <stdlib.h>
 #include <string.h>
 #include "xv_x86rt.h"
@@ -24,7 +25,8 @@ int main(int argc, char **argv)
     uint32_t base, size;
     if (fread(&base, 4, 1, f) != 1 || fread(&size, 4, 1, f) != 1) return 1;
     xk_mem_setup(base, size);
-    g_xram = calloc(xk_mem_arena_size(), 1);
+    g_xram = mmap(NULL, xk_mem_arena_size(), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);   /* page-aligned + zeroed: page protection diagnostics (write_watch.c) need it */
+    if (g_xram == MAP_FAILED) g_xram = NULL;
     if (fread(g_xram + xk_mem_image_arena_offset(), 1, size, f) != size) { fprintf(stderr, "short image\n"); return 1; }
     fclose(f);
     xk_mem_bind_arena();                      /* g_img_base for flat image-address access (X_IMG*), as the Vita boot does */
