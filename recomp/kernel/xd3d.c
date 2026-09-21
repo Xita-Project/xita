@@ -119,11 +119,13 @@ static inline void xd3d_count(const char *name)
     for (unsigned i = 0; i < g_hist_n; ++i) if (g_hist[i].name == name) { g_hist[i].n++; return; }
     if (g_hist_n < XD3D_HIST_MAX) { g_hist[g_hist_n].name = name; g_hist[g_hist_n].n = 1; g_hist_n++; }
 }
-static uint64_t g_draw_hash = 1469598103934665603ull; static int g_draw_hash_on = -1; static FILE *g_draw_hash_out;
+static uint64_t g_draw_hash = 1469598103934665603ull; static int g_draw_hash_on = -1; static FILE *g_draw_hash_out; static unsigned g_draw_hash_frame;
 static inline void xd3d_hash_call(const char *name, xctx *c)   /* XV_DRAW_HASH=<file>: per-frame hash of the D3D call stream (scene-output oracle for host comparisons) */
 {
     if (g_draw_hash_on < 0) { const char *e = getenv("XV_DRAW_HASH"); g_draw_hash_on = e != NULL; if (e) g_draw_hash_out = fopen(e, "w"); }
     if (!g_draw_hash_on) return;
+    { static int tf = -2; static FILE *tt; if (tf == -2) { const char *e = getenv("XV_DRAW_HASH_TRACE"); tf = e ? atoi(e) : -1; if (e) tt = fopen("draw-hash-trace.txt", "w"); }
+      if (tt && (int)g_draw_hash_frame + 1 == tf) { fprintf(tt, "%s", name); for (unsigned i = 1; i <= 8; ++i) fprintf(tt, " %08X", X_M32(c->r[4] + 4u * i)); fprintf(tt, "\n"); } }
     uint64_t h = g_draw_hash; for (const char *p = name; *p; ++p) { h ^= (uint8_t)*p; h *= 1099511628211ull; }
     for (unsigned i = 1; i <= 8; ++i) { uint32_t w = X_M32(c->r[4] + 4u * i); if (w >= 0x03D00000u && w < 0x04000000u) w = 0x03D00000u; h ^= w; h *= 1099511628211ull; }   /* kernel-object addresses (KERNEL_VA..64 MB) depend on host I/O timing: masked */
     g_draw_hash = h;
@@ -571,7 +573,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
         next = (next && now < next + 100000u) ? next + 33333u : now + 33333u;
     }
     g_dev.frame++;
-    if (g_draw_hash_out) { fprintf(g_draw_hash_out, "%u %016llx\n", g_dev.frame, (unsigned long long)g_draw_hash); g_draw_hash = 1469598103934665603ull; if (g_dev.frame % 60 == 0) fflush(g_draw_hash_out); }
+    if (g_draw_hash_out) { fprintf(g_draw_hash_out, "%u %016llx\n", g_dev.frame, (unsigned long long)g_draw_hash); g_draw_hash = 1469598103934665603ull; g_draw_hash_frame = g_dev.frame; if (g_dev.frame % 60 == 0) fflush(g_draw_hash_out); }
 #ifdef XV_OWNER_PHASE
     xv_owner_phase_present(c);
 #endif
@@ -596,7 +598,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
                material_sampler_groups[0], material_sampler_groups[1], material_sampler_groups[2], material_sampler_groups[3]);
         memset(material_sampler_groups, 0, sizeof material_sampler_groups);
 #endif
-        xv_render_view_report(60); { extern void xv_scene_thread_report(unsigned); xv_scene_thread_report(60); } if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
+        xv_render_view_report(60); { extern void xv_scene_thread_report(unsigned); xv_scene_thread_report(60); } { extern void xv_crt_float_report(unsigned) __attribute__((weak)); if (xv_crt_float_report) xv_crt_float_report(60); } if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */
             const float (*m)[4] = g_vp_rows;
             for (int i = 0; i < 3; ++i) { camfwd[i] = m[2][i];
