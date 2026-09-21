@@ -64,3 +64,25 @@ objects, parent dependencies or animation callbacks can execute concurrently.
 
 Captures, executables, logs and replay prototypes remain outside Git under
 `2026-09-13-worker-sizing/validation/hardware-updater-20260914T122650Z`.
+
+
+## September 20: scoped rendering code-size experiment
+
+`XV_RENDER_GUEST_SIZE=1` is an optional Halo CE 3925 build setting. Add it to
+an otherwise unchanged `RECOMP=1` build command. The default is `0`.
+It selects generated units containing functions `70110` and `7E530` and compiles
+those entire units with `-Os` instead of `-O2`. Other functions in the selected
+units also change compilation; this is not a function-only optimization.
+Native HLE/math flags and guest code generation remain unchanged.
+
+The build finds function definitions rather than assuming shard numbers, rejects
+missing/duplicate definitions, and rebuilds the selected objects when the option
+changes in either direction. Changing unrelated compiler flags still requires
+the usual build hygiene; this stamp tracks only this option.
+
+On the retained perf77 build, the two units shrink from 2,693,036 to 1,898,824
+bytes of object text (29.5%). Function `70110` shrinks from 30,450 to 19,672 bytes,
+but its static call sites increase from 268 to 627. Those counts are not dynamic
+instruction counts or frame-time estimates. Reduced instruction footprint may
+help, while extra helper calls may hurt. Hardware results are pending; do not
+consider this a proven optimization or enable it by default on size evidence.
