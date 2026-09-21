@@ -17,7 +17,8 @@ def specialize(source: str) -> str:
     float2 uv1 = IN.texcoord1.xy;
     float2 size1 = abs(xv_border1[1].xy);
     float2 linear1 = saturate(uv1 * size1 + 0.5) * saturate((1.0 - uv1) * size1 + 0.5);
-    float2 point1 = step(0.0, uv1) * (1.0 - step(1.0, uv1));
-    float2 inside1 = lerp(point1, linear1, step(0.0, xv_border1[1].xy));
+    float2 point1 = float2(step(0.0, uv1.x) * (1.0 - step(1.0, uv1.x)),
+                          step(0.0, uv1.y) * (1.0 - step(1.0, uv1.y)));
+    float2 inside1 = lerp(point1, linear1, float2(step(0.0, xv_border1[1].x), step(0.0, xv_border1[1].y)));
     inside1 = lerp(float2(1.0, 1.0), inside1, xv_border1[1].zw);
     t1 = lerp(xv_border1[0], t1, inside1.x * inside1.y);''')
