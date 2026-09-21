@@ -53,10 +53,12 @@ def main():
     # (-mcpu=cortex-a9 -mfpu=neon-fp16 come from make-n and are dropped by DROP_PREFIX); an A72 runs A9-tuned code.
     arm_flags = ['-marm', '-march=armv7-a', '-mfpu=neon', '-mfloat-abi=hard'] if arm and 'aarch' not in a.cc and not os.uname().machine.startswith('aarch') else []
     print(f'{len(units)} units, arm={arm}, cc={a.cc}, static={a.static}', flush=True)
+    # every unit includes these; an older object than any of them is stale (a TLS change in xv_x86rt.h once produced 'bad value' at link)
+    HEADER_MTIME = max((stage / h).stat().st_mtime for h in ('recomp/xv_x86rt.h', 'recomp/kernel/xk.h', 'recomp/kernel/xk_os.h') if (stage / h).exists())
     def compile_one(item):
         src, flags = item
         obj = out / (Path(src).stem + '.o'); s = stage / src
-        if obj.exists() and obj.stat().st_mtime > s.stat().st_mtime: return (src, 0, '')
+        if obj.exists() and obj.stat().st_mtime > max(s.stat().st_mtime, HEADER_MTIME): return (src, 0, '')   # headers: see HEADER_MTIME
         cmd = [a.cc] + HOST_FLAGS + arm_flags + flags + ['-c', str(s), '-o', str(obj)]
         r = subprocess.run(cmd, cwd=stage, capture_output=True, text=True)
         return (src, r.returncode, r.stderr[-1500:])
