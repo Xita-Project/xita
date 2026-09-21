@@ -866,3 +866,38 @@ in the same frame need an ownership rule (the 22 scene-written globals of
 §19 first). Expected frame ≈ max(tick ~37, scene ~33 + 5 view) ≈ 40 ms
 (25 FPS) at the checkpoint; 30 FPS needs the tick itself under ~33 ms as
 well. Estimated 1-2 weeks including the debugging the hardware will demand.
+
+## 33. 500 MHz: kernel module, unsafe SELF, remote /put; PSVshell is what reaches 500
+
+Facts: the user-side `scePowerSetArmClockFrequency(500)` returns 0x802B0000
+(cap 444). Xita has requested 500 since before the takeover and fell back.
+`third_party/xita_clock` (build.sh) is a kernel module loaded from
+`ux0:data/xita/module/xita_clock2.skprx` with
+`taiLoadStartKernelModuleForUser` at game start (`xv_configure_cpu_clock`):
+module_start reads {mhz, pid}, applies the clock with
+`kscePowerSetArmClockFrequency`, and a kernel thread re-applies it every
+500 ms while that pid lives; `xita_clock_bind` (syscall) re-arms a resident
+module on later launches (a syscall import to a module that is NOT resident
+at app load crashes when called, so the game calls it only on the
+"already loaded" path). Requirements learned the hard way: HENkaku "Unsafe
+Homebrew" AND an unsafe SELF (`XV_UNSAFE_SELF=1`, Makefile) — a safe SELF
+gets taiHEN 0x90010009; a changed module must get a new name (XitaClock2:
+the resident old copy answers "already loaded" and its exports differ).
+Remote: `POST /put?name=` (`vita_remote.py put <file> <name>`) writes
+<= 64 KiB under `ux0:data/xita/module/`. Stage `clock-hardware` (perf64,
+perf62 + this). Result: module loads (id 4001017F) but the clock stays 444:
+ScePower's kernel setter also caps at 444. PSVshell gets 500 by resolving
+`SceLowio` export `ScePervasiveForDriver_0xE9D95643` (mul:div 15:16), NOP-
+injecting a check at +0x1D in it, calling it, and writing 500/15 into
+ScePower data segment 1 offsets 0x41C8/0x41CC (Electry/PSVshell src/main.c,
+oc.c). The user has PSVshell installed (overlay in their screenshots), so
+the practical path is its profile (SELECT+UP, CPU row, RIGHT to 500, save).
+Replicating the patch in xita_clock is possible (vitasdk has
+libtaihenModuleUtils_stub, libScePervasiveForDriver_stub) but is a kernel
+patch with firmware-specific offsets; only worth it if 500 measurably helps.
+The 4th core: reserved by the OS for system use; PSVshell's overlay shows
+it at 14-21%; user apps get masks for cores 0-2 only.
+Loading screen (user report): the blue effect fills the screen and should
+be masked; captures in clock-hardware/load64-*.png; not yet bisected (Sep 18
+qualified build at 2026-09-18-tester-release/release/xita-0.2.0-test.1.vpk,
+script loading-bisect/run-loading.sh).
