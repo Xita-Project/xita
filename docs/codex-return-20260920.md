@@ -143,3 +143,9 @@ No speculative matrix NEON change was made; that remains a separate possible fol
 Perf72 / b927088 built successfully in ../quat-shared-candidate, carrying retained perf71 plus the narrow shared-output patch. New xk_quat_shared.h copied explicitly; shifted/fuzzy Makefile/xk_math hunks inspected after patching. XV_QUAT_SHARED_OUTPUT=1, XV_OBJECT_QUAT_PROFILE=0; cumulative optimization flags retained. Only game-a.self and boot-game.txt differ in the package. Remote upload started; no hardware admission, FPS, or stability result yet.
 
 Perf72 deployment confirmed: 32,155,786 bytes, SHA-256 008a7ab932ec2988aad67bd7cabed690e51805365077bd7bcbb7e28eb282ef12, slot 1, verified/restart_requested/boot_confirmed true. Re-armed shader override/loading trace/capture detail=0 and started the standard campaign launch sequence. Next wait for actual gameplay, pull [quat-shared] attempts/committed/retries, inspect ordinary frame/worker windows and confirm visuals. Do not infer benefit from test passes or successful deployment. Perf71 remains the previous confirmed slot for rollback if needed.
+
+## Perf72 follow-up validation
+
+Extended tools/test_arm_quat_shared.py to mutate the input word, remap the source page, remap the output page, or change a constant between capture and publication. It now checks the final page table as well as full context, memory and FPSCR against the guarded native calculation on the changed state. All 640 Vita-linked cases pass; 256 commits and 64 retries exercised. No new runtime change was needed. Private receipt ../quat-shared-remap-arm/result.json.
+
+Perf72 launch sequence completed and released controls. run-progress-2.log begins entering gameplay (19 draws/frame with active texture decoding) after loading; exclude that transitional window from performance conclusions. Settled admission and frame-time evidence still pending.
