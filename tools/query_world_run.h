@@ -4,8 +4,13 @@ extern unsigned xk_mem_arena_size(void);
 /* World BSP single-child run: publish only node index / consumed budget.
  * Always leave the last visited node to its unchanged emitted block. */
 static unsigned nq_run_calls,nq_run_chunks,nq_run_nodes,nq_run_max,nq_run_declines;
+#if defined(__arm__)
 static inline unsigned nq_run_fpscr(void) {unsigned v;__asm__ volatile("vmrs %0,fpscr":"=r"(v)::"memory");return v;}
 static inline void nq_run_restore(unsigned v) {__asm__ volatile("vmsr fpscr,%0"::"r"(v):"memory");}
+#else   /* HOST FALLBACK: no FPSCR on the host build */
+static inline unsigned nq_run_fpscr(void) {return 0u;}
+static inline void nq_run_restore(unsigned v) {(void)v;}
+#endif
 static inline int nq_run_span(uint8_t *arena,const uint32_t *pages,unsigned a,unsigned n,unsigned size,const void **out)
 {
  if((a&3)||a>0xffffffffu-n+1u||(a&4095u)>4096u-n)return 0;

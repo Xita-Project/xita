@@ -211,6 +211,12 @@ static prefix_entry *find_prefix(unsigned model,unsigned pose,unsigned nodes) {
     entries[base+way].count=0;return &entries[base+way];
 }
 static unsigned prefix_hits, prefix_misses, prefix_hit_matrices, prefix_miss_matrices;
+#if !defined(__arm__)
+static int equal_words(const void *av,const void *bv,unsigned words)   /* HOST FALLBACK: scalar, same result */
+{
+    const uint32_t *a=av,*b=bv;unsigned d=0;for(unsigned i=0;i<words;i++)d|=a[i]^b[i];return d==0;
+}
+#else
 static int equal_words(const void *av,const void *bv,unsigned words)
 {
     const uint32_t *a=av,*b=bv;uint32x4_t diff=vdupq_n_u32(0);
@@ -219,6 +225,7 @@ static int equal_words(const void *av,const void *bv,unsigned words)
     unsigned d=vget_lane_u32(halves,0)|vget_lane_u32(halves,1);
     for(;i<words;i++)d|=a[i]^b[i];return d==0;
 }
+#endif
 static unsigned read_fp(void) { unsigned v; __asm__ volatile("vmrs %0, fpscr":"=r"(v)::"memory");return v; }
 static void write_fp(unsigned v) { __asm__ volatile("vmsr fpscr, %0"::"r"(v):"memory"); }
 #endif
