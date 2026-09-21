@@ -234,3 +234,6 @@ Added opt-in XV_RENDER_GUEST_SIZE=1 (default 0), restricted to Halo CE 3925 and 
 
 
 Perf78 / 9a2da89 builds successfully with XV_RENDER_GUEST_SIZE=1. Package verification confirms only game-a.self and boot-game.txt differ from retained perf77; immutable updater/assets/Halo 2 remain byte-identical. Executable 30,963,770 bytes, SHA-256 ad576bc2020adfcdac69c2ddddbaa5493556a73b64fd31afaad98587465b739e. Material 70110 static calls rise from 268 to 627 under -Os: important tradeoff, not a speed prediction. Upload/restart started; await remote receipt before claiming installation. No whole-frame result yet.
+
+
+Perf78 update completed: verified=true, restart_requested=true, slot=1, boot_confirmed=true; executable hash/size match package-check.json. Startup shader override/loading trace/capture detail=0 and retention=1 re-armed; campaign sequence launched with expected-version guard. Await loaded gameplay before evaluating FPS.
