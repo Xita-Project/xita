@@ -471,6 +471,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         if(aligned>XV_VERTEX_CAPTURE_BYTES-required)goto fallback;
         required+=aligned;
     }
+    unsigned worst_required=required;
     if(!cap_start())goto fallback;
     cap_collect();
     if(cap_detail_enabled<0)
@@ -478,32 +479,40 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     int sample=cap_detail_enabled && !(cap_detail_serial++&63u);
     if(sample)cap_detail_samples++;
     unsigned submitted=__atomic_load_n(&cap_submitted,__ATOMIC_RELAXED);
-#if XV_VERTEX_CAPTURE_READY
     uint64_t start=sceKernelGetProcessTimeWide();
-    unsigned ready_ids[XV_VERTEX_PREPARE_STREAMS];
-    const void *ready_results[XV_VERTEX_PREPARE_STREAMS];
-    /* collect acquired every completed job. With no predecessor outstanding,
-     * cap_results is immutable until this owner publishes another job. Preserve
-     * callback order and never borrow a worker result still being written. */
-    int probed=cap_retired==submitted;
-    if(probed) {
-        int ready=1;
-        for(unsigned i=0;i<batch->count;i++) {
-            const xv_vertex_prepare_stream *s=&batch->streams[i];
-            unsigned packed=0,compact=0;
+#if XV_VERTEX_CAPTURE_REUSE
+    unsigned reserve_ids[XV_VERTEX_PREPARE_STREAMS];
+    int probed=1;
+    required=0;
+    /* IDs refer only to owner-managed immutable CPU snapshots. Worker result
+     * pointers are read below only after every predecessor has retired. */
+    for(unsigned i=0;i<batch->count;i++) {
+        const xv_vertex_prepare_stream *s=&batch->streams[i];
+        unsigned packed=0,compact=0;
 #if XV_PACKED_VERTEX_LAYOUT
-            packed=s->packed;
+        packed=s->packed;
 #endif
 #if XV_VERTEX_CAPTURE_PACKED
-            compact=cap_compact(s);
+        compact=cap_compact(s);
 #endif
-            unsigned id=cap_reuse_find(s,batch->slot,packed,compact,sample);
-            ready_ids[i]=id;ready_results[i]=id?cap_results[id-1]:NULL;
+        reserve_ids[i]=cap_reuse_find(s,batch->slot,packed,compact,sample);
+        if(!reserve_ids[i]) {
+            unsigned bytes=compact?s->bytes/2:s->bytes;
+            required+=(bytes+15u)&~15u;
+        }
+    }
+#endif
+#if XV_VERTEX_CAPTURE_READY
+    /* Keep callback order and never borrow a result still being written. */
+    if(cap_retired==submitted) {
+        int ready=1;
+        const void *ready_results[XV_VERTEX_PREPARE_STREAMS];
+        for(unsigned i=0;i<batch->count;i++) {
+            unsigned id=reserve_ids[i];
+            ready_results[i]=id?cap_results[id-1]:NULL;
             if(!ready_results[i])ready=0;
         }
         if(ready) {
-            /* Publish all-or-nothing, after every exact source comparison.
-             * GPU-copy completion still belongs to the existing seal/wait. */
             for(unsigned i=0;i<batch->count;i++)*targets[i]=ready_results[i];
             if(complete)complete(context,1);
             cap_ready_draws++;
@@ -518,26 +527,25 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         if(queue_full && arena_full)cap_pressure_both++;
         else if(queue_full)cap_pressure_queue++;
         else cap_pressure_arena++;
-#if XV_VERTEX_CAPTURE_READY
         cap_capture_us+=sceKernelGetProcessTimeWide()-start;
-#endif
         cap_pressure++;xv_vertex_capture_drain();
-        if(required>XV_VERTEX_CAPTURE_BYTES-cap_used) {
-            /* Only a joined arena-pressure boundary discards retained bytes.
+        if(worst_required>XV_VERTEX_CAPTURE_BYTES-cap_used) {
+            /* Drain callbacks can change sources, so re-probing must have room
+             * for a full miss, even if the earlier reservation had reuse hits.
+             * Only a joined arena-pressure boundary discards retained bytes.
              * GPU-copy jobs read the separate uploader mirror, not this arena. */
             cap_used=0;
 #if XV_VERTEX_CAPTURE_REUSE
             cap_reuse_reset();cap_reclaims++;
 #endif
         }
-#if XV_VERTEX_CAPTURE_READY
-        /* A drain invalidates GPU results and can discard snapshot identities. */
-        probed=0;start=sceKernelGetProcessTimeWide();
+#if XV_VERTEX_CAPTURE_REUSE
+        /* A drain can discard identities; never publish a stale reuse ID.
+         * The initial full-batch bound guarantees room after an arena reset. */
+        probed=0;
 #endif
+        start=sceKernelGetProcessTimeWide();
     }
-#if !XV_VERTEX_CAPTURE_READY
-    uint64_t start=sceKernelGetProcessTimeWide();
-#endif
     capture_job *j=&cap_jobs[submitted&(CAPTURE_JOBS-1)];j->batch=*batch;
     j->complete=complete;j->context=context;
     unsigned written=0;
@@ -563,11 +571,8 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         compact=cap_compact(s);j->compact[i]=compact;
 #endif
         unsigned id;
-#if XV_VERTEX_CAPTURE_READY
-        if(probed)id=ready_ids[i];
-        else
-#endif
-        id=cap_reuse_find(s,batch->slot,packed,compact,sample);
+        if(probed)id=reserve_ids[i];
+        else id=cap_reuse_find(s,batch->slot,packed,compact,sample);
         if(id) {
             j->reuse[i]=id;s->source=cap_arena+cap_entries[id-1].offset;s->result=NULL;
             /* Non-sparse references are semantically unused by upload(). */

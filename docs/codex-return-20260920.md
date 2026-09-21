@@ -174,3 +174,14 @@ Capture diagnostic also passes all 24 ThreadSanitizer configurations (/tmp/xita-
 Code audit follow-up: submit computes worst-case required bytes for every stream before the later reuse lookup. READY only bypasses this for fully completed all-stream hits. Mixed or pending reused streams can therefore trigger conservative arena pressure. A potential follow-up should resolve exact owned reuse IDs before the capacity decision and recompute them after any drain invalidation, without borrowing mutable guest pointers or racing worker results. First collect perf74 pressure/capacity evidence; no such refactor implemented yet.
 
 Perf74 deployment confirmed: 32,155,930 bytes, SHA-256 860f5fc04130b908432d04b72c708ef92bfa4c3f05122ea8e45ae792db39fc4b, slot 1, verified/restart_requested/boot_confirmed true. Remote status reports 0.2.0-perf.74 / 7a88e9e. Campaign sequence started with shader override/loading trace/capture detail=0. Read actual gameplay pressure/capacity counters next; do not confuse loading/menu zero counts with the result. No FPS claim for this diagnostic.
+
+
+## Perf74 arena evidence and exact reservation
+
+pressure-settled.log reaches real campaign gameplay. Last two windows: queue-only 0/1, arena-only 60/59, both 0 per 60 frames; effective retain=0, reuse=1, full metadata misses=0. Capture 704239/760490 us and join 486/1252 us per 60 frames, with 161380/167499 KiB copied. Last game windows 138.6/130.9 ms, 7.1/7.6 FPS, 387/421 draws. Pressure is predominantly arena capacity, but waiting on the capture worker remains tiny. Increasing job count is not supported by these observations.
+
+Implemented exact captured-byte reservation before the pressure decision. Resolve immutable CPU reuse IDs first, reserve only misses, and borrow completed GPU results only when every predecessor has retired. On a real drain, invalidate probe IDs and retain the original full-batch bound for reset decisions: completion callbacks may change sources before re-probing. Buffer capacities and retention policy unchanged. Regression with a 64 KiB reused stream plus a 32 KiB fresh stream in the remaining 48 KiB failed on the previous implementation (unnecessary pressure), now succeeds; pending predecessor variant also preserves ordered callbacks and captured bytes after live source mutation. Final sanitizer suites pending below; not deployed yet.
+
+Further retention work must account for slot-keyed CPU entries: enabling retention alone with a 2 MiB arena cannot hold the roughly 2.7 MiB/frame working set, much less distinct entries for three slots. Do not promise cross-frame reuse from a simple toggle. Investigate separating CPU payload identity from per-slot GPU-result identity, or a bounded memory budget, after the exact reservation change is qualified.
+
+Exact reservation final validation: all 24 configurations pass ASan/UBSan and all 24 pass ThreadSanitizer (/tmp/xita-exact-reserve-qualified-{asan,tsan}.log). No measured FPS gain yet.

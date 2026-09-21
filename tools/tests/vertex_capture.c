@@ -527,6 +527,34 @@ static void capture_reuse_versions(void)
     for(unsigned i=0;i<cap_entry_count;i++)assert(!cap_results[i]);
     assert(!munmap(guest,4096));cleanup();
 }
+/* Mixed reused/new streams fit by their copied bytes, not their source sizes. */
+static void capture_exact_reservation(int pending)
+{
+    static unsigned char src[65536],padding[16384],fresh[32768];
+    memset(src,0x31,sizeof src);memset(padding,0x52,sizeof padding);memset(fresh,0x73,sizeof fresh);
+    output first={0},second={0},mixed={0};
+    assert(capture(0,src,sizeof src,16,NULL,0,&first));join(0);
+    /* join invalidates results but retention keeps immutable CPU snapshots. */
+    if(pending)__atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    assert(capture(0,padding,sizeof padding,16,NULL,0,&second));
+    if(pending)wait_parked(&parked_capture);else join(0);
+    assert(cap_used==sizeof src+sizeof padding);
+    xv_vertex_prepare_batch b={.slot=0,.count=2};
+    b.streams[0]=(xv_vertex_prepare_stream){.source=src,.bytes=sizeof src,.stride=16};
+    b.streams[1]=(xv_vertex_prepare_stream){.source=fresh,.bytes=sizeof fresh,.stride=16};
+    const void **targets[]={(const void **)&mixed.result[0],(const void **)&mixed.result[1]};
+    unsigned pressure=cap_pressure;
+    assert(xv_vertex_capture_submit(&b,targets,collected,&mixed));
+    assert(cap_pressure==pressure);
+    assert(cap_used==sizeof src+sizeof padding+sizeof fresh);
+    if(pending)assert(!mixed.callbacks && !second.callbacks);
+    memset(src,0xff,sizeof src);memset(fresh,0xff,sizeof fresh);
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
+    assert(mixed.ok && mixed.callbacks==1 && second.callbacks==1);
+    for(unsigned i=0;i<sizeof src;i++)assert(mixed.result[0][i]==0x31);
+    for(unsigned i=0;i<sizeof fresh;i++)assert(mixed.result[1][i]==0x73);
+    cleanup();
+}
 static void capture_reuse_sparse(void)
 {
     unsigned char guest[32768];memset(guest,0x33,sizeof guest);
@@ -1033,7 +1061,7 @@ int main(void)
     puts("PASS: compact staging halves payload; tail/prefix mutations, unmapped input, shorter reuse, raw/packed cache interoperation, nine retired generations, invalid requests and startup disable");
 #endif
 #if XV_VERTEX_CAPTURE_REUSE
-    capture_reuse_versions();capture_reuse_sparse();capture_reuse_capacity();capture_reuse_failure();
+    capture_reuse_versions();capture_exact_reservation(0);capture_exact_reservation(1);capture_reuse_sparse();capture_reuse_capacity();capture_reuse_failure();
     capture_retained_generations();
     puts("PASS: retained CPU payload is read-only on hits; GPU generations/reordering revalidated, mutated sources and all three slots exact, shutdown and retention disable");
     puts("PASS: exact snapshot/result reuse, mutations and return-to-old-version, unmapping, slot/stride separation, sparse-to-full validation, job wrap and full metadata cache, startup disable and allocation retry");
