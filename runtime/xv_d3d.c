@@ -1518,7 +1518,19 @@ static int opaque_material_candidate(const cmd_t *c)
  * receiver, and emitted only for draws that write/read an offscreen target. */
 static void trace_draw_state(const cmd_t *c, const xv_vs_desc_t *d, unsigned texok)
 {
-    if (!vertex_trace_frame()) return;
+    /* Bounded capture for loading draws that can pass between remote requests.
+     * Never enables vertex readback, changes shader selection or reads pixels. */
+    static int loading_enabled=-1;
+    static unsigned loading_seen[2];
+    if(loading_enabled<0) {const char *e=getenv("XV_LOADING_TRACE");loading_enabled=e&&atoi(e)!=0;}
+    int loading_kind=S.ps_key==0xC4B1822Bu?0:S.ps_key==0xC61481BCu?1:-1;
+    int loading=loading_enabled&&loading_kind>=0&&loading_seen[loading_kind]<4;
+    if (!vertex_trace_frame()&&!loading) return;
+    if(loading) {
+        loading_seen[loading_kind]++;
+        XV_LOG("[loading-state] frame %u sample %u key %08X entry %d blend-slot %u op %u; diagnostic frame, exclude timing\n",
+            g_build_frame,loading_seen[loading_kind],S.ps_key,c->ps_entry,c->blend,S.blend_op);
+    }
     unsigned command = cur_list()->ncmds - 1, rt_mask = 0;
     XV_LOG("[draw-state] frame %u cmd %u pass %u vs %s ps %08X key %08X tex-mask %X previous %X blend %u/%u/%u z %u/%u/%u mask %X atest %08X\n",
         g_build_frame, command, c->pass, d->gxp, S.ps_hash, S.ps_key, texok,
@@ -1530,8 +1542,10 @@ static void trace_draw_state(const cmd_t *c, const xv_vs_desc_t *d, unsigned tex
             g_build_frame, command, t, S.tex_guest[t], (texok >> t) & 1u,
             S.tex_addr_u[t], S.tex_addr_v[t], S.tex_min[t], S.tex_mag[t],
             c->texscale[t][0], c->texscale[t][1]);
+        if(loading) XV_LOG("[loading-sampler] frame %u stage %u border %08X\n",g_build_frame,t,S.tex_border[t]);
         if (!(texok & (1u << t))) continue; /* Uncaptured slots are not descriptors. */
         const SceGxmTexture *tx = &c->tex[t];
+        if(loading) XV_LOG("[loading-format] frame %u stage %u format %08X\n",g_build_frame,t,(unsigned)sceGxmTextureGetFormat(tx));
         const void *data = sceGxmTextureGetData(tx);
         for (unsigned r = 0; r < XV_RT_SLOTS; ++r)
             if (data && data == g_rt[r].mem) rt_mask |= 1u << r;
