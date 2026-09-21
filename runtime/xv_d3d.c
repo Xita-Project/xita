@@ -1521,15 +1521,29 @@ static void trace_draw_state(const cmd_t *c, const xv_vs_desc_t *d, unsigned tex
     /* Bounded capture for loading draws that can pass between remote requests.
      * Never enables vertex readback, changes shader selection or reads pixels. */
     static int loading_enabled=-1;
-    static unsigned loading_seen[2];
+    static unsigned loading_seen[2],loading_first[2];
+    static const unsigned loading_offsets[4]={0,30,120,600};
     if(loading_enabled<0) {const char *e=getenv("XV_LOADING_TRACE");loading_enabled=e&&atoi(e)!=0;}
     int loading_kind=S.ps_key==0xC4B1822Bu?0:S.ps_key==0xC61481BCu?1:-1;
-    int loading=loading_enabled&&loading_kind>=0&&loading_seen[loading_kind]<4;
+    int loading=0;
+    if(loading_enabled&&loading_kind>=0&&loading_seen[loading_kind]<4) {
+        if(!loading_seen[loading_kind])loading_first[loading_kind]=g_build_frame;
+        loading=(uint32_t)(g_build_frame-loading_first[loading_kind])>=loading_offsets[loading_seen[loading_kind]];
+    }
     if (!vertex_trace_frame()&&!loading) return;
     if(loading) {
         loading_seen[loading_kind]++;
         XV_LOG("[loading-state] frame %u sample %u key %08X entry %d blend-slot %u op %u; diagnostic frame, exclude timing\n",
             g_build_frame,loading_seen[loading_kind],S.ps_key,c->ps_entry,c->blend,S.blend_op);
+        XV_LOG("[loading-attributes] frame %u color %.9g/%.9g/%.9g/%.9g tex1 %.9g/%.9g\n",
+            g_build_frame,S.const_attr[3][0],S.const_attr[3][1],S.const_attr[3][2],S.const_attr[3][3],
+            S.const_attr[10][0],S.const_attr[10][1]);
+        const cmdlist_t *list=cur_list();
+        for(unsigned i=0;i<list->ncmds&&i<8;i++) {
+            const cmd_t *before=&list->cmds[i];
+            if(before->kind==1) XV_LOG("[loading-clear] frame %u cmd %u pass %u flags %X color %08X\n",
+                g_build_frame,i,before->pass,before->clear_flags,before->clear_color);
+        }
     }
     unsigned command = cur_list()->ncmds - 1, rt_mask = 0;
     XV_LOG("[draw-state] frame %u cmd %u pass %u vs %s ps %08X key %08X tex-mask %X previous %X blend %u/%u/%u z %u/%u/%u mask %X atest %08X\n",
