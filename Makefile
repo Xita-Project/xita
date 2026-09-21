@@ -2519,6 +2519,26 @@ $(BUILD)/render-guest-size.config: force-render-guest-size-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(RENDER_SIZE_OBJS): $(BUILD)/render-guest-size.config
+XV_RENDER_INLINE_STACK ?= 0
+ifneq ($(filter $(XV_RENDER_INLINE_STACK),0 1),$(XV_RENDER_INLINE_STACK))
+$(error XV_RENDER_INLINE_STACK must be 0 or 1)
+endif
+ifeq ($(XV_RENDER_INLINE_STACK),1)
+ifneq ($(XV_RENDER_GUEST_SIZE),1)
+$(error XV_RENDER_INLINE_STACK=1 requires XV_RENDER_GUEST_SIZE=1 (the -Os units are the ones that stop inlining))
+endif
+# Same two rendering units: force the x87 stack helpers inline again (recomp/xv_inline_stack.h).
+$(RENDER_SIZE_OBJS): RECOMP_CFLAGS += -include $(abspath $(RECOMP_DIR)/xv_inline_stack.h)
+$(RENDER_SIZE_OBJS): $(RECOMP_DIR)/xv_inline_stack.h
+endif
+.PHONY: force-render-inline-stack-config
+force-render-inline-stack-config:
+$(BUILD)/render-inline-stack.config: force-render-inline-stack-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_RENDER_INLINE_STACK)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RENDER_SIZE_OBJS): $(BUILD)/render-inline-stack.config
 
 # Lifted code includes xv_recomp_protos.h -> xv_x86rt.h and, for diagnostic
 # generation, xv_phase.h. The kernel/HLE objects use -MMD
