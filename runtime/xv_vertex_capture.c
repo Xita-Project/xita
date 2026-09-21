@@ -94,6 +94,8 @@ static unsigned cap_submitted,cap_completed; /* atomic publication counters */
 static int cap_stopping,cap_unavailable,cap_enabled=-1;
 static unsigned cap_jobs_total,cap_drains,cap_pressure,cap_failures,cap_max_pending;
 static unsigned cap_masks_copied,cap_masks_omitted;
+/* Mutually exclusive pressure causes, captured before drain changes ownership. */
+static unsigned cap_pressure_queue,cap_pressure_arena,cap_pressure_both;
 static uint64_t cap_bytes,cap_capture_us,cap_worker_us,cap_join_us;
 #ifndef XV_VERTEX_CAPTURE_DETAIL_DEFAULT
 #define XV_VERTEX_CAPTURE_DETAIL_DEFAULT 0
@@ -136,7 +138,7 @@ static int cap_reuse_enabled=-1;
 static int cap_retain_enabled=-1;
 static unsigned cap_reuse_checks,cap_reuse_hits,cap_reuse_prepared;
 static uint64_t cap_reuse_bytes;
-static unsigned cap_retained_hits,cap_reclaims;
+static unsigned cap_retained_hits,cap_reclaims,cap_metadata_full;
 static uint64_t cap_retained_bytes;
 static void cap_reuse_reset(void)
 { cap_entry_count=0;memset(cap_buckets,0,sizeof cap_buckets); }
@@ -255,8 +257,8 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
 }
 static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned slot,unsigned packed,unsigned compact)
 {
-    if(!cap_reuse_enabled || xv_vertex_refs_sparse(s->refs,s->bytes,s->stride) ||
-       cap_entry_count==CAPTURE_ENTRIES)return 0;
+    if(!cap_reuse_enabled || xv_vertex_refs_sparse(s->refs,s->bytes,s->stride))return 0;
+    if(cap_entry_count==CAPTURE_ENTRIES) {cap_metadata_full++;return 0;}
 #if XV_PACKED_VERTEX_LAYOUT
     if(packed && packed!=XV_PACKED_PREFIX16)return 0;
 #endif
@@ -510,7 +512,12 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         }
     }
 #endif
-    if(submitted-cap_retired==CAPTURE_JOBS || required>XV_VERTEX_CAPTURE_BYTES-cap_used) {
+    int queue_full=submitted-cap_retired==CAPTURE_JOBS;
+    int arena_full=required>XV_VERTEX_CAPTURE_BYTES-cap_used;
+    if(queue_full || arena_full) {
+        if(queue_full && arena_full)cap_pressure_both++;
+        else if(queue_full)cap_pressure_queue++;
+        else cap_pressure_arena++;
 #if XV_VERTEX_CAPTURE_READY
         cap_capture_us+=sceKernelGetProcessTimeWide()-start;
 #endif
@@ -691,6 +698,15 @@ void xv_vertex_capture_report(unsigned frames)
         frames,cap_jobs_total,(unsigned long long)(cap_bytes>>10),(unsigned long long)cap_capture_us,
         (unsigned long long)cap_worker_us,(unsigned long long)cap_join_us,
         cap_drains,cap_pressure,cap_max_pending,cap_failures);
+    if(cap_jobs_total || cap_pressure)xv_logf("[vertex-capture-pressure] %u frames: queue-only %u arena-only %u both %u; capacities jobs %u arena-KiB %u; counts before drain, not wait durations\n",
+        frames,cap_pressure_queue,cap_pressure_arena,cap_pressure_both,
+        CAPTURE_JOBS,(unsigned)(XV_VERTEX_CAPTURE_BYTES>>10));
+    cap_pressure_queue=cap_pressure_arena=cap_pressure_both=0;
+#if XV_VERTEX_CAPTURE_REUSE
+    if(cap_jobs_total || cap_metadata_full)xv_logf("[vertex-capture-capacity] %u frames: retain %d reuse %d entries %u/%u full-misses %u; effective policy, -1 means not initialized\n",
+        frames,cap_retain_enabled,cap_reuse_enabled,cap_entry_count,CAPTURE_ENTRIES,cap_metadata_full);
+    cap_metadata_full=0;
+#endif
     cap_jobs_total=cap_drains=cap_pressure=cap_max_pending=cap_failures=0;
     cap_bytes=cap_capture_us=cap_worker_us=cap_join_us=0;
     if(cap_masks_copied || cap_masks_omitted)

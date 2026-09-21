@@ -344,7 +344,8 @@ static void pressure_and_wrap(void)
 {
     unsigned char guest[8192];output outputs[300]={0};
     cap_submitted=cap_completed=cap_retired=UINT32_MAX-15u;
-    unsigned before=cap_pressure;
+    unsigned before=cap_pressure,arena_before=cap_pressure_arena;
+    unsigned queue_before=cap_pressure_queue,both_before=cap_pressure_both;
     for(unsigned i=0;i<300;i++) {
         memset(guest,i,sizeof guest);assert(capture(1,guest,sizeof guest,16,NULL,0,&outputs[i]));
         if(i%48==47) { join(1);for(unsigned j=i-47;j<=i;j++) {
@@ -352,6 +353,8 @@ static void pressure_and_wrap(void)
         }xv_vertex_upload_reset(1); }
     }
     join(1);assert(cap_pressure>before && cap_submitted<300);
+    assert(cap_pressure_arena-arena_before==cap_pressure-before);
+    assert(cap_pressure_queue==queue_before && cap_pressure_both==both_before);
     for(unsigned i=288;i<300;i++)assert(outputs[i].ok && outputs[i].callbacks==1);
     cleanup();
 }
@@ -372,20 +375,29 @@ static void *release_capture(void *unused)
     (void)unused;usleep(20000);
     __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);return NULL;
 }
-static void queue_capacity(void)
+static void queue_capacity_size(unsigned bytes)
 {
-    unsigned char src[32]={0};output outputs[33]={0};
+    unsigned char src[4096]={0};output outputs[33]={0};
     __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
-    unsigned pressure=cap_pressure;
+    unsigned pressure=cap_pressure,q=cap_pressure_queue,a=cap_pressure_arena,b=cap_pressure_both;
     for(unsigned i=0;i<32;i++) {
-        src[0]=i;assert(capture(0,src,sizeof src,4,NULL,0,&outputs[i]));
+        src[0]=i;assert(capture(0,src,bytes,4,NULL,0,&outputs[i]));
     }
     assert(cap_submitted-cap_retired==32);wait_parked(&parked_capture);
     pthread_t releaser;assert(!pthread_create(&releaser,NULL,release_capture,NULL));
-    src[0]=32;assert(capture(0,src,sizeof src,4,NULL,0,&outputs[32]));
+    src[0]=32;assert(capture(0,src,bytes,4,NULL,0,&outputs[32]));
     assert(!pthread_join(releaser,NULL));join(0);assert(cap_pressure==pressure+1);
     for(unsigned i=0;i<33;i++)assert(outputs[i].ok && outputs[i].callbacks==1 && outputs[i].result[0][0]==i);
+    assert(cap_pressure_arena==a);
+    assert(cap_pressure_queue==q+(bytes==32));
+    assert(cap_pressure_both==b+(bytes==4096));
+    xv_vertex_capture_report(1);
+    assert(!cap_pressure && !cap_pressure_queue && !cap_pressure_arena && !cap_pressure_both);
     cleanup();
+}
+static void queue_capacity(void)
+{
+    queue_capacity_size(32);queue_capacity_size(4096);
 }
 static void partial_failure_and_fallback(void)
 {
