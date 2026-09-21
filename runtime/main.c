@@ -2182,20 +2182,26 @@ static void xv_configure_cpu_clock(void)
 {
     int requested = xv_quality_int("XV_CPU_MHZ", 444, 444, 500);
     if (requested != 500) requested = 444;
+    if (requested == 500 && scePowerGetArmClockFrequency() >= 500) { XV_LOG("CPU clock: already 500 MHz\n"); return; }
     int rc = scePowerSetArmClockFrequency(requested);
     int actual = scePowerGetArmClockFrequency();
     if (requested == 500 && (rc < 0 || actual < 500)) {
         /* The user-side setter caps at 444. Load our kernel module (third_party/xita_clock), whose
          * module_start applies the clock through the kernel-side setter; needs HENkaku "Unsafe
          * Homebrew". The module stays loaded so the syscall can re-apply after a suspend. */
-        int mhz = 500; tai_module_args_t targs = { sizeof targs, 0, sizeof mhz, &mhz, 0 };
+        int margs[2] = { 500, sceKernelGetProcessId() }; tai_module_args_t targs = { sizeof targs, 0, sizeof margs, margs, 0 };
         XV_LOG("CPU clock: user-side 500 refused (rc %08X, reads %d); loading ux0:data/xita/module/xita_clock.skprx\n", rc, actual);
         SceUID mod = taiLoadStartKernelModuleForUser("ux0:data/xita/module/xita_clock.skprx", &targs);
-        if (mod >= 0 || (unsigned)mod == 0x8002D013u /* already loaded */) {
-            /* module_start applied the clock; the game never calls into the module (its syscall import
-             * cannot resolve before the module exists), it only reads the effective clock back. */
-            XV_LOG("CPU clock: kernel module %s (%08X); user reads %d MHz\n",
-                   mod >= 0 ? "loaded" : "present", (unsigned)mod, scePowerGetArmClockFrequency());
+        if (mod >= 0) {
+            /* module_start applied the clock and armed its enforcer for this process. The syscall import
+             * was unresolved at our load (module not yet resident), so it must not be called this run. */
+            sceKernelDelayThread(20000);
+            XV_LOG("CPU clock: kernel module loaded (%08X); user reads %d MHz\n", (unsigned)mod, scePowerGetArmClockFrequency());
+        } else if ((unsigned)mod == 0x8002D013u) {
+            /* Resident from an earlier launch: the import resolved at our load, so re-arm through it. */
+            extern int xita_clock_bind(int);
+            int krc = xita_clock_bind(500);
+            XV_LOG("CPU clock: kernel module resident; bind 500 -> %08X, user reads %d MHz\n", (unsigned)krc, scePowerGetArmClockFrequency());
         } else {
             scePowerSetArmClockFrequency(444);
             XV_LOG("CPU clock: 500 MHz unavailable (rc %08X, reported %d); kernel module load %08X (needs ux0:data/xita/module/xita_clock.skprx and Unsafe Homebrew); requesting 444 MHz\n", rc, actual, (unsigned)mod);
@@ -2214,7 +2220,8 @@ int main(int argc, char *argv[])
     (void)argc; (void)argv;
     XV_LOG("Xita " XV_BUILD_LABEL " runtime starting\n");
     /* Homebrew boots at 333/111 MHz; ask for the full clocks (CPU 444, bus 222, GPU 222, GPU xbar 166). */
-    scePowerSetArmClockFrequency(444); scePowerSetBusClockFrequency(222);
+    if (scePowerGetArmClockFrequency() < 444) scePowerSetArmClockFrequency(444);   /* never lower a 500 MHz clock the kernel module holds */
+    scePowerSetBusClockFrequency(222);
     scePowerSetGpuClockFrequency(222); scePowerSetGpuXbarClockFrequency(166);
     XV_LOG("clocks: cpu %d bus %d gpu %d xbar %d MHz\n", scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(), scePowerGetGpuXbarClockFrequency());
     xv_log_memory_budget("boot");

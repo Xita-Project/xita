@@ -174,7 +174,7 @@ static int authorized_request(char *request,char **method,char **target,unsigned
         else if(!strcasecmp(p,"Transfer-Encoding"))return 0;
         p=end+2;
     }
-    return auth==1 && (!*body_size || (!strcmp(*method,"POST") && (!strncmp(*target,"/update/chunk?offset=",21) || !strncmp(*target,"/update/halo2/chunk?offset=",27))));
+    return auth==1 && (!*body_size || (!strcmp(*method,"POST") && (!strncmp(*target,"/put?name=",10) || !strncmp(*target,"/update/chunk?offset=",21) || !strncmp(*target,"/update/halo2/chunk?offset=",27))));
 }
 static void serve(int s)
 {
@@ -247,6 +247,23 @@ static void serve(int s)
                 if(!bad)xv_update_progress(XV_UPDATE_REQUESTED);
                 reply(s,bad?409:204,bad?"Update not ready\n":"");
             } else reply(s,404,"Unknown update operation\n");
+        } else if(!strcmp(method,"POST")&&!strncmp(target,"/put?name=",10)) {
+            /* Store a small file under ux0:data/xita/module/ (kernel module, diagnostics). Name only:
+             * no separators, <= 64 KiB. */
+            const char *name=target+10;
+            if(!*name||strlen(name)>48||strpbrk(name,"/\\:")||name[0]=='.'||!body_size||body_size>65536u) {reply(s,400,"Bad name or size\n");return;}
+            char *data=malloc(body_size);if(!data) {reply(s,503,"No buffer\n");return;}
+            memcpy(data,request+head,initial_body);size_t have=initial_body;deadline=remote_now()+15000000;
+            while(have<body_size&&LOAD(&running)&&remote_now()<deadline) {
+                int n=recv(s,data+have,body_size-have,0);if(n<=0)break;have+=(size_t)n;
+            }
+            if(have<body_size) {free(data);reply(s,400,"Short body\n");return;}
+            char path[128];snprintf(path,sizeof path,"ux0:data/xita/module/%s",name);
+            sceIoMkdir("ux0:data/xita/module",0777);
+            SceUID fd=sceIoOpen(path,SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC,0777);
+            int ok=fd>=0&&sceIoWrite(fd,data,body_size)==(int)body_size;if(fd>=0)sceIoClose(fd);free(data);
+            xv_logf("[remote] put %s %u bytes %s\n",path,body_size,ok?"ok":"FAILED");
+            reply(s,ok?204:500,ok?"":"Write failed\n");
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/env?",5)) {
             /* Set process environment variables before the game starts (diagnostic knobs read at
              * configure time); K=V pairs joined by '&', no decoding. */

@@ -1,0 +1,17 @@
+xita_clock.elf:
+  attributes: 0x0
+  version:
+    major: 0x1
+    minor: 0x1
+  nid: 0xee741ae6
+  main:
+    start: module_start
+    stop: module_stop
+  libraries:
+    xita_clock.elf:
+      version: 0x1
+      syscall: false
+      nid: 0x36596acb
+      functions:
+      - xita_clock_bind: 0x6a4efa9
+      - xita_clock_get_arm: 0xe3c0a795

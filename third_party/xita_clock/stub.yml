@@ -1,4 +1,4 @@
-# NIDs as vita-elf-create assigned them in the module's export table (see build.sh).
+# NIDs as vita-elf-create assigns them (build.sh: vita-elf-create -g); library NID from the export table.
 version: 2
 firmware: 3.60
 modules:
@@ -9,5 +9,5 @@ modules:
         kernel: true
         nid: 0xCC6037FC
         functions:
-          xita_clock_set_arm: 0x7AE9A530
-          xita_clock_get_arm: 0xE3C0A795
+          xita_clock_bind: 0x6a4efa9
+          xita_clock_get_arm: 0xe3c0a795

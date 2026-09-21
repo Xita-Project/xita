@@ -10,5 +10,5 @@ XitaClock:
     XitaClock:
       syscall: true
       functions:
-        - xita_clock_set_arm
+        - xita_clock_bind
         - xita_clock_get_arm
