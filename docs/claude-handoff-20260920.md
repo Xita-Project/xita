@@ -1209,3 +1209,39 @@ exactly that) - they need per-job binding to the render table; the
 D3DResource_Register/IsBusy calls from the tick during the scene need a
 runtime-side lock; the object-job lanes are shared with the scene's
 visibility jobs (untested concurrently on Vita).
+
+### 39c. Same-frame write conflicts: measured, policy chosen
+
+`[render-view-conflicts]` (xk_render_view.c merge): a word the scene
+changed whose live copy the tick also changed during the same scene, to
+a different value. Mode 1 (no tick during the scene): 0 conflicts, the
+control. Mode 2: 130-2,600 conflicting words per 60 frames in gameplay
+(up to ~44/frame), at five places:
+- the light records in the game-state block (0x80091908 + n*0x7C, a
+  124-byte stride array; scene writer f_00092890 = lights, called only
+  from the scene's 5D410; tick writer f_0008CBC0 via 109050): both
+  write a counter-like field, the scene's value a few ahead;
+- 0x2FC684 and 0x2D2FAC: the collision-query counter and time stamp,
+  written by f_00171F10/1721B0/17DD40 (world BSP queries) from both
+  halves;
+- 0x2FC324: lights (f_000939C0/92890/92120);
+- 0x2E364C: f_001744F0/1733E0/121110 (director side), rare.
+Policy `XV_RENDER_VIEW_CONFLICT`: 0 = tick wins (now the default), 1 =
+scene wins (the original merge). Tick wins keeps the simulation
+bit-identical at equal ticks (3,315/3,316, §39a method) and survived a
+10-minute mode-2 soak into the corridors; scene wins would write the
+scene's frame-old copies of light/collision state over the tick's newer
+values. Scene-only writes (words the tick did not touch) still merge.
+Open for review with symbols: whether the scene's dropped light-record
+writes matter across frames (at worst a one-frame stale render stamp).
+
+Tool: `XV_WRITE_WATCH=<guest hex addr>` (recomp/host/write_watch.c,
+host only): the live page and its shadow copy are made read-only at
+scene entry; the first write to each from either half is logged with
+PIE-relative code offsets (`addr2line -f -e harness <offset>`). Uses
+per-thread alternate signal stacks and a page-aligned (mmap) arena.
+Lesson: an earlier version resolved the address through the helper's
+render table and protected the shadow page twice; that crashed the tick
+in f_00091A80 (object parent-chain recursion) at the same frame in
+every run. With the page resolved through the live table, no crash in
+two runs, and a control watch on an unwritten page also passes.

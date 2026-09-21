@@ -60,9 +60,9 @@ static uint32_t learn_gap_us = 8000; static uint32_t *learn_hash; static uint64_
 static unsigned depth, bound, frames_entered, full_frames, fiber_switches, aliases_max, mirrors_in_scene;
 static uint64_t enter_us, leave_us, bytes_in, words_merged;
 /* Same-frame write conflicts (increment C): a word the scene changed (copy != pristine) whose live copy the tick also
- * changed meanwhile (live != pristine) to a different value. XV_RENDER_VIEW_CONFLICT=1 (default) lets the scene's value
- * win as before, 0 keeps the tick's; either way the sites are counted and the top ones reported. */
-static int conflict_scene_wins = 1; static uint64_t conflicts, conflicts_same_value;
+ * changed meanwhile (live != pristine) to a different value. XV_RENDER_VIEW_CONFLICT=1 lets the scene's value
+ * win (the original merge), 0 (default) keeps the tick's newer value; either way the sites are counted and the top ones reported. */
+static int conflict_scene_wins = 0;   /* default tick wins: scene-wins produced object parent cycles (f_00091A80 recursion) on the host */ static uint64_t conflicts, conflicts_same_value;
 #define CONFLICT_SITES 16
 static struct { uint32_t page, word; unsigned n; uint32_t live, scene, vaddr; } conflict_sites[CONFLICT_SITES]; static unsigned conflict_nsites, conflict_overflow;
 static void conflict_note(uint32_t page, uint32_t word, uint32_t live, uint32_t scene)
