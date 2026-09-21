@@ -15,6 +15,7 @@
 #include <psp2/gxm.h>
 
 #include "xv_d3d.h"
+#include "../recomp/kernel/xd3d.h"
 #include "xv_draw_profile.h"
 #include "xv_constant_window.h"
 #include "xv_draw_state.h"
@@ -2995,3 +2996,39 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
 
 /* The clear quad's vertex shader is a runtime-owned program registered by main.c. */
 void xv_d3d_set_clear_shader(uint32_t handle) { g_clear_vs = handle; }
+
+static uint32_t gl_blend_to_d3d(uint32_t gl)
+{
+    switch (gl) { case 0: return 1; case 1: return 2; case 0x300: return 3; case 0x301: return 4; case 0x302: return 5; case 0x303: return 6;
+                  case 0x304: return 7; case 0x305: return 8; case 0x306: return 9; case 0x307: return 10; case 0x308: return 11; default: return 2; }
+}
+void xv_d3d_SyncDrawState(const struct xd3d_state *state,
+                        const float (*attributes)[4],const uint32_t texture_state[4][5])
+{
+    xv_d3d_SetAllAttributes(attributes);
+    xv_d3d_SetPixelShader(state->ps_hash, state->ps_key, state->psc);
+    for (unsigned i = 0; i < 4; ++i) {
+        xv_d3d_SetStreamSource(i, state->stream_vb[i], state->stream_stride[i]);
+        xv_d3d_SetTexture(i, state->texture[i]);
+        xv_d3d_SetTexturePalette(i, state->palette[i]);
+        /* XDK 3925 orders ADDRESSU/V at 10/11 and MAG/MINFILTER at 13/14.
+         * The deferred setter already updates this guest table. Leaving GXM's
+         * mesh defaults here forced point sampling even for filtered lightmaps. */
+        xv_d3d_SetTextureStageState(i, X_D3DTSS_ADDRESSU, texture_state[i][0]);
+        xv_d3d_SetTextureStageState(i, X_D3DTSS_ADDRESSV, texture_state[i][1]);
+        xv_d3d_SetTextureStageState(i, X_D3DTSS_BORDERCOLOR, texture_state[i][2]);
+        xv_d3d_SetTextureStageState(i, X_D3DTSS_MAGFILTER, texture_state[i][3]);
+        xv_d3d_SetTextureStageState(i, X_D3DTSS_MINFILTER, texture_state[i][4]);
+    }
+    /* the kernel model keeps the NV2A/GL tokens the game wrote; xv_d3d speaks D3D enums */
+    xv_d3d_SetStencil(&state->stencil);
+    xv_d3d_SetRenderState_ZEnable(state->z_enable);
+    xv_d3d_SetRenderState_ZWriteEnable(state->z_write);
+    xv_d3d_SetRenderState_ZFunc(state->z_func >= 0x200 && state->z_func <= 0x207 ? state->z_func - 0x200 + 1 : 4);
+    xv_d3d_SetRenderState_CullMode(state->cull == 0x900 ? 2 : state->cull == 0x901 ? 3 : 1);   /* GL_CW / GL_CCW / none */
+    xv_d3d_SetRenderState_AlphaBlendEnable(state->alpha_blend);
+    xv_d3d_SetRenderState_BlendOp(state->blend_op);
+    { uint32_t m = state->color_mask; xv_d3d_SetRenderState_ColorWriteEnable(((m >> 16) & 1) | ((m >> 7) & 2) | ((m & 1) << 2) | ((m >> 21) & 8)); }   /* -> D3D bits R1 G2 B4 A8 */
+    xv_d3d_SetRenderState_SrcBlend(gl_blend_to_d3d(state->src_blend));
+    xv_d3d_SetRenderState_DestBlend(gl_blend_to_d3d(state->dst_blend));
+}

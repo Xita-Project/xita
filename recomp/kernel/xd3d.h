@@ -4,7 +4,7 @@
 #include "../xv_x86rt.h"
 #include "../../runtime/xv_stencil.h"
 
-typedef struct {
+typedef struct xd3d_state {
     /* geometry */
     uint32_t vs_handle;                /* odd = shader object | 1 (guest struct: decl, func, size, fnv) ; even = FVF */
     uint32_t vs_program;               /* resident program selected independently of the input declaration */
@@ -57,6 +57,7 @@ int xd3d_im_passthrough(void); /* current Begin/End uses SetVertexData4f(-1) */
 const float (*xd3d_current_attributes(void))[4]; /* persistent NV2A vertex register values */
 int xd3d_hist_active(void);
 uint32_t xd3d_texture_state(unsigned stage, unsigned state); /* XDK 3925 indices */
+void xd3d_texture_states(uint32_t out[4][5]); /* U/V, border ARGB, mag/min */
 uint32_t xd3d_backbuffer_data(void);
 
 unsigned xd3d_frame(void);

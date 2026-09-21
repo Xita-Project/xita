@@ -160,3 +160,9 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
 
 unsigned xv_d3d_record_slot(void);
 void xv_d3d_BeginFrame(void);
+
+/* Recording-owner state import; copies inputs immediately, no retained pointers.
+ * Texture columns: address U/V, border ARGB, mag filter, min filter. */
+struct xd3d_state;
+void xv_d3d_SyncDrawState(const struct xd3d_state *state,
+                        const float (*attributes)[4],const uint32_t texture_state[4][5]);

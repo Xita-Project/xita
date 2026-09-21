@@ -813,6 +813,19 @@ uint32_t xd3d_texture_state(unsigned stage, unsigned state)
     if (stage >= 4 || state >= 32) return 0;
     return X_M32(D3D_G_TEXTURESTATE + (stage * 32 + state) * 4);
 }
+/* This complete table lies within one guest page. Read the live values on
+ * every draw: translated code can update them without invoking a setter. */
+void xd3d_texture_states(uint32_t out[4][5])
+{
+    for(unsigned stage=0;stage<4;stage++) {
+        unsigned base=D3D_G_TEXTURESTATE+stage*128u;
+        out[stage][0]=X_M32(base+40u);
+        out[stage][1]=X_M32(base+44u);
+        out[stage][2]=X_M32(base+116u);
+        out[stage][3]=X_M32(base+52u);
+        out[stage][4]=X_M32(base+56u);
+    }
+}
 #define D3D_G_RENDERSTATE   0x0018F380u
 void xv_hle_D3DDevice_SetIndices(xctx *c) { XD3D_COUNT("D3DDevice_SetIndices"); XD3D_RET("SetIndices"); xd3d_state.indices = X_ARG(0); xd3d_state.index_base = X_ARG(1);
     X_W32(D3D_G_INDEXDATA) = X_ARG(0) ? X_M32(X_ARG(0) + 4) : 0;
