@@ -12,6 +12,13 @@
 #include <string.h>
 #include <strings.h>
 #include "xv_remote_platform.h"
+#ifdef __vita__
+#include <psp2/io/stat.h>
+static int xv_remote_mkdir(const char *path) { return sceIoMkdir(path, 0777); }
+#else
+#include <sys/stat.h>
+static int xv_remote_mkdir(const char *path) { return mkdir(path, 0777); }
+#endif
 
 #define ROOT "ux0:data/xita/"
 #define LOAD(p) __atomic_load_n(p,__ATOMIC_ACQUIRE)
@@ -263,7 +270,7 @@ static void serve(int s)
             if(have<body_size) {free(data);reply(s,400,"Short body\n");return;}
             char path[128];snprintf(path,sizeof path,"ux0:data/xita/module/%s",name);
             FILE *f=fopen(path,"wb");
-            if(!f) { extern int xv_remote_mkdir(const char *); xv_remote_mkdir("ux0:data/xita/module"); f=fopen(path,"wb"); }
+            if(!f) { xv_remote_mkdir("ux0:data/xita/module"); f=fopen(path,"wb"); }
             int ok=f&&fwrite(data,1,body_size,f)==body_size;if(f)fclose(f);free(data);
             xv_logf("[remote] put %s %u bytes %s\n",path,body_size,ok?"ok":"FAILED");
             reply(s,ok?204:500,ok?"":"Write failed\n");

@@ -272,6 +272,3 @@ int xv_update_confirm(unsigned slot)
     if(!GET(&boot_slot)) {memcpy(boot_sha,r.sha,65);SET(&boot_slot,slot+1);}
     return 0;
 }
-
-/* xv_remote.c (/put): create the module directory. */
-int xv_remote_mkdir(const char *path) { return sceIoMkdir(path, 0777); }
