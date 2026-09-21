@@ -989,11 +989,14 @@ endif
 	@$(SIZE) $@
 
 # ELF -> VELF (resolves NIDs / import stubs) -> signed fself --------------------
+# XV_UNSAFE_SELF=1 packages the game as an unsafe SELF (needs HENkaku "Unsafe Homebrew" to launch): required for
+# taiLoadStartKernelModuleForUser (the 500 MHz module, third_party/xita_clock). Default: safe.
+XV_UNSAFE_SELF ?= 0
 $(VELF): $(ELF)
 	vita-elf-create $< $@
 
 $(EBOOT): $(VELF)
-	vita-make-fself -s $< $@
+	vita-make-fself $(if $(filter 1,$(XV_UNSAFE_SELF)),,-s) $< $@
 
 $(SFO): Makefile version.json | $(BUILD)
 	vita-mksfoex -s TITLE_ID=$(TITLE_ID) -s APP_VER=$$($(PYTHON) tools/gen_build_version.py --sfo) $(SFO_EXTRA) "$(TITLE)" $@
