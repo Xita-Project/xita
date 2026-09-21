@@ -320,7 +320,7 @@ void xk_yield(void)
 {
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
     { extern int xv_scene_thread_no_yield(void); extern void xv_scene_thread_note_suppressed_yield(uint32_t, int);
-      if (xv_scene_thread_no_yield()) { xk_thread *me_ = xk_cur; xv_scene_thread_note_suppressed_yield(me_ ? X_M32(me_->ctx.r[4]) : 0, me_ && me_->state == 1); if (me_ && me_->state == 1) me_->state = 0; return; } }
+      if (xv_scene_thread_no_yield()) { xk_thread *me_ = xk_cur; xv_scene_thread_note_suppressed_yield(me_ ? X_M32(me_->ctx.r[4]) : 0, me_ && me_->state == 1); if (me_ && me_->state == 1) { me_->state = 0; xk_os_sleep_us(100); } return; } }   /* a Sleep/wait on the helper: let time pass instead of spinning */
 #endif
     XV_LIGHT_CENSUS_CANCEL(NULL,XV_LC_HANDOFF);
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS

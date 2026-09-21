@@ -1097,3 +1097,73 @@ xk_yield; harmless to drop under the overlap). Present is issued by
 f_000BC78B, outside BCB30, so "deferred Present" is an owner-side change
 to the Present HLE, not a scene-body change. host_reports.c also requests
 the kernel's `[wait]` dump each report (blocking sites of all threads).
+
+## 39. Increment C on the host: the overlap works, with two design corrections
+
+All in `../overlap-candidate/build` (host list make-n-overlap.txt, 97
+units) and mirrored into this checkout; every mode is opt-in by env.
+
+Findings that shaped it:
+- The scene-yield census (§38), restricted to the scene's own guest
+  thread: menu, load and gameplay, 6,400 frames, the thread takes only
+  preemption yields inside BCB30 (site BD97C, X_PREEMPT at the body's
+  top level), never a WaitForSingleObject, Sleep or SwitchToThread. So
+  "scheduler isolation" is just: the helper never enters the scheduler.
+- Owner-side D3D calls outside the scene in gameplay: Present only, plus
+  D3DResource_Register/IsBusy on texture loads (`[scene-owner-d3d]`).
+  The menu and loading screens are drawn by the owner outside BCB30.
+- Present is issued by f_000BC78B (not in BCB30); BCB30 is `ret 8` with
+  one 8-byte double argument by value, so an emulated return is
+  `esp += 12` and the body can run on a private stack.
+
+Mechanism (xk_scene_thread.c, both ports; xd3d.c; xk_thread.c; xv_x86rt.c):
+- XV_SCENE_OVERLAP=1: dispatch, copy the top 16 stack bytes onto a private
+  256 KiB guest stack, emulate the return, the owner continues; Present
+  joins the scene in flight (the frame is unchanged, only the post-scene
+  owner work overlaps). XV_SCENE_OVERLAP=2: Present defers the device
+  present (`xd3d_present_flush`) to the join at the next BCB30 dispatch,
+  so tick N+1 runs against scene N. xv_preempt and xk_yield return at
+  once on the helper (counted as suppressed yields; a suppressed
+  Sleep/wait now sleeps 100 us instead of spinning).
+- XV_RENDER_VIEW_THREAD=1: a private 4 MiB render table mirrored from
+  the live one (xv_render_view_mirror keeps it current; a viewed entry
+  keeps its copy until leave, which restores from live), bound only by
+  the thread running the body (`xk_os_bind_page_table`: host thread-
+  local pointer, Vita TPIDRURW through xv_thread_bind_table). The live
+  table is never touched, so the tick reads/writes live while the scene
+  reads frozen copies. Requires XV_THREAD_PAGE_TABLE=1 (so not Vita3K).
+  `xv_host_page_table` is now `__thread`; xv_x86rt.h changed, so the
+  generator pin in tools/query_memory_capture.py must be re-pinned
+  before a Vita build that runs that gate.
+- Shard hook order in code_017.c: scene-thread hook first, render-view
+  scope second, so the view is entered/left on the thread running the
+  body (tools/patch_render_view_hooks.py emits the old order; swap after).
+
+Results (4-minute host runs, a10 from menu into the ship corridors):
+- mode 1, mode 1 + thread view, mode 2, mode 2 + thread view: all reach
+  the corridors, no hang, 60/60 dispatched per window, owner-side calls
+  Present only. Mode 2 owner wait at the join is 0 ms in most windows
+  on x86 (the scene finishes inside the tick), 25-45 ms in the heaviest
+  corridor windows (the scene is longer there); thread-mode view adds
+  nothing measurable (m2 and m2t wait series match window for window).
+  The view merges 4-12k words/frame, 18-22 scene writes found late.
+- Design correction 1: the join must not block in a host wait. The
+  owner is a guest fiber holding the single runner; blocked, the
+  streaming/sound fibers never run and the scene (loading screen) spins
+  on its cache request. XV_LOCKSTEP=1 runs deadlocked at the a10 load
+  until the join became poll + xk_sleep_us(100). Now both modes load.
+- Design correction 2 (open): under lockstep two *baseline* runs
+  diverge after the load (29 of 100 windows identical, tick offset 3):
+  the load advances real time, so the comparison cannot yet prove the
+  overlap is semantically identical. Needs a lockstep variant without
+  the 200 ms real-time advance, or alignment by tick count.
+
+Vita build of the stage (XV_RENDER_VIEW=1 XV_SCENE_THREAD=1, both
+defaults 0) started 2026-09-21 evening in `../overlap-candidate`
+(build.py + build-command.json); untested on hardware, not deployed:
+no bench device. Hardware to-do when one exists: the runtime's vertex
+capture/upload workers must bind the render table when serving the
+scene (that is what hung increment A's first cut), D3DResource_Register
+from the tick vs the scene's draws needs a runtime-side lock, and the
+merge ownership of the 22 scene-written globals (§19) is still the
+in-place merge semantics.
