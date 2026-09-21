@@ -4,7 +4,7 @@ from pathlib import Path
 import os,re,subprocess,tempfile
 ROOT=Path(__file__).resolve().parents[1]
 def function(source,name):
-    m=re.search(r'^(?:static )?(?:inline )?(?:uint32_t|void) '+name+r'\([^;]*?\)\s*\{',source,re.M)
+    m=re.search(r'^(?:static )?(?:inline )?(?:uint32_t|void|int) '+name+r'\([^;]*?\)\s*\{',source,re.M)
     assert m,name
     end=m.end();depth=1
     while depth:

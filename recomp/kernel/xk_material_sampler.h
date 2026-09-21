@@ -1,5 +1,5 @@
 /* Halo CE 3925's consecutive default sampler writes in 70110.
- * Precondition: stage is 0..3. Candidate only; not wired into guest execution.
+ * Precondition: stage is 0..3; opt-in caller validates owner/diagnostic admission.
  * Caller must retain worker/diagnostic dispatch or decline this path there.
  * This is an ordered operation, not a cache: guest stack stores are observable.
  */

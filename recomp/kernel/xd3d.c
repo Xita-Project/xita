@@ -911,6 +911,31 @@ void xv_hle_D3DDevice_SetTextureState_BorderColor(xctx *c)
 void xv_hle_D3DDevice_SetTextureState_ColorKeyColor(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_ColorKeyColor"); X_RET(2); }
 void xv_hle_D3DDevice_SetTextureState_BumpEnv(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_BumpEnv"); X_RET(3); }
 void xv_hle_D3DDevice_SetTextureState_Deferred(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_Deferred"); if ((c->r[1] & 3) == c->r[1] && c->r[2] < 32) X_W32(D3D_G_TEXTURESTATE + ((c->r[1] << 5) + c->r[2]) * 4) = X_ARG(0); X_RET(1); }
+#ifdef XV_NATIVE_MATERIAL_SAMPLER
+#include "xk_material_sampler.h"
+#include "xk_object_jobs.h"
+int xv_material_sampler_try(xctx *c, unsigned stage)
+{
+    if (!c || stage > 3) return 0;
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    if (xv_is_object_job(c)) return 0;
+#endif
+#if defined(XV_CHECK_GUEST_ADDRESS)
+    /* Keep per-HLE diagnostic attribution in checked-address builds. */
+    return 0;
+#else
+    static int diagnostic = -1;
+    if (diagnostic < 0)
+        diagnostic = getenv("XV_D3D_HIST") != NULL || getenv("XV_DS_CHECK") != NULL ||
+                     getenv("XV_FUNC_HIST") != NULL || getenv("XV_WATCH_FN") != NULL ||
+                     getenv("XV_PROF") != NULL;
+    uint32_t generation = 0;
+    if (diagnostic || xv_owner_phase_active(c, XV_OWNER_SCENE, &generation) != 1) return 0;
+    xv_material_sampler_defaults(c, stage);
+    return 1;
+#endif
+}
+#endif
 /* Deferred render states (fog enable/table mode/start/end/density, lighting, ...) are applied by D3D at
    draw time; we don't consume them yet.  Log distinct (state, value) pairs so the fog setup can be read. */
 void xv_hle_D3DDevice_SetRenderState_Deferred(xctx *c) {

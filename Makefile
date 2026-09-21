@@ -2449,6 +2449,40 @@ endif
 recomp/kernel/xk_bounds.c: tools/gen_native_bounds.py games/halo_ce_3925/hooks.py games/halo_ce_3925/discovery.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_bounds.py
 
+# Native fixed sampler sequences retain the translated body as fallback.
+XV_NATIVE_MATERIAL_SAMPLER ?= 0
+ifneq ($(words $(XV_NATIVE_MATERIAL_SAMPLER)),1)
+$(error XV_NATIVE_MATERIAL_SAMPLER must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_MATERIAL_SAMPLER),0 1),$(XV_NATIVE_MATERIAL_SAMPLER))
+$(error XV_NATIVE_MATERIAL_SAMPLER must be 0 or 1)
+endif
+MATERIAL_SAMPLER_SRCS := $(shell rg -l 'XV_MATERIAL_SAMPLER_GROUP' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+MATERIAL_SAMPLER_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(MATERIAL_SAMPLER_SRCS)) $(RECOMP_BUILD)/kernel/xd3d.o
+ifeq ($(XV_NATIVE_MATERIAL_SAMPLER),1)
+ifneq ($(GAME_PROFILE),halo_ce_3925)
+$(error XV_NATIVE_MATERIAL_SAMPLER requires GAME_PROFILE=halo_ce_3925)
+endif
+ifneq ($(RECOMP),1)
+$(error XV_NATIVE_MATERIAL_SAMPLER requires RECOMP=1)
+endif
+ifneq ($(XV_OWNER_PHASE),1)
+$(error XV_NATIVE_MATERIAL_SAMPLER requires XV_OWNER_PHASE=1)
+endif
+ifneq ($(words $(shell rg --no-heading --no-filename -o 'XV_MATERIAL_SAMPLER_GROUP' $(RECOMP_DIR)/code_*.c 2>/dev/null)),4)
+$(error XV_NATIVE_MATERIAL_SAMPLER requires four guarded material groups)
+endif
+$(MATERIAL_SAMPLER_OBJS): RECOMP_CFLAGS += -DXV_NATIVE_MATERIAL_SAMPLER
+endif
+.PHONY: force-material-sampler-config
+force-material-sampler-config:
+$(BUILD)/material-sampler.config: force-material-sampler-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_NATIVE_MATERIAL_SAMPLER)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(MATERIAL_SAMPLER_OBJS): $(BUILD)/material-sampler.config recomp/kernel/xk_material_sampler.h
+
 # Opt-in instruction-footprint experiment for the material/constant guest units.
 # Unit numbers can change after lifting; select actual function definitions.
 XV_RENDER_GUEST_SIZE ?= 0

@@ -5,7 +5,7 @@ Native helpers retain the ordinary translated body as their fallback.
 """
 import hashlib
 import re
-from games.halo_ce_3925 import loading_brightness
+from games.halo_ce_3925 import loading_brightness, material_sampler
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
@@ -310,6 +310,8 @@ class HaloHooks(NoGameHooks):
             body = marker_region.hook(body)
         if self.enabled and address == 0x7E530:
             body = constant_pack.hook(body)
+        if self.enabled and address == 0x70110:
+            body = material_sampler.hook(body)
         body = model_fog.hook(self.image, address, body)
         body = model_uv.hook(self.image, address, body)
         if self.scene_partition_enabled and address == 0x5D410:

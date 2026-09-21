@@ -58,12 +58,41 @@ static void *guest(uint32_t a) {
 #define XV_HLE_CALL(address, fn) fn(c)
 #include "recomp/kernel/xk_material_sampler.h"
 '''
-    source += original + '\n' + '\n'.join(refs)
+    wrapper = function(kernel, 'xv_material_sampler_try')
+    source += """
++#define XV_EXPERIMENTAL_OBJECT_JOBS 1
++#define XV_OWNER_SCENE 1
++static int worker, owner = 1;
++static int xv_is_object_job(const xctx *c) { (void)c; return worker; }
++static int xv_owner_phase_active(void *c, unsigned phase, uint32_t *generation) {
++    assert(c && phase == XV_OWNER_SCENE && generation && !*generation);
++    *generation = 1; return owner;
++}
++""".replace("\n+", "\n")
+    source += original + '\n' + wrapper + '\n' + '\n'.join(refs)
     source += r'''
 static uint32_t rng = 731;
 static uint32_t next(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 static void fill(void *p, size_t n) { unsigned char *b=p; while(n--) *b++=(unsigned char)next(); }
-int main(void) {
+int main(int argc, char **argv) {
+    (void)argv;
+    xctx rejected = {0}, saved;
+    rejected.r[4] = 0x6000;
+    saved = rejected;
+    memcpy(expected, memory, MEM);
+    if (argc > 1) {
+        assert(setenv("XV_D3D_HIST", "1", 1) == 0);
+        assert(!xv_material_sampler_try(&rejected, 0));
+        assert(!memcmp(&rejected, &saved, sizeof saved));
+        assert(!memcmp(memory, expected, MEM));
+        puts("diagnostic fallback preserves context and memory"); return 0;
+    }
+    assert(!xv_material_sampler_try(NULL, 0));
+    assert(!xv_material_sampler_try(&rejected, 4));
+    worker = 1; assert(!xv_material_sampler_try(&rejected, 0)); worker = 0;
+    owner = 0; assert(!xv_material_sampler_try(&rejected, 0)); owner = 1;
+    assert(!memcmp(&rejected, &saved, sizeof saved));
+    assert(!memcmp(memory, expected, MEM));
     void (*refs[4])(xctx *) = {reference0, reference1, reference2, reference3};
     unsigned cases=0;
     for (unsigned stage=0; stage<4; ++stage) {
@@ -79,7 +108,7 @@ int main(void) {
             refs[stage](&baseline);
             /* Preserve reference result while restoring the initial guest RAM. */
             for (unsigned i=0; i<MEM; ++i) { unsigned char t=memory[i]; memory[i]=expected[i]; expected[i]=t; }
-            xv_material_sampler_defaults(&candidate, stage);
+            assert(xv_material_sampler_try(&candidate, stage) == 1);
             if (memcmp(&baseline, &candidate, sizeof baseline)) {
                 fprintf(stderr, "context mismatch stage=%u case=%u\n", stage, k);
                 for (unsigned j=0; j<sizeof baseline; ++j)
@@ -102,6 +131,7 @@ int main(void) {
                '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
                '-I', str(ROOT), str(p/'test.c'), '-o', str(p/'test')]
         subprocess.run(cmd, check=True)
+        subprocess.run([str(p/'test'), 'diagnostic'], check=True)
         subprocess.run([str(p/'test')], check=True)
 
 
