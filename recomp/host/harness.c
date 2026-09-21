@@ -27,6 +27,7 @@ int main(int argc, char **argv)
     g_xram = calloc(xk_mem_arena_size(), 1);
     if (fread(g_xram + xk_mem_image_arena_offset(), 1, size, f) != size) { fprintf(stderr, "short image\n"); return 1; }
     fclose(f);
+    xk_mem_bind_arena();                      /* g_img_base for flat image-address access (X_IMG*), as the Vita boot does */
     fprintf(stderr, "[harness] image %u KB at %08X (arena %u MB), entry %08X, main() = %08X, tls dir %08X\n",
             size >> 10, base, xk_mem_arena_size() >> 20, xv_entry_point, xv_game_main, xv_game_tls_dir);
 

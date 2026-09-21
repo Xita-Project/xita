@@ -10,9 +10,7 @@
 #if XV_PALETTE_PREFIX_REUSE && !defined(XV_NATIVE_MODEL_PALETTE)
 #error XV_PALETTE_PREFIX_REUSE requires XV_NATIVE_MODEL_PALETTE
 #endif
-#if XV_PALETTE_PREFIX_REUSE && !defined(__arm__)
-#error XV_PALETTE_PREFIX_REUSE requires the ARM NEON runtime
-#endif
+/* non-ARM hosts use the scalar equal_words fallback below */
 #ifdef XV_NATIVE_MODEL_PALETTE
 #include "xk.h"
 #include "xk_object_jobs.h"
@@ -226,8 +224,13 @@ static int equal_words(const void *av,const void *bv,unsigned words)
     for(;i<words;i++)d|=a[i]^b[i];return d==0;
 }
 #endif
+#if defined(__arm__)
 static unsigned read_fp(void) { unsigned v; __asm__ volatile("vmrs %0, fpscr":"=r"(v)::"memory");return v; }
 static void write_fp(unsigned v) { __asm__ volatile("vmsr fpscr, %0"::"r"(v):"memory"); }
+#else   /* HOST FALLBACK: no FPSCR on the host build */
+static unsigned read_fp(void) { return 0u; }
+static void write_fp(unsigned v) { (void)v; }
+#endif
 #endif
 
 int xv_math_model_palette(xctx *c)

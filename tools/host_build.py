@@ -16,6 +16,8 @@ from pathlib import Path
 
 DROP_PREFIX = ('-mthumb', '-mcpu=', '-mfpu=', '-mfloat-abi', '-MMD', '-MP', '-MF', '-o')
 HOST_FLAGS = ['-O1', '-g0', '-w', '-std=gnu11', '-fno-strict-aliasing', '-pthread']
+HOST_SKIP = {'recomp/kernel/xk_net.c', 'recomp/kernel/xk_os_vita.c', 'recomp/xv_trace_stub.c'}   # Vita network HLE and the Vita OS layer
+HOST_EXTRA = ['recomp/kernel/xk_os_host.c', 'recomp/host/harness.c', 'recomp/host/trace.c', 'recomp/host/softgfx.c', 'recomp/host/runtime_stubs.c']
 
 def main():
     ap = argparse.ArgumentParser()
@@ -30,6 +32,7 @@ def main():
         toks = shlex.split(line)
         src = toks[toks.index('-c') + 1]
         if not src.startswith('recomp/'): continue           # runtime/ and dashboard/ are Vita GXM/UI
+        if src in HOST_SKIP: continue
         flags = []
         skip = False
         for t in toks[1:]:
@@ -43,8 +46,8 @@ def main():
                 flags.append(t)
         units[src] = flags
     kernel_flags = units.get('recomp/kernel/xk_object_jobs.c') or units.get('recomp/kernel/xk_mem.c') or []
-    for h in ('harness', 'trace', 'softgfx'):
-        units[f'recomp/host/{h}.c'] = [f for f in kernel_flags]
+    for h in HOST_EXTRA:
+        if (stage / h).exists(): units[h] = [f for f in kernel_flags]
     print(f'{len(units)} units, arm={arm}, cc={a.cc}', flush=True)
     def compile_one(item):
         src, flags = item
