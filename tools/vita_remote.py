@@ -473,16 +473,16 @@ def main():
         print(json.dumps(client.status(), indent=2))
     elif args.command == "trace-draw":
         client.request("/trace/draw", "POST")
+        print("Queued one draw-trace frame. Verify its start/completion markers in the game log; traced frame timing is diagnostic only.")
     elif args.command == "trace-pages":
         client.request("/trace/pages", "POST")
+        print("Queued one page census. Look for [page-census] in the game log.")
     elif args.command == "put":
         data = args.local.read_bytes(); client.request("/put?name=" + args.name, "POST", body=data)
         print("put", args.name, len(data), "bytes")
     elif args.command == "env":
         client.request("/env?" + "&".join(args.pairs), "POST")
         print("env set:", " ".join(args.pairs))
-        print("Queued one page census. Look for [page-census] in the game log.")
-        print("Queued one draw-trace frame. Verify its start/completion markers in the game log; traced frame timing is diagnostic only.")
     elif args.command == "screen":
         print(json.dumps(client.screen(args.output)))
     elif args.command == "log":

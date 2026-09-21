@@ -1,0 +1,11 @@
+# Codex return — September 20
+
+Resumed from Claude's authoritative checkout at eebd698 after the user requested continued work. Read the latest handoff through section 33. Hardware status confirms perf64 / ac5e35c+, not perf48. No executable or clock settings changed during this investigation.
+
+Private evidence: ../codex-return-20260920. Initial screenshot shows the campaign pause menu in a different room with 279 draws/frame; recent paused windows report 8.1–8.6 FPS and 18.5–18.7 ms draw-HLE. These do not establish a regression against the earlier stationary checkpoint. Saved and quit through the game menu, then reopened the campaign. The old menu sequence stopped at difficulty selection; a subsequent confirmed input continued. Controls released.
+
+The reported loading-mask regression remains unconfirmed by a captured loading draw. The five packaged loading/passthrough shader binaries (including alpha-disabled variants) match the September 18 tester VPK byte-for-byte. This excludes changed binaries between those two packages, not runtime state, textures, or an older regression. The first trace captured a menu; the second captured gameplay frame 12590 (358 command indices ending at 357), not the loading frame. A screenshot request during the transition returned HTTP 504 (no completed display frame), after which status/log requests succeeded and frame count advanced. Do not describe this as a crash or use traced-frame time as a performance result.
+
+Corrected tools/vita_remote.py messages: trace-draw and trace-pages now confirm their own requests; env no longer incorrectly claims it queued both traces. Syntax compilation passed. No rendering fix is claimed from this CLI correction.
+
+Next: capture the actual loading draw at submission, then inspect mask texture, blend/write mask and sampler state. Avoid changing the shader on appearance alone. For performance, account for Claude's newer evidence: hierarchy assistance is reported too small to matter, query unlocking already exists, and full render views currently add approximately 4–5 ms without overlapping tick and scene. The proposed overlap requires scheduler and shared-write ownership work; do not assume the rough max(tick, scene) estimate is a verified result. No additional kernel clock patch is justified by the evidence gathered here.
