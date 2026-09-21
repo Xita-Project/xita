@@ -33,6 +33,9 @@ int main(int argc, char **argv)
 
     extern void xv_trace_init(void); xv_trace_init();
     xk_init(base, size, xv_game_tls_dir, game_dir, save_dir);
+    /* Kernel-side observers the Vita main program configures before the guest runs (weak: only when linked). */
+    { extern void xv_owner_phase_configure(void) __attribute__((weak)); if (xv_owner_phase_configure) xv_owner_phase_configure(); }
+    { extern void xv_host_reports_start(void); xv_host_reports_start(); }   /* 60-frame kernel reports (recomp/host/host_reports.c) */
     xk_thread_create(0x10000, 0, xv_entry_point, 0, 0, 0);     /* the initial thread runs mainCRTStartup() */
     xk_run_until_idle();
     fprintf(stderr, "[harness] done\n");

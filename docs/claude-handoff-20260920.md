@@ -969,3 +969,26 @@ halves write in one frame, starting from the 22 scene-written globals of
 §19. Expected in the heavy corridor: max(tick ~51, scene ~60 + view ~5) ≈
 65 ms (~15 FPS); 20 FPS additionally needs scene work below ~45 ms (model
 passes 19 ms and draw recording 12 ms are the targets). Neither is done.
+
+## 36. No-hardware development: the whole-game host harness works again
+
+`tools/host_build.py --stage <retained stage>/build --commands make-n.txt --out <objdir> [--cc gcc]`
+builds `recomp/host/harness` with each unit's exact Vita feature defines,
+taken from `make -n -B build/xita.elf <build-command args>` run in the stage
+(needs the bin/rg shim on PATH; `make-n.txt` lists 117 compile commands).
+Host-only pieces: Vita OS/net/trace-stub units skipped; `xk_os_host.c`,
+`host/{harness,trace,softgfx,runtime_stubs,host_reports}.c` added;
+`__arm__`-guarded fallbacks for the palette NEON/FPSCR helpers and the
+generated query FPSCR helpers (ARM output unchanged); the harness now binds
+the image base and configures the owner-phase observer; `host_reports.c`
+calls the kernel's 60-frame report functions every 60 presented frames.
+Run: in `<stage>/build/recomp`, `XV_LEVEL=a10` plus the Vita cfg keys as
+env (XV_EXPERIMENTAL_OBJECT_JOBS=1 XV_OBJECT_JOB_WORKERS=2 XV_OWNER_PHASE=1
+XV_THREADS=1 XV_VERTEX_WORKER=1 XV_VERTEX_REFERENCES=1
+XV_NATIVE_OBJECT_BASIS=1 quality knobs 0 XV_VERTEX_CAPTURE_RETAIN=1),
+`harness halo_image.bin <haloce dir> <save dir>`; the Vita3K copy of the
+game data works. On x86-64 (-O1) it boots straight into a10 headless at
+~28 presented frames/s; the vertex-capture/runtime reports do not exist
+here (runtime/ is Vita GXM code). Same builder targets an ARM Linux GCC on
+a Raspberry Pi (native compile; no cross-compiler on this PC). Host and Pi
+numbers are for attribution and correctness only, never Vita frame times.
