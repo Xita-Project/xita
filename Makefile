@@ -2449,6 +2449,43 @@ endif
 recomp/kernel/xk_bounds.c: tools/gen_native_bounds.py games/halo_ce_3925/hooks.py games/halo_ce_3925/discovery.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
 	$(PYTHON) tools/gen_native_bounds.py
 
+# Opt-in instruction-footprint experiment for the material/constant guest units.
+# Unit numbers can change after lifting; select actual function definitions.
+XV_RENDER_GUEST_SIZE ?= 0
+ifneq ($(words $(XV_RENDER_GUEST_SIZE)),1)
+$(error XV_RENDER_GUEST_SIZE must be 0 or 1)
+endif
+ifneq ($(filter $(XV_RENDER_GUEST_SIZE),0 1),$(XV_RENDER_GUEST_SIZE))
+$(error XV_RENDER_GUEST_SIZE must be 0 or 1)
+endif
+ifeq ($(GAME_PROFILE),halo_ce_3925)
+RENDER_SIZE_SRCS := $(shell rg -l '^void f_000(70110|7E530)\b' $(RECOMP_DIR)/code_*.c 2>/dev/null)
+RENDER_SIZE_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(RENDER_SIZE_SRCS))
+endif
+ifeq ($(XV_RENDER_GUEST_SIZE),1)
+ifneq ($(GAME_PROFILE),halo_ce_3925)
+$(error XV_RENDER_GUEST_SIZE requires GAME_PROFILE=halo_ce_3925)
+endif
+ifneq ($(RECOMP),1)
+$(error XV_RENDER_GUEST_SIZE requires RECOMP=1)
+endif
+ifneq ($(words $(shell rg --no-heading --no-filename -o '^void f_00070110\b' $(RECOMP_DIR)/code_*.c 2>/dev/null)),2)
+$(error XV_RENDER_GUEST_SIZE requires exactly one 70110 definition)
+endif
+ifneq ($(words $(shell rg --no-heading --no-filename -o '^void f_0007E530\b' $(RECOMP_DIR)/code_*.c 2>/dev/null)),2)
+$(error XV_RENDER_GUEST_SIZE requires exactly one 7E530 definition)
+endif
+$(RENDER_SIZE_OBJS): RECOMP_CFLAGS += -Os
+endif
+.PHONY: force-render-guest-size-config
+force-render-guest-size-config:
+$(BUILD)/render-guest-size.config: force-render-guest-size-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_RENDER_GUEST_SIZE)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RENDER_SIZE_OBJS): $(BUILD)/render-guest-size.config
+
 # Lifted code includes xv_recomp_protos.h -> xv_x86rt.h and, for diagnostic
 # generation, xv_phase.h. The kernel/HLE objects use -MMD
 # so a kernel header edit does not recompile the ~35 MB of generated code.
