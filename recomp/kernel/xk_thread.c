@@ -318,6 +318,10 @@ int xk_object_io_step(void)
 void xd3d_ds_check(const char *where, uint32_t eip) __attribute__((weak));
 void xk_yield(void)
 {
+#if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
+    { extern int xv_scene_thread_no_yield(void); extern void xv_scene_thread_note_suppressed_yield(uint32_t, int);
+      if (xv_scene_thread_no_yield()) { xk_thread *me_ = xk_cur; xv_scene_thread_note_suppressed_yield(me_ ? X_M32(me_->ctx.r[4]) : 0, me_ && me_->state == 1); if (me_ && me_->state == 1) me_->state = 0; return; } }
+#endif
     XV_LIGHT_CENSUS_CANCEL(NULL,XV_LC_HANDOFF);
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
     if(xk_cur==g_object_io_thread&&g_object_io_return) {

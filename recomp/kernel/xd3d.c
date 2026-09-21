@@ -110,6 +110,9 @@ static struct { const char *name; unsigned n; } g_hist[XD3D_HIST_MAX]; static un
 void xd3d_ds_check(const char *where, uint32_t eip);
 static inline void xd3d_count(const char *name)
 {
+#if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
+    { extern void xv_scene_thread_d3d_call(const char *); xv_scene_thread_d3d_call(name); }   /* owner-side call census (calls outside the scene helper) */
+#endif
     static int on = -1; if (on < 0) on = (getenv("XV_D3D_HIST") != NULL) || (getenv("XV_DS_CHECK") != NULL);
     if (!on) return;                                           /* ~4000 calls/frame: only walk the table when asked */
     { static int dbg = -1; if (dbg < 0) dbg = getenv("XV_DS_CHECK") != NULL; if (dbg) xd3d_ds_check(name, 0); }
@@ -544,6 +547,9 @@ int xd3d_benchmark_view(float view[6])
 /* Present / Swap: fire callbacks, count the frame */
 void xv_hle_D3DDevice_Present(xctx *c)
 { XD3D_COUNT("D3DDevice_Present");
+#if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
+    { extern void xv_scene_thread_join(void); xv_scene_thread_join(); }   /* overlap: the scene in flight finishes before the frame is presented */
+#endif
     if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_PRESENT);
     lockstep_init();
     if (xd3d_lockstep > 0) {                /* 30 fps cap: one simulation tick per frame at the right speed */
@@ -616,7 +622,11 @@ void xv_hle_D3DDevice_Present(xctx *c)
     xk_yield();
     c->r[0] = 0; X_RET(4);
 }
-void xv_hle_D3DDevice_Swap(xctx *c) { XD3D_COUNT("D3DDevice_Swap"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_PRESENT); g_dev.frame++;
+void xv_hle_D3DDevice_Swap(xctx *c) { XD3D_COUNT("D3DDevice_Swap");
+#if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
+    { extern void xv_scene_thread_join(void); xv_scene_thread_join(); }
+#endif
+ if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_PRESENT); g_dev.frame++;
     hist_remote_track();
 #ifdef XV_OWNER_PHASE
     xv_owner_phase_present(c);
