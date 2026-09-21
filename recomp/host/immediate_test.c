@@ -63,6 +63,14 @@ int main(void)
         assert(captured[i].a[0][0] == (float)i && captured[i].a[0][3] == 1);
         assert(captured[i].a[3][3] == .8f && captured[i].a[9][0] == 320);
     }
+    /* Diagnostics must preserve the guest payload, including non-finite color,
+     * rather than silently clamp it and hide its origin. */
+    uint32_t nan_bits = 0x7fc12345u, captured_bits;
+    float nan_color; memcpy(&nan_color, &nan_bits, sizeof nan_color);
+    begin(); vertex(3, nan_color, 1, 0, 1);
+    vertex(UINT32_MAX, 0, 0, .5f, 1); end();
+    memcpy(&captured_bits, &captured[0].a[3][0], sizeof captured_bits);
+    assert(count == 1 && passthrough && captured_bits == nan_bits);
     /* Attribute 15 is an ordinary attribute, not the -1 sentinel. */
     begin(); vertex(15, 7, 8, 9, 10); end();
     assert(count == 0 && !passthrough);

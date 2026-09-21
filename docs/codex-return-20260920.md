@@ -43,3 +43,9 @@ Confirmed and fixed an independent HLE omission: SetTextureState_BorderColor dis
 This setter change is committed source work, not deployed. Hardware remains perf66. Current renderer falls back to edge clamp for nonblack border colors, so simply deploying the setter is not a completed border fix. Implement/validate arbitrary-border sampling semantics before treating this as a loading-screen repair.
 
 Hardware followup.log shows advancing campaign frame workload (423–430 commands/frame, 32–33 BSP). Recent windows: 7.1–7.7 FPS, game 128–139 ms, draw-hle 25–26 ms, pump 5.7–6.8 ms, final wait 1.2–1.6 ms. Different view/workload from prior tests: not a controlled regression or gain result. This confirms that current preparation cost is distinct from the already-asynchronous GXM pump. No automated off/on benchmark was run.
+
+## Non-finite boundary trace prepared
+
+Added bounded XV_LOADING_TRACE diagnostics at SetVertexData4f (first four non-finite color writes: caller and raw argument bits) and End (first four passthrough batches containing a non-finite emitted color: caller, vertex index, component mask). Checks use integer exponent bits so fast-math cannot remove them. They do not clamp values or change guest state. The normal immediate-HLE fixture passes with the switch off and on, including exact NaN payload preservation in an emitted vertex. This is source-only; not installed on perf66, and no hardware result from these new trace points is claimed.
+
+The local SDK exposes clamp-full/half/ignore-border address modes but no arbitrary texture border-color setter. A correct nonblack border fallback must preserve filtered edge behavior; simply selecting edge clamp or replacing every out-of-range fragment with one flat color is insufficient near the edge. Keep this unresolved when preparing the next package, which now also includes the specialized border-state fix. Do not infer loading correctness from the host state test.

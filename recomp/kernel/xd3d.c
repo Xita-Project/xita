@@ -140,6 +140,24 @@ static void im_set2(const char *src, unsigned reg, float x, float y, float z, fl
 }
 #define im_set(...) im_set2("?", __VA_ARGS__)
 static float f32arg(xctx *c, unsigned i) { float f; uint32_t v = X_ARG(i); memcpy(&f, &v, 4); return f; }
+/* Loading diagnostics only: inspect raw bits so fast-math cannot erase the
+ * non-finite check. No sanitization, guest writes or vertex readback. */
+static int loading_input_trace(void)
+{
+    static int enabled = -1;
+    if (enabled < 0) { const char *e = getenv("XV_LOADING_TRACE"); enabled = e && atoi(e) != 0; }
+    return enabled;
+}
+static unsigned color_nonfinite(const float *rgba)
+{
+    unsigned mask = 0;
+    for (unsigned i = 0; i < 4; ++i) {
+        uint32_t bits; memcpy(&bits, rgba + i, sizeof bits);
+        if ((bits & 0x7f800000u) == 0x7f800000u) mask |= 1u << i;
+    }
+    return mask;
+}
+
 static struct { uint32_t vblank_cb, swap_cb; unsigned frame, draws, draws_total, clears; uint32_t backbuffer, depth; unsigned width, height; } g_dev;
 uint32_t xd3d_backbuffer_data(void) { return g_dev.backbuffer ? RES_DATA(g_dev.backbuffer) : 0; }
 static int g_hist_frame = -2;
@@ -730,6 +748,18 @@ void xv_hle_D3DDevice_End(xctx *c)
     g_dev.draws++; g_dev.draws_total++;
     if (g_dev.draws_total < 20)
         D3DLOG("End: prim %u verts %u vs %08X tex %08X ps %08X\n", g_im.prim, g_im.verts, xd3d_state.vs_handle, xd3d_state.texture[0], xd3d_state.ps_def);
+    static unsigned nonfinite_reported;
+    if (g_im_passthrough && loading_input_trace() && nonfinite_reported < 4) {
+        for (unsigned i = 0; i < g_im.verts; ++i) {
+            unsigned mask = color_nonfinite(g_im_v[i].a[3]);
+            if (mask) {
+                ++nonfinite_reported;
+                D3DLOG("[loading-vertex] frame %u end-caller %08X vertex %u nonfinite-color-mask %X; diagnostic, exclude timing\n",
+                    xd3d_frame(), X_M32(c->r[4]), i, mask);
+                break;
+            }
+        }
+    }
     xd3d_r_im_end(g_im.prim, g_im_v, g_im.verts);
     g_im.verts = 0;
     c->r[0] = 0; X_RET(0);
@@ -749,7 +779,19 @@ void xv_hle_D3DDevice_SetVertexData2f(xctx *c)
     im_set2("2f", X_ARG(0), f32arg(c, 1), f32arg(c, 2), 0.0f, 1.0f); c->r[0] = 0; X_RET(3);
 }
 void xv_hle_D3DDevice_SetVertexData2s(xctx *c) { XD3D_COUNT("D3DDevice_SetVertexData2s"); im_set2("2s", X_ARG(0), (float)(int16_t)(X_ARG(1) & 0xFFFF), (float)(int16_t)(X_ARG(2) & 0xFFFF), 0.0f, 1.0f); c->r[0] = 0; X_RET(3); }
-void xv_hle_D3DDevice_SetVertexData4f(xctx *c) { XD3D_COUNT("D3DDevice_SetVertexData4f"); im_set2("4f", X_ARG(0), f32arg(c, 1), f32arg(c, 2), f32arg(c, 3), f32arg(c, 4)); c->r[0] = 0; X_RET(5); }
+void xv_hle_D3DDevice_SetVertexData4f(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_SetVertexData4f");
+    float rgba[4] = {f32arg(c, 1), f32arg(c, 2), f32arg(c, 3), f32arg(c, 4)};
+    static unsigned reported;
+    if (X_ARG(0) == 3 && loading_input_trace() && reported < 4 && color_nonfinite(rgba)) {
+        ++reported;
+        D3DLOG("[loading-input] frame %u caller %08X color-bits %08X/%08X/%08X/%08X; diagnostic, exclude timing\n",
+            xd3d_frame(), X_M32(c->r[4]), X_ARG(1), X_ARG(2), X_ARG(3), X_ARG(4));
+    }
+    im_set2("4f", X_ARG(0), rgba[0], rgba[1], rgba[2], rgba[3]);
+    c->r[0] = 0; X_RET(5);
+}
 void xv_hle_D3DDevice_SetVertexData4ub(xctx *c) { XD3D_COUNT("D3DDevice_SetVertexData4ub"); im_set2("4ub", X_ARG(0), (X_ARG(1) & 0xFF) / 255.0f, (X_ARG(2) & 0xFF) / 255.0f, (X_ARG(3) & 0xFF) / 255.0f, (X_ARG(4) & 0xFF) / 255.0f); c->r[0] = 0; X_RET(5); }
 void xv_hle_D3DDevice_SetVertexDataColor(xctx *c) { XD3D_COUNT("D3DDevice_SetVertexDataColor"); uint32_t d = X_ARG(1);
     im_set(X_ARG(0), ((d >> 16) & 0xFF) / 255.0f, ((d >> 8) & 0xFF) / 255.0f, (d & 0xFF) / 255.0f, ((d >> 24) & 0xFF) / 255.0f); c->r[0] = 0; X_RET(2); }
