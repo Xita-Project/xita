@@ -992,3 +992,39 @@ game data works. On x86-64 (-O1) it boots straight into a10 headless at
 here (runtime/ is Vita GXM code). Same builder targets an ARM Linux GCC on
 a Raspberry Pi (native compile; no cross-compiler on this PC). Host and Pi
 numbers are for attribution and correctness only, never Vita frame times.
+
+## 37. Host harness reaches a10 gameplay: it was the main menu, not a stall
+
+Correction to §36: the harness does not "boot straight into a10". With no
+input the game sits in the main menu (ring camera loop, constant "68
+Begin/End, 809 SetVertexData", `game_globals loaded 1 active 1` because
+ui.map is a scenario too). The earlier hypothesis that the frame-pacing
+loop (0xBB060) spun because no vblank thread existed was wrong: the game
+registers its callback through SetVerticalBlankCallback, `vblank_thread`
+fires at 60 Hz real time, and `XV_HOST_CLOCK_TRACE=1` (host_reports.c)
+shows the 64-bit vblank count at 0x1F8C80 tracking the frame-end target
+at 0x2E3660 with the game presenting 30 frames/s. `XV_LEVEL=a10` is the
+default and a no-op (it only patches the mission-1 table for other codes).
+
+The host pad script (`XV_PAD`, xk_os_host.c) walks the menu:
+`150:a,300:a,450:a` -> Campaign, new game, difficulty; a10.map loads at
+about frame 500 (loading screen "2 Begin/End, 34 SetVertexData", loaded
+0), the level is up at ~720 and the cryo-bay cinematic (`director on 1`)
+at ~780; the cinematic plays out on its own and hands over to the player
+camera (the run reached 986-draw frames in the ship corridors within five
+minutes). `tools/host_run.sh [seconds] [K=V...]` wraps this (HOST_OBJ =
+the host_build.py --out dir, HOST_LOG, HOST_PAD, HOST_GAME, HOST_SAVE).
+zsh does not word-split unquoted variables: pass env lists as arrays or
+through the script, or XV_LEVEL swallows the whole list (level-select log
+line shows it).
+
+What the host gives now, in a10 gameplay: both object-worker lanes run
+(`[object-jobs] 60 frames passes 72 batches 75 jobs 4392 lanes 1801/2591`,
+`[job-split]`, `[query-unlock]`, `[typed-query]`, `[object-quat]`,
+`[object-lock-site]` with host PCs), object-pass scope elapsed, and the
+whole 60-frame report set. x86 timing is ~60x Vita (a 72-pass window
+spends 40 ms in batches where the Vita spends ~2.6 s), so the harness is
+for structure, counters, correctness and deadlocks (increment C merge
+ownership, scene scheduler isolation, deferred Present), not frame times.
+Vita-only runtime reports (vertex capture, frame time, GPU) do not exist
+here. Object-lock-site PCs are host addresses (addr2line on the harness).
