@@ -2200,8 +2200,10 @@ static void xv_configure_cpu_clock(void)
         } else if ((unsigned)mod == 0x8002D013u) {
             /* Resident from an earlier launch: the import resolved at our load, so re-arm through it. */
             extern int xita_clock_bind(int);
+            extern int xita_clock_get_arm(void);
             int krc = xita_clock_bind(500);
-            XV_LOG("CPU clock: kernel module resident; bind 500 -> %08X, user reads %d MHz\n", (unsigned)krc, scePowerGetArmClockFrequency());
+            XV_LOG("CPU clock: kernel module resident; bind 500 -> %08X, kernel reads %d MHz, user reads %d MHz (API reports, not measured cycles)\n",
+                   (unsigned)krc, xita_clock_get_arm(), scePowerGetArmClockFrequency());
         } else {
             scePowerSetArmClockFrequency(444);
             XV_LOG("CPU clock: 500 MHz unavailable (rc %08X, reported %d); kernel module load %08X (needs ux0:data/xita/module/xita_clock2.skprx and Unsafe Homebrew); requesting 444 MHz\n", rc, actual, (unsigned)mod);

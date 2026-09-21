@@ -63,6 +63,7 @@ static void *guest(uint32_t a) {
 +#define XV_EXPERIMENTAL_OBJECT_JOBS 1
 +#define XV_OWNER_SCENE 1
 +static int worker, owner = 1;
+static unsigned material_sampler_groups[4];
 +static int xv_is_object_job(const xctx *c) { (void)c; return worker; }
 +static int xv_owner_phase_active(void *c, unsigned phase, uint32_t *generation) {
 +    assert(c && phase == XV_OWNER_SCENE && generation && !*generation);
@@ -120,6 +121,7 @@ int main(int argc, char **argv) {
             ++cases;
         }
     }
+    for (unsigned stage=0; stage<4; ++stage) assert(material_sampler_groups[stage] == 1024);
     printf("%u sampler context/memory comparisons passed\n", cases);
     return 0;
 }

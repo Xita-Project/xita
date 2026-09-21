@@ -87,6 +87,9 @@ static uint32_t new_header(uint32_t type, unsigned size)
 /* ---- device ------------------------------------------------------------------------------------ */
 xd3d_state_t xd3d_state;
 static int ps_synced;
+#ifdef XV_NATIVE_MATERIAL_SAMPLER
+static unsigned material_sampler_groups[4]; /* active scene owner only */
+#endif
 /* NV2A has 136 instruction slots. Halo preloads VS 10/9/27 and switches
  * between them with SelectVertexShader(0, address). A null handle preserves
  * the declaration; it does not disable the selected resident program. */
@@ -561,6 +564,11 @@ void xv_hle_D3DDevice_Present(xctx *c)
         extern int xv_log_report_begin_async_frame(unsigned) __attribute__((weak));
         extern void xv_log_report_end(void) __attribute__((weak));
         int grouped=xv_log_report_begin_async_frame && xv_log_report_end && xv_log_report_begin_async_frame(g_dev.frame);
+#ifdef XV_NATIVE_MATERIAL_SAMPLER
+        D3DLOG("[material-sampler] 60 frames: accepted stage groups %u/%u/%u/%u; ordered native writes\n",
+               material_sampler_groups[0], material_sampler_groups[1], material_sampler_groups[2], material_sampler_groups[3]);
+        memset(material_sampler_groups, 0, sizeof material_sampler_groups);
+#endif
         xv_render_view_report(60); { extern void xv_scene_thread_report(unsigned); xv_scene_thread_report(60); } if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */
             const float (*m)[4] = g_vp_rows;
@@ -932,6 +940,7 @@ int xv_material_sampler_try(xctx *c, unsigned stage)
     uint32_t generation = 0;
     if (diagnostic || xv_owner_phase_active(c, XV_OWNER_SCENE, &generation) != 1) return 0;
     xv_material_sampler_defaults(c, stage);
+    material_sampler_groups[stage]++;
     return 1;
 #endif
 }
