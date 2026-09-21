@@ -235,6 +235,7 @@ static void trust_verification(void)
     xv_vertex_prepare_stream stream={.source=source,.bytes=256,.stride=16};
     for(unsigned mode=0;mode<3;mode++) {
         cap_arena=snapshot;cap_used=0;cap_reuse_enabled=1;cap_reuse_reset();
+        cap_detail_compares=0;cap_detail_compare_bytes=cap_detail_compare_us=0;
         trust_enabled=1;trust_disabled=trust_verify_serial=0;
         trust_hits=trust_verified=trust_mismatches=0;
         memset(source,0x21,256);memcpy(snapshot,source,256);
@@ -245,6 +246,8 @@ static void trust_verification(void)
             assert(trust_verified==1+i/64);
         }
         assert(trust_verified==2 && trust_hits==126);
+        assert(cap_detail_compares==(mode?2u:0u));
+        assert(cap_detail_compare_bytes==(mode?512u:0u));
         source[17]^=1; /* Lookup 129 independently verifies and disables trust. */
         assert(!cap_reuse_find(&stream,0,0,0,mode==1));
         assert(trust_disabled && trust_mismatches==1 && trust_verified==3);

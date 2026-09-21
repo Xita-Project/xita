@@ -204,7 +204,7 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
            e->packed!=packed || e->compact!=compact || e->slot!=slot)continue;
         cap_reuse_checks++;
         uint64_t detail_start=sample?sceKernelGetProcessTimeWide():0;
-        int equal;
+        int equal,compared=1;
 #if XV_CAPTURE_TRUST_TAGS
         if(trust_enabled<0)trust_enabled=xv_quality_int("XV_CAPTURE_TRUST_TAGS",XV_CAPTURE_TRUST_TAGS_DEFAULT,0,1);
         int trusted=trust_enabled && !trust_disabled &&
@@ -213,7 +213,7 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
         int verify=trusted && !(trust_verify_serial++ & 63u);
         if(trusted && !verify) {
             trust_hits++;trust_bytes+=compact?s->bytes/2:s->bytes;
-            equal=1;
+            equal=1;compared=0;
         } else {
 #endif
 #if XV_VERTEX_CAPTURE_PACKED
@@ -233,7 +233,7 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
         }
         }
 #endif
-        if(sample) {
+        if(sample && compared) {
             cap_detail_compare_us+=sceKernelGetProcessTimeWide()-detail_start;
             cap_detail_compares++;
             /* Logical input bytes, not measured memory-bus traffic. */
