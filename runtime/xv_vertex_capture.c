@@ -148,7 +148,7 @@ static void cap_reuse_reset(void)
  * vertex buffers. It is rewritten only by file reads (map load, BSP switch),
  * which the file layer reports here. A reuse source inside that region under
  * the same read generation is treated as unchanged without the byte compare;
- * the existing 1/64 sampled submissions still compare and disable trust on
+ * an independent check every 64 trusted lookups compares and disables trust on
  * the first mismatch. Dynamic (heap) vertex data keeps the full compare. */
 #ifndef XV_CAPTURE_TRUST_TAGS_DEFAULT
 #define XV_CAPTURE_TRUST_TAGS_DEFAULT 0
@@ -158,6 +158,8 @@ enum { TAG_PHYS_BASE=0x3A6000u, TAG_PHYS_BYTES=0x1600000u };
 static int trust_enabled=-1;
 static unsigned trust_generation,trust_disabled,trust_hits,trust_verified,trust_mismatches;
 static uint64_t trust_bytes;
+/* Owner-only sequence; timing diagnostics must not select correctness checks. */
+static unsigned trust_verify_serial;
 void xv_vertex_capture_tags_written(uint32_t guest,uint32_t bytes)
 {
     uint32_t phys=guest>=0xF0000000u?guest-0xF0000000u:guest>=0x80000000u?guest-0x80000000u:guest;
@@ -208,7 +210,8 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned slot,u
         int trusted=trust_enabled && !trust_disabled &&
             e->generation==__atomic_load_n(&trust_generation,__ATOMIC_RELAXED) &&
             trust_source(s->source,s->bytes);
-        if(trusted && !sample) {
+        int verify=trusted && !(trust_verify_serial++ & 63u);
+        if(trusted && !verify) {
             trust_hits++;trust_bytes+=compact?s->bytes/2:s->bytes;
             equal=1;
         } else {

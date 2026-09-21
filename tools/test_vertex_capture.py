@@ -23,6 +23,7 @@ def main():
                            '-DXV_VERTEX_RESIDENT_REFERENCES_DEFAULT=1',
                            f'-DXV_PACKED_VERTEX_LAYOUT={packed}', f'-DXV_VERTEX_CAPTURE_PACKED={compact}',
                            f'-DXV_VERTEX_CAPTURE_REUSE={reuse}',
+                           f'-DXV_CAPTURE_TRUST_TAGS={reuse}',
                            f'-DXV_VERTEX_PERSISTENT={persistent}',
                            f'-DXV_VERTEX_CAPTURE_READY={ready}',
                            f'-DXV_VERTEX_CAPTURE_NOTIFY={notify}',

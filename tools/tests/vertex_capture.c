@@ -223,6 +223,49 @@ static void detail_sampling(void)
     unsetenv("XV_VERTEX_CAPTURE_DETAIL");
     puts("PASS: sampled capture detail counts 1/64 submissions, resets reports, startup disable; outputs unchanged");
 }
+#if XV_VERTEX_CAPTURE_REUSE && XV_CAPTURE_TRUST_TAGS
+uint8_t *g_xram;
+static void trust_verification(void)
+{
+    /* Exercise production lookup decisions with timing off, on, and sparse.
+     * A missing write notification must still be detected without profiling. */
+    g_xram=calloc(1,TAG_PHYS_BASE+256);assert(g_xram);
+    uint8_t snapshot[256];
+    uint8_t *source=g_xram+TAG_PHYS_BASE;
+    xv_vertex_prepare_stream stream={.source=source,.bytes=256,.stride=16};
+    for(unsigned mode=0;mode<3;mode++) {
+        cap_arena=snapshot;cap_used=0;cap_reuse_enabled=1;cap_reuse_reset();
+        trust_enabled=1;trust_disabled=trust_verify_serial=0;
+        trust_hits=trust_verified=trust_mismatches=0;
+        memset(source,0x21,256);memcpy(snapshot,source,256);
+        assert(cap_reuse_add(&stream,0,0,0)==1);
+        for(unsigned i=0;i<128;i++) {
+            int sample=mode==1 || (mode==2 && !(i&63));
+            assert(cap_reuse_find(&stream,0,0,0,sample)==1);
+            assert(trust_verified==1+i/64);
+        }
+        assert(trust_verified==2 && trust_hits==126);
+        source[17]^=1; /* Lookup 129 independently verifies and disables trust. */
+        assert(!cap_reuse_find(&stream,0,0,0,mode==1));
+        assert(trust_disabled && trust_mismatches==1 && trust_verified==3);
+        assert(!cap_reuse_find(&stream,0,0,0,0));
+        memcpy(snapshot,source,256);
+        assert(cap_reuse_find(&stream,0,0,0,0)==1);
+        assert(trust_verified==3); /* Disabled trust always uses exact equality. */
+        trust_disabled=0;
+        xv_vertex_capture_tags_written(TAG_PHYS_BASE,256);
+        source[19]^=1;
+        assert(!cap_reuse_find(&stream,0,0,0,0)); /* Generation invalidation. */
+        assert(trust_verified==3);
+    }
+    cap_arena=NULL;cap_reuse_reset();cap_reuse_enabled=-1;
+    trust_enabled=-1;trust_disabled=trust_verify_serial=0;
+    trust_hits=trust_verified=trust_mismatches=0;trust_bytes=0;
+    cap_detail_compares=0;cap_detail_compare_bytes=cap_detail_compare_us=0;
+    free(g_xram);g_xram=NULL;
+    puts("PASS: trust verification independent of profiling; mismatch disables trust; write generation invalidates reuse");
+}
+#endif
 static void private_inputs(void)
 {
     unsigned char *guest=mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0);assert(guest!=MAP_FAILED);
@@ -961,6 +1004,9 @@ int main(void)
     setenv("XV_VERTEX_PERSISTENT","0",1);
     setenv("XV_VERTEX_CAPTURE_RETAIN","1",1); /* Exercise optional lifetime path. */
     xv_vertex_worker_override(0);xv_vertex_upload_override(1);
+#if XV_VERTEX_CAPTURE_REUSE && XV_CAPTURE_TRUST_TAGS
+    trust_verification();
+#endif
     detail_sampling();
 #if XV_VERTEX_CAPTURE_NOTIFY
     notification_races();
