@@ -36,7 +36,9 @@ static int xv_quat_shared_try(xctx *c,int *guard,const float input[4],
     const float *ip,float *output,float *scratch,const void *constants,
     uint32_t zero,uint32_t two,uint32_t one)
 {
-    if(!point_fp_supported()||!xv_object_quat_shared_admit(c,*guard))return 0;
+    /* Already-private and owner calls cannot use this transaction. Reject
+     * before FP inspection or another native-thread identity query. */
+    if(*guard<2||!xv_object_quat_shared_admit(c,*guard)||!point_fp_supported())return 0;
     quat_shared_attempts++;
     uint32_t before_fp=quat_shared_fp_get();
     xctx trial=*c;

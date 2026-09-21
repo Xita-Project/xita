@@ -149,3 +149,11 @@ Perf72 deployment confirmed: 32,155,786 bytes, SHA-256 008a7ab932ec2988aad67bd7c
 Extended tools/test_arm_quat_shared.py to mutate the input word, remap the source page, remap the output page, or change a constant between capture and publication. It now checks the final page table as well as full context, memory and FPSCR against the guarded native calculation on the changed state. All 640 Vita-linked cases pass; 256 commits and 64 retries exercised. No new runtime change was needed. Private receipt ../quat-shared-remap-arm/result.json.
 
 Perf72 launch sequence completed and released controls. run-progress-2.log begins entering gameplay (19 draws/frame with active texture decoding) after loading; exclude that transitional window from performance conclusions. Settled admission and frame-time evidence still pending.
+
+## Perf72 settled gameplay and admission overhead
+
+settled-gameplay.log proves the shared-output path is active: final five 60-frame windows have 3750/3757/3446/3360/3437 attempts, all committed, zero retries. gameplay.png confirms corridor geometry, enemies, pistol and HUD on perf72; no short-run visual failure observed. These windows remain 6.9–7.7 FPS, game 129.0–143.5 ms, roughly 410–447 draws/frame. Object batch elapsed is roughly 31.1–33.9 ms/frame. This is ordinary gameplay, not a controlled comparison, and establishes no FPS gain.
+
+Found avoidable per-call overhead in the prototype: even already-private/owner/non-target calls performed FP inspection and a second native worker-ID lookup. Added cheap guard-token rejection before entering admission; under the caller-held guard, exact context/private-return checks reject non-target calls before worker_lane(). Actual native-thread identity remains mandatory before accepting a candidate. No shared output permission was broadened. Production worker fixture passes 40 configurations each with ASan/UBSan and TSan after this cleanup; a fresh ARM run is recorded separately. No matrix NEON or TLS/thread-identity cache change was made.
+
+Updated admission also passes all 640 ARM full context/memory/page-table/FPSCR cases, with 256 commits and 64 retries. Receipt: ../quat-shared-admission-arm/result.json.
