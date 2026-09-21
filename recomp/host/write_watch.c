@@ -13,6 +13,19 @@
 #include <ucontext.h>
 #include <execinfo.h>
 #include <pthread.h>
+#if defined(__x86_64__)
+#define WW_PC(uc) ((void *)(uc)->uc_mcontext.gregs[REG_RIP])
+#define WW_SP(uc) ((void *)(uc)->uc_mcontext.gregs[REG_RSP])
+#elif defined(__arm__)
+#define WW_PC(uc) ((void *)(uc)->uc_mcontext.arm_pc)
+#define WW_SP(uc) ((void *)(uc)->uc_mcontext.arm_sp)
+#elif defined(__aarch64__)
+#define WW_PC(uc) ((void *)(uc)->uc_mcontext.pc)
+#define WW_SP(uc) ((void *)(uc)->uc_mcontext.sp)
+#else
+#define WW_PC(uc) ((void *)0)
+#define WW_SP(uc) ((void *)0)
+#endif
 extern uint8_t *g_xram; extern uint32_t *g_xpt;   /* the LIVE table: the thread running the body is bound to the render table */
 uint8_t *xv_render_view_shadow_of_phys(uint32_t phys_page);   /* xk_render_view.c: NULL when the page has no slot */
 static void ww_altstack(void) { static __thread int done; if (done) return; done = 1; stack_t ss; ss.ss_sp = malloc(1 << 16); ss.ss_size = 1 << 16; ss.ss_flags = 0; if (ss.ss_sp) sigaltstack(&ss, NULL); }
@@ -31,7 +44,7 @@ static void ww_handler(int sig, siginfo_t *si, void *uc_)
         }
         return;
     }
-    { ucontext_t *uc = uc_; extern char __executable_start; fprintf(stderr, "[write-watch] foreign SIGSEGV at %p (pc offset %lx, sp %p): default action\n", (void *)a, (unsigned long)((char *)uc->uc_mcontext.gregs[REG_RIP] - &__executable_start), (void *)uc->uc_mcontext.gregs[REG_RSP]); }
+    { ucontext_t *uc = uc_; extern char __executable_start; fprintf(stderr, "[write-watch] foreign SIGSEGV at %p (pc offset %lx, sp %p): default action\n", (void *)a, (unsigned long)((char *)WW_PC(uc) - &__executable_start), WW_SP(uc)); }
     signal(sig, SIG_DFL);   /* not ours: re-raise with the default action */
 }
 void xv_write_watch_init(void) { if (getenv("XV_WRITE_WATCH")) ww_altstack(); }   /* harness main thread (the owner) */
