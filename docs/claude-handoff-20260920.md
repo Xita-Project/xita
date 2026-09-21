@@ -901,3 +901,36 @@ Loading screen (user report): the blue effect fills the screen and should
 be masked; captures in clock-hardware/load64-*.png; not yet bisected (Sep 18
 qualified build at 2026-09-18-tester-release/release/xita-0.2.0-test.1.vpk,
 script loading-bisect/run-loading.sh).
+
+## 34. Sept 21: perf81 inline-stack candidate installed; perf82 scene-thread port built
+
+Resumed from Codex's return notes (perf80 / 219c50c installed, lowest graphics
+settings left on the device, heavy corridor 115-129 ms). Attribution from
+`../external-clock-candidate/lowest-settled.log` per frame: tick FA920 51.6 ms
+(object batch 36.5 inside), scene BCB30 64.1 ms (first section 30.8 incl.
+5B760 model interval 9.3 with 5B190 model packets 6.4; ordered passes 23.6
+incl. the 5B710 second model pass 13.0), draw-hle 14.9 nested. No shaving
+reaches 20 FPS here; overlap of tick and scene is the structural route and
+alone lands near 14 FPS in this view.
+
+perf81 / 67ce01b+ (`../inline-stack-candidate`, cloned from the retained
+perf80 stage; only `recomp/xv_inline_stack.h` and the Makefile block
+`XV_RENDER_INLINE_STACK=1`, scoped to the two -Os rendering units): material
+unit code_011 text 1,452,216 -> 1,477,764 bytes, zero `bl x87_push/pop`
+sites. Package differs from perf80 only in game-a.self/boot-game.txt
+(31,000,106 bytes, SHA-256 99b43fa8...). Installed slot 0, boot-confirmed;
+env re-armed (XV_CPU_EXTERNAL=1, shader override/loading trace/capture
+detail 0, retention 1); campaign sequence reached gameplay. settled.log last
+six windows: game 108.1-115.8 ms (8.5-9.1 FPS), 276-291 draws, draw-hle
+11.3-12.1 ms, FA920 51.0, BCB30 55.7 ms/frame. Same lowest settings; live
+NPC windows, so no precise gain claim, but draw-hle and scene are lower with
+slightly more draws than perf80's windows.
+
+perf82 / `../scene-thread-candidate` (built, not yet deployed): increment B
+ported as a narrow patch onto the retained perf80 stage (xk_scene_thread.c/h,
+xv_owner_thread_id alias in xk_os_vita.c, owner-check substitutions in
+object jobs / collision / clip / polygon-edge controls / owner-phase / log,
+BCB30 entry hook inserted into the retained shard, Makefile XV_SCENE_THREAD
+block, XV_SCENE_THREAD_DEFAULT=0 so it is env-enabled only). Package differs
+only in game-a.self/boot-game.txt (30,972,474 bytes, SHA-256 5fc1faaf...).
+Bin/rg shim is required by the retained Makefile's `$(shell rg ...)`.
