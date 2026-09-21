@@ -1195,14 +1195,15 @@ wrong for query_fusion.c: run the build once, copy the printed values.
 ### 39b. perf83 built, not deployed
 
 `../overlap-candidate/build/xita.vpk` = 0.2.0-perf.83 / 427df56+
-(sha256 a433fca61bb42f27...), built 2026-09-21 16:04 with
+(sha256 b7e76c16b363bffd..., rebuilt 2026-09-21 18:08 with the conflict
+census and the tick-wins default; the earlier a433fca6 build lacked them) with
 XV_RENDER_VIEW=1 XV_SCENE_THREAD=1 (defaults 0: an ordinary launch
 behaves like perf82). Env to arm before Launch (vita_remote.py env):
 XV_SCENE_THREAD=1 XV_SCENE_OVERLAP=2 XV_RENDER_VIEW=1
 XV_RENDER_VIEW_THREAD=1 (start with XV_SCENE_OVERLAP=1 and the view off,
 then add pieces; kill switches are the same names =0). Untested on
 hardware: no bench device. The Pi binary of the same stage is
-`../pi-bench/harness-armhf-overlap-be147c0`. Expected hardware issues,
+`../pi-bench/harness-armhf-overlap-d145ca0`. Expected hardware issues,
 in order: the runtime's vertex capture/upload workers write live memory
 the scene (bound to the render table) cannot see (A's first cut hung on
 exactly that) - they need per-job binding to the render table; the
