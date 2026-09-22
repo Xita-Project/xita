@@ -104,6 +104,9 @@ int xk_dispatch_magic(xctx *c, uint32_t target)
     unsigned ord = target & 0xFFFF;
     xv_fn_t fn = xv_kernel_dispatch(ord);
     if (!fn) { XK_LOG("kernel export ordinal %u (%s) not implemented\n", ord, ord < 367 && xv_kernel_names[ord] ? xv_kernel_names[ord] : "?"); c->r[0] = STATUS_NOT_IMPLEMENTED; c->r[4] += 4; return 1; }
+#if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
+    { extern int xv_scene_thread_proxy_call(xctx *, void (*)(xctx *), unsigned); if (xv_scene_thread_proxy_call(c, fn, ord)) return 1; }   /* scene helper: the owner runs it */
+#endif
     fn(c); return 1;
 }
 

@@ -4,6 +4,7 @@
 #include "xk_scene_thread.h"
 #include "../xv_x86rt.h"
 #include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 
 /* Scene-yield census (both ports): every scheduler handoff taken while the scene body runs on the helper is
@@ -80,6 +81,32 @@ static void overlap_report(void)
  * while the owner is parked in the wait, so I/O completions the scene waits for still arrive (perf87: the first
  * loading-screen scene waited on an event the immediate-timeout answer never satisfied; the owner joined forever). */
 static struct { xk_obj **objs; int n, wait_all; const int64_t *timeout; uint32_t result; } proxy; static volatile int proxy_pending;
+
+/* ---- kernel-call proxy (the general fix for "two threads inside the single-threaded guest kernel") -------------
+ * Every kernel import the scene body issues on the helper (mutex acquire/release for the cache-file request table,
+ * events, file requests...) is executed by the OWNER on the scene's own guest thread record: the helper posts
+ * {ctx, fn}, parks on a host semaphore, and the owner runs fn(ctx) from join() or from xv_preempt when its current
+ * fiber is the scene's thread (mode 2). Read-only time queries run directly. The census counts calls by name. */
+#define PROXY_NAMES 40
+static struct { const char *name; unsigned n; } proxy_names[PROXY_NAMES]; static unsigned proxy_names_n, proxy_calls, proxy_direct;
+static xctx *volatile proxy_call_ctx; static void (*volatile proxy_call_fn)(xctx *);
+extern const char *const xv_kernel_names[];
+static int proxy_direct_ok(const char *name)
+{
+    return name && (!strcmp(name, "KeQueryPerformanceCounter") || !strcmp(name, "KeQueryPerformanceFrequency") || !strcmp(name, "KeQuerySystemTime"));
+}
+static void proxy_note(const char *name)
+{
+    for (unsigned i = 0; i < proxy_names_n; ++i) if (proxy_names[i].name == name) { proxy_names[i].n++; return; }
+    if (proxy_names_n < PROXY_NAMES) { proxy_names[proxy_names_n].name = name; proxy_names[proxy_names_n].n = 1; proxy_names_n++; }
+}
+static void proxy_report(void)
+{
+    if (!proxy_calls && !proxy_direct) return;
+    char line[400]; int ln = snprintf(line, sizeof line, "[scene-proxy] kernel calls from the helper: proxied %u direct %u:", proxy_calls, proxy_direct);
+    for (unsigned i = 0; i < proxy_names_n && ln < 340; ++i) ln += snprintf(line + ln, sizeof line - ln, " %s %u", proxy_names[i].name ? proxy_names[i].name : "?", proxy_names[i].n);
+    XK_LOG("%s\n", line); proxy_calls = proxy_direct = 0; proxy_names_n = 0;
+}
 uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_t *timeout);
 static SceUID proxy_done = -1;
 int xv_scene_thread_on_helper(void) { return helper >= 0 && sceKernelGetThreadId() == helper; }
@@ -90,12 +117,23 @@ uint32_t xv_scene_thread_proxy_wait(xk_obj **objs, int n, int wait_all, const in
     sceKernelWaitSema(proxy_done, 1, NULL);
     return proxy.result;
 }
+int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
+{
+    if (!(enabled > 0 && in_flight_overlapped && xv_scene_thread_on_helper())) return 0;
+    const char *name = ord < 367 ? xv_kernel_names[ord] : NULL; proxy_note(name);
+    if (proxy_direct_ok(name)) { proxy_direct++; return 0; }
+    proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
+    sceKernelWaitSema(proxy_done, 1, NULL);
+    return 1;
+}
 static void proxy_service(void)
 {
+    { void (*fn)(xctx *) = proxy_call_fn; if (fn) { xctx *cc = proxy_call_ctx; proxy_call_fn = NULL; fn(cc); proxy_calls++; sceKernelSignalSema(proxy_done, 1); } }
     if (!__atomic_load_n(&proxy_pending, __ATOMIC_ACQUIRE)) return;
     proxy.result = xk_wait(proxy.objs, proxy.n, proxy.wait_all, 0, proxy.timeout); proxy_waits++;
     __atomic_store_n(&proxy_pending, 0, __ATOMIC_RELEASE); sceKernelSignalSema(proxy_done, 1);
 }
+void xv_scene_thread_service(void) { if (enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }   /* owner service point (xv_preempt) */
 static void join(unsigned *counter)
 {
     if (!in_flight) return;
@@ -103,7 +141,7 @@ static void join(unsigned *counter)
     /* The owner is a guest fiber holding the single runner: a blocking host wait here starves the streaming and sound
      * fibers the scene may be waiting on (lockstep runs deadlocked at the a10 load). Poll, and park in the guest
      * scheduler between polls so those fibers run. */
-    while (sceKernelPollSema(done, 1) < 0) { proxy_service(); xk_sleep_us(1000); }   /* 1 ms: a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
+    while (sceKernelPollSema(done, 1) < 0) { proxy_service(); xk_sleep_us(200); }   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; depth = 0; (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -170,7 +208,7 @@ void xv_scene_thread_report(unsigned frames)
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
-    scene_census_report(); overlap_report();
+    scene_census_report(); overlap_report(); proxy_report();
 }
 #elif defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
 /* Host (Linux) version of the same mechanism: a pthread helper and two POSIX semaphores. Host fibers are
@@ -232,6 +270,32 @@ static void overlap_report(void)
  * while the owner is parked in the wait, so I/O completions the scene waits for still arrive (perf87: the first
  * loading-screen scene waited on an event the immediate-timeout answer never satisfied; the owner joined forever). */
 static struct { xk_obj **objs; int n, wait_all; const int64_t *timeout; uint32_t result; } proxy; static volatile int proxy_pending;
+
+/* ---- kernel-call proxy (the general fix for "two threads inside the single-threaded guest kernel") -------------
+ * Every kernel import the scene body issues on the helper (mutex acquire/release for the cache-file request table,
+ * events, file requests...) is executed by the OWNER on the scene's own guest thread record: the helper posts
+ * {ctx, fn}, parks on a host semaphore, and the owner runs fn(ctx) from join() or from xv_preempt when its current
+ * fiber is the scene's thread (mode 2). Read-only time queries run directly. The census counts calls by name. */
+#define PROXY_NAMES 40
+static struct { const char *name; unsigned n; } proxy_names[PROXY_NAMES]; static unsigned proxy_names_n, proxy_calls, proxy_direct;
+static xctx *volatile proxy_call_ctx; static void (*volatile proxy_call_fn)(xctx *);
+extern const char *const xv_kernel_names[];
+static int proxy_direct_ok(const char *name)
+{
+    return name && (!strcmp(name, "KeQueryPerformanceCounter") || !strcmp(name, "KeQueryPerformanceFrequency") || !strcmp(name, "KeQuerySystemTime"));
+}
+static void proxy_note(const char *name)
+{
+    for (unsigned i = 0; i < proxy_names_n; ++i) if (proxy_names[i].name == name) { proxy_names[i].n++; return; }
+    if (proxy_names_n < PROXY_NAMES) { proxy_names[proxy_names_n].name = name; proxy_names[proxy_names_n].n = 1; proxy_names_n++; }
+}
+static void proxy_report(void)
+{
+    if (!proxy_calls && !proxy_direct) return;
+    char line[400]; int ln = snprintf(line, sizeof line, "[scene-proxy] kernel calls from the helper: proxied %u direct %u:", proxy_calls, proxy_direct);
+    for (unsigned i = 0; i < proxy_names_n && ln < 340; ++i) ln += snprintf(line + ln, sizeof line - ln, " %s %u", proxy_names[i].name ? proxy_names[i].name : "?", proxy_names[i].n);
+    XK_LOG("%s\n", line); proxy_calls = proxy_direct = 0; proxy_names_n = 0;
+}
 uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_t *timeout);
 static sem_t proxy_done;
 int xv_scene_thread_on_helper(void) { return helper_valid && pthread_equal(pthread_self(), helper); }
@@ -242,18 +306,29 @@ uint32_t xv_scene_thread_proxy_wait(xk_obj **objs, int n, int wait_all, const in
     while (sem_wait(&proxy_done) < 0 && errno == EINTR) {}
     return proxy.result;
 }
+int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
+{
+    if (!(enabled > 0 && in_flight_overlapped && xv_scene_thread_on_helper())) return 0;
+    const char *name = ord < 367 ? xv_kernel_names[ord] : NULL; proxy_note(name);
+    if (proxy_direct_ok(name)) { proxy_direct++; return 0; }
+    proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
+    while (sem_wait(&proxy_done) < 0 && errno == EINTR) {}
+    return 1;
+}
 static void proxy_service(void)
 {
+    { void (*fn)(xctx *) = proxy_call_fn; if (fn) { xctx *cc = proxy_call_ctx; proxy_call_fn = NULL; fn(cc); proxy_calls++; sem_post(&proxy_done); } }
     if (!__atomic_load_n(&proxy_pending, __ATOMIC_ACQUIRE)) return;
     proxy.result = xk_wait(proxy.objs, proxy.n, proxy.wait_all, 0, proxy.timeout); proxy_waits++;
     __atomic_store_n(&proxy_pending, 0, __ATOMIC_RELEASE); sem_post(&proxy_done);
 }
+void xv_scene_thread_service(void) { if (enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }
 static void join(unsigned *counter)
 {
     if (!in_flight) return;
     uint64_t t0 = xk_os_monotonic_us();
     /* see the Vita port: poll and park in the guest scheduler so the other fibers run while the owner waits */
-    while (sem_trywait(&done) < 0) { proxy_service(); xk_sleep_us(1000); }
+    while (sem_trywait(&done) < 0) { proxy_service(); xk_sleep_us(200); }
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; __atomic_store_n(&depth, 0, __ATOMIC_RELEASE); (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -319,7 +394,7 @@ void xv_scene_thread_report(unsigned frames)
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
-    scene_census_report(); overlap_report();
+    scene_census_report(); overlap_report(); proxy_report();
 }
 #else
 int xv_scene_thread_active(const void *guest_thread) { (void)guest_thread; return 0; }
@@ -327,6 +402,8 @@ int xv_scene_thread_on_helper(void) { return 0; }
 int xv_scene_thread_no_yield(void) { return 0; }
 void xv_scene_thread_join(void) {}
 void xv_scene_thread_join_owner(void) {}
+int xv_scene_thread_proxy_call(void *c, void (*fn)(void *), unsigned ord) { (void)c; (void)fn; (void)ord; return 0; }
+void xv_scene_thread_service(void) {}
 uint32_t xv_scene_thread_proxy_wait(void *objs, int n, int wait_all, const void *timeout) { (void)objs; (void)n; (void)wait_all; (void)timeout; return 0x102; }
 int xv_scene_thread_present_policy(void) { return 0; }
 void xv_scene_thread_d3d_call(const char *name) { (void)name; }

@@ -41,6 +41,7 @@ void xv_preempt(xctx *c)
 {
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
     { extern int xv_scene_thread_no_yield(void); if (xv_scene_thread_no_yield()) { c->preempt = 20000; return; } }   /* scene helper under the overlap: never the scheduler */
+    { extern void xv_scene_thread_service(void); xv_scene_thread_service(); }   /* owner: run a kernel call the helper posted */
 #endif
     XV_LIGHT_CENSUS_CANCEL(c,XV_LC_HANDOFF);
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
