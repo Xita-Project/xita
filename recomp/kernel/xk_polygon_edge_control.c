@@ -63,6 +63,7 @@ void xv_native_polygon_edge_override(int enabled)
 
 unsigned xv_math_polygon_edge_calls(void)
 {
+    if (!is_owner()) return 0;   /* the host harness reports from its own thread (Pi all1b abort); owner_drained() is owner-only */
     owner_drained();
     /* Modulo unsigned, like the other interval counters, without lost updates. */
     return __atomic_exchange_n(&calls, 0, __ATOMIC_RELAXED);

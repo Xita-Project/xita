@@ -27,24 +27,27 @@ static void clock_trace(void)
     fprintf(stderr, "[host] clock: vblank %llu target %llu frame %u fires %u kicks %u\n",
             (unsigned long long)cnt, (unsigned long long)tgt, xd3d_frame(), xv_n_fires, xv_n_kicks);
 }
+/* The 60-frame reports run on the OWNER at the device present (xd3d_r_present, host copy in xd3d.c), where the tick's
+ * object jobs are drained and, in overlap mode 2, the scene has been joined: several report reads are owner-only
+ * invariants (owner_drained, xv_object_math_report_check) and aborted the Pi soaks when a thread ran them. */
+void xv_host_reports_present(unsigned now)
+{
+    static unsigned last; unsigned delta = now - last;
+    if (delta < 60) return;
+    last = now;
+    fprintf(stderr, "[host] report at frame %u (%u frames)\n", now, delta);
+    if (xk_wait_stats_request) xk_wait_stats_request();
+    if (xv_host_sample_dump) xv_host_sample_dump(now);
+    CALL(xv_owner_phase_report); CALL(xv_object_jobs_report); CALL(xv_quat_shared_report); CALL(xv_quat_cache_report);
+    CALL(xv_model_palette_report); CALL(xv_model_hierarchy_report); CALL(xv_object_basis_report); CALL(xv_object_collect_report);
+    CALL(xv_object_scan_report); CALL(xv_object_hierarchy_report); CALL(xv_object_hierarchy_assist_report); CALL(xv_visibility_pass_report);
+    CALL(xv_subcluster_report); CALL(xv_portal_polygon_report); CALL(xv_clip_region_report); CALL(xv_query_reuse_report);
+    CALL(xv_query_world_run_report); CALL(xv_native_math_report); CALL(xv_flare_report);
+}
 static void *reporter(void *arg)
 {
-    (void)arg; unsigned last = xd3d_frame(); unsigned ticks = 0;
-    for (;;) {
-        usleep(100000);
-        if (++ticks % 10 == 0) clock_trace();
-        unsigned now = xd3d_frame(), delta = now - last;
-        if (delta < 60) continue;
-        last = now;
-        fprintf(stderr, "[host] report at frame %u (%u frames)\n", now, delta);
-        if (xk_wait_stats_request) xk_wait_stats_request();
-        if (xv_host_sample_dump) xv_host_sample_dump(now);
-        CALL(xv_owner_phase_report); CALL(xv_object_jobs_report); CALL(xv_quat_shared_report); CALL(xv_quat_cache_report);
-        CALL(xv_model_palette_report); CALL(xv_model_hierarchy_report); CALL(xv_object_basis_report); CALL(xv_object_collect_report);
-        CALL(xv_object_scan_report); CALL(xv_object_hierarchy_report); CALL(xv_object_hierarchy_assist_report); CALL(xv_visibility_pass_report);
-        CALL(xv_subcluster_report); CALL(xv_portal_polygon_report); CALL(xv_clip_region_report); CALL(xv_query_reuse_report);
-        CALL(xv_query_world_run_report); CALL(xv_native_math_report); CALL(xv_flare_report);
-    }
+    (void)arg;
+    for (;;) { usleep(1000000); clock_trace(); }
     return 0;
 }
 void xv_host_reports_start(void) { if (xv_host_sample_start) xv_host_sample_start(); pthread_t t; if (!pthread_create(&t, 0, reporter, 0)) pthread_detach(t); }

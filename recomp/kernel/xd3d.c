@@ -297,7 +297,7 @@ void xd3d_hist_small_check(unsigned frame, unsigned draws)
     static int small = -1, small_min = 0; if (small == -1) { const char *e = getenv("XV_D3D_HIST_SMALL"); small = e ? atoi(e) : -2; if (e && strchr(e, ',')) small_min = atoi(strchr(e, ',') + 1); }
     if (small >= 0 && (int)frame >= small_min && g_hist_frame < 0 && (int)draws <= small) { g_hist_frame = (int)frame + 2; D3DLOG("hist: small frame %u (%u draws) -> tracing frame %d\n", frame, draws, g_hist_frame); small = -3; }
 }
-void xd3d_r_present(unsigned frame, unsigned draws) { if (frame < 10 || frame % 60 == 0) D3DLOG("Present #%u (%u draws, %u clears)\n", frame, draws, g_dev.clears); xd3d_hist_small_check(frame, draws); }
+void xd3d_r_present(unsigned frame, unsigned draws) { if (frame < 10 || frame % 60 == 0) D3DLOG("Present #%u (%u draws, %u clears)\n", frame, draws, g_dev.clears); xd3d_hist_small_check(frame, draws); { extern void xv_host_reports_present(unsigned) __attribute__((weak)); if (xv_host_reports_present) xv_host_reports_present(frame); } }   /* host: the 60-frame reports, on the owner, drained */
 void xd3d_hist_tex_check(void)
 {   /* XV_D3D_HIST_TEX=<texture header>: trace the frame after the first draw that binds this texture */
     static uint32_t want = 1; if (want == 1) { const char *e = getenv("XV_D3D_HIST_TEX"); want = e ? (uint32_t)strtoul(e, NULL, 16) : 0; }

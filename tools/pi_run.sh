@@ -8,16 +8,21 @@
 # recomp/halo_image.bin), ~/xita/haloce (game dir), ~/xita/runs/<tag>.log + save-<tag>/ (removed at exit).
 # The same runtime knobs as tools/host_run.sh; pad script enters the campaign (a10 loads ~frame 500).
 # The Pi is ~10x slower than the x86 host and has no GPU: structure, counters, races and crashes only, never ms.
-# PI_HARNESS=<local file> copies a fresh harness first.  A crash leaves a core in ~/xita/runs (ulimit -c unlimited).
+# PI_HARNESS=<local file> copies a fresh harness first.  A crash leaves a core in ~/xita (ulimit -c unlimited).
+# PI_SAVE=<name> runs on a persistent save tree ~/xita/saves/<name> (e.g. "vita": the Vita's save/ tree copied over
+# with profiles + checkpoints, so "Continue" resumes the same checkpoint on both benches) instead of a fresh temp dir;
+# pair it with PI_PAD matching the menu flow of that profile (Vita profile: 150:a,300:a,450:a,600:a = Campaign,
+# profile, Continue, difficulty).
 set -e
 tag=${1:?tag}; secs=${2:-300}; [ $# -gt 1 ] && shift 2 || shift
 pad=${PI_PAD:-150:a,300:a,450:a,1100:lu,1400:lu}
 [ -n "${PI_HARNESS:-}" ] && scp -q "$PI_HARNESS" pi:~/xita/harness
-ssh pi "cd ~/xita && mkdir -p runs && rm -rf runs/save-$tag && mkdir -p runs/save-$tag && ulimit -c unlimited && \
+save=runs/save-$tag; keep=0; [ -n "${PI_SAVE:-}" ] && { save=saves/$PI_SAVE; keep=1; }
+ssh pi "cd ~/xita && mkdir -p runs && { [ $keep = 1 ] || { rm -rf $save && mkdir -p $save; }; } && ulimit -c unlimited && \
   env XV_LEVEL=a10 XV_EXPERIMENTAL_OBJECT_JOBS=1 XV_OBJECT_JOB_WORKERS=2 XV_OWNER_PHASE=1 XV_THREADS=1 \
       XV_VERTEX_WORKER=1 XV_VERTEX_REFERENCES=1 XV_NATIVE_OBJECT_BASIS=1 XV_VERTEX_CAPTURE_RETAIN=1 \
-      XV_PAD=$pad $* timeout $secs ./harness halo_image.bin haloce runs/save-$tag > runs/$tag.log 2>&1; \
-  rc=\$?; rm -rf runs/save-$tag; \
+      XV_PAD=$pad $* timeout $secs ./harness halo_image.bin haloce $save > runs/$tag.log 2>&1; \
+  rc=\$?; [ $keep = 1 ] || rm -rf $save; \
   echo \"rc=\$rc reports=\$(grep -c 'report at frame' runs/$tag.log) last=\$(grep 'report at frame' runs/$tag.log | tail -1 | sed 's/.*frame //')\"; \
   grep 'frame stats' runs/$tag.log | tail -1 | sed -E 's/.*frame stats: //' | cut -c1-160; \
   ls runs | grep -c core || true"

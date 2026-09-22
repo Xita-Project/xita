@@ -28,6 +28,37 @@ static void scene_census_report(void)
     if (scene_site_overflow) ln += snprintf(line + ln, sizeof line - ln, " (+%u unlisted)", scene_site_overflow);
     XK_LOG("%s\n", line); scene_nsites = 0; scene_site_overflow = 0;
 }
+/* Scene phase timers (XV_SCENE_PHASES=1, both builds): wall time of the direct guest callees of the scene entry
+ * f_000BCB30 and of its main callee f_0005DBC0, on the thread that runs the scene, installed by
+ * tools/patch_scene_phase_timers.py (a t0 stack handles the nesting; a callee's time includes its own callees).
+ * The host sampler says the scene is flat per function; this splits the Vita's ~65 ms scene into its phases. */
+#include <stdlib.h>
+#define PHASE_MAX 128
+static struct { uint32_t addr; uint64_t us; unsigned n; } phase_tab[PHASE_MAX]; static unsigned phase_used;
+static uint64_t phase_t0[16]; static unsigned phase_depth; static int phases = -1;
+void xv_scene_phase_begin(void) { if (phases < 0) { const char *e = getenv("XV_SCENE_PHASES"); phases = e ? atoi(e) : 0; } if (phases > 0 && phase_depth < 16) phase_t0[phase_depth++] = xk_os_monotonic_us(); }
+void xv_scene_phase_end(uint32_t addr)
+{
+    if (phases <= 0 || !phase_depth) return;
+    uint64_t dt = xk_os_monotonic_us() - phase_t0[--phase_depth]; unsigned i;
+    for (i = 0; i < phase_used; ++i) if (phase_tab[i].addr == addr) break;
+    if (i == phase_used) { if (phase_used >= PHASE_MAX) return; phase_tab[phase_used++].addr = addr; }
+    phase_tab[i].us += dt; phase_tab[i].n++;
+}
+static void phase_report(unsigned frames)
+{
+    if (phases <= 0 || !frames || !phase_used) return;
+    char line[400]; int ln = snprintf(line, sizeof line, "[scene-phases] %u frames (ms/frame, calls; top by time, a callee's time includes its callees):", frames);
+    for (unsigned k = 0; k < 30 && k < phase_used; ++k) {   /* selection by time: the table is small */
+        unsigned best = k; for (unsigned i = k + 1; i < phase_used; ++i) if (phase_tab[i].us > phase_tab[best].us) best = i;
+        if (best != k) { __typeof__(phase_tab[0]) t = phase_tab[k]; phase_tab[k] = phase_tab[best]; phase_tab[best] = t; }
+        if (!phase_tab[k].us) break;
+        if (ln > 320) { XK_LOG("%s\n", line); ln = snprintf(line, sizeof line, "[scene-phases]  "); }
+        ln += snprintf(line + ln, sizeof line - ln, " %X %.2f (%u)", phase_tab[k].addr, (double)phase_tab[k].us / frames / 1000.0, phase_tab[k].n);
+    }
+    XK_LOG("%s\n", line);
+    for (unsigned i = 0; i < phase_used; ++i) { phase_tab[i].us = 0; phase_tab[i].n = 0; }
+}
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD && defined(__vita__)
 #include <psp2/kernel/threadmgr.h>
 #ifndef XV_SCENE_THREAD_DEFAULT
@@ -218,7 +249,7 @@ void xv_scene_thread_report(unsigned frames)
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
-    scene_census_report(); overlap_report(); proxy_report();
+    scene_census_report(); overlap_report(); proxy_report(); phase_report(frames);
 }
 #elif defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
 /* Host (Linux) version of the same mechanism: a pthread helper and two POSIX semaphores. Host fibers are
@@ -414,7 +445,7 @@ void xv_scene_thread_report(unsigned frames)
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
-    scene_census_report(); overlap_report(); proxy_report();
+    scene_census_report(); overlap_report(); proxy_report(); phase_report(frames);
 }
 #else
 int xv_scene_thread_active(const void *guest_thread) { (void)guest_thread; return 0; }

@@ -303,6 +303,7 @@ void xd3d_r_im_end(uint32_t prim, const xd3d_im_vtx *v, unsigned n)
 
 void xd3d_r_present(unsigned frame, unsigned draws)
 {
+    { extern void xv_host_reports_present(unsigned) __attribute__((weak)); if (xv_host_reports_present) xv_host_reports_present(frame); }   /* the 60-frame reports, on the owner, drained (host_reports.c) */
     if (getenv("XV_PROBE_FONT") && (frame==30 || frame==120 || frame==400)) {
         uint32_t fd = 0x01EF8000u; const uint8_t *m=(const uint8_t*)X_G(0x80000000u|fd);
         unsigned nz=0; for (unsigned i=0;i<128*128;i++){ uint16_t v=m[i*2]|(m[i*2+1]<<8); if(((v>>12)&15)) nz++; }
