@@ -714,6 +714,7 @@ LDFLAGS   := -Wl,-q,--defsym=__sce_headroom=0x1000
 # The five hardware modules runtime/main.c talks to directly …
 LIBS      := -lSceGxm_stub \
              -lSceDisplay_stub \
+             -lSceKernelDmacMgr_stub \
              -lSceKernelThreadMgr_stub \
              -lSceSysmem_stub \
              -lSceProcessmgr_stub
