@@ -127,6 +127,15 @@ int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
     sceKernelWaitSema(proxy_done, 1, NULL);
     return 1;
 }
+int xv_scene_thread_proxy_hle(xctx *c, void (*fn)(xctx *), const char *name)
+{
+    if (!(enabled > 0 && in_flight_overlapped && xv_scene_thread_on_helper())) return 0;
+    proxy_note(name);
+    if (proxy_direct_ok(name + 3)) { proxy_direct++; return 0; }   /* "xk_KeQuery..." -> the time queries stay direct */
+    proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
+    sceKernelWaitSema(proxy_done, 1, NULL);
+    return 1;
+}
 static void proxy_service(void)
 {
     { void (*fn)(xctx *) = proxy_call_fn; if (fn) { xctx *cc = proxy_call_ctx; proxy_call_fn = NULL; fn(cc); proxy_calls++; sceKernelSignalSema(proxy_done, 1); } }
@@ -317,6 +326,15 @@ int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
     while (sem_wait(&proxy_done) < 0 && errno == EINTR) {}
     return 1;
 }
+int xv_scene_thread_proxy_hle(xctx *c, void (*fn)(xctx *), const char *name)
+{
+    if (!(enabled > 0 && in_flight_overlapped && xv_scene_thread_on_helper())) return 0;
+    proxy_note(name);
+    if (proxy_direct_ok(name + 3)) { proxy_direct++; return 0; }   /* "xk_KeQuery..." -> the time queries stay direct */
+    proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
+    while (sem_wait(&proxy_done) < 0 && errno == EINTR) {}
+    return 1;
+}
 static void proxy_service(void)
 {
     { void (*fn)(xctx *) = proxy_call_fn; if (fn) { xctx *cc = proxy_call_ctx; proxy_call_fn = NULL; fn(cc); proxy_calls++; sem_post(&proxy_done); } }
@@ -405,6 +423,7 @@ int xv_scene_thread_no_yield(void) { return 0; }
 void xv_scene_thread_join(void) {}
 void xv_scene_thread_join_owner(void) {}
 int xv_scene_thread_proxy_call(void *c, void (*fn)(void *), unsigned ord) { (void)c; (void)fn; (void)ord; return 0; }
+int xv_scene_thread_proxy_hle(void *c, void (*fn)(void *), const char *name) { (void)c; (void)fn; (void)name; return 0; }
 void xv_scene_thread_service(void) {}
 uint32_t xv_scene_thread_proxy_wait(void *objs, int n, int wait_all, const void *timeout) { (void)objs; (void)n; (void)wait_all; (void)timeout; return 0x102; }
 int xv_scene_thread_present_policy(void) { return 0; }
