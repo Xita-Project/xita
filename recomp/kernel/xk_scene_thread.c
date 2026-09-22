@@ -105,7 +105,9 @@ static void configure(void)
     configured = 1;
     const char *e = getenv("XV_SCENE_THREAD"); enabled = e ? atoi(e) != 0 : XV_SCENE_THREAD_DEFAULT;
     { const char *o = getenv("XV_SCENE_OVERLAP"); overlap = o ? atoi(o) : 0; if (overlap < 0 || overlap > 2) overlap = 0; }   /* 1: Present joins; 2: Present deferred to the next dispatch */
-    if (overlap) { scene_stack = xk_mem_alloc(SCENE_STACK_BYTES, 4096, 0, 0, 1); if (!scene_stack) { XK_LOG("[scene-thread] no guest stack for the overlap; overlap off\n"); overlap = 0; } }
+    /* kernel-owned, above the game heap: taking 256 KiB from the game's pool at the first menu frame left the a10 tag-cache
+     * contiguous allocation short on the Vita (perf85/86: the load never completed under the overlap; fine with it off) */
+    if (overlap) { scene_stack = xk_mem_alloc_high(SCENE_STACK_BYTES, 4096); if (!scene_stack) { XK_LOG("[scene-thread] no guest stack for the overlap; overlap off\n"); overlap = 0; } else XK_LOG("[scene-thread] overlap %d: private scene stack at %08X (kernel region)\n", overlap, scene_stack); }
     if (!enabled) { XK_LOG("[scene-thread] process-start disabled\n"); return; }
     go = sceKernelCreateSema("xv_scene_go", 0, 0, 1, NULL); done = sceKernelCreateSema("xv_scene_done", 0, 0, 1, NULL);
     helper = go >= 0 && done >= 0 ? sceKernelCreateThread("xv_scene", helper_main, sceKernelGetThreadCurrentPriority(), 1024 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_ALL, NULL) : -1;
@@ -233,7 +235,9 @@ static void configure(void)
     configured = 1;
     const char *e = getenv("XV_SCENE_THREAD"); enabled = e ? atoi(e) != 0 : XV_SCENE_THREAD_DEFAULT;
     { const char *o = getenv("XV_SCENE_OVERLAP"); overlap = o ? atoi(o) : 0; if (overlap < 0 || overlap > 2) overlap = 0; }   /* 1: Present joins; 2: Present deferred to the next dispatch */
-    if (overlap) { scene_stack = xk_mem_alloc(SCENE_STACK_BYTES, 4096, 0, 0, 1); if (!scene_stack) { XK_LOG("[scene-thread] no guest stack for the overlap; overlap off\n"); overlap = 0; } }
+    /* kernel-owned, above the game heap: taking 256 KiB from the game's pool at the first menu frame left the a10 tag-cache
+     * contiguous allocation short on the Vita (perf85/86: the load never completed under the overlap; fine with it off) */
+    if (overlap) { scene_stack = xk_mem_alloc_high(SCENE_STACK_BYTES, 4096); if (!scene_stack) { XK_LOG("[scene-thread] no guest stack for the overlap; overlap off\n"); overlap = 0; } else XK_LOG("[scene-thread] overlap %d: private scene stack at %08X (kernel region)\n", overlap, scene_stack); }
     if (!enabled) { XK_LOG("[scene-thread] process-start disabled\n"); return; }
     if (sem_init(&go, 0, 0) || sem_init(&done, 0, 0) || pthread_create(&helper, NULL, helper_main, NULL)) { XK_LOG("[scene-thread] helper thread failed; disabled\n"); enabled = 0; return; }
     helper_valid = 1;
