@@ -458,7 +458,9 @@ void xv_remote_start(void)
     listener=remote_listen(port);if(listener<0)goto failed;
     STORE(&running,1);STORE(&enabled,1);
 #ifdef __vita__
-    worker=sceKernelCreateThread("xv_remote_test",server,0x10000110,64*1024,0,SCE_KERNEL_CPU_MASK_USER_0,NULL);
+    /* Owner priority, any core: at 0x110 on core 0 it was starved to death under the scene overlap (the socket stayed
+     * open but accept never ran); it does microseconds of work per request and must answer while the game is busy. */
+    worker=sceKernelCreateThread("xv_remote_test",server,0x10000100,64*1024,0,SCE_KERNEL_CPU_MASK_USER_ALL,NULL);
     if(worker<0)goto failed;
     if(sceKernelStartThread(worker,0,NULL)<0) {sceKernelDeleteThread(worker);worker=-1;goto failed;}
     SceNetCtlInfo info={0};
