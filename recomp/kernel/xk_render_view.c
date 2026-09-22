@@ -50,6 +50,7 @@ static retarget_t *retargets; static unsigned retargets_n, retargets_last, retar
  * thread running the scene binds (host: thread-local pointer, Vita: TPIDRURW); the live table is untouched, so the
  * owner's tick keeps reading and writing live pages while the scene reads its frozen copies. The render table
  * mirrors the live table through xv_render_view_mirror (allocated once, 4 MiB, never copied per frame). */
+static int all_mode;   /* XV_RENDER_VIEW_ALL: every game-state page listed up front; the view enters before any learning pass */
 static int thread_mode; static struct { uint8_t *img_base; uint32_t entries[1u << 20]; } *rt;
 #define VIEW_TABLE (thread_mode ? rt->entries : g_xpt)
 void xk_os_bind_page_table(uint32_t *table);
@@ -162,7 +163,7 @@ void xv_render_view_configure(void)
          * corridor's object churn (Pi ov2b, 2026-09-22: 7 slots learned in the cinematic; tick N+1 tore an object's model
          * reference under real overlap and the scene looped forever in A26B0). Costs one copy-in of the listed pages per
          * frame; learning passes are skipped. */
-        const char *e = getenv("XV_RENDER_VIEW_ALL"); int all = e ? atoi(e) : 0;
+        const char *e = getenv("XV_RENDER_VIEW_ALL"); int all = e ? atoi(e) : 0; all_mode = all;
         if (all > 0) {
             unsigned n = phys_limit / XK_PAGE; if (n > L.phys_pages) n = L.phys_pages;
             for (unsigned i = 0; i < n; ++i) learn_page(i);
@@ -243,7 +244,7 @@ void xv_render_view_enter(unsigned *scope, void *context)
         else gap_frames = 0;
     }
     if (!ready || depth++) return;
-    if (!learn_done) return;
+    if (!learn_done && !all_mode) return;   /* all mode: the listed set is complete from the start (Vita perf103: entered 0 while waiting for the passes) */
     *scope = 1;
     full_frame = active_frames < 30 || (full_interval && active_frames % full_interval == 0);
     active_frames++;
