@@ -8,6 +8,7 @@
 #include "xv_update_halo2.h"
 #include <ctype.h>
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -402,10 +403,17 @@ REMOTE_THREAD(server)
     (void)argc;
 #endif
     (void)argv;
+    unsigned accepts=0,fails=0,serves=0;int last_err=0;uint64_t next_report=0;
     while(LOAD(&running)) {
         keep_awake();int s=remote_accept(listener);
-        if(s<0) {remote_sleep(100000);continue;}
-        if(remote_nonblock(s)>=0)serve(s);
+        uint64_t now=remote_now();
+        if(now>=next_report) {   /* liveness trace: the server went silent under the scene overlap with its socket still open */
+            xv_logf("[remote] loop: accepts %u fails %u (last err %d) serves %u\n",accepts,fails,last_err,serves);
+            next_report=now+5000000;accepts=fails=serves=0;
+        }
+        if(s<0) {fails++;last_err=errno;remote_sleep(100000);continue;}
+        accepts++;
+        if(remote_nonblock(s)>=0) {serves++;serve(s);}
         remote_close(s);
     }
     return 0;
