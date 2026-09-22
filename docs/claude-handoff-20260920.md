@@ -1286,3 +1286,32 @@ which is NOT yet deterministic: two baseline lockstep runs agree on only
 ~55% of frames while their per-call traces of a differing frame are
 identical, so the difference is outside the traced words (under
 investigation: trace-all mode).
+
+## 41. Virtual clock, and where the draw-stream oracle stands
+
+`XV_LOCKSTEP=2` is now a fully virtual guest clock: tick count, uptime,
+system time, KeQueryPerformanceCounter and the guest's rdtsc all derive
+from the vblank count (1/60 s each, starting at 1 s so a zero deadline
+still means "none"); idle time is skipped (the scheduler advances the
+clock to the earliest deadline instead of sleeping), a lone polling
+thread advances it 100 us per yield (the boot's XNetGetTitleXnAddr poll
+and Sleep loops needed both), and 200 vblank-fiber spins without a
+Present add a vblank. Tick-side state is identical run to run (2,840 of
+2,840 ticks). Runs under different clock modes are not comparable (the
+level starts at a different tick).
+
+Draw-stream hash (`XV_DRAW_HASH`, real arguments only via
+tools/gen_d3d_argc.py, audio calls excluded, line = frame, tick, hash):
+menu frames agree well between runs, level frames do not even at equal
+ticks. The per-call trace showed screen-space quads and UI fades that
+follow wall time (fixed by the virtual clock) and then a frame-to-tick
+phase that drifts differently per run (the streaming thread's I/O
+completion timing changes the extra vblanks during the load). Not
+pursued further: scene-side native replacements will be verified
+in-process instead (run the native and the guest body on the same
+inputs, compare outputs, count mismatches), which needs no cross-run
+alignment; the tick trace remains the oracle for anything the tick uses.
+
+Housekeeping: `tools/host_run.sh` now removes the temp save directory it
+creates (each run copies ~300 MB of cache files; 88 leftovers filled the
+31 GB /tmp). Trace-all draw logs are ~500 MB per run; delete them.

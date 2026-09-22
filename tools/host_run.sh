@@ -27,7 +27,8 @@ stage=${HOST_STAGE:-$here/../external-clock-candidate/build}
 obj=${HOST_OBJ:?set HOST_OBJ to the tools/host_build.py --out directory}
 game=${HOST_GAME:-$HOME/.local/share/Vita3K/Vita3K/ux0/data/xita/haloce}
 log=${HOST_LOG:-$PWD/host-run.log}
-save=${HOST_SAVE:-$(mktemp -d "${TMPDIR:-/tmp}/xita-host-save.XXXXXX")}
+save=${HOST_SAVE:-}
+if [ -z "$save" ]; then save=$(mktemp -d "${TMPDIR:-/tmp}/xita-host-save.XXXXXX"); trap 'rm -rf "$save"' EXIT; fi   # a run copies ~300 MB of cache files: temp dirs are removed at exit (88 of them once filled /tmp)
 pad=${HOST_PAD:-150:a,300:a,450:a}
 [ -x "$obj/harness" ] || { echo "no harness in $obj (run tools/host_build.py)" >&2; exit 2; }
 cd "$stage/recomp"
