@@ -72,7 +72,8 @@ static xctx ctx;
 static unsigned depth, dispatched, declined_nested;
 static uint64_t wait_us, wait_max_us;
 static xk_thread *scene_guest;
-int xv_scene_thread_active(const void *guest_thread) { return depth && guest_thread == scene_guest && sceKernelGetThreadId() == helper; }
+int xv_scene_thread_on_helper(void);
+int xv_scene_thread_active(const void *guest_thread) { return depth && guest_thread == scene_guest && xv_scene_thread_on_helper(); }
 
 /* ---- increment C (XV_SCENE_OVERLAP=1): the owner continues after dispatch ------------------------------
  * The helper runs the body without ever entering the guest scheduler (xv_preempt and xk_yield return at
@@ -141,7 +142,15 @@ static void proxy_report(void)
 }
 uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_t *timeout);
 static SceUID proxy_done = -1;
-int xv_scene_thread_on_helper(void) { return helper >= 0 && sceKernelGetThreadId() == helper; }
+/* "Am I the helper?" is asked twice per D3D HLE call (xd3d_count) - ~3,800 calls per frame in the corridor - and
+ * sceKernelGetThreadId is a syscall: compare the stack pointer with the helper's 1 MiB stack instead (set once in
+ * helper_main); the syscall remains the fallback until the helper has started. */
+static uintptr_t helper_sp_lo, helper_sp_hi;
+int xv_scene_thread_on_helper(void)
+{
+    if (helper_sp_hi) { uintptr_t sp = (uintptr_t)__builtin_frame_address(0); return sp >= helper_sp_lo && sp < helper_sp_hi; }
+    return helper >= 0 && sceKernelGetThreadId() == helper;
+}
 uint32_t xv_scene_thread_proxy_wait(xk_obj **objs, int n, int wait_all, const int64_t *timeout)
 {
     proxy.objs = objs; proxy.n = n; proxy.wait_all = wait_all; proxy.timeout = timeout; proxy.result = 0;
@@ -206,6 +215,7 @@ int xv_scene_thread_present_policy(void) { return enabled > 0 && in_flight ? ove
 static int helper_main(SceSize args, void *argp)
 {
     (void)args; (void)argp;
+    { char m; helper_sp_hi = (uintptr_t)&m + 4096u; helper_sp_lo = helper_sp_hi - (1024u * 1024u + 8192u); }   /* the 1 MiB stack from sceKernelCreateThread, with margins */
     for (;;) {
         if (sceKernelWaitSema(go, 1, NULL) < 0) return -1;
         f_000BCB30(&ctx);
