@@ -98,6 +98,11 @@ int xv_boot_recomp(const char *game_dir, const char *save_dir)
 
     /* Kernel up: drive letters, TLS template, thunk table.  game_dir holds maps/, save_dir is writable. */
     xk_init(base, size, xv_game_tls_dir, game_dir, save_dir);
+#if defined(XV_RENDER_VIEW) && XV_RENDER_VIEW
+    /* The render view needs the arena: main() used to configure it before this boot ran, so every Vita build logged
+     * "[render-view] no shadow region; disabled" and the overlap ran with no frozen pages (perf83-102). */
+    { extern void xv_render_view_configure(void); xv_render_view_configure(); }
+#endif
     { extern void xv_render_view_configure(void); xv_render_view_configure(); }   /* image in the arena, guest not started */
 
     /* The initial thread runs mainCRTStartup(); the kernel scheduler takes it from there. */
