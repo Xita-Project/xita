@@ -81,6 +81,7 @@ extern void xk_os_log(const char *, ...) __attribute__((weak));
 void xv_clip_region_report(unsigned frames)
 {
     if (!xv_native_clip_region_available()) return;
+    if (!is_owner()) return;   /* the host harness reports from its own thread; owner_drained() is an owner-only invariant (Pi all1a aborted here once the corridor used the native clip path) */
     xv_clip_region_work n;
     xv_clip_region_read_work(&n);
     if (xk_os_log) xk_os_log("[clip-region] %u frames: regions %u planes %u clips %u input-vertices %u capacity-failures %u max-clips %u\n",
