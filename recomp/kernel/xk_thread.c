@@ -116,6 +116,9 @@ xk_thread *xk_thread_create_host(void (*entry)(xctx *c, void *arg), void *arg)
 
 void xk_sleep_us(uint64_t us)
 {
+#if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
+    { extern int xv_scene_thread_no_yield(void); if (xv_scene_thread_no_yield()) { xk_os_sleep_us(us); return; } }   /* scene helper: host sleep, never the owner's thread record (xk_cur) or the scheduler */
+#endif
     xk_thread *t = xk_cur;
     t->wait_n = 0; t->wait_until = xk_uptime_100ns() + us * 10; t->state = 1;
     xk_yield(); t->state = 0; t->wait_until = 0;
@@ -124,6 +127,13 @@ void xk_sleep_us(uint64_t us)
 int xk_wait_u32(const uint32_t *word, uint32_t value, uint64_t timeout_us)
 {
     if (__atomic_load_n(word,__ATOMIC_ACQUIRE)==value) return 1;
+#if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
+    { extern int xv_scene_thread_no_yield(void); extern void xv_scene_thread_note_suppressed_yield(uint32_t, int);
+      if (xv_scene_thread_no_yield()) {   /* helper: host sleep poll (the runtime's vertex capture/upload completion waits come through here: perf84 data abort in this function on the helper) */
+          uint64_t t0 = xk_os_monotonic_us(); xv_scene_thread_note_suppressed_yield(0, 1);
+          while (__atomic_load_n(word,__ATOMIC_ACQUIRE)!=value && xk_os_monotonic_us()-t0 < timeout_us) xk_os_sleep_us(50);
+          return __atomic_load_n(word,__ATOMIC_ACQUIRE)==value; } }
+#endif
     if (!xk_os_scheduler_prepare() && timeout_us>1000) timeout_us=1000;
     xk_thread *t=xk_cur;
     t->wait_n=0; t->wait_word=word; t->wait_value=value;
@@ -466,6 +476,10 @@ void xk_wait_stats_dump(void)
 /* NTSTATUS-style wait: returns STATUS_WAIT_n / STATUS_TIMEOUT.  timeout: NULL = infinite, negative = relative 100ns, positive = absolute. */
 uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_t *timeout)
 {
+#if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
+    { extern int xv_scene_thread_no_yield(void); extern void xv_scene_thread_note_suppressed_yield(uint32_t, int);
+      if (xv_scene_thread_no_yield()) { xv_scene_thread_note_suppressed_yield(objs && n ? objs[0]->guest : 0, 1); return STATUS_TIMEOUT; } }   /* helper: never the scheduler (the census saw no such wait in the scene; counted if it happens) */
+#endif
     xk_thread *t = xk_cur;
     if (alertable && t->napc) { xk_apc_deliver(&t->ctx); return STATUS_USER_APC; }
     t->wait_n = n; t->wait_all = wait_all; t->alertable = alertable;
