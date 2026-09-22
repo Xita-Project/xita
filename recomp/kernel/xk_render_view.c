@@ -274,15 +274,20 @@ static void list_object_pool(void)
  * the copy raced tick N+1 and the snapshot itself was torn: the same bogus model pointer (01914660) hung A26B0 in
  * every Pi run, frozen pages or not. */
 static int prepared;
+static uint64_t prep_list_us, prep_copy_us, prep_pristine_us;   /* copy_in split, for the report */
 static void copy_in(void)
 {
+    uint64_t t0 = xk_os_monotonic_us();
     if (all_mode == 3) list_object_pool();
+    uint64_t t1 = xk_os_monotonic_us(); prep_list_us += t1 - t0;
     full_frame = active_frames < 30 || (full_interval && active_frames % full_interval == 0);
     active_frames++;
     if (all_mode && slots_contiguous && slots_used) {   /* all mode: an ascending slot range = one physical range: one range copy (DMA on the Vita) */
         view_copy(shadow_of(0), live_of_slot(0), (size_t)slots_used * XK_PAGE);
+        uint64_t t2 = xk_os_monotonic_us(); prep_copy_us += t2 - t1;
         if (full_frame) view_copy(pristine_slot(0), shadow_of(0), (size_t)slots_used * XK_PAGE);
         else for (unsigned s = 0; s < slots_used; ++s) if (sw_slot[s]) memcpy(pristine_slot(s), shadow_of(s), XK_PAGE);
+        prep_pristine_us += xk_os_monotonic_us() - t2;
     } else
     for (unsigned s = 0; s < slots_used; ++s) {
         memcpy(shadow_of(s), live_of_slot(s), XK_PAGE);
@@ -380,12 +385,12 @@ uint8_t *xv_render_view_shadow_of_phys(uint32_t phys_page) { uint32_t s = ready 
 void xv_render_view_report(unsigned frames)
 {
     if (!ready) return;
-    XK_LOG("[render-view] %u frames: entered %u (full %u); slots %u (overflow %u) image pages %u listed, tail %u; copy-in %.2f ms/frame (%.0f KiB, owner-side %.2f ms), merge %.2f ms/frame (%llu words); scene-write set %u slots + %u image pages (%u found late); retargets %u (+%u image, overflow %u), fiber switches in scene %u, remaps in scene %u; aliases max %u\n",
+    XK_LOG("[render-view] %u frames: entered %u (full %u); slots %u (overflow %u) image pages %u listed, tail %u; copy-in %.2f ms/frame (%.0f KiB, owner-side %.2f ms: list %.2f copy %.2f pristine %.2f), merge %.2f ms/frame (%llu words); scene-write set %u slots + %u image pages (%u found late); retargets %u (+%u image, overflow %u), fiber switches in scene %u, remaps in scene %u; aliases max %u\n",
            frames, frames_entered, full_frames, slots_used, slots_overflow, img_listed_n, img_lo < L.image_pages ? L.image_pages - img_lo : 0,
-           frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0, frames_entered ? (double)prepare_us / frames_entered / 1000.0 : 0.0,
+           frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0, frames_entered ? (double)prepare_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_list_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_copy_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_pristine_us / frames_entered / 1000.0 : 0.0,
            frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0, (unsigned long long)words_merged,
            sw_slots, sw_imgs, sw_found_late, retargets_last, image_entries, retargets_overflow, fiber_switches, mirrors_in_scene, aliases_max);
-    frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; fiber_switches = mirrors_in_scene = 0;
+    frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; fiber_switches = mirrors_in_scene = 0; prepare_us = prep_list_us = prep_copy_us = prep_pristine_us = 0;   /* (was never reset: perf109 "owner-side 31 -> 68 ms" grew per window) */
     if (conflicts || conflicts_same_value) {
         char line[400]; int ln = snprintf(line, sizeof line, "[render-view-conflicts] %u frames: %llu conflicting words (%llu same-value), policy %s; sites (phys-page:word n live/scene):",
                                           frames, (unsigned long long)conflicts, (unsigned long long)conflicts_same_value, conflict_scene_wins ? "scene wins" : "tick wins");
