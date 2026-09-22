@@ -151,7 +151,7 @@ uint32_t xv_scene_thread_proxy_wait(xk_obj **objs, int n, int wait_all, const in
 }
 int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
 {
-    if (!(enabled > 0 && in_flight_overlapped && xv_scene_thread_on_helper())) return 0;
+    if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     const char *name = ord < 367 ? xv_kernel_names[ord] : NULL; proxy_note(name);
     if (proxy_direct_ok(name)) { proxy_direct++; return 0; }
     proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
@@ -160,7 +160,7 @@ int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
 }
 int xv_scene_thread_proxy_hle(xctx *c, void (*fn)(xctx *), const char *name)
 {
-    if (!(enabled > 0 && in_flight_overlapped && xv_scene_thread_on_helper())) return 0;
+    if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     proxy_note(name);
     if (proxy_direct_ok(name + 3)) { proxy_direct++; return 0; }   /* "xk_KeQuery..." -> the time queries stay direct */
     proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
@@ -350,7 +350,7 @@ uint32_t xv_scene_thread_proxy_wait(xk_obj **objs, int n, int wait_all, const in
 }
 int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
 {
-    if (!(enabled > 0 && in_flight_overlapped && xv_scene_thread_on_helper())) return 0;
+    if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     const char *name = ord < 367 ? xv_kernel_names[ord] : NULL; proxy_note(name);
     if (proxy_direct_ok(name)) { proxy_direct++; return 0; }
     proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
@@ -359,7 +359,7 @@ int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
 }
 int xv_scene_thread_proxy_hle(xctx *c, void (*fn)(xctx *), const char *name)
 {
-    if (!(enabled > 0 && in_flight_overlapped && xv_scene_thread_on_helper())) return 0;
+    if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     proxy_note(name);
     if (proxy_direct_ok(name + 3)) { proxy_direct++; return 0; }   /* "xk_KeQuery..." -> the time queries stay direct */
     proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
