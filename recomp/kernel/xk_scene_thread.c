@@ -49,7 +49,7 @@ int xv_scene_thread_active(const void *guest_thread) { return depth && guest_thr
  * flight (backpressure). The owner-side D3D census lists the HLE calls made outside the scene. */
 #define SCENE_STACK_BYTES (256u * 1024u)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
-static int overlap; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
+static int overlap, in_flight_overlapped; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -59,7 +59,8 @@ void xv_scene_thread_d3d_call(const char *name)
     for (unsigned i = 0; i < owner_d3d_n; ++i) if (owner_d3d[i].name == name) { owner_d3d[i].n++; return; }
     if (owner_d3d_n < OWNER_D3D) { owner_d3d[owner_d3d_n].name = name; owner_d3d[owner_d3d_n].n = 1; owner_d3d_n++; } else owner_d3d_over++;
 }
-int xv_scene_thread_no_yield(void) { return overlap && xv_scene_thread_on_helper(); }
+static int gameplay_active(void) { uint32_t gg = X_M32(0x2F8CA0u); return gg && X_M8(gg) && X_M8(gg + 1u); }   /* game_globals: loaded, active */
+int xv_scene_thread_no_yield(void) { return in_flight_overlapped && xv_scene_thread_on_helper(); }
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { suppressed_yields++; if (blocking) { suppressed_waits++; suppressed_eip = eip; } }
 static void overlap_report(void)
 {
@@ -83,7 +84,7 @@ static void join(unsigned *counter)
      * scheduler between polls so those fibers run. */
     while (sceKernelPollSema(done, 1) < 0) xk_sleep_us(100);
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
-    in_flight = 0; depth = 0; (*counter)++;
+    in_flight = 0; in_flight_overlapped = 0; depth = 0; (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
 }
 void xv_scene_thread_join(void) { if (enabled > 0 && overlap) join(&joins_present); }
@@ -124,9 +125,10 @@ int xv_scene_thread_run(void *context)
     ctx = *c; scene_guest = xk_cur;
     xv_scene_owner_alias = sceKernelGetThreadId();
     uint64_t t0 = xk_os_monotonic_us();
-    if (overlap) { uint32_t top = scene_stack + SCENE_STACK_BYTES - 64u; for (unsigned i = 0; i < 4; ++i) X_W32(top + 4u * i) = X_M32(c->r[4] + 4u * i); ctx.r[4] = top; }   /* body frame on the private stack: return address + 8-byte argument copied */
+    int ov = overlap && gameplay_active(); in_flight_overlapped = ov;
+    if (ov) { uint32_t top = scene_stack + SCENE_STACK_BYTES - 64u; for (unsigned i = 0; i < 4; ++i) X_W32(top + 4u * i) = X_M32(c->r[4] + 4u * i); ctx.r[4] = top; }   /* body frame on the private stack: return address + 8-byte argument copied */
     sceKernelSignalSema(go, 1);
-    if (overlap) { in_flight = 1; overlaps++; dispatched++; c->r[4] += 12; return 1; }   /* the body's `ret 8`: the owner continues */
+    if (ov) { in_flight = 1; overlaps++; dispatched++; c->r[4] += 12; return 1; }   /* the body's `ret 8`: the owner continues */
     sceKernelWaitSema(done, 1, NULL);
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     *c = ctx;
@@ -170,7 +172,7 @@ int xv_scene_thread_active(const void *guest_thread) { return helper_valid && __
  * flight (backpressure). The owner-side D3D census lists the HLE calls made outside the scene. */
 #define SCENE_STACK_BYTES (256u * 1024u)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
-static int overlap; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
+static int overlap, in_flight_overlapped; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -180,7 +182,8 @@ void xv_scene_thread_d3d_call(const char *name)
     for (unsigned i = 0; i < owner_d3d_n; ++i) if (owner_d3d[i].name == name) { owner_d3d[i].n++; return; }
     if (owner_d3d_n < OWNER_D3D) { owner_d3d[owner_d3d_n].name = name; owner_d3d[owner_d3d_n].n = 1; owner_d3d_n++; } else owner_d3d_over++;
 }
-int xv_scene_thread_no_yield(void) { return overlap && xv_scene_thread_on_helper(); }
+static int gameplay_active(void) { uint32_t gg = X_M32(0x2F8CA0u); return gg && X_M8(gg) && X_M8(gg + 1u); }   /* game_globals: loaded, active */
+int xv_scene_thread_no_yield(void) { return in_flight_overlapped && xv_scene_thread_on_helper(); }
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { suppressed_yields++; if (blocking) { suppressed_waits++; suppressed_eip = eip; } }
 static void overlap_report(void)
 {
@@ -202,7 +205,7 @@ static void join(unsigned *counter)
     /* see the Vita port: poll and park in the guest scheduler so the other fibers run while the owner waits */
     while (sem_trywait(&done) < 0) xk_sleep_us(100);
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
-    in_flight = 0; __atomic_store_n(&depth, 0, __ATOMIC_RELEASE); (*counter)++;
+    in_flight = 0; in_flight_overlapped = 0; __atomic_store_n(&depth, 0, __ATOMIC_RELEASE); (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
 }
 void xv_scene_thread_join(void) { if (enabled > 0 && overlap) join(&joins_present); }
@@ -248,9 +251,10 @@ int xv_scene_thread_run(void *context)
     owner_alias = pthread_self();
     __atomic_store_n(&depth, 1, __ATOMIC_RELEASE);
     uint64_t t0 = xk_os_monotonic_us();
-    if (overlap) { uint32_t top = scene_stack + SCENE_STACK_BYTES - 64u; for (unsigned i = 0; i < 4; ++i) X_W32(top + 4u * i) = X_M32(c->r[4] + 4u * i); ctx.r[4] = top; }   /* body frame on the private stack: return address + 8-byte argument copied */
+    int ov = overlap && gameplay_active(); in_flight_overlapped = ov;
+    if (ov) { uint32_t top = scene_stack + SCENE_STACK_BYTES - 64u; for (unsigned i = 0; i < 4; ++i) X_W32(top + 4u * i) = X_M32(c->r[4] + 4u * i); ctx.r[4] = top; }   /* body frame on the private stack: return address + 8-byte argument copied */
     sem_post(&go);
-    if (overlap) { in_flight = 1; overlaps++; dispatched++; c->r[4] += 12; return 1; }   /* the body's `ret 8`: the owner continues */
+    if (ov) { in_flight = 1; overlaps++; dispatched++; c->r[4] += 12; return 1; }   /* the body's `ret 8`: the owner continues */
     while (sem_wait(&done) < 0 && errno == EINTR) {}
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     *c = ctx;
