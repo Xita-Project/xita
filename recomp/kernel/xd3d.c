@@ -109,8 +109,10 @@ const float (*xd3d_current_attributes(void))[4] { return g_im_cur; }
 static struct { const char *name; unsigned n; } g_hist[XD3D_HIST_MAX]; static unsigned g_hist_n;
 void xd3d_ds_check(const char *where, uint32_t eip);
 static const char xd3d_present_name[] = "D3DDevice_Present";   /* identity-compared in xd3d_count */
+const char *xv_hle_cur_name;   /* set by every D3D HLE entry, read by xv_call's timing (XV_HLE_TIMING) */
 static inline void xd3d_count(const char *name)
 {
+    xv_hle_cur_name = name;
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
     { extern void xv_scene_thread_d3d_call(const char *); extern void xv_scene_thread_join_owner(void);
       if (name != xd3d_present_name) xv_scene_thread_join_owner();   /* overlap: an owner-side D3D call waits for the scene in flight (GXM is single-threaded) - except Present, whose policy below decides (mode 2 defers the device present to the join; joining here made mode 2 behave as mode 1 on the Vita, perf99 m2a) */
@@ -570,10 +572,44 @@ int xd3d_benchmark_view(float view[6])
 }
 
 /* Present / Swap: fire callbacks, count the frame */
+/* XV_HLE_TIMING=1: wall time inside each HLE function (all threads; on the helper this is the scene's D3D recording
+ * cost). Key: the call site's name literal, cached pointer -> slot, merged by strcmp on first sight. [hle-time]. */
+int xv_hle_timing;   /* 0 until the first Present reads XV_HLE_TIMING */
+#define HLE_T_MAX 192
+static struct { const char *name; uint64_t us; unsigned n; } hle_t[HLE_T_MAX]; static unsigned hle_t_n;
+static struct { const char *p; unsigned slot; } hle_t_cache[1024];
+void xv_hle_time_add(const char *name, uint64_t us)
+{
+    unsigned h = (unsigned)(((uintptr_t)name >> 3) * 2654435761u) & 1023u;
+    unsigned slot;
+    if (hle_t_cache[h].p == name) slot = hle_t_cache[h].slot;
+    else {
+        for (slot = 0; slot < hle_t_n; ++slot) if (strcmp(hle_t[slot].name, name) == 0) break;
+        if (slot == hle_t_n) { if (hle_t_n >= HLE_T_MAX) return; hle_t[hle_t_n++].name = name; }
+        hle_t_cache[h].p = name; hle_t_cache[h].slot = slot;
+    }
+    hle_t[slot].us += us; hle_t[slot].n++;
+}
+void xv_hle_time_report(unsigned frames)
+{
+    if (xv_hle_timing <= 0 || !frames || !hle_t_n) return;
+    char line[400]; int ln = snprintf(line, sizeof line, "[hle-time] %u frames (ms/frame, calls/frame; top by time):", frames);
+    for (unsigned k = 0; k < 18 && k < hle_t_n; ++k) {
+        unsigned best = k; for (unsigned i = k + 1; i < hle_t_n; ++i) if (hle_t[i].us > hle_t[best].us) best = i;
+        if (best != k) { __typeof__(hle_t[0]) t = hle_t[k]; hle_t[k] = hle_t[best]; hle_t[best] = t; for (unsigned j = 0; j < 1024; ++j) { if (hle_t_cache[j].slot == k) hle_t_cache[j].slot = best; else if (hle_t_cache[j].slot == best) hle_t_cache[j].slot = k; } }
+        if (!hle_t[k].us) break;
+        if (ln > 320) { XK_LOG("%s\n", line); ln = snprintf(line, sizeof line, "[hle-time]  "); }
+        const char *nm = hle_t[k].name; if (strncmp(nm, "xv_hle_", 7) == 0) nm += 7;
+        ln += snprintf(line + ln, sizeof line - ln, " %s %.2f (%u)", nm, (double)hle_t[k].us / frames / 1000.0, hle_t[k].n / frames);
+    }
+    XK_LOG("%s\n", line);
+    for (unsigned i = 0; i < hle_t_n; ++i) { hle_t[i].us = 0; hle_t[i].n = 0; }
+}
+static void hle_timing_init(void) { static int done; if (!done) { done = 1; const char *e = getenv("XV_HLE_TIMING"); xv_hle_timing = e ? atoi(e) : 0; if (xv_hle_timing) XK_LOG("[hle-time] timing on (%s)\n", e); } }
 static unsigned g_present_deferred;
 void xd3d_present_flush(void) { if (g_present_deferred) { unsigned f = g_present_deferred; g_present_deferred = 0; xd3d_r_present(f, 0); } }   /* overlap mode 2: at the join */
 void xv_hle_D3DDevice_Present(xctx *c)
-{ XD3D_COUNT(xd3d_present_name);
+{ XD3D_COUNT(xd3d_present_name); hle_timing_init();
     int defer_ = 0;
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
     { extern int xv_scene_thread_present_policy(void); extern void xv_scene_thread_join(void); int pol_ = xv_scene_thread_present_policy();

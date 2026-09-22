@@ -183,7 +183,23 @@ static void proxy_service(void)
     proxy.result = xk_wait(proxy.objs, proxy.n, proxy.wait_all, 0, proxy.timeout); proxy_waits++;
     __atomic_store_n(&proxy_pending, 0, __ATOMIC_RELEASE); sceKernelSignalSema(proxy_done, 1);
 }
-void xv_scene_thread_service(void) { if (enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }   /* owner service point (xv_preempt) */
+/* The proxy fiber: a kernel-internal guest thread (like the vblank thread) that executes the helper's proxied kernel
+ * calls and waits AS ITSELF, so a call that blocks parks this fiber, not the owner's: the owner's tick keeps running
+ * and can signal whatever the blocking call waits for. Lock identity: locks the scene takes belong to this fiber. */
+static xk_thread *proxy_fiber;
+static void proxy_fiber_main(xctx *c, void *arg)
+{
+    (void)c; (void)arg;
+    for (;;) { if (__atomic_load_n(&proxy_call_fn, __ATOMIC_ACQUIRE) || __atomic_load_n(&proxy_pending, __ATOMIC_ACQUIRE)) proxy_service(); else xk_sleep_us(50); }
+}
+static void proxy_fiber_start(void)
+{
+    if (proxy_fiber) return;
+    extern xk_thread *xk_thread_create_host(void (*)(xctx *, void *), void *);
+    proxy_fiber = xk_thread_create_host(proxy_fiber_main, NULL);
+    XK_LOG("[scene-thread] proxy fiber %s\n", proxy_fiber ? "started" : "FAILED (proxied calls will run on the owner)");
+}
+void xv_scene_thread_service(void) { }   /* proxied calls run on the proxy fiber (proxy_fiber_main), never on the owner's fiber: a blocking one (a critical section held by a streaming thread that waits for the owner's tick) deadlocked the owner (Vita perf112 17:14) */   /* owner service point (xv_preempt) */
 static uint64_t stuck_logged_at;
 static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: log the helper's guest state once (a poor man's backtrace: return-address candidates on its stack) and let the render view's watchdog restore the live mapping */
 {
@@ -203,7 +219,7 @@ static void join(unsigned *counter)
     /* The owner is a guest fiber holding the single runner: a blocking host wait here starves the streaming and sound
      * fibers the scene may be waiting on (lockstep runs deadlocked at the a10 load). Poll, and park in the guest
      * scheduler between polls so those fibers run. */
-    while (sceKernelPollSema(done, 1) < 0) { proxy_service(); xk_sleep_us(200); stuck_check(t0); }   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
+    while (sceKernelPollSema(done, 1) < 0) { xk_sleep_us(200); stuck_check(t0); }   /* the proxy fiber services the helper's kernel calls; the owner only parks so the scheduler runs it and the streaming fibers */   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; depth = 0; (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -242,6 +258,7 @@ static void configure(void)
     if (helper < 0 || sceKernelStartThread(helper, 0, NULL) < 0) { XK_LOG("[scene-thread] helper thread failed; disabled\n"); enabled = 0; return; }
     xv_scene_helper_thread = helper;
     XK_LOG("[scene-thread] process-start enabled: BCB30 runs on helper thread %08x (core %d), owner waits\n", (unsigned)helper, core);
+    proxy_fiber_start();
 }
 int xv_scene_thread_run(void *context)
 {
@@ -272,7 +289,7 @@ void xv_scene_thread_report(unsigned frames)
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
-    scene_census_report(); overlap_report(); proxy_report(); phase_report(frames);
+    scene_census_report(); overlap_report(); proxy_report(); phase_report(frames); { extern void xv_hle_time_report(unsigned) __attribute__((weak)); if (xv_hle_time_report) xv_hle_time_report(frames); }
 }
 #elif defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
 /* Host (Linux) version of the same mechanism: a pthread helper and two POSIX semaphores. Host fibers are
@@ -396,7 +413,23 @@ static void proxy_service(void)
     proxy.result = xk_wait(proxy.objs, proxy.n, proxy.wait_all, 0, proxy.timeout); proxy_waits++;
     __atomic_store_n(&proxy_pending, 0, __ATOMIC_RELEASE); sem_post(&proxy_done);
 }
-void xv_scene_thread_service(void) { if (enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }
+/* The proxy fiber: a kernel-internal guest thread (like the vblank thread) that executes the helper's proxied kernel
+ * calls and waits AS ITSELF, so a call that blocks parks this fiber, not the owner's: the owner's tick keeps running
+ * and can signal whatever the blocking call waits for. Lock identity: locks the scene takes belong to this fiber. */
+static xk_thread *proxy_fiber;
+static void proxy_fiber_main(xctx *c, void *arg)
+{
+    (void)c; (void)arg;
+    for (;;) { if (__atomic_load_n(&proxy_call_fn, __ATOMIC_ACQUIRE) || __atomic_load_n(&proxy_pending, __ATOMIC_ACQUIRE)) proxy_service(); else xk_sleep_us(50); }
+}
+static void proxy_fiber_start(void)
+{
+    if (proxy_fiber) return;
+    extern xk_thread *xk_thread_create_host(void (*)(xctx *, void *), void *);
+    proxy_fiber = xk_thread_create_host(proxy_fiber_main, NULL);
+    XK_LOG("[scene-thread] proxy fiber %s\n", proxy_fiber ? "started" : "FAILED (proxied calls will run on the owner)");
+}
+void xv_scene_thread_service(void) { }   /* proxied calls run on the proxy fiber (proxy_fiber_main), never on the owner's fiber: a blocking one (a critical section held by a streaming thread that waits for the owner's tick) deadlocked the owner (Vita perf112 17:14) */
 static uint64_t stuck_logged_at;
 static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: log the helper's guest state once (a poor man's backtrace: return-address candidates on its stack) and let the render view's watchdog restore the live mapping */
 {
@@ -414,7 +447,7 @@ static void join(unsigned *counter)
     if (!in_flight) return;
     uint64_t t0 = xk_os_monotonic_us();
     /* see the Vita port: poll and park in the guest scheduler so the other fibers run while the owner waits */
-    while (sem_trywait(&done) < 0) { proxy_service(); xk_sleep_us(200); stuck_check(t0); }
+    while (sem_trywait(&done) < 0) { xk_sleep_us(200); stuck_check(t0); }
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; __atomic_store_n(&depth, 0, __ATOMIC_RELEASE); (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -451,6 +484,7 @@ static void configure(void)
     if (sem_init(&go, 0, 0) || sem_init(&done, 0, 0) || sem_init(&proxy_done, 0, 0) || pthread_create(&helper, NULL, helper_main, NULL)) { XK_LOG("[scene-thread] helper thread failed; disabled\n"); enabled = 0; return; }
     helper_valid = 1;
     XK_LOG("[scene-thread] process-start enabled (host pthread): BCB30 runs on a helper thread, owner waits\n");
+    proxy_fiber_start();
 }
 int xv_scene_thread_run(void *context)
 {
@@ -481,7 +515,7 @@ void xv_scene_thread_report(unsigned frames)
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
-    scene_census_report(); overlap_report(); proxy_report(); phase_report(frames);
+    scene_census_report(); overlap_report(); proxy_report(); phase_report(frames); { extern void xv_hle_time_report(unsigned) __attribute__((weak)); if (xv_hle_time_report) xv_hle_time_report(frames); }
 }
 #else
 int xv_scene_thread_active(const void *guest_thread) { (void)guest_thread; return 0; }

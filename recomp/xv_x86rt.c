@@ -226,7 +226,12 @@ dispatch_resolved:
     if (is_hle) hle_dispatch_hle_calls++; else hle_dispatch_guest_calls++;
 #endif
     if (traced && is_hle) xv_cur_fn = 0x80000000u | target;
-    fn(c);
+    {   /* XV_HLE_TIMING=1: time inside vtable-dispatched HLE (the scene's D3D calls come through here, not through the
+         * static XV_HLE_CALL macro); the callee's XD3D_COUNT names it (xd3d.c sets xv_hle_cur_name) */
+        extern int xv_hle_timing; extern const char *xv_hle_cur_name; extern void xv_hle_time_add(const char *, uint64_t); extern uint64_t xk_os_monotonic_us(void);
+        if (is_hle && xv_hle_timing) { uint64_t t0_ = xk_os_monotonic_us(); xv_hle_cur_name = NULL; fn(c); const char *nm_ = xv_hle_cur_name; xv_hle_time_add(nm_ ? nm_ : "indirect?", xk_os_monotonic_us() - t0_); }
+        else fn(c);
+    }
     /* Generated indirect calls and callback dispatch return here. Their callee
      * may have changed the sampler marker; subsequent caller work belongs to
      * the caller, just as XV_FN_BACK handles direct generated calls. */
