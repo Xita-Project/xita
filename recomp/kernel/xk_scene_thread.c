@@ -175,6 +175,18 @@ static void proxy_service(void)
     __atomic_store_n(&proxy_pending, 0, __ATOMIC_RELEASE); sceKernelSignalSema(proxy_done, 1);
 }
 void xv_scene_thread_service(void) { if (enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }   /* owner service point (xv_preempt) */
+static uint64_t stuck_logged_at;
+static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: log the helper's guest state once (a poor man's backtrace: return-address candidates on its stack) and let the render view's watchdog restore the live mapping */
+{
+    uint64_t now = xk_os_monotonic_us(); if (now - t0 < 3000000u || stuck_logged_at == t0) return;
+    stuck_logged_at = t0;
+    XK_LOG("[scene-thread] STUCK %llu ms: helper ctx eax %08X ecx %08X edx %08X ebx %08X esp %08X ebp %08X esi %08X edi %08X preempt %d proxy fn %p pending %d\n", (unsigned long long)((now - t0) / 1000u),
+           ctx.r[0], ctx.r[1], ctx.r[2], ctx.r[3], ctx.r[4], ctx.r[5], ctx.r[6], ctx.r[7], (int)ctx.preempt, (void *)proxy_call_fn, (int)proxy_pending);
+    { char line[400]; int ln = snprintf(line, sizeof line, "[scene-thread]   stack code words:"); uint32_t sp = ctx.r[4];
+      for (unsigned i = 0; i < 256 && ln < 360; ++i) { uint32_t w = X_M32(sp + 4u * i); if (w >= 0x10000u && w < 0x3B5000u) ln += snprintf(line + ln, sizeof line - ln, " %X", w); }
+      XK_LOG("%s\n", line); }
+    { extern void xv_render_view_watchdog(void) __attribute__((weak)); if (xv_render_view_watchdog) xv_render_view_watchdog(); }
+}
 static void join(unsigned *counter)
 {
     if (!in_flight) return;
@@ -182,7 +194,7 @@ static void join(unsigned *counter)
     /* The owner is a guest fiber holding the single runner: a blocking host wait here starves the streaming and sound
      * fibers the scene may be waiting on (lockstep runs deadlocked at the a10 load). Poll, and park in the guest
      * scheduler between polls so those fibers run. */
-    while (sceKernelPollSema(done, 1) < 0) { proxy_service(); xk_sleep_us(200); }   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
+    while (sceKernelPollSema(done, 1) < 0) { proxy_service(); xk_sleep_us(200); stuck_check(t0); }   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; depth = 0; (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -374,12 +386,24 @@ static void proxy_service(void)
     __atomic_store_n(&proxy_pending, 0, __ATOMIC_RELEASE); sem_post(&proxy_done);
 }
 void xv_scene_thread_service(void) { if (enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }
+static uint64_t stuck_logged_at;
+static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: log the helper's guest state once (a poor man's backtrace: return-address candidates on its stack) and let the render view's watchdog restore the live mapping */
+{
+    uint64_t now = xk_os_monotonic_us(); if (now - t0 < 3000000u || stuck_logged_at == t0) return;
+    stuck_logged_at = t0;
+    XK_LOG("[scene-thread] STUCK %llu ms: helper ctx eax %08X ecx %08X edx %08X ebx %08X esp %08X ebp %08X esi %08X edi %08X preempt %d proxy fn %p pending %d\n", (unsigned long long)((now - t0) / 1000u),
+           ctx.r[0], ctx.r[1], ctx.r[2], ctx.r[3], ctx.r[4], ctx.r[5], ctx.r[6], ctx.r[7], (int)ctx.preempt, (void *)proxy_call_fn, (int)proxy_pending);
+    { char line[400]; int ln = snprintf(line, sizeof line, "[scene-thread]   stack code words:"); uint32_t sp = ctx.r[4];
+      for (unsigned i = 0; i < 256 && ln < 360; ++i) { uint32_t w = X_M32(sp + 4u * i); if (w >= 0x10000u && w < 0x3B5000u) ln += snprintf(line + ln, sizeof line - ln, " %X", w); }
+      XK_LOG("%s\n", line); }
+    { extern void xv_render_view_watchdog(void) __attribute__((weak)); if (xv_render_view_watchdog) xv_render_view_watchdog(); }
+}
 static void join(unsigned *counter)
 {
     if (!in_flight) return;
     uint64_t t0 = xk_os_monotonic_us();
     /* see the Vita port: poll and park in the guest scheduler so the other fibers run while the owner waits */
-    while (sem_trywait(&done) < 0) { proxy_service(); xk_sleep_us(200); }
+    while (sem_trywait(&done) < 0) { proxy_service(); xk_sleep_us(200); stuck_check(t0); }
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; __atomic_store_n(&depth, 0, __ATOMIC_RELEASE); (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */

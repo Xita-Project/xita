@@ -386,7 +386,11 @@ void xk_dump_threads(void)
     static const char *tn[] = { "none", "file", "dir", "event", "mutant", "sem", "thread", "symlink", "timer" };
     for (xk_thread *t = g_threads; t; t = t->next) {
         char w[256] = ""; int n = 0;
-        for (int i = 0; i < t->wait_n; ++i) n += snprintf(w + n, sizeof w - n, "%s%s%s@%08X", i ? "," : "", tn[t->wait_objs[i]->type], t->wait_objs[i]->type == XO_EVENT ? (t->wait_objs[i]->u.event.signaled ? "(S)" : "(-)") : "", t->wait_objs[i]->guest);
+        for (int i = 0; i < t->wait_n; ++i) {
+            xk_obj *o = t->wait_objs[i];
+            n += snprintf(w + n, sizeof w - n, "%s%s%s@%08X", i ? "," : "", tn[o->type], o->type == XO_EVENT ? (o->u.event.signaled ? "(S)" : "(-)") : "", o->guest);
+            if (o->type == XO_MUTANT) n += snprintf(w + n, sizeof w - n, "/obj %p owner t%d cnt %d", (void *)o, o->u.mutant.owner ? o->u.mutant.owner->id : -1, o->u.mutant.count);   /* who holds it (overlap deadlock diagnosis, perf104/105 hangs) */
+        }
         XK_LOG("  thread %d state %d start %08X eip~%08X wait[%s]%s%s deadline %+lld ms\n", t->id, t->state, t->start_routine, t->ctx.eip_hint, w,
                t->wait_all ? " all" : "", t->wait_n == 0 && t->state == 1 ? " (sleep)" : "", t->wait_until ? (long long)((int64_t)t->wait_until - (int64_t)now100()) / 10000 : 0LL);
         if (t->state == 0) {

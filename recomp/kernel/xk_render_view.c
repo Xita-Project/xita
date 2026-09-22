@@ -177,10 +177,11 @@ void xv_render_view_configure(void)
         const char *e = getenv("XV_RENDER_VIEW_ALL"); int all = e ? atoi(e) : 0; all_mode = all;
         if (all > 0) {
             unsigned n = phys_limit / XK_PAGE; if (n > L.phys_pages) n = L.phys_pages;
+            if (all == 3) n = 0;   /* object pool only: listed at the first gameplay enter (list_object_pool), so kernel-written completion words elsewhere stay live (perf104/105 hung: the scene polled a shadowed word) */
             for (unsigned i = 0; i < n; ++i) learn_page(i);
             if (all >= 2 && image_view) for (unsigned i = 0; i < L.image_pages; ++i) learn_page((L.image_off >> 12) + i);
             { const char *d = getenv("XV_RENDER_VIEW_DMA"); dma_mode = d ? atoi(d) : 0; }
-            slots_contiguous = 1; for (unsigned i = 0; i < slots_used; ++i) if (slot_page[i] != i) { slots_contiguous = 0; break; }
+            slots_contiguous = 1; for (unsigned i = 1; i < slots_used; ++i) if (slot_page[i] != slot_page[0] + i) { slots_contiguous = 0; break; }
             if (dma_mode) XK_LOG("[render-view] DMA copy-in: %s\n", slots_contiguous ? "one transfer for the contiguous slot range" : "slots not contiguous, per-page copies");
             if (all >= 2) { learn_done = learn_passes; learn_armed = 0; }   /* 1: the learning passes still list the image .data pages the tick changes */
             XK_LOG("[render-view] all mode %d: %u shadow slots (%u overflow), %u image pages listed; learning %s\n", all, slots_used, slots_overflow, img_listed_n, all >= 2 ? "skipped" : "image pages only");
@@ -249,10 +250,29 @@ static void restore_in_place(void)
         if (VIEW_TABLE[retargets[i].vp] == retargets[i].view) VIEW_TABLE[retargets[i].vp] = thread_mode ? g_xpt[retargets[i].vp] : retargets[i].live;   /* remapped mid-scene: leave it */
     retargets_last = retargets_n; retargets_n = 0;
 }
+/* All mode 3: the object header table and the physical page range spanned by the live objects' data (Halo allocates
+ * them from one pool), read through the LIVE table (this runs before the view is bound). Once per map (table changes). */
+static uint32_t pool_table_seen, pool_lo = 0xFFFFFFFFu, pool_hi;
+static void list_object_pool(void)
+{
+    uint32_t table = X_IMG32(0x2FC6ACu); if (!table) return;
+    uint32_t base = X_M32(table + 0x34u); unsigned max = X_M16(table + 0x20u); if (!base || !max || max > 4096u) return;
+    if (table != pool_table_seen) { pool_table_seen = table; pool_lo = 0xFFFFFFFFu; pool_hi = 0; }
+    uint32_t lo = pool_lo, hi = pool_hi; unsigned live = 0;
+    for (unsigned i = 0; i < max; ++i) { uint32_t e = base + i * 12u; if (!X_M16(e) || !X_M32(e + 8u)) continue; uint32_t o = X_M32(e + 8u); if (o < lo) lo = o; if (o + 0x1000u > hi) hi = o + 0x1000u; live++; }
+    if (!live || (lo == pool_lo && hi == pool_hi)) return;   /* objects spawn as the level runs: the range grows, the listing follows it (every enter) */
+    unsigned before = slots_used;
+    for (uint32_t va = table & ~0xFFFu; va < base + max * 12u; va += XK_PAGE) { uint32_t off = g_xpt[va >> 12]; if (off < phys_limit) learn_page(off >> 12); }
+    for (uint32_t va = lo & ~0xFFFu; va < hi; va += XK_PAGE) { uint32_t off = g_xpt[va >> 12]; if (off < phys_limit) learn_page(off >> 12); }
+    pool_lo = lo; pool_hi = hi;
+    slots_contiguous = 1; for (unsigned i = 1; i < slots_used; ++i) if (slot_page[i] != slot_page[0] + i) { slots_contiguous = 0; break; }
+    XK_LOG("[render-view] object pool: table %08X, %u live objects, data %08X..%08X: +%u slots (%u, %s)\n", table, live, lo, hi, slots_used - before, slots_used, slots_contiguous ? "contiguous" : "not contiguous");
+}
 void xv_render_view_enter(unsigned *scope, void *context)
 {
     (void)context;
     uint64_t t0 = xk_os_monotonic_us();
+    if (all_mode == 3 && !bound) list_object_pool();
     if (!learn_armed && last_leave_us) {
         if (t0 - last_leave_us > learn_gap_us) { if (++gap_frames >= 30) { learn_armed = 1; XK_LOG("[render-view] gameplay detected (tick gap > %u us for 30 frames): learning armed\n", learn_gap_us); } }
         else gap_frames = 0;
