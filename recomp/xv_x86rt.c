@@ -114,8 +114,10 @@ void xv_trap(xctx *c, uint32_t eip)
     }
 }
 
+int xd3d_virtual_clock(void) __attribute__((weak)); uint64_t xd3d_virtual_us(void) __attribute__((weak));
 uint64_t x_rdtsc(void)
 {
+    if (xd3d_virtual_clock && xd3d_virtual_clock()) return xd3d_virtual_us() * 733333333ull / 1000000ull;   /* XV_LOCKSTEP=2: virtual cycles at the advertised 733 MHz */
 #if defined(__vita__)
     extern uint64_t sceKernelGetProcessTimeWide(void);
     return sceKernelGetProcessTimeWide() * 733u;        /* ~733 MHz Pentium III */

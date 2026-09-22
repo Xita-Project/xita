@@ -120,14 +120,18 @@ static inline void xd3d_count(const char *name)
     if (g_hist_n < XD3D_HIST_MAX) { g_hist[g_hist_n].name = name; g_hist[g_hist_n].n = 1; g_hist_n++; }
 }
 static uint64_t g_draw_hash = 1469598103934665603ull; static int g_draw_hash_on = -1; static FILE *g_draw_hash_out; static unsigned g_draw_hash_frame;
+#include "xd3d_hash_argc.h"
+static FILE *g_draw_trace; static int g_draw_trace_frame = -2;   /* XV_DRAW_HASH_TRACE=<frame> or -1 (all): "<hashfile>.trace", one handle */
 static inline void xd3d_hash_call(const char *name, xctx *c)   /* XV_DRAW_HASH=<file>: per-frame hash of the D3D call stream (scene-output oracle for host comparisons) */
 {
     if (g_draw_hash_on < 0) { const char *e = getenv("XV_DRAW_HASH"); g_draw_hash_on = e != NULL; if (e) g_draw_hash_out = fopen(e, "w"); }
     if (!g_draw_hash_on) return;
-    { static int tf = -2; static FILE *tt; if (tf == -2) { const char *e = getenv("XV_DRAW_HASH_TRACE"); tf = e ? atoi(e) : -1; if (e) { const char *hf = getenv("XV_DRAW_HASH"); char nm[512]; snprintf(nm, sizeof nm, "%s.trace", hf ? hf : "draw-hash"); tt = fopen(nm, "w"); } }
-      if (tt && (int)g_draw_hash_frame + 1 == tf) { fprintf(tt, "%s", name); for (unsigned i = 1; i <= 8; ++i) fprintf(tt, " %08X", X_M32(c->r[4] + 4u * i)); fprintf(tt, "\n"); } }
+    if (g_draw_trace_frame == -2) { const char *e = getenv("XV_DRAW_HASH_TRACE"); g_draw_trace_frame = e ? atoi(e) : -3; if (e) { const char *hf = getenv("XV_DRAW_HASH"); char nm[512]; snprintf(nm, sizeof nm, "%s.trace", hf ? hf : "draw-hash"); g_draw_trace = fopen(nm, "w"); } }
+    if (name[0] == 'I' || name[0] == 'D' && name[1] == 'i') return;   /* IDirectSound and DirectSound calls: owner-side audio, volumes depend on host timing */
+    unsigned argc = xd3d_hash_argc(name); if (argc > 8) argc = 8;
+    if (g_draw_trace && (g_draw_trace_frame == -1 || (int)g_draw_hash_frame + 1 == g_draw_trace_frame)) { fprintf(g_draw_trace, "%s", name); for (unsigned i = 1; i <= argc; ++i) fprintf(g_draw_trace, " %08X", X_M32(c->r[4] + 4u * i)); fprintf(g_draw_trace, "\n"); }
     uint64_t h = g_draw_hash; for (const char *p = name; *p; ++p) { h ^= (uint8_t)*p; h *= 1099511628211ull; }
-    for (unsigned i = 1; i <= 8; ++i) { uint32_t w = X_M32(c->r[4] + 4u * i); if (w >= 0x03D00000u && w < 0x04000000u) w = 0x03D00000u; h ^= w; h *= 1099511628211ull; }   /* kernel-object addresses (KERNEL_VA..64 MB) depend on host I/O timing: masked */
+    for (unsigned i = 1; i <= argc; ++i) { uint32_t w = X_M32(c->r[4] + 4u * i); if (w >= 0x03D00000u && w < 0x04000000u) w = 0x03D00000u; h ^= w; h *= 1099511628211ull; }   /* kernel-object addresses (KERNEL_VA..64 MB) depend on host I/O timing: masked */
     g_draw_hash = h;
 }
 #define XD3D_COUNT(nm) (xd3d_count(nm), xd3d_hash_call(nm, c))
@@ -385,7 +389,7 @@ void xv_hle_D3DDevice_BlockUntilVerticalBlank(xctx *c) { XD3D_COUNT("D3DDevice_B
  * (up to 16.7 ms per frame), so when the game thread yields from inside that loop we wake the vblank
  * thread early and let it run next (the callback must stay on that thread: running it inline on the
  * game thread deadlocked the map-list loader at the gametype screen). */
-static uint32_t g_vb_data; static unsigned g_vb_counter; static unsigned g_vb_kicks;
+static uint32_t g_vb_data; static unsigned g_vb_kicks;   /* g_vb_counter: above, with the virtual clock */
 static int xd3d_lockstep = -1;                 /* XV_LOCKSTEP=1: frame-locked clock + 30 fps cap (recording/replay) */
 static volatile unsigned g_vb_demand; static void lockstep_init(void);        /* lockstep: the game is in its vblank wait loop and needs one more */
 /* Lockstep: called at every cooperative preempt of a guest thread.  If the thread is spinning in Halo's
@@ -400,6 +404,12 @@ void xd3d_lockstep_preempt(xctx *c)
     if (ret > 0x11000u && ret < 0x3A0000u && X_M8(ret - 5u) == 0xE8u && (uint32_t)(ret + (int32_t)X_M32(ret - 4u)) == 0x000BB060u) g_vb_demand = 1;
 }
 static void lockstep_init(void) { if (xd3d_lockstep < 0) { const char *e = getenv("XV_LOCKSTEP"); xd3d_lockstep = e ? atoi(e) : 0; } }
+/* Virtual clock (XV_LOCKSTEP=2): guest-visible time advances 1/60 s per vblank fired, so two runs with the same
+ * inputs are identical down to UI fades and screen-space animation (host determinism oracle for the draw stream). */
+static unsigned g_vb_counter;
+int xd3d_virtual_clock(void) { lockstep_init(); return xd3d_lockstep >= 2; }
+uint64_t xd3d_virtual_us(void) { return 1000000ull + (uint64_t)g_vb_counter * 1000000ull / 60ull; }   /* starts at 1 s: a zero deadline means "none" in the scheduler */
+void xd3d_virtual_advance_100ns(uint64_t d) { unsigned n = (unsigned)((d / 10u + 16666u) / 16667u); g_vb_counter += n ? n : 1; }   /* scheduler idle: skip to the earliest deadline */
 static xk_thread *g_vb_thread;                 /* the 60 Hz vblank guest thread (kicked on demand) */
 #if defined(XV_SCENE_BUCKET1_DETAIL) && XV_SCENE_BUCKET1_DETAIL
 /* Owner-written, never reset by frame reporting. The scene observer samples
@@ -464,13 +474,14 @@ static void vblank_thread(xctx *c, void *arg)
          * xd3d_vblank_kick sets g_vb_demand): the game decides how many vblanks a frame takes, never the
          * host clock, so the count per frame depends only on game state.  200 ms without a Present (a
          * load) advances real time so timers keep moving. */
-        unsigned seen = g_dev.frame; uint64_t t_last = t0, extra = 0;
+        unsigned seen = g_dev.frame; uint64_t t_last = t0, extra = 0; unsigned idle_spins = 0;   /* lockstep 2: virtual time advances after 200 vblank-fiber spins without a Present (loads, boot waits) */
         for (;;) {
             uint64_t now = xk_os_monotonic_us();
             if (g_vb_demand) { g_vb_demand = 0; extra++; }
             uint64_t due = (uint64_t)g_dev.frame * 2u + 2u + extra;
-            if (g_dev.frame != seen) { seen = g_dev.frame; t_last = now; }
-            else if (now - t_last > 200000u && xd3d_lockstep < 2) { extra++; due++; t_last = now; }   /* XV_LOCKSTEP=2: no real-time advance (deterministic loads for run comparisons) */
+            if (g_dev.frame != seen) { seen = g_dev.frame; t_last = now; idle_spins = 0; }
+            else if (xd3d_lockstep >= 2) { if (++idle_spins >= 200) { extra++; due++; idle_spins = 0; } }   /* XV_LOCKSTEP=2: no real-time advance; idle time is a deterministic spin count */
+            else if (now - t_last > 200000u) { extra++; due++; t_last = now; }
             if (fired >= due) { xk_yield(); continue; }               /* runs again at the game's next preempt */
             while (fired < due) { vblank_fire(c); fired++; }
         }
@@ -573,7 +584,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
         next = (next && now < next + 100000u) ? next + 33333u : now + 33333u;
     }
     g_dev.frame++;
-    if (g_draw_hash_out) { fprintf(g_draw_hash_out, "%u %016llx\n", g_dev.frame, (unsigned long long)g_draw_hash); g_draw_hash = 1469598103934665603ull; g_draw_hash_frame = g_dev.frame; if (g_dev.frame % 60 == 0) fflush(g_draw_hash_out); }
+    if (g_draw_hash_out) { uint32_t gg_ = X_M32(0x2F8CA0); fprintf(g_draw_hash_out, "%u %08X %016llx\n", g_dev.frame, gg_ ? X_M32(gg_ + 0xC) : 0, (unsigned long long)g_draw_hash);   /* frame, game tick, hash: compare runs at equal ticks */ if (g_draw_trace) { fprintf(g_draw_trace, "# frame %u\n", g_dev.frame); fflush(g_draw_trace); } g_draw_hash = 1469598103934665603ull; g_draw_hash_frame = g_dev.frame; if (g_dev.frame % 60 == 0) fflush(g_draw_hash_out); }
 #ifdef XV_OWNER_PHASE
     xv_owner_phase_present(c);
 #endif

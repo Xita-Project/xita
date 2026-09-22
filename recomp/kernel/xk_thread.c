@@ -69,9 +69,11 @@ static void sync_guest(xk_obj *o)   /* mirror SignalState into the guest header 
 
 /* ---- time ------------------------------------------------------------------------------------ */
 static uint64_t g_boot_us;
-uint64_t xk_time_100ns(void) { return xk_os_time_100ns(); }
-uint64_t xk_uptime_100ns(void) { return (xk_os_monotonic_us() - g_boot_us) * 10; }
-uint32_t xk_tick_count(void) { return (uint32_t)((xk_os_monotonic_us() - g_boot_us) / 1000); }
+int xd3d_virtual_clock(void) __attribute__((weak)); uint64_t xd3d_virtual_us(void) __attribute__((weak));   /* xd3d.c: XV_LOCKSTEP=2 */
+static inline int vclock(void) { return xd3d_virtual_clock && xd3d_virtual_clock(); }
+uint64_t xk_time_100ns(void) { return vclock() ? 133000000000000000ull + xd3d_virtual_us() * 10 : xk_os_time_100ns(); }   /* virtual: a fixed 2022 epoch + virtual time */
+uint64_t xk_uptime_100ns(void) { return vclock() ? xd3d_virtual_us() * 10 : (xk_os_monotonic_us() - g_boot_us) * 10; }
+uint32_t xk_tick_count(void) { return vclock() ? (uint32_t)(xd3d_virtual_us() / 1000) : (uint32_t)((xk_os_monotonic_us() - g_boot_us) / 1000); }
 uint32_t xk_var_KeTickCount, xk_var_XboxHardwareInfo, xk_var_LaunchDataPage, xk_var_XboxKrnlVersion, xk_var_HalDiskCachePartitionCount;
 
 /* ---- threads ---------------------------------------------------------------------------------- */
@@ -354,7 +356,7 @@ void xk_yield(void)
     if (fast < 0) { const char *e=getenv("XV_FAST_YIELD"); fast=!e||atoi(e)!=0; }
     if (fast && me->state == 0) {
         xk_thread *next = pick_next(me);
-        if (next == me) { g_yield_same++; return; }
+        if (next == me) { g_yield_same++; { extern void xd3d_virtual_advance_100ns(uint64_t) __attribute__((weak)); if (vclock() && xd3d_virtual_advance_100ns) xd3d_virtual_advance_100ns(1000); } return; }   /* virtual clock: a lone poller advances time 100 us per yield */
         g_yield_next = next;
     }
     g_yield_handoffs++;
@@ -403,6 +405,7 @@ void xk_run_until_idle(void)
             uint64_t n = now100();
             if (earliest > n + 1000000) { static unsigned dumps; if (dumps++ < 6) { XK_LOG("scheduler idle for %llu ms:\n", (unsigned long long)(earliest - n) / 10000); xk_dump_threads(); } }
             if (earliest > n) {
+                { extern void xd3d_virtual_advance_100ns(uint64_t) __attribute__((weak)); if (vclock() && xd3d_virtual_advance_100ns) { xd3d_virtual_advance_100ns(earliest - n); continue; } }   /* virtual clock: idle time is skipped, not slept */
                 uint64_t us = (earliest - n) / 10 + 1;
                 uint64_t started = xk_os_monotonic_us();
                 xk_os_scheduler_wait(us);
@@ -576,7 +579,7 @@ void xk_KeDelayExecutionThread(xctx *c)
 void xk_KeStallExecutionProcessor(xctx *c) { xk_os_sleep_us(X_ARG(0)); X_RET(1); }
 void xk_KeQuerySystemTime(xctx *c) { LI64(X_ARG(0)) = xk_time_100ns(); X_RET(1); }
 void xk_KeQueryInterruptTime(xctx *c) { uint64_t t = xk_uptime_100ns(); c->r[0] = (uint32_t)t; c->r[2] = (uint32_t)(t >> 32); X_RET(0); }
-void xk_KeQueryPerformanceCounter(xctx *c) { uint64_t t = x_rdtsc(); c->r[0] = (uint32_t)t; c->r[2] = (uint32_t)(t >> 32); X_RET(0); }
+void xk_KeQueryPerformanceCounter(xctx *c) { uint64_t t = x_rdtsc(); c->r[0] = (uint32_t)t; c->r[2] = (uint32_t)(t >> 32); X_RET(0); }   /* x_rdtsc is virtual under XV_LOCKSTEP=2 (xv_x86rt.c) */
 void xk_KeQueryPerformanceFrequency(xctx *c) { c->r[0] = 733333333u; c->r[2] = 0; X_RET(0); }
 void xk_NtSetSystemTime(xctx *c) { c->r[0] = STATUS_SUCCESS; X_RET(2); }
 
