@@ -49,7 +49,7 @@ int xv_scene_thread_active(const void *guest_thread) { return depth && guest_thr
  * flight (backpressure). The owner-side D3D census lists the HLE calls made outside the scene. */
 #define SCENE_STACK_BYTES (256u * 1024u)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
-static int overlap, in_flight_overlapped; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
+static int overlap, in_flight_overlapped; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -79,7 +79,7 @@ static void overlap_report(void)
  * its own guest thread record (the scene *is* thread 8), stores the result and releases the helper. Other fibers run
  * while the owner is parked in the wait, so I/O completions the scene waits for still arrive (perf87: the first
  * loading-screen scene waited on an event the immediate-timeout answer never satisfied; the owner joined forever). */
-static struct { xk_obj **objs; int n, wait_all; const int64_t *timeout; uint32_t result; } proxy; static volatile int proxy_pending; static unsigned proxy_waits;
+static struct { xk_obj **objs; int n, wait_all; const int64_t *timeout; uint32_t result; } proxy; static volatile int proxy_pending;
 uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_t *timeout);
 static SceUID proxy_done = -1;
 int xv_scene_thread_on_helper(void) { return helper >= 0 && sceKernelGetThreadId() == helper; }
@@ -196,7 +196,7 @@ int xv_scene_thread_active(const void *guest_thread) { return helper_valid && __
  * flight (backpressure). The owner-side D3D census lists the HLE calls made outside the scene. */
 #define SCENE_STACK_BYTES (256u * 1024u)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
-static int overlap, in_flight_overlapped; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
+static int overlap, in_flight_overlapped; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -226,7 +226,7 @@ static void overlap_report(void)
  * its own guest thread record (the scene *is* thread 8), stores the result and releases the helper. Other fibers run
  * while the owner is parked in the wait, so I/O completions the scene waits for still arrive (perf87: the first
  * loading-screen scene waited on an event the immediate-timeout answer never satisfied; the owner joined forever). */
-static struct { xk_obj **objs; int n, wait_all; const int64_t *timeout; uint32_t result; } proxy; static volatile int proxy_pending; static unsigned proxy_waits;
+static struct { xk_obj **objs; int n, wait_all; const int64_t *timeout; uint32_t result; } proxy; static volatile int proxy_pending;
 uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_t *timeout);
 static sem_t proxy_done;
 int xv_scene_thread_on_helper(void) { return helper_valid && pthread_equal(pthread_self(), helper); }
