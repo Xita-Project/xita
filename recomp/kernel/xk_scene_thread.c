@@ -190,7 +190,9 @@ static xk_thread *proxy_fiber;
 static void proxy_fiber_main(xctx *c, void *arg)
 {
     (void)c; (void)arg;
-    for (;;) { if (__atomic_load_n(&proxy_call_fn, __ATOMIC_ACQUIRE) || __atomic_load_n(&proxy_pending, __ATOMIC_ACQUIRE)) proxy_service(); else xk_sleep_us(50); }
+    /* 2 ms, not 50 us: a fiber whose sleep deadline is always the nearest starves every other sleeper - the scheduler kept
+     * picking it and the owner sat 40 ms overdue (Vita perf113 froze at the menu in a 6,000/s yield storm) */
+    for (;;) { if (__atomic_load_n(&proxy_call_fn, __ATOMIC_ACQUIRE) || __atomic_load_n(&proxy_pending, __ATOMIC_ACQUIRE)) proxy_service(); else xk_sleep_us(2000); }
 }
 static void proxy_fiber_start(void)
 {
@@ -420,7 +422,9 @@ static xk_thread *proxy_fiber;
 static void proxy_fiber_main(xctx *c, void *arg)
 {
     (void)c; (void)arg;
-    for (;;) { if (__atomic_load_n(&proxy_call_fn, __ATOMIC_ACQUIRE) || __atomic_load_n(&proxy_pending, __ATOMIC_ACQUIRE)) proxy_service(); else xk_sleep_us(50); }
+    /* 2 ms, not 50 us: a fiber whose sleep deadline is always the nearest starves every other sleeper - the scheduler kept
+     * picking it and the owner sat 40 ms overdue (Vita perf113 froze at the menu in a 6,000/s yield storm) */
+    for (;;) { if (__atomic_load_n(&proxy_call_fn, __ATOMIC_ACQUIRE) || __atomic_load_n(&proxy_pending, __ATOMIC_ACQUIRE)) proxy_service(); else xk_sleep_us(2000); }
 }
 static void proxy_fiber_start(void)
 {
