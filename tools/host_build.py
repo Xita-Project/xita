@@ -54,7 +54,7 @@ def main():
     arm_flags = ['-marm', '-march=armv7-a', '-mfpu=neon', '-mfloat-abi=hard'] if arm and 'aarch' not in a.cc and not os.uname().machine.startswith('aarch') else []
     print(f'{len(units)} units, arm={arm}, cc={a.cc}, static={a.static}', flush=True)
     # every unit includes these; an older object than any of them is stale (a TLS change in xv_x86rt.h once produced 'bad value' at link)
-    HEADER_MTIME = max((stage / h).stat().st_mtime for h in ('recomp/xv_x86rt.h', 'recomp/kernel/xk.h', 'recomp/kernel/xk_os.h') if (stage / h).exists())
+    HEADER_MTIME = max((stage / h).stat().st_mtime for h in ('recomp/xv_x86rt.h', 'recomp/kernel/xk.h', 'recomp/kernel/xk_os.h', 'recomp/xv_recomp_protos.h', 'recomp/kernel/xk_object_jobs.h') if (stage / h).exists())
     def compile_one(item):
         src, flags = item
         obj = out / (Path(src).stem + '.o'); s = stage / src

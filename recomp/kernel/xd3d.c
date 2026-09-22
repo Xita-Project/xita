@@ -575,6 +575,7 @@ int xd3d_benchmark_view(float view[6])
 /* XV_HLE_TIMING=1: wall time inside each HLE function (all threads; on the helper this is the scene's D3D recording
  * cost). Key: the call site's name literal, cached pointer -> slot, merged by strcmp on first sight. [hle-time]. */
 int xv_hle_timing;   /* 0 until the first Present reads XV_HLE_TIMING */
+unsigned xv_hle_timed_calls;   /* static-macro sites that took the timed branch */
 #define HLE_T_MAX 192
 static struct { const char *name; uint64_t us; unsigned n; } hle_t[HLE_T_MAX]; static unsigned hle_t_n;
 static struct { const char *p; unsigned slot; } hle_t_cache[1024];
@@ -592,8 +593,9 @@ void xv_hle_time_add(const char *name, uint64_t us)
 }
 void xv_hle_time_report(unsigned frames)
 {
-    if (xv_hle_timing <= 0 || !frames || !hle_t_n) return;
-    char line[400]; int ln = snprintf(line, sizeof line, "[hle-time] %u frames (ms/frame, calls/frame; top by time):", frames);
+    if (xv_hle_timing <= 0 || !frames) return;
+    char line[400]; int ln = snprintf(line, sizeof line, "[hle-time] %u frames (ms/frame, calls/frame; top by time; macro-timed %u):", frames, xv_hle_timed_calls); xv_hle_timed_calls = 0;
+    if (!hle_t_n) { XK_LOG("%s\n", line); return; }
     for (unsigned k = 0; k < 18 && k < hle_t_n; ++k) {
         unsigned best = k; for (unsigned i = k + 1; i < hle_t_n; ++i) if (hle_t[i].us > hle_t[best].us) best = i;
         if (best != k) { __typeof__(hle_t[0]) t = hle_t[k]; hle_t[k] = hle_t[best]; hle_t[best] = t; for (unsigned j = 0; j < 1024; ++j) { if (hle_t_cache[j].slot == k) hle_t_cache[j].slot = best; else if (hle_t_cache[j].slot == best) hle_t_cache[j].slot = k; } }

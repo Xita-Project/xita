@@ -107,6 +107,10 @@ int xk_dispatch_magic(xctx *c, uint32_t target)
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
     { extern int xv_scene_thread_proxy_call(xctx *, void (*)(xctx *), unsigned); if (xv_scene_thread_proxy_call(c, fn, ord)) return 1; }   /* scene helper: the owner runs it */
 #endif
+    {   /* XV_HLE_TIMING=1 (xd3d.c): the D3D vtable methods arrive here as magic ordinals */
+        extern int xv_hle_timing; extern const char *xv_hle_cur_name; extern void xv_hle_time_add(const char *, uint64_t); extern uint64_t xk_os_monotonic_us(void);
+        if (xv_hle_timing) { uint64_t t0_ = xk_os_monotonic_us(); xv_hle_cur_name = NULL; fn(c); const char *nm_ = xv_hle_cur_name; xv_hle_time_add(nm_ ? nm_ : (ord < 367 && xv_kernel_names[ord] ? xv_kernel_names[ord] : "ordinal?"), xk_os_monotonic_us() - t0_); return 1; }
+    }
     fn(c); return 1;
 }
 
