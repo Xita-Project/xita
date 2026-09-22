@@ -197,11 +197,13 @@ static void proxy_fiber_main(xctx *c, void *arg)
 static void proxy_fiber_start(void)
 {
     if (proxy_fiber) return;
+    { const char *e = getenv("XV_SCENE_PROXY_FIBER"); if (!(e && atoi(e))) return; }   /* off by default: on the Vita (perf113/114) the object pass stopped running with it (jobs 0/window, objects not updated, NPC flicker); diagnose on the Pi */
     extern xk_thread *xk_thread_create_host(void (*)(xctx *, void *), void *);
     proxy_fiber = xk_thread_create_host(proxy_fiber_main, NULL);
     XK_LOG("[scene-thread] proxy fiber %s\n", proxy_fiber ? "started" : "FAILED (proxied calls will run on the owner)");
 }
-void xv_scene_thread_service(void) { }   /* proxied calls run on the proxy fiber (proxy_fiber_main), never on the owner's fiber: a blocking one (a critical section held by a streaming thread that waits for the owner's tick) deadlocked the owner (Vita perf112 17:14) */   /* owner service point (xv_preempt) */
+static xk_thread *proxy_fiber;   /* tentative; defined with the proxy fiber below */
+void xv_scene_thread_service(void) { if (!proxy_fiber && enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }   /* owner service point (xv_preempt) when no proxy fiber */   /* proxied calls run on the proxy fiber (proxy_fiber_main), never on the owner's fiber: a blocking one (a critical section held by a streaming thread that waits for the owner's tick) deadlocked the owner (Vita perf112 17:14) */   /* owner service point (xv_preempt) */
 static uint64_t stuck_logged_at;
 static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: log the helper's guest state once (a poor man's backtrace: return-address candidates on its stack) and let the render view's watchdog restore the live mapping */
 {
@@ -221,7 +223,7 @@ static void join(unsigned *counter)
     /* The owner is a guest fiber holding the single runner: a blocking host wait here starves the streaming and sound
      * fibers the scene may be waiting on (lockstep runs deadlocked at the a10 load). Poll, and park in the guest
      * scheduler between polls so those fibers run. */
-    while (sceKernelPollSema(done, 1) < 0) { xk_sleep_us(200); stuck_check(t0); }   /* the proxy fiber services the helper's kernel calls; the owner only parks so the scheduler runs it and the streaming fibers */   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
+    while (sceKernelPollSema(done, 1) < 0) { if (!proxy_fiber) proxy_service(); xk_sleep_us(200); stuck_check(t0); }   /* the proxy fiber services the helper's kernel calls; the owner only parks so the scheduler runs it and the streaming fibers */   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; depth = 0; (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -429,11 +431,13 @@ static void proxy_fiber_main(xctx *c, void *arg)
 static void proxy_fiber_start(void)
 {
     if (proxy_fiber) return;
+    { const char *e = getenv("XV_SCENE_PROXY_FIBER"); if (!(e && atoi(e))) return; }   /* off by default: on the Vita (perf113/114) the object pass stopped running with it (jobs 0/window, objects not updated, NPC flicker); diagnose on the Pi */
     extern xk_thread *xk_thread_create_host(void (*)(xctx *, void *), void *);
     proxy_fiber = xk_thread_create_host(proxy_fiber_main, NULL);
     XK_LOG("[scene-thread] proxy fiber %s\n", proxy_fiber ? "started" : "FAILED (proxied calls will run on the owner)");
 }
-void xv_scene_thread_service(void) { }   /* proxied calls run on the proxy fiber (proxy_fiber_main), never on the owner's fiber: a blocking one (a critical section held by a streaming thread that waits for the owner's tick) deadlocked the owner (Vita perf112 17:14) */
+static xk_thread *proxy_fiber;   /* tentative; defined with the proxy fiber below */
+void xv_scene_thread_service(void) { if (!proxy_fiber && enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }   /* owner service point (xv_preempt) when no proxy fiber */   /* proxied calls run on the proxy fiber (proxy_fiber_main), never on the owner's fiber: a blocking one (a critical section held by a streaming thread that waits for the owner's tick) deadlocked the owner (Vita perf112 17:14) */
 static uint64_t stuck_logged_at;
 static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: log the helper's guest state once (a poor man's backtrace: return-address candidates on its stack) and let the render view's watchdog restore the live mapping */
 {
@@ -451,7 +455,7 @@ static void join(unsigned *counter)
     if (!in_flight) return;
     uint64_t t0 = xk_os_monotonic_us();
     /* see the Vita port: poll and park in the guest scheduler so the other fibers run while the owner waits */
-    while (sem_trywait(&done) < 0) { xk_sleep_us(200); stuck_check(t0); }
+    while (sem_trywait(&done) < 0) { if (!proxy_fiber) proxy_service(); xk_sleep_us(200); stuck_check(t0); }
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; __atomic_store_n(&depth, 0, __ATOMIC_RELEASE); (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
