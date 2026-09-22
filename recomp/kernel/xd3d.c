@@ -108,10 +108,13 @@ const float (*xd3d_current_attributes(void))[4] { return g_im_cur; }
 #define XD3D_HIST_MAX 128
 static struct { const char *name; unsigned n; } g_hist[XD3D_HIST_MAX]; static unsigned g_hist_n;
 void xd3d_ds_check(const char *where, uint32_t eip);
+static const char xd3d_present_name[] = "D3DDevice_Present";   /* identity-compared in xd3d_count */
 static inline void xd3d_count(const char *name)
 {
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
-    { extern void xv_scene_thread_d3d_call(const char *); extern void xv_scene_thread_join_owner(void); xv_scene_thread_join_owner(); xv_scene_thread_d3d_call(name); }   /* overlap: an owner-side D3D call waits for the scene in flight; census */
+    { extern void xv_scene_thread_d3d_call(const char *); extern void xv_scene_thread_join_owner(void);
+      if (name != xd3d_present_name) xv_scene_thread_join_owner();   /* overlap: an owner-side D3D call waits for the scene in flight (GXM is single-threaded) - except Present, whose policy below decides (mode 2 defers the device present to the join; joining here made mode 2 behave as mode 1 on the Vita, perf99 m2a) */
+      xv_scene_thread_d3d_call(name); }
 #endif
     static int on = -1; if (on < 0) on = (getenv("XV_D3D_HIST") != NULL) || (getenv("XV_DS_CHECK") != NULL);
     if (!on) return;                                           /* ~4000 calls/frame: only walk the table when asked */
@@ -570,7 +573,7 @@ int xd3d_benchmark_view(float view[6])
 static unsigned g_present_deferred;
 void xd3d_present_flush(void) { if (g_present_deferred) { unsigned f = g_present_deferred; g_present_deferred = 0; xd3d_r_present(f, 0); } }   /* overlap mode 2: at the join */
 void xv_hle_D3DDevice_Present(xctx *c)
-{ XD3D_COUNT("D3DDevice_Present");
+{ XD3D_COUNT(xd3d_present_name);
     int defer_ = 0;
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
     { extern int xv_scene_thread_present_policy(void); extern void xv_scene_thread_join(void); int pol_ = xv_scene_thread_present_policy();
