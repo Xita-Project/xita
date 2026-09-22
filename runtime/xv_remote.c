@@ -409,9 +409,11 @@ REMOTE_THREAD(server)
         uint64_t now=remote_now();
         if(now>=next_report) {   /* liveness trace: the server went silent under the scene overlap with its socket still open */
             xv_logf("[remote] loop: accepts %u fails %u (last err %d) serves %u\n",accepts,fails,last_err,serves);
+            { static unsigned beats; char hb[96]; int hn=snprintf(hb,sizeof hb,"beat %u accepts %u fails %u err %d serves %u\n",++beats,accepts,fails,last_err,serves);
+              FILE *hf=fopen(ROOT "remote-heartbeat.txt","wb"); if(hf) {fwrite(hb,1,(size_t)hn,hf);fclose(hf);} }   /* logger-independent liveness (plugin FTP shows the mtime) */
             next_report=now+5000000;accepts=fails=serves=0;
         }
-        if(s<0) {fails++;last_err=errno;remote_sleep(100000);continue;}
+        if(s<0) {fails++;last_err=s;remote_sleep(100000);continue;}
         accepts++;
         if(remote_nonblock(s)>=0) {serves++;serve(s);}
         remote_close(s);
