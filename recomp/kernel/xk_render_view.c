@@ -179,7 +179,7 @@ void xv_render_view_configure(void)
             unsigned n = phys_limit / XK_PAGE; if (n > L.phys_pages) n = L.phys_pages;
             if (all == 3) n = 0;   /* object pool only: listed at the first gameplay enter (list_object_pool), so kernel-written completion words elsewhere stay live (perf104/105 hung: the scene polled a shadowed word) */
             for (unsigned i = 0; i < n; ++i) learn_page(i);
-            if (all >= 2 && image_view) for (unsigned i = 0; i < L.image_pages; ++i) learn_page((L.image_off >> 12) + i);
+            if (all == 2 && image_view) for (unsigned i = 0; i < L.image_pages; ++i) learn_page((L.image_off >> 12) + i);   /* mode 3 listed all 933 image pages by mistake (perf107: copy-in still 4.5 MB) */
             { const char *d = getenv("XV_RENDER_VIEW_DMA"); dma_mode = d ? atoi(d) : 0; }
             slots_contiguous = 1; for (unsigned i = 1; i < slots_used; ++i) if (slot_page[i] != slot_page[0] + i) { slots_contiguous = 0; break; }
             if (dma_mode) XK_LOG("[render-view] DMA copy-in: %s\n", slots_contiguous ? "one transfer for the contiguous slot range" : "slots not contiguous, per-page copies");
