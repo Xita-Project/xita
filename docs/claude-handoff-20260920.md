@@ -1333,3 +1333,62 @@ relaunches after a crash (dialog dismissed with press cross, env
 re-armed), reboots after 3 failed relaunches, logs every event. Not
 yet exercised on a real crash dialog. Whole-console hangs still need a
 power button.
+
+## 43. Overlap on hardware, night of Sept 21-22: seven builds, one root class
+
+Stage `../overlap-candidate` (perf83..93, each deployed through
+run-overlap.sh + tools/vita_watchdog.py; slots now hold perf92/93).
+What each build found, from device logs and core dumps
+(`tools/vita_core_threads.py <core> <elf>` prints every thread's PC, LR
+and a return-address scan; vita-parse-core + pyelftools 0.29 in
+`~/github/third_party/venv-core`, c_str patched for python 3):
+- perf83/84: helper entered the scheduler through xk_wait_u32 (the Vita
+  runtime's capture-completion wait) while the owner slept in the join:
+  data abort on the helper. Fix: xk_sleep_us / xk_wait_u32 / xk_wait
+  never touch xk_cur or the scheduler on the helper.
+- perf85/86: dispatches stopped at the a10 load; overlap gated to
+  gameplay (game_globals loaded+active); loads use the perf82 path.
+- perf87: private scene stack moved to the kernel region (game pool
+  allocation at the first menu frame).
+- perf88: proxy wait (owner performs the helper's guest object waits);
+  join poll 1 ms. perf90: helper pinned to core 1. perf91: remote thread
+  at owner priority, any core. perf92: remote accept-loop trace.
+- perf93: logger report ownership by the real thread id (owner+helper
+  both appended to the grouped report buffer under the alias).
+Result: the overlap runs the main menu at 29 fps on every build from
+perf85 on, and the level load never completes under it. The remote
+server stops answering after the scene thread starts (TCP connects,
+accept loop keeps sleeping; the log itself stops being written), and
+every forced-quit core shows the helper stopped with a data abort in
+xk_NtReleaseMutant, reached from the scene body (f_000C84D0 ->
+... f_00050A00 -> ReleaseMutex): the scene acquires and releases guest
+mutexes (cache-file request table) with zero timeout on the helper,
+while the owner side runs the same kernel-object code on another thread
+(xk_wait's fast path and NtReleaseMutant use xk_cur, the *owner's*
+current fiber, as the acquiring thread; wait lists are unlocked).
+This is the general form of every earlier fix: two threads inside the
+single-threaded guest kernel.
+
+Three baseline runs (scene thread off; natives on/off; scene thread on
+without overlap) all load and play at 8-9 fps in the cinematic area:
+the base build is intact. The overlap has not rendered one gameplay
+frame on the Vita; the 15 fps figure remains an estimate.
+
+The host never showed the mutex race in 10-minute mode-2 runs: x86
+timing, not correctness. Options for the fix, in order of preference:
+(1) a recursive lock around the guest kernel's object and scheduler
+state (xk_wait, try_satisfy, wake paths, Nt/Ke object calls, the
+scheduler pass), released across fiber switches and idle waits, with the
+helper using the scene's own thread record (thread 8) instead of xk_cur;
+(2) proxy every kernel-object call from the helper to the owner (the
+proxy-wait mechanism generalized; latency = the owner's next service
+point, fine in mode 1, up to a preempt slice in mode 2). About a day
+either way, verifiable on the host with the existing runs plus a
+deliberate stress (the census tool can count helper-side object calls).
+
+Remote-control lessons: vitacompanion `press` does not reach Xita's
+input (dashboard or game); the in-app pad endpoint remains the only
+scripted input, so campaign entry needs the remote alive. `quit all`
+before `launch` is the working relaunch recipe; a console reboot
+followed by launch worked once the user unlocked the screen (a lock
+screen or system dialog after reboot cannot be dismissed remotely).
