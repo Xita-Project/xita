@@ -50,6 +50,17 @@ static retarget_t *retargets; static unsigned retargets_n, retargets_last, retar
  * thread running the scene binds (host: thread-local pointer, Vita: TPIDRURW); the live table is untouched, so the
  * owner's tick keeps reading and writing live pages while the scene reads its frozen copies. The render table
  * mirrors the live table through xv_render_view_mirror (allocated once, 4 MiB, never copied per frame). */
+static int dma_mode, slots_contiguous;   /* XV_RENDER_VIEW_DMA=1 (Vita): one DMAC transfer for the contiguous all-mode slot range instead of a 240 MB/s CPU memcpy per page (perf104: copy-in 20.8 ms/frame on the helper) */
+#ifdef __vita__
+#include <psp2/kernel/dmac.h>
+#endif
+static void view_copy(void *dst, const void *src, size_t n)
+{
+#ifdef __vita__
+    if (dma_mode && n >= 65536u) { if (sceDmacMemcpy(dst, src, n) >= 0) return; dma_mode = 0; XK_LOG("[render-view] sceDmacMemcpy failed; CPU copies from now on\n"); }
+#endif
+    memcpy(dst, src, n);
+}
 static int all_mode;   /* XV_RENDER_VIEW_ALL: every game-state page listed up front; the view enters before any learning pass */
 static int thread_mode; static struct { uint8_t *img_base; uint32_t entries[1u << 20]; } *rt;
 #define VIEW_TABLE (thread_mode ? rt->entries : g_xpt)
@@ -168,6 +179,9 @@ void xv_render_view_configure(void)
             unsigned n = phys_limit / XK_PAGE; if (n > L.phys_pages) n = L.phys_pages;
             for (unsigned i = 0; i < n; ++i) learn_page(i);
             if (all >= 2 && image_view) for (unsigned i = 0; i < L.image_pages; ++i) learn_page((L.image_off >> 12) + i);
+            { const char *d = getenv("XV_RENDER_VIEW_DMA"); dma_mode = d ? atoi(d) : 0; }
+            slots_contiguous = 1; for (unsigned i = 0; i < slots_used; ++i) if (slot_page[i] != i) { slots_contiguous = 0; break; }
+            if (dma_mode) XK_LOG("[render-view] DMA copy-in: %s\n", slots_contiguous ? "one transfer for the contiguous slot range" : "slots not contiguous, per-page copies");
             if (all >= 2) { learn_done = learn_passes; learn_armed = 0; }   /* 1: the learning passes still list the image .data pages the tick changes */
             XK_LOG("[render-view] all mode %d: %u shadow slots (%u overflow), %u image pages listed; learning %s\n", all, slots_used, slots_overflow, img_listed_n, all >= 2 ? "skipped" : "image pages only");
         }
@@ -248,6 +262,11 @@ void xv_render_view_enter(unsigned *scope, void *context)
     *scope = 1;
     full_frame = active_frames < 30 || (full_interval && active_frames % full_interval == 0);
     active_frames++;
+    if (all_mode && slots_contiguous && slots_used) {   /* all mode: slots 0..n-1 = physical pages 0..n-1: one range copy (DMA on the Vita) */
+        view_copy(shadow_of(0), live_of_slot(0), (size_t)slots_used * XK_PAGE);
+        if (full_frame) view_copy(pristine_slot(0), shadow_of(0), (size_t)slots_used * XK_PAGE);
+        else for (unsigned s = 0; s < slots_used; ++s) if (sw_slot[s]) memcpy(pristine_slot(s), shadow_of(s), XK_PAGE);
+    } else
     for (unsigned s = 0; s < slots_used; ++s) {
         memcpy(shadow_of(s), live_of_slot(s), XK_PAGE);
         if (full_frame || sw_slot[s]) memcpy(pristine_slot(s), shadow_of(s), XK_PAGE);
