@@ -157,6 +157,20 @@ void xv_render_view_configure(void)
     }
     ready = 1;
     bench();
+    {   /* XV_RENDER_VIEW_ALL=1: list every physical page below the limit up front (2: the image .data pages too), so the
+         * scene reads a frozen copy of the whole game state instead of the learned subset. The learned set missed the
+         * corridor's object churn (Pi ov2b, 2026-09-22: 7 slots learned in the cinematic; tick N+1 tore an object's model
+         * reference under real overlap and the scene looped forever in A26B0). Costs one copy-in of the listed pages per
+         * frame; learning passes are skipped. */
+        const char *e = getenv("XV_RENDER_VIEW_ALL"); int all = e ? atoi(e) : 0;
+        if (all > 0) {
+            unsigned n = phys_limit / XK_PAGE; if (n > L.phys_pages) n = L.phys_pages;
+            for (unsigned i = 0; i < n; ++i) learn_page(i);
+            if (all >= 2 && image_view) for (unsigned i = 0; i < L.image_pages; ++i) learn_page((L.image_off >> 12) + i);
+            if (all >= 2) { learn_done = learn_passes; learn_armed = 0; }   /* 1: the learning passes still list the image .data pages the tick changes */
+            XK_LOG("[render-view] all mode %d: %u shadow slots (%u overflow), %u image pages listed; learning %s\n", all, slots_used, slots_overflow, img_listed_n, all >= 2 ? "skipped" : "image pages only");
+        }
+    }
     XK_LOG("[render-view] process-start enabled (in-place); shadow %u pages at %08X for physical pages below %u MiB, image copy %u pages at %08X (%s); learn %u passes every %u frames after a %u us tick gap%s; full every %u, copyback %d\n",
            L.shadow_pages, L.shadow_off, phys_limit >> 20, L.image_pages, L.image_copy_off, image_view ? "viewed" : "live", learn_passes, learn_interval, learn_gap_us, learn_armed ? " (armed now)" : "", full_interval, copyback);
 }
