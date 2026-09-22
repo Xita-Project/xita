@@ -61,7 +61,7 @@ static void view_copy(void *dst, const void *src, size_t n)
 #endif
     memcpy(dst, src, n);
 }
-static const char *array_words = "object,cluster";   /* XV_RENDER_VIEW_ARRAYS (mode 4) */
+static const char *array_words = "cluster,list";   /* XV_RENDER_VIEW_ARRAYS (mode 4): the cluster/object reference arrays + the object list headers/refs. NOT "object": that also freezes "cached object render states", whose scene-side writes lose the tick-wins merge and objects vanish (Vita perf112: 54 draw batches instead of 187, NPCs flickering) */
 static int all_mode;   /* XV_RENDER_VIEW_ALL: every game-state page listed up front; the view enters before any learning pass */
 static int thread_mode; static struct { uint8_t *img_base; uint32_t entries[1u << 20]; } *rt;
 #define VIEW_TABLE (thread_mode ? rt->entries : g_xpt)
