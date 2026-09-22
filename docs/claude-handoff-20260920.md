@@ -1315,3 +1315,21 @@ alignment; the tick trace remains the oracle for anything the tick uses.
 Housekeeping: `tools/host_run.sh` now removes the temp save directory it
 creates (each run copies ~300 MB of cache files; 88 leftovers filled the
 31 GB /tmp). Trace-all draw logs are ~500 MB per run; delete them.
+
+## 42. Remote restart: vitacompanion on the Vita (2026-09-21 21:10)
+
+vitacompanion 1.07 (devnoname120) is installed on the user's Vita:
+`ur0:tai/vitacompanion_kernel.skprx` + `ur0:tai/vitacompanion.suprx`,
+registered at the end of the `*KERNEL` and `*main` blocks of
+`ur0:tai/config.txt` (backup of the previous config in
+`xita-backups/vita-remote/3357-9AA2/tai-config-backup-*.txt`; spare
+copies of the plugin files on `ux0:tai/`). Clone + release binaries:
+`~/github/third_party/vitacompanion`. It answers on 192.168.0.205:1338
+whether or not Xita runs: `tools/vita_companion.py launch XITA00001 |
+quit all | reboot | press cross | nosleep on | screen off`. Verified:
+quit all -> launch -> the in-app remote (/status) answered on perf82.
+`tools/vita_watchdog.py --config <remote-client.json> --env K=V...`
+relaunches after a crash (dialog dismissed with press cross, env
+re-armed), reboots after 3 failed relaunches, logs every event. Not
+yet exercised on a real crash dialog. Whole-console hangs still need a
+power button.
