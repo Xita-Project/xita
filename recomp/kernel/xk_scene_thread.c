@@ -65,6 +65,7 @@ int xv_scene_thread_no_yield(void) { return in_flight_overlapped && xv_scene_thr
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { suppressed_yields++; if (blocking) { suppressed_waits++; suppressed_eip = eip; } }
 static void overlap_report(void)
 {
+    { extern unsigned xv_log_helper_dropped(void) __attribute__((weak)); if (xv_log_helper_dropped) { unsigned d = xv_log_helper_dropped(); if (d) XK_LOG("[scene-thread] helper log lines dropped: %u\n", d); } }
     if (overlap) XK_LOG("[scene-overlap] dispatched-without-wait %u, joins at present %u / next dispatch %u / owner d3d %u, proxy waits %u, suppressed helper yields %u (blocking %u, last eip %X)\n",
                         overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits, suppressed_eip);
     overlaps = joins_present = joins_dispatch = joins_d3d = proxy_waits = suppressed_yields = suppressed_waits = 0;
@@ -254,6 +255,7 @@ int xv_scene_thread_no_yield(void) { return in_flight_overlapped && xv_scene_thr
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { suppressed_yields++; if (blocking) { suppressed_waits++; suppressed_eip = eip; } }
 static void overlap_report(void)
 {
+    { extern unsigned xv_log_helper_dropped(void) __attribute__((weak)); if (xv_log_helper_dropped) { unsigned d = xv_log_helper_dropped(); if (d) XK_LOG("[scene-thread] helper log lines dropped: %u\n", d); } }
     if (overlap) XK_LOG("[scene-overlap] dispatched-without-wait %u, joins at present %u / next dispatch %u / owner d3d %u, proxy waits %u, suppressed helper yields %u (blocking %u, last eip %X)\n",
                         overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits, suppressed_eip);
     overlaps = joins_present = joins_dispatch = joins_d3d = proxy_waits = suppressed_yields = suppressed_waits = 0;

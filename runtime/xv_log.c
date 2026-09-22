@@ -157,9 +157,15 @@ void xv_log_report_end(void)
     (void)report_flush(1,0);
     __atomic_store_n(&g_report_owner,0,__ATOMIC_RELEASE);
 }
+static unsigned g_helper_dropped;
+int xv_scene_thread_on_helper(void) __attribute__((weak));   /* recomp/kernel/xk_scene_thread.c */
 void xv_log_write(const char *buf,unsigned n)
 {
     if(!buf || !n) return;
+    /* The scene helper logs hundreds of shader-binding lines per frame; through the immediate (mutex + file) path they
+     * stalled every other logging thread (the remote server died within seconds of the game start, perf93-95). Dropped
+     * for now; the count is reported by the scene thread. Critical lines still use xv_log_criticalf. */
+    if(xv_scene_thread_on_helper && xv_scene_thread_on_helper()) { __atomic_add_fetch(&g_helper_dropped,1,__ATOMIC_RELAXED); return; }
     if(!report_is_owner()) { log_write_immediate(buf,n); return; }
     if(!g_report_async) {
         /* Preserve the reviewed synchronous grouping/oversized-write policy. */
@@ -175,6 +181,7 @@ void xv_log_write(const char *buf,unsigned n)
         memcpy(g_report+g_report_used,buf,take); g_report_used+=take; buf+=take; n-=take;
     }
 }
+unsigned xv_log_helper_dropped(void) { return __atomic_exchange_n(&g_helper_dropped,0,__ATOMIC_RELAXED); }
 void xv_logf(const char *fmt,...)
 {
     char buf[512]; va_list ap; va_start(ap,fmt);
