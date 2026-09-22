@@ -111,7 +111,7 @@ void xd3d_ds_check(const char *where, uint32_t eip);
 static inline void xd3d_count(const char *name)
 {
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
-    { extern void xv_scene_thread_d3d_call(const char *); xv_scene_thread_d3d_call(name); }   /* owner-side call census (calls outside the scene helper) */
+    { extern void xv_scene_thread_d3d_call(const char *); extern void xv_scene_thread_join_owner(void); xv_scene_thread_join_owner(); xv_scene_thread_d3d_call(name); }   /* overlap: an owner-side D3D call waits for the scene in flight; census */
 #endif
     static int on = -1; if (on < 0) on = (getenv("XV_D3D_HIST") != NULL) || (getenv("XV_DS_CHECK") != NULL);
     if (!on) return;                                           /* ~4000 calls/frame: only walk the table when asked */

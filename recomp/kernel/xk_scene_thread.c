@@ -49,7 +49,7 @@ int xv_scene_thread_active(const void *guest_thread) { return depth && guest_thr
  * flight (backpressure). The owner-side D3D census lists the HLE calls made outside the scene. */
 #define SCENE_STACK_BYTES (256u * 1024u)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
-static int overlap; static unsigned in_flight, overlaps, joins_present, joins_dispatch, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
+static int overlap; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -63,9 +63,9 @@ int xv_scene_thread_no_yield(void) { return overlap && xv_scene_thread_on_helper
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { suppressed_yields++; if (blocking) { suppressed_waits++; suppressed_eip = eip; } }
 static void overlap_report(void)
 {
-    if (overlap) XK_LOG("[scene-overlap] dispatched-without-wait %u, joins at present %u / next dispatch %u, suppressed helper yields %u (blocking %u, last eip %X)\n",
-                        overlaps, joins_present, joins_dispatch, suppressed_yields, suppressed_waits, suppressed_eip);
-    overlaps = joins_present = joins_dispatch = suppressed_yields = suppressed_waits = 0;
+    if (overlap) XK_LOG("[scene-overlap] dispatched-without-wait %u, joins at present %u / next dispatch %u / owner d3d %u, suppressed helper yields %u (blocking %u, last eip %X)\n",
+                        overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits, suppressed_eip);
+    overlaps = joins_present = joins_dispatch = joins_d3d = suppressed_yields = suppressed_waits = 0;
     if (owner_d3d_n) {
         char line[400]; int ln = snprintf(line, sizeof line, "[scene-owner-d3d] owner-side calls:");
         for (unsigned i = 0; i < owner_d3d_n; ++i) { if (ln > 330) { XK_LOG("%s\n", line); ln = snprintf(line, sizeof line, "[scene-owner-d3d]  "); } ln += snprintf(line + ln, sizeof line - ln, " %s %u", owner_d3d[i].name, owner_d3d[i].n); }
@@ -87,6 +87,7 @@ static void join(unsigned *counter)
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
 }
 void xv_scene_thread_join(void) { if (enabled > 0 && overlap) join(&joins_present); }
+void xv_scene_thread_join_owner(void) { if (enabled > 0 && in_flight && !xv_scene_thread_on_helper()) join(&joins_d3d); }   /* an owner-side D3D HLE while a scene is in flight waits: the Vita runtime (GXM) is single-threaded (menu/loading draws crashed perf83 run 1) */
 int xv_scene_thread_present_policy(void) { return enabled > 0 && in_flight ? overlap : 0; }
 
 static int helper_main(SceSize args, void *argp)
@@ -169,7 +170,7 @@ int xv_scene_thread_active(const void *guest_thread) { return helper_valid && __
  * flight (backpressure). The owner-side D3D census lists the HLE calls made outside the scene. */
 #define SCENE_STACK_BYTES (256u * 1024u)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
-static int overlap; static unsigned in_flight, overlaps, joins_present, joins_dispatch, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
+static int overlap; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -183,9 +184,9 @@ int xv_scene_thread_no_yield(void) { return overlap && xv_scene_thread_on_helper
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { suppressed_yields++; if (blocking) { suppressed_waits++; suppressed_eip = eip; } }
 static void overlap_report(void)
 {
-    if (overlap) XK_LOG("[scene-overlap] dispatched-without-wait %u, joins at present %u / next dispatch %u, suppressed helper yields %u (blocking %u, last eip %X)\n",
-                        overlaps, joins_present, joins_dispatch, suppressed_yields, suppressed_waits, suppressed_eip);
-    overlaps = joins_present = joins_dispatch = suppressed_yields = suppressed_waits = 0;
+    if (overlap) XK_LOG("[scene-overlap] dispatched-without-wait %u, joins at present %u / next dispatch %u / owner d3d %u, suppressed helper yields %u (blocking %u, last eip %X)\n",
+                        overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits, suppressed_eip);
+    overlaps = joins_present = joins_dispatch = joins_d3d = suppressed_yields = suppressed_waits = 0;
     if (owner_d3d_n) {
         char line[400]; int ln = snprintf(line, sizeof line, "[scene-owner-d3d] owner-side calls:");
         for (unsigned i = 0; i < owner_d3d_n; ++i) { if (ln > 330) { XK_LOG("%s\n", line); ln = snprintf(line, sizeof line, "[scene-owner-d3d]  "); } ln += snprintf(line + ln, sizeof line - ln, " %s %u", owner_d3d[i].name, owner_d3d[i].n); }
@@ -205,6 +206,7 @@ static void join(unsigned *counter)
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
 }
 void xv_scene_thread_join(void) { if (enabled > 0 && overlap) join(&joins_present); }
+void xv_scene_thread_join_owner(void) { if (enabled > 0 && in_flight && !xv_scene_thread_on_helper()) join(&joins_d3d); }   /* an owner-side D3D HLE while a scene is in flight waits: the Vita runtime (GXM) is single-threaded (menu/loading draws crashed perf83 run 1) */
 int xv_scene_thread_present_policy(void) { return enabled > 0 && in_flight ? overlap : 0; }
 
 pthread_t xv_owner_pthread_self(void)
@@ -268,6 +270,7 @@ int xv_scene_thread_active(const void *guest_thread) { (void)guest_thread; retur
 int xv_scene_thread_on_helper(void) { return 0; }
 int xv_scene_thread_no_yield(void) { return 0; }
 void xv_scene_thread_join(void) {}
+void xv_scene_thread_join_owner(void) {}
 int xv_scene_thread_present_policy(void) { return 0; }
 void xv_scene_thread_d3d_call(const char *name) { (void)name; }
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { (void)eip; (void)blocking; }
