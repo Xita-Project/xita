@@ -103,7 +103,7 @@ static void join(unsigned *counter)
     /* The owner is a guest fiber holding the single runner: a blocking host wait here starves the streaming and sound
      * fibers the scene may be waiting on (lockstep runs deadlocked at the a10 load). Poll, and park in the guest
      * scheduler between polls so those fibers run. */
-    while (sceKernelPollSema(done, 1) < 0) { proxy_service(); xk_sleep_us(100); }
+    while (sceKernelPollSema(done, 1) < 0) { proxy_service(); xk_sleep_us(1000); }   /* 1 ms: a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; depth = 0; (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -248,7 +248,7 @@ static void join(unsigned *counter)
     if (!in_flight) return;
     uint64_t t0 = xk_os_monotonic_us();
     /* see the Vita port: poll and park in the guest scheduler so the other fibers run while the owner waits */
-    while (sem_trywait(&done) < 0) { proxy_service(); xk_sleep_us(100); }
+    while (sem_trywait(&done) < 0) { proxy_service(); xk_sleep_us(1000); }
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; __atomic_store_n(&depth, 0, __ATOMIC_RELEASE); (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
