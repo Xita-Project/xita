@@ -13,7 +13,7 @@
 #ifndef XV_NATIVE_CRT_FLOAT_DEFAULT
 #define XV_NATIVE_CRT_FLOAT_DEFAULT 1
 #endif
-static unsigned crt_calls[3];
+static unsigned crt_calls[4];
 int xv_native_crt_float(xctx *c, unsigned which)
 {
     static int on = -1; if (on < 0) { const char *e = getenv("XV_NATIVE_CRT_FLOAT"); on = e ? atoi(e) != 0 : XV_NATIVE_CRT_FLOAT_DEFAULT; XK_LOG("[crt-float] native _controlfp/_frnd/floor %s\n", on ? "enabled" : "disabled"); }
@@ -46,12 +46,46 @@ int xv_native_crt_float(xctx *c, unsigned which)
         c->r[0] = (uint32_t)(int32_t)(int16_t)old;              /* eax: the last _controlfp's return */
         c->r[4] = esp + 4u; crt_calls[2]++; return 1;
     }
+    case 3: {   /* f_00061270: float3 at [esp+4] -> 11/11/10-bit packed integer in eax; a transcription of the emitted body with the
+                 * emulator's own x87 primitives (compare flags, rounding under the 0x1F2840 word, fistp), minus the guest-stack traffic and
+                 * the calls. XV_NATIVE_PACK: 0 off, 1 verify against the guest body (guest result used), 2 native. */
+        static int mode = -1; if (mode < 0) { const char *e = getenv("XV_NATIVE_PACK"); mode = e ? atoi(e) : 0; }
+        if (!mode) return 0;
+        static int in_body; if (in_body) return 0;
+        uint32_t ptr = X_M32(esp + 4u);
+        uint32_t packed = 0;
+        for (int i = 0; i < 3; ++i) {
+            double v = x87_load_f32(c, ptr + 4u * i), x;
+            x87_compare(c, v, x87_load_f32(c, 0x1F0ABCu), 0);
+            unsigned r1 = ((c->fsw >> 8) & 0xFFu) & 0x5u; int pf1 = (__builtin_parity(r1) == 0);
+            if (!pf1) x = x87_load_f32(c, 0x1F0ABCu);
+            else {
+                x87_compare(c, v, x87_load_f32(c, 0x1F0A78u), 0);
+                unsigned r2 = ((c->fsw >> 8) & 0xFFu) & 0x41u;
+                x = r2 ? v : x87_load_f32(c, 0x1F0A78u);
+            }
+            x = x * x87_load_f32(c, i == 2 ? 0x1F0C30u : 0x1F0C34u);
+            double fl; { uint16_t old = c->fcw; c->fcw = (uint16_t)X_M32(0x1F2840u); fl = x87_round(c, x); c->fcw = old; }   /* f_00019E7B */
+            float st = (float)fl;                                              /* fstp dword */
+            double q = x87_round(c, (double)st);                               /* fistp */
+            uint32_t iv = (q >= -2147483648.0 && q <= 2147483647.0) ? (uint32_t)(int32_t)q : 0x80000000u;
+            packed |= (iv & 0x7FFu) << (11 * i);   /* guest: eax=z; shl 11; or y; shl 11; or x */
+        }
+        if (mode == 1) {
+            xctx copy = *c; copy.preempt = 1 << 30; in_body = 1; extern void f_00061270(xctx *); f_00061270(&copy); in_body = 0;
+            static unsigned calls, mismatches, shown; calls++;
+            if (copy.r[0] != packed) { mismatches++; if (shown < 6) { shown++; float v[3]; for (int i = 0; i < 3; ++i) { uint32_t w = X_M32(ptr + 4u * i); memcpy(&v[i], &w, 4); } XK_LOG("[native-pack] MISMATCH in %g %g %g guest %08X native %08X\n", v[0], v[1], v[2], copy.r[0], packed); } }
+            if ((calls & 0x3FFF) == 0) XK_LOG("[native-pack] verify: %u calls, %u mismatches\n", calls, mismatches);
+            int32_t pre = c->preempt; *c = copy; c->preempt = pre; return 1;   /* keep the real thread's preempt budget */
+        }
+        c->r[0] = packed; c->r[4] = esp + 8u; crt_calls[3]++; return 1;
+    }
     }
     return 0;
 }
 void xv_crt_float_report(unsigned frames)
 {
-    if (!crt_calls[0] && !crt_calls[1] && !crt_calls[2]) return;
-    XK_LOG("[crt-float] %u frames: native _controlfp %u, _frnd %u, floor %u\n", frames, crt_calls[0], crt_calls[1], crt_calls[2]);
-    crt_calls[0] = crt_calls[1] = crt_calls[2] = 0;
+    if (!crt_calls[0] && !crt_calls[1] && !crt_calls[2] && !crt_calls[3]) return;
+    XK_LOG("[crt-float] %u frames: native _controlfp %u, _frnd %u, floor %u, pack %u\n", frames, crt_calls[0], crt_calls[1], crt_calls[2], crt_calls[3]);
+    crt_calls[0] = crt_calls[1] = crt_calls[2] = crt_calls[3] = 0;
 }
