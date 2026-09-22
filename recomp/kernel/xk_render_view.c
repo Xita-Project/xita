@@ -70,6 +70,7 @@ static unsigned learn_interval = 150, learn_passes = 6, learn_done, learn_state,
 static uint32_t learn_gap_us = 8000; static uint32_t *learn_hash; static uint64_t learn_us, last_leave_us;
 
 static unsigned depth, bound, frames_entered, full_frames, fiber_switches, aliases_max, mirrors_in_scene;
+static uint64_t prepare_us;   /* owner-side copy-in (xv_render_view_prepare) */
 static uint64_t enter_us, leave_us, bytes_in, words_merged;
 /* Same-frame write conflicts (increment C): a word the scene changed (copy != pristine) whose live copy the tick also
  * changed meanwhile (live != pristine) to a different value. XV_RENDER_VIEW_CONFLICT=1 lets the scene's value
@@ -268,21 +269,17 @@ static void list_object_pool(void)
     slots_contiguous = 1; for (unsigned i = 1; i < slots_used; ++i) if (slot_page[i] != slot_page[0] + i) { slots_contiguous = 0; break; }
     XK_LOG("[render-view] object pool: table %08X, %u live objects, data %08X..%08X: +%u slots (%u, %s)\n", table, live, lo, hi, slots_used - before, slots_used, slots_contiguous ? "contiguous" : "not contiguous");
 }
-void xv_render_view_enter(unsigned *scope, void *context)
+/* The copy-in, as its own step: the OWNER runs it before dispatching an overlapped scene (xk_scene_thread.c), so the
+ * snapshot is taken while nothing mutates the pages. Done on the helper after dispatch (perf104-108, Pi all1a-all3a)
+ * the copy raced tick N+1 and the snapshot itself was torn: the same bogus model pointer (01914660) hung A26B0 in
+ * every Pi run, frozen pages or not. */
+static int prepared;
+static void copy_in(void)
 {
-    (void)context;
-    uint64_t t0 = xk_os_monotonic_us();
-    if (all_mode == 3 && !bound) list_object_pool();
-    if (!learn_armed && last_leave_us) {
-        if (t0 - last_leave_us > learn_gap_us) { if (++gap_frames >= 30) { learn_armed = 1; XK_LOG("[render-view] gameplay detected (tick gap > %u us for 30 frames): learning armed\n", learn_gap_us); } }
-        else gap_frames = 0;
-    }
-    if (!ready || depth++) return;
-    if (!learn_done && !all_mode) return;   /* all mode: the listed set is complete from the start (Vita perf103: entered 0 while waiting for the passes) */
-    *scope = 1;
+    if (all_mode == 3) list_object_pool();
     full_frame = active_frames < 30 || (full_interval && active_frames % full_interval == 0);
     active_frames++;
-    if (all_mode && slots_contiguous && slots_used) {   /* all mode: slots 0..n-1 = physical pages 0..n-1: one range copy (DMA on the Vita) */
+    if (all_mode && slots_contiguous && slots_used) {   /* all mode: an ascending slot range = one physical range: one range copy (DMA on the Vita) */
         view_copy(shadow_of(0), live_of_slot(0), (size_t)slots_used * XK_PAGE);
         if (full_frame) view_copy(pristine_slot(0), shadow_of(0), (size_t)slots_used * XK_PAGE);
         else for (unsigned s = 0; s < slots_used; ++s) if (sw_slot[s]) memcpy(pristine_slot(s), shadow_of(s), XK_PAGE);
@@ -297,6 +294,25 @@ void xv_render_view_enter(unsigned *scope, void *context)
         if (full_frame || sw_img[ip]) memcpy(pristine_img(ip), copy_of_img(ip), XK_PAGE);
     }
     bytes_in += ((uint64_t)slots_used + img_listed_n) * XK_PAGE;
+}
+void xv_render_view_prepare(void)
+{
+    if (!ready || depth || bound || prepared) return;
+    if (!learn_done && !all_mode) return;
+    uint64_t t0 = xk_os_monotonic_us(); copy_in(); prepare_us += xk_os_monotonic_us() - t0; prepared = 1;
+}
+void xv_render_view_enter(unsigned *scope, void *context)
+{
+    (void)context;
+    uint64_t t0 = xk_os_monotonic_us();
+    if (!learn_armed && last_leave_us) {
+        if (t0 - last_leave_us > learn_gap_us) { if (++gap_frames >= 30) { learn_armed = 1; XK_LOG("[render-view] gameplay detected (tick gap > %u us for 30 frames): learning armed\n", learn_gap_us); } }
+        else gap_frames = 0;
+    }
+    if (!ready || depth++) return;
+    if (!learn_done && !all_mode) return;   /* all mode: the listed set is complete from the start (Vita perf103: entered 0 while waiting for the passes) */
+    *scope = 1;
+    if (prepared) prepared = 0; else copy_in();   /* not prepared by the owner (non-overlapped dispatch, in-place mode): copy here */
     if (active_frames == 1) log_request_table("first viewed frame");
     retarget_in_place(); bound_since_us = t0; bound = 1;
     if (thread_mode) xk_os_bind_page_table(rt->entries);       /* this thread (the one running the body) sees the view */
@@ -364,9 +380,9 @@ uint8_t *xv_render_view_shadow_of_phys(uint32_t phys_page) { uint32_t s = ready 
 void xv_render_view_report(unsigned frames)
 {
     if (!ready) return;
-    XK_LOG("[render-view] %u frames: entered %u (full %u); slots %u (overflow %u) image pages %u listed, tail %u; copy-in %.2f ms/frame (%.0f KiB), merge %.2f ms/frame (%llu words); scene-write set %u slots + %u image pages (%u found late); retargets %u (+%u image, overflow %u), fiber switches in scene %u, remaps in scene %u; aliases max %u\n",
+    XK_LOG("[render-view] %u frames: entered %u (full %u); slots %u (overflow %u) image pages %u listed, tail %u; copy-in %.2f ms/frame (%.0f KiB, owner-side %.2f ms), merge %.2f ms/frame (%llu words); scene-write set %u slots + %u image pages (%u found late); retargets %u (+%u image, overflow %u), fiber switches in scene %u, remaps in scene %u; aliases max %u\n",
            frames, frames_entered, full_frames, slots_used, slots_overflow, img_listed_n, img_lo < L.image_pages ? L.image_pages - img_lo : 0,
-           frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0,
+           frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0, frames_entered ? (double)prepare_us / frames_entered / 1000.0 : 0.0,
            frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0, (unsigned long long)words_merged,
            sw_slots, sw_imgs, sw_found_late, retargets_last, image_entries, retargets_overflow, fiber_switches, mirrors_in_scene, aliases_max);
     frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; fiber_switches = mirrors_in_scene = 0;

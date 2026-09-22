@@ -247,6 +247,7 @@ int xv_scene_thread_run(void *context)
     uint64_t t0 = xk_os_monotonic_us();
     int ov = overlap && gameplay_active(); in_flight_overlapped = ov;
     if (ov) { uint32_t top = scene_stack + SCENE_STACK_BYTES - 64u; for (unsigned i = 0; i < 4; ++i) X_W32(top + 4u * i) = X_M32(c->r[4] + 4u * i); ctx.r[4] = top; }   /* body frame on the private stack: return address + 8-byte argument copied */
+    if (ov) { extern void xv_render_view_prepare(void) __attribute__((weak)); if (xv_render_view_prepare) xv_render_view_prepare(); }   /* snapshot before the tick resumes */
     sceKernelSignalSema(go, 1);
     if (ov) { in_flight = 1; overlaps++; dispatched++; c->r[4] += 12; return 1; }   /* the body's `ret 8`: the owner continues */
     sceKernelWaitSema(done, 1, NULL);
@@ -455,6 +456,7 @@ int xv_scene_thread_run(void *context)
     uint64_t t0 = xk_os_monotonic_us();
     int ov = overlap && gameplay_active(); in_flight_overlapped = ov;
     if (ov) { uint32_t top = scene_stack + SCENE_STACK_BYTES - 64u; for (unsigned i = 0; i < 4; ++i) X_W32(top + 4u * i) = X_M32(c->r[4] + 4u * i); ctx.r[4] = top; }   /* body frame on the private stack: return address + 8-byte argument copied */
+    if (ov) { extern void xv_render_view_prepare(void) __attribute__((weak)); if (xv_render_view_prepare) xv_render_view_prepare(); }   /* snapshot before the tick resumes */
     sem_post(&go);
     if (ov) { in_flight = 1; overlaps++; dispatched++; c->r[4] += 12; return 1; }   /* the body's `ret 8`: the owner continues */
     while (sem_wait(&done) < 0 && errno == EINTR) {}
