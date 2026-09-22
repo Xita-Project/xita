@@ -131,11 +131,16 @@ static void configure(void)
     if (overlap) { scene_stack = xk_mem_alloc_high(SCENE_STACK_BYTES, 4096); if (!scene_stack) { XK_LOG("[scene-thread] no guest stack for the overlap; overlap off\n"); overlap = 0; } else XK_LOG("[scene-thread] overlap %d: private scene stack at %08X (kernel region)\n", overlap, scene_stack); }
     if (!enabled) { XK_LOG("[scene-thread] process-start disabled\n"); return; }
     go = sceKernelCreateSema("xv_scene_go", 0, 0, 1, NULL); done = sceKernelCreateSema("xv_scene_done", 0, 0, 1, NULL);
-    helper = go >= 0 && done >= 0 ? sceKernelCreateThread("xv_scene", helper_main, sceKernelGetThreadCurrentPriority(), 1024 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_ALL, NULL) : -1;
+    /* Core 1 only: the owner presents on core 2 and the runtime's capture/upload/texture workers and the remote server
+     * live on core 0. The helper polls its capture-completion waits every 50 us at the owner's priority; on core 0 it
+     * starved the worker it was waiting for (loads never finished) and the remote server (perf85-89). */
+    int core = 1; { const char *ce = getenv("XV_SCENE_THREAD_CORE"); if (ce && atoi(ce) >= 0 && atoi(ce) <= 2) core = atoi(ce); }
+    int mask = core == 0 ? SCE_KERNEL_CPU_MASK_USER_0 : core == 2 ? SCE_KERNEL_CPU_MASK_USER_2 : SCE_KERNEL_CPU_MASK_USER_1;
+    helper = go >= 0 && done >= 0 ? sceKernelCreateThread("xv_scene", helper_main, sceKernelGetThreadCurrentPriority(), 1024 * 1024, 0, mask, NULL) : -1;
     proxy_done = sceKernelCreateSema("xv_scene_proxy", 0, 0, 1, NULL);
     if (helper < 0 || sceKernelStartThread(helper, 0, NULL) < 0) { XK_LOG("[scene-thread] helper thread failed; disabled\n"); enabled = 0; return; }
     xv_scene_helper_thread = helper;
-    XK_LOG("[scene-thread] process-start enabled: BCB30 runs on helper thread %08x, owner waits\n", (unsigned)helper);
+    XK_LOG("[scene-thread] process-start enabled: BCB30 runs on helper thread %08x (core %d), owner waits\n", (unsigned)helper, core);
 }
 int xv_scene_thread_run(void *context)
 {
