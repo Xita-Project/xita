@@ -1392,3 +1392,27 @@ scripted input, so campaign entry needs the remote alive. `quit all`
 before `launch` is the working relaunch recipe; a console reboot
 followed by launch worked once the user unlocked the screen (a lock
 screen or system dialog after reboot cannot be dismissed remotely).
+
+## 44. Sept 22 morning: the proxy at the right place, and the remote's real symptom
+
+- The kernel-call proxy first hooked `xk_dispatch_magic` (xv_call), but
+  the shards call kernel imports DIRECTLY through `XV_HLE_CALL(slot,
+  xk_Name)` in `recomp/xv_recomp_protos.h`; xv_call only sees indirect
+  calls. perf98 hooks the macro: `XV_HLE_PROXY(fn)` routes `xk_*`
+  functions from the scene helper to the owner (`xv_scene_thread_proxy_hle`),
+  D3D HLEs (`xv_hle_*`) run on the helper as before. The generator
+  (`recompiler/xita_recomp.py`) emits the same guard. The header is
+  pinned by the query gate: the build script re-pins from the printed
+  hashes automatically now (overlap-candidate/build.py chain).
+- The remote server never died: perf97's iteration-count trace shows
+  its loop accepting and serving my probes every 5 s while the client
+  saw no reply. Responses are lost/late under the overlap (send path or
+  the handler), the server thread itself is fine. Workaround for
+  scripted input: `tools/vita_campaign_fire.py` sends pad requests
+  without waiting for replies; progress is read from the FTP log.
+- Log lines from the scene helper are dropped (counted) since perf96;
+  the logger's grouped-report ownership is by real thread id (perf93).
+- The Vita sometimes ignores `launch` (no new launcher.log line, no new
+  game log) until someone looks at the screen: seen after last night's
+  reboot and again 14:42 UTC today. The plugin answers; the app does
+  not start. Unknown system dialog or lock.
