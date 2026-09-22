@@ -11,7 +11,7 @@ GUARD = '''    {   /* model-draw guard (tools/patch_model_draw_guard.py): see th
             if (shown < 8) { shown++; extern void xk_os_log(const char *, ...); uint32_t sp_ = c->r[4];
                 xk_os_log("[model-guard] tag index %04X (eax %08X ecx %08X edx %08X) entry %08X class %08X/%08X/%08X id %08X data %08X: nodes %08X -> skipped; ret %08X args %08X %08X %08X %08X\\n",
                           idx_, c->r[0], c->r[1], c->r[2], ent_, X_M32(ent_), X_M32(ent_ + 4u), X_M32(ent_ + 8u), X_M32(ent_ + 0xCu), tag_, nodes_, X_M32(sp_), X_M32(sp_ + 4u), X_M32(sp_ + 8u), X_M32(sp_ + 12u), X_M32(sp_ + 16u)); }
-            { static int ab = -1; if (ab < 0) { const char *e = getenv("XV_MODEL_GUARD_ABORT"); ab = e ? atoi(e) : 0; } if (ab) abort(); }   /* XV_MODEL_GUARD_ABORT=1: a core at the exact moment (bench root-causing) */
+            { extern char *getenv(const char *); extern int atoi(const char *); extern void abort(void); static int ab = -1; if (ab < 0) { const char *e = getenv("XV_MODEL_GUARD_ABORT"); ab = e ? atoi(e) : 0; } if (ab) abort(); }   /* XV_MODEL_GUARD_ABORT=1: a core at the exact moment (bench root-causing) */
             c->r[4] += 0x30u; return;   /* ret 2Ch */
         }
     }

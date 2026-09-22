@@ -61,6 +61,7 @@ static void view_copy(void *dst, const void *src, size_t n)
 #endif
     memcpy(dst, src, n);
 }
+static const char *array_words = "object,cluster";   /* XV_RENDER_VIEW_ARRAYS (mode 4) */
 static int all_mode;   /* XV_RENDER_VIEW_ALL: every game-state page listed up front; the view enters before any learning pass */
 static int thread_mode; static struct { uint8_t *img_base; uint32_t entries[1u << 20]; } *rt;
 #define VIEW_TABLE (thread_mode ? rt->entries : g_xpt)
@@ -176,9 +177,10 @@ void xv_render_view_configure(void)
          * reference under real overlap and the scene looped forever in A26B0). Costs one copy-in of the listed pages per
          * frame; learning passes are skipped. */
         const char *e = getenv("XV_RENDER_VIEW_ALL"); int all = e ? atoi(e) : 0; all_mode = all;
+        { const char *w = getenv("XV_RENDER_VIEW_ARRAYS"); if (w && *w) array_words = w; }
         if (all > 0) {
             unsigned n = phys_limit / XK_PAGE; if (n > L.phys_pages) n = L.phys_pages;
-            if (all == 3) n = 0;   /* object pool only: listed at the first gameplay enter (list_object_pool), so kernel-written completion words elsewhere stay live (perf104/105 hung: the scene polled a shadowed word) */
+            if (all >= 3) n = 0;   /* object pool only (4: + named data arrays): listed at the first gameplay enter (list_object_pool), so kernel-written completion words elsewhere stay live (perf104/105 hung: the scene polled a shadowed word) */
             for (unsigned i = 0; i < n; ++i) learn_page(i);
             if (all == 2 && image_view) for (unsigned i = 0; i < L.image_pages; ++i) learn_page((L.image_off >> 12) + i);   /* mode 3 listed all 933 image pages by mistake (perf107: copy-in still 4.5 MB) */
             { const char *d = getenv("XV_RENDER_VIEW_DMA"); dma_mode = d ? atoi(d) : 0; }
@@ -253,12 +255,45 @@ static void restore_in_place(void)
 }
 /* All mode 3: the object header table and the physical page range spanned by the live objects' data (Halo allocates
  * them from one pool), read through the LIVE table (this runs before the view is bound). Once per map (table changes). */
+/* Halo data arrays in the physical game-state region: header = name[32], max u16 @0x20, element size u16 @0x22,
+ * signature 'd@t@' @0x28, data pointer @0x34 (the "object" table at 800B9370 has its signature at 800B938C). Logged
+ * once per map; mode 4 freezes the ones whose name contains a word of XV_RENDER_VIEW_ARRAYS (default
+ * "object,cluster"): the render list source that went stale under overlap (core.4415: a deleted object's datum in the
+ * list, its header slot already 0 in the snapshot) lives in the cluster/object reference arrays, not in the pool. */
+static int name_matches(const char *name)
+{
+    const char *w = array_words;
+    while (*w) { const char *e = w; while (*e && *e != ',') e++; size_t n = (size_t)(e - w);
+        for (const char *p = name; *p; ++p) if (strncmp(p, w, n) == 0) return 1;
+        w = *e ? e + 1 : e; }
+    return 0;
+}
+static void list_data_arrays(int freeze)
+{
+    unsigned n = 0, frozen = 0; char line[420]; int ln = 0;
+    for (uint32_t off = 0x28u; off + 0x38u <= phys_limit; off += 4u) {
+        const uint8_t *h = g_xram + off - 0x28u; uint32_t sig; memcpy(&sig, g_xram + off, 4); if (sig != 0x64407440u) continue;
+        uint16_t max, esz; memcpy(&max, h + 0x20, 2); memcpy(&esz, h + 0x22, 2); uint32_t data; memcpy(&data, h + 0x34, 4);
+        char name[33]; memcpy(name, h, 32); name[32] = 0; for (int i = 0; i < 32 && name[i]; ++i) if (name[i] < 32 || name[i] > 126) name[i] = '?';
+        int hit = freeze && name_matches(name); uint32_t hdr_va = 0x80000000u + off - 0x28u;
+        if (ln > 300) { XK_LOG("[render-view] arrays:%s\n", line); ln = 0; }
+        ln += snprintf(line + ln, sizeof line - ln, " |%s@%08X %u*%u->%08X%s", name, hdr_va, max, esz, data, hit ? " FROZEN" : "");
+        n++;
+        if (hit) {
+            frozen++;
+            for (uint32_t va = hdr_va & ~0xFFFu; va < hdr_va + 0x38u; va += XK_PAGE) { uint32_t o = g_xpt[va >> 12]; if (o < phys_limit) learn_page(o >> 12); }
+            if (data >= 0x80000000u && max && esz) for (uint32_t va = data & ~0xFFFu; va < data + (uint32_t)max * esz; va += XK_PAGE) { uint32_t o = g_xpt[va >> 12]; if (o < phys_limit) learn_page(o >> 12); }
+        }
+    }
+    if (ln) XK_LOG("[render-view] arrays:%s\n", line);
+    XK_LOG("[render-view] %u data arrays below %u MiB, %u frozen by name (%s); slots %u\n", n, phys_limit >> 20, frozen, array_words, slots_used);
+}
 static uint32_t pool_table_seen, pool_lo = 0xFFFFFFFFu, pool_hi;
 static void list_object_pool(void)
 {
     uint32_t table = X_IMG32(0x2FC6ACu); if (!table) return;
     uint32_t base = X_M32(table + 0x34u); unsigned max = X_M16(table + 0x20u); if (!base || !max || max > 4096u) return;
-    if (table != pool_table_seen) { pool_table_seen = table; pool_lo = 0xFFFFFFFFu; pool_hi = 0; }
+    if (table != pool_table_seen) { pool_table_seen = table; pool_lo = 0xFFFFFFFFu; pool_hi = 0; list_data_arrays(all_mode == 4); }
     uint32_t lo = pool_lo, hi = pool_hi; unsigned live = 0;
     for (unsigned i = 0; i < max; ++i) { uint32_t e = base + i * 12u; if (!X_M16(e) || !X_M32(e + 8u)) continue; uint32_t o = X_M32(e + 8u); if (o < lo) lo = o; if (o + 0x1000u > hi) hi = o + 0x1000u; live++; }
     if (!live || (lo == pool_lo && hi == pool_hi)) return;   /* objects spawn as the level runs: the range grows, the listing follows it (every enter) */
@@ -278,7 +313,7 @@ static uint64_t prep_list_us, prep_copy_us, prep_pristine_us;   /* copy_in split
 static void copy_in(void)
 {
     uint64_t t0 = xk_os_monotonic_us();
-    if (all_mode == 3) list_object_pool();
+    if (all_mode >= 3) list_object_pool();
     uint64_t t1 = xk_os_monotonic_us(); prep_list_us += t1 - t0;
     full_frame = active_frames < 30 || (full_interval && active_frames % full_interval == 0);
     active_frames++;
