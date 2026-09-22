@@ -478,7 +478,8 @@ uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_
 {
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
     { extern int xv_scene_thread_no_yield(void); extern void xv_scene_thread_note_suppressed_yield(uint32_t, int);
-      if (xv_scene_thread_no_yield()) { xv_scene_thread_note_suppressed_yield(objs && n ? objs[0]->guest : 0, 1); return STATUS_TIMEOUT; } }   /* helper: never the scheduler (the census saw no such wait in the scene; counted if it happens) */
+      extern uint32_t xv_scene_thread_proxy_wait(xk_obj **, int, int, const int64_t *);
+      if (xv_scene_thread_no_yield()) { xv_scene_thread_note_suppressed_yield(objs && n ? objs[0]->guest : 0, 1); return xv_scene_thread_proxy_wait(objs, n, wait_all, timeout); } }   /* helper: the owner performs the wait (proxy), never the scheduler from here */
 #endif
     xk_thread *t = xk_cur;
     if (alertable && t->napc) { xk_apc_deliver(&t->ctx); return STATUS_USER_APC; }

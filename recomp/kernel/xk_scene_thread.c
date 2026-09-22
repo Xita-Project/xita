@@ -64,9 +64,9 @@ int xv_scene_thread_no_yield(void) { return in_flight_overlapped && xv_scene_thr
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { suppressed_yields++; if (blocking) { suppressed_waits++; suppressed_eip = eip; } }
 static void overlap_report(void)
 {
-    if (overlap) XK_LOG("[scene-overlap] dispatched-without-wait %u, joins at present %u / next dispatch %u / owner d3d %u, suppressed helper yields %u (blocking %u, last eip %X)\n",
-                        overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits, suppressed_eip);
-    overlaps = joins_present = joins_dispatch = joins_d3d = suppressed_yields = suppressed_waits = 0;
+    if (overlap) XK_LOG("[scene-overlap] dispatched-without-wait %u, joins at present %u / next dispatch %u / owner d3d %u, proxy waits %u, suppressed helper yields %u (blocking %u, last eip %X)\n",
+                        overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits, suppressed_eip);
+    overlaps = joins_present = joins_dispatch = joins_d3d = proxy_waits = suppressed_yields = suppressed_waits = 0;
     if (owner_d3d_n) {
         char line[400]; int ln = snprintf(line, sizeof line, "[scene-owner-d3d] owner-side calls:");
         for (unsigned i = 0; i < owner_d3d_n; ++i) { if (ln > 330) { XK_LOG("%s\n", line); ln = snprintf(line, sizeof line, "[scene-owner-d3d]  "); } ln += snprintf(line + ln, sizeof line - ln, " %s %u", owner_d3d[i].name, owner_d3d[i].n); }
@@ -74,7 +74,28 @@ static void overlap_report(void)
         XK_LOG("%s\n", line); owner_d3d_n = 0; owner_d3d_over = 0;
     }
 }
+/* Proxy wait: a guest wait (WaitForSingleObject...) inside an overlapped scene must not enter the scheduler from the
+ * helper. The helper posts the request and parks on a host semaphore; the owner, idle in join(), performs the wait on
+ * its own guest thread record (the scene *is* thread 8), stores the result and releases the helper. Other fibers run
+ * while the owner is parked in the wait, so I/O completions the scene waits for still arrive (perf87: the first
+ * loading-screen scene waited on an event the immediate-timeout answer never satisfied; the owner joined forever). */
+static struct { xk_obj **objs; int n, wait_all; const int64_t *timeout; uint32_t result; } proxy; static volatile int proxy_pending; static unsigned proxy_waits;
+uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_t *timeout);
+static SceUID proxy_done = -1;
 int xv_scene_thread_on_helper(void) { return helper >= 0 && sceKernelGetThreadId() == helper; }
+uint32_t xv_scene_thread_proxy_wait(xk_obj **objs, int n, int wait_all, const int64_t *timeout)
+{
+    proxy.objs = objs; proxy.n = n; proxy.wait_all = wait_all; proxy.timeout = timeout; proxy.result = 0;
+    __atomic_store_n(&proxy_pending, 1, __ATOMIC_RELEASE);
+    sceKernelWaitSema(proxy_done, 1, NULL);
+    return proxy.result;
+}
+static void proxy_service(void)
+{
+    if (!__atomic_load_n(&proxy_pending, __ATOMIC_ACQUIRE)) return;
+    proxy.result = xk_wait(proxy.objs, proxy.n, proxy.wait_all, 0, proxy.timeout); proxy_waits++;
+    __atomic_store_n(&proxy_pending, 0, __ATOMIC_RELEASE); sceKernelSignalSema(proxy_done, 1);
+}
 static void join(unsigned *counter)
 {
     if (!in_flight) return;
@@ -82,7 +103,7 @@ static void join(unsigned *counter)
     /* The owner is a guest fiber holding the single runner: a blocking host wait here starves the streaming and sound
      * fibers the scene may be waiting on (lockstep runs deadlocked at the a10 load). Poll, and park in the guest
      * scheduler between polls so those fibers run. */
-    while (sceKernelPollSema(done, 1) < 0) xk_sleep_us(100);
+    while (sceKernelPollSema(done, 1) < 0) { proxy_service(); xk_sleep_us(100); }
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; depth = 0; (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -111,6 +132,7 @@ static void configure(void)
     if (!enabled) { XK_LOG("[scene-thread] process-start disabled\n"); return; }
     go = sceKernelCreateSema("xv_scene_go", 0, 0, 1, NULL); done = sceKernelCreateSema("xv_scene_done", 0, 0, 1, NULL);
     helper = go >= 0 && done >= 0 ? sceKernelCreateThread("xv_scene", helper_main, sceKernelGetThreadCurrentPriority(), 1024 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_ALL, NULL) : -1;
+    proxy_done = sceKernelCreateSema("xv_scene_proxy", 0, 0, 1, NULL);
     if (helper < 0 || sceKernelStartThread(helper, 0, NULL) < 0) { XK_LOG("[scene-thread] helper thread failed; disabled\n"); enabled = 0; return; }
     xv_scene_helper_thread = helper;
     XK_LOG("[scene-thread] process-start enabled: BCB30 runs on helper thread %08x, owner waits\n", (unsigned)helper);
@@ -189,9 +211,9 @@ int xv_scene_thread_no_yield(void) { return in_flight_overlapped && xv_scene_thr
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { suppressed_yields++; if (blocking) { suppressed_waits++; suppressed_eip = eip; } }
 static void overlap_report(void)
 {
-    if (overlap) XK_LOG("[scene-overlap] dispatched-without-wait %u, joins at present %u / next dispatch %u / owner d3d %u, suppressed helper yields %u (blocking %u, last eip %X)\n",
-                        overlaps, joins_present, joins_dispatch, joins_d3d, suppressed_yields, suppressed_waits, suppressed_eip);
-    overlaps = joins_present = joins_dispatch = joins_d3d = suppressed_yields = suppressed_waits = 0;
+    if (overlap) XK_LOG("[scene-overlap] dispatched-without-wait %u, joins at present %u / next dispatch %u / owner d3d %u, proxy waits %u, suppressed helper yields %u (blocking %u, last eip %X)\n",
+                        overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits, suppressed_eip);
+    overlaps = joins_present = joins_dispatch = joins_d3d = proxy_waits = suppressed_yields = suppressed_waits = 0;
     if (owner_d3d_n) {
         char line[400]; int ln = snprintf(line, sizeof line, "[scene-owner-d3d] owner-side calls:");
         for (unsigned i = 0; i < owner_d3d_n; ++i) { if (ln > 330) { XK_LOG("%s\n", line); ln = snprintf(line, sizeof line, "[scene-owner-d3d]  "); } ln += snprintf(line + ln, sizeof line - ln, " %s %u", owner_d3d[i].name, owner_d3d[i].n); }
@@ -199,13 +221,34 @@ static void overlap_report(void)
         XK_LOG("%s\n", line); owner_d3d_n = 0; owner_d3d_over = 0;
     }
 }
+/* Proxy wait: a guest wait (WaitForSingleObject...) inside an overlapped scene must not enter the scheduler from the
+ * helper. The helper posts the request and parks on a host semaphore; the owner, idle in join(), performs the wait on
+ * its own guest thread record (the scene *is* thread 8), stores the result and releases the helper. Other fibers run
+ * while the owner is parked in the wait, so I/O completions the scene waits for still arrive (perf87: the first
+ * loading-screen scene waited on an event the immediate-timeout answer never satisfied; the owner joined forever). */
+static struct { xk_obj **objs; int n, wait_all; const int64_t *timeout; uint32_t result; } proxy; static volatile int proxy_pending; static unsigned proxy_waits;
+uint32_t xk_wait(xk_obj **objs, int n, int wait_all, int alertable, const int64_t *timeout);
+static sem_t proxy_done;
 int xv_scene_thread_on_helper(void) { return helper_valid && pthread_equal(pthread_self(), helper); }
+uint32_t xv_scene_thread_proxy_wait(xk_obj **objs, int n, int wait_all, const int64_t *timeout)
+{
+    proxy.objs = objs; proxy.n = n; proxy.wait_all = wait_all; proxy.timeout = timeout; proxy.result = 0;
+    __atomic_store_n(&proxy_pending, 1, __ATOMIC_RELEASE);
+    while (sem_wait(&proxy_done) < 0 && errno == EINTR) {}
+    return proxy.result;
+}
+static void proxy_service(void)
+{
+    if (!__atomic_load_n(&proxy_pending, __ATOMIC_ACQUIRE)) return;
+    proxy.result = xk_wait(proxy.objs, proxy.n, proxy.wait_all, 0, proxy.timeout); proxy_waits++;
+    __atomic_store_n(&proxy_pending, 0, __ATOMIC_RELEASE); sem_post(&proxy_done);
+}
 static void join(unsigned *counter)
 {
     if (!in_flight) return;
     uint64_t t0 = xk_os_monotonic_us();
     /* see the Vita port: poll and park in the guest scheduler so the other fibers run while the owner waits */
-    while (sem_trywait(&done) < 0) xk_sleep_us(100);
+    while (sem_trywait(&done) < 0) { proxy_service(); xk_sleep_us(100); }
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; __atomic_store_n(&depth, 0, __ATOMIC_RELEASE); (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -239,7 +282,7 @@ static void configure(void)
      * contiguous allocation short on the Vita (perf85/86: the load never completed under the overlap; fine with it off) */
     if (overlap) { scene_stack = xk_mem_alloc_high(SCENE_STACK_BYTES, 4096); if (!scene_stack) { XK_LOG("[scene-thread] no guest stack for the overlap; overlap off\n"); overlap = 0; } else XK_LOG("[scene-thread] overlap %d: private scene stack at %08X (kernel region)\n", overlap, scene_stack); }
     if (!enabled) { XK_LOG("[scene-thread] process-start disabled\n"); return; }
-    if (sem_init(&go, 0, 0) || sem_init(&done, 0, 0) || pthread_create(&helper, NULL, helper_main, NULL)) { XK_LOG("[scene-thread] helper thread failed; disabled\n"); enabled = 0; return; }
+    if (sem_init(&go, 0, 0) || sem_init(&done, 0, 0) || sem_init(&proxy_done, 0, 0) || pthread_create(&helper, NULL, helper_main, NULL)) { XK_LOG("[scene-thread] helper thread failed; disabled\n"); enabled = 0; return; }
     helper_valid = 1;
     XK_LOG("[scene-thread] process-start enabled (host pthread): BCB30 runs on a helper thread, owner waits\n");
 }
@@ -279,6 +322,7 @@ int xv_scene_thread_on_helper(void) { return 0; }
 int xv_scene_thread_no_yield(void) { return 0; }
 void xv_scene_thread_join(void) {}
 void xv_scene_thread_join_owner(void) {}
+uint32_t xv_scene_thread_proxy_wait(void *objs, int n, int wait_all, const void *timeout) { (void)objs; (void)n; (void)wait_all; (void)timeout; return 0x102; }
 int xv_scene_thread_present_policy(void) { return 0; }
 void xv_scene_thread_d3d_call(const char *name) { (void)name; }
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { (void)eip; (void)blocking; }
