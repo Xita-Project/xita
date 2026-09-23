@@ -111,6 +111,8 @@ static void phase_report(unsigned frames)
 }
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD && defined(__vita__)
 #include <psp2/kernel/threadmgr.h>
+static void ws_start(void);
+#define ws_start_fwd ws_start
 #ifndef XV_SCENE_THREAD_DEFAULT
 #define XV_SCENE_THREAD_DEFAULT 0
 #endif
@@ -379,6 +381,7 @@ static void configure(void)
     helper = go >= 0 && done >= 0 ? sceKernelCreateThread("xv_scene", helper_main, sceKernelGetThreadCurrentPriority(), 1024 * 1024, 0, mask, NULL) : -1;
     proxy_done = sceKernelCreateSema("xv_scene_proxy", 0, 0, 1, NULL);
     if (helper < 0 || sceKernelStartThread(helper, 0, NULL) < 0) { XK_LOG("[scene-thread] helper thread failed; disabled\n"); enabled = 0; return; }
+    ws_start_fwd();
     xv_scene_helper_thread = helper;
     XK_LOG("[scene-thread] process-start enabled: BCB30 runs on helper thread %08x (core %d), owner waits\n", (unsigned)helper, core);
     proxy_fiber_start();
@@ -407,6 +410,61 @@ int xv_scene_thread_run(void *context)
     depth = 0; dispatched++;
     return 1;
 }
+/* Scene wait sampler (XV_SCENE_WAIT_SAMPLE, default 1): every 500 us while a scene is in flight, read the helper's
+ * status from the kernel (running / ready = preempted / waiting on which object). perf154: the helper used 60-62 ms of
+ * CPU per scene but took 73-75 ms of wall time. */
+static SceUID ws_thread = -1; static volatile unsigned ws_total, ws_run, ws_ready, ws_wait, ws_other;
+static struct { SceUID id; unsigned type; unsigned n; } ws_tab[16];
+static int ws_main(SceSize args, void *argp)
+{
+    (void)args; (void)argp;
+    for (;;) {
+        sceKernelDelayThread(500);
+        if (!in_flight || helper < 0) continue;
+        SceKernelThreadInfo ti; memset(&ti, 0, sizeof ti); ti.size = sizeof ti;
+        if (sceKernelGetThreadInfo(helper, &ti) < 0) continue;
+        ws_total++;
+        if (ti.status & SCE_THREAD_RUNNING) ws_run++;
+        else if (ti.status & SCE_THREAD_READY) ws_ready++;
+        else if (ti.status & SCE_THREAD_WAITING) {
+            ws_wait++; unsigned i;
+            for (i = 0; i < 16; ++i) if (ws_tab[i].n && ws_tab[i].id == ti.waitId && ws_tab[i].type == ti.waitType) { ws_tab[i].n++; break; }
+            if (i == 16) for (i = 0; i < 16; ++i) if (!ws_tab[i].n) { ws_tab[i].id = ti.waitId; ws_tab[i].type = ti.waitType; ws_tab[i].n = 1; break; }
+        } else ws_other++;
+    }
+    return 0;
+}
+static void ws_start(void)
+{
+    const char *e = getenv("XV_SCENE_WAIT_SAMPLE"); if (e && !atoi(e)) return;
+    ws_thread = sceKernelCreateThread("xv_scene_wait_sampler", ws_main, 64, 8 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL);
+    if (ws_thread >= 0) sceKernelStartThread(ws_thread, 0, NULL);
+}
+static void ws_name(SceUID id, char *out, size_t n)
+{
+    SceKernelSemaInfo si; memset(&si, 0, sizeof si); si.size = sizeof si;
+    if (id > 0 && sceKernelGetSemaInfo(id, &si) >= 0) { snprintf(out, n, "sema:%s", si.name); return; }
+    SceKernelEventFlagInfo ei; memset(&ei, 0, sizeof ei); ei.size = sizeof ei;
+    if (id > 0 && sceKernelGetEventFlagInfo(id, &ei) >= 0) { snprintf(out, n, "flag:%s", ei.name); return; }
+    SceKernelMutexInfo mi; memset(&mi, 0, sizeof mi); mi.size = sizeof mi;
+    if (id > 0 && sceKernelGetMutexInfo(id, &mi) >= 0) { snprintf(out, n, "mutex:%s", mi.name); return; }
+    snprintf(out, n, "uid:%08X", (unsigned)id);
+}
+static void ws_report(void)
+{
+    unsigned t = ws_total; if (!t) return;
+    char line[440]; int ln = snprintf(line, sizeof line, "[scene-wait] %u samples in flight: running %.0f%% ready %.0f%% waiting %.0f%%; waits:", t, 100.0 * ws_run / t, 100.0 * ws_ready / t, 100.0 * ws_wait / t);
+    for (unsigned k = 0; k < 6; ++k) {
+        unsigned best = 16; for (unsigned i = 0; i < 16; ++i) if (ws_tab[i].n && (best == 16 || ws_tab[i].n > ws_tab[best].n)) best = i;
+        if (best == 16) break;
+        char nm[48]; ws_name(ws_tab[best].id, nm, sizeof nm);
+        ln += snprintf(line + ln, sizeof line - ln, " %s(type %u) %.1f%%", nm, ws_tab[best].type, 100.0 * ws_tab[best].n / t);
+        ws_tab[best].n = 0;
+        if (ln > 400) break;
+    }
+    XK_LOG("%s\n", line);
+    memset(ws_tab, 0, sizeof ws_tab); ws_total = ws_run = ws_ready = ws_wait = ws_other = 0;
+}
 void xv_scene_thread_report(unsigned frames)
 {
     if (enabled <= 0) return;
@@ -420,6 +478,7 @@ void xv_scene_thread_report(unsigned frames)
               (double)scene_wall_us / scene_wall_n / 1000.0 - (double)(run - last_run) / frames / 1000.0);
           last_run = run; } }
     scene_wall_us = 0; scene_wall_n = 0;
+    ws_report();
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
     scene_census_report(); overlap_report(); proxy_report(); phase_report(frames); { extern void xv_hle_time_report(unsigned) __attribute__((weak)); if (xv_hle_time_report) xv_hle_time_report(frames); }
 }
