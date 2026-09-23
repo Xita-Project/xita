@@ -362,6 +362,7 @@ static int helper_main(SceSize args, void *argp)
         if (sceKernelWaitSema(go, 1, NULL) < 0) return -1;
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
         scene_abandon_armed = 0;
+        { extern void xd3d_present_flush_helper(void) __attribute__((weak)); if (xd3d_present_flush_helper) xd3d_present_flush_helper(); }   /* the owner's deferred Present of this frame, off its critical path */
         slow_t_end = xk_os_monotonic_us();
         sceKernelSignalSema(done, 1);
     }

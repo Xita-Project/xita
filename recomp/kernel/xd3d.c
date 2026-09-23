@@ -633,8 +633,27 @@ void xv_hle_time_report(unsigned frames)
     for (unsigned i = 0; i < hle_t_n; ++i) { hle_t[i].us = 0; hle_t[i].n = 0; }
 }
 static void hle_timing_init(void) { static int done; if (!done) { done = 1; const char *e = getenv("XV_HLE_TIMING"); xv_hle_timing = e ? atoi(e) : 0; if (xv_hle_timing) XK_LOG("[hle-time] timing on (%s)\n", e); } }
-static unsigned g_present_deferred;
-void xd3d_present_flush(void) { if (g_present_deferred) { unsigned f = g_present_deferred; g_present_deferred = 0; xd3d_r_present(f, 0); } }   /* overlap mode 2: at the join */
+static unsigned g_present_deferred, helper_presents;
+void xd3d_present_flush(void)   /* overlap mode 2: at the join */
+{
+    unsigned f = __atomic_exchange_n(&g_present_deferred, 0, __ATOMIC_ACQ_REL);
+    if (f) xd3d_r_present(f, 0);
+    { extern void xd3d_r_present_owner_tail(void) __attribute__((weak)); if (xd3d_r_present_owner_tail) xd3d_r_present_owner_tail(); }   /* reports a helper-side present left for the owner */
+}
+/* Scene helper, after the scene body and before `done` (Vita, XV_HELPER_PRESENT default 1): the owner's Present for this
+ * frame normally arrives while the scene is still recording, so the device present (EndFrame, publish, BeginFrame,
+ * ~0.7 ms) runs here instead of on the owner between noticing `done` and signalling the next `go`. The exchange decides
+ * who presents; a Present that arrives after this check is flushed at the owner's join as before. */
+void xd3d_present_flush_helper(void)
+{
+#if defined(__vita__)
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("XV_HELPER_PRESENT"); on = !e || atoi(e) != 0; }
+    if (!on) return;
+    unsigned f = __atomic_exchange_n(&g_present_deferred, 0, __ATOMIC_ACQ_REL);
+    if (f) { helper_presents++; xd3d_r_present(f, 0); }
+#endif
+}
 void xv_hle_D3DDevice_Present(xctx *c)
 { XD3D_COUNT(xd3d_present_name); hle_timing_init();
     int defer_ = 0;
@@ -665,7 +684,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
     hist_level_track();
     XV_CLIP_TRIAL_PRESENT(c);
     XV_POLYGON_EDGE_TRIAL_PRESENT(c);
-    { XV_LIGHT_CENSUS_PRESENT_SCOPE(c); if (defer_) g_present_deferred = g_dev.frame; else xd3d_r_present(g_dev.frame, g_dev.draws); }
+    { XV_LIGHT_CENSUS_PRESENT_SCOPE(c); if (defer_) __atomic_store_n(&g_present_deferred, g_dev.frame, __ATOMIC_RELEASE); else xd3d_r_present(g_dev.frame, g_dev.draws); }
     if (g_dev.frame % 60 == 0) {
         extern int xv_log_report_begin_async_frame(unsigned) __attribute__((weak));
         extern void xv_log_report_end(void) __attribute__((weak));
@@ -675,6 +694,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
                material_sampler_groups[0], material_sampler_groups[1], material_sampler_groups[2], material_sampler_groups[3]);
         memset(material_sampler_groups, 0, sizeof material_sampler_groups);
 #endif
+        { unsigned hp = __atomic_exchange_n(&helper_presents, 0, __ATOMIC_ACQ_REL); if (hp) D3DLOG("[helper-present] %u of 60 device presents ran on the scene helper at scene end\n", hp); }
         xv_render_view_report(60); { extern void xv_scene_thread_report(unsigned); xv_scene_thread_report(60); } { extern void xv_crt_float_report(unsigned) __attribute__((weak)); if (xv_crt_float_report) xv_crt_float_report(60); } if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */
             const float (*m)[4] = g_vp_rows;

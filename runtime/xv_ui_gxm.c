@@ -1430,6 +1430,8 @@ static inline uint64_t t_us(void) { extern uint64_t xk_os_monotonic_us(void); re
 void xd3d_hist_small_check(unsigned frame, unsigned draws);
 uint64_t xv_t_present_us;
 static void xd3d_r_present_inner(unsigned frame, unsigned draws);
+static unsigned g_report_pending;   /* frame + 1: a helper-side present's 60-frame report, run at the owner's join */
+static void present_report(unsigned frame);
 void xd3d_r_present(unsigned frame, unsigned draws)
 {
     extern uint64_t xk_os_monotonic_us(void); uint64_t t0 = xk_os_monotonic_us(); xd3d_r_present_inner(frame, draws); xv_t_present_us += xk_os_monotonic_us() - t0;
@@ -1471,6 +1473,21 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
             (unsigned long long)((ps_[3] - ps_[2]) / 1000), (unsigned long long)((ps_[4] - ps_[3]) / 1000), (unsigned long long)((ps_[5] - ps_[4]) / 1000), (unsigned long long)((ps_[6] - ps_[5]) / 1000), (unsigned long long)((ps_[7] - ps_[6]) / 1000));
     }
     if (++g_t_frames == 60) {
+        /* A present on the scene helper (xd3d_present_flush_helper) leaves the reports to the owner's join: several of
+         * them (object jobs, owner phases) read owner-side state. */
+        { extern int xv_scene_thread_on_helper(void) __attribute__((weak));
+          if (xv_scene_thread_on_helper && xv_scene_thread_on_helper()) { __atomic_store_n(&g_report_pending, frame + 1u, __ATOMIC_RELEASE); return; } }
+        present_report(frame);
+    }
+}
+void xd3d_r_present_owner_tail(void)
+{
+    unsigned f = __atomic_exchange_n(&g_report_pending, 0, __ATOMIC_ACQ_REL);
+    if (f) present_report(f - 1u);
+}
+static void present_report(unsigned frame)
+{
+    {
         /* Measure the periodic report itself: its synchronous file writes
          * occur after t1 and are otherwise hidden in the next game interval. */
         uint64_t report_start=t_us();
