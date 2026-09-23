@@ -911,7 +911,7 @@ const SceGxmTexture *xv_ui_gxm_texture_pal(uint32_t hdr, uint32_t pal_guest);
 void xv_ui_gxm_apply_texture_options(SceGxmTexture *texture);
 int xv_ui_gxm_texture_opaque(const SceGxmTexture *texture);
 static const SceGxmTexture *texture_source[4];
-static unsigned sampler_hits, sampler_misses;
+static unsigned sampler_hits, sampler_misses, texture_source_memo_hits, texture_source_memo_misses;
 void xv_d3d_prep_cache_report(unsigned frames)
 {
     XV_LOG("[draw-scan] %u frames: enabled %d; %u index copies / %llu indices; %u constant checks / %u unchanged / %llu KiB checked; exact bytes, draw order preserved\n",
@@ -925,6 +925,8 @@ void xv_d3d_prep_cache_report(unsigned frames)
     index_reuse_report(frames);
     XV_LOG("[sampler-cache] %u frames: %u reused / %u prepared (texture validity still checked)\n", frames, sampler_hits, sampler_misses);
     sampler_hits = sampler_misses = 0;
+    XV_LOG("[texture-source-memo] %u frames: %u stage lookups reused / %u resolved (same header+palette as the previous draw, same frame)\n", frames, texture_source_memo_hits, texture_source_memo_misses);
+    texture_source_memo_hits = texture_source_memo_misses = 0;
     XV_LOG("[texture-prep] %u frames: %u stages prepared / %u unused skipped\n", frames, texture_stages_prepared, texture_stages_skipped);
     texture_stages_prepared = texture_stages_skipped = 0;
     XV_LOG("[depth-prepare] %u frames: enabled %d; %u draws omitted texture preparation using published shader proofs\n",
@@ -941,8 +943,20 @@ static const SceGxmTexture *texture_for(unsigned stage)
     static int enabled = -1;
     if (enabled < 0) { const char *e = getenv("XV_SAMPLER_CACHE"); enabled = !e || atoi(e) != 0; }
     const SceGxmTexture *src = NULL;
-    src = xv_d3d_render_target_texture(S.tex_guest[stage]);
-    if (!src) src = xv_ui_gxm_texture_pal(S.tex_guest[stage], S.pal_guest[stage]);
+    /* Per-frame source memo: consecutive draws mostly bind the same texture per stage (the 181 flare quads, the
+     * per-cluster BSP draws), and the render-target + palette-cache lookups (with their 1 KiB palette compares)
+     * were paid again for each. The cache entries are stable within a frame (no eviction pressure at 80 textures);
+     * the memo is keyed by the recording frame so render-target aliases and streamed uploads never cross frames. */
+    static uint32_t memo_hdr[4], memo_pal[4], memo_frame[4]; static const SceGxmTexture *memo_src[4]; static int memo_on = -1;
+    if (memo_on < 0) { const char *e = getenv("XV_TEXTURE_SOURCE_MEMO"); memo_on = e ? atoi(e) != 0 : 1; }
+    if (memo_on && memo_frame[stage] == g_build_frame + 1u && memo_hdr[stage] == S.tex_guest[stage] && memo_pal[stage] == S.pal_guest[stage]) {
+        src = memo_src[stage]; texture_source_memo_hits++;
+    } else {
+        src = xv_d3d_render_target_texture(S.tex_guest[stage]);
+        if (!src) src = xv_ui_gxm_texture_pal(S.tex_guest[stage], S.pal_guest[stage]);
+        memo_frame[stage] = g_build_frame + 1u; memo_hdr[stage] = S.tex_guest[stage]; memo_pal[stage] = S.pal_guest[stage]; memo_src[stage] = src;
+        texture_source_memo_misses++;
+    }
     texture_source[stage] = src;
     if (!src) return NULL;
     /* Always resolve the live texture first: streaming, palettes, render-target
