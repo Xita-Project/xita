@@ -1908,3 +1908,8 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   stable_frames never reaches 3. THE NATIVE OBJECT PASS HAS BEEN IDLE IN GAMEPLAY TOO since the overlap, not just in
   the cinematic. perf141 (tolerance: device frame - viewport frame <= 1) chained; with XV_OBJECT_JOBS_ANY_MODE=1 for
   the cinematic run. Expect [object-jobs] passes ~118/60 frames, jobs ~34 per pass, and the tick's 900E0 to drop.
+- perf141 (viewport gate relaxed + ANY_MODE): the object pass now engages in the cinematic and the freeze REPRODUCES
+  in the first window (10:59): `[object-jobs] STUCK owner-wait 4000..16000 ms: running 1 math_holder 0 worker service
+  words 0 0` - the math guard is FREE and no worker service is pending, so the workers are stuck on something else
+  inside a job (a guest wait inside the object update?). Watchdog core downloading (b4nkzjsmr); Pi yp7 (58 min clean
+  on the reverted wait) killed early to run the same build as yp8 for full worker backtraces under gdb.
