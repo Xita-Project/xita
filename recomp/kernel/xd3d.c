@@ -558,9 +558,12 @@ int xd3d_object_jobs_ready(void)
     static int any_mode=-1; if(any_mode<0){const char *e=getenv("XV_OBJECT_JOBS_ANY_MODE");any_mode=e?atoi(e)!=0:0;}
     int mode_ok=any_mode||mode==0x11E750u||mode==0x11DF50u;
     { static uint32_t reported_mode; if(!mode_ok&&mode!=reported_mode){reported_mode=mode;D3DLOG("[object-jobs] declined: director/camera mode %08X (accepted 0011E750/0011DF50; XV_OBJECT_JOBS_ANY_MODE=1 admits it)\n",mode);} }
-    if(xk_file_in_ui_map||!gg||!X_M8(gg)||!X_M8(gg+1)||X_M8(gg+2)||
-       X_M32(0x2E4000u)||!mode_ok||
-       g_vp_frame!=g_dev.frame-1u) { stable_frames=0;last_frame=g_dev.frame;return 0; }
+    unsigned why=(xk_file_in_ui_map?1u:0)|(!gg?2u:0)|(gg&&!X_M8(gg)?4u:0)|(gg&&!X_M8(gg+1)?8u:0)|(gg&&X_M8(gg+2)?16u:0)|
+                 (X_M32(0x2E4000u)?32u:0)|(!mode_ok?64u:0)|(g_vp_frame!=g_dev.frame-1u?128u:0);
+    { static unsigned reported_why=~0u; if(why!=reported_why){reported_why=why;
+        if(why)D3DLOG("[object-jobs] declined mask %02X (1 ui-map 2 no-gg 4 not-loaded 8 not-active 10 gg+2 20 word-2E4000 40 mode 80 vp-frame %u vs %u)\n",why,g_vp_frame,g_dev.frame);
+        else D3DLOG("[object-jobs] readiness conditions all met\n"); } }
+    if(why) { stable_frames=0;last_frame=g_dev.frame;return 0; }
     if(last_frame!=g_dev.frame) {last_frame=g_dev.frame;if(stable_frames<3)stable_frames++;}
     return stable_frames>=3;
 }
