@@ -1787,3 +1787,11 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
 - 00:20 CDT: Pi yp4 finished its full 2 h: one trap (the 1105E0 idiv at 62 min) abandoned as one dropped frame, no
   other event, run clean to the end. The trap bail-out is qualified on the Pi; the Vita has not run it yet (perf128 is
   built, not installed - see the recovery order above).
+- 08:15 CDT Sept 23: the full freeze-run log (xita.1.log, 6.4 MB, 50,630 lines, ends at 1357 s = my 22:42 quit)
+  says the GAME NEVER HUNG: frames presented at 10-12 fps to the end, the game-time counter (gg+C) advancing, the
+  camera moving with the user's stick (pad raw lx 236 ly 22 while cam went -44.98,18.25 -> -47.12,16.09), no fault
+  lines. Thread 24 (start CFDE0) waiting on "mutant obj .. owner t-1 cnt 0" is the steady state of EVERY overlap run
+  (p115/p118/perf121/perf127 alike, from the first storm) and the user played fine on p115, so it is not the cause.
+  What the user saw ("stuck", LiveArea reachable) plus the dead FTP and the app flagged corrupted after the reboot
+  points at the SYSTEM side (display/network/card), not the guest. Open: get the user's description (image frozen vs
+  input ignored), then reproduce on perf128 with XV_FREEZE_ABORT=20 (which only catches a stopped frame counter).
