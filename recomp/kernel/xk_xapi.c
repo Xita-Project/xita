@@ -225,7 +225,12 @@ static void xv_force_mp_start(xctx *c)
 }
 void xv_hle_XInputGetState(xctx *c)
 {
-    static uint32_t packet; xk_os_pad p; xk_os_pad_poll(&p);
+    static uint32_t packet; xk_os_pad p;
+    {   /* XV_HLE_TIMING: the pad poll on its own (perf117: 6 ms per call, unexplained) */
+        extern int xv_hle_timing; extern void xv_hle_time_add(const char *, uint64_t); extern uint64_t xk_os_monotonic_us(void);
+        if (xv_hle_timing) { uint64_t t0 = xk_os_monotonic_us(); xk_os_pad_poll(&p); xv_hle_time_add("XInputGetState:pad_poll", xk_os_monotonic_us() - t0); }
+        else xk_os_pad_poll(&p);
+    }
     uint32_t st = X_ARG(1);
     { static int held; int pressed = p.analog[0] && !held; held = p.analog[0] != 0;
       uint32_t host = X_M32(0x2E3628u), sess = X_M32(0x2E362Cu);
