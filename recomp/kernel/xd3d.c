@@ -827,7 +827,8 @@ void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawI
     g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_drop_rt()) xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); uint64_t elapsed = xk_os_monotonic_us() - t0; xv_t_draw_us += elapsed; XV_SCENE_DRAW_ELAPSED(elapsed); } c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_Begin(xctx *c)
 { XD3D_COUNT("D3DDevice_Begin");
-    { static int done; if (!done && xd3d_frame() > 1 && X_ARG(0) == 7 && getenv("XV_STACKDUMP")) {
+    { static int done; static int want = -1; if (want < 0) want = getenv("XV_STACKDUMP") != NULL;   /* was a getenv per Begin (205/frame) */
+      if (!done && want && xd3d_frame() > 1 && X_ARG(0) == 7) {
         done = 1; uint32_t sp = c->r[4];
         for (unsigned i = 0; i < 100; ++i) {
             uint32_t v = X_M32(sp + i * 4);
@@ -924,7 +925,8 @@ void xv_hle_D3DDevice_SetIndices(xctx *c) { XD3D_COUNT("D3DDevice_SetIndices"); 
     X_W32(D3D_G_INDEXDATA) = X_ARG(0) ? X_M32(X_ARG(0) + 4) : 0;
     if (xd3d_hist_active()) D3DLOG("[hist] SetIndices ib %08X (common %08X data %08X lock %08X) base %u | [18F17C] %08X\n", X_ARG(0), X_ARG(0) ? X_M32(X_ARG(0)) : 0, X_ARG(0) ? X_M32(X_ARG(0) + 4) : 0, X_ARG(0) ? X_M32(X_ARG(0) + 8) : 0, X_ARG(1), X_M32(0x18F17Cu)); c->r[0] = 0; X_RET(2); }
 void xv_hle_D3DDevice_SetTexture(xctx *c) { XD3D_COUNT("D3DDevice_SetTexture"); xd3d_state.texture[X_ARG(0) & 3] = X_ARG(1);
-    { static unsigned n; const char *e = getenv("XV_LOG_TEX"); if (e && n < 40 && xd3d_frame() >= (unsigned)atoi(e)) { n++; uint32_t t = X_ARG(1);
+    { static unsigned n; static const char *e; static int einit; if (!einit) { einit = 1; e = getenv("XV_LOG_TEX"); }   /* was a getenv per SetTexture (472/frame) */
+      if (e && n < 40 && xd3d_frame() >= (unsigned)atoi(e)) { n++; uint32_t t = X_ARG(1);
         xk_os_log("[tex] stage %u hdr %08X ret %08X : %08X %08X %08X %08X %08X | bd115 %08X %08X %08X | bd111 %08X %08X %08X\n", X_ARG(0), t, X_M32(c->r[4]),
             t ? X_M32(t) : 0, t ? X_M32(t + 4) : 0, t ? X_M32(t + 8) : 0, t ? X_M32(t + 12) : 0, t ? X_M32(t + 16) : 0,
             X_M32(0x80492CC8 + 0x24), X_M32(0x80492CC8 + 0x28), X_M32(0x80492CC8 + 0x2C), X_M32(0x80491D54 + 0x24), X_M32(0x80491D54 + 0x28), X_M32(0x80491D54 + 0x2C)); } }
