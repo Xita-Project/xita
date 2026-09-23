@@ -1687,3 +1687,29 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   The owner-wait fix (3e2dd53) does not cover it (no proxied call is pending: proxy fn nil). Same class as the Vita
   perf116/117 transition freeze. Open: who completes cache requests (which guest thread / native file thread) and why it
   cannot run while both sides spin; the helper's suppressed yields never let the owner's scheduler run the completer.
+
+## §54 Where the a10 cinematic frame goes (perf121/122, 21:00-21:35 CDT) and what 20 fps needs
+- perf121 (sparse snapshot reuse, 811a282) 8 min clean: 76-86 ms, 11.5-12.9 fps; same-phase windows vs perf120
+  averaged ~5 ms better (83.5 -> 78.6). `[vertex-capture]` 0 KiB copied, 0 reclaims, streams stage 10.4 -> 4.5 ms.
+- perf122 = perf121 + per-thread phase timers (ce69d09) + f_000BD420 (the owner's frame loop) instrumented; 6 min
+  clean, timers cost ~3 ms. THE SPLIT (60-frame window, ms/frame, inclusive):
+  tick side (owner): FA920 54.5-57.0 (the per-frame tick; the old [object-pass-scope] "1 completed 0" was broken
+  accounting), BCB30 29-29.5 (the scene dispatch + the join wait for the previous scene + render-view prepare),
+  7EDF0 0.4-1.6, FA500 0.8; scene side (helper): 5DBC0 74.9 / 5D990 74.1 (the scene), 54010 13.9-14.1 (10/frame,
+  the ordered callback dispatcher), 5B4A0 11.3-12.9 (17/frame, per model), 606B0 9.5-11.2, 60560 10.1, 62240 8.7
+  (182/frame, 48 us each), 5B760 7.9-8.8 (per-model loop), 5B710 6.6, 539C0 5.9, 92890 5.2, 54740 5.0, 602F0 4.1,
+  93C00 3.3, 93DD0 3.2, 544D0 3.3, D6B00 3.0, 542F0 2.8, D8C40 2.3, 28320 2.3. Draw HLE inside the scene ~14 ms
+  (draw-hle in the frame-time line), of which the stages are indices 3.9, streams 4.5, textures 2.9, program 1.8,
+  state 1.6.
+  So under the overlap: frame ~85 = scene 75 (helper, the wall) + ~10 ms not overlapped; the tick (55) hides under it.
+  The "[scene-thread] owner wait 1-3 ms" figure is NOT the join wait; the owner's BCB30 call (29 ms) is.
+- Index stage is not a trust win: `[index-reuse]` per 60 frames hits 3381 / rebuilt 3541 / ineligible 4528, compared
+  4 MB, reuploads 1.2 MB: the camera moves every frame so the visible-world index lists genuinely change.
+- HONEST: 20 fps in the cinematic = 50 ms = the scene must fall from 75 to ~40 ms AND the tick from 55 to <45.
+  Nothing left that is cheap: the draw HLE is ~14 of the 75, the other ~60 ms is the guest render code (ordered
+  passes 54010, per-model chain 5B760/5B4A0, 606B0/60560, 62240 per-object). That is the native rewrite of the
+  render loops or a second split of the scene across cores (§18 item 4): weeks, not an evening.
+- perf123 (built, skipped) / perf124 (running 21:33, 8 min): + the helper trap bail-out (82f149d) and FA920's callees
+  timed; read `[tick-phases]` for the tick split (object update vs the rest) - the only side with a possible cheap
+  lever left if one callee dominates and has a native path already (object jobs engage 1 pass/60 frames here).
+- Pi yp3 (trap bail-out build): 12 min clean at 21:33, no ABANDON yet (the yp2 trap came at ~25 min).
