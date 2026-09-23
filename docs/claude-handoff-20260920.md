@@ -1988,3 +1988,7 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   snapshot SLOWER (6.24 ms vs ~4.2: 4 runs per frame, 944 KiB at ~150 MB/s through sceDmacMemcpy). So placement is
   worth ~5 ms. Core loads with the plan: C0 37-39 %, C1 78-83 % (helper alone), C2 80-85 % (fibers).
   perf151 = same install, XV_RENDER_VIEW_DMA=0 XV_RENDER_VIEW_CLIB=1 (NEON copy of the runs).
+- perf151 (core plan + XV_RENDER_VIEW_DMA=0 XV_RENDER_VIEW_CLIB=1): early 75.0/76.8/75.6/75.4, steady
+  62.6/62.6/63.1/64.8/64.7/67.0 (mean 64.1, best 62.6 = 15.8 fps). Owner snapshot 4.61 ms (copy 4.15 = 944 KiB at
+  ~227 MB/s: sceClibMemcpy is no faster than newlib; the arena is cached USER_RW, this is the copy bandwidth).
+  sceDmacMemcpy is SLOWER (150 MB/s) - keep XV_RENDER_VIEW_DMA=0 with the run copy. perf152 (split copy) chained.
