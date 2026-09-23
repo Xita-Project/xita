@@ -6,6 +6,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <setjmp.h>
+/* A fatal guest trap on the helper (Pi yp2 20:37: idiv by [edi+34h] with edi=0x40 in f_001105E0, a torn/NULL object
+ * pointer) parked the helper in xv_trap's yield loop forever: the scene never finished, the game hung with nothing
+ * proxied. The helper now unwinds to its loop and finishes the frame as abandoned (the owner's join proceeds, the
+ * frame is dropped); xv_trap calls xv_scene_thread_abandon() when on the helper. Guest state the scene had half
+ * written stays as it is - a dropped frame, not a hang. */
+static jmp_buf scene_abandon_jmp; static volatile int scene_abandon_armed; static unsigned scene_abandons;
+int xv_scene_thread_on_helper(void);
+void xv_scene_thread_abandon(uint32_t eip)
+{
+    if (!scene_abandon_armed || !xv_scene_thread_on_helper()) return;
+    scene_abandons++;
+    XK_LOG("[scene-thread] ABANDON scene %u: guest trap at %08X on the helper; frame dropped, helper unwound\n", scene_abandons, eip);
+    longjmp(scene_abandon_jmp, 1);
+}
 
 /* Scene-yield census (both ports): every scheduler handoff taken while the scene body runs on the helper is
  * counted by the guest return address of the kernel call and whether the thread was blocking (state 1) or
@@ -288,7 +303,8 @@ static int helper_main(SceSize args, void *argp)
     { char m; helper_sp_hi = (uintptr_t)&m + 4096u; helper_sp_lo = helper_sp_hi - (1024u * 1024u + 8192u); }   /* the 1 MiB stack from sceKernelCreateThread, with margins */
     for (;;) {
         if (sceKernelWaitSema(go, 1, NULL) < 0) return -1;
-        f_000BCB30(&ctx);
+        if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
+        scene_abandon_armed = 0;
         sceKernelSignalSema(done, 1);
     }
 }
@@ -561,7 +577,8 @@ static void *helper_main(void *arg)
     (void)arg;
     for (;;) {
         while (sem_wait(&go) < 0 && errno == EINTR) {}
-        f_000BCB30(&ctx);
+        if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
+        scene_abandon_armed = 0;
         sem_post(&done);
     }
     return 0;

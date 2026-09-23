@@ -110,6 +110,8 @@ void xv_trap(xctx *c, uint32_t eip)
     { char sb[512]; int n = 0;                                 /* guest stack words that look like code addresses */
       for (unsigned i = 0; i < 64 && n < 480; ++i) { uint32_t w = X_M32(c->r[4] + 4 * i); if (w >= 0x11000 && w < 0x3A0000) n += snprintf(sb + n, sizeof sb - n, " %X", w); }
       XV_RT_LOG("TRAP stack code ptrs:%s\n", sb); }
+    { extern void xv_scene_thread_abandon(uint32_t) __attribute__((weak));   /* on the scene helper: unwind, drop the frame, never park (Pi yp2 hang) */
+      if (xv_scene_thread_abandon) xv_scene_thread_abandon(eip); }
     for (;;) {
         if (xk_yield) xk_yield(); else abort();
     }
