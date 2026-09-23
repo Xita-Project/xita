@@ -559,7 +559,7 @@ int xd3d_object_jobs_ready(void)
     int mode_ok=any_mode||mode==0x11E750u||mode==0x11DF50u;
     { static uint32_t reported_mode; if(!mode_ok&&mode!=reported_mode){reported_mode=mode;D3DLOG("[object-jobs] declined: director/camera mode %08X (accepted 0011E750/0011DF50; XV_OBJECT_JOBS_ANY_MODE=1 admits it)\n",mode);} }
     unsigned why=(xk_file_in_ui_map?1u:0)|(!gg?2u:0)|(gg&&!X_M8(gg)?4u:0)|(gg&&!X_M8(gg+1)?8u:0)|(gg&&X_M8(gg+2)?16u:0)|
-                 (X_M32(0x2E4000u)?32u:0)|(!mode_ok?64u:0)|(g_vp_frame!=g_dev.frame-1u?128u:0);
+                 (X_M32(0x2E4000u)?32u:0)|(!mode_ok?64u:0)|((uint32_t)(g_dev.frame-g_vp_frame)>1u?128u:0);   /* was != frame-1: with two sim ticks per rendered frame (overlap below 30 fps) every second tick saw the counters equal, the gate flapped and the 3-stable-frames requirement never completed (perf140: mask 80 alternating with all-met), so the native object pass idled */
     { static unsigned reported_why=~0u; if(why!=reported_why){reported_why=why;
         if(why)D3DLOG("[object-jobs] declined mask %02X (1 ui-map 2 no-gg 4 not-loaded 8 not-active 10 gg+2 20 word-2E4000 40 mode 80 vp-frame %u vs %u)\n",why,g_vp_frame,g_dev.frame);
         else D3DLOG("[object-jobs] readiness conditions all met\n"); } }
