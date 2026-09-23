@@ -1756,3 +1756,17 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   (13 fps). Beyond that the guest natives (63C00 math 2 ms, 539C0 4.5, 602F0 4.3, 544D0 3.2, D8C40 2.0, 27F40 2)
   and the 5B4A0/54010 pointer-called draw setup are what 50 ms needs.
 - Pi yp3 (trap bail-out build): 60 min, 1,791 windows clean (no trap/abandon/stall); yp4 2 h started 22:19.
+
+## §55 Gameplay freeze on perf127 (22:28 CDT) and the freeze watchdog
+- The user took the controls after the perf127 run and the game froze (image stuck; the system UI still worked, so an
+  app-level freeze, no core). The log (first 2.5 MB fetched before the FTP died; xita.1.log holds the rest) shows a
+  healthy cinematic at 12.6-13 fps to the last line at 544 s of runtime, then EVERY thread stopped logging at once,
+  including the [cpu] poller, and the FTP plugin died too. No STUCK / ABANDON / TRAP / [cs] marker. That is not the
+  guest-side hang classes fixed today; suspects: the logger lock (xv_logf) held by a thread that blocked, ux0 I/O
+  stalling (the fire script reads the 2.5 MB log over FTP every 30 s while the game writes it), or all cores busy at
+  guest priority. Recovery: vitacompanion `quit all` worked; the FTP data channel stays broken until a device reboot.
+- perf128 = perf127 + program-stage trim (94ec1fb) + freeze watchdog (cdad823): XV_FREEZE_ABORT=<seconds> makes a
+  native thread trap after that long without a presented frame, writing ux0:data/xita/freeze.txt first with sceIo, so
+  the next freeze produces a core dump with every thread. Run gameplay sessions with XV_FREEZE_ABORT=20.
+- Log fetch caveat: an FTP fetch of xita.log stops at 2,621,440 bytes (2.5 MiB, curl rc=18); resume with -C to get
+  the rest. The runtime rotates xita.log -> xita.1.log at every launch, so pull xita.1.log BEFORE relaunching.
