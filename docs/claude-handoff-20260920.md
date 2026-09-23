@@ -1992,3 +1992,8 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   62.6/62.6/63.1/64.8/64.7/67.0 (mean 64.1, best 62.6 = 15.8 fps). Owner snapshot 4.61 ms (copy 4.15 = 944 KiB at
   ~227 MB/s: sceClibMemcpy is no faster than newlib; the arena is cached USER_RW, this is the copy bandwidth).
   sceDmacMemcpy is SLOWER (150 MB/s) - keep XV_RENDER_VIEW_DMA=0 with the run copy. perf152 (split copy) chained.
+- Pi yp9 (perf141-equivalent harness: vp tolerance ON, no any-mode, corridor gameplay from the Vita save, 30 fps
+  paced so the pass runs every frame): 2 h, 3,584 windows, 0 abandon / trap / STUCK / job STOP / guard skip.
+- Visibility queries are not a scene wait: [visibility-wait] waits 0, [visibility-poll] pending 0 (perf151).
+- The user set PSVshell to 500 MHz but reports it seems broken; perf152's "game clocks" line will say what the game
+  actually runs at. Not pursued further per the user.
