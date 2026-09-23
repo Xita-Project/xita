@@ -2402,6 +2402,8 @@ void xv_d3d_frag_census_complete(uint32_t frame)
     enum { TOP=24, PS_TOP=12 };
     struct { uint32_t n; unsigned i; } top[TOP]; unsigned ntop=0;
     struct { int16_t entry; uint8_t kind, blend; uint32_t n, draws; } ps[64]; unsigned nps=0;
+    struct { uint16_t vs; uint32_t n, draws, empty, idx, empty_idx; } vsa[48]; unsigned nvsa=0;
+    uint64_t indices=0, empty_indices=0;
     uint64_t total=0, clears=0, back=0, rt=0, opaque=0, blended=0, nocolor=0, tail=0, tail_blended=0, queries=0;
     unsigned last_query=0, draws=0, empty=0, n=l->ncmds, switches=0, prev_frame=0, tail_switches=0;
     for (unsigned i=0;i<n;i++) if (l->cmds[i].kind==0 && l->cmds[i].visibility) last_query=i+1;
@@ -2422,6 +2424,10 @@ void xv_d3d_frag_census_complete(uint32_t frame)
         total+=v;
         if (c->kind==1) { clears+=v; continue; }
         draws++; if (!v) empty++;
+        indices+=c->index_count; if (!v) empty_indices+=c->index_count;
+        { unsigned k=0; while (k<nvsa && vsa[k].vs!=c->vs) k++;
+          if (k==nvsa && nvsa<48) { vsa[nvsa].vs=c->vs; vsa[nvsa].n=vsa[nvsa].draws=vsa[nvsa].empty=vsa[nvsa].idx=vsa[nvsa].empty_idx=0; nvsa++; }
+          if (k<nvsa) { vsa[k].n+=v; vsa[k].draws++; vsa[k].idx+=c->index_count; if (!v) { vsa[k].empty++; vsa[k].empty_idx+=c->index_count; } } }
         if (c->pass) rt+=v; else back+=v;
         int blend_on=c->blend!=BLEND_OPAQUE && c->blend<BLEND_NOCOLOR && g_blend_combo[c->blend].mask;
         if (c->blend==BLEND_NOCOLOR || !g_blend_combo[c->blend].mask) nocolor+=v; else if (blend_on) blended+=v; else opaque+=v;
@@ -2445,6 +2451,14 @@ void xv_d3d_frag_census_complete(uint32_t frame)
             t,top[t].i,(double)top[t].n/area,c->pass,c->blend,g_blend_combo[c->blend].src,g_blend_combo[c->blend].dst,g_blend_combo[c->blend].mask,
             c->ps_entry>=0?xv_ps_table[c->ps_entry].gxp:"-",c->fs_kind,c->depth_func_idx,c->depth_write,c->index_count,c->ntex,tw,th,
             c->ntex?(unsigned)sceGxmTextureGetFormat(&c->tex[0]):0u,c->atest&0x1FFFFu,c->depth_prepared);
+    }
+    XV_LOG("[frag-census]  indices %llu, of which %llu in zero-sample draws\n",(unsigned long long)indices,(unsigned long long)empty_indices);
+    for (unsigned a=0;a<16 && a<nvsa;a++) {
+        unsigned b=a; for (unsigned k=a+1;k<nvsa;k++) if (vsa[k].idx>vsa[b].idx) b=k;
+        typeof(vsa[0]) tmp=vsa[a]; vsa[a]=vsa[b]; vsa[b]=tmp;
+        const xv_vs_desc_t *d=vsa[a].vs<XV_MAX_VS?g_vs[vsa[a].vs].vs.desc:NULL;
+        XV_LOG("[frag-census]  vs %u %s: %u draws (%u zero-sample), %u indices (%u in zero-sample draws), %.2f screens\n",
+            vsa[a].vs,d&&d->gxp?d->gxp:"-",vsa[a].draws,vsa[a].empty,vsa[a].idx,vsa[a].empty_idx,(double)vsa[a].n/area);
     }
     for (unsigned a=0;a<PS_TOP && a<nps;a++) {
         unsigned b=a; for (unsigned k=a+1;k<nps;k++) if (ps[k].n>ps[b].n) b=k;
