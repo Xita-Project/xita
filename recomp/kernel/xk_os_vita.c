@@ -742,7 +742,13 @@ static int audio_thread_main(SceSize args, void *argp)
 int xk_os_audio_thread_start(void (*fn)(void *), void *arg)
 {
     (void)arg; static unsigned nth; char name[16]; snprintf(name, sizeof name, "xv_worker%u", nth++);
-    SceUID t = sceKernelCreateThread(name, audio_thread_main, 64, 64 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_ALL, NULL);
+    /* XV_AUDIO_CORE (default 0; -1 = any core): the mixer runs at priority 64, above every game thread; with any-core
+     * affinity it settled on core 1 and preempted the scene helper there (the steady cinematic's wall). Core 0 (the
+     * render pump's) runs ~50% busy. */
+    int mask = SCE_KERNEL_CPU_MASK_USER_0;
+    { const char *e = getenv("XV_AUDIO_CORE"); int core = e ? atoi(e) : 0;
+      mask = core < 0 ? SCE_KERNEL_CPU_MASK_USER_ALL : core == 1 ? SCE_KERNEL_CPU_MASK_USER_1 : core == 2 ? SCE_KERNEL_CPU_MASK_USER_2 : SCE_KERNEL_CPU_MASK_USER_0; }
+    SceUID t = sceKernelCreateThread(name, audio_thread_main, 64, 64 * 1024, 0, mask, NULL);
     if (t < 0) { xv_logf("[xk] thread %s create failed 0x%08X\n", name, t); return -1; }
     void (*fnv)(void *) = fn;
     int r = sceKernelStartThread(t, sizeof fnv, &fnv);
