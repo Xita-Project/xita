@@ -263,6 +263,33 @@ static void proxy_fiber_start(void)
 static xk_thread *proxy_fiber;   /* tentative; defined with the proxy fiber below */
 void xv_scene_thread_service(void) { if (!proxy_fiber && enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }   /* owner service point (xv_preempt) when no proxy fiber */   /* proxied calls run on the proxy fiber (proxy_fiber_main), never on the owner's fiber: a blocking one (a critical section held by a streaming thread that waits for the owner's tick) deadlocked the owner (Vita perf112 17:14) */   /* owner service point (xv_preempt) */
 static uint64_t stuck_logged_at;
+/* Slow scene frames (XV_SCENE_SLOW_MS, default 150): the user feels hitches of 150-730 ms in gameplay (Sept 23) that
+ * no other logger catches (the present-stall logger watches the owner's present, not the helper). While a scene runs
+ * past the threshold, log once what the helper is inside: guest stack code words, the last D3D HLE entered, its
+ * inline-answered yields (a yield-spin on a streamed resource) and proxied kernel calls, and the timed-function chain
+ * when XV_SCENE_PHASES=1; after the join, the scene's own duration. */
+static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static unsigned slow_yields_dispatch, slow_proxied_dispatch, slow_dispatch_serial, slow_logged_serial, slow_logs; static int slow_ms = -1;
+static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
+static void slow_check(void)
+{
+    if (slow_ms < 0) { const char *e = getenv("XV_SCENE_SLOW_MS"); slow_ms = e ? atoi(e) : 150; }
+    if (slow_ms <= 0 || slow_logged_serial == slow_dispatch_serial || slow_logs >= 80) return;
+    uint64_t now = xk_os_monotonic_us(); if (now - slow_t_dispatch < (uint64_t)slow_ms * 1000u) return;
+    slow_logged_serial = slow_dispatch_serial; slow_logs++;
+    extern const char *xv_hle_cur_name;
+    char line[420]; int ln = snprintf(line, sizeof line, "[scene-slow] scene %u running %llu ms: yields %u proxied %u last-hle %s esp %08X; stack code words:", slow_dispatch_serial,
+        (unsigned long long)((now - slow_t_dispatch) / 1000u), proxy_direct - slow_yields_dispatch, proxy_calls - slow_proxied_dispatch, xv_hle_cur_name ? xv_hle_cur_name : "-", ctx.r[4]);
+    uint32_t sp = ctx.r[4];
+    for (unsigned i = 0; i < 160 && ln < 400; ++i) { uint32_t w = X_M32(sp + 4u * i); if (w >= 0x10000u && w < 0x3B5000u) ln += snprintf(line + ln, sizeof line - ln, " %X", w); }
+    XK_LOG("%s\n", line);
+    if (phases > 0 && phase_depth[1]) { ln = snprintf(line, sizeof line, "[scene-slow]   timed chain (outer->inner):"); for (unsigned i = 0; i < phase_depth[1] && ln < 400; ++i) ln += snprintf(line + ln, sizeof line - ln, " %X", phase_addr[1][i]); XK_LOG("%s\n", line); }
+}
+static void slow_finish(void)
+{
+    if (slow_ms <= 0 || slow_logs >= 80) return;
+    uint64_t d = slow_t_end > slow_t_dispatch ? slow_t_end - slow_t_dispatch : 0;
+    if (d >= (uint64_t)slow_ms * 1000u) { slow_logs++; XK_LOG("[scene-slow] scene %u took %llu ms (dispatch -> done): yields %u proxied %u\n", slow_dispatch_serial, (unsigned long long)(d / 1000u), proxy_direct - slow_yields_dispatch, proxy_calls - slow_proxied_dispatch); }
+}
 static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: log the helper's guest state once (a poor man's backtrace: return-address candidates on its stack) and let the render view's watchdog restore the live mapping */
 {
     uint64_t now = xk_os_monotonic_us(); if (now - t0 < 3000000u || stuck_logged_at == t0) return;
@@ -310,7 +337,8 @@ static void join(unsigned *counter)
     /* The owner is a guest fiber holding the single runner: a blocking host wait here starves the streaming and sound
      * fibers the scene may be waiting on (lockstep runs deadlocked at the a10 load). Poll, and park in the guest
      * scheduler between polls so those fibers run. */
-    while (sceKernelPollSema(done, 1) < 0) { if (!proxy_fiber) proxy_service(); xk_sleep_us(200); stuck_check(t0); }   /* the proxy fiber services the helper's kernel calls; the owner only parks so the scheduler runs it and the streaming fibers */   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
+    while (sceKernelPollSema(done, 1) < 0) { if (!proxy_fiber) proxy_service(); xk_sleep_us(200); stuck_check(t0); slow_check(); }
+    slow_finish();   /* the proxy fiber services the helper's kernel calls; the owner only parks so the scheduler runs it and the streaming fibers */   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; depth = 0; (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -327,6 +355,7 @@ static int helper_main(SceSize args, void *argp)
         if (sceKernelWaitSema(go, 1, NULL) < 0) return -1;
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
         scene_abandon_armed = 0;
+        slow_t_end = xk_os_monotonic_us();
         sceKernelSignalSema(done, 1);
     }
 }
@@ -367,6 +396,7 @@ int xv_scene_thread_run(void *context)
     int ov = overlap && gameplay_active(); in_flight_overlapped = ov;
     if (ov) { uint32_t top = scene_stack + SCENE_STACK_BYTES - 64u; for (unsigned i = 0; i < 4; ++i) X_W32(top + 4u * i) = X_M32(c->r[4] + 4u * i); ctx.r[4] = top; }   /* body frame on the private stack: return address + 8-byte argument copied */
     if (ov) { extern void xv_render_view_prepare(void) __attribute__((weak)); if (xv_render_view_prepare) xv_render_view_prepare(); }   /* snapshot before the tick resumes */
+    slow_mark_dispatch();
     sceKernelSignalSema(go, 1);
     if (ov) { in_flight = 1; overlaps++; dispatched++; c->r[4] += 12; return 1; }   /* the body's `ret 8`: the owner continues */
     sceKernelWaitSema(done, 1, NULL);
@@ -534,6 +564,33 @@ static pthread_t owner_thread_self;   /* the thread that configured (owner); yie
 static xk_thread *proxy_fiber;   /* tentative; defined with the proxy fiber below */
 void xv_scene_thread_service(void) { if (!proxy_fiber && enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }   /* owner service point (xv_preempt) when no proxy fiber */   /* proxied calls run on the proxy fiber (proxy_fiber_main), never on the owner's fiber: a blocking one (a critical section held by a streaming thread that waits for the owner's tick) deadlocked the owner (Vita perf112 17:14) */
 static uint64_t stuck_logged_at;
+/* Slow scene frames (XV_SCENE_SLOW_MS, default 150): the user feels hitches of 150-730 ms in gameplay (Sept 23) that
+ * no other logger catches (the present-stall logger watches the owner's present, not the helper). While a scene runs
+ * past the threshold, log once what the helper is inside: guest stack code words, the last D3D HLE entered, its
+ * inline-answered yields (a yield-spin on a streamed resource) and proxied kernel calls, and the timed-function chain
+ * when XV_SCENE_PHASES=1; after the join, the scene's own duration. */
+static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static unsigned slow_yields_dispatch, slow_proxied_dispatch, slow_dispatch_serial, slow_logged_serial, slow_logs; static int slow_ms = -1;
+static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
+static void slow_check(void)
+{
+    if (slow_ms < 0) { const char *e = getenv("XV_SCENE_SLOW_MS"); slow_ms = e ? atoi(e) : 150; }
+    if (slow_ms <= 0 || slow_logged_serial == slow_dispatch_serial || slow_logs >= 80) return;
+    uint64_t now = xk_os_monotonic_us(); if (now - slow_t_dispatch < (uint64_t)slow_ms * 1000u) return;
+    slow_logged_serial = slow_dispatch_serial; slow_logs++;
+    extern const char *xv_hle_cur_name;
+    char line[420]; int ln = snprintf(line, sizeof line, "[scene-slow] scene %u running %llu ms: yields %u proxied %u last-hle %s esp %08X; stack code words:", slow_dispatch_serial,
+        (unsigned long long)((now - slow_t_dispatch) / 1000u), proxy_direct - slow_yields_dispatch, proxy_calls - slow_proxied_dispatch, xv_hle_cur_name ? xv_hle_cur_name : "-", ctx.r[4]);
+    uint32_t sp = ctx.r[4];
+    for (unsigned i = 0; i < 160 && ln < 400; ++i) { uint32_t w = X_M32(sp + 4u * i); if (w >= 0x10000u && w < 0x3B5000u) ln += snprintf(line + ln, sizeof line - ln, " %X", w); }
+    XK_LOG("%s\n", line);
+    if (phases > 0 && phase_depth[1]) { ln = snprintf(line, sizeof line, "[scene-slow]   timed chain (outer->inner):"); for (unsigned i = 0; i < phase_depth[1] && ln < 400; ++i) ln += snprintf(line + ln, sizeof line - ln, " %X", phase_addr[1][i]); XK_LOG("%s\n", line); }
+}
+static void slow_finish(void)
+{
+    if (slow_ms <= 0 || slow_logs >= 80) return;
+    uint64_t d = slow_t_end > slow_t_dispatch ? slow_t_end - slow_t_dispatch : 0;
+    if (d >= (uint64_t)slow_ms * 1000u) { slow_logs++; XK_LOG("[scene-slow] scene %u took %llu ms (dispatch -> done): yields %u proxied %u\n", slow_dispatch_serial, (unsigned long long)(d / 1000u), proxy_direct - slow_yields_dispatch, proxy_calls - slow_proxied_dispatch); }
+}
 static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: log the helper's guest state once (a poor man's backtrace: return-address candidates on its stack) and let the render view's watchdog restore the live mapping */
 {
     uint64_t now = xk_os_monotonic_us(); if (now - t0 < 3000000u || stuck_logged_at == t0) return;
@@ -579,7 +636,8 @@ static void join(unsigned *counter)
     if (!in_flight) return;
     uint64_t t0 = xk_os_monotonic_us();
     /* see the Vita port: poll and park in the guest scheduler so the other fibers run while the owner waits */
-    while (sem_trywait(&done) < 0) { if (!proxy_fiber) proxy_service(); xk_sleep_us(200); stuck_check(t0); }
+    while (sem_trywait(&done) < 0) { if (!proxy_fiber) proxy_service(); xk_sleep_us(200); stuck_check(t0); slow_check(); }
+    slow_finish();
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; __atomic_store_n(&depth, 0, __ATOMIC_RELEASE); (*counter)++;
     { extern void xd3d_present_flush(void) __attribute__((weak)); if (xd3d_present_flush) xd3d_present_flush(); }   /* mode 2: the deferred device present */
@@ -601,6 +659,7 @@ static void *helper_main(void *arg)
         while (sem_wait(&go) < 0 && errno == EINTR) {}
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
         scene_abandon_armed = 0;
+        slow_t_end = xk_os_monotonic_us();
         sem_post(&done);
     }
     return 0;
@@ -634,6 +693,7 @@ int xv_scene_thread_run(void *context)
     int ov = overlap && gameplay_active(); in_flight_overlapped = ov;
     if (ov) { uint32_t top = scene_stack + SCENE_STACK_BYTES - 64u; for (unsigned i = 0; i < 4; ++i) X_W32(top + 4u * i) = X_M32(c->r[4] + 4u * i); ctx.r[4] = top; }   /* body frame on the private stack: return address + 8-byte argument copied */
     if (ov) { extern void xv_render_view_prepare(void) __attribute__((weak)); if (xv_render_view_prepare) xv_render_view_prepare(); }   /* snapshot before the tick resumes */
+    slow_mark_dispatch();
     sem_post(&go);
     if (ov) { in_flight = 1; overlaps++; dispatched++; c->r[4] += 12; return 1; }   /* the body's `ret 8`: the owner continues */
     while (sem_wait(&done) < 0 && errno == EINTR) {}
