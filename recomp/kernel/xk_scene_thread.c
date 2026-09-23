@@ -272,6 +272,7 @@ static uint64_t stuck_logged_at;
  * inline-answered yields (a yield-spin on a streamed resource) and proxied kernel calls, and the timed-function chain
  * when XV_SCENE_PHASES=1; after the join, the scene's own duration. */
 static uint64_t notice_us, pre_go_us, join_exit_us; static unsigned notice_n, pre_go_n;
+static uint64_t join_park_us, join_park_max_us; static unsigned join_parks, join_hostwaits;   /* owner join: parked time, longest park, host-wait wakes */
 static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static unsigned slow_yields_dispatch, slow_proxied_dispatch, slow_dispatch_serial, slow_logged_serial, slow_logs; static int slow_ms = -1;
 static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
 int xv_scene_thread_helper_done(void) { return slow_t_end >= slow_t_dispatch; }   /* the dispatched scene has signalled done (its core is idle until the next go) */
@@ -344,7 +345,18 @@ static void join(unsigned *counter)
     /* The owner is a guest fiber holding the single runner: a blocking host wait here starves the streaming and sound
      * fibers the scene may be waiting on (lockstep runs deadlocked at the a10 load). Poll, and park in the guest
      * scheduler between polls so those fibers run. */
-    while (sceKernelPollSema(done, 1) < 0) { if (!proxy_fiber) proxy_service(); xk_sleep_us(200); stuck_check(t0); slow_check(); }
+    /* XV_JOIN_HOSTWAIT=<us> (opt-in): for the first <us> of the join, wait on `done` in the host (500 us slices) instead of
+     * parking the owner fiber in the guest scheduler, so the owner resumes the moment the helper finishes rather than
+     * after whichever guest fiber took the runner; past the budget it parks as before (the scene may need those fibers). */
+    { static int hostwait = -1; if (hostwait < 0) { const char *e = getenv("XV_JOIN_HOSTWAIT"); hostwait = e ? atoi(e) : 0; }
+      while (sceKernelPollSema(done, 1) < 0) {
+          if (!proxy_fiber) proxy_service();
+          uint64_t ps_ = xk_os_monotonic_us();
+          if (hostwait > 0 && ps_ - t0 < (uint64_t)hostwait) {
+              SceUInt to_ = 500; if (sceKernelWaitSema(done, 1, &to_) >= 0) { join_hostwaits++; break; }
+          } else xk_sleep_us(200);
+          uint64_t pd_ = xk_os_monotonic_us() - ps_; join_park_us += pd_; join_parks++; if (pd_ > join_park_max_us) join_park_max_us = pd_;
+          stuck_check(t0); slow_check(); } }
     { uint64_t now_ = xk_os_monotonic_us(); if (slow_t_end && now_ > slow_t_end && now_ - slow_t_end < 1000000u) { notice_us += now_ - slow_t_end; notice_n++; } join_exit_us = now_; }
     slow_finish();   /* the proxy fiber services the helper's kernel calls; the owner only parks so the scheduler runs it and the streaming fibers */   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
@@ -484,6 +496,9 @@ void xv_scene_thread_report(unsigned frames)
               (double)(run - last_run) / frames / 1000.0, (double)scene_wall_us / scene_wall_n / 1000.0, scene_wall_n,
               (double)scene_wall_us / scene_wall_n / 1000.0 - (double)(run - last_run) / frames / 1000.0,
               notice_n ? (double)notice_us / notice_n / 1000.0 : 0.0, pre_go_n ? (double)pre_go_us / pre_go_n / 1000.0 : 0.0);
+          XK_LOG("[scene-thread] owner join: %.2f parks/frame, parked %.2f ms/frame, longest park %.2f ms, host-wait wakes %u\n",
+              (double)join_parks / frames, (double)join_park_us / frames / 1000.0, join_park_max_us / 1000.0, join_hostwaits);
+          join_parks = join_hostwaits = 0; join_park_us = join_park_max_us = 0;
           notice_us = pre_go_us = 0; notice_n = pre_go_n = 0;
           last_run = run; } }
     scene_wall_us = 0; scene_wall_n = 0;
