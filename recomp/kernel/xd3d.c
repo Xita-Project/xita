@@ -558,8 +558,13 @@ int xd3d_object_jobs_ready(void)
     static int any_mode=-1; if(any_mode<0){const char *e=getenv("XV_OBJECT_JOBS_ANY_MODE");any_mode=e?atoi(e)!=0:0;}
     int mode_ok=any_mode||mode==0x11E750u||mode==0x11DF50u;
     { static uint32_t reported_mode; if(!mode_ok&&mode!=reported_mode){reported_mode=mode;D3DLOG("[object-jobs] declined: director/camera mode %08X (accepted 0011E750/0011DF50; XV_OBJECT_JOBS_ANY_MODE=1 admits it)\n",mode);} }
+    /* XV_OBJECT_JOBS_VP_TOLERANT=1 admits the pass with two sim ticks per rendered frame (viewport lag 0 or 1). Default
+     * off: perf144 showed the native pass 2-3x SLOWER than the guest path for the a10 cinematic's scripted objects
+     * (121 ms frames vs 67), so below 30 fps the exact frame-1 check stays as the gate until the pass is cheaper. */
+    static int vp_tol=-1; if(vp_tol<0){const char *e=getenv("XV_OBJECT_JOBS_VP_TOLERANT");vp_tol=e?atoi(e)!=0:0;}
+    uint32_t vp_lag=(uint32_t)(g_dev.frame-g_vp_frame), vp_allowed=vp_tol?1u:0u; if(!vp_tol&&vp_lag!=1u)vp_lag=2u;   /* exact frame-1 when not tolerant */
     unsigned why=(xk_file_in_ui_map?1u:0)|(!gg?2u:0)|(gg&&!X_M8(gg)?4u:0)|(gg&&!X_M8(gg+1)?8u:0)|(gg&&X_M8(gg+2)?16u:0)|
-                 (X_M32(0x2E4000u)?32u:0)|(!mode_ok?64u:0)|((uint32_t)(g_dev.frame-g_vp_frame)>1u?128u:0);   /* was != frame-1: with two sim ticks per rendered frame (overlap below 30 fps) every second tick saw the counters equal, the gate flapped and the 3-stable-frames requirement never completed (perf140: mask 80 alternating with all-met), so the native object pass idled */
+                 (X_M32(0x2E4000u)?32u:0)|(!mode_ok?64u:0)|(vp_lag>vp_allowed?128u:0);   /* was != frame-1: with two sim ticks per rendered frame (overlap below 30 fps) every second tick saw the counters equal, the gate flapped and the 3-stable-frames requirement never completed (perf140: mask 80 alternating with all-met), so the native object pass idled */
     { static unsigned reported_why=~0u; if(why!=reported_why){reported_why=why;
         if(why)D3DLOG("[object-jobs] declined mask %02X (1 ui-map 2 no-gg 4 not-loaded 8 not-active 10 gg+2 20 word-2E4000 40 mode 80 vp-frame %u vs %u)\n",why,g_vp_frame,g_dev.frame);
         else D3DLOG("[object-jobs] readiness conditions all met\n"); } }
