@@ -8,6 +8,7 @@
 # recomp/halo_image.bin), ~/xita/haloce (game dir), ~/xita/runs/<tag>.log + save-<tag>/ (removed at exit).
 # The same runtime knobs as tools/host_run.sh; pad script enters the campaign (a10 loads ~frame 500).
 # The Pi is ~10x slower than the x86 host and has no GPU: structure, counters, races and crashes only, never ms.
+# PI_CPUS=0,1 pins the run (taskset) so another harness (Halo 2 under ~/xita-h2, cores 2-3) can share the Pi.
 # PI_HARNESS=<local file> copies a fresh harness first.  A crash leaves a core in ~/xita (ulimit -c unlimited).
 # PI_SAVE=<name> runs on a persistent save tree ~/xita/saves/<name> (e.g. "vita": the Vita's save/ tree copied over
 # with profiles + checkpoints, so "Continue" resumes the same checkpoint on both benches) instead of a fresh temp dir;
@@ -21,7 +22,7 @@ save=runs/save-$tag; keep=0; [ -n "${PI_SAVE:-}" ] && { save=saves/$PI_SAVE; kee
 ssh pi "cd ~/xita && mkdir -p runs && { [ $keep = 1 ] || { rm -rf $save && mkdir -p $save; }; } && ulimit -c unlimited && \
   env XV_LEVEL=a10 XV_EXPERIMENTAL_OBJECT_JOBS=1 XV_OBJECT_JOB_WORKERS=2 XV_OWNER_PHASE=1 XV_THREADS=1 \
       XV_VERTEX_WORKER=1 XV_VERTEX_REFERENCES=1 XV_NATIVE_OBJECT_BASIS=1 XV_VERTEX_CAPTURE_RETAIN=1 \
-      XV_PAD=$pad $* timeout $secs ./harness halo_image.bin haloce $save > runs/$tag.log 2>&1; \
+      XV_PAD=$pad $* timeout $secs ${PI_CPUS:+taskset -c $PI_CPUS} ./harness halo_image.bin haloce $save > runs/$tag.log 2>&1; \
   rc=\$?; [ $keep = 1 ] || rm -rf $save; \
   echo \"rc=\$rc reports=\$(grep -c 'report at frame' runs/$tag.log) last=\$(grep 'report at frame' runs/$tag.log | tail -1 | sed 's/.*frame //')\"; \
   grep 'frame stats' runs/$tag.log | tail -1 | sed -E 's/.*frame stats: //' | cut -c1-160; \
