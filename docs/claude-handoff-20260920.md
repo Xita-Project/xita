@@ -1894,3 +1894,9 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   (6a6302f) admits that site too (XV_OBJECT_JOBS_SITE2=0 restores the old admission; `[object-jobs] site-2 ... jobs`
   counts). Expected: the 37 ms/frame of guest per-object updates move to the two worker lanes (tick 55 -> ~35).
   Unverified on the Pi (yp7 soak occupies it); watch NPC/vehicle behaviour and the guard/abandon counters.
+- perf138 (site-2 admitted) still `passes 0`: xd3d_object_jobs_ready() (recomp/kernel/xd3d.c) rejects the whole pass
+  unless the director/camera mode word at 0x271100 is 0x11E750 or 0x11DF50 (plus: not in the UI map, game_globals
+  loaded/active, [gg+2]==0, [0x2E4000]==0, viewport frame == device frame-1, 3 stable frames). The cinematic's mode is
+  neither, by design ("cinematic initialization has ordering dependencies"). perf139 (4c87abe) adds
+  XV_OBJECT_JOBS_ANY_MODE=1 (opt-in) and logs the declined mode once (`[object-jobs] declined: director/camera mode`).
+  perf138 itself: 67.6-80.6 ms, same as perf137.
