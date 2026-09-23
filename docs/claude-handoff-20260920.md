@@ -1913,3 +1913,14 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   words 0 0` - the math guard is FREE and no worker service is pending, so the workers are stuck on something else
   inside a job (a guest wait inside the object update?). Watchdog core downloading (b4nkzjsmr); Pi yp7 (58 min clean
   on the reverted wait) killed early to run the same build as yp8 for full worker backtraces under gdb.
+- perf141 watchdog core (psp2core-1790179229, symbolized against build/xita.elf = perf141): owner xk_fiber in
+  owner_wait <- xv_object_jobs_join <- 900E0 <- 109760 <- FA920; xv_objects_c0 in xv_object_math_lock from
+  xv_math_quaternion_matrix <- f_000B5B40 <- f_000B5F60; xv_objects_c1 in xv_object_math_lock from f_0004C980 <- 44AD0
+  <- 90710 <- 90950; xv_scene RUNNING in f_000325C0 <- 80250 <- 80360 <- 70110 <- A2380 <- xk_model_uv_scope_begin
+  <- 6F730 <- A26B0 (the per-model draw chain again); all other fibers parked. The guard is a RECURSIVE Vita mutex
+  (xk_object_mutex.h); math_holder stayed 0 through 16 s of STUCK lines while both workers failed the try-lock, so
+  some thread owns it through a path the holder tracking does not cover, or the helper's scene runs a native that
+  locks it without unlocking (the abandon longjmp would skip the cleanup unlock, but no ABANDON was logged).
+  perf142 (949c919) prints sceKernelGetMutexInfo's owner id and count next to our thread ids in the STUCK line.
+- Pi yp8 (perf141 harness, gameplay from the Vita save): the object pass engages every frame now (passes 60, jobs
+  1380/60 frames, 23 per pass, batch 2 ms), clean at 46 windows.
