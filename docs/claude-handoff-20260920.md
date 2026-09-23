@@ -1972,3 +1972,13 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
 - perf148 (b2fab64): `[scene-slow]` logs every scene frame over XV_SCENE_SLOW_MS (default 150): while running, the
   helper's guest stack code words, last D3D HLE, yields and proxied calls since dispatch (+ timed chain with
   XV_SCENE_PHASES=1); after the join, the scene's duration. Deployed 12:40 for the user's gameplay.
+- User directive 12:38: "We'll fix the crashing after we get to 20fps" - freezes/hitches are parked; [scene-slow]
+  data keeps accumulating passively (perf148 transition: scene 1099 took 668 ms with 377,269 yields, stack 7A1C0 <-
+  7A979 <- 70D96 <- A25F4 (A26B0 per-model chain); scene 927 392 ms with 44 proxied calls; scene 1100 344 ms).
+- CLOCK: the game runs at cpu 444 / bus 222 / gpu 222 / xbar 166 MHz. xita_clock2.skprx fails with taiHEN
+  0x90010009 (safe SELF; §33: even when loaded, ScePower's kernel setter caps at 444). PSVshell (installed by the
+  user) reaches 500 via its ScePervasive patch; asked the user to set a 500 MHz PSVshell profile for XITA00001.
+  Expected ~-12 % on both CPU-bound sides.
+- perf150 (749443b + bcb0b75): XV_FIBER_CORE / XV_PUMP_CORE core plan (fibers pinned to core 2, pump on core 0, scene
+  helper alone on core 1) + render-view copy-in coalesced into page runs with DMA / sceClibMemcpy
+  (XV_RENDER_VIEW_CLIB=1) + [render-view] copy runs line. Chained after perf148.
