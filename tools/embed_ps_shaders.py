@@ -15,6 +15,8 @@ for path in variants:
     if not (root/path).is_file():
         raise SystemExit(f'Missing alpha-disabled shader: {path}; run specialize_ps_alpha.py and compile it')
 variants += [p.replace('.frag.gxp', '_gt.frag.gxp') for p in paths if Path(p).name.startswith('ps_154066FD_')]
+# Alpha-zero programs (tools/specialize_ps_alphazero.py) are optional: the runtime falls back to the discard program.
+variants += [a for a in (p.replace('.frag.gxp', '_az.frag.gxp') for p in paths) if (root/a).is_file()]
 # The draw recorder must know the samplers of every possible fallback too.
 # Embed the same compiled programs that the package already ships, so an
 # executable-only update and its preparation metadata cannot disagree.
