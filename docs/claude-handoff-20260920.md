@@ -1955,3 +1955,5 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   Chain: "perf145" run = the perf146 VPK with the stride off (default config: vp tolerance off, 90-frame grace, full
   mutex), then perf147 = same install with XV_FLARE_TEST_STRIDE=2 (expected -3 to -4 ms of the ~7 ms flare HLE).
   Visual risk: one frame of extra latency on flare fade; the user should look at it in a cinematic.
+- "perf145" run (the perf146 VPK, default config: vp tolerance off, 90-frame grace, full mutex, no stride), 8 min
+  clean: 63.4-81.8 ms; steady windows 65.5/64.8/68.8/66.3/63.4/67.4/68.7 = 14.4-15.6 fps. Best default so far.
