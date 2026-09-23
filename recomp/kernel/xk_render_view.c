@@ -77,6 +77,10 @@ static uint32_t learn_gap_us = 8000; static uint32_t *learn_hash; static uint64_
 static unsigned depth, bound, frames_entered, full_frames, fiber_switches, aliases_max, mirrors_in_scene;
 static uint64_t prepare_us;   /* owner-side copy-in (xv_render_view_prepare) */
 static unsigned copy_runs;   /* mode 3/4: contiguous live-page runs copied per window */
+#define ASSIST_RUNS_MAX 1024
+#ifndef __vita__
+#define ASSIST_MAX 1
+#endif
 static uint64_t enter_us, leave_us, bytes_in, words_merged;
 /* Same-frame write conflicts (increment C): a word the scene changed (copy != pristine) whose live copy the tick also
  * changed meanwhile (live != pristine) to a different value. XV_RENDER_VIEW_CONFLICT=1 lets the scene's value
@@ -315,7 +319,75 @@ static void list_object_pool(void)
  * every Pi run, frozen pages or not. */
 static int prepared;
 static uint64_t prep_list_us, prep_copy_us, prep_pristine_us;   /* copy_in split, for the report */
-static void copy_in(void)
+/* Split snapshot copy (XV_RENDER_VIEW_SPLIT=1, Vita): the owner's copy-in sits on the frame's serialized path (owner
+ * joined scene N, helper idle until scene N+1 is dispatched). A copy thread on the scene helper's core takes the
+ * second half of the page runs while the owner copies the first; the owner waits for it before dispatching. */
+#ifdef __vita__
+#include <psp2/kernel/threadmgr.h>
+#define ASSIST_MAX 512
+static struct { unsigned n; uint8_t *dst[ASSIST_MAX]; const uint8_t *src[ASSIST_MAX]; uint32_t bytes[ASSIST_MAX]; } assist_work;
+static SceUID assist_go = -1, assist_done = -1; static int assist_state = -1; static unsigned assist_splits;
+static int assist_main(SceSize args, void *argp)
+{
+    (void)args; (void)argp;
+    for (;;) {
+        if (sceKernelWaitSema(assist_go, 1, NULL) < 0) return 0;
+        for (unsigned i = 0; i < assist_work.n; ++i) view_copy(assist_work.dst[i], assist_work.src[i], assist_work.bytes[i]);
+        sceKernelSignalSema(assist_done, 1);
+    }
+}
+static int assist_ready(void)
+{
+    if (assist_state >= 0) return assist_state;
+    const char *e = getenv("XV_RENDER_VIEW_SPLIT"); assist_state = 0;
+    if (!(e && atoi(e))) return 0;
+    const char *ce = getenv("XV_RENDER_VIEW_SPLIT_CORE"); int core = ce ? atoi(ce) : 1;
+    int mask = core == 0 ? SCE_KERNEL_CPU_MASK_USER_0 : core == 2 ? SCE_KERNEL_CPU_MASK_USER_2 : SCE_KERNEL_CPU_MASK_USER_1;
+    assist_go = sceKernelCreateSema("xv_rv_assist_go", 0, 0, 1, NULL); assist_done = sceKernelCreateSema("xv_rv_assist_done", 0, 0, 1, NULL);
+    SceUID t = assist_go >= 0 && assist_done >= 0 ? sceKernelCreateThread("xv_rv_assist", assist_main, sceKernelGetThreadCurrentPriority(), 16 * 1024, 0, mask, NULL) : -1;
+    if (t >= 0 && sceKernelStartThread(t, 0, NULL) >= 0) assist_state = 1;
+    XK_LOG("[render-view] split copy %s (core %d)\n", assist_state ? "on" : "FAILED", core);
+    return assist_state;
+}
+#endif
+static void copy_in_runs(int from_owner)
+{
+    /* collect the runs of consecutive live pages; shadow slots are contiguous by slot index */
+    static unsigned run_s[ASSIST_RUNS_MAX], run_n[ASSIST_RUNS_MAX]; unsigned runs = 0;
+    for (unsigned s = 0; s < slots_used; ) {
+        unsigned e = s + 1;
+        while (e < slots_used && slot_page[e] == slot_page[e - 1] + 1u) e++;
+        if (runs < ASSIST_RUNS_MAX) { run_s[runs] = s; run_n[runs] = e - s; runs++; }
+        else view_copy(shadow_of(s), live_of_slot(s), (size_t)(e - s) * XK_PAGE);
+        s = e;
+    }
+    copy_runs += runs;
+#ifdef __vita__
+    if (from_owner && slots_used >= 32 && assist_ready()) {
+        unsigned half = slots_used / 2, done = 0; assist_work.n = 0;
+        /* runs (or the tail of the run crossing the midpoint) at or after `half` pages go to the assistant */
+        for (unsigned r = 0; r < runs; ++r) {
+            unsigned s = run_s[r], n = run_n[r];
+            if (done + n <= half) { done += n; continue; }
+            unsigned skip = done < half ? half - done : 0;   /* pages of this run the owner keeps */
+            if (assist_work.n < ASSIST_MAX) {
+                assist_work.dst[assist_work.n] = shadow_of(s + skip); assist_work.src[assist_work.n] = live_of_slot(s + skip);
+                assist_work.bytes[assist_work.n] = (n - skip) * XK_PAGE; assist_work.n++;
+                run_n[r] = skip;   /* the owner copies only the head */
+            }
+            done += n;
+        }
+        sceKernelSignalSema(assist_go, 1);
+        for (unsigned r = 0; r < runs; ++r) if (run_n[r]) view_copy(shadow_of(run_s[r]), live_of_slot(run_s[r]), (size_t)run_n[r] * XK_PAGE);
+        sceKernelWaitSema(assist_done, 1, NULL); assist_splits++;
+        return;
+    }
+#else
+    (void)from_owner;
+#endif
+    for (unsigned r = 0; r < runs; ++r) view_copy(shadow_of(run_s[r]), live_of_slot(run_s[r]), (size_t)run_n[r] * XK_PAGE);
+}
+static void copy_in(int from_owner)
 {
     uint64_t t0 = xk_os_monotonic_us();
     if (all_mode >= 3) list_object_pool();
@@ -332,12 +404,7 @@ static void copy_in(void)
         /* mode 3/4: the listed slots are scattered pages, but mostly ascending runs of the object pool and data arrays;
          * copy each run of consecutive live pages in one call (DMA for runs of 64 KiB and up). This branch was the
          * owner's unattributed ~4.2 ms per frame (232 pages, one memcpy each, perf145). */
-        for (unsigned s = 0; s < slots_used; ) {
-            unsigned e = s + 1;
-            while (e < slots_used && slot_page[e] == slot_page[e - 1] + 1u) e++;
-            view_copy(shadow_of(s), live_of_slot(s), (size_t)(e - s) * XK_PAGE);
-            copy_runs++; s = e;
-        }
+        copy_in_runs(from_owner);
         uint64_t t2 = xk_os_monotonic_us(); prep_copy_us += t2 - t1;
         if (full_frame) view_copy(pristine_slot(0), shadow_of(0), (size_t)slots_used * XK_PAGE);
         else for (unsigned s = 0; s < slots_used; ++s) if (sw_slot[s]) memcpy(pristine_slot(s), shadow_of(s), XK_PAGE);
@@ -354,7 +421,7 @@ void xv_render_view_prepare(void)
 {
     if (!ready || depth || bound || prepared) return;
     if (!learn_done && !all_mode) return;
-    uint64_t t0 = xk_os_monotonic_us(); copy_in(); prepare_us += xk_os_monotonic_us() - t0; prepared = 1;
+    uint64_t t0 = xk_os_monotonic_us(); copy_in(1); prepare_us += xk_os_monotonic_us() - t0; prepared = 1;
 }
 void xv_render_view_enter(unsigned *scope, void *context)
 {
@@ -367,7 +434,7 @@ void xv_render_view_enter(unsigned *scope, void *context)
     if (!ready || depth++) return;
     if (!learn_done && !all_mode) return;   /* all mode: the listed set is complete from the start (Vita perf103: entered 0 while waiting for the passes) */
     *scope = 1;
-    if (prepared) prepared = 0; else copy_in();   /* not prepared by the owner (non-overlapped dispatch, in-place mode): copy here */
+    if (prepared) prepared = 0; else copy_in(0);   /* not prepared by the owner (non-overlapped dispatch, in-place mode): copy here */
     if (active_frames == 1) log_request_table("first viewed frame");
     retarget_in_place(); bound_since_us = t0; bound = 1;
     if (thread_mode) xk_os_bind_page_table(rt->entries);       /* this thread (the one running the body) sees the view */
@@ -440,7 +507,13 @@ void xv_render_view_report(unsigned frames)
            frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0, frames_entered ? (double)prepare_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_list_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_copy_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_pristine_us / frames_entered / 1000.0 : 0.0,
            frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0, (unsigned long long)words_merged,
            sw_slots, sw_imgs, sw_found_late, retargets_last, image_entries, retargets_overflow, fiber_switches, mirrors_in_scene, aliases_max);
-    if (copy_runs) XK_LOG("[render-view] copy runs %u per window (%.1f per frame; DMA %d, clib %d)\n", copy_runs, frames_entered ? (double)copy_runs / frames_entered : 0.0, dma_mode, clib_copy);
+    if (copy_runs) XK_LOG("[render-view] copy runs %u per window (%.1f per frame; DMA %d, clib %d, split copies %u)\n", copy_runs, frames_entered ? (double)copy_runs / frames_entered : 0.0, dma_mode, clib_copy,
+#ifdef __vita__
+        assist_splits);
+    assist_splits = 0;
+#else
+        0u);
+#endif
     copy_runs = 0;
     frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; fiber_switches = mirrors_in_scene = 0; prepare_us = prep_list_us = prep_copy_us = prep_pristine_us = 0;   /* (was never reset: perf109 "owner-side 31 -> 68 ms" grew per window) */
     if (conflicts || conflicts_same_value) {
