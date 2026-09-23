@@ -1735,7 +1735,8 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         if (sp) { char hb[9]; snprintf(hb, sizeof hb, "%08X", S.ps_hash); const char *e = sp;
             while (*e) { const char *end = strchr(e, ','); size_t l = end ? (size_t)(end - e) : strlen(e); if (l == 8 && !strncmp(e, hb, 8)) { cur_list()->ncmds--; return; } e = end ? end + 1 : e + l; } }
     }
-    {   /* which (vertex program, combiner program) pairs the game actually draws with: offline input */
+    static int pspair_log = -1; if (pspair_log < 0) { const char *e = getenv("XV_PSPAIR_LOG"); pspair_log = e ? atoi(e) != 0 : 0; }   /* offline input only: the 256-entry scan ran on every draw */
+    if (pspair_log) {   /* which (vertex program, combiner program) pairs the game actually draws with: offline input */
         static struct { uint32_t vs, ps; } pairs[256]; static unsigned np; unsigned k;
         for (k = 0; k < np; ++k) if (pairs[k].vs == d->func_hash && pairs[k].ps == S.ps_hash) break;
         if (k == np && np < 256) { pairs[np].vs = d->func_hash; pairs[np].ps = S.ps_hash; np++;
@@ -1774,7 +1775,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
     c->cull = (uint8_t)S.cull;
     { extern uint32_t xd3d_fog_color(void); c->fog_color = xd3d_fog_color(); }
     { extern uint32_t xd3d_alpha_test(void); c->atest = xd3d_alpha_test(); }
-    if (strstr(d->gxp, "halo_vs_16")) xv_d3d_bsp_acc++;
+    { static const xv_vs_desc_t *bsp_d; static int bsp_is; if (d != bsp_d) { bsp_d = d; bsp_is = strstr(d->gxp, "halo_vs_16") != NULL; } if (bsp_is) xv_d3d_bsp_acc++; }   /* was a strstr per draw */
     for (unsigned a = 0; a < d->nattrs; a++) if (d->attrs[a].stream == XV_CONST_STREAM) {
         if (!snapshot_attributes(c)) {
             cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_attributes++;
