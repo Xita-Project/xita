@@ -122,7 +122,7 @@ static struct { xk_obj **objs; int n, wait_all; const int64_t *timeout; uint32_t
  * fiber is the scene's thread (mode 2). Read-only time queries run directly. The census counts calls by name. */
 #define PROXY_NAMES 40
 static struct { const char *name; unsigned n; } proxy_names[PROXY_NAMES]; static unsigned proxy_names_n, proxy_calls, proxy_direct;
-static xctx *volatile proxy_call_ctx; static void (*volatile proxy_call_fn)(xctx *);
+static xctx *volatile proxy_call_ctx; static void (*volatile proxy_call_fn)(xctx *); static const char *volatile proxy_call_name;
 extern const char *const xv_kernel_names[];
 static int proxy_direct_ok(const char *name)
 {
@@ -163,7 +163,7 @@ int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
     if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     const char *name = ord < 367 ? xv_kernel_names[ord] : NULL; proxy_note(name);
     if (proxy_direct_ok(name)) { proxy_direct++; return 0; }
-    proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
+    proxy_call_ctx = c; proxy_call_name = name; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
     sceKernelWaitSema(proxy_done, 1, NULL);
     return 1;
 }
@@ -172,9 +172,13 @@ int xv_scene_thread_proxy_hle(xctx *c, void (*fn)(xctx *), const char *name)
     if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     proxy_note(name);
     if (proxy_direct_ok(name + 3)) { proxy_direct++; return 0; }   /* "xk_KeQuery..." -> the time queries stay direct */
-    proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
+    proxy_call_ctx = c; proxy_call_name = name; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
     sceKernelWaitSema(proxy_done, 1, NULL);
     return 1;
+}
+static void proxy_service_call_only(void)
+{
+    { void (*fn)(xctx *) = proxy_call_fn; if (fn) { xctx *cc = proxy_call_ctx; proxy_call_fn = NULL; fn(cc); proxy_calls++; sceKernelSignalSema(proxy_done, 1); } }
 }
 static void proxy_service(void)
 {
@@ -215,6 +219,21 @@ static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: lo
       for (unsigned i = 0; i < 256 && ln < 360; ++i) { uint32_t w = X_M32(sp + 4u * i); if (w >= 0x10000u && w < 0x3B5000u) ln += snprintf(line + ln, sizeof line - ln, " %X", w); }
       XK_LOG("%s\n", line); }
     { extern void xv_render_view_watchdog(void) __attribute__((weak)); if (xv_render_view_watchdog) xv_render_view_watchdog(); }
+}
+/* Serviced from xk_yield too (xv_scene_thread_service_yield): while the owner's main thread spins in the game's own
+ * "wait for the cache request" loop (f_00056670, Vita perf116/117 froze at the load->cinematic transition), the
+ * streaming thread waits for an event the SCENE sets through the proxy, and the join loop that services the proxy is
+ * not running. Only calls without lock identity (events, yields) are run from an arbitrary yielding thread. */
+static int proxy_name_lockless(const char *nm)
+{
+    if (!nm) return 0; if (strncmp(nm, "xk_", 3) == 0) nm += 3;
+    return strcmp(nm, "NtSetEvent") == 0 || strcmp(nm, "NtYieldExecution") == 0 || strcmp(nm, "NtPulseEvent") == 0 || strcmp(nm, "NtClearEvent") == 0 || strcmp(nm, "KeSetEvent") == 0;
+}
+void xv_scene_thread_service_yield(void)
+{
+    if (enabled <= 0 || !in_flight || proxy_fiber || xv_scene_thread_on_helper()) return;
+    void (*fn)(xctx *) = proxy_call_fn; if (!fn || !proxy_name_lockless(proxy_call_name)) return;
+    proxy_service_call_only();   /* never the proxied WAIT from a random yielding thread */
 }
 static void join(unsigned *counter)
 {
@@ -364,7 +383,7 @@ static struct { xk_obj **objs; int n, wait_all; const int64_t *timeout; uint32_t
  * fiber is the scene's thread (mode 2). Read-only time queries run directly. The census counts calls by name. */
 #define PROXY_NAMES 40
 static struct { const char *name; unsigned n; } proxy_names[PROXY_NAMES]; static unsigned proxy_names_n, proxy_calls, proxy_direct;
-static xctx *volatile proxy_call_ctx; static void (*volatile proxy_call_fn)(xctx *);
+static xctx *volatile proxy_call_ctx; static void (*volatile proxy_call_fn)(xctx *); static const char *volatile proxy_call_name;
 extern const char *const xv_kernel_names[];
 static int proxy_direct_ok(const char *name)
 {
@@ -397,7 +416,7 @@ int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
     if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     const char *name = ord < 367 ? xv_kernel_names[ord] : NULL; proxy_note(name);
     if (proxy_direct_ok(name)) { proxy_direct++; return 0; }
-    proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
+    proxy_call_ctx = c; proxy_call_name = name; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
     while (sem_wait(&proxy_done) < 0 && errno == EINTR) {}
     return 1;
 }
@@ -406,9 +425,13 @@ int xv_scene_thread_proxy_hle(xctx *c, void (*fn)(xctx *), const char *name)
     if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     proxy_note(name);
     if (proxy_direct_ok(name + 3)) { proxy_direct++; return 0; }   /* "xk_KeQuery..." -> the time queries stay direct */
-    proxy_call_ctx = c; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
+    proxy_call_ctx = c; proxy_call_name = name; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
     while (sem_wait(&proxy_done) < 0 && errno == EINTR) {}
     return 1;
+}
+static void proxy_service_call_only(void)
+{
+    { void (*fn)(xctx *) = proxy_call_fn; if (fn) { xctx *cc = proxy_call_ctx; proxy_call_fn = NULL; fn(cc); proxy_calls++; sem_post(&proxy_done); } }
 }
 static void proxy_service(void)
 {
@@ -449,6 +472,21 @@ static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: lo
       for (unsigned i = 0; i < 256 && ln < 360; ++i) { uint32_t w = X_M32(sp + 4u * i); if (w >= 0x10000u && w < 0x3B5000u) ln += snprintf(line + ln, sizeof line - ln, " %X", w); }
       XK_LOG("%s\n", line); }
     { extern void xv_render_view_watchdog(void) __attribute__((weak)); if (xv_render_view_watchdog) xv_render_view_watchdog(); }
+}
+/* Serviced from xk_yield too (xv_scene_thread_service_yield): while the owner's main thread spins in the game's own
+ * "wait for the cache request" loop (f_00056670, Vita perf116/117 froze at the load->cinematic transition), the
+ * streaming thread waits for an event the SCENE sets through the proxy, and the join loop that services the proxy is
+ * not running. Only calls without lock identity (events, yields) are run from an arbitrary yielding thread. */
+static int proxy_name_lockless(const char *nm)
+{
+    if (!nm) return 0; if (strncmp(nm, "xk_", 3) == 0) nm += 3;
+    return strcmp(nm, "NtSetEvent") == 0 || strcmp(nm, "NtYieldExecution") == 0 || strcmp(nm, "NtPulseEvent") == 0 || strcmp(nm, "NtClearEvent") == 0 || strcmp(nm, "KeSetEvent") == 0;
+}
+void xv_scene_thread_service_yield(void)
+{
+    if (enabled <= 0 || !in_flight || proxy_fiber || xv_scene_thread_on_helper()) return;
+    void (*fn)(xctx *) = proxy_call_fn; if (!fn || !proxy_name_lockless(proxy_call_name)) return;
+    proxy_service_call_only();   /* never the proxied WAIT from a random yielding thread */
 }
 static void join(unsigned *counter)
 {
