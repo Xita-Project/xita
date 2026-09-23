@@ -270,6 +270,7 @@ static uint64_t stuck_logged_at;
  * past the threshold, log once what the helper is inside: guest stack code words, the last D3D HLE entered, its
  * inline-answered yields (a yield-spin on a streamed resource) and proxied kernel calls, and the timed-function chain
  * when XV_SCENE_PHASES=1; after the join, the scene's own duration. */
+static uint64_t notice_us, pre_go_us, join_exit_us; static unsigned notice_n, pre_go_n;
 static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static unsigned slow_yields_dispatch, slow_proxied_dispatch, slow_dispatch_serial, slow_logged_serial, slow_logs; static int slow_ms = -1;
 static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
 static void slow_check(void)
@@ -342,6 +343,7 @@ static void join(unsigned *counter)
      * fibers the scene may be waiting on (lockstep runs deadlocked at the a10 load). Poll, and park in the guest
      * scheduler between polls so those fibers run. */
     while (sceKernelPollSema(done, 1) < 0) { if (!proxy_fiber) proxy_service(); xk_sleep_us(200); stuck_check(t0); slow_check(); }
+    { uint64_t now_ = xk_os_monotonic_us(); if (slow_t_end && now_ > slow_t_end && now_ - slow_t_end < 1000000u) { notice_us += now_ - slow_t_end; notice_n++; } join_exit_us = now_; }
     slow_finish();   /* the proxy fiber services the helper's kernel calls; the owner only parks so the scheduler runs it and the streaming fibers */   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; depth = 0; (*counter)++;
@@ -402,6 +404,7 @@ int xv_scene_thread_run(void *context)
     if (ov) { uint32_t top = scene_stack + SCENE_STACK_BYTES - 64u; for (unsigned i = 0; i < 4; ++i) X_W32(top + 4u * i) = X_M32(c->r[4] + 4u * i); ctx.r[4] = top; }   /* body frame on the private stack: return address + 8-byte argument copied */
     if (ov) { extern void xv_render_view_prepare(void) __attribute__((weak)); if (xv_render_view_prepare) xv_render_view_prepare(); }   /* snapshot before the tick resumes */
     slow_mark_dispatch();
+    if (join_exit_us) { uint64_t now_ = xk_os_monotonic_us(); if (now_ > join_exit_us && now_ - join_exit_us < 1000000u) { pre_go_us += now_ - join_exit_us; pre_go_n++; } join_exit_us = 0; }
     sceKernelSignalSema(go, 1);
     if (ov) { in_flight = 1; overlaps++; dispatched++; c->r[4] += 12; return 1; }   /* the body's `ret 8`: the owner continues */
     sceKernelWaitSema(done, 1, NULL);
@@ -473,9 +476,11 @@ void xv_scene_thread_report(unsigned frames)
     { static uint64_t last_run; SceKernelThreadInfo ti; memset(&ti, 0, sizeof ti); ti.size = sizeof ti;
       if (helper >= 0 && sceKernelGetThreadInfo(helper, &ti) >= 0) {
           uint64_t run = (uint64_t)ti.runClocks;
-          if (last_run && scene_wall_n) XK_LOG("[scene-thread] helper cpu %.2f ms/frame, scene wall %.2f ms/scene (%u scenes): waiting inside the scene ~%.2f ms\n",
+          if (last_run && scene_wall_n) XK_LOG("[scene-thread] helper cpu %.2f ms/frame, scene wall %.2f ms/scene (%u scenes): waiting inside the scene ~%.2f ms; done->noticed %.2f ms, noticed->go %.2f ms\n",
               (double)(run - last_run) / frames / 1000.0, (double)scene_wall_us / scene_wall_n / 1000.0, scene_wall_n,
-              (double)scene_wall_us / scene_wall_n / 1000.0 - (double)(run - last_run) / frames / 1000.0);
+              (double)scene_wall_us / scene_wall_n / 1000.0 - (double)(run - last_run) / frames / 1000.0,
+              notice_n ? (double)notice_us / notice_n / 1000.0 : 0.0, pre_go_n ? (double)pre_go_us / pre_go_n / 1000.0 : 0.0);
+          notice_us = pre_go_us = 0; notice_n = pre_go_n = 0;
           last_run = run; } }
     scene_wall_us = 0; scene_wall_n = 0;
     ws_report();
@@ -638,6 +643,7 @@ static uint64_t stuck_logged_at;
  * past the threshold, log once what the helper is inside: guest stack code words, the last D3D HLE entered, its
  * inline-answered yields (a yield-spin on a streamed resource) and proxied kernel calls, and the timed-function chain
  * when XV_SCENE_PHASES=1; after the join, the scene's own duration. */
+static uint64_t notice_us, pre_go_us, join_exit_us; static unsigned notice_n, pre_go_n;
 static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static unsigned slow_yields_dispatch, slow_proxied_dispatch, slow_dispatch_serial, slow_logged_serial, slow_logs; static int slow_ms = -1;
 static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
 static void slow_check(void)
