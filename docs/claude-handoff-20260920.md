@@ -1784,3 +1784,6 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   two-hour hang. The root cause (a torn/NULL object pointer read by the frozen-page scene in f_001105E0, same class
   as the A26B0 model-guard skip) is still open; the guard-style fix is to validate [edi] before the idiv or freeze the
   array that pointer comes from (`[render-view] arrays:` names them).
+- 00:20 CDT: Pi yp4 finished its full 2 h: one trap (the 1105E0 idiv at 62 min) abandoned as one dropped frame, no
+  other event, run clean to the end. The trap bail-out is qualified on the Pi; the Vita has not run it yet (perf128 is
+  built, not installed - see the recovery order above).
