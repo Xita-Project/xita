@@ -1900,3 +1900,6 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   neither, by design ("cinematic initialization has ordering dependencies"). perf139 (4c87abe) adds
   XV_OBJECT_JOBS_ANY_MODE=1 (opt-in) and logs the declined mode once (`[object-jobs] declined: director/camera mode`).
   perf138 itself: 67.6-80.6 ms, same as perf137.
+- perf139 (XV_OBJECT_JOBS_ANY_MODE=1): the mode is accepted now (no "declined: director/camera mode" line) but the
+  cinematic windows still show `passes 0` (one pass of 34 jobs in the transition window, lanes 20/14, batch 18 ms):
+  another readiness condition declines. perf140 (50c0dfe) logs the decline mask once per change.
