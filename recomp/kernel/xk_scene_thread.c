@@ -284,8 +284,10 @@ static void slow_check(void)
     XK_LOG("%s\n", line);
     if (phases > 0 && phase_depth[1]) { ln = snprintf(line, sizeof line, "[scene-slow]   timed chain (outer->inner):"); for (unsigned i = 0; i < phase_depth[1] && ln < 400; ++i) ln += snprintf(line + ln, sizeof line - ln, " %X", phase_addr[1][i]); XK_LOG("%s\n", line); }
 }
+static uint64_t scene_wall_us; static unsigned scene_wall_n;   /* dispatch -> helper done, per joined scene */
 static void slow_finish(void)
 {
+    { uint64_t w = slow_t_end > slow_t_dispatch ? slow_t_end - slow_t_dispatch : 0; if (w && w < 5000000u) { scene_wall_us += w; scene_wall_n++; } }
     if (slow_ms <= 0 || slow_logs >= 80) return;
     uint64_t d = slow_t_end > slow_t_dispatch ? slow_t_end - slow_t_dispatch : 0;
     if (d >= (uint64_t)slow_ms * 1000u) { slow_logs++; XK_LOG("[scene-slow] scene %u took %llu ms (dispatch -> done): yields %u proxied %u\n", slow_dispatch_serial, (unsigned long long)(d / 1000u), proxy_direct - slow_yields_dispatch, proxy_calls - slow_proxied_dispatch); }
@@ -410,6 +412,14 @@ void xv_scene_thread_report(unsigned frames)
     if (enabled <= 0) return;
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
+    { static uint64_t last_run; SceKernelThreadInfo ti; memset(&ti, 0, sizeof ti); ti.size = sizeof ti;
+      if (helper >= 0 && sceKernelGetThreadInfo(helper, &ti) >= 0) {
+          uint64_t run = (uint64_t)ti.runClocks;
+          if (last_run && scene_wall_n) XK_LOG("[scene-thread] helper cpu %.2f ms/frame, scene wall %.2f ms/scene (%u scenes): waiting inside the scene ~%.2f ms\n",
+              (double)(run - last_run) / frames / 1000.0, (double)scene_wall_us / scene_wall_n / 1000.0, scene_wall_n,
+              (double)scene_wall_us / scene_wall_n / 1000.0 - (double)(run - last_run) / frames / 1000.0);
+          last_run = run; } }
+    scene_wall_us = 0; scene_wall_n = 0;
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
     scene_census_report(); overlap_report(); proxy_report(); phase_report(frames); { extern void xv_hle_time_report(unsigned) __attribute__((weak)); if (xv_hle_time_report) xv_hle_time_report(frames); }
 }
@@ -585,8 +595,10 @@ static void slow_check(void)
     XK_LOG("%s\n", line);
     if (phases > 0 && phase_depth[1]) { ln = snprintf(line, sizeof line, "[scene-slow]   timed chain (outer->inner):"); for (unsigned i = 0; i < phase_depth[1] && ln < 400; ++i) ln += snprintf(line + ln, sizeof line - ln, " %X", phase_addr[1][i]); XK_LOG("%s\n", line); }
 }
+static uint64_t scene_wall_us; static unsigned scene_wall_n;   /* dispatch -> helper done, per joined scene */
 static void slow_finish(void)
 {
+    { uint64_t w = slow_t_end > slow_t_dispatch ? slow_t_end - slow_t_dispatch : 0; if (w && w < 5000000u) { scene_wall_us += w; scene_wall_n++; } }
     if (slow_ms <= 0 || slow_logs >= 80) return;
     uint64_t d = slow_t_end > slow_t_dispatch ? slow_t_end - slow_t_dispatch : 0;
     if (d >= (uint64_t)slow_ms * 1000u) { slow_logs++; XK_LOG("[scene-slow] scene %u took %llu ms (dispatch -> done): yields %u proxied %u\n", slow_dispatch_serial, (unsigned long long)(d / 1000u), proxy_direct - slow_yields_dispatch, proxy_calls - slow_proxied_dispatch); }
