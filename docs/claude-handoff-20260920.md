@@ -1834,3 +1834,11 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   80.8/80.4, 80.0/83.2, 80.9/81.0, 80.2/74.0, 67.4/73.1, 71.1/73.6 - a wash within run-to-run variance (the cinematic
   content shifts a little per run; compare same-phase windows and expect +-5 ms noise). perf131 (three trims, pack
   off) and perf132 (perf131 + pack) are chained to run back to back.
+- FOUND (09:05): the Vita's `[crt-float]` line shows _controlfp/_frnd/floor 0 while the Pi shows floor 186k/60 frames.
+  The hooks are in the stage shards' .c, but build/recomp/code_002.o and code_003.o (compiled 09-22 18:25, the
+  "clean rebuild" of the previous session) contain NO xv_native_crt_float reference: those 22 shard objects were
+  compiled with a different (smaller) flag set than make-vars.txt; only the 10 shards rebuilt today carry the
+  current flags (code_011's pack hook fires). The host-measured XV_NATIVE_CRT_FLOAT gain (-11 % scene samples,
+  handoff §40) has therefore NEVER been on the Vita. perf133 = all shard objects deleted and rebuilt with
+  make-vars.txt. Trap: after any flag-set change, delete build/recomp/*.o; make's option stamps do not cover the
+  shard flags. Verify with `arm-vita-eabi-nm build/recomp/code_002.o | grep xv_native_crt_float`.
