@@ -1997,3 +1997,10 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
 - Visibility queries are not a scene wait: [visibility-wait] waits 0, [visibility-poll] pending 0 (perf151).
 - The user set PSVshell to 500 MHz but reports it seems broken; perf152's "game clocks" line will say what the game
   actually runs at. Not pursued further per the user.
+- perf152 (+ XV_RENDER_VIEW_SPLIT=1, assist thread on core 1): snapshot copy 4.15 -> 2.95 ms (owner-side 3.51); early
+  74.2/77.3/76.1/75.1, steady 63.0/66.0/62.8/62.6/62.6/62.5/62.7 (mean 63.2, ~15.8 fps). Two cores share the memory
+  bandwidth, so the split is -1.2 ms, not half.
+- perf154 (d8fa2da, XV_RENDER_VIEW_EARLY=1): early snapshot into a second bank during the owner's dispatch join; Pi
+  early1 soak (40 min, corridor) running; the Vita run is chained after perf153 and gated on early1 being clean
+  (early-gate.txt).
+- perf153 = perf152 install + XV_CPU_EXTERNAL=1 (runtime leaves the clock to PSVshell, which the user set to 500).
