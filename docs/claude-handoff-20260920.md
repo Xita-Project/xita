@@ -1957,3 +1957,18 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   Visual risk: one frame of extra latency on flare fade; the user should look at it in a cinematic.
 - "perf145" run (the perf146 VPK, default config: vp tolerance off, 90-frame grace, full mutex, no stride), 8 min
   clean: 63.4-81.8 ms; steady windows 65.5/64.8/68.8/66.3/63.4/67.4/68.7 = 14.4-15.6 fps. Best default so far.
+
+## §58 Gameplay hitches (Sept 23, 12:30 CDT)
+- perf147 stride 2 vs the default run, per window: early 78.1/77.7/78.2/76.4 vs 77.1/81.8/79.3/79.4 (-1.8 ms), steady
+  67.7/66.2/68.1/65.3/65.4/68.2/69.7 vs 65.5/64.8/68.8/66.3/63.4/67.4/68.7 (+0.8): a wash. Stride stays off.
+- Default config steady: owner waits 9-11 ms/frame for the scene (scene is the wall at ~65 ms; the owner side ~55).
+- USER REPORT: "14 fps, but doing gameplay the game seems to freeze a lot". Their session log (xita.1.log, perf146
+  VPK, 1,108 s): no present stall > 300 ms, no fault/STUCK/abandon, but `[scene-thread] ... (max N ms)` per 60-frame
+  window shows single scene frames of 155-727 ms in 10 of 278 windows (191.6, 355.1, 566.5, 212.7, 270.9, 726.9,
+  457.1, 332.0, 155.1, 271.0). One window (566 ms) had 495,152 inline-answered helper NtYieldExecution calls = the
+  scene yield-spinning on a streamed resource (the f_000325C0 <- 80250 texture path seen in the cores). Two windows
+  had texture decodes (74 tex 388 ms; 10 tex 135 ms: synchronous first-use decode). Others: no decode, no yields,
+  3 shader-link lines; cause unknown. The present-stall logger (owner) cannot see helper stalls.
+- perf148 (b2fab64): `[scene-slow]` logs every scene frame over XV_SCENE_SLOW_MS (default 150): while running, the
+  helper's guest stack code words, last D3D HLE, yields and proxied calls since dispatch (+ timed chain with
+  XV_SCENE_PHASES=1); after the join, the scene's duration. Deployed 12:40 for the user's gameplay.
