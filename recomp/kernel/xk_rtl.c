@@ -123,8 +123,19 @@ void xk_RtlEnterCriticalSection(xctx *c)
 {
     uint32_t cs = X_ARG(0), me = xk_cur ? xk_cur->kthread : 1;
     if (cs) {
+        uint64_t spin_t0 = 0;
         while (CS_OWNER(cs) && CS_OWNER(cs) != me && (int32_t)CS_LOCKCOUNT(cs) >= 0) {
             if (cs_owner_dead(CS_OWNER(cs))) break;      /* owner thread exited holding it: steal */
+            {   /* 3 s of spinning is never legitimate: log the cycle (Vita perf112/116 froze here: the owner acquiring on the
+                 * scene helper's behalf while the holder waits for the owner's tick) and steal the section rather than freeze */
+                extern uint64_t xk_os_monotonic_us(void); uint64_t now = xk_os_monotonic_us(); if (!spin_t0) spin_t0 = now;
+                if (now - spin_t0 > 3000000u) {
+                    xk_obj *ho = xk_obj_from_guest(CS_OWNER(cs)); xk_thread *ht = ho && ho->type == XO_THREAD ? ho->u.thread : NULL;
+                    XK_LOG("[cs] STUCK 3 s: t%d wants critical section %08X held by kthread %08X (t%d state %d wait_n %d obj %p) lock %d rec %d - stealing\n",
+                           xk_cur ? xk_cur->id : -1, cs, CS_OWNER(cs), ht ? ht->id : -1, ht ? ht->state : -1, ht ? ht->wait_n : -1, ht && ht->wait_n ? (void *)ht->wait_objs[0] : NULL, (int)CS_LOCKCOUNT(cs), (int)CS_RECURSION(cs));
+                    CS_LOCKCOUNT(cs) = 0xFFFFFFFFu; break;
+                }
+            }
             xk_yield();
         }
         if (CS_OWNER(cs) == me) CS_RECURSION(cs)++; else { CS_OWNER(cs) = me; CS_RECURSION(cs) = 1; CS_LOCKCOUNT(cs) = 0xFFFFFFFFu; }
