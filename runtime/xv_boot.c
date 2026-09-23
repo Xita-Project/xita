@@ -15,6 +15,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include <psp2/gxm.h>
 #include <psp2/io/fcntl.h>
@@ -68,7 +69,17 @@ int xv_boot_recomp(const char *game_dir, const char *save_dir)
     xk_mem_setup(base, size);
     uint32_t arena = ALIGN_UP(xk_mem_arena_size(), 4 * 1024);
 
-    g_xram_uid = sceKernelAllocMemBlock("xv_arena", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, arena, NULL);
+    /* XV_ARENA_PHYCONT (default 1): try a physically contiguous arena first. Identical builds swung the scene
+     * helper 53 <-> 58.5 ms between launches (perf164/164b); every guest access lands in this block, so a
+     * layout the kernel can map with large pages is worth trying. Falls back to ordinary USER_RW. */
+    g_xram_uid = -1;
+    { const char *e = getenv("XV_ARENA_PHYCONT");
+      if (!e || atoi(e)) {
+          g_xram_uid = sceKernelAllocMemBlock("xv_arena", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_RW, ALIGN_UP(arena, 1024 * 1024), NULL);
+          BOOT_LOG("arena: physically contiguous %u MB %s (0x%08X)\n", ALIGN_UP(arena, 1024 * 1024) >> 20, g_xram_uid >= 0 ? "ok" : "refused", (unsigned)g_xram_uid);
+          if (g_xram_uid >= 0) arena = ALIGN_UP(arena, 1024 * 1024);
+      } }
+    if (g_xram_uid < 0) g_xram_uid = sceKernelAllocMemBlock("xv_arena", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, arena, NULL);
     if (g_xram_uid < 0) { BOOT_LOG("arena alloc (%u MB) failed: 0x%08X\n", arena >> 20, g_xram_uid); sceIoClose(fd); return -1; }
     sceKernelGetMemBlockBase(g_xram_uid, (void **)&g_xram);
     xk_mem_bind_arena();                                  /* g_img_base for flat image-address access (X_IMG*) */
