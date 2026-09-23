@@ -1416,3 +1416,245 @@ screen or system dialog after reboot cannot be dismissed remotely).
   game log) until someone looks at the screen: seen after last night's
   reboot and again 14:42 UTC today. The plugin answers; the app does
   not start. Unknown system dialog or lock.
+
+## §45 perf99 on the Vita (2026-09-22 12:18-12:30 CDT): first overlap build past the a10 load
+
+perf99 = perf98 (kernel-call proxy at the XV_HLE_CALL call site: every `xk_*` import the scene helper issues is
+executed by the owner on the scene's thread record) + XV_NATIVE_PACK (native f_00061270, host-verified 7.8M calls /
+0 mismatches, default off). Deployed with `run-overlap-fire.sh m1m 6 XV_SCENE_THREAD=1 XV_SCENE_OVERLAP=1 ...`.
+
+- Mode 1 (Present joins) ran the full 6 minutes: menu 23 fps, a10 loaded at t+150 s, cinematic 7.7-8.6 fps (game
+  118-128 ms), 60/60 scenes per window on the helper, owner wait at Present 62-66 ms/frame (max 104 ms), no new core
+  (53 before and after). `[scene-proxy]` shows the helper's kernel calls are all proxied (NtSetEvent + NtYieldExecution,
+  74 in the first window, then 10-16 per window, direct 0). This is the first overlap build that completes the load
+  (perf83-93 died inside the load or on the first scenes); the call-site proxy is the fix for the two-threads-in-the-
+  guest-kernel class (§43).
+- Frame time in mode 1 equals the baseline (8-9 fps cinematic) by construction: Present waits for the scene. The scene
+  costs ~65 ms on the helper; the rest of the frame (tick + Present + pump) is ~55 ms, so mode 2 (deferred Present)
+  has room for roughly max(65, 55) + join.
+- New: `yield storm` lines (~2,500 yields / 3 s) in gameplay - the owner's 200 us join poll at Present (~100 yields
+  per frame). perf81/82 logs have none. Harmless in mode 1; watch that mode 2 makes it disappear.
+- Bench Pi: Raspberry Pi 4 (4 GB, 32-bit Raspbian 13 userland, 64-bit kernel) at 192.168.0.9, ssh alias `pi`, key
+  ~/.ssh/xita_pi, layout ~/xita/{harness,halo_image.bin,haloce,runs}; `tools/pi_run.sh <tag> [s] [K=V..]`. The static
+  armhf harness (host_build.py --static --cc arm-none-linux-gnueabihf-gcc) runs the game: base1 reached a10 player
+  control in 5 min (697 Begin/End frames, ~18 fps vblank-paced). Overlap mode 2 run (ov2a) in progress.
+
+## §46 perf100: real overlap on the Vita, first hardware gain (2026-09-22 12:57-13:05 CDT)
+
+perf99 mode 2 was mode 1 in disguise: the Present HLE's entry counter (XD3D_COUNT -> xd3d_count) ran the generic
+"owner-side D3D call joins the scene" hook before the Present policy could defer, so every frame joined at Present
+(`[scene-overlap] ... owner d3d 60`, `[scene-owner-d3d] D3DDevice_Present 60`). Fix (commit c0dea71): Present is exempt
+from that join (identity-compared name); the generic join stays for every other owner-side D3D HLE (GXM is single-threaded).
+Host: joins `next dispatch 60 / owner d3d 0`.
+
+perf100 = perf99 + that fix, `run-overlap-fire.sh m2b 8 XV_SCENE_THREAD=1 XV_SCENE_OVERLAP=2 XV_RENDER_VIEW=1
+XV_RENDER_VIEW_THREAD=1 ...`, 8 minutes, no crash (cores 53 before and after):
+
+| window | perf99 (join at Present) | perf100 (tick N+1 over scene N) |
+|---|---|---|
+| a10 cinematic, 190 Begin/End, ~305 draws | 118-128 ms, 8.0-8.6 fps | 70-90 ms, 11.4-14.0 fps |
+| owner wait for the scene | 62-66 ms/frame at Present | 15-26 ms/frame at the next dispatch |
+| cores (C0 owner / C1 helper / C2 workers) | 27 / 51 / 23 % | 27 / 85 / 57 % |
+
+The scene (~65 ms on the helper) is now the critical path: owner side = tick + pump (7.6-9 ms texture pump) + wait.
+Still the cinematic, not the corridor; still with the learned-subset render view (hazard below).
+
+**Pi bench finding (ov2b, real overlap, all pages NOT frozen):** hung at frame 4437 in the corridor. gdb: the helper
+spins in x_str_movs inside f_000A26B0 (model draw); ctx.r: ebp=01914660 is not a model tag ([ebp+4]=C22F0000, not the
+'mode' magic) and [ebp+B8] (node count) = 41E87F7B, a float, so the `movsx eax,dx; cmp eax,ebx` loop at A27D4 never
+ends. The object's model tag reference was torn by tick N+1 while the scene read it live: the render view had learned
+only 7-8 game-state pages (cinematic passes). Just before the hang: a 4 MB cache-file read completing on thread 16.
+Fix (commit 70a121c): XV_RENDER_VIEW_ALL=1 lists all 1024 game-state pages (the shadow capacity) up front; =2 also all
+933 image .data pages. Host: copy-in 4.1 MB (mode 1) / 7.8 MB (mode 2) per frame; Pi: 2.98 ms/frame for mode 1;
+Pi soak all1a (15 min) past the previous hang point without incident (in progress at 13:06). perf101 = perf100 + the
+knob (default off), deploying with XV_RENDER_VIEW_ALL=1 to measure the copy cost on the Vita.
+
+**Trap:** a background shell that waits with `pgrep -f '<script> <tag>'` matches its own command line and never exits
+(the m2b chain sat for 8 minutes); use `pgrep -x` on the process name or a pid file.
+
+## §47 Vita render view was never on; scene phase split; frozen-page cost (2026-09-22 13:05-13:50 CDT)
+
+- **Every Vita overlap build (perf83-102) ran with the render view disabled**: `[render-view] no shadow region; disabled`
+  printed BEFORE `[xv/boot] arena 75 MB`. main() called xv_render_view_configure before xv_boot_recomp allocated the
+  arena (g_xram NULL); the host harness configures after xk_init and was unaffected. Fix f735a79: configure in
+  xv_boot_recomp after xk_init. perf103 = first Vita build with the view configured (1024 slots); perf104 (9337c9a) also
+  lets all mode enter before the learning passes (perf103 logged `entered 0` all cinematic: enter() waited for 6
+  passes x 150 frames). So the perf100/101 gains (8 -> 11-14 fps cinematic) were real overlap with NO frozen pages and
+  survived 8-minute cinematics only because the cinematic has little object churn.
+- Vita memcpy is slow: `[render-view] 1024 KiB throughput MB/s: arena->arena 234, arena->heap 312, heap->heap 236,
+  memcmp heap 86`. All mode 1 copy-in (4 MB) is ~17 ms/frame on the owner; the owner currently waits 15-30 ms/frame for
+  the scene, so it may be absorbed - measure with perf104. The learn passes hash 7.7 MB twice per pass (~90 ms each).
+- **Scene phase split on the Vita** (XV_SCENE_PHASES=1, tools/patch_scene_phase_timers.py, a227e28; perf102 cinematic,
+  scene 76-79 ms on the helper): 5DBC0 78.8 = 5D990 77.5; direct callees: 606B0 13.3, 54010 10.2 (9 calls/frame),
+  60560 8.8, 5B760 8.7, 5B710 6.9, 54740 6.6, 539C0 5.9, 92890 5.2, 93C00 4.0, D6B00 3.1, 28320 2.8-6.7, 542F0 2.8.
+  Flat: the top 8 are ~65 ms; no single native rewrite gets the scene under 45 ms. 28320 (scene start: bookkeeping +
+  a subsystem callback through ds:[2E3008]+14) varies 2.8-6.7 ms: back-pressure/wait, not compute.
+- GPU: `[gpu-packet]` in the cinematic: submit 7-11 ms/frame, completion bounds lo ~40 ms / hi ~90 ms, bracket ~50 ms
+  (coarse polling), so the GPU is between 40 and 90 ms per frame - possibly the wall at a 50 ms target. Untested: a
+  lower render resolution run (single observation, not an A/B).
+- Clean rebuild: perf102 = every object rebuilt (the stage had xk_mem.o from 09-21 21:37 compiled without
+  XV_RENDER_VIEW; harmless in the end but the rule stands: after changing the build command, delete build/recomp/**/*.o).
+- Pi: hangs/aborts are the host reporter thread running owner-only report invariants (owner_drained,
+  xv_object_math_report_check) - reports now run on the owner at the device present (a227e28); all1d soak (all pages
+  frozen, real overlap, corridor) 20+ min without incident. The Vita's save/ tree is on the Pi (~/xita/saves/vita;
+  `PI_SAVE=vita PI_PAD=150:a,300:a,450:a,600:a tools/pi_run.sh ...`) for "Continue" runs; the corridor checkpoint is
+  the profile save of 2026-09-21 01:02.
+
+## §48 Frozen pages on the Vita: cost and hangs (2026-09-22 13:45-14:25 CDT)
+
+- perf104/105 (render view really on, all mode 1): copy-in 20.9 ms + merge 3.3-5.5 ms per frame ON THE HELPER (enter()
+  runs inside BCB30's body), helper core 97%, cinematic back to 8.3-9 fps (from 11-14 without the view). Both runs
+  hung (perf104 in the first gameplay window, perf105 at 7.5 min): thread dump = owner in the join poll (yield storm),
+  a game thread (start CFDE0) waiting on a mutant, the helper not finishing. The render view's own watchdog comment
+  names the class: "a scene bound for over 3 s is stuck (guest polling a word a host writer updates through a live
+  pointer)". With all 1024 game-state pages frozen, a completion word the kernel/I-O thread writes live is polled by
+  the scene in its shadow copy. The Pi never hit it (host fibers, no real I/O concurrency). That watchdog only ran from
+  the remote status poll, which is dead under overlap.
+- Fixes (commits after 40e4d9d): XV_RENDER_VIEW_DMA=1 (one sceDmacMemcpy for the contiguous slot range, link
+  SceKernelDmacMgr_stub) for the copy cost; XV_RENDER_VIEW_ALL=3 freezes only the object header table + the live
+  objects' data range (re-listed as it grows; host: 8 slots at load), so completion words stay live; the scene join
+  loop logs the helper's guest registers + stack code words after 3 s and runs the watchdog (recovery, view disabled).
+  Thread dump prints a mutant's owner/count. The two cores dated 13:35/13:49 are UTC (08:35/08:49 CDT, morning perf97
+  runs, not this session; core names carry the epoch, the FTP listing is UTC): helper in xk_NtReleaseMutant through the
+  CRT wrapper from 50560 during a non-overlapped scene -> the proxy is now unconditional for helper scenes (2f84a63).
+  No core was produced by any run of this session (perf99-108).
+- Deploy trap: a hung Xita cannot take an update (in-app remote dead): `run-overlap-fire.sh` prints DEPLOY NOT
+  CONFIRMED; companion `quit all` + `launch XITA00001`, wait 45 s, then deploy. The "cores" count in the run summary
+  was meaningless (folder capped at 53): it now prints the newest core's time.
+- perf107 = ALL=3 + DMA + stuck dump, deploying at 14:25.
+
+## §49 The overlap hang named, mitigated; owner-side snapshot; resolution check (2026-09-22 14:45-15:30 CDT)
+
+- Every frozen-page hang on the Pi (all1a, all1b, all3a, prep1) and the two on the Vita (perf104/105) had the same
+  signature: helper in f_000A26B0's node loop with ebp 01914660 (not a model tag) and node count 41E87F7B (a float).
+  `tools/patch_model_draw_guard.py` (at A26B0 entry: node count > 0x400 -> log + `ret 2Ch`) fired once on the Pi:
+  `tag index C0A8 (eax 8083C0A8 ecx 0 edx 8083BAF8) entry 80527524 class 3CBA5D69/... data 01914660 ... ret 0005B3B1`.
+  The caller (f_0005B190 at 5B3A9: `mov eax,[edx+34h]`) read a POINTER (8083C0A8 = edx + 0x5B0) where the model
+  tag datum should be; edx (8083BAF8) is the object's definition tag data resolved from the object's datum at [ebp]
+  (5B23D..5B24E) - both live in the tag data region ABOVE the 4 MB game-state limit, never frozen in any mode. So the
+  scene reads a torn object datum / wrong tag under real overlap; the host (x86, ucontext fibers) never reproduces it
+  (12,480 frames mode 2 clean), the Pi hits it at frame ~4400-5600 (corridor) every run. Guarded run guard1: one skip,
+  then 15 minutes clean (448 windows). The guard is the mitigation shipped in perf110 (one object skipped for one frame).
+  Open: which write tears [ebp] / the tag pointer - candidates: object deletion/reuse during tick N+1 seen through a
+  structure outside the frozen ranges (visibility/cluster object lists, tag data runtime fields).
+- Owner-side snapshot (8915823): `xv_render_view_prepare` runs the copy-in on the owner before `go`; on the helper it
+  raced tick N+1 (a real defect, though not the cause of the signature above). "owner-side NN ms" in the report was
+  cumulative until ca05ab3 (never reset); the real cost is ~0.4 ms (Pi) and a few ms (Vita, memcpy or DMA alike:
+  DMA=0 and DMA=1 both give ~84 ms frames). perf108/109/109b: 8-minute cinematic runs at 11-12.7 fps, no stuck.
+- Resolution: XV_RENDER_HEIGHT accepts only 360/400/480 (else native 544); the cfg file wins over env (edit
+  ux0:data/xita/xita.cfg over the plugin FTP, restore after). Native 544: 96.7-107 ms vs 85 ms at 360 -> resolution
+  is a 12-20 ms factor; at 360 the CPU scene is the wall.
+- Scene phases on the Vita with the copy off the helper: 5DBC0 63.7 ms (perf108); the flat split of §47 stands.
+
+## §50 Root cause of the overlap hang, mode 4 (2026-09-22 16:00-16:20 CDT, Pi only - the Vita is locked)
+
+Pi core.4415 (XV_MODEL_GUARD_ABORT=1, `tools/patch_model_draw_guard.py`): at the guard, the helper's edx (8083BAF8) is
+tag entry 0 = the scenario tag "levels\a10\a10" and [edx+34h] = its skies block pointer; the caller f_0005B190 had
+ebp = 0: `mov ebp,[ecx+edi+8]` (object header table slot -> object pointer) returned 0 for the datum the render list
+passed in, i.e. an object whose header slot was already free in the snapshot. Guest page 0 is mapped, so the NULL
+object read gave datum 0 -> tag 0 -> the skies pointer as a "tag index" -> garbage tag -> float node count -> the
+A26B0 loop. So: the render list was built from arrays outside every frozen range (cluster / object reference arrays,
+cached object render states) while the tick deleted the object. Not memory ordering; a stale list vs a consistent
+snapshot (the host never showed it because its fibers keep the tick from interleaving there).
+Mode 4 (commit above) freezes, by name, `cached object render states`, `cluster light reference`, `light cluster
+reference`, `object`, the four `cluster ... object reference` arrays, `object looping sounds`, `object list header`,
+`list object reference`: 248 slots on the host. The full data-array list (42 arrays below 4 MiB) is in the
+`[render-view] arrays:` log lines (mode 3/4, once per map). Pi soak mode4a in progress; the guard stays as the
+backstop (it fired once per run in modes 1/3 and the run continued).
+- Mode 4 soak mode4a (Pi, 25 min, 639 windows): 0 guard fires, 0 stalls. Every earlier mode fired by window ~75-95.
+  The stale render list was the whole hang class; mode 4 is the fix, the guard stays as backstop. mode4b (60 min) next.
+- HLE entry overhead on the Vita: xd3d_count asks "am I the helper?" twice per D3D HLE call and that was
+  sceKernelGetThreadId (a syscall) - ~3,800 HLE calls/frame in the corridor (host histogram at frame 1500:
+  SetTextureState_Deferred 1152, SetRenderState_Simple 898, SetRenderStateNotInline 782, SetTexture 226,
+  SetStreamSource 151, SetVertexShaderConstant 145, SetIndices 100, DrawIndexedVertices 99). 85b4dd6 replaces it with a
+  stack-pointer range test (helper_main records its 1 MiB stack). Expect a few ms off the helper's scene on the Vita
+  (the `draw-hle` 12-15 ms figure is the HLE time inside the scene). perf112 = perf111 (mode 4, guard, owner-side
+  snapshot, report fix) + this; built, NOT deployed (Vita locked since 15:36).
+- Vita scene structure (from the Pi split + host histogram): 54010 (9/frame, 10.6 ms Vita) is the structure-BSP
+  material loop with a per-material draw callback; 606B0 (13 ms Vita, 1 ms Pi) is draw submission; 5B4A0 (60/frame)
+  the per-object render with 5B190; i.e. most of the Vita's scene is D3D HLE recording cost, not guest arithmetic.
+  Next levers in order: HLE per-call overhead (this), then the recording path itself (state calls ~2,800/frame), then
+  native object/BSP loops.
+
+## §51 Vita afternoon: flicker, the proxy fiber, perf112-115 (2026-09-22 17:05-17:55 CDT)
+
+- perf112 (mode 4 default "object,cluster"): NPCs flicker, 54-62 draw batches instead of 187. Freezing `cached object
+  render states` loses the scene's own writes to it (tick-wins merge) so objects vanish next frame. Mode 4 default is
+  now "cluster,list" (30232a7): m4cl run drew 186-192 batches at 79-88 ms (11.2-12.6 fps), 6 min, guard 0.
+- perf112 froze at 17:14 after 4 min: the owner spinning (yield storm, no STUCK line) inside a proxied
+  RtlEnterCriticalSection loop on its own fiber, while the streaming thread that holds the section waits for the owner's
+  tick. Structural: proxied calls executed on the owner's fiber. Thread 24 ("state 3 wait mutant") in every dump is a
+  finished thread (state 3 = exited), a red herring. The remote wedges after such a freeze (accept fails forever):
+  device reboot + user unlock needed.
+- Proxy fiber (77c61ab): a kernel-internal guest thread (xk_thread_create_host) runs the helper's proxied calls.
+  perf113 froze at the menu: its 50 us poll made it the shortest-deadline sleeper and the scheduler starved everyone
+  (owner 40 ms overdue, 6,000 yields/s) -> 2 ms poll (perf114). perf114 ran, but the object pass never began
+  (`[object-jobs] passes 0 jobs 0` vs 33 jobs/window on perf112), objects not updated, flicker, ~90 draws. Host and Pi
+  with the fiber: full draws (Pi mode4c 605 batches). Vita-only (XV_THREADS=1 real threads + owner-phase admission by
+  thread id is the suspect). Parked: XV_SCENE_PROXY_FIBER=1 opt-in (default off, perf115). The perf112-class freeze
+  is therefore still possible (~once per hour of runs); the mitigation candidates are (a) fix the admission so the
+  fiber works, or (b) make proxied blocking calls time-slice (return to the join loop between yields).
+- HLE timing (XV_HLE_TIMING=1): macro + xv_call hook + [hle-time] report exist; the D3D vtable calls come through
+  xk_dispatch_magic (magic ordinals), where the hook is NOT yet installed (the edit was interrupted) - on the host
+  the report shows only sound calls so far. Build-gate pin for xv_recomp_protos.h re-pinned (d9ee557).
+- Quality sweep script `overlap-candidate/quality-sweep.sh <baseline-tag> <knob>...` written (one knob removed per
+  6-min run, gameplay-window median vs baseline, THRESH=3 ms, writes sweep-final.cfg, restores the original cfg);
+  not yet run - needs a clean baseline run first (perf115).
+- perf115 (fiber off, mode 4 cluster,list, guard, syscall fix) at DEFAULT graphics (user's call: only XV_RENDER_HEIGHT=360
+  kept; the old low-quality cfg is overlap-candidate/xita.cfg.lowquality-20260922): 8 min clean, 79-93 ms
+  (10.6-12.4 fps), 198-209 draw batches, object pass 34 jobs/window, guard 0. The ten quality overrides together were
+  worth ~7 ms (m4cl at low settings: 79-88 ms), below the 3 ms/knob noise floor, so they stay default.
+- Trap (18:20): tools/host_build.py rebuilt shards only when xv_x86rt.h/xk.h/xk_os.h changed, so every "host check" of an
+  xv_recomp_protos.h macro edit ran stale shards; now xv_recomp_protos.h and xk_object_jobs.h are triggers too
+  (656f138). HLE timing verified after a clean host build: ~9,850 timed HLE calls/frame on the host, the D3D ones
+  0.04-0.07 ms/frame each there (SetVertexData4f 1769/frame, SetTextureState_Deferred 1817/frame, Begin/End 446).
+- perf116 = perf115 + HLE timing hooks; deploy blocked at 18:41: the perf115 process died/froze at 18:24 (log ends,
+  launch ignored -> the device needs the user again). run-overlap-fire.sh now restarts to the dashboard before a deploy
+  when a level is running (the remote's replies are lost mid-level). Armed loop: launch every 30 s, deploy on a fresh boot.
+- Pi mode4c (18:48): 60 minutes, 1,791 windows / 107,460 frames of real overlap in the corridor, mode 4 (cluster,list),
+  proxy fiber ON (host variant), guard 0, stuck 0, not-drained 0. The overlap is stable on ARM by construction now.
+
+## §52 HLE time split on the Vita (perf117, XV_HLE_TIMING=1, a10 cinematic, 19:30 CDT)
+
+Timing itself costs ~24 ms/frame (two sceKernelGetProcessTimeWide per HLE call, ~9,500 timed calls/frame), so read
+the split, not the absolute frame (114 ms under timing vs 90 without). Per frame, steady state:
+DrawIndexedVertices 19.2 ms (228 calls, 84 us each) | XInputGetState 6.4 (1 call!) | SetTexture 2.9 (503) |
+End 2.9 (205) | SetTextureState_Deferred 2.6 (2653) | SetRenderState_Simple 2.1 (1781) | SetStreamSource 0.4 (282) |
+SetIndices 0.3 (229). The waits (NtWaitForSingleObjectEx 216 ms/frame over 3 calls) are the streaming threads' event
+waits summed across threads, not owner time.
+So of the ~65 ms scene: ~19 ms is the draw call's runtime work (xd3d_r_draw in runtime/xv_ui_gxm.c: SetVertexShader,
+SetTrackedConstants, DrawIndexedVerticesBase, ps_sync; stages timed by XV_DRAW_PROFILE=1: SETUP/STATE/INDICES/PROGRAM/
+STREAMS/CONSTANTS/TEXTURES/DIAGNOSTICS) and ~10 ms the state/texture setters. That is the native side of the scene and
+the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState at 6 ms/call is unexplained
+(xk_os_pad_poll: sceCtrlPeekBufferPositive + xv_remote_pad, both cheap in code) - measure inside next.
+- perf117 = perf116 + [cs] STUCK 3 s -> log holder + steal in RtlEnterCriticalSection (c134800): no trip in this run so far.
+- perf118 (proxy yields inline + events serviced from xk_yield on the owner thread; 3f-commit after 5ffa939): passed the
+  load->cinematic transition where 116/117 froze. Draw-stage split, steady state (XV_DRAW_PROFILE=1, 353 draws/frame):
+  streams 10.4 ms, textures 4.1, indices 3.9, program 1.7, state 1.6, setup 0.6, constants 0.5, diagnostics 0.3
+  (~23 ms/frame of draw work; the 13.6 ms textures figure was the load transient). First native target: the per-draw
+  vertex stream binding (~29 us/draw).
+
+## §53 The streams stage is the vertex snapshot copy; Pi mode4d deadlock (2026-09-22 20:00-20:20 CDT)
+- perf118 ran its 8 minutes clean at default graphics + 360 rows (10.3-12.2 fps in the cinematic, 81-96 ms).
+- Streams stage (10.4 ms/frame, xv_d3d.c draw path) = `xv_vertex_capture_submit`: the owner memcpy's each stream that
+  misses the reuse table into the 4 MB staging arena. `[vertex-capture]` per 60 frames: ~7,800 jobs, ~60 MB copied
+  (1 MB/frame at the Vita's ~240 MB/s = the stage), capture 360-470 ms, 15 arena reclaims (every 4 frames the arena
+  fills, `cap_reuse_reset` forgets every identity, everything re-copies). Reuse: 8-9k checks/60 frames, all exact hits,
+  trust (XV_CAPTURE_TRUST_TAGS) skips the compare for tag-resident sources. What is NOT known: whether the 1 MB/frame is
+  eviction churn (tag-resident, fixable by a bigger arena / smarter reclaim: Makefile accepts XV_CAPTURE_ARENA_KIB
+  2048/4096/8192) or geometry the game rewrites each frame (game-state region, needs a different path).
+  perf119 = perf118 + `[vertex-capture-census]` (0122b3f): copied bytes by region (tag / game state / other) and the top
+  64 KiB source bins. Read it, then pick: arena 8192 (tag churn) or a no-copy path for rewritten geometry.
+- Build recipe recovered: `ce-build-command.json` in the unified-games dir is the exact make line (RECOMP=1 + ~60
+  XV_* options + HALO2_PACKAGE); `overlap-candidate/make-vars.txt` is the stamp-reconstructed equivalent for the overlap
+  stage (`PATH=build/bin:$PATH make -j6 xita.vpk $(cat ../make-vars.txt)` from the stage; the rg shim in build/bin is
+  required by the Makefile's OWNER_PHASE hook check). Bump version.json by hand; the Makefile's option stamps
+  (build/*.config) are what decide rebuilds, so a wrong variable silently recompiles half the tree.
+- Pi mode4d soak DEADLOCKED after 2 h (18:53, load 0.02, no log lines): gdb: owner in xv_object_jobs_join waiting on
+  owner_wake (service_owner), both workers in xv_object_math_lock (nanosleep loop, guard held by someone else), scene
+  helper in xv_scene_thread_proxy_hle waiting for proxy_done. The helper holds the math guard (scene-side math native,
+  non-lane path takes math_mutex) and its proxied kernel call is only serviced by the DISPATCH join loop, which is not
+  running while the owner is inside the object pass. Fix 3e2dd53: owner waits in the object pass (owner_wake, dones,
+  visibility dones) are bounded 500 us and call `xv_scene_thread_service_owner_blocked()` (full proxy service, owner
+  thread only) between attempts; `[object-jobs] owner bounded-wait timeouts N` counts them. Pi soak yp2 (1 h) and
+  Vita perf120 carry it. This is a candidate for the ~once/hour Vita freezes that left every thread asleep.
