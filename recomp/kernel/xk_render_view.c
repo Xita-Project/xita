@@ -53,11 +53,15 @@ static retarget_t *retargets; static unsigned retargets_n, retargets_last, retar
 static int dma_mode, slots_contiguous;   /* XV_RENDER_VIEW_DMA=1 (Vita): one DMAC transfer for the contiguous all-mode slot range instead of a 240 MB/s CPU memcpy per page (perf104: copy-in 20.8 ms/frame on the helper) */
 #ifdef __vita__
 #include <psp2/kernel/dmac.h>
+#include <psp2/kernel/clib.h>
 #endif
+static int clib_copy = -1;   /* XV_RENDER_VIEW_CLIB=1: sceClibMemcpy (NEON) for the CPU copies; newlib memcpy measured ~216 MB/s here */
 static void view_copy(void *dst, const void *src, size_t n)
 {
 #ifdef __vita__
     if (dma_mode && n >= 65536u) { if (sceDmacMemcpy(dst, src, n) >= 0) return; dma_mode = 0; XK_LOG("[render-view] sceDmacMemcpy failed; CPU copies from now on\n"); }
+    if (clib_copy < 0) { const char *e = getenv("XV_RENDER_VIEW_CLIB"); clib_copy = e ? atoi(e) != 0 : 0; }
+    if (clib_copy) { sceClibMemcpy(dst, src, n); return; }
 #endif
     memcpy(dst, src, n);
 }
@@ -72,6 +76,7 @@ static uint32_t learn_gap_us = 8000; static uint32_t *learn_hash; static uint64_
 
 static unsigned depth, bound, frames_entered, full_frames, fiber_switches, aliases_max, mirrors_in_scene;
 static uint64_t prepare_us;   /* owner-side copy-in (xv_render_view_prepare) */
+static unsigned copy_runs;   /* mode 3/4: contiguous live-page runs copied per window */
 static uint64_t enter_us, leave_us, bytes_in, words_merged;
 /* Same-frame write conflicts (increment C): a word the scene changed (copy != pristine) whose live copy the tick also
  * changed meanwhile (live != pristine) to a different value. XV_RENDER_VIEW_CONFLICT=1 lets the scene's value
@@ -323,10 +328,20 @@ static void copy_in(void)
         if (full_frame) view_copy(pristine_slot(0), shadow_of(0), (size_t)slots_used * XK_PAGE);
         else for (unsigned s = 0; s < slots_used; ++s) if (sw_slot[s]) memcpy(pristine_slot(s), shadow_of(s), XK_PAGE);
         prep_pristine_us += xk_os_monotonic_us() - t2;
-    } else
-    for (unsigned s = 0; s < slots_used; ++s) {
-        memcpy(shadow_of(s), live_of_slot(s), XK_PAGE);
-        if (full_frame || sw_slot[s]) memcpy(pristine_slot(s), shadow_of(s), XK_PAGE);
+    } else {
+        /* mode 3/4: the listed slots are scattered pages, but mostly ascending runs of the object pool and data arrays;
+         * copy each run of consecutive live pages in one call (DMA for runs of 64 KiB and up). This branch was the
+         * owner's unattributed ~4.2 ms per frame (232 pages, one memcpy each, perf145). */
+        for (unsigned s = 0; s < slots_used; ) {
+            unsigned e = s + 1;
+            while (e < slots_used && slot_page[e] == slot_page[e - 1] + 1u) e++;
+            view_copy(shadow_of(s), live_of_slot(s), (size_t)(e - s) * XK_PAGE);
+            copy_runs++; s = e;
+        }
+        uint64_t t2 = xk_os_monotonic_us(); prep_copy_us += t2 - t1;
+        if (full_frame) view_copy(pristine_slot(0), shadow_of(0), (size_t)slots_used * XK_PAGE);
+        else for (unsigned s = 0; s < slots_used; ++s) if (sw_slot[s]) memcpy(pristine_slot(s), shadow_of(s), XK_PAGE);
+        prep_pristine_us += xk_os_monotonic_us() - t2;
     }
     for (unsigned i = 0; i < img_listed_n; ++i) {
         uint32_t ip = img_list[i];
@@ -425,6 +440,8 @@ void xv_render_view_report(unsigned frames)
            frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0, frames_entered ? (double)prepare_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_list_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_copy_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_pristine_us / frames_entered / 1000.0 : 0.0,
            frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0, (unsigned long long)words_merged,
            sw_slots, sw_imgs, sw_found_late, retargets_last, image_entries, retargets_overflow, fiber_switches, mirrors_in_scene, aliases_max);
+    if (copy_runs) XK_LOG("[render-view] copy runs %u per window (%.1f per frame; DMA %d, clib %d)\n", copy_runs, frames_entered ? (double)copy_runs / frames_entered : 0.0, dma_mode, clib_copy);
+    copy_runs = 0;
     frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; fiber_switches = mirrors_in_scene = 0; prepare_us = prep_list_us = prep_copy_us = prep_pristine_us = 0;   /* (was never reset: perf109 "owner-side 31 -> 68 ms" grew per window) */
     if (conflicts || conflicts_same_value) {
         char line[400]; int ln = snprintf(line, sizeof line, "[render-view-conflicts] %u frames: %llu conflicting words (%llu same-value), policy %s; sites (phys-page:word n live/scene):",
