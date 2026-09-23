@@ -1982,3 +1982,9 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
 - perf150 (749443b + bcb0b75): XV_FIBER_CORE / XV_PUMP_CORE core plan (fibers pinned to core 2, pump on core 0, scene
   helper alone on core 1) + render-view copy-in coalesced into page runs with DMA / sceClibMemcpy
   (XV_RENDER_VIEW_CLIB=1) + [render-view] copy runs line. Chained after perf148.
+- perf148 baseline (default config + slow logger): early 79.6/79.4/79.3/77.7, steady 68.9/65.9/66.1/67.6/68.1/70.4/68.1
+  (mean 67.9). perf150 (core plan: pump core 0, fibers core 2 + page-run copy with DMA): early 73.6/76.8/76.0/75.3,
+  steady 66.4/66.2/65.9/63.1/64.0/63.6/66.6 (mean 65.1): -3 ms overall although the DMA run copy made the owner's
+  snapshot SLOWER (6.24 ms vs ~4.2: 4 runs per frame, 944 KiB at ~150 MB/s through sceDmacMemcpy). So placement is
+  worth ~5 ms. Core loads with the plan: C0 37-39 %, C1 78-83 % (helper alone), C2 80-85 % (fibers).
+  perf151 = same install, XV_RENDER_VIEW_DMA=0 XV_RENDER_VIEW_CLIB=1 (NEON copy of the runs).
