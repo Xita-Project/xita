@@ -644,12 +644,14 @@ void xd3d_present_flush(void)   /* overlap mode 2: at the join */
  * frame normally arrives while the scene is still recording, so the device present (EndFrame, publish, BeginFrame,
  * ~0.7 ms) runs here instead of on the owner between noticing `done` and signalling the next `go`. The exchange decides
  * who presents; a Present that arrives after this check is flushed at the owner's join as before. */
-void xd3d_present_flush_helper(void)
+void xd3d_present_flush_helper(int owner_waiting)
 {
 #if defined(__vita__)
-    static int on = -1;
-    if (on < 0) { const char *e = getenv("XV_HELPER_PRESENT"); on = e && atoi(e) != 0; }   /* opt-in: perf161 steady windows ~3.5 ms worse with it on (the helper counts as busy during its present, so the owner loses the helper-core copy share) */
-    if (!on) return;
+    /* XV_HELPER_PRESENT: 0 off, 1 always (perf161: ~3.5 ms worse when the helper is the wall), 2 (default) adaptive:
+     * only while the owner is still ticking, i.e. when the owner is the wall and the helper would otherwise idle. */
+    static int mode = -1;
+    if (mode < 0) { const char *e = getenv("XV_HELPER_PRESENT"); mode = e ? atoi(e) : 2; }
+    if (!mode || (mode == 2 && owner_waiting)) return;
     unsigned f = __atomic_exchange_n(&g_present_deferred, 0, __ATOMIC_ACQ_REL);
     if (f) { helper_presents++; xd3d_r_present(f, 0); }
 #endif

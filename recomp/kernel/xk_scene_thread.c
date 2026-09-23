@@ -134,6 +134,7 @@ int xv_scene_thread_active(const void *guest_thread) { return depth && guest_thr
  * flight (backpressure). The owner-side D3D census lists the HLE calls made outside the scene. */
 #define SCENE_STACK_BYTES (256u * 1024u)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
+volatile int xv_owner_at_join;   /* the owner reached the dispatch join (early copy / wait): the helper is the wall this frame */
 static int overlap, in_flight_overlapped; static unsigned owner_blocked_services, in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
@@ -362,7 +363,7 @@ static int helper_main(SceSize args, void *argp)
         if (sceKernelWaitSema(go, 1, NULL) < 0) return -1;
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
         scene_abandon_armed = 0;
-        { extern void xd3d_present_flush_helper(void) __attribute__((weak)); if (xd3d_present_flush_helper) xd3d_present_flush_helper(); }   /* the owner's deferred Present of this frame, off its critical path */
+        { extern void xd3d_present_flush_helper(int) __attribute__((weak)); if (xd3d_present_flush_helper) xd3d_present_flush_helper(__atomic_load_n(&xv_owner_at_join, __ATOMIC_ACQUIRE)); }   /* the owner's deferred Present, when the owner is still ticking (it is then the wall) */
         slow_t_end = xk_os_monotonic_us();
         sceKernelSignalSema(done, 1);
     }
@@ -395,7 +396,8 @@ int xv_scene_thread_run(void *context)
     if (!configured) configure();
     if (!enabled) return 0;
     if (sceKernelGetThreadId() == helper) return 0;             /* the helper's own entry: run the body */
-    if (overlap && in_flight) { if (in_flight_overlapped) { extern void xv_render_view_early_copy(void) __attribute__((weak)); if (xv_render_view_early_copy) xv_render_view_early_copy(); } join(&joins_dispatch); }   /* early snapshot: copy tick N+1's pages while scene N finishes */             /* backpressure: scene N must finish before scene N+1 */
+    if (overlap && in_flight) { __atomic_store_n(&xv_owner_at_join, 1, __ATOMIC_RELEASE); if (in_flight_overlapped) { extern void xv_render_view_early_copy(void) __attribute__((weak)); if (xv_render_view_early_copy) xv_render_view_early_copy(); } join(&joins_dispatch); }   /* early snapshot: copy tick N+1's pages while scene N finishes */             /* backpressure: scene N must finish before scene N+1 */
+    __atomic_store_n(&xv_owner_at_join, 0, __ATOMIC_RELEASE);
     if (depth) { declined_nested++; return 0; }                  /* recursive scene entry on the owner */
     depth = 1;
     xctx *c = context;
@@ -518,6 +520,7 @@ int xv_scene_thread_active(const void *guest_thread) { return helper_valid && __
  * flight (backpressure). The owner-side D3D census lists the HLE calls made outside the scene. */
 #define SCENE_STACK_BYTES (256u * 1024u)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
+volatile int xv_owner_at_join;
 static int overlap, in_flight_overlapped; static unsigned owner_blocked_services, in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
@@ -763,7 +766,8 @@ int xv_scene_thread_run(void *context)
     if (!configured) configure();
     if (!enabled) return 0;
     if (pthread_equal(pthread_self(), helper)) return 0;         /* the helper's own entry: run the body */
-    if (overlap && in_flight) { if (in_flight_overlapped) { extern void xv_render_view_early_copy(void) __attribute__((weak)); if (xv_render_view_early_copy) xv_render_view_early_copy(); } join(&joins_dispatch); }   /* early snapshot: copy tick N+1's pages while scene N finishes */             /* backpressure: scene N must finish before scene N+1 */
+    if (overlap && in_flight) { __atomic_store_n(&xv_owner_at_join, 1, __ATOMIC_RELEASE); if (in_flight_overlapped) { extern void xv_render_view_early_copy(void) __attribute__((weak)); if (xv_render_view_early_copy) xv_render_view_early_copy(); } join(&joins_dispatch); }   /* early snapshot: copy tick N+1's pages while scene N finishes */             /* backpressure: scene N must finish before scene N+1 */
+    __atomic_store_n(&xv_owner_at_join, 0, __ATOMIC_RELEASE);
     if (depth) { declined_nested++; return 0; }                  /* recursive scene entry on the owner */
     xctx *c = context;
     ctx = *c; scene_guest = xk_cur;

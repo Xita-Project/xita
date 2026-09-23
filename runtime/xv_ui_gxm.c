@@ -1260,7 +1260,15 @@ static unsigned ps_image_stage(uint32_t psdef)
  * directly by Halo. Keep that attribute per vertex: the streamed declaration
  * normally supplies it from one persistent value for the whole draw. */
 static unsigned g_flare_seen, g_flare_culled;
+static uint64_t g_flare_us;   /* time inside draw_immediate_flare (kept + culled), for [flare-work] */
+static void draw_immediate_flare_inner(const xd3d_im_vtx *v, unsigned n);
 static void draw_immediate_flare(const xd3d_im_vtx *v, unsigned n)
+{
+    extern uint64_t xk_os_monotonic_us(void); uint64_t t0 = xk_os_monotonic_us();
+    draw_immediate_flare_inner(v, n);
+    g_flare_us += xk_os_monotonic_us() - t0;
+}
+static void draw_immediate_flare_inner(const xd3d_im_vtx *v, unsigned n)
 {
     typedef struct {
         float x, y, z, u, v;
@@ -1519,9 +1527,9 @@ static void present_report(unsigned frame)
         UI_LOG("[palette-cache] %u frames: %u reused / %u hashed (all 1024 bytes checked)\n",
             g_t_frames,g_palette_reused,g_palette_hashed);
         g_palette_reused=g_palette_hashed=0;
-        if (g_flare_seen) UI_LOG("[flare-work] %u quads kept / %u outside screen in %u frames\n",
-            g_flare_seen-g_flare_culled,g_flare_culled,g_t_frames);
-        g_flare_seen=g_flare_culled=0;
+        if (g_flare_seen) UI_LOG("[flare-work] %u quads kept / %u outside screen in %u frames; recording %.2f ms/frame\n",
+            g_flare_seen-g_flare_culled,g_flare_culled,g_t_frames,(double)g_flare_us/g_t_frames/1000.0);
+        g_flare_seen=g_flare_culled=0; g_flare_us=0;
         g_xv_ovl_game_ms = g_t_game_acc / 60000.0f; g_xv_ovl_render_ms = g_t_render_acc / 60000.0f;
         g_xv_ovl_fps = 60.0e6f / (float)(g_t_game_acc + g_t_render_acc + 1);
         { extern unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc, xv_n_kicks, xv_n_fires; extern uint64_t xv_t_vbcb_us, xv_t_draw_us, xv_t_present_us; UI_LOG("frame time: game %.1f ms + wait %.1f ms = %.1f fps | pump %.1f ms | %u textures %u KB | decode %u tex %.1f ms | draws/frame %u bsp %u | frames %u | kicks %u fires %u vbcb %.1f ms draw-hle %.1f ms present %.1f ms (per frame)\n",
