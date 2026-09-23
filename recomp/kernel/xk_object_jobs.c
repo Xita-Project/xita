@@ -255,6 +255,7 @@ static sem_t owner_wake, replies[WORKERS];
 #endif
 
 static xv_object_mutex math_mutex;
+static volatile int math_holder;   /* diagnostic: lane+1 for a worker, 100 owner lane, 200 another thread; 0 free */
 static int worker_lane(void);
 
 
@@ -553,10 +554,10 @@ static void hold_begin(unsigned lane,uintptr_t pc)
 static void hold_release(unsigned lane)
 {
     if(hold_lanes[lane].child_active||hold_lanes[lane].motion_active)abort();
-    if(!hold_lanes[lane].active) {xv_object_mutex_release(&math_mutex);return;}
+    if(!hold_lanes[lane].active) {math_holder=0;xv_object_mutex_release(&math_mutex);return;}
     uint64_t elapsed=xk_os_monotonic_us()-hold_lanes[lane].start;
     uintptr_t pc=hold_lanes[lane].pc;hold_lanes[lane].active=0;
-    xv_object_mutex_release(&math_mutex);
+    math_holder=0;xv_object_mutex_release(&math_mutex);
     unsigned site;
     for(site=0;site<HOLD_SITES;site++)
         if(!hold_lanes[lane].sites[site].samples||hold_lanes[lane].sites[site].pc==pc)break;
@@ -653,30 +654,51 @@ static unsigned owner_wait_timeouts;
  * scene helper yield-spinning in the model draw chain (325C0 -> 12AA3 -> NtYieldExecution) for a resource the guest
  * streaming thread produces, and every guest fiber parked: a host wait on this thread keeps the scheduler from ever
  * running that streaming fiber. The dispatch join parks the same way for the same reason. */
+static void owner_wait_stuck(unsigned timeouts,const char *what)
+{
+    /* every 4 s of a stalled pass: who holds the guard, what the workers are doing (the perf134 core answered none of it) */
+    if(timeouts%8000u)return;
+    XK_LOG("[object-jobs] STUCK %s %u ms: running %d math_holder %d (lane+1 / 100 owner-lane / 200 other) worker service words %u %u\n",
+        what,timeouts/2u,(int)__atomic_load_n(&running,__ATOMIC_RELAXED),(int)math_holder,
+        service_state[0],service_state[1]);
+}
 static void owner_wait(SceUID sem)
 {
-    extern void xk_sleep_us(uint64_t);
+    /* Bounded HOST wait + proxy service. Parking in the guest scheduler here (perf136, Pi yp6) let another guest fiber
+     * run xv_worker_query against the cluster snapshot the owner was rebuilding: SIGSEGV within minutes. */
+    unsigned timeouts=0;
     for(;;) {
-        int r=sceKernelPollSema(sem,1);
+        SceUInt32 timeout=500;
+        int r=sceKernelWaitSema(sem,1,&timeout);
         if(r==0)return;
-        if(r!=(int)SCE_KERNEL_ERROR_SEMA_ZERO)abort();
-        owner_wait_timeouts++;
+        if(r!=(int)SCE_KERNEL_ERROR_WAIT_TIMEOUT)abort();
+        owner_wait_timeouts++;timeouts++;
         if(xv_scene_thread_service_owner_blocked)xv_scene_thread_service_owner_blocked();
-        xk_sleep_us(300);
+        owner_wait_stuck(timeouts,"owner-wait");
     }
 }
 #else
 #define OWNER_WAKE_SEM (&owner_wake)
 #define DONE_SEM(i) (&dones[i])
+static void owner_wait_stuck(unsigned timeouts,const char *what)
+{
+    if(timeouts%8000u)return;
+    XK_LOG("[object-jobs] STUCK %s %u ms: running %d math_holder %d (lane+1 / 100 owner-lane / 200 other) worker service words %u %u\n",
+        what,timeouts/2u,(int)__atomic_load_n(&running,__ATOMIC_RELAXED),(int)math_holder,
+        service_state[0],service_state[1]);
+}
 static void owner_wait(sem_t *sem)
 {
-    extern void xk_sleep_us(uint64_t);
+    unsigned timeouts=0;
     for(;;) {
-        if(sem_trywait(sem)==0)return;
-        if(errno!=EAGAIN && errno!=EINTR)abort();
-        owner_wait_timeouts++;
+        struct timespec deadline;clock_gettime(CLOCK_REALTIME,&deadline);
+        deadline.tv_nsec+=500000;if(deadline.tv_nsec>=1000000000L){deadline.tv_nsec-=1000000000L;deadline.tv_sec++;}
+        if(sem_timedwait(sem,&deadline)==0)return;
+        if(errno==EINTR)continue;
+        if(errno!=ETIMEDOUT)abort();
+        owner_wait_timeouts++;timeouts++;
         if(xv_scene_thread_service_owner_blocked)xv_scene_thread_service_owner_blocked();
-        xk_sleep_us(300);
+        owner_wait_stuck(timeouts,"owner-wait");
     }
 }
 #endif
@@ -1000,6 +1022,7 @@ __attribute__((noinline)) int xv_object_math_lock(void)
             math_depth[lane]++;math_stats[lane].nested++;return lane+2;
         }
         int acquired=!xv_object_mutex_try(&math_mutex);
+        if(acquired)math_holder=lane+1;
         if(!acquired) {
 #if XV_HIERARCHY_ASSIST
             /* Pure captured work only; service parking remains above this loop. */
@@ -1009,7 +1032,7 @@ __attribute__((noinline)) int xv_object_math_lock(void)
             if(math_wait_override<0?math_wait_enabled:(unsigned)math_wait_override) {
                 math_wait_stats[lane].attempts++;
                 acquired=!xv_object_mutex_wait_bounded(&math_mutex,50);
-                if(acquired)math_wait_stats[lane].acquired++;
+                if(acquired){math_holder=lane+1;math_wait_stats[lane].acquired++;}
                 else math_wait_stats[lane].timeouts++;
             }
         }
@@ -1047,12 +1070,12 @@ __attribute__((noinline)) int xv_object_math_lock(void)
             owner_lane_stall_check(&since,"guard-spin");
             owner_lane_delay();
         }
-        math_stats[WORKERS].acquired++;
+        math_holder=100;math_stats[WORKERS].acquired++;
         return 1;
     }
 #endif
     xv_object_mutex_wait(&math_mutex);
-    math_stats[WORKERS].acquired++;
+    math_holder=200;math_stats[WORKERS].acquired++;
     return 1;
 }
 
@@ -1067,7 +1090,7 @@ void xv_object_math_unlock(int *locked)
         hold_release(lane);return;
 #endif
     }
-    xv_object_mutex_release(&math_mutex);
+    math_holder=0;xv_object_mutex_release(&math_mutex);
 }
 #ifdef XV_OBJECT_POSE_EXPERIMENT
 static int pose_is_owner(void)
@@ -2352,7 +2375,7 @@ void xv_object_jobs_report(unsigned frames)
         frames,passes,batches,submitted,executed[0],executed[1],WORKERS>2?executed[2]:0u,executed[WORKERS],
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)(WORKERS>2?work_us[2]:0),(unsigned long long)work_us[WORKERS],
         (unsigned long long)batch_us,rejected);
-    if(owner_wait_timeouts){XK_LOG("[object-jobs] owner scheduler-parked waits %u (300 us each; the scene proxy is serviced between them)\n",owner_wait_timeouts);owner_wait_timeouts=0;}
+    if(owner_wait_timeouts){XK_LOG("[object-jobs] owner bounded-wait timeouts %u (500 us each; the scene proxy is serviced between them)\n",owner_wait_timeouts);owner_wait_timeouts=0;}
     XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
     XK_LOG("[object-jobs] quiescent owner audio pumps %u\n",audio_pumps);audio_pumps=0;
     XK_LOG("[object-jobs] quiescent owner stream volume updates %u\n",audio_volumes);audio_volumes=0;
