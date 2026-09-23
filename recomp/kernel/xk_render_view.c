@@ -516,10 +516,30 @@ void xv_render_view_enter(unsigned *scope, void *context)
     { extern void xv_write_watch_arm(void) __attribute__((weak)); if (xv_write_watch_arm) xv_write_watch_arm(); }   /* host diagnostic (write_watch.c) */
     enter_us += xk_os_monotonic_us() - t0; frames_entered++; full_frames += full_frame;
 }
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+/* 64 bytes of copy vs pristine per step; nonzero = some word in the block differs (the scene wrote it). */
+static inline int block64_differs(const uint32_t *c, const uint32_t *p)
+{
+    uint32x4_t d = veorq_u32(vld1q_u32(c), vld1q_u32(p));
+    d = vorrq_u32(d, veorq_u32(vld1q_u32(c + 4), vld1q_u32(p + 4)));
+    d = vorrq_u32(d, veorq_u32(vld1q_u32(c + 8), vld1q_u32(p + 8)));
+    d = vorrq_u32(d, veorq_u32(vld1q_u32(c + 12), vld1q_u32(p + 12)));
+    uint32x2_t r = vorr_u32(vget_low_u32(d), vget_high_u32(d));
+    return (vget_lane_u32(r, 0) | vget_lane_u32(r, 1)) != 0;
+}
+#else
+static inline int block64_differs(const uint32_t *c, const uint32_t *p)
+{
+    uint32_t d = 0; for (unsigned k = 0; k < 16; ++k) d |= c[k] ^ p[k]; return d != 0;
+}
+#endif
 static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live, uint32_t page_id)   /* one pass; newlib memcmp is ~86 MB/s here */
 {
     const uint32_t *c = (const uint32_t *)copy, *p = (const uint32_t *)pre; uint32_t *l = (uint32_t *)live; unsigned changed = 0;
-    for (unsigned i = 0; i < XK_PAGE / 4; i += 4) {
+    for (unsigned b = 0; b < XK_PAGE / 4; b += 16) {
+        if (!block64_differs(c + b, p + b)) continue;   /* perf162: ~79 us/page with 4-word scalar blocks */
+    for (unsigned i = b; i < b + 16; i += 4) {
         uint32_t d = (c[i] ^ p[i]) | (c[i+1] ^ p[i+1]) | (c[i+2] ^ p[i+2]) | (c[i+3] ^ p[i+3]);
         if (!d) continue;
         for (unsigned k = i; k < i + 4; ++k) if (c[k] != p[k]) {
@@ -532,6 +552,7 @@ static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live, ui
             }
             if (copyback) l[k] = c[k];
         }
+    }
     }
     words_merged += changed;
     return changed != 0;

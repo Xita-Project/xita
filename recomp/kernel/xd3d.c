@@ -648,7 +648,7 @@ void xd3d_present_flush_helper(void)
 {
 #if defined(__vita__)
     static int on = -1;
-    if (on < 0) { const char *e = getenv("XV_HELPER_PRESENT"); on = !e || atoi(e) != 0; }
+    if (on < 0) { const char *e = getenv("XV_HELPER_PRESENT"); on = e && atoi(e) != 0; }   /* opt-in: perf161 steady windows ~3.5 ms worse with it on (the helper counts as busy during its present, so the owner loses the helper-core copy share) */
     if (!on) return;
     unsigned f = __atomic_exchange_n(&g_present_deferred, 0, __ATOMIC_ACQ_REL);
     if (f) { helper_presents++; xd3d_r_present(f, 0); }
