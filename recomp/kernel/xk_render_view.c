@@ -54,6 +54,7 @@ static int dma_mode, slots_contiguous;   /* XV_RENDER_VIEW_DMA=1 (Vita): one DMA
 #ifdef __vita__
 #include <psp2/kernel/dmac.h>
 #include <psp2/kernel/clib.h>
+#include <psp2/kernel/sysmem.h>
 #endif
 static int clib_copy = -1;   /* XV_RENDER_VIEW_CLIB=1: sceClibMemcpy (NEON) for the CPU copies; newlib memcpy measured ~216 MB/s here */
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
