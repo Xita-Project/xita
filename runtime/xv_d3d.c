@@ -1337,6 +1337,7 @@ static int retain_indices(const void **indices, unsigned count, unsigned *nverts
     g_index_requested[list] += ((uint64_t)count + 7u) & ~7ull;
     unsigned references=xv_vertex_references_enabled()!=0;
     xv_index_cache_entry *entry=NULL;
+    uint64_t sub = xv_draw_profile_begin();
     if (index_reuse_enabled()) {
         entry=xv_index_cache_select(g_index_cache,*indices,count);
         if (entry) {
@@ -1361,6 +1362,7 @@ static int retain_indices(const void **indices, unsigned count, unsigned *nverts
                 *indices=entry->retained;*nverts=entry->vertices;
                 if (references) g_draw_vertex_refs=entry->refs;
                 g_draw_vertex_refs_valid=references;
+                xv_draw_profile_step(XV_DRAW_IDX_CACHE, &sub);
                 return 1;
             }
             index_reuse_misses++;
@@ -1376,6 +1378,7 @@ static int retain_indices(const void **indices, unsigned count, unsigned *nverts
         memcpy(entry->mirror,source,count*sizeof(uint16_t));
         captured=entry->mirror;
     }
+    xv_draw_profile_step(XV_DRAW_IDX_CACHE, &sub);
     static int cached_scan = -1;
     if (cached_scan < 0) {
         const char *e = getenv("XV_INDEX_SCAN_CACHED");
@@ -1399,6 +1402,7 @@ static int retain_indices(const void **indices, unsigned count, unsigned *nverts
         memcpy(dst, captured, count * sizeof *dst);
         *nverts = index_bounds(dst, count);
     }
+    xv_draw_profile_step(XV_DRAW_IDX_SCAN, &sub);
     g_index_used[list] += (count + 7u) & ~7u; /* keep every draw 16-byte aligned */
     if (entry) {
         entry->retained=dst;entry->vertices=*nverts;entry->count=count;
@@ -1820,8 +1824,10 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
             s, S.stream_guest[s], vb->Common, vb->Data, nverts, stride);
         /* Only the owned upload is published; the cached source stays on CPU. */
     }
+    uint64_t sub = xv_draw_profile_begin();
     if (indices)
         xv_gpu_flush(indices, count * 2);
+    xv_draw_profile_step(XV_DRAW_FLUSH, &sub);
     static int capture_diagnostics=-1;
     if(capture_diagnostics<0)capture_diagnostics=getenv("XV_SKIN_DUMP") || getenv("XV_FOG_DUMP") ||
         getenv("XV_MESH_DUMP") || getenv("XV_DUMP_VS");
@@ -1833,6 +1839,7 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
         xv_vertex_capture_drain();
         xv_vertex_prepare_begin(&prep);
     }
+    xv_draw_profile_step(XV_DRAW_SUBMIT, &sub);
     xv_draw_profile_step(XV_DRAW_STREAMS, &profile);
     /* constants: snapshot the window this program reads.  Consecutive draws with unchanged c[] share one
      * snapshot (Halo draws hundreds of BSP pieces per frame with full-window programs: 768 floats each) */

@@ -47,6 +47,9 @@ void xv_draw_profile_report(unsigned frames)
         frames, calls[XV_DRAW_INDICES], elapsed[0]*scale, elapsed[1]*scale,
         elapsed[2]*scale, elapsed[3]*scale, elapsed[4]*scale, elapsed[5]*scale,
         elapsed[6]*scale, elapsed[7]*scale);
+    xv_logf("[draw-prep-sub] %u frames: index-cache %.3f (%u) index-scan %.3f (%u) flush %.3f (%u) capture-submit %.3f (%u) ms/frame (calls); inside indices/streams above\n",
+        frames, elapsed[XV_DRAW_IDX_CACHE]*scale, calls[XV_DRAW_IDX_CACHE], elapsed[XV_DRAW_IDX_SCAN]*scale, calls[XV_DRAW_IDX_SCAN],
+        elapsed[XV_DRAW_FLUSH]*scale, calls[XV_DRAW_FLUSH], elapsed[XV_DRAW_SUBMIT]*scale, calls[XV_DRAW_SUBMIT]);
     memset(elapsed, 0, sizeof elapsed);
     memset(calls, 0, sizeof calls);
 }
