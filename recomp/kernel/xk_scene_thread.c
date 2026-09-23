@@ -34,30 +34,45 @@ static void scene_census_report(void)
  * The host sampler says the scene is flat per function; this splits the Vita's ~65 ms scene into its phases. */
 #include <stdlib.h>
 #define PHASE_MAX 128
-static struct { uint32_t addr; uint64_t us; unsigned n; } phase_tab[PHASE_MAX]; static unsigned phase_used;
-static uint64_t phase_t0[16]; static unsigned phase_depth; static int phases = -1;
-void xv_scene_phase_begin(void) { if (phases < 0) { const char *e = getenv("XV_SCENE_PHASES"); phases = e ? atoi(e) : 0; } if (phases > 0 && phase_depth < 16) phase_t0[phase_depth++] = xk_os_monotonic_us(); }
+/* Two sets: [0] the owner's thread (tick side, the frame loop f_000BD420's callees), [1] the scene helper. The threads
+ * run concurrently under the overlap; a shared t0 stack interleaved their timings. */
+int xv_scene_thread_on_helper(void);
+static struct { uint32_t addr; uint64_t us; unsigned n; } phase_tab[2][PHASE_MAX]; static unsigned phase_used[2];
+static uint64_t phase_t0[2][16]; static unsigned phase_depth[2]; static int phases = -1;
+static const char *phase_tag[2] = { "[tick-phases]", "[scene-phases]" };
+void xv_scene_phase_begin(void)
+{
+    if (phases < 0) { const char *e = getenv("XV_SCENE_PHASES"); phases = e ? atoi(e) : 0; }
+    if (phases <= 0) return;
+    unsigned t = xv_scene_thread_on_helper() ? 1 : 0;
+    if (phase_depth[t] < 16) phase_t0[t][phase_depth[t]++] = xk_os_monotonic_us();
+}
 void xv_scene_phase_end(uint32_t addr)
 {
-    if (phases <= 0 || !phase_depth) return;
-    uint64_t dt = xk_os_monotonic_us() - phase_t0[--phase_depth]; unsigned i;
-    for (i = 0; i < phase_used; ++i) if (phase_tab[i].addr == addr) break;
-    if (i == phase_used) { if (phase_used >= PHASE_MAX) return; phase_tab[phase_used++].addr = addr; }
-    phase_tab[i].us += dt; phase_tab[i].n++;
+    if (phases <= 0) return;
+    unsigned t = xv_scene_thread_on_helper() ? 1 : 0;
+    if (!phase_depth[t]) return;
+    uint64_t dt = xk_os_monotonic_us() - phase_t0[t][--phase_depth[t]]; unsigned i;
+    for (i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].addr == addr) break;
+    if (i == phase_used[t]) { if (phase_used[t] >= PHASE_MAX) return; phase_tab[t][phase_used[t]++].addr = addr; }
+    phase_tab[t][i].us += dt; phase_tab[t][i].n++;
 }
 static void phase_report(unsigned frames)
 {
-    if (phases <= 0 || !frames || !phase_used) return;
-    char line[400]; int ln = snprintf(line, sizeof line, "[scene-phases] %u frames (ms/frame, calls; top by time, a callee's time includes its callees):", frames);
-    for (unsigned k = 0; k < 30 && k < phase_used; ++k) {   /* selection by time: the table is small */
-        unsigned best = k; for (unsigned i = k + 1; i < phase_used; ++i) if (phase_tab[i].us > phase_tab[best].us) best = i;
-        if (best != k) { __typeof__(phase_tab[0]) t = phase_tab[k]; phase_tab[k] = phase_tab[best]; phase_tab[best] = t; }
-        if (!phase_tab[k].us) break;
-        if (ln > 320) { XK_LOG("%s\n", line); ln = snprintf(line, sizeof line, "[scene-phases]  "); }
-        ln += snprintf(line + ln, sizeof line - ln, " %X %.2f (%u)", phase_tab[k].addr, (double)phase_tab[k].us / frames / 1000.0, phase_tab[k].n);
+    if (phases <= 0 || !frames) return;
+    for (unsigned t = 0; t < 2; ++t) {
+        if (!phase_used[t]) continue;
+        char line[400]; int ln = snprintf(line, sizeof line, "%s %u frames (ms/frame, calls; top by time, a callee's time includes its callees):", phase_tag[t], frames);
+        for (unsigned k = 0; k < 30 && k < phase_used[t]; ++k) {   /* selection by time: the table is small */
+            unsigned best = k; for (unsigned i = k + 1; i < phase_used[t]; ++i) if (phase_tab[t][i].us > phase_tab[t][best].us) best = i;
+            if (best != k) { __typeof__(phase_tab[0][0]) x = phase_tab[t][k]; phase_tab[t][k] = phase_tab[t][best]; phase_tab[t][best] = x; }
+            if (!phase_tab[t][k].us) break;
+            if (ln > 320) { XK_LOG("%s\n", line); ln = snprintf(line, sizeof line, "%s  ", phase_tag[t]); }
+            ln += snprintf(line + ln, sizeof line - ln, " %X %.2f (%u)", phase_tab[t][k].addr, (double)phase_tab[t][k].us / frames / 1000.0, phase_tab[t][k].n);
+        }
+        XK_LOG("%s\n", line);
+        for (unsigned i = 0; i < phase_used[t]; ++i) { phase_tab[t][i].us = 0; phase_tab[t][i].n = 0; }
     }
-    XK_LOG("%s\n", line);
-    for (unsigned i = 0; i < phase_used; ++i) { phase_tab[i].us = 0; phase_tab[i].n = 0; }
 }
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD && defined(__vita__)
 #include <psp2/kernel/threadmgr.h>
