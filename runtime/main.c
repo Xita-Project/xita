@@ -1175,6 +1175,26 @@ void xk_run(void)
 
 static volatile uint32_t g_frame_requested = 0;    /* written by guest fiber            */
 static volatile uint32_t g_frame_completed = 0;    /* written by pump thread            */
+/* Freeze watchdog (XV_FREEZE_ABORT=<seconds>, default off): a native thread on its own core that watches the
+ * presented-frame counter without touching the logger. If no frame completes for that long it writes a marker file
+ * with sceIo (not xv_logf, whose lock may be what everything is stuck behind) and traps, so the Vita writes a core
+ * dump with every thread's state. Tonight's gameplay freeze (perf127, 22:28) left no log line and no core: every
+ * thread, including the [cpu] poller, stopped at once and the FTP plugin died with them. */
+static int xv_freeze_watchdog_thread(SceSize args, void *argp)
+{
+    (void)args; (void)argp;
+    const char *e = getenv("XV_FREEZE_ABORT"); int limit = e ? atoi(e) : 0; if (limit <= 0) return 0;
+    uint32_t last = __atomic_load_n(&g_frame_completed, __ATOMIC_RELAXED); unsigned quiet = 0;
+    for (;;) {
+        sceKernelDelayThread(1000000);
+        uint32_t now = __atomic_load_n(&g_frame_completed, __ATOMIC_RELAXED);
+        if (now != last) { last = now; quiet = 0; continue; }
+        if (++quiet < (unsigned)limit) continue;
+        SceUID fd = sceIoOpen("ux0:data/xita/freeze.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+        if (fd >= 0) { char m[160]; int n = snprintf(m, sizeof m, "freeze watchdog: no frame presented for %u s (frame counter %u, process time %.1f s); trapping for a core dump\n", quiet, (unsigned)now, sceKernelGetProcessTimeWide() / 1000000.0); sceIoWrite(fd, m, n); sceIoClose(fd); }
+        __builtin_trap();
+    }
+}
 #include "xv_frame_events.h"
 #include "xv_packet_timing.h"
 #include "xv_benchmark.h"
@@ -2315,6 +2335,7 @@ int main(int argc, char *argv[])
                                             XV_PUMP_THREAD_STACK, 0, SCE_KERNEL_CPU_MASK_USER_1, NULL);
         if (pump < 0) { XV_LOG("pump thread create failed: 0x%08X\n", pump); xv_frame_events_close(&g_frame_events); goto shutdown; }
         sceKernelStartThread(pump, 0, NULL);
+        { SceUID wd = sceKernelCreateThread("xv_freeze_wd", xv_freeze_watchdog_thread, 64, 16 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL); if (wd >= 0) sceKernelStartThread(wd, 0, NULL); }   /* XV_FREEZE_ABORT */
         SceUID eng = sceKernelCreateThread("xv_recomp", xv_recomp_thread, XV_THREAD_PRIORITY,
                                            2 * 1024 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL);
         if (eng < 0) {
