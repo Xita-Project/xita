@@ -1938,3 +1938,8 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   slot is read. A corridor "Continue" would give the heavy-gameplay benchmark without a player.
 - perf142 (no ANY_MODE, vp tolerance, kernel mutex-owner STUCK line, XV_FREEZE_ABORT=40) chained; Pi yp9 (perf141
   harness, no ANY_MODE) 2 h soak started 11:07.
+- perf142 (no ANY_MODE) FROZE DURING THE LEVEL LOAD (loaded 0, 11:13): the viewport tolerance let the pass engage in
+  the load transition; `STUCK owner-wait ... math_holder 0`; the guard is the LwMutex ("light 1"), for which the SDK
+  has no owner query, so the kernel-owner line is empty. perf144 (a) XV_OBJECT_JOBS_STABLE (default 90 frames of all
+  conditions holding before admission, was 3) to keep the pass out of the transition, (b) runs with
+  XV_OBJECT_LIGHT_LOCK=0 (full mutex) so a stall prints the kernel owner id and count.
