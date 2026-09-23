@@ -3,11 +3,12 @@
 f_0005DBC0 in a stage's hand-maintained shards (idempotent: earlier timers are stripped and re-installed).
 Usage: patch_scene_phase_timers.py <stage>/recomp     Report: [scene-phases] in recomp/kernel/xk_scene_thread.c."""
 import re, sys, glob
-PARENTS = ['000FA920',   # the tick root (54 ms/frame in the a10 cinematic, perf122): its direct callees are the tick's phases
+PARENTS = ['00109760', '0005B4A0', '00062240', '000A26B0',   # sim tick (2-3/frame at 12 fps), per-model chain, the 182/frame callee (perf124 split)
+           '000FA920',   # the tick root (54 ms/frame in the a10 cinematic, perf122): its direct callees are the tick's phases
            '000BD420',   # the owner's frame loop (tick side): its direct callees are the tick phases ([tick-phases])
            '000BCB30', '0005DBC0', '0005D990', '0005C5E0', '0005D410', '0005BCB0', '00028320',
            '000606B0', '00054010', '00060560', '0005B760', '00054740', '0005B710', '000539C0', '00092890', '00093C00']   # + the Vita's top scene callees (§47), one level down   # scene entry, its main callee, and the chain below (each level was one callee on the host)
-BEGIN = '    { extern void xv_scene_phase_begin(void); xv_scene_phase_begin(); }\n'
+BEGIN = '    { extern void xv_scene_phase_begin(uint32_t); xv_scene_phase_begin(0x%su); }\n'
 def main():
     root = sys.argv[1]; total = 0
     for f in glob.glob(root + '/code_*.c'):
@@ -16,11 +17,11 @@ def main():
             m = re.search(r'^void f_%s\(xctx \*restrict c\)\n\{\n' % fn, s, re.M)
             if not m: continue
             end = s.find('\nvoid f_', m.end()); body = s[m.end():end]
-            body = re.sub(r'^    \{ extern void xv_scene_phase_(begin|end)\([^\n]*\n', '', body, flags=re.M)   # strip old
+            body = re.sub(r'^    \{ extern void xv_scene_phase_(begin|end)\([^\n]*\n', '', body, flags=re.M)   # strip old (both the old void begin and the new addr begin)
             n = [0]
             def wrap(mm):
                 n[0] += 1
-                return BEGIN + mm.group(1) + '    { extern void xv_scene_phase_end(uint32_t); xv_scene_phase_end(0x%su); }\n' % mm.group(2)
+                return (BEGIN % mm.group(2)) + mm.group(1) + '    { extern void xv_scene_phase_end(uint32_t); xv_scene_phase_end(0x%su); }\n' % mm.group(2)
             body = re.sub(r'(    X_PUSH32\(0x[0-9A-Fa-f]+u\);\n    f_([0-9A-F]{8})\(c\);\n)', wrap, body)
             s = s[:m.end()] + body + s[end:]; changed = True; total += n[0]
             print(f'f_{fn}: {n[0]} call sites in {f}')

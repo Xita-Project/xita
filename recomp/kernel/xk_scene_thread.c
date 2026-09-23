@@ -52,24 +52,27 @@ static void scene_census_report(void)
 /* Two sets: [0] the owner's thread (tick side, the frame loop f_000BD420's callees), [1] the scene helper. The threads
  * run concurrently under the overlap; a shared t0 stack interleaved their timings. */
 int xv_scene_thread_on_helper(void);
-static struct { uint32_t addr; uint64_t us; unsigned n; } phase_tab[2][PHASE_MAX]; static unsigned phase_used[2];
-static uint64_t phase_t0[2][16]; static unsigned phase_depth[2]; static int phases = -1;
+static struct { uint32_t parent, addr; uint64_t us; unsigned n; } phase_tab[2][PHASE_MAX]; static unsigned phase_used[2];
+static uint64_t phase_t0[2][16]; static uint32_t phase_addr[2][16]; static unsigned phase_depth[2]; static int phases = -1;
 static const char *phase_tag[2] = { "[tick-phases]", "[scene-phases]" };
-void xv_scene_phase_begin(void)
+/* Keyed by (parent, callee): the parent is the innermost timed call on this thread's stack, so a parent's self time
+ * is its own inclusive time minus its direct timed children. The tool passes the callee address at begin. */
+void xv_scene_phase_begin(uint32_t addr)
 {
     if (phases < 0) { const char *e = getenv("XV_SCENE_PHASES"); phases = e ? atoi(e) : 0; }
     if (phases <= 0) return;
     unsigned t = xv_scene_thread_on_helper() ? 1 : 0;
-    if (phase_depth[t] < 16) phase_t0[t][phase_depth[t]++] = xk_os_monotonic_us();
+    if (phase_depth[t] < 16) { phase_addr[t][phase_depth[t]] = addr; phase_t0[t][phase_depth[t]++] = xk_os_monotonic_us(); }
 }
 void xv_scene_phase_end(uint32_t addr)
 {
     if (phases <= 0) return;
     unsigned t = xv_scene_thread_on_helper() ? 1 : 0;
     if (!phase_depth[t]) return;
-    uint64_t dt = xk_os_monotonic_us() - phase_t0[t][--phase_depth[t]]; unsigned i;
-    for (i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].addr == addr) break;
-    if (i == phase_used[t]) { if (phase_used[t] >= PHASE_MAX) return; phase_tab[t][phase_used[t]++].addr = addr; }
+    uint64_t dt = xk_os_monotonic_us() - phase_t0[t][--phase_depth[t]];
+    uint32_t parent = phase_depth[t] ? phase_addr[t][phase_depth[t] - 1] : 0; unsigned i;
+    for (i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].addr == addr && phase_tab[t][i].parent == parent) break;
+    if (i == phase_used[t]) { if (phase_used[t] >= PHASE_MAX) return; phase_tab[t][phase_used[t]].parent = parent; phase_tab[t][phase_used[t]++].addr = addr; }
     phase_tab[t][i].us += dt; phase_tab[t][i].n++;
 }
 static void phase_report(unsigned frames)
@@ -77,8 +80,9 @@ static void phase_report(unsigned frames)
     if (phases <= 0 || !frames) return;
     for (unsigned t = 0; t < 2; ++t) {
         if (!phase_used[t]) continue;
-        char line[400]; int ln = snprintf(line, sizeof line, "%s %u frames (ms/frame, calls; top by time, a callee's time includes its callees):", phase_tag[t], frames);
-        for (unsigned k = 0; k < 30 && k < phase_used[t]; ++k) {   /* selection by time: the table is small */
+        /* inclusive per callee (summed over parents), then per parent: inclusive, self, top children */
+        char line[400]; int ln = snprintf(line, sizeof line, "%s %u frames (ms/frame, calls; inclusive by callee):", phase_tag[t], frames);
+        for (unsigned k = 0; k < 30 && k < phase_used[t]; ++k) {
             unsigned best = k; for (unsigned i = k + 1; i < phase_used[t]; ++i) if (phase_tab[t][i].us > phase_tab[t][best].us) best = i;
             if (best != k) { __typeof__(phase_tab[0][0]) x = phase_tab[t][k]; phase_tab[t][k] = phase_tab[t][best]; phase_tab[t][best] = x; }
             if (!phase_tab[t][k].us) break;
@@ -86,6 +90,22 @@ static void phase_report(unsigned frames)
             ln += snprintf(line + ln, sizeof line - ln, " %X %.2f (%u)", phase_tab[t][k].addr, (double)phase_tab[t][k].us / frames / 1000.0, phase_tab[t][k].n);
         }
         XK_LOG("%s\n", line);
+        /* self time: for every parent that is itself a timed callee, inclusive - sum(children) */
+        for (unsigned p = 0; p < phase_used[t]; ++p) {
+            uint32_t P = phase_tab[t][p].addr; uint64_t children = 0; unsigned nchild = 0;
+            for (unsigned i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].parent == P) { children += phase_tab[t][i].us; nchild++; }
+            if (!nchild || phase_tab[t][p].us < 500u * frames) continue;   /* parents worth 0.5 ms/frame or more */
+            int dup = 0; for (unsigned q = 0; q < p; ++q) if (phase_tab[t][q].addr == P) dup = 1; if (dup) continue;
+            ln = snprintf(line, sizeof line, "%s   %X incl %.2f self %.2f (%u children):", phase_tag[t], P, (double)phase_tab[t][p].us / frames / 1000.0,
+                          (double)(phase_tab[t][p].us > children ? phase_tab[t][p].us - children : 0) / frames / 1000.0, nchild);
+            for (unsigned c = 0; c < 8; ++c) {   /* the 8 biggest children */
+                unsigned best = PHASE_MAX; for (unsigned i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].parent == P && phase_tab[t][i].n && (best == PHASE_MAX || phase_tab[t][i].us > phase_tab[t][best].us)) best = i;
+                if (best == PHASE_MAX || !phase_tab[t][best].us) break;
+                ln += snprintf(line + ln, sizeof line - ln, " %X %.2f", phase_tab[t][best].addr, (double)phase_tab[t][best].us / frames / 1000.0);
+                phase_tab[t][best].n = 0;   /* consumed for this listing; counts are reset below anyway */
+            }
+            XK_LOG("%s\n", line);
+        }
         for (unsigned i = 0; i < phase_used[t]; ++i) { phase_tab[t][i].us = 0; phase_tab[t][i].n = 0; }
     }
 }
