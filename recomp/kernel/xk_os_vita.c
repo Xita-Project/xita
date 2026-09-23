@@ -330,6 +330,19 @@ static int fiber_thread(SceSize args, void *argp)
     return 0;
 }
 
+/* XV_FIBER_CORE=<0|1|2> pins every guest fiber thread to one core (default: any core). Only one guest fiber runs at a
+ * time (the single runner), so one core suffices; unpinned, the owner fiber migrated ~50,000 times per session and
+ * landed on core 1 next to the scene helper. */
+static int fiber_affinity_mask(void)
+{
+    static int mask = -1;
+    if (mask < 0) {
+        const char *e = getenv("XV_FIBER_CORE"); int core = e ? atoi(e) : -1;
+        mask = core == 0 ? SCE_KERNEL_CPU_MASK_USER_0 : core == 1 ? SCE_KERNEL_CPU_MASK_USER_1 : core == 2 ? SCE_KERNEL_CPU_MASK_USER_2 : 0;
+        xk_os_log("[core-plan] guest fibers: %s\n", mask ? (core == 0 ? "core 0" : core == 1 ? "core 1" : "core 2") : "any core");
+    }
+    return mask;
+}
 xk_fiber *xk_os_fiber_create(void (*entry)(void *), void *arg, size_t host_stack)
 {
     if (g_main_fiber.wake < 0) g_main_fiber.wake = sceKernelCreateSema("xk_main", 0, 0, 1, NULL);
@@ -337,7 +350,7 @@ xk_fiber *xk_os_fiber_create(void (*entry)(void *), void *arg, size_t host_stack
     f->entry = entry; f->arg = arg;
     f->wake = sceKernelCreateSema("xk_fiber", 0, 0, 1, NULL);
     f->thid = sceKernelCreateThread("xk_fiber", fiber_thread, sceKernelGetThreadCurrentPriority(),
-                                    (SceSize)host_stack, 0, 0, NULL);
+                                    (SceSize)host_stack, 0, fiber_affinity_mask(), NULL);
     if (f->thid < 0) { xk_os_log("fiber: sceKernelCreateThread failed %08X\n", (unsigned)f->thid); }
     sceKernelStartThread(f->thid, sizeof f, &f);
     return f;

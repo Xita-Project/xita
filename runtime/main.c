@@ -1180,6 +1180,14 @@ static volatile uint32_t g_frame_completed = 0;    /* written by pump thread    
  * with sceIo (not xv_logf, whose lock may be what everything is stuck behind) and traps, so the Vita writes a core
  * dump with every thread's state. Tonight's gameplay freeze (perf127, 22:28) left no log line and no core: every
  * thread, including the [cpu] poller, stopped at once and the FTP plugin died with them. */
+/* XV_PUMP_CORE=<0|1|2> (default 1): the render pump shared core 1 with the scene helper (the frame's wall); core 0 runs
+ * at ~30 % with the capture/upload/texture workers. */
+static int xv_pump_core_mask(void)
+{
+    const char *e = getenv("XV_PUMP_CORE"); int core = e ? atoi(e) : 1;
+    XV_LOG("[core-plan] render pump: core %d\n", core == 0 || core == 2 ? core : 1);
+    return core == 0 ? SCE_KERNEL_CPU_MASK_USER_0 : core == 2 ? SCE_KERNEL_CPU_MASK_USER_2 : SCE_KERNEL_CPU_MASK_USER_1;
+}
 static int xv_freeze_watchdog_thread(SceSize args, void *argp)
 {
     (void)args; (void)argp;
@@ -2332,7 +2340,7 @@ int main(int argc, char *argv[])
      * threads with default affinity; the render pump submits frames asynchronously. */
     {
         SceUID pump = sceKernelCreateThread("xv_pump", xv_pump_thread, XV_THREAD_PRIORITY,
-                                            XV_PUMP_THREAD_STACK, 0, SCE_KERNEL_CPU_MASK_USER_1, NULL);
+                                            XV_PUMP_THREAD_STACK, 0, xv_pump_core_mask(), NULL);
         if (pump < 0) { XV_LOG("pump thread create failed: 0x%08X\n", pump); xv_frame_events_close(&g_frame_events); goto shutdown; }
         sceKernelStartThread(pump, 0, NULL);
         { SceUID wd = sceKernelCreateThread("xv_freeze_wd", xv_freeze_watchdog_thread, 64, 16 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL); if (wd >= 0) sceKernelStartThread(wd, 0, NULL); }   /* XV_FREEZE_ABORT */
@@ -2372,7 +2380,7 @@ int main(int argc, char *argv[])
 
     /* Core 1: render pump.  Core 0: guest scheduler.  Nothing else runs Xbox code. */
     SceUID pump = sceKernelCreateThread("xv_pump", xv_pump_thread, XV_THREAD_PRIORITY,
-                                        XV_PUMP_THREAD_STACK, 0, SCE_KERNEL_CPU_MASK_USER_1, NULL);
+                                        XV_PUMP_THREAD_STACK, 0, xv_pump_core_mask(), NULL);
     SceUID guest = sceKernelCreateThread("xv_guest", xv_guest_thread, XV_THREAD_PRIORITY,
                                          XV_GUEST_THREAD_STACK, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL);
     if (pump < 0 || guest < 0) {
