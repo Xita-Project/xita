@@ -1855,3 +1855,22 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   completion and frame-retire latency normal in those windows, busy-slot waits 0, no fault line. perf134 = same
   install with XV_NATIVE_CRT_FLOAT=0 (kill switch) to test the natives; perf135 = + [present-stall] stage logger
   (7bc3d72: EndFrame / flip / flush / present / BeginFrame / frame_begin / purge split when a present exceeds 300 ms).
+
+## §57 The freeze watchdog's first core (perf134, 09:36 CDT Sept 23)
+- perf134 (perf133 install, XV_NATIVE_CRT_FLOAT=0) froze right after the load->cinematic transition (frame 5447,
+  326 s); XV_FREEZE_ABORT=20 trapped and the Vita wrote psp2core-1790174187 (1.58 MB gz). ux0:data/xita/freeze.txt
+  carries the marker. Symbolized with tools/vita_core_threads.py against a rebuilt perf133 ELF (git show
+  7bc3d72~1:runtime/xv_ui_gxm.c into the stage, relink, save, restore); pyelftools' note-name parse had to be made
+  tolerant (venv-core .../elftools/elf/notes.py, backup .orig-20260923: a note name without NUL).
+- Threads: owner xk_fiber in xv_object_jobs_join <- f_000900E0 <- 109760 <- FA920 (inside the object pass, host wait);
+  xv_objects_c0/c1 in xv_object_math_lock (sceKernelDelayThread loop) under f_0004C980 <- 44AD0 <- 90710 <- 90950;
+  xv_scene (RUNNING) in xv_scene_thread_proxy_hle's strcmp fast path <- xk_NtYieldExecution <- f_00012AA3 <- 325C0
+  <- 80250 <- 80360 <- 70110 <- A2380 (the per-model draw chain, SetTexture area: a guest wait loop with yields for
+  a resource the streaming thread produces); every other xk_fiber (streaming, sound, vblank) parked in waits; pump
+  and vertex threads idle. The owner's bounded host wait (perf120) serviced the proxy but never let the guest
+  scheduler run the streaming fiber, so the helper's wait could never be satisfied and the workers' service never
+  completed. Fix (perf136): owner_wait polls the semaphore, services the proxy, and parks with xk_sleep_us(300)
+  like the dispatch join. Residual risk: another guest fiber taking the math guard while a worker holds it and
+  awaits an owner service (the non-owner-lane path blocks); watch for it.
+- Trap: never delete/rebuild build/xita.vpk while a fire script may be deploying (perf135's deploy found no file:
+  "DEPLOY NOT CONFIRMED"). Build into a temp name and rename, or wait for "env set".
