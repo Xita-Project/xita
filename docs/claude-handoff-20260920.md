@@ -1883,3 +1883,5 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   other), worker service words` every 4 s of a stalled pass. The perf134 deadlock remains open; the next occurrence
   will name the guard holder. Idea not yet tried: on the helper, a yield-spin longer than N ms could hand the wait to
   the owner as a proxied wait (so the helper blocks in the proxy and the owner's join loop parks the scheduler).
+- perf137 (10:00): windows 76.9, 80.2, 79.5, 78.8, 70.8, 67.1, 66.7, 64.8 ms - 15.2 fps at t+390, the first window
+  above 15 fps in the cinematic; no long present wait so far, no STUCK line.
