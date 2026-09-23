@@ -163,6 +163,7 @@ int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
     if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     const char *name = ord < 367 ? xv_kernel_names[ord] : NULL; proxy_note(name);
     if (proxy_direct_ok(name)) { proxy_direct++; return 0; }
+    if (name && strcmp(name, "NtYieldExecution") == 0) { c->r[0] = 0; c->r[4] += 4u; proxy_direct++; return 1; }
     proxy_call_ctx = c; proxy_call_name = name; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
     sceKernelWaitSema(proxy_done, 1, NULL);
     return 1;
@@ -172,6 +173,7 @@ int xv_scene_thread_proxy_hle(xctx *c, void (*fn)(xctx *), const char *name)
     if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     proxy_note(name);
     if (proxy_direct_ok(name + 3)) { proxy_direct++; return 0; }   /* "xk_KeQuery..." -> the time queries stay direct */
+    if (strcmp(name, "xk_NtYieldExecution") == 0) { c->r[0] = 0; c->r[4] += 4u; proxy_direct++; return 1; }   /* a yield on the helper's behalf is meaningless (and re-enters xk_yield from the yield-path servicer): STATUS_SUCCESS, ret 0 */
     proxy_call_ctx = c; proxy_call_name = name; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
     sceKernelWaitSema(proxy_done, 1, NULL);
     return 1;
@@ -227,13 +229,15 @@ static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: lo
 static int proxy_name_lockless(const char *nm)
 {
     if (!nm) return 0; if (strncmp(nm, "xk_", 3) == 0) nm += 3;
-    return strcmp(nm, "NtSetEvent") == 0 || strcmp(nm, "NtYieldExecution") == 0 || strcmp(nm, "NtPulseEvent") == 0 || strcmp(nm, "NtClearEvent") == 0 || strcmp(nm, "KeSetEvent") == 0;
+    return strcmp(nm, "NtSetEvent") == 0 || strcmp(nm, "NtPulseEvent") == 0 || strcmp(nm, "NtClearEvent") == 0 || strcmp(nm, "KeSetEvent") == 0;   /* no yields: they re-enter xk_yield */
 }
 void xv_scene_thread_service_yield(void)
 {
     if (enabled <= 0 || !in_flight || proxy_fiber || xv_scene_thread_on_helper()) return;
-    void (*fn)(xctx *) = proxy_call_fn; if (!fn || !proxy_name_lockless(proxy_call_name)) return;
-    proxy_service_call_only();   /* never the proxied WAIT from a random yielding thread */
+    if (sceKernelGetThreadId() != xv_scene_owner_alias) return;   /* only the dispatching guest thread itself: an HLE run from an object-job worker or another fiber corrupts the scheduler (host wedge at the first scene) */
+    static int in_service; if (in_service) return; in_service = 1;
+    void (*fn)(xctx *) = proxy_call_fn; if (fn && proxy_name_lockless(proxy_call_name)) proxy_service_call_only();   /* never the proxied WAIT from a random yielding thread */
+    in_service = 0;
 }
 static void join(unsigned *counter)
 {
@@ -416,6 +420,7 @@ int xv_scene_thread_proxy_call(xctx *c, void (*fn)(xctx *), unsigned ord)
     if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     const char *name = ord < 367 ? xv_kernel_names[ord] : NULL; proxy_note(name);
     if (proxy_direct_ok(name)) { proxy_direct++; return 0; }
+    if (name && strcmp(name, "NtYieldExecution") == 0) { c->r[0] = 0; c->r[4] += 4u; proxy_direct++; return 1; }
     proxy_call_ctx = c; proxy_call_name = name; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
     while (sem_wait(&proxy_done) < 0 && errno == EINTR) {}
     return 1;
@@ -425,6 +430,7 @@ int xv_scene_thread_proxy_hle(xctx *c, void (*fn)(xctx *), const char *name)
     if (!(enabled > 0 && in_flight && xv_scene_thread_on_helper())) return 0;   /* every helper scene, overlapped or not: the owner's join poll sleeps through the guest scheduler, so a direct kernel call from the helper races it (Vita core 13:35: helper in xk_NtReleaseMutant via the CRT critical section from 50560) */
     proxy_note(name);
     if (proxy_direct_ok(name + 3)) { proxy_direct++; return 0; }   /* "xk_KeQuery..." -> the time queries stay direct */
+    if (strcmp(name, "xk_NtYieldExecution") == 0) { c->r[0] = 0; c->r[4] += 4u; proxy_direct++; return 1; }   /* a yield on the helper's behalf is meaningless (and re-enters xk_yield from the yield-path servicer): STATUS_SUCCESS, ret 0 */
     proxy_call_ctx = c; proxy_call_name = name; __atomic_store_n(&proxy_call_fn, fn, __ATOMIC_RELEASE);
     while (sem_wait(&proxy_done) < 0 && errno == EINTR) {}
     return 1;
@@ -459,6 +465,7 @@ static void proxy_fiber_start(void)
     proxy_fiber = xk_thread_create_host(proxy_fiber_main, NULL);
     XK_LOG("[scene-thread] proxy fiber %s\n", proxy_fiber ? "started" : "FAILED (proxied calls will run on the owner)");
 }
+static pthread_t owner_thread_self;   /* the thread that configured (owner); yield-path proxy service only from it */
 static xk_thread *proxy_fiber;   /* tentative; defined with the proxy fiber below */
 void xv_scene_thread_service(void) { if (!proxy_fiber && enabled > 0 && in_flight_overlapped && xk_cur == scene_guest && !xv_scene_thread_on_helper()) proxy_service(); }   /* owner service point (xv_preempt) when no proxy fiber */   /* proxied calls run on the proxy fiber (proxy_fiber_main), never on the owner's fiber: a blocking one (a critical section held by a streaming thread that waits for the owner's tick) deadlocked the owner (Vita perf112 17:14) */
 static uint64_t stuck_logged_at;
@@ -480,13 +487,15 @@ static void stuck_check(uint64_t t0)   /* the scene has not finished for 3 s: lo
 static int proxy_name_lockless(const char *nm)
 {
     if (!nm) return 0; if (strncmp(nm, "xk_", 3) == 0) nm += 3;
-    return strcmp(nm, "NtSetEvent") == 0 || strcmp(nm, "NtYieldExecution") == 0 || strcmp(nm, "NtPulseEvent") == 0 || strcmp(nm, "NtClearEvent") == 0 || strcmp(nm, "KeSetEvent") == 0;
+    return strcmp(nm, "NtSetEvent") == 0 || strcmp(nm, "NtPulseEvent") == 0 || strcmp(nm, "NtClearEvent") == 0 || strcmp(nm, "KeSetEvent") == 0;   /* no yields: they re-enter xk_yield */
 }
 void xv_scene_thread_service_yield(void)
 {
     if (enabled <= 0 || !in_flight || proxy_fiber || xv_scene_thread_on_helper()) return;
-    void (*fn)(xctx *) = proxy_call_fn; if (!fn || !proxy_name_lockless(proxy_call_name)) return;
-    proxy_service_call_only();   /* never the proxied WAIT from a random yielding thread */
+    if (!pthread_equal(pthread_self(), owner_thread_self)) return;   /* only the owner's own thread: an HLE run from an object-job worker corrupts the scheduler (host wedge at the first scene) */
+    static int in_service; if (in_service) return; in_service = 1;
+    void (*fn)(xctx *) = proxy_call_fn; if (fn && proxy_name_lockless(proxy_call_name)) proxy_service_call_only();   /* never the proxied WAIT from a random yielding thread */
+    in_service = 0;
 }
 static void join(unsigned *counter)
 {
@@ -528,7 +537,7 @@ static void configure(void)
     if (overlap) { scene_stack = xk_mem_alloc_high(SCENE_STACK_BYTES, 4096); if (!scene_stack) { XK_LOG("[scene-thread] no guest stack for the overlap; overlap off\n"); overlap = 0; } else XK_LOG("[scene-thread] overlap %d: private scene stack at %08X (kernel region)\n", overlap, scene_stack); }
     if (!enabled) { XK_LOG("[scene-thread] process-start disabled\n"); return; }
     if (sem_init(&go, 0, 0) || sem_init(&done, 0, 0) || sem_init(&proxy_done, 0, 0) || pthread_create(&helper, NULL, helper_main, NULL)) { XK_LOG("[scene-thread] helper thread failed; disabled\n"); enabled = 0; return; }
-    helper_valid = 1;
+    helper_valid = 1; owner_thread_self = pthread_self();
     XK_LOG("[scene-thread] process-start enabled (host pthread): BCB30 runs on a helper thread, owner waits\n");
     proxy_fiber_start();
 }
