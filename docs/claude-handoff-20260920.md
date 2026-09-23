@@ -1770,3 +1770,11 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   the next freeze produces a core dump with every thread. Run gameplay sessions with XV_FREEZE_ABORT=20.
 - Log fetch caveat: an FTP fetch of xita.log stops at 2,621,440 bytes (2.5 MiB, curl rc=18); resume with -C to get
   the rest. The runtime rotates xita.log -> xita.1.log at every launch, so pull xita.1.log BEFORE relaunching.
+- 23:07 CDT, end of session: after the reboot the LiveArea reports Xita as CORRUPTED (unclean shutdown during the
+  I/O stall is the likely cause); the companion plugin answers but the FTP server (port 1337) does not, even with
+  VitaShell launched (its FTP needs SELECT pressed in VitaShell). NEXT SESSION, in this order: (1) VitaShell + SELECT,
+  pull ux0:data/xita/xita.1.log (the freeze log, resume with curl -C past 2.5 MiB) before ANY Xita launch; (2) list
+  ux0:app/XITA00001 for the damaged file; (3) upload overlap-candidate/build/xita.vpk (perf128 = perf127 + freeze
+  watchdog + trims, 56903ef) to ux0:/ and install it from VitaShell; (4) play sessions with XV_FREEZE_ABORT=20 and
+  WITHOUT XV_DRAW_PROFILE/XV_SCENE_PHASES/XV_HLE_TIMING (each costs 2-15 ms). The Vita keepalive was stopped; the Pi
+  yp4 2 h soak keeps running unattended (runs/yp4.log), clean at 30 min.
