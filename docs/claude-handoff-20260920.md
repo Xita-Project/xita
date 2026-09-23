@@ -2004,3 +2004,10 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   early1 soak (40 min, corridor) running; the Vita run is chained after perf153 and gated on early1 being clean
   (early-gate.txt).
 - perf153 = perf152 install + XV_CPU_EXTERNAL=1 (runtime leaves the clock to PSVshell, which the user set to 500).
+- perf154 (early snapshot, Pi-gated; Pi early1 clean at the gate): owner-side snapshot 0.57 ms (was 3.51), 3.88 ms of
+  copy hidden in the owner's dispatch wait, 0 fallbacks, ~9 pages re-copied per frame. Frames: early 73.4/76.8/75.7/
+  75.4, steady 62.8/62.0/60.9/63.0/62.7/63.9/67.5 (best 60.9 = 16.2 fps; mean ~63): only ~-0.5 ms vs perf152.
+  New [scene-thread] helper line: EARLY phase helper cpu 60-62 ms, scene wall 73-75 (waits ~13 ms inside the scene);
+  STEADY phase helper cpu 55 = scene wall 55 (no waits) while the frame is ~62.5 and the owner waits 4-6 ms at the
+  join: ~7 ms per frame between scene done and the next go is unaccounted. perf155 adds done->noticed and
+  noticed->go latencies and the [scene-wait] kernel-status sampler.
