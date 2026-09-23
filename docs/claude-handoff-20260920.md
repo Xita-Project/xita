@@ -1924,3 +1924,17 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   perf142 (949c919) prints sceKernelGetMutexInfo's owner id and count next to our thread ids in the STUCK line.
 - Pi yp8 (perf141 harness, gameplay from the Vita save): the object pass engages every frame now (passes 60, jobs
   1380/60 frames, 23 per pass, batch 2 ms), clean at 46 windows.
+- Pi yp8 (perf141 harness + XV_OBJECT_JOBS_ANY_MODE=1, gameplay from the corridor save) ABORTED after 46 windows:
+  `[object-jobs] STOP job instruction budget exceeded target 00000000 return 00000262 object E440018B; experiment
+  cannot enter owner-only services` on lane 1 in f_000A3080 (targets 0004C980, indirect-depth 1): a job spun past its
+  budget (a guest wait inside an object update that only the owner could satisfy). On the Vita there is no budget, so
+  that job spins forever inside the worker and the owner's dones wait never ends = the perf134/perf141 freeze class.
+  The readiness gate's excluded modes exist precisely to keep such objects out of the pass: XV_OBJECT_JOBS_ANY_MODE
+  stays OFF. The viewport-frame tolerance (perf141) stays: the Pi soaked 2 h x3 with the pass per frame at 30 fps.
+  Open: make a job that hits an owner-only wait fail over safely (re-run on the owner) instead of spinning.
+- Vita save slots (ux0:data/xita/save/udata/UDATA/4d530004): 122A17771B9E savegame.bin Sep 21 01:02 (the corridor
+  checkpoint), 122A17771B9F Sep 17 08:58, 122A17771BA0 none. The fire script's "New001 profile" + "Continue" lands in
+  the a10 cinematic, so it selects a profile whose checkpoint is the level start; XV_SAVE_LOG=1 on a run shows which
+  slot is read. A corridor "Continue" would give the heavy-gameplay benchmark without a player.
+- perf142 (no ANY_MODE, vp tolerance, kernel mutex-owner STUCK line, XV_FREEZE_ABORT=40) chained; Pi yp9 (perf141
+  harness, no ANY_MODE) 2 h soak started 11:07.
