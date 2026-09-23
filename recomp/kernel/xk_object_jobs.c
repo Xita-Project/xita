@@ -43,6 +43,7 @@ extern int fegetexcept(void);
 pthread_t xv_owner_pthread_self(void);   /* xk_scene_thread.c: owner alias for the scene helper (host) */
 #include <semaphore.h>
 #include <errno.h>
+#include <time.h>
 #endif
 
 /* Worker lanes are a build-time choice: 2 (cores 0/1, owner services on core 2)
@@ -639,6 +640,41 @@ void xv_object_holds_override(int value)
 #ifndef __vita__
 static void wait_sem(sem_t *s) { while(sem_wait(s))if(errno!=EINTR)abort(); }
 #endif
+/* Owner waits during a batch never block outright: the scene helper may sit in a proxied kernel call that only the
+ * owner runs while a worker waits for the math guard the helper holds (Pi mode4d deadlock, 2026-09-22 18:53).
+ * Bounded waits, and the scene thread's owner-blocked service between them. */
+extern void xv_scene_thread_service_owner_blocked(void) __attribute__((weak));
+static unsigned owner_wait_timeouts;
+#ifdef __vita__
+#define OWNER_WAKE_SEM owner_wake
+#define DONE_SEM(i) dones[i]
+static void owner_wait(SceUID sem)
+{
+    for(;;) {
+        SceUInt32 timeout=500;
+        int r=sceKernelWaitSema(sem,1,&timeout);
+        if(r==0)return;
+        if(r!=(int)SCE_KERNEL_ERROR_WAIT_TIMEOUT)abort();
+        owner_wait_timeouts++;
+        if(xv_scene_thread_service_owner_blocked)xv_scene_thread_service_owner_blocked();
+    }
+}
+#else
+#define OWNER_WAKE_SEM (&owner_wake)
+#define DONE_SEM(i) (&dones[i])
+static void owner_wait(sem_t *sem)
+{
+    for(;;) {
+        struct timespec deadline;clock_gettime(CLOCK_REALTIME,&deadline);
+        deadline.tv_nsec+=500000;if(deadline.tv_nsec>=1000000000L){deadline.tv_nsec-=1000000000L;deadline.tv_sec++;}
+        if(sem_timedwait(sem,&deadline)==0)return;
+        if(errno==EINTR)continue;
+        if(errno!=ETIMEDOUT)abort();
+        owner_wait_timeouts++;
+        if(xv_scene_thread_service_owner_blocked)xv_scene_thread_service_owner_blocked();
+    }
+}
+#endif
 static void notify_owner(void)
 {
     if(__atomic_exchange_n(&owner_notice,1,__ATOMIC_ACQ_REL))return;
@@ -857,11 +893,7 @@ static void service_owner(void)
 {
     unsigned completed=0;
     while(completed<active_workers) {
-#ifdef __vita__
-        if(sceKernelWaitSema(owner_wake,1,NULL)<0)abort();
-#else
-        wait_sem(&owner_wake);
-#endif
+        owner_wait(OWNER_WAKE_SEM);
         service_scan(&completed,1);
     }
 }
@@ -1817,13 +1849,7 @@ int xv_visibility_classify_jobs(xctx *c,const xv_visibility_input *input,unsigne
 #endif
     }
     visibility_execute(WORKERS,workers);
-    for(unsigned i=0;i<workers;++i) {
-#ifdef __vita__
-        if(sceKernelWaitSema(dones[i],1,NULL)<0)abort();
-#else
-        wait_sem(&dones[i]);
-#endif
-    }
+    for(unsigned i=0;i<workers;++i)owner_wait(DONE_SEM(i));
     __atomic_store_n(&visibility_running,0,__ATOMIC_RELEASE);
     __atomic_store_n(&running,0,__ATOMIC_RELEASE);
     memcpy(output,visibility_packet.output,n*sizeof(*output));return 1;
@@ -2235,11 +2261,7 @@ void xv_object_jobs_join(void)
 #endif
     if(active_workers)service_owner();else execute(WORKERS);
     for(unsigned i=0;i<active_workers;i++) {
-#ifdef __vita__
-        if(sceKernelWaitSema(dones[i],1,NULL)<0)abort();
-#else
-        wait_sem(&dones[i]);
-#endif
+        owner_wait(DONE_SEM(i));
     }
     /* Every worker posts its final owner notification before its done semaphore.
      * With all done semaphores consumed, no old notification can arrive later. */
@@ -2325,6 +2347,7 @@ void xv_object_jobs_report(unsigned frames)
         frames,passes,batches,submitted,executed[0],executed[1],WORKERS>2?executed[2]:0u,executed[WORKERS],
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)(WORKERS>2?work_us[2]:0),(unsigned long long)work_us[WORKERS],
         (unsigned long long)batch_us,rejected);
+    if(owner_wait_timeouts){XK_LOG("[object-jobs] owner bounded-wait timeouts %u (500 us each; the scene proxy is serviced between them)\n",owner_wait_timeouts);owner_wait_timeouts=0;}
     XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
     XK_LOG("[object-jobs] quiescent owner audio pumps %u\n",audio_pumps);audio_pumps=0;
     XK_LOG("[object-jobs] quiescent owner stream volume updates %u\n",audio_volumes);audio_volumes=0;

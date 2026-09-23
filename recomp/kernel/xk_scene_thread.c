@@ -82,7 +82,7 @@ int xv_scene_thread_active(const void *guest_thread) { return depth && guest_thr
  * flight (backpressure). The owner-side D3D census lists the HLE calls made outside the scene. */
 #define SCENE_STACK_BYTES (256u * 1024u)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
-static int overlap, in_flight_overlapped; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
+static int overlap, in_flight_overlapped; static unsigned owner_blocked_services, in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -231,6 +231,18 @@ static int proxy_name_lockless(const char *nm)
     if (!nm) return 0; if (strncmp(nm, "xk_", 3) == 0) nm += 3;
     return strcmp(nm, "NtSetEvent") == 0 || strcmp(nm, "NtPulseEvent") == 0 || strcmp(nm, "NtClearEvent") == 0 || strcmp(nm, "KeSetEvent") == 0;   /* no yields: they re-enter xk_yield */
 }
+/* The owner blocked in a host wait of its own (object-jobs owner_wake/dones): a worker may be waiting for the math
+ * guard the HELPER holds while the helper waits for the owner to run its proxied kernel call - three-way deadlock
+ * (Pi mode4d 18:53: owner in xv_object_jobs_join/owner_wake, workers in xv_object_math_lock, helper in proxy_hle).
+ * Full service (calls and the pending wait), exactly what the dispatch join loop runs; owner thread only. */
+void xv_scene_thread_service_owner_blocked(void)
+{
+    if (enabled <= 0 || !in_flight || proxy_fiber || xv_scene_thread_on_helper()) return;
+    if (sceKernelGetThreadId() != xv_scene_owner_alias) return;
+    static int in_service; if (in_service) return; in_service = 1;
+    proxy_service(); owner_blocked_services++;
+    in_service = 0;
+}
 void xv_scene_thread_service_yield(void)
 {
     if (enabled <= 0 || !in_flight || proxy_fiber || xv_scene_thread_on_helper()) return;
@@ -347,7 +359,7 @@ int xv_scene_thread_active(const void *guest_thread) { return helper_valid && __
  * flight (backpressure). The owner-side D3D census lists the HLE calls made outside the scene. */
 #define SCENE_STACK_BYTES (256u * 1024u)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
-static int overlap, in_flight_overlapped; static unsigned in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
+static int overlap, in_flight_overlapped; static unsigned owner_blocked_services, in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -488,6 +500,18 @@ static int proxy_name_lockless(const char *nm)
 {
     if (!nm) return 0; if (strncmp(nm, "xk_", 3) == 0) nm += 3;
     return strcmp(nm, "NtSetEvent") == 0 || strcmp(nm, "NtPulseEvent") == 0 || strcmp(nm, "NtClearEvent") == 0 || strcmp(nm, "KeSetEvent") == 0;   /* no yields: they re-enter xk_yield */
+}
+/* The owner blocked in a host wait of its own (object-jobs owner_wake/dones): a worker may be waiting for the math
+ * guard the HELPER holds while the helper waits for the owner to run its proxied kernel call - three-way deadlock
+ * (Pi mode4d 18:53: owner in xv_object_jobs_join/owner_wake, workers in xv_object_math_lock, helper in proxy_hle).
+ * Full service (calls and the pending wait), exactly what the dispatch join loop runs; owner thread only. */
+void xv_scene_thread_service_owner_blocked(void)
+{
+    if (enabled <= 0 || !in_flight || proxy_fiber || xv_scene_thread_on_helper()) return;
+    if (!pthread_equal(pthread_self(), owner_thread_self)) return;
+    static int in_service; if (in_service) return; in_service = 1;
+    proxy_service(); owner_blocked_services++;
+    in_service = 0;
 }
 void xv_scene_thread_service_yield(void)
 {
