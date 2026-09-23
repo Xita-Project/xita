@@ -1658,3 +1658,23 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   visibility dones) are bounded 500 us and call `xv_scene_thread_service_owner_blocked()` (full proxy service, owner
   thread only) between attempts; `[object-jobs] owner bounded-wait timeouts N` counts them. Pi soak yp2 (1 h) and
   Vita perf120 carry it. This is a candidate for the ~once/hour Vita freezes that left every thread asleep.
+- perf120 (owner-wait fix + census) 8 min clean, 11.0-12.4 fps; `[object-jobs] owner bounded-wait timeouts` ~115/60
+  frames (normal waiting for workers, now with proxy service). CENSUS ANSWER: copies tag 4200 (96 MB/60 frames = 1.6
+  MB/frame) state 48 (15 KiB) other 0. All of it is tag-resident BSP vertex data; top bins 0x1480000 (43.6 MB/380
+  copies = ~115 KB each), 0x1450000, 0x1470000. Cause: `cap_reuse_find/add` refused sparse-referenced streams (their
+  worker result is per index mask), so every sparse BSP draw re-copied its whole source buffer, and that churn filled
+  the 4 MB arena every 2-3 frames (24 reclaims/60 frames), evicting the non-sparse entries too.
+  Fix 811a282 (perf121, running 20:57): sparse streams share the arena CPU snapshot (entry flag `sparse`, key includes
+  it); the job's reuse id is cleared so worker results are never stored/borrowed across masks; hit path copies the mask
+  into the job like a miss. `[vertex-capture-sparse]` counts copies avoided. Expect the streams stage (10.4 ms) to fall
+  to the publish/join residue and reclaims to ~0. Not a knob: it is unconditional (XV_VERTEX_CAPTURE_REUSE=0 disables
+  all reuse).
+- Pi yp2 (owner-wait fix): one `[scene-thread] STUCK 3000 ms` at line 46772 with an owner yield storm (thread 8 in the
+  56670 cache-request wait), proxy fn nil / pending 0, helper stack words 7A3B0 6229C 541C4 58B38 10C356 110CDF 5D7FC
+  5DBAC; the render-view watchdog restored the live mapping and DISABLED the view, the run continued (deadlock test
+  still valid, frozen-page coverage ended there). Open: a 3 s scene with nothing proxied.
+- Trap, again: `until ! pgrep -f 'run-overlap-fire.sh perf120'` in a background shell matches the shell itself and
+  never ends (perf121 sat unfired for 15 min). Use `ps -eo pid,args | grep '[r]un-overlap-fire.sh perf120'` or a pid
+  file. Also: the fire script's FTP fetch is starved for ~60-90 s at the load->cinematic transition; that is not a
+  freeze (I relaunched a healthy perf119 on that signal). The script now keeps the previous log copy on a failed fetch
+  and the longest copy as gameplay-<tag>.log.max.
