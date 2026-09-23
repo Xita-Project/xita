@@ -1745,3 +1745,14 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   textures 13 us (record_material, 4 stages), program 8 us (ps link lookup), state 7 us. Flare quads 20 us each
   (draw_immediate_flare -> the full draw record for a 4-vertex quad). Plan: micro-profile inside the HLE draw with
   finer XV_DRAW_PROFILE steps, then cut each stage; -15 ms is realistic in days and lands ~60 ms with the sparse fix.
+- perf127 (draw sub-stages 6ba3d1d, [draw-prep-sub]), cinematic, ~350 draws/frame: indices 4.0 = index-cache 1.33
+  (select+compare+copy, 210/frame) + index-scan 1.39 (bounds/reference scans on the ~130 misses/frame) + ~1.3 before
+  the cache (prim_to_gxm/new_cmd/early paths); streams 5.0 = flush 0.29 + capture-submit 3.5 (10 us/draw with ZERO
+  bytes copied: reuse probes, cap_collect per submit, publish + event-flag wake) + ~1.2 stream loop; textures 3.9;
+  program 1.7; state 1.5; setup 0.5; constants 0.5. FLAT AGAIN: no sub-step above 4 ms. Realistic cuts: submit -1.5
+  (collect/wake batching, cheaper probe), textures -1.5 (record_material caching by handle), program -0.5 (strstr
+  "halo_vs_16" + 256-entry pspair scan per draw), End flare quads -2 (batch the 4-vertex quads), deferred setters -2
+  (SetTextureState_Deferred 2493 + SetRenderState 2749 calls/frame ~1 us each): about -8 ms = scene ~67, frame ~77
+  (13 fps). Beyond that the guest natives (63C00 math 2 ms, 539C0 4.5, 602F0 4.3, 544D0 3.2, D8C40 2.0, 27F40 2)
+  and the 5B4A0/54010 pointer-called draw setup are what 50 ms needs.
+- Pi yp3 (trap bail-out build): 60 min, 1,791 windows clean (no trap/abandon/stall); yp4 2 h started 22:19.
