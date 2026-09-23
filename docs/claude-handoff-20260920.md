@@ -1822,3 +1822,11 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   14.1 (1/tick, 7 ms) + E7140 1.8. BCB30 22.5 this run. Pi gdb chain for it: 565E0 <- 8D760 <- 8FB70 <- 900E0.
   When the scene drops below the tick, the lever is making the native object pass engage per tick in cinematics
   (or the 14E2C0 tick step, 7 ms, unknown).
+- perf129 6 min clean (77-87 ms with the tick timers on). perf130 = same build, XV_NATIVE_PACK=2 (native f_00061270),
+  no profiling, launched 08:47 via NO_DEPLOY (note: NO_DEPLOY needs a companion quit/launch to the dashboard first,
+  the env is armed there). perf131 built (not yet run): getenv caching in Begin/SetTexture (2e22c3a), the inline
+  on-helper fast path in xd3d_count (91375c2), the per-frame texture source memo (edbf2ef, XV_TEXTURE_SOURCE_MEMO=0
+  disables, [texture-source-memo] counts). Each is a sub-ms to ~2 ms candidate; measured together against perf128's
+  71.7-83 ms window set. Flare quads: not batchable (one visibility query per quad); their path is
+  draw_immediate_flare -> xv_d3d_DrawImmediateStrided -> record_draw with stream 0 immediate (no capture submit),
+  so the memo and the program stage are what they pay.
