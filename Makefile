@@ -931,7 +931,7 @@ endif
 # under app0:shaders/ inside the VPK, where the runtime loads them.
 SHADER_DIR      := shaders
 SHADER_PRIMARY  := $(SHADER_DIR)/halo_shader_0.gxp
-SHADER_GXP      := $(sort $(SHADER_PRIMARY) $(wildcard $(SHADER_DIR)/*.gxp))
+SHADER_GXP      := $(filter-out %_az.frag.gxp,$(sort $(SHADER_PRIMARY) $(wildcard $(SHADER_DIR)/*.gxp)))   # alpha-zero programs travel embedded in the executable only (executable-only updates keep the package)
 SHADER_CG       := $(wildcard $(SHADER_DIR)/*.cg)
 PSP2CGC         := $(shell command -v psp2cgc 2>/dev/null)
 

@@ -69,6 +69,8 @@ def package(root, eboot, sfo, output, include_scenes=False, launcher=None, halo2
     for pattern in ("shaders/*.gxp", "sce_sys/*.png", "sce_sys/livearea/contents/*", "LICENSES/*.txt"):
         for source in sorted(root.glob(pattern)):
             if source.is_file():
+                if source.name.endswith("_az.frag.gxp"):
+                    continue   # alpha-zero programs are embedded in the executable; the package (and executable-only updates) stay unchanged
                 if source.relative_to(root).as_posix().startswith("sce_sys/") and source.suffix not in {".png", ".xml", ".jpg", ".jpeg"}:
                     raise ValueError(f"Unexpected LiveArea asset: {source.name}")
                 files[source.relative_to(root).as_posix()] = source
