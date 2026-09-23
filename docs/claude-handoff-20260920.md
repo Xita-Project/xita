@@ -1903,3 +1903,8 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
 - perf139 (XV_OBJECT_JOBS_ANY_MODE=1): the mode is accepted now (no "declined: director/camera mode" line) but the
   cinematic windows still show `passes 0` (one pass of 34 jobs in the transition window, lanes 20/14, batch 18 ms):
   another readiness condition declines. perf140 (50c0dfe) logs the decline mask once per change.
+- perf140 decline mask: 0x80 alternating with "all met" every tick: `g_vp_frame != g_dev.frame-1` fails on every
+  second sim tick when the game runs two ticks per rendered frame (any time it is below 30 fps under the overlap), so
+  stable_frames never reaches 3. THE NATIVE OBJECT PASS HAS BEEN IDLE IN GAMEPLAY TOO since the overlap, not just in
+  the cinematic. perf141 (tolerance: device frame - viewport frame <= 1) chained; with XV_OBJECT_JOBS_ANY_MODE=1 for
+  the cinematic run. Expect [object-jobs] passes ~118/60 frames, jobs ~34 per pass, and the tick's 900E0 to drop.
