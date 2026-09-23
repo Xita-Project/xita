@@ -1949,3 +1949,9 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   worker time per frame for 66 object updates that cost the guest path 37 ms. The native pass is 2-3x slower per
   object here (scripted/animated cinematic objects, guard contention). No stall in 4 min with the grace period.
   perf145 (43feb86): the tolerance is opt-in (XV_OBJECT_JOBS_VP_TOLERANT=1); default = perf137 behaviour.
+- perf146 (4e31001): XV_FLARE_TEST_STRIDE=<n> issues each flare visibility test every n-th frame only (the n-th test
+  of a frame maps to the same flare; the skipped test's quad is dropped at D3DDevice_End; the game's read-back sees
+  the previous completed result at once because xv_visibility_read completes when completed == issued). Default off.
+  Chain: "perf145" run = the perf146 VPK with the stride off (default config: vp tolerance off, 90-frame grace, full
+  mutex), then perf147 = same install with XV_FLARE_TEST_STRIDE=2 (expected -3 to -4 ms of the ~7 ms flare HLE).
+  Visual risk: one frame of extra latency on flare fade; the user should look at it in a cinematic.
