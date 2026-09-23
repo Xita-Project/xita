@@ -1795,3 +1795,17 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   What the user saw ("stuck", LiveArea reachable) plus the dead FTP and the app flagged corrupted after the reboot
   points at the SYSTEM side (display/network/card), not the guest. Open: get the user's description (image frozen vs
   input ignored), then reproduce on perf128 with XV_FREEZE_ABORT=20 (which only catches a stopped frame counter).
+
+## §56 Sept 23 morning: perf128 baseline, the Pi sampler's owner hotspot (08:00-08:40 CDT)
+- The user reinstalled Xita (perf127) after the "corrupted" flag; perf128 (freeze watchdog, capture timing gate,
+  program-stage trim) deployed 08:09 and ran 8 min clean with NO profiling knobs (XV_DRAW_PROFILE=0, no phases, no
+  HLE timing): 71.7-83 ms, 12.0-13.8 fps in the cinematic - the best run so far. The profiling knobs were costing
+  2-8 ms; play sessions must run without them. XV_FREEZE_ABORT=20 is armed (no trip).
+- Pi in-process sampler (XV_HOST_SAMPLE, tools/host_profile.py with the cross addr2line via a PATH shim, 7 min run
+  sample1, 210 windows): OWNER THREAD (all guest fibers except the scene helper): f_000B8980 63-66 %, f_000B8840
+  12 %, f_000AB3E0 3-4 %, everything else < 1.5 %. B8980 (961 lines, called only by f_000B9678, no direct-call
+  references to B9678 anywhere: a callback/thread entry) loops over 0x1C-byte records with a valid flag and
+  x87 dot products (looks like per-emitter/per-node distance math). HELPER/WORKERS: flat (f_00060000 ~7.6 %,
+  54DAE 3.9, 52F50 3.8, 52D50 3.7, nq_run_impl 3.7, ns_solver_fused 3.4, 62B90 1.9). The Pi owner is only ~21 % busy
+  (30 fps paced), so B8980 may be a spin/idle pattern there; whether it is hot on the Vita's tick is what perf129
+  (timers under 900E0/14A162/B9678/B8840) answers.
