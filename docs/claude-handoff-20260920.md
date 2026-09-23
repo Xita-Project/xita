@@ -1874,3 +1874,12 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   awaits an owner service (the non-owner-lane path blocks); watch for it.
 - Trap: never delete/rebuild build/xita.vpk while a fire script may be deploying (perf135's deploy found no file:
   "DEPLOY NOT CONFIRMED"). Build into a temp name and rename, or wait for "env set".
+- perf136 (owner waits parked in the guest scheduler) CRASHED on both benches within minutes of the level: Pi yp6
+  SIGSEGV in xv_worker_query <- f_00056670 <- f_00092330 on a guest fiber thread (LWP 8470) while the owner thread
+  was in xv_object_jobs_join -> xv_cluster_runtime_begin -> xv_cluster_snapshot_build (xv_cluster_snapshot_geometry
+  returned NULL: the snapshot was being rebuilt); Vita core psp2core-1790175027 (game-b) at 09:50. Parking the owner
+  lets other guest fibers run natives that assume the object pass's exclusive window. REVERTED (dd1781b, perf137):
+  bounded host waits again + `[object-jobs] STUCK <what> <ms>: running, math_holder (lane+1 / 100 owner lane / 200
+  other), worker service words` every 4 s of a stalled pass. The perf134 deadlock remains open; the next occurrence
+  will name the guard holder. Idea not yet tried: on the helper, a yield-spin longer than N ms could hand the wait to
+  the owner as a proxied wait (so the helper blocks in the proxy and the owner's join loop parks the scheduler).
