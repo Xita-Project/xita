@@ -2252,9 +2252,17 @@ int xv_object_jobs_begin(xctx *c)
 /* Guest-owner admission, never called by the network service thread. */
 int xv_object_jobs_available(void)
 { return !xv_phase_enabled && initialize(); }
+static unsigned site2_jobs;
 int xv_object_jobs_queue(xctx *c)
 {
-    if(c!=owner||X_M32(c->r[4])!=0x90299u)return 0;
+    /* f_000900E0 calls the per-object update f_0008FB70 from two sites: 0x90294 (the flagged-object loop, queued
+     * since the experiment began) and 0x902DA (the "requested update" list: what the a10 cinematic drives its ~34
+     * objects per tick through, 37 of the 55 ms tick in guest code on the owner, perf129). XV_OBJECT_JOBS_SITE2=0
+     * keeps the old single-site admission. */
+    static int site2=-1; if(site2<0) { const char *e=getenv("XV_OBJECT_JOBS_SITE2"); site2=e?atoi(e)!=0:1; }
+    uint32_t ret=X_M32(c->r[4]);
+    if(c!=owner||!(ret==0x90299u||(site2&&ret==0x902DFu)))return 0;
+    if(ret==0x902DFu)site2_jobs++;
     if(count==CAPACITY)xv_object_jobs_join();
     jobs[count++]=*c; submitted++;
     /* This call site's next iteration overwrites volatile inputs. Whole guest
@@ -2375,6 +2383,7 @@ void xv_object_jobs_report(unsigned frames)
         frames,passes,batches,submitted,executed[0],executed[1],WORKERS>2?executed[2]:0u,executed[WORKERS],
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)(WORKERS>2?work_us[2]:0),(unsigned long long)work_us[WORKERS],
         (unsigned long long)batch_us,rejected);
+    if(site2_jobs){XK_LOG("[object-jobs] site-2 (0x902DA requested-update list) jobs %u\n",site2_jobs);site2_jobs=0;}
     if(owner_wait_timeouts){XK_LOG("[object-jobs] owner bounded-wait timeouts %u (500 us each; the scene proxy is serviced between them)\n",owner_wait_timeouts);owner_wait_timeouts=0;}
     XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
     XK_LOG("[object-jobs] quiescent owner audio pumps %u\n",audio_pumps);audio_pumps=0;
