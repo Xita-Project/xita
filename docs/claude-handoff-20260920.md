@@ -1730,3 +1730,18 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   (4) 539C0 self 4.5, 602F0 4.3, 544D0 3.2, D8C40 2.0 natives (-8 to -10, several days). (1)-(3) land near 60 ms
   (~16 fps); (4) is what 50 ms needs. Xk query-reuse ([query-reuse] declines) is the COLLISION world query, unrelated
   to the D3D visibility tests.
+- perf126 (perf125 build + XV_HLE_TIMING=1), cinematic, ms/frame (calls/frame): DrawIndexedVertices 15.85 (218 =
+  73 us per draw; the draw-profile stages sum to the same: indices 3.9 streams 4.5 textures 2.9 program 1.8 state 1.6
+  setup 0.6 constants 0.5), D3DDevice_End 4.03 (205 immediate quads = 20 us each, the flare visibility quads via
+  draw_immediate_flare), SetTexture 2.72 (472), SetTextureState_Deferred 2.39 (2493), SetRenderState_Simple 1.86
+  (1620), SetRenderStateNotInline 1.34 (1129), SetVertexData4f 1.20 (751), Begin 1.14 (205), SetVertexShaderConstant
+  0.63, EndVisibilityTest 0.56 (172), SetVertexData2f 0.48, SetStreamSource 0.32, SetIndices 0.27. TOTAL ~32 ms of the
+  75 ms scene is OUR HLE code, no guest rewrite needed to attack it. The 63C00 flare cost (8.75) is ~7 ms of HLE
+  (Begin + 4 SetVertexData4f + End + Begin/EndVisibilityTest per flare). NtWaitForSingleObjectEx 214 ms/frame (3) is
+  other threads' waits summed, not scene time.
+  Per-draw 73 us is the lever: the Xbox did a draw in ~5 us. Suspects per stage: indices 18 us (xv_index_cache_select
+  + compare + the per-draw reference-mask/bounds scans over every index, [index-coverage] 134 mask builds/frame),
+  streams 20 us (capture submit: reuse probe, per-draw xv_gpu_flush of the index bytes, event-flag wake syscall),
+  textures 13 us (record_material, 4 stages), program 8 us (ps link lookup), state 7 us. Flare quads 20 us each
+  (draw_immediate_flare -> the full draw record for a 4-vertex quad). Plan: micro-profile inside the HLE draw with
+  finer XV_DRAW_PROFILE steps, then cut each stage; -15 ms is realistic in days and lands ~60 ms with the sparse fix.
