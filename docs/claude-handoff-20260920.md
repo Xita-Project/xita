@@ -1849,3 +1849,9 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
 - perf131 complete, 8 min clean: 68.1-81.9 ms, 12.1-14.5 fps; last four windows 70.1/68.2/74.8/70.9/68.1 vs perf128's
   73.6/77.7/71.7/73.1/74.3 (about -3 ms). Best build so far. perf133 (all shards rebuilt with the full flags, native
   CRT float hooks live for the first time on the Vita, native pack on) deploys automatically after the rebuild.
+- perf133 (all shards rebuilt, CRT float hooks live: floor 42k/60 frames, pack 22k), 8 min, no core: game 67.6-82
+  ms, steady windows 67.6/68.6/70.1/69.1/69.9/71.4 = ~14 fps, about -2 ms vs perf131. BUT two present-path stalls
+  of ~6.6 s (windows reporting "wait 111.6/112.5 ms" = one 6.6 s wait each), never seen in perf128-131. GPU
+  completion and frame-retire latency normal in those windows, busy-slot waits 0, no fault line. perf134 = same
+  install with XV_NATIVE_CRT_FLOAT=0 (kill switch) to test the natives; perf135 = + [present-stall] stage logger
+  (7bc3d72: EndFrame / flip / flush / present / BeginFrame / frame_begin / purge split when a present exceeds 300 ms).
