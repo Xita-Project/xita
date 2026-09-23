@@ -1449,15 +1449,27 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
       if(xv_benchmark_present)xv_benchmark_present(); }
     { extern void xv_settings_frame(void) __attribute__((weak));
       if(xv_settings_frame)xv_settings_frame(); }
+    uint64_t ps_[8]; ps_[0] = t_us();
     if (g_mesh_path) g_mesh_frame = xv_d3d_EndFrame();
+    ps_[1] = t_us();
     xv_ui_gxm_frame_flip();      /* seal; do not reset the next slot yet */
+    ps_[2] = t_us();
     xv_gpu_flush_pending();     /* includes the current frame's late UI writes */
+    ps_[3] = t_us();
     xv_present();               /* publish, then acquire only the next slots */
+    ps_[4] = t_us();
     if (g_mesh_path) xv_d3d_BeginFrame();
+    ps_[5] = t_us();
     xv_ui_gxm_frame_begin();
+    ps_[6] = t_us();
     ui_tex_purge_if_needed(frame);
-    uint64_t t1 = t_us();
+    uint64_t t1 = t_us(); ps_[7] = t1;
     g_t_render_acc += t1 - t0; g_t_last_present = t1;
+    if (t1 - t0 > 300000u) {   /* perf133 (Sept 23): isolated ~6.6 s present-path stalls once every few windows; name the stage */
+        static unsigned n_; if (n_++ < 20) UI_LOG("[present-stall] frame %u: %llu ms total; pre %llu EndFrame %llu flip %llu flush %llu present %llu BeginFrame %llu frame_begin %llu purge %llu ms\n", frame,
+            (unsigned long long)((t1 - t0) / 1000), (unsigned long long)((ps_[0] - t0) / 1000), (unsigned long long)((ps_[1] - ps_[0]) / 1000), (unsigned long long)((ps_[2] - ps_[1]) / 1000),
+            (unsigned long long)((ps_[3] - ps_[2]) / 1000), (unsigned long long)((ps_[4] - ps_[3]) / 1000), (unsigned long long)((ps_[5] - ps_[4]) / 1000), (unsigned long long)((ps_[6] - ps_[5]) / 1000), (unsigned long long)((ps_[7] - ps_[6]) / 1000));
+    }
     if (++g_t_frames == 60) {
         /* Measure the periodic report itself: its synchronous file writes
          * occur after t1 and are otherwise hidden in the next game interval. */
