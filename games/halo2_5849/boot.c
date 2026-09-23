@@ -377,6 +377,7 @@ void h2_timer_fault(xctx *c, const char *reason, uint32_t first, uint32_t second
     sceKernelExitProcess(27);
     for (;;) sceKernelDelayThread(1000);
 }
+#if defined(__arm__)
 uint32_t h2_platform_fpscr_read(void)
 {
     uint32_t value;
@@ -385,6 +386,7 @@ uint32_t h2_platform_fpscr_read(void)
 }
 void h2_platform_fpscr_write(uint32_t value)
 { __asm__ volatile("vmsr fpscr, %0" : : "r"(value) : "memory", "vfpcc"); }
+#endif /* other hosts (the x86 Linux harness): host/psp2_host.c emulates the FPSCR flags */
 void h2_fp_environment_fault(xctx *c, uint32_t ip, uint32_t address, uint32_t value)
 {
     graphics_snapshot();
@@ -711,8 +713,7 @@ void xv_boot_missing_kernel(xctx *c, const char *name)
 void __wrap_xv_unimpl(xctx *c, uint32_t address, const char *name)
 {
     graphics_snapshot();
-    uint32_t fpscr;
-    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr));
+    uint32_t fpscr = h2_platform_fpscr_read();
     xv_logf("[h2/fp] native FPSCR=%08X guest FCW=%04X FSW=%04X\n", fpscr, c->fcw, c->fsw);
     xv_logf("[h2/blocked] instruction=%s address=%08X fn=%08X eax=%08X ecx=%08X esp=%08X\n",
             name, address, xv_cur_fn, c->r[0], c->r[1], c->r[4]);
