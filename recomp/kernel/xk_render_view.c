@@ -198,7 +198,21 @@ void xv_render_view_configure(void)
     memset(slot_of, 0xFF, L.phys_pages * sizeof *slot_of);
     if (thread_mode) {
 #if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
-        rt = malloc(sizeof *rt);
+        rt = NULL;
+#ifdef __vita__
+        {   /* XV_RENDER_VIEW_RT_PHYCONT (default 1): the scene helper translates every guest access through this 4 MiB
+             * table; physically contiguous memory gives it one stable cache/TLB layout (identical builds swung the
+             * helper's scene 53 <-> 58.5 ms between launches, perf164/164b). Falls back to the heap. */
+            const char *e = getenv("XV_RENDER_VIEW_RT_PHYCONT");
+            if (!e || atoi(e)) {
+                SceUID uid = sceKernelAllocMemBlock("xv_rv_table", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_RW, 5u << 20, NULL);
+                void *base = NULL;
+                if (uid >= 0 && sceKernelGetMemBlockBase(uid, &base) >= 0 && base) rt = base;
+                XK_LOG("[render-view] render table: physically contiguous block %s (uid %08X)\n", rt ? "ok" : "refused, heap", (unsigned)uid);
+            }
+        }
+#endif
+        if (!rt) rt = malloc(sizeof *rt);
         if (!rt) { XK_LOG("[render-view] no render table; thread mode off\n"); thread_mode = 0; }
         else { memcpy(rt->entries, g_xpt, sizeof rt->entries); rt->img_base = ((uint8_t *const *)g_xpt)[-1]; XK_LOG("[render-view] thread mode: private render table, bound by the scene thread only\n"); }
 #else
