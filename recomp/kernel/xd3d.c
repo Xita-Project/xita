@@ -552,8 +552,14 @@ int xd3d_object_jobs_ready(void)
 {
     static unsigned last_frame, stable_frames;
     uint32_t gg=X_M32(0x2F8CA0u),mode=X_M32(0x271100u);
+    /* XV_OBJECT_JOBS_ANY_MODE=1: admit the object pass under any camera/director mode (the a10 cinematic's mode is
+     * neither accepted value, so its ~34 objects per tick stayed guest-side on the owner: 37 of the 55 ms tick,
+     * perf129/138). Opt-in: cinematic scripting may depend on sequential object updates. */
+    static int any_mode=-1; if(any_mode<0){const char *e=getenv("XV_OBJECT_JOBS_ANY_MODE");any_mode=e?atoi(e)!=0:0;}
+    int mode_ok=any_mode||mode==0x11E750u||mode==0x11DF50u;
+    { static uint32_t reported_mode; if(!mode_ok&&mode!=reported_mode){reported_mode=mode;D3DLOG("[object-jobs] declined: director/camera mode %08X (accepted 0011E750/0011DF50; XV_OBJECT_JOBS_ANY_MODE=1 admits it)\n",mode);} }
     if(xk_file_in_ui_map||!gg||!X_M8(gg)||!X_M8(gg+1)||X_M8(gg+2)||
-       X_M32(0x2E4000u)||(mode!=0x11E750u&&mode!=0x11DF50u)||
+       X_M32(0x2E4000u)||!mode_ok||
        g_vp_frame!=g_dev.frame-1u) { stable_frames=0;last_frame=g_dev.frame;return 0; }
     if(last_frame!=g_dev.frame) {last_frame=g_dev.frame;if(stable_frames<3)stable_frames++;}
     return stable_frames>=3;
