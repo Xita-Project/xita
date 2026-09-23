@@ -564,8 +564,12 @@ int xd3d_object_jobs_ready(void)
         if(why)D3DLOG("[object-jobs] declined mask %02X (1 ui-map 2 no-gg 4 not-loaded 8 not-active 10 gg+2 20 word-2E4000 40 mode 80 vp-frame %u vs %u)\n",why,g_vp_frame,g_dev.frame);
         else D3DLOG("[object-jobs] readiness conditions all met\n"); } }
     if(why) { stable_frames=0;last_frame=g_dev.frame;return 0; }
-    if(last_frame!=g_dev.frame) {last_frame=g_dev.frame;if(stable_frames<3)stable_frames++;}
-    return stable_frames>=3;
+    /* XV_OBJECT_JOBS_STABLE=<frames> (default 90): how long every condition must hold before the pass is admitted.
+     * 3 frames let the pass engage inside the load->cinematic transition (objects still being created/scripted),
+     * which is where perf134 and perf142 froze (workers looping on the math guard). */
+    static int need=-1; if(need<0){const char *e=getenv("XV_OBJECT_JOBS_STABLE");need=e?atoi(e):90;if(need<1)need=1;}
+    if(last_frame!=g_dev.frame) {last_frame=g_dev.frame;if(stable_frames<(unsigned)need)stable_frames++;}
+    return stable_frames>=(unsigned)need;
 }
 #endif
 
