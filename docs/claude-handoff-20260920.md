@@ -1885,3 +1885,12 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   the owner as a proxied wait (so the helper blocks in the proxy and the owner's join loop parks the scheduler).
 - perf137 (10:00): windows 76.9, 80.2, 79.5, 78.8, 70.8, 67.1, 66.7, 64.8 ms - 15.2 fps at t+390, the first window
   above 15 fps in the cinematic; no long present wait so far, no STUCK line.
+- perf137 complete, 8 min clean, no core: 64.8-80.2 ms, last five windows 67.1/66.7/64.8/65.8/72.6/67.6 = 14.6-15.2
+  fps. Best build. At 65 ms the tick side (2 sim ticks x 27 ms = 54 + ~10 non-overlapped) is level with the scene.
+- WHY THE NATIVE OBJECT PASS IDLES IN THE CINEMATIC (10:10): xv_object_jobs_queue admits only the per-object call
+  whose return address is 0x90299 (f_000900E0's first 8FB70 site, the flagged-object loop, `[ecx+1C8h] != -1`). The
+  cinematic drives its ~34 objects per tick through the SECOND site at 0x902DA (return 0x902DF: a list of entries with
+  a flags byte at +2 whose bit 2 requests an update; the flag is cleared before the call, ecx = index|salt). perf138
+  (6a6302f) admits that site too (XV_OBJECT_JOBS_SITE2=0 restores the old admission; `[object-jobs] site-2 ... jobs`
+  counts). Expected: the 37 ms/frame of guest per-object updates move to the two worker lanes (tick 55 -> ~35).
+  Unverified on the Pi (yp7 soak occupies it); watch NPC/vehicle behaviour and the guard/abandon counters.
