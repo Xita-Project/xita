@@ -1778,3 +1778,9 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   watchdog + trims, 56903ef) to ux0:/ and install it from VitaShell; (4) play sessions with XV_FREEZE_ABORT=20 and
   WITHOUT XV_DRAW_PROFILE/XV_SCENE_PHASES/XV_HLE_TIMING (each costs 2-15 ms). The Vita keepalive was stopped; the Pi
   yp4 2 h soak keeps running unattended (runs/yp4.log), clean at 30 min.
+- 23:38 CDT, Pi yp4 (perf128-equivalent harness): the SAME guest trap recurred (idiv at 0011092C, edi=0x40, frame
+  ~111,360, about 62 min in) and the new bail-out did its job: `[scene-thread] ABANDON scene 1`, one frame dropped,
+  the soak continued (frame 139,620+ and counting, 2,322 windows clean otherwise). Before 82f149d this was the yp2
+  two-hour hang. The root cause (a torn/NULL object pointer read by the frozen-page scene in f_001105E0, same class
+  as the A26B0 model-guard skip) is still open; the guard-style fix is to validate [edi] before the idiv or freeze the
+  array that pointer comes from (`[render-view] arrays:` names them).
