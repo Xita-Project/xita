@@ -273,6 +273,7 @@ static uint64_t stuck_logged_at;
 static uint64_t notice_us, pre_go_us, join_exit_us; static unsigned notice_n, pre_go_n;
 static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static unsigned slow_yields_dispatch, slow_proxied_dispatch, slow_dispatch_serial, slow_logged_serial, slow_logs; static int slow_ms = -1;
 static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
+int xv_scene_thread_helper_done(void) { return slow_t_end >= slow_t_dispatch; }   /* the dispatched scene has signalled done (its core is idle until the next go) */
 static void slow_check(void)
 {
     if (slow_ms < 0) { const char *e = getenv("XV_SCENE_SLOW_MS"); slow_ms = e ? atoi(e) : 150; }
@@ -646,6 +647,7 @@ static uint64_t stuck_logged_at;
 static uint64_t notice_us, pre_go_us, join_exit_us; static unsigned notice_n, pre_go_n;
 static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static unsigned slow_yields_dispatch, slow_proxied_dispatch, slow_dispatch_serial, slow_logged_serial, slow_logs; static int slow_ms = -1;
 static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
+int xv_scene_thread_helper_done(void) { return slow_t_end >= slow_t_dispatch; }   /* the dispatched scene has signalled done (its core is idle until the next go) */
 static void slow_check(void)
 {
     if (slow_ms < 0) { const char *e = getenv("XV_SCENE_SLOW_MS"); slow_ms = e ? atoi(e) : 150; }

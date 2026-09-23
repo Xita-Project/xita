@@ -83,6 +83,7 @@ static unsigned copy_runs;   /* mode 3/4: contiguous live-page runs copied per w
  * serialized path (owner joined, helper idle) for the owner's wait. */
 static unsigned cur_bank, bank_pages; static int early_mode;
 static int early_valid; static unsigned early_bank, early_slots, early_copies, early_fallbacks, early_recopied; static uint64_t early_us;
+static int split_idle = -1; static unsigned early_split;   /* XV_RENDER_VIEW_EARLY_SPLIT (default 1): split the early copy when the helper is idle */
 static uint8_t *merged_slot;   /* [shadow_pages] slots scene N's merge copied back into live */
 #define ASSIST_RUNS_MAX 1024
 #ifndef __vita__
@@ -193,7 +194,8 @@ void xv_render_view_configure(void)
          * reference under real overlap and the scene looped forever in A26B0). Costs one copy-in of the listed pages per
          * frame; learning passes are skipped. */
         const char *e = getenv("XV_RENDER_VIEW_ALL"); int all = e ? atoi(e) : 0; all_mode = all;
-            { const char *ee = getenv("XV_RENDER_VIEW_EARLY"); early_mode = ee && atoi(ee) && all >= 3 && L.shadow_pages >= 256; if (early_mode) { bank_pages = L.shadow_pages / 2; merged_slot = calloc(L.shadow_pages, 1); if (!merged_slot) { early_mode = 0; bank_pages = 0; } XK_LOG("[render-view] early snapshot: %s, 2 banks of %u slots\n", early_mode ? "on" : "off (alloc)", bank_pages); } }
+            { const char *ee = getenv("XV_RENDER_VIEW_EARLY"); early_mode = ee && atoi(ee) && all >= 3 && L.shadow_pages >= 256;
+              { const char *es = getenv("XV_RENDER_VIEW_EARLY_SPLIT"); split_idle = !es || atoi(es) != 0; } if (early_mode) { bank_pages = L.shadow_pages / 2; merged_slot = calloc(L.shadow_pages, 1); if (!merged_slot) { early_mode = 0; bank_pages = 0; } XK_LOG("[render-view] early snapshot: %s, 2 banks of %u slots\n", early_mode ? "on" : "off (alloc)", bank_pages); } }
         { const char *w = getenv("XV_RENDER_VIEW_ARRAYS"); if (w && *w) array_words = w; }
         if (all > 0) {
             unsigned n = phys_limit / XK_PAGE; if (n > L.phys_pages) n = L.phys_pages;
@@ -359,7 +361,7 @@ static int assist_ready(void)
     return assist_state;
 }
 #endif
-static void copy_in_runs(int from_owner)
+static void copy_runs_to(unsigned bank, int from_owner)
 {
     /* collect the runs of consecutive live pages; shadow slots are contiguous by slot index */
     static unsigned run_s[ASSIST_RUNS_MAX], run_n[ASSIST_RUNS_MAX]; unsigned runs = 0;
@@ -367,7 +369,7 @@ static void copy_in_runs(int from_owner)
         unsigned e = s + 1;
         while (e < slots_used && slot_page[e] == slot_page[e - 1] + 1u) e++;
         if (runs < ASSIST_RUNS_MAX) { run_s[runs] = s; run_n[runs] = e - s; runs++; }
-        else view_copy(shadow_of(s), live_of_slot(s), (size_t)(e - s) * XK_PAGE);
+        else view_copy(shadow_bank(bank, s), live_of_slot(s), (size_t)(e - s) * XK_PAGE);
         s = e;
     }
     copy_runs += runs;
@@ -380,22 +382,23 @@ static void copy_in_runs(int from_owner)
             if (done + n <= half) { done += n; continue; }
             unsigned skip = done < half ? half - done : 0;   /* pages of this run the owner keeps */
             if (assist_work.n < ASSIST_MAX) {
-                assist_work.dst[assist_work.n] = shadow_of(s + skip); assist_work.src[assist_work.n] = live_of_slot(s + skip);
+                assist_work.dst[assist_work.n] = shadow_bank(bank, s + skip); assist_work.src[assist_work.n] = live_of_slot(s + skip);
                 assist_work.bytes[assist_work.n] = (n - skip) * XK_PAGE; assist_work.n++;
                 run_n[r] = skip;   /* the owner copies only the head */
             }
             done += n;
         }
         sceKernelSignalSema(assist_go, 1);
-        for (unsigned r = 0; r < runs; ++r) if (run_n[r]) view_copy(shadow_of(run_s[r]), live_of_slot(run_s[r]), (size_t)run_n[r] * XK_PAGE);
+        for (unsigned r = 0; r < runs; ++r) if (run_n[r]) view_copy(shadow_bank(bank, run_s[r]), live_of_slot(run_s[r]), (size_t)run_n[r] * XK_PAGE);
         sceKernelWaitSema(assist_done, 1, NULL); assist_splits++;
         return;
     }
 #else
     (void)from_owner;
 #endif
-    for (unsigned r = 0; r < runs; ++r) view_copy(shadow_of(run_s[r]), live_of_slot(run_s[r]), (size_t)run_n[r] * XK_PAGE);
+    for (unsigned r = 0; r < runs; ++r) view_copy(shadow_bank(bank, run_s[r]), live_of_slot(run_s[r]), (size_t)run_n[r] * XK_PAGE);
 }
+static void copy_in_runs(int from_owner) { copy_runs_to(cur_bank, from_owner); }
 static void copy_in(int from_owner)
 {
     uint64_t t0 = xk_os_monotonic_us();
@@ -434,12 +437,12 @@ void xv_render_view_early_copy(void)
     if (!early_mode || !ready || early_valid || prepared || img_listed_n || !slots_used || slots_used > bank_pages) return;
     uint64_t t0 = xk_os_monotonic_us();
     unsigned b = cur_bank ^ 1u, n = slots_used;
-    for (unsigned s = 0; s < n; ) {
-        unsigned e = s + 1;
-        while (e < n && slot_page[e] == slot_page[e - 1] + 1u) e++;
-        view_copy(shadow_bank(b, s), live_of_slot(s), (size_t)(e - s) * XK_PAGE);
-        s = e;
-    }
+    /* The scene already signalled done (steady cinematic: the helper idles ~7 ms before the owner arrives): its core
+     * is free, so the split assistant on that core takes half the runs. A still-running scene keeps its core. */
+    extern int xv_scene_thread_helper_done(void) __attribute__((weak));
+    int idle = split_idle && xv_scene_thread_helper_done && xv_scene_thread_helper_done();
+    copy_runs_to(b, idle);
+    early_split += idle;
     early_bank = b; early_slots = n; early_valid = 1; early_copies++;
     early_us += xk_os_monotonic_us() - t0;
 }
@@ -556,8 +559,8 @@ void xv_render_view_report(unsigned frames)
            frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0, frames_entered ? (double)prepare_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_list_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_copy_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_pristine_us / frames_entered / 1000.0 : 0.0,
            frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0, (unsigned long long)words_merged,
            sw_slots, sw_imgs, sw_found_late, retargets_last, image_entries, retargets_overflow, fiber_switches, mirrors_in_scene, aliases_max);
-    if (early_copies || early_fallbacks) XK_LOG("[render-view] early snapshot %u per window (%.2f ms/frame hidden in the owner's wait), %u fallbacks, %u pages re-copied after the join\n", early_copies, early_copies ? (double)early_us / early_copies / 1000.0 : 0.0, early_fallbacks, early_recopied);
-    early_copies = early_fallbacks = early_recopied = 0; early_us = 0;
+    if (early_copies || early_fallbacks) XK_LOG("[render-view] early snapshot %u per window (%.2f ms/frame hidden in the owner's wait, %u split with the idle helper core), %u fallbacks, %u pages re-copied after the join\n", early_copies, early_copies ? (double)early_us / early_copies / 1000.0 : 0.0, early_split, early_fallbacks, early_recopied);
+    early_copies = early_fallbacks = early_recopied = early_split = 0; early_us = 0;
     if (copy_runs) XK_LOG("[render-view] copy runs %u per window (%.1f per frame; DMA %d, clib %d, split copies %u)\n", copy_runs, frames_entered ? (double)copy_runs / frames_entered : 0.0, dma_mode, clib_copy,
 #ifdef __vita__
         assist_splits);

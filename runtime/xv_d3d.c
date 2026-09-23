@@ -2403,8 +2403,12 @@ void xv_d3d_frag_census_complete(uint32_t frame)
     struct { uint32_t n; unsigned i; } top[TOP]; unsigned ntop=0;
     struct { int16_t entry; uint8_t kind, blend; uint32_t n, draws; } ps[64]; unsigned nps=0;
     uint64_t total=0, clears=0, back=0, rt=0, opaque=0, blended=0, nocolor=0, tail=0, tail_blended=0, queries=0;
-    unsigned last_query=0, draws=0, empty=0, n=l->ncmds;
+    unsigned last_query=0, draws=0, empty=0, n=l->ncmds, switches=0, prev_frame=0, tail_switches=0;
     for (unsigned i=0;i<n;i++) if (l->cmds[i].kind==0 && l->cmds[i].visibility) last_query=i+1;
+    for (unsigned i=0;i<n;i++) {   /* target changes = scene breaks (tile store + reload of the previous target) */
+        if (i && l->cmds[i].pass!=l->cmds[i-1].pass) { switches++; if (i>=last_query) tail_switches++; }
+        if (l->cmds[i].kind==0 && l->cmds[i].previous_frame) prev_frame++;
+    }
     if (n>XV_CENSUS_CORE_WORDS-XV_VISIBILITY_PER_FRAME) n=XV_CENSUS_CORE_WORDS-XV_VISIBILITY_PER_FRAME;
     for (unsigned i=0;i<n;i++) {
         const cmd_t *c=&l->cmds[i];
@@ -2431,9 +2435,9 @@ void xv_d3d_frag_census_complete(uint32_t frame)
         top[pos].n=v; top[pos].i=i;
     }
     unsigned area=l->visibility_back_area?l->visibility_back_area:1;
-    XV_LOG("[frag-census] frame %u: %u cmds (%u draws, %u empty) last query cmd %u; samples %llu = %.1f screens (back %.1f rt %.1f clears %.1f); opaque %.1f blended %.1f no-color %.1f; after the last query %.1f (blended %.1f); query quads %.2f\n",
+    XV_LOG("[frag-census] frame %u: %u cmds (%u draws, %u empty) last query cmd %u; samples %llu = %.1f screens (back %.1f rt %.1f clears %.1f); opaque %.1f blended %.1f no-color %.1f; after the last query %.1f (blended %.1f); query quads %.2f; target switches %u (%u after the last query), previous-frame samplers %u\n",
         frame,l->ncmds,draws,empty,last_query,(unsigned long long)total,(double)total/area,(double)back/area,(double)rt/area,(double)clears/area,
-        (double)opaque/area,(double)blended/area,(double)nocolor/area,(double)tail/area,(double)tail_blended/area,(double)queries/area);
+        (double)opaque/area,(double)blended/area,(double)nocolor/area,(double)tail/area,(double)tail_blended/area,(double)queries/area,switches,tail_switches,prev_frame);
     for (unsigned t=0;t<ntop;t++) {
         const cmd_t *c=&l->cmds[top[t].i];
         unsigned tw=c->ntex?sceGxmTextureGetWidth(&c->tex[0]):0, th=c->ntex?sceGxmTextureGetHeight(&c->tex[0]):0;
