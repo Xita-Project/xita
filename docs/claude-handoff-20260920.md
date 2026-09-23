@@ -1809,3 +1809,16 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   54DAE 3.9, 52F50 3.8, 52D50 3.7, nq_run_impl 3.7, ns_solver_fused 3.4, 62B90 1.9). The Pi owner is only ~21 % busy
   (30 fps paced), so B8980 may be a spin/idle pattern there; whether it is hot on the Vita's tick is what perf129
   (timers under 900E0/14A162/B9678/B8840) answers.
+- CORRECTION to the Pi sampler numbers above: the sampler's offsets are relative to __executable_start, which is the
+  link address 0x10000 for the static armhf harness, so every symbol resolved 64 KiB off (f_000B8980 was really
+  f_000BB060, the frame loop's idle spin on a 30 fps-paced Pi). tools/host_profile.py now adds the base (a7deff0).
+  Corrected helper+workers profile (gameplay windows): flat, top f_00053E90 4.8 %, x87_load_f32 4.1, xd3d_r_clear
+  3.7 (softgfx), f_00061270 3.3 (XV_NATIVE_PACK=2 exists, host-verified, never measured on the Vita -> perf130),
+  f_00054010 3.1, getenv 1.1 + strncmp 1.0 (per-call getenv in xv_hle_D3DDevice_Begin and SetTexture, fixed
+  2e22c3a), xk_audio_mix 2.0, f_00063C00 1.4, f_000602F0 1.1, f_00070110 1.1, xv_native_crt_float 1.0.
+- perf129 [tick-phases] (Vita, cinematic): FA920 57.1 = 109760 55.6 (x2/frame) = 900E0 38.3 -> f_0008FB70 37.5
+  (4,061 calls/60 frames = ~34 per sim tick, 0.55 ms each: the PER-OBJECT UPDATE, the work the native object pass
+  (FA920 scope, 33 jobs) does in the corridor but engages ~1/60 frames in the cinematic) + 14A162 14.3 -> f_0014E2C0
+  14.1 (1/tick, 7 ms) + E7140 1.8. BCB30 22.5 this run. Pi gdb chain for it: 565E0 <- 8D760 <- 8FB70 <- 900E0.
+  When the scene drops below the tick, the lever is making the native object pass engage per tick in cinematics
+  (or the 14E2C0 tick step, 7 ms, unknown).
