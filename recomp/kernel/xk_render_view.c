@@ -336,32 +336,42 @@ static uint64_t prep_list_us, prep_copy_us, prep_pristine_us;   /* copy_in split
 #ifdef __vita__
 #include <psp2/kernel/threadmgr.h>
 #define ASSIST_MAX 512
-static struct { unsigned n; uint8_t *dst[ASSIST_MAX]; const uint8_t *src[ASSIST_MAX]; uint32_t bytes[ASSIST_MAX]; } assist_work;
-static SceUID assist_go = -1, assist_done = -1; static int assist_state = -1; static unsigned assist_splits;
+/* Two assistants: [0] on the scene helper's core (XV_RENDER_VIEW_SPLIT_CORE, default 1; only when that core is free),
+ * [1] on core 0 with the render pump (XV_RENDER_VIEW_SPLIT_CORE0=1). A single core's memcpy is latency-bound (~230 MB/s)
+ * far below the bus, so each share runs close to full speed. */
+typedef struct { unsigned n; uint8_t *dst[ASSIST_MAX]; const uint8_t *src[ASSIST_MAX]; uint32_t bytes[ASSIST_MAX]; SceUID go, done; int state; } assist_t;
+static assist_t assists[2] = { { .go = -1, .done = -1, .state = -1 }, { .go = -1, .done = -1, .state = -1 } };
+static unsigned assist_splits, assist_three;
 static int assist_main(SceSize args, void *argp)
 {
-    (void)args; (void)argp;
+    (void)args; assist_t *a = *(assist_t **)argp;
     for (;;) {
-        if (sceKernelWaitSema(assist_go, 1, NULL) < 0) return 0;
-        for (unsigned i = 0; i < assist_work.n; ++i) view_copy(assist_work.dst[i], assist_work.src[i], assist_work.bytes[i]);
-        sceKernelSignalSema(assist_done, 1);
+        if (sceKernelWaitSema(a->go, 1, NULL) < 0) return 0;
+        for (unsigned i = 0; i < a->n; ++i) view_copy(a->dst[i], a->src[i], a->bytes[i]);
+        sceKernelSignalSema(a->done, 1);
     }
 }
-static int assist_ready(void)
+static int assist_start(unsigned i)
 {
-    if (assist_state >= 0) return assist_state;
-    const char *e = getenv("XV_RENDER_VIEW_SPLIT"); assist_state = 0;
-    if (!(e && atoi(e))) return 0;
-    const char *ce = getenv("XV_RENDER_VIEW_SPLIT_CORE"); int core = ce ? atoi(ce) : 1;
+    assist_t *a = &assists[i];
+    if (a->state >= 0) return a->state;
+    a->state = 0;
+    const char *e = getenv("XV_RENDER_VIEW_SPLIT"); if (!(e && atoi(e))) return 0;
+    int core = 0;
+    if (i == 0) { const char *ce = getenv("XV_RENDER_VIEW_SPLIT_CORE"); core = ce ? atoi(ce) : 1; }
+    else { const char *ce = getenv("XV_RENDER_VIEW_SPLIT_CORE0"); if (!(ce && atoi(ce))) return 0; }
     int mask = core == 0 ? SCE_KERNEL_CPU_MASK_USER_0 : core == 2 ? SCE_KERNEL_CPU_MASK_USER_2 : SCE_KERNEL_CPU_MASK_USER_1;
-    assist_go = sceKernelCreateSema("xv_rv_assist_go", 0, 0, 1, NULL); assist_done = sceKernelCreateSema("xv_rv_assist_done", 0, 0, 1, NULL);
-    SceUID t = assist_go >= 0 && assist_done >= 0 ? sceKernelCreateThread("xv_rv_assist", assist_main, sceKernelGetThreadCurrentPriority(), 16 * 1024, 0, mask, NULL) : -1;
-    if (t >= 0 && sceKernelStartThread(t, 0, NULL) >= 0) assist_state = 1;
-    XK_LOG("[render-view] split copy %s (core %d)\n", assist_state ? "on" : "FAILED", core);
-    return assist_state;
+    a->go = sceKernelCreateSema(i ? "xv_rv_assist0_go" : "xv_rv_assist_go", 0, 0, 1, NULL);
+    a->done = sceKernelCreateSema(i ? "xv_rv_assist0_done" : "xv_rv_assist_done", 0, 0, 1, NULL);
+    SceUID t = a->go >= 0 && a->done >= 0 ? sceKernelCreateThread(i ? "xv_rv_assist0" : "xv_rv_assist", assist_main, sceKernelGetThreadCurrentPriority(), 16 * 1024, 0, mask, NULL) : -1;
+    if (t >= 0) { assist_t *arg = a; if (sceKernelStartThread(t, sizeof arg, &arg) >= 0) a->state = 1; }
+    XK_LOG("[render-view] split copy assistant %u %s (core %d)\n", i, a->state ? "on" : "FAILED", core);
+    return a->state;
 }
+static int assist_ready(void) { return assist_start(0); }
 #endif
-static void copy_runs_to(unsigned bank, int from_owner)
+/* allowed: bit 0 = the helper-core assistant may take a share (its core is idle), bit 1 = the core-0 assistant may. */
+static void copy_runs_to(unsigned bank, int allowed)
 {
     /* collect the runs of consecutive live pages; shadow slots are contiguous by slot index */
     static unsigned run_s[ASSIST_RUNS_MAX], run_n[ASSIST_RUNS_MAX]; unsigned runs = 0;
@@ -374,31 +384,44 @@ static void copy_runs_to(unsigned bank, int from_owner)
     }
     copy_runs += runs;
 #ifdef __vita__
-    if (from_owner && slots_used >= 32 && assist_ready()) {
-        unsigned half = slots_used / 2, done = 0; assist_work.n = 0;
-        /* runs (or the tail of the run crossing the midpoint) at or after `half` pages go to the assistant */
+    assist_t *use[2]; unsigned k = 0;
+    if (slots_used >= 32) {
+        if ((allowed & 1) && assist_start(0)) use[k++] = &assists[0];
+        if ((allowed & 2) && assist_start(1)) use[k++] = &assists[1];
+    }
+    if (k) {
+        /* pages [0, slots_used) in k+1 equal shares by slot order: share 0 the owner's, share j assistant j-1's */
+        unsigned shares = k + 1, owner_end = slots_used / shares;
+        for (unsigned j = 0; j < k; ++j) use[j]->n = 0;
+        static unsigned own_s[ASSIST_RUNS_MAX + 4], own_n[ASSIST_RUNS_MAX + 4]; unsigned owns = 0;
         for (unsigned r = 0; r < runs; ++r) {
-            unsigned s = run_s[r], n = run_n[r];
-            if (done + n <= half) { done += n; continue; }
-            unsigned skip = done < half ? half - done : 0;   /* pages of this run the owner keeps */
-            if (assist_work.n < ASSIST_MAX) {
-                assist_work.dst[assist_work.n] = shadow_bank(bank, s + skip); assist_work.src[assist_work.n] = live_of_slot(s + skip);
-                assist_work.bytes[assist_work.n] = (n - skip) * XK_PAGE; assist_work.n++;
-                run_n[r] = skip;   /* the owner copies only the head */
+            unsigned a = run_s[r], b = run_s[r] + run_n[r];
+            for (unsigned w = 0; w < shares && a < b; ++w) {
+                unsigned lo = slots_used * w / shares, hi = w + 1 == shares ? slots_used : slots_used * (w + 1) / shares;
+                unsigned x = a > lo ? a : lo, y = b < hi ? b : hi;
+                if (x >= y) continue;
+                if (w == 0) { own_s[owns] = x; own_n[owns] = y - x; owns++; }
+                else {
+                    assist_t *as = use[w - 1];
+                    if (as->n < ASSIST_MAX) { as->dst[as->n] = shadow_bank(bank, x); as->src[as->n] = live_of_slot(x); as->bytes[as->n] = (y - x) * XK_PAGE; as->n++; }
+                    else view_copy(shadow_bank(bank, x), live_of_slot(x), (size_t)(y - x) * XK_PAGE);
+                }
+                a = y;
             }
-            done += n;
         }
-        sceKernelSignalSema(assist_go, 1);
-        for (unsigned r = 0; r < runs; ++r) if (run_n[r]) view_copy(shadow_bank(bank, run_s[r]), live_of_slot(run_s[r]), (size_t)run_n[r] * XK_PAGE);
-        sceKernelWaitSema(assist_done, 1, NULL); assist_splits++;
+        (void)owner_end;
+        for (unsigned j = 0; j < k; ++j) sceKernelSignalSema(use[j]->go, 1);
+        for (unsigned o = 0; o < owns; ++o) view_copy(shadow_bank(bank, own_s[o]), live_of_slot(own_s[o]), (size_t)own_n[o] * XK_PAGE);
+        for (unsigned j = 0; j < k; ++j) sceKernelWaitSema(use[j]->done, 1, NULL);
+        assist_splits++; assist_three += k == 2;
         return;
     }
 #else
-    (void)from_owner;
+    (void)allowed;
 #endif
     for (unsigned r = 0; r < runs; ++r) view_copy(shadow_bank(bank, run_s[r]), live_of_slot(run_s[r]), (size_t)run_n[r] * XK_PAGE);
 }
-static void copy_in_runs(int from_owner) { copy_runs_to(cur_bank, from_owner); }
+static void copy_in_runs(int from_owner) { copy_runs_to(cur_bank, from_owner ? 3 : 0); }
 static void copy_in(int from_owner)
 {
     uint64_t t0 = xk_os_monotonic_us();
@@ -441,7 +464,7 @@ void xv_render_view_early_copy(void)
      * is free, so the split assistant on that core takes half the runs. A still-running scene keeps its core. */
     extern int xv_scene_thread_helper_done(void) __attribute__((weak));
     int idle = split_idle && xv_scene_thread_helper_done && xv_scene_thread_helper_done();
-    copy_runs_to(b, idle);
+    copy_runs_to(b, (idle ? 1 : 0) | (split_idle ? 2 : 0));
     early_split += idle;
     early_bank = b; early_slots = n; early_valid = 1; early_copies++;
     early_us += xk_os_monotonic_us() - t0;
@@ -561,12 +584,12 @@ void xv_render_view_report(unsigned frames)
            sw_slots, sw_imgs, sw_found_late, retargets_last, image_entries, retargets_overflow, fiber_switches, mirrors_in_scene, aliases_max);
     if (early_copies || early_fallbacks) XK_LOG("[render-view] early snapshot %u per window (%.2f ms/frame hidden in the owner's wait, %u split with the idle helper core), %u fallbacks, %u pages re-copied after the join\n", early_copies, early_copies ? (double)early_us / early_copies / 1000.0 : 0.0, early_split, early_fallbacks, early_recopied);
     early_copies = early_fallbacks = early_recopied = early_split = 0; early_us = 0;
-    if (copy_runs) XK_LOG("[render-view] copy runs %u per window (%.1f per frame; DMA %d, clib %d, split copies %u)\n", copy_runs, frames_entered ? (double)copy_runs / frames_entered : 0.0, dma_mode, clib_copy,
+    if (copy_runs) XK_LOG("[render-view] copy runs %u per window (%.1f per frame; DMA %d, clib %d, split copies %u, three-way %u)\n", copy_runs, frames_entered ? (double)copy_runs / frames_entered : 0.0, dma_mode, clib_copy,
 #ifdef __vita__
-        assist_splits);
-    assist_splits = 0;
+        assist_splits, assist_three);
+    assist_splits = assist_three = 0;
 #else
-        0u);
+        0u, 0u);
 #endif
     copy_runs = 0;
     frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; fiber_switches = mirrors_in_scene = 0; prepare_us = prep_list_us = prep_copy_us = prep_pristine_us = 0;   /* (was never reset: perf109 "owner-side 31 -> 68 ms" grew per window) */
