@@ -1830,3 +1830,7 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   71.7-83 ms window set. Flare quads: not batchable (one visibility query per quad); their path is
   draw_immediate_flare -> xv_d3d_DrawImmediateStrided -> record_draw with stream 0 immediate (no capture submit),
   so the memo and the program stage are what they pay.
+- perf130 (XV_NATIVE_PACK=2, engaged: [crt-float] pack 22,180/60 frames) vs perf128 per window: 81.5/77.9,
+  80.8/80.4, 80.0/83.2, 80.9/81.0, 80.2/74.0, 67.4/73.1, 71.1/73.6 - a wash within run-to-run variance (the cinematic
+  content shifts a little per run; compare same-phase windows and expect +-5 ms noise). perf131 (three trims, pack
+  off) and perf132 (perf131 + pack) are chained to run back to back.
