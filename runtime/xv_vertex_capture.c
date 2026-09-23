@@ -137,7 +137,7 @@ static int cap_compact(const xv_vertex_prepare_stream *s)
  * The worker neither reads guest memory nor owns the source identity keys. */
 typedef struct {
     const void *identity;
-    unsigned offset,bytes,stride,packed,compact,next,current,generation;
+    unsigned offset,bytes,stride,packed,compact,next,current,generation,sparse;
 } capture_entry;
 static capture_entry cap_entries[CAPTURE_ENTRIES];
 static const void *cap_results[CAPTURE_ENTRIES][XV_FRAME_SLOTS];
@@ -146,7 +146,7 @@ static int cap_reuse_enabled=-1;
 static int cap_retain_enabled=-1;
 static unsigned cap_reuse_checks,cap_reuse_hits,cap_reuse_prepared;
 static uint64_t cap_reuse_bytes;
-static unsigned cap_retained_hits,cap_reclaims,cap_metadata_full;
+static unsigned cap_retained_hits,cap_reclaims,cap_metadata_full,cap_sparse_hits;static uint64_t cap_sparse_bytes;
 static uint64_t cap_retained_bytes;
 static void cap_reuse_reset(void)
 { cap_entry_count=0;memset(cap_buckets,0,sizeof cap_buckets); }
@@ -243,7 +243,12 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned packed
     if(cap_reuse_enabled<0)cap_reuse_enabled=xv_quality_int("XV_VERTEX_CAPTURE_REUSE",1,0,1);
     /* Sparse uploads may intentionally retain stale unfetched records. Do not
      * reuse their result for another mask, even when the captured bytes match. */
-    if(!cap_reuse_enabled || xv_vertex_refs_sparse(s->refs,s->bytes,s->stride))return 0;
+    if(!cap_reuse_enabled)return 0;
+    /* Sparse streams reuse the CPU snapshot only: their worker result covers one
+     * mask, so it is never stored or borrowed (submit clears the job's reuse id).
+     * Before this every sparse draw re-copied its whole source buffer: on the Vita
+     * that was ~1.6 MB/frame of tag-resident BSP vertex data, 8-10 ms of the frame. */
+    unsigned sparse=xv_vertex_refs_sparse(s->refs,s->bytes,s->stride)!=0;
 #if XV_PACKED_VERTEX_LAYOUT
     if(packed && packed!=XV_PACKED_PREFIX16)return 0;
 #endif
@@ -251,7 +256,7 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned packed
     for(unsigned id=cap_buckets[bucket];id;id=cap_entries[id-1].next) {
         capture_entry *e=&cap_entries[id-1];
         if(e->identity!=s->source || e->bytes!=s->bytes || e->stride!=s->stride ||
-           e->packed!=packed || e->compact!=compact)continue;
+           e->packed!=packed || e->compact!=compact || e->sparse!=sparse)continue;
         cap_reuse_checks++;
         uint64_t detail_start=sample?sceKernelGetProcessTimeWide():0;
         int equal,compared=1;
@@ -305,13 +310,14 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned packed
 }
 static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned packed,unsigned compact)
 {
-    if(!cap_reuse_enabled || xv_vertex_refs_sparse(s->refs,s->bytes,s->stride))return 0;
+    if(!cap_reuse_enabled)return 0;
     if(cap_entry_count==CAPTURE_ENTRIES) {cap_metadata_full++;return 0;}
 #if XV_PACKED_VERTEX_LAYOUT
     if(packed && packed!=XV_PACKED_PREFIX16)return 0;
 #endif
     unsigned bucket=((uintptr_t)s->source>>4)&(CAPTURE_BUCKETS-1),id=++cap_entry_count;
-    cap_entries[id-1]=(capture_entry){s->source,cap_used,s->bytes,s->stride,packed,compact,cap_buckets[bucket],1,0};
+    cap_entries[id-1]=(capture_entry){s->source,cap_used,s->bytes,s->stride,packed,compact,cap_buckets[bucket],1,0,
+        xv_vertex_refs_sparse(s->refs,s->bytes,s->stride)!=0};
 #if XV_CAPTURE_TRUST_TAGS
     cap_entries[id-1].generation=__atomic_load_n(&trust_generation,__ATOMIC_RELAXED);
 #endif
@@ -622,12 +628,20 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         if(probed)id=reserve_ids[i];
         else id=cap_reuse_find(s,packed,compact,sample);
         if(id) {
-            j->reuse[i]=id;s->source=cap_arena+cap_entries[id-1].offset;s->result=NULL;
-            /* Non-sparse references are semantically unused by upload(). */
-            s->refs=NULL;
+            s->source=cap_arena+cap_entries[id-1].offset;s->result=NULL;
+            if(cap_entries[id-1].sparse) {
+                /* CPU snapshot hit for a sparse stream: the worker prepares this
+                 * mask from the arena copy; results are per mask, never shared. */
+                j->reuse[i]=0;j->refs[i]=*s->refs;s->refs=&j->refs[i];
+                cap_masks_copied++;cap_sparse_hits++;cap_sparse_bytes+=s->bytes;
+            } else {
+                /* Non-sparse references are semantically unused by upload(). */
+                j->reuse[i]=id;s->refs=NULL;
+            }
             continue;
         }
-        j->reuse[i]=cap_reuse_add(s,packed,compact);
+        { unsigned added=cap_reuse_add(s,packed,compact);
+          j->reuse[i]=added && cap_entries[added-1].sparse?0:added; }
 #endif
         uint64_t copy_start=sample?sceKernelGetProcessTimeWide():0;
 #if XV_VERTEX_CAPTURE_PACKED
@@ -772,6 +786,9 @@ void xv_vertex_capture_report(unsigned frames)
     if(cap_reuse_checks)xv_logf("[vertex-capture-reuse] %u frames: %u checks %u exact hits; %llu KiB staging writes avoided; %u worker preparations reused\n",
         frames,cap_reuse_checks,cap_reuse_hits,(unsigned long long)(cap_reuse_bytes>>10),cap_reuse_prepared);
     cap_reuse_checks=cap_reuse_hits=cap_reuse_prepared=0;cap_reuse_bytes=0;
+    if(cap_sparse_hits)xv_logf("[vertex-capture-sparse] %u frames: %u sparse-stream snapshot hits, %llu KiB copies avoided; worker results per mask, never shared\n",
+        frames,cap_sparse_hits,(unsigned long long)(cap_sparse_bytes>>10));
+    cap_sparse_hits=0;cap_sparse_bytes=0;
     if(cap_retained_hits || cap_reclaims)
         xv_logf("[vertex-capture-retain] %u frames: %u exact hits after drain, %llu KiB staging writes avoided; %u arena reclaims; CPU snapshots only, GPU results revalidated\n",
             frames,cap_retained_hits,(unsigned long long)(cap_retained_bytes>>10),cap_reclaims);
