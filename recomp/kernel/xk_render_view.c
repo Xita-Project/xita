@@ -56,10 +56,28 @@ static int dma_mode, slots_contiguous;   /* XV_RENDER_VIEW_DMA=1 (Vita): one DMA
 #include <psp2/kernel/clib.h>
 #endif
 static int clib_copy = -1;   /* XV_RENDER_VIEW_CLIB=1: sceClibMemcpy (NEON) for the CPU copies; newlib memcpy measured ~216 MB/s here */
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
+static int pld_copy = -1;    /* XV_RENDER_VIEW_PLD=1: NEON 64-byte copy with loads requested 512 bytes ahead (page runs are 4 KiB multiples) */
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+static void copy_pld(void *dst, const void *src, size_t n)
+{
+    uint8_t *d = dst; const uint8_t *s = src; size_t i = 0;
+    for (; i + 64 <= n; i += 64) {
+        __builtin_prefetch(s + i + 512);
+        uint8x16_t a = vld1q_u8(s + i), b = vld1q_u8(s + i + 16), c = vld1q_u8(s + i + 32), e = vld1q_u8(s + i + 48);
+        vst1q_u8(d + i, a); vst1q_u8(d + i + 16, b); vst1q_u8(d + i + 32, c); vst1q_u8(d + i + 48, e);
+    }
+    if (i < n) memcpy(d + i, s + i, n - i);
+}
+#endif
 static void view_copy(void *dst, const void *src, size_t n)
 {
 #ifdef __vita__
     if (dma_mode && n >= 65536u) { if (sceDmacMemcpy(dst, src, n) >= 0) return; dma_mode = 0; XK_LOG("[render-view] sceDmacMemcpy failed; CPU copies from now on\n"); }
+    if (pld_copy < 0) { const char *e = getenv("XV_RENDER_VIEW_PLD"); pld_copy = e ? atoi(e) != 0 : 0; }
+    if (pld_copy) { copy_pld(dst, src, n); return; }
     if (clib_copy < 0) { const char *e = getenv("XV_RENDER_VIEW_CLIB"); clib_copy = e ? atoi(e) != 0 : 0; }
     if (clib_copy) { sceClibMemcpy(dst, src, n); return; }
 #endif
@@ -538,6 +556,9 @@ static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live, ui
 {
     const uint32_t *c = (const uint32_t *)copy, *p = (const uint32_t *)pre; uint32_t *l = (uint32_t *)live; unsigned changed = 0;
     for (unsigned b = 0; b < XK_PAGE / 4; b += 16) {
+        /* The A9's own prefetch leaves every line of the cold pristine page a serial miss (Vita ~79 us/page vs the
+         * Pi's 3 us): request both streams 256 bytes ahead so the misses overlap. */
+        if (b + 64 < XK_PAGE / 4) { __builtin_prefetch(c + b + 64); __builtin_prefetch(p + b + 64); }
         if (!block64_differs(c + b, p + b)) continue;   /* perf162: ~79 us/page with 4-word scalar blocks */
     for (unsigned i = b; i < b + 16; i += 4) {
         uint32_t d = (c[i] ^ p[i]) | (c[i+1] ^ p[i+1]) | (c[i+2] ^ p[i+2]) | (c[i+3] ^ p[i+3]);
