@@ -104,6 +104,12 @@ static unsigned cap_masks_copied,cap_masks_omitted;
 /* Mutually exclusive pressure causes, captured before drain changes ownership. */
 static unsigned cap_pressure_queue,cap_pressure_arena,cap_pressure_both;
 static uint64_t cap_bytes,cap_capture_us,cap_worker_us,cap_join_us;
+static int cap_timing=-1;
+static inline uint64_t cap_clock(void)
+{
+    if(cap_timing<0)cap_timing=xv_quality_int("XV_VERTEX_CAPTURE_TIMING",0,0,1);
+    return cap_timing?sceKernelGetProcessTimeWide():0;
+}
 #ifndef XV_VERTEX_CAPTURE_DETAIL_DEFAULT
 #define XV_VERTEX_CAPTURE_DETAIL_DEFAULT 0
 #endif
@@ -258,7 +264,7 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned packed
         if(e->identity!=s->source || e->bytes!=s->bytes || e->stride!=s->stride ||
            e->packed!=packed || e->compact!=compact || e->sparse!=sparse)continue;
         cap_reuse_checks++;
-        uint64_t detail_start=sample?sceKernelGetProcessTimeWide():0;
+        uint64_t detail_start=sample?cap_clock():0;
         int equal,compared=1;
 #if XV_CAPTURE_TRUST_TAGS
         if(trust_enabled<0)trust_enabled=xv_quality_int("XV_CAPTURE_TRUST_TAGS",XV_CAPTURE_TRUST_TAGS_DEFAULT,0,1);
@@ -289,7 +295,7 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned packed
         }
 #endif
         if(sample && compared) {
-            cap_detail_compare_us+=sceKernelGetProcessTimeWide()-detail_start;
+            cap_detail_compare_us+=cap_clock()-detail_start;
             cap_detail_compares++;
             /* Logical input bytes, not measured memory-bus traffic. */
             cap_detail_compare_bytes+=compact?s->bytes/2:s->bytes;
@@ -380,10 +386,10 @@ static int cap_run(SceSize bytes,void *arg)
 #if XV_VERTEX_CAPTURE_NOTIFY
             XV_CAPTURE_NOTIFY_POINT(CAP_BEFORE_EXECUTE);
 #endif
-            uint64_t start=sceKernelGetProcessTimeWide();
+            uint64_t start=cap_clock();
             cap_execute(&cap_jobs[next&(CAPTURE_JOBS-1)]);
             xv_gpu_write_barrier();
-            cap_worker_us+=sceKernelGetProcessTimeWide()-start;
+            cap_worker_us+=cap_clock()-start;
 #if XV_VERTEX_CAPTURE_NOTIFY
             XV_CAPTURE_NOTIFY_POINT(CAP_BEFORE_COMPLETE);
 #endif
@@ -480,7 +486,7 @@ void xv_vertex_capture_drain(void)
 #endif
         return;
     }
-    uint64_t start=sceKernelGetProcessTimeWide();cap_drains++;
+    uint64_t start=cap_clock();cap_drains++;
 #if XV_VERTEX_CAPTURE_NOTIFY
     for(;;) {
         /* A plain store is insufficient on weakly ordered CPUs. The RMW
@@ -499,7 +505,7 @@ void xv_vertex_capture_drain(void)
 #if XV_VERTEX_CAPTURE_NOTIFY
     __atomic_exchange_n(&cap_waiting,0,__ATOMIC_ACQ_REL);
 #endif
-    cap_collect();cap_join_us+=sceKernelGetProcessTimeWide()-start;
+    cap_collect();cap_join_us+=cap_clock()-start;
 #if XV_VERTEX_CAPTURE_REUSE
     cap_reuse_retire();
 #else
@@ -533,7 +539,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     int sample=cap_detail_enabled && !(cap_detail_serial++&63u);
     if(sample)cap_detail_samples++;
     unsigned submitted=__atomic_load_n(&cap_submitted,__ATOMIC_RELAXED);
-    uint64_t start=sceKernelGetProcessTimeWide();
+    uint64_t start=cap_clock();
 #if XV_VERTEX_CAPTURE_REUSE
     unsigned reserve_ids[XV_VERTEX_PREPARE_STREAMS];
     int probed=1;
@@ -570,7 +576,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
             for(unsigned i=0;i<batch->count;i++)*targets[i]=ready_results[i];
             if(complete)complete(context,1);
             cap_ready_draws++;
-            cap_capture_us+=sceKernelGetProcessTimeWide()-start;
+            cap_capture_us+=cap_clock()-start;
             return 1;
         }
     }
@@ -581,7 +587,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         if(queue_full && arena_full)cap_pressure_both++;
         else if(queue_full)cap_pressure_queue++;
         else cap_pressure_arena++;
-        cap_capture_us+=sceKernelGetProcessTimeWide()-start;
+        cap_capture_us+=cap_clock()-start;
         cap_pressure++;xv_vertex_capture_drain();
         if(worst_required>XV_VERTEX_CAPTURE_BYTES-cap_used) {
             /* Drain callbacks can change sources, so re-probing must have room
@@ -598,7 +604,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
          * The initial full-batch bound guarantees room after an arena reset. */
         probed=0;
 #endif
-        start=sceKernelGetProcessTimeWide();
+        start=cap_clock();
     }
     capture_job *j=&cap_jobs[submitted&(CAPTURE_JOBS-1)];j->batch=*batch;
     j->complete=complete;j->context=context;
@@ -643,7 +649,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         { unsigned added=cap_reuse_add(s,packed,compact);
           j->reuse[i]=added && cap_entries[added-1].sparse?0:added; }
 #endif
-        uint64_t copy_start=sample?sceKernelGetProcessTimeWide():0;
+        uint64_t copy_start=sample?cap_clock():0;
 #if XV_VERTEX_CAPTURE_PACKED
         j->compact[i]=cap_compact(s);
         if(j->compact[i]) {
@@ -654,7 +660,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         memcpy(cap_arena+cap_used,s->source,captured);
         cap_census_note(batch->streams[i].source,captured);
         if(sample) {
-            cap_detail_copy_us+=sceKernelGetProcessTimeWide()-copy_start;
+            cap_detail_copy_us+=cap_clock()-copy_start;
             cap_detail_copies++;cap_detail_copy_bytes+=captured;
         }
         s->source=cap_arena+cap_used;s->result=NULL;
@@ -673,7 +679,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     }
     j->batch.ok=0;cap_jobs_total++;cap_bytes+=written;
     unsigned pending=submitted+1-cap_retired;if(pending>cap_max_pending)cap_max_pending=pending;
-    uint64_t publish_start=sample?sceKernelGetProcessTimeWide():0;
+    uint64_t publish_start=sample?cap_clock():0;
     __atomic_store_n(&cap_submitted,submitted+1,__ATOMIC_RELEASE);
 #if XV_VERTEX_CAPTURE_NOTIFY
     if(__atomic_exchange_n(&cap_wake_state,CAP_PENDING,__ATOMIC_ACQ_REL)==CAP_SLEEPING) {
@@ -685,10 +691,10 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
     sceKernelSetEventFlag(cap_wake,1);
 #endif
     if(sample) {
-        cap_detail_publish_us+=sceKernelGetProcessTimeWide()-publish_start;
+        cap_detail_publish_us+=cap_clock()-publish_start;
         cap_detail_publishes++;
     }
-    cap_capture_us+=sceKernelGetProcessTimeWide()-start;
+    cap_capture_us+=cap_clock()-start;
     return 1;
 fallback:
     xv_vertex_capture_drain();return 0;
