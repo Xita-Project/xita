@@ -3,7 +3,8 @@
 f_0005DBC0 in a stage's hand-maintained shards (idempotent: earlier timers are stripped and re-installed).
 Usage: patch_scene_phase_timers.py <stage>/recomp     Report: [scene-phases] in recomp/kernel/xk_scene_thread.c."""
 import re, sys, glob
-PARENTS = ['000BD420',   # the owner's frame loop (tick side): its direct callees are the tick phases ([tick-phases])
+PARENTS = ['000FA920',   # the tick root (54 ms/frame in the a10 cinematic, perf122): its direct callees are the tick's phases
+           '000BD420',   # the owner's frame loop (tick side): its direct callees are the tick phases ([tick-phases])
            '000BCB30', '0005DBC0', '0005D990', '0005C5E0', '0005D410', '0005BCB0', '00028320',
            '000606B0', '00054010', '00060560', '0005B760', '00054740', '0005B710', '000539C0', '00092890', '00093C00']   # + the Vita's top scene callees (§47), one level down   # scene entry, its main callee, and the chain below (each level was one callee on the host)
 BEGIN = '    { extern void xv_scene_phase_begin(void); xv_scene_phase_begin(); }\n'
