@@ -2048,3 +2048,36 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   relaunch; a companion reboot did not bring FTP or Xita back without the user. Freezes stay parked (user, 12:38).
 - Next: run perf160 (overlap-candidate/wait-and-run-p160.sh is armed), read `[alpha-zero] linked` lines and the
   census alpha-mode 3 counts, compare early-part completion latency with perf155-159.
+
+## §60 Sept 23 evening: alpha-zero reverted, Blood Gulch >20 fps, merge 1.6 -> 0.6 ms, owner split (16:30-17:45 CDT)
+- Blood Gulch (user playing perf160, alpha-zero + helper present on): steady 44.9-48.2 ms = 20.7-22.2 fps, one 55 ms
+  window; GPU completion 44-46 ms = the wall there; helper cpu 29-33 ms and idle 13-15 ms/frame in flare waits. TRAP:
+  the BG load shows one ~1.8 s/frame window (pump 1.7 s, texture decode) - that is the load, not a crash; I killed a
+  healthy 22 fps session on that misread.
+- Alpha-zero on hardware (perf160 a10): the early cinematic got WORSE (GPU completion 114-126 -> 128-160 ms, frames
+  ~78 -> 94-101): the unlit specular pass costs its shading, not punch-through. Made opt-in (3a04036). The pass's
+  light color psc[0] is (1,1,1) (perf161 census): its output is zeroed by texture data, so no constant-based exact
+  skip exists. The punch-through probe's ~20 ms remains unexplained beyond "it is shading work".
+- Owner split (perf160, [tick-phases], BD420/FA920 timers via patch_scene_phase_timers.py --parents): the owner's own
+  per-frame work outside FA920 (tick, ~26.5 ms per sim tick: per-object 8FB70 ~0.53 ms x ~33/tick, 14E2C0 ~8 ms/tick)
+  and BCB30 (dispatch incl. the join wait) is small (FA500 0.9, 7EDF0 0.6). The owner is NOT the steady wall; the
+  scene helper is (~55-57 ms wall). My "owner fixed 12.7 ms" arithmetic in §59 was wrong. NOTE: the stage shards still
+  carry the old scene-side timer patches (62240, 5B4A0, ... from perf122-129); XV_SCENE_PHASES=1 turns them all on.
+- Helper scene split (perf160 steady, timers on, ms/frame): 5D990 60.4 = self 13.7 (untimed tail/indirect calls) +
+  54010 7.4 + 54740->54010 3.7 (ordered passes 11.2) + 5B760 7.7 / 5B710 7.1 (5B4A0 per-model 12.5) + 60560 7.6 ->
+  62240 -> 63C00 5.9 (181 flare tests, 32 us each) + 539C0 6.2 + 542F0 2.9 + 92890 2.8 + D8C40 2.0 + 28320 1.4.
+- XV_HELPER_PRESENT (25c4909): made opt-in (81a7c3d) - perf161 steady ~3.5 ms worse with it (the helper counts as busy
+  during its present so the owner loses the helper-core copy share); perf162 with it off back to 59.9-62.4.
+- XV_BC_MIPS=1 (DXT mip chains) ran perf162-164 on the Vita with no fault (main menu, a10) and no GPU gain in the
+  early cinematic; kept on in runs for quality/validation, still default 0.
+- Merge (scene-end, helper critical path): [render-view] leave split (1d64bcb): bind 0.001, restore 0.07, merge 1.6 ms
+  for ~20 pages = 79 us/page vs 3 us/page on the Pi (cold serial misses on the A9). NEON 64-byte compare (81a7c3d):
+  1.07 ms; + __builtin_prefetch 256 B ahead on both streams (18734bf): 0.60-0.64 ms. ~1 ms off the helper path.
+- XV_RENDER_VIEW_PLD=1 (NEON copy with PLD 512 B ahead) is SLOWER than sceClibMemcpy (early copy 3.5-3.8 vs 2.8 ms):
+  leave it off.
+- Pi: pi_run.sh PI_CPUS=<list> (8ea849b) pins runs; CE soak cesoak1 (today's code, cores 0-1) 40 min, 1,173 reports,
+  1 abandon = the known f_001105E0 idiv trap (edi=0x40) recovered by the bail-out, nothing new. A background agent
+  is building a Halo 2 host/ARM harness in the H2 worktree (Pi ~/xita-h2, cores 2-3).
+- Where 20 fps stands: Blood Gulch 20.7-22.2 fps (GPU-bound); a10 steady ~60-62 ms (helper-bound), a10 early ~78 ms
+  (GPU-bound on legit Halo shading). The remaining CPU path is native ports of the scene's hot guest functions
+  (54010/54740 ordered passes, 5B4A0 per-model, 539C0, 63C00 flares): days of work, not knobs.
