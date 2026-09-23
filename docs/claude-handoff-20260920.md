@@ -1678,3 +1678,12 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   file. Also: the fire script's FTP fetch is starved for ~60-90 s at the load->cinematic transition; that is not a
   freeze (I relaunched a healthy perf119 on that signal). The script now keeps the previous log copy on a failed fetch
   and the longest copy as gameplay-<tag>.log.max.
+- CORRECTION on Pi yp2: it did NOT recover from the 3 s STUCK at 20:37 (line 46772). The frame counter froze at 19260
+  (line 46605) and the log only grew with yield-storm thread dumps (~1,170 storms). gdb at 21:16 (runs/yp2-gdb.txt):
+  helper (50% CPU) spinning in f_001105E0 -> xv_trap -> xk_yield -> xv_scene_thread_note_suppressed_yield (callers
+  14188 <- 13A77); owner in xk_os_scheduler_wait with guest thread 8 yield-storming in the 56670 cache-request wait
+  (stack BD97C 56A6E 56978); workers idle in wait_sem. A LIVELOCK, not the mutex deadlock: the scene (helper) spins on
+  a memory flag for a cache request while the owner side spins in its own cache-request wait, and nobody serves it.
+  The owner-wait fix (3e2dd53) does not cover it (no proxied call is pending: proxy fn nil). Same class as the Vita
+  perf116/117 transition freeze. Open: who completes cache requests (which guest thread / native file thread) and why it
+  cannot run while both sides spin; the helper's suppressed yields never let the owner's scheduler run the completer.
