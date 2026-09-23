@@ -2011,3 +2011,40 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   STEADY phase helper cpu 55 = scene wall 55 (no waits) while the frame is ~62.5 and the owner waits 4-6 ms at the
   join: ~7 ms per frame between scene done and the next go is unaccounted. perf155 adds done->noticed and
   noticed->go latencies and the [scene-wait] kernel-status sampler.
+
+## §59 The a10 cinematic has two walls; the GPU one is a punch-through pass (Sept 23, 13:50-15:20 CDT)
+- perf155 [scene-wait] sampler: in the EARLY cinematic (~t+180..300 s of a run, ~74-78 ms) the scene helper sleeps
+  8-16 ms/frame in `exact_pixels` (xk_flare.c: flare-defer `waits`, the `uid:FFFFFFFF(type 1)` delay wait) because the
+  GPU is behind: `[frame-retire]` completion ~120 ms (max pending 2) vs ~42 ms in the steady part, `[frame-query-
+  boundary]` tail after the flare queries ~60 ms of GPU. The early part is GPU-bound. The steady part (~60-63 ms) is
+  CPU-bound with owner and helper both ~55-60 ms (done->noticed 3-7 ms, owner wait 3.5-9 ms).
+- XV_FRAG_CENSUS=<n> (ac21f32 .. e9ca5d0): every n-th frame each command gets its own visibility counter (index
+  512+cmd; per-core arrays widen to 2048 words only when enabled), read at final completion: totals in screens,
+  top draws, top programs, per-vertex-shader aggregates with the first draw's state and the discard variants replay
+  actually bound. Early and steady frames draw the SAME samples (~4.2 screens at 640x360, ~1M) - not overdraw.
+  The early part adds two level-geometry (BSP) passes: halo_vs_49 + ps_576EBD5A/192F3CCA/95EFB444 (33 draws, 11,160
+  indices, ZERO surviving samples) and halo_vs_41 + ps_D05FE9D0 (33 draws, 0.12 screens, three cube maps).
+- Probe perf158 (XV_SKIP_VS=halo_vs_49, diagnostic only): early completion 120 -> 72-82 ms, frames 74-78 -> 63-70.
+  perf159 census: that pass is additive (ONE/ONE), depth EQUAL, no depth write, alpha test "alpha > 0" through
+  `discard` in all 33 draws. Its combiner makes alpha = dot(rgb, c0) with everything saturated, so alpha is 0 exactly
+  where rgb is 0 (an unlit dynamic-light specular term): on the Xbox the test only saved blend bandwidth; on PowerVR a
+  program with discard is punch-through, every depth-passing fragment is shaded and the tile pipeline waits on it.
+- Fix b00ebf2 (perf160, NOT yet run on hardware): `_az` alpha-zero programs (tools/specialize_ps_alphazero.py,
+  577 variants compiled with libshacccg inside Vita3K via xv_shadercomp with VITA3K_NOCLICK-style direct launch, 0
+  failures, GXP flag bit 0x8 = discard cleared) write a zero source on a failed test. Selected (alpha mode 3,
+  XV_ALPHA_ZERO default on) only where a zero source leaves the target unchanged: no depth write, stencil pass op
+  KEEP, no visibility query, color writes off or ADD with destination ONE / INV_SRC_COLOR / INV_SRC_ALPHA. That covers
+  the vs_49, vs_41 (DESTALPHA/ONE), vs_06 (ONE/INVSRCALPHA, also in the steady part) and vs_29 (ZERO/INVSRCCOLOR)
+  passes if their stencil pass op is KEEP (census now logs it). embed_ps_shaders.py embeds _az when present; the
+  loader falls back to the discard program if a variant is missing.
+- Owner arithmetic (why the steady part sits at ~62 ms): the 30 Hz tick runs F/33.3 times per frame, so the owner
+  settles at F = fixed / (1 - tick/33.3) = 12.7 / (1 - 26.5/33.3) ~ 62 ms. Each 1 ms of fixed owner work is worth
+  ~5 ms of frame; each 1 % of tick cost ~2 ms. Pi sampler (sample2, cinematic windows): the owner's tick is flat
+  (top non-idle function ~10 % of tick samples) - no cheap tick hotspot.
+- Early snapshot copy split (5bd4ec2, 36a2af7): with the helper idle, the core-1 assistant (and with
+  XV_RENDER_VIEW_SPLIT_CORE0=1 a core-0 assistant) take shares; owner early copy 3.7 -> 2.7 ms/frame, frame within
+  noise (60-63 ms steady). perf157 had one 58.1 ms window (17.0 fps).
+- perf159 froze at ~t+330 s (steady cinematic, 14:57): FTP plugin wedged (accepts, never greets), Xita would not
+  relaunch; a companion reboot did not bring FTP or Xita back without the user. Freezes stay parked (user, 12:38).
+- Next: run perf160 (overlap-candidate/wait-and-run-p160.sh is armed), read `[alpha-zero] linked` lines and the
+  census alpha-mode 3 counts, compare early-part completion latency with perf155-159.
