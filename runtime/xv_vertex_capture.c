@@ -11,6 +11,7 @@
 #include <psp2/kernel/sysmem.h>
 #include <assert.h>
 #include <string.h>
+#include <stdio.h>
 
 #ifndef XV_VERTEX_CAPTURE_DEFAULT
 #define XV_VERTEX_CAPTURE_DEFAULT 0
@@ -164,6 +165,43 @@ static void cap_reuse_reset(void)
 #endif
 extern uint8_t *g_xram __attribute__((weak));
 enum { TAG_PHYS_BASE=0x3A6000u, TAG_PHYS_BYTES=0x1600000u };
+/* Miss census: where the bytes we still copy come from. Tag-resident
+ * misses are reuse evictions (arena churn); game-state/other misses are
+ * geometry the guest rewrites. XV_VERTEX_CAPTURE_CENSUS=1 (default on). */
+static int cap_census_enabled=-1;
+static unsigned cap_miss_tag,cap_miss_state,cap_miss_other;
+static uint64_t cap_miss_tag_bytes,cap_miss_state_bytes,cap_miss_other_bytes;
+#define CENSUS_BINS 12
+static struct { uint32_t base; uint32_t bytes; unsigned n; } cap_census[CENSUS_BINS];
+static void cap_census_note(const void *source,unsigned bytes)
+{
+    if(cap_census_enabled<0)cap_census_enabled=xv_quality_int("XV_VERTEX_CAPTURE_CENSUS",1,0,1);
+    if(!cap_census_enabled)return;
+    if(!&g_xram || !g_xram || (const uint8_t *)source<g_xram) { cap_miss_other++;cap_miss_other_bytes+=bytes;return; }
+    uint32_t off=(uint32_t)((const uint8_t *)source-g_xram);
+    if(off>=TAG_PHYS_BASE && off+bytes<=TAG_PHYS_BASE+TAG_PHYS_BYTES) { cap_miss_tag++;cap_miss_tag_bytes+=bytes; }
+    else if(off<TAG_PHYS_BASE) { cap_miss_state++;cap_miss_state_bytes+=bytes; }
+    else { cap_miss_other++;cap_miss_other_bytes+=bytes; }
+    uint32_t bin=off&~0xFFFFu;int free_i=-1;
+    for(unsigned i=0;i<CENSUS_BINS;i++) {
+        if(cap_census[i].n && cap_census[i].base==bin) { cap_census[i].bytes+=bytes;cap_census[i].n++;return; }
+        if(!cap_census[i].n && free_i<0)free_i=(int)i;
+    }
+    if(free_i>=0) { cap_census[free_i].base=bin;cap_census[free_i].bytes=bytes;cap_census[free_i].n=1; }
+}
+static void cap_census_report(unsigned frames)
+{
+    if(!(cap_miss_tag|cap_miss_state|cap_miss_other))return;
+    xv_logf("[vertex-capture-census] %u frames: copies tag %u (%llu KiB) state %u (%llu KiB) other %u (%llu KiB); tag copies are reuse evictions, state copies are rewritten geometry\n",
+        frames,cap_miss_tag,(unsigned long long)(cap_miss_tag_bytes>>10),cap_miss_state,(unsigned long long)(cap_miss_state_bytes>>10),
+        cap_miss_other,(unsigned long long)(cap_miss_other_bytes>>10));
+    char line[400];int n=0;
+    for(unsigned i=0;i<CENSUS_BINS && n<(int)sizeof line-40;i++)
+        if(cap_census[i].n)n+=snprintf(line+n,sizeof line-n," %06X:%uK/%u",cap_census[i].base,cap_census[i].bytes>>10,cap_census[i].n);
+    xv_logf("[vertex-capture-census] top 64K bins (guest off:KiB/copies, first %d seen):%s\n",CENSUS_BINS,line);
+    cap_miss_tag=cap_miss_state=cap_miss_other=0;cap_miss_tag_bytes=cap_miss_state_bytes=cap_miss_other_bytes=0;
+    memset(cap_census,0,sizeof cap_census);
+}
 static int trust_enabled=-1;
 static unsigned trust_generation,trust_disabled,trust_hits,trust_verified,trust_mismatches;
 static uint64_t trust_bytes;
@@ -181,6 +219,9 @@ static int trust_source(const void *source,unsigned bytes)
     uintptr_t off=(const uint8_t *)source-g_xram;
     return off>=TAG_PHYS_BASE && off+bytes<=TAG_PHYS_BASE+TAG_PHYS_BYTES;
 }
+#else
+#define cap_census_note(src,bytes) ((void)0)
+#define cap_census_report(frames) ((void)0)
 #endif
 static void cap_reuse_retire(void)
 {
@@ -597,6 +638,7 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         } else
 #endif
         memcpy(cap_arena+cap_used,s->source,captured);
+        cap_census_note(batch->streams[i].source,captured);
         if(sample) {
             cap_detail_copy_us+=sceKernelGetProcessTimeWide()-copy_start;
             cap_detail_copies++;cap_detail_copy_bytes+=captured;
@@ -734,6 +776,7 @@ void xv_vertex_capture_report(unsigned frames)
         xv_logf("[vertex-capture-retain] %u frames: %u exact hits after drain, %llu KiB staging writes avoided; %u arena reclaims; CPU snapshots only, GPU results revalidated\n",
             frames,cap_retained_hits,(unsigned long long)(cap_retained_bytes>>10),cap_reclaims);
     cap_retained_hits=cap_reclaims=0;cap_retained_bytes=0;
+    cap_census_report(frames);
 #endif
 #if XV_VERTEX_CAPTURE_PACKED
     if(cap_compact_streams)xv_logf("[vertex-capture-packed] %u frames: %u streams, %llu KiB staging writes avoided; exact 16-byte shader inputs\n",
