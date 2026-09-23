@@ -661,6 +661,14 @@ static void owner_wait_stuck(unsigned timeouts,const char *what)
     XK_LOG("[object-jobs] STUCK %s %u ms: running %d math_holder %d (lane+1 / 100 owner-lane / 200 other) worker service words %u %u\n",
         what,timeouts/2u,(int)__atomic_load_n(&running,__ATOMIC_RELAXED),(int)math_holder,
         service_state[0],service_state[1]);
+    /* the kernel's own view of the recursive guard: owner thread id and lock count (perf141: math_holder 0 yet both
+     * workers failed the try-lock forever) */
+    { int owner_id=-1,count=-1,rc;
+      if(math_mutex.use_light) { rc=-1; /* no LwMutex info API in this SDK */ }
+      else { SceKernelMutexInfo mi; memset(&mi,0,sizeof mi); mi.size=sizeof mi; rc=sceKernelGetMutexInfo(math_mutex.full,&mi); owner_id=mi.currentOwnerId; count=mi.currentCount; }
+      extern int xv_scene_helper_thread, xv_scene_owner_alias;
+      XK_LOG("[object-jobs] STUCK guard: kernel owner %08X count %d (rc %08X, light %d); ids: this %08X owner-alias %08X helper %08X workers %08X %08X\n",
+          (unsigned)owner_id,count,(unsigned)rc,(int)math_mutex.use_light,(unsigned)sceKernelGetThreadId(),(unsigned)xv_scene_owner_alias,(unsigned)xv_scene_helper_thread,(unsigned)threads[0],(unsigned)threads[1]); }
 }
 static void owner_wait(SceUID sem)
 {
