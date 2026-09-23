@@ -114,9 +114,16 @@ static inline void xd3d_count(const char *name)
 {
     xv_hle_cur_name = name;
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
+#if defined(__vita__)
+    { extern uintptr_t xv_scene_helper_sp_lo, xv_scene_helper_sp_hi; uintptr_t sp_ = (uintptr_t)__builtin_frame_address(0);
+      if (xv_scene_helper_sp_hi && sp_ >= xv_scene_helper_sp_lo && sp_ < xv_scene_helper_sp_hi) goto hooked_; }   /* on the helper both hooks below return immediately: ~8,000 HLE calls/frame skip two calls each */
+#endif
     { extern void xv_scene_thread_d3d_call(const char *); extern void xv_scene_thread_join_owner(void);
       if (name != xd3d_present_name) xv_scene_thread_join_owner();   /* overlap: an owner-side D3D call waits for the scene in flight (GXM is single-threaded) - except Present, whose policy below decides (mode 2 defers the device present to the join; joining here made mode 2 behave as mode 1 on the Vita, perf99 m2a) */
       xv_scene_thread_d3d_call(name); }
+#if defined(__vita__)
+    hooked_:;
+#endif
 #endif
     static int on = -1; if (on < 0) on = (getenv("XV_D3D_HIST") != NULL) || (getenv("XV_DS_CHECK") != NULL);
     if (!on) return;                                           /* ~4000 calls/frame: only walk the table when asked */

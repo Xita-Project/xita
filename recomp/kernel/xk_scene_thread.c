@@ -195,7 +195,9 @@ static SceUID proxy_done = -1;
 /* "Am I the helper?" is asked twice per D3D HLE call (xd3d_count) - ~3,800 calls per frame in the corridor - and
  * sceKernelGetThreadId is a syscall: compare the stack pointer with the helper's 1 MiB stack instead (set once in
  * helper_main); the syscall remains the fallback until the helper has started. */
-static uintptr_t helper_sp_lo, helper_sp_hi;
+uintptr_t xv_scene_helper_sp_lo, xv_scene_helper_sp_hi;   /* exported: xd3d_count's inline on-helper fast path (the two hook calls per HLE call return at once on the helper) */
+#define helper_sp_lo xv_scene_helper_sp_lo
+#define helper_sp_hi xv_scene_helper_sp_hi
 int xv_scene_thread_on_helper(void)
 {
     if (helper_sp_hi) { uintptr_t sp = (uintptr_t)__builtin_frame_address(0); return sp >= helper_sp_lo && sp < helper_sp_hi; }
