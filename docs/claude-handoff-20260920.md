@@ -1846,3 +1846,6 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   on ARM. XV_NATIVE_PACK=2 is exact on ARM; it stays on from perf133 (the Vita gain is within noise, ~0-3 ms).
 - perf131 per window vs perf128: 81.3/77.9, 81.6/80.4, 81.9/83.2, 78.2/81.0, 71.6/74.0, 72.2/73.1 (texture memo:
   32,133 of 45,503 stage lookups per 60 frames reused = 70 %).
+- perf131 complete, 8 min clean: 68.1-81.9 ms, 12.1-14.5 fps; last four windows 70.1/68.2/74.8/70.9/68.1 vs perf128's
+  73.6/77.7/71.7/73.1/74.3 (about -3 ms). Best build so far. perf133 (all shards rebuilt with the full flags, native
+  CRT float hooks live for the first time on the Vita, native pack on) deploys automatically after the rebuild.
