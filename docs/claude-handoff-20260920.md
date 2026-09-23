@@ -1943,3 +1943,9 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   has no owner query, so the kernel-owner line is empty. perf144 (a) XV_OBJECT_JOBS_STABLE (default 90 frames of all
   conditions holding before admission, was 3) to keep the pass out of the transition, (b) runs with
   XV_OBJECT_LIGHT_LOCK=0 (full mutex) so a stall prints the kernel owner id and count.
+- perf144 (90-frame grace, full mutex, NO any-mode, vp tolerance on): the pass engages in the cinematic every tick
+  after the grace (passes 120/60 frames, 33 jobs each; the cinematic's mode is accepted after the intro; only the vp
+  gate had kept it off) and the frame goes to 108-124 ms (8-9 fps): lane work 5.2 + 5.5 s per 60 frames = ~90 ms of
+  worker time per frame for 66 object updates that cost the guest path 37 ms. The native pass is 2-3x slower per
+  object here (scripted/animated cinematic objects, guard contention). No stall in 4 min with the grace period.
+  perf145 (43feb86): the tolerance is opt-in (XV_OBJECT_JOBS_VP_TOLERANT=1); default = perf137 behaviour.
