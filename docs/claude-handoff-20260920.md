@@ -1842,3 +1842,7 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   handoff §40) has therefore NEVER been on the Vita. perf133 = all shard objects deleted and rebuilt with
   make-vars.txt. Trap: after any flag-set change, delete build/recomp/*.o; make's option stamps do not cover the
   shard flags. Verify with `arm-vita-eabi-nm build/recomp/code_002.o | grep xv_native_crt_float`.
+- Pi packv (XV_NATIVE_PACK=1 verify mode, 10 min): 20,234,240 native pack calls, 0 mismatches against the guest body
+  on ARM. XV_NATIVE_PACK=2 is exact on ARM; it stays on from perf133 (the Vita gain is within noise, ~0-3 ms).
+- perf131 per window vs perf128: 81.3/77.9, 81.6/80.4, 81.9/83.2, 78.2/81.0, 71.6/74.0, 72.2/73.1 (texture memo:
+  32,133 of 45,503 stage lookups per 60 frames reused = 70 %).
