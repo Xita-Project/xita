@@ -2462,10 +2462,11 @@ void xv_d3d_frag_census_complete(uint32_t frame)
         const xv_vs_desc_t *d=vsa[a].vs<XV_MAX_VS?g_vs[vsa[a].vs].vs.desc:NULL;
         const cmd_t *fc=&l->cmds[vsa[a].first];
         unsigned fi=vsa[a].first<XV_CENSUS_CORE_WORDS?vsa[a].first:0;
-        XV_LOG("[frag-census]  vs %u %s: %u draws (%u zero-sample, %u discard), %u indices (%u in zero-sample draws), %.2f screens; first cmd %u ps %s blend %u(%u/%u m%X) zf %u zw %u atest %05X stencil %u/%u/%u alpha-mode %u depth-only %u zrep %u prim %X\n",
+        XV_LOG("[frag-census]  vs %u %s: %u draws (%u zero-sample, %u discard), %u indices (%u in zero-sample draws), %.2f screens; first cmd %u ps %s blend %u(%u/%u m%X) zf %u zw %u atest %05X stencil %u/%u/%u alpha-mode %u depth-only %u zrep %u prim %X psc0 %.3f %.3f %.3f %.3f psc16 %.3f %.3f %.3f stencil-ops %u/%u/%u\n",
             vsa[a].vs,d&&d->gxp?d->gxp:"-",vsa[a].draws,vsa[a].empty,vsa[a].discard,vsa[a].idx,vsa[a].empty_idx,(double)vsa[a].n/area,
             vsa[a].first,fc->ps_entry>=0?xv_ps_table[fc->ps_entry].gxp:"-",fc->blend,g_blend_combo[fc->blend].src,g_blend_combo[fc->blend].dst,g_blend_combo[fc->blend].mask,
-            fc->depth_func_idx,fc->depth_write,fc->atest&0x1FFFFu,fc->stencil.enabled,fc->stencil.func,fc->stencil.pass,g_census_fs[fi].alpha_mode,g_census_fs[fi].depth_only,g_census_fs[fi].replaces_depth,(unsigned)fc->prim);
+            fc->depth_func_idx,fc->depth_write,fc->atest&0x1FFFFu,fc->stencil.enabled,fc->stencil.func,fc->stencil.pass,g_census_fs[fi].alpha_mode,g_census_fs[fi].depth_only,g_census_fs[fi].replaces_depth,(unsigned)fc->prim,
+            fc->psc[0][0],fc->psc[0][1],fc->psc[0][2],fc->psc[0][3],fc->psc[16][0],fc->psc[16][1],fc->psc[16][2],fc->stencil.fail,fc->stencil.depth_fail,fc->stencil.pass);
     }
     for (unsigned a=0;a<PS_TOP && a<nps;a++) {
         unsigned b=a; for (unsigned k=a+1;k<nps;k++) if (ps[k].n>ps[b].n) b=k;
@@ -2663,7 +2664,7 @@ static xv_fshader_t *fragment_for_ps_mode(vs_slot_t *v, int entry, unsigned blen
       replace_blend_enabled() && replace_blend_eligible(blend)); }
 static xv_fshader_t *fragment_for_ps(vs_slot_t *v, int entry, unsigned blend)
 { return fragment_for_ps_mode(v, entry, blend, 0); }
-/* XV_ALPHA_ZERO (default 1): a failed alpha test writes a zero source instead of discarding, through the
+/* XV_ALPHA_ZERO (opt-in, default 0): a failed alpha test writes a zero source instead of discarding, through the
  * `_az` programs (tools/specialize_ps_alphazero.py). PowerVR runs any program with discard as punch-through:
  * every depth-passing fragment is shaded before visibility resolves and the tile pipeline waits on it (the a10
  * bridge's unlit specular pass: 33 draws, zero surviving samples, ~20 ms of GPU per frame). Identical output only
@@ -2673,7 +2674,7 @@ static int alpha_zero_enabled(void)
 {
     static int enabled = -1;
     if (enabled < 0) {
-        const char *e = getenv("XV_ALPHA_ZERO"); enabled = !e || atoi(e) != 0;
+        const char *e = getenv("XV_ALPHA_ZERO"); enabled = e && atoi(e) != 0;   /* opt-in: perf160 a10 early part got WORSE (GPU completion 114-126 -> 128-160 ms): the pass's cost is the shading, not punch-through */
         const char *o = getenv("XV_SHADER_OVERRIDE"); if (o && atoi(o)) enabled = 0;
         const char *n = getenv("XV_NO_ATEST"); if (n && atoi(n)) enabled = 0;
         XV_LOG("alpha-zero variants (no discard where a zero source is a no-op): %s\n", enabled ? "on" : "off");
