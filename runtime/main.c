@@ -1696,6 +1696,7 @@ static int xv_pump_retire(void)
 #endif
             xv_d3d_visibility_complete(g_packets[q].mesh);
         }
+        xv_d3d_frag_census_complete(g_packets[q].mesh);
         xv_d3d_check_geometry(g_packets[q].mesh);
     }
     if (g_packets[q].visibility_completed) {

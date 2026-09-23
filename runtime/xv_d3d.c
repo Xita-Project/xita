@@ -239,6 +239,7 @@ typedef struct {
     int visibility_gpu_ready;
     unsigned visibility_back_area;
     unsigned visibility_draw_slot; /* pump-owned cached GXM state */
+    uint8_t census;                /* XV_FRAG_CENSUS frame: per-command counters armed */
 } cmdlist_t;
 
 /* ----------------------------------------------------------------------------------
@@ -299,8 +300,14 @@ static xv_visibility_result g_visibility_results[XV_VISIBILITY_IDS];
 /* SGX543MP4 writes one counter array per GPU core. Each frame owns its buffer
  * until the pump retires its GPU notification, just like indices/vertices. */
 #define XV_VISIBILITY_GPU_CORES 4u
-#define XV_VISIBILITY_STRIDE (XV_VISIBILITY_PER_FRAME * sizeof(uint32_t))
-#define XV_VISIBILITY_WORDS (XV_VISIBILITY_PER_FRAME * XV_VISIBILITY_GPU_CORES)
+/* XV_FRAG_CENSUS=<n> (diagnostic, default 0): every n-th frame, each command without a game
+ * query gets its own counter (index 512 + command) so final completion reports the depth-passing
+ * samples of every draw and clear. Enabling it widens each core's array to 2048 words. */
+#define XV_CENSUS_CORE_WORDS 2048u
+static unsigned g_vis_core_words = XV_VISIBILITY_PER_FRAME;
+static int g_census_period = -1;
+#define XV_VISIBILITY_STRIDE (g_vis_core_words * sizeof(uint32_t))
+#define XV_VISIBILITY_WORDS (g_vis_core_words * XV_VISIBILITY_GPU_CORES)
 static uint32_t *g_visibility_memory;
 static SceUID g_visibility_uid = -1;
 #include "xv_visibility_placement.h"
@@ -2291,8 +2298,13 @@ void xv_d3d_Swap(void)
 static void visibility_draw_state(SceGxmContext *ctx, cmdlist_t *l, const cmd_t *c)
 {
     unsigned slot=c && c->kind==0 && l->visibility_gpu_ready ? c->visibility : 0;
+    if (!slot && c && l->census && l->visibility_gpu_ready) {
+        unsigned i=(unsigned)(c-l->cmds);
+        if (i<XV_CENSUS_CORE_WORDS-XV_VISIBILITY_PER_FRAME) slot=XV_VISIBILITY_PER_FRAME+i+1;
+    }
     if (slot == l->visibility_draw_slot) return;
     if (slot) {
+        if (slot<=XV_VISIBILITY_PER_FRAME)
         l->visibility[slot-1].render_area=c->pass && c->pass<=XV_RT_SLOTS ?
             g_rt[c->pass-1].w*g_rt[c->pass-1].h : l->visibility_back_area;
         sceGxmSetFrontVisibilityTestIndex(ctx,slot-1);
@@ -2313,7 +2325,14 @@ void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, u
     l->visibility_back_area=w*h;
     l->visibility_draw_slot=UINT32_MAX;
     visibility_draw_state(ctx,l,NULL);
-    if (!l->nvisibility) return;
+    if (g_census_period < 0) {
+        const char *e=getenv("XV_FRAG_CENSUS"); g_census_period=e?atoi(e):0;
+        if (g_census_period < 0) g_census_period=0;
+        if (g_census_period) g_vis_core_words=XV_CENSUS_CORE_WORDS;
+        XV_LOG("fragment census: %s (every %d frames)\n", g_census_period?"on":"off", g_census_period);
+    }
+    l->census=g_census_period && frame>600 && frame%(unsigned)g_census_period==0;
+    if (!l->nvisibility && !l->census) return;
     uint32_t submitted_us=xk_os_monotonic_us?(uint32_t)xk_os_monotonic_us():0;
     for (unsigned i=0;i<l->nvisibility;i++)
         if (l->visibility[i].serial)
@@ -2334,7 +2353,9 @@ void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, u
     }
     if (!g_visibility_memory) return;
     uint32_t *p=g_visibility_memory+(frame % XV_NUM_LISTS)*XV_VISIBILITY_WORDS;
-    memset(p,0,XV_VISIBILITY_WORDS*sizeof *p);
+    if (l->census) memset(p,0,XV_VISIBILITY_WORDS*sizeof *p);
+    else for (unsigned core=0;core<XV_VISIBILITY_GPU_CORES;core++)
+        memset(p+core*g_vis_core_words,0,XV_VISIBILITY_PER_FRAME*sizeof *p);
     int err=sceGxmSetVisibilityBuffer(ctx,p,XV_VISIBILITY_STRIDE);
     l->visibility_gpu_ready=err >= 0;
     sceGxmSetFrontVisibilityTestOp(ctx,SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
@@ -2356,7 +2377,7 @@ void xv_d3d_visibility_complete(uint32_t frame)
         uint64_t total=0;
         if (l->visibility_gpu_ready && p)
             for (unsigned core=0;core<XV_VISIBILITY_GPU_CORES;core++)
-                total+=p[core*XV_VISIBILITY_PER_FRAME+i];
+                total+=p[core*g_vis_core_words+i];
         uint32_t pixels=xv_visibility_scale(total,l->visibility[i].guest_area,l->visibility[i].render_area);
         xv_visibility_publish_timed(g_visibility_results,l->visibility[i].result_slot,l->visibility[i].serial,pixels,completed_us);
         static unsigned shown; static int log_all=-1;
@@ -2367,6 +2388,66 @@ void xv_d3d_visibility_complete(uint32_t frame)
     }
     if (l->nvisibility && xk_os_scheduler_notify) xk_os_scheduler_notify();
     XV_VP_COMPLETE(l,frame);
+}
+
+/* Final completion of a census frame: depth-passing samples per command (all four cores). The
+ * counters measure coverage, not GPU time; blended and discarding draws are what they rank. */
+void xv_d3d_frag_census_complete(uint32_t frame)
+{
+    cmdlist_t *l=g_lists[frame % XV_NUM_LISTS];
+    if (!l->census) return;
+    l->census=0;
+    if (!l->visibility_gpu_ready || !g_visibility_memory) return;
+    const uint32_t *p=g_visibility_memory+(frame % XV_NUM_LISTS)*XV_VISIBILITY_WORDS;
+    enum { TOP=24, PS_TOP=12 };
+    struct { uint32_t n; unsigned i; } top[TOP]; unsigned ntop=0;
+    struct { int16_t entry; uint8_t kind, blend; uint32_t n, draws; } ps[64]; unsigned nps=0;
+    uint64_t total=0, clears=0, back=0, rt=0, opaque=0, blended=0, nocolor=0, tail=0, tail_blended=0, queries=0;
+    unsigned last_query=0, draws=0, empty=0, n=l->ncmds;
+    for (unsigned i=0;i<n;i++) if (l->cmds[i].kind==0 && l->cmds[i].visibility) last_query=i+1;
+    if (n>XV_CENSUS_CORE_WORDS-XV_VISIBILITY_PER_FRAME) n=XV_CENSUS_CORE_WORDS-XV_VISIBILITY_PER_FRAME;
+    for (unsigned i=0;i<n;i++) {
+        const cmd_t *c=&l->cmds[i];
+        if (c->kind==2) continue;
+        uint32_t v=0;
+        if (c->kind==0 && c->visibility) {
+            for (unsigned core=0;core<XV_VISIBILITY_GPU_CORES;core++) v+=p[core*g_vis_core_words+c->visibility-1];
+            queries+=v; continue;
+        }
+        for (unsigned core=0;core<XV_VISIBILITY_GPU_CORES;core++) v+=p[core*g_vis_core_words+XV_VISIBILITY_PER_FRAME+i];
+        total+=v;
+        if (c->kind==1) { clears+=v; continue; }
+        draws++; if (!v) empty++;
+        if (c->pass) rt+=v; else back+=v;
+        int blend_on=c->blend!=BLEND_OPAQUE && c->blend<BLEND_NOCOLOR && g_blend_combo[c->blend].mask;
+        if (c->blend==BLEND_NOCOLOR || !g_blend_combo[c->blend].mask) nocolor+=v; else if (blend_on) blended+=v; else opaque+=v;
+        if (i+1>last_query && last_query) { tail+=v; if (blend_on) tail_blended+=v; }
+        unsigned k=0; while (k<nps && !(ps[k].entry==c->ps_entry && ps[k].kind==c->fs_kind && ps[k].blend==c->blend)) k++;
+        if (k==nps && nps<64) { ps[nps].entry=c->ps_entry; ps[nps].kind=c->fs_kind; ps[nps].blend=c->blend; ps[nps].n=0; ps[nps].draws=0; nps++; }
+        if (k<nps) { ps[k].n+=v; ps[k].draws++; }
+        unsigned pos=ntop<TOP?ntop++:TOP;
+        if (pos==TOP) { if (v<=top[TOP-1].n) continue; pos=TOP-1; }
+        while (pos>0 && top[pos-1].n<v) { top[pos]=top[pos-1]; pos--; } /* top[TOP] never read: pos<TOP here */
+        top[pos].n=v; top[pos].i=i;
+    }
+    unsigned area=l->visibility_back_area?l->visibility_back_area:1;
+    XV_LOG("[frag-census] frame %u: %u cmds (%u draws, %u empty) last query cmd %u; samples %llu = %.1f screens (back %.1f rt %.1f clears %.1f); opaque %.1f blended %.1f no-color %.1f; after the last query %.1f (blended %.1f); query quads %.2f\n",
+        frame,l->ncmds,draws,empty,last_query,(unsigned long long)total,(double)total/area,(double)back/area,(double)rt/area,(double)clears/area,
+        (double)opaque/area,(double)blended/area,(double)nocolor/area,(double)tail/area,(double)tail_blended/area,(double)queries/area);
+    for (unsigned t=0;t<ntop;t++) {
+        const cmd_t *c=&l->cmds[top[t].i];
+        unsigned tw=c->ntex?sceGxmTextureGetWidth(&c->tex[0]):0, th=c->ntex?sceGxmTextureGetHeight(&c->tex[0]):0;
+        XV_LOG("[frag-census]  #%u cmd %u %.2f screens pass %u blend %u(%u/%u m%X) ps %s kind %u zf %u zw %u idx %u tex %u t0 %ux%u fmt %08X atest %05X prepared %u\n",
+            t,top[t].i,(double)top[t].n/area,c->pass,c->blend,g_blend_combo[c->blend].src,g_blend_combo[c->blend].dst,g_blend_combo[c->blend].mask,
+            c->ps_entry>=0?xv_ps_table[c->ps_entry].gxp:"-",c->fs_kind,c->depth_func_idx,c->depth_write,c->index_count,c->ntex,tw,th,
+            c->ntex?(unsigned)sceGxmTextureGetFormat(&c->tex[0]):0u,c->atest&0x1FFFFu,c->depth_prepared);
+    }
+    for (unsigned a=0;a<PS_TOP && a<nps;a++) {
+        unsigned b=a; for (unsigned k=a+1;k<nps;k++) if (ps[k].n>ps[b].n) b=k;
+        typeof(ps[0]) tmp=ps[a]; ps[a]=ps[b]; ps[b]=tmp;
+        XV_LOG("[frag-census]  program %s kind %u blend %u: %.2f screens over %u draws\n",
+            ps[a].entry>=0?xv_ps_table[ps[a].entry].gxp:"-",ps[a].kind,ps[a].blend,(double)ps[a].n/area,ps[a].draws);
+    }
 }
 
 #if XV_QUERY_PREFIX_PUBLISH

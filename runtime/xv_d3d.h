@@ -147,6 +147,7 @@ int xv_d3d_query_boundary_prepare(uint32_t frame,int enabled);
 void xv_d3d_query_boundary_arm(uint32_t frame,const SceGxmNotification *fence);
 void xv_d3d_query_boundary_report(void);
 #endif
+void xv_d3d_frag_census_complete(uint32_t frame); /* XV_FRAG_CENSUS: after final completion */
 void xv_d3d_visibility_complete(uint32_t frame); /* after query fragments complete; storage stays owned until final completion */
 
 /* Legacy replay runs inside the caller's scene. RTT replay starts outside a
