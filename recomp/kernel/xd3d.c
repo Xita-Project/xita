@@ -754,10 +754,28 @@ int xd3d_r_visibility_wait(uint32_t id,uint32_t timeout_us,uint32_t *age,uint32_
 static unsigned visibility_retry_id, visibility_retry_frame, visibility_retries;
 static xk_thread *visibility_retry_thread;
 static int visibility_retry_valid;
+/* XV_FLARE_TEST_STRIDE=<n> (default 1 = every frame): issue each lens-flare visibility test (the n-th test of a frame
+ * maps to the same flare each frame) only on every n-th frame, dropping the whole Begin/quad/End for the skipped ones.
+ * Safe for the read-back: xv_visibility_read returns the last completed pixels once completed == issued, so a skipped
+ * frame reads the previous result with no wait. 181 tests x ~40 us of HLE per frame in the a10 cinematic. */
+static unsigned vis_stride_frame_seq, vis_stride_last_frame; static int vis_stride_skip, vis_stride = -1; static unsigned vis_stride_skipped, vis_stride_issued;
+static int vis_stride_decide(void)
+{
+    if (vis_stride < 0) { const char *e = getenv("XV_FLARE_TEST_STRIDE"); vis_stride = e ? atoi(e) : 1; if (vis_stride < 1) vis_stride = 1; }
+    if (vis_stride == 1) return 0;
+    unsigned f = xd3d_frame(); if (f != vis_stride_last_frame) { vis_stride_last_frame = f; vis_stride_frame_seq = 0;
+        if (f % 60u == 0 && (vis_stride_issued || vis_stride_skipped)) { D3DLOG("[flare-stride] stride %d: %u tests issued / %u skipped since the last report\n", vis_stride, vis_stride_issued, vis_stride_skipped); vis_stride_issued = vis_stride_skipped = 0; } }
+    unsigned n = vis_stride_frame_seq++;
+    return ((n + f) % (unsigned)vis_stride) != 0;
+}
 void xv_hle_D3DDevice_BeginVisibilityTest(xctx *c)
-{ XD3D_COUNT("D3DDevice_BeginVisibilityTest"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_QUERY); xd3d_r_visibility_begin(xd3d_state.vp_w,xd3d_state.vp_h); c->r[0]=0; X_RET(0); }
+{ XD3D_COUNT("D3DDevice_BeginVisibilityTest"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_QUERY);
+  if ((vis_stride_skip = vis_stride_decide())) { vis_stride_skipped++; c->r[0]=0; X_RET(0); return; } vis_stride_issued++;
+  xd3d_r_visibility_begin(xd3d_state.vp_w,xd3d_state.vp_h); c->r[0]=0; X_RET(0); }
 void xv_hle_D3DDevice_EndVisibilityTest(xctx *c)
-{ XD3D_COUNT("D3DDevice_EndVisibilityTest"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_QUERY); visibility_retry_valid=0; c->r[0]=xd3d_r_visibility_end(X_ARG(0)); X_RET(1); }
+{ XD3D_COUNT("D3DDevice_EndVisibilityTest"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_QUERY); visibility_retry_valid=0;
+  if (vis_stride_skip) { vis_stride_skip = 0; c->r[0]=0; X_RET(1); return; }
+  c->r[0]=xd3d_r_visibility_end(X_ARG(0)); X_RET(1); }
 void xv_hle_D3DDevice_GetVisibilityTestResult(xctx *c)
 {
     XD3D_COUNT("D3DDevice_GetVisibilityTestResult");
@@ -862,6 +880,7 @@ void xv_hle_D3DDevice_Begin(xctx *c)
     } }
     g_im.prim = X_ARG(0); g_im.verts = 0; g_im_passthrough = 0; g_im.begins_in_frame++; c->r[0] = 0; X_RET(1);
 }
+/* the skipped visibility test's quad: Begin/SetVertexData4f still record vertices (cheap); End drops the draw */
 void xv_hle_D3DDevice_End(xctx *c)
 { XD3D_COUNT("D3DDevice_End");
     g_dev.draws++; g_dev.draws_total++;
@@ -879,7 +898,7 @@ void xv_hle_D3DDevice_End(xctx *c)
             }
         }
     }
-    xd3d_r_im_end(g_im.prim, g_im_v, g_im.verts);
+    if (!vis_stride_skip) xd3d_r_im_end(g_im.prim, g_im_v, g_im.verts);   /* a skipped visibility test draws nothing */
     g_im.verts = 0;
     c->r[0] = 0; X_RET(0);
 }
