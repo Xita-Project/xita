@@ -77,6 +77,13 @@ static uint32_t learn_gap_us = 8000; static uint32_t *learn_hash; static uint64_
 static unsigned depth, bound, frames_entered, full_frames, fiber_switches, aliases_max, mirrors_in_scene;
 static uint64_t prepare_us;   /* owner-side copy-in (xv_render_view_prepare) */
 static unsigned copy_runs;   /* mode 3/4: contiguous live-page runs copied per window */
+/* Early snapshot (XV_RENDER_VIEW_EARLY=1, all mode >= 3): two shadow banks of shadow_pages/2 slots. While the owner waits
+ * for scene N (tick N+1 complete) it copies the next snapshot into the idle bank; after the join it re-copies the few
+ * pages scene N's merge wrote back, copies slots the listing appended, and swaps banks. The copy leaves the frame's
+ * serialized path (owner joined, helper idle) for the owner's wait. */
+static unsigned cur_bank, bank_pages; static int early_mode;
+static int early_valid; static unsigned early_bank, early_slots, early_copies, early_fallbacks, early_recopied; static uint64_t early_us;
+static uint8_t *merged_slot;   /* [shadow_pages] slots scene N's merge copied back into live */
 #define ASSIST_RUNS_MAX 1024
 #ifndef __vita__
 #define ASSIST_MAX 1
@@ -123,7 +130,7 @@ static void learn_page(uint32_t page)
         return;
     }
     if (off >= phys_limit || slot_of[page] != 0xFFFFu) return;
-    if (slots_used >= L.shadow_pages) { slots_overflow++; return; }
+    if (slots_used >= (bank_pages ? bank_pages : L.shadow_pages)) { slots_overflow++; return; }
     slot_of[page] = (uint16_t)slots_used; slot_page[slots_used++] = page;
 }
 static void bench(void)
@@ -186,6 +193,7 @@ void xv_render_view_configure(void)
          * reference under real overlap and the scene looped forever in A26B0). Costs one copy-in of the listed pages per
          * frame; learning passes are skipped. */
         const char *e = getenv("XV_RENDER_VIEW_ALL"); int all = e ? atoi(e) : 0; all_mode = all;
+            { const char *ee = getenv("XV_RENDER_VIEW_EARLY"); early_mode = ee && atoi(ee) && all >= 3 && L.shadow_pages >= 256; if (early_mode) { bank_pages = L.shadow_pages / 2; merged_slot = calloc(L.shadow_pages, 1); if (!merged_slot) { early_mode = 0; bank_pages = 0; } XK_LOG("[render-view] early snapshot: %s, 2 banks of %u slots\n", early_mode ? "on" : "off (alloc)", bank_pages); } }
         { const char *w = getenv("XV_RENDER_VIEW_ARRAYS"); if (w && *w) array_words = w; }
         if (all > 0) {
             unsigned n = phys_limit / XK_PAGE; if (n > L.phys_pages) n = L.phys_pages;
@@ -219,11 +227,12 @@ void xv_render_view_present(unsigned frame)
            learn_done, learn_passes, frame, changed, slots_used - before, slots_used, slots_overflow, img_listed_n - ibefore, img_listed_n,
            img_lo == UINT32_MAX ? 0 : img_lo, L.image_pages, (unsigned long long)learn_us);
 }
-static inline uint8_t *shadow_of(unsigned s) { return g_xram + L.shadow_off + (size_t)s * XK_PAGE; }
+static inline uint8_t *shadow_bank(unsigned b, unsigned s) { return g_xram + L.shadow_off + ((size_t)b * bank_pages + s) * XK_PAGE; }
+static inline uint8_t *shadow_of(unsigned s) { return shadow_bank(cur_bank, s); }
 static inline uint8_t *live_of_slot(unsigned s) { return g_xram + (size_t)slot_page[s] * XK_PAGE; }
 static inline uint8_t *copy_of_img(uint32_t ip) { return g_xram + L.image_copy_off + (size_t)ip * XK_PAGE; }
 static inline uint8_t *live_of_img(uint32_t ip) { return g_xram + L.image_off + (size_t)ip * XK_PAGE; }
-static inline uint8_t *pristine_slot(unsigned s) { return pristine + (size_t)s * XK_PAGE; }
+static inline uint8_t *pristine_slot(unsigned s) { return pristine + ((size_t)cur_bank * bank_pages + s) * XK_PAGE; }
 static inline uint8_t *pristine_img(uint32_t ip) { return pristine + ((size_t)L.shadow_pages + ip) * XK_PAGE; }
 
 /* Halo's cache-file request table (global 2E2D24 -> +34: entries; the spin at 32B00 polls it): is it
@@ -238,7 +247,7 @@ static void retarget_in_place(void)
 {
     retargets_n = 0;
     for (unsigned s = 0; s < slots_used; ++s) {
-        uint32_t live = slot_page[s] * XK_PAGE, view = L.shadow_off + s * XK_PAGE, vps[8];
+        uint32_t live = slot_page[s] * XK_PAGE, view = L.shadow_off + (cur_bank * bank_pages + s) * XK_PAGE, vps[8];
         unsigned n = xk_mem_page_aliases(live, vps, 8);
         if (n > aliases_max) aliases_max = n;
         for (unsigned i = 0; i < n; ++i) {
@@ -417,11 +426,50 @@ static void copy_in(int from_owner)
     }
     bytes_in += ((uint64_t)slots_used + img_listed_n) * XK_PAGE;
 }
+/* Owner, at the dispatch join, tick N+1 complete, scene N possibly still bound on bank cur_bank: copy the listed slots
+ * into the other bank. Nothing here touches the slot listing, full_frame or the bound bank (the helper's merge reads
+ * them concurrently). */
+void xv_render_view_early_copy(void)
+{
+    if (!early_mode || !ready || early_valid || prepared || img_listed_n || !slots_used || slots_used > bank_pages) return;
+    uint64_t t0 = xk_os_monotonic_us();
+    unsigned b = cur_bank ^ 1u, n = slots_used;
+    for (unsigned s = 0; s < n; ) {
+        unsigned e = s + 1;
+        while (e < n && slot_page[e] == slot_page[e - 1] + 1u) e++;
+        view_copy(shadow_bank(b, s), live_of_slot(s), (size_t)(e - s) * XK_PAGE);
+        s = e;
+    }
+    early_bank = b; early_slots = n; early_valid = 1; early_copies++;
+    early_us += xk_os_monotonic_us() - t0;
+}
+static int early_finish(void)   /* after the join: 1 = the early bank is now the snapshot */
+{
+    if (!early_valid) return 0;
+    early_valid = 0;
+    uint64_t t0 = xk_os_monotonic_us();
+    if (all_mode >= 3) list_object_pool();
+    uint64_t t1 = xk_os_monotonic_us(); prep_list_us += t1 - t0;
+    if (slots_used > bank_pages || slots_overflow) { early_fallbacks++; memset(merged_slot, 0, L.shadow_pages); return 0; }
+    full_frame = active_frames < 30 || (full_interval && active_frames % full_interval == 0);
+    active_frames++;
+    cur_bank = early_bank;
+    for (unsigned s = 0; s < early_slots; ++s) if (merged_slot[s]) { memcpy(shadow_of(s), live_of_slot(s), XK_PAGE); merged_slot[s] = 0; early_recopied++; }
+    for (unsigned s = early_slots; s < slots_used; ++s) memcpy(shadow_of(s), live_of_slot(s), XK_PAGE);   /* appended by the listing */
+    uint64_t t2 = xk_os_monotonic_us(); prep_copy_us += t2 - t1;
+    if (full_frame) view_copy(pristine_slot(0), shadow_of(0), (size_t)slots_used * XK_PAGE);
+    else for (unsigned s = 0; s < slots_used; ++s) if (sw_slot[s]) memcpy(pristine_slot(s), shadow_of(s), XK_PAGE);
+    prep_pristine_us += xk_os_monotonic_us() - t2;
+    bytes_in += (uint64_t)slots_used * XK_PAGE;
+    return 1;
+}
 void xv_render_view_prepare(void)
 {
     if (!ready || depth || bound || prepared) return;
     if (!learn_done && !all_mode) return;
-    uint64_t t0 = xk_os_monotonic_us(); copy_in(1); prepare_us += xk_os_monotonic_us() - t0; prepared = 1;
+    uint64_t t0 = xk_os_monotonic_us();
+    if (!early_finish()) { if (merged_slot) memset(merged_slot, 0, L.shadow_pages); copy_in(1); }
+    prepare_us += xk_os_monotonic_us() - t0; prepared = 1;
 }
 void xv_render_view_enter(unsigned *scope, void *context)
 {
@@ -467,6 +515,7 @@ static void unbind_merge(void)
     for (unsigned s = 0; s < slots_used; ++s) {
         if (!full_frame && !sw_slot[s]) continue;
         if (!merge_page(shadow_of(s), pristine_slot(s), live_of_slot(s), slot_page[s])) continue;
+        if (merged_slot) merged_slot[s] = 1;   /* early snapshot: re-copy this page from live after the join */
         if (!sw_slot[s]) { sw_slot[s] = 1; sw_slots++; if (active_frames > 30) sw_found_late++; }
     }
     for (unsigned i = 0; i < img_listed_n; ++i) {
@@ -507,6 +556,8 @@ void xv_render_view_report(unsigned frames)
            frames_entered ? (double)enter_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)bytes_in / frames_entered / 1024.0 : 0.0, frames_entered ? (double)prepare_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_list_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_copy_us / frames_entered / 1000.0 : 0.0, frames_entered ? (double)prep_pristine_us / frames_entered / 1000.0 : 0.0,
            frames_entered ? (double)leave_us / frames_entered / 1000.0 : 0.0, (unsigned long long)words_merged,
            sw_slots, sw_imgs, sw_found_late, retargets_last, image_entries, retargets_overflow, fiber_switches, mirrors_in_scene, aliases_max);
+    if (early_copies || early_fallbacks) XK_LOG("[render-view] early snapshot %u per window (%.2f ms/frame hidden in the owner's wait), %u fallbacks, %u pages re-copied after the join\n", early_copies, early_copies ? (double)early_us / early_copies / 1000.0 : 0.0, early_fallbacks, early_recopied);
+    early_copies = early_fallbacks = early_recopied = 0; early_us = 0;
     if (copy_runs) XK_LOG("[render-view] copy runs %u per window (%.1f per frame; DMA %d, clib %d, split copies %u)\n", copy_runs, frames_entered ? (double)copy_runs / frames_entered : 0.0, dma_mode, clib_copy,
 #ifdef __vita__
         assist_splits);

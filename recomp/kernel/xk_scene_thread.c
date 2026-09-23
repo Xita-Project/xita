@@ -386,7 +386,7 @@ int xv_scene_thread_run(void *context)
     if (!configured) configure();
     if (!enabled) return 0;
     if (sceKernelGetThreadId() == helper) return 0;             /* the helper's own entry: run the body */
-    if (overlap && in_flight) join(&joins_dispatch);             /* backpressure: scene N must finish before scene N+1 */
+    if (overlap && in_flight) { if (in_flight_overlapped) { extern void xv_render_view_early_copy(void) __attribute__((weak)); if (xv_render_view_early_copy) xv_render_view_early_copy(); } join(&joins_dispatch); }   /* early snapshot: copy tick N+1's pages while scene N finishes */             /* backpressure: scene N must finish before scene N+1 */
     if (depth) { declined_nested++; return 0; }                  /* recursive scene entry on the owner */
     depth = 1;
     xctx *c = context;
@@ -683,7 +683,7 @@ int xv_scene_thread_run(void *context)
     if (!configured) configure();
     if (!enabled) return 0;
     if (pthread_equal(pthread_self(), helper)) return 0;         /* the helper's own entry: run the body */
-    if (overlap && in_flight) join(&joins_dispatch);             /* backpressure: scene N must finish before scene N+1 */
+    if (overlap && in_flight) { if (in_flight_overlapped) { extern void xv_render_view_early_copy(void) __attribute__((weak)); if (xv_render_view_early_copy) xv_render_view_early_copy(); } join(&joins_dispatch); }   /* early snapshot: copy tick N+1's pages while scene N finishes */             /* backpressure: scene N must finish before scene N+1 */
     if (depth) { declined_nested++; return 0; }                  /* recursive scene entry on the owner */
     xctx *c = context;
     ctx = *c; scene_guest = xk_cur;
