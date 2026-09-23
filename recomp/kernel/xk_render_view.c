@@ -90,6 +90,7 @@ static uint8_t *merged_slot;   /* [shadow_pages] slots scene N's merge copied ba
 #define ASSIST_MAX 1
 #endif
 static uint64_t enter_us, leave_us, bytes_in, words_merged;
+static uint64_t leave_bind_us, leave_restore_us, leave_merge_us; static unsigned merged_pages_compared;   /* leave split for the report */
 /* Same-frame write conflicts (increment C): a word the scene changed (copy != pristine) whose live copy the tick also
  * changed meanwhile (live != pristine) to a different value. XV_RENDER_VIEW_CONFLICT=1 lets the scene's value
  * win (the original merge), 0 (default) keeps the tick's newer value; either way the sites are counted and the top ones reported. */
@@ -537,9 +538,12 @@ static int merge_page(const uint8_t *copy, const uint8_t *pre, uint8_t *live, ui
 }
 static void unbind_merge(void)
 {
+    uint64_t t0 = xk_os_monotonic_us();
     restore_in_place(); bound = 0;
+    uint64_t t1 = xk_os_monotonic_us(); leave_restore_us += t1 - t0;
     for (unsigned s = 0; s < slots_used; ++s) {
         if (!full_frame && !sw_slot[s]) continue;
+        merged_pages_compared++;
         if (!merge_page(shadow_of(s), pristine_slot(s), live_of_slot(s), slot_page[s])) continue;
         if (merged_slot) merged_slot[s] = 1;   /* early snapshot: re-copy this page from live after the join */
         if (!sw_slot[s]) { sw_slot[s] = 1; sw_slots++; if (active_frames > 30) sw_found_late++; }
@@ -550,13 +554,14 @@ static void unbind_merge(void)
         if (!merge_page(copy_of_img(ip), pristine_img(ip), live_of_img(ip), (L.image_off >> 12) + ip)) continue;
         if (!sw_img[ip]) { sw_img[ip] = 1; sw_imgs++; if (active_frames > 30) sw_found_late++; }
     }
+    leave_merge_us += xk_os_monotonic_us() - t1;
 }
 void xv_render_view_leave(unsigned *scope)
 {
     uint64_t t0 = xk_os_monotonic_us();
     if (!ready || !depth) { last_leave_us = t0; return; }
     if (--depth || !*scope) { last_leave_us = t0; return; }
-    if (bound) { if (thread_mode) xk_os_bind_page_table(g_xpt); unbind_merge(); }
+    if (bound) { uint64_t tb = xk_os_monotonic_us(); if (thread_mode) xk_os_bind_page_table(g_xpt); leave_bind_us += xk_os_monotonic_us() - tb; unbind_merge(); }
     last_leave_us = xk_os_monotonic_us();
     leave_us += last_leave_us - t0;
 }
@@ -592,6 +597,10 @@ void xv_render_view_report(unsigned frames)
         0u, 0u);
 #endif
     copy_runs = 0;
+    if (frames_entered) XK_LOG("[render-view] leave split per frame: bind %.3f restore %.3f merge %.3f ms, %.1f pages compared (full frames included)\n",
+        (double)leave_bind_us / frames_entered / 1000.0, (double)leave_restore_us / frames_entered / 1000.0, (double)leave_merge_us / frames_entered / 1000.0,
+        (double)merged_pages_compared / frames_entered);
+    leave_bind_us = leave_restore_us = leave_merge_us = 0; merged_pages_compared = 0;
     frames_entered = full_frames = 0; enter_us = leave_us = bytes_in = words_merged = 0; fiber_switches = mirrors_in_scene = 0; prepare_us = prep_list_us = prep_copy_us = prep_pristine_us = 0;   /* (was never reset: perf109 "owner-side 31 -> 68 ms" grew per window) */
     if (conflicts || conflicts_same_value) {
         char line[400]; int ln = snprintf(line, sizeof line, "[render-view-conflicts] %u frames: %llu conflicting words (%llu same-value), policy %s; sites (phys-page:word n live/scene):",
