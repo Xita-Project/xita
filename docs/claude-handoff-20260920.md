@@ -1713,3 +1713,20 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   timed; read `[tick-phases]` for the tick split (object update vs the rest) - the only side with a possible cheap
   lever left if one callee dominates and has a native path already (object jobs engage 1 pass/60 frames here).
 - Pi yp3 (trap bail-out build): 12 min clean at 21:33, no ABANDON yet (the yp2 trap came at ~25 min).
+- perf124 (trap bail-out + FA920 timers) 8 min clean, 78-90 ms. Tick: FA920 55 = 109760 x2/frame (the 30 Hz sim tick
+  runs 2-3 times per 85 ms frame; at 50 ms it would run 1.5x, so the tick side SHRINKS with the frame: the scene is the
+  one target). Per sim tick 27 ms = 900E0 19 + 14A162 7 + rest.
+- perf125 (parent/callee timers d0c961b, self time): scene 5D990 incl 72-75, SELF 13.3-13.8 (direct HLE setters and
+  pointer calls, untimed); children: 60560 10.4 = 62240 = 63C00 8.75 (181/frame, 48 us each: the lens-flare
+  VISIBILITY TESTS, BeginVisibilityTest + Begin + 4x SetVertexData4f + End + EndVisibilityTest per flare, 482 lines,
+  124 x87 ops); 54010 8.9 + 5.5 via 54740 = 14.4 (the ordered-pass callback dispatcher, callbacks through pointers so
+  untimed: mostly draw HLE); 5B760 8.6 + 5B710 5.9 = 14.5 (per-model chain, 17 models/frame, 5B4A0 self 5.7 incl. its
+  pointer calls into A26B0/draw HLE; D8C40 self 2.0); 539C0 6.0 (self 4.5); 92890 5.3 = 602F0 4.3 (5/frame); 93C00 3.3 =
+  544D0 3.2; 28320 3.0-3.6 (27F40 1.8-2.7). Flat: ten chunks of 3-14 ms, no 30 ms function.
+  REVISED ROADMAP (days, not "weeks" in the vague sense): (1) flare visibility tests 63C00: native rewrite of one
+  482-line function or batch the 181 immediate quads + queries in the HLE (-6 to -9 ms, ~1 day); (2) the scene body's
+  own 14 ms + the callback draw paths: HLE setter/dispatch cost, measure with XV_HLE_TIMING=1 on this build first
+  (-5 ms plausible, 1-2 days); (3) draw HLE stages indices 3.9/textures 2.9/program 1.8/state 1.6 (-3 to -5, 1-2 days);
+  (4) 539C0 self 4.5, 602F0 4.3, 544D0 3.2, D8C40 2.0 natives (-8 to -10, several days). (1)-(3) land near 60 ms
+  (~16 fps); (4) is what 50 ms needs. Xk query-reuse ([query-reuse] declines) is the COLLISION world query, unrelated
+  to the D3D visibility tests.
