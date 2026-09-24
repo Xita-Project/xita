@@ -797,10 +797,17 @@ pthread_t xv_owner_pthread_self(void)
     if (helper_valid && __atomic_load_n(&depth, __ATOMIC_ACQUIRE) && pthread_equal(me, helper)) return owner_alias;
     return me;
 }
+/* The helper's pthread stack, as on the Vita (xd3d_count's on-helper fast path; host builds with XV_HOST_HELPER_SP):
+ * the two scene-thread hook calls per HLE call return at once on the helper, so skipping them there is exact. */
+uintptr_t xv_scene_helper_sp_lo, xv_scene_helper_sp_hi;
 static void *helper_main(void *arg)
 {
     (void)arg;
     { extern void xv_host_thread_role(int) __attribute__((weak)); if (xv_host_thread_role) xv_host_thread_role(2); }   /* host profiler: this is the scene helper (recomp/host/sampler.c) */
+    { extern int pthread_getattr_np(pthread_t, pthread_attr_t *); pthread_attr_t at; void *base; size_t size;
+      if (!pthread_getattr_np(pthread_self(), &at)) {
+          if (!pthread_attr_getstack(&at, &base, &size)) { xv_scene_helper_sp_lo = (uintptr_t)base; xv_scene_helper_sp_hi = (uintptr_t)base + size; }
+          pthread_attr_destroy(&at); } }
     for (;;) {
         while (sem_wait(&go) < 0 && errno == EINTR) {}
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }

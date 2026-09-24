@@ -60,7 +60,7 @@ typedef struct {
     /* event flag / semaphore */
     unsigned bits; int count, max, waiters;
     /* memory block */
-    void *base; size_t size;
+    void *base; size_t size; int dmabuf;
 } shim_obj;
 static shim_obj g_obj[SHIM_OBJECTS];
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -275,16 +275,42 @@ int sceKernelPollSema(SceUID semaid, int signal)
 }
 
 /* ---- memory blocks ---- */
+/* XV_HOST_UNCACHED=<name>[,<name>...] (or 1 = xv_d3d_scratch): USER_RW_UNCACHE blocks with these names come from
+ * /dev/vcsm-cma (Raspberry Pi: a write-combined, uncached user mapping - loads go to DRAM, stores are buffered, like
+ * the Vita's uncached GPU-mapped memory), so the harness pays for loads from them. Falls back to ordinary memory. */
+#include <sys/ioctl.h>
+struct shim_vcsm_alloc { uint32_t size, num, cached, pad; uint8_t name[32]; int32_t handle; uint32_t vc_handle; uint64_t dma_addr; };
+#define SHIM_VCSM_ALLOC _IOR('J', 0x5A, struct shim_vcsm_alloc)
+static void *shim_uncached_alloc(const char *name, SceKernelMemBlockType type, size_t size, int *dmabuf)
+{
+    static const char *want; static int init, vcsm = -1;
+    if (!init) { init = 1; want = getenv("XV_HOST_UNCACHED"); if (want && !strcmp(want, "1")) want = "xv_d3d_scratch";
+                 if (want && *want && strcmp(want, "0")) vcsm = open("/dev/vcsm-cma", O_RDWR | O_CLOEXEC); }
+    if (vcsm < 0 || type != SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE || !name) return NULL;
+    size_t n = strlen(name); const char *p = want; int listed = 0;
+    while (*p) { const char *e = strchr(p, ','); size_t l = e ? (size_t)(e - p) : strlen(p); if (l == n && !strncmp(p, name, n)) listed = 1; p += l + (e ? 1 : 0); }
+    if (!listed) return NULL;
+    struct shim_vcsm_alloc a; memset(&a, 0, sizeof a); a.size = (uint32_t)((size + 4095) & ~(size_t)4095); a.num = 1;
+    snprintf((char *)a.name, sizeof a.name, "%s", name);
+    if (ioctl(vcsm, SHIM_VCSM_ALLOC, &a) < 0) { fprintf(stderr, "[shim] %s: vcsm-cma allocation of %zu bytes failed; cached memory\n", name, size); return NULL; }
+    void *m = mmap(NULL, a.size, PROT_READ | PROT_WRITE, MAP_SHARED, a.handle, 0);
+    if (m == MAP_FAILED) { close(a.handle); return NULL; }
+    *dmabuf = a.handle;
+    fprintf(stderr, "[shim] %s: %zu bytes of uncached (write-combined) vcsm-cma memory\n", name, size);
+    return m;
+}
 SceUID sceKernelAllocMemBlock(const char *name, SceKernelMemBlockType type, SceSize size, SceKernelAllocMemBlockOpt *opt)
 {
-    (void)name; (void)type; (void)opt;
+    (void)opt;
     if (!size) return (int)0x80020001;
-    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    int dmabuf = -1;
+    void *p = shim_uncached_alloc(name, type, size, &dmabuf);
+    if (!p) p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (p == MAP_FAILED) return (int)0x80020001;
     SceUID id = obj_new(OBJ_BLOCK);
     shim_obj *o = obj_get(id, OBJ_BLOCK);
-    if (!o) { munmap(p, size); return id; }
-    o->base = p; o->size = size;
+    if (!o) { munmap(p, size); if (dmabuf >= 0) close(dmabuf); return id; }
+    o->base = p; o->size = size; o->dmabuf = dmabuf;
     return id;
 }
 int sceKernelGetMemBlockBase(SceUID uid, void **base)
@@ -297,7 +323,8 @@ int sceKernelFreeMemBlock(SceUID uid)
 {
     shim_obj *o = obj_get(uid, OBJ_BLOCK);
     if (!o) return (int)0x80020001;
-    munmap(o->base, o->size);
+    munmap(o->base, o->dmabuf >= 0 ? (o->size + 4095) & ~(size_t)4095 : o->size);
+    if (o->dmabuf >= 0) { close(o->dmabuf); o->dmabuf = -1; }
     pthread_mutex_lock(&g_lock); o->kind = OBJ_FREE; pthread_mutex_unlock(&g_lock);
     return 0;
 }

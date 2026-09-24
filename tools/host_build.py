@@ -56,6 +56,9 @@ def main():
             if t.startswith('-D') or t.startswith('-I') or t.startswith('-std') or t.startswith('-f') or flags and flags[-1] == '-include':
                 flags.append(t)
         units[src] = flags
+    # xd3d_count's on-helper fast path (the Vita's stack-range check) on the host too: the scene-thread hooks return at
+    # once on the helper, so the Pi no longer pays two calls per HLE call that the Vita skips (xk_scene_thread.c sets the range)
+    if 'recomp/kernel/xd3d.c' in units: units['recomp/kernel/xd3d.c'] = units['recomp/kernel/xd3d.c'] + ['-DXV_HOST_HELPER_SP=1']
     kernel_flags = units.get('recomp/kernel/xk_object_jobs.c') or units.get('recomp/kernel/xk_mem.c') or []
     for h in HOST_EXTRA:
         if (stage / h).exists(): units[h] = [f for f in kernel_flags]
@@ -66,6 +69,7 @@ def main():
         if stale.exists(): stale.unlink()
         missing = [u for u in RUNTIME_UNITS if u not in units]
         if missing: print('--runtime: not in the dry run:', missing); return 1
+        if 'recomp/host/runtime_stubs.c' in units: units['recomp/host/runtime_stubs.c'] = units['recomp/host/runtime_stubs.c'] + ['-DXV_HOST_RUNTIME=1']
         units[RUNTIME_SHIM] = list(units['runtime/xv_d3d.c'])   # same struct layouts (XV_PACKED_VERTEX_LAYOUT ...) as the bridge
         inc = ['-idirafter', str(Path(a.vitasdk) / 'arm-vita-eabi' / 'include')]
         if arm: inc += ['-include', 'recomp/host/neon_x4_compat.h']   # GCC < 14 lacks AArch32 vld1q_u8_x4 (the Vita's GCC 15 has it)
