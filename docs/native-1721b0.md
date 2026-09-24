@@ -19,8 +19,9 @@ cast `f_00088E90`. That cast is native in `recomp/kernel/xk_native_1721b0.c`:
 | `f_00086E20` | point in the surface's edge ring (2D cross products), the surface's bit in the caller's mask |
 
 The 88E90 hook serves every caller. 1721B0 calls it once for its structure-BSP ray. `f_001731D0`, under the object walk
-`f_00171AF0`, calls it once per object collision region the ray reaches: in a30 that is 55-78 % of all casts, depending on where the player is. Seven
-other callers make < 0.02 % of the calls.
+`f_00171AF0`, calls it once per object collision region the ray reaches: in a30 that is 55-78 % of all casts, depending
+on where the player is. Seven other callers made 0.01 % of the casts in most runs, and 22 % in one Pi run where the
+player went elsewhere.
 
 Evidence, with details below:
 - **0 mismatches in 87,828,407 in-game casts** compared in verify mode on the x86 host and the Pi 4 in a30 with
