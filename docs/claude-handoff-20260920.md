@@ -2152,3 +2152,17 @@ built by `overlap-candidate/build_x87.py`; its tools/query_memory_capture.py is 
   owner (tick, ~1.75 ticks/frame) is the wall. Agents: native 92330, native 90770 / 14B230 (tick), native 63C00
   (scene flare tests, 6.6 ms/frame). Input notes: fire = R, flashlight = D-pad right in control (rear touch needs
   XV_REAR_TOUCH=1); a10 gives no weapon until the bridge.
+- **Render-loop freeze + scene timeout (perf181-184):** perf181t froze once at 485 s with the helper looping in
+  5D410 -> 5B710 -> 5B4A0 (core psp2core-1790235896; the render-view watchdog's live remap did not end it; the
+  torn-model-data class of §51). XV_SCENE_ABANDON_MS (default 2500) abandons a helper scene still running that long
+  through the trap path and releases the render view (xv_render_view_abandon; the scope cleanup never runs after the
+  longjmp). Vita perf184 XV_SCENE_ABANDON_TEST=3000: scene 3000 abandoned, the run went on to scene 6479 with normal
+  frame times and the view entering every frame. Note: helper-thread log lines can be dropped - read the
+  `[scene-thread] timeout checks ... abandons N` counters, not the ABANDON line. One natural 2.5 s scene (perf182,
+  scene 2423) recovered on its own - the same torn-data loops happen and usually resolve.
+- **Flag drift (TRAP):** build-command.json (Vita VPKs) lacked XV_NATIVE_CRT_FLOAT=1 that make-vars.txt (host/agent
+  builds) had; every build-x87 VPK perf177-185 ran without the native CRT float. Restored in perf186 (touch the files
+  that test a flag after changing it - make does not track flags).
+- **Natives merged:** aim blend (A39B0 subtree, 90770's hot path; Vita verify 0 mismatches, 33 vs 120 us/call, tick
+  8DDF0 9.5 -> 6.6 ms, perf181 steady 61.0 vs 63+), light cluster query (56670 subtree under 92330; host/Pi exact,
+  2.1x), flare occlusion test (63C00 guest part; HLE draws unchanged; 2-4x on the compute part).
