@@ -108,9 +108,11 @@ void xv_host_thread_role(int role)
 static uint64_t spl_read(int fd) { uint64_t v = 0; if (fd >= 0 && read(fd, &v, sizeof v) != sizeof v) v = 0; return v; }
 void xv_host_perf_report(unsigned frame, unsigned frames)
 {
-    extern unsigned xv_rec_ab_frames[2] __attribute__((weak));
-    unsigned ab0 = xv_rec_ab_frames ? xv_rec_ab_frames[0] : 0, ab1 = xv_rec_ab_frames ? xv_rec_ab_frames[1] : 0;
-    if (xv_rec_ab_frames) xv_rec_ab_frames[0] = xv_rec_ab_frames[1] = 0;
+    extern unsigned xv_rec_ab_frames[2] __attribute__((weak));   /* cumulative XV_REC_AB phase frames (xd3d.c) */
+    static unsigned last_ab[2];
+    unsigned now0 = xv_rec_ab_frames ? xv_rec_ab_frames[0] : 0, now1 = xv_rec_ab_frames ? xv_rec_ab_frames[1] : 0;
+    unsigned ab0 = now0 - last_ab[0], ab1 = now1 - last_ab[1];
+    last_ab[0] = now0; last_ab[1] = now1;
     if (!spl_perf_count || !frames) return;
     for (unsigned r = 0; r < SPL_ROLES; r++) {
         if (spl_role[r].cycles < 0) continue;
@@ -137,9 +139,12 @@ void xv_host_sample_dump(unsigned frame)
 {
     if (!spl_on) return;
     struct itimerval off = { { 0, 0 }, { 0, 0 } }, on = { { 0, 1000 }, { 0, 1000 } }; setitimer(ITIMER_PROF, &off, NULL);
-    extern unsigned xv_rec_ab_frames[2] __attribute__((weak));   /* XV_REC_AB phase frames in this window (xd3d.c) */
+    extern unsigned xv_rec_ab_frames[2] __attribute__((weak));   /* cumulative XV_REC_AB phase frames (xd3d.c) */
+    static unsigned last_ab[2];
+    unsigned now0 = xv_rec_ab_frames ? xv_rec_ab_frames[0] : 0, now1 = xv_rec_ab_frames ? xv_rec_ab_frames[1] : 0;
     fprintf(spl_out, "frame %u samples %u dropped %u helper-cycles %d ab %u %u\n", frame, spl_total, spl_drop, spl_helper_sampling ? spl_perf_period : 0,
-        xv_rec_ab_frames ? xv_rec_ab_frames[0] : 0, xv_rec_ab_frames ? xv_rec_ab_frames[1] : 0);
+        now0 - last_ab[0], now1 - last_ab[1]);
+    last_ab[0] = now0; last_ab[1] = now1;
     for (unsigned i = 0; i < SPL_BUCKETS; ++i) if (spl[i].n) {
         if (spl_lr) fprintf(spl_out, "%u %x %u %x\n", spl[i].kind, spl[i].off, spl[i].n, spl[i].lr);
         else fprintf(spl_out, "%u %x %u\n", spl[i].kind, spl[i].off, spl[i].n);

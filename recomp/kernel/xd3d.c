@@ -211,7 +211,7 @@ static int g_hist_frame = -2;
 static xv_rec_opt g_opt_hle = XV_REC_OPT_INIT("XV_REC_HLE");
 /* XV_REC_AB state (runtime/xv_record_opt.h): the phase flips at recording-frame starts, never inside a scene. */
 int xv_rec_ab_period = -1;
-unsigned xv_rec_ab_phase, xv_rec_ab_frames[2];
+unsigned xv_rec_ab_phase, xv_rec_ab_frames[2];   /* frames started in each phase, cumulative */
 static int g_hle_now = -1;   /* the XV_REC_HLE path for this frame (-1: recompute) */
 static inline int hle_mode_now(void)
 {
@@ -748,6 +748,11 @@ void xv_hle_D3DDevice_Present(xctx *c)
         memset(material_sampler_groups, 0, sizeof material_sampler_groups);
 #endif
         { unsigned hp = __atomic_exchange_n(&helper_presents, 0, __ATOMIC_ACQ_REL); if (hp) D3DLOG("[helper-present] %u of 60 device presents ran on the scene helper at scene end\n", hp); }
+        if (xv_rec_ab_active()) {   /* XV_REC_AB: which phase the following [hle-time] window ran (tools/rec_ab.py) */
+            static unsigned last[2]; unsigned a = xv_rec_ab_frames[0] - last[0], b = xv_rec_ab_frames[1] - last[1];
+            last[0] = xv_rec_ab_frames[0]; last[1] = xv_rec_ab_frames[1];
+            D3DLOG("[rec-ab] hle frames %u %u\n", a, b);
+        }
         xv_render_view_report(60); { extern void xv_scene_thread_report(unsigned); xv_scene_thread_report(60); } { extern void xv_crt_float_report(unsigned) __attribute__((weak)); if (xv_crt_float_report) xv_crt_float_report(60); } { extern void xv_native_visibility_report(unsigned) __attribute__((weak)); if (xv_native_visibility_report) xv_native_visibility_report(60); } { extern void xv_cache_probe_report(unsigned) __attribute__((weak)); if (xv_cache_probe_report) xv_cache_probe_report(60); } { extern void xv_cache_defer_report(unsigned) __attribute__((weak)); if (xv_cache_defer_report) xv_cache_defer_report(60); } { extern void xv_objtrace_report(unsigned) __attribute__((weak)); if (xv_objtrace_report) xv_objtrace_report(60); } { extern void xv_native_aim_blend_report(unsigned) __attribute__((weak)); if (xv_native_aim_blend_report) xv_native_aim_blend_report(60); } { extern void xv_native_92330_report(unsigned) __attribute__((weak)); if (xv_native_92330_report) xv_native_92330_report(60); } { extern void xv_native_63c00_report(unsigned) __attribute__((weak)); if (xv_native_63c00_report) xv_native_63c00_report(60); } if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */
             const float (*m)[4] = g_vp_rows;
