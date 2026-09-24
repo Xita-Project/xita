@@ -584,7 +584,7 @@ found:
     }
     {
         const uint32_t n = ecx * 4u + (ebp & 3u);
-        if (!c->df && !n9_watch && (edi & 0xFFFu) + n <= 0x1000u) {
+        if (!c->df && !n9_watch && n <= 0x1000u - (edi & 0xFFFu)) {   /* (n from a negative element size is huge) */
             /* x_str_stos with df = 0 and a zero value clears the bytes page by page through the translation: in one
              * page that is one memset (its XV_WATCH_ADDR diagnostic is honoured by taking the call below instead) */
             memset(N9_P(edi), 0, n); edi += n; ecx = 0;
