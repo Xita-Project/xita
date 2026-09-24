@@ -72,6 +72,7 @@ MUTANTS = [
     ('layout: the record\'s t across a page end', '    if ((rec & 0xFFFu) > 0xFFCu) return 0;', '    (void)0;'),
     ('delegation: its back-edges not counted', '        be += (uint32_t)((1 << 30) - c->preempt);', '        (void)0;'),
     ('delegation: stale carry cell not passed', 'c->f_cf_override = 0; c->f_cf = fcf; c->f_of_override = 0; c->f_of = fof;', 'c->f_cf_override = 0; c->f_cf = 0; c->f_of_override = 0; c->f_of = fof;'),
+    ('heap levels: entries not carried over', 'if (big) { memcpy(big, lv, lvcap * sizeof *big); lv = big; lvcap = NR_MAXDEPTH; }', 'if (big) { lv = big; lvcap = NR_MAXDEPTH; }'),
 ]
 
 def main():
@@ -80,6 +81,8 @@ def main():
     ap.add_argument('--verify', action='store_true'); ap.add_argument('--mutants', type=int, default=0)
     ap.add_argument('--variants', default='all'); ap.add_argument('--bench', type=int, default=0)
     ap.add_argument('--replay', help='casts captured with XV_NATIVE_1721B0_CAPTURE (exactness; speed with --reps)'); ap.add_argument('--reps', type=int, default=0)
+    ap.add_argument('--threads', type=int, default=0, help='N threads casting at once, each through its own page table (NR_MODE=1 for verify mode)')
+    ap.add_argument('--iters', type=int, default=50, help='--threads: casts per thread and scene')
     ap.add_argument('--extra', default='', help='extra compiler flags (e.g. -mthumb -march=armv7-a -mfpu=neon -mfloat-abi=hard -static for the Pi)')
     ap.add_argument('--native', default=str(ROOT / 'recomp/kernel/xk_native_1721b0.c'))
     ap.add_argument('--keep', help='also write the test executable here (e.g. to copy it to another machine)')
@@ -98,7 +101,7 @@ def main():
     bodies = []
     for fn in FUNCS:
         b = body(texts[fn], fn)
-        if 'xv_native_1721b0_ray' in b: sys.exit(f'f_{fn} of {rec} carries the native hook: point the test at an unpatched stage copy')
+        if 'xv_native_1721b0_ray' in b: sys.exit(f'f_{fn} of {rec} carries the first version\'s in-body hook: point the test at an unpatched or re-patched stage')
         bodies.append(b)
     # the kernel helper first: it uses xv_x86rt.h's X_G, the shard preamble then redefines X_G for the bodies
     guest = '#include "xv_x86rt.h"\n#include "xv_phase.h"\n' + interval + '\n' + preamble + '\n' + '\n'.join(bodies)
@@ -113,13 +116,19 @@ def main():
             (d / 'kernel/xk_native_1721b0.c').write_text(native_text)
             cmd = [a.cc, *flags, *a.extra.split(), "-std=gnu11", "-w", "-fno-strict-aliasing", "-ffp-contract=off", "-DXV_NATIVE_1721B0=1", "-DXV_NATIVE_1721B0_TEST=1", '-I' + str(rec),
                    '-I' + str(rec / 'kernel'), str(ROOT / 'tools/tests/native_1721b0.c'), str(d / 'guest.c'),
-                   str(d / 'kernel/xk_native_1721b0.c'), '-lm', '-o', str(exe)]
+                   str(d / 'kernel/xk_native_1721b0.c'), '-lm', '-lpthread', '-o', str(exe)]
             subprocess.run(cmd, check=True)
         if a.replay:
             exe = d / 'replay'; build(exe, variants.get('thread-table+render-view -O2', ['-O2']), native_src)
             if a.keep: subprocess.run(['cp', str(exe), a.keep], check=True)
             if a.cc != "cc" and "arm" in a.cc: print("built", exe); sys.exit(0)   # cross build: run it on the target (--keep)
             r = subprocess.run([str(exe), "0", "0", "--replay", a.replay, str(a.reps)], capture_output=True, text=True)
+            print(r.stdout.strip() + r.stderr.strip()); sys.exit(r.returncode)
+        if a.threads:
+            exe = d / 'threads'; build(exe, ['-O2', '-DXV_THREAD_PAGE_TABLE=1', '-DXV_RENDER_VIEW=1', '-pthread'], native_src)
+            if a.keep: subprocess.run(['cp', str(exe), a.keep], check=True)
+            if a.cc != "cc" and "arm" in a.cc: print("built", exe); sys.exit(0)
+            r = subprocess.run([str(exe), a.cases, a.seed, '--threads', str(a.threads), str(a.iters)], capture_output=True, text=True)
             print(r.stdout.strip() + r.stderr.strip()); sys.exit(r.returncode)
         if a.bench:
             exe = d / 'bench'; build(exe, variants.get('thread-table+render-view -O2', ['-O2']), native_src)

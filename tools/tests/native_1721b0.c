@@ -31,6 +31,7 @@
 #include <sys/syscall.h>
 #include <sys/ioctl.h>
 #endif
+#include <pthread.h>
 #include "xv_x86rt.h"
 
 uint8_t *g_xram; uint32_t *g_xpt; uint8_t *g_img_base;
@@ -61,6 +62,8 @@ void x_guest_write_pages(uint32_t a, const void *src, size_t size)
     while (size) { size_t n = 4096u - (a & 0xFFFu); if (n > size) n = size; memcpy(X_G(a), s, n); s += n; a += (uint32_t)n; size -= n; }
 }
 extern void f_00088E90(xctx *);
+/* in a stage the hook's translation is the renamed body (tools/patch_native_1721b0_hooks.py); here the lifted body */
+void f_00088E90_body(xctx *c) { f_00088E90(c); }
 extern void xv_native_1721b0_force(int);
 extern void xv_native_1721b0_detail(int);
 extern int xv_native_1721b0_ray(xctx *);
@@ -117,6 +120,7 @@ static int nan32(uint32_t w) { return (w & 0x7F800000u) == 0x7F800000u && (w & 0
 
 static uint32_t E_top;            /* esp at the entry of f_00088E90 */
 static int bench_like;            /* game-like casts (a30 sound rays: ~16 nodes, ~0.25 leaf tests per cast) */
+static int stack_only;            /* --threads: every word the cast writes on the stack pages (the game's layout) */
 static float odd(float x, int flavor) { if (flavor == 2 && rnd() % 29 == 0) return rnd() % 3 ? nanf_() : rnd() % 2 ? INFINITY : -INFINITY; return x; }
 typedef struct { float n[3], d; } plane;
 static void random_normal(float *n, int flavor)
@@ -302,6 +306,7 @@ static void scene(stats *st)
     /* the stack: E at a random 4-aligned place; the caller's frame above (the point and delta vectors, the record) */
     unsigned layout = bench_like ? 0 : rnd() % 40;               /* 1..13: the special layouts (a third of the cases) */
     if (deep && rnd() % 3 == 0) layout = 12;                      /* the record's t across a page end, with a translated subtree */
+    if (stack_only) layout = 0;                                   /* the caller's frame (a record over S sends writes to the shared trash page) */
     E_top = STACK + 0x11000u + 4u * (rnd() % 0x800);
     for (uint32_t a = E_top - 0x400u; a < E_top + 0x400u; a += 4) w32(a, rnd());          /* stale frames */
     uint32_t rec = E_top + 0x40u + 4u * (rnd() % 0x100);                                     /* 1721B0's [esp+44h] area */
@@ -356,7 +361,7 @@ static void init_ctx(xctx *c)
 static int same_ctx(const xctx *a, const xctx *b, char *why, size_t n)
 {
 #define F(x) if (a->x != b->x) { snprintf(why, n, #x " %llX vs %llX", (unsigned long long)a->x, (unsigned long long)b->x); return 0; }
-    for (unsigned i = 0; i < 8; ++i) F(r[i]);
+    for (unsigned i = 0; i < 8; ++i) if (a->r[i] != b->r[i]) { snprintf(why, n, "r[%u] %X vs %X", i, a->r[i], b->r[i]); return 0; }
     F(fs_base) F(df) F(f_kind) F(f_op1) F(f_op2) F(f_res) F(f_bits) F(f_cf_override) F(f_of_override) F(f_cf) F(f_of)
     F(fsp) F(fsw) F(fcw) F(preempt) F(scratch) F(eip_hint)
     /* two NaNs are equal (which NaN payload an operation propagates is the host compiler's operand order) */
@@ -527,11 +532,97 @@ static int replay(const char *path, int reps)
     return bad != 0;
 }
 
+/* --threads N [iters]: N host threads cast at the same time, each through its own page table whose stack pages are its
+ * own physical copy (the same guest addresses, different host memory: the scene helper's render view in the game), in
+ * the mode given by NR_MODE (2 native, default; 1 verify), iters casts each per scene; every result (registers, flags,
+ * x87, the stack pages with the record) must equal the single-threaded translation's. Catches state shared between
+ * threads (a journal, a level stack, a flag) and a translation that is not the calling thread's. */
+#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE && !defined(__vita__)
+typedef struct { uint32_t *pt; int iters; xctx c0, cref; const uint8_t *init, *ref; unsigned bad, runs; char why[200]; } nr_th;
+static void *nr_thread(void *p)
+{
+    nr_th *a = p;
+    xv_host_page_table = a->pt;
+    uint8_t *cur = malloc((size_t)STACK_PAGES << 12);
+    for (int k = 0; k < a->iters; ++k) {
+        x_guest_write_pages(STACK, a->init, (size_t)STACK_PAGES << 12);
+        xctx c = a->c0;
+        if (!xv_native_1721b0_ray(&c)) f_00088E90(&c);
+        x_guest_read_pages(cur, STACK, (size_t)STACK_PAGES << 12);
+        char why[200] = "";
+        int ok = same_ctx(&c, &a->cref, why, sizeof why);
+        if (getenv("NR_TDEBUG") && !ok) {
+            for (uint32_t i = 0; i < ((uint32_t)STACK_PAGES << 12); ++i) if (cur[i] != a->ref[i]) { printf("  first stack diff %08X (E%+d) native %02X guest %02X\n", STACK + i, (int)(STACK + i - a->c0.r[4]), cur[i], a->ref[i]); break; }
+            printf("  eax %08X/%08X ecx %08X/%08X edx %08X/%08X esp %08X/%08X\n", c.r[0], a->cref.r[0], c.r[1], a->cref.r[1], c.r[2], a->cref.r[2], c.r[4], a->cref.r[4]);
+        }
+        if (ok && memcmp(cur, a->ref, (size_t)STACK_PAGES << 12)) {
+            ok = 1;
+            for (uint32_t i = 0; i < ((uint32_t)STACK_PAGES << 12); ++i) if (cur[i] != a->ref[i]) {
+                uint32_t x, y; memcpy(&x, cur + (i & ~3u), 4); memcpy(&y, a->ref + (i & ~3u), 4);
+                if (nan32(x) && nan32(y)) { i |= 3u; continue; }
+                ok = 0; snprintf(why, sizeof why, "stack %08X native %02X guest %02X", STACK + i, cur[i], a->ref[i]); break;
+            }
+        }
+        if (!ok && !a->bad++) snprintf(a->why, sizeof a->why, "%s", why);
+        a->runs++;
+    }
+    free(cur);
+    return NULL;
+}
+static int threads_test(unsigned scenes, int nth, int iters)
+{
+    const int mode = getenv("NR_MODE") ? atoi(getenv("NR_MODE")) : 2;
+    stats st = {0}; stack_only = 1; slice = 1 << 30;
+    if (next_free + ((uint32_t)nth * STACK_PAGES << 12) > trash_off) { fprintf(stderr, "arena too small for %d threads\n", nth); return 2; }
+    uint32_t **pts = malloc(sizeof *pts * (size_t)nth);
+    for (int t = 0; t < nth; ++t) {                                /* own tables: the stack pages on private physical pages */
+        pts[t] = malloc(sizeof(uint32_t) << 20); memcpy(pts[t], g_xpt, sizeof(uint32_t) << 20);
+        for (uint32_t i = 0; i < STACK_PAGES; ++i) pts[t][(STACK >> 12) + i] = next_free + (((uint32_t)t * STACK_PAGES + (STACK_PAGES - 1 - i)) << 12);
+    }
+    uint8_t *init = malloc((size_t)STACK_PAGES << 12), *ref = malloc((size_t)STACK_PAGES << 12);
+    unsigned bad = 0, runs = 0, skipped = 0, native = 0, badscenes = 0;
+    xv_native_1721b0_force(mode); xv_native_1721b0_detail(1);
+    for (unsigned k = 0; k < scenes; ++k) {
+        xv_host_page_table = g_xpt;
+        scene(&st);
+        xctx c0; init_ctx(&c0); c0.preempt = 1 << 30;
+        if ((c0.r[4] & 3u) || c0.r[1] < STACK || c0.r[1] + 0x418u > STACK + ((uint32_t)STACK_PAGES << 12)) { skipped++; continue; }
+        x_guest_read_pages(init, STACK, (size_t)STACK_PAGES << 12);
+        xctx cref = c0;                                            /* the reference: the translation, single-threaded */
+        xv_native_1721b0_force(0);
+        if (!run(&cref, 0)) { skipped++; xv_native_1721b0_force(mode); continue; }
+        xv_native_1721b0_force(mode);
+        x_guest_read_pages(ref, STACK, (size_t)STACK_PAGES << 12);
+        { xctx t = c0; x_guest_write_pages(STACK, init, (size_t)STACK_PAGES << 12); if (xv_native_1721b0_ray(&t)) native++; }   /* declined layouts run the guest */
+        nr_th *a = calloc((size_t)nth, sizeof *a); pthread_t *th = malloc(sizeof *th * (size_t)nth);
+        for (int t = 0; t < nth; ++t) { a[t].pt = pts[t]; a[t].iters = iters; a[t].c0 = c0; a[t].cref = cref; a[t].init = init; a[t].ref = ref; pthread_create(&th[t], NULL, nr_thread, &a[t]); }
+        for (int t = 0; t < nth; ++t) {
+            pthread_join(th[t], NULL); runs += a[t].runs;
+            if (a[t].bad) { if (++badscenes <= 10) printf("scene %u thread %d: %u of %u casts differ (%s)\n", k, t, a[t].bad, a[t].runs, a[t].why); bad += a[t].bad; }
+        }
+        free(a); free(th);
+    }
+    xv_native_1721b0_force(0);
+    log_all = 1; xv_native_1721b0_report(0); log_all = 0;
+    printf("native-1721b0 threads: %u scenes (%u run natively, %u skipped), %d threads x %d casts each, mode %d: %u casts, %u mismatches\n",
+           scenes, native, skipped, nth, iters, mode, runs, bad);
+    return bad != 0;
+}
+#endif
+
 int main(int argc, char **argv)
 {
     if (argc > 3 && !strcmp(argv[3], "--replay")) return replay(argv[4], argc > 5 ? atoi(argv[5]) : 0);
     unsigned cases = argc > 1 ? (unsigned)atoi(argv[1]) : 3000;
     if (argc > 2) rng ^= strtoull(argv[2], 0, 0) * 0x9E3779B97F4A7C15ull;
+    if (argc > 4 && !strcmp(argv[3], "--threads")) {
+#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE && !defined(__vita__)
+        signal(SIGALRM, on_alarm); guard_stack(); map_memory();   /* a scene whose guest recursion never ends is skipped */
+        return threads_test(cases, atoi(argv[4]), argc > 5 ? atoi(argv[5]) : 50);
+#else
+        fprintf(stderr, "--threads needs the per-thread page table build (-DXV_THREAD_PAGE_TABLE=1)\n"); return 2;
+#endif
+    }
     const int verify = argc > 3 && !strcmp(argv[3], "--verify");
     const int bench = argc > 4 && !strcmp(argv[3], "--bench") ? atoi(argv[4]) : 0;
     stats s = {0};

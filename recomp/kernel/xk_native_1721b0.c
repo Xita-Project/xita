@@ -15,8 +15,15 @@
  *   f_000889E0  a leaf's BSP2D references on the crossed plane: the hit point projected on the plane's dominant axes,
  *               17ADD0 (BSP2D point location), 86E20 (point in the surface's edge ring)
  *   f_0017ADD0  BSP2D point location;   f_00086E20  point in polygon (edge ring walk), the surface's "ignored" bit mask
- * No other calls, no HLE. The hook is the entry of f_00088E90 (tools/patch_native_1721b0_hooks.py), so every caller
- * of the cast (1721B0, 1731D0 and seven others) is served; when the native declines, the translation runs.
+ * No other calls, no HLE. The hook is f_00088E90 itself: tools/patch_native_1721b0_hooks.py renames the translated body
+ * f_00088E90_body and puts `if (!xv_native_1721b0_ray(c)) f_00088E90_body(c);` in front of it, so every caller of the
+ * cast (1721B0, 1731D0 and seven others) is served; when the native declines, the translation runs.
+ *
+ * Any thread may cast, several at once: the owner's tick, the object workers, and the scene helper (its render pass
+ * f_00044000 -> 88E90) through its own page table (the render view). Every access goes through the calling thread's
+ * X_PT, and nothing of a call is shared: the journal, the level stack and every cache live in the call's frame; no
+ * __thread (vitasdk's is emutls, which does not keep the Vita's threads apart: the first version's per-thread journal,
+ * level stack and reentry flag were one copy for the owner and the helper, and verify/native broke on hardware).
  *
  * Exact by construction (a transliteration of the generated code, docs/native-1721b0.md):
  *  - every guest memory read and write happens in the guest's order at the guest's address through the same
@@ -38,8 +45,9 @@
  *    86E20) and xv_preempt() is called the same number of times, after the call instead of mid-loop (a scheduling
  *    point only, as in xk_native_visibility.c / xk_native_4b9d0.c).
  * Declines (the translation runs): esp not 4-aligned or near the address-space ends, a result record inside the 64 KB
- * below 88E90's frame. A recursion deeper than NR_MAXDEPTH levels hands that subtree to the translated f_00088B80
- * (exact: the state is the guest's at every call boundary).
+ * below 88E90's frame or with its t across a page end, the BSP header / vectors / image constants over the frames or
+ * the record. A recursion deeper than NR_MAXDEPTH levels hands that subtree to the translated f_00088B80 (exact: the
+ * state is the guest's at every call boundary).
  *
  * XV_NATIVE_1721B0 build flag (hook: tools/patch_native_1721b0_hooks.py). Env XV_NATIVE_1721B0: 0 off (default
  * XV_NATIVE_1721B0_DEFAULT), 1 verify (native with a write journal, undo, run the translation on the same state,
@@ -57,27 +65,30 @@
 #define XV_NATIVE_1721B0_DEFAULT 0
 #endif
 
-enum { NR_ZERO = 0x1F0A68u, NR_ONE = 0x1F0A78u, NR_AXES = 0x1EAF30u, NR_MAXDEPTH = 1024u };
+enum { NR_ZERO = 0x1F0A68u, NR_ONE = 0x1F0A78u, NR_AXES = 0x1EAF30u, NR_MAXDEPTH = 1024u, NR_STACK_LEVELS = 128u };
 
-/* ---- guest memory, as the generated code addresses it (X_PT, taken once per call) --------------------------- */
-typedef struct { uint8_t *ram; const uint32_t *pt; int jon; } nr_mem;   /* jon: journal the writes (verify) */
+/* ---- guest memory, as the generated code addresses it -----------------------------------------------------------
+ * pt: the calling thread's page table (X_PT: TPIDRURW on the Vita, xv_host_page_table on the host; the scene helper's
+ * is its render view), taken once per call - every access of the call goes through it, as in the translation.
+ * No state of this unit is thread-local or shared between calls (vitasdk's __thread is emutls, which the Vita's
+ * threads do not keep apart): the journal, the level stack and all caches live in the call's own frame. */
+typedef struct { uint32_t addr; uint8_t size, pad[3]; uint8_t old[4], now[4]; uint32_t word; } nr_jent;
+typedef struct { nr_jent *e; unsigned n, cap; int overflow; } nr_journal;
+typedef struct { uint8_t *ram; const uint32_t *pt; nr_journal *j; } nr_mem;   /* j: journal the writes (verify), else NULL */
 #define NR_P(a) (m->ram + m->pt[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu))
 
 /* Verify mode journals every native write (address, size, old bytes) so the pre-state can be restored. */
-typedef struct { uint32_t addr; uint8_t size, pad[3]; uint8_t old[4], now[4]; uint32_t word; } nr_jent;
-typedef struct { nr_jent *e; unsigned n, cap; int overflow; } nr_journal;
-static __thread nr_journal nr_j;
-static void nr_jlog_slow(uint32_t a, const void *host, unsigned size)
+static void nr_jlog_slow(nr_journal *jr, uint32_t a, const void *host, unsigned size)
 {
-    if (nr_j.n == nr_j.cap) {
-        unsigned cap = nr_j.cap ? nr_j.cap * 2u : 4096u;
-        nr_jent *e = realloc(nr_j.e, cap * sizeof *e);
-        if (!e) { nr_j.overflow = 1; return; }
-        nr_j.e = e; nr_j.cap = cap;
+    if (jr->n == jr->cap) {
+        unsigned cap = jr->cap ? jr->cap * 2u : 4096u;
+        nr_jent *e = realloc(jr->e, cap * sizeof *e);
+        if (!e) { jr->overflow = 1; return; }
+        jr->e = e; jr->cap = cap;
     }
-    nr_jent *j = &nr_j.e[nr_j.n++]; j->addr = a; j->size = (uint8_t)size; memcpy(j->old, host, size);
+    nr_jent *j = &jr->e[jr->n++]; j->addr = a; j->size = (uint8_t)size; memcpy(j->old, host, size);
 }
-#define nr_jlog(a, host, size) do { if (__builtin_expect(m->jon, 0)) nr_jlog_slow((a), (host), (size)); } while (0)
+#define nr_jlog(a, host, size) do { if (__builtin_expect(m->j != NULL, 0)) nr_jlog_slow(m->j, (a), (host), (size)); } while (0)
 
 static inline __attribute__((always_inline)) uint32_t nr_r32(const nr_mem *m, uint32_t a) { uint32_t v; memcpy(&v, NR_P(a), 4); return v; }
 static inline __attribute__((always_inline)) uint16_t nr_r16(const nr_mem *m, uint32_t a) { uint16_t v; memcpy(&v, NR_P(a), 2); return v; }
@@ -94,7 +105,7 @@ static inline __attribute__((always_inline)) double nr_rf(const nr_mem *m, uint3
 }
 static void nr_wf_split(const nr_mem *m, uint32_t a, float v)
 {
-    if (__builtin_expect(m->jon, 0))
+    if (__builtin_expect(m->j != NULL, 0))
         for (unsigned i = 0; i < 4; ++i) { uint32_t b = a + i; nr_jlog(b, NR_P(b), 1); }
     x_guest_write_pages(a, &v, 4);
 }
@@ -573,7 +584,6 @@ L_88B71:
  * the argument words the caller pushed (nothing below writes them). The callee-saved registers after a child are the
  * ones the child popped: this level's own. A child deeper than NR_MAXDEPTH levels runs in the translation. ------ */
 typedef struct { uint32_t E, t0w, t1w, sv_ebx, sv_ebp, sv_esi, sv_edi, ts, site; uint8_t *hf; } nr_lvl;
-static __thread nr_lvl *nr_lv;       /* NR_MAXDEPTH levels per thread, allocated on first use */
 void f_00088B80(xctx *);
 static void nr_cache(nrs *s);
 enum { NR_NEAR, NR_FAR, NR_ONE_SIDE };
@@ -581,7 +591,10 @@ static __attribute__((noinline)) void nr_88b80(nrs *restrict s, nrr *restrict R,
 {
     NR_LOCALS;
     double x1 = s->sl[1], x2 = s->sl[2];
-    nr_lvl *const lv = nr_lv;
+    /* the levels: NR_STACK_LEVELS in this frame (the game's casts use at most 64), moved to the heap for deeper walks
+     * (up to NR_MAXDEPTH), freed at the end of the call */
+    nr_lvl lvbuf[NR_STACK_LEVELS], *lv = lvbuf;
+    unsigned lvcap = NR_STACK_LEVELS;
     unsigned d = 0;                                               /* this level's index: levels 0..d-1 wait in lv[] */
     nr_lvl *L;                                                    /* this level's entry: what it keeps across a child */
     uint32_t E, site;
@@ -589,7 +602,11 @@ static __attribute__((noinline)) void nr_88b80(nrs *restrict s, nrr *restrict R,
     float ts = 0.0f;
 call:
     /* a level starts: esp at the pushed return address, ecx = S, edx = the node, t0w / t1w its arguments */
-    if (__builtin_expect(d >= NR_MAXDEPTH, 0)) {
+    if (__builtin_expect(d >= lvcap, 0) && lvcap < NR_MAXDEPTH) {
+        nr_lvl *big = malloc(NR_MAXDEPTH * sizeof *big);
+        if (big) { memcpy(big, lv, lvcap * sizeof *big); lv = big; lvcap = NR_MAXDEPTH; }
+    }
+    if (__builtin_expect(d >= lvcap, 0)) {
         /* the translated f_00088B80 on the guest context: the state is the guest's at this call boundary */
         xctx *c = s->c;
         c->r[0] = eax; c->r[1] = ecx; c->r[2] = edx; c->r[3] = ebx; c->r[4] = esp; c->r[5] = ebp; c->r[6] = esi; c->r[7] = edi;
@@ -613,7 +630,7 @@ call:
         s->s1c = nr_r32(m, s->F + 0x1Cu); s->s20 = nr_r8(m, s->F + 0x20u); s->s24 = nr_r32(m, s->F + 0x24u);
         s->rt = nr_r32(m, s->rec); s->rcount = nr_r32(m, s->rec + 0x14u);
         s->deleg++;
-        if (s->m.jon) s->jfail = 1;               /* its writes are not journaled: the call cannot be undone */
+        if (s->m.j) s->jfail = 1;                 /* its writes are not journaled: the call cannot be undone */
         goto ret;
     }
     if (d + 1u > s->maxdepth) s->maxdepth = d + 1u;
@@ -919,6 +936,7 @@ ret:
         (void)edi; (void)esi; (void)ebp; (void)ebx;
         s->sl[1] = x1; s->sl[2] = x2;
         NR_EXIT((void)0);
+        if (lv != lvbuf) free(lv);
         return;
     }
     /* the caller level: every call returns to a flag write (test al,al), so of the record only the stale cells
@@ -1016,7 +1034,7 @@ static inline uint64_t nr_ns(void) { struct timespec t; clock_gettime(CLOCK_MONO
 
 enum { NR_CALLS, NR_VERIFIED, NR_MISMATCHED, NR_DECLINED, NR_JOURNAL_FAIL, NR_NODES, NR_LEAVES, NR_REFS, NR_POLYS, NR_EDGES,
        NR_STEPS2, NR_HITS, NR_BACKEDGES, NR_DELEG, NR_MAXD, NR_FROM_1721B0, NR_FROM_1731D0, NR_FROM_OTHER, NR_TIMED_NATIVE,
-       NR_TIMED_GUEST, NR_NAN_WORDS, NR_COUNTERS };
+       NR_TIMED_GUEST, NR_NAN_WORDS, NR_ON_HELPER, NR_THREAD_TABLE, NR_COUNTERS };
 static unsigned nr_counter[NR_COUNTERS], nr_mismatch_total;
 static uint64_t nr_native_ns, nr_guest_ns;
 #define NR_ADD(i, v) __atomic_fetch_add(&nr_counter[i], (unsigned)(v), __ATOMIC_RELAXED)
@@ -1081,9 +1099,9 @@ static void nr_cache(nrs *s)
     for (unsigned i = 0; i < 12; ++i) s->axes[i] = (int16_t)nr_r16(m, NR_AXES + 2u * i);
 }
 /* The whole cast from the state of `call 00088E90h` (esp at the pushed return address) to after its `ret 14h`. */
-static void nr_run(xctx *c, nrs *s, int journal)
+static void nr_run(xctx *c, nrs *s, nr_journal *journal)
 {
-    s->m.ram = g_xram; s->m.pt = X_PT; s->m.jon = journal;
+    s->m.ram = g_xram; s->m.pt = X_PT; s->m.j = journal;
     s->fk = c->f_kind; s->fa = c->f_op1; s->fb = c->f_op2; s->fr = c->f_res; s->fbits = c->f_bits;
     s->fcfo = c->f_cf_override; s->fcf = c->f_cf; s->fofo = c->f_of_override; s->fof = c->f_of;
     s->fsp0 = c->fsp; s->fsw = c->fsw;
@@ -1129,25 +1147,26 @@ static void nr_report_mismatch(const char *what, uint32_t a, uint32_t b, const n
                what, a, b, s->nodes, s->leaves, s->refs, s->polys);
 }
 
-void f_00088E90(xctx *c);
-static __thread int nr_in_guest;   /* the hook's own call of the translation: the hook stands aside */
-static void nr_guest(xctx *c) { nr_in_guest = 1; f_00088E90(c); nr_in_guest = 0; }
+/* The translated body of 88E90: tools/patch_native_1721b0_hooks.py renames it and puts f_00088E90 = this hook in front
+ * of it, so the hook runs the translation by calling the body (no flag, no thread-local state). */
+void f_00088E90_body(xctx *c);
+static void nr_guest(xctx *c) { f_00088E90_body(c); }
 
 static void nr_verify(xctx *c, int timed)
 {
     const xctx before = *c;
     nrs s;
-    nr_j.n = 0; nr_j.overflow = 0;
+    nr_journal jr = { NULL, 0, 0, 0 };                            /* this call's own journal */
     const uint64_t t0 = timed ? nr_ns() : 0;
-    nr_run(c, &s, 1);
+    nr_run(c, &s, &jr);
     if (timed) { __atomic_fetch_add(&nr_native_ns, nr_ns() - t0, __ATOMIC_RELAXED); NR_ADD(NR_TIMED_NATIVE, 1); }
     const xctx native = *c;
     const uint32_t ret = X_M32(before.r[4]);
     /* regions the guest may write: the stack from below the deepest native write to 88E90's arguments, and the
      * result record (ecx at entry, 0x418 bytes). Everything the native wrote is journaled too. */
     uint32_t low = before.r[4] - 0x100u;
-    for (unsigned i = 0; i < nr_j.n; ++i) {
-        const uint32_t a = nr_j.e[i].addr;
+    for (unsigned i = 0; i < jr.n; ++i) {
+        const uint32_t a = jr.e[i].addr;
         if (a < before.r[4] + 0x18u && before.r[4] - a < 0x100000u && a < low) low = a;
     }
     uint32_t reg_addr[NR_REGIONS], reg_len[NR_REGIONS]; unsigned nreg = 0;
@@ -1158,22 +1177,23 @@ static void nr_verify(xctx *c, int timed)
     uint32_t total = 0;
     for (unsigned i = 0; i < nreg; ++i) total += reg_len[i];
     uint8_t *img = malloc(total), *cur = malloc(total);
-    const unsigned nj = nr_j.n;
+    const unsigned nj = jr.n;
     nr_jent *j = malloc((nj ? nj : 1) * sizeof *j);
-    if (!img || !cur || !j || nr_j.overflow || s.jfail) {
+    if (!img || !cur || !j || jr.overflow || s.jfail) {
         /* cannot verify this call: keep the native result (it is complete), account for its budget */
         NR_ADD(NR_JOURNAL_FAIL, 1);
-        free(img); free(cur); free(j);
+        free(img); free(cur); free(j); free(jr.e);
         nr_budget(c, s.be); nr_count(&s, ret);
         return;
     }
     for (unsigned i = 0, o = 0; i < nreg; o += reg_len[i], ++i) x_guest_read_pages(img + o, reg_addr[i], reg_len[i]);
     const nr_mem *m = &s.m;
     for (unsigned i = 0; i < nj; ++i) {
-        j[i] = nr_j.e[i]; memcpy(j[i].now, NR_P(j[i].addr), j[i].size);
+        j[i] = jr.e[i]; memcpy(j[i].now, NR_P(j[i].addr), j[i].size);
         x_guest_read_pages(&j[i].word, j[i].addr & ~3u, 4);
     }
     for (unsigned i = nj; i-- > 0;) memcpy(NR_P(j[i].addr), j[i].old, j[i].size);
+    free(jr.e);
     nr_count(&s, ret);
     /* the translation on the same state, unbounded budget */
     *c = before; c->preempt = 1 << 30;
@@ -1274,17 +1294,18 @@ static void nr_capture(const xctx *c)
 }
 #endif
 
-/* ---- the hook: first thing in f_00088E90 (tools/patch_native_1721b0_hooks.py). Nonzero: handled (the translated
- * body returns at once). ------------------------------------------------------------------------------------- */
+/* ---- the hook: f_00088E90 itself (tools/patch_native_1721b0_hooks.py: `if (!xv_native_1721b0_ray(c))
+ * f_00088E90_body(c);`). Nonzero: handled. Any thread may call it, several at once (the owner's tick, the object
+ * workers, the scene helper through its render view): everything a call uses is its own. ----------------------- */
+int xv_scene_thread_on_helper(void) __attribute__((weak));
 int xv_native_1721b0_ray(xctx *c)
 {
-    if (nr_in_guest) return 0;
     const int mode = nr_mode();
     const int timed = nr_timing();
 #if !defined(__vita__) && !defined(XV_NATIVE_1721B0_TEST)
-    {   /* one capturing thread at a time (the owner, object workers and the scene helper all cast) */
+    {   /* one capturing thread at a time, casts through the live table only (a capture holds the live arena) */
         static int busy;
-        if (nr_layout(c) && !__atomic_exchange_n(&busy, 1, __ATOMIC_ACQUIRE)) { nr_capture(c); __atomic_store_n(&busy, 0, __ATOMIC_RELEASE); }
+        if (X_PT == g_xpt && nr_layout(c) && !__atomic_exchange_n(&busy, 1, __ATOMIC_ACQUIRE)) { nr_capture(c); __atomic_store_n(&busy, 0, __ATOMIC_RELEASE); }
     }
 #endif
     if (!mode) {
@@ -1295,12 +1316,15 @@ int xv_native_1721b0_ray(xctx *c)
         return 1;
     }
     if (!nr_layout(c)) { NR_ADD(NR_DECLINED, 1); return 0; }
-    if (__builtin_expect(!nr_lv, 0) && !(nr_lv = malloc(NR_MAXDEPTH * sizeof *nr_lv))) { NR_ADD(NR_DECLINED, 1); return 0; }
+    if (nr_detail) {
+        if (xv_scene_thread_on_helper && xv_scene_thread_on_helper()) NR_ADD(NR_ON_HELPER, 1);
+        if (X_PT != g_xpt) NR_ADD(NR_THREAD_TABLE, 1);
+    }
     if (mode == 1) { nr_verify(c, timed); return 1; }
     nrs s;
     const uint32_t ret = nr_detail ? X_M32(c->r[4]) : 0;
     const uint64_t t0 = timed ? nr_ns() : 0;
-    nr_run(c, &s, 0);
+    nr_run(c, &s, NULL);
     if (timed) { __atomic_fetch_add(&nr_native_ns, nr_ns() - t0, __ATOMIC_RELAXED); NR_ADD(NR_TIMED_NATIVE, 1); }
     nr_budget(c, s.be); nr_count(&s, ret);
     return 1;
@@ -1319,9 +1343,10 @@ void xv_native_1721b0_report(unsigned frames)
         snprintf(t, sizeof t, "; us/call native %.3f guest %.3f (%u timed)", v[NR_TIMED_NATIVE] ? nn / 1000.0 / v[NR_TIMED_NATIVE] : 0.0,
                  v[NR_TIMED_GUEST] ? gn / 1000.0 / v[NR_TIMED_GUEST] : 0.0, v[NR_TIMED_GUEST]);
     XK_LOG("[native-1721b0] %u frames: calls %u verified %u mismatched %u (total mismatches %u) declined %u journal-fail %u; "
-           "from 1721B0 %u 1731D0 %u other %u; nodes %u leaves %u refs %u polygons %u edges %u bsp2d-steps %u hits %u back-edges %u "
-           "delegated %u max-depth %u nan-words %u%s\n",
+           "from 1721B0 %u 1731D0 %u other %u; on the scene helper %u, through a thread's own table %u; nodes %u leaves %u refs %u "
+           "polygons %u edges %u bsp2d-steps %u hits %u back-edges %u delegated %u max-depth %u nan-words %u%s\n",
            frames, v[NR_CALLS], v[NR_VERIFIED], v[NR_MISMATCHED], __atomic_load_n(&nr_mismatch_total, __ATOMIC_RELAXED), v[NR_DECLINED],
-           v[NR_JOURNAL_FAIL], v[NR_FROM_1721B0], v[NR_FROM_1731D0], v[NR_FROM_OTHER], v[NR_NODES], v[NR_LEAVES], v[NR_REFS],
+           v[NR_JOURNAL_FAIL], v[NR_FROM_1721B0], v[NR_FROM_1731D0], v[NR_FROM_OTHER], v[NR_ON_HELPER], v[NR_THREAD_TABLE],
+           v[NR_NODES], v[NR_LEAVES], v[NR_REFS],
            v[NR_POLYS], v[NR_EDGES], v[NR_STEPS2], v[NR_HITS], v[NR_BACKEDGES], v[NR_DELEG], v[NR_MAXD], v[NR_NAN_WORDS], t);
 }
