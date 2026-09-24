@@ -286,7 +286,7 @@ static void helper_timeout_check(void)
     if (!scene_abandon_armed) return;
     if (abandon_ms < 0) { const char *e = getenv("XV_SCENE_ABANDON_MS"); abandon_ms = e ? atoi(e) : 2500; const char *t = getenv("XV_SCENE_ABANDON_TEST"); abandon_test = t ? (unsigned)atoi(t) : 0; }
     uint64_t run = xk_os_monotonic_us() - slow_t_dispatch;
-    int test = abandon_test && slow_dispatch_serial == abandon_test && run > 20000u;
+    int test = abandon_test && slow_dispatch_serial >= abandon_test && run > 20000u;   /* first check at or past scene n: checks come every 20,000 back edges, not every scene */
     if (!test && (abandon_ms <= 0 || run < (uint64_t)abandon_ms * 1000u)) return;
     if (test) abandon_test = 0;
     abandon_timeouts++; scene_abandons++;
@@ -701,7 +701,7 @@ static void helper_timeout_check(void)
     if (!scene_abandon_armed) return;
     if (abandon_ms < 0) { const char *e = getenv("XV_SCENE_ABANDON_MS"); abandon_ms = e ? atoi(e) : 2500; const char *t = getenv("XV_SCENE_ABANDON_TEST"); abandon_test = t ? (unsigned)atoi(t) : 0; }
     uint64_t run = xk_os_monotonic_us() - slow_t_dispatch;
-    int test = abandon_test && slow_dispatch_serial == abandon_test && run > 20000u;
+    int test = abandon_test && slow_dispatch_serial >= abandon_test && run > 20000u;   /* first check at or past scene n: checks come every 20,000 back edges, not every scene */
     if (!test && (abandon_ms <= 0 || run < (uint64_t)abandon_ms * 1000u)) return;
     if (test) abandon_test = 0;
     abandon_timeouts++; scene_abandons++;
