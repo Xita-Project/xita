@@ -203,10 +203,10 @@ static struct { uint32_t vblank_cb, swap_cb; unsigned frame, draws, draws_total,
 uint32_t xd3d_backbuffer_data(void) { return g_dev.backbuffer ? RES_DATA(g_dev.backbuffer) : 0; }
 static int g_hist_frame = -2;
 /* XV_REC_HLE (runtime/xv_record_opt.h): exact fast paths for the scene's hottest D3D state setters - render-state
- * methods through a precomputed method table, the texture-state table read through one guest page pointer, and
- * single-page vertex-constant uploads - plus the histogram check skipped while no trace is configured
- * (g_hist_frame == -1 makes xd3d_hist_active() return 0). Verify runs the original on the live state and the fast
- * path on a copy, and compares. */
+ * methods through a precomputed method table, the texture-state table read through one guest page pointer - plus
+ * the histogram check skipped while no trace is configured (g_hist_frame == -1 makes xd3d_hist_active() return 0)
+ * and the draw-stream hash call skipped while that hash is off. Verify runs the original on the live state and the
+ * fast path on a copy, and compares. */
 #include "../../runtime/xv_record_opt.h"
 static xv_rec_opt g_opt_hle = XV_REC_OPT_INIT("XV_REC_HLE");
 /* XV_REC_AB state (runtime/xv_record_opt.h): the phase flips at recording-frame starts, never inside a scene. */
@@ -1127,10 +1127,10 @@ static void rs_method_old(uint32_t method, uint32_t v)
 enum { RS_NONE = -1, RS_ALPHA_TEST = -2, RS_ALPHA_BLEND = -3, RS_COLOR_MASK = -4, RS_FOG = -5, RS_ALPHA_FUNC = -6,
        RS_ALPHA_REF = -7, RS_SRC_BLEND = -8, RS_DST_BLEND = -9, RS_BLEND_OP = -10, RS_Z_FUNC = -11, RS_Z_WRITE = -12 };
 static int16_t rs_table[0x800];
+static int rs_table_done;
 static void rs_table_init(void)
 {
-    static int done;
-    if (done) return;
+    if (rs_table_done) return;
     for (uint32_t m = 0; m < 0x2000u; m += 4) {
         int16_t k;
         switch (m) {
@@ -1142,9 +1142,9 @@ static void rs_table_init(void)
         }
         rs_table[m >> 2] = k;
     }
-    done = 1;
+    rs_table_done = 1;
 }
-static void rs_state_fast(xd3d_state_t *st, uint32_t method, uint32_t v)
+static inline __attribute__((always_inline)) void rs_state_fast(xd3d_state_t *st, uint32_t method, uint32_t v)
 {
     uint32_t m = method & 0x1FFC;
     xv_stencil_method(&st->stencil, m, v);
@@ -1168,7 +1168,7 @@ static void rs_state_fast(xd3d_state_t *st, uint32_t method, uint32_t v)
     default: break;
     }
 }
-static void rs_diag(uint32_t method, uint32_t v)
+static inline __attribute__((always_inline)) void rs_diag(uint32_t method, uint32_t v)
 {
     uint32_t m = method & 0x1FFC;
     { static unsigned n; static int log_rs=-1;
@@ -1184,6 +1184,7 @@ static void rs_diag(uint32_t method, uint32_t v)
 static void rs_method(uint32_t method, uint32_t v)
 {
     int mode = hle_mode_now();
+    if (mode == 2 && __builtin_expect(rs_table_done, 1)) { rs_state_fast(&xd3d_state, method, v); rs_diag(method, v); return; }
     if (mode == 0) { rs_method_old(method, v); return; }
     rs_table_init();
     if (mode == 2) { rs_state_fast(&xd3d_state, method, v); rs_diag(method, v); return; }
@@ -1342,24 +1343,11 @@ void xv_hle_D3DDevice_GetVertexShaderSize(xctx *c)
     X_RET(2);
 }
 /* SetVertexShaderConstant(Register (-96..95), pConstantData, ConstantCount) */
-static void vs_constants_fast(float (*vsc)[4], int64_t reg, uint32_t src, uint32_t n, uint32_t caller,
-    uint32_t *dirty_lo, uint32_t *dirty_hi);
 void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
 { XD3D_COUNT("D3DDevice_SetVertexShaderConstant");
     int64_t reg = (int64_t)(int32_t)X_ARG(0) + 96;
     uint32_t src = X_ARG(1), n = X_ARG(2);
-    int mode = hle_mode_now();
-    if (mode == 2) {
-        if (xd3d_hist_gate()) { float f[4]; x_guest_read(f, src, sizeof f); D3DLOG("[hist] SetVertexShaderConstant(reg %d, n %u) from %08X: %.3f %.3f %.3f %.3f\n", (int32_t)X_ARG(0), n, X_M32(c->r[4]), f[0], f[1], f[2], f[3]); }
-        vs_constants_fast(xd3d_state.vsc, reg, src, n, X_M32(c->r[4]), &xd3d_state.vsc_dirty_lo, &xd3d_state.vsc_dirty_hi);
-        c->r[0] = 0; X_RET(3);
-    }
-    static float shadow_vsc[192][4]; static uint32_t shadow_lo, shadow_hi;
-    if (mode == 1) {
-        memcpy(shadow_vsc, xd3d_state.vsc, sizeof shadow_vsc); shadow_lo = xd3d_state.vsc_dirty_lo; shadow_hi = xd3d_state.vsc_dirty_hi;
-        vs_constants_fast(shadow_vsc, reg, src, n, 0, &shadow_lo, &shadow_hi);
-    }
-    if (xd3d_hist_active()) { float f[4]; x_guest_read(f, src, sizeof f); D3DLOG("[hist] SetVertexShaderConstant(reg %d, n %u) from %08X: %.3f %.3f %.3f %.3f\n", (int32_t)X_ARG(0), n, X_M32(c->r[4]), f[0], f[1], f[2], f[3]); }
+    if (xd3d_hist_gate()) { float f[4]; x_guest_read(f, src, sizeof f); D3DLOG("[hist] SetVertexShaderConstant(reg %d, n %u) from %08X: %.3f %.3f %.3f %.3f\n", (int32_t)X_ARG(0), n, X_M32(c->r[4]), f[0], f[1], f[2], f[3]); }
     /* NV2A's vertex ALU defines 0 * (inf|NaN) = 0, so Halo happily uploads non-finite constants (e.g. the
      * texture-transform row c[17].z = 1/scale^2 with scale 0 for a non-animated stage) and the dph against a
      * texcoord with a 0 component still comes out right.  GXM is IEEE: NaN texcoords sampled the second stage
@@ -1379,33 +1367,7 @@ void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
         if ((uint32_t)lo < xd3d_state.vsc_dirty_lo) xd3d_state.vsc_dirty_lo = (uint32_t)lo;
         if ((uint32_t)hi > xd3d_state.vsc_dirty_hi) xd3d_state.vsc_dirty_hi = (uint32_t)hi;
     }
-    if (mode == 1 && xv_rec_opt_result(&g_opt_hle, !memcmp(shadow_vsc, xd3d_state.vsc, sizeof shadow_vsc) &&
-            shadow_lo == xd3d_state.vsc_dirty_lo && shadow_hi == xd3d_state.vsc_dirty_hi))
-        xk_os_log("[d3d] [rec-verify] XV_REC_HLE mismatch: vertex constants reg %d count %u\n", (int)(reg - 96), n);
     c->r[0] = 0; X_RET(3);
-}
-/* The same rows, zeroing and dirty range as above: one guest translation when the whole source lies in one page,
- * then the identical per-component non-finite rule (and its first-8 log) over the copied rows. */
-static void vs_constants_fast(float (*vsc)[4], int64_t reg, uint32_t src, uint32_t n, uint32_t caller,
-    uint32_t *dirty_lo, uint32_t *dirty_hi)
-{
-    int64_t lo = reg < 0 ? 0 : reg, hi = reg + n;
-    if (hi > 192) hi = 192;
-    if (lo >= hi) return;
-    uint32_t first = (uint32_t)(lo - reg), rows = (uint32_t)(hi - lo);
-    uint32_t a = src + first * 16u, bytes = rows * 16u;
-    float *d = vsc[(uint32_t)lo];
-    if (bytes <= 4096u - (a & 0xFFFu)) memcpy(d, X_G(a), bytes);
-    else for (uint32_t r = 0; r < rows; ++r) x_guest_read(d + 4u * r, a + 16u * r, 16);
-    for (uint32_t i = 0; i < rows * 4u; ++i) {
-        uint32_t bits; memcpy(&bits, &d[i], 4);
-        if ((bits & 0x7F800000u) == 0x7F800000u) {   /* !isfinite */
-            d[i] = 0.0f;
-            if (caller) { static unsigned nn; if (nn++ < 8) D3DLOG("vs const c[%d].%c non-finite from %08X -> 0\n", (int)(lo + i / 4u) - 96, "xyzw"[i & 3u], caller); }
-        }
-    }
-    if ((uint32_t)lo < *dirty_lo) *dirty_lo = (uint32_t)lo;
-    if ((uint32_t)hi > *dirty_hi) *dirty_hi = (uint32_t)hi;
 }
 /* Halo builds its register-combiner programs at run time into one scratch X_D3DPIXELSHADERDEF and
  * re-submits it before each material.  Hash the program fields (everything except the constant colours)

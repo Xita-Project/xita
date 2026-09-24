@@ -727,7 +727,6 @@ typedef struct {
     SceGxmTexture tex;
 } rt_alias_t;
 static rt_alias_t g_rt[XV_RT_SLOTS];
-static unsigned g_rt_gen;   /* bumped on every change of an alias's data/format (XV_REC_TEXTURE memo validity) */
 #include "xv_scene_census_plan.h"
 #include "xv_query_boundary.h"
 #include "xv_depth_store.h"
@@ -757,7 +756,6 @@ static int rt_formats(unsigned fmt, SceGxmColorFormat *cf, SceGxmTextureFormat *
 }
 static void rt_destroy(rt_alias_t *r)
 {
-    g_rt_gen++;
     if (r->rt) sceGxmDestroyRenderTarget(r->rt);
     if (r->mem) { sceGxmUnmapMemory(r->mem); sceKernelFreeMemBlock(r->uid); }
     g_rt_bytes -= r->bytes + r->driver_bytes;
@@ -771,7 +769,7 @@ void xv_d3d_ReleaseRenderTarget(uint32_t data)
 {
     data &= 0x03ffffffu;
     for (unsigned i = 0; i < XV_RT_SLOTS; ++i)
-        if (g_rt[i].owner == data) { g_rt[i].data = g_rt[i].owner = 0; g_rt_gen++; }
+        if (g_rt[i].owner == data) g_rt[i].data = g_rt[i].owner = 0;
 }
 static rt_alias_t *rt_find(uint32_t data)
 {
@@ -848,7 +846,7 @@ static rt_alias_t *rt_register(uint32_t data, unsigned w, unsigned h, unsigned f
         XV_LOG("RT slot %u: %ux%u fmt %02X, pool %u KB\n", (unsigned)(r - g_rt), w, h, fmt, g_rt_bytes >> 10);
     }
     memset(r->mem, 0, r->bytes);
-    r->data = data & 0x03ffffffu; r->last_frame = g_build_frame; g_rt_gen++;
+    r->data = data & 0x03ffffffu; r->last_frame = g_build_frame;
     return r;
 fail:
     { static unsigned n; if (n++ < 16) XV_LOG("RT %08X %ux%u fmt %02X unavailable; pass skipped\n", data, w, h, fmt); }
@@ -900,19 +898,11 @@ int xv_d3d_record_ui(unsigned frame, unsigned batch)
 static int draw_scan_override = -1;
 static xv_rec_opt g_opt_index = XV_REC_OPT_INIT("XV_REC_INDEX");   /* retain_indices: see retain_new */
 /* XV_REC_DRAW: exact memos of per-draw lookups whose inputs are immutable tables or the memo key itself (vertex
- * program handle by microcode hash, combiner table entry, blend variant, declaration properties, texture-coordinate
- * scales), and the draw's trace flags read once per draw. Verify recomputes each lookup and compares. */
+ * program handle by microcode hash, combiner table entry, reference layout per declaration and stream, texture-
+ * coordinate scale per size word), and the draw's trace flags read once per draw. Verify recomputes each lookup
+ * and compares. */
 static xv_rec_opt g_opt_draw = XV_REC_OPT_INIT("XV_REC_DRAW");
 static int g_draw_mode;   /* XV_REC_DRAW path of the draw being recorded (record_draw sets it) */
-/* XV_REC_TEXTURE: when the per-stage source memo misses, a per-frame memo keyed by the texture header and validated
- * by the header words both resolvers read (render-target alias: live Data/Format; UI cache: Data/Format/Size through
- * the thread's page table) and the render-target generation returns the source the resolvers would return. P8 with a
- * palette (palette contents are part of the cache key) always resolves. Verify resolves and compares the pointer. */
-static xv_rec_opt g_opt_texture = XV_REC_OPT_INIT("XV_REC_TEXTURE");
-/* XV_REC_QUERY: visibility-query slots by ID through a hash index instead of the 512-entry scans in
- * xv_visibility_issue/read/find. Slots are only ever allocated at the first empty index and never freed, so the
- * used slots are the prefix [0, count) and each ID owns exactly one: the index returns the slot the scan finds, and
- * a new ID gets slot `count`. Verify runs the scans and compares every slot (and the prefix invariant). */
 static xv_rec_opt g_opt_query = XV_REC_OPT_INIT("XV_REC_QUERY");
 static void draw_memo_mismatch(const char *what, unsigned a, unsigned b);
 static unsigned scan_index_calls, scan_constant_checks, scan_constant_reused;
@@ -954,7 +944,6 @@ void xv_d3d_prep_cache_report(unsigned frames)
     index_reuse_report(frames);
     XV_REC_OPT_REPORT(&g_opt_index, frames, XV_LOG);
     XV_REC_OPT_REPORT(&g_opt_draw, frames, XV_LOG);
-    XV_REC_OPT_REPORT(&g_opt_texture, frames, XV_LOG);
     XV_REC_OPT_REPORT(&g_opt_query, frames, XV_LOG);
     XV_LOG("[sampler-cache] %u frames: %u reused / %u prepared (texture validity still checked)\n", frames, sampler_hits, sampler_misses);
     sampler_hits = sampler_misses = 0;
@@ -967,36 +956,6 @@ void xv_d3d_prep_cache_report(unsigned frames)
     depth_prepare_hits = 0;
     XV_LOG("[opaque-material] %u frames: %u eligible / %u proven opaque (captured upload; alpha test retained otherwise)\n", frames, opaque_candidates, opaque_proven);
     opaque_candidates = opaque_proven = 0;
-}
-static const SceGxmTexture *texture_source_resolve_old(uint32_t hdr, uint32_t pal)
-{
-    const SceGxmTexture *src = xv_d3d_render_target_texture(hdr);
-    if (!src) src = xv_ui_gxm_texture_pal(hdr, pal);
-    return src;
-}
-static const SceGxmTexture *texture_source_resolve(uint32_t hdr, uint32_t pal)
-{
-    int mode = xv_rec_opt_mode(&g_opt_texture);
-    if (!mode || !hdr) return texture_source_resolve_old(hdr, pal);
-    /* the words each resolver reads: xv_d3d_render_target_texture through xv_guest_ptr, the UI cache through X_G */
-    const uint32_t *live = xv_guest_ptr(hdr);
-    uint32_t live_data = live[1], live_fmt = live[3];
-    uint32_t data = *(const xu32_u *)X_G(hdr + 4), fmtword = *(const xu32_u *)X_G(hdr + 12), size = *(const xu32_u *)X_G(hdr + 16);
-    int memoizable = !(((fmtword >> 8) & 0xFF) == 0x0B && pal);   /* P8 through a palette: contents are the key */
-    static struct { uint32_t hdr, live_data, live_fmt, data, fmtword, size, frame, rt_gen; const SceGxmTexture *src; } memo[64];
-    unsigned m = (hdr >> 4) * 2654435761u >> 26;
-    int hit = memoizable && memo[m].src && memo[m].hdr == hdr && memo[m].frame == g_build_frame + 1u &&
-        memo[m].rt_gen == g_rt_gen && memo[m].live_data == live_data && memo[m].live_fmt == live_fmt &&
-        memo[m].data == data && memo[m].fmtword == fmtword && memo[m].size == size;
-    if (hit && mode == 2) return memo[m].src;
-    const SceGxmTexture *src = texture_source_resolve_old(hdr, pal);
-    if (hit && xv_rec_opt_result(&g_opt_texture, src == memo[m].src))
-        XV_LOG("[rec-verify] XV_REC_TEXTURE mismatch frame %u: header %08X memo %p resolved %p\n", g_build_frame, hdr, (const void *)memo[m].src, (const void *)src);
-    if (memoizable && src) {
-        memo[m].hdr = hdr; memo[m].live_data = live_data; memo[m].live_fmt = live_fmt; memo[m].data = data;
-        memo[m].fmtword = fmtword; memo[m].size = size; memo[m].frame = g_build_frame + 1u; memo[m].rt_gen = g_rt_gen; memo[m].src = src;
-    }
-    return src;
 }
 static const SceGxmTexture *texture_for(unsigned stage)
 {
@@ -1015,7 +974,8 @@ static const SceGxmTexture *texture_for(unsigned stage)
     if (memo_on && memo_frame[stage] == g_build_frame + 1u && memo_hdr[stage] == S.tex_guest[stage] && memo_pal[stage] == S.pal_guest[stage]) {
         src = memo_src[stage]; texture_source_memo_hits++;
     } else {
-        src = texture_source_resolve(S.tex_guest[stage], S.pal_guest[stage]);
+        src = xv_d3d_render_target_texture(S.tex_guest[stage]);
+        if (!src) src = xv_ui_gxm_texture_pal(S.tex_guest[stage], S.pal_guest[stage]);
         memo_frame[stage] = g_build_frame + 1u; memo_hdr[stage] = S.tex_guest[stage]; memo_pal[stage] = S.pal_guest[stage]; memo_src[stage] = src;
         texture_source_memo_misses++;
     }
@@ -1292,27 +1252,7 @@ static cmd_t *new_cmd(void)
     return c;
 }
 
-static int blend_mode_scan(int *fallback);
-/* g_blend_combo only grows and its entries never change: a found (or newly added) variant stays the answer for the
- * same inputs. The table-full fallback is never memoized. */
 static int blend_mode(void)
-{
-    int mode = g_draw_mode, fallback = 0;
-    if (mode <= 0) return blend_mode_scan(&fallback);
-    static struct { uint32_t enable, src, dst, mask, op; int valid, result; } memo;
-    uint32_t mask = S.color_mask, op = S.blend_op;
-    if (memo.valid && memo.enable == S.blend_enable && memo.src == S.src_blend && memo.dst == S.dst_blend &&
-        memo.mask == mask && memo.op == op) {
-        if (mode == 2) return memo.result;
-        int r = blend_mode_scan(&fallback);
-        if (xv_rec_opt_result(&g_opt_draw, r == memo.result)) draw_memo_mismatch("blend variant", (unsigned)memo.result, (unsigned)r);
-        return r;
-    }
-    int r = blend_mode_scan(&fallback);
-    if (!fallback) { memo.enable = S.blend_enable; memo.src = S.src_blend; memo.dst = S.dst_blend; memo.mask = mask; memo.op = op; memo.result = r; memo.valid = 1; }
-    return r;
-}
-static int blend_mode_scan(int *fallback)
 {
     unsigned mask = S.color_mask & 0xF;
     unsigned src = S.blend_enable ? S.src_blend : X_D3DBLEND_ONE, dst = S.blend_enable ? S.dst_blend : X_D3DBLEND_ZERO;
@@ -1329,7 +1269,6 @@ static int blend_mode_scan(int *fallback)
         return (int)g_blend_combos++;
     }
     XV_ONCE(warned_blend, "blend %u/%u: variant table full; using src-alpha\n", S.src_blend, S.dst_blend);
-    *fallback = 1;
     return BLEND_ALPHA;
 }
 
@@ -2118,28 +2057,6 @@ static int vertex_reference_layout_scan(const xv_vs_desc_t *d, unsigned stream, 
     return 1;
 }
 
-/* Does the declaration read persistent (constant-stream) attributes? Immutable per declaration. */
-static int desc_uses_const_stream_scan(const xv_vs_desc_t *d)
-{
-    for (unsigned a = 0; a < d->nattrs; a++) if (d->attrs[a].stream == XV_CONST_STREAM) return 1;
-    return 0;
-}
-static int desc_uses_const_stream(const xv_vs_desc_t *d)
-{
-    int mode = g_draw_mode;
-    if (mode <= 0) return desc_uses_const_stream_scan(d);
-    static struct { const xv_vs_desc_t *d; int result; } memo[32];
-    unsigned m = (unsigned)((uintptr_t)d >> 4) * 2654435761u >> 27;
-    if (memo[m].d == d) {
-        if (mode == 2) return memo[m].result;
-        int r = desc_uses_const_stream_scan(d);
-        if (xv_rec_opt_result(&g_opt_draw, r == memo[m].result)) draw_memo_mismatch("constant stream", (unsigned)memo[m].result, (unsigned)r);
-        return r;
-    }
-    int r = desc_uses_const_stream_scan(d);
-    memo[m].d = d; memo[m].result = r;
-    return r;
-}
 static void draw_memo_mismatch(const char *what, unsigned memo, unsigned live)
 {
     XV_LOG("[rec-verify] XV_REC_DRAW mismatch frame %u cmd %u: %s memo %u live %u\n", g_build_frame, cur_list()->ncmds, what, memo, live);
@@ -2243,11 +2160,12 @@ static void record_draw_body(uint32_t prim, uint32_t count, const void *indices,
     { extern uint32_t xd3d_fog_color(void); c->fog_color = xd3d_fog_color(); }
     { extern uint32_t xd3d_alpha_test(void); c->atest = xd3d_alpha_test(); }
     { static const xv_vs_desc_t *bsp_d; static int bsp_is; if (d != bsp_d) { bsp_d = d; bsp_is = strstr(d->gxp, "halo_vs_16") != NULL; } if (bsp_is) xv_d3d_bsp_acc++; }   /* was a strstr per draw */
-    if (desc_uses_const_stream(d)) {
+    for (unsigned a = 0; a < d->nattrs; a++) if (d->attrs[a].stream == XV_CONST_STREAM) {
         if (!snapshot_attributes(c)) {
             cur_list()->ncmds--; cur_list()->dropped++; cur_list()->drop_attributes++;
             return;
         }
+        break;
     }
 
     xv_draw_profile_step(XV_DRAW_PROGRAM, &profile);
