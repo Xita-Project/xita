@@ -170,7 +170,11 @@ static void scene(xctx *c, scen *sc)
     /* the stack: random bytes; E (the body's esp) 8-aligned with the frame and the callee frames mapped */
     for (uint32_t a = STACK; a < STACK + STACK_PAGES * 4096u; a += 4) w32(a, rnd());
     uint32_t E = (STACK + 0x100 + (rnd() % (STACK_PAGES * 4096u - 0x300))) & ~7u;
-    if (straddle) E = STACK + 0x3040u;                               /* the window starts at guest stack page 3 = physical stack page 0 */
+    const int straddle_written = straddle && (rnd() & 1);
+    if (straddle) E = straddle_written ? STACK + 0x3030u : STACK + 0x3040u;
+    /* STACK+0x3040: the window starts at guest stack page 3 = physical stack page 0 (its first part); STACK+0x3030: the
+     * window crosses from page 2 into page 3, whose first bytes (the window's second part) are frame offset -30h,
+     * written by 60E90 inside 60000 for every flare - the straddling read then sees the region's own store */
     else if (rnd() % 11 == 0) E = STACK + 0x1000u - 0x40u - 8u * (rnd() % 12);   /* the window straddles a page boundary */
     const uint32_t ESP0 = E + 0xCCu + (rnd() & 4);                   /* push ebp; and esp,-8 -> E + 0xC8; sub esp,0B8h; 4 pushes -> E */
     /* camera and view */
@@ -207,7 +211,7 @@ static void scene(xctx *c, scen *sc)
         if (sc->alias == 1 && rnd() % 3 == 0) refl = E - 0x40u + 4u * (rnd() % 16);        /* reflections inside the stack window */
         w32(def + 0xC8, refl);
         if (straddle && d == 0) {
-            w16(STACK + 0x3000u, (uint16_t)(refl >> 16));               /* window bytes 0..1 (frame offset -40h: never written) */
+            w16(STACK + 0x3000u, (uint16_t)(refl >> 16));               /* the window's page-3 bytes 0..1 */
             w16(def + 0xCA, (uint16_t)((refl >> 16) ^ 0x10));           /* the next guest page: a different (valid) tag page */
         }
         for (int32_t r = 0; r < nrefl; ++r) {
