@@ -73,6 +73,22 @@ static const char *const FS_GXP[FS_KINDS] = { "app0:shaders/xv_color.frag.gxp", 
 /* Recompiled register-combiner programs (Stage 3b, tools/ps_pipeline.py): fragment programs keyed by
  * the combiner hash the game submitted.  Linked lazily per (vertex program, combiner, blend). */
 #include "xv_ps_table.h"
+/* XV_ALPHA_PROOF (default on when the generated table exists): tools/gen_ps_alpha_kind.py marks the combiners whose
+ * output alpha is texture 0's alpha unchanged (1) or the constant 1 (2). Kind 1 joins the audited 154066FD family in
+ * the opaque-upload proof; kind 2 needs no texture. A proven draw takes the alpha-disabled program: no discard, which
+ * on this tile-based GPU would otherwise disable hidden-surface removal for its tiles (a30 pod: ~100 ms of GPU). */
+#if __has_include("xv_ps_alpha_kind.h")
+#include "xv_ps_alpha_kind.h"
+#define XV_PS_ALPHA_KIND(e) xv_ps_alpha_kind[e]
+#else
+#define XV_PS_ALPHA_KIND(e) 0
+#endif
+static int alpha_proof_on(void)
+{
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("XV_ALPHA_PROOF"); on = e ? atoi(e) != 0 : 1; }
+    return on;
+}
 #define XV_PS_LINKS (XV_MAX_VS * 12) /* share the former per-VS capacity */
 #define XV_PS_BUCKETS 2048
 typedef struct { uint16_t vs, next; int16_t entry; uint8_t blend, failed, alpha_mode, replace_blend; xv_fshader_t fs; } ps_link_t;
@@ -1864,7 +1880,7 @@ static int opaque_material_enabled(void)
 static int opaque_material_candidate(const cmd_t *c)
 {
     if (c->ps_entry < 0 || (unsigned)c->ps_entry >= XV_PS_TABLE_COUNT ||
-        xv_ps_table[c->ps_entry].ps_key != 0x154066FDu ||
+        (xv_ps_table[c->ps_entry].ps_key != 0x154066FDu && !(alpha_proof_on() && XV_PS_ALPHA_KIND(c->ps_entry) == 1)) ||
         !(c->atest & (1u << 16)) || ((c->atest >> 8) & 7u) == 7 ||
         !xv_alpha_accepts_opaque(c->atest)) return 0;
     for (unsigned i = 0; i < 2; i++) {
@@ -3439,7 +3455,11 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             specialize_alpha = e ? atoi(e) != 0 : 1;
             XV_LOG("alpha-disabled shader specialization: %d\n", specialize_alpha);
         }
-        int no_alpha = specialize_alpha && (!draw_needs_alpha_test(c->atest) || c->opaque_alpha);
+        static int force_na = -1;   /* diagnostic XV_FORCE_NA=1: every draw takes its alpha-disabled (no discard) program */
+        if (force_na < 0) { const char *e = getenv("XV_FORCE_NA"); force_na = e ? atoi(e) != 0 : 0; if (force_na) XV_LOG("XV_FORCE_NA: alpha test dropped from every draw (diagnostic, wrong cutouts)\n"); }
+        int alpha_one = alpha_proof_on() && c->ps_entry >= 0 && (unsigned)c->ps_entry < XV_PS_TABLE_COUNT &&
+            XV_PS_ALPHA_KIND(c->ps_entry) == 2 && xv_alpha_accepts_opaque(c->atest);   /* output alpha is 1 */
+        int no_alpha = specialize_alpha && (force_na || !draw_needs_alpha_test(c->atest) || c->opaque_alpha || alpha_one);
         int alpha_mode = material_alpha_mode(c, no_alpha);
         xv_fshader_t *fs = c->depth_prepared ? &v->fs[FS_COLOR][BLEND_NOCOLOR] : c->ps_entry >= 0 ?
             XV_RENDER_CALL(XV_RENDER_SHADER_LOOKUP, fragment_for_ps_mode(v, c->ps_entry, c->blend, alpha_mode)) : NULL;

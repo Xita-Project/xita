@@ -996,6 +996,10 @@ $(BUILD)/runtime/xv_shader.o: shaders/xv_vs_gxp.h
 shaders/xv_ps_gxp.h: tools/embed_ps_shaders.py shaders/xv_ps_table.h $(wildcard shaders/ps_*.gxp) shaders/xv_color.frag.gxp shaders/xv_texmod.frag.gxp shaders/xv_tex0.frag.gxp shaders/xv_lm.frag.gxp
 	$(PYTHON) tools/embed_ps_shaders.py $@
 $(BUILD)/runtime/xv_shader.o: shaders/xv_ps_gxp.h
+# Output-alpha kind of every combiner entry (XV_ALPHA_PROOF in runtime/xv_d3d.c)
+shaders/xv_ps_alpha_kind.h: tools/gen_ps_alpha_kind.py shaders/xv_ps_table.h
+	$(PYTHON) tools/gen_ps_alpha_kind.py shaders
+$(BUILD)/runtime/xv_d3d.o: shaders/xv_ps_alpha_kind.h
 
 # compile ----------------------------------------------------------------------
 $(BUILD)/%.o: %.c | $(BUILD)

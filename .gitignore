@@ -53,6 +53,7 @@ shaders/*.gxp
 shaders/xv_layouts.h
 shaders/xv_ps_table.h
 shaders/xv_ps_gxp.h
+shaders/xv_ps_alpha_kind.h
 shaders/xv_hud_gxp.h
 shaders/xv_vs_gxp.h
 dashboard/license_text.h
