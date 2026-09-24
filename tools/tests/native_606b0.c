@@ -37,7 +37,10 @@ void xk_os_log(const char *fmt, ...)
     if (strstr(b, "NAN-ONLY")) log_nan++;
     if (strstr(b, " frames: calls ")) fputs(b, stdout);                  /* the native's own counters (end of the run) */
 }
-uint64_t xk_os_monotonic_us(void) { return 0; }
+uint64_t xk_os_monotonic_us(void)   /* only read with XV_NATIVE_606B0_TIME=1 (bench) */
+{
+    struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000000u + (uint64_t)t.tv_nsec / 1000u;
+}
 void xv_scene_phase_begin(uint32_t a) { (void)a; }
 void xv_scene_phase_end(uint32_t a) { (void)a; }
 static unsigned preempt_calls, barrier_calls; static int slice = 37;
@@ -356,6 +359,45 @@ int main(int argc, char **argv)
         }
         xv_native_606b0_force(0);
         printf("bench: %d flares, us/call guest %.2f native %.2f (%.2fx)\n", sc.nflares, tg, tn, tg / tn);
+        /* region only: every reflection rejected (brightness 0; the first one's replaces the flare's), so the whole flare list is one region and the
+         * draw path (guest code and the logging stubs, identical in both modes) never runs */
+        memcpy(g_xram, before, ARENA);
+        unsigned nrefl = 0;
+        for (int32_t i = 0; i < sc.nflares; ++i) {
+            uint32_t def = r32(0x2C76D0u + 40u * (uint32_t)i); int32_t n = (int32_t)r32(def + 0xC4); uint32_t refl = r32(def + 0xC8);
+            for (int32_t r = 0; r < n && r < 64; ++r) { wf(refl + 0x80u * (uint32_t)r + 0x34, 0.0f); wf(refl + 0x80u * (uint32_t)r + 0x38, 0.0f); w16(refl + 0x80u * (uint32_t)r + 0x3C, 0); }
+        }
+        memcpy(before, g_xram, ARENA);
+        for (int pass = 0; pass < 2; ++pass) {
+            xv_native_606b0_force(pass ? 2 : 0);
+            clock_gettime(CLOCK_MONOTONIC, &t0);
+            for (unsigned i = 0; i < reps; ++i) { xctx cc = c0; w32(LOG_TOP, 0); f_000606B0(&cc); }
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            double us = ((t1.tv_sec - t0.tv_sec) * 1e6 + (t1.tv_nsec - t0.tv_nsec) / 1e3) / reps;
+            if (pass) tn = us; else tg = us;
+        }
+        xv_native_606b0_force(0);
+        { xctx cc = c0; preempt_calls = 0; xv_native_606b0_force(2); f_000606B0(&cc); xv_native_606b0_force(0); }
+        (void)nrefl;
+        printf("bench (region only, reflections rejected): %d flares, us/call guest %.2f native %.2f (%.2fx)\n", sc.nflares, tg, tn, tg / tn);
+        if (getenv("XV_NATIVE_606B0_TIME")) {        /* the natives' own region timers (guest timed entry hook -> exit probe) */
+            xv_native_606b0_report(0);
+            for (int pass = 0; pass < 2; ++pass) {
+                xv_native_606b0_force(pass ? 2 : 0);
+                for (unsigned i = 0; i < reps; ++i) { xctx cc = c0; w32(LOG_TOP, 0); f_000606B0(&cc); }
+                printf("  %s: ", pass ? "native" : "guest"); fflush(stdout); xv_native_606b0_report(reps);
+            }
+            xv_native_606b0_force(0);
+            /* fixed cost: one flare, rejected at its first test (another view's stage) */
+            memcpy(g_xram, before, ARENA);
+            w32(0x2E34E0, 1); w8(0x2C76D0 + 0x22, (uint8_t)(r32(0x2FC6C0) >> 16) + 1u);
+            for (int pass = 0; pass < 2; ++pass) {
+                xv_native_606b0_force(pass ? 2 : 0);
+                for (unsigned i = 0; i < reps; ++i) { xctx cc = c0; w32(LOG_TOP, 0); f_000606B0(&cc); }
+                printf("  one rejected flare, %s: ", pass ? "native" : "guest"); fflush(stdout); xv_native_606b0_report(reps);
+            }
+            xv_native_606b0_force(0);
+        }
     }
     return mismatches != 0;
 }

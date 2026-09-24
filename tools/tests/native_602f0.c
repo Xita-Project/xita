@@ -128,6 +128,7 @@ static void image_constants(void)
         { 0x1F0C30, 0x43FFC000 }, { 0x1F0C34, 0x447FE000 }, { 0x1F2840, 0x0000173F },
     };
     for (unsigned i = 0; i < sizeof k / sizeof k[0]; ++i) w32(k[i].a, k[i].v);
+    if (rnd() % 4 == 0) w32(0x1F2840, 0x0000033Fu | ((rnd() & 3u) << 10) | (rnd() & 0x1000u));   /* the floor's control word, any RC */
 }
 typedef struct { int nmarkers, alias, straddle, declines; } scen;
 
@@ -224,7 +225,9 @@ static int same_ctx(const xctx *a, const xctx *b, char *why, size_t n)
     for (unsigned i = 0; i < 8; ++i) F(r[i]);
     F(fs_base) F(df) F(f_kind) F(f_op1) F(f_op2) F(f_res) F(f_bits) F(f_cf_override) F(f_cf) F(f_of_override) F(f_of)
     F(fsp) F(fsw) F(fcw) F(preempt) F(scratch) F(eip_hint)
-    for (unsigned i = 0; i < 8; ++i) if (memcmp(&a->st[i], &b->st[i], 8)) {
+    /* x87 slots: two NaNs are equal (aliased-garbage markers can give NaN positions; which operand's NaN a two-NaN
+     * operation keeps is the host compiler's operand order - the guest built -O0 and -O2 already disagrees) */
+    for (unsigned i = 0; i < 8; ++i) if (memcmp(&a->st[i], &b->st[i], 8) && !(isnan(a->st[i]) && isnan(b->st[i]))) {
         uint64_t x, y; memcpy(&x, &a->st[i], 8); memcpy(&y, &b->st[i], 8);
         snprintf(why, n, "st[%u] (fsp %u) %016llX vs %016llX", i, a->fsp, (unsigned long long)x, (unsigned long long)y); return 0;
     }
@@ -248,6 +251,31 @@ int main(int argc, char **argv)
     if (argc > 2) rng ^= strtoull(argv[2], 0, 0) * 0x9E3779B97F4A7C15ull;
     const int bench = argc > 3 && !strcmp(argv[3], "bench");
     map_memory();
+    {   /* the native's libm-free x87 rounding against libm (every mode; halves, zeros, signs, large, NaN/inf) */
+        extern double xv_native_606b0_round(uint16_t, double);
+        unsigned bad = 0, n = 0;
+        for (unsigned k = 0; k < 400000; ++k) {
+            double v;
+            switch (k % 8) {
+            case 0: v = (double)((int32_t)rnd() % 4096) * 0.5; break;                      /* halves and integers */
+            case 1: v = (double)((int32_t)rnd() % 2048) + (k & 16 ? 0.5 : -0.5); break;
+            case 2: v = ((double)(int32_t)rnd()) / (double)(1u + rnd() % 1000); break;
+            case 3: v = ldexp((double)(int32_t)rnd(), -(int)(rnd() % 60)); break;          /* tiny fractions, -0.0 via 0 */
+            case 4: v = (k & 32) ? -0.0 : 0.0; if (k & 64) v = (k & 32) ? -1e-300 : 1e-300; break;
+            case 5: v = ldexp((double)(int32_t)rnd(), (int)(rnd() % 40)); break;           /* up to and past 2^31 */
+            case 6: v = (k & 32) ? 2147483647.5 : -2147483648.5; if (k & 64) v = (k & 32) ? 2147483648.0 : -2147483648.0; break;
+            default: v = (k & 32) ? NAN : ((k & 64) ? INFINITY : -INFINITY);
+            }
+            for (unsigned rc = 0; rc < 4; ++rc) {
+                const uint16_t fcw = (uint16_t)(0x027Fu | (rc << 10));
+                const double a = xv_native_606b0_round(fcw, v), b = x87_round(&(xctx){ .fcw = fcw }, v);
+                ++n;
+                if (memcmp(&a, &b, 8) && !(isnan(a) && isnan(b))) { if (++bad <= 5) printf("round rc %u %.17g: native %.17g libm %.17g\n", rc, v, a, b); }
+            }
+        }
+        printf("rounding self-test: %u values x modes, %u differences\n", n, bad);
+        if (bad) return 1;
+    }
     uint8_t *before = malloc(ARENA), *guest = malloc(ARENA);
     unsigned mismatches = 0, unexp = 0, markers = 0, verify_bad = 0, declined = 0, decline_changed = 0;
     for (unsigned k = 0; k < cases; ++k) {

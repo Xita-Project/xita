@@ -45,7 +45,7 @@ MUTANTS = [
     ('606b0', 'flare-loop inc keeps no stale carry', 'FL_INCDEC(); s->eax += 1u;\n    sw32(s, 0x70, s->eax);', 's->eax += 1u;\n    sw32(s, 0x70, s->eax);'),
     ('606b0', 'shl edi,7 flags not recorded', 's->edi = nf_shl32(fl, s->edi, 7);', 's->edi <<= 7;'),
     ('606b0', 'stage byte bit 7 not masked', 's->ecx = nm_rd(m, s->esi + 0x22u, 1) & 0xFFFFFF7Fu;', 's->ecx = nm_rd(m, s->esi + 0x22u, 1);'),
-    ('606b0', 'fsp not masked back', 'if (s->touched) c->fsp = s->F;', 'c->fsp = s->F;'),
+    ('606b0', 'fsp not masked back', 'if (s->touched) c->fsp = s->F;               /* the region ends at depth 0 */', 'c->fsp = s->F;'),
     ('606b0', 'bx==0 copy of the brightness skipped', 'if (!(s->ebx & 0xFFFFu)) { s->ecx = sr32(s, 0x14); sw32(s, 0x34, s->ecx); }', '(void)0;'),
     ('606b0', 'flare barrier not called', '    xv_flare_barrier(2u);\n    const uint32_t row', '    const uint32_t row'),
     ('606b0', 'reflection count cached (not re-read)', 's->eax = nm_rd(m, s->ebp + 0xC4u, 4);       /* 60D90: next reflection */', 's->eax = (uint32_t)(int32_t)(int16_t)s->ebx + 1u + (s->ebx < 7u ? 0u : 0u) ? nm_rd(m, s->ebp + 0xC4u, 4) : 0; if (s->ebx == 0) s->eax = 2;'),
