@@ -101,6 +101,7 @@ void f_00061FE0(xctx *c) { stub_log(c, 0x61FE0, 1); c->r[0] = r32(c->r[4] + 4); 
 void f_0007F210(xctx *c) { stub_log(c, 0x7F210, 0); c->r[0] = 0x7F21; c->r[1] = 0x7F22; c->r[2] = 0x7F23; c->r[4] += 4; }
 void f_00063E80(xctx *c) { stub_log(c, 0x63E80, 4); c->r[0] = 0x63E8; c->r[1] = 0x63E9; c->r[2] = 0x63EA; c->r[4] += 0x14; }
 void f_00071D00(xctx *c) { stub_log(c, 0x71D00, 0); c->r[0] = 0x71D0; c->r[1] = 0x71D1; c->r[2] = 0x71D2; c->r[4] += 4; }
+void f_000602F0(xctx *c) { unexpected = 1; unexpected_what = "f_000602F0 (not part of this test)"; c->r[4] += 4; }
 
 static void map_memory(void)
 {
@@ -308,7 +309,9 @@ int main(int argc, char **argv)
         xv_native_606b0_force(1); f_000606B0(&cv); xv_native_606b0_force(0);
         int vok = same_ctx(&cv, &cg, why, sizeof why) && preempt_calls == g_pre && same_arena(g_xram, guest, 0, why, sizeof why) && !log_mismatch;
         const unsigned v_nan = log_nan;
-        if (v_nan) { nan_regions += v_nan; if (!sc.flavor) { vok = 0; snprintf(why, sizeof why, "NaN-only difference without NaN data"); } }
+        /* NaN data: the NaN flavor, or flare data aliased onto random stack bytes (alias 1/2: any bit pattern) */
+        const int nan_data = sc.flavor || sc.alias == 1 || sc.alias == 2;
+        if (v_nan) { nan_regions += v_nan; if (!nan_data) { vok = 0; snprintf(why, sizeof why, "NaN-only difference without NaN data"); } }
         if (!vok) { verify_bad++; if (++mismatches <= 10) printf("case %u (%d flares) VERIFY MISMATCH (logged %u): %s\n", k, sc.nflares, log_mismatch, why); }
         /* native */
         memcpy(g_xram, before, ARENA);
@@ -316,12 +319,12 @@ int main(int argc, char **argv)
         xv_native_606b0_force(2); f_000606B0(&cn); xv_native_606b0_force(0);
         int ok = same_ctx(&cn, &cg, why, sizeof why);
         if (ok && (preempt_calls != g_pre || barrier_calls != g_bar)) { ok = 0; snprintf(why, sizeof why, "xv_preempt %u vs %u, barrier %u vs %u", preempt_calls, g_pre, barrier_calls, g_bar); }
-        if (ok && !same_arena(g_xram, guest, sc.flavor, why, sizeof why)) ok = 0;
+        if (ok && !same_arena(g_xram, guest, nan_data, why, sizeof why)) ok = 0;
         if (g_unexp || unexpected) { unexp++; ok = 0; snprintf(why, sizeof why, "unexpected guest path: %s", unexpected_what); }
         /* NaN data: a NaN whose payload a two-NaN operation picked (host code generation) can be read back as integer
          * bits by later guest code (e.g. through aliased records); accepted only when the per-region verify of the same
          * case differed in NaN-only words and nothing else */
-        if (!ok && sc.flavor && vok && v_nan) { nan_propagated++; ok = 1; }
+        if (!ok && nan_data && vok && v_nan) { nan_propagated++; ok = 1; }
         if (!ok && ++mismatches <= 10) printf("case %u (%d flares, flavor %d, alias %d, straddle %d) native MISMATCH: %s\n", k, sc.nflares, sc.flavor, sc.alias, sc.straddle, why);
         if (!ok && getenv("N6_DEBUG")) {          /* the draw-path call log, native vs guest */
             for (uint32_t e = 0; e < 900; ++e) {
@@ -334,7 +337,7 @@ int main(int argc, char **argv)
         }
         if (sc.nflares > 0) flares += (unsigned)sc.nflares;
     }
-    printf("native-606b0 differential: %u cases, %u flares, %u draw-path stub calls, %u guest-unexpected, %u verify-mode failures (%u NaN-only words, %u cases with NaN bits propagated, all NaN-data cases), %u mismatches\n",
+    printf("native-606b0 differential: %u cases, %u flares, %u draw-path stub calls, %u guest-unexpected, %u verify-mode failures (%u NaN-only words, %u cases with NaN bits propagated, all in NaN-data cases), %u mismatches\n",
            cases, flares, draws, unexp, verify_bad, nan_regions, nan_propagated, mismatches);
     { extern void xv_native_606b0_report(unsigned); xv_native_606b0_report(cases); }
     if (bench) {
