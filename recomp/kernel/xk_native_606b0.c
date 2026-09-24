@@ -280,14 +280,23 @@ typedef struct {
     double c_a68, c_a78, c_a80, c_a98, c_acc, c_ad0, c_ad4, c_ad8, c_c2c, c_af8;
     double g_6c8, g_6cc, g_6d0, g_6d4, g_6d8, g_6dc, g_764, g_768, g_76c, g_770, g_774, g_778, g_77c, g_780, g_784;
     uint32_t i_6d4, i_6d8, i_6dc;
+    /* f_000602F0 only */
+    double c_abc, c_b14, c_c30, c_c34;
+    uint32_t K;                     /* [1F2840]: the CRT floor's control word */
+    uint16_t fcw, g_6c0;
+    int barriers;                   /* call the flare barriers (not in verify mode's native pass) */
 } rs;
 typedef struct { unsigned flares, reflections, draws, be; } r_info;
-/* frame offsets relative to E (the body's esp) */
-#define SO(k) (R_BELOW + (k))
-static inline uint32_t sr32(const rs *s, int k) { uint32_t v; memcpy(&v, s->S + SO(k), 4); return v; }
-static inline void sw32(rs *s, int k, uint32_t v) { memcpy(s->S + SO(k), &v, 4); }
-static inline double srf(const rs *s, int k) { float v; memcpy(&v, s->S + SO(k), 4); return (double)v; }
-static inline void swf(rs *s, int k, double d) { float v = (float)d; memcpy(s->S + SO(k), &v, 4); }
+/* frame offsets relative to E (the body's esp): s->S points at offset 0 inside the shadow */
+static inline uint32_t sr32(const rs *s, int k) { uint32_t v; memcpy(&v, s->S + k, 4); return v; }
+static inline uint16_t sr16(const rs *s, int k) { uint16_t v; memcpy(&v, s->S + k, 2); return v; }
+static inline void sw32(rs *s, int k, uint32_t v) { memcpy(s->S + k, &v, 4); }
+static inline void sw16(rs *s, int k, uint16_t v) { memcpy(s->S + k, &v, 2); }
+static inline void sw8(rs *s, int k, uint8_t v) { s->S[k] = v; }
+static inline double srf(const rs *s, int k) { float v; memcpy(&v, s->S + k, 4); return (double)v; }
+static inline void swf(rs *s, int k, double d) { float v = (float)d; memcpy(s->S + k, &v, 4); }
+static inline double sr64(const rs *s, int k) { double v; memcpy(&v, s->S + k, 8); return v; }
+static inline void sw64(rs *s, int k, double d) { memcpy(s->S + k, &d, 8); }
 #define CMP(A, B, depth) (s->fsw = (uint16_t)((s->fsw & ~0x4700u) | nx_cc((A), (B)) | (((s->F - (depth)) & 7u) << 11)))
 #define FNSTSW_AX() (s->eax = (s->eax & 0xFFFF0000u) | s->fsw)
 #define AH() ((s->eax >> 8) & 0xFFu)
@@ -474,7 +483,7 @@ static int r_run(xctx *c, unsigned entry, r_info *info)
     rs state; rs *const s = &state; double *const X = s->X;
     nfl flags = { c->f_kind, c->f_op1, c->f_op2, c->f_res, c->f_bits, c->f_cf_override, c->f_cf, c->f_of_override, c->f_of };
     nfl *const fl = &flags;
-    s->S = S; s->E = E;
+    s->S = S + R_BELOW; s->E = E;
     s->F = c->fsp & 7u;
     for (unsigned d = 0; d < 8; ++d) X[d] = c->st[(s->F - d) & 7u];
     s->fsw = c->fsw; s->touched = 0; s->be = 0;
@@ -818,12 +827,523 @@ void xv_native_606b0_probe(xctx *c, unsigned label)
 void xv_native_606b0_report(unsigned frames);
 
 /* ===============================================================================================================
- * 2. f_000602F0 (placeholder until the native lands)
+ * 2. f_000602F0: one cluster's BSP lens-flare markers into the flare list.
+ *    Frame: S = esp in the body (entry esp - 0x5C); the window [S - 0x54, S + 0x5C) holds 602F0's locals (the
+ *    direction/perpendicular vectors at S+1C/S+28, the flare record at S+34..S+5B) and every callee frame below S (the
+ *    deepest: 61270 -> 19E7B -> 1EC1F / 1EABA at S - 0x4C).
  * =============================================================================================================== */
-int xv_native_602f0(xctx *c) { (void)c; return 0; }
+enum { P_BELOW = 0x54, P_WIN = P_BELOW + 0x5C };
+typedef struct { unsigned markers, added, resets, floors, be; } p_info;
+
+/* f_0001EC1F (_controlfp(new, mask) with the arguments at kr + 4 / kr + 8), the return address at kr */
+static inline __attribute__((always_inline)) void p_controlfp(rs *s, int kr, uint32_t ret)
+{
+    const int P = kr - 4;                            /* its ebp */
+    sw32(s, kr, ret);
+    sw32(s, P, s->ebp);                              /* push ebp; mov ebp,esp */
+    s->ebp = s->E + (uint32_t)P;
+    sw32(s, P - 4, s->ecx);                          /* push ecx */
+    sw16(s, P - 4, s->fcw);                          /* fnstcw [ebp-4] */
+    s->eax = sr32(s, P + 0xC);
+    s->ecx = sr32(s, P + 8);
+    s->ecx &= sr32(s, P + 0xC);
+    s->eax = ~s->eax;
+    s->eax &= sr32(s, P - 4);                        /* the stored control word and the pushed ecx's high half */
+    s->eax |= s->ecx;
+    sw32(s, P + 0xC, s->eax);
+    s->fcw = sr16(s, P + 0xC);                       /* fldcw */
+    s->eax = (uint32_t)(int32_t)(int16_t)sr16(s, P - 4);
+    s->ebp = sr32(s, P);                             /* leave; ret */
+}
+
+/* f_00019E7B (CRT floor: round the double at S-0x20 under the control word [1F2840], restore the old word) called
+ * from 61270 at depth 0 with the return address at S-0x24; the result at depth 1. Finite input and the precision
+ * exception masked (checked at entry): the 19F01 path, through 19F15 directly (exact) or via 19F23 (a back-edge). */
+static inline __attribute__((always_inline)) void p_floor(rs *s, nfl *fl, const nm *m, uint32_t ret)
+{
+    double *X = s->X;
+    enum { T = -0x24, B = -0x28 };
+    sw32(s, T, ret);
+    sw32(s, B, s->ebp); s->ebp = s->E + (uint32_t)B;        /* push ebp; mov ebp,esp */
+    sw32(s, B - 4, s->ecx); sw32(s, B - 8, s->ecx);         /* push ecx x2 */
+    sw32(s, B - 0xC, s->ebx); sw32(s, B - 0x10, s->esi);    /* push ebx; push esi */
+    s->esi = 0xFFFFu;
+    sw32(s, B - 0x14, s->esi); sw32(s, B - 0x18, s->K);     /* push esi; push [1F2840] */
+    p_controlfp(s, B - 0x1C, 0x19E93u);
+    X[1] = sr64(s, B + 8);
+    s->ecx = sr32(s, B - 0x18); s->ecx = sr32(s, B - 0x14); /* pop ecx x2 */
+    s->ebx = s->eax;
+    s->eax = nm_rd(m, s->E + (uint32_t)(B + 0xE), 4);      /* mov eax,[ebp+0Eh]: 2-aligned, may straddle */
+    sw32(s, B - 0x14, s->ecx);
+    { const uint16_t ax = (uint16_t)(s->eax & 0x7FF0u); s->eax = (s->eax & 0xFFFF0000u) | ax;
+      FLG(XK_SUB, ax, 0x7FF0u, (uint16_t)(ax - 0x7FF0u), 16); }
+    sw32(s, B - 0x18, s->ecx);
+    sw64(s, B - 0x18, X[1]);                                /* fstp qword [esp] (depth 0) */
+    /* 19F01: f_0001EABA (frndint under the current control word) */
+    sw32(s, B - 0x1C, 0x19F06u);
+    sw32(s, B - 0x20, s->ecx); sw32(s, B - 0x24, s->ecx);
+    X[1] = sr64(s, B - 0x18);
+    X[1] = nx_round(s->fcw, X[1]);
+    sw64(s, B - 0x24, X[1]); X[1] = sr64(s, B - 0x24);
+    s->ecx = sr32(s, B - 0x24); s->ecx = sr32(s, B - 0x20);
+    sw64(s, B - 8, X[1]);                                   /* fst qword [ebp-8] */
+    CMP(X[1], sr64(s, B + 8), 1);                           /* fcomp qword [ebp+8] */
+    s->ecx = sr32(s, B - 0x18); s->ecx = sr32(s, B - 0x14);
+    FNSTSW_AX();
+    { const uint32_t r = AH() & 0x44u; FLG(XK_LOGIC, 0, 0, r, 8);
+      if (nf_parity_even(r)) {                              /* 19F23: inexact; masked (entry check): back to 19F15 */
+          FLG(XK_LOGIC, 0, 0, s->ebx & 0x20u, 8);
+          s->be++;
+      } }
+    sw32(s, B - 0x14, s->esi); sw32(s, B - 0x18, s->ebx);   /* 19F15: push esi; push ebx */
+    p_controlfp(s, B - 0x1C, 0x19F1Cu);
+    X[1] = sr64(s, B - 8);
+    s->ecx = sr32(s, B - 0x18); s->ecx = sr32(s, B - 0x14);
+    s->esi = sr32(s, B - 0x10); s->ebx = sr32(s, B - 0xC);  /* 19F45: pop esi; pop ebx; leave; ret */
+    s->ebp = sr32(s, B);
+}
+
+/* 61270's clamp of one component to [-1, 1] (depth 1) */
+static inline __attribute__((always_inline)) void p_clamp(rs *s, nfl *fl, int k)
+{
+    double *X = s->X;
+    X[1] = srf(s, k); CMP(X[1], s->c_abc, 1); FNSTSW_AX();
+    { const uint32_t r = AH() & 5u; FLG(XK_LOGIC, 0, 0, r, 8); if (!nf_parity_even(r)) { X[1] = s->c_abc; return; } }
+    X[1] = srf(s, k); CMP(X[1], s->c_a78, 1); FNSTSW_AX();
+    { const uint32_t r = AH() & 0x41u; FLG(XK_LOGIC, 0, 0, r, 8); if (!r) { X[1] = s->c_a78; return; } }
+    X[1] = srf(s, k);
+}
+static inline uint32_t p_fistp(uint16_t fcw, double v)
+{
+    const double r = nx_round(fcw, v);
+    return (r >= -2147483648.0 && r <= 2147483647.0) ? (uint32_t)(int32_t)r : 0x80000000u;
+}
+/* f_00061270 (pack the vector at frame offset kv into 11/11/10 bits -> eax), its pointer argument at S-4 and the
+ * return address at S-8; ret 4. */
+static inline __attribute__((always_inline)) void p_61270(rs *s, nfl *fl, const nm *m, int kv, uint32_t ret)
+{
+    double *X = s->X;
+    sw32(s, -8, ret);
+    s->ecx = sr32(s, -4);
+    p_clamp(s, fl, kv);
+    X[1] = X[1] * s->c_c34;
+    sw32(s, -0x14, s->esi); sw32(s, -0x18, s->edi);         /* push esi; push edi */
+    sw64(s, -0x20, X[1]);                                   /* sub esp,8; fstp qword [esp] */
+    p_floor(s, fl, m, 0x612BAu);
+    swf(s, -0x10, X[1]);
+    X[1] = srf(s, -0x10); sw32(s, -0xC, p_fistp(s->fcw, X[1]));
+    s->ecx = sr32(s, -4);
+    s->edi = sr32(s, -0xC);
+    p_clamp(s, fl, kv + 4);
+    s->edi &= 0x7FFu;                                       /* (between the compare and fnstsw in the guest) */
+    X[1] = X[1] * s->c_c34;
+    sw64(s, -0x20, X[1]);
+    p_floor(s, fl, m, 0x6131Bu);
+    swf(s, -0xC, X[1]);
+    X[1] = srf(s, -0xC); sw32(s, -0x10, p_fistp(s->fcw, X[1]));
+    s->ecx = sr32(s, -4);
+    s->esi = sr32(s, -0x10);
+    p_clamp(s, fl, kv + 8);
+    s->esi &= 0x7FFu;
+    X[1] = X[1] * s->c_c30;
+    sw64(s, -0x20, X[1]);
+    p_floor(s, fl, m, 0x6137Cu);
+    swf(s, -0xC, X[1]);
+    X[1] = srf(s, -0xC); sw32(s, -0x10, p_fistp(s->fcw, X[1]));
+    s->eax = sr32(s, -0x10);
+    s->eax = nf_shl32(fl, s->eax, 11); s->eax |= s->esi;
+    s->eax = nf_shl32(fl, s->eax, 11); s->eax |= s->edi;
+    s->edi = sr32(s, -0x18); s->esi = sr32(s, -0x14);      /* pop edi; pop esi; add esp,8; ret 4 */
+}
+
+/* f_000B1260 (a vector perpendicular to [S+1C] into [S+28]; edx/ecx point there), return address at S-4. */
+static inline __attribute__((always_inline)) void p_B1260(rs *s, nfl *fl)
+{
+    double *X = s->X;
+    enum { KI = 0x1C, KO = 0x28, L = -0xC };
+    sw32(s, -4, 0x603A7u);
+    X[1] = srf(s, KI); X[1] = fabs(X[1]);
+    X[2] = srf(s, KI + 4); X[2] = fabs(X[2]); swf(s, L, X[2]);
+    X[2] = srf(s, KI + 8); X[2] = fabs(X[2]); swf(s, L + 4, X[2]);
+    CMP(X[1], srf(s, L), 1); FNSTSW_AX();
+    { const uint32_t r = AH() & 0x41u; FLG(XK_LOGIC, 0, 0, r, 8); if (nf_parity_even(r)) goto pB12AB; }
+    CMP(X[1], srf(s, L + 4), 1); FNSTSW_AX();
+    { const uint32_t r = AH() & 0x41u; FLG(XK_LOGIC, 0, 0, r, 8); if (nf_parity_even(r)) goto pB12AB; }
+    sw32(s, KO, 0); s->eax = sr32(s, KI + 8); sw32(s, KO + 4, s->eax);   /* |x| smallest: (0, z, -y) */
+    X[1] = srf(s, KI + 4); X[1] = -X[1]; s->eax = s->ecx; swf(s, KO + 8, X[1]);
+    return;
+pB12AB:
+    X[1] = srf(s, L); CMP(X[1], srf(s, L + 4), 1); FNSTSW_AX();
+    { const uint32_t r = AH() & 0x41u; FLG(XK_LOGIC, 0, 0, r, 8); if (nf_parity_even(r)) goto pB12D3; }
+    X[1] = srf(s, KI + 8); sw32(s, KO + 4, 0); X[1] = -X[1]; s->eax = s->ecx; swf(s, KO, X[1]);   /* |y| smallest: (-z, 0, x) */
+    s->edx = sr32(s, KI); sw32(s, KO + 8, s->edx);
+    return;
+pB12D3:
+    s->eax = sr32(s, KI + 4); sw32(s, KO, s->eax);                     /* |z| smallest: (y, -x, 0) */
+    X[1] = srf(s, KI); X[1] = -X[1]; sw32(s, KO + 8, 0); swf(s, KO + 4, X[1]); s->eax = s->ecx;
+}
+
+/* f_0005FE80 (append the flare record at [edx] = S+34 to the flare list), return address at S-4. */
+static inline __attribute__((always_inline)) void p_5FE80(rs *s, nfl *fl, const nm *m, p_info *info)
+{
+    double *X = s->X;
+    enum { R = 0x34 };
+    sw32(s, -4, 0x60438u);
+    if (s->barriers) xv_flare_barrier(6u);
+    FLG(XK_SUB, s->g_6c0, 0u, s->g_6c0, 16);
+    sw32(s, -8, s->ebx); sw32(s, -0xC, s->esi); sw32(s, -0x10, s->edi);
+    if (!nf_z(fl)) goto pFFAD;
+    s->ecx = nm_i32(m, 0x2E34E0u);
+    FLG(XK_SUB, s->ecx, 0x400u, s->ecx - 0x400u, 32);
+    if (nf_s(fl) == nf_o(fl)) goto pFF9D;           /* the list is full */
+    X[1] = srf(s, R + 4); s->esi = sr32(s, R); X[1] = X[1] - s->g_6c8;
+    X[2] = srf(s, R + 8); X[2] = X[2] - s->g_6cc;
+    X[3] = srf(s, R + 0xC); X[3] = X[3] - s->g_6d0;
+    X[4] = nm_f32(m, s->esi + 0x1Cu); CMP(X[4], s->c_a68, 4); FNSTSW_AX();
+    { const uint32_t r = AH() & 0x44u; FLG(XK_LOGIC, 0, 0, r, 8); if (!nf_parity_even(r)) goto pFF08; }
+    X[4] = s->g_6dc; X[4] = X[4] * X[3];
+    X[5] = s->g_6d8; X[5] = X[5] * X[2]; X[4] = X[4] + X[5];
+    X[5] = s->g_6d4; X[5] = X[5] * X[1]; X[4] = X[4] + X[5];
+    CMP(X[4], nm_f32(m, s->esi + 0x1Cu), 4);        /* fcomp; fstp st(0); fnstsw ax; fstp st(0); test; fstp st(0) */
+    FNSTSW_AX();
+    { const uint32_t r = AH() & 5u; FLG(XK_LOGIC, 0, 0, r, 8); if (nf_parity_even(r)) goto pFFAD; }
+pFF08:
+    { const uint32_t r = sr32(s, R + 0x18) & 0xFF000000u; FLG(XK_LOGIC, 0, 0, r, 32); if (nf_c(fl) || nf_z(fl)) goto pFFAD; }
+    info->added++;
+    s->eax = s->ecx; FL_INCDEC(); s->ecx += 1u;
+    s->ebx = s->eax * 5u;
+    nm_wi32(m, 0x2E34E0u, s->ecx);
+    s->ebx = s->ebx * 8u + 0x2C76D0u;
+    s->esi = s->edx; s->edi = s->ebx;
+    for (unsigned k = 0; k < 10; ++k) {              /* rep movsd (ecx = 10): element-wise, page-split */
+        uint32_t v; nm_gread(m, &v, s->esi, 4); nm_gwrite(m, s->edi, &v, 4); s->esi += 4u; s->edi += 4u;
+    }
+    s->ecx = 0;
+    s->eax = (s->eax & 0xFFFF0000u) | sr16(s, R + 0x1C);
+    { const uint16_t a = (uint16_t)s->eax; FLG(XK_SUB, a, 0xFFFFu, (uint16_t)(a - 0xFFFFu), 16); if (!nf_z(fl)) goto pFF74; }
+    s->eax = (s->eax & 0xFFFF0000u) | sr16(s, R + 0x1E);
+    { const uint16_t a = (uint16_t)s->eax; FLG(XK_SUB, a, 0xFFFFu, (uint16_t)(a - 0xFFFFu), 16); if (!nf_z(fl)) goto pFF51; }
+    s->edi = sr32(s, -0x10); s->esi = sr32(s, -0xC);
+    nm_wr(m, s->ebx + 0x1Eu, 2, 0x8000u);
+    s->ebx = sr32(s, -8);
+    return;
+pFF51:
+    s->ecx = (uint32_t)(int32_t)(int16_t)sr16(s, R + 0x20);
+    s->eax = (uint32_t)(int32_t)(int16_t)s->eax;
+    s->eax = nf_shl32(fl, s->eax, 16);
+    s->eax |= s->ecx;
+    s->edx = s->eax + 8u;
+    s->eax = nf_sar32(fl, s->eax, 16);
+    s->edi = sr32(s, -0x10);
+    s->eax |= 0xFFFF8000u;
+    s->esi = sr32(s, -0xC);
+    nm_wr(m, s->ebx + 0x20u, 2, s->edx & 0xFFFFu);
+    nm_wr(m, s->ebx + 0x1Eu, 2, s->eax & 0xFFFFu);
+    s->ebx = sr32(s, -8);
+    return;
+pFF74:
+    s->edx = (uint32_t)(int32_t)(int16_t)nm_rd(m, s->ebx + 0x1Eu, 2);
+    s->edx = nf_imul32(fl, s->edx, 0x22u);
+    s->edx += 0x2BFFD0u;
+    { const uint16_t a = (uint16_t)s->eax, b = (uint16_t)nm_rd(m, s->edx, 2); FLG(XK_SUB, a, b, (uint16_t)(a - b), 16); if (nf_z(fl)) goto pFFAD; }
+    info->resets++;
+    if (s->barriers) xv_flare_barrier(3u);
+    s->eax = 0; s->edi = s->edx + 2u;
+    for (unsigned k = 0; k < 8; ++k) { const uint32_t z = 0; nm_gwrite(m, s->edi, &z, 4); s->edi += 4u; }   /* rep stosd */
+    s->ecx = 0;
+    s->eax = nm_rd(m, s->ebx + 0x1Cu, 2);
+    s->edi = sr32(s, -0x10); s->esi = sr32(s, -0xC);
+    nm_wr(m, s->edx, 2, s->eax & 0xFFFFu);
+    s->ebx = sr32(s, -8);
+    return;
+pFF9D:
+    s->eax = (s->eax & ~0xFFu) | nm_i8(m, 0x2E34E4u);
+    { const uint8_t al = (uint8_t)s->eax; FLG(XK_LOGIC, 0, 0, al, 8); if (al) goto pFFAD; }
+    nm_wi8(m, 0x2E34E4u, 1);
+pFFAD:
+    s->edi = sr32(s, -0x10); s->esi = sr32(s, -0xC); s->ebx = sr32(s, -8);
+}
+
+/* The whole f_000602F0. Returns 1 (ran, state committed) or 0 (declined, nothing written). */
+static int p_run(xctx *c, p_info *info, int barriers)
+{
+    const uint32_t E0 = c->r[4], Sa = E0 - 0x5Cu, wlo = Sa - P_BELOW;
+    memset(info, 0, sizeof *info);
+    if (E0 & 3u) return 0;                          /* 4-aligned frame: no constant-offset access straddles a page */
+    if (!(c->fcw & 0x20u)) return 0;                /* precision exception unmasked: the CRT floor raises (guest path) */
+    if (nm_overlap(wlo, P_WIN, 0x1F0A60u, 0x1E0u) || nm_overlap(wlo, P_WIN, 0x1F2840u, 4u) || nm_overlap(wlo, P_WIN, 0x39BE58u, 4u) ||
+        nm_overlap(wlo, P_WIN, 0x39CE24u, 4u) || nm_overlap(wlo, P_WIN, 0x2FEB8Au, 1u) || nm_overlap(wlo, P_WIN, 0x2FC6C0u, 0x20u) ||
+        nm_overlap(wlo, P_WIN, 0x2E34E0u, 8u) || nm_overlap(wlo, P_WIN, 0x2C76D0u, 40u * 1024u))
+        return 0;                                   /* (the flare rows: then [S+50h] stays the 0xFFFF stored before each
+                                                     * 5FE80, whose surface-slot path and its draining barrier are unreachable) */
+    uint8_t W[P_WIN];
+    nm mm; nm_init(&mm, W, wlo, P_WIN); const nm *const m = &mm;
+    rs state; rs *const s = &state; double *const X = s->X;
+    nfl flags = { c->f_kind, c->f_op1, c->f_op2, c->f_res, c->f_bits, c->f_cf_override, c->f_cf, c->f_of_override, c->f_of };
+    nfl *const fl = &flags;
+    s->S = W + P_BELOW; s->E = Sa; s->barriers = barriers;
+    s->F = c->fsp & 7u;
+    for (unsigned d = 0; d < 8; ++d) X[d] = c->st[(s->F - d) & 7u];
+    s->fsw = c->fsw; s->fcw = c->fcw; s->touched = 0; s->be = 0;
+    s->eax = c->r[0]; s->ecx = c->r[1]; s->edx = c->r[2]; s->ebx = c->r[3]; s->ebp = c->r[5]; s->esi = c->r[6]; s->edi = c->r[7];
+    s->c_a68 = nm_f32(m, 0x1F0A68u); s->c_a78 = nm_f32(m, 0x1F0A78u); s->c_abc = nm_f32(m, 0x1F0ABCu); s->c_b14 = nm_f32(m, 0x1F0B14u);
+    s->c_c30 = nm_f32(m, 0x1F0C30u); s->c_c34 = nm_f32(m, 0x1F0C34u); s->c_af8 = nm_f64(m, 0x1F0AF8u);
+    s->g_6c8 = nm_f32(m, 0x2FC6C8u); s->g_6cc = nm_f32(m, 0x2FC6CCu); s->g_6d0 = nm_f32(m, 0x2FC6D0u);
+    s->g_6d4 = nm_f32(m, 0x2FC6D4u); s->g_6d8 = nm_f32(m, 0x2FC6D8u); s->g_6dc = nm_f32(m, 0x2FC6DCu);
+    s->K = nm_i32(m, 0x1F2840u); s->g_6c0 = nm_i16(m, 0x2FC6C0u);
+    /* prologue */
+    s->eax = nm_i32(m, 0x39BE58u);                  /* the BSP */
+    s->edx = nm_rd(m, s->eax + 0x138u, 4);          /* its clusters */
+    sw32(s, 0xC, s->ebx);                           /* sub esp,4Ch; push ebx */
+    s->ebx = (uint32_t)(int32_t)(int16_t)s->ecx;
+    s->ebx = nf_imul32(fl, s->ebx, 0x68u);
+    s->ebx += s->edx;                               /* the cluster */
+    { const uint16_t n = (uint16_t)nm_rd(m, s->ebx + 0x42u, 2); FLG(XK_SUB, n, 0u, n, 16); }
+    sw32(s, 0x14, s->eax); sw32(s, 0x10, 0);
+    if (nf_c(fl) || nf_z(fl)) {                     /* no markers: pop ebx; add esp,4Ch; ret */
+        s->ebx = sr32(s, 0xC);
+        goto out;
+    }
+    sw32(s, 8, s->ebp); sw32(s, 4, s->esi); sw32(s, 0, s->edi);
+    for (;;) {                                      /* 60330: one marker (eax = the BSP) */
+        info->markers++;
+        s->edi = nm_rd(m, s->ebx + 0x40u, 2);
+        s->ecx = sr32(s, 0x10);
+        s->edx = nm_rd(m, s->eax + 0x12Cu, 4);      /* the markers */
+        s->edi += s->ecx;
+        s->esi = s->edi;
+        s->esi = nf_shl32(fl, s->esi, 4);
+        s->ecx = (uint32_t)(int32_t)(int8_t)nm_rd(m, s->esi + s->edx + 0xDu, 1);
+        s->ebp = nm_rd(m, s->esi + s->edx + 0xFu, 1);
+        s->esi += s->edx;
+        s->edx = nm_rd(m, s->eax + 0x120u, 4);      /* the lens flares */
+        s->eax = (uint32_t)(int32_t)(int8_t)nm_rd(m, s->esi + 0xCu, 1);
+        sw32(s, 0x18, s->eax);
+        s->ebp = nf_shl32(fl, s->ebp, 4);
+        s->ebp += s->edx;
+        s->touched = 1;
+        X[1] = (double)(int32_t)sr32(s, 0x18);
+        s->edx = (uint32_t)(int32_t)(int8_t)nm_rd(m, s->esi + 0xEu, 1);
+        X[1] = X[1] * s->c_b14;
+        sw32(s, 0x18, s->ecx);
+        s->ecx = s->E + 0x28u;
+        swf(s, 0x1C, X[1]);
+        X[1] = (double)(int32_t)sr32(s, 0x18);
+        sw32(s, 0x18, s->edx);
+        s->edx = s->E + 0x1Cu;
+        X[1] = X[1] * s->c_b14;
+        swf(s, 0x20, X[1]);
+        X[1] = (double)(int32_t)sr32(s, 0x18); X[1] = X[1] * s->c_b14; swf(s, 0x24, X[1]);
+        p_B1260(s, fl);
+        s->ecx = s->E + 0x1Cu; r_11120(s, fl, 0x1C, 0x603B0u);
+        s->ecx = s->E + 0x28u; r_11120(s, fl, 0x28, 0x603BBu);
+        s->eax = s->E + 0x1Cu; sw32(s, -4, s->eax);
+        p_61270(s, fl, m, 0x1C, 0x603C7u);
+        s->ecx = s->E + 0x28u; sw32(s, -4, s->ecx);
+        sw32(s, 0x44, s->eax);
+        p_61270(s, fl, m, 0x28, 0x603D5u);
+        s->edx = nm_rd(m, s->ebp + 0xCu, 4) & 0xFFFFu;
+        sw32(s, 0x48, s->eax);
+        s->eax = nm_i32(m, 0x39CE24u);              /* the tag instances */
+        s->edx = nf_shl32(fl, s->edx, 5);
+        s->ecx = nm_rd(m, s->edx + s->eax + 0x14u, 4);
+        s->edx = nm_rd(m, s->esi, 4); s->eax = nm_rd(m, s->esi + 4u, 4);
+        sw32(s, 0x38, s->edx); sw32(s, 0x3C, s->eax);
+        s->eax = 0xFFFFFFFFu;
+        s->edx = s->edi; s->edx = nf_sar32(fl, s->edx, 16);
+        sw32(s, 0x34, s->ecx);
+        s->ecx = nm_rd(m, s->esi + 8u, 4);
+        sw32(s, 0x4C, s->eax); sw16(s, 0x50, (uint16_t)s->eax);
+        s->eax = (s->eax & ~0xFFu) | nm_i8(m, 0x2FEB8Au);
+        sw16(s, 0x52, (uint16_t)s->edx);
+        s->edx = s->E + 0x34u;
+        sw32(s, 0x40, s->ecx); sw8(s, 0x57, 0); sw16(s, 0x54, (uint16_t)s->edi); sw8(s, 0x56, (uint8_t)s->eax);
+        p_5FE80(s, fl, m, info);
+        s->eax = sr32(s, 0x10);
+        s->ecx = nm_rd(m, s->ebx + 0x42u, 2);
+        FL_INCDEC(); s->eax += 1u;
+        FLG(XK_SUB, s->eax, s->ecx, s->eax - s->ecx, 32);
+        sw32(s, 0x10, s->eax);
+        if (!F_JL()) break;
+        s->be++;
+        s->eax = sr32(s, 0x14);                     /* 60323 */
+    }
+    s->edi = sr32(s, 0); s->esi = sr32(s, 4); s->ebp = sr32(s, 8); s->ebx = sr32(s, 0xC);
+out:
+    x_guest_write_pages(wlo, W, P_WIN);
+    c->r[0] = s->eax; c->r[1] = s->ecx; c->r[2] = s->edx; c->r[3] = s->ebx; c->r[5] = s->ebp; c->r[6] = s->esi; c->r[7] = s->edi;
+    c->r[4] = E0 + 4u;
+    for (unsigned d = 1; d < 8; ++d) c->st[(s->F - d) & 7u] = X[d];
+    if (s->touched) c->fsp = s->F;
+    c->fsw = s->fsw; c->fcw = s->fcw;
+    c->f_kind = fl->kind; c->f_op1 = fl->op1; c->f_op2 = fl->op2; c->f_res = fl->res; c->f_bits = fl->bits;
+    c->f_cf_override = fl->cfo; c->f_cf = fl->cf; c->f_of_override = fl->ofo; c->f_of = fl->of;
+    info->be = s->be;
+    return 1;
+}
+/* ---- f_000602F0 hook ------------------------------------------------------------------------------------------ */
+enum { PC_CALLS, PC_NATIVE, PC_VERIFIED, PC_MISMATCHED, PC_DECLINED, PC_MARKERS, PC_ADDED, PC_FLOORS, PC_TIMED_NATIVE,
+       PC_TIMED_GUEST, PC_N };
+static unsigned p_counter[PC_N], p_mismatch_total;
+static uint64_t p_native_us, p_guest_us;
+#define PC_ADD(i, v) __atomic_fetch_add(&p_counter[i], (unsigned)(v), __ATOMIC_RELAXED)
+static xctx *volatile p_guest_ctx;               /* verify mode re-runs the guest body of this context (the hook stands aside) */
+extern void f_000602F0(xctx *);
+static int p_mode_value = -1;
+static int p_mode(void)
+{
+    int mode = __atomic_load_n(&p_mode_value, __ATOMIC_RELAXED);
+    if (mode < 0) {
+        const char *e = getenv("XV_NATIVE_602F0"); mode = e ? atoi(e) : XV_NATIVE_602F0_DEFAULT;
+        if (mode < 0 || mode > 2) mode = 0;
+        XK_LOG("[native-602f0] f_000602F0 lens-flare marker collection: %s\n",
+               mode == 2 ? "native" : mode == 1 ? "verify (native vs guest, guest result kept)" : "off");
+        __atomic_store_n(&p_mode_value, mode, __ATOMIC_RELAXED);
+    }
+    return mode;
+}
+void xv_native_602f0_force(int mode) { __atomic_store_n(&p_mode_value, mode < 0 || mode > 2 ? 0 : mode, __ATOMIC_RELAXED); p_mismatch_total = 0; }
+static int p_timing(void)
+{
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("XV_NATIVE_602F0_TIME"); on = e && atoi(e) != 0; }
+    return on;
+}
+static void p_count(const p_info *o) { PC_ADD(PC_MARKERS, o->markers); PC_ADD(PC_ADDED, o->added); PC_ADD(PC_FLOORS, o->markers * 6u); }
+static void p_report_mismatch(const char *what, uint32_t a, uint32_t b, const p_info *o)
+{
+    if (__atomic_add_fetch(&p_mismatch_total, 1, __ATOMIC_RELAXED) <= 12)
+        XK_LOG("[native-602f0] MISMATCH %s native %08X guest %08X (call: %u markers, %u added)\n", what, a, b, o->markers, o->added);
+}
+/* verify-mode copies of what the call can write: the flare rows from the current count on, the count and the
+ * list-full byte (the stack window is on the host stack) */
+static uint8_t *p_rows_before, *p_rows_native; static int p_busy;
+
+/* Entry hook of f_000602F0: 1 = handled (guest body skipped). */
+int xv_native_602f0(xctx *c)
+{
+    const int mode = p_mode();
+    if (p_guest_ctx == c) return 0;
+    const int timed = p_timing();
+    if (!mode) {
+        if (!timed) return 0;
+        const uint64_t t0 = xk_os_monotonic_us();
+        p_guest_ctx = c; f_000602F0(c); p_guest_ctx = 0;
+        __atomic_fetch_add(&p_guest_us, xk_os_monotonic_us() - t0, __ATOMIC_RELAXED); PC_ADD(PC_TIMED_GUEST, 1); PC_ADD(PC_CALLS, 1);
+        return 1;
+    }
+    p_info o;
+    PC_ADD(PC_CALLS, 1);
+    if (mode == 2) {
+        const uint64_t t0 = timed ? xk_os_monotonic_us() : 0;
+        if (!p_run(c, &o, 1)) { PC_ADD(PC_DECLINED, 1); return 0; }
+        if (timed) { __atomic_fetch_add(&p_native_us, xk_os_monotonic_us() - t0, __ATOMIC_RELAXED); PC_ADD(PC_TIMED_NATIVE, 1); }
+        n_budget(c, o.be); p_count(&o); PC_ADD(PC_NATIVE, 1);
+        return 1;
+    }
+    if (__atomic_exchange_n(&p_busy, 1, __ATOMIC_ACQUIRE)) {     /* another thread is verifying: guest only */
+        PC_ADD(PC_DECLINED, 1);
+        p_guest_ctx = c; f_000602F0(c); p_guest_ctx = 0;
+        return 1;
+    }
+    enum { ROWS = 40u * 1024u };
+    if (!p_rows_before && (!(p_rows_before = malloc(ROWS)) || !(p_rows_native = malloc(ROWS)))) {
+        __atomic_store_n(&p_busy, 0, __ATOMIC_RELEASE);
+        XK_LOG("[native-602f0] verify: no memory for the row copies: verification off, guest path\n");
+        xv_native_602f0_force(0); return 0;
+    }
+    const uint32_t wlo = c->r[4] - 0x5Cu - P_BELOW;
+    uint32_t c0 = X_IMG32(0x2E34E0u); if ((int32_t)c0 < 0) c0 = 0; if (c0 > 1024u) c0 = 1024u;
+    const uint32_t rows = 0x2C76D0u + 40u * c0, nrows = ROWS - 40u * c0;
+    uint8_t win_before[P_WIN], win_native[P_WIN], win_guest[P_WIN], cnt_before[8], cnt_native[8], cnt_guest[8];
+    x_guest_read_pages(win_before, wlo, P_WIN);
+    x_guest_read_pages(p_rows_before, rows, nrows);
+    x_guest_read_pages(cnt_before, 0x2E34E0u, 8);
+    const xctx before = *c;
+    const uint64_t t0 = timed ? xk_os_monotonic_us() : 0;
+    const int ran = p_run(c, &o, 0);             /* no barrier calls: the guest pass makes them */
+    const uint64_t t1 = timed ? xk_os_monotonic_us() : 0;
+    if (!ran) {
+        __atomic_store_n(&p_busy, 0, __ATOMIC_RELEASE);
+        PC_ADD(PC_DECLINED, 1);
+        p_guest_ctx = c; f_000602F0(c); p_guest_ctx = 0;
+        return 1;
+    }
+    const xctx native = *c;
+    x_guest_read_pages(win_native, wlo, P_WIN);
+    x_guest_read_pages(p_rows_native, rows, nrows);
+    x_guest_read_pages(cnt_native, 0x2E34E0u, 8);
+    x_guest_write_pages(wlo, win_before, P_WIN);
+    x_guest_write_pages(rows, p_rows_before, nrows);
+    x_guest_write_pages(0x2E34E0u, cnt_before, 8);
+    *c = before; c->preempt = 1 << 30;
+    const uint64_t t2 = timed ? xk_os_monotonic_us() : 0;
+    p_guest_ctx = c; f_000602F0(c); p_guest_ctx = 0;
+    const uint64_t t3 = timed ? xk_os_monotonic_us() : 0;
+    if (timed) {
+        __atomic_fetch_add(&p_native_us, t1 - t0, __ATOMIC_RELAXED); __atomic_fetch_add(&p_guest_us, t3 - t2, __ATOMIC_RELAXED);
+        PC_ADD(PC_TIMED_NATIVE, 1); PC_ADD(PC_TIMED_GUEST, 1);
+    }
+    const uint32_t guest_be = (uint32_t)((1 << 30) - c->preempt);
+    c->preempt = before.preempt;
+    x_guest_read_pages(win_guest, wlo, P_WIN);
+    x_guest_read_pages(cnt_guest, 0x2E34E0u, 8);
+    unsigned bad = 0;
+#define P_CMP(what, a, b) do { if ((a) != (b)) { bad++; p_report_mismatch(what, (uint32_t)(a), (uint32_t)(b), &o); } } while (0)
+    static const char *const rn[8] = { "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi" };
+    for (unsigned i = 0; i < 8; ++i) P_CMP(rn[i], native.r[i], c->r[i]);
+    P_CMP("backedges", o.be, guest_be);
+    P_CMP("fsp", native.fsp, c->fsp); P_CMP("fcw", native.fcw, c->fcw); P_CMP("fsw", native.fsw, c->fsw); P_CMP("df", native.df, c->df);
+    P_CMP("f_kind", native.f_kind, c->f_kind); P_CMP("f_op1", native.f_op1, c->f_op1); P_CMP("f_op2", native.f_op2, c->f_op2);
+    P_CMP("f_res", native.f_res, c->f_res); P_CMP("f_bits", native.f_bits, c->f_bits);
+    P_CMP("f_cf_override", native.f_cf_override, c->f_cf_override); P_CMP("f_of_override", native.f_of_override, c->f_of_override);
+    P_CMP("f_cf", native.f_cf, c->f_cf); P_CMP("f_of", native.f_of, c->f_of);
+    for (unsigned i = 0; i < 8; ++i)
+        if (!n_same_double(native.st[i], c->st[i])) {
+            uint64_t a, b; memcpy(&a, &native.st[i], 8); memcpy(&b, &c->st[i], 8);
+            char w[40]; snprintf(w, sizeof w, "st slot %u (lo word)", i); bad++; p_report_mismatch(w, (uint32_t)a, (uint32_t)b, &o);
+        }
+    for (unsigned i = 0; i < P_WIN; i += 4) {
+        uint32_t a, b; memcpy(&a, win_native + i, 4); memcpy(&b, win_guest + i, 4);
+        if (a != b) { char w[48]; snprintf(w, sizeof w, "stack[esp%+d]", (int)i - P_BELOW - 0x5C); bad++; p_report_mismatch(w, a, b, &o); }
+    }
+    for (unsigned i = 0; i < 8; i += 4) {
+        uint32_t a, b; memcpy(&a, cnt_native + i, 4); memcpy(&b, cnt_guest + i, 4);
+        P_CMP(i ? "[2E34E4]" : "flare count [2E34E0]", a, b);
+    }
+    x_guest_read_pages(p_rows_before, rows, nrows);             /* now the guest's rows */
+    for (unsigned i = 0; i < nrows; i += 4) {
+        uint32_t a, b; memcpy(&a, p_rows_native + i, 4); memcpy(&b, p_rows_before + i, 4);
+        if (a != b) { char w[48]; snprintf(w, sizeof w, "flare row %u +%02X", c0 + i / 40u, i % 40u); bad++; p_report_mismatch(w, a, b, &o); break; }
+    }
+#undef P_CMP
+    __atomic_store_n(&p_busy, 0, __ATOMIC_RELEASE);
+    n_budget(c, guest_be);
+    p_count(&o); PC_ADD(PC_VERIFIED, 1);
+    if (bad) PC_ADD(PC_MISMATCHED, 1);
+    return 1;
+}
+
+static void p_report(unsigned frames)
+{
+    unsigned n[PC_N];
+    for (unsigned i = 0; i < PC_N; ++i) n[i] = __atomic_exchange_n(&p_counter[i], 0u, __ATOMIC_RELAXED);
+    const uint64_t nu = __atomic_exchange_n(&p_native_us, 0, __ATOMIC_RELAXED), gu = __atomic_exchange_n(&p_guest_us, 0, __ATOMIC_RELAXED);
+    if (!n[PC_CALLS]) return;
+    char timing[160] = "";
+    if (n[PC_TIMED_NATIVE] || n[PC_TIMED_GUEST])
+        snprintf(timing, sizeof timing, "; us/call native %.2f guest %.2f; ms/frame native %.3f guest %.3f",
+                 n[PC_TIMED_NATIVE] ? (double)nu / n[PC_TIMED_NATIVE] : 0.0, n[PC_TIMED_GUEST] ? (double)gu / n[PC_TIMED_GUEST] : 0.0,
+                 frames ? (double)nu / frames / 1000.0 : 0.0, frames ? (double)gu / frames / 1000.0 : 0.0);
+    XK_LOG("[native-602f0] %u frames: calls %u native %u verified %u mismatched %u (total mismatches %u); markers %u added %u floors %u; declined %u%s\n",
+           frames, n[PC_CALLS], n[PC_NATIVE], n[PC_VERIFIED], n[PC_MISMATCHED], __atomic_load_n(&p_mismatch_total, __ATOMIC_RELAXED),
+           n[PC_MARKERS], n[PC_ADDED], n[PC_FLOORS], n[PC_DECLINED], timing);
+}
 
 void xv_native_606b0_report(unsigned frames)
 {
+    p_report(frames);
+
     unsigned n[RC_N];
     for (unsigned i = 0; i < RC_N; ++i) n[i] = __atomic_exchange_n(&r_counter[i], 0u, __ATOMIC_RELAXED);
     const uint64_t nu = __atomic_exchange_n(&r_native_us, 0, __ATOMIC_RELAXED), gu = __atomic_exchange_n(&r_guest_us, 0, __ATOMIC_RELAXED);
