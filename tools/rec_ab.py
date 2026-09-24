@@ -10,8 +10,8 @@ of opposite phases are paired, so slow drift (thermal, other work on the machine
 per-window difference and its standard error.
 
 Window sources:
-  - "[rec-ab] draw frames a b" (runtime, Vita and host): starts the window of the [draw-prep], [draw-prep-sub]
-    and [flare-work] lines that follow it in the same report batch
+  - "[rec-ab] draw frames a b" (runtime, Vita and host): starts the window of the [draw-prep], [draw-prep-sub],
+    [flare-work] and "frame time" (game/wait/pump/draw-hle ms) lines that follow it in the same report batch
   - "[rec-ab] hle frames a b" (xd3d.c Present report): starts the window of the [hle-time] lines that follow
   - "[host-perf] ... ab a b" (host harness, XV_HOST_PERF=1): scene-helper cycles/instructions/CPU per frame
   Host logs without [rec-ab] lines (older builds) fall back to "[host] report at frame N" windows; there the
@@ -76,6 +76,10 @@ def windows_from_log(path):
             for k, v in re.findall(r'([\w-]+) ([\d.]+) \(\d+\)', m.group(1)): met['draw-prep-sub ' + k] = float(v)
         m = re.search(r'\[flare-work\] .* recording ([\d.]+) ms/frame', line)
         if m: target = 'draw'; met['flare-work recording'] = float(m.group(1))
+        m = re.search(r'frame time: game ([\d.]+) ms \+ wait ([\d.]+) ms .*\| pump ([\d.]+) ms .* draw-hle ([\d.]+) ms', line)
+        if m:
+            target = 'draw'
+            for k, v in zip(('frame game', 'frame wait', 'frame pump', 'frame draw-hle'), m.groups()): met[k + ' ms'] = float(v)
         if '[hle-time]' in line and 'timing on' not in line:
             body = re.sub(r'^.*?\[hle-time\] (\d+ frames \([^)]*\):)?', '', line)
             target = 'hle'
