@@ -2190,6 +2190,23 @@ CFLAGS += -DXV_NATIVE_4B9D0=1 -DXV_NATIVE_4B9D0_DEFAULT=$(XV_NATIVE_4B9D0_DEFAUL
 RECOMP_CFLAGS += -DXV_NATIVE_4B9D0=1 -DXV_NATIVE_4B9D0_DEFAULT=$(XV_NATIVE_4B9D0_DEFAULT)
 endif
 $(RECOMP_BUILD)/kernel/xk_native_4b9d0.o: RECOMP_CFLAGS += -ffp-contract=off
+# Native BSP segment cast under f_001721B0 (the collision vector test): f_00088E90 + 88B80/889E0/17ADD0/86E20, hooked
+# at the entry of f_00088E90 (tools/patch_native_1721b0_hooks.py), so the structure-BSP ray of 1721B0, the per-object
+# model rays of 1731D0 and the other casts are served: recomp/kernel/xk_native_1721b0.c. Env XV_NATIVE_1721B0 0 off /
+# 1 verify / 2 native, XV_NATIVE_1721B0_TIME=1 us/call (docs/native-1721b0.md).
+XV_NATIVE_1721B0 ?= 0
+XV_NATIVE_1721B0_DEFAULT ?= 0
+ifneq ($(filter $(XV_NATIVE_1721B0),0 1),$(XV_NATIVE_1721B0))
+$(error XV_NATIVE_1721B0 must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_1721B0_DEFAULT),0 1 2),$(XV_NATIVE_1721B0_DEFAULT))
+$(error XV_NATIVE_1721B0_DEFAULT must be 0, 1 or 2)
+endif
+ifeq ($(XV_NATIVE_1721B0),1)
+CFLAGS += -DXV_NATIVE_1721B0=1 -DXV_NATIVE_1721B0_DEFAULT=$(XV_NATIVE_1721B0_DEFAULT)
+RECOMP_CFLAGS += -DXV_NATIVE_1721B0=1 -DXV_NATIVE_1721B0_DEFAULT=$(XV_NATIVE_1721B0_DEFAULT)
+endif
+$(RECOMP_BUILD)/kernel/xk_native_1721b0.o: RECOMP_CFLAGS += -ffp-contract=off
 XV_RENDER_VIEW ?= 0
 XV_RENDER_VIEW_DEFAULT ?= 0
 ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))
