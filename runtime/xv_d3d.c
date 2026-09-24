@@ -316,7 +316,7 @@ static xv_visibility_result g_visibility_results[XV_VISIBILITY_IDS];
 #define XV_OCCL_SLOTS  255u
 static int g_occl_enabled = -1;           /* XV_OCCL != 0: counters armed, proxies replayed */
 static uint16_t g_occl_cur;               /* recording thread: object slot of the draws being recorded */
-static uint8_t *g_occl_quads;             /* XV_NUM_LISTS x 255 proxies x 8 verts x 16 B, then 36 cube indices; GPU-mapped */
+static uint8_t *g_occl_quads;             /* XV_NUM_LISTS x 255 proxies x 4 verts x 16 B, GPU-mapped */
 static SceUID g_occl_quads_uid = -1;
 /* census frames: what replay actually bound per command (discard/depth-replace/depth-only, alpha mode) */
 static struct { uint8_t valid, discard, replaces_depth, depth_only, alpha_mode; } g_census_fs[XV_CENSUS_CORE_WORDS];
@@ -2742,15 +2742,10 @@ void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, u
     }
     l->census=g_census_period && frame>600 && frame%(unsigned)g_census_period==0;
     if (occl_on() && !g_occl_quads && g_occl_quads_uid < 0) {
-        unsigned qb=(XV_NUM_LISTS*XV_OCCL_SLOTS*8*16+36*2+4095u)&~4095u;
+        unsigned qb=(XV_NUM_LISTS*XV_OCCL_SLOTS*4*16+4095u)&~4095u;
         g_occl_quads_uid=sceKernelAllocMemBlock("xv_occl_quads",SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,qb,NULL);
         void *qp=NULL;
-        if (g_occl_quads_uid>=0 && sceKernelGetMemBlockBase(g_occl_quads_uid,&qp)>=0 && sceGxmMapMemory(qp,qb,SCE_GXM_MEMORY_ATTRIB_READ)>=0) {
-            g_occl_quads=qp;
-            /* corner k = (x bit 0, y bit 1, z bit 2): the six faces as twelve triangles (culling is off) */
-            static const uint16_t cube[36]={0,1,3,0,3,2, 4,6,7,4,7,5, 0,4,5,0,5,1, 2,3,7,2,7,6, 0,2,6,0,6,4, 1,5,7,1,7,3};
-            memcpy(g_occl_quads+XV_NUM_LISTS*XV_OCCL_SLOTS*8*16,cube,sizeof cube);
-        }
+        if (g_occl_quads_uid>=0 && sceKernelGetMemBlockBase(g_occl_quads_uid,&qp)>=0 && sceGxmMapMemory(qp,qb,SCE_GXM_MEMORY_ATTRIB_READ)>=0) g_occl_quads=qp;
         XV_LOG("[occl] proxy quads %s (%u bytes)\n", g_occl_quads?"ready":"FAILED", qb);
     }
     l->occl_armed=occl_on() && g_occl_quads && l->occl_n && !l->census;
@@ -2828,13 +2823,13 @@ unsigned xv_d3d_occl_begin(uint32_t handle, unsigned flags)   /* tag the followi
 void xv_d3d_occl_end(void) { g_occl_cur = 0; }
 uint32_t xv_d3d_occl_build_frame(void) { return g_build_frame; }
 const float *xv_d3d_occl_matrix(void) { return &S.vsc[0][0]; }   /* c[-96..-93]: world -> clip rows */
-int xv_d3d_occl_proxy(unsigned slot, const float corners[8][3])   /* NDC x/w, y/w, z/w of the 8 cube corners */
+int xv_d3d_occl_proxy(unsigned slot, float x0, float y0, float x1, float y1, float z)
 {
     if (!slot || slot > cur_list()->occl_n) return 0;
     cmd_t *c = new_cmd();
     if (!c) return 0;
     c->kind = 3; c->occl = (uint16_t)slot; c->visibility = 0;
-    for (int k = 0; k < 8; ++k) { c->psc[k][0] = corners[k][0]; c->psc[k][1] = corners[k][1]; c->psc[k][2] = corners[k][2]; }
+    c->texscale[0][0] = x0; c->texscale[0][1] = y0; c->texscale[0][2] = x1; c->texscale[0][3] = y1; c->clear_z = z;
     cur_list()->occl_flags[slot - 1] |= 4;
     return 1;
 }
@@ -3402,7 +3397,7 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLE_FAN, SCE_GXM_INDEX_FORMAT_U16, g_seq_indices, 4));
             continue;
         }
-        if (c->kind == 3) {   /* XV_OCCL proxy: the object's bounding cube at its real corner depths, depth-tested only */
+        if (c->kind == 3) {   /* XV_OCCL proxy: the object's screen rectangle at its nearest depth, depth-tested only */
             state.valid = 0;
             stencil_state.valid = 0;
             textures.valid = 0;
@@ -3414,8 +3409,10 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             if (!fp)
                 continue;
             struct { float x, y, z; uint8_t b, g, r, a; } *q =
-                (void *)(g_occl_quads + ((frame % XV_NUM_LISTS) * XV_OCCL_SLOTS + c->occl - 1) * 8 * 16);
-            for (int k = 0; k < 8; ++k) q[k] = (typeof(q[0])){ c->psc[k][0], c->psc[k][1], c->psc[k][2], 0, 0, 0, 0 };
+                (void *)(g_occl_quads + ((frame % XV_NUM_LISTS) * XV_OCCL_SLOTS + c->occl - 1) * 4 * 16);
+            float x0 = c->texscale[0][0], y0 = c->texscale[0][1], x1 = c->texscale[0][2], y1 = c->texscale[0][3], z = c->clear_z;
+            q[0] = (typeof(q[0])){ x0, y0, z, 0, 0, 0, 0 }; q[1] = (typeof(q[0])){ x1, y0, z, 0, 0, 0, 0 };
+            q[2] = (typeof(q[0])){ x1, y1, z, 0, 0, 0, 0 }; q[3] = (typeof(q[0])){ x0, y1, z, 0, 0, 0, 0 };
             xv_stencil_clear(ctx, 0, 0);
             sceGxmSetFrontDepthFunc(ctx, SCE_GXM_DEPTH_FUNC_LESS_EQUAL);
             sceGxmSetFrontDepthWriteEnable(ctx, SCE_GXM_DEPTH_WRITE_DISABLED);
@@ -3423,9 +3420,8 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             sceGxmSetVertexProgram(ctx, v->vs.vprog);
             sceGxmSetFragmentProgram(ctx, fp);
             sceGxmSetVertexStream(ctx, 0, q);
-            xv_gpu_flush_pump(q, 8 * sizeof *q);
-            XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16,
-                g_occl_quads + XV_NUM_LISTS * XV_OCCL_SLOTS * 8 * 16, 36));
+            xv_gpu_flush_pump(q, 4 * sizeof *q);
+            XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLE_FAN, SCE_GXM_INDEX_FORMAT_U16, g_seq_indices, 4));
             continue;
         }
 

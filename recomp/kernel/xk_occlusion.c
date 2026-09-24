@@ -7,12 +7,14 @@
  * camera counts as outdoors, so everything in the frustum is prepared, recorded and vertex-shaded behind the walls.
  *
  * Every object rendered by the 5B760 loop gets a slot in the frame (xv_d3d_occl_begin tags its draws) and, after the
- * loop, a proxy: the cube around its bounding sphere (object +50h/54h/58h center, +5Ch radius), projected with the
- * frame's world-to-clip rows (c[-96..-93]) and drawn as 12 triangles at the corners' own depths, depth-tested with
- * color and depth writes off and its own GPU sample counter (runtime/xv_d3d.c, command kind 3). After final completion
- * xv_occl_result() records per object whether any proxy sample passed. The cube contains the object, so an object
- * with a visible sample has a visible proxy sample in front of or at it (mode 1 counts violations: an object whose own
- * draws passed samples but whose proxy did not; objects covered by a later, nearer model count there too).
+ * loop, a proxy: the screen rectangle of its bounding sphere's cube (object +50h/54h/58h center, +5Ch radius) at the
+ * cube's nearest depth, drawn depth-tested with color and depth writes off and its own GPU sample counter
+ * (runtime/xv_d3d.c, command kind 3). After final completion xv_occl_result() records per object whether any proxy
+ * sample passed. The proxy is conservative: it covers the whole object at its nearest depth, so an object whose
+ * draws pass any sample also passes its proxy (mode 1 counts violations of exactly that; objects covered later by a
+ * nearer model, and draws without a depth test, count there too - an object's own samples therefore always mark it
+ * visible). A projected cube per corner depth marked no more objects hidden in the pod and cost more GPU time
+ * (perf199: +8 ms/frame), so the proxy stays a rectangle.
  *
  * XV_OCCL=1 verify: never skips; reports how many rendered objects had no visible proxy (what mode 2 would skip) and
  *                   violations (the object's own draws passed samples but its proxy did not - must stay 0).
@@ -32,13 +34,13 @@ extern void f_0005B4A0(xctx *restrict c);
 extern unsigned xv_d3d_occl_begin(uint32_t handle, unsigned flags);
 extern void xv_d3d_occl_end(void);
 extern const float *xv_d3d_occl_matrix(void);
-extern int xv_d3d_occl_proxy(unsigned slot, const float corners[8][3]);
+extern int xv_d3d_occl_proxy(unsigned slot, float x0, float y0, float x1, float y1, float z);
 extern uint32_t xv_d3d_occl_build_frame(void);
 
 #define TAB 4096u
 static struct { uint32_t handle, frame; uint8_t visible; } tab[TAB];   /* written by the pump, read by the recorder */
-static struct { unsigned slot; float v[8][3]; } pend[255]; static unsigned npend;
-static int mode = -1, age = 4; static float cut_cos = 0.990268f;
+static struct { unsigned slot; float x0, y0, x1, y1, z; } pend[255]; static unsigned npend;
+static int mode = -1, age = 4; static float cut_cos = 0.990268f, margin = 0.02f;
 static float prev_fwd[3], prev_d; static int have_prev, cut_frames;
 static unsigned n_render, n_skip, n_noproxy, n_untracked, n_cuts;
 static volatile unsigned r_rendered, r_real_zero, r_proxy_zero, r_violation, r_skipped, r_reappear, r_both_zero;
@@ -47,33 +49,35 @@ static void config(void)
 {
     const char *e = getenv("XV_OCCL"); mode = e ? atoi(e) : 0;
     e = getenv("XV_OCCL_AGE"); if (e) age = atoi(e);
+    e = getenv("XV_OCCL_MARGIN"); if (e) margin = (float)atof(e);
     e = getenv("XV_OCCL_CUT_DEG"); if (e) cut_cos = cosf((float)atof(e) * 3.14159265f / 180.0f);
-    if (mode) XK_LOG("[occl] mode %d (%s), cube proxies, result age <= %d frames, cut above %.1f deg/frame\n", mode,
-                     mode == 1 ? "verify: never skips" : "skip hidden objects", age, acosf(cut_cos) * 180.0f / 3.14159265f);
+    if (mode) XK_LOG("[occl] mode %d (%s), result age <= %d frames, rect margin %.3f, cut above %.1f deg/frame\n", mode,
+                     mode == 1 ? "verify: never skips" : "skip hidden objects", age, margin, acosf(cut_cos) * 180.0f / 3.14159265f);
 }
 
 static float f32(uint32_t a) { float v; uint32_t w = X_M32(a); memcpy(&v, &w, 4); return v; }
 static unsigned hslot(uint32_t h) { return (h * 2654435761u) >> 20 & (TAB - 1u); }
 
-/* The eight corners of the object's bounding cube in NDC (x/w, y/w, z/w); 0 when a corner is at or behind the near
- * plane (the caller then renders the object and records no proxy) or the cube is entirely off screen. */
-static int object_cube(uint32_t body, float v[8][3])
+/* Screen rectangle and nearest depth of the object's bounding cube; 0 when a corner is at or behind the near plane. */
+static int object_rect(uint32_t body, float *r)
 {
     const float *m = xv_d3d_occl_matrix();
     float cx = f32(body + 0x50u), cy = f32(body + 0x54u), cz = f32(body + 0x58u), rad = f32(body + 0x5Cu);
     if (!(rad > 0.0f) || rad > 1000.0f || !isfinite(cx) || !isfinite(cy) || !isfinite(cz)) return 0;
-    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f, zmin = 1e30f;
     for (int k = 0; k < 8; ++k) {
         float px = cx + ((k & 1) ? rad : -rad), py = cy + ((k & 2) ? rad : -rad), pz = cz + ((k & 4) ? rad : -rad);
         float w = m[12] * px + m[13] * py + m[14] * pz + m[15];
         if (!(w > 0.05f)) return 0;
-        v[k][0] = (m[0] * px + m[1] * py + m[2] * pz + m[3]) / w;
-        v[k][1] = (m[4] * px + m[5] * py + m[6] * pz + m[7]) / w;
-        v[k][2] = (m[8] * px + m[9] * py + m[10] * pz + m[11]) / w;
-        if (!(v[k][2] > 0.0f)) return 0;
-        if (v[k][0] < x0) x0 = v[k][0]; if (v[k][0] > x1) x1 = v[k][0]; if (v[k][1] < y0) y0 = v[k][1]; if (v[k][1] > y1) y1 = v[k][1];
+        float x = (m[0] * px + m[1] * py + m[2] * pz + m[3]) / w, y = (m[4] * px + m[5] * py + m[6] * pz + m[7]) / w;
+        float z = (m[8] * px + m[9] * py + m[10] * pz + m[11]) / w;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < zmin) zmin = z;
     }
+    if (!(zmin > 0.0f)) return 0;
+    x0 -= margin; y0 -= margin; x1 += margin; y1 += margin;
     if (x1 < -1.0f || y1 < -1.0f || x0 > 1.0f || y0 > 1.0f) return 0;    /* off screen: let the game decide */
+    r[0] = x0 < -1.0f ? -1.0f : x0; r[1] = y0 < -1.0f ? -1.0f : y0;
+    r[2] = x1 > 1.0f ? 1.0f : x1;   r[3] = y1 > 1.0f ? 1.0f : y1; r[4] = zmin > 1.0f ? 1.0f : zmin;
     return 1;
 }
 
@@ -86,7 +90,7 @@ void xv_occl_render(xctx *c)
     uint32_t hdr = X_M32(X_M32(0x2FC6ACu) + 0x34u) + (handle & 0xFFFFu) * 12u;
     uint32_t body = X_M32(hdr + 8u);
     if (handle == 0xFFFFFFFFu || X_M16(hdr) != (handle >> 16) || !body) { n_untracked++; f_0005B4A0(c); return; }
-    float v[8][3]; int proxy = object_cube(body, v);
+    float r[5]; int proxy = object_rect(body, r);
     uint32_t bf = xv_d3d_occl_build_frame();
     unsigned t = hslot(handle);
     int skip = mode == 2 && proxy && !cut_frames && tab[t].handle == handle && !tab[t].visible && bf - tab[t].frame <= (uint32_t)age;
@@ -96,14 +100,14 @@ void xv_occl_render(xctx *c)
     xv_d3d_occl_end();
     if (!slot) { n_untracked++; return; }
     if (!proxy) { n_noproxy++; return; }
-    if (npend < 255u) { pend[npend].slot = slot; memcpy(pend[npend].v, v, sizeof v); npend++; }
+    if (npend < 255u) { pend[npend].slot = slot; pend[npend].x0 = r[0]; pend[npend].y0 = r[1]; pend[npend].x1 = r[2]; pend[npend].y1 = r[3]; pend[npend].z = r[4]; npend++; }
 }
 
 /* After the 5B760 model pass returns (5D410): the opaque world is in the depth buffer; record the proxies. */
 void xv_occl_after_models(void)
 {
     if (mode <= 0) { npend = 0; return; }
-    for (unsigned i = 0; i < npend; ++i) xv_d3d_occl_proxy(pend[i].slot, (const float (*)[3])pend[i].v);
+    for (unsigned i = 0; i < npend; ++i) xv_d3d_occl_proxy(pend[i].slot, pend[i].x0, pend[i].y0, pend[i].x1, pend[i].y1, pend[i].z);
     npend = 0;
     const float *m = xv_d3d_occl_matrix();   /* w row: the camera's forward axis (unnormalized) and its offset */
     float f[3] = { m[12], m[13], m[14] }, n = sqrtf(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
