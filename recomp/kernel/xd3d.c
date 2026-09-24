@@ -742,17 +742,17 @@ void xv_hle_D3DDevice_Present(xctx *c)
         extern int xv_log_report_begin_async_frame(unsigned) __attribute__((weak));
         extern void xv_log_report_end(void) __attribute__((weak));
         int grouped=xv_log_report_begin_async_frame && xv_log_report_end && xv_log_report_begin_async_frame(g_dev.frame);
+        if (xv_rec_ab_active()) {   /* XV_REC_AB: which phase the following [hle-time] window ran (tools/rec_ab.py) */
+            static unsigned last[2]; unsigned a = xv_rec_ab_frames[0] - last[0], b = xv_rec_ab_frames[1] - last[1];
+            last[0] = xv_rec_ab_frames[0]; last[1] = xv_rec_ab_frames[1];
+            D3DLOG("[rec-ab] hle frames %u %u\n", a, b);
+        }
 #ifdef XV_NATIVE_MATERIAL_SAMPLER
         D3DLOG("[material-sampler] 60 frames: accepted stage groups %u/%u/%u/%u; ordered native writes\n",
                material_sampler_groups[0], material_sampler_groups[1], material_sampler_groups[2], material_sampler_groups[3]);
         memset(material_sampler_groups, 0, sizeof material_sampler_groups);
 #endif
         { unsigned hp = __atomic_exchange_n(&helper_presents, 0, __ATOMIC_ACQ_REL); if (hp) D3DLOG("[helper-present] %u of 60 device presents ran on the scene helper at scene end\n", hp); }
-        if (xv_rec_ab_active()) {   /* XV_REC_AB: which phase the following [hle-time] window ran (tools/rec_ab.py) */
-            static unsigned last[2]; unsigned a = xv_rec_ab_frames[0] - last[0], b = xv_rec_ab_frames[1] - last[1];
-            last[0] = xv_rec_ab_frames[0]; last[1] = xv_rec_ab_frames[1];
-            D3DLOG("[rec-ab] hle frames %u %u\n", a, b);
-        }
         xv_render_view_report(60); { extern void xv_scene_thread_report(unsigned); xv_scene_thread_report(60); } { extern void xv_crt_float_report(unsigned) __attribute__((weak)); if (xv_crt_float_report) xv_crt_float_report(60); } { extern void xv_native_visibility_report(unsigned) __attribute__((weak)); if (xv_native_visibility_report) xv_native_visibility_report(60); } { extern void xv_cache_probe_report(unsigned) __attribute__((weak)); if (xv_cache_probe_report) xv_cache_probe_report(60); } { extern void xv_cache_defer_report(unsigned) __attribute__((weak)); if (xv_cache_defer_report) xv_cache_defer_report(60); } { extern void xv_objtrace_report(unsigned) __attribute__((weak)); if (xv_objtrace_report) xv_objtrace_report(60); } { extern void xv_native_aim_blend_report(unsigned) __attribute__((weak)); if (xv_native_aim_blend_report) xv_native_aim_blend_report(60); } { extern void xv_native_92330_report(unsigned) __attribute__((weak)); if (xv_native_92330_report) xv_native_92330_report(60); } { extern void xv_native_63c00_report(unsigned) __attribute__((weak)); if (xv_native_63c00_report) xv_native_63c00_report(60); } if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */
             const float (*m)[4] = g_vp_rows;
