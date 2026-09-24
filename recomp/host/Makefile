@@ -290,6 +290,22 @@ build/rec_index_test: rec_index_test.c ../../runtime/xv_index_copy.h ../../runti
 	mkdir -p build
 	$(CC) $(CFLAGS) $< -o $@
 
+# XV_REC_* recording knobs (runtime/xv_record_opt.h). rec_query_test includes xv_d3d.c: like ps_cache_test it needs
+# the generated shaders/xv_ps_table.h of a built stage.
+.PHONY: test-rec
+test-rec: build/rec_index_test build/rec_hle_test build/rec_query_test
+	./build/rec_index_test
+	./build/rec_hle_test
+	./build/rec_query_test
+
+build/rec_hle_test: Makefile rec_hle_test.c ../kernel/xd3d.c ../kernel/xd3d.h ../xv_x86rt.c ../kernel/xk_mem.c ../../runtime/xv_record_opt.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -ffunction-sections -fdata-sections rec_hle_test.c ../xv_x86rt.c ../kernel/xk_mem.c -Wl,--gc-sections -lm -o $@
+
+build/rec_query_test: Makefile rec_query_test.c ../../runtime/xv_d3d.c ../../runtime/xv_visibility.h ../../runtime/xv_record_opt.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -DXV_FLARE_QUERY_OVERLAP -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include rec_query_test.c -Wl,--gc-sections -lm -o $@
+
 build/draw_state_test: draw_state_test.c ../../runtime/xv_draw_state.h ../../runtime/xv_d3d.c ../../runtime/xv_bytes_equal.h ../../runtime/xv_index_copy.h ../../runtime/xv_index_cache.h ../../runtime/xv_vertex_refs.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include draw_state_test.c -Wl,--gc-sections -lm -o $@
