@@ -2081,3 +2081,27 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
 - Where 20 fps stands: Blood Gulch 20.7-22.2 fps (GPU-bound); a10 steady ~60-62 ms (helper-bound), a10 early ~78 ms
   (GPU-bound on legit Halo shading). The remaining CPU path is native ports of the scene's hot guest functions
   (54010/54740 ordered passes, 5B4A0 per-model, 539C0, 63C00 flares): days of work, not knobs.
+
+## §61 Evening: launch variance, the two-tick structure, and what 20 fps in the a10 needs (Sept 23, 17:45-19:10 CDT)
+- Identical builds vary ~5 ms per LAUNCH (perf164 steady frame 58.0 / helper 53.3 vs its same-build rerun perf164b
+  63.1 / 54.4; perf166 62.1 / 54.8, perf165 63.6 / 58.6). Single runs cannot validate ~1 ms changes; directly timed
+  pieces (merge, copy) are the reliable measure. Not the audio core (the mixer sat on core 1 in good and bad launches),
+  not deploy-vs-restart. Tried: helper render table in PHYCONT memory (b5a8c10/3a6f0ca, granted, no effect); guest arena
+  PHYCONT (e8bb7d0) refused for 76 MB (0x80024302, falls back).
+- XV_RENDER_VIEW_PLD NEON copy: slower than sceClibMemcpy (2.8 -> 3.5 ms); leave off. Merge NEON + prefetch kept (0.6 ms).
+- Audio/profiler workers pinned to core 0 (108ef80, XV_AUDIO_CORE): helper preemption 0.2% -> 0%, frame unchanged.
+- XV_HELPER_PRESENT=2 adaptive (965cb70, default): the helper presents only while the owner is still ticking; used in
+  22-36 of 60 frames in the steady part, noticed->go 1.6-1.8 -> 1.1 ms. [flare-work] recording 1.8 ms/frame (~15 us
+  per kept quad) of the ~5.9 ms flare path.
+- Owner join stats + XV_JOIN_HOSTWAIT=<us> (a348312, opt-in): early cinematic single parks last up to 10-21 ms (another
+  guest fiber holds the runner); with a 4 ms host-wait budget done->noticed there fell to 0.7-0.9 ms. Steady part: longest
+  park 1.4-1.75 ms, done->noticed still ~5 ms, frame unchanged (60.8-62.4).
+- THE STRUCTURE (steady a10): the 30 Hz sim runs ~1.86 ticks per ~62 ms frame, so frames alternate: two-tick frames
+  (owner 2 x ~26.5 + ~7 fixed = ~60 ms, the helper waits: done->noticed) and one-tick frames (owner ~34 ms, waits for
+  the ~55 ms scene: the parks). The walls are balanced; 50 ms needs BOTH the per-tick cost ~26.5 -> ~22 ms (per-object
+  update 8FB70 ~17 ms/tick, 14E2C0 ~8 ms/tick) AND the scene ~55 -> ~45 ms (ordered passes 54010 ~11, per-model 5B4A0
+  ~12.5, 539C0 ~6, flares ~6). That is native-port work on both threads, days not hours. Blood Gulch (GPU-bound 45 ms)
+  is already at 20.7-22.2 fps.
+- Halo 2: a background agent built a headless H2 harness (x86 + Pi, H2 worktree bc49709/fd74e13/55418c0): boot ->
+  menus -> split-screen Slayer on Ivory Tower, 40 min Pi soak clean; ARM profile says runtime (texture binds 27%, vertex
+  decode 11%, audio DSP interpreter a whole core) dominates, guest code 4.6%. See docs/halo2-host-harness.md there.
