@@ -2127,7 +2127,7 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   (worktree branch work/x87-regs-20260923, default off, verified with XV_TICK_TRACE/XV_DRAW_HASH on host + Pi);
   that is the systemic lever for both threads.
 
-## 63. Night of Sept 23-24: the freeze, the flicker, the first native ports (perf174-180)
+## §63 Night of Sept 23-24: the freeze, the flicker, the first native ports (perf174-180)
 
 Stages: `overlap-candidate/build` (perf176 = perf174 + cache defer) and `overlap-candidate/build-x87` (perf177+,
 built by `overlap-candidate/build_x87.py`; its tools/query_memory_capture.py is re-pinned for the inline parity).
