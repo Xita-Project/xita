@@ -146,7 +146,14 @@ static inline void xd3d_hash_call(const char *name, xctx *c)   /* XV_DRAW_HASH=<
     for (unsigned i = 1; i <= argc; ++i) { uint32_t w = X_M32(c->r[4] + 4u * i); if (w >= 0x03D00000u && w < 0x04000000u) w = 0x03D00000u; h ^= w; h *= 1099511628211ull; }   /* kernel-object addresses (KERNEL_VA..64 MB) depend on host I/O timing: masked */
     g_draw_hash = h;
 }
-#define XD3D_COUNT(nm) (xd3d_count(nm), xd3d_hash_call(nm, c))
+#if defined(XV_NATIVE_63C00) && XV_NATIVE_63C00
+/* XV_NATIVE_63C00 verify/timing (kernel/xk_native_63c00.c): observes every D3D HLE entry (it filters by context). */
+void (*volatile xv_hle_tap)(xctx *, const char *);
+#define XD3D_TAP(nm) (xv_hle_tap ? xv_hle_tap(c, nm) : (void)0)
+#else
+#define XD3D_TAP(nm) ((void)0)
+#endif
+#define XD3D_COUNT(nm) (XD3D_TAP(nm), xd3d_count(nm), xd3d_hash_call(nm, c))
 int  xd3d_hist_active(void);                                 /* true during the XV_D3D_HIST frame */
 #define XD3D_RET(nm) do { if (xd3d_hist_active()) { D3DLOG("[hist] %s from %08X\n", nm, X_M32(c->r[4])); \
     char sb_[400]; int sn_ = 0; for (unsigned i_ = 0; i_ < 40 && sn_ < 380; ++i_) { uint32_t w_ = X_M32(c->r[4] + 4 * i_); if (w_ >= 0x11000 && w_ < 0x3A0000) sn_ += snprintf(sb_ + sn_, sizeof sb_ - sn_, " %X", w_); } \
@@ -697,7 +704,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
         memset(material_sampler_groups, 0, sizeof material_sampler_groups);
 #endif
         { unsigned hp = __atomic_exchange_n(&helper_presents, 0, __ATOMIC_ACQ_REL); if (hp) D3DLOG("[helper-present] %u of 60 device presents ran on the scene helper at scene end\n", hp); }
-        xv_render_view_report(60); { extern void xv_scene_thread_report(unsigned); xv_scene_thread_report(60); } { extern void xv_crt_float_report(unsigned) __attribute__((weak)); if (xv_crt_float_report) xv_crt_float_report(60); } { extern void xv_native_visibility_report(unsigned) __attribute__((weak)); if (xv_native_visibility_report) xv_native_visibility_report(60); } { extern void xv_cache_probe_report(unsigned) __attribute__((weak)); if (xv_cache_probe_report) xv_cache_probe_report(60); } { extern void xv_cache_defer_report(unsigned) __attribute__((weak)); if (xv_cache_defer_report) xv_cache_defer_report(60); } { extern void xv_objtrace_report(unsigned) __attribute__((weak)); if (xv_objtrace_report) xv_objtrace_report(60); } if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
+        xv_render_view_report(60); { extern void xv_scene_thread_report(unsigned); xv_scene_thread_report(60); } { extern void xv_crt_float_report(unsigned) __attribute__((weak)); if (xv_crt_float_report) xv_crt_float_report(60); } { extern void xv_native_visibility_report(unsigned) __attribute__((weak)); if (xv_native_visibility_report) xv_native_visibility_report(60); } { extern void xv_native_63c00_report(unsigned) __attribute__((weak)); if (xv_native_63c00_report) xv_native_63c00_report(60); } { extern void xv_cache_probe_report(unsigned) __attribute__((weak)); if (xv_cache_probe_report) xv_cache_probe_report(60); } { extern void xv_cache_defer_report(unsigned) __attribute__((weak)); if (xv_cache_defer_report) xv_cache_defer_report(60); } { extern void xv_objtrace_report(unsigned) __attribute__((weak)); if (xv_objtrace_report) xv_objtrace_report(60); } if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */
             const float (*m)[4] = g_vp_rows;
             for (int i = 0; i < 3; ++i) { camfwd[i] = m[2][i];

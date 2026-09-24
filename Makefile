@@ -2087,6 +2087,22 @@ CFLAGS += -DXV_NATIVE_VISIBILITY=1 -DXV_NATIVE_VISIBILITY_DEFAULT=$(XV_NATIVE_VI
 RECOMP_CFLAGS += -DXV_NATIVE_VISIBILITY=1 -DXV_NATIVE_VISIBILITY_DEFAULT=$(XV_NATIVE_VISIBILITY_DEFAULT)
 endif
 $(RECOMP_BUILD)/kernel/xk_native_visibility.o: RECOMP_CFLAGS += -ffp-contract=off
+# Native lens-flare visibility test (f_00063C00 with f_000637A0, f_000B5EA0 and its four f_00019E7B floors; the D3D HLE
+# calls are made as the guest makes them): recomp/kernel/xk_native_63c00.c, entry hook installed by
+# tools/patch_native_63c00_hooks.py. Env XV_NATIVE_63C00 0 off / 1 verify / 2 native; XV_NATIVE_63C00_TIME=1 us/call.
+XV_NATIVE_63C00 ?= 0
+XV_NATIVE_63C00_DEFAULT ?= 0
+ifneq ($(filter $(XV_NATIVE_63C00),0 1),$(XV_NATIVE_63C00))
+$(error XV_NATIVE_63C00 must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_63C00_DEFAULT),0 1 2),$(XV_NATIVE_63C00_DEFAULT))
+$(error XV_NATIVE_63C00_DEFAULT must be 0, 1 or 2)
+endif
+ifeq ($(XV_NATIVE_63C00),1)
+CFLAGS += -DXV_NATIVE_63C00=1 -DXV_NATIVE_63C00_DEFAULT=$(XV_NATIVE_63C00_DEFAULT)
+RECOMP_CFLAGS += -DXV_NATIVE_63C00=1 -DXV_NATIVE_63C00_DEFAULT=$(XV_NATIVE_63C00_DEFAULT)
+endif
+$(RECOMP_BUILD)/kernel/xk_native_63c00.o: RECOMP_CFLAGS += -ffp-contract=off
 XV_RENDER_VIEW ?= 0
 XV_RENDER_VIEW_DEFAULT ?= 0
 ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))
