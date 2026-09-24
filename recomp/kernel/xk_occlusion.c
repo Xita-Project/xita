@@ -20,8 +20,10 @@
  *                   violations (the object's own draws passed samples but its proxy did not - must stay 0).
  * XV_OCCL=2 skip:   an object whose latest proxy (at most XV_OCCL_AGE frames old, default 4) passed no sample is not
  *                   rendered (the loop's call returns at once) but still gets a proxy, so it comes back the frame
- *                   after it becomes visible (GPU latency: ~2-3 frames). No skipping while the camera turns more than
- *                   XV_OCCL_CUT_DEG (default 8) per frame or jumps (cutscene cuts), and never for objects whose cube
+ *                   after it becomes visible (GPU latency: ~2-3 frames). No skipping for 3 frames after the camera turns
+ *                   more than XV_OCCL_CUT_DEG (default 25) or moves more than XV_OCCL_CUT_DIST (default 8 world units,
+ *                   along the view axis) in one frame - a cutscene cut; continuous pans and the falling lifepod's
+ *                   camera (1-3 units/frame) keep skipping (was 8 deg / 1 unit: the a30 intro never skipped), and never for objects whose cube
  *                   reaches behind the near plane. Default 0 (off). Hooks from tools/patch_occlusion_hooks.py.
  * XV_OCCL_STATIC=<frames> (mode 2, default 4, 0 off): while the camera has not moved for two frames, an object that
  *                   has not moved since it was last rendered and whose own draws passed no sample in its last two
@@ -49,7 +51,7 @@ static struct {
     uint32_t rendered; float c[3];             /* recorder: last frame it was rendered, and its center then */
 } tab[TAB];
 static struct { unsigned slot; float x0, y0, x1, y1, z; } pend[255]; static unsigned npend;
-static int mode = -1, age = 4, static_every = 4, cam_still; static float cut_cos = 0.990268f, margin = 0.02f;
+static int mode = -1, age = 4, static_every = 4, cam_still; static float cut_cos = 0.906308f, cut_dist = 8.0f, margin = 0.02f;
 static float prev_fwd[3], prev_d, prev_m3, prev_m7; static int have_prev, cut_frames;
 static unsigned n_render, n_skip, n_skip_static, n_noproxy, n_untracked, n_cuts;
 static volatile unsigned r_rendered, r_real_zero, r_proxy_zero, r_violation, r_skipped, r_reappear, r_both_zero;
@@ -61,6 +63,7 @@ static void config(void)
     e = getenv("XV_OCCL_STATIC"); if (e) static_every = atoi(e);
     e = getenv("XV_OCCL_MARGIN"); if (e) margin = (float)atof(e);
     e = getenv("XV_OCCL_CUT_DEG"); if (e) cut_cos = cosf((float)atof(e) * 3.14159265f / 180.0f);
+    e = getenv("XV_OCCL_CUT_DIST"); if (e) cut_dist = (float)atof(e);
     if (mode) XK_LOG("[occl] mode %d (%s), result age <= %d frames, rect margin %.3f, cut above %.1f deg/frame\n", mode,
                      mode == 1 ? "verify: never skips" : "skip hidden objects", age, margin, acosf(cut_cos) * 180.0f / 3.14159265f);
 }
@@ -134,7 +137,7 @@ void xv_occl_after_models(void)
     if (n > 0.0f) { f[0] /= n; f[1] /= n; f[2] /= n; }
     float d = m[15] / (n > 0.0f ? n : 1.0f);
     float fd = f[0] * prev_fwd[0] + f[1] * prev_fwd[1] + f[2] * prev_fwd[2];
-    if (have_prev && (fd < cut_cos || fabsf(d - prev_d) > 1.0f)) { cut_frames = 3; n_cuts++; }
+    if (have_prev && (fd < cut_cos || fabsf(d - prev_d) > cut_dist)) { cut_frames = 3; n_cuts++; }
     else if (cut_frames) cut_frames--;
     /* still camera: under ~0.1 degree of turn and 0.01 units of offset change since the previous frame */
     if (have_prev && fd > 0.9999985f && fabsf(d - prev_d) < 0.01f && fabsf(m[3] - prev_m3) < 0.01f && fabsf(m[7] - prev_m7) < 0.01f) cam_still++;
