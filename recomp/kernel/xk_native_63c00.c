@@ -542,41 +542,12 @@ static uint32_t n63_input_hash(xctx *c, const n63_plan *p)
     return h;
 }
 
-/* Entry hook of f_00063C00: 1 = handled (guest body skipped). */
-int xv_native_63c00(xctx *c)
+/* Verify mode: the native runs dry (HLE calls recorded), then the guest body runs on the restored state with its HLE
+ * entries observed; everything either can write is compared; the guest's result (and its HLE calls) stand. Its own
+ * frame (~4 KB of buffers) so modes 0 and 2 do not carry it. */
+static __attribute__((noinline)) int n63_verify(xctx *c, int timed)
 {
-    const int mode = n63_mode();
-    if (c == n63_ref_ctx) return 0;                              /* the reference run of verify/timing */
-    const int timed = n63_timing();
-    if (!mode) {
-        if (!timed) return 0;
-        n63_tap_install();
-        if (!n63_claim(c)) return 0;
-        uint64_t first = 0, t = n63_guest(c, 0, &first);
-        N63_ADD_NS(NT_GUEST, t); N63_ADD(NC_T_GUEST, 1);
-        if (first) { N63_ADD_NS(NT_GUEST_COMPUTE, first); N63_ADD_NS(NT_GUEST_HLE, t - first); N63_ADD(NC_T_GUEST_DRAW, 1); }
-        else N63_ADD_NS(NT_GUEST_COMPUTE, t);
-        N63_ADD(NC_CALLS, 1);
-        return 1;
-    }
     n63_plan p;
-    if (mode == 2) {
-        n63_run_ctl ctl = { 0, 0 };
-        const uint64_t t0 = timed ? n63_now_ns() : 0;
-        const int why = n63_compute(c, &p);
-        if (why) { n63_declined(why); return 0; }
-        const int exit = n63_commit(c, &p, &ctl);
-        if (timed) {
-            const uint64_t t1 = n63_now_ns();
-            N63_ADD_NS(NT_NATIVE, t1 - t0); N63_ADD(NC_T_NATIVE, 1);
-            if (ctl.hle_start) { N63_ADD_NS(NT_NATIVE_COMPUTE, ctl.hle_start - t0); N63_ADD_NS(NT_NATIVE_HLE, t1 - ctl.hle_start); N63_ADD(NC_T_NATIVE_DRAW, 1); }
-            else N63_ADD_NS(NT_NATIVE_COMPUTE, t1 - t0);
-        }
-        n63_count(exit);
-        return 1;
-    }
-    /* verify: the native runs dry (HLE calls recorded), then the guest body runs on the restored state with its HLE
-     * entries observed; everything either can write is compared; the guest's result (and its HLE calls) stand. */
     n63_tap_install();
     if (!n63_claim(c)) { N63_ADD(NC_SKIPPED, 1); return 0; }
     const uint32_t E = c->r[4], lo = E - N63_WINDOW_LO;
@@ -640,6 +611,42 @@ int xv_native_63c00(xctx *c)
 #undef N63_CMP
     if (bad) N63_ADD(NC_MISMATCHED, 1);
     return 1;
+}
+
+/* Entry hook of f_00063C00: 1 = handled (guest body skipped). */
+int xv_native_63c00(xctx *c)
+{
+    const int mode = n63_mode();
+    if (c == n63_ref_ctx) return 0;                              /* the reference run of verify/timing */
+    const int timed = n63_timing();
+    if (!mode) {
+        if (!timed) return 0;
+        n63_tap_install();
+        if (!n63_claim(c)) return 0;
+        uint64_t first = 0, t = n63_guest(c, 0, &first);
+        N63_ADD_NS(NT_GUEST, t); N63_ADD(NC_T_GUEST, 1);
+        if (first) { N63_ADD_NS(NT_GUEST_COMPUTE, first); N63_ADD_NS(NT_GUEST_HLE, t - first); N63_ADD(NC_T_GUEST_DRAW, 1); }
+        else N63_ADD_NS(NT_GUEST_COMPUTE, t);
+        N63_ADD(NC_CALLS, 1);
+        return 1;
+    }
+    n63_plan p;
+    if (mode == 2) {
+        n63_run_ctl ctl = { 0, 0 };
+        const uint64_t t0 = timed ? n63_now_ns() : 0;
+        const int why = n63_compute(c, &p);
+        if (why) { n63_declined(why); return 0; }
+        const int exit = n63_commit(c, &p, &ctl);
+        if (timed) {
+            const uint64_t t1 = n63_now_ns();
+            N63_ADD_NS(NT_NATIVE, t1 - t0); N63_ADD(NC_T_NATIVE, 1);
+            if (ctl.hle_start) { N63_ADD_NS(NT_NATIVE_COMPUTE, ctl.hle_start - t0); N63_ADD_NS(NT_NATIVE_HLE, t1 - ctl.hle_start); N63_ADD(NC_T_NATIVE_DRAW, 1); }
+            else N63_ADD_NS(NT_NATIVE_COMPUTE, t1 - t0);
+        }
+        n63_count(exit);
+        return 1;
+    }
+    return n63_verify(c, timed);
 }
 
 #if defined(XV_NATIVE_63C00_COVERAGE)
