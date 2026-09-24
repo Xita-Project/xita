@@ -2166,3 +2166,18 @@ built by `overlap-candidate/build_x87.py`; its tools/query_memory_capture.py is 
 - **Natives merged:** aim blend (A39B0 subtree, 90770's hot path; Vita verify 0 mismatches, 33 vs 120 us/call, tick
   8DDF0 9.5 -> 6.6 ms, perf181 steady 61.0 vs 63+), light cluster query (56670 subtree under 92330; host/Pi exact,
   2.1x), flare occlusion test (63C00 guest part; HLE draws unchanged; 2-4x on the compute part).
+- **User play, Sept 24 morning (open issues):**
+  - *Buttons dead system-wide* (home screen too) while sticks worked; a Vita reboot fixed it. Suspect: vitacompanion's
+    `press` injection (used to dismiss crash dialogs, 22:16) and/or `nosleep` hooks. Keep-awake now uses only the
+    in-app `vita_remote.py lease` (sceKernelPowerTick); avoid companion `press`/`nosleep` on the user's console.
+  - *Perf settings were never on for the user's own launches*: every knob defaults off in the build and was only sent
+    by run-overlap-fire.sh's remote env. Blood Gulch valley ran 10 fps on the old path. The play settings are now
+    appended to the device's ux0:data/xita/xita.cfg (backup xita.cfg.bak-20260924; local copies in overlap-candidate).
+  - *Warthog driver floats out of the seat while driving* (seen on the OLD path, scene thread off). Prime suspect:
+    XV_EXPERIMENTAL_OBJECT_JOBS (runtime default on) - it queues f_0008FB70 per-object updates from 900E0's two sites
+    and reorders them (split_order, lanes); its own header says "intentionally relaxes object update ordering". A
+    rider updated before its vehicle takes the previous-tick seat transform (offset grows with speed). Test:
+    XV_EXPERIMENTAL_OBJECT_JOBS=0. Proper fix: keep attached objects with their parent's job / after it.
+  - *Blocky "bloom" on the Warthog*: 4x4-texel-looking squares over the body and wheels (screenshot
+    2026-09-24-072743.png, kj folder) - a low-res texture (likely the reflection cube map) point-sampled or wrong
+    mip. Needs `vita_remote.py trace-draw` with the Warthog on screen.

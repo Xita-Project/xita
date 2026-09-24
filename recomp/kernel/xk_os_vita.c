@@ -511,7 +511,11 @@ void xk_os_pad_poll(xk_os_pad *p)
     d.lx = d.ly = d.rx = d.ry = 128;                                  /* centred if no pad answers */
     { static int mode_set; if (!mode_set) { mode_set = 1; sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);   /* real firmware defaults to DIGITAL: sticks read 128 forever */
         xv_logf("[xk] pad: analog sampling mode set\n"); } }
-    sceCtrlPeekBufferPositive(0, &d, 1);
+    int ctrl_rc = sceCtrlPeekBufferPositive(0, &d, 1);
+    {   /* button trace: every change of the raw sceCtrl buttons (and the rc), first 400 changes - "all my buttons are disabled but the sticks work" */
+        static uint32_t last = 0xFFFFFFFFu; static int last_rc = 1; static unsigned n;
+        if ((d.buttons != last || (ctrl_rc < 0) != (last_rc < 0)) && n < 400) { n++; xv_logf("[xk] pad buttons raw %08X (was %08X) rc %d sticks %u %u %u %u\n", d.buttons, last, ctrl_rc, d.lx, d.ly, d.rx, d.ry); }
+        last = d.buttons; last_rc = ctrl_rc; }
     xv_remote_pad(&d.buttons, &d.lx, &d.ly, &d.rx, &d.ry);
     memset(p, 0, sizeof *p); p->connected = 1;
     uint16_t b = 0;
@@ -703,6 +707,10 @@ void xk_os_pad_poll(xk_os_pad *p)
     p->analog[3] = (d.buttons & SCE_CTRL_TRIANGLE) ? 255 : 0;   /* Y */
     p->analog[6] = (d.buttons & SCE_CTRL_LTRIGGER) ? 255 : 0;   /* left trigger */
     p->analog[7] = (d.buttons & SCE_CTRL_RTRIGGER) ? 255 : 0;   /* right trigger */
+    {   /* ... and what the game gets: Xbox wButtons + the eight analog buttons, on change */
+        static uint32_t lastb = 0xFFFFFFFFu, lasta = 0xFFFFFFFFu; static unsigned n2; uint32_t a = 0; for (int i = 0; i < 8; ++i) a |= (p->analog[i] ? 1u : 0u) << i;
+        if ((p->buttons != lastb || a != lasta) && n2 < 400) { n2++; xv_logf("[xk] pad to game: wButtons %04X analog mask %02X (A B X Y black white LT RT)\n", p->buttons, a); }
+        lastb = p->buttons; lasta = a; }
     pad_stick(d.lx, d.ly, g_pad_cfg.deadzone, 100, 0, 0, &p->lx, &p->ly);
     pad_stick(d.rx, d.ry, g_pad_cfg.deadzone, g_pad_cfg.sens,
               g_pad_cfg.curve, g_pad_cfg.invert, &p->rx, &p->ry);
