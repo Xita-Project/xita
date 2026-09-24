@@ -310,10 +310,12 @@ class HaloHooks(NoGameHooks):
             body = marker_region.hook(body)
         if self.enabled and address == 0x7E530:
             body = constant_pack.hook(body)
-        if self.enabled and address == 0x70110:
-            body = material_sampler.hook(body)
+        # The fog/UV hooks pin the unmodified emitted body: run them before the
+        # material sampler batching rewrites 70110's sampler groups.
         body = model_fog.hook(self.image, address, body)
         body = model_uv.hook(self.image, address, body)
+        if self.enabled and address == 0x70110:
+            body = material_sampler.hook(body)
         if self.scene_partition_enabled and address == 0x5D410:
             body = scene_partition.hook(body)
             if self.scene_bucket0_detail_enabled:

@@ -495,6 +495,11 @@ class Emitter:
         self.stats = Counter()
         self.hle_used: Set[str] = set()
         self.kernel_used: Set[str] = set()
+        self.x87regs = None          # --x87-regs: recompiler.x87_regs.X87Regs (analysis + per-function plans)
+        self._x87 = None             # plan of the function being emitted in register mode
+        self._x87_pos = None         # (block start, index) of the instruction being lowered
+        self._x87_resume = None      # memory-lowering copy: guarded call sites that get a resume label
+        self._lp = "L_"              # block label prefix (the memory-lowering copy uses M_)
 
     # ---- operand helpers -----------------------------------------------------------
     def reg(self, r: int, size: int) -> str:
@@ -759,12 +764,15 @@ class Emitter:
         if mn == "call":
             if ins.op0_kind == OpKind.NEAR_BRANCH32:
                 tgt = ins.near_branch_target
+                x87_pre, x87_post = self.x87_call_sync()
+                out.extend(x87_pre)
                 out.append(f"    X_PUSH32(0x{nxt:X}u);")
                 if self.trace and (tgt in self.hle or tgt in self.kthunks):
                     out.append(f'    if (xv_trace_enabled) xv_trace_call(c, "{self.trace_name(tgt)}", {self.trace_argc(tgt)});')
                 out.append(f"    {self.call_expr(tgt)};")
                 if self.trace_funcs:
                     out.append(f"    XV_FN_BACK(0x{self.cur_fn:08X}u);")      # sampling profiler: time after the call is ours again
+                out.extend(x87_post)
                 return
             # indirect: through kernel thunk slot?  call [slot]
             if ins.op0_kind == OpKind.MEMORY and ins.memory_base == Register.NONE and ins.memory_index == Register.NONE:
@@ -772,15 +780,22 @@ class Emitter:
                 if slot in self.kthunks:
                     name = KERNEL_EXPORTS.get(self.kthunks[slot], f"ordinal_{self.kthunks[slot]}")
                     self.kernel_used.add(name)
+                    x87_pre, x87_post = self.x87_call_sync()
+                    out.extend(x87_pre)
                     out.append(f"    X_PUSH32(0x{nxt:X}u);")
                     if self.trace:
                         out.append(f'    if (xv_trace_enabled) xv_trace_call(c, "{name}", {KERNEL_ARGC.get(name, 0)});')
                     out.append(f"    XV_HLE_CALL(0x{slot:X}u, xk_{name});")
+                    out.extend(x87_post)
                     return
+            x87_pre, x87_post = self.x87_call_sync()
+            out.extend(x87_pre)
             out.append(f"    {{ uint32_t t_ = {self.operand(ins,0,4)}; X_PUSH32(0x{nxt:X}u); xv_call(c, t_); }}")
+            out.extend(x87_post)
             return
         if mn == "ret":
             n = ins.immediate(0) if ins.op_count else 0
+            out.extend(self.x87_exit_sync())
             out.append(f"    c->r[4] += {4 + n}; return;")
             return
         if mn == "jmp":
@@ -789,17 +804,19 @@ class Emitter:
                 if tgt in fn.blocks:
                     if tgt <= ip:
                         out.append("    X_PREEMPT();")
-                    out.append(f"    goto L_{tgt:08X};")
+                    out.append(f"    goto {self._lp}{tgt:08X};")
                 else:
+                    out.extend(self.x87_exit_sync())
                     out.append(f"    {self.call_expr(tgt)}; return;")             # tail call
                 return
             if ins.ip in fn.switch_tables:
                 idx = self.reg(ins.memory_index, 4)
                 out.append(f"    switch ({idx}) {{")
                 for i, t in fn.switch_tables[ins.ip]:
-                    out.append(f"    case 0x{i & 0xFFFFFFFF:X}u: goto L_{t:08X};")
+                    out.append(f"    case 0x{i & 0xFFFFFFFF:X}u: goto {self._lp}{t:08X};")
                 out.append(f"    default: xv_trap(c, 0x{ip:X}u); return; }}")
                 return
+            out.extend(self.x87_exit_sync())
             out.append(f"    xv_call(c, {self.operand(ins,0,4)}); return;")       # indirect tail jump
             return
         if mn.startswith("j") and mn not in ("jmp",):
@@ -815,25 +832,27 @@ class Emitter:
                 U(); return
             if tgt in fn.blocks:
                 if tgt <= ip:
-                    out.append(f"    if ({cond}) {{ X_PREEMPT(); goto L_{tgt:08X}; }}")
+                    out.append(f"    if ({cond}) {{ X_PREEMPT(); goto {self._lp}{tgt:08X}; }}")
                 else:
-                    out.append(f"    if ({cond}) goto L_{tgt:08X};")
+                    out.append(f"    if ({cond}) goto {self._lp}{tgt:08X};")
             else:
-                out.append(f"    if ({cond}) {{ {self.call_expr(tgt)}; return; }}")
+                out.append(f"    if ({cond}) {{ {self.x87_exit_inline()}{self.call_expr(tgt)}; return; }}")
             return
         if mn in ("loop", "loope", "loopne"):
             tgt = ins.near_branch_target
             extra = {"loop": "", "loope": " && XF_Z(c)", "loopne": " && !XF_Z(c)"}[mn]
             if tgt in fn.blocks:
-                out.append(f"    if (--c->r[1] != 0{extra}) {{ X_PREEMPT(); goto L_{tgt:08X}; }}")
+                out.append(f"    if (--c->r[1] != 0{extra}) {{ X_PREEMPT(); goto {self._lp}{tgt:08X}; }}")
             else:
                 # Match JMP/Jcc: an external target has no local label and
                 # must use tail dispatch without pushing a return address.
-                out.append(f"    if (--c->r[1] != 0{extra}) {{ {self.call_expr(tgt)}; return; }}")
+                out.append(f"    if (--c->r[1] != 0{extra}) {{ {self.x87_exit_inline()}{self.call_expr(tgt)}; return; }}")
             return
 
         # ---- x87 --------------------------------------------------------------------
         if mn.startswith("f") and mn not in ("fs",):
+            if self._x87 is not None:
+                self.lower_x87_regs(ins, mn, out); return
             self.lower_x87(ins, mn, out, U); return
 
         # ---- MMX (Bink) -----------------------------------------------------------------
@@ -901,6 +920,38 @@ class Emitter:
         if tgt in self.disc.functions:
             return f"f_{tgt:08X}(c)"
         return f"xv_call(c, 0x{tgt:X}u)"
+
+    # ---- x87 register mode (--x87-regs, recompiler/x87_regs.py) --------------------------
+    def x87_call_sync(self):
+        """Lines before/after a call in a register-mode function: spill dirty slots, c->fsp, c->fsw; reload
+        after (behind the guard when the callee's x87 effect is only assumed). In the memory-lowering copy
+        a guarded site gets the label its guard jumps to."""
+        if self._x87 is None:
+            if self._x87_resume and self._x87_pos in self._x87_resume:
+                from recompiler.x87_regs import resume_label
+                return [], [f"{resume_label(self._x87_pos)}: ;"]
+            return [], []
+        st = self._x87.states[self._x87_pos]
+        pre = self._x87.spill(st)
+        post = [self._x87.guard(self._x87_pos), self._x87.fill()]
+        return ([f"    {pre}"] if pre else []), [f"    {x}" for x in post if x]
+
+    def x87_exit_sync(self):
+        if self._x87 is None:
+            return []
+        pre = self._x87.spill(self._x87.states[self._x87_pos])
+        return [f"    {pre}"] if pre else []
+
+    def x87_exit_inline(self) -> str:
+        if self._x87 is None:
+            return ""
+        pre = self._x87.spill(self._x87.states[self._x87_pos])
+        return f"{pre} " if pre else ""
+
+    def lower_x87_regs(self, ins, mn, out):
+        from recompiler.x87_regs import Ctx, lower_x87_regs
+        ctx = Ctx(self._x87.states[self._x87_pos].d)
+        out.extend(lower_x87_regs(self, ins, mn, ctx, COND))
 
     # ---- x87 --------------------------------------------------------------------------
     def x87_mem(self, ins: Instruction) -> Tuple[str, str]:
@@ -1286,6 +1337,44 @@ class Emitter:
         return "".join(out)
 
     def emit_function(self, fn: Function) -> str:
+        plan = self.x87regs.plans.get(fn.entry) if self.x87regs is not None else None
+        base_raw = self.emit_function_raw(fn, None)
+        base = self.finish_function(fn, base_raw)
+        if plan is None:
+            return base
+        # --x87-regs: only when no game hook rewrites the body, or the rewrite inserts pure observers
+        # (census/profile lines) into both lowerings; otherwise the memory lowering stays.
+        from recompiler.x87_regs import X87Regs
+        stats, unimpl = Counter(self.stats), Counter(self.unimpl)   # count each instruction once
+        reg_raw = self.emit_function_raw(fn, plan)
+        self.stats, self.unimpl = stats, unimpl
+        base_plain = self.rewrite_stores(base_raw) if getattr(self.disc, "rewrite_memory_stores", True) else base_raw
+        reg_plain = self.rewrite_stores(reg_raw) if getattr(self.disc, "rewrite_memory_stores", True) else reg_raw
+        try:
+            reg = self.hooks.transform_body(fn.entry, reg_plain)
+        except Exception as error:                                   # a body pin refused the register lowering
+            self.x87regs.fallback(fn.entry, f"hook-transform-refused:{type(error).__name__}")
+            return base
+        if base != base_plain or reg != reg_plain:
+            if not (X87Regs.observer_insertions(base_plain, base) and X87Regs.observer_insertions(reg_plain, reg)):
+                self.x87regs.fallback(fn.entry, "hook-transform")
+                return base
+        return reg
+
+    def finish_function(self, fn: Function, body: str) -> str:
+        if getattr(self.disc, "rewrite_memory_stores", True):
+            body = self.rewrite_stores(body)
+        return self.hooks.transform_body(fn.entry, body)
+
+    def emit_function_raw(self, fn: Function, plan) -> str:
+        self._x87 = plan
+        try:
+            return self._emit_function_raw(fn)
+        finally:
+            self._x87 = None
+            self._x87_pos = None
+
+    def _emit_function_raw(self, fn: Function) -> str:
         # `restrict`: the context is host memory that no guest pointer can reach, so GCC may keep guest
         # registers in ARM registers across guest memory stores (otherwise every store reloads them).
         # xram_/xpt_: locals shadow the globals for the same reason (X_G is redefined per file to use them).
@@ -1300,6 +1389,8 @@ class Emitter:
             index = sorted(self.phase_targets).index(fn.entry)
             out.append(f"    XV_PHASE_SCOPE(c, {index}u);")
         out.extend(self.hooks.function_entry(fn.entry))
+        if self._x87 is not None:
+            out.extend(self._x87.prologue())
         # Blocks are emitted in address order.  When the function owns blocks below its entry (a jump
         # back into shared code, a tail merged with an earlier function) the first emitted block is
         # NOT the entry - without this goto the function would start executing someone else's code.
@@ -1307,16 +1398,38 @@ class Emitter:
         if fn.blocks and min(fn.blocks) != fn.entry:
             out.append(f"    goto L_{fn.entry:08X};")
         out.append("    uint32_t fk_a = 0, fk_b = 0, fk_r = 0; (void)fk_a; (void)fk_b; (void)fk_r;")
+        self._emit_blocks(fn, out)
+        plan = self._x87
+        if plan is not None and plan.final_return is not None:
+            spill = plan.spill(plan.final_return)
+            if spill:
+                out.append(f"    {spill}")
+        out.append("    return;")
+        if plan is not None and plan.guards:
+            # --x87-regs: the whole body again in the memory lowering; a guarded call whose callee moved the
+            # x87 stack differently from the assumed effect continues here (memory is authoritative then).
+            out.append("    /* --x87-regs: memory-lowering copy, entered only from a failed call guard */")
+            self._x87, self._lp, self._x87_resume = None, "M_", set(plan.guards)
+            try:
+                self._emit_blocks(fn, out)
+            finally:
+                self._x87, self._lp, self._x87_resume = plan, "L_", None
+            out.append("    return;")
+        out.append("}")
+        return "\n".join(out)
+
+    def _emit_blocks(self, fn: Function, out: List[str]):
         self.fused_cond = None
         for start in sorted(fn.blocks):
             blk = fn.blocks[start]
-            out.append(f"L_{start:08X}:")
+            out.append(f"{self._lp}{start:08X}:")
             dead = self.dead_flag_writes(blk.insns)
             fuse = self.fusable_pairs(blk.insns, fn)
             skip_next = False
             for idx, ins in enumerate(blk.insns):
                 if skip_next:
                     skip_next = False; continue
+                self._x87_pos = (start, idx)
                 if idx in fuse:
                     kind, bits, cc = fuse[idx]
                     tmp: List[str] = []
@@ -1324,6 +1437,7 @@ class Emitter:
                     cap = [FLAGS_CAP_RE.sub(lambda m: f"fk_a = (uint32_t)({m.group(2)}); fk_b = (uint32_t)({m.group(3)}); fk_r = (uint32_t)({m.group(4)}); ", line) for line in tmp]
                     out.extend(cap)
                     self.fused_cond = fused_cond(kind, bits, cc)
+                    self._x87_pos = (start, idx + 1)
                     self.lower(fn, blk.insns[idx + 1], out)
                     self.fused_cond = None
                     self.stats["flags_fused"] = self.stats.get("flags_fused", 0) + 1
@@ -1348,20 +1462,14 @@ class Emitter:
                     nxt_sorted = sorted(fn.blocks)
                     i = nxt_sorted.index(start)
                     if i + 1 >= len(nxt_sorted) or nxt_sorted[i + 1] != blk.end:
-                        out.append(f"    goto L_{blk.end:08X};")
+                        out.append(f"    goto {self._lp}{blk.end:08X};")
                 elif fc == FlowControl.NEXT and blk.end not in fn.blocks:
                     out.append(f"    xv_trap(c, 0x{blk.end:X}u); return;   /* fell off the end */")
                 elif fc == FlowControl.CONDITIONAL_BRANCH and blk.end in fn.blocks:
                     nxt_sorted = sorted(fn.blocks)
                     i = nxt_sorted.index(start)
                     if i + 1 >= len(nxt_sorted) or nxt_sorted[i + 1] != blk.end:
-                        out.append(f"    goto L_{blk.end:08X};")
-        out.append("    return;")
-        out.append("}")
-        body = "\n".join(out)
-        if getattr(self.disc, "rewrite_memory_stores", True):
-            body = self.rewrite_stores(body)
-        return self.hooks.transform_body(fn.entry, body)
+                        out.append(f"    goto {self._lp}{blk.end:08X};")
 
     def write_all(self):
         missing = set(self.phase_targets) - self.disc.functions.keys()
@@ -1379,7 +1487,7 @@ class Emitter:
             proto.append(f"void f_{f.entry:08X}(xctx *c);")
         for i in range(0, len(fns), per):
             chunk = fns[i:i + per]
-            body = ['#include "xv_recomp_protos.h"',
+            body = ['#include "xv_recomp_protos.h"'] + (['#include "xv_x87reg.h"   /* --x87-regs */'] if self.x87regs is not None else []) + [
                     "#ifndef XV_CHECK_GUEST_ADDRESS",
                     "#undef X_G",
                     "#define X_G(a) ((void *)(xram_ + xpt_[(uint32_t)(a) >> 12] + ((uint32_t)(a) & 0xFFFu)))",
@@ -1462,13 +1570,11 @@ class Emitter:
         proto.append("#define XV_HLE_PROXY(fn) 0")
         proto.append("#endif")
         proto.append("extern int xv_hle_timing; void xv_hle_time_add(const char *, uint64_t); uint64_t xk_os_monotonic_us(void);   /* XV_HLE_TIMING=1: time inside each HLE, [hle-time] report (kernel/xd3d.c) */")
-        proto.append("extern unsigned xv_hle_timed_calls;
-#define XV_HLE_TIMED(fn) do { if (xv_hle_timing) { xv_hle_timed_calls++; uint64_t t0_ = xk_os_monotonic_us(); fn(c); xv_hle_time_add(#fn, xk_os_monotonic_us() - t0_); } else fn(c); } while (0)")
+        proto.append("extern unsigned xv_hle_timed_calls;\n#define XV_HLE_TIMED(fn) do { if (xv_hle_timing) { xv_hle_timed_calls++; uint64_t t0_ = xk_os_monotonic_us(); fn(c); xv_hle_time_add(#fn, xk_os_monotonic_us() - t0_); } else fn(c); } while (0)")
         proto.append("#define XV_HLE_CALL(addr, fn) do { if (XV_HLE_PROXY(fn)) break; if (xv_is_object_job(c)) xv_object_job_hle(c, addr, fn); else { uint32_t xvfn_ = xv_cur_fn; xv_cur_fn = 0x80000000u | (uint32_t)(addr); XV_HLE_TIMED(fn); xv_cur_fn = xvfn_; } } while (0)")
         proto.append("#else")
         proto.append("extern int xv_hle_timing; void xv_hle_time_add(const char *, uint64_t); uint64_t xk_os_monotonic_us(void);   /* XV_HLE_TIMING=1: time inside each HLE, [hle-time] report (kernel/xd3d.c) */")
-        proto.append("extern unsigned xv_hle_timed_calls;
-#define XV_HLE_TIMED(fn) do { if (xv_hle_timing) { xv_hle_timed_calls++; uint64_t t0_ = xk_os_monotonic_us(); fn(c); xv_hle_time_add(#fn, xk_os_monotonic_us() - t0_); } else fn(c); } while (0)")
+        proto.append("extern unsigned xv_hle_timed_calls;\n#define XV_HLE_TIMED(fn) do { if (xv_hle_timing) { xv_hle_timed_calls++; uint64_t t0_ = xk_os_monotonic_us(); fn(c); xv_hle_time_add(#fn, xk_os_monotonic_us() - t0_); } else fn(c); } while (0)")
         proto.append("#define XV_HLE_CALL(addr, fn) do { if (XV_HLE_PROXY(fn)) break; uint32_t xvfn_ = xv_cur_fn; xv_cur_fn = 0x80000000u | (uint32_t)(addr); XV_HLE_TIMED(fn); xv_cur_fn = xvfn_; } while (0)")
         proto.append("#endif")
         proto.append("extern int xv_watch_n; void xv_watch_enter(uint32_t fn, xctx *c); void xv_watch_leave(uint32_t fn, uint32_t back, xctx *c);\n#define XV_FN(a) do { xv_cur_fn = (a); if (xv_trace_funcs) xv_trace_func(a); if (xv_watch_n) xv_watch_enter((a), c); } while (0)")
@@ -1547,6 +1653,16 @@ def main() -> int:
     ap.add_argument("--trace-funcs", action="store_true", help="count every recompiled function entry (runtime: XV_FUNC_HIST=<frame> dumps that frame's histogram)")
     ap.add_argument("--phase-timing", action="store_true", help="instrument only the selected game adapter's reviewed phase boundaries (runtime: XV_PHASE_TIMING=1)")
     ap.add_argument("--hle-addr", nargs="*", default=[], help="extra HLE overrides by address: HEXADDR:Name:StackArgc")
+    ap.add_argument("--x87-regs", action="store_true",
+                    help="opt-in: keep x87 stack slots in C locals where the stack depth is statically consistent "
+                         "(recompiler/x87_regs.py; report in <outdir>/x87_regs_report.json)")
+    ap.add_argument("--x87-regs-only", default=None, help="--x87-regs for these function entries only (hex, comma separated; bisecting)")
+    ap.add_argument("--x87-regs-exclude", default=None, help="--x87-regs: keep the memory lowering for these entries (hex, comma separated)")
+    ap.add_argument("--x87-regs-min-density", type=float, default=0.0,
+                    help="--x87-regs: keep the memory lowering where x87 instructions per sync point (calls, returns, tail calls) "
+                         "fall below this (0 = convert every consistent function)")
+    ap.add_argument("--x87-regs-no-guards", action="store_true",
+                    help="--x87-regs: convert only functions whose every call has a proven x87 effect (no runtime guards)")
     args = ap.parse_args()
 
     from pathlib import Path
@@ -1639,6 +1755,11 @@ def main() -> int:
             em.phase_targets = hooks.phase_targets()
         except ValueError as error:
             ap.error(str(error))
+    if args.x87_regs:
+        from recompiler.x87_regs import X87Regs, parse_entries
+        em.x87regs = X87Regs(em, only=parse_entries(args.x87_regs_only), exclude=parse_entries(args.x87_regs_exclude),
+                             guards=not args.x87_regs_no_guards, min_density=args.x87_regs_min_density)
+        em.x87regs.run()
     if args.symbols:
         em.vars = {s["name"]: s["address"] for s in symbols if s["kind"] == "VAR"}
     if profile:
@@ -1647,6 +1768,12 @@ def main() -> int:
         n = emit_output(em, hooks)
     except (OSError, ValueError) as error:
         ap.error(str(error))
+    if em.x87regs is not None:
+        rep = em.x87regs.report()
+        with open(os.path.join(args.outdir, "x87_regs_report.json"), "w") as fh:
+            json.dump(rep, fh, indent=1)
+        print(f"x87 register stack: {rep['converted']} of {rep['x87_functions']} x87 functions converted; "
+              f"fallbacks {rep['fallback_reasons']}")
     total = em.stats["insns"]
     un = sum(em.unimpl.values())
     print(f"emitted {n} functions / {total:,} instructions to {args.outdir}/ ; unimplemented {un} ({100.0*un/max(total,1):.2f}%)")
