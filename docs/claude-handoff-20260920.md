@@ -2126,3 +2126,29 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   A second background agent is prototyping a static x87-depth -> C locals codegen mode in the recompiler
   (worktree branch work/x87-regs-20260923, default off, verified with XV_TICK_TRACE/XV_DRAW_HASH on host + Pi);
   that is the systemic lever for both threads.
+
+## 63. Night of Sept 23-24: the freeze, the flicker, the first native ports (perf174-180)
+
+Stages: `overlap-candidate/build` (perf176 = perf174 + cache defer) and `overlap-candidate/build-x87` (perf177+,
+built by `overlap-candidate/build_x87.py`; its tools/query_memory_capture.py is re-pinned for the inline parity).
+- **Freeze (user play, perf174, 7.5 min in):** the scene helper spun in f_000A6620, the block allocator of the resource
+  cache at [2E2D2C] (the core dump, not the log's last-HLE, named it). The tick (17A750 sound preloads -> 32A70) and the
+  scene (32B00 -> 32A70, 32510) allocate from it at once; the block walk ends only at the cache end, so a damaged list
+  never ends. XV_CACHE_PROBE (host) proved the concurrency. Fix XV_CACHE_DEFER (xk_cache_defer.c, default on): helper
+  calls to 32A70 / 32510 during an overlapped scene return their own no-free-block exit and are queued with 114B50's
+  A65A0 free; the owner replays them in xv_scene_thread_run right after the join. Host 26,640 frames and Vita perf176
+  clean; the user's own play test of the freeze path is still to come.
+- **Flicker (user: "models are flickering"):** XV_FRAME_DRAWS=1 (per-frame draw counts) showed one object's 17-23 draws
+  missing in ~5% of frames, only with the overlap (off: ~0.1%). XV_OBJTRACE=1 (5B4A0 entry) named the a10 crewmen
+  (tag E31701A3), never COLLECTED in those scenes. Root cause: mode 4 froze the 'cluster ... object reference' chains
+  but not their per-cluster head tables (plain 0x800 allocations: image globals 2FC6A0 collideable, 2FC690
+  noncollideable, 2FC670 lights), so the scene followed live heads the tick had just relinked into frozen chains.
+  XV_RENDER_VIEW_HEADS freezes them: perf180 0 gaps in 6,538 scenes (perf179: 474). Measured and ruled out as the main
+  cause on the way: the shared query serials 2D2FAC/2D2FB0/2FC684 (a real race, fixed anyway by XV_QSERIAL private
+  copies; 5.4% -> 5.0%) and the early snapshot (off: 3.6%, 3.5 ms slower). The render-view conflict sites (object +8)
+  are the query stamp (xv_object_collect_refs), harmless under tick-wins. Host tools: XV_ADDR_WHOIS / _ARRAYS.
+- **Speed:** native BSP visibility (XV_NATIVE_VISIBILITY=2) 539C0 6.2 -> 2.4 ms, verified 1,468 passes bit-exact on the
+  Vita; x87 register-stack splice ~4% on 92330 / 4C980; inline parity. Frame time unchanged (~61-64 ms steady): the
+  owner (tick, ~1.75 ticks/frame) is the wall. Agents: native 92330, native 90770 / 14B230 (tick), native 63C00
+  (scene flare tests, 6.6 ms/frame). Input notes: fire = R, flashlight = D-pad right in control (rear touch needs
+  XV_REAR_TOUCH=1); a10 gives no weapon until the bridge.
