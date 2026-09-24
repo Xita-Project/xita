@@ -91,6 +91,9 @@ endif
 ifeq ($(XV_NATIVE_VISIBILITY),1)
 XITA_GAME_SRCS += recomp/kernel/xk_native_visibility.c
 endif
+ifeq ($(XV_NATIVE_AIM_BLEND),1)
+XITA_GAME_SRCS += recomp/kernel/xk_native_aim_blend.c
+endif
 
 # Optional two-scope owner elapsed census; no general phase/worker controls.
 ifeq ($(XV_OWNER_PHASE),1)

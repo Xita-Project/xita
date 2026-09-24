@@ -2087,6 +2087,25 @@ CFLAGS += -DXV_NATIVE_VISIBILITY=1 -DXV_NATIVE_VISIBILITY_DEFAULT=$(XV_NATIVE_VI
 RECOMP_CFLAGS += -DXV_NATIVE_VISIBILITY=1 -DXV_NATIVE_VISIBILITY_DEFAULT=$(XV_NATIVE_VISIBILITY_DEFAULT)
 endif
 $(RECOMP_BUILD)/kernel/xk_native_visibility.o: RECOMP_CFLAGS += -ffp-contract=off
+
+# Native 2-D aim/look overlay blend (f_000A39B0 + its CRT/quaternion callees, f_00090770's hot path in the object
+# update): recomp/kernel/xk_native_aim_blend.c, entry hook installed by tools/patch_native_aim_blend_hooks.py.
+# Env XV_NATIVE_AIM_BLEND 0 off / 1 verify / 2 native.
+XV_NATIVE_AIM_BLEND ?= 0
+XV_NATIVE_AIM_BLEND_DEFAULT ?= 0
+ifneq ($(filter $(XV_NATIVE_AIM_BLEND),0 1),$(XV_NATIVE_AIM_BLEND))
+$(error XV_NATIVE_AIM_BLEND must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_AIM_BLEND_DEFAULT),0 1 2),$(XV_NATIVE_AIM_BLEND_DEFAULT))
+$(error XV_NATIVE_AIM_BLEND_DEFAULT must be 0, 1 or 2)
+endif
+ifeq ($(XV_NATIVE_AIM_BLEND),1)
+CFLAGS += -DXV_NATIVE_AIM_BLEND=1 -DXV_NATIVE_AIM_BLEND_DEFAULT=$(XV_NATIVE_AIM_BLEND_DEFAULT)
+RECOMP_CFLAGS += -DXV_NATIVE_AIM_BLEND=1 -DXV_NATIVE_AIM_BLEND_DEFAULT=$(XV_NATIVE_AIM_BLEND_DEFAULT)
+endif
+# -fno-math-errno: sqrt inlines to vsqrt.f64 (the libm wrapper only adds errno for negative input; the blend only
+# takes the square root of a positive sum, and __ieee754_sqrt is the same vsqrt.f64)
+$(RECOMP_BUILD)/kernel/xk_native_aim_blend.o: RECOMP_CFLAGS += -ffp-contract=off -fno-math-errno
 XV_RENDER_VIEW ?= 0
 XV_RENDER_VIEW_DEFAULT ?= 0
 ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))
