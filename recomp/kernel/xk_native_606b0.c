@@ -106,11 +106,16 @@ static __attribute__((noinline)) uint32_t nm_rd_slow(const nm *m, uint32_t a, un
     for (unsigned j = 0; j < n; ++j) v |= (uint32_t)nm_hbyte(m, p + j) << (8 * j);
     return v;
 }
-/* X_M8/X_M16/X_M32: one translation of the first byte (a straddling access reads the host-adjacent bytes). */
+/* X_M8/X_M16/X_M32: one translation of the first byte (a straddling access reads the host-adjacent bytes). A
+ * non-straddling access reads its own guest bytes: from memory, or from the shadow when they lie in the window. */
 static inline __attribute__((always_inline)) uint32_t nm_rd(const nm *m, uint32_t a, unsigned n)
 {
-    if (__builtin_expect(!nm_in_window(m, a, n) && (a & 0xFFFu) <= 0x1000u - n, 1)) {
-        const uint8_t *p = NM_HP(m, a);
+    if (__builtin_expect((a & 0xFFFu) <= 0x1000u - n, 1)) {
+        const uint32_t o = a - m->wlo;
+        const uint8_t *p;
+        if (!nm_in_window(m, a, n)) p = NM_HP(m, a);
+        else if (o <= m->win - n) p = m->S + o;
+        else return nm_rd_slow(m, a, n);
         if (n == 1) return *p;
         if (n == 2) { uint16_t v; memcpy(&v, p, 2); return v; }
         uint32_t v; memcpy(&v, p, 4); return v;
@@ -124,8 +129,12 @@ static __attribute__((noinline)) void nm_wr_slow(const nm *m, uint32_t a, unsign
 }
 static inline __attribute__((always_inline)) void nm_wr(const nm *m, uint32_t a, unsigned n, uint32_t v)
 {
-    if (__builtin_expect(!nm_in_window(m, a, n) && (a & 0xFFFu) <= 0x1000u - n, 1)) {
-        uint8_t *p = NM_HP(m, a);
+    if (__builtin_expect((a & 0xFFFu) <= 0x1000u - n, 1)) {
+        const uint32_t o = a - m->wlo;
+        uint8_t *p;
+        if (!nm_in_window(m, a, n)) p = NM_HP(m, a);
+        else if (o <= m->win - n) p = m->S + o;
+        else { nm_wr_slow(m, a, n, v); return; }
         if (n == 1) *p = (uint8_t)v;
         else if (n == 2) { uint16_t w = (uint16_t)v; memcpy(p, &w, 2); }
         else memcpy(p, &v, 4);
@@ -145,6 +154,8 @@ static __attribute__((noinline)) void nm_gread_slow(const nm *m, void *dst, uint
 }
 static inline __attribute__((always_inline)) void nm_gread(const nm *m, void *dst, uint32_t a, unsigned n)
 {
+    const uint32_t o = a - m->wlo;
+    if (o <= m->win - n) { memcpy(dst, m->S + o, n); return; }       /* all in the window: its guest bytes */
     if (__builtin_expect(!nm_in_window(m, a, n) && (a & 0xFFFu) <= 0x1000u - n, 1)) { memcpy(dst, NM_HP(m, a), n); return; }
     nm_gread_slow(m, dst, a, n);
 }
@@ -158,6 +169,8 @@ static __attribute__((noinline)) void nm_gwrite_slow(const nm *m, uint32_t a, co
 }
 static inline __attribute__((always_inline)) void nm_gwrite(const nm *m, uint32_t a, const void *src, unsigned n)
 {
+    const uint32_t o = a - m->wlo;
+    if (o <= m->win - n) { memcpy(m->S + o, src, n); return; }
     if (__builtin_expect(!nm_in_window(m, a, n) && (a & 0xFFFu) <= 0x1000u - n, 1)) { memcpy(NM_HP(m, a), src, n); return; }
     nm_gwrite_slow(m, a, src, n);
 }
