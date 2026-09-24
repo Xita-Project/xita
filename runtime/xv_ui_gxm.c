@@ -1480,6 +1480,14 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
             (unsigned long long)((t1 - t0) / 1000), (unsigned long long)((ps_[0] - t0) / 1000), (unsigned long long)((ps_[1] - ps_[0]) / 1000), (unsigned long long)((ps_[2] - ps_[1]) / 1000),
             (unsigned long long)((ps_[3] - ps_[2]) / 1000), (unsigned long long)((ps_[4] - ps_[3]) / 1000), (unsigned long long)((ps_[5] - ps_[4]) / 1000), (unsigned long long)((ps_[6] - ps_[5]) / 1000), (unsigned long long)((ps_[7] - ps_[6]) / 1000));
     }
+    {   /* XV_FRAME_DRAWS=1: every frame's draw count, printed each 60 frames; a model flickering out shows as dips */
+        static int on = -1; static unsigned last, fd[60]; extern unsigned xv_d3d_draw_acc;
+        if (on < 0) { const char *e = getenv("XV_FRAME_DRAWS"); on = e ? atoi(e) : 0; }
+        if (on) { unsigned now = xv_d3d_draw_acc, d = now >= last ? now - last : now; last = now; fd[g_t_frames % 60u] = d;
+            if (g_t_frames == 59) { char line[520]; unsigned mn = ~0u, mx = 0; for (int i = 0; i < 60; ++i) { if (fd[i] < mn) mn = fd[i]; if (fd[i] > mx) mx = fd[i]; }
+                int ln = snprintf(line, sizeof line, "[frame-draws] 60 frames min %u max %u:", mn, mx);
+                for (int i = 0; i < 60 && ln < (int)sizeof line - 8; ++i) ln += snprintf(line + ln, sizeof line - ln, " %u", fd[i]);
+                UI_LOG("%s\n", line); } } }
     if (++g_t_frames == 60) {
         /* A present on the scene helper (xd3d_present_flush_helper) leaves the reports to the owner's join: several of
          * them (object jobs, owner phases) read owner-side state. */
