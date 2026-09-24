@@ -2138,6 +2138,31 @@ CFLAGS += -DXV_NATIVE_63C00=1 -DXV_NATIVE_63C00_DEFAULT=$(XV_NATIVE_63C00_DEFAUL
 RECOMP_CFLAGS += -DXV_NATIVE_63C00=1 -DXV_NATIVE_63C00_DEFAULT=$(XV_NATIVE_63C00_DEFAULT)
 endif
 $(RECOMP_BUILD)/kernel/xk_native_63c00.o: RECOMP_CFLAGS += -ffp-contract=off
+
+# Native lens-flare scene work: the pure per-flare region of f_000606B0 (flare render loop up to the reflection draw
+# test, with 60E90/5FE30/60000/11120 inlined) and f_000602F0 (BSP lens-flare markers -> flare list, with B1260/11120/
+# 61270 + the CRT floor/5FE80): recomp/kernel/xk_native_606b0.c, hooks installed by tools/patch_native_606b0_hooks.py.
+# Env XV_NATIVE_606B0 / XV_NATIVE_602F0: 0 off / 1 verify / 2 native.
+XV_NATIVE_606B0 ?= 0
+XV_NATIVE_606B0_DEFAULT ?= 0
+XV_NATIVE_602F0_DEFAULT ?= 0
+ifneq ($(filter $(XV_NATIVE_606B0),0 1),$(XV_NATIVE_606B0))
+$(error XV_NATIVE_606B0 must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_606B0_DEFAULT),0 1 2),$(XV_NATIVE_606B0_DEFAULT))
+$(error XV_NATIVE_606B0_DEFAULT must be 0, 1 or 2)
+endif
+ifneq ($(filter $(XV_NATIVE_602F0_DEFAULT),0 1 2),$(XV_NATIVE_602F0_DEFAULT))
+$(error XV_NATIVE_602F0_DEFAULT must be 0, 1 or 2)
+endif
+ifeq ($(XV_NATIVE_606B0),1)
+CFLAGS += -DXV_NATIVE_606B0=1 -DXV_NATIVE_606B0_DEFAULT=$(XV_NATIVE_606B0_DEFAULT) -DXV_NATIVE_602F0_DEFAULT=$(XV_NATIVE_602F0_DEFAULT)
+RECOMP_CFLAGS += -DXV_NATIVE_606B0=1 -DXV_NATIVE_606B0_DEFAULT=$(XV_NATIVE_606B0_DEFAULT) -DXV_NATIVE_602F0_DEFAULT=$(XV_NATIVE_602F0_DEFAULT)
+endif
+# -ffp-contract=off: no fused multiply-add (the guest rounds every product); -fno-math-errno: sqrt inlines to vsqrt.f64
+# (the libm wrapper only adds errno for negative input; __ieee754_sqrt is the same vsqrt.f64); atan2 stays the libm call
+# the guest makes
+$(RECOMP_BUILD)/kernel/xk_native_606b0.o: RECOMP_CFLAGS += -ffp-contract=off -fno-math-errno
 XV_RENDER_VIEW ?= 0
 XV_RENDER_VIEW_DEFAULT ?= 0
 ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))
