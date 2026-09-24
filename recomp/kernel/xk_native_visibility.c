@@ -309,7 +309,8 @@ static void nv_count(const nv_pass *o)
 }
 
 enum { NV_STACK_LO = 0x94u, NV_STACK_BYTES = 0x94u + 8u };
-static uint8_t nv_bits_before[NV_BITS_BYTES + 2], nv_bits_native[NV_BITS_BYTES + 2];
+/* Verify mode only: the whole bitmap + count, before and after the native (allocated on the first verify pass). */
+static uint8_t *nv_bits_before, *nv_bits_native;
 
 /* Dead x87 slots: two NaNs compare equal (the NaN payload an addition propagates is the host compiler's operand
  * order, which differs between builds of the guest body itself; tools/test_native_visibility.py). */
@@ -344,6 +345,14 @@ int xv_native_visibility(xctx *c)
     }
     /* verify: snapshot what either path can write (bitmap + count, the stack window), run the native, keep its
      * result, restore, run the guest with an unbounded budget (no scheduling inside the check), compare. */
+    if (!nv_bits_before) {
+        nv_bits_before = malloc(NV_BITS_BYTES + 2); nv_bits_native = malloc(NV_BITS_BYTES + 2);
+        if (!nv_bits_before || !nv_bits_native) {
+            free(nv_bits_before); free(nv_bits_native); nv_bits_before = nv_bits_native = 0;
+            XK_LOG("[native-visibility] verify buffers unavailable (2 x 512 KiB): verification off, guest path\n");
+            nv_mode_value = 0; return 0;
+        }
+    }
     const uint32_t E = c->r[4], lo = E - NV_STACK_LO;
     uint8_t stack_before[NV_STACK_BYTES], stack_native[NV_STACK_BYTES], stack_guest[NV_STACK_BYTES];
     x_guest_read_pages(nv_bits_before, NV_BITS, NV_BITS_BYTES + 2);
