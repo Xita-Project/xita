@@ -2119,3 +2119,10 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
   XV_SCENE_PHASES=1).
 - Scene side: a background agent is porting the BSP cluster visibility pass under 539C0 (52E10/537E0/52520/...),
   worktree branch work/native-visibility-20260923, knob XV_NATIVE_VISIBILITY.
+- perf173 (4C980 --any-call timers, PHASE_MAX 512): 4C980 13.2 = 4B9D0 11.8 (20 calls/frame, 0.59 ms each; 2,650
+  lines, 186 x87 loads / ~110 push/pop) + small; 8D760 9.6 = 92330 8.4 (self 6.9, 62 calls/frame, ~240 x86 insns of
+  x87 math) + 8D650 1.1-1.5. Both tick hotspots are x87-heavy. The recompiler keeps the x87 stack in memory
+  (X_ST(i) = c->st[(c->fsp+i)&7], x87_push/pop move c->fsp), so no float value stays in a VFP register.
+  A second background agent is prototyping a static x87-depth -> C locals codegen mode in the recompiler
+  (worktree branch work/x87-regs-20260923, default off, verified with XV_TICK_TRACE/XV_DRAW_HASH on host + Pi);
+  that is the systemic lever for both threads.
