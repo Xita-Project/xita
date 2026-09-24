@@ -638,6 +638,16 @@ void xv_render_view_leave(unsigned *scope)
     last_leave_us = xk_os_monotonic_us();
     leave_us += last_leave_us - t0;
 }
+/* An abandoned scene (xk_scene_thread.c: guest trap or scene timeout, longjmp out of f_000BCB30) never runs the
+ * cleanup-attribute xv_render_view_leave: release the view here - live table back, the scene's writes merged under the
+ * usual tick-wins policy (the trap path's "half-written guest state stays"). */
+void xv_render_view_abandon(void)
+{
+    if (!ready || !depth) return;
+    depth = 0;
+    if (bound) { if (thread_mode) xk_os_bind_page_table(g_xpt); unbind_merge(); }
+    last_leave_us = xk_os_monotonic_us();
+}
 /* Remote status poll: a scene bound for over 3 s is stuck (guest polling a word a host writer updates
  * through a live pointer); restore the live mapping so it can continue, and disable the view. Racy by
  * design (another thread), last resort instead of a manual app restart. */
@@ -689,6 +699,7 @@ void xv_render_view_configure(void) {}
 void xv_render_view_present(unsigned frame) { (void)frame; }
 void xv_render_view_enter(unsigned *scope, void *context) { (void)scope; (void)context; }
 void xv_render_view_leave(unsigned *scope) { (void)scope; }
+void xv_render_view_abandon(void) { }
 void xv_render_view_report(unsigned frames) { (void)frames; }
 void xv_render_view_mirror(uint32_t vpage, uint32_t arena_off) { (void)vpage; (void)arena_off; }
 void xv_render_view_fiber_switch(void) {}

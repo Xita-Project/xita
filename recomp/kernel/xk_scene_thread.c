@@ -146,7 +146,8 @@ void xv_scene_thread_d3d_call(const char *name)
     if (owner_d3d_n < OWNER_D3D) { owner_d3d[owner_d3d_n].name = name; owner_d3d[owner_d3d_n].n = 1; owner_d3d_n++; } else owner_d3d_over++;
 }
 static int gameplay_active(void) { uint32_t gg = X_M32(0x2F8CA0u); return gg && X_M8(gg) && X_M8(gg + 1u); }   /* game_globals: loaded, active */
-int xv_scene_thread_no_yield(void) { return in_flight_overlapped && xv_scene_thread_on_helper(); }
+static void helper_timeout_check(void);
+int xv_scene_thread_no_yield(void) { int r = in_flight_overlapped && xv_scene_thread_on_helper(); if (r) helper_timeout_check(); return r; }
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { suppressed_yields++; if (blocking) { suppressed_waits++; suppressed_eip = eip; } }
 static void overlap_report(void)
 {
@@ -274,6 +275,24 @@ static uint64_t stuck_logged_at;
 static uint64_t notice_us, pre_go_us, join_exit_us; static unsigned notice_n, pre_go_n;
 static uint64_t join_park_us, join_park_max_us; static unsigned join_parks, join_hostwaits;   /* owner join: parked time, longest park, host-wait wakes */
 static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static unsigned slow_yields_dispatch, slow_proxied_dispatch, slow_dispatch_serial, slow_logged_serial, slow_logs; static int slow_ms = -1;
+/* Scene timeout (XV_SCENE_ABANDON_MS, default 2500; 0 off): a scene still running that long on the helper under the
+ * overlap is looping on torn guest data (Vita perf181t 02:44: 5D410 -> 5B710 -> 5B4A0 for 40 s until the freeze
+ * watchdog trapped; the render-view watchdog's live remap at 3 s did not end it). Abandon it through the trap path:
+ * frame dropped, view released in helper_main. XV_SCENE_ABANDON_TEST=<n> abandons scene n once it has run 20 ms, to
+ * prove the recovery on hardware. Checked at the helper's xv_preempt points (every 20,000 back edges). */
+static int abandon_ms = -1; static unsigned abandon_test, abandon_timeouts;
+static void helper_timeout_check(void)
+{
+    if (!scene_abandon_armed) return;
+    if (abandon_ms < 0) { const char *e = getenv("XV_SCENE_ABANDON_MS"); abandon_ms = e ? atoi(e) : 2500; const char *t = getenv("XV_SCENE_ABANDON_TEST"); abandon_test = t ? (unsigned)atoi(t) : 0; }
+    uint64_t run = xk_os_monotonic_us() - slow_t_dispatch;
+    int test = abandon_test && slow_dispatch_serial == abandon_test && run > 20000u;
+    if (!test && (abandon_ms <= 0 || run < (uint64_t)abandon_ms * 1000u)) return;
+    if (test) abandon_test = 0;
+    abandon_timeouts++; scene_abandons++;
+    XK_LOG("[scene-thread] ABANDON scene %u: running %llu ms on the helper%s; frame dropped, helper unwound\n", slow_dispatch_serial, (unsigned long long)(run / 1000u), test ? " (XV_SCENE_ABANDON_TEST)" : " (timeout)");
+    longjmp(scene_abandon_jmp, 2);
+}
 static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
 int xv_scene_thread_helper_done(void) { return slow_t_end >= slow_t_dispatch; }   /* the dispatched scene has signalled done (its core is idle until the next go) */
 static void slow_check(void)
@@ -376,6 +395,7 @@ static int helper_main(SceSize args, void *argp)
         if (sceKernelWaitSema(go, 1, NULL) < 0) return -1;
         { extern void xv_objtrace_scene_begin(void) __attribute__((weak)); if (xv_objtrace_scene_begin) xv_objtrace_scene_begin(); }   /* XV_OBJTRACE scene bounds */
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
+        else { extern void xv_render_view_abandon(void) __attribute__((weak)); scene_abandon_armed = 0; if (xv_render_view_abandon) xv_render_view_abandon(); }   /* the scope cleanup never ran */
         scene_abandon_armed = 0;
         { extern void xd3d_present_flush_helper(int) __attribute__((weak)); if (xd3d_present_flush_helper) xd3d_present_flush_helper(__atomic_load_n(&xv_owner_at_join, __ATOMIC_ACQUIRE)); }   /* the owner's deferred Present, when the owner is still ticking (it is then the wall) */
         slow_t_end = xk_os_monotonic_us();
@@ -551,7 +571,8 @@ void xv_scene_thread_d3d_call(const char *name)
     if (owner_d3d_n < OWNER_D3D) { owner_d3d[owner_d3d_n].name = name; owner_d3d[owner_d3d_n].n = 1; owner_d3d_n++; } else owner_d3d_over++;
 }
 static int gameplay_active(void) { uint32_t gg = X_M32(0x2F8CA0u); return gg && X_M8(gg) && X_M8(gg + 1u); }   /* game_globals: loaded, active */
-int xv_scene_thread_no_yield(void) { return in_flight_overlapped && xv_scene_thread_on_helper(); }
+static void helper_timeout_check(void);
+int xv_scene_thread_no_yield(void) { int r = in_flight_overlapped && xv_scene_thread_on_helper(); if (r) helper_timeout_check(); return r; }
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { suppressed_yields++; if (blocking) { suppressed_waits++; suppressed_eip = eip; } }
 static void overlap_report(void)
 {
@@ -669,6 +690,24 @@ static uint64_t stuck_logged_at;
  * when XV_SCENE_PHASES=1; after the join, the scene's own duration. */
 static uint64_t notice_us, pre_go_us, join_exit_us; static unsigned notice_n, pre_go_n;
 static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static unsigned slow_yields_dispatch, slow_proxied_dispatch, slow_dispatch_serial, slow_logged_serial, slow_logs; static int slow_ms = -1;
+/* Scene timeout (XV_SCENE_ABANDON_MS, default 2500; 0 off): a scene still running that long on the helper under the
+ * overlap is looping on torn guest data (Vita perf181t 02:44: 5D410 -> 5B710 -> 5B4A0 for 40 s until the freeze
+ * watchdog trapped; the render-view watchdog's live remap at 3 s did not end it). Abandon it through the trap path:
+ * frame dropped, view released in helper_main. XV_SCENE_ABANDON_TEST=<n> abandons scene n once it has run 20 ms, to
+ * prove the recovery on hardware. Checked at the helper's xv_preempt points (every 20,000 back edges). */
+static int abandon_ms = -1; static unsigned abandon_test, abandon_timeouts;
+static void helper_timeout_check(void)
+{
+    if (!scene_abandon_armed) return;
+    if (abandon_ms < 0) { const char *e = getenv("XV_SCENE_ABANDON_MS"); abandon_ms = e ? atoi(e) : 2500; const char *t = getenv("XV_SCENE_ABANDON_TEST"); abandon_test = t ? (unsigned)atoi(t) : 0; }
+    uint64_t run = xk_os_monotonic_us() - slow_t_dispatch;
+    int test = abandon_test && slow_dispatch_serial == abandon_test && run > 20000u;
+    if (!test && (abandon_ms <= 0 || run < (uint64_t)abandon_ms * 1000u)) return;
+    if (test) abandon_test = 0;
+    abandon_timeouts++; scene_abandons++;
+    XK_LOG("[scene-thread] ABANDON scene %u: running %llu ms on the helper%s; frame dropped, helper unwound\n", slow_dispatch_serial, (unsigned long long)(run / 1000u), test ? " (XV_SCENE_ABANDON_TEST)" : " (timeout)");
+    longjmp(scene_abandon_jmp, 2);
+}
 static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
 int xv_scene_thread_helper_done(void) { return slow_t_end >= slow_t_dispatch; }   /* the dispatched scene has signalled done (its core is idle until the next go) */
 static void slow_check(void)
@@ -761,6 +800,7 @@ static void *helper_main(void *arg)
     for (;;) {
         while (sem_wait(&go) < 0 && errno == EINTR) {}
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
+        else { extern void xv_render_view_abandon(void) __attribute__((weak)); scene_abandon_armed = 0; if (xv_render_view_abandon) xv_render_view_abandon(); }   /* the scope cleanup never ran */
         scene_abandon_armed = 0;
         slow_t_end = xk_os_monotonic_us();
         sem_post(&done);
