@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """tools/record_profile.py - where one thread's CPU time goes, from recomp/host/sampler.c output (XV_HOST_SAMPLE).
 
-  tools/record_profile.py <samples> <harness> [--from F] [--to T] [--kind 2] [--top 40] [--nm NM] [--addr2line A2L]
+  tools/record_profile.py <samples> <harness> [--from F] [--to T] [--phase 0|1] [--kind 2] [--top 40] [--nm NM] [--addr2line A2L]
 
 Frames (F, T] select 60-frame windows. kind 0 = owner, 2 = scene helper, 1 = other threads. Every sampled PC is
 resolved with `addr2line -f -i` (the innermost inlined function and its file:line, plus the outermost symbol), then
@@ -23,21 +23,28 @@ def main():
     lo, hi = arg(a, '--from', 0, int), arg(a, '--to', 1 << 30, int)
     kind, top = arg(a, '--kind', 2, int), arg(a, '--top', 40, int)
     focus = arg(a, '--focus', None)   # comma list of outermost symbols: line table of everything inlined into them
+    want_phase = arg(a, '--phase', None, int)   # XV_REC_AB runs: only windows of this phase (0 original, 1 new)
     nm, a2l = arg(a, '--nm', 'nm'), arg(a, '--addr2line', 'addr2line')
     base = 0
     for line in subprocess.run([nm, exe], capture_output=True, text=True).stdout.splitlines():
         if line.endswith(' __executable_start'):
             v = int(line.split()[0], 16); base = v if v > 0x1000 else 0; break
-    counts = collections.Counter(); lrs = collections.Counter(); cur = 0; windows = 0; total_all = collections.Counter()
+    counts = collections.Counter(); lrs = collections.Counter(); cur = 0; windows = 0; total_all = collections.Counter(); in_window = False
     cycles_per_sample = 0   # "frame F samples S dropped D helper-cycles N": kind-2 samples are every N user cycles (perf)
     for line in open(src):
         f = line.split()
         if not f: continue
         if f[0] == 'frame':
-            cur = int(f[1]); windows += lo < cur <= hi
-            if len(f) > 7 and f[6] == 'helper-cycles' and lo < cur <= hi: cycles_per_sample = max(cycles_per_sample, int(f[7]))
+            cur = int(f[1]); ok = lo < cur <= hi
+            if want_phase is not None:
+                ph = None
+                if len(f) > 10 and f[8] == 'ab':
+                    x, y = int(f[9]), int(f[10]); ph = 0 if y <= 3 and x > 3 else 1 if x <= 3 and y > 3 else None
+                ok = ok and ph == want_phase
+            in_window = ok; windows += ok
+            if len(f) > 7 and f[6] == 'helper-cycles' and ok: cycles_per_sample = max(cycles_per_sample, int(f[7]))
             continue
-        if not (lo < cur <= hi): continue
+        if not in_window: continue
         total_all[int(f[0])] += int(f[2])
         if int(f[0]) == kind:
             counts[int(f[1], 16) + base] += int(f[2])

@@ -72,6 +72,9 @@ def main():
         for u in RUNTIME_UNITS + [RUNTIME_SHIM]:
             units[u] = units[u] + inc
             runtime_opt[u] = ['-O2', '-g']      # the Vita builds runtime/ at -O2; -g for line-level sample attribution
+        # The D3D HLE is half of the recording path: build it at the Vita's -O2 too (other recomp units stay at -O1,
+        # where e.g. inline helpers and __builtin_strncmp on literals are not always folded as they are on the Vita).
+        runtime_opt['recomp/kernel/xd3d.c'] = ['-O2', '-g']
     # 32-bit ARM Linux (Raspberry Pi OS 32-bit, or a cross build for it): same ISA/FPU class as the Vita build
     # (-mcpu=cortex-a9 -mfpu=neon-fp16 come from make-n and are dropped by DROP_PREFIX); an A72 runs A9-tuned code.
     arm_flags = ['-marm', '-march=armv7-a', '-mfpu=neon', '-mfloat-abi=hard'] if arm and 'aarch' not in a.cc and not os.uname().machine.startswith('aarch') else []
