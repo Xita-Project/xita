@@ -94,6 +94,9 @@ endif
 ifeq ($(XV_NATIVE_AIM_BLEND),1)
 XITA_GAME_SRCS += recomp/kernel/xk_native_aim_blend.c
 endif
+ifeq ($(XV_SOUND_OBSTRUCTION_HOOK),1)
+XITA_GAME_SRCS += recomp/kernel/xk_sound_obstruction.c
+endif
 ifeq ($(XV_NATIVE_92330),1)
 XITA_GAME_SRCS += recomp/kernel/xk_native_92330.c
 endif

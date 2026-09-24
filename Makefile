@@ -2056,6 +2056,15 @@ CFLAGS += -DXV_QSERIAL=1
 RECOMP_CFLAGS += -DXV_QSERIAL=1
 endif
 
+# Looping-sound obstruction reuse (recomp/kernel/xk_sound_obstruction.c, entry hook from
+# tools/patch_sound_obstruction_hook.py on f_0002B460). Env XV_SOUND_OBSTRUCTION=<frames> (0 off, default),
+# XV_SOUND_OBSTRUCTION_VERIFY=1, XV_SOUND_OBSTRUCTION_EPS=<world units>.
+XV_SOUND_OBSTRUCTION_HOOK ?= 0
+ifeq ($(XV_SOUND_OBSTRUCTION_HOOK),1)
+CFLAGS += -DXV_SOUND_OBSTRUCTION_HOOK=1
+RECOMP_CFLAGS += -DXV_SOUND_OBSTRUCTION_HOOK=1
+endif
+
 # Scene helper never changes the shared resource caches while the tick can: recomp/kernel/xk_cache_defer.c, entry
 # hooks from tools/patch_cache_defer_hooks.py (f_00032A70, f_00032510). Env XV_CACHE_DEFER 1 on (default) / 0 off.
 XV_CACHE_DEFER ?= 0
