@@ -2163,6 +2163,24 @@ endif
 # (the libm wrapper only adds errno for negative input; __ieee754_sqrt is the same vsqrt.f64); atan2 stays the libm call
 # the guest makes
 $(RECOMP_BUILD)/kernel/xk_native_606b0.o: RECOMP_CFLAGS += -ffp-contract=off -fno-math-errno
+# Native BSP sphere query under f_0004B9D0's collision move (f_00088110 + 87EA0/87E10/86F50/B0CB0, the fused copy the
+# collection 171F10 runs at 171F94) and the solver's feature test (f_000864C0 + 85D10/85A00/85720/11120/111A0 at the
+# fused solver's 170CD1 call): recomp/kernel/xk_native_4b9d0.c, hooks in recomp/kernel/xk_query_reuse.c and
+# recomp/solver_fusion.c installed by tools/patch_native_4b9d0_hooks.py. Env XV_NATIVE_4B9D0 0 off / 1 verify /
+# 2 native, XV_NATIVE_4B9D0_PARTS (1 query, 2 feature test, 3 both: default), XV_NATIVE_4B9D0_TIME=1 us/call.
+XV_NATIVE_4B9D0 ?= 0
+XV_NATIVE_4B9D0_DEFAULT ?= 0
+ifneq ($(filter $(XV_NATIVE_4B9D0),0 1),$(XV_NATIVE_4B9D0))
+$(error XV_NATIVE_4B9D0 must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_4B9D0_DEFAULT),0 1 2),$(XV_NATIVE_4B9D0_DEFAULT))
+$(error XV_NATIVE_4B9D0_DEFAULT must be 0, 1 or 2)
+endif
+ifeq ($(XV_NATIVE_4B9D0),1)
+CFLAGS += -DXV_NATIVE_4B9D0=1 -DXV_NATIVE_4B9D0_DEFAULT=$(XV_NATIVE_4B9D0_DEFAULT)
+RECOMP_CFLAGS += -DXV_NATIVE_4B9D0=1 -DXV_NATIVE_4B9D0_DEFAULT=$(XV_NATIVE_4B9D0_DEFAULT)
+endif
+$(RECOMP_BUILD)/kernel/xk_native_4b9d0.o: RECOMP_CFLAGS += -ffp-contract=off
 XV_RENDER_VIEW ?= 0
 XV_RENDER_VIEW_DEFAULT ?= 0
 ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))

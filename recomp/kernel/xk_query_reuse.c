@@ -15,6 +15,12 @@ extern int xv_watch_n, xv_trace_funcs;
 extern unsigned xv_collision_vertices_state, xv_segment_sphere_mode;
 extern const unsigned xv_collision_traversal_mode;
 extern void query_fused_172c95_171f94(xctx *);
+#if defined(XV_NATIVE_4B9D0) && XV_NATIVE_4B9D0
+/* recomp/kernel/xk_native_4b9d0.c: the native BSP sphere query (f_00088110 subtree) in place of the fused guest
+ * query at every call below; it runs query_fused_172c95_171f94 itself when XV_NATIVE_4B9D0=0 (default). */
+void xv_native_4b9d0_query(xctx *);
+#define query_fused_172c95_171f94 xv_native_4b9d0_query
+#endif
 extern void query_captured_172c95_171f94(XvQueryCpu *, XvQueryMemory *, xctx *);
 
 #define REUSE_ENTRIES 64u
