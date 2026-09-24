@@ -176,7 +176,10 @@ static void scene(xctx *c, scen *s)
         uint32_t rm = dense == 0 ? rnd() | rnd() : dense == 1 ? rnd() : ~(rnd() & rnd());
         if (straddle && w == 0) { tm |= 1u; rm &= ~1u; }                    /* node 0: translation only, read first */
         w32(edi + 0x5C + 4 * w, tm); w32(edi + 0x6C + 4 * w, rm);
-        for (unsigned b = 0; b < 32; ++b) if ((int32_t)(32 * w + b) < cnt) { nrot += (rm >> b) & 1; ntr += (tm >> b) & 1; }
+    }
+    for (int32_t n = 0; n < cnt; ++n) {   /* exactly the words the loop reads: past 128 nodes the translation mask is rotation word 0 */
+        uint32_t rm, tm; x_guest_read_pages(&rm, edi + 0x6C + 4 * (n >> 5), 4); x_guest_read_pages(&tm, edi + 0x5C + 4 * (n >> 5), 4);
+        nrot += (rm >> (n & 31)) & 1; ntr += (tm >> (n & 31)) & 1;
     }
     uint32_t stride = 8 * nrot + 12 * ntr + (rnd() % 3) * 4;
     uint32_t nframes = frames + 2;
