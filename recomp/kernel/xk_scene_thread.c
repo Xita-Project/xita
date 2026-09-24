@@ -48,7 +48,7 @@ static void scene_census_report(void)
  * tools/patch_scene_phase_timers.py (a t0 stack handles the nesting; a callee's time includes its own callees).
  * The host sampler says the scene is flat per function; this splits the Vita's ~65 ms scene into its phases. */
 #include <stdlib.h>
-#define PHASE_MAX 128
+#define PHASE_MAX 512   /* 128 overflowed silently once the tick side had ~10 timed parents (perf172) */
 /* Two sets: [0] the owner's thread (tick side, the frame loop f_000BD420's callees), [1] the scene helper. The threads
  * run concurrently under the overlap; a shared t0 stack interleaved their timings. */
 int xv_scene_thread_on_helper(void);
