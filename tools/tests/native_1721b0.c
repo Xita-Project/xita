@@ -135,6 +135,7 @@ static void scene(stats *st)
     memset(g_xram, 0, ARENA);
     tag_top = TAG + (rnd() % 64) * 4;
     const int flavor = bench_like ? 0 : rnd() % 4 == 0 ? 1 : rnd() % 8 == 0 ? 2 : 0;
+    const int huge = !bench_like && flavor == 0 && rnd() % 12 == 0;    /* coordinates ~1e16: the sums' association shows */
     const int chain = !bench_like && rnd() % 12 == 0;                  /* planes across the segment: many leaves */
     const int deep = chain && rnd() % 12 == 0;                         /* > 1024 levels */
     const int clean = chain && (deep || rnd() % 2);                    /* no plane in the chain breaks it */
@@ -158,6 +159,7 @@ static void scene(stats *st)
     else if (dk == 2 || flavor == 1) { D[0] = D[1] = D[2] = 0; D[rnd() % 3] = frand(-12, 12); }
     else for (unsigned k = 0; k < 3; ++k) D[k] = frand(-10, 10);
     if (flavor == 1) for (unsigned k = 0; k < 3; ++k) P[k] = (float)(int)P[k];
+    if (huge) for (unsigned k = 0; k < 3; ++k) { if (rnd() % 3) P[k] *= 3e15f; if (rnd() % 2) D[k] *= 1e14f; }   /* mixed magnitudes */
     for (unsigned k = 0; k < 3; ++k) { P[k] = odd(P[k], flavor); D[k] = odd(D[k], flavor); }
     /* BSP */
     uint32_t bsp = tag_alloc(0x60, 0);
@@ -298,7 +300,8 @@ static void scene(stats *st)
     }
     free(pl); free(leaf_parent); free(node_plane); free(node_parent);
     /* the stack: E at a random 4-aligned place; the caller's frame above (the point and delta vectors, the record) */
-    const unsigned layout = bench_like ? 0 : rnd() % 40;         /* 1..13: the special layouts (a third of the cases) */
+    unsigned layout = bench_like ? 0 : rnd() % 40;               /* 1..13: the special layouts (a third of the cases) */
+    if (deep && rnd() % 3 == 0) layout = 12;                      /* the record's t across a page end, with a translated subtree */
     E_top = STACK + 0x11000u + 4u * (rnd() % 0x800);
     for (uint32_t a = E_top - 0x400u; a < E_top + 0x400u; a += 4) w32(a, rnd());          /* stale frames */
     uint32_t rec = E_top + 0x40u + 4u * (rnd() % 0x100);                                     /* 1721B0's [esp+44h] area */
