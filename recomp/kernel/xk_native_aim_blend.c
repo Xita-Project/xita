@@ -81,19 +81,19 @@ static inline uint16_t ab_m16(const ab_mem *m, uint32_t a) { uint16_t v; memcpy(
 static inline uint32_t ab_m32(const ab_mem *m, uint32_t a) { uint32_t v; memcpy(&v, AB_PTR(a), 4); return v; }
 static inline uint8_t ab_i8(const ab_mem *m, uint32_t a) { return *AB_IPTR(a); }
 static inline uint32_t ab_i32(const ab_mem *m, uint32_t a) { uint32_t v; memcpy(&v, AB_IPTR(a), 4); return v; }
-static inline double ab_f32(const ab_mem *m, uint32_t a)
+static inline __attribute__((always_inline)) double ab_f32(const ab_mem *m, uint32_t a)
 {
     float v;
     if ((a & 0xFFFu) <= 0xFFCu) memcpy(&v, AB_PTR(a), 4); else x_guest_read_pages(&v, a, 4);
     return (double)v;
 }
-static inline double ab_f64(const ab_mem *m, uint32_t a)
+static inline __attribute__((always_inline)) double ab_f64(const ab_mem *m, uint32_t a)
 {
     double v;
     if ((a & 0xFFFu) <= 0xFF8u) memcpy(&v, AB_PTR(a), 8); else x_guest_read_pages(&v, a, 8);
     return v;
 }
-static inline void ab_wf32(const ab_mem *m, uint32_t a, double d)
+static inline __attribute__((always_inline)) void ab_wf32(const ab_mem *m, uint32_t a, double d)
 {
     float v = (float)d;
     if ((a & 0xFFFu) <= 0xFFCu) memcpy(AB_PTR(a), &v, 4); else x_guest_write_pages(a, &v, 4);
@@ -667,6 +667,7 @@ static int ab_run(xctx *c, ab_info *info, unsigned *why)
     {
         const uint32_t n = (uint32_t)(int16_t)cnt16, span = n * 32u, words = (n + 31u) >> 5;
         if (ab_overlap(nodes, span, WLO, AB_WIN) || ab_overlap(nodes, span, edi + 0x2Cu, 0x40u + 4u * words) ||
+            ab_overlap(edi + 0x5Cu, 0x10u + 4u * words, WLO, AB_WIN) ||     /* the per-32-node mask words (past +0xB0 beyond 544 nodes) */
             ab_overlap(nodes, span, AB_ZERO, 4) || ab_overlap(nodes, span, AB_ONE, 4) || ab_overlap(nodes, span, AB_QSCALE, 4) ||
             ab_overlap(s32(S, AB_Q + 0x3C), 20u * n, WLO, AB_WIN) || ab_overlap(s32(S, AB_Q + 0x40), 20u * n, WLO, AB_WIN) ||
             ab_overlap(s32(S, AB_Q + 0x34), 20u * n, WLO, AB_WIN) || ab_overlap(s32(S, AB_Q + 0x14), 20u * n, WLO, AB_WIN)) {
@@ -799,6 +800,7 @@ out:
     c->r[0] = st->eax; c->r[1] = st->ecx; c->r[2] = st->edx; c->r[3] = st->ebx; c->r[5] = st->ebp; c->r[6] = st->esi;
     c->r[4] = E + 0x10u;
     for (unsigned d = 1; d < 8; ++d) c->st[(st->F - d) & 7u] = st->X[d];
+    c->fsp = st->F;                       /* the guest's pushes/pops leave the top masked to 0..7 */
     c->fsw = st->fsw; c->fcw = st->fcw;
     c->f_kind = fl->kind; c->f_op1 = fl->op1; c->f_op2 = fl->op2; c->f_res = fl->res; c->f_bits = fl->bits;
     c->f_cf_override = fl->cfo; c->f_cf = fl->cf; c->f_of_override = fl->ofo; c->f_of = fl->of;

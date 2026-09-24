@@ -237,7 +237,7 @@ static void scene(xctx *c, scen *s)
     memset(c, 0, sizeof *c);
     for (unsigned i = 0; i < 8; ++i) c->r[i] = rnd();
     c->r[0] = A; c->r[4] = E; c->r[7] = edi;
-    c->fsp = rnd() & 7;
+    c->fsp = rnd() & 7; if (rnd() % 53 == 0) c->fsp |= 8u << (rnd() % 3);   /* stale high bits: the guest masks them */
     static const uint16_t cws[] = { 0x027F, 0x027F, 0x027F, 0x037F, 0x067F, 0x0A7F, 0x0E7F, 0x025F };
     c->fcw = cws[rnd() % 8]; c->fsw = (uint16_t)rnd();
     for (unsigned i = 0; i < 8; ++i) c->st[i] = (double)(int32_t)rnd() / 7.0;

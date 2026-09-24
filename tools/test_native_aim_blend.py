@@ -56,10 +56,11 @@ def find(rec, fn):
 
 def build_and_run(cc, flags, rec, guest_c, native_c, cases, seed, d, tag):
     exe = d / f'test-{tag}'
-    cmd = [cc, *flags, '-std=gnu11', '-w', '-fno-strict-aliasing', '-ffp-contract=off', '-DXV_NATIVE_AIM_BLEND=1',
-           '-DXV_EXPERIMENTAL_OBJECT_JOBS=1', '-I' + str(rec), '-I' + str(rec / 'kernel'), '-I' + str(ROOT / 'recomp'),
-           '-I' + str(ROOT / 'recomp/kernel'), str(ROOT / 'tools/tests/native_aim_blend.c'), str(guest_c), str(native_c), '-lm', '-o', str(exe)]
-    subprocess.run(cmd, check=True)
+    common = [cc, *flags, '-std=gnu11', '-w', '-fno-strict-aliasing', '-DXV_NATIVE_AIM_BLEND=1', '-DXV_EXPERIMENTAL_OBJECT_JOBS=1',
+              '-I' + str(rec), '-I' + str(rec / 'kernel'), '-I' + str(ROOT / 'recomp'), '-I' + str(ROOT / 'recomp/kernel')]
+    # the native with its production flags (Makefile: -ffp-contract=off -fno-math-errno), the guest and driver like the stage
+    subprocess.run(common + ['-ffp-contract=off', '-fno-math-errno', '-c', str(native_c), '-o', str(d / f'native-{tag}.o')], check=True)
+    subprocess.run(common + [str(ROOT / 'tools/tests/native_aim_blend.c'), str(guest_c), str(d / f'native-{tag}.o'), '-lm', '-o', str(exe)], check=True)
     return subprocess.run([str(exe), str(cases), str(seed)], capture_output=True, text=True)
 
 def main():

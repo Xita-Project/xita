@@ -2088,7 +2088,9 @@ ifeq ($(XV_NATIVE_AIM_BLEND),1)
 CFLAGS += -DXV_NATIVE_AIM_BLEND=1 -DXV_NATIVE_AIM_BLEND_DEFAULT=$(XV_NATIVE_AIM_BLEND_DEFAULT)
 RECOMP_CFLAGS += -DXV_NATIVE_AIM_BLEND=1 -DXV_NATIVE_AIM_BLEND_DEFAULT=$(XV_NATIVE_AIM_BLEND_DEFAULT)
 endif
-$(RECOMP_BUILD)/kernel/xk_native_aim_blend.o: RECOMP_CFLAGS += -ffp-contract=off
+# -fno-math-errno: sqrt inlines to vsqrt.f64 (the libm wrapper only adds errno for negative input; the blend only
+# takes the square root of a positive sum, and __ieee754_sqrt is the same vsqrt.f64)
+$(RECOMP_BUILD)/kernel/xk_native_aim_blend.o: RECOMP_CFLAGS += -ffp-contract=off -fno-math-errno
 XV_RENDER_VIEW ?= 0
 XV_RENDER_VIEW_DEFAULT ?= 0
 ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))
