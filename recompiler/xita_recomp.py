@@ -1658,6 +1658,9 @@ def main() -> int:
                          "(recompiler/x87_regs.py; report in <outdir>/x87_regs_report.json)")
     ap.add_argument("--x87-regs-only", default=None, help="--x87-regs for these function entries only (hex, comma separated; bisecting)")
     ap.add_argument("--x87-regs-exclude", default=None, help="--x87-regs: keep the memory lowering for these entries (hex, comma separated)")
+    ap.add_argument("--x87-regs-min-density", type=float, default=0.0,
+                    help="--x87-regs: keep the memory lowering where x87 instructions per sync point (calls, returns, tail calls) "
+                         "fall below this (0 = convert every consistent function)")
     ap.add_argument("--x87-regs-no-guards", action="store_true",
                     help="--x87-regs: convert only functions whose every call has a proven x87 effect (no runtime guards)")
     args = ap.parse_args()
@@ -1755,7 +1758,7 @@ def main() -> int:
     if args.x87_regs:
         from recompiler.x87_regs import X87Regs, parse_entries
         em.x87regs = X87Regs(em, only=parse_entries(args.x87_regs_only), exclude=parse_entries(args.x87_regs_exclude),
-                             guards=not args.x87_regs_no_guards)
+                             guards=not args.x87_regs_no_guards, min_density=args.x87_regs_min_density)
         em.x87regs.run()
     if args.symbols:
         em.vars = {s["name"]: s["address"] for s in symbols if s["kind"] == "VAR"}

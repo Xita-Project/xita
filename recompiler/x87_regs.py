@@ -324,8 +324,9 @@ class X87Regs:
     the effect the code after the call expects, see guess()). Calls whose effect is only assumed get a
     runtime guard in the converted caller; everything proven is used without checks."""
 
-    def __init__(self, em, only=None, exclude=None, guards=True):
+    def __init__(self, em, only=None, exclude=None, guards=True, min_density=0.0):
         self.em = em
+        self.min_density = min_density     # x87 instructions per sync point below which the memory lowering stays
         self.disc = em.disc
         self.only = only
         self.exclude = exclude or set()
@@ -668,6 +669,8 @@ class X87Regs:
             if hook:
                 self.reasons[e] = hook; continue
             summary, plan, reason = self.analyze(f, "plan")
+            if plan is not None and plan.x87 < self.min_density * max(plan.syncs, 1):
+                plan, reason = None, "density"     # call-heavy, x87-light: the reloads after calls cost more than they save
             if plan is None:
                 self.reasons[e] = reason
             else:
