@@ -42,7 +42,12 @@ static pid_t spl_main_tid; static FILE *spl_out; static int spl_on, spl_lr;
  * helper every <cycles> user cycles (signal to that thread; its ITIMER_PROF hits are then dropped). ITIMER_PROF and
  * thread CPU timers are tick-limited (HZ=250 on the Pi: 4 ms per sample at most); cycle overflows are not. */
 enum { SPL_ROLES = 3 };
-static struct { pid_t tid; int cycles, instr, clock, sample; uint64_t last[3]; } spl_role[SPL_ROLES];
+static struct { pid_t tid; int cycles, instr, clock, sample; uint64_t last[3]; int ev[4]; uint64_t ev_last[4]; } spl_role[SPL_ROLES];
+/* XV_HOST_PERF_EVENTS=<raw hex>[,<raw hex>...] (up to 4, with XV_HOST_PERF=1): also count these raw PMU events per role,
+ * "[host-perf-ev]" (Cortex-A72: 0x01 L1I refill, 0x03 L1D refill, 0x17 L2D refill, 0x10 branch mispredict).
+ * XV_HOST_PERF_SAMPLE_EVENT=<raw hex>: sample the scene helper every XV_HOST_PERF_SAMPLE occurrences of that raw event
+ * instead of every XV_HOST_PERF_SAMPLE cycles (where do the I-cache refills go). */
+static uint64_t spl_ev_config[4]; static int spl_ev_n; static uint64_t spl_sample_event;
 static int spl_perf_count, spl_perf_period, spl_perf_init;
 static int spl_helper_sampling;
 static void spl_handler(int sig, siginfo_t *si, void *uc_)
@@ -79,7 +84,11 @@ static void spl_perf_configure(void)
     spl_perf_init = 1;
     const char *c = getenv("XV_HOST_PERF"); spl_perf_count = c && atoi(c);
     const char *p = getenv("XV_HOST_PERF_SAMPLE"); spl_perf_period = p ? atoi(p) : 0;
-    for (unsigned r = 0; r < SPL_ROLES; r++) spl_role[r].cycles = spl_role[r].instr = spl_role[r].clock = spl_role[r].sample = -1;
+    const char *ev = getenv("XV_HOST_PERF_EVENTS");
+    while (ev && *ev && spl_ev_n < 4) { char *end; spl_ev_config[spl_ev_n++] = strtoull(ev, &end, 16); ev = *end == ',' ? end + 1 : end; if (end == ev && *ev != ',') break; }
+    const char *se = getenv("XV_HOST_PERF_SAMPLE_EVENT"); spl_sample_event = se ? strtoull(se, NULL, 16) : 0;
+    for (unsigned r = 0; r < SPL_ROLES; r++) { spl_role[r].cycles = spl_role[r].instr = spl_role[r].clock = spl_role[r].sample = -1;
+        for (int k = 0; k < 4; k++) spl_role[r].ev[k] = -1; }
 }
 /* On the thread itself: 0 = owner (harness main thread), 2 = scene helper (xk_scene_thread.c helper_main). */
 void xv_host_thread_role(int role)
@@ -91,17 +100,19 @@ void xv_host_thread_role(int role)
         spl_role[role].cycles = spl_perf_open(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES, -1, 0);
         spl_role[role].instr = spl_perf_open(PERF_TYPE_HARDWARE, PERF_COUNT_HW_INSTRUCTIONS, -1, 0);
         spl_role[role].clock = spl_perf_open(PERF_TYPE_SOFTWARE, PERF_COUNT_SW_TASK_CLOCK, -1, 0);
+        for (int k = 0; k < spl_ev_n; k++) spl_role[role].ev[k] = spl_perf_open(PERF_TYPE_RAW, spl_ev_config[k], -1, 0);
         fprintf(stderr, "[host-perf] role %d tid %d counters %d/%d/%d\n", role, (int)spl_role[role].tid,
             spl_role[role].cycles, spl_role[role].instr, spl_role[role].clock);
     }
     if (role == 2 && spl_perf_period > 0) {
-        int fd = spl_perf_open(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES, -1, (uint64_t)spl_perf_period);
+        int fd = spl_sample_event ? spl_perf_open(PERF_TYPE_RAW, spl_sample_event, -1, (uint64_t)spl_perf_period) :
+                                    spl_perf_open(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES, -1, (uint64_t)spl_perf_period);
         if (fd >= 0) {
             struct f_owner_ex owner = { F_OWNER_TID, spl_role[role].tid };
             fcntl(fd, F_SETFL, O_ASYNC | O_NONBLOCK); fcntl(fd, F_SETSIG, SIGPROF); fcntl(fd, F_SETOWN_EX, &owner);
             spl_role[role].sample = fd; spl_helper_sampling = 1;
             ioctl(fd, PERF_EVENT_IOC_RESET, 0); ioctl(fd, PERF_EVENT_IOC_REFRESH, 1);
-            fprintf(stderr, "[host-perf] scene helper sampled every %d user cycles\n", spl_perf_period);
+            fprintf(stderr, "[host-perf] scene helper sampled every %d user %s\n", spl_perf_period, spl_sample_event ? "raw events" : "cycles");
         } else fprintf(stderr, "[host-perf] helper sampling unavailable\n");
     }
 }
@@ -120,6 +131,14 @@ void xv_host_perf_report(unsigned frame, unsigned frames)
         for (int k = 0; k < 3; k++) { d[k] = now[k] - spl_role[r].last[k]; spl_role[r].last[k] = now[k]; }
         fprintf(stderr, "[host-perf] frame %u %s: %.3f Mcycles %.3f Minstr %.3f ms CPU per frame (%u frames) ab %u %u\n", frame,
             r == 0 ? "owner" : "scene-helper", d[0] / 1e6 / frames, d[1] / 1e6 / frames, d[2] / 1e6 / frames, frames, ab0, ab1);
+        if (spl_ev_n) {
+            char line[256]; int n = snprintf(line, sizeof line, "[host-perf-ev] frame %u %s:", frame, r == 0 ? "owner" : "scene-helper");
+            for (int k = 0; k < spl_ev_n; k++) {
+                uint64_t v = spl_read(spl_role[r].ev[k]), dv = v - spl_role[r].ev_last[k]; spl_role[r].ev_last[k] = v;
+                n += snprintf(line + n, sizeof line - n, " 0x%llx %.1f k", (unsigned long long)spl_ev_config[k], dv / 1e3 / frames);
+            }
+            fprintf(stderr, "%s per frame\n", line);
+        }
     }
 }
 void xv_host_sample_start(void)

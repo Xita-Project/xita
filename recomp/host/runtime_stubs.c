@@ -15,6 +15,7 @@ __attribute__((weak)) int xd3d_r_visibility_wait_generation(uint32_t id, uint32_
  * two runs of the same save and pad script see the same pattern. Default 0: no pixels, as before. Overrides xd3d.c's
  * weak 0-pixel default. */
 #include <stdlib.h>
+#ifndef XV_HOST_RUNTIME   /* --runtime builds link runtime/xv_d3d.c's real query results instead */
 extern unsigned xd3d_frame(void);
 uint32_t xd3d_r_visibility_result(uint32_t id, uint32_t *pixels)
 {
@@ -23,6 +24,7 @@ uint32_t xd3d_r_visibility_result(uint32_t id, uint32_t *pixels)
     *pixels = n ? (((id * 2654435761u) >> 12) ^ ((xd3d_frame() >> 3) * 40503u)) % (uint32_t)n : 0;
     return 0;
 }
+#endif
 /* Grouped 60-frame reports: the Vita log batches them; on the host print them directly. */
 __attribute__((weak)) int xv_log_report_begin_async_frame(unsigned frame) { (void)frame; return 1; }
 __attribute__((weak)) int xv_log_report_begin(void) { return 1; }

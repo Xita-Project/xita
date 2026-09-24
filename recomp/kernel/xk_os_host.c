@@ -89,7 +89,7 @@ uint64_t xk_os_time_100ns(void)
 uint64_t xk_os_monotonic_us(void)
 {
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000;
+    return (uint64_t)ts.tv_sec * 1000000ull + (uint32_t)ts.tv_nsec / 1000u;   /* tv_nsec < 1e9: a 32-bit divide (armhf has no 64-bit divide: __udivmoddi4 was 10-15% of the Pi scene helper with XV_HLE_TIMING) */
 }
 void xk_os_sleep_us(uint64_t us) { struct timespec ts = { (time_t)(us / 1000000ull), (long)((us % 1000000ull) * 1000) }; nanosleep(&ts, NULL); }
 

@@ -110,22 +110,59 @@ static struct { const char *name; unsigned n; } g_hist[XD3D_HIST_MAX]; static un
 void xd3d_ds_check(const char *where, uint32_t eip);
 static const char xd3d_present_name[] = "D3DDevice_Present";   /* identity-compared in xd3d_count */
 const char *xv_hle_cur_name;   /* set by every D3D HLE entry, read by xv_call's timing (XV_HLE_TIMING) */
-static inline void xd3d_count(const char *name)
+/* XV_REC_ENTRY (runtime/xv_record_opt.h): every D3D HLE entry called xd3d_count out of line (it was too large to
+ * inline), and on the scene helper that call only stores the name, finds itself on the helper (the two scene-thread
+ * hooks return at once there) and returns while the histogram is off. Mode 2 does exactly that inline and calls the
+ * original only otherwise; verify also runs the original and checks the fast answer against the helper identity and
+ * the histogram setting. */
+static int xd3d_count_on = -1;   /* XV_D3D_HIST / XV_DS_CHECK set (xd3d_count's table walk) */
+static void xd3d_count_slow(const char *name);
+#include "../../runtime/xv_record_opt.h"
+static xv_rec_opt g_opt_entry = XV_REC_OPT_INIT("XV_REC_ENTRY");
+static int g_entry_now = -1;   /* this frame's XV_REC_ENTRY path (reset by xv_rec_ab_frame) */
+static int xd3d_entry_mode_read(void) { return g_entry_now = xv_rec_opt_mode(&g_opt_entry); }
+static inline __attribute__((always_inline)) int xd3d_entry_mode(void)
+{
+    int m = g_entry_now;
+    return __builtin_expect(m >= 0, 1) ? m : xd3d_entry_mode_read();
+}
+static inline __attribute__((always_inline)) void xd3d_count(const char *name)
+{
+#if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD && (defined(__vita__) || defined(XV_HOST_HELPER_SP))
+    int mode = xd3d_entry_mode();
+    if (__builtin_expect(mode != 0, 1)) {
+        extern uintptr_t xv_scene_helper_sp_lo, xv_scene_helper_sp_hi; uintptr_t sp_;
+#if defined(__arm__)
+        __asm__ volatile("mov %0, sp" : "=r"(sp_));                    /* any address on this thread's stack (no frame pointer) */
+#elif defined(__x86_64__)
+        __asm__ volatile("mov %%rsp, %0" : "=r"(sp_));
+#else
+        sp_ = (uintptr_t)__builtin_frame_address(0);
+#endif
+        int fast = xv_scene_helper_sp_hi && sp_ >= xv_scene_helper_sp_lo && sp_ < xv_scene_helper_sp_hi && xd3d_count_on == 0;
+        if (__builtin_expect(fast && mode == 2, 1)) { xv_hle_cur_name = name; return; }
+        if (mode == 1) { extern void xd3d_entry_verify(int fast); xd3d_entry_verify(fast); }
+    }
+#endif
+    xd3d_count_slow(name);
+}
+static __attribute__((noinline)) void xd3d_count_slow(const char *name)
 {
     xv_hle_cur_name = name;
 #if defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
-#if defined(__vita__)
+#if defined(__vita__) || defined(XV_HOST_HELPER_SP)
     { extern uintptr_t xv_scene_helper_sp_lo, xv_scene_helper_sp_hi; uintptr_t sp_ = (uintptr_t)__builtin_frame_address(0);
       if (xv_scene_helper_sp_hi && sp_ >= xv_scene_helper_sp_lo && sp_ < xv_scene_helper_sp_hi) goto hooked_; }   /* on the helper both hooks below return immediately: ~8,000 HLE calls/frame skip two calls each */
 #endif
     { extern void xv_scene_thread_d3d_call(const char *); extern void xv_scene_thread_join_owner(void);
       if (name != xd3d_present_name) xv_scene_thread_join_owner();   /* overlap: an owner-side D3D call waits for the scene in flight (GXM is single-threaded) - except Present, whose policy below decides (mode 2 defers the device present to the join; joining here made mode 2 behave as mode 1 on the Vita, perf99 m2a) */
       xv_scene_thread_d3d_call(name); }
-#if defined(__vita__)
+#if defined(__vita__) || defined(XV_HOST_HELPER_SP)
     hooked_:;
 #endif
 #endif
-    static int on = -1; if (on < 0) on = (getenv("XV_D3D_HIST") != NULL) || (getenv("XV_DS_CHECK") != NULL);
+    if (xd3d_count_on < 0) xd3d_count_on = (getenv("XV_D3D_HIST") != NULL) || (getenv("XV_DS_CHECK") != NULL);
+    int on = xd3d_count_on;
     if (!on) return;                                           /* ~4000 calls/frame: only walk the table when asked */
     { static int dbg = -1; if (dbg < 0) dbg = getenv("XV_DS_CHECK") != NULL; if (dbg) xd3d_ds_check(name, 0); }
     for (unsigned i = 0; i < g_hist_n; ++i) if (g_hist[i].name == name) { g_hist[i].n++; return; }
@@ -213,10 +250,20 @@ static xv_rec_opt g_opt_hle = XV_REC_OPT_INIT("XV_REC_HLE");
 int xv_rec_ab_period = -1;
 unsigned xv_rec_ab_phase, xv_rec_ab_frames[2];   /* frames started in each phase, cumulative */
 static int g_hle_now = -1;   /* the XV_REC_HLE path for this frame (-1: recompute) */
+static int g_vsc_now = -1;   /* the XV_REC_VSC path for this frame (SetVertexShaderConstant) */
 static inline int hle_mode_now(void)
 {
     if (__builtin_expect(g_hle_now < 0, 0)) g_hle_now = xv_rec_opt_mode(&g_opt_hle);
     return g_hle_now;
+}
+void xd3d_entry_verify(int fast)
+{
+    /* fast = the inline test's answer; it may only skip when the original's hooks and table walk do nothing */
+    extern int xv_scene_thread_on_helper(void);
+    if (xd3d_count_on < 0) xd3d_count_on = (getenv("XV_D3D_HIST") != NULL) || (getenv("XV_DS_CHECK") != NULL);
+    if (!fast) return;
+    if (xv_rec_opt_result(&g_opt_entry, xv_scene_thread_on_helper() && xd3d_count_on == 0))
+        xk_os_log("[d3d] [rec-verify] XV_REC_ENTRY mismatch: fast path off the helper or with the histogram on\n");
 }
 void xv_rec_ab_frame(void)
 {
@@ -224,7 +271,7 @@ void xv_rec_ab_frame(void)
     if (!xv_rec_ab_active()) return;
     xv_rec_ab_phase = (frames++ / (unsigned)xv_rec_ab_period) & 1u;
     xv_rec_ab_frames[xv_rec_ab_phase]++;
-    g_hle_now = -1;
+    g_hle_now = -1; g_vsc_now = -1; g_entry_now = -1;
 }
 /* Every D3D HLE entry called xd3d_hash_call, which returns at once when the draw-stream hash is off
  * (g_draw_hash_on == 0: read and disabled). XV_REC_HLE=2 skips that call inline; a -1 (unread) or enabled
@@ -1363,6 +1410,42 @@ void xv_hle_D3DDevice_GetVertexShaderSize(xctx *c)
     if (X_ARG(1)) X_W32(X_ARG(1)) = vs_instruction_count(X_ARG(0));
     X_RET(2);
 }
+/* XV_REC_VSC (runtime/xv_record_opt.h): SetVertexShaderConstant rows that lie in one guest page are checked for
+ * non-finite components (exponent 0xFF, exactly !isfinite) in place and copied with one translation and one
+ * memcpy. A call with any non-finite component, or a source that crosses a page, takes the original row loop (which
+ * zeroes and logs those components). Verify copies into a scratch array first, lets the original loop write the
+ * live rows, and compares the rows. */
+static xv_rec_opt g_opt_vsc = XV_REC_OPT_INIT("XV_REC_VSC");
+static inline int vsc_mode_now(void)
+{
+    if (__builtin_expect(g_vsc_now < 0, 0)) g_vsc_now = xv_rec_opt_mode(&g_opt_vsc);
+    return g_vsc_now;
+}
+static float vsc_scratch[192][4];
+static int vsc_scratch_valid;
+static int vsc_fast(uint32_t lo, uint32_t hi, uint32_t first_row, uint32_t src, int mode)
+{
+    uint32_t a = src + first_row * 16u, bytes = (hi - lo) * 16u;
+    vsc_scratch_valid = 0;
+    if (bytes > 4096u - (a & 0xFFFu)) return 0;              /* crosses a page: the original per-row reads */
+    const uint8_t *p = (const uint8_t *)X_G(a);
+    uint32_t bad = 0;
+    for (uint32_t i = 0; i < bytes; i += 4) {
+        uint32_t w = *(const xu32_u *)(p + i);
+        bad |= (w & 0x7F800000u) == 0x7F800000u;
+    }
+    if (bad) return 0;                                        /* the original loop zeroes and logs them */
+    if (mode == 2) { memcpy(xd3d_state.vsc[lo], p, bytes); return 1; }
+    memcpy(vsc_scratch[lo], p, bytes); vsc_scratch_valid = 1;
+    return 0;                                                 /* verify: the original loop writes the live rows */
+}
+static void vsc_verify(uint32_t lo, uint32_t hi)
+{
+    if (!vsc_scratch_valid) return;
+    vsc_scratch_valid = 0;
+    if (xv_rec_opt_result(&g_opt_vsc, !memcmp(vsc_scratch[lo], xd3d_state.vsc[lo], (hi - lo) * 16u)))
+        xk_os_log("[d3d] [rec-verify] XV_REC_VSC mismatch: rows %u..%u\n", lo, hi);
+}
 /* SetVertexShaderConstant(Register (-96..95), pConstantData, ConstantCount) */
 void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
 { XD3D_COUNT("D3DDevice_SetVertexShaderConstant");
@@ -1377,6 +1460,8 @@ void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
     int64_t lo = reg < 0 ? 0 : reg, hi = reg + n;
     if (hi > 192) hi = 192;
     if (lo < hi) {
+        int vsc_mode = vsc_mode_now();
+        if (vsc_mode && vsc_fast((uint32_t)lo, (uint32_t)hi, (uint32_t)((uint32_t)lo - (uint32_t)reg), src, vsc_mode)) goto vsc_done;
         /* Range arithmetic is wide only at the boundary; the accepted row
          * loop remains 32-bit on Cortex-A9 and visits at most 192 registers. */
         for (uint32_t row = (uint32_t)lo; row < (uint32_t)hi; ++row) {
@@ -1385,6 +1470,8 @@ void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
             float *d = xd3d_state.vsc[row]; x_guest_read(d, src + i * 16u, 16);
             for (int k = 0; k < 4; ++k) if (!isfinite(d[k])) { d[k] = 0.0f; static unsigned nn; if (nn++ < 8) D3DLOG("vs const c[%d].%c non-finite from %08X -> 0\n", (int)row - 96, "xyzw"[k], X_M32(c->r[4])); }
         }
+        if (vsc_mode == 1) vsc_verify((uint32_t)lo, (uint32_t)hi);
+    vsc_done:
         if ((uint32_t)lo < xd3d_state.vsc_dirty_lo) xd3d_state.vsc_dirty_lo = (uint32_t)lo;
         if ((uint32_t)hi > xd3d_state.vsc_dirty_hi) xd3d_state.vsc_dirty_hi = (uint32_t)hi;
     }
@@ -1412,6 +1499,8 @@ static unsigned ps_colors_reused, ps_colors_computed;
 void xd3d_prepare_report(unsigned frames)
 {
     XV_REC_OPT_REPORT(&g_opt_hle, frames, D3DLOG);
+    XV_REC_OPT_REPORT(&g_opt_vsc, frames, D3DLOG);
+    XV_REC_OPT_REPORT(&g_opt_entry, frames, D3DLOG);
     D3DLOG("[draw-state-cache] %u frames lookups %u adjacent %u reused %u computed %u\n",
         frames,ps_identity_cache.lookups,ps_identity_cache.adjacent_hits,
         ps_identity_cache.table_hits,ps_identity_cache.misses);

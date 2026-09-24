@@ -18,8 +18,9 @@ typedef struct {
     unsigned checks, mismatches;    /* since the last report */
     uint64_t session_checks, session_mismatches;
     unsigned logged;                /* mismatch details printed so far (bounded) */
+    int ab;                         /* XV_REC_AB applies to this knob: -1 until read */
 } xv_rec_opt;
-#define XV_REC_OPT_INIT(name) { name, -1, 0, 0, 0, 0, 0 }
+#define XV_REC_OPT_INIT(name) { name, -1, 0, 0, 0, 0, 0, -1 }
 
 /* XV_REC_AB=<frames> (measurement): every knob alternates between 0 and 2 each <frames> recorded frames, so one
  * run measures both paths under the same conditions (the Pi shares its L2/DRAM with other work; separate runs
@@ -43,15 +44,35 @@ static inline int xv_rec_opt_configured(xv_rec_opt *o)
     }
     return o->mode;
 }
+/* XV_REC_AB_KNOBS=<env>[,<env>...] limits the A/B alternation to these knobs; the others keep their configured mode
+ * (measure new knobs on top of the ones already in use). Unset: every knob alternates. */
+static inline int xv_rec_opt_ab(xv_rec_opt *o)
+{
+    if (o->ab < 0) {
+        const char *list = getenv("XV_REC_AB_KNOBS");
+        int in = !list;
+        if (list) {
+            size_t n = 0; while (o->env[n]) n++;
+            for (const char *p = list; *p; ) {
+                const char *e = p; while (*e && *e != ',') e++;
+                size_t k = 0; while (k < n && p + k < e && p[k] == o->env[k]) k++;
+                if (k == n && p + n == e) { in = 1; break; }
+                p = *e ? e + 1 : e;
+            }
+        }
+        o->ab = in;
+    }
+    return o->ab;
+}
 /* The path to take now: the configured mode, or the A/B phase (0 or 2). */
 static inline int xv_rec_opt_mode(xv_rec_opt *o)
 {
     int m = xv_rec_opt_configured(o);
-    if (xv_rec_ab_active()) return xv_rec_ab_phase ? 2 : 0;
+    if (xv_rec_ab_active() && xv_rec_opt_ab(o)) return xv_rec_ab_phase ? 2 : 0;
     return m;
 }
 /* Whether state used by the new path (indexes, second hash tables) must be kept current. */
-static inline int xv_rec_opt_maintain(xv_rec_opt *o) { return xv_rec_opt_configured(o) > 0 || xv_rec_ab_active(); }
+static inline int xv_rec_opt_maintain(xv_rec_opt *o) { return xv_rec_opt_configured(o) > 0 || (xv_rec_ab_active() && xv_rec_opt_ab(o)); }
 
 /* Record one comparison. Returns nonzero when the caller should print mismatch details (the first 8). */
 static inline int xv_rec_opt_result(xv_rec_opt *o, int equal)
