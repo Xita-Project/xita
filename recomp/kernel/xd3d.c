@@ -153,7 +153,8 @@ void (*volatile xv_hle_tap)(xctx *, const char *);
 #else
 #define XD3D_TAP(nm) ((void)0)
 #endif
-#define XD3D_COUNT(nm) (XD3D_TAP(nm), xd3d_count(nm), xd3d_hash_call(nm, c))
+static inline __attribute__((always_inline)) void xd3d_hash_gate(const char *name, xctx *c);
+#define XD3D_COUNT(nm) (XD3D_TAP(nm), xd3d_count(nm), xd3d_hash_gate(nm, c))
 int  xd3d_hist_active(void);                                 /* true during the XV_D3D_HIST frame */
 #define XD3D_RET(nm) do { if (xd3d_hist_gate()) { D3DLOG("[hist] %s from %08X\n", nm, X_M32(c->r[4])); \
     char sb_[400]; int sn_ = 0; for (unsigned i_ = 0; i_ < 40 && sn_ < 380; ++i_) { uint32_t w_ = X_M32(c->r[4] + 4 * i_); if (w_ >= 0x11000 && w_ < 0x3A0000) sn_ += snprintf(sb_ + sn_, sizeof sb_ - sn_, " %X", w_); } \
@@ -208,11 +209,35 @@ static int g_hist_frame = -2;
  * path on a copy, and compares. */
 #include "../../runtime/xv_record_opt.h"
 static xv_rec_opt g_opt_hle = XV_REC_OPT_INIT("XV_REC_HLE");
+/* XV_REC_AB state (runtime/xv_record_opt.h): the phase flips at recording-frame starts, never inside a scene. */
+int xv_rec_ab_period = -1;
+unsigned xv_rec_ab_phase, xv_rec_ab_frames[2];
+static int g_hle_now = -1;   /* the XV_REC_HLE path for this frame (-1: recompute) */
+static inline int hle_mode_now(void)
+{
+    if (__builtin_expect(g_hle_now < 0, 0)) g_hle_now = xv_rec_opt_mode(&g_opt_hle);
+    return g_hle_now;
+}
+void xv_rec_ab_frame(void)
+{
+    static unsigned frames;
+    if (!xv_rec_ab_active()) return;
+    xv_rec_ab_phase = (frames++ / (unsigned)xv_rec_ab_period) & 1u;
+    xv_rec_ab_frames[xv_rec_ab_phase]++;
+    g_hle_now = -1;
+}
+/* Every D3D HLE entry called xd3d_hash_call, which returns at once when the draw-stream hash is off
+ * (g_draw_hash_on == 0: read and disabled). XV_REC_HLE=2 skips that call inline; a -1 (unread) or enabled
+ * hash still calls it. No output depends on the skipped call. */
+static inline __attribute__((always_inline)) void xd3d_hash_gate(const char *name, xctx *c)
+{
+    if (hle_mode_now() == 2 && g_draw_hash_on == 0) return;
+    xd3d_hash_call(name, c);
+}
 int xd3d_hist_active(void);
 static inline int xd3d_hist_gate(void)
 {
-    int mode = g_opt_hle.mode;
-    if (mode < 0) mode = xv_rec_opt_mode(&g_opt_hle);
+    int mode = hle_mode_now();
     if (mode == 0) return xd3d_hist_active();
     int fast = g_hist_frame == -1 ? 0 : xd3d_hist_active();
     if (mode == 2) return fast;
@@ -1014,7 +1039,7 @@ static void xd3d_texture_states_old(uint32_t out[4][5])
 }
 void xd3d_texture_states(uint32_t out[4][5])
 {
-    int mode = xv_rec_opt_mode(&g_opt_hle);
+    int mode = hle_mode_now();
     if (mode == 0) { xd3d_texture_states_old(out); return; }
     /* 0x18F180..0x18F37F is one guest page: one translation, then plain loads (unaligned-safe like X_M32). */
     const uint8_t *t = (const uint8_t *)X_G(D3D_G_TEXTURESTATE);
@@ -1158,7 +1183,7 @@ static void rs_diag(uint32_t method, uint32_t v)
 }
 static void rs_method(uint32_t method, uint32_t v)
 {
-    int mode = xv_rec_opt_mode(&g_opt_hle);
+    int mode = hle_mode_now();
     if (mode == 0) { rs_method_old(method, v); return; }
     rs_table_init();
     if (mode == 2) { rs_state_fast(&xd3d_state, method, v); rs_diag(method, v); return; }
@@ -1323,7 +1348,7 @@ void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
 { XD3D_COUNT("D3DDevice_SetVertexShaderConstant");
     int64_t reg = (int64_t)(int32_t)X_ARG(0) + 96;
     uint32_t src = X_ARG(1), n = X_ARG(2);
-    int mode = xv_rec_opt_mode(&g_opt_hle);
+    int mode = hle_mode_now();
     if (mode == 2) {
         if (xd3d_hist_gate()) { float f[4]; x_guest_read(f, src, sizeof f); D3DLOG("[hist] SetVertexShaderConstant(reg %d, n %u) from %08X: %.3f %.3f %.3f %.3f\n", (int32_t)X_ARG(0), n, X_M32(c->r[4]), f[0], f[1], f[2], f[3]); }
         vs_constants_fast(xd3d_state.vsc, reg, src, n, X_M32(c->r[4]), &xd3d_state.vsc_dirty_lo, &xd3d_state.vsc_dirty_hi);

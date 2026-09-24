@@ -148,6 +148,17 @@ typedef struct {
 static capture_entry cap_entries[CAPTURE_ENTRIES];
 static const void *cap_results[CAPTURE_ENTRIES][XV_FRAME_SLOTS];
 static unsigned cap_buckets[CAPTURE_BUCKETS],cap_entry_count;
+/* XV_REC_CAPTURE (runtime/xv_record_opt.h): the same newest-first chains in a 1024-bucket table hashed on all
+ * address bits (the 256 buckets above use address bits 4..11 only, so page-aligned sources share a chain).
+ * Entries with one identity share a bucket in both tables and keep their insertion order, so the first entry
+ * matching the whole key is the same. Verify walks both and compares the candidate. */
+#include "xv_record_opt.h"
+#define CAPTURE_BUCKETS2 1024u
+static xv_rec_opt cap_opt=XV_REC_OPT_INIT("XV_REC_CAPTURE");
+static uint16_t cap_buckets2[CAPTURE_BUCKETS2],cap_next2[CAPTURE_ENTRIES];
+static uint64_t cap_steps_old,cap_steps_new;
+static unsigned cap_bucket2(const void *source)
+{ return (unsigned)(((uintptr_t)source>>2)*2654435761u)>>22; }
 static int cap_reuse_enabled=-1;
 static int cap_retain_enabled=-1;
 static unsigned cap_reuse_checks,cap_reuse_hits,cap_reuse_prepared;
@@ -155,7 +166,7 @@ static uint64_t cap_reuse_bytes;
 static unsigned cap_retained_hits,cap_reclaims,cap_metadata_full,cap_sparse_hits;static uint64_t cap_sparse_bytes;
 static uint64_t cap_retained_bytes;
 static void cap_reuse_reset(void)
-{ cap_entry_count=0;memset(cap_buckets,0,sizeof cap_buckets); }
+{ cap_entry_count=0;memset(cap_buckets,0,sizeof cap_buckets);if(xv_rec_opt_maintain(&cap_opt))memset(cap_buckets2,0,sizeof cap_buckets2); }
 #ifndef XV_CAPTURE_TRUST_TAGS
 #define XV_CAPTURE_TRUST_TAGS 0
 #endif
@@ -258,11 +269,30 @@ static unsigned cap_reuse_find(const xv_vertex_prepare_stream *s,unsigned packed
 #if XV_PACKED_VERTEX_LAYOUT
     if(packed && packed!=XV_PACKED_PREFIX16)return 0;
 #endif
-    unsigned bucket=((uintptr_t)s->source>>4)&(CAPTURE_BUCKETS-1);
-    for(unsigned id=cap_buckets[bucket];id;id=cap_entries[id-1].next) {
+    #define CAP_KEY_MATCH(e) ((e)->identity==s->source && (e)->bytes==s->bytes && (e)->stride==s->stride && \
+        (e)->packed==packed && (e)->compact==compact && (e)->sparse==sparse)
+    unsigned candidate=0;
+    int mode=xv_rec_opt_mode(&cap_opt);
+    if(mode!=2) {
+        unsigned bucket=((uintptr_t)s->source>>4)&(CAPTURE_BUCKETS-1);
+        for(unsigned id=cap_buckets[bucket];id;id=cap_entries[id-1].next) {
+            if(mode)cap_steps_old++;
+            if(CAP_KEY_MATCH(&cap_entries[id-1])) { candidate=id;break; }
+        }
+    }
+    if(mode) {
+        unsigned found=0;
+        for(unsigned id=cap_buckets2[cap_bucket2(s->source)];id;id=cap_next2[id-1]) {
+            cap_steps_new++;
+            if(CAP_KEY_MATCH(&cap_entries[id-1])) { found=id;break; }
+        }
+        if(mode==2)candidate=found;
+        else if(xv_rec_opt_result(&cap_opt,found==candidate))
+            xv_logf("[rec-verify] XV_REC_CAPTURE mismatch: source %p bytes %u chain %u table %u\n",s->source,s->bytes,candidate,found);
+    }
+    #undef CAP_KEY_MATCH
+    for(unsigned id=candidate;id;id=0) {
         capture_entry *e=&cap_entries[id-1];
-        if(e->identity!=s->source || e->bytes!=s->bytes || e->stride!=s->stride ||
-           e->packed!=packed || e->compact!=compact || e->sparse!=sparse)continue;
         cap_reuse_checks++;
         uint64_t detail_start=sample?cap_clock():0;
         int equal,compared=1;
@@ -327,7 +357,9 @@ static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned packed,
 #if XV_CAPTURE_TRUST_TAGS
     cap_entries[id-1].generation=__atomic_load_n(&trust_generation,__ATOMIC_RELAXED);
 #endif
-    memset(cap_results[id-1],0,sizeof cap_results[id-1]);cap_buckets[bucket]=id;return id;
+    memset(cap_results[id-1],0,sizeof cap_results[id-1]);cap_buckets[bucket]=id;
+    if(xv_rec_opt_maintain(&cap_opt)) { unsigned b2=cap_bucket2(s->source);cap_next2[id-1]=cap_buckets2[b2];cap_buckets2[b2]=(uint16_t)id; }
+    return id;
 }
 #endif
 
@@ -732,6 +764,12 @@ void xv_vertex_capture_shutdown(void)
 void xv_vertex_capture_report(unsigned frames)
 {
     assert(cap_retired==__atomic_load_n(&cap_submitted,__ATOMIC_ACQUIRE));
+#if XV_VERTEX_CAPTURE_REUSE
+    if(cap_opt.mode==1)xv_logf("[rec-capture] %u frames: reuse chain steps 256-bucket %llu / 1024-bucket %llu\n",
+        frames,(unsigned long long)cap_steps_old,(unsigned long long)cap_steps_new);
+    cap_steps_old=cap_steps_new=0;
+    XV_REC_OPT_REPORT(&cap_opt,frames,xv_logf);
+#endif
 #if XV_CAPTURE_TRUST_TAGS
     xv_logf("[capture-trust] %u frames: enabled %d disabled %u generation %u; trusted %u hits %llu KiB compare skipped; sampled verified %u mismatches %u\n",
         frames,trust_enabled,trust_disabled,__atomic_load_n(&trust_generation,__ATOMIC_RELAXED),

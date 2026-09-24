@@ -108,13 +108,16 @@ void xv_host_thread_role(int role)
 static uint64_t spl_read(int fd) { uint64_t v = 0; if (fd >= 0 && read(fd, &v, sizeof v) != sizeof v) v = 0; return v; }
 void xv_host_perf_report(unsigned frame, unsigned frames)
 {
+    extern unsigned xv_rec_ab_frames[2] __attribute__((weak));
+    unsigned ab0 = xv_rec_ab_frames ? xv_rec_ab_frames[0] : 0, ab1 = xv_rec_ab_frames ? xv_rec_ab_frames[1] : 0;
+    if (xv_rec_ab_frames) xv_rec_ab_frames[0] = xv_rec_ab_frames[1] = 0;
     if (!spl_perf_count || !frames) return;
     for (unsigned r = 0; r < SPL_ROLES; r++) {
         if (spl_role[r].cycles < 0) continue;
         uint64_t now[3] = { spl_read(spl_role[r].cycles), spl_read(spl_role[r].instr), spl_read(spl_role[r].clock) }, d[3];
         for (int k = 0; k < 3; k++) { d[k] = now[k] - spl_role[r].last[k]; spl_role[r].last[k] = now[k]; }
-        fprintf(stderr, "[host-perf] frame %u %s: %.3f Mcycles %.3f Minstr %.3f ms CPU per frame (%u frames)\n", frame,
-            r == 0 ? "owner" : "scene-helper", d[0] / 1e6 / frames, d[1] / 1e6 / frames, d[2] / 1e6 / frames, frames);
+        fprintf(stderr, "[host-perf] frame %u %s: %.3f Mcycles %.3f Minstr %.3f ms CPU per frame (%u frames) ab %u %u\n", frame,
+            r == 0 ? "owner" : "scene-helper", d[0] / 1e6 / frames, d[1] / 1e6 / frames, d[2] / 1e6 / frames, frames, ab0, ab1);
     }
 }
 void xv_host_sample_start(void)
@@ -134,7 +137,9 @@ void xv_host_sample_dump(unsigned frame)
 {
     if (!spl_on) return;
     struct itimerval off = { { 0, 0 }, { 0, 0 } }, on = { { 0, 1000 }, { 0, 1000 } }; setitimer(ITIMER_PROF, &off, NULL);
-    fprintf(spl_out, "frame %u samples %u dropped %u helper-cycles %d\n", frame, spl_total, spl_drop, spl_helper_sampling ? spl_perf_period : 0);
+    extern unsigned xv_rec_ab_frames[2] __attribute__((weak));   /* XV_REC_AB phase frames in this window (xd3d.c) */
+    fprintf(spl_out, "frame %u samples %u dropped %u helper-cycles %d ab %u %u\n", frame, spl_total, spl_drop, spl_helper_sampling ? spl_perf_period : 0,
+        xv_rec_ab_frames ? xv_rec_ab_frames[0] : 0, xv_rec_ab_frames ? xv_rec_ab_frames[1] : 0);
     for (unsigned i = 0; i < SPL_BUCKETS; ++i) if (spl[i].n) {
         if (spl_lr) fprintf(spl_out, "%u %x %u %x\n", spl[i].kind, spl[i].off, spl[i].n, spl[i].lr);
         else fprintf(spl_out, "%u %x %u\n", spl[i].kind, spl[i].off, spl[i].n);

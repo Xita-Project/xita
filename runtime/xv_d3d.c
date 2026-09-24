@@ -903,6 +903,7 @@ static xv_rec_opt g_opt_index = XV_REC_OPT_INIT("XV_REC_INDEX");   /* retain_ind
  * program handle by microcode hash, combiner table entry, blend variant, declaration properties, texture-coordinate
  * scales), and the draw's trace flags read once per draw. Verify recomputes each lookup and compares. */
 static xv_rec_opt g_opt_draw = XV_REC_OPT_INIT("XV_REC_DRAW");
+static int g_draw_mode;   /* XV_REC_DRAW path of the draw being recorded (record_draw sets it) */
 /* XV_REC_TEXTURE: when the per-stage source memo misses, a per-frame memo keyed by the texture header and validated
  * by the header words both resolvers read (render-target alias: live Data/Format; UI cache: Data/Format/Size through
  * the thread's page table) and the render-target generation returns the source the resolvers would return. P8 with a
@@ -1163,8 +1164,15 @@ uint32_t xd3d_r_visibility_end(uint32_t id)
     if (!slot) return XV_VISIBILITY_OUT_OF_MEMORY;
     int mode = xv_rec_opt_mode(&g_opt_query);
     if (mode == 2) return vis_issue_fast(id, &l->visibility[slot-1].result_slot, &l->visibility[slot-1].serial);
-    if (mode == 0) return xv_visibility_issue(g_visibility_results,id,
-        &l->visibility[slot-1].result_slot,&l->visibility[slot-1].serial);
+    if (mode == 0) {
+        unsigned before = g_vis_count;
+        uint32_t rc = xv_visibility_issue(g_visibility_results,id,
+            &l->visibility[slot-1].result_slot,&l->visibility[slot-1].serial);
+        /* XV_REC_AB: keep the index complete while the scan path runs (a new ID takes slot `count`) */
+        if (!rc && xv_rec_opt_maintain(&g_opt_query) && l->visibility[slot-1].result_slot == before &&
+            g_visibility_results[before].id == id && vis_map_lookup(id) < 0) { vis_map_add(id, before); g_vis_count++; }
+        return rc;
+    }
     /* verify: predict the slot/serial from the index, then issue through the scan */
     int known = vis_map_lookup(id);
     unsigned expect_slot = known >= 0 ? (unsigned)known : g_vis_count;
@@ -1289,7 +1297,7 @@ static int blend_mode_scan(int *fallback);
  * same inputs. The table-full fallback is never memoized. */
 static int blend_mode(void)
 {
-    int mode = g_opt_draw.mode, fallback = 0;
+    int mode = g_draw_mode, fallback = 0;
     if (mode <= 0) return blend_mode_scan(&fallback);
     static struct { uint32_t enable, src, dst, mask, op; int valid, result; } memo;
     uint32_t mask = S.color_mask, op = S.blend_op;
@@ -1393,7 +1401,7 @@ static int g_draw_trace = -1, g_draw_vtrace = -1;
 static int trace_frame(void)
 {
     if (g_draw_trace < 0) return trace_frame_live();
-    if (g_opt_draw.mode == 2) return g_draw_trace;
+    if (g_draw_mode == 2) return g_draw_trace;
     int live = trace_frame_live();
     if (xv_rec_opt_result(&g_opt_draw, live == g_draw_trace)) draw_memo_mismatch("trace flag", (unsigned)g_draw_trace, (unsigned)live);
     return live;
@@ -1401,7 +1409,7 @@ static int trace_frame(void)
 static int vertex_trace_frame(void)
 {
     if (g_draw_vtrace < 0) return vertex_trace_frame_live();
-    if (g_opt_draw.mode == 2) return g_draw_vtrace;
+    if (g_draw_mode == 2) return g_draw_vtrace;
     int live = vertex_trace_frame_live();
     if (xv_rec_opt_result(&g_opt_draw, live == g_draw_vtrace)) draw_memo_mismatch("vertex trace flag", (unsigned)g_draw_vtrace, (unsigned)live);
     return live;
@@ -1434,7 +1442,7 @@ static int ps_entry_for(uint32_t vs, uint32_t key, unsigned c2d)
 /* The combiner table is immutable: memoize every (vertex program, program key, 2D mask) result, misses included. */
 static int ps_entry_memo(uint32_t vs, uint32_t key, unsigned c2d)
 {
-    int mode = g_opt_draw.mode;
+    int mode = g_draw_mode;
     if (mode <= 0) return ps_entry_for(vs, key, c2d);
     static struct { uint32_t vs, key; uint8_t c2d, valid; int16_t entry; } memo[128];
     unsigned m = ((vs ^ key * 2654435761u) + c2d * 40503u) * 2654435761u >> 25;
@@ -2029,7 +2037,7 @@ static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
             if (size) {
                 /* XV_REC_DRAW: the scale is a pure function of the size word; keep the last one per stage. */
                 static uint32_t memo_size[4]; static float memo_scale[4][2];
-                int mode = g_opt_draw.mode;
+                int mode = g_draw_mode;
                 if (mode == 2 && memo_size[t] == size) {
                     c->texscale[t][0] = memo_scale[t][0]; c->texscale[t][1] = memo_scale[t][1];
                     continue;
@@ -2074,7 +2082,7 @@ static int vertex_reference_layout_scan(const xv_vs_desc_t *d, unsigned stream, 
 /* Declarations are immutable: memoize (declaration, stream, stride). */
 static int vertex_reference_layout(const xv_vs_desc_t *d, unsigned stream, unsigned stride)
 {
-    int mode = g_opt_draw.mode;
+    int mode = g_draw_mode;
     if (mode <= 0) return vertex_reference_layout_scan(d, stream, stride);
     static struct { const xv_vs_desc_t *d; unsigned stream, stride; int result; } memo[64];
     unsigned m = (unsigned)(((uintptr_t)d >> 3) * 2654435761u + stream * 40503u + stride * 97u) >> 26 & 63u;
@@ -2118,7 +2126,7 @@ static int desc_uses_const_stream_scan(const xv_vs_desc_t *d)
 }
 static int desc_uses_const_stream(const xv_vs_desc_t *d)
 {
-    int mode = g_opt_draw.mode;
+    int mode = g_draw_mode;
     if (mode <= 0) return desc_uses_const_stream_scan(d);
     static struct { const xv_vs_desc_t *d; int result; } memo[32];
     unsigned m = (unsigned)((uintptr_t)d >> 4) * 2654435761u >> 27;
@@ -2139,9 +2147,10 @@ static void draw_memo_mismatch(const char *what, unsigned memo, unsigned live)
 static void record_draw_body(uint32_t prim, uint32_t count, const void *indices, uint32_t base_vertex, const void *immediate);
 static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint32_t base_vertex, const void *immediate)
 {
-    if (xv_rec_opt_mode(&g_opt_draw) > 0) { g_draw_trace = trace_frame_live(); g_draw_vtrace = vertex_trace_frame_live(); }
+    g_draw_mode = xv_rec_opt_mode(&g_opt_draw);
+    if (g_draw_mode > 0) { g_draw_trace = trace_frame_live(); g_draw_vtrace = vertex_trace_frame_live(); }
     record_draw_body(prim, count, indices, base_vertex, immediate);
-    g_draw_trace = g_draw_vtrace = -1;
+    g_draw_trace = g_draw_vtrace = -1; g_draw_mode = 0;
 }
 static void record_draw_body(uint32_t prim, uint32_t count, const void *indices, uint32_t base_vertex, const void *immediate)
 {
@@ -2674,6 +2683,7 @@ uint32_t xv_d3d_EndFrame(void)
 unsigned xv_d3d_record_slot(void) { return g_build_frame % XV_NUM_LISTS; }
 void xv_d3d_BeginFrame(void)
 {
+    { extern void xv_rec_ab_frame(void) __attribute__((weak)); if (xv_rec_ab_frame) xv_rec_ab_frame(); }   /* XV_REC_AB */
 #if XV_POSE_PIPELINE
     xv_pose_pipeline_begin(g_build_frame);
 #endif
