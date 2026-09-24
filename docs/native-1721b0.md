@@ -1,7 +1,11 @@
 # Native BSP segment cast under f_001721B0 (`XV_NATIVE_1721B0`)
 
-Sept 24 2026. Branch `work/native-1721b0-20260924` (not pushed). Status: implemented and verified. It is off by
-default and has not been built into a VPK or measured on the Vita.
+Sept 24 2026. Branch `work/native-1721b0-20260924` (not pushed). Status: implemented and verified on the host and the
+Pi. It is off by default.
+
+The first version failed on the Vita (perf204). Its per-thread state was `__thread`, which is emutls on vitasdk, and
+the owner and the scene helper cast at the same time. The second version (see "The Vita failure" below) holds no
+per-thread or shared state and waits for a hardware retest.
 
 `f_001721B0` is Halo's collision vector test: a segment through the structure BSP and the objects near it. In a30 on the
 Vita it costs about 300 us per call, and it is the biggest tick cost found so far. The looping-sound obstruction pass
@@ -24,8 +28,10 @@ on where the player is. Seven other callers made 0.01 % of the casts in most run
 player went elsewhere.
 
 Evidence, with details below:
-- **0 mismatches in 87,828,407 in-game casts** compared in verify mode on the x86 host and the Pi 4 in a30 with
-  movement. 70,080,835 of them were on the final build.
+- **0 mismatches in 120,489,117 in-game casts** compared in verify mode on the x86 host and the Pi 4 in a30 with
+  movement. 32,660,710 of them were on the thread-safe build with the Vita play settings, 1,275,448 of those on the
+  scene helper.
+- **0 mismatches in 758,880 concurrent casts.** Up to 8 threads cast at once, each through its own page table.
 - **0 mismatches in 240,000 differential-test cases** against the lifted bodies of both stage flavours, three builds
   each, verify mode included.
 - **0 mismatches in 2,000 captured a30 casts** replayed on x86 and on the Pi.
@@ -155,11 +161,14 @@ In the game runs below nothing was declined.
 - Build: `XV_NATIVE_1721B0=1`. The Makefile block after `XV_NATIVE_4B9D0` sets `-DXV_NATIVE_1721B0=1`,
   `XV_NATIVE_1721B0_DEFAULT` (0), and `-ffp-contract=off` for the unit. `games/halo_ce_3925/runtime.mk` adds the source,
   and `recomp/kernel/xd3d.c` makes one weak report call.
-- Hook: `python3 tools/patch_native_1721b0_hooks.py <stage>/recomp` (idempotent). At the top of `f_00088E90`, inside
-  `#if defined(XV_NATIVE_1721B0) && XV_NATIVE_1721B0`, it adds
-  `{ extern int xv_native_1721b0_ray(xctx *); if (xv_native_1721b0_ray(c)) return; }`. It returns 0 (the translated
-  body runs) when the knob is off without timing, when the layout is declined, and for its own call of the translation
-  (verify, timing). `tools/install_native_1721b0.py <stage>` does all of it: unit, Makefile, runtime.mk, xd3d.c, hook.
+- Hook: `python3 tools/patch_native_1721b0_hooks.py <stage>/recomp` (idempotent). Under
+  `#if defined(XV_NATIVE_1721B0) && XV_NATIVE_1721B0`, it renames the translated body to `f_00088E90_body` (a
+  `#define` around its definition) and puts the hook in front of it:
+  `void f_00088E90(xctx *restrict c) { extern int xv_native_1721b0_ray(xctx *); if (!xv_native_1721b0_ray(c)) f_00088E90_body(c); }`.
+  The hook returns 0 (the body runs) when the knob is off without timing and when the layout is declined. For its own
+  runs of the translation (verify, timing) it calls `f_00088E90_body` directly, so no flag tells its call from a
+  caller's. The tool also upgrades a shard patched by the first version: it removes the in-body hook.
+  `tools/install_native_1721b0.py <stage>` does all of it: unit, Makefile, runtime.mk, xd3d.c, hook.
 - Env `XV_NATIVE_1721B0`:
   - 0: off (default).
   - 1: verify. The native runs with a write journal. Its result is recorded (registers, flags, x87, back-edges, every
@@ -170,7 +179,8 @@ In the game runs below nothing was declined.
 - Env `XV_NATIVE_1721B0_TIME=1`: ns clock per call (Vita: us clock) of the translation in mode 0 (timed by the hook),
   the native in mode 2, and both in mode 1. It also turns on the per-call detail counters.
 - Report, every 60 frames:
-  `[native-1721b0] 60 frames: calls N verified N mismatched N (total mismatches N) declined N journal-fail N; from 1721B0 N 1731D0 N other N; nodes .. leaves .. refs .. polygons .. edges .. bsp2d-steps .. hits .. back-edges .. delegated .. max-depth .. nan-words ..; us/call native X guest Y (N timed)`.
+  `[native-1721b0] 60 frames: calls N verified N mismatched N (total mismatches N) declined N journal-fail N; from 1721B0 N 1731D0 N other N; on the scene helper N, through a thread's own table N; nodes .. leaves .. refs .. polygons .. edges .. bsp2d-steps .. hits .. back-edges .. delegated .. max-depth .. nan-words ..; us/call native X guest Y (N timed)`.
+  The helper counts need the detail counters (mode 1 or `_TIME=1`).
   Mismatches print up to 12 `MISMATCH <what> native .. guest ..` lines.
 - Host harness only: `XV_NATIVE_1721B0_CAPTURE=<file>[:n[:skip]]` writes the arena and page table once, then n entry
   states (xctx and the stack within 64 KB of esp) for `--replay`. Captures are private (game memory) and stay out of the
@@ -348,25 +358,30 @@ tick timers.
 
 Files on branch `work/native-1721b0-20260924`, on top of `0ed288e`:
 
-1. `recomp/kernel/xk_native_1721b0.c` (new). The Vita object is 24.7 KB of text and 108 B of BSS. Per thread there is
-   a TLS journal, and the level stack (1,024 x 40 B on the Vita) is allocated on first use.
+1. `recomp/kernel/xk_native_1721b0.c` (new). The Vita object is 25.2 KB of text and 116 B of BSS (the atomic counters
+   and the mode word only). There is no `__thread` and no emutls reference. A call keeps its 128-level stack (5 KB) in
+   its own C frame; deeper walks go to a per-call heap copy, and verify mode's journal is per call.
 2. `Makefile`: the `XV_NATIVE_1721B0` block (flag, `_DEFAULT`, the `-ffp-contract=off` rule).
 3. `games/halo_ce_3925/runtime.mk`: `XITA_GAME_SRCS += recomp/kernel/xk_native_1721b0.c` under
    `ifeq ($(XV_NATIVE_1721B0),1)`.
 4. `recomp/kernel/xd3d.c`: one weak call `xv_native_1721b0_report(60)` after `xv_native_4b9d0_report`.
-5. The shard that defines `f_00088E90` (code_013.c in this stage): the entry hook.
+5. The shard that defines `f_00088E90` (code_013.c in this stage): the hook in front of the renamed body.
 
 Steps for `overlap-candidate/build-x87` (the same for `overlap-candidate/build`):
 
 1. Run `python3 tools/install_native_1721b0.py overlap-candidate/build-x87` from this checkout. It copies the unit and
    adds the Makefile block after the stage's `xk_native_4b9d0.o` -ffp-contract rule (falling back to the 92330 or
    visibility one), the runtime.mk line after the 4B9D0 line, and the xd3d.c call after the 4B9D0 report call. It
-   prints `hook installed in f_00088E90`, and it is idempotent. It was tried here on a copy of the x87 stage, twice.
+   prints `wrapper installed in front of f_00088E90`, and it is idempotent. On a stage installed with the first version
+   (perf204), running it again replaces the unit, removes the in-body hook and installs the wrapper; the rest is
+   already present. It was tried here on copies of both stage flavours, and on the upgrade path.
 2. Add `XV_NATIVE_1721B0=1` to `overlap-candidate/make-vars.txt`, and to the make variables in `build-command.json` if
    the build driver takes them from there. `code_013.c`, `xd3d.c` and the new unit rebuild by mtime (`code_013.c` is
    compiled with `RECOMP_CFLAGS`, which carry `-DXV_NATIVE_1721B0=1`).
 3. Check:
-   - `arm-vita-eabi-nm build/recomp/code_013.o | grep 1721b0` shows `U xv_native_1721b0_ray`.
+   - `arm-vita-eabi-nm build/recomp/code_013.o | grep -i '1721b0\|88E90'` shows `U xv_native_1721b0_ray`,
+     `T f_00088E90` (the hook) and `T f_00088E90_body`.
+   - `arm-vita-eabi-nm build/recomp/kernel/xk_native_1721b0.o | grep -c emutls` is 0.
    - `arm-vita-eabi-nm build/recomp/kernel/xd3d.o | grep 1721b0` shows `w xv_native_1721b0_report`.
    - The ELF has `T xv_native_1721b0_ray` and `T xv_native_1721b0_report`.
    - `arm-vita-eabi-objdump -d build/recomp/kernel/xk_native_1721b0.o | grep -c vfma` is 0.
@@ -380,9 +395,98 @@ Steps for `overlap-candidate/build-x87` (the same for `overlap-candidate/build`)
 Checked here with the Vita command lines from `make -n` of the installed x87-stage copy (`arm-vita-eabi-gcc -O2
 -mthumb -mcpu=cortex-a9 -mfpu=neon`, `-ffp-contract=off` for the unit):
 - The unit, the hooked `code_013.c` and `xd3d.c` compile.
-- `code_013.o` references `xv_native_1721b0_ray` from `T f_00088E90`.
+- `code_013.o` has `T f_00088E90` and `T f_00088E90_body` and references `xv_native_1721b0_ray`.
+- The unit's object has no emutls reference.
 - `xd3d.o` has the weak `xv_native_1721b0_report`.
 - There is no `vfma` in the unit's object.
+
+## The Vita failure of the first version, and the fix
+
+**What happened on hardware (perf204).** The build was `overlap-candidate/build-x87` with the first installer, a30 (the
+intro and the pod), and the Vita play settings: scene thread with overlap mode 2, render view with the per-thread page
+table, the other natives on.
+- Mode 1 printed one clean 60-frame report (5 casts). Then it printed a mismatch on a small cast ("4 nodes, 4 leaves":
+  wrong ebp/esi/ecx/edx, fsw, x87 slot 7), and the scene helper died of a data abort inside `nr_88b80`. At that moment
+  the owner's fiber was also inside the native, in `nr_jlog_slow` -> `__emutls_get_address`.
+- Mode 2 hung the owner's tick in `f_0008DDF0` until the freeze watchdog fired.
+
+**Cause.** The cast runs on several threads at once. The scene helper renders through `f_00044000 -> 88E90` while the
+owner's tick casts, and the object workers cast too. The first version kept three things in `__thread` variables:
+- the verify journal;
+- the heap level stack of the iterative 88B80;
+- the flag that let the hook's own call of the translation pass.
+
+On vitasdk `__thread` is emutls (handoff 20260920 §25). The Vita's `sceKernelCreateThread` threads did not get their
+own copies, so the owner and the helper shared one journal, one level stack and one flag. One thread's levels
+overwrote the other's saved registers and arguments, which is where the wrong ebp/esi came from. The journal undo
+restored the other thread's bytes, and the helper crashed.
+
+The page tables were not the problem. The unit reads `X_PT` (TPIDRURW, one `mrc` per call on the Vita), so every
+access already went through the calling thread's table, including the helper's render view. The Vita object shows the
+`mrc p15, 0, rX, c13, c0, 2` reads.
+
+**Reproduced on the host.** The first version with its `__thread` variables turned into plain statics (one copy, as
+emutls behaved) was run in a30 in verify mode with the play settings (scene thread, overlap 2, render view). It printed
+the same sequence as the Vita:
+- one clean 60-frame report with 5 casts;
+- MISMATCH lines on a "4 nodes, 4 leaves" cast, with esp values from the other thread's stack (owner 0045xxxx, helper
+  03CFxxxx);
+- a segmentation fault.
+
+With real TLS (the host's), the same code passed.
+
+**Fix** (commit after `8a892d3`):
+- No `__thread` and no shared mutable state. The journal is a local of the verify call, passed through the memory
+  context.
+- The level stack is an array in the call's frame (128 levels, 5 KB; in game at most 64). A deeper walk moves it to a
+  heap copy freed at the end of the call, and beyond 1,024 levels the translation takes the subtree, as before.
+- The reentry flag is gone. The hook is now `f_00088E90` itself, a wrapper in front of the renamed translated body, and
+  the native calls `f_00088E90_body` for its own translation runs.
+- What remains shared: the atomic counters, and the mode word, which is set once. Casts through a thread's own table
+  are counted in the report. The host-only capture takes live-table casts only.
+
+**New test: `--threads N`** (`tools/test_native_1721b0.py <stage>/recomp <scenes> --threads N --iters K`, `NR_MODE=1`
+for verify). N host threads cast the same scene at once, K times each. Each thread uses its own page table, whose
+stack pages are its own physical copy: the same guest addresses in different host memory, as with the render view.
+Every result must equal the single-threaded translation's.
+
+| native | mode | threads x casts per scene | scenes | casts | mismatches |
+|---|---|---|---|---|---|
+| first version, real TLS (host) | 2 | 4 x 20 | 300 | 24,000 | 0 |
+| first version, real TLS (host) | 1 | 4 x 20 | 300 | 24,000 | 0 |
+| first version, `__thread` as one shared copy (the Vita's behaviour) | 2 | 4 x 20 | 300 | 24,000 | **1,256** |
+| first version, `__thread` as one shared copy | 1 | 4 x 20 | 300 | - | **crash (core dump)** |
+| fixed | 0 (translation) | 4 x 20 | 300 | 24,000 | 0 |
+| fixed | 2 | 4 x 20 | 300 | 24,000 | 0 |
+| fixed | 1 | 4 x 20 | 300 | 24,000 | 0 |
+| fixed | 2 | 8 x 20 | 3,000 | 479,200 | 0 |
+| fixed | 1 | 8 x 10 | 3,000 | 239,920 | 0 |
+| fixed, Pi 4 (cores 0-1, `-O2 -mthumb`) | 2 | 4 x 10 | 1,000 | 39,960 | 0 |
+| fixed, Pi 4 | 1 | 4 x 10 | 1,000 | 39,960 | 0 |
+
+The 8-thread mode-2 run also took 1,610 subtrees deeper than 1,024 levels to the translation and grew the level stack
+to the heap in each of them.
+
+**In game with the play settings** (the fixed build; `XV_NATIVE_1721B0=1 XV_NATIVE_1721B0_TIME=1`; scene thread,
+overlap mode 2, render view with split and early; `XV_RENDER_HEIGHT=360`; the play config's other natives in mode 2;
+`XV_SOUND_OBSTRUCTION=6`, `XV_OCCL=2`; a30 walking the whole run):
+
+| run | where | frames | casts compared | on the scene helper (own table) | mismatches | declined |
+|---|---|---|---|---|---|---|
+| ver5 | x86 host, CPUs 0-7, 40 min | 71,700 | 15,288,435 | 514,071 | 0 | 0 |
+| pver5 | Pi 4, cores 0-1, 40 min | 70,560 | 17,372,275 | 761,377 | 0 | 0 |
+
+Neither run crashed or hung. The helper's casts all went through its own table (the render view).
+
+The fixed unit, after this change:
+- 120,000 differential cases on both stage flavours (seeds 33 and 34, three builds each, verify mode on): 0
+  mismatches.
+- The 2,000-cast replay: 0 mismatches on x86 and on the Pi, at 2.15x (x86) and 1.77x (Pi), about as before.
+- The new heap-copy mutant is caught (84 of 6,000 cases).
+
+The other natives that use `__thread` carry the same risk wherever two of their calls can run at once: the verify
+journals of `xk_native_4b9d0.c` (`n4_j`) and `xk_native_92330.c` (`n9_j`), and 4B9D0's timing stamp (`n5_t0`). The
+query part of 4B9D0 declines on the helper.
 
 ## Findings along the way
 
