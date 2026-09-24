@@ -340,6 +340,22 @@ static void list_data_arrays(int freeze)
         }
     }
     if (ln) XK_LOG("[render-view] arrays:%s\n", line);
+    /* The frozen "cluster ... reference" chains start from per-cluster head tables that are plain 512-entry allocations
+     * (0x800 bytes right below each array), not data arrays, so the name match missed them: the scene followed LIVE heads
+     * the tick had just relinked into FROZEN chains and lost moving objects for a frame (Vita perf179 XV_OBJTRACE: the
+     * a10 crewmen, tag E31701A3, uncollected in ~5% of scenes; only under the overlap). XV_RENDER_VIEW_HEADS lists the
+     * image globals holding the table pointers: 2FC6A0 collideable objects, 2FC690 noncollideable objects, 2FC670 lights. */
+    if (freeze) {
+        const char *hs = getenv("XV_RENDER_VIEW_HEADS"); if (!hs) hs = "2FC670,2FC690,2FC6A0";
+        unsigned nh = 0; char hl[200]; int hn = 0; hl[0] = 0;
+        for (const char *p = hs; *p; ) {
+            char *q; uint32_t g = (uint32_t)strtoul(p, &q, 16); if (q == p) break; p = q; while (*p == ',' || *p == ' ') p++;
+            uint32_t t = g ? X_IMG32(g) : 0;
+            if (t >= 0x80000000u) { for (uint32_t va = t & ~0xFFFu; va < t + 0x800u; va += XK_PAGE) { uint32_t o = g_xpt[va >> 12]; if (o < phys_limit) learn_page(o >> 12); }
+                nh++; if (hn < (int)sizeof hl - 24) hn += snprintf(hl + hn, sizeof hl - hn, " %X->%08X", g, t); }
+        }
+        XK_LOG("[render-view] %u cluster head tables frozen:%s; slots %u\n", nh, nh ? hl : " none", slots_used);
+    }
     XK_LOG("[render-view] %u data arrays below %u MiB, %u frozen by name (%s); slots %u\n", n, phys_limit >> 20, frozen, array_words, slots_used);
 }
 static uint32_t pool_table_seen, pool_lo = 0xFFFFFFFFu, pool_hi;

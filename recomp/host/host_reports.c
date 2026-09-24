@@ -100,9 +100,9 @@ static void state_hash(unsigned now)
 static uint32_t wh_r32(uint32_t va) { uint32_t off = g_xpt[va >> 12]; uint32_t v = 0; if (off < (64u << 20)) memcpy(&v, g_xram + off + (va & 0xFFFu), 4); return v; }
 static void addr_whois(unsigned now)
 {
-    static unsigned at = ~0u; static uint32_t want[32]; static unsigned nwant; static int init;
+    static unsigned at = ~0u; static uint32_t want[32]; static int wderef[32]; static unsigned nwant; static int init;
     if (!init) { init = 1; const char *e = getenv("XV_ADDR_WHOIS"); if (!e) return; at = (unsigned)strtoul(e, NULL, 10); const char *p = strchr(e, ':');
-        while (p && nwant < 32) { want[nwant++] = (uint32_t)strtoul(p + 1, NULL, 16); p = strchr(p + 1, ','); } }
+        while (p && nwant < 32) { const char *t = p + 1; int deref = *t == '*'; if (deref) t++; want[nwant] = (uint32_t)strtoul(t, NULL, 16) | (deref ? 0x1u << 0 : 0); wderef[nwant++] = deref; p = strchr(p + 1, ','); } }
     if (now != at || !g_xram || !g_xpt) return;
     struct { uint32_t data, bytes, esz; char name[33]; } arr[256]; unsigned narr = 0; uint32_t obj_data = 0, obj_max = 0, obj_esz = 0;
     for (uint32_t off = 0x28u; off + 0x10u <= (64u << 20) && narr < 256; off += 4u) {
@@ -124,6 +124,7 @@ static void addr_whois(unsigned now)
       } }
     for (unsigned w = 0; w < nwant; ++w) {
         uint32_t a = want[w]; int found = 0;
+        if (wderef[w]) { uint32_t g = a & ~1u, v; memcpy(&v, g_img_base + g, 4); fprintf(stderr, "[whois] image global %08X = %08X\n", g, v); a = v; }
         for (unsigned i = 0; i < narr && !found; ++i) if (a >= arr[i].data && a < arr[i].data + arr[i].bytes && arr[i].esz) {
             uint32_t k = (a - arr[i].data) / arr[i].esz; fprintf(stderr, "[whois] %08X: array %s element %u offset +%X (esz %u)\n", a, arr[i].name, k, (a - arr[i].data) % arr[i].esz, arr[i].esz); found = 1; }
         if (found) continue;

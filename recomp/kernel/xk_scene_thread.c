@@ -374,6 +374,7 @@ static int helper_main(SceSize args, void *argp)
     { char m; helper_sp_hi = (uintptr_t)&m + 4096u; helper_sp_lo = helper_sp_hi - (1024u * 1024u + 8192u); }   /* the 1 MiB stack from sceKernelCreateThread, with margins */
     for (;;) {
         if (sceKernelWaitSema(go, 1, NULL) < 0) return -1;
+        { extern void xv_objtrace_scene_begin(void) __attribute__((weak)); if (xv_objtrace_scene_begin) xv_objtrace_scene_begin(); }   /* XV_OBJTRACE scene bounds */
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
         scene_abandon_armed = 0;
         { extern void xd3d_present_flush_helper(int) __attribute__((weak)); if (xd3d_present_flush_helper) xd3d_present_flush_helper(__atomic_load_n(&xv_owner_at_join, __ATOMIC_ACQUIRE)); }   /* the owner's deferred Present, when the owner is still ticking (it is then the wall) */

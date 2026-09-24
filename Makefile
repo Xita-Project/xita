@@ -2041,6 +2041,14 @@ CFLAGS += -DXV_NATIVE_CRT_FLOAT=1 -DXV_NATIVE_CRT_FLOAT_DEFAULT=$(XV_NATIVE_CRT_
 RECOMP_CFLAGS += -DXV_NATIVE_CRT_FLOAT=1 -DXV_NATIVE_CRT_FLOAT_DEFAULT=$(XV_NATIVE_CRT_FLOAT_DEFAULT)
 endif
 
+# Diagnostic: objects that miss the per-object render entry for exactly one scene (recomp/kernel/xk_objtrace.c,
+# tools/patch_objtrace.py). Env XV_OBJTRACE=1 turns it on.
+XV_OBJTRACE ?= 0
+ifeq ($(XV_OBJTRACE),1)
+CFLAGS += -DXV_OBJTRACE=1
+RECOMP_CFLAGS += -DXV_OBJTRACE=1
+endif
+
 # Scene helper keeps private object-query serials (recomp/kernel/xk_qserial.[ch], tools/patch_qserial.py). Env XV_QSERIAL 1 (default) / 0.
 XV_QSERIAL ?= 0
 ifeq ($(XV_QSERIAL),1)

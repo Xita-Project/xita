@@ -76,6 +76,9 @@ endif
 ifeq ($(XV_NATIVE_VISIBILITY_PASS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_visibility_pass.c
 endif
+ifeq ($(XV_OBJTRACE),1)
+XITA_GAME_SRCS += recomp/kernel/xk_objtrace.c
+endif
 ifeq ($(XV_QSERIAL),1)
 XITA_GAME_SRCS += recomp/kernel/xk_qserial.c
 endif
