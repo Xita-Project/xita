@@ -204,8 +204,8 @@ uint32_t xd3d_backbuffer_data(void) { return g_dev.backbuffer ? RES_DATA(g_dev.b
 static int g_hist_frame = -2;
 /* XV_REC_HLE (runtime/xv_record_opt.h): exact fast paths for the scene's hottest D3D state setters - render-state
  * methods through a precomputed method table, the texture-state table read through one guest page pointer - plus
- * the histogram check skipped while no trace is configured (g_hist_frame == -1 makes xd3d_hist_active() return 0)
- * and the draw-stream hash call skipped while that hash is off. Verify runs the original on the live state and the
+ * the histogram check skipped while no trace is configured (g_hist_frame == -1 makes xd3d_hist_active() return 0),
+ * the draw-stream hash call skipped while that hash is off, and SetVertexData2f's XV_WATCH lookup cached. Verify runs the original on the live state and the
  * fast path on a copy, and compares. */
 #include "../../runtime/xv_record_opt.h"
 static xv_rec_opt g_opt_hle = XV_REC_OPT_INIT("XV_REC_HLE");
@@ -975,13 +975,29 @@ void xv_hle_D3DDevice_End(xctx *c)
     g_im.verts = 0;
     c->r[0] = 0; X_RET(0);
 }
+/* SetVertexData2f asked getenv("XV_WATCH") on every register-0 call once past frame 1 (about 90-130 per frame, each
+ * a walk of the whole environment). XV_REC_HLE=2 caches the answer until the environment changes: the only runtime
+ * setenv is the remote env command, which bumps xv_env_generation (runtime/xv_remote.c; absent on the host). */
+extern volatile unsigned xv_env_generation __attribute__((weak));
+static int xd3d_env_watch(void)
+{
+    int mode = hle_mode_now();
+    if (mode == 0) return getenv("XV_WATCH") != NULL;
+    static unsigned gen = ~0u; static int watch;
+    unsigned g = &xv_env_generation ? __atomic_load_n(&xv_env_generation, __ATOMIC_ACQUIRE) : 0u;
+    if (gen != g) { watch = getenv("XV_WATCH") != NULL; gen = g; }
+    if (mode == 2) return watch;
+    int live = getenv("XV_WATCH") != NULL;
+    if (xv_rec_opt_result(&g_opt_hle, live == watch)) xk_os_log("[d3d] [rec-verify] XV_REC_HLE mismatch: XV_WATCH cached %d live %d\n", watch, live);
+    return live;
+}
 void *xv_dbg_watch_host;                 /* host address of the guest vertex array (for gdb watchpoints) */
 uint32_t xv_dbg_watch_guest;
 void xv_dbg_break(void) { }              /* gdb: break here after the address is known */
 void xv_hle_D3DDevice_SetVertexData2f(xctx *c)
 { XD3D_COUNT("D3DDevice_SetVertexData2f");
     { static unsigned n; if (n < 12 && xd3d_frame() > 0) { n++; xk_os_log("[2f] ret %08X reg %u = %.2f %.2f (esi %08X)\n", X_M32(c->r[4]), X_ARG(0), f32arg(c, 1), f32arg(c, 2), c->r[6]); } }
-    { static int armed; if (!armed && xd3d_frame() > 1 && X_ARG(0) == 0 && getenv("XV_WATCH")) {
+    { static int armed; if (!armed && xd3d_frame() > 1 && X_ARG(0) == 0 && xd3d_env_watch()) {
         armed = 1; xv_dbg_watch_guest = c->r[6];                     /* esi = current vertex */
         xv_dbg_watch_host = X_G(c->r[6] + 4);                        /* watch the y of this vertex */
         xk_os_log("[dbg] watching guest %08X (host %p)\n", c->r[6] + 4, xv_dbg_watch_host);

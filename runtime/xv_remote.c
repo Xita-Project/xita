@@ -286,6 +286,7 @@ static void serve(int s)
             for(char *tok=strtok(vars,"&");tok;tok=strtok(NULL,"&")) {
                 char *eq=strchr(tok,'=');if(!eq||eq==tok)continue;*eq=0;
                 setenv(tok,eq+1,1);n++;xv_logf("[remote] env %s=%s\n",tok,eq+1);
+                { extern volatile unsigned xv_env_generation; __atomic_add_fetch(&xv_env_generation,1u,__ATOMIC_RELEASE); }
             }
             reply(s,n?204:400,n?"":"No K=V pairs\n");
         } else if(!strcmp(method,"POST")&&!strcmp(target,"/trace/pages")) {
@@ -485,3 +486,6 @@ void xv_remote_start(void)
 failed:
     xv_logf("[remote] startup failed; game continues without remote testing\n");xv_remote_stop();
 }
+/* Bumped after every runtime setenv (the remote env command above): readers that cache a getenv result
+ * (xd3d.c, XV_REC_HLE) re-read when it changes. */
+volatile unsigned xv_env_generation;
