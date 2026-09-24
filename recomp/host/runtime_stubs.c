@@ -9,16 +9,18 @@ __attribute__((weak)) int xv_benchmark_active(void) { return 0; }
 __attribute__((weak)) uint32_t xd3d_r_visibility_generation(uint32_t id) { (void)id; return 0; }
 __attribute__((weak)) uint32_t xd3d_r_visibility_result_generation(uint32_t id, uint32_t serial, uint32_t *pixels) { (void)id; (void)serial; if (pixels) *pixels = 0; return 0; }
 __attribute__((weak)) int xd3d_r_visibility_wait_generation(uint32_t id, uint32_t serial, uint32_t timeout_us) { (void)id; (void)serial; (void)timeout_us; return 0; }
-/* XV_HOST_VISIBILITY_PIXELS=N (host testing only): answer the lens-flare visibility queries with a deterministic
- * pseudo pixel count in [0, N) (query id and call count hashed) instead of 0, so flares get nonzero brightness and the
- * flare render path past its brightness test (f_000606B0's reflections and draws) runs on the host. Default 0: no
- * pixels, as before. Overrides xd3d.c's weak 0-pixel default. */
+/* XV_HOST_VISIBILITY_PIXELS=N (host testing only): answer the lens-flare visibility queries with a pseudo pixel count
+ * in [0, N) hashed from the query id and the frame number (every 8 frames), instead of 0, so flares get nonzero
+ * brightness and the flare render path past its brightness test (f_000606B0's reflections and draws) runs on the host;
+ * two runs of the same save and pad script see the same pattern. Default 0: no pixels, as before. Overrides xd3d.c's
+ * weak 0-pixel default. */
 #include <stdlib.h>
+extern unsigned xd3d_frame(void);
 uint32_t xd3d_r_visibility_result(uint32_t id, uint32_t *pixels)
 {
-    static int n = -1; static uint32_t calls;
+    static int n = -1;
     if (n < 0) { const char *e = getenv("XV_HOST_VISIBILITY_PIXELS"); n = e ? atoi(e) : 0; if (n < 0) n = 0; }
-    *pixels = n ? (((id * 2654435761u) >> 12) ^ (calls++ >> 6)) % (uint32_t)n : 0;
+    *pixels = n ? (((id * 2654435761u) >> 12) ^ ((xd3d_frame() >> 3) * 40503u)) % (uint32_t)n : 0;
     return 0;
 }
 /* Grouped 60-frame reports: the Vita log batches them; on the host print them directly. */
