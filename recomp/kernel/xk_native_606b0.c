@@ -236,15 +236,49 @@ static inline uint32_t nf_imul32(nfl *fl, uint32_t a, uint32_t b)     /* x_imul3
 #define F_JL()  (nf_s(fl) != nf_o(fl))
 #define F_JLE() (nf_z(fl) || nf_s(fl) != nf_o(fl))
 
-/* x87 condition codes (x87_compare) */
+/* x87 condition codes (x87_compare): unordered C3|C2|C0, less C0, equal C3. One quiet VFP compare, as xv_x86rt.h's
+ * Thumb-2 path does (the portable expression emits up to three compare/transfer pairs). */
 static inline uint16_t nx_cc(double a, double b)
 {
+#if defined(__arm__) && defined(__ARM_FP) && (__ARM_FP & 8)
+    uint32_t r;
+#if defined(__thumb2__)
+    __asm__ volatile("vcmp.f64 %P1, %P2\n\tvmrs APSR_nzcv, fpscr\n\tmov %0, #0\n\tit mi\n\tmovmi %0, #256\n\t"
+                     "it eq\n\tmoveq %0, #16384\n\tit vs\n\tmovvs %0, #17664" : "=r"(r) : "w"(a), "w"(b) : "cc");
+#else
+    __asm__ volatile("vcmp.f64 %P1, %P2\n\tvmrs APSR_nzcv, fpscr\n\tmov %0, #0\n\tmovmi %0, #256\n\t"
+                     "moveq %0, #16384\n\tmovvs %0, #17664" : "=r"(r) : "w"(a), "w"(b) : "cc");
+#endif
+    return (uint16_t)r;
+#else
     return (isnan(a) || isnan(b)) ? 0x4500 : (a < b) ? 0x0100 : (a == b) ? 0x4000 : 0;
+#endif
 }
+/* x87_round (nearbyint / floor / ceil / trunc by the control word's RC field), without the libm calls for |v| < 2^31
+ * (ARMv7 has no rounding instruction; nearbyint saves and restores the FP environment): truncate through int32 (exact
+ * there), adjust per mode, give a zero result the sign of v as the libm functions do. Same result for every input
+ * (checked against libm by the 602F0 test's self-test); NaN, infinities and |v| >= 2^31 take libm. */
 static inline double nx_round(uint16_t fcw, double v)
 {
-    switch ((fcw >> 10) & 3u) { case 0: return nearbyint(v); case 1: return floor(v); case 2: return ceil(v); default: return trunc(v); }
+    const unsigned rc = (fcw >> 10) & 3u;
+    if (__builtin_expect(fabs(v) < 2147483648.0, 1)) {
+        const int32_t i = (int32_t)v;
+        double t = (double)i;
+        switch (rc) {
+        case 0: { const double d = v - t;                      /* exact: t is v with its fraction cleared */
+                  if (d > 0.5 || (d == 0.5 && (i & 1))) t += 1.0;
+                  else if (d < -0.5 || (d == -0.5 && (i & 1))) t -= 1.0;
+                  break; }
+        case 1: if (t > v) t -= 1.0; break;
+        case 2: if (t < v) t += 1.0; break;
+        default: break;
+        }
+        return t == 0.0 ? copysign(0.0, v) : t;
+    }
+    switch (rc) { case 0: return nearbyint(v); case 1: return floor(v); case 2: return ceil(v); default: return trunc(v); }
 }
+/* Tests: the rounding above against libm. */
+double xv_native_606b0_round(uint16_t fcw, double v) { return nx_round(fcw, v); }
 
 /* The guest's back-edge budget: X_PREEMPT() per back-edge, in one go. */
 static void n_budget(xctx *c, uint32_t backedges)
@@ -288,15 +322,18 @@ typedef struct {
 } rs;
 typedef struct { unsigned flares, reflections, draws, be; } r_info;
 /* frame offsets relative to E (the body's esp): s->S points at offset 0 inside the shadow */
-static inline uint32_t sr32(const rs *s, int k) { uint32_t v; memcpy(&v, s->S + k, 4); return v; }
-static inline uint16_t sr16(const rs *s, int k) { uint16_t v; memcpy(&v, s->S + k, 2); return v; }
-static inline void sw32(rs *s, int k, uint32_t v) { memcpy(s->S + k, &v, 4); }
-static inline void sw16(rs *s, int k, uint16_t v) { memcpy(s->S + k, &v, 2); }
-static inline void sw8(rs *s, int k, uint8_t v) { s->S[k] = v; }
-static inline double srf(const rs *s, int k) { float v; memcpy(&v, s->S + k, 4); return (double)v; }
-static inline void swf(rs *s, int k, double d) { float v = (float)d; memcpy(s->S + k, &v, 4); }
-static inline double sr64(const rs *s, int k) { double v; memcpy(&v, s->S + k, 8); return v; }
-static inline void sw64(rs *s, int k, double d) { memcpy(s->S + k, &d, 8); }
+/* The frame base inside the shadow is 4-aligned (the shadow is 8-aligned, R_BELOW / P_BELOW are multiples of 4), so
+ * word-aligned offsets compile to direct VFP loads/stores (no core <-> VFP register transfers on the A9). */
+#define SB(s) ((uint8_t *)__builtin_assume_aligned((s)->S, 4))
+static inline uint32_t sr32(const rs *s, int k) { uint32_t v; memcpy(&v, SB(s) + k, 4); return v; }
+static inline uint16_t sr16(const rs *s, int k) { uint16_t v; memcpy(&v, SB(s) + k, 2); return v; }
+static inline void sw32(rs *s, int k, uint32_t v) { memcpy(SB(s) + k, &v, 4); }
+static inline void sw16(rs *s, int k, uint16_t v) { memcpy(SB(s) + k, &v, 2); }
+static inline void sw8(rs *s, int k, uint8_t v) { SB(s)[k] = v; }
+static inline double srf(const rs *s, int k) { float v; memcpy(&v, SB(s) + k, 4); return (double)v; }
+static inline void swf(rs *s, int k, double d) { float v = (float)d; memcpy(SB(s) + k, &v, 4); }
+static inline double sr64(const rs *s, int k) { double v; memcpy(&v, SB(s) + k, 8); return v; }
+static inline void sw64(rs *s, int k, double d) { memcpy(SB(s) + k, &d, 8); }
 #define CMP(A, B, depth) (s->fsw = (uint16_t)((s->fsw & ~0x4700u) | nx_cc((A), (B)) | (((s->F - (depth)) & 7u) << 11)))
 #define FNSTSW_AX() (s->eax = (s->eax & 0xFFFF0000u) | s->fsw)
 #define AH() ((s->eax >> 8) & 0xFFu)
@@ -476,9 +513,9 @@ static int r_run(xctx *c, unsigned entry, r_info *info)
     memset(info, 0, sizeof *info);
     if (E & 7u) return 0;                        /* the frame is 8-aligned (and esp,-8): never in practice */
     /* the image constants / render globals / flare count are read with fixed-address semantics */
-    if (nm_overlap(wlo, R_WIN, 0x1F0A60u, 0x1E0u) || nm_overlap(wlo, R_WIN, 0x2E34E0u, 4u) || nm_overlap(wlo, R_WIN, 0x2FC6C0u, 0xD0u))
+    if (nm_overlap(wlo, R_WIN, 0x1F0000u, 0x1000u) || nm_overlap(wlo, R_WIN, 0x2E34E0u, 4u) || nm_overlap(wlo, R_WIN, 0x2FC000u, 0x1000u))
         return 0;
-    uint8_t S[R_WIN];
+    uint8_t S[R_WIN] __attribute__((aligned(8)));
     nm mm; nm_init(&mm, S, wlo, R_WIN); const nm *const m = &mm;
     rs state; rs *const s = &state; double *const X = s->X;
     nfl flags = { c->f_kind, c->f_op1, c->f_op2, c->f_res, c->f_bits, c->f_cf_override, c->f_cf, c->f_of_override, c->f_of };
@@ -488,14 +525,21 @@ static int r_run(xctx *c, unsigned entry, r_info *info)
     for (unsigned d = 0; d < 8; ++d) X[d] = c->st[(s->F - d) & 7u];
     s->fsw = c->fsw; s->touched = 0; s->be = 0;
     s->eax = c->r[0]; s->ecx = c->r[1]; s->edx = c->r[2]; s->ebx = c->r[3]; s->ebp = c->r[5]; s->esi = c->r[6]; s->edi = c->r[7];
-    s->c_a68 = nm_f32(m, 0x1F0A68u); s->c_a78 = nm_f32(m, 0x1F0A78u); s->c_a80 = nm_f32(m, 0x1F0A80u); s->c_a98 = nm_f32(m, 0x1F0A98u);
-    s->c_acc = nm_f32(m, 0x1F0ACCu); s->c_ad0 = nm_f32(m, 0x1F0AD0u); s->c_ad4 = nm_f32(m, 0x1F0AD4u); s->c_ad8 = nm_f32(m, 0x1F0AD8u);
-    s->c_c2c = nm_f32(m, 0x1F0C2Cu); s->c_af8 = nm_f64(m, 0x1F0AF8u);
-    s->g_6c8 = nm_f32(m, 0x2FC6C8u); s->g_6cc = nm_f32(m, 0x2FC6CCu); s->g_6d0 = nm_f32(m, 0x2FC6D0u);
-    s->g_6d4 = nm_f32(m, 0x2FC6D4u); s->g_6d8 = nm_f32(m, 0x2FC6D8u); s->g_6dc = nm_f32(m, 0x2FC6DCu);
-    s->g_764 = nm_f32(m, 0x2FC764u); s->g_768 = nm_f32(m, 0x2FC768u); s->g_76c = nm_f32(m, 0x2FC76Cu);
-    s->g_770 = nm_f32(m, 0x2FC770u); s->g_774 = nm_f32(m, 0x2FC774u); s->g_778 = nm_f32(m, 0x2FC778u);
-    s->g_77c = nm_f32(m, 0x2FC77Cu); s->g_780 = nm_f32(m, 0x2FC780u); s->g_784 = nm_f32(m, 0x2FC784u);
+    /* The constants (page 1F0000) and the render camera (page 2FC000): outside the window (checked above) and never
+     * straddling, so each x87_load_f32 of them is one translation of its page: translate each page once. */
+    {
+        const uint8_t *k = NM_HP(m, 0x1F0000u), *g = NM_HP(m, 0x2FC000u);
+#define KF(p, a) ({ float v_; memcpy(&v_, (p) + ((a) & 0xFFFu), 4); (double)v_; })
+        s->c_a68 = KF(k, 0x1F0A68u); s->c_a78 = KF(k, 0x1F0A78u); s->c_a80 = KF(k, 0x1F0A80u); s->c_a98 = KF(k, 0x1F0A98u);
+        s->c_acc = KF(k, 0x1F0ACCu); s->c_ad0 = KF(k, 0x1F0AD0u); s->c_ad4 = KF(k, 0x1F0AD4u); s->c_ad8 = KF(k, 0x1F0AD8u);
+        s->c_c2c = KF(k, 0x1F0C2Cu); memcpy(&s->c_af8, k + 0xAF8u, 8);
+        s->g_6c8 = KF(g, 0x2FC6C8u); s->g_6cc = KF(g, 0x2FC6CCu); s->g_6d0 = KF(g, 0x2FC6D0u);
+        s->g_6d4 = KF(g, 0x2FC6D4u); s->g_6d8 = KF(g, 0x2FC6D8u); s->g_6dc = KF(g, 0x2FC6DCu);
+        s->g_764 = KF(g, 0x2FC764u); s->g_768 = KF(g, 0x2FC768u); s->g_76c = KF(g, 0x2FC76Cu);
+        s->g_770 = KF(g, 0x2FC770u); s->g_774 = KF(g, 0x2FC774u); s->g_778 = KF(g, 0x2FC778u);
+        s->g_77c = KF(g, 0x2FC77Cu); s->g_780 = KF(g, 0x2FC780u); s->g_784 = KF(g, 0x2FC784u);
+#undef KF
+    }
     s->i_6d4 = nm_i32(m, 0x2FC6D4u); s->i_6d8 = nm_i32(m, 0x2FC6D8u); s->i_6dc = nm_i32(m, 0x2FC6DCu);
     unsigned exit;
     switch (entry) {
@@ -1071,12 +1115,12 @@ static int p_run(xctx *c, p_info *info, int barriers)
     memset(info, 0, sizeof *info);
     if (E0 & 3u) return 0;                          /* 4-aligned frame: no constant-offset access straddles a page */
     if (!(c->fcw & 0x20u)) return 0;                /* precision exception unmasked: the CRT floor raises (guest path) */
-    if (nm_overlap(wlo, P_WIN, 0x1F0A60u, 0x1E0u) || nm_overlap(wlo, P_WIN, 0x1F2840u, 4u) || nm_overlap(wlo, P_WIN, 0x39BE58u, 4u) ||
-        nm_overlap(wlo, P_WIN, 0x39CE24u, 4u) || nm_overlap(wlo, P_WIN, 0x2FEB8Au, 1u) || nm_overlap(wlo, P_WIN, 0x2FC6C0u, 0x20u) ||
+    if (nm_overlap(wlo, P_WIN, 0x1F0000u, 0x1000u) || nm_overlap(wlo, P_WIN, 0x1F2840u, 4u) || nm_overlap(wlo, P_WIN, 0x39BE58u, 4u) ||
+        nm_overlap(wlo, P_WIN, 0x39CE24u, 4u) || nm_overlap(wlo, P_WIN, 0x2FEB8Au, 1u) || nm_overlap(wlo, P_WIN, 0x2FC000u, 0x1000u) ||
         nm_overlap(wlo, P_WIN, 0x2E34E0u, 8u) || nm_overlap(wlo, P_WIN, 0x2C76D0u, 40u * 1024u))
         return 0;                                   /* (the flare rows: then [S+50h] stays the 0xFFFF stored before each
                                                      * 5FE80, whose surface-slot path and its draining barrier are unreachable) */
-    uint8_t W[P_WIN];
+    uint8_t W[P_WIN] __attribute__((aligned(8)));
     nm mm; nm_init(&mm, W, wlo, P_WIN); const nm *const m = &mm;
     rs state; rs *const s = &state; double *const X = s->X;
     nfl flags = { c->f_kind, c->f_op1, c->f_op2, c->f_res, c->f_bits, c->f_cf_override, c->f_cf, c->f_of_override, c->f_of };
@@ -1086,10 +1130,15 @@ static int p_run(xctx *c, p_info *info, int barriers)
     for (unsigned d = 0; d < 8; ++d) X[d] = c->st[(s->F - d) & 7u];
     s->fsw = c->fsw; s->fcw = c->fcw; s->touched = 0; s->be = 0;
     s->eax = c->r[0]; s->ecx = c->r[1]; s->edx = c->r[2]; s->ebx = c->r[3]; s->ebp = c->r[5]; s->esi = c->r[6]; s->edi = c->r[7];
-    s->c_a68 = nm_f32(m, 0x1F0A68u); s->c_a78 = nm_f32(m, 0x1F0A78u); s->c_abc = nm_f32(m, 0x1F0ABCu); s->c_b14 = nm_f32(m, 0x1F0B14u);
-    s->c_c30 = nm_f32(m, 0x1F0C30u); s->c_c34 = nm_f32(m, 0x1F0C34u); s->c_af8 = nm_f64(m, 0x1F0AF8u);
-    s->g_6c8 = nm_f32(m, 0x2FC6C8u); s->g_6cc = nm_f32(m, 0x2FC6CCu); s->g_6d0 = nm_f32(m, 0x2FC6D0u);
-    s->g_6d4 = nm_f32(m, 0x2FC6D4u); s->g_6d8 = nm_f32(m, 0x2FC6D8u); s->g_6dc = nm_f32(m, 0x2FC6DCu);
+    {   /* constants (page 1F0000) and render camera (page 2FC000): one translation per page (see r_run) */
+        const uint8_t *k = NM_HP(m, 0x1F0000u), *g = NM_HP(m, 0x2FC000u);
+#define KF(p, a) ({ float v_; memcpy(&v_, (p) + ((a) & 0xFFFu), 4); (double)v_; })
+        s->c_a68 = KF(k, 0x1F0A68u); s->c_a78 = KF(k, 0x1F0A78u); s->c_abc = KF(k, 0x1F0ABCu); s->c_b14 = KF(k, 0x1F0B14u);
+        s->c_c30 = KF(k, 0x1F0C30u); s->c_c34 = KF(k, 0x1F0C34u); memcpy(&s->c_af8, k + 0xAF8u, 8);
+        s->g_6c8 = KF(g, 0x2FC6C8u); s->g_6cc = KF(g, 0x2FC6CCu); s->g_6d0 = KF(g, 0x2FC6D0u);
+        s->g_6d4 = KF(g, 0x2FC6D4u); s->g_6d8 = KF(g, 0x2FC6D8u); s->g_6dc = KF(g, 0x2FC6DCu);
+#undef KF
+    }
     s->K = nm_i32(m, 0x1F2840u); s->g_6c0 = nm_i16(m, 0x2FC6C0u);
     /* prologue */
     s->eax = nm_i32(m, 0x39BE58u);                  /* the BSP */
