@@ -270,9 +270,10 @@ build/geometry_worker_test: geometry_worker_test.c ../../runtime/xv_geometry_sor
 	$(CC) $(CFLAGS) -std=gnu11 -I../.. -idirafter $(VITASDK)/arm-vita-eabi/include geometry_worker_test.c -pthread -o $@
 
 .PHONY: test-draw-prep
-test-draw-prep: build/index_copy_test build/draw_profile_test build/draw_profile_no_clock_test build/ps_cache_test build/draw_state_test
+test-draw-prep: build/index_copy_test build/rec_index_test build/draw_profile_test build/draw_profile_no_clock_test build/ps_cache_test build/draw_state_test
 	./build/draw_state_test
 	./build/index_copy_test
+	./build/rec_index_test
 	./build/draw_profile_test
 	./build/draw_profile_test disabled
 	./build/draw_profile_no_clock_test
@@ -282,6 +283,10 @@ test-draw-prep: build/index_copy_test build/draw_profile_test build/draw_profile
 	XV_INDEX_SCAN_CACHED=0 ./build/ps_cache_test
 
 build/index_copy_test: index_copy_test.c ../../runtime/xv_index_copy.h ../../runtime/xv_vertex_refs.h
+	mkdir -p build
+	$(CC) $(CFLAGS) $< -o $@
+
+build/rec_index_test: rec_index_test.c ../../runtime/xv_index_copy.h ../../runtime/xv_vertex_refs.h
 	mkdir -p build
 	$(CC) $(CFLAGS) $< -o $@
 
