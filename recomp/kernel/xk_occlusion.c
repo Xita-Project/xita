@@ -22,7 +22,12 @@
  *                   rendered (the loop's call returns at once) but still gets a proxy, so it comes back the frame
  *                   after it becomes visible (GPU latency: ~2-3 frames). No skipping while the camera turns more than
  *                   XV_OCCL_CUT_DEG (default 8) per frame or jumps (cutscene cuts), and never for objects whose cube
- *                   reaches behind the near plane. Default 0 (off). Hooks from tools/patch_occlusion_hooks.py. */
+ *                   reaches behind the near plane. Default 0 (off). Hooks from tools/patch_occlusion_hooks.py.
+ * XV_OCCL_STATIC=<frames> (mode 2, default 4, 0 off): while the camera has not moved for two frames, an object that
+ *                   has not moved since it was last rendered and whose own draws passed no sample in its last two
+ *                   renders (its proxy passing - behind a door frame's edge, say) is rendered only every <frames>
+ *                   frames. Any camera or object movement renders it at once; a static object revealed by something
+ *                   else moving (a door) can come back up to <frames> frames late. */
 #include "xk.h"
 #include "../xv_x86rt.h"
 #include <math.h>
@@ -38,17 +43,22 @@ extern int xv_d3d_occl_proxy(unsigned slot, float x0, float y0, float x1, float 
 extern uint32_t xv_d3d_occl_build_frame(void);
 
 #define TAB 4096u
-static struct { uint32_t handle, frame; uint8_t visible; } tab[TAB];   /* written by the pump, read by the recorder */
+static struct {
+    uint32_t handle, frame; uint8_t visible;   /* latest result, written by the pump */
+    uint8_t empty_streak;                      /* pump: consecutive renders with no own sample */
+    uint32_t rendered; float c[3];             /* recorder: last frame it was rendered, and its center then */
+} tab[TAB];
 static struct { unsigned slot; float x0, y0, x1, y1, z; } pend[255]; static unsigned npend;
-static int mode = -1, age = 4; static float cut_cos = 0.990268f, margin = 0.02f;
-static float prev_fwd[3], prev_d; static int have_prev, cut_frames;
-static unsigned n_render, n_skip, n_noproxy, n_untracked, n_cuts;
+static int mode = -1, age = 4, static_every = 4, cam_still; static float cut_cos = 0.990268f, margin = 0.02f;
+static float prev_fwd[3], prev_d, prev_m3, prev_m7; static int have_prev, cut_frames;
+static unsigned n_render, n_skip, n_skip_static, n_noproxy, n_untracked, n_cuts;
 static volatile unsigned r_rendered, r_real_zero, r_proxy_zero, r_violation, r_skipped, r_reappear, r_both_zero;
 
 static void config(void)
 {
     const char *e = getenv("XV_OCCL"); mode = e ? atoi(e) : 0;
     e = getenv("XV_OCCL_AGE"); if (e) age = atoi(e);
+    e = getenv("XV_OCCL_STATIC"); if (e) static_every = atoi(e);
     e = getenv("XV_OCCL_MARGIN"); if (e) margin = (float)atof(e);
     e = getenv("XV_OCCL_CUT_DEG"); if (e) cut_cos = cosf((float)atof(e) * 3.14159265f / 180.0f);
     if (mode) XK_LOG("[occl] mode %d (%s), result age <= %d frames, rect margin %.3f, cut above %.1f deg/frame\n", mode,
@@ -93,10 +103,20 @@ void xv_occl_render(xctx *c)
     float r[5]; int proxy = object_rect(body, r);
     uint32_t bf = xv_d3d_occl_build_frame();
     unsigned t = hslot(handle);
-    int skip = mode == 2 && proxy && !cut_frames && tab[t].handle == handle && !tab[t].visible && bf - tab[t].frame <= (uint32_t)age;
+    int known = tab[t].handle == handle;
+    int skip = mode == 2 && proxy && !cut_frames && known && !tab[t].visible && bf - tab[t].frame <= (uint32_t)age;
+    float cx = f32(body + 0x50u), cy = f32(body + 0x54u), cz = f32(body + 0x58u);
+    if (!skip && mode == 2 && static_every > 1 && proxy && known && cam_still >= 2 && tab[t].empty_streak >= 2 &&
+        bf - tab[t].rendered < (uint32_t)static_every) {
+        float dx = cx - tab[t].c[0], dy = cy - tab[t].c[1], dz = cz - tab[t].c[2];
+        if (dx * dx + dy * dy + dz * dz < 0.0004f) { skip = 1; n_skip_static++; }
+    }
     unsigned slot = xv_d3d_occl_begin(handle, skip ? 2u : 1u);
     if (skip) { c->r[4] += 4u; n_skip++; }
-    else { f_0005B4A0(c); n_render++; }
+    else {
+        f_0005B4A0(c); n_render++;
+        if (known) { tab[t].rendered = bf; tab[t].c[0] = cx; tab[t].c[1] = cy; tab[t].c[2] = cz; }
+    }
     xv_d3d_occl_end();
     if (!slot) { n_untracked++; return; }
     if (!proxy) { n_noproxy++; return; }
@@ -113,8 +133,13 @@ void xv_occl_after_models(void)
     float f[3] = { m[12], m[13], m[14] }, n = sqrtf(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
     if (n > 0.0f) { f[0] /= n; f[1] /= n; f[2] /= n; }
     float d = m[15] / (n > 0.0f ? n : 1.0f);
-    if (have_prev && (f[0] * prev_fwd[0] + f[1] * prev_fwd[1] + f[2] * prev_fwd[2] < cut_cos || fabsf(d - prev_d) > 1.0f)) { cut_frames = 3; n_cuts++; }
+    float fd = f[0] * prev_fwd[0] + f[1] * prev_fwd[1] + f[2] * prev_fwd[2];
+    if (have_prev && (fd < cut_cos || fabsf(d - prev_d) > 1.0f)) { cut_frames = 3; n_cuts++; }
     else if (cut_frames) cut_frames--;
+    /* still camera: under ~0.1 degree of turn and 0.01 units of offset change since the previous frame */
+    if (have_prev && fd > 0.9999985f && fabsf(d - prev_d) < 0.01f && fabsf(m[3] - prev_m3) < 0.01f && fabsf(m[7] - prev_m7) < 0.01f) cam_still++;
+    else cam_still = 0;
+    prev_m3 = m[3]; prev_m7 = m[7];
     memcpy(prev_fwd, f, sizeof f); prev_d = d; have_prev = 1;
 }
 
@@ -122,10 +147,12 @@ void xv_occl_after_models(void)
 void xv_occl_result(uint32_t handle, uint32_t frame, uint32_t real, uint32_t proxy, unsigned flags)
 {
     unsigned t = hslot(handle);
-    if (tab[t].handle != handle || (int32_t)(frame - tab[t].frame) > 0) {
+    if (tab[t].handle != handle) { tab[t].handle = handle; tab[t].empty_streak = 0; tab[t].rendered = 0; tab[t].frame = frame - 1u; }
+    if ((int32_t)(frame - tab[t].frame) > 0) {
         tab[t].visible = !(flags & 4u) || proxy > 0 || ((flags & 1u) && real > 0);   /* own samples always win */
-        tab[t].frame = frame; tab[t].handle = handle;
+        tab[t].frame = frame;
     }
+    if (flags & 1u) tab[t].empty_streak = real ? 0 : (tab[t].empty_streak < 255 ? tab[t].empty_streak + 1 : 255);
     if (flags & 1u) {
         r_rendered++;
         if (!real) r_real_zero++;
@@ -136,8 +163,8 @@ void xv_occl_result(uint32_t handle, uint32_t frame, uint32_t real, uint32_t pro
 void xv_occl_report(unsigned frames)
 {
     if (mode <= 0 || !frames) return;
-    XK_LOG("[occl] %u frames: rendered %u skipped %u (no proxy %u, untracked %u, camera cuts %u); results: rendered %u of which own draws empty %u, proxy empty %u (both empty %u, VIOLATIONS %u); skipped %u, back in view %u\n",
-           frames, n_render, n_skip, n_noproxy, n_untracked, n_cuts, r_rendered, r_real_zero, r_proxy_zero, r_both_zero, r_violation, r_skipped, r_reappear);
-    n_render = n_skip = n_noproxy = n_untracked = n_cuts = 0;
+    XK_LOG("[occl] %u frames: rendered %u skipped %u (%u static; no proxy %u, untracked %u, camera cuts %u); results: rendered %u of which own draws empty %u, proxy empty %u (both empty %u, VIOLATIONS %u); skipped %u, back in view %u\n",
+           frames, n_render, n_skip, n_skip_static, n_noproxy, n_untracked, n_cuts, r_rendered, r_real_zero, r_proxy_zero, r_both_zero, r_violation, r_skipped, r_reappear);
+    n_render = n_skip = n_skip_static = n_noproxy = n_untracked = n_cuts = 0;
     r_rendered = r_real_zero = r_proxy_zero = r_violation = r_skipped = r_reappear = r_both_zero = 0;
 }
