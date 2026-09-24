@@ -145,6 +145,7 @@ void xv_host_reports_present(unsigned now)
     fprintf(stderr, "[host] report at frame %u (%u frames)\n", now, delta);
     if (xk_wait_stats_request) xk_wait_stats_request();
     if (xv_host_sample_dump) xv_host_sample_dump(now);
+    { extern void xv_host_perf_report(unsigned, unsigned) __attribute__((weak)); if (xv_host_perf_report) xv_host_perf_report(now, delta); }   /* XV_HOST_PERF (sampler.c) */
     CALL(xv_owner_phase_report); CALL(xv_object_jobs_report); CALL(xv_quat_shared_report); CALL(xv_quat_cache_report);
     CALL(xv_model_palette_report); CALL(xv_model_hierarchy_report); CALL(xv_object_basis_report); CALL(xv_object_collect_report);
     CALL(xv_object_scan_report); CALL(xv_object_hierarchy_report); CALL(xv_object_hierarchy_assist_report); CALL(xv_visibility_pass_report);

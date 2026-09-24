@@ -40,6 +40,7 @@ int main(int argc, char **argv)
     { extern void xv_render_view_configure(void) __attribute__((weak)); if (xv_render_view_configure) xv_render_view_configure(); }   /* render view (XV_RENDER_VIEW env) */
     { extern void xv_write_watch_init(void) __attribute__((weak)); if (xv_write_watch_init) xv_write_watch_init(); }   /* host write-watch: owner thread alt signal stack */
     { extern void xv_host_reports_start(void); xv_host_reports_start(); }   /* 60-frame kernel reports (recomp/host/host_reports.c) */
+    { extern void xv_host_runtime_init(void) __attribute__((weak)); if (xv_host_runtime_init) xv_host_runtime_init(); }   /* --runtime builds: the GXM recording bridge (vita_runtime_shim.c) */
     xk_thread_create(0x10000, 0, xv_entry_point, 0, 0, 0);     /* the initial thread runs mainCRTStartup() */
     xk_run_until_idle();
     fprintf(stderr, "[harness] done\n");

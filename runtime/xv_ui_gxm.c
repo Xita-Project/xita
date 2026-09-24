@@ -1513,6 +1513,14 @@ static void present_report(unsigned frame)
             report_batch=!e || atoi(e)!=0;
         }
         int grouped=report_batch && xv_log_report_begin_frame(frame);
+        {   /* XV_REC_AB (runtime/xv_record_opt.h): phase frames of the following [draw-prep]/[flare-work] window */
+            extern int xv_rec_ab_period __attribute__((weak)); extern unsigned xv_rec_ab_frames[2] __attribute__((weak));
+            if (&xv_rec_ab_period && xv_rec_ab_period > 0 && xv_rec_ab_frames) {
+                static unsigned last[2]; unsigned a = xv_rec_ab_frames[0] - last[0], b = xv_rec_ab_frames[1] - last[1];
+                last[0] = xv_rec_ab_frames[0]; last[1] = xv_rec_ab_frames[1];
+                UI_LOG("[rec-ab] draw frames %u %u\n", a, b);
+            }
+        }
 #ifdef XV_OWNER_PHASE
         { extern void xv_owner_phase_report(unsigned); xv_owner_phase_report(g_t_frames); }
 #endif

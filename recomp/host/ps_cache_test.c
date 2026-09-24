@@ -15,6 +15,9 @@ static int fail_replace, captured_blend;
 static SceGxmBlendInfo last_blend;
 static char loaded_path[160];
 void xv_logf(const char *fmt, ...) { (void)fmt; }
+/* retain_indices stamps the draw profile; the profiler itself is covered by draw_profile_test. */
+uint64_t xv_draw_profile_begin(void) { return 0; }
+void xv_draw_profile_step(enum xv_draw_stage stage, uint64_t *stamp) { (void)stage; (void)stamp; }
 int xv_fshader_load(xv_fshader_t *fs, const char *path, const xv_vshader_t *vs,
                     const SceGxmBlendInfo *blend)
 {
