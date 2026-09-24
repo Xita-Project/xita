@@ -2106,6 +2106,22 @@ endif
 # -fno-math-errno: sqrt inlines to vsqrt.f64 (the libm wrapper only adds errno for negative input; the blend only
 # takes the square root of a positive sum, and __ieee754_sqrt is the same vsqrt.f64)
 $(RECOMP_BUILD)/kernel/xk_native_aim_blend.o: RECOMP_CFLAGS += -ffp-contract=off -fno-math-errno
+# Native light cluster query (f_00056670 + 52240/51E90/11840/B77C0/A9330, the cost under f_00092330's light update):
+# recomp/kernel/xk_native_92330.c, hooks installed by tools/patch_native_92330_hooks.py. Env XV_NATIVE_92330 0 off /
+# 1 verify / 2 native, XV_NATIVE_92330_TIME=1 us/call.
+XV_NATIVE_92330 ?= 0
+XV_NATIVE_92330_DEFAULT ?= 0
+ifneq ($(filter $(XV_NATIVE_92330),0 1),$(XV_NATIVE_92330))
+$(error XV_NATIVE_92330 must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_92330_DEFAULT),0 1 2),$(XV_NATIVE_92330_DEFAULT))
+$(error XV_NATIVE_92330_DEFAULT must be 0, 1 or 2)
+endif
+ifeq ($(XV_NATIVE_92330),1)
+CFLAGS += -DXV_NATIVE_92330=1 -DXV_NATIVE_92330_DEFAULT=$(XV_NATIVE_92330_DEFAULT)
+RECOMP_CFLAGS += -DXV_NATIVE_92330=1 -DXV_NATIVE_92330_DEFAULT=$(XV_NATIVE_92330_DEFAULT)
+endif
+$(RECOMP_BUILD)/kernel/xk_native_92330.o: RECOMP_CFLAGS += -ffp-contract=off
 XV_RENDER_VIEW ?= 0
 XV_RENDER_VIEW_DEFAULT ?= 0
 ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))
