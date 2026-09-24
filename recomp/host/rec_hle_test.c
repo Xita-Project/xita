@@ -49,6 +49,34 @@ int main(void)
         g_opt_hle.mode = 2; g_hle_now = -1; xd3d_texture_states(fast);
         assert(!memcmp(old_ts, fast, sizeof fast));
     }
-    printf("PASS: %u render-state methods x values x states match the original; texture-state page reads match\n", cases);
+    /* XV_REC_VSC: SetVertexShaderConstant through the one-page check-and-copy against the original row loop -
+     * register windows below, inside and past c[-96..95], counts 0..200, sources on and across page ends, and
+     * rows holding NaN / +-Inf / denormals / -0 (the original zeroes non-finite components). */
+    unsigned vsc_cases = 0, vsc_fast_rows = 0;
+    const uint32_t specials[] = {0x7F800000u, 0xFF800000u, 0x7FC00000u, 0x7F800001u, 0xFFFFFFFFu, 0x00000001u, 0x80000000u, 0x7F7FFFFFu};
+    for (unsigned round = 0; round < 6000; round++) {
+        int reg = (int)(next() % 260) - 130;
+        uint32_t n = next() % 8 == 0 ? next() % 201 : next() % 24;
+        uint32_t src = 0x200000u + (next() % 3) * 0x1000u + (next() & 1 ? 0x1000u - 16u * (next() % 12) : (next() % 250) * 16u);
+        if (next() & 1) src += next() % 16;                          /* unaligned sources too */
+        for (uint32_t i = 0; i < 4 * n && i < 4 * 256; i++) {
+            uint32_t w = next();
+            if (next() % 64 == 0) w = specials[next() % 8];
+            X_W32(src + 4 * i) = w;
+        }
+        uint32_t sp = 0x300000u;
+        X_W32(sp) = 0x11223344u; X_W32(sp + 4) = (uint32_t)reg; X_W32(sp + 8) = src; X_W32(sp + 12) = n;
+        uint8_t *p = (uint8_t *)&start;
+        for (unsigned i = 0; i < sizeof start; i++) p[i] = (uint8_t)next();
+        xctx c0; memset(&c0, 0, sizeof c0); c0.r[4] = sp; xctx c2 = c0;
+        xd3d_state = start; g_opt_vsc.mode = 0; g_vsc_now = -1; xv_hle_D3DDevice_SetVertexShaderConstant(&c0); a = xd3d_state;
+        xd3d_state = start; g_opt_vsc.mode = 2; g_vsc_now = -1; xv_hle_D3DDevice_SetVertexShaderConstant(&c2); b = xd3d_state;
+        assert(!memcmp(&a, &b, sizeof a) && c0.r[4] == c2.r[4] && c0.r[0] == c2.r[0]);
+        int64_t lo = reg + 96 < 0 ? 0 : reg + 96, hi = (int64_t)reg + 96 + n; if (hi > 192) hi = 192;
+        if (lo < hi) vsc_fast_rows += (unsigned)(hi - lo);
+        vsc_cases++;
+    }
+    printf("PASS: %u render-state methods x values x states match the original; texture-state page reads match; "
+           "%u SetVertexShaderConstant calls (%u rows) match the original\n", cases, vsc_cases, vsc_fast_rows);
     return 0;
 }
