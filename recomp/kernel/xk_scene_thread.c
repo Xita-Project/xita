@@ -800,6 +800,7 @@ pthread_t xv_owner_pthread_self(void)
 static void *helper_main(void *arg)
 {
     (void)arg;
+    { extern void xv_host_thread_role(int) __attribute__((weak)); if (xv_host_thread_role) xv_host_thread_role(2); }   /* host profiler: this is the scene helper (recomp/host/sampler.c) */
     for (;;) {
         while (sem_wait(&go) < 0 && errno == EINTR) {}
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
