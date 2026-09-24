@@ -13,7 +13,8 @@ A converted function (listed in <regs>/x87_regs_report.json) replaces the stage'
 equals the baseline regeneration, or equals it after removing the stage's known observer patches (the entry
 hook/phase-scope line order of older generators, tools/patch_scene_phase_timers.py call timers,
 tools/patch_crt_float_hooks.py entry hooks). Those observers are re-installed into the new body at the same
-places the patch tools put them. Any other difference keeps the stage body (reported as stage-differs).
+places the patch tools put them, except the CRT native hook, which goes before the x87 slot fill (it returns
+early for most calls; the fill would be wasted work). Any other difference keeps the stage body (reported as stage-differs).
 Shards that receive a converted body get #include "xv_x87reg.h" (copy recomp/xv_x87reg.h into the stage).
 Idempotent: a stage body already carrying the register lowering is left alone ("already").
 """
@@ -66,8 +67,7 @@ def split_prologue(text):
 
 def normalize(text):
     """Stage-vs-regeneration comparison key: prologue lines as a sorted multiset, observers removed."""
-    pro, rest = split_prologue(text)
-    rest = CRT.sub('', rest)
+    pro, rest = split_prologue(CRT.sub('', text))
     rest = TIMER.sub('', rest)
     lines = pro.split('\n')
     return '\n'.join(lines[:2] + sorted(lines[2:])) + '\x00' + rest
@@ -136,12 +136,14 @@ def rebuild(stage_fn, base_fn, regs_fn):
     s_lines = [line for line in s_pro.split('\n') if not line.startswith('    goto L_')]
     if s_lines and s_lines[-1] == '':
         s_lines = s_lines[:-1]
-    pro = '\n'.join(s_lines + [line for line in extra if line] + goto) + '\n'
     crt = CRT.search(s_rest)
+    hook = []
     if crt and s_rest.startswith(FK) and s_rest[len(FK):].startswith(crt.group(0)):
-        r_rest = r_rest.replace(FK, FK + crt.group(0), 1)
+        # the native CRT entry hook returns early for most calls: run it before the x87 slot fill
+        hook = crt.group(0).rstrip('\n').split('\n')
     elif crt:
         return None
+    pro = '\n'.join(s_lines + hook + [line for line in extra if line] + goto) + '\n'
     out = install_timers(pro + r_rest, timers(stage_fn))
     # the result may differ from the plain register body only by the stage's observers
     if normalize(out) != normalize(regs_fn):
