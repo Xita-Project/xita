@@ -2036,6 +2036,7 @@ static int xv_recomp_thread(SceSize args, void *argp)
 }
 #endif
 
+int xv_remote_env_owns(const char *key) __attribute__((weak));
 static void xv_load_settings(void)
 {
     /* The user-facing dashboard file wins over emulator fallback settings. */
@@ -2059,6 +2060,7 @@ static void xv_load_settings(void)
             while (*end && *end != '#' && *end != ';' && *end != '\r' && *end != '\n') end++;
             while (end > value && isspace((unsigned char)end[-1])) end--;
             *end = 0;
+            if (*key && xv_remote_env_owns && xv_remote_env_owns(key)) { XV_LOG("cfg %s=%s ignored: set by the remote env\n", key, value); continue; }
             if (*key) { setenv(key, value, 1); XV_LOG("cfg %s=%s\n", key, value); }
         }
         fclose(f);

@@ -101,6 +101,20 @@ int xv_remote_take_page_census(void)
     if(!LOAD(&enabled))return 0;
     return __atomic_exchange_n(&page_census_pending,0,__ATOMIC_ACQ_REL)&&!xv_benchmark_status()&&!xv_benchmark_remote_busy()&&!xv_updates_requested();
 }
+/* Keys set through /env: the dashboard hand-off reloads xita.cfg/env.txt (setenv overwrite), which silently undid
+ * a remote diagnostic override of any key the cfg also sets (e.g. XV_SCENE_THREAD=0 for a trace run). */
+static char remote_env_keys[32][48]; static unsigned remote_env_nkeys;
+static void remote_env_own(const char *key)
+{
+    if(strlen(key)>=sizeof remote_env_keys[0])return;
+    for(unsigned i=0;i<remote_env_nkeys;i++)if(!strcmp(remote_env_keys[i],key))return;
+    if(remote_env_nkeys<32)strcpy(remote_env_keys[remote_env_nkeys++],key);
+}
+int xv_remote_env_owns(const char *key)
+{
+    for(unsigned i=0;i<remote_env_nkeys;i++)if(!strcmp(remote_env_keys[i],key))return 1;
+    return 0;
+}
 int xv_remote_take_draw_trace(void)
 {
     if(!LOAD(&enabled))return 0;
@@ -286,6 +300,7 @@ static void serve(int s)
             for(char *tok=strtok(vars,"&");tok;tok=strtok(NULL,"&")) {
                 char *eq=strchr(tok,'=');if(!eq||eq==tok)continue;*eq=0;
                 setenv(tok,eq+1,1);n++;xv_logf("[remote] env %s=%s\n",tok,eq+1);
+                remote_env_own(tok);
                 { extern volatile unsigned xv_env_generation; __atomic_add_fetch(&xv_env_generation,1u,__ATOMIC_RELEASE); }
             }
             reply(s,n?204:400,n?"":"No K=V pairs\n");
