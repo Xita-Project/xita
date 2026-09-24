@@ -2174,10 +2174,11 @@ built by `overlap-candidate/build_x87.py`; its tools/query_memory_capture.py is 
     by run-overlap-fire.sh's remote env. Blood Gulch valley ran 10 fps on the old path. The play settings are now
     appended to the device's ux0:data/xita/xita.cfg (backup xita.cfg.bak-20260924; local copies in overlap-candidate).
   - *Warthog driver floats out of the seat while driving* (seen on the OLD path, scene thread off). Prime suspect:
-    XV_EXPERIMENTAL_OBJECT_JOBS (runtime default on) - it queues f_0008FB70 per-object updates from 900E0's two sites
-    and reorders them (split_order, lanes); its own header says "intentionally relaxes object update ordering". A
-    rider updated before its vehicle takes the previous-tick seat transform (offset grows with speed). Test:
-    XV_EXPERIMENTAL_OBJECT_JOBS=0. Proper fix: keep attached objects with their parent's job / after it.
+    NOT object jobs: they are declined in every recent Vita log (`[object-jobs] declined mask 80`, vp-frame check), in
+    both the user's old-path session and the overlap runs. 8FB70 updates children in place (first child +0xC8, next
+    sibling +0xC4, parent +0xCC). Remaining suspects on the old path: native model hierarchy (active), native object
+    basis (xita.cfg XV_NATIVE_OBJECT_BASIS=1), the x87-regs splice (perf177+), native CRT float. Needs the user
+    driving with one knob off at a time (or perf176, pre-splice).
   - *Blocky "bloom" on the Warthog*: 4x4-texel-looking squares over the body and wheels (screenshot
     2026-09-24-072743.png, kj folder) - a low-res texture (likely the reflection cube map) point-sampled or wrong
     mip. Needs `vita_remote.py trace-draw` with the Warthog on screen.
