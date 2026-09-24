@@ -2105,3 +2105,17 @@ the next lever; the run with XV_DRAW_PROFILE=1 is queued (dprof). XInputGetState
 - Halo 2: a background agent built a headless H2 harness (x86 + Pi, H2 worktree bc49709/fd74e13/55418c0): boot ->
   menus -> split-screen Slayer on Ivory Tower, 40 min Pi soak clean; ARM profile says runtime (texture binds 27%, vertex
   decode 11%, audio DSP interpreter a whole core) dominates, guest code 4.6%. See docs/halo2-host-harness.md there.
+
+## §62 The tick side mapped to leaf functions (perf170/171, a10 steady, timers on, ms/frame)
+- FA920 54.4 = 109760 52.8 (x ~1.9 sim ticks) = 900E0 35.3 (-> per-object 8FB70 34.3) + 14A162 14.9 (-> 14E2C0 ->
+  14E1A0 14.3) + E7140 1.6 + small.
+- 8FB70 34.3: 90950 14.0 (object-type update dispatcher, one `call eax` at 90993; timed by target in perf171:
+  4C980 10.3 (!), 44AD0 2.3, C0EA0 0.4, C5230 0.2, 1188F0 0.2), 8DDF0 9.7 (self 2.5, 90770 5.1, B5B40 0.8, A4CE0 0.6),
+  8D760 7.4 (-> 92330 6.3), recursive child objects 6.7, 8BD50 1.0, 8C570 0.8.
+- 14E1A0 14.3: 14B230 5.4, 15CE90 3.6, 156770 1.8, 14C260 1.2, 1560E0 0.4, 152A00 0.3.
+- Native-port candidates on the tick side, largest first: 4C980 (~10 ms/frame, per-type update, likely units),
+  92330 (6.3), 14B230 (5.4), 90770 (5.1), 15CE90 (3.6). The stage shards now carry timers for 0014E2C0, 0008FB70,
+  00090950 (indirect, hand-patched at 90993 in code_014.c), 0008DDF0, 0008D760, 0014E1A0 (inactive unless
+  XV_SCENE_PHASES=1).
+- Scene side: a background agent is porting the BSP cluster visibility pass under 539C0 (52E10/537E0/52520/...),
+  worktree branch work/native-visibility-20260923, knob XV_NATIVE_VISIBILITY.
