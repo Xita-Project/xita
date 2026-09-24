@@ -129,7 +129,7 @@ static uint32_t rec_alloc(uint32_t bytes)
     return tag_alloc(bytes, rnd() % 11 == 0);
 }
 
-typedef struct { unsigned cases, native_ran, declined, dirty_like, timeouts, mismatches, verify_mismatch, verify_timeouts, nan_words, hits, deep; } stats;
+typedef struct { unsigned cases, native_ran, declined, dirty_like, timeouts, mismatches, verify_mismatch, verify_timeouts, nan_words, hits, deep, full[4]; } stats;
 static int nan32(uint32_t w) { return (w & 0x7F800000u) == 0x7F800000u && (w & 0x007FFFFFu); }
 
 static uint32_t E_top;            /* esp at the entry of f_00088110 */
@@ -168,7 +168,7 @@ static void scene(stats *st)
     /* the sphere */
     float ctr[3] = { frand(-4, 4), frand(-4, 4), frand(-4, 4) };
     float radius = bench_like ? frand(0.3f, 0.8f) : rnd() % 3 ? frand(0.2f, 2.5f) : rnd() % 2 ? frand(2.5f, 9) : rnd() % 3 ? 0.0f : rnd() % 2 ? frand(-1, 0) : nanf_();
-    if (big) radius = frand(20, 60);
+    if (big) radius = rnd() % 3 ? frand(20, 60) : frand(200, 1000);   /* huge: every plane straddled, the lists fill up */
     if (wild) radius = frand(6, 12);
     /* BSP header */
     uint32_t bsp = tag_alloc(0x60, 0);
@@ -187,6 +187,7 @@ static void scene(stats *st)
         random_normal(pl[i].n, flavor);
         float through = pl[i].n[0] * ctr[0] + pl[i].n[1] * ctr[1] + pl[i].n[2] * ctr[2];
         pl[i].d = rnd() % 3 ? through + frand(-radius * 1.5f - 0.5f, radius * 1.5f + 0.5f) : frand(-10, 10);   /* mostly straddling */
+        if (radius > 100) pl[i].d = through + frand(-5, 5);                /* huge: every plane straddled */
         if (flavor == 1) pl[i].d = (float)(int)pl[i].d;
         for (unsigned k = 0; k < 3; ++k) wf(planes + 16u * (uint32_t)i + 4 * k, pl[i].n[k]);
         wf(planes + 16u * (uint32_t)i + 12, flavor == 2 && rnd() % 23 == 0 ? nanf_() : pl[i].d);
@@ -207,7 +208,7 @@ static void scene(stats *st)
         uint32_t ch[2];
         for (int s = 0; s < 2; ++s) {
             unsigned r = rnd() % 10; int kid = deep ? (s == 0 ? i + 1 : n3) : 2 * i + 1 + s;
-            if (kid < n3 && (deep || r < 7)) ch[s] = (uint32_t)kid;
+            if (kid < n3 && (deep || r < 7 || (big && radius > 100))) ch[s] = (uint32_t)kid;   /* huge: a full tree */
             else if (r < 9 || deep) {
                 uint32_t L = deep ? (uint32_t)i % (uint32_t)nl : rnd() % (uint32_t)nl;
                 ch[s] = 0x80000000u | L; leaf_at[L] = i | (s << 30);
@@ -402,12 +403,13 @@ static void guard_stack(void)
     struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_handler = on_alarm; sa.sa_flags = SA_ONSTACK | SA_NODEFER;
     sigaction(SIGSEGV, &sa, NULL);
 }
-/* mode 0: the guest body; 1/2: the hook (verify / native). Returns 0 on a timeout. */
+/* mode 0: the guest body; 1/2: the hook (verify / native). Returns 0 on a timeout (env N4_ALARM seconds, default 6). */
+static unsigned alarm_s = 6;
 static int run(xctx *c, int mode)
 {
     xv_native_4b9d0_force(mode);
     if (sigsetjmp(alarm_jmp, 1)) { xv_native_4b9d0_force(0); return 0; }
-    alarm(6);
+    alarm(alarm_s);
     if (mode) xv_native_4b9d0_query(c); else f_00088110(c);
     alarm(0);
     xv_native_4b9d0_force(0);
@@ -526,8 +528,236 @@ static int replay(const char *path, int reps)
     return bad != 0;
 }
 
+/* ==== N4_PART=features: the solver's feature test (native f_000864C0 subtree vs the lifted bodies of f_000864C0 +
+ * f_00085D10 + f_00085A00 + f_00085720 + f_00011120 + f_000111A0). Random feature sets around a random move: spheres,
+ * capsules and plane prisms placed across the path (hits, grazes, misses, starting inside), zero / parallel / NaN
+ * directions, degenerate normals and axes, prisms with 0..12 vertices (beyond the record), axis words and side bytes
+ * outside the table (the table and the frame read at other indices), negative counts, random image constants; the
+ * layouts: the game's (start and dir in the caller's frame above, the record elsewhere), frames straddling a page end
+ * of the reversed stack, start / dir / features inside the frames (the guest's stores change what it reads), the
+ * record over start / dir / the features (the literal tail), and the declined ones (esp unaligned, the record in the
+ * frames). ------------------------------------------------------------------------------------------------------ */
+extern void f_000864C0(xctx *);
+extern int xv_native_4b9d0_features(xctx *);
+static int part5;
+static uint32_t E5;
+static void wv3(uint32_t a, const float *v) { for (unsigned k = 0; k < 3; ++k) wf(a + 4 * k, v[k]); }
+static float odd(float x, int flavor) { if (flavor == 2 && rnd() % 23 == 0) return rnd() % 3 ? nanf_() : rnd() % 2 ? INFINITY : -INFINITY; return x; }
+static void scene5(stats *st)
+{
+    memset(g_xram, 0, ARENA);
+    tag_top = TAG + (rnd() % 64) * 4;
+    const int flavor = bench_like ? 0 : rnd() % 4 == 0 ? 1 : rnd() % 8 == 0 ? 2 : 0;
+    const unsigned layout = bench_like ? 0 : rnd() % 16;
+    /* image constants: the axes table, 0.0, 1.0, eps (double), the facing threshold */
+    for (unsigned a = 0; a < 6; ++a) {
+        uint16_t u = (uint16_t)((a / 2 + 1) % 3), v = (uint16_t)((a / 2 + 2) % 3);
+        if (a & 1) { uint16_t t = u; u = v; v = t; }
+        if (!bench_like && rnd() % 41 == 0) u = (uint16_t)(int16_t)((int)(rnd() % 13) - 5);
+        if (!bench_like && rnd() % 41 == 0) v = (uint16_t)(int16_t)((int)(rnd() % 13) - 5);
+        w16(0x1EAF30 + 4 * a, u); w16(0x1EAF32 + 4 * a, v);
+    }
+    for (uint32_t a = 0x1EAF30 - 0x40; a < 0x1EAF30; a += 2) w16(a, (uint16_t)(int16_t)((int)(rnd() % 9) - 4));   /* below the table */
+    for (uint32_t a = 0x1EAF48; a < 0x1EAF48 + 0x100; a += 2) w16(a, (uint16_t)(int16_t)((int)(rnd() % 9) - 4));  /* above it */
+    wf(0x1F0A68, bench_like || rnd() % 5 ? 0.0f : rnd() % 2 ? -0.0f : rnd() % 3 ? frand(-0.01f, 0.01f) : nanf_());
+    wf(0x1F0A78, bench_like || rnd() % 4 ? 1.0f : rnd() % 5 ? frand(0.3f, 2.0f) : nanf_());
+    { double eps = bench_like || rnd() % 5 ? 0.0001 : rnd() % 2 ? 0.0 : rnd() % 2 ? 1e-12 : 0.75; x_guest_write_pages(0x1F0AF8, &eps, 8); }
+    wf(0x1F0C24, bench_like || rnd() % 3 ? -0.0001f : rnd() % 2 ? 0.0f : frand(-0.5f, 0.5f));
+    /* the move */
+    float start[3] = { frand(-4, 4), frand(-4, 4), frand(-4, 4) }, dir[3];
+    const unsigned dk = bench_like ? 0 : rnd() % 12;
+    if (dk == 1) dir[0] = dir[1] = dir[2] = 0;
+    else if (dk == 2 || flavor == 1) { dir[0] = dir[1] = dir[2] = 0; dir[rnd() % 3] = frand(-2, 2); }
+    else for (unsigned k = 0; k < 3; ++k) dir[k] = frand(-1.5f, 1.5f);
+    if (flavor == 1) for (unsigned k = 0; k < 3; ++k) start[k] = (float)(int)start[k];
+    for (unsigned k = 0; k < 3; ++k) { start[k] = odd(start[k], flavor); dir[k] = odd(dir[k], flavor); }
+    /* the stack: 864C0's entry esp; now and then its frames straddle a page end (the stack pages are reversed) */
+    E5 = STACK + 0x8000u + 4u * (rnd() % 0x800);
+    if (rnd() % 5 == 0) E5 = STACK + 0xA000u - 0x10u + 4u * (rnd() % 0x28);
+    for (uint32_t a = E5 - 0x200u; a < E5 + 0x200u; a += 4) w32(a, rnd());   /* stale frames */
+    /* the features */
+    int n0 = (int)(rnd() % 6), n1 = (int)(rnd() % 6), n2 = (int)(rnd() % 7);
+    if (!bench_like) {
+        if (rnd() % 9 == 0) n0 = (int)(rnd() % 20); if (rnd() % 9 == 0) n1 = (int)(rnd() % 20); if (rnd() % 9 == 0) n2 = (int)(rnd() % 20);
+        if (rnd() % 17 == 0) n0 = -(int)(rnd() % 3) - 1; if (rnd() % 17 == 0) n1 = -1 - (int)(rnd() % 3); if (rnd() % 17 == 0) n2 = -1;
+    }
+    uint32_t feat = tag_alloc(0x4408u + 0x68u * (uint32_t)(n2 > 0 ? n2 : 0) + 0x80u, 0);
+    if (layout == 14) feat = E5 - 0x60u - 0x1Cu * (rnd() % 3) - 8u;   /* spheres over the frames (and the counts in them) */
+    w16(feat, (uint16_t)n0); w16(feat + 2, (uint16_t)n1); w16(feat + 4, (uint16_t)n2);
+    for (int i = 0; i < n0; ++i) {                                   /* spheres: +0xC center, +0x18 radius */
+        const uint32_t r = feat + 8u + 0x1Cu * (uint32_t)i;
+        if (layout == 14 && r + 0x1C > E5 - 0x90u && r < E5 + 0x14u && rnd() % 2) continue;   /* keep some frame bytes */
+        for (unsigned k = 0; k < 3; ++k) w32(r + 4 * k, rnd());
+        const float t = frand(-0.3f, 1.3f), rad = rnd() % 11 ? frand(0.1f, 2.0f) : rnd() % 2 ? 0.0f : -frand(0, 1);
+        float c[3];
+        for (unsigned k = 0; k < 3; ++k) c[k] = odd(start[k] + t * dir[k] + frand(-1.5f, 1.5f) * (rnd() % 3 ? rad : 3.0f), flavor);
+        if (rnd() % 9 == 0) for (unsigned k = 0; k < 3; ++k) c[k] = start[k] + frand(-0.2f, 0.2f);   /* starts inside */
+        wv3(r + 0xC, c); wf(r + 0x18, odd(rad, flavor));
+    }
+    for (int i = 0; i < n1; ++i) {                                   /* capsules: +0xC point, +0x18 axis, +0x24 radius */
+        const uint32_t r = feat + 0x1C08u + 0x28u * (uint32_t)i;
+        for (unsigned k = 0; k < 3; ++k) w32(r + 4 * k, rnd());
+        const float t = frand(-0.3f, 1.3f), rad = rnd() % 11 ? frand(0.1f, 1.5f) : 0.0f;
+        float p[3], ax[3];
+        for (unsigned k = 0; k < 3; ++k) { ax[k] = frand(-2.5f, 2.5f); p[k] = start[k] + t * dir[k] + frand(-1.2f, 1.2f) - 0.5f * ax[k] * frand(0, 1); }
+        const unsigned ak = rnd() % 10;
+        if (ak == 0) ax[0] = ax[1] = ax[2] = 0;                                     /* A == 0 */
+        else if (ak == 1) for (unsigned k = 0; k < 3; ++k) ax[k] = dir[k] * frand(-2, 2);   /* parallel: A == 0 up to rounding */
+        else if (ak == 2 || flavor == 1) { ax[0] = ax[1] = ax[2] = 0; ax[rnd() % 3] = frand(0.5f, 3); }
+        for (unsigned k = 0; k < 3; ++k) { p[k] = odd(p[k], flavor); ax[k] = odd(ax[k], flavor); }
+        wv3(r + 0xC, p); wv3(r + 0x18, ax); wf(r + 0x24, odd(rad, flavor));
+    }
+    for (int i = 0; i < n2; ++i) {                                   /* plane prisms */
+        const uint32_t r = feat + 0x4408u + 0x68u * (uint32_t)i;
+        for (unsigned k = 0; k < 3; ++k) w32(r + 4 * k, rnd());
+        float nrm[3]; random_normal(nrm, flavor);
+        if (rnd() % 23 == 0) nrm[0] = nrm[1] = nrm[2] = 0;
+        if (rnd() % 7 == 0)                                          /* parallel to the move (nd == 0) where dir has a zero */
+            for (unsigned j = 0; j < 3; ++j) if (dir[j] == 0.0f) { nrm[0] = nrm[1] = nrm[2] = 0; nrm[j] = rnd() % 2 ? 1.0f : -1.0f; break; }
+        const float t = frand(-0.3f, 1.3f);
+        float P[3]; for (unsigned k = 0; k < 3; ++k) P[k] = start[k] + t * dir[k];
+        float d = nrm[0] * P[0] + nrm[1] * P[1] + nrm[2] * P[2];
+        if (rnd() % 6 == 0) d = nrm[0] * start[0] + nrm[1] * start[1] + nrm[2] * start[2] - frand(-0.5f, 0.5f);   /* start near / inside */
+        if (flavor == 1) d = (float)(int)d;
+        const float thick = rnd() % 5 ? frand(0.05f, 1.5f) : rnd() % 2 ? 0.0f : -frand(0, 1);
+        unsigned ax = fabsf(nrm[0]) >= fabsf(nrm[1]) && fabsf(nrm[0]) >= fabsf(nrm[2]) ? 0 : fabsf(nrm[1]) >= fabsf(nrm[2]) ? 1 : 2;
+        uint8_t side = nrm[ax] < 0;
+        int16_t axw = (int16_t)ax;
+        if (!bench_like && rnd() % 19 == 0) axw = (int16_t)((int)(rnd() % 9) - 4);
+        if (!bench_like && rnd() % 97 == 0) axw = (int16_t)(rnd() % 0x2000);
+        if (!bench_like && rnd() % 19 == 0) side = (uint8_t)(rnd() % 2 ? rnd() % 4 : 255);
+        int nv = 3 + (int)(rnd() % 6);
+        if (!bench_like && rnd() % 9 == 0) nv = (int)(rnd() % 13) - 1;
+        wv3(r + 0xC, nrm); wf(r + 0x18, odd(d, flavor)); wf(r + 0x1C, odd(thick, flavor));
+        w16(r + 0x20, (uint16_t)axw); w8(r + 0x22, side); w8(r + 0x23, (uint8_t)rnd()); w32(r + 0x24, (uint32_t)nv);
+        /* the polygon on the projected axes (the table's standard (u, v) for the axis and side), around the path */
+        const unsigned u = (ax + 1 + side % 2) % 3, v = (ax + 2 - side % 2) % 3;
+        const float cu = P[u] + frand(-0.8f, 0.8f), cv = P[v] + frand(-0.8f, 0.8f), rr = frand(0.2f, 2.5f);
+        const int ccw = rnd() % 2;
+        const int nw = nv > 12 ? 12 : nv;
+        for (int j = 0; j < nw; ++j) {
+            float a = 6.2831853f * ((float)j + frand(0.1f, 0.9f)) / (float)(nw > 0 ? nw : 1);
+            if (!ccw) a = -a;
+            float pu = cu + rr * cosf(a), pv = cv + rr * sinf(a);
+            if (flavor == 1) { pu = (float)(int)pu; pv = (float)(int)pv; }
+            wf(r + 0x28 + 8u * (uint32_t)j, odd(pu, flavor)); wf(r + 0x2C + 8u * (uint32_t)j, odd(pv, flavor));
+        }
+    }
+    /* start, dir and the result record */
+    uint32_t sa = E5 + 0x68u, da = E5 + 0x50u, res = tag_alloc(0x2C, 0);
+    if (rnd() % 3 == 0) res = E5 + 0x100u + 4u * (rnd() % 0x40);
+    if (layout == 12) { if (rnd() % 2) sa = E5 - 0x90u + 4u * (rnd() % 0x22); else da = E5 - 0x90u + 4u * (rnd() % 0x22); }
+    if (layout == 15) { sa = rec_alloc(12); da = rec_alloc(12); }
+    if (layout == 13) res = rnd() % 3 == 0 ? sa - 4u * (rnd() % 8) : rnd() % 2 ? da - 4u * (rnd() % 8) : feat + 4u * (rnd() % 16);
+    if (layout == 11) res = E5 - 4u * (rnd() % 0x30);                  /* in the frames: declined */
+    wv3(sa, start); wv3(da, dir);
+    for (uint32_t a = res; a < res + 0x2C; a += 4) if (!(layout == 13)) w32(a, rnd());
+    w32(E5, 0x170CD6u); w32(E5 + 4, feat); w32(E5 + 8, sa); w32(E5 + 12, da); w32(E5 + 16, res);
+    if (layout == 10) E5 += 1u + rnd() % 3;                            /* esp unaligned: declined */
+    st->hits += n2 > 0; st->deep += layout == 12 || layout == 13 || layout == 14; st->dirty_like += flavor == 2;
+}
+static void init_ctx5(xctx *c)
+{
+    memset(c, 0, sizeof *c);
+    for (unsigned i = 0; i < 8; ++i) c->r[i] = rnd();
+    c->r[4] = E5;
+    c->fsp = rnd() & 7; c->fcw = 0x027F; c->fsw = (uint16_t)rnd();
+    for (unsigned i = 0; i < 8; ++i) c->st[i] = (double)(int32_t)rnd() / 7.0;
+    for (unsigned r = 0; r < 8; ++r) for (unsigned l = 0; l < 4; ++l) c->xmm[r][l] = frand(-100, 100);
+    c->f_kind = rnd() % 5; c->f_op1 = rnd(); c->f_op2 = rnd(); c->f_res = rnd(); c->f_bits = rnd() % 3 == 0 ? 16 : 32;
+    c->f_cf_override = rnd() & 1; c->f_cf = rnd() & 1; c->f_of_override = rnd() & 1; c->f_of = rnd() & 1;
+    c->preempt = (int32_t)(rnd() % 400) - 20;
+}
+/* mode 0: the guest body; 1/2: the hook (declined: the guest, as the fused solver code runs it) */
+static int run5(xctx *c, int mode)
+{
+    xv_native_4b9d0_force(mode);
+    if (sigsetjmp(alarm_jmp, 1)) { xv_native_4b9d0_force(0); return 0; }
+    alarm(alarm_s);
+    if (!mode || !xv_native_4b9d0_features(c)) f_000864C0(c);
+    alarm(0);
+    xv_native_4b9d0_force(0);
+    return 1;
+}
+
+/* --replay-features <file> [reps]: feature-test calls captured in the game (XV_NATIVE_4B9D0_CAPTURE_FEATURES) */
+static int replay5(const char *path, int reps)
+{
+    FILE *f = fopen(path, "rb"); if (!f) { perror(path); return 2; }
+    uint32_t hdr[4]; if (fread(hdr, sizeof hdr, 1, f) != 1 || hdr[0] != 0x3544354Eu || hdr[2] != (1u << 20)) { fprintf(stderr, "bad capture\n"); return 2; }
+    const uint32_t arena = hdr[1], W = hdr[3];
+    g_xram = malloc(arena + 4096u); g_xpt = malloc(4u << 20); g_img_base = g_xram;
+    if (!g_xram || !g_xpt || fread(g_xpt, 4, 1u << 20, f) != (1u << 20) || fread(g_xram, 1, arena, f) != arena) { fprintf(stderr, "short capture\n"); return 2; }
+#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE && !defined(__vita__)
+    xv_host_page_table = g_xpt;
+#endif
+    unsigned n = 0, cap = 256; n4rec *recs = malloc(sizeof *recs * cap); uint8_t *wins = malloc((size_t)W * cap);
+    uint32_t *fa = malloc(4 * cap), *fl = malloc(4 * cap); uint8_t **fb = malloc(sizeof *fb * cap);
+    for (;;) {
+        if (n == cap) { cap *= 2; recs = realloc(recs, sizeof *recs * cap); wins = realloc(wins, (size_t)W * cap); fa = realloc(fa, 4 * cap); fl = realloc(fl, 4 * cap); fb = realloc(fb, sizeof *fb * cap); }
+        if (fread(&recs[n], sizeof *recs, 1, f) != 1 || fread(wins + (size_t)W * n, 1, W, f) != W) break;
+        if (fread(&fa[n], 4, 1, f) != 1 || fread(&fl[n], 4, 1, f) != 1) break;
+        fb[n] = malloc(fl[n]); if (fread(fb[n], 1, fl[n], f) != fl[n]) break;
+        n++;
+    }
+    fclose(f);
+    printf("replay: %u feature-test calls, arena %u bytes\n", n, arena);
+    uint8_t *gw = malloc(W), *nw = malloc(W);
+    unsigned bad = 0, nan_words = 0, hits = 0;
+    for (unsigned i = 0; i < n; ++i) {
+        const uint32_t lo = recs[i].r[4] - W / 2;
+        uint32_t res; memcpy(&res, wins + (size_t)W * i + W / 2 + 0x10, 4);
+        xctx cg, cn; rec_to_ctx(&recs[i], &cg); rec_to_ctx(&recs[i], &cn);
+        uint8_t rg[0x2C], rn[0x2C];
+        x_guest_write_pages(lo, wins + (size_t)W * i, W); x_guest_write_pages(fa[i], fb[i], fl[i]); preempt_calls = 0;
+        f_000864C0(&cg); unsigned gp = preempt_calls; x_guest_read_pages(gw, lo, W); x_guest_read_pages(rg, res, 0x2C);
+        x_guest_write_pages(lo, wins + (size_t)W * i, W); x_guest_write_pages(fa[i], fb[i], fl[i]); preempt_calls = 0;
+        xv_native_4b9d0_force(2); if (!xv_native_4b9d0_features(&cn)) f_000864C0(&cn); xv_native_4b9d0_force(0);
+        x_guest_read_pages(nw, lo, W); x_guest_read_pages(rn, res, 0x2C);
+        hits += (cg.r[0] & 0xFF) != 0;
+        char why[200] = "";
+        int ok = same_ctx(&cn, &cg, why, sizeof why) && preempt_calls == gp;
+        if (ok && memcmp(rg, rn, sizeof rg)) { ok = 0; snprintf(why, sizeof why, "result record"); }
+        if (ok && memcmp(gw, nw, W))
+            for (uint32_t k = 0; k < W; ++k) if (gw[k] != nw[k]) {
+                uint32_t a, b; memcpy(&a, gw + (k & ~3u), 4); memcpy(&b, nw + (k & ~3u), 4);
+                if (nan32(a) && nan32(b)) { nan_words++; k |= 3u; continue; }
+                ok = 0; snprintf(why, sizeof why, "stack %08X guest %02X native %02X", lo + k, gw[k], nw[k]); break;
+            }
+        if (!ok && ++bad <= 10) printf("call %u MISMATCH: %s\n", i, why[0] ? why : "xv_preempt calls");
+    }
+    printf("replay: %u calls compared (%u hits), %u mismatches, %u NaN-payload words\n", n, hits, bad, nan_words);
+    if (reps > 0) {
+        pe_open();
+        double ns[2] = { 0, 0 }; uint64_t pe[2][2] = { { 0, 0 }, { 0, 0 } }; struct timespec t0, t1;
+        for (int r = 0; r < reps; ++r)
+            for (int mode = 0; mode <= 2; mode += 2) {
+                for (unsigned i = 0; i < n; ++i) {
+                    const uint32_t lo = recs[i].r[4] - W / 2;
+                    x_guest_write_pages(lo, wins + (size_t)W * i, W); x_guest_write_pages(fa[i], fb[i], fl[i]);
+                    xctx c; rec_to_ctx(&recs[i], &c); c.preempt = 1 << 30;
+                    xv_native_4b9d0_force(mode);
+                    uint64_t p0[2], p1[2]; pe_read(p0); clock_gettime(CLOCK_MONOTONIC, &t0);
+                    if (mode) { if (!xv_native_4b9d0_features(&c)) f_000864C0(&c); } else f_000864C0(&c);
+                    clock_gettime(CLOCK_MONOTONIC, &t1); pe_read(p1);
+                    ns[mode / 2] += (t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec);
+                    pe[mode / 2][0] += p1[0] - p0[0]; pe[mode / 2][1] += p1[1] - p0[1];
+                }
+                xv_native_4b9d0_force(0);
+            }
+        const double calls = (double)n * reps;
+        printf("replay speed: %u calls x %d: guest %.0f ns/call, native %.0f ns/call, ratio %.2fx; user instructions/call guest %.0f native %.0f (%.2fx), cycles/call guest %.0f native %.0f (%.2fx)%s\n",
+               n, reps, ns[0] / calls, ns[1] / calls, ns[0] / ns[1], pe[0][0] / calls, pe[1][0] / calls, pe[1][0] ? (double)pe[0][0] / pe[1][0] : 0,
+               pe[0][1] / calls, pe[1][1] / calls, pe[1][1] ? (double)pe[0][1] / pe[1][1] : 0, pe_fd[0] < 0 ? " (perf counters unavailable)" : "");
+    }
+    log_all = 1; xv_native_4b9d0_report(0);
+    return bad != 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc > 3 && !strcmp(argv[3], "--replay-features")) return replay5(argv[4], argc > 5 ? atoi(argv[5]) : 0);
+    { const char *p = getenv("N4_PART"); part5 = p && !strcmp(p, "features"); }
     if (argc > 3 && !strcmp(argv[3], "--replay")) return replay(argv[4], argc > 5 ? atoi(argv[5]) : 0);
     unsigned cases = argc > 1 ? (unsigned)atoi(argv[1]) : 3000;
     if (argc > 2) rng ^= strtoull(argv[2], 0, 0) * 0x9E3779B97F4A7C15ull;
@@ -535,6 +765,7 @@ int main(int argc, char **argv)
     const int bench = argc > 4 && !strcmp(argv[3], "--bench") ? atoi(argv[4]) : 0;
     stats s = {0};
     signal(SIGALRM, on_alarm);
+    if (getenv("N4_ALARM")) alarm_s = (unsigned)atoi(getenv("N4_ALARM"));
     guard_stack();
     map_memory();
     if (bench) {
@@ -544,14 +775,17 @@ int main(int argc, char **argv)
         double g_ns = 0, n_ns = 0; unsigned calls = 0; struct timespec t0, t1;
         uint64_t g_pe[2] = { 0, 0 }, n_pe[2] = { 0, 0 }; pe_open();
         for (unsigned k = 0; k < cases; ++k) {
-            scene(&s); slice = 1 << 30;
-            xctx c0; init_ctx(&c0); c0.preempt = 1 << 30; c0.df = 0;
+            if (part5) scene5(&s); else scene(&s);
+            slice = 1 << 30;
+            xctx c0; if (part5) init_ctx5(&c0); else init_ctx(&c0);
+            c0.preempt = 1 << 30; c0.df = 0;
             for (int r = 0; r < bench; ++r)
                 for (int mode = 0; mode <= 2; mode += 2) {
                     xctx c = c0; xv_native_4b9d0_force(mode);
                     uint64_t p0[2], p1[2]; pe_read(p0);
                     clock_gettime(CLOCK_MONOTONIC, &t0);
-                    if (mode) xv_native_4b9d0_query(&c); else f_00088110(&c);
+                    if (part5) { if (!mode || !xv_native_4b9d0_features(&c)) f_000864C0(&c); }
+                    else if (mode) xv_native_4b9d0_query(&c); else f_00088110(&c);
                     clock_gettime(CLOCK_MONOTONIC, &t1);
                     pe_read(p1);
                     double ns = (t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec);
@@ -574,21 +808,31 @@ int main(int argc, char **argv)
     }
     uint8_t *before = malloc(ARENA), *guest = malloc(ARENA);
     for (unsigned k = 0; k < cases; ++k) {
-        scene(&s); slice = 5 + (int)(rnd() % 90);
-        xctx c0; init_ctx(&c0);
+        if (part5) scene5(&s); else scene(&s);
+        slice = 5 + (int)(rnd() % 90);
+        xctx c0; if (part5) init_ctx5(&c0); else init_ctx(&c0);
         if (getenv("N4_FROM") && k < (unsigned)atoi(getenv("N4_FROM"))) continue;
         if (getenv("N4_TRACE")) { fprintf(stderr, "case %u\n", k); fflush(stderr); }
         memcpy(before, g_xram, ARENA);
         xctx cg = c0; preempt_calls = 0;
-        int gok = run(&cg, 0);
+        int gok = part5 ? run5(&cg, 0) : run(&cg, 0);
         unsigned guest_preempts = preempt_calls;
         memcpy(guest, g_xram, ARENA); memcpy(g_xram, before, ARENA);
         xctx cn = c0; preempt_calls = 0; log_mismatch = 0;
-        int nok = run(&cn, 2);
+        int nok = part5 ? run5(&cn, 2) : run(&cn, 2);
         unsigned native_preempts = preempt_calls;
         char why[200] = "";
         s.cases++;
         if (!gok) { s.timeouts++; continue; }
+        if (!part5) {                              /* the result lists that reached their capacity (0x100 entries) */
+            uint32_t res; x_guest_read_pages(&res, E_top + 0x2004, 4);
+            for (unsigned l = 0; l < 4; ++l) {
+                uint32_t a = res + 0x404u * l, n = 0;
+                const uint32_t pa = g_xpt[a >> 12] + (a & 0xFFFu);
+                if (pa + 4u <= ARENA) memcpy(&n, guest + pa, 4);
+                if (n >= 0x100u && n < 0x80000000u) s.full[l]++;
+            }
+        }
         int ok = gok && nok && same_ctx(&cn, &cg, why, sizeof why) && native_preempts == guest_preempts;
         if (ok && memcmp(guest, g_xram, ARENA)) {
             for (uint32_t i = 0; i < ARENA; ++i) if (guest[i] != g_xram[i]) {
@@ -606,16 +850,16 @@ int main(int argc, char **argv)
                     for (uint32_t i = 0; i < ARENA && shown < 24; ++i) if (guest[i] != g_xram[i]) {
                         uint32_t va = 0xFFFFFFFFu;
                         for (uint32_t p = 0; p < (1u << 20); ++p) if (g_xpt[p] == (i & ~0xFFFu)) { va = (p << 12) | (i & 0xFFFu); break; }
-                        printf("   va %08X (E%+d) before %02X guest %02X native %02X\n", va, (int)(va - E_top), before[i], guest[i], g_xram[i]); shown++;
+                        printf("   va %08X (E%+d) before %02X guest %02X native %02X\n", va, (int)(va - (part5 ? E5 : E_top)), before[i], guest[i], g_xram[i]); shown++;
                     }
-                    printf("   E %08X eax %08X/%08X ecx %08X/%08X edx %08X/%08X fsw %04X/%04X preempts %u/%u\n", E_top, cg.r[0], cn.r[0], cg.r[1], cn.r[1], cg.r[2], cn.r[2], cg.fsw, cn.fsw, guest_preempts, native_preempts);
+                    printf("   E %08X eax %08X/%08X ecx %08X/%08X edx %08X/%08X fsw %04X/%04X preempts %u/%u\n", part5 ? E5 : E_top, cg.r[0], cn.r[0], cg.r[1], cn.r[1], cg.r[2], cn.r[2], cg.fsw, cn.fsw, guest_preempts, native_preempts);
                 }
             }
         }
         if (verify && gok) {
             memcpy(g_xram, before, ARENA);
             xctx cv = c0; preempt_calls = 0; log_mismatch = 0;
-            int vok = run(&cv, 1);
+            int vok = part5 ? run5(&cv, 1) : run(&cv, 1);
             char vw[200] = "";
             int good = vok && !log_mismatch && same_ctx(&cv, &cg, vw, sizeof vw) && preempt_calls == guest_preempts && !memcmp(guest, g_xram, ARENA);
             if (!vok) s.verify_timeouts++;
@@ -626,8 +870,13 @@ int main(int argc, char **argv)
         }
     }
     log_all = 1; xv_native_4b9d0_report(0); log_all = 0;     /* the native's own counters over all native/verify runs */
-    printf("native-4b9d0 differential: %u cases (%u big, %u deep, %u wild, %u guest timeouts skipped, %u NaN-payload words), %u mismatches%s",
-           s.cases, s.hits, s.deep, s.dirty_like, s.timeouts, s.nan_words, s.mismatches, verify ? "" : "\n");
+    if (part5)
+        printf("native-4b9d0 features differential: %u cases (%u with prisms, %u aliased layouts, %u NaN/inf scenes, %u guest timeouts skipped, %u NaN-payload words), %u mismatches%s",
+               s.cases, s.hits, s.deep, s.dirty_like, s.timeouts, s.nan_words, s.mismatches, verify ? "" : "\n");
+    else
+    printf("native-4b9d0 differential: %u cases (%u big, %u deep, %u wild, %u guest timeouts skipped, %u NaN-payload words; "
+           "full lists: surfaces %u edges %u vertices %u leaves %u), %u mismatches%s",
+           s.cases, s.hits, s.deep, s.dirty_like, s.timeouts, s.nan_words, s.full[0], s.full[1], s.full[2], s.full[3], s.mismatches, verify ? "" : "\n");
     if (verify) printf(", verify-mode failures %u (%u verify runs past the alarm skipped)\n", s.verify_mismatch, s.verify_timeouts);
     return s.mismatches || s.verify_mismatch;
 }

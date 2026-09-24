@@ -3,8 +3,9 @@
  * f_0004B9D0 costs ~9 ms/frame on the Vita's a10 (perf187, 23 calls/frame). Phase timers inside it (host x86 and
  * Pi 4, a10 checkpoint with movement) put 85-90 % of it in f_00049600 -> f_00172BF0, the character's collision
  * move: the feature collection f_00171F10 (BSP sphere query 88110, BSP feature build 868F0, object walk) and the
- * solver f_00170C10 (its feature test 864C0). The biggest single subtree is the BSP sphere query:
+ * solver f_00170C10 (its feature test 864C0). Two subtrees are native here (docs/native-4b9d0.md):
  *
+ * 1. The BSP sphere query (41 % of 4B9D0 on the Pi, 56 % on x86):
  *   f_00088110  query set-up on its own frame (the query record q), result lists cleared, then 87EA0
  *   f_00087EA0  BSP3D traversal (recursive): sphere vs node planes; leaves recorded (q->results +C0C, <= 256); per
  *               leaf its BSP2D references, the planes already on the ancestor stack (q+0x18/+0x1C) projected
@@ -12,17 +13,20 @@
  *   f_00086F50  surface test: already-tested bit, vertex ring (SSE distance, vertex list +808, <= 256), edges
  *               (segment/sphere B0CB0, edge list +404), point in polygon on the projected axes (surface list +0)
  *   f_000B0CB0  segment vs sphere
- *
- * No other calls, no HLE. The hook replaces the fused copy of this subtree (recomp/query_fusion.c
- * query_fused_172c95_171f94, the 171F94 call of the collection under 172C95) where recomp/kernel/xk_query_reuse.c
- * runs it; the query reuse / world-run admission around it is unchanged.
+ *   The hook replaces the fused copy of this subtree (recomp/query_fusion.c query_fused_172c95_171f94, the 171F94
+ *   call of the collection under 172C95) where recomp/kernel/xk_query_reuse.c runs it; the query reuse / world-run
+ *   admission around it is unchanged.
+ * 2. The solver's feature test (17 % of 4B9D0 on the Pi and x86): f_000864C0 and its swept-sphere tests 85D10
+ *   (spheres), 85A00 (capsules), 85720 (plane prisms) with 11120 (normalize) and 111A0 (t * a + b). The hook sits at
+ *   the fused solver's 170CD1 call (recomp/solver_fusion.c); see the section further down.
+ * No other calls, no HLE.
  *
  * Exact by construction (a transliteration of the generated code, not a re-derivation):
  *  - every guest memory read and write happens in the guest's order at the guest's address through the same
  *    translation (integer, SSE and push/pop accesses single-translation like X_M32/X_MF32/X_PUSH32, x87 float loads
- *    and stores page-split like x87_load_f32/x87_store_f32); nothing the guest reads from memory is taken from a
- *    local, so any aliasing (a deep ancestor stack running over the frame, results inside the stack) reads the bytes
- *    the guest reads;
+ *    and stores page-split like x87_load_f32/x87_store_f32); a value the guest reads back from memory is taken from
+ *    a local only where no store but the owner's can have reached it (a frame slot; the query's `dirty` flag and the
+ *    feature test's layout check guard the exceptions), so aliasing reads the bytes the guest reads;
  *  - registers: every guest register is a local assigned where the generated code assigns it (partial writes
  *    included: fnstsw ax, setcc, byte xors); callee-saved registers come back from the guest's pops (memory);
  *  - lazy flags: the whole record (kind, operands, result, width, both override cells and both stale cf/of cells),
@@ -34,15 +38,18 @@
  *    word exactly as x87_compare leaves it (condition codes of the last compare, TOP of every compare OR-ed in);
  *  - SSE: xmm0/xmm1/xmm2[0] of the vertex pass in float arithmetic in the translation's order;
  *  - the back-edge budget: c->preempt drops by exactly the guest's back-edge count and xv_preempt() is called the
- *    same number of times, after the query instead of mid-loop (a scheduling point only; xk_native_visibility.c).
+ *    same number of times, after the call instead of mid-loop (a scheduling point only; xk_native_visibility.c).
  * Declines (runs the fused guest code): the scene helper, a thread whose page table is not the live table (the fused
- * code mixes both), and while a watch/trace is on.
+ * code mixes both), and layouts outside the checked ones (n4_layout, n5_layout).
  *
- * XV_NATIVE_4B9D0 build flag (hook: tools/patch_native_4b9d0_hooks.py). Env XV_NATIVE_4B9D0: 0 off (default
- * XV_NATIVE_4B9D0_DEFAULT), 1 verify (native with a write journal, undo, run the fused guest query on the same
- * state, compare registers/flags/x87/SSE/budget, every byte the native wrote and the regions the guest may write,
- * keep the guest result), 2 native. XV_NATIVE_4B9D0_TIME=1: ns/call (Vita: us clock) of the guest (mode 0), the
- * native (2), both (1). [native-4b9d0] line every 60 frames. */
+ * XV_NATIVE_4B9D0 build flag (hooks: tools/patch_native_4b9d0_hooks.py). Env XV_NATIVE_4B9D0: 0 off (default
+ * XV_NATIVE_4B9D0_DEFAULT), 1 verify (native with a write journal, undo, run the guest on the same state - the fused
+ * query, the translated f_000864C0 - compare registers/flags/x87/SSE/budget, every byte the native wrote and the
+ * regions the guest may write, keep the guest result), 2 native. XV_NATIVE_4B9D0_PARTS: 1 the query, 2 the feature
+ * test, 3 both (default). XV_NATIVE_4B9D0_TIME=1: ns/call (Vita: us clock) of the guest (mode 0: the fused code),
+ * the native (2), both (1). [native-4b9d0] lines every 60 frames (the query; "features" for the feature test).
+ * Host harness only: XV_NATIVE_4B9D0_CAPTURE=<file>[:n[:skip]] and XV_NATIVE_4B9D0_CAPTURE_FEATURES=... write entry
+ * states for tools/tests/native_4b9d0.c --replay / --replay-features. */
 #include "xk.h"
 /* xv_x86rt.h comes through xk.h (one path: the unit is also compiled from a copy by tools/test_native_4b9d0.py) */
 #include <stdio.h>
@@ -1416,9 +1423,10 @@ static void n4_capture(const xctx *c)
 #endif
 
 /* The hook: in place of query_fused_172c95_171f94(c) (recomp/kernel/xk_query_reuse.c). */
+static int n5_parts(void);
 void xv_native_4b9d0_query(xctx *c)
 {
-    const int mode = n4_mode();
+    const int mode = n5_parts() & 1 ? n4_mode() : 0;
     const int timed = n4_timing();
 #if !defined(__vita__) && !defined(XV_NATIVE_4B9D0_TEST)
     if (X_PT == g_xpt && !(xv_scene_thread_on_helper && xv_scene_thread_on_helper()) && n4_layout(c)) n4_capture(c);
@@ -1446,8 +1454,956 @@ void xv_native_4b9d0_query(xctx *c)
     n4_budget(c, s.be); n4_count(&s);
 }
 
+/* ==== The solver's feature test: f_000864C0 (+85D10 / 85A00 / 85720 / 11120 / 111A0) =========================
+ * f_00170C10 (the collision solver under 172BF0; recomp/solver_fusion.c runs its fused copy) calls f_000864C0 once
+ * per solver iteration: for every collected feature (int16 counts at +0/+2/+4; type 0 spheres at +8 stride 0x1C,
+ * type 1 capsules at +0x1C08 stride 0x28, type 2 plane prisms at +0x4408 stride 0x68) the swept-sphere test of its
+ * type leaves a time in 864C0's frame [E-0x34] and a plane in [E-0x20..E-0x14]; the earliest hit whose plane faces
+ * the motion (plane . dir < [1F0C24]) is kept in [E-0x38], [E-0x10..E-4], [E-0x2C] (type), [E-0x28] (index), and the
+ * result record (+0 t, +4 point, +0x10 plane, +0x20 the feature's first 12 bytes; or 1.0 and start + dir) is written
+ * at the end. All x87; no other calls, no HLE.
+ * The frames of 864C0 and its callees lie in [E-0x90, E+0x14) (E: 864C0's entry esp; the arguments are the top 16
+ * bytes and are never written). The subtree's only other stores are the result record's, at the end: when it lies
+ * outside that range (checked, else the guest runs) no store can reach a frame slot but the frame's own, so slots are
+ * served from locals (every store still goes to guest memory, in the guest's order). Features, start and dir are
+ * read from guest memory at the guest's points, so aliasing with the frames reads what the guest reads; the tail from
+ * the first record store on is literal (every access translated). Registers, lazy flags (with the stale cf/of cells
+ * of inc/dec, imul and shl), x87 slots d1..d6 and the status word, and the back-edge budget as in the query above.
+ * The callees' register results other than al are dead at 864C0's exit (every exit path reloads eax/ecx/edx, the
+ * callee-saved registers come back from 864C0's pops), so they are not modelled. */
+enum { N5_ZERO = 0x1F0A68u, N5_ONE = 0x1F0A78u, N5_EPS = 0x1F0AF8u, N5_C24 = 0x1F0C24u, N5_AXES = 0x1EAF30u };
+typedef struct {
+    n4_mem m;
+    uint32_t fk, fa, fb, fr, fbits, fcfo, fcf, fofo, fof;
+    uint32_t fsp0;
+    uint16_t fsw;
+    double sl[8];              /* sl[d]: x87 slot st[(fsp0 - d) & 7] (d = 1..6 written by the subtree) */
+    uint32_t be;
+    uint32_t E;                /* 864C0's entry esp */
+    n4_stk k; uint8_t *hf;     /* the frames [E-0x90, E+0x14): hf = the host address of E when they lie in one page */
+    double zero, one, eps, c24;   /* 0x1F0A68, 0x1F0A78 (floats), 0x1F0AF8 (double), 0x1F0C24 (float) */
+    int16_t axes[12];          /* 0x1EAF30: (u, v) per (axis, side) */
+    float t, n[4];             /* 864C0's frame: [E-0x34] the time a test leaves, [E-0x20..E-0x14] its plane */
+    unsigned feats[3], hits, edges;
+} n5q;
+#define N5_LOCALS n4_mem mm_ = s->m; const n4_mem *const m = &mm_; N4_FL_LOCALS; \
+    const uint32_t fsp0 = s->fsp0; uint16_t fsw = s->fsw; uint32_t be = s->be; \
+    double x1 = s->sl[1], x2 = s->sl[2], x3 = s->sl[3], x4 = s->sl[4], x5 = s->sl[5], x6 = s->sl[6]; (void)m; (void)x6; (void)fsp0
+#define N5_SAVE() (N4_FL_SAVE(), s->fsw = fsw, s->be = be, s->sl[1] = x1, s->sl[2] = x2, s->sl[3] = x3, s->sl[4] = x4, \
+                   s->sl[5] = x5, s->sl[6] = x6)
+#define N5_LOAD() (N4_FL_LOAD(), fsw = s->fsw, be = s->be, x1 = s->sl[1], x2 = s->sl[2], x3 = s->sl[3], x4 = s->sl[4], \
+                   x5 = s->sl[5], x6 = s->sl[6])
+/* frame stores: 4-aligned slots of [E-0x90, E+0x14) (one translation, like X_M32 and like a page-split float store) */
+static inline __attribute__((always_inline)) uint8_t *n5_fp(const n5q *s, uint32_t a)
+{ return s->hf ? s->hf + (int32_t)(a - s->E) : N4_SP(&s->k, a); }
+#define N5W32(a, v) do { const uint32_t a__ = (a), v__ = (v); uint8_t *p__ = n5_fp(s, a__); n4_jlog(a__, p__, 4); memcpy(p__, &v__, 4); } while (0)
+#define N5WF(a, d) ({ const uint32_t a__ = (a); const float f__ = (float)(d); uint8_t *p__ = n5_fp(s, a__); n4_jlog(a__, p__, 4); \
+                      memcpy(p__, &f__, 4); f__; })
+/* fnstsw ax; test ah,imm (ax itself is dead after every such test in this subtree) */
+#define N5_TEST(imm) do { const uint8_t r__ = (uint8_t)((fsw >> 8) & (imm)); SETF(XK_LOGIC, 0, 0, r__, 8); } while (0)
+/* imul r32, imm (x_imul32) */
+#define N5_IMUL(a_, b_) ({ const int64_t p__ = (int64_t)(int32_t)(a_) * (int32_t)(b_); const uint32_t r__ = (uint32_t)p__; \
+                           SETF(XK_LOGIC, 0, 0, r__, 32); fcfo = fofo = 1; fcf = fof = (p__ != (int64_t)(int32_t)r__); r__; })
+#define SX16(v) ((uint32_t)(int32_t)(int16_t)(v))
+
+/* ---- f_00011120: normalize the three floats at ecx in place (v[]: a frame's floats); st0 = the length, or 0.0 when
+ * |length| < [1F0AF8]. Entered at depth 0, leaves depth 1. ---------------------------------------------------------- */
+static inline __attribute__((always_inline)) void n5_11120(n5q *restrict s, uint32_t ecx, float *v)
+{
+    N5_LOCALS;
+    x1 = v[2]; x2 = v[1]; x3 = v[0];
+    x4 = x3; x4 = x4 * x3;                   /* fld st(0); fmul st,st(1) */
+    x5 = x2; x5 = x5 * x2; x4 = x4 + x5;     /* fld st(2); fmul st,st(3); faddp */
+    x5 = x1; x5 = x5 * x1; x4 = x4 + x5;     /* fld st(3); fmul st,st(4); faddp */
+    x4 = sqrt(x4);
+    x1 = x4;                                 /* fstp st(3); fstp st(0); fstp st(0): depth 1 */
+    x2 = x1; x2 = fabs(x2);
+    FCMP(x2, s->eps, 2);                     /* fcomp qword [1F0AF8] */
+    N5_TEST(5);
+    if (!PF()) x1 = s->zero;                 /* 1116E: fstp st(0); fld [1F0A68] */
+    else {
+        x2 = s->one; x2 = x2 / x1;
+        x3 = x2; x3 = x3 * v[0]; v[0] = N5WF(ecx, x3);
+        x3 = x2; x3 = x3 * v[1]; v[1] = N5WF(ecx + 4u, x3);
+        x2 = x2 * v[2]; v[2] = N5WF(ecx + 8u, x2);
+    }
+    N5_SAVE();
+}
+
+/* ---- f_000111A0: [eax + 4k] = t * a[k] + b[k], k = 0..2 (a from guest memory at ha/a, b a frame's floats), depth 0 */
+static inline __attribute__((always_inline)) void n5_111a0(n5q *restrict s, uint32_t eax, double t, const uint8_t *ha,
+                                                            uint32_t a, const float *b, float *out)
+{
+    N5_LOCALS;
+    x1 = t; x1 = x1 * HF(ha, a, 0u, 12u); x1 = x1 + b[0]; out[0] = N5WF(eax, x1);
+    x1 = t; x1 = x1 * HF(ha, a, 4u, 12u); x1 = x1 + b[1]; out[1] = N5WF(eax + 4u, x1);
+    x1 = t; x1 = x1 * HF(ha, a, 8u, 12u); x1 = x1 + b[2]; out[2] = N5WF(eax + 8u, x1);
+    N5_SAVE();
+}
+
+/* ---- f_00085D10: type 0, moving sphere vs sphere (+0xC center, +0x18 radius). Entry esp Ec = E-0x50; eax = start,
+ * ecx = dir, esi = the record, edi = the plane E-0x20, [Ec+4] = the time E-0x34. ret 4. ------------------------------ */
+static inline __attribute__((always_inline)) unsigned n5_85d10(n5q *restrict s, uint32_t rec, uint32_t start, uint32_t dir,
+                                                                uint32_t ebx0, uint32_t ebp0)
+{
+    N5_LOCALS;
+    const uint32_t Ec = s->E - 0x50u, tp = s->E - 0x34u, np = s->E - 0x20u;
+    const uint8_t *const hr = n4_span(m, rec, 0x1Cu), *const hs = n4_span(m, start, 12u), *const hd = n4_span(m, dir, 12u);
+    unsigned al;
+    x1 = HF(hr, rec, 0xCu, 0x1Cu);
+    N5W32(Ec - 0x24u, ebx0);                                 /* push ebx */
+    x1 = x1 - HF(hs, start, 0u, 12u);
+    N5W32(Ec - 0x28u, ebp0);                                 /* push ebp; ebp = [Ec+4] */
+    const float d0 = N5WF(Ec - 0x18u, x1);
+    x1 = HF(hr, rec, 0x10u, 0x1Cu); x1 = x1 - HF(hs, start, 4u, 12u);
+    const float d1 = N5WF(Ec - 0x14u, x1);
+    x1 = HF(hr, rec, 0x14u, 0x1Cu); x1 = x1 - HF(hs, start, 8u, 12u);
+    const float d2 = N5WF(Ec - 0x10u, x1);
+    x1 = HF(hr, rec, 0x18u, 0x1Cu);                          /* radius */
+    x2 = d2; x2 = x2 * d2;
+    x3 = d0; x3 = x3 * d0; x2 = x2 + x3;
+    x3 = d1; x3 = x3 * d1; x2 = x2 + x3;
+    x3 = x1; x3 = x3 * x1;                                   /* fld st(1); fmul st,st(2) */
+    x2 = x2 - x3;                                            /* fsubp */
+    const float c0 = N5WF(Ec - 0x1Cu, x2);                   /* fstp; fstp st(0): depth 0 */
+    x1 = c0;
+    FCMP(x1, s->zero, 1); N5_TEST(0x41);
+    if (!PF()) { N5W32(tp, 0u); s->t = 0.0f; goto L_85E0E; } /* 85D74: starts inside (or on) the sphere */
+    x1 = d0; x1 = x1 * HF(hd, dir, 0u, 12u);
+    x2 = d2; x2 = x2 * HF(hd, dir, 8u, 12u); x1 = x1 + x2;
+    x2 = d1; x2 = x2 * HF(hd, dir, 4u, 12u); x1 = x1 + x2;
+    const float bb = N5WF(Ec + 4u, x1);                      /* fst [esp+2Ch]: over the time argument */
+    FCMP(x1, s->zero, 1); N5_TEST(0x41);
+    if (!ZF()) { al = 0; goto out; }                         /* 85E94 */
+    x1 = HF(hd, dir, 8u, 12u); x2 = HF(hd, dir, 4u, 12u); x3 = HF(hd, dir, 0u, 12u);
+    x4 = x3; x4 = x4 * x3;
+    x5 = x2; x5 = x5 * x2; x4 = x4 + x5;
+    x5 = x1; x5 = x5 * x1; x4 = x4 + x5;
+    const float aa = N5WF(Ec - 0x20u, x4);                   /* fstp [esp+8]; fstp st(0) x3 */
+    x1 = bb; x1 = x1 * bb;
+    x2 = aa; x2 = x2 * c0;
+    x1 = x1 - x2;                                            /* fsubp */
+    FCMP(x1, s->zero, 1); N5_TEST(1);                        /* fcom */
+    if (!ZF()) { al = 0; goto out; }                         /* 85E92: fstp st(0) */
+    x1 = sqrt(x1);
+    x1 = (double)bb - x1;                                    /* fsubr [esp+2Ch] */
+    FCMP(x1, aa, 1); N5_TEST(0x41);                          /* fcom [esp+8] */
+    if (PF()) { al = 0; goto out; }
+    x1 = x1 / aa;
+    s->t = N5WF(tp, x1);
+L_85E0E:
+    x1 = s->t;                                               /* fld [ebp]; mov bl,1 */
+    x2 = x1; x2 = x2 * HF(hd, dir, 0u, 12u);
+    x3 = x1; x3 = x3 * HF(hd, dir, 4u, 12u);
+    const float m1 = N5WF(Ec - 8u, x3);
+    { const double t_ = x2; x2 = x1; x1 = t_; }              /* fxch */
+    x2 = x2 * HF(hd, dir, 8u, 12u);
+    const float m2 = N5WF(Ec - 4u, x2);
+    x1 = x1 - d0; s->n[0] = N5WF(np, x1);
+    x1 = m1; x1 = x1 - d1; s->n[1] = N5WF(np + 4u, x1);
+    x1 = m2; x1 = x1 - d2; s->n[2] = N5WF(np + 8u, x1);
+    N5W32(Ec - 0x2Cu, 0x85E4Cu);                             /* call 00011120h */
+    N5_SAVE();
+    n5_11120(s, np, s->n);
+    N5_LOAD();
+    FCMP(x1, s->zero, 1); N5_TEST(0x44);
+    if (!PF()) {                                             /* a zero normal: (0, 0, 1) */
+        N5W32(np, 0u); N5W32(np + 4u, 0u); N5W32(np + 8u, 0x3F800000u);
+        s->n[0] = 0.0f; s->n[1] = 0.0f; s->n[2] = 1.0f;
+    }
+    x1 = HF(hr, rec, 0x14u, 0x1Cu); x1 = x1 * s->n[2];
+    x2 = HF(hr, rec, 0x10u, 0x1Cu); x2 = x2 * s->n[1];
+    x1 = x1 + x2;
+    x2 = HF(hr, rec, 0xCu, 0x1Cu); x2 = x2 * s->n[0];
+    x1 = x1 + x2;
+    x1 = x1 + HF(hr, rec, 0x18u, 0x1Cu);
+    s->n[3] = N5WF(np + 0xCu, x1);
+    al = 1;
+out:
+    N5_SAVE();
+    return al;
+}
+
+/* ---- f_00085A00: type 1, moving sphere vs capsule (+0xC point, +0x18 axis, +0x24 radius). Entry esp Ec = E-0x50;
+ * edx = start, ecx = dir, edi = the record, ebx = the plane E-0x20, [Ec+4] = the time E-0x34. ret 4. -------------- */
+static inline __attribute__((always_inline)) unsigned n5_85a00(n5q *restrict s, uint32_t rec, uint32_t start, uint32_t dir,
+                                                                uint32_t esi0)
+{
+    N5_LOCALS;
+    const uint32_t Ec = s->E - 0x50u, tp = s->E - 0x34u, np = s->E - 0x20u;
+    const uint8_t *const hr = n4_span(m, rec, 0x28u), *const hs = n4_span(m, start, 12u), *const hd = n4_span(m, dir, 12u);
+    unsigned al;
+    x1 = HF(hr, rec, 0x20u, 0x28u);
+    N5W32(Ec - 0x30u, esi0);                                 /* push esi; esi = rec + 0x18 (the axis) */
+    x2 = HF(hr, rec, 0x1Cu, 0x28u);
+    x3 = HF(hr, rec, 0x18u, 0x28u);
+    x4 = x3; x4 = x4 * x3;
+    x5 = x2; x5 = x5 * x2; x4 = x4 + x5;
+    x5 = x1; x5 = x5 * x1; x4 = x4 + x5;
+    const float aa = N5WF(Ec - 0x20u, x4);                   /* [esp+10h]; fstp st(0) x3 */
+    x1 = HF(hr, rec, 0x20u, 0x28u); x1 = x1 * HF(hd, dir, 8u, 12u);
+    x2 = HF(hr, rec, 0x1Cu, 0x28u); x2 = x2 * HF(hd, dir, 4u, 12u); x1 = x1 + x2;
+    x2 = HF(hr, rec, 0x18u, 0x28u); x2 = x2 * HF(hd, dir, 0u, 12u); x1 = x1 + x2;
+    const float ad = N5WF(Ec - 0x24u, x1);                   /* [esp+0Ch] */
+    x1 = HF(hd, dir, 8u, 12u); x2 = HF(hd, dir, 4u, 12u); x3 = HF(hd, dir, 0u, 12u);
+    x4 = x3; x4 = x4 * x3;
+    x5 = x2; x5 = x5 * x2; x4 = x4 + x5;
+    x5 = x1; x5 = x5 * x1; x4 = x4 + x5;
+    x4 = x4 * aa;
+    x5 = ad; x5 = x5 * ad;
+    x4 = x4 - x5;
+    const float A = N5WF(Ec - 0x1Cu, x4);                    /* [esp+14h]; fstp st(0) x3 */
+    x1 = A;
+    FCMP(x1, s->zero, 1); N5_TEST(0x44);
+    if (!PF()) { al = 0; goto out; }                         /* jnp 85B2D: A == 0 */
+    x1 = HF(hs, start, 0u, 12u); x1 = x1 - HF(hr, rec, 0xCu, 0x28u);
+    const float w0 = N5WF(Ec - 0x18u, x1);
+    x1 = HF(hs, start, 4u, 12u); x1 = x1 - HF(hr, rec, 0x10u, 0x28u);
+    const float w1 = N5WF(Ec - 0x14u, x1);
+    x1 = HF(hs, start, 8u, 12u); x1 = x1 - HF(hr, rec, 0x14u, 0x28u);
+    const float w2 = N5WF(Ec - 0x10u, x1);                   /* fst [esp+20h] */
+    x1 = x1 * HF(hr, rec, 0x20u, 0x28u);
+    x2 = w1; x2 = x2 * HF(hr, rec, 0x1Cu, 0x28u); x1 = x1 + x2;
+    x2 = w0; x2 = x2 * HF(hr, rec, 0x18u, 0x28u); x1 = x1 + x2;
+    const float wa = N5WF(Ec - 0x28u, x1);                   /* fst [esp+8] */
+    x1 = x1 * ad;
+    x2 = w1; x2 = x2 * HF(hd, dir, 4u, 12u);
+    x3 = w0; x3 = x3 * HF(hd, dir, 0u, 12u); x2 = x2 + x3;
+    x3 = w2; x3 = x3 * HF(hd, dir, 8u, 12u); x2 = x2 + x3;
+    x2 = x2 * aa;
+    x1 = x1 - x2;                                            /* B */
+    x2 = HF(hr, rec, 0x24u, 0x28u);                          /* radius */
+    x3 = x1; x3 = x3 * x1;                                   /* fld st(1); fmul st,st(2) */
+    x4 = w2; x4 = x4 * w2;
+    x5 = w1; x5 = x5 * w1; x4 = x4 + x5;
+    x5 = w0; x5 = x5 * w0; x4 = x4 + x5;
+    x5 = x2; x5 = x5 * x2;                                   /* fld st(2); fmul st,st(3) */
+    x4 = x4 - x5;
+    x4 = x4 * aa;
+    x5 = wa; x5 = x5 * wa;
+    x4 = x4 - x5;
+    x4 = x4 * A;
+    x3 = x3 - x4;                                            /* fsubp: depth 3 */
+    x2 = x3;                                                 /* fstp st(1): depth 2 */
+    FCMP(x2, s->zero, 2); N5_TEST(5);                        /* fcom */
+    if (!PF()) { al = 0; goto out; }                         /* 85B29: fstp st(0) x2 */
+    x2 = sqrt(x2);
+    x3 = s->one; x3 = x3 / A;
+    x4 = x1; x4 = x4 - x2; x4 = x4 * x3;                     /* fld st(2); fsub st,st(2); fmul st,st(1) */
+    uint32_t t1 = n4_f2u(N5WF(Ec - 0x2Cu, x4));             /* [esp+4] */
+    { const double t_ = x3; x3 = x2; x2 = t_; }              /* fxch */
+    x1 = x1 + x3;                                            /* faddp st(2),st: depth 2 */
+    { const double t_ = x2; x2 = x1; x1 = t_; }              /* fxch */
+    x1 = x1 * x2;                                            /* fmulp: depth 1 */
+    x2 = n4_u2f(t1);
+    FCMP(x2, s->one, 2); N5_TEST(0x41);
+    if (ZF()) { be++; al = 0; goto out; }                    /* je 85B2B (back-edge): t1 > 1 */
+    FCMP(x1, s->zero, 1); N5_TEST(5);                        /* fcom */
+    if (!PF()) { be++; al = 0; goto out; }                   /* jnp 85B2B: t2 < 0 */
+    x2 = n4_u2f(t1);
+    FCMP(x2, s->zero, 2); N5_TEST(5);
+    if (!PF()) { t1 = 0; N5W32(Ec - 0x2Cu, 0u); }            /* t1 < 0 */
+    FCMP(x1, s->one, 1); N5_TEST(0x41);                      /* fcom [1F0A78] */
+    if (ZF()) x1 = s->one;                                   /* t2 > 1: fstp st(0); fld 1.0 */
+    x2 = ad;
+    FCMP(x2, s->zero, 2); N5_TEST(0x44);
+    if (!PF()) {                                             /* 85C52: ad == 0 (fstp st(0): depth 0) */
+        x1 = wa;
+        FCMP(x1, s->zero, 1); N5_TEST(5);
+        if (!PF()) { be++; al = 0; goto out; }               /* jnp 85B2D */
+        x1 = wa;
+        FCMP(x1, aa, 1); N5_TEST(0x41);
+        if (ZF()) { be++; al = 0; goto out; }                /* je 85B2D */
+        goto L_85C7C;
+    }
+    x2 = s->one; x2 = x2 / ad;
+    x3 = wa; x3 = x3 * x2; x3 = -x3;
+    const float s1 = N5WF(Ec - 0x1Cu, x3);                   /* [esp+14h] (over A) */
+    x3 = aa; x3 = x3 - wa; x3 = x3 * x2;
+    const float s2 = N5WF(Ec - 0x28u, x3);                   /* [esp+8] (over wa); fstp st(0): depth 1 */
+    x2 = ad;
+    FCMP(x2, s->zero, 2);                                    /* fcomp */
+    x2 = n4_u2f(t1);                                         /* fld [esp+4] */
+    N5_TEST(0x41);
+    if (ZF()) {                                              /* 85BF0: ad > 0 */
+        FCMP(x2, s1, 2); N5_TEST(5);                         /* fcomp [esp+14h] */
+        if (!PF()) { t1 = n4_f2u(s1); N5W32(Ec - 0x2Cu, t1); }
+        FCMP(x1, s2, 1); N5_TEST(0x41);                      /* fcom [esp+8] */
+        if (ZF()) x1 = s2;                                   /* fstp st(0); fld [esp+8] */
+    } else {                                                 /* 85C16 */
+        FCMP(x2, s2, 2); N5_TEST(5);                         /* fcomp [esp+8] */
+        if (!PF()) { t1 = n4_f2u(s2); N5W32(Ec - 0x2Cu, t1); }
+        FCMP(x1, s1, 1); N5_TEST(0x41);                      /* fcom [esp+14h] */
+        if (ZF()) x1 = s1;
+    }
+    x2 = n4_u2f(t1);                                         /* 85C3A: fld [esp+4]; fcomp; fstp st(0) */
+    FCMP(x2, x1, 2); N5_TEST(0x41);
+    if (ZF()) { al = 0; goto out; }                          /* t1 > t2 */
+L_85C7C:
+    {
+        const uint32_t e = Ec - 0x30u;                       /* esp here: [esp+k] = e + k */
+        N5W32(tp, t1); s->t = n4_u2f(t1);                    /* mov eax,[esp+4]; mov edx,[esp+34h]; mov [edx],eax */
+        N5W32(e - 4u, t1);                                   /* push eax: the argument */
+        N5W32(e - 8u, 0x85C94u);                             /* call 000111A0h: eax = esp+28h, edx = esp+1Ch (w) */
+        const float w[3] = { w0, w1, w2 };
+        float p[3];
+        N5_SAVE();
+        n5_111a0(s, Ec - 0xCu, n4_u2f(t1), hd, dir, w, p);   /* p = [Ec-0xC..Ec-4] */
+        N5_LOAD();
+        x1 = p[1]; x1 = x1 * HF(hr, rec, 0x1Cu, 0x28u);      /* after ret 4: esp = e */
+        N5W32(e - 4u, dir);                                  /* push ecx */
+        x2 = p[2]; x2 = x2 * HF(hr, rec, 0x20u, 0x28u);
+        x1 = x1 + x2;
+        x2 = p[0]; x2 = x2 * HF(hr, rec, 0x18u, 0x28u);
+        x1 = x1 + x2;
+        x1 = x1 / aa;                                        /* fdiv [esp+14h] = Ec-0x20 */
+        x1 = -x1;
+        const float kk = N5WF(e - 4u, x1);                   /* fstp [esp]: over the pushed ecx */
+        N5W32(e - 8u, 0x85CC3u);                             /* call 000111A0h: eax = the plane, ecx = the axis, edx = p */
+        N5_SAVE();
+        n5_111a0(s, np, kk, hr ? hr + 0x18 : NULL, rec + 0x18u, p, s->n);
+        N5_LOAD();
+        N5W32(e - 4u, 0x85CCAu);                             /* call 00011120h */
+        N5_SAVE();
+        n5_11120(s, np, s->n);
+        N5_LOAD();
+        FCMP(x1, s->zero, 1); N5_TEST(0x44);
+        if (!PF()) {                                         /* a zero normal: (1, 0, 0) */
+            N5W32(np, 0x3F800000u); N5W32(np + 4u, 0u); N5W32(np + 8u, 0u);
+            s->n[0] = 1.0f; s->n[1] = 0.0f; s->n[2] = 0.0f;
+        }
+        x1 = HF(hr, rec, 0x14u, 0x28u); x1 = x1 * s->n[2];
+        x2 = HF(hr, rec, 0x10u, 0x28u); x2 = x2 * s->n[1];
+        x1 = x1 + x2;
+        x2 = HF(hr, rec, 0xCu, 0x28u); x2 = x2 * s->n[0];
+        x1 = x1 + x2;
+        x1 = x1 + HF(hr, rec, 0x24u, 0x28u);
+        s->n[3] = N5WF(np + 0xCu, x1);
+        al = 1;
+    }
+out:
+    N5_SAVE();
+    return al;
+}
+
+/* ---- f_00085720: type 2, moving sphere vs a plane prism (+0xC plane, +0x18 d, +0x1C thickness, +0x20 axis word,
+ * +0x22 side byte, +0x24 vertex count, +0x28 the 2D polygon (u, v) per vertex). Entry esp Ec = E-0x54; ecx = the
+ * record, eax = start, edx = dir, [Ec+4] = the time E-0x34, [Ec+8] = the plane E-0x20. ret 8. -------------------- */
+static inline __attribute__((always_inline)) unsigned n5_85720(n5q *restrict s, uint32_t rec, uint32_t start, uint32_t dir,
+                                                                uint32_t ebp0, uint32_t esi0, uint32_t edi0)
+{
+    N5_LOCALS;
+    const uint32_t Ec = s->E - 0x54u, tp = s->E - 0x34u, np = s->E - 0x20u;
+    const uint8_t *const hr = n4_span(m, rec, 0x28u), *const hs = n4_span(m, start, 12u), *const hd = n4_span(m, dir, 12u);
+    unsigned al;
+    uint32_t tmin, tmax;                                     /* [Ec+8] (over the plane argument), [Ec-0x28]: bits */
+    float t0 = 0.0f;
+    x1 = HF(hr, rec, 0x10u, 0x28u);
+    N5W32(Ec - 0x2Cu, ebp0);                                 /* push ebp */
+    N5W32(Ec - 0x30u, esi0);                                 /* push esi; esi = start */
+    x1 = x1 * HF(hs, start, 4u, 12u);                        /* ebp = [Ec+8] = the plane */
+    x2 = HF(hr, rec, 0x14u, 0x28u);
+    N5W32(Ec - 0x34u, edi0);                                 /* push edi */
+    x2 = x2 * HF(hs, start, 8u, 12u);
+    tmin = 0; N5W32(Ec + 8u, 0u);
+    tmax = 0x3F800000u; N5W32(Ec - 0x28u, 0x3F800000u);
+    x1 = x1 + x2;
+    x2 = HF(hs, start, 0u, 12u); x2 = x2 * HF(hr, rec, 0xCu, 0x28u);
+    x1 = x1 + x2;
+    x1 = x1 - HF(hr, rec, 0x18u, 0x28u);
+    const float dist = N5WF(Ec - 0x24u, x1);
+    x1 = HF(hr, rec, 0x14u, 0x28u); x1 = x1 * HF(hd, dir, 8u, 12u);
+    x2 = HF(hr, rec, 0x10u, 0x28u); x2 = x2 * HF(hd, dir, 4u, 12u); x1 = x1 + x2;
+    x2 = HF(hd, dir, 0u, 12u); x2 = x2 * HF(hr, rec, 0xCu, 0x28u); x1 = x1 + x2;
+    const float nd = N5WF(Ec - 0x10u, x1);                   /* fst [esp+24h] */
+    FCMP(x1, s->zero, 1); N5_TEST(0x44);
+    if (!PF()) goto L_8582A;                                 /* nd == 0 */
+    x1 = s->one; x1 = x1 / nd;
+    x2 = dist; x2 = x2 * x1; x2 = -x2;
+    t0 = N5WF(Ec - 0x18u, x2);                               /* [esp+1Ch] */
+    x2 = dist; x2 = x2 - HF(hr, rec, 0x1Cu, 0x28u);
+    x1 = x1 * x2;                                            /* fmulp */
+    x1 = -x1;                                                /* t1 */
+    x2 = nd;
+    FCMP(x2, s->zero, 2);                                    /* fcomp */
+    x2 = s->zero;                                            /* fld [1F0A68] */
+    N5_TEST(0x41);
+    if (ZF()) {                                              /* 857BA: nd > 0 */
+        FCMP(x2, t0, 2); N5_TEST(5);                         /* fcomp [esp+1Ch] */
+        if (!PF()) { tmin = n4_f2u(t0); N5W32(Ec + 8u, tmin); }
+        x2 = s->one;
+        FCMP(x2, x1, 2); N5_TEST(0x41);                      /* fcomp: 1 vs t1 */
+        if (ZF()) tmax = n4_f2u(N5WF(Ec - 0x28u, x1));       /* 857DC: fstp [esp+0Ch]; else 8580E: fstp st(0) */
+    } else {                                                 /* 857E2 */
+        FCMP(x2, x1, 2); N5_TEST(5);                         /* fcomp: 0 vs t1 */
+        if (!PF()) tmin = n4_f2u(N5WF(Ec + 8u, x1));         /* 857EB: fstp [esp+3Ch]; else 857F1: fstp st(0) */
+        x1 = s->one;
+        FCMP(x1, t0, 1); N5_TEST(0x41);                      /* fcomp [esp+1Ch] */
+        if (ZF()) { tmax = n4_f2u(t0); N5W32(Ec - 0x28u, tmax); }
+    }
+    x1 = n4_u2f(tmin);                                       /* 85810 */
+    FCMP(x1, n4_u2f(tmax), 1); N5_TEST(0x41);
+    if (!ZF()) goto L_85849;
+L_8581F:
+    al = 0;                                                  /* pop edi; pop esi; xor al,al; pop ebp; ret 8 */
+    goto out;
+L_8582A:
+    x1 = dist;
+    FCMP(x1, s->zero, 1); N5_TEST(5);
+    if (!PF()) { be++; goto L_8581F; }                       /* below the plane */
+    x1 = dist;
+    FCMP(x1, HF(hr, rec, 0x1Cu, 0x28u), 1); N5_TEST(1);
+    if (ZF()) { be++; goto L_8581F; }                        /* beyond the thickness */
+L_85849: {
+    float P0[3], D[3];
+    x1 = dist; x1 = -x1;
+    x2 = x1; x2 = x2 * HF(hr, rec, 0xCu, 0x28u); x2 = x2 + HF(hs, start, 0u, 12u);
+    P0[0] = N5WF(Ec - 0x24u, x2);
+    x2 = x1; x2 = x2 * HF(hr, rec, 0x10u, 0x28u); x2 = x2 + HF(hs, start, 4u, 12u);
+    P0[1] = N5WF(Ec - 0x20u, x2);
+    x1 = x1 * HF(hr, rec, 0x14u, 0x28u); x1 = x1 + HF(hs, start, 8u, 12u);
+    const uint16_t axis = H16(hr, rec, 0x20u, 0x28u);       /* mov si,[ecx+20h] */
+    P0[2] = N5WF(Ec - 0x1Cu, x1);
+    x1 = nd; x1 = -x1;
+    x2 = x1; x2 = x2 * HF(hr, rec, 0xCu, 0x28u); x2 = x2 + HF(hd, dir, 0u, 12u);
+    D[0] = N5WF(Ec - 0xCu, x2);
+    x2 = x1; x2 = x2 * HF(hr, rec, 0x10u, 0x28u); x2 = x2 + HF(hd, dir, 4u, 12u);
+    D[1] = N5WF(Ec - 8u, x2);
+    x1 = x1 * HF(hr, rec, 0x14u, 0x28u); x1 = x1 + HF(hd, dir, 8u, 12u);
+    const uint8_t side = H8(hr, rec, 0x22u, 0x28u);         /* mov dl,[ecx+22h] */
+    uint32_t ix = SHL32((uint32_t)side + SX16(axis) * 2u, 2u);   /* movzx edi,dl; lea eax,[edi+eax*2]; shl eax,2 */
+    D[2] = N5WF(Ec - 4u, x1);
+    uint32_t u, v;
+    if (ix <= 20u) { u = SX16(s->axes[ix >> 1]); v = SX16(s->axes[(ix >> 1) + 1u]); }
+    else { u = SX16(n4_r16(m, ix + N5_AXES)); v = SX16(n4_r16(m, ix + N5_AXES + 2u)); }
+    x1 = u < 3u ? (double)P0[u] : n4_rf(m, Ec - 0x24u + u * 4u);   /* fld [esp+edi*4+10h] */
+    const uint32_t n = H32(hr, rec, 0x24u, 0x28u);          /* mov edi,[ecx+24h] */
+    const float Pu = N5WF(Ec - 0x18u, x1);
+    x1 = v < 3u ? (double)P0[v] : n4_rf(m, Ec - 0x24u + v * 4u);
+    ix = SHL32((uint32_t)side + SX16(axis) * 2u, 2u);        /* the same index again (and shl's flags again) */
+    SETF(XK_LOGIC, 0, 0, n, 32);                             /* test edi,edi */
+    if (ix <= 20u) { u = SX16(s->axes[ix >> 1]); v = SX16(s->axes[(ix >> 1) + 1u]); }
+    else { u = SX16(n4_r16(m, ix + N5_AXES)); v = SX16(n4_r16(m, ix + N5_AXES + 2u)); }
+    const float Pv = N5WF(Ec - 0x14u, x1);
+    x1 = u < 3u ? (double)D[u] : n4_rf(m, Ec - 0xCu + u * 4u);
+    const float Du = N5WF(Ec - 0x24u, x1);
+    x1 = v < 3u ? (double)D[v] : n4_rf(m, Ec - 0xCu + v * 4u);
+    const float Dv = N5WF(Ec - 0x20u, x1);
+    if (ZF() || SF() != OF()) goto L_859C8;                  /* jle: no vertices */
+    const uint32_t vb = rec + 0x28u, vlen = n * 8u;
+    const uint8_t *const hv = n <= 0x1F0u ? n4_span(m, vb, vlen) : NULL;
+    uint32_t i = 1, oc = 0;                                  /* esi; edx = vb + oc */
+    for (;;) {
+        SETF(XK_SUB, i, n, i - n, 32);                       /* cmp esi,edi */
+        const uint32_t ge = SF() == OF();                    /* xor eax,eax; setge al */
+        INCDEC_CF();                                         /* dec eax */
+        const uint32_t nx = ((ge - 1u) & i) * 8u;            /* and eax,esi: the next vertex (0 after the last) */
+        x1 = HF(hv, vb, nx, vlen); x1 = x1 - HF(hv, vb, oc, vlen);
+        x2 = HF(hv, vb, nx + 4u, vlen); x2 = x2 - HF(hv, vb, oc + 4u, vlen);
+        x3 = Pu; x3 = x3 - HF(hv, vb, oc, vlen);
+        x4 = Pv; x4 = x4 - HF(hv, vb, oc + 4u, vlen);
+        x5 = x2; x5 = x5 * Du;                               /* fld st(2); fmul [esp+10h] */
+        x6 = Dv; x6 = x6 * x1;                               /* fld [esp+14h]; fmul st,st(5) */
+        x5 = x5 - x6;                                        /* fsubp */
+        const float den = N5WF(Ec - 0x10u, x5);              /* fstp [esp+24h] */
+        x1 = x1 * x4;                                        /* fmulp st(3),st */
+        { const double t_ = x3; x3 = x2; x2 = t_; }          /* fxch */
+        x3 = x3 * x2;                                        /* fmul st,st(1) */
+        x1 = x1 - x3;                                        /* fsubp st(2),st; fstp st(0): depth 1 */
+        s->edges++;
+        x2 = den;
+        FCMP(x2, s->zero, 2); N5_TEST(0x44);
+        if (!PF()) {                                         /* 859A8: den == 0 */
+            FCMP(x1, s->zero, 1); N5_TEST(5);
+            if (!PF()) { be++; goto L_8581F; }
+        } else {
+            x1 = x1 / den;
+            x2 = den;
+            FCMP(x2, s->zero, 2); N5_TEST(5);
+            if (!PF()) {                                     /* 8596B: den < 0 */
+                x2 = n4_u2f(tmin);
+                FCMP(x2, x1, 2); N5_TEST(5);
+                if (!PF()) tmin = n4_f2u(N5WF(Ec + 8u, x1));
+            } else {                                         /* 8597E */
+                x2 = n4_u2f(tmax);
+                FCMP(x2, x1, 2); N5_TEST(0x41);
+                if (ZF()) tmax = n4_f2u(N5WF(Ec - 0x28u, x1));
+            }
+            x1 = n4_u2f(tmin);                               /* 85993 */
+            FCMP(x1, n4_u2f(tmax), 1); N5_TEST(0x41);
+            if (ZF()) { be++; goto L_8581F; }
+        }
+        oc += 8u;                                            /* add edx,8 */
+        INCDEC_CF(); i += 1u;                                /* inc esi */
+        SETF(XK_SUB, i - 1u, n, i - 1u - n, 32);             /* lea eax,[esi-1]; cmp eax,edi */
+        if (SF() == OF()) break;
+        be++;                                                /* jl 85905 */
+    }
+L_859C8:
+    N5W32(tp, tmin); s->t = n4_u2f(tmin);                    /* mov edx,[esp+3Ch]; mov eax,[esp+38h]; mov [eax],edx */
+    {
+        const uint32_t a0 = H32(hr, rec, 0xCu, 0x28u); N5W32(np, a0);
+        const uint32_t a1 = H32(hr, rec, 0x10u, 0x28u); N5W32(np + 4u, a1);
+        const uint32_t a2 = H32(hr, rec, 0x14u, 0x28u); N5W32(np + 8u, a2);
+        s->n[0] = n4_u2f(a0); s->n[1] = n4_u2f(a1); s->n[2] = n4_u2f(a2);
+    }
+    x1 = HF(hr, rec, 0x18u, 0x28u); x1 = x1 + HF(hr, rec, 0x1Cu, 0x28u);
+    s->n[3] = N5WF(np + 0xCu, x1);
+    al = 1;
+    }
+out:
+    N5_SAVE();
+    return al;
+}
+
+/* ---- f_000864C0: the loop over the features, the best hit, the result record. ret 10h. ------------------------- */
+static inline __attribute__((always_inline)) void n5_864c0(n5q *restrict s, n4r *restrict R)
+{
+    N5_LOCALS;
+    const uint32_t E = s->E;
+    uint32_t eax = R->eax, ecx = R->ecx, edx = R->edx, ebx = R->ebx, ebp = R->ebp, esi = R->esi, edi = R->edi;
+    const uint32_t sv_ebx = ebx, sv_ebp = ebp, sv_esi = esi, sv_edi = edi;
+    /* the arguments [E+4..E+0x10] (never written: every store of the subtree is below E or in the record) */
+    const uint32_t feat = n4_r32(m, E + 4u), start = n4_r32(m, E + 8u), dir = n4_r32(m, E + 0xCu), res = n4_r32(m, E + 0x10u);
+    const uint8_t *const hd = n4_span(m, dir, 12u);
+    unsigned al;
+    uint32_t best_t, best_type, best_idx, cntp, tc, bn[4] = { 0, 0, 0, 0 };
+    N5W32(E - 0x3Cu, ebx); N5W32(E - 0x40u, ebp); N5W32(E - 0x44u, esi); N5W32(E - 0x48u, edi);   /* sub esp,38h; push x4 */
+    edi = 0xFFFFFFFFu;                                       /* or edi,-1 */
+    ebx = 0;                                                 /* xor ebx,ebx */
+    best_type = edi; N5W32(E - 0x2Cu, edi);
+    best_idx = edi; N5W32(E - 0x28u, edi);
+    best_t = 0x7F7FFFFFu; N5W32(E - 0x38u, 0x7F7FFFFFu);
+    tc = ebx; N5W32(E - 0x30u, ebx);
+L_864E0:
+    esi = feat;
+    eax = esi + SX16(ebx) * 2u;                              /* movsx eax,bx; lea eax,[esi+eax*2] */
+    ebp = 0;
+    { const uint16_t a_ = n4_r16(m, eax), b_ = (uint16_t)ebp; SETF(XK_SUB, a_, b_, (uint16_t)(a_ - b_), 16); }
+    cntp = eax; N5W32(E - 0x24u, eax);
+    if (ZF() || SF() != OF()) goto L_86614;                  /* no features of this type */
+L_86500:
+    SETF(XK_LOGIC, 0, 0, (uint16_t)ebx, 16);                 /* test bx,bx */
+    if (!ZF()) goto L_8652E;
+    eax = start;                                             /* type 0 */
+    edx = N5_IMUL(SX16(ebp), 0x1Cu);
+    ecx = E - 0x34u; N5W32(E - 0x4Cu, ecx);                  /* lea ecx,[esp+14h]; push ecx */
+    ecx = dir;
+    esi = edx + esi + 8u;
+    edi = E - 0x20u;
+    N5W32(E - 0x50u, 0x86525u);                              /* call 00085D10h */
+    N5_SAVE();
+    al = n5_85d10(s, esi, eax, ecx, ebx, ebp);
+    N5_LOAD();
+    s->feats[0]++;
+    SETF(XK_LOGIC, 0, 0, (uint8_t)al, 8);                    /* test al,al */
+    if (!ZF()) goto L_86596;
+    goto L_865FE;
+L_8652E:
+    { const uint16_t a_ = (uint16_t)ebx; SETF(XK_SUB, a_, 1u, (uint16_t)(a_ - 1u), 16); }
+    if (!ZF()) goto L_86564;
+    edx = start;                                             /* type 1 */
+    eax = E - 0x34u; N5W32(E - 0x4Cu, eax);                  /* lea eax,[esp+14h]; push eax */
+    eax = SX16(ebp);
+    ecx = eax + eax * 4u;
+    edi = esi + ecx * 8u + 0x1C08u;
+    ecx = dir;
+    ebx = E - 0x20u;
+    N5W32(E - 0x50u, 0x86557u);                              /* call 00085A00h */
+    N5_SAVE();
+    al = n5_85a00(s, edi, edx, ecx, esi);
+    N5_LOAD();
+    s->feats[1]++;
+    SETF(XK_LOGIC, 0, 0, (uint8_t)al, 8);                    /* test al,al */
+    ebx = tc;                                                /* mov ebx,[esp+18h]: the type counter */
+    if (!ZF()) goto L_86596;
+    goto L_865FE;
+L_86564:
+    { const uint16_t a_ = (uint16_t)ebx; SETF(XK_SUB, a_, 2u, (uint16_t)(a_ - 2u), 16); }
+    if (!ZF()) goto L_865FE;
+    ecx = N5_IMUL(SX16(ebp), 0x68u);                         /* type 2 */
+    edx = E - 0x20u; N5W32(E - 0x4Cu, edx);                  /* lea edx,[esp+28h]; push edx */
+    edx = dir;
+    eax = E - 0x34u; N5W32(E - 0x50u, eax);                  /* lea eax,[esp+18h]; push eax */
+    eax = start;
+    ecx = ecx + esi + 0x4408u;
+    N5W32(E - 0x54u, 0x86592u);                              /* call 00085720h */
+    N5_SAVE();
+    al = n5_85720(s, ecx, eax, edx, ebp, esi, edi);
+    N5_LOAD();
+    s->feats[2]++;
+    SETF(XK_LOGIC, 0, 0, (uint8_t)al, 8);                    /* test al,al */
+    if (ZF()) goto L_865FE;
+L_86596:
+    x1 = n4_u2f(best_t);                                     /* fld [esp+10h]; fcomp [esp+14h] */
+    FCMP(x1, s->t, 1); N5_TEST(0x41);
+    if (!ZF()) goto L_865FE;                                 /* not earlier */
+    x1 = s->n[1]; x1 = x1 * HF(hd, dir, 4u, 12u);
+    x2 = s->n[2]; x2 = x2 * HF(hd, dir, 8u, 12u);
+    x1 = x1 + x2;
+    x2 = s->n[0]; x2 = x2 * HF(hd, dir, 0u, 12u);
+    x1 = x1 + x2;
+    FCMP(x1, s->c24, 1); N5_TEST(5);                         /* fcomp [1F0C24] */
+    if (PF()) goto L_865FE;                                  /* the plane does not face the motion */
+    /* integer copies of the frame's words (their bits, as the guest moves them) */
+    memcpy(&best_t, n5_fp(s, E - 0x34u), 4);
+    for (unsigned k_ = 0; k_ < 4; ++k_) memcpy(&bn[k_], n5_fp(s, E - 0x20u + 4u * k_), 4);
+    N5W32(E - 0x38u, best_t);
+    N5W32(E - 0x10u, bn[0]);
+    best_type = ebx; N5W32(E - 0x2Cu, ebx);
+    best_idx = ebp; N5W32(E - 0x28u, ebp);
+    N5W32(E - 0xCu, bn[1]);
+    N5W32(E - 8u, bn[2]);
+    N5W32(E - 4u, bn[3]);
+    s->hits++;
+L_865FE:
+    ecx = cntp; esi = feat;
+    INCDEC_CF(); ebp += 1u;                                  /* inc ebp */
+    { const uint16_t a_ = (uint16_t)ebp, b_ = n4_r16(m, ecx); SETF(XK_SUB, a_, b_, (uint16_t)(a_ - b_), 16); }
+    if (SF() != OF()) { be++; goto L_86500; }                /* jl 86500 */
+    edi = best_idx;                                          /* mov edi,[esp+20h] */
+L_86614:
+    INCDEC_CF(); ebx += 1u;                                  /* inc ebx */
+    { const uint16_t a_ = (uint16_t)ebx; SETF(XK_SUB, a_, 3u, (uint16_t)(a_ - 3u), 16); }
+    tc = ebx; N5W32(E - 0x30u, ebx);
+    if (SF() != OF()) { be++; goto L_864E0; }                /* jl 864E0 */
+    { const uint16_t a_ = (uint16_t)best_type; SETF(XK_SUB, a_, 0xFFFFu, (uint16_t)(a_ - 0xFFFFu), 16); }
+    ecx = dir; eax = res;
+    if (ZF()) {                                              /* 866E7: no hit */
+        edx = start;
+        n4_w32(m, eax, 0x3F800000u);
+        x1 = n4_rf(m, edx); x1 = x1 + n4_rf(m, ecx);
+        n4_wf(m, eax + 4u, x1);
+        x1 = n4_rf(m, edx + 4u); x1 = x1 + n4_rf(m, ecx + 4u);
+        n4_wf(m, eax + 8u, x1);
+        x1 = n4_rf(m, edx + 8u); x1 = x1 + n4_rf(m, ecx + 8u);
+        n4_wf(m, eax + 0xCu, x1);
+        LO8(eax, 0);                                         /* xor al,al */
+        goto done;
+    }
+    /* 86637: the hit */
+    edx = best_t;
+    x1 = n4_u2f(best_t);
+    n4_w32(m, eax, edx);
+    x1 = x1 * n4_rf(m, ecx);
+    edx = start;
+    x1 = x1 + n4_rf(m, edx);
+    n4_wf(m, eax + 4u, x1);
+    x1 = n4_u2f(best_t); x1 = x1 * n4_rf(m, ecx + 4u); x1 = x1 + n4_rf(m, edx + 4u);
+    n4_wf(m, eax + 8u, x1);
+    x1 = n4_u2f(best_t); x1 = x1 * n4_rf(m, ecx + 8u);
+    ecx = eax + 0x10u;
+    x1 = x1 + n4_rf(m, edx + 8u);
+    edx = bn[0];
+    n4_wf(m, eax + 0xCu, x1);
+    n4_w32(m, ecx, edx); edx = bn[1];
+    n4_w32(m, ecx + 4u, edx); edx = bn[2];
+    n4_w32(m, ecx + 8u, edx); edx = bn[3];
+    n4_w32(m, ecx + 0xCu, edx);
+    ecx = SX16(best_type);                                   /* movsx ecx,word ptr [esp+1Ch] */
+    SETF(XK_SUB, ecx, 0u, ecx, 32);                          /* sub ecx,0 */
+    if (ZF()) {                                              /* 866B2 */
+        edx = N5_IMUL(SX16(edi), 0x1Cu);
+        ecx = edx + esi + 8u;
+    } else {
+        { const uint32_t cf_ = CF(), a_ = ecx; ecx = a_ - 1u; SETF(XK_SUB, a_, 1u, ecx, 32); fcfo = 1; fcf = cf_; }   /* dec ecx */
+        if (ZF()) {                                          /* 866A3 */
+            ecx = SX16(edi);
+            edx = ecx + ecx * 4u;
+            ecx = esi + edx * 8u + 0x1C08u;
+        } else {
+            { const uint32_t cf_ = CF(), a_ = ecx; ecx = a_ - 1u; SETF(XK_SUB, a_, 1u, ecx, 32); fcfo = 1; fcf = cf_; }
+            if (!ZF()) goto done;                            /* jne 866DB */
+            ecx = N5_IMUL(SX16(edi), 0x68u);
+            ecx = ecx + esi + 0x4408u;
+        }
+    }
+    edx = n4_r32(m, ecx); n4_w32(m, eax + 0x20u, edx);      /* 866BC: the feature's first 12 bytes */
+    edx = n4_r32(m, ecx + 4u); n4_w32(m, eax + 0x24u, edx);
+    LO8(edx, n4_r8(m, ecx + 8u)); n4_w8(m, eax + 0x28u, (uint8_t)edx);
+    LO8(edx, n4_r8(m, ecx + 9u)); n4_w8(m, eax + 0x29u, (uint8_t)edx);
+    { const uint16_t w_ = n4_r16(m, ecx + 0xAu); LO16(ecx, w_); n4_w16(m, eax + 0x2Au, w_); }
+    LO8(eax, 1);                                             /* mov al,1 */
+done:
+    /* pop edi/esi/ebp/ebx: the frame slots written at entry */
+    R->eax = eax; R->ecx = ecx; R->edx = edx; R->ebx = sv_ebx; R->esp = E + 0x14u; R->ebp = sv_ebp; R->esi = sv_esi; R->edi = sv_edi;
+    N5_SAVE();
+}
+
+/* Where the native's frame-slot locals hold: esp 4-aligned, the result record and the image constants outside the
+ * frames [E-0x90, E+0x14). And the feature block (counts, records) outside them too: the subtree reads its counts and
+ * the prisms' axis/side/vertex-count fields as integers, so frame words (floats the subtree stores, NaNs among them)
+ * read back as counts would make the control flow depend on NaN payload bits, which neither the host compilers nor
+ * the translation fix (which operand's payload an operation propagates). In the game the block is in the solver's
+ * frame above (features = E+0xD4). */
+static int n5_layout(const xctx *c)
+{
+    const uint32_t E = c->r[4];
+    if ((E & 3u) || E < 0x1000u || E > 0xFFFFF000u) return 0;
+    const uint32_t lo = E - 0x90u, len = 0xA4u;
+    uint32_t res; x_guest_read_pages(&res, E + 0x10u, 4);
+    uint32_t feat; x_guest_read_pages(&feat, E + 4u, 4);
+#define N5_OVER(a, n, b, l) ((uint64_t)(a) < (uint64_t)(b) + (l) && (uint64_t)(b) < (uint64_t)(a) + (n))
+    if (N5_OVER(feat, 0x4408u + 0x68u * 0x8000u, lo, len)) return 0;
+    if (res > 0xFFFFFFFFu - 0x2Cu || N5_OVER(res, 0x2Cu, lo, len)) return 0;
+    if (N5_OVER(N5_ZERO, 4u, lo, len) || N5_OVER(N5_ONE, 4u, lo, len) || N5_OVER(N5_EPS, 8u, lo, len) ||
+        N5_OVER(N5_C24, 4u, lo, len) || N5_OVER(N5_AXES, 0x18u, lo, len)) return 0;
+#undef N5_OVER
+    return 1;
+}
+/* The whole feature test from the state of `call 000864C0h` (esp at the pushed return address) to after its ret 10h. */
+static __attribute__((noinline)) void n5_query(xctx *c, n5q *s, int journal)
+{
+    s->m.ram = g_xram; s->m.pt = g_xpt; s->m.jon = journal;
+    const n4_mem *m = &s->m;
+    s->fk = c->f_kind; s->fa = c->f_op1; s->fb = c->f_op2; s->fr = c->f_res; s->fbits = c->f_bits;
+    s->fcfo = c->f_cf_override; s->fcf = c->f_cf; s->fofo = c->f_of_override; s->fof = c->f_of;
+    s->fsp0 = c->fsp; s->fsw = c->fsw;
+    for (unsigned d = 1; d <= 6; ++d) s->sl[d] = c->st[(s->fsp0 - d) & 7u];
+    s->be = 0;
+    const uint32_t E = c->r[4];
+    s->E = E;
+    n4_stk_at(m, &s->k, E - 0x90u);
+    s->hf = ((E - 0x90u) >> 12) == ((E + 0x13u) >> 12) ? s->k.h0 + ((E - 0x90u) & 0xFFFu) + 0x90u : NULL;
+    s->zero = n4_rf(m, N5_ZERO); s->one = n4_rf(m, N5_ONE); s->c24 = n4_rf(m, N5_C24);
+    { const uint64_t lo = n4_r32(m, N5_EPS), hi = n4_r32(m, N5_EPS + 4u); const uint64_t u = lo | hi << 32; memcpy(&s->eps, &u, 8); }
+    for (unsigned i = 0; i < 12; ++i) s->axes[i] = (int16_t)n4_r16(m, N5_AXES + 2u * i);
+    s->t = 0.0f; s->n[0] = s->n[1] = s->n[2] = s->n[3] = 0.0f;
+    s->feats[0] = s->feats[1] = s->feats[2] = s->hits = s->edges = 0;
+    n4r R = { c->r[0], c->r[1], c->r[2], c->r[3], c->r[4], c->r[5], c->r[6], c->r[7] };
+    n5_864c0(s, &R);
+    c->r[0] = R.eax; c->r[1] = R.ecx; c->r[2] = R.edx; c->r[3] = R.ebx; c->r[4] = R.esp; c->r[5] = R.ebp; c->r[6] = R.esi; c->r[7] = R.edi;
+    c->f_kind = s->fk; c->f_op1 = s->fa; c->f_op2 = s->fb; c->f_res = s->fr; c->f_bits = s->fbits;
+    c->f_cf_override = s->fcfo; c->f_cf = s->fcf; c->f_of_override = s->fofo; c->f_of = s->fof;
+    c->fsw = s->fsw;
+    for (unsigned d = 1; d <= 6; ++d) c->st[(s->fsp0 - d) & 7u] = s->sl[d];
+}
+
+enum { N5_CALLS, N5_VERIFIED, N5_MISMATCHED, N5_DECLINED, N5_JOURNAL_FAIL, N5_SPHERES, N5_CAPSULES, N5_PRISMS, N5_HITS,
+       N5_EDGES, N5_BACKEDGES, N5_LAYOUT, N5_TIMED_NATIVE, N5_TIMED_GUEST, N5_NAN_WORDS, N5_COUNTERS };
+static unsigned n5_counter[N5_COUNTERS], n5_mismatch_total;
+static uint64_t n5_native_ns, n5_guest_ns;
+#define N5_ADD(i, v) __atomic_fetch_add(&n5_counter[i], (unsigned)(v), __ATOMIC_RELAXED)
+static void n5_count(const n5q *s)
+{
+    N5_ADD(N5_CALLS, 1);
+    if (!n4_detail) return;
+    N5_ADD(N5_SPHERES, s->feats[0]); N5_ADD(N5_CAPSULES, s->feats[1]); N5_ADD(N5_PRISMS, s->feats[2]);
+    N5_ADD(N5_HITS, s->hits); N5_ADD(N5_EDGES, s->edges); N5_ADD(N5_BACKEDGES, s->be);
+}
+static void n5_report_mismatch(const char *what, uint32_t a, uint32_t b, const n5q *s)
+{
+    if (__atomic_add_fetch(&n5_mismatch_total, 1, __ATOMIC_RELAXED) <= 12)
+        XK_LOG("[native-4b9d0] features MISMATCH %s native %08X guest %08X (call: %u spheres, %u capsules, %u prisms, %u hits)\n",
+               what, a, b, s->feats[0], s->feats[1], s->feats[2], s->hits);
+}
+
+void f_000864C0(xctx *);
+/* verify: the native with a write journal, undo, the translated guest body on the same state (unbounded budget),
+ * compare, keep the guest's result */
+static void n5_verify(xctx *c, int timed)
+{
+    const xctx before = *c;
+    n5q s;
+    n4_j.n = 0; n4_j.overflow = 0;
+    const uint64_t t0 = timed ? n4_ns() : 0;
+    n5_query(c, &s, 1);
+    if (timed) { __atomic_fetch_add(&n5_native_ns, n4_ns() - t0, __ATOMIC_RELAXED); N5_ADD(N5_TIMED_NATIVE, 1); }
+    const xctx native = *c;
+    /* the guest may write the stack below 864C0's arguments (its frames, 0x100 of slack below) and the record */
+    uint32_t reg_addr[2], reg_len[2];
+    const uint32_t E = before.r[4];
+    uint32_t low = E - 0x90u;
+    for (unsigned i = 0; i < n4_j.n; ++i) {
+        const uint32_t a = n4_j.e[i].addr;
+        if (a < E + 0x14u && E - a < 0x100000u && a < low) low = a;
+    }
+    reg_addr[0] = low - 0x100u; reg_len[0] = E + 0x14u - reg_addr[0];
+    if (reg_len[0] > N4_REGION_CAP) reg_len[0] = N4_REGION_CAP;
+    x_guest_read_pages(&reg_addr[1], E + 0x10u, 4); reg_len[1] = 0x2Cu;
+    const unsigned nreg = 2;
+    const uint32_t total = reg_len[0] + reg_len[1];
+    uint8_t *img = malloc(total), *cur = malloc(total);
+    const unsigned nj = n4_j.n;
+    n4_jent *j = malloc((nj ? nj : 1) * sizeof *j);
+    if (!img || !cur || !j || n4_j.overflow) {
+        N5_ADD(N5_JOURNAL_FAIL, 1);
+        free(img); free(cur); free(j);
+        n4_budget(c, s.be); n5_count(&s);
+        return;
+    }
+    for (unsigned i = 0, o = 0; i < nreg; o += reg_len[i], ++i) x_guest_read_pages(img + o, reg_addr[i], reg_len[i]);
+    const n4_mem *m = &s.m;
+    for (unsigned i = 0; i < nj; ++i) {
+        j[i] = n4_j.e[i]; memcpy(j[i].now, N4_P(j[i].addr), j[i].size);
+        x_guest_read_pages(&j[i].word, j[i].addr & ~3u, 4);
+    }
+    for (unsigned i = nj; i-- > 0;) memcpy(N4_P(j[i].addr), j[i].old, j[i].size);
+    n5_count(&s);
+    *c = before; c->preempt = 1 << 30;
+    const uint64_t t1 = timed ? n4_ns() : 0;
+    f_000864C0(c);
+    if (timed) { __atomic_fetch_add(&n5_guest_ns, n4_ns() - t1, __ATOMIC_RELAXED); N5_ADD(N5_TIMED_GUEST, 1); }
+    const uint32_t guest_backedges = (uint32_t)((1 << 30) - c->preempt);
+    unsigned bad = 0, nan_words = 0;
+    const xctx *n = &native;
+#define N5_CMP(what, a, b) do { if ((a) != (b)) { bad++; n5_report_mismatch(what, (uint32_t)(a), (uint32_t)(b), &s); } } while (0)
+    static const char *const rn[8] = { "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi" };
+    for (unsigned i = 0; i < 8; ++i) N5_CMP(rn[i], n->r[i], c->r[i]);
+    N5_CMP("backedges", s.be, guest_backedges);
+    N5_CMP("fsp", n->fsp, c->fsp); N5_CMP("fcw", n->fcw, c->fcw); N5_CMP("fsw", n->fsw, c->fsw); N5_CMP("df", n->df, c->df);
+    N5_CMP("f_kind", n->f_kind, c->f_kind); N5_CMP("f_op1", n->f_op1, c->f_op1); N5_CMP("f_op2", n->f_op2, c->f_op2);
+    N5_CMP("f_res", n->f_res, c->f_res); N5_CMP("f_bits", n->f_bits, c->f_bits);
+    N5_CMP("f_cf_override", n->f_cf_override, c->f_cf_override); N5_CMP("f_of_override", n->f_of_override, c->f_of_override);
+    N5_CMP("f_cf", n->f_cf, c->f_cf); N5_CMP("f_of", n->f_of, c->f_of);
+    N5_CMP("fs_base", n->fs_base, c->fs_base); N5_CMP("scratch", n->scratch, c->scratch); N5_CMP("eip_hint", n->eip_hint, c->eip_hint);
+    for (unsigned i = 0; i < 8; ++i)
+        if (!n4_same_double(n->st[i], c->st[i])) {
+            uint64_t a, b; memcpy(&a, &n->st[i], 8); memcpy(&b, &c->st[i], 8);
+            char w[40]; snprintf(w, sizeof w, "st[%u] fsp %u (lo word)", i, c->fsp); bad++; n5_report_mismatch(w, (uint32_t)a, (uint32_t)b, &s);
+        }
+    if (memcmp(n->xmm, c->xmm, sizeof c->xmm)) { bad++; n5_report_mismatch("xmm", 0, 1, &s); }
+    if (memcmp(n->mm, c->mm, sizeof c->mm)) { bad++; n5_report_mismatch("mm", 0, 1, &s); }
+    for (unsigned i = 0; i < nj; ++i) {
+        uint8_t now[4]; memcpy(now, N4_P(j[i].addr), j[i].size);
+        if (memcmp(now, j[i].now, j[i].size)) {
+            uint32_t gw; x_guest_read_pages(&gw, j[i].addr & ~3u, 4);
+            if (n4_nan32(gw) && n4_nan32(j[i].word)) { nan_words++; continue; }
+            uint32_t a = 0, b = 0; memcpy(&a, j[i].now, j[i].size); memcpy(&b, now, j[i].size);
+            char w[40]; snprintf(w, sizeof w, "write@%08X", j[i].addr); bad++; n5_report_mismatch(w, a, b, &s);
+            break;
+        }
+    }
+    for (unsigned i = 0, o = 0; i < nreg; o += reg_len[i], ++i) {
+        x_guest_read_pages(cur + o, reg_addr[i], reg_len[i]);
+        if (!memcmp(cur + o, img + o, reg_len[i])) continue;
+        for (uint32_t k = 0; k < reg_len[i]; ++k) {
+            if (cur[o + k] == img[o + k]) continue;
+            const uint32_t a = reg_addr[i] + k, w0 = (a & ~3u) - reg_addr[i];
+            if ((a & ~3u) >= reg_addr[i] && w0 + 4u <= reg_len[i]) {
+                uint32_t gw, nw; memcpy(&gw, cur + o + w0, 4); memcpy(&nw, img + o + w0, 4);
+                if (n4_nan32(gw) && n4_nan32(nw)) { nan_words++; k = w0 + 3u; continue; }
+            }
+            char w[48]; snprintf(w, sizeof w, "region%u@%08X (byte)", i, a);
+            bad++; n5_report_mismatch(w, img[o + k], cur[o + k], &s); break;
+        }
+    }
+#undef N5_CMP
+    c->preempt = before.preempt;
+    n4_budget(c, guest_backedges);
+    N5_ADD(N5_VERIFIED, 1); N5_ADD(N5_NAN_WORDS, nan_words);
+    if (bad) N5_ADD(N5_MISMATCHED, 1);
+    free(img); free(cur); free(j);
+}
+
+/* ---- the solver hook (recomp/solver_fusion.c, the 170CD1 call; tools/patch_native_4b9d0_hooks.py) ----------------
+ * xv_native_4b9d0_features_on(): non-zero when the native (mode 1 or 2) takes the call; then the solver publishes
+ * its registers and calls xv_native_4b9d0_features(guest), which returns 1 when it ran the call (native or verify)
+ * and 0 when it declines (the fused code then runs as usual). In mode 0 with XV_NATIVE_4B9D0_TIME=1,
+ * xv_native_4b9d0_features_t0()/_t1() time the fused code between the call and its continuation. */
+static int n5_parts(void)
+{
+    static int parts = -1;
+    if (parts < 0) { const char *e = getenv("XV_NATIVE_4B9D0_PARTS"); parts = e ? atoi(e) & 3 : 3; }
+    return parts;
+}
+int xv_native_4b9d0_features_on(void) { return n4_mode() && (n5_parts() & 2); }
+static __thread uint64_t n5_t0;
+void xv_native_4b9d0_features_t0(void) { if (n4_timing()) n5_t0 = n4_ns(); }
+void xv_native_4b9d0_features_t1(void)
+{
+    if (!n5_t0) return;
+    __atomic_fetch_add(&n5_guest_ns, n4_ns() - n5_t0, __ATOMIC_RELAXED); N5_ADD(N5_TIMED_GUEST, 1);
+    n5_t0 = 0;
+}
+#if !defined(__vita__) && !defined(XV_NATIVE_4B9D0_TEST)
+/* Host harness only: XV_NATIVE_4B9D0_CAPTURE_FEATURES=<file>[:count[:skip]] (with XV_NATIVE_4B9D0=1 or 2) writes the
+ * guest arena and page table once, then count (default 2000) feature-test entry states the native accepts: the xctx,
+ * the guest stack [esp - 8 KB, esp + 8 KB) (864C0's frames, start and dir in the solver's frame) and the feature block
+ * [features, features + 0x4408 + 0x68 * prisms + 0x100), for tools/tests/native_4b9d0.c --replay-features. */
+static void n5_capture(const xctx *c)
+{
+    static int state = -1; static FILE *f; static unsigned n, max, skip; static char path[512];
+    if (state == 0) return;
+    if (state < 0) {
+        const char *e = getenv("XV_NATIVE_4B9D0_CAPTURE_FEATURES"); state = 0;
+        if (!e) return;
+        snprintf(path, sizeof path, "%s", e);
+        max = 2000; skip = 0;
+        char *c1 = strchr(path, ':');
+        if (c1) { *c1 = 0; max = (unsigned)atoi(c1 + 1); char *c2 = strchr(c1 + 1, ':'); if (c2) skip = (unsigned)atoi(c2 + 1); }
+        state = 2;
+    }
+    if (state == 2) {
+        if (skip) { skip--; return; }
+        if (!(f = fopen(path, "wb"))) { state = 0; return; }
+        state = 1;
+        const uint32_t hdr[4] = { 0x3544354Eu, xk_mem_arena_size(), 1u << 20, 0x4000u };
+        fwrite(hdr, sizeof hdr, 1, f); fwrite(g_xpt, 4, 1u << 20, f); fwrite(g_xram, 1, hdr[1], f);
+        XK_LOG("[native-4b9d0] features capture: arena %u bytes to %s, %u calls\n", hdr[1], path, max);
+    }
+    struct { uint32_t r[8], fl[9], fsp, fsw, fcw, df; int32_t preempt; double st[8]; float xmm[8][4]; uint64_t mm[8]; } rec;
+    memcpy(rec.r, c->r, sizeof rec.r);
+    rec.fl[0] = c->f_kind; rec.fl[1] = c->f_op1; rec.fl[2] = c->f_op2; rec.fl[3] = c->f_res; rec.fl[4] = c->f_bits;
+    rec.fl[5] = c->f_cf_override; rec.fl[6] = c->f_cf; rec.fl[7] = c->f_of_override; rec.fl[8] = c->f_of;
+    rec.fsp = c->fsp; rec.fsw = c->fsw; rec.fcw = c->fcw; rec.df = c->df; rec.preempt = c->preempt;
+    memcpy(rec.st, c->st, sizeof rec.st); memcpy(rec.xmm, c->xmm, sizeof rec.xmm); memcpy(rec.mm, c->mm, sizeof rec.mm);
+    static uint8_t win[0x4000];
+    x_guest_read_pages(win, c->r[4] - 0x2000u, sizeof win);
+    uint32_t feat; x_guest_read_pages(&feat, c->r[4] + 4u, 4);
+    int16_t n2; x_guest_read_pages(&n2, feat + 4u, 2);
+    uint32_t len = 0x4408u + 0x68u * (uint32_t)(n2 > 0 ? n2 : 0) + 0x100u;
+    if (len > 0x40000u) len = 0x40000u;
+    static uint8_t blk[0x40000];
+    x_guest_read_pages(blk, feat, len);
+    fwrite(&rec, sizeof rec, 1, f); fwrite(win, 1, sizeof win, f);
+    fwrite(&feat, 4, 1, f); fwrite(&len, 4, 1, f); fwrite(blk, 1, len, f);
+    if (++n == max) { fclose(f); f = NULL; state = 0; XK_LOG("[native-4b9d0] features capture: %u calls written\n", n); }
+}
+#endif
+int xv_native_4b9d0_features(xctx *c)
+{
+    const int mode = n4_mode();
+    if (!mode || !(n5_parts() & 2)) return 0;
+    if ((xv_scene_thread_on_helper && xv_scene_thread_on_helper()) || X_PT != g_xpt || !n5_layout(c)) {
+        N5_ADD(N5_DECLINED, 1);
+        if (X_PT == g_xpt && !(xv_scene_thread_on_helper && xv_scene_thread_on_helper())) N5_ADD(N5_LAYOUT, 1);
+        return 0;
+    }
+#if !defined(__vita__) && !defined(XV_NATIVE_4B9D0_TEST)
+    n5_capture(c);
+#endif
+    const int timed = n4_timing();
+    if (mode == 1) { n5_verify(c, timed); return 1; }
+    n5q s;
+    const uint64_t t0 = timed ? n4_ns() : 0;
+    n5_query(c, &s, 0);
+    if (timed) { __atomic_fetch_add(&n5_native_ns, n4_ns() - t0, __ATOMIC_RELAXED); N5_ADD(N5_TIMED_NATIVE, 1); }
+    n4_budget(c, s.be); n5_count(&s);
+    return 1;
+}
+static void n5_report(unsigned frames)
+{
+    unsigned n[N5_COUNTERS];
+    for (unsigned i = 0; i < N5_COUNTERS; ++i) n[i] = __atomic_exchange_n(&n5_counter[i], 0u, __ATOMIC_RELAXED);
+    const uint64_t native_ns = __atomic_exchange_n(&n5_native_ns, 0, __ATOMIC_RELAXED), guest_ns = __atomic_exchange_n(&n5_guest_ns, 0, __ATOMIC_RELAXED);
+    if (!n[N5_CALLS] && !n[N5_TIMED_GUEST] && !n[N5_DECLINED]) return;
+    char timing[112] = "";
+    if (n[N5_TIMED_NATIVE])
+        snprintf(timing, sizeof timing, "; us/call native %.3f", (double)native_ns / 1000.0 / n[N5_TIMED_NATIVE]);
+    if (n[N5_TIMED_GUEST])
+        snprintf(timing + strlen(timing), sizeof timing - strlen(timing), "%s guest %.3f (%u timed)", n[N5_TIMED_NATIVE] ? "" : "; us/call",
+                 (double)guest_ns / 1000.0 / n[N5_TIMED_GUEST], n[N5_TIMED_GUEST]);
+    XK_LOG("[native-4b9d0] features %u frames: calls %u verified %u mismatched %u (total mismatches %u) declined %u journal-fail %u; "
+           "spheres %u capsules %u prisms %u hits %u edges %u back-edges %u layout-declined %u nan-words %u%s\n",
+           frames, n[N5_CALLS], n[N5_VERIFIED], n[N5_MISMATCHED], __atomic_load_n(&n5_mismatch_total, __ATOMIC_RELAXED),
+           n[N5_DECLINED], n[N5_JOURNAL_FAIL], n[N5_SPHERES], n[N5_CAPSULES], n[N5_PRISMS], n[N5_HITS], n[N5_EDGES],
+           n[N5_BACKEDGES], n[N5_LAYOUT], n[N5_NAN_WORDS], timing);
+}
+
 void xv_native_4b9d0_report(unsigned frames)
 {
+    n5_report(frames);
     unsigned n[N4_COUNTERS];
     for (unsigned i = 0; i < N4_COUNTERS; ++i) n[i] = __atomic_exchange_n(&n4_counter[i], 0u, __ATOMIC_RELAXED);
     const uint64_t native_ns = __atomic_exchange_n(&n4_native_ns, 0, __ATOMIC_RELAXED), guest_ns = __atomic_exchange_n(&n4_guest_ns, 0, __ATOMIC_RELAXED);

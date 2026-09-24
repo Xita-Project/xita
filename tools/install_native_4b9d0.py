@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Install the native BSP sphere query under f_0004B9D0 (XV_NATIVE_4B9D0) into a retained stage (idempotent).
+"""Install the natives under f_0004B9D0 (XV_NATIVE_4B9D0: the BSP sphere query and the solver's feature test) into a
+retained stage (idempotent).
 Usage: install_native_4b9d0.py <stage>          (the directory holding Makefile, games/, recomp/)
 
 Copies recomp/kernel/xk_native_4b9d0.c from this checkout, adds the XV_NATIVE_4B9D0 Makefile block after the stage's
 XV_NATIVE_92330 -ffp-contract rule, the runtime.mk source line, the weak report call in recomp/kernel/xd3d.c, and the
-hook in recomp/kernel/xk_query_reuse.c (tools/patch_native_4b9d0_hooks.py). Build with XV_NATIVE_4B9D0=1 in the make
-vars; see docs/native-4b9d0.md."""
+hooks in recomp/kernel/xk_query_reuse.c and recomp/solver_fusion.c (tools/patch_native_4b9d0_hooks.py). Build with
+XV_NATIVE_4B9D0=1 in the make vars; see docs/native-4b9d0.md."""
 import shutil, subprocess, sys
 from pathlib import Path
 

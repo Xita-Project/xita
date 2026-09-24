@@ -15,7 +15,8 @@ import argparse, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FUNCS = ['00088110', '00087EA0', '00087E10', '00086F50', '000B0CB0']
+FUNCS = ['00088110', '00087EA0', '00087E10', '00086F50', '000B0CB0',
+         '000864C0', '00085D10', '00085A00', '00085720', '00011120', '000111A0']
 def body(src, fn):
     m = re.search(r'^void f_%s\(xctx \*restrict c\)\n\{\n' % fn, src, re.M)
     if not m: return None
@@ -50,6 +51,34 @@ MUTANTS = [
      'SETF(XK_SUB, ecx, 0x100u, ecx - 0x100u, 32);\n        FSW32(E - 0x10u, edi); s10 = edi;\n        if (ecx < 0x100u) {'),
 ]
 
+# Deliberately broken feature-test natives (--part features)
+MUTANTS5 = [
+    ('sphere: closing-speed sum association', '    x2 = d2; x2 = x2 * HF(hd, dir, 8u, 12u); x1 = x1 + x2;\n    x2 = d1; x2 = x2 * HF(hd, dir, 4u, 12u); x1 = x1 + x2;\n    const float bb',
+     '    x2 = d1; x2 = x2 * HF(hd, dir, 4u, 12u); x1 = x1 + x2;\n    x2 = d2; x2 = x2 * HF(hd, dir, 8u, 12u); x1 = x1 + x2;\n    const float bb'),
+    ('sphere: radius squared rounded to float', '    x3 = x1; x3 = x3 * x1;                                   /* fld st(1); fmul st,st(2) */\n    x2 = x2 - x3;                                            /* fsubp */\n    const float c0',
+     '    x3 = x1; x3 = (float)(x3 * x1);\n    x2 = x2 - x3;\n    const float c0'),
+    ('sphere: closing speed not stored over the argument', 'const float bb = N5WF(Ec + 4u, x1);', 'const float bb = (float)x1;'),
+    ('sphere: fxch dropped', '    { const double t_ = x2; x2 = x1; x1 = t_; }              /* fxch */\n    x2 = x2 * HF(hd, dir, 8u, 12u);\n    const float m2',
+     '    x2 = x2 * HF(hd, dir, 8u, 12u);\n    const float m2'),
+    ('normalize: eps compare at depth 1', 'FCMP(x2, s->eps, 2);', 'FCMP(x2, s->eps, 1);'),
+    ('normalize: short vector keeps its length', 'if (!PF()) x1 = s->zero;                 /* 1116E', 'if (!PF()) {}                            /* 1116E'),
+    ('capsule: t2 clamped to literal 1.0', 'if (ZF()) x1 = s->one;                                   /* t2 > 1', 'if (ZF()) x1 = 1.0;                                      /* t2 > 1'),
+    ('capsule: back-edge not counted (t1 > 1)', 'if (ZF()) { be++; al = 0; goto out; }                    /* je 85B2B', 'if (ZF()) { al = 0; goto out; }                    /* je 85B2B'),
+    ('capsule: normal scale divides by A', 'x1 = x1 / aa;                                        /* fdiv [esp+14h] = Ec-0x20 */', 'x1 = x1 / A;'),
+    ('prism: edge loop one short', 'SETF(XK_SUB, i - 1u, n, i - 1u - n, 32);             /* lea eax,[esi-1]; cmp eax,edi */', 'SETF(XK_SUB, i, n, i - n, 32);'),
+    ('prism: last edge does not wrap', 'const uint32_t nx = ((ge - 1u) & i) * 8u;', 'const uint32_t nx = i * 8u; (void)ge;'),
+    ('prism: projected direction u/v swapped', 'x1 = u < 3u ? (double)D[u] : n4_rf(m, Ec - 0xCu + u * 4u);', 'x1 = v < 3u ? (double)D[v] : n4_rf(m, Ec - 0xCu + v * 4u);'),
+    ('prism: second shl flags', 'ix = SHL32((uint32_t)side + SX16(axis) * 2u, 2u);        /* the same index again', 'ix = SHL32((uint32_t)side + SX16(axis) * 2u, 3u) >> 1;        /* the same index again'),
+    ('prism: parallel edge sign test', 'if (!PF()) { be++; goto L_8581F; }\n        } else {', 'if (ZF()) { be++; goto L_8581F; }\n        } else {'),
+    ('prism: x87 slot 6 not written', '        x6 = Dv; x6 = x6 * x1;                               /* fld [esp+14h]; fmul st,st(5) */\n        x5 = x5 - x6;',
+     '        { const double y6 = Dv * x1; x5 = x5 - y6; }'),
+    ('feature test: facing threshold 0', 'FCMP(x1, s->c24, 1); N5_TEST(5);', 'FCMP(x1, s->zero, 1); N5_TEST(5);'),
+    ('feature test: inner back-edge not counted', 'if (SF() != OF()) { be++; goto L_86500; }', 'if (SF() != OF()) { goto L_86500; }'),
+    ('feature test: capsule record base', '            ecx = esi + edx * 8u + 0x1C08u;', '            ecx = esi + edx * 8u + 0x1C00u;'),
+    ('imul: of override not set', 'SETF(XK_LOGIC, 0, 0, r__, 32); fcfo = fofo = 1; fcf = fof = (p__ != (int64_t)(int32_t)r__); r__; })',
+     'SETF(XK_LOGIC, 0, 0, r__, 32); fcfo = 1; fcf = fof = (p__ != (int64_t)(int32_t)r__); r__; })'),
+]
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('recomp'); ap.add_argument('cases', nargs='?', default='3000')
     ap.add_argument('--cc', default=os.environ.get('CC', 'cc')); ap.add_argument('--seed', default='1')
@@ -60,7 +89,11 @@ def main():
     ap.add_argument('--fused', help='with --replay: a harness object dir whose query_fusion.o (the fused guest query) is the reference')
     ap.add_argument('--native', default=str(ROOT / 'recomp/kernel/xk_native_4b9d0.c'))
     ap.add_argument('--keep', help='also write the test executable here (e.g. to copy it to another machine)')
+    ap.add_argument('--part', default='query', choices=['query', 'features'],
+                    help='query: the BSP sphere query (f_00088110 subtree); features: the solver feature test (f_000864C0 subtree)')
+    ap.add_argument('--replay-features', help='feature-test calls captured with XV_NATIVE_4B9D0_CAPTURE_FEATURES')
     a = ap.parse_args(); rec = Path(a.recomp)
+    env = dict(os.environ, N4_PART=a.part)
     texts = {}
     for p in sorted(rec.glob('code_*.c')):
         t = p.read_text(errors='replace')
@@ -83,6 +116,12 @@ def main():
                    '-I' + str(rec / 'kernel'), str(ROOT / 'tools/tests/native_4b9d0.c'), str(d / 'guest.c'),
                    str(d / 'kernel/xk_native_4b9d0.c'), '-lm', '-o', str(exe)]
             subprocess.run(cmd, check=True)
+        if a.replay_features:
+            exe = d / 'replay'; build(exe, variants.get('thread-table+render-view -O2', ['-O2']), native_src)
+            if a.keep: subprocess.run(['cp', str(exe), a.keep], check=True)
+            if a.cc != "cc" and "arm" in a.cc: print("built", exe); sys.exit(0)
+            r = subprocess.run([str(exe), "0", "0", "--replay-features", a.replay_features, str(a.reps)], capture_output=True, text=True)
+            print(r.stdout.strip() + r.stderr.strip()); sys.exit(r.returncode)
         if a.replay:
             fl = variants.get('thread-table+render-view -O2', ['-O2'])
             if a.fused:   # the game's fused query as the guest: a harness object directory (tools/host_build.py --out)
@@ -97,22 +136,25 @@ def main():
         if a.bench:
             exe = d / 'bench'; build(exe, variants.get('thread-table+render-view -O2', ['-O2']), native_src)
             if a.keep: subprocess.run(['cp', str(exe), a.keep], check=True)
-            r = subprocess.run([str(exe), a.cases, a.seed, '--bench', str(a.bench)], capture_output=True, text=True)
+            r = subprocess.run([str(exe), a.cases, a.seed, '--bench', str(a.bench)], capture_output=True, text=True, env=env)
             print(r.stdout.strip() + r.stderr.strip()); sys.exit(r.returncode)
         for name, flags in variants.items():
             exe = d / 'test'; build(exe, flags, native_src)
             if a.keep: subprocess.run(['cp', str(exe), a.keep + '-' + name.split()[0]], check=True)
             args = [str(exe), a.cases, a.seed] + (['--verify'] if a.verify else [])
-            r = subprocess.run(args, capture_output=True, text=True)
+            r = subprocess.run(args, capture_output=True, text=True, env=env)
             print(f'[{name}] ' + (r.stdout.strip() + r.stderr.strip()).replace('\n', f'\n[{name}] '), flush=True)
             rc |= r.returncode
         if a.mutants:
             caught = 0
-            for name, old, new in MUTANTS:
+            mutants = MUTANTS if a.part == 'query' else MUTANTS5
+            only = os.environ.get('N4_MUTANT_ONLY')
+            if only: mutants = [m for m in mutants if only in m[0]]
+            for name, old, new in mutants:
                 if native_src.count(old) != 1: print(f'[mutant] {name}: pattern not found once ({native_src.count(old)})'); rc |= 1; continue
                 exe = d / 'mutant'; build(exe, ['-O2'], native_src.replace(old, new))
                 try:
-                    r = subprocess.run([str(exe), str(a.mutants), a.seed], capture_output=True, text=True, timeout=3600)
+                    r = subprocess.run([str(exe), str(a.mutants), a.seed], capture_output=True, text=True, timeout=3600, env=env)
                     m = re.search(r'(\d+) mismatches', r.stdout)
                     n = int(m.group(1)) if m else -1
                     how = f'{n} of {a.mutants} cases differ' if m else f'no summary (exit {r.returncode}: the mutant crashed)'
@@ -121,6 +163,6 @@ def main():
                 ok = n != 0
                 caught += ok
                 print(f'[mutant] {name}: {how}' + ('' if ok else '  <-- NOT CAUGHT'), flush=True)
-            print(f'[mutant] {caught} of {len(MUTANTS)} mutants caught')
+            print(f'[mutant] {caught} of {len(mutants)} mutants caught')
     sys.exit(rc)
 if __name__ == '__main__': main()
