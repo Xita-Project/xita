@@ -10,7 +10,8 @@ carry them (tools/patch_native_92330_hooks.py logic). The native is compiled aga
 Builds tools/tests/native_92330.c three ways - plain page table -O2, host per-thread table + render view -O2 (image
 globals through the page table, as on the Vita) and -O0 - and runs the randomized cases in each. --verify also runs
 the in-game verify mode (mode 1) per case. --mutants N builds deliberately broken natives and requires each to be
-caught within N cases."""
+caught within N cases (a crash or a hang counts; two mutants need ~3000 cases: a summation association that changes
+one rounding in 3000, and the exit carry flag that only the stack-straddling-0 scenes reach)."""
 import argparse, os, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
@@ -34,20 +35,23 @@ def hook(text):
 
 # Deliberately broken natives: each must produce a mismatch.
 MUTANTS = [
-    ('d2 summation order', 'd2 = d2 + t;\n        t = dy * dy;', 'd2 = t + d2 * 1.0000001;\n        t = dy * dy;'),
+    ('d2 association (dz2 + (dx2 + dy2))', '    double d2 = dz * dz, t = dx * dx;\n    d2 = d2 + t;\n    t = dy * dy;\n    d2 = d2 + t;',
+     '    double d2 = dz * dz, t = dx * dx + dy * dy;\n    d2 = d2 + t;'),
     ('circle test strict/non-strict', 'if (cc == 0x0100) {', 'if (cc & 0x4100) {'),
-    ('edge back-edge not counted', 'if ((int16_t)edi < (int16_t)cnt) { s->backedges++; continue; }', 'if ((int16_t)edi < (int16_t)cnt) { continue; }'),
-    ('dead projected z not stored', 'proj[2] = n9_wf(m, G + 0x1Cu, k1);', 'proj[2] = (float)k1;'),
+    ('edge back-edge not counted', 'if (i < n) { be++; continue; }', 'if (i < n) { continue; }'),
+    ('dead projected z not stored', 'n9_swf(m, k, G + 0x1Cu, k1);', '(void)k1;'),
     ('datum hint off by one', 'eax = ebx + 1u;\n        n9_w16(m, edx + 0x2Cu', 'eax = ebx;\n        n9_w16(m, edx + 0x2Cu'),
-    ('fsw TOP replaced, not OR-ed', '(s->fsw & ~0x4700u)', '(s->fsw & ~0x7F00u)'),
+    ('fsw TOP replaced, not OR-ed', '(*fsw & ~0x4700u)', '(*fsw & ~0x7F00u)'),
     ('list write for count >= 0', 'if ((int16_t)edx > 0) { n9_w16(m, edi, (uint16_t)ebx); edi += 2u; }', 'if ((int16_t)edx >= 0) { n9_w16(m, edi, (uint16_t)ebx); edi += 2u; }'),
     ('dirty reload skipped', '                if (s->dirty) {\n                    pos = n9_r32(m, S - 4u);', '                if (0) {\n                    pos = n9_r32(m, S - 4u);'),
     ('slot 6 wrong value', 'N9_SL(4, rr); N9_SL(5, d2); N9_SL(6, rr2);', 'N9_SL(4, rr); N9_SL(5, d2); N9_SL(6, d2);'),
-    ('plane distance: fabs before the store', 'const float distf = n9_wf(m, F + 0xCu, k1);\n    k1 = fabs(k1);', 'k1 = fabs(k1);\n    const float distf = n9_wf(m, F + 0xCu, k1);'),
+    ('plane distance: fabs before the store', 'const float distf = n9_swf(m, &k, F + 0xCu, k1);\n    k1 = fabs(k1);', 'k1 = fabs(k1);\n    const float distf = n9_swf(m, &k, F + 0xCu, k1);'),
     ('salt wrap to 0x8000 missing', 'if (n9_r16(m, edx + 0x32u) == 0) n9_w16(m, edx + 0x32u, 0x8000u);', ''),
     ('exit carry flag', 'c->f_cf = ebx < b0;', 'c->f_cf = 0;'),
-    ('11840 tie goes to y', 'eax = N9_LO(eax) | ((cc & 0x100) ? 0u : 1u);', 'eax = N9_LO(eax) | ((cc & 0x4100) ? 0u : 1u);'),
+    ('11840 tie goes to y', 'axis = (cc & 0x100) ? 0u : 1u;', 'axis = (cc & 0x4100) ? 0u : 1u;'),
     ('stamp kept when it holds the previous epoch', 'if (n9_r32(m, a) != edx) {\n            n9_w32(m, a, edx);', 'if (n9_r32(m, a) != edx && n9_r32(m, a) != edx - 1u) {\n            n9_w32(m, a, edx);'),
+    ('cluster record not re-translated after a child', '                    hc = n9_span(m, esi + 0x5Cu, 8);', '                    (void)0;'),
+    ('scan back-edges off by one when full', 'be += ebx - b0 - 1u; goto pop;', 'be += ebx - b0; goto pop;'),
 ]
 
 def main():
@@ -97,11 +101,16 @@ def main():
             for name, old, new in MUTANTS:
                 if native_src.count(old) != 1: print(f'[mutant] {name}: pattern not found once'); rc |= 1; continue
                 exe = d / 'mutant'; build(exe, ['-O2'], native_src.replace(old, new))
-                r = subprocess.run([str(exe), str(a.mutants), a.seed], capture_output=True, text=True)
-                m = re.search(r'(\d+) mismatches', r.stdout)
-                n = int(m.group(1)) if m else -1
-                caught += n > 0
-                print(f'[mutant] {name}: {n} of {a.mutants} cases differ' + ('' if n > 0 else '  <-- NOT CAUGHT'), flush=True)
+                try:
+                    r = subprocess.run([str(exe), str(a.mutants), a.seed], capture_output=True, text=True, timeout=1800)
+                    m = re.search(r'(\d+) mismatches', r.stdout)
+                    n = int(m.group(1)) if m else -1
+                    how = f'{n} of {a.mutants} cases differ' if m else f'no summary (exit {r.returncode}: the mutant crashed)'
+                except subprocess.TimeoutExpired:
+                    n, how = -1, 'no summary (the mutant never finished)'
+                ok = n != 0                                  # a crash or a hang is a difference too
+                caught += ok
+                print(f'[mutant] {name}: {how}' + ('' if ok else '  <-- NOT CAUGHT'), flush=True)
             print(f'[mutant] {caught} of {len(MUTANTS)} mutants caught')
     sys.exit(rc)
 if __name__ == '__main__': main()

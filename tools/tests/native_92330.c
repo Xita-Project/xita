@@ -126,7 +126,7 @@ static void random_plane(plane *p, int flavor)
     if (flavor == 2 && rnd() % 9 == 0) p->n[rnd() % 3] = nanf_();
 }
 
-typedef struct { unsigned cases, native_hit, flood_cases, linked, dirty_cases, alias_cases, timeouts, mismatches, verify_mismatch, nan_words; } stats;
+typedef struct { unsigned cases, native_hit, flood_cases, linked, dirty_cases, alias_cases, timeouts, mismatches, verify_mismatch, verify_timeouts, nan_words; } stats;
 static int nan32(uint32_t w) { return (w & 0x7F800000u) == 0x7F800000u && (w & 0x007FFFFFu); }
 
 static uint32_t E_top;
@@ -415,6 +415,7 @@ int main(int argc, char **argv)
     for (unsigned k = 0; k < cases; ++k) {
         int alias; scene(&s, &alias); slice = 5 + (int)(rnd() % 60);
         xctx c0; init_ctx(&c0);
+        if (getenv("N92_FROM") && k < (unsigned)atoi(getenv("N92_FROM"))) continue;   /* debugging: replay from case N */
         memcpy(before, g_xram, ARENA);
         xctx cg = c0; preempt_calls = 0;
         int gok = run(&cg, 0);
@@ -465,13 +466,17 @@ int main(int argc, char **argv)
             int vok = run(&cv, 1);
             char vw[200] = "";
             int good = vok && !log_mismatch && same_ctx(&cv, &cg, vw, sizeof vw) && preempt_calls == guest_preempts && !memcmp(guest, g_xram, ARENA);
-            if (!good) { if (++s.verify_mismatch <= 10) printf("case %u VERIFY: log mismatches %d, %s\n", k, log_mismatch, vw[0] ? vw : "state"); }
+            if (!vok) s.verify_timeouts++;                   /* native + guest past the 4 s alarm (a chaotic overrun case) */
+            else if (!good) {
+                const char *what = log_mismatch ? "log" : vw[0] ? vw : preempt_calls != guest_preempts ? "xv_preempt calls" : "arena";
+                if (++s.verify_mismatch <= 10) printf("case %u VERIFY: log mismatches %d, %s\n", k, log_mismatch, what);
+            }
         }
     }
     extern void xv_native_92330_report(unsigned);
     log_all = 1; xv_native_92330_report(0); log_all = 0;     /* the native's own counters over all native/verify runs */
     printf("native-92330 differential: %u cases (%u flooded, %u linked, %u stack-alias scenes, %u guest timeouts skipped, %u NaN-payload words), %u mismatches%s",
            s.cases, s.flood_cases, s.linked, s.alias_cases, s.timeouts, s.nan_words, s.mismatches, verify ? "" : "\n");
-    if (verify) printf(", verify-mode failures %u\n", s.verify_mismatch);
+    if (verify) printf(", verify-mode failures %u (%u verify runs past the alarm skipped)\n", s.verify_mismatch, s.verify_timeouts);
     return s.mismatches || s.verify_mismatch;
 }
