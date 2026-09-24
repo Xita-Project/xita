@@ -302,6 +302,10 @@ static uint8_t  *g_scratch;
 static uint16_t *g_seq_indices;
 static uint8_t  *g_clear_quads;                          /* XV_NUM_LISTS x SLOTS x 4 verts x 16 B */
 static uint16_t *g_quad_indices;                         /* XV_NUM_LISTS x XV_QUAD_INDICES */
+/* XV_REC_QUAD: the rewrite of a sequential QUADLIST (DrawVertices, immediate quads) is always a prefix of this
+ * immutable list - quad k -> 4k, 4k+1, 4k+2, 4k, 4k+2, 4k+3 - written once at init, after every other scratch range. */
+#define XV_SEQ_QUAD_INDICES XV_QUAD_INDICES
+static uint16_t *g_seq_quads;
 static uint32_t  g_quad_used[XV_NUM_LISTS];
 static uint16_t *g_frame_indices;
 static uint32_t  g_index_used[XV_NUM_LISTS];
@@ -491,7 +495,8 @@ int xv_d3d_init(const xv_vs_desc_t *const *table, unsigned count)
         if (!g_lists[i])
             return -1;
     }
-    uint32_t size = (XV_SEQ_INDICES * 2 + XV_NUM_LISTS * XV_CLEAR_SLOTS * 4 * 16 + XV_NUM_LISTS * XV_QUAD_INDICES * 2 + XV_NUM_LISTS * XV_IM_VERTICES * XV_IM_STRIDE + XV_NUM_LISTS * XV_FRAME_INDICES * 2 + 0xFFF) & ~0xFFFu;
+    uint32_t base = XV_SEQ_INDICES * 2 + XV_NUM_LISTS * XV_CLEAR_SLOTS * 4 * 16 + XV_NUM_LISTS * XV_QUAD_INDICES * 2 + XV_NUM_LISTS * XV_IM_VERTICES * XV_IM_STRIDE + XV_NUM_LISTS * XV_FRAME_INDICES * 2;
+    uint32_t size = (base + XV_SEQ_QUAD_INDICES * 2 + 0xFFF) & ~0xFFFu;   /* XV_REC_QUAD's list after every original range */
     g_scratch_uid = sceKernelAllocMemBlock("xv_d3d_scratch", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, size, NULL);
     if (g_scratch_uid < 0)
         return g_scratch_uid;
@@ -506,6 +511,11 @@ int xv_d3d_init(const xv_vs_desc_t *const *table, unsigned count)
     g_quad_indices = (uint16_t *)(g_clear_quads + XV_NUM_LISTS * XV_CLEAR_SLOTS * 4 * 16);
     g_im_vertices = (uint8_t *)(g_quad_indices + XV_NUM_LISTS * XV_QUAD_INDICES);
     g_frame_indices = (uint16_t *)(g_im_vertices + XV_NUM_LISTS * XV_IM_BYTES);
+    g_seq_quads = (uint16_t *)(g_scratch + base);
+    for (uint32_t k = 0; k < XV_SEQ_QUAD_INDICES / 6; ++k) {
+        uint16_t *q = g_seq_quads + 6 * k, v = (uint16_t)(4 * k);
+        q[0] = v; q[1] = v + 1; q[2] = v + 2; q[3] = v; q[4] = v + 2; q[5] = v + 3;
+    }
 
     memset(&S, 0, sizeof(S)); S.color_mask = 0xF;
     S.z_enable = 1; S.z_write = 1; S.z_func = X_D3DCMP_LESSEQUAL; S.cull = X_D3DCULL_CCW;
@@ -933,6 +943,9 @@ static xv_rec_opt g_opt_index = XV_REC_OPT_INIT("XV_REC_INDEX");   /* retain_ind
 static xv_rec_opt g_opt_draw = XV_REC_OPT_INIT("XV_REC_DRAW");
 static int g_draw_mode;   /* XV_REC_DRAW path of the draw being recorded (record_draw sets it) */
 static xv_rec_opt g_opt_query = XV_REC_OPT_INIT("XV_REC_QUERY");
+static xv_rec_opt g_opt_quad = XV_REC_OPT_INIT("XV_REC_QUAD");    /* rewrite_quads_opt */
+static unsigned quad_seq_draws, quad_other_draws;                   /* [rec-quad] counters (new path) */
+static uint64_t quad_uncached_loads;   /* loads of uncached GPU memory the original rewrite + bound scan made for them */
 static void draw_memo_mismatch(const char *what, unsigned a, unsigned b);
 static unsigned scan_index_calls, scan_constant_checks, scan_constant_reused;
 static unsigned scan_reference_calls, scan_reference_fast;
@@ -974,6 +987,11 @@ void xv_d3d_prep_cache_report(unsigned frames)
     XV_REC_OPT_REPORT(&g_opt_index, frames, XV_LOG);
     XV_REC_OPT_REPORT(&g_opt_draw, frames, XV_LOG);
     XV_REC_OPT_REPORT(&g_opt_query, frames, XV_LOG);
+    XV_REC_OPT_REPORT(&g_opt_quad, frames, XV_LOG);
+    if (quad_seq_draws || quad_other_draws)
+        XV_LOG("[rec-quad] %u frames: %u sequential quad lists from the shared list, %u rewritten without read-back; "
+            "%llu uncached index loads avoided\n", frames, quad_seq_draws, quad_other_draws, (unsigned long long)quad_uncached_loads);
+    quad_seq_draws = quad_other_draws = 0; quad_uncached_loads = 0;
     XV_LOG("[sampler-cache] %u frames: %u reused / %u prepared (texture validity still checked)\n", frames, sampler_hits, sampler_misses);
     sampler_hits = sampler_misses = 0;
     XV_LOG("[texture-source-memo] %u frames: %u stage lookups reused / %u resolved (same header+palette as the previous draw, same frame)\n", frames, texture_source_memo_hits, texture_source_memo_misses);
@@ -1322,6 +1340,7 @@ static SceGxmBlendFactor d3d_blend_factor(unsigned f)
 
 /* QUADLIST / POLYGON have no GXM equivalent: rewrite them as an indexed triangle list into this frame's
  * quad-index pool (GPU-visible scratch).  Halo draws its in-game UI text and HUD through DrawVertices(QUADLIST). */
+static unsigned index_bounds(const uint16_t *indices, unsigned count);
 static int rewrite_quads(uint32_t prim, uint32_t *count, const void **indices)
 {
     const uint16_t *src = (const uint16_t *)*indices;
@@ -1342,6 +1361,65 @@ static int rewrite_quads(uint32_t prim, uint32_t *count, const void **indices)
     return 0;
 }
 
+/* XV_REC_QUAD (runtime/xv_record_opt.h). The quad pool and the sequential list live in uncached GPU memory
+ * (xv_d3d_scratch, USER_RW_UNCACHE), where every load is a full memory round trip on the Vita. The original rewrite
+ * reads its source there for DrawVertices and immediate quads (g_seq_indices) and re-reads each source value after
+ * every store (the pool may alias it for all the compiler knows), then retain_indices scans the written pool again
+ * for the vertex bound (index_bounds). The new path reads nothing uncached:
+ *   - sequential QUADLIST: points at the matching prefix of g_seq_quads (same values), writes nothing, and advances
+ *     the pool fill exactly as the original, so later rewrites keep the same room and truncation;
+ *   - any other source (guest indices, sequential POLYGON): the same writes, each source value loaded once into a
+ *     register (a sequential source is its own position), and the bound tracked on the way.
+ * The bound goes to retain_indices through g_quad_bound for this draw only. Verify runs the new path into a cached
+ * shadow pool, then the original, and compares result, count, pool fill, every index value and the bound. */
+#include "xv_quad_rewrite.h"
+static unsigned g_quad_bound; static int g_quad_bound_valid;   /* set by a mode-2 rewrite, consumed by retain_indices */
+static int rewrite_quads_opt(uint32_t prim, uint32_t *count, const void **indices)
+{
+    g_quad_bound_valid = 0;
+    int mode = xv_rec_opt_mode(&g_opt_quad);
+    uint32_t list = g_build_frame % XV_NUM_LISTS;
+    uint16_t *pool = g_quad_indices + list * XV_QUAD_INDICES;
+    if (mode == 0) return rewrite_quads(prim, count, indices);
+    if (mode == 2) {
+        const void *src_before = *indices;
+        int r = xv_quad_rewrite(prim == X_D3DPT_QUADLIST, count, indices, &g_quad_bound, pool, &g_quad_used[list],
+                                XV_QUAD_INDICES, g_seq_indices, g_seq_quads);
+        if (!r) {
+            g_quad_bound_valid = 1;
+            int seq_source = *indices == g_seq_quads || src_before == g_seq_indices;
+            if (*indices == g_seq_quads) quad_seq_draws++; else quad_other_draws++;
+            /* the original: one uncached load per written index from a sequential source (the rewrite re-reads its
+             * source after each store) plus one per written index in index_bounds */
+            quad_uncached_loads += (uint64_t)*count * (seq_source ? 2u : 1u);
+        }
+        return r;
+    }
+    /* verify: the new path into a cached shadow of this list's pool, then the original */
+    static uint16_t *shadow;
+    if (!shadow) shadow = malloc(XV_QUAD_INDICES * sizeof *shadow);
+    if (!shadow) return rewrite_quads(prim, count, indices);
+    uint32_t used0 = g_quad_used[list], shadow_used = used0, n_count = *count; const void *n_ind = *indices;
+    unsigned n_bound = 0;
+    int r_new = xv_quad_rewrite(prim == X_D3DPT_QUADLIST, &n_count, &n_ind, &n_bound, shadow, &shadow_used,
+                                XV_QUAD_INDICES, g_seq_indices, g_seq_quads);
+    int r_old = rewrite_quads(prim, count, indices);
+    const char *why = NULL;
+    if (r_old != r_new) why = "result";
+    else if (shadow_used != g_quad_used[list]) why = "pool fill";
+    else if (!r_old) {
+        if (n_count != *count) why = "count";
+        else if ((const uint16_t *)*indices != pool + used0) why = "original pointer";
+        else if (n_ind != g_seq_quads && (const uint16_t *)n_ind != shadow + used0) why = "new pointer";
+        else if (memcmp(n_ind, *indices, *count * sizeof(uint16_t))) why = "index values";
+        else if (n_bound != index_bounds((const uint16_t *)*indices, *count)) why = "vertex bound";
+    }
+    if (xv_rec_opt_result(&g_opt_quad, why == NULL))
+        XV_LOG("[rec-verify] XV_REC_QUAD mismatch frame %u cmd %u: %s (prim %u count %u seq %d)\n",
+            g_build_frame, cur_list()->ncmds, why, prim, (unsigned)n_count, n_ind == g_seq_quads);
+    return r_old;
+}
+
 static int prim_to_gxm(uint32_t prim, uint32_t *count, const void **indices, uint32_t *out)
 {
     switch (prim) {
@@ -1351,7 +1429,7 @@ static int prim_to_gxm(uint32_t prim, uint32_t *count, const void **indices, uin
     case X_D3DPT_LINELIST:      *out = SCE_GXM_PRIMITIVE_LINES;          return 0;
     case X_D3DPT_POINTLIST:     *out = SCE_GXM_PRIMITIVE_POINTS;         return 0;
     case X_D3DPT_QUADLIST: case X_D3DPT_POLYGON:
-        if (rewrite_quads(prim, count, indices) != 0) return -1;
+        if (rewrite_quads_opt(prim, count, indices) != 0) return -1;
         *out = SCE_GXM_PRIMITIVE_TRIANGLES; return 0;
     default:
         XV_ONCE(warned_prim, "primitive type %u not implemented (lineloop/linestrip/quadstrip)\n", prim);
@@ -1739,6 +1817,11 @@ static int retain_indices(const void **indices, unsigned count, unsigned *nverts
 {
     g_draw_vertex_refs_valid = 0;
     if (!*indices || !count) return 0;
+    if (g_quad_bound_valid) {   /* XV_REC_QUAD=2: this draw's rewrite (quad pool or g_seq_quads) computed its bound */
+        g_quad_bound_valid = 0;
+        *nverts = g_quad_bound;
+        return 1;
+    }
     unsigned list = g_build_frame % XV_NUM_LISTS;
     uintptr_t p = (uintptr_t)*indices;
     uintptr_t quad = (uintptr_t)(g_quad_indices + list * XV_QUAD_INDICES);

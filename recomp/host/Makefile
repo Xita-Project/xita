@@ -286,6 +286,10 @@ build/index_copy_test: index_copy_test.c ../../runtime/xv_index_copy.h ../../run
 	mkdir -p build
 	$(CC) $(CFLAGS) $< -o $@
 
+build/rec_quad_test: rec_quad_test.c ../../runtime/xv_quad_rewrite.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 rec_quad_test.c -o $@
+
 build/rec_index_test: rec_index_test.c ../../runtime/xv_index_copy.h ../../runtime/xv_vertex_refs.h
 	mkdir -p build
 	$(CC) $(CFLAGS) $< -o $@
@@ -293,7 +297,8 @@ build/rec_index_test: rec_index_test.c ../../runtime/xv_index_copy.h ../../runti
 # XV_REC_* recording knobs (runtime/xv_record_opt.h). rec_query_test includes xv_d3d.c: like ps_cache_test it needs
 # the generated shaders/xv_ps_table.h of a built stage.
 .PHONY: test-rec
-test-rec: build/rec_index_test build/rec_hle_test build/rec_query_test
+test-rec: build/rec_index_test build/rec_hle_test build/rec_query_test build/rec_quad_test
+	./build/rec_quad_test
 	./build/rec_index_test
 	./build/rec_hle_test
 	./build/rec_query_test
