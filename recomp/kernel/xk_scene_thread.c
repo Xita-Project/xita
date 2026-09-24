@@ -280,13 +280,14 @@ static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static uns
  * watchdog trapped; the render-view watchdog's live remap at 3 s did not end it). Abandon it through the trap path:
  * frame dropped, view released in helper_main. XV_SCENE_ABANDON_TEST=<n> abandons scene n once it has run 20 ms, to
  * prove the recovery on hardware. Checked at the helper's xv_preempt points (every 20,000 back edges). */
-static int abandon_ms = -1; static unsigned abandon_test, abandon_timeouts;
+static int abandon_ms = -1; static unsigned abandon_test, abandon_timeouts; static unsigned tc_calls, tc_unarmed;
 static void helper_timeout_check(void)
 {
-    if (!scene_abandon_armed) return;
+    tc_calls++;
+    if (!scene_abandon_armed) { tc_unarmed++; return; }
     if (abandon_ms < 0) { const char *e = getenv("XV_SCENE_ABANDON_MS"); abandon_ms = e ? atoi(e) : 2500; const char *t = getenv("XV_SCENE_ABANDON_TEST"); abandon_test = t ? (unsigned)atoi(t) : 0; }
     uint64_t run = xk_os_monotonic_us() - slow_t_dispatch;
-    int test = abandon_test && slow_dispatch_serial >= abandon_test && run > 20000u;   /* first check at or past scene n: checks come every 20,000 back edges, not every scene */
+    int test = abandon_test && slow_dispatch_serial >= abandon_test;   /* first check at or past scene n: checks come every 20,000 back edges, about one per scene */
     if (!test && (abandon_ms <= 0 || run < (uint64_t)abandon_ms * 1000u)) return;
     if (test) abandon_test = 0;
     abandon_timeouts++; scene_abandons++;
@@ -510,6 +511,7 @@ static void ws_report(void)
 }
 void xv_scene_thread_report(unsigned frames)
 {
+    XK_LOG("[scene-thread] timeout checks %u (unarmed %u), abandons %u (timeouts %u); serial %u, limit %d ms, test %u\n", tc_calls, tc_unarmed, scene_abandons, abandon_timeouts, slow_dispatch_serial, abandon_ms, abandon_test);
     if (enabled <= 0) return;
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
@@ -695,13 +697,14 @@ static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static uns
  * watchdog trapped; the render-view watchdog's live remap at 3 s did not end it). Abandon it through the trap path:
  * frame dropped, view released in helper_main. XV_SCENE_ABANDON_TEST=<n> abandons scene n once it has run 20 ms, to
  * prove the recovery on hardware. Checked at the helper's xv_preempt points (every 20,000 back edges). */
-static int abandon_ms = -1; static unsigned abandon_test, abandon_timeouts;
+static int abandon_ms = -1; static unsigned abandon_test, abandon_timeouts; static unsigned tc_calls, tc_unarmed;
 static void helper_timeout_check(void)
 {
-    if (!scene_abandon_armed) return;
+    tc_calls++;
+    if (!scene_abandon_armed) { tc_unarmed++; return; }
     if (abandon_ms < 0) { const char *e = getenv("XV_SCENE_ABANDON_MS"); abandon_ms = e ? atoi(e) : 2500; const char *t = getenv("XV_SCENE_ABANDON_TEST"); abandon_test = t ? (unsigned)atoi(t) : 0; }
     uint64_t run = xk_os_monotonic_us() - slow_t_dispatch;
-    int test = abandon_test && slow_dispatch_serial >= abandon_test && run > 20000u;   /* first check at or past scene n: checks come every 20,000 back edges, not every scene */
+    int test = abandon_test && slow_dispatch_serial >= abandon_test;   /* first check at or past scene n: checks come every 20,000 back edges, about one per scene */
     if (!test && (abandon_ms <= 0 || run < (uint64_t)abandon_ms * 1000u)) return;
     if (test) abandon_test = 0;
     abandon_timeouts++; scene_abandons++;
@@ -850,6 +853,7 @@ int xv_scene_thread_run(void *context)
 }
 void xv_scene_thread_report(unsigned frames)
 {
+    XK_LOG("[scene-thread] timeout checks %u (unarmed %u), abandons %u (timeouts %u); serial %u, limit %d ms, test %u\n", tc_calls, tc_unarmed, scene_abandons, abandon_timeouts, slow_dispatch_serial, abandon_ms, abandon_test);
     if (enabled <= 0) return;
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
