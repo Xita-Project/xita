@@ -1,6 +1,7 @@
 # D3D draw recording speed (`XV_REC_*`)
 
 Sept 24 2026. Branch `work/d3d-record-20260924` (worktree `d3d-record-wt`, base `c122b5c`). Not pushed.
+Round 2 (a30 pod and cutscene: `XV_REC_QUAD`, `XV_REC_VSC`, `XV_REC_ENTRY`): [d3d-record-speed2.md](d3d-record-speed2.md).
 
 Status: five exact fast paths for the scene thread's D3D recording, each behind its own environment knob (default
 0 = original code). Every path has a verify mode that runs the original and the new code in the same process and
