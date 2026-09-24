@@ -38,8 +38,15 @@
  *    served from the shadow, so data aliasing the stack behaves like the guest;
  *  - the back-edge budget (c->preempt) drops by exactly the guest's back-edge count and xv_preempt() is called the same
  *    number of times, at the end of the region/call (a scheduling point only; the scene helper never yields there).
+ * Declined (the hook returns 0 before touching anything): 606B0 - esp not 8-aligned, a window overlapping the constant
+ * or camera page or the flare count; 602F0 - the precision exception unmasked in fcw (the CRT floor would raise), esp
+ * not 4-aligned, a window overlapping the fixed-address data or the flare rows. None in-game.
+ * 602F0 reproduces the lifted 61270 / CRT floor (the true guest). The stage's XV_NATIVE_PACK / XV_NATIVE_CRT_FLOAT
+ * shortcuts for those callees are exact in what the callers read but not in dead state, so verify 602F0 with
+ * XV_NATIVE_PACK=0 XV_NATIVE_CRT_FLOAT=0.
  * Not reproduced: which NaN payload a two-NaN operation propagates (host compiler operand order; the guest body built
- * -O0 and -O2 already disagrees); the scene phase timers around the inlined callees (host timing only).
+ * -O0 and -O2 already disagrees; verify mode reports such stack words as nan-only); the scene phase timers around the
+ * inlined callees (host timing only).
  *
  * XV_NATIVE_606B0 build flag (hooks: tools/patch_native_606b0_hooks.py). Env XV_NATIVE_606B0 (region of f_000606B0)
  * and XV_NATIVE_602F0 (f_000602F0): 0 off (default XV_NATIVE_606B0_DEFAULT / XV_NATIVE_602F0_DEFAULT), 1 verify
