@@ -176,7 +176,7 @@ typedef struct {
  *  Command list
  * -------------------------------------------------------------------------------- */
 typedef struct {
-    uint8_t   kind;                 /* 0 draw, 1 clear, 2 failed captured draw        */
+    uint8_t   kind;                 /* 0 draw, 1 clear, 2 failed captured draw, 3 occlusion proxy (XV_OCCL) */
     uint8_t   fs_kind, blend;
     uint32_t  prim;                 /* SceGxmPrimitiveType (bitfield values, not small ints) */
     uint8_t   depth_func_idx, depth_write, cull;
@@ -208,6 +208,7 @@ typedef struct {
     float     clear_z;
     uint8_t   clear_flags, clear_stencil;
     xv_stencil stencil;
+    uint16_t  occl;                 /* XV_OCCL object slot (1-based) of the draw or proxy, 0 = untracked */
 } cmd_t;
 
 /* Alpha-disabled variants only. Texture-kind-dependent variants may change
@@ -241,6 +242,8 @@ typedef struct {
     unsigned visibility_back_area;
     unsigned visibility_draw_slot; /* pump-owned cached GXM state */
     uint8_t census;                /* XV_FRAG_CENSUS frame: per-command counters armed */
+    /* XV_OCCL: objects of this frame (slot i+1), what happened to them, and whether their counters are armed */
+    uint32_t occl_handle[255]; uint8_t occl_flags[255]; uint16_t occl_n; uint8_t occl_armed;
 } cmdlist_t;
 
 /* ----------------------------------------------------------------------------------
@@ -305,6 +308,16 @@ static xv_visibility_result g_visibility_results[XV_VISIBILITY_IDS];
  * query gets its own counter (index 512 + command) so final completion reports the depth-passing
  * samples of every draw and clear. Enabling it widens each core's array to 2048 words. */
 #define XV_CENSUS_CORE_WORDS 2048u
+/* XV_OCCL (recomp/kernel/xk_occlusion.c): per-object counters in the widened array - an object's own draws count into
+ * word 1536 + slot - 1, its depth-tested proxy rectangle into 1792 + slot - 1 (slot 1..255). Census frames take the
+ * whole array for per-command counters, so a census frame carries no object results. */
+#define XV_OCCL_REAL0  1536u
+#define XV_OCCL_PROXY0 1792u
+#define XV_OCCL_SLOTS  255u
+static int g_occl_enabled = -1;           /* XV_OCCL != 0: counters armed, proxies replayed */
+static uint16_t g_occl_cur;               /* recording thread: object slot of the draws being recorded */
+static uint8_t *g_occl_quads;             /* XV_NUM_LISTS x 255 proxies x 4 verts x 16 B, GPU-mapped */
+static SceUID g_occl_quads_uid = -1;
 /* census frames: what replay actually bound per command (discard/depth-replace/depth-only, alpha mode) */
 static struct { uint8_t valid, discard, replaces_depth, depth_only, alpha_mode; } g_census_fs[XV_CENSUS_CORE_WORDS];
 static unsigned g_vis_core_words = XV_VISIBILITY_PER_FRAME;
@@ -1248,6 +1261,7 @@ static cmd_t *new_cmd(void)
     memset(c, 0, sizeof(*c));
     c->pass = (uint8_t)l->cur_pass;
     c->visibility = (uint16_t)l->active_visibility;
+    c->occl = g_occl_cur;
     if (c->pass && c->pass <= XV_RT_SLOTS) g_rt[c->pass - 1].last_frame = g_build_frame;
     return c;
 }
@@ -2618,6 +2632,7 @@ void xv_d3d_BeginFrame(void)
     g_index_requested[g_build_frame % XV_NUM_LISTS] = 0;
     next->drop_commands = next->drop_indices = next->drop_attributes = next->drop_immediate = 0;
     next->nvisibility = next->active_visibility = 0;
+    next->occl_n = 0; next->occl_armed = 0;
     next->visibility_gpu_ready = 0;
 
 }
@@ -2670,6 +2685,7 @@ void xv_d3d_Swap(void)
     g_index_requested[g_build_frame % XV_NUM_LISTS] = 0;
     next->drop_commands = next->drop_indices = next->drop_attributes = next->drop_immediate = 0;
     next->nvisibility = next->active_visibility = 0;
+    next->occl_n = 0; next->occl_armed = 0;
     next->visibility_gpu_ready = 0;
     xv_present();
 }
@@ -2677,6 +2693,15 @@ void xv_d3d_Swap(void)
 /* ----------------------------------------------------------------------------------
  *  Replay (pump thread)
  * -------------------------------------------------------------------------------- */
+/* XV_OCCL != 0 widens every core's counter array to the census size once, before the buffer is allocated. */
+static int occl_on(void)
+{
+    if (g_occl_enabled < 0) {
+        const char *e=getenv("XV_OCCL"); g_occl_enabled = e && atoi(e) != 0;
+        if (g_occl_enabled) g_vis_core_words=XV_CENSUS_CORE_WORDS;
+    }
+    return g_occl_enabled;
+}
 static void visibility_draw_state(SceGxmContext *ctx, cmdlist_t *l, const cmd_t *c)
 {
     unsigned slot=c && c->kind==0 && l->visibility_gpu_ready ? c->visibility : 0;
@@ -2684,6 +2709,8 @@ static void visibility_draw_state(SceGxmContext *ctx, cmdlist_t *l, const cmd_t 
         unsigned i=(unsigned)(c-l->cmds);
         if (i<XV_CENSUS_CORE_WORDS-XV_VISIBILITY_PER_FRAME) slot=XV_VISIBILITY_PER_FRAME+i+1;
     }
+    if (!slot && c && c->occl && l->occl_armed && l->visibility_gpu_ready && (c->kind==0 || c->kind==3))
+        slot=(c->kind==3 ? XV_OCCL_PROXY0 : XV_OCCL_REAL0)+c->occl;   /* index + 1 */
     if (slot == l->visibility_draw_slot) return;
     if (slot) {
         if (slot<=XV_VISIBILITY_PER_FRAME)
@@ -2714,7 +2741,15 @@ void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, u
         XV_LOG("fragment census: %s (every %d frames)\n", g_census_period?"on":"off", g_census_period);
     }
     l->census=g_census_period && frame>600 && frame%(unsigned)g_census_period==0;
-    if (!l->nvisibility && !l->census) return;
+    if (occl_on() && !g_occl_quads && g_occl_quads_uid < 0) {
+        unsigned qb=(XV_NUM_LISTS*XV_OCCL_SLOTS*4*16+4095u)&~4095u;
+        g_occl_quads_uid=sceKernelAllocMemBlock("xv_occl_quads",SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,qb,NULL);
+        void *qp=NULL;
+        if (g_occl_quads_uid>=0 && sceKernelGetMemBlockBase(g_occl_quads_uid,&qp)>=0 && sceGxmMapMemory(qp,qb,SCE_GXM_MEMORY_ATTRIB_READ)>=0) g_occl_quads=qp;
+        XV_LOG("[occl] proxy quads %s (%u bytes)\n", g_occl_quads?"ready":"FAILED", qb);
+    }
+    l->occl_armed=occl_on() && g_occl_quads && l->occl_n && !l->census;
+    if (!l->nvisibility && !l->census && !l->occl_armed) return;
     uint32_t submitted_us=xk_os_monotonic_us?(uint32_t)xk_os_monotonic_us():0;
     for (unsigned i=0;i<l->nvisibility;i++)
         if (l->visibility[i].serial)
@@ -2736,8 +2771,10 @@ void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, u
     if (!g_visibility_memory) return;
     uint32_t *p=g_visibility_memory+(frame % XV_NUM_LISTS)*XV_VISIBILITY_WORDS;
     if (l->census) memset(p,0,XV_VISIBILITY_WORDS*sizeof *p);
-    else for (unsigned core=0;core<XV_VISIBILITY_GPU_CORES;core++)
+    else for (unsigned core=0;core<XV_VISIBILITY_GPU_CORES;core++) {
         memset(p+core*g_vis_core_words,0,XV_VISIBILITY_PER_FRAME*sizeof *p);
+        if (l->occl_armed) memset(p+core*g_vis_core_words+XV_OCCL_REAL0,0,(XV_CENSUS_CORE_WORDS-XV_OCCL_REAL0)*sizeof *p);
+    }
     int err=sceGxmSetVisibilityBuffer(ctx,p,XV_VISIBILITY_STRIDE);
     l->visibility_gpu_ready=err >= 0;
     sceGxmSetFrontVisibilityTestOp(ctx,SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
@@ -2772,6 +2809,49 @@ void xv_d3d_visibility_complete(uint32_t frame)
     XV_VP_COMPLETE(l,frame);
 }
 
+/* ---- XV_OCCL: recording-thread API for recomp/kernel/xk_occlusion.c -------------------------------------------- */
+unsigned xv_d3d_occl_begin(uint32_t handle, unsigned flags)   /* tag the following draws with a new object slot */
+{
+    if (!occl_on()) return 0;
+    cmdlist_t *l = cur_list();
+    if (l->occl_n >= XV_OCCL_SLOTS) return 0;
+    unsigned slot = ++l->occl_n;
+    l->occl_handle[slot - 1] = handle; l->occl_flags[slot - 1] = (uint8_t)flags;
+    g_occl_cur = (uint16_t)slot;
+    return slot;
+}
+void xv_d3d_occl_end(void) { g_occl_cur = 0; }
+uint32_t xv_d3d_occl_build_frame(void) { return g_build_frame; }
+const float *xv_d3d_occl_matrix(void) { return &S.vsc[0][0]; }   /* c[-96..-93]: world -> clip rows */
+int xv_d3d_occl_proxy(unsigned slot, float x0, float y0, float x1, float y1, float z)
+{
+    if (!slot || slot > cur_list()->occl_n) return 0;
+    cmd_t *c = new_cmd();
+    if (!c) return 0;
+    c->kind = 3; c->occl = (uint16_t)slot; c->visibility = 0;
+    c->texscale[0][0] = x0; c->texscale[0][1] = y0; c->texscale[0][2] = x1; c->texscale[0][3] = y1; c->clear_z = z;
+    cur_list()->occl_flags[slot - 1] |= 4;
+    return 1;
+}
+/* After final completion: each object's own depth-passing samples and its proxy's, to the kernel's table. */
+void xv_d3d_occl_complete(uint32_t frame)
+{
+    cmdlist_t *l = g_lists[frame % XV_NUM_LISTS];
+    if (!l->occl_armed) return;
+    l->occl_armed = 0;
+    extern void xv_occl_result(uint32_t, uint32_t, uint32_t, uint32_t, unsigned) __attribute__((weak));
+    if (!xv_occl_result || !l->visibility_gpu_ready || !g_visibility_memory) return;
+    const uint32_t *p = g_visibility_memory + (frame % XV_NUM_LISTS) * XV_VISIBILITY_WORDS;
+    for (unsigned i = 0; i < l->occl_n; i++) {
+        uint64_t real = 0, proxy = 0;
+        for (unsigned core = 0; core < XV_VISIBILITY_GPU_CORES; core++) {
+            real += p[core * g_vis_core_words + XV_OCCL_REAL0 + i];
+            proxy += p[core * g_vis_core_words + XV_OCCL_PROXY0 + i];
+        }
+        xv_occl_result(l->occl_handle[i], frame, (uint32_t)real, (uint32_t)proxy, l->occl_flags[i]);
+    }
+}
+
 /* Final completion of a census frame: depth-passing samples per command (all four cores). The
  * counters measure coverage, not GPU time; blended and discarding draws are what they rank. */
 void xv_d3d_frag_census_complete(uint32_t frame)
@@ -2796,7 +2876,7 @@ void xv_d3d_frag_census_complete(uint32_t frame)
     if (n>XV_CENSUS_CORE_WORDS-XV_VISIBILITY_PER_FRAME) n=XV_CENSUS_CORE_WORDS-XV_VISIBILITY_PER_FRAME;
     for (unsigned i=0;i<n;i++) {
         const cmd_t *c=&l->cmds[i];
-        if (c->kind==2) continue;
+        if (c->kind==2 || c->kind==3) continue;
         uint32_t v=0;
         if (c->kind==0 && c->visibility) {
             for (unsigned core=0;core<XV_VISIBILITY_GPU_CORES;core++) v+=p[core*g_vis_core_words+c->visibility-1];
@@ -3309,6 +3389,33 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             xv_stencil_clear(ctx, c->clear_flags & 4, c->clear_stencil);
             sceGxmSetFrontDepthFunc(ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
             sceGxmSetFrontDepthWriteEnable(ctx, (c->clear_flags & 2) ? SCE_GXM_DEPTH_WRITE_ENABLED : SCE_GXM_DEPTH_WRITE_DISABLED);
+            sceGxmSetCullMode(ctx, SCE_GXM_CULL_NONE);
+            sceGxmSetVertexProgram(ctx, v->vs.vprog);
+            sceGxmSetFragmentProgram(ctx, fp);
+            sceGxmSetVertexStream(ctx, 0, q);
+            xv_gpu_flush_pump(q, 4 * sizeof *q);
+            XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, SCE_GXM_PRIMITIVE_TRIANGLE_FAN, SCE_GXM_INDEX_FORMAT_U16, g_seq_indices, 4));
+            continue;
+        }
+        if (c->kind == 3) {   /* XV_OCCL proxy: the object's screen rectangle at its nearest depth, depth-tested only */
+            state.valid = 0;
+            stencil_state.valid = 0;
+            textures.valid = 0;
+            int slot = handle_to_slot(g_clear_vs);
+            if (slot < 0 || !g_occl_quads || !c->occl || c->occl > XV_OCCL_SLOTS || !l->occl_armed)
+                continue;
+            vs_slot_t *v = &g_vs[slot];
+            SceGxmFragmentProgram *fp = fragment_for(v, FS_COLOR, BLEND_NOCOLOR, NULL);
+            if (!fp)
+                continue;
+            struct { float x, y, z; uint8_t b, g, r, a; } *q =
+                (void *)(g_occl_quads + ((frame % XV_NUM_LISTS) * XV_OCCL_SLOTS + c->occl - 1) * 4 * 16);
+            float x0 = c->texscale[0][0], y0 = c->texscale[0][1], x1 = c->texscale[0][2], y1 = c->texscale[0][3], z = c->clear_z;
+            q[0] = (typeof(q[0])){ x0, y0, z, 0, 0, 0, 0 }; q[1] = (typeof(q[0])){ x1, y0, z, 0, 0, 0, 0 };
+            q[2] = (typeof(q[0])){ x1, y1, z, 0, 0, 0, 0 }; q[3] = (typeof(q[0])){ x0, y1, z, 0, 0, 0, 0 };
+            xv_stencil_clear(ctx, 0, 0);
+            sceGxmSetFrontDepthFunc(ctx, SCE_GXM_DEPTH_FUNC_LESS_EQUAL);
+            sceGxmSetFrontDepthWriteEnable(ctx, SCE_GXM_DEPTH_WRITE_DISABLED);
             sceGxmSetCullMode(ctx, SCE_GXM_CULL_NONE);
             sceGxmSetVertexProgram(ctx, v->vs.vprog);
             sceGxmSetFragmentProgram(ctx, fp);

@@ -353,6 +353,12 @@ static int xv_gfx_init(void)
     init.displayQueueCallback         = xv_display_callback;
     init.displayQueueCallbackDataSize = sizeof(xv_display_data_t);
     init.parameterBufferSize          = SCE_GXM_DEFAULT_PARAMETER_BUFFER_SIZE;
+    {   /* XV_GXM_PB_MB=<MiB> (xita.cfg: read before the dashboard): a larger parameter buffer for scenes whose
+         * binned geometry overflows the default 16 MiB (an overflow forces partial renders: store + reload). */
+        const char *e = getenv("XV_GXM_PB_MB"); int mb = e ? atoi(e) : 0;
+        if (mb >= 16 && mb <= 128) init.parameterBufferSize = (unsigned)mb * 1024u * 1024u;
+        XV_LOG("GXM parameter buffer %u MiB\n", init.parameterBufferSize >> 20);
+    }
     int err = sceGxmInitialize(&init);
     if (err != SCE_OK) {
         XV_LOG("sceGxmInitialize failed: 0x%08X\n", err);
@@ -1697,6 +1703,7 @@ static int xv_pump_retire(void)
             xv_d3d_visibility_complete(g_packets[q].mesh);
         }
         xv_d3d_frag_census_complete(g_packets[q].mesh);
+        xv_d3d_occl_complete(g_packets[q].mesh);
         xv_d3d_check_geometry(g_packets[q].mesh);
     }
     if (g_packets[q].visibility_completed) {

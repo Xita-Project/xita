@@ -2056,6 +2056,14 @@ CFLAGS += -DXV_QSERIAL=1
 RECOMP_CFLAGS += -DXV_QSERIAL=1
 endif
 
+# Hidden-object skip for the model pass (recomp/kernel/xk_occlusion.c + runtime/xv_d3d.c proxy commands, hooks from
+# tools/patch_occlusion_hooks.py in f_0005B760/f_0005D410). Env XV_OCCL 0 off (default) / 1 verify / 2 skip.
+XV_OCCL_HOOK ?= 0
+ifeq ($(XV_OCCL_HOOK),1)
+CFLAGS += -DXV_OCCL_HOOK=1
+RECOMP_CFLAGS += -DXV_OCCL_HOOK=1
+endif
+
 # Looping-sound obstruction reuse (recomp/kernel/xk_sound_obstruction.c, entry hook from
 # tools/patch_sound_obstruction_hook.py on f_0002B460). Env XV_SOUND_OBSTRUCTION=<frames> (0 off, default),
 # XV_SOUND_OBSTRUCTION_VERIFY=1, XV_SOUND_OBSTRUCTION_EPS=<world units>.
