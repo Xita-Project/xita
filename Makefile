@@ -2041,6 +2041,13 @@ CFLAGS += -DXV_NATIVE_CRT_FLOAT=1 -DXV_NATIVE_CRT_FLOAT_DEFAULT=$(XV_NATIVE_CRT_
 RECOMP_CFLAGS += -DXV_NATIVE_CRT_FLOAT=1 -DXV_NATIVE_CRT_FLOAT_DEFAULT=$(XV_NATIVE_CRT_FLOAT_DEFAULT)
 endif
 
+# Scene helper keeps private object-query serials (recomp/kernel/xk_qserial.[ch], tools/patch_qserial.py). Env XV_QSERIAL 1 (default) / 0.
+XV_QSERIAL ?= 0
+ifeq ($(XV_QSERIAL),1)
+CFLAGS += -DXV_QSERIAL=1
+RECOMP_CFLAGS += -DXV_QSERIAL=1
+endif
+
 # Scene helper never changes the shared resource caches while the tick can: recomp/kernel/xk_cache_defer.c, entry
 # hooks from tools/patch_cache_defer_hooks.py (f_00032A70, f_00032510). Env XV_CACHE_DEFER 1 on (default) / 0 off.
 XV_CACHE_DEFER ?= 0

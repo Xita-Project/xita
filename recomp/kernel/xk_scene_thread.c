@@ -383,6 +383,7 @@ static int helper_main(SceSize args, void *argp)
 }
 static void configure(void)
 {
+    { extern void xv_qserial_configure(void) __attribute__((weak)); if (xv_qserial_configure) xv_qserial_configure(); }   /* xk_qserial.c: the helper's private object-query serials */
     configured = 1;
     const char *e = getenv("XV_SCENE_THREAD"); enabled = e ? atoi(e) != 0 : XV_SCENE_THREAD_DEFAULT;
     { const char *o = getenv("XV_SCENE_OVERLAP"); overlap = o ? atoi(o) : 0; if (overlap < 0 || overlap > 2) overlap = 0; }   /* 1: Present joins; 2: Present deferred to the next dispatch */
@@ -767,6 +768,7 @@ static void *helper_main(void *arg)
 }
 static void configure(void)
 {
+    { extern void xv_qserial_configure(void) __attribute__((weak)); if (xv_qserial_configure) xv_qserial_configure(); }   /* xk_qserial.c: the helper's private object-query serials */
     configured = 1;
     const char *e = getenv("XV_SCENE_THREAD"); enabled = e ? atoi(e) != 0 : XV_SCENE_THREAD_DEFAULT;
     { const char *o = getenv("XV_SCENE_OVERLAP"); overlap = o ? atoi(o) : 0; if (overlap < 0 || overlap > 2) overlap = 0; }   /* 1: Present joins; 2: Present deferred to the next dispatch */

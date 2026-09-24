@@ -94,9 +94,50 @@ static void state_hash(unsigned now)
             fclose(f); break;
         }
 }
+/* XV_ADDR_WHOIS=<frame>:<addr>,<addr>,... (host diagnostic): once at that frame, name what holds each guest address -
+ * the game data array element (name, index, offset) or the object whose body starts nearest below it (index, salt,
+ * definition tag, offset). Used to identify the render-view merge conflict sites the Vita reports. */
+static uint32_t wh_r32(uint32_t va) { uint32_t off = g_xpt[va >> 12]; uint32_t v = 0; if (off < (64u << 20)) memcpy(&v, g_xram + off + (va & 0xFFFu), 4); return v; }
+static void addr_whois(unsigned now)
+{
+    static unsigned at = ~0u; static uint32_t want[32]; static unsigned nwant; static int init;
+    if (!init) { init = 1; const char *e = getenv("XV_ADDR_WHOIS"); if (!e) return; at = (unsigned)strtoul(e, NULL, 10); const char *p = strchr(e, ':');
+        while (p && nwant < 32) { want[nwant++] = (uint32_t)strtoul(p + 1, NULL, 16); p = strchr(p + 1, ','); } }
+    if (now != at || !g_xram || !g_xpt) return;
+    struct { uint32_t data, bytes, esz; char name[33]; } arr[256]; unsigned narr = 0; uint32_t obj_data = 0, obj_max = 0, obj_esz = 0;
+    for (uint32_t off = 0x28u; off + 0x10u <= (64u << 20) && narr < 256; off += 4u) {
+        uint32_t sig; memcpy(&sig, g_xram + off, 4); if (sig != 0x64407440u) continue;
+        const uint8_t *hp = g_xram + off - 0x28u; uint16_t max, esz; uint32_t data; memcpy(&max, hp + 0x20, 2); memcpy(&esz, hp + 0x22, 2); memcpy(&data, hp + 0x34, 4);
+        memcpy(arr[narr].name, hp, 32); arr[narr].name[32] = 0; for (int i = 0; i < 32 && arr[narr].name[i]; ++i) if (arr[narr].name[i] < 32 || arr[narr].name[i] > 126) arr[narr].name[i] = '?';
+        arr[narr].data = data; arr[narr].bytes = (uint32_t)max * esz; arr[narr].esz = esz;
+        if (!strcmp(arr[narr].name, "object")) { obj_data = data; obj_max = max; obj_esz = esz; }
+        narr++;
+    }
+    /* XV_ADDR_WHOIS_ARRAYS=<word>: also list the data arrays whose name contains <word>, with the image globals that point at their header */
+    { const char *aw = getenv("XV_ADDR_WHOIS_ARRAYS");
+      if (aw) for (uint32_t off = 0x28u; off + 0x10u <= (64u << 20); off += 4u) {
+        uint32_t sig; memcpy(&sig, g_xram + off, 4); if (sig != 0x64407440u) continue;
+        char nm[33]; memcpy(nm, g_xram + off - 0x28u, 32); nm[32] = 0; if (!strstr(nm, aw)) continue;
+        uint32_t hdr_va = 0; for (uint32_t va = 0x80000000u; va < 0x84000000u; va += 0x1000u) if (g_xpt[va >> 12] == ((off - 0x28u) & ~0xFFFu)) { hdr_va = va + ((off - 0x28u) & 0xFFFu); break; }
+        fprintf(stderr, "[whois] array '%s' header %08X\n", nm, hdr_va);
+        for (uint32_t ia = 0x10000u; hdr_va && ia < 0x400000u; ia += 4u) { uint32_t v; memcpy(&v, g_img_base + ia, 4); if (v == hdr_va) fprintf(stderr, "[whois]   image global %08X -> header\n", ia); }
+      } }
+    for (unsigned w = 0; w < nwant; ++w) {
+        uint32_t a = want[w]; int found = 0;
+        for (unsigned i = 0; i < narr && !found; ++i) if (a >= arr[i].data && a < arr[i].data + arr[i].bytes && arr[i].esz) {
+            uint32_t k = (a - arr[i].data) / arr[i].esz; fprintf(stderr, "[whois] %08X: array %s element %u offset +%X (esz %u)\n", a, arr[i].name, k, (a - arr[i].data) % arr[i].esz, arr[i].esz); found = 1; }
+        if (found) continue;
+        uint32_t best = 0, bk = 0, bsalt = 0;
+        for (uint32_t k = 0; k < obj_max && obj_esz >= 12; ++k) { uint32_t e = obj_data + k * obj_esz, hdr = wh_r32(e), body = wh_r32(e + 8u);
+            if ((hdr & 0xFFFFu) && body && body <= a && body > best) { best = body; bk = k; bsalt = hdr & 0xFFFFu; } }
+        if (best && a - best < 0x2000u) fprintf(stderr, "[whois] %08X: object %u (handle %04X%04X) body %08X +%X, definition tag %08X, type word %08X\n", a, bk, bsalt, bk, best, a - best, wh_r32(best), wh_r32(obj_data + bk * obj_esz + 4u));
+        else fprintf(stderr, "[whois] %08X: no array element or object body within 8 KiB (nearest body %08X)\n", a, best);
+    }
+}
 void xv_host_reports_present(unsigned now)
 {
     state_hash(now);
+    addr_whois(now);
     static unsigned last; unsigned delta = now - last;
     if (delta < 60) return;
     last = now;
