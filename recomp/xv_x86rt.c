@@ -23,6 +23,17 @@
 
 static unsigned g_unimpl_count;
 
+/* xita_recomp.py --x87-regs: a guarded call's callee moved the x87 stack differently from the effect the
+ * analysis assumed; the caller continues in its memory-lowering copy (exact, just slower). Rare by design:
+ * the first 32 are logged with the call site, then every 1024th. */
+void xv_x87reg_miss(xctx *c, uint32_t call_ip)
+{
+    static unsigned misses;
+    unsigned n = __atomic_add_fetch(&misses, 1u, __ATOMIC_RELAXED);
+    if (n <= 32 || (n & 1023u) == 0)
+        XV_RT_LOG("x87-regs guard miss #%u after call at %08X (fsp %u)\n", n, call_ip, c->fsp);
+}
+
 void xv_unimpl(xctx *c, uint32_t eip, const char *what)
 {
     XV_LIGHT_CENSUS_CANCEL(c,XV_LC_STOP);
