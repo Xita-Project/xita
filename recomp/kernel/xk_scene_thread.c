@@ -366,6 +366,7 @@ static void join(unsigned *counter)
 void xv_scene_thread_join(void) { if (enabled > 0 && overlap) join(&joins_present); }
 void xv_scene_thread_join_owner(void) { if (enabled > 0 && in_flight && !xv_scene_thread_on_helper()) join(&joins_d3d); }   /* an owner-side D3D HLE while a scene is in flight waits: the Vita runtime (GXM) is single-threaded (menu/loading draws crashed perf83 run 1) */
 int xv_scene_thread_present_policy(void) { return enabled > 0 && in_flight ? overlap : 0; }
+int xv_scene_thread_overlapped(void) { return in_flight_overlapped; }   /* set before the go signal, cleared at the join: the helper sees it from its first instruction (xk_cache_defer.c) */
 
 static int helper_main(SceSize args, void *argp)
 {
@@ -410,6 +411,7 @@ int xv_scene_thread_run(void *context)
     if (sceKernelGetThreadId() == helper) return 0;             /* the helper's own entry: run the body */
     if (overlap && in_flight) { __atomic_store_n(&xv_owner_at_join, 1, __ATOMIC_RELEASE); if (in_flight_overlapped) { extern void xv_render_view_early_copy(void) __attribute__((weak)); if (xv_render_view_early_copy) xv_render_view_early_copy(); } join(&joins_dispatch); }   /* early snapshot: copy tick N+1's pages while scene N finishes */             /* backpressure: scene N must finish before scene N+1 */
     __atomic_store_n(&xv_owner_at_join, 0, __ATOMIC_RELEASE);
+    { extern void xv_cache_defer_replay(xctx *, int) __attribute__((weak)); if (xv_cache_defer_replay && !in_flight) xv_cache_defer_replay((xctx *)context, gameplay_active()); }   /* the helper's deferred cache allocations (xk_cache_defer.c): neither the tick nor a scene runs here */
     if (depth) { declined_nested++; return 0; }                  /* recursive scene entry on the owner */
     depth = 1;
     xctx *c = context;
@@ -743,6 +745,7 @@ static void join(unsigned *counter)
 void xv_scene_thread_join(void) { if (enabled > 0 && overlap) join(&joins_present); }
 void xv_scene_thread_join_owner(void) { if (enabled > 0 && in_flight && !xv_scene_thread_on_helper()) join(&joins_d3d); }   /* an owner-side D3D HLE while a scene is in flight waits: the Vita runtime (GXM) is single-threaded (menu/loading draws crashed perf83 run 1) */
 int xv_scene_thread_present_policy(void) { return enabled > 0 && in_flight ? overlap : 0; }
+int xv_scene_thread_overlapped(void) { return in_flight_overlapped; }   /* set before the go signal, cleared at the join: the helper sees it from its first instruction (xk_cache_defer.c) */
 
 pthread_t xv_owner_pthread_self(void)
 {
@@ -783,6 +786,7 @@ int xv_scene_thread_run(void *context)
     if (pthread_equal(pthread_self(), helper)) return 0;         /* the helper's own entry: run the body */
     if (overlap && in_flight) { __atomic_store_n(&xv_owner_at_join, 1, __ATOMIC_RELEASE); if (in_flight_overlapped) { extern void xv_render_view_early_copy(void) __attribute__((weak)); if (xv_render_view_early_copy) xv_render_view_early_copy(); } join(&joins_dispatch); }   /* early snapshot: copy tick N+1's pages while scene N finishes */             /* backpressure: scene N must finish before scene N+1 */
     __atomic_store_n(&xv_owner_at_join, 0, __ATOMIC_RELEASE);
+    { extern void xv_cache_defer_replay(xctx *, int) __attribute__((weak)); if (xv_cache_defer_replay && !in_flight) xv_cache_defer_replay((xctx *)context, gameplay_active()); }   /* the helper's deferred cache allocations (xk_cache_defer.c): neither the tick nor a scene runs here */
     if (depth) { declined_nested++; return 0; }                  /* recursive scene entry on the owner */
     xctx *c = context;
     ctx = *c; scene_guest = xk_cur;
@@ -820,6 +824,7 @@ int xv_scene_thread_proxy_hle(void *c, void (*fn)(void *), const char *name) { (
 void xv_scene_thread_service(void) {}
 uint32_t xv_scene_thread_proxy_wait(void *objs, int n, int wait_all, const void *timeout) { (void)objs; (void)n; (void)wait_all; (void)timeout; return 0x102; }
 int xv_scene_thread_present_policy(void) { return 0; }
+int xv_scene_thread_overlapped(void) { return 0; }
 void xv_scene_thread_d3d_call(const char *name) { (void)name; }
 void xv_scene_thread_note_suppressed_yield(uint32_t eip, int blocking) { (void)eip; (void)blocking; }
 int xv_scene_thread_run(void *context) { (void)context; return 0; }

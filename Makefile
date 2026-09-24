@@ -2041,6 +2041,22 @@ CFLAGS += -DXV_NATIVE_CRT_FLOAT=1 -DXV_NATIVE_CRT_FLOAT_DEFAULT=$(XV_NATIVE_CRT_
 RECOMP_CFLAGS += -DXV_NATIVE_CRT_FLOAT=1 -DXV_NATIVE_CRT_FLOAT_DEFAULT=$(XV_NATIVE_CRT_FLOAT_DEFAULT)
 endif
 
+# Scene helper never changes the shared resource caches while the tick can: recomp/kernel/xk_cache_defer.c, entry
+# hooks from tools/patch_cache_defer_hooks.py (f_00032A70, f_00032510). Env XV_CACHE_DEFER 1 on (default) / 0 off.
+XV_CACHE_DEFER ?= 0
+ifeq ($(XV_CACHE_DEFER),1)
+CFLAGS += -DXV_CACHE_DEFER=1
+RECOMP_CFLAGS += -DXV_CACHE_DEFER=1
+endif
+
+# Diagnostic: which thread enters the shared resource-cache functions while a scene is in flight
+# (recomp/kernel/xk_cache_probe.c, hooks from tools/patch_cache_probe.py). 0 off (default) / 1 on.
+XV_CACHE_PROBE ?= 0
+ifeq ($(XV_CACHE_PROBE),1)
+CFLAGS += -DXV_CACHE_PROBE=1
+RECOMP_CFLAGS += -DXV_CACHE_PROBE=1
+endif
+
 # Native BSP subcluster visibility pass (f_00052E10 + its leaf f_0005C300, under f_000539C0): recomp/kernel/xk_native_visibility.c,
 # entry hook installed by tools/patch_native_visibility_hooks.py. Env XV_NATIVE_VISIBILITY 0 off / 1 verify / 2 native.
 XV_NATIVE_VISIBILITY ?= 0

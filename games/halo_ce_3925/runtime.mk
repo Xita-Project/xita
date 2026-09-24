@@ -76,6 +76,12 @@ endif
 ifeq ($(XV_NATIVE_VISIBILITY_PASS),1)
 XITA_GAME_SRCS += recomp/kernel/xk_visibility_pass.c
 endif
+ifeq ($(XV_CACHE_DEFER),1)
+XITA_GAME_SRCS += recomp/kernel/xk_cache_defer.c
+endif
+ifeq ($(XV_CACHE_PROBE),1)
+XITA_GAME_SRCS += recomp/kernel/xk_cache_probe.c
+endif
 ifeq ($(XV_NATIVE_VISIBILITY),1)
 XITA_GAME_SRCS += recomp/kernel/xk_native_visibility.c
 endif
