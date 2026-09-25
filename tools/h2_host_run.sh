@@ -14,6 +14,8 @@
 # Other knobs: H2_HOST_BIN (harness, required), H2_HOST_GAME (game dir; default the lab's copy),
 # H2_HOST_SAVE_FROM (save tree to copy instead of save-base), H2_HOST_TASKSET (cpu list for taskset),
 # H2_HOST_KEEP_CACHE4=1 (keep the copied cache4 partition instead of starting it empty).
+# H2_HOST_BARE=1: no xita-base env.txt and no shaders link, like a device with only the package installed
+# (a MENU_RUNTIME_DEFAULTS=1 build then runs on its compiled-in defaults and loads h2menu_*.gxp from app0).
 # H2_DRIVE=1 runs tools/h2_menu_driver.py next to the harness (title -> split-screen match, driver.log).
 # Pad: XV_PAD="<flip>:<button>[*<hold>],..." / "t<sec>:..." / XV_PAD_FILE=<file> (see host/psp2_host.c).
 # Timing on a host is ~structure only: no GPU, x86 is many times a Vita core. Never quote it as Vita ms.
@@ -36,8 +38,10 @@ $pin cp -a --reflink=auto "$save_from" "$run/ux0:data/xita-halo2/save"
 # one ("[h2/blocked] raw access to mounted/populated cache4 requires a general FATX driver"): start it empty, as the
 # lab's preserve_fresh_cache.py does (the intro then re-copies mainmenu.map there as cache002.map).
 [ "${H2_HOST_KEEP_CACHE4:-0}" = 1 ] || { rm -rf "$run/ux0:data/xita-halo2/save/cache4" "$run/ux0:data/xita-halo2/save/cache4.raw"; mkdir "$run/ux0:data/xita-halo2/save/cache4"; }
-cp "$base/xita-base/env.txt" "$run/ux0:data/xita/env.txt"
-ln -s "$base/xita-base/shaders" "$run/ux0:data/xita/shaders"
+if [ "${H2_HOST_BARE:-0}" != 1 ]; then
+  cp "$base/xita-base/env.txt" "$run/ux0:data/xita/env.txt"
+  ln -s "$base/xita-base/shaders" "$run/ux0:data/xita/shaders"
+fi
 cd "$run"
 echo "run $run: $secs s, bin $bin"
 driver=
