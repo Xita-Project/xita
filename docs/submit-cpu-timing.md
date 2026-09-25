@@ -60,3 +60,10 @@ The proposed -12 trial follows perf220 pod sampling: roughly 59% READY versus
 1% WAITING in the captured eight windows. This supports testing earlier
 submission; it does not guarantee a frame-time improvement. Check recording
 drain time, scene time and complete frame intervals for a shifted bottleneck.
+
+Hardware interpretation limit: perf221 produced some short windows whose
+kernel CPU deltas disagreed with the sampled running fraction. The cause is not
+yet established (counter accounting boundaries, sampling bias and phase changes
+remain possible). Treat per-submission CPU deltas as diagnostic estimates, not
+exact execution time or a recoverable-time budget. Corroborate with sampled
+states and whole-frame intervals.
