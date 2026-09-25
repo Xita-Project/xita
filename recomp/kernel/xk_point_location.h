@@ -19,6 +19,10 @@ static __attribute__((noinline)) void xv_point_plane_exceptional(xctx *c)
 }
 static void xv_point_location_body(xctx *c)
 {
+    /* Retained shards may bind X_G to these function-local aliases. */
+    uint8_t *const xram_ = g_xram;
+    const uint32_t *const xpt_ = g_xpt;
+    (void)xram_; (void)xpt_;
     X_PUSH32(c->r[6]);
     c->r[6] = X_M32(c->r[1] + 4u);
     X_PUSH32(c->r[7]);

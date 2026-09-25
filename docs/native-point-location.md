@@ -1,6 +1,6 @@
 # Point-location prototype (17A8B0)
 
-This is an unhooked candidate, not an installed optimization. `xk_point_location.h`
+This candidate has an opt-in retained-shard hook, but is not installed on the Vita. `xk_point_location.h`
 reduces transient x87 context traffic while traversing the BSP point-location tree.
 The retained implementation has no callees and one preemption backedge. The
 prototype keeps stack writes, register/flag results and that scheduling boundary;
@@ -40,4 +40,16 @@ retained body and 2,007.3 ns/call for the candidate. This single microbenchmark
 excludes hook/verifier overhead and is not a hardware frame-time prediction.
 Run the compiled fixture with `bench` to repeat it. In-game verification and
 Vita measurements remain required before enabling the candidate.
-No runtime hook or default is changed.
+`tools/patch_point_location.py` adds the wrapper only to the pinned retained
+function and rejects drift or a second application. `XV_POINT_LOCATION=0` is the
+default; 1 verifies and retains the guest result, 2 runs the native. Object-worker
+calls and unaligned stacks decline to the guest. A mismatch disables the candidate.
+The report uses session totals and is called through the existing weak report chain.
+
+Verification saves/restores the eight bytes written by the prologue and the input
+context/FP state. It defers preemption during replay, compares both results, then
+applies the guest's backedge budget at return. This is a correctness diagnostic,
+not representative scheduling or performance. Normal native mode retains each
+backedge. The wrapper passed 4,096 cases on host and ARM; an injected wrong-side
+mutation was detected while retaining the guest result. Full-game verification
+is still pending.

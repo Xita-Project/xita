@@ -4,6 +4,10 @@
 #include <time.h>
 #include "xv_x86rt.h"
 #include "xk_point_location.h"
+#ifdef PL_TEST_HOOK
+#include "xk_point_location_hook.h"
+void xk_os_log(const char *fmt,...) { fputs(fmt,stderr); }
+#endif
 #define BYTES (4u*1024u*1024u)
 uint8_t *g_xram, *g_img_base;
 uint32_t *g_xpt;
@@ -31,10 +35,19 @@ void f_0017A8B0(xctx *);
 static unsigned rng=0x17a8b0;
 static unsigned rnd(void) { rng^=rng<<13;rng^=rng>>17;rng^=rng<<5;return rng; }
 static void putf(uint32_t a,unsigned word) { x_guest_write(a,&word,4); }
-static __attribute__((noinline)) void candidate(xctx *c) { xv_point_location_body(c); }
+static __attribute__((noinline)) void candidate(xctx *c) {
+#ifdef PL_TEST_HOOK
+    xv_point_location_hook(c,f_0017A8B0);
+#else
+    xv_point_location_body(c);
+#endif
+}
 static double now(void) { struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9; }
 int main(int argc,char **argv) {
     (void)argv;
+#ifdef PL_TEST_HOOK
+    pl_mode=1;
+#endif
     g_xram=calloc(1,BYTES);g_img_base=g_xram;g_xpt=malloc(1024*4);
     unsigned char *saved=malloc(BYTES),*expected=malloc(BYTES);
     for(unsigned i=0;i<1024;i++) g_xpt[i]=i*4096;
@@ -81,13 +94,19 @@ int main(int argc,char **argv) {
         for(unsigned j=0;j<8;j++) { c.r[j]=rnd();c.st[j]=(double)(int)rnd(); }
         c.r[0]=0;c.r[1]=root;c.r[2]=point;c.r[4]=0x90000;
         c.fsp=test%8;c.fsw=rnd();c.fcw=0x37f;c.preempt=1+test%13;
+#ifdef PL_TEST_HOOK
+        c.preempt=1<<24; /* replay verifier deliberately defers scheduling */
+#endif
         memcpy(saved,g_xram,BYTES);xctx ref=c;calls=0;trace=0;feclearexcept(FE_ALL_EXCEPT);f_0017A8B0(&ref);int refenv=fetestexcept(FE_ALL_EXCEPT);unsigned refcalls=calls,reftrace=trace;memcpy(expected,g_xram,BYTES);
-        memcpy(g_xram,saved,BYTES);calls=0;trace=0;feclearexcept(FE_ALL_EXCEPT);xv_point_location_body(&c);int env=fetestexcept(FE_ALL_EXCEPT);
+        memcpy(g_xram,saved,BYTES);calls=0;trace=0;feclearexcept(FE_ALL_EXCEPT);candidate(&c);int env=fetestexcept(FE_ALL_EXCEPT);
         if(memcmp(&c,&ref,sizeof c)||memcmp(g_xram,expected,BYTES)||calls!=refcalls||trace!=reftrace||env!=refenv) {
             fprintf(stderr,"mismatch case %u preempts %u/%u\n",test,calls,refcalls);
             for(unsigned k=0;k<sizeof c;k++) if(((unsigned char *)&c)[k]!=((unsigned char *)&ref)[k]) fprintf(stderr,"context byte %u: %02x/%02x\n",k,((unsigned char *)&c)[k],((unsigned char *)&ref)[k]);
             return 1;
         }
     }
+#ifdef PL_TEST_HOOK
+    if(pl_verified!=4096||pl_mismatch) {fprintf(stderr,"mismatch case verifier counters %u/%u\n",pl_verified,pl_mismatch);return 1;}
+#endif
     puts("PASS 4096 full-context/memory/preemption-trace/FP-exception comparisons");return 0;
 }
