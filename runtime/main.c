@@ -65,6 +65,7 @@
 #include "xv_vertex_prepare.h"
 #include "xv_scene.h"
 #include "xv_quality_settings.h"
+#include "xv_test_save.h"
 #include "xv_ui_gxm.h"
 #include "xv_layouts.h"        /* generated: recompiled-shader layouts (gen_layouts.py) */
 
@@ -2034,10 +2035,23 @@ static int xv_recomp_thread(SceSize args, void *argp)
         SceUID d = sceIoDopen(game_dirs[i]);
         if (d >= 0) { sceIoDclose(d); game_dir = game_dirs[i]; break; }
     }
+    static char test_save[96]; /* xk_init retains this path while the game runs. */
+    const char *save_dir = "ux0:data/xita/save";
+    int isolated = xv_test_save_path(getenv("XV_TEST_SAVE"), test_save, sizeof test_save);
+    if (isolated > 0) {
+        SceUID d = sceIoDopen(test_save);
+        if (d < 0) isolated = -1;
+        else { sceIoDclose(d); save_dir = test_save; }
+    }
+    if (isolated < 0) {
+        XV_LOG("recomp: invalid or missing XV_TEST_SAVE directory; launch stopped to protect player saves\n");
+        __atomic_store_n(&g_recomp_finished,1,__ATOMIC_RELEASE);
+        return -1;
+    }
     sceIoMkdir("ux0:data/xita", 0777);
-    sceIoMkdir("ux0:data/xita/save", 0777);
-    XV_LOG("recomp: game dir %s\n", game_dir);
-    xv_boot_recomp(game_dir, "ux0:data/xita/save");
+    if (!isolated) sceIoMkdir(save_dir, 0777);
+    XV_LOG("recomp: game dir %s; save dir %s\n", game_dir, save_dir);
+    xv_boot_recomp(game_dir, save_dir);
     __atomic_store_n(&g_recomp_finished,1,__ATOMIC_RELEASE);
     return 0;
 }
