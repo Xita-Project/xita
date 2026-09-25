@@ -4,3 +4,5 @@
 #pragma once
 int  xv_scene_thread_run(void *context);    /* generated BCB30 entry hook: 1 = body ran on the helper, return */
 void xv_scene_thread_report(unsigned frames);
+
+int xv_scene_thread_owns_context(const void *context); /* active helper copy only */

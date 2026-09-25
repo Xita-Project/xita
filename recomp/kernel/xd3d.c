@@ -1288,6 +1288,7 @@ void xv_hle_D3DDevice_SetTextureState_BumpEnv(xctx *c) { XD3D_COUNT("D3DDevice_S
 void xv_hle_D3DDevice_SetTextureState_Deferred(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_Deferred"); if ((c->r[1] & 3) == c->r[1] && c->r[2] < 32) X_W32(D3D_G_TEXTURESTATE + ((c->r[1] << 5) + c->r[2]) * 4) = X_ARG(0); X_RET(1); }
 #ifdef XV_NATIVE_MATERIAL_SAMPLER
 #include "xk_material_sampler.h"
+#include "xk_scene_thread.h"
 #include "xk_object_jobs.h"
 int xv_material_sampler_try(xctx *c, unsigned stage)
 {
@@ -1305,7 +1306,20 @@ int xv_material_sampler_try(xctx *c, unsigned stage)
                      getenv("XV_FUNC_HIST") != NULL || getenv("XV_WATCH_FN") != NULL ||
                      getenv("XV_PROF") != NULL;
     uint32_t generation = 0;
-    if (diagnostic || xv_owner_phase_active(c, XV_OWNER_SCENE, &generation) != 1) return 0;
+    if (diagnostic) return 0;
+    /* The overlapped scene uses a copied xctx, so the presenting owner's
+     * diagnostic phase cannot admit it. This ordered write batch has no memo
+     * state: an explicitly enabled, active helper context is sufficient.
+     * Keep this separate from owner-phase admission used by stateful caches. */
+    static int helper_enabled = -1;
+    int helper = __atomic_load_n(&helper_enabled, __ATOMIC_RELAXED);
+    if (helper < 0) {
+        const char *e = getenv("XV_MATERIAL_SAMPLER_HELPER");
+        helper = e && atoi(e) != 0;
+        __atomic_store_n(&helper_enabled, helper, __ATOMIC_RELAXED);
+    }
+    if (!(helper && xv_scene_thread_owns_context(c)) &&
+        xv_owner_phase_active(c, XV_OWNER_SCENE, &generation) != 1) return 0;
     xv_material_sampler_defaults(c, stage);
     material_sampler_groups[stage]++;
     return 1;

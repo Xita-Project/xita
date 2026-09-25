@@ -126,6 +126,9 @@ static uint64_t wait_us, wait_max_us;
 static xk_thread *scene_guest;
 int xv_scene_thread_on_helper(void);
 int xv_scene_thread_active(const void *guest_thread) { return depth && guest_thread == scene_guest && xv_scene_thread_on_helper(); }
+/* Only the active helper may admit its private copied context. Check thread
+ * identity first so other threads never inspect helper-owned state. */
+int xv_scene_thread_owns_context(const void *context) { return xv_scene_thread_on_helper() && context == &ctx && depth != 0; }
 
 /* ---- increment C (XV_SCENE_OVERLAP=1): the owner continues after dispatch ------------------------------
  * The helper runs the body without ever entering the guest scheduler (xv_preempt and xk_yield return at
@@ -554,6 +557,9 @@ static unsigned depth, dispatched, declined_nested;
 static uint64_t wait_us, wait_max_us;
 static xk_thread *scene_guest;
 int xv_scene_thread_active(const void *guest_thread) { return helper_valid && __atomic_load_n(&depth, __ATOMIC_ACQUIRE) && guest_thread == scene_guest && pthread_equal(pthread_self(), helper); }
+/* Only the active helper may admit its private copied context. Check thread
+ * identity first so other threads never inspect helper-owned state. */
+int xv_scene_thread_owns_context(const void *context) { return xv_scene_thread_on_helper() && context == &ctx && depth != 0; }
 
 /* ---- increment C (XV_SCENE_OVERLAP=1): the owner continues after dispatch ------------------------------
  * The helper runs the body without ever entering the guest scheduler (xv_preempt and xk_yield return at
@@ -872,6 +878,9 @@ void xv_scene_thread_report(unsigned frames)
 }
 #else
 int xv_scene_thread_active(const void *guest_thread) { (void)guest_thread; return 0; }
+/* Only the active helper may admit its private copied context. Check thread
+ * identity first so other threads never inspect helper-owned state. */
+int xv_scene_thread_owns_context(const void *context) { (void)context; return 0; }
 int xv_scene_thread_on_helper(void) { return 0; }
 int xv_scene_thread_no_yield(void) { return 0; }
 void xv_scene_thread_join(void) {}

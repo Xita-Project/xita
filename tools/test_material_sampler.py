@@ -62,7 +62,8 @@ static void *guest(uint32_t a) {
     source += """
 +#define XV_EXPERIMENTAL_OBJECT_JOBS 1
 +#define XV_OWNER_SCENE 1
-+static int worker, owner = 1;
++static int worker, owner = 1, helper_context;
++static int xv_scene_thread_owns_context(const void *c) { return c && helper_context; }
 static unsigned material_sampler_groups[4];
 +static int xv_is_object_job(const xctx *c) { (void)c; return worker; }
 +static int xv_owner_phase_active(void *c, unsigned phase, uint32_t *generation) {
@@ -81,12 +82,15 @@ int main(int argc, char **argv) {
     rejected.r[4] = 0x6000;
     saved = rejected;
     memcpy(expected, memory, MEM);
-    if (argc > 1) {
+    if (argc > 1 && !strcmp(argv[1], "diagnostic")) {
         assert(setenv("XV_D3D_HIST", "1", 1) == 0);
         assert(!xv_material_sampler_try(&rejected, 0));
         assert(!memcmp(&rejected, &saved, sizeof saved));
         assert(!memcmp(memory, expected, MEM));
         puts("diagnostic fallback preserves context and memory"); return 0;
+    }
+    if (argc > 1) {
+        assert(setenv("XV_MATERIAL_SAMPLER_HELPER", "1", 1) == 0);
     }
     assert(!xv_material_sampler_try(NULL, 0));
     assert(!xv_material_sampler_try(&rejected, 4));
@@ -94,6 +98,10 @@ int main(int argc, char **argv) {
     owner = 0; assert(!xv_material_sampler_try(&rejected, 0)); owner = 1;
     assert(!memcmp(&rejected, &saved, sizeof saved));
     assert(!memcmp(memory, expected, MEM));
+    if (argc > 1) {
+        owner = 0; helper_context = 1;
+        worker = 1; assert(!xv_material_sampler_try(&rejected, 0)); worker = 0;
+    }
     void (*refs[4])(xctx *) = {reference0, reference1, reference2, reference3};
     unsigned cases=0;
     for (unsigned stage=0; stage<4; ++stage) {
@@ -135,6 +143,7 @@ int main(int argc, char **argv) {
         subprocess.run(cmd, check=True)
         subprocess.run([str(p/'test'), 'diagnostic'], check=True)
         subprocess.run([str(p/'test')], check=True)
+        subprocess.run([str(p/'test'), 'helper'], check=True)
 
 
 if __name__ == '__main__':
