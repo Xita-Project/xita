@@ -79,6 +79,7 @@ def main():
     ap.add_argument('--cflags', default='')
     ap.add_argument('--guest-cflags', default='', help='extra flags for the lifted body only (e.g. -Os: the Vita builds code_011 -Os)')
     ap.add_argument('--native-cflags', default='', help='extra flags for the native only')
+    ap.add_argument('--workdir', default='', help='build here (kept) instead of a temporary directory (e.g. for gcov)')
     a = ap.parse_args(); rec = Path(a.recomp).resolve()
     src = next((p.read_text(errors='replace') for p in sorted(rec.glob('code_*.c')) if re.search(r'^void f_00070110\(xctx', p.read_text(errors='replace'), re.M)), None)
     if src is None: sys.exit('no shard defines f_00070110')
@@ -94,8 +95,9 @@ def main():
     variants = {k: v for k, v in VARIANTS.items() if not a.variants or any(x in k for x in a.variants.split(','))}
     native_src = Path(a.native).read_text()
     rc = 0
-    with tempfile.TemporaryDirectory(prefix='xita-native-70110-') as d:
-        d = Path(d); (d / 'guest.c').write_text(guest)
+    import contextlib
+    with (contextlib.nullcontext(a.workdir) if a.workdir else tempfile.TemporaryDirectory(prefix='xita-native-70110-')) as d:
+        d = Path(d); d.mkdir(parents=True, exist_ok=True); (d / 'guest.c').write_text(guest)
         def build(flags, native_path, exe):
             common = [*flags, *a.cflags.split(), '-std=gnu11', '-w', '-fno-strict-aliasing', '-ffp-contract=off', '-DXV_NATIVE_70110=1',
                       '-I' + str(rec), '-I' + str(kernel)]

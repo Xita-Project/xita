@@ -10,24 +10,34 @@
  * the helper's cycles (docs/native-70110.md). This unit is that body, native; every callee stays the translated guest
  * function and every D3D call the same HLE function, called directly.
  *
- * Structure. n70_core is a transliteration of the lifted body (one line per x86 instruction, with its address), in which
+ * Structure. n70_core is a transliteration of the lifted body (one statement per lifted statement, with the x86 address
+ * and instruction), drafted by a generator from the lift and reviewed; what differs from the lift is where state lives:
  *  - the eight registers, the lazy-flag record (kind, operands, result, width, both override cells, both stale cf/of
- *    cells) and the x87 top of stack and status word are locals, written exactly where the lifted code writes them;
- *    they are stored to the context before every translated callee, hook and preemption point and at the exit, and
- *    reloaded after (the registers also around every HLE call, which reads ecx/edx/esp and returns esp/eax);
- *  - the x87 slots stay in c->st (the lift's own storage), indexed from the local top exactly as the lift indexes them;
+ *    cells), the x87 status word and the x87 slots are locals, written exactly where the lift writes them. The x87 depth
+ *    is static at every statement: slot j holds c->st[(T0 + j) & 7], T0 the entry top (re-derived from c->fsp after
+ *    every call), so st(i) at depth d is slot (i - d) & 7;
+ *  - at every site the generator's dirty-state analysis lists the fields written since the context was last stored or
+ *    loaded: exactly those are stored before a translated callee, a hook, the preemption call and the exit, and the
+ *    context is loaded back after (unread loads are dropped by the compiler); an HLE call stores the written ones of
+ *    ecx/edx/esp (what the six setters read) and reloads esp (eax after SetVertexShaderConstant);
+ *  - the 32 `fnstsw ax; test ah,MASK; jcc` chains branch on the compare's condition codes (the masks 0x44/0x41/0x05 see
+ *    only C3/C2/C0); the eax/fsw/flag statements stay and are dropped where nothing reads them;
  *  - guest memory is addressed as the lift addresses it (single translation for integer accesses like X_M32,
  *    page-split for x87 float accesses like x87_load_f32 / x87_store_f32) through the calling thread's page table,
- *    taken once per call; the frame window [E - 0x100, E + 0x20) (E: the entry esp) and the image pages the body
- *    addresses by constant (0x18F, 0x1F0, 0x232, 0x2E3, 0x2FC) are translated once and again after every translated
- *    callee; every read happens at the lift's point, every write in the lift's order;
+ *    taken once per call; the frame window [E - 0x100, E + 0x20) (E: the entry esp), the material ([E+4], ebp from
+ *    70118 on) and the image pages the body addresses by constant (0x18F, 0x1F0, 0x232, 0x2E3, 0x2FC) are translated
+ *    once per call (their page-table entries do not change during a call: a stack page in use and the image pages are
+ *    never remapped, the render view retargets at scene boundaries); every read happens at the lift's point, every
+ *    write in the lift's order;
  *  - calls are numbered sites (N70_SITES below): the 19 translated callees, the 40 HLE calls, the two f_00056F20 units
  *    with the XV_MODEL_UV memo, the XV_MODEL_FOG memo's begin and end, the four XV_NATIVE_MATERIAL_SAMPLER groups and the
  *    one back-edge (70321 -> 7030D, X_PREEMPT). The memos and the sampler groups are called as the lift calls them
  *    (their presence in the lift is passed in `cfg` by the hook, compiled with the shard's flags).
- * The core is instantiated twice: n70_run (mode 2: performs the calls) and n70_dry (verify: stops at the next site with
- * the predicted state in a private context, the frame window in a shadow and other writes in an overlay; resumes after
- * a site from the actual state).
+ * Three instances: FAST (mode 2 with the window and the material each in one page: esp is E minus the lift's stack
+ * offset at every point and is checked after every call, so frame slots and material fields are one load), GEN (mode 2
+ * otherwise, or after a FAST call returned an unexpected esp/ebp: every access translated like the lift's) and DRY
+ * (verify: stops at the next site with the predicted state in a private context, the frame window in a shadow and other
+ * writes in an overlay; resumes after a site from the actual state).
  *
  * Declines (the translation runs; before any write but the four callee-saved pushes, which the translation then
  * repeats with the same values): the prologue's rare paths (the 6EFC0 path of a set [2E3520]+0A8h, [2E3528] == 1,
@@ -36,7 +46,7 @@
  *
  * Threads: the owner and the scene helper (through its own page table, the render view) may both be in 70110 at once.
  * No __thread and no shared mutable state (vitasdk's __thread is emutls, which the Vita's threads do not keep apart:
- * docs/native-1721b0.md); a verify session lives in its call's frame and reaches the tapped guest copy as an argument.
+ * docs/native-1721b0.md); a verify session lives in its call's heap block and reaches the tapped guest copy as an argument.
  *
  * XV_NATIVE_70110 build flag (hook and tapped copy: tools/patch_native_70110_hooks.py). Env XV_NATIVE_70110: 0 off
  * (default XV_NATIVE_70110_DEFAULT), 1 verify (the guest copy with taps at every site runs; at each site the native's
@@ -2849,7 +2859,7 @@ void xv_native_70110_report(unsigned frames)
     if (v[NC_TIMED_NATIVE] || v[NC_TIMED_GUEST])
         snprintf(t, sizeof t, "; us/call native %.3f (%u) guest %.3f (%u)", v[NC_TIMED_NATIVE] ? nn / 1000.0 / v[NC_TIMED_NATIVE] : 0.0,
                  v[NC_TIMED_NATIVE], v[NC_TIMED_GUEST] ? gn / 1000.0 / v[NC_TIMED_GUEST] : 0.0, v[NC_TIMED_GUEST]);
-    XK_LOG("[native-70110] %u frames: native %u (frame across a page end %u, esp bail-outs %u) guest %u declined %u (prologue %u layout %u "
+    XK_LOG("[native-70110] %u frames: native %u (frame across a page end %u, GEN restarts %u) guest %u declined %u (prologue %u layout %u "
            "object-job %u); verified %u segments %u mismatched %u skipped %u nan-words %u (total mismatches %u); on the scene helper %u%s\n",
            frames, v[NC_NATIVE], v[NC_GENERIC], v[NC_BAILED], v[NC_GUEST], v[NC_DECLINED], v[NC_DECL_PROLOGUE], v[NC_DECL_LAYOUT], v[NC_DECL_JOB], v[NC_VERIFIED],
            v[NC_SEGMENTS], v[NC_MISMATCHED], v[NC_SKIPPED], v[NC_NAN_WORDS], __atomic_load_n(&n70_mismatch_total, __ATOMIC_RELAXED),

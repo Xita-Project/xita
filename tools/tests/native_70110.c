@@ -151,7 +151,11 @@ static void callee(xctx *c, uint32_t id, uint32_t ret, int fret, uint32_t out, u
         else if ((k >> 50) % 8 == 0) c->fsp = T;                                       /* masks an unmasked top */
         if ((k >> 53) & 1) c->fsw = (uint16_t)((c->fsw & 0x3800u) | ((k >> 20) & 0x4700u));
         for (uint32_t o = 4; o <= 0x20; o += 4) w32(c->r[4] - o, (uint32_t)mix(k, 30 + o));   /* its frame below esp */
-        for (unsigned i = 0; i < outn; ++i) w32(out + 4u * i, (i & 1) ? hf32(mix(k, 40 + i)) : (uint32_t)mix(k, 60 + i));
+        const int zeros = (k >> 60) % 3 == 0;   /* all outputs 0.0 now and then (70720..70794 test three of them for 0.0) */
+        for (unsigned i = 0; i < outn; ++i) {   /* output words: 0.0 and 1.0 often (the alpha and stage tests compare with them) */
+            const uint64_t q = zeros ? 0 : mix(k, 40 + i);
+            w32(out + 4u * i, q % 4 == 0 ? 0u : q % 4 == 1 ? 0x3F800000u : (i & 1) ? hf32(q >> 2) : (uint32_t)mix(k, 60 + i));
+        }
         c->preempt -= (int32_t)((k >> 57) % 3);
     } else if (fret) { c->fsp = (c->fsp - 1u) & 7u; c->st[c->fsp] = 1.0; }
     c->r[4] += 4u + ret;
@@ -336,8 +340,9 @@ static void scene(scene_t *s)
     for (uint32_t o = 0x5C; o <= 0x68; o += 4) wf(S + o, fv(0, 2));
     wf(S + 0xC4, fv(0, 2)); wf(S + 0xC8, fv(0, 2));
     w16(S + 0x50, (uint16_t)(rnd() % 3 - 1)); w16(S + 0x0C, (uint16_t)(rnd() % 3));
-    const uint32_t lights = tag_alloc(5 * 12);
-    for (uint32_t o = 0; o < 60; o += 4) wf(lights + o, fv(0, 1));
+    uint32_t lights = tag_alloc(5 * 12);
+    if (rnd() % 8 == 0) { tag_top = ((tag_top | 0xFFFu) + 1u) + 0x40u; lights = tag_top - 0x40u - 1u - rnd() % 0x30u; tag_top = lights + 60u; }   /* unaligned, across a page end */
+    for (uint32_t o = 0; o < 60; o += 4) wf(lights + o, rnd() % 3 == 0 ? 1.0f : fv(0, 1));
     w32(S + 0x84, lights);
     w32(S + 0xA8, 0);
     if (!game_like && rnd() % 12 == 0) {                            /* the prologue's 6EFC0 path (decline) or its skip */
@@ -351,10 +356,10 @@ static void scene(scene_t *s)
     w8(0x2E352Bu, (uint8_t)(rnd() % 4 == 0)); w8(0x2E352Cu, (uint8_t)(rnd() % 3 == 0));
     if (rnd() % 3) { const uint32_t v = tag_alloc(16); for (uint32_t o = 0; o < 16; o += 4) wf(v + o, rnd() % 3 ? 0.0f : fv(-1, 1)); w32(0x2E3508u, v); }
     else w32(0x2E3508u, 0);
-    { const uint32_t v = tag_alloc(12); for (uint32_t o = 0; o < 12; o += 4) wf(v + o, fv(0, 1)); w32(0x232F6Cu, v); }
+    { const uint32_t v = tag_alloc(12); for (uint32_t o = 0; o < 12; o += 4) wf(v + o, rnd() % 2 ? 1.0f : fv(0, 1)); w32(0x232F6Cu, v); }
     /* the material */
     uint32_t M = tag_alloc(0x180);
-    if (rnd() % 6 == 0) { tag_top = ((tag_top | 0xFFFu) + 1u) + 0x100u; M = tag_top - 0x100u - 4u * (1 + rnd() % 0x5F); tag_top = M + 0x180u; }   /* across a page end */
+    if (rnd() % 6 == 0) { tag_top = ((tag_top | 0xFFFu) + 1u) + 0x100u; M = tag_top - 0x100u - 4u * (1 + rnd() % 0x5F) - (rnd() % 3 ? 0 : 1 + rnd() % 3); tag_top = M + 0x180u; }   /* across a page end (sometimes unaligned: split float loads) */
     for (uint32_t o = 0; o < 0x180; o += 4) w32(M + o, rnd());
     { static const uint16_t kinds[4] = { 0, 1, 2, 4 }; w16(M + 0x24, game_like ? kinds[rnd() % 3] : rnd() % 10 == 0 ? 3 : kinds[rnd() % 4]); }
     w8(M + 0x28, (uint8_t)rnd());
@@ -372,6 +377,7 @@ static void scene(scene_t *s)
         if (!game_like && rnd() % 5 == 0) E = ((E | 0xFFFu) + 1u) - 4u * (rnd() % 0x48u);   /* the window across a page end */
         if (game_like) E = (E & ~0xFFFu) + 0x400u + 4u * (rnd() % 0x300u);
     } while (E > STACK + (STACK_PAGES << 12) - 0x40u || E < STACK + 0x200u);
+    if (!game_like && rnd() % 100 == 0) E += 1 + rnd() % 3;   /* esp not 4-aligned: the native declines (layout) */
     for (uint32_t o = 0; o < 0x400; o += 4) w32(E - 0x200u + o, rnd());
     w32(E + 4, M); w32(E + 8, rnd());
     if (rnd() % 3) { const uint32_t p = tag_alloc(4); w16(p, (uint16_t)rnd()); w32(E + 0x18, p); } else w32(E + 0x18, 0);
@@ -670,6 +676,7 @@ int main(int argc, char **argv)
     const int verify = !(argc > 3 && !strcmp(argv[3], "--no-verify"));
     if (argc > 4 && !strcmp(argv[3], "--replay")) return replay(argv[4], argc > 5 ? atoi(argv[5]) : 0);
     map_memory();
+    if (getenv("N70_HLE_TIMING")) xv_hle_timing = atoi(getenv("N70_HLE_TIMING"));   /* the XV_HLE_TIMING branch of every HLE call */
     if (argc > 4 && !strcmp(argv[3], "--threads")) {
 #if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE && !defined(__vita__)
         return threads_test(cases, atoi(argv[4]), argc > 5 ? atoi(argv[5]) : 20);
@@ -701,7 +708,23 @@ int main(int argc, char **argv)
                 xv_native_70110_force(0);
             }
         prof_stop();
+        /* the stand-ins alone: the 19 callees and 40 HLE calls of a full call, on a copy of the context (both sides pay
+         * them; subtract for the body's own cost) */
+        double sns = 0; uint64_t spe[2] = { 0, 0 };
+        static const uint32_t ids[19] = { 0x80360u, 0x80360u, 0x80360u, 0x80360u, 0xB5130u, 0x173F20u, 0x111A0u, 0x658D0u, 0x56F20u,
+                                          0x118D0u, 0x11B60u, 0x11BD0u, 0x11BD0u, 0x11BD0u, 0x11BD0u, 0x6F340u, 0x7A960u, 0x56F20u, 0x7A960u };
+        for (int r = 0; r < reps; ++r)
+            for (unsigned k = 0; k < cases; ++k) {
+                xctx c = cs[k]; unsnap(snaps[k]);
+                uint64_t p0[2], p1[2]; struct timespec t0, t1;
+                pe_read(p0); clock_gettime(CLOCK_MONOTONIC, &t0);
+                for (int i = 0; i < 19; ++i) { c.r[4] -= 8; callee(&c, ids[i], 4, i == 4 || i == 5 || i == 9, 0, 0); }
+                for (int i = 0; i < 40; ++i) { c.r[4] -= 8; hle(&c, 1 + (unsigned)i % 6, 1); }
+                clock_gettime(CLOCK_MONOTONIC, &t1); pe_read(p1);
+                sns += (t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec); spe[0] += p1[0] - p0[0]; spe[1] += p1[1] - p0[1];
+            }
         const double n = (double)calls;
+        printf("bench: the stand-ins alone (19 callees + 40 HLE calls): %.0f ns, %.0f instructions, %.0f cycles per call\n", sns / n, spe[0] / n, spe[1] / n);
         printf("bench: %u scenes x %d: guest %.0f ns/call, native %.0f ns/call (%.2fx); user instructions/call guest %.0f native %.0f (%.2fx), "
                "cycles/call guest %.0f native %.0f (%.2fx)%s\n", cases, reps, ns[0] / n, ns[1] / n, ns[0] / ns[1],
                pe[0][0] / n, pe[1][0] / n, pe[1][0] ? (double)pe[0][0] / pe[1][0] : 0, pe[0][1] / n, pe[1][1] / n,
