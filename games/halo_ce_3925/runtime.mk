@@ -115,6 +115,9 @@ endif
 ifeq ($(XV_NATIVE_1721B0),1)
 XITA_GAME_SRCS += recomp/kernel/xk_native_1721b0.c
 endif
+ifeq ($(XV_NATIVE_70110),1)
+XITA_GAME_SRCS += recomp/kernel/xk_native_70110.c
+endif
 
 # Optional two-scope owner elapsed census; no general phase/worker controls.
 ifeq ($(XV_OWNER_PHASE),1)
