@@ -230,6 +230,9 @@ void xv_vertex_capture_tags_written(uint32_t guest,uint32_t bytes)
     if(phys<TAG_PHYS_BASE+TAG_PHYS_BYTES && phys+bytes>TAG_PHYS_BASE)
         __atomic_fetch_add(&trust_generation,1u,__ATOMIC_RELAXED);
 }
+/* XV_REC_DEFER (xv_rec_defer.h): tag-resident index lists are read by the recording worker in place; a file read
+ * into the tag range between the draw call and its recording would show as a changed generation. */
+unsigned xv_vertex_capture_tag_generation(void) { return __atomic_load_n(&trust_generation,__ATOMIC_RELAXED); }
 static int trust_source(const void *source,unsigned bytes)
 {
     if(!&g_xram || !g_xram || (const uint8_t *)source<g_xram)return 0;

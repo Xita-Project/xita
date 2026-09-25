@@ -103,6 +103,9 @@ static xd3d_im_vtx g_im_v[1024];
 static int g_im_passthrough;
 int xd3d_im_passthrough(void) { return g_im_passthrough; }
 const float (*xd3d_current_attributes(void))[4] { return g_im_cur; }
+/* XV_REC_DEFER (runtime/xv_rec_defer.h): bumped at every write of g_im_cur / xd3d_state.psc, so a queued draw carries
+ * them only when they changed since the last one (was a 288 + 256 byte compare per draw). */
+unsigned xd3d_attr_gen, xd3d_psc_gen;
 /* Per-frame histogram of HLE entry points (host: XV_D3D_HIST=<frame> logs that frame's counts; also
  * dumped once on the Vita when the log asks).  Cheap enough to leave in: one strcmp-free table walk. */
 #define XD3D_HIST_MAX 128
@@ -212,7 +215,7 @@ static void im_set2(const char *src, unsigned reg, float x, float y, float z, fl
      * a completed, already transformed vertex. It is not attribute register 15. */
     if (reg == UINT32_MAX) { reg = 0; g_im_passthrough = 1; }
     else if (reg >= 16) return;
-    g_im_cur[reg][0] = x; g_im_cur[reg][1] = y; g_im_cur[reg][2] = z; g_im_cur[reg][3] = w;
+    g_im_cur[reg][0] = x; g_im_cur[reg][1] = y; g_im_cur[reg][2] = z; g_im_cur[reg][3] = w; xd3d_attr_gen++;
     if (reg == 0 && g_im.verts < 1024) memcpy(&g_im_v[g_im.verts++], g_im_cur, sizeof g_im_cur);   /* writing v0 completes a vertex */
     g_im.setdata_in_frame++;
 }
@@ -462,6 +465,7 @@ void xv_hle_Direct3D_CreateDevice(xctx *c)
     uint32_t pp = X_ARG(4);
     if (!g_xd3d_device) {
         for (unsigned i = 0; i < 16; i++) g_im_cur[i][3] = 1.0f;
+        xd3d_attr_gen++;
         g_xd3d_device = xk_kalloc(DEVICE_SIZE);
         g_dev.width = pp ? X_M32(pp) : 640; g_dev.height = pp ? X_M32(pp + 4) : 480;
         if (!g_dev.width) g_dev.width = 640; if (!g_dev.height) g_dev.height = 480;
@@ -1562,7 +1566,7 @@ void xd3d_ps_sync(void)
     #define PSC_SET(idx, col) do { uint32_t col_ = (col); \
         if (cache_enabled && ps_synced && ps_packed_colors[(idx)] == col_) { ++ps_colors_reused; break; } \
         ps_packed_colors[(idx)] = col_; ++ps_colors_computed; \
-        float *o_ = xd3d_state.psc[(idx)]; \
+        float *o_ = xd3d_state.psc[(idx)]; xd3d_psc_gen++; \
         o_[0] = ((col_ >> 16) & 0xFF) / 255.0f; o_[1] = ((col_ >> 8) & 0xFF) / 255.0f; o_[2] = (col_ & 0xFF) / 255.0f; o_[3] = (col_ >> 24) / 255.0f; } while (0)
     for (unsigned i = 0; i < 8; ++i) {
         PSC_SET(i, xd3d_state.ps_shadow[0x28 / 4 + i]);

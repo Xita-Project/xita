@@ -631,6 +631,7 @@ static void unbind_merge(void)
 }
 void xv_render_view_leave(unsigned *scope)
 {
+    { extern void xv_rec_defer_drain(void) __attribute__((weak)); if (xv_rec_defer_drain) xv_rec_defer_drain(); }   /* XV_REC_DEFER: queued draws read through the scene table */
     uint64_t t0 = xk_os_monotonic_us();
     if (!ready || !depth) { last_leave_us = t0; return; }
     if (--depth || !*scope) { last_leave_us = t0; return; }
@@ -643,6 +644,7 @@ void xv_render_view_leave(unsigned *scope)
  * usual tick-wins policy (the trap path's "half-written guest state stays"). */
 void xv_render_view_abandon(void)
 {
+    { extern void xv_rec_defer_drain(void) __attribute__((weak)); if (xv_rec_defer_drain) xv_rec_defer_drain(); }
     if (!ready || !depth) return;
     depth = 0;
     if (bound) { if (thread_mode) xk_os_bind_page_table(g_xpt); unbind_merge(); }

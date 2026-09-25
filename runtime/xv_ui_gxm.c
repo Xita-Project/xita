@@ -1147,7 +1147,18 @@ void xv_ui_gxm_replay_frame(SceGxmContext *ctx, unsigned width, unsigned height,
 static int g_mesh_path = 1;                              /* world geometry through xv_d3d (set 0 to fall back to UI-only clears) */
 /* Color target state for the legacy immediate UI path. */
 static int g_offscreen;
+static void xd3d_r_state_inline(const char *what, uint32_t a, uint32_t b, uint32_t v);
+void xv_rec_defer_inline_begin(void); void xv_rec_defer_inline_end(void); void xv_rec_defer_note_state(void);
+int xv_rec_defer_draw(int indexed, uint32_t prim, uint32_t count, uint32_t data, uint32_t fnv); void xv_rec_defer_verify_done(void);
+/* XV_REC_DEFER (runtime/xv_rec_defer.h): every inline recorder entry drains the recording worker first. */
 void xd3d_r_state(const char *what, uint32_t a, uint32_t b, uint32_t v)
+{
+    xv_rec_defer_inline_begin();
+    xd3d_r_state_inline(what, a, b, v);
+    xv_rec_defer_note_state();
+    xv_rec_defer_inline_end();
+}
+static void xd3d_r_state_inline(const char *what, uint32_t a, uint32_t b, uint32_t v)
 {
     (void)b;
     if (!strcmp(what, "ReleaseRenderTarget")) { xv_d3d_ReleaseRenderTarget(a); return; }
@@ -1158,7 +1169,14 @@ void xd3d_r_state(const char *what, uint32_t a, uint32_t b, uint32_t v)
         static unsigned n; if (n++ < 8) UI_LOG("SetRenderTarget %08X (backbuffer %08X) -> %s\n", a, v, g_offscreen ? "offscreen pass" : "backbuffer");
     }
 }
+static void xd3d_r_clear_inline(uint32_t flags, uint32_t color, float z, uint32_t stencil);
 void xd3d_r_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil)
+{
+    xv_rec_defer_inline_begin();
+    xd3d_r_clear_inline(flags, color, z, stencil);
+    xv_rec_defer_inline_end();
+}
+static void xd3d_r_clear_inline(uint32_t flags, uint32_t color, float z, uint32_t stencil)
 {
     if (g_mesh_path) { xv_d3d_Clear(flags, color, z, stencil); return; }   /* colour + depth, rendered before the world */
     (void)z; (void)stencil;
@@ -1178,6 +1196,7 @@ static void sync_draw_state(void)
     xv_draw_profile_step(XV_DRAW_STATE, &profile);
 }
 
+static void xd3d_r_draw_inline(int indexed, uint32_t prim, uint32_t count, uint32_t data, uint32_t fnv);
 void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t data)
 {
     { extern void xd3d_hist_tex_check(void); xd3d_hist_tex_check(); }
@@ -1186,6 +1205,15 @@ void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t d
     uint32_t vs = xd3d_state.vs_program;
     if (!(vs & 1)) return;                                             /* FVF draws: not yet */
     uint32_t fnv = guest_u32((vs & ~1u) + 12);
+    int deferred = xv_rec_defer_draw(indexed, prim, count, data, fnv);   /* XV_REC_DEFER: 1 = queued for the worker */
+    if (deferred == 1) return;
+    if (deferred == 2) { xd3d_r_draw_inline(indexed, prim, count, data, fnv); xv_rec_defer_verify_done(); return; }   /* verify */
+    xv_rec_defer_inline_begin();
+    xd3d_r_draw_inline(indexed, prim, count, data, fnv);
+    xv_rec_defer_inline_end();
+}
+static void xd3d_r_draw_inline(int indexed, uint32_t prim, uint32_t count, uint32_t data, uint32_t fnv)
+{
     uint64_t profile = xv_draw_profile_begin();
     uint32_t h = xv_d3d_handle_for_hash(fnv);
     if (!h) { static unsigned n; if (n++ < 8) UI_LOG("draw: no program for VS fnv %08X\n", fnv); return; }
@@ -1323,7 +1351,14 @@ static void draw_immediate_flare_inner(const xd3d_im_vtx *v, unsigned n)
     }
 }
 
+static void xd3d_r_im_end_inline(uint32_t prim, const xd3d_im_vtx *v, unsigned n);
 void xd3d_r_im_end(uint32_t prim, const xd3d_im_vtx *v, unsigned n)
+{
+    xv_rec_defer_inline_begin();
+    xd3d_r_im_end_inline(prim, v, n);
+    xv_rec_defer_inline_end();
+}
+static void xd3d_r_im_end_inline(uint32_t prim, const xd3d_im_vtx *v, unsigned n)
 {
     if (xd3d_im_passthrough()) {
         if (!g_mesh_path || prim != 7 || n < 4) return;
@@ -1442,6 +1477,7 @@ static unsigned g_report_pending;   /* frame + 1: a helper-side present's 60-fra
 static void present_report(unsigned frame);
 void xd3d_r_present(unsigned frame, unsigned draws)
 {
+    xv_rec_defer_inline_begin();   /* XV_REC_DEFER: the frame's queued draws first */
     extern uint64_t xk_os_monotonic_us(void); uint64_t t0 = xk_os_monotonic_us(); xd3d_r_present_inner(frame, draws); xv_t_present_us += xk_os_monotonic_us() - t0;
 }
 static void xd3d_r_present_inner(unsigned frame, unsigned draws)

@@ -398,6 +398,7 @@ static int helper_main(SceSize args, void *argp)
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
         else { extern void xv_render_view_abandon(void) __attribute__((weak)); scene_abandon_armed = 0; if (xv_render_view_abandon) xv_render_view_abandon(); }   /* the scope cleanup never ran */
         scene_abandon_armed = 0;
+        { extern void xv_rec_defer_drain(void) __attribute__((weak)); if (xv_rec_defer_drain) xv_rec_defer_drain(); }   /* XV_REC_DEFER: the scene's queued draws */
         { extern void xd3d_present_flush_helper(int) __attribute__((weak)); if (xd3d_present_flush_helper) xd3d_present_flush_helper(__atomic_load_n(&xv_owner_at_join, __ATOMIC_ACQUIRE)); }   /* the owner's deferred Present, when the owner is still ticking (it is then the wall) */
         slow_t_end = xk_os_monotonic_us();
         sceKernelSignalSema(done, 1);
@@ -813,6 +814,7 @@ static void *helper_main(void *arg)
         if (setjmp(scene_abandon_jmp) == 0) { scene_abandon_armed = 1; f_000BCB30(&ctx); }
         else { extern void xv_render_view_abandon(void) __attribute__((weak)); scene_abandon_armed = 0; if (xv_render_view_abandon) xv_render_view_abandon(); }   /* the scope cleanup never ran */
         scene_abandon_armed = 0;
+        { extern void xv_rec_defer_drain(void) __attribute__((weak)); if (xv_rec_defer_drain) xv_rec_defer_drain(); }   /* XV_REC_DEFER: the scene's queued draws */
         slow_t_end = xk_os_monotonic_us();
         sem_post(&done);
     }

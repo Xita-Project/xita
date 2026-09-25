@@ -316,6 +316,16 @@ static uint64_t g_index_requested[XV_NUM_LISTS];
 /* Serialized recorder scratch. Reset for every draw; no GPU/pump pointer to it. */
 static xv_vertex_refs g_draw_vertex_refs;
 static int g_draw_vertex_refs_valid;
+/* XV_REC_DEFER (runtime/xv_rec_defer.h): a deferred draw's call-time values of what record_draw_body otherwise reads
+ * live - the fog colour and alpha test (kernel state), and the index list, copied at call time (the guest pointer stays
+ * the index cache identity; only the bytes come from the copy). Set by the recording worker around one draw; NULL on
+ * the original path, where every read below is unchanged. */
+typedef struct { uint32_t fog, atest; const void *index_identity, *index_data; } rec_override_t;
+static const rec_override_t *g_rec_ovr;
+static inline const void *idx_data(const void *identity)
+{ return __builtin_expect(g_rec_ovr != NULL, 0) && identity == g_rec_ovr->index_identity ? g_rec_ovr->index_data : identity; }
+static uint32_t *g_rec_stream_bytes;   /* XV_REC_DEFER verify: per command, the captured bytes of each stream */
+void xv_rec_defer_inline_begin(void);  /* runtime/xv_rec_defer.h: drain the recording worker before inline recording */
 
 typedef struct { uint32_t data, format; SceGxmTexture tex; uint8_t valid; } tex_entry_t;
 static tex_entry_t g_texcache[XV_TEX_CACHE];
@@ -988,6 +998,7 @@ void xv_d3d_prep_cache_report(unsigned frames)
     XV_REC_OPT_REPORT(&g_opt_draw, frames, XV_LOG);
     XV_REC_OPT_REPORT(&g_opt_query, frames, XV_LOG);
     XV_REC_OPT_REPORT(&g_opt_quad, frames, XV_LOG);
+    { extern void xv_rec_defer_report(unsigned); xv_rec_defer_report(frames); }
     if (quad_seq_draws || quad_other_draws)
         XV_LOG("[rec-quad] %u frames: %u sequential quad lists from the shared list, %u rewritten without read-back; "
             "%llu uncached index loads avoided\n", frames, quad_seq_draws, quad_other_draws, (unsigned long long)quad_uncached_loads);
@@ -1098,7 +1109,15 @@ static const SceGxmTexture *texture_for(unsigned stage)
  * -------------------------------------------------------------------------------- */
 static cmdlist_t *cur_list(void) { return g_lists[g_build_frame % XV_NUM_LISTS]; }
 
+static void vis_begin_inline(uint32_t w, uint32_t h);
+void xv_rec_defer_note_state(void);
 void xd3d_r_visibility_begin(uint32_t w, uint32_t h)
+{
+    xv_rec_defer_inline_begin();   /* XV_REC_DEFER: queued draws first; verify follows the open query */
+    vis_begin_inline(w, h);
+    xv_rec_defer_note_state();
+}
+static void vis_begin_inline(uint32_t w, uint32_t h)
 {
     cmdlist_t *l=cur_list();
     l->active_visibility=0;
@@ -1163,7 +1182,15 @@ static uint32_t vis_issue_fast(uint32_t id, uint16_t *slot, uint32_t *serial)
     *slot = (uint16_t)i; *serial = next;
     return 0;
 }
+static uint32_t vis_end_inline(uint32_t id);
 uint32_t xd3d_r_visibility_end(uint32_t id)
+{
+    xv_rec_defer_inline_begin();   /* XV_REC_DEFER: queued draws first; verify follows the open query */
+    uint32_t rc = vis_end_inline(id);
+    xv_rec_defer_note_state();
+    return rc;
+}
+static uint32_t vis_end_inline(uint32_t id)
 {
     cmdlist_t *l=cur_list();
     unsigned slot=l->active_visibility;
@@ -1429,6 +1456,7 @@ static int prim_to_gxm(uint32_t prim, uint32_t *count, const void **indices, uin
     case X_D3DPT_LINELIST:      *out = SCE_GXM_PRIMITIVE_LINES;          return 0;
     case X_D3DPT_POINTLIST:     *out = SCE_GXM_PRIMITIVE_POINTS;         return 0;
     case X_D3DPT_QUADLIST: case X_D3DPT_POLYGON:
+        *indices = idx_data(*indices);   /* XV_REC_DEFER: an indexed quad list rewrites from its call-time copy */
         if (rewrite_quads_opt(prim, count, indices) != 0) return -1;
         *out = SCE_GXM_PRIMITIVE_TRIANGLES; return 0;
     default:
@@ -1642,7 +1670,8 @@ static int retain_old(const void **indices, unsigned count, unsigned *nverts, un
     if (entry) {
         if (entry->source==*indices && entry->count==count && entry->references==references && t->real)
             index_reuse_compared+=(uint64_t)count*2u;
-        if (xv_index_cache_match(entry,*indices,count,references)) {
+        if (entry->source==*indices && entry->count==count && entry->references==references &&
+            xv_bytes_equal(idx_data(*indices),entry->mirror,count*sizeof(uint16_t))) {   /* xv_index_cache_match on idx_data */
             if (!entry->retained) {
                 /* CPU equality does not retire a GPU slot. A new frame
                  * needs a fresh append allocation, including on a hit. */
@@ -1669,12 +1698,12 @@ static int retain_old(const void **indices, unsigned count, unsigned *nverts, un
     }
     if (*t->used > XV_FRAME_INDICES || count > XV_FRAME_INDICES - *t->used) return 0;
     uint16_t *dst = t->pool + *t->used;
-    const void *source=*indices, *captured=source;
+    const void *source=*indices, *captured=idx_data(source);
     if (entry) {
         /* Capture once, then derive both GPU bytes and bounds/coverage from
          * that exact cached version. Never rescan mutable guest data later. */
         entry->source=NULL;
-        memcpy(entry->mirror,source,count*sizeof(uint16_t));
+        memcpy(entry->mirror,captured,count*sizeof(uint16_t));
         captured=entry->mirror;
     }
     if (t->real) xv_draw_profile_step(XV_DRAW_IDX_CACHE, sub);
@@ -1724,18 +1753,18 @@ static int retain_new(const void **indices, unsigned count, unsigned *nverts, un
         if (same) {
             int hit = 0;
             if (entry->retained) {
-                hit = xv_bytes_equal(*indices, entry->mirror, count * sizeof(uint16_t));
+                hit = xv_bytes_equal(idx_data(*indices), entry->mirror, count * sizeof(uint16_t));
                 if (hit && t->real) { index_reuse_hits++;index_reuse_saved+=(uint64_t)count*2u; }
             } else if (fits) {
                 uint16_t *dst = t->pool + *t->used;
-                hit = xv_index_copy_if_equal(dst, *indices, entry->mirror, count);
+                hit = xv_index_copy_if_equal(dst, idx_data(*indices), entry->mirror, count);
                 if (hit) {
                     *t->used += (count + 7u) & ~7u;
                     entry->retained = dst;
                     if (t->real) { index_metadata_reuploads++;index_metadata_bytes+=(uint64_t)count*2u;
                                    scan_index_calls++;scan_indices+=count; }
                 }
-            } else if (xv_bytes_equal(*indices, entry->mirror, count * sizeof(uint16_t))) {
+            } else if (xv_bytes_equal(idx_data(*indices), entry->mirror, count * sizeof(uint16_t))) {
                 if (t->real) index_metadata_full++;
                 return 0;
             }
@@ -1751,7 +1780,7 @@ static int retain_new(const void **indices, unsigned count, unsigned *nverts, un
     }
     if (!fits) return 0;
     uint16_t *dst = t->pool + *t->used;
-    const void *source = *indices;
+    const void *source = *indices, *data = idx_data(source);
     uint16_t *mirror = entry ? entry->mirror : NULL;
     if (entry) entry->source = NULL;
     if (t->real) xv_draw_profile_step(XV_DRAW_IDX_CACHE, sub);
@@ -1764,12 +1793,12 @@ static int retain_new(const void **indices, unsigned count, unsigned *nverts, un
             scan_reference_fast += draw_scan_neon() && count >= 256;
 #endif
         }
-        *nverts = xv_index_copy2_reference_bounds(dst, mirror, source, count, t->refs);
+        *nverts = xv_index_copy2_reference_bounds(dst, mirror, data, count, t->refs);
         *t->refs_valid = 1;
-    } else if (cached_scan) *nverts = xv_index_copy2_bounds(dst, mirror, source, count);
+    } else if (cached_scan) *nverts = xv_index_copy2_bounds(dst, mirror, data, count);
     else {
-        const void *captured = source;
-        if (mirror) { memcpy(mirror, source, count * sizeof *mirror); captured = mirror; }
+        const void *captured = data;
+        if (mirror) { memcpy(mirror, data, count * sizeof *mirror); captured = mirror; }
         memcpy(dst, captured, count * sizeof *dst);
         *nverts = index_bounds(dst, count);
     }
@@ -2270,8 +2299,8 @@ static void record_draw_body(uint32_t prim, uint32_t count, const void *indices,
     c->depth_write = S.z_enable && S.z_write;
     c->stencil = S.stencil;
     c->cull = (uint8_t)S.cull;
-    { extern uint32_t xd3d_fog_color(void); c->fog_color = xd3d_fog_color(); }
-    { extern uint32_t xd3d_alpha_test(void); c->atest = xd3d_alpha_test(); }
+    { extern uint32_t xd3d_fog_color(void); c->fog_color = g_rec_ovr ? g_rec_ovr->fog : xd3d_fog_color(); }
+    { extern uint32_t xd3d_alpha_test(void); c->atest = g_rec_ovr ? g_rec_ovr->atest : xd3d_alpha_test(); }
     { static const xv_vs_desc_t *bsp_d; static int bsp_is; if (d != bsp_d) { bsp_d = d; bsp_is = strstr(d->gxp, "halo_vs_16") != NULL; } if (bsp_is) xv_d3d_bsp_acc++; }   /* was a strstr per draw */
     for (unsigned a = 0; a < d->nattrs; a++) if (d->attrs[a].stream == XV_CONST_STREAM) {
         if (!snapshot_attributes(c)) {
@@ -2321,6 +2350,16 @@ static void record_draw_body(uint32_t prim, uint32_t count, const void *indices,
         if (vertex_trace_frame()) XV_LOG("[hist] stream %u vb %08X common %08X data %08X vertices %u stride %u\n",
             s, S.stream_guest[s], vb->Common, vb->Data, nverts, stride);
         /* Only the owned upload is published; the cached source stays on CPU. */
+    }
+    if (__builtin_expect(g_rec_stream_bytes != NULL, 0)) {   /* XV_REC_DEFER verify: bytes each stream's capture holds */
+        uint32_t *nb = g_rec_stream_bytes + (size_t)(cur_list()->ncmds - 1) * XV_MAX_STREAMS;
+        memset(nb, 0, XV_MAX_STREAMS * sizeof *nb);
+        for (unsigned i = 0; i < prep.count; ++i)
+#if XV_PACKED_VERTEX_LAYOUT
+            nb[prep_stream[i]] = prep.streams[i].packed ? prep.streams[i].bytes / 2u : prep.streams[i].bytes;
+#else
+            nb[prep_stream[i]] = prep.streams[i].bytes;
+#endif
     }
     uint64_t sub = xv_draw_profile_begin();
     if (indices)
@@ -2909,7 +2948,7 @@ void xv_d3d_visibility_complete(uint32_t frame)
 }
 
 /* ---- XV_OCCL: recording-thread API for recomp/kernel/xk_occlusion.c -------------------------------------------- */
-unsigned xv_d3d_occl_begin(uint32_t handle, unsigned flags)   /* tag the following draws with a new object slot */
+static unsigned occl_begin_impl(uint32_t handle, unsigned flags)   /* tag the following draws with a new object slot */
 {
     if (!occl_on()) return 0;
     cmdlist_t *l = cur_list();
@@ -2919,10 +2958,10 @@ unsigned xv_d3d_occl_begin(uint32_t handle, unsigned flags)   /* tag the followi
     g_occl_cur = (uint16_t)slot;
     return slot;
 }
-void xv_d3d_occl_end(void) { g_occl_cur = 0; }
+static void occl_end_impl(void) { g_occl_cur = 0; }
 uint32_t xv_d3d_occl_build_frame(void) { return g_build_frame; }
-const float *xv_d3d_occl_matrix(void) { return &S.vsc[0][0]; }   /* c[-96..-93]: world -> clip rows */
-int xv_d3d_occl_proxy(unsigned slot, float x0, float y0, float x1, float y1, float z)
+static const float *occl_matrix_impl(void) { return &S.vsc[0][0]; }   /* c[-96..-93]: world -> clip rows */
+static int occl_proxy_impl(unsigned slot, float x0, float y0, float x1, float y1, float z)
 {
     if (!slot || slot > cur_list()->occl_n) return 0;
     cmd_t *c = new_cmd();
@@ -3782,3 +3821,6 @@ void xv_d3d_SyncDrawState(const struct xd3d_state *state,
     xv_d3d_SetRenderState_SrcBlend(gl_blend_to_d3d(state->src_blend));
     xv_d3d_SetRenderState_DestBlend(gl_blend_to_d3d(state->dst_blend));
 }
+
+/* XV_REC_DEFER: the scene helper's draws recorded by a worker thread (uses the recorder's statics above) */
+#include "xv_rec_defer.h"
