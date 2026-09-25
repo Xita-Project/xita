@@ -2,6 +2,12 @@
  * command consumer. Original allocation, DMA objects, RAMHT, state generation
  * and submission remain guest code. Unsupported commands and display work stop. */
 #include "log_budget.h"
+#ifndef H2_MENU_VBLANK_DEFAULT
+#define H2_MENU_VBLANK_DEFAULT 0   /* MENU_RUNTIME_DEFAULTS=1 builds: 1 (the menu's free-running vblank, see xd3d_vblank_kick) */
+#endif
+#ifndef H2_MENU_YIELD_DEFAULT
+#define H2_MENU_YIELD_DEFAULT 1    /* MENU_RUNTIME_DEFAULTS=1 builds: 0 (the validated lab setting) */
+#endif
 #include "host_channel_runtime.h"
 #include "host_channel.h"
 #include "host_tiles.h"
@@ -702,7 +708,7 @@ int xd3d_vblank_kick(xctx *c, uint32_t eip)
 {
     extern uint64_t xk_os_monotonic_us(void);
     static int on = -1;
-    if (on < 0) { const char *e = getenv("XV_MENU_VBLANK"); on = e ? atoi(e) : 0; }
+    if (on < 0) { const char *e = getenv("XV_MENU_VBLANK"); on = e ? atoi(e) : H2_MENU_VBLANK_DEFAULT; }
     if (!on || !c || !initialization_flip_done || active_flip_queued || software_active || !channel_idle())
         return 0;
     static uint64_t frozen_us; static uint32_t seen_count;
@@ -726,7 +732,7 @@ static void vblank_pace_in_render(void)
     extern uint64_t xk_os_monotonic_us(void);
     static int on = -1, busy;
     static uint64_t last_us;
-    if (on < 0) { const char *e = getenv("XV_MENU_VBLANK"); on = e ? atoi(e) : 0; }
+    if (on < 0) { const char *e = getenv("XV_MENU_VBLANK"); on = e ? atoi(e) : H2_MENU_VBLANK_DEFAULT; }
     if (!on || busy || !active_context || !initialization_flip_done) return;
     uint64_t now = xk_os_monotonic_us();
     if (!last_us) last_us = now;
@@ -754,7 +760,7 @@ static void vblank_pace_in_render(void)
      * on the loader thread. Hand the scheduler a turn once per vblank. */
     static int yield_every = -1, yield_burst = -1;
     static unsigned ticks;
-    if (yield_every < 0) { const char *e = getenv("XV_MENU_YIELD"); yield_every = e ? atoi(e) : 1; }
+    if (yield_every < 0) { const char *e = getenv("XV_MENU_YIELD"); yield_every = e ? atoi(e) : H2_MENU_YIELD_DEFAULT; }
     if (yield_burst < 0) { const char *e = getenv("XV_MENU_YIELD_BURST"); yield_burst = e ? atoi(e) : 8; }
     if (yield_every > 0 && !(++ticks % (unsigned)yield_every)) {
         /* One yield = one scheduler round = one step of each other fiber. The

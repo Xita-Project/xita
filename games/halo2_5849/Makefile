@@ -23,6 +23,16 @@ MENU_GXM_DEFAULT ?= 0
 ifneq ($(filter $(MENU_GXM_DEFAULT),0 1),$(MENU_GXM_DEFAULT))
 $(error MENU_GXM_DEFAULT must be 0 or 1)
 endif
+# MENU_RUNTIME_DEFAULTS=1: the settings the Vita3K lab runs validated (XV_MENU_VBLANK=1 XV_MENU_YIELD=0
+# XV_MENU_THREADS=3) become the defaults, so a package boots to the menu with no env.txt (hardware candidates).
+# ux0:data/xita(-halo2)/env.txt still overrides each knob. 0 keeps the historical defaults (vblank off, yield 1, threads 2).
+MENU_RUNTIME_DEFAULTS ?= 0
+ifneq ($(filter $(MENU_RUNTIME_DEFAULTS),0 1),$(MENU_RUNTIME_DEFAULTS))
+$(error MENU_RUNTIME_DEFAULTS must be 0 or 1)
+endif
+ifeq ($(MENU_RUNTIME_DEFAULTS),1)
+H2_RUNTIME_DEFAULT_FLAGS := -DH2_MENU_VBLANK_DEFAULT=1 -DH2_MENU_YIELD_DEFAULT=0 -DH2_MENU_THREADS_DEFAULT=3
+endif
 AUDIO_HOST ?= 0
 AUDIO_DSP ?= 0
 AUDIO_SPATIAL_MODEL ?= 0
@@ -744,6 +754,15 @@ $(BUILD)/boot.o: CFLAGS += -include $(BUILD)/xv_build.h
 $(BUILD)/param.sfo: $(ROOT)/version.json
 
 $(BUILD)/menu_render.o: CFLAGS += -DH2_MENU_GXM_DEFAULT=$(MENU_GXM_DEFAULT)
+$(BUILD)/host_channel_runtime.o $(BUILD)/audio_host.o $(BUILD)/menu_render.o: CFLAGS += $(H2_RUNTIME_DEFAULT_FLAGS)
+
+.PHONY: runtime-defaults-force
+$(BUILD)/runtime-defaults.config: runtime-defaults-force
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(MENU_RUNTIME_DEFAULTS)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/host_channel_runtime.o $(BUILD)/audio_host.o $(BUILD)/menu_render.o: $(BUILD)/runtime-defaults.config
 
 .PHONY: menu-gxm-force
 $(BUILD)/menu-gxm.config: menu-gxm-force

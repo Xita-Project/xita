@@ -1,4 +1,7 @@
 #include "menu_render.h"
+#ifndef H2_MENU_THREADS_DEFAULT
+#define H2_MENU_THREADS_DEFAULT 2  /* MENU_RUNTIME_DEFAULTS=1 builds: 3 (the validated lab setting) */
+#endif
 #include "nv2a_vsh.h"
 #include "menu_raster.h"
 #include "menu_texture.h"
@@ -313,7 +316,7 @@ static int software_body(void *opaque, const h2_menu_request *r, uint8_t *ab_bef
     if (depth_knob < 0) depth_knob = knob("XV_MENU_DEPTH", 1);
     if (pool_knob < 0) {
         extern void h2_menu_render_tick(void);
-        pool_knob = knob("XV_MENU_THREADS", 2); menu_raster_pool_install(pool_knob);
+        pool_knob = knob("XV_MENU_THREADS", H2_MENU_THREADS_DEFAULT); menu_raster_pool_install(pool_knob);
         menu_raster_tick = h2_menu_render_tick;
     }
     if (depth_knob && s->setup[0x30C / 4]) {

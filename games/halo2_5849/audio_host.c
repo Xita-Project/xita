@@ -1,4 +1,7 @@
 #include "bundle.h"
+#ifndef H2_MENU_VBLANK_DEFAULT
+#define H2_MENU_VBLANK_DEFAULT 0   /* MENU_RUNTIME_DEFAULTS=1 builds: 1 (the menu's free-running vblank, see xd3d_vblank_kick) */
+#endif
 /* Checked XDK5849 device and external PCM buffer boundaries. Unknown sound
  * methods stop; every accepted object owns real mixer/output resources. */
 #include "audio_host.h"
@@ -748,7 +751,7 @@ static void stream_process(xctx *c)
          * checks the HRESULT (setge) and takes its failure path (exits the submit loop, continues the
          * menu build) - so return a real submission FAILURE the game handles, rather than strict-stopping.
          * Menu audio is silent for now; correct routing of the menu stream is a later audio step. */
-        static int menu=-1; if(menu<0){const char*e=getenv("XV_MENU_VBLANK");menu=e?atoi(e):0;}
+        static int menu=-1; if(menu<0){const char*e=getenv("XV_MENU_VBLANK");menu=e?atoi(e):H2_MENU_VBLANK_DEFAULT;}
         if (menu) { xv_logf("[h2/audio-menu] stream Process unsupported (caller %08X flags %08X cb %08X route %u) -> DSERR, game handles\n",
                             caller, s->flags, s->callback, s->route_bin); result(c,0x8007000E,3); return; }
         fail(c,ip,"unsupported stream Process state/caller",caller);
@@ -2082,7 +2085,7 @@ void h2_audio_guest_entry(xctx *c, uint32_t ip)
      * buffer/config methods (closure from 0x37AD9C) that carry no APU/device I/O of their own - the
      * backend-touching methods are the separately-replaced host boundaries. Permit these audited
      * original methods to execute unchanged so the menu build proceeds; the APU boundary still traps. */
-    { static int menu = -1; if (menu < 0) { const char *e = getenv("XV_MENU_VBLANK"); menu = e ? atoi(e) : 0; }
+    { static int menu = -1; if (menu < 0) { const char *e = getenv("XV_MENU_VBLANK"); menu = e ? atoi(e) : H2_MENU_VBLANK_DEFAULT; }
       if (menu) {
           uint32_t caller = mapped(c->r[4], 4) ? X_M32(c->r[4]) : 0;
           /* Menu bring-up: the menu's audio init drives a large set of original DSoundBuffer buffer/
