@@ -2714,9 +2714,12 @@ void xv_native_70110_tap(xctx *c, void *vsp, unsigned kind, uint32_t key, int po
     if (k > 0 && N70_SITES[k].kind == N70_K_HLE) {         /* the HLE call changed only esp (and eax: 0 for VSC) */
         xctx x = vs->pre; x.r[4] += 4u + 4u * N70_SITES[k].hle_args; if (N70_SITES[k].hle_eax) x.r[0] = 0;
         if (memcmp(&x, c, sizeof x)) n70_mismatch(vs, "HLE effect", 0, (uint32_t)k);
-    } else if (k > 0 && N70_SITES[k].kind == N70_K_PREEMPT) {   /* X_PREEMPT: the budget, or a refill by xv_preempt */
-        xctx x = vs->pre; x.preempt = c->preempt;
-        if (memcmp(&x, c, sizeof x) || !(c->preempt == vs->pre.preempt - 1 || (vs->pre.preempt - 1 <= 0 && c->preempt > 0)))
+    } else if (k > 0 && N70_SITES[k].kind == N70_K_PREEMPT) {
+        /* X_PREEMPT: the budget, or a refill by xv_preempt, whose yield (on the owner) also sets eip_hint to [esp] */
+        xctx x = vs->pre; x.preempt = c->preempt; x.eip_hint = c->eip_hint;
+        const int fired = vs->pre.preempt - 1 <= 0;
+        if (memcmp(&x, c, sizeof x) || !(c->preempt == vs->pre.preempt - 1 || (fired && c->preempt > 0)) ||
+            (c->eip_hint != vs->pre.eip_hint && !(fired && c->eip_hint == X_M32(c->r[4]))))
             n70_mismatch(vs, "back-edge budget", (uint32_t)vs->pre.preempt, (uint32_t)c->preempt);
     }
     if (k < 0) { n70_mismatch(vs, "unknown site", kind, key); vs->broken = 1; return; }
