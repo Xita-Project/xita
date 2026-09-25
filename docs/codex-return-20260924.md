@@ -41,3 +41,9 @@ Added developer XV_TEST_SAVE=<slot> startup selection. A nonempty slot must cont
 Cloned perf210 stage to ../isolated-save-candidate/build-x87 and applied only the isolated-save runtime/header changes. Full Vita build passed. New code-only package xita-perf211c.vpk retains perf210 assets, changing game-a.self and boot-game.txt only. Executable 34,725,382 bytes, SHA256 468598e9483595e09bc45f4ce452a217b4511e3fa01bcd80d5916cdd8b95dba7. Queue padding remains absent from this retained candidate. Not uploaded or installed.
 
 Prepared ux0:data/xita/test-saves/a30-perf211 using 15 files from the captured perf208 disk-save backup, verifying each uploaded file by a fresh FTP read and SHA256 comparison. This is not the unsaved in-memory checkpoint. Normal save files untouched. Set XV_TEST_SAVE=a30-perf211 via remote env before Launch on perf211, and verify the logged save directory before interpreting any campaign run. Still awaiting the save-and-quit user response before restarting current perf208.
+
+## Pause navigation investigation
+
+Read-only Vita pause-investigation.log reports ui_map 0, paused 1, menu 004E9E20, extras 0 repeatedly. Thus the observed stuck selection is not explained by the normal gameplay D-pad-to-crouch/zoom mapping staying enabled. This does not prove delivery of each short remote pulse. No further Vita inputs/restarts issued.
+
+Started Pi harness-fin2 with a fresh temporary save through existing pirun.sh, cores 0/1, tag codex-menu-20260924, duration 180 seconds, native70110=2, save logging. Input schedule enters a30 then at frame6000 Start, Down at6060/6120/6180, A at6240/6360. First poll confirmed frame363; not yet known whether the run will reach menu events. Preserve this limitation when inspecting the result; a timeout before6000 is not a reproduction. Private output in native-70110-work/pi-runs after script completion, remote ~/xita-70110/runs/codex-menu-20260924.log.
