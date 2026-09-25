@@ -3,6 +3,7 @@
 #if defined(XV_MODEL_FOG) && XV_MODEL_FOG
 #include "xk.h"
 #include "xk_owner_phase.h"
+#include "xk_render_cache_context.h"
 #include "xk_model_fog.h"
 #include <stdlib.h>
 extern int xv_watch_n __attribute__((weak)),xv_trace_funcs __attribute__((weak));
@@ -56,14 +57,14 @@ static void invalidate(void)
 void xk_model_fog_override(xctx *c,int value)
 {
     uint32_t generation=0;
-    if(xv_owner_phase_active(c,XV_OWNER_SCENE,&generation)<0)return;
+    if(xv_render_cache_admit(c,&generation)<0)return;
     invalidate();override=value<0?-1:value!=0;
 }
 static int admit(xctx *c,FogKey *key,uint32_t generation,
                  const uint8_t *ram,const uint32_t *pt,const uint8_t *image)
 {
     uint32_t sp=c->r[4],fp=fpscr_get();
-    if(ram!=g_xram || pt!=g_xpt || image!=g_img_base || !ram || !pt || !image ||
+    if(ram!=g_xram || pt!=xv_render_cache_pt() || image!=xv_render_cache_image() || !ram || !pt || !image ||
        (c->fcw!=0x023f && c->fcw!=0x027f) || c->fsp>7 || (fp&~0xf300009fu) ||
        sp<36 || sp>UINT32_MAX-0xabu || (sp&3) ||
        ((sp-36)>>12)!=((sp+0xab)>>12))return 0;
@@ -100,7 +101,7 @@ int xk_model_fog_begin(xctx *c,const uint8_t *ram,const uint32_t *pt,
     /* This query rejects native workers before accessing owner scheduler
      * state. No mutable cache/config/counter is touched by foreign callers. */
     uint32_t generation=0;
-    if(xv_owner_phase_active(c,XV_OWNER_SCENE,&generation)<0)return 0;
+    if(xv_render_cache_admit(c,&generation)<0)return 0;
     if((&xv_watch_n && xv_watch_n) || (&xv_trace_funcs && xv_trace_funcs)
 #ifdef XV_CHECK_GUEST_ADDRESS
        || xv_watch_len
@@ -130,14 +131,14 @@ void xk_model_fog_end(xctx *c,unsigned token)
     if(!token)return;
     unsigned fp=fpscr_get();
     uint32_t generation=token;
-    if(xv_owner_phase_active(c,XV_OWNER_SCENE,&generation)<0)return;
+    if(xv_render_cache_admit(c,&generation)<0)return;
     if(!pending_valid || generation!=pending.generation)return;
     pending_valid=0;
-    if((uintptr_t)g_xram!=pending.ram || (uintptr_t)g_xpt!=pending.pt ||
-       (uintptr_t)g_img_base!=pending.image || c->r[4]!=pending.sp ||
+    if((uintptr_t)g_xram!=pending.ram || (uintptr_t)xv_render_cache_pt()!=pending.pt ||
+       (uintptr_t)xv_render_cache_image()!=pending.image || c->r[4]!=pending.sp ||
        c->fsp!=pending.top || c->fcw!=pending.fcw ||
        xk_mem_arena_size()!=pending.arena || xk_mem_image_lo()!=pending.lo ||
-       xk_mem_image_hi()!=pending.hi || g_xpt[pending.sp>>12]!=pending.stackpage){
+       xk_mem_image_hi()!=pending.hi || xv_render_cache_pt()[pending.sp>>12]!=pending.stackpage){
         invalidate();return;
     }
     last.fpscr=fp;last.key=pending;

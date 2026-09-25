@@ -3,6 +3,7 @@
 #if defined(XV_MODEL_UV) && XV_MODEL_UV
 #include "xk.h"
 #include "xk_owner_phase.h"
+#include "xk_render_cache_context.h"
 #include "xk_model_uv.h"
 extern int xv_watch_n __attribute__((weak)),xv_trace_funcs __attribute__((weak));
 static const uint32_t canonical[14]={0,0x3f800000,0,0x3f800000,0,0x3f800000,0,0x3f800000,0,0x3f800000,0,0x43b40000,0,0};
@@ -52,7 +53,7 @@ static int diagnostic(void){return (&xv_watch_n && xv_watch_n) || (&xv_trace_fun
 #endif
     ;}
 /* Reject workers/native foreign callers before any mutable cache/counter access. */
-static int owner(xctx*c,uint32_t *generation){return xv_owner_phase_active(c,XV_OWNER_SCENE,generation);}
+static int owner(xctx*c,uint32_t *generation){return xv_render_cache_admit(c,generation);}
 static uint32_t *span(uint32_t a,unsigned n){
     if((a&3) || n>4096-(a&4095))return NULL;
     uint32_t p=scope.pt[a>>12];
@@ -61,10 +62,11 @@ static uint32_t *span(uint32_t a,unsigned n){
 }
 static int overlap(const void*a,unsigned n,const void*b,unsigned m){uintptr_t x=(uintptr_t)a,y=(uintptr_t)b;return x<y+m && y<x+n;}
 static int memory_context(const uint8_t *ram,const uint32_t *pt,const uint8_t *image){
-    if(!ram || !pt || !image || ram!=g_xram || pt!=g_xpt || image!=g_img_base ||
+    if(!ram || !pt || !image || ram!=g_xram || pt!=xv_render_cache_pt() || image!=xv_render_cache_image() ||
        ram!=scope.ram || pt!=scope.pt || image!=scope.image ||
        xk_mem_arena_size()!=scope.arena || xk_mem_image_lo()!=scope.lo || xk_mem_image_hi()!=scope.hi)return 0;
-    return *(const xu32_u *)(image+0x2e3520)==scope.packet;
+    return (xv_render_cache_helper_enabled() ? X_IMG32(0x2e3520u) :
+            *(const xu32_u *)(image+0x2e3520))==scope.packet;
 }
 unsigned xk_model_uv_scope_begin(xctx*c,const uint8_t *ram,const uint32_t *pt,const uint8_t *image){
     uint32_t generation=0;int active=owner(c,&generation);
@@ -75,7 +77,7 @@ unsigned xk_model_uv_scope_begin(xctx*c,const uint8_t *ram,const uint32_t *pt,co
     if(diagnostic()){invalidate();counts.diagnostics++;return 0;}
     uint32_t arena=xk_mem_arena_size(),lo=xk_mem_image_lo(),hi=xk_mem_image_hi();
     uintptr_t base=(uintptr_t)ram,at=(uintptr_t)image+0x2e3520u;
-    if(ram!=g_xram || pt!=g_xpt || image!=g_img_base || !ram || !pt || !image || arena<8192 ||
+    if(ram!=g_xram || pt!=xv_render_cache_pt() || image!=xv_render_cache_image() || !ram || !pt || !image || arena<8192 ||
        lo>0x2e3520 || hi<0x2e3524 || at<base || at-base>arena-4100u){counts.roots++;invalidate();return 0;}
     if(exhausted || serial==UINT32_MAX){exhausted=1;counts.scope_declines++;return 0;}
 #if XV_MODEL_UV_CROSS_MODEL
@@ -85,7 +87,7 @@ unsigned xk_model_uv_scope_begin(xctx*c,const uint8_t *ram,const uint32_t *pt,co
     invalidate();
 #endif
     scope.owner=c;scope.ram=ram;scope.pt=pt;scope.image=image;scope.arena=arena;scope.lo=lo;scope.hi=hi;
-    scope.generation=generation;scope.packet=*(const xu32_u *)at;
+    scope.generation=generation;scope.packet=xv_render_cache_helper_enabled() ? X_IMG32(0x2e3520u) : *(const xu32_u *)at;
     if(!scope.packet || !span(scope.packet,4)){counts.roots++;
 #if XV_MODEL_UV_CROSS_MODEL
         invalidate();

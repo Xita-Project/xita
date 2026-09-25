@@ -121,6 +121,7 @@ int xv_scene_helper_thread = -1, xv_scene_owner_alias = -1;   /* read by xv_owne
 static int enabled = -1, configured;
 static SceUID helper = -1, go = -1, done = -1;
 static xctx ctx;
+static uint32_t cache_generation; /* published with go; never wraps */
 static unsigned depth, dispatched, declined_nested;
 static uint64_t wait_us, wait_max_us;
 static xk_thread *scene_guest;
@@ -129,6 +130,11 @@ int xv_scene_thread_active(const void *guest_thread) { return depth && guest_thr
 /* Only the active helper may admit its private copied context. Check thread
  * identity first so other threads never inspect helper-owned state. */
 int xv_scene_thread_owns_context(const void *context) { return xv_scene_thread_on_helper() && context == &ctx && depth != 0; }
+uint32_t xv_scene_thread_context_generation(const void *context)
+{
+    if (!xv_scene_thread_owns_context(context)) return 0;
+    return cache_generation == UINT32_MAX ? 0 : cache_generation;
+}
 
 /* ---- increment C (XV_SCENE_OVERLAP=1): the owner continues after dispatch ------------------------------
  * The helper runs the body without ever entering the guest scheduler (xv_preempt and xk_yield return at
@@ -443,6 +449,7 @@ int xv_scene_thread_run(void *context)
     depth = 1;
     xctx *c = context;
     ctx = *c; scene_guest = xk_cur;
+    if (cache_generation != UINT32_MAX) ++cache_generation;
     xv_scene_owner_alias = sceKernelGetThreadId();
     uint64_t t0 = xk_os_monotonic_us();
     int ov = overlap && gameplay_active(); in_flight_overlapped = ov;
@@ -553,6 +560,7 @@ static int enabled = -1, configured, helper_valid;
 static pthread_t helper, owner_alias;
 static sem_t go, done;
 static xctx ctx;
+static uint32_t cache_generation; /* published with go; never wraps */
 static unsigned depth, dispatched, declined_nested;
 static uint64_t wait_us, wait_max_us;
 static xk_thread *scene_guest;
@@ -560,6 +568,11 @@ int xv_scene_thread_active(const void *guest_thread) { return helper_valid && __
 /* Only the active helper may admit its private copied context. Check thread
  * identity first so other threads never inspect helper-owned state. */
 int xv_scene_thread_owns_context(const void *context) { return xv_scene_thread_on_helper() && context == &ctx && depth != 0; }
+uint32_t xv_scene_thread_context_generation(const void *context)
+{
+    if (!xv_scene_thread_owns_context(context)) return 0;
+    return cache_generation == UINT32_MAX ? 0 : cache_generation;
+}
 
 /* ---- increment C (XV_SCENE_OVERLAP=1): the owner continues after dispatch ------------------------------
  * The helper runs the body without ever entering the guest scheduler (xv_preempt and xk_yield return at
@@ -852,6 +865,7 @@ int xv_scene_thread_run(void *context)
     if (depth) { declined_nested++; return 0; }                  /* recursive scene entry on the owner */
     xctx *c = context;
     ctx = *c; scene_guest = xk_cur;
+    if (cache_generation != UINT32_MAX) ++cache_generation;
     owner_alias = pthread_self();
     __atomic_store_n(&depth, 1, __ATOMIC_RELEASE);
     uint64_t t0 = xk_os_monotonic_us();
@@ -881,6 +895,7 @@ int xv_scene_thread_active(const void *guest_thread) { (void)guest_thread; retur
 /* Only the active helper may admit its private copied context. Check thread
  * identity first so other threads never inspect helper-owned state. */
 int xv_scene_thread_owns_context(const void *context) { (void)context; return 0; }
+uint32_t xv_scene_thread_context_generation(const void *context) { (void)context; return 0; }
 int xv_scene_thread_on_helper(void) { return 0; }
 int xv_scene_thread_no_yield(void) { return 0; }
 void xv_scene_thread_join(void) {}
