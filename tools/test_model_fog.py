@@ -15,7 +15,8 @@ from games.halo_ce_3925 import model_fog
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     for n in ['xbe','manifest','retained-build','out']:p.add_argument('--'+n,type=Path,required=True)
-    a=p.parse_args();O=a.out.resolve();O.mkdir(parents=True,exist_ok=True);B=a.retained_build.resolve()
+    p.add_argument("--helper-context",action="store_true")
+    a=p.parse_args();helper_context=a.helper_context;O=a.out.resolve();O.mkdir(parents=True,exist_ok=True);B=a.retained_build.resolve()
     image=recomp.Image(str(a.xbe),str(a.manifest))
     source=(B/'recomp/code_011.c').read_text();body=source[source.index('void f_00070110('):];body=body[:body.index('\nvoid ')]
     hooked=model_fog.hook(image,0x70110,body)
@@ -39,6 +40,7 @@ def main():
     (O/'fog-original.c').write_text(header+region+'}\n')
     cc=os.environ.get('ARM_CC','/home/birchwoodgod/vitasdk/bin/arm-vita-eabi-gcc')
     flags=['-O2','-g1','-std=gnu11','-mthumb','-mcpu=cortex-a9','-mfpu=neon','-fno-strict-aliasing','-ffp-contract=off','-ffunction-sections','-fdata-sections','-fstack-usage','-DXV_MODEL_FOG=1','-DXV_OWNER_PHASE','-I'+str(ROOT/'recomp')]
+    if helper_context:flags += ["-DXV_TEST_HELPER_CACHE=1","-include",str(ROOT/"tools/tests/render_cache_mapping.h")]
     commands=[]
     for name,path in [('fog-original',O/'fog-original.c'),('fixture',ROOT/'tools/tests/model_fog_arm.c'),('fog-cache',ROOT/'recomp/kernel/xk_model_fog.c'),('imports',ROOT/'tools/tests/cluster_runtime_arm_imports.c')]:
      cmd=[cc,*flags,'-c',str(path),'-o',str(O/(name+'.o'))];commands.append(cmd);subprocess.run(cmd,check=True)
@@ -112,7 +114,9 @@ def main():
      if expect=='miss':compare('mapped-stack-warm-'+hex(page),s)
     # Changed root identity with equivalent mappings/data also invalidates the key.
     m.call('arm_prepare',(0,0,0));s=snapshot();compare('root-seed',s,expected='miss')
-    newpt=RAM+0x700000;wr(newpt,rd(m.symbols['pages'],4096));put(m.symbols['g_xpt'],newpt);s=snapshot();compare('root-change',s,expected='miss');compare('root-change-warm',s)
+    newpt=RAM+0x700000;wr(newpt,rd(m.symbols['pages'],4096));put(m.symbols['g_xpt'],newpt)
+    if helper_context:put(m.symbols['xv_test_active_pt'],newpt)
+    s=snapshot();compare('root-change',s,expected='miss');compare('root-change-warm',s)
     # Native comparison flags are overwritten; prior exception-status bits are keyed.
     m.call('arm_prepare',(0,0,0));s=snapshot();compare('fpscr-nzcv-seed',s,0,expected='miss');compare('fpscr-nzcv-reuse',s,0xf0000000,expected='hit')
     # Actual live runtime controls: FCW023f, default-NaN + flush-to-zero,
@@ -156,7 +160,7 @@ def main():
     for name,symbol,value in [('arena-trash','arena_bytes',0x2fe000),('image-lo','image_lo',0x300000),('image-hi','image_hi',0x200000)]:
      m.call('arm_reset');m.call('arm_prepare',(0,0,0));s=snapshot();put(m.symbols[symbol],value);compare(name,s,expected='decline')
     m.call('arm_reset')
-    result={'comparisons':len(rows),'scope':'standalone original region with retained code_000.o children; no publication sinks or FPS claim','commands':commands,'rows':rows,'oracle_sha256':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in [B/'recomp/code_011.c',B/'build/recomp/code_000.o',ROOT/'recomp/kernel/xk_model_fog.c']}}
+    result={'helper_context':helper_context,'comparisons':len(rows),'scope':'standalone original region with retained code_000.o children; no publication sinks or FPS claim','commands':commands,'rows':rows,'oracle_sha256':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in [B/'recomp/code_011.c',B/'build/recomp/code_000.o',ROOT/'recomp/kernel/xk_model_fog.c']}}
     (O/'prototype-results.json').write_text(json.dumps(result,indent=2)+'\n')
     for r in rows[:8]:print(r['name'],r['outcome'],r['original']['instructions'],r['candidate']['instructions'],r['candidate']['firmware_copy_bytes'])
     print('PASS',len(rows),'full context/8MiB/FPSCR comparisons')

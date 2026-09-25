@@ -10,7 +10,8 @@ const char xv_object_job_marker=0;
 unsigned on_worker,thread_id=17;
 int xv_object_is_worker_thread(void){return on_worker;}
 int xv_object_is_worker_id(int32_t id){if(id!=(int32_t)thread_id)__builtin_trap();return on_worker;}
-int __wrap_sceKernelGetThreadId(void){return thread_id;}
+__attribute__((noinline)) int __wrap_sceKernelGetThreadId(void){return thread_id;}
+int32_t xv_owner_thread_id(void){return __wrap_sceKernelGetThreadId();}
 xk_fiber *xk_os_fiber_current(void){return current_fiber;}
 uint64_t xk_os_monotonic_us(void){return 1;}
 void xk_os_log(const char*f,...){(void)f;}
@@ -24,6 +25,8 @@ uint32_t xk_mem_image_hi(void){return image_hi;}
 static unsigned model_token,nested_token;static xv_owner_phase_scope scene_token;
 void f_00056F20(xctx*);void uv_cached(xctx*);
 void abort(void){__builtin_trap();}char *getenv(const char*x){(void)x;return 0;}
+/* No environment value exists in this fixture: conversion must stay cold. */
+int atoi(const char*x){(void)x;abort();return 0;}
 void x_guest_read_pages(void*out,uint32_t a,size_t n){unsigned char*p=out;while(n){size_t k=4096-(a&4095);if(k>n)k=n;memcpy(p,X_G(a),k);p+=k;a+=k;n-=k;}}
 void x_guest_write_pages(uint32_t a,const void*in,size_t n){const unsigned char*p=in;while(n){size_t k=4096-(a&4095);if(k>n)k=n;memcpy(X_G(a),p,k);p+=k;a+=k;n-=k;}}
 void xv_preempt(xctx*c){(void)c;abort();}void xv_trap(xctx*c,uint32_t a){(void)c;(void)a;abort();}
