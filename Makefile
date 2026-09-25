@@ -2219,6 +2219,24 @@ CFLAGS += -DXV_NATIVE_1721B0=1 -DXV_NATIVE_1721B0_DEFAULT=$(XV_NATIVE_1721B0_DEF
 RECOMP_CFLAGS += -DXV_NATIVE_1721B0=1 -DXV_NATIVE_1721B0_DEFAULT=$(XV_NATIVE_1721B0_DEFAULT)
 endif
 $(RECOMP_BUILD)/kernel/xk_native_1721b0.o: RECOMP_CFLAGS += -ffp-contract=off
+# Native effects and material helpers (XV_NATIVE_EFFECTS): f_0007E530 (vertex-constant matrices), f_0007E420 (+7DBE0,
+# light constants), f_00056F20 (texture animation), f_00080360 (+1290E0, 80250: texture bind), f_00011B60 / f_00011610 /
+# f_00011BD0 (colour packing), hooked at their entries (tools/patch_native_effects_hooks.py):
+# recomp/kernel/xk_native_effects.c. Env XV_NATIVE_EFFECTS 0 off / 1 verify / 2 native, XV_NATIVE_EFFECTS_TIME=1 us/call,
+# XV_NATIVE_EFFECTS_FUNCS=<hex,...> a subset (docs/native-effects.md).
+XV_NATIVE_EFFECTS ?= 0
+XV_NATIVE_EFFECTS_DEFAULT ?= 0
+ifneq ($(filter $(XV_NATIVE_EFFECTS),0 1),$(XV_NATIVE_EFFECTS))
+$(error XV_NATIVE_EFFECTS must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_EFFECTS_DEFAULT),0 1 2),$(XV_NATIVE_EFFECTS_DEFAULT))
+$(error XV_NATIVE_EFFECTS_DEFAULT must be 0, 1 or 2)
+endif
+ifeq ($(XV_NATIVE_EFFECTS),1)
+CFLAGS += -DXV_NATIVE_EFFECTS=1 -DXV_NATIVE_EFFECTS_DEFAULT=$(XV_NATIVE_EFFECTS_DEFAULT)
+RECOMP_CFLAGS += -DXV_NATIVE_EFFECTS=1 -DXV_NATIVE_EFFECTS_DEFAULT=$(XV_NATIVE_EFFECTS_DEFAULT)
+endif
+$(RECOMP_BUILD)/kernel/xk_native_effects.o: RECOMP_CFLAGS += -ffp-contract=off
 XV_RENDER_VIEW ?= 0
 XV_RENDER_VIEW_DEFAULT ?= 0
 ifneq ($(filter $(XV_RENDER_VIEW),0 1),$(XV_RENDER_VIEW))
