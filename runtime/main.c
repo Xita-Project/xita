@@ -1781,11 +1781,13 @@ static int xv_pump_retire(void)
 }
 /* Core 1 owns all GXM submission. It can submit another packet while the prior
  * notification is pending; it polls fences while display slots/pacing are busy. */
+#include "xv_submit_cpu.h"
 static int xv_pump_thread(SceSize args, void *argp)
 {
     (void)args; (void)argp;
     XV_LOG("pump: triple slots, fragment notification retirement; configured queue mode; requested core 1\n");
     xv_cpu_log_thread("render-pump");
+    { const char *e = getenv("XV_SUBMIT_CPU"); xv_submit_cpu_enabled = e && atoi(e) != 0; }
 #if XV_GPU_PACKET_TIMING
     XV_LOG("[gpu-packet] enabled: pump-owned submission and bracketed notification polling; pipeline/wait policy unchanged\n");
 #endif
@@ -1858,11 +1860,13 @@ static int xv_pump_thread(SceSize args, void *argp)
             xv_cpu_poll(now);
             xv_render_profile_begin(g_packets[q].mesh);
             xv_gpu_write_barrier();
+            xv_submit_cpu_begin();
             int err=xv_gfx_render_frame(g_packets[q].mesh,g_packets[q].ui,&g_packets[q].fence,
 #ifdef XV_QUERY_BOUNDARY
                 g_packets[q].query_boundary ? NULL :
 #endif
                 g_packets[q].visibility_fence.address ? &g_packets[q].visibility_fence : NULL);
+            xv_submit_cpu_end(err < 0);
 #if XV_GPU_PACKET_TIMING
             xv_packet_timing_end(&g_packets[q].timing,sceKernelGetProcessTimeWide(),err<0);
 #endif
