@@ -24,8 +24,11 @@ The modified occlusion unit compiles with the retained Vita flags. These checks
 do not replace integration testing of table collisions, skipped/rendered object
 transitions, reports and GPU completion. The integrated render-admission fixture also passes on host and Pi: hidden/visible
 transitions, missing proxy, own-sample precedence, table collision, stale results,
-frame wrap, and overflow fail-open. The full perf222 Vita build passes. Hardware
-testing remains pending. No FPS gain or resolution of prior crashes is claimed.
+frame wrap, and overflow fail-open. The full perf222 Vita build passes. Physical perf222 testing confirms active culling with no reported result-queue
+overflow in the settled a30 lifepod capture. Across 1,200 Present intervals
+(end frames 7200–8340), mean frame time was 73.49 ms (13.61 FPS), p95 83.22 ms,
+p99 124.30 ms, and maximum 153.13 ms. There is no demonstrated FPS gain or
+resolution of prior crashes; prolonged active gameplay remains unqualified.
 
 The existing temporal occlusion policy can still reveal objects late; this
 change fixes CPU data ownership, not that policy. Fresh fragment-census data

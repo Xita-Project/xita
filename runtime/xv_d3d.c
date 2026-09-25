@@ -29,6 +29,7 @@
 #include "xv_visibility.h"
 #include "xv_frame_slots.h"
 #include "xv_scene_census.h"
+#include "xv_clip_diagnostic.h"
 #include "xv_vertex_upload.h"
 #include "xv_vertex_prepare.h"
 #include "xv_vertex_capture.h"
@@ -200,6 +201,7 @@ typedef struct {
     uint16_t  vs;                   /* slot index                                     */
     uint16_t  visibility;           /* frame query index + 1, zero disables testing */
     uint32_t  index_count;
+    uint32_t clip_stream_bytes, clip_stream_stride; /* owned stream 0 extent; census only */
     const void *streams[XV_MAX_STREAMS];
     const void *indices;
     uint32_t geometry_bytes[XV_MAX_STREAMS + 1], geometry_hash[XV_MAX_STREAMS + 1]; /* trace frames only */
@@ -2351,6 +2353,18 @@ static void record_draw_body(uint32_t prim, uint32_t count, const void *indices,
             s, S.stream_guest[s], vb->Common, vb->Data, nverts, stride);
         /* Only the owned upload is published; the cached source stays on CPU. */
     }
+    /* Record actual retained layout, not mutable guest state. Immediate and
+     * absent streams remain ineligible. Sparse capture still owns this extent;
+     * only referenced indices are inspected after completion. */
+    for (unsigned i=0;i<prep.count;i++) if (prep_stream[i]==0) {
+        c->clip_stream_bytes=prep.streams[i].bytes;
+        c->clip_stream_stride=prep.streams[i].stride;
+#if XV_PACKED_VERTEX_LAYOUT
+        if (prep.streams[i].packed==XV_PACKED_PREFIX16) {
+            c->clip_stream_bytes/=2; c->clip_stream_stride=16;
+        }
+#endif
+    }
     if (__builtin_expect(g_rec_stream_bytes != NULL, 0)) {   /* XV_REC_DEFER verify: bytes each stream's capture holds */
         uint32_t *nb = g_rec_stream_bytes + (size_t)(cur_list()->ncmds - 1) * XV_MAX_STREAMS;
         memset(nb, 0, XV_MAX_STREAMS * sizeof *nb);
@@ -2990,6 +3004,34 @@ void xv_d3d_occl_complete(uint32_t frame)
     }
 }
 
+/* Coverage diagnostic only: never decides whether to emit a draw. */
+static unsigned census_clip_planes(const cmdlist_t *l,const cmd_t *c,uint32_t frame,unsigned *eligible)
+{
+    if(c->vs>=XV_MAX_VS || !c->clip_stream_bytes || !c->streams[0] ||
+       !c->indices || c->index_count>SIZE_MAX/2 || c->const_n<4 ||
+       c->const_off>l->nconsts/4 || c->const_n>l->nconsts/4-c->const_off) return 0;
+    const xv_vs_desc_t *d=g_vs[c->vs].vs.desc;
+    if(!d || !d->gxp)return 0;
+    const char *name=strrchr(d->gxp,'/'); name=name?name+1:d->gxp;
+    /* Only these retained programs have audited raw-v0 affine position math.
+     * In particular halo_vs_11 transforms a derived register instead. */
+    if(strcmp(name,"halo_vs_16.gxp") && strcmp(name,"halo_vs_40.gxp"))return 0;
+    const xv_attr_desc_t *position=NULL;
+    for(unsigned i=0;i<d->nattrs;i++)if(d->attrs[i].vreg==0)position=&d->attrs[i];
+    if(!position || position->stream!=0 || position->offset!=0 ||
+       position->format!=SCE_GXM_ATTRIBUTE_FORMAT_F32 || position->components!=3)return 0;
+    unsigned expected_stride=d->stride[0];
+#if XV_PACKED_VERTEX_LAYOUT
+    if(c->packed_vertex==XV_PACKED_PREFIX16)expected_stride=16;
+#endif
+    if(c->clip_stream_stride!=expected_stride)return 0;
+    (*eligible)++;
+    return xv_clip_diagnostic(xv_vertex_upload_readback(frame%XV_NUM_LISTS,c->streams[0]),
+        c->clip_stream_bytes,c->clip_stream_stride,0,c->indices,
+        (size_t)c->index_count*2,c->index_count,
+        (const float (*)[4])&l->consts[c->const_off*4]);
+}
+
 /* Final completion of a census frame: depth-passing samples per command (all four cores). The
  * counters measure coverage, not GPU time; blended and discarding draws are what they rank. */
 void xv_d3d_frag_census_complete(uint32_t frame)
@@ -3004,6 +3046,7 @@ void xv_d3d_frag_census_complete(uint32_t frame)
     struct { int16_t entry; uint8_t kind, blend; uint32_t n, draws; } ps[64]; unsigned nps=0;
     struct { uint16_t vs; uint32_t n, draws, empty, idx, empty_idx, first, discard; } vsa[48]; unsigned nvsa=0;
     uint64_t indices=0, empty_indices=0;
+    unsigned clip_eligible=0,clip_outside=0,clip_nonzero=0; uint64_t clip_indices=0;
     uint64_t total=0, clears=0, back=0, rt=0, opaque=0, blended=0, nocolor=0, tail=0, tail_blended=0, queries=0;
     unsigned last_query=0, draws=0, empty=0, n=l->ncmds, switches=0, prev_frame=0, tail_switches=0;
     for (unsigned i=0;i<n;i++) if (l->cmds[i].kind==0 && l->cmds[i].visibility) last_query=i+1;
@@ -3025,6 +3068,9 @@ void xv_d3d_frag_census_complete(uint32_t frame)
         if (c->kind==1) { clears+=v; continue; }
         draws++; if (!v) empty++;
         indices+=c->index_count; if (!v) empty_indices+=c->index_count;
+        if(census_clip_planes(l,c,frame,&clip_eligible)) {
+            clip_outside++;clip_indices+=c->index_count;if(v)clip_nonzero++;
+        }
         { unsigned k=0; while (k<nvsa && vsa[k].vs!=c->vs) k++;
           if (k==nvsa && nvsa<48) { vsa[nvsa].vs=c->vs; vsa[nvsa].n=vsa[nvsa].draws=vsa[nvsa].empty=vsa[nvsa].idx=vsa[nvsa].empty_idx=vsa[nvsa].discard=0; vsa[nvsa].first=i; nvsa++; }
           if (k<nvsa) { vsa[k].n+=v; vsa[k].draws++; vsa[k].idx+=c->index_count; if (!v) { vsa[k].empty++; vsa[k].empty_idx+=c->index_count; }
@@ -3041,6 +3087,8 @@ void xv_d3d_frag_census_complete(uint32_t frame)
         while (pos>0 && top[pos-1].n<v) { top[pos]=top[pos-1]; pos--; } /* top[TOP] never read: pos<TOP here */
         top[pos].n=v; top[pos].i=i;
     }
+    XV_LOG("[clip-census] frame %u: eligible %u draws; common xy outside %u draws %llu indices; GPU nonzero %u (diagnostic only)\n",
+        frame,clip_eligible,clip_outside,(unsigned long long)clip_indices,clip_nonzero);
     unsigned area=l->visibility_back_area?l->visibility_back_area:1;
     XV_LOG("[frag-census] frame %u: %u cmds (%u draws, %u empty) last query cmd %u; samples %llu = %.1f screens (back %.1f rt %.1f clears %.1f); opaque %.1f blended %.1f no-color %.1f; after the last query %.1f (blended %.1f); query quads %.2f; target switches %u (%u after the last query), previous-frame samplers %u\n",
         frame,l->ncmds,draws,empty,last_query,(unsigned long long)total,(double)total/area,(double)back/area,(double)rt/area,(double)clears/area,
