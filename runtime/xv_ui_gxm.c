@@ -1469,6 +1469,10 @@ uint32_t xv_ui_gxm_mesh_frame(void) { return g_mesh_frame; }
  * render (recompiled Halo + HLE + draw recording), "render" = xv_present (GXM submit + wait for the
  * previous frame + display flip).  The first hardware number that says where the time goes. */
 static uint64_t g_t_last_present, g_t_game_acc, g_t_render_acc; static unsigned g_t_frames;
+/* Optional raw intervals for slow-frame analysis; reuse existing timestamps.
+ * Owner reporting follows the helper join, just like the aggregate counters. */
+static int g_frame_times_enabled = -1;
+static uint64_t g_frame_times_us[60];
 static inline uint64_t t_us(void) { extern uint64_t xk_os_monotonic_us(void); return xk_os_monotonic_us(); }
 void xd3d_hist_small_check(unsigned frame, unsigned draws);
 uint64_t xv_t_present_us;
@@ -1510,6 +1514,13 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
     ps_[6] = t_us();
     ui_tex_purge_if_needed(frame);
     uint64_t t1 = t_us(); ps_[7] = t1;
+    if (g_frame_times_enabled < 0) {
+        const char *e = getenv("XV_FRAME_TIMES");
+        g_frame_times_enabled = e && atoi(e) != 0;
+    }
+    if (g_frame_times_enabled && g_t_frames < 60)
+        g_frame_times_us[g_t_frames] = g_t_last_present && t1 >= g_t_last_present
+            ? t1 - g_t_last_present : 0; /* zero marks an unavailable interval */
     g_t_render_acc += t1 - t0; g_t_last_present = t1;
     if (t1 - t0 > 300000u) {   /* perf133 (Sept 23): isolated ~6.6 s present-path stalls once every few windows; name the stage */
         static unsigned n_; if (n_++ < 20) UI_LOG("[present-stall] frame %u: %llu ms total; pre %llu EndFrame %llu flip %llu flush %llu present %llu BeginFrame %llu frame_begin %llu purge %llu ms\n", frame,
@@ -1586,6 +1597,23 @@ static void present_report(unsigned frame)
         g_xv_ovl_fps = 60.0e6f / (float)(g_t_game_acc + g_t_render_acc + 1);
         { extern unsigned xv_d3d_draw_acc, xv_d3d_bsp_acc, xv_n_kicks, xv_n_fires; extern uint64_t xv_t_vbcb_us, xv_t_draw_us, xv_t_present_us; UI_LOG("frame time: game %.1f ms + wait %.1f ms = %.1f fps | pump %.1f ms | %u textures %u KB | decode %u tex %.1f ms | draws/frame %u bsp %u | frames %u | kicks %u fires %u vbcb %.1f ms draw-hle %.1f ms present %.1f ms (per frame)\n",
                g_t_game_acc / 60000.0, g_t_render_acc / 60000.0, 60.0e6 / (double)(g_t_game_acc + g_t_render_acc + 1), xv_pump_us_acc / 60000.0, g.texcount, g.dec_off >> 10, g_dec_n, g_dec_us / 1000.0, xv_d3d_draw_acc / (g_t_frames ? g_t_frames : 1), xv_d3d_bsp_acc / (g_t_frames ? g_t_frames : 1), g_t_frames, xv_n_kicks / (g_t_frames ? g_t_frames : 1), xv_n_fires / (g_t_frames ? g_t_frames : 1), xv_t_vbcb_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_draw_us / 1000.0 / (g_t_frames ? g_t_frames : 1), xv_t_present_us / 1000.0 / (g_t_frames ? g_t_frames : 1)); xv_d3d_draw_acc = xv_d3d_bsp_acc = 0; xv_n_kicks = xv_n_fires = 0; xv_t_vbcb_us = xv_t_draw_us = xv_t_present_us = 0; } g_dec_n = 0; g_dec_us = 0; xv_texture_worker_report(); xv_geometry_worker_report();
+        if (g_frame_times_enabled) {
+            /* Twenty samples keep each line within xv_log's 512-byte buffer,
+             * even for 20-digit uint64 values. These are CPU Present-to-Present
+             * intervals, not GPU completion or physical scanout timestamps. */
+            for (unsigned start = 0; start < g_t_frames && start < 60; start += 20) {
+                unsigned end = start + 20;
+                if (end > g_t_frames) end = g_t_frames;
+                if (end > 60) end = 60;
+                char line[500];
+                int len = snprintf(line, sizeof line,
+                    "[frame-us] end %u offset %u count %u:", frame, start, end-start);
+                for (unsigned i = start; i < end; ++i)
+                    len += snprintf(line+len, sizeof line-(unsigned)len, " %llu",
+                                    (unsigned long long)g_frame_times_us[i]);
+                UI_LOG("%s\n", line);
+            }
+        }
         g_t_frames = 0; g_t_game_acc = g_t_render_acc = 0; xv_pump_us_acc = 0;
         if (grouped) xv_log_report_end();
         uint64_t report_us=t_us()-report_start;
