@@ -130,9 +130,9 @@ void xv_host_perf_report(unsigned frame, unsigned frames)
         uint64_t now[3] = { spl_read(spl_role[r].cycles), spl_read(spl_role[r].instr), spl_read(spl_role[r].clock) }, d[3];
         for (int k = 0; k < 3; k++) { d[k] = now[k] - spl_role[r].last[k]; spl_role[r].last[k] = now[k]; }
         fprintf(stderr, "[host-perf] frame %u %s: %.3f Mcycles %.3f Minstr %.3f ms CPU per frame (%u frames) ab %u %u\n", frame,
-            r == 0 ? "owner" : "scene-helper", d[0] / 1e6 / frames, d[1] / 1e6 / frames, d[2] / 1e6 / frames, frames, ab0, ab1);
+            r == 0 ? "owner" : r == 1 ? "rec-worker" : "scene-helper", d[0] / 1e6 / frames, d[1] / 1e6 / frames, d[2] / 1e6 / frames, frames, ab0, ab1);
         if (spl_ev_n) {
-            char line[256]; int n = snprintf(line, sizeof line, "[host-perf-ev] frame %u %s:", frame, r == 0 ? "owner" : "scene-helper");
+            char line[256]; int n = snprintf(line, sizeof line, "[host-perf-ev] frame %u %s:", frame, r == 0 ? "owner" : r == 1 ? "rec-worker" : "scene-helper");
             for (int k = 0; k < spl_ev_n; k++) {
                 uint64_t v = spl_read(spl_role[r].ev[k]), dv = v - spl_role[r].ev_last[k]; spl_role[r].ev_last[k] = v;
                 n += snprintf(line + n, sizeof line - n, " 0x%llx %.1f k", (unsigned long long)spl_ev_config[k], dv / 1e3 / frames);

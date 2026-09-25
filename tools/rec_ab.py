@@ -55,12 +55,18 @@ def windows_from_log(path):
             kind = m.group(1); seq += 1; close(kind)
             cur[kind] = [seq, frame, phase_of(int(m.group(2)), int(m.group(3))), {}]
             continue
-        m = re.search(r'\[host-perf\] frame (\d+) scene-helper: ([\d.]+) Mcycles ([\d.]+) Minstr ([\d.]+) ms CPU per frame \(\d+ frames\) ab (\d+) (\d+)', line)
-        if m:
-            ph = phase_of(int(m.group(5)), int(m.group(6)))
+        m = re.search(r'\[host-perf\] frame (\d+) (scene-helper|owner|rec-worker): ([\d.]+) Mcycles ([\d.]+) Minstr ([\d.]+) ms CPU per frame \(\d+ frames\) ab (\d+) (\d+)', line)
+        if m and m.group(2) != 'scene-helper':   # other roles: their own window lists (kinds perf-owner / perf-rec-worker)
+            ph = phase_of(int(m.group(6)), int(m.group(7))); role = m.group(2)
             if ph is not None:
-                out['perf'].append((seq, int(m.group(1)), ph, {'helper Mcycles': float(m.group(2)), 'helper Minstr': float(m.group(3)),
-                                                              'helper CPU ms': float(m.group(4))}))
+                out['perf-' + role].append((seq, int(m.group(1)), ph, {role + ' Mcycles': float(m.group(3)), role + ' Minstr': float(m.group(4)),
+                                                                       role + ' CPU ms': float(m.group(5))}))
+            continue
+        if m:
+            ph = phase_of(int(m.group(6)), int(m.group(7)))
+            if ph is not None:
+                out['perf'].append((seq, int(m.group(1)), ph, {'helper Mcycles': float(m.group(3)), 'helper Minstr': float(m.group(4)),
+                                                              'helper CPU ms': float(m.group(5))}))
             if not have_markers:
                 for k in ('draw', 'hle'):
                     if cur[k] is not None: cur[k][2] = ph
@@ -117,7 +123,7 @@ def main():
     allw = windows_from_log(log)
     print(f'{log}: frames ({lo},{hi}]')
     print(f'  {"metric":48s} {"phase0":>9s} {"phase1":>9s} {"paired 1-0":>11s} {"+-se":>7s} pairs')
-    for kind in ('perf', 'draw', 'hle'):
+    for kind in ('perf', 'perf-owner', 'perf-rec-worker', 'draw', 'hle'):
         ws = [w for w in allw.get(kind, []) if lo < w[1] <= hi]
         keys = []
         for w in ws:

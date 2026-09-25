@@ -250,7 +250,7 @@ build/frame_handoff_test: Makefile frame_handoff_test.c ../../runtime/xv_ui_gxm.
 
 build/ps_cache_test: Makefile ps_cache_test.c ../../runtime/xv_d3d.c ../../runtime/xv_d3d.h ../../runtime/xv_index_copy.h ../../runtime/xv_index_cache.h ../../runtime/xv_vertex_refs.h ../../runtime/xv_bytes_equal.h ../../shaders/xv_ps_table.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include ps_cache_test.c -Wl,--gc-sections -lm -o $@
+	$(CC) $(CFLAGS) -DXV_REC_DEFER_OFF -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include ps_cache_test.c -Wl,--gc-sections -lm -o $@
 
 build/hud_program_test: hud_program_test.c ../../runtime/xv_hud.h ../../runtime/xv_ps_key.h
 	mkdir -p build
@@ -286,6 +286,17 @@ build/index_copy_test: index_copy_test.c ../../runtime/xv_index_copy.h ../../run
 	mkdir -p build
 	$(CC) $(CFLAGS) $< -o $@
 
+# XV_REC_DEFER's queue: producer/consumer stress (make rec-queue-tsan: the same under ThreadSanitizer)
+VITASDK_INC ?= $(VITASDK)/arm-vita-eabi/include
+build/rec_queue_test: rec_queue_test.c ../../runtime/xv_rec_queue.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -std=gnu11 -idirafter $(VITASDK_INC) rec_queue_test.c -lpthread -o $@
+.PHONY: rec-queue-tsan
+rec-queue-tsan: rec_queue_test.c ../../runtime/xv_rec_queue.h
+	@mkdir -p build
+	$(CC) -O1 -g -std=gnu11 -fsanitize=thread -fno-omit-frame-pointer -I../.. -I../../runtime -idirafter $(VITASDK_INC) rec_queue_test.c -lpthread -o build/rec_queue_test_tsan
+	./build/rec_queue_test_tsan 150000
+
 build/rec_quad_test: rec_quad_test.c ../../runtime/xv_quad_rewrite.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -std=gnu11 rec_quad_test.c -o $@
@@ -297,7 +308,8 @@ build/rec_index_test: rec_index_test.c ../../runtime/xv_index_copy.h ../../runti
 # XV_REC_* recording knobs (runtime/xv_record_opt.h). rec_query_test includes xv_d3d.c: like ps_cache_test it needs
 # the generated shaders/xv_ps_table.h of a built stage.
 .PHONY: test-rec
-test-rec: build/rec_index_test build/rec_hle_test build/rec_query_test build/rec_quad_test
+test-rec: build/rec_index_test build/rec_hle_test build/rec_query_test build/rec_quad_test build/rec_queue_test
+	./build/rec_queue_test
 	./build/rec_quad_test
 	./build/rec_index_test
 	./build/rec_hle_test
@@ -309,11 +321,11 @@ build/rec_hle_test: Makefile rec_hle_test.c ../kernel/xd3d.c ../kernel/xd3d.h ..
 
 build/rec_query_test: Makefile rec_query_test.c ../../runtime/xv_d3d.c ../../runtime/xv_visibility.h ../../runtime/xv_record_opt.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -DXV_FLARE_QUERY_OVERLAP -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include rec_query_test.c -Wl,--gc-sections -lm -o $@
+	$(CC) $(CFLAGS) -DXV_REC_DEFER_OFF -DXV_FLARE_QUERY_OVERLAP -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include rec_query_test.c -Wl,--gc-sections -lm -o $@
 
 build/draw_state_test: draw_state_test.c ../../runtime/xv_draw_state.h ../../runtime/xv_d3d.c ../../runtime/xv_bytes_equal.h ../../runtime/xv_index_copy.h ../../runtime/xv_index_cache.h ../../runtime/xv_vertex_refs.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include draw_state_test.c -Wl,--gc-sections -lm -o $@
+	$(CC) $(CFLAGS) -DXV_REC_DEFER_OFF -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include draw_state_test.c -Wl,--gc-sections -lm -o $@
 
 build/draw_profile_test: draw_profile_test.c ../../runtime/xv_draw_profile.c ../../runtime/xv_draw_profile.h
 	mkdir -p build
@@ -390,7 +402,7 @@ test-cpu-prep: build/ps_identity_test build/frame_events_test build/sleep_wait_t
 
 build/draw_optimization_test: draw_optimization_test.c ../../runtime/xv_d3d.c ../../runtime/xv_shader.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include draw_optimization_test.c -Wl,--gc-sections -lm -o $@
+	$(CC) $(CFLAGS) -DXV_REC_DEFER_OFF -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include draw_optimization_test.c -Wl,--gc-sections -lm -o $@
 
 .PHONY: test-texture-preparation
 test-texture-preparation: build/texture_preparation_test
@@ -401,7 +413,7 @@ test-texture-preparation: build/texture_preparation_test
 
 build/texture_preparation_test: Makefile texture_preparation_test.c ../../runtime/xv_d3d.c ../../runtime/xv_shader.h ../../shaders/xv_ps_table.h
 	mkdir -p build
-	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include texture_preparation_test.c -Wl,--gc-sections -lm -o $@
+	$(CC) $(CFLAGS) -DXV_REC_DEFER_OFF -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include texture_preparation_test.c -Wl,--gc-sections -lm -o $@
 
 build/yield_handoff_test: yield_handoff_test.c ../kernel/xk_thread.c ../kernel/xk.h
 	mkdir -p build
@@ -421,7 +433,7 @@ build/frame_events_test: frame_events_test.c ../../runtime/xv_frame_events.h
 
 build/visibility_test: Makefile visibility_test.c ../../runtime/xv_d3d.c ../../runtime/xv_visibility.h ../kernel/xd3d.c ../xv_x86rt.c ../kernel/xk_mem.c
 	mkdir -p build
-	$(CC) $(CFLAGS) -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include visibility_test.c ../xv_x86rt.c ../kernel/xk_mem.c ../kernel/xd3d.c -Wl,--gc-sections -lm -pthread -o $@
+	$(CC) $(CFLAGS) -DXV_REC_DEFER_OFF -I../.. -I../../shaders -Wno-pointer-to-int-cast -std=gnu11 -ffunction-sections -fdata-sections -idirafter $(VITASDK)/arm-vita-eabi/include visibility_test.c ../xv_x86rt.c ../kernel/xk_mem.c ../kernel/xd3d.c -Wl,--gc-sections -lm -pthread -o $@
 
 .PHONY: test-surface-desc
 test-surface-desc: build/surface_desc_test
