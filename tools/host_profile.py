@@ -32,9 +32,24 @@ def main():
         if cur < frm: continue
         counts[int(f[0])][int(f[1], 16) + base] += int(f[2])
     offs = sorted(set(counts[0]) | set(counts[1]) | set(counts[2]))
-    a2l = a[a.index('--addr2line') + 1] if '--addr2line' in a else 'addr2line'
+    a2l = a[a.index('--addr2line') + 1] if '--addr2line' in a else (a[a.index('--nm') + 1][:-2] + 'addr2line' if '--nm' in a and a[a.index('--nm') + 1].endswith('nm') else 'addr2line')
     out = subprocess.run([a2l, '-f', '-e', exe] + [hex(o) for o in offs], capture_output=True, text=True).stdout.split('\n')
     name = {o: out[2 * i] for i, o in enumerate(offs)}
+    # addr2line only uses the symbol table when the binary has no DWARF at all; a mixed build (runtime -g, guest
+    # code -g0, as tools/h2_host_build.py makes) leaves the guest functions as '??'. Resolve those from nm.
+    if any(v == '??' for v in name.values()):
+        import bisect
+        nm = a[a.index('--nm') + 1] if '--nm' in a else 'nm'
+        syms = []
+        for line in subprocess.run([nm, '-n', '-S', '--defined-only', exe], capture_output=True, text=True).stdout.splitlines():
+            f = line.split()
+            if len(f) == 4 and f[2] in 'tTwW': syms.append((int(f[0], 16), int(f[1], 16), f[3]))
+        keys = [k for k, _, _ in syms]
+        for o, v in name.items():
+            if v == '??' and syms:
+                i = bisect.bisect_right(keys, o) - 1
+                # a PC past every sized symbol is outside the executable (shared libc, vdso) in a dynamic build
+                if i >= 0: name[o] = syms[i][2] if o < syms[i][0] + max(syms[i][1], 1) else '[outside the binary: libc/vdso]'
     for kind, label in ((0, 'owner thread'), (2, 'scene helper thread'), (1, 'other threads')):
         byfn = collections.Counter()
         for o, n in counts[kind].items(): byfn[name.get(o, '?')] += n
