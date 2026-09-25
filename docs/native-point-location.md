@@ -1,6 +1,6 @@
 # Point-location prototype (17A8B0)
 
-This candidate has an opt-in retained-shard hook, but is not installed on the Vita. `xk_point_location.h`
+This candidate has an opt-in retained-shard hook and is installed in perf217 on the Vita. `xk_point_location.h`
 reduces transient x87 context traffic while traversing the BSP point-location tree.
 The retained implementation has no callees and one preemption backedge. The
 prototype keeps stack writes, register/flag results and that scheduling boundary;
@@ -51,5 +51,7 @@ context/FP state. It defers preemption during replay, compares both results, the
 applies the guest's backedge budget at return. This is a correctness diagnostic,
 not representative scheduling or performance. Normal native mode retains each
 backedge. The wrapper passed 4,096 cases on host and ARM; an injected wrong-side
-mutation was detected while retaining the guest result. Full-game verification
-is still pending.
+mutation was detected while retaining the guest result. Full-game Pi verification passed 765,691 calls. Physical Vita verification in the
+a30 lifepod passed 1,046,158 calls with zero mismatches or declines. These
+checks compare this function, not the entire simulation. A cold launch in native
+mode is underway; no whole-frame performance benefit has been established.
