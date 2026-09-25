@@ -31,6 +31,7 @@
  *                   frames. Any camera or object movement renders it at once; a static object revealed by something
  *                   else moving (a door) can come back up to <frames> frames late. */
 #include "xk.h"
+#include "xk_occlusion_results.h"
 #include "../xv_x86rt.h"
 #include <math.h>
 #include <stdio.h>
@@ -45,16 +46,28 @@ extern int xv_d3d_occl_proxy(unsigned slot, float x0, float y0, float x1, float 
 extern uint32_t xv_d3d_occl_build_frame(void);
 
 #define TAB 4096u
+static xv_occl_results result_queue;
+static int results_reliable = 1;
+static void apply_result(uint32_t, uint32_t, uint32_t, uint32_t, unsigned);
+static void consume_results(void)
+{
+    xv_occl_event e;
+    /* Bounded even if the pump continues publishing during this call. */
+    for(unsigned n=0;n<XV_OCCL_RESULT_CAP && xv_occl_results_pop(&result_queue,&e);n++)
+        apply_result(e.handle,e.frame,e.real,e.proxy,e.flags);
+    if(__atomic_load_n(&result_queue.dropped,__ATOMIC_ACQUIRE)) results_reliable=0;
+}
+
 static struct {
-    uint32_t handle, frame; uint8_t visible;   /* latest result, written by the pump */
-    uint8_t empty_streak;                      /* pump: consecutive renders with no own sample */
+    uint32_t handle, frame; uint8_t visible;   /* latest result, applied by the scene consumer */
+    uint8_t empty_streak;                      /* scene consumer: consecutive renders with no own sample */
     uint32_t rendered; float c[3];             /* recorder: last frame it was rendered, and its center then */
 } tab[TAB];
 static struct { unsigned slot; float x0, y0, x1, y1, z; } pend[255]; static unsigned npend;
 static int mode = -1, age = 4, static_every = 4, cam_still; static float cut_cos = 0.906308f, cut_dist = 8.0f, margin = 0.02f;
 static float prev_fwd[3], prev_d, prev_m3, prev_m7; static int have_prev, cut_frames;
 static unsigned n_render, n_skip, n_skip_static, n_noproxy, n_untracked, n_cuts;
-static volatile unsigned r_rendered, r_real_zero, r_proxy_zero, r_violation, r_skipped, r_reappear, r_both_zero;
+static unsigned r_rendered, r_real_zero, r_proxy_zero, r_violation, r_skipped, r_reappear, r_both_zero;
 
 static void config(void)
 {
@@ -99,6 +112,7 @@ void xv_occl_render(xctx *c)
 {
     if (mode < 0) config();
     if (mode <= 0) { f_0005B4A0(c); return; }
+    consume_results();
     uint32_t handle = X_M32(c->r[7]);
     uint32_t hdr = X_M32(X_M32(0x2FC6ACu) + 0x34u) + (handle & 0xFFFFu) * 12u;
     uint32_t body = X_M32(hdr + 8u);
@@ -107,9 +121,9 @@ void xv_occl_render(xctx *c)
     uint32_t bf = xv_d3d_occl_build_frame();
     unsigned t = hslot(handle);
     int known = tab[t].handle == handle;
-    int skip = mode == 2 && proxy && !cut_frames && known && !tab[t].visible && bf - tab[t].frame <= (uint32_t)age;
+    int skip = results_reliable && mode == 2 && proxy && !cut_frames && known && !tab[t].visible && bf - tab[t].frame <= (uint32_t)age;
     float cx = f32(body + 0x50u), cy = f32(body + 0x54u), cz = f32(body + 0x58u);
-    if (!skip && mode == 2 && static_every > 1 && proxy && known && cam_still >= 2 && tab[t].empty_streak >= 2 &&
+    if (!skip && results_reliable && mode == 2 && static_every > 1 && proxy && known && cam_still >= 2 && tab[t].empty_streak >= 2 &&
         bf - tab[t].rendered < (uint32_t)static_every) {
         float dx = cx - tab[t].c[0], dy = cy - tab[t].c[1], dz = cz - tab[t].c[2];
         if (dx * dx + dy * dy + dz * dz < 0.0004f) { skip = 1; n_skip_static++; }
@@ -149,6 +163,13 @@ void xv_occl_after_models(void)
 /* Pump thread, after final completion of `frame`: flags 1 rendered, 2 skipped, 4 proxy recorded. */
 void xv_occl_result(uint32_t handle, uint32_t frame, uint32_t real, uint32_t proxy, unsigned flags)
 {
+    xv_occl_event e={handle,frame,real,proxy,flags};
+    (void)xv_occl_results_push(&result_queue,e);
+}
+
+/* Only the scene consumer touches the table and result report counters. */
+static void apply_result(uint32_t handle, uint32_t frame, uint32_t real, uint32_t proxy, unsigned flags)
+{
     unsigned t = hslot(handle);
     if (tab[t].handle != handle) { tab[t].handle = handle; tab[t].empty_streak = 0; tab[t].rendered = 0; tab[t].frame = frame - 1u; }
     if ((int32_t)(frame - tab[t].frame) > 0) {
@@ -166,6 +187,7 @@ void xv_occl_result(uint32_t handle, uint32_t frame, uint32_t real, uint32_t pro
 void xv_occl_report(unsigned frames)
 {
     if (mode <= 0 || !frames) return;
+    if (!results_reliable) XK_LOG("[occl] result queue overflow: culling disabled until restart\n");
     XK_LOG("[occl] %u frames: rendered %u skipped %u (%u static; no proxy %u, untracked %u, camera cuts %u); results: rendered %u of which own draws empty %u, proxy empty %u (both empty %u, VIOLATIONS %u); skipped %u, back in view %u\n",
            frames, n_render, n_skip, n_skip_static, n_noproxy, n_untracked, n_cuts, r_rendered, r_real_zero, r_proxy_zero, r_both_zero, r_violation, r_skipped, r_reappear);
     n_render = n_skip = n_skip_static = n_noproxy = n_untracked = n_cuts = 0;
