@@ -343,7 +343,7 @@ static void scene(scene_t *s)
     if (!game_like && rnd() % 12 == 0) {                            /* the prologue's 6EFC0 path (decline) or its skip */
         const uint32_t x = tag_alloc(0x30), fl = tag_alloc(16);
         w16(x + 0x24, (uint16_t)(rnd() % 3 ? 0xA : rnd() % 12)); w16(x + 0x2C, (uint16_t)(rnd() % 6));
-        for (uint32_t o = 0; o < 16; o += 4) wf(fl + o, rnd() % 2 ? 0.0f : fv(-1, 1));
+        for (uint32_t o = 0; o < 16; o += 4) wf(fl + o, rnd() % 3 == 0 ? 0.0f : rnd() % 2 ? 1.0f : fv(-1, 1));
         w32(S + 0xA8, x); w32(S + 0xB0, rnd() % 5 ? fl : 0);
     }
     w32(0x2E3520u, S);
@@ -353,7 +353,8 @@ static void scene(scene_t *s)
     else w32(0x2E3508u, 0);
     { const uint32_t v = tag_alloc(12); for (uint32_t o = 0; o < 12; o += 4) wf(v + o, fv(0, 1)); w32(0x232F6Cu, v); }
     /* the material */
-    const uint32_t M = tag_alloc(0x180);
+    uint32_t M = tag_alloc(0x180);
+    if (rnd() % 6 == 0) { tag_top = ((tag_top | 0xFFFu) + 1u) + 0x100u; M = tag_top - 0x100u - 4u * (1 + rnd() % 0x5F); tag_top = M + 0x180u; }   /* across a page end */
     for (uint32_t o = 0; o < 0x180; o += 4) w32(M + o, rnd());
     { static const uint16_t kinds[4] = { 0, 1, 2, 4 }; w16(M + 0x24, game_like ? kinds[rnd() % 3] : rnd() % 10 == 0 ? 3 : kinds[rnd() % 4]); }
     w8(M + 0x28, (uint8_t)rnd());
@@ -556,7 +557,10 @@ static int threads_test(unsigned scenes, int nth, int iters)
         x_guest_read_pages(refstack, STACK, (size_t)STACK_PAGES << 12);
         { result *g = malloc(sizeof *g); x_guest_write_pages(STACK, init, (size_t)STACK_PAGES << 12); run(0, &c0, g);   /* and the guest agrees */
           uint8_t *gs = malloc((size_t)STACK_PAGES << 12); x_guest_read_pages(gs, STACK, (size_t)STACK_PAGES << 12);
-          if (memcmp(&g->c.r, &ref->c.r, sizeof g->c.r) || memcmp(gs, refstack, (size_t)STACK_PAGES << 12)) { if (++badscenes <= 5) printf("scene %u: mode %d differs from the guest single-threaded\n", k, mode); bad++; }
+          int differs = 0;
+          for (int i = 0; i < 8; ++i) if (g->c.r[i] != ref->c.r[i] && !(nan32w(g->c.r[i]) && nan32w(ref->c.r[i]))) differs = 1;
+          for (uint32_t i = 0; i < ((uint32_t)STACK_PAGES << 12); i += 4) { uint32_t u, v; memcpy(&u, gs + i, 4); memcpy(&v, refstack + i, 4); if (u != v && !(nan32w(u) && nan32w(v))) differs = 1; }
+          if (differs) { if (++badscenes <= 5) printf("scene %u: mode %d differs from the guest single-threaded\n", k, mode); bad++; }
           free(gs); free(g); }
         th_arg *a = calloc((size_t)nth, sizeof *a); pthread_t *th = malloc(sizeof *th * (size_t)nth);
         xv_native_70110_force(mode);
@@ -574,11 +578,97 @@ static int threads_test(unsigned scenes, int nth, int iters)
 }
 #endif
 
+/* ---- --replay <file> [reps]: entry states captured in the game (XV_NATIVE_70110_CAPTURE) ---------------------------
+ * The captured page table, and per call the context and every block the body reads (frame window, material, render
+ * context and its tables, the global/camera/constant pages, the render-state page). Each call runs the guest body, the
+ * native and verify mode from its own state (with this file's callee/HLE stand-ins) and is compared like a random case
+ * (the frame window, the render-state page, the context, the events). reps > 0: then the timing of guest and native
+ * over all calls, alternating passes (the cheap stand-ins, as --bench). */
+typedef struct { uint32_t a, n; uint8_t *b; } rblock;
+typedef struct { xctx c; unsigned nb; rblock bl[16]; } rrec;
+static void rput(const rrec *q) { for (unsigned i = 0; i < q->nb; ++i) x_guest_write_pages(q->bl[i].a, q->bl[i].b, q->bl[i].n); }
+static int replay(const char *path, int reps)
+{
+    FILE *f = fopen(path, "rb"); if (!f) { perror(path); return 2; }
+    uint32_t hdr[3];
+    if (fread(hdr, sizeof hdr, 1, f) != 1 || hdr[0] != 0x4337304Eu || hdr[1] != (1u << 20) || hdr[2] != sizeof(xctx)) { fprintf(stderr, "bad capture\n"); return 2; }
+    g_xpt = malloc(4u << 20);
+    if (fread(g_xpt, 4, 1u << 20, f) != (1u << 20)) { fprintf(stderr, "short capture\n"); return 2; }
+    uint32_t top = 0; for (uint32_t i = 0; i < (1u << 20); ++i) if (g_xpt[i] > top) top = g_xpt[i];
+    g_xram = calloc(1, (size_t)top + 0x2000u); g_img_base = g_xram;
+#if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE && !defined(__vita__)
+    xv_host_page_table = g_xpt;
+#endif
+    unsigned n = 0, cap = 256; rrec *rs = malloc(sizeof *rs * cap);
+    for (;;) {
+        if (n == cap) { cap *= 2; rs = realloc(rs, sizeof *rs * cap); }
+        rrec *q = &rs[n];
+        if (fread(&q->c, sizeof q->c, 1, f) != 1 || fread(&q->nb, 4, 1, f) != 1) break;
+        unsigned k = 0; int ok = 1;
+        for (unsigned i = 0; i < q->nb && ok; ++i) {
+            uint32_t an[2]; if (fread(an, 8, 1, f) != 1) { ok = 0; break; }
+            if (k < 16) { q->bl[k].a = an[0]; q->bl[k].n = an[1]; q->bl[k].b = malloc(an[1]); if (fread(q->bl[k].b, 1, an[1], f) != an[1]) ok = 0; k++; }
+        }
+        if (!ok) break;
+        q->nb = k; n++;
+    }
+    fclose(f);
+    printf("replay: %u calls\n", n);
+    result *rg = malloc(sizeof *rg), *rn = malloc(sizeof *rn), *rv = malloc(sizeof *rv);
+    unsigned bad = 0, vbad = 0, native = 0;
+    const unsigned W = 0x120u + 0x1000u;
+    uint8_t *wg = malloc(W), *wn = malloc(W), *wv = malloc(W);
+    for (unsigned i = 0; i < n; ++i) {
+        const rrec *q = &rs[i]; const uint32_t lo = q->c.r[4] - 0x100u;
+        rput(q); run(0, &q->c, rg); x_guest_read_pages(wg, lo, 0x120); x_guest_read_pages(wg + 0x120, 0x18F000u, 0x1000);
+        rput(q); run(2, &q->c, rn); x_guest_read_pages(wn, lo, 0x120); x_guest_read_pages(wn + 0x120, 0x18F000u, 0x1000);
+        char why[400] = "";
+        /* the comparison of random cases, on the window and the render-state page */
+        uint8_t *snapg = calloc(1, SNAP_BYTES), *snapn = calloc(1, SNAP_BYTES);
+        memcpy(snapg, wg, W); memcpy(snapn, wn, W);
+        if (!same(rg, rn, snapg, snapn, why, sizeof why, 0)) { if (++bad <= 10) printf("call %u native MISMATCH: %s\n", i, why); }
+        const unsigned before = xv_native_70110_mismatch_total();
+        rput(q); run(1, &q->c, rv); x_guest_read_pages(wv, lo, 0x120); x_guest_read_pages(wv + 0x120, 0x18F000u, 0x1000);
+        uint8_t *snapv = calloc(1, SNAP_BYTES); memcpy(snapv, wv, W);
+        if (!same(rg, rv, snapg, snapv, why, sizeof why, 1)) { if (++vbad <= 10) printf("call %u verify result MISMATCH: %s\n", i, why); }
+        else if (xv_native_70110_mismatch_total() != before) { if (++vbad <= 10) printf("call %u verify reported mismatches\n", i); }
+        native += rn->log.n > 0;
+        free(snapg); free(snapn); free(snapv);
+    }
+    printf("replay: %u calls compared, %u mismatches, verify %u, nan words %u\n", n, bad, vbad, nan_words);
+    if (reps > 0) {
+        light = 1; pe_open();
+        double ns[2] = { 0, 0 }; uint64_t pe[2][2] = { { 0, 0 }, { 0, 0 } };
+        for (int r = 0; r < reps; ++r)
+            for (int mode = 0; mode <= 2; mode += 2) {
+                xv_native_70110_force(mode);
+                for (unsigned i = 0; i < n; ++i) {
+                    rput(&rs[i]); xctx c = rs[i].c; c.preempt = 1 << 30;
+                    uint64_t p0[2], p1[2]; struct timespec t0, t1;
+                    pe_read(p0); clock_gettime(CLOCK_MONOTONIC, &t0);
+                    f_00070110(&c);
+                    clock_gettime(CLOCK_MONOTONIC, &t1); pe_read(p1);
+                    ns[mode / 2] += (t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec);
+                    pe[mode / 2][0] += p1[0] - p0[0]; pe[mode / 2][1] += p1[1] - p0[1];
+                }
+                xv_native_70110_force(0);
+            }
+        const double calls = (double)n * reps;
+        printf("replay speed: %u calls x %d: guest %.0f ns/call, native %.0f ns/call (%.2fx); user instructions/call guest %.0f native %.0f (%.2fx), "
+               "cycles/call guest %.0f native %.0f (%.2fx)%s\n", n, reps, ns[0] / calls, ns[1] / calls, ns[0] / ns[1], pe[0][0] / calls, pe[1][0] / calls,
+               pe[1][0] ? (double)pe[0][0] / pe[1][0] : 0, pe[0][1] / calls, pe[1][1] / calls, pe[1][1] ? (double)pe[0][1] / pe[1][1] : 0,
+               pe_fd[0] < 0 ? " (perf counters unavailable)" : "");
+    }
+    log_all = 1; xv_native_70110_report(0);
+    return bad || vbad;
+}
+
 int main(int argc, char **argv)
 {
     unsigned cases = argc > 1 ? (unsigned)atoi(argv[1]) : 2000;
     if (argc > 2) rng ^= strtoull(argv[2], 0, 0) * 0x9E3779B97F4A7C15ull;
     const int verify = !(argc > 3 && !strcmp(argv[3], "--no-verify"));
+    if (argc > 4 && !strcmp(argv[3], "--replay")) return replay(argv[4], argc > 5 ? atoi(argv[5]) : 0);
     map_memory();
     if (argc > 4 && !strcmp(argv[3], "--threads")) {
 #if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE && !defined(__vita__)

@@ -231,6 +231,14 @@ enum { N70_BAIL = 2000 };
 #define KW32(a, v) do { uint32_t v__ = (v); if (DRY) n70_dry_w(e, (a), v__, 4); else n70_st32(N70_KI(a), v__); } while (0)
 /* x87 constant loads go through the table like x87_load_f32 (the page is translated once; the address is 4-aligned) */
 #define KLDF(a) (DRY ? n70_dry_ldf(e, (a)) : (double)n70_ldf(N70_KF(a)))
+/* the material (ebp from 70118 on: [E+4], restored by every callee): FAST reads it from one page, checked where ebp is
+ * loaded (a material across a page end runs GEN from the start) and after every call (else GEN after the site) */
+enum { N70_MLEN = 0x180u };
+#define MB_SET() do { if (FAST) { if ((ebp & 0xFFFu) + N70_MLEN > 0x1000u) return N70_BAIL + 0; mb = N70_H(e, ebp); EBP0 = ebp; } } while (0)
+#define MB32(k) (FAST ? n70_ld32(mb + (k)) : M32(ebp + (k)))
+#define MB16(k) (FAST ? n70_ld16(mb + (k)) : M16(ebp + (k)))
+#define MB8(k) (FAST ? mb[k] : M8(ebp + (k)))
+#define MBF(k) (FAST ? (double)n70_ldf(mb + (k)) : LDF(ebp + (k)))
 #define PUSH(v) do { uint32_t p__ = (v); esp -= 4u; SW32(esp, p__); } while (0)
 #define POP() (esp += 4u, SM32(esp - 4u))
 /* partial registers */
@@ -345,9 +353,9 @@ static inline __attribute__((always_inline)) uint32_t n70_cc(double a, double b)
         xs[0] = c->st[T0]; xs[1] = c->st[(T0 + 1u) & 7u]; xs[2] = c->st[(T0 + 2u) & 7u]; xs[3] = c->st[(T0 + 3u) & 7u]; \
         xs[4] = c->st[(T0 + 4u) & 7u]; xs[5] = c->st[(T0 + 5u) & 7u]; xs[6] = c->st[(T0 + 6u) & 7u]; xs[7] = c->st[(T0 + 7u) & 7u]; } while (0)
 #define REMAP() do { } while (0)
-/* FAST: esp after a site must be E - off (the lift's stack discipline); else the call continues in GEN after the site
- * (the state is in the context: just loaded) */
-#define ESP_CHECK(k, off) do { if (FAST) { if (esp != E - (uint32_t)(off)) return N70_BAIL + (k); esp = E - (uint32_t)(off); } } while (0)
+/* FAST: esp after a site must be E - off (the lift's stack discipline) and ebp the material; else the call continues in
+ * GEN after the site (the state is in the context: just loaded) */
+#define ESP_CHECK(k, off) do { if (FAST) { if (esp != E - (uint32_t)(off) || ebp != EBP0) return N70_BAIL + (k); esp = E - (uint32_t)(off); ebp = EBP0; } } while (0)
 /* sites. Mode 2 performs the call; a dry run stops before it (returns the site, state stored) and resumes after it
  * (R_k: the actual state loaded, `outcome` the hook's result); GEN resumes the same way after a FAST bail. */
 #define CALL(k, fn, off, d, da, list) do { SYNC_AT(d, list); if (DRY) return k; fn(c); if (0) { R_##k:; } LOAD_AT(da); ESP_CHECK(k, off); } while (0)
@@ -386,10 +394,10 @@ static inline __attribute__((always_inline)) int n70_core(xctx *restrict c, n70_
 {
     uint32_t eax, ecx, edx, ebx, esp, ebp, esi, edi, fk, fa, fb, fr, fw, fco, fcf, foo, fof, T0;
     uint16_t fsw;
-    uint32_t cc = 0;
+    uint32_t cc = 0, EBP0 = 0;
     double xs[8];
-    uint8_t *w0 = e->w0;
-    (void)outcome; (void)cfg; (void)w0;
+    uint8_t *w0 = e->w0, *mb = NULL;
+    (void)outcome; (void)cfg; (void)w0; (void)mb; (void)EBP0;
     LOAD_AT(0);
     T0 = c->fsp;   /* the entry top as the lift keeps it (masked by its first push) */
     const uint32_t E = FAST ? esp : e->E;   /* FAST: the entry esp itself, so frame offsets fold */
@@ -473,7 +481,7 @@ L_00070110:
     /* 00070117  push ebp */
     PUSH(ebp);
     /* 00070118  mov ebp,[esp+0ACh] */
-    ebp = SM32((esp+0xACu));
+    ebp = SM32((esp+0xACu)); MB_SET();
     /* 0007011F  push esi */
     PUSH(esi);
     /* 00070120  mov esi,[esp+0B4h] */
@@ -542,7 +550,7 @@ L_00070220:
     if (FZ == 0) DECLINE();
 L_00070229:
     /* 00070229  cmp word ptr [ebp+24h],3 */
-    { uint16_t a_ = M16((ebp+0x24u)), b_ = 0x3u; FLAGS(XK_SUB, a_, b_, (uint16_t)(a_-b_), 16); }
+    { uint16_t a_ = MB16(0x24u), b_ = 0x3u; FLAGS(XK_SUB, a_, b_, (uint16_t)(a_-b_), 16); }
     /* 0007022E  jne short 00070265h */
     if (!FZ) goto L_00070265;
 L_00070230: DECLINE();
@@ -551,7 +559,7 @@ L_00070265:
     /* 00070265  fld dword ptr [edi+0B4h] */
     XS(7) = LDF((edi+0xB4u)); XD(7);
     /* 0007026B  mov bl,[ebp+28h] */
-    SET8L(ebx, M8((ebp+0x28u)));
+    SET8L(ebx, MB8(0x28u));
     /* 0007026E  fsub dword ptr ds:[2FC6C8h] */
     XS(7) = XS(7) - KLDF(0x2FC6C8u); XD(7);
     /* 00070274  shr bl,3 */
@@ -588,7 +596,7 @@ L_00070265:
     SSTF((esp+0x48u), XS(7));
     /* pop */
     /* 000702B2  fld dword ptr [ebp+140h] */
-    XS(7) = LDF((ebp+0x140u)); XD(7);
+    XS(7) = MBF(0x140u); XD(7);
     /* 000702B8  fcomp dword ptr ds:[1F0A68h] */
     FCOMT(7, XS(7), KLDF(0x1F0A68u));
     /* pop */
@@ -602,11 +610,11 @@ L_000702C5:
     /* 000702C5  fld dword ptr [esp+48h] */
     XS(7) = SLDF((esp+0x48u)); XD(7);
     /* 000702C9  fsub dword ptr [ebp+140h] */
-    XS(7) = XS(7) - LDF((ebp+0x140u)); XD(7);
+    XS(7) = XS(7) - MBF(0x140u); XD(7);
     /* 000702CF  fld dword ptr [ebp+13Ch] */
-    XS(6) = LDF((ebp+0x13Cu)); XD(6);
+    XS(6) = MBF(0x13Cu); XD(6);
     /* 000702D5  fsub dword ptr [ebp+140h] */
-    XS(6) = XS(6) - LDF((ebp+0x140u)); XD(6);
+    XS(6) = XS(6) - MBF(0x140u); XD(6);
     /* 000702DB  fdivp */
     XS(7) = XS(7) / XS(6); XD(7);
     /* pop */
@@ -771,7 +779,7 @@ L_00070368:
     if (!FZ) goto L_00070401;
 L_000703F4:
     /* 000703F4  test byte ptr [ebp+28h],4 */
-    { uint8_t r_ = M8((ebp+0x28u)) & 0x4u; FLAGS(XK_LOGIC, 0, 0, r_, 8); }
+    { uint8_t r_ = MB8(0x28u) & 0x4u; FLAGS(XK_LOGIC, 0, 0, r_, 8); }
     /* 000703F8  jne short 00070401h */
     if (!FZ) goto L_00070401;
 L_000703FA:
@@ -808,7 +816,7 @@ L_00070403:
     /* 00070429  mov dword ptr ds:[18F474h],7Fh */
     KW32(0x18F474u, 0x7Fu);
     /* 00070433  mov ecx,[ebp+0B0h] */
-    ecx = M32((ebp+0xB0u));
+    ecx = MB32(0xB0u);
     /* 00070439  push 0 */
     PUSH(0x0u);
     /* 0007043B  call 00080360h */
@@ -862,7 +870,7 @@ L_00070403:
     HLE(21, 0x182150u, D3DDevice_SetTextureState_Deferred, 0xb0, 0, (ST_ecx ST_edx ST_esp), (ST_ecx ST_edx ST_esp));
 S_16:;
     /* 00070486  mov ecx,[ebp+0E8h] */
-    ecx = M32((ebp+0xE8u));
+    ecx = MB32(0xE8u);
     /* 0007048C  push esi */
     PUSH(esi);
     /* 0007048D  push 2 */
@@ -922,7 +930,7 @@ S_16:;
     HLE(28, 0x182150u, D3DDevice_SetTextureState_Deferred, 0xb0, 0, (ST_ecx ST_edx ST_esp), (ST_ecx ST_edx ST_esp));
 S_23:;
     /* 000704ED  mov ecx,[ebp+0C8h] */
-    ecx = M32((ebp+0xC8u));
+    ecx = MB32(0xC8u);
     /* 000704F3  push esi */
     PUSH(esi);
     /* 000704F4  push 1 */
@@ -982,7 +990,7 @@ S_23:;
     HLE(35, 0x182150u, D3DDevice_SetTextureState_Deferred, 0xb0, 0, (ST_ecx ST_edx ST_esp), (ST_ecx ST_edx ST_esp));
 S_30:;
     /* 00070554  mov ecx,[ebp+170h] */
-    ecx = M32((ebp+0x170u));
+    ecx = MB32(0x170u);
     /* 0007055A  push esi */
     PUSH(esi);
     /* 0007055B  push 0 */
@@ -1057,7 +1065,7 @@ S_37:;
     /* 000705D5  mov [esp+9Ch],eax */
     SW32((esp+0x9Cu), eax);
     /* 000705DC  test byte ptr [ebp+6Ch],1 */
-    { uint8_t r_ = M8((ebp+0x6Cu)) & 0x1u; FLAGS(XK_LOGIC, 0, 0, r_, 8); }
+    { uint8_t r_ = MB8(0x6Cu) & 0x1u; FLAGS(XK_LOGIC, 0, 0, r_, 8); }
     /* 000705E0  je short 000705EAh */
     if (FZ) goto L_000705EA;
 L_000705E2:
@@ -1073,7 +1081,7 @@ L_000705EA:
     CALL(44, f_000B5130, 0xb0, 0, 1, (ST_eax ST_ecx ST_esp ST_edi ST_fk ST_fa ST_fb ST_fr ST_fw ST_fco ST_foo));
 L_000705F6:
     /* 000705F6  fld dword ptr [ebp+84h] */
-    XS(6) = LDF((ebp+0x84u)); XD(6);
+    XS(6) = MBF(0x84u); XD(6);
     /* 000705FC  lea esi,[ebp+78h] */
     esi = (ebp+0x78u);
     /* 000705FF  fsub dword ptr [esi] */
@@ -1083,19 +1091,19 @@ L_000705F6:
     /* 00070602  xor ecx,ecx */
     { uint32_t a_ = ecx, b_ = ecx; uint32_t r_ = (uint32_t)(a_ ^ b_); ecx = r_; }
     /* 00070604  mov cx,[ebp+72h] */
-    SET16(ecx, M16((ebp+0x72u)));
+    SET16(ecx, MB16(0x72u));
     /* 00070608  fstp dword ptr [esp+28h] */
     SSTF((esp+0x28u), XS(6));
     /* pop */
     /* 0007060C  fld dword ptr [ebp+88h] */
-    XS(6) = LDF((ebp+0x88u)); XD(6);
+    XS(6) = MBF(0x88u); XD(6);
     /* 00070612  fsub dword ptr [esi+4] */
     XS(6) = XS(6) - LDF((esi+0x4u)); XD(6);
     /* 00070615  fstp dword ptr [esp+2Ch] */
     SSTF((esp+0x2Cu), XS(6));
     /* pop */
     /* 00070619  fld dword ptr [ebp+8Ch] */
-    XS(6) = LDF((ebp+0x8Cu)); XD(6);
+    XS(6) = MBF(0x8Cu); XD(6);
     /* 0007061F  fsub dword ptr [esi+8] */
     XS(6) = XS(6) - LDF((esi+0x8u)); XD(6);
     /* 00070622  fstp dword ptr [esp+30h] */
@@ -1104,7 +1112,7 @@ L_000705F6:
     /* 00070626  fld dword ptr ds:[2FC918h] */
     XS(6) = KLDF(0x2FC918u); XD(6);
     /* 0007062C  fdiv dword ptr [ebp+74h] */
-    XS(6) = XS(6) / LDF((ebp+0x74u)); XD(6);
+    XS(6) = XS(6) / MBF(0x74u); XD(6);
     /* 0007062F  fadd st,st(1) */
     XS(6) = XS(6) + XS(7); XD(6);
     /* 00070631  fstp dword ptr [esp] */
@@ -1133,7 +1141,7 @@ L_000705F6:
     PUSH(0x7064Fu);
     CALL(46, f_000111A0, 0xb0, 0, 0, (ST_eax ST_ecx ST_edx ST_esp));
     /* 0007064F  mov ax,[ebp+70h] */
-    SET16(eax, M16((ebp+0x70u)));
+    SET16(eax, MB16(0x70u));
     /* 00070653  test ax,ax */
     { uint16_t r_ = R16(eax) & R16(eax); FLAGS(XK_LOGIC, 0, 0, r_, 16); }
     /* 00070656  jle short 0007068Eh */
@@ -1174,7 +1182,7 @@ L_0007065E:
     SSTF((esp+0x38u), XS(7));
     /* pop */
     /* 0007068E  mov ax,[ebp+4Ch] */
-    SET16(eax, M16((ebp+0x4Cu)));
+    SET16(eax, MB16(0x4Cu));
     /* 00070692  test ax,ax */
     { uint16_t r_ = R16(eax) & R16(eax); FLAGS(XK_LOGIC, 0, 0, r_, 16); }
     /* 00070695  jle short 000706C3h */
@@ -1182,7 +1190,7 @@ L_0007065E:
     goto L_00070697;
 L_0007068E:
     /* 0007068E  mov ax,[ebp+4Ch] */
-    SET16(eax, M16((ebp+0x4Cu)));
+    SET16(eax, MB16(0x4Cu));
     /* 00070692  test ax,ax */
     { uint16_t r_ = R16(eax) & R16(eax); FLAGS(XK_LOGIC, 0, 0, r_, 16); }
     /* 00070695  jle short 000706C3h */
@@ -1232,7 +1240,7 @@ L_000706C3:
     SW32((esp+0x44u), ecx);
 L_000706DD:
     /* 000706DD  test byte ptr [ebp+28h],10h */
-    { uint8_t r_ = M8((ebp+0x28u)) & 0x10u; FLAGS(XK_LOGIC, 0, 0, r_, 8); }
+    { uint8_t r_ = MB8(0x28u) & 0x10u; FLAGS(XK_LOGIC, 0, 0, r_, 8); }
     /* 000706E1  jne near ptr 000707B4h */
     if (!FZ) goto L_000707B4;
 L_000706E7:
@@ -1264,7 +1272,7 @@ L_00070708:
     if ((!FZ&&(FS==FO))) goto L_000707B4;
 L_00070713:
     /* 00070713  mov eax,[ebp+0C8h] */
-    eax = M32((ebp+0xC8u));
+    eax = MB32(0xC8u);
     /* 00070719  or ecx,0FFFFFFFFh */
     { uint32_t a_ = ecx, b_ = 0xFFFFFFFFu; uint32_t r_ = (uint32_t)(a_ | b_); ecx = r_; }
     /* 0007071C  cmp eax,ecx */
@@ -1273,7 +1281,7 @@ L_00070713:
     if (FZ) goto L_00070794;
 L_00070720:
     /* 00070720  cmp word ptr [ebp+0D6h],0 */
-    { uint16_t a_ = M16((ebp+0xD6u)), b_ = 0x0u; FLAGS(XK_SUB, a_, b_, (uint16_t)(a_-b_), 16); }
+    { uint16_t a_ = MB16(0xD6u), b_ = 0x0u; FLAGS(XK_SUB, a_, b_, (uint16_t)(a_-b_), 16); }
     /* 00070728  jne near ptr 000707B4h */
     if (!FZ) goto L_000707B4;
 L_0007072E:
@@ -1350,7 +1358,7 @@ L_00070783:
     if (n70_ccj(cc, 0x44u, 'P')) goto L_000707B4;
 L_00070794:
     /* 00070794  cmp [ebp+170h],ecx */
-    { uint32_t a_ = M32((ebp+0x170u)), b_ = ecx; FLAGS(XK_SUB, a_, b_, (uint32_t)(a_-b_), 32); }
+    { uint32_t a_ = MB32(0x170u), b_ = ecx; FLAGS(XK_SUB, a_, b_, (uint32_t)(a_-b_), 32); }
     /* 0007079A  je short 000707ADh */
     if (FZ) goto L_000707AD;
 L_0007079C:
@@ -1404,13 +1412,13 @@ L_000707D8:
     PUSH(0x707E1u);
     CALL(48, f_000658D0, 0xb0, 0, 0, (ST_eax ST_ecx ST_edx ST_esp ST_fk ST_fa ST_fb ST_fr ST_fw ST_fco ST_foo ST_fsw ST_x7));
     /* 000707E1  fld dword ptr [ebp+144h] */
-    XS(7) = LDF((ebp+0x144u)); XD(7);
+    XS(7) = MBF(0x144u); XD(7);
     /* 000707E7  mov eax,ds:[2E3520h] */
     eax = K32(0x2E3520u);
     /* 000707EC  fmul dword ptr [eax+5Ch] */
     XS(7) = XS(7) * LDF((eax+0x5Cu)); XD(7);
     /* 000707EF  mov edx,[ebp+0D8h] */
-    edx = M32((ebp+0xD8u));
+    edx = MB32(0xD8u);
     /* 000707F5  lea esi,[ebp+0FCh] */
     esi = (ebp+0xFCu);
     /* 000707FB  lea edi,[esp+6Ch] */
@@ -1423,42 +1431,42 @@ L_000707D8:
     SSTF((esp+0x14u), XS(7));
     /* pop */
     /* 0007080B  fld dword ptr [ebp+148h] */
-    XS(7) = LDF((ebp+0x148u)); XD(7);
+    XS(7) = MBF(0x148u); XD(7);
     /* 00070811  fmul dword ptr [eax+60h] */
     XS(7) = XS(7) * LDF((eax+0x60u)); XD(7);
     /* 00070814  fstp dword ptr [esp+18h] */
     SSTF((esp+0x18u), XS(7));
     /* pop */
     /* 00070818  fld dword ptr [ebp+14Ch] */
-    XS(7) = LDF((ebp+0x14Cu)); XD(7);
+    XS(7) = MBF(0x14Cu); XD(7);
     /* 0007081E  fmul dword ptr [eax+64h] */
     XS(7) = XS(7) * LDF((eax+0x64u)); XD(7);
     /* 00070821  fstp dword ptr [esp+1Ch] */
     SSTF((esp+0x1Cu), XS(7));
     /* pop */
     /* 00070825  fld dword ptr [ebp+150h] */
-    XS(7) = LDF((ebp+0x150u)); XD(7);
+    XS(7) = MBF(0x150u); XD(7);
     /* 0007082B  fmul dword ptr [eax+68h] */
     XS(7) = XS(7) * LDF((eax+0x68u)); XD(7);
     /* 0007082E  fstp dword ptr [esp+20h] */
     SSTF((esp+0x20u), XS(7));
     /* pop */
     /* 00070832  fld dword ptr [ebp+154h] */
-    XS(7) = LDF((ebp+0x154u)); XD(7);
+    XS(7) = MBF(0x154u); XD(7);
     /* 00070838  fmul dword ptr [eax+5Ch] */
     XS(7) = XS(7) * LDF((eax+0x5Cu)); XD(7);
     /* 0007083B  fmul dword ptr [esp+10h] */
     XS(7) = XS(7) * SLDF((esp+0x10u)); XD(7);
     /* 0007083F  fld dword ptr [ebp+158h] */
-    XS(6) = LDF((ebp+0x158u)); XD(6);
+    XS(6) = MBF(0x158u); XD(6);
     /* 00070845  fmul dword ptr [eax+60h] */
     XS(6) = XS(6) * LDF((eax+0x60u)); XD(6);
     /* 00070848  fld dword ptr [ebp+15Ch] */
-    XS(5) = LDF((ebp+0x15Cu)); XD(5);
+    XS(5) = MBF(0x15Cu); XD(5);
     /* 0007084E  fmul dword ptr [eax+64h] */
     XS(5) = XS(5) * LDF((eax+0x64u)); XD(5);
     /* 00070851  fld dword ptr [ebp+160h] */
-    XS(4) = LDF((ebp+0x160u)); XD(4);
+    XS(4) = MBF(0x160u); XD(4);
     /* 00070857  fmul dword ptr [eax+68h] */
     XS(4) = XS(4) * LDF((eax+0x68u)); XD(4);
     /* 0007085A  mov [esp+4Ch],edx */
@@ -1473,11 +1481,11 @@ L_000707D8:
     /* 0007086C  mov ecx,[esp+0B0h] */
     ecx = SM32((esp+0xB0u));
     /* 00070873  fld dword ptr [ebp+0D8h] */
-    XS(4) = LDF((ebp+0xD8u)); XD(4);
+    XS(4) = MBF(0xD8u); XD(4);
     /* 00070879  push 0 */
     PUSH(0x0u);
     /* 0007087B  fmul dword ptr [ebp+0ECh] */
-    XS(4) = XS(4) * LDF((ebp+0xECu)); XD(4);
+    XS(4) = XS(4) * MBF(0xECu); XD(4);
     /* 00070881  mov [esp+9Ch],ecx */
     SW32((esp+0x9Cu), ecx);
     /* 00070888  mov dword ptr [esp+5Ch],3F800000h */
@@ -1553,14 +1561,14 @@ L_000707D8:
     /* 0007093C  fld dword ptr [eax+0C8h] */
     XS(7) = LDF((eax+0xC8u)); XD(7);
     /* 00070942  fmul dword ptr [ebp+0A0h] */
-    XS(7) = XS(7) * LDF((ebp+0xA0u)); XD(7);
+    XS(7) = XS(7) * MBF(0xA0u); XD(7);
     /* 00070948  fstp dword ptr [esp+4] */
     SSTF((esp+0x4u), XS(7));
     /* pop */
     /* 0007094C  fld dword ptr [eax+0C4h] */
     XS(7) = LDF((eax+0xC4u)); XD(7);
     /* 00070952  fmul dword ptr [ebp+9Ch] */
-    XS(7) = XS(7) * LDF((ebp+0x9Cu)); XD(7);
+    XS(7) = XS(7) * MBF(0x9Cu); XD(7);
     /* 00070958  fstp dword ptr [esp] */
     SSTF((esp), XS(7));
     /* pop */
@@ -1568,7 +1576,7 @@ L_000707D8:
     PUSH(0x70960u);
     UVCALL(49, 0u, 0xb0, 0, 0, (ST_eax ST_ecx ST_edx ST_ebx ST_esp ST_esi ST_edi ST_x4 ST_x5 ST_x6 ST_x7));
     /* 00070960  mov eax,[ebp+38h] */
-    eax = M32((ebp+0x38u));
+    eax = MB32(0x38u);
     /* 00070963  mov [esp+74h],eax */
     SW32((esp+0x74u), eax);
     /* 00070967  push 3 */
@@ -2236,17 +2244,17 @@ L_00070D12:
     /* 00070D12  xor ecx,ecx */
     { uint32_t a_ = ecx, b_ = ecx; uint32_t r_ = (uint32_t)(a_ ^ b_); ecx = r_; }
     /* 00070D14  mov cl,[ebp+28h] */
-    SET8L(ecx, M8((ebp+0x28u)));
+    SET8L(ecx, MB8(0x28u));
     /* 00070D17  shr cl,4 */
     SET8L(ecx, SHR8(R8L(ecx), 0x4u));
     /* 00070D1A  xor edx,edx */
     { uint32_t a_ = edx, b_ = edx; uint32_t r_ = (uint32_t)(a_ ^ b_); edx = r_; }
     /* 00070D1C  mov dl,[ebp+28h] */
-    SET8L(edx, M8((ebp+0x28u)));
+    SET8L(edx, MB8(0x28u));
     /* 00070D1F  xor eax,eax */
     { uint32_t a_ = eax, b_ = eax; uint32_t r_ = (uint32_t)(a_ ^ b_); eax = r_; }
     /* 00070D21  mov ax,[ebp+0D4h] */
-    SET16(eax, M16((ebp+0xD4u)));
+    SET16(eax, MB16(0xD4u));
     /* 00070D28  and ecx,0FFFFFF01h */
     { uint32_t a_ = ecx, b_ = 0xFFFFFF01u; uint32_t r_ = (uint32_t)(a_ & b_); ecx = r_; }
     /* 00070D2E  push ecx */
@@ -2280,7 +2288,7 @@ L_00070D12:
     PUSH(0x70D51u);
     CALL(60, f_00011BD0, 0xcc, 0, 0, (ST_edx ST_esp));
     /* 00070D51  mov cx,[ebp+0D6h] */
-    SET16(ecx, M16((ebp+0xD6u)));
+    SET16(ecx, MB16(0xD6u));
     /* 00070D58  add esp,4 */
     { uint32_t a_ = esp, b_ = 0x4u; uint32_t r_ = (uint32_t)(a_ + b_); esp = r_; }
     /* 00070D5B  call 0006F340h */
@@ -2311,18 +2319,18 @@ L_00070D12:
     PUSH(0x70D96u);
     CALL(63, f_0007A960, 0xb0, 0, 0, (ST_eax ST_ecx ST_edx ST_esp ST_esi));
     /* 00070D96  test byte ptr [ebp+28h],2 */
-    { uint8_t r_ = M8((ebp+0x28u)) & 0x2u; FLAGS(XK_LOGIC, 0, 0, r_, 8); }
+    { uint8_t r_ = MB8(0x28u) & 0x2u; FLAGS(XK_LOGIC, 0, 0, r_, 8); }
     /* 00070D9A  je near ptr 00070EAAh */
     if (FZ) goto L_00070EAA;
 L_00070DA0:
     /* 00070DA0  fld dword ptr [ebp+0D8h] */
-    XS(7) = LDF((ebp+0xD8u)); XD(7);
+    XS(7) = MBF(0xD8u); XD(7);
     /* 00070DA6  mov eax,ds:[2FC918h] */
     eax = K32(0x2FC918u);
     /* 00070DAB  fmul dword ptr [ebp+0ECh] */
-    XS(7) = XS(7) * LDF((ebp+0xECu)); XD(7);
+    XS(7) = XS(7) * MBF(0xECu); XD(7);
     /* 00070DB1  mov edx,[ebp+0D8h] */
-    edx = M32((ebp+0xD8u));
+    edx = MB32(0xD8u);
     /* 00070DB7  push eax */
     PUSH(eax);
     /* 00070DB8  mov eax,ds:[2E3520h] */
@@ -2357,7 +2365,7 @@ L_00070DA0:
     /* 00070E1A  fld dword ptr [eax+0C8h] */
     XS(7) = LDF((eax+0xC8u)); XD(7);
     /* 00070E20  fmul dword ptr [ebp+0A0h] */
-    XS(7) = XS(7) * LDF((ebp+0xA0u)); XD(7);
+    XS(7) = XS(7) * MBF(0xA0u); XD(7);
     /* 00070E26  push 0 */
     PUSH(0x0u);
     /* 00070E28  push 0 */
@@ -2374,7 +2382,7 @@ L_00070DA0:
     /* 00070E3D  lea edi,[esp+84h] */
     edi = (esp+0x84u);
     /* 00070E44  fmul dword ptr [ebp+9Ch] */
-    XS(7) = XS(7) * LDF((ebp+0x9Cu)); XD(7);
+    XS(7) = XS(7) * MBF(0x9Cu); XD(7);
     /* 00070E4A  lea ebx,[esp+74h] */
     ebx = (esp+0x74u);
     /* 00070E4E  lea esi,[ebp+0FCh] */
@@ -2386,7 +2394,7 @@ L_00070DA0:
     PUSH(0x70E5Cu);
     UVCALL(64, 1u, 0xb0, 0, 0, (ST_eax ST_ecx ST_edx ST_ebx ST_esp ST_esi ST_edi ST_fk ST_fa ST_fb ST_fr ST_fw ST_fco ST_foo ST_x7));
     /* 00070E5C  mov ecx,[ebp+38h] */
-    ecx = M32((ebp+0x38u));
+    ecx = MB32(0x38u);
     /* 00070E5F  push 3 */
     PUSH(0x3u);
     /* 00070E61  lea edx,[esp+50h] */
@@ -2743,12 +2751,61 @@ static int n70_verify(xctx *c, unsigned cfg)
     return 1;
 }
 
+#ifndef __vita__
+/* Host harness only: XV_NATIVE_70110_CAPTURE=<file>[:n[:skip]] writes the page table once, then n entry states (after
+ * skipping `skip` calls): the context and every guest block the body reads - the frame window, the material ([E+4],
+ * 0x180), the render context ([2E3520], 0xD0), its light table ([S+84], 60), its [S+A8] record and [S+B0] array, the
+ * vectors at [2E3508] and [232F6C], the word at [E+18h], the globals page 0x2E3000, the camera page 0x2FC000 and the
+ * constants 0x1F0A00.. - for tools/tests/native_70110.c --replay (with its callee and HLE stand-ins). Captures are game
+ * memory: private, not for the repository. One call at a time (a host diagnostic; not built for the Vita). */
+static void n70_cap_block(FILE *f, const n70_env *e, uint32_t a, uint32_t len)
+{
+    if (!a || len > 0x2000u) { const uint32_t z[2] = { 0, 0 }; fwrite(z, 4, 2, f); return; }   /* an absent block */
+    uint8_t buf[0x2000]; for (uint32_t i = 0; i < len; ++i) buf[i] = *N70_H(e, a + i);
+    fwrite(&a, 4, 1, f); fwrite(&len, 4, 1, f); fwrite(buf, 1, len, f);
+}
+static void n70_capture(xctx *c)
+{
+    static int state = -1; static FILE *f; static unsigned left, skip, busy;
+    if (state == 0) return;
+    if (__atomic_exchange_n(&busy, 1u, __ATOMIC_ACQUIRE)) return;
+    if (state < 0) {
+        const char *e = getenv("XV_NATIVE_70110_CAPTURE"); state = 0;
+        if (e) {
+            char path[512]; snprintf(path, sizeof path, "%s", e); char *p = strchr(path, ':'); left = 2000;
+            if (p) { *p++ = 0; left = (unsigned)atoi(p); char *q = strchr(p, ':'); if (q) skip = (unsigned)atoi(q + 1); }
+            f = fopen(path, "wb");
+            if (f) { const uint32_t hdr[3] = { 0x4337304Eu, 1u << 20, (uint32_t)sizeof(xctx) }; fwrite(hdr, sizeof hdr, 1, f); fwrite(N70_XPT, 4, 1u << 20, f); state = 1; }
+        }
+    }
+    if (state == 1 && skip) skip--;
+    else if (state == 1 && left) {
+        n70_env e; memset(&e, 0, sizeof e); e.ram = g_xram; e.pt = N70_XPT;
+        const uint32_t E = c->r[4], M = *(uint32_t *)N70_H(&e, E + 4u), S = *(uint32_t *)N70_H(&e, 0x2E3520u);
+        uint32_t nb = 13; fwrite(c, sizeof *c, 1, f); fwrite(&nb, 4, 1, f);
+        n70_cap_block(f, &e, E - N70_WLO, N70_WSIZE); n70_cap_block(f, &e, M, 0x180); n70_cap_block(f, &e, S, 0xD0);
+        n70_cap_block(f, &e, S ? *(uint32_t *)N70_H(&e, S + 0x84u) : 0, 60);
+        n70_cap_block(f, &e, S ? *(uint32_t *)N70_H(&e, S + 0xA8u) : 0, 0x30);
+        n70_cap_block(f, &e, S ? *(uint32_t *)N70_H(&e, S + 0xB0u) : 0, 16);
+        n70_cap_block(f, &e, *(uint32_t *)N70_H(&e, 0x2E3508u), 16); n70_cap_block(f, &e, *(uint32_t *)N70_H(&e, 0x232F6Cu), 12);
+        n70_cap_block(f, &e, *(uint32_t *)N70_H(&e, E + 0x18u), 2);
+        n70_cap_block(f, &e, 0x2E3000u, 0x1000); n70_cap_block(f, &e, 0x2FC000u, 0x1000); n70_cap_block(f, &e, 0x1F0A00u, 0x100);
+        n70_cap_block(f, &e, 0x18F000u, 0x1000);
+        if (!--left) { fclose(f); f = NULL; state = 0; XK_LOG("[native-70110] capture written\n"); }
+    }
+    __atomic_store_n(&busy, 0u, __ATOMIC_RELEASE);
+}
+#endif
+
 /* The hook (tools/patch_native_70110_hooks.py): f_00070110 is `if (!xv_native_70110(c, cfg)) f_00070110_body(c);`.
  * Returns 0 - the translation runs - when off (without timing) and when declined; else the call is done. */
 int xv_native_70110(xctx *c, unsigned cfg)
 {
     int mode = n70_mode();
     if (xv_rec_ab_active() && xv_rec_opt_ab(&n70_ab_opt)) mode = xv_rec_ab_phase ? 2 : 0;
+#ifndef __vita__
+    { static int cap = -1; if (cap < 0) cap = getenv("XV_NATIVE_70110_CAPTURE") != NULL; if (cap) n70_capture(c); }
+#endif
     const int timed = __atomic_load_n(&n70_timing, __ATOMIC_RELAXED);
     if (mode == 0) {
         if (!timed) return 0;
