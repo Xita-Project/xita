@@ -282,6 +282,10 @@ static uint64_t stuck_logged_at;
  * inline-answered yields (a yield-spin on a streamed resource) and proxied kernel calls, and the timed-function chain
  * when XV_SCENE_PHASES=1; after the join, the scene's own duration. */
 static uint64_t notice_us, pre_go_us, join_exit_us; static unsigned notice_n, pre_go_n;
+/* Owner-only, sampled after consuming done: separate useful owner overlap from
+ * completion recognition while inside join. Neither is a pure scheduler counter. */
+static uint64_t notice_before_join_us, notice_in_join_us;
+static unsigned notice_before_join_n;
 static uint64_t join_park_us, join_park_max_us; static unsigned join_parks, join_hostwaits;   /* owner join: parked time, longest park, host-wait wakes */
 static uint64_t slow_t_dispatch; static volatile uint64_t slow_t_end; static unsigned slow_yields_dispatch, slow_proxied_dispatch, slow_dispatch_serial, slow_logged_serial, slow_logs; static int slow_ms = -1;
 /* Scene timeout (XV_SCENE_ABANDON_MS, default 2500; 0 off): a scene still running that long on the helper under the
@@ -386,7 +390,19 @@ static void join(unsigned *counter)
           } else xk_sleep_us(200);
           uint64_t pd_ = xk_os_monotonic_us() - ps_; join_park_us += pd_; join_parks++; if (pd_ > join_park_max_us) join_park_max_us = pd_;
           stuck_check(t0); slow_check(); } }
-    { uint64_t now_ = xk_os_monotonic_us(); if (slow_t_end && now_ > slow_t_end && now_ - slow_t_end < 1000000u) { notice_us += now_ - slow_t_end; notice_n++; } join_exit_us = now_; }
+    { uint64_t now_ = xk_os_monotonic_us();
+      /* done was consumed above, so the helper's end timestamp is published.
+       * Do not read it at join entry while the helper may still be writing it. */
+      if (slow_t_end && now_ > slow_t_end && now_ - slow_t_end < 1000000u) {
+          uint64_t before_ = slow_t_end < t0 ? t0 - slow_t_end : 0;
+          uint64_t total_ = now_ - slow_t_end;
+          if (before_ > total_) before_ = total_; /* defensive clock-order bound */
+          notice_us += total_; notice_n++;
+          notice_before_join_us += before_;
+          notice_in_join_us += total_ - before_;
+          notice_before_join_n += before_ != 0;
+      }
+      join_exit_us = now_; }
     slow_finish();   /* the proxy fiber services the helper's kernel calls; the owner only parks so the scheduler runs it and the streaming fibers */   /* 200 us (proxied kernel calls wait here): a 100 us poll kept the owner core at ~95% and starved the runtime's remote thread (perf88) */
     uint64_t dt = xk_os_monotonic_us() - t0; wait_us += dt; if (dt > wait_max_us) wait_max_us = dt;
     in_flight = 0; in_flight_overlapped = 0; depth = 0; (*counter)++;
@@ -536,6 +552,10 @@ void xv_scene_thread_report(unsigned frames)
           XK_LOG("[scene-thread] owner join: %.2f parks/frame, parked %.2f ms/frame, longest park %.2f ms, host-wait wakes %u\n",
               (double)join_parks / frames, (double)join_park_us / frames / 1000.0, join_park_max_us / 1000.0, join_hostwaits);
           join_parks = join_hostwaits = 0; join_park_us = join_park_max_us = 0;
+          XK_LOG("[scene-join-notice] %u completions: before join %.2f ms (%u already finished), inside join %.2f ms; same-sample split of done->noticed, not isolated scheduler cost\n",
+              notice_n, notice_n ? (double)notice_before_join_us / notice_n / 1000.0 : 0.0,
+              notice_before_join_n, notice_n ? (double)notice_in_join_us / notice_n / 1000.0 : 0.0);
+          notice_before_join_us = notice_in_join_us = 0; notice_before_join_n = 0;
           notice_us = pre_go_us = 0; notice_n = pre_go_n = 0;
           last_run = run; } }
     scene_wall_us = 0; scene_wall_n = 0;
