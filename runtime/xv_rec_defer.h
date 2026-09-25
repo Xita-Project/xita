@@ -77,7 +77,7 @@ typedef struct { rd_hdr h; uint32_t value, frame; } rd_value;   /* RD_FRAME / RD
 
 static xv_rq rd_q;                            /* producer: the scene helper; consumer: the worker */
 static SceUID rd_thread = -1;
-static int rd_started, rd_failed, rd_spin_us;
+static int rd_started, rd_failed, rd_spin_us, rd_worker_timing;
 static unsigned rd_draw_seq;
 static rd_draw *rd_last_draw;                  /* verify: the queued record of the draw being recorded inline */
 /* helper-side mirrors (producer thread only) */
@@ -143,7 +143,7 @@ static int rd_worker(SceSize args, void *argp)
             rd_hdr *h = (rd_hdr *)xv_rq_at(&rd_q, &tail, head);
             if (!h) { if (tail != rd_q.tail) xv_rq_release(&rd_q, tail); break; }
             if (h->mode == 1 && !__atomic_load_n(&rd_q.want, __ATOMIC_ACQUIRE)) break;   /* verify: only at a drain */
-            uint64_t t0 = rd_now();
+            uint64_t t0 = rd_worker_timing ? rd_now() : 0;
             if (h->mode == 1) {   /* verify: the whole pending batch into the shadow list while the helper waits */
                 rd_verify_batch_begin();
                 do { rd_process(h); tail += h->bytes; } while ((h = (rd_hdr *)xv_rq_at(&rd_q, &tail, head)) != NULL);
@@ -151,8 +151,9 @@ static int rd_worker(SceSize args, void *argp)
             } else {
                 rd_process(h); tail += h->bytes;
             }
+            /* A drained tail permits the owner to report/reset statistics. */
+            if (rd_worker_timing) rd_stat_worker_us += rd_now() - t0;
             xv_rq_release(&rd_q, tail);
-            rd_stat_worker_us += rd_now() - t0;
         }
         if (rd_spin_us && xv_rq_empty(&rd_q) && !__atomic_load_n(&rd_q.want, __ATOMIC_ACQUIRE)) {   /* XV_REC_DEFER_SPIN_US: poll before sleeping (not with verify records waiting) */
             uint64_t t0 = rd_now(); int work = 0;
@@ -173,6 +174,7 @@ static int rd_start(void)
     while (bytes < kib * 1024u && bytes < (1u << 26)) bytes <<= 1;
     e = getenv("XV_REC_DEFER_BATCH"); int batch = e ? atoi(e) : 1; rd_q.batch = batch < 1 ? 1u : (unsigned)batch;
     e = getenv("XV_REC_DEFER_TIMING"); rd_timing = e ? atoi(e) : 0;   /* the helper's queueing time (two clock reads per draw) */
+    e = getenv("XV_REC_WORKER_TIMING"); rd_worker_timing = e && atoi(e) != 0;
     e = getenv("XV_REC_DEFER_SPIN_US"); rd_spin_us = e ? atoi(e) : 0;   /* the worker polls this long before sleeping (fewer wake syscalls) */
     if (rd_spin_us < 0) rd_spin_us = 0;
     rd_q.ring = malloc(bytes); rd_q.size = bytes;
@@ -644,12 +646,13 @@ void xv_rec_defer_report(unsigned frames)
     XV_LOG("[rec-defer] %u frames: %u draws %u events queued (%.1f KiB/frame, high %u KiB, %u full waits), %u inline draws; "
            "helper %.2f ms/frame queueing; worker %.2f ms/frame busy; drains %u (%u waited, %.2f ms/frame); verify draws %u streams %u; "
            "per frame: %.0f constant rows, %.1f full syncs, %.1f combiner and %.1f attribute sets, %.0f indices copied, %.0f read in place (tag data); "
-           "errors (session): object slot/matrix %u, tag data rewritten %u\n",
+           "errors (session): object slot/matrix %u, tag data rewritten %u; worker timing %s\n",
         frames, rd_stat_draws, rd_stat_events, (double)rd_q.bytes_published / 1024.0 / frames, rd_q.high >> 10, rd_q.full_waits,
         rd_stat_inline_draws, (double)rd_stat_helper_us / 1000.0 / frames, (double)rd_stat_worker_us / 1000.0 / frames,
         rd_q.drains, rd_q.drains_busy, (double)rd_stat_drain_us / 1000.0 / frames, rd_v_draws, rd_v_streams,
         (double)rd_stat_rows / frames, (double)rd_stat_fullrows / frames, (double)rd_stat_psc / frames, (double)rd_stat_attr / frames,
-        (double)rd_stat_idx / frames, (double)rd_stat_tag_idx / frames, rd_stat_slot_mismatch + rd_stat_matrix_mismatch, rd_stat_tag_gen_changed);
+        (double)rd_stat_idx / frames, (double)rd_stat_tag_idx / frames, rd_stat_slot_mismatch + rd_stat_matrix_mismatch, rd_stat_tag_gen_changed,
+        rd_worker_timing ? "enabled" : "disabled");
     rd_stat_tag_idx = 0;
     rd_stat_psc = rd_stat_attr = rd_stat_fullrows = 0; rd_stat_rows = rd_stat_idx = 0;
     rd_stat_draws = rd_stat_events = rd_stat_inline_draws = 0; rd_q.drains = rd_q.drains_busy = rd_q.full_waits = 0;

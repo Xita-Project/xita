@@ -236,6 +236,7 @@ level.
 | `XV_REC_DEFER_CORE` | 0 | worker core (0, 1, 2) |
 | `XV_REC_DEFER_PRIO` | +1 | worker priority relative to the helper |
 | `XV_REC_DEFER_TIMING` | 0 | 1: the report adds the helper's queueing time (two clock reads per draw) |
+| `XV_REC_WORKER_TIMING` | 0 | 1: measure worker elapsed time using two clock reads per record (per batch in verify mode) |
 | `XV_REC_AB_KNOBS` | | e.g. `XV_REC_DEFER`: `XV_REC_AB` alternates only this knob |
 
 The report is printed by the owner every 60 frames. Below are the lines from the a30 pod on the Pi (`ab3`, mode 2)
@@ -249,7 +250,11 @@ and from `vx86-a30f` (mode 1):
 [rec-verify] XV_REC_DEFER mode 1: 60 frames 76282 checks 0 mismatches (session 37206714 checks 0 mismatches)
 ```
 
-`helper ... queueing` stays 0 unless `XV_REC_DEFER_TIMING=1`. In verify mode, each mismatch also prints a detail line,
+`helper ... queueing` stays 0 unless `XV_REC_DEFER_TIMING=1`. Worker time stays 0
+unless `XV_REC_WORKER_TIMING=1`; the report explicitly labels disabled timing.
+Zero in that case means unmeasured, not free work. Older builds measured worker
+time unconditionally. These elapsed times include preemption, not just CPU work.
+In verify mode, each mismatch also prints a detail line,
 with a bounded count per frame, for example `[rec-verify] XV_REC_DEFER mismatch frame 13 draw 5 (inline cmd 6):
 fog_color 0/1`.
 
