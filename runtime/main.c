@@ -1790,6 +1790,24 @@ static int xv_pump_thread(SceSize args, void *argp)
 {
     (void)args; (void)argp;
     XV_LOG("pump: triple slots, fragment notification retirement; configured queue mode; requested core 1\n");
+    /* Opt-in scheduling trial: preserve the existing priority by default. */
+    {
+        const char *e = getenv("XV_PUMP_PRIORITY_DELTA");
+        int delta = e ? atoi(e) : 0;
+        if (delta < -16) delta = -16;
+        if (delta > 16) delta = 16;
+        if (delta) {
+            int before = sceKernelGetThreadCurrentPriority();
+            if (before >= 0 && before <= 255) {
+                int after = before + delta;
+                if (after < 64) after = 64;
+                if (after > 191) after = 191;
+                int rc = sceKernelChangeThreadPriority(sceKernelGetThreadId(), after);
+                XV_LOG("[core-plan] pump priority requested %d -> %d, result %08X; audio priority unchanged\n",
+                    before, after, (unsigned)rc);
+            }
+        }
+    }
     xv_cpu_log_thread("render-pump");
     { const char *e = getenv("XV_SUBMIT_CPU"); xv_submit_cpu_enabled = e && atoi(e) != 0; }
     { const char *e = getenv("XV_SCENE_WAIT_TARGET"); g_submit_sample_enabled = e && !strcmp(e, "pump"); }

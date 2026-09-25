@@ -409,6 +409,29 @@ def benchmark(client, out, runs, timeout, kind=None):
             pass
 
 
+def env_batches(pairs):
+    """Validate before mutation; old device builds accept only 511 query bytes."""
+    batches = []
+    current = []
+    used = 0
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,46}", key):
+            raise ValueError("Environment keys must be identifiers of at most 47 characters")
+        if any(ord(c) < 33 or ord(c) > 126 or c == "&" for c in pair):
+            raise ValueError("Environment pairs must be ASCII without whitespace or '&'")
+        size = len(pair)
+        if size > 511:
+            raise ValueError("One environment pair exceeds the device's 511-byte limit")
+        if current and used + 1 + size > 511:
+            batches.append("&".join(current)); current = []; used = 0
+        used += size + bool(current)
+        current.append(pair)
+    if current:
+        batches.append("&".join(current))
+    return batches
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, help="Private remote-client.json pairing file")
@@ -481,7 +504,8 @@ def main():
         data = args.local.read_bytes(); client.request("/put?name=" + args.name, "POST", body=data)
         print("put", args.name, len(data), "bytes")
     elif args.command == "env":
-        client.request("/env?" + "&".join(args.pairs), "POST")
+        for batch in env_batches(args.pairs):
+            client.request("/env?" + batch, "POST")
         print("env set:", " ".join(args.pairs))
     elif args.command == "screen":
         print(json.dumps(client.screen(args.output)))

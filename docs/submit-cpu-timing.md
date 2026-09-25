@@ -47,3 +47,16 @@ Sampler counters and wait-object records use a non-blocking try-lock. A busy
 sampler skips that observation; a busy reporter defers reporting. The reporter
 copies and resets counters under the lock, then resolves names and formats logs
 after release. It does not hold the lock across kernel queries or output.
+
+## Pump priority trial
+
+`XV_PUMP_PRIORITY_DELTA` defaults to zero (no change). An explicit value is
+bounded to -16 through +16; the resulting native priority is bounded to
+64 through 191. Negative values increase scheduling priority. The pump changes
+its own priority once at startup and logs the request, result and actual thread
+information. Other workers and audio keep their priorities.
+
+The proposed -12 trial follows perf220 pod sampling: roughly 59% READY versus
+1% WAITING in the captured eight windows. This supports testing earlier
+submission; it does not guarantee a frame-time improvement. Check recording
+drain time, scene time and complete frame intervals for a shifted bottleneck.

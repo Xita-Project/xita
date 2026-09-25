@@ -251,3 +251,14 @@ Even range-only logging perturbs that frame. Use its source/index records to
 identify work, not to compare FPS or claim ordinary-gameplay timing. A separately
 enabled full histogram adds hashing and excludes packed vertices as before.
 Pull the log after the completion marker.
+
+### Environment request size
+
+The `env` client command validates all pairs before sending them and splits
+requests into batches of at most 511 query bytes, preserving order. Earlier
+device versions silently truncated longer requests, potentially dropping the
+last setting despite the client printing success. The updated device endpoint
+rejects oversized requests rather than truncating them. Use the updated client
+with older devices as well. Batches are sequential, not transactional; if a
+request fails, do not launch until settings have been reapplied successfully.
+Check startup `[remote] env` lines for the settings used in a measurement.

@@ -295,7 +295,8 @@ static void serve(int s)
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/env?",5)) {
             /* Set process environment variables before the game starts (diagnostic knobs read at
              * configure time); K=V pairs joined by '&', no decoding. */
-            char vars[512];strncpy(vars,target+5,sizeof vars-1);vars[sizeof vars-1]=0;
+            if(strlen(target+5)>=512) {reply(s,400,"Environment query exceeds 511 bytes\n");return;}
+            char vars[512];strcpy(vars,target+5);
             unsigned n=0;
             for(char *tok=strtok(vars,"&");tok;tok=strtok(NULL,"&")) {
                 char *eq=strchr(tok,'=');if(!eq||eq==tok)continue;*eq=0;
