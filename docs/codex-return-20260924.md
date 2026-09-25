@@ -55,3 +55,11 @@ Corrected Pi run codex-menu2-20260924 completed (planned timeout rc124, 72 repor
 ## September 25 — user saved and quit; hardware work resumed
 
 User explicitly confirmed physical Save and Quit and requested autonomous work while away. Captured a fresh 15-file udata/tdata backup in ../isolated-save-candidate/save-after-quit-20260925 before updating. Applying perf211 via verified code-only updater; deploy-20260925.log receipt pending. Previous restart blocker is cleared. Keep-awake refresher remains active. Do not use earlier test-slot files as the newest player checkpoint: they are deliberately the preceding isolated test baseline.
+
+## perf211 installed and hardware native verification
+
+Updater completed: executable 468598e9483595e09bc45f4ce452a217b4511e3fa01bcd80d5916cdd8b95dba7 verified, slot1 boot confirmed; status reports perf211. Startup explicitly confirms isolated save root ux0:data/xita/test-saves/a30-perf211. Normal user saves were not used by this run.
+
+Ordinary scripted a30 launch reached the lifepod (verify-a30.png). Combined mode1 checked 50,689 material calls / 3,083,712 tapped segments and 1,021,677 effects calls with zero reported mismatches. Eleven effects calls were excluded as callee-diverged: the 80360 texture-load callee changed cache residency between passes. This is not verification of those eleven calls. Zero-mismatch coverage is for this observed scene/run, not all gameplay. Verification deliberately runs both paths and its frame times are not performance results. Private receipts: isolated-save-candidate/perf211-verify-complete.log and verify-summary.json.
+
+Started perf211-fast-20260925: same isolated root, material mode2, effects mode2 with default five fast functions explicitly listed, deferred recording off, scene/HLE timing off. Await settled scene-qualified hardware measurements. Keep-awake lease refresher remains running.
