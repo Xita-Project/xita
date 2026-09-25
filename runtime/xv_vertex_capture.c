@@ -99,6 +99,8 @@ static capture_job *cap_jobs;
 static unsigned cap_used,cap_retired;
 static unsigned cap_submitted,cap_completed; /* atomic publication counters */
 static int cap_stopping,cap_unavailable,cap_enabled=-1;
+static int cap_partial_wait=-1;
+static unsigned cap_partial_waits;
 static unsigned cap_jobs_total,cap_drains,cap_pressure,cap_failures,cap_max_pending;
 static unsigned cap_masks_copied,cap_masks_omitted;
 /* Mutually exclusive pressure causes, captured before drain changes ownership. */
@@ -366,6 +368,10 @@ static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned packed,
 }
 #endif
 
+#if !XV_VERTEX_CAPTURE_REUSE
+#define cap_census_note(src,bytes) ((void)0)
+#endif
+
 static void cap_execute(capture_job *job)
 {
     xv_vertex_prepare_batch *b=&job->batch;b->ok=0;
@@ -510,6 +516,31 @@ static void cap_collect(void)
         cap_retired++;
     }
 }
+/* Queue-only backpressure does not retire the upload slot or snapshot arena.
+ * Wait for at least one completed job, then publish its callbacks in FIFO order.
+ * All lifetime boundaries still use the full drain below. */
+static void cap_wait_for_slot(void)
+{
+    unsigned retired=cap_retired;
+    uint64_t start=cap_clock();cap_partial_waits++;
+    for(;;) {
+#if XV_VERTEX_CAPTURE_NOTIFY
+        __atomic_exchange_n(&cap_waiting,1,__ATOMIC_ACQ_REL);
+        XV_CAPTURE_NOTIFY_POINT(CAP_DRAIN_ARMED);
+#endif
+        if(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)!=retired)break;
+#if XV_VERTEX_CAPTURE_NOTIFY
+        XV_CAPTURE_NOTIFY_POINT(CAP_DRAIN_WAIT);
+#endif
+        unsigned bits;SceUInt timeout=1000;
+        if(sceKernelWaitEventFlag(cap_done,1,SCE_EVENT_WAITOR|SCE_EVENT_WAITCLEAR_PAT,&bits,&timeout)<0)
+            sceKernelDelayThread(100);
+    }
+#if XV_VERTEX_CAPTURE_NOTIFY
+    __atomic_exchange_n(&cap_waiting,0,__ATOMIC_ACQ_REL);
+#endif
+    cap_collect();cap_join_us+=cap_clock()-start;
+}
 void xv_vertex_capture_drain(void)
 {
     unsigned submitted=__atomic_load_n(&cap_submitted,__ATOMIC_RELAXED);
@@ -623,7 +654,13 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         else if(queue_full)cap_pressure_queue++;
         else cap_pressure_arena++;
         cap_capture_us+=cap_clock()-start;
-        cap_pressure++;xv_vertex_capture_drain();
+        cap_pressure++;
+        if(cap_partial_wait<0)
+            cap_partial_wait=xv_quality_int("XV_CAPTURE_PARTIAL_WAIT",0,0,1);
+        if(cap_partial_wait && queue_full && !arena_full &&
+           worst_required<=XV_VERTEX_CAPTURE_BYTES-cap_used) {
+            cap_wait_for_slot();
+        } else xv_vertex_capture_drain();
         if(worst_required>XV_VERTEX_CAPTURE_BYTES-cap_used) {
             /* Drain callbacks can change sources, so re-probing must have room
              * for a full miss, even if the earlier reservation had reuse hits.
@@ -823,6 +860,9 @@ void xv_vertex_capture_report(unsigned frames)
     cap_metadata_full=0;
 #endif
     cap_jobs_total=cap_drains=cap_pressure=cap_max_pending=cap_failures=0;
+    xv_logf("[vertex-capture-partial] %u frames: enabled %d queue-slot waits %u; full lifetime drains retained\n",
+        frames,cap_partial_wait,cap_partial_waits);
+    cap_partial_waits=0;
     cap_bytes=cap_capture_us=cap_worker_us=cap_join_us=0;
     if(cap_masks_copied || cap_masks_omitted)
         xv_logf("[vertex-capture-masks] %u frames: %u sparse masks copied / %u unused masks omitted; %llu KiB metadata writes avoided\n",

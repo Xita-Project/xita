@@ -397,8 +397,34 @@ static void queue_capacity_size(unsigned bytes)
 }
 static void queue_capacity(void)
 {
-    queue_capacity_size(32);queue_capacity_size(4096);
+    cap_partial_wait=0;queue_capacity_size(32);queue_capacity_size(4096);
+    cap_partial_wait=1;queue_capacity_size(32);queue_capacity_size(4096);
+    cap_partial_wait=-1;
 }
+#if XV_VERTEX_CAPTURE_NOTIFY
+static void queue_partial_boundary(void)
+{
+    unsigned char src[32]={0};output out[33]={0};
+    cap_partial_wait=1;
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    for(unsigned i=0;i<32;i++){src[0]=i;assert(capture(0,src,sizeof src,4,NULL,0,&out[i]));}
+    wait_parked(&parked_capture);
+    unsigned initial_retired=cap_retired;
+    gate(CAP_AFTER_COMPLETE);
+    pthread_t releaser;assert(!pthread_create(&releaser,NULL,release_capture,NULL));
+    src[0]=32;assert(capture(0,src,sizeof src,4,NULL,0,&out[32]));
+    assert(!pthread_join(releaser,NULL));
+    /* Worker is parked after exactly one completion. Submission must have
+     * returned without waiting for the other 31 or reusing their snapshots. */
+    assert(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)==initial_retired+1);
+    assert(cap_retired==initial_retired+1 && cap_submitted-cap_retired==32);
+    assert(out[0].callbacks==1 && out[1].callbacks==0 && out[32].callbacks==0);
+    assert(cap_used==33*32);
+    ungate(CAP_AFTER_COMPLETE);join(0);
+    for(unsigned i=0;i<33;i++)assert(out[i].ok&&out[i].callbacks==1&&out[i].result[0][0]==i);
+    cleanup();cap_partial_wait=-1;
+}
+#endif
 static void partial_failure_and_fallback(void)
 {
     unsigned char src[32]={0};output o={0};
@@ -562,7 +588,7 @@ static void capture_reuse_sparse(void)
     output a={0},b={0},c={0},d={0};
     __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
     assert(capture(0,guest,sizeof guest,32,&refs,0,&a));wait_parked(&parked_capture);
-    assert(capture(0,guest,sizeof guest,32,&refs,0,&b));assert(cap_used==65536 && !cap_entry_count);
+    assert(capture(0,guest,sizeof guest,32,&refs,0,&b));assert(cap_used==32768 && cap_entry_count==1); /* CPU snapshot reused; masks remain per-job. */
     memset(guest+512*32,0x91,32);xv_vertex_refs_add(&refs,512);
     assert(capture(0,guest,sizeof guest,32,&refs,0,&c));
     /* Full validation after sparse reuse must not reuse a stale hole. */
@@ -570,7 +596,9 @@ static void capture_reuse_sparse(void)
     memset(guest,0xef,sizeof guest);memset(&refs,0,sizeof refs);
     __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);
     assert(a.ok&&b.ok&&c.ok&&d.ok && a.result[0]==b.result[0]);
-    assert(a.result[0][512*32]==0x33 && c.result[0][512*32]==0x91 && d.result[0][512*32]==0x91);
+    assert(a.result[0][0]==0x33 && a.result[0][1023*32]==0x33);
+    /* Sparse holes are deliberately unspecified; newly referenced rows must match. */
+    assert(c.result[0][512*32]==0x91 && d.result[0][512*32]==0x91);
     cleanup();
 }
 static void wait_prepared(void)
@@ -1057,7 +1085,11 @@ int main(void)
     notification_races();
 #endif
     private_inputs();sparse_and_packed();unused_mask_lifetime();pressure_and_wrap();failure_cases();
-    queue_capacity();partial_failure_and_fallback();gpu_copy_lifetime();
+    queue_capacity();
+#if XV_VERTEX_CAPTURE_NOTIFY
+    queue_partial_boundary();
+#endif
+    partial_failure_and_fallback();gpu_copy_lifetime();
 #if XV_VERTEX_CAPTURE_PACKED
     compact_versions();compact_pressure_and_retirement();
     puts("PASS: compact staging halves payload; tail/prefix mutations, unmapped input, shorter reuse, raw/packed cache interoperation, nine retired generations, invalid requests and startup disable");
