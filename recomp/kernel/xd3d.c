@@ -1839,6 +1839,16 @@ static void ds_pump_all(xctx *c) { for (int i = 0; i < DS_MAX_STREAMS; ++i) if (
 /* debug: detect a stream object whose vtable word got clobbered (called from the scheduler) */
 void xd3d_ds_check(const char *where, uint32_t eip)
 {
+    /* The scheduler also calls this diagnostic on every yield. Keep the
+     * 128-slot scan opt-in there, just as it is at HLE entry. Presence (even
+     * "0") preserves the existing XV_DS_CHECK convention. */
+    static int enabled = -1;
+    int check = __atomic_load_n(&enabled, __ATOMIC_RELAXED);
+    if (check < 0) {
+        check = getenv("XV_DS_CHECK") != NULL;
+        __atomic_store_n(&enabled, check, __ATOMIC_RELAXED);
+    }
+    if (!check) return;
     static int reported;
     if (reported) return;
     for (int i = 0; i < DS_MAX_STREAMS; ++i) if (g_ds_streams[i].obj && X_M32(g_ds_streams[i].obj) != DS_STREAM_VTBL) {
