@@ -26,3 +26,24 @@ The private fixture checks disabled-call behavior, known elapsed/CPU totals,
 invalid samples and report-window reset. The Vita build must additionally be
 qualified against real kernel counters. Diagnostic timings are not a clean
 performance baseline.
+
+## Pump wait sampling
+
+`XV_SCENE_WAIT_SAMPLE=1 XV_SCENE_WAIT_TARGET=pump` redirects the existing
+500-microsecond sampler to the pump only while it is inside frame submission.
+The default target remains the scene helper. Pump samples label their target
+`pump-submit`; running/ready/waiting percentages are sampled states, not exact
+time attribution. Wait-object names help distinguish driver waits from ready
+threads awaiting scheduling.
+
+Pump mode runs the sampler on core 1 when the pump is on core 0, otherwise on
+core 0. Sampling on the target's own core would preempt it and bias running
+samples toward READY. This diagnostic changes sampler placement and adds
+measurement overhead; do not interpret its FPS as a clean optimization result.
+Short submissions and transitions may be undersampled. The phase check rejects
+samples when submission ends during the query.
+
+Sampler counters and wait-object records use a non-blocking try-lock. A busy
+sampler skips that observation; a busy reporter defers reporting. The reporter
+copies and resets counters under the lock, then resolves names and formats logs
+after release. It does not hold the lock across kernel queries or output.

@@ -1781,6 +1781,10 @@ static int xv_pump_retire(void)
 }
 /* Core 1 owns all GXM submission. It can submit another packet while the prior
  * notification is pending; it polls fences while display slots/pacing are busy. */
+static int g_submit_sample_enabled;
+static int g_submit_sample_thread = -1;
+int xv_pump_submit_thread(void)
+{ return __atomic_load_n(&g_submit_sample_thread, __ATOMIC_ACQUIRE); }
 #include "xv_submit_cpu.h"
 static int xv_pump_thread(SceSize args, void *argp)
 {
@@ -1788,6 +1792,7 @@ static int xv_pump_thread(SceSize args, void *argp)
     XV_LOG("pump: triple slots, fragment notification retirement; configured queue mode; requested core 1\n");
     xv_cpu_log_thread("render-pump");
     { const char *e = getenv("XV_SUBMIT_CPU"); xv_submit_cpu_enabled = e && atoi(e) != 0; }
+    { const char *e = getenv("XV_SCENE_WAIT_TARGET"); g_submit_sample_enabled = e && !strcmp(e, "pump"); }
 #if XV_GPU_PACKET_TIMING
     XV_LOG("[gpu-packet] enabled: pump-owned submission and bracketed notification polling; pipeline/wait policy unchanged\n");
 #endif
@@ -1861,11 +1866,13 @@ static int xv_pump_thread(SceSize args, void *argp)
             xv_render_profile_begin(g_packets[q].mesh);
             xv_gpu_write_barrier();
             xv_submit_cpu_begin();
+            if (g_submit_sample_enabled) __atomic_store_n(&g_submit_sample_thread, sceKernelGetThreadId(), __ATOMIC_RELEASE);
             int err=xv_gfx_render_frame(g_packets[q].mesh,g_packets[q].ui,&g_packets[q].fence,
 #ifdef XV_QUERY_BOUNDARY
                 g_packets[q].query_boundary ? NULL :
 #endif
                 g_packets[q].visibility_fence.address ? &g_packets[q].visibility_fence : NULL);
+            if (g_submit_sample_enabled) __atomic_store_n(&g_submit_sample_thread, -1, __ATOMIC_RELEASE);
             xv_submit_cpu_end(err < 0);
 #if XV_GPU_PACKET_TIMING
             xv_packet_timing_end(&g_packets[q].timing,sceKernelGetProcessTimeWide(),err<0);

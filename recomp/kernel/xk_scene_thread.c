@@ -484,16 +484,25 @@ int xv_scene_thread_run(void *context)
 /* Scene wait sampler (XV_SCENE_WAIT_SAMPLE, default 1): every 500 us while a scene is in flight, read the helper's
  * status from the kernel (running / ready = preempted / waiting on which object). perf154: the helper used 60-62 ms of
  * CPU per scene but took 73-75 ms of wall time. */
-static SceUID ws_thread = -1; static volatile unsigned ws_total, ws_run, ws_ready, ws_wait, ws_other;
+static SceUID ws_thread = -1; static unsigned ws_total, ws_run, ws_ready, ws_wait, ws_other;
+static unsigned ws_lock;
+static int ws_pump;
+extern int xv_pump_submit_thread(void) __attribute__((weak));
 static struct { SceUID id; unsigned type; unsigned n; } ws_tab[16];
 static int ws_main(SceSize args, void *argp)
 {
     (void)args; (void)argp;
     for (;;) {
         sceKernelDelayThread(500);
-        if (!in_flight || helper < 0) continue;
+        SceUID target = helper;
+        if (ws_pump) target = xv_pump_submit_thread ? xv_pump_submit_thread() : -1;
+        else if (!in_flight) continue;
+        if (target < 0) continue;
         SceKernelThreadInfo ti; memset(&ti, 0, sizeof ti); ti.size = sizeof ti;
-        if (sceKernelGetThreadInfo(helper, &ti) < 0) continue;
+        if (sceKernelGetThreadInfo(target, &ti) < 0) continue;
+        /* Exclude samples whose submission ended during the query. */
+        if (ws_pump && xv_pump_submit_thread() != target) continue;
+        if (__atomic_exchange_n(&ws_lock, 1u, __ATOMIC_ACQUIRE)) continue;
         ws_total++;
         if (ti.status & SCE_THREAD_RUNNING) ws_run++;
         else if (ti.status & SCE_THREAD_READY) ws_ready++;
@@ -502,13 +511,22 @@ static int ws_main(SceSize args, void *argp)
             for (i = 0; i < 16; ++i) if (ws_tab[i].n && ws_tab[i].id == ti.waitId && ws_tab[i].type == ti.waitType) { ws_tab[i].n++; break; }
             if (i == 16) for (i = 0; i < 16; ++i) if (!ws_tab[i].n) { ws_tab[i].id = ti.waitId; ws_tab[i].type = ti.waitType; ws_tab[i].n = 1; break; }
         } else ws_other++;
+        __atomic_store_n(&ws_lock, 0u, __ATOMIC_RELEASE);
     }
     return 0;
 }
 static void ws_start(void)
 {
     const char *e = getenv("XV_SCENE_WAIT_SAMPLE"); if (e && !atoi(e)) return;
-    ws_thread = sceKernelCreateThread("xv_scene_wait_sampler", ws_main, 64, 8 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_0, NULL);
+    const char *target = getenv("XV_SCENE_WAIT_TARGET"); ws_pump = target && !strcmp(target, "pump");
+    /* Observing a thread on our own core would preempt it and falsely label
+     * its running samples READY. Pump mode samples from another core. */
+    int mask = SCE_KERNEL_CPU_MASK_USER_0;
+    if (ws_pump) {
+        const char *pc = getenv("XV_PUMP_CORE");
+        if (pc && atoi(pc) == 0) mask = SCE_KERNEL_CPU_MASK_USER_1;
+    }
+    ws_thread = sceKernelCreateThread("xv_scene_wait_sampler", ws_main, 64, 8 * 1024, 0, mask, NULL);
     if (ws_thread >= 0) sceKernelStartThread(ws_thread, 0, NULL);
 }
 static void ws_name(SceUID id, char *out, size_t n)
@@ -523,18 +541,22 @@ static void ws_name(SceUID id, char *out, size_t n)
 }
 static void ws_report(void)
 {
-    unsigned t = ws_total; if (!t) return;
-    char line[440]; int ln = snprintf(line, sizeof line, "[scene-wait] %u samples in flight: running %.0f%% ready %.0f%% waiting %.0f%%; waits:", t, 100.0 * ws_run / t, 100.0 * ws_ready / t, 100.0 * ws_wait / t);
+    if (__atomic_exchange_n(&ws_lock, 1u, __ATOMIC_ACQUIRE)) return;
+    unsigned t = ws_total, running = ws_run, ready = ws_ready, waiting = ws_wait;
+    __typeof__(ws_tab) tab; memcpy(tab, ws_tab, sizeof tab);
+    memset(ws_tab, 0, sizeof ws_tab); ws_total = ws_run = ws_ready = ws_wait = ws_other = 0;
+    __atomic_store_n(&ws_lock, 0u, __ATOMIC_RELEASE);
+    if (!t) return;
+    char line[440]; int ln = snprintf(line, sizeof line, "[scene-wait] %u samples target %s: running %.0f%% ready %.0f%% waiting %.0f%%; waits:", t, ws_pump ? "pump-submit" : "scene-helper", 100.0 * running / t, 100.0 * ready / t, 100.0 * waiting / t);
     for (unsigned k = 0; k < 6; ++k) {
-        unsigned best = 16; for (unsigned i = 0; i < 16; ++i) if (ws_tab[i].n && (best == 16 || ws_tab[i].n > ws_tab[best].n)) best = i;
+        unsigned best = 16; for (unsigned i = 0; i < 16; ++i) if (tab[i].n && (best == 16 || tab[i].n > tab[best].n)) best = i;
         if (best == 16) break;
-        char nm[48]; ws_name(ws_tab[best].id, nm, sizeof nm);
-        ln += snprintf(line + ln, sizeof line - ln, " %s(type %u) %.1f%%", nm, ws_tab[best].type, 100.0 * ws_tab[best].n / t);
-        ws_tab[best].n = 0;
+        char nm[48]; ws_name(tab[best].id, nm, sizeof nm);
+        ln += snprintf(line + ln, sizeof line - ln, " %s(type %u) %.1f%%", nm, tab[best].type, 100.0 * tab[best].n / t);
+        tab[best].n = 0;
         if (ln > 400) break;
     }
     XK_LOG("%s\n", line);
-    memset(ws_tab, 0, sizeof ws_tab); ws_total = ws_run = ws_ready = ws_wait = ws_other = 0;
 }
 void xv_scene_thread_report(unsigned frames)
 {
