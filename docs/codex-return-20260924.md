@@ -17,3 +17,9 @@ Perf210 full Vita build completed (return code 0), and linked ELF contains both 
 Fresh host ASan/UBSan run found fixture-only leaked result/snapshot allocations; added cleanup at normal test exit and reran: 2,000 cases, 134 page-crossing cases, zero mismatches, no sanitizer errors. No production native change for this fix.
 
 Predeployment screenshot shows actual a30 outdoor gameplay on perf208. Uploading perf210 WITHOUT --apply first; do not treat upload as installation. Hardware verification and speed measurement remain outstanding. Keep-awake refresher running through tools/vita_remote.py lease 3600 every 300 seconds, retries every 30 seconds; no vitacompanion nosleep/press calls.
+
+## Hardware staging and pause-menu obstacle
+
+Upload finished: staged-update.log confirms perf210 executable hash verified, restart_requested false. Perf208 remains running. Attempted Save and Quit before applying: Start opened pause menu; three D-pad Down presses followed by Cross resumed gameplay rather than selecting Save and Quit. Reopened and tried three left-stick down pulses; screenshot still selects Resume Game. Controls released, game left at pause menu. Asked user whether physical controls can Save and Quit, or whether to restart without saving. Do not apply/restart while this save-preservation question is pending. Current disk backups predate this attempted Save and Quit; no fresh checkpoint persistence claimed.
+
+The fetched perf208-before.log covers outdoor play, not a stationary pod baseline, and was fetched during update staging. gpu-summary.py blindly labels later windows pod; do not interpret its 92.2 ms aggregate as an equivalent pod measurement. Screenshots and settings/state must qualify future comparisons.
