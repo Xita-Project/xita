@@ -38,7 +38,9 @@ Use `rollback --game halo2` for its previous confirmed executable.
 ## Building a combined private package
 
 Build the Halo 2 target with its required image, generated code and shader inputs
-and **`BUNDLED=1`**. Then build CE with
+and **`BUNDLED=1`**. Also set `MENU_RUNTIME_DEFAULTS=1 MENU_GXM_DEFAULT=1 MENU_SHADERS=<h2menu gxp dir>`.
+Without them, the menu waits forever for a vblank unless `ux0:data/xita-halo2/env.txt` sets
+`XV_MENU_VBLANK=1` ([halo2-vita3k-menu-20260924.md](halo2-vita3k-menu-20260924.md)). Then build CE with
 `HALO2_PACKAGE=/absolute/path/to/halo2-boot.vpk`, preserving the intended CE
 build flags. The packager rejects an old standalone Halo 2 VPK. H2 assets live
 under `app0:halo2/`; each engine runs in its own process and only one runs at a time.
