@@ -89,10 +89,10 @@ core 0, or find why the worker is so much slower than the inline path (cross-cor
 
 1. perf209: verify and speed-test the effects native on the Vita; add to the cfg if it gains.
 2. Make deferred recording pay off (above), or drop it.
-3. f_00070110 native (material setup, 8.3% of the helper): agent branch `work/native-70110-20260924`
-   (worktree `native-70110-wt`, work dir `native-70110-work`); was told to wrap up and document its status in
-   `docs/native-70110.md` on that branch. Check it, finish verification, integrate like the others
-   (`tools/install_native_*.py` pattern).
+3. f_00070110 native (material setup, 8.3% of the helper, `XV_NATIVE_70110`): implemented and verified on the x86
+   host and the Pi in a30 with the play settings (branch `work/native-70110-20260924`, head `5943662`, worktree
+   `native-70110-wt`; not merged, not on the Vita). Read `docs/native-70110.md` on that branch for the evidence,
+   speed and integration steps; merge, install into build-x87, verify `=1` on the Vita, then speed-test `=2`.
 4. Hidden structure (BSP) draws in the pod: ~65 zero-sample draws/frame (vs_11/16/40/06 passes behind the pod
    walls) - a draw-level skip in `runtime/xv_d3d.c` could save ~5 ms.
 5. Cutscene: the effects pass and the canyon flyover spike (~170 ms, check whether it is streaming/loading).
