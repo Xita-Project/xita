@@ -9,3 +9,11 @@ Merged work/native-70110-20260924, preserving the effects Makefile/runtime integ
 Fresh Pi validation compiled from merged native source and the retained stage’s translated body, Cortex-A9 Thumb, guest -Os, native -O2, thread page table and render view. On Pi cores 0/1: 20,000 differential cases, 12,000 concurrent fast-mode runs, 4,000 concurrent verify-mode runs; zero mismatches. Includes 1,360 page-crossing-window cases. These are deterministic callee/HLE stand-ins, not full-game or Vita validation. Private logs: differential.log, threads-fast.log, threads-verify.log in the candidate directory. Pi artifacts isolated at ~/xita-codex-ce-20260924.
 
 Before hardware mutations, read-only FTP capture saved 15 udata/tdata files (7,376,346 bytes), plus configuration copies, under candidate/save-backup-20260924; SHA256 manifest included. No saves were replaced and no new campaign launch has been issued.
+
+## Candidate qualification
+
+Perf210 full Vita build completed (return code 0), and linked ELF contains both material and effects natives. Code-only package produced from perf209 package, retaining every other entry byte-for-byte; only game-a.self and boot-game.txt changed. Executable 34,724,782 bytes, SHA256 851f54474c78f2c860622d9ce1485ec726260d68aee72bb933bd85e9f56cc0f0. Existing asset contract 775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897 retained. Neither native’s fast mode is enabled by default.
+
+Fresh host ASan/UBSan run found fixture-only leaked result/snapshot allocations; added cleanup at normal test exit and reran: 2,000 cases, 134 page-crossing cases, zero mismatches, no sanitizer errors. No production native change for this fix.
+
+Predeployment screenshot shows actual a30 outdoor gameplay on perf208. Uploading perf210 WITHOUT --apply first; do not treat upload as installation. Hardware verification and speed measurement remain outstanding. Keep-awake refresher running through tools/vita_remote.py lease 3600 every 300 seconds, retries every 30 seconds; no vitacompanion nosleep/press calls.

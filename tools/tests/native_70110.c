@@ -757,5 +757,7 @@ int main(int argc, char **argv)
     log_all = 1; xv_native_70110_report(0); log_all = 0;
     printf("native-70110: %u cases (%u with the window across a page end), %u mismatches, verify %u; %u events (%u callee calls, %u HLE calls), "
            "hook-args %u, nan words %u\n", cases, straddle, bad, vbad, events, callees, hle, hook_args_bad, nan_words);
+    free(m0); free(mg); free(mn); free(mv);
+    free(rg); free(rn); free(rv);
     return bad || vbad || hook_args_bad;
 }
