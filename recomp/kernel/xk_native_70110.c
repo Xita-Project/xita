@@ -2860,7 +2860,7 @@ void xv_native_70110_report(unsigned frames)
         snprintf(t, sizeof t, "; us/call native %.3f (%u) guest %.3f (%u)", v[NC_TIMED_NATIVE] ? nn / 1000.0 / v[NC_TIMED_NATIVE] : 0.0,
                  v[NC_TIMED_NATIVE], v[NC_TIMED_GUEST] ? gn / 1000.0 / v[NC_TIMED_GUEST] : 0.0, v[NC_TIMED_GUEST]);
     XK_LOG("[native-70110] %u frames: native %u (frame across a page end %u, GEN restarts %u) guest %u declined %u (prologue %u layout %u "
-           "object-job %u); verified %u segments %u mismatched %u skipped %u nan-words %u (total mismatches %u); on the scene helper %u%s\n",
+           "object-job %u); verified %u segments %u mismatched %u skipped %u nan-words %u (total mismatches %u); on the scene helper %u (counted only in verifier/timed mode)%s\n",
            frames, v[NC_NATIVE], v[NC_GENERIC], v[NC_BAILED], v[NC_GUEST], v[NC_DECLINED], v[NC_DECL_PROLOGUE], v[NC_DECL_LAYOUT], v[NC_DECL_JOB], v[NC_VERIFIED],
            v[NC_SEGMENTS], v[NC_MISMATCHED], v[NC_SKIPPED], v[NC_NAN_WORDS], __atomic_load_n(&n70_mismatch_total, __ATOMIC_RELAXED),
            v[NC_ON_HELPER], t);
