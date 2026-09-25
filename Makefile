@@ -2219,6 +2219,23 @@ CFLAGS += -DXV_NATIVE_1721B0=1 -DXV_NATIVE_1721B0_DEFAULT=$(XV_NATIVE_1721B0_DEF
 RECOMP_CFLAGS += -DXV_NATIVE_1721B0=1 -DXV_NATIVE_1721B0_DEFAULT=$(XV_NATIVE_1721B0_DEFAULT)
 endif
 $(RECOMP_BUILD)/kernel/xk_native_1721b0.o: RECOMP_CFLAGS += -ffp-contract=off
+# Native material setup f_00070110 (the model/structure passes' per-material render states, texture stages, vertex
+# constants and fog colours; its callees and D3D HLE calls stay as the guest makes them), hooked at its entry with a
+# tapped copy of the body for verify mode (tools/patch_native_70110_hooks.py): recomp/kernel/xk_native_70110.c. Env
+# XV_NATIVE_70110 0 off / 1 verify / 2 native, XV_NATIVE_70110_TIME=1 us/call (docs/native-70110.md).
+XV_NATIVE_70110 ?= 0
+XV_NATIVE_70110_DEFAULT ?= 0
+ifneq ($(filter $(XV_NATIVE_70110),0 1),$(XV_NATIVE_70110))
+$(error XV_NATIVE_70110 must be 0 or 1)
+endif
+ifneq ($(filter $(XV_NATIVE_70110_DEFAULT),0 1 2),$(XV_NATIVE_70110_DEFAULT))
+$(error XV_NATIVE_70110_DEFAULT must be 0, 1 or 2)
+endif
+ifeq ($(XV_NATIVE_70110),1)
+CFLAGS += -DXV_NATIVE_70110=1 -DXV_NATIVE_70110_DEFAULT=$(XV_NATIVE_70110_DEFAULT)
+RECOMP_CFLAGS += -DXV_NATIVE_70110=1 -DXV_NATIVE_70110_DEFAULT=$(XV_NATIVE_70110_DEFAULT)
+endif
+$(RECOMP_BUILD)/kernel/xk_native_70110.o: RECOMP_CFLAGS += -ffp-contract=off
 # Native effects and material helpers (XV_NATIVE_EFFECTS): f_0007E530 (vertex-constant matrices), f_0007E420 (+7DBE0,
 # light constants), f_00056F20 (texture animation), f_00080360 (+1290E0, 80250: texture bind), f_00011B60 / f_00011610 /
 # f_00011BD0 (colour packing), hooked at their entries (tools/patch_native_effects_hooks.py):
