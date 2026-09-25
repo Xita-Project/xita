@@ -13,6 +13,13 @@
 #include <time.h>
 #include <unistd.h>
 #include "../../runtime/xv_rec_queue.h"
+#if XV_REC_QUEUE_PADDED
+#include <stddef.h>
+_Static_assert(_Alignof(xv_rq) >= 64, "queue alignment");
+_Static_assert(offsetof(xv_rq, head) % 64 == 0, "producer alignment");
+_Static_assert(offsetof(xv_rq, tail) >= offsetof(xv_rq, head) + 64, "consumer isolation");
+_Static_assert(offsetof(xv_rq, state) >= offsetof(xv_rq, tail) + 64, "wake-state isolation");
+#endif
 
 /* ---- minimal SceKernel event flags ---- */
 typedef struct { pthread_mutex_t m; pthread_cond_t c; unsigned bits; } flag_t;

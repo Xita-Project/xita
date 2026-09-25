@@ -18,13 +18,33 @@
 
 typedef struct { uint16_t type, mode; uint32_t bytes; } xv_rq_hdr;   /* bytes: the whole record */
 #define XV_RQ_WRAP 0xFFFFu
+/* Experimental placement only: release/acquire ownership and wake protocol stay
+ * unchanged. 64-byte groups separate writer domains on both Vita and Pi builds.
+ * Default preserves the qualified compact layout; this is not a speed claim. */
+#ifndef XV_REC_QUEUE_PADDED
+#define XV_REC_QUEUE_PADDED 0
+#endif
+#if XV_REC_QUEUE_PADDED != 0 && XV_REC_QUEUE_PADDED != 1
+#error "XV_REC_QUEUE_PADDED must be 0 or 1"
+#endif
 typedef struct {
     uint8_t *ring; uint32_t size;          /* power of two */
+#if XV_REC_QUEUE_PADDED
+    uint32_t head __attribute__((aligned(64)));
+    uint32_t reserved;
+    unsigned unsignaled, batch;
+    unsigned full_waits, drains, drains_busy; uint32_t high; uint64_t bytes_published;
+    uint32_t tail __attribute__((aligned(64)));
+    unsigned state __attribute__((aligned(64)));
+    unsigned want;
+    SceUID wake, done;
+#else
     uint32_t head, tail, reserved;
     unsigned state, want, unsignaled, batch;
     SceUID wake, done;
     /* producer-side statistics */
     unsigned full_waits, drains, drains_busy; uint32_t high; uint64_t bytes_published;
+#endif
 } xv_rq;
 
 static inline void xv_rq_notify(xv_rq *q)

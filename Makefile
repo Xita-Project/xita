@@ -2762,6 +2762,24 @@ $(BUILD)/render-inline-stack.config: force-render-inline-stack-config
 	@rm -f $@.tmp
 $(RENDER_SIZE_OBJS): $(BUILD)/render-inline-stack.config
 
+# Optional cache-line separation for the deferred-recording SPSC queue.
+XV_REC_QUEUE_PADDED ?= 0
+ifneq ($(words $(XV_REC_QUEUE_PADDED)),1)
+$(error XV_REC_QUEUE_PADDED must be 0 or 1)
+endif
+ifneq ($(filter $(XV_REC_QUEUE_PADDED),0 1),$(XV_REC_QUEUE_PADDED))
+$(error XV_REC_QUEUE_PADDED must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_d3d.o: CFLAGS += -DXV_REC_QUEUE_PADDED=$(XV_REC_QUEUE_PADDED)
+.PHONY: force-rec-queue-layout-config
+force-rec-queue-layout-config:
+$(BUILD)/rec-queue-layout.config: force-rec-queue-layout-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_REC_QUEUE_PADDED)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_d3d.o: $(BUILD)/rec-queue-layout.config runtime/xv_rec_queue.h
+
 # Lifted code includes xv_recomp_protos.h -> xv_x86rt.h and, for diagnostic
 # generation, xv_phase.h. The kernel/HLE objects use -MMD
 # so a kernel header edit does not recompile the ~35 MB of generated code.
