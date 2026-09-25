@@ -134,8 +134,31 @@ int main(int argc, char **argv) {
     return 0;
 }
 '''
+    # Exercise the production helper-identity predicate independently of the
+    # sampler fixture's mock owner API, including foreign contexts/threads.
+    admission = function((ROOT / 'recomp/kernel/xk_scene_thread.c').read_text(),
+                         'xv_scene_thread_owns_context')
+    admission_source = r'''
+#include <assert.h>
+static int ctx, other, depth, on_helper;
+static int xv_scene_thread_on_helper(void) { return on_helper; }
+''' + admission + r'''
+int main(void) {
+    for (on_helper=0; on_helper<2; ++on_helper)
+        for (depth=0; depth<2; ++depth) {
+            assert(!xv_scene_thread_owns_context(0));
+            assert(!xv_scene_thread_owns_context(&other));
+            assert(xv_scene_thread_owns_context(&ctx) == (on_helper && depth));
+        }
+    return 0;
+}
+'''
     with tempfile.TemporaryDirectory(prefix='xita-material-sampler-') as d:
         p = Path(d)
+        (p / 'admission.c').write_text(admission_source)
+        subprocess.run([os.environ.get('CC', 'cc'), '-Wall', '-Werror',
+                        str(p/'admission.c'), '-o', str(p/'admission')], check=True)
+        subprocess.run([str(p/'admission')], check=True)
         (p / 'test.c').write_text(source)
         cmd = [os.environ.get('CC', 'cc'), '-O2', '-fno-strict-aliasing',
                '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
