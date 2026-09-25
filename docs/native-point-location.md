@@ -28,7 +28,16 @@ python3 tools/test_point_location.py ../helper-cache-candidate/build-x87 \
 
 Pass `--cc /path/to/arm-none-linux-gnueabihf-gcc` to build a static Cortex-A9 Thumb
 fixture for execution on the Pi. This is supporting correctness evidence, not a
-Vita speed measurement. The fixture currently uses a single page-table binding;
-active snapshot mapping, aliasing layouts, rounding modes, fault injection,
-performance and in-game verification still need qualification before integration.
+Vita speed measurement. The expanded `--snapshot` fixture uses a distinct active page table with stale
+live mappings, tests all four rounding modes and point data overlapping the
+saved-register stack area. Host and ARM each passed 4,096 cases. `--mutant side`
+and `--mutant dead-slot` were both caught on the host. These tests do not cover
+every possible guest-memory alias layout or concurrent runtime behavior.
+
+On the Pi, the Cortex-A9 Thumb binary's synthetic 32-node finite traversal
+(200,000 calls per implementation, no yields) measured 2,467.6 ns/call for the
+retained body and 2,007.3 ns/call for the candidate. This single microbenchmark
+excludes hook/verifier overhead and is not a hardware frame-time prediction.
+Run the compiled fixture with `bench` to repeat it. In-game verification and
+Vita measurements remain required before enabling the candidate.
 No runtime hook or default is changed.
