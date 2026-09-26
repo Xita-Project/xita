@@ -185,3 +185,39 @@ not the playable scene. Follow-up reports timing frame 4417 and continued
 two-draw frames. The 4200+ interval summary (41.93 ms mean) is therefore
 explicitly excluded from gameplay evidence. Next inspect loading progress
 and scene readiness; do not report this number as a performance gain.
+
+### First scene-qualified sample
+
+Subsequent `a30-readiness.png` confirms the playable lifepod: loading did
+finish without another restart. Collection session 93784 completed. No load
+failure is established by the earlier black captures.
+
+Idle collection session 22020 completed. Selecting only complete 60-frame
+windows wholly inside timing frames 5966–6591 yields 540 intervals:
+56.5968 ms mean (17.67 FPS), p50 54.294 ms, p95 74.196 ms, p99 91.789 ms,
+max 118.715 ms; 383 exceed 50 ms and four exceed 100 ms. Settings are the
+existing 360p stack, reported CPU 444 MHz. Private receipt `idle-summary.json`
+and `effects-gameplay.log`. CPU Present intervals, not scanout measurements.
+This remains below the goal and is similar to the earlier perf258 idle sample;
+independent runs do not establish a small gain or regression.
+
+The initial intended firing sample is invalid: its direct pad call omitted
+the input lease (`ms=0` clears the deadline). The screenshot confirms ammo
+unchanged at 60. Do not label those frames as firing. A corrected collection
+uses `Client.hold(..., duration=5)` and retains separate `ar-held*` artifacts.
+
+Corrected firing collection 97591 completed: image `ar-after-held.png`
+confirms magazine 60 -> 0 with reload prompt. 64 intervals in timing frames
+7829–7892 average 81.2575 ms (12.31 FPS), p95 111.651 ms, p99/max 169.449 ms;
+63 exceed 50 ms, eight exceed 100 ms. Recovery has 268 recorded intervals
+averaging 61.1978 ms (16.34 FPS), p95 83.310 ms, max 117.292 ms. Its final
+41 intervals were not yet emitted in a complete log report and are excluded,
+not treated as zero. `ar-held-summary.json` selects individual intervals by
+frame ID inside complete reports. The firing interval includes the magazine
+running empty and timing-boundary uncertainty, not a pure effects microbench.
+
+No new FPS gain demonstrated. The short run stayed responsive through firing
+but does not satisfy long stability, AI combat, cutscene or full rendering
+validation. Perf260 remains installed; perf258 is rollback. Next prioritize
+the reference-guided collision traversal work behind firing cost rather than
+claiming physical-slot lowering achieved the target.
