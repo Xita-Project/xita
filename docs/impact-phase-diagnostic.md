@@ -280,3 +280,7 @@ same 180-second baseline/two-burst arguments as the preceding weapon-child
 run, unique tag `codex-weapon-effect-20260926`. Do not add sound verification
 flags. Inspect complete firing windows before selecting the replacement.
 No new VPK, deployment or demonstrated Vita speedup results from this probe.
+
+Follow-up: build 55786 and transfer 38934 completed successfully. The planned
+weapon-effect run is now active on Pi cores 0/1, local exec session 56721.
+Poll this handle; no need to rebuild or restart the job.
