@@ -108,3 +108,29 @@ Retain the trial for active gameplay assessment. Started the bounded ordinary
 gameplay collector (session 20673): five-second AR hold, recovery, five seconds
 forward, then a settled outdoor interval. Its images must prove firing and actual
 location before those timing labels are accepted. No further deployment started.
+
+## Firing and outdoor observation
+
+Collector session 20673 completed. `fire-after.png` shows the AR reloading after
+the timed trigger hold; the earlier idle view had a full magazine. Both outdoor
+images show the player outside the lifepod looking toward trees/cliffs. Thus these
+are gameplay intervals, not loading-screen readings. No crash was observed in
+this short sequence; it does not satisfy the 15-minute active-play gate.
+
+| Interval | Samples | Mean ms / FPS | p95 ms | p99 ms | Max ms | >50 / >100 ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| AR hold, 7865–7940 | 76 | 72.616 / 13.771 | 98.712 | 118.916 | 118.916 | 76 / 3 |
+| Walking out, 8196–8275 | 80 | 66.660 / 15.002 | 77.952 | 284.794 | 284.794 | 78 / 2 |
+| Settled outside, 8526–9418 | 893 | 50.493 / 19.805 | 61.543 | 73.191 | 324.617 | 291 / 1 |
+
+All selected CPU Present intervals are available. Input/status boundaries are host
+brackets, not exact simulation-event boundaries. The outdoor mean is close to the
+target but contains one >200 ms stall and many >50 ms frames. It is not sustained
+20 FPS and is not an isolated LRU speedup measurement.
+
+Outdoor palette reports are dominated by misses (about 1723–1725 misses and 1500
+evictions per 60 frames, only ~7% prefix-matrix reuse), unlike the lifepod. Do not
+expand cache memory without proving identity/content reuse in this workload.
+Next diagnostic is a bounded ordinary outdoor idle/firing draw capture, excluded
+from timing, to identify work added by firing. Preserve complete receipts and
+reject earlier completed captures when a new request has not yet finished.
