@@ -1,6 +1,6 @@
 # Collision transform register lowering — perf258 candidate
 
-September 26, 2026. Hardware result pending; deployment in progress.
+September 26, 2026. Installed and boot-confirmed; gameplay result pending.
 
 The existing native ray cast replaces 88E90 and its BSP traversal, while
 1731D0 still prepares object collision rays using B6210 (inverse transform),
@@ -56,6 +56,8 @@ code and game inputs stay outside Git. The full Vita build succeeded. Its
 B6210 symbol is 2,140 bytes, down from 3,044 in perf257. Runtime SHA-256:
 `28bd07ffe8d0d2668a17ba533f72ba0a0d9ac94f99deff06468ea3deadc688ef`.
 The compatible package replaces only `game-a.self` and `boot-game.txt`,
-preserving the asset contract. Remote upload/apply is in progress.
-Next: confirm the new boot, then inspect ordinary a30 gameplay/firing with timers off. A frame-rate gain
+preserving the asset contract. Remote upload/apply verified that hash and
+confirmed slot 0; perf257 remains in slot 1 for rollback. The protected a30
+launch uses `XV_SCENE_PHASES=0` and the in-app keep-awake lease.
+Next: inspect ordinary a30 gameplay/firing with timers off. A frame-rate gain
 and the 20 FPS objective remain unproven.
