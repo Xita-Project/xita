@@ -950,7 +950,7 @@ class Emitter:
 
     def lower_x87_regs(self, ins, mn, out):
         from recompiler.x87_regs import Ctx, lower_x87_regs
-        ctx = Ctx(self._x87.states[self._x87_pos].d)
+        ctx = Ctx(self._x87.states[self._x87_pos].d, physical=self._x87.physical)
         out.extend(lower_x87_regs(self, ins, mn, ctx, COND))
 
     # ---- x87 --------------------------------------------------------------------------
@@ -1657,6 +1657,8 @@ def main() -> int:
                     help="opt-in: keep x87 stack slots in C locals where the stack depth is statically consistent "
                          "(recompiler/x87_regs.py; report in <outdir>/x87_regs_report.json)")
     ap.add_argument("--x87-regs-only", default=None, help="--x87-regs for these function entries only (hex, comma separated; bisecting)")
+    ap.add_argument("--x87-regs-physical-slots", default=None,
+                    help="experimental: map logical x87 slots onto eight physical locals for these entries (hex, comma separated)")
     ap.add_argument("--x87-regs-exclude", default=None, help="--x87-regs: keep the memory lowering for these entries (hex, comma separated)")
     ap.add_argument("--x87-regs-min-density", type=float, default=0.0,
                     help="--x87-regs: keep the memory lowering where x87 instructions per sync point (calls, returns, tail calls) "
@@ -1758,7 +1760,8 @@ def main() -> int:
     if args.x87_regs:
         from recompiler.x87_regs import X87Regs, parse_entries
         em.x87regs = X87Regs(em, only=parse_entries(args.x87_regs_only), exclude=parse_entries(args.x87_regs_exclude),
-                             guards=not args.x87_regs_no_guards, min_density=args.x87_regs_min_density)
+                             guards=not args.x87_regs_no_guards, min_density=args.x87_regs_min_density,
+                             physical_slots=parse_entries(args.x87_regs_physical_slots))
         em.x87regs.run()
     if args.symbols:
         em.vars = {s["name"]: s["address"] for s in symbols if s["kind"] == "VAR"}

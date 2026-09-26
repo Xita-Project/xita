@@ -74,7 +74,9 @@ def parse_entries(text):
     return {int(x, 16) for x in text.split(",") if x.strip()}
 
 
-def slot_name(L: int) -> str:
+def slot_name(L: int, physical: bool = False) -> str:
+    if physical:
+        L &= 7
     return f"xr{L}" if L >= 0 else f"xrn{-L}"
 
 
@@ -85,7 +87,8 @@ def phys(L: int) -> str:
 
 class Ctx:
     """Lowering state for one instruction: current depth and the slots/status word it touches."""
-    def __init__(self, d: int):
+    def __init__(self, d: int, physical: bool = False):
+        self.physical = physical
         self.d = d
         self.used = set()
         self.written = set()
@@ -98,19 +101,19 @@ class Ctx:
         return L
 
     def st(self, i: int) -> str:
-        return slot_name(self._slot(i))
+        return slot_name(self._slot(i), self.physical)
 
     def stw(self, i: int) -> str:
         L = self._slot(i)
         self.written.add(L)
-        return slot_name(L)
+        return slot_name(L, self.physical)
 
     def push(self, expr: str) -> str:
         L = self.d
         self.used.add(L)
         self.written.add(L)
         self.d += 1
-        return f"{slot_name(L)} = {expr};"
+        return f"{slot_name(L, self.physical)} = {expr};"
 
     def pop(self):
         self.d -= 1
@@ -263,6 +266,7 @@ class Plan:
     """Everything the emitter needs for one converted function."""
     def __init__(self, fn):
         self.entry = fn.entry
+        self.physical = False
         self.states: Dict[Tuple[int, int], State] = {}     # (block start, index) -> state before the instruction
         self.final_return: Optional[State] = None          # state reaching emit_function's trailing return
         self.guards: Dict[Tuple[int, int], Tuple[int, int]] = {}   # guarded call -> (call ip, assumed depth after)
@@ -274,20 +278,21 @@ class Plan:
 
     @property
     def slots(self):
-        return range(self.lo, self.hi + 1)
+        slots = range(self.lo, self.hi + 1)
+        return sorted({L & 7 for L in slots}) if self.physical else slots
 
     # ---- emitted text ---------------------------------------------------------------
     def prologue(self) -> List[str]:
         out = ["    /* --x87-regs: x87 slots live in locals (recompiler/x87_regs.py); c->st/c->fsp/c->fsw synced at calls and exits */",
                "    const uint32_t xfsp0 = c->fsp; (void)xfsp0;"]
         if self.hi >= self.lo:
-            out.append("    double " + ", ".join(f"{slot_name(L)} = c->st[{phys(L)}]" for L in self.slots) + ";")
+            out.append("    double " + ", ".join(f"{slot_name(L, self.physical)} = c->st[{phys(L)}]" for L in self.slots) + ";")
         if self.fsw:
             out.append("    uint16_t xfsw = c->fsw;")
         return out
 
     def spill(self, s: State) -> str:
-        parts = [f"c->st[{phys(L)}] = {slot_name(L)};" for L in sorted(s.dirty)]
+        parts = [f"c->st[{phys(L)}] = {slot_name(L, self.physical)};" for L in sorted({L & 7 for L in s.dirty} if self.physical else s.dirty)]
         if s.mem != s.d:
             parts.append(f"c->fsp = (xfsp0 + {(-s.d) & 7}u) & 7u;")
         if s.fswd:
@@ -295,7 +300,7 @@ class Plan:
         return " ".join(parts)
 
     def fill(self) -> str:
-        parts = [f"{slot_name(L)} = c->st[{phys(L)}];" for L in self.slots]
+        parts = [f"{slot_name(L, self.physical)} = c->st[{phys(L)}];" for L in self.slots]
         if self.fsw:
             parts.append("xfsw = c->fsw;")
         return " ".join(parts)
@@ -324,8 +329,9 @@ class X87Regs:
     the effect the code after the call expects, see guess()). Calls whose effect is only assumed get a
     runtime guard in the converted caller; everything proven is used without checks."""
 
-    def __init__(self, em, only=None, exclude=None, guards=True, min_density=0.0):
+    def __init__(self, em, only=None, exclude=None, guards=True, min_density=0.0, physical_slots=None):
         self.em = em
+        self.physical_slots = set(physical_slots or ())
         self.min_density = min_density     # x87 instructions per sync point below which the memory lowering stays
         self.disc = em.disc
         self.only = only
@@ -597,12 +603,13 @@ class X87Regs:
                 fail = "no-x87"
             elif any((st, i) not in seen for st in fn.blocks for i in range(len(fn.blocks[st].insns))):
                 fail = "unreached"
-            elif used and max(used) - min(used) > 7:
+            elif used and max(used) - min(used) > 7 and fn.entry not in self.physical_slots:
                 fail = "slot-range"
         if fail is not None:
             return summary, None, fail
         # record the fixed-point state before every instruction and the guarded calls
         plan = Plan(fn)
+        plan.physical = fn.entry in self.physical_slots
         for start in order:
             s = state_in.get(start)
             if s is None:
@@ -731,7 +738,8 @@ class X87Regs:
             "assumed_summaries": hist(self.assumed),
             "analysis_steps": self.rounds,
             "converted_functions": {f"0x{e:08X}": {"x87": p.x87, "syncs": p.syncs, "guards": len(p.guards),
-                                                   "slots": [p.lo, p.hi], "fsw": p.fsw}
+                                                   "slots": [p.lo, p.hi], "fsw": p.fsw,
+                                                   **({"physical_slots": True} if p.physical else {})}
                                     for e, p in sorted(self.plans.items())},
             "fallback_functions": {f"0x{e:08X}": r for e, r in sorted(self.reasons.items())},
             "proven": {f"0x{e:08X}": (v if isinstance(v, str) else int(v)) for e, v in sorted(self.proven.items()) if v != 0},
