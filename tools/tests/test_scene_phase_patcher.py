@@ -21,6 +21,23 @@ void f_00000020(xctx *restrict c)
 '''
 
 class PatcherTests(unittest.TestCase):
+    def test_tail_call_end_precedes_return(self):
+        source = SOURCE.replace('    f_00000030(c);', '    f_00000030(c); return;')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'code_000.c'
+            path.write_text(source)
+            cmd = [sys.executable, str(TOOL), tmp, '--parents', '00000020',
+                   '--any-call', '--tail-calls']
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            self.assertNotIn('unwrapped guest calls', result.stdout)
+            first = path.read_text()
+            self.assertLess(first.index('f_00000030(c);'), first.index('xv_scene_phase_end(0x00000030u)'))
+            self.assertLess(first.index('xv_scene_phase_end(0x00000030u)'), first.index('    return;'))
+            retained = '\n'.join(line for line in first.splitlines() if 'extern void xv_scene_phase_' not in line) + '\n'
+            self.assertEqual(retained, source.replace('f_00000030(c); return;', 'f_00000030(c);\n    return;'))
+            subprocess.run(cmd, check=True, capture_output=True)
+            self.assertEqual(first, path.read_text())
+
     def test_conditional_scope_between_push_and_call(self):
         source = SOURCE.replace('    f_00000030(c);',
             '#if ENABLE_SCOPE\n    scope_begin(c);\n#endif\n    f_00000030(c);')

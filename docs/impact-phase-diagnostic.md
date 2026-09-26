@@ -345,3 +345,41 @@ mutation. Preserve default generated output until qualified. Inspect actual
 slot ranges/paths first; do not assume this report proves a speedup. Existing
 particle/collision register differential tests are useful patterns, but their
 cases do not cover this function. No Vita deployment or FPS gain yet.
+
+## Tail-call attribution follow-up
+
+Added opt-in `--any-call --tail-calls` support to the phase patcher. It splits
+a bare `f_ADDRESS(c); return;` into call and return, placing the end observer
+before the return. Defaults are unchanged. Tail-call elimination is inhibited
+in this diagnostic, so timings include observer/call overhead. Unit tests
+verify ordering, instruction retention and idempotence.
+
+Private `effect-tail-phase-pi/` patches only parent 113370 on top of the prior
+effect-process diagnostic: 34 call sites instead of 26, including eight
+111240 tail sites. Removing observers and normalizing return whitespace
+reproduces the prior source. ARM build and transfer completed. Run
+`codex-effect-tail-20260926` is active as local session 98859 on Pi cores 0/1,
+with the same 180-second two-fire-burst/reload inputs as the prior profile.
+Poll the existing session; do not restart because of an observation timeout.
+
+Source inspection shows 111240 validates an effect handle, walks linked
+entries from an effect-related pool and invokes A92C0 for each. This is not
+evidence of its runtime cost; the pending profile will resolve that.
+Vita HTTP8080 still refuses, FTP log MDTM remains 20260926181602, and no new
+freeze-lights capture exists. Perf260 remains uninstalled.
+
+Follow-up: session 98859 completed the planned 180-second timeout (124),
+67 host reports; no job remains active. The two reported 113370 firing rows
+(at host report indices 1800 and 2040) are inclusive 1.11/1.18 ms and
+self/remainder 0.59/0.63 ms. Largest children: 1122A0 0.26/0.27 ms,
+112C80 0.21/0.22 ms, 113080 0.04/0.04 ms. Full rows are recorded in
+`effect-tail-phase-pi/selected-windows.json`. 111240 is absent from the
+top-eight listing (last printed children round to 0.00); this does not
+prove zero calls or zero cost, but does not support a dominant hidden tail
+expense. The reporter subtracts all timed children, including unprinted
+children, before reporting self. The residual therefore remains a useful
+lead, subject to inline work, instrumentation and host scheduling overhead.
+No fatal/trap line was found by the log scan. This is supporting Pi evidence,
+not hardware performance or rendering correctness. Perf260 still awaits
+physical validation; investigate 112C80/local 113370 work next rather than
+rewriting effect cleanup based on the old incomplete attribution.

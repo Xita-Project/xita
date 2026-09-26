@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Install the XV_SCENE_PHASES timers around the direct guest calls of the scene entry f_000BCB30 and of its main callee
 f_0005DBC0 in a stage's hand-maintained shards (idempotent: earlier timers are stripped and re-installed).
-Usage: patch_scene_phase_timers.py <stage>/recomp [--parents A,B] [--hle-calls]     Report: [scene-phases] in recomp/kernel/xk_scene_thread.c."""
+Usage: patch_scene_phase_timers.py <stage>/recomp [--parents A,B] [--hle-calls] [--any-call --tail-calls]
+Tail-call timing prevents compiler tail-call elimination; use only for diagnostics.
+Report: [scene-phases] in recomp/kernel/xk_scene_thread.c."""
 import re, sys, glob
 from collections import Counter
 ANY_CALL = False
@@ -39,6 +41,8 @@ def main():
     global PARENTS
     global ANY_CALL
     ANY_CALL = '--any-call' in sys.argv   # wrap every bare f_XXXXXXXX(c); line, not only push+call pairs
+    if '--tail-calls' in sys.argv and not ANY_CALL:
+        raise SystemExit('--tail-calls requires --any-call')
     if '--parents' in sys.argv:   # e.g. --parents 000BD420,000FA920: only these loops (a few calls/frame, no measurable cost)
         PARENTS = sys.argv[sys.argv.index('--parents') + 1].split(',')
     for f in glob.glob(root + '/code_*.c'):
@@ -52,6 +56,11 @@ def main():
             body = re.sub(r'^\s*\{ extern void xv_scene_phase_(begin|end)\([^\n]*\n', '', body, flags=re.M)   # strip old (any indentation)
             n = [0]
             if ANY_CALL:   # every bare `f_XXXXXXXX(c);` line (calls wrapped by object-jobs/#if code have no push right before them)
+                if '--tail-calls' in sys.argv:
+                    # Preserve the return after the end observer. Do not match
+                    # conditional calls or statements with trailing guest work.
+                    body = re.sub(r'^([ \t]*)f_([0-9A-F]{8})\(c\);[ \t]*return;[ \t]*$',
+                                  r'\1f_\2(c);\n\1return;', body, flags=re.M)
                 def wrap_any(mm):
                     n[0] += 1; ind, a = mm.group(1), mm.group(2)
                     return (ind + '{ extern void xv_scene_phase_begin(uint32_t); xv_scene_phase_begin(0x%su); }\n' % a + ind + 'f_%s(c);\n' % a
