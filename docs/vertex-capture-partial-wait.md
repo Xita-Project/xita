@@ -35,3 +35,10 @@ and referenced vertex contents; deliberately uncopied sparse holes are not
 asserted to contain particular bytes.
 
 Hardware frame-time and prolonged active-play qualification remain pending.
+
+Queue timing is opt-in with `XV_VERTEX_CAPTURE_TIMING=1`. The
+`vertex-capture-waits` report separates partial queue wait elapsed time from
+full-drain elapsed time, including owner callbacks and scheduling delay.
+These overlap work on other cores and must not be added to total frame time.
+The report includes the timing enable state; zero totals with timing disabled
+are not measured zero-cost waits. Existing aggregate join totals remain.

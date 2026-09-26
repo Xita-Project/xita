@@ -101,6 +101,7 @@ static unsigned cap_submitted,cap_completed; /* atomic publication counters */
 static int cap_stopping,cap_unavailable,cap_enabled=-1;
 static int cap_partial_wait=-1,cap_wait_batch=-1;
 static unsigned cap_partial_waits;
+static uint64_t cap_partial_wait_us,cap_full_wait_us;
 static unsigned cap_jobs_total,cap_drains,cap_pressure,cap_failures,cap_max_pending;
 static unsigned cap_masks_copied,cap_masks_omitted;
 /* Mutually exclusive pressure causes, captured before drain changes ownership. */
@@ -541,7 +542,8 @@ static void cap_wait_for_slot(void)
 #if XV_VERTEX_CAPTURE_NOTIFY
     __atomic_exchange_n(&cap_waiting,0,__ATOMIC_ACQ_REL);
 #endif
-    cap_collect();cap_join_us+=cap_clock()-start;
+    cap_collect();
+    uint64_t elapsed=cap_clock()-start;cap_join_us+=elapsed;cap_partial_wait_us+=elapsed;
 }
 void xv_vertex_capture_drain(void)
 {
@@ -573,7 +575,8 @@ void xv_vertex_capture_drain(void)
 #if XV_VERTEX_CAPTURE_NOTIFY
     __atomic_exchange_n(&cap_waiting,0,__ATOMIC_ACQ_REL);
 #endif
-    cap_collect();cap_join_us+=cap_clock()-start;
+    cap_collect();
+    uint64_t elapsed=cap_clock()-start;cap_join_us+=elapsed;cap_full_wait_us+=elapsed;
 #if XV_VERTEX_CAPTURE_REUSE
     cap_reuse_retire();
 #else
@@ -864,7 +867,9 @@ void xv_vertex_capture_report(unsigned frames)
     cap_jobs_total=cap_drains=cap_pressure=cap_max_pending=cap_failures=0;
     xv_logf("[vertex-capture-partial] %u frames: enabled %d batch %d queue-slot waits %u; full lifetime drains retained\n",
         frames,cap_partial_wait,cap_wait_batch,cap_partial_waits);
-    cap_partial_waits=0;
+    xv_logf("[vertex-capture-waits] %u frames: timing %d queue-only %llu us full-drain %llu us; elapsed owner waits including callbacks, overlapping other workers\n",
+        frames,cap_timing,(unsigned long long)cap_partial_wait_us,(unsigned long long)cap_full_wait_us);
+    cap_partial_waits=0;cap_partial_wait_us=cap_full_wait_us=0;
     cap_bytes=cap_capture_us=cap_worker_us=cap_join_us=0;
     if(cap_masks_copied || cap_masks_omitted)
         xv_logf("[vertex-capture-masks] %u frames: %u sparse masks copied / %u unused masks omitted; %llu KiB metadata writes avoided\n",
