@@ -1227,3 +1227,13 @@ Vita3K gameplay test. Normal246 watcher324540 stopped before deployment; keepawa
 in material-greater-candidate. Require actual _axisblack_gt linked receipt in
 pod/outdoor logs before attributing any gain. Pod may use NA programs; outdoors
 is the important generic-alpha material workload. No GPU gain claimed yet.
+
+
+Perf247 deployment complete: verified=true,boot_confirmed=true,slot1, expected
+payload SHA. Normal campaign launch active session81350; collector74852.
+Tag perf247-material-greater-20260926; scripts launch247.sh/collect247.py in
+material-greater-candidate, outputs launch247-driver.log/collect247.log,
+fast247-summary.json,fast247-pod.log,fast247-qualification.json,pod247-fast.png.
+No shader FPS result yet. Inspect the qualified scene and look for actual
+_axisblack_gt program linking (pod may mostly use NA); then collect outside.
+Keepawake134059 still running. Current source HEAD before this note7704f54a.
