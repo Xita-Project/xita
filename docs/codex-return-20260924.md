@@ -725,3 +725,13 @@ logs gameplay-driver.log/collector.log. Collector waits qualified frame5700 for
 pod241.png, then7440 for settled-pod.log, qualification.json and6300..7440 raw
 frame summary. No draw trace; ordinary gameplay. Source9e4f1359 committed locally,
 not pushed. Current goal turn concrete progress via implemented/tested candidate.
+
+Perf241 update60178 finished0, bootconfirmedslot1 payload SHA
+013f12eed616b4ab98c25bff11aa980a125317d3f385a61a3018239a22458274.
+Launch55236 driver244501, collector80637 PID244523 running; env log confirms
+XV_MATERIAL_BLACK=1. Keepawake134059 remains live. Early material counters zero
+are MENU frames, not evidence of failed campaign qualification. Wait for the
+already running scene/collector; do not relaunch. Related154066FD_0D_t8 (vs27)
+is already58instructions3temps with color1 zero/unused reflection pruned; current
+candidate correctly only covers7F (vs09), up to93draws in240capture. 3F variants
+still130instructions; audit later if their scenes need it. No new FPS claim.
