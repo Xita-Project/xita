@@ -1498,3 +1498,51 @@ Private packet-builder-audit.json inspects installed stage6EFC0 (627lines,
 8 direct callsites,19x87 operations):56D20,5DF60,5DF90,5DE90,66510,5FDA0x3.
 Next narrow its child cost/real ARM packet work before another broad rewrite.
 No new candidate code or performance claim, no push. Goal remains active.
+
+
+### Material packet attribution and 60-frame hitch follow-up
+
+Prior turn made progress: completed normal250 hardware measurements, saved logs,
+updated native-object-query.md, commitfcd069f4. This turn retained installed250
+and keepawake134059; no restart/deployment/config change.
+
+Built private packet-prepare-phase-pi from point-location-build host objects,
+recompiling code011/code015 with direct-call phases in6EFC0,A2380,66510
+(8/6/211 callsites; heavily instrumented, elapsed timings NOT speed acceptance).
+Initialbuild92811 andrun34194 finished. Initialrun exposed older host reporter
+still using a single parent edge for aggregate inclusive time, yielding impossible
+child>parent/zero-self displays. Do NOT use initial summary.json for attribution.
+Copied only corrected report block from currentsource xk_scene_thread.c into
+private oldstage kernel; rebuild-reporter.py compiled/relinked xk_scene_thread.o
+withtwoexistingcandidateobjects. No scheduling changes. Fixedrun31508 finished
+planned120s timeout124,38reports; Pi cores0/1, no concurrent CE harness, Halo2
+old logtail untouched. Logs d3d-record2-work/pi-runs/codex-packet-prepare-phase-fixed-20260926.log.
+
+fixed-summary.json last10 windows:6EFC0 inclusive2.747ms,self0.268ms;
+6EFC0->66510 2.366ms,30calls/frame (~86% ofinclusive). Thus packet-wrapper/native
+rewrite alone is not the large target. 66510 aggregate4.328ms,self1.173ms;
+66390 direct0.776ms/72.595calls/frame,64F900.926ms/2calls/frame. Inclusive values
+nest and cannot be added. 66390 dispatches7A130/7A1F0/7A2F0/7A3D0/7A460/7A540;
+64F90 also calls66390 andmany render-state/texture/effect functions. Existing
+native-effects.md explains why66510 broad native/glue and7E5D0 replacement were
+previously low payoff. Next examine repeated state/recording work beneath these
+routes/sharedmodeldraws, not implement packet cache by material identity.
+Pi headless oldstage differs fromVita250; supporting attribution, notVita ms.
+No Pi process remains active afterfixedrun. Private artifacts/generated C notcommitted.
+
+Also analyzed actualperf250 rawintervalphase modulo60. Pod6300..7440 has14of17
+>100ms samples at framephase3; phase3mean104.3167ms vsotherphases55.820394ms.
+Descriptive excess amortized0.808272ms/frame: cadence matters for hitches but
+cannotaloneclose56.63->50ms gap. Outdoor/activephase3alsohighestmean.
+Privatecadence250.json andcadence250-report-cost.json. Preserveallframes in
+acceptance averages; this is NOT excuse toremoveoutliers. Correctexistinginterval
+index derivesframe=end-59+offset;window6300includes6241..6300.
+
+Reportproducer measured1.4442msmean/1.812msmax over20podreports. Async logging
+alreadyenabled, queued1/high3/error0/backpressure0. This doesn'texplain~48ms
+phase3excess. Nativeconsole/file worker cost andotherperiodicwork remainpossible,
+notproven. Existinglogwriter priority0x10000110 USER_ALL, errorsimmediate andfile
+append preserved. Do notdisablecritical logging orclaimperiodicreportcausality.
+Next separate periodic output scheduling fromgame/effectswork ifpursuinghitches.
+Vita keepawake134059 verifiedlive through8h04m; installed250 normalrun stillopen.
+No newFPSgainclaim; goalactive, fullcanyon/NPCcombat/15min/AI/save gatesunmet.
