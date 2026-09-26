@@ -25,3 +25,24 @@ flag, so these runs are diagnostic rather than clean FPS qualifications.
 The patcher tests cover opt-in HLE wrapping in both guest-call modes, unchanged
 instruction order, unselected functions, idempotence, and the final function in
 a shard. Generated game code and private captures remain outside the repository.
+
+## Material-call boundary correction
+
+For model material attribution, also instrument the conditional-hook callers:
+
+```sh
+python3 tools/patch_scene_phase_timers.py /private/stage/recomp \
+  --parents 000A26B0,000A2380 --any-call --hle-calls
+```
+
+`A26B0` has a model-UV hook between the return-address push and the `A2380`
+call. The default adjacent push/call matcher misses that boundary. Without
+`--any-call`, its reported remainder includes untimed material work and cannot
+justify replacing the caller itself. The retained stage check found eight
+call sites in `A26B0` and six in `A2380`, with balanced begin/end hooks and
+all non-timer tokens unchanged.
+
+Perf227's last ten observed pod reports put `7A130` at median 2.41 ms inclusive
+and 0.73 ms outside its three timed graphics calls. These are diagnostic wall
+timings, not CPU-cycle measurements or a projected native speedup. The corrected
+material boundaries require a subsequent hardware run.

@@ -21,6 +21,21 @@ void f_00000020(xctx *restrict c)
 '''
 
 class PatcherTests(unittest.TestCase):
+    def test_conditional_scope_between_push_and_call(self):
+        source = SOURCE.replace('    f_00000030(c);',
+            '#if ENABLE_SCOPE\n    scope_begin(c);\n#endif\n    f_00000030(c);')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'code_000.c'
+            path.write_text(source)
+            cmd = [sys.executable, str(TOOL), tmp, '--parents', '00000020', '--any-call']
+            subprocess.run(cmd, check=True, capture_output=True)
+            first = path.read_text()
+            self.assertIn('xv_scene_phase_begin(0x00000030u)', first)
+            retained = '\n'.join(line for line in first.splitlines() if 'extern void xv_scene_phase_' not in line) + '\n'
+            self.assertEqual(retained, source)
+            subprocess.run(cmd, check=True, capture_output=True)
+            self.assertEqual(first, path.read_text())
+
     def test_modes_and_idempotence(self):
         for any_call in (False, True):
             for hle in (False, True):
