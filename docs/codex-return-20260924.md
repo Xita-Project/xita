@@ -1120,3 +1120,10 @@ Previous perf244 captures/receipts preserved with perf244- prefixes. Old244
 watcher explicitly stopped before deployment; keepawake remains running.
 Update session76102 is live; receipt deploy245.log. After it completes, launch
 verify245.sh and collect-verify245.py (tag perf245-index-verify-20260926).
+
+
+Perf245 deployment completed verified=true, boot_confirmed=true, slot1. The
+verification launch is now running: driver session3276, collector73192. Read
+verify245-driver.log, collect-verify245.log, hardware-verify245.json and
+verified245-pod.log when available. Re-poll these live handles; do not relaunch
+because a collection observation expires. Keepawake PID134059 still active.
