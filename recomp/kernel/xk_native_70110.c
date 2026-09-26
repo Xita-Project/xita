@@ -108,6 +108,30 @@ static inline __attribute__((always_inline)) void n70_hle_call(xctx *c, uint32_t
     xv_cur_fn = saved;
 }
 
+/* Optional diagnostic only. Synthetic FE70xxxx labels identify helpers, not guest PCs.
+ * Resume labels stay outside intervals; DRY returns before opening them. */
+#if defined(XV_NATIVE_70110_PHASES) && XV_NATIVE_70110_PHASES
+extern void xv_scene_phase_begin(uint32_t);
+extern void xv_scene_phase_end(uint32_t);
+#define N70_BEGIN(a) xv_scene_phase_begin(a)
+#define N70_END(a) xv_scene_phase_end(a)
+#else
+#define N70_BEGIN(a) ((void)0)
+#define N70_END(a) ((void)0)
+#endif
+#define N70_ADDR_f_000111A0 0x000111A0u
+#define N70_ADDR_f_000118D0 0x000118D0u
+#define N70_ADDR_f_00011B60 0x00011B60u
+#define N70_ADDR_f_00011BD0 0x00011BD0u
+#define N70_ADDR_f_000621E0 0x000621E0u
+#define N70_ADDR_f_000658D0 0x000658D0u
+#define N70_ADDR_f_0006F340 0x0006F340u
+#define N70_ADDR_f_000736F0 0x000736F0u
+#define N70_ADDR_f_0007A960 0x0007A960u
+#define N70_ADDR_f_00080360 0x00080360u
+#define N70_ADDR_f_000B5130 0x000B5130u
+#define N70_ADDR_f_00173F20 0x00173F20u
+
 /* ---- guest memory -----------------------------------------------------------------------------------------------
  * ram/pt: the arena and the calling thread's page table (X_PT: TPIDRURW on the Vita, xv_host_page_table on the host,
  * the scene helper's render view), taken once per call. w0/w1: the host addresses of the window's (at most two) pages,
@@ -368,30 +392,30 @@ static inline __attribute__((always_inline)) uint32_t n70_cc(double a, double b)
 #define ESP_CHECK(k, off) do { if (FAST) { if (esp != E - (uint32_t)(off) || ebp != EBP0) return N70_BAIL + (k); esp = E - (uint32_t)(off); ebp = EBP0; } } while (0)
 /* sites. Mode 2 performs the call; a dry run stops before it (returns the site, state stored) and resumes after it
  * (R_k: the actual state loaded, `outcome` the hook's result); GEN resumes the same way after a FAST bail. */
-#define CALL(k, fn, off, d, da, list) do { SYNC_AT(d, list); if (DRY) return k; fn(c); if (0) { R_##k:; } LOAD_AT(da); ESP_CHECK(k, off); } while (0)
+#define CALL(k, fn, off, d, da, list) do { SYNC_AT(d, list); if (DRY) return k; N70_BEGIN(N70_ADDR_##fn); fn(c); N70_END(N70_ADDR_##fn); if (0) { R_##k:; } LOAD_AT(da); ESP_CHECK(k, off); } while (0)
 /* An HLE call reads ecx/edx and its stack arguments and returns esp (eax for SetVertexShaderConstant); mode 2 stores the
  * written ones of those and reloads esp/eax (verify compares the whole state at every HLE call and checks that nothing
  * else changed). */
 #define N70_EAX(name) (__builtin_strcmp(#name, "D3DDevice_SetVertexShaderConstant") == 0)
 #define HLE(k, addr, name, off, d, full, hle) do { if (DRY) { SYNC_AT(d, full); return k; } \
-        SYNCL(hle); n70_hle_call(c, addr, xv_hle_##name, "xv_hle_" #name); \
+        SYNCL(hle); N70_BEGIN(addr); n70_hle_call(c, addr, xv_hle_##name, "xv_hle_" #name); N70_END(addr); \
         if (N70_EAX(name)) eax = c->r[0]; \
         esp = FAST ? E - (uint32_t)(off) : c->r[4]; \
         if (0) { R_##k: LOAD_AT(d); } } while (0)
 #define UVCALL(k, variant, off, d, da, list) do { SYNC_AT(d, list); if (DRY) return k; \
-        if (!(cfg & N70_CFG_UV) || !xk_model_uv_begin(c, g_xram, e->pt, e->imgb, (variant), &e->utok)) { \
-            f_00056F20(c); if (cfg & N70_CFG_UV) xk_model_uv_end(c, e->utok); } \
+        N70_BEGIN(0xFE700001u); if (!(cfg & N70_CFG_UV) || !xk_model_uv_begin(c, g_xram, e->pt, e->imgb, (variant), &e->utok)) { \
+            N70_BEGIN(0x56F20u); f_00056F20(c); N70_END(0x56F20u); if (cfg & N70_CFG_UV) xk_model_uv_end(c, e->utok); } N70_END(0xFE700001u); \
         if (0) { R_##k:; } LOAD_AT(da); ESP_CHECK(k, off); } while (0)
 #define FOG_BEGIN(k, target, off, d, da, list) do { if (cfg & N70_CFG_FOG) { int h__; SYNC_AT(d, list); if (DRY) return k; \
-        h__ = xk_model_fog_begin(c, g_xram, e->pt, e->imgb, &e->ftok); \
+        N70_BEGIN(0xFE700002u); h__ = xk_model_fog_begin(c, g_xram, e->pt, e->imgb, &e->ftok); N70_END(0xFE700002u); \
         if (0) { R_##k: h__ = outcome; } LOAD_AT(da); ESP_CHECK(k, off); if (h__) goto target; } } while (0)
-#define FOG_END(k, off, d, da, list) do { if (cfg & N70_CFG_FOG) { SYNC_AT(d, list); if (DRY) return k; xk_model_fog_end(c, e->ftok); \
+#define FOG_END(k, off, d, da, list) do { if (cfg & N70_CFG_FOG) { SYNC_AT(d, list); if (DRY) return k; N70_BEGIN(0xFE700003u); xk_model_fog_end(c, e->ftok); N70_END(0xFE700003u); \
         if (0) { R_##k:; } LOAD_AT(da); ESP_CHECK(k, off); } } while (0)
 #define SAMPLER(k, g, skip, off, d, da, list) do { if (cfg & N70_CFG_SAMPLER) { int h__; SYNC_AT(d, list); if (DRY) return k; \
-        h__ = xv_material_sampler_try(c, (g)); \
+        N70_BEGIN(0xFE700010u + (g)); h__ = xv_material_sampler_try(c, (g)); N70_END(0xFE700010u + (g)); \
         if (0) { R_##k: h__ = outcome; } LOAD_AT(da); ESP_CHECK(k, off); if (h__) goto skip; } } while (0)
 #define PREEMPT(k, off, d, da, list) do { if (DRY) { SYNC_AT(d, list); return k; } \
-        if (--c->preempt <= 0) { SYNC_AT(d, list); xv_preempt(c); LOAD_AT(da); ESP_CHECK(k, off); } if (0) { R_##k: LOAD_AT(da); } } while (0)
+        if (--c->preempt <= 0) { SYNC_AT(d, list); N70_BEGIN(0xFE700004u); xv_preempt(c); N70_END(0xFE700004u); LOAD_AT(da); ESP_CHECK(k, off); } if (0) { R_##k: LOAD_AT(da); } } while (0)
 #define EXIT(d, list) do { SYNC_AT(d, list); return N70_EXIT; } while (0)
 #define DECLINE() do { return N70_DECLINE; } while (0)
 /* the lift's XV_PHASE_SCOPE(c, 24u), opened where no decline can follow (L_00070265) and closed by the caller */

@@ -46,3 +46,12 @@ Perf227's last ten observed pod reports put `7A130` at median 2.41 ms inclusive
 and 0.73 ms outside its three timed graphics calls. These are diagnostic wall
 timings, not CPU-cycle measurements or a projected native speedup. The corrected
 material boundaries require a subsequent hardware run.
+
+
+### Native material boundaries
+
+Build with `XV_NATIVE_70110_PHASES=1` and run with `XV_SCENE_PHASES=1` to include native70110's direct calls. Guest-shard timers alone miss its internal calls, so the old reported self/remainder includes more than native arithmetic. The option defaults off and applies only to the native unit. Runtime clocks still require scene profiling.
+
+Guest and HLE calls use their original addresses. Synthetic labels: FE700001 UV helper including its nested56F20 call; FE700002/3 fog begin/end; FE700004 actual preemption; FE700010 plus sampler group index for sampler helpers. These are diagnostic labels, not Xbox addresses. Intervals exclude verifier DRY returns and resumed FAST/GEN labels. All timings remain elapsed time, including waits/preemption and diagnostic overhead.
+
+Host:900 differential cases across plain, hooks and render-view/thread-table variants; no native/verify mismatches and balanced timing intervals. Pi ARM:300 hooks/render-view/thread-table cases, no mismatches and10266 balanced intervals. Disabled host .text is byte-identical to the original. These checks establish no hardware speedup. Timer scopes beyond depth16 are now ignored as balanced pairs and reported as incomplete attribution, preserving outer timers.

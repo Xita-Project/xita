@@ -15,7 +15,7 @@ fixture = r'''
 #include <assert.h>
 #define PHASE_MAX 512
 static struct { uint32_t parent, addr; uint64_t us; unsigned n; } phase_tab[2][PHASE_MAX];
-static unsigned phase_used[2];
+static unsigned phase_used[2], phase_overflow[2];
 static int phases=1;
 static const char *phase_tag[]={"[tick-phases]","[scene-phases]"};
 static char logs[16384];

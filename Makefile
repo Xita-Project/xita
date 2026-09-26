@@ -2235,7 +2235,11 @@ ifeq ($(XV_NATIVE_70110),1)
 CFLAGS += -DXV_NATIVE_70110=1 -DXV_NATIVE_70110_DEFAULT=$(XV_NATIVE_70110_DEFAULT)
 RECOMP_CFLAGS += -DXV_NATIVE_70110=1 -DXV_NATIVE_70110_DEFAULT=$(XV_NATIVE_70110_DEFAULT)
 endif
-$(RECOMP_BUILD)/kernel/xk_native_70110.o: RECOMP_CFLAGS += -ffp-contract=off
+XV_NATIVE_70110_PHASES ?= 0
+ifneq ($(filter $(XV_NATIVE_70110_PHASES),0 1),$(XV_NATIVE_70110_PHASES))
+$(error XV_NATIVE_70110_PHASES must be 0 or 1)
+endif
+$(RECOMP_BUILD)/kernel/xk_native_70110.o: RECOMP_CFLAGS += -ffp-contract=off -DXV_NATIVE_70110_PHASES=$(XV_NATIVE_70110_PHASES)
 # Native effects and material helpers (XV_NATIVE_EFFECTS): f_0007E530 (vertex-constant matrices), f_0007E420 (+7DBE0,
 # light constants), f_00056F20 (texture animation), f_00080360 (+1290E0, 80250: texture bind), f_00011B60 / f_00011610 /
 # f_00011BD0 (colour packing), hooked at their entries (tools/patch_native_effects_hooks.py):
