@@ -65,7 +65,31 @@ Initial evidence, September 26:
 - Pi fast-path attribution: the last ten object-space windows averaged 1.357 ms
   versus 1.781 ms for the fused path. This is supporting evidence only.
 
-Next: cold-launch with mode 2 and phase timers off.
-Measure pod, outdoor movement and NPC combat against the retained normal build,
-including slow frames and rendering/collision correctness. Keep the earlier
-shader and scene-index improvements enabled.
+Normal perf250 hardware results (mode 2, phase timers off, prior shader and
+scene-index changes retained):
+
+| Workload | Mean frame time | FPS | p95 | p99 | Frames over 200 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Standing pod, 1,200 intervals | 56.629 ms | 17.66 | 73.419 ms | 106.237 ms | 0 |
+| Standing outdoors, 1,200 intervals | 49.721 ms | 20.11 | 60.021 ms | 79.478 ms | 0 |
+| Movement, jump, turn, firing/reload, 1,200 intervals | 51.658 ms | 19.36 | 65.016 ms | 86.768 ms | 2 |
+
+The prior perf247 pod/outdoor/active averages were 17.51/19.97/19.64 FPS.
+These small differences do not establish a whole-frame speedup. The active
+route is not an identical device-timed replay; host command durations vary.
+Keep this option experimental and off by default. The earlier 24,080 hardware
+comparisons establish observed query correctness, not a performance benefit.
+Normal mode does not compare results and must not be cited as additional
+zero-mismatch verification.
+
+The captured outdoor and post-exercise views retain terrain and the weapon;
+there was no observed crash or scene abandonment. This short input sequence is
+not the required 15-minute active session, NPC combat validation, or full canyon
+cutscene coverage. Measurements are CPU Present-to-Present intervals, not GPU
+service or physical scanout times. About 26% of settled outdoor intervals still
+exceed 50 ms; a 20.11 FPS average does not meet the sustained target.
+
+Next: narrow the remaining scene material-packet preparation cost. Existing
+nested profiles put most model-loop time beneath material/draw preparation,
+not transform preparation. Preserve packet ownership, original ordering and
+callee side effects; do not cache whole packets by material identity.

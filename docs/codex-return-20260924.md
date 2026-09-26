@@ -1459,3 +1459,42 @@ Freshstatusframe7confirmedafterlaunch; openingcapturehasnooldimageandwaitsfor522
 Keepawake134059 active. Waitforcollector,viewpodscreen,compare1200normalintervals
 6300..7440against247~57.10ms/17.51FPS, thenoutsideandactivegameplay. Fastresult
 notknownyet. NoVita3K/newVPKneededforverify->fast; samepayloadwithfreshenvlaunch.
+
+
+### Perf250 normal hardware measurement completed
+
+Previous continuation was a verified wait: live collector372364 and keepawake134059,
+status frame7278. Normal fast collector finished; pod250-fast.png frame6515 viewed.
+fast250-summary.json:1200 intervals6300..7440,56.628666ms/17.65890FPS,
+p50 54.201,p95 73.419,p99 106.237,max130.923;870>50ms,17>100ms,0>200ms.
+No meaningful pod gain versus247 57.1039ms/17.5119FPS. Mode2 receipt, phase0,
+scene-index activation and5 specialized shader links verified.
+
+Moved forward5s, right3s, ARfire2s, neutralfinally (session33167 complete).
+outdoor250.png frame9093 viewed: terrain/weapon intact, AR30. Collector98398
+completed20windows9240..10380,1200intervals:49.720697ms/20.11235FPS,
+p50 47.471,p95 60.021,p99 79.478,max173.94;311>50ms,7>100ms,0>200ms.
+Prior247 outdoor50.0727ms/19.97: similar, not a demonstrated new gain.
+
+Four active forward/jump/fire/turn/back/reload cycles completed session81698.
+exercise250-input.json start11498,end12721; screenshot12724 viewed intact world,
+AR60 reserve446. Logs archived session51250 completed. Complete intervals wholly
+within input sequence11580..12720:1200samples,51.658351ms/19.35795FPS,
+p50 49.173,p95 65.016,p99 86.768,max323.621;492>50ms,8>100ms,2>200ms.
+Prior247 active19.64FPS; timing/route not exact replay, no speedup established.
+No observed crash; mode2 reports are NOT new differential comparisons. Short
+active exercise is not NPC combat/15min/full cutscene/AI/checkpoint qualification.
+Do not persist XV_NATIVE_OBJECT_QUERY yet. Same installed250 remains running.
+Keepawake134059 remains live. New collector/input/capture jobs all complete.
+Watch tagperf250-object-query-fast-20260926 and launch40927 remain; don't duplicate.
+
+Evidence narrows next rendering target: retained242 outdoor 5B4A0 ~16.77ms
+includes5B190 ~13.4 -> A26B0 ~12.4 -> A2380/material path; transform5AE10
+~0.84ms, not whole model time. Native70110 inclusive~9.6ms includes~3ms7A130;
+reported6.5ms remainder has untimed native callees and is NOT proven native self.
+A2380 also calls6EFC0 (~3.4ms across its routes). Existing model-routing audit
+warns6EFC0 allocates/selects/writes shared packets: don't memoize by material.
+Private packet-builder-audit.json inspects installed stage6EFC0 (627lines,
+8 direct callsites,19x87 operations):56D20,5DF60,5DF90,5DE90,66510,5FDA0x3.
+Next narrow its child cost/real ARM packet work before another broad rewrite.
+No new candidate code or performance claim, no push. Goal remains active.
