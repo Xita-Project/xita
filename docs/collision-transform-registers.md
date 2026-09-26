@@ -1,6 +1,6 @@
 # Collision transform register lowering — perf258 candidate
 
-September 26, 2026. Installed and boot-confirmed; gameplay result pending.
+September 26, 2026. Installed and boot-confirmed; short gameplay tests completed.
 
 The existing native ray cast replaces 88E90 and its BSP traversal, while
 1731D0 still prepares object collision rays using B6210 (inverse transform),
@@ -59,5 +59,33 @@ The compatible package replaces only `game-a.self` and `boot-game.txt`,
 preserving the asset contract. Remote upload/apply verified that hash and
 confirmed slot 0; perf257 remains in slot 1 for rollback. The protected a30
 launch uses `XV_SCENE_PHASES=0` and the in-app keep-awake lease.
-Next: inspect ordinary a30 gameplay/firing with timers off. A frame-rate gain
-and the 20 FPS objective remain unproven.
+## Hardware results (timers off)
+
+All marked frame intervals were present; benchmark mode was off. These are
+ordinary scripted gameplay samples, not matched A/B evidence.
+
+| Phase | Frames | Mean ms | FPS | p95 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Lifepod idle | 143 | 56.816 | 17.60 | 73.125 | 108.161 | 109.332 |
+| Lifepod AR firing | 64 | 75.844 | 13.18 | 98.316 | 117.736 | 117.736 |
+| After firing | 125 | 65.286 | 15.32 | 84.074 | 97.433 | 126.968 |
+| Outdoor movement/firing | 707 | 51.673 | 19.35 | 64.458 | 74.354 | 99.479 |
+
+The outdoor sample covers timing frames 9896–10602: four forward/turn/fire/
+reload/backward cycles after leaving the pod. The final screenshot shows the
+player outside, intact terrain and weapon, a reloaded AR and full health. No
+crash occurred during these short sequences. Of 707 outdoor frames, 334 exceeded
+50 ms; none exceeded 100 ms. This does not establish sustained 20 FPS, NPC
+combat, long-session stability, or a fix for the Warthog/rocket crash.
+
+The lifepod values are broadly similar to perf255/256. No frame-time gain is
+established for the single B6210 change. Private receipts are
+`ar258-summary.json`, `ar258-events.json`, `move258-summary.json` and
+`move258-events.json` in the candidate directory. Host input brackets do not
+identify the precise weapon simulation tick.
+
+Next: attribute impact-triggered effects/sound and the object-update branches
+that grow while firing before choosing another implementation boundary. The
+existing particle-callee profile limits what further 80720 math alone could
+save. Keep all qualified earlier changes; do not infer a speedup from the Pi
+microbenchmark or remove gameplay work to improve the number.
