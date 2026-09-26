@@ -634,3 +634,13 @@ After boot-confirmation run render-trace-buffer-candidate/launch.sh and its
 collect-trace.py, redirecting their logs there. Latest changes122be38f local;
 no push. Previous goal turn progresses via reproduced trace failure, tested
 fix and new hardware candidate. Target not met.
+
+Perf240 update64593 completed0/boot-confirmed slot0, payload SHA
+64cdcf0b38272dc9b7c674bea713f58eb51ef3b2e45fbfac07d9c6c46addfc5c.
+Launch10195 and collector57135 started in render-trace-buffer-candidate;
+logs gameplay-driver.log/collector.log. Collector waits gameplay end>=5700
+then captures pod240.png and ONE trace. Validator now requires buffer marker,
+zero dropped lines, successful allocation, same end frame and actual records.
+Added tools/summarize_draw_trace.py to group validated state by PS/VS/pass,
+texture dimensions and constants. It rejects the actual239 failed trace and
+synthetic dropped/allocation/count/end-frame failures. Counts are NOT GPU time.
