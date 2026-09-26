@@ -59,4 +59,25 @@ The package changes only `game-a.self` and `boot-game.txt`; its asset contract i
 unchanged. All translated bodies other than 80720 compare byte-identically to
 perf255. The 80720 ELF symbol shrank from 18,634 to 13,810 bytes (25.89%).
 Code size is not a frame-rate measurement. Perf255 remains the rollback slot.
-An ordinary protected a30 launch with phase timers off is in progress.
+An ordinary protected a30 launch with phase timers off completed, followed by
+a short stationary AR firing test at the lifepod exit. The before/after images
+show 60 to 6 rounds; all timing intervals were present. Private receipts are
+`ar256-events.json`, `ar256-summary.json`, `ar256-marked.log` and the before/after
+images in the candidate directory. The in-app keep-awake lease remains active.
+
+| Phase | Frames | Mean ms | FPS | p95 ms | p99 / max ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Idle | 152 | 54.44 | 18.37 | 67.62 | 100.42 / 107.04 |
+| Firing | 65 | 75.12 | 13.31 | 98.88 | 136.89 / 136.89 |
+| Cooldown | 127 | 64.05 | 15.61 | 82.64 | 91.06 / 101.19 |
+
+The prior uninstrumented perf255 run measured 53.91, 78.30 and 63.63 ms for
+these phases. This single fresh-launch observation does **not** establish a
+speedup: idle and cooldown are effectively unchanged, weapon/input timing and
+particle histories differ, and the firing bracket was 4.92 seconds versus
+4.56 seconds previously. The candidate remains installed for further ordinary
+gameplay, with perf255 available for rollback. This short test completed without
+a crash, but does not validate the Warthog/rocket reproduction or long-session
+stability. The 20 FPS target is not met. Next investigate remaining particle
+update/collision work and simulation cost while retaining the separate light-list
+freeze investigation.
