@@ -989,3 +989,35 @@ payloadSHAexactlybd28fae6d7c7013c22dbea8a1251682dcf2cb06f2234fe1c1d00efb72205e74
 Startedscene-callback-candidate/launch.sh andcollect.py, logsdriver.log and
 collector.log. Awaitconfirmedenvreceipt,qualifiedpod243.png andsettledlog;
 thenanalyzeactual54010childrenwithanalyze.py. ThisisdiagnosticnotFPSacceptance.
+
+
+### Perf243 callback attribution completed
+
+Qualified pod243.png frame6128 and outdoor243.png frame9554, both viewed;
+movement/fire sequence completed without a crash or obvious new visual defect.
+Private scene-callback-candidate/settled-pod.log3133017bytes, last10phasegroups
+near7800..8340:54010 inclusive7.113ms, self4.076ms (15children).
+settled-outdoor.log4146699bytes, last10groups10080..10620:
+54010inclusive6.471ms,self3.588ms. Leadingcallbacks:62870~1.24ms,
+628F0~0.93ms,62270~0.35ms; remaining callbacks individuallysmall.
+Timingsdiagnostic,notnormalFPS; timer overhead nowmoves some cost into dispatcher
+remainder. Original~5.5–6ms apparent self included these previouslyuntimedcalls.
+Do NOT assume a6ms puredispatcherrewrite saving. Preserveordering/callbacks.
+
+Private callback-reference/manifest.json pins owned bodies54010,62870,628F0,
+62270; generatedcode remainsoutsidegit. 628F0is a33lineforwarder to77FE0,
+not0.9ms ofwrapperoverhead. 62870and77FE0 contain39/65x87ops respectively;
+existing x87-regs-d3-final explicitlyrejects both forlowdensity (manycall-syncs),
+notunsupportedinstructions. R=0regeneratedcopiesexistbut priorARMwork showed
+call-heavyregsloweringregressions; do notblindlyoverride density3.
+54010has0x87ops,4indirectcalls,501originalClines (533withnewtimers).
+Itsown3.6–4.1ms suggests nativeordered-list traversal/setup, retainingcallback
+order and every guest-visible state/memory effect. Needs in-process reference
+comparison and ARMcost proof; no replacementimplementedyet. Existing TPIDRURW
+pagetablelookupalreadyhoisted(oneMRC/function); do notclaimitper-memorycost.
+Existing53E90maskscanprototype remainsuninstalled due commonmaskregressions.
+
+Stopped confirmeddiagnosticwatcher276403. Announcednormalrestore; launched
+scene-callback-candidate/restore.sh tagperf243-normal-restored-20260926,
+phases0, allretainedshader/native/deferredsettingsunchanged. Awaitenvreceipt;
+keepawake134059retained. Goalstillincomplete; noadditionalFPSgainclaimed243.
