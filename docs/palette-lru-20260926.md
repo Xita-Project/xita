@@ -134,3 +134,27 @@ expand cache memory without proving identity/content reuse in this workload.
 Next diagnostic is a bounded ordinary outdoor idle/firing draw capture, excluded
 from timing, to identify work added by firing. Preserve complete receipts and
 reject earlier completed captures when a new request has not yet finished.
+
+### Bounded outdoor draw captures
+
+Session 29776 completed. Idle frame 11098 has 274 recorded draws; firing frame
+11460 has 307. Both pass strict closed-receipt/no-dropped-lines validation, and
+their frame IDs are newer than the corresponding request status. `outdoor-fired.png`
+shows the same outdoor view and AR magazine 52 instead of 60, confirming trigger
+input took effect. These trace frames are diagnostic and excluded from FPS.
+
+`firing-draw-delta.json` and `firing-model-delta.json` correlate the accepted draw
+states with map resources. The net +33 draws include +15 vs09/154066FD, five new
+vs10/154066FD and additional effect shader groups. The five first-person model
+materials move from vs09 to vs10 rather than disappearing. Identified resource
+changes include +15 pine draws (ten bough, five trunk) and five rock draws;
+emitters also differ. No object-instance or complete lighting-state identity is
+available in these logs. Resource counts alone do not prove redundant work.
+
+These are two separate frames, not identical simulation state: recoil, visibility
+query results and time-varying effects may change the scene. Therefore the net
+draw difference cannot all be attributed to firing, nor converted to milliseconds.
+The evidence does not support treating the entire firing slowdown as blended
+particle overdraw. Continue with scene-preparation/firing simulation attribution
+and preserve visibility/lighting correctness; do not delete scenery draws based
+on this count. The trace helper has finished and released remote inputs.
