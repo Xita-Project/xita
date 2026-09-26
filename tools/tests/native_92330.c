@@ -68,6 +68,11 @@ void x_str_stos(xctx *c, unsigned sz, int mode)
     } while (mode != X_STR_ONCE);
 }
 extern void f_00056670(xctx *);
+#ifdef XV_NATIVE_52240_TEST
+extern void f_00052240(xctx *);
+extern void xv_native_52240_test(xctx *);
+extern void xv_native_52240_test_counts(uint64_t out[3]);
+#endif
 extern void xv_native_92330_force(int);
 
 enum { ARENA = 24u << 20, IMAGE_PAGES = 0x400, TAG = 0x40000000u, TAG_PAGES = 768, STACK = 0xD0000000u, STACK_PAGES = 8,
@@ -287,6 +292,17 @@ static void init_ctx(xctx *c)
     c->f_kind = rnd() % 5; c->f_op1 = rnd(); c->f_op2 = rnd(); c->f_res = rnd(); c->f_bits = 32; c->f_cf = rnd() & 1; c->f_of = rnd() & 1;
     c->df = rnd() % 53 == 0;
     c->preempt = (int32_t)(rnd() % 200) - 20;
+#ifdef XV_NATIVE_52240_TEST
+    /* Reuse randomized BSPs, but enter the flood directly with its own ABI. */
+    uint16_t cluster; x_guest_read_pages(&cluster, c->r[0] + 4, 2);
+    if (cluster == 0xFFFFu) cluster = 0;
+    c->r[1] = (c->r[1] & 0xFFFF0000u) | cluster;
+    c->r[2] = r32(E_top + 12);
+    uint32_t radius = r32(E_top + 16), list = tag_alloc(128, 0);
+    static const uint32_t capacities[] = {0, 1, 2, 64, 0xFFFFFFFFu};
+    w32(E_top + 4, radius); w32(E_top + 8, capacities[rnd() % 5]);
+    w32(E_top + 12, list);
+#endif
 }
 
 static int same_ctx(const xctx *a, const xctx *b, char *why, size_t n)
@@ -328,7 +344,11 @@ static int run(xctx *c, int mode)
     xv_native_92330_force(mode);
     if (sigsetjmp(alarm_jmp, 1)) { xv_native_92330_force(0); return 0; }
     alarm(4);
+#ifdef XV_NATIVE_52240_TEST
+    if (mode) xv_native_52240_test(c); else f_00052240(c);
+#else
     f_00056670(c);
+#endif
     alarm(0);
     xv_native_92330_force(0);
     return 1;
@@ -478,5 +498,11 @@ int main(int argc, char **argv)
     printf("native-92330 differential: %u cases (%u flooded, %u linked, %u stack-alias scenes, %u guest timeouts skipped, %u NaN-payload words), %u mismatches%s",
            s.cases, s.flood_cases, s.linked, s.alias_cases, s.timeouts, s.nan_words, s.mismatches, verify ? "" : "\n");
     if (verify) printf(", verify-mode failures %u (%u verify runs past the alarm skipped)\n", s.verify_mismatch, s.verify_timeouts);
+#ifdef XV_NATIVE_52240_TEST
+    uint64_t counts[3]; xv_native_52240_test_counts(counts);
+    printf("direct flood coverage: %llu calls, %llu flood entries, %llu portal tests\n",
+           (unsigned long long)counts[0], (unsigned long long)counts[1], (unsigned long long)counts[2]);
+    if (cases >= 300 && (counts[0] < cases || counts[1] <= counts[0] || !counts[2])) return 2;
+#endif
     return s.mismatches || s.verify_mismatch;
 }

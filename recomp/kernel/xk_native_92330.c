@@ -136,6 +136,10 @@ typedef struct {
     int dirty;               /* a write may have hit a stack slot a caller keeps in a local */
     int16_t cl_min, cl_max;  /* stamped cluster range (verify regions) */
     unsigned portals, full, clusters, datums, flood;
+#ifdef XV_NATIVE_52240_TEST
+    uint32_t flood_flag_a, flood_flag_b;
+    unsigned flood_flag_kind;
+#endif
 } n9;
 
 static inline uint16_t n9_cmp_(uint16_t *fsw, uint32_t fsp0, double a, double b, unsigned depth)   /* x87_compare */
@@ -523,8 +527,14 @@ static uint32_t n9_flood(n9 *s, uint32_t S, uint32_t radius, uint32_t count, uin
             break;
         }
         if (s->dirty) found = n9_r32(m, S + 0xCu);
+#ifdef XV_NATIVE_52240_TEST
+        s->flood_flag_kind = XK_SUB; s->flood_flag_a = eax; s->flood_flag_b = ecx;
+#endif
         eax = N9_LO(eax) | (found & 0xFFFFu);
     }
+#ifdef XV_NATIVE_52240_TEST
+    else { s->flood_flag_kind = XK_LOGIC; s->flood_flag_a = edx; s->flood_flag_b = 0; }
+#endif
     (void)fsw; (void)fsp0; s->backedges += be;
     *ecx_out = ecx; *edx_out = edx;
     return eax;
@@ -781,6 +791,36 @@ static inline void n9_init(n9 *s, xctx *c)
     s->c = c; s->E = c->r[4]; s->fsp0 = c->fsp; s->fsw = c->fsw; s->touched = 0; s->backedges = 0; s->dirty = 0;
     s->cl_min = 0x7FFF; s->cl_max = -0x8000; s->portals = s->full = s->clusters = s->datums = s->flood = 0;
 }
+#ifdef XV_NATIVE_52240_TEST
+/* Differential-test candidate only: no runtime hook or user setting. The
+ * encompassing light query normally overwrites these exit flags. */
+static uint64_t n52240_test_counts[3];
+void xv_native_52240_test_counts(uint64_t out[3]) { memcpy(out, n52240_test_counts, sizeof n52240_test_counts); }
+void xv_native_52240_test(xctx *c)
+{
+    n9 s; n9_init(&s, c); s.low = s.E;
+    const n9_mem *m = &s.m;
+    const uint32_t E = s.E;
+    uint32_t ecx, edx;
+    uint32_t eax = n9_flood(&s, E, n9_r32(m, E + 4), n9_r32(m, E + 8),
+                           n9_r32(m, E + 12), c->r[1], c->r[2], c->r[3],
+                           c->r[5], c->r[6], c->r[7], &ecx, &edx);
+    c->r[0] = eax; c->r[1] = ecx; c->r[2] = edx;
+    c->r[3] = n9_r32(m, E - 0x10); c->r[5] = n9_r32(m, E - 0x14);
+    c->r[6] = n9_r32(m, E - 0x18); c->r[7] = n9_r32(m, E - 0x1C);
+    c->r[4] = E + 16;
+    c->f_kind = s.flood_flag_kind;
+    c->f_op1 = s.flood_flag_kind == XK_SUB ? s.flood_flag_a : 0;
+    c->f_op2 = s.flood_flag_b;
+    c->f_res = s.flood_flag_a - s.flood_flag_b; c->f_bits = 32;
+    c->f_cf_override = c->f_of_override = 0;
+    for (unsigned k = 1; k < 8; ++k)
+        if (s.touched & (1u << k)) c->st[(s.fsp0 - k) & 7u] = s.sl[k];
+    c->fsw = s.fsw;
+    n9_budget(c, s.backedges);
+    n52240_test_counts[0]++; n52240_test_counts[1] += s.flood; n52240_test_counts[2] += s.portals;
+}
+#endif
 static void n9_count(const n9 *s)
 {
     N9_ADD(N9_CALLS, 1);

@@ -12,7 +12,8 @@ globals through the page table, as on the Vita) and -O0 - and runs the randomize
 the in-game verify mode (mode 1) per case. --mutants N builds deliberately broken natives and requires each to be
 caught within N cases (a crash or a hang counts; two mutants need ~3000 cases: a summation association that changes
 one rounding in 3000, and the exit carry flag that only the stack-straddling-0 scenes reach)."""
-import argparse, os, re, shutil, subprocess, sys, tempfile
+import argparse, os, re, shutil, subprocess, sys, tempfile, shlex, json
+from contextlib import nullcontext
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,7 +60,15 @@ def main():
     ap.add_argument('--cc', default=os.environ.get('CC', 'cc')); ap.add_argument('--seed', default='1')
     ap.add_argument('--verify', action='store_true'); ap.add_argument('--mutants', type=int, default=0)
     ap.add_argument('--variants', default='all')
+    ap.add_argument('--flood', action='store_true', help='Test the isolated 52240 candidate; no runtime hook.')
+    ap.add_argument('--output', type=Path, help='Preserve private generated sources, binaries and build receipts here.')
+    ap.add_argument('--build-only', action='store_true')
+    ap.add_argument('--extra', default='', help='Extra compiler flags, including cross-compilation target flags.')
     a = ap.parse_args(); rec = Path(a.recomp)
+    rec = rec.resolve()
+    if a.build_only and (not a.output or a.mutants): ap.error('--build-only requires --output and no mutants')
+    if a.flood and (a.verify or a.mutants):
+        ap.error('--flood does not support the light-query verify/mutant modes')
     shards = sorted(rec.glob('code_*.c')); texts = {}
     for p in shards:
         t = p.read_text(errors='replace')
@@ -81,17 +90,20 @@ def main():
                 'plain -O0': ['-O0']}
     if a.variants != 'all': variants = {k: v for k, v in variants.items() if k.split()[0] in a.variants.split(',')}
     rc = 0
-    with tempfile.TemporaryDirectory(prefix='xita-native-92330-') as d:
-        d = Path(d); (d / 'guest.c').write_text(guest); (d / 'kernel').mkdir()
+    if a.output: a.output.mkdir(parents=True, exist_ok=True)
+    with (nullcontext(a.output.resolve()) if a.output else tempfile.TemporaryDirectory(prefix='xita-native-92330-')) as d:
+        d = Path(d); (d / 'guest.c').write_text(guest); (d / 'kernel').mkdir(exist_ok=True)
         native_src = (ROOT / 'recomp/kernel/xk_native_92330.c').read_text()
         def build(exe, flags, native_text):
             (d / 'kernel/xk_native_92330.c').write_text(native_text)
-            cmd = [a.cc, *flags, '-std=gnu11', '-w', '-fno-strict-aliasing', '-ffp-contract=off', '-DXV_NATIVE_92330=1', '-I' + str(rec),
+            cmd = [a.cc, *flags, *shlex.split(a.extra), *(['-DXV_NATIVE_52240_TEST=1'] if a.flood else []), '-std=gnu11', '-w', '-fno-strict-aliasing', '-ffp-contract=off', '-DXV_NATIVE_92330=1', '-I' + str(rec),
                    '-I' + str(rec / 'kernel'), str(ROOT / 'tools/tests/native_92330.c'), str(d / 'guest.c'),
                    str(d / 'kernel/xk_native_92330.c'), '-lm', '-o', str(exe)]
             subprocess.run(cmd, check=True)
-        for name, flags in variants.items():
-            exe = d / 'test'; build(exe, flags, native_src)
+            (d / (exe.name + '.build.json')).write_text(json.dumps({'command': cmd}, indent=2))
+        for index, (name, flags) in enumerate(variants.items()):
+            exe = d / ('test-' + str(index)); build(exe, flags, native_src)
+            if a.build_only: continue
             args = [str(exe), a.cases, a.seed] + (['--verify'] if a.verify else [])
             r = subprocess.run(args, capture_output=True, text=True)
             print(f'[{name}] ' + (r.stdout.strip() + r.stderr.strip()).replace('\n', f'\n[{name}] '), flush=True)
