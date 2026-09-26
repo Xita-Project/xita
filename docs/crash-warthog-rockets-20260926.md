@@ -65,3 +65,10 @@ passed host ASan/UBSan and Cortex-A9-targeted ARM tests on the Raspberry Pi.
 The decoder rejected a partial capture and identified a synthetic two-node
 cycle. The full developer Vita build linked successfully with the capture
 symbol. Hardware reproduction and the cause of the freeze remain unverified.
+
+Hardware deployment: perf255 was verified and cold-boot confirmed in slot 1;
+runtime SHA-256 `cb6e797033a50e1e48d09298f7d2b512ae62545a24a699161aa224a0d4e12e37`.
+The compatible update preserves the previous perf254 slot and asset contract.
+The saved configuration has `XV_FREEZE_ABORT=40`; the dashboard is running and
+the in-app keep-awake lease was renewed after restart. This is boot validation,
+not validation of the diagnostic under a freeze or an improvement in FPS.
