@@ -1368,3 +1368,22 @@ Vita249 still loading aroundframe3037 when this note was written. Private source
 references inbiped-phase-candidate include4B9D0,8DDF0,868F0; no generated code was
 committed. 868F0 is only289 lines, forwarding to862A0,86170,86440; don't assume
 itself is expensive before the child breakdown arrives.
+
+
+CollectionPi69518 finishedplanned120s timeout124,36reports. Last reports171F10
+~1.91-1.98ms inclusive,88110~0.03ms and virtually all remaining time reportedself.
+This is NOT actual selfCPU: XV_NATIVE_OBJECT_COLLECT bypasses the timed guest
+1716F0 call and calls it inside xk_object_collect.c. Native BSP query~10us/call,
+120calls/60frames,0surfaces; optimizing868F0 here would target the wrong branch.
+Nextprivate object-collision-phase-pi wraps the actual native collector's call
+into1716F0 and seven direct calls inside1716F0. Buildsession34801, still pending.
+Usescollection-phase-pi code028, its splitfusedscopes retained, biped-phase-pi
+code008, and newlyinstrumentedxk_object_collect.o. Then run120s onPi0/1 withsame
+settings. Inspect object callbackchildren855F0,81900,81770,172DE0,172F40 before
+choosing an optimization. Nativecollect outer-loop already exists; don't duplicate.
+
+Vita249 openingcapture74359 finishedframe5316: same letterboxed pod transition
+withweapon/HUD, NOT qualifiedcanyonflight. Current nearby4B9D0~17.7-18.7ms,
+49600~17.35-18.34,172BF0~17.21-18.20ms (ownerelapsedincludeswaits). Confirms Pi's
+high-levelcallchainonhardware; doesn'tyetprove its deeperrelativecostsonVita.
+Collector46799 stilllive; let it archive qualifiedpodlogbeforefurtherdeployment.
