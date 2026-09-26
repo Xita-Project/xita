@@ -262,3 +262,20 @@ rejects oversized requests rather than truncating them. Use the updated client
 with older devices as well. Batches are sequential, not transactional; if a
 request fails, do not launch until settings have been reapplied successfully.
 Check startup `[remote] env` lines for the settings used in a measurement.
+
+### Correlating controls with frame timings
+
+`/status.frames` and screenshot frame identifiers count remote image publications.
+They are **not** the guest Present identifiers printed by `[frame-us]`. Do not
+join those counters or use screenshot numbers as exact timing-window boundaries.
+
+New builds expose `/status.timing_frame`: the last completed Present identifier
+published by the `[frame-us]` producer when `XV_FRAME_TIMES=1`. Zero means the
+provider is unavailable or has not published a usable marker yet. Older builds
+omit the field. Refuse exact input/timing correlation in either case.
+
+Bracket an input with `timing_frame` readings, use the corresponding complete log
+records, and require every requested sample to be available. Network latency and
+input sampling make these brackets approximate; they do not identify the exact
+simulation tick that fires a weapon. Use screenshots or other game evidence to
+confirm the action occurred. Keep screenshots outside the measured interval.

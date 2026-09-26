@@ -167,6 +167,7 @@ def main():
         benchmark_cases(tmp)
         exe = tmp / "server"
         flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if os.getenv("SANITIZE") else []
+        if os.getenv("XITA_TEST_TIMING_PROVIDER"): flags.append("-DXITA_TEST_TIMING_PROVIDER")
         subprocess.run(["cc", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", *flags,
                         str(ROOT / "tools/tests/remote_server.c"), str(ROOT / "runtime/xv_update.c"), str(ROOT / "runtime/xv_update_halo2.c"), str(ROOT / "runtime/xv_sha256.c"), "-pthread", "-o", str(exe)], check=True)
         data = tmp / "ux0:data/xita"
@@ -361,6 +362,8 @@ def main():
                 else:raise AssertionError('Invalid game log selection accepted')
             status = client.status()
             assert status["protocol"] == 1
+            assert status["timing_frame"] == (2**32-1 if os.getenv("XITA_TEST_TIMING_PROVIDER") else 0)
+            assert status["frames"] != status["timing_frame"]  # independent counters
             assert status["reported_cpu_mhz"] == 0  # host has no Vita clock API
             assert client.log(tmp / "client.log") == len(log)
             assert (tmp / "client.log").read_bytes() == log

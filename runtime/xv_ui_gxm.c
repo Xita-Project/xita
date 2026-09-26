@@ -1516,6 +1516,14 @@ static uint64_t g_t_last_present, g_t_game_acc, g_t_render_acc; static unsigned 
  * Owner reporting follows the helper join, just like the aggregate counters. */
 static int g_frame_times_enabled = -1;
 static uint64_t g_frame_times_us[60];
+/* /status.frames counts remote image publications, including non-game frames.
+ * Publish the actual completed [frame-us] identifier for input correlation. */
+static unsigned g_timing_frame;
+unsigned xv_ui_timing_frame(void)
+{
+    return __atomic_load_n(&g_timing_frame, __ATOMIC_ACQUIRE);
+}
+
 static inline uint64_t t_us(void) { extern uint64_t xk_os_monotonic_us(void); return xk_os_monotonic_us(); }
 void xd3d_hist_small_check(unsigned frame, unsigned draws);
 uint64_t xv_t_present_us;
@@ -1565,6 +1573,7 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
         g_frame_times_us[g_t_frames] = g_t_last_present && t1 >= g_t_last_present
             ? t1 - g_t_last_present : 0; /* zero marks an unavailable interval */
     g_t_render_acc += t1 - t0; g_t_last_present = t1;
+    if (g_frame_times_enabled) __atomic_store_n(&g_timing_frame, frame, __ATOMIC_RELEASE);
     if (t1 - t0 > 300000u) {   /* perf133 (Sept 23): isolated ~6.6 s present-path stalls once every few windows; name the stage */
         static unsigned n_; if (n_++ < 20) UI_LOG("[present-stall] frame %u: %llu ms total; pre %llu EndFrame %llu flip %llu flush %llu present %llu BeginFrame %llu frame_begin %llu purge %llu ms\n", frame,
             (unsigned long long)((t1 - t0) / 1000), (unsigned long long)((ps_[0] - t0) / 1000), (unsigned long long)((ps_[1] - ps_[0]) / 1000), (unsigned long long)((ps_[2] - ps_[1]) / 1000),

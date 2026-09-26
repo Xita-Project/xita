@@ -1849,3 +1849,34 @@ filename: sceneMUSTbevisuallyqualified),normal252-summary.json. Itdoesnot
 provepodscenejustfromfilename. Keepawake134059continues. Nextpollsame30317
 andnormalcollector,verifyordinarymaterials,recordnormalresultsanduserARissue.
 Noadditionalbenchmarktoggleloops. Goal20FPSunmet,normalmode252notyetqualified.
+
+## 2026-09-26: normal252 outdoor and AR timing-correlation correction
+
+Readobjective; previousnormalrestorationturnwasprogress. Normal30317/PID481630
+confirmedlive,noadditionalrestart. Collector32536finished0. Photo6526
+normal252-check.pngshowsnormaltreesOUTSIDE,AR60/ammo384. Correctlylabeloutdoor,
+notpoddespitelegacyfilename. Normal1200intervalsmean55.01302ms18.177515FPS,
+p9567.248,p9993.529,max127.972,967>50ms,8>100,0>200. No[material-cost]links,
+normalmateriallinks5. Gray55.586msvsnormal55.013msnotvalidmatchedview/input
+comparison; doesnotshowgainfromgray. Bothuser-activeoutdoors,donotclaimshader
+costisolated. Normal252remainsinstalled/activeprotectedtestsave.
+
+Privatear252.pyexecuted88835finished0:statusimageframesidle8720,fire8877,
+end8941,cooldown9080;photosbeforeAR60afterAR07prove53rounds,unchangedview.
+FoundCRITICALcountermismatch: /status.frames fromxv_remote_frame countsimage
+publications, while[frame-us] usesguestframepassedtoxd3d_r_present. Theseare
+independent! Naivejoinedphasesinvalidatedexplicitlyinar252-summary.json.
+DoNOTclaimidle15.49/fire17.50/cooldown17.06FPSfrominvalidjoin. Rawoverall
+reportwindowFPSstillvalid; exactsnapshot-framealignmentnotvalid. Existing
+scenewindowsneedvisualcontextandloadedstate,notnumericalremote-frameidentity.
+
+Implementedruntime/xv_ui_gxm.c atomiclastcompletedtimingframepublisher only
+whenFRAME_TIMESenabled; weakgetterinremote/status exposes timing_frame field,
+0ifabsent.32bitatomic,no64bitlock,timestampreuse,noadditionalclockcalls.
+Runtimeframecountandscreenshotsunchanged. tools/test_remote.py verifiesabsent
+provider0,withXITA_TEST_TIMING_PROVIDER=1fixtureUINT32_MAXindependentfromframes.
+Basehosttest97596passed;provider+ASan/UBSan54864passed. Docsremote-testingupdated.
+TheseeditsNOTyetbuilt/deployed. Nextbuildperf253from252private stage,qualified
+code-onlyupdate, thenmarkedARtestusesstatus.timing_frame andcompletecoverage;
+neverreuseoldimageframejoin. Pendingnormalwatch30317canfinish;nochildrestart
+becauseitwaits. Keepawake134059stillownslease. Goal20FPSunmet.

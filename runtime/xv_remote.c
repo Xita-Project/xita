@@ -341,8 +341,10 @@ static void serve(int s)
         } else if(!strcmp(method,"GET")&&!strcmp(target,"/status")) {
             { extern void xv_render_view_watchdog(void) __attribute__((weak)); if(xv_render_view_watchdog)xv_render_view_watchdog(); }   /* un-freeze a scene stuck on the render view */
             uint64_t now=remote_now();
-            char body[320];snprintf(body,sizeof body,"{\"protocol\":1,\"build\":\"%s\",\"version\":\"%s\",\"revision\":\"%s\",\"frames\":%u,\"benchmark\":%u,\"awake_seconds\":%llu,\"reported_cpu_mhz\":%d}\n",
-                XV_BUILD_LABEL,XV_BUILD_VERSION,XV_BUILD_REVISION,LOAD(&frame_count),xv_benchmark_status(),
+            extern unsigned xv_ui_timing_frame(void) __attribute__((weak));
+            unsigned timing_frame=xv_ui_timing_frame?xv_ui_timing_frame():0;
+            char body[384];snprintf(body,sizeof body,"{\"protocol\":1,\"build\":\"%s\",\"version\":\"%s\",\"revision\":\"%s\",\"frames\":%u,\"timing_frame\":%u,\"benchmark\":%u,\"awake_seconds\":%llu,\"reported_cpu_mhz\":%d}\n",
+                XV_BUILD_LABEL,XV_BUILD_VERSION,XV_BUILD_REVISION,LOAD(&frame_count),timing_frame,xv_benchmark_status(),
                 (unsigned long long)(awake_until>now?(awake_until-now)/1000000:0),xv_remote_cpu_mhz());
             if(!header(s,200,"application/json",strlen(body),NULL))send_all(s,body,strlen(body),remote_now()+2000000);
         } else if(!strcmp(method,"POST")&&!strncmp(target,"/pad?",5)) {

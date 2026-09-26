@@ -1,5 +1,8 @@
 #include <assert.h>
 #include "../../runtime/xv_remote.c"
+#ifdef XITA_TEST_TIMING_PROVIDER
+unsigned xv_ui_timing_frame(void) { return UINT32_MAX; }
+#endif
 static unsigned benchmark;
 uint32_t xv_benchmark_status(void) {return LOAD(&benchmark);}
 unsigned xv_benchmark_remote_busy(void) {return LOAD(&benchmark)!=0;}
