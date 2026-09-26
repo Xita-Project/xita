@@ -430,3 +430,23 @@ threshold exception. Staged report and depth tests both pass; depth test now
 also accepts `--source`. Build and transfer succeeded. New 180-second run
 `codex-effect-child-v2-20260926` is launched on cores 0/1; use its live exec
 session 65064 to poll. All v1 jobs are terminal. No hardware deployment.
+
+### Overflow confirmed in the corrected collector
+
+V2 session 65064 is terminal (planned timeout 124, 68 reports). Four windows
+explicitly report nesting overflow: 360, 96, 360, 96 omitted scopes. Recovery
+preserves outer attribution, but omitted children still make self totals
+incomplete. The two 113370 firing rows now show inclusive 1.16/1.07 ms and
+self 0.06/0.05 ms; largest children 1122A0 0.80/0.72 and 113080 0.26/0.25 ms.
+This contradicts treating the older 0.6–0.8 ms remainder as local wrapper
+work. Do not optimize that wrapper based on the stale measurements. V2 rows
+and warnings are preserved in `effect-child-phase-pi/v2-windows.json`.
+No fatal/trap line was found; no hardware performance result is implied.
+
+Private diagnostic capacity increased to 64 scopes (production remains 16).
+Depth tests now derive capacity from the compiled arrays and pass for both
+production 16 and staged 64, including overflow recovery and per-thread
+isolation. Build/transfer finished. V3 run `codex-effect-child-v3-20260926`
+is live as exec session 73941 on Pi cores 0/1 with the same 180-second inputs.
+Poll that handle and require no omitted-scope reports before attributing
+its deepest effect costs. Perf260 remains built but uninstalled.
