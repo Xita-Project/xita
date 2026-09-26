@@ -55,17 +55,51 @@ def summarize(selected):
                 over_200ms=sum(v > 200000 for v in values))
 
 
+def cadence(selected, period):
+    """Group actual interval frame identifiers, preserving missing/zero samples.
+
+    A high-cost phase is correlation with a cycle, not proof of its cause.
+    These groups never remove intervals from the overall summary.
+    """
+    if period < 2:
+        raise ValueError('cadence period must be at least 2 frames')
+    phases = {}
+    for end, values in selected:
+        for offset, value in enumerate(values):
+            phase = (end - len(values) + 1 + offset) % period
+            phases.setdefault(phase, []).append(value)
+    rows = []
+    for phase, values in sorted(phases.items()):
+        valid = [v for v in values if v]
+        row = dict(phase=phase, samples=len(valid), unavailable=values.count(0))
+        if valid:
+            stats = summarize([(0, values)])
+            row.update({k: stats[k] for k in ('mean_ms', 'p95_ms', 'max_ms',
+                                             'over_100ms', 'over_200ms')})
+        rows.append(row)
+    return dict(period_frames=period,
+                limits='Correlation only; all intervals remain in the overall summary. '
+                       'Frame identifiers are inferred from each complete report end.',
+                phases=rows)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('log', type=Path)
     p.add_argument('--from-frame', type=int, default=0)
     p.add_argument('--to-frame', type=int, default=2**32-1)
+    p.add_argument('--cadence-period', type=int,
+                   help='also group intervals by frame identifier modulo this period')
     a = p.parse_args()
     records, discarded = windows(a.log.read_text(errors='replace'))
     selected = [(f, v) for f, v in records if a.from_frame <= f <= a.to_frame]
     result = summarize(selected)
     result['incomplete_windows_in_log'] = discarded
     result['window_end_frames'] = [f for f, _ in selected]
+    if a.cadence_period is not None:
+        if a.cadence_period < 2:
+            p.error('--cadence-period must be at least 2')
+        result['cadence'] = cadence(selected, a.cadence_period)
     print(json.dumps(result, indent=2))
 
 

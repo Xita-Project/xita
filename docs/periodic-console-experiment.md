@@ -36,3 +36,28 @@ read back while the worker retained its startup policy. The private receipt and
 guarded restoration script live in the candidate directory. Check cumulative console time stays zero while file
 bytes progress, then compare complete raw frame distributions and phase cadence.
 Do not remove periodic outliers from the acceptance results.
+
+
+## Qualified perf251 pod result
+
+After startup activation was verified, 1,200 intervals ending at report frames
+6300..7440 averaged **56.083 ms / 17.83 FPS**, p95 72.666 ms, p99 108.853 ms,
+maximum 183.038 ms. Eighteen exceeded 100 ms; none exceeded 200 ms. The prior
+perf250 sample was 56.629 ms / 17.66 FPS. This small difference does not establish
+a meaningful speedup.
+
+The recurring phase-3 interval still averages **101.993 ms** (11/20 over 100 ms),
+versus 104.317 ms (14/20 over 100 ms) before. Disabling periodic console output
+does not remove the cadence or explain the whole stall. Leave the option
+experimental; do not make it a default optimization on this evidence.
+
+Reproduce the cadence analysis without excluding any slow frames:
+
+```sh
+python3 tools/frame_times.py capture.log --from-frame 6300 --to-frame 7440 --cadence-period 60
+```
+
+The capture must first be qualified for build, settings and scene. The pod photo
+was at frame 6369, inside this window; screenshot I/O can affect isolated samples.
+The opening photo at frame 5057 was a black transition, not evidence of canyon
+performance. Outdoor qualification is still pending.
