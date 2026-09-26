@@ -510,3 +510,12 @@ These mocks do not verify actual CDRAM mapping or GPU reads; hardware is next.
 Native Vita build passed in texture-cdram-candidate. Package contract unchanged;
 only game-a.self and boot-game.txt may differ from perf237. Do not attribute a
 speedup until live logs confirm CDRAM and settled gameplay improves.
+
+Perf238 upload/apply is LIVE in exec session 30080 (started after deliberately
+stopping perf237's watcher 204862 and launcher 203950). Poll this same session;
+do not duplicate the upload. Package 55,067,479 bytes, SHA
+477ce1a294461debf67c7b94cdf3044a977f8e5ac34b274a47f786cb00db6e59.
+After confirmed boot, run texture-cdram-candidate/launch.sh (same saved-test
+profile and 360p settings); launch has NOT yet been started. Keep-awake process
+134059 remains active. Need actual [texture-memory] CDRAM confirmation, screenshot,
+settled frame distributions and active gameplay before drawing conclusions.
