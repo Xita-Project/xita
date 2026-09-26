@@ -623,3 +623,14 @@ render-trace-buffer-candidate. NOT deployed yet at this note. Keep-awake134059
 remains running; current device239. Next verify package contract, deploy240,
 run existing launch.sh/collect-trace.py once, inspect actual capture. No FPS
 optimization is claimed for this diagnostic repair. Goal remains unmet.
+
+Perf240 package verified:55068699bytes SHA
+e40c01403784d52341d2c1fc9d2f44a0d737014cb21ab050ef1d189a46a36a3b,
+asset contract unchanged775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897,
+exact ZIP changes game-a.self/boot-game.txt only. Stopped confirmed239 watcher
+226197/driver225377; keepawake untouched. Announced restart; update session64593
+is uploading payload34756402bytes. Poll same session; do not restart upload.
+After boot-confirmation run render-trace-buffer-candidate/launch.sh and its
+collect-trace.py, redirecting their logs there. Latest changes122be38f local;
+no push. Previous goal turn progresses via reproduced trace failure, tested
+fix and new hardware candidate. Target not met.
