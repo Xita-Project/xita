@@ -16,6 +16,17 @@ contributors worth separating before another native replacement:
   and scheduling included, and cannot be added to their parents or treated as
   an exact decomposition of the uninstrumented firing penalty.
 
+The uninstrumented perf258 reports provide a separate check. Window ending
+6360 is wholly inside idle; window ending 6480 overlaps firing and its first
+cooldown frames. FA920 inclusive elapsed rises from 45.053 to 64.719 ms/frame;
+scene-helper CPU from 48.36 to 56.68 ms/frame; scene wall from 49.05 to 59.59.
+Draw count rises from 275 to 312, while the reported final wait changes from
+1.1 to 0.8 ms. These overlapping paths must not be added. The final wait does
+not cover every possible GPU dependency; it does not prove the GPU irrelevant.
+The evidence favors examining extra update and scene-preparation work before
+attributing this firing penalty to a full-GPU finish stall. Receipt:
+`collision-transform-candidate/ar258-frame-paths.json`.
+
 The diagnostic retains perf258 and adds direct-call scopes inside 1746F0,
 112070, 2B610, C0EA0 and C3A00. The 158 emitted call sites include duplicate
 translated paths; that count is not a per-frame call count. No gameplay,
