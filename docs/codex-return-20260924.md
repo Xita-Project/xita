@@ -435,3 +435,33 @@ source; retained both privately with generated shaders, compiler logs and
 Perf236 stays installed. Next target is repeated combiner arithmetic in these
 same measured materials, comparing compiled instruction/register cost before
 hardware testing rather than assuming shorter Cg source is faster.
+
+### 2026-09-26: nonnegative material-result clamps, perf237 candidate
+
+A second targeted compiler experiment replaces lower-bound -1 clamps only when
+combiner input mappings prove the result nonnegative. Unknown signed operands
+and biased scales retain their original clamps. Source generator support is
+caller-opt-in (`NONNEGATIVE_CLAMPS=False` by default), not a global shader change.
+Six synthetic tests cover input mappings, zero constants, partial sign proofs,
+scale bias, mux and dot outputs; existing shader-program tests still pass.
+Proof-driven emission exactly reproduces the two independently compiled private
+candidate sources. No changed texture lookups, coordinates, ordering or blend
+state. Finite arithmetic sign proof alone does not establish GPU visual results.
+
+Compilation diverged by material:
+- B5691565: 138 -> 135 primary instructions, 17 -> 13 temporary registers;
+  binary 1716 -> 1684 bytes. Selected for hardware trial.
+- 154066FD: 130 -> 133 instructions, 9 -> 17 temporary registers. Rejected.
+
+The compiler baseline for B5691565 is byte-identical to perf236's deployed
+embedded shader (SHA ac4b8e6f93aa41b14bb18602194bc60290cd0e2ea90a6381d02a02a58762cb72).
+Perf237 changes only this embedded `_na` program, plus build/version metadata;
+external app assets and update contract remain unchanged. Log confirms perf236
+actually binds that variant against halo_vs_09. Build under
+`range-clamp-candidate`; known-good package remains perf236c. Do not claim a
+speedup from instruction/register counts alone.
+
+Latest settled baseline, screenshot-confirmed pod at 640x360, frames
+14880..16020 (1200 intervals): 77.087804 ms / 12.9722 FPS, p95 85.778 ms,
+p99 109.246 ms, max 169.976 ms; 20 intervals >100 ms, zero >200 ms.
+Private before237.png/log and baseline-summary.json preserve evidence.

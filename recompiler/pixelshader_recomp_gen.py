@@ -90,6 +90,25 @@ NONE_STAGE_ZERO = False   # H2 menu pipeline sets True: NONE stages read as zero
 TEXCOORD_SCALE = False    # H2 menu pipeline sets True: PROJECT2D samples scale by xv_texscale[i]
 BLEND_CONST = False       # H2 menu pipeline sets True: output rgb *= xv_blendconst (constant-colour blend factors)
 VARYINGS_AVAILABLE: Optional[Set[str]] = None   # --varyings: what the paired vertex program outputs
+NONNEGATIVE_CLAMPS = False  # caller opt-in per program; compiled cost can increase
+
+
+def mapped_nonnegative(inp: dict) -> bool:
+    """Conservative finite-value sign proof, without assuming register ranges."""
+    mapping = inp["mapping"]
+    if mapping in ("unsigned_identity", "unsigned_invert"):
+        return True
+    if inp["reg"] == "zero":
+        return mapping in ("expand_negate", "halfbias_negate",
+                           "signed_identity", "signed_negate")
+    return False
+
+
+def nonnegative_results(inputs: List[dict], prefix: str = "") -> Set[str]:
+    ab = all(mapped_nonnegative(x) for x in inputs[:2])
+    cd = all(mapped_nonnegative(x) for x in inputs[2:])
+    return {prefix + name for name, proven in
+            (("AB", ab), ("CD", cd), ("SUM", ab and cd)) if proven}
 
 
 def src_expr(inp: dict, stage: Optional[dict], alpha: bool, final_c: Tuple[int, int] = (0, 0)) -> str:
@@ -117,6 +136,8 @@ def src_expr(inp: dict, stage: Optional[dict], alpha: bool, final_c: Tuple[int, 
 def emit_stage(s: dict, mux_msb: bool, L: List[str], written: Set[str]) -> None:
     i = s["index"]
     ro, ao = s["rgb_out"], s["alpha_out"]
+    nonnegative = (nonnegative_results(s["rgb_in"]) |
+                   nonnegative_results(s["alpha_in"], "a_")) if NONNEGATIVE_CLAMPS else set()
     L.append(f"    // ---- combiner stage {i}")
     L.append("    {")
     a, b, c, d = (src_expr(x, s, False) for x in s["rgb_in"])
@@ -141,7 +162,12 @@ def emit_stage(s: dict, mux_msb: bool, L: List[str], written: Set[str]) -> None:
         if dst == "zero" or dst not in WRITABLE:
             return
         e = SCALE[scale].format(x=expr)
-        L.append(f"        {dst}.{comps} = clamp({e}, -1.0, 1.0);")
+        # Dot products, sums and muxes preserve the proven sign. Biased scales
+        # do not. Keep all unknown/signed cases on the original clamp path.
+        if expr in nonnegative and scale in ("identity", "x2", "x4", "div2"):
+            L.append(f"        {dst}.{comps} = saturate({e});")
+        else:
+            L.append(f"        {dst}.{comps} = clamp({e}, -1.0, 1.0);")
         written.add(dst)
 
     # rgb results
