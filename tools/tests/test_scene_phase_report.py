@@ -1,10 +1,14 @@
 """Exercise the production report with one callee reached through two parents."""
 from pathlib import Path
+import argparse
 import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
-s = (root / 'recomp/kernel/xk_scene_thread.c').read_text()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--source', type=Path, default=root / 'recomp/kernel/xk_scene_thread.c',
+                    help='Validate the actual staged report used by a diagnostic build.')
+s = parser.parse_args().source.read_text()
 a = s.index('static void phase_report(unsigned frames)')
 b = s.index('\n#if defined(XV_SCENE_THREAD)', a)
 fixture = r'''
@@ -15,7 +19,7 @@ fixture = r'''
 #include <assert.h>
 #define PHASE_MAX 512
 static struct { uint32_t parent, addr; uint64_t us; unsigned n; } phase_tab[2][PHASE_MAX];
-static unsigned phase_used[2], phase_overflow[2];
+static unsigned phase_used[2], phase_overflow[2] __attribute__((unused));
 static int phases=1;
 static const char *phase_tag[]={"[tick-phases]","[scene-phases]"};
 static char logs[16384];

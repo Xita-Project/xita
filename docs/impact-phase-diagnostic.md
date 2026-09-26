@@ -383,3 +383,33 @@ No fatal/trap line was found by the log scan. This is supporting Pi evidence,
 not hardware performance or rendering correctness. Perf260 still awaits
 physical validation; investigate 112C80/local 113370 work next rather than
 rewriting effect cleanup based on the old incomplete attribution.
+
+## 112C80 child attribution and staged reporter correction
+
+112C80 has only 19 X_ST references in the maintained body and falls back from
+register lowering on density. Its 16 direct call sites reach 13 different
+helpers, including object and sound paths. Measure these before assuming
+translated floating-point math dominates.
+
+Private `effect-child-phase-pi/` adds its 16 timers atop effect-tail, with
+observer-stripped source identity verified. Its staged reporter now prints
+112C80 even below 0.5 ms/frame. Inspection found the old baseline Pi object
+uses the pre-fix report: one `(parent,callee)` entry for inclusive time but
+all matching child entries for subtraction. The current repository already
+fixes this, but that fix was not in these reused harness objects. Therefore
+previous Pi self/remainder figures, including effect-process, effect-tail,
+and physical-slot gameplay summaries, must not be interpreted as validated
+aggregate self time where the same routine is entered under multiple parents.
+Their raw observations remain preserved; no Vita FPS claim depends on them.
+
+The new private reporter sums inclusive time across parent entries and labels
+raw `parent>callee` edges, matching the existing production report correction.
+`tools/tests/test_scene_phase_report.py` now accepts `--source` so it can
+validate the actual staged reporter, not only the checkout. Both checkout and
+staged report pass multi-parent totals, edge-label, and reset assertions under
+host ASan/UBSan. This is a reporting-only correction, not a speedup.
+
+Build and transfer completed. Run `codex-effect-child-20260926` is active on
+Pi cores 0/1 as local session 40591, with the prior 180-second two-burst/reload
+sequence. Poll this session; do not restart on observation timeout. No new
+Vita build was made or deployed; perf260 still awaits a working dashboard.
