@@ -450,3 +450,30 @@ isolation. Build/transfer finished. V3 run `codex-effect-child-v3-20260926`
 is live as exec session 73941 on Pi cores 0/1 with the same 180-second inputs.
 Poll that handle and require no omitted-scope reports before attributing
 its deepest effect costs. Perf260 remains built but uninstalled.
+
+### V3 completed: no omitted scopes
+
+Session 73941 is terminal: planned timeout 124, 69 host reports, zero omitted
+scope messages, no fatal/trap line found. All current Pi jobs are finished.
+Complete relevant rows are in `effect-child-phase-pi/v3-windows.json`.
+Two firing windows (host report indices 1800/2040), ms per reported frame:
+
+| Routine | Inclusive | Self/remainder | Leading children |
+| --- | --- | --- | --- |
+| 113370 | 1.04 / 1.09 | 0.06 / 0.06 | 1122A0 0.70 / 0.74; 113080 0.25 / 0.25 |
+| 113080 | 0.63 / 0.63 | 0.09 / 0.08 | 112C80 0.52 / 0.52 |
+| 112C80 | 0.52 / 0.52 | 0.05 / 0.04 | 2B660 0.26 / 0.25; 963C0 0.17 / 0.18 |
+| 1122A0 | 1.68 / 1.69 | 0.74 / 0.74 | 10E8B0 0.43 / 0.44; 111950 0.14 / 0.13 |
+
+Totals aggregate each routine across parents; a child total can exceed its
+contribution under one listed parent. Do not add inclusive rows together.
+Timers include instrumentation and host scheduling. Zero omitted scopes
+removes the identified nesting limit, not every possible measurement error.
+
+Next targets: retain perf260 hardware qualification as first priority; trace
+2B660's sound setup (2B140 then conditional 26B10) and 963C0's object work
+(8D320, looped 95E50, final 8A300) before choosing native replacement or caching.
+Do not rewrite 112C80/113370 local math on the old large self estimates. The
+current 1122A0 cost supports continued investigation but does not revalidate
+the previous candidate speedup comparison collected with the old reporter.
+No new hardware performance result; HTTP8080 still refuses connections.
