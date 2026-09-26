@@ -1546,3 +1546,44 @@ append preserved. Do notdisablecritical logging orclaimperiodicreportcausality.
 Next separate periodic output scheduling fromgame/effectswork ifpursuinghitches.
 Vita keepawake134059 verifiedlive through8h04m; installed250 normalrun stillopen.
 No newFPSgainclaim; goalactive, fullcanyon/NPCcombat/15min/AI/save gatesunmet.
+
+
+### Perf251 periodic-console candidate built; deployment in progress
+
+Retained evidence rules outblind newsetter/cache: REC_HLE alreadyfast,
+ps_packed_colors alreadyexactreuse, psidentity adjacent cachehits ~65%.
+Also earlier227hardware alreadymeasured7A130~2.41ms incl/~0.73remainder,
+so didNOTrerunthatdiagnostic. Pursuedconcrete60framecadencelead instead.
+
+Commit3b798102 adds startup-onlyXV_LOG_PERIODIC_CONSOLE=0 inasyncwriter:
+periodic bytesstillfile/FIFO/barriers/retry, consoleonlyomittedforthisqueue.
+Default/invalidkeepsboth; immediateordinary,critical,writerfailure outputunchanged.
+Worker policy publishedbeforeStartThread, not a live envswitch. Newreal-thread
+mockcasesblockedconsolefileprogress/exactpartialfileretry/error/invalidpolicy.
+FullASanUBSan suitepassed afterfixingstaleexitfixture'sxv_updates_requestedstub.
+Pi94179 completed8casesoncores0/1,CortexA9ThumbNEONbinary,allPASS.
+No Pi jobleft. docs/periodic-console-experiment.md documentslimits.
+
+Privateperiodic-console-candidate cloned250 (not fullregeneration), copied
+logginginclude, removedxv_log.o, version251. Build17968completed0.
+VPK55076038bytesSHA790a4a903a233e18048e9045f311474ead097afa3f8793fc29e81763f5885a7f.
+Payload34772330SHA dfb0d5c4cde210e66da405efe4c949bda5b1c3e75ec3c6534a27479ccd4ef009.
+Contractunchanged775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897;
+onlygame-a.self+boot-game.txt changedversus250. Provenancefileauthoredincludematch.
+
+Announcedinterruption, companionquit/launchdashboardcomplete. Statusframe96
+perf250confirmedaftertransientconnectionrefused. Keepawake134059 alive8h16m.
+Remoteupdate --apply session4166 RUNNING; deploy251.log showsuploadprogress.
+DO NOTrestart/reissuewhilelive. No251hardwareFPSresultyet.
+
+Next poll4166/deploy251.log forverified/bootconfirmed. Then sh launch251.sh and
+python3 -u collect251.py (outputsredirecttospecificlogs) fromcandidatefolder.
+Tagperf251-periodic-console-20260926. Same250mode2objectquery/360/allpriorgains,
+onlyperiodicconsole0. Keeps32envslotsbyomittingVERTEX_CAPTURE_TIMING=0;
+itsqualitydefault0 andsavedconfiglacksthatkeyconfirmed. Nousercfgmutation.
+Collectorrequiresmode2,nophases,scene-indexreceipt,and allcumulativeworkerconsole
+us==0; screenshotpod and1200rawintervals6300..7440. Inspectactualscreenshot,
+compareallframesandphase3cadence—notdiscardoutliers. Ifconsoleoffdoesn'treduce
+hitches,don'tclaimgain/persistit; usefiletimingandotherperiodicworknext.
+Old250watch/driveralreadyendedafter20minuteobservation; nonefoundtoterminate.
+Keepawakealwaysretained. No push; goalactive andfullqualificationsunmet.
