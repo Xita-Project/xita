@@ -249,3 +249,34 @@ The sound ray-key run and build session 19477 are terminal. Next use the child
 breakdown to select a concrete native/repeated-work target; retain the ordinary
 hardware AR baseline as the acceptance reference. Pi timings are supporting
 profiles, never Vita frame-rate proof. No hardware deployment occurred.
+
+## Weapon-child result and next target
+
+`codex-weapon-child-20260926` completed its planned 180-second timeout (124),
+with 67 host reports. Local session 13531 is terminal. The two reported firing
+windows (host reports 1800 and 2040) attribute BF200's 0.87/1.10 ms inclusive
+to 113930 at 0.86/1.09 ms; BF200 self is only 0.01 ms. BFA70's 0.82/0.78 ms
+is led by 10AAF0 at 0.42/0.39 ms, then 8F120 at 0.16/0.15 and 8FC90 at
+0.12/0.14 ms. BFA70 self is 0.06/0.05 ms. Do not rewrite these wrappers on
+the assumption that their inclusive time is translation overhead in the body.
+Private receipt: `weapon-child-phase-pi/selected-windows.json`, plus full log.
+All numbers are instrumented Pi elapsed time; overlapping scopes and host
+preemption remain included. The reporter prints only selected parents/children.
+
+BF200 dispatches by tag class: its `effe` branch calls 113930, while its `snd!`
+branch calls 2B660. The measured windows predominantly take the former.
+113930 is a short wrapper over allocation/setup routines 111430, 110F60,
+111F10, and 113370, with a 128-byte initialization between calls. It is not
+reasonable to ascribe its entire inclusive cost to that initialization.
+
+Prepared `weapon-effect-phase-pi/` to time direct children of 113930 (9 sites)
+and 10AAF0 (40 sites). Inputs preserve earlier impact timers in code_024 and
+weapon-child timers in linked code_017. Observer-stripped source equality
+passed for both newly changed shards; no guest instruction changes.
+Build session 55786 is active; poll it before copying/running its harness.
+Build script and log are in that private directory. After successful linking,
+copy as `pi:xita-d3d2/harness-codex-weapon-effect` and run pi30.sh with the
+same 180-second baseline/two-burst arguments as the preceding weapon-child
+run, unique tag `codex-weapon-effect-20260926`. Do not add sound verification
+flags. Inspect complete firing windows before selecting the replacement.
+No new VPK, deployment or demonstrated Vita speedup results from this probe.
