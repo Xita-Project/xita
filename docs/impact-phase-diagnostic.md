@@ -1,6 +1,6 @@
 # Firing slowdown attribution — perf259
 
-September 26, 2026. Diagnostic candidate building; not yet deployed.
+September 26, 2026. Build and package checks passed; deployment pending.
 
 Perf258's ordinary lifepod AR sample remained about 75.8 ms/frame while firing
 versus 56.8 ms idle. Its inverse-transform register lowering did not establish a
@@ -54,3 +54,10 @@ The next decision is whether impact allocation/initialization, sound creation,
 or the growing object-update subtree warrants implementation work. Do not
 assume that removing particle math can recover the entire firing penalty.
 The sustained-20-FPS, NPC combat, cutscene and long-session gates remain open.
+
+## Build receipt
+
+Full developer Vita build succeeded. The compatible package replaces only
+`game-a.self` and `boot-game.txt`, preserving the installed asset contract.
+Runtime SHA-256: `ff7ff12ee5e425136fceb82d1058e379098cd1d601ab0676c609c598224ea37d`.
+Runtime size: 34775314 bytes. Hardware results remain pending.
