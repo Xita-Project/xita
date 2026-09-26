@@ -809,3 +809,13 @@ same settingsinclMATERIAL_BLACK1 and normal6300..7440podcollection. Need inspect
 build result, package/verify exact ZIP changes, deploy and coldlaunch. Current
 physical241stilloutdoors; keepawake134059 live. Do not overwrite qualified241
 candidate. Full20FPS target/correctness/session gates remain unmet.
+
+Perf242 fullbuild58875 completed0. Package55072192bytes SHA
+fc1676ce9d72b45aba4bf30731a8a7c86bccc475e6c180c25094f7e9a7ed6f60,
+unchangedcontract775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897;
+exact ZIP changes game-a.self/boot-game.txt verified. Announced install.
+Session15400 is first downloading241 outdoor-before242.log, then stopping
+confirmed241driver244501/watcher245337 and uploading/applying242. Poll this SAME
+handle. After bootconfirmation run material-black-alpha-candidate/launch.sh and
+collect.py, logs gameplay-driver.log/collector.log. Keep awake134059 untouched.
+Source8059f904 local committed, no push. Full targetnotmet,241podgain retained.
