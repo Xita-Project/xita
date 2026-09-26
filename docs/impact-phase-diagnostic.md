@@ -121,3 +121,12 @@ The Vita readiness watcher 63856 subsequently ended without an HTTP response;
 no retry upload happened and perf258 remains the last confirmed installed build.
 Companion display-on was requested without pad injection or nosleep. A user
 screen-status question is pending. Do not silently restart the failed watcher.
+
+A follow-up Pi harness adds 25 direct-call scopes inside C0C60 and 26B10 only,
+with all observer-stripped bodies unchanged. It reuses the completed first
+harness's other objects; no game behavior is changed. Its ARM build passed
+(session 1239). A second planned 180-second run is active as session 89394,
+`codex-impact-child-phases-20260926`, on cores 0/1 with the same input schedule.
+Poll that handle, then inspect the nested child reports before choosing a
+native implementation. Artifacts are in `impact-child-phase-pi/` and the usual
+`d3d-record2-work/pi-runs/` directory. The first Pi run 95407 is terminal.
