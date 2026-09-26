@@ -130,3 +130,27 @@ harness's other objects; no game behavior is changed. Its ARM build passed
 Poll that handle, then inspect the nested child reports before choosing a
 native implementation. Artifacts are in `impact-child-phase-pi/` and the usual
 `d3d-record2-work/pi-runs/` directory. The first Pi run 95407 is terminal.
+
+### Follow-up result
+
+The second Pi run 89394 completed its planned 180-second timeout (124), with
+68 reports and no tick-phase overflow/abandon notices. No Pi job remains active.
+At host report labels 1800/2040, C0C60 is 1.58/1.81 ms inclusive, of which
+C02F0 is 1.57/1.80; residual only 0.01. At labels 1860/2100, 26B10 is 0.71/0.75,
+of which 26A50 is 0.47/0.49; residual 0.10/0.12. Keep the same asynchronous,
+headless, overlapping-time limitations stated above. Full selected reports:
+`impact-child-phase-pi/child-phase-windows.json`.
+
+Static inspection confirms 26A50 calls 25590 and 2B460; the latter is the
+existing sound-obstruction collision-vector route (native-1721b0.md). This cost
+is not audio sample decoding. The native BSP segment cast is already enabled,
+so proposing it again would duplicate existing work. C02F0 is a larger weapon
+routine (2,858 translated lines, 15 distinct callees), not a cheap wrapper that
+can be replaced without callee attribution. The next offline action is to split
+C02F0's actual callees and determine whether creation/initialization or another
+shared subtree dominates. Do not claim all of C02F0 is collision work.
+
+The Vita endpoint remains unavailable after the single quit/launch sequence;
+FTP still responds and perf259 has not been installed. Await the screen-status
+reply while continuing work that does not require hardware access. No new FPS
+gain or crash fix has been established by these diagnostic runs.
