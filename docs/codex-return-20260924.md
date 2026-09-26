@@ -1295,3 +1295,35 @@ collector64327. All targetperf248-tick-phases-20260926; captureopening atframe52
 pod collector after5700 and archives logat7440. Inspect screenshots, require
 [tick-phases] and no[scene-phases]. Diagnostic timings include timer overhead,
 preemption and waits; not FPS acceptance. Retains CPU indexmode2+blackmaterialmode2.
+
+
+### Perf248 identifies remaining biped-physics cost
+
+Captureopening248.png is frame5281, letterboxed pod with the weapon/HUD visible:
+it is an opening transition, not a visually qualified canyon-flyover sample.
+The settled pod screenshotpod248-fast.png frame6092 matches the standing view.
+Owner-only mode worked: tick reports present, no helper phase reports. Timer-on
+pod mean68.484ms is diagnostic overhead, NOT a regression/FPS acceptance result.
+
+Private tick-phase-candidate/pod-phase-summary.json covers ten reports nearframes
+7200..7740: FA92064.42ms/frame inclusive; simulation10976052.758; object loop
+900E047.581; biped4C98019.615 including4B9D019.128 (7.28 calls/frame); transforms
+8DDF012.308 (398.58 calls/frame); post-update108FD011.577 including particle
+10E7A06.011 and2BB705.504. Parent timings overlap and include waits/preemption.
+Early near5220/5280/5340:4B9D019.77,8DDF012.35,FA92067.18. This justifies
+breaking down4B9D0 before proposing a whole-engine rewrite. Native collision and
+aim hooks report calls without declines, already enabled; don't duplicate them.
+
+Perf249 private biped-phase-candidate is building session73590. It changes only
+version and adds phase scopes to4B9D0/49600 (86 emitted call sites, includes x87
+fast/fallback copies) using existing --any-call patch tool. The49600->172BF0
+scope brackets the actual call, preserving its x87 spill/reload and return setup.
+All perf248 gains retained. After build/package checks, deploy and runlaunch249.sh;
+keep SCENE_PHASES=2 for attribution. No optimization gain claimed for timers.
+
+Supporting ARM harness biped-phase-pi builds session3037 from the established
+point-location host stage, replacing onlycode_008.o with the same two scoped
+parents. It is an older headless render baseline and cannot predict Vita FPS;
+use to locate collision callees for differential/native work, on Pi cores0/1.
+Perf248 collector64327 and opening41212 completed. Launch watcher remains live;
+keepawake134059 active. Do not restart those jobs just because a turn ends.
