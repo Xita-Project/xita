@@ -853,3 +853,40 @@ rather than changing the old global startup override. No FPS claim for it.
 Old idle compiler198830 ignored TERM and was explicitly cleaned withKILL before
 new isolated compiler launch. Do not touch ClaudeHalo2 emulator resources.
 Current242watcher reporting loading(menu)frames at90s; no qualified resultyet.
+
+### 2026-09-26: perf242 full-alpha material gain verified outdoors
+
+Collector95263 completed0. Pod1200intervals6300..7440 mean58.7345275ms,
+17.02576FPS,p5056.637,p9575.983,p9997.553,max146.721;1023>50ms,10>100ms,
+0>200ms. Slight improvement over24160.01324ms but tails not better; don't
+oversell this small pod delta. qualification.json has5successful specialized
+links incl both generic _axisblack and _axisblack_na. pod242.png6311 viewed
+same scene/AR60; weapon idle animation differs, no obvious new visual defect.
+
+Movement24219: forward5s, rightturn3s, fire2s, release pad. Screenshot
+outdoor-fire242.png8495 viewed same general hill/trees view as241, AR16,
+transparent foliage edges intact. HUD17FPS. No crash in short sequence. Different
+ammo count vs241 is not a firing-rate proof: actual HTTP/input timing wasn't
+measured and hold durations bound loops rather than exact device exposure.
+Don't claim full weapon/audio/AI correctness from a screenshot.
+
+Outdoor collector9425 completed (collect-outdoor.py): settled-outdoor.log3650180
+bytes,1200intervalsend9780..10920, warmup excluded. Mean56.524073ms,17.69158FPS,
+p5054.485,p9567.405,p9997.937,max213.540;1148>50ms,12>100ms,1>200ms.
+Prior241scriptedstationaryoutdoor73.745615ms/13.56013FPS,p9585.997,p99127.441,
+30>100ms. About17.2ms less/~30%higherFPS in closely matching scripted outdoor
+view; no claim of exact pose identity. One214msstall remains, so not stable20.
+This confirms an outdoor gain from the alpha-preserving specialization; retain
+both241and242optimizations with MATERIAL_BLACK1 in subsequent builds/configs.
+
+outdoor-coarse-timing.json last20reports: helperCPU47.3885ms,scene-wall49.6565ms,
+ownerjoinwait12.189ms, game51.53+displaywait5.185ms. These overlap; DO NOT SUM
+helper/owner/game. Scene preparation is now near the50ms target by itself;
+remaining waits/tails stillmatter. Need reduce real scene work while preserving
+shader gain. Offline guarded GREATER cutout probe78instructions vs155generic
+is stilluninstalled and may reduce remainingGPUcost; only use enabledfunc4 with
+allmaterialproofs, preservefallback and defaultglobalcutoutdisabledpolicy.
+Currentphysical242outdoors/remotealiveframe12316, awake3570; keepawake134059
+live. Launch78856 watcher stillobserving; podcollector95263andoutdoor9425done.
+No15-minuteACTIVE session,NPCcombat/audio/save-resume qualification yet. Full
+20FPSpod/outdoor/cutscene completiongates remain unmet. No push.
