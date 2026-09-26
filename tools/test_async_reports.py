@@ -16,7 +16,8 @@ CASES = ['disabled', 'cold', *['startup' + str(i) for i in range(1, 7)],
          'toggle-cycle', 'toggle-startup', 'toggle-open', 'toggle-ordinary', 'toggle-ordinary-timeout',
          'toggle-sync-error', 'toggle-error', 'toggle-barrier', 'toggle-blocked-file',
          'toggle-blocked-console', 'toggle-deadline',
-         'policy-default', 'policy-off', 'policy-invalid', 'policy-on']
+         'policy-default', 'policy-off', 'policy-invalid', 'policy-on',
+         'periodic-file-only', 'periodic-file-retry', 'periodic-console-invalid']
 
 
 def run(out, modes):

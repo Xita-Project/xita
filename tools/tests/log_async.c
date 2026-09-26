@@ -229,6 +229,7 @@ typedef struct { void *ctx; } xv_gfx_t;
 static xv_gfx_t g_gfx={(void *)1};
 static atomic_int remote_live=1,exit_done,exit_stage;
 unsigned xv_update_requested(void) { return 1; }
+static int xv_updates_requested(void) { return 1; }
 void xv_update_progress(unsigned stage) { assert(atomic_load(&remote_live));atomic_store(&exit_stage,stage); }
 int scePowerRequestDisplayOn(void) { return 0; }
 int sceKernelPowerTick(SceKernelPowerTickType type) { assert(!type);return 0; }
@@ -346,7 +347,37 @@ static void toggle_test(const char *test)
 int main(int argc,char **argv)
 {
     assert(argc==2);const char *test=argv[1];
-    if(!strncmp(test,"policy-",7)) {
+    unsetenv("XV_LOG_PERIODIC_CONSOLE");
+    if(!strcmp(test,"periodic-file-only")) {
+        setenv("XV_LOG_PERIODIC_CONSOLE","0",1);start();
+        pthread_mutex_lock(&io);console_block=1;pthread_mutex_unlock(&io);
+        report("periodic\n",9,1);
+        assert(xv_log_flush_wait(1000000)==XV_LOG_OK);
+        verify("periodic\n",9);
+        assert(!atomic_load(&console_entered) && !console_n);
+        assert(status().written_bytes==9 && status().synced_bytes==9);
+        pthread_mutex_lock(&io);console_block=0;pthread_mutex_unlock(&io);
+        xv_log_criticalf("urgent\n");xv_logf("ordinary\n");
+        assert(xv_log_shutdown(1000000)==XV_LOG_OK);
+        verify("periodic\nurgent\nordinary\n",25);
+        assert(console_n==16 && !memcmp(console_output,"urgent\nordinary\n",16));
+    } else if(!strcmp(test,"periodic-file-retry")) {
+        setenv("XV_LOG_PERIODIC_CONSOLE","0",1);start();
+        pthread_mutex_lock(&io);fail_after=5;short_write=3;pthread_mutex_unlock(&io);
+        report("abcdefghijk\n",12,42);wait_error();
+        assert(status().failed_file_offset==5 && status().failed_console_offset==12);
+        assert(xv_log_flush_wait(10000)==XV_LOG_IO);
+        pthread_mutex_lock(&io);fail_after=-1;pthread_mutex_unlock(&io);
+        assert(xv_log_retry()==XV_LOG_OK);
+        assert(xv_log_shutdown(1000000)==XV_LOG_OK);verify("abcdefghijk\n",12);
+        assert(status().synced_bytes==12 && status().completed_report==1);
+        assert(strstr(console_output,"[log-worker] output failed"));
+        assert(!strstr(console_output,"abcdefghijk"));
+    } else if(!strcmp(test,"periodic-console-invalid")) {
+        setenv("XV_LOG_PERIODIC_CONSOLE","0x",1);start();report("kept\n",5,1);
+        assert(xv_log_shutdown(1000000)==XV_LOG_OK);verify("kept\n",5);
+        assert(console_n==5 && !memcmp(console_output,"kept\n",5));
+    } else if(!strncmp(test,"policy-",7)) {
         int enabled;
         if(!strcmp(test,"policy-default")) {
             unsetenv("XV_PROFILE_ASYNC_REPORT");enabled=XV_PROFILE_ASYNC_REPORT_DEFAULT==1;

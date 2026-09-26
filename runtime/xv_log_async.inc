@@ -15,6 +15,9 @@ static xv_log_status log_status;
 static uint64_t log_sync_request, log_sync_done, log_sync_target;
 static uint64_t log_report_id;
 static unsigned log_report_frame, log_report_chunk;
+/* Startup-only experiment: periodic bytes still reach the file and its flush
+ * barrier. Immediate messages and errors retain both sinks. */
+static int log_periodic_console = 1;
 
 static void queue_lock(void)
 { while (__atomic_exchange_n(&log_guard,1,__ATOMIC_ACQUIRE)) sceKernelDelayThread(10); }
@@ -78,7 +81,9 @@ static int log_writer(SceSize args,void *argp)
          * No slot or caller buffer can be recycled before written advances. */
         unsigned console=s->console_offset,file=s->file_offset,old_file=file;
         uint64_t console_us=0,wait=0,io=0;
-        int rc=log_console(s->bytes,s->length,&console,&console_us);
+        int rc=0;
+        if(log_periodic_console) rc=log_console(s->bytes,s->length,&console,&console_us);
+        else console=s->length; /* this sink is deliberately omitted, not pending */
         if(!rc) rc=log_file(s->bytes,s->length,&file,&wait,&io);
         queue_lock();
         s->console_offset=console; s->file_offset=file;
@@ -133,6 +138,10 @@ static int async_create(int enabled,int claim)
     log_thread=sceKernelCreateThread("xv_periodic_log",log_writer,0x10000110,
         64*1024,0,SCE_KERNEL_CPU_MASK_USER_ALL,NULL);
     if(log_thread<0) { error=log_thread; goto fail; }
+    {
+        const char *e=getenv("XV_LOG_PERIODIC_CONSOLE");
+        log_periodic_console=!e || strcmp(e,"0")!=0;
+    }
     error=sceKernelStartThread(log_thread,0,NULL);
     if(error<0) goto fail;
     queue_lock(); log_status.state=XV_LOG_RUNNING;log_status.enabled=enabled;
