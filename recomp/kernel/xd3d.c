@@ -253,6 +253,8 @@ static xv_rec_opt g_opt_hle = XV_REC_OPT_INIT("XV_REC_HLE");
 int xv_rec_ab_period = -1;
 unsigned xv_rec_ab_phase, xv_rec_ab_frames[2];   /* frames started in each phase, cumulative */
 static int g_hle_now = -1;   /* the XV_REC_HLE path for this frame (-1: recompute) */
+static int vsc_equal = -1;
+static unsigned vsc_equal_checks, vsc_equal_skips, vsc_equal_bytes;
 static int g_vsc_now = -1;   /* the XV_REC_VSC path for this frame (SetVertexShaderConstant) */
 static inline int hle_mode_now(void)
 {
@@ -1453,7 +1455,17 @@ static int vsc_fast(uint32_t lo, uint32_t hi, uint32_t first_row, uint32_t src, 
         bad |= (w & 0x7F800000u) == 0x7F800000u;
     }
     if (bad) return 0;                                        /* the original loop zeroes and logs them */
-    if (mode == 2) { memcpy(xd3d_state.vsc[lo], p, bytes); return 1; }
+    if (mode == 2) {
+        if (vsc_equal < 0) { const char *e = getenv("XV_VSC_EQUAL"); vsc_equal = e && atoi(e) != 0; }
+        if (vsc_equal) {
+            vsc_equal_checks++;
+            if (!memcmp(xd3d_state.vsc[lo], p, bytes)) {
+                vsc_equal_skips++; vsc_equal_bytes += bytes;
+                return 2; /* Live rows identical: retain any previously pending dirty range. */
+            }
+        }
+        memcpy(xd3d_state.vsc[lo], p, bytes); return 1;
+    }
     memcpy(vsc_scratch[lo], p, bytes); vsc_scratch_valid = 1;
     return 0;                                                 /* verify: the original loop writes the live rows */
 }
@@ -1479,7 +1491,11 @@ void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
     if (hi > 192) hi = 192;
     if (lo < hi) {
         int vsc_mode = vsc_mode_now();
-        if (vsc_mode && vsc_fast((uint32_t)lo, (uint32_t)hi, (uint32_t)((uint32_t)lo - (uint32_t)reg), src, vsc_mode)) goto vsc_done;
+        if (vsc_mode) {
+            int fast = vsc_fast((uint32_t)lo, (uint32_t)hi, (uint32_t)((uint32_t)lo - (uint32_t)reg), src, vsc_mode);
+            if (fast == 2) goto vsc_return;
+            if (fast) goto vsc_done;
+        }
         /* Range arithmetic is wide only at the boundary; the accepted row
          * loop remains 32-bit on Cortex-A9 and visits at most 192 registers. */
         for (uint32_t row = (uint32_t)lo; row < (uint32_t)hi; ++row) {
@@ -1493,6 +1509,7 @@ void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
         if ((uint32_t)lo < xd3d_state.vsc_dirty_lo) xd3d_state.vsc_dirty_lo = (uint32_t)lo;
         if ((uint32_t)hi > xd3d_state.vsc_dirty_hi) xd3d_state.vsc_dirty_hi = (uint32_t)hi;
     }
+vsc_return:
     c->r[0] = 0; X_RET(3);
 }
 /* Halo builds its register-combiner programs at run time into one scratch X_D3DPIXELSHADERDEF and
@@ -1518,6 +1535,8 @@ void xd3d_prepare_report(unsigned frames)
 {
     XV_REC_OPT_REPORT(&g_opt_hle, frames, D3DLOG);
     XV_REC_OPT_REPORT(&g_opt_vsc, frames, D3DLOG);
+    if (vsc_equal > 0) D3DLOG("[vsc-equal] %u frames checks %u skipped %u bytes %u\n", frames, vsc_equal_checks, vsc_equal_skips, vsc_equal_bytes);
+    vsc_equal_checks = vsc_equal_skips = vsc_equal_bytes = 0;
     XV_REC_OPT_REPORT(&g_opt_entry, frames, D3DLOG);
     D3DLOG("[draw-state-cache] %u frames lookups %u adjacent %u reused %u computed %u\n",
         frames,ps_identity_cache.lookups,ps_identity_cache.adjacent_hits,
