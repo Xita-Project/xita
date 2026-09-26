@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,6 +28,7 @@ def main():
         'void xd3d_remote_trace_end(unsigned frame, unsigned commands)',
         'int xd3d_hist_active(void)\n', 'int xd3d_vertex_trace_active(void)\n'))
     assert 'hist_remote_track' not in source
+    trace_macro = re.search(r'#define D3DTRACELOG\(\.\.\.\).*?while \(0\)', source, re.S)[0]
     renderer = (ROOT / 'runtime/xv_d3d.c').read_text()
     assert 'xd3d_remote_trace_begin(g_build_frame)' in function(renderer, 'void xv_d3d_BeginFrame(void)')
     assert 'xd3d_remote_trace_end(g_build_frame, l->ncmds)' in function(renderer, 'uint32_t xv_d3d_EndFrame(void)')
@@ -45,8 +47,17 @@ static int g_hist_frame=-2, g_remote_hist_on;
 static unsigned g_remote_hist_frame, g_remote_hist_records, logs, request;
 int xv_remote_take_draw_trace(void) __attribute__((weak));
 static void log_stub(const char *format, ...) { (void)format; ++logs; }
+#ifdef QUIET_WORKER
+#define D3DLOG(...) ((void)0)
+#else
 #define D3DLOG(...) log_stub(__VA_ARGS__)
+#endif
+void xv_log_criticalf(const char *, ...) __attribute__((weak));
+@TRACE_MACRO@
 @ACTUAL@
+#ifndef NO_CRITICAL
+void xv_log_criticalf(const char *format, ...) { log_stub(format); }
+#endif
 #ifndef ABSENT
 int xv_remote_take_draw_trace(void) { unsigned r=request; request=0; return r; }
 #endif
@@ -96,18 +107,17 @@ int main(void) {
 #endif
     return 0;
 }
-'''.replace('@ACTUAL@', actual)
+'''.replace('@ACTUAL@', actual).replace('@TRACE_MACRO@', trace_macro)
     if os.getenv('XITA_TEST_EMIT'):
         Path(os.environ['XITA_TEST_EMIT']).write_text(fixture)
     with tempfile.TemporaryDirectory(prefix='xita-draw-trace-') as directory:
         path = Path(directory)
         (path / 'test.c').write_text(fixture)
-        for absent in (False, True):
+        for defines in ([], ['ABSENT'], ['NO_CRITICAL'], ['QUIET_WORKER']):
             command = ['cc', '-std=gnu11', '-O2', '-Wall', '-Wextra', '-Werror']
             if os.getenv('SANITIZE'):
                 command += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
-            if absent:
-                command += ['-DABSENT=1']
+            command += ['-D'+name+'=1' for name in defines]
             subprocess.run(command + [str(path / 'test.c'), '-o', str(path / 'test')], check=True)
             subprocess.run([str(path / 'test')], check=True)
     print('Actual trace selectors passed: one frame, overlap, repeated requests, wrap and absent hook')

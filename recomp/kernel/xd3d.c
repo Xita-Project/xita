@@ -26,6 +26,13 @@ extern void xv_flare_report(unsigned) __attribute__((weak));
 #include "../../runtime/xv_visibility.h"
 
 #define D3DLOG(...) xk_os_log("[d3d] " __VA_ARGS__)
+/* Only remote trace boundary receipts bypass worker log suppression. These
+ * execute at drained recorder boundaries, not per draw. Host fallback stays. */
+extern void xv_log_criticalf(const char *, ...) __attribute__((weak));
+#define D3DTRACELOG(...) do { \
+    if (xv_log_criticalf) xv_log_criticalf("[d3d] " __VA_ARGS__); \
+    else D3DLOG(__VA_ARGS__); \
+} while (0)
 
 /* ---- Xbox D3D constants ---------------------------------------------------------------------- */
 #define X_D3DCOMMON_REFCOUNT_MASK      0x0000FFFFu
@@ -359,7 +366,7 @@ void xd3d_remote_trace_begin(unsigned frame)
         __atomic_store_n(&g_remote_hist_frame, frame, __ATOMIC_RELAXED);
         __atomic_store_n(&g_remote_hist_records, 0, __ATOMIC_RELAXED);
         __atomic_store_n(&g_remote_hist_on, 1, __ATOMIC_RELEASE);
-        D3DLOG("hist: remote request -> render frame %u; diagnostic timing excluded\n", frame);
+        D3DTRACELOG("hist: remote request -> render frame %u; diagnostic timing excluded\n", frame);
     }
 }
 void xd3d_remote_trace_note_draw(void)
@@ -373,7 +380,7 @@ void xd3d_remote_trace_end(unsigned frame, unsigned commands)
         __atomic_exchange_n(&g_remote_hist_on, 0, __ATOMIC_ACQ_REL)) {
         unsigned selected = __atomic_load_n(&g_remote_hist_frame, __ATOMIC_RELAXED);
         unsigned records = __atomic_load_n(&g_remote_hist_records, __ATOMIC_RELAXED);
-        D3DLOG("hist: remote render frame %u closed at %u: %u commands, %u draw-state records; diagnostic timing excluded\n",
+        D3DTRACELOG("hist: remote render frame %u closed at %u: %u commands, %u draw-state records; diagnostic timing excluded\n",
                selected, frame, commands, records);
     }
 }
