@@ -747,3 +747,23 @@ checks the candidate after observer removal. No production recompiler
 selection/default or Vita package has changed. Next is ordinary Pi gameplay
 to look for regressions and determine whether the low-density lowering has
 any useful effect; hardware qualification remains necessary.
+
+171AF0 gameplay diagnostic completed (`codex-object-registers-20260926`,
+session 30236 terminal, intended timeout 124, 68 reports). No omitted scopes
+or fatal/trap lines. It did not demonstrate improvement: firing self time
+0.71/0.69 ms versus aligned reference 0.65/0.66; settled reported self median
+0.29 versus 0.26. These are separate diagnostic runs with possible workload
+and scheduling differences, not proof of a precise regression. Retain the
+validated candidate privately, but do not add it to the hardware stack on
+this evidence. Raw comparisons: `object-walk-registers/gameplay/comparison.json`.
+
+Next codegen lead: 171AF0's type-mask shifts at 171B4E and 171B88 still call
+flag-producing x_shl32 helpers before subsequent TEST instructions replace
+flags. The emitter's existing dead-flag removal strips textual X_FLAGS
+stores, not side effects inside shift helpers. A safe experiment must prove
+all flag outputs dead along the actual control flow, preserve count masking
+(including count zero), and respect shifts' conditional flag writes. It must
+not indiscriminately treat a variable shift as killing incoming flags.
+Two direct 171AF0 call sites were found (recursion and 1721B0); both immediately
+test AL, but that alone does not prove all other state dead or exclude indirect
+callers. No relaxed-state native or shift optimization is enabled yet.
