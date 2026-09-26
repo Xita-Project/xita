@@ -713,3 +713,37 @@ bytes versus 17,051 reference bytes; C size is not native machine-code cost.
 This is only a prepared candidate: no runtime hook, package, deployment or
 correctness/performance claim. Its low x87 density makes it a limited prospect;
 validate complete state/callee boundaries and actual cost before inclusion.
+
+### 171AF0 register candidate validation
+
+Added `tools/test_object_walk_registers.py` and
+`tools/tests/object_walk_registers.c`: synthetic differential comparison of
+the complete function against the maintained memory lowering. It compares
+the entire 4 MiB arena, full xctx, call-boundary context/arguments and
+preemption counts. Sibling traversal, one recursive child level, ignore and
+object-flag filters, both collision-result paths and all eight synthetic
+callees are exercised. Mock callees overwrite x87 scratch slots/status while
+preserving their proven stack effects. This tests compiler lowering, not the
+real collision callees or real-world object topology.
+
+Host O1 ASan/UBSan and Pi Cortex-A9 Thumb O2 with thread-table/render-view
+both passed 1,000 cases / 6,221 candidate callee observations. Every modeled
+callee was required to execute at all eight x87 TOP positions; input TOP is
+selected independently of the low scenario bits choosing the paths. Recursion
+depth reached two. Final run sessions 1098 (host/build), 97769 (Pi) and 15310
+(gameplay diagnostic build) are terminal. No timeouts or guard fallbacks.
+Private logs/receipts: `object-walk-registers/host`, `host.log`, `arm`,
+`arm-run.log`. Inputs are bounded synthetic finite values, not exhaustive.
+
+Uninstrumented Cortex-A9 Thumb O2 function text is 4,156 bytes reference and
+4,164 candidate (+8 bytes), with the same staged preamble and FP-contraction
+disabled. This is code-size evidence, not instruction counts or speed.
+Private `reference-cost.o` / `candidate-cost.o` retain the measurements.
+
+`object-walk-registers/gameplay/` now contains a built diagnostic harness
+with only 171AF0 changed over the aligned diagnostic, retaining B6210 and
+1122A0 updates and restoring the same child observers. `body-audit.json`
+checks the candidate after observer removal. No production recompiler
+selection/default or Vita package has changed. Next is ordinary Pi gameplay
+to look for regressions and determine whether the low-density lowering has
+any useful effect; hardware qualification remains necessary.
