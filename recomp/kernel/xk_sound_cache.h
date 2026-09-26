@@ -33,6 +33,14 @@ static inline float xv_sound_cache_distance2(const float a[3], const float b[3])
     float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
     return x*x + y*y + z*z;
 }
+/* Zero tolerance means identical input bits, not a squared distance that can
+ * underflow to zero. Signed-zero differences conservatively miss. */
+static inline int xv_sound_cache_endpoint_matches(const float a[3],
+                                                 const float b[3], float epsilon2)
+{
+    if (epsilon2 == 0) return memcmp(a, b, 3 * sizeof(float)) == 0;
+    return xv_sound_cache_distance2(a, b) <= epsilon2;
+}
 static inline int xv_sound_cache_probe(const xv_sound_cache *cache,
     unsigned ways, uint32_t hash, uintptr_t domain, uint32_t epoch,
     uint32_t frame, uint32_t lifetime, const float listener[3], const float sound[3],
@@ -47,8 +55,8 @@ static inline int xv_sound_cache_probe(const xv_sound_cache *cache,
         const xv_sound_cache_entry *e = &cache->entry[i];
         if (e->used && e->domain == domain && e->epoch == epoch &&
             frame - e->frame < lifetime &&
-            xv_sound_cache_distance2(listener, e->listener) <= listener_epsilon2 &&
-            xv_sound_cache_distance2(sound, e->sound) <= sound_epsilon2) {
+            xv_sound_cache_endpoint_matches(listener, e->listener, listener_epsilon2) &&
+            xv_sound_cache_endpoint_matches(sound, e->sound, sound_epsilon2)) {
             *hit = e->hit;
             if (matched) *matched = *e;
             return 1; /* Do not renew the age or move the endpoint anchor. */

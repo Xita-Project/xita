@@ -54,6 +54,16 @@ int main(void)
     assert(lookup(4,UINT32_MAX,1,7,101,p[0],&hit) && hit == 0);
     assert(lookup(4,UINT32_MAX,2,7,101,p[0],&hit) && hit == 1);
     assert(lookup(4,UINT32_MAX,1,8,101,p[0],&hit) && hit == 2);
+    /* Squaring this finite difference underflows, but it is not an exact key. */
+    float zero[3] = {0,0,0}, tiny[3] = {0x1p-100f,0,0};
+    float negative_zero[3] = {-0.0f,0,0};
+    assert(xv_sound_cache_distance2(zero,tiny) == 0);
+    memset(&cache,0,sizeof cache);
+    assert(xv_sound_cache_store(&cache,4,7,1,2,100,zero,zero,1));
+    assert(xv_sound_cache_lookup(&cache,4,7,1,2,101,6,zero,zero,0,0,&hit));
+    assert(!xv_sound_cache_lookup(&cache,4,7,1,2,101,6,tiny,zero,0,0,&hit));
+    assert(!xv_sound_cache_lookup(&cache,4,7,1,2,101,6,zero,tiny,0,0,&hit));
+    assert(!xv_sound_cache_lookup(&cache,4,7,1,2,101,6,negative_zero,zero,0,0,&hit));
     puts("PASS: bounded retention, eviction, view/epoch separation, age wrap, anchors, invalid inputs");
     return 0;
 }

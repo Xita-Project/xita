@@ -120,3 +120,33 @@ Inspect that handle and the complete log before concluding anything. Zero
 movement tolerance still does not prove the world stayed unchanged; invalidation
 and hardware qualification remain required. No new Vita deployment or FPS gain
 is claimed.
+
+## Zero-tolerance result and exact-key hardening
+
+Run `codex-sound-cache-exact-20260926` is terminal: planned timeout 124,
+66 host reports, 58 cache reports. It used zero listener/sound tolerances,
+six-frame retention, and four ways. The complete counters report 204,574
+queries, 168,451 proposed hits (82.34%), 168,451 agreements and zero differences;
+24,302 queries used a non-root view. Every query still performed its real cast.
+Private receipt: `sound-cache-access-candidate/exact-summary.json`.
+This is a single headless ARM comparison, not hardware performance proof or
+world-transition coverage. No further Pi job is running.
+
+The zero-tolerance policy now compares coordinate bits rather than squared
+floating-point distance. This prevents underflow from treating distinct tiny
+coordinates as identical; differing signed zeros conservatively miss. Tests
+cover both listener and sound underflow and signed zero. Policy tests passed
+host ASan/UBSan and Cortex-A9-targeted Pi ARM; access/concurrency tests passed
+host ASan/UBSan and Pi ARM after the change. Receipt: `exact-key-tests.log`.
+The whole-game run above predates this additional policy hardening.
+
+Remaining key audit: the current runtime reconstructs the sound endpoint as
+`start + vector`. Identical reconstructed endpoints do not necessarily imply
+identical original vectors because float addition rounds. Exact reuse must key
+the original ray inputs as well, not rely on the reconstructed endpoint alone.
+Furthermore, epoch is still zero: unchanged positions do not prove unchanged
+collision objects/BSP. The scene helper exposes a context generation, but that
+is not yet established as a collision-world revision and must not be used as
+one without checking mutation boundaries. Actual cached reuse remains disabled.
+Next: preserve original ray inputs, audit world/view invalidation, rerun real
+queries, then qualify on hardware. Perf258 remains last confirmed installed.
