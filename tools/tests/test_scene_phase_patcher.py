@@ -27,6 +27,10 @@ class PatcherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'code_000.c'
             path.write_text(source)
+            ordinary = [sys.executable, str(TOOL), tmp, '--parents', '00000020']
+            result = subprocess.run(ordinary, check=True, capture_output=True, text=True)
+            self.assertIn('unwrapped guest calls 00000030 x1', result.stdout)
+            path.write_text(source)
             cmd = [sys.executable, str(TOOL), tmp, '--parents', '00000020', '--any-call']
             subprocess.run(cmd, check=True, capture_output=True)
             first = path.read_text()

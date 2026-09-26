@@ -3,6 +3,7 @@
 f_0005DBC0 in a stage's hand-maintained shards (idempotent: earlier timers are stripped and re-installed).
 Usage: patch_scene_phase_timers.py <stage>/recomp [--parents A,B] [--hle-calls]     Report: [scene-phases] in recomp/kernel/xk_scene_thread.c."""
 import re, sys, glob
+from collections import Counter
 ANY_CALL = False
 PARENTS = ['000900E0', '0014A162', '000B9678', '000B8840',   # the sim tick's two big callees (38 + 14 ms/frame, perf125) and the Pi sampler's hot owner chain (B9678 -> B8980 66%)
            '00109760', '0005B4A0', '00062240', '000A26B0',   # sim tick (2-3/frame at 12 fps), per-model chain, the 182/frame callee (perf124 split)
@@ -22,6 +23,15 @@ def wrap_hle(body):
                 + indent + '{ extern void xv_scene_phase_end(uint32_t); xv_scene_phase_end(0x%su); }\n' % addr)
     body = re.sub(r'^([ \t]*)XV_HLE_CALL\(0x([0-9A-Fa-f]+)u,\s*\w+\);\n', wrap, body, flags=re.M)
     return body, count
+
+def report_unwrapped(body, parent):
+    calls = Counter(re.findall(r'^\s*f_([0-9A-F]{8})\(c\);', body, re.M))
+    wrapped = Counter(a.upper().zfill(8) for a in re.findall(r'xv_scene_phase_begin\(0x([0-9A-Fa-f]+)u\)', body))
+    missing = calls - wrapped
+    if missing:
+        print('WARNING f_' + parent + ': unwrapped guest calls ' +
+              ', '.join(f'{a} x{n}' for a, n in sorted(missing.items())) +
+              '; use --any-call for conditional-hook callers')
 
 BEGIN = '    { extern void xv_scene_phase_begin(uint32_t); xv_scene_phase_begin(0x%su); }\n'
 def main():
@@ -49,6 +59,7 @@ def main():
                 body = re.sub(r'^([ \t]*)f_([0-9A-F]{8})\(c\);\n', wrap_any, body, flags=re.M)
                 if '--hle-calls' in sys.argv:
                     body, hle_count = wrap_hle(body); n[0] += hle_count
+                report_unwrapped(body, fn)
                 s = s[:m.end()] + body + s[end:]; changed = True; total += n[0]
                 print(f'f_{fn}: {n[0]} call sites (any-call) in {f}')
                 continue
@@ -58,6 +69,7 @@ def main():
             body = re.sub(r'(    X_PUSH32\(0x[0-9A-Fa-f]+u\);\n    f_([0-9A-F]{8})\(c\);\n)', wrap, body)
             if '--hle-calls' in sys.argv:
                 body, hle_count = wrap_hle(body); n[0] += hle_count
+            report_unwrapped(body, fn)
             s = s[:m.end()] + body + s[end:]; changed = True; total += n[0]
             print(f'f_{fn}: {n[0]} call sites in {f}')
         if changed: open(f, 'w').write(s)
