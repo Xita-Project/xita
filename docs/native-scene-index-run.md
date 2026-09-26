@@ -95,3 +95,10 @@ Both hook modes passed the 2,400-case suite under host ASan/UBSan and Pi Thumb A
 The admission fixture additionally checks foreign callers, out-of-stack inputs,
 wrapped addresses, a bound word crossing the stack end, and checked-build
 exclusion. Hardware verification and normal gameplay measurements remain required.
+
+
+Hardware reporting correction: perf244's standard-error messages are not captured
+in xita.log, so its run cannot establish a verification pass. Use the explicit
+critical log sink on Vita (ordinary scene-helper messages are also suppressed).
+Fast mode reports its first admitted batch only; verification reports every
+65,536 completed comparisons. Perf245 carries this reporting correction.

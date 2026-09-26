@@ -1097,3 +1097,14 @@ save. Driver session 2474, collector session 73152; tag
 `perf244-index-verify-20260926`. Collector writes hardware-verify.json at frame
 6540 and a pod screenshot after frame5700. Do not treat its diagnostic timings
 as acceptance. Current source commit e0074486; no push performed.
+
+
+Perf244 qualification correction: reached the expected lifepod view (screenshot
+pod244-verify.png frame6221) without a visible regression, but verified-prefix
+messages were written to stderr, which is not captured by Vita xita.log. The
+collector returned checked=0, NOT a pass. Ordinary xk_os_log would also be dropped
+on the scene helper. Perf245 therefore uses xv_log_criticalf for verification
+messages and a one-time fast-mode admission message, leaving the prefix logic
+unchanged. Host admission tests pass with a shim of the Vita critical log API.
+The source correction is awaiting the final stage rebuild; no hardware fast-mode
+performance result has been claimed.
