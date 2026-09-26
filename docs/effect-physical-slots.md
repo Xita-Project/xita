@@ -177,3 +177,11 @@ disabled. Private artifacts are `vita-candidate/launch-a30.py`, `.log`, and
 `a30-env.json`. Deployment success is not performance or correctness proof;
 settled scene identification, frame intervals, firing, and regression checks
 are still required.
+
+Launch session 87563 and follow-up collection 36589 completed. Save reads in
+`a30-first.log` confirm the isolated namespace and `a30.map`; however both
+`a30-after-sequence.png` and `a30-loaded-check.png` show loading/black output,
+not the playable scene. Follow-up reports timing frame 4417 and continued
+two-draw frames. The 4200+ interval summary (41.93 ms mean) is therefore
+explicitly excluded from gameplay evidence. Next inspect loading progress
+and scene readiness; do not report this number as a performance gain.
