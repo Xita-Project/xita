@@ -181,3 +181,52 @@ observer unit and link script. Run 52821 is active for a planned 180 seconds on
 Pi cores 0/1, tag `codex-weapon-create-phases-20260926`, with the same two-burst
 input schedule. Poll this handle and inspect its completed log. The Vita
 endpoint is still connection-refused; no repeated restart or update was made.
+
+### Weapon/census result and candidate policy
+
+Run 52821 completed the planned 180-second timeout (124), with 66 reports.
+At host labels 1800/2040, C02F0 costs 1.59/1.75 ms inclusive: BF200 accounts
+for 0.82/0.87, BFA70 0.64/0.73, and 95680 only 0.07/0.08. Its own residual
+is 0.03. Thus 95680/94280 are not the primary implementation target in this
+sample. BF200 calls 2B660 and 113930 (plus 8B910); BFA70 is a larger subtree.
+
+The same-run hypothetical four-way cache reports 4,381/4,749/4,236/4,704 hits
+near labels 1800/1860/2040/2100, versus actual reuses 3,690/3,997/3,564/3,915:
+approximately 670–790 additional retained queries per 60-frame window. The
+original cache reports 873–1,102 recent sound-endpoint mismatches in those
+windows, compared with approximately 400 age expirations. Two-way retention
+helps less. Neither age nor distance tolerances were loosened. These are
+candidate-selection counts, not verified saved casts or FPS.
+
+Caution: this older Pi runtime emits both tick and scene-helper phase reports
+even with mode 2. Sound entry 2B460 appears on the helper too. The existing
+sound cache and this diagnostic's counters/tables are shared, so thread/domain
+ownership and concurrent report boundaries need attention; one window's rays
+and completed cast/reuse counters differ by one. Do not treat the approximate
+shadow counts as an exact serialized replay. Also 2B460's reported residual
+includes the unwrapped `xv_sound_ray` native-hook branch, not just its own math.
+Private evidence is `weapon-create-phase-pi/selected-windows.json` and the
+complete Pi log. No new Vita test or FPS gain was obtained.
+
+A reusable candidate policy is now in `recomp/kernel/xk_sound_cache.h`, with
+1/2/4-way retention at 1,024 entries, memory-view and world-epoch keys, original
+endpoint anchors, bounded age, and copied hit results. It is **not integrated
+into xv_sound_ray or enabled in any build**. Its caller must serialize access,
+release the lock before guest execution, and supply a valid world epoch. The
+key fields increase bytes per entry; capacity equality is not byte-size equality.
+It retains the original endpoint/age approximation rather than claiming exact
+collision equivalence.
+
+`tools/tests/sound_cache_policy.c` passed host ASan/UBSan and Cortex-A9-targeted
+ARM execution on Pi core 0. Tests cover same-bucket collisions/oldest eviction,
+1/2/4 ways, opposite answers in different views/epochs, maximum hash, expiration,
+frame wrap/backward age, unchanged anchors, moved endpoints, nonfinite positions
+and invalid ways. Receipts: `weapon-create-phase-pi/sound-cache-policy-tests.log`
+and `sound-cache-policy-test-commands.json`. These are policy invariants, not
+concurrency or gameplay verification. Next: integrate with short nonblocking
+cache synchronization, world-change invalidation and view ownership; compare
+candidate hits against actual guest casts before enabling it on hardware.
+
+All Pi jobs in this section are terminal. Perf259 remains built but undeployed;
+last confirmed hardware build is perf258, with its HTTP endpoint unavailable.
+The pending screen-status question has not been answered. Keep the goal active.
