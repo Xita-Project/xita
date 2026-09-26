@@ -22,6 +22,26 @@
 #include <stdio.h>
 #include <string.h>
 #include "../xv_x86rt.h"
+#if XV_DEVELOPER_BUILD
+#include "../../runtime/xv_freeze_lights.h"
+/* Static storage: the watchdog has only 16 KiB of stack and the allocator may
+ * itself be involved in a freeze. This observer neither binds nor merges views. */
+const void *xv_freeze_light_capture(size_t *bytes)
+{
+    static xv_freeze_light_dump dump;
+    xk_render_view_layout layout;
+    xk_mem_render_view_layout(&layout);
+    memset(&dump, 0, sizeof dump);
+    dump.magic = XV_FREEZE_LIGHT_MAGIC;
+    dump.version = 1;
+    dump.bytes = sizeof dump;
+    for (unsigned i=0; i<2; ++i)
+        xv_freeze_light_sample_read(&dump.samples[i],g_xram,g_xpt,layout.trash_off);
+    dump.equal_samples = !memcmp(&dump.samples[0],&dump.samples[1],sizeof dump.samples[0]);
+    *bytes = sizeof dump;
+    return &dump;
+}
+#endif
 #if XV_RENDER_VIEW
 
 #ifndef XV_RENDER_VIEW_DEFAULT

@@ -1228,6 +1228,22 @@ static int xv_freeze_watchdog_thread(SceSize args, void *argp)
         if (++quiet < (unsigned)limit) continue;
         SceUID fd = sceIoOpen("ux0:data/xita/freeze.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
         if (fd >= 0) { char m[160]; int n = snprintf(m, sizeof m, "freeze watchdog: no frame presented for %u s (frame counter %u, process time %.1f s); trapping for a core dump\n", quiet, (unsigned)now, sceKernelGetProcessTimeWide() / 1000000.0); sceIoWrite(fd, m, n); sceIoClose(fd); }
+#if XV_DEVELOPER_BUILD && defined(XV_RUN_RECOMP)
+        /* Preserve the small guest region missing from ordinary core dumps.
+         * SceIo avoids the application's possibly held stdio/allocator locks. */
+        extern const void *xv_freeze_light_capture(size_t *bytes);
+        size_t bytes = 0;
+        const uint8_t *capture = xv_freeze_light_capture(&bytes);
+        fd = sceIoOpen("ux0:data/xita/freeze-lights.bin", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+        if (fd >= 0) {
+            while (bytes) {
+                int n = sceIoWrite(fd, capture, bytes);
+                if (n <= 0) break;
+                capture += n; bytes -= (size_t)n;
+            }
+            sceIoClose(fd);
+        }
+#endif
         __builtin_trap();
     }
 }

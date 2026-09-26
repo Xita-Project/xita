@@ -1258,6 +1258,8 @@ XITA_SYS_SRCS := $(RECOMP_DIR)/xv_x86rt.c $(RECOMP_DIR)/kernel/xk_mem.c $(RECOMP
                  $(RECOMP_DIR)/xv_trace_stub.c $(RECOMP_DIR)/xv_funchist.c $(RECOMP_DIR)/xv_phase.c
 RECOMP_SRCS := $(XITA_GUEST_SRCS) $(XITA_SYS_SRCS) $(XITA_GAME_SRCS)
 RECOMP_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(RECOMP_SRCS))
+$(RECOMP_BUILD)/kernel/xk_render_view.o: RECOMP_CFLAGS += -DXV_DEVELOPER_BUILD=$(XV_DEVELOPER_BUILD)
+$(RECOMP_BUILD)/kernel/xk_render_view.o: $(BUILD)/distribution.config runtime/xv_freeze_lights.h
 XITA_GUEST_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GUEST_SRCS))
 XITA_SYS_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_SYS_SRCS))
 XITA_GAME_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GAME_SRCS))
