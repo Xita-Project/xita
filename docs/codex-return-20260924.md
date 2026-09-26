@@ -465,3 +465,16 @@ Latest settled baseline, screenshot-confirmed pod at 640x360, frames
 14880..16020 (1200 intervals): 77.087804 ms / 12.9722 FPS, p95 85.778 ms,
 p99 109.246 ms, max 169.976 ms; 20 intervals >100 ms, zero >200 ms.
 Private before237.png/log and baseline-summary.json preserve evidence.
+
+Perf237 built successfully and was deployed with remote update verification and
+confirmed boot (slot 1). Payload 34,750,898 bytes, SHA
+40d4cb135fdaf1affb5a7195937f09a4ff11e9e5e7b87ac553767ace378400e1.
+Package xita-perf237c.vpk is 55,067,387 bytes, SHA
+05d338e3928715437aab7948950169c03cc7f86f2850f4cf2b980ba8b614c51a.
+Only game-a.self and boot-game.txt differ from perf236c; asset contract unchanged.
+Scripted launch is live as exec session 89349, driver
+range-clamp-candidate/gameplay-driver.log, tag perf237-range-clamp-20260926.
+Keep-awake PID 134059 remains active. Next check that this existing launch
+reaches the pod, capture a meaningful screenshot, then collect settled frame
+intervals; do not relaunch because observation expires. No hardware speedup or
+visual acceptance is established yet.
