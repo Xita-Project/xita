@@ -126,3 +126,9 @@ Therefore removing all 36 calls cannot be credited with a large frame-time
 saving. Many return immediately on an empty queue; nonempty drains protect
 recorder/guest-state ownership. Further changes need a specific dependency
 that can be removed or delayed without violating that ownership.
+
+Deployment session 6854 subsequently exited successfully. Live status confirms
+perf262 / a0fc8cba on a fresh dashboard boot (timing frame 0), and its awake lease
+was renewed for 3600 seconds. The temporary connection refusal occurred during
+restart and recovered without a second deployment. Starting the same protected
+a30 launch sequence for this build; exclude loading and trace frames from timing.
