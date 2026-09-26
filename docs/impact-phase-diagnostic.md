@@ -284,3 +284,31 @@ No new VPK, deployment or demonstrated Vita speedup results from this probe.
 Follow-up: build 55786 and transfer 38934 completed successfully. The planned
 weapon-effect run is now active on Pi cores 0/1, local exec session 56721.
 Poll this handle; no need to rebuild or restart the job.
+
+## Effect creation result
+
+`codex-weapon-effect-20260926` completed its planned timeout (124), with 69
+host reports; session 56721 is terminal. At host reports 1800/2040, 113930
+inclusive was 0.85/1.04 ms and its child 113370 was 0.78/0.96 ms. Other
+children: 111F10 0.04 ms, 111430 0.01 ms, 110F60 approximately 0.00 at
+report precision; wrapper self 0.01 ms. These are Pi instrumented elapsed
+values, not Vita savings. Receipt: `weapon-effect-phase-pi/selected-windows.json`.
+10AAF0 did not appear as a printed parent in this run's selected rows; that
+absence does not mean zero cost. Avoid inferring its child breakdown.
+
+The runtime already has page-aware repeated-byte memset in x_str_stos, which
+covers this wrapper's 128-byte all-ones fill. The measured child costs also
+argue against prioritizing that fill or rewriting the allocation wrapper.
+Focus on 113370's processing instead.
+
+Private `effect-process-phase-pi/` adds timers beneath 113370 (26 sites),
+1122A0 (37), and 113080 (14), preserving the prior child probe. 111530 has
+no direct calls. Observer-stripped source equality passed. Eight 111240
+calls in 113370 use tail-call syntax and remain unwrapped; their cost may
+appear in parent remainder. Do not label that remainder pure local math.
+Build session 78342 is active, compiling code_024 and linking the harness.
+Poll the existing handle. After success, transfer as
+`pi:xita-d3d2/harness-codex-effect-process`, then use the previous baseline
+180-second two-burst/reload pi30.sh command with tag
+`codex-effect-process-20260926`. No sound-cache verification flags.
+No new hardware build/deployment or performance gain has been claimed.
