@@ -587,3 +587,39 @@ passed; rebuild running after preserving the disabled hot-path fence policy.
 Current build session recorded by tools; NOT deployed yet. Next verify nonzero
 hardware draw-state records before relying on this diagnostic to choose material
 specializations. No FPS gain is claimed for this repair.
+
+### 2026-09-26: perf239 trace exposed helper log suppression; perf240 buffers it
+
+Perf239 installed/boot-confirmed, payload SHA
+87aa4a582611b6d2337bb729dab2d10bac8ee26858412a88347e4cc8f8677278.
+Pod239.png frame6011 visually matches the stationary pod/AR60 view.
+Settled-after-trace.log windows6300..7440 (1200 intervals) mean76.608784ms,
+13.0533FPS, p9587.195/p99114.374/max207.446ms; 23>100ms,1>200ms.
+No established performance gain; excludes the traced frame5990.
+
+Trace validation FAILED usefully: closed frame5990 had422 commands and268
+reported draw-state calls, but ZERO actual draw-state lines. Frame selection
+now follows recording, but xv_log_write intentionally suppresses both scene
+helper and deferred-worker messages (prior repeated logging caused stalls).
+Do not remove that normal hot-path safeguard. Private evidence under
+render-trace-candidate/pod-draw-trace.log and trace-validation.json.
+
+Perf240 buffers only trace_draw_state output into an on-demand bounded1MiB
+allocation. Existing drained Begin/End boundaries hand ownership between
+recording workers and the recording owner; workers only format into RAM.
+After workers drain, explicitly flush once through critical_write, bypassing
+helper suppression (Present can itself run on the scene helper). Allocation
+failure/overflow are visible in a separate summary; validator requires zero
+lost lines plus exact reported/actual draw-state record agreement. The traced
+frame incurs diagnostic I/O and must be excluded from performance results.
+Captures all18 PSC rows for the two heavy B5691565/154066FD materials to evaluate
+exact specialization opportunities. No shader choice or rendering changes.
+
+Host ASan/UBSan and ARMv7 Pi CPUs0/1 pass bounded-buffer tests (worker join,
+no sink calls on worker, whole-line overflow rejection, failed allocation,
+disabled no allocation, exact capacity). Existing trace-selector tests pass.
+Perf240 full build session37930 completed0; package running63653 under
+render-trace-buffer-candidate. NOT deployed yet at this note. Keep-awake134059
+remains running; current device239. Next verify package contract, deploy240,
+run existing launch.sh/collect-trace.py once, inspect actual capture. No FPS
+optimization is claimed for this diagnostic repair. Goal remains unmet.

@@ -39,6 +39,7 @@
 #include "xv_record_opt.h"
 
 #include "xv_log.h"
+#include "xv_draw_trace_buffer.h"
 #define XV_LOG(...)     xv_logf("[xv/d3d] " __VA_ARGS__)
 #define XV_ONCE(flag, ...) do { static int flag; if (!flag) { flag = 1; XV_LOG(__VA_ARGS__); } } while (0)
 
@@ -2012,6 +2013,7 @@ static int opaque_material_candidate(const cmd_t *c)
  * bytes or vertex readback. Keep packed/resident geometry and submission intact.
  * Constants are limited to projection rows used by CE's shadow producer and
  * receiver, and emitted only for draws that write/read an offscreen target. */
+#define DRAW_TRACE_LOG(...) do { if (xv_draw_trace.active) xv_draw_trace_append("[xv/d3d] " __VA_ARGS__); else XV_LOG(__VA_ARGS__); } while (0)
 static void trace_draw_state(const cmd_t *c, const xv_vs_desc_t *d, unsigned texok)
 {
     /* Bounded capture for loading draws that can pass between remote requests.
@@ -2029,52 +2031,61 @@ static void trace_draw_state(const cmd_t *c, const xv_vs_desc_t *d, unsigned tex
     if (!vertex_trace_frame()&&!loading) return;
     if(loading) {
         loading_seen[loading_kind]++;
-        XV_LOG("[loading-state] frame %u sample %u key %08X entry %d blend-slot %u op %u; diagnostic frame, exclude timing\n",
+        DRAW_TRACE_LOG("[loading-state] frame %u sample %u key %08X entry %d blend-slot %u op %u; diagnostic frame, exclude timing\n",
             g_build_frame,loading_seen[loading_kind],S.ps_key,c->ps_entry,c->blend,S.blend_op);
-        XV_LOG("[loading-attributes] frame %u color %.9g/%.9g/%.9g/%.9g tex1 %.9g/%.9g\n",
+        DRAW_TRACE_LOG("[loading-attributes] frame %u color %.9g/%.9g/%.9g/%.9g tex1 %.9g/%.9g\n",
             g_build_frame,S.const_attr[3][0],S.const_attr[3][1],S.const_attr[3][2],S.const_attr[3][3],
             S.const_attr[10][0],S.const_attr[10][1]);
         const cmdlist_t *list=cur_list();
         for(unsigned i=0;i<list->ncmds&&i<8;i++) {
             const cmd_t *before=&list->cmds[i];
-            if(before->kind==1) XV_LOG("[loading-clear] frame %u cmd %u pass %u flags %X color %08X\n",
+            if(before->kind==1) DRAW_TRACE_LOG("[loading-clear] frame %u cmd %u pass %u flags %X color %08X\n",
                 g_build_frame,i,before->pass,before->clear_flags,before->clear_color);
         }
     }
-    if (xd3d_remote_trace_note_draw) xd3d_remote_trace_note_draw();
+    if (xd3d_remote_trace_note_draw && xv_draw_trace.active) xd3d_remote_trace_note_draw();
     unsigned command = cur_list()->ncmds - 1, rt_mask = 0;
-    XV_LOG("[draw-state] frame %u cmd %u pass %u vs %s ps %08X key %08X tex-mask %X previous %X blend %u/%u/%u z %u/%u/%u mask %X atest %08X\n",
+    DRAW_TRACE_LOG("[draw-state] frame %u cmd %u pass %u vs %s ps %08X key %08X tex-mask %X previous %X blend %u/%u/%u z %u/%u/%u mask %X atest %08X\n",
         g_build_frame, command, c->pass, d->gxp, S.ps_hash, S.ps_key, texok,
         c->previous_frame, S.blend_enable, S.src_blend, S.dst_blend,
         S.z_enable, S.z_write, S.z_func, S.color_mask, c->atest);
     for (unsigned t = 0; t < 4; ++t) {
         if (!S.tex_guest[t] && !(texok & (1u << t))) continue;
-        XV_LOG("[draw-sampler] frame %u cmd %u stage %u guest %08X captured %u address %u/%u filter %u/%u scale %.9g/%.9g\n",
+        DRAW_TRACE_LOG("[draw-sampler] frame %u cmd %u stage %u guest %08X captured %u address %u/%u filter %u/%u scale %.9g/%.9g\n",
             g_build_frame, command, t, S.tex_guest[t], (texok >> t) & 1u,
             S.tex_addr_u[t], S.tex_addr_v[t], S.tex_min[t], S.tex_mag[t],
             c->texscale[t][0], c->texscale[t][1]);
-        if(loading) XV_LOG("[loading-sampler] frame %u stage %u border %08X\n",g_build_frame,t,S.tex_border[t]);
+        if(loading) DRAW_TRACE_LOG("[loading-sampler] frame %u stage %u border %08X\n",g_build_frame,t,S.tex_border[t]);
         if (!(texok & (1u << t))) continue; /* Uncaptured slots are not descriptors. */
         const SceGxmTexture *tx = &c->tex[t];
-        if(loading) XV_LOG("[loading-format] frame %u stage %u format %08X\n",g_build_frame,t,(unsigned)sceGxmTextureGetFormat(tx));
+        if(loading) DRAW_TRACE_LOG("[loading-format] frame %u stage %u format %08X\n",g_build_frame,t,(unsigned)sceGxmTextureGetFormat(tx));
         const void *data = sceGxmTextureGetData(tx);
         for (unsigned r = 0; r < XV_RT_SLOTS; ++r)
             if (data && data == g_rt[r].mem) rt_mask |= 1u << r;
-        XV_LOG("[draw-texture] frame %u cmd %u stage %u data %08X size %u/%u type %08X address %u/%u\n",
+        DRAW_TRACE_LOG("[draw-texture] frame %u cmd %u stage %u data %08X size %u/%u type %08X address %u/%u\n",
             g_build_frame, command, t, (unsigned)(uintptr_t)data,
             (unsigned)sceGxmTextureGetWidth(tx), (unsigned)sceGxmTextureGetHeight(tx),
             (unsigned)sceGxmTextureGetType(tx), (unsigned)sceGxmTextureGetUAddrMode(tx),
             (unsigned)sceGxmTextureGetVAddrMode(tx));
     }
+    if (S.ps_hash == 0xB5691565u || S.ps_hash == 0x154066FDu) {
+        for (unsigned row = 0; row < 18; ++row) {
+            const float *v = S.psc[row];
+            DRAW_TRACE_LOG("[draw-constant] frame %u cmd %u psc %u %.9g %.9g %.9g %.9g\n",
+                g_build_frame, command, row, v[0], v[1], v[2], v[3]);
+        }
+    }
     if (c->pass || rt_mask) {
         static const unsigned rows[] = {0,1,2,3,15,16,17,18,19,28,29,30,31};
         for (unsigned i = 0; i < sizeof rows / sizeof rows[0]; ++i) {
             unsigned row = rows[i]; const float *v = S.vsc[96 + row];
-            XV_LOG("[draw-projection] frame %u cmd %u read-rt %X c[%u] %.9g %.9g %.9g %.9g\n",
+            DRAW_TRACE_LOG("[draw-projection] frame %u cmd %u read-rt %X c[%u] %.9g %.9g %.9g %.9g\n",
                 g_build_frame, command, rt_mask, row, v[0], v[1], v[2], v[3]);
         }
     }
 }
+
+#undef DRAW_TRACE_LOG
 
 static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
 {
@@ -2765,6 +2776,7 @@ uint32_t xv_d3d_EndFrame(void)
     l->ui_frame = xv_ui_gxm_record_frame();
     g_record_pass = l->cur_pass;
     xv_vertex_upload_seal(g_build_frame % XV_NUM_LISTS);
+    xv_draw_trace_end(g_build_frame);
     if (xd3d_remote_trace_end) xd3d_remote_trace_end(g_build_frame, l->ncmds);
     uint32_t done = g_build_frame++;
     return done;
@@ -2773,6 +2785,7 @@ unsigned xv_d3d_record_slot(void) { return g_build_frame % XV_NUM_LISTS; }
 void xv_d3d_BeginFrame(void)
 {
     if (xd3d_remote_trace_begin) xd3d_remote_trace_begin(g_build_frame);
+    xv_draw_trace_begin(vertex_trace_frame_live());
     { extern void xv_rec_ab_frame(void) __attribute__((weak)); if (xv_rec_ab_frame) xv_rec_ab_frame(); }   /* XV_REC_AB */
 #if XV_POSE_PIPELINE
     xv_pose_pipeline_begin(g_build_frame);
@@ -2831,9 +2844,11 @@ void xv_d3d_Swap(void)
     cmdlist_t *l = cur_list();
     report_draw_drops(l);
     xv_vertex_upload_seal(g_build_frame % XV_NUM_LISTS);
+    xv_draw_trace_end(g_build_frame);
     if (xd3d_remote_trace_end) xd3d_remote_trace_end(g_build_frame, l->ncmds);
     g_build_frame++;
     if (xd3d_remote_trace_begin) xd3d_remote_trace_begin(g_build_frame);
+    xv_draw_trace_begin(vertex_trace_frame_live());
     index_reuse_begin_frame();
     /* reset the list the NEXT frame will use (the pump is done with it: at most one
        frame is in flight beyond the one just submitted) */

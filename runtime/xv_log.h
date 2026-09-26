@@ -65,6 +65,9 @@ int xv_log_shutdown(unsigned timeout_us);
 int xv_log_retry(void);
 /* Always bypass report buffering; console evidence precedes any file wait. */
 void xv_log_criticalf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+/* Explicit bounded diagnostic flush after recording workers have joined.
+ * Bypasses helper suppression; never call from per-draw worker hot paths. */
+void xv_log_critical_write(const char *text, unsigned length);
 int xv_log_report_begin_frame(unsigned frame);
 /* Scope only when the async sink is active; synchronous call sites unchanged. */
 int xv_log_report_begin_async_frame(unsigned frame);

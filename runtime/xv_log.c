@@ -199,6 +199,10 @@ void xv_log_criticalf(const char *fmt,...)
     if(n>(int)sizeof buf-1) n=(int)sizeof buf-1;
     log_write_immediate(buf,(unsigned)n);
 }
+void xv_log_critical_write(const char *text,unsigned length)
+{
+    if(text && length) log_write_immediate(text,length);
+}
 int xv_log_flush_wait(unsigned timeout_us)
 {
     uint64_t began=sink_now();
