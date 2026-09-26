@@ -1469,11 +1469,13 @@ System Link networking onto `sceNetAdhoc`.
   unverified. See [transport details](docs/adhoc.md).
 - **Session flow.** System Link lobby, join and start over ad-hoc, with the existing
   force-start hack retired once real peers can join.
-- **Campaign co-op.** Halo's Xbox build carries the co-op path for split-screen; System
-  Link co-op is the same simulation with a second player over the transport. Determine
-  what the 3925 build supports and where the runtime has to fill in.
-- **Bandwidth and latency.** Halo assumes 100 Mbit LAN; ad-hoc Wi-Fi is far below that.
-  Measure the per-tick packet budget and apply the game's own bandwidth settings.
+- **Campaign co-op research.** The original Xbox game supports local split-screen
+  campaign co-op; working System Link versus does not establish networked co-op.
+  Investigate campaign state replication, scripts, AI authority and transitions as
+  a separate engine task before promising cross-Vita campaign play.
+- **Bandwidth and latency.** Measure packet sizes, traffic per simulation tick,
+  latency and loss on two Vitas; Ethernet link speed is not the game's required
+  throughput. Apply supported game bandwidth settings where measurements justify it.
 
 ### 3.2 Hardware-specific considerations
 
@@ -1488,7 +1490,8 @@ System Link networking onto `sceNetAdhoc`.
 
 1. Two Vitas discover each other and complete a System Link lobby over ad-hoc.
 2. Blood Gulch slayer between two Vitas for a full match.
-3. Campaign co-op through a10 between two Vitas.
+3. Research gate: establish campaign networking support before attempting a10 co-op
+   between two Vitas.
 4. Session recovery: a dropped peer returns the host to the lobby cleanly.
 
 ## Phase 4 — Plugin Architecture & Community Modding
