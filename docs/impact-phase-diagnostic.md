@@ -312,3 +312,6 @@ Poll the existing handle. After success, transfer as
 180-second two-burst/reload pi30.sh command with tag
 `codex-effect-process-20260926`. No sound-cache verification flags.
 No new hardware build/deployment or performance gain has been claimed.
+
+Follow-up: build 78342 and transfer 29351 finished successfully. Effect-process
+run is active on Pi cores 0/1 with local exec session 81814. Poll this handle.
