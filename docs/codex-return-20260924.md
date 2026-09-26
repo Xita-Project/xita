@@ -1327,3 +1327,44 @@ parents. It is an older headless render baseline and cannot predict Vita FPS;
 use to locate collision callees for differential/native work, on Pi cores0/1.
 Perf248 collector64327 and opening41212 completed. Launch watcher remains live;
 keepawake134059 active. Do not restart those jobs just because a turn ends.
+
+Pi biped phase harness built successfully; session90981 is running the planned120s
+headless profile on cores0/1, tagcodex-biped-phases-20260926, with existing native
+material/effects/1721B0 and deferred recording enabled. No active Halo2 compute job
+seen (only its old log tail); do not stop that tail. Poll this same job.
+
+
+### Perf249 deployed; Pi collision split
+
+Perf249 biped-phase-candidate built successfully. Payload-only package55,078,075
+bytes SHA256fd37f08e74bbb244070f919038a20fc05ad3c952079303f913250392f7cccac8;
+payload34,774,762 SHA25678baa439b61bac5ca2ee374f49827896c130f99fb2704c0b6b3ce42d37aca924.
+Contract unchanged; only game-a.self/boot-game.txt differ from248. Initial upload
+attempt reached dashboard too early (connection refused, terminal session5753);
+status subsequently confirmedready248, retry16345 completedverified=true,
+boot_confirmed=true,slot1. No hardware reboot required. Current249 launchsession
+61219, openingcapture74359, collector46799 (same scripts as248 with correctedtag
+perf249-biped-phases-20260926). Keepawake134059 remains active. Deployment evidence
+isdeploy249-retry.log. Keep these live jobs; don't restart on an observation timeout.
+
+Pi biped profile90981 completedplanned120s timeout124,37reports, logs in
+../d3d-record2-work/pi-runs/codex-biped-phases-20260926.log. Last ten owner reports:
+4B9D0~2.50ms incl/~0.07self;49600~2.33/~0.07self, most timein172BF0.
+These are headlessPi values, not Vita predictions. Existing analyzer's near_frame
+is0 here (Pi log uses differentframe markers); use last tenreports afterload.
+Small childedges omittedfromtop30 are still visible in per-parent detail lines.
+
+Supporting collision-phase-pi harness additionally times BOTH fused and fallback
+branches of172BF0's171F10collection and170C10solver calls (begin outside#if,end
+after#endif). It retained the instrumentedcode_008 object. Planned120srun85747
+completed37reports. Last ten172BF0 reports~2.28-2.37ms:collection1.90-1.98ms,
+solver0.36-0.39ms,self0.01ms. Collection is the supporting lead.
+
+collection-phase-pi harness now instruments the actual specialized static
+nq_collection_172c95 body: three directguestcalls and nq_query_at_171f94 tagged
+88110. Run69518,120s,cores0/1,tagcodex-collection-phases-20260926, also enables
+NATIVE_4B9D0_TIME=1 for attribution. This is currently live; poll same session.
+Vita249 still loading aroundframe3037 when this note was written. Private source
+references inbiped-phase-candidate include4B9D0,8DDF0,868F0; no generated code was
+committed. 868F0 is only289 lines, forwarding to862A0,86170,86440; don't assume
+itself is expensive before the child breakdown arrives.
