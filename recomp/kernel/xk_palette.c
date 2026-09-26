@@ -191,21 +191,36 @@ static int palette_numeric(const float *left, const uint8_t *right, unsigned cou
  * FP control prove every hit. The enclosing math guard owns this bounded pool. */
 typedef struct { unsigned count, control, raised, model, pose, nodes; float left[64*13], right[64*13], output[64*13]; } prefix_entry;
 static prefix_entry entries[32];
-static unsigned next_way[8];
+/* Four recency ranks per set; same storage as the old round-robin cursors.
+ * Updated only under XV_OBJECT_MATH_GUARD. Identity chooses a candidate;
+ * exact input and FP checks below still decide whether arithmetic is reusable. */
+static unsigned char prefix_age[32];
 static unsigned prefix_evictions;
-static const unsigned prefix_storage_bytes=sizeof entries+sizeof next_way;
+static const unsigned prefix_storage_bytes=sizeof entries+sizeof prefix_age;
 static unsigned prefix_set(unsigned model,unsigned pose,unsigned nodes) {
     unsigned h=model^(pose*0x9e3779b1u)^(nodes*0x85ebca6bu);
     h^=h>>16;h*=0x7feb352du;h^=h>>15;return h&7u;
 }
+static void touch_prefix(unsigned base,unsigned way) {
+    unsigned rank=entries[base+way].count?prefix_age[base+way]:3u;
+    for(unsigned i=0;i<4;i++)
+        if(entries[base+i].count && prefix_age[base+i]<rank)prefix_age[base+i]++;
+    prefix_age[base+way]=0;
+}
 static prefix_entry *find_prefix(unsigned model,unsigned pose,unsigned nodes) {
-    unsigned set=prefix_set(model,pose,nodes),base=set*4u;
+    unsigned base=prefix_set(model,pose,nodes)*4u;
     for(unsigned i=0;i<4;i++) {
         prefix_entry *p=&entries[base+i];
-        if(p->count && p->model==model && p->pose==pose && p->nodes==nodes)return p;
+        if(p->count && p->model==model && p->pose==pose && p->nodes==nodes) {
+            touch_prefix(base,i);return p;
+        }
     }
-    for(unsigned i=0;i<4;i++)if(!entries[base+i].count)return &entries[base+i];
-    prefix_evictions++;unsigned way=next_way[set];next_way[set]=(way+1u)&3u;
+    for(unsigned i=0;i<4;i++)if(!entries[base+i].count) {
+        touch_prefix(base,i);return &entries[base+i];
+    }
+    unsigned way=0;
+    for(unsigned i=1;i<4;i++)if(prefix_age[base+i]>prefix_age[base+way])way=i;
+    prefix_evictions++;touch_prefix(base,way);
     entries[base+way].count=0;return &entries[base+way];
 }
 static unsigned prefix_hits, prefix_misses, prefix_hit_matrices, prefix_miss_matrices;
