@@ -57,7 +57,7 @@ windows from mixed ones. Times are inclusive ms per rendered frame.
 | 80720 → 1721B0 collision | 2.60 | 2.21 | 3.58 | 2.75 |
 | 80720 → 57810 environment | 1.78 | 1.20 | 1.53 | 1.52 |
 | 80720 residual | 1.56 | 1.11 | 1.58 | 1.38 |
-| 10E240 → 1746F0 impact handling | below displayed rounding | 0.63 | 2.79 | 0.63 |
+| 10E240 → 1746F0 impact handling | not reported | 0.63 | 2.79 | 0.63 |
 | FA920 → 109760 simulation | 54.38 | 62.00 | 56.72 | 52.73 |
 | FA920 → 108FD0 realtime update | 14.68 | 12.85 | 17.94 | 14.60 |
 
@@ -82,5 +82,6 @@ these dependencies and callee-visible state, with differential ARM validation.
 
 After archiving the diagnostic capture, Xita was restarted to remove the
 launch-only timer environment. A normal protected launch with
-`XV_SCENE_PHASES=0` is in progress. No performance optimization beyond perf256
+`XV_SCENE_PHASES=0` completed; status showed perf257, advancing timing frames,
+benchmark mode off and an active keep-awake lease. No performance optimization beyond perf256
 was introduced, and the 20 FPS goal remains unmet.
