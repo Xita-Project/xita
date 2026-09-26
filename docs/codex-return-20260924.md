@@ -1765,3 +1765,17 @@ andcreatesrestore.shunder/var/backups/xita-display-TIMESTAMP. Requiresuser
 sudo; notinstalled/rebootedyet. DoesnotchangeXitacodeorPiharness.
 Vita performancegoalwasblocked; reconnectrestoreshardwarebuttoolcannotresume
 blockedgoals; userresumecontrolsstatus. FinishPidriverthencontinue252test.
+
+## 2026-09-26: user opening-cutscene observation captured
+
+Goalcontinuationre-readobjective; priorturnIPlookupnotperformanceprogress.
+Announced252intentbutpredeployscreenshowedliveusercampaign, notdashboard.
+Userreportedfirstcutscene20FPS; pauseddeploymenttocapturecurrentobservation.
+pre-deploy.pngframe5119showsPillarofAutumnexterior/20FPS, downloaded
+returned251-cutscene.log1582573bytesconfirmsa10.map, notourtargeta30canyon.
+Correctiontoinitialcommentary: thisisfirstmission, cannotqualifya30flyover.
+Last12normal60framereports22.1,19.7,16.5,16.2,17.2,18.5,20.0,20.8,16.1,
+19.4,16.3,13.4FPS; per-frame[frame-us]notenabledinthisuserlaunch. Savedprivate
+returned251-cutscene-summary.json. ActualMATERIAL_BLACKgreaterlinksrecorded,
+renderheight360. No252updateornewoptimizationapplied. Normalusercampaignsave
+notconfirmedtestnamespace: do notforcequitwithoutpreservingcurrentprogress.
