@@ -1089,3 +1089,11 @@ Deployment and hardware qualification were started this turn; consult
 `verify.sh` preserves previous options, replacing explicit SCENE_PHASES=0 with
 SCENE_INDEX_RUN=1 to stay under 32-key remote limit. Actual xita.cfg has no
 SCENE_PHASES key, so its default stays off. Keepawake PID134059 remains active.
+
+
+Perf244 upload completed: payload SHA verified, slot 0, boot_confirmed=true.
+The ordinary scripted a30 launch is live with INDEX_RUN=1 and the protected test
+save. Driver session 2474, collector session 73152; tag
+`perf244-index-verify-20260926`. Collector writes hardware-verify.json at frame
+6540 and a pod screenshot after frame5700. Do not treat its diagnostic timings
+as acceptance. Current source commit e0074486; no push performed.
