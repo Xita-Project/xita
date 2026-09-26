@@ -477,3 +477,23 @@ Do not rewrite 112C80/113370 local math on the old large self estimates. The
 current 1122A0 cost supports continued investigation but does not revalidate
 the previous candidate speedup comparison collected with the old reporter.
 No new hardware performance result; HTTP8080 still refuses connections.
+
+## Combined sound/object service diagnostic
+
+Private `effect-services-phase-pi/` retains V3's corrected 64-scope owner-only
+collector and all prior effect probes, adding 108 direct call sites beneath
+26B10 (15), 2B660 (2), 2B140 (5), 963C0 (5), 95E50 (78), and 8D320 (3).
+Modified shards 004/005/014 derive from the previous weapon-create diagnostic;
+013 derives from the maintained baseline. Observer removal and return
+whitespace normalization reproduce their respective inputs. No optimization
+or game behavior change is intended.
+
+The staged report/depth tests passed before build. Both build steps and
+transfer completed. Run `codex-effect-services-20260926` is active on cores
+0/1, same 180-second a30 two-burst/reload sequence. Inspect its terminal result
+and omitted-scope warnings before trusting the deeper attribution.
+
+Static inspection: 2B660 calls 2B140, then conditionally 26B10; 26B10 includes
+a recursive call. 963C0 calls spatial helper 8D320, iterates results through
+95E50, then calls 8A300. This does not by itself prove the costly descendant.
+HTTP8080 still refuses; perf260 remains ready but not installed.
