@@ -717,3 +717,11 @@ Next deploy, coldlaunch, check qualification/link counts and pod visual/frame
 distribution, then active outdoor/effects. Current physical build240, no241FPS
 claim yet. Keepawake134059 persists. Do not repeat trace unless qualification
 counters require inspecting new state. Original20FPS completion gates unmet.
+
+Announced241 restart, stopped confirmed240 driver233366/watcher234302. Update
+session60178 active uploading34761626-byte payload. Poll same handle; after
+bootconfirmation start material-black-candidate/launch.sh and collect.py with
+logs gameplay-driver.log/collector.log. Collector waits qualified frame5700 for
+pod241.png, then7440 for settled-pod.log, qualification.json and6300..7440 raw
+frame summary. No draw trace; ordinary gameplay. Source9e4f1359 committed locally,
+not pushed. Current goal turn concrete progress via implemented/tested candidate.
