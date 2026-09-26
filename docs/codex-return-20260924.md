@@ -1779,3 +1779,26 @@ Last12normal60framereports22.1,19.7,16.5,16.2,17.2,18.5,20.0,20.8,16.1,
 returned251-cutscene-summary.json. ActualMATERIAL_BLACKgreaterlinksrecorded,
 renderheight360. No252updateornewoptimizationapplied. Normalusercampaignsave
 notconfirmedtestnamespace: do notforcequitwithoutpreservingcurrentprogress.
+
+## 2026-09-26: heavy a10 cutscene slowdown captured, save pending
+
+Userreportsheavierscenes6FPS. pre-deploy/save-menu.pngframe6866showshangar8FPS;
+save-menu2.pngshowsReveille6FPS. RemoteStart.25andlaterCross.8/Start.8didnot
+reachsavemenu(cutscenecontinued); noquit/updateperformed. Askeduserasync
+SaveandQuitwhenfinished becauseprogressnotconfirmedprotectedtestnamespace.
+returned251-heavy.log2126118bytesarchived. Lastfive60framereports:
+game/wait/FPS/draws/drawHLE:
+168.9/1.1/5.9/795/20.0;
+169.8/1.2/5.8/673/23.2;
+161.6/3.3/6.1/386/30.5;
+130.1/1.5/7.6/364/20.8;
+97.9/1.1/10.1/328/18.0.
+TheseoverlapGPUworkandcannotbeadditivelydecomposed. Completionlatency~53..66ms
+intheheavywindowsnotGPUservicetime. Oneloadwindowdecoded50textures420.5ms
+windowtotal; twoearlier6FPSwindowsdecoded0..1textures,notstreamingalone.
+[scene-slow]163..164mswithmaterial/immediatecalls; normalsavedcfgdoesnotset
+XV_REC_DEFER, no[rec-defer]activationlog, currentruntimeheaderdefault0.
+Userrunisnotcontrolleddeferred2candidateconfiguration; donotclaimsamebaseline.
+SavedMATERIAL_BLACK2,SCENE_INDEX_RUN2and360heightactive. Nochangespersisted.
+NextafterSaveQuit:252deployment+controlledtestnamespace. Awaitsaveonlybefore
+restart; goalactive,noblockedorcompletionclaim.
