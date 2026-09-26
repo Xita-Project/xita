@@ -1,0 +1,68 @@
+# Object-vector collision reference investigation
+
+Inspected 2026-09-26. Research lead, not an enabled optimization or an FPS claim.
+
+References pinned for reproducibility:
+
+- bnunu/halo-1 `d890c2db285c865b352b0de4e690da8535d77e84`,
+  `source/physics/collisions.c`, `object_test_vector`.
+- punpckhdq/halo `b70101a8fbced388815cb46cd1a142e9a191f7be` is the upstream.
+  Its corresponding collision/render files are primarily symbol listings;
+  the fork contains additional reconstructed implementations.
+
+Both projects target build 2342; Xita's guest is retail 3925. Names and
+algorithm structure are useful hypotheses, not proof of identical layouts,
+calling conventions, or floating-point behavior. No external implementation
+was copied into the runtime by this investigation.
+
+## Concrete correspondence to retail 171AF0
+
+Comparison against the private maintained `object-walk-registers/reference.c`
+supports identifying 171AF0 as an object-vector collision traversal:
+
+| Observed retail behavior | Reference role |
+| --- | --- |
+| Ignore-object comparison, object flags at +4 | Object eligibility filters |
+| Type at +0x64, mask shift by type+8 | Requested object-type mask |
+| B0CB0 with center +0x50 and radius +0x5c | Segment/sphere broad-phase rejection |
+| Type-mask test followed by flag 0x400000 | Vehicle-physics branch selection |
+| 81900 / 81A10 versus 172DE0 / 1731D0 | Physics-instance versus collision-model path |
+| Recursive 171AF0 using link +0xc8 | Child-object traversal |
+| Loop using link +0xc4 | Sibling traversal |
+
+These matches do not establish every callee signature or result-field offset.
+In particular, preserve child traversal under the eligibility/bounding-sphere
+gate and sibling traversal after a rejected object. Moving those gates can
+change collision behavior even if most test scenes look correct.
+
+The fork's pinned `docs/object_matching_logs/collisions_obj_large_closeout_evidence_pass_20260919.md`
+reports an exact instruction/relocation match for `object_test_vector` in its
+own target and an independently checked October prototype. This is a reported
+result, not a locally reproduced verification and not a retail-3925 match.
+It strengthens the choice of this routine for investigation without removing
+the retail differential-test requirement. Its source-provenance claims also
+need review before any implementation is imported; this note imports no code.
+
+## Next implementation gate
+
+Use the reference to annotate the retail path and construct a native candidate
+from verified retail behavior. Keep vehicle and model collision callees, result
+writes, recursive ordering, nearest-hit comparisons and preemption semantics.
+The existing 171AF0 differential fixture covers bounded synthetic sibling and
+child cases, but real callee integration and captured gameplay cases are still
+required. A reconstructed C implementation alone is not equivalence evidence.
+
+Prior profiling attributes roughly 0.65–0.66 ms Pi self time to this routine
+in firing windows, with significant additional callee work. That bounds its
+standalone appeal on the Pi and does not predict Vita savings. The earlier
+x87-register-only candidate did not demonstrate improvement; do not enable it
+just because this source match was found.
+
+## Hardware contact
+
+The authenticated endpoint responded with perf258 / revision 427df56+ and
+reported CPU 444 MHz. A one-hour keep-awake lease was renewed. Retrieved log:
+private `effect-physical-slots/vita-online258.log` (935,557 bytes), ending in
+Blood Gulch map loading. This is not a settled a30 performance measurement.
+No update or restart occurred during this investigation; perf260 remains a
+candidate requiring hardware validation.

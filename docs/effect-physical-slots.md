@@ -1,6 +1,7 @@
 # Effect-processing physical x87 slots candidate
 
-Status: experimental and not deployed. Goal remains sustained 20 FPS on Vita.
+Status: perf260 deployed; hardware qualification in progress. Goal remains
+sustained 20 FPS on Vita. Entries below are chronological records.
 
 The Pi effect profile identifies 1122A0 as a recurring cost. Existing x87
 register lowering rejects it as `slot-range`: its logical slots span -3..5,
@@ -159,3 +160,20 @@ Private build receipts are under `effect-physical-slots/guard-host` and
 `effect-physical-slots/guard-arm`. No runtime/package changes were made.
 Perf260 remains ready but uninstalled: the Vita control endpoint still refuses
 connections. These tests establish no new physical-Vita FPS result.
+
+## Hardware deployment, 2026-09-26
+
+After the authenticated endpoint returned on perf258, installed the prepared
+`xita-perf260c.vpk` through the code-only updater. `vita-candidate/deploy.log`
+confirms all 34,805,430 bytes, matching SHA-256, restart requested and boot
+confirmed in slot 1. A separate status request reports `0.2.0-perf.260`,
+revision `97c49789`; perf258 remains slot 0 rollback. Session 3663 completed
+successfully. Renewed a one-hour awake lease after restart.
+
+Started the existing a30 launch sequence adapted for version/path and a
+45-second initial wait. It retains isolated `XV_TEST_SAVE=a30-perf211`,
+360p and the existing qualified optimization stack, with phase instrumentation
+disabled. Private artifacts are `vita-candidate/launch-a30.py`, `.log`, and
+`a30-env.json`. Deployment success is not performance or correctness proof;
+settled scene identification, frame intervals, firing, and regression checks
+are still required.
