@@ -90,3 +90,67 @@ math mutex: the caller may already hold a transaction, and owner service
 parking makes naive nested locking unsafe. Preserve the caller's existing
 synchronization; verify-mode journaling must also decline while a render-view
 merge could mutate the observed globals. No such runtime hook is enabled yet.
+
+## Direct timing fixture and remaining admission constraints
+
+`tools/tests/native_92330.c` now accepts `--bench-flood REPEATS` in the
+`XV_NATIVE_52240_TEST` build. The existing `--bench` / `--bench-game` paths
+are rejected in that build: they call 56670 with a different ABI and would
+not measure the direct candidate. Build with `tools/test_native_92330.py
+--flood --output <private-output>` and run:
+
+```sh
+N92_STRICT_NAN=1 timeout 120 <private-output>/test-0 300 1 --bench-flood 1
+```
+
+The fixture restores the entire 24 MiB physical arena outside each timed
+call, including stack, output and visited stamps. Direct 52240 does not
+advance the epoch; repeating without restoration would progressively skip
+work. Guest/native order alternates. Every pair checks the entire arena,
+context and preemption count; use `N92_STRICT_NAN=1` for strict context NaN
+comparison. Timer overhead is included. The small synthetic scenes use the
+existing game-like fixture, not captured a30 inputs. Full-memory restoration
+conditions caches, and the native test entry includes coverage counters.
+These measurements are neither production timings nor a Vita FPS prediction.
+
+The host smoke run (100 scenes, five repetitions) passed all comparisons:
+500 calls each, 545 native flood entries and 1,850 portal tests. The separate
+300-case randomized differential regression also passed, with 4,941 flood
+entries, 28,125 portal tests, 14 stack-alias cases and no skipped timeouts.
+
+Further admission audit: `xv_owner_thread_id()` returns the current native
+thread identity, aliasing the scene helper to its owner; it is not a getter
+for a globally registered owner. Comparing it to the current native thread
+would admit unrelated threads. The light-census code instead records an
+owner during object-job initialization and checks context, queue and fiber
+state. It still requires an explicit scene-helper exclusion for this native.
+Do not borrow this API without checking build availability and whether its
+initialization thread is the actual caller at the direct query boundary.
+The native's existing `__thread` journal also cannot be assumed isolated on
+Vita (see native-1721b0's emutls notes). A future concurrent verifier needs
+call-local or explicitly owned journal storage. No runtime hook is enabled.
+
+Pi timing smoke (30 scenes, three repetitions, strict comparisons): 90 calls
+per implementation, guest 8,617.2 ns/call versus native 6,723.7 ns/call
+(1.28x); 96 flood entries, 321 portal tests. The initial 300-scene,
+ten-repetition run ended at the external 120-second timeout with no summary;
+it is not a pass. Its process was confirmed terminal before starting the
+smaller smoke run. Logs: `../flood-direct/bench-arm-run.log` (timeout),
+`../flood-direct/bench-arm-smoke.log` (pass). Both used only Pi cores 0/1.
+Host 300-scene/one-repetition strict run also passed; private log
+`../flood-direct/bench-host-300.log`.
+
+Full 300-scene Pi timing run, one repetition, then completed with strict
+comparisons: 300 calls each, guest 9,107.1 ns/call, native 7,275.5 ns/call
+(1.25x, about 20% lower call time), 334 flood entries and 1,025 portal tests.
+Log: `../flood-direct/bench-arm-300.log`; session 96815 exited zero. All timing
+jobs are terminal. This retains the full scene set from the timed-out run.
+
+Decision: retain the candidate, but do not prioritize a risky shared-state
+runtime integration on this evidence alone. Corrected effect profiling puts
+52240 at only 0.08–0.09 ms per reported Pi frame, while listener setup 26A50
+is 0.39–0.40 ms. The small-query fixture does not establish the relative
+speedup on real flood sizes; even the measured synthetic ratio cannot
+explain a large whole-frame improvement. Next independent investigation
+should split 26A50's distance/listener and spatial-query work (25590/2B460),
+while perf260 still awaits the separate physical gameplay check.

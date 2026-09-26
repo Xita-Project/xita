@@ -365,6 +365,68 @@ int main(int argc, char **argv)
     map_memory();
     const int bench = argc > 4 && !strcmp(argv[3], "--bench") ? atoi(argv[4]) : 0;
     const int bench_game = argc > 4 && !strcmp(argv[3], "--bench-game") ? atoi(argv[4]) : 0;
+#ifdef XV_NATIVE_52240_TEST
+    if (bench || bench_game) {
+        fprintf(stderr, "Direct flood requires --bench-flood; light-query benchmarks use a different ABI.\n");
+        return 2;
+    }
+    if (argc > 4 && !strcmp(argv[3], "--bench-flood")) {
+        int reps = atoi(argv[4]);
+        if (!cases || reps < 1) return 2;
+        /* Full physical-arena restoration includes stamps, output, stack and
+         * aliases. 52240 does NOT advance the epoch itself. Never benchmark
+         * repeated calls on the previous call's already-visited state.
+         * Restore outside timing, alternate order, and check every result.
+         * This is a cache-conditioned synthetic microbenchmark, not gameplay. */
+        uint8_t *snap = malloc(ARENA), *result = malloc(ARENA);
+        if (!snap || !result) return 2;
+        game_like = 1;
+        double ns[2] = {0, 0}; unsigned calls = 0;
+        uint64_t counts0[3], counts1[3];
+        xv_native_52240_test_counts(counts0);
+        for (unsigned k = 0; k < cases; ++k) {
+            int alias; scene(&s, &alias); slice = 1 << 30;
+            xctx c0; init_ctx(&c0); c0.preempt = 1 << 30;
+            memcpy(snap, g_xram, ARENA);
+            for (int r = 0; r < reps; ++r) {
+                xctx out[2]; unsigned preempts[2];
+                for (int j = 0; j < 2; ++j) {
+                    int mode = j ^ ((k + (unsigned)r) & 1);
+                    memcpy(g_xram, snap, ARENA); out[mode] = c0;
+                    preempt_calls = 0;
+                    struct timespec a, b;
+                    clock_gettime(CLOCK_MONOTONIC, &a);
+                    if (mode) xv_native_52240_test(&out[mode]);
+                    else f_00052240(&out[mode]);
+                    clock_gettime(CLOCK_MONOTONIC, &b);
+                    ns[mode] += (b.tv_sec-a.tv_sec)*1e9 + b.tv_nsec-a.tv_nsec;
+                    preempts[mode] = preempt_calls;
+                    if (!j) memcpy(result, g_xram, ARENA);
+                    else if (memcmp(result, g_xram, ARENA)) {
+                        fprintf(stderr, "flood bench memory mismatch case %u rep %d\n", k, r);
+                        return 1;
+                    }
+                }
+                char why[160];
+                if (!same_ctx(&out[0], &out[1], why, sizeof why) || preempts[0] != preempts[1]) {
+                    fprintf(stderr, "flood bench context/preemption mismatch case %u rep %d\n", k, r);
+                    return 1;
+                }
+                calls++;
+            }
+        }
+        xv_native_52240_test_counts(counts1);
+        printf("direct flood synthetic bench: %u calls each, guest %.1f ns/call, native %.1f ns/call, ratio %.2fx; full arena reset per call, timer cost included\n",
+               calls, ns[0]/calls, ns[1]/calls, ns[0]/ns[1]);
+        printf("direct flood measured coverage: %llu calls, %llu flood entries, %llu portal tests\n",
+               (unsigned long long)(counts1[0]-counts0[0]),
+               (unsigned long long)(counts1[1]-counts0[1]),
+               (unsigned long long)(counts1[2]-counts0[2]));
+        free(snap); free(result); return 0;
+    }
+#else
+    if (argc > 3 && !strcmp(argv[3], "--bench-flood")) return 2;
+#endif
     if (bench_game) {
         /* Speed on a10-like queries: every repetition restores the datum arrays and list heads (outside the timed
          * call), so each timed call allocates and links like the game; guest and native alternate per repetition. */
