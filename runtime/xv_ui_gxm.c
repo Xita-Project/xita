@@ -128,15 +128,44 @@ static struct {
 } g;
 
 /* ---- GPU memory ------------------------------------------------------------------------------- */
-static void *ui_gpu_alloc(uint32_t size, SceUID *uid)
+static void *ui_gpu_alloc_type(uint32_t size, SceUID *uid, SceKernelMemBlockType type)
 {
     void *base = NULL;
-    size = ALIGN_UP(size, 4 * 1024);
-    *uid = sceKernelAllocMemBlock("xv_ui", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, size, NULL);
+    size = ALIGN_UP(size, type == SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW ? 256 * 1024 : 4 * 1024);
+    *uid = sceKernelAllocMemBlock("xv_ui", type, size, NULL);
     if (*uid < 0) { UI_LOG("alloc %u KB failed: 0x%08X\n", size >> 10, *uid); return NULL; }
-    sceKernelGetMemBlockBase(*uid, &base);
+    int base_err = sceKernelGetMemBlockBase(*uid, &base);
+    if (base_err != SCE_OK || !base) {
+        UI_LOG("get allocation base failed: 0x%08X\n", base_err);
+        sceKernelFreeMemBlock(*uid); *uid = -1; return NULL;
+    }
     int err = sceGxmMapMemory(base, size, SCE_GXM_MEMORY_ATTRIB_READ);
-    if (err != SCE_OK) { UI_LOG("map failed: 0x%08X\n", err); sceKernelFreeMemBlock(*uid); return NULL; }
+    if (err != SCE_OK) { UI_LOG("map failed: 0x%08X\n", err); sceKernelFreeMemBlock(*uid); *uid = -1; return NULL; }
+    return base;
+}
+
+static void *ui_gpu_alloc(uint32_t size, SceUID *uid)
+{
+    return ui_gpu_alloc_type(size, uid, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE);
+}
+
+#ifndef XV_TEXTURE_CDRAM_DEFAULT
+#define XV_TEXTURE_CDRAM_DEFAULT 0
+#endif
+static void *ui_texture_alloc(uint32_t size, SceUID *uid)
+{
+    const char *e = getenv("XV_TEXTURE_CDRAM");
+    int enabled = e ? atoi(e) != 0 : XV_TEXTURE_CDRAM_DEFAULT;
+    if (enabled) {
+        void *base = ui_gpu_alloc_type(size, uid, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW);
+        if (base) {
+            UI_LOG("[texture-memory] %u KiB CDRAM pool\n", size >> 10);
+            return base;
+        }
+        UI_LOG("[texture-memory] CDRAM unavailable; falling back to main memory\n");
+    }
+    void *base = ui_gpu_alloc(size, uid);
+    if (base) UI_LOG("[texture-memory] %u KiB uncached main-memory pool\n", size >> 10);
     return base;
 }
 
@@ -745,7 +774,7 @@ int xv_ui_gxm_init(void)
     g.clrbuf = ui_gpu_alloc(UI_FRAMES * (4 + OVL_MAX_QUADS * 4) * sizeof(clr_vtx), &g.clr_uid);
     g.settingsbuf = ui_gpu_alloc(UI_FRAMES * UI_MAX_QUADS * 4 * sizeof(clr_vtx), &g.settings_uid);
     g.dec_cap = 32 * 1024 * 1024;                                  /* texture pool (BC as-is, others decoded RGBA) */
-    g.dec_base = ui_gpu_alloc(g.dec_cap, &g.dec_uid);
+    g.dec_base = ui_texture_alloc(g.dec_cap, &g.dec_uid);
     if (!g.vbuf || !g.ibuf || !g.clrbuf || !g.dec_base || !g.settingsbuf) return -1;
 
     /* static quad index buffer: quad q -> (0,1,2, 0,2,3)+q*4, relative to the batch's stream base */

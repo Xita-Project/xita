@@ -589,6 +589,23 @@ $(BUILD)/rgba-layout-startup.config: force-rgba-layout-startup-config
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 $(BUILD)/runtime/xv_ui_gxm.o: $(BUILD)/rgba-layout-startup.config
+# Texture-pool placement experiment; stream buffers retain their existing pool.
+XV_TEXTURE_CDRAM_DEFAULT ?= 0
+ifneq ($(words $(XV_TEXTURE_CDRAM_DEFAULT)),1)
+$(error XV_TEXTURE_CDRAM_DEFAULT must be 0 or 1)
+endif
+ifneq ($(filter $(XV_TEXTURE_CDRAM_DEFAULT),0 1),$(XV_TEXTURE_CDRAM_DEFAULT))
+$(error XV_TEXTURE_CDRAM_DEFAULT must be 0 or 1)
+endif
+$(BUILD)/runtime/xv_ui_gxm.o: CFLAGS += -DXV_TEXTURE_CDRAM_DEFAULT=$(XV_TEXTURE_CDRAM_DEFAULT)
+.PHONY: force-texture-cdram-config
+force-texture-cdram-config:
+$(BUILD)/texture-cdram.config: force-texture-cdram-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_TEXTURE_CDRAM_DEFAULT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/xv_ui_gxm.o: $(BUILD)/texture-cdram.config
 # Existing XV_TEXTURE_STATE_CACHE policy: absent environment uses this process-start default.
 # Only replay/recording configuration in xv_d3d consumes it; guest units unchanged.
 XV_TEXTURE_STATE_CACHE_DEFAULT ?= 0

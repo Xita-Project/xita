@@ -478,3 +478,35 @@ Keep-awake PID 134059 remains active. Next check that this existing launch
 reaches the pod, capture a meaningful screenshot, then collect settled frame
 intervals; do not relaunch because observation expires. No hardware speedup or
 visual acceptance is established yet.
+
+### 2026-09-26: perf237 hardware result and texture-memory follow-up
+
+Perf237 pod237.png (frame 6551) shows the same pod/AR60 view with no obvious
+material regression. Settled 1200 intervals, window ends 5880..7020:
+77.602135 ms / 12.8862 FPS; p95 88.205, p99 104.879, max 200.376 ms;
+15 >100 ms, one >200 ms. Against perf236 77.087804 ms, this establishes no
+measurable FPS gain from the smaller shader. Keep it provisional in the next
+candidate (real compiled-work reduction, no claim of hardware benefit).
+No 15-minute active gameplay or complete rendering qualification yet.
+
+Texture placement audit found the 32 MiB `g.dec_base` pool allocated through
+`USER_RW_UNCACHE` in main RAM. Existing startup reports show 89,088 KiB free
+CDRAM after graphics initialization. A new opt-in allocation path moves ONLY
+this pool to CDRAM: same capacity, textures, layouts, upload/lifetime/purge
+logic, GPU read mapping and publication barriers. Vertex/index/command buffers
+are unchanged. CDRAM allocations round to 256 KiB; failure to allocate, obtain
+the base, or GPU-map frees the failed block and falls back to the previous main
+RAM allocation. Logs identify the pool actually used. CPU-side texture writes
+and alpha scans may become slower; benefit is not assumed.
+
+`XV_TEXTURE_CDRAM_DEFAULT=0` preserves normal builds; startup
+`XV_TEXTURE_CDRAM` overrides it. Make tracks default changes through a config
+stamp so an incremental build recompiles the allocator. Perf238 opts in with
+build default 1, preserving the 32-key remote environment capacity. It retains
+perf237's one embedded shader. Host ASan/UBSan tests cover both defaults,
+overrides, alignment and allocation/base/map failure cleanup/fallback; ARMv7
+static harness on Pi CPUs 0/1 passes the same allocator logic using API mocks.
+These mocks do not verify actual CDRAM mapping or GPU reads; hardware is next.
+Native Vita build passed in texture-cdram-candidate. Package contract unchanged;
+only game-a.self and boot-game.txt may differ from perf237. Do not attribute a
+speedup until live logs confirm CDRAM and settled gameplay improves.
