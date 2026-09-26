@@ -1237,3 +1237,37 @@ fast247-summary.json,fast247-pod.log,fast247-qualification.json,pod247-fast.png.
 No shader FPS result yet. Inspect the qualified scene and look for actual
 _axisblack_gt program linking (pod may mostly use NA); then collect outside.
 Keepawake134059 still running. Current source HEAD before this note7704f54a.
+
+
+### Perf247 outdoor improvement and cutscene evidence
+
+Qualified pod247-fast.png frame6315: mean57.1039ms/17.5119FPS,p95 73.684,
+p99 92.074,max116.858;11>100ms,0>200ms. No demonstrated pod gain vs246.
+Qualified outdoor247.png frame9237 matches the route/view; transient blue/blocky
+effects visible (existing effects issues remain tracked, do not claim every
+pixel correct). Subsequent1200 intervals11280..12420 average50.0727ms/19.9710FPS,
+p50 47.816,p95 62.465,p99 91.550,max290.317;305>50ms,8>100ms,1>200ms.
+Previous246 outdoor56.0225ms/17.85FPS. Newaxisblack_gt program explicitly linked
+against halo_vs_09, vs3 blend6; both shader and index changes remain stacked.
+Promising improvement, still not sustained20FPS.
+
+opening247.png frame5277 visibly shows the letterboxed pod cutscene. Adjacent
+180 intervals ending5160/5220/5280 average70.7665ms/14.131FPS,p95 90.348,
+p99 237.265,max271.921. This identifies one opening slice, not the whole canyon
+flyover. In nearby coarse reports helper wall50.7–52.1ms, done->noticed8.8–20.5ms,
+FA920 inclusive owner elapsed52.8–65.4ms/frame. Interleaved reports and nested
+waits prevent treating these as CPU self or adding across threads, but update
+path completion is a concrete next target beyond shader optimization.
+
+Added XV_SCENE_PHASES=2 (owner/tick only;1 remains both,0 off), with relaxed atomic
+initialization/read to avoid concurrent first-use races. Production scope fixture
+passes host sanitizers and Pi for off/both/owner-only, interleaved thread identity,
+nesting, and clock exclusion. Perf248 stage tick-phase-candidate/build-x87 is
+compiling (session90727), diagnostic only. launch248.sh retains both optimizations,
+replaces explicitFRAG_CENSUS=0 withSCENE_PHASES=2 to fit32 keys; actual xita.cfg has
+noFRAG_CENSUS entry and its runtime default is0. No deployment yet.
+
+Perf247 active input exercise live session12948, four forward/jump/fire/turn/back/
+reload cycles. Collector35421 finished outdoor observation. Keepawake134059 lives.
+Finish the input check, archive screenshot/log, then deploy248 for attribution,
+not performance acceptance. Stop only confirmed247 watcher before restart.

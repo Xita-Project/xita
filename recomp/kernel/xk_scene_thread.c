@@ -57,20 +57,36 @@ static uint64_t phase_t0[2][16]; static uint32_t phase_addr[2][16]; static unsig
 static unsigned phase_skipped[2], phase_overflow[2];
 static uint16_t phase_hint[2][256]; /* validated hints: reports may reorder phase_tab */
 static const char *phase_tag[2] = { "[tick-phases]", "[scene-phases]" };
+/* 0 off, 1 both threads, 2 owner/tick only. Relaxed atomics make concurrent
+ * first-use initialization well-defined; the launch environment is immutable. */
+static int phase_mode(void)
+{
+    int mode = __atomic_load_n(&phases, __ATOMIC_RELAXED);
+    if (mode < 0) {
+        const char *e = getenv("XV_SCENE_PHASES");
+        mode = e ? atoi(e) : 0;
+        __atomic_store_n(&phases, mode, __ATOMIC_RELAXED);
+    }
+    return mode;
+}
+
 /* Keyed by (parent, callee): the parent is the innermost timed call on this thread's stack, so a parent's self time
  * is its own inclusive time minus its direct timed children. The tool passes the callee address at begin. */
 void xv_scene_phase_begin(uint32_t addr)
 {
-    if (phases < 0) { const char *e = getenv("XV_SCENE_PHASES"); phases = e ? atoi(e) : 0; }
-    if (phases <= 0) return;
+    int mode = phase_mode();
+    if (mode <= 0) return;
     unsigned t = xv_scene_thread_on_helper() ? 1 : 0;
+    if (mode == 2 && t) return;
     if (phase_depth[t] >= 16) { phase_skipped[t]++; phase_overflow[t]++; return; }
     phase_addr[t][phase_depth[t]] = addr; phase_t0[t][phase_depth[t]++] = xk_os_monotonic_us();
 }
 void xv_scene_phase_end(uint32_t addr)
 {
-    if (phases <= 0) return;
+    int mode = __atomic_load_n(&phases, __ATOMIC_RELAXED);
+    if (mode <= 0) return;
     unsigned t = xv_scene_thread_on_helper() ? 1 : 0;
+    if (mode == 2 && t) return;
     /* Match ignored begins without popping a live outer scope. */
     if (phase_skipped[t]) { phase_skipped[t]--; return; }
     if (!phase_depth[t]) return;
@@ -87,7 +103,7 @@ void xv_scene_phase_end(uint32_t addr)
 }
 static void phase_report(unsigned frames)
 {
-    if (phases <= 0 || !frames) return;
+    if (__atomic_load_n(&phases, __ATOMIC_RELAXED) <= 0 || !frames) return;
     for (unsigned t = 0; t < 2; ++t) {
         if (phase_overflow[t]) {
             XK_LOG("%s omitted %u scopes beyond depth 16; child attribution incomplete\n", phase_tag[t], phase_overflow[t]);

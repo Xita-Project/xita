@@ -1,6 +1,7 @@
 # Guarded black-material GREATER specialization
 
-Status: opt-in runtime candidate, host/Pi checks passed; not hardware-qualified.
+Status: opt-in perf247 hardware observation in progress. Host/Pi checks passed;
+outdoor improvement observed; sustained 20 FPS is not established.
 
 The retained axis/black material optimization folds a proven RGB-zero placeholder
 and exact captured constants. Its generic-alpha variant still implements all
@@ -30,6 +31,10 @@ The compiled 1,228-byte GXP preserves the original capability word; SHA256
 35f7f7900f1c3415c5ff62af9f1884e0cbb9b4999927408389fad976b501978e.
 Generated shaders and compiled programs stay in the private build stage.
 
-Next: finish the independent perf246 CPU gameplay observation, then qualify the
-shader on hardware. Compiler instruction counts are supporting evidence, not
-proof of reduced physical Vita frame time or rendering equivalence.
+Hardware perf247 confirms the new program linked. The qualified lifepod window
+measured 57.104 ms (17.512 FPS), versus perf246 at56.440 ms: no demonstrated gain
+in that view. The outdoor window averaged50.073 ms (19.971 FPS), versus perf246 at56.022 ms.
+Its p95 was62.465 ms,p99 91.550 ms,max290.317 ms;305/1200 intervals exceeded50ms.
+This is a promising view-specific improvement, not stable20FPS or full-game
+correctness validation. Compiler instruction counts
+are supporting evidence, not proof of physical frame time or image equivalence.
