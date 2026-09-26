@@ -42,3 +42,11 @@ Private receipts are under `particle-register-candidate/`: extracted-body hashes
 compile commands, the one-function splice report and mutation result. The Pi
 result supports ARM correctness only. A Vita build and ordinary firing test with
 phase timers off are required before claiming any frame-time improvement.
+
+A read-only audit across the earlier 1,390 converted-function entries found
+1,084 currently marked as register-lowered, 299 still matching the memory
+baseline, six with other maintained changes, and one absent from the stage.
+This is not evidence that converting all 299 is safe or useful. Functions
+already bypassed by native paths may contribute no benefit, and earlier
+exclusions need investigation. Only the measured 80720 is changed in this
+candidate. The full address list remains in the private audit receipt.
