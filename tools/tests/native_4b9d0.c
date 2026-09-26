@@ -58,6 +58,7 @@ void x_guest_write_pages(uint32_t a, const void *src, size_t size)
     while (size) { size_t n = 4096u - (a & 0xFFFu); if (n > size) n = size; memcpy(X_G(a), s, n); s += n; a += (uint32_t)n; size -= n; }
 }
 extern void f_00088110(xctx *);
+static unsigned world_reference_calls;
 #ifdef N4_FUSED_GUEST
 /* --fused: the guest is the game's own fused query (a harness build's query_fusion.o and the collision control
  * objects: the older partial natives on, as XV_NATIVE_*_DEFAULT=1 builds them); the rest of its environment stubbed
@@ -77,9 +78,12 @@ extern void query_fused_172c95_171f94(xctx *);
 #define N4_GUEST(c) query_fused_172c95_171f94(c)
 #else
 /* the hook's guest: in the game the fused copy of the same subtree (recomp/query_fusion.c) */
-void query_fused_172c95_171f94(xctx *c) { f_00088110(c); }
+void query_fused_172c95_171f94(xctx *c) { world_reference_calls++; f_00088110(c); }
 #define N4_GUEST(c) f_00088110(c)
 #endif
+static void object_reference(xctx *c) { f_00088110(c); }
+void xv_native_object_query_force(int);
+void xv_native_4b9d0_object_query(xctx *, void (*)(xctx *));
 extern void xv_native_4b9d0_force(int);
 extern void xv_native_4b9d0_query(xctx *);
 extern void xv_native_4b9d0_report(unsigned);
@@ -410,7 +414,12 @@ static int run(xctx *c, int mode)
     xv_native_4b9d0_force(mode);
     if (sigsetjmp(alarm_jmp, 1)) { xv_native_4b9d0_force(0); return 0; }
     alarm(alarm_s);
-    if (mode) xv_native_4b9d0_query(c); else f_00088110(c);
+    if (getenv("N4_OBJECT")) {
+        unsigned world_before = world_reference_calls;
+        xv_native_object_query_force(mode);
+        xv_native_4b9d0_object_query(c, object_reference);
+        if (world_reference_calls != world_before) abort();
+    } else if (mode) xv_native_4b9d0_query(c); else f_00088110(c);
     alarm(0);
     xv_native_4b9d0_force(0);
     return 1;

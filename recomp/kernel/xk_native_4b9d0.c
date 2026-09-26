@@ -1275,7 +1275,7 @@ static void n4_report_mismatch(const char *what, uint32_t a, uint32_t b, const n
 void query_fused_172c95_171f94(xctx *c);   /* recomp/query_fusion.c: the fused guest query (88110 subtree) */
 int xv_scene_thread_on_helper(void) __attribute__((weak));
 
-static void n4_verify(xctx *c, int timed)
+static void n4_verify(xctx *c, int timed, void (*guest_query)(xctx *))
 {
     const xctx before = *c;
     n4q s;
@@ -1319,7 +1319,7 @@ static void n4_verify(xctx *c, int timed)
     /* the guest on the same state, unbounded budget */
     *c = before; c->preempt = 1 << 30;
     const uint64_t t1 = timed ? n4_ns() : 0;
-    query_fused_172c95_171f94(c);
+    guest_query(c);
     if (timed) { __atomic_fetch_add(&n4_guest_ns, n4_ns() - t1, __ATOMIC_RELAXED); N4_ADD(N4_TIMED_GUEST, 1); }
     const uint32_t guest_backedges = (uint32_t)((1 << 30) - c->preempt);
     unsigned bad = 0, nan_words = 0;
@@ -1424,17 +1424,13 @@ static void n4_capture(const xctx *c)
 
 /* The hook: in place of query_fused_172c95_171f94(c) (recomp/kernel/xk_query_reuse.c). */
 static int n5_parts(void);
-void xv_native_4b9d0_query(xctx *c)
+static void n4_dispatch_query(xctx *c, int mode, void (*guest_query)(xctx *))
 {
-    const int mode = n5_parts() & 1 ? n4_mode() : 0;
     const int timed = n4_timing();
-#if !defined(__vita__) && !defined(XV_NATIVE_4B9D0_TEST)
-    if (X_PT == g_xpt && !(xv_scene_thread_on_helper && xv_scene_thread_on_helper()) && n4_layout(c)) n4_capture(c);
-#endif
     if (!mode) {
-        if (!timed) { query_fused_172c95_171f94(c); return; }
+        if (!timed) { guest_query(c); return; }
         const uint64_t t0 = n4_ns();
-        query_fused_172c95_171f94(c);
+        guest_query(c);
         __atomic_fetch_add(&n4_guest_ns, n4_ns() - t0, __ATOMIC_RELAXED); N4_ADD(N4_TIMED_GUEST, 1);
         return;
     }
@@ -1443,15 +1439,47 @@ void xv_native_4b9d0_query(xctx *c)
     if ((xv_scene_thread_on_helper && xv_scene_thread_on_helper()) || X_PT != g_xpt || !n4_layout(c)) {
         N4_ADD(N4_DECLINED, 1);
         if (X_PT == g_xpt && !(xv_scene_thread_on_helper && xv_scene_thread_on_helper())) N4_ADD(N4_LAYOUT, 1);
-        query_fused_172c95_171f94(c);
+        guest_query(c);
         return;
     }
-    if (mode == 1) { n4_verify(c, timed); return; }
+    if (mode == 1) { n4_verify(c, timed, guest_query); return; }
     n4q s;
     const uint64_t t0 = timed ? n4_ns() : 0;
     n4_query(c, &s, 0);
     if (timed) { __atomic_fetch_add(&n4_native_ns, n4_ns() - t0, __ATOMIC_RELAXED); N4_ADD(N4_TIMED_NATIVE, 1); }
     n4_budget(c, s.be); n4_count(&s);
+}
+
+/* Keep the world query's exact fused reference, capture path and mode. */
+void xv_native_4b9d0_query(xctx *c)
+{
+#if !defined(__vita__) && !defined(XV_NATIVE_4B9D0_TEST)
+    if (X_PT == g_xpt && !(xv_scene_thread_on_helper && xv_scene_thread_on_helper()) && n4_layout(c)) n4_capture(c);
+#endif
+    n4_dispatch_query(c, n5_parts() & 1 ? n4_mode() : 0, query_fused_172c95_171f94);
+}
+
+/* The object-space caller supplies its own fused reference (world_run=0).
+ * Never use the world-specialized reference for a decline or verification.
+ * Default off until object-space calls pass differential checks on ARM/Vita. */
+static int n4_object_mode = -1;
+#if defined(XV_NATIVE_4B9D0_TEST)
+void xv_native_object_query_force(int mode)
+{
+    __atomic_store_n(&n4_object_mode, mode >= 0 && mode <= 2 ? mode : 0, __ATOMIC_RELAXED);
+}
+#endif
+void xv_native_4b9d0_object_query(xctx *c, void (*guest_query)(xctx *))
+{
+    int mode = __atomic_load_n(&n4_object_mode, __ATOMIC_RELAXED);
+    if (mode < 0) {
+        const char *e = getenv("XV_NATIVE_OBJECT_QUERY");
+        mode = e ? atoi(e) : 0;
+        if (mode < 0 || mode > 2) mode = 0;
+        __atomic_store_n(&n4_object_mode, mode, __ATOMIC_RELAXED);
+        XK_LOG("[native-object-query] mode %d (0 off, 1 verify, 2 native)\n", mode);
+    }
+    n4_dispatch_query(c, n5_parts() & 1 ? mode : 0, guest_query);
 }
 
 /* ==== The solver's feature test: f_000864C0 (+85D10 / 85A00 / 85720 / 11120 / 111A0) =========================

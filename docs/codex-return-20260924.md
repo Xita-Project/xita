@@ -1387,3 +1387,43 @@ withweapon/HUD, NOT qualifiedcanyonflight. Current nearby4B9D0~17.7-18.7ms,
 49600~17.35-18.34,172BF0~17.21-18.20ms (ownerelapsedincludeswaits). Confirms Pi's
 high-levelcallchainonhardware; doesn'tyetprove its deeperrelativecostsonVita.
 Collector46799 stilllive; let it archive qualifiedpodlogbeforefurtherdeployment.
+
+ObjectcollisionPi build34801 completed; planned120s run51505 is nowlive withtag
+codex-object-collision-phases-20260926, cores0/1. Poll same session. Vita pod
+collector46799 also confirmedlive; preserve both. Keepawake134059 remains active.
+
+
+### Native object-query candidate implemented (perf250)
+
+Pi objectcollision51505 finishedplanned120s,37reports. 1716F0~1.78-1.90ms,
+172F40~1.76-1.88ms dominates. Existingnative88110 hooks only worldquery; object
+nq_query_at_17301b stillcallsfusednq_run_impl(c,0). Added default-off
+XV_NATIVE_OBJECT_QUERY=0/1verify/2native, sharedn4dispatcherwith explicitreference
+callback. World retainsworldreference; object retainsits ownfusedworld_run=0
+reference fordisabled/declined/verify. No collisionarithmetic/admission changed.
+Newtoolpatch_native_object_query.py installsownedstagehook; all4compiletime
+native/world-runroutes, idempotence, drift/duplicate rejection tested.
+
+Hosttests57309/57992: worldandobject1000cases each atO2andO0, allzero mismatches
+andverifyfailures;26referencetimeouts pervariant skipped, notvalidated. Existing
+NaN-payloadtolerance accepted1debugword. ActualPi native-object-query-pi run35798
+planned180s completed68reports:51,084querycalls,43,982objectcomparisons,0mismatch,
+0decline,0journal-fail. Worldmode2 retained. These are correctnessresults, notFPS.
+Sharedtiming mixesworldandobject; verify includesjournaling andbothruns.
+
+Perf250 native-object-query-candidate cloned248 (beforeextra249physicsscopes),
+updatednativeunitandquery_fusionhook;build8526 finished0. Package55,075,809bytes
+SHAc02b2ce724b1b5f1b4b1358a422c3292e0c81ad38d9cc34fc453027413d5707a;
+payload34,772,142 SHAfd799f28c3b6c40059ca18f0cb704dfec06a4cfe9d9d85c2ccaaed0ce4cf8168.
+Samecontract, onlygame-a.self/boot-game.txt differfrom249. Deploysession34361
+iscurrentlylive; pollsamehandleanddeploy250.log. Old249watcher356760/driver355864
+stoppedexplicitly. Keepawake134059 remainsactive.
+
+Oncebootconfirmed, runnative-object-query-candidate/launch250-verify.sh and
+collect250-verify.py. Launchkeeps32keysbyreplacingSHOT_DUMP=0 with
+NATIVE_OBJECT_QUERY=1 and setsSCENE_PHASES=0. Collectorrequiresframe>=6600,
+>=10,000verifiedcalls,0mismatches/journalfail,mode1receipt,no phase output;
+archivesverify250-game.log andpodscreen. Inspectactualscreen. Onlythen coldlaunch
+mode2 withnormalcollectionsettings; verificationFPSisnotacceptance. Knownfast
+rollback247 retained. Goalstillunmet:normalpod~17.5FPS,outdoor~19.97,active~19.64,
+opening~14.1; no15minactivecombatgate orwholecanyonqualification yet.
