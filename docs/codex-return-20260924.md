@@ -890,3 +890,64 @@ Currentphysical242outdoors/remotealiveframe12316, awake3570; keepawake134059
 live. Launch78856 watcher stillobserving; podcollector95263andoutdoor9425done.
 No15-minuteACTIVE session,NPCcombat/audio/save-resume qualification yet. Full
 20FPSpod/outdoor/cutscene completiongates remain unmet. No push.
+
+
+### Perf242 post-shader CPU profile — running
+
+Confirmed physical perf242 responding and keep-awake PID134059 live. Previous
+ordinary outdoor observer deliberately stopped (255612/256539). Started one
+cold diagnostic launch with all retained settings unchanged except
+XV_SCENE_PHASES=1; private material-cpu-profile-candidate/launch.sh,
+launch session23740/PID263719, collector session54253. Environment receipt
+confirms all32keys. Frame4097 screenshot launch-check.png shows the loading
+screen, not a qualified gameplay result. Collector waits for5700 screenshot and
+6300 logfile. Timed guest callee scopes cover model prep, tick, effects and
+native70110's caller (native body's expensive internal taps remain compiledoff).
+Do not compare instrumented FPS against ordinary performance baselines.
+Private analyze.py reads the actual tick/scene phase format, separately by
+thread; output self times already subtract instrumented children, elapsed
+includes timer overhead/preemption/waits. Top30 edges are incomplete listings;
+never sum inclusive entries or scene+tick. Next qualify pod, collect settled
+phase windows, identify real remaining critical-path work, restore phases0
+for performance/gameplay qualification. Keep awake and do not restart an active
+launch just because a collector observation window expires.
+
+
+### Perf242 CPU profile collected: scene and tick costs depend on view
+
+Diagnostic pod screenshot frame6221 verified the loaded lifepod; both specialized
+shader families linked (5 links, last5730 proofs/60frames). Collected
+material-cpu-profile-candidate/settled-pod.log and pod-phases.json, last6windows
+near6180..6480. Scene5DBC0 inclusive53.305ms, model5B76019.835ms;
+5B760->5B4A0 15.358ms/177calls per frame. Native70110 inclusive8.092ms;
+reported self5.732ms **includes its untimed native callees**, internal expensive
+taps compiledoff. 54010 inclusive6.642/self6.03ms also includes **four untimed
+indirect callback sites**, not proven dispatcher overhead. 53540 self2.967ms.
+Tick FA92061.11ms includes1.836simulationticks/frame; object4C98015.47ms,
+4B9D014.99ms, transforms8DDF012.512ms incl/5.728ms reportedself.
+Native4B9D0 and92330 alreadyenabled; do not propose reimplementing existing
+query/feature natives as if missing. Generated4B9D0/49600 alreadyx87-regs.
+
+Scripted forward5s/right3s/ARfire2s/release completed; outdoor-profile.png
+frame7829 verified foliage/world/weapon view, no visible new regression. These
+hold durations are host bounds, not measured device input durations. Outdoor
+settled-outdoor.log3186114bytes, last10windowsnear7920..8460:
+scene5DBC052.048ms,5B76020.402ms,5B4A0total16.768ms;
+70110incl9.607/remainder6.551,54010incl6.039/remainder5.475;
+tickFA92041.516ms (1.725ticks/frame),8DDF011.101incl/5.136remainder.
+Pod's large collisioncost therefore does NOT remain the principal outdoorwall.
+Scene is the outdoorcriticalpath; tick matters strongly atpod. These diagnostic
+elapsed values contain timer cost, waits/preemption, nested scopes, and repeated
+ticks; not additive and not normalFPS qualification. Do not call the earlier
+cutscene-phases.json filename verifiedcutscene evidence: it selectsnear5640..5880
+without a contemporaneous screenshot; exactscenephase uncertain.
+
+Next narrow evidence target: the four indirect callbacks inside54010, currently
+lumped into its apparent self time; identify actualcallback targets before
+attempting a dispatcher rewrite. Native70110's untimedcallees also require
+careful attribution; don't repeat full per-call internal timers that previously
+cost severalms themselves. Preserve shadergains, querynatives andx87locals.
+Stopped diagnosticobserver264767/263719 afterlogcapture. Announced ordinary
+restore, material-cpu-profile-candidate/restore.sh nowcoldlaunches sameperf242
+withXV_SCENE_PHASES0 andallotherretainedsettingsunchanged; newtag
+perf242-normal-restored-20260926. Keepawake134059leftalive. Goalnotmet.
