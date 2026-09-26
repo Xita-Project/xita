@@ -692,3 +692,24 @@ two known optimized functions, not the entire host runtime to Vita. The next
 profile must use this aligned diagnostic before choosing a transform change.
 The object-walk branch is the larger remaining lead; B0CB0 and 88E90 already
 have native implementations and must not be advertised as new replacements.
+
+Aligned run `codex-sound-aligned-20260926` completed: session 52539 terminal,
+intended timeout 124, 68 reports, no omitted scopes or fatal/trap lines.
+Firing 1800/2040 still points to the object walk: sound cast 1.56/1.56 ms,
+child 171AF0 1.15/1.14 versus world 88E90 0.10/0.10. Across parents, 171AF0
+is 1.75/1.77 inclusive and 0.65/0.66 self; 1731D0 0.70/0.70, B0CB0
+0.32/0.33. B6210 beneath 1731D0 is 0.09/0.09. These diagnostic observations
+support the branch choice, not a measured hardware speedup from alignment.
+Rows: `sound-aligned-phase-pi/selected-windows.json`.
+
+A bounded existing-codegen experiment is prepared privately in
+`object-walk-registers/`: regenerate with `--profile halo_ce_3925 --x87-regs
+--x87-regs-only 171AF0,1731D0`. The report converts 171AF0 with eight x87
+instructions, eleven synchronization points, one local slot and no guards.
+1731D0 has no local x87 instructions, so this pass cannot accelerate its own
+body. The 171AF0 candidate and maintained reference have the same 207 guest
+instruction comments in order (`lowering-audit.json`). Candidate C is 17,988
+bytes versus 17,051 reference bytes; C size is not native machine-code cost.
+This is only a prepared candidate: no runtime hook, package, deployment or
+correctness/performance claim. Its low x87 density makes it a limited prospect;
+validate complete state/callee boundaries and actual cost before inclusion.
