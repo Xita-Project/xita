@@ -31,3 +31,19 @@ Perf233 lifepod: 1,200 packets averaged 32.789 ms before submission (maximum
 p95 87.556 ms, p99 116.710 ms. These overlapping intervals do not establish a
 recoverable 32.789 ms saving. The extended gate report is not yet deployed.
 This is a diagnostic, not a speedup.
+
+
+Perf234 settled lifepod (1,200 packets): 1.537 ms before first inspection and
+31.739 ms after inspection; 1,086 packets encountered both unavailable back
+buffer and full display queue, none encountered frame pacing. Nearby Present
+intervals averaged 76.967 ms (12.993 FPS), p95 85.078 ms, p99 118.508 ms.
+These are overlapping intervals, not additive frame costs.
+
+Next diagnostic: `XV_DISPLAY_CALLBACK_TIMING=1` (default off, restart required)
+measures callback setup/capture and vblank elapsed time with three clock reads
+per callback. Aggregates are callback-owned, reported every 60 tracked frames
+after the original slot release. It does not move the vblank wait or release.
+Times include callback preemption; the periodic report itself is excluded and
+may add overhead. This distinguishes slow callback execution from waiting for
+a callback to become eligible/scheduled; it does not separately prove GPU time.
+Vita object compilation passed; hardware deployment pending.

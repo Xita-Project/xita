@@ -309,6 +309,10 @@ static xv_gfx_t g_gfx;
 static void xv_display_callback(const void *callback_data)
 {
     const xv_display_data_t *dd = (const xv_display_data_t *)callback_data;
+    /* Callback-owned coarse diagnostic; never move the release before vblank. */
+    static int timing = -1;
+    if (timing < 0) { const char *e=getenv("XV_DISPLAY_CALLBACK_TIMING"); timing=e && atoi(e)!=0; }
+    uint64_t callback_start=timing ? sceKernelGetProcessTimeWide() : 0;
     SceDisplayFrameBuf fb;
     memset(&fb, 0, sizeof(fb));
     fb.size        = sizeof(fb);
@@ -333,10 +337,24 @@ static void xv_display_callback(const void *callback_data)
                   for (unsigned x = 0; x < XV_DISPLAY_WIDTH; ++x) { row[x*3+0] = pr[x*4+0]; row[x*3+1] = pr[x*4+1]; row[x*3+2] = pr[x*4+2]; }
                   sceIoWrite(f, row, XV_DISPLAY_WIDTH * 3); }
               sceIoClose(f); } } }
+    uint64_t before_vblank=timing ? sceKernelGetProcessTimeWide() : 0;
     sceDisplayWaitVblankStart();
+    uint64_t after_vblank=timing ? sceKernelGetProcessTimeWide() : 0;
     if (dd->tracked) {
         __atomic_store_n(&g_display_free[dd->old_slot], 1, __ATOMIC_RELEASE);
         __atomic_add_fetch(&g_display_released, 1, __ATOMIC_RELEASE);
+    }
+    if (timing && dd->tracked) {
+        static uint64_t setup_us, vblank_us, max_us;
+        static unsigned count;
+        setup_us += before_vblank-callback_start;
+        vblank_us += after_vblank-before_vblank;
+        if (after_vblank-callback_start>max_us) max_us=after_vblank-callback_start;
+        if (++count==60) {
+            XV_LOG("[display-callback] 60 frames: setup %llu us, vblank %llu us, max-total %llu us; elapsed includes preemption; report after slot release\n",
+                (unsigned long long)setup_us,(unsigned long long)vblank_us,(unsigned long long)max_us);
+            setup_us=vblank_us=max_us=0; count=0;
+        }
     }
 
 }
