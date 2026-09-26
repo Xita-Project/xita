@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Compare 171AF0 memory/register lowering with synthetic callee contracts.
+"""Compare 171AF0 candidates with synthetic callee contracts.
 Generated bodies stay outside the repository. This validates lowering, NOT the
-real object-collision callees or gameplay. Supply baseline and register shard paths.
+real object-collision callees or gameplay. Default comparison is bit-exact;
+--inactive-flags explicitly permits only dormant CF/OF backing storage to differ.
 """
 import argparse
 import hashlib
@@ -29,10 +30,14 @@ def main():
     p.add_argument('--extra', default='')
     p.add_argument('--build-only', action='store_true')
     p.add_argument('--cases', type=int, default=1000)
+    p.add_argument('--plain-candidate', action='store_true',
+                   help='accept a non-register-lowered experimental body')
+    p.add_argument('--inactive-flags', action='store_true',
+                   help='ignore dormant CF/OF backing fields, never active flags')
     a = p.parse_args()
     a.output.mkdir(parents=True, exist_ok=True)
     bodies = [extract(a.baseline), extract(a.registers)]
-    if 'xfsp0' in bodies[0] or 'xfsp0' not in bodies[1]:
+    if 'xfsp0' in bodies[0] or (not a.plain_candidate and 'xfsp0' not in bodies[1]):
         raise ValueError('expected memory baseline and register candidate')
     # Bound synthetic paths without changing arithmetic or guest state.
     bodies = [re.sub(r'^([LM]_([0-9A-F]{8})(?:_\d+)?):',
@@ -48,9 +53,12 @@ def main():
            '-I'+str(ROOT/'recomp'), '-I'+str(ROOT/'recomp/kernel'),
            str(src), str(ROOT/'tools/tests/object_walk_registers.c'), '-lm', '-o', str(a.output/'object-walk-test')]
     cmd += shlex.split(a.extra)
+    if a.inactive_flags:
+        cmd.append('-DOBJECT_WALK_INACTIVE_FLAGS=1')
     subprocess.run(cmd, check=True)
     (a.output/'build.json').write_text(json.dumps(dict(command=cmd,
-        body_sha256=[hashlib.sha256(b.encode()).hexdigest() for b in bodies]), indent=2))
+        body_sha256=[hashlib.sha256(b.encode()).hexdigest() for b in bodies],
+        inactive_flags=a.inactive_flags, plain_candidate=a.plain_candidate), indent=2))
     if not a.build_only:
         subprocess.run([str(a.output/'object-walk-test'), str(a.cases)], check=True, timeout=60)
 

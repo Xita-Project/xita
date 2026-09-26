@@ -66,3 +66,34 @@ private `effect-physical-slots/vita-online258.log` (935,557 bytes), ending in
 Blood Gulch map loading. This is not a settled a30 performance measurement.
 No update or restart occurred during this investigation; perf260 remains a
 candidate requiring hardware validation.
+
+## First reference-guided experiment: type-mask shifts
+
+Private `object-walk-dead-shifts/` changes only the shifts at 171B4E and
+171B88 to unsigned value shifts with count masked by 31. Both are followed
+by TEST before flags are read; the first has one flag-neutral register MOV
+between them. There is no intervening call/preemption. No global liveness
+rule or production compiler default changed. In particular this does not
+treat variable-count shifts as unconditionally killing incoming flags.
+
+The existing differential fixture now has explicit optional `--plain-candidate`
+and `--inactive-flags` modes. The latter normalizes only dormant CF/OF backing
+fields at comparisons/callee-observation hashing; it preserves active overrides
+and ADC/SBB carry input. Actual execution state is not normalized. Memory,
+all other context fields, callee observations and preemption counts remain
+compared. Strict comparison remains the default and passed its prior 1,000
+register-lowering cases after this test change.
+
+Host ASan/UBSan and Pi Cortex-A9 Thumb O2 passed 4,096 candidate cases,
+19,077 candidate callee observations, all eight entry TOP values and recursion
+depth two. Expanded type-mask inputs include negative types, zero and wrapped
+counts. This is bounded synthetic evidence, not real-callee equivalence.
+Private receipts: `host.log`, `pi.log`, `host/build.json`, `arm/build.json`.
+
+Uninstrumented reference/candidate ARM text measured 4,156/4,096 bytes with
+the same staged headers and O2 Thumb flags. The initial size compile used
+mixed header roots and failed; the successful compile uses staged headers
+only. Code size is not runtime speed. An identically instrumented gameplay
+candidate retains the existing collision child observers and aligned B6210 /
+1122A0 bodies; only the two target shift expressions change. Hardware remains
+perf260; this experiment has not been packaged or deployed.

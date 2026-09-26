@@ -25,6 +25,16 @@ void object_walk_step(unsigned ip)
 static unsigned rnd(void) { seed=seed*1664525u+1013904223u; return seed; }
 static void hash(const void *ptr,size_t n)
 { const unsigned char *p=ptr; while(n--) trace=(trace^*p++)*1099511628211ull; }
+/* Only unused backing storage may differ after a flags overwrite. ADC/SBB
+ * still consume f_cf even with the override cleared. Default is strict. */
+static xctx comparable(xctx c)
+{
+#if defined(OBJECT_WALK_INACTIVE_FLAGS) && OBJECT_WALK_INACTIVE_FLAGS
+    if (!c.f_cf_override && c.f_kind != XK_ADC && c.f_kind != XK_SBB) c.f_cf=0;
+    if (!c.f_of_override) c.f_of=0;
+#endif
+    return c;
+}
 void x_guest_read_pages(void *out,uint32_t a,size_t n)
 { unsigned char *p=out; while(n) {size_t k=4096-(a&4095);if(k>n)k=n;memcpy(p,X_G(a),k);a+=k;p+=k;n-=k;} }
 void x_guest_write_pages(uint32_t a,const void *in,size_t n)
@@ -34,7 +44,7 @@ static void wf(uint32_t a,float f) { x_guest_write(a,&f,4); }
 
 static void observe(xctx *c,unsigned id)
 {
-    ++calls;hash(&id,sizeof id);hash(c,sizeof *c);
+    ++calls;hash(&id,sizeof id);xctx visible=comparable(*c);hash(&visible,sizeof visible);
     unsigned char args[24];x_guest_read(args,c->r[4],sizeof args);hash(args,sizeof args);
     for(unsigned i=0;i<8;i++)c->st[i]=(double)(i+scenario%17)*0.125;
     c->fsw=(uint16_t)(scenario*29u);c->r[0]=scenario&1u;
@@ -73,6 +83,15 @@ void f_00171AF0(xctx *c)
 void xv_trap(xctx *c,uint32_t ip) { (void)c;fprintf(stderr,"unexpected trap %x\n",ip);abort(); }
 int main(int argc,char **argv)
 {
+#if defined(OBJECT_WALK_INACTIVE_FLAGS) && OBJECT_WALK_INACTIVE_FLAGS
+    xctx flags={0};flags.f_kind=XK_LOGIC;flags.f_cf=1;flags.f_of=1;
+    xctx normalized=comparable(flags);assert(!normalized.f_cf && !normalized.f_of);
+    flags.f_cf_override=flags.f_of_override=1;normalized=comparable(flags);
+    assert(normalized.f_cf==1 && normalized.f_of==1);
+    flags.f_cf_override=flags.f_of_override=0;
+    flags.f_kind=XK_ADC;normalized=comparable(flags);assert(normalized.f_cf==1);
+    flags.f_kind=XK_SBB;normalized=comparable(flags);assert(normalized.f_cf==1);
+#endif
     unsigned count=argc>1?strtoul(argv[1],0,0):1000;
     g_xram=calloc(1,SIZE);g_img_base=g_xram;g_xpt=malloc((1u<<20)*4);
     uint8_t *before=malloc(SIZE),*expected=malloc(SIZE);assert(g_xram&&g_xpt&&before&&expected);
@@ -91,7 +110,13 @@ int main(int argc,char **argv)
         for(unsigned i=0;i<5;i++) {
             uint32_t obj=0x40013000+i*0x200;X_M32(entries+i*12+8)=obj;
             X_M8(obj+4)=(scenario%7==0 && i==1)?1:0;
-            X_M16(obj+0x64)=scenario&32?1:i%4;
+            unsigned type=i%4;
+#if defined(OBJECT_WALK_INACTIVE_FLAGS) && OBJECT_WALK_INACTIVE_FLAGS
+            /* Include negative, zero, 31 and wrapped x86 counts. Vehicle cases
+             * remain available independently to cover their callee contracts. */
+            type=(scenario>>6)%40-8;
+#endif
+            X_M16(obj+0x64)=scenario&32?1:type;
             wf(obj+0x5c,(float)(scenario%7)*0.25f);
             X_M32(obj+0xc4)=(i==2||i==4)?0xffffffffu:i+1;
             X_M32(obj+0xc8)=(i==0 && scenario&64)?3:0xffffffffu;
@@ -103,6 +128,7 @@ int main(int argc,char **argv)
         f_00171AF0(&ref);assert(!guard_misses);unsigned rc=calls,rp=preempts;uint64_t rt=trace;memcpy(expected,g_xram,SIZE);
         memcpy(g_xram,before,SIZE);xctx got=initial;mode=1;calls=preempts=steps=guard_misses=depth=max_depth=0;trace=1469598103934665603ull;
         f_00171AF0(&got);
+        ref=comparable(ref);got=comparable(got);
         if(memcmp(&ref,&got,sizeof ref)||memcmp(expected,g_xram,SIZE)||rc!=calls||rp!=preempts||rt!=trace||guard_misses) {
             fprintf(stderr,"case %u mismatch ctx=%d memory=%d calls=%u/%u trace=%llx/%llx\n",scenario,
                 memcmp(&ref,&got,sizeof ref)!=0,memcmp(expected,g_xram,SIZE)!=0,rc,calls,
