@@ -1127,3 +1127,27 @@ verification launch is now running: driver session3276, collector73192. Read
 verify245-driver.log, collect-verify245.log, hardware-verify245.json and
 verified245-pod.log when available. Re-poll these live handles; do not relaunch
 because a collection observation expires. Keepawake PID134059 still active.
+
+
+### 2026-09-26: perf245 admission result and perf246 adjustment
+
+Perf245 reached the expected pod checkpoint and logs INDEX_RUN mode1 through
+critical logging, but the collector at frame6600 reports checked=0/no failures.
+This is NOT a pass: no 65,536-prefix report arrived, so sparse/declined admission
+cannot be distinguished from that coarse threshold. The main 54010 workload
+uses the scene-global list at38BE14; stack-only admission misses that path.
+
+Audited retained callers/producer (details native-scene-index-run.md); expanded
+admission only to this bounded scene list on the active helper, preserving the
+private-stack bound word and <=0x4000-entry capacity. Host2400-case verification
+and fast fixtures still pass; host sanitizer/Pi admission boundary tests pass.
+Reporting now includes first verified prefix and every4096, fast still once.
+
+Perf246 is building in scene-index-candidate/build-x87, session30184. Source
+updates not deployed yet; installed perf245 remains in diagnostic mode1.
+Keepawake PID134059 active. Current245 watcher driver3276 / collector73192;
+collector finished, watcher may still be live. Check handles before stopping.
+Next: package246, deploy (same only-two-entry payload contract), run verify246.sh
+and collect-verify246.py. Require actual completed comparisons and inspect pod
+screenshot; then normal mode2 cold launch, keeping previous qualified options.
+Do not count 244 stderr silence or245 coarse-threshold silence as validation.

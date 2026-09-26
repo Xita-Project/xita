@@ -102,3 +102,31 @@ in xita.log, so its run cannot establish a verification pass. Use the explicit
 critical log sink on Vita (ordinary scene-helper messages are also suppressed).
 Fast mode reports its first admitted batch only; verification reports every
 65,536 completed comparisons. Perf245 carries this reporting correction.
+
+
+## Perf246: include the actual scene list
+
+Perf245 logs mode activation but has no completed 65,536-comparison report at
+the settled pod checkpoint. This is not a verification pass or a performance
+result. The private-stack restriction excludes the main global surface-list
+path. The reporting threshold alone cannot establish that *zero* prefixes ran.
+
+The reviewed producer 542F0 converts the scene surface bitmap into the bounded
+list at 38BE14 before 54740/material dispatch. All explicit addresses within
+its 0x4000-entry extent in the retained shards belong to that producer and the
+scene material consumers (544D0, 545A3/545A7, 54740, 547A0, 5D410/5D7F7).
+Literal-reference inspection alone is not a universal pointer-alias proof;
+qualification still requires original-path comparisons on real hardware.
+
+Perf246 admits this specific scene-owned list on the active scene helper,
+with a private-stack bound word and a bound no greater than the list capacity.
+It does not admit arbitrary global/heap memory. The original loop continues to
+handle callbacks, exits, page transitions and scheduler checks. Verification
+reports its first comparison and each 4,096 thereafter to distinguish sparse
+admission from missing logging. Fast mode still reports only its first batch.
+
+The 2,400-case host suite passes both modes. Additional host ASan/UBSan and Pi
+Thumb A9 admission cases verify an in-range global batch, an over-capacity bound
+and a cursor at the excluded end, alongside private-stack/foreign-caller checks.
+Hardware verification remains pending. The source-stage reference census is
+private at scene-index-candidate/global-index-references.json.

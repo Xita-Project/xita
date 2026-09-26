@@ -37,6 +37,18 @@ int main(void)
     c.r[4] = 0x7000;
     xv_scene_index_step(&s, &c, g_xram, g_xpt);
     assert(c.r[3] == 0x20fc && c.preempt == 37);
+    /* The only admitted non-stack region is the bounded CE scene list. */
+    g_xpt[0x38b] = 0x10000;
+    c.r[3] = 0x38be14; c.preempt = 100;
+    bound = 0x39be18; memcpy(g_xram + 0x7014, &bound, 4); old = c;
+    xv_scene_index_step(&s, &c, g_xram, g_xpt);
+    assert(!memcmp(&old, &c, sizeof c));
+    bound = 0x38bf14; memcpy(g_xram + 0x7014, &bound, 4);
+    xv_scene_index_step(&s, &c, g_xram, g_xpt);
+    assert(c.r[3] == 0x38bf10 && c.preempt == 37);
+    c.r[3] = 0x39be14; old = c;
+    xv_scene_index_step(&s, &c, g_xram, g_xpt);
+    assert(!memcmp(&old, &c, sizeof c));
 #endif
     free(g_xram); free(g_xpt);
     puts("PASS helper ownership, stack boundaries and diagnostic exclusion");

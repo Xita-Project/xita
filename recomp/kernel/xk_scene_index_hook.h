@@ -35,7 +35,7 @@ static inline void xv_scene_index_begin(xv_scene_index_scope *s, xctx *c)
             const char *e = getenv("XV_SCENE_INDEX_RUN");
             mode = e ? atoi(e) : 0;
             if (mode != 1 && mode != 2) mode = 0;
-            XV_INDEX_LOG("[scene-index] mode %d; private-stack admission\n", mode);
+            XV_INDEX_LOG("[scene-index] mode %d; scene-owned list admission\n", mode);
         }
         s->mode = mode;
         if (mode) s->bytes = xk_mem_arena_size();
@@ -46,12 +46,21 @@ static inline void xv_scene_index_begin(xv_scene_index_scope *s, xctx *c)
 static inline unsigned xv_scene_index_owned(xv_scene_index_scope *s, xctx *c,
                                             uint8_t *arena, const uint32_t *pages)
 {
-    /* Private stack is a page-aligned 256 KiB allocation. The primitive never
-     * reads an index outside this one page. Validate the complete bound word. */
+    /* The bound word is always on the helper's private stack. Indices are
+     * either a caller-local list on that stack or CE's scene-owned global
+     * surface list: 542F0 builds it before the ordered material passes. */
     uint32_t next = c->r[3] + 4u, slot = c->r[4] + 0x14u;
-    if (!s->stack || next < c->r[3] || slot < c->r[4] ||
-        next - s->stack >= 256u * 1024u ||
+    if (!s->stack || !arena || !pages || s->bytes < 4096 ||
+        next < c->r[3] || slot < c->r[4] ||
         slot - s->stack > 256u * 1024u - 4u) return 0;
+    if (next - s->stack >= 256u * 1024u) {
+        enum { LIST = 0x38BE14u, END = LIST + 0x4000u * 4u };
+        if (next < LIST || next >= END) return 0;
+        uint32_t off = pages[slot >> 12], bound;
+        if ((off & 4095u) || off > s->bytes - 4096 || (slot & 4095u) > 4092u) return 0;
+        memcpy(&bound, arena + off + (slot & 4095u), 4);
+        if (bound > END) return 0;
+    }
     return xv_scene_index_run(c, arena, pages, s->bytes);
 }
 
@@ -76,7 +85,7 @@ static inline void xv_scene_index_step(xv_scene_index_scope *s, xctx *c,
             s->mode = 0;
             return;
         }
-        if (!(++checked % 65536u))
+        if (++checked == 1u || !(checked % 4096u))
             XV_INDEX_LOG("[scene-index] verified %u prefixes mismatches 0\n", checked);
     }
     if (!s->tried) {
