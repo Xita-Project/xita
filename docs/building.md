@@ -67,8 +67,12 @@ tools/recomp.sh haloce/default.xbe
 python tools/gen_native_clip.py
 python tools/gen_native_bounds.py
 python recompiler/xbe_image.py haloce/default.xbe local/halo_ce_3925/game_manifest.json recomp/halo_image.bin
-make -j2 RECOMP=1
+make -j2 RECOMP=1 XV_DEVELOPER_BUILD=1
 ```
+
+This explicitly enables developer-only remote tooling. For a tester build,
+use `XV_DEVELOPER_BUILD=0` (the default) and first build the HTTPS dependencies
+as described in [tester updates](tester-updates.md).
 
 The result is `xita.vpk`. The Makefile already links the touch library; no extra
 override is needed. Generated C, game images, shader translations and the

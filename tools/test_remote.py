@@ -168,7 +168,7 @@ def main():
         exe = tmp / "server"
         flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if os.getenv("SANITIZE") else []
         if os.getenv("XITA_TEST_TIMING_PROVIDER"): flags.append("-DXITA_TEST_TIMING_PROVIDER")
-        subprocess.run(["cc", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", *flags,
+        subprocess.run(["cc", "-DXV_DEVELOPER_BUILD=1", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", *flags,
                         str(ROOT / "tools/tests/remote_server.c"), str(ROOT / "runtime/xv_update.c"), str(ROOT / "runtime/xv_update_halo2.c"), str(ROOT / "runtime/xv_sha256.c"), "-pthread", "-o", str(exe)], check=True)
         data = tmp / "ux0:data/xita"
         data.mkdir(parents=True)

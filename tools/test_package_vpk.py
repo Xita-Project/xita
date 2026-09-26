@@ -22,7 +22,7 @@ class Packaging(unittest.TestCase):
                 path.write_bytes(data)
             out = root / "xita.vpk"
             result = package(root, root / "build/eboot.bin", root / "build/param.sfo", out)
-            self.assertEqual(result["files"], 7)
+            self.assertEqual(result["files"], 8)
             with zipfile.ZipFile(out) as archive:
                 self.assertIsNone(archive.testzip())
                 self.assertEqual(archive.read("eboot.bin"), b"SCE\0test")
@@ -66,7 +66,7 @@ class Packaging(unittest.TestCase):
             def write_h2():
                 with zipfile.ZipFile(h2,'w') as z:
                     for name,data in payload.items():z.writestr(name,data)
-            def build():return package(root,root/'runtime.self',root/'param.sfo',out,launcher=root/'launcher.self',halo2_package=h2)
+            def build():return package(root,root/'runtime.self',root/'param.sfo',out,launcher=root/'launcher.self',halo2_package=h2,distribution="developer")
             write_h2();build()
             with zipfile.ZipFile(out) as z:files={name:z.read(name) for name in z.namelist()}
             self.assertEqual(files['sce_sys/param.sfo'],b'\0PSFtest')

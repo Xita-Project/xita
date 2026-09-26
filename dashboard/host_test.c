@@ -66,6 +66,7 @@ static int game_status(const char *id,char *text,unsigned size)
     snprintf(text,size,h2_installed ? "Installed / experimental test" : "Install Halo 2 first.");
     return h2_installed;
 }
+static int update_busy(void) {return 1;}
 static unsigned update_calls,update_rows;
 static int update_action(int rollback) {update_calls++;update_rows|=1u<<rollback;return -1;}
 static void update_status(char *text,unsigned size) {snprintf(text,size,"Synthetic update status");}
@@ -81,7 +82,7 @@ int main(void)
     uint32_t *pixels = malloc(976*544*sizeof(*pixels)); assert(pixels);
     for (int i = 0; i < 976*544; i++) pixels[i] = 0x12345678u;
     harness h = {0};
-    xv_dash_config cfg = {{pixels,960,544,976},root,&h,poll_input,present,0,NULL,NULL,NULL};
+    xv_dash_config cfg = {.framebuffer={pixels,960,544,976},.data_root=root,.userdata=&h,.poll=poll_input,.present=present};
     xv_dash_result result;
     const uint32_t preview[] = {0,XV_DASH_DOWN,XV_DASH_CROSS};
     h.previews = 1;
@@ -127,35 +128,44 @@ int main(void)
     const uint32_t update_menu[]={XV_DASH_UP,0,XV_DASH_UP,0,XV_DASH_CROSS,0,XV_DASH_CROSS,0,XV_DASH_DOWN,0,XV_DASH_CROSS};
     assert(run(&cfg,&h,update_menu,sizeof update_menu/sizeof update_menu[0],&result)==1 && update_calls==2 && update_rows==3);
     assert(!result.game_id[0]);
+    cfg.release_updates=1;update_calls=update_rows=0;
+    const uint32_t release_menu[]={XV_DASH_UP,0,XV_DASH_UP,0,XV_DASH_CROSS,0,
+        XV_DASH_CROSS,0,XV_DASH_DOWN,0,XV_DASH_CROSS,0,XV_DASH_DOWN,0,XV_DASH_CROSS,0,XV_DASH_DOWN,0,XV_DASH_CROSS};
+    assert(run(&cfg,&h,release_menu,sizeof release_menu/sizeof release_menu[0],&result)==1 && update_calls==4 && update_rows==15);
+    cfg.release_updates=0;
+    cfg.update_busy=update_busy;
+    const uint32_t busy_launch[]={XV_DASH_CROSS};
+    assert(run(&cfg,&h,busy_launch,1,&result)==1 && !result.game_id[0]);
+    cfg.update_busy=NULL;
     cfg.update_status=NULL;cfg.update_action=NULL;
     assert(run(&cfg,&h,update_menu,sizeof update_menu/sizeof update_menu[0],&result)==1);
     const uint32_t launch[] = {0,XV_DASH_CROSS};
     assert(run(&cfg,&h,launch,2,&result) == 0 && !strcmp(result.game_id,"haloce") && !result.map[0] && !result.is_save);
-    const uint32_t texture[] = {XV_DASH_DOWN,XV_DASH_CROSS,XV_DASH_LEFT,0,XV_DASH_CIRCLE,XV_DASH_UP,XV_DASH_CROSS};
-    assert(run(&cfg,&h,texture,7,&result) == 0);
+    const uint32_t texture[] = {XV_DASH_DOWN,0,XV_DASH_DOWN,XV_DASH_CROSS,0,XV_DASH_CROSS,XV_DASH_LEFT,0,XV_DASH_CIRCLE,0,XV_DASH_CIRCLE,XV_DASH_UP,0,XV_DASH_UP,XV_DASH_CROSS};
+    assert(run(&cfg,&h,texture,sizeof texture/sizeof texture[0],&result) == 0);
     snprintf(path,sizeof(path),"%s/xita.cfg",root);
     f = fopen(path,"r"); assert(f); n = fread(data,1,sizeof(data)-1,f); data[n] = 0; fclose(f);
     assert(strstr(data," XV_TEX_MAXDIM = 128 # detail\nXV_TEX_MAXDIM=128\n"));
     assert(strstr(data,"XV_PROF=1\nXV_VBLANK_HZ=60\n") && strstr(data,"XV_THREADS=1\n") && strstr(data,"UNKNOWN=keep\n"));
     assert(!strstr(data,"XV_FPS=") && !strstr(data,"XV_CPU=") && !strstr(data,"XV_BC_MIPS="));
     /* Reopening reads the persisted value before applying the next change. */
-    assert(run(&cfg,&h,texture,7,&result) == 0);
+    assert(run(&cfg,&h,texture,sizeof texture/sizeof texture[0],&result) == 0);
     f = fopen(path,"r"); assert(f); n = fread(data,1,sizeof(data)-1,f); data[n] = 0; fclose(f);
     assert(strstr(data,"XV_TEX_MAXDIM=64\n"));
-    const uint32_t texture_raise[] = {XV_DASH_DOWN,XV_DASH_CROSS,XV_DASH_RIGHT,0,XV_DASH_RIGHT,0,XV_DASH_CIRCLE,XV_DASH_UP,XV_DASH_CROSS};
-    assert(run(&cfg,&h,texture_raise,9,&result) == 0);
+    const uint32_t texture_raise[] = {XV_DASH_DOWN,0,XV_DASH_DOWN,XV_DASH_CROSS,0,XV_DASH_CROSS,XV_DASH_RIGHT,0,XV_DASH_RIGHT,0,XV_DASH_CIRCLE,0,XV_DASH_CIRCLE,XV_DASH_UP,0,XV_DASH_UP,XV_DASH_CROSS};
+    assert(run(&cfg,&h,texture_raise,sizeof texture_raise/sizeof texture_raise[0],&result) == 0);
     f = fopen(path,"r"); assert(f); n = fread(data,1,sizeof(data)-1,f); data[n] = 0; fclose(f);
     assert(strstr(data,"XV_TEX_MAXDIM=256\n"));
-    const uint32_t filtering[] = {XV_DASH_DOWN,XV_DASH_CROSS,XV_DASH_DOWN,XV_DASH_RIGHT,XV_DASH_DOWN,XV_DASH_RIGHT,XV_DASH_CIRCLE,XV_DASH_UP,XV_DASH_CROSS};
-    assert(run(&cfg,&h,filtering,9,&result) == 0);
+    const uint32_t filtering[] = {XV_DASH_DOWN,0,XV_DASH_DOWN,XV_DASH_CROSS,0,XV_DASH_CROSS,XV_DASH_DOWN,XV_DASH_RIGHT,XV_DASH_DOWN,XV_DASH_RIGHT,XV_DASH_CIRCLE,0,XV_DASH_CIRCLE,XV_DASH_UP,0,XV_DASH_UP,XV_DASH_CROSS};
+    assert(run(&cfg,&h,filtering,sizeof filtering/sizeof filtering[0],&result) == 0);
     f = fopen(path,"r"); assert(f); n = fread(data,1,sizeof(data)-1,f); data[n] = 0; fclose(f);
     assert(strstr(data,"XV_TEX_FILTER=1\n") && strstr(data,"XV_MIP_SMOOTH=0\n"));
     assert(strstr(data,"XV_TEX_MAXDIM=256\n") && strstr(data,"XV_THREADS=1\n"));
-    const uint32_t resolution[] = {XV_DASH_DOWN,XV_DASH_CROSS,XV_DASH_DOWN,0,XV_DASH_DOWN,0,XV_DASH_DOWN,XV_DASH_RIGHT};
-    assert(run(&cfg,&h,resolution,8,&result) == 1);
+    const uint32_t resolution[] = {XV_DASH_DOWN,0,XV_DASH_DOWN,XV_DASH_CROSS,0,XV_DASH_CROSS,XV_DASH_DOWN,0,XV_DASH_DOWN,0,XV_DASH_DOWN,XV_DASH_RIGHT};
+    assert(run(&cfg,&h,resolution,sizeof resolution/sizeof resolution[0],&result) == 1);
     f = fopen(path,"r"); assert(f); n = fread(data,1,sizeof(data)-1,f); data[n] = 0; fclose(f);
     assert(strstr(data,"XV_RENDER_HEIGHT=360\n") && strstr(data,"XV_TEX_MAXDIM=256\n"));
-    assert(run(&cfg,&h,resolution,8,&result) == 1);
+    assert(run(&cfg,&h,resolution,sizeof resolution/sizeof resolution[0],&result) == 1);
     f = fopen(path,"r"); assert(f); n = fread(data,1,sizeof(data)-1,f); data[n] = 0; fclose(f);
     assert(strstr(data,"XV_RENDER_HEIGHT=400\n") && strstr(data,"XV_MIP_SMOOTH=0\n"));
     /* Graphics scrolls through every visual control and only saves the edited key. */
@@ -169,8 +179,10 @@ int main(void)
         {1,16,"XV_REFLECTIONS=0\n"}, {1,17,"XV_OBJECT_SHADOWS=0\n"}
     };
     for (unsigned q=0;q<sizeof quality/sizeof quality[0];++q) {
-        uint32_t script[48]; unsigned count=0;
-        for (unsigned j=0;j<quality[q].page;++j) { script[count++]=XV_DASH_DOWN; script[count++]=0; }
+        uint32_t script[64]; unsigned count=0;
+        for(unsigned j=0;j<2;j++) {script[count++]=XV_DASH_DOWN;script[count++]=0;}
+        script[count++]=XV_DASH_CROSS;script[count++]=0;
+        for (unsigned j=1;j<quality[q].page;++j) { script[count++]=XV_DASH_DOWN; script[count++]=0; }
         script[count++]=XV_DASH_CROSS; script[count++]=0;
         for (unsigned j=0;j<quality[q].row;++j) { script[count++]=XV_DASH_DOWN; script[count++]=0; }
         script[count++]=XV_DASH_LEFT;
@@ -180,9 +192,9 @@ int main(void)
         assert(strstr(data,"XV_THREADS=1\n") && strstr(data,"UNKNOWN=keep\n"));
     }
     /* Wrap to the last Graphics row, return to the first, then leave and launch. */
-    const uint32_t graphics_wrap[] = {XV_DASH_DOWN,XV_DASH_CROSS,XV_DASH_UP,
-        XV_DASH_RIGHT,XV_DASH_DOWN,XV_DASH_CIRCLE,XV_DASH_UP,XV_DASH_CROSS};
-    assert(run(&cfg,&h,graphics_wrap,8,&result) == 0);
+    const uint32_t graphics_wrap[] = {XV_DASH_DOWN,0,XV_DASH_DOWN,XV_DASH_CROSS,0,XV_DASH_CROSS,XV_DASH_UP,
+        XV_DASH_RIGHT,XV_DASH_DOWN,XV_DASH_CIRCLE,0,XV_DASH_CIRCLE,XV_DASH_UP,0,XV_DASH_UP,XV_DASH_CROSS};
+    assert(run(&cfg,&h,graphics_wrap,sizeof graphics_wrap/sizeof graphics_wrap[0],&result) == 0);
     f = fopen(path,"r"); assert(f); n = fread(data,1,sizeof(data)-1,f); data[n] = 0; fclose(f);
     assert(strstr(data,"XV_OBJECT_SHADOWS=1\n") && strstr(data,"XV_VERTEX_REFERENCES=1\n") && strstr(data,"XV_MODEL_DETAIL=1\n") && strstr(data,"XV_TRIPLE_BUFFER=1\n") && strstr(data,"XV_EXTENDED_BC=1\n") && strstr(data,"XV_TEX_MAXDIM=256\n"));
     /* About/license is readable without game files and never edits settings. */
@@ -192,13 +204,13 @@ int main(void)
     assert(run(&cfg,&h,license,sizeof license/sizeof license[0],&result)==0);
     f=fopen(path,"r");assert(f);n=fread(data,1,sizeof data-1,f);data[n]=0;fclose(f);
     assert(!strcmp(before_license,data));
-    const uint32_t volume[] = {XV_DASH_DOWN,0,XV_DASH_DOWN,XV_DASH_CROSS,XV_DASH_LEFT};
-    assert(run(&cfg,&h,volume,5,&result) == 1);
+    const uint32_t volume[] = {XV_DASH_DOWN,0,XV_DASH_DOWN,XV_DASH_CROSS,XV_DASH_DOWN,XV_DASH_CROSS,XV_DASH_LEFT};
+    assert(run(&cfg,&h,volume,7,&result) == 1);
     f = fopen(path,"r"); assert(f); n = fread(data,1,sizeof(data)-1,f); data[n] = 0; fclose(f);
     assert(strstr(data,"XV_VOLUME=40\n"));
     /* An unwritable staging path must leave the original file intact. */
     subdir(root,"xita.cfg.tmp");
-    assert(run(&cfg,&h,texture,7,&result) == 0);
+    assert(run(&cfg,&h,texture,sizeof texture/sizeof texture[0],&result) == 0);
     f = fopen(path,"r"); assert(f); n = fread(data,1,sizeof(data)-1,f); data[n] = 0; fclose(f);
     assert(strstr(data,"XV_TEX_MAXDIM=256\n"));
     snprintf(path,sizeof(path),"%s/xita.cfg.tmp",root); /* remove() may remove an empty directory after the failed open */
@@ -209,7 +221,7 @@ int main(void)
     /* Selection persists independently of CE settings and saves. Uninstalled
      * profiles remain visible, but cannot return a launch request. */
     cfg.game_status=game_status;
-    const uint32_t choose_h2[]={XV_DASH_UP,0,XV_DASH_CROSS,0,XV_DASH_DOWN,0,XV_DASH_CROSS};
+    const uint32_t choose_h2[]={XV_DASH_DOWN,0,XV_DASH_CROSS,0,XV_DASH_DOWN,0,XV_DASH_CROSS};
     assert(run(&cfg,&h,choose_h2,sizeof choose_h2/sizeof choose_h2[0],&result)==1);
     assert(run(&cfg,&h,launch,2,&result)==1 && !result.game_id[0]);
     h2_installed=1;
@@ -218,12 +230,12 @@ int main(void)
     assert(run(&cfg,&h,launch,2,&result)==1 && !result.game_id[0]); /* CE UI absent */
     put(root,"haloce/maps/ui.map","");
     assert(run(&cfg,&h,launch,2,&result)==0 && !strcmp(result.game_id,"haloce"));
-    const uint32_t choose_ce[]={XV_DASH_UP,0,XV_DASH_CROSS,0,XV_DASH_CROSS};
+    const uint32_t choose_ce[]={XV_DASH_DOWN,0,XV_DASH_CROSS,0,XV_DASH_CROSS};
     put(root,"selected-game.txt","halo2\n");
     assert(run(&cfg,&h,choose_ce,sizeof choose_ce/sizeof choose_ce[0],&result)==1);
     assert(run(&cfg,&h,launch,2,&result)==0 && !strcmp(result.game_id,"haloce"));
     h.previews=1;
-    const uint32_t preview_games[]={XV_DASH_UP,0,XV_DASH_CROSS};
+    const uint32_t preview_games[]={XV_DASH_DOWN,0,XV_DASH_CROSS};
     assert(run(&cfg,&h,preview_games,3,&result)==1); h.previews=0;
     assert(xv_dash_run(NULL,&result) == -1);
     free(pixels);

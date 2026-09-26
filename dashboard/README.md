@@ -1,5 +1,12 @@
 # Xita Dashboard
 
+The embedded dashboard now uses five main sections: Launch Game, Games, Settings,
+Updates and About / License. Settings contains Graphics, Audio, Controls,
+Display and Performance. Game selection, settings persistence, build version
+and offline license reading remain available. Tester builds use the outbound
+[release updater](../docs/tester-updates.md); developer builds retain paired
+computer updates.
+
 ## Integrated startup dashboard
 
 `make RECOMP=1` from the repository root now embeds a simple launcher in Xita

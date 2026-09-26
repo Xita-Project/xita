@@ -82,6 +82,7 @@
 #include <psp2/ctrl.h>
 #include "dashboard/xv_dash.h"
 #include "xv_remote.h"
+#include "xv_release.h"
 #include "xv_update_halo2.h"
 #include "xv_launch_args.h"
 #include <psp2/appmgr.h>
@@ -2254,7 +2255,7 @@ static int xv_dashboard_present(void *userdata, xv_dash_framebuffer *fb)
     uint64_t shown = sceKernelGetProcessTimeWide();
     if(g_update_slot>=0 && p->frames==2) {
         const char *remote=getenv("XV_REMOTE_TEST"),*adhoc=getenv("XV_NET_ADHOC");
-        int need_remote=remote&&!strcmp(remote,"1")&&!(adhoc&&atoi(adhoc)==1);
+        int need_remote=XV_DEVELOPER_BUILD && remote&&!strcmp(remote,"1")&&!(adhoc&&atoi(adhoc)==1);
         int rc=need_remote&&!xv_remote_ready()?-1:xv_update_confirm((unsigned)g_update_slot);
         XV_LOG("update: dashboard boot confirmation slot %d rc %d\n",g_update_slot,rc);
         g_update_slot=-1;
@@ -2277,6 +2278,9 @@ static int g_launch_halo2;
 static int xv_dashboard_game_status(const char *id,char *text,unsigned size)
 {
     if(strcmp(id,"halo2")) return 0;
+    if(!XV_DEVELOPER_BUILD) {
+        snprintf(text,size,"Halo 2 is currently a developer preview.");return 0;
+    }
     SceIoStat info;
     if(sceIoGetstat("app0:halo2-a.self",&info)<0) {
         snprintf(text,size,"Install a combined Xita VPK with Halo 2."); return 0;
@@ -2302,7 +2306,11 @@ static int xv_dashboard_start(void)
     xv_dash_config cfg = {
         .framebuffer = {canvas, XV_DISPLAY_WIDTH, XV_DISPLAY_HEIGHT, XV_DISPLAY_STRIDE},
         .userdata = &platform, .poll = xv_dashboard_poll, .present = xv_dashboard_present, .simple_launcher = 1,
-        .update_status=xv_dashboard_update_status, .update_action=xv_update_request,
+        .update_status=XV_DEVELOPER_BUILD ? xv_dashboard_update_status : xv_release_status,
+        .update_action=XV_DEVELOPER_BUILD ? xv_update_request : xv_release_action,
+        .release_updates=!XV_DEVELOPER_BUILD,
+        .update_detail=XV_DEVELOPER_BUILD ? NULL : xv_release_detail,
+        .update_busy=XV_DEVELOPER_BUILD ? NULL : xv_release_busy,
         .game_status=xv_dashboard_game_status
     };
     xv_dash_result choice;
@@ -2414,6 +2422,7 @@ int main(int argc, char *argv[])
     xv_update_init();xv_halo2_update_init();
     for(int i=0;i<argc;i++)if(!strcmp(argv[i],"--xita-slot=0")||!strcmp(argv[i],"--xita-slot=1"))g_update_slot=argv[i][12]-'0';
     if(xv_launch_has(argc,argv,"--xita-dashboard"))setenv("XV_DASHBOARD","1",1);
+    XV_LOG("distribution: %s\n",xv_distribution());
     xv_remote_start();
     int dashboard_result=xv_dashboard_start();
     if(dashboard_result>0)goto shutdown;

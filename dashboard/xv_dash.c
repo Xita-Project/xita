@@ -308,16 +308,17 @@ static int content_count(const dash *s)
     return s->mode == 0 ? s->nc : s->mode == 1 ? s->nm : s->ns;
 }
 
-enum { LAUNCH_VISIBLE_ROWS = 5, LICENSE_PAGE = 6, UPDATE_PAGE = 7, GAMES_PAGE = 8, LICENSE_VISIBLE_LINES = 18 };
-static const char *const launch_pages[] = {"LAUNCH GAME", "GRAPHICS", "AUDIO", "CONTROLS", "DISPLAY", "PERFORMANCE", "ABOUT / LICENSE", "UPDATE", "SELECT GAME"};
+enum { LAUNCH_VISIBLE_ROWS = 5, LICENSE_PAGE = 6, UPDATE_PAGE = 7, GAMES_PAGE = 8, SETTINGS_PAGE = 9, LICENSE_VISIBLE_LINES = 18 };
+static const char *const launch_pages[] = {"LAUNCH GAME", "GRAPHICS", "AUDIO", "CONTROLS", "DISPLAY", "PERFORMANCE", "ABOUT / LICENSE", "UPDATES", "GAMES", "SETTINGS"};
+static const int home_pages[] = {0, GAMES_PAGE, SETTINGS_PAGE, UPDATE_PAGE, LICENSE_PAGE};
 static const int launch_keys[][18] = {
     {-1}, {TEX_DETAIL, TEX_FILTER, MIP_SMOOTH, RESOLUTION, MATERIAL,
            GLOW, PARTICLES, DECAL_TIME, DECAL_LIMIT, FRAME_CAP, EXTENDED_BC, TRIPLE_BUFFER, MODEL_DETAIL, VERTEX_REFERENCES,
            TEMP_DECALS, COSMETIC_EFFECTS, REFLECTIONS, OBJECT_SHADOWS}, {VOLUME, -1},
     {SENSITIVITY, DEADZONE, INVERT_Y, LOOK_CURVE, TOUCH}, {FPS, CPU, -1},
-    {CPU_CLOCK, VERTEX_WORKER, -1}, {-1}, {-1}, {-1}
+    {CPU_CLOCK, VERTEX_WORKER, -1}, {-1}, {-1}, {-1}, {-1}
 };
-static const int launch_counts[] = {0, 18, 1, 5, 2, 2, 0, 2, 2};
+static const int launch_counts[] = {0, 18, 1, 5, 2, 2, 0, 2, 2, 5};
 static const char *const setting_names[] = {
     "Performance overlay", "", "", "", "Texture detail", "Master volume",
     "Look sensitivity", "Stick deadzone", "Invert look", "Look response", "Touch controls", "CPU meter",
@@ -400,11 +401,12 @@ static void setting_value(const dash *s, int k, char *value, size_t size)
 }
 static void render_launcher(dash *s)
 {
-    for (int i = 0; i < COUNT(launch_pages); i++) {
-        int y = 177 + i*34, active = s->page == i;
-        pill(s,40,y,286,30,active ? GREEN : DIM,active ? 190 : 60);
-        pill(s,43,y+3,280,24,0xff092510u,active ? 80 : 255);
-        text(s,64,y+9,launch_pages[i],2,1,active ? WHITE : DIM);
+    int selected_page=(s->page>=1 && s->page<=5)?SETTINGS_PAGE:s->page;
+    for (int i = 0; i < COUNT(home_pages); i++) {
+        int page=home_pages[i], y=185+i*54, active=selected_page==page;
+        pill(s,40,y,286,42,active ? GREEN : DIM,active ? 190 : 60);
+        pill(s,43,y+3,280,36,0xff092510u,active ? 80 : 255);
+        text(s,64,y+15,launch_pages[page],2,1,active ? WHITE : DIM);
     }
     rect(s,350,177,576,305,0xff040b05u,235);
     if (!s->page && s->game == 1) {
@@ -435,16 +437,35 @@ static void render_launcher(dash *s)
         if(s->depth) rect(s,365,s->row ? 344 : 268,3,15,GREEN,255);
         text(s,378,416,"Halo CE settings and saves stay separate.",1,0,DIM);
         text(s,378,450,"CROSS  SELECT     CIRCLE  BACK",1,1,GREEN);
+    } else if (s->page == SETTINGS_PAGE) {
+        text(s,378,206,"SETTINGS",3,1,WHITE);
+        for(int i=0;i<5;i++) {
+            int active=s->depth && s->row==i;
+            if(active)rect(s,366,264+i*38,3,18,GREEN,255);
+            text(s,384,266+i*38,launch_pages[i+1],2,0,active?WHITE:DIM);
+        }
     } else if (s->page == UPDATE_PAGE) {
         char state[96]="Updater not available in this build";
         if(s->config && s->config->update_status)s->config->update_status(state,sizeof state);
         text(s,378,206,"XITA UPDATES",3,1,WHITE);
         text(s,378,267,state,1,0,GREEN);
-        text(s,378,306,"Send a compatible build from your paired computer.",1,0,DIM);
-        text(s,378,330,"The previous working build stays available.",1,0,DIM);
-        text(s,378,374,"INSTALL RECEIVED UPDATE",2,0,s->depth&&s->row==0?WHITE:GREEN);
-        text(s,378,414,"RESTORE PREVIOUS BUILD",2,0,s->depth&&s->row==1?WHITE:GREEN);
-        text(s,378,458,"Installing or restoring restarts Xita.",1,0,DIM);
+        if(s->config && s->config->release_updates) {
+            char detail[193]="";
+            if(s->config->update_detail)s->config->update_detail(detail,sizeof detail);
+            /* Three bounded lines; the complete release notes remain on GitHub. */
+            for(int i=0;i<3;i++) {char line[65]={0};size_t off=(size_t)i*64;
+                if(strlen(detail)>off)snprintf(line,sizeof line,"%.64s",detail+off);
+                text(s,378,291+i*14,line,1,0,DIM);
+            }
+            const char *actions[]={"CHECK FOR UPDATES","DOWNLOAD UPDATE","INSTALL AND RESTART","RESTORE PREVIOUS BUILD"};
+            for(int i=0;i<4;i++)text(s,378,346+i*28,actions[i],2,0,s->depth&&s->row==i?WHITE:GREEN);
+        } else {
+            text(s,378,306,"Developer build: paired computer updates.",1,0,DIM);
+            text(s,378,330,"The previous working build stays available.",1,0,DIM);
+            text(s,378,374,"INSTALL RECEIVED UPDATE",2,0,s->depth&&s->row==0?WHITE:GREEN);
+            text(s,378,414,"RESTORE PREVIOUS BUILD",2,0,s->depth&&s->row==1?WHITE:GREEN);
+        }
+        text(s,378,466,"Installing or restoring restarts Xita.",1,0,DIM);
     } else if (s->page == LICENSE_PAGE) {
         if (s->depth) render_license(s);
         else {
@@ -588,7 +609,9 @@ void xv_dash_graphics_snapshot(const xv_dash_graphics *panel, xv_dash_graphics_v
 }
 static int launcher_input(dash *s, uint32_t edge, xv_dash_result *out)
 {
-    if (edge & XV_DASH_CIRCLE) { s->depth = 0; s->row = 0; s->scroll = 0; s->status[0] = 0; }
+    if (edge & XV_DASH_CIRCLE) {
+        if(s->page>=1 && s->page<=5) {s->row=s->page-1;s->page=SETTINGS_PAGE;s->depth=1;s->scroll=0;return 0;}
+        s->depth = 0; s->row = 0; s->scroll = 0; s->status[0] = 0; }
     else if (s->depth && s->page == GAMES_PAGE) {
         if(edge & (XV_DASH_UP|XV_DASH_DOWN)) s->row=1-s->row;
         if(edge & XV_DASH_CROSS) {
@@ -601,12 +624,19 @@ static int launcher_input(dash *s, uint32_t edge, xv_dash_result *out)
             else { s->game=s->row; s->page=s->depth=s->row=s->scroll=0; s->status[0]=0; }
         }
     }
+    else if(s->depth && s->page == SETTINGS_PAGE) {
+        if(edge & XV_DASH_UP)s->row=(s->row+4)%5;
+        if(edge & XV_DASH_DOWN)s->row=(s->row+1)%5;
+        if(edge & (XV_DASH_CROSS|XV_DASH_RIGHT)) {s->page=s->row+1;s->row=s->scroll=0;}
+    }
     else if(s->depth && s->page == UPDATE_PAGE) {
-        if(edge & (XV_DASH_UP|XV_DASH_DOWN))s->row=1-s->row;
+        int count=s->config && s->config->release_updates?4:2;
+        if(edge & XV_DASH_UP)s->row=(s->row+count-1)%count;
+        if(edge & XV_DASH_DOWN)s->row=(s->row+1)%count;
         if(edge & XV_DASH_CROSS) {
             if(!s->config || !s->config->update_action || s->config->update_action(s->row))
-                strcpy(s->status,"Update unavailable. Check the paired computer.");
-            else strcpy(s->status,"Restarting Xita...");
+                strcpy(s->status,"Action unavailable. Check the update status above.");
+            else s->status[0]=0;
         }
     }
     else if (s->depth && s->page == LICENSE_PAGE) {
@@ -620,15 +650,22 @@ static int launcher_input(dash *s, uint32_t edge, xv_dash_result *out)
         if (s->scroll > limit) s->scroll = limit;
     }
     else if (edge & (XV_DASH_UP | XV_DASH_DOWN)) {
-        int count = s->depth ? launch_counts[s->page] : COUNT(launch_pages);
-        int *row = s->depth ? &s->row : &s->page;
-        *row = (*row + ((edge & XV_DASH_UP) ? count-1 : 1)) % count;
-        if (!s->depth) { s->row = 0; s->scroll = 0; }
+        if(s->depth) {
+            int count=launch_counts[s->page];
+            s->row=(s->row+((edge & XV_DASH_UP)?count-1:1))%count;
+        } else {
+            int selected=0;
+            for(int i=0;i<COUNT(home_pages);i++)if(home_pages[i]==s->page)selected=i;
+            selected=(selected+((edge & XV_DASH_UP)?COUNT(home_pages)-1:1))%COUNT(home_pages);
+            s->page=home_pages[selected];s->row=s->scroll=0;
+        }
         s->status[0] = 0;
     } else if (s->depth && (edge & (XV_DASH_LEFT | XV_DASH_RIGHT | XV_DASH_CROSS))) {
         edit_setting(s,edge & XV_DASH_LEFT ? -1 : 1);
     } else if (edge & (XV_DASH_CROSS | XV_DASH_RIGHT)) {
         if (s->page) { s->depth = 1; s->row = 0; s->scroll = 0; }
+        else if(s->config && s->config->update_busy && s->config->update_busy())
+            strcpy(s->status,"Please wait for the update operation to finish.");
         else if(s->game==1) {
             if(!s->halo2_ready) snprintf(s->status,sizeof s->status,"%s",s->halo2_status);
             else { strcpy(out->game_id,"halo2"); out->mode=XV_DASH_CAMPAIGN; return 1; }

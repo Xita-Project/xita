@@ -47,7 +47,10 @@ typedef struct {
      * Selection returns an empty map and opens the game's normal menu. */
     int simple_launcher;
     void (*update_status)(char *text, unsigned size);
-    int (*update_action)(int rollback);
+    int (*update_action)(int action);
+    int release_updates; /* actions: check, download, install, rollback */
+    void (*update_detail)(char *text, unsigned size);
+    int (*update_busy)(void);
     /* Optional external profile availability. Positive = launchable; otherwise
      * explain the missing installation in text. Does not launch or modify data. */
     int (*game_status)(const char *game_id, char *text, unsigned size);

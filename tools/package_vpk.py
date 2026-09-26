@@ -61,9 +61,14 @@ def halo2_payload(package_path):
         return result
 
 
-def package(root, eboot, sfo, output, include_scenes=False, launcher=None, halo2_package=None):
+def package(root, eboot, sfo, output, include_scenes=False, launcher=None, halo2_package=None, distribution="tester"):
     root, eboot, sfo, output = map(Path, (root, eboot, sfo, output))
+    if distribution not in {"tester", "developer"}:
+        raise ValueError("Invalid distribution")
     files = {"sce_sys/param.sfo": sfo, "eboot.bin": eboot}
+    ca = root / "resources/release-ca.pem"
+    if ca.is_file():
+        files["release-ca.pem"] = ca
     for name in ("LICENSE", "NOTICE", "THIRD_PARTY.md"):
         files[name] = root / name
     for pattern in ("shaders/*.gxp", "sce_sys/*.png", "sce_sys/livearea/contents/*", "LICENSES/*.txt"):
@@ -90,6 +95,15 @@ def package(root, eboot, sfo, output, include_scenes=False, launcher=None, halo2
     if halo2_package and not launcher:
         raise ValueError("A combined package requires the shared launcher")
     generated = halo2_payload(halo2_package) if halo2_package else {}
+    generated["distribution.txt"] = (distribution + "\n").encode()
+    opposite = b"XITA-DISTRIBUTION:" + (b"developer-v1" if distribution == "tester" else b"tester-v1")
+    expected = b"XITA-DISTRIBUTION:" + distribution.encode() + b"-v1"
+    if ca.is_file() and launcher and expected not in eboot.read_bytes():
+        raise ValueError("Runtime is missing its compiled distribution identity")
+    if opposite in eboot.read_bytes():
+        raise ValueError("Runtime distribution does not match package")
+    if halo2_package and distribution == "tester":
+        raise ValueError("Tester packages require a separately audited Halo 2 build; omit Halo 2 for now")
     if launcher:
         if Path(launcher).read_bytes()[:4] != b"SCE\0" or not 4096 <= eboot.stat().st_size <= 64*1024*1024:
             raise ValueError("Invalid updater launcher or game executable size")
@@ -126,11 +140,12 @@ def main():
     parser.add_argument("--launcher", type=Path, help="stable updater SELF; game runtime becomes game-a.self")
     parser.add_argument("--halo2-package", type=Path, help="private Halo 2 VPK built with BUNDLED=1; adds the second game to this install")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--distribution", choices=["tester", "developer"], default="tester")
     parser.add_argument("--include-scenes", action="store_true", help="include assets/*.bin for the mock build only")
     args = parser.parse_args()
     try:
         result = package(args.root, args.eboot or args.root / "build/eboot.bin",
-                         args.sfo or args.root / "build/param.sfo", args.output, args.include_scenes, args.launcher, args.halo2_package)
+                         args.sfo or args.root / "build/param.sfo", args.output, args.include_scenes, args.launcher, args.halo2_package, args.distribution)
     except (OSError, ValueError) as error:
         parser.error(str(error))
     print(f"{args.output}: {result['files']} files, {result['bytes']} bytes")

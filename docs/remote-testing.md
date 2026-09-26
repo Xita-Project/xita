@@ -1,5 +1,9 @@
 # Remote testing on a Vita
 
+**Developer builds only:** build with `XV_DEVELOPER_BUILD=1`. Default tester
+builds omit the server; a setting or pairing file cannot enable it. For tester
+updates, see [GitHub release updates](tester-updates.md).
+
 Xita's optional LAN test service lets a maintainer see the running dashboard or
 game, send controller input, collect logs, and repeat the existing off/on/off
 benchmark without someone operating the Vita. USB can still supply power and

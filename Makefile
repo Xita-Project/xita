@@ -38,6 +38,22 @@ LAYOUTS_H := shaders/xv_layouts.h
 LAYOUTS_SRC := shaders/halo_shaders.json
 
 CFLAGS    := -O2 -mthumb -Wall -Wextra -Wno-unused-parameter -MMD -MP -I. -Iruntime -Ishaders
+# Public/tester is the default. Development control must be explicitly compiled in.
+XV_DEVELOPER_BUILD ?= 0
+ifneq ($(XV_DEVELOPER_BUILD),0)
+ifneq ($(XV_DEVELOPER_BUILD),1)
+$(error XV_DEVELOPER_BUILD must be 0 or 1)
+endif
+endif
+CFLAGS += -DXV_DEVELOPER_BUILD=$(XV_DEVELOPER_BUILD)
+.PHONY: force-distribution-config
+force-distribution-config:
+$(BUILD)/distribution.config: force-distribution-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_DEVELOPER_BUILD)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(BUILD)/runtime/main.o $(BUILD)/runtime/xv_remote.o $(BUILD)/runtime/xv_release.o $(BUILD)/dashboard/xv_dash.o: $(BUILD)/distribution.config
 # Explicit research build; ordinary builds omit the writer. A separately
 # selected startup default preserves the environment/config opt-out.
 ifeq ($(XV_PROFILE_ASYNC_REPORT),1)
@@ -899,7 +915,7 @@ include games/$(GAME_PROFILE)/runtime.mk
 ifeq ($(RECOMP),1)
 CFLAGS    += -DXV_RUN_RECOMP -Irecomp -Irecomp/kernel
 SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_ui_gxm.c runtime/xv_boot.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_vertex_prepare.c runtime/xv_vertex_capture.c runtime/xv_upload_worker.c runtime/xv_draw_profile.c runtime/xv_render_profile.c runtime/xv_settings.c dashboard/xv_dash.c
-SRCS      += runtime/xv_remote.c runtime/xv_update.c runtime/xv_update_halo2.c runtime/xv_sha256.c
+SRCS      += runtime/xv_remote.c runtime/xv_release.c runtime/xv_update.c runtime/xv_update_halo2.c runtime/xv_sha256.c
 SRCS      += runtime/xv_tpidr_probe.c
 XV_THREAD_PAGE_TABLE ?= 0
 ifeq ($(XV_THREAD_PAGE_TABLE),1)
@@ -912,6 +928,15 @@ RECOMP_LINK_LIB = $(BUILD)/recomp/libxita_sys.a $(BUILD)/recomp/libxita_game.a $
 # Strong implementations must be retained even when generated declarations are
 # weak. Otherwise a static archive can silently leave the compatibility stub.
 RECOMP_LINK_FLAGS = -Wl,--whole-archive $(RECOMP_BUILD)/libxita_sys.a $(RECOMP_BUILD)/libxita_game.a -Wl,--no-whole-archive $(RECOMP_BUILD)/libxita_guest.a
+ifeq ($(XV_DEVELOPER_BUILD),0)
+XV_RELEASE_DEPS ?= $(BUILD)/release-deps
+CFLAGS += -I$(XV_RELEASE_DEPS)/include
+LIBS += -L$(XV_RELEASE_DEPS)/lib -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lpthread
+$(BUILD)/runtime/xv_release.o: $(XV_RELEASE_DEPS)/lib/libcurl.a
+$(XV_RELEASE_DEPS)/lib/libcurl.a:
+	@echo "Build updater dependencies: python3 tools/build_release_deps.py --output $(XV_RELEASE_DEPS)"
+	@false
+endif
 LIBS      += -lSceNet_stub -lSceNetCtl_stub -lScePspnetAdhoc_stub -lSceSysmodule_stub -lSceCommonDialog_stub
 LIBS      += -lSceAppMgr_stub -lSceCtrl_stub -lSceRtc_stub -lSceIofilemgr_stub -lSceAudio_stub -lScePower_stub
 PROJECT   := xita
@@ -984,7 +1009,7 @@ all: $(VPK)
 .PHONY: version-force
 $(BUILD)/xv_build.h: version-force version.json tools/gen_build_version.py
 	$(PYTHON) tools/gen_build_version.py --output $@ $(if $(BUILD_REVISION),--revision $(BUILD_REVISION),)
-VERSION_OBJS = $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_ui_gxm.o $(BUILD)/runtime/xv_remote.o $(BUILD)/dashboard/xv_dash.o
+VERSION_OBJS = $(BUILD)/runtime/main.o $(BUILD)/runtime/xv_ui_gxm.o $(BUILD)/runtime/xv_remote.o $(BUILD)/runtime/xv_release.o $(BUILD)/dashboard/xv_dash.o
 $(VERSION_OBJS): $(BUILD)/xv_build.h
 $(VERSION_OBJS): CFLAGS += -include $(abspath $(BUILD)/xv_build.h)
 
@@ -1061,13 +1086,13 @@ UPDATE_LAUNCHER := $(BUILD)/update-launcher.self
 endif
 
 # VPK: eboot + param.sfo + shaders/*.gxp (+ sce_sys assets when present) ------
-$(VPK): $(EBOOT) $(SFO) $(SHADER_PRESENT) $(SCE_SYS_FILES) $(SCENE_FILES) $(LICENSE_FILES) $(UPDATE_LAUNCHER) $(HALO2_PACKAGE) tools/package_vpk.py
+$(VPK): $(EBOOT) $(SFO) $(SHADER_PRESENT) $(SCE_SYS_FILES) $(SCENE_FILES) $(LICENSE_FILES) $(UPDATE_LAUNCHER) $(HALO2_PACKAGE) tools/package_vpk.py resources/release-ca.pem $(BUILD)/distribution.config
 ifneq ($(SHADER_MISSING),)
 	@echo "warning: shader(s) not found, VPK built without them: $(SHADER_MISSING)"
 	@echo "         (run 'make shaders' with psp2cgc on PATH, or drop prebuilt .gxp files in $(SHADER_DIR)/)"
 endif
 ifeq ($(RECOMP),1)
-	$(PYTHON) tools/package_vpk.py --root . --eboot $(EBOOT) --sfo $(SFO) --launcher $(UPDATE_LAUNCHER) $(if $(HALO2_PACKAGE),--halo2-package $(HALO2_PACKAGE),) --output $@
+	$(PYTHON) tools/package_vpk.py --distribution $(if $(filter 1,$(XV_DEVELOPER_BUILD)),developer,tester) --root . --eboot $(EBOOT) --sfo $(SFO) --launcher $(UPDATE_LAUNCHER) $(if $(HALO2_PACKAGE),--halo2-package $(HALO2_PACKAGE),) --output $@
 else
 	vita-pack-vpk -s $(SFO) -b $(EBOOT) $(VPK_SHADER_ARGS) $(VPK_ASSET_ARGS) $@
 endif

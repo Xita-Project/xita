@@ -1880,3 +1880,58 @@ TheseeditsNOTyetbuilt/deployed. Nextbuildperf253from252private stage,qualified
 code-onlyupdate, thenmarkedARtestusesstatus.timing_frame andcompletecoverage;
 neverreuseoldimageframejoin. Pendingnormalwatch30317canfinish;nochildrestart
 becauseitwaits. Keepawake134059stillownslease. Goal20FPSunmet.
+
+
+## September 26: tester updater / dashboard requested now
+
+User promoted the release/dashboard notes into active implementation. Pi gameplay
+display remains cancelled. New default `XV_DEVELOPER_BUILD=0` compiles only inert
+remote hooks; developer explicitly selects 1. Package distribution contracts are
+separate and release asset tooling rejects developer identities. Existing private
+LAN workflow remains in developer builds. Tester update state machine is outbound
+HTTPS only, user Check / Download / Install / Rollback, fixed GitHub release assets,
+Mozilla CA, exact payload SHA/size/asset contract, existing two-slot rollback.
+
+Main dashboard reduced to Launch Game, Games, Settings, Updates, About / License;
+settings categories remain nested and all values persist. Tester Halo 2 bundling
+is rejected until its independent runtime is audited; developer combined package
+continues to work. No GitHub publish/push/visibility change was performed.
+
+Private `tester-release-candidate/xita-tester-0.2.0-test.3.vpk` builds successfully:
+15,890,194 bytes; package SHA
+`6f8cf4b3d78c65710a099843432844509103d74753e35a86cb171863fbf808c8`,
+runtime SHA `24297d3822ee6f6cf5915ef9ea4344a5514d732ced1c75700837cb39a61cae58`.
+Host downloader tests, malformed/failed/corrupt transfer checks, explicit install,
+existing slot/recovery/handoff tests, dashboard navigation/preservation and real
+socket developer regression pass. Native tester and developer full builds pass.
+Tester remote object has no undefined calls. Hardware HTTPS download/install and
+rollback against a published release remain UNTESTED; do not call it release-ready.
+The new native dependencies are pinned curl 8.22.0 + Mbed TLS 3.6.7 with Vita
+hardware entropy and monotonic clock adapters, plus SDK zlib/pthread. Local SDK's
+old curl/OpenSSL pair failed to link, so dependencies are built in a separate
+prefix by `tools/build_release_deps.py`; SDK itself is unchanged.
+
+Developer preview perf254 is packaged at
+`developer-dashboard-candidate/xita-perf254c.vpk`, preserving installed contract
+`775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897`.
+Only game-a.self and boot-game.txt differ from perf253. Runtime 34,774,198 bytes,
+SHA `826d34882d34431c7b19cb3bfea82c4ff84a82b328085145032ca20d7e2f12ec`.
+Deployment session3185 is in progress; poll it and check its receipt before any
+retry. Log in that directory is deploy.log. Keepawake134059 remains; companion
+nosleep was enabled while restarting after the user's crash.
+
+User reported crash: Blood Gulch, Warthog driving and shooting rockets at vehicle.
+Evidence preserved under `crash-20260926-1519`: full253log, previouslog, freeze
+marker, core517824bytes and six screenshots. Watchdog stopped after40s with no
+Present at frame12346/process859.3s. Symbolized running guest is f_00091EE0 with
+f_000939C0 / f_00180ADA stack scan; render pump waiting. Screenshots show world
+geometry absent, sky above pale fill. This is NOT fixed by dashboard work.
+See docs/crash-warthog-rockets-20260926.md. Own core-parser venv pins pyelftools0.29.
+Reopening the original perf253 reached dashboard and renewed awake lease.
+
+
+Perf254 deployment session3185 completed successfully: verified payload SHA,
+slot0, restart_requested=true and boot_confirmed=true. `/status` reports254,
+benchmark0 and awake lease3580s. Hardware home screenshot captured after restart;
+new five-section dashboard is visible. User settings were not changed for this
+UI check. The public tester VPK remains local, not installed or published.

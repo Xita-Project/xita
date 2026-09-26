@@ -1,5 +1,27 @@
 # Xita Roadmap
 
+## Tester release and dashboard notes — September 26
+
+Implemented locally September 26; tester VPK builds and host checks pass.
+Hardware release download/install/rollback validation remains outstanding.
+Halo CE performance remains the broader priority.
+
+- [~] Separate developer and tester builds. Exclude remote control, file upload,
+  remote installation and remote configuration endpoints from tester packages;
+  verify the packaged build exposes no developer listener. Keep those tools in
+  explicit developer builds for hardware work.
+- [~] Add a user-initiated updater that downloads a published GitHub Release
+  asset, rather than repository source or an arbitrary development build. Show
+  the installed/new versions and release notes before installation. Verify the
+  release's authenticity, payload integrity and compatibility, preserve saves
+  and settings, and support recovery from interrupted updates. Repository
+  credentials must not be embedded in tester builds.
+- [~] Simplify the dashboard: prioritize game selection, Launch, Settings and
+  Updates; move advanced diagnostics out of the main navigation. Keep the build
+  version and software license easy to find.
+
+The requested Pi gameplay display is set aside; do not substitute a Vita stream.
+
 September 18 tester build: the dashboard now selects Halo CE or the separately installed experimental Halo 2 application. Version and source revision appear on the dashboard and performance overlay. Halo 2 hardware startup and sustained CE performance remain validation work.
 
 Xita runs Halo: Combat Evolved's original Xbox executable on the PlayStation Vita. The

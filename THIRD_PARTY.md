@@ -25,3 +25,16 @@ too broad: translated shaders and game captures are tracked. See the
 AI-assisted work does not establish provenance or permission. Contributors must
 identify external sources and preserve their notices; the GPL applies only to
 rights they can actually grant.
+
+## Release updater TLS trust store
+
+`resources/release-ca.pem` is the Mozilla CA bundle converted by curl, retrieved
+2026-09-26 from https://curl.se/ca/cacert.pem. SHA-256:
+`a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505`.
+It is unmodified and licensed under MPL-2.0; see
+[LICENSES/Mozilla-MPL-2.0.txt](LICENSES/Mozilla-MPL-2.0.txt).
+Source and conversion details: https://curl.se/docs/caextract.html.
+The tester updater uses pinned libcurl and Mbed TLS builds plus VitaSDK zlib.
+Their license texts are included in `LICENSES/`. Mbed TLS is used under its
+Apache-2.0 license. The dependency build script records the source archive
+hashes and the Vita configuration changes.

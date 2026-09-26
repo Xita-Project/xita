@@ -13,6 +13,11 @@ and supplies Xbox kernel, graphics and audio interfaces through Vita homebrew
 libraries. Each title needs its own port and testing. **Halo: Combat Evolved is in hardware gameplay testing. Halo 2 is an
 experimental second profile; it is not yet validated on a physical Vita.**
 
+The next tester build simplifies the dashboard to **Launch Game, Games, Settings,
+Updates and About / License**. It removes developer remote access and adds an
+optional [GitHub Releases updater](docs/tester-updates.md). This update flow is
+under hardware validation and has not yet been published.
+
 ## Getting started
 
 1. **Download the VPK** from the [current Xita release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.2).

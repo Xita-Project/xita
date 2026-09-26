@@ -97,7 +97,7 @@ int main(void)
     }
     sceIoMkdir("ux0:data",0777);
     sceIoMkdir("ux0:data/xita",0777);
-    xv_dash_config cfg = {{p.pixels[0],960,544,960},NULL,&p,poll_input,present,0,NULL,NULL,NULL};
+    xv_dash_config cfg = {.framebuffer={p.pixels[0],960,544,960},.userdata=&p,.poll=poll_input,.present=present};
     xv_dash_result result;
     rc = xv_dash_run(&cfg,&result);
     if (!rc) rc = handoff(&result);

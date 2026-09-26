@@ -148,3 +148,9 @@ is a verified **package transfer**, not installation: open that VPK in VitaShell
 once, launch Xita and leave it on the dashboard for the first hardware update
 check. Package SHA-256:
 `ea15bffde007e900917521424c04e5e5a97981c8997522d02866effca9fc472f`.
+
+## Distribution split (September 26)
+
+The LAN updater now requires a build made with `XV_DEVELOPER_BUILD=1`.
+Ordinary builds omit the remote server. See [tester release updates](tester-updates.md)
+for the separate outbound GitHub Releases workflow and first-install requirements.

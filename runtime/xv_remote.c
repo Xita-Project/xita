@@ -1,4 +1,24 @@
+#ifndef XV_DEVELOPER_BUILD
+#define XV_DEVELOPER_BUILD 0
+#endif
+#if !XV_DEVELOPER_BUILD
+/* Tester binaries contain no listener, pairing, upload or remote input code. */
+#include "xv_remote.h"
+const char *xv_distribution(void) {return "XITA-DISTRIBUTION:tester-v1";}
+void xv_remote_start(void) {}
+void xv_remote_stop(void) {}
+int xv_remote_ready(void) { return 0; }
+void xv_remote_frame(const void *p,unsigned w,unsigned h,unsigned pitch)
+{ (void)p;(void)w;(void)h;(void)pitch; }
+void xv_remote_pad(uint32_t *b,uint8_t *lx,uint8_t *ly,uint8_t *rx,uint8_t *ry)
+{ (void)b;(void)lx;(void)ly;(void)rx;(void)ry; }
+int xv_remote_take_draw_trace(void) { return 0; }
+int xv_remote_take_page_census(void) { return 0; }
+void xv_update_progress(unsigned stage) { (void)stage; }
+volatile unsigned xv_env_generation;
+#else
 #include "xv_version.h"
+const char *xv_distribution(void) {return "XITA-DISTRIBUTION:developer-v1";}
 /* Private-LAN development control. The network thread never touches Xbox RAM,
  * GXM, settings or saves. It publishes expiring pad input and requests a copy
  * from the existing completed-frame callback. No listener exists by default. */
@@ -507,3 +527,5 @@ failed:
 /* Bumped after every runtime setenv (the remote env command above): readers that cache a getenv result
  * (xd3d.c, XV_REC_HLE) re-read when it changes. */
 volatile unsigned xv_env_generation;
+
+#endif
