@@ -61,3 +61,28 @@ Full developer Vita build succeeded. The compatible package replaces only
 `game-a.self` and `boot-game.txt`, preserving the installed asset contract.
 Runtime SHA-256: `ff7ff12ee5e425136fceb82d1058e379098cd1d601ab0676c609c598224ea37d`.
 Runtime size: 34775314 bytes. Hardware results remain pending.
+
+## Deployment checkpoint
+
+The companion accepted quit/launch, but the in-app HTTP endpoint remained
+connection-refused during the initial 60-second readiness check. The first
+update command failed before upload; perf259 is not confirmed installed.
+FTP and companion remained reachable. The previous gameplay log stopped at
+2026-09-26 18:16:02 UTC; no new freeze-lights dump was present. This observation
+alone does not establish a crash or justify repeated restarts.
+
+A bounded `impact-phase-candidate/wait-dashboard.py` observer is running (exec
+session 63856). It polls the existing launch for up to ten minutes and only
+retries the update after receiving perf258 dashboard status with timing frame
+zero. Poll that same handle and `wait-dashboard.log` / `deploy-retry.log` before
+any further action. It does not relaunch the app. If installation becomes
+boot-confirmed, run `launch-a30.py`, inspect readiness with `wait-game.py`, then
+`ar259.py` (two four-second bursts with a reload) and `read-phases.py`. The latter
+labels only complete 60-frame reports wholly inside an input phase as such;
+mixed windows remain explicitly marked. Do not run the firing script before
+visually confirming the protected gameplay scene.
+
+Build 56643 and packaging 36333 completed successfully. Initial deployment
+session 7208 is terminal failure. Keep-awake refresher PID 134059 is still alive;
+its in-app renewal cannot succeed until HTTP returns. Do not use companion
+press/nosleep as a substitute. Source changes are locally committed, not pushed.
