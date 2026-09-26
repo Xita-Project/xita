@@ -1,6 +1,6 @@
 # Collision transform register lowering — perf258 candidate
 
-September 26, 2026. Hardware result pending; not yet deployed.
+September 26, 2026. Hardware result pending; deployment in progress.
 
 The existing native ray cast replaces 88E90 and its BSP traversal, while
 1731D0 still prepares object collision rays using B6210 (inverse transform),
@@ -52,7 +52,10 @@ case. `--function vector` reproduces the excluded candidate's discrepancy.
 
 Private candidate directory: `collision-transform-candidate/`, containing
 body hashes, commands, logs, one-function audit and the build stage. Generated
-code and game inputs stay outside Git. The full Vita build is in progress.
-Next: confirm the built candidate, deploy a compatible package with rollback,
-then inspect ordinary a30 gameplay/firing with timers off. A frame-rate gain
+code and game inputs stay outside Git. The full Vita build succeeded. Its
+B6210 symbol is 2,140 bytes, down from 3,044 in perf257. Runtime SHA-256:
+`28bd07ffe8d0d2668a17ba533f72ba0a0d9ac94f99deff06468ea3deadc688ef`.
+The compatible package replaces only `game-a.self` and `boot-game.txt`,
+preserving the asset contract. Remote upload/apply is in progress.
+Next: confirm the new boot, then inspect ordinary a30 gameplay/firing with timers off. A frame-rate gain
 and the 20 FPS objective remain unproven.
