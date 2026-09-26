@@ -616,3 +616,42 @@ from different spatial cells mapping to the same slot, or profile the actual
 collision descendants. Extending TTL cannot solve most firing misses and
 would increase stale-world risk. No cache policy change or Vita gain is
 established. All diagnostic jobs are terminal; perf260 remains undeployed.
+
+## Endpoint grid diagnostic
+
+The optional sound-cache profiler additionally classifies endpoint-rejected
+casts by the stored and requested half-unit grid cell. Different cells in
+the same direct-mapped slot establish a spatial hash collision. Same-cell
+rejection can still involve motion or different sounds within that cell;
+neither class proves that reusing the previous result would be correct.
+Fresh versus expired entries are reported separately, so old collisions
+are not mistaken for current avoidable work. No new stable sound identity
+or cache policy is introduced.
+
+Private `sound-cell-phase-pi/` rebuilds only the diagnostic sound runtime on
+the previous listener harness. Default ARM `.text` remains identical to the
+pre-diagnostic object. The repeated 180-second run is needed for the new
+miss classification, not to claim a whole-frame improvement.
+
+Completed `codex-sound-cell-20260926`: session 97835 terminal, intended timeout
+124, 68 reports, no scope-overflow or fatal/trap lines. Cell counts reconcile
+with endpoint-rejected counts in all 61 reported sound windows. Selected rows
+are retained in `sound-cell-phase-pi/selected-windows.json`.
+
+| Endpoint rejection class | Firing 1800 | Firing 2040 |
+| --- | ---: | ---: |
+| Fresh, same grid cell | 965 | 833 |
+| Fresh, different cell (slot collision) | 1 | 3 |
+| Expired, same cell | 5 | 19 |
+| Expired, different cell | 16 | 31 |
+
+Almost all fresh endpoint misses are within the same half-unit cell. A better
+hash avalanche cannot distinguish positions already quantized to the same
+cell, so changing only the hash is not supported by this result. This does
+not prove a single sound is moving: multiple sounds in one cell can also
+replace each other. Multi-entry retention may help only if distinct eligible
+rays recur, and must be evaluated with exact endpoint/vector distinctions and
+world-state validation. Increasing tolerance would hide distinct rays rather
+than establish equivalent collision answers. Keep the existing candidate
+verification-only. Faster collision processing remains the alternative to
+reducing cast count; no new hardware performance claim follows from this run.

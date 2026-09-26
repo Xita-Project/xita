@@ -29,6 +29,7 @@ extern void f_001721B0(xctx *restrict c);
  * Synthetic phase ID is not a guest address. Default builds add no observers. */
 #if defined(XV_SOUND_CACHE_PROFILE) && XV_SOUND_CACHE_PROFILE
 static unsigned miss_reasons[16];
+static unsigned endpoint_cells[6]; /* same/different/invalid grid cell, fresh then expired */
 static void sound_cast(xctx *c)
 {
     extern void xv_scene_phase_begin(uint32_t), xv_scene_phase_end(uint32_t);
@@ -157,6 +158,17 @@ void xv_sound_ray(xctx *c)
              (!(d2(a, e->a) <= eps_l2) ? 4u : 0u) |
              (!(d2(b, e->b) <= eps_s2) ? 8u : 0u));
         __atomic_fetch_add(&miss_reasons[reason], 1u, __ATOMIC_RELAXED);
+        if (reason & 8u) {
+            unsigned cell = 0;
+            for (unsigned i = 0; i < 3; ++i) {
+                if (!isfinite(e->b[i])) { cell = 2; break; }
+                if (floorf(e->b[i] * 2.0f) != (float)q[i]) cell = 1;
+            }
+            /* Different spatial cells competing for this same slot is a
+             * hash collision. Same cell still allows different sounds or
+             * motion within the cell; neither is proof of safe reuse. */
+            __atomic_fetch_add(&endpoint_cells[cell + ((reason & 2u) ? 3u : 0u)], 1u, __ATOMIC_RELAXED);
+        }
     }
 #endif
     if (reusable && !verify) {
@@ -185,6 +197,12 @@ void xv_sound_obstruction_report(unsigned frames)
         return;
     }
 #if defined(XV_SOUND_CACHE_PROFILE) && XV_SOUND_CACHE_PROFILE
+    for (unsigned cell = 0; cell < 6; ++cell) {
+        unsigned n = __atomic_exchange_n(&endpoint_cells[cell], 0u, __ATOMIC_RELAXED);
+        if (n) XK_LOG("[sound-cache-cells] %u frames: %s %s casts %u\n", frames,
+            cell >= 3 ? "expired" : "fresh",
+            cell % 3 == 0 ? "same-cell" : cell % 3 == 1 ? "different-cell" : "invalid-cell", n);
+    }
     for (unsigned reason = 0; reason < 16; ++reason) {
         unsigned n = __atomic_exchange_n(&miss_reasons[reason], 0u, __ATOMIC_RELAXED);
         if (n) XK_LOG("[sound-cache-profile] %u frames: reason-mask %u casts %u (1 empty, 2 age, 4 listener, 8 endpoint; 0 verify-only)\n", frames, reason, n);
