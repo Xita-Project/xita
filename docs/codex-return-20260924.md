@@ -1620,3 +1620,13 @@ pod251-fast.png, requiresconsolecumulative0. Originalfirstattemptdidn'treachpod.
 Keepawake134059neverstopped. Next confirmstartupcfgreceipt andconsole0 innewtag's
 watchlog, waitforqualifiedpod/sample; no reuploadneeded. Currentcandidateinstalled251.
 ThiscorrectionisnotanA/Bloop; firstprocedurefaileditsownactivationgate.
+
+
+Startup251activation confirmed: startup251-activation.log archived viaFTP,
+cfgXV_LOG_PERIODIC_CONSOLE0 present;19workerreportsallconsole0.000.
+Ranrestore-startup-config.py immediatelyafteractivation: exactoriginalconfiguration
+RESTORED/readbackverified; startup-config-receipt.json restore_required=false.
+No temporaryoverride remains onsavedcfg. Runningworkerkeepsstartuppolicy0; remote
+launchalsoownskey0forlaterdashboardhandoffreload. No newrestartneeded.
+Newlaunch90406/collector16290 remainactive (levelstillloading); keepawake134059.
+Next pollsamecollector, don'tduplicatetest. No settledhardwareFPSresultyet.

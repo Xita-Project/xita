@@ -30,7 +30,9 @@ in the dashboard before remote launch overrides, so a `/env` acknowledgment alon
 does not activate this startup option. The first perf251 attempt still had
 increasing console counters and is not a valid experiment. A temporary
 `xita.cfg` override was then backed up, applied and read back before cold launch.
-Restore the exact original configuration after the test; its private receipt
-and guarded restoration script live in the candidate directory. Check cumulative console time stays zero while file
+Nineteen live worker reports confirmed zero console time and the startup log
+confirmed the override. The exact original configuration was then restored and
+read back while the worker retained its startup policy. The private receipt and
+guarded restoration script live in the candidate directory. Check cumulative console time stays zero while file
 bytes progress, then compare complete raw frame distributions and phase cadence.
 Do not remove periodic outliers from the acceptance results.
