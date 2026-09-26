@@ -101,3 +101,28 @@ The modified renderer compiled with the candidate's actual Vita build flags
 perf261 still lacks these added stream records. Next: package the diagnostic
 extension, capture a vehicle scene with resource identity, and distinguish
 missing submissions from incorrect state before changing geometry/materials.
+
+## Perf262 candidate
+
+Built successfully in the private `../model-identity-candidate/build-x87`
+stage, derived from perf261 with only the model-stream diagnostic source and
+version/revision metadata changed. Version 0.2.0-perf.262 / a0fc8cba.
+`xita-perf262c.vpk` differs from the perf261 package only in `game-a.self`
+and `boot-game.txt`; the updater contract remains unchanged.
+
+- Runtime: 34,805,274 bytes, SHA-256
+  `92868028ca11caf15158846d0fbc2a51fb2a4eb5ec8924f64c0f61545828b6eb`.
+- Package SHA-256:
+  `3cd639e6a4232de25d6a8829a9fb5aee6f9fe95a482510fe6f5693d303a17d0a`.
+
+Deployment started under tool session 6854, logging to that private directory's
+`deploy.log`. Do not infer boot success from completed upload alone; inspect its
+final receipt and live status. No additional performance changes are bundled.
+
+The latest settled perf261 log reports roughly 247 deferred draws/frame and
+36 drain calls/frame; only about 1.7–1.9 drains/frame waited, for approximately
+1.0–2.3 ms/frame in several late windows (earlier windows reached ~5 ms).
+Therefore removing all 36 calls cannot be credited with a large frame-time
+saving. Many return immediately on an empty queue; nonempty drains protect
+recorder/guest-state ownership. Further changes need a specific dependency
+that can be removed or delayed without violating that ownership.
