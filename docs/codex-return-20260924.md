@@ -1598,3 +1598,25 @@ thenrequireallworkerconsolecumulativetimes0. Originalsample250screenshotsoccurre
 at6515(pod)and9093(outdoor); photoIOcanperturbindividualintervals, so smallFPS
 changescannotbeattributedblindly. Periodicphase3signal repeated14of17slowframes,
 notjustone screenshot. Resultsnotyetknown.
+
+
+### Perf251 launch-policy correction — CONFIG RESTORATION REQUIRED
+
+First251runwasNOTfile-only: atframes3840/3900 cumulativeconsole538.945/546.753ms.
+Do notinterpretitsFPSasexperiment. Sourceexplainswhy: main startslogworkerbefore
+dashboard remote/envlaunch. Startup-onlygetenvwasreadbeforeremoteflag0arrived.
+Existingcodecorrectforstartupconfig, butinitiallaunchprocedurewrong.
+Stoppedconfirmeddriver390597/collector390619/watcher391495; companionquitall.
+Appliedtemporaryxita.cfg XV_LOG_PERIODIC_CONSOLE=0 withoriginalexactlocal+remote
+backup, stagedreadback+renamewithrollback. Private startup-config-receipt.json
+andrestore-startup-config.py inperiodic-console-candidate. MUSTrestoreaftertest;
+scriptrefusesifcurrentconfigdiffersfromtrialSHA, so don'toverwriteuserchanges.
+Nootherconfigkeysmodified. SavedoriginalcontainsretainedMATERIAL_BLACK2/index2.
+
+Newdistincttagperf251-periodic-console-startup-20260926; launch251-startup.sh
+session90406 andcollect251-startup.py session16290 RUNNING. Outputslaunch251-startup-driver.log,
+collect251-startup.log. Collectorstillwritesfast251-summary.json/fast251-pod.log/
+pod251-fast.png, requiresconsolecumulative0. Originalfirstattemptdidn'treachpod.
+Keepawake134059neverstopped. Next confirmstartupcfgreceipt andconsole0 innewtag's
+watchlog, waitforqualifiedpod/sample; no reuploadneeded. Currentcandidateinstalled251.
+ThiscorrectionisnotanA/Bloop; firstprocedurefaileditsownactivationgate.

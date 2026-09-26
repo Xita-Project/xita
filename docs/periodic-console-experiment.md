@@ -25,7 +25,12 @@ critical, partial, console-error, owner-critical and barrier cases. The exit
 fixture was updated for the current aggregate update-request helper.
 
 Perf251 is built from perf250, changing only the logging include and version.
-Hardware results are pending. Keep the setting experimental; no saved user
-configuration is changed. Check cumulative console time stays zero while file
+Hardware results are pending. Keep the setting experimental. The worker starts
+in the dashboard before remote launch overrides, so a `/env` acknowledgment alone
+does not activate this startup option. The first perf251 attempt still had
+increasing console counters and is not a valid experiment. A temporary
+`xita.cfg` override was then backed up, applied and read back before cold launch.
+Restore the exact original configuration after the test; its private receipt
+and guarded restoration script live in the candidate directory. Check cumulative console time stays zero while file
 bytes progress, then compare complete raw frame distributions and phase cadence.
 Do not remove periodic outliers from the acceptance results.
