@@ -826,3 +826,12 @@ end15600..16740, well after diagnostic trace11441 and movement9330. Mean73.74561
 0>200ms. Same stationary outdoor view after the earlier scripted movement;
 future outdoor comparison needs view qualification, not just map name. Update
 15400 uploaded all34765806bytes; verification/apply still pending, do not restart.
+
+Perf242 update15400 completed0/bootconfirmedslot0. Payload SHA
+c82bbca58016818da36df63c69822bcb68aed85d9a23dad2f23f027751e0a685.
+Started existing material-black-alpha-candidate/launch.sh session78856,
+driver255612, and collect.py session95263/PID255631. Log files there:
+gameplay-driver.log,collector.log. Keepawake134059 confirmed live. Wait on these
+same processes for pod242.png, settled-summary.json and qualification.json;
+then inspect generic _axisblack links/visuals and do outdoor movement/effects.
+No hardware242performance result yet; original20FPS acceptance stillnotmet.
