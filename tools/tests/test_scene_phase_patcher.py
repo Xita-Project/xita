@@ -1,0 +1,45 @@
+"""Ensure diagnostic insertion retains calls and handles a final shard function."""
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+TOOL = Path(__file__).resolve().parents[1] / 'patch_scene_phase_timers.py'
+SOURCE = '''void f_00000010(xctx *restrict c)
+{
+    XV_HLE_CALL(0x123u, untouched);
+}
+void f_00000020(xctx *restrict c)
+{
+    X_PUSH32(0x24u);
+    f_00000030(c);
+    XV_HLE_CALL(0x183AD0u, stream);
+    XV_HLE_CALL(0x181B30u, indices);
+    XV_HLE_CALL(0x1842D0u, draw);
+}
+'''
+
+class PatcherTests(unittest.TestCase):
+    def test_modes_and_idempotence(self):
+        for any_call in (False, True):
+            for hle in (False, True):
+                with self.subTest(any_call=any_call, hle=hle), tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / 'code_000.c'
+                    path.write_text(SOURCE)
+                    cmd = [sys.executable, str(TOOL), tmp, '--parents', '00000020']
+                    if any_call: cmd.append('--any-call')
+                    if hle: cmd.append('--hle-calls')
+                    subprocess.run(cmd, check=True, capture_output=True)
+                    first = path.read_text()
+                    subprocess.run(cmd, check=True, capture_output=True)
+                    self.assertEqual(first, path.read_text())
+                    self.assertEqual(first.split('void f_00000020')[0], SOURCE.split('void f_00000020')[0])
+                    # Remove diagnostics: every original instruction remains in order,
+                    # including the closing brace of the final function.
+                    retained = '\n'.join(line for line in first.splitlines() if 'extern void xv_scene_phase_' not in line) + '\n'
+                    self.assertEqual(retained, SOURCE)
+                    self.assertEqual(first.count('xv_scene_phase_begin(0x'), 4 if hle else 1)
+                    self.assertEqual(first.count('xv_scene_phase_end(0x'), 4 if hle else 1)
+
+if __name__ == '__main__': unittest.main()

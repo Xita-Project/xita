@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install the XV_SCENE_PHASES timers around the direct guest calls of the scene entry f_000BCB30 and of its main callee
 f_0005DBC0 in a stage's hand-maintained shards (idempotent: earlier timers are stripped and re-installed).
-Usage: patch_scene_phase_timers.py <stage>/recomp [--parents A,B]     Report: [scene-phases] in recomp/kernel/xk_scene_thread.c."""
+Usage: patch_scene_phase_timers.py <stage>/recomp [--parents A,B] [--hle-calls]     Report: [scene-phases] in recomp/kernel/xk_scene_thread.c."""
 import re, sys, glob
 ANY_CALL = False
 PARENTS = ['000900E0', '0014A162', '000B9678', '000B8840',   # the sim tick's two big callees (38 + 14 ms/frame, perf125) and the Pi sampler's hot owner chain (B9678 -> B8980 66%)
@@ -10,6 +10,19 @@ PARENTS = ['000900E0', '0014A162', '000B9678', '000B8840',   # the sim tick's tw
            '000BD420',   # the owner's frame loop (tick side): its direct callees are the tick phases ([tick-phases])
            '000BCB30', '0005DBC0', '0005D990', '0005C5E0', '0005D410', '0005BCB0', '00028320',
            '000606B0', '00054010', '00060560', '0005B760', '00054740', '0005B710', '000539C0', '00092890', '00093C00']   # + the Vita's top scene callees (§47), one level down   # scene entry, its main callee, and the chain below (each level was one callee on the host)
+def wrap_hle(body):
+    """Time the existing macro invocation, retaining proxy/dispatch semantics."""
+    count = 0
+    def wrap(m):
+        nonlocal count
+        count += 1
+        indent, addr = m.group(1), m.group(2)
+        return (indent + '{ extern void xv_scene_phase_begin(uint32_t); xv_scene_phase_begin(0x%su); }\n' % addr
+                + m.group(0)
+                + indent + '{ extern void xv_scene_phase_end(uint32_t); xv_scene_phase_end(0x%su); }\n' % addr)
+    body = re.sub(r'^([ \t]*)XV_HLE_CALL\(0x([0-9A-Fa-f]+)u,\s*\w+\);\n', wrap, body, flags=re.M)
+    return body, count
+
 BEGIN = '    { extern void xv_scene_phase_begin(uint32_t); xv_scene_phase_begin(0x%su); }\n'
 def main():
     root = sys.argv[1]; total = 0
@@ -23,7 +36,9 @@ def main():
         for fn in PARENTS:
             m = re.search(r'^void f_%s\(xctx \*restrict c\)\n\{\n' % fn, s, re.M)
             if not m: continue
-            end = s.find('\nvoid f_', m.end()); body = s[m.end():end]
+            end = s.find('\nvoid f_', m.end())
+            if end < 0: end = len(s)
+            body = s[m.end():end]
             body = re.sub(r'^\s*\{ extern void xv_scene_phase_(begin|end)\([^\n]*\n', '', body, flags=re.M)   # strip old (any indentation)
             n = [0]
             if ANY_CALL:   # every bare `f_XXXXXXXX(c);` line (calls wrapped by object-jobs/#if code have no push right before them)
@@ -32,6 +47,8 @@ def main():
                     return (ind + '{ extern void xv_scene_phase_begin(uint32_t); xv_scene_phase_begin(0x%su); }\n' % a + ind + 'f_%s(c);\n' % a
                             + ind + '{ extern void xv_scene_phase_end(uint32_t); xv_scene_phase_end(0x%su); }\n' % a)
                 body = re.sub(r'^([ \t]*)f_([0-9A-F]{8})\(c\);\n', wrap_any, body, flags=re.M)
+                if '--hle-calls' in sys.argv:
+                    body, hle_count = wrap_hle(body); n[0] += hle_count
                 s = s[:m.end()] + body + s[end:]; changed = True; total += n[0]
                 print(f'f_{fn}: {n[0]} call sites (any-call) in {f}')
                 continue
@@ -39,6 +56,8 @@ def main():
                 n[0] += 1
                 return (BEGIN % mm.group(2)) + mm.group(1) + '    { extern void xv_scene_phase_end(uint32_t); xv_scene_phase_end(0x%su); }\n' % mm.group(2)
             body = re.sub(r'(    X_PUSH32\(0x[0-9A-Fa-f]+u\);\n    f_([0-9A-F]{8})\(c\);\n)', wrap, body)
+            if '--hle-calls' in sys.argv:
+                body, hle_count = wrap_hle(body); n[0] += hle_count
             s = s[:m.end()] + body + s[end:]; changed = True; total += n[0]
             print(f'f_{fn}: {n[0]} call sites in {f}')
         if changed: open(f, 'w').write(s)
