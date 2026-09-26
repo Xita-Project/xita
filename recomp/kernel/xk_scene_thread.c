@@ -80,24 +80,25 @@ static void phase_report(unsigned frames)
     if (phases <= 0 || !frames) return;
     for (unsigned t = 0; t < 2; ++t) {
         if (!phase_used[t]) continue;
-        /* inclusive per callee (summed over parents), then per parent: inclusive, self, top children */
-        char line[400]; int ln = snprintf(line, sizeof line, "%s %u frames (ms/frame, calls; inclusive by callee):", phase_tag[t], frames);
+        /* Raw parent/callee entries, then totals per callee across all parents. */
+        char line[400]; int ln = snprintf(line, sizeof line, "%s %u frames (ms/frame, calls; inclusive parent>callee entries):", phase_tag[t], frames);
         for (unsigned k = 0; k < 30 && k < phase_used[t]; ++k) {
             unsigned best = k; for (unsigned i = k + 1; i < phase_used[t]; ++i) if (phase_tab[t][i].us > phase_tab[t][best].us) best = i;
             if (best != k) { __typeof__(phase_tab[0][0]) x = phase_tab[t][k]; phase_tab[t][k] = phase_tab[t][best]; phase_tab[t][best] = x; }
             if (!phase_tab[t][k].us) break;
             if (ln > 320) { XK_LOG("%s\n", line); ln = snprintf(line, sizeof line, "%s  ", phase_tag[t]); }
-            ln += snprintf(line + ln, sizeof line - ln, " %X %.2f (%u)", phase_tab[t][k].addr, (double)phase_tab[t][k].us / frames / 1000.0, phase_tab[t][k].n);
+            ln += snprintf(line + ln, sizeof line - ln, " %X>%X %.2f (%u)", phase_tab[t][k].parent, phase_tab[t][k].addr, (double)phase_tab[t][k].us / frames / 1000.0, phase_tab[t][k].n);
         }
         XK_LOG("%s\n", line);
         /* self time: for every parent that is itself a timed callee, inclusive - sum(children) */
         for (unsigned p = 0; p < phase_used[t]; ++p) {
-            uint32_t P = phase_tab[t][p].addr; uint64_t children = 0; unsigned nchild = 0;
+            uint32_t P = phase_tab[t][p].addr; uint64_t children = 0, inclusive = 0; unsigned nchild = 0;
+            for (unsigned i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].addr == P) inclusive += phase_tab[t][i].us;
             for (unsigned i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].parent == P) { children += phase_tab[t][i].us; nchild++; }
-            if (!nchild || phase_tab[t][p].us < 500u * frames) continue;   /* parents worth 0.5 ms/frame or more */
+            if (!nchild || inclusive < 500u * frames) continue;   /* parents worth 0.5 ms/frame or more */
             int dup = 0; for (unsigned q = 0; q < p; ++q) if (phase_tab[t][q].addr == P) dup = 1; if (dup) continue;
-            ln = snprintf(line, sizeof line, "%s   %X incl %.2f self %.2f (%u children):", phase_tag[t], P, (double)phase_tab[t][p].us / frames / 1000.0,
-                          (double)(phase_tab[t][p].us > children ? phase_tab[t][p].us - children : 0) / frames / 1000.0, nchild);
+            ln = snprintf(line, sizeof line, "%s   %X incl %.2f self %.2f (%u children):", phase_tag[t], P, (double)inclusive / frames / 1000.0,
+                          (double)(inclusive > children ? inclusive - children : 0) / frames / 1000.0, nchild);
             for (unsigned c = 0; c < 8; ++c) {   /* the 8 biggest children */
                 unsigned best = PHASE_MAX; for (unsigned i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].parent == P && phase_tab[t][i].n && (best == PHASE_MAX || phase_tab[t][i].us > phase_tab[t][best].us)) best = i;
                 if (best == PHASE_MAX || !phase_tab[t][best].us) break;
