@@ -31,8 +31,10 @@ the source checkout. Generated code and game inputs are not committed.
 Compatible package runtime SHA-256:
 `892d78f11fa03e4d215420b0c9d5c05e28de0225192beafb260c9a8c781f22a4`.
 Only `game-a.self` and `boot-game.txt` are replaced in the preceding compatible
-package; the asset contract is unchanged. Deployment and hardware attribution
-are pending. Use the protected `a30-perf211` save namespace and inspect the
+package; the asset contract is unchanged. Deployment verified the runtime hash
+and confirmed the new boot in slot 1; perf256 remains in slot 0 for rollback.
+The protected a30 launch is running; hardware attribution is pending.
+Use the protected `a30-perf211` save namespace and inspect the
 settled lifepod view before running the short idle/fire/cooldown sequence.
 
 Interpretation: parent minus direct timed children is residual inclusive wall
