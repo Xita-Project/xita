@@ -408,3 +408,30 @@ libshacccg, inspect generated program resources/code, then consider a bounded
 hardware deployment with a rollback and unchanged material appearance. Do not
 regenerate/package all shaders or treat Pi arithmetic tests as shader/FPS proof.
 Perf236 remains installed; the opt-in shader candidate is not deployed.
+
+
+### 2026-09-26: cube-select compilation rejected before deployment
+
+Compiled baseline and candidate for both dominant cube-addressed materials in
+an isolated libshacccg workspace (`cube-select-candidate/compiler-pref`), without
+changing Halo 2 or the physical Vita. All four compiled successfully; compiler
+warnings were unused generated locals. The emulator faulted while exiting the
+compiler, after its log recorded completion and all outputs were written. No
+emulator rendering/performance validation was attempted.
+
+GXP header comparison (primary instructions / temporary registers):
+- B5691565: baseline 138 / 17, candidate 142 / 17.
+- 154066FD: baseline 130 / 9, candidate 137 / 12.
+- Primary/secondary register allocation, phase count and secondary instructions
+  were unchanged (24 / 80 registers, one phase, 23 secondary instructions).
+
+Header fields were checked against the upstream Vita3K SceGxmProgram structure:
+https://github.com/Vita3K/Vita3K/blob/master/vita3k/gxm/include/gxm/types.h
+These counts do not prove GPU timing, but give no reason to deploy this
+speculative rewrite: it failed its intended compiled-work reduction criterion.
+Removed the opt-in generator experiment and its dedicated harness from active
+source; retained both privately with generated shaders, compiler logs and
+`program-comparison.json`. This does not remove any deployed optimization.
+Perf236 stays installed. Next target is repeated combiner arithmetic in these
+same measured materials, comparing compiled instruction/register cost before
+hardware testing rather than assuming shorter Cg source is faster.

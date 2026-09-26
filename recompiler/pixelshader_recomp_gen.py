@@ -311,32 +311,6 @@ def emit_textures(d: dict, L: List[str], samplers: Dict[int, str], warnings: Lis
             L.append(f"    float4 t{i} = tex2D(tex{i}, {tc}.xy);")
 
 
-def cube_uv_helper(select_before_divide: bool = False) -> str:
-    """Cube-mode coordinates on a 2D resource; keep strict tie handling.
-
-    The opt-in candidate selects numerator/denominator before dividing. This
-    does not approximate the projection or use arithmetic masks (which could
-    propagate NaNs from an unselected face). Hardware benefit is unverified.
-    """
-    if select_before_divide:
-        body = """    bool xface = a.x > a.y && a.x > a.z;
-    bool yface = a.y > a.x && a.y > a.z;
-    float2 uv = xface ? float2(d.x > 0.0 ? -d.z : d.z, d.y)
-                     : (yface ? float2(d.x, d.y > 0.0 ? -d.z : d.z)
-                              : float2(d.z > 0.0 ? d.x : -d.x, d.y));
-    float divisor = xface ? a.x : (yface ? a.y : max(a.z, 1e-20));
-    return uv / divisor;"""
-    else:
-        body = """    if (a.x > a.y && a.x > a.z) return float2(d.x > 0.0 ? -d.z : d.z, d.y) / a.x;
-    if (a.y > a.x && a.y > a.z) return float2(d.x, d.y > 0.0 ? -d.z : d.z) / a.y;
-    return float2(d.z > 0.0 ? d.x : -d.x, d.y) / max(a.z, 1e-20);"""
-    return "\n".join([
-        "// NV2A cube-mode addressing on a 2D resource (see xemu pgraph/glsl/psh.c).",
-        "float2 xv_cube_uv(float3 d)", "{", "    float3 a = abs(d);",
-        body, "}", "",
-    ])
-
-
 def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
     warnings: List[str] = list(d.get("warnings", []))
     samplers: Dict[int, str] = {}
@@ -445,8 +419,13 @@ def generate(d: dict, name: str, use_half: bool) -> Tuple[str, List[str], Dict]:
     L.append("};")
     L.append("")
     if CUBE_2D_MASK:
-        # Build-time experiment only; default shader output remains unchanged.
-        L += cube_uv_helper(os.environ.get("XV_PS_CUBE_SELECT") == "1").split("\n")
+        L += ["// NV2A cube-mode addressing on a 2D resource (see xemu pgraph/glsl/psh.c).",
+              "float2 xv_cube_uv(float3 d)", "{",
+              "    float3 a = abs(d);",
+              "    if (a.x > a.y && a.x > a.z) return float2(d.x > 0.0 ? -d.z : d.z, d.y) / a.x;",
+              "    if (a.y > a.x && a.y > a.z) return float2(d.x, d.y > 0.0 ? -d.z : d.z) / a.y;",
+              "    return float2(d.z > 0.0 ? d.x : -d.x, d.y) / max(a.z, 1e-20);",
+              "}", ""]
     params = ["VertOut IN"]
     for i in sorted(samplers):
         params.append(f"uniform {samplers[i]} tex{i}")
