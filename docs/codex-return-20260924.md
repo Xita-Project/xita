@@ -951,3 +951,20 @@ Stopped diagnosticobserver264767/263719 afterlogcapture. Announced ordinary
 restore, material-cpu-profile-candidate/restore.sh nowcoldlaunches sameperf242
 withXV_SCENE_PHASES0 andallotherretainedsettingsunchanged; newtag
 perf242-normal-restored-20260926. Keepawake134059leftalive. Goalnotmet.
+
+
+### Perf243 callback attribution prepared
+
+Added tools/patch_scene_callback_timers.py: narrowly instruments the four
+indirect calls in the owned CE54010 generated body, retaining the original
+capturedtarget -> guestreturnaddresspush -> xv_call sequence. Existing
+XV_SCENE_PHASES gate controls collection; each callback uses its actual captured
+targetaddress, including after xv_call mutatesguestregisters. Requires exactly
+the four auditedreturns540E3/541C4/54221/54257 and failsclosedonlayoutdrift;
+idempotence verified. Removing inserted declarations/timercalls from the patched
+privatebody reproduces the originalstatementtokens inexactorder. No generated
+code addedtorepo. Stage scene-callback-candidate clones242withidenticalflags,
+only code_009callbacksites+version243changed. Buildsession38475completed0.
+Normal242restoredlaunch remainslive; material-normal-cold-candidate collector
+session5378 verifiesanotherordinarycoldlaunchbeforethe nextdiagnosticupdate.
+Keepawake134059live; noemulatorvalidation orHalo2changes.
