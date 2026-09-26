@@ -1,7 +1,8 @@
 # Native object-space collision query
 
-Status: experimental, default off. Hardware verification and ordinary gameplay
-performance testing are still required. This is not a claimed FPS improvement.
+Status: experimental, default off. Initial Vita pod verification passed; ordinary
+gameplay performance and broader correctness testing are still required. This is
+not a claimed FPS improvement.
 
 The perf249 Vita diagnostic found about 18.4 ms/frame in the movement-collision
 routine `172BF0` in the a30 pod. These elapsed timers include waits, preemption
@@ -58,7 +59,13 @@ Initial evidence, September 26:
   shared native timing counters also include world queries. Do not interpret
   them as the speed of the object-only fast path.
 
-Next: verify on the Vita, then cold-launch with mode 2 and phase timers off.
+- Vita perf250 pod run: 24,080 object-query comparisons, zero mismatches,
+  declines or journal failures; the captured pod view was intact. This is a
+  stationary workload, not combat or full-campaign validation.
+- Pi fast-path attribution: the last ten object-space windows averaged 1.357 ms
+  versus 1.781 ms for the fused path. This is supporting evidence only.
+
+Next: cold-launch with mode 2 and phase timers off.
 Measure pod, outdoor movement and NPC combat against the retained normal build,
 including slow frames and rendering/collision correctness. Keep the earlier
 shader and scene-index improvements enabled.

@@ -1427,3 +1427,35 @@ archivesverify250-game.log andpodscreen. Inspectactualscreen. Onlythen coldlaunc
 mode2 withnormalcollectionsettings; verificationFPSisnotacceptance. Knownfast
 rollback247 retained. Goalstillunmet:normalpod~17.5FPS,outdoor~19.97,active~19.64,
 opening~14.1; no15minactivecombatgate orwholecanyonqualification yet.
+
+Perf250deploy34361 completedverified=true,boot_confirmed=true,slot0. Protected
+campaign launch250-verify.sh nowstarted; collectorcollect250-verify.py started.
+SourceHEADabd2c1e7,allcandidatecodecommittedlocally,nothingpushed. Keepawake134059.
+
+
+### Perf250 hardware verification passed; normal fast run started
+
+Collector24116 finished: frame6900 log,33reports,27,865totalqueries includingworld,
+24,080objectcomparisons,0mismatches,0declines,0journal-fail. Mode1receipt present,
+no tick/helperphase timers; worldqueryreportsnative. verify250-pod.png frame7005
+viewed and matchesstandingpod. Notcombat/fullcampaigncoverage. NoFPSclaimfromverify.
+
+Pi fast run29739 finishedplanned120s,38reports. Last10objectcallback1716F0 mean
+1.380ms vs1.807baseline;172F40 mean1.357 vs1.781ms. Privatefast-summary.json.
+Do notscale this intoVitaFPS. NoPi job remainsactive.
+
+Foundphysicalxita.cfg hadneitherMATERIAL_BLACK norSCENE_INDEX_RUN: these gains
+wereonly incontrolledlaunch env. PersistedXV_MATERIAL_BLACK=2 andXV_SCENE_INDEX_RUN=2
+withoriginalprivate+remote backupandreadbackverification. FTPcannotrenameoveran
+existingfile; firstattemptleftoriginalintact, thenrenamedoriginaltouniquebackup
+andstagedfiletonamewithrollbackonfailure. Receiptpersistent-settings-receipt.json
+in native-object-query-candidate. DidNOTpersistnewobjectqueryexperimentalsetting
+orchangeuserresolution/shadows/audio/preferences.
+
+Stoppedconfirmedverifywatcher369509/driver368623. Startednormalmode2launch40927,
+collector88138,openingcapture51859. Allscriptsinnative-object-query-candidate;
+tagperf250-object-query-fast-20260926. Phase0,objectquery2,allpriorgainsstacked.
+Freshstatusframe7confirmedafterlaunch; openingcapturehasnooldimageandwaitsfor5220.
+Keepawake134059 active. Waitforcollector,viewpodscreen,compare1200normalintervals
+6300..7440against247~57.10ms/17.51FPS, thenoutsideandactivegameplay. Fastresult
+notknownyet. NoVita3K/newVPKneededforverify->fast; samepayloadwithfreshenvlaunch.
