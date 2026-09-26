@@ -2396,7 +2396,14 @@ static void record_draw_body(uint32_t prim, uint32_t count, const void *indices,
             c->packed_vertex=XV_PACKED_PREFIX16;
         }
 #endif
-        if (vertex_trace_frame()) XV_LOG("[hist] stream %u vb %08X common %08X data %08X vertices %u stride %u\n",
+        if (xv_draw_trace.active) {
+            /* Capture identity while this recording owner still owns guest
+             * state. No worker readback or deferred guest-pointer dereference.
+             * Ordinary worker logs are suppressed; use the bounded trace. */
+            xv_draw_trace_append("[xv/d3d] [draw-stream] frame %u cmd %u stream %u resource %08X data %08X vertices %u stride %u base %u\n",
+                g_build_frame, cur_list()->ncmds - 1, s, S.stream_guest[s],
+                vb->Data, nverts, stride, base_vertex);
+        } else if (vertex_trace_frame()) XV_LOG("[hist] stream %u vb %08X common %08X data %08X vertices %u stride %u\n",
             s, S.stream_guest[s], vb->Common, vb->Data, nverts, stride);
         /* Only the owned upload is published; the cached source stays on CPU. */
     }

@@ -64,3 +64,40 @@ e18a9ee9209efd7026dd826c6f94988b664a5e2ed6d7ed0343aa50f9275f722c
 Entry comparison against perf260 changes only game-a.self and boot-game.txt;
 update contract is unchanged. Not deployed; current campaign progress was
 not interrupted. This candidate establishes no rendering/performance gain.
+
+## Perf261 deployment and hardware receipt verification
+
+The user subsequently saved and quit. Deployment completed with verified bytes,
+slot 0 and boot confirmation; live status also reports perf261 / 9fcf7486.
+The protected a30-perf211 launch sequence completed. Several screenshots still
+showed loading while map data was copied; those timings are excluded. Eventually
+`draw-trace-receipt-candidate/gameplay.png` confirmed lifepod gameplay, not the
+Warthog section. Thus this run does not reproduce or resolve the missing body.
+
+`receipt-trace.log` passes the strict `tools/summarize_draw_trace.py` parser:
+frame 4954, 396 commands, 239 draw-state records, 343881 buffered bytes, zero
+dropped lines and a matching closing receipt. The one-shot trace was requested
+while loading was progressing, so the later gameplay image is not a synchronized
+image of trace frame 4954. No timing claim is made for the trace frame.
+
+The 154066FD material family accounts for 101 recorded draws (80 vs09 and 21
+vs27). This is not proof of shadow work, screen coverage or GPU cost. Full
+material/target/blend classification is necessary before an optimization.
+
+The owned a30 map inventory also completed: 789 vertex resources / 5,091,776
+vertex bytes, including 51 Warthog parts. Private resource identities are saved
+in `draw-trace-receipt-candidate/a30-model-resources.json`.
+
+An additional source change routes stream identity to the bounded trace buffer
+while a remote trace is active. Previously those ordinary worker log messages
+were suppressed. It captures frame/command/stream, guest resource, resource
+data, count, stride and base vertex while the recorder owns guest state. It
+does not read back vertices or hand guest pointers to a worker. Rejected commands
+can leave provisional stream records, so future consumers must correlate only
+accepted draw records and account for reused command indices.
+
+The modified renderer compiled with the candidate's actual Vita build flags
+(`geometry-compile.json`, return code 0). It is not linked, packaged or deployed;
+perf261 still lacks these added stream records. Next: package the diagnostic
+extension, capture a vehicle scene with resource identity, and distinguish
+missing submissions from incorrect state before changing geometry/materials.
