@@ -1220,7 +1220,8 @@ static volatile int      g_running         = 1;
 static struct {
     uint32_t mesh, ui;
     SceGxmNotification fence, visibility_fence;
-    uint64_t started_us, visibility_us, published_us;
+    uint64_t started_us, visibility_us, published_us, inspected_us;
+    unsigned queue_gate_mask;
     int failed, visibility_completed;
 #if XV_QUERY_PREFIX_PUBLISH
     unsigned prefix_history_blocked;
@@ -1305,6 +1306,7 @@ void xv_present(void)
      * The pump acquires g_frame_requested before reading this timestamp. */
     static int queue_timing = -1;
     if (queue_timing < 0) { const char *e = getenv("XV_FRAME_QUEUE_TIMING"); queue_timing = e && atoi(e) != 0; }
+    g_packets[q].inspected_us = 0; g_packets[q].queue_gate_mask = 0;
     g_packets[q].published_us = queue_timing ? sceKernelGetProcessTimeWide() : 0;
     __atomic_store_n(&g_frame_requested, ticket, __ATOMIC_RELEASE);
     xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
@@ -1843,11 +1845,16 @@ static int xv_pump_thread(SceSize args, void *argp)
         uint32_t done=__atomic_load_n(&g_frame_completed,__ATOMIC_ACQUIRE);
         if (g_frame_submitted != requested) {
             uint64_t now=sceKernelGetProcessTimeWide();
-            int display_busy=!__atomic_load_n(&g_display_free[g_gfx.back_index],__ATOMIC_ACQUIRE) ||
-                g_display_queued-__atomic_load_n(&g_display_released,__ATOMIC_ACQUIRE)>=XV_DISPLAY_MAX_PENDING;
-            if (display_busy || now<next_frame) { sceKernelDelayThread(100); continue; }
             uint32_t ticket=g_frame_submitted+1u;
             unsigned q=ticket&(XV_FRAME_TICKETS-1u);
+            unsigned gate = !__atomic_load_n(&g_display_free[g_gfx.back_index],__ATOMIC_ACQUIRE) ? 1u : 0u;
+            if (g_display_queued-__atomic_load_n(&g_display_released,__ATOMIC_ACQUIRE)>=XV_DISPLAY_MAX_PENDING) gate |= 2u;
+            if (now<next_frame) gate |= 4u;
+            if (g_packets[q].published_us) {
+                if (!g_packets[q].inspected_us) g_packets[q].inspected_us=now;
+                g_packets[q].queue_gate_mask |= gate;
+            }
+            if (gate) { sceKernelDelayThread(100); continue; }
 #ifndef XV_RUN_RECOMP
             g_packets[q].mesh=ticket-1u; g_packets[q].ui=UINT32_MAX;
 #endif
@@ -1878,15 +1885,23 @@ static int xv_pump_thread(SceSize args, void *argp)
             /* Includes scheduling, display-slot and pacing delays before
              * submission. Not GPU execution time or a recoverable budget. */
             if (g_packets[q].published_us && now >= g_packets[q].published_us) {
-                static uint64_t queue_us, queue_max;
-                static unsigned queue_count, queue_over_ms;
+                static uint64_t queue_us, queue_max, queue_unseen_us, queue_head_us;
+                static unsigned queue_count, queue_over_ms, queue_gate_count[3];
                 uint64_t age = now - g_packets[q].published_us;
                 queue_us += age; if (age > queue_max) queue_max = age;
                 queue_over_ms += age > 1000;
+                queue_unseen_us += g_packets[q].inspected_us - g_packets[q].published_us;
+                queue_head_us += now - g_packets[q].inspected_us;
+                for (unsigned k=0;k<3;k++) queue_gate_count[k] += !!(g_packets[q].queue_gate_mask & (1u<<k));
                 if (++queue_count == 60) {
                     XV_LOG("[frame-queue] 60 packets: published-to-submit %llu us total, %llu us max, %u over 1 ms; scheduling/display/pacing included\n",
                         (unsigned long long)queue_us, (unsigned long long)queue_max, queue_over_ms);
-                    queue_us = queue_max = 0; queue_count = queue_over_ms = 0;
+                    XV_LOG("[frame-queue-gates] 60 packets: before-first-inspection %llu us, inspected-head %llu us; packets observing back-buffer/queue-limit/pacing %u/%u/%u; intervals include preemption, gate counts overlap\n",
+                        (unsigned long long)queue_unseen_us, (unsigned long long)queue_head_us,
+                        queue_gate_count[0],queue_gate_count[1],queue_gate_count[2]);
+                    queue_us = queue_max = queue_unseen_us = queue_head_us = 0;
+                    queue_count = queue_over_ms = 0;
+                    memset(queue_gate_count,0,sizeof queue_gate_count);
                 }
             }
             g_packets[q].started_us=now;
