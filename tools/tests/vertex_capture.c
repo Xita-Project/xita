@@ -989,6 +989,24 @@ static void *complete_rearmed(void *unused)
     assert(READ_NOTIFY(notify_reached[CAP_DRAIN_ARMED])>=2);
     assert(READ_NOTIFY(cap_waiting));ungate(CAP_AFTER_NOTIFY);return NULL;
 }
+static void notification_frontiers(void)
+{
+    /* No worker exists here. Exercise notification decisions independently of
+     * scheduling, including requested completion zero after unsigned wrap. */
+    const unsigned starts[]={0,0xfffffff8u,0xfffffff0u};
+    for(unsigned s=0;s<3;s++)for(unsigned batch=1;batch<=16;batch++) {
+        unsigned start=starts[s];
+        __atomic_store_n(&cap_wait_target,start+batch,__ATOMIC_RELAXED);
+        __atomic_exchange_n(&cap_waiting,1,__ATOMIC_ACQ_REL);
+        for(unsigned i=1;i<batch;i++) {
+            assert(!cap_completion_signal(start+i));
+            assert(READ_NOTIFY(cap_waiting)==1);
+        }
+        assert(cap_completion_signal(start+batch));
+        assert(!READ_NOTIFY(cap_waiting));
+        assert(!cap_completion_signal(start+batch+1));
+    }
+}
 static void notification_races(void)
 {
     unsigned char guest[64];memset(guest,0x47,sizeof guest);
@@ -1090,7 +1108,7 @@ int main(void)
 #endif
     detail_sampling();
 #if XV_VERTEX_CAPTURE_NOTIFY
-    notification_races();
+    notification_frontiers();notification_races();
 #endif
     private_inputs();sparse_and_packed();unused_mask_lifetime();pressure_and_wrap();failure_cases();
     queue_capacity();

@@ -38,7 +38,19 @@
 #if XV_VERTEX_CAPTURE_NOTIFY
 /* Queue counters own jobs. This handshake only suppresses redundant events. */
 enum { CAP_SLEEPING, CAP_RUNNING, CAP_PENDING };
-static unsigned cap_wake_state,cap_waiting;
+static unsigned cap_wake_state,cap_waiting,cap_wait_target;
+/* Keep an RMW on every completion, even before the requested frontier. The
+ * owner's arming RMW then either observes completion or is observed here.
+ * Never clear an unmet request: that would require a wake/rearm per job.
+ * At most 32 tickets are outstanding, so unsigned half-range ordering handles
+ * wrap (including a target of zero). Target access is atomic across rearming. */
+static int cap_completion_signal(unsigned completed)
+{
+    if(!__atomic_fetch_or(&cap_waiting,0,__ATOMIC_ACQ_REL))return 0;
+    unsigned target=__atomic_load_n(&cap_wait_target,__ATOMIC_RELAXED);
+    if((unsigned)(completed-target)>=0x80000000u)return 0;
+    return __atomic_exchange_n(&cap_waiting,0,__ATOMIC_ACQ_REL)!=0;
+}
 static unsigned cap_wake_signals,cap_wake_skips,cap_done_signals,cap_done_skips;
 static unsigned cap_wake_failures,cap_done_notify_failures;
 /* Compile-time fixture frontiers; ordinary builds contain no calls here. */
@@ -440,7 +452,7 @@ static int cap_run(SceSize bytes,void *arg)
             XV_CAPTURE_NOTIFY_POINT(CAP_AFTER_COMPLETE);
             /* RMW pairs with the owner's RMW before its completed reread:
              * either it sees this completion or we observe its wait and signal. */
-            if(__atomic_exchange_n(&cap_waiting,0,__ATOMIC_ACQ_REL)) {
+            if(cap_completion_signal(next)) {
                 __atomic_fetch_add(&cap_done_signals,1,__ATOMIC_RELAXED);
                 if(sceKernelSetEventFlag(cap_done,1)<0)
                     __atomic_fetch_add(&cap_done_notify_failures,1,__ATOMIC_RELAXED);
@@ -526,6 +538,9 @@ static void cap_wait_for_slot(void)
     if(cap_wait_batch<0)cap_wait_batch=xv_quality_int("XV_CAPTURE_WAIT_BATCH",1,1,16);
     unsigned batch=(unsigned)cap_wait_batch; /* Called only with all 32 jobs pending. */
     uint64_t start=cap_clock();cap_partial_waits++;
+#if XV_VERTEX_CAPTURE_NOTIFY
+    __atomic_store_n(&cap_wait_target,retired+batch,__ATOMIC_RELAXED);
+#endif
     for(;;) {
 #if XV_VERTEX_CAPTURE_NOTIFY
         __atomic_exchange_n(&cap_waiting,1,__ATOMIC_ACQ_REL);
@@ -558,6 +573,7 @@ void xv_vertex_capture_drain(void)
     }
     uint64_t start=cap_clock();cap_drains++;
 #if XV_VERTEX_CAPTURE_NOTIFY
+    __atomic_store_n(&cap_wait_target,submitted,__ATOMIC_RELAXED);
     for(;;) {
         /* A plain store is insufficient on weakly ordered CPUs. The RMW
          * reads the worker's release RMW when completion wins this race. */

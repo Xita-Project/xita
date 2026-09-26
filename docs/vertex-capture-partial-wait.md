@@ -42,3 +42,19 @@ full-drain elapsed time, including owner callbacks and scheduling delay.
 These overlap work on other cores and must not be added to total frame time.
 The report includes the timing enable state; zero totals with timing disabled
 are not measured zero-cost waits. Existing aggregate join totals remain.
+
+Completion notifications now carry a requested ticket frontier. Intermediate
+completions retain the armed request without sending a done event; reaching
+the target clears it and signals. Both sides retain acquire/release RMWs so
+completion racing the owner's final check cannot silently lose the wakeup.
+The target is atomic, zero is a valid wrapped ticket, and comparisons use
+unsigned half-range ordering with at most 32 outstanding jobs. Existing
+timeout recovery remains. A late notification overlapping rearming may be
+spurious; the completion counter remains authoritative. Full drains request
+the submitted frontier, while partial waits request the chosen batch.
+
+Validation: all 24 host ASan/UBSan configurations passed, and the Pi all-feature
+concurrency fixture passed. Direct frontier checks cover every batch size
+1–16 at ordinary and wrapped ticket values; existing deterministic queue
+pressure, wakeup races, failed notifications, and ownership tests remain.
+Hardware performance is not yet verified for this notification change.
