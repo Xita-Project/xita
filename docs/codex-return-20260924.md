@@ -1271,3 +1271,27 @@ Perf247 active input exercise live session12948, four forward/jump/fire/turn/bac
 reload cycles. Collector35421 finished outdoor observation. Keepawake134059 lives.
 Finish the input check, archive screenshot/log, then deploy248 for attribution,
 not performance acceptance. Stop only confirmed247 watcher before restart.
+
+
+### Perf248 owner-only diagnostic deployed
+
+Perf247 active movement/jump/AR/turn/reload check completed without a crash:
+1140 intervals16920..18000 averaged50.9151ms/19.6405FPS,p50 48.725,p95 63.906,
+p99 89.398,max143.267;430>50ms,5>100ms,0>200ms. Screenshotexercise247.png
+shows intact world/weapon. No NPC combat and only roughly one minute active;
+this does not meet the15-minute gameplay gate.
+
+Perf248 package verified:55,075,641 bytes, SHA256
+`2063858a2cc54839dabb2b0fe94679831794b5b5d63a9fb965157cef7f3b0277`.
+Payload34,771,698 bytes,SHA256
+`003e465d66c637a1cd4251ec6e0b343815df56c294ef573c0583285f12a54704`.
+Same contract; only game-a.self and boot-game.txt replaced. deploy248.log reports
+verified=true,boot_confirmed=true,slot0. Native aim blend,92330,4B9D0,1721B0
+remain enabled in physical xita.cfg (all mode2); do not rediscover them as new
+optimizations. Keepawake134059 confirmed active.
+
+Private tick-phase-candidate launch248.sh live session85052, opening capture41212,
+collector64327. All targetperf248-tick-phases-20260926; captureopening atframe5220,
+pod collector after5700 and archives logat7440. Inspect screenshots, require
+[tick-phases] and no[scene-phases]. Diagnostic timings include timer overhead,
+preemption and waits; not FPS acceptance. Retains CPU indexmode2+blackmaterialmode2.
