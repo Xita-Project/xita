@@ -36,3 +36,19 @@ exclude real cache contention and are not Vita time or FPS.
 Not yet hardware-qualified. Next build on the cumulative perf262 baseline, then
 collect ordinary gameplay: hit/miss/eviction and matrix counts, settled frame-time
 distribution, and correctness. Do not claim a gain from fewer evictions alone.
+
+## Hardware candidate
+
+Perf263 / 04471a8c built successfully on the perf262 private stage. Package
+`palette-lru-candidate/xita-perf263c.vpk` changes only `game-a.self` and
+`boot-game.txt`, retaining the existing update contract and assets.
+
+- Runtime 34805522 bytes, SHA-256
+  `b0a6dbea50ce2bbd1e5ca113f0639c1dd501f29c00db2d89b653ff70b14c8f17`.
+- VPK SHA-256
+  `c5f1ef4b0a8050e3cf830e71f5edb243b26ebbb761b765a1ff3f7a126fa6e125`.
+
+Deployment started with output in `palette-lru-candidate/deploy.log`. Confirm
+the final update receipt/live version before calling it installed. Preserve
+the a30-perf211 namespace and renew the awake lease after restart. No hardware
+FPS or cache improvement has yet been established for this candidate.
