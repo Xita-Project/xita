@@ -20,7 +20,7 @@ typedef struct {uint16_t vs,next;int16_t entry;uint8_t blend,failed,alpha_mode,r
 #define XV_PS_TABLE_COUNT 1
 #define BLEND_MODES 2
 #define XV_PS_BUCKETS 16
-#define XV_PS_LINKS 16
+#define XV_PS_LINKS 32
 #define SCE_GXM_BLEND_FUNC_NONE 0
 #define XV_LOG(...) ((void)0)
 #define XV_ONCE(flag,...) ((void)0)
@@ -28,10 +28,12 @@ static struct {unsigned ps_key;const char *gxp;} xv_ps_table[]={{0x154066FD,"app
 static vs_slot_t g_vs[2];static ps_link_t g_ps_links[XV_PS_LINKS];
 static unsigned g_ps_buckets[XV_PS_BUCKETS],g_ps_count;
 static struct {unsigned src,dst,mask;} g_blend_combo[2];
+static unsigned cost_loads,fail_cost;
 static unsigned black_loads,normal_loads,generic_loads,fail_black,greater_loads,fail_greater;
 static const SceGxmBlendInfo *blend_info_for(unsigned blend,SceGxmBlendInfo *b) {(void)blend;return b;}
 static int xv_fshader_load(xv_fshader_t *f,const char *p,vs_t *v,const SceGxmBlendInfo *b) {
  (void)f;(void)v;(void)b;
+ if(strstr(p,"_axisblack_gt_cost")) {++cost_loads;return fail_cost?-1:0;}
  if(strstr(p,"_axisblack_gt")) {++greater_loads;return fail_greater?-1:0;}
  if(strstr(p,"_axisblack")) {++black_loads;return fail_black?-1:0;}
  if(strstr(p,"_na.frag.gxp")) ++normal_loads; else ++generic_loads; return 0;
@@ -66,10 +68,23 @@ int main(void) {
  xv_fshader_t *gt_black_fallback=fragment_for_ps_policy(g_vs,0,1,6,0);
  assert(gt_black_fallback && gt_black_fallback->alpha_test_mode==0);
  assert(fragment_for_ps_policy(g_vs,0,1,6,0)==gt_black_fallback);
+ xv_fshader_t *cost=fragment_for_ps_policy(g_vs,0,0,7,0);
+ assert(cost && cost!=gt && cost->alpha_test_mode==2 && cost_loads==1);
+ assert(fragment_for_ps_policy(g_vs,0,0,7,0)==cost && cost_loads==1);
+ assert(fragment_for_ps_policy(g_vs,0,0,6,0)==gt);
+ fail_cost=1;
+ assert(fragment_for_ps_policy(g_vs+1,0,0,7,0)==generic_fallback && cost_loads==2);
+ assert(fragment_for_ps_policy(g_vs+1,0,0,7,0)==generic_fallback && cost_loads==2);
+ fail_greater=0;
+ xv_fshader_t *cost_fallback=fragment_for_ps_policy(g_vs+1,0,1,7,0);
+ assert(cost_fallback && cost_fallback->alpha_test_mode==2 && cost_loads==3);
+ assert(fragment_for_ps_policy(g_vs+1,0,1,6,0)==cost_fallback);
+ assert(fragment_for_ps_policy(g_vs+1,0,1,7,0)==cost_fallback && cost_loads==3);
  unsigned gt_before=greater_loads;
  xv_ps_table[0].ps_key=0xB5691565;
  assert(fragment_for_ps_policy(g_vs,0,0,6,0)->alpha_test_mode==0);
- assert(greater_loads==gt_before);
+ assert(fragment_for_ps_policy(g_vs,0,0,7,0)->alpha_test_mode==0);
+ assert(greater_loads==gt_before && cost_loads==3);
  puts("actual material linker: distinct cache identity, failed-load fallback and alpha mode preservation pass");
 }
 '''.replace('@BODY@',body)

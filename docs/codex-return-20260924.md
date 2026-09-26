@@ -1672,3 +1672,25 @@ Avoidrepeating227drawroutetimersalreadyrecorded:7A130~2.41msincl/.73remainder.
 Native66390isthinwrapperarounddrawroutes,notalargeindependenttarget. Potential
 periodicfileoutput/schedulingstillnotisolated; consoleexperimentnegative.
 No newVPK beyond251; no push. Goalactive, not20FPScertified, remaininggatesunmet.
+
+## 2026-09-26: optional material-cost diagnostic prepared offline
+
+Previous connection-check turn yielded no new performance progress; device
+status still fails with No route to host. User advised wake/Wi-Fi/dashboard
+first, restart app if frozen, full reboot only if system unresponsive.
+Keepawake134059 confirmed alive but cannot guarantee sleep prevention offline.
+No Vita3K process present in process listing; no compiler started this turn.
+
+Authored mode7 runtime/embed edits now accompanied by specialize_ps_cost.py,
+test_specialize_ps_cost.py, expanded test_material_link.py and
+material-cost-diagnostic.md. Default off, exact XV_MATERIAL_COST=1, mode6-only
+admission, depth-prepared exclusion, distinct cache and fallback7→6→5→0.
+Gray RGB is intentionally not visual equivalence; original alpha/discard remain.
+ASan/UBSan actual-linker host fixture passes; generator3tests pass. Private
+material-cost-diagnostic/ps_154066FD_7F_t8_axisblack_gt_cost.frag.cg generated
+from periodic-console-candidate qualified mode6source. First strict text guard
+rejected actual spacing/comment; fixed guard accepts whitespace/comments while
+replacing only exact final return (regression-tested). No GXP compiled, no
+hardware build/deploy or FPS result yet. Next compile isolated owned XVSC
+without touching Halo2, inspect GXP linkage/instructions, qualify/build opt-in
+candidate when hardware returns. Goal remains unmet; perf251 last installed.
