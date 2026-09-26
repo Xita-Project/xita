@@ -86,7 +86,7 @@ typedef struct {
 } ui_frame;
 
 /* built texture control words, cached by (guest data pointer, format word) */
-typedef struct { uint32_t data, fmtword, palsum; SceGxmTexture tex; int valid; uint32_t sum, bytes, source_data; unsigned checked; uint16_t stable; uint8_t dirty, opaque, pinned, rgba_layout; int16_t next; } ui_tex_entry;   /* source_data: selected mip's physical address; data remains the resource/cache identity */   /* stable: consecutive unchanged re-checks; palsum: P8 palette hash; sum: source content hash; next: hash chain */
+typedef struct { uint32_t data, fmtword, palsum; SceGxmTexture tex; int valid; uint32_t sum, bytes, source_data; unsigned checked; uint16_t stable; uint8_t dirty, opaque, pinned, rgba_layout, black_rgb; int16_t next; } ui_tex_entry;   /* source_data: selected mip's physical address; data remains the resource/cache identity */   /* stable: consecutive unchanged re-checks; palsum: P8 palette hash; sum: source content hash; next: hash chain */
 
 /* one UI vertex program + the fragment programs linked against it (one per texcoord set it writes) */
 typedef struct {
@@ -175,6 +175,7 @@ static void *ui_texture_alloc(uint32_t size, SceUID *uid)
  * de-swizzle + decompress once on the CPU (textures are cached).  Same logic proved correct on host. */
 #include "xv_texture_worker.h"
 #include "xv_texture_alpha.h"
+#include "xv_material_specialize.h"
 #include "xv_rgba_layout.h"
 #include "xv_geometry_worker.h"
 #include "xv_quality_settings.h"
@@ -447,7 +448,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         sceGxmTextureSetMipFilter(&e->tex, SCE_GXM_TEXTURE_MIP_FILTER_ENABLED);
         g.dec_off += need;
         e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1; g.texcount++;
-        e->opaque = e->pinned = 0; /* Cube reinterpretation is not covered by the initial proof. */
+        e->opaque = e->pinned = e->black_rgb = 0; /* Cube reinterpretation is not covered by the initial proof. */
         e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache);
         e->source_data = data;
         e->bytes = 6u * face_bytes; if (e->bytes > 512 * 1024) e->bytes = 512 * 1024; e->sum = ui_tex_hash(base, e->bytes); e->checked = g.rec_frame; e->stable = 0; e->dirty = 0;
@@ -475,7 +476,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
      * its pixels after granting that proof, even within the recording frame.
      * The normal pool purge drains published draws before reclaiming storage. */
     int allocate = 1; /* All recorded uploads are immutable until pool retirement. */
-    int opaque = 0; unsigned rgba_layout = 0;
+    int opaque = 0, black_rgb = 0; unsigned rgba_layout = 0;
     int err, as_bc = 0; unsigned source_consumed=0;
     /* Rectangular BC and full cube chains are opt-in pending hardware comparison.
      * Both reorder blocks using the same tested Y-even/X-odd GXM layout. */
@@ -590,6 +591,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
             }
         }
         opaque = xv_alpha_rgba_opaque(dst, w, h, levels);
+        black_rgb = xv_material_black_rgba(dst, w, h, levels);
         if (swizzled) xv_rgba_swizzle(dst,gpu,w,h,levels);
         free(scratch);
         xv_gpu_flush(gpu, need);
@@ -601,7 +603,7 @@ static const SceGxmTexture *ui_texture_for_pal(uint32_t hdr, int coverage, uint3
         g_dec_us += xk_os_monotonic_us() - dec_t0; g_dec_n++;
     }
     e->data = data; e->fmtword = fmtword; e->palsum = g_cur_palsum; e->valid = 1;
-    e->opaque = opaque; e->pinned = 0; e->rgba_layout = rgba_layout;
+    e->opaque = opaque; e->black_rgb = black_rgb; e->pinned = 0; e->rgba_layout = rgba_layout;
     if (!re) { g.texcount++; e->next = g.texhash[bucket]; g.texhash[bucket] = (int16_t)(e - g.texcache); }
     e->bytes = 0; e->sum = 0; e->checked = g.rec_frame; e->stable = 0;
     {                                                                 /* size of the source level we consumed */
@@ -674,6 +676,18 @@ int xv_ui_gxm_texture_opaque(const SceGxmTexture *texture)
     if (i >= g.texcount) return 0;
     ui_tex_entry *e = &g.texcache[i];
     if (!e->valid || !e->opaque) return 0;
+    e->pinned = 1;
+    return 1;
+}
+
+int xv_ui_gxm_texture_black_rgb(const SceGxmTexture *texture)
+{
+    uintptr_t base = (uintptr_t)&g.texcache[0].tex, ptr = (uintptr_t)texture;
+    if (!texture || ptr < base || (ptr - base) % sizeof(ui_tex_entry)) return 0;
+    uintptr_t i = (ptr - base) / sizeof(ui_tex_entry);
+    if (i >= g.texcount) return 0;
+    ui_tex_entry *e = &g.texcache[i];
+    if (!e->valid || !e->black_rgb) return 0;
     e->pinned = 1;
     return 1;
 }

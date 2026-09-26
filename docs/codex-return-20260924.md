@@ -683,3 +683,37 @@ and frame distribution. Do not assume4x4 meansblack; do not extrapolate the
 launch10195/driver233366 still observing; keepawake134059 active. Collector is
 finished, don't reissue request. Normal helper log drops last20reports avg4.75;
 not enough evidence to prioritize logger formatting as a heavy bottleneck.
+
+### 2026-09-26: guarded black-placeholder specialization implemented, perf241 ready
+
+Added tiny decoded RGBA upload proof (<=4x4, all uploaded mip RGB samples zero,
+alpha ignored; no BC/cube proof). Metadata captured with immutable upload version;
+cache-owner descriptors only, same pin/lifetime rule as opacity. Texture size
+alone never qualifies. Exact PSC0/8/5 RGB checked against command snapshot.
+Candidate opt-in XV_MATERIAL_BLACK=1, disabled if device shader override enabled;
+nonblack custom border conservatively rejected. Validate final resolved shader
+path after 2D-cube selection, only B5691565_7F_t8 and154066FD_7F_t8. Mode4 is a
+separate cache identity using _axisblack_na; only used when existing alpha path
+selected mode1. Loaded program reports alpha_test_mode1 for depth preparation.
+Missing/link-failed program falls back to normal mode1. Texture/order/blend/depth
+and uniform upload unchanged. Embed optional variants in executable (same assets
+contract). Runtime source default off. Periodic material-black counters report
+candidate/proven counts; link log proves successful specialized link, no FPS claim.
+
+Host ASan/UBSan + ARMv7 Pi CPUs0/1 pass classifier/constant tests (every mip texel,
+every RGB bit, alpha/padding, wrong constants including next-float and NaN/Inf)
+and actual production linker harness (distinct cache, successful reuse, failed
+load fallback, unchanged alpha). Existing remote trace selector test passes.
+Generator tools/specialize_ps_black.py preserves unused alpha and rejects other
+stage3/constant/output dependencies; its outputs byte-match cost-tested Cg.
+No proprietary shader source/GXP in commits. Private stage material-black-candidate
+full build30512 completed0. Source authored files staged separately there.
+Perf241 package55070711bytes SHA85a25790d8cb3dd1ec7f03a8b8365c5e6e01810031c01dd43684cea009df0741,
+contract775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897 unchanged;
+onlygame-a.self/boot-game.txt differ from240. launch.sh uses241 tag and replaces
+XV_HLE_TIMING=0 with XV_MATERIAL_BLACK=1 to fit32 remote slots. Verified device
+xita.cfg has NO HLE_TIMING setting and runtime default is0, so timing stays off.
+Next deploy, coldlaunch, check qualification/link counts and pod visual/frame
+distribution, then active outdoor/effects. Current physical build240, no241FPS
+claim yet. Keepawake134059 persists. Do not repeat trace unless qualification
+counters require inspecting new state. Original20FPS completion gates unmet.

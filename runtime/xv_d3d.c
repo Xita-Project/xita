@@ -35,6 +35,7 @@
 #include "xv_vertex_capture.h"
 #include "xv_gpu_upload.h"
 #include "xv_texture_alpha.h"
+#include "xv_material_specialize.h"
 #include "xv_depth_prepare.h"
 #include "xv_record_opt.h"
 
@@ -121,6 +122,7 @@ static int replace_blend_eligible(unsigned blend)
 static uint8_t g_ps_texture_masks[XV_PS_TABLE_COUNT]; /* bit 4 marks initialized */
 static unsigned texture_stages_prepared, texture_stages_skipped;
 static unsigned opaque_candidates, opaque_proven;
+static unsigned black_material_candidates, black_material_proven;
 #ifndef XV_DEPTH_PREPARE_DEFAULT
 #define XV_DEPTH_PREPARE_DEFAULT 0
 #endif
@@ -217,6 +219,7 @@ typedef struct {
     int16_t   ps_entry;             /* xv_ps_table index, or -1 (heuristic fragment)  */
     uint8_t   pass;                 /* 0 = back buffer, n = offscreen pass n           */
     uint8_t   previous_frame;       /* stages sampling the last completed backbuffer */
+    uint8_t   black_material;        /* exact captured upload/constants proof, never a live cache pointer */
     uint8_t   opaque_alpha;         /* pinned tex0 upload proves the captured test always passes */
 #if XV_PACKED_VERTEX_LAYOUT
     uint8_t   packed_vertex;        /* captured immutable representation; never consult live stream state */
@@ -984,6 +987,7 @@ const SceGxmTexture *xv_ui_gxm_texture(uint32_t hdr);
 const SceGxmTexture *xv_ui_gxm_texture_pal(uint32_t hdr, uint32_t pal_guest);
 void xv_ui_gxm_apply_texture_options(SceGxmTexture *texture);
 int xv_ui_gxm_texture_opaque(const SceGxmTexture *texture);
+int xv_ui_gxm_texture_black_rgb(const SceGxmTexture *texture);
 static const SceGxmTexture *texture_source[4];
 static unsigned sampler_hits, sampler_misses, texture_source_memo_hits, texture_source_memo_misses;
 void xv_d3d_prep_cache_report(unsigned frames)
@@ -1017,6 +1021,8 @@ void xv_d3d_prep_cache_report(unsigned frames)
     depth_prepare_hits = 0;
     XV_LOG("[opaque-material] %u frames: %u eligible / %u proven opaque (captured upload; alpha test retained otherwise)\n", frames, opaque_candidates, opaque_proven);
     opaque_candidates = opaque_proven = 0;
+    XV_LOG("[material-black] %u frames: %u candidates / %u captured proofs; alpha eligibility checked at replay\n", frames, black_material_candidates, black_material_proven);
+    black_material_candidates = black_material_proven = 0;
 }
 static const SceGxmTexture *texture_for(unsigned stage)
 {
@@ -2087,6 +2093,21 @@ static void trace_draw_state(const cmd_t *c, const xv_vs_desc_t *d, unsigned tex
 
 #undef DRAW_TRACE_LOG
 
+static int black_material_candidate(const cmd_t *c)
+{
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *e = getenv("XV_MATERIAL_BLACK"), *override = getenv("XV_SHADER_OVERRIDE");
+        enabled = e && atoi(e) != 0 && !(override && atoi(override) != 0);
+    }
+    if (!enabled || c->ps_entry < 0 || (unsigned)c->ps_entry >= XV_PS_TABLE_COUNT) return 0;
+    uint32_t key = xv_ps_table[c->ps_entry].ps_key;
+    if (key != 0xB5691565u && key != 0x154066FDu) return 0;
+    /* Nonblack custom border colors are conservatively excluded. */
+    if (S.tex_border[3] & 0x00ffffffu) return 0;
+    return xv_material_axis_constants(c->psc);
+}
+
 static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
 {
     /* textures */
@@ -2094,6 +2115,9 @@ static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
     int candidate = opaque_material_candidate(c);
     opaque_candidates += candidate;
     c->opaque_alpha = 0;
+    c->black_material = 0;
+    int black_candidate = black_material_candidate(c);
+    black_material_candidates += black_candidate;
     for (unsigned t = 0; t < 4; ++t) {
         if (!S.tex_guest[t])
             continue;
@@ -2116,6 +2140,8 @@ static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
             c->ntex = (uint8_t)(t + 1);
             texok |= 1u << t;
 #ifdef XV_RUN_RECOMP
+            if (t == 3 && black_candidate && sceGxmTextureGetType(tex) != SCE_GXM_TEXTURE_CUBE &&
+                xv_ui_gxm_texture_black_rgb(texture_source[3])) c->black_material = 1;
             if (!t && candidate && opaque_material_enabled() &&
                 sceGxmTextureGetType(tex) != SCE_GXM_TEXTURE_CUBE &&
                 xv_ui_gxm_texture_opaque(texture_source[0])) {
@@ -2160,6 +2186,12 @@ static unsigned record_textures(cmd_t *c, const xv_vs_desc_t *d, int immediate)
             if (variant >= 0) c->ps_entry = (int16_t)variant;
         }
     }
+    if (c->black_material) {
+        const char *path = xv_ps_table[c->ps_entry].gxp;
+        if (strcmp(path, "app0:shaders/ps_B5691565_7F_t8.frag.gxp") &&
+            strcmp(path, "app0:shaders/ps_154066FD_7F_t8.frag.gxp")) c->black_material = 0;
+    }
+    black_material_proven += c->black_material != 0;
     return texok;
 }
 
@@ -3282,7 +3314,7 @@ static const SceGxmTexture *cube_fallback(void)
 static xv_fshader_t *fragment_for_ps_policy(vs_slot_t *v, int entry, unsigned blend, int alpha_mode, unsigned replace)
 {
     if (entry < 0 || (unsigned)entry >= XV_PS_TABLE_COUNT || blend >= BLEND_MODES) return NULL;
-    if (alpha_mode < 0 || alpha_mode > 3) return NULL;
+    if (alpha_mode < 0 || alpha_mode > 4) return NULL;
     if (alpha_mode == 2 && xv_ps_table[entry].ps_key != 0x154066FDu)
         return fragment_for_ps_policy(v, entry, blend, 0, replace);
     unsigned vs = (unsigned)(v - g_vs);
@@ -3292,13 +3324,13 @@ static xv_fshader_t *fragment_for_ps_policy(vs_slot_t *v, int entry, unsigned bl
         if (l->vs == vs && l->entry == entry && l->blend == blend && l->alpha_mode == alpha_mode && l->replace_blend == replace) {
             if(!l->failed)return &l->fs;
             if(replace)return fragment_for_ps_policy(v,entry,blend,alpha_mode,0);
-            return alpha_mode ? fragment_for_ps_policy(v,entry,blend,0,0) : NULL;
+            return alpha_mode ? fragment_for_ps_policy(v,entry,blend,alpha_mode == 4 ? 1 : 0,0) : NULL;
         }
     }
     if (g_ps_count == XV_PS_LINKS) {
         XV_ONCE(warn_ps_full, "combiner link cache full (%u): using fallback\n", g_ps_count);
         if(replace)return fragment_for_ps_policy(v,entry,blend,alpha_mode,0);
-        return alpha_mode ? fragment_for_ps_policy(v, entry, blend, 0, 0) : NULL;
+        return alpha_mode ? fragment_for_ps_policy(v, entry, blend, alpha_mode == 4 ? 1 : 0, 0) : NULL;
     }
     ps_link_t *l = &g_ps_links[g_ps_count++];
     l->vs = (uint16_t)vs; l->next = g_ps_buckets[bucket];
@@ -3310,22 +3342,23 @@ static xv_fshader_t *fragment_for_ps_policy(vs_slot_t *v, int entry, unsigned bl
     const char *path = xv_ps_table[entry].gxp; char variant[160];
     if (alpha_mode) {
         size_t len = strlen(path);
-        if (len < 9 || len + 4 > sizeof variant || strcmp(path + len - 9, ".frag.gxp")) {
+        if (len < 9 || len + 16 > sizeof variant || strcmp(path + len - 9, ".frag.gxp")) {
             l->failed = 1;
-            return fragment_for_ps_policy(v, entry, blend, 0, replace);
+            return fragment_for_ps_policy(v, entry, blend, alpha_mode == 4 ? 1 : 0, replace);
         }
-        snprintf(variant, sizeof variant, "%.*s_%s.frag.gxp", (int)(len - 9), path, alpha_mode == 3 ? "az" : alpha_mode == 2 ? "gt" : "na");
+        snprintf(variant, sizeof variant, "%.*s_%s.frag.gxp", (int)(len - 9), path, alpha_mode == 4 ? "axisblack_na" : alpha_mode == 3 ? "az" : alpha_mode == 2 ? "gt" : "na");
         path = variant;
     }
     if (xv_fshader_load(&l->fs, path, &v->vs, pbi) != 0) {
         static unsigned n; if (n++ < 12) XV_LOG("combiner %s does not link against %s (blend %u) - using heuristic fragment\n", xv_ps_table[entry].gxp, v->vs.desc ? v->vs.desc->gxp : "?", blend);
         l->failed = 1;
         if(replace)return fragment_for_ps_policy(v,entry,blend,alpha_mode,0);
-        return alpha_mode ? fragment_for_ps_policy(v, entry, blend, 0, 0) : NULL;
+        return alpha_mode ? fragment_for_ps_policy(v, entry, blend, alpha_mode == 4 ? 1 : 0, 0) : NULL;
     }
     if(replace)XV_LOG("[replace-blend] linked vs %u entry %d blend %u mask %X alpha-mode %d; source replacement, channels preserved\n",vs,entry,blend,g_blend_combo[blend].mask,alpha_mode);
     if (alpha_mode == 3) { static unsigned n; if (n++ < 16) XV_LOG("[alpha-zero] linked %s vs %u blend %u (%u/%u m%X): discard-free, zero source on a failed test\n", path, vs, blend, g_blend_combo[blend].src, g_blend_combo[blend].dst, g_blend_combo[blend].mask); }
-    l->fs.alpha_test_mode = alpha_mode;
+    if (alpha_mode == 4) XV_LOG("[material-black] linked %s vs %u blend %u; captured black RGB and exact constants\n", path, vs, blend);
+    l->fs.alpha_test_mode = alpha_mode == 4 ? 1 : alpha_mode;
     return &l->fs;
 }
 static xv_fshader_t *fragment_for_ps_mode(vs_slot_t *v, int entry, unsigned blend, int alpha_mode)
@@ -3654,6 +3687,7 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             XV_PS_ALPHA_KIND(c->ps_entry) == 2 && xv_alpha_accepts_opaque(c->atest);   /* output alpha is 1 */
         int no_alpha = specialize_alpha && (force_na || !draw_needs_alpha_test(c->atest) || c->opaque_alpha || alpha_one);
         int alpha_mode = material_alpha_mode(c, no_alpha);
+        if (alpha_mode == 1 && c->black_material) alpha_mode = 4;
         xv_fshader_t *fs = c->depth_prepared ? &v->fs[FS_COLOR][BLEND_NOCOLOR] : c->ps_entry >= 0 ?
             XV_RENDER_CALL(XV_RENDER_SHADER_LOOKUP, fragment_for_ps_mode(v, c->ps_entry, c->blend, alpha_mode)) : NULL;
         xv_fshader_t *linked = c->depth_prepared ? NULL : fs;
