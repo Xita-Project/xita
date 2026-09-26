@@ -101,3 +101,31 @@ local exec session 42571; poll that handle. Output/log are
 from it or deployed. Vita port 8080 still refuses connections; FTP1337 responds.
 Next finish the SDK compile, assess release-shard integration and code size,
 and prepare hardware qualification without replacing the installed rollback.
+
+## Hardware candidate preparation
+
+The separate SDK unit compile completed successfully (42571 terminal). Its
+instrumented Thumb target is 61,740 bytes versus 40,812 bytes in the perf259
+release object, but differing timer coverage makes that an imperfect size
+comparison (`gameplay/vita-code-size.json`). Use final release objects instead.
+
+Prepared private `effect-physical-slots/vita-candidate/build-x87` by copying
+perf259. The target body matched the regenerated memory baseline byte-for-byte
+before replacement. Only 1122A0 and build identification changed in the stage;
+no new sound-cache runtime is included. Label: `0.2.0-perf.260`, build revision
+97c49789. `splice-audit.json` records the candidate body hash. All preexisting
+asset/runtime contracts and the developer remote build mode are retained.
+
+Full build is active as local exec session 21283. At last inspection make and
+cc1 were live, with cc1 using a CPU; no build error was reported. Poll this
+handle instead of restarting. `build-x87-result.json` is authoritative only
+after this build terminates. After success, run the prepared `package.py` in
+`vita-candidate/`: it preserves the perf258 package's dashboard/assets and
+replaces only game-a.self and boot-game.txt, requiring the same update contract.
+Expected output `xita-perf260c.vpk`; it has NOT yet been packaged or deployed.
+
+FTP log retrieval succeeded (`effect-physical-slots/vita-before260.log`,
+8,963,092 bytes), but MDTM remains 20260926181602. It ends with prior gameplay
+telemetry, providing no new startup/failure evidence. HTTP8080 still refuses
+connections; do not assume a newly launched dashboard or renew a lease by
+claim alone. Last confirmed installed runtime remains perf258.
