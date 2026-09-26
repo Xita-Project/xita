@@ -21,14 +21,18 @@ def function(source, signature):
 
 def main():
     source = (ROOT / 'recomp/kernel/xd3d.c').read_text()
-    actual = function(source, 'static void hist_remote_track(void)') + '\n'
-    actual += function(source, 'int xd3d_hist_active(void)\n')
-    actual += '\n' + function(source, 'int xd3d_vertex_trace_active(void)\n')
-    # Cover both supported HLE frame boundaries, not a harness-only caller.
-    assert 'hist_remote_track();' in function(source, 'static void hist_level_track(void)')
-    assert 'hist_level_track();' in function(source, 'void xv_hle_D3DDevice_Present(xctx *c)')
-    assert 'hist_remote_track();' in function(source, 'void xv_hle_D3DDevice_Swap(xctx *c)')
+    actual = '\n'.join(function(source, sig) for sig in (
+        'void xd3d_remote_trace_begin(unsigned frame)',
+        'void xd3d_remote_trace_note_draw(void)',
+        'void xd3d_remote_trace_end(unsigned frame, unsigned commands)',
+        'int xd3d_hist_active(void)\n', 'int xd3d_vertex_trace_active(void)\n'))
+    assert 'hist_remote_track' not in source
     renderer = (ROOT / 'runtime/xv_d3d.c').read_text()
+    assert 'xd3d_remote_trace_begin(g_build_frame)' in function(renderer, 'void xv_d3d_BeginFrame(void)')
+    assert 'xd3d_remote_trace_end(g_build_frame, l->ncmds)' in function(renderer, 'uint32_t xv_d3d_EndFrame(void)')
+    swap = function(renderer, 'void xv_d3d_Swap(void)')
+    assert 'xd3d_remote_trace_begin(g_build_frame)' in swap and 'xd3d_remote_trace_end(g_build_frame, l->ncmds)' in swap
+    assert 'xd3d_remote_trace_note_draw();' in function(renderer, 'static void trace_draw_state(')
     assert 'if (vertex_trace_frame()) {\n' in renderer
     assert 'if (vertex_trace_frame()) XV_LOG("[hist] stream' in renderer
     assert '!trace_frame() && stride==32' in renderer
@@ -38,9 +42,10 @@ def main():
 #include <stdlib.h>
 static struct { unsigned frame; } g_dev;
 static int g_hist_frame=-2, g_remote_hist_on;
-static unsigned g_remote_hist_frame, logs, request;
+static unsigned g_remote_hist_frame, g_remote_hist_records, logs, request;
 int xv_remote_take_draw_trace(void) __attribute__((weak));
-#define D3DLOG(...) (++logs)
+static void log_stub(const char *format, ...) { (void)format; ++logs; }
+#define D3DLOG(...) log_stub(__VA_ARGS__)
 @ACTUAL@
 #ifndef ABSENT
 int xv_remote_take_draw_trace(void) { unsigned r=request; request=0; return r; }
@@ -50,43 +55,50 @@ int main(void) {
      * manual trace at frames 12..14. Frame numbers describe the next draw. */
     setenv("XV_D3D_HIST", "12", 1);setenv("XV_D3D_HIST_COUNT", "3", 1);
     for(unsigned f=1;f<17;f++) {
-        g_dev.frame=f-1;hist_remote_track();
+        g_dev.frame=f-1;xd3d_remote_trace_begin(f);
         assert(xd3d_hist_active()==(f>=12 && f<=14));
         assert(xd3d_vertex_trace_active()==xd3d_hist_active());
     }
     assert(!logs);
 #ifndef ABSENT
-    /* Remote capture is exactly one frame despite the configured count=3. */
-    g_dev.frame=100;request=1;hist_remote_track();
-    assert(!request && g_remote_hist_on && g_remote_hist_frame==101);
+    /* Recorder and guest-frame counters may be arbitrarily far apart.
+     * Owner progress must not truncate a queued/deferred scene capture. */
+    g_dev.frame=100;request=1;xd3d_remote_trace_begin(40);
+    assert(!request && g_remote_hist_on && g_remote_hist_frame==40);
     for(unsigned draw=0;draw<1000;draw++) {
+        g_dev.frame=101+draw;
         assert(xd3d_vertex_trace_active());
-        assert(!xd3d_hist_active()); /* Full diagnostics remain off. */
+        assert(!xd3d_hist_active());
+        xd3d_remote_trace_note_draw();
     }
-    g_dev.frame=101;hist_remote_track();
+    assert(g_remote_hist_records==1000);
+    request=1;xd3d_remote_trace_begin(41); /* no drain/end yet: cannot rearm */
+    assert(request && g_remote_hist_frame==40);
+    xd3d_remote_trace_end(40,1002);
     assert(!xd3d_vertex_trace_active() && !g_remote_hist_on && logs==2);
-    g_dev.frame=102;hist_remote_track();assert(!xd3d_vertex_trace_active());
-    /* A request at completion arms the following frame without losing either. */
-    request=1;hist_remote_track();assert(xd3d_vertex_trace_active());
-    g_dev.frame=103;request=1;hist_remote_track();assert(xd3d_vertex_trace_active());
-    g_dev.frame=104;hist_remote_track();assert(!xd3d_vertex_trace_active());
-    /* Wrap at UINT_MAX still selects and retires exactly frame zero. */
-    g_dev.frame=UINT_MAX;request=1;hist_remote_track();
+    xd3d_remote_trace_note_draw(); assert(g_remote_hist_records==1000);
+    xd3d_remote_trace_begin(41);
+    assert(!request && g_remote_hist_frame==41 && g_remote_hist_records==0);
+    xd3d_remote_trace_end(41,0); /* empty capture is explicit, closes normally */
+    assert(!xd3d_vertex_trace_active());
+    request=1;xd3d_remote_trace_begin(UINT_MAX);
+    assert(xd3d_vertex_trace_active());xd3d_remote_trace_end(UINT_MAX,1);
+    request=1;xd3d_remote_trace_begin(0);
     assert(g_remote_hist_frame==0 && xd3d_vertex_trace_active());
-    g_dev.frame=0;hist_remote_track();assert(!xd3d_vertex_trace_active());
-    /* Overlap does not truncate or extend a separate manual trace. */
-    g_dev.frame=11;request=1;hist_remote_track();assert(xd3d_hist_active());
-    for(unsigned f=12;f<16;f++) {
-        g_dev.frame=f;hist_remote_track();
-        assert(xd3d_hist_active()==(f<14));
-        assert(xd3d_vertex_trace_active()==xd3d_hist_active());
-    }
+    xd3d_remote_trace_end(0,1);assert(!xd3d_vertex_trace_active());
+    /* Remote completion leaves a separately configured manual trace intact. */
+    g_dev.frame=11;request=1;xd3d_remote_trace_begin(1234);
+    assert(xd3d_hist_active());xd3d_remote_trace_end(1234,1);
+    assert(xd3d_vertex_trace_active());
+    g_dev.frame=14;assert(!xd3d_vertex_trace_active());
 #else
     (void)request;
 #endif
     return 0;
 }
 '''.replace('@ACTUAL@', actual)
+    if os.getenv('XITA_TEST_EMIT'):
+        Path(os.environ['XITA_TEST_EMIT']).write_text(fixture)
     with tempfile.TemporaryDirectory(prefix='xita-draw-trace-') as directory:
         path = Path(directory)
         (path / 'test.c').write_text(fixture)

@@ -297,7 +297,7 @@ static inline int xd3d_hist_gate(void)
     if (xv_rec_opt_result(&g_opt_hle, fast == live)) xk_os_log("[d3d] [rec-verify] XV_REC_HLE mismatch: hist gate %d live %d\n", fast, live);
     return live;
 }
-static unsigned g_remote_hist_frame;
+static unsigned g_remote_hist_frame, g_remote_hist_records;
 static int g_remote_hist_on;
 int xv_remote_take_draw_trace(void) __attribute__((weak));
 static float g_vp_rows[4][4]; static unsigned g_vp_frame = 0xFFFFFFFFu;   /* view-projection of the frame's first world draw */
@@ -348,25 +348,37 @@ static void census_track(void)
         census_state=0;
     }
 }
-static void hist_remote_track(void)
+/* Remote diagnostics follow the recorded render list, not the guest Present
+ * counter: overlap can advance the latter before the scene worker draws. These
+ * hooks run at drained recorder boundaries. Manual guest-frame traces retain
+ * their existing policy below. */
+void xd3d_remote_trace_begin(unsigned frame)
 {
-    /* Frame selection is owned here; render-side diagnostic readers may also
-     * consult it. Keep those optional scalar observations free of data races.
-     * The disabled hot path needs only a relaxed load, not a per-draw fence. */
-    if(__atomic_load_n(&g_remote_hist_on,__ATOMIC_RELAXED) &&
-       __atomic_load_n(&g_remote_hist_frame,__ATOMIC_RELAXED)==g_dev.frame) {
-        D3DLOG("hist: remote frame %u completed; diagnostic timing excluded\n",g_remote_hist_frame);
-        __atomic_store_n(&g_remote_hist_on,0,__ATOMIC_RELEASE);
+    if (__atomic_load_n(&g_remote_hist_on, __ATOMIC_RELAXED)) return;
+    if (xv_remote_take_draw_trace && xv_remote_take_draw_trace()) {
+        __atomic_store_n(&g_remote_hist_frame, frame, __ATOMIC_RELAXED);
+        __atomic_store_n(&g_remote_hist_records, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&g_remote_hist_on, 1, __ATOMIC_RELEASE);
+        D3DLOG("hist: remote request -> render frame %u; diagnostic timing excluded\n", frame);
     }
-    if(xv_remote_take_draw_trace && xv_remote_take_draw_trace()) {
-        __atomic_store_n(&g_remote_hist_frame,g_dev.frame+1,__ATOMIC_RELAXED);
-        __atomic_store_n(&g_remote_hist_on,1,__ATOMIC_RELEASE);
-        D3DLOG("hist: remote one-frame request -> tracing frame %u; diagnostic timing excluded\n",g_remote_hist_frame);
+}
+void xd3d_remote_trace_note_draw(void)
+{
+    if (__atomic_load_n(&g_remote_hist_on, __ATOMIC_ACQUIRE))
+        __atomic_fetch_add(&g_remote_hist_records, 1, __ATOMIC_RELAXED);
+}
+void xd3d_remote_trace_end(unsigned frame, unsigned commands)
+{
+    if (__atomic_load_n(&g_remote_hist_on, __ATOMIC_RELAXED) &&
+        __atomic_exchange_n(&g_remote_hist_on, 0, __ATOMIC_ACQ_REL)) {
+        unsigned selected = __atomic_load_n(&g_remote_hist_frame, __ATOMIC_RELAXED);
+        unsigned records = __atomic_load_n(&g_remote_hist_records, __ATOMIC_RELAXED);
+        D3DLOG("hist: remote render frame %u closed at %u: %u commands, %u draw-state records; diagnostic timing excluded\n",
+               selected, frame, commands, records);
     }
 }
 static void hist_level_track(void)
 {
-    hist_remote_track();
     census_track();
     xv_render_view_present(g_dev.frame);
     if(xv_diag_poll_hist()) {
@@ -397,8 +409,9 @@ int xd3d_vertex_trace_active(void)
     /* Remote range capture must not enable the full histogram's per-vertex
      * hashing, transformed-position dump or packed-layout bypass. On hardware
      * that diagnostic work can stall a solo match long enough to time out. */
-    if(__atomic_load_n(&g_remote_hist_on,__ATOMIC_RELAXED) &&
-       g_dev.frame+1==__atomic_load_n(&g_remote_hist_frame,__ATOMIC_RELAXED))return 1;
+    /* Preserve the disabled per-draw path: no acquire fence unless armed. */
+    if (__atomic_load_n(&g_remote_hist_on, __ATOMIC_RELAXED) &&
+        __atomic_load_n(&g_remote_hist_on, __ATOMIC_ACQUIRE)) return 1;
     return xd3d_hist_active();
 }
 
@@ -858,7 +871,6 @@ void xv_hle_D3DDevice_Swap(xctx *c) { XD3D_COUNT("D3DDevice_Swap");
     { extern void xv_scene_thread_join(void); xv_scene_thread_join(); }
 #endif
  if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_PRESENT); g_dev.frame++;
-    hist_remote_track();
 #ifdef XV_OWNER_PHASE
     xv_owner_phase_present(c);
 #endif

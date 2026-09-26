@@ -550,3 +550,40 @@ The source option stays off by default. Main-memory headroom improved 32MiB,
 but that is not progress toward the FPS acceptance criterion by itself.
 Next pursue substantial shader/pass work reduction; avoid another pool-placement
 trial without new evidence. Target 20FPS remains unmet.
+
+### 2026-09-26: empty remote draw traces exposed an asynchronous diagnostic gap
+
+One offline RGB-intermediate-half variant of B5691565 compiled to 135 primary
+instructions (unchanged from perf237) and eight temporary registers vs13.
+No hardware deployment: this changes numerical precision without demonstrating
+a large compiled-work reduction, and a prior global half trial was unhelpful.
+Artifacts remain private under cube-select-candidate. Physical Vita unchanged.
+
+Requested two separate one-frame remote traces during perf238 outdoor gameplay.
+The first fetch preceded completion; preserved the later complete logs.
+Both requests reported guest-frame start/completion (12407 and15395) but emitted
+ZERO [draw-state] records. Evidence: texture-cdram-candidate/
+outdoor-draw-trace-complete.log and outdoor-trace-recheck.log. Empty trace output
+must not be used as evidence that the material draws were absent. This finding
+alone does not invalidate the independent Present-interval distributions.
+
+Remote tracing previously used g_dev.frame+1 while owner Present can advance
+before the asynchronous scene/recorder draws. Changed the remote trace window to
+actual BeginFrame/EndFrame (and legacy renderer Swap) boundaries, which follow
+recorder draining. Guest Present no longer consumes or closes remote requests.
+Manual guest-frame histogram selection remains separate. End reports both
+recorded commands and the number of actual draw-state log records, making empty
+captures explicit. No full histogram/per-vertex dump or new GPU wait is enabled.
+The ordinary disabled per-draw path keeps its relaxed atomic load; acquire
+fencing occurs only while the diagnostic is armed.
+
+Updated production-function harness exercises independent guest/render counters,
+1000 draws while the guest counter advances, queued follow-up requests, empty
+capture, wrap, manual-trace overlap and absent network hook. Host ASan/UBSan and
+ARMv7 Pi CPUs0/1 pass. New regression would fail the former guest-counter window.
+Perf239 is a diagnostic repair candidate under render-trace-candidate; retains
+perf238 settings, texture pool and embedded material shader. Initial Vita build
+passed; rebuild running after preserving the disabled hot-path fence policy.
+Current build session recorded by tools; NOT deployed yet. Next verify nonzero
+hardware draw-state records before relying on this diagnostic to choose material
+specializations. No FPS gain is claimed for this repair.

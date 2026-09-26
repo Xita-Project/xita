@@ -1470,6 +1470,9 @@ static int prim_to_gxm(uint32_t prim, uint32_t *count, const void **indices, uin
 int xd3d_hist_active(void) __attribute__((weak));
 static int trace_frame_live(void) { return xd3d_hist_active && xd3d_hist_active(); }
 int xd3d_vertex_trace_active(void) __attribute__((weak));
+void xd3d_remote_trace_begin(unsigned frame) __attribute__((weak));
+void xd3d_remote_trace_end(unsigned frame, unsigned commands) __attribute__((weak));
+void xd3d_remote_trace_note_draw(void) __attribute__((weak));
 static int vertex_trace_frame_live(void) {
     return xd3d_vertex_trace_active ? xd3d_vertex_trace_active() : trace_frame_live();
 }
@@ -2038,6 +2041,7 @@ static void trace_draw_state(const cmd_t *c, const xv_vs_desc_t *d, unsigned tex
                 g_build_frame,i,before->pass,before->clear_flags,before->clear_color);
         }
     }
+    if (xd3d_remote_trace_note_draw) xd3d_remote_trace_note_draw();
     unsigned command = cur_list()->ncmds - 1, rt_mask = 0;
     XV_LOG("[draw-state] frame %u cmd %u pass %u vs %s ps %08X key %08X tex-mask %X previous %X blend %u/%u/%u z %u/%u/%u mask %X atest %08X\n",
         g_build_frame, command, c->pass, d->gxp, S.ps_hash, S.ps_key, texok,
@@ -2761,12 +2765,14 @@ uint32_t xv_d3d_EndFrame(void)
     l->ui_frame = xv_ui_gxm_record_frame();
     g_record_pass = l->cur_pass;
     xv_vertex_upload_seal(g_build_frame % XV_NUM_LISTS);
+    if (xd3d_remote_trace_end) xd3d_remote_trace_end(g_build_frame, l->ncmds);
     uint32_t done = g_build_frame++;
     return done;
 }
 unsigned xv_d3d_record_slot(void) { return g_build_frame % XV_NUM_LISTS; }
 void xv_d3d_BeginFrame(void)
 {
+    if (xd3d_remote_trace_begin) xd3d_remote_trace_begin(g_build_frame);
     { extern void xv_rec_ab_frame(void) __attribute__((weak)); if (xv_rec_ab_frame) xv_rec_ab_frame(); }   /* XV_REC_AB */
 #if XV_POSE_PIPELINE
     xv_pose_pipeline_begin(g_build_frame);
@@ -2825,7 +2831,9 @@ void xv_d3d_Swap(void)
     cmdlist_t *l = cur_list();
     report_draw_drops(l);
     xv_vertex_upload_seal(g_build_frame % XV_NUM_LISTS);
+    if (xd3d_remote_trace_end) xd3d_remote_trace_end(g_build_frame, l->ncmds);
     g_build_frame++;
+    if (xd3d_remote_trace_begin) xd3d_remote_trace_begin(g_build_frame);
     index_reuse_begin_frame();
     /* reset the list the NEXT frame will use (the pump is done with it: at most one
        frame is in flight beyond the one just submitted) */
