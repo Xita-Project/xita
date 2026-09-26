@@ -54,3 +54,13 @@ Private perf261 candidate is being built in `../draw-trace-receipt-candidate`,
 derived from perf260 with only xd3d receipt logging and version/revision
 changes. Build handle 21937 must be polled until terminal; no deployment yet.
 Preserve the user's current campaign progress before any later restart.
+
+Build 21937 and packaging 85852 completed successfully. Prepared
+`draw-trace-receipt-candidate/xita-perf261c.vpk`, version 0.2.0-perf.261,
+revision 9fcf7486. Runtime SHA-256
+e18a9ee9209efd7026dd826c6f94988b664a5e2ed6d7ed0343aa50f9275f722c
+(34,805,526 bytes); package SHA-256
+1d65ebcd0e443e685fdeb88d643d8ad5a5e5eded82407893cc9cfe0af8926c89.
+Entry comparison against perf260 changes only game-a.self and boot-game.txt;
+update contract is unchanged. Not deployed; current campaign progress was
+not interrupted. This candidate establishes no rendering/performance gain.
