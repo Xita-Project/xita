@@ -1203,3 +1203,27 @@ link/cache tests pass; exhaustive alpha-policy/reference selection host test pas
 Generated source exactly matches prior private compiled gtblack shader, GXP1228B,
 capability word preserved. Stage material-greater-candidate/build-x87 compiling
 perf247, session58067. Do not deploy until current246 outdoor observation finishes.
+
+
+Perf246 outdoor observation: qualified outdoor246.png frame9712; 1200 intervals
+11040..12180 average56.0225ms/17.8500FPS,p50 54.247,p95 68.574,p99 99.928,
+max139.767;12>100ms,0>200ms. Previous242 outdoor56.5241ms: small variation-sized
+change; do not claim a clear outdoor win. Pod gain remains modest. A short input
+check (fire3s,look right3s,left3s,forward2s; host durations, not exact device
+exposure) completed frames13633..13901; screenshot13877 shows ammo60->17 and
+intact world/weapon. Log captured around this check reports zero scene abandons.
+This is NOT the required15-minute active combat gate or full weapon/AI validation.
+
+Perf247 candidate ready, currently deploying session50814. It stacks CPU index
+mode2 and uses MATERIAL_BLACK=2 to enable the captured GREATER material variant.
+VPK material-greater-candidate/xita-perf247c.vpk55,075,827 bytes, SHA256
+`46ac8aabdf82db651861d3751d5dba9ce7a03294e8023d2e5d7e55544f91e1da`.
+Payload34,771,490 bytes, SHA256
+`1d13ed82124692eeed3ea1784a0ce29dae5dc18305f83d815c8c92a7af28f5b5`.
+Same contract; only game-a.self/boot-game.txt differ from246. Embedded1228-byte
+shader verified byte-for-byte against the qualified compiled candidate. No new
+Vita3K gameplay test. Normal246 watcher324540 stopped before deployment; keepawake
+134059 remains live. After boot confirmation, start launch247.sh and collect247.py
+in material-greater-candidate. Require actual _axisblack_gt linked receipt in
+pod/outdoor logs before attributing any gain. Pod may use NA programs; outdoors
+is the important generic-alpha material workload. No GPU gain claimed yet.
