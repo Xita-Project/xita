@@ -1,10 +1,13 @@
 """Overflowing nested diagnostics must not consume an outer call's timer."""
 from pathlib import Path
+import argparse
 import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
-source = (root / 'recomp/kernel/xk_scene_thread.c').read_text()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--source', type=Path, default=root / 'recomp/kernel/xk_scene_thread.c')
+source = parser.parse_args().source.read_text()
 start = source.index('#define PHASE_MAX')
 end = source.index('static void phase_report(unsigned frames)', start)
 fixture = '''

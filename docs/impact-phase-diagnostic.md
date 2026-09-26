@@ -413,3 +413,20 @@ Build and transfer completed. Run `codex-effect-child-20260926` is active on
 Pi cores 0/1 as local session 40591, with the prior 180-second two-burst/reload
 sequence. Poll this session; do not restart on observation timeout. No new
 Vita build was made or deployed; perf260 still awaits a working dashboard.
+
+Follow-up: first child run 40591 terminated normally at timeout 124 with 67
+host reports. Its firing attribution is QUARANTINED. Adding deeper scopes
+exposed another stale implementation: the reused Pi begin/end lacks skipped
+scope tracking, so nesting beyond 16 can pop live outer scopes. Unexpected
+parent edges cannot be trusted without overflow-safe collection. Previous
+deep Pi effect profiles share this limitation; do not use them as precise
+self-time or parent-attribution proof. No optimization is accepted on these
+measurements alone.
+
+Replaced the private stage's complete phase collector/reporter section with
+the current checkout implementation (including owner-only mode 2, lookup hint,
+skipped-scope recovery and overflow reporting), retaining the 112C80 reporting
+threshold exception. Staged report and depth tests both pass; depth test now
+also accepts `--source`. Build and transfer succeeded. New 180-second run
+`codex-effect-child-v2-20260926` is launched on cores 0/1; use its live exec
+session 65064 to poll. All v1 jobs are terminal. No hardware deployment.
