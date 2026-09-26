@@ -94,3 +94,29 @@ Next action: rebuild the verification-only ARM unit with the bounded mismatch
 capture, rerun the two-burst sequence, inspect anchor age/distance and memory-view
 patterns, and then correct or constrain reuse. World invalidation integration
 and hardware verification remain required. No Pi job is currently active.
+
+## Captured mismatch follow-up
+
+The updated diagnostic unit compiled for Vita and ARM, and the rebuilt ARM
+harness completed `codex-sound-cache-mismatch-20260926` (180-second planned
+timeout, exit 124; 68 host reports). The 60 cache-counter reports contain
+210,406 queries, 178,332 proposed hits, and 14 disagreements. All 14 were captured;
+none was returned instead of the real collision result.
+
+Ten disagreements occurred during listener movement at frames 639–650, with
+anchors one to three frames old. Four occurred around firing at frames
+1882–1883 and 2113–2114, with a stationary listener and moving sound endpoint.
+Every captured discrepancy involved endpoint movement. This implicates the
+inherited movement tolerance, but does not rule out simultaneous world changes.
+A one-frame-old answer can already disagree, so merely reducing six-frame
+retention to two frames is insufficient for these examples.
+
+Private evidence: `sound-cache-access-candidate/mismatch-capture-summary.json`,
+`vita-capture-compile.log`, and the full run log in `d3d-record2-work/pi-runs/`.
+The next verification-only run, `codex-sound-cache-exact-20260926`, uses zero
+listener and sound tolerances with the same two-burst input sequence. It is
+running on Pi cores 0/1; local exec session 68175 is its observation handle.
+Inspect that handle and the complete log before concluding anything. Zero
+movement tolerance still does not prove the world stayed unchanged; invalidation
+and hardware qualification remain required. No new Vita deployment or FPS gain
+is claimed.

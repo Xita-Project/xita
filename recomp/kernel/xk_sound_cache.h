@@ -1,8 +1,8 @@
 #ifndef XK_SOUND_CACHE_H
 #define XK_SOUND_CACHE_H
 
-/* Candidate retention policy for sound-obstruction queries. Not yet wired into
- * xv_sound_ray. The caller must serialize lookup/store, copy a hit before
+/* Candidate retention policy for sound-obstruction queries. xv_sound_ray
+ * uses it only to verify predictions against real casts. The caller must serialize lookup/store, copy a hit before
  * releasing its lock, and never hold that lock across a guest collision cast.
  * domain identifies the memory view; epoch must change when the world changes.
  * Reuse retains the existing bounded-age/endpoint approximation, not exact

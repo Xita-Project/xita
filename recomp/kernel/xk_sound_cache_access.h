@@ -2,7 +2,7 @@
 #define XK_SOUND_CACHE_ACCESS_H
 #include "xk_sound_cache.h"
 
-/* Candidate integration boundary, not yet enabled by xv_sound_ray.
+/* Candidate integration boundary; xv_sound_ray uses verification only.
  * Zero-initialize before publication. Never hold guard during guest execution.
  * World-change hooks must call invalidate before publishing new world state. */
 typedef struct {
