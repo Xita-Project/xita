@@ -68,3 +68,36 @@ so test execution time is not an optimization benchmark.
 Next integrate only 1122A0 into a private Pi gameplay harness, preserve all
 other maintained bodies/hooks, and inspect actual gameplay/profile behavior.
 No candidate has been deployed to Vita and no FPS improvement is established.
+
+## First gameplay harness run
+
+Integrated only 1122A0 into the private `gameplay/` shard, restoring the same
+callee timers in its register and fallback paths. `splice-audit.json` proves
+the original target matched regeneration after removing observers, everything
+outside the target stayed byte-identical, and candidate changes beyond lowering
+are observer insertions only. ARM build and link succeeded; session 32271 is
+terminal.
+
+`codex-effect-physical-20260926` completed its planned 180-second timeout (124),
+with 68 host reports; run 40867 is terminal. The headless run reached both
+scripted firing bursts. It is not a visual/gameplay equivalence test. Across
+36 common host report indices in ranges 900–1740 and 2400–3600, the target's
+reported mean self time was 0.5417 ms baseline versus 0.4836 ms candidate;
+inclusive was 0.9814 versus 0.9056 ms. Timings are rounded, instrumented elapsed
+values from independent runs and include scheduling effects. Do not extrapolate
+the difference into Vita FPS or call this a controlled paired experiment.
+Receipt: `gameplay/profile-summary.json` with all selected rows.
+
+Both logs print 39 guard-miss messages at the existing unrelated A43DD site.
+The logger prints only the first 32 misses and each 1024th, so these messages
+cannot prove no candidate guard misses occurred. There were no fatal/trap
+messages found by the recorded scan; absence alone does not prove correctness.
+The candidate ARM function is 103,228 bytes versus 66,648 bytes baseline
+(instrumented O1 build), a material instruction-cache tradeoff.
+
+A separate Vita SDK compilation of the candidate shard is still active as
+local exec session 42571; poll that handle. Output/log are
+`gameplay/code_024-vita.o` and `gameplay/vita-unit.log`. No VPK has been built
+from it or deployed. Vita port 8080 still refuses connections; FTP1337 responds.
+Next finish the SDK compile, assess release-shard integration and code size,
+and prepare hardware qualification without replacing the installed rollback.
