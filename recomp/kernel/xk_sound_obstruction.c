@@ -25,6 +25,21 @@
 extern unsigned xd3d_frame(void);
 extern void f_001721B0(xctx *restrict c);
 
+/* Diagnostic-only: actual collision work, separate from lookup/reuse overhead.
+ * Synthetic phase ID is not a guest address. Default builds add no observers. */
+#if defined(XV_SOUND_CACHE_PROFILE) && XV_SOUND_CACHE_PROFILE
+static unsigned miss_reasons[16];
+static void sound_cast(xctx *c)
+{
+    extern void xv_scene_phase_begin(uint32_t), xv_scene_phase_end(uint32_t);
+    xv_scene_phase_begin(0xF01721B0u);
+    f_001721B0(c);
+    xv_scene_phase_end(0xF01721B0u);
+}
+#else
+#define sound_cast(c) f_001721B0(c)
+#endif
+
 #define SLOTS 1024u
 static struct entry { float a[3], b[3]; uint32_t frame; uint8_t used, hit; } tab[SLOTS];
 static int mode = -1, verify; static float eps_l2, eps_s2;
@@ -75,9 +90,9 @@ static float d2(const float *a, const float *b) { float x = a[0] - b[0], y = a[1
 void xv_sound_ray(xctx *c)
 {
     /* A simultaneous first caller casts normally instead of waiting for config. */
-    if (!configuration_ready()) { f_001721B0(c); return; }
+    if (!configuration_ready()) { sound_cast(c); return; }
     uint32_t sp = c->r[4];                 /* [sp] return address 2B54E, then flags, start, vector, ignore, result */
-    if (!mode || X_M32(sp + 4u) != 0xC0E1u || X_M32(sp + 16u) != 0xFFFFFFFFu) { if (mode) n_other++; f_001721B0(c); return; }
+    if (!mode || X_M32(sp + 4u) != 0xC0E1u || X_M32(sp + 16u) != 0xFFFFFFFFu) { if (mode) n_other++; sound_cast(c); return; }
     uint32_t pa = X_M32(sp + 8u), pv = X_M32(sp + 12u);
     float a[3] = { f32(pa), f32(pa + 4u), f32(pa + 8u) };
     float vector[3] = {f32(pv), f32(pv + 4u), f32(pv + 8u)};
@@ -86,7 +101,7 @@ void xv_sound_ray(xctx *c)
         /* Avoid undefined float-to-int conversion in the diagnostic hash. */
         for (unsigned i = 0; i < 3; ++i) {
             if (!isfinite(a[i]) || !isfinite(b[i]) || b[i] < -1073741824.0f || b[i] >= 1073741824.0f) {
-                CANDIDATE_ADD(candidate_unavailable); f_001721B0(c); return;
+                CANDIDATE_ADD(candidate_unavailable); sound_cast(c); return;
             }
         }
     }
@@ -108,7 +123,7 @@ void xv_sound_ray(xctx *c)
         CANDIDATE_ADD(candidate_queries);
         if (X_PT != g_xpt) CANDIDATE_ADD(candidate_other_view);
         if (!ticket.valid) CANDIDATE_ADD(candidate_unavailable);
-        f_001721B0(c); /* Keep complete guest state, not just AL, in verification. */
+        sound_cast(c); /* Keep complete guest state, not just AL, in verification. */
         uint8_t actual = (uint8_t)c->r[0];
         if (found) {
             CANDIDATE_ADD(candidate_hits);
@@ -132,12 +147,24 @@ void xv_sound_ray(xctx *c)
     uint32_t frame = xd3d_frame();
     int reusable = e->used && frame - e->frame < (uint32_t)mode && d2(a, e->a) <= eps_l2 && d2(b, e->b) <= eps_s2;
     n_rays++;
+#if defined(XV_SOUND_CACHE_PROFILE) && XV_SOUND_CACHE_PROFILE
+    if (!reusable || verify) {
+        /* Overlapping causes form a bitmask, not additive independent totals.
+         * A displaced endpoint can mean motion OR a colliding cache slot;
+         * the legacy cache has no stable sound identity to distinguish them. */
+        unsigned reason = !e->used ? 1u :
+            ((frame - e->frame >= (uint32_t)mode ? 2u : 0u) |
+             (!(d2(a, e->a) <= eps_l2) ? 4u : 0u) |
+             (!(d2(b, e->b) <= eps_s2) ? 8u : 0u));
+        __atomic_fetch_add(&miss_reasons[reason], 1u, __ATOMIC_RELAXED);
+    }
+#endif
     if (reusable && !verify) {
         c->r[4] += 24u;                    /* ret 14h: return address + 5 arguments */
         c->r[0] = (c->r[0] & ~0xFFu) | e->hit;
         n_reused++; return;
     }
-    f_001721B0(c);
+    sound_cast(c);
     uint8_t hit = (uint8_t)c->r[0];
     n_cast++;
     if (reusable) { if (hit == e->hit) n_verify_same++; else n_verify_diff++; return; }   /* verify keeps the old anchor */
@@ -157,6 +184,12 @@ void xv_sound_obstruction_report(unsigned frames)
                frames, queries, hits, same, diff, unavailable, other_view);
         return;
     }
+#if defined(XV_SOUND_CACHE_PROFILE) && XV_SOUND_CACHE_PROFILE
+    for (unsigned reason = 0; reason < 16; ++reason) {
+        unsigned n = __atomic_exchange_n(&miss_reasons[reason], 0u, __ATOMIC_RELAXED);
+        if (n) XK_LOG("[sound-cache-profile] %u frames: reason-mask %u casts %u (1 empty, 2 age, 4 listener, 8 endpoint; 0 verify-only)\n", frames, reason, n);
+    }
+#endif
     char tail[80] = "";
     if (verify) snprintf(tail, sizeof tail, "; verify: a reuse would answer the same %u, differently %u", n_verify_same, n_verify_diff);
     XK_LOG("[sound-obstruction] %u frames: rays %u reused %u cast %u (other flags %u)%s\n", frames, n_rays, n_reused, n_cast, n_other, tail);

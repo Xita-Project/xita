@@ -563,3 +563,56 @@ slot collisions). Keep the previously deferred set-associative candidate in
 verification mode until world-state invalidation and side effects are proven;
 its earlier hit rate alone does not justify enabling it. Hardware perf260
 qualification remains pending because the Xita HTTP endpoint is unavailable.
+
+## Sound cache miss/cast diagnostic
+
+Compile `xk_sound_obstruction.c` with `XV_SOUND_CACHE_PROFILE=1` to time its
+actual collision calls under synthetic phase ID `F01721B0` and report rejected
+legacy-cache lookups. Miss reasons are a bitmask: 1 empty slot, 2 expired age,
+4 listener displacement, 8 endpoint displacement. Multiple bits can apply;
+mask 0 is a verify-forced cast of an otherwise reusable ray. Empty entries
+are classified separately. Endpoint displacement alone does not distinguish
+sound motion from hash-slot collision, because the legacy entry stores no
+stable sound identity. Do not interpret every displaced endpoint as a hash
+collision or independently sum overlapping reason categories.
+
+Diagnostics add observers/counters only; cache acceptance, replacement and
+returned guest results are unchanged. Candidate set-associative mode retains
+its separate existing verification counters. Normal builds compile to the
+original direct calls with no profiling arrays or observers. Cross-compiled
+ARM O1 default `.text` matched the pre-edit source exactly (4,556 bytes).
+
+Private `sound-miss-phase-pi/` preserves compiler receipt, source/header
+copies, hashes, default-object comparison and harness. It uses the listener
+stage's guest objects and corrected phase collector, with the sound runtime
+rebuilt from current source (candidate cache disabled in this run). This is
+not a paired whole-harness speed comparison with the prior stage's older
+sound object. The 180-second ordinary Pi input sequence uses only cores 0/1.
+
+Completed `codex-sound-miss-20260926`: session 98569 terminal, intended timeout
+124, 68 reports, zero scope-overflow or fatal/trap lines. Miss-reason counts
+reconcile with cast counts in every reported sound window. Selected records
+are in `sound-miss-phase-pi/selected-windows.json`.
+
+Firing windows 1800 / 2040: wrapper inclusive 0.82 / 0.81 ms, self 0.04 / 0.04,
+actual collision child 0.77 / 0.77. Rounding explains small nonadditivity.
+Thus the actual casts dominate; optimizing cache arithmetic alone is not the
+large opportunity. Counts (each window covers 60 frames):
+
+| Reason mask | 1800 | 2040 |
+| --- | ---: | ---: |
+| 1: empty | 18 | 6 |
+| 2: age only | 382 | 377 |
+| 8: endpoint only | 935 | 927 |
+| 10: age + endpoint | 23 | 25 |
+| 14: age + listener + endpoint | 4 | 1 |
+| Total casts | 1,362 | 1,336 |
+
+Rays/reused: 4,915/3,553 and 4,860/3,524. Endpoint-only rejection accounts for
+about 69–70% of firing-window casts; any age involvement about 29–30%.
+Earlier non-firing samples were age dominated, so do not generalize that
+live observation to the firing workload. Next distinguish endpoint movement
+from different spatial cells mapping to the same slot, or profile the actual
+collision descendants. Extending TTL cannot solve most firing misses and
+would increase stale-world risk. No cache policy change or Vita gain is
+established. All diagnostic jobs are terminal; perf260 remains undeployed.
