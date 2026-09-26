@@ -519,3 +519,34 @@ After confirmed boot, run texture-cdram-candidate/launch.sh (same saved-test
 profile and 360p settings); launch has NOT yet been started. Keep-awake process
 134059 remains active. Need actual [texture-memory] CDRAM confirmation, screenshot,
 settled frame distributions and active gameplay before drawing conclusions.
+
+### 2026-09-26: perf238 CDRAM verified, no demonstrated FPS benefit
+
+Upload session30080 completed verified=true, boot_confirmed=true, slot0;
+payload SHA d2b6cb641f3dc46c26c2511c69bdfde77a88e993420f2c5a6d2a41b84ebe2511,
+34,755,238 bytes. Launched once in session65534/PID210485 with tag
+perf238-texture-cdram-20260926. Collector session92613/PID211396 completed
+normally; it did not restart or change the launch. Watcher remains active.
+
+startup.log confirms perf238, `[texture-memory] 32768 KiB CDRAM pool`,
+640x360 rendering, and after-gfx free main 266240 KiB / CDRAM 56320 KiB.
+This is the intended placement, not fallback. pod238.png frame6058 was viewed:
+same AR60 lifepod, no obvious new material/texture/lighting regression.
+
+Settled 1200 intervals, end frames6360..7500: mean77.075359ms /12.9743FPS,
+p50 75.688ms, p95 86.764ms, p99 119.795ms, max172.705ms;
+1199 >50ms, 24 >100ms, zero >200ms. Baseline perf237 77.602135ms and
+perf236 77.087804ms: NO demonstrated FPS gain. Do not market this as a speedup.
+Texture pool placement alone is not the dominant lifepod limit in this test;
+this does not rule out bandwidth elsewhere or shader work.
+
+Followed with 5s forward, 3s right camera turn, 2s AR fire, then pad release.
+outdoor-fire238.png frame8339 shows outdoor terrain/trees, muzzle flash and
+AR36; remote log download after-fire.log succeeded. This is only a short
+movement/effects smoke test, not sustained NPC combat, audio verification,
+checkpoint qualification or the required 15-minute active gameplay session.
+Current Vita remains perf238 outdoors; lease refresher134059 still owns wake.
+The source option stays off by default. Main-memory headroom improved 32MiB,
+but that is not progress toward the FPS acceptance criterion by itself.
+Next pursue substantial shader/pass work reduction; avoid another pool-placement
+trial without new evidence. Target 20FPS remains unmet.
