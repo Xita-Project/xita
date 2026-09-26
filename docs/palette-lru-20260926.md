@@ -74,3 +74,37 @@ polled to completion; exclude loading. Perf262 remains the previous slot.
 Next capture settled ordinary lifepod and outdoor/weapon gameplay, joining cache
 counters with measured Present intervals and slow-frame counts. No new trace or
 heavy per-call timers should contaminate those timing windows.
+
+## First ordinary hardware observation
+
+Launch session 18014 completed. The first readiness collector stopped because
+the remote client correctly refuses to overwrite an existing log. After its
+terminal failure was confirmed, the collector was fixed to use unique capture
+names and restarted without restarting Xita. Retry session 52325 completed.
+Both `idle-before.png` and `idle-after.png` show the same stationary lifepod,
+AR magazine 60. Loaded/active/director telemetry preceded the measurement.
+
+Perf263's complete windows inside timing frames 5429–6240 contain 780 intervals:
+mean 55.798 ms (17.922 FPS), p50 53.715, p95 72.423, p99 102.089, max 121.264;
+532 exceeded 50 ms, 8 exceeded 100 ms. No unavailable samples. This is not 20 FPS.
+
+A separate perf262 reference from the same lifepod, excluding the trace and at
+least 120 following frames, contains 600 intervals: mean 55.300 ms (18.083 FPS),
+p95 73.298, p99 88.320, max 125.745; 383 over 50 ms, 4 over 100 ms. Separate runs
+do not establish the significance of this difference. **No FPS gain demonstrated.**
+
+Last ten 60-frame cache reports per run (`reuse-comparison.json`) show:
+
+| Metric | perf262 round-robin | perf263 LRU |
+| --- | ---: | ---: |
+| Hits/frame | 10.275 | 10.545 |
+| Misses/frame | 9.218 | 8.965 |
+| Evictions/frame | 7.488 | 6.995 |
+| Reused matrices/frame | 80.920 | 85.975 |
+| Matrix hit fraction | 42.03% | 44.56% |
+
+These reports show modestly better reuse in this scene, not a whole-frame speedup.
+Retain the trial for active gameplay assessment. Started the bounded ordinary
+gameplay collector (session 20673): five-second AR hold, recovery, five seconds
+forward, then a settled outdoor interval. Its images must prove firing and actual
+location before those timing labels are accepted. No further deployment started.
