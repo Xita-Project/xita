@@ -30,11 +30,13 @@ hardware qualification are required before integration.
 
 Private artifacts: `effect-physical-slots/host`, `arm`, `regen`, `regen.log`.
 The regeneration completed (session 93762 terminal). A matching no-register
-baseline regeneration is active as local exec session 81276; poll that handle,
-do not restart on observation timeout. Output is `effect-physical-slots/baseline`
+baseline regeneration completed successfully (session 81276 terminal). Output is `effect-physical-slots/baseline`
 and `baseline.log`. Nothing is running on the Pi now.
 
 Next: compare regenerated baseline with the maintained target body; build a
 full-context/memory differential harness with explicit callee contracts and
 representative paths, then validate actual game queries/captures before any
 Vita deployment. Preserve the known-good rollback and all existing hooks.
+
+The regenerated baseline target body is byte-identical to the maintained
+point-location stage target (`baseline-identity.json`). No jobs remain active.
