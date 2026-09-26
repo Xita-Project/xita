@@ -1108,3 +1108,15 @@ messages and a one-time fast-mode admission message, leaving the prefix logic
 unchanged. Host admission tests pass with a shim of the Vita critical log API.
 The source correction is awaiting the final stage rebuild; no hardware fast-mode
 performance result has been claimed.
+
+
+Perf245 final stage build succeeded with the critical log sink. VPK
+scene-index-candidate/xita-perf245c.vpk: 55,073,978 bytes, SHA256
+`e0d0e4c2fbda6d802fa1e96603dc3b2fb8d7a7ef219aa6b3053d3d1d21775f14`.
+Payload 34,767,298 bytes, SHA256
+`c6891934dd8009fbd9c06b2946bbf338d27f9662da003adda6103a3a89fb9ac1`.
+Contract unchanged; only game-a.self/boot-game.txt changed versus243.
+Previous perf244 captures/receipts preserved with perf244- prefixes. Old244
+watcher explicitly stopped before deployment; keepawake remains running.
+Update session76102 is live; receipt deploy245.log. After it completes, launch
+verify245.sh and collect-verify245.py (tag perf245-index-verify-20260926).
