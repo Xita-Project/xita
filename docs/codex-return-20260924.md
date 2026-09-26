@@ -819,3 +819,10 @@ confirmed241driver244501/watcher245337 and uploading/applying242. Poll this SAME
 handle. After bootconfirmation run material-black-alpha-candidate/launch.sh and
 collect.py, logs gameplay-driver.log/collector.log. Keep awake134059 untouched.
 Source8059f904 local committed, no push. Full targetnotmet,241podgain retained.
+
+Saved241 outdoor baseline before242: outdoor-summary.json selects1200intervals
+end15600..16740, well after diagnostic trace11441 and movement9330. Mean73.745615ms,
+13.56013FPS,p5072.153,p9585.997,p99127.441,max168.824;1185>50ms,30>100ms,
+0>200ms. Same stationary outdoor view after the earlier scripted movement;
+future outdoor comparison needs view qualification, not just map name. Update
+15400 uploaded all34765806bytes; verification/apply still pending, do not restart.
