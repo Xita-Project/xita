@@ -97,3 +97,40 @@ only. Code size is not runtime speed. An identically instrumented gameplay
 candidate retains the existing collision child observers and aligned B6210 /
 1122A0 bodies; only the two target shift expressions change. Hardware remains
 perf260; this experiment has not been packaged or deployed.
+
+## Model-collision child: 1731D0
+
+The pinned fork's `source/physics/collision_models.c`,
+`collision_model_test_vector`, has a matching structural role: iterate model
+nodes, choose a region permutation/BSP, invert each eligible node matrix,
+transform the query point/vector and test that BSP against the nearest hit.
+Retail 1731D0 calls B6210, B5EA0, B5E40 and 88E90 in that order, consistent
+with inverse, point transform, vector transform and BSP query respectively.
+This adds concrete semantic anchors for the existing child timing results.
+
+Verified retail layout/access observations from the maintained translation:
+
+- Instance model pointer +4, permutation array +8, matrices +0x0c.
+- Model node count +0x28c, node array +0x290; node stride 0x40.
+- Node region is a 16-bit field +0x20; BSP count/pointer +0x34/+0x38.
+- Selected BSP stride 0x60; matrix stride 0x34.
+- Crucial difference: at 173232 the retail routine loads a **byte** permutation
+  and zero-extends it into AX, then compares AX against 0xffff. The reconstructed
+  reference instead uses a signed short permutation and tests NONE. Therefore
+  interpreting byte 0xff as NONE would alter the retail control flow: the
+  observed retail path clamps 255 against the BSP count instead. Preserve the
+  executable's behavior until separately proving a game bug and intended fix.
+
+This prevents a direct source substitution. A native candidate should first
+target retail node filtering/setup while retaining validated transform/BSP
+callees and closest-hit order. Do not assume inverse-matrix caching is free:
+the measured child is only about 0.09 ms in the instrumented Pi firing windows,
+and a byte-comparison cache needs to account for animated matrices, scale,
+guest aliasing and per-thread ownership. No such cache is enabled.
+
+The two-shift gameplay run completed (session 53779, planned timeout 124,
+69 reports, no scope-overflow/fatal/trap lines found). Firing-window self times
+were 0.64/0.69 ms versus aligned baseline 0.65/0.66 ms; settled median self
+was 0.26 ms in both. Separate instrumented runs establish no measurable gain.
+Retain the private candidate as groundwork, not a demonstrated optimization.
+Receipt: `object-walk-dead-shifts/gameplay/comparison.json`.
