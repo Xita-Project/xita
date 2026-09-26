@@ -835,3 +835,21 @@ gameplay-driver.log,collector.log. Keepawake134059 confirmed live. Wait on these
 same processes for pod242.png, settled-summary.json and qualification.json;
 then inspect generic _axisblack links/visuals and do outdoor movement/effects.
 No hardware242performance result yet; original20FPS acceptance stillnotmet.
+
+While242launch78856/collector95263 continue normally, inspected old cutout
+restriction provenance: main.c force-off comes from39de2bfda; docs/slot-pipeline-
+20260907.md says UNVALIDATED experiment, and docs/alpha-range-audit-20260907.md
+says dedicated GREATER shader was prepared but not hardware-tested. No documented
+failure found in these notes; don't assume it is broken or blindly enable it.
+Prepared OFFLINE follow-up only by applying existing specialize_ps_cutout to
+new genericblack154Cg. Compiled isolatedXVSC session50679:16shaders0failures,
+gtblack_ps_154066FD_7F_t8.frag.gxp1228bytes,78instructions4temps versus generic
+black155/9. GXP capabilities at0x14 identical and declared/aligned size valid.
+Original math before alpha block/return unchanged by existing generator; GREATER
+selected only for enabledfunc4 would preserve alpha/NaN rejection. Runtime242
+unchanged; this variant NOT embedded/deployed/routed. Candidate for later only
+after current242measurements, perhaps explicit guarded mode2 ofMATERIAL_BLACK
+rather than changing the old global startup override. No FPS claim for it.
+Old idle compiler198830 ignored TERM and was explicitly cleaned withKILL before
+new isolated compiler launch. Do not touch ClaudeHalo2 emulator resources.
+Current242watcher reporting loading(menu)frames at90s; no qualified resultyet.
