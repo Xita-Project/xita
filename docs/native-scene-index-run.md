@@ -130,3 +130,10 @@ Thumb A9 admission cases verify an in-range global batch, an over-capacity bound
 and a cursor at the excluded end, alongside private-stack/foreign-caller checks.
 Hardware verification remains pending. The source-stage reference census is
 private at scene-index-candidate/global-index-references.json.
+
+
+The explicit global-list differential fixture (`--hook --global-list`) also
+passes on host ASan/UBSan and isolated Pi Thumb A9: 2,400 cases per mode, 8,678
+matching yield states, and 5,987 fast batches. This maps the scene-list virtual
+pages to separate arena offsets and tests a remap at the original handoff.
+The same signed-threshold, page-crossing, bound/input/stack mutation cases apply.

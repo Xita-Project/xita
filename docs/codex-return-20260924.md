@@ -1151,3 +1151,11 @@ Next: package246, deploy (same only-two-entry payload contract), run verify246.s
 and collect-verify246.py. Require actual completed comparisons and inspect pod
 screenshot; then normal mode2 cold launch, keeping previous qualified options.
 Do not count 244 stderr silence or245 coarse-threshold silence as validation.
+
+
+Perf246 build/package succeeded. VPK55,075,082 bytes SHA256
+`1222c576f9ea602f4b44a8200f4cfb581cacc688e2d89edf135ca5fb4addc840`.
+Update session79204 currently transferring; final payload receipt deploy246.log.
+Additional `--hook --global-list` fixtures pass on host sanitizers and Pi for
+both modes: 2400 cases,8678 yields,5987 fast batches. Source tests added without
+changing the currently deploying payload. See scene-index-global-differential.

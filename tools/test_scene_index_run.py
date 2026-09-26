@@ -19,6 +19,7 @@ def main():
     ap.add_argument("--reference", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--hook", action="store_true", help="also exercise helper admission and verify/fast routing")
+    ap.add_argument("--global-list", action="store_true", help="exercise the bounded scene-global virtual list")
     args = ap.parse_args()
     source = args.reference.read_text()
     function = source.split("void f_00054010(xctx *restrict c)\n", 1)[1].split("\nvoid f_", 1)[0]
@@ -48,9 +49,23 @@ def main():
         text += "return;\n}\n"
     reference = args.out / "reference.c"
     reference.write_text(text)
+    fixture = ROOT / "tools/tests/scene_index_run.c"
+    if args.global_list:
+        original_fixture = fixture.read_text()
+        replacements = {
+            "{0x1800, 0x1ff0, 0x1ffc, 0x2000}[k % 4]": "{0x38be14, 0x38bff0, 0x38bffc, 0x38c000}[k % 4]",
+            "g_xpt[2] = 0x9000;": "g_xpt[0x38c] = 0x9000;",
+            "g_xpt[i] = i * 4096u;": "g_xpt[i] = i * 4096u;\n    g_xpt[0x38b] = 0x1000; g_xpt[0x38c] = 0x2000;",
+        }
+        for old, new in replacements.items():
+            if original_fixture.count(old) != 1:
+                raise SystemExit("global-list fixture layout drift")
+            original_fixture = original_fixture.replace(old, new)
+        fixture = args.out / "global_fixture.c"
+        fixture.write_text(original_fixture)
     cmd = [os.environ.get("CC", "cc"), "-O2", "-g", "-fno-strict-aliasing",
            "-fsanitize=address,undefined", "-no-pie", "-I" + str(ROOT / "recomp"),
-           str(reference), str(ROOT / "tools/tests/scene_index_run.c"),
+           str(reference), str(fixture),
            "-o", str(args.out / "test")]
     (args.out / "command.json").write_text(json.dumps(cmd, indent=2) + "\n")
     subprocess.run(cmd, check=True)
