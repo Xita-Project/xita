@@ -520,3 +520,46 @@ call remains translated. Reusing that subtree at a new boundary requires
 separate guest-context/flags/x87/memory equivalence tests; existing light
 query validation does not establish the new boundary. Perf260 hardware
 qualification remains pending; do not infer Vita gains from these Pi times.
+
+## Listener preparation split (September 26)
+
+Private `listener-phase-pi/` derives shards 004/005 from the combined-service
+stage and retains its other objects and corrected 64-scope owner collector.
+Five direct-call probes were added beneath 26A50 and 2B460. 25590 is a leaf
+(no child probes). Crucially, the active `xv_sound_ray()` branch at 2B549
+has an explicit wrapper probe `F002B549`; the guest 1721B0 call is only the
+fallback branch when the sound hook is compiled out. `F002B549` is a synthetic
+diagnostic label, not an executable guest address.
+
+Observer removal plus whitespace normalization reproduces both input shards;
+`patch-audit.json` records the checks. Staged multi-parent report/reset and
+scope overflow/isolation tests passed. Build and transfer completed, then
+`codex-listener-20260926` ran the same 180-second a30 two-burst/reload sequence
+on Pi cores 0/1. Session 8140 is terminal: intended timeout 124, 65 reports,
+no scope-overflow warnings or fatal/trap lines. No candidate was deployed.
+
+Firing windows 1800 / 2040, milliseconds per reported Pi frame:
+
+| Boundary | Inclusive | Self | Children |
+| --- | --- | --- | --- |
+| 26A50 | 0.64 / 0.67 | 0.09 / 0.08 | 2B460 0.53 / 0.56; 25590 0.03 / 0.03 |
+| 2B460 | 0.93 / 0.97 | 0.12 / 0.13 | sound wrapper F002B549 0.77 / 0.80; 551D0 0.04 / 0.04 |
+
+These aggregate routines across all timed parents; do not add their inclusive
+values. Additional instrumentation and scheduling affect these values, so
+this is attribution, not a performance regression comparison with the previous
+run. Full rows: `listener-phase-pi/selected-windows.json`.
+
+Sound-cache counters in those 60-frame windows: 4,903 rays / 3,563 reused /
+1,340 cast; then 4,824 / 3,609 / 1,215. That is approximately 73–75% reuse
+already. Reuse is not a newly gained speedup. Native-1721B0's total call count
+also includes unrelated callers and cannot isolate audio cost by itself.
+
+Decision: do not prioritize replacing 25590's distance arithmetic or 26A50's
+four-listener scan. Most of this measured chain is the existing sound-ray
+wrapper and its remaining collision casts. Next isolate actual cast time
+inside that wrapper, then investigate why misses occur (movement, expiration,
+slot collisions). Keep the previously deferred set-associative candidate in
+verification mode until world-state invalidation and side effects are proven;
+its earlier hit rate alone does not justify enabling it. Hardware perf260
+qualification remains pending because the Xita HTTP endpoint is unavailable.
