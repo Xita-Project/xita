@@ -86,3 +86,38 @@ Build 56643 and packaging 36333 completed successfully. Initial deployment
 session 7208 is terminal failure. Keep-awake refresher PID 134059 is still alive;
 its in-app renewal cannot succeed until HTTP returns. Do not use companion
 press/nosleep as a substitute. Source changes are locally committed, not pushed.
+
+## Pi attribution (completed)
+
+The 180-second ARM run on cores 0/1 completed its planned timeout (124), with
+66 frame reports. It used the existing native-object-query host harness and
+four recompiled shards with the same five instrumented function bodies as the
+Vita candidate (byte equality checked). The surrounding host runtime is older,
+headless, and has different scheduling; these are supporting attribution data,
+not Vita timings, a visual test, or an optimization acceptance result.
+
+Script: campaign buttons at frames 150/300/450; fire at 1800 for 120 frames,
+reload at 1930, fire at 2040 for 120 frames. The report labels are host frame
+markers and asynchronous reporting may straddle an input boundary. No exact
+weapon-tick alignment is claimed. The new impact/weapon call reports establish
+that the input exercised these paths.
+
+- Near report labels 1800 and 2040, C0EA0 costs 1.62/1.76 ms per host frame,
+  including C0C60 at 1.52/1.66. C0EA0's residual is only 0.09 in each.
+- At labels 1860 and 2100, 1746F0 costs 0.75/0.75, including sound entry 2B610
+  at 0.68/0.69; its child 26B10 accounts for 0.62/0.65. This directs the impact
+  investigation toward sound setup. It does not mean effects are absent or
+  dispensable: small children can fall below the report's detail threshold.
+- C3A00 at label 2040 costs 0.56, including C2D30 0.31 and C26A0 0.15. It is
+  a smaller lead here than C0C60.
+
+Private evidence: `impact-phase-pi/{body-audit.json,phase-windows.json,run.log}`
+and `d3d-record2-work/pi-runs/codex-impact-phases-20260926.log`. No tick-phase
+overflow/abandon notices were found. Parent times overlap with their children.
+Next inspect C0C60 and 26B10's children to choose a useful replacement boundary;
+rewriting only their small caller wrappers would miss most of this measured cost.
+
+The Vita readiness watcher 63856 subsequently ended without an HTTP response;
+no retry upload happened and perf258 remains the last confirmed installed build.
+Companion display-on was requested without pad injection or nosleep. A user
+screen-status question is pending. Do not silently restart the failed watcher.
