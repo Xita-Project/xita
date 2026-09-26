@@ -363,3 +363,48 @@ Perf235deploy4893completed0 verifiedtrue slot1bootconfirmedtrue, payload34750566
 Perf235callback1 startupstalled: observerlog787lines endingfirst60framereport,no display-callback line; remote status33818timedout/stillpendingcheck, companion1.07reachable. Saveddisplay-callback-candidate/stalled-startup.log. Stoppedconfirmeddriver176136/watcher177184. Recovery.shsame235binarycallback0 launchedsession99008; env0confirmed,status235frame926awake3576responsive. Exactstallcauseunproven; sharedlogger mutex/file IO inGXMcallback unsafe diagnosticdesign. ReplacedcallbackXV_LOGwithSPSCsingle-slotcountermailbox,producerretainsaggregateifbusy,pumplogsafteracquire/copy/release. Variableframes>=60mustnormalizeactualcount. tools/tests/display_timing_mailbox.c hostASan/UBSan+PiARMcores0/1bothPASS1millionordered64bitpayloads/full/empty; session18564completed0. Private display-mailbox-candidate retained235stage+main/header; Vitaobjectcompile19551pendingorcompletedtoolresult. Notversioned/fullbuilt/deployed. Needcompilefinishthenbuild236/deploywithcallback1, retainrecoveryuntilready. Keepawake134059active. No callbacktimingevidence/noFPSgain.
 
 Displaymailbox Vitaobjectcompile19551completed0; diffcheckpassed. Hardwarepath stillunverified.
+
+Perf235callback0 recovery reachedpod: recovered-pod.png frame5934 viewedliveAR60samepod, recovered-before236.log1782710bytes. This confirmsrecovery,noproofexactpreviousstallcause. Perf236mailboxfullbuild76338completed0. code-onlypackage55067216bytesSHA896a4f098f989b4995e437fef77383feda9e1b1a1e59da8e3d973c2a2bd6a1a0; unchangedcontract775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897. Verifiedonlygame-a.self/boot-game.txtdifferfrom235withsameZIPnames. Stoppedconfirmedrecoverydriver177903/watcher179268. Announcedrestart; deploy87469activepayload34750898. display-mailbox-candidate/launch.shsame235settingswithcallback1; parsernormalizesactualreportcount>=60. Needbootconfirmthenlaunch/verifycallbackreports/pod/FPS. Keepawake134059active.
+
+Perf236deploy87469completed0 verifiedtrue slot0bootconfirmedtrue;payload34750898SHAedd2b4367619ccdda43f3fae4e77cfbd9cafbcdc308a319440273e202f9d1fba. Starteddisplay-mailbox-candidate/launch.sh, ordinaryisolateda30callback1. Needpollsamejob, verifyactualcallbackreports andloadedscene beforeconclusions. Keepawake134059retained.
+
+Perf236 callbackmailboxhardwareworks: launch44181/driver183626watch184484advanced, pod.pngframe5982viewedstationarysamepod. settled-pod.log2143024bytes; last20windows5640..6780mean77.541896ms12.89625FPS,p9587.59,p99131.42,max194.993,26>100ms0>200,all>50. Callback1200frames setup0.062568msvblank8.541253msmax27.592. Directcallbacklogging235stallnotreproducedwithmailbox; no15minqualification. Callbackexecutiondoesnotexplainwhole~32msdisplaygatedelay,stillcannotseparateGPUeligibilityvsbeforecallbackpreemption. NoFPSgain. Sourceaudit mainbackbufferusesselectedresolution; oldglobalhalfprecisiontrialunhelpful(docs/hardware-packet-timing-20260918.md),donotrepeat. Preparednative-resolution.shsame236/settingsonlyXV_RENDER_HEIGHT544; 31explicitoptions+XV_LEVEL=32 fitsremoteoverridecapacity. Announcedsinglecoldnative-resolutiondiagnostic,stoppedconfirmedobserver183626/184484,launchednative-resolution-driver.log. Needpollnewjob/effectiveresolutionstartup960x544,qualifysamepod,collectcallback/gates/GPUbounds/rawintervals. Restore360afterdiagnostic; donotattributeview/loadingdifferences. Keepawake134059active.
+
+Perf236native-resolution74560 verified startup cfg360ignoredremote544, effective960x544native; clocksreported444/222/222/166sameas360. native-pod.pngframe5722viewedmatchingstationarypod/AR60. native-settled.log2129667bytes; native-summary840intervalsfrom5760mean131.537313ms7.6024FPS,p95139.955,p99178.875,max279.385,832>100ms6>200ms. Compared3601200samples77.541896ms12.896FPS:large resolution-pathcost. Nativealsoeliminatesupscale,notpurepixel-countisolation;cannotdeclarefullyGPUbound. Callbacklast20reports setup0.060084msvblank7.676323msmax35.432, queuefirstinspection1.862967mshead80.861974ms1122/1200backbuffer+queuelimit,0pacing. Supportsrendering/fragment/framebufferworknextoverblindCPUpriorityadjustment. CompilerO3alreadyon; broadhalfprecisionandreplaceblendtrialsalreadyunhelpfuldonotrepeatblindly. Stoppedconfirmednativedriver187094/watcher187997afterannouncingrestore; restore360.shsame236settings+explicitHEIGHT360 launched, restore360-driver.log. Needverifyrestorationeffective640x360 thennext targetedgraphicscandidatewithcorrectness. Keepawake134059active. Goalnotmet.
+
+
+### 2026-09-26: material-pixel audit and opt-in cube-coordinate candidate
+
+Confirmed perf236 restoration to 640x360 from its startup log; remote status
+remains responsive and the lease refresher remains active. The historical
+settled a30 fragment census (frames 5400..8880, 30 samples) now has a private
+`world-census-candidate/settled-fragment-programs.json` summary. The largest
+reported programs average 0.958 screens / 2 draws (B5691565), 0.736 / 1
+(49E75D47), 0.5163 / 75.8 (154066FD), and 0.5 / 1 (842F21C9).
+These are rounded surviving-sample counts, not GPU execution times. The
+program list is top-N; absent entries are not proven zero. The census blend
+bucket includes masked ONE/ZERO replacement writes, so its large blended
+fraction does not establish transparent overdraw as the dominant cost.
+
+The B5691565 material has eight combiner stages, four texture lookups, and
+cube-mode coordinates applied to a 2D texture. A narrow build-time experiment,
+`XV_PS_CUBE_SELECT=1`, selects the same numerator and denominator before a
+shared division. Strict major-axis comparisons, tie-to-Z behavior, signs and
+Z denominator floor are retained. No approximation, precision reduction,
+texture removal, blend changes or draw reordering. It is OFF by default.
+Compiler lowering may make this equivalent or slower; no speedup claimed.
+
+`tools/test_cube_uv_select.py` emits the actual old/new helper bodies into a
+portable C++ arithmetic harness. PC ASan/UBSan and static ARMv7 hard-float on
+Pi CPUs 0/1 each passed 1,378,375 triples (random bits, axis ties, signed zero,
+subnormals, extremes, infinity and NaN; finite results compared bitwise,
+NaN payload differences ignored). This does not validate Cg lowering or GPU
+sampling derivatives. Default generator output remains byte-identical over
+1,644 captured texture-mode variants; existing program tests pass 2,292
+identity checks and 1,526 source-equivalence cases.
+
+Next: compile ONLY the targeted candidate and corresponding baseline through
+libshacccg, inspect generated program resources/code, then consider a bounded
+hardware deployment with a rollback and unchanged material appearance. Do not
+regenerate/package all shaders or treat Pi arithmetic tests as shader/FPS proof.
+Perf236 remains installed; the opt-in shader candidate is not deployed.
