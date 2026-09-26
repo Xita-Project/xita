@@ -1021,3 +1021,41 @@ Stopped confirmeddiagnosticwatcher276403. Announcednormalrestore; launched
 scene-callback-candidate/restore.sh tagperf243-normal-restored-20260926,
 phases0, allretainedshader/native/deferredsettingsunchanged. Awaitenvreceipt;
 keepawake134059retained. Goalstillincomplete; noadditionalFPSgainclaimed243.
+
+
+### Scene index prefix implemented and ARM verified, not installed
+
+New authored prototype xk_scene_index_run.h and pinned retained-loop comparison
+tools/test_scene_index_run.py + tools/tests/scene_index_run.c. Batches only
+54132's signed consecutive-index prefix, stays within one mappedpage, preserves
+fullregister/flag/budgetstate, does no guestwrites, stops beforeloop-exit/yield;
+minimum4 entries. Hardwareadmission/productionhook NOT implemented. Needactive
+helpercontext+ownedordinaryinputs, activeX_PT mapping, no diagnosticobservations
+bypassed; preserveoriginalfallback. Full details docs/native-scene-index-run.md.
+
+Host ASan/UBSan + PiThumbA9compile pass2400cases/5984batches/8678yieldstates,
+9declines. Private scene-index-run-host-v2 reference.c remainsoutsidegit.
+Firstv2costrun overlapped profileharness; discard its timing, correctnessstill
+valid. Isolatedpi-isolated-result.txt: original/candidate ns/call length1 49/59.5,
+2 55.1/82.4,3 62.4/106.3,8 99/97.9,32 284.8/147.4,128 983.6/312.3,
+512 3788.7/963.2. NohardwareFPSprojection.
+
+Real a30 original-path Pi histogram completedplanned120s(rc124),38reports.
+scene-index-profile/build.py modifiesonlycode009overpoint-locationhostobjects;
+run scriptpoint-location-build/profile-current.sh, tagcodex-index-runs-20260926,
+cores0/1, nativesfast+deferred2. Settledframe>=1800:121completegroups,
+123904runs,21221267steps,171.27steps/run,87.47%>8,37.47%>128.
+Parserinitiallyhitinterleavedpre-settledlines; correctedparserrequires12numeric
+bins+sum=runs andrejectsbadgroups. Settledrejected0. summary.jsonpreserved.
+
+Private scene-index-verify/build.py predicts a copiedxctx at first54132entry
+perrun, lets ORIGINAL code advance nbackedges, comparesallcontextbytes there,
+aborts onmismatch/prematureloop-exit. Originalpathremainsactive; nofakecallback
+or schedulerreplacement. Planned120srun99717completed0(wrapper),remote124,
+37reports, lastverificationframe2255/356352prefixes/0mismatches.
+Receipts scene-index-verify/summary.json; full logs d3d-record2-work/pi-runs/
+codex-index-{runs,verify}-20260926.log. Both Pijobsfinished; noH2interference.
+
+Vita remainsnormalperf243 (phases0),keepawake134059active; scene-indexprototype
+notdeployed. Nextintegratehelper-only opt-in andhardwareverify beforeordinary
+fastqualification. Existing shaderimprovementsretained. Goalnotmet.
