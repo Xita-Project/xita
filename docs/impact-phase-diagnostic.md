@@ -154,3 +154,30 @@ The Vita endpoint remains unavailable after the single quit/launch sequence;
 FTP still responds and perf259 has not been installed. Await the screen-status
 reply while continuing work that does not require hardware access. No new FPS
 gain or crash fix has been established by these diagnostic runs.
+
+## Weapon creation and sound-cache census
+
+A further private ARM probe adds direct-call timers to C02F0, 95680, 26A50
+and 2B460 (73 emitted sites); 94280 has no direct guest calls to wrap. All
+observer-stripped translated shards remain identical to the previous supporting
+harness. Full ARM build 88809 passed. No Vita payload was changed.
+
+The preceding Pi run's sound counters rise from approximately 360 native casts
+per 60-frame idle window to 1,600 during firing, while total queries grow from
+roughly 3,400 to 5,600. The sound cache already exists, is enabled at six frames,
+and hashes sound endpoints; do not propose adding this existing cache as new.
+
+The new probe also observes hypothetical two-way and four-way retention using
+the same 1,024-entry capacity, frame lifetime and endpoint distance predicates.
+It returns the original cache/guest answer on every call; hypothetical hits do
+not substitute collision results. It counts original misses as empty, expired,
+listener-distance or sound-distance failures, in that order. These counters
+select whether further cache work is justified; they do not establish output
+correctness or a frame-rate improvement for an alternative policy. Cache
+thread ownership and result correctness must be audited before implementation.
+
+Private directory `weapon-create-phase-pi/` contains the patch audit, modified
+observer unit and link script. Run 52821 is active for a planned 180 seconds on
+Pi cores 0/1, tag `codex-weapon-create-phases-20260926`, with the same two-burst
+input schedule. Poll this handle and inspect its completed log. The Vita
+endpoint is still connection-refused; no repeated restart or update was made.
