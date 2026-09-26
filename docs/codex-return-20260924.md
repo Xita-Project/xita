@@ -1630,3 +1630,45 @@ No temporaryoverride remains onsavedcfg. Runningworkerkeepsstartuppolicy0; remot
 launchalsoownskey0forlaterdashboardhandoffreload. No newrestartneeded.
 Newlaunch90406/collector16290 remainactive (levelstillloading); keepawake134059.
 Next pollsamecollector, don'tduplicatetest. No settledhardwareFPSresultyet.
+
+
+### Qualified perf251 result and subsequent network loss
+
+Normalpodcollector16290 finished0. pod251-fast.png frame6369 viewed matchingpod.
+1200intervals6300..7440:56.083419ms/17.83058FPS,p50 53.440,p95 72.666,
+p99 108.853,max183.038;845>50ms,18>100ms,0>200ms. Mode2objectquery,
+phase0,shader/indexactivationandallworkerconsole0 confirmed. Versus25056.6287ms/
+17.6589FPS: no meaningful demonstrated gain. Cadencephase3still101.9931ms,
+11of20>100ms (was104.3167ms,14of20). Consoleduplicateoutputdoesnotremovehitch.
+Keepoptionexperimental,notpersistent. OriginalcfgRESTOREDalready(restore_requiredfalse).
+
+Addedtools/frame_times.py --cadence-period (commit35a38b2c), preservesoverall
+summaryandalloutliers; infersactualframe=end-len(values)+1+offset. Manualfixture
+checksunalignedwindows,gaps,unavailablezero,invalidperiod,unchangedoverallsummary;
+real250phase3reproduces14over100ms/104.3167ms exactly. Privatebaseline250-cadence.json,
+pod251-cadence.json. opening251.png frame5057 isBLACKTRANSITION, notcanyonproof.
+Do notuseits26FPSoverlayascutsceneperformance. No fullopeningqualification.
+
+Movement2492 completed: forward5s/right3s/AR2s/neutral. Status8535. outdoor251.png
+frame9329 viewedintactterrain/weaponAR30. Outdoorcollector84461/PID397731live,
+window9480..10620, scriptscollect-outdoor251.py/log. Howeverdevicelostnetwork
+beforewatchcapturedwindow: lastarchivedcompleteframe9060, ZEROoutdoorwindows.
+RemoteHTTPreportsENETUNREACH/no route tohost;ping2packetlost. ThisdoesNOTprove
+appcrashorintentionaldisconnect. Do notrestartbecauseofnetworktimeout. Existing
+collectorwaits360sdeadline; don'tduplicate. Watchtagperf251-periodic-console-startup-20260926
+andlaunch90406remainliveunlessauthoritativestatussaysotherwise.
+
+Keepawake134059 stillalive8h36m, butcannotrenewwhiledeviceunreachable. Userasync
+questionpending: stillHalo/crashscreen/asleep? Noanswerrequiredforofflinework.
+NoassumptionthatVitaactuallyawakeafterlossofcontact. Savedpodlogsafe.
+Clockauditofstartup:500request,helperbind0,kernel+usergetters444; no measured
+cycleevidence, no clockschanged. Generalguestphaseoff/ownerphaseonly120clockcalls
+per60frames, notanaccidentallyenabledfullprofiler. Noclaimaboutphysical500vs444.
+
+Next: finishoutdooronlyifconnectionreturns; otherwisecontinueofflineperformance
+work. Strong earlierGPUshaderwinsremainstacked; selectedopaque/alpha-preserving
+fragment-costdiagnosticisstillonlyplannedinrender-bottleneck-plan (notimplemented).
+Avoidrepeating227drawroutetimersalreadyrecorded:7A130~2.41msincl/.73remainder.
+Native66390isthinwrapperarounddrawroutes,notalargeindependenttarget. Potential
+periodicfileoutput/schedulingstillnotisolated; consoleexperimentnegative.
+No newVPK beyond251; no push. Goalactive, not20FPScertified, remaininggatesunmet.
