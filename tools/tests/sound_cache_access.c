@@ -58,6 +58,21 @@ int main(void)
     xv_sound_cache_invalidate(&state);
     __atomic_store_n(&state.guard, 0u, __ATOMIC_RELEASE);
     assert(!xv_sound_cache_begin(&state, &q, &fresh, &hit));
+    /* Different original vectors can round to the same reconstructed endpoint. */
+    xv_sound_cache_invalidate(&state);
+    q = query(1); q.exact_ray = 1;
+    q.listener_epsilon2 = q.sound_epsilon2 = 0;
+    q.listener[0] = 0x1p24f; q.vector[0] = 0.25f;
+    q.sound[0] = q.listener[0] + q.vector[0];
+    assert(!xv_sound_cache_begin(&state,&q,&fresh,&hit));
+    assert(xv_sound_cache_commit(&state,&fresh,1));
+    assert(xv_sound_cache_begin(&state,&q,&fresh,&hit) && hit == 1);
+    q.vector[0] = 0.5f;
+    assert(q.listener[0] + q.vector[0] == q.sound[0]);
+    assert(!xv_sound_cache_begin(&state,&q,&fresh,&hit));
+    q.vector[0] = 0.25f; q.exact_ray = 0;
+    assert(!xv_sound_cache_begin(&state,&q,&fresh,&hit));
+    xv_sound_cache_invalidate(&state);
     pthread_t a, b, reset;
     assert(!pthread_create(&a, NULL, worker, (void *)(uintptr_t)1));
     assert(!pthread_create(&b, NULL, worker, (void *)(uintptr_t)2));

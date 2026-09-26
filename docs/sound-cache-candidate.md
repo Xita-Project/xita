@@ -150,3 +150,31 @@ is not yet established as a collision-world revision and must not be used as
 one without checking mutation boundaries. Actual cached reuse remains disabled.
 Next: preserve original ray inputs, audit world/view invalidation, rerun real
 queries, then qualify on hardware. Perf258 remains last confirmed installed.
+
+## Original ray key
+
+Zero-tolerance candidate queries now retain the original start/vector bits as
+well as reconstructed endpoints. Exact-ray entries cannot match approximate
+entries. This avoids aliasing when different vectors added to a large start
+round to the same endpoint. The regression uses start 2^24 with vectors 0.25
+and 0.5: equal reconstructed endpoints must still miss across vectors.
+The extra vector costs 12 bytes per entry (12 KiB for 1,024 entries); entry
+capacity is unchanged. Existing approximate verification remains available;
+the installed legacy runtime behavior is unchanged.
+
+Host ASan/UBSan and Pi ARM access tests passed, including vector aliasing,
+input ownership, concurrent views and invalidation. Host sanitized policy tests
+passed. Both runtime units compiled, and the ARM harness linked. Private
+receipts: `ray-key-tests.log` and `ray-key-compile.log`.
+Whole-game verification is running as `codex-sound-cache-ray-key-20260926`
+on cores 0/1, local exec session 69245. It preserves actual collision results
+and uses the same two-burst sequence and zero tolerances. Poll that existing
+handle; do not restart based only on observation timeout.
+
+Initial collision boundary audit: generated 1721B0 tests object-related flag
+bits, traverses references through 39BE58/2FC6A0/2FC6A4, and manipulates query
+state at 2D2FAC/2D2FA9/2FC684. A page-table identity or display-frame number
+alone is not a demonstrated collision-world revision. Next inspect the actual
+sound-flag paths and mutation ownership, including query side effects, before
+wiring an epoch or enabling cached returns. No complete invalidation proof or
+new hardware performance measurement exists yet.

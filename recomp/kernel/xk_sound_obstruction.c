@@ -80,7 +80,8 @@ void xv_sound_ray(xctx *c)
     if (!mode || X_M32(sp + 4u) != 0xC0E1u || X_M32(sp + 16u) != 0xFFFFFFFFu) { if (mode) n_other++; f_001721B0(c); return; }
     uint32_t pa = X_M32(sp + 8u), pv = X_M32(sp + 12u);
     float a[3] = { f32(pa), f32(pa + 4u), f32(pa + 8u) };
-    float b[3] = { a[0] + f32(pv), a[1] + f32(pv + 4u), a[2] + f32(pv + 8u) };
+    float vector[3] = {f32(pv), f32(pv + 4u), f32(pv + 8u)};
+    float b[3] = {a[0] + vector[0], a[1] + vector[1], a[2] + vector[2]};
     if (candidate_ways) {
         /* Avoid undefined float-to-int conversion in the diagnostic hash. */
         for (unsigned i = 0; i < 3; ++i) {
@@ -97,6 +98,8 @@ void xv_sound_ray(xctx *c)
         query.ways = (unsigned)candidate_ways; query.hash = h;
         query.domain = (uintptr_t)X_PT; query.frame = xd3d_frame();
         query.lifetime = (uint32_t)mode;
+        query.exact_ray = eps_l2 == 0 && eps_s2 == 0;
+        memcpy(query.vector, vector, sizeof vector);
         query.listener_epsilon2 = eps_l2; query.sound_epsilon2 = eps_s2;
         memcpy(query.listener, a, sizeof a); memcpy(query.sound, b, sizeof b);
         xv_sound_cache_ticket ticket;

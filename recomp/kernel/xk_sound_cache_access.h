@@ -10,6 +10,8 @@ typedef struct {
     uint32_t hash, epoch, frame, lifetime;
     uintptr_t domain;
     float listener[3], sound[3], listener_epsilon2, sound_epsilon2;
+    float vector[3];
+    unsigned exact_ray; /* require original start/vector bits in addition to endpoints */
 } xv_sound_cache_query;
 typedef struct {
     xv_sound_cache cache;
@@ -44,7 +46,7 @@ static inline int xv_sound_cache_begin(xv_sound_cache_access *state,
     int found = xv_sound_cache_probe(&state->cache, query->ways, query->hash,
         query->domain, query->epoch, query->frame, query->lifetime,
         query->listener, query->sound, query->listener_epsilon2,
-        query->sound_epsilon2, &answer, &ticket->matched);
+        query->sound_epsilon2, &answer, &ticket->matched, query->exact_ray ? query->vector : NULL);
     if (__atomic_load_n(&state->pending_reset, __ATOMIC_ACQUIRE)) {
         ticket->valid = 0;
         found = 0;
@@ -62,8 +64,9 @@ static inline int xv_sound_cache_commit(xv_sound_cache_access *state,
     if (!__atomic_load_n(&state->pending_reset, __ATOMIC_ACQUIRE) &&
         state->generation == ticket->generation) {
         const xv_sound_cache_query *q = &ticket->query;
-        stored = xv_sound_cache_store(&state->cache, q->ways, q->hash, q->domain,
-            q->epoch, q->frame, q->listener, q->sound, hit);
+        stored = xv_sound_cache_store_ray(&state->cache, q->ways, q->hash, q->domain,
+            q->epoch, q->frame, q->listener, q->sound, hit,
+            q->exact_ray ? q->vector : NULL);
     }
     __atomic_store_n(&state->guard, 0u, __ATOMIC_RELEASE);
     return stored;

@@ -13,10 +13,10 @@
 
 #define XV_SOUND_CACHE_CAPACITY 1024u
 typedef struct {
-    float listener[3], sound[3];
+    float listener[3], sound[3], vector[3];
     uintptr_t domain;
     uint32_t epoch, frame;
-    uint8_t used, hit;
+    uint8_t used, hit, exact_ray;
 } xv_sound_cache_entry;
 typedef struct { xv_sound_cache_entry entry[XV_SOUND_CACHE_CAPACITY]; } xv_sound_cache;
 
@@ -45,7 +45,7 @@ static inline int xv_sound_cache_probe(const xv_sound_cache *cache,
     unsigned ways, uint32_t hash, uintptr_t domain, uint32_t epoch,
     uint32_t frame, uint32_t lifetime, const float listener[3], const float sound[3],
     float listener_epsilon2, float sound_epsilon2, uint8_t *hit,
-    xv_sound_cache_entry *matched)
+    xv_sound_cache_entry *matched, const float *vector)
 {
     if (!xv_sound_cache_ways_valid(ways) || !lifetime ||
         !xv_sound_cache_finite(listener) || !xv_sound_cache_finite(sound) ||
@@ -53,7 +53,9 @@ static inline int xv_sound_cache_probe(const xv_sound_cache *cache,
     unsigned base = (hash & (XV_SOUND_CACHE_CAPACITY / ways - 1u)) * ways;
     for (unsigned i = base; i < base + ways; ++i) {
         const xv_sound_cache_entry *e = &cache->entry[i];
-        if (e->used && e->domain == domain && e->epoch == epoch &&
+        if (e->used && e->exact_ray == (vector != NULL) &&
+            (!vector || (memcmp(e->vector, vector, sizeof e->vector) == 0 &&
+                         memcmp(e->listener, listener, sizeof e->listener) == 0)) && e->domain == domain && e->epoch == epoch &&
             frame - e->frame < lifetime &&
             xv_sound_cache_endpoint_matches(listener, e->listener, listener_epsilon2) &&
             xv_sound_cache_endpoint_matches(sound, e->sound, sound_epsilon2)) {
@@ -70,14 +72,15 @@ static inline int xv_sound_cache_lookup(const xv_sound_cache *cache,
     float listener_epsilon2, float sound_epsilon2, uint8_t *hit)
 {
     return xv_sound_cache_probe(cache, ways, hash, domain, epoch, frame, lifetime,
-        listener, sound, listener_epsilon2, sound_epsilon2, hit, NULL);
+        listener, sound, listener_epsilon2, sound_epsilon2, hit, NULL, NULL);
 }
-static inline int xv_sound_cache_store(xv_sound_cache *cache,
+static inline int xv_sound_cache_store_ray(xv_sound_cache *cache,
     unsigned ways, uint32_t hash, uintptr_t domain, uint32_t epoch,
-    uint32_t frame, const float listener[3], const float sound[3], uint8_t hit)
+    uint32_t frame, const float listener[3], const float sound[3], uint8_t hit, const float *vector)
 {
     if (!xv_sound_cache_ways_valid(ways) || !xv_sound_cache_finite(listener) ||
-        !xv_sound_cache_finite(sound)) return 0;
+        !xv_sound_cache_finite(sound) ||
+        (vector && !xv_sound_cache_finite(vector))) return 0;
     unsigned base = (hash & (XV_SOUND_CACHE_CAPACITY / ways - 1u)) * ways;
     unsigned victim = base;
     uint32_t oldest = 0;
@@ -91,7 +94,15 @@ static inline int xv_sound_cache_store(xv_sound_cache *cache,
     memcpy(e->listener, listener, sizeof e->listener);
     memcpy(e->sound, sound, sizeof e->sound);
     e->domain = domain; e->epoch = epoch; e->frame = frame;
-    e->hit = hit; e->used = 1;
+    e->hit = hit; e->used = 1; e->exact_ray = vector != NULL;
+    if (vector) memcpy(e->vector, vector, sizeof e->vector);
     return 1;
+}
+static inline int xv_sound_cache_store(xv_sound_cache *cache,
+    unsigned ways, uint32_t hash, uintptr_t domain, uint32_t epoch,
+    uint32_t frame, const float listener[3], const float sound[3], uint8_t hit)
+{
+    return xv_sound_cache_store_ray(cache,ways,hash,domain,epoch,frame,
+                                    listener,sound,hit,NULL);
 }
 #endif
