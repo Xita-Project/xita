@@ -137,3 +137,10 @@ passes on host ASan/UBSan and isolated Pi Thumb A9: 2,400 cases per mode, 8,678
 matching yield states, and 5,987 fast batches. This maps the scene-list virtual
 pages to separate arena offsets and tests a remap at the original handoff.
 The same signed-threshold, page-crossing, bound/input/stack mutation cases apply.
+
+
+Hardware qualification: perf246 completed 372,736 original-path prefix
+comparisons with zero mismatches through the a30 lifepod (collector frame6600,
+qualified screenshot frame6280). This establishes observed equivalence for
+those inputs, not a complete-game proof or performance gain. The normal mode2
+cold launch has started; frame-time acceptance remains pending.

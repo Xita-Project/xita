@@ -1159,3 +1159,29 @@ Update session79204 currently transferring; final payload receipt deploy246.log.
 Additional `--hook --global-list` fixtures pass on host sanitizers and Pi for
 both modes: 2400 cases,8678 yields,5987 fast batches. Source tests added without
 changing the currently deploying payload. See scene-index-global-differential.
+
+
+### Perf246 hardware verification passed; normal fast run live
+
+Installed payload SHA256
+`940c8a604b399e4944e6d699901617b8b8bac4b293048e07a1f9780b4de04630`,
+34,767,218 bytes; updater verified=true,boot_confirmed=true,slot0.
+Mode1 reached the qualified a30 pod screenshot atframe6280. Collector frame6600
+saved 372,736 compared prefixes, zero mismatches, verified246-pod.log and
+hardware-verify246.json. This is real hardware evidence; 244/245 incomplete
+admission/logging results were never counted as passes.
+
+Stopped only the246 verification watcher321069/driver320221, then started normal
+mode2 cold launch with all earlier qualified settings retained. Active driver
+session39262, collector44843; tag perf246-index-fast-20260926. Source scripts
+fast246.sh and collect-fast246.py; outputs fast246-driver.log,
+collect-fast246.log, fast246-pod.log, fast246-summary.json,
+fast246-qualification.json, pod246-fast.png. The collector requires an applied
+batch activation receipt, captures a pod screenshot, then summarizes6300..7440.
+Inspect that screenshot before accepting timings. Keepawake134059 remains live.
+Do not restart this run merely on observation timeout; poll its handles.
+
+Next: inspect normal pod timing against qualified perf242 pod58.15–58.73ms and
+outdoor56.52ms, then move outside and test effects. No FPS gain claimed yet.
+Pi full-hook cost receipt scene-index-global-differential/pi-cost.txt shows
+short-run overhead and long-run gains; these are not hardware FPS predictions.
