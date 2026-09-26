@@ -132,3 +132,41 @@ perf262 / a0fc8cba on a fresh dashboard boot (timing frame 0), and its awake lea
 was renewed for 3600 seconds. The temporary connection refusal occurred during
 restart and recovered without a second deployment. Starting the same protected
 a30 launch sequence for this build; exclude loading and trace frames from timing.
+
+## Perf262 model identity verified on hardware
+
+Launch session 33496 completed. First requested frame 4449 captured loading
+(3 commands / 2 draws), so it is excluded from gameplay analysis. Later screen
+`model-identity-candidate/gameplay-before-trace.png` confirms lifepod gameplay;
+status timing frame 6078 preceded the second request. Its immediately retrieved
+log still contained only the old receipt: do not accept an old completed trace
+as completion of a new request. Follow-up retrieval `gameplay-trace-complete.log`
+contains matching closed frame 6081: 402 commands, 244 draw records, 372430 bytes,
+zero dropped lines. The strict summarizer passes.
+
+Private map/resource correlation in `model-matches.json` identifies 138 stream
+records, with 109 unmatched (these are not automatically invalid: BSP and dynamic
+streams are outside the model-resource inventory). All matched records reference
+accepted draw commands and no matched command/stream pair is duplicated. This
+establishes model-resource identity in this capture, not visible pixel output,
+object-instance identity or an unnecessary draw.
+
+`model-pass-counts.json` joins stream 0 to accepted render-state records. Largest
+identified groups include 29 armored-Marine draws, 15 pine draws and 12 pistol-ammo
+draws, all 154066FD, pass 0, blend disabled. First-person AR also has 10 additive
+FEBED18F draws. Alpha test, material multiplicity, multiple objects and lighting
+passes remain relevant: do not merge draws based only on a shared resource.
+The observed dominant Marine group is not evidence of blended-particle overdraw.
+
+The private resource inventory now includes shader tag names using the existing
+Xbox model layout (shader table +DC, part shader index +4); Warthog hull, tires,
+windshield, lights and instruments can be distinguished in a later vehicle scene.
+No Warthog is in this lifepod capture, so its body bug remains unresolved.
+
+Next performance work should inspect reuse of model preparation/material state
+for these actual model classes without changing draw order or object transforms.
+The diagnostic update itself establishes no FPS gain. Loading also remains slow:
+the captured log shows cache output progressing past 196 MiB, with approximately
+11 seconds cumulative write time; neither that figure nor CPU utilization alone
+isolates decompression, scheduling or the total load duration. Upstream zlib
+decompression is a reference lead, not a proven loading bottleneck or FPS fix.
