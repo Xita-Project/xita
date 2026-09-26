@@ -1587,3 +1587,14 @@ compareallframesandphase3cadence—notdiscardoutliers. Ifconsoleoffdoesn'treduce
 hitches,don'tclaimgain/persistit; usefiletimingandotherperiodicworknext.
 Old250watch/driveralreadyendedafter20minuteobservation; nonefoundtoterminate.
 Keepawakealwaysretained. No push; goalactive andfullqualificationsunmet.
+
+
+Perf251 deployment4166 finished0: payload SHAverified, boot_confirmed=true,
+slot1. Startedlaunch251.sh session35617 andcollect251.py session16027 in
+periodic-console-candidate. EnvreceiptconfirmsXV_LOG_PERIODIC_CONSOLE0 plusall
+priorgains; status251frame1586,awake3595. Levelstillloading. Keepawake134059live.
+Do notrestart/duplicate eitherjob. Collectorwillqualifypodscreenand1200intervals,
+thenrequireallworkerconsolecumulativetimes0. Originalsample250screenshotsoccurred
+at6515(pod)and9093(outdoor); photoIOcanperturbindividualintervals, so smallFPS
+changescannotbeattributedblindly. Periodicphase3signal repeated14of17slowframes,
+notjustone screenshot. Resultsnotyetknown.
