@@ -178,3 +178,25 @@ alone is not a demonstrated collision-world revision. Next inspect the actual
 sound-flag paths and mutation ownership, including query side effects, before
 wiring an epoch or enabling cached returns. No complete invalidation proof or
 new hardware performance measurement exists yet.
+
+## Ray-key comparison complete; performance claim withheld
+
+The ray-key run completed its planned timeout (124), with 68 host reports.
+Across 60 cache reports: 210,233 queries, 174,055 proposed hits, 174,055
+agreements, zero disagreements and 24,243 queries in non-root views. Receipt:
+`sound-cache-access-candidate/ray-key-summary.json`. The 82.79% hit fraction
+is not a new speedup: installed builds already reuse sound queries.
+
+In the preceding exact-endpoint run, the two busiest firing reports had only
+3,626/6,071 and 3,497/6,002 proposed hits (59.73% and 58.26%). Across runs,
+input timing and asynchronous report boundaries differ, so these are not a
+controlled performance comparison. They do show that whole-run hit fraction
+hides the busiest windows. No net performance advantage has been established.
+
+The source inspection confirms C0E1 sets the 0x20/0x40/0x80 bits tested by
+1721B0; the sound call cannot simply be assumed to use immutable BSP data
+alone. Full world invalidation and side-effect equivalence remain unresolved.
+Keep the candidate verification-only and preserve these findings. Priority
+returns to measured weapon-creation work rather than enabling approximate
+answers or spending further iterations optimizing a hit rate already present
+in the baseline. Vita HTTP still refuses connections; FTP responds.

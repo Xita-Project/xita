@@ -230,3 +230,22 @@ candidate hits against actual guest casts before enabling it on hardware.
 All Pi jobs in this section are terminal. Perf259 remains built but undeployed;
 last confirmed hardware build is perf258, with its HTTP endpoint unavailable.
 The pending screen-status question has not been answered. Keep the goal active.
+
+## Weapon creation child probe (2026-09-26)
+
+Prepared private `weapon-child-phase-pi/` from the previous weapon-creation
+stage. Timers now wrap 3 direct calls in BF200 and 46 in BFA70. Stripping
+observer lines reproduces the prior code_017 exactly (`patch-audit.json`).
+Two BFA70 `f_000C003E(c); return;` tail-call exits are not wrapped by the
+existing patcher and remain part of unmeasured parent remainder; do not claim
+complete attribution. The ARM shard compiled and harness linked (`build.log`).
+This harness retains the baseline sound path, not the verification-only cache,
+so mandatory extra real casts do not confound its weapon-creation profiling.
+
+Pi run `codex-weapon-child-20260926` is active on cores 0/1, local exec session
+13531, 180-second planned duration. It uses the existing two-burst/reload input
+sequence and scene phase timers. Poll that session and inspect the whole log.
+The sound ray-key run and build session 19477 are terminal. Next use the child
+breakdown to select a concrete native/repeated-work target; retain the ordinary
+hardware AR baseline as the acceptance reference. Pi timings are supporting
+profiles, never Vita frame-rate proof. No hardware deployment occurred.
