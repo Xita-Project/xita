@@ -9,8 +9,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#ifndef XV_VERTEX_UPLOAD_BYTES
 #define XV_VERTEX_UPLOAD_BYTES (512u*1024u)
+#endif
+#ifndef XV_VERTEX_CAPTURE_BYTES
 #define XV_VERTEX_CAPTURE_BYTES (128u*1024u)
+#endif
 #define XV_VERTEX_PERSISTENT_BYTES (128u*1024u)
 #define VP_ENTRIES 16u
 #include "../../runtime/xv_vertex_upload.c"
@@ -31,7 +35,7 @@ static int fail_capture_alloc,fail_gpu_alloc,fail_create_at,create_calls;
 static int fail_persistent;
 static pthread_t owner;
 #if XV_VERTEX_CAPTURE_NOTIFY
-static unsigned notify_pause[8],notify_reached[8];
+static unsigned notify_pause[8],notify_reached[8],notify_completion_skip;
 static unsigned wake_wait_calls,wake_timeouts,done_wait_calls,done_timeouts;
 static void capture_notify_point(unsigned point)
 {
@@ -39,6 +43,9 @@ static void capture_notify_point(unsigned point)
         __atomic_store_n(&parked_capture,1,__ATOMIC_RELEASE);
         while(__atomic_load_n(&pause_capture,__ATOMIC_ACQUIRE))usleep(100);
         __atomic_store_n(&parked_capture,0,__ATOMIC_RELEASE);
+    }
+    if(point==CAP_AFTER_COMPLETE && __atomic_load_n(&notify_completion_skip,__ATOMIC_RELAXED)) {
+        __atomic_fetch_sub(&notify_completion_skip,1,__ATOMIC_RELAXED);return;
     }
     __atomic_fetch_add(&notify_reached[point],1,__ATOMIC_RELEASE);
     while(__atomic_load_n(&notify_pause[point],__ATOMIC_ACQUIRE))usleep(100);
@@ -402,27 +409,28 @@ static void queue_capacity(void)
     cap_partial_wait=-1;
 }
 #if XV_VERTEX_CAPTURE_NOTIFY
-static void queue_partial_boundary(void)
+static void queue_partial_boundary(unsigned batch)
 {
     unsigned char src[32]={0};output out[33]={0};
-    cap_partial_wait=1;
+    cap_partial_wait=1;cap_wait_batch=(int)batch;
     __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
     for(unsigned i=0;i<32;i++){src[0]=i;assert(capture(0,src,sizeof src,4,NULL,0,&out[i]));}
     wait_parked(&parked_capture);
     unsigned initial_retired=cap_retired;
+    __atomic_store_n(&notify_completion_skip,batch-1,__ATOMIC_RELAXED);
     gate(CAP_AFTER_COMPLETE);
     pthread_t releaser;assert(!pthread_create(&releaser,NULL,release_capture,NULL));
     src[0]=32;assert(capture(0,src,sizeof src,4,NULL,0,&out[32]));
     assert(!pthread_join(releaser,NULL));
-    /* Worker is parked after exactly one completion. Submission must have
-     * returned without waiting for the other 31 or reusing their snapshots. */
-    assert(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)==initial_retired+1);
-    assert(cap_retired==initial_retired+1 && cap_submitted-cap_retired==32);
-    assert(out[0].callbacks==1 && out[1].callbacks==0 && out[32].callbacks==0);
+    /* Worker is parked after the requested batch. Submission must return
+     * without waiting for the remainder or reusing their snapshots. */
+    assert(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)==initial_retired+batch);
+    assert(cap_retired==initial_retired+batch && cap_submitted-cap_retired==33-batch);
+    assert(out[0].callbacks==1 && out[batch].callbacks==0 && out[32].callbacks==0);
     assert(cap_used==33*32);
     ungate(CAP_AFTER_COMPLETE);join(0);
     for(unsigned i=0;i<33;i++)assert(out[i].ok&&out[i].callbacks==1&&out[i].result[0][0]==i);
-    cleanup();cap_partial_wait=-1;
+    cleanup();cap_partial_wait=-1;cap_wait_batch=-1;
 }
 #endif
 static void partial_failure_and_fallback(void)
@@ -1087,7 +1095,7 @@ int main(void)
     private_inputs();sparse_and_packed();unused_mask_lifetime();pressure_and_wrap();failure_cases();
     queue_capacity();
 #if XV_VERTEX_CAPTURE_NOTIFY
-    queue_partial_boundary();
+    queue_partial_boundary(1);queue_partial_boundary(8);queue_partial_boundary(16);
 #endif
     partial_failure_and_fallback();gpu_copy_lifetime();
 #if XV_VERTEX_CAPTURE_PACKED

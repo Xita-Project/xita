@@ -99,7 +99,7 @@ static capture_job *cap_jobs;
 static unsigned cap_used,cap_retired;
 static unsigned cap_submitted,cap_completed; /* atomic publication counters */
 static int cap_stopping,cap_unavailable,cap_enabled=-1;
-static int cap_partial_wait=-1;
+static int cap_partial_wait=-1,cap_wait_batch=-1;
 static unsigned cap_partial_waits;
 static unsigned cap_jobs_total,cap_drains,cap_pressure,cap_failures,cap_max_pending;
 static unsigned cap_masks_copied,cap_masks_omitted;
@@ -517,18 +517,20 @@ static void cap_collect(void)
     }
 }
 /* Queue-only backpressure does not retire the upload slot or snapshot arena.
- * Wait for at least one completed job, then publish its callbacks in FIFO order.
+ * Wait for a bounded batch of completed jobs, then publish callbacks in FIFO order.
  * All lifetime boundaries still use the full drain below. */
 static void cap_wait_for_slot(void)
 {
     unsigned retired=cap_retired;
+    if(cap_wait_batch<0)cap_wait_batch=xv_quality_int("XV_CAPTURE_WAIT_BATCH",1,1,16);
+    unsigned batch=(unsigned)cap_wait_batch; /* Called only with all 32 jobs pending. */
     uint64_t start=cap_clock();cap_partial_waits++;
     for(;;) {
 #if XV_VERTEX_CAPTURE_NOTIFY
         __atomic_exchange_n(&cap_waiting,1,__ATOMIC_ACQ_REL);
         XV_CAPTURE_NOTIFY_POINT(CAP_DRAIN_ARMED);
 #endif
-        if(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)!=retired)break;
+        if((unsigned)(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)-retired)>=batch)break;
 #if XV_VERTEX_CAPTURE_NOTIFY
         XV_CAPTURE_NOTIFY_POINT(CAP_DRAIN_WAIT);
 #endif
@@ -860,8 +862,8 @@ void xv_vertex_capture_report(unsigned frames)
     cap_metadata_full=0;
 #endif
     cap_jobs_total=cap_drains=cap_pressure=cap_max_pending=cap_failures=0;
-    xv_logf("[vertex-capture-partial] %u frames: enabled %d queue-slot waits %u; full lifetime drains retained\n",
-        frames,cap_partial_wait,cap_partial_waits);
+    xv_logf("[vertex-capture-partial] %u frames: enabled %d batch %d queue-slot waits %u; full lifetime drains retained\n",
+        frames,cap_partial_wait,cap_wait_batch,cap_partial_waits);
     cap_partial_waits=0;
     cap_bytes=cap_capture_us=cap_worker_us=cap_join_us=0;
     if(cap_masks_copied || cap_masks_omitted)
