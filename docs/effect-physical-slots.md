@@ -40,3 +40,31 @@ Vita deployment. Preserve the known-good rollback and all existing hooks.
 
 The regenerated baseline target body is byte-identical to the maintained
 point-location stage target (`baseline-identity.json`). No jobs remain active.
+
+## Full-function synthetic differential test
+
+Added `tools/test_effect_registers.py` and `tools/tests/effect_registers.c`.
+Both complete generated bodies run from identical context and 4 MiB memory;
+the fixture compares all context bytes, all memory, and hashes of context and
+arguments observed at every synthetic callee. Stub callees modify scratch
+registers, flags and every x87 slot. The iterator returns one item then ends;
+the callback can change stack depth to exercise guarded fallback. Label-based
+step limits and a process timeout reject runaway fixtures; a callee-count
+assertion rejects vacuous all-early-exit runs.
+
+Initial fixture attempts were rejected: one exited before reaching callees,
+and another never terminated its synthetic iterator. Both fixture defects were
+corrected before accepting results. Final 1,000-case runs passed on host
+ASan/UBSan at O1 and Cortex-A9-targeted ARM at O2 on Pi cores 0/1. Each recorded
+7,875 synthetic callee observations. Build commands and body hashes are in
+`function-host/build.json` and `function-arm/build.json`; result receipt is
+`function-results.json`. All test sessions are terminal, no jobs remain live.
+
+This covers selected finite-input effect paths, not every discovered branch,
+real callee implementations, or arbitrary exceptional floating-point inputs.
+The 4 MiB fixture deliberately aliases the guest address space and is not a
+model of the full game memory map. Per-label observers affect code generation,
+so test execution time is not an optimization benchmark.
+Next integrate only 1122A0 into a private Pi gameplay harness, preserve all
+other maintained bodies/hooks, and inspect actual gameplay/profile behavior.
+No candidate has been deployed to Vita and no FPS improvement is established.
