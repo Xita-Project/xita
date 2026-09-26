@@ -968,3 +968,24 @@ only code_009callbacksites+version243changed. Buildsession38475completed0.
 Normal242restoredlaunch remainslive; material-normal-cold-candidate collector
 session5378 verifiesanotherordinarycoldlaunchbeforethe nextdiagnosticupdate.
 Keepawake134059live; noemulatorvalidation orHalo2changes.
+
+
+Perf243 package verified:55072559bytes,
+SHA841e2969d920bb8d0088ee98e5dffb2f32bb19b1a82140c07b9505fd480e5b62;
+onlygame-a.self+boot-game.txtchanged, contract775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897.
+Payload34765998bytes SHAbd28fae6d7c7013c22dbea8a1251682dcf2cb06f2234fe1c1d00efb72205e745.
+Normal242secondcoldlaunch material-normal-cold-candidate settled-summary.json:
+1200 intervals6300..7440: mean58.1474ms (17.19767FPS), p95=73.777ms,
+p99=97.144ms, max152.139ms, 11>100ms, 0>200ms. Screenshotpod242.png
+frame6423verifiedsamepod. No20FPSclaim; repeats17FPSgainaftercoldlaunch.
+Stoppedconfirmednormalobserver268803/269778 aftercapture; announced243update.
+Deploymentexec76442live, dashboardresponded242beforetransfer, upload26.3/34.8MB
+lastpoll. Do notrestarttransfer. Candidatecollector/analyzerready,launchafter
+verifiedboot; normal242rollbackretained. Keepawake134059continues.
+
+
+Perf243deploy76442completed0: verifiedtrue,bootconfirmedtrue,slot1,
+payloadSHAexactlybd28fae6d7c7013c22dbea8a1251682dcf2cb06f2234fe1c1d00efb72205e745.
+Startedscene-callback-candidate/launch.sh andcollect.py, logsdriver.log and
+collector.log. Awaitconfirmedenvreceipt,qualifiedpod243.png andsettledlog;
+thenanalyzeactual54010childrenwithanalyze.py. ThisisdiagnosticnotFPSacceptance.
