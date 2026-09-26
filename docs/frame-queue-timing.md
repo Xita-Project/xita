@@ -41,9 +41,21 @@ These are overlapping intervals, not additive frame costs.
 
 Next diagnostic: `XV_DISPLAY_CALLBACK_TIMING=1` (default off, restart required)
 measures callback setup/capture and vblank elapsed time with three clock reads
-per callback. Aggregates are callback-owned, reported every 60 tracked frames
-after the original slot release. It does not move the vblank wait or release.
+per callback. Aggregates are callback-owned. After at least 60 tracked frames, a single-slot
+release/acquire mailbox hands them to the pump, which performs the report. A full
+mailbox causes the callback to retain and extend its aggregate; it never waits.
+Consumers must use the reported frame count rather than assume exactly 60. It does not move the vblank wait or release.
 Times include callback preemption; the periodic report itself is excluded and
 may add overhead. This distinguishes slow callback execution from waiting for
 a callback to become eligible/scheduled; it does not separately prove GPU time.
 Vita object compilation passed; hardware deployment pending.
+
+
+Perf235 with direct callback logging stalled during early startup, before any
+callback report was captured. The companion remained reachable; restarting the
+same binary with callback timing disabled restored remote responsiveness.
+This does not prove the exact stall cause. Direct callback logging was removed
+because the shared logger may block on a mutex/file output. The replacement
+mailbox passed host ASan/UBSan and Pi ARM tests of empty/full behavior and one
+million ordered transfers of 64-bit counters on two threads. Hardware validation
+of the mailbox path is pending.

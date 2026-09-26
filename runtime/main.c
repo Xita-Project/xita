@@ -305,6 +305,9 @@ static uint32_t g_h_clear, g_h_test_tex, g_h_ff, g_h_model;
 
 static xv_gfx_t g_gfx;
 
+#include "xv_display_timing_mailbox.h"
+static xv_display_timing_mailbox g_display_timing;
+
 /* Runs on the GXM display thread: flip to the finished buffer, wait for vblank. */
 static void xv_display_callback(const void *callback_data)
 {
@@ -350,9 +353,8 @@ static void xv_display_callback(const void *callback_data)
         setup_us += before_vblank-callback_start;
         vblank_us += after_vblank-before_vblank;
         if (after_vblank-callback_start>max_us) max_us=after_vblank-callback_start;
-        if (++count==60) {
-            XV_LOG("[display-callback] 60 frames: setup %llu us, vblank %llu us, max-total %llu us; elapsed includes preemption; report after slot release\n",
-                (unsigned long long)setup_us,(unsigned long long)vblank_us,(unsigned long long)max_us);
+        if (++count>=60 && xv_display_timing_push(&g_display_timing,
+                (xv_display_timing_sample){setup_us,vblank_us,max_us,count})) {
             setup_us=vblank_us=max_us=0; count=0;
         }
     }
@@ -1847,6 +1849,11 @@ static int xv_pump_thread(SceSize args, void *argp)
     __atomic_store_n(&g_settings_frame_period,period,__ATOMIC_RELEASE);
     uint64_t next_frame=0;
     while (g_running) {
+        xv_display_timing_sample display_sample;
+        if (xv_display_timing_pop(&g_display_timing,&display_sample))
+            XV_LOG("[display-callback] %u frames: setup %llu us, vblank %llu us, max-total %llu us; elapsed includes preemption; report on pump\n",
+                display_sample.count,(unsigned long long)display_sample.setup_us,
+                (unsigned long long)display_sample.vblank_us,(unsigned long long)display_sample.max_us);
         uint32_t updated=__atomic_load_n(&g_settings_frame_period,__ATOMIC_ACQUIRE);
         if(updated!=period) {period=updated;next_frame=0;}
 #if XV_GPU_PACKET_TIMING
