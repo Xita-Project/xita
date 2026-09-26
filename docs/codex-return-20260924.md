@@ -1723,3 +1723,26 @@ XV_MATERIAL_COST=1, verify[material-cost]actualhardwarelink and originalcutout
 coverage, collectnormalpod/outdoorwindows, restoreoffbeforeplayablequalification.
 Remoteenv32slotcap: replacefailedconsoleexperimentoverride withMATERIAL_COST;
 normalcfgalreadyrestoredconsoledefault. Donotpersistdiagnostic.
+
+## 2026-09-26: ARM qualification and hardware wait
+
+Priorgoalturn madeconcreteprogress:252compiledandpackaged. Thisturnre-read
+objectiveandconfirmedcleantree. Physicalstatus54055terminalNoRouteToHost,
+thirdconsecutivegoalturnwithsamehardwareunreachablecondition. Pi reachable;
+compiledactualproductionlinkerfixturestaticThumbCortexA9NEON, ranvia
+taskset-c0, passedcacheidentity/fallback/alpha tests. Savedprivate
+material-cost-diagnostic/material-link.c,material-link-arm,pi-link-test.log.
+ThisisARMcontrolpathqualification,notGXMlinkvalidationorFPSproof.
+Preparedprivate launch252.sh,launch252-normal.sh,collect252.py (notexecuted).
+32envslotsincludingXV_LEVEL; XV_TEST_SAVE=a30-perf211 remains. Removedconsole
+experimentoverridein favorofMATERIAL_COST. Collector requiresactualdiagnostic
+linklogbeforeacceptingtiming, phasesoffandsceneindexreceipt, samereportwindow
+6300..7440. Pythoncompilecheckpassed. NoVitaorPiworkloadstillrunningfromthis
+turn. Keepawake134059leftintactforreconnect, butofflinecannotpreventsleep.
+
+NextmeaningfulstepneedsphysicalVita: reconnectWi-Fi/openXitadashboard, verify
+installedpayload+lease, announcerestart/deploy252, runonecontrolleddiagnostic
+session, thenrestoreMATERIAL_COST=0 beforeplayablequalification. Compilation
+andhost/ARMchecksarecomplete; nofurtherFPSclaimispossiblewithoutdevice.
+Goal20FPSstillunmet. Hardwareblockerrecurredacrossatleastthreegoalturns;
+markblockednowratherthanmanufacturingunrelatedoptimizationsortestresults.
