@@ -55,3 +55,10 @@ Build with `XV_NATIVE_70110_PHASES=1` and run with `XV_SCENE_PHASES=1` to includ
 Guest and HLE calls use their original addresses. Synthetic labels: FE700001 UV helper including its nested56F20 call; FE700002/3 fog begin/end; FE700004 actual preemption; FE700010 plus sampler group index for sampler helpers. These are diagnostic labels, not Xbox addresses. Intervals exclude verifier DRY returns and resumed FAST/GEN labels. All timings remain elapsed time, including waits/preemption and diagnostic overhead.
 
 Host:900 differential cases across plain, hooks and render-view/thread-table variants; no native/verify mismatches and balanced timing intervals. Pi ARM:300 hooks/render-view/thread-table cases, no mismatches and10266 balanced intervals. Disabled host .text is byte-identical to the original. These checks establish no hardware speedup. Timer scopes beyond depth16 are now ignored as balanced pairs and reported as incomplete attribution, preserving outer timers.
+
+
+### Lookup overhead
+
+Phase-end bookkeeping now checks a256-slot per-thread index hint before a linear search. Every hit validates both parent and callee; collisions and report reordering fall back to the original search. No timing record is shared across threads. This reduces diagnostic overhead, not normal game work.
+
+`python3 tools/tests/test_scene_phase_lookup.py` compares exact production totals with the linear reference over one million nested samples,404 keys per thread, collisions and record swaps. Host totals match; the same ARM binaries on Pi CPU0 also match. One synthetic Pi run measured575.621ms linear versus234.227ms hinted. This is a bookkeeping microbenchmark, not a Vita frame-rate prediction. Native instrumentation also adds clock/call costs and may alter register allocation; its remainder still cannot be read as uninstrumented arithmetic time.

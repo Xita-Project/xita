@@ -55,6 +55,7 @@ int xv_scene_thread_on_helper(void);
 static struct { uint32_t parent, addr; uint64_t us; unsigned n; } phase_tab[2][PHASE_MAX]; static unsigned phase_used[2];
 static uint64_t phase_t0[2][16]; static uint32_t phase_addr[2][16]; static unsigned phase_depth[2]; static int phases = -1;
 static unsigned phase_skipped[2], phase_overflow[2];
+static uint16_t phase_hint[2][256]; /* validated hints: reports may reorder phase_tab */
 static const char *phase_tag[2] = { "[tick-phases]", "[scene-phases]" };
 /* Keyed by (parent, callee): the parent is the innermost timed call on this thread's stack, so a parent's self time
  * is its own inclusive time minus its direct timed children. The tool passes the callee address at begin. */
@@ -75,8 +76,13 @@ void xv_scene_phase_end(uint32_t addr)
     if (!phase_depth[t]) return;
     uint64_t dt = xk_os_monotonic_us() - phase_t0[t][--phase_depth[t]];
     uint32_t parent = phase_depth[t] ? phase_addr[t][phase_depth[t] - 1] : 0; unsigned i;
-    for (i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].addr == addr && phase_tab[t][i].parent == parent) break;
-    if (i == phase_used[t]) { if (phase_used[t] >= PHASE_MAX) return; phase_tab[t][phase_used[t]].parent = parent; phase_tab[t][phase_used[t]++].addr = addr; }
+    unsigned h = ((addr >> 4) ^ (addr >> 12) ^ (parent >> 3) ^ (parent >> 11)) & 255u;
+    i = phase_hint[t][h];
+    if (i >= phase_used[t] || phase_tab[t][i].addr != addr || phase_tab[t][i].parent != parent) {
+        for (i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].addr == addr && phase_tab[t][i].parent == parent) break;
+        if (i == phase_used[t]) { if (phase_used[t] >= PHASE_MAX) return; phase_tab[t][phase_used[t]].parent = parent; phase_tab[t][phase_used[t]++].addr = addr; }
+        phase_hint[t][h] = (uint16_t)i;
+    }
     phase_tab[t][i].us += dt; phase_tab[t][i].n++;
 }
 static void phase_report(unsigned frames)
