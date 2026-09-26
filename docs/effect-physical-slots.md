@@ -140,3 +140,22 @@ Runtime SHA-256: 83b9e5eddb352e2c3afd84ee3daa8aec973f87361cdd631b5e34405287dbb73
 Archive entry comparison against perf258 confirmed only game-a.self and
 boot-game.txt changed. All jobs are terminal. Perf260 is ready as a hardware
 candidate but remains uninstalled and unverified on Vita.
+
+### Explicit fallback coverage (2026-09-26)
+
+The differential fixture now counts `xv_x87reg_miss` callbacks and requires
+both fallback and non-fallback cases, including fallback from all eight entry
+TOP positions. The first stronger assertion exposed a fixture correlation:
+`scenario & 7` selected both entry TOP and effect paths, so all 62 fallback
+cases started at TOP 0. Selecting TOP from independent scenario bits removes
+that gap. This was a test coverage defect, not an observed lowering mismatch.
+
+Host O1 ASan/UBSan and Pi Cortex-A9 O2 Thumb each passed 1,000 cases with
+7,875 synthetic callee observations, 62 fallback cases, 938 non-fallback cases,
+and entry-TOP mask `ff`. The observed fallback call site was `00112983`; this
+does not establish coverage of all 12 static guards or actual game callees.
+Full guest context, arena memory, and callee observations still match.
+Private build receipts are under `effect-physical-slots/guard-host` and
+`effect-physical-slots/guard-arm`. No runtime/package changes were made.
+Perf260 remains ready but uninstalled: the Vita control endpoint still refuses
+connections. These tests establish no new physical-Vita FPS result.

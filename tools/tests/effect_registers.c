@@ -16,6 +16,9 @@ void effect_reference(xctx *); void effect_candidate(xctx *);
 static unsigned seed=1, scenario, calls, preempts, conversions, iterations;
 static uint64_t trace;
 static unsigned steps;
+static unsigned guard_misses, guard_ip;
+void xv_x87reg_miss(xctx *c, uint32_t ip)
+{ (void)c; ++guard_misses; guard_ip=ip; }
 void effect_test_step(unsigned ip)
 { if (++steps > 100000) { fprintf(stderr,"step limit scenario=%u ip=%x calls=%u\n",scenario,ip,calls); abort(); } }
 static unsigned rnd(void) { seed=seed*1664525u+1013904223u; return seed; }
@@ -75,10 +78,11 @@ int main(int argc,char **argv)
 #if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
     xv_host_page_table=g_xpt;
 #endif
-    unsigned total_calls=0;
+    unsigned total_calls=0, fallback_cases=0, register_cases=0, fallback_tops=0;
     for(scenario=0;scenario<count;scenario++) {
         memset(g_xram,0,SIZE);
-        xctx initial={0};initial.r[4]=0xd003e000;initial.fsp=scenario&7;initial.fcw=0x37f;
+        /* Keep entry TOP independent of the low bits selecting effect paths. */
+        xctx initial={0};initial.r[4]=0xd003e000;initial.fsp=(scenario>>7)&7;initial.fcw=0x37f;
         initial.fsw=(uint16_t)rnd();initial.preempt=scenario&1?0:100;
         for(unsigned i=0;i<8;i++)initial.st[i]=(double)(int32_t)rnd()/65536;
         for(unsigned a=0x1f0000;a<0x280000;a+=4)wf(a,0.5f);
@@ -100,9 +104,13 @@ int main(int argc,char **argv)
         X_M32(parts)=scenario%8;
         uint32_t args[2]={0x12345678,rec}; x_guest_write(initial.r[4],args,sizeof args);
         memcpy(before,g_xram,SIZE);xctx ref=initial;calls=preempts=conversions=iterations=steps=0;trace=1469598103934665603ull;
-        effect_reference(&ref);unsigned rc=calls,rp=preempts;uint64_t rt=trace;memcpy(expected,g_xram,SIZE);
+        guard_misses=0;
+        effect_reference(&ref);assert(!guard_misses);
+        unsigned rc=calls,rp=preempts;uint64_t rt=trace;memcpy(expected,g_xram,SIZE);
         memcpy(g_xram,before,SIZE);xctx got=initial;calls=preempts=conversions=iterations=steps=0;trace=1469598103934665603ull;
         effect_candidate(&got);
+        if(guard_misses) { ++fallback_cases; fallback_tops|=1u<<initial.fsp; }
+        else ++register_cases;
         if(memcmp(&ref,&got,sizeof ref)||memcmp(expected,g_xram,SIZE)||rc!=calls||rp!=preempts||rt!=trace) {
             fprintf(stderr,"case %u mismatch: ctx %d memory %d calls %u/%u preempts %u/%u trace %llx/%llx\n",scenario,
                 memcmp(&ref,&got,sizeof ref)!=0,memcmp(expected,g_xram,SIZE)!=0,rc,calls,rp,preempts,
@@ -111,6 +119,10 @@ int main(int argc,char **argv)
         total_calls+=calls;
     }
     assert(total_calls > count);
+    /* A passing comparison must not silently omit the recovery path. */
+    if(count>=1000) assert(fallback_cases && register_cases && fallback_tops==255);
     printf("%u effect lowering cases passed; %u synthetic callee observations\n",count,total_calls);
+    printf("guard coverage: fallback=%u no-fallback=%u entry-TOP-mask=%02x last-IP=%08x\n",
+           fallback_cases,register_cases,fallback_tops,guard_ip);
     free(expected);free(before);free(g_xpt);free(g_xram);return 0;
 }
