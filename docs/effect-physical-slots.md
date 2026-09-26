@@ -129,3 +129,14 @@ FTP log retrieval succeeded (`effect-physical-slots/vita-before260.log`,
 telemetry, providing no new startup/failure evidence. HTTP8080 still refuses
 connections; do not assume a newly launched dashboard or renew a lease by
 claim alone. Last confirmed installed runtime remains perf258.
+
+Packaging follow-up: full build 21283 and package session 79689 completed
+successfully. The update contract remains
+775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897
+(consult package-receipt.json for authoritative hash spelling).
+Runtime SHA-256: 83b9e5eddb352e2c3afd84ee3daa8aec973f87361cdd631b5e34405287dbb733,
+34,805,430 bytes. Package SHA-256:
+18200be5e5e7715aaaf160f438648d98f861bdd063e96584cc1c24765e279dfa.
+Archive entry comparison against perf258 confirmed only game-a.self and
+boot-game.txt changed. All jobs are terminal. Perf260 is ready as a hardware
+candidate but remains uninstalled and unverified on Vita.
