@@ -2,7 +2,7 @@
 """Compare the experimental index prefix against the owned retained loop.
 
 Generated reference code is written only to the caller's private output folder.
-No production hook is installed.
+Use --hook to exercise the opt-in production admission and routing too.
 """
 import argparse
 import hashlib
@@ -18,6 +18,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--reference", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--hook", action="store_true", help="also exercise helper admission and verify/fast routing")
     args = ap.parse_args()
     source = args.reference.read_text()
     function = source.split("void f_00054010(xctx *restrict c)\n", 1)[1].split("\nvoid f_", 1)[0]
@@ -27,11 +28,24 @@ def main():
         raise SystemExit("unsupported retained loop")
     args.out.mkdir(parents=True, exist_ok=False)
     text = '#include "kernel/xk_scene_index_run.h"\nextern unsigned batches;\n'
+    if args.hook:
+        text += '#include "kernel/xk_scene_index_hook.h"\n'
+        text += 'uint32_t xv_scene_index_stack(const void *c) {(void)c; return 0x1000;}\n'
+        text += 'unsigned xk_mem_arena_size(void) {return 65536;}\n'
     for name in ("original", "candidate"):
-        text += f"void {name}(xctx *restrict c) {{\nL_00054132:\n"
+        text += f"void {name}(xctx *restrict c) {{\n"
+        if name == "candidate" and args.hook:
+            text += "xv_scene_index_scope scope; xv_scene_index_begin(&scope,c);\n"
+        text += "L_00054132:\n"
         if name == "candidate":
-            text += "batches += !!xv_scene_index_run(c,g_xram,g_xpt,65536);\n"
-        text += loop + "L_00054141: return;\n}\n"
+            if args.hook:
+                text += "{uint32_t old=c->r[3]; xv_scene_index_step(&scope,c,g_xram,g_xpt); batches += scope.pending != 0 || old != c->r[3];}\n"
+            else:
+                text += "batches += !!xv_scene_index_run(c,g_xram,g_xpt,65536);\n"
+        text += loop + "L_00054141:;\n"
+        if name == "candidate" and args.hook:
+            text += 'xv_scene_index_end_run(&scope); if(scope.mode != atoi(getenv("XV_SCENE_INDEX_RUN"))) abort();\n'
+        text += "return;\n}\n"
     reference = args.out / "reference.c"
     reference.write_text(text)
     cmd = [os.environ.get("CC", "cc"), "-O2", "-g", "-fno-strict-aliasing",
@@ -40,7 +54,9 @@ def main():
            "-o", str(args.out / "test")]
     (args.out / "command.json").write_text(json.dumps(cmd, indent=2) + "\n")
     subprocess.run(cmd, check=True)
-    subprocess.run([str(args.out / "test")], check=True)
+    for mode in (("1", "2") if args.hook else ("0",)):
+        env = dict(os.environ, XV_SCENE_INDEX_RUN=mode)
+        subprocess.run([str(args.out / "test")], check=True, env=env)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 #pragma once
 #include "../xv_x86rt.h"
 
-/* Experimental prefix of the ordered scene index loop at 54132. Not installed.
+/* Experimental prefix of the ordered scene index loop at 54132. Opt-in hook.
  * Caller must own ordinary scene RAM for this interval. There are no guest
  * writes or callbacks inside the prefix. Stop before a page boundary, loop
  * exit or scheduler handoff; the original loop executes all of those.

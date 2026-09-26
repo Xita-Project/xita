@@ -1,6 +1,6 @@
 # Ordered scene index scan prototype
 
-Status: host and Pi checked; **not installed in a Vita build**.
+Status: host and Pi checked; opt-in perf244 hardware qualification pending.
 
 Perf243 attributed approximately 3.6–4.1 ms of diagnostic elapsed time to
 `54010` itself, after timing its indirect callbacks separately. One inner loop
@@ -72,3 +72,26 @@ campaign harness; use the isolated timing receipt above instead.
 Next: add an opt-in helper-owned integration, verify on actual hardware, then
 measure normal gameplay with diagnostics disabled and existing improvements
 retained. Keep the original loop as the fallback. Do not infer FPS from Pi cost.
+
+## Guarded integration
+
+`tools/patch_scene_index_run.py` installs a hook only after checking the retained
+loop hash. Removing its include and three hook statements restores the original
+shard byte-for-byte. Reapplication is idempotent and layout drift is rejected.
+
+`XV_SCENE_INDEX_RUN=1` predicts a prefix, retains original execution, and compares
+the complete context at the corresponding back-edge. Mode 2 applies the prefix;
+absent/other settings leave the original loop active. A mismatch is logged and
+disables the hook for that dispatcher invocation; it never replaces guest state
+in verification mode. Checked-address builds decline the hook entirely.
+
+Admission currently requires the active scene helper's copied context and its
+allocated 256 KiB private stack. Both the index page and complete bound word must
+belong to that stack. Global scene lists remain original-path until their
+ownership is separately established. It uses the dispatcher's actual cached
+arena/page table, including the render view, and never skips an original yield.
+
+Both hook modes passed the 2,400-case suite under host ASan/UBSan and Pi Thumb A9.
+The admission fixture additionally checks foreign callers, out-of-stack inputs,
+wrapped addresses, a bound word crossing the stack end, and checked-build
+exclusion. Hardware verification and normal gameplay measurements remain required.

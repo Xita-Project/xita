@@ -1059,3 +1059,33 @@ codex-index-{runs,verify}-20260926.log. Both Pijobsfinished; noH2interference.
 Vita remainsnormalperf243 (phases0),keepawake134059active; scene-indexprototype
 notdeployed. Nextintegratehelper-only opt-in andhardwareverify beforeordinary
 fastqualification. Existing shaderimprovementsretained. Goalnotmet.
+
+
+### 2026-09-26: perf244 scene-index guarded integration
+
+Implemented an opt-in private-stack hook for the qualified 54132 prefix. The
+stage patch tool checks the exact retained-loop hash; removing the hook restores
+the shard byte-for-byte. Mode `XV_SCENE_INDEX_RUN=1` predicts and compares against
+original execution; mode 2 applies, mode 0/default retains original execution.
+Only the active helper's private context and 256 KiB stack are admitted; checked
+address builds decline. Global index lists remain original-path pending ownership
+qualification. Uses cached active arena/page table and retains real loop exits,
+page transitions, scheduler yields, callbacks and order.
+
+Host ASan/UBSan and isolated Pi Thumb A9 each passed both modes through 2,400
+full-context/memory/mapping cases and 8,678 yield states per mode. Additional
+admission tests passed for foreign callers, private-stack boundaries, wraparound,
+and checked-build exclusion. No hardware speedup claimed yet.
+
+Private stage `scene-index-candidate/build-x87` compiled successfully as perf244.
+VPK `xita-perf244c.vpk` is 55,074,588 bytes, SHA256
+`1c4b104532cb2031e4dfca92d4dddf47d8b03665827fc53eb46e6ad64d7ad72b`.
+Only game-a.self and boot-game.txt differ from perf243. Payload 34,767,482 bytes,
+SHA256 `c763777c29891284f571a0322b374efc8fa86e6537b913436e152de368678376`;
+contract unchanged `775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897`.
+
+Deployment and hardware qualification were started this turn; consult
+`scene-index-candidate/deploy.log` and subsequent notes for completion.
+`verify.sh` preserves previous options, replacing explicit SCENE_PHASES=0 with
+SCENE_INDEX_RUN=1 to stay under 32-key remote limit. Actual xita.cfg has no
+SCENE_PHASES key, so its default stays off. Keepawake PID134059 remains active.

@@ -160,6 +160,13 @@ uint32_t xv_scene_thread_context_generation(const void *context)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
 volatile int xv_owner_at_join;   /* the owner reached the dispatch join (early copy / wait): the helper is the wall this frame */
 static int overlap, in_flight_overlapped; static unsigned owner_blocked_services, in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
+
+/* Called once per scene dispatcher, only the helper can expose its stack.
+ * Configuration and counters in the index hook are helper-owned as well. */
+uint32_t xv_scene_index_stack(const void *context)
+{
+    return xv_scene_thread_owns_context(context) && overlap ? scene_stack : 0;
+}
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -640,6 +647,13 @@ uint32_t xv_scene_thread_context_generation(const void *context)
 static uint32_t scene_stack;   /* private guest stack for the overlapped body (see dispatch) */
 volatile int xv_owner_at_join;
 static int overlap, in_flight_overlapped; static unsigned owner_blocked_services, in_flight, overlaps, joins_present, joins_dispatch, joins_d3d, proxy_waits, suppressed_yields, suppressed_waits; static uint32_t suppressed_eip;
+
+/* Called once per scene dispatcher, only the helper can expose its stack.
+ * Configuration and counters in the index hook are helper-owned as well. */
+uint32_t xv_scene_index_stack(const void *context)
+{
+    return xv_scene_thread_owns_context(context) && overlap ? scene_stack : 0;
+}
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -952,6 +966,7 @@ int xv_scene_thread_active(const void *guest_thread) { (void)guest_thread; retur
 /* Only the active helper may admit its private copied context. Check thread
  * identity first so other threads never inspect helper-owned state. */
 int xv_scene_thread_owns_context(const void *context) { (void)context; return 0; }
+uint32_t xv_scene_index_stack(const void *context) { (void)context; return 0; }
 uint32_t xv_scene_thread_context_generation(const void *context) { (void)context; return 0; }
 int xv_scene_thread_on_helper(void) { return 0; }
 int xv_scene_thread_no_yield(void) { return 0; }
