@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "xk_sound_cache_access.h"
 
 extern unsigned xd3d_frame(void);
 extern void f_001721B0(xctx *restrict c);
@@ -28,6 +29,20 @@ extern void f_001721B0(xctx *restrict c);
 static struct entry { float a[3], b[3]; uint32_t frame; uint8_t used, hit; } tab[SLOTS];
 static int mode = -1, verify; static float eps_l2, eps_s2;
 static unsigned n_rays, n_reused, n_cast, n_other, n_verify_same, n_verify_diff;
+static int configured, candidate_ways;
+static xv_sound_cache_access candidate_cache;
+static unsigned candidate_queries, candidate_hits, candidate_same, candidate_diff;
+static unsigned candidate_unavailable, candidate_other_view;
+static unsigned candidate_mismatch_reports;
+#define CANDIDATE_ADD(counter) __atomic_fetch_add(&(counter), 1u, __ATOMIC_RELAXED)
+
+/* Reserved for the world-transition integration. Candidate mode below always
+ * casts and returns the guest result; it must not become a fast path until
+ * world invalidation has a verified call site. */
+void xv_sound_obstruction_cache_invalidate(void)
+{
+    xv_sound_cache_invalidate(&candidate_cache);
+}
 
 static void config(void)
 {
@@ -36,8 +51,22 @@ static void config(void)
     e = getenv("XV_SOUND_OBSTRUCTION_VERIFY"); verify = e && atoi(e) != 0;
     e = getenv("XV_SOUND_OBSTRUCTION_EPS_LISTENER"); float el = e ? (float)atof(e) : 0.3f; eps_l2 = el * el;
     e = getenv("XV_SOUND_OBSTRUCTION_EPS_SOUND"); float es = e ? (float)atof(e) : 0.1f; eps_s2 = es * es;
+    e = getenv("XV_SOUND_CACHE_VERIFY_WAYS"); candidate_ways = e ? atoi(e) : 0;
+    if (!xv_sound_cache_ways_valid((unsigned)candidate_ways)) candidate_ways = 0;
     if (mode) XK_LOG("[sound-obstruction] reuse a ray's answer up to %d frames while its ends move < %.2f (listener) / %.2f (sound)%s\n",
                      mode, el, es, verify ? " (verify: always casts)" : "");
+    if (mode && candidate_ways) XK_LOG("[sound-cache-candidate] %d-way verification only; real cast/result always retained, world invalidation integration pending\n", candidate_ways);
+}
+
+static int configuration_ready(void)
+{
+    if (__atomic_load_n(&configured, __ATOMIC_ACQUIRE) == 2) return 1;
+    int expected = 0;
+    if (!__atomic_compare_exchange_n(&configured, &expected, 1, 0,
+                                    __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return 0;
+    config();
+    __atomic_store_n(&configured, 2, __ATOMIC_RELEASE);
+    return 1;
 }
 
 static float f32(uint32_t a) { float v; uint32_t w = X_M32(a); memcpy(&v, &w, 4); return v; }
@@ -45,15 +74,57 @@ static float d2(const float *a, const float *b) { float x = a[0] - b[0], y = a[1
 
 void xv_sound_ray(xctx *c)
 {
-    if (mode < 0) config();
+    /* A simultaneous first caller casts normally instead of waiting for config. */
+    if (!configuration_ready()) { f_001721B0(c); return; }
     uint32_t sp = c->r[4];                 /* [sp] return address 2B54E, then flags, start, vector, ignore, result */
     if (!mode || X_M32(sp + 4u) != 0xC0E1u || X_M32(sp + 16u) != 0xFFFFFFFFu) { if (mode) n_other++; f_001721B0(c); return; }
     uint32_t pa = X_M32(sp + 8u), pv = X_M32(sp + 12u);
     float a[3] = { f32(pa), f32(pa + 4u), f32(pa + 8u) };
     float b[3] = { a[0] + f32(pv), a[1] + f32(pv + 4u), a[2] + f32(pv + 8u) };
+    if (candidate_ways) {
+        /* Avoid undefined float-to-int conversion in the diagnostic hash. */
+        for (unsigned i = 0; i < 3; ++i) {
+            if (!isfinite(a[i]) || !isfinite(b[i]) || b[i] < -1073741824.0f || b[i] >= 1073741824.0f) {
+                CANDIDATE_ADD(candidate_unavailable); f_001721B0(c); return;
+            }
+        }
+    }
     /* slot by the sound end on a 0.5-unit grid: a sound's rays keep landing in the same slot while the listener walks */
     int32_t q[3] = { (int32_t)floorf(b[0] * 2.0f), (int32_t)floorf(b[1] * 2.0f), (int32_t)floorf(b[2] * 2.0f) };
     uint32_t h = ((uint32_t)q[0] * 73856093u) ^ ((uint32_t)q[1] * 19349663u) ^ ((uint32_t)q[2] * 83492791u);
+    if (candidate_ways) {
+        xv_sound_cache_query query = {0};
+        query.ways = (unsigned)candidate_ways; query.hash = h;
+        query.domain = (uintptr_t)X_PT; query.frame = xd3d_frame();
+        query.lifetime = (uint32_t)mode;
+        query.listener_epsilon2 = eps_l2; query.sound_epsilon2 = eps_s2;
+        memcpy(query.listener, a, sizeof a); memcpy(query.sound, b, sizeof b);
+        xv_sound_cache_ticket ticket;
+        uint8_t expected = 0;
+        int found = xv_sound_cache_begin(&candidate_cache, &query, &ticket, &expected);
+        CANDIDATE_ADD(candidate_queries);
+        if (X_PT != g_xpt) CANDIDATE_ADD(candidate_other_view);
+        if (!ticket.valid) CANDIDATE_ADD(candidate_unavailable);
+        f_001721B0(c); /* Keep complete guest state, not just AL, in verification. */
+        uint8_t actual = (uint8_t)c->r[0];
+        if (found) {
+            CANDIDATE_ADD(candidate_hits);
+            if (actual == expected) CANDIDATE_ADD(candidate_same);
+            else {
+                CANDIDATE_ADD(candidate_diff);
+                if (__atomic_fetch_add(&candidate_mismatch_reports, 1u, __ATOMIC_RELAXED) < 32) {
+                    const xv_sound_cache_entry *anchor = &ticket.matched;
+                    XK_LOG("[sound-cache-mismatch] frame %u age %u view %p expected %u actual %u listener-d2 %.9g sound-d2 %.9g; listener %.9g/%.9g/%.9g sound %.9g/%.9g/%.9g\n",
+                        query.frame, query.frame-anchor->frame, (void *)query.domain,
+                        expected, actual, (double)d2(query.listener,anchor->listener),
+                        (double)d2(query.sound,anchor->sound),
+                        (double)a[0],(double)a[1],(double)a[2],
+                        (double)b[0],(double)b[1],(double)b[2]);
+                }
+            }
+        } else xv_sound_cache_commit(&candidate_cache, &ticket, actual);
+        return;
+    }
     struct entry *e = &tab[h & (SLOTS - 1u)];
     uint32_t frame = xd3d_frame();
     int reusable = e->used && frame - e->frame < (uint32_t)mode && d2(a, e->a) <= eps_l2 && d2(b, e->b) <= eps_s2;
@@ -72,7 +143,17 @@ void xv_sound_ray(xctx *c)
 
 void xv_sound_obstruction_report(unsigned frames)
 {
-    if (mode <= 0 || !frames) return;
+    if (__atomic_load_n(&configured, __ATOMIC_ACQUIRE) != 2 || mode <= 0 || !frames) return;
+    if (candidate_ways) {
+#define TAKE(counter) __atomic_exchange_n(&(counter), 0u, __ATOMIC_RELAXED)
+        unsigned queries = TAKE(candidate_queries), hits = TAKE(candidate_hits);
+        unsigned same = TAKE(candidate_same), diff = TAKE(candidate_diff);
+        unsigned unavailable = TAKE(candidate_unavailable), other_view = TAKE(candidate_other_view);
+#undef TAKE
+        XK_LOG("[sound-cache-candidate] %u frames: queries %u hits %u same %u different %u unavailable %u other-view %u; always cast, asynchronous counters\n",
+               frames, queries, hits, same, diff, unavailable, other_view);
+        return;
+    }
     char tail[80] = "";
     if (verify) snprintf(tail, sizeof tail, "; verify: a reuse would answer the same %u, differently %u", n_verify_same, n_verify_diff);
     XK_LOG("[sound-obstruction] %u frames: rays %u reused %u cast %u (other flags %u)%s\n", frames, n_rays, n_reused, n_cast, n_other, tail);

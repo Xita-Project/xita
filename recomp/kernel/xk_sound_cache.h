@@ -33,10 +33,11 @@ static inline float xv_sound_cache_distance2(const float a[3], const float b[3])
     float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
     return x*x + y*y + z*z;
 }
-static inline int xv_sound_cache_lookup(const xv_sound_cache *cache,
+static inline int xv_sound_cache_probe(const xv_sound_cache *cache,
     unsigned ways, uint32_t hash, uintptr_t domain, uint32_t epoch,
     uint32_t frame, uint32_t lifetime, const float listener[3], const float sound[3],
-    float listener_epsilon2, float sound_epsilon2, uint8_t *hit)
+    float listener_epsilon2, float sound_epsilon2, uint8_t *hit,
+    xv_sound_cache_entry *matched)
 {
     if (!xv_sound_cache_ways_valid(ways) || !lifetime ||
         !xv_sound_cache_finite(listener) || !xv_sound_cache_finite(sound) ||
@@ -49,10 +50,19 @@ static inline int xv_sound_cache_lookup(const xv_sound_cache *cache,
             xv_sound_cache_distance2(listener, e->listener) <= listener_epsilon2 &&
             xv_sound_cache_distance2(sound, e->sound) <= sound_epsilon2) {
             *hit = e->hit;
+            if (matched) *matched = *e;
             return 1; /* Do not renew the age or move the endpoint anchor. */
         }
     }
     return 0;
+}
+static inline int xv_sound_cache_lookup(const xv_sound_cache *cache,
+    unsigned ways, uint32_t hash, uintptr_t domain, uint32_t epoch,
+    uint32_t frame, uint32_t lifetime, const float listener[3], const float sound[3],
+    float listener_epsilon2, float sound_epsilon2, uint8_t *hit)
+{
+    return xv_sound_cache_probe(cache, ways, hash, domain, epoch, frame, lifetime,
+        listener, sound, listener_epsilon2, sound_epsilon2, hit, NULL);
 }
 static inline int xv_sound_cache_store(xv_sound_cache *cache,
     unsigned ways, uint32_t hash, uintptr_t domain, uint32_t epoch,
