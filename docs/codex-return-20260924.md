@@ -1821,3 +1821,31 @@ namespacea30-perf211,graydiagnostic1,normalconsoledefault,32envslots.
 Nextpollthesehandles, verifyenv/actualcutsceneandlink, inspectpodphoto,collect
 podwindow; thenoutdoormovementwindow,restoreMATERIAL_COST=0coldlaunchafter
 resultsbeforeplayablequalification. Savedcfgunchanged. Goalactiveunmet.
+
+## 2026-09-26: gray diagnostic captured, normal run now active
+
+Priordeploymentturnwasprogress. Re-readobjective.252launch76268/PID475862
+andcollector27747/PID475879confirmedlive,norestartswhileloading. Actualmode7
+GXMlinkrecorded, nativeobjectquery2active. At5815collectorphoto(pod252-fast.png)
+showsplayerOUTSIDEwithgraytrees/AR, notpod. Userreportedtreeswrong; explained
+intentionaldiagnostic. UserthenreportedgreatFPSbutARfirecausesdrops; confirmed
+activegameplaymeansfixed6300..7440windowNOTstationarycomparison.
+Collector27747finished0. fast252-summary1200intervalsmean55.5862225ms,
+17.9900694FPS,p9566.563,p9983.634,max151.577,1101>50ms,6>100,0>200.
+fast252-interpretation.jsonexplicitlymarksactiveoutdoor/noncomparabletopriorpod.
+4actualdiagnosticlinks; cannotclaimshadergainwithdifferentview/input.
+active252-ar.log2573086bytescapturesuserARreport. Last4reports17.7..19.1FPS,
+309..313draws,drawHLE2.8ms,0texturedecodes;deferredrecordingactive
+~312..315KiB/frame,drain1.12..1.35ms/frame,0fullwaits/slot/matrix/tagerrors.
+Noexactshotmarkers;firesfieldisnottobeinterpretedasweaponshots. ARcauseunproven.
+
+Announcedrestorenormal. VerifiedPID475862PGID475862ownedoldwatcherthenSIGTERM
+thatgroup;collectorhadalreadyfinished. Launchedlaunch252-normal.sh/session30317,
+PID481630confirmedlive. EnvironmentreceiptconfirmsMATERIAL_COST=0andallother
+controlledsettingsunchanged,protectedTEST_SAVEa30-perf211. No savedcfgchanges.
+Newnormalcollectorcollect252-normal.pyspawned (handle in tool output); uses
+normalwatchtag,assertsnomode7link,normal252-check.png/normal252-pod.log (legacy
+filename: sceneMUSTbevisuallyqualified),normal252-summary.json. Itdoesnot
+provepodscenejustfromfilename. Keepawake134059continues. Nextpollsame30317
+andnormalcollector,verifyordinarymaterials,recordnormalresultsanduserARissue.
+Noadditionalbenchmarktoggleloops. Goal20FPSunmet,normalmode252notyetqualified.
