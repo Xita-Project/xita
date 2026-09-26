@@ -21,6 +21,7 @@ variants += [a for a in (p.replace('.frag.gxp', '_az.frag.gxp') for p in paths) 
 # retain the ordinary alpha-disabled path.
 variants += [a for a in (p.replace(".frag.gxp", "_axisblack_na.frag.gxp") for p in paths) if (root/a).is_file()]
 variants += [a for a in (p.replace(".frag.gxp", "_axisblack.frag.gxp") for p in paths) if (root/a).is_file()]
+variants += [a for a in (p.replace(".frag.gxp", "_axisblack_gt.frag.gxp") for p in paths) if (root/a).is_file()]
 # The draw recorder must know the samplers of every possible fallback too.
 # Embed the same compiled programs that the package already ships, so an
 # executable-only update and its preparation metadata cannot disagree.

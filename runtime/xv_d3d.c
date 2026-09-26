@@ -3314,8 +3314,10 @@ static const SceGxmTexture *cube_fallback(void)
 static xv_fshader_t *fragment_for_ps_policy(vs_slot_t *v, int entry, unsigned blend, int alpha_mode, unsigned replace)
 {
     if (entry < 0 || (unsigned)entry >= XV_PS_TABLE_COUNT || blend >= BLEND_MODES) return NULL;
-    if (alpha_mode < 0 || alpha_mode > 5) return NULL;
+    if (alpha_mode < 0 || alpha_mode > 6) return NULL;
     if (alpha_mode == 2 && xv_ps_table[entry].ps_key != 0x154066FDu)
+        return fragment_for_ps_policy(v, entry, blend, 0, replace);
+    if (alpha_mode == 6 && xv_ps_table[entry].ps_key != 0x154066FDu)
         return fragment_for_ps_policy(v, entry, blend, 0, replace);
     unsigned vs = (unsigned)(v - g_vs);
     unsigned bucket = (vs * 131u + (unsigned)entry * 33u + blend + alpha_mode * 521u + replace * 977u) & (XV_PS_BUCKETS - 1);
@@ -3324,13 +3326,13 @@ static xv_fshader_t *fragment_for_ps_policy(vs_slot_t *v, int entry, unsigned bl
         if (l->vs == vs && l->entry == entry && l->blend == blend && l->alpha_mode == alpha_mode && l->replace_blend == replace) {
             if(!l->failed)return &l->fs;
             if(replace)return fragment_for_ps_policy(v,entry,blend,alpha_mode,0);
-            return alpha_mode ? fragment_for_ps_policy(v,entry,blend,alpha_mode == 4 ? 1 : 0,0) : NULL;
+            return alpha_mode ? fragment_for_ps_policy(v,entry,blend,alpha_mode == 6 ? 5 : alpha_mode == 4 ? 1 : 0,0) : NULL;
         }
     }
     if (g_ps_count == XV_PS_LINKS) {
         XV_ONCE(warn_ps_full, "combiner link cache full (%u): using fallback\n", g_ps_count);
         if(replace)return fragment_for_ps_policy(v,entry,blend,alpha_mode,0);
-        return alpha_mode ? fragment_for_ps_policy(v, entry, blend, alpha_mode == 4 ? 1 : 0, 0) : NULL;
+        return alpha_mode ? fragment_for_ps_policy(v, entry, blend, alpha_mode == 6 ? 5 : alpha_mode == 4 ? 1 : 0, 0) : NULL;
     }
     ps_link_t *l = &g_ps_links[g_ps_count++];
     l->vs = (uint16_t)vs; l->next = g_ps_buckets[bucket];
@@ -3344,21 +3346,21 @@ static xv_fshader_t *fragment_for_ps_policy(vs_slot_t *v, int entry, unsigned bl
         size_t len = strlen(path);
         if (len < 9 || len + 16 > sizeof variant || strcmp(path + len - 9, ".frag.gxp")) {
             l->failed = 1;
-            return fragment_for_ps_policy(v, entry, blend, alpha_mode == 4 ? 1 : 0, replace);
+            return fragment_for_ps_policy(v, entry, blend, alpha_mode == 6 ? 5 : alpha_mode == 4 ? 1 : 0, replace);
         }
-        snprintf(variant, sizeof variant, "%.*s_%s.frag.gxp", (int)(len - 9), path, alpha_mode == 5 ? "axisblack" : alpha_mode == 4 ? "axisblack_na" : alpha_mode == 3 ? "az" : alpha_mode == 2 ? "gt" : "na");
+        snprintf(variant, sizeof variant, "%.*s_%s.frag.gxp", (int)(len - 9), path, alpha_mode == 6 ? "axisblack_gt" : alpha_mode == 5 ? "axisblack" : alpha_mode == 4 ? "axisblack_na" : alpha_mode == 3 ? "az" : alpha_mode == 2 ? "gt" : "na");
         path = variant;
     }
     if (xv_fshader_load(&l->fs, path, &v->vs, pbi) != 0) {
         static unsigned n; if (n++ < 12) XV_LOG("combiner %s does not link against %s (blend %u) - using heuristic fragment\n", xv_ps_table[entry].gxp, v->vs.desc ? v->vs.desc->gxp : "?", blend);
         l->failed = 1;
         if(replace)return fragment_for_ps_policy(v,entry,blend,alpha_mode,0);
-        return alpha_mode ? fragment_for_ps_policy(v, entry, blend, alpha_mode == 4 ? 1 : 0, 0) : NULL;
+        return alpha_mode ? fragment_for_ps_policy(v, entry, blend, alpha_mode == 6 ? 5 : alpha_mode == 4 ? 1 : 0, 0) : NULL;
     }
     if(replace)XV_LOG("[replace-blend] linked vs %u entry %d blend %u mask %X alpha-mode %d; source replacement, channels preserved\n",vs,entry,blend,g_blend_combo[blend].mask,alpha_mode);
     if (alpha_mode == 3) { static unsigned n; if (n++ < 16) XV_LOG("[alpha-zero] linked %s vs %u blend %u (%u/%u m%X): discard-free, zero source on a failed test\n", path, vs, blend, g_blend_combo[blend].src, g_blend_combo[blend].dst, g_blend_combo[blend].mask); }
     if (alpha_mode >= 4) XV_LOG("[material-black] linked %s vs %u blend %u; captured black RGB and exact constants\n", path, vs, blend);
-    l->fs.alpha_test_mode = alpha_mode == 5 ? 0 : alpha_mode == 4 ? 1 : alpha_mode;
+    l->fs.alpha_test_mode = alpha_mode == 6 ? 2 : alpha_mode == 5 ? 0 : alpha_mode == 4 ? 1 : alpha_mode;
     return &l->fs;
 }
 static xv_fshader_t *fragment_for_ps_mode(vs_slot_t *v, int entry, unsigned blend, int alpha_mode)
@@ -3687,8 +3689,13 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
             XV_PS_ALPHA_KIND(c->ps_entry) == 2 && xv_alpha_accepts_opaque(c->atest);   /* output alpha is 1 */
         int no_alpha = specialize_alpha && (force_na || !draw_needs_alpha_test(c->atest) || c->opaque_alpha || alpha_one);
         int alpha_mode = material_alpha_mode(c, no_alpha);
-        if (c->black_material && (alpha_mode == 0 || alpha_mode == 1))
-            alpha_mode = alpha_mode == 1 ? 4 : 5;
+        /* Opt-in level 2 retains proven black materials and specializes only
+         * the actual captured GREATER policy. Default level 1 is unchanged. */
+        static int black_greater = -1;
+        if (black_greater < 0) { const char *e = getenv("XV_MATERIAL_BLACK"); black_greater = e && atoi(e) >= 2; }
+        if (c->ps_entry >= 0 && (unsigned)c->ps_entry < XV_PS_TABLE_COUNT)
+            alpha_mode = xv_material_black_alpha_mode(c->black_material, alpha_mode,
+                xv_ps_table[c->ps_entry].ps_key, c->atest, black_greater);
         xv_fshader_t *fs = c->depth_prepared ? &v->fs[FS_COLOR][BLEND_NOCOLOR] : c->ps_entry >= 0 ?
             XV_RENDER_CALL(XV_RENDER_SHADER_LOOKUP, fragment_for_ps_mode(v, c->ps_entry, c->blend, alpha_mode)) : NULL;
         xv_fshader_t *linked = c->depth_prepared ? NULL : fs;

@@ -42,5 +42,10 @@ if __name__ == '__main__':
     p.add_argument('input', type=Path)
     p.add_argument('output', type=Path)
     p.add_argument('--keep-alpha', action='store_true')
+    p.add_argument("--greater", action="store_true", help="retain cutouts with captured GREATER policy")
     args = p.parse_args()
-    args.output.write_text(specialize(args.input.read_text(), args.keep_alpha))
+    result = specialize(args.input.read_text(), args.keep_alpha or args.greater)
+    if args.greater:
+        from specialize_ps_cutout import specialize as greater
+        result = greater(result)
+    args.output.write_text(result)

@@ -29,4 +29,16 @@ static inline int xv_material_axis_constants(const float psc[18][4])
            psc[8][0] == 0.0f && psc[8][1] == 1.0f && psc[8][2] == 0.0f &&
            psc[5][0] == 0.0f && psc[5][1] == 0.0f && psc[5][2] == 0.0f;
 }
+/* Mode 6 combines the existing RGB proof with the captured GREATER alpha
+ * policy. Reference remains a uniform; no alpha threshold is guessed. */
+static inline int xv_material_black_alpha_mode(int proven, int mode,
+                                               uint32_t key, uint32_t atest,
+                                               int greater_enabled)
+{
+    if (!proven || (mode != 0 && mode != 1 && mode != 2)) return mode;
+    if (mode == 1) return 4;
+    if (greater_enabled && key == 0x154066FDu &&
+        (atest & (1u << 16)) && ((atest >> 8) & 7u) == 4u) return 6;
+    return mode == 0 ? 5 : mode;
+}
 #endif

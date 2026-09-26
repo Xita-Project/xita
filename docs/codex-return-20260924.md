@@ -1185,3 +1185,21 @@ Next: inspect normal pod timing against qualified perf242 pod58.15–58.73ms and
 outdoor56.52ms, then move outside and test effects. No FPS gain claimed yet.
 Pi full-hook cost receipt scene-index-global-differential/pi-cost.txt shows
 short-run overhead and long-run gains; these are not hardware FPS predictions.
+
+
+### Perf246 normal pod result and next shader candidate
+
+Normal mode2 pod screenshot frame6498 matches the previous pod view. 1200
+intervals6300..7440: mean56.4401ms (17.7179FPS),p50 54.183,p95 73.000,
+p99 89.404,max133.626;882>50ms,6>100ms,0>200ms. Activation receipt records first
+121-entry applied batch. Earlier qualified242 pod58.15–58.73ms: a modest observed
+improvement, not sustained20FPS. Keep this candidate stacked while testing outside.
+
+Next GPU candidate implemented locally, not deployed: XV_MATERIAL_BLACK=2 enables
+captured GREATER only on the existing proven154066FD_7F_t8 black-material path.
+Mode6 distinct cache identity, generic-black then ordinary fallback; fragment
+alpha policy2. Source and tests in docs/native-material-greater.md. Host/Pi
+link/cache tests pass; exhaustive alpha-policy/reference selection host test passes.
+Generated source exactly matches prior private compiled gtblack shader, GXP1228B,
+capability word preserved. Stage material-greater-candidate/build-x87 compiling
+perf247, session58067. Do not deploy until current246 outdoor observation finishes.

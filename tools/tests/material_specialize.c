@@ -35,5 +35,16 @@ int main(void)
     }
     psc[0][3]=NAN; psc[8][3]=INFINITY; /* Unused components impose no condition. */
     assert(xv_material_axis_constants(psc));
+    for (unsigned f=0; f<8; ++f) for (unsigned ref=0; ref<256; ++ref)
+        for (unsigned enabled=0; enabled<2; ++enabled) {
+            uint32_t at=ref|(f<<8)|(enabled<<16);
+            assert(xv_material_black_alpha_mode(0,0,0x154066FD,at,1)==0);
+            assert(xv_material_black_alpha_mode(1,0,0x154066FD,at,0)==5);
+            assert(xv_material_black_alpha_mode(1,0,0x154066FD,at,1)==(enabled && f==4 ? 6 : 5));
+            assert(xv_material_black_alpha_mode(1,0,0xB5691565,at,1)==5);
+            assert(xv_material_black_alpha_mode(1,1,0x154066FD,at,1)==4);
+            assert(xv_material_black_alpha_mode(1,3,0x154066FD,at,1)==3);
+            assert(xv_material_black_alpha_mode(1,2,0x154066FD,at,1)==(enabled && f==4 ? 6 : 2));
+        }
     puts("material proofs: all mip RGB samples, padding, alpha, exact constants and nonfinite rejection pass");
 }
