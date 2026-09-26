@@ -1220,7 +1220,7 @@ static volatile int      g_running         = 1;
 static struct {
     uint32_t mesh, ui;
     SceGxmNotification fence, visibility_fence;
-    uint64_t started_us, visibility_us;
+    uint64_t started_us, visibility_us, published_us;
     int failed, visibility_completed;
 #if XV_QUERY_PREFIX_PUBLISH
     unsigned prefix_history_blocked;
@@ -1301,6 +1301,11 @@ void xv_present(void)
     g_packets[q].mesh = mesh; g_packets[q].ui = ui;
     if (mesh != UINT32_MAX) g_mesh_owners[mesh % XV_FRAME_SLOTS] = (xv_slot_owner){ticket,1};
     if (ui < XV_FRAME_SLOTS) g_ui_owners[ui] = (xv_slot_owner){ticket,1};
+    /* Optional coarse queue timing: publish with the packet, no shared reset.
+     * The pump acquires g_frame_requested before reading this timestamp. */
+    static int queue_timing = -1;
+    if (queue_timing < 0) { const char *e = getenv("XV_FRAME_QUEUE_TIMING"); queue_timing = e && atoi(e) != 0; }
+    g_packets[q].published_us = queue_timing ? sceKernelGetProcessTimeWide() : 0;
     __atomic_store_n(&g_frame_requested, ticket, __ATOMIC_RELEASE);
     xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
     unsigned next_mesh = xv_d3d_record_slot(), next_ui = xv_ui_gxm_record_frame();
@@ -1870,6 +1875,20 @@ static int xv_pump_thread(SceSize args, void *argp)
 #ifdef XV_QUERY_BOUNDARY
             if(g_packets[q].query_boundary)xv_d3d_query_boundary_arm(g_packets[q].mesh,&g_packets[q].visibility_fence);
 #endif
+            /* Includes scheduling, display-slot and pacing delays before
+             * submission. Not GPU execution time or a recoverable budget. */
+            if (g_packets[q].published_us && now >= g_packets[q].published_us) {
+                static uint64_t queue_us, queue_max;
+                static unsigned queue_count, queue_over_ms;
+                uint64_t age = now - g_packets[q].published_us;
+                queue_us += age; if (age > queue_max) queue_max = age;
+                queue_over_ms += age > 1000;
+                if (++queue_count == 60) {
+                    XV_LOG("[frame-queue] 60 packets: published-to-submit %llu us total, %llu us max, %u over 1 ms; scheduling/display/pacing included\n",
+                        (unsigned long long)queue_us, (unsigned long long)queue_max, queue_over_ms);
+                    queue_us = queue_max = 0; queue_count = queue_over_ms = 0;
+                }
+            }
             g_packets[q].started_us=now;
 #ifdef XV_SCENE_CENSUS
             int sc_tracked=g_gfx.hle_ready && g_packets[q].mesh!=UINT32_MAX && !g_net_dialog;
