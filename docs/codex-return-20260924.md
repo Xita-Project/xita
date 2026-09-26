@@ -1802,3 +1802,22 @@ Userrunisnotcontrolleddeferred2candidateconfiguration; donotclaimsamebaseline.
 SavedMATERIAL_BLACK2,SCENE_INDEX_RUN2and360heightactive. Nochangespersisted.
 NextafterSaveQuit:252deployment+controlledtestnamespace. Awaitsaveonlybefore
 restart; goalactive,noblockedorcompletionclaim.
+
+## 2026-09-26: perf252 installed; controlled a30 launch active
+
+Re-readobjective. Priorcapturedheavya10logswasprogress. Userexplicitlysaid
+"I saved and quit"; saveprerequisitesatisfied. Companionquit/launchdashboard,
+renewedlease; updater84453finished0 verifiedpayload34772778bytesSHA
+15c82ab04267eb763525933bb113bd112105140828b6760aa6c53c4b713c7c86,
+slot0bootconfirmed. deploy252.logprivatepreserved. No252FPSclaimyet.
+Launchedpreparedlaunch252.sh/session76268; actualPID475862 bench-a30still
+perf252-material-cost-20260926 20. Collector27747/PID475879collect252.py.
+Bothconfirmedlive18safterlaunch. Keepawake134059confirmedlive. DONOTrestart
+becauseobservationtakesminutes. Watchfileoverlap-candidate/gameplay-perf252-
+material-cost-20260926.log; driver/material-cost-diagnostic/launch252-driver.log.
+Collectorwaitsto7440requiresactualmode7shaderlink,sceneindexreceipt,phasesoff;
+producesfast252-pod.log/summary/qualification andpod252-fast.png. Testsave
+namespacea30-perf211,graydiagnostic1,normalconsoledefault,32envslots.
+Nextpollthesehandles, verifyenv/actualcutsceneandlink, inspectpodphoto,collect
+podwindow; thenoutdoormovementwindow,restoreMATERIAL_COST=0coldlaunchafter
+resultsbeforeplayablequalification. Savedcfgunchanged. Goalactiveunmet.
