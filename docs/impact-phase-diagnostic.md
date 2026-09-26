@@ -315,3 +315,33 @@ No new hardware build/deployment or performance gain has been claimed.
 
 Follow-up: build 78342 and transfer 29351 finished successfully. Effect-process
 run is active on Pi cores 0/1 with local exec session 81814. Poll this handle.
+
+## Effect processing and a register-lowering lead
+
+`codex-effect-process-20260926` completed the planned timeout (124), with 68
+host reports. Session 81814 is terminal; no Pi job is active. The complete
+selected parent rows are in `effect-process-phase-pi/selected-windows.json`.
+113370 firing rows: inclusive 1.33/1.44 ms, remainder 0.69/0.83 ms, child
+1122A0 0.31/0.30 ms and 112C80 0.27/0.27 ms. Recall unwrapped tail calls,
+inline descendants, instrumentation and host preemption are not excluded
+from the remainder; it must not be called pure arithmetic time.
+1122A0 also appears regularly outside the two firing windows at approximately
+0.9–1.1 ms inclusive, with 0.5–0.6 ms reported self. Its main reported child
+is 10E8B0 (roughly 0.14–0.24 ms in the inspected later windows).
+
+Concrete compiler lead: current 1122A0 has no register-stack locals and many
+emulated X_ST accesses. The existing regeneration report
+`x87-regs-work/regen-regs-d3-final/x87_regs_report.json` identifies its fallback
+as `slot-range`, not merely low density. `recompiler/x87_regs.py` rejects a
+plan when maximum minus minimum touched logical slot exceeds seven. Its
+locals represent logical slots mapped onto eight physical slots, so simply
+removing the rejection would create stale aliases and is unsafe.
+
+Next investigate an opt-in physical-slot mapping for this specific function:
+canonicalize operand locals, declaration/fill sets, and dirty spill sets
+consistently modulo eight, retain depth joins and call guards, and compare
+complete context/slot results against memory lowering under wrap and call
+mutation. Preserve default generated output until qualified. Inspect actual
+slot ranges/paths first; do not assume this report proves a speedup. Existing
+particle/collision register differential tests are useful patterns, but their
+cases do not cover this function. No Vita deployment or FPS gain yet.
