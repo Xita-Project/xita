@@ -735,3 +735,41 @@ already running scene/collector; do not relaunch. Related154066FD_0D_t8 (vs27)
 is already58instructions3temps with color1 zero/unused reflection pruned; current
 candidate correctly only covers7F (vs09), up to93draws in240capture. 3F variants
 still130instructions; audit later if their scenes need it. No new FPS claim.
+
+### 2026-09-26: perf241 confirmed pod gain; first shader specialization works
+
+Collector80637 finished normally. settled-summary.json has1200 Present intervals
+end6300..7440: mean60.013240ms (16.66299FPS),p5058.184,p9574.002,p9992.330,
+max138.460ms;1138>50ms,8>100ms,0>200ms. Prior matching239 capture76.608784ms,
+13.05333FPS,p9587.195,p99114.374,max207.446. About16.6ms lower/~28%higherFPS
+in this single settled pod capture. Not sustained20FPS or full gameplay proof.
+qualification.json:3 successful specialized links (154 variant vs3blend5/6,
+B569vs3blend6). Last20 counters ~7030candidates/5730proofs per60frames,
+~95.5proofs/frame. All earlier MENU zero counters irrelevant. pod241.png frame6271
+viewed: matching lifepod/AR60, no obvious new rendering defect.
+
+Short active smoke: forward5s, camera-right3s, ARfire2s, release pad. Input14478
+completed0; outdoor-fire241.png9343 viewed outdoors with AR32 and normal terrain/
+trees/weapon, overlay13FPS. after-fire.log2986232bytes fetched successfully.
+No crash in that short sequence; this is NOT the required15-minute active run,
+AI/audio qualification, save/resume verification, or proof of outdoor20FPS.
+Current device241 remains outdoors. Keep awake134059 unchanged.
+
+Residual settled last20 scene-thread reports: helper CPU49.106ms/frame,
+scene wall52.459ms, owner wait3.7735ms. Inclusive owner FA920 roughly48ms;
+never add parallel/inclusive times or label them isolated CPU self. Deferred
+recording drains around0.39ms/frame at one observed window, no fullqueue waits.
+GPU work reduction has exposed a ~50ms scene preparation floor in the pod;
+open outdoor view still shows meaningful display wait (~19ms in snapshot).
+Need keep qualified specialization stacked, examine remaining scene preparation
+and outdoor rendering, not assume more fragment savings alone solve all views.
+
+Private original world shader ps_DEB42ED7_3D_na (canonicalA01D09CF,vs16) already
+uses analytic normalization-cube replacement:47instructions0temps, t8variant65/6.
+Do not repeat analytic cube optimization. No change to this shader. Related
+model0D has58instructions and unused reflection already eliminated. Next target
+must respect existing optimizations and current physical evidence. Scene detailed
+phase timing currentlyoff XV_SCENE_PHASES0; coarse reports above remain enabled.
+Goal20FPS through pod/outdoor/NPC/cutscene and stability correctness gates still
+unmet. Source9e4f1359 contains optimization; build241 opt-inXV_MATERIAL_BLACK1
+must remain in subsequent launch configs (source defaultoff pending broader use).
