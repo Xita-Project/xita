@@ -655,3 +655,40 @@ world-state validation. Increasing tolerance would hide distinct rays rather
 than establish equivalent collision answers. Keep the existing candidate
 verification-only. Faster collision processing remains the alternative to
 reducing cast count; no new hardware performance claim follows from this run.
+
+## Collision descendants and diagnostic build alignment
+
+`sound-collision-phase-pi/` adds 22 call-site scopes beneath 1721B0, 171AF0
+and 1731D0; 172DE0 has no direct children. Observer removal reproduces the
+previous shard 028 exactly. `codex-sound-collision-20260926` completed its
+180-second two-burst sequence on Pi cores 0/1: session 39325 terminal,
+intended timeout 124, 68 reports and no omitted scopes.
+
+Firing 1800 / 2040, Pi ms/reported frame:
+
+| Boundary | Inclusive | Self | Leading children |
+| --- | --- | --- | --- |
+| Sound cast F01721B0 | 1.67 / 1.67 | 0.33 / 0.34 | 171AF0 1.23 / 1.23; 88E90 0.11 / 0.11 |
+| Object walk 171AF0 (all timed parents) | 1.90 / 1.89 | 0.72 / 0.71 | 1731D0 0.74 / 0.75; B0CB0 0.36 / 0.36 |
+| Object collision region 1731D0 | 0.74 / 0.75 | 0.22 / 0.22 | 88E90 0.28 / 0.29; B6210 0.11 / 0.10; B5E40 0.07 / 0.07; B5EA0 0.06 / 0.06 |
+
+Deep timers substantially inflate the cast compared with the wrapper-only
+profile. Use this to identify branches, not as a whole-frame regression or
+Vita-time estimate. Aggregate parents and recursive totals overlap.
+
+Alignment audit found the legacy Pi harness retains the pre-perf258 B6210
+transform and pre-perf260 1122A0 effect routine. It must not be presented as
+an exact perf258/perf260 hardware surrogate, nor should those updates be
+counted as new optimization opportunities. Private
+`sound-collision-phase-pi/candidate-alignment.json` records the differences.
+
+`sound-aligned-phase-pi/` replaces only those two function bodies with the
+perf260 candidate's versions, retaining other diagnostic objects and restoring
+1122A0 child timers. `candidate-body-audit.json` verifies both bodies match
+the candidate after removing observers/whitespace. The B6210 shard also needs
+the candidate's `xv_x87reg.h` include; an initial link caught its omission
+(`x87r_compare` unresolved), which was corrected before use. This aligns the
+two known optimized functions, not the entire host runtime to Vita. The next
+profile must use this aligned diagnostic before choosing a transform change.
+The object-walk branch is the larger remaining lead; B0CB0 and 88E90 already
+have native implementations and must not be advertised as new replacements.
