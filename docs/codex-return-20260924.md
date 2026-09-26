@@ -773,3 +773,39 @@ phase timing currentlyoff XV_SCENE_PHASES0; coarse reports above remain enabled.
 Goal20FPS through pod/outdoor/NPC/cutscene and stability correctness gates still
 unmet. Source9e4f1359 contains optimization; build241 opt-inXV_MATERIAL_BLACK1
 must remain in subsequent launch configs (source defaultoff pending broader use).
+
+### 2026-09-26: outdoor alpha-preserving specialization candidate perf242
+
+Requested ONE outdoor render trace on current241 without relaunch. Captured
+material-black-candidate/outdoor-trace.log4326212bytes; validated via parser,
+frame11441:296draw records,475161bufferbytes,zero drops. outdoor-materials.json
+shows161vs09/154066FD draws, all alpha state0x0001047F(GREATER127), blend0/5/6.
+World20draws DEB/A01, others unchanged. Opacity proof means some of these already
+use NA; raw alpha request alone does not prove all use generic test. Log shows
+both normal generic154 and newaxisblack_na programs linked. No241gt linked.
+Found main.c explicitly xv_cutout_override(0), so DO NOT enable the separate
+GREATER-only feature blindly. Preserve that existing setting.
+
+Extended guarded optimization to generic full-alpha program as cachemode5.
+Original generic alpha block and uniform preserved BYTE-FOR-BYTE. All same
+texture/constant/material proofs required. Mode5 loadedfs alpha_test_mode0;
+load failure/cache-full falls back mode0. Mode4 successful NA path unchanged.
+Routes only originalmode0/1; modes2/3 untouched. Generic optional filenames
+_axisblack.frag.gxp embedded separately. Source option remains same opt-in1.
+Actual linker harness extended for distinctmode5/4 and both fallback policies:
+hostASan/UBSan and ARMv7Pi CPUs0/1 pass. Generator validates alpha block via
+existing specialize_ps_alpha before rewriting material arithmetic only.
+
+Stopped old idle owned compiler198830 (isolated XVSC, not Halo2). New compile
+session10751 produced15shaders0failures. Generic cost probe:
+154 baseline225instructions17temps ->155instructions9temps;
+B569 baseline232instructions19temps ->162instructions11temps.
+Data material-black-candidate/generic-costs.json. This is compiler evidence,
+not an FPS result. Private GXP/Cg genericblack_ in compiler workspace.
+
+material-black-alpha-candidate stage copied241; fullbuild58875 running. Package
+script targets242 from241 unchangedassets. launch/collect scripts prepared242tag,
+same settingsinclMATERIAL_BLACK1 and normal6300..7440podcollection. Need inspect
+build result, package/verify exact ZIP changes, deploy and coldlaunch. Current
+physical241stilloutdoors; keepawake134059 live. Do not overwrite qualified241
+candidate. Full20FPS target/correctness/session gates remain unmet.

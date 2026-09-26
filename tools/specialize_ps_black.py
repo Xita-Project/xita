@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Create opt-in axis/black variants from owned, generated alpha-disabled Cg.
+"""Create opt-in axis/black variants from owned, generated material Cg.
 
 Runtime requires exact constants, a captured all-black RGB upload in stage 3,
-the matching 2D-cube material variant, and an already disabled/proven alpha test.
+the matching 2D-cube material variant, and the matching alpha-test policy.
+The default input is alpha-disabled; --keep-alpha preserves the generic test.
 Compile outputs with the same compiler options as their original programs.
 """
 import argparse
@@ -10,8 +11,15 @@ from pathlib import Path
 import re
 
 
-def specialize(source):
-    code = re.sub(r'//[^\n]*', '', source)
+def specialize(source, keep_alpha=False):
+    # Validate the audited generated alpha block separately, then leave that
+    # entire block and its uniform byte-for-byte unchanged in the output.
+    if keep_alpha:
+        from specialize_ps_alpha import specialize as remove_alpha
+        validated = remove_alpha(source)
+    else:
+        validated = source
+    code = re.sub(r'//[^\n]*', '', validated)
     sample = 'float4 t3 = tex2D(tex3, xv_cube_uv(IN.texcoord3.xyz));'
     if code.count(sample) != 1 or re.search(r'\b(discard|clip)\b', code):
         raise ValueError('Expected an alpha-disabled 2D-cube material')
@@ -33,5 +41,6 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('input', type=Path)
     p.add_argument('output', type=Path)
+    p.add_argument('--keep-alpha', action='store_true')
     args = p.parse_args()
-    args.output.write_text(specialize(args.input.read_text()))
+    args.output.write_text(specialize(args.input.read_text(), args.keep_alpha))

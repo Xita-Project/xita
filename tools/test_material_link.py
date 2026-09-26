@@ -28,12 +28,12 @@ static struct {unsigned ps_key;const char *gxp;} xv_ps_table[]={{0x154066FD,"app
 static vs_slot_t g_vs[2];static ps_link_t g_ps_links[XV_PS_LINKS];
 static unsigned g_ps_buckets[XV_PS_BUCKETS],g_ps_count;
 static struct {unsigned src,dst,mask;} g_blend_combo[2];
-static unsigned black_loads,normal_loads,fail_black;
+static unsigned black_loads,normal_loads,generic_loads,fail_black;
 static const SceGxmBlendInfo *blend_info_for(unsigned blend,SceGxmBlendInfo *b) {(void)blend;return b;}
 static int xv_fshader_load(xv_fshader_t *f,const char *p,vs_t *v,const SceGxmBlendInfo *b) {
  (void)f;(void)v;(void)b;
- if(strstr(p,"_axisblack_na.frag.gxp")) {++black_loads;return fail_black?-1:0;}
- assert(strstr(p,"_na.frag.gxp"));++normal_loads;return 0;
+ if(strstr(p,"_axisblack")) {++black_loads;return fail_black?-1:0;}
+ if(strstr(p,"_na.frag.gxp")) ++normal_loads; else ++generic_loads; return 0;
 }
 @BODY@
 int main(void) {
@@ -47,6 +47,13 @@ int main(void) {
  assert(fallback && fallback->alpha_test_mode==1 && black_loads==2 && normal_loads==2);
  assert(fragment_for_ps_policy(g_vs+1,0,0,4,0)==fallback && black_loads==2);
  assert(!fragment_for_ps_policy(g_vs,-1,0,4,0));
+ fail_black=0;
+ xv_fshader_t *generic_special=fragment_for_ps_policy(g_vs,0,0,5,0);
+ assert(generic_special && generic_special!=special && generic_special->alpha_test_mode==0);
+ fail_black=1;
+ xv_fshader_t *generic_fallback=fragment_for_ps_policy(g_vs+1,0,0,5,0);
+ assert(generic_fallback && generic_fallback!=fallback && generic_fallback->alpha_test_mode==0 && generic_loads==1);
+ assert(fragment_for_ps_policy(g_vs+1,0,0,5,0)==generic_fallback && generic_loads==1);
  puts("actual material linker: distinct cache identity, failed-load fallback and alpha mode preservation pass");
 }
 '''.replace('@BODY@',body)
