@@ -1746,3 +1746,22 @@ session, thenrestoreMATERIAL_COST=0 beforeplayablequalification. Compilation
 andhost/ARMchecksarecomplete; nofurtherFPSclaimispossiblewithoutdevice.
 Goal20FPSstillunmet. Hardwareblockerrecurredacrossatleastthreegoalturns;
 markblockednowratherthanmanufacturingunrelatedoptimizationsortestresults.
+
+## 2026-09-26: Vita reconnected; Pi display requested
+
+UserreportsVitabackonline. InitialHTTPrefusedbutcompanion1.07responded;
+launchedXITA00001, thenlease3600succeeded andstatusconfirmedperf251,
+frame822,awake3599. Keepawake134059stillrunning. No252deployyet.
+Userprimarytaskinstall3.5inchMPI3501ILI9486/XPT2046displaydriverfromNotion.
+Pi4BRev1.5, Raspbian13.6armhfuserspace/aarch646.18kernel. Driverfb_ili9486,
+ads7846,fbdevXorgmoduleandX11desktopalreadyavailable. SSHsudo-nrequires
+password. ReviewedgoodtftLCD-showinstaller: overwritesboot/modules/rc.local,
+removesXorgdir,replacesbashprofile. Didnotexecute. Preparedtargetedinstaller
+~/xita-display-setup/install.sh onPi, vendoroverlaytft35a.dtboSHA
+601ea7056da5d7864648798fd3656b4205f01d6b9a6a8a5cfad6ca5601bbbe1e.
+Scriptbash-npasses. Addsownoverlay+SPI16MHz90deg,Xorgfbdevviaudevfb_ili9486
+symlink,evdevvendorcalibration,selectsexistingX11session,backupsboot/lightdm
+andcreatesrestore.shunder/var/backups/xita-display-TIMESTAMP. Requiresuser
+sudo; notinstalled/rebootedyet. DoesnotchangeXitacodeorPiharness.
+Vita performancegoalwasblocked; reconnectrestoreshardwarebuttoolcannotresume
+blockedgoals; userresumecontrolsstatus. FinishPidriverthencontinue252test.
