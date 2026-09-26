@@ -34,7 +34,7 @@ __thread uint32_t *xv_host_page_table;
 int xv_phase_enabled;
 void xv_phase_begin(void *s, void *c, unsigned id) { (void)s; (void)c; (void)id; }
 void xv_phase_end(void *s) { (void)s; }
-static int log_mismatch, log_all;
+static int log_mismatch, log_all, strict_nan;
 void xk_os_log(const char *fmt, ...)
 {
     if (strstr(fmt, "MISMATCH")) log_mismatch++;
@@ -314,7 +314,7 @@ static int same_ctx(const xctx *a, const xctx *b, char *why, size_t n)
     if (b->f_of_override) F(f_of)
     F(fsp) F(fsw) F(fcw) F(preempt) F(scratch) F(eip_hint)
     /* Scratch x87 slots: two NaNs are equal (which NaN payload an operation propagates is the host compiler's choice). */
-    for (unsigned i = 0; i < 8; ++i) if (memcmp(&a->st[i], &b->st[i], 8) && !(isnan(a->st[i]) && isnan(b->st[i]))) {
+    for (unsigned i = 0; i < 8; ++i) if (memcmp(&a->st[i], &b->st[i], 8) && (strict_nan || !(isnan(a->st[i]) && isnan(b->st[i])))) {
         uint64_t x, y; memcpy(&x, &a->st[i], 8); memcpy(&y, &b->st[i], 8);
         snprintf(why, n, "st[%u] (fsp %u) %016llX vs %016llX", i, a->fsp, (unsigned long long)x, (unsigned long long)y); return 0;
     }
@@ -356,6 +356,7 @@ static int run(xctx *c, int mode)
 
 int main(int argc, char **argv)
 {
+    strict_nan = getenv("N92_STRICT_NAN") && atoi(getenv("N92_STRICT_NAN"));
     unsigned cases = argc > 1 ? (unsigned)atoi(argv[1]) : 3000;
     if (argc > 2) rng ^= strtoull(argv[2], 0, 0) * 0x9E3779B97F4A7C15ull;
     const int verify = argc > 3 && !strcmp(argv[3], "--verify");
@@ -458,7 +459,7 @@ int main(int argc, char **argv)
             /* a float NaN in both at a differing aligned word: the payload is the host compiler's operand order */
             for (uint32_t i = 0; i < ARENA; ++i) if (guest[i] != g_xram[i]) {
                 uint32_t gw, nw; memcpy(&gw, guest + (i & ~3u), 4); memcpy(&nw, g_xram + (i & ~3u), 4);
-                if (nan32(gw) && nan32(nw)) { s.nan_words++; i |= 3u; continue; }
+                if (!strict_nan && nan32(gw) && nan32(nw)) { s.nan_words++; i |= 3u; continue; }
                 ok = 0; snprintf(why, sizeof why, "arena+%06X guest %02X native %02X", i, guest[i], g_xram[i]); break;
             }
         }

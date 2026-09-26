@@ -57,3 +57,36 @@ or explicitly constrain NaN equivalence, cover the actual caller's invariants,
 and compare in ordinary gameplay under safe verification synchronization.
 Do not enable direct replacement just because the encompassing light-query
 native is enabled. No hardware gain is established by these tests.
+
+## Strict floating-point check and ownership audit
+
+`N92_STRICT_NAN=1` now disables both NaN scratch-slot equivalence and the
+aligned memory-word NaN exemption in the differential fixture. Defaults for
+existing light-query testing remain unchanged.
+
+Strict host O2/render-view testing rejects case 859 of the 1,000-case seed-1
+corpus: x87 scratch slot 7 differs (`7FF92F2000000000` native versus
+`7FF9988BA0000000` guest). Both are NaNs, but their payloads differ. The
+candidate is therefore not host bit-exact. Do not hide this with a tolerant
+pass summary. Log: `../flood-direct-strict-host.log`.
+
+Strict Pi Cortex-A9 Thumb O2/render-view testing passes all 1,000 seed-1 cases:
+zero mismatches, no skipped timeouts, 16,325 flood entries, 55,237 portal tests,
+52 stack-alias scenes. Native run session 69770 is terminal. Private compiler
+receipt is `../flood-direct/strict-arm/test-0.build.json`. This is bounded
+ARM evidence, not a proof for every input or a performance measurement.
+
+The actual perf260 stage's 8D320 and 52240 bodies have no local object-math
+lock. Both route query serials/stamps via `X_QS8/X_QS32`. `xk_qserial.h`
+redirects those accesses to `xv_qserial_private` on the scene helper; the
+native flood currently reads the mapped live image globals. Enabling it on
+that helper would bypass an existing correctness mechanism.
+
+A future hook must positively identify the actual guest owner thread and
+exclude scene helpers and worker/job contexts unless their routing and
+transaction are separately modeled. `xv_object_is_worker_thread()==0` alone
+is not owner proof (the header explicitly says so). Do not add an unconditional
+math mutex: the caller may already hold a transaction, and owner service
+parking makes naive nested locking unsafe. Preserve the caller's existing
+synchronization; verify-mode journaling must also decline while a render-view
+merge could mutate the observed globals. No such runtime hook is enabled yet.
