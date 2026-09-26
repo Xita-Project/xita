@@ -52,3 +52,25 @@ Deployment started with output in `palette-lru-candidate/deploy.log`. Confirm
 the final update receipt/live version before calling it installed. Preserve
 the a30-perf211 namespace and renew the awake lease after restart. No hardware
 FPS or cache improvement has yet been established for this candidate.
+
+## Native ARM and deployment follow-up
+
+The Raspberry Pi ran `palette-pi` pinned to core 0 and passed 480 comparisons:
+counts 1/4/16/32/64, two finite matrix patterns, all eight guest x87 TOP values,
+three native FP states, cold and warm cache. Complete context, 8 MiB arena,
+admission and raw FPSCR matched the native uncached baseline. Evidence is
+`pi-main.c`, `pi-build.json`, `pi-build.log` and `pi-result.log` in the private
+candidate directory. This supplements the 156 instruction-runner comparisons;
+it does not exercise the concurrent game scheduler or establish Vita FPS.
+
+The first static Linux link encountered a fixture/libc `abort` symbol conflict;
+the final test build namespaces fixture `abort` and `getenv` explicitly instead
+of interposing libc. No production source change was required for the harness.
+
+Deployment session 6523 completed: runtime bytes/hash verified, slot 0,
+boot_confirmed true. Awake lease renewed, then the version-asserting protected
+a30 launcher started under session 18014 (`launch.log`). That session must be
+polled to completion; exclude loading. Perf262 remains the previous slot.
+Next capture settled ordinary lifepod and outdoor/weapon gameplay, joining cache
+counters with measured Present intervals and slow-frame counts. No new trace or
+heavy per-call timers should contaminate those timing windows.
