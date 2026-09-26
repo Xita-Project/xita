@@ -14,6 +14,11 @@ typedef struct {
  xv_vertex_refs refs;
  output out;
 } replay_mesh;
+static uint64_t replay_ns(void)
+{
+ struct timespec ts;clock_gettime(CLOCK_MONOTONIC,&ts);
+ return (uint64_t)ts.tv_sec*1000000000ull+(uint64_t)ts.tv_nsec;
+}
 static unsigned le32(const unsigned char *p)
 { return (unsigned)p[0]|(unsigned)p[1]<<8|(unsigned)p[2]<<16|(unsigned)p[3]<<24; }
 static unsigned le16(const unsigned char *p){return p[0]|(unsigned)p[1]<<8;}
@@ -58,7 +63,8 @@ int main(int argc,char **argv)
  if(partial && strcmp(partial,"0") && strcmp(partial,"1"))return 2;
  cap_partial_wait=partial?atoi(partial):1;
  xv_vertex_worker_override(1);xv_vertex_upload_override(1);
- unsigned files=0;uint64_t checked=0;
+ unsigned files=0;uint64_t checked=0,prepare_ns=0;
+ int timing=getenv("XV_REPLAY_TIMING") && !strcmp(getenv("XV_REPLAY_TIMING"),"1");
  /* Bounded batches preserve output lifetimes. Batch boundaries are fixture
   * boundaries, NOT reconstructed game frames (mesh files lack that contract). */
  for(int begin=2;begin<argc;) {
@@ -67,13 +73,18 @@ int main(int argc,char **argv)
   for(;n<64&&begin<argc;n++,begin++) {
    replay_mesh *m=&meshes[n];
    if(!load_mesh(argv[begin],m)){fprintf(stderr,"invalid mesh: %s\n",argv[begin]);abort_batch(meshes,n+1);return 2;}
+  }
+  uint64_t start=replay_ns();
+  for(unsigned j=0;j<n;j++) {
+   replay_mesh *m=&meshes[j];
    unsigned pack=packed&&m->stride==32?XV_PACKED_PREFIX16:0;
    if(!capture(0,m->live,(unsigned)m->bytes,m->stride,sparse?&m->refs:NULL,pack,&m->out)) {
-    fprintf(stderr,"capture rejected: %s\n",argv[begin]);abort_batch(meshes,n+1);return 3;
+    fprintf(stderr,"capture rejected at batch item %u\n",j);abort_batch(meshes,n);return 3;
    }
-   memset(m->live,0xa5,m->bytes); /* Caller can mutate after capture returns. */
+   if(!timing)memset(m->live,0xa5,m->bytes); /* Caller can mutate after capture returns. */
   }
   join(0);
+  prepare_ns+=replay_ns()-start;
   for(unsigned j=0;j<n;j++) {
    replay_mesh *m=&meshes[j];unsigned width=packed&&m->stride==32?16:m->stride;
    if(!m->out.ok||m->out.callbacks!=1){fprintf(stderr,"callback failure\n");return 3;}
@@ -87,6 +98,8 @@ int main(int argc,char **argv)
    files++;release_mesh(m);
   }
  }
+ if(timing)fprintf(stderr,"queue_waits=%u full_drains=%u\n",cap_partial_waits,cap_drains);
+ if(timing)fprintf(stderr,"preparation_ns=%llu (capture+join; excludes IO, validation, poisoning; includes first worker startup)\n",(unsigned long long)prepare_ns);
  cleanup();printf("{\"mode\":\"%s\",\"files\":%u,\"checked_bytes\":%llu,\"mismatches\":0}\n",argv[1],files,(unsigned long long)checked);
  return 0;
 }

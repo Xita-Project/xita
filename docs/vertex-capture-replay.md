@@ -53,3 +53,24 @@ Pi: 4,428 preparations, zero mismatches. The host concurrency suite also passed
 all 24 ASan/UBSan configurations, including forced queue saturation and exact
 completion-frontier checks at 1, 8 and 16 jobs. These establish correctness for
 the tested cases; they do not establish a performance benefit.
+
+For preparation-only timing, set `XV_REPLAY_TIMING=1`. The fixture preloads
+each batch, times capture submission through final join with CLOCK_MONOTONIC,
+and validates afterwards. Timing excludes file IO, allocation of input meshes,
+result checks and deliberate source poisoning; it includes first worker startup.
+Normal correctness mode still poisons sources immediately after submission.
+Queue-wait and full-drain counts are printed for workload interpretation.
+
+Seven alternating-order Pi trials per mode/batch size showed no meaningful
+batching gain. Median milliseconds for the entire 492-mesh corpus:
+
+| Mode | Batch 1 | Batch 8 | Batch 16 |
+| --- | ---: | ---: | ---: |
+| Full | 58.299 | 58.634 | 58.562 |
+| Sparse | 58.579 | 58.290 | 58.452 |
+| Packed | 43.482 | 43.342 | 43.319 |
+
+Ranges overlapped in every mode. A separate lexically ordered full-mode
+pressure check recorded only two partial waits and eight full drains; this
+archive is weak evidence about a saturated runtime queue. Do not extrapolate
+these times to Vita frames or treat them as disproving batching under pressure.
