@@ -29,4 +29,7 @@ cache identity, original alpha policy, missing diagnostic fallback to mode 6,
 further fallback when mode 6 is absent, cached failure, and wrong-key rejection.
 Generator tests cover exact RGB-only change and rejection of unsupported alpha,
 discard, depth-output, and unqualified-stage input. Generated private shader
-source successfully; GXP compilation and hardware evaluation remain pending.
+source successfully. Isolated XVSC compiled the diagnostic GXP (456 bytes),
+and perf252 builds successfully with byte-verified embedded shader data. The
+update contract is preserved and only game-a.self/boot-game.txt change from
+perf251. Hardware linking, visual inspection, and timing remain pending.

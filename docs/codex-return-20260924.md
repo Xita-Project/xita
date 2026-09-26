@@ -1694,3 +1694,32 @@ replacing only exact final return (regression-tested). No GXP compiled, no
 hardware build/deploy or FPS result yet. Next compile isolated owned XVSC
 without touching Halo2, inspect GXP linkage/instructions, qualify/build opt-in
 candidate when hardware returns. Goal remains unmet; perf251 last installed.
+
+## 2026-09-26: perf252 diagnostic package built, not deployed
+
+Previous turn was concrete progress (cefb0caa). Re-read objective, clean tree.
+Vita status againNoRouteToHost; nohardwareclaim. Existing isolated compiler
+workspace cube-select-candidate/compiler-pref used after confirming no Vita3K
+process. Started XVSC00001 session72634, finished133 withknownexitSIGSEGV,
+but compile.log completed17shaders0failures, newlycompiledgrayGXP456bytes.
+Copiedcompilerlog/outputprivate material-cost-diagnostic. ShaderSHA
+5e978d99c7146570729221a0e158ce199c43c044a18100fad137dabcf778b932.
+No Halo2instance touched and no gameplayemulatorvalidation.
+
+Cloned251stageviareflink, copiedruntimeD3D/embedscriptandnewoptionalGXP,
+setstageversion0.2.0-perf.252, invalidatedD3D/shaderobjects. Build29152
+completed0. Package68257completed0. BytecomparedembeddedGXP againstcompiled
+asset; identical. Compare251→252zipmembers provesonlygame-a.selfand
+boot-game.txtchanged, commoncontract unchanged:
+775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897.
+PrivateVPK material-cost-diagnostic/xita-perf252c.vpk55075439bytesSHA
+c479bedf496fdaa5bc790d3122b992bacac2a9e855ba0db036040a17dfd01b1e.
+Payload34772778bytesSHA
+15c82ab04267eb763525933bb113bd112105140828b6760aa6c53c4b713c7c86.
+verification.json/package-receipt.json/shader-receipt.jsonsaved.
+Defaultoff, deliberatelygrayRGBwhenenabled, noFPSgainclaim. Notdeployed.
+Next reconnect/dashboardlease, deploy252withannouncement, coldlaunchcontrolled
+XV_MATERIAL_COST=1, verify[material-cost]actualhardwarelink and originalcutout
+coverage, collectnormalpod/outdoorwindows, restoreoffbeforeplayablequalification.
+Remoteenv32slotcap: replacefailedconsoleexperimentoverride withMATERIAL_COST;
+normalcfgalreadyrestoredconsoledefault. Donotpersistdiagnostic.
