@@ -142,7 +142,7 @@ headless, overlapping-time limitations stated above. Full selected reports:
 `impact-child-phase-pi/child-phase-windows.json`.
 
 Static inspection confirms 26A50 calls 25590 and 2B460; the latter is the
-existing sound-obstruction collision-vector route (native-1721b0.md). This cost
+existing sound-obstruction collision-vector route (native-1721b 0.md). This cost
 is not audio sample decoding. The native BSP segment cast is already enabled,
 so proposing it again would duplicate existing work. C02F0 is a larger weapon
 routine (2,858 translated lines, 15 distinct callees), not a cheap wrapper that
@@ -497,3 +497,26 @@ Static inspection: 2B660 calls 2B140, then conditionally 26B10; 26B10 includes
 a recursive call. 963C0 calls spatial helper 8D320, iterates results through
 95E50, then calls 8A300. This does not by itself prove the costly descendant.
 HTTP8080 still refuses; perf260 remains ready but not installed.
+
+Combined service run completed (session 14161 terminal, timeout 124, 68 reports).
+No omitted scopes or fatal/trap lines were found. Firing windows 1800/2040:
+2B660 inclusive 0.24/0.24 ms, self 0.01/0.01, child 26B10 0.21/0.21. Across
+all parents 26B10 totals 0.59/0.56 ms, with 26A50 0.39/0.40, self 0.07/0.06.
+The recursive 26B10 child contributes 0.03/0.02; inclusive recursive totals
+can count nested work more than once and must not be added as exclusive cost.
+
+963C0 totals 0.18/0.22 ms, self 0.02/0.02;8D320 contributes 0.14/0.16.
+8D320's largest child 52240 is 0.08/0.09, versus 8C7E0 0.02/0.02 and local
+remainder 0.04/0.04.95E50 is near report precision in this scene; this is not
+evidence that processing many nearby objects is universally cheap.
+Full rows:`effect-services-phase-pi/selected-windows.json`. All jobs terminal.
+
+Next sound boundary is 26A50: source checks up to four active listeners at
+2E3018 (stride 0x44), calls 25590, chooses a distance, takes its square root
+and conditionally calls 2B460. Profile those two children before replacing
+the scan. Query reuse lead: native 92330 already implements 52240's portal
+flood internally, but its public hook covers 56670, so 8D320's direct 52240
+call remains translated. Reusing that subtree at a new boundary requires
+separate guest-context/flags/x87/memory equivalence tests; existing light
+query validation does not establish the new boundary. Perf260 hardware
+qualification remains pending; do not infer Vita gains from these Pi times.
