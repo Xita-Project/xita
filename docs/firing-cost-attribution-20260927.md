@@ -2386,3 +2386,19 @@ corrects version.json290, rebuilds and runs packageaudit. Poll both existing
 handles; do not manually start a duplicate correction/build. No deployment
 automation attached. Version-checked290 launch/pressure scripts prepared.
 Vita status independently still289, awake. This turn verified livebuildwait.
+
+
+## Perf290 qualified package deploying
+
+Firstbuild29368 and finalizer7300 both terminalrc0. Version correction and
+secondbuild successful:header0.2.0-perf.290/ccaa61b9. Audit passed:changed
+code013 plusdashboard,remote,main,UIversionconsumers only; assets only
+game-a.self/boot-game.txt. Updatercontract unchanged775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897.
+RuntimeSHA176f19418026ba877088d6a7da16e7c0e8729ca1509f23e0a5d459c80e19bbe0.
+PackageSHAd5a4dddd1fe0e44e683817f5f0ed7e00773f6db9fd3f809cf9c6d1586adbafe6.
+Announced interruption and started updater50268, currently live; transfer
+progress34.67MB/34.84MB logged. Poll samehandle, no duplicateapply/restart.
+After terminalsuccess independentlyverify dashboard290/timing0, then run
+model-native-detail-290/launch-and-profile.py (prepared90slaunch plus bounded
+readiness and45ssettledcapture). This diagnostic measures helpers notnewFPS
+optimization. Preserve normal285baseline and protecteda30save. Goal unmet.
