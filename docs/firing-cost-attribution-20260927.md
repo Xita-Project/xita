@@ -555,3 +555,55 @@ releases controls in finally. After idle screenshots/telemetry qualification,
 run collect-gameplay.py and require [vertex-capture-wait-only] records before
 claiming diagnostic data. Restore normal startup by dashboard restart afterward.
 No current frame-time result or optimization gain claimed.
+
+## Perf279 wait attribution completed
+
+Launch and both collectors completed normally (all sessions terminal). Reviewed
+pod, firing/reload and canyon screenshots. Wait-only records confirmed active.
+An extra transition screenshot overlapped the early idle sample; excluded the
+first 300 timing frames from wait analysis, leaving six complete pod reports.
+Private summarize-waits.py associates each periodic report with the following
+frame-us offset-0 group, selecting only complete windows within host brackets:
+
+| Scene | Reports / frames | Partial waits/frame | Completion observe ms/frame | Partial publication ms/frame | Full observe / publication ms/frame |
+|---|---:|---:|---:|---:|---:|
+| Pod | 6 / 360 | 16.261 | 15.319 | 0.068 | 0.016 / 0.014 |
+| AR/reload | 2 / 120 | 17.983 | 13.834 | 0.066 | 0.032 / 0.012 |
+| Outdoors | 14 / 840 | 11.850 | 6.211 | 0.054 | 0.008 / 0.005 |
+
+Movement has no complete matching report window; no timing attribution there.
+These are elapsed owner intervals including preemption; not CPU-only work or
+necessarily time removable from the critical path. Publication is tiny, full
+lifetime drains nearly empty, partial queue waits dominate. Firing still gets
+slower while measured capture waiting decreases: keep separate simulation/
+effect cost investigation. Do not subtract these results from older heavily
+instrumented draw-profile runs to infer CPU self time.
+
+Diagnostic overall intervals (not candidate speed acceptance): fire 168 samples,
+73.864 ms / 13.538 FPS, p95 100.436, max 133.132, 9 >100 ms; movement 78 samples,
+68.161 ms / 14.671 FPS, p95 87.675, max 308.844, one >200 ms; outdoor 938 samples,
+48.192 ms / 20.750 FPS, p95 57.946, max 88.721, 208 >50 ms. Fire is 12 seconds,
+not previous five-second ordinary sample. No long-session or AI/audio/cutscene
+qualification claimed. Hardware goal remains unmet.
+
+Thread log confirms capture worker C0 priority153, while existing deferred
+recorder is configured C0 priority152. cap_run processes FIFO jobs with a
+per-job device barrier and completion/event publication; captured_draw_complete
+only marks failed commands. Next investigate reducing same-core handoffs and
+worker service cost, not larger capacity or callbacks. Existing wait batch16
+is offline-tested; prior hardware batch16 notes refer to deferred recorder
+notification, distinct from XV_CAPTURE_WAIT_BATCH (currently8). Verify whole
+frame before retaining any scheduling candidate. Do not remove device ordering
+without proving each path's writes and publication requirements.
+
+Companion quit/launch completed to clear startup diagnostic overrides; first
+status connection refused during boot. Recheck same boot before any restart.
+
+Dashboard restoration is not yet verified. Follow-up status polling session
+17001 completed after 30 attempts with connection refusal; this is an observation
+timeout, not proof the application terminated. No additional restart issued.
+Companion remains reachable (version 1.07) and `nosleep on` returned enabled.
+All collection/launch/poll handles are terminal, no controls held. Hardware
+has perf279 installed, but in-app lease cannot be renewed until its endpoint
+returns; companion suspend prevention is enabled. Check endpoint or obtain
+independent application state next, rather than treating timeout as a crash.
