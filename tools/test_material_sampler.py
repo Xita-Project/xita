@@ -20,6 +20,7 @@ BOUNDS = ((0x70440, 0x70486), (0x70498, 0x704ED),
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--shard', type=Path, required=True)
+    ap.add_argument('--pointers', action='store_true', help='exercise call-local pointer candidate')
     args = ap.parse_args()
     body = function(args.shard.read_text(), 'f_00070110')
     refs = []
@@ -44,6 +45,7 @@ def main():
 static unsigned char memory[MEM], expected[MEM];
 #undef X_M32
 #undef X_W32
+#undef X_GW
 /* Distinct physical halves exercise virtual-to-host translation as well as
  * unaligned table/stack overlap. Fixture addresses never straddle MEM. */
 static void *guest(uint32_t a) {
@@ -53,6 +55,7 @@ static void *guest(uint32_t a) {
 }
 #define X_M32(a) (*(const xu32_u *)guest(a))
 #define X_W32(a) (*(xu32_u *)guest(a))
+#define X_GW(a) guest(a)
 #define D3D_G_TEXTURESTATE 0x18F180u
 #define XD3D_COUNT(name) ((void)0)
 #define XV_HLE_CALL(address, fn) fn(c)
@@ -161,6 +164,7 @@ int main(void) {
         subprocess.run([str(p/'admission')], check=True)
         (p / 'test.c').write_text(source)
         cmd = [os.environ.get('CC', 'cc'), '-O2', '-fno-strict-aliasing',
+               '-DXV_MATERIAL_SAMPLER_POINTERS=' + str(int(args.pointers)),
                '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
                '-I', str(ROOT), str(p/'test.c'), '-o', str(p/'test')]
         subprocess.run(cmd, check=True)
