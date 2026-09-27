@@ -1703,3 +1703,56 @@ missingmulticore support. Core0/1 stillrunrender/capturework. Do not blindly
 removegate: wholecallbacksreorder sharedgame state and are explicitlyunproven.
 CurrentNPC ownerupdatepressure remains; further targetednative/purejob work
 needed alongsidepolygon. Goalunmet.
+
+
+## Perf285 gameplay and stationary slowdown audit
+
+Previous user-feedback turn was no progress (status only). Revalidated current
+checkout at 077e601a, clean; renewed physical Vita lease successfully. No update
+or settings change in this continuation. Perf285 remains the tested candidate.
+
+Completed gameplay74189 and encounter87158 artifacts are preserved in private
+`contact-registers-hardware/`. All scripted controls released. Reviewed boundary
+images: fire-after is inside the pod/reloading; outside-after is by cliffs,
+waterfall and trees. Encounter before/after face a nearby rock, with no visually
+confirmed enemies. Do not describe this as verified multi-enemy combat.
+
+| Ordinary segment | Samples | Mean ms / FPS | p95 ms | Maximum ms | >100 ms |
+|---|---:|---:|---:|---:|---:|
+| AR firing | 86 | 63.685 / 15.70 | 77.612 | 123.852 | 1 |
+| Moving out of pod | 84 | 64.513 / 15.50 | 80.031 | 265.674 | 1 |
+| Outside, stationary | 911 | 49.516 / 20.20 | 59.620 | 108.303 | 1 |
+| After traversal, stationary | 840 | 50.074 / 19.97 | 90.273 | 158.077 | 28 |
+
+These are CPU Present intervals from normal gameplay, not physical scanout or
+matched causal comparisons with perf284. No crash in these short sequences;
+15-minute acceptance, NPC combat, checkpoints and cutscene gates remain unmet.
+
+New `encounter-window-audit.json` uses complete timing windows wholly inside
+status brackets 13057..13963. First seven windows ending 13140..13500 average
+37.31–41.30 ms; subsequent windows ending 13560..13920 average 54.04–68.12 ms.
+Thus the overall near-20-FPS average hides a sustained deterioration while the
+camera is stationary, not merely a few isolated transition stalls.
+
+Existing slow-frame instrumentation partitions 29 records inside those status
+brackets: 3417.199 ms before Present versus 6.186 ms in all other segments
+combined (99.82% before Present). The count is 29 rather than the table's 28
+because frame13925 is inside the status bracket but outside the last selected
+complete 60-frame report. No samples removed to improve the aggregate. This
+strongly deprioritizes Present flip/drain/publication work for these stalls;
+pre-Present still includes scheduling and is not exclusive simulation CPU time.
+
+Adjacent asynchronous reports show helper CPU30.64–30.87 ms, scene wall32.72–
+33.00 ms, done-to-noticed17.21–20.95 ms and FA920 inclusive46.20–49.21 ms.
+Do not align these exactly to individual slow frames or add overlapping times.
+They support further owner-side update investigation while helper finishes early.
+
+Source audit avoids two misleading targets: 90770 is a type postprocess
+DISPATCHER, whose dominant aim-blend child already has a native replacement;
+it is not a fresh 5.4 ms arithmetic opportunity. Hierarchy bounds declines
+include the deliberately retained final guest iteration and short tails, so
+large decline counts alone do not prove missed useful batches. Final iteration
+preserves guest registers, FP state and stack footprint. Do not relax its gate.
+Next target remains remaining owner object/animation preparation with existing
+native hooks retained; qualify any replacement against full guest state and
+memory before deploying. Goal remains unmet.
