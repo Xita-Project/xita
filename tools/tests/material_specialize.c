@@ -46,5 +46,19 @@ int main(void)
             assert(xv_material_black_alpha_mode(1,3,0x154066FD,at,1)==3);
             assert(xv_material_black_alpha_mode(1,2,0x154066FD,at,1)==(enabled && f==4 ? 6 : 2));
         }
+    psc[1][0]=psc[1][1]=psc[1][2]=0;
+    psc[2][0]=psc[2][1]=psc[2][2]=1;
+    for (int mode=0;mode<=8;++mode)
+        assert(xv_material_nocolor_mode(mode,psc)==(mode==6?8:mode));
+    for(unsigned r=1;r<=2;++r) for(unsigned j=0;j<3;++j) {
+        float old=psc[r][j];
+        float bad[]={NAN,INFINITY,-INFINITY,nextafterf(old,2),-0.0f};
+        for(unsigned k=0;k<5;++k) {
+            psc[r][j]=bad[k]; assert(xv_material_nocolor_mode(6,psc)==6);
+        }
+        psc[r][j]=old;
+    }
+    psc[1][3]=NAN;psc[2][3]=INFINITY;
+    assert(xv_material_nocolor_mode(6,psc)==8);
     puts("material proofs: all mip RGB samples, padding, alpha, exact constants and nonfinite rejection pass");
 }

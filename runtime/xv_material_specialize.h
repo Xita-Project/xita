@@ -3,6 +3,7 @@
 #define XV_MATERIAL_SPECIALIZE_H
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 static inline int xv_material_black_rgba(const uint32_t *pixels, unsigned w,
                                        unsigned h, unsigned levels)
@@ -40,5 +41,18 @@ static inline int xv_material_black_alpha_mode(int proven, int mode,
     if (greater_enabled && key == 0x154066FDu &&
         (atest & (1u << 16)) && ((atest >> 8) & 7u) == 4u) return 6;
     return mode == 0 ? 5 : mode;
+}
+/* Only extend the already admitted GREATER axis/black material. Signed zero
+ * is excluded so literal +0 substitution preserves even the captured bits. */
+static inline int xv_material_nocolor_mode(int mode, const float psc[18][4])
+{
+    if (mode != 6) return mode;
+    for (unsigned i = 0; i < 3; ++i) {
+        uint32_t zero, one;
+        memcpy(&zero, &psc[1][i], sizeof zero);
+        memcpy(&one, &psc[2][i], sizeof one);
+        if (zero != 0u || one != 0x3f800000u) return mode;
+    }
+    return 8;
 }
 #endif

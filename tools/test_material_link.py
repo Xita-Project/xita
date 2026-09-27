@@ -28,11 +28,12 @@ static struct {unsigned ps_key;const char *gxp;} xv_ps_table[]={{0x154066FD,"app
 static vs_slot_t g_vs[2];static ps_link_t g_ps_links[XV_PS_LINKS];
 static unsigned g_ps_buckets[XV_PS_BUCKETS],g_ps_count;
 static struct {unsigned src,dst,mask;} g_blend_combo[2];
-static unsigned cost_loads,fail_cost;
+static unsigned cost_loads,fail_cost,nocolor_loads,fail_nocolor;
 static unsigned black_loads,normal_loads,generic_loads,fail_black,greater_loads,fail_greater;
 static const SceGxmBlendInfo *blend_info_for(unsigned blend,SceGxmBlendInfo *b) {(void)blend;return b;}
 static int xv_fshader_load(xv_fshader_t *f,const char *p,vs_t *v,const SceGxmBlendInfo *b) {
  (void)f;(void)v;(void)b;
+ if(strstr(p,"_axisblack_gt_nocolor")) {++nocolor_loads;return fail_nocolor?-1:0;}
  if(strstr(p,"_axisblack_gt_cost")) {++cost_loads;return fail_cost?-1:0;}
  if(strstr(p,"_axisblack_gt")) {++greater_loads;return fail_greater?-1:0;}
  if(strstr(p,"_axisblack")) {++black_loads;return fail_black?-1:0;}
@@ -80,11 +81,19 @@ int main(void) {
  assert(cost_fallback && cost_fallback->alpha_test_mode==2 && cost_loads==3);
  assert(fragment_for_ps_policy(g_vs+1,0,1,6,0)==cost_fallback);
  assert(fragment_for_ps_policy(g_vs+1,0,1,7,0)==cost_fallback && cost_loads==3);
+ xv_fshader_t *nc=fragment_for_ps_policy(g_vs,0,0,8,0);
+ assert(nc && nc!=gt && nc!=cost && nc->alpha_test_mode==2 && nocolor_loads==1);
+ assert(fragment_for_ps_policy(g_vs,0,0,8,0)==nc && nocolor_loads==1);
+ fail_nocolor=1;
+ assert(fragment_for_ps_policy(g_vs+1,0,0,8,0)==generic_fallback && nocolor_loads==2);
+ assert(fragment_for_ps_policy(g_vs+1,0,0,8,0)==generic_fallback && nocolor_loads==2);
+ assert(fragment_for_ps_policy(g_vs+1,0,1,8,0)==cost_fallback && nocolor_loads==3);
  unsigned gt_before=greater_loads;
  xv_ps_table[0].ps_key=0xB5691565;
  assert(fragment_for_ps_policy(g_vs,0,0,6,0)->alpha_test_mode==0);
  assert(fragment_for_ps_policy(g_vs,0,0,7,0)->alpha_test_mode==0);
- assert(greater_loads==gt_before && cost_loads==3);
+ assert(fragment_for_ps_policy(g_vs,0,0,8,0)->alpha_test_mode==0);
+ assert(greater_loads==gt_before && cost_loads==3 && nocolor_loads==3);
  puts("actual material linker: distinct cache identity, failed-load fallback and alpha mode preservation pass");
 }
 '''.replace('@BODY@',body)
