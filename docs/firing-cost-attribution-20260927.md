@@ -165,3 +165,23 @@ headers do not reproduce every shard macro override; before promotion, qualify
 that actual preamble and inspect full-game integration. No runtime settings,
 Vita package, draw order or save data changed. Poll the existing build rather
 than starting another. No integration gameplay run has started yet.
+
+## Final shard qualification and perf277 candidate
+
+The integration build and 120-second Pi run have now completed (planned timeout
+124, cores 0/1). The bounded fatal/panic/scope-omission search found no matches;
+this headless run does not establish rendering correctness. Private evidence:
+`sprite-stack-candidate/gameplay/{run-result,phase-summary}.json` and `run.log`.
+
+The final candidate with the actual generated shard preamble passed all 2,048
+VitaSDK-linked instruction cases, including context, memory, mapping, handoff
+trace and FPSCR. Within-page executed instruction counts were 3,169,920 original
+versus 2,246,528 candidate; crossing-page fallback was 3,197,744 versus 3,210,032.
+Modeled copy volume matched. These instruction counts are not physical timing.
+
+Perf277 builds successfully from perf275 with the candidate opt-in enabled only
+for code_010.o. Package audit confirms that is the sole changed recompiled
+object, and game-a.self/boot-game.txt are the sole changed package entries.
+Runtime SHA256: 7d8ba31adb1fea060d8d58084639817a64943e67edccef792204e0c242aec062.
+The remote update has started; installation and ordinary hardware gameplay
+results remain unverified. Retain perf275 as rollback and protect a30-perf211.
