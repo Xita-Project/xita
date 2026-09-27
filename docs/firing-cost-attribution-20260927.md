@@ -2431,3 +2431,29 @@ at17seconds; bounded180s run cores0/1,separatesavedirectory. Pollsamehandle;
 plannedtimeout124 notcrash. Retrievegame.log/exitcode oncompletion; require
 loadedgameplay beforeinterpretingrepeatcounts. No VitaFPSextrapolation.
 Vita290unchanged,awake. Goalunmet; no newoptimizationdeployed.
+
+
+## Perf290 pod capture complete; matrix reuse census and lowering gates
+
+Vita collector78331 terminalrc0. Pod boundaryimageverified.720intervals
+mean59.870ms/16.703FPS,p9576.981,p9982.440,max97.712;546over50ms,
+noneover100ms. Diagnosticphase2/rootpairdisabled, notnormalFPSacceptance.
+Pi86395 terminal124 planned180stimeout. Retrievedgame.log/exit-code;55
+loaded/active/director1reports.631completecensuswindows/5169152calls,
+74589664slotinputhits(14.430%),261500consecutivehits(5.059%). Includes
+startupandgameplay; notfullyFP-keyedcache,notexactresultreuse,noVitaprediction.
+Given modestrepeatfraction andlookup/FPstatecost, defermatrixcache.
+
+Private model-wrapper-analysis/analyze.py ran owned-image8DDF0 analysis
+with leavesB5B40/B5F60/B5EA0 plus8E087; normalrejectionhook-before-instruction.
+Ignoringonlythatguard makes abstractx87planpossible, but actualemission
+stillfallbacks hook-transform-refused:AssertionError. Rootpair transform
+expects adjacentX_PUSH32/f_B5B40; registermode insertscallstate synchronization.
+This is a real secondintegrationgate, notpermissiontoignoreassertions.
+Analysis-only-model.c/report.json remainprivate; no generatedcandidatebuilt.
+
+Next boundedroute: explicit hook contracts for spill/reload and same-depth
+branchtargets at8E0F0/8E166/8E5D0, plusstructuralrootpaircall integration that
+preserves pairedoptimization andsyncs beforejump8E58B. Need differential
+fullcontext/FP/stack/guardedfallback tests; do notjustloosenhook-rejection or
+stringassertion. Currentcode unchanged,290hardwareawake; goalunmet.
