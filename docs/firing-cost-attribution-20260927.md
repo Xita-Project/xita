@@ -1063,3 +1063,24 @@ Gameplay collector60982 is live, firing and movement brackets already captured,
 currently proceeding to45-second outdoor sample. Re-poll same handle; inspect
 saved screenshots and gameplay-summary.json when terminal. No full15-minute,
 cutscene, AI/audio or checkpoint acceptance yet. Keep perf282 provisional.
+
+
+Gameplay collector60982 completed0; controls released. Reviewed fire-after.png
+(reload animation in lifepod) and outside-after.png (expected rocks/canyon,
+weapon/HUD). Short-run no observed crash or obvious new corruption; not full
+rendering validation. Exact results in gameplay-summary.json:
+
+| Scene | N | Mean ms / FPS | p95 ms | max ms | >50 / >100 ms |
+|---|---:|---:|---:|---:|---:|
+|5s AR/reload|81|67.027 /14.919|89.115|114.060|79/3|
+|movement|86|62.656 /15.960|75.412|280.910|85/1|
+|outdoor|887|50.819 /19.678|67.850|355.055|343/6|
+
+Earlier perf277 respective mean76.562/62.594/47.494ms. Pod and firing improve;
+movement essentially unchanged; outdoors worse with2 frames>200ms. Keep282
+provisional, not accepted globally and not goal complete. Next correlate slow
+frames to checkpoint/streaming/tick/capture reports inside exact outdoor
+brackets; post-bracket tail windows alone are not sufficient attribution.
+Final persistent windows have zero capacity fallsbacks, so do not assume cache
+exhaustion caused outdoor stalls without aligned evidence. No further test is
+running; perf282 remains live in ordinary a30, lease renewed by collector.
