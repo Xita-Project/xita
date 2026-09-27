@@ -18,6 +18,10 @@ void xv_preempt(xctx*c){
     if((scenario&3)==0){unsigned page=c->r[1]>>12,off=g_xpt[page];
         unsigned spare=SIZE-4096;if(off==spare)spare=SIZE-8192;
         memcpy(g_xram+spare,g_xram+off,4096);g_xpt[page]=spare;}
+    if((scenario&7)==2){
+        c->fsp=(c->fsp+3)&7; c->fsw^=0x4500;
+        for(unsigned j=0;j<8;j++)c->st[j]=(scenario+j+preempts)*0.125;
+    }
     c->preempt=1;
 }
 static void putf(unsigned a,float f){x_guest_write(a,&f,4);}
@@ -55,7 +59,8 @@ int main(int argc,char**argv){
   memcpy(expected,g_xram,SIZE);memcpy(ept,g_xpt,4*(1u<<20));memcpy(g_xram,before,SIZE);memcpy(g_xpt,pt,4*(1u<<20));
   xctx got=init;preempts=0;trace=1469598103934665603ull;candidate(&got);
   if(memcmp(&ref,&got,sizeof ref)||memcmp(expected,g_xram,SIZE)||memcmp(ept,g_xpt,4*(1u<<20))||rp!=preempts||rt!=trace){
-   fprintf(stderr,"FAIL case %u ctx %d memory %d preempts %u/%u\n",scenario,memcmp(&ref,&got,sizeof ref)!=0,memcmp(expected,g_xram,SIZE)!=0,rp,preempts);return 1;}
+   fprintf(stderr,"FAIL case %u ctx %d memory %d preempts %u/%u\n",scenario,memcmp(&ref,&got,sizeof ref)!=0,memcmp(expected,g_xram,SIZE)!=0,rp,preempts);
+   free(ept);free(pt);free(expected);free(before);free(g_xpt);free(g_xram);return 1;}
  }
  printf("PASS %u cases: full context, arena, page table, preemption observations\n",cases);
  free(ept);free(pt);free(expected);free(before);free(g_xpt);free(g_xram);return 0;
