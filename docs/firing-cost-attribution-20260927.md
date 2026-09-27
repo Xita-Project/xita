@@ -2320,3 +2320,17 @@ REP STOSD, already serviced by xv_x86rt.c page-batched repeated-byte memset.
 Do not claim a new memset optimization or replace existing heap with a heap.
 These are source correlations, not current inner-cost attribution.
 Goal remains unmet; next capture must reproduce AI work before native choice.
+
+
+## Perf289 replay reached pod and shortened route
+
+Replay launch3944 completed rc0. Readiness screenshot confirms pod; camera
+31.64,-103.41,59.47 already close to old spike position. Therefore changed
+prepared exit-pod.py to5seconds forward only, removing extra8second leg.
+Exit82214 completedrc0, controls released; screenshot shows outdoors safely,
+camera30.67,-93.14,58.75. No expensive path rows yet in pod-exit.log.
+Started observe-arrival.py:three30second-spaced log captures with status
+validation and final boundary image; no movement or repeated FPS benchmark.
+Poll existing observer handle. No sleep enabled and lease renewed3600.
+Previous turn was progress (qualified quiet sample and same-build restart).
+No new code optimization/FPS success this turn; goal remains unmet.
