@@ -1516,6 +1516,11 @@ static uint64_t g_t_last_present, g_t_game_acc, g_t_render_acc; static unsigned 
  * Owner reporting follows the helper join, just like the aggregate counters. */
 static int g_frame_times_enabled = -1;
 static uint64_t g_frame_times_us[60];
+/* Optional slow intervals, buffered until the existing joined-owner report.
+ * Each row is total + eleven adjacent wall-time segments, never GPU time. */
+static int g_frame_slow_ms = -1;
+static uint64_t g_frame_slow_us[60][12];
+static unsigned g_frame_slow_frame[60];
 /* /status.frames counts remote image publications, including non-game frames.
  * Publish the actual completed [frame-us] identifier for input correlation. */
 static unsigned g_timing_frame;
@@ -1527,16 +1532,23 @@ unsigned xv_ui_timing_frame(void)
 static inline uint64_t t_us(void) { extern uint64_t xk_os_monotonic_us(void); return xk_os_monotonic_us(); }
 void xd3d_hist_small_check(unsigned frame, unsigned draws);
 uint64_t xv_t_present_us;
-static void xd3d_r_present_inner(unsigned frame, unsigned draws);
+static void xd3d_r_present_inner(unsigned frame, unsigned draws, uint64_t entry, uint64_t recorder_done);
 static unsigned g_report_pending;   /* frame + 1: a helper-side present's 60-frame report, run at the owner's join */
 static void present_report(unsigned frame);
 void xd3d_r_present(unsigned frame, unsigned draws)
 {
+    if (g_frame_slow_ms < 0) {
+        const char *e = getenv("XV_FRAME_SLOW_MS");
+        int value = e ? atoi(e) : 0;
+        g_frame_slow_ms = value >= 50 && value <= 10000 ? value : 0;
+    }
+    uint64_t entry = g_frame_slow_ms ? t_us() : 0;
     xv_rec_defer_inline_begin();   /* XV_REC_DEFER: the frame's queued draws first */
-    extern uint64_t xk_os_monotonic_us(void); uint64_t t0 = xk_os_monotonic_us(); xd3d_r_present_inner(frame, draws); xv_t_present_us += xk_os_monotonic_us() - t0;
+    extern uint64_t xk_os_monotonic_us(void); uint64_t t0 = xk_os_monotonic_us(); xd3d_r_present_inner(frame, draws, entry, t0); xv_t_present_us += xk_os_monotonic_us() - t0;
 }
-static void xd3d_r_present_inner(unsigned frame, unsigned draws)
+static void xd3d_r_present_inner(unsigned frame, unsigned draws, uint64_t entry, uint64_t recorder_done)
 {
+    uint64_t previous_present = g_t_last_present;
     /* Settings/benchmark transitions may touch upload policy or attachments.
      * Complete captured preparation before either transition, not just before
      * the eventual EndFrame publication. No full-GPU wait is added. */
@@ -1572,6 +1584,21 @@ static void xd3d_r_present_inner(unsigned frame, unsigned draws)
     if (g_frame_times_enabled && g_t_frames < 60)
         g_frame_times_us[g_t_frames] = g_t_last_present && t1 >= g_t_last_present
             ? t1 - g_t_last_present : 0; /* zero marks an unavailable interval */
+    if (g_frame_slow_ms && g_t_frames < 60) {
+        uint64_t *row = g_frame_slow_us[g_t_frames];
+        row[0] = 0;
+        if (previous_present && entry >= previous_present &&
+            recorder_done >= entry && t0 >= recorder_done && t1 >= t0 &&
+            t1 - previous_present >= (uint64_t)g_frame_slow_ms * 1000u) {
+            row[0] = t1 - previous_present;
+            row[1] = entry - previous_present;
+            row[2] = recorder_done - entry;
+            row[3] = t0 - recorder_done;
+            row[4] = ps_[0] - t0;
+            for (unsigned i = 1; i < 8; ++i) row[4+i] = ps_[i] - ps_[i-1];
+            g_frame_slow_frame[g_t_frames] = frame;
+        }
+    }
     g_t_render_acc += t1 - t0; g_t_last_present = t1;
     if (g_frame_times_enabled) __atomic_store_n(&g_timing_frame, frame, __ATOMIC_RELEASE);
     if (t1 - t0 > 300000u) {   /* perf133 (Sept 23): isolated ~6.6 s present-path stalls once every few windows; name the stage */
@@ -1663,6 +1690,17 @@ static void present_report(unsigned frame)
                 for (unsigned i = start; i < end; ++i)
                     len += snprintf(line+len, sizeof line-(unsigned)len, " %llu",
                                     (unsigned long long)g_frame_times_us[i]);
+                UI_LOG("%s\n", line);
+            }
+        }
+        if (g_frame_slow_ms) {
+            for (unsigned i = 0; i < g_t_frames && i < 60; ++i) {
+                const uint64_t *row = g_frame_slow_us[i];
+                if (!row[0]) continue;
+                char line[440];
+                int len = snprintf(line, sizeof line, "[frame-slow-us] frame %u:", g_frame_slow_frame[i]);
+                for (unsigned j = 0; j < 12; ++j)
+                    len += snprintf(line+len, sizeof line-(unsigned)len, " %llu", (unsigned long long)row[j]);
                 UI_LOG("%s\n", line);
             }
         }

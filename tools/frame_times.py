@@ -83,6 +83,33 @@ def cadence(selected, period):
                 phases=rows)
 
 
+SLOW_LINE = re.compile(r'\[frame-slow-us\] frame (\d+):([\d ]*)$')
+SLOW_SEGMENTS = ('before_present', 'recorder_drain', 'capture_and_histogram',
+                 'settings', 'end_frame', 'flip', 'flush', 'publish_acquire',
+                 'begin_frame', 'ui_begin', 'texture_purge')
+
+
+def slow_frames(text):
+    """Adjacent elapsed segments; pre-present includes scheduling/reporting.
+
+    These are wall times on the present caller, not exclusive CPU or GPU work.
+    Fail closed on partial records or sums that do not cover the interval.
+    """
+    rows = []
+    for line in text.splitlines():
+        m = SLOW_LINE.search(line)
+        if not m:
+            if '[frame-slow-us]' in line:
+                raise ValueError('malformed slow-frame record')
+            continue
+        values = [int(x) for x in m[2].split()]
+        if len(values) != 12 or sum(values[1:]) != values[0]:
+            raise ValueError('slow-frame segments do not partition the interval')
+        rows.append(dict(frame=int(m[1]), total_us=values[0],
+                         segments_us=dict(zip(SLOW_SEGMENTS, values[1:]))))
+    return rows
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('log', type=Path)
@@ -90,8 +117,15 @@ def main():
     p.add_argument('--to-frame', type=int, default=2**32-1)
     p.add_argument('--cadence-period', type=int,
                    help='also group intervals by frame identifier modulo this period')
+    p.add_argument('--slow-only', action='store_true',
+                   help='show opt-in slow-frame partitions instead of aggregate windows')
     a = p.parse_args()
-    records, discarded = windows(a.log.read_text(errors='replace'))
+    text = a.log.read_text(errors='replace')
+    if a.slow_only:
+        rows = [r for r in slow_frames(text) if a.from_frame <= r['frame'] <= a.to_frame]
+        print(json.dumps(rows, indent=2))
+        return
+    records, discarded = windows(text)
     selected = [(f, v) for f, v in records if a.from_frame <= f <= a.to_frame]
     result = summarize(selected)
     result['incomplete_windows_in_log'] = discarded
