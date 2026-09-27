@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES = ['disabled', 'cold', *['startup' + str(i) for i in range(1, 7)],
+CASES = ['aux-interleave', 'aux-chunks', 'aux-shutdown', 'aux-capacity', 'aux-disabled', 'aux-error', 'disabled', 'cold', *['startup' + str(i) for i in range(1, 7)],
          'fifo', 'capacity', 'critical', 'ownerflush', 'errorfull', 'barrier',
          'self', 'join', 'hints', 'ownercritical', 'openflush', 'console', 'syncerror', 'partial', 'zero', 'impossible',
          'negative', 'consoleerror', 'update-write', 'update-console',

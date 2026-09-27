@@ -344,11 +344,67 @@ static void toggle_test(const char *test)
     assert(xv_log_async_init()==XV_LOG_BUSY && xv_log_async_set_enabled(1,1000)==XV_LOG_UNAVAILABLE);
 }
 
+static void *aux_producer(void *arg)
+{
+    identity=2;assert(xv_log_aux_begin_frame(123));
+    const char *text=arg;xv_log_write(text,(unsigned)strlen(text));
+    assert(!xv_log_aux_begin_frame(124));assert(!xv_log_report_begin_frame(124));
+    xv_log_aux_end();return NULL;
+}
+
 int main(int argc,char **argv)
 {
     assert(argc==2);const char *test=argv[1];
     unsetenv("XV_LOG_PERIODIC_CONSOLE");
-    if(!strcmp(test,"periodic-file-only")) {
+    if(!strcmp(test,"aux-interleave")) {
+        start();pthread_mutex_lock(&io);write_block=1;pthread_mutex_unlock(&io);
+        assert(xv_log_report_begin_frame(100));xv_log_write("A",1);
+        assert(!xv_log_aux_begin_frame(200));
+        pthread_t p;assert(!pthread_create(&p,NULL,aux_producer,"B"));assert(!pthread_join(p,NULL));
+        wait_value(&writer_entered,1);
+        assert(status().pending_frame==123 && status().pending_report==2);
+        assert(g_report_used==1 && g_report[0]=='A' && log_report_id==1 && log_report_chunk==0);
+        xv_log_write("C",1);xv_log_report_end();
+        assert(status().accepted==2 && log_queue[1].report==1 && log_queue[1].frame==100);
+        release_writes(10);assert(xv_log_shutdown(1000000)==XV_LOG_OK);verify("BAC",3);
+    } else if(!strcmp(test,"aux-chunks")) {
+        start();pthread_mutex_lock(&io);write_block=1;pthread_mutex_unlock(&io);
+        char bytes[65537];memset(bytes,'Q',sizeof bytes);
+        assert(xv_log_aux_begin_frame(12));xv_log_write(bytes,sizeof bytes);
+        memset(bytes,'X',sizeof bytes);xv_log_aux_end();wait_value(&writer_entered,1);
+        assert(status().queued==3);
+        for(unsigned i=0;i<3;++i)assert(log_queue[i].report==1 && log_queue[i].chunk==i && log_queue[i].frame==12 && log_queue[i].final==(i==2));
+        release_writes(1000);assert(xv_log_shutdown(1000000)==XV_LOG_OK);
+        memset(bytes,'Q',sizeof bytes);verify(bytes,sizeof bytes);
+    } else if(!strcmp(test,"aux-shutdown")) {
+        start();identity=2;assert(xv_log_aux_begin_frame(12));xv_log_write("X",1);
+        assert(xv_log_flush_wait(1000)==XV_LOG_BUSY && xv_log_shutdown(1000)==XV_LOG_BUSY);
+        identity=1;assert(xv_log_flush_wait(1000)==XV_LOG_BUSY);
+        assert(xv_log_shutdown(10000)==XV_LOG_TIMEOUT && !atomic_load(&deleted_threads));
+        identity=2;xv_log_aux_end();identity=1;
+        assert(xv_log_shutdown(1000000)==XV_LOG_OK);verify("X",1);
+        assert(!xv_log_aux_begin_frame(13));
+    } else if(!strcmp(test,"aux-capacity")) {
+        start();pthread_mutex_lock(&io);write_block=1;pthread_mutex_unlock(&io);
+        report("A",1,1);wait_value(&writer_entered,1);
+        report("B",1,2);report("C",1,3);report("D",1,4);
+        pthread_t p;assert(!pthread_create(&p,NULL,aux_producer,"E"));
+        uint64_t t=sceKernelGetProcessTimeWide();
+        while(!status().backpressure_count) {assert(sceKernelGetProcessTimeWide()-t<2000000);sceKernelDelayThread(100);}
+        assert(status().queued==4 && status().open_report);
+        release_writes(10);assert(!pthread_join(p,NULL));
+        assert(xv_log_shutdown(1000000)==XV_LOG_OK);verify("ABCDE",5);
+    } else if(!strcmp(test,"aux-disabled")) {
+        assert(!xv_log_aux_begin_frame(1));xv_log_write("A",1);verify("A",1);
+        assert(!status().accepted && !status().open_report);
+    } else if(!strcmp(test,"aux-error")) {
+        start();pthread_mutex_lock(&io);fail_after=0;pthread_mutex_unlock(&io);
+        assert(xv_log_aux_begin_frame(222));xv_log_write("retry",5);xv_log_aux_end();wait_error();
+        assert(status().pending_frame==222 && status().queued==1);
+        assert(!xv_log_aux_begin_frame(223));assert(xv_log_flush_wait(10000)==XV_LOG_IO);
+        pthread_mutex_lock(&io);fail_after=-1;pthread_mutex_unlock(&io);
+        assert(xv_log_retry()==XV_LOG_OK && xv_log_shutdown(1000000)==XV_LOG_OK);verify("retry",5);
+    } else if(!strcmp(test,"periodic-file-only")) {
         setenv("XV_LOG_PERIODIC_CONSOLE","0",1);start();
         pthread_mutex_lock(&io);console_block=1;pthread_mutex_unlock(&io);
         report("periodic\n",9,1);

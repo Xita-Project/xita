@@ -23,6 +23,12 @@ static char g_report[XV_LOG_REPORT_BYTES];
 static unsigned g_report_used;
 static SceUID g_report_owner;
 static int g_report_async;
+/* One independent periodic producer, currently the render pump. It never
+ * claims g_report_owner, so the gameplay report keeps its asynchronous path. */
+static char g_aux_report[XV_LOG_REPORT_BYTES];
+static SceUID g_aux_owner;
+static unsigned g_aux_used,g_aux_frame,g_aux_chunk;
+static uint64_t g_aux_id;
 
 static void log_initialize(void)
 {
@@ -126,6 +132,7 @@ static int report_is_owner(void)
 static int report_begin(unsigned frame,int async_only)
 {
     SceUID expected=0,current=sceKernelGetThreadId();
+    if(__atomic_load_n(&g_aux_owner,__ATOMIC_ACQUIRE)==current) return 0;
     if(current<=0 || !__atomic_compare_exchange_n(&g_report_owner,&expected,current,
             0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return 0;
     g_report_async=async_report_begin(frame);
@@ -157,6 +164,32 @@ void xv_log_report_end(void)
     (void)report_flush(1,0);
     __atomic_store_n(&g_report_owner,0,__ATOMIC_RELEASE);
 }
+int xv_log_aux_begin_frame(unsigned frame)
+{
+    SceUID current=sceKernelGetThreadId(),expected=0;
+    if(current<=0 || report_is_owner() ||
+       !__atomic_compare_exchange_n(&g_aux_owner,&expected,current,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return 0;
+    if(!async_aux_begin(&g_aux_id)) {
+        __atomic_store_n(&g_aux_owner,0,__ATOMIC_RELEASE); return 0;
+    }
+    g_aux_used=g_aux_chunk=0;g_aux_frame=frame;return 1;
+}
+static void aux_flush(unsigned final)
+{
+    /* As with the existing guest report, admitted bytes stay owned until
+     * queued, including on persistent I/O failure; explicit retry unblocks. */
+    if(g_aux_used || final) {
+        (void)async_enqueue_named(g_aux_report,g_aux_used,final,0,g_aux_id,g_aux_frame,g_aux_chunk++);
+        g_aux_used=0;
+    }
+}
+void xv_log_aux_end(void)
+{
+    if(__atomic_load_n(&g_aux_owner,__ATOMIC_ACQUIRE)!=sceKernelGetThreadId()) return;
+    aux_flush(1);async_aux_end();
+    __atomic_store_n(&g_aux_owner,0,__ATOMIC_RELEASE);
+}
+
 static unsigned g_helper_dropped;
 int xv_scene_thread_on_helper(void) __attribute__((weak));   /* recomp/kernel/xk_scene_thread.c */
 int xv_rec_defer_on_worker(void) __attribute__((weak));     /* runtime/xv_rec_defer.h */
@@ -167,6 +200,14 @@ void xv_log_write(const char *buf,unsigned n)
      * stalled every other logging thread (the remote server died within seconds of the game start, perf93-95). Dropped
      * for now; the count is reported by the scene thread. Critical lines still use xv_log_criticalf. */
     if((xv_scene_thread_on_helper && xv_scene_thread_on_helper()) || (xv_rec_defer_on_worker && xv_rec_defer_on_worker())) { __atomic_add_fetch(&g_helper_dropped,1,__ATOMIC_RELAXED); return; }   /* XV_REC_DEFER: the recording worker records what the helper did; same policy */
+    if(__atomic_load_n(&g_aux_owner,__ATOMIC_ACQUIRE)==sceKernelGetThreadId()) {
+        while(n) {
+            if(g_aux_used==XV_LOG_REPORT_BYTES) aux_flush(0);
+            unsigned take=XV_LOG_REPORT_BYTES-g_aux_used;if(take>n)take=n;
+            memcpy(g_aux_report+g_aux_used,buf,take);g_aux_used+=take;buf+=take;n-=take;
+        }
+        return;
+    }
     if(!report_is_owner()) { log_write_immediate(buf,n); return; }
     if(!g_report_async) {
         /* Preserve the reviewed synchronous grouping/oversized-write policy. */
@@ -207,6 +248,7 @@ int xv_log_flush_wait(unsigned timeout_us)
 {
     uint64_t began=sink_now();
     if(async_is_worker()) return XV_LOG_SELF;
+    if(__atomic_load_n(&g_aux_owner,__ATOMIC_ACQUIRE)) return XV_LOG_BUSY;
     SceUID owner=__atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE);
     if(owner && owner!=sceKernelGetThreadId()) return XV_LOG_BUSY;
     if(owner) { int rc=report_flush(0,timeout_us ? timeout_us : 1); if(rc) return rc; }

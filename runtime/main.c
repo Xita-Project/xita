@@ -1807,6 +1807,7 @@ static int xv_pump_retire(void)
     __atomic_store_n(&g_frame_completed,ticket,__ATOMIC_RELEASE);
     xv_frame_events_signal(&g_frame_events,XV_FRAME_COMPLETED);
     if (++g_retired_count == 60) {
+        int grouped_pump=xv_log_aux_begin_frame(ticket);
 #ifdef XV_SCENE_CENSUS
         xv_sc_report();
 #endif
@@ -1854,6 +1855,7 @@ static int xv_pump_retire(void)
 #endif
         g_early_visibility_count=0; g_early_visibility_us=0; g_visibility_tail_us=0;
         g_retired_count=0; g_completion_us=0; g_max_pending=0;
+        if(grouped_pump) xv_log_aux_end();
     }
     return 1;
 }
@@ -1901,10 +1903,13 @@ static int xv_pump_thread(SceSize args, void *argp)
     uint64_t next_frame=0;
     while (g_running) {
         xv_display_timing_sample display_sample;
-        if (xv_display_timing_pop(&g_display_timing,&display_sample))
+        if (xv_display_timing_pop(&g_display_timing,&display_sample)) {
+            int grouped_display=xv_log_aux_begin_frame(g_frame_submitted);
             XV_LOG("[display-callback] %u frames: setup %llu us, vblank %llu us, max-total %llu us; elapsed includes preemption; report on pump\n",
                 display_sample.count,(unsigned long long)display_sample.setup_us,
                 (unsigned long long)display_sample.vblank_us,(unsigned long long)display_sample.max_us);
+            if(grouped_display) xv_log_aux_end();
+        }
         uint32_t updated=__atomic_load_n(&g_settings_frame_period,__ATOMIC_ACQUIRE);
         if(updated!=period) {period=updated;next_frame=0;}
 #if XV_GPU_PACKET_TIMING
@@ -1970,6 +1975,7 @@ static int xv_pump_thread(SceSize args, void *argp)
                 queue_head_us += now - g_packets[q].inspected_us;
                 for (unsigned k=0;k<3;k++) queue_gate_count[k] += !!(g_packets[q].queue_gate_mask & (1u<<k));
                 if (++queue_count == 60) {
+                    int grouped_queue=xv_log_aux_begin_frame(ticket);
                     XV_LOG("[frame-queue] 60 packets: published-to-submit %llu us total, %llu us max, %u over 1 ms; scheduling/display/pacing included\n",
                         (unsigned long long)queue_us, (unsigned long long)queue_max, queue_over_ms);
                     XV_LOG("[frame-queue-gates] 60 packets: before-first-inspection %llu us, inspected-head %llu us; packets observing back-buffer/queue-limit/pacing %u/%u/%u; intervals include preemption, gate counts overlap\n",
@@ -1978,6 +1984,7 @@ static int xv_pump_thread(SceSize args, void *argp)
                     queue_us = queue_max = queue_unseen_us = queue_head_us = 0;
                     queue_count = queue_over_ms = 0;
                     memset(queue_gate_count,0,sizeof queue_gate_count);
+                    if(grouped_queue) xv_log_aux_end();
                 }
             }
             g_packets[q].started_us=now;

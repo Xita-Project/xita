@@ -44,6 +44,8 @@ typedef struct {
     unsigned enabled, transition;
     int error, startup_error;
     uint64_t accepted, written, synced, accepted_bytes, written_bytes, synced_bytes;
+    /* Last report whose final chunk was written, not an admission-order
+     * watermark: independent producers can finish in a different order. */
     uint64_t completed_report, failed_sequence;
     /* Console offset ends at a wholly accepted call; a negative result gives
      * no count within that failed call. File offset includes partial writes. */
@@ -71,4 +73,10 @@ void xv_log_critical_write(const char *text, unsigned length);
 int xv_log_report_begin_frame(unsigned frame);
 /* Scope only when the async sink is active; synchronous call sites unchanged. */
 int xv_log_report_begin_async_frame(unsigned frame);
+/* Independent pump report builder; only admits with active, healthy async
+ * writer. Returns 0 without changing ordinary logging on failure. Admitted
+ * reports retain lossless queue backpressure, and must be ended before flush.
+ * A concurrent guest report retains its own builder and chunk identity. */
+int xv_log_aux_begin_frame(unsigned frame);
+void xv_log_aux_end(void);
 #endif

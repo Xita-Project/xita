@@ -13,7 +13,7 @@ static SceUID log_thread=-1, log_wake=-1, log_changed=-1;
 static SceUID log_control_owner;
 static xv_log_status log_status;
 static uint64_t log_sync_request, log_sync_done, log_sync_target;
-static uint64_t log_report_id;
+static uint64_t log_report_id, log_next_report_id;
 static unsigned log_report_frame, log_report_chunk;
 /* Startup-only experiment: periodic bytes still reach the file and its flush
  * barrier. Immediate messages and errors retain both sinks. */
@@ -175,12 +175,13 @@ static int async_report_begin(unsigned frame)
     queue_lock();
     int active=log_status.enabled && (log_status.state==XV_LOG_RUNNING || log_status.state==XV_LOG_ERROR);
     int blocked=log_status.transition || log_status.state==XV_LOG_STARTING || log_status.state==XV_LOG_DRAINING || log_draining;
-    if(active && !blocked) { ++log_report_id; log_report_frame=frame; log_report_chunk=0; }
+    if(active && !blocked) { log_report_id=++log_next_report_id; log_report_frame=frame; log_report_chunk=0; }
     queue_unlock();
     return blocked ? -1 : active;
 }
 
-static int async_enqueue(const char *bytes,unsigned length,unsigned final,unsigned timeout_us)
+static int async_enqueue_named(const char *bytes,unsigned length,unsigned final,unsigned timeout_us,
+                               uint64_t report,unsigned frame,unsigned chunk)
 {
     uint64_t began=0,start=log_now();
     for(;;) {
@@ -189,8 +190,8 @@ static int async_enqueue(const char *bytes,unsigned length,unsigned final,unsign
             log_slot *s=&log_queue[log_status.accepted%LOG_SLOTS];
             memcpy(s->bytes,bytes,length);
             s->length=length; s->console_offset=s->file_offset=0;
-            s->sequence=++log_status.accepted; s->report=log_report_id;
-            s->frame=log_report_frame; s->chunk=log_report_chunk++; s->final=final;
+            s->sequence=++log_status.accepted; s->report=report;
+            s->frame=frame; s->chunk=chunk; s->final=final;
             s->captured_us=log_now();
             log_status.accepted_bytes+=length; log_status.queued++;
             if(log_status.queued>log_status.high_water) log_status.high_water=log_status.queued;
@@ -211,6 +212,25 @@ static int async_enqueue(const char *bytes,unsigned length,unsigned final,unsign
     }
 }
 
+static int async_enqueue(const char *bytes,unsigned length,unsigned final,unsigned timeout_us)
+{
+    int rc=async_enqueue_named(bytes,length,final,timeout_us,log_report_id,log_report_frame,log_report_chunk);
+    if(!rc) log_report_chunk++;
+    return rc;
+}
+/* An independent producer pins the lifecycle without taking the guest builder.
+ * Its admitted chunks share the existing FIFO and lossless backpressure policy. */
+static int async_aux_begin(uint64_t *report)
+{
+    queue_lock();
+    int ok=log_status.enabled && log_status.state==XV_LOG_RUNNING &&
+        !log_status.transition && !log_draining && !log_quit;
+    if(ok) { ++log_users; *report=++log_next_report_id; }
+    queue_unlock(); return ok;
+}
+static void async_aux_end(void)
+{ queue_lock(); --log_users; queue_unlock(); }
+
 void xv_log_get_status(xv_log_status *out)
 {
     if(!out) return;
@@ -221,7 +241,8 @@ void xv_log_get_status(xv_log_status *out)
         out->pending_frame=s->frame; out->pending_chunk=s->chunk; out->pending_length=s->length;
     }
     queue_unlock();
-    out->open_report=__atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE)>0;
+    out->open_report=__atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE)>0 ||
+        __atomic_load_n(&g_aux_owner,__ATOMIC_ACQUIRE)>0;
     if(!out->error) out->error=__atomic_load_n(&g_immediate_error,__ATOMIC_ACQUIRE);
 }
 
@@ -304,7 +325,8 @@ int xv_log_shutdown(unsigned timeout_us)
     queue_lock();
     if(log_status.state==XV_LOG_STARTING) { queue_unlock(); result=XV_LOG_BUSY; goto out; }
     if(sceKernelGetThreadId()==log_thread) { queue_unlock(); result=XV_LOG_SELF; goto out; }
-    if(__atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE)==sceKernelGetThreadId()) {
+    if(__atomic_load_n(&g_report_owner,__ATOMIC_ACQUIRE)==sceKernelGetThreadId() ||
+       __atomic_load_n(&g_aux_owner,__ATOMIC_ACQUIRE)==sceKernelGetThreadId()) {
         queue_unlock(); result=XV_LOG_BUSY; goto out;
     }
     if(log_thread<0) { queue_unlock(); result=xv_log_flush_wait(timeout_us); goto out; }
@@ -342,6 +364,11 @@ out:
     __atomic_store_n(&log_stop_guard,0,__ATOMIC_RELEASE); return result;
 }
 #else
+static int async_aux_begin(uint64_t *report) { (void)report; return 0; }
+static void async_aux_end(void) {}
+static int async_enqueue_named(const char *bytes,unsigned length,unsigned final,unsigned timeout_us,
+                               uint64_t report,unsigned frame,unsigned chunk)
+{ (void)bytes;(void)length;(void)final;(void)timeout_us;(void)report;(void)frame;(void)chunk;return XV_LOG_UNAVAILABLE; }
 static int async_report_begin(unsigned frame) { (void)frame; return 0; }
 static int async_enqueue(const char *bytes,unsigned length,unsigned final,unsigned timeout_us)
 { (void)bytes; (void)length; (void)final; (void)timeout_us; return XV_LOG_UNAVAILABLE; }
