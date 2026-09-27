@@ -1,5 +1,9 @@
 # Bounded visible-surface scan prototype
 
+Historical prototype: the later [scene-index implementation](native-scene-index-run.md)
+is qualified and enabled in current hardware tests. Do not mistake the parked
+prototype below for the current runtime or repeat its completed run census.
+
 This is an **uninstalled experiment**, with no production recompiler hook,
 runtime switch, Makefile integration or FPS claim. The current Vita still runs
 the original loop. The helper is in `recomp/kernel/xk_surface_scan.h`; its only
