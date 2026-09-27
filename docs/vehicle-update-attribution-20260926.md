@@ -147,3 +147,39 @@ coverage and its remaining traversal/memory work. Do not treat the aggregate
 another replacement for work already native. Private audit, build, command,
 result, log and summary files retain this evidence. No Vita update or FPS gain
 is claimed from this capture.
+
+## Object collection versus packet construction (September 27)
+
+The next diagnostic, `../collection-packet-phase-pi/`, times primary 172F40's
+existing `nq_query_at_17301b` adapter as 88110, its transform helpers, and 868F0
+packet construction. It also wraps direct calls in the three packet branches
+86440, 862A0 and 86170. Twenty-four observer pairs were added; all five selected
+bodies match perf269 after stripping observers, and both full source shards
+restore to their prior versions. No query route, output or scheduling changed.
+
+The ARM build and planned 180-second Pi core-0/1 run completed (exit 124),
+85 reports through frame 5100; the bounded fatal/signal/scope error scan found
+no matches. Older-runtime/headless and scripted-input limitations still apply.
+
+| Report | 172F40 inclusive | Query 88110 | Packet 868F0 | Polygon branch 86170 | Capsule branch 862A0 | Sphere branch 86440 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1740 | 1.00 | 0.41 | 0.56 | 0.28 | 0.21 | 0.03 |
+| 1860 | 1.11 | 0.46 | 0.59 | 0.29 | 0.21 | 0.03 |
+| 1920 | 1.02 | 0.43 | 0.56 | 0.27 | 0.21 | 0.03 |
+
+All values are instrumented Pi ms/frame, nested rather than additive.
+172F40 self is 0.02/0.04/0.02; matrix inversion/point transformation is small.
+Packet construction, not just the native query, is a substantial remaining
+branch. Additional high-frequency observers can inflate it; do not compare
+these totals with the previous less-instrumented run as a regression, or claim
+these milliseconds are recoverable Vita time. The bounded report omits the
+inner polygon/capsule branch rows, so individual inner leaf costs are unproven.
+
+Next implementation target: qualify the packet construction subtree, starting
+with polygon emission 86170 -> 86A40/11690/B5EA0/85020, then capsules
+862A0 -> 116F0/B5E40/B5EA0/851E0. Existing native matrix helpers must remain
+reused. A replacement needs owned-retail differential checks for packet caps,
+count/order, transforms, plane orientation, page crossings/aliases, complete
+context and preemption state, and unchanged publication timing. A frame cache
+or stale collision-result reuse is not part of this proposal. No new runtime
+optimization or hardware deployment resulted from the diagnostic itself.
