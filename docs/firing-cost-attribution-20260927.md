@@ -346,3 +346,12 @@ stay off. These measurements perturb frame times and will not be used as a
 normal FPS comparison. Announced interruption, companion quit completed and
 launch returned; dashboard boot still needs live confirmation before the
 prepared launch script. Restore normal startup settings after the capture.
+
+Dashboard status subsequently confirmed perf277, timing_frame=0. The transient
+connection refusal during startup resolved without another launch. Lease
+renewed; recording277-diagnostic/launch-a30.py is active (session 44098).
+Poll it before starting collect-idle.py, then inspect the pod screenshot and
+collect-gameplay.py. Require [draw-prep] and [draw-prep-sub] output before
+claiming the diagnostic activated. These collectors' FPS summaries are
+instrumented and must not be compared as speed results. After capture, restart
+to dashboard to clear startup overrides and renew the lease.
