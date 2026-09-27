@@ -1424,3 +1424,39 @@ Initial source-tree enabled-reuse test rejected pre-existing canonical-header
 inventory differences (query_world_run.h/xv_x86rt.h versus capture pins); no pins
 were weakened. Stage284 uses the retained qualified headers. Default system
 Python also lacks iced-x86; use the existing private venv for generation tests.
+
+
+## Perf284 normal gameplay: user reports a successful run
+
+Idle collector53687 and gameplay30640 terminal success. Reviewed idle-before/
+after: both outdoors with600reserve/3grenades, NOT pod. Thus do not compare this
+idle result as a pod improvement against282. Protected namespace unchanged;
+location changed between verification and ordinary captures, cause not proven.
+Reviewed outside-after: outdoor trees/cliffs/waterfall and Covenant craft, no
+clear enemy count. User may also be playing; input brackets do not establish a
+deterministic replay. No controls held after collector completion.
+
+Normal mode2 confirmed in logs; native feature calls now reported; root-pair
+accepted counters present. No phases2 instrumentation. Current measurements:
+
+| Segment | Samples | Mean ms / FPS | p95 ms | max ms | >50/>100/>200ms |
+|---|---:|---:|---:|---:|---:|
+|Initial outdoors|840|51.281 /19.500|64.337|115.766|312/8/0|
+|AR firing|82|64.383 /15.532|78.020|114.731|81/1/0|
+|Movement|102|52.842 /18.924|63.497|136.730|50/1/0|
+|Later outdoors|1003|45.045 /22.200|58.178|344.762|189/2/1|
+
+User: “This current run I would say is a SUCCESS!!!” Retain perf284 as promising
+candidate. These results establish playable outdoor intervals and subjective
+improvement, not sustained20FPS across required combat/cutscene/15min acceptance,
+and not a causal FPS delta versus a different scene. Next target AR/effects and
+increased active-unit work; preserve restored hooks. Next contact-feature
+candidate868F0 remains guest; its verified diagnostic cost2.86ms/frame in pod,
+calling86440/862A0/86170 (private callgraph/reference recorded). Do not infer it
+still dominates after284 without current measurements.
+
+Pi has helped earlier ARM correctness/profiling; latest retention bug was found
+by Vita diagnostics and source audit. No claim Pi predicts hardware FPS or did
+this latest hardware test. Current task-specific scripts terminal; hardware284
+running with awake lease. No goal completion: remaining heavy scenes, stalls,
+AI/weapon/audio/checkpoint and stability gates still require work.
