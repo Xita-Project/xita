@@ -192,6 +192,9 @@ typedef struct {
     unsigned offset,bytes,stride,packed,compact,next,current,generation,sparse;
 } capture_entry;
 static capture_entry cap_entries[CAPTURE_ENTRIES];
+#if XV_VERTEX_PERSISTENT
+static vp_snapshot_link cap_gpu_links[CAPTURE_ENTRIES];
+#endif
 static const void *cap_results[CAPTURE_ENTRIES][XV_FRAME_SLOTS];
 static unsigned cap_buckets[CAPTURE_BUCKETS],cap_entry_count;
 /* XV_REC_CAPTURE (runtime/xv_record_opt.h): the same newest-first chains in a 1024-bucket table hashed on all
@@ -405,6 +408,9 @@ static unsigned cap_reuse_add(const xv_vertex_prepare_stream *s,unsigned packed,
         xv_vertex_refs_sparse(s->refs,s->bytes,s->stride)!=0};
 #if XV_CAPTURE_TRUST_TAGS
     cap_entries[id-1].generation=__atomic_load_n(&trust_generation,__ATOMIC_RELAXED);
+#endif
+#if XV_VERTEX_PERSISTENT
+    cap_gpu_links[id-1]=(vp_snapshot_link){0};
 #endif
     memset(cap_results[id-1],0,sizeof cap_results[id-1]);cap_buckets[bucket]=id;
     if(xv_rec_opt_maintain(&cap_opt)) { unsigned b2=cap_bucket2(s->source);cap_next2[id-1]=cap_buckets2[b2];cap_buckets2[b2]=(uint16_t)id; }
@@ -765,6 +771,10 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         j->identity[i]=s->source;j->targets[i]=targets[i];
         unsigned captured=s->bytes;
 #if XV_VERTEX_PERSISTENT
+        j->persistent[i]=j->persistent_copy[i]=0;
+#if XV_VERTEX_CAPTURE_REUSE
+        if(!vp_snapshot_enabled())
+#endif
         j->persistent[i]=vp_capture(batch->slot,s,&j->persistent_copy[i]);
         if(j->persistent[i]) {
             /* The FIFO owns an immutable cached mirror, including pending
@@ -828,6 +838,17 @@ int xv_vertex_capture_submit(const xv_vertex_prepare_batch *batch,
         if(need_refs) { j->refs[i]=*s->refs;s->refs=&j->refs[i];cap_masks_copied++; }
         else { cap_masks_omitted+=s->refs!=NULL;s->refs=NULL; }
     }
+#if XV_VERTEX_PERSISTENT && XV_VERTEX_CAPTURE_REUSE
+    if(vp_snapshot_enabled())for(unsigned i=0;i<batch->count;i++) {
+        unsigned id=j->reuse[i];
+        if(!id)continue; /* Sparse or uncached inputs retain the ordinary path. */
+        j->persistent[i]=vp_from_snapshot(batch->slot,&j->batch.streams[i],
+            j->identity[i],&cap_gpu_links[id-1],&j->persistent_copy[i]);
+        if(j->persistent[i]) {
+            j->batch.streams[i].source=NULL;j->batch.streams[i].refs=NULL;
+        }
+    }
+#endif
     j->batch.ok=0;cap_jobs_total++;cap_bytes+=written;
     unsigned pending=submitted+1-cap_retired;if(pending>cap_max_pending)cap_max_pending=pending;
     uint64_t publish_start=sample?cap_clock():0;

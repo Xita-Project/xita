@@ -18,6 +18,7 @@ _Static_assert(XV_VERTEX_PERSISTENT_BYTES>=VP_PAGE && !(XV_VERTEX_PERSISTENT_BYT
 typedef struct {
     const void *identity;
     unsigned bytes,stride,first,pages,pins,next;
+    uint64_t generation;
 } vp_entry;
 static vp_entry vp_entries[VP_ENTRIES];
 static unsigned vp_pages[VP_PAGES],vp_buckets[VP_BUCKETS];
@@ -49,6 +50,27 @@ static int vp_start(void)
 fail:
     vp_release();vp_unavailable=1;return 0;
 }
+/* Generation handles cannot alias a recycled GPU allocation. Never wrap. */
+static uint64_t vp_generation;
+static unsigned vp_create(unsigned slot,const xv_vertex_prepare_stream *s,
+                          const void *data,unsigned *copy)
+{
+    unsigned bucket=vp_hash(s->source,s->bytes,s->stride);
+    if(vp_generation==UINT64_MAX || !vp_start())return 0;
+    unsigned count=(s->bytes+VP_PAGE-1u)/VP_PAGE,run=0,first=VP_PAGES,id=0;
+    for(unsigned i=0;i<VP_ENTRIES;i++)if(!vp_entries[i].pins) { id=i+1u;break; }
+    if(!id) { vp_full++;return 0; }
+    for(unsigned i=0;i<VP_PAGES;i++) {
+        run=vp_pages[i]?0:run+1;
+        if(run==count) { first=i+1u-count;break; }
+    }
+    if(first==VP_PAGES) { vp_full++;return 0; }
+    for(unsigned i=0;i<count;i++)vp_pages[first+i]=id;
+    vp_entries[id-1]=(vp_entry){s->source,s->bytes,s->stride,first,count,1u<<slot,vp_buckets[bucket],++vp_generation};
+    vp_buckets[bucket]=id;
+    memcpy(vp_cpu+first*VP_PAGE,data,s->bytes);
+    *copy=1;vp_created++;return id;
+}
 /* Called only with an accepted FIFO job that will be published. Pending hits
  * are safe: the creating job precedes the hit in the same FIFO. Every creation
  * is copied in the worker's first pass, even if another stream later fails. */
@@ -73,21 +95,45 @@ static unsigned vp_capture(unsigned slot,const xv_vertex_prepare_stream *s,unsig
          * still be referenced by this or another frame; never overwrite them. */
         break;
     }
-    if(!vp_start())return 0;
-    unsigned count=(s->bytes+VP_PAGE-1u)/VP_PAGE,run=0,first=VP_PAGES,id=0;
-    for(unsigned i=0;i<VP_ENTRIES;i++)if(!vp_entries[i].pins) { id=i+1u;break; }
-    if(!id) { vp_full++;return 0; }
-    for(unsigned i=0;i<VP_PAGES;i++) {
-        run=vp_pages[i]?0:run+1;
-        if(run==count) { first=i+1u-count;break; }
-    }
-    if(first==VP_PAGES) { vp_full++;return 0; }
-    for(unsigned i=0;i<count;i++)vp_pages[first+i]=id;
-    vp_entries[id-1]=(vp_entry){s->source,s->bytes,s->stride,first,count,1u<<slot,vp_buckets[bucket]};
-    vp_buckets[bucket]=id;
-    memcpy(vp_cpu+first*VP_PAGE,s->source,s->bytes);
-    *copy=1;vp_created++;return id;
+    return vp_create(slot,s,s->source,copy);
 }
+
+#if XV_VERTEX_CAPTURE_REUSE
+typedef struct { unsigned id; uint64_t generation; } vp_snapshot_link;
+static int vp_snapshot_configured=-1;
+static unsigned vp_snapshot_hits;
+static int vp_snapshot_enabled(void)
+{
+    if(vp_snapshot_configured<0)
+        vp_snapshot_configured=xv_quality_int("XV_VERTEX_SNAPSHOT_GPU",0,0,1);
+    return vp_snapshot_configured;
+}
+/* The owner has already proven this capture entry's bytes immutable and equal
+ * to the requested input. Its link is cleared whenever that entry is reused.
+ * Do not inspect guest memory or repeat a byte comparison here. */
+static unsigned vp_from_snapshot(unsigned slot,const xv_vertex_prepare_stream *s,
+    const void *identity,vp_snapshot_link *link,unsigned *copy)
+{
+    *copy=0;
+    if(s->bytes<256u || s->bytes>256u*1024u ||
+       xv_vertex_refs_sparse(s->refs,s->bytes,s->stride))return 0;
+#if XV_PACKED_VERTEX_LAYOUT
+    if(s->packed)return 0;
+#endif
+    if(link->id && link->id<=VP_ENTRIES) {
+        vp_entry *e=&vp_entries[link->id-1];
+        if(e->pins && e->generation==link->generation &&
+           e->identity==identity && e->bytes==s->bytes && e->stride==s->stride) {
+            e->pins|=1u<<slot;vp_hits++;vp_snapshot_hits++;vp_saved+=s->bytes;
+            return link->id;
+        }
+    }
+    xv_vertex_prepare_stream key=*s;key.source=identity;
+    unsigned id=vp_create(slot,&key,s->source,copy);
+    *link=(vp_snapshot_link){id,id?vp_entries[id-1].generation:0};
+    return id;
+}
+#endif
 static void vp_upload(unsigned id)
 {
     const vp_entry *e=&vp_entries[id-1];
@@ -118,9 +164,18 @@ static void vp_shutdown(void)
     vp_release();memset(vp_entries,0,sizeof vp_entries);memset(vp_pages,0,sizeof vp_pages);
     memset(vp_buckets,0,sizeof vp_buckets);vp_configured=-1;vp_unavailable=0;
     vp_hits=vp_created=vp_full=0;vp_compared=vp_saved=vp_copied=0;
+    vp_generation=0;
+#if XV_VERTEX_CAPTURE_REUSE
+    vp_snapshot_configured=-1;vp_snapshot_hits=0;
+#endif
 }
 static void vp_report(unsigned frames)
 {
+#if XV_VERTEX_CAPTURE_REUSE
+    xv_logf("[vertex-snapshot-gpu] %u frames enabled %d hits %u; validated snapshot links, no second compare\n",
+        frames,vp_snapshot_configured==1,vp_snapshot_hits);
+    vp_snapshot_hits=0;
+#endif
     xv_logf("[vertex-persistent] %u frames enabled %d hits %u created %u full %u; compared %llu KiB avoided-capture %llu KiB uploaded %llu KiB; immutable versions pinned to GPU slots\n",
         frames,vp_configured==1,vp_hits,vp_created,vp_full,
         (unsigned long long)(vp_compared>>10),(unsigned long long)(vp_saved>>10),(unsigned long long)(vp_copied>>10));

@@ -886,6 +886,50 @@ static void capture_retained_generations(void)
 }
 #endif
 #if XV_VERTEX_PERSISTENT
+#if XV_VERTEX_CAPTURE_REUSE
+static void persistent_snapshot_links(void)
+{
+    setenv("XV_VERTEX_SNAPSHOT_GPU","1",1);
+    setenv("XV_VERTEX_CAPTURE_RETAIN","1",1);
+    unsigned char *src=mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0);
+    assert(src!=MAP_FAILED);memset(src,0x51,4096);
+    output a={0},pending={0},b={0},changed={0},old={0},recycled={0};
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    assert(capture(0,src,4096,16,NULL,0,&a));wait_parked(&parked_capture);
+    assert(capture(1,src,4096,16,NULL,0,&pending));
+    assert(cap_entry_count==1 && vp_created==1 && vp_snapshot_hits==1 && !vp_compared);
+    assert(!mprotect(src,4096,PROT_NONE));
+    __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);join(0);join(1);
+    assert(a.ok && pending.ok && a.result[0]==pending.result[0] && a.result[0][0]==0x51);
+    assert(!mprotect(src,4096,PROT_READ|PROT_WRITE));
+    assert(!mprotect(vp_cpu,XV_VERTEX_PERSISTENT_BYTES,PROT_READ));
+    assert(!mprotect(vp_gpu,XV_VERTEX_PERSISTENT_BYTES,PROT_READ));
+    assert(capture(2,src,4096,16,NULL,0,&b));join(2);
+    assert(b.ok && b.result[0]==a.result[0] && vp_copied==4096 && !vp_compared);
+    assert(!mprotect(vp_cpu,XV_VERTEX_PERSISTENT_BYTES,PROT_READ|PROT_WRITE));
+    assert(!mprotect(vp_gpu,XV_VERTEX_PERSISTENT_BYTES,PROT_READ|PROT_WRITE));
+    for(unsigned slot=0;slot<3;slot++)xv_vertex_capture_begin_slot(slot);
+    /* Old link now targets a retired allocation. Recycle that ID using the
+     * SAME guest identity but new bytes: generation must distinguish it. */
+    memset(src,0x92,4096);assert(capture(0,src,4096,16,NULL,0,&changed));join(0);
+    memset(src,0x51,4096);assert(capture(1,src,4096,16,NULL,0,&old));join(1);
+    assert(changed.ok && old.ok && changed.result[0]!=old.result[0]);
+    for(unsigned i=0;i<4096;i++)assert(changed.result[0][i]==0x92 && old.result[0][i]==0x51);
+    /* Arena pressure can recycle CPU entry IDs while GPU allocations remain
+     * pinned. Adding a new entry must erase the stale GPU association. */
+    cap_used=0;cap_reuse_reset();memset(src,0x63,4096);
+    assert(capture(2,src,4096,16,NULL,0,&recycled));join(2);
+    assert(recycled.ok && recycled.result[0]!=old.result[0] && recycled.result[0]!=changed.result[0]);
+    assert(recycled.result[0][0]==0x63 && old.result[0][0]==0x51 && changed.result[0][0]==0x92);
+    assert(!vp_compared);assert(!munmap(src,4096));cleanup();
+    /* New allocation exhaustion must fall back, never wrap generation IDs. */
+    unsigned char bytes[4096];memset(bytes,0x74,sizeof bytes);output fallback={0};
+    vp_generation=UINT64_MAX;
+    assert(capture(0,bytes,sizeof bytes,16,NULL,0,&fallback));join(0);
+    assert(fallback.ok && !memcmp(fallback.result[0],bytes,sizeof bytes) && !vp_created);
+    cleanup();unsetenv("XV_VERTEX_SNAPSHOT_GPU");
+}
+#endif
 static void persistent_slots(void)
 {
     setenv("XV_VERTEX_PERSISTENT","1",1);
@@ -1214,8 +1258,18 @@ int main(void)
 #endif
     puts("PASS: private inputs, rewritten aliases, mask ownership, packed/raw identity, arena/queue pressure, ticket wrap, partial/allocation/thread/notification failures, fallback drains, disable and three GPU-copy slots");
 #if XV_VERTEX_PERSISTENT
+#if XV_VERTEX_CAPTURE_REUSE
+    persistent_snapshot_links();
+    puts("PASS: snapshot GPU links reuse without second comparison; pending/unmapped inputs, read-only cross-slot hits, GPU/CPU ID recycling and generation exhaustion");
+#endif
     persistent_slots();persistent_bypass();persistent_pressure();persistent_metadata_pressure();
     persistent_fragmentation();persistent_failures();persistent_generations();
+#if XV_VERTEX_CAPTURE_REUSE
+    setenv("XV_VERTEX_SNAPSHOT_GPU","1",1);
+    persistent_bypass();persistent_failures();persistent_generations();
+    unsetenv("XV_VERTEX_SNAPSHOT_GPU");
+    puts("PASS: snapshot-linked sparse/packed bypass, allocation/partial failures and 240 mixed GPU-slot generations");
+#endif
     puts("PASS: immutable persistent GPU versions, pending FIFO hits, read-only reuse, sparse/packed bypass, exact mutations, all-slot retirement, page/metadata/fragmentation pressure, allocation/map/partial failures and 240 mixed generations");
 #endif
     return 0;

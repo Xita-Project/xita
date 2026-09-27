@@ -926,3 +926,50 @@ intended gain is removing duplicate validation, not assuming guest data static.
 Pi reachability retried with a5-second SSH timeout: connection timed out;
 no ARM run occurred. Existing local work remains available. No hardware/source
 behavior changed during this audit, and no speedup is established.
+
+
+## Snapshot-linked persistent GPU prototype implemented (default off)
+
+`XV_VERTEX_SNAPSHOT_GPU=1` is a new startup option compiled only with both
+`XV_VERTEX_PERSISTENT=1` and `XV_VERTEX_CAPTURE_REUSE=1`. It selects the new
+snapshot-linked path instead of the legacy live-source persistent lookup;
+it does not require enabling the legacy runtime `XV_VERTEX_PERSISTENT` option.
+All default settings and existing nonpersistent builds retain previous behavior.
+
+The owner first obtains its normal immutable capture snapshot and reuse ID.
+Dense raw entries can then associate that snapshot with a persistent GPU
+allocation. A hit checks allocation generation, liveness, identity, size and
+stride, pins this frame's GPU slot, and performs no additional byte compare.
+New associations copy the immutable snapshot to the persistent CPU mirror;
+the existing FIFO first pass uploads all promised GPU entries before handling
+ordinary streams, even if one of those streams fails. Original GPU barriers,
+FIFO callback ordering, and slot retirement remain in force. CPU drains do not
+release GPU pins. Sparse/packed, uncached and capacity-failure paths fall back.
+
+Each GPU allocation gets a64-bit monotonically increasing generation; exhaustion
+fails allocation rather than wrapping. Recycled capture IDs clear their link.
+Shutdown clears all resources and generations together. Mapping caches never
+serve as guest immutability evidence: the capture lookup remains responsible
+for input validation. Existing optional tag-trust behavior is unchanged.
+`[vertex-snapshot-gpu]` reports selected mode and hits without second comparison.
+
+Validation completed:
+- All24 production-FIFO host configurations pass with new path default off.
+- Persistent+reuse variants additionally exercise the new path: pending uploads
+  after guest unmapping, read-only cross-slot reuse, changed same-address bytes,
+  recycled GPU IDs with stale CPU links, recycled CPU IDs while old GPU storage
+  remains pinned, and generation exhaustion fallback. Assert zero legacy
+  persistent comparison bytes in the dedicated snapshot-link fixture.
+- New mode also passes existing sparse/packed bypass, allocation/map/partial-job
+  failure and240 mixed GPU-slot generation cases.
+- Full24-configuration ASan/UBSan run passes, including those new-mode cases.
+- VitaSDK compiles production capture with reuse/persistent/packed/compact/
+  ready/notify enabled; this is compile-only evidence, not a linked VPK.
+
+Private receipts: `snapshot-gpu-candidate/{host.log,asan.log,capture-vita.o}`.
+No handles remain live. Renewed Vita lease3600 during work. Perf279 remains
+installed; no frame-time claim. Next qualify new-mode capacity/fragmentation and
+callback-pressure coverage explicitly, then build a versioned private candidate
+with owning-object audit and conduct ordinary protected a30 hardware gameplay.
+Pi remains unavailable from the preceding connection attempt; do not claim ARM
+Linux correctness execution. Goal and long-session acceptance remain unmet.
