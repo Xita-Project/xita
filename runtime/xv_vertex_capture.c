@@ -543,6 +543,7 @@ static int cap_start(void)
 {
     if(cap_thread>=0)return 1;
     if(cap_unavailable)return 0;
+    int core=xv_quality_int("XV_CAPTURE_CORE",0,0,1);
     unsigned allocation=(XV_VERTEX_CAPTURE_BYTES+sizeof(capture_job)*CAPTURE_JOBS+4095u)&~4095u;
     cap_memory=sceKernelAllocMemBlock("xv_vertex_capture",SCE_KERNEL_MEMBLOCK_TYPE_USER_RW,allocation,NULL);
     if(cap_memory<0 || sceKernelGetMemBlockBase(cap_memory,(void **)&cap_arena)<0 || !cap_arena)goto fail;
@@ -555,10 +556,11 @@ static int cap_start(void)
     __atomic_store_n(&cap_waiting,0,__ATOMIC_RELAXED);
 #endif
     cap_thread=sceKernelCreateThread("xv_vertex_capture",cap_run,
-        sceKernelGetThreadCurrentPriority()+1,32*1024,0,SCE_KERNEL_CPU_MASK_USER_0,NULL);
+        sceKernelGetThreadCurrentPriority()+1,32*1024,0,
+        core?SCE_KERNEL_CPU_MASK_USER_1:SCE_KERNEL_CPU_MASK_USER_0,NULL);
     if(cap_thread<0 || sceKernelStartThread(cap_thread,0,NULL)<0)goto fail;
-    xv_logf("[vertex-capture] core 0; %u KiB private inputs, %u ordered jobs; exact snapshots, drain before publication\n",
-        XV_VERTEX_CAPTURE_BYTES>>10,CAPTURE_JOBS);
+    xv_logf("[vertex-capture] core %d; %u KiB private inputs, %u ordered jobs; exact snapshots, drain before publication\n",
+        core,XV_VERTEX_CAPTURE_BYTES>>10,CAPTURE_JOBS);
 #if XV_VERTEX_CAPTURE_NOTIFY
     xv_logf("[vertex-capture-notify] enabled; coalesced events, ordered FIFO and finite timeout recovery retained\n");
 #endif

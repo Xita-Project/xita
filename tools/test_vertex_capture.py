@@ -13,7 +13,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--jobs', type=int, choices=(32, 64, 128), default=32)
     parser.add_argument('--publish-batch', type=int, choices=(1, 8), default=1)
+    parser.add_argument('--core', type=int, choices=(0, 1), default=0)
     args = parser.parse_args()
+    run_env = dict(os.environ, XV_CAPTURE_CORE=str(args.core))
     sdk = Path(os.environ.get('VITASDK', Path.home() / 'vitasdk'))
     with tempfile.TemporaryDirectory(prefix='xita-vertex-capture-') as directory:
         for notify in (0, 1):
@@ -44,7 +46,7 @@ def main():
                     # synchronization remain instrumented.
                     command += ['-fsanitize=thread', '-fno-omit-frame-pointer', '-Wno-error=tsan']
                 subprocess.run(command + [str(ROOT / 'tools/tests/vertex_capture.c'), '-pthread', '-o', str(binary)], check=True)
-                subprocess.run([str(binary)], check=True, timeout=30)
+                subprocess.run([str(binary)], check=True, timeout=30, env=run_env)
 
 
 if __name__ == '__main__':

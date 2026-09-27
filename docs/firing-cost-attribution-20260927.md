@@ -747,3 +747,32 @@ Rollback confirmed independently by perf279 version and expected runtime hash;
 dashboard timing_frame0. Lease renewed3600. Receipt:
 capture-publication-candidate/restored-dashboard.json. Poll24193 terminal;
 no live collectors or controls remain. Diagnostic startup overrides absent.
+
+## Capture C1 affinity candidate implemented, host-qualified
+
+Added startup XV_CAPTURE_CORE=0/1, default0 and invalid fallback0. Capture
+thread uses matching VitaSDK CPU mask; priority remains creator+1, stack32KiB.
+Startup log reports actual requested core. Queue capacity, publication, waits,
+source/result ownership, upload slots and GPU barriers unchanged. No shared
+renderer/gameplay task reassigned. Option is uninstalled; hardware stillperf279,
+lease renewed this turn. Candidate should use32jobs/publication1, not perf280's
+rejected grouping.
+
+Tests: existing production-worker matrix24 configurations passes with C1
+requested; ASan/UBSan matrix24 passes. New selection cases cover absent,0,1,
+invalid2/-1/text and shutdown/reinitialization; thread fixture verifies affinity,
+unchanged priority/stack and upload worker C0. Added optional XV_TEST_PIN_CORES
+host fixture pinning: main producer C0, capture C1, copy worker C0. All24
+configurations pass with actual host pthread affinity, retaining FIFO/race/
+publication/wrap/source mutation/failure/GPU-slot tests. This is host correctness,
+not Vita speed or driver validation.
+
+ARM A9 Thumb/NEON fixture compiled using existing x4 compatibility header.
+Initial compile needed -D_GNU_SOURCE before forced include to expose Linux
+pthread affinity APIs; corrected. Pi transfer then failed connection closed;
+follow-up SSH confirmed no route to192.168.0.9. No ARM execution result claimed.
+Private ../capture-core-candidate/ has binary, exact command and host logs;
+pi-core1.log records connection failure, not a passing test. All handles terminal.
+Continue VitaSDK build/audit while Pi unavailable; repeat Pi pinned run when
+reachable. Hardware whole-frame test remains necessary to determine whether
+C1 model-worker contention offsets improved C0 recording overlap.

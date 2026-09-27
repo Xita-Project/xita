@@ -1,5 +1,9 @@
 /* Production capture FIFO, uploader and copy worker under pthread Vita services.
  * Expected draws are retained independently from the guest source/masks. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include <sched.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <sys/mman.h>
@@ -28,7 +32,7 @@ static void capture_notify_point(unsigned point);
 static struct { void *base;int mapped; } mem[32];
 static pthread_mutex_t mem_lock=PTHREAD_MUTEX_INITIALIZER;
 static struct { pthread_mutex_t lock;pthread_cond_t cond;unsigned bits;int live; } events[8];
-static struct { pthread_t id;SceKernelThreadEntry entry;int live,started,joined; } threads[8];
+static struct { pthread_t id;SceKernelThreadEntry entry;int live,started,joined,mask; } threads[8];
 static sem_t semaphore;
 static int sem_live,pause_capture,pause_copy,parked_capture,parked_copy,fail_wake,fail_done;
 static int fail_capture_alloc,fail_gpu_alloc,fail_create_at,create_calls;
@@ -145,14 +149,26 @@ int sceKernelWaitEventFlag(SceUID id,unsigned bits,unsigned mode,unsigned *out,S
 #endif
     return rc?-1:0;
 }
+static int fixture_capture_mask=SCE_KERNEL_CPU_MASK_USER_0;
 SceUID sceKernelCreateThread(const char *name,SceKernelThreadEntry fn,int priority,SceSize stack,SceUInt attrs,int mask,const SceKernelThreadOptParam *opts)
 {
-    (void)name;(void)attrs;(void)opts;assert(priority==65 && stack==32768 && mask==SCE_KERNEL_CPU_MASK_USER_0);
+    (void)attrs;(void)opts;assert(priority==65 && stack==32768);
+    assert(mask==(!strcmp(name,"xv_vertex_capture")?fixture_capture_mask:SCE_KERNEL_CPU_MASK_USER_0));
     if(++create_calls==fail_create_at)return -1;
     unsigned i;for(i=0;i<8 && threads[i].live;i++);assert(i<8);
-    threads[i].entry=fn;threads[i].live=1;threads[i].started=threads[i].joined=0;return 200+i;
+    threads[i].entry=fn;threads[i].mask=mask;threads[i].live=1;threads[i].started=threads[i].joined=0;return 200+i;
 }
-static void *host_run(void *arg) { unsigned i=(uintptr_t)arg;threads[i].entry(0,NULL);return NULL; }
+static void fixture_pin(unsigned core)
+{
+    if(!getenv("XV_TEST_PIN_CORES"))return;
+    cpu_set_t set;CPU_ZERO(&set);CPU_SET(core,&set);
+    assert(!pthread_setaffinity_np(pthread_self(),sizeof set,&set));
+}
+static void *host_run(void *arg) {
+    unsigned i=(uintptr_t)arg;
+    fixture_pin(threads[i].mask==SCE_KERNEL_CPU_MASK_USER_1?1:0);
+    threads[i].entry(0,NULL);return NULL;
+}
 int sceKernelStartThread(SceUID id,SceSize n,void *p)
 {
     assert(!n && !p);if(++create_calls==fail_create_at)return -1;
@@ -207,6 +223,20 @@ static void cleanup(void)
     for(unsigned i=1;i<32;i++)assert(!mem[i].base);
     for(unsigned i=0;i<8;i++)assert(!events[i].live && !threads[i].live);
     assert(!sem_live);xv_vertex_worker_override(0);xv_vertex_upload_override(1);
+}
+static void capture_core_selection(void)
+{
+    const char *current=getenv("XV_CAPTURE_CORE");char *saved=current?strdup(current):NULL;
+    const char *values[]={NULL,"0","1","2","-1","bad"};
+    for(unsigned i=0;i<sizeof values/sizeof values[0];i++) {
+        if(values[i])setenv("XV_CAPTURE_CORE",values[i],1);else unsetenv("XV_CAPTURE_CORE");
+        fixture_capture_mask=i==2?SCE_KERNEL_CPU_MASK_USER_1:SCE_KERNEL_CPU_MASK_USER_0;
+        assert(cap_start());cleanup();
+    }
+    if(saved){setenv("XV_CAPTURE_CORE",saved,1);free(saved);}else unsetenv("XV_CAPTURE_CORE");
+    fixture_capture_mask=getenv("XV_CAPTURE_CORE") && !strcmp(getenv("XV_CAPTURE_CORE"),"1")?
+        SCE_KERNEL_CPU_MASK_USER_1:SCE_KERNEL_CPU_MASK_USER_0;
+    puts("PASS: capture core default/0/1/invalid choices, unchanged priority and stack, shutdown/reinitialization");
 }
 static void wait_parked(int *flag)
 {
@@ -1148,7 +1178,7 @@ static void notification_races(void)
 #endif
 int main(void)
 {
-    owner=pthread_self();setenv("XV_VERTEX_CAPTURE","1",1);
+    owner=pthread_self();fixture_pin(0);capture_core_selection();setenv("XV_VERTEX_CAPTURE","1",1);
     setenv("XV_VERTEX_PERSISTENT","0",1);
     setenv("XV_VERTEX_CAPTURE_RETAIN","1",1); /* Exercise optional lifetime path. */
     xv_vertex_worker_override(0);xv_vertex_upload_override(1);
