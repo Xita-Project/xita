@@ -652,3 +652,30 @@ No candidate deployed. Next build a versioned batch8 candidate preserving
 perf277/279 generated code and queue32, then ordinary hardware gameplay once
 connection/application state is resolved. Do not promote default or claim FPS
 from fewer barriers alone. Hardware goal and full acceptance remain unmet.
+
+## Perf280 candidate built, awaiting hardware connection
+
+Previous turn made progress through implementation and offline qualification.
+Rechecked endpoint this turn: connection refused, user screen-state reply still
+pending. Companion `nosleep status` confirms enabled. No additional restart or
+claim of application termination made.
+
+Built perf280 / f62e6553 from retained perf279 private tree, synchronized only
+capture source and owning Make block, XV_CAPTURE_JOBS=32 and
+XV_CAPTURE_PUBLISH_BATCH=8. Vita SDK build session64558 completed successfully.
+All generated game objects match perf277 byte-for-byte. Changed objects are
+capture plus version-label consumers (main/UI/remote/dashboard sources unchanged).
+Repacked only game-a.self and boot-game.txt over verified perf277 VPK; asset
+contract unchanged. Reproducible private audit-package.py and receipts under
+../capture-publication-candidate/.
+Runtime SHA256 349e8686392a2067b901d3bc1879d383b115425e969d0546e76b74f9b1373baf;
+package SHA256 23a2da1b266f402575479ee23c78e0671ea35491ef515d19d553964f08456cda.
+Package: capture-publication-candidate/xita-perf280c.vpk.
+
+Prepared normal-settings launch/idle/gameplay scripts assert perf280, retain
+protected a30-perf211 and five-second fire, and do not enable wait-only or draw
+profiling. Candidate is not installed or hardware-qualified. Installed last
+confirmed perf279 slot1, perf277 rollback slot0; current application state unknown.
+All local build/test handles terminal. Next hardware step: resolve endpoint/
+screen state, install verified candidate, then one ordinary gameplay capture.
+Do not replace this required validation with more offline success claims.
