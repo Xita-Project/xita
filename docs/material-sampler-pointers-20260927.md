@@ -107,3 +107,9 @@ Update contract: `775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d48
 Private package: ../sampler-pointer-hardware/xita-perf275c.vpk. Update/apply
 has started; installation must be confirmed by the verified boot receipt and
 live version status. No hardware performance result for this build yet.
+
+Deployment completed: verified=true and boot_confirmed=true, slot 1, with the
+runtime hash above. Independent live status confirmed perf275 / d0975e0b at
+timing_frame=0 on the dashboard. The ordinary a30 launch sequence is now running;
+it renews the keep-awake lease before input. Perf273 is retained in slot 0.
+No perf275 gameplay measurement is available yet.
