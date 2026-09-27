@@ -1944,3 +1944,37 @@ active; poll samehandle. Owner phases2/nativehooks2/snapshotGPU1, savea30-perf21
 No collector yet; do not overlapinputs. After launch completes, telemetry-readiness
 collector and image qualification before traversal. Awakelease renewed; no claim
 286gameplay or FPS improvement yet. Goal unmet.
+
+
+## Perf286 pod and traversal capture; AI behavior dispatcher identified
+
+Launch65006 completedrc0/padreleased. Initial screenshot loading; no extra input.
+Readiness4251 waited through map load/cinematic (inspected readiness-view.png,
+letterboxed pod), then terminalrc0. Idle images confirm ordinary pod view.
+720 diagnostic intervals58.446ms/17.110FPS,p9573.639,max84.920,532>50,0>100.
+Phase2/root-pair suppression means NOT a regression or normal-FPS acceptance.
+Latest pod phases8DDF011.77ms incl,4B9D08.66,particles10E7A08.44. Collision
+172F406.84 includes881103.71 and868F02.96. Costs nested; nativehooks active.
+Hardware hierarchy declines also overwhelmingly small models, agreeing withPi.
+
+Traversal31471 terminalrc0, controlsreleased. Before/after show outdoor trees and
+cliffs, same view, AR60/600reserve; no visually confirmed enemy.840intervals
+50.564ms/19.777FPS,p9569.997,max354.803,430>50,one>100/200. Not sustained20.
+Measured bracket8299..9192. Crucially AFTER this interval, adjacent phase reports
+next-frame9240/9300 show AI14A16215.51/18.59ms,14E2C015.40/18.49;
+14E1A0>1640909.49/12.62ms. Earlier next-frame9180 has14E2C04.03ms.
+Do not attribute these later timings to the45secaggregate. OwnerFA92077.64/82.66,
+8DDF015.92/15.74,4B9D09.42/8.98. Thus AI rose as well as object preparation;
+collision alone is not an established dominant explanation for the whole jump.
+
+Source164090 is34lines: resolves actor table2FA244,datum stride724h, signedword
+actor+6Ch, dispatchtable1F0570 stride38h, and tail xv_call(c,c->r[0]). It is an
+INDIRECT behavior dispatcher, not12.6ms arithmetic. Must time resolved destination
+before selecting a native replacement; behavior semantic names not verified.
+Existing generic scene patcher covers direct calls, not this taildispatch.
+
+Started collect-pressure.py89967 for stationary settled capture (new pressure*
+paths; retains idle artifacts). Live on lastcall; no controls. Poll samehandle,
+review images/log and phase windows. Next bounded instrumentation should split
+164090 by actual target while preserving tail-call guest state and ordering.
+No newoptimization/FPSclaim; goalunmet. Awakelease renewed.
