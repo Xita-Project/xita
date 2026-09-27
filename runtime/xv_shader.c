@@ -427,13 +427,16 @@ int xv_fshader_load(xv_fshader_t *fs, const char *gxp_path, const xv_vshader_t *
     fs->replaces_depth = sceGxmProgramIsDepthReplaceUsed(fs->prog) != 0;
     fs->p_fogcolor = sceGxmProgramFindParameterByName(fs->prog, "xv_fogcolor");
     fs->p_atest    = sceGxmProgramFindParameterByName(fs->prog, "xv_atest");
-    if (strstr(gxp_path, "_na.frag.gxp"))
-        XV_LOG("%s: alpha-disabled, discard-used %u\n", gxp_path, (unsigned)sceGxmProgramIsDiscardUsed(fs->prog));
     fs->p_texscale = sceGxmProgramFindParameterByName(fs->prog, "xv_texscale");
     fs->p_border1 = sceGxmProgramFindParameterByName(fs->prog, "xv_border1");
-    if (fs->p_psc && strstr(gxp_path, "_1D.frag.gxp"))
-        XV_LOG("%s: constants %u x %u\n", gxp_path,
-               sceGxmProgramParameterGetArraySize(fs->p_psc), sceGxmProgramParameterGetComponentCount(fs->p_psc));
+    /* Keep cold-load diagnostics in one record. Ordinary owner-thread logs can
+     * take the immediate mutex/file path; logging here both stalls setup and
+     * contaminates the metadata timer. Preserve error logs at their failures. */
+    unsigned psc_array = 0, psc_components = 0;
+    if (fs->p_psc && strstr(gxp_path, "_1D.frag.gxp")) {
+        psc_array = sceGxmProgramParameterGetArraySize(fs->p_psc);
+        psc_components = sceGxmProgramParameterGetComponentCount(fs->p_psc);
+    }
     static const char *const texnames[4] = { "tex0", "tex1", "tex2", "tex3" };
     for (int i = 0; i < 4; ++i) {
         const SceGxmProgramParameter *p = sceGxmProgramFindParameterByName(fs->prog, texnames[i]);
@@ -444,15 +447,16 @@ int xv_fshader_load(xv_fshader_t *fs, const char *gxp_path, const xv_vshader_t *
         uint64_t t4 = sceKernelGetProcessTimeWide();
         /* Keep normal helper-log suppression: this must never introduce a
          * synchronous helper log wait. Missing records do not prove no hitch.
-         * Earlier alpha/constant log formatting is included in metadata. */
-        XV_LOG("[shader-load-us] end %llu source %s total %llu load %llu register %llu link %llu metadata %llu: %s against %s\n",
+         * This single final record is outside the measured setup interval. */
+        XV_LOG("[shader-load-us] end %llu source %s total %llu load %llu register %llu link %llu metadata %llu: %s against %s; discard %u psc %u x %u\n",
                (unsigned long long)t4, source == 1 ? "embedded" : "file",
                (unsigned long long)(t4-t0), (unsigned long long)(t1-t0),
                (unsigned long long)(t2-t1), (unsigned long long)(t3-t2),
                (unsigned long long)(t4-t3), gxp_path,
-               vs->desc ? vs->desc->gxp : "?");
+               vs->desc ? vs->desc->gxp : "?", (unsigned)fs->uses_discard, psc_array, psc_components);
     } else {
-        XV_LOG("%s: linked against %s\n", gxp_path, vs->desc ? vs->desc->gxp : "?");
+        XV_LOG("%s: linked against %s; discard %u psc %u x %u\n", gxp_path,
+               vs->desc ? vs->desc->gxp : "?", (unsigned)fs->uses_discard, psc_array, psc_components);
     }
     return 0;
 }

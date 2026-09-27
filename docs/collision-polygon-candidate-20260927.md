@@ -117,3 +117,62 @@ boot confirmed. Independent status reports `0.2.0-perf.270 / c8fb09c5`, timing
 frame 0 and benchmark off at the dashboard. Keep-awake lease renewed. The
 existing batched a30 launch sequence has started using `a30-perf211`; settled
 hardware measurements and screenshot validation are still pending.
+
+## Perf270 physical gameplay results
+
+The existing batched launch reached a30. Readiness polling waited for
+loaded/active/director telemetry before measurement; the loading screenshot is
+not a gameplay sample. Idle screenshots confirm the lifepod, AR and HUD. After
+the five-second trigger hold, the screenshot shows the empty magazine/reload
+pose; after movement, both outdoor images show the same landscape/view direction.
+No crash was observed in this short sequence. Audio, AI combat, checkpoint
+resumption, 15-minute active stability and the canyon cutscene are not qualified.
+
+Existing 32 launch settings were retained, including 360p and `a30-perf211`.
+The benchmark feature was off. CPU Present-to-Present intervals:
+
+| Segment | Samples | Mean ms / FPS | p95 ms | Max ms | Over 50 / 100 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Lifepod | 720 | 59.803 / 16.72 | 75.636 | 88.152 | 643 / 0 |
+| AR hold | 64 | 83.822 / 11.93 | 102.645 | 120.786 | 64 / 7 |
+| Movement | 83 | 67.683 / 14.77 | 78.355 | 282.264 | 82 / 1 |
+| Settled outdoors | 910 | 49.689 / 20.12 | 59.013 | 89.079 | 280 / 0 |
+
+These do not establish a whole-frame improvement over perf269. The prior outdoor
+view moved, and independent launches have different timing/scene history. About
+31% of outdoor intervals exceed 50 ms despite the average exceeding 20 FPS.
+The sustained gameplay goal remains unmet. Keep the qualified candidate in the
+cumulative build while targeting the much larger firing/scene-preparation cost;
+the isolated leaf result does not explain or solve that cost.
+
+Slow-frame partitions again mostly precede Present. Movement frame 6815 totals
+282,264 us: before-Present 271,733; publish/acquire 10,343. The remaining parts
+sum exactly to the total. These are elapsed intervals including scheduling and
+internal dependencies, not pure CPU time or independent GPU service costs.
+Private idle/gameplay logs, status marks, screenshots and JSON summaries retain
+all measurement ranges.
+
+## Shader setup finding and follow-up
+
+Perf270's ordinary log exposes 82 successful cold fragment-load timing records
+by the end of the gameplay capture. The largest is 48,969 us, split into embedded
+load 91, registration 8, link 63 and metadata 48,807 us. The next largest is
+41,001 us with 40,749 in metadata. All are wall times; missing helper-suppressed
+records are not proof of no hitch. Neither record establishes which operation
+inside metadata dominated or that it caused the movement spike.
+
+Inspection shows metadata includes an alpha/constant diagnostic log.
+`xv_log_write` routes ordinary non-report owner calls through the immediate
+console/mutex/file path. Thus calling this interval GPU shader compilation or
+parameter-lookup CPU time alone would be incorrect. The final timing log's own
+write is outside the interval and can still stall.
+
+The source follow-up consolidates successful-load diagnostics into one final
+record, retaining discard/constant information and leaving failures unchanged.
+There is no log write inside metadata now, and the redundant discard API query
+is removed. Helper suppression remains intact. The Vita unit compiles using the
+retained stage headers, and the existing material-link fixture passes (it tests
+cache identity/fallback/alpha routing, not actual GXM execution). Initial compile
+from the source root lacked a generated header; using the intended private
+build-stage include context resolved it. Artifacts: `../shader-log-consolidation/`.
+This follow-up is not deployed yet and has no measured FPS or hitch improvement.
