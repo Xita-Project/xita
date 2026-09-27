@@ -438,3 +438,22 @@ Next: build a versioned depth-64 Vita candidate on the retained perf277 build,
 verify package/object scope, then one ordinary protected a30 gameplay run.
 Measure total frame times and queue/arena pressure; fewer full-queue events
 alone are not a success. Preserve perf277 rollback and existing settings.
+
+## Perf278 depth-64 package built
+
+Private capture-depth-candidate/build-x87 retains perf277's generated code and
+private build overrides, adds only the qualified Make depth block and capture
+source, and sets XV_CAPTURE_JOBS=64. Vita SDK build succeeded. All recompiled
+game objects are byte-identical to perf277. Changed objects: capture worker,
+plus main/remote/UI/dashboard version-label consumers (their source files
+are unchanged). Package replaces only game-a.self and boot-game.txt; update
+contract remains 775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897.
+Runtime SHA256 27f4461aaeed4c9bde5f341259bb7975603df5c26ba75a1ce711344d0887bafb;
+package SHA256 269b65d1a71fab7ea14e2f8137251d54d89b98505f872f048631343d8f2edcc7.
+Hardware upload/apply started; installation and gameplay remain to verify.
+
+Perf278 installed successfully: updater verified runtime hash and confirmed
+boot slot 1; independent live status reports 0.2.0-perf.278 / 06e32786,
+timing_frame=0. Perf277 preserved in slot 0. Protected normal-settings launch
+started via capture-depth-candidate/launch-a30.py; script renews keep-awake
+lease and releases controls in finally. No FPS result yet.
