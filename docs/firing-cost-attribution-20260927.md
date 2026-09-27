@@ -607,3 +607,48 @@ All collection/launch/poll handles are terminal, no controls held. Hardware
 has perf279 installed, but in-app lease cannot be renewed until its endpoint
 returns; companion suspend prevention is enabled. Check endpoint or obtain
 independent application state next, rather than treating timeout as a crash.
+
+## Grouped completion publication candidate (offline only)
+
+The remote endpoint still refused connection on the next turn. Asked user for
+screen state through the asynchronous question; no reply yet. No additional
+restart issued or sleep/termination inferred. Continued independent work.
+
+Added XV_CAPTURE_PUBLISH_BATCH=1/8 (default1) as a capture-only build option.
+With coalesced notifications enabled, worker executes up to eight FIFO jobs
+before its device barrier and completed release. It publishes earlier at an
+armed owner completion frontier or the current submitted tail; no future job
+or notification is needed to finish a short batch. Non-coalesced builds keep
+per-job behavior. CPU job capacity remains32; arena and GPU slots unchanged.
+
+Ownership rationale: owner does not collect these jobs until completed acquire;
+worker-only result cache is not read by the owner while predecessors remain
+unretired. Every group retains a device barrier before completion publication.
+New or partial/failed uploads therefore remain ordered before callbacks/targets
+become visible. No upload, device fence at a publication boundary, callback,
+source snapshot, full drain or GPU-slot retirement is removed. Grouping changes
+publication frequency and may reduce barrier/event bookkeeping, not the amount
+of game simulation. Improvement remains unproven, especially because armed
+wait targets can shorten groups.
+
+Validation:
+- Host production-worker matrix: all24 configurations pass with option1 and8.
+- ASan/UBSan option8: all24 pass, including unsigned wrap, failure/fallback,
+  sparse/packed/private inputs, persistent/reused results and GPU-copy slots.
+- Forced eight-job burst verifies one capture-worker device barrier and one
+  notification decision with batching8, versus8 with default1; FIFO output
+  order/bytes verified. Adjusted the former per-job notification-count assertion
+  to the intentionally grouped contract; it was the initial test failure.
+- Partial wait batches1/8/16 still stop at their armed frontiers; test gate skips
+  count publication groups. Existing completion/wait races retain coverage.
+- Pi A9 Thumb all-feature fixture, cores0/1, batch8 passed. Uses existing
+  recomp/host/neon_x4_compat.h for GCC13 x4 intrinsics, retaining NEON packing;
+  mocked Vita kernel/device services mean this is correctness evidence only.
+- Make default/no-op/change/restore/invalid-option tests pass for publication,
+  depth and notification options; only capture object rebuilds.
+
+Private artifacts: ../capture-publication-candidate/. All test handles terminal.
+No candidate deployed. Next build a versioned batch8 candidate preserving
+perf277/279 generated code and queue32, then ordinary hardware gameplay once
+connection/application state is resolved. Do not promote default or claim FPS
+from fewer barriers alone. Hardware goal and full acceptance remain unmet.

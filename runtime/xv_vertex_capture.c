@@ -41,6 +41,12 @@
 #if XV_VERTEX_CAPTURE_NOTIFY != 0 && XV_VERTEX_CAPTURE_NOTIFY != 1
 #error XV_VERTEX_CAPTURE_NOTIFY must be 0 or 1
 #endif
+#ifndef XV_CAPTURE_PUBLISH_BATCH
+#define XV_CAPTURE_PUBLISH_BATCH 1
+#endif
+#if XV_CAPTURE_PUBLISH_BATCH != 1 && XV_CAPTURE_PUBLISH_BATCH != 8
+#error XV_CAPTURE_PUBLISH_BATCH must be 1 or 8
+#endif
 #if XV_VERTEX_CAPTURE_NOTIFY
 /* Queue counters own jobs. This handshake only suppresses redundant events. */
 enum { CAP_SLEEPING, CAP_RUNNING, CAP_PENDING };
@@ -461,18 +467,37 @@ static int cap_run(SceSize bytes,void *arg)
 #endif
         if(__atomic_load_n(&cap_stopping,__ATOMIC_ACQUIRE))return 0;
         unsigned next=__atomic_load_n(&cap_completed,__ATOMIC_RELAXED);
+#if XV_VERTEX_CAPTURE_NOTIFY && XV_CAPTURE_PUBLISH_BATCH > 1
+        unsigned unpublished=0;
+#endif
         while(next!=__atomic_load_n(&cap_submitted,__ATOMIC_ACQUIRE)) {
 #if XV_VERTEX_CAPTURE_NOTIFY
             XV_CAPTURE_NOTIFY_POINT(CAP_BEFORE_EXECUTE);
 #endif
             uint64_t start=cap_clock();
             cap_execute(&cap_jobs[next&(CAPTURE_JOBS-1)]);
+            ++next;
+#if XV_VERTEX_CAPTURE_NOTIFY && XV_CAPTURE_PUBLISH_BATCH > 1
+            /* Only this FIFO worker touches results until completed release.
+             * Delay that publication, not its device ordering. A joined owner
+             * can never observe an unbarriered result. Publish the last job even
+             * without another wake, and honor an armed wait frontier promptly.
+             * submitted only advances, so a known successor keeps the loop live. */
+            unsigned requested=__atomic_load_n(&cap_waiting,__ATOMIC_ACQUIRE) &&
+                (unsigned)(next-__atomic_load_n(&cap_wait_target,__ATOMIC_RELAXED))<0x80000000u;
+            if(++unpublished<XV_CAPTURE_PUBLISH_BATCH && !requested &&
+               next!=__atomic_load_n(&cap_submitted,__ATOMIC_ACQUIRE)) {
+                cap_worker_us+=cap_clock()-start;
+                continue;
+            }
+            unpublished=0;
+#endif
             xv_gpu_write_barrier();
             cap_worker_us+=cap_clock()-start;
 #if XV_VERTEX_CAPTURE_NOTIFY
             XV_CAPTURE_NOTIFY_POINT(CAP_BEFORE_COMPLETE);
 #endif
-            __atomic_store_n(&cap_completed,++next,__ATOMIC_RELEASE);
+            __atomic_store_n(&cap_completed,next,__ATOMIC_RELEASE);
 #if XV_VERTEX_CAPTURE_NOTIFY
             XV_CAPTURE_NOTIFY_POINT(CAP_AFTER_COMPLETE);
             /* RMW pairs with the owner's RMW before its completed reread:

@@ -14,11 +14,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--depth', action='store_true')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--depth', action='store_true')
+    group.add_argument('--publication', action='store_true')
     options = parser.parse_args()
     flag = 'XV_CAPTURE_JOBS' if options.depth else 'XV_VERTEX_CAPTURE_NOTIFY'
     default = 32 if options.depth else 0
     modes = (None, 32, 64, 64, 128, 32, 32) if options.depth else (None, 0, 1, 1, 0, 0)
+    if options.publication:
+        flag, default, modes = 'XV_CAPTURE_PUBLISH_BATCH', 1, (None, 1, 8, 8, 1, 1)
     with tempfile.TemporaryDirectory(prefix='xita-capture-notify-build-') as directory:
         out = Path(directory)
         (out / 'Makefile').write_text((ROOT / 'Makefile').read_text())
@@ -58,7 +62,8 @@ subprocess.run(['cc',*[a for a in args if a != '-mthumb']],check=True)
                 flags = [v for v in command if v.startswith(f'-D{flag}=')]
                 assert flags == ([f'-D{flag}={effective}'] if name.endswith('capture.c') else [])
             previous = effective
-        for bad in (('', '0', '31', '33', '256', '32 64') if options.depth else ('', '2', '-1', '0 1')):
+        for bad in (('', '0', '31', '33', '256', '32 64') if options.depth else
+                    ('', '0', '2', '16', '1 8') if options.publication else ('', '2', '-1', '0 1')):
             result = subprocess.run(base + [flag+'='+bad], cwd=out, capture_output=True, text=True)
             assert result.returncode and flag+' must be ' in result.stderr
         print(f'PASS: {flag} default {default}, transitions rebuild capture only; invalid flags rejected')

@@ -66,7 +66,12 @@ static void reached(unsigned point) {
 void xv_logf(const char *fmt,...) { (void)fmt; }
 void xv_cpu_log_thread(const char *name) { assert(!strcmp(name,"vertex-capture") || !strcmp(name,"vertex-upload")); }
 void xv_gpu_flush(const void *p,uint32_t n) { assert(p && n); }
-void xv_gpu_write_barrier(void) { __atomic_thread_fence(__ATOMIC_SEQ_CST); }
+static unsigned fixture_capture_barriers;
+void xv_gpu_write_barrier(void) {
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    if(cap_thread>=200 && cap_thread<208 && pthread_equal(pthread_self(),threads[cap_thread-200].id))
+        __atomic_fetch_add(&fixture_capture_barriers,1,__ATOMIC_RELAXED);
+}
 static __thread unsigned fixture_clock_calls;
 uint64_t sceKernelGetProcessTimeWide(void)
 { fixture_clock_calls++;struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000; }
@@ -454,7 +459,7 @@ static void queue_partial_boundary(unsigned batch)
     for(unsigned i=0;i<CAPTURE_JOBS;i++){src[0]=i;assert(capture(0,src,sizeof src,4,NULL,0,&out[i]));}
     wait_parked(&parked_capture);
     unsigned initial_retired=cap_retired;
-    __atomic_store_n(&notify_completion_skip,batch-1,__ATOMIC_RELAXED);
+    __atomic_store_n(&notify_completion_skip,(batch+XV_CAPTURE_PUBLISH_BATCH-1)/XV_CAPTURE_PUBLISH_BATCH-1,__ATOMIC_RELAXED);
     gate(CAP_AFTER_COMPLETE);
     pthread_t releaser;assert(!pthread_create(&releaser,NULL,release_capture,NULL));
     unsigned clocks=fixture_clock_calls;
@@ -1101,11 +1106,13 @@ static void notification_races(void)
         __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);gate(CAP_AFTER_SLEEP);
         unsigned wake=READ_NOTIFY(cap_wake_signals),skip=READ_NOTIFY(cap_wake_skips);
         unsigned done=READ_NOTIFY(cap_done_signals),dskip=READ_NOTIFY(cap_done_skips);
+        unsigned barriers=READ_NOTIFY(fixture_capture_barriers);
         for(unsigned i=0;i<8;i++){guest[0]=i;assert(capture(0,guest,sizeof guest,16,NULL,0,&o[i]));}
         wait_parked(&parked_capture);__atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);
         reached(CAP_AFTER_SLEEP);
         assert(READ_NOTIFY(cap_wake_signals)==wake+1 && READ_NOTIFY(cap_wake_skips)==skip+7);
-        assert(READ_NOTIFY(cap_done_signals)==done && READ_NOTIFY(cap_done_skips)==dskip+8);
+        assert(READ_NOTIFY(cap_done_signals)==done && READ_NOTIFY(cap_done_skips)==dskip+8/XV_CAPTURE_PUBLISH_BATCH);
+        assert(READ_NOTIFY(fixture_capture_barriers)==barriers+8/XV_CAPTURE_PUBLISH_BATCH);
         join(0);assert(ordered_at==8);
         for(unsigned i=0;i<8;i++)assert(o[i].callbacks==1 && o[i].ok && o[i].result[0][0]==i);
         ordered_outputs=NULL;ungate(CAP_AFTER_SLEEP);cleanup();

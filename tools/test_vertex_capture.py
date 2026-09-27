@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--jobs', type=int, choices=(32, 64, 128), default=32)
+    parser.add_argument('--publish-batch', type=int, choices=(1, 8), default=1)
     args = parser.parse_args()
     sdk = Path(os.environ.get('VITASDK', Path.home() / 'vitasdk'))
     with tempfile.TemporaryDirectory(prefix='xita-vertex-capture-') as directory:
@@ -26,6 +27,7 @@ def main():
                            '-Wno-unused-parameter', '-Wno-misleading-indentation',
                            '-DXV_VERTEX_RESIDENT_REFERENCES_DEFAULT=1',
                            f'-DXV_CAPTURE_JOBS={args.jobs}',
+                           f'-DXV_CAPTURE_PUBLISH_BATCH={args.publish_batch}',
                            f'-DXV_PACKED_VERTEX_LAYOUT={packed}', f'-DXV_VERTEX_CAPTURE_PACKED={compact}',
                            f'-DXV_VERTEX_CAPTURE_REUSE={reuse}',
                            f'-DXV_CAPTURE_TRUST_TAGS={reuse}',
