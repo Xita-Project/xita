@@ -182,3 +182,12 @@ Lifepod screenshot verified. 720 complete sampled frame intervals averaged
 No object-worker report appeared. Strict admission still flaps below 30 FPS.
 The firing/movement/outdoor collector is now running. Evidence is private
 ../worker-log-hardware/idle-summary.json, idle.log and screenshots.
+
+Perf273 ordinary gameplay completed without an observed crash: firing 72 frames,
+76.515 ms / 13.07 FPS, p95 98.577 ms, max 128.701 ms (71 >50, two >100);
+movement 85 frames, 64.206 ms / 15.57 FPS, max 282.158 ms (83 >50, three >100);
+outdoor stationary 932 frames, 48.428 ms / 20.65 FPS, p95 58.086 ms,
+max 88.477 ms (199 >50, none >100). Outdoor screenshot verified; the pre-existing
+radar artifact remains visible. Movement checkpoint transfer was 195,423 us.
+Results recover the pre-regression range, not sustained 20 FPS qualification.
+One-hour keep-awake lease renewed. No further deployment is pending.
