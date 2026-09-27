@@ -90,3 +90,17 @@ Perf272 staging in ../worker-readiness-hardware/ retains perf271 generated code,
 imports the readiness predicate, profiler guard and save-transfer timer only.
 No lag tolerance or camera-policy expansion. Hardware remains perf271 until the
 candidate has built and deployment is explicitly recorded.
+
+## Perf272 package
+
+The build completed successfully: perf272 / 36f7b0ed.
+Runtime SHA-256 `f50ec06e6a9c1d4d6ade3dca7caf6bc1f33941094db28582af3ec4dcda1fc9d2`,
+34,818,458 bytes. Package SHA-256
+`b0a961b454fe5b9dd2dd4ea7cc92557d102503f6ac240d2906f00cf225f8dd73`.
+The update contract matches perf271; package comparison confirms only
+`game-a.self` and `boot-game.txt` differ. All generated C units remain unchanged;
+only xd3d.c, xk_scene_thread.c and xk_file.c changed among runtime C files.
+Receipts are in private ../worker-readiness-hardware/.
+
+Pre-update perf271 log preserved (8,166,181 bytes). Update upload has started;
+installation requires a verified boot receipt, not just completion of upload.
