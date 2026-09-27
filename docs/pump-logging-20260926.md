@@ -1,6 +1,6 @@
 # Render pump asynchronous reports — 2026-09-26
 
-Status: implemented and host-tested; hardware effect remains unverified.
+Status: perf266 installed and boot-confirmed; gameplay effect remains unverified.
 
 Perf265 recorded seven long slot waits on tickets congruent to 3 modulo 60.
 Six mostly preceded retirement. Periodic pump reports currently issue console
@@ -29,3 +29,16 @@ ASan/UBSan. No Halo 2 runtime behavior was changed.
 Next: compile perf266 with existing settings, verify update contract, deploy
 with rollback retained, and collect ordinary a30 gameplay. Report frame-time
 and long-slot-wait distributions separately. No performance gain claimed yet.
+
+## Deployment
+
+perf266 / 58e024d7 built successfully. The six new auxiliary concurrency cases
+also passed on the Raspberry Pi (ARM Linux pthread harness, core 0 only).
+Package comparison against perf265 changed only game-a.self and boot-game.txt;
+update contract remained unchanged. Remote updater verified 34,811,074 bytes,
+SHA-256 `995bbaea012cb7c95fa514cfc31e1c961eee15d97987bf61d7f238eee7fa699e`,
+installed slot 1 and confirmed boot. Dashboard independently reported perf266.
+Perf265 remains in slot 0. Awake lease renewed after restart.
+
+Private build, package, test and deployment receipts: ../pump-log-candidate/.
+No gameplay timing result for this build yet.
