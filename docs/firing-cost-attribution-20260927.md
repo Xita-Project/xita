@@ -1460,3 +1460,37 @@ by Vita diagnostics and source audit. No claim Pi predicts hardware FPS or did
 this latest hardware test. Current task-specific scripts terminal; hardware284
 running with awake lease. No goal completion: remaining heavy scenes, stalls,
 AI/weapon/audio/checkpoint and stability gates still require work.
+
+
+## NPC slowdown retained on284; Pi contact-feature profile running
+
+User corrected success report: “Still low frames with NPCs but it's a ton better.”
+Previous reply was status-only; this continuation pulled fresh evidence. Log64880
+completed (3,658,320B) in collision-hook-retention/npc-report.log. Post-controlled
+sequence windows9360–10920:1620samples58.552ms/17.079FPS,p95104.194,max232.248,
+98>100ms/four>200ms. Worst60frame window10080:106.575ms/9.383FPS;10020:
+97.242ms/10.284FPS. Last180frames alone19.029FPS would hide those episodes.
+
+Nearby10080 report: FA920 elapsed94.386ms/frame (inclusive/preemption/waits),
+helperCPU50.78ms,helperwall55.07,ownerjoin0.30,done->noticed49.66ms. CPU2 around
+84–94%. These adjacent async reports support owner/update critical-path pressure,
+not proof a specific leaf or exact frame-by-frame alignment. Helperwork itself
+also approaches50ms, so fixing only one side may expose the other bottleneck.
+Native object mode2 confirmed; feature calls1484/60frames nearby; counters with
+zero surfaces in ordinary mode are disabled detail counters, not empty geometry.
+No Vita restart/controls this turn, lease renewed before log capture.
+
+Prepared contact-feature-profile-pi from existing native-object-query ARM harness
+objects, replacing only code013 with18 additional scopes in868F0/862A0/86170/
+86440. Build39068 completed rc0. It uses the older supporting harness/runtime,
+not284; do not compare Pi timings to Vita FPS or present it as current full build.
+Transferred17845 complete. Remote session89661 currently running timeout180 on
+Pi192.168.0.9, taskset0,1, PID7606 confirmed live ~104%CPU. Other cores available
+for Halo2. Root /home/birchwoodgod/xita-70110; executable
+harness-codex-contact-feature-20260927; isolated save/log under
+runs/codex-contact-feature-20260927, no existing saves overwritten. Scripted
+150:a,300:a,450:a starts newa30; profile phases1/nativeobject2/native4B9D02,
+soft raster off, legacy shader/effects reductions. Result is supporting callee
+attribution only, not representative NPC gameplay until its logs establish that.
+After terminal timeout124 (expected observation bound), pull game.log and
+exit-code, inspect actual loaded scene and timed children. Do not duplicate job.

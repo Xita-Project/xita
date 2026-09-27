@@ -33,7 +33,14 @@ the correct callback instead of selecting a route from a guest return address.
 The world entry retains its existing mode and reference. No collision arithmetic,
 precision, flags, memory writes or query ordering was intentionally changed.
 
-Install the hook into an existing private generated stage with:
+Production fusion generation now installs this guarded hook automatically when
+object-space queries are generated. It also preserves the native solver feature
+hook. The generator receipt records both integrations. This prevents a later
+regeneration from silently removing manually installed hooks while their runtime
+settings remain enabled. See `tools/test_collision_hook_retention.py` for the
+owned-input regression test.
+
+For an older private generated stage, install the hook with:
 
 ```sh
 python3 tools/patch_native_object_query.py /path/to/stage/recomp
