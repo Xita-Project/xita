@@ -2226,3 +2226,17 @@ onlycode026/027 plusfourversionconsumers; packagegame-a/boot-gameonly.
 No deployment yet, no new optimization or FPS improvement claim.
 Vita288 retained online with lease renewed3600; no movement/restart thisturn.
 Goal unmet.
+
+
+## Perf289 package qualified and deploying
+
+Previous goal turn made progress: measured path refresh attribution and built
+the next diagnostic. Build23908 completed rc0; audit74635 completed rc0.
+Only code026/code027 and four version consumers changed against288; only
+game-a.self/boot-game.txt changed in the update-compatible package.
+Runtime SHA:536fbd76c523d00f7c1ec2db89d7a67145191158d91a66d341b069208e0dff14.
+VPK SHA:bd45ad36c370ded2e7689aac45dc33fb9933c1b17e979369d8c3ed6a6d9906be.
+Sleep lease renewed3600. Announced interruption and started remote update;
+see path-detail-289/deploy.log and live process handle. No restart should be
+sent until the existing updater resolves. Prepared289 launch/pressure/route
+scripts. This remains profiling, not a newly qualified performance gain.
