@@ -87,3 +87,27 @@ harness qualification, not declaring a hardware improvement. The private
 `gameplay/` stage replaces only 85020 relative to the preceding collection
 capture and retains existing timers/routes. Build/capture qualification remains
 pending; no Vita deployment has occurred.
+
+## Campaign harness and hardware package
+
+The Pi campaign candidate completed its planned 180-second run (exit 124),
+86 reports through frame 5160. The bounded fatal/signal/scope/x87-guard scan
+found no matches. This is an ordinary headless run, not a runtime differential
+comparison or visual verification. The recorded scripted weapon inputs alone
+do not prove both firing bursts occurred. Private evidence is in `gameplay/`.
+
+Perf270 / c8fb09c5 built successfully in `../polygon-register-hardware/`.
+The maintained shard audit proves only 85020 changed relative to perf269's
+code_013.c. The build also includes the previously compiled cold fragment-load
+subtimers from runtime/xv_shader.c (frame-slow-diagnostic-20260926.md); these
+are diagnostics, not a shader optimization. Existing build warnings match the
+baseline, including the composite texture-row warning; no warning fix is claimed.
+
+Package audit: same membership/update contract as perf269, with only
+`game-a.self` and `boot-game.txt` bytes changed. Runtime: 34,818,538 bytes,
+SHA-256 `28073eabb0bb3fbc0e1b98282278c39f650a732a6b9e400c04371c4beff4a7a4`.
+VPK SHA-256 `42b0051e423eff50b8e10d9be3534091a7296c010ae16e77d82157a45ad10ca3`.
+Contract `775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897`.
+Remote upload/application has started; boot and hardware gameplay results remain
+pending. Perf269 is retained as rollback. No settings or saves are changed by
+the package itself.
