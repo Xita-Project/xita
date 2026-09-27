@@ -2407,3 +2407,27 @@ Updater50268 subsequently completedrc0:exactruntimeSHA verified,slot0boot
 confirmed. Independentstatus290/ccaa61b9 timing0; companionnosleepenabled.
 Launch/profile78331 nowlive, logmodel-native-detail-290/launch-profile.log.
 Pollsamehandle; no duplicate launch. No measurementresults yet.
+
+
+## Perf290 first hardware model split; Pi matrix-input census live
+
+Previous turn progress: qualified290 boot and startedcapture. Job78331 still
+live; pressure interval nowstarted (timing5509), pollsamehandle. Latest
+readiness6 telemetryloaded/active/director1 andpodcamera31.64,-103.41,59.47.
+Three modelwindows:8DDF0incl12.71–13.23ms,self4.89–5.10ms;nativehierarchy
+FFFF8E0F0.99–1.03ms,nativebasisFFFF8E160.71–0.74ms,B5B40matrix2.81–2.92ms.
+Other guestcallees account forremainder. Self is not pure removableCPUwork:
+includes uninstrumentedwork/scheduling/observercost. Diagnosticphase2still
+disablesrootpair. Privateinitial-model-split.json preservesexactrows.
+
+Built private read-only matrix-input census on olderpoint-locationPi harness.
+Onlyxk_math.o replaced; original statements reverse-stripidentical. TLS64slot
+full104byte input comparison plusconsecutivecomparison;no cachedoutputused,
+no FPcontrolkey/correctnessclaim. Logs every8192calls. Initial compilefailed
+missingstderrdeclaration; switched toexistingXK_LOG, rebuildcompletedrc0.
+Private matrix-reuse-census-pi contains sourceaudit/build/scripts. Pi idle
+verifiedbeforelaunch. Job86395 nowlive, remotePID18784 confirmed105%CPU
+at17seconds; bounded180s run cores0/1,separatesavedirectory. Pollsamehandle;
+plannedtimeout124 notcrash. Retrievegame.log/exitcode oncompletion; require
+loadedgameplay beforeinterpretingrepeatcounts. No VitaFPSextrapolation.
+Vita290unchanged,awake. Goalunmet; no newoptimizationdeployed.
