@@ -42,3 +42,25 @@ Not yet built into a Vita executable or deployed. Perf264 remains installed.
 Next: build the diagnostic, retain normal gameplay settings, and capture a long
 wait to choose between pump/retirement work and guest scheduling. Do not change
 synchronization policy on the strength of aggregated GPU latency alone.
+
+## Perf265 package
+
+Private full Vita build completed successfully for `0.2.0-perf.265 / 4c701e91`.
+The candidate preserves the current perf264 configuration and optional shader
+trial, isolating the new observation code. Package member comparison confirms
+only `game-a.self` and `boot-game.txt` changed; the shared update contract remains
+`775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897`.
+
+- Runtime: 34,809,974 bytes, SHA256
+  `6536a0ec5a68f060194023d5f8d4f42168d855e9b1701815b1739ca30581eb18`.
+- VPK: `../slot-stall-candidate/xita-perf265c.vpk`, SHA256
+  `0f407d716d8a1caa4cfe2a99a53e01c7eecbaf2996e63db8513c0b1817792b01`.
+
+Build and package receipts are preserved in that private directory. Existing
+compiler warnings remain; no new compilation error occurred. No performance
+improvement is claimed for this diagnostic.
+
+Updater subsequently verified the exact runtime hash and confirmed boot in slot
+0. Perf264 remains in slot 1. The ordinary a30 launch sequence was started with
+the preserved `a30-perf211` namespace and queue timing enabled; launch/gameplay
+qualification is still pending. Keep-awake was renewed by the launch client.
