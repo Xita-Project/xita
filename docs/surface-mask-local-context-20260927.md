@@ -1,0 +1,65 @@
+# Visibility-mask local-context candidate
+
+Experimental and not installed on Vita. Goal remains sustained 20 FPS on a30.
+
+The preceding GPR-only formulation regressed sparse masks. This variant keeps
+the routine's working context local so the compiler can optimize both integer
+registers and lazy flag state. It retains all original instructions, branches,
+guest memory operations and scheduler handoffs. At each handoff it publishes
+integer registers, nine lazy-flag fields and preemption budget into the original
+context, calls the original scheduler with that original pointer, then reloads
+state. Exit publishes the same modified fields. Other fields are never copied
+back over the caller's state. The phase scope still receives the original
+context identity. No cached visibility answer or altered visibility decision.
+
+`prepare_surface_mask_registers.py --local-context` rejects retained-body hash
+or helper drift and emits game code only into a private directory.
+`test_surface_mask_context.py` builds the generated reference/candidate with the
+source-only fixture. The production runtime and compiler default are unchanged.
+
+## Evidence
+
+Private ../surface-mask-local-context/ and selective/ contain receipts.
+Host ASan/UBSan and Cortex-A9 Thumb ARM/Pi each passed 768 full-context/memory
+comparisons and 2,520 matching handoff states after expanded mutations. Cases
+include empty/dense/sparse/mixed/partial masks, different handoff budgets,
+mask page relocation, count changes, index/source-register changes, flag changes,
+unrelated context-field changes and stack relocation at a handoff. Removing
+publication before scheduling fails the handoff-budget assertion. This is bounded
+synthetic coverage, not exhaustive aliases or real concurrent execution.
+
+Selective-publication Pi microbenchmark, 128 entries, 50,000 calls per pattern:
+
+| Mask | Reference ns/call | Candidate ns/call |
+|---|---:|---:|
+| empty | 213.6 | 198.5 |
+| bit 0 | 4,927.1 | 4,538.9 |
+| bit 31 | 4,781.6 | 4,524.4 |
+| all set | 8,897.9 | 6,595.1 |
+| alternating | 6,787.2 | 5,685.8 |
+| bits 0 and 16 | 5,076.1 | 4,680.9 |
+
+Supporting evidence only: not Vita timings or whole-frame savings. An earlier
+full-context publication variant also improved these masks, but selective
+publication avoids overwriting unrelated state. The final generator uses a
+prefixed preemption macro to avoid changing subsequent emitted functions; its
+host fixture passed again after that integration cleanup.
+
+## Headless integration in progress
+
+The private gameplay shard replaces only 53E90 in the retained point-location
+harness. That original body is byte-identical to perf275's target. An audit
+checks replacement reversal restores the whole original shard. The full ARM
+harness built successfully. Other harness units are older than perf275; results
+cannot establish current hardware frame times or validate rendering.
+
+A 120-second Pi cores 0/1 run with the documented a30/two-input-burst sequence
+has started, remote executable harness-codex-mask-context, log
+runs/codex-mask-context-20260927.log. Command and result receipts live in the
+private gameplay directory. Wait for the actual process result before restarting.
+No Halo 2 resources or user saves were modified. Perf275 remains on the Vita.
+
+Before promotion: inspect integration results and actual exercised paths, audit
+context ownership/diagnostic admission, verify Vita-compiled output, then create
+an isolated hardware candidate preserving all qualified optimizations and saves.
+Neither a short headless run nor the microbenchmark proves a hardware gain.
