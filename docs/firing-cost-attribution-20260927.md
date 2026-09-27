@@ -1895,3 +1895,25 @@ suppressed in diagnostic phases, so attribution only, no normal-FPS claim.
 collect-idle.py adapted286. No deployment/restart yet; Vita285 stays installed,
 lease renewed. Announce interruption before deploy; inspect completed package and
 post-buildsource audits first. Goal remains unmet.
+
+
+## Perf286 package audited; remote deployment underway
+
+Build4063 terminalrc0. Package/source audit passed: changed objects exactly
+code008/code028, xk_object_collect/xk_hierarchy and four version consumers.
+Query/solver objects and retained polygon code013 object unchanged from285.
+Only game-a.self/boot-game.txt changed, update contract unchanged
+775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897.
+RuntimeSHA81ba4621278ad6c76865517db66dac9a51fdb52cc8b3cfd4551035c7eb7ac0fc;
+packageSHA600c738953be8dbb0e71fc7ccdffa87809bd1f6c5f35894041a911bf797efff1.
+Private actor-detail-286/xita-perf286c.vpk. Post-build retained native source hashes
+also checked. Collector metadata corrected to diagnostic phase2, not normalFPS.
+
+Announced interruption and started remote update--apply53376. Last upload progress
+34668544/34837442; verification/boot still pending, handle active on last poll.
+Do not re-upload/restart due to silence. Poll SAME handle and deploy.log; only
+claim installed286 after hash/slotboot and independentstatus confirmation. Then
+renewlease, run prepared launch-diagnostic.py (protected a30 save), collect-idle.py,
+inspect images, and collect-encounter.py (includes5sec pod exit before oldroute).
+Prepared input sequences always release pad. Existing285 package is rollback.
+No286gameplay evidence yet. Goal unmet.
