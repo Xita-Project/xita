@@ -2115,3 +2115,24 @@ soundobstructionreuse,and source/platformfixes. Obstructioncacheespecially
 targets nativeports renderingmultipleframespertick; Xitaalreadyhasindependent
 sound-obstructionhookmode6, so do not assume additivegain. Compare exact
 remaining per-draw work and invalidation before copying. No upstreamcode merged.
+
+
+## Guard/movement sub-timers prepared as perf288
+
+Previous goal turn progress: resolvedguardtarget16D250 and investigatednative
+portdelta. Currentprivateguard-detail-288 copies287; onlyselectedparents
+16D250,15AF50,15AA20,15A890 receive55direct-call scopes. Existing164090
+indirecttimerretained. Whitespace/timer-strippedwhole-shard comparisons prove
+guestsstatementsidenticalforcode027/028; source-audit.json recordsSHA.
+Sevenphasepatcher/indirecttests pass. Build90984 active, compilerPID1344646
+confirmedCPUprogress2:44 at2:45elapsed. No newdeployment yet.
+Preparedaudit-package.py requires onlycode027/028+fourversionconsumers
+andgame-a/boot-game assetchanges. Pollsamebuildhandle, auditbeforedeploy.
+Vita287 retainedawakelease3600; no benchmarkloops or newPijobs.
+
+Referenceactor_moving.calreadycachesdestinationidentityandrefreshed_this_tick.
+15AA20/15A890 bothcall15A290; latter801generatedlinescalls13*pathroutines.
+Do not call this a provenhotpathuntil288timings. Guard/movementnativework
+must preservepathrefreshconditions,sharedstateandcollisionsemantics.
+Addedhalo-universal-performance-review-20260927.md torecordoverlaprather
+thanpretendupstreamoptimizationsareallnewgain. Goalunmet.
