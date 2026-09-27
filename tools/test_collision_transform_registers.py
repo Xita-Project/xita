@@ -3,15 +3,16 @@
 import argparse, hashlib, json, re, shlex, subprocess
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-IDS=('000B6210','000B5E40')
+IDS=('000B6210','000B5E40','000B5DF0')
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('baseline',type=Path);p.add_argument('registers',type=Path)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--cc',default='cc')
-    p.add_argument('--function',choices=['all','inverse','vector'],default='all')
+    p.add_argument('--function',choices=['all','inverse','vector','rotation'],default='all')
     p.add_argument('--extra',default='');p.add_argument('--build-only',action='store_true')
     a=p.parse_args();a.output.mkdir(parents=True,exist_ok=True)
-    src='#include "xv_x87reg.h"\n';hashes={}
+    # Timing observers are outside this arithmetic/context equivalence test.
+    src='#include "xv_x87reg.h"\n#define XV_PHASE_SCOPE(c, id) ((void)0)\n';hashes={}
     for prefix,path in [('reference',a.baseline),('candidate',a.registers)]:
         text=path.read_text()
         for name in IDS:

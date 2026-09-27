@@ -11,6 +11,7 @@ __thread uint32_t *xv_host_page_table;
 #endif
 void reference_000B6210(xctx *); void candidate_000B6210(xctx *);
 void reference_000B5E40(xctx *); void candidate_000B5E40(xctx *);
+void reference_000B5DF0(xctx *); void candidate_000B5DF0(xctx *);
 #define SIZE (4u<<20)
 void x_guest_read_pages(void *out,uint32_t a,size_t n) {
     unsigned char *p=out; while(n){size_t k=4096-(a&4095);if(k>n)k=n;memcpy(p,X_G(a),k);a+=k;p+=k;n-=k;}
@@ -58,6 +59,8 @@ int main(int argc,char **argv) {
     setvbuf(stdout,NULL,_IOLBF,0);
     unsigned first=argc>1&&!strcmp(argv[1],"vector")?1:0;
     unsigned last=argc>1&&!strcmp(argv[1],"inverse")?1:2;
+    if(argc>1&&!strcmp(argv[1],"rotation")){first=2;last=3;}
+    else if(argc<=1||!strcmp(argv[1],"all"))last=3;
     g_xram=calloc(1,SIZE);g_img_base=g_xram;g_xpt=malloc((1u<<20)*4);
     unsigned char *before=malloc(SIZE),*expected=malloc(SIZE);
     assert(g_xram&&g_xpt&&before&&expected);
@@ -65,8 +68,8 @@ int main(int argc,char **argv) {
 #if defined(XV_THREAD_PAGE_TABLE) && XV_THREAD_PAGE_TABLE
     xv_host_page_table=g_xpt;
 #endif
-    void (*ref[2])(xctx *)={reference_000B6210,reference_000B5E40};
-    void (*cand[2])(xctx *)={candidate_000B6210,candidate_000B5E40};
+    void (*ref[3])(xctx *)={reference_000B6210,reference_000B5E40,reference_000B5DF0};
+    void (*cand[3])(xctx *)={candidate_000B6210,candidate_000B5E40,candidate_000B5DF0};
     for(unsigned which=first;which<last;which++) {
         for(unsigned i=0;i<1728;i++) {
             xctx c=setup(i,which),a=c,b=c;memcpy(before,g_xram,SIZE);

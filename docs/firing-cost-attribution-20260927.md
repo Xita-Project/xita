@@ -255,3 +255,36 @@ was observed on Pi before launch. Poll that handle and inspect run-result.json
 and run.log when terminal; do not duplicate the run. Scope timings include
 observer overhead and are not Vita FPS. Perf277 remains installed and the Vita
 lease was renewed. No production code or math behavior changed this turn.
+
+## Preparation probe result and rotation-transform candidate
+
+The focused Pi run completed its planned timeout (124), with 30 parent reports.
+The top-eight child listing censors two of the ten measured children: do not
+report absent sine/cosine/copy scopes as zero. Settled parent samples were
+roughly 2.0–2.2 ms; sine or copy occupied the eighth position at ~0.06–0.07 ms,
+with other omitted children no larger. These scopes do not establish a large
+trigonometry/copy bottleneck. Extra observers also increased the parent's
+reported self time; that remainder is not solely removable guest work.
+
+Inspection of 59200 identified rotation-only transform B5DF0, whose installed
+perf277 body still uses memory-backed x87 slots. Historical perf175/177 splice
+reports list a register-lowered version, but that alone does not establish an
+accidental regression or authorize restoring all old lowerings. B5E40's known
+NaN-payload mismatch remains excluded.
+
+Extended the existing transform differential fixture with `--function rotation`
+for B5DF0. The reference extracted from the old stage is byte-identical to the
+installed perf277 function (SHA256
+1e61bb09b5a6df6a402cdad385af1b406ea1d611a371551dab33ef85f56be95c).
+Both host ASan/UBSan and Cortex-A9 Thumb Pi passed 1,728 full-context/4-MiB-memory
+cases covering TOP, controls, aliases, page edges and exceptional values.
+Timing observers are disabled in this offline test; concurrency and real
+callers are not covered. Pi core 0 warm cost, including context reset: original
+145.8–147.6 ns/call versus register lowering 122.4–123.6 ns/call. This is not
+a Vita FPS estimate. All Pi jobs in this entry are terminal.
+
+Private evidence: rotation-transform-candidate/{host.log,pi.log,baseline-audit.json},
+build receipts under host/ and pi/. No candidate is staged or deployed. Next
+check B5DF0's frequency beneath 59200 and qualify its real-callee integration
+with the current sprite candidate before deciding if this small leaf is worth
+a Vita trial. Perf277 and the protected a30 save remain unchanged.
