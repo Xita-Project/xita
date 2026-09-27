@@ -1113,3 +1113,31 @@ Any such diagnostic run is attribution-only and cannot be used as ordinary
 FPS comparison. Preserve282 ordinary logs and protected save before restart;
 no diagnostic restart was performed in this turn. No active collectors or
 held controls. Enemy combat remains required for acceptance; goal unmet.
+
+
+## Owner diagnostic prepared; save preservation in progress
+
+Prepared private enemy-tick-diagnostic launch/collector scripts from282 with
+XV_SCENE_PHASES=2, same version/cache/protected save. Scripts syntax-check;
+not executed. Diagnostic collectors label timing as attribution-only because
+phase mode affects root-pair optimization. No runtime code changed.
+
+Paused gameplay and started read-only FTP backup of the isolated test-save
+namespace to enemy-tick-diagnostic/save-before-quit, session40163. Save/profile
+files copied first; script also recursively includes large cache maps (unneeded
+for future save-only backups). Last poll confirms live transfer; do not treat
+local partial files as a verified complete backup until receipt.json is written.
+
+Remote menu sequence down3/cross displayed a warning that all level progress
+would be lost. Did NOT confirm it. Sent circle to cancel, then down; subsequent
+image unexpectedly showed lifepod rather than menu. No further controls sent.
+Cannot claim Save and Quit succeeded or attribute this transition confidently.
+Initial pause image showed outdoor mission objectives. Preserve images and
+pre-quit backup; inspect saved file hashes before restarting. Backup started
+before navigation but was still reading cache maps during menu actions, so
+verify checkpoint files with a second read before treating them as stable.
+
+Current live status still perf282/533a6c71, timing_frame17628, awake3574sec.
+No diagnostic restart or launch performed. Re-poll backup40163 to terminal,
+verify save/profile files (exclude map cache), then restart same282 with
+owner-only timers through the prepared launch. No current game controls held.
