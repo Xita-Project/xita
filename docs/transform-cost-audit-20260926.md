@@ -181,3 +181,36 @@ hardware verification. The production worker and bounded consumer receipts
 above precede the configuration/counter integration; repeat applicable checks
 against the final candidate flags. Next steps remain Vita-linked qualification,
 full build and gameplay deployment. The installed hardware build remains perf267.
+
+### Perf268 candidate qualification and build
+
+Final source worker tests repeated all five configurations successfully:
+9,000 private/shared/nested pairs. Results: `worker-final-summary.json` and
+`worker-final-*.log` in the private candidate directory.
+
+The bounded emitted root/child-list consumer was compiled and linked with
+VitaSDK (`-O3 -funroll-loops`, Cortex-A9 Thumb/VFP, optional NEON compiled in)
+and executed in the Cortex-A9 instruction harness. All 384 cases matched full
+arena/context, FPSCR and yield count: 128 each with the pair enabled, disabled,
+and optional NEON enabled (which forces pair fallback). Controls include four
+rounding modes, flush-to-zero/default-NaN combinations, exceptional operands,
+and alternating physical-page mappings. Enabled cases asserted one actual
+pair admission; fallback modes asserted none. Firmware memory copies are modeled;
+this is correctness evidence, not Vita timing or scheduling evidence. Receipts:
+`check-vita.py`, `vita-consumer.elf`, `vita-consumer-result.json`.
+
+The isolated `../root-pair-hardware/build-x87` stage targets perf268/d681f21f.
+Its only changed game/runtime source files relative to perf267 are code_013.c
+and xk_math.c, plus the generator hook; see `stage-source-changes.json`. The
+initial attempt imported newer generator modules absent from the retained
+stage. This was resolved by inserting only the new hook into the retained
+stage's generator, rather than importing unrelated generator changes. The
+second build is in progress; the prior result file still contains its first
+attempt's failure until the live build terminates. Do not package from that
+stale result or treat it as the live build's outcome.
+
+The planned launch replaces explicit `XV_REC_WORKER_TIMING=0` with
+`XV_ROOT_PAIR=1` to remain within the 32-key remote limit. Worker timing defaults
+to zero when unset, so this preserves its behavior. Other optimizations,
+360p settings and `XV_TEST_SAVE=a30-perf211` remain. No perf268 package has been
+deployed yet; perf267 is still installed and remains the rollback package.
