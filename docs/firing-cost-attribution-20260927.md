@@ -2050,3 +2050,22 @@ Announced interruption; remote update41010 actively uploading. Pollsamehandle,
 verify runtime hash/version, then use ai-behavior-287/launch-diagnostic.py
 and collect-pressure.py (287 versions) for protected a30 save. No target
 behavior timing yet. Do not claim an optimization or20FPS.
+
+
+## Perf287 hardware boot confirmed; campaign readiness capture active
+
+Previous turn progress: built/audited diagnostic and started deployment.
+Update41010 is now terminalrc0; deploy.log confirms exact eaf848d5... runtime
+SHA installed and booted slot1. Independent status confirmsperf287/16abae1b,
+dashboard timing0. Brief connection refusals were update handoff; no redundant
+restart was issued. Companion1.07 reachable, nosleep on acknowledged.
+Launch79055 terminalrc0, sequence completed and inputs released. Reviewed
+a30-after-sequence.png: loading screen, NOT gameplay.
+
+collect-pressure55030 is active, bounded readiness polling, not repeated
+benchmark toggles. Latest readiness file3 has loaded0/active0/director0.
+Wait same handle; don't send movement while loading. It will collect45seconds
+after loaded/active/director telemetry, then review pressure-before/after.png
+and pressure.log. Afterwards prepared collect-encounter.py can follow286route
+and expose164090 resolved targets. May need another settled capture under a
+new filename after traversal. No FPS-improvement claim. Saves untouched.
