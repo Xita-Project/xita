@@ -131,6 +131,25 @@ static inline uint64_t cap_clock(void)
     if(cap_timing<0)cap_timing=xv_quality_int("XV_VERTEX_CAPTURE_TIMING",0,0,1);
     return cap_timing?sceKernelGetProcessTimeWide():0;
 }
+/* Owner-only low-frequency diagnostic. Three clock reads per actual drain
+ * or queue wait, none per job. Scheduling is included; these are not CPU cycles.
+ * Completion observation and callback publication are disjoint intervals. */
+static int cap_wait_timing=-1;
+static unsigned cap_wait_samples[2]; /* partial, full */
+static uint64_t cap_wait_observe_us[2],cap_wait_publish_us[2];
+static inline uint64_t cap_wait_stamp(void)
+{
+    if(cap_wait_timing<0)cap_wait_timing=xv_quality_int("XV_CAPTURE_WAIT_TIMING",0,0,1);
+    return cap_wait_timing?sceKernelGetProcessTimeWide():0;
+}
+static inline void cap_wait_record(unsigned full,uint64_t start,uint64_t ready)
+{
+    if(!cap_wait_timing)return;
+    uint64_t end=cap_wait_stamp();
+    cap_wait_samples[full]++;
+    cap_wait_observe_us[full]+=ready-start;
+    cap_wait_publish_us[full]+=end-ready;
+}
 #ifndef XV_VERTEX_CAPTURE_DETAIL_DEFAULT
 #define XV_VERTEX_CAPTURE_DETAIL_DEFAULT 0
 #endif
@@ -544,6 +563,7 @@ static void cap_wait_for_slot(void)
     if(cap_wait_batch<0)cap_wait_batch=xv_quality_int("XV_CAPTURE_WAIT_BATCH",1,1,16);
     unsigned batch=(unsigned)cap_wait_batch; /* Called only with all CAPTURE_JOBS pending. */
     uint64_t start=cap_clock();cap_partial_waits++;
+    uint64_t wait_start=cap_wait_stamp();
 #if XV_VERTEX_CAPTURE_NOTIFY
     __atomic_store_n(&cap_wait_target,retired+batch,__ATOMIC_RELAXED);
 #endif
@@ -563,7 +583,9 @@ static void cap_wait_for_slot(void)
 #if XV_VERTEX_CAPTURE_NOTIFY
     __atomic_exchange_n(&cap_waiting,0,__ATOMIC_ACQ_REL);
 #endif
+    uint64_t wait_ready=cap_wait_stamp();
     cap_collect();
+    cap_wait_record(0,wait_start,wait_ready);
     uint64_t elapsed=cap_clock()-start;cap_join_us+=elapsed;cap_partial_wait_us+=elapsed;
 }
 void xv_vertex_capture_drain(void)
@@ -578,6 +600,7 @@ void xv_vertex_capture_drain(void)
         return;
     }
     uint64_t start=cap_clock();cap_drains++;
+    uint64_t wait_start=cap_wait_stamp();
 #if XV_VERTEX_CAPTURE_NOTIFY
     __atomic_store_n(&cap_wait_target,submitted,__ATOMIC_RELAXED);
     for(;;) {
@@ -597,7 +620,9 @@ void xv_vertex_capture_drain(void)
 #if XV_VERTEX_CAPTURE_NOTIFY
     __atomic_exchange_n(&cap_waiting,0,__ATOMIC_ACQ_REL);
 #endif
+    uint64_t wait_ready=cap_wait_stamp();
     cap_collect();
+    cap_wait_record(1,wait_start,wait_ready);
     uint64_t elapsed=cap_clock()-start;cap_join_us+=elapsed;cap_full_wait_us+=elapsed;
 #if XV_VERTEX_CAPTURE_REUSE
     cap_reuse_retire();
@@ -816,7 +841,7 @@ void xv_vertex_capture_shutdown(void)
         while(sceKernelWaitThreadEnd(cap_thread,NULL,NULL)<0)sceKernelDelayThread(100);
     }
     cap_release();cap_unavailable=cap_stopping=0;cap_enabled=-1;
-    cap_detail_enabled=-1;cap_detail_serial=0;
+    cap_detail_enabled=-1;cap_detail_serial=0;cap_wait_timing=-1;
 #if XV_VERTEX_PERSISTENT
     vp_shutdown();
 #endif
@@ -891,6 +916,13 @@ void xv_vertex_capture_report(unsigned frames)
         frames,cap_partial_wait,cap_wait_batch,cap_partial_waits);
     xv_logf("[vertex-capture-waits] %u frames: timing %d queue-only %llu us full-drain %llu us; elapsed owner waits including callbacks, overlapping other workers\n",
         frames,cap_timing,(unsigned long long)cap_partial_wait_us,(unsigned long long)cap_full_wait_us);
+    if(cap_wait_timing>0)xv_logf("[vertex-capture-wait-only] %u frames: partial %u calls observe %llu us publish %llu us; full %u calls observe %llu us publish %llu us; disjoint elapsed owner intervals, scheduling included\n",
+        frames,cap_wait_samples[0],(unsigned long long)cap_wait_observe_us[0],
+        (unsigned long long)cap_wait_publish_us[0],cap_wait_samples[1],
+        (unsigned long long)cap_wait_observe_us[1],(unsigned long long)cap_wait_publish_us[1]);
+    memset(cap_wait_samples,0,sizeof cap_wait_samples);
+    memset(cap_wait_observe_us,0,sizeof cap_wait_observe_us);
+    memset(cap_wait_publish_us,0,sizeof cap_wait_publish_us);
     cap_partial_waits=0;cap_partial_wait_us=cap_full_wait_us=0;
     cap_bytes=cap_capture_us=cap_worker_us=cap_join_us=0;
     if(cap_masks_copied || cap_masks_omitted)

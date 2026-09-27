@@ -67,8 +67,9 @@ void xv_logf(const char *fmt,...) { (void)fmt; }
 void xv_cpu_log_thread(const char *name) { assert(!strcmp(name,"vertex-capture") || !strcmp(name,"vertex-upload")); }
 void xv_gpu_flush(const void *p,uint32_t n) { assert(p && n); }
 void xv_gpu_write_barrier(void) { __atomic_thread_fence(__ATOMIC_SEQ_CST); }
+static __thread unsigned fixture_clock_calls;
 uint64_t sceKernelGetProcessTimeWide(void)
-{ struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000; }
+{ fixture_clock_calls++;struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000+t.tv_nsec/1000; }
 int sceKernelDelayThread(SceUInt n) { usleep(n);return 0; }
 int sceKernelGetThreadCurrentPriority(void) { return 64; }
 SceUID sceKernelAllocMemBlock(const char *name,SceKernelMemBlockType type,SceSize size,SceKernelAllocMemBlockOpt *opt)
@@ -382,6 +383,40 @@ static void *release_capture(void *unused)
     (void)unused;usleep(20000);
     __atomic_store_n(&pause_capture,0,__ATOMIC_RELEASE);return NULL;
 }
+static void slow_collected(void *context,int ok)
+{ usleep(5000);collected(context,ok); }
+static void wait_only_timing(void)
+{
+    for(unsigned enabled=0;enabled<2;enabled++) {
+        setenv("XV_CAPTURE_WAIT_TIMING",enabled?"1":"0",1);
+        cap_timing=0; /* Full per-job clocking stays disabled. */
+        xv_vertex_capture_report(1);
+        unsigned char src[32]={0};output o={0};
+        __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+        xv_vertex_prepare_batch b={.slot=0,.count=1};
+        b.streams[0]=(xv_vertex_prepare_stream){.source=src,.bytes=sizeof src,.stride=4};
+        const void **targets[]={(const void **)&o.result[0]};
+        assert(xv_vertex_capture_submit(&b,targets,slow_collected,&o));
+        wait_parked(&parked_capture);
+        pthread_t releaser;assert(!pthread_create(&releaser,NULL,release_capture,NULL));
+        unsigned clocks=fixture_clock_calls;
+        xv_vertex_capture_drain();
+        assert(fixture_clock_calls-clocks==3*enabled);
+        assert(!pthread_join(releaser,NULL));
+        assert(o.ok && o.callbacks==1 && !memcmp(o.result[0],src,sizeof src));
+        assert(!cap_wait_samples[0] && cap_wait_samples[1]==enabled);
+        if(enabled)assert(cap_wait_observe_us[1]>0 && cap_wait_publish_us[1]>=5000);
+        else assert(!cap_wait_observe_us[1] && !cap_wait_publish_us[1]);
+        assert(!cap_capture_us && !cap_worker_us && !cap_join_us);
+        clocks=fixture_clock_calls;xv_vertex_capture_drain();
+        assert(fixture_clock_calls==clocks); /* Empty drain has no clocks. */
+        xv_vertex_capture_report(1);
+        assert(!cap_wait_samples[1] && !cap_wait_observe_us[1] && !cap_wait_publish_us[1]);
+        cleanup();
+    }
+    unsetenv("XV_CAPTURE_WAIT_TIMING");
+    puts("PASS: wait-only timing separates completion and delayed callbacks, three clocks per drain, none disabled/empty, report reset and exact outputs");
+}
 static void queue_capacity_size(unsigned bytes)
 {
     unsigned char src[4096]={0};output outputs[CAPTURE_JOBS+1]={0};
@@ -412,6 +447,8 @@ static void queue_capacity(void)
 static void queue_partial_boundary(unsigned batch)
 {
     unsigned char src[32]={0};output out[CAPTURE_JOBS+1]={0};
+    setenv("XV_CAPTURE_WAIT_TIMING","1",1);
+    xv_vertex_capture_report(1);
     cap_partial_wait=1;cap_wait_batch=(int)batch;
     __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
     for(unsigned i=0;i<CAPTURE_JOBS;i++){src[0]=i;assert(capture(0,src,sizeof src,4,NULL,0,&out[i]));}
@@ -420,7 +457,10 @@ static void queue_partial_boundary(unsigned batch)
     __atomic_store_n(&notify_completion_skip,batch-1,__ATOMIC_RELAXED);
     gate(CAP_AFTER_COMPLETE);
     pthread_t releaser;assert(!pthread_create(&releaser,NULL,release_capture,NULL));
+    unsigned clocks=fixture_clock_calls;
     src[0]=CAPTURE_JOBS;assert(capture(0,src,sizeof src,4,NULL,0,&out[CAPTURE_JOBS]));
+    assert(fixture_clock_calls-clocks==3);
+    assert(cap_wait_samples[0]==1 && !cap_wait_samples[1]);
     assert(!pthread_join(releaser,NULL));
     /* Worker is parked after the requested batch. Submission must return
      * without waiting for the remainder or reusing their snapshots. */
@@ -430,7 +470,9 @@ static void queue_partial_boundary(unsigned batch)
     assert(cap_used==(CAPTURE_JOBS+1)*32);
     ungate(CAP_AFTER_COMPLETE);join(0);
     for(unsigned i=0;i<CAPTURE_JOBS+1;i++)assert(out[i].ok&&out[i].callbacks==1&&out[i].result[0][0]==i);
+    xv_vertex_capture_report(1);
     cleanup();cap_partial_wait=-1;cap_wait_batch=-1;
+    unsetenv("XV_CAPTURE_WAIT_TIMING");
 }
 #endif
 static void partial_failure_and_fallback(void)
@@ -1111,7 +1153,7 @@ int main(void)
     notification_frontiers();notification_races();
 #endif
     private_inputs();sparse_and_packed();unused_mask_lifetime();pressure_and_wrap();failure_cases();
-    queue_capacity();
+    wait_only_timing();queue_capacity();
 #if XV_VERTEX_CAPTURE_NOTIFY
     queue_partial_boundary(1);queue_partial_boundary(8);queue_partial_boundary(16);
 #endif

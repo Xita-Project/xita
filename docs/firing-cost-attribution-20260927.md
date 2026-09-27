@@ -504,3 +504,28 @@ Rollback independently confirmed: perf277 dashboard timing_frame=0, slot 0,
 expected runtime SHA256 7d8ba31adb1fea060d8d58084639817a64943e67edccef792204e0c242aec062.
 Lease renewed for 3600 seconds. Receipt: capture-depth-candidate/
 restored-dashboard.json. No live collector or held controls remain.
+
+## Wait-only capture instrumentation qualified offline
+
+Implemented XV_CAPTURE_WAIT_TIMING=1 (default off), owner-only timestamps at
+wait entry, completion observation before cap_collect, and after cap_collect.
+Reports [vertex-capture-wait-only] separately for queue partial waits and full
+drains: call counts, observe us, publish us. These intervals are disjoint within
+a wait and include scheduling/preemption; they are not exclusive CPU costs or
+additional frame time. The existing broad per-job timing is unchanged and can
+remain disabled. Empty drains perform no clock reads. Report resets counters;
+shutdown resets startup option. No worker or resource lifetime policy changed.
+
+Production-worker tests passed in all 24 host feature/notification combinations.
+Then added partial-wait timing assertions and reran all 24 under ASan/UBSan.
+Tests verify exactly three owner clock reads per enabled full/partial wait,
+zero disabled/empty-drain reads, delayed callback attributed to publication,
+exact output/callback counts, reset behavior, batches 1/8/16, plus the existing
+ownership/failure/reuse/wrap suite. Pi A9 Thumb static binary (cores 0/1,
+all reuse/packed/persistent/ready/notify options) passed. As with the depth
+fixture, Linux GCC's missing vld1q_u8_x4 requires existing scalar packing via
+-U__ARM_NEON -U__ARM_NEON__; this qualifies queue instrumentation behavior,
+not Vita SIMD performance. Private logs: ../capture-wait-diagnostic/.
+All tests terminal. Hardware still perf277; lease renewed. Next build perf279
+with depth 32 and this instrumentation, use a single diagnostic gameplay run,
+then clear startup overrides. Do not claim its timing as an FPS improvement.
