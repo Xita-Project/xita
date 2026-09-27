@@ -21,6 +21,7 @@ def build(directory,reference,cc,assist=False):
     harness.write_text('''#include "xv_x86rt.h"
 #include <stddef.h>
 uint8_t *g_xram,*g_img_base;uint32_t *g_xpt;
+int xv_phase_enabled; /* No phase tracing in this fixture. */
 const unsigned layout[]={sizeof(xctx),offsetof(xctx,r),offsetof(xctx,st),offsetof(xctx,fsp),offsetof(xctx,fsw),offsetof(xctx,fcw),offsetof(xctx,preempt),offsetof(xctx,f_kind),offsetof(xctx,f_bits),offsetof(xctx,xmm)};
 void test_boot(void) {}
 void xk_os_log(const char *fmt,...) { (void)fmt; }

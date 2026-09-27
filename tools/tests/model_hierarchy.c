@@ -9,6 +9,7 @@
 enum { ARENA=4<<20,MODEL=0x12000,POSE=0x22000,NODES=0x32000,MATRICES=0x52000,SP=0x62000,OBJECT=0x72000 };
 uint8_t *g_xram,*g_img_base;
 uint32_t *g_xpt;
+int xv_phase_enabled; /* Fixture runs with guest phase tracing disabled. */
 static uint8_t *saved,*expected;
 static unsigned yields,accepted,comparisons,rejections;
 static uint32_t random_state=0x35476u;

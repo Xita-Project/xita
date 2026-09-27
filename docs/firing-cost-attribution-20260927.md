@@ -1756,3 +1756,34 @@ preserves guest registers, FP state and stack footprint. Do not relax its gate.
 Next target remains remaining owner object/animation preparation with existing
 native hooks retained; qualify any replacement against full guest state and
 memory before deploying. Goal remains unmet.
+
+
+## Hierarchy fallback attribution prepared
+
+After the user-facing bug-list turn (no performance progress), resumed the NPC
+objective. Vita awake lease renewed successfully. Pi SSH responded at192.168.0.9,
+uptime2h51/load0; no harness/Halo2/compiler process matched the read-only check.
+No new Pi run or Vita update was performed in this turn.
+
+Latest encounter tail: aim-blend1275/1275 and1380/1380 calls native, no declines;
+hierarchy2059/2177 batches,19356/20398 child nodes,3895/4130 bounds declines,
+44/126 numeric-pose declines. Broad bounds counts cannot distinguish required
+final-original iterations from recoverable work. Added five guarded subcounters
+in xk_hierarchy.c: entry, model-address, count/queue, short/final tail, empty
+worklist. Existing admission conditions, arithmetic and publication unchanged.
+Report describes retry-inclusive attempts, not missed nodes or milliseconds.
+This diagnostic is prepared only, not deployed or evidence of FPS improvement.
+
+Existing test_model_hierarchy.py initially failed linking because its fixture
+omitted the newer xv_phase_enabled global used by xk_math root-pair. Added
+explicit disabled phase state to host and ARM fixtures. Then host68326 passed:
+222 full comparisons in each enabled/unset/disabled/math-disabled mode;
+117 admitted random probes in enabled mode;85 unchanged declines per mode.
+Owned-XBE signatures and disabled-generation equivalence also passed.
+Private output hierarchy-bounds-audit uses285 stage XBE/manifest. First attempted
+old production-build-final manifest was empty; correct stage manifest used.
+ARM instruction test did not start: default interpreter lacks pyelftools,
+separate crash-parser venv lacks Unicorn. No ARM result claimed for this change.
+Next integrate these counters with the next qualified diagnostic candidate or
+ARM harness to distinguish retained tails before changing hierarchy admission.
+Vita remains285; full NPC and cutscene20FPS target still unmet.
