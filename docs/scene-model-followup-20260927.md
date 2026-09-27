@@ -69,3 +69,20 @@ Default 0 retains existing compiler behavior. A tracked config dependency handle
 both size and phase changes without stale objects. The production Makefile
 fixture passes unchanged-repeat, 0→1→0, phase-switch, unrelated-object and invalid
 option checks. This is a reversible hardware experiment, not a default speedup.
+
+## Perf274 hardware candidate
+
+Full Vita build succeeded: perf274 / 910817dc. Comparing retained compiled
+objects against perf273 shows only recomp/kernel/xk_native_70110.o changed.
+Its actual n70_fast/n70_gen symbols match the smaller-code probe. Generated
+game objects remain byte-identical. Package membership/assets are unchanged;
+only game-a.self and boot-game.txt differ, with the same update contract.
+
+Runtime: 34,799,886 bytes, SHA-256
+`ce4dc06994b6afff2636f7b09b10700089bc98557d2c66953c53bc04602773cd`.
+Package SHA-256
+`42e53607146a3d50c85ed5368b3770d5ec4f36f609c388f359a4613b0d0708d3`.
+Receipts: ../material-size-hardware/. Update/apply is running; confirmation
+of installation must come from the updater's verified boot receipt.
+The planned launch preserves all 32 gameplay overrides, 360p and a30-perf211.
+No change to worker tolerance, rendering, save policy or simulation settings.
