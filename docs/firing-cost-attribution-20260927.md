@@ -806,3 +806,39 @@ active session86315; poll to completion before collect-idle.py, then normal
 collect-gameplay.py. Verify [cpu-thread] vertex-capture affinity00020000/core1
 or startup core1 log in readiness/idle logs before attributing results. All
 build/update handles terminal; only launch is active. No FPS result yet.
+
+## Perf281 C1 hardware trial: contention moved to scene helper
+
+Launch86315, idle32181, gameplay21458 all terminal. Hardware thread log confirms
+capture core1 affinity00020000 priority153 (actual requested placement), not just
+an env receipt. Reviewed pod, AR/reload, canyon screenshots. No short-run crash;
+controls released. Ordinary360p settings, queue32/publication1, no wait timing:
+
+| Scene | Samples | Mean ms / FPS | p95 ms | Maximum ms | >50 / >100 ms |
+|---|---:|---:|---:|---:|---:|
+| Pod | 600 | 67.667 / 14.778 | 77.020 | 120.595 | 600 / 7 |
+| AR fire | 71 | 81.767 / 12.230 | 97.198 | 124.995 | 71 / 1 |
+| Movement | 71 | 74.240 / 13.470 | 88.091 | 321.529 | 71 / 2 |
+| Outdoors | 738 | 61.263 / 16.323 | 70.798 | 113.689 | 738 / 5 |
+
+No speedup: pod and outdoor substantially slower than perf277's55.702/47.494ms.
+Tail queue-only pressure became0, recorder drains fell to0.71–0.93ms/frame,
+FA920 elapsed41.0–45.1ms. These local improvements did not improve the frame.
+C1 utilization84–96%, C0~45–48%, C2~64–72% in tail windows. Scene helper CPU
+44.5–47.6ms, wall63.8–67.3ms, ready26–28%, waiting1–2%; wall-minus-CPU~19ms
+includes runnable-but-unscheduled time, not solely synchronization waits.
+Previous perf277 tail scene CPU42.9–46.2ms, wall43.6–47.9ms. This supports
+same-core contention with the scene helper, not more simulation CPU work or
+GPU saturation. Frame acquire reports zero busy-slot waits; GPU retirement
+latency~40ms overlaps and is not exclusive GPU service measurement.
+
+Requested rollback to perf279; confirmation poll27198 active. Keep C0 default.
+Next inspect baseline C2 workload/headroom before proposing alternate placement;
+C1 has no demonstrated spare capacity. Preserve separate firing-cost lead.
+Do not promote a change based on eliminated queue pressure or shorter FA920.
+Pi still untested for this affinity feature; physical trial now supplies Vita
+evidence, but no long-session/cutscene/AI/audio/checkpoint acceptance met.
+
+Rollback independently confirmed perf279 and expected boot hash at dashboard,
+timing_frame0; lease renewed3600. Receipt capture-core-candidate/
+restored-dashboard.json. All handles terminal; no controls held.
