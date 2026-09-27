@@ -126,3 +126,27 @@ benefit is claimed. This source adjustment is not in installed perf272.
 The perf272 launch script completed; the capture collector is waiting on actual
 loaded/active/director telemetry. Loading-screen FPS is excluded. Keep its
 existing process running rather than issuing another launch while loading.
+
+## Perf272 lifepod result and admission limit
+
+Hardware reached the lifepod (idle-before.png visually checked). The settled
+540-frame sample averaged 72.634 ms / 13.77 FPS, p95 91.663 ms, maximum 161.595 ms;
+518 frames exceeded 50 ms and four exceeded 100 ms. No object-worker report
+appeared. The capture contains 2,616 readiness transition messages: alternating
+lag 0/1 observations reset strict readiness before 90 consecutive stable frames.
+Therefore this is NOT a successful hardware worker-performance test. It is also
+a regression from perf271's pod capture, with a new synchronous logging burden;
+do not attribute it to actual parallel jobs, which were not admitted.
+
+The first 3,428,352-byte checkpoint transfer measured 199,353 us; the preceding
+512-byte profile write measured 1,114 us. These are actual synchronous transfer
+timings, excluding diagnostic writes; this initial-save result does not prove
+which later movement frame contains a save. The gameplay capture is continuing.
+
+Perf273 contains only the bounded-readiness-log adjustment atop perf272.
+It is built and packaged, not yet deployed. Runtime SHA-256
+`9b7253247521d3da37630765415e5e05e272fa744a47362c76ff8ab815232950`,
+34,818,386 bytes; package SHA-256
+`f4ba6c680dcd2ff3bff40a914433b609e8f4df16d6844f82f1359219342dabbc`.
+Keep the previous graphics settings and strict admission policy for its initial
+launch; do not silently enable lag tolerance or broaden camera support.
