@@ -21,6 +21,76 @@ void f_00000020(xctx *restrict c)
 '''
 
 class PatcherTests(unittest.TestCase):
+    def test_fused_collision_scopes(self):
+        source = '''void f_00172BF0(xctx *restrict c)
+{
+#if FUSED
+    nq_collection_172c95(c);
+    ns_solver_at_172cb8(c,0x172cb8u);
+#else
+    f_00171F10(c);
+    f_00170C10(c);
+#endif
+}
+static void nq_collection_172c95(xctx *restrict c)
+{
+    nq_query_at_171f94(c,0x172c95u);
+    f_000868F0(c);
+    f_001716F0(c);
+}
+void unrelated(xctx *c)
+{
+    f_00012345(c);
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'code_000.c'
+            path.write_text(source)
+            cmd = [sys.executable, str(TOOL), tmp, '--parents', '00172BF0',
+                   '--any-call', '--collision-hooks']
+            subprocess.run(cmd, check=True, capture_output=True)
+            first = path.read_text()
+            self.assertEqual(first.count('xv_scene_phase_begin(0x'), 7)
+            self.assertNotIn('xv_scene_phase_begin(0x00012345u)', first)
+            stripped = '\n'.join(l for l in first.splitlines()
+                                 if 'extern void xv_scene_phase_' not in l) + '\n'
+            self.assertEqual(stripped, source)
+            subprocess.run(cmd, check=True, capture_output=True)
+            self.assertEqual(first, path.read_text())
+
+    def test_native_callback_and_fail_closed(self):
+        native = ('if (reject_object(c)) skipped++;\n'
+                  '                    else f_001716F0(c);\n'
+                  '                    RELOAD();\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'kernel').mkdir()
+            collector = root / 'kernel/xk_object_collect.c'
+            shard = root / 'code_000.c'
+            shard.write_text(SOURCE)
+            collector.write_text(native)
+            cmd = [sys.executable, str(TOOL), tmp, '--parents', '00000020',
+                   '--native-object-collect']
+            subprocess.run(cmd, check=True, capture_output=True)
+            first = collector.read_text()
+            self.assertEqual(first.count('f_001716F0(c);'), 1)
+            self.assertIn('if (reject_object(c)) skipped++;', first)
+            self.assertLess(first.index('xv_scene_phase_begin(0x1716F0u)'),
+                            first.index('f_001716F0(c);'))
+            self.assertLess(first.index('f_001716F0(c);'),
+                            first.index('xv_scene_phase_end(0x1716F0u)'))
+            self.assertLess(first.index('xv_scene_phase_end(0x1716F0u)'),
+                            first.index('RELOAD();'))
+            subprocess.run(cmd, check=True, capture_output=True)
+            self.assertEqual(first, collector.read_text())
+            # Refuse an ambiguous callback before touching any generated shard.
+            collector.write_text(native + native)
+            shard.write_text(SOURCE)
+            result = subprocess.run(cmd, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(shard.read_text(), SOURCE)
+            self.assertEqual(collector.read_text(), native + native)
+
     def test_tail_call_end_precedes_return(self):
         source = SOURCE.replace('    f_00000030(c);', '    f_00000030(c); return;')
         with tempfile.TemporaryDirectory() as tmp:

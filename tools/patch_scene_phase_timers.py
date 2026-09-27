@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Install the XV_SCENE_PHASES timers around the direct guest calls of the scene entry f_000BCB30 and of its main callee
 f_0005DBC0 in a stage's hand-maintained shards (idempotent: earlier timers are stripped and re-installed).
-Usage: patch_scene_phase_timers.py <stage>/recomp [--parents A,B] [--hle-calls] [--any-call --tail-calls]
+Usage: patch_scene_phase_timers.py <stage>/recomp [--parents A,B] [--hle-calls] [--any-call --tail-calls] [--native-object-collect] [--collision-hooks]
 Tail-call timing prevents compiler tail-call elimination; use only for diagnostics.
 Report: [scene-phases] in recomp/kernel/xk_scene_thread.c."""
 import re, sys, glob
+from pathlib import Path
 from collections import Counter
 ANY_CALL = False
 PARENTS = ['000900E0', '0014A162', '000B9678', '000B8840',   # the sim tick's two big callees (38 + 14 ms/frame, perf125) and the Pi sampler's hot owner chain (B9678 -> B8980 66%)
@@ -36,8 +37,65 @@ def report_unwrapped(body, parent):
               '; use --any-call for conditional-hook callers')
 
 BEGIN = '    { extern void xv_scene_phase_begin(uint32_t); xv_scene_phase_begin(0x%su); }\n'
+
+def native_collect_patch(root):
+    """Time the real callback that the native walk bypasses in generated code.
+
+    Prepare before editing shards so an unknown native layout fails closed.
+    Keep this opt-in: ordinary production builds need no extra observer calls.
+    """
+    path = Path(root) / 'kernel/xk_object_collect.c'
+    original = path.read_text()
+    call = 'else f_001716F0(c);'
+    wrapped = ('else { /* XV_NATIVE_COLLECT_PHASE */\n'
+               '                        extern void xv_scene_phase_begin(uint32_t);\n'
+               '                        extern void xv_scene_phase_end(uint32_t);\n'
+               '                        xv_scene_phase_begin(0x1716F0u);\n'
+               '                        f_001716F0(c);\n'
+               '                        xv_scene_phase_end(0x1716F0u);\n'
+               '                    }')
+    if original.count(wrapped) == 1 and call not in original:
+        return path, original
+    if original.count(call) != 1 or 'XV_NATIVE_COLLECT_PHASE' in original:
+        raise SystemExit('native object collector layout changed; no timers installed')
+    return path, original.replace(call, wrapped)
+
+def collision_hooks(source):
+    """Observe specialized calls under the same guest addresses as fallbacks.
+
+    These are whole-call scopes, including native dispatch/reuse. They do not
+    claim to split the internal fused query or solver into individual leaves.
+    """
+    source = re.sub(r'^.*?/\* XV_COLLISION_PHASE \*/\n', '', source, flags=re.M)
+    targets = {
+        'nq_collection_172c95(c);': '00171F10',
+        'ns_solver_at_172cb8(c,0x172cb8u);': '00170C10',
+        'nq_query_at_171f94(c,0x172c95u);': '00088110',
+        'nq_query_at_17301b(c);': '00088110',
+    }
+    # The specialized collector is a separate static function and therefore is
+    # not covered by --parents 00171F10. Include its ordinary direct children.
+    start = source.find('static void nq_collection_172c95(xctx *restrict c)\n{')
+    body_start = source.find('{', start) + 1 if start >= 0 else -1
+    def wrap(m):
+        indent, call = m.group(1), m.group(2)
+        addr = targets.get(call)
+        if addr is None:
+            if start < 0 or m.start() < start:
+                return m.group(0)
+            # Restrict to this function; do not accidentally time a later one.
+            if re.search(r'^\S.*\([^\n]*\)\n\{', source[body_start:m.start()], re.M):
+                return m.group(0)
+            addr = re.fullmatch(r'f_([0-9A-F]{8})\(c\);', call).group(1)
+        return (indent + '{ extern void xv_scene_phase_begin(uint32_t); xv_scene_phase_begin(0x' + addr + 'u); } /* XV_COLLISION_PHASE */\n'
+                + m.group(0)
+                + indent + '{ extern void xv_scene_phase_end(uint32_t); xv_scene_phase_end(0x' + addr + 'u); } /* XV_COLLISION_PHASE */\n')
+    pattern = '|'.join(re.escape(k) for k in targets)
+    return re.sub(r'^([ \t]*)(' + pattern + r'|f_[0-9A-F]{8}\(c\);)\n', wrap, source, flags=re.M)
+
 def main():
     root = sys.argv[1]; total = 0
+    native = native_collect_patch(root) if '--native-object-collect' in sys.argv else None
     global PARENTS
     global ANY_CALL
     ANY_CALL = '--any-call' in sys.argv   # wrap every bare f_XXXXXXXX(c); line, not only push+call pairs
@@ -50,8 +108,8 @@ def main():
         for fn in PARENTS:
             m = re.search(r'^void f_%s\(xctx \*restrict c\)\n\{\n' % fn, s, re.M)
             if not m: continue
-            end = s.find('\nvoid f_', m.end())
-            if end < 0: end = len(s)
+            next_function = re.search(r'^\S[^\n]*\([^\n]*\)\n\{', s[m.end():], re.M)
+            end = m.end() + next_function.start() if next_function else len(s)
             body = s[m.end():end]
             body = re.sub(r'^\s*\{ extern void xv_scene_phase_(begin|end)\([^\n]*\n', '', body, flags=re.M)   # strip old (any indentation)
             n = [0]
@@ -81,6 +139,14 @@ def main():
             report_unwrapped(body, fn)
             s = s[:m.end()] + body + s[end:]; changed = True; total += n[0]
             print(f'f_{fn}: {n[0]} call sites in {f}')
+        if '--collision-hooks' in sys.argv:
+            patched = collision_hooks(s)
+            changed |= patched != s
+            s = patched
         if changed: open(f, 'w').write(s)
+    if native:
+        path, content = native
+        path.write_text(content)
+        print(f'native object collector: 1716F0 callback in {path}')
     print(f'scene phase timers: {total} call sites')
 if __name__ == '__main__': main()

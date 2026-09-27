@@ -1240,3 +1240,49 @@ be applied blindly. Inspect which children grow under this new active-object
 state and preserve collision/simulation behavior. Snapshot cache remains
 provisional; no ordinary FPS acceptance from instrumented run. Hardware282
 still in diagnostic mode2, lease active, save backup unchanged.
+
+
+## Current collision diagnostic preparation
+
+Re-read the prior biped investigation before selecting a replacement. Its largest
+object-query optimization is already enabled (`XV_NATIVE_OBJECT_QUERY=2`);
+repeating that old result would not establish a new gain. The previous response
+was a status restatement, not additional performance progress.
+
+Added opt-in `--native-object-collect` to the scene timer installer. It wraps the
+actual 1716F0 callback in the native collector, after early-exit rejection and
+before register reload. This avoids charging that callback entirely to collection
+self time when generated collector code is bypassed. Unknown or ambiguous native
+layouts fail before any shard edits; repeated application is idempotent. Ordinary
+source/runtime and ordinary builds have no additional timer overhead.
+
+Four patcher tests pass, covering existing modes, ordering, idempotence, conditional
+calls, and native-layout rejection without partial shard changes. Applied to
+private copies of current perf282 shards in `enemy-collision-scopes/recomp`:
+114 generated call sites across 4B9D0, 49600, 172BF0, 171F10, 1716F0, 172F40,
+170C10, plus the native callback. This is diagnostic preparation, **not a built or
+deployed candidate**. Fused query/solver paths must still be audited for bypassed
+observers before using this to infer self time. Keep diagnostic timing separate
+from ordinary FPS acceptance, particularly the existing root-pair interaction.
+
+Hardware status verified perf282/533a6c71, awake lease ~3579 seconds. No controls,
+save writes, deployments or restarts this turn. Goal remains unmet.
+
+
+### Fused-path audit completed for whole-call attribution
+
+The active 172BF0 route invokes `nq_collection_172c95` and
+`ns_solver_at_172cb8`, bypassing the timed generic collector/solver. The
+specialized collector invokes `nq_query_at_171f94`; object-space queries invoke
+`nq_query_at_17301b`. Added opt-in `--collision-hooks` to time these under their
+original guest addresses, including native dispatch/reuse. Also times the
+specialized collector's ordinary direct children. Query/solver internals remain
+inclusive; this does not claim a leaf-level split inside fused code.
+
+Five installer tests pass. A fixture exposed the old function boundary search
+extending through a following static function; the installer now stops at the
+next function definition. The fixture checks that a later unrelated function is
+untouched and that rerunning the combined generic/specialized installer is
+idempotent. Current private staged shards contain 114 generic call sites and
+seven specialized call sites (14 begin/end lines), plus native collector callback.
+Preparing perf283 as a diagnostic-only derivative of perf282. No claimed gain.
