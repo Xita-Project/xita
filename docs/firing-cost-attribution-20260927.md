@@ -321,3 +321,28 @@ so the inclusive cost is not free-standing transform work. Attribute its active
 draw path before proposing a wrapper rewrite; preserve existing draw ordering
 and consult prior 7A130/material studies to avoid repeating them. Perf277 is
 still installed; no hardware update or FPS claim follows this Pi run.
+
+## Effect-specific route attribution and current-worker follow-up
+
+The private effect-draw-route-pi run completed its planned 120-second timeout
+(124). Six call scopes in 66390 are reversible to the original body, and
+uncensored child records precede top-list consumption. Last ten 60-frame
+reports: 7A130 67 calls/frame, 0.6843 ms/frame; 7A3D0 3 calls/frame, 0.0645 ms;
+7A540 3.735 calls/frame, 0.0756 ms. Earlier transient reports had much higher
+7A540 activity: do not generalize those to settled gameplay. No bounded
+fatal/panic/nonzero-mismatch/scope-overflow matches found. These are older
+headless Pi elapsed observations, not current Vita costs.
+
+This supports the previous shared indexed-draw finding, not a new wrapper
+rewrite. Source inspection confirms sequential-index retention already skips
+scan/copy, quad-list rewrite already has the static-prefix optimization, and
+vertex capture starts at base_vertex*stride. Do not reimplement those paths.
+
+Next, a single current-hardware detailed draw profile is prepared under
+recording277-diagnostic/. Perf277 remains the executable. The normal protected
+a30 launch changes only instrumentation: add XV_DRAW_PROFILE=1, omit the
+explicit XV_FRAME_QUEUE_TIMING override to fit 32 entries. Scene-phase timers
+stay off. These measurements perturb frame times and will not be used as a
+normal FPS comparison. Announced interruption, companion quit completed and
+launch returned; dashboard boot still needs live confirmation before the
+prepared launch script. Restore normal startup settings after the capture.
