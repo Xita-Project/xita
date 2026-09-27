@@ -90,3 +90,20 @@ therefore must be repeated once the build is terminal; it is not final package
 qualification. No package has been produced or deployed. Perf273 stays on the
 Vita. Launch and ordinary idle/fire/move/outdoor collection scripts are prepared
 with version guards and the same 32 overrides, protected a30-perf211 save.
+
+## Perf275 completed package
+
+Full build completed successfully. The final object comparison after compilation
+confirms only kernel/xd3d.o differs from perf273; regenerated code_011.o and
+all other generated objects are byte-identical. Package membership and assets
+are unchanged; only game-a.self and boot-game.txt differ.
+
+Runtime: 34,818,338 bytes; SHA-256
+`37a6724045ff7c54d9302e1f11ee052dd6dcada911d69c1901057f5d8e480f40`.
+Package SHA-256:
+`0e80fc49c56e22e93e4149eb5fb157f6d7b6acc94a5e6531dab5c1992cd22d5d`.
+Update contract: `775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897`.
+
+Private package: ../sampler-pointer-hardware/xita-perf275c.vpk. Update/apply
+has started; installation must be confirmed by the verified boot receipt and
+live version status. No hardware performance result for this build yet.
