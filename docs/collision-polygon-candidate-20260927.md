@@ -176,3 +176,17 @@ cache identity/fallback/alpha routing, not actual GXM execution). Initial compil
 from the source root lacked a generated header; using the intended private
 build-stage include context resolved it. Artifacts: `../shader-log-consolidation/`.
 This follow-up is not deployed yet and has no measured FPS or hitch improvement.
+
+## Perf271 logging follow-up deployment
+
+Perf271 / 7b9b849d retains the qualified polygon change and consolidates cold
+shader diagnostics. It built successfully. Package membership and contract are
+unchanged; only CE runtime and boot metadata differ from perf270. Runtime size
+34,818,210 bytes; SHA-256
+`aaa91f49bb402edffc5f0d90f4c66fc6b46b7cc166cf1ac641ad6ba9e1a245fd`.
+VPK SHA-256 `f8c9c423a43e9125968f4371b1bb78495d2e4914187e521a0edb67e4da2286e0`.
+Remote hash verification and slot-0 boot confirmation succeeded; independent
+status confirms the version with benchmark off. Keep-awake renewed and the
+protected a30 launch sequence started. Cold-load and gameplay measurements
+remain pending in `../shader-log-hardware/`. The newly identified object-worker
+readiness correction is not part of this package.

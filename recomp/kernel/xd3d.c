@@ -670,6 +670,12 @@ void xv_hle_D3DDevice_SetTransform(xctx *c) { XD3D_COUNT("D3DDevice_SetTransform
 void xv_hle_D3DDevice_GetTransform(xctx *c) { XD3D_COUNT("D3DDevice_GetTransform"); memset(X_GWN(X_ARG(1), 64), 0, 64); X_WF32(X_ARG(1)) = X_WF32(X_ARG(1) + 20) = X_WF32(X_ARG(1) + 40) = X_WF32(X_ARG(1) + 60) = 1.0f; X_RET(2); }
 
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+/* Unsigned subtraction deliberately handles the frame counter wrapping. */
+static int xd3d_object_viewport_ready(uint32_t frame, uint32_t viewport_frame, int tolerant)
+{
+    uint32_t lag = frame - viewport_frame;
+    return tolerant ? lag <= 1u : lag == 1u;
+}
 /* Called only by the guest owner, before any object jobs are submitted.
  * Each new map and scripted-camera transition must re-establish gameplay. */
 int xd3d_object_jobs_ready(void)
@@ -686,9 +692,9 @@ int xd3d_object_jobs_ready(void)
      * off: perf144 showed the native pass 2-3x SLOWER than the guest path for the a10 cinematic's scripted objects
      * (121 ms frames vs 67), so below 30 fps the exact frame-1 check stays as the gate until the pass is cheaper. */
     static int vp_tol=-1; if(vp_tol<0){const char *e=getenv("XV_OBJECT_JOBS_VP_TOLERANT");vp_tol=e?atoi(e)!=0:0;}
-    uint32_t vp_lag=(uint32_t)(g_dev.frame-g_vp_frame), vp_allowed=vp_tol?1u:0u; if(!vp_tol&&vp_lag!=1u)vp_lag=2u;   /* exact frame-1 when not tolerant */
+    int vp_ready=xd3d_object_viewport_ready(g_dev.frame,g_vp_frame,vp_tol);
     unsigned why=(xk_file_in_ui_map?1u:0)|(!gg?2u:0)|(gg&&!X_M8(gg)?4u:0)|(gg&&!X_M8(gg+1)?8u:0)|(gg&&X_M8(gg+2)?16u:0)|
-                 (X_M32(0x2E4000u)?32u:0)|(!mode_ok?64u:0)|(vp_lag>vp_allowed?128u:0);   /* was != frame-1: with two sim ticks per rendered frame (overlap below 30 fps) every second tick saw the counters equal, the gate flapped and the 3-stable-frames requirement never completed (perf140: mask 80 alternating with all-met), so the native object pass idled */
+                 (X_M32(0x2E4000u)?32u:0)|(!mode_ok?64u:0)|(!vp_ready?128u:0);   /* was != frame-1: with two sim ticks per rendered frame (overlap below 30 fps) every second tick saw the counters equal, the gate flapped and the 3-stable-frames requirement never completed (perf140: mask 80 alternating with all-met), so the native object pass idled */
     { static unsigned reported_why=~0u; if(why!=reported_why){reported_why=why;
         if(why)D3DLOG("[object-jobs] declined mask %02X (1 ui-map 2 no-gg 4 not-loaded 8 not-active 10 gg+2 20 word-2E4000 40 mode 80 vp-frame %u vs %u)\n",why,g_vp_frame,g_dev.frame);
         else D3DLOG("[object-jobs] readiness conditions all met\n"); } }
