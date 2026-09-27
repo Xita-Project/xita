@@ -384,52 +384,52 @@ static void *release_capture(void *unused)
 }
 static void queue_capacity_size(unsigned bytes)
 {
-    unsigned char src[4096]={0};output outputs[33]={0};
+    unsigned char src[4096]={0};output outputs[CAPTURE_JOBS+1]={0};
     __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
     unsigned pressure=cap_pressure,q=cap_pressure_queue,a=cap_pressure_arena,b=cap_pressure_both;
-    for(unsigned i=0;i<32;i++) {
+    for(unsigned i=0;i<CAPTURE_JOBS;i++) {
         src[0]=i;assert(capture(0,src,bytes,4,NULL,0,&outputs[i]));
     }
-    assert(cap_submitted-cap_retired==32);wait_parked(&parked_capture);
+    assert(cap_submitted-cap_retired==CAPTURE_JOBS);wait_parked(&parked_capture);
     pthread_t releaser;assert(!pthread_create(&releaser,NULL,release_capture,NULL));
-    src[0]=32;assert(capture(0,src,bytes,4,NULL,0,&outputs[32]));
+    src[0]=CAPTURE_JOBS;assert(capture(0,src,bytes,4,NULL,0,&outputs[CAPTURE_JOBS]));
     assert(!pthread_join(releaser,NULL));join(0);assert(cap_pressure==pressure+1);
-    for(unsigned i=0;i<33;i++)assert(outputs[i].ok && outputs[i].callbacks==1 && outputs[i].result[0][0]==i);
+    for(unsigned i=0;i<CAPTURE_JOBS+1;i++)assert(outputs[i].ok && outputs[i].callbacks==1 && outputs[i].result[0][0]==i);
     assert(cap_pressure_arena==a);
     assert(cap_pressure_queue==q+(bytes==32));
-    assert(cap_pressure_both==b+(bytes==4096));
+    assert(cap_pressure_both==b+(bytes==XV_VERTEX_CAPTURE_BYTES/CAPTURE_JOBS));
     xv_vertex_capture_report(1);
     assert(!cap_pressure && !cap_pressure_queue && !cap_pressure_arena && !cap_pressure_both);
     cleanup();
 }
 static void queue_capacity(void)
 {
-    cap_partial_wait=0;queue_capacity_size(32);queue_capacity_size(4096);
-    cap_partial_wait=1;queue_capacity_size(32);queue_capacity_size(4096);
+    cap_partial_wait=0;queue_capacity_size(32);queue_capacity_size(XV_VERTEX_CAPTURE_BYTES/CAPTURE_JOBS);
+    cap_partial_wait=1;queue_capacity_size(32);queue_capacity_size(XV_VERTEX_CAPTURE_BYTES/CAPTURE_JOBS);
     cap_partial_wait=-1;
 }
 #if XV_VERTEX_CAPTURE_NOTIFY
 static void queue_partial_boundary(unsigned batch)
 {
-    unsigned char src[32]={0};output out[33]={0};
+    unsigned char src[32]={0};output out[CAPTURE_JOBS+1]={0};
     cap_partial_wait=1;cap_wait_batch=(int)batch;
     __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
-    for(unsigned i=0;i<32;i++){src[0]=i;assert(capture(0,src,sizeof src,4,NULL,0,&out[i]));}
+    for(unsigned i=0;i<CAPTURE_JOBS;i++){src[0]=i;assert(capture(0,src,sizeof src,4,NULL,0,&out[i]));}
     wait_parked(&parked_capture);
     unsigned initial_retired=cap_retired;
     __atomic_store_n(&notify_completion_skip,batch-1,__ATOMIC_RELAXED);
     gate(CAP_AFTER_COMPLETE);
     pthread_t releaser;assert(!pthread_create(&releaser,NULL,release_capture,NULL));
-    src[0]=32;assert(capture(0,src,sizeof src,4,NULL,0,&out[32]));
+    src[0]=CAPTURE_JOBS;assert(capture(0,src,sizeof src,4,NULL,0,&out[CAPTURE_JOBS]));
     assert(!pthread_join(releaser,NULL));
     /* Worker is parked after the requested batch. Submission must return
      * without waiting for the remainder or reusing their snapshots. */
     assert(__atomic_load_n(&cap_completed,__ATOMIC_ACQUIRE)==initial_retired+batch);
-    assert(cap_retired==initial_retired+batch && cap_submitted-cap_retired==33-batch);
-    assert(out[0].callbacks==1 && out[batch].callbacks==0 && out[32].callbacks==0);
-    assert(cap_used==33*32);
+    assert(cap_retired==initial_retired+batch && cap_submitted-cap_retired==CAPTURE_JOBS+1-batch);
+    assert(out[0].callbacks==1 && out[batch].callbacks==0 && out[CAPTURE_JOBS].callbacks==0);
+    assert(cap_used==(CAPTURE_JOBS+1)*32);
     ungate(CAP_AFTER_COMPLETE);join(0);
-    for(unsigned i=0;i<33;i++)assert(out[i].ok&&out[i].callbacks==1&&out[i].result[0][0]==i);
+    for(unsigned i=0;i<CAPTURE_JOBS+1;i++)assert(out[i].ok&&out[i].callbacks==1&&out[i].result[0][0]==i);
     cleanup();cap_partial_wait=-1;cap_wait_batch=-1;
 }
 #endif

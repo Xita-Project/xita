@@ -402,3 +402,39 @@ reclaim drains, unsigned ticket wrap and GPU-slot retirement. First extend
 the existing real-worker tests for capacity and wrap boundaries; do not
 assume fewer queue-full events improve total frame time or bypass callbacks.
 No deeper queue has been implemented or deployed yet.
+
+## Configurable capture depth implemented; offline qualification complete
+
+Added build-time XV_CAPTURE_JOBS=32/64/128 (default remains 32), with source
+and Make validation. The capacity controls CPU job storage and ring masking;
+GPU slots, capture arena, wait batch, callbacks and drain boundaries are
+unchanged. Capture storage config tracks depth, so changing it rebuilds the
+owning capture object. No larger queue has been installed on the Vita yet.
+
+The real-worker fixture now fills the configured capacity, verifies the first
+excess submission, and checks partial retirement at batch 1/8/16. Combined
+arena/queue exhaustion scales payload bytes by capacity to reach both limits
+simultaneously. Existing wrap, failures, source mutation, reuse, ordering and
+three GPU-slot lifetime cases remain active.
+
+Validation completed successfully:
+- tools/test_vertex_capture.py --jobs 32, 64, 128: 24 feature/notification
+  combinations each, using production capture/upload/copy worker code.
+- SANITIZE=1 tools/test_vertex_capture.py --jobs 64: all 24 combinations,
+  AddressSanitizer and UndefinedBehaviorSanitizer.
+- tools/test_vertex_capture_notify_build.py with and without --depth:
+  defaults, changing/repeating/restoring options, capture-only rebuild, invalid
+  inputs rejected.
+- Pi Cortex-A9 Thumb static binaries, taskset cores 0/1, depth 64 and 128:
+  packed/compact/reuse/persistent/ready/notify enabled, all fixture cases pass.
+  The Linux cross compiler lacks vld1q_u8_x4; these two queue correctness
+  binaries used -U__ARM_NEON -U__ARM_NEON__ to exercise the existing scalar
+  packing implementation. This does not qualify Vita NEON performance or
+  replace a Vita SDK build/hardware trial.
+
+Private logs/binaries: ../capture-depth-candidate/. All test sessions terminal.
+Live status confirmed perf277 at dashboard, timing_frame=0; lease renewed.
+Next: build a versioned depth-64 Vita candidate on the retained perf277 build,
+verify package/object scope, then one ordinary protected a30 gameplay run.
+Measure total frame times and queue/arena pressure; fewer full-queue events
+alone are not a success. Preserve perf277 rollback and existing settings.

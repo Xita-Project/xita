@@ -28,7 +28,13 @@
 #ifndef XV_VERTEX_CAPTURE_BYTES
 #define XV_VERTEX_CAPTURE_BYTES (XV_CAPTURE_ARENA_KIB*1024u)
 #endif
-#define CAPTURE_JOBS 32u
+#ifndef XV_CAPTURE_JOBS
+#define XV_CAPTURE_JOBS 32
+#endif
+#if XV_CAPTURE_JOBS != 32 && XV_CAPTURE_JOBS != 64 && XV_CAPTURE_JOBS != 128
+#error XV_CAPTURE_JOBS must be 32, 64 or 128
+#endif
+#define CAPTURE_JOBS ((unsigned)XV_CAPTURE_JOBS)
 #ifndef XV_VERTEX_CAPTURE_NOTIFY
 #define XV_VERTEX_CAPTURE_NOTIFY 0
 #endif
@@ -42,7 +48,7 @@ static unsigned cap_wake_state,cap_waiting,cap_wait_target;
 /* Keep an RMW on every completion, even before the requested frontier. The
  * owner's arming RMW then either observes completion or is observed here.
  * Never clear an unmet request: that would require a wake/rearm per job.
- * At most 32 tickets are outstanding, so unsigned half-range ordering handles
+ * At most CAPTURE_JOBS (<=128) tickets are outstanding, so unsigned half-range ordering handles
  * wrap (including a target of zero). Target access is atomic across rearming. */
 static int cap_completion_signal(unsigned completed)
 {
@@ -536,7 +542,7 @@ static void cap_wait_for_slot(void)
 {
     unsigned retired=cap_retired;
     if(cap_wait_batch<0)cap_wait_batch=xv_quality_int("XV_CAPTURE_WAIT_BATCH",1,1,16);
-    unsigned batch=(unsigned)cap_wait_batch; /* Called only with all 32 jobs pending. */
+    unsigned batch=(unsigned)cap_wait_batch; /* Called only with all CAPTURE_JOBS pending. */
     uint64_t start=cap_clock();cap_partial_waits++;
 #if XV_VERTEX_CAPTURE_NOTIFY
     __atomic_store_n(&cap_wait_target,retired+batch,__ATOMIC_RELAXED);
