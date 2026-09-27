@@ -1813,3 +1813,30 @@ and poll this SAME session; timeout observation is not job failure. Planned
 180-second timeout normally returns124; inspect final log/exit-code before
 interpreting counts. Copy log to hierarchy-bounds-audit after completion.
 Vita285 unchanged, awake lease renewed. Goal unmet; no new hardware FPS claim.
+
+
+## Pi fallback census narrowed; launch-state correction
+
+Previous turn progress/verified live jobs. Pi12828 completed plannedtimeout124.
+Copied complete log to hierarchy-bounds-audit/pi.log; pi-summary.json has204
+report calls (includes repeated zero reset reports),320591 count/queue declines,
+171 tail,0 entry/model/empty. Later a30 map reads and director1 establish loaded
+gameplay. Final windows2160 batches/15000 child nodes/5400 count declines per60
+frames;8DDF0~3.6ms inclusive/~1.95ms remainder on this supporting Pi harness.
+Do not extrapolate to Vita FPS or confirm visible NPC combat from these counters.
+
+Expanded count category into small(<3),large(>64),queue(first>=queued or queued>
+count), preserving guard order and behavior. Host10867 completedrc0: same222
+full comparisons in each of4modes,117admissions enabled,85unchanged declines.
+ARM2308 qualification from previous turn applies before this counter-only split;
+no new ARM result claimed for split. Private Pi harness rebuilt successfully.
+
+Detailed Pi80333 used a COPY of previous save/cache to avoid I/O. This changed
+menu navigation: at2m21s zeroa30.map reads, director0, only UI rendering. Explicitly
+terminated confirmedPID11475; session80333terminal143. Its zero counters are
+NOT gameplay evidence. No timeout-triggered blind restart. Original saves intact.
+Fresh isolated job86433 now active, same known-working initial script and new
+empty save directory: codex-hierarchy-fresh-20260927,180sec cores0/1. Poll SAME
+handle, inspect map/director before interpreting, then retrieve log. Do not reuse
+copied profile with the fresh-profile button sequence. Vita285 unchanged/awake.
+Goal unmet; no hardware speedup claimed.

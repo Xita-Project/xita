@@ -31,7 +31,7 @@ enum { H_BOUNDS, H_LAYOUT, H_LINKS, H_BUDGET, H_NUMERIC, H_FP, H_REASONS };
 static unsigned batches, prepared, declined[H_REASONS];
 /* Distinguish intentional retained tails from unsupported input. Counts are
  * attempts, not skipped nodes or a timing estimate; guarded like declined[]. */
-enum { HB_ENTRY, HB_MODEL, HB_COUNT, HB_TAIL, HB_EMPTY, HB_REASONS };
+enum { HB_ENTRY, HB_MODEL, HB_SMALL, HB_LARGE, HB_QUEUE, HB_TAIL, HB_EMPTY, HB_REASONS };
 static unsigned bounds_stages[HB_REASONS];
 static unsigned numeric_stages[4],output_computed,output_discarded,output_salvageable;
 static unsigned final_normal_batches;
@@ -278,7 +278,9 @@ int xv_math_model_hierarchy(xctx *c)
     const uint32_t *header=span(model+0xb8u,8);
     if(!header)return decline(H_LAYOUT);
     unsigned count=header[0],queued=stack[0x10/4];
-    if(count<3||count>MAX_NODES||first>=queued||queued>count)return bounds_decline(HB_COUNT);
+    if(count<3)return bounds_decline(HB_SMALL);
+    if(count>MAX_NODES)return bounds_decline(HB_LARGE);
+    if(first>=queued||queued>count)return bounds_decline(HB_QUEUE);
     /* Skip the final original iteration and short tails of larger models before
      * copying a whole hierarchy. Most calls enter after the original root. */
     if(first+1u>=count||(count-first-1u)*4u<count)return bounds_decline(HB_TAIL);
@@ -393,8 +395,9 @@ void xv_model_hierarchy_report(unsigned frames)
     XK_LOG("[model-hierarchy] %u frames batches %u child nodes %u; declined bounds %u layout %u links %u budget %u numeric %u fp %u\n",
         frames,batches,prepared,declined[H_BOUNDS],declined[H_LAYOUT],
         declined[H_LINKS],declined[H_BUDGET],declined[H_NUMERIC],declined[H_FP]);
-    XK_LOG("[model-hierarchy-bounds] %u frames entry/model/count/tail/empty %u/%u/%u/%u/%u; retry-inclusive attempts, not missed nodes\n",
-        frames,bounds_stages[HB_ENTRY],bounds_stages[HB_MODEL],bounds_stages[HB_COUNT],
+    XK_LOG("[model-hierarchy-bounds] %u frames entry/model/small/large/queue/tail/empty %u/%u/%u/%u/%u/%u/%u; retry-inclusive attempts, not missed nodes\n",
+        frames,bounds_stages[HB_ENTRY],bounds_stages[HB_MODEL],bounds_stages[HB_SMALL],
+        bounds_stages[HB_LARGE],bounds_stages[HB_QUEUE],
         bounds_stages[HB_TAIL],bounds_stages[HB_EMPTY]);
     XK_LOG("[model-hierarchy-numeric] %u frames constants/prefix/pose/output %u/%u/%u/%u; output computed %u discarded-success %u salvageable-prefix %u; retry-inclusive attempts\n",
         frames,numeric_stages[0],numeric_stages[1],numeric_stages[2],numeric_stages[3],
