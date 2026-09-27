@@ -1397,3 +1397,30 @@ separate query/feature counters and saves verify-summary.json upon completion.
 This is a scoped correctness check, not the full campaign/goal acceptance or an
 FPS measurement. No controls or restart on observation timeout. After success,
 restart284 in ordinary native mode2/phases0 and perform gameplay measurements.
+
+
+### Perf284 scoped hardware verification passed; normal run started
+
+Collector84362 terminal success at frame4915: query6275/6275 verified,
+features701/701 verified, zero mismatches/declines/journal failures. Query totals
+combine world/object calls; explicit object mode1 startup proves that restored
+entry was reached. Screenshot shows pod with transition blur; loaded/active/
+director true. This qualifies exercised states only, not all campaign physics.
+
+Restart48673 via Companion terminal success; initial endpoint refused briefly
+while dashboard started, then retry independently confirmed284 at timing_frame0.
+Lease renewed without another restart. Normal launch78521 completed using
+object-query2/native4B9D02/phases0; snapshotGPU1/all earlier launch settings retained,
+protected save unchanged. Idle collector53687 active waiting for gameplay then
+45seconds. Poll existing handle; after completion run prepared collect-gameplay.py
+and review images. No performance result yet.
+
+New tools/test_collision_hook_retention.py reproduces missing generated hooks
+and verifies exact restoration plus repeat-generation stability using owned
+inputs outside source. Run60024 passed, evidence collision-hook-retention/
+hook-regression. This test isolates hook retention with query-reuse disabled;
+actual284 enabled-reuse build/repeated generation already passed separately.
+Initial source-tree enabled-reuse test rejected pre-existing canonical-header
+inventory differences (query_world_run.h/xv_x86rt.h versus capture pins); no pins
+were weakened. Stage284 uses the retained qualified headers. Default system
+Python also lacks iced-x86; use the existing private venv for generation tests.
