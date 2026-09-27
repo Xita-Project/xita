@@ -464,3 +464,43 @@ session 72365, polling loaded/active/director telemetry before its 45-second
 pod capture. Poll that existing handle; do not restart due to loading alone.
 After completion inspect idle screenshots, then run collect-gameplay.py for
 AR/movement/outdoor measurements. No new scene timing result claimed yet.
+
+## Perf278 ordinary gameplay: depth 64 not retained
+
+The protected a30 load completed. Screenshots reviewed: expected lifepod,
+AR firing/ammunition consumption, then outdoor canyon. Both collectors are
+terminal, controls released. Measurements are CPU Present intervals, 360p,
+normal settings and no detailed draw profiling:
+
+| Scene | Samples | Mean ms / FPS | p95 ms | Maximum ms | >50 / >100 ms |
+|---|---:|---:|---:|---:|---:|
+| Pod | 720 | 56.906 / 17.573 | 74.731 | 103.073 | 503 / 1 |
+| Five-second AR fire | 61 | 84.737 / 11.801 | 103.018 | 128.112 | 60 / 5 |
+| Movement | 79 | 66.965 / 14.933 | 90.629 | 250.920 | 74 / 1 |
+| Outdoors | 875 | 51.720 / 19.335 | 61.773 | 103.603 | 464 / 1 |
+
+Previous perf277 samples were 55.702 / 76.562 / 62.594 / 47.494 ms respectively.
+These separate ordinary runs are not controlled statistical proof of a
+regression, but show no reason to retain depth 64. Queue-only events fell from
+737–806 per 60-frame tail reports to 383–495; arena pressure remained zero.
+Inline completed-result reuse also fell (106–269 versus 448–507 per 60 frames),
+consistent with fewer opportunities for the conservative empty-queue shortcut.
+This is a possible mechanism, not a measured causal attribution.
+
+No observed crash in this short run; this does not satisfy long-session,
+cutscene, AI/audio or checkpoint validation. One movement interval reached
+250.920 ms; do not conceal it in an average or attribute it without correlation.
+Rollback requested to perf277. First startup status connection refused;
+recheck the same reboot rather than issuing another restart. No depth-128
+hardware trial justified by this result. Keep default 32 and preserve the
+optional depth tests. Next useful measurement is wait-only capture timing:
+current XV_VERTEX_CAPTURE_TIMING instruments every job, while the needed
+split is queue partial-wait versus final-drain elapsed time. A separate opt-in
+clock around waits would avoid thousands of per-job clock reads and distinguish
+worker backpressure from owner-side capture work. Callback collection remains
+included unless explicitly timed separately; neither is CPU-cycle measurement.
+
+Rollback independently confirmed: perf277 dashboard timing_frame=0, slot 0,
+expected runtime SHA256 7d8ba31adb1fea060d8d58084639817a64943e67edccef792204e0c242aec062.
+Lease renewed for 3600 seconds. Receipt: capture-depth-candidate/
+restored-dashboard.json. No live collector or held controls remain.
