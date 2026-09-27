@@ -166,3 +166,9 @@ still needs a frame ID or matching clock bracket; do not claim the full 264 ms
 was proven to be save time. Log remains private gameplay.log.
 Perf273 upload/apply started after the collector terminated; boot verification
 is pending in ../worker-log-hardware/deploy.log.
+
+Perf273 deployment verified its expected hash and confirmed boot in slot 0.
+The launch script accepted version 0.2.0-perf.273 with timing_frame=0 and started
+a30 with unchanged settings and strict readiness. Keep-awake lease renewed.
+Perf272 is slot 1; the known-good perf271 VPK is retained separately (it is no
+longer in an active update slot). No perf273 frame-time result yet.
