@@ -1084,3 +1084,32 @@ brackets; post-bracket tail windows alone are not sufficient attribution.
 Final persistent windows have zero capacity fallsbacks, so do not assume cache
 exhaustion caused outdoor stalls without aligned evidence. No further test is
 running; perf282 remains live in ordinary a30, lease renewed by collector.
+
+
+## Enemy-activity report narrows the current wall to guest tick
+
+User reports FPS drops as grunts/elites spawn. Pulled fresh enemy-report.log
+(3,205,842 bytes) without controls or settings changes and renewed awake lease.
+Latest180 complete frames end9660: mean97.779ms/10.227FPS, p95114.962ms, max123.959ms; all180>50ms,79>100ms. No synchronized
+spawn marker, so this is the observed slow state rather than an exact spawn
+cost. Screenshot enemy-report.png subsequently shows outdoor view, nearby
+Covenant craft and radar contacts; it does not establish enemy counts.
+
+Final windows: C2=99%, C0~29–31%, C1~32%. Guest FA920 outer elapsed
+6,204,137us/60frames=103.402ms/frame (nested work/waits included).
+Scene helper CPU34.50ms, wall36.18ms, owner join0.01ms; done->noticed70.33ms.
+Thus the renderer finishes much earlier than the guest owner proceeds. This
+strongly supports guest update pressure as the current critical path, not
+insufficient graphics-worker core utilization. It does not distinguish AI,
+physics, animation or multiple catch-up simulation ticks. Snapshot cache
+continues hitting6675 times/60frames with zero final-window capacity failures.
+
+Next inspect FA920->109760 tick count and its object/AI children during enemy
+activity. Existing staged generated phase timers and owner-only mode2 are
+available; startup latch means remote env alone cannot enable them live.
+Audit counts saved in tick-instrumentation-audit.json. Important diagnostic
+confound: XV_SCENE_PHASES>0 disables XV_ROOT_PAIR in existing math helper.
+Any such diagnostic run is attribution-only and cannot be used as ordinary
+FPS comparison. Preserve282 ordinary logs and protected save before restart;
+no diagnostic restart was performed in this turn. No active collectors or
+held controls. Enemy combat remains required for acceptance; goal unmet.
