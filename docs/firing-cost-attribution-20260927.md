@@ -2359,3 +2359,21 @@ Private model-admission-tail.json retains rows. Next bounded investigation:
 separate already-native hooks from residual8DDF0 wrapper before selecting
 a rewrite; earlier Pi transform-native-phase supplies startinginstrumentation.
 Goal unmet; no newoptimization deployed. Previous turn progress/verifiedwait.
+
+
+## Native model hook probe implemented and private build started
+
+Added tools/patch_model_native_timers.py and two compiled-fixture tests.
+Synthetic phase keysFFFF8E0F/FFFF8E16 wrap hierarchy/basis within8DDF0,
+retaining return values and early branch decisions. Enabled/disabled tests
+passed, including exact context mutations/event order, idempotence and
+partial/missing/ambiguous rejection. Commitccaa61b9 contains tools only.
+Private model-native-detail-290 copies289; code013 reverse-strip audit
+proves all previous guest statements retained. Other path timers remain.
+Build29368 is active; poll samehandle. IMPORTANT: copiedversion.json is
+still289 (noticed after buildstarted). After this build terminates, change
+private version.json to0.2.0-perf.290, preserve first buildlog, rerunbuild,
+then auditpackage. Do NOT deploy first build mislabeled289. Revisionalready
+ccaa61b9. Expected changescode013 plusfourversionconsumers; assets only
+game-a.self/boot-game.txt, retained updatercontract. No deployment yet.
+Vita remains289 outsidepod, no active gameplaycollector. Goal unmet.
