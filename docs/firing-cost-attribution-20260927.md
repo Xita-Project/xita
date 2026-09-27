@@ -874,3 +874,55 @@ changing scheduling. Preserve mask identity, slot retirement and FIFO callbacks.
 Live endpoint confirms perf279/55e73b9f at dashboard, timing_frame0, with
 3578 seconds awake lease remaining at inspection. No build or settings change
 was deployed by this audit. Goal remains unmet; no new FPS claim.
+
+
+## Dense upload revalidation dominates sparse-mask volume
+
+The same perf277 idle log's final60-frame reports narrow the next target:
+
+| Counter | Per60 frames | Per frame |
+|---|---:|---:|
+| Sparse masks captured |240|4|
+| Sparse upload comparisons |120|2|
+| Sparse compared KiB |765|12.75|
+| All upload compared KiB |64550|1075.83|
+| Resident checks/hits |9948/6566|165.8/109.43|
+| Resident compared KiB |63785|1063.08|
+| Actual copies / copied KiB |3382/14452|56.37/240.87|
+
+These are requested comparison spans (early mismatch can exit early), not
+physical bus traffic or exclusive CPU costs. Sparse-mask optimization is not
+the leading volume target. The worker's dense resident validation dominates
+requested upload comparison bytes. Capture reuse already validates live guest
+bytes against its immutable snapshot; the upload worker then independently
+validates its retired GPU mirror.
+
+Re-read `persistent-vertex-uploads-20260919.md`: the earlier persistent cache
+reduced worker preparation4.781→0.678ms but increased owner capture
+5.978→10.716ms, with no total-frame improvement. Do not simply re-enable it.
+Unlike that experiment, current capture reuse provides an existing exact
+snapshot identity proof which may support eliminating a second validation.
+
+Next candidate design: associate an immutable capture snapshot version with a
+persistent GPU allocation only after a successful exact snapshot match. Reuse
+that association without a second live-source byte comparison. This requires
+explicit generation/liveness checks for BOTH capture-entry recycling and GPU
+allocation recycling; an array index or source address is insufficient. The
+owner must pin GPU storage before publishing each job, the worker must finish
+new copies in FIFO order, and all referencing GPU slots must retire before
+reuse/eviction. Sparse and packed streams initially retain existing paths;
+changed bytes create distinct versions. Pending upload failures must not expose
+uninitialized results. Capacity failures retain ordinary upload fallback.
+
+Before implementation, establish how mappings are invalidated at CPU arena
+reset, GPU slot retirement and shutdown, including synchronous fallback. Do
+not retain ordinary `cap_results` across drains: existing pools can be reset
+or overwritten after that boundary. A dedicated persistent allocation is
+required unless a separate explicit upload-generation contract is introduced.
+Qualification must exercise snapshot-ID reuse, allocation-ID reuse, partial
+failure, three in-flight slots, callback mutation and pressure drains. The
+intended gain is removing duplicate validation, not assuming guest data static.
+
+Pi reachability retried with a5-second SSH timeout: connection timed out;
+no ARM run occurred. Existing local work remains available. No hardware/source
+behavior changed during this audit, and no speedup is established.
