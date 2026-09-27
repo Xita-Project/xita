@@ -110,3 +110,42 @@ and concurrent use. In particular the prototype retains its guard across both
 operations, whereas the existing leaf can release the guard for private output.
 Do not introduce serialization while reducing setup cost. Hardware gameplay
 validation remains required after those checks.
+
+### Worker and emitted-consumer qualification
+
+The private prototype now copies all three input matrices and updates shared
+math counters under the existing guard, then calls the production
+`xv_object_math_release_private` with the same output/scratch ranges as the
+original leaf. This retains the original private-stack mapping/identity checks
+and nested-transaction restriction. Shared outputs retain their guard; private
+outputs can execute arithmetic without holding it. No scheduler policy or
+ownership allowlist changed.
+
+An adapted private copy of `tools/tests/object_private_math.c` linked the actual
+worker implementation and exercised the new helper in each scheduled callback.
+Five Pi ARM configurations passed: two, one and zero workers with private/fast
+paths enabled; two workers with private release disabled; and two workers with
+the fast lock path disabled. Each run checked 1,800 root pairs (private output,
+shared output, and nested guard), for 9,000 comparisons total. Worker stacks
+used the existing fixture's noncontiguous page mappings. Reference and candidate
+used the actual worker context, comparing registers/context, stack scratch and
+output. The fixture's owner-identity adapter returns actual pthread identity;
+there is no scene-helper impersonation in this test. Receipts are
+`../root-compose-candidate/worker-summary.json` and `worker-*.log`.
+
+A separate ARM test extracted the actual current generated 8E511 root branch
+and the 8E586 child-list continuation, stopping at the next hierarchy iteration
+or loop exit (8E0F0/8E5D0). The candidate branches to the existing 8E58B label
+after successful combined processing. All 1,024 cases matched full arena,
+context and FP exception state, including both child-link sentinel branches.
+Matrix leaves use the existing native implementation, and phase instrumentation
+is stubbed inactive. This establishes the bounded caller/consumer behavior,
+not equivalence of all of 8DDF0 or a Vita-linked release. Source region hashes
+and scope are recorded in `consumer-receipt.json`; result in `consumer-arm.log`.
+
+Remaining integration gates: generated hook must require the owned executable
+hashes, decline when phase instrumentation or incompatible optional math modes
+are active, and preserve original execution when disabled. Add reproducible
+source tests, compile with the actual Vita flags, then qualify/deploy the next
+candidate and inspect complete gameplay frame times. The prototype is still
+private and has not changed perf267 on hardware.
