@@ -2119,20 +2119,25 @@ remaining per-draw work and invalidation before copying. No upstreamcode merged.
 
 ## Guard/movement sub-timers prepared as perf288
 
-Previous goal turn progress: resolvedguardtarget16D250 and investigatednative
-portdelta. Currentprivateguard-detail-288 copies287; onlyselectedparents
-16D250,15AF50,15AA20,15A890 receive55direct-call scopes. Existing164090
-indirecttimerretained. Whitespace/timer-strippedwhole-shard comparisons prove
-guestsstatementsidenticalforcode027/028; source-audit.json recordsSHA.
-Sevenphasepatcher/indirecttests pass. Build90984 active, compilerPID1344646
-confirmedCPUprogress2:44 at2:45elapsed. No newdeployment yet.
-Preparedaudit-package.py requires onlycode027/028+fourversionconsumers
-andgame-a/boot-game assetchanges. Pollsamebuildhandle, auditbeforedeploy.
-Vita287 retainedawakelease3600; no benchmarkloops or newPijobs.
+Previous goal turn made progress: resolved guard target 16D250 and reviewed
+the native port delta. Private `guard-detail-288` copies perf287. Only parents
+16D250, 15AF50, 15AA20 and 15A890 receive 55 direct-call scopes. The existing
+164090 indirect timer remains. Comparisons stripping timers and whitespace
+prove guest statements identical in code027/028; source-audit.json records
+the hashes. Seven phase-patcher/indirect tests pass.
 
-Referenceactor_moving.calreadycachesdestinationidentityandrefreshed_this_tick.
-15AA20/15A890 bothcall15A290; latter801generatedlinescalls13*pathroutines.
-Do not call this a provenhotpathuntil288timings. Guard/movementnativework
-must preservepathrefreshconditions,sharedstateandcollisionsemantics.
-Addedhalo-universal-performance-review-20260927.md torecordoverlaprather
-thanpretendupstreamoptimizationsareallnewgain. Goalunmet.
+Build 90984 was active when checked: compiler PID1344646 had used 2:44 CPU
+time after 2:45 elapsed. No new deployment yet. Prepared audit-package.py
+requires only code027/028 plus four version consumers to change, and only
+game-a.self/boot-game.txt package assets. Poll the same build and audit before
+deployment. Vita287's awake lease was renewed for 3600 seconds. No benchmark
+loops or new Pi jobs were started.
+
+Reference actor_moving.c already checks destination identity and
+refreshed_this_tick. 15AA20/15A890 both call 15A290; that 801-line generated
+body calls several 13xxxx path routines. This is a hypothesis pending perf288
+timings. Native work must preserve path refresh conditions, shared state and
+collision semantics.
+
+Added halo-universal-performance-review-20260927.md to record overlap rather
+than assume every upstream optimization offers a new gain. Goal unmet.
