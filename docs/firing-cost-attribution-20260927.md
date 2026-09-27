@@ -1167,3 +1167,33 @@ run after movement collector completes. It never toggles settings or calls
 benchmark mode. Review pictures/telemetry before identifying enemy activity;
 spawn time/count is not automatically known. All diagnostic durations are
 attribution data, not ordinary FPS acceptance. No active save transfer remains.
+
+
+## Owner-only diagnostic completed in quiet outdoor state
+
+Launch79949, idle56250, gameplay93311 and outdoor-observation97020 all completed0.
+Saved diagnostics under enemy-tick-diagnostic; reviewed idle-before and
+outdoor before/after images. Outdoor images show canyon/trees and no radar
+contacts, unlike user's prior enemy-report image with craft/radar contacts.
+120seconds without further controls did not reproduce C2 saturation. Do not
+label enemy.log as a verified enemy-combat profile merely because of filename.
+No further controllers are active. Asked user asynchronously where enemies
+appeared; answer pending, not a prerequisite for independent investigation.
+
+New private extract-ticks.py preserves raw owner report rows and parent/callee
+inclusive edges/call counts. JSON records next frame report as a contextual
+marker, not proven exact alignment. Nested times must not be summed.
+Last quiet outdoor report: FA92037.47ms/frame,10976026.22ms across1.517ticks/frame;
+900E022.41ms,8FB7021.37ms; realtime108FD011.15ms. Object transform/update
+8DDF09.88ms, particle10E7A06.16ms. C2~85%, C1~87–90%; scene wall44.7ms,
+done->noticed4.5ms. Prior user slow state had C2=99%, scene36ms and
+~70ms done->noticed, so the crucial slow condition has NOT been sampled with
+the detailed timers yet. Next reproduce actual enemy-active location before
+choosing which native routine to rewrite.
+
+Diagnostic quiet pod final report: FA92052.76ms,10976039.57ms across1.65ticks/frame,
+8FB7034.02ms,4B9D010.35ms,108FD013.10ms. These are instrumented elapsed
+values including nested work, overhead/preemption and root-pair disabled;
+not comparable to ordinary perf28249ms pod frames as a regression claim.
+Protected save15-file backup remains verified; hardware still282 with startup
+XV_SCENE_PHASES=2. Restore ordinary startup before any FPS acceptance run.
