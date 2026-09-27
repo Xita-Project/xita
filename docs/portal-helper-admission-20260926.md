@@ -112,3 +112,12 @@ The launch will retain the a30-perf211 save namespace and existing settings,
 replacing the disabled scene-wait observer key with `XV_SCENE_PORTAL=1` to stay
 within the 32-key environment limit. Hardware installation/results are not yet
 established by this package receipt.
+
+## Hardware deployment
+
+The updater verified perf267 and confirmed its boot in slot 0; remote status
+reports `V0.2.0-perf.267 / c1a2d36a`. Perf266 remains the other slot. The normal
+a30 launch sequence is running with the opt-in key and a renewed awake lease.
+Deployment receipts are `../portal-helper-candidate/deploy.log` and `launch.log`.
+Installation is not evidence of a frame-rate gain; admission and settled
+ordinary-gameplay measurements remain pending.
