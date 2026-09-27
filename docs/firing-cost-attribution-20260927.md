@@ -2402,3 +2402,8 @@ After terminalsuccess independentlyverify dashboard290/timing0, then run
 model-native-detail-290/launch-and-profile.py (prepared90slaunch plus bounded
 readiness and45ssettledcapture). This diagnostic measures helpers notnewFPS
 optimization. Preserve normal285baseline and protecteda30save. Goal unmet.
+
+Updater50268 subsequently completedrc0:exactruntimeSHA verified,slot0boot
+confirmed. Independentstatus290/ccaa61b9 timing0; companionnosleepenabled.
+Launch/profile78331 nowlive, logmodel-native-detail-290/launch-profile.log.
+Pollsamehandle; no duplicate launch. No measurementresults yet.
