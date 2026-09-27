@@ -127,3 +127,19 @@ changed among recomp objects, and only game-a.self/boot-game.txt changed in the
 final package. It retains perf275's other assets and updater contract. Do not
 deploy until these checks pass. The launch/collector scripts assert perf276 and
 preserve the existing protected-save settings. Hardware has not yet changed.
+
+The perf276 build and package gates passed: code_009.o is the only changed
+recomp object; final VPK differs only in game-a.self and boot-game.txt. The
+53E90 symbol shrank from 0x788 to 0x696 bytes, which is not an FPS measurement.
+Runtime size is 34,818,350 bytes, SHA-256
+3801a9f4244cd6f0ee4ac9a46737ecaf19387345d9c843bdcafe95b235ef2c7e.
+Package SHA-256 is
+7e57569c4b3acf86cef7151fe61cf8dc860beb2fe595d52d3d2a91fc4826ebba.
+Updater contract remains
+775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897.
+
+The authorized update completed with verified=true and boot_confirmed=true,
+slot 0. An independent status returned V0.2.0-perf.276 / 104d3696 at dashboard
+(timing_frame=0). Perf275 occupies the other slot; retained perf273/275 VPKs
+remain available. The batched a30 launch was started and renews the awake lease.
+No frame-time result or gameplay correctness conclusion exists yet for perf276.
