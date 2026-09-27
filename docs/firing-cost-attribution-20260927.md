@@ -679,3 +679,17 @@ confirmed perf279 slot1, perf277 rollback slot0; current application state unkno
 All local build/test handles terminal. Next hardware step: resolve endpoint/
 screen state, install verified candidate, then one ordinary gameplay capture.
 Do not replace this required validation with more offline success claims.
+
+## Hardware access blocker audit
+
+Endpoint again refuses connection after the same condition across four goal
+continuations. Companion reachable; no-sleep remains enabled. User screen-state
+question unanswered. Package checksum independently reverified; worktree clean.
+Last turn was progress (Vita SDK build/package audit), not an idle wait. No live
+build/collector handle remains. The evidence-backed candidate's implementation,
+host/sanitizer/Pi qualification and package preparation are complete; its next
+required step and acceptance require the physical Vita. More offline checks
+cannot establish frame improvement, and further scheduling changes before that
+result would obscure attribution. Goal blocked on restoring/identifying the
+Vita application state; not complete. Resume with live endpoint/screen state,
+install perf280 and ordinary protected a30 capture. Preserve perf277 rollback.
