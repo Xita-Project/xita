@@ -1649,3 +1649,28 @@ existing handles, audit package/source preservation after generation, then
 deploy qualified285 with announcement and protected test save. Retain284rollback.
 No FPS claim; small polygon lowering stacks prior native hooks and snapshotGPU.
 NPC-critical-path work and full20FPS acceptance still outstanding.
+
+## Perf285 package qualified; deployment in progress
+
+Build9404 completedrc0. audit-package.py passed: changed objects exactly
+code013 plus dashboard/remote/main/ui version consumers. Query/solver objects
+byte-identical284, so existing nativehooks retained. Package changes only
+game-a.self/boot-game.txt; contract775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897.
+RuntimeSHA0be12bd2c85d7d8c2450f887c5b89f79fc4e610cccf2673a7b0bd8426c80e2c0;
+packageSHAaef5c8e36740edb4fd77addc7548cab52442eb55c8ab4d3a55f37f4b3c4c1065.
+VPK contact-registers-hardware/xita-perf285c.vpk.
+
+Announced interruption and started update--apply session3455. Still live: last
+upload progress34668544/34832554; finish verification may take120seconds.
+Do not restart/re-upload based solely on silence. Pollsamehandle and inspect
+deploy.log. No installed285claim untilboot/hash confirmed. launch-fast.py,
+collect-idle.py,collect-gameplay.py prepared in candidate directory with285
+assertions; launch retains protectedXV_TEST_SAVE=a30-perf211 andnormalphases0.
+
+Beforelog66907 completed14864289bytes. Last600samples284 mean78.360735ms/
+12.761493FPS,p9590.413,max103.162,all600>50ms,five>100ms; uncontrolledscene,
+notmatchedbenchmark. C2near96–97%, ownerFA920around75ms inclusive; noFPSgain
+claim. Further source audit:90950 dispatches indirectper-typeupdates (including
+4C980);8DDF0 is1538-line poseupdate with knownposeexperiment scope. Supporting
+Pi costs remain nested, do not call90950a cheaplookup or assume GPU bound.
+Next confirm285boot,renewlease,launchandcollectordinarygameplay. Goal unmet.
