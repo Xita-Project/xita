@@ -2249,3 +2249,27 @@ path-detail-289/launch-ready.log. It runs the existing launch sequence then
 a bounded readiness observer, finally gameplay-ready.png. No redundant pod
 timing interval. Poll this handle and inspect image before route inputs.
 No new performance result yet; goal remains unmet.
+
+
+## Perf289 route capture: scene qualification rejected
+
+Launch/readiness job7685 completed rc0; gameplay-ready.png confirms protected
+a30 pod. Route job25405 completed rc0 with controls released. Its 1200
+intervals average35.560ms/28.122FPS,p9558.099,max89.254,101over50ms.
+However encounter-before.png faces a rock wall, so this is NOT NPC encounter
+evidence or an optimization gain. No expensive15A290/13A140/139E30 rows
+appeared in that capture. The reporter suppresses parents below0.5ms/frame;
+absence alone does not prove a routine never executed.
+
+Correction85933 completed; forward93099 completed with controls released,
+but forward-area.png shows player death after movement toward the canyon.
+Exclude this segment from acceptance. After-death collector39464 completed;
+after-death.png shows gameplay resumed outdoors (ammo425), not a crash.
+No save restore or Save/Quit was issued. AI rows in this retained log peak
+only1.30ms; the earlier expensive guard/path window remains unreproduced.
+
+Prepared and launched collect-checkpoint.py for a settled45second capture
+without further movement. Poll its existing process, inspect checkpoint
+images and path rows before interpreting averages. Runtime289 remains
+diagnostic, not a new speedup. Sleep lease renewed3600. No code changes
+or upstream implementation adopted. Goal remains unmet.
