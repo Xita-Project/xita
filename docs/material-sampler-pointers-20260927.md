@@ -113,3 +113,35 @@ runtime hash above. Independent live status confirmed perf275 / d0975e0b at
 timing_frame=0 on the dashboard. The ordinary a30 launch sequence is now running;
 it renews the keep-awake lease before input. Perf273 is retained in slot 0.
 No perf275 gameplay measurement is available yet.
+
+## Perf275 hardware results
+
+| Interval | Samples | Mean ms | FPS | p95 ms | Max ms | >50 / >100 ms |
+|---|---:|---:|---:|---:|---:|---:|
+| pod | 780 | 57.113 | 17.509 | 74.754 | 87.795 | 570 / 0 |
+| fire | 68 | 78.240 | 12.781 | 104.576 | 127.425 | 67 / 4 |
+| move | 86 | 64.310 | 15.550 | 83.664 | 269.953 | 85 / 2 |
+| outside | 934 | 48.469 | 20.632 | 58.856 | 88.338 | 216 / 0 |
+
+CPU Present intervals, same 32 launch overrides and 360p. Pod and outdoor
+screenshots were inspected and show the intended scenes. Movement is controlled
+by wall time and can end at slightly different positions; these are ordinary
+gameplay samples, not deterministic identical-workload replays. No crash was
+observed during this short sequence. No AI, audio, cutscene, save/resume or
+15-minute stability qualification is implied.
+
+There is no demonstrated whole-frame improvement against perf273 (pod 55.849,
+fire 76.515, move 64.206, outside 48.428 ms). Movement/outdoor times are close;
+pod/fire are slower in this sample. The isolated Pi gain is insufficient to
+claim a Vita frame-rate gain. The pod logs show 5,760 accepted groups per stage
+per 60 frames: 384 total groups/frame. That frequency limits the aggregate
+payoff of such a short helper. Do not spend another iteration retuning it
+without evidence of substantially greater production cost.
+
+Perf275 remains installed provisionally, with perf273 retained for rollback;
+the build option stays default-off. No repeated A/B loop is planned. The
+269.953 ms movement outlier remains and the full 20 FPS goal is unmet. Next
+investigation should address larger material/recording or simulation work,
+using existing attribution before proposing another narrow native replacement.
+Private captures and summaries: ../sampler-pointer-hardware/. All collection
+processes have completed; no gameplay controls are held.
