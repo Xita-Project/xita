@@ -73,3 +73,20 @@ same readiness change and only this instrumentation exclusion atop the retained
 phase implementation. Build succeeded; the 180-second campaign capture is
 running. Inspect terminal results before drawing any performance conclusions.
 Hardware remains perf271; no experimental gate deployment occurred.
+
+The isolated retest completed after 180 seconds (expected timeout 124):
+108 report rows, 54 active, 3,318 passes and 720,010 jobs. No phase overflows,
+worker STOP, scene ABANDON or guest-trap lines were found. The previous implausible
+tick durations are gone. This establishes usable owner-phase instrumentation,
+not equivalent gameplay or a hardware speedup. Existing player-vector diagnostic
+oddities also occur in the pre-gate baseline and are not newly attributed here.
+
+A separate save-write timing change uses existing XV_SAVE_LOG and timestamps
+only selected save transfers, excluding logging. No write, completion, offset,
+flush or durability policy changes. VitaSDK compiled xk_file.c and the profiling
+fix successfully; receipts in private ../save-write-timing/.
+
+Perf272 staging in ../worker-readiness-hardware/ retains perf271 generated code,
+imports the readiness predicate, profiler guard and save-transfer timer only.
+No lag tolerance or camera-policy expansion. Hardware remains perf271 until the
+candidate has built and deployment is explicitly recorded.

@@ -311,7 +311,19 @@ void xk_NtWriteFile(xctx *c)
     if (!o || o->type != XO_FILE) { c->r[0] = STATUS_INVALID_HANDLE; X_RET(8); }
     uint64_t pos = poff && LI64(poff) != 0xFFFFFFFFFFFFFFFEull ? LI64(poff) : o->u.file.pos;
     if (o->u.file.append) { int64_t s = xk_os_size(o->u.file.f); pos = s > 0 ? (uint64_t)s : 0; }
+    static int sl = -1;
+    if (sl < 0) { const char *e = getenv("XV_SAVE_LOG"); sl = e ? atoi(e) : 0; }
+    const char *path = o->u.file.path;
+    size_t path_len = sl && path ? strlen(path) : 0;
+    int save_trace = path_len &&
+        ((path_len >= 12 && !strcmp(path+path_len-12, "savegame.bin")) ||
+         (path_len >= 8 && !strcmp(path+path_len-8, "blam.sav")) ||
+         (path_len >= 12 && !strcmp(path+path_len-12, "SaveMeta.xbx")));
+    /* Measure the synchronous transfer only, excluding diagnostic sink writes.
+     * Completion, offsets and save durability policy remain unchanged. */
+    uint64_t write_start = save_trace ? xk_os_monotonic_us() : 0;
     int64_t got = file_guest_io(o->u.file.f, pos, buf, len, 1);
+    uint64_t write_end = save_trace ? xk_os_monotonic_us() : 0;
     { static const char *watch; static int init; static unsigned traces;
       if (!init) { init = 1; watch = getenv("XV_LOG_WRITES"); }
       if (watch && o->u.file.path && strstr(o->u.file.path, watch) && traces++ < 48) {
@@ -326,10 +338,10 @@ void xk_NtWriteFile(xctx *c)
           XK_LOG("[write-trace] stack:%s\n", sb);
       } }
     { static unsigned n; if (n++ < 12) XK_LOG("NtWriteFile(%s @%llu, %u B) = %lld\n", o->u.file.path, (unsigned long long)pos, len, (long long)got); }
-    { static int sl = -1; if (sl < 0) { const char *e = getenv("XV_SAVE_LOG"); sl = e ? atoi(e) : 0; }
-      if (sl && o->u.file.path) { const char *b = o->u.file.path; size_t hl = strlen(b);
-          if ((hl >= 12 && !strcmp(b + hl - 12, "savegame.bin")) || (hl >= 8 && !strcmp(b + hl - 8, "blam.sav")) || (hl >= 12 && !strcmp(b + hl - 12, "SaveMeta.xbx")))
-              XK_LOG("[save] WRITE %s @%llu len %u -> %lld\n", b, (unsigned long long)pos, len, (long long)got); } }
+    if (save_trace)
+        XK_LOG("[save] WRITE %s @%llu len %u -> %lld io-us %llu end-us %llu\n",
+               o->u.file.path, (unsigned long long)pos, len, (long long)got,
+               (unsigned long long)(write_end-write_start), (unsigned long long)write_end);
     uint32_t st = got < 0 ? STATUS_ACCESS_DENIED : STATUS_SUCCESS;
     if (got > 0) o->u.file.pos = pos + (uint64_t)got;
     if (iosb) { IOSB_STATUS(iosb) = st; IOSB_INFO(iosb) = got > 0 ? (uint32_t)got : 0; }
