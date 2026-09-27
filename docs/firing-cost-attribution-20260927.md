@@ -2174,3 +2174,28 @@ not measured attribution: 15A290 has calls to 1391F0/139220/139260/13A140/
 13A280/13A310 and actor helpers. Reference pathfinding already handles
 destination identity and refreshed_this_tick; no semantic shortcut accepted.
 No new optimization qualified and no claim of20FPS combat. Goal remains unmet.
+
+
+## Perf288 user-observed drops captured
+
+Previous turn made progress by confirming288 installation and startingcapture.
+33557 completedrc0: pod660 intervals58.743ms/17.023FPS,p9573.589,max81.851.
+Reviewed pod-after.png: usual pod, AR60/120. Route38221 completedrc0 and
+released inputs. Before image shows quiet trees;660 intervals59.350ms/
+16.849FPS,p9577.385,max337.573,498over50,6over100,2over200. This route
+interval is not a normal-settings acceptance sample.
+
+User asked whether drops were seen. Pulled user-drops.log via14170,rc0,
+3315358bytes. Last600 complete intervals throughframe9120:
+88.673ms/11.277FPS,p95152.788,p99182.041,max304.108;565over50,
+158over100,3over200. Rawlog,summary and parsedphaseJSON preserved privately.
+The largest FA920 report is nearframe8880: FA920129.01ms,900E076.90ms,
+AI14E2C023.79ms,effects10E7A016.68ms. Nested costs, not additive.
+Actorupdate14E1A0 children:14B2309.91,1640904.28,15ABC03.78,
+1567702.15,15AF500.94. Modelprep8DDF017.85 andcollision4B9D015.38ms.
+Thus this slowdown includes AI decision work, object updates and effects;
+do not attribute every drop to the previously13ms guard callback.
+Last guardcontrol report16D2500.51ms includes15A8900.47, withtinyself.
+Need a later active guard report before selecting its native candidate.
+No controls or restart after the user's question; all captures terminal.
+Vita288 remains running. Goalunmet; keep qualifiedoptimizations stacked.
