@@ -77,3 +77,34 @@ The Vita diagnostic session was ended via companion and dashboard relaunch
 requested. Confirm status/lease in restored-dashboard.json before assuming the
 restart finished. Normal launch must retain XV_SCENE_PHASES=0 and omit the
 record-worker timing override. No save or production optimization was changed.
+
+## Pi child result and private stack-translation candidate
+
+The 120-second Pi job ended at its planned timeout (124), returning 31 reports
+with 59550. The bounded fatal/mismatch/scope-omission scan found no matches.
+Settled examples: 59550 inclusive 1.84–2.62 ms, remainder 0.68–0.96 ms;
+597CB contributes 0.55–0.80 ms, followed by 59200 at 0.19–0.27 ms. These are
+instrumented Pi numbers, not predicted Vita savings. The native 11B60 child is
+already present. The result selects the vertex-building continuation 597CB for
+a memory-access experiment rather than another replacement of that native leaf.
+
+`tools/prepare_sprite_stack_candidate.py` prepares a private candidate from the
+pinned installed body. It caches only the guest stack page translation for the
+loop before the first pop: 48 float loads, six float stores, 28 word accesses.
+All actual reads/writes and float conversion/rounding remain in place. The
+page pointer refreshes after every actual scheduler handoff; crossing-page
+stacks fall back to individual original translations. The post-loop callee and
+unwind remain original. Checked-address builds take the original routine.
+
+This is **unqualified, not deployed**, and changes no production policy.
+Private ../sprite-stack-candidate/reference.c contains generated code, excluded
+from commits. VitaSDK O2 Thumb compilation succeeded; original/candidate text
+sizes are 0x1d22/0x1d1a. An eight-byte difference is not evidence of runtime gain.
+Next construct whole-context/arena differential cases covering four-corner loop
+branches, stack/output aliases, page boundaries, scheduler stack/mapping changes,
+x87 TOP/status and the 5BA10 callee. Only after correctness qualification should
+Pi timing or a private Vita build be considered. Avoid caching stack values or
+changing double intermediates to float as a shortcut.
+
+Vita dashboard restoration was independently confirmed on perf275; the latest
+3600-second lease succeeded. No Pi or Vita capture job remains active.
