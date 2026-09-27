@@ -143,3 +143,35 @@ slot 0. An independent status returned V0.2.0-perf.276 / 104d3696 at dashboard
 (timing_frame=0). Perf275 occupies the other slot; retained perf273/275 VPKs
 remain available. The batched a30 launch was started and renews the awake lease.
 No frame-time result or gameplay correctness conclusion exists yet for perf276.
+
+## Perf276 hardware result: no demonstrated overall gain
+
+Both collectors completed. Screenshots confirm the saved lifepod, rifle
+firing/reload, and the expected outdoor canyon after movement. All values below
+are CPU Present intervals at the retained 360p settings, not GPU execution time.
+
+| Interval | Samples | Mean ms | FPS | p95 ms | Max ms | >50 / >100 ms |
+|---|---:|---:|---:|---:|---:|---:|
+| pod | 720 | 56.644 | 17.654 | 74.338 | 97.090 | 512 / 0 |
+| fire | 64 | 82.425 | 12.132 | 116.562 | 126.139 | 63 / 7 |
+| move | 81 | 67.090 | 14.905 | 94.064 | 274.426 | 81 / 1 |
+| outside | 941 | 48.124 | 20.780 | 58.370 | 105.429 | 197 / 2 |
+
+Perf275 preceding means were 57.113 / 78.240 / 64.310 / 48.469 ms.
+The small pod/outdoor changes do not establish useful improvement; firing and
+movement were slower. Separate ordinary runs are not identical workloads or a
+statistically isolated regression test. No crash was observed in this short
+sequence, but it does not qualify AI/audio/cutscene/checkpoint/15-minute stability.
+The outdoor average above 20 FPS still hides 197 frames exceeding 50 ms.
+
+Keep the candidate experimental, default off, with its correctness evidence.
+A rollback to perf275 was requested; initial status during restart refused the
+connection. Confirm actual boot/version before stating rollback completed.
+Neither collector is running now. The next work must address the larger
+firing/update/recording cost, not repeat this local-context trial without new
+evidence. The separate ~274 ms movement hitch remains an I/O attribution lead,
+not an explanation for the sustained firing cost.
+
+Rollback is now confirmed by independent live status: perf275 / d0975e0b,
+timing_frame=0 at dashboard. A fresh 3600-second keep-awake lease succeeded.
+rollback-status.json preserves the receipt. No test jobs or held controls remain.
