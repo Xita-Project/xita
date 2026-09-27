@@ -306,6 +306,15 @@ class HaloHooks(NoGameHooks):
         return out
 
     def transform_body(self, address, body):
+        if address == 0x8DDF0 and self.hierarchy_enabled:
+            needle = "    X_PUSH32(0x8E525u);\n    f_000B5B40(c);"
+            assert body.count(needle) == 1, "root matrix pair callsite drift"
+            assert "L_0008E58B:" in body, "root matrix pair continuation drift"
+            body = body.replace(needle, "    X_PUSH32(0x8E525u);\n"
+                "#ifdef XV_NATIVE_MODEL_HIERARCHY\n"
+                "    { extern int xv_math_root_pair(xctx *);\n"
+                "      if (xv_math_root_pair(c)) goto L_0008E58B; }\n"
+                "#endif\n    f_000B5B40(c);")
         if self.enabled and address == 0xA1EC0 and marker_region.matches(self.image):
             body = marker_region.hook(body)
         if self.enabled and address == 0x7E530:

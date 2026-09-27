@@ -22,6 +22,8 @@
  * admitted private lanes. */
 enum { MATH_LANE_SLOTS=XV_OBJECT_WORKERS+1 };
 static unsigned math_fast[2], math_fallback[2];
+static unsigned root_pair_fast,root_pair_declined;
+static int root_pair_decline(void){root_pair_declined++;return 0;}
 /* Slot zero retains guarded accounting. A bypassed quaternion owns its actual
  * worker's slot; reports aggregate/reset only after every job has retired. */
 static struct __attribute__((aligned(64))) {
@@ -70,6 +72,8 @@ void xv_native_math_report(unsigned frames)
     xv_object_math_report_check();
 #endif
     XV_OBJECT_MATH_GUARD();
+    XK_LOG("[root-pair] %u frames accepted %u declined %u\n",frames,root_pair_fast,root_pair_declined);
+    root_pair_fast=root_pair_declined=0;
 #ifdef XV_NATIVE_MATRIX_NEON
     matrix_neon_report(frames);
 #endif
@@ -313,5 +317,49 @@ int xv_math_quaternion_matrix(xctx *restrict c)
     xv_quat_cache_store(c,output,scratch_out,&cache_request);
 #endif
     c->r[4]=sp+4;
+    return 1;
+}
+
+/* Halo 3925 root composition at 8E520 followed by 8E586. The generated hook
+ * pins the enclosing function and math leaves. All inputs are captured before
+ * releasing private ownership; shared outputs retain the guard. The original
+ * two multiplies remain the fallback, and runtime admission defaults off. */
+
+int xv_math_root_pair(xctx *restrict c)
+{
+    XV_OBJECT_MATH_GUARD();
+    /* Configuration and shared counters are accessed under the existing math
+     * guard. Keep diagnostic call boundaries and optional SIMD policy intact. */
+    static int configured=-1;
+    extern int xv_phase_enabled;
+    if(configured<0) {
+        const char *enable=getenv("XV_ROOT_PAIR"), *phases=getenv("XV_SCENE_PHASES");
+        configured=enable&&atoi(enable)!=0&&(!phases||atoi(phases)<=0);
+    }
+    if(!configured||xv_phase_enabled)return root_pair_decline();
+#ifdef XV_NATIVE_MATRIX_NEON
+    if(matrix_neon_enabled())return root_pair_decline();
+#endif
+    uint32_t sp=c->r[4];
+    if(!math_enabled()||c->df||sp<16u||sp>UINT32_MAX-0x154u)return root_pair_decline();
+    uint32_t *stack=math_span(sp-16u,32);
+    if(!stack||stack[4]!=0x8e525u||stack[5]!=sp+0x84u||stack[6]!=sp+0x50u||stack[7]!=c->r[6])return root_pair_decline();
+    uint32_t out=stack[7],second=sp+0x120u;
+    const float *a=math_span(stack[5],52),*b=math_span(stack[6],52),*d=math_span(second,52);
+    float *op=math_span(out,52);
+    if(!a||!b||!d||!op)return root_pair_decline();
+    const void *inputs[]={a,b,d};
+    if(math_overlap(stack,32,op,52))return root_pair_decline();
+    for(unsigned i=0;i<3;i++)if(math_overlap(stack,32,inputs[i],52)||math_overlap(op,52,inputs[i],52))return root_pair_decline();
+    float l[13],r[13],last[13],middle[13];
+    memcpy(l,a,52);memcpy(r,b,52);memcpy(last,d,52);
+    root_pair_fast++;
+    math_fast[0]+=2;matrix_layout[ML_DISJOINT]++;matrix_layout[ML_LEFT]++;
+    XV_OBJECT_MATH_PRIVATE(c,1,out,52,sp-16u,32);
+    xv_matrix_snapshot(c,l,r,middle);
+    xv_matrix_snapshot(c,middle,last,op);
+    stack[0]=out;stack[1]=out+4;stack[2]=second+4;stack[3]=out+4;
+    stack[4]=0x8e58bu;stack[5]=out;stack[6]=second;stack[7]=out;
+    c->r[0]=second;c->r[1]=out;c->r[2]=out;c->r[4]=sp+16;
     return 1;
 }

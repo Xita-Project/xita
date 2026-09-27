@@ -149,3 +149,35 @@ are active, and preserve original execution when disabled. Add reproducible
 source tests, compile with the actual Vita flags, then qualify/deploy the next
 candidate and inspect complete gameplay frame times. The prototype is still
 private and has not changed perf267 on hardware.
+
+### Opt-in source integration
+
+`xk_math.c` now implements `xv_math_root_pair`; the exact-image Halo hook inserts
+it after the original 8E525 return push. `XV_NATIVE_MODEL_HIERARCHY` controls
+compiled hook inclusion and `XV_ROOT_PAIR=1` opts in at runtime. Defaults retain
+the original calls. Native-math disable, active `xv_phase_enabled`, positive
+`XV_SCENE_PHASES`, or enabled optional matrix NEON policy decline. Admission
+requires the validated stack argument layout and nonoverlapping output/input
+ranges. `[root-pair]` logs guarded accepted/declined totals at the existing
+native-math report boundary.
+
+Reproducible tests are now in source:
+
+- `tools/test_root_matrix_hook.py --xbe <owned default.xbe> --manifest <manifest>`:
+  passed original-image insertion, three altered-image guards and identical
+  preprocessed generated code with hierarchy hooks disabled.
+- `tools/test_root_matrix_pair.py --cc <ARM Linux gcc> --cflags='-static -mthumb
+  -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard' --output-dir <private directory>
+  --build-only`: build command is saved to that directory. On the Pi, run the
+  resulting `root-matrix-pair-test` with `enabled`, `unset`, `phase`, `scene`,
+  and `math-off`. Enabled passed 1,024 exact cases plus eight layout declines;
+  each other mode passed 1,024 mutation-free declines. ARM is required for the
+  exact NaN operand-payload expectations; do not weaken these to hide host
+  compiler expression-order differences.
+
+VitaSDK compiled the current math unit with hierarchy, NEON and object-worker
+features enabled. This is compile evidence only, not a linked runtime or
+hardware verification. The production worker and bounded consumer receipts
+above precede the configuration/counter integration; repeat applicable checks
+against the final candidate flags. Next steps remain Vita-linked qualification,
+full build and gameplay deployment. The installed hardware build remains perf267.
