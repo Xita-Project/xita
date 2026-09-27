@@ -1494,3 +1494,70 @@ soft raster off, legacy shader/effects reductions. Result is supporting callee
 attribution only, not representative NPC gameplay until its logs establish that.
 After terminal timeout124 (expected observation bound), pull game.log and
 exit-code, inspect actual loaded scene and timed children. Do not duplicate job.
+
+## Pi contact-feature profile completed; current user feedback retained
+
+The bounded Pi run ended with expected timeout status124. Retrieved full log to
+private contact-feature-profile-pi/game.log. Loaded/active/director all1; camera
+31.49,-102.45,59.38 stayed at the pod. This is not NPC-combat coverage.
+Settled windows show86170 about0.73–0.76ms inclusive,0.44–0.46ms self,
+5040calls/60frames;862A0 about0.46–0.48ms inclusive,5880calls/60frames;
+86440 about0.07ms. These are older ARM harness timings, not Vita predictions.
+The reporter aggregates callees and attributes untimed868F0 children under172F40;
+do not mistake this for a direct source call graph. Next concrete leaf candidate
+is86170, with862A0 second; inspect semantics and build differential coverage
+before replacing either. Current284 NPC attribution is still needed before
+claiming these leaves dominate combat. No new build deployed or gameplay
+interrupted. Vita awake lease renewed3600seconds. User reports NPC frames remain
+low but substantially improved; sustained20FPS goal remains unmet.
+
+## Contact-branch register candidate prepared on Pi
+
+Previous turn was progress: completed/retrieved the bounded profile. Inspection
+confirms86170 emits polygon contacts (ring/plane/point transforms ->85020),
+862A0 emits capsule contacts after plane/edge convexity checks. This agrees with
+docs/claude-collision-collection-20260916.md and the earlier collection-packet
+profile; do not claim discovery of a new call graph.
+
+Both current284 bodies exactly equal the existing regen-base-final bodies after
+observer normalization. Existing regen-regs-d3-final has register lowering for
+both (86170:39x87/8syncs;862A0:38x87/9syncs; neither has guarded calls). Current284
+uses memory lowering. Historical perf177-splice receipts say both were spliced;
+when/why this was lost remains unaudited. Do not globally regenerate other code.
+
+Private contact-feature-registers-pi candidate replaces only those two bodies
+in the instrumented supporting harness. Six/five timer pairs retained via the
+existing splice tool, hashes in splice-receipt.json; all generated code private.
+ARM build27725 completed rc0 and transfer26745 completed. A bounded180second
+run is now session18994, Pi cores0/1, separate runs/codex-contact-registers-20260927
+save directory. Same legacy harness/settings as the prior contact-feature run.
+The run command is retained in run-remote.sh. Poll the existing handle; do not
+duplicate. This measures a prototype, not correctness qualification or Vita FPS.
+Next: retrieve terminal output, verify loaded state, compare scoped costs, then
+qualify complete context/memory and ARM call-boundary behavior before hardware.
+No Vita build change/restart; awake lease renewed.20FPS goal unmet.
+
+## Register candidate supporting result and polygon qualification
+
+Pi run18994 finished with planned timeout124; retrieved game.log. Last20
+polygon reports: reference inclusive0.737/self0.446ms; candidate
+inclusive0.715/self0.4255ms. Same stationary pod coordinates and older
+headless harness. Sequential noisy instrumentation, no confidence interval:
+small supporting difference, not proof of Vita benefit; retain as candidate
+for stacking, not a claimed solution to NPC stalls.
+
+Added tools/test_contact_polygon_registers.py and synthetic fixture. Extracts
+owned reference/candidate86170 privately; full context/arena/callee trace and
+preemption compare strictly.256 cases cover all8 starting x87 tops, null/non-null
+transforms,0–8 ring vertices, preempting loops, sentinel/ordinary argument,
+surface record across a page boundary. Stub callees overwrite physical x87
+slots/status but preserve known stack effects. Host ASan/UBSan76390 passed;
+ARM compiled and ran on Pi46314, passed256. Deliberate multiply->add mutation
+failed scenario1 with memory/trace differences.
+
+Scope is lowering with synthetic callees, not real collision packet semantics.
+No arbitrary aliases, special floating values or real-game differential capture
+yet;862A0 capsule branch also still unqualified. Candidate remains private and
+undeployed;284 unchanged. Next qualify capsule and broader boundaries, then
+consider hardware trial alongside existing improvements. No task processes
+remain active from this turn; keep-awake lease renewed. Goal remains unmet.
