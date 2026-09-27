@@ -842,3 +842,35 @@ evidence, but no long-session/cutscene/AI/audio/checkpoint acceptance met.
 Rollback independently confirmed perf279 and expected boot hash at dashboard,
 timing_frame0; lease renewed3600. Receipt capture-core-candidate/
 restored-dashboard.json. All handles terminal; no controls held.
+
+
+## Baseline core-headroom and capture reuse audit
+
+Re-read private `sprite-stack-hardware/idle.log` against the completed C1
+trial. Baseline final four utilization windows report C0 74–77%, C1 81–82%,
+C2 73–76%. Guest-present is fixed to C2, priority160. Vertex capture is C0,
+priority153; texture decode C0/152, vertex upload C0/161, pump C0/160 and
+an audio-or-profiler worker C0/64. These are observed thread assignments,
+not an exhaustive core workload decomposition. Percent utilization alone
+cannot establish an available contiguous scheduling budget.
+
+Do not implement a C2 relocation from the C1 queue-pressure improvement alone:
+capture would outrank the existing guest fiber and can move contention into
+simulation. First reduce actual preparation work or measure its exclusive CPU
+cost; baseline scene helper already spends approximately43–46ms CPU/frame.
+
+The final baseline capture report has13,746 jobs/60frames but only847KiB
+of newly captured data across that interval. Reuse reports16,320 exact hits
+out of16,391 checks, avoiding110,837KiB staging writes, with4,938 worker
+preparations reused and507 completed draws admitted inline. Low new-copy
+volume is therefore not evidence that preparation itself is cheap: the
+worker may still process sparse masks, cache lookups and upload validation.
+`cap_execute` already bypasses upload on persistent and prepared-result hits;
+non-sparse reuse is slot-specific. Sparse streams deliberately clear reuse
+IDs because results depend on the reference mask. Next inspect the remaining
+sparse/upload path and its existing counters before adding another cache or
+changing scheduling. Preserve mask identity, slot retirement and FIFO callbacks.
+
+Live endpoint confirms perf279/55e73b9f at dashboard, timing_frame0, with
+3578 seconds awake lease remaining at inspection. No build or settings change
+was deployed by this audit. Goal remains unmet; no new FPS claim.
