@@ -2273,3 +2273,24 @@ without further movement. Poll its existing process, inspect checkpoint
 images and path rows before interpreting averages. Runtime289 remains
 diagnostic, not a new speedup. Sleep lease renewed3600. No code changes
 or upstream implementation adopted. Goal remains unmet.
+
+
+## Perf289 settled outdoor sample and coordinate-guided route
+
+Previous turn made progress by qualifying/rejecting the wall/death capture.
+Checkpoint collector51896 completed rc0:720intervals mean60.260ms/16.595FPS,
+p9572.658,p9982.870,max90.033;all720over50ms,noneover100ms. Boundary image
+shows outdoor gameplay near a dead marine. This is not verified NPC combat.
+Latest retained phases show900E0 object updates28–30ms,8DDF0 model updates
+11.7–12.4ms inclusive,10E7A0 effects6.3–9.4ms; nested values cannot be added.
+AI/path timing remains quiet; no justification yet for a path-search native.
+
+Slope route68234 ended facing terrain; correction14093 backed away and turned
+without another death. All controls released. Live log48105 gives camera
+45.07,-103.94,61.49 facing-0.95,-0.31,0.00. Recovered the old expensive guard
+window's camera33.81,-104.36,59.99 facing0.49,0.87,0.01 from288followup.log.
+Approach28034 completedrc0;2seconds forward moved to40.51,-105.41,61.68.
+Now collect-path-area.py is running a short further approach/turn followed by
+a settled45second capture; inspect images and path rows before conclusions.
+This uses ordinary controls, no teleport or save writes. Poll existing job.
+Hardware remains289 diagnostic; goal unmet, no new performance improvement.
