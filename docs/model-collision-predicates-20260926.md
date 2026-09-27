@@ -58,3 +58,37 @@ harness, preserving the same native callees and observers. If useful, qualify
 real callee integration and fingerprinted hook admission before a Vita build.
 Do not claim that this small candidate will resolve the entire firing deficit.
 Hardware remains perf269; no update or gameplay restart was performed here.
+
+## Gameplay harness integration — partial run
+
+`../model-collision-predicates/gameplay/` contains a successfully linked ARM
+harness. Only 1731D0's eleven predicates change relative to the existing aligned
+collision diagnostic: original child observers remain, and removing observers
+produces exactly the synthetic-tested candidate. Other functions in shard 028
+are byte-identical. Shards 016/024 retain the earlier aligned native transform
+and effects changes. Build log and body audit are retained privately.
+
+The Pi run used cores 0/1, an isolated save-directory argument, a30, campaign
+buttons at 150/300/450, firing at 1800 for 120 frames, reload at 1930 and firing
+at 2040 for 120 frames. `run-command.json` preserves the exact environment.
+That environment was reconstructed from documented inputs and startup logs;
+it is not established as identical to every older comparison run. The host
+runtime is also older than perf269, so it is not a hardware surrogate.
+
+This run was manually terminated after about 77 seconds (exit 143), not its
+planned 180-second timeout. An earlier unloaded status sample was mistakenly
+used to suspect failed navigation; the latest log in fact shows successful a30
+loading and active gameplay through report 2100. The run was not restarted.
+Keep this as partial integration evidence, not a completed cost comparison.
+
+The retained log has 35 reports, active gameplay, and real collision callee
+execution. No fatal/trap/scope-overflow string was found; that bounded log scan
+is not a comprehensive correctness or visual test. At report labels 1860/1920,
+1731D0 reports 0.55/0.58 ms inclusive and 0.15/0.16 ms self, with most remaining
+time in BSP and transforms. These are instrumented Pi observations, not a
+measured gain over the prior candidate or a prediction of Vita milliseconds.
+The second scripted burst and steady post-fire interval were not completed.
+
+Do not deploy on this partial evidence. A complete comparable cost capture and
+Vita qualification remain outstanding. Source/recompiler defaults and installed
+perf269 are unchanged; the one-hour Vita awake lease was renewed during work.
