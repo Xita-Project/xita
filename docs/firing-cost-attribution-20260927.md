@@ -973,3 +973,23 @@ callback-pressure coverage explicitly, then build a versioned private candidate
 with owning-object audit and conduct ordinary protected a30 hardware gameplay.
 Pi remains unavailable from the preceding connection attempt; do not claim ARM
 Linux correctness execution. Goal and long-session acceptance remain unmet.
+
+
+## Perf282 qualification and package
+
+Expanded new-mode coverage to existing page/metadata exhaustion and fragmented
+allocation tests. Added a queue-full callback-mutation fixture: preflight sees
+a reusable old snapshot, partial-wait callback rewrites its live source, and
+the eventual job must capture the new bytes while the first job keeps the old
+GPU version. Both versions are checked byte-for-byte. Normal24 configurations
+passed capacity additions; ASan/UBSan24 configurations additionally passed the
+callback fixture and all capacity cases. Receipts `host-pressure.log` and
+`asan-pressure.log` in snapshot-gpu-candidate. No active test handles remain.
+
+Full Vita build completed successfully as perf282/533a6c71. Private stage
+based on perf279; changes are current capture/persistent header, version, and
+owning capture object's persistent build feature=1. Runtime snapshot mode is
+explicit opt-in via launch environment, leaving queue depth32, publication1,
+core0 unchanged. No Pi execution claimed. Package audit and deployment receipts
+will establish installed state separately; build completion is not deployment
+or an FPS result.

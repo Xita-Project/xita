@@ -887,6 +887,38 @@ static void capture_retained_generations(void)
 #endif
 #if XV_VERTEX_PERSISTENT
 #if XV_VERTEX_CAPTURE_REUSE
+static unsigned char *snapshot_callback_source;
+static void snapshot_mutating_callback(void *context,int ok)
+{
+    collected(context,ok);memset(snapshot_callback_source,0x92,4096);
+}
+static void persistent_snapshot_callback_pressure(void)
+{
+    setenv("XV_VERTEX_SNAPSHOT_GPU","1",1);
+    setenv("XV_CAPTURE_PARTIAL_WAIT","1",1);
+    unsigned char source[4096],other[256];memset(source,0x31,sizeof source);
+    snapshot_callback_source=source;
+    output outputs[CAPTURE_JOBS]={0},last={0};
+    xv_vertex_prepare_batch b={.slot=0,.count=1};
+    b.streams[0]=(xv_vertex_prepare_stream){.source=source,.bytes=sizeof source,.stride=16};
+    const void **targets[]={(const void **)&outputs[0].result[0]};
+    __atomic_store_n(&pause_capture,1,__ATOMIC_RELEASE);
+    assert(xv_vertex_capture_submit(&b,targets,snapshot_mutating_callback,&outputs[0]));
+    wait_parked(&parked_capture);
+    for(unsigned i=1;i<CAPTURE_JOBS;i++) {
+        memset(other,i,sizeof other);assert(capture(0,other,sizeof other,16,NULL,0,&outputs[i]));
+    }
+    assert(cap_submitted-cap_retired==CAPTURE_JOBS);
+    pthread_t releaser;assert(!pthread_create(&releaser,NULL,release_capture,NULL));
+    /* Initial preflight matches old bytes; partial-wait callback rewrites the
+     * live source. A stale reserved snapshot link must never be published. */
+    assert(capture(0,source,sizeof source,16,NULL,0,&last));
+    assert(!pthread_join(releaser,NULL));join(0);
+    assert(outputs[0].ok && last.ok && outputs[0].result[0]!=last.result[0]);
+    for(unsigned i=0;i<4096;i++)assert(outputs[0].result[0][i]==0x31 && last.result[0][i]==0x92);
+    for(unsigned i=1;i<CAPTURE_JOBS;i++)assert(outputs[i].ok && outputs[i].result[0][0]==i);
+    cleanup();unsetenv("XV_VERTEX_SNAPSHOT_GPU");unsetenv("XV_CAPTURE_PARTIAL_WAIT");
+}
 static void persistent_snapshot_links(void)
 {
     setenv("XV_VERTEX_SNAPSHOT_GPU","1",1);
@@ -1259,14 +1291,15 @@ int main(void)
     puts("PASS: private inputs, rewritten aliases, mask ownership, packed/raw identity, arena/queue pressure, ticket wrap, partial/allocation/thread/notification failures, fallback drains, disable and three GPU-copy slots");
 #if XV_VERTEX_PERSISTENT
 #if XV_VERTEX_CAPTURE_REUSE
-    persistent_snapshot_links();
+    persistent_snapshot_links();persistent_snapshot_callback_pressure();
     puts("PASS: snapshot GPU links reuse without second comparison; pending/unmapped inputs, read-only cross-slot hits, GPU/CPU ID recycling and generation exhaustion");
 #endif
     persistent_slots();persistent_bypass();persistent_pressure();persistent_metadata_pressure();
     persistent_fragmentation();persistent_failures();persistent_generations();
 #if XV_VERTEX_CAPTURE_REUSE
     setenv("XV_VERTEX_SNAPSHOT_GPU","1",1);
-    persistent_bypass();persistent_failures();persistent_generations();
+    persistent_bypass();persistent_pressure();persistent_metadata_pressure();
+    persistent_fragmentation();persistent_failures();persistent_generations();
     unsetenv("XV_VERTEX_SNAPSHOT_GPU");
     puts("PASS: snapshot-linked sparse/packed bypass, allocation/partial failures and 240 mixed GPU-slot generations");
 #endif
