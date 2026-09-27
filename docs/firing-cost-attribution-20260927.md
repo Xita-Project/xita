@@ -185,3 +185,8 @@ object, and game-a.self/boot-game.txt are the sole changed package entries.
 Runtime SHA256: 7d8ba31adb1fea060d8d58084639817a64943e67edccef792204e0c242aec062.
 The remote update has started; installation and ordinary hardware gameplay
 results remain unverified. Retain perf275 as rollback and protect a30-perf211.
+
+Updater subsequently confirmed perf277 in slot 0 with the expected runtime
+hash; independent status confirms V0.2.0-perf.277 / b2172f5a. Lease renewed and
+normal protected a30 launch started. Perf275 remains in slot 1. Gameplay
+measurement is pending; no frame-time benefit is established yet.
