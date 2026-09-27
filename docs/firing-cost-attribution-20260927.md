@@ -1624,3 +1624,28 @@ Created private contact-registers-hardware/build-x87 as reflink copy of284
 depend on qualification (polygon-only is possible while capsule held). Keep
 all previously restored nativehooks and buffers. Vita284 unchanged;awake renewed.
 No performance win claimed. Goal remains unmet.
+
+## Perf285 polygon-only hardware candidate building
+
+Previous turn progress: expanded numeric cases and live ARM test.16252 is now
+terminalrc1: polygon1024passes; capsule535fails only final NaN sign in popped
+st2/st3 (reference7ff8000000000000/candidatefff8000000000000), memory/trace same.
+Capsule held; strict gate unchanged. Polygon qualified for an incremental trial.
+
+Used existing splice_x87_regs --only86170 with regen-yield and baseline-final
+on private contact-registers-hardware/build-x87. Report exactly1spliced shard.
+source-audit.json proves only86170 body changed in code013; all other functions,
+query_fusion andsolver_fusion source unchanged.285/bef4017f version metadata.
+Current build9404 live; PID1286939 cc1 compilingcode013 at99.3%CPU after1:48.
+Do not restart. make-plan lists full dependency recipes, but actual build log
+sofar only a subset recompiles. Actual object audit after completion is required.
+Private audit-package.py prepared: compare284 objects, allow onlycode013 and
+version consumers, substitute onlygame-a.self/boot-game into284package, enforce
+unchanged update contract. Not run yet, no285VPK/deployment claimed.
+
+Before-update Vita log fetch66907 also live (PID1287579 observed00:24); path
+contact-registers-hardware/before285.log. No controls/restart. Next poll both
+existing handles, audit package/source preservation after generation, then
+deploy qualified285 with announcement and protected test save. Retain284rollback.
+No FPS claim; small polygon lowering stacks prior native hooks and snapshotGPU.
+NPC-critical-path work and full20FPS acceptance still outstanding.
