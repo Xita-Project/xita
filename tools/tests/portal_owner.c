@@ -43,6 +43,16 @@ int main(void)
     setenv("XV_OBJECT_JOB_WORKERS","2",1);setenv("XV_NATIVE_CLIP","1",1);setenv("XV_CLIP_REGISTERS","1",1);
     geometry();assert(!xv_portal_polygon((xctx*)(uintptr_t)1));
     assert(initialize());xv_native_clip_region_init();xv_native_clip_region_override(1);
+    /* Even with the native owner identity, a copied scene context cannot use
+     * the guest-owner contract. A helper alias does not change this check. */
+    xctx copied=t_guest.ctx, copied_before=copied;
+    unsigned char *copied_ram=malloc(ARENA_BYTES);assert(copied_ram);
+    memcpy(copied_ram,g_xram,ARENA_BYTES);
+    assert(xv_object_census_boundary(&copied)==XV_LC_CONTEXT);
+    assert(!xv_portal_polygon(&copied));
+    assert(!memcmp(&copied,&copied_before,sizeof copied));
+    assert(!memcmp(copied_ram,g_xram,ARENA_BYTES));free(copied_ram);
+    checked++;
     assert(xv_portal_polygon(&t_guest.ctx));assert((int16_t)t_guest.ctx.r[0]==4);
     assert(t_guest.ctx.r[4]==0x90018&&t_guest.ctx.preempt==9981);
     assert(!memcmp(g_xram+0x9004c,g_xram+0x90850,32));

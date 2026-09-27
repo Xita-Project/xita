@@ -33,6 +33,8 @@ void __wrap_xv_native_clip_region_override(int n) { t_override++; __real_xv_nati
 int __wrap_xv_clip_region_compatible(void) { t_compat++; return __real_xv_clip_region_compatible(); }
 int xv_benchmark_active(void) { return t_benchmark; }
 xk_fiber *xk_os_fiber_current(void) { return t_current; }
+/* This fixture runs the guest owner directly; no scene helper alias. */
+pthread_t xv_owner_pthread_self(void) { return pthread_self(); }
 uint64_t xk_os_monotonic_us(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts); return (uint64_t)ts.tv_sec*1000000+ts.tv_nsec/1000; }
 void xk_os_log(const char *fmt,...) {
     if (strncmp(fmt,"[clip-region-trial]",19)) return;
