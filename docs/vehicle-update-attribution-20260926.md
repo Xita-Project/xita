@@ -122,3 +122,28 @@ collision-solver-boundary-20260916.md before proposing another replacement.
 Keep the physical perf269 baseline and existing physics equations unchanged
 until a concrete remaining cost is selected and its replacement qualified.
 All numbers are instrumented Pi observations, not hardware FPS savings.
+
+## Ground-plane split completed
+
+`../ground-plane-phase-pi/` adds nine direct-call observers across 82380,
+86720 and its sphere/cylinder/prism test helpers (84F50, 85FE0, 85EA0).
+Removing observers restores the prior shard exactly; all five selected bodies
+match perf269. The ARM build and 180-second Pi core-0/1 capture completed
+(exit 124), with 86 reports through frame 5160. The bounded fatal/signal/scope
+error scan found no matches. This remains an older, headless diagnostic harness,
+not hardware validation or proof that each scripted weapon input fired.
+
+The report at frame 1860 exposes 82380: 0.66 ms inclusive, 0.02 self,
+0.61 in collection 171F10 and 0.03 in point testing 86720. Other selected
+windows omit this parent from the bounded top-cost report; absence is not zero.
+Within this observed window, collection is about 92% of ground-plane cost.
+Rewriting the point-testing loop first therefore has little measured scope.
+
+The reference's collision_features_test_point explains the sphere/cylinder/prism
+selection and deepest-contact output, but the capture redirects the next action
+back to collection. Inspect the existing 171F10 -> 1716F0 -> 172F40 native query
+coverage and its remaining traversal/memory work. Do not treat the aggregate
+171F10 children across all callers as ground-plane-only timing, and do not add
+another replacement for work already native. Private audit, build, command,
+result, log and summary files retain this evidence. No Vita update or FPS gain
+is claimed from this capture.
