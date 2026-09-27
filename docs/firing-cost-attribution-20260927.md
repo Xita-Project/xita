@@ -2010,3 +2010,32 @@ Movement/map/activity must be verified from resulting log; intent is not evidenc
 Poll SAME handle, retrieve log after terminal, resolve164090>targetedges. This
 older supporting runtime is not a Vita FPS prediction. No newhardware update.
 Vita lease renewed. Goalunmet.
+
+
+## AI Pi result and perf287 diagnostic preparation
+
+Previous continuation yielded terminal Pi evidence; no optimization accepted.
+Pi job68251 ended by its planned180-second timeout (exit124), not a game-crash
+claim. Retrieved ai-behavior-profile-pi/game.log and result-summary.json.
+The run opened a30.map and logged54 director-on gameplay reports, ending at
+camera35.89,-44.44,58.40. However14E2C0 reported at most0.01ms and no164090
+entry appeared. Older linked phase reporter uses inclusive-by-callee format,
+not parent edges. Thus absence of164090> text alone was not a valid test.
+This route/runtime did NOT reproduce hardware heavy-AI activity; do not infer
+AI is cheap or fixed. Next measurement is the current Vita runtime with the
+resolved-target timer. No repeated Pi run launched.
+
+Vita286 retained online; pulled preupdate-user.log (8438966bytes). Last600
+diagnostic intervals through22140:63.259ms/15.808FPS,p9578.348,p9984.779,
+max90.660,451over50,noneover100. No synchronized image for scene attribution.
+Last phase reports8DDF014.10..14.53ms,4B9D08.15..9.16ms,14E2C04.21..5.25ms;
+these are inclusive, not additive. Protected saves not changed.
+
+Prepared private ai-behavior-287 as reflink copy of286; installed only the
+validated164090 indirect-target wrapper incode027 plus version287/16abae1b.
+Exact reversal recreates baselinecode027 byte-for-byte (source-audit.json).
+Two indirect-patcher tests rerun/pass. Build89982 active at this note; poll
+same handle, then run audit-package.py, which requires changed objects to be
+onlycode027 and4version consumers and package assets onlygame-a/boot-game.
+Not deployed yet. This is diagnostic instrumentation, not an FPS optimization.
+Goal unmet.
