@@ -1257,7 +1257,7 @@ static volatile int      g_running         = 1;
 static struct {
     uint32_t mesh, ui;
     SceGxmNotification fence, visibility_fence;
-    uint64_t started_us, visibility_us, published_us, inspected_us;
+    uint64_t started_us, visibility_us, published_us, inspected_us, retired_us;
     unsigned queue_gate_mask;
     int failed, visibility_completed;
 #if XV_QUERY_PREFIX_PUBLISH
@@ -1344,21 +1344,52 @@ void xv_present(void)
     static int queue_timing = -1;
     if (queue_timing < 0) { const char *e = getenv("XV_FRAME_QUEUE_TIMING"); queue_timing = e && atoi(e) != 0; }
     g_packets[q].inspected_us = 0; g_packets[q].queue_gate_mask = 0;
+    g_packets[q].retired_us = 0;
     g_packets[q].published_us = queue_timing ? sceKernelGetProcessTimeWide() : 0;
     __atomic_store_n(&g_frame_requested, ticket, __ATOMIC_RELEASE);
     xv_frame_events_signal(&g_frame_events,XV_FRAME_REQUESTED);
     unsigned next_mesh = xv_d3d_record_slot(), next_ui = xv_ui_gxm_record_frame();
     uint64_t start = 0;
+    uint32_t wait_done = 0;
+    unsigned wait_polls = 0;
     for (;;) {
         uint32_t done = __atomic_load_n(&g_frame_completed, __ATOMIC_ACQUIRE);
         if (!xv_slot_busy(&g_mesh_owners[next_mesh],done) &&
             !xv_slot_busy(&g_ui_owners[next_ui],done)) break;
-        if (!start) { start = sceKernelGetProcessTimeWide(); g_slot_waits++; }
+        if (!start) { start = sceKernelGetProcessTimeWide(); wait_done = done; g_slot_waits++; }
+        wait_polls++;
         /* Park just this guest fiber; other runnable guest threads may work. */
         extern void xk_sleep_us(uint64_t);
         xk_sleep_us(100);
     }
-    if (start) g_slot_wait_us += sceKernelGetProcessTimeWide() - start;
+    if (start) {
+        uint64_t returned = sceKernelGetProcessTimeWide();
+        g_slot_wait_us += returned - start;
+        /* Only inspect retirement metadata after the completion acquire above.
+         * This sole recording thread has not published another packet, so the
+         * next-slot owners (at most two tickets older) cannot wrap the four-entry
+         * packet ring. Never use the diagnostic timestamp to release storage. */
+        if (queue_timing && returned - start > 100000u) {
+            static unsigned reports;
+            if (reports++ < 32) {
+                xv_slot_owner owners[2] = {g_mesh_owners[next_mesh],g_ui_owners[next_ui]};
+                uint64_t retired = start; unsigned valid = 1;
+                for (unsigned i=0; i<2; ++i) {
+                    if (!xv_slot_busy(&owners[i],wait_done)) continue;
+                    uint32_t age = ticket - owners[i].ticket;
+                    if (!age || age >= XV_FRAME_TICKETS) { valid=0; continue; }
+                    uint64_t t=g_packets[owners[i].ticket & (XV_FRAME_TICKETS-1u)].retired_us;
+                    if (!t || t > returned) { valid=0; continue; }
+                    if (t > retired) retired=t;
+                }
+                XV_LOG("[slot-stall] ticket %u mesh/ui %u/%u done-before %u polls %u wait-us %llu valid %u until-retired-us %llu after-retired-us %llu; CPU retirement/publication observations, not GPU service time\n",
+                    ticket,owners[0].ticket,owners[1].ticket,wait_done,wait_polls,
+                    (unsigned long long)(returned-start),valid,
+                    (unsigned long long)(valid ? retired-start : 0),
+                    (unsigned long long)(valid ? returned-retired : 0));
+            }
+        }
+    }
     if (ticket % 60u == 0) {
         XV_LOG("[frame-acquire] 60 presents: %u busy-slot waits %llu us; async %d\n",
             g_slot_waits,(unsigned long long)g_slot_wait_us,xv_pipeline_enabled());
@@ -1770,6 +1801,9 @@ static int xv_pump_retire(void)
     /* The guest may reuse this packet as soon as completed is published. */
     xv_packet_timing_fold(&g_packet_timing,&g_packets[q].timing);
 #endif
+    /* Published with completion; consumed only by the recording owner after
+     * its acquire, while that owner prevents reuse of the packet ring. */
+    g_packets[q].retired_us = g_packets[q].published_us ? sceKernelGetProcessTimeWide() : 0;
     __atomic_store_n(&g_frame_completed,ticket,__ATOMIC_RELEASE);
     xv_frame_events_signal(&g_frame_events,XV_FRAME_COMPLETED);
     if (++g_retired_count == 60) {
