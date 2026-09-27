@@ -1286,3 +1286,15 @@ untouched and that rerunning the combined generic/specialized installer is
 idempotent. Current private staged shards contain 114 generic call sites and
 seven specialized call sites (14 begin/end lines), plus native collector callback.
 Preparing perf283 as a diagnostic-only derivative of perf282. No claimed gain.
+
+
+Perf283 compile started from a reflink copy of the full perf282 stage; only the
+two instrumented shards, instrumented native collector, and version are changed.
+Build command revision is 341d6873. Live tool session 50900, build driver PID
+1242267; compiler PID1243126 still at ~99% CPU at three minutes. No build result
+yet. Continue polling this handle; do not restart. Private package audit script
+expects precisely the two shards, native collector, and four version consumers
+to differ from perf282; not executed before build completion. Guarded launch
+script prepared for perf283/protected a30 save, not run. Hardware remains282;
+lease successfully renewed. Previous goal turn made diagnostic implementation
+progress; current turn adds fused coverage, tests and the active SDK build.
