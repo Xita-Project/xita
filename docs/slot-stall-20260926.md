@@ -64,3 +64,53 @@ Updater subsequently verified the exact runtime hash and confirmed boot in slot
 0. Perf264 remains in slot 1. The ordinary a30 launch sequence was started with
 the preserved `a30-perf211` namespace and queue timing enabled; launch/gameplay
 qualification is still pending. Keep-awake was renewed by the launch client.
+
+## Perf265 capture results
+
+The existing launch and both collectors completed normally. `slot-stall-analysis.json`
+contains seven valid records from loading/cutscene/early gameplay through the
+ordinary outdoor run. Every ticket has `ticket % 60 == 3`:
+
+| Ticket | Total wait ms | Until retirement ms | After retirement ms |
+| --- | ---: | ---: | ---: |
+| 3783 | 424.068 | 190.552 | 233.516 |
+| 4383 | 300.601 | 293.217 | 7.384 |
+| 4443 | 305.028 | 300.904 | 4.124 |
+| 4623 | 225.949 | 223.060 | 2.889 |
+| 4683 | 292.335 | 291.941 | 0.394 |
+| 4983 | 323.992 | 323.608 | 0.384 |
+| 5043 | 167.953 | 167.894 | 0.059 |
+
+The six later records point toward delayed retirement rather than delayed return
+from the guest sleep. The first also contains substantial post-retirement delay.
+Nearby queue-gate reports show substantial time before first pump inspection,
+including a window with 964495 us there and zero in inspected-head gates.
+This is not evidence that GPU execution itself consumed the whole wait.
+
+Code inspection supplies a concrete suspect: the pump's every-60-retire report
+in `xv_pump_retire` calls ordinary `XV_LOG` outside a report scope. `xv_log_write`
+therefore calls `log_write_immediate`, including file writes and a sink mutex,
+on the GXM pump thread. The main gameplay report already uses the asynchronous
+report writer, but that does not automatically cover other producer threads.
+The periodic alignment is strong evidence to investigate this path, not direct
+measurement of time inside the logger. Preserve this distinction.
+
+Ordinary CPU Present interval samples (360p, same active shader trial):
+
+| Segment | Samples | Mean ms / FPS | p95 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: |
+| Lifepod | 720 | 56.278 / 17.77 | 73.407 | 173.632 |
+| Firing | 68 | 78.614 / 12.72 | 105.154 | 133.465 |
+| Moving outside | 74 | 72.489 / 13.80 | 101.435 | 255.216 |
+| Outdoor | 875 | 51.614 / 19.37 | 60.504 | 104.614 |
+
+Outdoor endpoint screenshot confirms the expected scene. No 200+ ms outdoor
+hitch occurred in this short sample; this does not establish a fix or sustained
+20 FPS. No controls remain held. Collector sessions are terminal.
+
+Next implementation: independent bounded asynchronous periodic pump reports,
+without stealing the existing guest report builder or changing GPU ownership.
+Retain error/critical reporting and explicit queue/full/failure behavior; test
+concurrent producers and flush/shutdown guarantees before deploying. Do not
+simply wrap the pump with the existing single-owner report scope: a collision
+could push the much larger guest report back onto synchronous file I/O.
