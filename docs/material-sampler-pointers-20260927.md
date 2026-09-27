@@ -38,3 +38,39 @@ ownership requirements. Qualify Vita compiler output and production integration,
 then add a tracked build switch and measure ordinary gameplay before promotion.
 No Makefile default or currently installed build was changed. Preserve the other
 qualified optimizations and the a30-perf211 save namespace.
+
+## Lifetime review: narrow the shortcut to stack slots
+
+`xv_render_view_mirror` preserves active shadow/image-copy entries, but
+`xv_render_view_watchdog` explicitly restores mappings from another thread.
+Therefore the initial table-pointer shortcut is not promoted. The revised
+candidate translates the texture destination at each original store. Only the
+8-byte stack span is retained; image-page stack addresses decline as well.
+The normal overlapped helper stack is a kernel-owned high allocation made once
+in scene configuration (`xk_scene_thread.c`), outside the low physical pages
+shadowed by render view. The sequence has no guest calls/yields and does not
+retain pointers after returning. Existing object-worker/diagnostic admission
+rules remain unchanged. This does not add safety to the pre-existing emergency
+watchdog race; it avoids introducing a stale image pointer across that recovery.
+
+Revised stack-only results:
+
+- Host and Pi: 16,384 exact full-context/memory cases each, including an injected
+  texture-page remap between individual stores. This models observable remapping,
+  not a full concurrent watchdog execution. Receipts remap-host.log/remap-pi.log.
+- A mutant restoring the cached texture-table pointer fails at stage 0 case 1036;
+  the new coverage detects the specific stale-mapping behavior.
+- Stack-only Pi baseline/candidate/candidate/baseline measured
+  142.177 / 84.906 / 84.838 / 144.306 ns/group, before adding the image-page
+  decline and remap-injection fixture. This remains a supporting microbenchmark.
+- Retained generated-instruction fixture: owner/helper 4,096 cases each passed
+  with stack-only translation, plus diagnostic fallback (stack-guest.log).
+- VitaSDK compiled the final remap fixture to an ARM object. No linked gameplay
+  executable or Vita runtime equivalence claim follows from that compile.
+
+Makefile integration now offers XV_MATERIAL_SAMPLER_POINTERS=0 (default) or 1,
+requires native sampler enablement, and tracks flag changes for xd3d.o only.
+`tools/test_sampler_pointer_build.py` verifies repeat builds, 0→1→0 transitions,
+unaffected unrelated objects, and rejection of invalid flag combinations.
+Next step: isolated Vita build retaining perf273 settings and generated code,
+then ordinary gameplay measurement. Perf273 remains installed; no update yet.

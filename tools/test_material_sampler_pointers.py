@@ -31,6 +31,16 @@ static unsigned char memory[MEM], initial[MEM], expected[MEM];
 static uint32_t pt[1u<<20];
 uint8_t *g_xram = memory;
 uint32_t *g_xpt = pt;
+static unsigned remap, write_index;
+#undef X_GW
+static void *write_pointer(uint32_t a) {
+    unsigned word=(a-0x18f180u)&127u;
+    if(remap && a>=0x18f180u && a<0x18f380u && word>=40u && word<=60u) {
+        pt[0x18f]=((write_index++&1)?4:2)*4096;
+    }
+    return X_G(a);
+}
+#define X_GW(a) write_pointer((uint32_t)(a))
 static uint32_t rng=713;
 static uint32_t next(void) { rng ^= rng<<13; rng ^= rng>>17; rng ^= rng<<5; return rng; }
 static void fill(void *p, size_t n) { unsigned char *b=p; while(n--) *b++=next(); }
@@ -71,9 +81,11 @@ int main(int argc, char **argv) {
             c=(xctx *)(memory+pt[0x18f]);
             memcpy(c,&local,sizeof local);
         }
+        remap=(k&4)!=0; write_index=0;
+        uint32_t mapping=pt[0x18f];
         saved=*c; memcpy(initial,memory,MEM);
         reference(c,stage); want=*c; memcpy(expected,memory,MEM);
-        memcpy(memory,initial,MEM); *c=saved;
+        memcpy(memory,initial,MEM); *c=saved; pt[0x18f]=mapping; write_index=0;
         xv_material_sampler_defaults(c,stage);
         if(memcmp(c,&want,sizeof want)||memcmp(memory,expected,MEM)) {
             fprintf(stderr,"mismatch stage %u case %u\n",stage,k); return 1;

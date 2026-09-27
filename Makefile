@@ -2768,6 +2768,29 @@ $(BUILD)/material-sampler.config: force-material-sampler-config
 	@rm -f $@.tmp
 $(MATERIAL_SAMPLER_OBJS): $(BUILD)/material-sampler.config recomp/kernel/xk_material_sampler.h
 
+# Call-local sampler stack translations; defaults remain unchanged.
+XV_MATERIAL_SAMPLER_POINTERS ?= 0
+ifneq ($(words $(XV_MATERIAL_SAMPLER_POINTERS)),1)
+$(error XV_MATERIAL_SAMPLER_POINTERS must be 0 or 1)
+endif
+ifneq ($(filter $(XV_MATERIAL_SAMPLER_POINTERS),0 1),$(XV_MATERIAL_SAMPLER_POINTERS))
+$(error XV_MATERIAL_SAMPLER_POINTERS must be 0 or 1)
+endif
+ifeq ($(XV_MATERIAL_SAMPLER_POINTERS),1)
+ifneq ($(XV_NATIVE_MATERIAL_SAMPLER),1)
+$(error XV_MATERIAL_SAMPLER_POINTERS requires XV_NATIVE_MATERIAL_SAMPLER=1)
+endif
+endif
+$(RECOMP_BUILD)/kernel/xd3d.o: RECOMP_CFLAGS += -DXV_MATERIAL_SAMPLER_POINTERS=$(XV_MATERIAL_SAMPLER_POINTERS)
+.PHONY: force-sampler-pointers-config
+force-sampler-pointers-config:
+$(BUILD)/sampler-pointers.config: force-sampler-pointers-config
+	@mkdir -p $(BUILD)
+	@printf '%s\n' '$(XV_MATERIAL_SAMPLER_POINTERS)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xd3d.o: $(BUILD)/sampler-pointers.config
+
 # Opt-in instruction-footprint experiment for the material/constant guest units.
 # Unit numbers can change after lifting; select actual function definitions.
 XV_RENDER_GUEST_SIZE ?= 0
