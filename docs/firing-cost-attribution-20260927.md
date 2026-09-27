@@ -231,3 +231,27 @@ Next: inspect remaining 59550 effect/model preparation outside the optimized
 597CB inner loop, using the existing child profile before adding instrumentation.
 Prioritize removing repeated work without changing effect output, scheduler
 handoffs or draw order. No further hardware A/B trial is queued.
+
+## Remaining 59550 preparation: focused Pi probe
+
+Source inspection finds a six-dword REP MOVS at 59667 and separate double
+sine/cosine operations at 59672/5967F before the sprite loop. Runtime MOVS
+already copies page-contained spans in bulk and preserves forward-overlap
+semantics; replacing it with a blind memcpy is not a justified optimization.
+59200 also contains point/direction-transform children, so its inclusive timing
+cannot be treated as removable wrapper overhead.
+
+A private probe in ../sprite-preparation-phase-pi adds scopes at those three
+instruction addresses, including the generated x87 fallback copies. Initial
+preparation stopped on the duplicate MOVS assertion before emitting a unit;
+inspection confirmed one normal and one fallback occurrence. The final audit
+requires two MOVS scopes plus normal/fallback sine and cosine scopes. Removing
+all six observer pairs exactly restores the original 59550 body. Existing
+597CB candidate and child observers remain unchanged.
+
+The ARM harness built successfully. A single planned 120-second run is active
+on Pi cores 0/1 (exec session 25252); no other harness/halo/compiler process
+was observed on Pi before launch. Poll that handle and inspect run-result.json
+and run.log when terminal; do not duplicate the run. Scope timings include
+observer overhead and are not Vita FPS. Perf277 remains installed and the Vita
+lease was renewed. No production code or math behavior changed this turn.
