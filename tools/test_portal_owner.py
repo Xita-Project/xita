@@ -33,16 +33,32 @@ def main():
     linker=['-Wl,--gc-sections,--wrap=xv_native_clip_region_init,--wrap=xv_native_clip_region_override,--wrap=xv_clip_region_compatible','-lm']
     results=[];commands=[]
     for name,fixture,cases in [('backend',a.out/'backend.c',['admission']),
-            ('owner',ROOT/'tools/tests/portal_owner.c',[None])]:
-        cmd=[*common,str(fixture),*sources,*linker,'-o',str(a.out/name)]
+            ('owner',ROOT/'tools/tests/portal_owner.c',[None]),
+            ('scene',ROOT/'tools/tests/portal_scene.c',[None,'off'])]:
+        cmd=[*common,*(['-DXV_THREAD_PAGE_TABLE=1'] if name=='scene' else []),str(fixture),*sources,*linker,'-o',str(a.out/name)]
         with (a.out/(name+'-compile.log')).open('w') as f:subprocess.run(cmd,stdout=f,stderr=subprocess.STDOUT,check=True)
         commands.append(cmd)
         for case in cases:
             cmd=[str(a.out/name)]+([case] if case else [])
             r=subprocess.run(cmd,capture_output=True,text=True,timeout=60,env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0'))
-            (a.out/(name+'-run.log')).write_text(r.stdout+r.stderr)
+            (a.out/(name+('-'+case if case else '')+'-run.log')).write_text(r.stdout+r.stderr)
             results.append(dict(name=name,case=case,exit_code=r.returncode,output=r.stdout.strip()))
             (a.out/'result.json').write_text(json.dumps(dict(results=results,commands=commands),indent=2)+'\n')
             r.check_returncode();print(r.stdout.strip(),flush=True)
+
+    # Compile production guard bodies, retaining only their reachable code.
+    for name in ('view','stack'):
+        cmd=[*common,'-DXV_THREAD_PAGE_TABLE=1','-DXV_RENDER_VIEW=1','-DXV_SCENE_THREAD=1',
+             '-I'+str(ROOT/'runtime'),str(ROOT/f'tools/tests/portal_{name}_guard.c'),
+             '-Wl,--gc-sections','-lm','-o',str(a.out/name)]
+        with (a.out/(name+'-compile.log')).open('w') as f:
+            subprocess.run(cmd,stdout=f,stderr=subprocess.STDOUT,check=True)
+        commands.append(cmd)
+        r=subprocess.run([str(a.out/name)],capture_output=True,text=True,timeout=60,
+                         env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0'))
+        (a.out/(name+'-run.log')).write_text(r.stdout+r.stderr)
+        results.append(dict(name=name,exit_code=r.returncode,output=r.stdout.strip()))
+        (a.out/'result.json').write_text(json.dumps(dict(results=results,commands=commands),indent=2)+'\n')
+        r.check_returncode();print(r.stdout.strip(),flush=True)
 
 if __name__=='__main__':main()

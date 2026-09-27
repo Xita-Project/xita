@@ -18,6 +18,7 @@
  * Exit: restore, merge (copy != pristine -> live). XV_RENDER_VIEW_COPYBACK=0 skips the merge. */
 #include "xk.h"
 #include "xk_render_view.h"
+#include "xk_scene_thread.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -567,6 +568,12 @@ void xv_render_view_prepare(void)
     if (!early_finish()) { if (merged_slot) memset(merged_slot, 0, L.shadow_pages); copy_in(1); }
     prepare_us += xk_os_monotonic_us() - t0; prepared = 1;
 }
+int xv_render_view_owns_scene_context(const void *context)
+{
+    /* Identity first: only the helper may inspect its binding state. */
+    if(!xv_scene_thread_owns_context(context))return 0;
+    return ready && bound && thread_mode && rt && X_PT==rt->entries;
+}
 void xv_render_view_enter(unsigned *scope, void *context)
 {
     (void)context;
@@ -717,6 +724,7 @@ void xv_render_view_report(unsigned frames)
 }
 #else
 int xv_render_view_enabled;
+int xv_render_view_owns_scene_context(const void *context) { (void)context;return 0; }
 void xv_render_view_configure(void) {}
 void xv_render_view_present(unsigned frame) { (void)frame; }
 void xv_render_view_enter(unsigned *scope, void *context) { (void)scope; (void)context; }

@@ -8,3 +8,5 @@ void xv_scene_thread_report(unsigned frames);
 
 int xv_scene_thread_owns_context(const void *context); /* active helper copy only */
 uint32_t xv_scene_thread_context_generation(const void *context);
+
+int xv_scene_thread_stack_bounds(const void *context,uint32_t *low,uint32_t *high);

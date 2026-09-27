@@ -39,12 +39,50 @@ complete fallback state and the enclosing recursive traversal on ARM, then
 capture hardware admission counts and ordinary gameplay. Do not claim the full
 2.9 ms can be removed: traversal/projection work and fallback remain.
 
+## Candidate implementation and qualification
+
+The un-deployed candidate adds process-start opt-in `XV_SCENE_PORTAL=1`.
+The scene route requires real helper identity, its copied context, a valid
+non-wrapping generation, overlap stack bounds and a bound thread render view.
+It bypasses only the guest-owner controller; diagnostics, exact caller layout,
+budget, finite inputs, mapping/alias checks and numeric fallback remain.
+Explicit `XV_NATIVE_CLIP=0` or `XV_CLIP_REGISTERS=0` disables this route too.
+Scene acceptance/decline counters are atomic and reported separately.
+
+Review caught two global-versus-thread-table mistakes before deployment:
+the new view admission compared `g_xpt` instead of `X_PT`, and the existing
+adapter validated spans through `g_xpt` while guest reads used `X_PT`.
+Both now use the actual thread table. Tests provide distinct tables: a physical
+alias only in the helper table must decline; an alias only in the live table
+must not reject valid helper data. No broad memory-view or scheduling rewrite
+is included.
+
+Host ASan/UBSan and static ARM Linux binaries on Raspberry Pi core 0 pass:
+
+- 33 existing backend admission checks and 25 native-owner decline checks.
+- Scene route acceptance without initializing the guest-owner controller,
+  complete-state declines, default-off behavior, and 64 owner/helper output
+  equivalence cases, including FP state reset between each pair.
+- Actual production render-view admission with distinct live/helper tables.
+- Actual production scene helper identity, generation and private stack bounds,
+  including rejection from another pthread.
+
+The adapter fixture mocks scene identity/binding services; the last two fixtures
+exercise the production guards independently. This is not an end-to-end Vita
+scheduler proof or a replacement for the enclosing generated traversal test.
+Production Vita compilation of the three changed C units passes using the
+perf266 build flags. No new VPK has been packaged or deployed yet.
+
+Private receipts: `../portal-helper-candidate/host-tables/`, `guards/`, `pi/`,
+and `object-build-result.json`. `tools/test_portal_owner.py` now also includes
+the production guard fixtures for future runs. The next gate is ARM enclosing
+recursive traversal equivalence, then hardware admission counts and ordinary
+gameplay. There is no measured FPS gain for this candidate.
+
 ## Hardware status
 
-The normal-settings restore coordinator (session 7406) ended after its 180-second
-readiness deadline with connection refused. The preceding companion quit/launch
-was acknowledged, but dashboard/readiness never returned, so no normal-settings
-launch or new awake lease is confirmed. Perf266 remains the last installed build;
-no additional restart or upload was sent. A screen-status question is pending.
-Offline implementation can continue; the performance goal is not blocked by
-this hardware contact issue alone and remains unmet.
+The user reported LiveArea or sleep after the first normal-settings restore
+failed its readiness deadline. One subsequent companion launch succeeded;
+normal a30 launch inputs completed and the remote endpoint returned on perf266.
+The keep-awake lease was renewed. Perf266 remains installed; the candidate above
+has not changed the device. The sustained-20-FPS goal remains unmet.

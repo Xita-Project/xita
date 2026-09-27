@@ -12,3 +12,5 @@ void xv_render_view_report(unsigned frames);       /* periodic log line */
 void xv_render_view_mirror(uint32_t vpage, uint32_t arena_off);  /* live table write -> render table */
 void xv_render_view_fiber_switch(void);
 void xv_render_view_watchdog(void);                /* remote thread: restore the live mapping if a scene is stuck */            /* guest scheduler leaving the scene's thread: publish + drop to live */
+
+int xv_render_view_owns_scene_context(const void *context);

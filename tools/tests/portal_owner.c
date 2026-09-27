@@ -35,7 +35,10 @@ static void geometry(void)
     X_M32(0x1f0a68)=0;X_M32(0x1f0a78)=0x3f800000;
     X_M64(0x1f0af8)=UINT64_C(0x3f1a36e2e0000000);
 }
-int main(void)
+#ifndef PORTAL_OWNER_MAIN
+#define PORTAL_OWNER_MAIN main
+#endif
+int PORTAL_OWNER_MAIN(void)
 {
     g_xram=malloc(ARENA_BYTES);g_img_base=g_xram;g_xpt=calloc(1<<20,4);
     assert(g_xram&&g_xpt);

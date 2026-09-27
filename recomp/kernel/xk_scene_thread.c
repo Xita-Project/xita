@@ -183,6 +183,13 @@ uint32_t xv_scene_index_stack(const void *context)
 {
     return xv_scene_thread_owns_context(context) && overlap ? scene_stack : 0;
 }
+int xv_scene_thread_stack_bounds(const void *context,uint32_t *low,uint32_t *high)
+{
+    if(!xv_scene_thread_owns_context(context) || !overlap || !scene_stack ||
+       scene_stack>UINT32_MAX-SCENE_STACK_BYTES) return 0;
+    *low=scene_stack;*high=scene_stack+SCENE_STACK_BYTES;return 1;
+}
+
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -621,7 +628,7 @@ void xv_scene_thread_report(unsigned frames)
     scene_wall_us = 0; scene_wall_n = 0;
     ws_report();
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
-    scene_census_report(); overlap_report(); proxy_report(); phase_report(frames); { extern void xv_hle_time_report(unsigned) __attribute__((weak)); if (xv_hle_time_report) xv_hle_time_report(frames); }
+    scene_census_report(); overlap_report(); proxy_report(); phase_report(frames); { extern void xv_portal_polygon_scene_report(unsigned) __attribute__((weak)); if(xv_portal_polygon_scene_report)xv_portal_polygon_scene_report(frames); } { extern void xv_hle_time_report(unsigned) __attribute__((weak)); if (xv_hle_time_report) xv_hle_time_report(frames); }
 }
 #elif defined(XV_SCENE_THREAD) && XV_SCENE_THREAD
 /* Host (Linux) version of the same mechanism: a pthread helper and two POSIX semaphores. Host fibers are
@@ -670,6 +677,13 @@ uint32_t xv_scene_index_stack(const void *context)
 {
     return xv_scene_thread_owns_context(context) && overlap ? scene_stack : 0;
 }
+int xv_scene_thread_stack_bounds(const void *context,uint32_t *low,uint32_t *high)
+{
+    if(!xv_scene_thread_owns_context(context) || !overlap || !scene_stack ||
+       scene_stack>UINT32_MAX-SCENE_STACK_BYTES) return 0;
+    *low=scene_stack;*high=scene_stack+SCENE_STACK_BYTES;return 1;
+}
+
 #define OWNER_D3D 48
 static struct { const char *name; unsigned n; } owner_d3d[OWNER_D3D]; static unsigned owner_d3d_n, owner_d3d_over;
 int xv_scene_thread_on_helper(void);
@@ -975,12 +989,13 @@ void xv_scene_thread_report(unsigned frames)
     XK_LOG("[scene-thread] %u frames: dispatched %u, owner wait %.2f ms/frame (max %.1f ms), nested declines %u\n",
            frames, dispatched, dispatched ? (double)wait_us / dispatched / 1000.0 : 0.0, wait_max_us / 1000.0, declined_nested);
     dispatched = 0; wait_us = wait_max_us = 0; declined_nested = 0;
-    scene_census_report(); overlap_report(); proxy_report(); phase_report(frames); { extern void xv_hle_time_report(unsigned) __attribute__((weak)); if (xv_hle_time_report) xv_hle_time_report(frames); }
+    scene_census_report(); overlap_report(); proxy_report(); phase_report(frames); { extern void xv_portal_polygon_scene_report(unsigned) __attribute__((weak)); if(xv_portal_polygon_scene_report)xv_portal_polygon_scene_report(frames); } { extern void xv_hle_time_report(unsigned) __attribute__((weak)); if (xv_hle_time_report) xv_hle_time_report(frames); }
 }
 #else
 int xv_scene_thread_active(const void *guest_thread) { (void)guest_thread; return 0; }
 /* Only the active helper may admit its private copied context. Check thread
  * identity first so other threads never inspect helper-owned state. */
+int xv_scene_thread_stack_bounds(const void *context,uint32_t *low,uint32_t *high) { (void)context;(void)low;(void)high;return 0; }
 int xv_scene_thread_owns_context(const void *context) { (void)context; return 0; }
 uint32_t xv_scene_index_stack(const void *context) { (void)context; return 0; }
 uint32_t xv_scene_thread_context_generation(const void *context) { (void)context; return 0; }
