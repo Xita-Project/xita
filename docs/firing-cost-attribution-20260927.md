@@ -2377,3 +2377,12 @@ then auditpackage. Do NOT deploy first build mislabeled289. Revisionalready
 ccaa61b9. Expected changescode013 plusfourversionconsumers; assets only
 game-a.self/boot-game.txt, retained updatercontract. No deployment yet.
 Vita remains289 outsidepod, no active gameplaycollector. Goal unmet.
+
+
+Perf290 build29368 remains live (compiler code013 observed~99%CPU).
+Started finalizer7300: waits for actual first-build PID1374466/startidentity
+to disappear, requires first result rc0, preserves first log/result, then
+corrects version.json290, rebuilds and runs packageaudit. Poll both existing
+handles; do not manually start a duplicate correction/build. No deployment
+automation attached. Version-checked290 launch/pressure scripts prepared.
+Vita status independently still289, awake. This turn verified livebuildwait.
