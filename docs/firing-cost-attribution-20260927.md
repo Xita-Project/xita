@@ -2141,3 +2141,13 @@ collision semantics.
 
 Added halo-universal-performance-review-20260927.md to record overlap rather
 than assume every upstream optimization offers a new gain. Goal unmet.
+
+
+Perf288 build90984 and audit50074 completed rc0. Changed objects: code027,
+code028 and four version consumers. Changed package assets: game-a.self and
+boot-game.txt; updater contract unchanged. Runtime SHA:
+9a6364d92e153f5c05359d4d2212e52475aff60d8ca3d72a0a7e84b1faf42383.
+VPK SHA:9874c41d6aad5a05d1e723258cd795ead13e3850576cdd0302c2e73fb19256f3.
+Announced interruption and started upload; inspect guard-detail-288/deploy.log
+and the live handle before any restart. Prepared 288 versions of launch and
+pressure/encounter collectors. Installation and timing results remain unproven.
