@@ -1011,3 +1011,27 @@ prepared launch-a30.py and collect-idle.py (independent processes; no screenshot
 inside the measured interval). New env replaces C1 placement trial with
 XV_VERTEX_SNAPSHOT_GPU=1, keeps protected a30-perf211 and32 override limit.
 No launch/collector has started, no controls held. No new hardware FPS evidence.
+
+
+## Perf282 installed; Pi restored
+
+Deployment session31798 completed0. Updater confirms verified runtime hash
+1aee4affc198c5272a5c3845f56975869127e107890659dd9d01fa8dca8de13e,
+slot0 and boot_confirmed=true. Independent status confirms perf282/533a6c71 at
+dashboard, timing_frame0. Renewed lease3600; perf279 remains rollback slot1.
+An intermediate connection refusal occurred during the authorized reboot;
+we waited for the same update handle and did not restart it.
+
+User restored Pi connectivity. Recompiled current production capture fixture
+with ARM GCC13, Cortex-A9 Thumb/NEON hard-float and the existing x4-intrinsic
+compatibility header (not scalar fallback). `arm-command.json` captures command.
+All-feature fixture passed on Pi constrained to cores0/1 (`pi.log`), including
+new generation links, pressure/fragmentation, callback mutation and partial
+failure cases. A second run pinned producer/copy to core0 and capture to core1
+also passed (`pi-pinned.log`). Both SSH runs terminal0. These establish ARM
+correctness/concurrency evidence, not physical Vita throughput predictions.
+
+Started ordinary protected a30 launch script session70215; last poll confirmed
+live, log snapshot-gpu-candidate/launch.log. No collector started yet. Re-poll
+same handle, then run collect-idle.py after launch completion. Source and
+hardware unchanged during Pi tests. No perf282 gameplay result available yet.
