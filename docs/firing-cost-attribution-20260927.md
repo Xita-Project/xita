@@ -1595,3 +1595,32 @@ polygon recheck for corrected yield handling, broaden numeric/alias coverage,
 and build only qualified bodies into a private284-derived candidate (retain
 native query/solver hooks). Vita status verified284/b3b52b63, awake renewed.
 All jobs terminal. Sustained NPC20FPS/other acceptance gates still unmet.
+
+## Expanded numeric/alias checks; capsule NaN discrepancy remains
+
+Previous goal turn was progress: fixed preemption synchronization and512 ARM
+capsule cases. This turn expanded fixtures to1024cases. Polygon adds matrix
+aliases to its local plane/vertex storage and a page-crossing matrix; numeric
+inputs include signed zeros, subnormals, maxfinite, infinities and quietNaN.
+Capsule adds plane/vertex special values and synthetic transform-pointer aliases
+(the transform callees remain stubs, so not real transform alias qualification).
+
+Polygon host ASan/UBSan45711 passes1024. Capsule host56173 fails703: final
+context differs but fullarena/calltrace match. Focused O1+sanitizer64596 confirms
+physicalst5 referencefff8000000000000 vs candidate7ff82468a0000000: distinct
+NaN payload/sign in a popped slot. O2 plain85830 passes704cases. Strict gate
+not relaxed. Tool now accepts case-start to reproduce this singlecase.
+Do not claim capsule universally bit-exact; assess target compiler behavior
+and any required exceptional-value fallback before including it.
+
+Both corrected expanded fixtures compiled ARM O2. Remote test16252 running
+sequential polygon1024 then capsule1024, cores0/1; PID9290 polygon confirmed
+alive00:45 at99.9%CPU. Log contact-feature-registers-pi/boundary-arm.log.
+Poll samehandle; no duplicate job. Target production shard usesO2,thumb,
+cortex-a9,neon; these supporting tests stillARM-state GCC13 (not full VitaSDK).
+
+Created private contact-registers-hardware/build-x87 as reflink copy of284
+(1.1GB apparent); not modified/spliced/built/deployed yet. Candidate scope will
+depend on qualification (polygon-only is possible while capsule held). Keep
+all previously restored nativehooks and buffers. Vita284 unchanged;awake renewed.
+No performance win claimed. Goal remains unmet.

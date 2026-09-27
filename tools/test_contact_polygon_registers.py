@@ -55,7 +55,7 @@ def main():
         body_sha256=[hashlib.sha256(b.encode()).hexdigest() for b in bodies],
         plain_candidate=a.plain_candidate), indent=2))
     if not a.build_only:
-        subprocess.run([str(a.output/'contact-polygon-test'), str(a.cases)], check=True, timeout=60)
+        subprocess.run([str(a.output/'contact-polygon-test'), str(a.cases)], check=True, timeout=180)
 
 if __name__ == '__main__':
     main()

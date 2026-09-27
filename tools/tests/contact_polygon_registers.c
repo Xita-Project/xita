@@ -19,6 +19,7 @@ void x_guest_write_pages(uint32_t a,const void *i,size_t n){const unsigned char 
 void xv_preempt(xctx *c){preempts++;hash(c,sizeof *c);c->preempt=3;}
 void xv_trap(xctx*c,uint32_t ip){(void)c;fprintf(stderr,"trap %x\n",ip);abort();}
 static void wf(uint32_t a,float v){x_guest_write(a,&v,4);}
+static const uint32_t numeric_bits[]={0,0x80000000u,1,0x007fffffu,0x7f7fffffu,0x7f800000u,0xff800000u,0x7fc12345u};
 static void observe(xctx*c,unsigned id){calls++;covered[id]++;hash(&id,sizeof id);hash(c,sizeof *c);hash(g_xram,SIZE);
  for(unsigned i=0;i<8;i++)c->st[i]=(double)(scenario+i+1)*0.03125;
  c->fsw=(uint16_t)(scenario*37);c->f_kind=XK_LOGIC;c->f_bits=32;c->f_res=scenario&1;c->f_op1=c->f_op2=0;
@@ -35,11 +36,13 @@ int main(int argc,char **argv){unsigned count=argc>1?strtoul(argv[1],0,0):256;
  xv_host_page_table=g_xpt;
 #endif
  for(scenario=0;scenario<count;scenario++){memset(g_xram,0,SIZE);xctx initial={0};uint32_t sp=0xd003e000,desc=0x40010000,matrix=0x40012000;
+ if(scenario&512){unsigned kind=(scenario>>5)&3;matrix=kind==0?sp-112:kind==1?sp-96:kind==2?0x40012ffcu:0x40012000;}
  initial.r[4]=sp;initial.r[0]=desc;initial.r[6]=(scenario&1)?matrix:0;initial.fsp=(scenario>>1)&7;initial.fcw=0x37f;initial.fsw=scenario;initial.preempt=(scenario&2)?1:100;
  for(unsigned i=0;i<8;i++)initial.st[i]=(double)(i+scenario)*0.125;
  X_M32(sp+4)=0;X_M32(sp+16)=(scenario&16)?0xffffffffu:7;X_M32(desc+0x40)=0x40010ff8;
  for(unsigned i=0;i<13;i++)wf(matrix+4*i,(float)((int)(scenario%7)-3+i)*0.125f);
+ if(scenario&512)X_M32(matrix+4)=numeric_bits[(scenario>>1)&7];
  memcpy(before,g_xram,SIZE);xctx ref=initial;steps=calls=preempts=0;trace=0;contact_polygon_reference(&ref);uint64_t rt=trace;unsigned rc=calls,rp=preempts;memcpy(expected,g_xram,SIZE);
  memcpy(g_xram,before,SIZE);xctx cand=initial;steps=calls=preempts=0;trace=0;contact_polygon_candidate(&cand);
- if(memcmp(&ref,&cand,sizeof ref)||memcmp(expected,g_xram,SIZE)||trace!=rt||calls!=rc||preempts!=rp){fprintf(stderr,"mismatch scenario=%u context=%d memory=%d trace=%d\n",scenario,memcmp(&ref,&cand,sizeof ref),memcmp(expected,g_xram,SIZE),trace!=rt);return 1;}}
+ if(memcmp(&ref,&cand,sizeof ref)||memcmp(expected,g_xram,SIZE)||trace!=rt||calls!=rc||preempts!=rp){fprintf(stderr,"mismatch scenario=%u context=%d memory=%d trace=%d\n",scenario,memcmp(&ref,&cand,sizeof ref),memcmp(expected,g_xram,SIZE),trace!=rt);free(before);free(expected);free(g_xpt);free(g_xram);return 1;}}
  for(unsigned i=0;i<4;i++)assert(covered[i]);printf("PASS %u polygon cases: full context/memory/callee trace/preemption; synthetic callees\n",count);free(before);free(expected);free(g_xpt);free(g_xram);return 0;}

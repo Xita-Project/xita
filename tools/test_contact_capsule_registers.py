@@ -29,6 +29,7 @@ def main():
     p.add_argument('--extra', default='')
     p.add_argument('--build-only', action='store_true')
     p.add_argument('--cases', type=int, default=1000)
+    p.add_argument('--case-start', type=int, default=0)
     p.add_argument('--plain-candidate', action='store_true',
                    help='accept a non-register-lowered experimental body')
     a = p.parse_args()
@@ -55,7 +56,7 @@ def main():
         body_sha256=[hashlib.sha256(b.encode()).hexdigest() for b in bodies],
         plain_candidate=a.plain_candidate), indent=2))
     if not a.build_only:
-        subprocess.run([str(a.output/'contact-capsule-test'), str(a.cases)], check=True, timeout=60)
+        subprocess.run([str(a.output/'contact-capsule-test'), str(a.cases), str(a.case_start)], check=True, timeout=180)
 
 if __name__ == '__main__':
     main()
