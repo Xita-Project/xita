@@ -2294,3 +2294,29 @@ Now collect-path-area.py is running a short further approach/turn followed by
 a settled45second capture; inspect images and path rows before conclusions.
 This uses ordinary controls, no teleport or save writes. Poll existing job.
 Hardware remains289 diagnostic; goal unmet, no new performance improvement.
+
+
+## Perf289 near-target quiet capture; fresh encounter replay
+
+Previous turn made progress: settled outdoor costs and recovered earlier
+expensive guard camera. Path-area job37633 completedrc0:1080intervals,
+39.439ms/25.356FPS,p9556.671,p9960.999,max71.273;177over50ms,noneover100.
+Image shows terrain/tree, no visible active NPCs. Last camera34.06,-107.50,
+60.14 versus old spike33.81,-104.36,59.99. AI remains quiet; location alone
+does not reproduce encounter state. This is NOT a performance gain or
+completion evidence. Controls released, no saves manually written/restored.
+
+Announced same-build restart to replay earlier encounter state. Companion
+nosleep on/quit/launch acknowledged; independent status289/3c54c859 with
+timing_frame0. Job3944 now running existing protected-save launch/readiness
+sequence in private path-detail-289-replay. Poll SAME handle. Prepared
+exit-pod.py (5s+8s forward, boundary image/log) to run AFTER readiness image
+confirms pod. No feature toggles or new build; no repeated on/off benchmark.
+
+Additional source check:13A140 performs path reset then139E30 begin and
+tail-enters inlined1397E0 traversal.139510 matches heap insertion (limit1024,
+node/cost writes,139110 bubble-up). Retail path hash reset is8192bytes via
+REP STOSD, already serviced by xv_x86rt.c page-batched repeated-byte memset.
+Do not claim a new memset optimization or replace existing heap with a heap.
+These are source correlations, not current inner-cost attribution.
+Goal remains unmet; next capture must reproduce AI work before native choice.
