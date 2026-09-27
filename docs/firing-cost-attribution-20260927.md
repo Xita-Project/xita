@@ -1197,3 +1197,46 @@ values including nested work, overhead/preemption and root-pair disabled;
 not comparable to ordinary perf28249ms pod frames as a regression claim.
 Protected save15-file backup remains verified; hardware still282 with startup
 XV_SCENE_PHASES=2. Restore ordinary startup before any FPS acceptance run.
+
+
+## Traversal reproduces sustained owner pressure; six additional objects
+
+Moved forward8s, turned right0.65s/forward7s, then left0.3s/forward8s, releasing
+controls each time. Screenshots encounter-advance1/2/3 show terrain/tree/rock
+approach; third view faces a nearby cliff, not confirmed enemies. advance3.log
+shows C2~97–98%, helper22–23ms and done->noticed47–51ms. Looked back1.2s right,
+released input, then captured30seconds stationary (advance-stationary.log and
+marks). All handles6773/71885/15734/12479 terminal; no controls held.
+
+Pressure persists stationary: C2~97–98%, helper44–45ms, done->noticed20–22ms.
+This rules out *only* the held movement input as the explanation. Last complete
+phase windows compared with prior quiet outdoor report (same diagnostic build):
+
+| Quantity | Quiet | Advanced, stationary |
+|---|---:|---:|
+|Simulation ticks/frame|1.517|1.783|
+|109760 ms/tick|17.288|29.232|
+|Top-level 8FB70 calls/tick|208|214|
+|8FB70 inclusive ms/tick|14.090|23.142|
+|8DDF0 calls/tick|210|222|
+|8DDF0 inclusive ms/tick|6.514|8.187|
+|4B9D0 biped calls/tick|4|10|
+|4B9D0 inclusive ms/tick|0.699|5.209|
+
+AI14A162 now5.12ms/frame (~2.87ms/tick); prior quiet report did not list it
+among top30, which is not proof of zero. Realtime particle cost6.16→6.76ms/frame
+is comparatively similar. Parent times overlap. Private activity-cost-comparison
+JSON stores source values; realtime particle per-tick ratios are descriptive
+only, because that pass runs once/frame. This supports additional active objects
+and more expensive simulation, not just more catch-up ticks or render geometry.
+Visual identification/count of enemies is still unproven; user location question
+pending. Do not state six additional objects are six enemies as established fact.
+
+Next audit remaining biped collision work using existing biped-phase-candidate
+notes before adding any native routine. Native4B9D0 already covers query/solver
+subtrees and remains active. Older docs suggested868F0, but later measurements
+showed empty BSP work in an earlier scene, so that old recommendation cannot
+be applied blindly. Inspect which children grow under this new active-object
+state and preserve collision/simulation behavior. Snapshot cache remains
+provisional; no ordinary FPS acceptance from instrumented run. Hardware282
+still in diagnostic mode2, lease active, save backup unchanged.
