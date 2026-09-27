@@ -34,3 +34,20 @@ installed. Before qualification: audit raw flag-field consumers and run the
 aligned Pi gameplay harness to determine whether any measurable work is saved.
 The small size reduction does not justify expecting the full firing deficit
 to disappear. The sustained hardware 20 FPS objective remains unmet.
+
+## Reconciled prior evidence
+
+A broader artifact search found the same two-site experiment already completed
+under ../object-walk-dead-shifts/. See halo-reference-object-vector.md. Its
+aligned Pi gameplay capture reported firing self 0.64/0.69 ms versus baseline
+0.65/0.66, and identical 0.26 ms settled median. That does not establish a gain.
+The new 10,000-case run extends bounded correctness coverage but is not a new
+optimization lead. Do not repeat the gameplay experiment or promote this
+candidate based on its smaller object. The differently sized reference objects
+also used different header roots; only within-pair size differences are useful.
+
+Raw runtime flag consumers include evaluators, explicit save/restore and native
+verification diagnostics. Active evaluators gate the dormant fields, but this
+is not a complete downstream observational-equivalence proof. Keep the candidate
+private. Return to current hardware scene attribution, rather than spending
+another performance run on this already inconclusive micro-optimization.
