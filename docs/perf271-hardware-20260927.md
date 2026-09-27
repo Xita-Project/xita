@@ -24,3 +24,18 @@ prevents attributing small differences versus perf270 to shader logging alone.
 The goal remains unmet. Next investigate safe diagnostic ownership for the
 newly admitted object workers before hardware promotion, and inspect cold shader
 and slow-frame records for the remaining movement stall.
+
+## Cold shader timing follow-up
+
+Parsed 82 `[shader-load-us]` records into private `shader-times.json`.
+Largest total was 830 us; independent maxima: load 812 us, registration 11 us,
+link 134 us, metadata 99 us. All recorded sources were embedded. Consolidation
+removed synchronous intermediate log writes from the metadata interval; the
+final log write remains outside the timer. Thus the prior 40–49 ms records were
+not evidence of intrinsically expensive shader parameter lookup/compilation.
+This is not a controlled estimate of logging's total frame cost.
+
+Slow frame 10683 was 267481 us, with 267290 us before Present. The remaining
+movement hitch cannot be explained by the measured shader operations in this
+capture. Follow pre-Present game/preparation work and logging; do not spend the
+next optimization on shader precompilation based on the old metadata timings.
