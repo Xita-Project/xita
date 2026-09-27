@@ -95,3 +95,42 @@ with the runtime SHA-256 above. Live status independently reported
 sequence has started with the protected test-save namespace and the same
 32 overrides. The keep-awake lease was renewed. Perf273 remains the rollback
 in slot 0. Installation is verified; gameplay performance is not yet measured.
+
+### Perf274 first gameplay measurement
+
+The ordinary launch reached loaded/active/director gameplay telemetry; the
+lifepod screenshot was inspected and matches the intended saved scene. A
+45-second idle capture contains 720 complete-window frame samples: mean
+57.138 ms (17.502 FPS), p95 74.238 ms, max 92.303 ms, 531 above 50 ms,
+none above 100 ms. Perf273's preceding capture was 55.849 ms (17.905 FPS),
+p95 74.024 ms. This is no demonstrated gain, not a statistically isolated
+regression claim. These are CPU Present intervals at the retained 360p settings.
+Firing/movement/outdoor collection has started; no completion claim yet.
+
+### Completed perf274 gameplay test and disposition
+
+| Interval | Samples | Mean ms | FPS | p95 ms | Max ms | >50 / >100 ms |
+|---|---:|---:|---:|---:|---:|---:|
+| fire | 67 | 80.378 | 12.441 | 109.210 | 135.106 | 65 / 5 |
+| move | 80 | 67.562 | 14.801 | 92.041 | 262.462 | 78 / 4 |
+| outside | 930 | 48.591 | 20.580 | 58.278 | 90.258 | 215 / 0 |
+
+Firing and outdoor screenshots were inspected: the rifle fired/reloaded and
+movement exited the pod into the expected canyon scene. No crash was observed
+in this short sequence; this does not qualify AI, audio, cutscene, checkpoint
+resume or 15-minute stability. Outdoor average remains above 20 FPS but its
+215 frames above 50 ms do not establish sustained completion.
+
+No interval demonstrates a useful gain against perf273. The size option stays
+opt-in/default-off; a rollback to the previous confirmed perf273 executable
+was requested. Confirmation must come from live version status. Existing
+qualified optimizations remain intact. Do not repeat this compiler-size trial
+without a new mechanism. The movement hitch persists (262.462 ms), with a
+222.535 ms save write in the movement interval; exact causal alignment remains
+unproven. Next work should target repeated material/HLE work or the established
+checkpoint I/O ownership problem, not another broad wrapper rewrite.
+
+Rollback confirmed by live status: 0.2.0-perf.273 / 5f316bea, timing_frame=0
+at dashboard. A fresh 3600-second awake lease succeeded. Private receipt:
+../material-size-hardware/rollback-status.json. No jobs remain running from
+the perf274 collection.
