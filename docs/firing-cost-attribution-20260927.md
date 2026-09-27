@@ -288,3 +288,36 @@ build receipts under host/ and pi/. No candidate is staged or deployed. Next
 check B5DF0's frequency beneath 59200 and qualify its real-callee integration
 with the current sprite candidate before deciding if this small leaf is worth
 a Vita trial. Perf277 and the protected a30 save remain unchanged.
+
+## Rotation real-callee integration completed
+
+Private rotation-transform-candidate/gameplay starts from the previous sprite
+integration harness, replaces B5DF0 only in code_016, and adds two 59200 child
+scopes in code_010. Its reference body matches both the installed build and
+the older Pi harness. A private scene reporter prints uncensored counts for
+parent 59200 before the ordinary top-30/top-eight lists consume them. No game
+state, scheduling or rendering policy changed. Build succeeded; one 120-second
+Pi cores 0/1 run finished with planned exit 124. Bounded fatal/panic/nonzero
+mismatch/scope-omission checks found no matches. This headless integration is
+not a visual, audio or physical-Vita correctness test.
+
+Across 34 reported 60-frame groups, each transform child ran 387,518 times
+(~189.96/frame). B5DF0 totaled 190,111 us (~0.0932 ms/frame); B5EA0 totaled
+195,129 us (~0.0957 ms/frame). Timings include observers and are not Vita
+measurements. The rotation leaf is a small qualified candidate, not evidence
+of a large missing optimization. Retain its fixture and private candidate for
+a future justified bundle; do not launch a standalone Vita trial for this
+small Pi subtree. Both build and run are terminal; no job needs resuming.
+
+A source inventory lists 302 functions with old memory x87 bodies and an
+available historical register body. This is only an inventory: some have
+native replacements, intentional exclusions, or changed code. Do not blanket
+restore them or call this a regression count. Private lowering-inventory.json
+records the candidates. B5E40 remains excluded for the known NaN discrepancy.
+
+Next larger boundary: 66510's 66390 draw-dispatch child (~0.42 ms of ~1.67 ms
+on the older Pi profile). Inspection shows calls into 7A130/7A1F0/7A2F0/7A3D0,
+so the inclusive cost is not free-standing transform work. Attribute its active
+draw path before proposing a wrapper rewrite; preserve existing draw ordering
+and consult prior 7A130/material studies to avoid repeating them. Perf277 is
+still installed; no hardware update or FPS claim follows this Pi run.
