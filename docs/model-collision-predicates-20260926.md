@@ -92,3 +92,42 @@ The second scripted burst and steady post-fire interval were not completed.
 Do not deploy on this partial evidence. A complete comparable cost capture and
 Vita qualification remain outstanding. Source/recompiler defaults and installed
 perf269 are unchanged; the one-hour Vita awake lease was renewed during work.
+
+## Completed follow-up capture
+
+The prior job was terminal before a new, uniquely named capture was started.
+`codex-model-predicates-full-20260926` completed its intended 180-second timeout
+(exit 124), with 88 reports through host frame 5280. Both scripted input windows
+and the post-input interval elapsed. No fatal/trap or tick-scope overflow/omission
+matches were found in the retained log. This is a bounded headless integration
+check, not rendering verification or a hardware stability pass.
+
+Private `full-command.json`, `full-result.json`, `full.log`, `full-summary.json`
+and `linked-size.json` preserve the run. The instrumented ARM-mode linked
+1731D0 is 0xda8 bytes versus 0xe88 in the prior aligned harness; this differs
+from the uninstrumented Thumb size comparison above.
+
+At report 1920 the candidate's model-collision loop is 0.68 ms inclusive,
+0.19 ms self. Older aligned reports showed 0.17–0.21 ms self in firing-adjacent
+windows. These are not matched workloads: the reconstructed environment and
+system activity are not identical, and the second scripted burst has no
+comparable rise in collision work. Input scheduling does not prove weapon
+firing occurred as intended. Consequently this capture establishes no speedup
+or regression. Retain the candidate privately; do not promote based on size.
+
+The larger parent paths at report labels 1860/1920 are:
+
+- Sound loop 2BB70: 5.67/5.39 ms inclusive; actual obstruction casts beneath it
+  F01721B0: 4.72/4.44 ms (nested, not additive).
+- Object update 900E0: 5.40/6.03 ms, almost entirely 8FB70.
+- 8FB70 children include 90950 at 2.18/2.70 ms and pose 8DDF0 at
+  1.76/1.81 ms. Existing native pose/math work remains relevant.
+- 90950 includes 4C980 at 1.05/1.08 ms (its native work is already implemented)
+  and callback 39450 at 0.52/0.98 ms. Inspect 39450's children and prior worker
+  fault findings before changing its scheduling; this is a new attribution
+  lead, not permission to dispatch the callback unsafely.
+
+All values above are instrumented Pi elapsed observations, not Vita estimates.
+Next prioritize the larger callback/obstruction branches rather than repeat
+this small predicate experiment. Perf269 remains reachable on hardware and
+its 3600-second keep-awake lease was renewed. No build was installed this turn.
