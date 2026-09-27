@@ -1680,3 +1680,26 @@ status285/bef4017f timingframe0/dashboard. Awakelease renewed3600.
 Protected a30 launch42023 now active; logcontact-registers-hardware/launch-fast.log.
 Poll existinghandle; scriptedbuttonsequence has finallypadrelease. No285
 gameplay/FPS evidence yet.284rollback remains in slot0 and packaged.
+
+## Perf285 normal a30 pod sample; gameplay sequence running
+
+Launch42023 completedrc0 with finallypadrelease. Screenshot atsequenceend
+stillloading; noblindextra buttons/restart. Collector24008 waited for loaded1/
+active1/director1 (actualmapI/Ocontinued), then completedrc0. Both idlebefore/
+after images inspected: same lifepod view, AR60/120reserve, no visiblecombat.
+840samples48.799888ms/20.49185FPS,p9559.076,p9966.391,max76.102;265>50ms,
+none>100ms. This is notsustained20acceptance and not a controlledcausal gain
+versus284's outdoor sample. Noimmediate visible regression in this view.
+
+Started collect-gameplay.py session74189:fire7450–7536,move7794–7878 recorded;
+45secondpostmovementinterval thenlogcapture stillactive. Boundaryscreens need
+inspection; noresultclaimed yet. Poll existinghandle; don't overlapcontrols.
+
+Audit before285fullsessionlog: no whole-objectworker initialization markers,
+while root-paircounts active. xd3d_object_jobs_ready strictviewportlag1 and
+90stableframes reset underlag0 catch-up ticks. This is a documented intentional
+gate (olderperf144 tolerantwholecallbacktrial121ms vs67ms), not newlydiscovered
+missingmulticore support. Core0/1 stillrunrender/capturework. Do not blindly
+removegate: wholecallbacksreorder sharedgame state and are explicitlyunproven.
+CurrentNPC ownerupdatepressure remains; further targetednative/purejob work
+needed alongsidepolygon. Goalunmet.
