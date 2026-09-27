@@ -1917,3 +1917,30 @@ renewlease, run prepared launch-diagnostic.py (protected a30 save), collect-idle
 inspect images, and collect-encounter.py (includes5sec pod exit before oldroute).
 Prepared input sequences always release pad. Existing285 package is rollback.
 No286gameplay evidence yet. Goal unmet.
+
+
+## Perf286 boot confirmed; user NPC session recovered
+
+Deployment53376 terminalrc0: runtimeSHA matched, slot0 boot confirmed.
+Independentstatus286/28034fec at timingframe0; dashboard log confirms waiting for
+Launch Game. User reported moving to many NPCs. Paused launch to preserve prior
+session first: archived log slot1 fetched9532 terminalrc0,19048722bytes to
+actor-detail-286/user-npc-previous.log, identifies285/bef4017f and ends update
+handoff. Current user-npc.log is dashboard-only, NOT gameplay evidence.
+
+Last600 complete archived intervals end56340: mean99.8194ms/10.0181FPS,
+p95121.253,p99138.647,max155.787;600>50ms,248>100ms,0>200ms.
+User supplies NPC-heavy scene identification; no synchronized screenshot.
+Adjacent latest phase window FA9205997290/60=99.955ms inclusive; helper CPU59.95,
+wall73.70,done-to-noticed32.96ms. Overlapping/nested reports, not additive self
+costs or exact per-frame alignment. Nearby C0~55–62%,C1~86–92%,C2~92–96%.
+Final frame aggregate9.2FPS,363draws/frame,decode0; substantial owner AND render
+work. Do not repeat earlier quiet-scene helper33ms as this NPCscene's cost.
+Nativefeaturecalls2293/60frames with0declines; mode2 means not active differential
+verification. Evidence strengthens actorpressure but not exact internalroutine.
+
+Explained findings to user and started prepared protected launch65006, currently
+active; poll samehandle. Owner phases2/nativehooks2/snapshotGPU1, savea30-perf211.
+No collector yet; do not overlapinputs. After launch completes, telemetry-readiness
+collector and image qualification before traversal. Awakelease renewed; no claim
+286gameplay or FPS improvement yet. Goal unmet.
