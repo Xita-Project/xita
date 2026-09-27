@@ -104,3 +104,10 @@ Receipts are in private ../worker-readiness-hardware/.
 
 Pre-update perf271 log preserved (8,166,181 bytes). Update upload has started;
 installation requires a verified boot receipt, not just completion of upload.
+
+Deployment completed: updater verified the runtime hash, selected slot 1 and
+confirmed boot. Live status reports `0.2.0-perf.272 / 36f7b0ed` at the dashboard
+with timing_frame=0. Perf271 remains slot 0. One-hour awake lease renewed by
+update/launch. The a30 launch sequence is running with unchanged 32 settings,
+360p and protected `a30-perf211` test-save namespace. No perf272 gameplay result
+yet; inspect actual worker admissions as well as full-frame intervals.
