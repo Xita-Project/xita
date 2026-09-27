@@ -776,3 +776,33 @@ pi-core1.log records connection failure, not a passing test. All handles termina
 Continue VitaSDK build/audit while Pi unavailable; repeat Pi pinned run when
 reachable. Hardware whole-frame test remains necessary to determine whether
 C1 model-worker contention offsets improved C0 recording overlap.
+
+## Perf281 C1-placement build and deployment
+
+VitaSDK build succeeded (session65847 terminal). Private capture-core-candidate
+build retains perf279 generated code, queue32, publication1, and adds only the
+new runtime capture affinity option plus version281/6e26db37. Package audit
+confirms all generated objects identical to perf277; capture object and version
+consumers changed, main/UI/remote/dashboard source unchanged. Only game-a.self
+and boot-game.txt repacked; assets/launcher contract unchanged.
+Runtime SHA256 1a5d477b9caab117f440e72dda5fac193cd71c497c3ec5d762eff275198865df;
+package SHA256 934a2de8dae5bae87368dfd09c4a89120098f359aa856da606464ea7d0e97db8.
+Prepared launch sets XV_CAPTURE_CORE=1 in place of explicit FRAME_QUEUE_TIMING
+override to fit32 entries; other normal settings and protected save unchanged.
+Wait-only/draw profiling off. Default remains C0 outside this startup override.
+
+Pi recheck still no route to192.168.0.9; ARM binary execution remains unverified.
+Host24/pinned24/sanitizer24 tests passed as recorded. Affinity change preserves
+all publication/device barriers and single-producer/worker ownership; vertex
+upload implementation has no guest-context/TLS/core binding dependency found
+in this audit. Proceeding to authorized physical trial, without presenting host
+checks as Vita driver validation. Update/apply active session56241; require boot
+hash confirmation and actual C1 thread log before claiming the option exercised.
+
+Perf281 update finished successfully, verified expected runtime hash and boot
+slot0. Independent status confirms0.2.0-perf.281/6e26db37 at dashboard,
+timing_frame0, awake3591. Perf279 remains rollback slot1. Protected C1 launch
+active session86315; poll to completion before collect-idle.py, then normal
+collect-gameplay.py. Verify [cpu-thread] vertex-capture affinity00020000/core1
+or startup core1 log in readiness/idle logs before attributing results. All
+build/update handles terminal; only launch is active. No FPS result yet.
