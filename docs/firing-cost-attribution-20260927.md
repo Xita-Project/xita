@@ -2039,3 +2039,14 @@ same handle, then run audit-package.py, which requires changed objects to be
 onlycode027 and4version consumers and package assets onlygame-a/boot-game.
 Not deployed yet. This is diagnostic instrumentation, not an FPS optimization.
 Goal unmet.
+
+
+Perf287 build89982 and package audit49170 now terminalrc0. Exactlycode027
+and4version objects changed; onlygame-a.self/boot-game.txt differ from286.
+RuntimeSHA eaf848d5626dda8ab0e88b52370d909d1bfc4006ef47d3cdb097fff8554da2b6;
+VPKSHA97152a1bb39b41d01e2a22042e4c6871da1da2226d0803de40c55892cfc1eafd.
+Contract unchanged775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897.
+Announced interruption; remote update41010 actively uploading. Pollsamehandle,
+verify runtime hash/version, then use ai-behavior-287/launch-diagnostic.py
+and collect-pressure.py (287 versions) for protected a30 save. No target
+behavior timing yet. Do not claim an optimization or20FPS.
