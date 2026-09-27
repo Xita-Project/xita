@@ -1357,3 +1357,18 @@ discovery is not their CLI). Pi SSH reachable, load0.01; no jobs started there.
 Perf283 remains on hardware, idle collection terminal, no controls held. Prepare
 ordinary perf284 from282 plus restored hooks, verify actual native invocation
 and differential correctness on hardware before claiming recovered FPS.
+
+
+Forced repeat generation36123 passed: every output hash stable, changed=[], both
+hook receipt fields true. Exact comparison against282 equals applying the two
+previously qualified hook transformations; code028 bytes unchanged. Perf284
+build3568 is active under collision-hook-retention/build-x87, revisionb3b52b63,
+ordinary282 timers (not283 expanded diagnostics). Expected changed objects are
+query_fusion,solver_fusion,and four version consumers. Code028 is recompiling
+because generation stamp changed; package audit requires its output bytes still
+match282. No package yet; don't deploy until build/audit pass.
+
+Prepared launch-verify.py for284: explicit object-query1 and native4B9D01,
+phases0; removes display-callback-timing override to remain within32 overrides.
+This is native-vs-original correctness verification, not an FPS comparison.
+Not launched. Hardware remains283, lease valid, collector90315 terminal.
