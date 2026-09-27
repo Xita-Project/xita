@@ -63,3 +63,14 @@ Before promotion: inspect integration results and actual exercised paths, audit
 context ownership/diagnostic admission, verify Vita-compiled output, then create
 an isolated hardware candidate preserving all qualified optimizations and saves.
 Neither a short headless run nor the microbenchmark proves a hardware gain.
+
+The bounded Pi job completed with its planned timeout exit 124. Final telemetry
+shows loaded=1, active=1 and director=1 at the established pod camera. The log
+contains five constant-pool exhaustion lines, also a known issue in older
+headless diagnostics; this prevents treating the run as rendered correctness
+qualification. The bounded scan found no fatal/trap/mismatch/abandon/scope-overflow
+lines. Absence of those messages is not equivalence or crash-free hardware proof.
+No per-call target admission counter was added, so this is integration evidence
+rather than a measured target call census. summary.json and run.log preserve the
+actual observations. All Pi test jobs are now terminal. Next qualify the exact
+Vita-generated body and diagnostic/context admission before packaging.
