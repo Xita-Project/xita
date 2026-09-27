@@ -1561,3 +1561,37 @@ yet;862A0 capsule branch also still unqualified. Candidate remains private and
 undeployed;284 unchanged. Next qualify capsule and broader boundaries, then
 consider hardware trial alongside existing improvements. No task processes
 remain active from this turn; keep-awake lease renewed. Goal remains unmet.
+
+## Capsule qualification exposed x87 scheduler-boundary bug
+
+Previous turn progress: polygon differential fixture and completed ARM profile.
+New862A0 capsule fixture failed the old register candidate at scenario3: final
+context/arena matched, but xv_preempt observed stale physical x87 slots and status
+at backward jump86431. This is why final-output-only tests were insufficient.
+Do not deploy the original contact-feature-registers-pi/harness candidate.
+
+Fixed canonical Emitter.x87_preempt_inline: register lowering decrements budget
+once, spills dirty slots/top/status only when yielding, calls scheduler, then
+reloads locals. Memory lowering keeps X_PREEMPT. JMP/Jcc/LOOP emission all use
+the helper. Static dirty-state analysis remains conservative. Scheduler must
+preserve the guest logical stack depth, as required by the existing model.
+
+Regenerated privately with current codegen, original ownedXBE/symbols, profile
+halo_ce_3925, phase timing, x87-regs-only86170,862A0. Session3720 completed.
+Compared with earlier candidate: only the three preemption emission sites changed.
+No other instruction/arithmetic changes in these two bodies.
+
+Corrected capsule passes512 strict cases under host ASan/UBSan34331 and Pi
+ARM84865; includes early return, masked equal plane, opposite-orientation dot
+test, cross-product branch, null/non-null transform, all8 x87 tops, and optional
+physical-slot/status mutation at scheduler yield. All4 callee stubs exercised.
+Polygon256cases still passes host ASan/UBSan1028. Actual-emitter tests cover
+JMP/Jcc/LOOP/LOOPE/LOOPNE, forward branches and unchanged memory lowering;2pass.
+Synthetic callee limitation remains. The originally failing candidate provides
+a regression negative control; private capsule-host retains failure artifacts.
+
+Source fix and fixtures ready; no hardware deployment or FPS claim. Next ARM
+polygon recheck for corrected yield handling, broaden numeric/alias coverage,
+and build only qualified bodies into a private284-derived candidate (retain
+native query/solver hooks). Vita status verified284/b3b52b63, awake renewed.
+All jobs terminal. Sustained NPC20FPS/other acceptance gates still unmet.

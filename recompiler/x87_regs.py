@@ -14,7 +14,7 @@ c->fsw becomes a uint16_t local as well; c->fcw stays in memory.
 
 Memory is brought back in sync at every point where something else can look at
 it (sync points): calls to guest functions, HLE and kernel calls, returns, tail
-calls. Before a sync the slots written since the last sync (all of them,
+calls, and scheduler yields. Before a sync the slots written since the last sync (all of them,
 including values already popped, so c->st[] holds exactly what the memory
 lowering would have left there), c->fsp and c->fsw are stored; after a call
 every slot and c->fsw are reloaded, because the callee may have written any of

@@ -803,7 +803,7 @@ class Emitter:
                 tgt = ins.near_branch_target
                 if tgt in fn.blocks:
                     if tgt <= ip:
-                        out.append("    X_PREEMPT();")
+                        out.append(f"    {self.x87_preempt_inline()}")
                     out.append(f"    goto {self._lp}{tgt:08X};")
                 else:
                     out.extend(self.x87_exit_sync())
@@ -832,7 +832,7 @@ class Emitter:
                 U(); return
             if tgt in fn.blocks:
                 if tgt <= ip:
-                    out.append(f"    if ({cond}) {{ X_PREEMPT(); goto {self._lp}{tgt:08X}; }}")
+                    out.append(f"    if ({cond}) {{ {self.x87_preempt_inline()} goto {self._lp}{tgt:08X}; }}")
                 else:
                     out.append(f"    if ({cond}) goto {self._lp}{tgt:08X};")
             else:
@@ -842,7 +842,7 @@ class Emitter:
             tgt = ins.near_branch_target
             extra = {"loop": "", "loope": " && XF_Z(c)", "loopne": " && !XF_Z(c)"}[mn]
             if tgt in fn.blocks:
-                out.append(f"    if (--c->r[1] != 0{extra}) {{ X_PREEMPT(); goto {self._lp}{tgt:08X}; }}")
+                out.append(f"    if (--c->r[1] != 0{extra}) {{ {self.x87_preempt_inline()} goto {self._lp}{tgt:08X}; }}")
             else:
                 # Match JMP/Jcc: an external target has no local label and
                 # must use tail dispatch without pushing a return address.
@@ -935,6 +935,21 @@ class Emitter:
         pre = self._x87.spill(st)
         post = [self._x87.guard(self._x87_pos), self._x87.fill()]
         return ([f"    {pre}"] if pre else []), [f"    {x}" for x in post if x]
+
+    def x87_preempt_inline(self) -> str:
+        """Publish floating state only when the back-edge budget yields.
+
+        The scheduler observes the same context as memory lowering. Reload
+        afterwards so changes to physical slots/status are not overwritten by
+        cached locals. The analysis retains its dirty set conservatively.
+        Scheduler yields preserve this guest's logical x87 stack depth.
+        """
+        if self._x87 is None:
+            return "X_PREEMPT();"
+        state = self._x87.states[self._x87_pos]
+        spill = self._x87.spill(state)
+        fill = self._x87.fill()
+        return f"do {{ if (--c->preempt <= 0) {{ {spill} xv_preempt(c); {fill} }} }} while (0);"
 
     def x87_exit_sync(self):
         if self._x87 is None:
