@@ -214,3 +214,32 @@ The planned launch replaces explicit `XV_REC_WORKER_TIMING=0` with
 to zero when unset, so this preserves its behavior. Other optimizations,
 360p settings and `XV_TEST_SAVE=a30-perf211` remain. No perf268 package has been
 deployed yet; perf267 is still installed and remains the rollback package.
+
+### Completed perf268 package
+
+The full isolated build completed successfully. Package verification confirms
+only `game-a.self` and `boot-game.txt` changed against perf267. The launcher,
+assets and bundled Halo 2 files are unchanged. The linked runtime contains the
+root-pair helper and counters.
+
+- Runtime: 34,813,282 bytes; SHA-256
+  `8505a8a273d349ae46351eea643f62cec3d3d8a41df6d7f2c97fc8643016face`.
+- Package SHA-256:
+  `3f72eed185aa25cf2ef40218ddfc6bc13122c62466cdb6125a53c8d6844734d4`.
+- Asset/update contract:
+  `775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897`.
+- Package: private `../root-pair-hardware/xita-perf268c.vpk`.
+- Previous perf267 log preserved as `preupdate-perf267.log` (25,726,526 bytes).
+
+An initial CLI invocation used an unsupported `--wait` option and exited before
+uploading anything. The corrected `--apply` invocation includes boot waiting
+internally; its authoritative receipt is `deploy-apply.log`. Do not infer
+installation from package creation or partial upload progress.
+
+Deployment subsequently completed: `deploy-apply.log` reports verified=true,
+boot_confirmed=true, candidate slot 1, and the runtime hash above. Live status
+confirmed `0.2.0-perf.268 / d681f21f` at the dashboard with timing_frame=0.
+Perf267 remains in slot 0. Renewed the one-hour awake lease after reboot.
+The ordinary a30 launch sequence has started with the preserved test-save
+namespace and `XV_ROOT_PAIR=1`. No perf268 gameplay measurement is available
+yet; deployment success is not a performance result.
