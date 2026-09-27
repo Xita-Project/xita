@@ -1840,3 +1840,30 @@ empty save directory: codex-hierarchy-fresh-20260927,180sec cores0/1. Poll SAME
 handle, inspect map/director before interpreting, then retrieve log. Do not reuse
 copied profile with the fresh-profile button sequence. Vita285 unchanged/awake.
 Goal unmet; no hardware speedup claimed.
+
+
+## Completed Pi census: dominant declines are tiny models
+
+Previous turn made progress and verified a live corrected run. This continuation
+polled86433 until terminal124 (planned180sec timeout), copied pi-fresh.log and
+wrote pi-fresh-summary.json. a30.map reads and director1 confirmed.198 report
+calls include startup/repeated zero resets. Totals:309836 small(count<3),172
+short/final tails; zero entry/model-address/large/queue/empty. Final active
+reports have5400 small declines per60frames. These are attempts, not expensive
+missed batches. The batch leaves a final guest node for observable register,
+FP and stack state, so count<3 has no ordinary non-root batch to recover.
+This rules against relaxing MAX_NODES/queue validation or enlarging worker
+queues on the basis of the previously broad bounds count. Existing large-model
+batching is doing useful work. No claim about every hardware scene or enemy type.
+
+Pi phase traces disable root-pair and run an older supporting runtime; their
+~3.6ms8DDF0/~1.95ms remainder cannot be scaled into Vita savings. The remaining
+actor collision path still deserves targeted hardware attribution AFTER restored
+nativehooks: old283 pre-retention numbers are not a current hot-function ranking.
+Current285 code028 has only2 scene-phase sites, so do not assume it contains all
+114 expanded diagnostic sites from283. A next diagnostic candidate should retain
+285 code, add the guarded detail sites and counters, identify its version, then
+collect a single owner-phase scene sample (no repeated benchmark toggles). Keep
+normal phase0/root-pair path as rollback; diagnostic elapsed is attribution only.
+Vita285 unchanged, lease renewed. All Pi jobs from this census terminal; no
+background task left to poll. Goal unmet; no new FPS improvement claimed.
