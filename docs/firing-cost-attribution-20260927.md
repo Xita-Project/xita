@@ -1035,3 +1035,31 @@ Started ordinary protected a30 launch script session70215; last poll confirmed
 live, log snapshot-gpu-candidate/launch.log. No collector started yet. Re-poll
 same handle, then run collect-idle.py after launch completion. Source and
 hardware unchanged during Pi tests. No perf282 gameplay result available yet.
+
+
+## Perf282 first ordinary hardware sample: lifepod improvement
+
+Launch70215 and idle collector14388 completed0. Loaded/active/director telemetry
+qualified the sample; reviewed idle-before.png and idle-after.png show expected
+lifepod scene, weapon and HUD. No extra hardware screenshots inside interval.
+840 measured frames: mean49.054ms/20.386FPS, p5047.793ms,
+p9559.023ms, p9965.203ms, max73.775ms;317>50ms, zero>100ms.
+Earlier perf277 same ordinary pod sample:55.702ms/17.953FPS. Separate live runs
+are not deterministic; this is promising evidence, not a sustained20FPS claim.
+Private idle-summary.json and idle-comparison.json retain exact values.
+
+Mechanism in final60-frame counters:11,625 snapshot GPU hits, zero second
+persistent comparisons,192 new persistent versions uploading1439KiB; ordinary
+upload comparisons6121KiB versus baseline64550KiB. Ordinary copies226/28KiB
+versus baseline3382/14452KiB. These are separate windows, requested spans rather
+than physical bandwidth. Queue pressure153 versus baseline806. Scene helper
+CPU44.05ms, wall44.59ms; C0 tail56–59%, C1~89–90%, C2~80%. Scene work remains
+large despite removal of capture/upload duplication. Legacy persistent log
+labels enabled0 because the new snapshot selector replaces its lookup; the
+separate snapshot-gpu row correctly reports enabled1. Do not misread this as
+feature disabled.
+
+Gameplay collector60982 is live, firing and movement brackets already captured,
+currently proceeding to45-second outdoor sample. Re-poll same handle; inspect
+saved screenshots and gameplay-summary.json when terminal. No full15-minute,
+cutscene, AI/audio or checkpoint acceptance yet. Keep perf282 provisional.
