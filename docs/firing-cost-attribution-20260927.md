@@ -1787,3 +1787,29 @@ separate crash-parser venv lacks Unicorn. No ARM result claimed for this change.
 Next integrate these counters with the next qualified diagnostic candidate or
 ARM harness to distinguish retained tails before changing hierarchy admission.
 Vita remains285; full NPC and cutscene20FPS target still unmet.
+
+
+## Hierarchy ARM qualification and live Pi diagnostic
+
+Previous goal turn made progress: committed fallback attribution and repaired
+fixture dependency. Current ARM test44243 completedrc0:2308 comparisons,
+four rounding modes, root/consumed-prefix/shuffled-index/remapped-page cases.
+Private hierarchy-bounds-audit/arm/result.json and arm.log retained. Uses VitaSDK
+Thumb Cortex-A9 instruction emulation, not Vita3K or hardware FPS. Isolated venv
+now has Unicorn2.1.4 and pyelftools0.32; no global Python environment changed.
+
+Built hierarchy-bounds-audit/harness using existing ARM whole-game link recipe,
+replacing only xk_hierarchy with the new counters and retaining baseline
+point-location-build code013 (not unqualified contact-registers capsule code).
+Hierarchy source comparison against that stage is precisely the counter patch.
+This supporting harness predates perf285 and cannot establish its frame times.
+
+Pi verified idle before launch. New private job codex-hierarchy-bounds-20260927
+runs180seconds pinned cores0/1, explicit XV_NATIVE_MODEL_HIERARCHY=1, separate
+save directory. Session12828 still active; remote PID11096 confirmed Rl at50s,
+102%CPU. First reports include count/queue declines5400 and zero tail/empty,
+but other windows zero; no representative gameplay attribution yet. Preserve
+and poll this SAME session; timeout observation is not job failure. Planned
+180-second timeout normally returns124; inspect final log/exit-code before
+interpreting counts. Copy log to hierarchy-bounds-audit after completion.
+Vita285 unchanged, awake lease renewed. Goal unmet; no new hardware FPS claim.
