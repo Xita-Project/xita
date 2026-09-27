@@ -1372,3 +1372,28 @@ Prepared launch-verify.py for284: explicit object-query1 and native4B9D01,
 phases0; removes display-callback-timing override to remain within32 overrides.
 This is native-vs-original correctness verification, not an FPS comparison.
 Not launched. Hardware remains283, lease valid, collector90315 terminal.
+
+
+### Perf284 deployed; correctness collection active
+
+Build3568 and package audit16157 completed rc0. Actual changed objects exactly
+query_fusion.o,solver_fusion.o and four version consumers; code028 output remains
+identical to282. RuntimeSHA a737fb1ed762a5a66f407dc9cffd51292938b82266eb27174a9e8339fa4de8c1;
+packageSHA87fe557df36bdeb6b7f15d90bc75642968425f02990a1b07695b050df2742077.
+Contract unchanged. nm confirms native object-query and all four native feature
+observer/dispatch references in the actual compiled modules.
+
+Deployment85401 terminal rc0: verified hash, slot0, boot confirmed. Independent
+status284/b3b52b63 and renewed lease. Guarded launch16186 terminal rc0; correct
+32 launch overrides include explicit object-query1/native4B9D01/phases0, protected
+savea30-perf211. No controls held. Previous283 retained in slot1; packaged282 is
+still available as ordinary rollback if needed.
+
+Correctness collector84362 active, incremental log capture in
+collision-hook-retention/verify.log. Poll same handle. It requires loaded/active/
+director1, object-mode1 startup evidence, >=2000 verified query calls and >=500
+verified feature calls, with zero reported mismatches/journal failures. Reports
+separate query/feature counters and saves verify-summary.json upon completion.
+This is a scoped correctness check, not the full campaign/goal acceptance or an
+FPS measurement. No controls or restart on observation timeout. After success,
+restart284 in ordinary native mode2/phases0 and perform gameplay measurements.
