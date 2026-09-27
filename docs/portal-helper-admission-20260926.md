@@ -86,3 +86,29 @@ failed its readiness deadline. One subsequent companion launch succeeded;
 normal a30 launch inputs completed and the remote endpoint returned on perf266.
 The keep-awake lease was renewed. Perf266 remains installed; the candidate above
 has not changed the device. The sustained-20-FPS goal remains unmet.
+
+## Perf267 traversal and package gate
+
+The current retained perf266 ARM objects were compared to the perf267 adapter
+with a copied-context fixture. All 33 cases pass (28 traversal cases plus five
+53540 outer-consumer FP modes). Outside dead recursive stack scratch, guest
+memory, callee-saved registers, logical x87 depth, return stack and remaining
+budget match. Declines also preserve complete context and FP status.
+Recursion depths 4/16/32 and invalid generation, disabled mode, low budget,
+noncontiguous pages, crossing and empty polygons are covered.
+
+The harness needed current owner-ID, private-clip-release and phase-timer
+platform services. Earlier attempts stopped on those missing fixture imports;
+they did not produce a game-state mismatch. Actual scheduler/worker identity
+remains covered separately by the host/Pi guard tests. No Vita timing is inferred
+from the modeled instruction count reduction. Receipts are
+`arm-scene3/result.json`, `arm-scene-outer/result.json` and
+`traversal-receipt.json` under the private candidate directory.
+
+Perf267 (`c1a2d36a`) builds and packages successfully. Against perf266, only
+`game-a.self` and `boot-game.txt` differ; the update contract stays unchanged.
+Runtime SHA-256: `5f89ebc86d5e45d90c8a779bdeb73a1aca6df0b02d27910e8ca02520d07f2584`.
+The launch will retain the a30-perf211 save namespace and existing settings,
+replacing the disabled scene-wait observer key with `XV_SCENE_PORTAL=1` to stay
+within the 32-key environment limit. Hardware installation/results are not yet
+established by this package receipt.

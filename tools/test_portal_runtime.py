@@ -18,9 +18,10 @@ import test_native_visibility_portal_loop as vp
 from test_arm_model_palette import RAM,CTX,SIZE
 from unicorn.arm_const import UC_ARM_REG_FPSCR
 
-def build(reference,candidate,out):
+def build(reference,candidate,out,scene=False):
     flags=['-O2','-std=gnu11','-mthumb','-mcpu=cortex-a9','-mfpu=neon',
            '-I'+str(candidate/'recomp'),'-DXV_EXPERIMENTAL_OBJECT_JOBS','-DXV_LIGHT_QUERY_CENSUS']
+    if scene:flags+=['-DXV_PORTAL_SCENE_FIXTURE']
     cc=str(Path.home()/'vitasdk/bin/arm-vita-eabi-gcc');commands=[];objects=[]
     for name in ('visibility_portal_arm','portal_runtime_arm'):
         obj=out/(name+'.o');cmd=[cc,*flags,'-c',str(ROOT/'tools/tests'/(name+'.c')),'-o',str(obj)]
@@ -29,7 +30,7 @@ def build(reference,candidate,out):
            'kernel/xk_clip_region.o','kernel/xk_clip_region_control.o','kernel/xk_math.o','kernel/xk_light_census.o']
     hashes={}
     for lane,stage in (('reference',reference),('candidate',candidate)):
-        selected=names+(['kernel/xk_portal_polygon.o','kernel/xk_portal_polygon_math.o'] if lane=='candidate' else [])
+        selected=names+(['kernel/xk_portal_polygon.o','kernel/xk_portal_polygon_math.o'] if lane=='candidate' or scene else [])
         retained=[stage/'build/recomp'/n for n in selected]
         hashes[lane]={n:hashlib.sha256(p.read_bytes()).hexdigest() for n,p in zip(selected,retained)}
         cmd=[cc,*flags,*objects,*map(str,retained),'-nostdlib',
@@ -55,6 +56,12 @@ class Machine(vp.Machine):
         if active and self.case.get('outer') and name=='f_000532E0':name='f_00053540'
         return super().call(name,args,fpscr,active)
     def result(self,spec):
+        scene='portal_test_scene' in self.symbols
+        if scene:
+            self.put(self.symbols['portal_test_scene'],int(self.path_is_candidate))
+            self.put(self.symbols['portal_test_mode_off'],int(spec.get('native_clip',1)==0))
+            self.put(self.symbols['portal_test_context'],CTX)
+            self.uc.cpr_write(15,0,13,0,2,0,False,vp.PT)
         self.call('portal_fixture_boot')
         if spec.get('decline'):self.put(self.symbols['portal_test_decline'],spec['decline'])
         row=self.run(spec,False);u=self.uc
@@ -64,25 +71,26 @@ class Machine(vp.Machine):
         for n in ('fsp','preempt'):preserved[n]=struct.unpack_from('<I',context,self.layout[n])[0]
         return dict(external=external,preserved=preserved,context=context.hex(),
             fpscr=u.reg_read(UC_ARM_REG_FPSCR),stats=row['stats'],
-            accepted=self.word(self.symbols['portal_accepted']) if 'portal_accepted' in self.symbols else 0,
-            declines=list(struct.unpack('<7I',u.mem_read(self.symbols['portal_declines'],28))) if 'portal_declines' in self.symbols else [])
+            accepted=self.word(self.symbols['scene_accepted' if scene else 'portal_accepted']) if ('scene_accepted' if scene else 'portal_accepted') in self.symbols else 0,
+            declines=list(struct.unpack('<7I',u.mem_read(self.symbols['scene_declines' if scene else 'portal_declines'],28))) if ('scene_declines' if scene else 'portal_declines') in self.symbols else [])
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--reference',type=Path,required=True);p.add_argument('--candidate',type=Path,required=True)
     p.add_argument('--out',type=Path,required=True);p.add_argument('--reuse',action='store_true')
+    p.add_argument('--scene',action='store_true',help='Compare copied scene fallback to helper native route')
     p.add_argument('--case-prefix',action='append',default=[])
     a=p.parse_args();a.out=a.out.resolve()
     if a.out.is_relative_to(ROOT):p.error('private outputs must stay outside source')
     a.out.mkdir(parents=True,exist_ok=a.reuse)
-    if not a.reuse:build(a.reference.resolve(),a.candidate.resolve(),a.out)
+    if not a.reuse:build(a.reference.resolve(),a.candidate.resolve(),a.out,a.scene)
     specs=[dict(name='leaf',clusters=1,edges=[]),dict(name='projection',projection=True),
         dict(name='crossing',projection=True,portal_points=[(-2,-.5,1),(2,-.5,1),(2,.5,1),(-2,.5,1)]),
         dict(name='empty',projection=True,portal_points=[(2,2,1),(3,2,1),(3,3,1),(2,3,1)]),
         dict(name='diamond',projection=True,edges=[(0,1),(0,2),(1,3),(2,3)]),
         dict(name='noncontiguous',projection=True,noncontiguous=True),
         dict(name='low-budget',projection=True,budget=1,refill=1,fallback=True),
-        dict(name='queued',projection=True,decline=6,fallback=True),
+        dict(name='generation-invalid' if a.scene else 'queued',projection=True,decline=6,fallback=True),
         dict(name='mode-off',projection=True,native_clip=0,fallback=True)]
     for mode in range(16):specs.append(dict(name=f'fp-{mode}',projection=True,fpscr=mode<<22))
     clockwise=[(-.5,-.5,1),(-.5,.5,1),(.5,.5,1),(.5,-.5,1)]
@@ -96,7 +104,10 @@ def main():
     if a.case_prefix:specs=[s for s in specs if any(s['name'].startswith(x) for x in a.case_prefix)]
     rows=[]
     for spec in specs:
-        lanes={lane:Machine(a.out/(lane+'.elf')).result(spec) for lane in ('reference','candidate')}
+        lanes={}
+        for lane in ('reference','candidate'):
+            machine=Machine(a.out/(lane+'.elf'));machine.path_is_candidate=lane=='candidate'
+            lanes[lane]=machine.result(spec)
         ref,cand=lanes.values();checks={k:ref[k]==cand[k] for k in ('external','preserved')}
         if spec.get('fallback'):checks['full_context']=ref['context']==cand['context'];checks['fpscr']=ref['fpscr']==cand['fpscr']
         for lane,r in lanes.items():
