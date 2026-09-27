@@ -529,3 +529,29 @@ not Vita SIMD performance. Private logs: ../capture-wait-diagnostic/.
 All tests terminal. Hardware still perf277; lease renewed. Next build perf279
 with depth 32 and this instrumentation, use a single diagnostic gameplay run,
 then clear startup overrides. Do not claim its timing as an FPS improvement.
+
+## Perf279 wait-only diagnostic package
+
+Built from the retained perf277 private build, depth 32, with capture source
+from 55e73b9f and matching Make configuration. Vita SDK build passed. Object
+audit: capture plus unchanged-source version consumers main/remote/UI/dashboard;
+all generated game objects byte-identical to perf277. Packaged only game-a.self
+and boot-game.txt over perf277, same launcher/assets/update contract.
+Runtime SHA256 d67fb05291efb885f08824c4678de92db5c33aa0e18d62c0b18f76166111d60c;
+package SHA256 1d67d8c7e5640f4278c5332c77a1c8dd689b3ffe26d27cde0d514b1932e74b37.
+Upload/apply underway. Private directory: ../capture-wait-diagnostic/.
+Prepared launch preserves protected a30/settings, replaces only explicit
+XV_FRAME_QUEUE_TIMING override with XV_CAPTURE_WAIT_TIMING=1 to fit 32
+startup entries. Broad capture and draw profiling remain off. Diagnostic fire
+is 12 seconds to span report windows (not comparable to five-second FPS test).
+Source confirms captured_draw_complete only marks failed commands; successful
+callback is trivial, but publication includes target writes and scheduling.
+
+Perf279 installed and boot-confirmed in slot 1 with expected runtime hash.
+Independent live status: 0.2.0-perf.279 / 55e73b9f, dashboard timing_frame=0.
+Perf277 remains slot 0 rollback. launch-a30.py is live in session 90379;
+continue polling this handle before collect-idle.py. Script renews lease and
+releases controls in finally. After idle screenshots/telemetry qualification,
+run collect-gameplay.py and require [vertex-capture-wait-only] records before
+claiming diagnostic data. Restore normal startup by dashboard restart afterward.
+No current frame-time result or optimization gain claimed.
