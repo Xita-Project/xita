@@ -1867,3 +1867,31 @@ collect a single owner-phase scene sample (no repeated benchmark toggles). Keep
 normal phase0/root-pair path as rollback; diagnostic elapsed is attribution only.
 Vita285 unchanged, lease renewed. All Pi jobs from this census terminal; no
 background task left to poll. Goal unmet; no new FPS improvement claimed.
+
+
+## Perf286 actor-detail candidate compiling from perf285
+
+Previous turn progress: completed Pi fallback attribution. Prepared private
+actor-detail-286 as reflink copy of full285 stage. Added114 generic phase sites
+plus specialized collision-hook scopes and native collector callback using the
+existing tested patcher; copied canonical hierarchy diagnostic counters. Version
+286/revision28034fec. Five patcher tests pass. source-audit.json verifies two
+shards' guest statements unchanged after observer/whitespace normalization and
+exact285 code013/query_fusion/solver_fusion/solver_primitives/query_world_run bytes.
+This retains polygon register lowering and the restored native query/solver hooks.
+
+Build4063 active, driverPID1312400 and code028 compiler observed at~1minute;
+no completed result yet. Poll samehandle, do not restart. Build command marks
+query-fusion.generated.json old to retain instrumented generated sources, as the
+previous diagnostic did. Rechecked pinned source hashes while building:unchanged.
+After completion run audit-package.py: expects onlycode008/code028, nativecollector,
+hierarchy and four version consumers changed; query/solverobjects must remain
+identical285. Package script substitutes onlygame-a.self/boot-game.txt into285,
+requires identical update contract, records hashes. Not run yet/no286VPK claimed.
+
+Prepared launch-diagnostic.py for286 with protecteda30-perf211 and phases2,
+retaining nativeobjectquery2/native4B9D02/snapshotGPU1. Existing root-pair is
+suppressed in diagnostic phases, so attribution only, no normal-FPS claim.
+collect-idle.py adapted286. No deployment/restart yet; Vita285 stays installed,
+lease renewed. Announce interruption before deploy; inspect completed package and
+post-buildsource audits first. Goal remains unmet.
