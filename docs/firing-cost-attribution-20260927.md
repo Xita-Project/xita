@@ -1141,3 +1141,29 @@ Current live status still perf282/533a6c71, timing_frame17628, awake3574sec.
 No diagnostic restart or launch performed. Re-poll backup40163 to terminal,
 verify save/profile files (exclude map cache), then restart same282 with
 owner-only timers through the prepared launch. No current game controls held.
+
+
+## Save verification completed; owner diagnostic launching
+
+Backup40163 terminated with a size assertion while copying mutable map-cache
+files. Do not claim the entire directory image complete. Independently read
+all15 save/profile files under udata/tdata again and verified SHA256 against
+local copies:15/15 identical. Separately enumerated remote udata/tdata recursively
+and verified exact file-set equality. Private save-verification.json and
+save-file-set.json establish the protected test checkpoint/profile backup;
+cache files are excluded from this claim. No restore or save write performed.
+
+Companion quit XITA00001, waited4 seconds, then launched same282. Observation
+session70917 completed0 with independent perf282 dashboard/timing_frame0;
+lease3600 renewed after boot. Receipt enemy-tick-diagnostic/restarted-dashboard.json.
+Started prepared launch-a30.py session79949 (live); launch.log records sequence.
+Owner-only mode2 and snapshot GPU1, same a30-perf211 namespace. No update or
+binary change. Current root-pair diagnostic confound remains documented.
+
+After same launch handle completes, start diagnostic collect-idle.py, review
+scene, then collect-gameplay.py. Prepared collect-enemy.py supplies another
+120-second no-input outdoor observation with status marks and final tick log;
+run after movement collector completes. It never toggles settings or calls
+benchmark mode. Review pictures/telemetry before identifying enemy activity;
+spawn time/count is not automatically known. All diagnostic durations are
+attribution data, not ordinary FPS acceptance. No active save transfer remains.
