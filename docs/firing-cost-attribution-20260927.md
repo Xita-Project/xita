@@ -2199,3 +2199,30 @@ Last guardcontrol report16D2500.51ms includes15A8900.47, withtinyself.
 Need a later active guard report before selecting its native candidate.
 No controls or restart after the user's question; all captures terminal.
 Vita288 remains running. Goalunmet; keep qualifiedoptimizations stacked.
+
+
+## Guard spike isolated to shared path refresh
+
+Previous turn made progress: captured and attributed user-observed drops.
+Pulled followup.log via50647, completedrc0 (4049515bytes). Last600 complete
+intervals through10920 average70.690ms/14.146FPS,p9587.061,max124.31;
+511over50,13over100. No synchronized scene image for that aggregate.
+
+The retained earlier report near8760 resolves the expensive guard chain:
+16D25013.75ms ->15A89013.69ms ->15A29013.67ms. Guardself0.06ms and
+15A890self0.02ms. The later decision report near8880 has14B2309.91ms,
+including15A2904.94ms. Timed parent keys are the nearest instrumented
+ancestor, not necessarily an immediate source-level call.
+Private path-attribution.json preserves selected rows and aggregate scope.
+This establishes shared path refresh as a relevant target, not proof that
+its own arithmetic (versus callees) consumes13ms.
+
+Prepared private path-detail-289 from288. Added29direct-call scopes under
+15A290,13A140,139E30 (code026/027), retaining all earlier instrumentation.
+Whole-shard stripped comparisons preserve guest statements; source-audit.json
+records baseline/new hashes. Version289/3c54c859. Build23908 active; poll
+samehandle then run prepared audit-package.py. Expected changed objects
+onlycode026/027 plusfourversionconsumers; packagegame-a/boot-gameonly.
+No deployment yet, no new optimization or FPS improvement claim.
+Vita288 retained online with lease renewed3600; no movement/restart thisturn.
+Goal unmet.
