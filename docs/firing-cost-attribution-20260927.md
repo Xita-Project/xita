@@ -2457,3 +2457,26 @@ branchtargets at8E0F0/8E166/8E5D0, plusstructuralrootpaircall integration that
 preserves pairedoptimization andsyncs beforejump8E58B. Need differential
 fullcontext/FP/stack/guardedfallback tests; do notjustloosenhook-rejection or
 stringassertion. Currentcode unchanged,290hardwareawake; goalunmet.
+
+
+## Private register-model prototype: bounded host and Pi gates passed
+
+model-wrapper-analysis/prototype.py now emits private8DDF0 with explicit
+spill/fill around hierarchy/pose/basis hooks and same-depthbasisjump; rootpair
+inserted structurally immediately beforeB5B40 after normalcallspill. Accepted
+rootpair reloads locals before8E58B; fallbackcopy usesM_ jump targets. Depth
+checks cover everyCFGentry at target (discovery has duplicateoverlappingIP
+states, allmustagree). Sixunknown-call guards remain withmemoryfallback.
+Productiongenerator/hookrejection unchanged. Prototype intentionallybypasses
+productionadmission ONLY inprivate emitter and remainsunqualified.
+
+VitaSDK prototypecompile64515 completedrc0 afteraddingpropercalleeprototypes.
+Private test-region.py extracts8E0F0..8E5D0loop andspills analyzedstate at
+fixtureboundary. Host79646 completedrc0:222fullhierarchycomparisons ineach
+ofenabled/unset/disabled/math-disabled (888total),117randomadmissions when
+enabled,85unchangeddeclines/mode. SamefixtureadaptedtoARMFPSCR access and
+stickyflagmask0x9f; ARM25971 completedrc0 onPi, same888comparisons passed.
+No fullfunction/prefixvalidation claimed; thesefixtures do notestablish
+rootpairacceptance,basis-enabledbranches,failedcallguards orallpreemption
+scenarios. Next gatesmustcoverthose beforeintegration/deployment.
+No speedmeasurementyet. Vita290remainsinstalled; goalunmet.
