@@ -1978,3 +1978,35 @@ paths; retains idle artifacts). Live on lastcall; no controls. Poll samehandle,
 review images/log and phase windows. Next bounded instrumentation should split
 164090 by actual target while preserving tail-call guest state and ordering.
 No newoptimization/FPSclaim; goalunmet. Awakelease renewed.
+
+
+## Indirect AI target profiling implemented and running on Pi
+
+Previous turn progress: hardware capture and dispatcher identification. Settled
+pressure89967 now terminalrc0. Images show unchanged outdoor trees/cliffs; no
+visibleenemy identity established.660 diagnostic intervals65.336ms/15.306FPS,
+p9580.707,max123.805,522>50ms,9>100ms. Behavior cost varies: later14E2C0 windows
+8.35 then4.98ms,1640903.64 then0.75; do not extrapolate the12.62ms peak to every
+frame. Protected saves untouched; controls released; Vita286 remains phase2.
+
+Added tools/patch_indirect_phase_timers.py, opt-in diagnostic-stage installer.
+Selected parent must contain exactly one register-indirect tailcall. Capture
+target before invoking callee and use the same address at timer end even if callee
+changes guestregister. Guest call/return order preserved; host tail elimination
+intentionally prevented. Validate every selected body before writes; refuse
+missing/duplicate/partial/unrecognized installations; exact-block idempotence.
+Two new tests plus5existing phasepatcher tests pass. Compiled fixture proves
+callee target/register/stack changes, earlyreturn, eventorder and saved endtarget.
+
+Private ai-behavior-profile-pi built19362 terminalrc0 from supporting ARMobjects,
+replacing code027 only for164090 indirect timing, retaining previous hierarchy
+counterobject and baselinecode013. source-audit.json proves reversing EXACT
+inserted block recreates baseline shard byte-for-byte. No generatedcode committed.
+
+Fresh Pi job68251 active, remotePID13374 confirmed. timeout180 pinned0/1,
+private codex-ai-behavior-20260927 save/log. Original successful fresh-profile
+buttons plus1200:lup*300,1650:rright*20,1710:lup*210; hostparser supports these.
+Movement/map/activity must be verified from resulting log; intent is not evidence.
+Poll SAME handle, retrieve log after terminal, resolve164090>targetedges. This
+older supporting runtime is not a Vita FPS prediction. No newhardware update.
+Vita lease renewed. Goalunmet.
