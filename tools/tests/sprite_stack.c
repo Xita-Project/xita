@@ -1,7 +1,12 @@
 #include "xv_x86rt.h"
+#ifdef SPRITE_ARM_FIXTURE
+#define assert(x) do { if(!(x)) __builtin_trap(); } while(0)
+#else
 #include <assert.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 enum { SIZE=8<<20, PAGES=2048 };
 uint8_t *g_xram,*g_img_base; uint32_t *g_xpt;
 static unsigned mode,yields,calls; static xctx trace[16];
@@ -13,7 +18,7 @@ static void fp(uint32_t a,float f){x_guest_write_pages(a,&f,4);}
 void xv_preempt(xctx *c){
  assert(yields+calls<16);trace[yields+calls]=*c;yields++;c->preempt=1;
  if(yields!=1)return;
- if(mode==1){unsigned page=c->r[4]>>12;memcpy(g_xram+0x30000,g_xram+g_xpt[page],4096);g_xpt[page]=0x30000;}
+ if(mode==1){unsigned page=c->r[4]>>12;memcpy(g_xram+0x30000,g_xram+X_PT[page],4096);X_PT[page]=0x30000;}
  if(mode==2){uint8_t b[256];x_guest_read_pages(b,c->r[4],256);c->r[4]=0x18000;x_guest_write_pages(c->r[4],b,256);}
  if(mode==3){c->scratch^=0x12345678;fp(c->r[4]+0x24,-0.25f);}
 }
@@ -23,11 +28,8 @@ void f_0005BA10(xctx *c){
  put(0x40000,c->r[1]);put(0x40004,X_M32(c->r[1]));
  c->r[0]=0x12345678;c->st[(c->fsp+7)&7]=0.75;c->r[4]+=4;
 }
-int main(void){
- g_xram=malloc(SIZE);g_img_base=g_xram;g_xpt=calloc(1<<20,4);
- uint8_t *before=malloc(SIZE),*want=malloc(SIZE);uint32_t pages[PAGES];xctx seen[16];unsigned total_yields=0,total_calls=0;
- for(unsigned k=0;k<2048;k++){
-  for(unsigned j=0;j<PAGES;j++)g_xpt[j]=(j^1)*4096;
+static xctx prepare(unsigned k){
+  for(unsigned j=0;j<PAGES;j++)X_PT[j]=(j^1)*4096;
   memset(g_xram,0,SIZE);xctx c;memset(&c,0xa5,sizeof c);
   uint32_t sp=(uint32_t[]){0x6000,0x6f90,0x6001,0x6f91}[(k/64)%4];
   c.r[0]=0x9000;c.r[1]=0xff00aabb;c.r[2]=0x3f000000;c.r[3]=(k/8)%4;c.r[4]=sp;c.r[5]=0xb000;c.r[6]=(k/128)%2;c.r[7]=(k/256)%2;
@@ -37,13 +39,36 @@ int main(void){
   put(sp+0x1c,0);put(sp+0x28,0x9000);put(sp+0x30,0xa000);
   put(0xa004,((k/192)%2)?sp+0x4c:0x20000);X_M8(0xb010)=(k/32)%2;
   fp(0xb014,0.1f);fp(0xb018,0.2f);fp(0xb01c,0.3f);fp(0x1f0aa0,0.5f);
-  mode=(k/512)%4;xctx initial=c;memcpy(before,g_xram,SIZE);yields=calls=0;original(&c);
+  mode=(k/512)%4;
+ return c;
+}
+int main(void){
+ g_xram=malloc(SIZE);g_img_base=g_xram;g_xpt=calloc(1<<20,4);
+ uint8_t *before=malloc(SIZE),*want=malloc(SIZE);uint32_t pages[PAGES];xctx seen[16];unsigned total_yields=0,total_calls=0;
+ for(unsigned k=0;k<2048;k++){
+  xctx c=prepare(k);uint32_t sp=c.r[4];xctx initial=c;memcpy(before,g_xram,SIZE);yields=calls=0;original(&c);
   xctx expected=c;unsigned ny=yields,nc=calls;memcpy(seen,trace,(ny+nc)*sizeof(xctx));memcpy(want,g_xram,SIZE);memcpy(pages,g_xpt,sizeof pages);
-  for(unsigned j=0;j<PAGES;j++)g_xpt[j]=(j^1)*4096;
+  for(unsigned j=0;j<PAGES;j++)X_PT[j]=(j^1)*4096;
   memcpy(g_xram,before,SIZE);c=initial;yields=calls=0;candidate(&c);
   int ctx=memcmp(&c,&expected,sizeof c),mem=memcmp(g_xram,want,SIZE),pt=memcmp(g_xpt,pages,sizeof pages),tr=(ny!=yields||nc!=calls||memcmp(seen,trace,(ny+nc)*sizeof(xctx)));
   if(ctx||mem||pt||tr){fprintf(stderr,"FAIL %u ctx %d mem %d pages %d trace %d\n",k,ctx,mem,pt,tr);return 1;}
   total_yields+=ny;total_calls+=nc;
+  if(getenv("SPRITE_BENCH") && (k==0||k==32||k==192||k==224)) {
+   for(unsigned j=0;j<PAGES;j++)X_PT[j]=(j^1)*4096;
+   memcpy(g_xram,before,SIZE);uint8_t stack[256],meta[32],list[16];
+   x_guest_read_pages(stack,sp,sizeof stack);x_guest_read_pages(meta,0xb000,sizeof meta);x_guest_read_pages(list,0xa000,sizeof list);
+   for(unsigned variant=0;variant<2;variant++) {
+    memcpy(g_xram,before,SIZE);struct timespec t0,t1;clock_gettime(CLOCK_MONOTONIC,&t0);
+    for(unsigned it=0;it<50000;it++) {
+     c=initial;c.preempt=100;yields=calls=0;
+     x_guest_write_pages(sp,stack,sizeof stack);x_guest_write_pages(0xb000,meta,sizeof meta);x_guest_write_pages(0xa000,list,sizeof list);
+     if(variant)candidate(&c);else original(&c);
+    }
+    clock_gettime(CLOCK_MONOTONIC,&t1);
+    double ns=(t1.tv_sec-t0.tv_sec)*1e9+t1.tv_nsec-t0.tv_nsec;
+    printf("BENCH case %u variant %u ns/call %.1f (includes identical fixture reset/callee)\n",k,variant,ns/50000);
+   }
+  }
  }
  printf("PASS 2048 full-context/arena/mapping/callee/handoff cases; %u yields %u callees\n",total_yields,total_calls);
  free(before);free(want);free(g_xpt);free(g_xram);return 0;

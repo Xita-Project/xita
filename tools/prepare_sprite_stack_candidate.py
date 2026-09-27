@@ -18,7 +18,10 @@ assert not re.search(r'c->r\[4\]\s*(?:=|\+=|-=)|X_PUSH32|f_[0-9A-F]+\(c\)',front
 assert front.count('X_PREEMPT()')==1
 # Cache only the page translation, never the stack values. A handoff can change
 # both ESP and mappings. The slow path retains original unaligned/page semantics.
-front=front.replace('{\n','{\n    uint8_t *sprite_stack=0; SPRITE_REFRESH();\n',1)
+front=front.replace('{\n','{\n    uint8_t *sprite_stack=0;\n',1)
+anchor='    uint8_t *const imgb_ = g_img_base; (void)imgb_;\n'
+assert front.count(anchor)==1
+front=front.replace(anchor,anchor+'    SPRITE_REFRESH();\n',1)
 front=front.replace('X_PREEMPT()', 'SPRITE_PREEMPT()')
 pat=r'\(c->r\[4\]\+0x([0-9A-F]+)u\)'
 counts={}
@@ -38,7 +41,7 @@ static inline void sprite_store(void *p,double v) { float f=(float)v; memcpy(p,&
 '''
 # Diagnostics may remap memory between individual accesses; do not cache there.
 body=front+'    c->r[3] = X_POP32();'+tail
-body=body.replace('{\n','{\n#ifdef XV_CHECK_GUEST_ADDRESS\n    original(c); return;\n#endif\n',1)
+body=body.replace('{\n','{\n#ifdef XV_CHECK_GUEST_ADDRESS\n    original(c); return;\n#endif\n    if((c->r[4]&4095u)>4096u-0xB8u) { original(c); return; }\n',1)
 a.out.mkdir(parents=True,exist_ok=False)
 (a.out/'reference.c').write_text(pre+'void original(xctx *restrict c)\n'+s+'\nvoid candidate(xctx *restrict c)\n'+body)
 (a.out/'audit.json').write_text(json.dumps({'body_sha256':pin,'replacements':counts,'qualified':False,'production_enabled':False},indent=2)+'\n')

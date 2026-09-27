@@ -136,3 +136,32 @@ Next: VitaSDK-linked instruction qualification including per-thread mapping,
 then a focused cost test. Real-callee integration and ordinary physical-Vita
 frame-time checks are still required before promotion. The candidate is not a
 proven speedup; generated test bodies and binaries remain private.
+
+## ARM cost and Vita-linked qualification
+
+The source fixture now supports SPRITE_BENCH=1: 50,000 calls per format with
+identical stack/object reset and modeled callee overhead included in both sides.
+The split-safe formulation improved ordinary one-page cases but cost ~4% more
+on crossing-page cases. The generator now declines those at entry to the
+original function; post-handoff access fallback remains for relocated stacks.
+
+Refined Pi Cortex-A9 Thumb O2 results (ns/call, original/candidate):
+case 0 2473.8/1815.0; case 32 1722.3/1361.7; crossing cases 192
+2442.3/2440.0 and 224 1618.0/1616.6. Supporting microbenchmark only, not a
+predicted whole-frame gain. Full 2,048-case correctness checks also passed.
+
+The fixture setup is shared by sprite_stack.c and sprite_stack_arm.c.
+`test_arm_sprite_stack.py --thread-mapping` compiled using VitaSDK and executed
+2,048 Cortex-A9 instruction cases: context, arena, mapping, ordered handoff/callee
+trace and FPSCR all matched. Actual test callee/preemption code executed; libc
+firmware copies were modeled. A distinct live table and TPIDRURW-bound table
+exercise render-view accesses. This is not Vita3K or physical frame-time evidence.
+
+Private gameplay/ replaces only 597CB in the 59550 diagnostic shard. Its first
+compile exposed declaration ordering: shard-local X_G uses xram_/xpt_ variables,
+so SPRITE_REFRESH must follow their declarations. The generator was corrected
+and the rebuilt integration-safe/ candidate is now compiling. Standalone test
+headers do not reproduce every shard macro override; before promotion, qualify
+that actual preamble and inspect full-game integration. No runtime settings,
+Vita package, draw order or save data changed. Poll the existing build rather
+than starting another. No integration gameplay run has started yet.
