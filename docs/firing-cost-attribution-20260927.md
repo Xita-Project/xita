@@ -993,3 +993,21 @@ explicit opt-in via launch environment, leaving queue depth32, publication1,
 core0 unchanged. No Pi execution claimed. Package audit and deployment receipts
 will establish installed state separately; build completion is not deployment
 or an FPS result.
+
+
+Perf282 package audit passed: only capture object and four version-consuming
+objects differ from perf277; all generated objects unchanged. Package changes
+only game-a.self and boot-game.txt; contract unchanged775a1863...d4897.
+Runtime SHA2561aee4affc198c5272a5c3845f56975869127e107890659dd9d01fa8dca8de13e;
+package03a6dd968ba3e44646d5884cadb326d7bae98bfb043a88ed9e65602c322a2c89.
+Full hashes and build receipt in snapshot-gpu-candidate/qualification-receipt.json.
+
+Deployment session31798 confirmed live at last poll, uploading34,668,544 of
+34,836,694 runtime bytes. Log snapshot-gpu-candidate/deploy-apply.log. Re-poll
+this SAME handle through verification/reboot; do not restart update or infer
+installation from upload. Prior live status was perf279 dashboard with lease
+3594sec. After boot confirmation verify perf282/hash and renew lease, then run
+prepared launch-a30.py and collect-idle.py (independent processes; no screenshots
+inside the measured interval). New env replaces C1 placement trial with
+XV_VERTEX_SNAPSHOT_GPU=1, keeps protected a30-perf211 and32 override limit.
+No launch/collector has started, no controls held. No new hardware FPS evidence.
