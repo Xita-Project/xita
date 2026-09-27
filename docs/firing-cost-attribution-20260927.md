@@ -2480,3 +2480,276 @@ No fullfunction/prefixvalidation claimed; thesefixtures do notestablish
 rootpairacceptance,basis-enabledbranches,failedcallguards orallpreemption
 scenarios. Next gatesmustcoverthose beforeintegration/deployment.
 No speedmeasurementyet. Vita290remainsinstalled; goalunmet.
+
+
+## Model-register basis qualification: fallback rejected
+
+Previous goal response only restated captured drops (no progress); this continuation
+ran the pending ARM fixture and produced new correctness evidence. Private files
+remain under ../model-wrapper-analysis; no production lowering or Vita update.
+Vita in-app lease renewed successfully for 3600 seconds.
+
+Root-register continuation qualification from the preceding work: root-arm.log
+records 1024 full arena/context/FP comparisons passing, with native root-pair
+acceptance asserted. This covers the bounded root/child-list consumer, not the
+entire model routine or preemption.
+
+basis-register-arm on Pi: native enabled passed 4096 strict context/arena/full
+FPSCR cases and asserted 4096 actual native acceptances. Native disabled failed
+case 1 at physical arena word 0x11054: expected 0xffc01234, actual 0x7fc01234.
+Both are NaNs with matching payload but different sign. The test does not normalize
+NaNs, so this is a genuine strict fallback mismatch and blocks deployment. Detailed
+rerun basis-decline-detail.log reproduced it. Session 53130 shell returned zero
+because its final cat succeeded; the disabled fixture itself aborted. Detailed
+rerun session 49966 returned 255 through SSH; output identifies the same failure.
+
+The enabled native fast path is qualified only for this bounded region. Do not
+infer that the full register-lowered wrapper is ready. Next isolate the basis
+fallback arithmetic/negation lowering (or preserve the memory-lowered region),
+then rerun both acceptance and decline cases before full-routine, call-guard and
+yield testing. No FPS improvement claimed and goal remains unmet.
+
+Generation environment: use the existing
+/home/birchwoodgod/xita-backups/2026-09-12-222123-phase-followup/arm-test-venv/bin/python;
+system Python and hierarchy-bounds-audit venv lack iced-x86. No packages installed.
+
+
+## Ordered ARM basis arithmetic resolves bounded fallback mismatch
+
+Previous continuation made progress by identifying the disabled-native mismatch.
+This continuation modified only private model-wrapper-analysis/prototype.py:
+for register-lowered multiply/subtract instructions in 8E166..8E293, emit ordered
+ARM vmul.f64/vsub.f64 through volatile inline assembly (ordinary C fallback on
+non-ARM). The operands remain in their original source order. No production
+emitter/header changes or hardware deployment. Original private prototype saved
+as prototype-before-basis-order.py.
+
+Pi session 23843 completed rc0. basis-ordered-arm.log records:
+- 4096 strict context/arena/full-FPSCR comparisons; native accepted 4096.
+- 4096 strict context/arena/full-FPSCR comparisons; native accepted 0.
+All four rounding modes, all x87 stack positions, exceptional floats and mapped
+pages remain in the fixture. No NaN canonicalization or relaxed comparison.
+This shows explicit ARM operation ordering resolves the bounded failure; it does
+not separately identify multiply versus subtract as the responsible operation.
+Compiler disassembly before the change retained ordinary C arithmetic freedom.
+
+The fast native basis path is unchanged. Full-routine entry/prefix, unknown-call
+fallback guards, preemption and worker ownership remain unqualified. Next extend
+qualification there before integrating the private hook-aware register lowering.
+No new hardware FPS evidence; goal remains unmet.
+
+
+## Model-register guard and yield boundary fixture
+
+Previous turn made progress by fixing and qualifying bounded basis arithmetic.
+New private test-boundaries.py extracts the six actual guard statements and three
+actual yield bodies from prototype-model.c and builds a static Cortex-A9 ARM
+fixture. Pi boundaries-arm.log: PASS 480 actual model guard/yield boundary cases;
+command completed rc0. No production edits or deployment.
+
+Scope: each of six guards exercised every 8x8 initial/returned x87 TOP pair,
+asserting fallback decision, miss callback IP/count, and unchanged context. These
+384 cases test the extracted guard and local refill; they do not execute the
+memory-body continuation. Three yield bodies each cover eight TOP values and
+preemption counters 0..3 (96 cases). Callback asserts spilled context, changes
+all stack values/status, and verifies reloaded locals. Non-yield cases assert
+context unchanged except counter decrement. Scheduler preserves TOP in this
+fixture; this is not a concurrency/worker-ownership or whole-routine test.
+
+Remaining next step: full 8DDF0 invocation differential replay through its real
+prefix/callees and memory fallback continuations, using private ARM harness state.
+Keep canonical hook admission restrictions until that broader evidence exists.
+Vita lease renewed3600 successfully; goal unmet, no new FPS claim.
+
+
+## Full model-call transcript harness prepared and running
+
+Previous goal turn made progress with 480 guard/yield checks. Private
+model-wrapper-analysis/prepare-capture.py creates a baseline model body with nine
+real callee taps plus a preemption tap. build-capture.py successfully linked a
+static ARM whole-game harness from retained point-location host objects and the
+new capture units. --wrap=f_0008DDF0 observes external calls; same-object direct
+calls may bypass observation. One selected call (skip500) records initial arena,
+full page table/context/FPSCR at each frontier, and changed arena pages. Real
+callees execute once. Capture file creation is exclusive. No proprietary code
+committed. Native shortcuts in the observer body are not compiled; actual real
+callees remain the retained harness implementations. Background writes may cause
+conservative replay failures; this is not worker-ownership qualification.
+
+Pi checked with ps (rg absent, grep fallback), no existing Halo/harness process
+found; 27GB free. Uploaded harness-codex-model-capture-20260927. Remote capture
+started via exec session74028, bounded180sec with retained launch environment;
+run directory /home/birchwoodgod/xita-70110/runs/codex-model-capture-20260927.
+Must poll74028 to terminal and inspect tape/footer before treating it as complete.
+Next implement offline candidate replay that verifies every pre-callee frontier,
+applies only recorded callee effects, and compares full model output. No correctness
+or performance pass claimed from merely building this harness. Vita lease renewed.
+
+
+## First full-model transcript replay passes
+
+Prior continuation made progress by building/running capture. Session74028 ended
+with planned timeout124; the single-call capture completed earlier and its tape
+was closed. model-first.tape and capture-game.log copied privately into
+model-wrapper-analysis (78,950,400-byte guest arena; tape about132MB). Capture
+occurs after a30 tag-load reporting; exact scene/model coverage not established.
+
+New build-replay.py builds a static offline ARM verifier. It reconstructs complete
+arena/page table/context/FPSCR at each tape boundary, compares pre-callee state,
+then applies the recorded callee effects instead of calling gameplay again. Final
+state and EOF checked. Initial link duplicate runtime symbols corrected using
+--wrap=xv_preempt,--wrap=xv_x87reg_miss, retaining real page-crossing helpers.
+Session25576 completedrc0; replay-arm.log:
+PASS full model replay mode0:14frontiers (original memory lowering)
+PASS full model replay mode1:14frontiers (register candidate)
+
+This is one real invocation, with native shortcuts disabled in the observer and
+replay bodies; native callees' recorded effects retained. No broad hardware or
+worker-safety claim. It confirms the fixture itself reproduces baseline before
+checking candidate. More input/path coverage and enabled native integration remain.
+
+Prepared a new exclusive multi-capture run: skip500, stride1000, count8, each file
+suffix is observed call sequence. Session87020 currently running build/upload/Pi
+180sec script; must poll to terminal, inspect tapes, then replay each original
+and candidate. Remote run directory runs/codex-model-multi-20260927. No repeated
+hardware benchmark or Vita update. Lease renewed3600. Goal still unmet.
+
+
+## Eight full-call memory-lowering replays pass; native capture built
+
+Previous goal turn made progress with first full replay and expanded capture.
+Session87020 now terminal124 (planned timeout); eight tapes completed. Sessions
+81434/87326 terminalrc0. multi-replay-first.log and multi-replay-last.log record
+both original and candidate PASS for observed call indices500,1500,...7500:
+frontier counts14,20,4,14,14,14,14,14 respectively (108 per implementation).
+Every replay verifies full arena/page table/context/FPSCR and EOF. This extends
+real-input coverage, not a hardware performance or all-path proof.
+
+build-native-capture.py successfully built a separate observer with hierarchy,
+basis and root-pair shortcuts enabled; current xk_math/xk_hierarchy/xk_object_basis
+compiled with retained feature flags replace the older harness helper objects.
+This preserves the already-qualified shortcuts while testing register integration.
+run-native.sh uses fresh runs/codex-model-native-20260927, eight samples, rootpair1.
+Native replay still needs its corresponding helper linkage/configuration and
+actual acceptance evidence. No Vita deployment; lease renewed3600, goal unmet.
+
+Native capture build/upload/run is live in exec session38025; poll this handle
+to terminal before further Pi gameplay jobs. Script bounded180sec.
+
+
+## Native-basis full replays pass; root-pair profiling exclusion corrected
+
+Previous continuation made progress with eight full replays and native capture.
+Native capture38025 terminal124 (planned), replay88782 terminalrc0. All eight
+original/candidate full-call replays pass (native-replay-arm.log). Acceptance
+wrappers prove basis1/1 for seven calls; call2500 takes neither basis nor root.
+Hierarchy0/8 attempts and root0/7 per implementation: do not claim acceptance.
+
+Inspected current xk_math.c lines334-339: root-pair configuration requires
+XV_SCENE_PHASES absent or <=0 AND xv_phase_enabled==0. Earlier shorthand implying
+only phase2 suppressed root was incomplete: phase1 also disables it. Diagnostic
+model timing cannot be treated as the normal root-pair baseline.
+
+Prepared native-counts.c with xv_phase_enabled=0 and fresh capture script with
+XV_SCENE_PHASES=0, otherwise same eight samples. Build/upload/run session71276
+live, bounded180sec. Remote runs/codex-model-native-normal-20260927; binary
+model-native-normal-replay-arm. Must poll session to terminal and confirm actual
+root acceptance in replay. Captures remain private. No Vita update or FPS gain
+claim; renewed in-app keepawake3600. Goal unmet.
+
+
+## Root-enabled full replays pass; private perf291 build started
+
+Previous turn progressed with native integration and corrected capture setup.
+Capture71276 terminal124, replay94821 terminalrc0. native-normal-replay.log records
+all8 original/candidate calls passing. Root and basis accepted1/1 for seven calls;
+call2500 visits neither. Frontier counts10,16,4,10,10,10,10,10. Hierarchy still
+0accepted in these sampled real calls; bounded hierarchy acceptance tests remain
+the available accepted-batch evidence. Native shortcuts preserved, not removed.
+
+Created private model-registers-291 from perf290 using separate reflink copy.
+prepare.py splices only 8DDF0 from the qualified prototype into code_013.c, asserts
+six runtime guards, retained pose scope/native shortcuts, and unchanged prefix/
+suffix (all other functions). Target is last function in shard; initial next-
+function delimiter assumption failed before writing and was replaced by balanced
+body extraction. source-audit.json records old/new shard and function hashes.
+Version0.2.0-perf.291. No deployment yet.
+
+Initial build stopped before compile because source revision suffix-modelregs
+was invalid. Corrected to supported dirty marker1d342e7e+ (private candidate).
+Actual build now live exec62683; poll to completion and inspect result/log. Parent
+assets/helpers unchanged. Next audit compiled object/package changes, preserve
+updater contract, then announce deployment and use normal scene phases0 for
+hardware gameplay. Native diagnostic wrappers previously within replaced function
+are absent; remaining profiling may still be enabled elsewhere by configuration.
+Vita keepawake renewed3600. Goal unmet, no hardware gain claimed.
+
+
+## Vita compiler replay passes while perf291 shard builds
+
+Previous turn progressed with root-enabled replay and startedbuild62683.
+That handle remains live; confirmed arm-vita-eabi-gcc/cc1 compiling code_013.c,
+not a stalled/missing job. Package audit script prepared against perf290: allow
+only code013 plus four version-bearing objects; preserve updater contract/assets.
+Do not run package audit or deployment until build result is terminalrc0.
+
+Additional compiler-specific gate: prototype-model.c compiled with VitaSDK GCC15.2
+(-O2 Thumb Cortex-A9, native hierarchy/basis flags), linked into the Linux ARM
+replay runner with existing helper implementations. Session70097 completedrc0:
+all8 normal-native tapes passed, with basis/root accepted in seven. This checks
+Vita compiler output for the standalone routine, not the final full shard with
+all production observer/worker flags. No Vita3K used.
+
+Prepared launch-normal.py (perf291, scene phases0, protecteda30-perf211 save) and
+collect-pressure.py (labels normal CPU Present sample,360p,not full acceptance).
+Verified MATERIAL_NOCOLOR is exact-constant specialization retaining samples and
+combiner arithmetic, not trivial-fragment diagnostic. Current Vita status still
+perf290/ccaa61b9,444MHz,notbenchmark; no update yet. Goal unmet.
+
+
+## Perf291 build/package qualified; hardware update started
+
+Previous continuation progressed with Vita-compiler replay and verified buildwait.
+Build62683 now terminalrc0; audit66397 terminalrc0. Changed objects exactly:
+code013 plus dashboard/xv_dash,runtime/xv_remote,main,xv_ui_gxm (version-bearing).
+Package derived from retained290; onlygame-a.self/boot-game.txt changed; updater
+contract preserved775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897.
+Runtime SHA c36f678527cb626b19dc59e362bf25e3fe666782ed345c50b875ad14182b8b5d;
+package SHA feb0649cae0b509a59b4333fdceb6b547245b3afc4a9b46efb2b1bb1504c58bf.
+Private package model-registers-291/xita-perf291c.vpk,version291/1d342e7e+.
+Announced gameplay interruption. Update--apply started exec54560; currently live,
+deploy.log has advancing upload bytes. Must poll54560, verify exact installed hash
+and bootversion before launch-normal.py. Then collect-pressure.py and inspect
+screenshots before interpreting pod intervals. Protected savea30-perf211 retained.
+No hardware performance result yet; goal remains unmet.
+
+
+## Perf291 confirmed on hardware, a30 launch underway
+
+Previous turn progressed through build/package audit and update. Update54560
+terminalrc0:34859238bytes, exact runtime hashc36f678527cb626b19dc59e362bf25e3fe666782ed345c50b875ad14182b8b5d,
+verifiedtrue,restartrequestedtrue,slot1,bootconfirmedtrue. Independent status
+confirms0.2.0-perf.291/1d342e7e+,timingframe0,444MHz,benchmark0.
+Launched launch-normal.py via exec98648; fixed button sequence, preserved test
+savea30-perf211 and scene phases0. Poll98648 to completion then run collect-pressure.py;
+inspect screenshot and load/active/director telemetry before reporting FPS.
+Slot0 retains290; packaged285 normal baseline remains available separately.
+Goal unmet; installation does not establish a performance improvement.
+
+
+Launch98648 terminalrc0 with input release; status291 confirmed. Inspected
+model-registers-291/a30-after-sequence.png: a30 loading screen, not gameplay.
+Started readiness+45sec collector exec24538, pressure-driver.log. It polls
+loaded1/active1/director1 before its window, never restarts/repeats inputs.
+Poll24538; inspect pressure-before/after and summary before claiming results.
+
+
+## Perf291 loading remains live; gameplay collector still pending
+
+Previous turn progressed by confirming deployment and startingcollector24538.
+This continuation re-polled24538 (still live), inspected readiness logs: loaded0/
+active0/director0, with actual map cache I/O (163844KB written42calls,9160ms in
+one report). Loading is not a frame-time result or failure. No restart, additional
+button inputs, or benchmark toggles. Prepared collect-gameplay.py for later
+AR5sec then move5sec and settled outdoor window, but NOT started while collector
+owns the idle scene. Next poll24538 to completion and inspect images/summary.
