@@ -111,3 +111,19 @@ receipt beside it. No generated guest code is committed.
 Hardware remains perf275; no candidate package has been deployed. Next build
 this guarded shard with the retained production flags, audit the package against
 perf275, then test normal a30 gameplay with the protected save and rollback.
+
+## Isolated perf276 build staged
+
+Private `../mask-context-hardware/` copies the retained perf275 build, preserving
+its flags and runtime stack. Only recomp/code_009.c differs among translated
+sources/headers; source-scope.json records that comparison. The private Makefile
+adds XV_SURFACE_MASK_CONTEXT=1 only to code_009.o. Version is perf276, qualification
+revision 104d3696. The compile command confirms O2 Cortex-A9 Thumb and the existing
+thread-page-table/render-view modes. No default source-tree build policy changed.
+
+The build was started once with build_x87.py; build-x87-result.json is written
+only on process completion. audit-package.py requires success, exactly code_009.o
+changed among recomp objects, and only game-a.self/boot-game.txt changed in the
+final package. It retains perf275's other assets and updater contract. Do not
+deploy until these checks pass. The launch/collector scripts assert perf276 and
+preserve the existing protected-save settings. Hardware has not yet changed.
