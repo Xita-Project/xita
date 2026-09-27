@@ -74,3 +74,40 @@ No per-call target admission counter was added, so this is integration evidence
 rather than a measured target call census. summary.json and run.log preserve the
 actual observations. All Pi test jobs are now terminal. Next qualify the exact
 Vita-generated body and diagnostic/context admission before packaging.
+
+## Vita compiler and thread-mapping qualification
+
+`tools/test_arm_surface_mask_context.py` and its source-only ARM fixture now
+compile the reference and candidate using VitaSDK GCC O2 Thumb Cortex-A9.
+The linked ARM instructions passed 192 full context, 8 MiB arena, page-table,
+handoff-trace and FPSCR comparisons. The fixture executes its actual preemption
+handler; only libc firmware copies are modeled. Private receipts are vita/ and
+vita.log. This is instruction-level correctness evidence, not Vita FPS.
+
+A second 192-case run (`--thread-mapping`, vita-thread/ and vita-thread.log)
+uses `__vita__`, `XV_THREAD_PAGE_TABLE=1` and `XV_RENDER_VIEW=1`. The fixture
+binds TPIDRURW to a table different from g_xpt, accesses image globals through
+that thread table, and mutates mappings at handoff. All comparisons passed.
+This covers the compiled memory-access mode, not a real kernel context switch
+or concurrent scheduler execution.
+
+Ownership review: xk_thread embeds its host context, and the scene helper owns
+a static host context outside the guest arena. The candidate calls xv_preempt
+with that original owner after publication, preserving scene-helper and object
+worker identity checks. It reloads after the callback. The phase scope likewise
+uses the original owner. Ordinary memory/flag operations have no context-aware
+callback. Checked-address instrumentation can invoke diagnostic callbacks during
+access, so it must retain the original routine rather than observe stale owner
+registers. Contexts aliased into guest RAM are not an admitted runtime use case.
+
+`tools/prepare_surface_mask_context_shard.py` stages a private copy of the
+production shard, checks the exact qualified body (allowing its known phase
+scope), and proves replacing the staged region with the original restores the
+whole shard. The experiment requires `XV_SURFACE_MASK_CONTEXT=1`; default and
+checked-address builds retain the original body. Its macros are undefined before
+following functions. The first staged output is code_009_guarded.c with an audit
+receipt beside it. No generated guest code is committed.
+
+Hardware remains perf275; no candidate package has been deployed. Next build
+this guarded shard with the retained production flags, audit the package against
+perf275, then test normal a30 gameplay with the protected save and rollback.
