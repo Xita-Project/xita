@@ -86,3 +86,12 @@ Receipts: ../material-size-hardware/. Update/apply is running; confirmation
 of installation must come from the updater's verified boot receipt.
 The planned launch preserves all 32 gameplay overrides, 360p and a30-perf211.
 No change to worker tolerance, rendering, save policy or simulation settings.
+
+### Perf274 verified installation
+
+The updater completed successfully: verified=true, boot_confirmed=true, slot 1,
+with the runtime SHA-256 above. Live status independently reported
+0.2.0-perf.274 / 910817dc, timing_frame=0 at the dashboard. The a30 launch
+sequence has started with the protected test-save namespace and the same
+32 overrides. The keep-awake lease was renewed. Perf273 remains the rollback
+in slot 0. Installation is verified; gameplay performance is not yet measured.
