@@ -190,3 +190,44 @@ Updater subsequently confirmed perf277 in slot 0 with the expected runtime
 hash; independent status confirms V0.2.0-perf.277 / b2172f5a. Lease renewed and
 normal protected a30 launch started. Perf275 remains in slot 1. Gameplay
 measurement is pending; no frame-time benefit is established yet.
+
+## Perf277 ordinary hardware trial (in progress)
+
+Normal 360p settings, protected a30-perf211 save, scene-phase and worker timers
+disabled. Loaded/active/director telemetry qualified readiness; screenshot
+confirms the lifepod and AR. The settled 780-frame sample measured 55.702 ms
+(17.953 FPS), p95 72.743 ms, maximum 93.019 ms; 523 frames exceeded 50 ms,
+none exceeded 100 ms. Perf275's earlier ordinary run was 57.113 ms. This small
+between-run difference is suggestive, not proof of a repeatable gain. The
+50 ms sustained target remains unmet. Firing/movement capture is running; do
+not restart it or claim wider regression qualification from the idle sample.
+
+## Perf277 completed short gameplay sample
+
+| Scene | Samples | Mean ms / FPS | p95 ms | Max ms | >50 / >100 ms |
+|---|---:|---:|---:|---:|---:|
+| Lifepod | 780 | 55.702 / 17.953 | 72.743 | 93.019 | 523 / 0 |
+| AR firing | 71 | 76.562 / 13.061 | 97.914 | 125.225 | 70 / 3 |
+| Walk outside | 90 | 62.594 / 15.976 | 82.253 | 270.353 | 88 / 1 |
+| Outdoor stationary | 952 | 47.494 / 21.055 | 57.739 | 88.088 | 147 / 0 |
+
+Screenshots confirm pod/AR, ammunition consumption/reload, and the canyon after
+walking outside. No crash observed; bounded fatal/panic/scope-omission/nonzero
+mismatch/retirement-failure scan found no matches. This is not proof of AI
+combat, audio, opening cutscene, checkpoint resume, or a 15-minute stress test.
+The isolated 270 ms movement stall remains; do not ascribe it to a checkpoint
+without a correlated write record.
+
+Compared with earlier perf275 ordinary samples, mean times fell by 1.411 ms
+(pod), 1.678 ms (firing), 1.716 ms (movement), and 0.975 ms (outdoors). No repeated
+A/B loop was run; scene scheduling and run variation prevent a causal FPS
+claim from these small differences. Retain perf277 provisionally as a stacked
+candidate, perf275 rollback in slot 1. All collectors are terminal, controls
+released, lease renewed. Private marks, logs, summaries and screenshots live
+under sprite-stack-hardware/. Goal remains unmet: firing and pod exceed 50 ms
+and even the outdoor mean hides 147 slow frames.
+
+Next: inspect remaining 59550 effect/model preparation outside the optimized
+597CB inner loop, using the existing child profile before adding instrumentation.
+Prioritize removing repeated work without changing effect output, scheduler
+handoffs or draw order. No further hardware A/B trial is queued.
