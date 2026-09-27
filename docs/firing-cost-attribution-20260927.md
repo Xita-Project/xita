@@ -2151,3 +2151,26 @@ VPK SHA:9874c41d6aad5a05d1e723258cd795ead13e3850576cdd0302c2e73fb19256f3.
 Announced interruption and started upload; inspect guard-detail-288/deploy.log
 and the live handle before any restart. Prepared 288 versions of launch and
 pressure/encounter collectors. Installation and timing results remain unproven.
+
+
+## Perf288 installed; hardware capture awaiting campaign readiness
+
+Previous turn made progress: built/audited perf288 and began deployment.
+Update67253 completed rc0. Its receipt confirms runtime SHA
+9a6364d92e153f5c05359d4d2212e52475aff60d8ca3d72a0a7e84b1faf42383
+booted in slot0. Independent status verifies perf288/ce174018 at dashboard
+timing_frame0. Companion nosleep on acknowledged again.
+
+Launch67172 completed rc0, inputs released. Reviewed a30-after-sequence.png:
+loading screen, not yet gameplay. Collector33557 is now active; it waits
+for loaded/active/director telemetry before a45-second sample. Poll the same
+handle, inspect images, then use the prepared encounter route. The previous
+quiet route needed further movement (.3left+12forward, .7right+8forward)
+before substantial AI appeared; inputs should follow actual scene state.
+
+Private path-callgraph.json/path-refresh-children.json record static direct
+callees for the likely shared refresh path. This is supporting source audit,
+not measured attribution: 15A290 has calls to 1391F0/139220/139260/13A140/
+13A280/13A310 and actor helpers. Reference pathfinding already handles
+destination identity and refreshed_this_tick; no semantic shortcut accepted.
+No new optimization qualified and no claim of20FPS combat. Goal remains unmet.
