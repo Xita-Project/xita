@@ -2284,6 +2284,21 @@ ifneq ($(filter $(XV_NATIVE_70110_PHASES),0 1),$(XV_NATIVE_70110_PHASES))
 $(error XV_NATIVE_70110_PHASES must be 0 or 1)
 endif
 $(RECOMP_BUILD)/kernel/xk_native_70110.o: RECOMP_CFLAGS += -ffp-contract=off -DXV_NATIVE_70110_PHASES=$(XV_NATIVE_70110_PHASES)
+# Explicit instruction-footprint experiment; default retains the qualified -O2.
+XV_NATIVE_70110_SIZE ?= 0
+ifneq ($(filter $(XV_NATIVE_70110_SIZE),0 1),$(XV_NATIVE_70110_SIZE))
+$(error XV_NATIVE_70110_SIZE must be 0 or 1)
+endif
+$(RECOMP_BUILD)/kernel/xk_native_70110.o: RECOMP_CFLAGS += $(if $(filter 1,$(XV_NATIVE_70110_SIZE)),-Os,)
+.PHONY: force-native-material-config
+force-native-material-config:
+$(RECOMP_BUILD)/native-material.config: force-native-material-config
+	@mkdir -p $(RECOMP_BUILD)
+	@printf '%s\n' '$(XV_NATIVE_70110_PHASES):$(XV_NATIVE_70110_SIZE)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+$(RECOMP_BUILD)/kernel/xk_native_70110.o: $(RECOMP_BUILD)/native-material.config
+
 # Native effects and material helpers (XV_NATIVE_EFFECTS): f_0007E530 (vertex-constant matrices), f_0007E420 (+7DBE0,
 # light constants), f_00056F20 (texture animation), f_00080360 (+1290E0, 80250: texture bind), f_00011B60 / f_00011610 /
 # f_00011BD0 (colour packing), hooked at their entries (tools/patch_native_effects_hooks.py):

@@ -55,3 +55,17 @@ Host differential fixture passed 2,048 cases, including 139 cross-page windows,
 normalization/skip policies remain; this is not a new exhaustive FP proof.
 ARM fixture built successfully with Cortex-A9 Thumb flags; Pi execution is
 running. No production build flag or installed Vita executable changed.
+
+The ARM/Pi differential fixture also passed all 2,048 cases with zero mismatches
+under existing verifier normalization rules. Isolated game-like timing (64
+inputs × 1,000 repetitions, stand-in callees, Pi core 0) completed baseline,
+size, size, baseline runs: native 3,964 / 3,965 / 4,027 / 3,987 ns per call.
+Cycles were 7,603 / 7,638 / 7,759 / 7,626. No Pi speed improvement is established;
+smaller instruction footprint is the remaining hardware-specific hypothesis.
+Receipts and counters are in ../material-size-candidate/bench-*.log.
+
+`XV_NATIVE_70110_SIZE=1` now opts only this native material object into -Os.
+Default 0 retains existing compiler behavior. A tracked config dependency handles
+both size and phase changes without stale objects. The production Makefile
+fixture passes unchanged-repeat, 0→1→0, phase-switch, unrelated-object and invalid
+option checks. This is a reversible hardware experiment, not a default speedup.
