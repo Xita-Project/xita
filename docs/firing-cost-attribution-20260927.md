@@ -693,3 +693,21 @@ cannot establish frame improvement, and further scheduling changes before that
 result would obscure attribution. Goal blocked on restoring/identifying the
 Vita application state; not complete. Resume with live endpoint/screen state,
 install perf280 and ordinary protected a30 capture. Preserve perf277 rollback.
+
+## Hardware connection restored; perf280 deployment underway
+
+On the resumed goal turn, independent status returned perf279 / 55e73b9f at
+dashboard timing_frame=0. Blocker cleared; renewed lease3600 and companion
+nosleep. Reverified perf280 package checksum and started authorized update/apply
+(session15623), not a speculative relaunch. Confirm boot before gameplay.
+Slot rotation will retain perf279 as immediate rollback; perf277 verified VPK
+remains local. Perf279 with profiling off retains the baseline behavior and
+queue32; perf280 adds grouped publication8. No new FPS claim yet.
+
+Perf280 updater completed successfully: slot0, verified runtime hash
+349e8686392a2067b901d3bc1879d383b115425e969d0546e76b74f9b1373baf.
+Independent status confirms perf280/f62e6553, dashboard timing_frame0, awake3589.
+Normal protected a30 launch is live session33657; poll it to completion before
+collect-idle.py. Then inspect pod screenshots and collect-gameplay.py (five-second
+AR, movement, outdoor). No wait-only/draw profile override. Perf279 retained
+slot1. Do not confuse this launch with the completed perf279 diagnostic handles.
