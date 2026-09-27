@@ -1298,3 +1298,30 @@ to differ from perf282; not executed before build completion. Guarded launch
 script prepared for perf283/protected a30 save, not run. Hardware remains282;
 lease successfully renewed. Previous goal turn made diagnostic implementation
 progress; current turn adds fused coverage, tests and the active SDK build.
+
+
+### Perf283 built and deployed
+
+Initial build50900 terminated rc2: automatic query fusion regeneration correctly
+rejected diagnostic-edited callsites. No generator validation was weakened.
+Normalized both edited shards against282 (remove observers/normalize split tail
+return and whitespace): guest statements identical. Twelve fusion sources,
+headers and configs matched byte-for-byte. Private post-generation-audit.json
+records evidence. Diagnostic-only make invocation uses `-o
+build/recomp/query-fusion.generated.json` to preserve those existing generated
+outputs; retry27576 completed rc0. Package audit92067 passed: exactly code008,
+code028, native collector and four version consumers differ from282. Contract
+unchanged, only game-a.self and boot-game.txt replaced.
+
+RuntimeSHA d8b7de85d7c8803ba8b25b37b3baca8cfde7d74f2bdb91fb92dd47fc2445c42c.
+PackageSHA09fe97e4053a8cb939a67e5eecd85a6279d00570a8776dc84926a6adfb5ed00f.
+Deployment50579 terminal success: slot1, hash verified, boot confirmed.
+Independent status identifies283/341d6873; awake lease renewed. Slot0 retains282.
+Predeployment log13302 completed, 14,063,583B preserved. Last complete report
+37260: FA92063.04ms/frame;10976050.13ms/1.7167ticks;4B9D08.62ms/17.1667calls.
+
+Guarded launch23012 completed; screenshot shows loading, not failed gameplay.
+Idle collector90315 is active, waiting for loaded/active/director telemetry
+before its45second measurement. No held controls. Poll this same handle; do not
+restart because loading takes several minutes. Diagnostic phase2 remains on,
+protected save XV_TEST_SAVE=a30-perf211; no ordinary FPS acceptance claim.
