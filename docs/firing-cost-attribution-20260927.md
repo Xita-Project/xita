@@ -355,3 +355,50 @@ collect-gameplay.py. Require [draw-prep] and [draw-prep-sub] output before
 claiming the diagnostic activated. These collectors' FPS summaries are
 instrumented and must not be compared as speed results. After capture, restart
 to dashboard to clear startup overrides and renew the lease.
+
+## Current recording diagnostic completed; normal startup restored
+
+Perf277's detailed draw profile activated (draw-prep/sub lines confirmed),
+loaded the protected pod, and completed idle, 12-second AR/reload, movement
+and outdoor captures. Screenshots confirm ammunition consumption and canyon
+geometry. All collectors are terminal; controls released. Companion restart
+returned to perf277 dashboard, timing_frame=0; lease renewed. Startup-only
+overrides cleared without modifying xita.cfg. Receipt: recording277-diagnostic/
+restored-dashboard.json.
+
+Elapsed recording-stage means (ms/frame, diagnostic only):
+
+| Stage | Pod (10 reports) | AR/reload (1 full report) | Outdoors (14 reports) |
+|---|---:|---:|---:|
+| Setup | 0.435 | 0.612 | 0.512 |
+| State | 0.855 | 0.968 | 0.898 |
+| Indices | 4.445 | 5.034 | 3.901 |
+| Program | 0.859 | 1.006 | 0.841 |
+| Streams | 22.701 | 18.732 | 14.278 |
+| Constants | 0.752 | 0.914 | 0.994 |
+| Textures | 2.598 | 3.104 | 2.710 |
+| Diagnostics | 0.242 | 0.230 | 0.251 |
+| Capture submit (inside streams) | 21.302 | 17.331 | 12.818 |
+
+Private report-windows.json associates preceding periodic records with the
+following frame-us group. This is coarse window association, not exact
+per-draw/frame alignment. AR/reload has only one complete window; do not
+generalize it to sustained NPC combat. Stages include waits, preemption and
+clock overhead; nested rows cannot be added. Instrumented pod 64.477 ms and
+fire 82.535 ms are not optimization acceptance measurements.
+
+The firing penalty is not explained solely by capture submission: that
+measured component decreased while the frame slowed. Preserve the game-update
+lead. Steady capture pressure is nevertheless substantial: diagnostic queue
+full events ~22/frame, arena pressure zero. The ordinary perf277 pod log also
+shows 737–806 queue-only events per 60-frame tail reports (~12–13/frame), so
+this is not solely a profiling artifact, though instrumentation magnifies it.
+It differs materially from the old perf202 evidence of 31 events/60 frames
+in d3d-record-speed2.md. Existing partial waits retain arena/slot lifetimes.
+
+Next concrete candidate: configurable capture queue depth (32 default, test
+64/128 privately), preserving FIFO callback order, immutable inputs, arena
+reclaim drains, unsigned ticket wrap and GPU-slot retirement. First extend
+the existing real-worker tests for capacity and wrap boundaries; do not
+assume fewer queue-full events improve total frame time or bypass callbacks.
+No deeper queue has been implemented or deployed yet.
