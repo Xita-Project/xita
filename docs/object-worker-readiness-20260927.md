@@ -26,7 +26,10 @@ still reset strict stability; correcting this bug does not guarantee admission.
 strict/tolerant modes, 512 lags across seven frame values, future frames and
 uint32 wrap. It reproduces the previous strict-case rejection. It also checks
 the production readiness function calls the tested predicate and uses its result.
-This is a predicate test, not a full readiness state-machine/concurrency test.
+The expanded test also compiles the complete production readiness function with
+mock guest memory. Both modes pass the 90-frame stabilization requirement,
+repeated-tick checks, every map/loading/camera/script reset gate, both accepted
+camera modes and frame-counter wrap. This is not a concurrency test.
 
 Next: qualify the corrected gate in the Pi campaign harness, explicitly inspect
 whether jobs actually engage and whether the guarded helpers remain correct.
@@ -34,3 +37,19 @@ Earlier workers could be substantially slower and have known shared-state risks;
 do not silently broaden camera/lag policy or promote the fix to hardware merely
 because the predicate test passes. Current hardware is perf271, which contains
 the cold-shader logging consolidation but not this readiness change.
+
+## First Pi campaign result
+
+The corrected gate completed a 180-second campaign capture (planned timeout
+124) in private `../object-readiness-pi/`. Workers actually engaged; aggregate
+counts are preserved in `summary.json`, with the command and full log alongside.
+This is stronger than initialization alone, but not gameplay qualification.
+
+The run produced impossible tick phase durations and repeated scope overflows.
+Inspection of `xk_scene_thread.c` exposes only two profiling stacks: scene helper
+and every other thread. Object workers therefore share the tick stack when
+phase instrumentation is enabled. These timings are invalid for attribution;
+the profiler needs worker exclusion or independently owned stacks before
+profiling this configuration again. This does not prove that gameplay itself
+is correct or corrupted. No worker-gate hardware deployment is authorized by
+this result. Keep perf271 installed while fixing diagnostic ownership.
