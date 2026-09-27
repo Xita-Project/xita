@@ -457,3 +457,10 @@ boot slot 1; independent live status reports 0.2.0-perf.278 / 06e32786,
 timing_frame=0. Perf277 preserved in slot 0. Protected normal-settings launch
 started via capture-depth-candidate/launch-a30.py; script renews keep-awake
 lease and releases controls in finally. No FPS result yet.
+
+Launch sequence completed normally (session 29193 terminal), screenshot
+review shows the loading screen, not gameplay. collect-idle.py is live in
+session 72365, polling loaded/active/director telemetry before its 45-second
+pod capture. Poll that existing handle; do not restart due to loading alone.
+After completion inspect idle screenshots, then run collect-gameplay.py for
+AR/movement/outdoor measurements. No new scene timing result claimed yet.
