@@ -2240,3 +2240,12 @@ Sleep lease renewed3600. Announced interruption and started remote update;
 see path-detail-289/deploy.log and live process handle. No restart should be
 sent until the existing updater resolves. Prepared289 launch/pressure/route
 scripts. This remains profiling, not a newly qualified performance gain.
+
+
+Perf289 update22869 completed rc0; exact runtime SHA536fbd76... booted slot1.
+Independent dashboard status confirms289/3c54c859, timing_frame0. Companion
+nosleep on acknowledged. Launch/readiness job7685 is active, logging to
+path-detail-289/launch-ready.log. It runs the existing launch sequence then
+a bounded readiness observer, finally gameplay-ready.png. No redundant pod
+timing interval. Poll this handle and inspect image before route inputs.
+No new performance result yet; goal remains unmet.
