@@ -1325,3 +1325,35 @@ Idle collector90315 is active, waiting for loaded/active/director telemetry
 before its45second measurement. No held controls. Poll this same handle; do not
 restart because loading takes several minutes. Diagnostic phase2 remains on,
 protected save XV_TEST_SAVE=a30-perf211; no ordinary FPS acceptance claim.
+
+
+## Important correction: native settings were present, two hooks were absent
+
+Perf283 idle collector90315 completed; screenshots confirm pod gameplay. In a
+complete60frame window, 4B9D011.04ms includes4960010.74,172BF010.61;
+collection171F108.72; object callback1716F08.46; object-space172F408.33,
+including881105.30 and868F02.86; solver170C101.86. These are nested diagnostic
+wall times, not additive independent costs. Diagnostic idle660frames mean61.317ms,
+p9576.278ms; not an ordinary-build performance comparison.
+
+Source audit found a concrete retention bug: perf282 (and its diagnostic283)
+query_fusion.c has no xv_native_4b9d0_object_query hook, and solver_fusion.c has
+no native feature-test hooks. Native implementations/settings existing did NOT
+prove these call paths active. Previous notes claiming both active were too
+strong. Native world-query hook in xk_query_reuse.c remains installed. Current
+logs contain no native-object-query initialization tag, consistent with source.
+
+Generator now inserts the exact existing compile-guarded object-query and solver
+feature hooks before output hashing/publication. Make dependencies include both
+hook tools. No new arithmetic or collision semantics. Solver patching extracted
+as pure function with complete/partial/duplicate checks. Two solver-hook tests
+pass; existing object-hook test compiles/runs all four native/world-run routes.
+Full owned-image generation41611 succeeded in collision-hook-retention/build-x87:
+only query_fusion.c and solver_fusion.c changed. A forced repeat and exact-hook
+comparison verify retention, recorded in retention-verification.json.
+
+Other phase tests passed when invoked as their standalone scripts (unittest
+discovery is not their CLI). Pi SSH reachable, load0.01; no jobs started there.
+Perf283 remains on hardware, idle collection terminal, no controls held. Prepare
+ordinary perf284 from282 plus restored hooks, verify actual native invocation
+and differential correctness on hardware before claiming recovered FPS.

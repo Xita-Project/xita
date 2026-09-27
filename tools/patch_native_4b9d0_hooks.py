@@ -49,6 +49,17 @@ S_CONT_HOOK = ('        goto NS_ENTRY_000864C0;\n    }\nNS_CONT_1: ;\n'
                '    xv_native_4b9d0_features_t1();\n'
                '#endif\n')
 
+def patch_solver(text):
+    """Install all three guarded solver edits, or reject partial/drifted input."""
+    if 'xv_native_4b9d0_features' in text:
+        if any(text.count(anchor) != 1 for anchor in (S_DECL_HOOK, S_CALL_HOOK, S_CONT_HOOK)):
+            raise ValueError('partial or duplicate native solver hooks')
+        return text
+    if any(text.count(anchor) != 1 for anchor in (S_DECL, S_CALL, S_CONT)):
+        raise ValueError('native solver call-site anchors missing or ambiguous')
+    return (text.replace(S_DECL, S_DECL + S_DECL_HOOK, 1)
+                .replace(S_CALL, S_CALL_HOOK, 1).replace(S_CONT, S_CONT_HOOK, 1))
+
 def main():
     recomp = Path(sys.argv[1])
     f = recomp / 'kernel' / 'xk_query_reuse.c'
@@ -63,11 +74,7 @@ def main():
         print(f'{f}: hook installed ({n} call sites)')
     f = recomp / 'solver_fusion.c'
     s = f.read_text()
-    if 'xv_native_4b9d0_features' in s: print(f'{f}: hooks already present'); return
-    for what, n in ((S_DECL, 1), (S_CALL, 1), (S_CONT, 1)):
-        if s.count(what) < n: sys.exit(f'{f}: anchor not found: {what.strip()!r}')
-    if s.count(S_CALL) != 1 or s.count(S_CONT) != 1: sys.exit(f'{f}: call-site anchors not unique')
-    s = s.replace(S_DECL, S_DECL + S_DECL_HOOK, 1).replace(S_CALL, S_CALL_HOOK, 1).replace(S_CONT, S_CONT_HOOK, 1)
-    f.write_text(s)
-    print(f'{f}: hooks installed (the 170CD1 call of f_000864C0, its continuation)')
+    patched = patch_solver(s)
+    if patched != s: f.write_text(patched)
+    print(f'{f}: solver hooks verified')
 if __name__ == '__main__': main()

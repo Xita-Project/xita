@@ -1939,6 +1939,7 @@ $(RECOMP_BUILD)/query-f32.config: force-query-f32-config
 	@rm -f $@.tmp
 QUERY_FUSION_OBJECTS := $(RECOMP_BUILD)/code_028.o $(RECOMP_BUILD)/query_fusion.o
 QUERY_FUSION_INPUTS := tools/query_world_run.py tools/query_object_space.py games/halo_ce_3925/discovery.py tools/query_ancestor_scalar.py tools/query_membership_scalar.py tools/query_semantic_leaf.py tools/query_f32_primitives.py tools/gen_native_query_fusion.py tools/gen_native_solver_fusion.py tools/prototype_collision_query.py \
+    tools/patch_native_object_query.py tools/patch_native_4b9d0_hooks.py \
     tools/tests/collision_query_fusion.c $(wildcard recompiler/*.py recompiler/core/*.py games/halo_ce_3925/*.py) \
     recomp/kernel/xk_collision_vertices.h recomp/kernel/xk_segment_sphere.h \
     recomp/kernel/xk_collision_traversal.h recomp/kernel/xk_geometry.c \

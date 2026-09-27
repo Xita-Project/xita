@@ -26,6 +26,8 @@ from tools import query_membership_scalar as query_membership
 from tools import query_ancestor_scalar as query_ancestor
 from tools import query_object_space
 from tools import query_world_run
+from tools import patch_native_object_query
+from tools import patch_native_4b9d0_hooks
 
 FEATURE = 'XV_NATIVE_QUERY_FUSION'
 PREREQUISITES = ('XV_NATIVE_BSP_SPHERE', 'XV_NATIVE_COLLISION_VERTICES',
@@ -209,6 +211,14 @@ def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inli
         generated['query_fusion.c'] = generated['query_fusion.c'].replace(marker,
             '        { extern void xv_query_repeat_probe_observe(xctx *);\n'
             '          xv_query_repeat_probe_observe(c); }\n' + marker)
+    # These qualified native paths used to be installed manually after generation.
+    # Regenerating silently erased them while leaving their runtime settings on.
+    # Own the guarded hooks here, before hashing/publication. Undefined/zero
+    # XV_NATIVE_4B9D0 retains the original fused implementation.
+    if query_object_space_enabled:
+        generated['query_fusion.c'] = patch_native_object_query.patch(generated['query_fusion.c'])
+    if solver_fusion:
+        generated['solver_fusion.c'] = patch_native_4b9d0_hooks.patch_solver(generated['solver_fusion.c'])
     # Publication happens only after every input/output contract check passed.
     changed = [name for name, text in generated.items()
                if replace_if_changed(recomp_dir / name, text)]
@@ -228,6 +238,8 @@ def generate(xbe, manifest, recomp_dir, receipt, solver_fusion=0, query_f32_inli
         query_repeat_census=query_repeat_census,
         query_reuse=query_reuse, query_reuse_contract=reuse_contract,
         query_world_run=query_world_run_enabled, query_world_run_contract=world_contract,
+        guarded_native_object_query=bool(query_object_space_enabled),
+        guarded_native_solver_features=bool(solver_fusion),
         changed=changed)
     # A fresh receipt is also the build stamp. Write it after generated outputs,
     # including when their bytes were unchanged but an input was revalidated.
