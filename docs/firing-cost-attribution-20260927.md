@@ -108,3 +108,31 @@ changing double intermediates to float as a shortcut.
 
 Vita dashboard restoration was independently confirmed on perf275; the latest
 3600-second lease succeeded. No Pi or Vita capture job remains active.
+
+## Stack candidate differential qualification
+
+`tools/tests/sprite_stack.c` compares the entire xctx, 8 MiB arena, page table,
+and ordered full-context callee/handoff observations. Expanded 2,048 cases cover
+all eight x87 TOP values, four corner-loop entry indices, both output-format
+branches, aligned/unaligned within-page and crossing-page stacks, stack/output
+aliasing, handoff remapping/stack relocation/input edits, and modeled 5BA10
+memory/context effects. The callee is modeled, not actual integration coverage.
+
+The first 768-case host sanitizer and Pi runs passed. Code review then found
+that the generic pointer fallback for float accesses bypassed the original
+split-page helper. Existing cases had not demonstrated a mismatch from that
+issue; it was corrected explicitly, without weakening checks. The expanded
+candidate uses original x87_load/store_f32 when the complete stack span does
+not fit one page. Word accesses retain their original unaligned semantics.
+
+Corrected private split-safe/ host ASan/UBSan and Cortex-A9 Thumb Pi builds each
+passed 2,048 cases, 1,536 matching handoffs and 1,024 matching modeled callees.
+A mutant omitting stack-pointer refresh after handoff fails the full comparison.
+These are bounded synthetic results, not proof of all aliases or concurrent
+kernel behavior. The Pi fixture ran on cores 0/1 and is terminal. No build was
+installed on Vita; perf275 remains with a renewed lease.
+
+Next: VitaSDK-linked instruction qualification including per-thread mapping,
+then a focused cost test. Real-callee integration and ordinary physical-Vita
+frame-time checks are still required before promotion. The candidate is not a
+proven speedup; generated test bodies and binaries remain private.
