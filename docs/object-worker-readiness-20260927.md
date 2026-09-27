@@ -150,3 +150,19 @@ It is built and packaged, not yet deployed. Runtime SHA-256
 `f4ba6c680dcd2ff3bff40a914433b609e8f4df16d6844f82f1359219342dabbc`.
 Keep the previous graphics settings and strict admission policy for its initial
 launch; do not silently enable lag tolerance or broaden camera support.
+
+Perf272 gameplay capture completed: AR hold 56 frames, 95.710 ms / 10.45 FPS
+(p95 128.570, max 138.563; all >50 ms, 24 >100 ms); movement 74 frames,
+71.714 ms / 13.94 FPS (p95 106.191, max 264.073; all >50 ms, four >100 ms);
+outdoors 856 frames, 52.848 ms / 18.92 FPS (p95 63.846, max 88.563;
+445 >50 ms, none >100 ms). Screenshot confirms the outdoor location. The AR
+still has eight rounds after the timed hold, unlike the previous run's empty
+magazine/reload pose: do not describe these as identical firing workloads.
+No worker pass reports were present. No crash occurred in this short sequence.
+
+The later 3.4 MB checkpoint write took 191,268 us, further evidence that save I/O
+can account for a large part of movement-associated stalls. Exact frame alignment
+still needs a frame ID or matching clock bracket; do not claim the full 264 ms
+was proven to be save time. Log remains private gameplay.log.
+Perf273 upload/apply started after the collector terminated; boot verification
+is pending in ../worker-log-hardware/deploy.log.
