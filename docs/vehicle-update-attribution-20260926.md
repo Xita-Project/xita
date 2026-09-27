@@ -51,3 +51,36 @@ No source runtime policy or installed package changed in this investigation.
 Perf269 remains the hardware baseline, with its keep-awake lease renewed.
 The next concrete action is to isolate these three children, then target the
 one actually responsible rather than repeat the small predicate experiment.
+
+## Physics/effect split completed
+
+`../vehicle-physics-phase-pi/` adds 82 direct-call observers across 37F80,
+37760, 37AB0 and 36D20, retaining the previous 39450 scopes. Removing the new
+observers restores the original shard 006 exactly; each selected body also
+matches retained perf269. No candidate predicates or runtime policy changed.
+The full ARM harness built and ran on Pi cores 0/1 for the planned 180 seconds
+(exit 124), producing 87 reports through frame 5220. The saved log contains no
+fatal/trap or tick-scope omission/overflow/abandonment matches. The same headless,
+older-runtime and input-versus-action qualifications above remain applicable.
+
+| Host report | 37F80 ms | 37760 ms | 84D40 beneath 37760 ms | 36D20 ms |
+| --- | ---: | ---: | ---: | ---: |
+| 1740 | 0.96 | 0.96 | 0.91 | 0.00 |
+| 1860 | 0.76 | 0.76 | 0.72 | 0.00 |
+| 1920 | 1.12 | 1.12 | 1.08 | 0.00 |
+
+These rounded measurements put 95–96% of the selected old-physics branch under
+84D40. A displayed 0.00 is below report precision, not proof of zero work.
+The new-physics branch 37AB0 is not established as active by these windows.
+The attached effect path is not the major cost in this sample.
+
+The reference `update_alien_fighter_physics_old` finishes with `physics_update`;
+retail 37760's corresponding call is 84D40. Its maintained translation calls
+824B0, 81900, the existing quaternion helper B5F60, 83970, 81B90 and 84C00.
+This narrows the next implementation boundary to shared physics update and
+its children rather than vehicle steering math or ghost-effect suppression.
+Existing quaternion work must not be counted as a new replacement opportunity.
+
+Artifacts include `build.log`, `audit.json`, `run-command.json`, `run-result.json`,
+`run.log` and `summary.json`. Hardware still runs perf269; no FPS improvement,
+new hardware stability result or physics change is claimed from this diagnostic.
