@@ -172,3 +172,13 @@ The launch script accepted version 0.2.0-perf.273 with timing_frame=0 and starte
 a30 with unchanged settings and strict readiness. Keep-awake lease renewed.
 Perf272 is slot 1; the known-good perf271 VPK is retained separately (it is no
 longer in an active update slot). No perf273 frame-time result yet.
+
+## Perf273 settled lifepod capture
+
+Lifepod screenshot verified. 720 complete sampled frame intervals averaged
+55.849 ms / 17.91 FPS; p95 74.024 ms, maximum 90.904 ms, 495 >50 ms and none
+>100 ms. This recovers from perf272's logging regression and is near perf271's
+17.46 FPS result; do not claim a net worker gain or controlled small FPS gain.
+No object-worker report appeared. Strict admission still flaps below 30 FPS.
+The firing/movement/outdoor collector is now running. Evidence is private
+../worker-log-hardware/idle-summary.json, idle.log and screenshots.
