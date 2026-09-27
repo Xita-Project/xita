@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include <psp2/kernel/sysmem.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/clib.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/gxm.h>
@@ -174,8 +175,11 @@ int xv_fshader_embedded_no_depth(const char *path)
 }
 #endif
 
-static SceGxmProgram *load_gxp(const char *path)
+static SceGxmProgram *load_gxp(const char *path, int *source)
 {
+    /* Source: 0 unknown/failure, 1 embedded, 2 file. Caller-local so concurrent
+     * first-use loads cannot overwrite another load's diagnostic provenance. */
+    if (source) *source = 0;
     /* Optimization correctness relies on this exact constant program, even
      * when development overrides are enabled for ordinary game shaders. */
     int builtin_only = !strcmp(path, "builtin:xita-depth");
@@ -220,6 +224,7 @@ static SceGxmProgram *load_gxp(const char *path)
         if (!prog) return NULL;
         memcpy(prog, builtin, builtin_size);
         if (sceGxmProgramCheck(prog) != SCE_OK) { free(prog); return NULL; }
+        if (source) *source = 1;
         return prog;
     }
     if (fd < 0 && use_override) fd = sceIoOpen(path, SCE_O_RDONLY, 0);
@@ -245,6 +250,7 @@ static SceGxmProgram *load_gxp(const char *path)
         free(prog);
         return NULL;
     }
+    if (source) *source = 2;
     return prog;
 }
 
@@ -298,7 +304,7 @@ int xv_vshader_load(xv_vshader_t *vs, const xv_vs_desc_t *desc)
     memset(vs, 0, sizeof(*vs));
     vs->desc = desc;
     vs->const_stream = 0xFF;
-    vs->prog = load_gxp(desc->gxp);
+    vs->prog = load_gxp(desc->gxp, NULL);
     if (!vs->prog)
         return -1;
     int err = sceGxmShaderPatcherRegisterProgram(g_patcher, vs->prog, &vs->id);
@@ -388,10 +394,20 @@ int xv_fshader_load(xv_fshader_t *fs, const char *gxp_path, const xv_vshader_t *
     memset(fs, 0, sizeof(*fs));
     for (int i = 0; i < 4; ++i)
         fs->tex_index[i] = -1;
-    fs->prog = load_gxp(gxp_path);
+    /* Cold-path attribution only. No clocks on cache-hit draws. Reuse the
+     * existing diagnostic switch to avoid consuming another launch-env slot.
+     * Wall time includes preemption; this is not GPU service time. */
+    const char *slow = getenv("XV_FRAME_SLOW_MS");
+    int slow_ms = slow ? atoi(slow) : 0;
+    int timed = slow_ms >= 50 && slow_ms <= 10000;
+    uint64_t t0 = timed ? sceKernelGetProcessTimeWide() : 0;
+    int source = 0;
+    fs->prog = load_gxp(gxp_path, &source);
+    uint64_t t1 = timed ? sceKernelGetProcessTimeWide() : 0;
     if (!fs->prog)
         return -1;
     int err = sceGxmShaderPatcherRegisterProgram(g_patcher, fs->prog, &fs->id);
+    uint64_t t2 = timed ? sceKernelGetProcessTimeWide() : 0;
     if (err < 0) {
         XV_LOG("%s: register failed 0x%08X\n", gxp_path, err);
         free((void *)fs->prog); fs->prog = NULL;
@@ -399,6 +415,7 @@ int xv_fshader_load(xv_fshader_t *fs, const char *gxp_path, const xv_vshader_t *
     }
     err = sceGxmShaderPatcherCreateFragmentProgram(g_patcher, fs->id, SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4,
                                                    SCE_GXM_MULTISAMPLE_NONE, blend, vs->prog, &fs->fprog);
+    uint64_t t3 = timed ? sceKernelGetProcessTimeWide() : 0;
     if (err < 0) {
         XV_LOG("%s: create fragment program failed 0x%08X\n", gxp_path, err);
         sceGxmShaderPatcherUnregisterProgram(g_patcher, fs->id);
@@ -423,7 +440,20 @@ int xv_fshader_load(xv_fshader_t *fs, const char *gxp_path, const xv_vshader_t *
         if (p)
             fs->tex_index[i] = (int)sceGxmProgramParameterGetResourceIndex(p);
     }
-    XV_LOG("%s: linked against %s\n", gxp_path, vs->desc ? vs->desc->gxp : "?");
+    if (timed) {
+        uint64_t t4 = sceKernelGetProcessTimeWide();
+        /* Keep normal helper-log suppression: this must never introduce a
+         * synchronous helper log wait. Missing records do not prove no hitch.
+         * Earlier alpha/constant log formatting is included in metadata. */
+        XV_LOG("[shader-load-us] end %llu source %s total %llu load %llu register %llu link %llu metadata %llu: %s against %s\n",
+               (unsigned long long)t4, source == 1 ? "embedded" : "file",
+               (unsigned long long)(t4-t0), (unsigned long long)(t1-t0),
+               (unsigned long long)(t2-t1), (unsigned long long)(t3-t2),
+               (unsigned long long)(t4-t3), gxp_path,
+               vs->desc ? vs->desc->gxp : "?");
+    } else {
+        XV_LOG("%s: linked against %s\n", gxp_path, vs->desc ? vs->desc->gxp : "?");
+    }
     return 0;
 }
 
