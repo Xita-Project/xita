@@ -111,3 +111,9 @@ Contract `775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897`.
 Remote upload/application has started; boot and hardware gameplay results remain
 pending. Perf269 is retained as rollback. No settings or saves are changed by
 the package itself.
+
+Remote update completed: runtime hash verified, slot 1, restart requested and
+boot confirmed. Independent status reports `0.2.0-perf.270 / c8fb09c5`, timing
+frame 0 and benchmark off at the dashboard. Keep-awake lease renewed. The
+existing batched a30 launch sequence has started using `a30-perf211`; settled
+hardware measurements and screenshot validation are still pending.
