@@ -74,3 +74,19 @@ requires native sampler enablement, and tracks flag changes for xd3d.o only.
 unaffected unrelated objects, and rejection of invalid flag combinations.
 Next step: isolated Vita build retaining perf273 settings and generated code,
 then ordinary gameplay measurement. Perf273 remains installed; no update yet.
+
+## Perf275 build started
+
+Private stage ../sampler-pointer-hardware/ is a reflink of perf273 with only
+the sampler header, dedicated Makefile option, and build/version identification
+changed. It targets perf275 / d0975e0b with XV_MATERIAL_SAMPLER_POINTERS=1.
+All prior build settings are preserved; the rejected native-material -Os trial
+is not included. Runtime/generated source remains otherwise unchanged.
+
+xd3d.o compiled successfully; xv_material_sampler_try grows from 0x27c to
+0x39c bytes. The existing shared-header dependencies also trigger recompilation
+of generated code_011.c, which is still running. The preliminary object audit
+therefore must be repeated once the build is terminal; it is not final package
+qualification. No package has been produced or deployed. Perf273 stays on the
+Vita. Launch and ordinary idle/fire/move/outdoor collection scripts are prepared
+with version guards and the same 32 overrides, protected a30-perf211 save.
