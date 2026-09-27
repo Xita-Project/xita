@@ -1,0 +1,53 @@
+# Vehicle update attribution
+
+Perf269 slow-frame evidence points before present; the follow-up Pi owner
+profile identified callback 39450 beneath 90950. Previous worker faults under
+39450 involved both sound-cache yielding (95680 -> 10D920 -> 26B10 -> 32B00)
+and deep physics stacks (86A40). See parallel-object-experiment-20260914.md.
+Those findings prohibit assuming this callback can simply move to another core.
+
+Private `../vehicle-child-phase-pi/` adds observers at 27 direct call sites
+inside 39450. Removing observers restores the exact retained perf269 function;
+all other functions in shard 007 remain unchanged. The harness uses the earlier
+aligned native transform/effects objects. It does not include the experimental
+1731D0 predicate candidate, change worker policy, or alter simulation behavior.
+Build, audit, command, terminal result, full log and summary are retained there.
+
+Pi cores 0/1, a30 scripted campaign/firing sequence: the 180-second job completed
+with intended timeout exit 124, 87 reports through frame 5220. No fatal/trap or
+tick-scope omission/overflow/abandonment matches were found. This is headless,
+instrumented supporting attribution, not a Vita frame-rate or visual result.
+The second input burst's actual firing remains unverified, as in the preceding
+capture; do not infer weapon behavior solely from scheduled inputs.
+
+| Host report | 39450 inclusive ms | Self ms | Child 37F80 ms |
+| --- | ---: | ---: | ---: |
+| 1740 | 0.98 | 0.02 | 0.93 |
+| 1860 | 0.65 | 0.02 | 0.60 |
+| 1920 | 1.19 | 0.02 | 1.14 |
+
+These nested timings identify 37F80 as 92–96% of this callback's measured cost
+in these windows. Optimizing the outer callback alone has little scope here.
+They do not establish 37F80's cost on the Vita or identify its own slow child.
+
+## Reference-guided next boundary
+
+The pinned bnunu reference `source/units/vehicles.c`,
+`update_alien_fighter_physics`, selects old/new physics using physics radius
+and then invokes `create_ghost_effect`. The retail 37F80 likewise resolves a
+physics tag, compares its first float against zero, calls 37760 or 37AB0, and
+then calls 36D20. This is a structural correspondence, not a build/layout match
+or permission to copy its implementation. The reference's vehicle update also
+already has an at-rest gate; a blanket stationary-vehicle skip is not justified.
+
+Inspect/time the retail children separately before implementing a replacement:
+
+- 37760 and 37AB0: alternative physics paths with math and 84D40 calls.
+- 36D20: calls 8D650, B5350, collision-vector 1721B0 and effect creation 112070.
+  Thus the apparent flying-vehicle physics cost could actually be its attached
+  effect/collision work. Do not assume all of the measured time is physics.
+
+No source runtime policy or installed package changed in this investigation.
+Perf269 remains the hardware baseline, with its keep-awake lease renewed.
+The next concrete action is to isolate these three children, then target the
+one actually responsible rather than repeat the small predicate experiment.
