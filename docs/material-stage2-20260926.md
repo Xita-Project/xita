@@ -98,3 +98,38 @@ Embedded candidate bytes match the compiled GXP exactly.
 Evidence is in `../material-nocolor-candidate/`, including build/deploy receipts
 and launch log. Installation alone does not verify shader selection, rendering,
 performance, or campaign completion.
+
+## Perf264 ordinary gameplay observations
+
+Both collectors completed normally. Actual hardware log confirms the candidate
+linked against `halo_vs_09.gxp` (saved in `shader-selection.json`). Screenshots
+show the lifepod and then the same general outdoor view used previously; trees,
+terrain, weapon and HUD are present. This does not establish full visual or
+campaign correctness.
+
+| Segment | Samples | Mean ms / FPS | p95 ms | p99 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Lifepod idle | 720 | 55.952 / 17.87 | 73.455 | 105.847 | 181.761 |
+| Firing in pod | 69 | 79.587 / 12.56 | 103.631 | 131.407 | 131.407 |
+| Moving outside | 80 | 67.591 / 14.79 | 89.867 | 257.377 | 257.377 |
+| Outdoor idle | 863 | 52.410 / 19.08 | 60.753 | 95.687 | 861.078 |
+
+Frames above 50 ms: 511/720 pod, 69/69 firing, 78/80 movement, 297/863
+outdoors. Outdoor median is 48.774 ms, nearly the earlier perf263 sample's
+48.748 ms; neither establishes stable 20 FPS. These are independent gameplay
+samples, not a controlled causal comparison. No demonstrated gain from the new
+shader; the shorter compiled program is not sufficient evidence to promote it
+to a default optimization.
+
+Largest outdoor stalls were frames 8643 (861.078 ms), 8666 (550.220 ms), and
+8644 (203.340 ms). The overlapping 60-frame report shows zero texture decodes,
+zero recording-queue full waits, and no recorded object/tag ownership errors.
+The GPU observation bracket cannot attribute an individual frame's cause.
+Do not label these GPU stalls or shader regressions from this data alone.
+
+The selected shader remains opt-in in source and enabled only for this test
+launch. No further update/restart was performed. Next investigation should
+isolate the long CPU/queue intervals during effects and the recurring stalls;
+repeating this shader comparison is not justified by the current evidence.
+Private measurements: `idle-summary.json`, `gameplay-summary.json`, source logs,
+input/status marks, and endpoint screenshots in `material-nocolor-candidate`.
