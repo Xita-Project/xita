@@ -64,3 +64,49 @@ receipts, build scripts and summaries. Raw logs are in
 `../d3d-record2-work/pi-runs/codex-transform-{native,child}-split-20260926.log`.
 No proprietary/generated source has been added to Git. The 20-FPS goal remains
 unmet, particularly firing, the lifepod and the canyon cutscene.
+
+## Follow-up: common root pair and isolated ARM prototype
+
+A call-site counter probe (no per-child clocks) observed 794,624 object calls:
+
+| Matrix call site | Calls |
+|---|---:|
+| 8E374 | 496 |
+| 8E419 | 685,446 |
+| 8E4F4 | 16,053 |
+| 8E500 | 16,053 |
+| 8E520 | 669,393 |
+| 8E586 | 913,566 |
+
+The initially proposed 8E4F4/8E500 pair is rare. The candidate now targets
+8E520 followed by 8E586: about 84.2% of observed object calls. This count is
+from the supporting Pi harness, not a frequency guarantee for every Vita scene.
+Evidence: `../transform-sites-pi/summary.json` and the corresponding
+`codex-transform-sites-20260926.log` in `../d3d-record2-work/pi-runs/`.
+
+A private prototype combines admission and stack/register handling around the
+two existing snapshot multiplies. It preserves both arithmetic operations and
+their intermediate float rounding. It does not cache animation or skip models.
+On the Pi, 1,024 differential cases passed exact full-arena, full-context and
+FP-exception checks against the two existing native leaf calls plus their
+intervening caller instructions. Cases include four rounding modes, all x87
+stack positions, finite values, signed zeros, subnormals, infinities and NaNs.
+The x86 host version initially failed a NaN-payload comparison; the ARM helper
+uses explicit operand order and passed without normalization. This is not yet
+an enclosing generated-consumer equivalence test.
+
+An isolated ARM microbenchmark, pinned to Pi core 0, ran four million pairs per
+implementation in alternating one-million-call groups. Original pairs took
+310.735–310.909 ns, combined pairs 187.590–187.652 ns (about 40% less for this
+isolated operation). This fixture excludes production worker locking and does
+not prove any Vita frame-time gain. It also uses repeated fixed inputs; cache
+and workload behavior differ from ordinary gameplay.
+
+Private source, executables and receipts: `../root-compose-candidate/`.
+Nothing is integrated into generated call sites or deployed; perf267 remains
+the hardware build. Before integration, qualify the owned caller and enclosing
+consumer, worker ownership/guard release, disabled and optional math modes,
+and concurrent use. In particular the prototype retains its guard across both
+operations, whereas the existing leaf can release the guard for private output.
+Do not introduce serialization while reducing setup cost. Hardware gameplay
+validation remains required after those checks.
