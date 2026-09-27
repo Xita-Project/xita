@@ -711,3 +711,39 @@ Normal protected a30 launch is live session33657; poll it to completion before
 collect-idle.py. Then inspect pod screenshots and collect-gameplay.py (five-second
 AR, movement, outdoor). No wait-only/draw profile override. Perf279 retained
 slot1. Do not confuse this launch with the completed perf279 diagnostic handles.
+
+## Perf280 ordinary hardware result: grouped publication not retained
+
+Launch33657, idle98912 and gameplay40388 all terminal. Inspected pod,
+AR/reload and outdoor screenshots; controls released. No crash observed in this
+short run. Ordinary 360p settings, five-second fire, no wait-only/draw profiling:
+
+| Scene | Samples | Mean ms / FPS | p95 ms | Maximum ms | >50 / >100 ms |
+|---|---:|---:|---:|---:|---:|
+| Pod | 720 | 58.658 / 17.048 | 76.508 | 101.002 | 561 / 1 |
+| AR fire | 65 | 81.669 / 12.245 | 101.903 | 140.516 | 64 / 4 |
+| Movement | 78 | 67.974 / 14.712 | 87.082 | 261.939 | 78 / 3 |
+| Outdoors | 928 | 48.660 / 20.551 | 58.816 | 93.486 | 206 / 0 |
+
+Perf277 ordinary samples were55.702/76.562/62.594/47.494ms respectively.
+Separate ordinary runs are not controlled proof of regression, but no speedup
+is demonstrated. Grouping did reduce completion bookkeeping: tail reports show
+~1932–1970 done signal+skip decisions/60frames, versus~14K queued jobs. Ready
+inline draws only65–146/60frames in these tails. Owner FA920 elapsed51.5–51.7ms
+includes waits; recorder drain4.38–5.28ms/frame overlaps and cannot be added.
+Do not interpret reduced notifications as reduced critical-path frame time.
+
+Requested rollback to perf279; confirmation poll session24193 active. Preserve
+existing cumulative optimizations, keep publication default1, retain optional
+candidate/tests and findings. Next evidence-backed scheduling candidate is
+capture-worker placement: current capture and deferred recorder both C0,
+prior wait-only profile15.3ms owner queue waits in pod. Audit an opt-in C1
+capture affinity while preserving priority/FIFO/ownership; assess competition
+with C1 model work and total frame time, not aggregate core utilization.
+No affinity change implemented yet. Still need full cutscene/combat and15min
+acceptance; goal remains unmet.
+
+Rollback confirmed independently by perf279 version and expected runtime hash;
+dashboard timing_frame0. Lease renewed3600. Receipt:
+capture-publication-candidate/restored-dashboard.json. Poll24193 terminal;
+no live collectors or controls remain. Diagnostic startup overrides absent.
