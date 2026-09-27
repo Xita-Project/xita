@@ -2069,3 +2069,49 @@ after loaded/active/director telemetry, then review pressure-before/after.png
 and pressure.log. Afterwards prepared collect-encounter.py can follow286route
 and expose164090 resolved targets. May need another settled capture under a
 new filename after traversal. No FPS-improvement claim. Saves untouched.
+
+
+## Perf287 resolves action control to guard behavior
+
+Previous turn progress: confirmed deployment and started readiness capture.
+55030 terminalrc0: pod720intervals58.312ms/17.149FPS,p9573.474,max89.267.
+Reviewed pod-before image, ordinary pod/AR. Route10897 terminalrc0, controls
+released; outdoor900intervals46.777ms/21.378FPS,p9559.046,max148.746;269over50.
+Reviewed encounter-after: quiet trees/cliff, no visibleenemy. Settled11204
+terminalrc0:900intervals46.237ms/21.628FPS,p9558.242,max79.159,256over50.
+Neither quiet interval meets NPC-combat acceptance.
+
+Moved .3left+12forward66747, then .7right+8forward17334; bothterminalrc0,
+controlsreleased. Images show cliff/trees, then nearby rock with radar contact.
+after-forward.log identifies AI14E2C08.20/8.51ms,15AF505.09/5.69ms inclusive.
+active42644 failed during initial log fetch withHTTP408; statusstilllive287,
+not a game crash/restart. New collector active2/job37598 completedrc0.
+720intervals59.849ms/16.709FPS,p9572.865,max104.59;all720over50.
+Reviewed active2-after image: outdoor different viewpoint, ammo425 versus587
+earlier; do not label whole interval stationary or assume only scripted input.
+
+Resolved target evidence in active2.log, action-targets.json: reports near
+13380/13440/13500 show164090>16D2503.58/13.07/10.97ms; latter960/912calls
+per60frames. These are earlier than active2 timed15411..16164 interval; don't
+assign the peak to that interval's mean. Heavy action-control target is16D250.
+Private Pi image action-table.json includesSHA,14entries. Tablebase1F0550,
+stride38h,control pointer+20h=1F0570,labels/indexesmatch reference actions.c.
+Thus164090 is actor_action_control,16D250 is action_guard_control (NOT
+actor_action_update, an earlier tentative label). Targetbodycode028:24360.
+15AF50 likely actor_move_update from surrounding caller order matched against
+reference actors.c; keep semantic label provisional until body corroboration.
+Next: split guardcontrol16D250 and movement15AF50 direct children to identify
+path work/native candidate; do not optimize the tiny dispatcher itself.
+No new gameplayoptimization qualified. Current287 remains online, no collectors
+active; companion nosleep remainson andlease refreshed during route.
+
+User supplied cybersecurity/halo-ce-universal again. Existingprivatecheckout
+13d1ae2 withuntrackedconfigure-attempt.log preserved. Fetchedorigin/main to
+5d1ee75 withoutcheckout/reset. Native-build experiment docs alreadyrecord
+missingXDK,D3D8headers,mapversionmismatch,and successful isolatedARMmathcompile.
+LatestREADME explicitlymeasures desktop/Pixel hardware, notVita. Newdiffhas
+statecache/bufferreuse,Androidthree-stream-buffer retirement,once-per-tick
+soundobstructionreuse,and source/platformfixes. Obstructioncacheespecially
+targets nativeports renderingmultipleframespertick; Xitaalreadyhasindependent
+sound-obstructionhookmode6, so do not assume additivegain. Compare exact
+remaining per-draw work and invalidation before copying. No upstreamcode merged.
