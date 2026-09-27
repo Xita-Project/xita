@@ -84,3 +84,41 @@ Existing quaternion work must not be counted as a new replacement opportunity.
 Artifacts include `build.log`, `audit.json`, `run-command.json`, `run-result.json`,
 `run.log` and `summary.json`. Hardware still runs perf269; no FPS improvement,
 new hardware stability result or physics change is claimed from this diagnostic.
+
+## Shared physics child capture
+
+`../physics-update-phase-pi/` adds 76 direct-call observers inside 84D40,
+824B0, 83970, 81B90, 84C00 and 846E0. Each selected pre-observer body matches
+retained perf269; stripping new observers restores the prior shard 013 exactly.
+The already-aligned effects/native code in other functions is retained.
+
+The ARM build succeeded. The Pi core-0/1 run completed its planned 180-second
+timeout (exit 124), with 86 reports through frame 5160 and no fatal/trap or
+tick-scope omission/overflow/abandonment matches in the log. Private command,
+result, log and summary artifacts preserve the evidence and its limits.
+
+| Host report | 824B0 inclusive ms | Self ms | 1721B0 ms | 82380 ms |
+| --- | ---: | ---: | ---: | ---: |
+| 1740 | 0.97 | 0.17 | 0.37 | 0.33 |
+| 1860 | 0.80 | 0.15 | 0.33 | 0.23 |
+| 1920 | 1.08 | 0.16 | 0.22 | 0.61 |
+
+84D40 delegates essentially its whole measured interval to 824B0 in these
+windows. Despite the latter's substantial translated floating-point body,
+segment collision and ground-plane work outweigh its local math. A register
+lowering of the entire body is therefore not the first priority on this data.
+
+Retail 82380 initializes a plane/result record, calls 171F10 with flags C0A0,
+then conditionally calls 86720, 80F00 and 940C0. The reference
+`source/physics/physics.c` function `compute_ground_plane` provides a structural
+anchor for this sequence. It allocates large scratch storage and may depend on
+moving objects, so caching the last answer without lifetime/geometry validation
+would not preserve behavior. The remaining immediate question is collection
+171F10 versus plane extraction 86720 versus the other result updates.
+
+The 171F10 collection and 1721B0 segment paths already contain native work.
+Consult native-object-query.md, claude-collision-collection-20260916.md and
+collision-solver-boundary-20260916.md before proposing another replacement.
+Keep the physical perf269 baseline and existing physics equations unchanged
+until a concrete remaining cost is selected and its replacement qualified.
+All numbers are instrumented Pi observations, not hardware FPS savings.
