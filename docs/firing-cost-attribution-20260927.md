@@ -2334,3 +2334,28 @@ validation and final boundary image; no movement or repeated FPS benchmark.
 Poll existing observer handle. No sleep enabled and lease renewed3600.
 Previous turn was progress (qualified quiet sample and same-build restart).
 No new code optimization/FPS success this turn; goal remains unmet.
+
+
+## Replay observation closed; retain AI probe and return to model wrapper
+
+Arrival observer27566 completedrc0, three log captures plus final image.
+Allthree logs have no reported15A290/13A140/139E30 parent row; final image
+remains quiet outsidepod. This does not reproduce prior NPC path spike.
+No further automatic waiting/restarts scheduled. Asked optional user help
+leaving game at known active Grunt/Elite encounter when next available.
+Not a blocking dependency: continue residual model work.
+
+Productioncode013 f8DDF0 uses memoryx87 because x87_regs.hook_reason rejects
+before-instruction hooks.8E0F0 hierarchy and8E166 basis mutate context;basis
+can jump8E293,rootpair can jump8E58B. Cannot safely removeguard or simply
+regenerate with registerlowering; hook entry/exit FPstate/branches must be
+explicitly represented and differentiallyqualified first.
+Hardware tail verifies existing native work active:58962fast/484fallback
+matrices,25810fast/151fallback quaternions per60frames;hierarchy1365batches
+11102childnodes;4095small-modeldeclines,nootherboundsdeclines. Rootpair0
+accepted/15925declined is expected with diagnosticphase2. Thus do not claim
+helper implementation missing or diagnostic wrapper times equal normalbaseline.
+Private model-admission-tail.json retains rows. Next bounded investigation:
+separate already-native hooks from residual8DDF0 wrapper before selecting
+a rewrite; earlier Pi transform-native-phase supplies startinginstrumentation.
+Goal unmet; no newoptimization deployed. Previous turn progress/verifiedwait.
