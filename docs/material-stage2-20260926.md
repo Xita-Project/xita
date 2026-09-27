@@ -75,3 +75,26 @@ admission. Both fixtures also passed as static ARM executables on Pi core 0
 Next: package a private Vita candidate retaining the qualified stack, verify
 actual selection and tree/alpha rendering, then collect ordinary gameplay frame
 times. This has not yet changed the installed perf263 build.
+
+## Perf264 hardware installation
+
+Private application build and packaging completed successfully. Only
+`game-a.self` and `boot-game.txt` differ from perf263; shared asset/update contract
+remains `775a18633b824a8ed092a7883713a88fff592bda190db0ffbc8e01614d7d4897`.
+Embedded candidate bytes match the compiled GXP exactly.
+
+- Build: `0.2.0-perf.264 / aafda2b6`.
+- Runtime: 34,805,702 bytes, SHA256
+  `1e48e61ad8218eb6739a82ebd537bf7445c0c41109417b0d47fa181705b7be34`.
+- Package: `../material-nocolor-candidate/xita-perf264c.vpk`, SHA256
+  `aff45cac8e0a2205eb4144731732496c15f4177979d5239d37be99be587efa52`.
+- Updater verified payload, restarted, and confirmed boot in slot 1. Perf263
+  remains the previous slot.
+- The protected `a30-perf211` launch sequence was started with
+  `XV_MATERIAL_NOCOLOR=1`, the same 360p settings and qualified optimization stack.
+  It replaces the explicit `XV_MATERIAL_COST=0` remote override to stay within
+  the 32-entry remote limit; the diagnostic defaults off.
+
+Evidence is in `../material-nocolor-candidate/`, including build/deploy receipts
+and launch log. Installation alone does not verify shader selection, rendering,
+performance, or campaign completion.
