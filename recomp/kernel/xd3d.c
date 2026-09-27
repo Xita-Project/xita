@@ -695,7 +695,11 @@ int xd3d_object_jobs_ready(void)
     int vp_ready=xd3d_object_viewport_ready(g_dev.frame,g_vp_frame,vp_tol);
     unsigned why=(xk_file_in_ui_map?1u:0)|(!gg?2u:0)|(gg&&!X_M8(gg)?4u:0)|(gg&&!X_M8(gg+1)?8u:0)|(gg&&X_M8(gg+2)?16u:0)|
                  (X_M32(0x2E4000u)?32u:0)|(!mode_ok?64u:0)|(!vp_ready?128u:0);   /* was != frame-1: with two sim ticks per rendered frame (overlap below 30 fps) every second tick saw the counters equal, the gate flapped and the 3-stable-frames requirement never completed (perf140: mask 80 alternating with all-met), so the native object pass idled */
-    { static unsigned reported_why=~0u; if(why!=reported_why){reported_why=why;
+    /* Viewport lag can alternate every simulation tick below 30 FPS. Keep
+     * diagnostics out of that hot path; admission still evaluates every call. */
+    { static unsigned reported_why=~0u, reported_frame;
+      if(why!=reported_why && (reported_why==~0u || g_dev.frame-reported_frame>=60u)) {
+        reported_why=why;reported_frame=g_dev.frame;
         if(why)D3DLOG("[object-jobs] declined mask %02X (1 ui-map 2 no-gg 4 not-loaded 8 not-active 10 gg+2 20 word-2E4000 40 mode 80 vp-frame %u vs %u)\n",why,g_vp_frame,g_dev.frame);
         else D3DLOG("[object-jobs] readiness conditions all met\n"); } }
     if(why) { stable_frames=0;last_frame=g_dev.frame;return 0; }

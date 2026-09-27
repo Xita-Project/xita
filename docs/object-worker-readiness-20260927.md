@@ -111,3 +111,18 @@ with timing_frame=0. Perf271 remains slot 0. One-hour awake lease renewed by
 update/launch. The a30 launch sequence is running with unchanged 32 settings,
 360p and protected `a30-perf211` test-save namespace. No perf272 gameplay result
 yet; inspect actual worker admissions as well as full-frame intervals.
+
+## Bound readiness diagnostics
+
+Perf272 loading logs show viewport-related reason masks alternating between
+simulation ticks. Source now rate-limits changed-mask diagnostics to one per
+60 rendered frames (first observation immediate), without changing readiness
+checks, counters or admission. Camera-mode diagnostics remain unchanged.
+The readiness fixture now observes the actual logging branch, checks spacing
+across frame wrap and runs 1,000 alternating lag-0/1 ticks under both policies.
+All prior gate assertions and new logging assertions pass. No measured FPS
+benefit is claimed. This source adjustment is not in installed perf272.
+
+The perf272 launch script completed; the capture collector is waiting on actual
+loaded/active/director telemetry. Loading-screen FPS is excluded. Keep its
+existing process running rather than issuing another launch while loading.

@@ -50,7 +50,14 @@ static char *config(const char *s){
 }
 #define X_M32(a) read32(a)
 #define X_M8(a) read8(a)
-#define D3DLOG(...) ((void)0)
+static unsigned notes, note_frame;
+static void log_note(const char *fmt,...) {
+ if(strstr(fmt,"declined mask") || strstr(fmt,"readiness conditions")) {
+  if(notes)assert(g_dev.frame-note_frame>=60u);
+  note_frame=g_dev.frame;notes++;
+ }
+}
+#define D3DLOG(...) log_note(__VA_ARGS__)
 #define getenv config
 """
 exercise = r"""
@@ -79,6 +86,12 @@ int main(int argc,char**argv){
  assert(xd3d_object_jobs_ready()==tolerant);
  xk_file_in_ui_map=1;g_dev.frame=0xffffffc0u;assert(!xd3d_object_jobs_ready());
  xk_file_in_ui_map=0;settle(0xffffffc1u,1);
+ unsigned before=notes;
+ for(unsigned i=0;i<1000;i++) {
+  ++g_dev.frame;g_vp_frame=g_dev.frame-(i&1u);
+  assert(xd3d_object_jobs_ready()==tolerant);
+ }
+ assert(notes-before<=17); /* alternating lag cannot flood the sink */
  return 0;
 }
 """
