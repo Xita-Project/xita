@@ -53,3 +53,23 @@ the profiler needs worker exclusion or independently owned stacks before
 profiling this configuration again. This does not prove that gameplay itself
 is correct or corrupted. No worker-gate hardware deployment is authorized by
 this result. Keep perf271 installed while fixing diagnostic ownership.
+
+## Diagnostic isolation candidate
+
+Both phase begin/end now exclude actual object-worker threads using the existing
+native-thread identity query, compiled only with experimental object jobs.
+The ordinary owner/scene attribution remains, and object worker work counters
+remain available separately; parent elapsed time still includes worker joins.
+This changes instrumentation, not task scheduling or simulation.
+
+`python3 tools/test_scene_phase_worker_isolation.py` extracts the production
+phase implementation and runs two worker pthreads concurrently with owner and
+scene scopes. It verifies exact call counts, nesting and empty stacks. Removing
+the exclusion causes the regression fixture to fail. This is a host concurrency
+fixture with mocked thread identities, not proof of all guest scheduling.
+
+A fresh ARM campaign harness in `../object-readiness-isolated-pi/` carries the
+same readiness change and only this instrumentation exclusion atop the retained
+phase implementation. Build succeeded; the 180-second campaign capture is
+running. Inspect terminal results before drawing any performance conclusions.
+Hardware remains perf271; no experimental gate deployment occurred.

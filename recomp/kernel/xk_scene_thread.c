@@ -2,6 +2,7 @@
  * XV_SCENE_THREAD_DEFAULT). No overlap yet: gain 0, proves the scene half is thread-portable. */
 #include "xk.h"
 #include "xk_scene_thread.h"
+#include "xk_object_jobs.h"
 #include "../xv_x86rt.h"
 #include <stdlib.h>
 #include <string.h>
@@ -76,6 +77,11 @@ void xv_scene_phase_begin(uint32_t addr)
 {
     int mode = phase_mode();
     if (mode <= 0) return;
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    /* Object callbacks have their own work counters. They must not interleave
+     * this owner/scene-only stack, including when the owner is waiting. */
+    if (xv_object_is_worker_thread()) return;
+#endif
     unsigned t = xv_scene_thread_on_helper() ? 1 : 0;
     if (mode == 2 && t) return;
     if (phase_depth[t] >= 16) { phase_skipped[t]++; phase_overflow[t]++; return; }
@@ -85,6 +91,11 @@ void xv_scene_phase_end(uint32_t addr)
 {
     int mode = __atomic_load_n(&phases, __ATOMIC_RELAXED);
     if (mode <= 0) return;
+#ifdef XV_EXPERIMENTAL_OBJECT_JOBS
+    /* Object callbacks have their own work counters. They must not interleave
+     * this owner/scene-only stack, including when the owner is waiting. */
+    if (xv_object_is_worker_thread()) return;
+#endif
     unsigned t = xv_scene_thread_on_helper() ? 1 : 0;
     if (mode == 2 && t) return;
     /* Match ignored begins without popping a live outer scope. */
