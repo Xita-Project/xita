@@ -4,6 +4,8 @@
 #include <assert.h>
 #include <fenv.h>
 #include <pthread.h>
+/* No scene helper alias in this fixture; preserve actual native identity. */
+pthread_t xv_owner_pthread_self(void) { return pthread_self(); }
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -410,6 +412,9 @@ int main(int argc,char **argv)
 #ifdef XV_QUERY_OVERLAP_TEST
     if(mode==0||mode==6||mode==9)assert(private_visits);
     if(mode==9)assert(private_pairs==64&&private_visits==128);
+#endif
+#if defined(XV_NATIVE_92330) && XV_NATIVE_92330
+    { extern void xv_native_92330_report(unsigned); xv_native_92330_report(1); }
 #endif
     xv_object_jobs_report(1);xv_object_jobs_shutdown();
     printf("%u exact comparisons; %u private-ready visits; lanes %u/%u; mutations %u; guard restored at publication\n",comparisons,ready_count,lane_seen[0],lane_seen[1],mutation_count);

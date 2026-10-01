@@ -32,6 +32,22 @@ POST = ('    c->r[4] += 20;\n'
         '#endif\n'
         '    return;\n')
 
+def add_worker_tail_hook(body):
+    """Upgrade only the successful worker-prefix continuation; keep its guard."""
+    if 'xv_native_566de(c)' in body: return body
+    pattern = r'if\s*\(xv_worker_query\(c,\s*xv_object_math_locked_\)\)\s*goto L_000566DE;'
+    replacement = """if (xv_worker_query(c, xv_object_math_locked_)) {
+#if defined(XV_NATIVE_92330) && XV_NATIVE_92330 && defined(XV_TYPED_CLUSTER_QUERY)
+#ifdef XV_LIGHT_QUERY_CENSUS
+        XV_QUERY_WORK_END(c, xv_object_math_locked_);
+#endif
+        { extern int xv_native_566de(xctx *); if (xv_native_566de(c)) return; }
+#endif
+        goto L_000566DE; }"""
+    body, count = re.subn(pattern, lambda _: replacement, body)
+    if count != 1: raise ValueError('expected one successful worker-prefix continuation')
+    return body
+
 def main():
     root = sys.argv[1]; found = 0
     for f in sorted(glob.glob(root + '/code_*.c')):
@@ -40,7 +56,13 @@ def main():
         found += 1
         end = s.index('\n}\n', m.end())
         body = s[m.end():end]
-        if 'xv_native_92330(c, &xn92_)' in body: print(f'{f}: hooks already present'); continue
+        if 'xv_worker_query(c,' in body:
+            body = add_worker_tail_hook(body)
+        if 'xv_native_92330(c, &xn92_)' in body:
+            s = s[:m.end()] + body + s[end:]
+            open(f, 'w').write(s)
+            print(f'{f}: whole-query hooks retained; worker continuation updated')
+            continue
         if body.count(DECL_ANCHOR) != 1 or body.count(LABEL) != 1: sys.exit(f'{f}: preamble anchors not found once inside f_{FN}')
         if body.index(DECL_ANCHOR) > body.index(LABEL): sys.exit(f'{f}: unexpected preamble order in f_{FN}')
         nret = body.count(RET)

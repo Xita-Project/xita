@@ -21,7 +21,9 @@ void xv_render_profile_stage(enum xv_render_stage stage);
 void xv_render_profile_end(void);
 
 /* Nested attribution within SUBMIT. These spans are subsets of submit time,
- * not additional frame costs and not GPU execution timers. */
+ * not additional frame costs and not GPU execution timers. Uniform spans cover
+ * the complete binding helper (including no-uniform and failed bindings), not
+ * only default-buffer reservation. */
 enum xv_render_call {
     XV_RENDER_SCENE_BEGIN, XV_RENDER_SCENE_END,
     XV_RENDER_VERTEX_UNIFORM, XV_RENDER_FRAGMENT_UNIFORM,

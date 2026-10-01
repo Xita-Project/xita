@@ -2753,3 +2753,553 @@ one report). Loading is not a frame-time result or failure. No restart, addition
 button inputs, or benchmark toggles. Prepared collect-gameplay.py for later
 AR5sec then move5sec and settled outdoor window, but NOT started while collector
 owns the idle scene. Next poll24538 to completion and inspect images/summary.
+
+
+## Perf291 normal pod result; firing/movement test started
+
+Previous continuation made progress documenting live loading. Collector24538
+terminalrc0. Both pressure-before/after screenshots inspected: same pod view,
+AR60/120,no combat,no obvious new visual regression in that view.
+840 intervals mean48.362056ms/20.677367FPS,p9558.772,p9963.733,max70.871;
+244>50ms,0>100ms. Frames5409..6337,360p,444MHz,scenephases0,rootpairenabled.
+This does not meet sustained20 requirement. Earlier285 pod48.799888ms/20.49185
+is close; no controlled causal gain claimed from this difference. Do not compare
+to290 diagnostics as if profiling overhead were an optimization benefit.
+
+Started collect-gameplay.py exec7610: AR5sec then forward5sec and settled outdoor
+window, finally releases controls. No concurrent controls. Poll7610 and review
+fire/outside images before interpreting movement sample. Goal unmet.
+
+
+## Perf291 AR/movement/outdoor result
+
+Collector7610 terminalrc0; all three screenshots inspected. Fire-after shows AR
+reload in pod; outside-before/after show same outdoor trees/cliff view, no active
+NPC combat. No crash during this short sequence; not15min or comprehensive safety.
+fire86frames63.432860ms/15.7647FPS,p9577.449,max100.012,81>50,1>100;
+move86frames61.624884ms/16.2272FPS,p9573.756,max274.132,82>50,1>100/200;
+outside944frames48.418663ms/20.6532FPS,p9558.685,p9987.040,max101.473,
+161>50,2>100. Host input/status bracket caveat retained, all intervals available.
+Firing remains about15ms slower than quiet pod; similar to285's63.684884ms AR
+sample, so no breakthrough/causal gain claim. Keep qualified change stacked for
+now; do not mistake diagnostic-phase removal for new engine optimization.
+Next prioritize firing/NPC update costs and active encounter coverage. Vita291
+is left outside the pod after5sec forward,AR60/600,4grenades. No controls live.
+Goal unmet: sustained20/combat/cutscene/15min/checkpoint/AI verification pending.
+
+
+## Reference-guided path edge investigation
+
+The preceding user-answer turn was no progress (source reread/status only).
+This continuation revalidated the goal and hardware: perf291, remote lease
+renewed3600, no new deployment. Three short navigation sequences ended facing
+terrain/trees, not a verified NPC encounter. Controls were released and no
+Save/Quit or checkpoint restore was issued. Images and current log are under
+/tmp/xita-path-*-20260927.*; exclude these quiet views from combat acceptance.
+
+New findings are in docs/pathfinding-reference-audit-20260927.md. Retail139420
+matches repeated collision-surface edge construction; it is a narrower possible
+reuse target than entire-path caching. Extracted288 path-refresh windows give
+36 calls/13.67ms per frame (22.78ms/call),31/8.50 (16.45ms/call),14/4.94
+(21.17ms/call), all inclusive. No child-cost attribution is implied.
+
+Built a private ARM Pi census in ../path-edge-census-pi, with unchanged helper
+body and per-thread recent-key tracking outside the helper timer. Source audit
+passed. Checked Pi idle before starting its180second supporting a30 harness
+(remote pid23501,local handle80113). The harness reached loaded1/active1/
+director1; no139420 calls were observed at148seconds. A quiet supporting route
+cannot justify implementing the cache or estimate a Vita gain. Terminal result
+and retained log follow below. Goal remains unmet.
+
+Pi census handle80113 is terminal124 (configured180second timeout), confirmed
+remote exit-code124 and pid23501 absent. Log retrieved and result-summary.json
+written: 54 gameplay reports, zero helper calls reported. This fixture is
+unsuitable for qualifying path-edge reuse. No native cache was implemented or
+deployed; retain instrumentation for active path-search captures. No live jobs
+remain from this continuation. Vita291 stays awake; 20FPS combat goal unmet.
+
+
+## Pi AI gate and route diagnosis
+
+Previous goal turn was progress: qualified/rejected the path-edge fixture.
+Read goal again. Built ai-gate-census-pi read-only wrappers14A162/14E1A0 plus
+existing139420 census; unchanged-body audit passes. Gate run95685 terminal124
+(configured180seconds), retained game.log:7,680updates,active/init/control all1,
+zero actor-control entries and zero path-edge calls. This is not evidence that
+the user's AI bugs are fixed. It identifies a missing workload in the fixture.
+
+Extracted owned a30 trigger volumes using halo_map and reference structure
+layout(offset360,74x96bytes), privateJSON only. Old route is below pass trigger
+and bypasses bridge. Route68608 terminal124; lateral-left input moved positiveX
+to46,-33,58.38, so corrected to lateral-right using observed coordinates.
+Corrected route65323 is running same harness in separate
+runs/codex-ai-bridge-west-20260927; poll this existing handle. No new Vita
+deployment or gameplay controls this turn; lease renewed3600. Goalunmet.
+
+Corrected-route65323 terminal124; bridge-west.log retrieved. Stillzeroactor/
+pathcalls. Intermediatecoords show left31.49->31.37,right31.49->31.59 before
+bothsameforwardroute: lateral input was nearly blocked atpod, notsignreversal.
+Earlier direction assumption withdrawn. Prepared run-exit-bridge.sh (notrun):
+forward60polls,thenleft240,thenforward600. Verifyactualcoords/actorentries before
+using this for performance. Alljobs fromturnterminal; nohardwareupdate.
+
+
+## Exit-first Pi route and private live controls
+
+Previous turn made progress by resolving AI gates and pod-blocked inputs.
+Readgoal again. Exit-bridge39537 terminal124, retained exit-bridge.log/result:
+393actorupdates,zero139420calls,camZdown to-29.97 => canyonfall, NOTcombat/FPS
+qualification. No Vita changes; keepawake renewed3600.
+
+Built private live_pad.c linkerwrap for xk_os_pad_poll. PCandARM Pi tests pass
+(defaultdisabled,hold/release,invalid/stalecommands,framewrap). Original guest
+functionsunchanged. Installed onlyPi harness-codex-ai-live-20260927; started
+600second route underhandle35503. Log runs/codex-ai-live-20260927/game.log.
+XV_HOST_PAD_FILE there is pad.txt; publish via atomic rename. Format:
+sequence hold_frames lx ly rx ry buttons LT RT. Signedaxes32767,hold<=900;
+sequenceincreases,hold0releases. Initialmenu inputs+1200:lup*60 only.
+No filecommand sent yet. Wait for gameplay/frame>1260, then cross mostly-X
+bridge usingleftaxiswithsmallpositiveforward compensation to maintainY.
+Poll SAME35503; do not restart merelybecause output quiet. Goalstillunmet.
+
+
+## Live Pi route result and actual bridge geometry
+
+Previous continuation madeprogress (privateinputwrapper+ARMchecks). Readgoal.
+Resumed35503/PID25072 whileconfirmedlive; sent7boundedcommands throughlocalfile.
+Allacknowledgedandautorreleased. Initialcrossingagainfell;actorcount360,zero
+139420rows. Endedat600secondbound124, pidabsent andexit-code124verified.
+Retained ai-gate-census-pi/live.log/live-result.json. No livejobsremain.
+
+New privatecollision-map.py decodesownedmap BSP collision surfaces/edges/
+vertices andplots955nearbyfaces. collision-map.png showsrealbridge runsalongX
+withnarrowdecknearY=-98.3, muchnarrowerthantrigger. PreviousY=-97.6 crossedoff
+deck. Currentrunreturnedtoeastlanding~24.5,-98.3,58.8 afterfall; noaccepted
+combatmeasurement. Partialaxiscompensation3500wasineffective(deadzonelikely);
+manualcamera17frame turnmuchlargerthanexpected. Do not repeatguessedroutes.
+Nextusecoordinatefeedbackwithboundedstepsanddeadzone-awareaxiscommands,
+followingcollisionmapthroughbridge, thenledge. This is navigation support,
+notperformancegain. No Vita update/controlsthiscall; awakelease renewed.
+
+## Current perf291 host harness refresh
+
+The previous status-only turn made no implementation progress. This continuation
+re-read the objective and resumed the current-stage harness build. All 128 units
+compiled; linking initially failed because the host logging shim lacked
+`xv_log_critical_write`. Added an exact-length stderr writer to the canonical host
+stubs. Checked null/empty input, embedded NUL, and literal percent bytes.
+A private supplemental object provides the same writer for the retained perf291
+stage without modifying that stage. The ARM static harness now links successfully
+in `../perf291-host/arm/harness`.
+
+A fresh `arm-o2` build is in progress (exec session 12976; log
+`../perf291-host/build-o2.log`), with O2 and debug symbols for generated/kernel
+units as well as runtime units. Do not reuse the old O1 objects: the host builder
+does not include compiler flags in incremental invalidation. This harness still
+uses host OS/GXM shims and cannot establish Vita FPS or GPU cost. No hardware
+update was deployed. The remote keep-awake lease command returned successfully.
+
+The preceding private ftol census (`../ftol-census-pi/summary.json`) completed:
+selected per-reporting-thread estimates were 0.063–0.179 ms/frame. Periodic
+sampling, timer overhead and missing thread IDs prevent treating this as total
+critical-path time. It supplies no reason to prioritize a global ftol rewrite.
+The older model-walk shift candidate had already shown no measurable benefit;
+its superseded status is now explicit in impact-phase-diagnostic.md.
+
+Follow-up: session12976 remains live compiling O2 units. Pi process inspection found no competing harness jobs. Prepared private perf291-host/run-pi.sh and run-env.json for an isolated 180-second pod/firing smoke profile, overlaying retained291 launch overrides on supporting harness defaults. It intentionally does not claim complete hardware configuration parity or NPC coverage; see run-notes.txt. Run not launched until optimized build completes. Vita status confirmed291/444MHz and lease renewed. Current log captured at /tmp/xita-perf291-current-20260927.log; screen fetch session31583 remains pending, not declared failed. No deployment or FPS claim.
+
+## Current291 optimized harness built; current hardware encounter capture
+
+Build12976 completed rc0, 128 units plus supplemental host logger linked.
+Capture31583 completed rc0. Current screenshot shows nearby NPCs and pickup
+prompt outdoors (not the prior quiet wall view). Last20 60-frame timing windows
+average58.93ms, reported16.6–17.3FPS. These are window averages, not p95/p99
+or proof of active AI combat in every window. Private current-hardware-summary.json
+retains inputs. Detailed scene/model timers are disabled (zero entries), so no
+new subroutine attribution is warranted.
+
+Uploaded current O2 harness to Pi. First launch terminated127 before game startup:
+shell-quoted XV_PAD assignment was interpreted as command. Fixed launcher to use
+explicit env, retaining failed run; second launch uses fresh -r2 directory.
+No Vita changes. Pi result still pending; inspect same live handle/process before
+retrying. Goal remains unmet.
+
+Current-code Pi run63280 reached a30 lifepod (loaded/active/director1, camera31.50,-102.50,59.38); remains live under180s timeout. Intermediate sampler from frame1200: owner39.4% syscall,11.3% software64-bit division; helper7.6% guest_read,2.6%53E90. These are supporting sample shares, not Vita time. Retained291 host OS still uses64-bit tv_nsec division whereas canonical host OS already narrows it; runtime shim also retained that cost. Canonical runtime shim now narrows tv_nsec before /1000 (POSIX range <1e9), preserving timestamp result. This is host-only, not a hardware gain. Next run should overlay current host timing adapters and preserve original-run results before interpreting guest rankings.
+
+Hardware interval analysis: last20 complete windows,1200frames,58.9352ms mean,56.947median,72.901p95,76.499p99,max106.483;1186>50ms,2>100ms. Scope nearby-NPC screenshot, not qualified active combat. Private current-hardware-intervals.json. Goal unmet.
+
+Run63280 subsequently completed with configured timeout124. Final game.log and samples preserved in perf291-host/pi-r2.log and samples-r2.txt. No replacement run started yet.
+
+## Host timing distortion isolated without rebuilding guest code
+
+Previous turn made progress by completing/collecting current291 O2 profile and
+fixing canonical host shim. Final profile-r2.txt: owner41.4%syscall,11.6%64-bit
+division; scene6.9%guest_read,2.8%53E90. This is pod/firing, not NPC workload.
+Do not repeat53E90 candidates already rejected in surface-mask-local-context notes.
+
+Built private arm-o2-clock with only two retained host adapter clock expressions
+narrowed for POSIX tv_nsec<1e9. Game-code objects unchanged, proven by SHA audit
+clock-object-audit.json. build-clock.py preserves all original per-unit defines.
+Original stage unmodified. New180s isolated Pi run launched, log pi-clock-driver.log,
+remote runs/codex-perf291-clock-20260927. Must collect terminal result before
+relaunch. No hardware performance claim or deployment; Vita lease renewed.
+
+Corrected clock run intermediate35windows: owner softwaredivision4.3% vs original11.6% over48windows; hostsystemcalls44.5%, helperguest_read7.6%,53E903.4%. Unequal sampled windows, no Vita inference. Confirms host distortion, not a new game hotspot. Retained139420 current-body audit pinned privately: alreadyx87-register-lowered, one preemption backedge,64edgecap; no new native/cache implemented. Stop repeating quiet-pod profiling for NPC diagnosis; next required evidence is active path-search child cost. Run48869 approaching configured180s end; final result must be collected.
+
+Run48869 terminal124 at configured limit; final log/sample files copied to perf291-host/pi-clock.log and clock-samples.txt. No Pi harness job remains from this run. Goal still unmet; no Vita deployment.
+
+## Encounter fixture: live save check rules out newer checkpoint
+
+Previous turn completed corrected hostprofile; copy91791 now confirmedterminal0.
+FTP1337 reachable during gameplay. Read-only copy33469 completed0 of
+ux0:data/xita/test-saves/a30-perf211 udata/tdata into private
+perf291-host/encounter-save. All15files matched a second read; directoryfile sets
+also matched. No mapcache copied, no remote writes or controls. All15SHA values
+identical to enemy-tick-diagnostic/save-verification.json: no newer checkpoint
+fixture available. comparison.json preserves evidence. Do not run same pod
+resume and describe it as NPC test. Next useful work requires route-based
+activeAI workload or hardware diagnostic capture; original saved data untouched.
+
+## Position-feedback harness for encounter route
+
+Built private perf291-host/navigation/harness from corrected current291 objects
+plus host-only input wrapper/observer. Observer uses existing player0/unit lookup
+from xd3d diagnostics (obj+5C position,+74forward), owner pad-poll thread, every10
+frames, only loaded/active/director1. No guest writes. Host fixture verified
+disabled/no-memory path, readiness gate, expected position/forward, and byte-for-
+byte unchanged4MiB guest arena. Existing live-input tests passed expiry, invalid
+commands, explicitrelease and framewrap. Observer is navigation data, not FPS data.
+
+Uploaded and launched600s fresh isolated run session9911, remote
+runs/codex-perf291-nav-20260927, current local navigation/driver.log. Sampler off;
+only startup inputs150a/300a/450a, no movement command yet. XV_HOST_PAD_FILE points
+to that run/pad.txt. Protocol: sequence holdframes lx ly rx ry buttons LT RT;
+atomicrename command; hold<=900, prefer1–6frame movement. Inspect current live
+handle and [host-nav] telemetry before steering. Camera-based guessed routes
+previously fell; use bodyposition and stop on Zloss. Vita unchanged.
+
+## Live validation rejected legacy player-position observer
+
+Initialnavigation9911 was live but emitted no nav records after a30loaded.
+Existing xd3d legacy player-object diagnostic reports position0.45,0,0 while
+its viewmatrix camera is31.5,-102.5,59.38: cannot treat old lookup as reliable
+playerposition. No movement commands sent. Deliberately terminated ownedPi
+PID28300; session9911 terminal143. Hostfixture had validated mechanics only,
+not actual retail address correctness.
+
+Replaced private observer with existing xd3d_benchmark_view readiness-checked
+API (no new guest memory reads, now explicitly CAMERA coordinates). Built
+harness-camera,uploadedfreshnavcamera600srun session92402. Started guide.py
+controller session5647: expectedpodstart, positionfeedback per10frames,1–4frame
+commands, acknowledgement+freshtelemetry before nextinput,20sdata/10sacktimeouts,
+300sdeadline, stop1.5unitheightloss/12blockedsteps; finallyreleaseallinput.
+Waypoints30.8,-98.3 then24,-98.3 then3,-98.3 based on private collisionmap.
+Onlynormal padinputs, no simulation/save edits. Controller/output under private
+perf291-host/navigation/guide-driver.log, remote guided-route.json. Poll same
+handles; no result yet. Vita unchanged,20FPSgoal unmet.
+
+## Feedback route advanced, then current host worker aborted
+
+Navigation reached26.72438,-98.92677,58.98368 nearbridge, no fall. Camera API
+produced qualified10frame telemetry. Initialguide5647 interrupted deliberately
+with SIGINT for corridor drift correction; finally releasedpad. Resumecontroller
+14813 stopped1 on missingack (finallyrelease); it did not move the game again.
+Independent inspection then established harness92402 terminal134, not merely
+telemetrytimeout: objectworker lane1 budgetabort, indirectchain4C980, object
+E4CE0031, return00000262. Complete private navigation/fault.log and
+guided-route.json copied. No controllers/harness live from this route.
+
+Do not call this a successful NPC workload or Vita crash; private host adapters
+and config differ. Do not increasebudget/removeguard. Next inspect lane fault
+and4C980 dependency against known worker invariants before deciding whether a
+host-only owner-execution fixture is appropriate. guide-r2.py prepared corridor
+correction when |Yerror|>.18,1frame corrections; not successfully exercised.
+Vita lease renewed and hardware untouched.20FPSgoal remains unmet.
+
+## Worker-abort localization prepared
+
+Prior note namedA3080 for similar oldabort, but current indirectchain4C980 alone
+cannot locate presentfailure. RetainedA3080 is random-weighted animation-chain
+selection, so do not repeat old unsupported claim that this exact fault is an
+owner-only wait. Canonical xv_x86rt.c now logs host native calleraddress only
+on existing fatal objectjob budgetpath; Vita logging/limits unchanged. Private
+retainedstage patch and arm-o2-fault built; SHA audit shows onlyxv_x86rt.o differs
+from correctedhostbaseline. Linked navigation observer unchanged.
+
+Extracted24actual acknowledged movement commands from originalfault.log into
+fault-replay-inputs.json; startup150a/300a/450a retained. Prepared240s replay in
+fresh remote codex-perf291-fault-20260927 directory. Transfer95586 pending; no
+replay started at this note. Next finishtransfer,run,resolve callerusing exact
+harness-fault ELF (ARM returnaddress Thumbbit if relevant). Do notincreasebudget
+or bypassguard. PhysicalVita untouched.
+
+Transfer95586 completed0; replay launched (fault-driver.log). No restart unless this specific run is terminal.
+
+Replay64829 completed134; copiedfault4567 completed0. Exact hostcaller125AFBC
+resolvesA3080 code015line52146 (backedgeA3122). BothcapturesESI/EDX/ECXzero.
+PrivateHaloCEUniversal model_animations.c:620 provides matching animation
+permutation selection algorithm; NOT an owner-only synchronizationwait. Added
+docs/pi-animation-loop-audit-20260927.md with evidence and next entry-state
+capture requirements. No livePi test remains. Vita lease renewed; unchanged291.
+
+## Read-only animation entry probe built
+
+Private code015 copy inserts a diagnostic after original cachedpointer locals in
+A3080, before all retailinstructions. Records context,graphID,index,kind,tagtable,
+tagentry/class,graphpointer,animationcount(+74)/data(+78),graphpageoffset. First4
+calls perhostthread plusinvalidinputs logged; invalidgraphheader0..80 words
+retained. No RNGcalls/guestwrites/skip/fallback added. Removalofprobe+stdioinclude
+reconstructs exact originalsource; auditJSON retained. Build64664completed0.
+SHAaudit onlycode015.o changed from faultbaseline. Linked navigation unchanged,
+prepared same24input replay in freshcodex-perf291-animation-20260927 directory.
+Transfer25565 live at note; aftercompletion launchrun-animation.sh, then inspect
+entryrecordcorrelatedwithfatalcontext. PhysicalVita unchanged.
+
+Transfer25565completed0. Animation-entry replay launched; animation-driver.log. Keep this run until terminal, then collectfullgame.log.
+
+Animationrun91707 terminal134,full log collected. Entryprobe provesgraphID0
+resolves scnr scenario8094D004 withzero animationarray,count0. Earlier calls
+validantr. Guestcallchain A31C5<-41C7A; graphIDread[EBX+44] at41C6A, statepointer
+ESI262 consistentnullbase. New details in pi-animation-loop-audit-20260927.md.
+No livejob,hardware unchanged. Need upstreamobject/weaponlookup attribution.
+
+## Upstream object-animation entry probe compiling
+
+Statictrace:41B40 loadsobject from argumenthandle atESP+4 via2FC6AC objecttable,
+then definitiontag, then graphID atdefinition+44. A3080savedESI262 could mean
+objectbase0; cannot assume deletionrace without entryproof. Nearby457DCword
+is not necessarily livecaller (stackmaycontainolddata); avoidinterpretingevery
+stackwordasframe.173E10 hasvalidsubESP0C at173E1F; no missingprologuefix needed.
+
+Privatecode008 adds read-only probe at41B40entry, originaltokensverifiedunchanged.
+Recordscontext,caller,handle,entrysalt,object/tag/definition/graphandESP/EBP; logs
+first4perthread ornullobject/definition. Reusesanimation-entry code015.
+Buildsession6019 live, log perf291-host/build-objectentry.log. Afterterminalsuccess
+linknav-camera.o with--wrap=xk_os_pad_poll intoharness-objectentry, runfresh
+run-objectentry.sh (same24inputs,240slimit). No deployment or productionfix.
+
+Build6019completed0. Onlycode008.o changed verified; linkedprivateharness. Dependent transferandrun command launched, objectentry-driver.log; inspectcurrenthandle before retry.
+
+### Pi object-lifetime follow-up
+
+Owner-only replay of the retained pod-exit inputs completed its 240-second
+limit (exit124), camera frame6224, with no invalid animation/object entries.
+Worker replay with a 4C980 entry probe exited134: object E4C2000F was already
+cleared at guarded update entry. See pi-animation-loop-audit-20260927.md and
+private perf291-host/navigation/{ownercheck,updateentry}.log. This is Pi
+correctness evidence, not a Vita performance gain. No hardware deployment.
+
+A further private diagnostic binary records queue-time and job-start object
+salt/pointer, reporting those values on an invalid 4C980 entry. Build passed;
+only code_008.o and xk_object_jobs.o changed versus the previous diagnostic.
+Run directory on Pi: runs/codex-perf291-lifetime-20260927. Retain its outcome
+before considering any scheduler change; do not mask stale handles by skipping
+updates or changing animation behavior.
+
+## Perf296 repeated ordinary firing
+
+Collector32449 completed0; path-ray-296/warm-fire-summary.json retains exact
+status brackets and all intervals. Settled324frames62.111ms(16.10FPS),
+12second trigger172frames72.841ms(13.73FPS), recovery332frames60.846ms(16.43FPS).
+Trigger p9594.802ms,p99100.476,max100.697;161/172>50ms,2>100ms.
+This longer burst includes reload/duty-cycle differences, so its better average
+is NOT evidence of a code improvement or pure warm-cache benefit.
+A fully bracketed60frame report ending12360 has zero texture decodes but
+81.9ms game time, helperCPU52.22ms,sceneWall53.88ms,FA92077.097ms inclusive.
+Settled report12180 helperCPU41.61ms,sceneWall44.74ms,FA92051.31ms.
+These nested/concurrent scopes cannot be summed and asynchronous report
+association is approximate. Nevertheless, continued slow frames with zero
+decodes contradict first-use texture decoding as the sole firing bottleneck.
+Recorded draw counts grow260to305/frame. Need update/impact branch attribution
+alongside rendering; do not label this exclusively GPU or CPU from these scopes.
+
+CorrectedPi clearance profile relink/transfer64080 in progress. It guards
+recursive136FD0children to prevent double counting; no algorithm change.
+Pi had no harness processes before transfer. Run script uses unique directory
+codex-path-clearance-corrected-20260927 and a240second timeout. No launch yet.
+
+Transfer64080 completed0. Corrected Pi run95335 launched; poll this handle before any rerun. Vita keep-awake lease renewed3600seconds. Hardware remains296, controls released.
+
+
+## Ordinary297 firing attribution and narrower native-query capture
+
+ordinary-return-297 report near7680 overlaps firing7633..7691 (not a fully
+contained60frame burst). Scene helperCPU52.64ms, sceneWall56.43ms, ownerFA920
+77.84ms inclusive, done->noticed27.09ms. Prior near7620 helper40.86ms,
+scene43.27ms, FA92044.72ms; near8400 helper42.27ms,scene46.04ms,
+FA92044.04ms. Concurrent/nested/wait-inclusive times, not additive. Supports
+investigating update-side growth as well as extra scene work; no GPU-only claim.
+
+Ordinary capture92439 deliberately interrupted130 after completed gameplay
+capture, not a game crash. query-timing-297 save backup17623 completed0, all15
+files stable two-read. Restart controller21971 confirmed freshperf297 dashboard
+frame15/timingframe0, then started driver. No binary change. New launch replaces
+FRAME_SLOW_MS override with XV_NATIVE_4B9D0_TIME=1, keeps SCENE_PHASES=0 and
+ROOT_PAIR=1. Driver sequences launch->readinessroute->collector with no automatic
+restart on failure; it owns inputs. Capture child PID in capture-process.json
+renews keepawake and stops at900s. Poll21971 before other controls. This diagnostic
+has per-call timer/atomic overhead; do not label its FPS ordinary.
+
+extract-query.py records native query workload and approximate elapsedms/frame
+using mode2 calls*us/call/frames. Counters and timing totals drain independently,
+so boundary skew is possible. Associates async output with nearby frame-end;
+not exact timing alignment, CPUself, or per-route split. Wait for real gameplay
+query rows and confirm root-pair acceptance before drawing conclusions.
+
+
+## Native-query297 completed: traversal is not the whole firing penalty
+
+Driver21971 completed0: launch/readinessroute/collector all successful. Screenshot
+inspected: outdoor view, AR11rounds after firing, no crash observed. Scenephases0,
+root-pair acceptance confirmed roughly18k–19k/60frames. Native query declines0.
+Diagnostic gameplay (not ordinary FPS comparison): initial798frames56.472ms,
+p95101.093,max135.418; burst52frames103.122ms,p95149.703,max163.553;
+recovery790frames57.126ms,p9572.608,max204.054. No target qualification.
+
+query-timing-297/window-query-summary.json:12 approximate complete initial
+batches average3.416ms query elapsed/frame,13.2queries/frame,weighted258.798us/query.
+13recoverybatches average5.726ms,18.165queries/frame,315.197us/query. Async report
+association and independent atomic drains are approximate. No complete60frame
+batch fits52frameburst. Nearby7140/7200 estimatedquery6.390/6.480ms; preceding
+7020/7080 7.378/6.221ms; following7260/7320 6.421/6.647ms. Thus query time remains
+substantial but does not explain most of the firing spike by itself. Timed body
+excludes outer layout/budget/report overhead and includes preemption; do not
+claim exact selfCPU or exclusive bottleneck. Per-querycounts grow while average
+per-querytime drops in mixed burst report7200 (2636calls/60 at147.502us), so
+count alone is misleading. Solverfeature tests are separately reported and must
+not silently be included in query figure.
+
+Capture child1607520 may remain until900s; inspect live process before touching.
+No controller remains. Hardware still297 with nativequery timer enabled, not
+ordinary settings. Keepawake renewed by capture. Next inspect remaining impact/
+object-update work, retaining previous C0C60/26B10 and171AF0 negative results;
+do not invest the entire next optimization in a small query counter saving.
+
+Capture lifecycle correction: post-driver ps confirms child1607520 absent.
+Last status445.7s, no900s completion marker or exception; therefore it did NOT
+complete its intended900s duration. Likely ended with parent session, but cause
+not proven. Full gameplay.log already fetched by successful collector and
+retained. Explicit remote lease3600 renewal succeeded after this check. No
+capture currently active. Future capture should use a separately tracked exec
+session or driver-owned wait, not rely on unawaited child surviving parent exit.
+
+
+## Current guest-code CPU sample harness
+
+Reviewed historical effect/weapon/sound attribution before selecting new work.
+113370/112C80's apparent large self cost was an old reporter artifact; corrected
+rows put work in descendants. 1122A0/B6210 updates already shipped, 171AF0
+register/shift trials did not earn gains, and native7E420/80360 were slower.
+Do not repeat those as new leads. Sound reuse exists; fresh same-cell endpoint
+misses dominate its prior census, not a poor spatial hash.
+
+Private cpu-sample-297 retains perf291-host/arm-o2-lifecycle (including corrected
+host clock division and stale-object lifecycle fix), replacing only872D0 in
+code013 and136FD0 plus its exact helpers incode025 with installed297 bodies.
+Build17004 completed0. SHA object audit proves onlycode013.o/code025.o differ.
+No production source, VPK or hardware update. This is supporting LinuxARM runtime,
+not a complete Vita-equivalent engine/GPU. Source audit retains exact bodies.
+
+Transferred harness and launched existing180second a30 pod/two-burst/reload
+schedule with XV_HOST_SAMPLE_LR=1 and XV_HOST_PERF=1. Run
+pi:/home/birchwoodgod/xita-70110/runs/codex-cpu-sample297-20260927.
+Local handle43205 live; remote PID10973 verified running beneath timeout10972.
+Poll same handle, then fetch game.log/samples.txt/exit-code and symbolize with
+source/tools/host_profile.py and ARM addr2line. No Pi jobs overlapped at launch.
+Do not restart because a sampling wait times out. Native scene phase timers off;
+rootpair retained. Samples measure this host runtime, not VitaFPS; Linux signal/
+scheduler/syscall paths must not be presented as Vita bottlenecks.
+Vita remains297 with query timing enabled, no active controller or capture;
+keepawake renewed3600sec this turn, companionnosleep remains enabled.
+
+
+## CPU sample completed; effects66510 float helper candidate
+
+Pi43205 ended planned180s timeout124; full game.log, samples.txt, exit-code
+fetched undercpu-sample-297. No competing Pi harness remains. Fromframe1500,
+46reportedwindows: scene samples7.5%guest_read,2.7%53E90,2.4%A2380,
+2.1%80360body,2.0%66510; owner44%Linuxsyscall,5.9%udivmoddi4,4.8%guest_read.
+Do not transfer Linuxsystem costs toVita or equate sample share with frame share.
+No single game routine dominates these samples; inline helper attribution needs
+callsite resolution. Sampled view is nearpod31.50,-102.50 with scriptedbursts,
+not the dense NPC encounter qualification. No hardwareFPS claim.
+
+Actual installed297 Vita code011 disassembly finds266 local BL calls to
+x87_load_f32.isra.0/x87_store_f32.isra.0 inside66510. A first relocation-only
+search incorrectly returned0: local resolved branches have no external
+relocation, so that count was discarded. Sourcecalls are fewer/may be duplicated
+by codegen. This differs from136FD0's rejectedinlinelead whereVitaalreadyinlined.
+
+Privateeffects-float-inline-297 changes only66510's float helper names to exact
+same bodies with always_inline; splitpagehandling and live root access unchanged.
+Round-trip source equality audited; no semantics or scheduling policy change.
+Candidatecompile86361 and matchedreferencecompile61787 active. Both use same
+retainedVitaflags and297headers; next compare referenceallocatedtext toinstalled
+code011before calling it an exactproductioncomparison, inspect66510size and
+helpercalls, then differential/cost validation before any hardwaredeployment.
+No candidate installed. Vita297querytimerstillenabled; keepawake renewed3600.
+
+
+Effects-inline follow-up: existingVita compilers86361/61787 both verifiedlive
+(about3minutes elapsed, each99%CPU), not hung or restarted. Pi candidate43051
+also compiling. Its cached128-unit baseline iscpu-sample-297; onlycode011
+rebuild requested. Original291code011 andinstalled297sourcecode011 are byte
+identical, so this substitution does not drop intervening changes inthatshard.
+Privateaudit-assembly.py is ready: after bothVitacompiles complete, compare
+reference.text toinstalled.text, measure66510bytes/localBLfloatcalls/MRCsites.
+Relocation-only grep is invalid for local helper calls. Do not infer gain from
+call removal or code size alone. No Pi gameplay run for candidate yet; original
+cpu-sample297 run43205 terminal124 and allresults retained. Vita lease renewed.
+
+
+EffectsinlinePi43051 buildcompleted0, objectauditonlycode011 changed from
+cpu-sample297. Candidate run84738 completedplanned180s timeout124; logs/samples
+fetched, Piidle. Noobservedcrash; notfullfunctional/renderingqualification.
+From1500,45windows scene7.6%guest_read,2.1%66510 vsbaseline7.5%/2.0%; normalized
+sample percentages and scheduling variation do not establish gain/regression.
+
+Vita86361/61787 bothcompleted0. Auditfound reference.text DOESNOTmatchinstalled:
+reference6651082128bytes/78floatcalls, candidate83890/0, installed62304/266.
+Cause: reusedcode025compilecommand omittedcode011's final-Os and model/material
+flags. Discard this comparison as production evidence. Correctedcommands now
+come from exactcode011make recipe with297include paths. candidate11778 and
+reference98558 active; audit-assembly-os.py ready afterbothcomplete. No failedjob
+was restarted; these are corrected new builds. NoVPKorhardwarechange. Do not
+ship on the incorrectO2artifact. Keep alloriginal receipts for reproducibility.
+
+
+Disabled-scope audit: XV_PHASE_SCOPE zeroes16bytes (memset ininstalled66510)
+beforecheckingxv_phase_enabled; cleanup onlyreadsowner, andphase_begin setsall
+otherfields on admission. Owner-only initialization is a possible smallcleanup,
+but only48generatedscopesites exist and no whole-framecost established. Not
+implemented; do not substitute this for the effects bottleneck investigation.
+CorrectedOscompiles11778/98558 remainlive; no restart or hardwarechange.
+
+
+CorrectedOs compiles11778/98558 completed0 (supersedes preceding live note).
+Assemblyaudit-os confirms reference.text byte-identical toinstalled297code011.
+66510reference62304bytes266helpercalls; candidate70660bytes0helpercalls,
+186MRCsites inbody versusreference1plushelperMRCexecution. +8356bytes(+13.4%)
+is a cache tradeoff, not a proven gain. Exacthelperbodies and call/yield sites
+unchanged; no new rootcachepolicy. Source roundtrip audited. Pi sample smoke
+completed without observedcrash but no clear speedup; not fullrenderqualification.
+
+Preparing experimentalperf298 from297 withonlycode011candidate andnewversion.
+Privateeffects-inline-298 stage cloned withpreservedtimestamps; candidateOsobject
+installed inprivatebuild (sameflags/provedreferenceidentity), sourcecopied too.
+Build31159 active. audit-package.py expects onlycode011plusfourversionobjects,
+retains297archive/updatercontract; outputxita-perf298c.vpk. No deployment yet.
+Beforehardware: finishbuild/audit, backupprotectedsaves, announceinterruption,
+updateverifyruntimehash/boot298, ordinarylaunchwithoutquerytiming, thennormal
+firing/outdoorcollection. Retain297rollback and donotcallstaticcallremovalFPSgain.
+
+
+Perf298build31159 completed0. Packageaudit/savebackup94568 completed0:onlycode011
+plusfourversionobjects, onlygame-a.self/boot-game.txtassets, updatercontractunchanged.
+Runtime727b6c40ff1df05d446e6d1f5fecf974aed849c5f742d695c3914ffb15b89588;
+package5f9445799dd8b5b6ba5b0c279c5d5df266286629929410d84078b8738801a71c.
+All15protectedsavefilesstabletwo-read. Announcedinterruption, authorizedupdate
+started (handlelatesttoolresult), effects-inline-298/install.log. Pollsamehandle
+throughverification; no restart duringtransfer. Normal298scripts prepared from
+ordinary-return297 (SCENE_PHASES0, noquerytimer, ROOT_PAIR1). Mustverifyinstalled
+runtimehash/boot298 beforelaunch. 297remainsrollback. NoFPSgainclaimed.

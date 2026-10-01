@@ -311,6 +311,7 @@ void xk_os_scheduler_wait(uint64_t us)
 struct xk_fiber { SceUID thid; SceUID wake; void (*entry)(void *); void *arg; int dead; };
 static xk_fiber g_main_fiber = { -1, -1, NULL, NULL, 0 };
 static xk_fiber *g_current = &g_main_fiber;
+static int g_current_guest_thread = -1;
 
 static void fiber_park(xk_fiber *f)
 {
@@ -362,10 +363,16 @@ void xk_os_fiber_switch(xk_fiber *to)
     { extern void xv_render_view_fiber_switch(void) __attribute__((weak));   /* a scene on the render table drops back to live before another guest thread runs */
       if (xv_render_view_fiber_switch) xv_render_view_fiber_switch(); }
     g_current = to;
+    __atomic_store_n(&g_current_guest_thread, to == &g_main_fiber ? -1 : to->thid, __ATOMIC_RELEASE);
     sceKernelSignalSema(to->wake, 1);
     fiber_park(from);
 }
 xk_fiber *xk_os_fiber_current(void) { return g_current; }
+int xk_os_fiber_is_current_guest(void)
+{
+    int id = __atomic_load_n(&g_current_guest_thread, __ATOMIC_ACQUIRE);
+    return id > 0 && id == sceKernelGetThreadId();
+}
 extern int xv_scene_helper_thread __attribute__((weak)), xv_scene_owner_alias __attribute__((weak));
 int xv_owner_thread_id(void)
 {

@@ -1,0 +1,418 @@
+
+/* ---- semantic BSP sphere query (tools/patch_native_4b9d0_semantic.py) --------------------------------------
+ * XV_NATIVE_4B9D0=3: the same query as n4_88110 computed for its live results only. The traversal order, every
+ * double/float operation and rounding, every x87 compare predicate (n4_cc + the AH masks the branches test) and every
+ * back-edge are the transliteration's; what is not reproduced is guest state that is dead after `ret 8`: the query's
+ * own stack frames (88110's record q, the ancestor stack, the callee frames), the lazy-flag records of intermediate
+ * instructions, the popped x87 slots, xmm0-2 and ecx/edx (caller-saved; every caller writes them before reading).
+ * Live results: the four result lists at esi (counts cleared, then the same appends in the same order), eax, the
+ * callee-saved registers, esp, the final flag record and fsw of 88110's last compare, the back-edge budget.
+ * Results are built in locals and stored at the end; a query that would need guest state the semantic version does
+ * not model (an ancestor stack past 88110's frame, frames deeper than 64 KB, axes outside the projected point, a
+ * center/tested-bits/BSP array overlapping the lists or the frames) declines before any store and runs n4.
+ * XV_NATIVE_4B9D0=4: compare - the semantic query dry (no stores), then the exact native; lists, registers and
+ * budget compared; the exact result is kept. */
+typedef struct {
+    n4_mem mm;
+    uint32_t nodes3, planes, leaves, refs, nodes2, surfs, edges, verts, bits;
+    int32_t cap;
+    double rad, zero, cxd, cyd, czd;
+    float cxf, cyf, czf;
+    int16_t axes[12];
+    uint32_t anc[131], nanc;
+    uint16_t axis; uint8_t side; float pu, pv;
+    uint32_t list[4][256], cnt[4];            /* 0 surfaces (+0), 1 edges (+0x404), 2 vertices (+0x808), 3 leaves (+0xC0C) */
+    uint32_t be;
+    uint16_t fsw; uint32_t fsp0;
+    unsigned d3, d2; int decline;
+    unsigned nodes3n, nodes2n, leavesn, surfacesn, edgesn, vertsn, scans, scanned;
+} n6q;
+
+static unsigned n6_calls, n6_declined, n6_compared, n6_mismatched, n6_mismatch_total;
+
+/* one x87 compare: the AH condition bits (C0 0x01, C2 0x04, C3 0x40) and fsw as FCMP leaves it */
+static inline __attribute__((always_inline)) unsigned n6_cmp(n6q *q, double a, double b, unsigned depth)
+{
+    const uint16_t cc = n4_cc(a, b);
+    q->fsw = (uint16_t)((q->fsw & ~0x4700u) | cc | (((q->fsp0 - depth) & 7u) << 11));
+    return cc >> 8;
+}
+/* `test ah,mask`: ZF, and PF (even parity of the low byte) */
+static inline __attribute__((always_inline)) int n6_zf(unsigned ah, unsigned mask) { return (ah & mask) == 0; }
+static inline __attribute__((always_inline)) int n6_pf(unsigned ah, unsigned mask)
+{ unsigned v = ah & mask & 0xFFu; v ^= v >> 4; v ^= v >> 2; v ^= v >> 1; return !(v & 1u); }
+
+/* a list append after the duplicate scan (`n > 0`: scan, found at i: i back-edges, else n - 1; `n < 0x100`: store) */
+static inline __attribute__((always_inline)) void n6_add(n6q *q, unsigned l, uint32_t v)
+{
+    const uint32_t n = q->cnt[l];
+    if ((int32_t)n > 0) {
+        uint32_t i = 0;
+        while (i < n && q->list[l][i] != v) ++i;
+        q->scans++; q->scanned += i < n ? i + 1u : n;
+        if (i < n) { q->be += i; return; }
+        q->be += n - 1u;
+    }
+    if ((int32_t)n < 0x100) { q->list[l][n] = v; q->cnt[l] = n + 1u; }
+}
+
+/* f_000B0CB0 (segment vs sphere): start va, center q->c*, direction d0..d2, rad as 86F50 stored it */
+static inline __attribute__((always_inline)) int n6_segment(n6q *q, uint32_t va, float rad, float d0, float d1, float d2)
+{
+    const n4_mem *const m = &q->mm;
+    q->edgesn++;
+    const uint8_t *hv = n4_span(m, va, 12);
+    double x1 = HF(hv, va, 0, 12) - q->cxd;
+    double x2 = HF(hv, va, 4, 12) - q->cyd;
+    double x3 = HF(hv, va, 8, 12) - q->czd;
+    double x4 = x3 * x3, x5 = x2 * x2; x4 = x4 + x5; x5 = x1 * x1; x4 = x4 + x5;
+    x5 = (double)rad; x5 = x5 * (double)rad;
+    x4 = x4 - x5;
+    float q0 = (float)x4;
+    if (!n6_pf(n6_cmp(q, x4, q->zero, 4), 5)) return 1;                  /* inside at the start */
+    x4 = (double)d2 * x3; x5 = (double)d1 * x2; x4 = x4 + x5; x5 = (double)d0 * x1; x4 = x4 + x5;
+    const float t = (float)x4;
+    if (n6_zf(n6_cmp(q, (double)t, q->zero, 1), 1)) return 0;            /* moving away */
+    x1 = (double)d2 * (double)d2; x2 = (double)d1 * (double)d1; x1 = x1 + x2; x2 = (double)d0 * (double)d0; x1 = x1 + x2;
+    x2 = (double)t * (double)t;
+    x3 = x1 * (double)q0;
+    x2 = x2 - x3;
+    q0 = (float)x2;                                                       /* the discriminant */
+    if (!n6_pf(n6_cmp(q, x2, q->zero, 2), 0x41)) return 0;                /* no root */
+    x1 = -x1;
+    x1 = x1 - (double)t;
+    if (!n6_pf(n6_cmp(q, x1, q->zero, 1), 5)) { q->be++; return 1; }
+    x2 = x1 * x1;
+    return n6_pf(n6_cmp(q, x2, (double)q0, 2), 5) ? 0 : 1;
+}
+
+/* f_00086F50 (surface test) */
+static void n6_surface(n6q *q, uint32_t surf)
+{
+    const n4_mem *const m = &q->mm;
+    q->surfacesn++;
+    const uint32_t srec = q->surfs + surf * 12u;
+    const uint8_t *hs = n4_span(m, srec, 12);
+    if (H8(hs, srec, 8u, 12) & 8u) {                                      /* the surface's tested bit */
+        const uint32_t bi = H8(hs, srec, 9u, 12);
+        if ((int32_t)bi < q->cap && !(n4_r32(m, q->bits + (bi >> 5) * 4u) & (1u << (bi & 31u)))) return;
+    }
+    const float r2 = (float)(q->rad * q->rad);
+    int hit = 0;
+    uint32_t e = H32(hs, srec, 4u, 12);
+    for (;;) {                                                            /* vertex ring */
+        q->vertsn++;
+        const uint32_t erec = q->edges + e * 24u;
+        const uint8_t *he = n4_span(m, erec, 24);
+        const uint32_t sel = H32(he, erec, 0x14u, 24) == surf;
+        const uint32_t vtx = H32(he, erec, sel * 4u, 24);
+        const uint32_t vrec = (vtx << 4) + q->verts;
+        const uint8_t *hv = n4_span(m, vrec, 12);
+        float e0 = HMF(hv, vrec, 0u, 12) - q->cxf, e2 = HMF(hv, vrec, 4u, 12) - q->cyf, e3 = HMF(hv, vrec, 8u, 12) - q->czf;
+        e0 = e0 * e0; e2 = e2 * e2; e3 = e3 * e3;
+        float sum = e0; sum = sum + e2; sum = sum + e3;
+        if (!n6_pf(n6_cmp(q, (double)sum, (double)r2, 1), 0x41)) { n6_add(q, 2, vtx); hit = 1; }
+        const uint32_t next = H32(he, erec, sel * 4u + 8u, 24);
+        e = H32(hs, srec, 4u, 12);
+        if (next != e) { q->be++; e = next; continue; }
+        break;
+    }
+    for (;;) {                                                            /* edges (from the first edge again) */
+        const uint32_t erec = q->edges + e * 24u;
+        const uint8_t *he = n4_span(m, erec, 24);
+        const uint32_t sel = H32(he, erec, 0x14u, 24) == surf;
+        const uint32_t va = (H32(he, erec, sel * 4u, 24) << 4) + q->verts;
+        const uint32_t vb = (H32(he, erec, (sel ? 0u : 1u) * 4u, 24) << 4) + q->verts;
+        const uint8_t *ha = n4_span(m, va, 12), *hb = n4_span(m, vb, 12);
+        const float d0 = (float)(HF(hb, vb, 0u, 12) - HF(ha, va, 0u, 12));
+        const float d1 = (float)(HF(hb, vb, 4u, 12) - HF(ha, va, 4u, 12));
+        const float d2 = (float)(HF(hb, vb, 8u, 12) - HF(ha, va, 8u, 12));
+        if (n6_segment(q, va, (float)q->rad, d0, d1, d2)) { n6_add(q, 1, e); hit = 1; }
+        const uint32_t next = H32(he, erec, sel * 4u + 8u, 24);
+        if (next != H32(hs, srec, 4u, 12)) { q->be++; e = next; continue; }
+        break;
+    }
+    if (!hit) {                                                           /* point in polygon on the projected axes */
+        const uint32_t first = H32(hs, srec, 4u, 12);
+        const uint32_t idx = ((uint32_t)q->side + (uint32_t)(int32_t)(int16_t)q->axis * 2u) << 2;
+        const uint32_t u = (uint32_t)(int32_t)q->axes[idx >> 1], v = (uint32_t)(int32_t)q->axes[(idx + 2u) >> 1];
+        const double pu = (double)q->pu, pv = (double)q->pv;
+        e = first;
+        for (;;) {
+            const uint32_t erec = q->edges + e * 24u;
+            const uint8_t *he = n4_span(m, erec, 24);
+            const uint32_t sel = H32(he, erec, 0x14u, 24) == surf;
+            const uint32_t va = (H32(he, erec, sel * 4u, 24) << 4) + q->verts;
+            const uint32_t vb = (H32(he, erec, (sel ? 0u : 1u) * 4u, 24) << 4) + q->verts;
+            const uint8_t *ha = n4_span(m, va, 12), *hb = n4_span(m, vb, 12);
+            const double au = HF(ha, va, u * 4u, 12), av = HF(ha, va, v * 4u, 12);
+            const float c20 = (float)HF(hb, vb, u << 2, 12), c24 = (float)HF(hb, vb, v << 2, 12);
+            const float c14 = (float)(au - pu);
+            const double dav = av - pv, dbu = (double)c20 - pu, dbv = (double)c24 - pv;
+            double cross = (double)c14 * dbv;
+            cross = cross - dav * dbu;
+            if (!n6_pf(n6_cmp(q, cross, q->zero, 3), 5)) return;          /* outside: no add */
+            const uint32_t next = H32(he, erec, sel * 4u + 8u, 24);
+            if (next != first) { q->be++; e = next; continue; }
+            break;
+        }
+    }
+    n6_add(q, 0, surf);
+}
+
+/* f_00087E10 (BSP2D traversal) */
+static void n6_2d(n6q *q, uint32_t node)
+{
+    const n4_mem *const m = &q->mm;
+    if (++q->d2 * 0x10u + q->d3 * 0x24u > 0xF000u) { q->decline = 1; return; }
+    if ((int32_t)node >= 0) {
+        for (;;) {
+            q->nodes2n++;
+            const uint32_t nrec = q->nodes2 + node * 20u;
+            const uint8_t *hn = n4_span(m, nrec, 20);
+            double x1 = HF(hn, nrec, 4u, 20) * (double)q->pv;
+            const double x2 = (double)q->pu * HF(hn, nrec, 0u, 20);
+            x1 = x1 + x2;
+            x1 = x1 - HF(hn, nrec, 8u, 20);
+            const int cl = !n6_pf(n6_cmp(q, x1, q->rad, 1), 0x41);
+            const int bl = n6_zf(n6_cmp(q, x1, -q->rad, 2), 1);
+            if (cl) { n6_2d(q, H32(hn, nrec, 0xCu, 20)); if (q->decline) return; }
+            if (!bl) { q->d2--; return; }
+            node = H32(hn, nrec, 0x10u, 20);
+            if ((int32_t)node >= 0) { q->be++; continue; }
+            break;
+        }
+    }
+    n6_surface(q, node & 0x7FFFFFFFu);
+    q->d2--;
+}
+
+/* the leaf's BSP2D references (87F67): the reference's plane on the ancestor stack -> project, pick the axes, 2D */
+static void n6_leaf(n6q *q, uint32_t node)
+{
+    const n4_mem *const m = &q->mm;
+    q->leavesn++;
+    const uint32_t leaf = node & 0x7FFFFFFFu, lrec = q->leaves + leaf * 8u;
+    if ((int32_t)q->cnt[3] < 0x100) { q->list[3][q->cnt[3]] = leaf; q->cnt[3]++; }
+    const uint8_t *hl = n4_span(m, lrec, 8);
+    uint32_t r = H32(hl, lrec, 4u, 8);
+    uint32_t end = (uint32_t)(int32_t)(int16_t)H16(hl, lrec, 2u, 8) + r;
+    if (!((int32_t)r < (int32_t)end)) return;
+    for (;;) {
+        const uint32_t rrec = q->refs + r * 8u;
+        const uint8_t *hr = n4_span(m, rrec, 8);
+        const uint32_t word = H32(hr, rrec, 0u, 8);
+        const uint32_t n = q->nanc;
+        int found = 0;
+        if ((int32_t)n > 0) {
+            uint32_t i = 0;
+            while (i < n && q->anc[i] != word) ++i;
+            q->scans++; q->scanned += i < n ? i + 1u : n;
+            if (i < n) { q->be += i; found = 1; } else q->be += n - 1u;
+        }
+        if (found) {
+            const uint32_t prec = ((word & 0x7FFFFFFFu) << 4) + q->planes;
+            const uint8_t *hp = n4_span(m, prec, 16);
+            const double px = HF(hp, prec, 0u, 16), py = HF(hp, prec, 4u, 16), pz = HF(hp, prec, 8u, 16);
+            double x1 = q->czd * pz, x2 = q->cyd * py;
+            x1 = x1 + x2;
+            x2 = px * q->cxd;
+            x1 = x1 + x2;
+            x1 = x1 - HF(hp, prec, 0xCu, 16);
+            x1 = -x1;
+            float pj[3];
+            x2 = x1 * px; x2 = x2 + q->cxd; pj[0] = (float)x2;
+            x2 = x1 * py; x2 = x2 + q->cyd; pj[1] = (float)x2;
+            x1 = x1 * pz; x1 = x1 + q->czd; pj[2] = (float)x1;
+            const double ax = fabs(px), ay = fabs(py), az = fabs(pz);
+            uint32_t axis;
+            if (n6_zf(n6_cmp(q, az, ay, 3), 1) && n6_zf(n6_cmp(q, az, ax, 3), 1)) axis = 2;
+            else axis = n6_zf(n6_cmp(q, ay, ax, 2), 1) ? 1u : 0u;
+            q->axis = (uint16_t)axis;
+            /* side: the translation's `neg` keeps no flags, so the following sbb reads the carry of `test ah`/`xor`
+             * (0) and the reference's sign bit drops out: side = the axis component > 0 */
+            const uint32_t side = n6_zf(n6_cmp(q, HF(hp, prec, axis * 4u, 16), q->zero, 1), 0x41) ? 1u : 0u;
+            q->side = (uint8_t)side;
+            const uint32_t idx = (side + axis * 2u) << 2;
+            const uint32_t v = (uint32_t)(int32_t)q->axes[(idx + 2u) >> 1], u = (uint32_t)(int32_t)q->axes[idx >> 1];
+            if (u > 2u || v > 2u) { q->decline = 1; return; }            /* would read 87EA0's frame */
+            q->pv = pj[v]; q->pu = pj[u];
+            n6_2d(q, H32(hr, rrec, 4u, 8));
+            if (q->decline) return;
+        }
+        end = (uint32_t)(int32_t)(int16_t)H16(hl, lrec, 2u, 8) + H32(hl, lrec, 4u, 8);
+        r = r + 1u;
+        if ((int32_t)r < (int32_t)end) { q->be++; continue; }
+        break;
+    }
+}
+
+/* f_00087EA0 (BSP3D traversal) */
+static void n6_3d(n6q *q, uint32_t node)
+{
+    const n4_mem *const m = &q->mm;
+    if (++q->d3 * 0x24u + q->d2 * 0x10u > 0xF000u) { q->decline = 1; return; }
+    if ((int32_t)node >= 0) {
+        const double rad = q->rad;
+        const float nr = (float)-rad;
+        for (;;) {
+            q->nodes3n++;
+            const uint32_t nrec = q->nodes3 + node * 12u;
+            const uint8_t *hn = n4_span(m, nrec, 12);
+            const uint32_t prec = (H32(hn, nrec, 0u, 12) << 4) + q->planes;
+            const uint8_t *hp = n4_span(m, prec, 16);
+            double x1 = HF(hp, prec, 8u, 16) * q->czd;
+            double x2 = HF(hp, prec, 4u, 16) * q->cyd;
+            x1 = x1 + x2;
+            x2 = HF(hp, prec, 0u, 16) * q->cxd;
+            x1 = x1 + x2;
+            x1 = x1 - HF(hp, prec, 0xCu, 16);
+            const int dl = !n6_pf(n6_cmp(q, x1, rad, 1), 5);
+            uint32_t al;
+            if (!n6_zf(n6_cmp(q, x1, (double)nr, 1), 0x41)) { al = 0; q->be++; }   /* the back side only */
+            else {
+                al = 1;
+                if (dl) {                                                  /* both sides */
+                    if (q->nanc >= 131u) { q->decline = 1; return; }
+                    q->anc[q->nanc++] = H32(hn, nrec, 0u, 12) | 0x80000000u;
+                    n6_3d(q, H32(hn, nrec, 4u, 12));
+                    if (q->decline) return;
+                    q->nanc--;
+                    q->anc[q->nanc++] = H32(hn, nrec, 0u, 12) & 0x7FFFFFFFu;
+                    n6_3d(q, H32(hn, nrec, 8u, 12));
+                    if (q->decline) return;
+                    q->nanc--;
+                    q->d3--;
+                    return;
+                }
+            }
+            node = H32(hn, nrec, al * 4u + 4u, 12);
+            if ((int32_t)node >= 0) { q->be++; continue; }
+            break;
+        }
+    }
+    if (node != 0xFFFFFFFFu) n6_leaf(q, node);
+    q->d3--;
+}
+
+static int n6_overlap(uint32_t a, uint32_t n, uint32_t b, uint32_t len) { return a < b + len && b < a + n; }
+
+/* Entry at `call 00088110h` (esp at the pushed return address), after n4_layout. Returns 0 (declined, nothing stored)
+ * or 1 (lists built; stored when `store`, else left in q). */
+static int n6_query(xctx *c, n6q *q, int store)
+{
+    q->mm.ram = g_xram; q->mm.pt = g_xpt; q->mm.jon = 0;
+    const n4_mem *const m = &q->mm;
+    const uint32_t E = c->r[4], bsp = c->r[0], res = c->r[6], low = E - 0x10000u, top = E + 12u;
+    const uint32_t ctr = n4_r32(m, E + 4u);
+    { const uint32_t r = n4_r32(m, E + 8u); float f; memcpy(&f, &r, 4); q->rad = (double)f; }
+    q->cap = (int32_t)(int16_t)(uint16_t)c->r[1];
+    q->bits = c->r[2];
+    q->nodes3 = n4_r32(m, bsp + 4u); q->planes = n4_r32(m, bsp + 0x10u); q->leaves = n4_r32(m, bsp + 0x1Cu); q->refs = n4_r32(m, bsp + 0x28u);
+    q->nodes2 = n4_r32(m, bsp + 0x34u); q->surfs = n4_r32(m, bsp + 0x40u); q->edges = n4_r32(m, bsp + 0x4Cu); q->verts = n4_r32(m, bsp + 0x58u);
+    /* what the semantic version reads once or keeps in locals must not be written by the query: the center, the
+     * tested bits and the BSP arrays (counts at +0/+C/+18/+24/+30/+3C/+48/+54) against the lists and the frames */
+    if (ctr > 0xFFFFFFF0u || n6_overlap(ctr, 12u, res, 0x1010u) || n6_overlap(ctr, 12u, low, top - low)) return 0;
+    if (q->cap > 0) {
+        const uint32_t bytes = (((uint32_t)q->cap + 31u) >> 5) * 4u;
+        if (q->bits > 0xFFFFFFFFu - bytes || n6_overlap(q->bits, bytes, res, 0x1010u) || n6_overlap(q->bits, bytes, low, top - low)) return 0;
+    }
+    {
+        static const uint8_t cnt_off[8] = { 0x00, 0x0C, 0x18, 0x24, 0x30, 0x3C, 0x48, 0x54 };
+        static const uint8_t size[8] = { 12, 16, 8, 8, 20, 12, 24, 16 };
+        const uint32_t base[8] = { q->nodes3, q->planes, q->leaves, q->refs, q->nodes2, q->surfs, q->edges, q->verts };
+        for (unsigned i = 0; i < 8; ++i) {
+            const uint32_t n = n4_r32(m, bsp + cnt_off[i]);
+            if (n > 0x100000u) return 0;
+            const uint32_t len = n * size[i];
+            if (!len) continue;
+            if (base[i] > 0xFFFFFFFFu - len || n6_overlap(base[i], len, res, 0x1010u) || n6_overlap(base[i], len, low, top - low)) return 0;
+        }
+    }
+    { const uint8_t *hc = n4_span(m, ctr, 12);
+      q->cxf = HMF(hc, ctr, 0u, 12); q->cyf = HMF(hc, ctr, 4u, 12); q->czf = HMF(hc, ctr, 8u, 12);
+      q->cxd = HF(hc, ctr, 0u, 12); q->cyd = HF(hc, ctr, 4u, 12); q->czd = HF(hc, ctr, 8u, 12); }
+    q->zero = n4_rf(m, N4_ZERO);
+    for (unsigned i = 0; i < 12; ++i) q->axes[i] = (int16_t)n4_r16(m, N4_AXES + 2u * i);
+    /* 87EA0 reads q+0x21C/21E/220/224 only after 87E10's caller stored them; the initial values are never used */
+    q->axis = 0; q->side = 0; q->pu = q->pv = 0.0f;
+    q->nanc = 0; q->cnt[0] = q->cnt[1] = q->cnt[2] = q->cnt[3] = 0;
+    q->be = 0; q->d3 = q->d2 = 0; q->decline = 0;
+    q->fsw = c->fsw; q->fsp0 = c->fsp;
+    q->nodes3n = q->nodes2n = q->leavesn = q->surfacesn = q->edgesn = q->vertsn = q->scans = q->scanned = 0;
+    n6_3d(q, 0u);
+    if (q->decline) return 0;
+    if (!store) return 1;
+    /* the stores: counts and appended entries, exactly the bytes the transliteration leaves in the lists */
+    static const uint16_t list_off[4] = { 0x000, 0x404, 0x808, 0xC0C };
+    for (unsigned l = 0; l < 4; ++l) {
+        const uint32_t base = res + list_off[l];
+        for (uint32_t i = 0; i < q->cnt[l]; ++i) n4_w32(m, base + 4u + 4u * i, q->list[l][i]);
+        n4_w32(m, base, q->cnt[l]);
+    }
+    /* registers: eax = a surface or an edge touched; ebx/ebp/esi/edi as at entry (restored by the guest); ret 8 */
+    const uint32_t hit_s = (int32_t)q->cnt[0] > 0, hit_e = (int32_t)q->cnt[1] > 0;
+    c->r[0] = hit_s || hit_e;
+    c->r[4] = E + 12u;
+    /* 88110's last flag record (`cmp [esi],edi` / `cmp [esi+404h],edi`) and fsw of the last compare */
+    const uint32_t last = hit_s ? q->cnt[0] : q->cnt[1];
+    c->f_kind = XK_SUB; c->f_op1 = last; c->f_op2 = 0; c->f_res = last; c->f_bits = 32; c->f_cf_override = 0; c->f_of_override = 0;
+    c->fsw = q->fsw;
+    return 1;
+}
+static void n6_count(const n6q *q)
+{
+    N4_ADD(N4_CALLS, 1);
+    if (!n4_detail) return;
+    N4_ADD(N4_NODES3, q->nodes3n); N4_ADD(N4_NODES2, q->nodes2n); N4_ADD(N4_LEAVES, q->leavesn);
+    N4_ADD(N4_SURFACES, q->surfacesn); N4_ADD(N4_EDGES, q->edgesn); N4_ADD(N4_VERTICES, q->vertsn); N4_ADD(N4_BACKEDGES, q->be);
+    N4_ADD(N4_SCANS, q->scans); N4_ADD(N4_SCANNED, q->scanned);
+}
+/* mode 3: semantic, else the exact native */
+static int n6_run(xctx *c, int timed)
+{
+    static __thread n6q q;
+    const uint64_t t0 = timed ? n4_ns() : 0;
+    if (!n6_query(c, &q, 1)) { __atomic_fetch_add(&n6_declined, 1, __ATOMIC_RELAXED); return 0; }
+    if (timed) { __atomic_fetch_add(&n4_native_ns, n4_ns() - t0, __ATOMIC_RELAXED); N4_ADD(N4_TIMED_NATIVE, 1); }
+    __atomic_fetch_add(&n6_calls, 1, __ATOMIC_RELAXED);
+    n4_budget(c, q.be); n6_count(&q);
+    return 1;
+}
+/* mode 4: the semantic query dry, then the exact native (kept); live outputs compared */
+static void n6_compare(xctx *c, int timed)
+{
+    static __thread n6q q;
+    const xctx before = *c;
+    xctx dry = before;                                   /* the dry run reads the entry state only */
+    const int ok = n6_query(&dry, &q, 0);
+    n4q s;
+    const uint64_t t0 = timed ? n4_ns() : 0;
+    n4_query(c, &s, 0);
+    if (timed) { __atomic_fetch_add(&n4_native_ns, n4_ns() - t0, __ATOMIC_RELAXED); N4_ADD(N4_TIMED_NATIVE, 1); }
+    n4_budget(c, s.be); n4_count(&s);
+    if (!ok) { __atomic_fetch_add(&n6_declined, 1, __ATOMIC_RELAXED); return; }
+    __atomic_fetch_add(&n6_compared, 1, __ATOMIC_RELAXED);
+    const n4_mem *const m = &q.mm;
+    unsigned bad = 0; const char *what = NULL; uint32_t a = 0, b = 0;
+#define N6_CMP(w, x, y) do { if ((x) != (y) && !bad++) { what = (w); a = (uint32_t)(x); b = (uint32_t)(y); } } while (0)
+    static const uint16_t list_off[4] = { 0x000, 0x404, 0x808, 0xC0C };
+    for (unsigned l = 0; l < 4; ++l) {
+        const uint32_t base = before.r[6] + list_off[l], n = n4_r32(m, base);
+        N6_CMP(l == 0 ? "surface count" : l == 1 ? "edge count" : l == 2 ? "vertex count" : "leaf count", q.cnt[l], n);
+        for (uint32_t i = 0; i < n && i < q.cnt[l] && i < 256u; ++i) N6_CMP("list entry", q.list[l][i], n4_r32(m, base + 4u + 4u * i));
+    }
+    N6_CMP("eax", ((int32_t)q.cnt[0] > 0 || (int32_t)q.cnt[1] > 0) ? 1u : 0u, c->r[0]);
+    N6_CMP("esp", before.r[4] + 12u, c->r[4]);
+    N6_CMP("ebx", before.r[3], c->r[3]); N6_CMP("ebp", before.r[5], c->r[5]);
+    N6_CMP("esi", before.r[6], c->r[6]); N6_CMP("edi", before.r[7], c->r[7]);
+    N6_CMP("back-edges", q.be, s.be);
+    N6_CMP("fsw", q.fsw, c->fsw);
+#undef N6_CMP
+    if (bad) {
+        __atomic_fetch_add(&n6_mismatched, 1, __ATOMIC_RELAXED);
+        if (__atomic_add_fetch(&n6_mismatch_total, 1, __ATOMIC_RELAXED) <= 16)
+            XK_LOG("[native-4b9d0] SEMANTIC MISMATCH %s semantic %08X exact %08X (%u differences; %u nodes %u leaves %u surfaces %u edges)\n",
+                   what, a, b, bad, s.nodes3n, s.leavesn, s.surfacesn, s.edgesn);
+    }
+}

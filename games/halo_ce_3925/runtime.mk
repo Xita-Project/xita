@@ -155,3 +155,7 @@ endif
 ifeq ($(XV_POSE_PIPELINE),1)
 XITA_GAME_SRCS += recomp/kernel/xk_pose_pipeline.c recomp/kernel/xk_frame_snapshot.c
 endif
+
+ifeq ($(XV_NATIVE_FEATURE_VERTICES),1)
+XITA_GAME_SRCS += recomp/kernel/xk_native_feature.c
+endif

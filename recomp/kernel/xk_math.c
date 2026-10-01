@@ -23,6 +23,7 @@
 enum { MATH_LANE_SLOTS=XV_OBJECT_WORKERS+1 };
 static unsigned math_fast[2], math_fallback[2];
 static unsigned root_pair_fast,root_pair_declined;
+static unsigned root_chain_fast,root_chain_declined;
 static int root_pair_decline(void){root_pair_declined++;return 0;}
 /* Slot zero retains guarded accounting. A bypassed quaternion owns its actual
  * worker's slot; reports aggregate/reset only after every job has retired. */
@@ -74,6 +75,8 @@ void xv_native_math_report(unsigned frames)
     XV_OBJECT_MATH_GUARD();
     XK_LOG("[root-pair] %u frames accepted %u declined %u\n",frames,root_pair_fast,root_pair_declined);
     root_pair_fast=root_pair_declined=0;
+    XK_LOG("[root-chain] %u frames accepted %u declined %u\n",frames,root_chain_fast,root_chain_declined);
+    root_chain_fast=root_chain_declined=0;
 #ifdef XV_NATIVE_MATRIX_NEON
     matrix_neon_report(frames);
 #endif
@@ -362,4 +365,55 @@ int xv_math_root_pair(xctx *restrict c)
     stack[4]=0x8e58bu;stack[5]=out;stack[6]=second;stack[7]=out;
     c->r[0]=second;c->r[1]=out;c->r[2]=out;c->r[4]=sp+16;
     return 1;
+}
+
+/* Engine boundary 8E419..8E58B: offset/basis, world translation, then root
+ * orientation for an unattached object. Capture once, retain all three rounded
+ * products and the basis write, and publish the same final guest call frame.
+ * Parent-relative objects continue through the original path. */
+int xv_math_root_chain(xctx *restrict c)
+{
+    XV_OBJECT_MATH_GUARD();
+    static int configured=-1;
+    extern int xv_phase_enabled;
+    if(configured<0) {
+        const char *enable=getenv("XV_ROOT_CHAIN"),*phases=getenv("XV_SCENE_PHASES");
+        configured=enable&&atoi(enable)!=0&&(!phases||atoi(phases)<=0);
+    }
+    if(!configured||xv_phase_enabled)goto decline;
+#ifdef XV_NATIVE_MATRIX_NEON
+    if(matrix_neon_enabled())goto decline;
+#endif
+    uint32_t sp=c->r[4];
+    if(!math_enabled()||c->df||(sp&3u)||sp<16u||sp>UINT32_MAX-0x154u)goto decline;
+    uint32_t base=sp-16u;
+    uint32_t *stack=X_G(base);
+    for(uint64_t page=((uint64_t)base&~4095ull)+4096;
+        page<(uint64_t)base+0x164u;page+=4096)
+        if((uintptr_t)X_G((uint32_t)page)!=(uintptr_t)stack+(page-base))goto decline;
+    if(stack[4]!=0x8e41eu||stack[5]!=sp+0x50u||
+       stack[6]!=sp+0xecu||stack[7]!=sp+0x50u||stack[15])goto decline;
+    uint32_t out=stack[17];
+    float *op=math_span(out,52);
+    if(!op||math_overlap(stack,0x164u,op,52))goto decline;
+    float basis[13],offset[13],translation[13],local[13],adjusted[13],middle[13];
+    memcpy(basis,stack+0x60/4,52);memcpy(offset,stack+0xfc/4,52);
+    memcpy(translation,stack+0x94/4,52);memcpy(local,stack+0x130/4,52);
+    root_chain_fast++;math_fast[0]+=3;
+    matrix_layout[ML_LEFT]+=2;matrix_layout[ML_DISJOINT]++;
+    /* Both written stack regions belong to the captured caller; no guest
+     * pointer is read after the private arithmetic window begins. */
+    XV_OBJECT_MATH_PRIVATE(c,1,out,52,sp-16u,0x94u);
+    xv_matrix_snapshot(c,basis,offset,adjusted);
+    memcpy(stack+0x60/4,adjusted,52);
+    xv_matrix_snapshot(c,translation,adjusted,middle);
+    xv_matrix_snapshot(c,middle,local,op);
+    uint32_t second=sp+0x120u;
+    stack[0]=out;stack[1]=out+4;stack[2]=second+4;stack[3]=out+4;
+    stack[4]=0x8e58bu;stack[5]=out;stack[6]=second;stack[7]=out;
+    c->r[0]=second;c->r[1]=out;c->r[2]=out;c->r[4]=sp+16;c->r[6]=out;
+    X_FLAGS(XK_LOGIC,0,0,0,32); /* test esi,esi at 8E422 (unattached) */
+    return 1;
+decline:
+    root_chain_declined++;return 0;
 }

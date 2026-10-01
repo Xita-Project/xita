@@ -7,13 +7,36 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <setjmp.h>
 
 uint8_t *g_xram,*g_img_base; uint32_t *g_xpt;
 /* Clang's sanitizer keeps the runtime's optional trace reference linked. */
 volatile uint32_t xv_cur_fn;
 int xv_phase_enabled;
+/* This fixture has no scene-helper alias: every callback keeps its real
+ * pthread identity. Optional indirect-HLE timing is intentionally disabled. */
+pthread_t xv_owner_pthread_self(void) { return pthread_self(); }
+int xv_hle_timing;
+const char *xv_hle_cur_name;
+void xv_hle_time_add(const char *name, uint64_t elapsed)
+{ (void)name; (void)elapsed; assert(!"unexpected HLE timing in worker fixture"); }
 static int gameplay_ready=1;
 int xd3d_object_jobs_ready(void) {return gameplay_ready;}
+static unsigned admission_joins, admission_invalidate;
+static xctx *admission_context;
+void xv_scene_thread_join_owner(void)
+{
+    admission_joins++;
+    if(admission_context) {
+        /* A guest fiber resumed by scene retirement cannot start a nested
+         * batch, and a map/phase change must invalidate outer admission. */
+        assert(!xv_object_jobs_begin(admission_context));
+        if(admission_invalidate==1)gameplay_ready=0;
+        if(admission_invalidate==2)xv_phase_enabled=1;
+        if(admission_invalidate==3)xv_object_jobs_override(0);
+    }
+}
+
 static unsigned writes[300],active,peak,allocations;
 static unsigned shared_guarded_value;
 #ifdef XV_OBJECT_SOLVER_EXPERIMENT
@@ -70,6 +93,41 @@ static void nested_guard_return(void)
 static unsigned event_calls,event_value;
 static unsigned event_seen[1200];
 static pthread_t guest_owner;
+/* Exercise the dependency absent from the original worker-only fixture:
+ * a separate scene thread owns the guard and needs the waiting owner to
+ * service its request before it can release the guard. */
+static unsigned scene_test, scene_start, scene_held, scene_reply, scene_services;
+static pthread_t scene_thread;
+static void scene_pause(void)
+{ struct timespec delay={0,50000};nanosleep(&delay,NULL); }
+static void *scene_guard_test(void *unused)
+{
+    (void)unused;
+    while(!__atomic_load_n(&scene_start,__ATOMIC_ACQUIRE))scene_pause();
+    jmp_buf abandon;
+    if(setjmp(abandon))return NULL;
+    int locked __attribute__((cleanup(xv_object_math_unlock)))=xv_object_math_lock();assert(locked==1);
+    __atomic_store_n(&scene_held,1,__ATOMIC_RELEASE);
+    while(!__atomic_load_n(&scene_reply,__ATOMIC_ACQUIRE))scene_pause();
+    if(getenv("OBJECT_SCENE_ABANDON_TEST")) {
+        int nested __attribute__((cleanup(xv_object_math_unlock)))=xv_object_math_lock();
+        assert(nested==1);
+        assert(xv_object_math_abandon_current()==2);
+        assert(xv_object_math_abandon_current()==0);
+        longjmp(abandon,1);
+    }
+    return NULL;
+}
+void xv_scene_thread_service_owner_blocked(void)
+{
+    assert(pthread_equal(pthread_self(),guest_owner));
+    if(scene_test && __atomic_load_n(&scene_held,__ATOMIC_ACQUIRE) &&
+       !__atomic_load_n(&scene_reply,__ATOMIC_RELAXED)) {
+        assert(xv_object_math_abandon_current()==0); /* holder is another thread */
+        scene_services++;
+        __atomic_store_n(&scene_reply,1,__ATOMIC_RELEASE);
+    }
+}
 static unsigned io_calls, io_seen[300], audio_calls, volume_calls, commit_calls, stop_calls;
 static unsigned frequency_calls, parameter_calls;
 void object_test_audio_owner(void)
@@ -253,6 +311,10 @@ void f_0008FB70(xctx *c)
     /* Simulate substantial work while exercising nested native-helper locks. */
     struct timespec delay={0,1000000};nanosleep(&delay,NULL);
     unsigned id=c->r[1];
+    if(scene_test) {
+        __atomic_store_n(&scene_start,1,__ATOMIC_RELEASE);
+        while(!__atomic_load_n(&scene_held,__ATOMIC_ACQUIRE))scene_pause();
+    }
 #ifdef XV_OBJECT_HOLD_PROFILE
     extern unsigned xv_object_motion_begin(xctx *,unsigned);
     extern void xv_object_motion_end(unsigned *);
@@ -410,7 +472,16 @@ int main(int argc,char **argv)
 #endif
     gameplay_ready=0;assert(!xv_object_jobs_begin(&c));gameplay_ready=1;
     xv_phase_enabled=1;assert(!xv_object_jobs_begin(&c));xv_phase_enabled=0;
+    assert(admission_joins==0);
+    admission_context=&c;
+    for(admission_invalidate=1;admission_invalidate<=3;admission_invalidate++) {
+        assert(!xv_object_jobs_begin(&c));
+        assert(admission_joins==admission_invalidate);
+        gameplay_ready=1;xv_phase_enabled=0;xv_object_jobs_override(1);
+    }
+    admission_invalidate=0;
     assert(xv_object_jobs_begin(&c));assert(!xv_object_jobs_begin(&c));
+    assert(admission_joins==4);admission_context=NULL;
     X_M32(c.r[4])=0x902DF;assert(!xv_object_jobs_queue(&c));
     if(argc>1&&!strcmp(argv[1],"unsupported-yield")) {
         c.fiber=(void *)&xv_object_job_marker;X_M32(c.r[4])=0x12AA9;X_M32(c.r[4]+4)=0xDEADBEEF;
@@ -456,6 +527,8 @@ int main(int argc,char **argv)
         setenv("OBJECT_AUDIO_NESTED_FAIL","1",1);argc=1;
     }
     if(argc>1) {c.fiber=(void *)&xv_object_job_marker;xv_object_job_hle(&c,0x1D66EC,NULL);assert(0);}
+    scene_test=getenv("OBJECT_SCENE_WAIT_TEST")!=NULL;
+    if(scene_test)assert(!pthread_create(&scene_thread,NULL,scene_guard_test,NULL));
     for(unsigned round=0;round<2;round++) {
         if(round)assert(xv_object_jobs_begin(&c));
         for(unsigned i=0;i<300;i++) {
@@ -469,6 +542,10 @@ int main(int argc,char **argv)
         xctx *scope=&c;xv_object_jobs_end(&scope);
     }
     const char *workers=getenv("XV_OBJECT_JOB_WORKERS");
+    if(scene_test) {
+        assert(!pthread_join(scene_thread,NULL));assert(scene_services==1);
+        puts("PASS: foreign scene guard released through blocked-owner service");
+    }
     unsigned expected=workers?(unsigned)atoi(workers):2u;if(!expected)expected=1;
     assert(peak==expected);
 #ifdef XV_OBJECT_SOLVER_EXPERIMENT

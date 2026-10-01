@@ -59,6 +59,34 @@ with tempfile.TemporaryDirectory() as d:
  p=Path(d); (p/'test.c').write_text(prefix+section+suffix)
  subprocess.run(['cc','-std=gnu11','-O2','-pthread','-DXV_EXPERIMENTAL_OBJECT_JOBS=1',str(p/'test.c'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
+ # Sample-state isolation: workers and helper must never consume owner RNG or
+ # change recursive depth, even when they use the exact sampled guest address.
+ sampled = r"""
+static void *excluded(void *arg) {
+ worker=arg!=0;scene=arg==0;
+ for(unsigned i=0;i<200000;i++) {
+  xv_scene_phase_begin(0x8FB70);xv_scene_phase_end(0x8FB70);
+ }
+ return 0;
+}
+int main(void) {
+ setenv("XV_SCENE_PHASES","0",1);setenv("XV_TICK_PHASES","3",1);
+ xv_scene_phase_begin(0x900E0);
+ pthread_t a,b;assert(!pthread_create(&a,0,excluded,(void *)1));
+ assert(!pthread_create(&b,0,excluded,0));
+ for(unsigned i=0;i<10000;i++) {
+  xv_scene_phase_begin(0x8FB70);xv_scene_phase_end(0x8FB70);
+ }
+ pthread_join(a,0);pthread_join(b,0);xv_scene_phase_end(0x900E0);
+ assert(object_sample_seen==10000 && !object_sample_depth);
+ assert(!phase_depth[0] && !phase_depth[1] && !phase_used[1]);
+ assert(phase_used[0]==2 && phase_tab[0][0].n==object_sample_chosen);
+ return 0;
+}
+"""
+ (p/'sampled.c').write_text(prefix+section+sampled)
+ subprocess.run(['cc','-std=gnu11','-O2','-pthread','-DXV_EXPERIMENTAL_OBJECT_JOBS=1',str(p/'sampled.c'),'-o',str(p/'sampled')],check=True)
+ subprocess.run([str(p/'sampled')],check=True)
  # Regression sensitivity: dropping both worker guards must fail the assertions.
  (p/'bad.c').write_text((prefix+section+suffix).replace('if (xv_object_is_worker_thread()) return;', ''))
  subprocess.run(['cc','-std=gnu11','-O2','-pthread','-DXV_EXPERIMENTAL_OBJECT_JOBS=1',str(p/'bad.c'),'-o',str(p/'bad')],check=True)

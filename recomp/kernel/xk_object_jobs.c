@@ -83,6 +83,8 @@ static unsigned service_address[WORKERS];
 static xv_fn_t service_fn[WORKERS];
 static int initialized, override=-1, configured=-1;
 static xctx *owner;
+/* Guest-owner admission can yield while retiring a previous scene. */
+static int admitting;
 static unsigned passes, batches, submitted, executed[LANES], rejected;
 static uint64_t work_us[LANES], batch_us;
 /* A worker's recursive scopes stay on its native thread, including while it
@@ -113,13 +115,27 @@ static int census_is_owner(void)
 {
     if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
 #ifdef __vita__
-    return xv_owner_thread_id()==census_owner_thread;
+    return sceKernelGetThreadId()==census_owner_thread;
 #else
-    return pthread_equal(xv_owner_pthread_self(),census_owner_thread);
+    return pthread_equal(pthread_self(),census_owner_thread);
 #endif
 }
 /* Register/queue/fiber inspection is legal only after native owner identity.
  * A borrowed worker xctx in an owner service is never the current guest xctx. */
+/* Before pool initialization, identity comes from the real scheduler handoff,
+ * never from a worker registration or a shared current-fiber pointer alone. */
+int xv_object_feature_serial_admit(const xctx *c)
+{
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=0 ||
+       !xk_os_fiber_is_current_guest())return 0;
+    if(!xk_cur||c!=&xk_cur->ctx||xv_is_object_job(c)||xk_cur->state!=0||
+       !xk_cur->fiber||xk_cur->fiber!=xk_os_fiber_current())return 0;
+    return !owner&&!admitting&&!count&&
+        !__atomic_load_n(&running,__ATOMIC_ACQUIRE)&&
+        !__atomic_load_n(&pause_workers,__ATOMIC_ACQUIRE)&&
+        !__atomic_load_n(&owner_notice,__ATOMIC_ACQUIRE)&&
+        !__atomic_load_n(&audio_service_context,__ATOMIC_ACQUIRE);
+}
 unsigned xv_object_census_admit(const xctx *c)
 {
     if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return XV_LC_UNINITIALIZED;
@@ -257,6 +273,39 @@ static sem_t owner_wake, replies[WORKERS];
 static xv_object_mutex math_mutex;
 static volatile int math_holder;   /* diagnostic: lane+1 for a worker, 100 owner lane, 200 another thread; 0 free */
 static int worker_lane(void);
+/* Non-worker ownership also permits same-thread abandonment cleanup. Depth
+ * is protected by the recursive mutex; observers read published scalars only. */
+static int guard_trace;
+static unsigned guard_other_depth;
+static uintptr_t guard_other_thread, guard_other_pc;
+static void guard_other_enter(uintptr_t pc)
+{
+    if(!guard_other_depth++) {
+#ifdef __vita__
+        uintptr_t id=(uintptr_t)sceKernelGetThreadId();
+#else
+        uintptr_t id=(uintptr_t)pthread_self();
+#endif
+        __atomic_store_n(&guard_other_pc,pc,__ATOMIC_RELAXED);
+        __atomic_store_n(&guard_other_thread,id,__ATOMIC_RELEASE);
+    }
+}
+static void guard_other_leave(void)
+{
+    if(!guard_other_depth)abort();
+    if(!--guard_other_depth)__atomic_store_n(&guard_other_thread,0,__ATOMIC_RELEASE);
+}
+static void guard_trace_report(void)
+{
+    if(!guard_trace)return;
+    uintptr_t id=__atomic_load_n(&guard_other_thread,__ATOMIC_ACQUIRE);
+    uintptr_t pc=__atomic_load_n(&guard_other_pc,__ATOMIC_RELAXED);
+    XK_LOG("[object-guard-owner] sampled native thread %llX outer caller %llX; zero thread means no foreign holder, independently sampled\n",
+        (unsigned long long)id,(unsigned long long)pc);
+    extern void xv_scene_thread_stall_snapshot(void) __attribute__((weak));
+    if(xv_scene_thread_stall_snapshot)xv_scene_thread_stall_snapshot();
+}
+
 
 
 #if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING != 0 && XV_OBJECT_PASS_TIMING != 1
@@ -658,6 +707,7 @@ static void owner_wait_stuck(unsigned timeouts,const char *what)
 {
     /* every 4 s of a stalled pass: who holds the guard, what the workers are doing (the perf134 core answered none of it) */
     if(timeouts%8000u)return;
+    guard_trace_report();
     XK_LOG("[object-jobs] STUCK %s %u ms: running %d math_holder %d (lane+1 / 100 owner-lane / 200 other) worker service words %u %u\n",
         what,timeouts/2u,(int)__atomic_load_n(&running,__ATOMIC_RELAXED),(int)math_holder,
         service_state[0],service_state[1]);
@@ -691,6 +741,7 @@ static void owner_wait(SceUID sem)
 static void owner_wait_stuck(unsigned timeouts,const char *what)
 {
     if(timeouts%8000u)return;
+    guard_trace_report();
     XK_LOG("[object-jobs] STUCK %s %u ms: running %d math_holder %d (lane+1 / 100 owner-lane / 200 other) worker service words %u %u\n",
         what,timeouts/2u,(int)__atomic_load_n(&running,__ATOMIC_RELAXED),(int)math_holder,
         service_state[0],service_state[1]);
@@ -1078,11 +1129,13 @@ __attribute__((noinline)) int xv_object_math_lock(void)
             owner_lane_stall_check(&since,"guard-spin");
             owner_lane_delay();
         }
+        guard_other_enter((uintptr_t)__builtin_return_address(0));
         math_holder=100;math_stats[WORKERS].acquired++;
         return 1;
     }
 #endif
     xv_object_mutex_wait(&math_mutex);
+    guard_other_enter((uintptr_t)__builtin_return_address(0));
     math_holder=200;math_stats[WORKERS].acquired++;
     return 1;
 }
@@ -1098,8 +1151,30 @@ void xv_object_math_unlock(int *locked)
         hold_release(lane);return;
 #endif
     }
+    if(*locked==1 && worker_lane()<0)guard_other_leave();
     math_holder=0;xv_object_mutex_release(&math_mutex);
 }
+/* Only for a native scene helper about to discard its entire C stack. Never
+ * release a worker/another thread's transaction. Normal cleanup still owns
+ * all normal returns; this must not be followed by cleanup of old tokens. */
+unsigned xv_object_math_abandon_current(void)
+{
+    if(__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)!=1)return 0;
+#ifdef __vita__
+    uintptr_t id=(uintptr_t)sceKernelGetThreadId();
+#else
+    uintptr_t id=(uintptr_t)pthread_self();
+#endif
+    if(__atomic_load_n(&guard_other_thread,__ATOMIC_ACQUIRE)!=id)return 0;
+    unsigned n=guard_other_depth;
+    for(unsigned remaining=n;remaining;remaining--) {
+        guard_other_leave();
+        math_holder=0;
+        xv_object_mutex_release(&math_mutex);
+    }
+    return n;
+}
+
 #ifdef XV_OBJECT_POSE_EXPERIMENT
 static int pose_is_owner(void)
 {
@@ -2085,6 +2160,7 @@ static int initialize(void)
 {
     if(initialized)return initialized>0;
     initialized=-1;
+    { const char *e=getenv("XV_OBJECT_GUARD_TRACE");guard_trace=e&&atoi(e)!=0; }
 #ifdef XV_OBJECT_SOLVER_EXPERIMENT
 #ifdef __vita__
     solver_owner_thread=sceKernelGetThreadId();
@@ -2245,11 +2321,22 @@ fail:
 int xv_object_jobs_begin(xctx *c)
 {
     if(configured<0) { const char *e=getenv("XV_EXPERIMENTAL_OBJECT_JOBS");configured=e?atoi(e)!=0:1; }
-    if(!(override<0?configured:override)||owner||xv_phase_enabled||xv_is_object_job(c))return 0;
+    if(!(override<0?configured:override)||owner||admitting||xv_phase_enabled||xv_is_object_job(c))return 0;
     /* Map construction/cinematic initialization has ordering dependencies.
      * Only opt into jobs once the owner observes a rendered gameplay view. */
     extern int xd3d_object_jobs_ready(void) __attribute__((weak));
     if(!xd3d_object_jobs_ready || !xd3d_object_jobs_ready())return 0;
+    /* Retire the previous scene BEFORE publishing a worker batch. Its bitmap
+     * cache wait may require guest streaming fibers. Those fibers may run in
+     * the scene join, but cannot safely run after worker snapshots are active.
+     * Reentrant admission during that yield must remain serial. */
+    extern void xv_scene_thread_join_owner(void) __attribute__((weak));
+    admitting=1;
+    if(xv_scene_thread_join_owner)xv_scene_thread_join_owner();
+    admitting=0;
+    /* A yielded guest fiber can change phase/readiness or disable jobs. */
+    if(!(override<0?configured:override)||owner||xv_phase_enabled||
+       !xd3d_object_jobs_ready())return 0;
     if(!initialize())return 0;
     owner=c;
 #if defined(XV_OBJECT_PASS_TIMING) && XV_OBJECT_PASS_TIMING
@@ -2260,17 +2347,19 @@ int xv_object_jobs_begin(xctx *c)
 /* Guest-owner admission, never called by the network service thread. */
 int xv_object_jobs_available(void)
 { return !xv_phase_enabled && initialize(); }
-static unsigned site2_jobs;
 int xv_object_jobs_queue(xctx *c)
 {
-    /* f_000900E0 calls the per-object update f_0008FB70 from two sites: 0x90294 (the flagged-object loop, queued
-     * since the experiment began) and 0x902DA (the "requested update" list: what the a10 cinematic drives its ~34
-     * objects per tick through, 37 of the 55 ms tick in guest code on the owner, perf129). XV_OBJECT_JOBS_SITE2=0
-     * keeps the old single-site admission. */
-    static int site2=-1; if(site2<0) { const char *e=getenv("XV_OBJECT_JOBS_SITE2"); site2=e?atoi(e)!=0:1; }
     uint32_t ret=X_M32(c->r[4]);
-    if(c!=owner||!(ret==0x90299u||(site2&&ret==0x902DFu)))return 0;
-    if(ret==0x902DFu)site2_jobs++;
+    if(c!=owner)return 0;
+    /* 0x902DA is the creation/deletion lifecycle pass, not an independent
+     * requested-update list. After this call, 0x902E5 tests deletion and
+     * 0x902F8 can free the same object. Deferring this update lets the owner
+     * delete its queued input before a worker starts (a30 Pi reproduction).
+     * Execute it inline with the original guest context and ordering. Drain
+     * prior work first; regular updates at 0x90294 still use the workers.
+     * XV_OBJECT_JOBS_SITE2 must not re-enable the unsafe lifetime crossing. */
+    if(ret==0x902DFu) { xv_object_jobs_join(); return 0; }
+    if(ret!=0x90299u)return 0;
     if(count==CAPACITY)xv_object_jobs_join();
     jobs[count++]=*c; submitted++;
     /* This call site's next iteration overwrites volatile inputs. Whole guest
@@ -2391,7 +2480,6 @@ void xv_object_jobs_report(unsigned frames)
         frames,passes,batches,submitted,executed[0],executed[1],WORKERS>2?executed[2]:0u,executed[WORKERS],
         (unsigned long long)work_us[0],(unsigned long long)work_us[1],(unsigned long long)(WORKERS>2?work_us[2]:0),(unsigned long long)work_us[WORKERS],
         (unsigned long long)batch_us,rejected);
-    if(site2_jobs){XK_LOG("[object-jobs] site-2 (0x902DA requested-update list) jobs %u\n",site2_jobs);site2_jobs=0;}
     if(owner_wait_timeouts){XK_LOG("[object-jobs] owner bounded-wait timeouts %u (500 us each; the scene proxy is serviced between them)\n",owner_wait_timeouts);owner_wait_timeouts=0;}
     XK_LOG("[object-jobs] owner event services %u cache yields %u resource queries %u registrations %u vertex locks %u\n",services,io_yields,resource_queries,resource_registers,vertex_locks);services=io_yields=resource_queries=resource_registers=vertex_locks=0;
     XK_LOG("[object-jobs] quiescent owner audio pumps %u\n",audio_pumps);audio_pumps=0;

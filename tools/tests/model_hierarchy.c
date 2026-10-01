@@ -17,6 +17,16 @@ void xk_os_log(const char *fmt,...) { (void)fmt; }
 void original_hierarchy(xctx *),current_hierarchy(xctx *),candidate_hierarchy(xctx *);
 int xv_math_model_hierarchy(xctx *);
 void xv_model_hierarchy_override(int);
+#ifdef XV_ROOT_CHAIN_TEST
+static unsigned root_chain_admitted;
+int __real_xv_math_root_chain(xctx *);
+int __wrap_xv_math_root_chain(xctx *c)
+{
+    int took=__real_xv_math_root_chain(c);
+    root_chain_admitted+=took!=0;
+    return took;
+}
+#endif
 void __wrap_xv_preempt(xctx *c) { yields++;c->preempt=100; }
 static uint32_t next(void) { uint32_t x=random_state;x^=x<<13;x^=x>>17;x^=x<<5;return random_state=x; }
 static void word(uint32_t address,uint32_t v) { X_M32(address)=v; }
@@ -109,6 +119,28 @@ int main(int argc,char **argv)
         if(took) {assert(on);accepted++;assert(probe.r[0]==n-1&&probe.preempt==c.preempt-(int32_t)(n-first-1));}
         compare(c,k,1);
     }
+    /* Exercise the actual lifted root setup and continuation, not just a
+     * synthetic sequence of native matrix calls. Existing root fixtures use
+     * the world-relative copy path and cannot establish root-chain uptake. */
+#ifdef XV_ROOT_CHAIN_TEST
+    for(unsigned k=0;k<32;k++) {
+        assert(!fesetround(modes[k%4]));
+        xctx c=fixture(3+next()%30,0,k%3);
+        const uint32_t definition=0x70000u;
+        X_M8(SP+0x17)=0;word(SP+0x18,definition);word(SP+0x1c,0);
+        word(definition+0x8c,UINT32_MAX);
+        X_MF32(definition+0x14)=.25f;X_MF32(definition+0x18)=-.5f;X_MF32(definition+0x1c)=1.f;
+        word(OBJECT+4,k&1?0x1000u:0);
+        for(unsigned j=0;j<3;j++) {
+            X_MF32(OBJECT+0x0c+j*4)=(float)((int)k-16+j);
+            X_MF32(OBJECT+0x24+j*4)=j==0?1.f:0.f;
+            X_MF32(OBJECT+0x30+j*4)=j==2?1.f:0.f;
+        }
+        compare(c,1000+k,1);
+    }
+    if(on)assert(root_chain_admitted>0);
+    printf("root-chain accepted %u complete-hierarchy calls\n",root_chain_admitted);
+#endif
     /* Uncomputed matrices are deliberately unusable as inputs. Every parent
      * must come from the completed prefix or an earlier freshly computed node,
      * including shuffled IDs and invocations with a consumed prefix. */

@@ -94,7 +94,8 @@ static void deadline_after(struct timespec *ts, SceUInt us)
 SceUInt64 sceKernelGetProcessTimeWide(void)
 {
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (SceUInt64)ts.tv_sec * 1000000u + (SceUInt64)ts.tv_nsec / 1000u;
+    /* POSIX tv_nsec is below 1e9; avoid ARM32's software 64-bit division. */
+    return (SceUInt64)ts.tv_sec * 1000000u + (uint32_t)ts.tv_nsec / 1000u;
 }
 int sceKernelDelayThread(SceUInt delay) { usleep(delay ? delay : 1); return 0; }
 

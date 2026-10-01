@@ -45,6 +45,7 @@ def main():
     p.add_argument('--sanitize', choices=('address', 'thread'))
     p.add_argument('--overlap', action='store_true')
     p.add_argument('--arm', action='store_true')
+    p.add_argument('--native-tail', action='store_true', help='Exercise native publication with the real worker pool')
     p.add_argument('--census', action='store_true', help='verify original-prefix workload counters through the actual pool')
     p.add_argument('--mode', action='append')
     a = p.parse_args()
@@ -56,6 +57,9 @@ def main():
              '-I' + str(ROOT / 'recomp'), '-I' + str(ROOT / 'recomp/kernel'), '-I' + str(a.out)]
     runtime = [ROOT / 'recomp/kernel' / (name + '.c') for name in
                ('xk_cluster_runtime', 'xk_cluster_snapshot', 'xk_cluster_query', 'xk_cluster_query_replay')]
+    if a.native_tail:
+        flags += ['-DXV_NATIVE_92330=1', '-DXV_NATIVE_92330_DEFAULT=2']
+        runtime.append(ROOT / 'recomp/kernel/xk_native_92330.c')
     if a.overlap:
         flags += ['-DXV_QUERY_OVERLAP_DEFAULT=1', '-DXV_QUERY_OVERLAP_TEST']
     if a.census:
@@ -86,6 +90,15 @@ def main():
             assert run.returncode != 0 and 'job instruction budget exceeded' in run.stderr, run
         else:
             assert run.returncode == 0, run.stdout + run.stderr
+        if a.native_tail and mode in ('normal', 'concurrent', 'overlap'):
+            tails = re.findall(r' tails (\d+)', run.stderr)
+            assert tails and sum(map(int, tails)) > 0, (mode, 'native tail not exercised', run.stderr)
+        if os.environ.get('XV_TYPED_QUERY_COST') == '1' and run.returncode == 0 and mode != 'disabled':
+            rows=re.findall(r'\[typed-query-cost\] lane (\d+) samples (\d+) outcomes decline/bypass/applied (\d+)/(\d+)/(\d+) us capture/compute/reacquire/validate/publish (\d+)/(\d+)/(\d+)/(\d+)/(\d+);',run.stdout+run.stderr)
+            assert len(rows)==2,(mode,rows)
+            for lane,samples,declined,bypassed,applied,*times in rows:
+                assert int(samples)==int(declined)+int(bypassed)+int(applied),(mode,rows)
+                if not int(samples):assert not any(map(int,times)),(mode,rows)
         print('PASS:', mode, run.stdout.strip(), flush=True)
 
 

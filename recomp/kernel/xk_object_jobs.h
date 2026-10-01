@@ -8,6 +8,7 @@ extern const char xv_object_job_marker;
 static inline int xv_is_object_job(const xctx *c)
 { return c && c->fiber == &xv_object_job_marker; }
 int xv_object_jobs_begin(xctx *c);
+int xv_object_feature_serial_admit(const xctx *c);
 int xv_object_jobs_queue(xctx *c);
 void xv_object_jobs_join(void);
 void xv_object_jobs_end(xctx **owner);
@@ -21,6 +22,8 @@ void xv_object_job_stop(xctx *c, unsigned address, const char *reason) __attribu
 /* Actual native-thread identity only; false is not proof of guest ownership. */
 int xv_object_is_worker_thread(void);
 int xv_object_math_lock(void);
+/* Scene abandonment only: caller must immediately discard all guard tokens. */
+unsigned xv_object_math_abandon_current(void);
 #if XV_QUERY_WORLD_RUN
 /* Read-only admission: exact worker guest under the retained math transaction. */
 unsigned xv_object_world_run_admit(xctx *c);

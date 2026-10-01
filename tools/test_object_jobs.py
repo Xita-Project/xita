@@ -75,7 +75,11 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                 else:assert sum(values[5:])>0,'held owner-service transactions must exercise timeout/park'
                 reports=re.findall(r'^\[object-jobs\] (\d+) frames passes (\d+) batches (\d+) jobs (\d+)',result.stderr,re.M)
                 assert reports==[('3','2','6','600'),('3','0','0','0')],reports
-                locks=re.findall(r'contended (\d+)/(\d+) wait-us (\d+)/(\d+);',result.stderr)
+                lock_rows=re.findall(r'contended (\d+)/(\d+)/(\d+) wait-us (\d+)/(\d+)/(\d+);',result.stderr)
+                # Production reports a third worker slot even in the default
+                # two-worker build. It must remain empty in this fixture.
+                assert all(row[2]==row[5]=='0' for row in lock_rows),lock_rows
+                locks=[(row[0],row[1],row[3],row[4]) for row in lock_rows]
                 assert len(locks)==2 and locks[1]==('0','0','0','0'),locks
                 sites=re.findall(r'^\[object-lock-site\] lane (\d+) pc ([0-9A-F]+) count (\d+) wait-us (\d+) max-us (\d+) overflow (\d+)',result.stderr,re.M)
                 if profile=='0': assert not sites
@@ -92,7 +96,7 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                     holds=re.findall(r'\[object-holds\] (\d+) frames lane (\d+) enabled (\d+) outer (\d+) samples (\d+) denominator 64;',result.stderr)
                     assert len(holds)==4 and all(row[0]=='3' and row[2]=='1' for row in holds),holds
                     assert all(row[3:] == ('0','0') for row in holds[2:]),holds
-                    acquisitions=re.search(r'acquired (\d+)/(\d+)/(\d+) nested',result.stderr)
+                    acquisitions=re.search(r'acquired (\d+)/(\d+)/(\d+)/(\d+) nested',result.stderr)
                     sites=re.findall(r'\[object-hold-site\] lane (\d+) pc ([0-9A-F]+) samples (\d+) elapsed-us (\d+) max-us (\d+) overflow (\d+)',result.stderr)
                     for lane in range(2):
                         rows=[tuple(int(v,16 if j==1 else 10) for j,v in enumerate(row)) for row in sites if int(row[0])==lane]
@@ -153,6 +157,18 @@ with tempfile.TemporaryDirectory(prefix='xita-object-jobs-') as directory:
                     assert '[object-motion]' not in result.stderr
                 print(f'PASS: {workers} workers, profile {profile}, bounded wait {timed}: two object passes in three render frames; retired/reset totals and wait-site accounting')
     subprocess.run([str(binary),"default-on"],check=True,timeout=10)
+    for timed in ('0','1'):
+        result=subprocess.run([str(binary)],check=True,timeout=30,capture_output=True,text=True,
+            env=dict(os.environ,OBJECT_SCENE_WAIT_TEST='1',XV_OBJECT_JOB_WORKERS='2',
+                     XV_OBJECT_TIMED_WAIT=timed))
+        assert 'PASS: foreign scene guard released through blocked-owner service' in result.stdout
+        print('PASS: concurrent scene holder and blocked-owner service, wait mode',timed)
+    for trace in ('0','1'):
+        result=subprocess.run([str(binary)],check=True,timeout=30,capture_output=True,text=True,
+            env=dict(os.environ,OBJECT_SCENE_WAIT_TEST='1',OBJECT_SCENE_ABANDON_TEST='1',
+                     XV_OBJECT_JOB_WORKERS='2',XV_OBJECT_GUARD_TRACE=trace))
+        assert 'PASS: foreign scene guard released through blocked-owner service' in result.stdout
+        print('PASS: recursive scene guards released before longjmp, trace',trace)
     if '-DXV_OBJECT_SOLVER_EXPERIMENT' in os.environ.get('OBJECT_JOB_TEST_FLAGS',''):
         for reason in ('OBJECT_SOLVER_TEST_OFF','OBJECT_SOLVER_TEST_BAD_CONSTANT'):
             result=subprocess.run([str(binary)],check=True,timeout=30,capture_output=True,text=True,

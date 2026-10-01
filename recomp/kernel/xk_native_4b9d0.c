@@ -132,8 +132,13 @@ static inline __attribute__((always_inline)) float n4_u2f(uint32_t u) { float v;
 static inline __attribute__((always_inline)) uint32_t n4_f2u(float f) { uint32_t v; memcpy(&v, &f, 4); return v; }
 /* A guest record read through one translation when [a, a+len) lies in one page (host(a) + off is then exactly the
  * translation of a + off, for integer, x87 and SSE loads alike); otherwise NULL and every field is translated. */
-static inline __attribute__((always_inline)) const uint8_t *n4_span(const n4_mem *m, uint32_t a, uint32_t len)
-{ return (a & 0xFFFu) + len <= 0x1000u ? N4_P(a) : NULL; }
+/* Aligned records permit direct VFP loads. Check the actual host pointer;
+ * unaligned records keep the existing per-field fallback below. */
+static inline __attribute__((always_inline)) __attribute__((assume_aligned(4))) const uint8_t *n4_span(const n4_mem *m, uint32_t a, uint32_t len)
+{ if ((a & 0xFFFu) + len > 0x1000u) return NULL;
+  const uint8_t *p = N4_P(a);
+  if ((uintptr_t)p & 3u) return NULL;
+  return __builtin_assume_aligned(p, 4); }
 /* field reads: h = n4_span(base, len); off may be dynamic (outside [0, len-size] it is translated on its own) */
 #define H32(h, base, off, len) ((h) && (uint32_t)(off) <= (len) - 4u ? n4_ld32((h) + (uint32_t)(off)) : n4_r32(m, (base) + (uint32_t)(off)))
 #define H16(h, base, off, len) ((h) && (uint32_t)(off) <= (len) - 2u ? n4_ld16((h) + (uint32_t)(off)) : n4_r16(m, (base) + (uint32_t)(off)))

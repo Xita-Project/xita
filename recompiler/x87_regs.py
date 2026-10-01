@@ -329,8 +329,16 @@ class X87Regs:
     the effect the code after the call expects, see guess()). Calls whose effect is only assumed get a
     runtime guard in the converted caller; everything proven is used without checks."""
 
-    def __init__(self, em, only=None, exclude=None, guards=True, min_density=0.0, physical_slots=None):
+    def __init__(self, em, only=None, exclude=None, guards=True, min_density=0.0, physical_slots=None,
+                 call_deltas=None):
         self.em = em
+        # Per-call-site expectations, never proofs. A mismatch resumes the memory
+        # lowering after the already executed call, preserving its side effects.
+        self.call_deltas = dict(call_deltas or {})
+        if any(type(ip) is not int or not 0 <= ip <= 0xFFFFFFFF or
+               type(delta) is not int or not -7 <= delta <= 7
+               for ip, delta in self.call_deltas.items()):
+            raise ValueError("x87 call deltas require 32-bit addresses and integer deltas in [-7, 7]")
         self.physical_slots = set(physical_slots or ())
         self.min_density = min_density     # x87 instructions per sync point below which the memory lowering stays
         self.disc = em.disc
@@ -438,6 +446,9 @@ class X87Regs:
                 return p, False
             if mode == "proven":
                 return p, False
+            ip = fn.blocks[start].insns[idx].ip
+            if ip in self.call_deltas:
+                return self.call_deltas[ip], True
             a = self.assumed.get(kind[1], TOP)
             if isinstance(a, int):
                 return a, True
@@ -733,6 +744,7 @@ class X87Regs:
             "fallback": len(self.reasons),
             "fallback_reasons": dict(reasons.most_common()),
             "guarded_calls": guarded,
+            "call_delta_hints": {f"0x{ip:08X}": delta for ip, delta in sorted(self.call_deltas.items())},
             "functions_with_guards": sum(1 for p in self.plans.values() if p.guards),
             "proven_summaries": hist(self.proven),
             "assumed_summaries": hist(self.assumed),

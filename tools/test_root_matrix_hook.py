@@ -29,9 +29,11 @@ d.add_root(0x8DDF0);d.lift_function(d.functions[0x8DDF0]);d.split_blocks(d.funct
 emitter=r.Emitter(image,d,{},image.kernel_imports(),'unused',1,hooks=hooks)
 enabled=emitter.emit_function(d.functions[0x8DDF0])
 assert enabled.count('if (xv_math_root_pair(c)) goto L_0008E58B;')==1
+assert enabled.count('if (xv_math_root_chain(c)) goto L_0008E58B;')==2
 hooks.hierarchy_enabled=False
 reference=emitter.emit_function(d.functions[0x8DDF0])
 assert 'xv_math_root_pair' not in reference
+assert 'xv_math_root_chain' not in reference
 # Both hierarchy hooks are compiled out in the baseline configuration.
 with tempfile.TemporaryDirectory(prefix='xita-root-hook-') as directory:
     outputs=[]

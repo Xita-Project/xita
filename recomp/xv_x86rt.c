@@ -61,6 +61,9 @@ void xv_preempt(xctx *c)
         uintptr_t caller=(uintptr_t)__builtin_return_address(0);
         XV_RT_LOG("object job spin ARM caller %08X relative-to-xv_preempt %d\n",
                   (unsigned)caller,(int32_t)(caller-(uintptr_t)xv_preempt));
+#else
+        /* Resolve against the exact host harness, not the indirect parent alone. */
+        XV_RT_LOG("object job spin host caller %p\n", __builtin_return_address(0));
 #endif
         XV_RT_LOG("object job spin regs %08X %08X %08X %08X %08X %08X %08X %08X\n",
                   c->r[0],c->r[1],c->r[2],c->r[3],c->r[4],c->r[5],c->r[6],c->r[7]);

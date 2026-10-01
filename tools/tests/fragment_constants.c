@@ -6,13 +6,18 @@
 #include <stdarg.h>
 
 typedef int SceGxmContext;
-typedef struct { float psc[18][4], texscale[4][4]; uint32_t fog_color, atest; } cmd_t;
-typedef struct { const int *p_psc, *p_fogcolor, *p_atest, *p_texscale; } xv_fshader_t;
-static int parameters[4];
+typedef struct { unsigned width, height, filter; } SceGxmTexture;
+#define SCE_GXM_TEXTURE_FILTER_POINT 0
+static unsigned sceGxmTextureGetMagFilter(const SceGxmTexture *t) { return t->filter; }
+static unsigned sceGxmTextureGetWidth(const SceGxmTexture *t) { return t->width; }
+static unsigned sceGxmTextureGetHeight(const SceGxmTexture *t) { return t->height; }
+typedef struct { unsigned ntex, loading_border_axes; uint32_t loading_border_color; SceGxmTexture tex[4]; float psc[18][4], texscale[4][4]; uint32_t fog_color, atest; } cmd_t;
+typedef struct { const int *p_psc, *p_fogcolor, *p_atest, *p_texscale, *p_border1; } xv_fshader_t;
+static int parameters[5];
 static unsigned reserve_calls, write_calls, fail_write, null_buffer;
 static int reserve_error;
-static float buffer[96], written[4][72];
-static unsigned sizes[4];
+static float buffer[96], written[5][72];
+static unsigned sizes[5];
 static void test_log(const char *fmt, ...) { (void)fmt; }
 #define XV_LOG test_log
 #define XV_RENDER_CALL(kind, expression) (expression)
@@ -27,7 +32,7 @@ static int sceGxmSetUniformDataF(void *p, const int *parameter, unsigned first,
 {
     assert(p == buffer && !first && count <= 72);
     unsigned index = (unsigned)(parameter - parameters);
-    assert(index < 4);
+    assert(index < 5);
     write_calls++;
     if (write_calls == fail_write) return -17;
     sizes[index] = count;
@@ -49,11 +54,11 @@ int main(void)
     for (unsigned i=0;i<4;i++) for (unsigned j=0;j<4;j++) c.texscale[i][j]=(float)(i*4+j)+.25f;
     int noat = atoi(getenv("XV_NO_ATEST"));
     unsigned cases = 0;
-    for (unsigned mask=0;mask<16;mask++) {
+    for (unsigned mask=0;mask<32;mask++) {
         xv_fshader_t fs = {
             mask&1 ? parameters : NULL, mask&2 ? parameters+1 : NULL,
-            mask&8 ? parameters+3 : NULL, mask&4 ? parameters+2 : NULL};
-        unsigned expected=!!(mask&1)+!!(mask&2)+!!(mask&4)+!!(mask&8);
+            mask&8 ? parameters+3 : NULL, mask&4 ? parameters+2 : NULL, mask&16 ? parameters+4 : NULL};
+        unsigned expected=!!(mask&1)+!!(mask&2)+!!(mask&4)+!!(mask&8)+!!(mask&16);
         reset();
         assert(bind_fragment_constants(NULL,&c,&fs,123,4)); cases++;
         assert(reserve_calls==!!mask && write_calls==expected);
@@ -66,6 +71,10 @@ int main(void)
         if(mask&8) {
             const float alpha[]={0xA5/255.0f,4.0f,noat ? 0.0f : 1.0f,0.0f};
             assert(sizes[3]==4 && !memcmp(written[3],alpha,sizeof alpha));
+        }
+        if(mask&16) {
+            const float border[]={0,0,0,0,1,1,0,0};
+            assert(sizes[4]==8 && !memcmp(written[4],border,sizeof border));
         }
         if (!mask) continue;
         reset(); reserve_error=-27;
@@ -81,6 +90,12 @@ int main(void)
             assert(reserve_calls==1 && write_calls==expected); /* Fresh retry. */
         }
     }
+    xv_fshader_t border_only={.p_border1=parameters+4};
+    c.ntex=2; c.loading_border_color=0x7F123456; c.loading_border_axes=3;
+    c.tex[1]=(SceGxmTexture){128,64,SCE_GXM_TEXTURE_FILTER_POINT};
+    reset(); assert(bind_fragment_constants(NULL,&c,&border_only,124,0)); cases++;
+    const float border[]={0x12/255.0f,0x34/255.0f,0x56/255.0f,0x7F/255.0f,-128,-64,1,1};
+    assert(sizes[4]==8 && !memcmp(written[4],border,sizeof border));
     xv_fshader_t alpha_only={.p_atest=parameters+3};
     c.atest &= ~(1u<<16); reset();
     assert(bind_fragment_constants(NULL,&c,&alpha_only,124,0)); cases++;

@@ -89,10 +89,13 @@ def main():
     ap.add_argument('--fused', help='with --replay: a harness object dir whose query_fusion.o (the fused guest query) is the reference')
     ap.add_argument('--native', default=str(ROOT / 'recomp/kernel/xk_native_4b9d0.c'))
     ap.add_argument('--keep', help='also write the test executable here (e.g. to copy it to another machine)')
+    ap.add_argument('--build-only', action='store_true', help='compile differential cases for another machine; requires --keep (does not run tests)')
     ap.add_argument('--part', default='query', choices=['query', 'features'],
                     help='query: the BSP sphere query (f_00088110 subtree); features: the solver feature test (f_000864C0 subtree)')
     ap.add_argument('--replay-features', help='feature-test calls captured with XV_NATIVE_4B9D0_CAPTURE_FEATURES')
     a = ap.parse_args(); rec = Path(a.recomp)
+    if a.build_only and (not a.keep or a.bench or a.replay or a.replay_features or a.mutants):
+        ap.error('--build-only requires --keep and differential cases without replay, bench or mutants')
     env = dict(os.environ, N4_PART=a.part)
     texts = {}
     for p in sorted(rec.glob('code_*.c')):
@@ -105,7 +108,11 @@ def main():
     guest = '#include "xv_x86rt.h"\n#include "xv_phase.h"\n' + preamble + '\n' + '\n'.join(body(texts[fn], fn) for fn in FUNCS)
     variants = {'plain -O2': ['-O2'], 'thread-table+render-view -O2': ['-O2', '-DXV_THREAD_PAGE_TABLE=1', '-DXV_RENDER_VIEW=1'],
                 'plain -O0': ['-O0']}
-    if a.variants != 'all': variants = {k: v for k, v in variants.items() if k.split()[0] in a.variants.split(',')}
+    if a.variants != 'all':
+        requested = set(a.variants.split(','))
+        if requested - {k.split()[0] for k in variants}:
+            ap.error('--variants must be all, plain, thread-table+render-view, or comma-separated names')
+        variants = {k: v for k, v in variants.items() if k.split()[0] in requested}
     rc = 0
     with tempfile.TemporaryDirectory(prefix='xita-native-4b9d0-') as d:
         d = Path(d); (d / 'guest.c').write_text(guest); (d / 'kernel').mkdir()
@@ -141,6 +148,9 @@ def main():
         for name, flags in variants.items():
             exe = d / 'test'; build(exe, flags, native_src)
             if a.keep: subprocess.run(['cp', str(exe), a.keep + '-' + name.split()[0]], check=True)
+            if a.build_only:
+                print(f'[{name}] built {a.keep}-{name.split()[0]}; NOT executed', flush=True)
+                continue
             args = [str(exe), a.cases, a.seed] + (['--verify'] if a.verify else [])
             r = subprocess.run(args, capture_output=True, text=True, env=env)
             print(f'[{name}] ' + (r.stdout.strip() + r.stderr.strip()).replace('\n', f'\n[{name}] '), flush=True)

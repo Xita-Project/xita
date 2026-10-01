@@ -1680,7 +1680,21 @@ def main() -> int:
                          "fall below this (0 = convert every consistent function)")
     ap.add_argument("--x87-regs-no-guards", action="store_true",
                     help="--x87-regs: convert only functions whose every call has a proven x87 effect (no runtime guards)")
+    ap.add_argument("--x87-regs-call-delta", action="append", default=[], metavar="HEX_CALL_IP:DELTA",
+                    help="experimental per-call-site x87 depth expectation; always runtime-guarded, never a proof")
     args = ap.parse_args()
+    x87_call_deltas = {}
+    for spec in args.x87_regs_call_delta:
+        try:
+            address, value = spec.split(":")
+            ip, delta = int(address, 16), int(value, 10)
+            if not 0 <= ip <= 0xFFFFFFFF or not -7 <= delta <= 7 or ip in x87_call_deltas:
+                raise ValueError()
+            x87_call_deltas[ip] = delta
+        except ValueError:
+            ap.error("--x87-regs-call-delta requires a unique HEX_CALL_IP and a decimal delta in [-7, 7]")
+    if x87_call_deltas and (not args.x87_regs or args.x87_regs_no_guards):
+        ap.error("--x87-regs-call-delta requires --x87-regs with runtime guards enabled")
 
     from pathlib import Path
     from recompiler.xbe_parse import XbeError
@@ -1776,7 +1790,8 @@ def main() -> int:
         from recompiler.x87_regs import X87Regs, parse_entries
         em.x87regs = X87Regs(em, only=parse_entries(args.x87_regs_only), exclude=parse_entries(args.x87_regs_exclude),
                              guards=not args.x87_regs_no_guards, min_density=args.x87_regs_min_density,
-                             physical_slots=parse_entries(args.x87_regs_physical_slots))
+                             physical_slots=parse_entries(args.x87_regs_physical_slots),
+                             call_deltas=x87_call_deltas)
         em.x87regs.run()
     if args.symbols:
         em.vars = {s["name"]: s["address"] for s in symbols if s["kind"] == "VAR"}

@@ -3555,8 +3555,7 @@ static int bind_fragment_constants(SceGxmContext *ctx, const cmd_t *c,
     if (!fs->p_psc && !fs->p_fogcolor && !fs->p_atest && !fs->p_texscale && !fs->p_border1) return 1;
     void *fub = NULL;
     const char *stage = "reserve";
-    int err = XV_RENDER_CALL(XV_RENDER_FRAGMENT_UNIFORM,
-        sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub));
+    int err = sceGxmReserveFragmentDefaultUniformBuffer(ctx, &fub);
     if (err != 0 || !fub) goto fail;
     if (fs->p_psc) {
         stage = "psc";
@@ -3776,7 +3775,9 @@ static void render_range(SceGxmContext *ctx, cmdlist_t *l, unsigned first, unsig
         xv_vshader_set_streams(ctx, &v->vs, c->streams);
         if (v->vs.const_stream != 0xFF && c->constant_stream)
             sceGxmSetVertexStream(ctx, v->vs.const_stream, c->constant_stream);
-        if (!bind_fragment_constants(ctx, c, fs, frame, i))
+        /* Attribute reservation, conversion and every upload together, including
+         * failure paths, just as vertex constants are timed above. */
+        if (!XV_RENDER_CALL(XV_RENDER_FRAGMENT_UNIFORM, bind_fragment_constants(ctx, c, fs, frame, i)))
             continue;
         if (fs->alpha_test_mode == 2) xv_render_profile_cutout(c->index_count);
         int draw_result=XV_RENDER_CALL(XV_RENDER_DRAW, sceGxmDraw(ctx, (SceGxmPrimitiveType)c->prim, SCE_GXM_INDEX_FORMAT_U16, c->indices, c->index_count));

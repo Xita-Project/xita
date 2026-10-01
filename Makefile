@@ -2189,6 +2189,21 @@ $(RECOMP_BUILD)/kernel/xk_native_aim_blend.o: RECOMP_CFLAGS += -ffp-contract=off
 # Native light cluster query (f_00056670 + 52240/51E90/11840/B77C0/A9330, the cost under f_00092330's light update):
 # recomp/kernel/xk_native_92330.c, hooks installed by tools/patch_native_92330_hooks.py. Env XV_NATIVE_92330 0 off /
 # 1 verify / 2 native, XV_NATIVE_92330_TIME=1 us/call.
+# Experimental query-scoped collision vertices: compile and launch opt-in.
+XV_NATIVE_FEATURE_VERTICES ?= 0
+ifneq ($(filter $(XV_NATIVE_FEATURE_VERTICES),0 1),$(XV_NATIVE_FEATURE_VERTICES))
+$(error XV_NATIVE_FEATURE_VERTICES must be 0 or 1)
+endif
+ifeq ($(XV_NATIVE_FEATURE_VERTICES),1)
+ifneq ($(XV_EXPERIMENTAL_OBJECT_JOBS) $(XV_LIGHT_QUERY_CENSUS) $(XV_QUERY_WORLD_RUN),1 1 1)
+$(error XV_NATIVE_FEATURE_VERTICES requires XV_EXPERIMENTAL_OBJECT_JOBS=1 XV_LIGHT_QUERY_CENSUS=1 XV_QUERY_WORLD_RUN=1)
+endif
+$(RECOMP_BUILD)/kernel/xk_native_feature.o: RECOMP_CFLAGS += -DXV_QUERY_WORLD_RUN=1
+CFLAGS += -DXV_NATIVE_FEATURE_VERTICES=1
+RECOMP_CFLAGS += -DXV_NATIVE_FEATURE_VERTICES=1
+endif
+$(RECOMP_BUILD)/kernel/xk_native_feature.o: RECOMP_CFLAGS += -ffp-contract=off
+
 XV_NATIVE_92330 ?= 0
 XV_NATIVE_92330_DEFAULT ?= 0
 ifneq ($(filter $(XV_NATIVE_92330),0 1),$(XV_NATIVE_92330))

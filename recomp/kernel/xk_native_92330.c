@@ -632,7 +632,7 @@ pop:
 
 /* f_00056670 after its preamble: esp = E ([E+4] light, [E+8] &light list head, [E+0xC] &position, [E+0x10]
  * radius), eax = &location (cluster at +4), edi = the reference structure. */
-static void n9_query(n9 *s)
+static void n9_query_at(n9 *s, int tail_only)
 {
     N9_LOCALS;
     xctx *c = s->c;
@@ -640,6 +640,7 @@ static void n9_query(n9 *s)
     uint32_t eax = c->r[0], ecx = c->r[1], edx = c->r[2], ebx = c->r[3], ebp = c->r[5], esi = c->r[6], edi = c->r[7];
     s->low = E - 0xA4u;
     n9_stk k; n9_stk_at(m, &k, E - 0x98u);                /* this frame: [E-0x98, E-0x7E) */
+    if (tail_only) goto publish_tail;
     ecx = N9_LO(ecx) | n9_r16(m, eax + 4u);
     eax = 0;
     n9_sw32(m, &k, E - 0x88u, ebp);
@@ -671,7 +672,8 @@ static void n9_query(n9 *s)
             n9_wi8(m, N9_INUSE, 0);
         }
     }
-    /* 566DE */
+publish_tail:
+    /* 566DE: prefix state is already present for a continuation. */
     if ((int16_t)eax > 0x40) eax = 0x40u;
     if ((int16_t)eax <= 0) {
         c->f_kind = XK_LOGIC; c->f_op1 = 0; c->f_op2 = 0; c->f_res = (uint16_t)eax; c->f_bits = 16;
@@ -735,6 +737,8 @@ static void n9_query(n9 *s)
     c->fsw = fsw; s->fsw = fsw; s->backedges += be;
 }
 
+static void n9_query(n9 *s) { n9_query_at(s, 0); }
+
 /* ---- modes, budget, counters ------------------------------------------------------------------------------ */
 /* The guest's back-edge budget: X_PREEMPT() per back-edge, in one go at the end (xk_native_visibility.c). */
 static inline void n9_budget(xctx *c, uint32_t backedges)
@@ -755,7 +759,7 @@ static inline uint64_t n9_ns(void) { struct timespec t; clock_gettime(CLOCK_MONO
 #endif
 
 enum { N9_CALLS, N9_VERIFIED, N9_MISMATCHED, N9_DECLINED, N9_FLOODS, N9_CLUSTERS, N9_PORTALS, N9_FULL, N9_DATUMS,
-       N9_DIRTY, N9_TIMED_NATIVE, N9_TIMED_GUEST, N9_JOURNAL_FAIL, N9_NAN_WORDS, N9_BACKEDGES, N9_OVERLAP_SKIP, N9_COUNTERS };
+       N9_DIRTY, N9_TIMED_NATIVE, N9_TIMED_GUEST, N9_JOURNAL_FAIL, N9_NAN_WORDS, N9_BACKEDGES, N9_OVERLAP_SKIP, N9_TAILS, N9_COUNTERS };
 static unsigned n9_counter[N9_COUNTERS], n9_mismatch_total;
 static uint64_t n9_native_ns, n9_guest_ns;
 #define N9_ADD(i, v) __atomic_fetch_add(&n9_counter[i], (unsigned)(v), __ATOMIC_RELAXED)
@@ -791,6 +795,10 @@ static inline void n9_init(n9 *s, xctx *c)
     s->c = c; s->E = c->r[4]; s->fsp0 = c->fsp; s->fsw = c->fsw; s->touched = 0; s->backedges = 0; s->dirty = 0;
     s->cl_min = 0x7FFF; s->cl_max = -0x8000; s->portals = s->full = s->clusters = s->datums = s->flood = 0;
 }
+#ifdef XV_NATIVE_566DE_TEST
+int xv_native_566de(xctx *c);
+int xv_native_566de_test(xctx *c) { return xv_native_566de(c); }
+#endif
 #ifdef XV_NATIVE_52240_TEST
 /* Differential-test candidate only: no runtime hook or user setting. The
  * encompassing light query normally overwrites these exit flags. */
@@ -885,6 +893,20 @@ static void n9_report_mismatch(const char *what, uint32_t a, uint32_t b, const n
 int xv_scene_thread_overlapped(void) __attribute__((weak));     /* xk_scene_thread.c */
 int xv_scene_thread_on_helper(void) __attribute__((weak));
 int xv_scene_thread_helper_done(void) __attribute__((weak));
+/* Called only after a successful typed prefix and census-end, while the
+ * original 56670 transaction guard is still held. No undo/verify here: mode1
+ * retains the translated tail. ESP is entryESP-0x88 at this continuation. */
+int xv_native_566de(xctx *c)
+{
+    if (n9_mode() != 2) return 0;
+    if (xv_scene_thread_on_helper && xv_scene_thread_on_helper()) return 0;
+    n9 s; n9_init(&s, c); s.E += 0x88u;
+    n9_query_at(&s, 1);
+    n9_budget(c, s.backedges);
+    n9_count(&s); N9_ADD(N9_TAILS, 1);
+    return 1;
+}
+
 /* Hook inside f_00056670 after its preamble: 1 = handled (the guest body is skipped). 0 = run the guest body; a
  * token set in *token asks the body's return sites to call xv_native_92330_post. */
 int xv_native_92330(xctx *c, void **token)
@@ -1042,7 +1064,7 @@ void xv_native_92330_report(unsigned frames)
         snprintf(timing + strlen(timing), sizeof timing - strlen(timing), "%s guest %.3f (%u timed)", n[N9_TIMED_NATIVE] ? "" : "; us/call",
                  (double)guest_ns / 1000.0 / n[N9_TIMED_GUEST], n[N9_TIMED_GUEST]);
     XK_LOG("[native-92330] %u frames: calls %u verified %u mismatched %u (total mismatches %u) declined %u journal-fail %u overlap-skipped %u; "
-           "floods %u clusters %u portals %u full %u datums %u back-edges %u dirty %u nan-words %u%s\n",
+           "floods %u clusters %u portals %u full %u datums %u back-edges %u dirty %u nan-words %u tails %u%s\n",
            frames, n[N9_CALLS], n[N9_VERIFIED], n[N9_MISMATCHED], __atomic_load_n(&n9_mismatch_total, __ATOMIC_RELAXED),
-           n[N9_DECLINED], n[N9_JOURNAL_FAIL], n[N9_OVERLAP_SKIP], n[N9_FLOODS], n[N9_CLUSTERS], n[N9_PORTALS], n[N9_FULL], n[N9_DATUMS], n[N9_BACKEDGES], n[N9_DIRTY], n[N9_NAN_WORDS], timing);
+           n[N9_DECLINED], n[N9_JOURNAL_FAIL], n[N9_OVERLAP_SKIP], n[N9_FLOODS], n[N9_CLUSTERS], n[N9_PORTALS], n[N9_FULL], n[N9_DATUMS], n[N9_BACKEDGES], n[N9_DIRTY], n[N9_NAN_WORDS], n[N9_TAILS], timing);
 }

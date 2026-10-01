@@ -5,6 +5,7 @@
 #include "xk_worker_query.h"
 #include "xk_cluster_runtime.h"
 #include "xk_cluster_snapshot.h"
+#include "xk_cluster_read_index.h"
 #include <fenv.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -23,8 +24,26 @@ typedef struct __attribute__((aligned(64))) {
     Span maps[T_MAPS];unsigned maps_count;
     fenv_t entry_fp,result_fp;
     uint64_t attempts,applied,bypassed,declines[T_REASONS],dirty_bytes,backedges,overlaps;
+    uint64_t cost_us[5]; unsigned cost_samples,cost_outcomes[3];
 } Lane;
 static Lane lanes[T_LANES];
+/* Opt-in, one in 64 admitted calls. No locks, extra snapshots or altered
+ * admission. Stage clocks include native scheduling; they are not CPU self. */
+static int cost_enabled=-1;
+typedef struct { Lane *lane; uint64_t since; unsigned stage,outcome; } QueryCost;
+static void cost_stage(QueryCost *p,unsigned next)
+{
+    if(!p->lane)return;
+    uint64_t now=xk_os_monotonic_us();
+    p->lane->cost_us[p->stage]+=now-p->since;p->since=now;p->stage=next;
+}
+static void cost_end(QueryCost *p)
+{
+    if(!p->lane)return;
+    cost_stage(p,p->stage);p->lane->cost_samples++;
+    p->lane->cost_outcomes[p->outcome]++;
+}
+
 /* Exact construction read-set: guards against in-place geometry writes even
  * when roots and allocator addresses are unchanged. This deliberately bounded
  * prototype measures its validation traffic before any hardware default. */
@@ -39,9 +58,14 @@ typedef struct SourceRead {
 enum { SOURCE_BUCKETS=1024 };
 static SourceRead *source_reads, *source_index[SOURCE_BUCKETS];
 static unsigned source_bytes, source_count;
+static XvClusterReadIndex read_index;
+static SourceRead **read_order;
+static int read_index_enabled=-1;
+static uint64_t indexed_queries,examined_records;
 static uint64_t source_checks, source_compared, source_changes;
 static void clear_source_reads(void)
 {
+    xv_read_index_clear(&read_index);free(read_order);read_order=NULL;
     while(source_reads){SourceRead *next=source_reads->next;free(source_reads);source_reads=next;}
     memset(source_index,0,sizeof source_index);
     source_bytes=source_count=0;
@@ -151,13 +175,42 @@ static int build_source_dependencies(const XvClusterSource *source)
     }
     return 1;
 }
+/* Built only with workers drained. IDs retain linked-list order so a failing
+ * validation sees exactly the same first changed record as the scalar scan. */
+static void build_read_index(void)
+{
+    if(read_index_enabled<0){const char *e=getenv("XV_TYPED_SOURCE_INDEX");read_index_enabled=!e||atoi(e)!=0;}
+    if(!read_index_enabled||!xv_read_index_init(&read_index,source_count))return;
+    read_order=malloc(source_count*sizeof *read_order);
+    if(!read_order){xv_read_index_clear(&read_index);return;}
+    unsigned id=0;
+    for(SourceRead *r=source_reads;r;r=r->next){
+        read_order[id]=r;xv_read_index_add(&read_index,id++,r->dependency_kind,r->dependencies);
+    }
+    if(id!=source_count)abort();
+}
 static int same_words(const void *,const void *,unsigned);
 static int source_current(const XvClusterResult *result,unsigned start)
 {
     source_checks++;
     unsigned words=(xv_cluster_snapshot_geometry(batch.snapshot)->cluster_count+31)/32;
-    for(SourceRead *r=source_reads;r;r=r->next){
-        if(result&&r->dependency_kind==1){
+    uint32_t selected[XV_READ_INDEX_WORDS];
+    int indexed=result&&read_index.rows;
+    if(indexed)indexed_queries++;
+    if(indexed)xv_read_index_select(&read_index,start,result->changed,
+        xv_cluster_snapshot_geometry(batch.snapshot)->cluster_count,selected);
+    unsigned index_word=0;uint32_t index_bits=0;
+    SourceRead *cursor=source_reads;
+    for(;;){
+        SourceRead *r;
+        if(indexed){
+            while(!index_bits&&index_word<read_index.words)index_bits=selected[index_word++];
+            if(!index_bits)break;
+            unsigned id=(index_word-1)*32u+(unsigned)__builtin_ctz(index_bits);
+            index_bits&=index_bits-1;r=read_order[id];
+        }else{r=cursor;if(!r)break;cursor=r->next;}
+        examined_records++;
+        if(!indexed&&result&&r->dependency_kind==1){
             unsigned relevant=r->dependencies[start>>5]&(1u<<(start&31));
             for(unsigned i=0;!relevant&&i<words;i++)relevant=r->dependencies[i]&result->changed[i];
             if(!relevant)continue;
@@ -221,6 +274,9 @@ void xv_cluster_runtime_invalidate(unsigned service)
 }
 void xv_cluster_runtime_begin(void)
 {
+    if(cost_enabled<0) {
+        const char *e=getenv("XV_TYPED_QUERY_COST");cost_enabled=e&&atoi(e)!=0;
+    }
     /* Owner has drained the previous batch. Reuse requires every source byte
      * and mapping, roots, arena and publication mappings to still match. */
     if(__atomic_load_n(&batch.reusable,__ATOMIC_ACQUIRE)&&globals_match()&&
@@ -247,6 +303,7 @@ void xv_cluster_runtime_begin(void)
     XvClusterSource source={batch.bsp,batch.projection,0x1eaf30,0x1f0a68};
     batch.snapshot=xv_cluster_snapshot_build(source_read,NULL,&source,1u<<20);
     if(!batch.snapshot||!build_source_dependencies(&source))goto failed;
+    build_read_index();
     /* The validated traversal reads stamps only for clusters in this BSP.
      * Keep the full backing spans for alias/page validation, but capture and
      * compare only the live entries. No epoch wrap clears unrelated entries. */
@@ -376,18 +433,22 @@ int xv_worker_query(xctx *c,int guard)
     int lane=xv_object_query_lane(c,guard,c->r[4]-XV_CLUSTER_SCRATCH,XV_CLUSTER_SCRATCH+20)-1;
     if(lane<0||lane>=T_LANES)return 0;
     Lane *v=&lanes[lane];v->attempts++;v->maps_count=0;
+    QueryCost cost __attribute__((cleanup(cost_end)))={0};
+    if(cost_enabled>0 && ((v->attempts-1)&63u)==0) {
+        cost.lane=v;cost.since=xk_os_monotonic_us();
+    }
     /* The original handles these cases in a handful of instructions. Inspect
      * only validated private bytes using integers, without changing native FP
      * state or allocating/copying a complete query capture. */
     x_guest_read(v->args,c->r[4],20);
     uint32_t radius=v->args[4];
-    if(!radius||(radius&0x80000000u)||radius>=0x7f800000u){v->bypassed++;return 0;}
+    if(!radius||(radius&0x80000000u)||radius>=0x7f800000u){v->bypassed++;cost.outcome=1;return 0;}
     if(v->args[0]!=0x925b0||c->r[0]<c->r[4]+20||v->args[3]<c->r[4]+20||
        !xv_object_query_private(c,guard,c->r[0],6)||!xv_object_query_private(c,guard,v->args[3],12)){
         v->declines[T_LAYOUT]++;return 0;
     }
     uint16_t start_cluster;x_guest_read(&start_cluster,c->r[0]+4,2);
-    if(start_cluster==65535){v->bypassed++;return 0;}
+    if(start_cluster==65535){v->bypassed++;cost.outcome=1;return 0;}
     /* Numerical work uses only the owned, bounded snapshot. Validate live
      * geometry once at publication; a stale snapshot may waste private work,
      * but cannot publish results or dereference retired guest geometry. */
@@ -400,7 +461,7 @@ int xv_worker_query(xctx *c,int guard)
     int worthwhile=worthwhile_start(xv_cluster_snapshot_geometry(batch.snapshot),
                                    start_cluster,v->center,admission_radius);
     fesetenv(&v->entry_fp);
-    if(!worthwhile){v->bypassed++;return 0;}
+    if(!worthwhile){v->bypassed++;cost.outcome=1;return 0;}
     for(unsigned i=0;i<batch.visited_spans;i++)
         if(pointer(batch.visited[i].address,batch.visited[i].bytes,0)!=batch.visited[i].pointer)goto decline;
     copy_visited(v->visited);
@@ -418,9 +479,12 @@ int xv_worker_query(xctx *c,int guard)
     if(suspended){extern void xv_worker_query_test_private(xctx *);xv_worker_query_test_private(c);}
 #endif
     /* Only owned geometry and lane-private captures may be read while unlocked. */
+    cost_stage(&cost,1);
     int computed=xv_cluster_query_replay(geometry,&in,&layout,&v->entry,&v->result,&v->replay);
     fegetenv(&v->result_fp);fesetenv(&v->entry_fp);
+    cost_stage(&cost,2);
     xv_object_query_resume(suspended);
+    cost_stage(&cost,3);
     fesetenv(&v->entry_fp);
     if(!computed)goto decline;
 #ifdef XV_WORKER_QUERY_TEST
@@ -439,7 +503,8 @@ int xv_worker_query(xctx *c,int guard)
        !xv_object_query_private(c,guard,c->r[0],6)||!xv_object_query_private(c,guard,v->args[3],12)||
        !read_input(v,c->r[0],start,6)||!read_input(v,v->args[3],center,12)||
        memcmp(start,v->start,6)||memcmp(center,v->center,12))goto decline;
-    publish(v,c,in.epoch);v->applied++;v->backedges+=v->result.backedges;return 1;
+    cost_stage(&cost,4);
+    publish(v,c,in.epoch);v->applied++;v->backedges+=v->result.backedges;cost.outcome=2;return 1;
 decline:
     fesetenv(&v->entry_fp);v->declines[reason]++;return 0;
 }
@@ -451,8 +516,17 @@ void xv_worker_query_report(void)
         (unsigned long long)source_checks,(unsigned long long)source_compared,
         (unsigned long long)source_changes,source_bytes,source_count);
     source_checks=source_compared=source_changes=0;
+    XK_LOG("[typed-read-index] queries %llu examined-records %llu bytes %u; identical mapping/byte checks, scalar fallback retained\n",
+        (unsigned long long)indexed_queries,(unsigned long long)examined_records,
+        read_index.rows?(unsigned)(257u*read_index.words*sizeof(uint32_t)+source_count*sizeof *read_order):0);
+    indexed_queries=examined_records=0;
     for(unsigned i=0;i<T_LANES;i++){
         Lane *v=&lanes[i];
+        if(cost_enabled>0)XK_LOG("[typed-query-cost] lane %u samples %u outcomes decline/bypass/applied %u/%u/%u us capture/compute/reacquire/validate/publish %llu/%llu/%llu/%llu/%llu; sampled 1/64 admitted calls, elapsed includes scheduling, lock policy unchanged\n",
+            i,v->cost_samples,v->cost_outcomes[0],v->cost_outcomes[1],v->cost_outcomes[2],
+            (unsigned long long)v->cost_us[0],(unsigned long long)v->cost_us[1],
+            (unsigned long long)v->cost_us[2],(unsigned long long)v->cost_us[3],(unsigned long long)v->cost_us[4]);
+        v->cost_samples=0;memset(v->cost_us,0,sizeof v->cost_us);memset(v->cost_outcomes,0,sizeof v->cost_outcomes);
         XK_LOG("[typed-query-overlap] lane %u private-calculations %llu\n",i,(unsigned long long)v->overlaps);
         v->overlaps=0;
         XK_LOG("[typed-query] lane %u attempts %llu applied %llu bypassed %llu dirty-bytes %llu backedges %llu declines layout/input/numeric/changed %llu/%llu/%llu/%llu\n",i,

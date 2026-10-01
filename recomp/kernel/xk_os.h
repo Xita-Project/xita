@@ -44,6 +44,8 @@ void      xk_os_scheduler_wait(uint64_t us);
 xk_fiber *xk_os_fiber_create(void (*entry)(void *), void *arg, size_t host_stack);
 void      xk_os_fiber_switch(xk_fiber *to);  /* from current */
 xk_fiber *xk_os_fiber_current(void);
+/* True only on the native caller currently executing a non-scheduler guest fiber. */
+int       xk_os_fiber_is_current_guest(void);
 xk_fiber *xk_os_fiber_main(void);            /* the scheduler's own context */
 void      xk_os_fiber_destroy(xk_fiber *f);  /* never the current one */
 

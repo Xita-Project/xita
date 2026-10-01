@@ -27,6 +27,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--xbe',required=True);ap.add_argument('--manifest',required=True)
     ap.add_argument('--output-dir',type=Path,required=True,help='Private evidence directory; never publish generated game code')
+    ap.add_argument('--root-chain',action='store_true',help='Exercise native root-chain uptake in the complete lifted hierarchy')
     a=ap.parse_args();a.output_dir.mkdir(parents=True,exist_ok=True)
     image=r.Image(a.xbe,a.manifest);hooks=HaloHooks(image);assert hooks.hierarchy_enabled
     read=image.bytes_at
@@ -63,6 +64,9 @@ def main():
         reference.replace('original_hierarchy','current_hierarchy')+hooked)
     flags=['-std=gnu11','-fno-strict-aliasing','-ffp-contract=off','-DXV_NATIVE_MODEL_HIERARCHY',
            '-ffunction-sections','-fdata-sections',include,*shlex.split(os.environ.get('NATIVE_MATH_CFLAGS',''))]
+    if a.root_chain:
+        flags+=['-DXV_ROOT_CHAIN_TEST','-Wl,--wrap=xv_math_root_chain']
+        os.environ['XV_ROOT_CHAIN']='1'
     sources=[source,ROOT/'tools/tests/model_hierarchy.c',ROOT/'recomp/kernel/xk_hierarchy.c',
              ROOT/'recomp/kernel/xk_math.c',ROOT/'recomp/xv_x86rt.c']
     objects=[]

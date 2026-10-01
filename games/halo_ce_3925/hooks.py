@@ -9,7 +9,7 @@ from games.halo_ce_3925 import loading_brightness, material_sampler
 
 from recompiler.halo_flare_hooks import matches_image, ENTRY, ENTRY_HOOK, BARRIERS, barrier_line
 from recompiler.core.hooks import NoGameHooks
-from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, collision_vertices, segment_sphere, collision_traversal, scene_partition, model_route_profile, constant_pack, cluster_lifetime, model_fog, model_uv, marker_region
+from games.halo_ce_3925 import clip_region, collision_solver, object_motion_profile, feature_vertices, collision_vertices, segment_sphere, collision_traversal, scene_partition, model_route_profile, constant_pack, cluster_lifetime, model_fog, model_uv, marker_region
 
 
 class HaloHooks(NoGameHooks):
@@ -254,6 +254,7 @@ class HaloHooks(NoGameHooks):
         out.extend(cluster_lifetime.entry(self.image, address))
         out.extend(self.light_census_entry(address))
         out.extend(object_motion_profile.entry(self.image, address))
+        out.extend(feature_vertices.entry(self.image, address))
         if address == 0x170C10 and collision_solver.matches(self.image):
             out.extend(collision_solver.ENTRY)
         if address == segment_sphere.SPAN[0] and segment_sphere.matches(self.image):
@@ -281,7 +282,14 @@ class HaloHooks(NoGameHooks):
                                     "    XV_QUERY_WORK_BEGIN(c, xv_object_math_locked_);", "#endif"])
                     out.extend(["#ifdef XV_WORKER_QUERY",
                                 "    { extern int xv_worker_query(xctx *, int);",
-                                "      if (xv_worker_query(c, xv_object_math_locked_)) goto L_000566DE; }",
+                                "      if (xv_worker_query(c, xv_object_math_locked_)) {",
+                                "#if defined(XV_NATIVE_92330) && XV_NATIVE_92330 && defined(XV_TYPED_CLUSTER_QUERY)",
+                                "#ifdef XV_LIGHT_QUERY_CENSUS",
+                                "        XV_QUERY_WORK_END(c, xv_object_math_locked_);",
+                                "#endif",
+                                "        { extern int xv_native_566de(xctx *); if (xv_native_566de(c)) return; }",
+                                "#endif",
+                                "        goto L_000566DE; } }",
                                 "#endif"])
         if self.flare_enabled and address == ENTRY:
             out.append(ENTRY_HOOK)
@@ -307,6 +315,13 @@ class HaloHooks(NoGameHooks):
 
     def transform_body(self, address, body):
         if address == 0x8DDF0 and self.hierarchy_enabled:
+            chain = "    X_PUSH32(0x8E41Eu);\n    f_000B5B40(c);"
+            assert body.count(chain) == 2, "root matrix chain callsite drift"
+            body = body.replace(chain, "    X_PUSH32(0x8E41Eu);\n"
+                "#ifdef XV_NATIVE_MODEL_HIERARCHY\n"
+                "    { extern int xv_math_root_chain(xctx *);\n"
+                "      if (xv_math_root_chain(c)) goto L_0008E58B; }\n"
+                "#endif\n    f_000B5B40(c);")
             needle = "    X_PUSH32(0x8E525u);\n    f_000B5B40(c);"
             assert body.count(needle) == 1, "root matrix pair callsite drift"
             assert "L_0008E58B:" in body, "root matrix pair continuation drift"

@@ -20,6 +20,10 @@ void xv_scene_thread_abandon(uint32_t eip)
     if (!scene_abandon_armed || !xv_scene_thread_on_helper()) return;
     scene_abandons++;
     XK_LOG("[scene-thread] ABANDON scene %u: guest trap at %08X on the helper; frame dropped, helper unwound\n", scene_abandons, eip);
+    /* GCC cleanup attributes do not run across longjmp. The helper releases
+     * only its own recursive math guards before discarding their tokens. */
+    extern unsigned xv_object_math_abandon_current(void) __attribute__((weak));
+    if(xv_object_math_abandon_current)xv_object_math_abandon_current();
     longjmp(scene_abandon_jmp, 1);
 }
 
@@ -58,7 +62,8 @@ static uint64_t phase_t0[2][16]; static uint32_t phase_addr[2][16]; static unsig
 static unsigned phase_skipped[2], phase_overflow[2];
 static uint16_t phase_hint[2][256]; /* validated hints: reports may reorder phase_tab */
 static const char *phase_tag[2] = { "[tick-phases]", "[scene-phases]" };
-/* 0 off, 1 both threads, 2 owner/tick only. Relaxed atomics make concurrent
+/* 0 off, 1 both threads, 2 owner/tick only, 3 sparse owner scopes, 4 sampled object subtrees.
+ * Relaxed atomics make concurrent
  * first-use initialization well-defined; the launch environment is immutable. */
 static int phase_mode(void)
 {
@@ -66,9 +71,58 @@ static int phase_mode(void)
     if (mode < 0) {
         const char *e = getenv("XV_SCENE_PHASES");
         mode = e ? atoi(e) : 0;
+        if (mode > 0) mode = mode == 2 ? 2 : 1;
+        /* Passive owner-only attribution without requesting the legacy scene
+         * diagnostic policy (which disables root-pair fusion). Native fused
+         * work remains inside its enclosing scope; absent child scopes must
+         * not be interpreted as zero work or CPU self time. */
+        const char *tick = getenv("XV_TICK_PHASES");
+        if (mode <= 0 && tick && atoi(tick) > 0)
+            mode = atoi(tick) >= 3 ? 4 : atoi(tick) >= 2 ? 3 : 2;
         __atomic_store_n(&phases, mode, __ATOMIC_RELAXED);
     }
     return mode;
+}
+
+/* Paired filtering before thread queries and clock reads. Unselected nested
+ * calls remain in their selected parent's inclusive time. Do not time the
+ * per-object callbacks here: their observer cost can change catch-up ticks. */
+/* Owner-only sampling state, accessed only after worker/helper exclusion.
+ * Private deterministic sampling never consumes the game's random stream.
+ * Whole subtrees share a decision, retaining recursive child attribution. */
+static unsigned object_sample_depth, object_sample_active;
+static uint32_t object_sample_rng = 0x91E10DA5u;
+static unsigned object_sample_seen, object_sample_chosen;
+static int phase_selected(int mode, uint32_t addr)
+{
+    if (mode < 3) return 1;
+    if (mode == 4) switch (addr) {
+    case 0x8FB70u: case 0x90950u: case 0x96430u: case 0x90900u:
+    case 0x8DDF0u: case 0x8BD50u: case 0x8C0F0u:
+    case 0x8D760u: case 0x8C570u:
+    /* 3925 type-definition update chains at 1FCB78, resolved from the owned
+     * image. Existing indirect-call observers retain the actual target. */
+    case 0x44AD0u: case 0x4C980u: case 0x39450u:
+    case 0xC5230u: case 0xC0EA0u: case 0x174440u:
+    case 0xC3A00u: case 0x8A750u: case 0x118440u:
+    case 0x1188F0u: case 0x118EA0u: case 0x118DD0u:
+        return object_sample_active != 0;
+    default: break;
+    }
+    switch (addr) {
+    case 0xFA920u: case 0x109760u: case 0x900E0u:
+    case 0x14A162u: case 0x108FD0u: case 0xBCB30u:
+    /* The final object-lifecycle pass runs once per simulation tick, unlike
+     * the per-object callbacks. The diagnostic shard must wrap its tail call
+     * with --tail-calls so its end is observed before the guest return. */
+    case 0x8ECA0u:
+    /* Synthetic once-per-tick spans in the diagnostic object-pass patcher:
+     * activation/setup, regular updates (including join), new/deleted objects.
+     * These are elapsed scopes, never additional guest function calls. */
+    case 0xF0900001u: case 0xF0900002u: case 0xF0900003u:
+        return 1;
+    default: return 0;
+    }
 }
 
 /* Keyed by (parent, callee): the parent is the innermost timed call on this thread's stack, so a parent's self time
@@ -76,28 +130,47 @@ static int phase_mode(void)
 void xv_scene_phase_begin(uint32_t addr)
 {
     int mode = phase_mode();
-    if (mode <= 0) return;
+    if (mode <= 0 || (mode != 4 && !phase_selected(mode, addr))) return;
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
     /* Object callbacks have their own work counters. They must not interleave
      * this owner/scene-only stack, including when the owner is waiting. */
     if (xv_object_is_worker_thread()) return;
 #endif
     unsigned t = xv_scene_thread_on_helper() ? 1 : 0;
-    if (mode == 2 && t) return;
+    if (mode >= 2 && t) return;
+    if (mode == 4) {
+        if (addr == 0x8FB70u && object_sample_depth++ == 0) {
+            uint32_t r = object_sample_rng;
+            r ^= r << 13; r ^= r >> 17; r ^= r << 5;
+            object_sample_rng = r;
+            object_sample_active = (r & 63u) == 0;
+            object_sample_seen++;
+            object_sample_chosen += object_sample_active;
+        }
+        if (!phase_selected(mode, addr)) return;
+    }
     if (phase_depth[t] >= 16) { phase_skipped[t]++; phase_overflow[t]++; return; }
     phase_addr[t][phase_depth[t]] = addr; phase_t0[t][phase_depth[t]++] = xk_os_monotonic_us();
 }
 void xv_scene_phase_end(uint32_t addr)
 {
     int mode = __atomic_load_n(&phases, __ATOMIC_RELAXED);
-    if (mode <= 0) return;
+    if (mode <= 0 || (mode != 4 && !phase_selected(mode, addr))) return;
 #ifdef XV_EXPERIMENTAL_OBJECT_JOBS
     /* Object callbacks have their own work counters. They must not interleave
      * this owner/scene-only stack, including when the owner is waiting. */
     if (xv_object_is_worker_thread()) return;
 #endif
     unsigned t = xv_scene_thread_on_helper() ? 1 : 0;
-    if (mode == 2 && t) return;
+    if (mode >= 2 && t) return;
+    if (mode == 4) {
+        int selected = phase_selected(mode, addr);
+        if (addr == 0x8FB70u) {
+            if (!object_sample_depth) return;
+            if (--object_sample_depth == 0) object_sample_active = 0;
+        }
+        if (!selected) return;
+    }
     /* Match ignored begins without popping a live outer scope. */
     if (phase_skipped[t]) { phase_skipped[t]--; return; }
     if (!phase_depth[t]) return;
@@ -115,6 +188,11 @@ void xv_scene_phase_end(uint32_t addr)
 static void phase_report(unsigned frames)
 {
     if (__atomic_load_n(&phases, __ATOMIC_RELAXED) <= 0 || !frames) return;
+    if (__atomic_load_n(&phases, __ATOMIC_RELAXED) == 4) {
+        XK_LOG("[object-sample] %u frames roots seen %u selected %u open %u; detail rows are sampled elapsed totals, not full-frame costs\n",
+            frames, object_sample_seen, object_sample_chosen, object_sample_depth);
+        object_sample_seen = object_sample_chosen = 0;
+    }
     for (unsigned t = 0; t < 2; ++t) {
         if (phase_overflow[t]) {
             XK_LOG("%s omitted %u scopes beyond depth 16; child attribution incomplete\n", phase_tag[t], phase_overflow[t]);
@@ -132,7 +210,7 @@ static void phase_report(unsigned frames)
         }
         XK_LOG("%s\n", line);
         /* self time: for every parent that is itself a timed callee, inclusive - sum(children) */
-        for (unsigned p = 0; p < phase_used[t]; ++p) {
+        for (unsigned p = 0; phases != 4 && p < phase_used[t]; ++p) {
             uint32_t P = phase_tab[t][p].addr; uint64_t children = 0, inclusive = 0; unsigned nchild = 0;
             for (unsigned i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].addr == P) inclusive += phase_tab[t][i].us;
             for (unsigned i = 0; i < phase_used[t]; ++i) if (phase_tab[t][i].parent == P) { children += phase_tab[t][i].us; nchild++; }
@@ -361,6 +439,10 @@ static void helper_timeout_check(void)
     if (test) abandon_test = 0;
     abandon_timeouts++; scene_abandons++;
     XK_LOG("[scene-thread] ABANDON scene %u: running %llu ms on the helper%s; frame dropped, helper unwound\n", slow_dispatch_serial, (unsigned long long)(run / 1000u), test ? " (XV_SCENE_ABANDON_TEST)" : " (timeout)");
+    /* GCC cleanup attributes do not run across longjmp. The helper releases
+     * only its own recursive math guards before discarding their tokens. */
+    extern unsigned xv_object_math_abandon_current(void) __attribute__((weak));
+    if(xv_object_math_abandon_current)xv_object_math_abandon_current();
     longjmp(scene_abandon_jmp, 2);
 }
 static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
@@ -411,6 +493,25 @@ static int proxy_name_lockless(const char *nm)
  * guard the HELPER holds while the helper waits for the owner to run its proxied kernel call - three-way deadlock
  * (Pi mode4d 18:53: owner in xv_object_jobs_join/owner_wake, workers in xv_object_math_lock, helper in proxy_hle).
  * Full service (calls and the pending wait), exactly what the dispatch join loop runs; owner thread only. */
+/* Read-only owner-side stall evidence. Values are sampled independently;
+ * do not follow mutable guest pointers or run recovery from this observer. */
+void xv_scene_thread_stall_snapshot(void)
+{
+    void (*fn)(xctx *)=__atomic_load_n(&proxy_call_fn,__ATOMIC_ACQUIRE);
+    XK_LOG("[scene-stall-snapshot] enabled %d in-flight %u proxy-fiber %u pending %d fn %p helper-done %d; sampled, no recovery\n",
+        enabled,in_flight,proxy_fiber!=NULL,(int)proxy_pending,(void *)fn,
+        xv_scene_thread_helper_done());
+    XK_LOG("[scene-stall-clock] dispatch-us %llu end-us %llu serial %u depth %u esp %08X; diagnostic samples only\n",
+        (unsigned long long)slow_t_dispatch,(unsigned long long)slow_t_end,
+        slow_dispatch_serial,(unsigned)depth,ctx.r[4]);
+#ifdef __vita__
+    SceKernelThreadInfo ti; memset(&ti,0,sizeof ti);ti.size=sizeof ti;
+    int rc=sceKernelGetThreadInfo(helper,&ti);
+    if(!rc)XK_LOG("[scene-stall-kernel] helper %08X status %X wait-type %u wait-id %08X\n",
+        (unsigned)helper,(unsigned)ti.status,(unsigned)ti.waitType,(unsigned)ti.waitId);
+    else XK_LOG("[scene-stall-kernel] thread query failed %08X\n",(unsigned)rc);
+#endif
+}
 void xv_scene_thread_service_owner_blocked(void)
 {
     if (enabled <= 0 || !in_flight || proxy_fiber || xv_scene_thread_on_helper()) return;
@@ -841,6 +942,10 @@ static void helper_timeout_check(void)
     if (test) abandon_test = 0;
     abandon_timeouts++; scene_abandons++;
     XK_LOG("[scene-thread] ABANDON scene %u: running %llu ms on the helper%s; frame dropped, helper unwound\n", slow_dispatch_serial, (unsigned long long)(run / 1000u), test ? " (XV_SCENE_ABANDON_TEST)" : " (timeout)");
+    /* GCC cleanup attributes do not run across longjmp. The helper releases
+     * only its own recursive math guards before discarding their tokens. */
+    extern unsigned xv_object_math_abandon_current(void) __attribute__((weak));
+    if(xv_object_math_abandon_current)xv_object_math_abandon_current();
     longjmp(scene_abandon_jmp, 2);
 }
 static void slow_mark_dispatch(void) { slow_t_dispatch = xk_os_monotonic_us(); slow_yields_dispatch = proxy_direct; slow_proxied_dispatch = proxy_calls; slow_dispatch_serial++; }
@@ -891,6 +996,25 @@ static int proxy_name_lockless(const char *nm)
  * guard the HELPER holds while the helper waits for the owner to run its proxied kernel call - three-way deadlock
  * (Pi mode4d 18:53: owner in xv_object_jobs_join/owner_wake, workers in xv_object_math_lock, helper in proxy_hle).
  * Full service (calls and the pending wait), exactly what the dispatch join loop runs; owner thread only. */
+/* Read-only owner-side stall evidence. Values are sampled independently;
+ * do not follow mutable guest pointers or run recovery from this observer. */
+void xv_scene_thread_stall_snapshot(void)
+{
+    void (*fn)(xctx *)=__atomic_load_n(&proxy_call_fn,__ATOMIC_ACQUIRE);
+    XK_LOG("[scene-stall-snapshot] enabled %d in-flight %u proxy-fiber %u pending %d fn %p helper-done %d; sampled, no recovery\n",
+        enabled,in_flight,proxy_fiber!=NULL,(int)proxy_pending,(void *)fn,
+        xv_scene_thread_helper_done());
+    XK_LOG("[scene-stall-clock] dispatch-us %llu end-us %llu serial %u depth %u esp %08X; diagnostic samples only\n",
+        (unsigned long long)slow_t_dispatch,(unsigned long long)slow_t_end,
+        slow_dispatch_serial,(unsigned)depth,ctx.r[4]);
+#ifdef __vita__
+    SceKernelThreadInfo ti; memset(&ti,0,sizeof ti);ti.size=sizeof ti;
+    int rc=sceKernelGetThreadInfo(helper,&ti);
+    if(!rc)XK_LOG("[scene-stall-kernel] helper %08X status %X wait-type %u wait-id %08X\n",
+        (unsigned)helper,(unsigned)ti.status,(unsigned)ti.waitType,(unsigned)ti.waitId);
+    else XK_LOG("[scene-stall-kernel] thread query failed %08X\n",(unsigned)rc);
+#endif
+}
 void xv_scene_thread_service_owner_blocked(void)
 {
     if (enabled <= 0 || !in_flight || proxy_fiber || xv_scene_thread_on_helper()) return;

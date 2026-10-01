@@ -60,6 +60,7 @@ def main():
     ap.add_argument('--cc', default=os.environ.get('CC', 'cc')); ap.add_argument('--seed', default='1')
     ap.add_argument('--verify', action='store_true'); ap.add_argument('--mutants', type=int, default=0)
     ap.add_argument('--variants', default='all')
+    ap.add_argument('--tail', action='store_true', help='Test isolated 566DE continuation; no runtime hook.')
     ap.add_argument('--flood', action='store_true', help='Test the isolated 52240 candidate; no runtime hook.')
     ap.add_argument('--output', type=Path, help='Preserve private generated sources, binaries and build receipts here.')
     ap.add_argument('--build-only', action='store_true')
@@ -67,6 +68,8 @@ def main():
     a = ap.parse_args(); rec = Path(a.recomp)
     rec = rec.resolve()
     if a.build_only and (not a.output or a.mutants): ap.error('--build-only requires --output and no mutants')
+    if a.tail and (a.flood or a.verify or a.mutants):
+        ap.error('--tail cannot combine with flood, verify, or mutants')
     if a.flood and (a.verify or a.mutants):
         ap.error('--flood does not support the light-query verify/mutant modes')
     shards = sorted(rec.glob('code_*.c')); texts = {}
@@ -80,7 +83,14 @@ def main():
     parts = []
     for fn in FUNCS:
         b = body(texts[fn][1], fn)
-        parts.append(hook(b) if fn == '00056670' else b)
+        if fn == '00056670':
+            b = hook(b)
+            if a.tail:
+                b = b.replace('xv_native_92330(c, &xn92_)', '0')
+                label = 'L_000566DE:\n'
+                if b.count(label) != 1: sys.exit('566DE continuation label missing or duplicated')
+                b = b.replace(label, label + '    { extern int xv_native_566de_test(xctx *); if (xv_native_566de_test(c)) return; }\n', 1)
+        parts.append(b)
     extra = '#include "xv_x87reg.h"\n' if (rec / 'xv_x87reg.h').exists() and any('xfsp0' in p for p in parts) else ''
     # stages with XV_QSERIAL hooks (tools/patch_qserial.py) define X_QS8/X_QS32 between functions: the owner-thread meaning
     qs = '#ifndef X_QS32\n#define X_QS8(a) X_IMG8(a)\n#define X_QS32(a) (*(xu32_u *)X_G(a))\n#endif\n'
@@ -96,7 +106,7 @@ def main():
         native_src = (ROOT / 'recomp/kernel/xk_native_92330.c').read_text()
         def build(exe, flags, native_text):
             (d / 'kernel/xk_native_92330.c').write_text(native_text)
-            cmd = [a.cc, *flags, *shlex.split(a.extra), *(['-DXV_NATIVE_52240_TEST=1'] if a.flood else []), '-std=gnu11', '-w', '-fno-strict-aliasing', '-ffp-contract=off', '-DXV_NATIVE_92330=1', '-I' + str(rec),
+            cmd = [a.cc, *flags, *shlex.split(a.extra), *(['-DXV_NATIVE_52240_TEST=1'] if a.flood else []), *(['-DXV_NATIVE_566DE_TEST=1'] if a.tail else []), '-std=gnu11', '-w', '-fno-strict-aliasing', '-ffp-contract=off', '-DXV_NATIVE_92330=1', '-I' + str(rec),
                    '-I' + str(rec / 'kernel'), str(ROOT / 'tools/tests/native_92330.c'), str(d / 'guest.c'),
                    str(d / 'kernel/xk_native_92330.c'), '-lm', '-o', str(exe)]
             subprocess.run(cmd, check=True)

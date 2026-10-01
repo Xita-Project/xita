@@ -11,11 +11,13 @@ p.add_argument('--cc',required=True)
 p.add_argument('--cflags',default='')
 p.add_argument('--output-dir',type=Path,required=True)
 p.add_argument('--build-only',action='store_true')
+p.add_argument('--chain',action='store_true',help='Test the three-operation engine boundary')
 a=p.parse_args();out=a.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
-binary=out/'root-matrix-pair-test'
+kind='chain' if a.chain else 'pair'
+binary=out/f'root-matrix-{kind}-test'
 cmd=[a.cc,'-O3','-std=gnu11','-fno-strict-aliasing','-ffp-contract=off',
      '-frounding-math','-ffunction-sections','-fdata-sections',*shlex.split(a.cflags),
-     '-I'+str(ROOT/'recomp'),str(ROOT/'tools/tests/root_matrix_pair.c'),
+     '-I'+str(ROOT/'recomp'),str(ROOT/f'tools/tests/root_matrix_{kind}.c'),
      str(ROOT/'recomp/kernel/xk_math.c'),str(ROOT/'recomp/xv_x86rt.c'),
      '-Wl,--gc-sections','-lm','-o',str(binary)]
 (out/'build-command.json').write_text(json.dumps(cmd,indent=2)+'\n')

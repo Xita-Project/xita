@@ -4,6 +4,11 @@
 #include <stdint.h>
 #include <stdio.h>
 __attribute__((weak)) void xv_logf(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vfprintf(stderr, fmt, ap); va_end(ap); }
+/* Already-formatted critical records: preserve their exact length and contents. */
+__attribute__((weak)) void xv_log_critical_write(const char *text, unsigned length)
+{
+    if (text && length) (void)fwrite(text, 1, length, stderr);
+}
 __attribute__((weak)) int xv_benchmark_active(void) { return 0; }
 /* GPU visibility queries never complete on the host: report no result, no wait. */
 __attribute__((weak)) uint32_t xd3d_r_visibility_generation(uint32_t id) { (void)id; return 0; }

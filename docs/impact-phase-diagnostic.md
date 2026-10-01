@@ -757,7 +757,7 @@ and scheduling differences, not proof of a precise regression. Retain the
 validated candidate privately, but do not add it to the hardware stack on
 this evidence. Raw comparisons: `object-walk-registers/gameplay/comparison.json`.
 
-Next codegen lead: 171AF0's type-mask shifts at 171B4E and 171B88 still call
+Historical codegen lead (subsequently tested): 171AF0's type-mask shifts at 171B4E and 171B88 still call
 flag-producing x_shl32 helpers before subsequent TEST instructions replace
 flags. The emitter's existing dead-flag removal strips textual X_FLAGS
 stores, not side effects inside shift helpers. A safe experiment must prove
@@ -767,3 +767,9 @@ not indiscriminately treat a variable shift as killing incoming flags.
 Two direct 171AF0 call sites were found (recursion and 1721B0); both immediately
 test AL, but that alone does not prove all other state dead or exclude indirect
 callers. No relaxed-state native or shift optimization is enabled yet.
+
+This is no longer an untested lead. See
+[object-walk-shifts-20260926.md](object-walk-shifts-20260926.md) and
+[halo-reference-object-vector.md](halo-reference-object-vector.md): the two-site
+candidate passed bounded differential checks, but aligned Pi gameplay did not
+establish a gain. Do not repeat that experiment based on this older section.

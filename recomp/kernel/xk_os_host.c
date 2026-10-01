@@ -121,6 +121,7 @@ void xk_os_scheduler_wait(uint64_t us)
 struct xk_fiber { ucontext_t uc; void *stack; void (*entry)(void *); void *arg; };
 static xk_fiber g_main_fiber;
 static xk_fiber *g_current = &g_main_fiber;
+static _Thread_local xk_fiber *g_native_guest;
 
 static void fiber_trampoline(void)
 {
@@ -146,9 +147,15 @@ void xk_os_fiber_switch(xk_fiber *to)
     { extern void xv_render_view_fiber_switch(void) __attribute__((weak));   /* a scene on the render table drops back to live before another guest thread runs */
       if (xv_render_view_fiber_switch) xv_render_view_fiber_switch(); }
     g_current = to;
+    g_native_guest = to == &g_main_fiber ? NULL : to;
     swapcontext(&from->uc, &to->uc);
 }
 xk_fiber *xk_os_fiber_current(void) { return g_current; }
+int xk_os_fiber_is_current_guest(void)
+{
+    /* Foreign threads short-circuit before inspecting shared scheduler state. */
+    return g_native_guest && g_native_guest == g_current;
+}
 xk_fiber *xk_os_fiber_main(void) { return &g_main_fiber; }
 void xk_os_fiber_destroy(xk_fiber *f) { if (f && f != &g_main_fiber) { free(f->stack); free(f); } }
 

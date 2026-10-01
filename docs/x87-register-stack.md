@@ -225,3 +225,23 @@ The stage shards are hand-maintained (handoff §27), so converted bodies are spl
 * `tools/state_hash_compare.py`, `tools/sampler_compare.py` - verification and profile comparison
 * Work area (not committed): `xita-backups/2026-09-18-unified-games/x87-regs-work/` (stage copies
   `stage-base`/`stage-regs`, harness objects `objs-{base,regs}-{x86,arm}`, runs, scripts)
+
+## Guarded call-site expectations (2026-09-28, experimental)
+
+`--x87-regs-call-delta HEX_CALL_IP:DELTA` supplies an opt-in expected stack
+change for an otherwise unproven direct guest call. Repeat for multiple sites;
+addresses are call instructions, not callee entries. Positive deltas push,
+negative deltas pop. This requires `--x87-regs` and runtime guards. Default
+behavior is unchanged when no hints are supplied. Hints appear in the report.
+
+A hint is never entered into the proven analysis or allowed to override a
+proven effect. The caller spills before the call, checks the returned stack
+pointer, and resumes the existing memory lowering after the call on mismatch.
+The callee is neither bypassed nor executed twice. This checks stack shape,
+not full arithmetic correctness: hardware behavior still needs validation.
+
+Private CE candidate selects only 8BD50 and supplies -1 at its two CRT remainder
+calls (8BF20 and 8C083). Generation now converts 109 x87 instructions using two
+logical local slots, nine synchronization points and seven guarded calls.
+Previously the function failed the stack-depth join. Candidate is not yet
+hardware-qualified; no new host/Pi/emulator execution is authorized.
