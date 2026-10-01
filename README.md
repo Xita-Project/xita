@@ -4,16 +4,59 @@
 
 <h1 align="center">Xita</h1>
 
-**A static recompiler and runtime for bringing original Xbox games to the PlayStation Vita.**
+**A toolkit for decompiling and porting original Xbox games.**
 
-[Download VPK](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.2) · [Install](docs/installing.md) · [Compatibility](COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
+[Game progress maps](https://xita.dev/games/) · [Recompiler](recompiler/README.md) · [Runtime](runtime/README.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
 
-Xita translates an Xbox game's x86 executable into C, builds it as ARM code,
-and supplies Xbox kernel, graphics and audio interfaces through Vita homebrew
-libraries. Each title needs its own port and testing. **Halo: Combat Evolved is in hardware gameplay testing. Halo 2 is an
-experimental second profile; it is not yet validated on a physical Vita.**
+Xita started as a way to run original Xbox games on the PlayStation Vita by
+recompiling them. Along the way it became something more useful: a set of
+tools for **taking an Xbox game apart and rebuilding it as source code**. It
+gives a decompilation project a complete, runnable C version of the game from
+day one, a way to swap functions out for hand-written ones and check them
+against the original, and translators for the Xbox's graphics hardware.
 
-## Getting started
+## What Xita gives a decompilation project
+
+- **The whole game as C, from the start.** `xita-recomp` reads an XBE, finds
+  its functions and lifts each one's x86 into C. The result builds and runs,
+  so a decompilation can begin from a working game instead of a disassembly.
+  See the [recompiler](recompiler/README.md).
+- **A runtime to run it on.** Xita supplies the Xbox kernel, Direct3D 8 and
+  DirectSound for the lifted code, on the Vita and on Linux, so the game runs
+  while its functions are studied and replaced.
+- **Function-by-function replacement, checked against the original.** A
+  hand-written C function can stand in for a lifted one. On the development
+  branch, Xita runs both and compares their results call by call: Halo CE's
+  collision, lighting and material functions were checked this way, one of
+  them over six million calls without a mismatch.
+- **Progress maps.** [`tools/profile_progress.py`](tools/profile_progress.py)
+  turns a recompilation into a per-game map of every function: translated,
+  replaced by native code, or still needing work. Browse
+  [Halo CE's map](https://xita.dev/games/), or
+  [generate one locally](docs/game-progress.md).
+- **Xbox graphics translation.** The NV2A GPU's register combiners and vertex
+  programs are translated into shaders for other GPUs
+  ([`tools/ps_pipeline.py`](tools/ps_pipeline.py) and the shader generators in
+  [recompiler/](recompiler/README.md)).
+
+## Halo: Combat Evolved: from recompilation to a native port
+
+Halo CE was Xita's first game. Its recompiled build reached the campaign and
+solo matches on a physical Vita, and the work behind it (the register combiner
+translation, the GPU and threading lessons, the profiling tools) went
+straight into **Halo CE for PS Vita**, a native port built from the
+community decompilation of the game, which now runs the whole campaign on the
+Vita at up to 30 fps. That is the path Xita is meant for: recompile a game to
+understand it, then help its decompilation become a real port.
+
+## Xita's Vita runtime (tester builds)
+
+The recompiled builds still run through Xita's own Vita runtime. Each title
+needs its own port and testing. **Halo: Combat Evolved is in hardware
+gameplay testing. Halo 2 is an experimental second profile; it is not yet
+validated on a physical Vita.**
+
+### Getting started
 
 1. **Download the VPK** from the [current Xita release](https://github.com/Xita-Project/xita/releases/tag/v0.2.0-test.2).
    Expand **Assets** and choose its single `.vpk` file. The **Source code** ZIP is for developers.
@@ -38,7 +81,7 @@ during development.
 supported original Xbox copy of Halo CE. The VPK does not include the game image
 or maps. [Prepare your game data](docs/game-data.md) once, then use VPKs for app updates.
 
-### Create halo_image.bin from your .xbe
+#### Create halo_image.bin from your .xbe
 
 `halo_image.bin` is generated from your own Xbox Halo CE **`default.xbe`**.
 It is not a separate download, and renaming the `.xbe` will not work.
@@ -81,7 +124,7 @@ After both commands succeed, **`halo_image.bin` appears beside the scripts**. Co
 must be at `ux0:data/xita/haloce/maps/ui.map`. Your executable must match the
 [supported Xbox revision](docs/game-data.md#supported-game-copy).
 
-## Screenshots
+### Screenshots
 
 [Explore per-game progress](https://xita.dev/games/) to inspect generated
 functions and remaining instruction gaps. Developers can also generate the
@@ -98,7 +141,7 @@ Actual development captures; select an image to view it at full size.
 The emulator's **20 FPS** overlay is a test cap, not a Vita measurement.
 These captures show different development builds. [Image details](docs/images/README.md).
 
-## Current status
+### Current status
 
 **Tester build: 0.2.0-test.2 · September 18, 2026.** The dashboard and in-game
 performance overlay show the version and a short source revision. Include both
@@ -118,7 +161,7 @@ Stable **20 FPS** is the next milestone, with **30 FPS** the longer-term goal.
 Neither has been established across representative gameplay. Emulator speed does
 not predict Vita performance. See [Compatibility](COMPATIBILITY.md).
 
-## Dashboard and controls
+### Dashboard and controls
 
 Graphics includes textures, filtering, mip smoothing, resolution, materials,
 glow, particles, decals, a frame limit, compressed textures and experimental
@@ -152,9 +195,12 @@ Rear touch shortcuts default off. Profiling controls are in [Developer notes](do
 
 ## Roadmap
 
-The full plan is **[ROADMAP.md](ROADMAP.md)**. Near-term work focuses on GPU
-stability, visibility waits and draw preparation. **Select Game** chooses CE or the bundled experimental Halo 2
-application. Additional titles still need their own recompilation and testing.
+The full plan is **[ROADMAP.md](ROADMAP.md)**. The direction is Xita as a
+decompilation toolkit: lifting other Xbox games, checking hand-written
+functions against the recompiled ones, and progress maps for each game. The
+Vita runtime keeps **Select Game** for CE and the experimental Halo 2
+application; additional titles still need their own recompilation and
+testing.
 
 ## Reporting problems
 
